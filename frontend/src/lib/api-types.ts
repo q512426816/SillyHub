@@ -19490,7 +19490,7 @@ export interface components {
             /** Name */
             name: string;
             /** Agent Kinds */
-            agent_kinds: ("claude" | "pi" | "codex")[];
+            agent_kinds: ("claude" | "pi" | "codex" | "dsh" | "zcode")[];
             /**
              * Models
              * @default []
@@ -19643,7 +19643,7 @@ export interface components {
             /** Api Format */
             api_format?: ("anthropic" | "openai_chat") | null;
             /** Agent Kinds */
-            agent_kinds?: ("claude" | "pi" | "codex")[] | null;
+            agent_kinds?: ("claude" | "pi" | "codex" | "dsh" | "zcode")[] | null;
             /** Models */
             models?: components["schemas"]["ProviderModelEntry"][] | null;
             /** Extra Env */

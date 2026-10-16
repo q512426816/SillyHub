@@ -26,10 +26,11 @@ import { ModelInputWithFetch, type FetchedModel } from "./model-input-with-fetch
  * 供应商新建/编辑表单（task-11）。
  *
  * 字段对齐 cc-switch 核心可用集（D-010），无预设选择器（D-003 纯自定义）：
- *   名称 / agent 种类（claude / codex / pi 可选，gemini disabled 占位；pi 于
+ *   名称 / agent 种类（claude / codex / pi / dsh / zcode 可选；pi 于
  *   review-dispatch task-07 放开，D-002@v1 独立凭证池入口；codex 于
  *   multi-provider-injection task-06 放开——凭证经 daemon per-session
- *   CODEX_HOME 文件注入，无需 env auth_field，D-005/D-006）/
+ *   CODEX_HOME 文件注入，无需 env auth_field，D-005/D-006；dsh/zcode 于
+ *   2026-10-15 两变更放开——凭证分别经 env 注入与会级配置目录写文件）/
  *   备注 / 官网链接 / base_url / api_key 密码框（编辑时不填=保持原密钥）。
  *
  * 高级项默认折叠：<details> 承载：
@@ -59,10 +60,13 @@ const ROLE_ROWS: { key: string; label: string; placeholder: string }[] = [
 ];
 
 /**
- * agent 种类下拉选项；gemini disabled 占位（D-006），pi 已启用（task-07 /
- * D-002@v1），codex 已启用（task-06 / D-005/D-006）——凭证经 daemon
- * per-session CODEX_HOME 文件注入（config.toml/auth.json 落盘），不经 env
- * auth_field，故 codex 无需配置认证字段。
+ * agent 种类下拉选项（与 backend llm_provider/schema.py agent_kinds Literal
+ * 五值对齐）：pi 已启用（task-07 / D-002@v1），codex 已启用（task-06 /
+ * D-005/D-006，凭证经 daemon per-session CODEX_HOME 文件注入不经 env
+ * auth_field），dsh 已启用（2026-10-15-dsh-engine-acp，凭证经 env 注入——
+ * DSH_HOME patch 的 apiKeyEnv 引用），zcode 已启用（2026-10-15-zcode-engine-
+ * appserver，凭证由 daemon 写会级 provider_config.json 文件）。gemini 占位
+ * 退役（backend 词表从未收录，disabled 项提交会被 422 拒，纯误导）。
  */
 const AGENT_KIND_OPTIONS: {
   value: string;
@@ -71,8 +75,9 @@ const AGENT_KIND_OPTIONS: {
 }[] = [
   { value: "claude", label: "Claude Code" },
   { value: "codex", label: "Codex" },
-  { value: "gemini", label: "Gemini（即将支持）", disabled: true },
   { value: "pi", label: "Pi" },
+  { value: "dsh", label: "DeepSeek Harness" },
+  { value: "zcode", label: "ZCode" },
 ];
 
 const AUTH_FIELD_OPTIONS: { value: LlmProviderAuthField; label: string }[] = [
@@ -790,7 +795,7 @@ export function LlmProviderForm({
             {AGENT_KIND_OPTIONS.map((o) => {
               const checked = agentKinds.includes(o.value as LlmProviderAgentKind);
               // task-06（FR-05 / D-012；D-005 集合级）：openai_chat 格式下 pi 项
-              // 前置禁用（后端 422 同口径，双端一致）；gemini 占位禁用照旧。
+              // 前置禁用（后端 422 同口径，双端一致）。
               const piLocked =
                 o.value === "pi" && apiFormat === "openai_chat" && !checked;
               const disabled = Boolean(o.disabled) || piLocked;
@@ -837,7 +842,8 @@ export function LlmProviderForm({
           <p className={hintCls}>
             一条凭证可同时服务多个引擎；Claude Code 走默认凭证链；Pi 使用独立凭证池
             （认证字段可配专属 env 名）；Codex 凭证由 daemon 在会话级 CODEX_HOME
-            目录写入文件。gemini 预留。
+            目录写入文件；dsh 凭证经 env 注入（DSH_HOME patch 的 apiKeyEnv 引用）；
+            zcode 凭证由 daemon 在会级配置目录写 provider_config.json 文件。
           </p>
         </div>
       </div>

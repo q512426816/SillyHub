@@ -491,7 +491,7 @@ describe("LlmProviderForm — agent_kind=pi（task-07 / D-002@v1）", () => {
     expect(onSubmit).not.toHaveBeenCalled();
   });
 
-  it("claude 路径零回归：认证字段仍是既有两选项下拉，gemini 仍 disabled 占位（codex 已启用）", () => {
+  it("claude 路径零回归：认证字段仍是既有两选项下拉；gemini 占位退役，dsh/zcode 已启用", () => {
     render(<LlmProviderForm mode="create" onSubmit={vi.fn()} onCancel={vi.fn()} />);
 
     // 固定下拉仍在且缺省 ANTHROPIC_AUTH_TOKEN
@@ -501,15 +501,19 @@ describe("LlmProviderForm — agent_kind=pi（task-07 / D-002@v1）", () => {
     // pi 自由输入不渲染
     expect(screen.queryByPlaceholderText(/ZAI_API_KEY/)).toBeNull();
 
-    // task-06 起 codex 启用（凭证走 daemon CODEX_HOME 文件注入）；仅 gemini 占位。
+    // task-06 起 codex 启用（凭证走 daemon CODEX_HOME 文件注入）。
     expect(
       (screen.getByRole("checkbox", { name: "Codex" }) as HTMLInputElement).disabled,
     ).toBe(false);
+    // 2026-10-15-zcode-engine-appserver：gemini 占位退役（backend 词表从未收录，
+    // disabled 项提交会被 422 拒——纯误导），选项不再渲染；dsh/zcode 启用。
+    expect(screen.queryByRole("checkbox", { name: /Gemini/ })).toBeNull();
     expect(
-      (
-        screen.getByRole("checkbox", { name: /Gemini（即将支持）/ }) as HTMLInputElement
-      ).disabled,
-    ).toBe(true);
+      (screen.getByRole("checkbox", { name: "DeepSeek Harness" }) as HTMLInputElement).disabled,
+    ).toBe(false);
+    expect(
+      (screen.getByRole("checkbox", { name: "ZCode" }) as HTMLInputElement).disabled,
+    ).toBe(false);
   });
 });
 

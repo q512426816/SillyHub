@@ -52,7 +52,7 @@ class LlmProviderCreate(BaseModel):
     # 共享断言面：本字段名/声明形态（复数 list Literal）被 daemon 源读取对账正则
     # 锚定——改词表或形态须同步 sillyhub-daemon/tests/provider-adapter-registry.
     # test.ts 的 readBackendAgentKindVocab（testing-gotchas「共享断言面」⑥）。
-    agent_kinds: list[Literal["claude", "pi", "codex"]] = Field(min_length=1)
+    agent_kinds: list[Literal["claude", "pi", "codex", "dsh", "zcode"]] = Field(min_length=1)
     models: list[ProviderModelEntry] = []
     base_url: str | None = None
     api_key: str | None = None
@@ -105,7 +105,9 @@ class LlmProviderUpdate(BaseModel):
     api_format: Literal["anthropic", "openai_chat"] | None = None
     # 引擎集合可编辑（D-004/D-006）：None=不动；非 None 时至少一个 + 保序去重
     # （validator 见下，与 Create 同口径）。
-    agent_kinds: list[Literal["claude", "pi", "codex"]] | None = Field(default=None, min_length=1)
+    agent_kinds: list[Literal["claude", "pi", "codex", "dsh", "zcode"]] | None = Field(
+        default=None, min_length=1
+    )
     # 模型列表（D-001）：None=不动；非 None 时整表替换（条目级编辑在前端完成）。
     models: list[ProviderModelEntry] | None = None
     extra_env: dict[str, Any] | None = None

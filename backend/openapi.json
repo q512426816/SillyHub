@@ -53076,7 +53076,9 @@
               "enum": [
                 "claude",
                 "pi",
-                "codex"
+                "codex",
+                "dsh",
+                "zcode"
               ]
             },
             "type": "array",
@@ -53523,7 +53525,9 @@
                   "enum": [
                     "claude",
                     "pi",
-                    "codex"
+                    "codex",
+                    "dsh",
+                    "zcode"
                   ]
                 },
                 "type": "array",

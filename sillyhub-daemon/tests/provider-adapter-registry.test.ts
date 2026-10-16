@@ -63,6 +63,8 @@ const API_FORMAT_VOCAB: readonly string[] = ['anthropic', 'openai_chat'];
 
 /**
  * 读 backend agent_kinds Literal 词表（源文件读取式解析，不跨语言 import）。
+ * 词表演进：claude/pi/codex → +dsh、+zcode（2026-10-15 两变更，五值——
+ * 本测试源读取动态解析，无需随词表改值；聚合表 ⊆ detector 守护同行覆盖）。
  *
  * 2026-10-06-provider-multi-agent-kind：字段单数 `agent_kind: Literal[...]` 改
  * 复数 `agent_kinds: list[Literal[...]]`（一供应商多 kind），正则锚随形态更新
