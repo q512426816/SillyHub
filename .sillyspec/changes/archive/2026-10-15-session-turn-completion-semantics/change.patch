@@ -1,0 +1,940 @@
+diff --git a/.sillyspec/docs/SillyHub/modules/frontend_app.changelog.md b/.sillyspec/docs/SillyHub/modules/frontend_app.changelog.md
+index 80a94c946..9a5f3efa4 100644
+--- a/.sillyspec/docs/SillyHub/modules/frontend_app.changelog.md
++++ b/.sillyspec/docs/SillyHub/modules/frontend_app.changelog.md
+@@ -25,3 +25,4 @@ created_at: 2026-09-03 14:49:48
+ - 2026-10-15-change-assets-graph | 变更详情页信息动线不佳（用户原话四条）：①知识图谱（画布+右侧节点详情描述）没有出现在变更详情页，要…
+ - 2026-10-15-pseudo-domain-migration | 用户指令：把平台仓存量伪域迁真域。背景：sillyspec 仓 2026-10-15-module-…
+ - 2026-10-15-workspace-session-agent-only | 工作区中新建会话不再选机器：机器已由工作区绑定决定，浮层只让用户选智能体类型
++- 2026-10-16-archived-files-tab | 归档变更也要显示「文件与对账」tab：归档留档区不展示 spec 文档全貌，用户需要文件树与范围对账…
+diff --git a/.sillyspec/docs/SillyHub/modules/frontend_components.changelog.md b/.sillyspec/docs/SillyHub/modules/frontend_components.changelog.md
+index c5ed7ceda..72b136bf9 100644
+--- a/.sillyspec/docs/SillyHub/modules/frontend_components.changelog.md
++++ b/.sillyspec/docs/SillyHub/modules/frontend_components.changelog.md
+@@ -77,3 +77,4 @@ created_at: 2026-08-30 22:23:33
+ | 2026-10-15 | 2026-10-15-pseudo-domain-migration | 用户指令：把平台仓存量伪域迁真域。背景：sillyspec 仓 2026-10-15-module-… |
+ | 2026-10-15 | 2026-10-15-workspace-session-agent-only | 工作区中新建会话不再选机器：机器已由工作区绑定决定，浮层只让用户选智能体类型 |
+ | 2026-10-15 | 2026-10-15-assets-graph-depth | 变更详情页沉淀资产卡的内嵌知识图谱分区（2026-10-15-change-assets-graph… |
++| 2026-10-16 | 2026-10-16-archived-files-tab | 归档变更也要显示「文件与对账」tab：归档留档区不展示 spec 文档全貌，用户需要文件树与范围对账… |
+diff --git a/.sillyspec/docs/multi-agent-platform/modules/frontend.changelog.md b/.sillyspec/docs/multi-agent-platform/modules/frontend.changelog.md
+index e09ffcd87..41b496c6f 100644
+--- a/.sillyspec/docs/multi-agent-platform/modules/frontend.changelog.md
++++ b/.sillyspec/docs/multi-agent-platform/modules/frontend.changelog.md
+@@ -112,3 +112,4 @@
+ | 2026-10-15 | 2026-10-15-workspace-session-agent-only | 工作区中新建会话不再选机器：机器已由工作区绑定决定，浮层只让用户选智能体类型 |
+ | 2026-10-15 | 2026-10-15-assets-graph-depth | 变更详情页沉淀资产卡的内嵌知识图谱分区（2026-10-15-change-assets-graph… |
+ - 2026-10-15-change-detail-redesign | 变更详情页重设计：四 tab 容器 + 状态自适应 + 统一时间线 + 图谱独立分区 + 范围对账下沉 + 用量/会话入概览右信息栏（D-001~D-018）
++| 2026-10-16 | 2026-10-16-archived-files-tab | 归档变更也要显示「文件与对账」tab：归档留档区不展示 spec 文档全貌，用户需要文件树与范围对账… |
+diff --git a/frontend/src/components/sessions/__tests__/session-list-panel.test.tsx b/frontend/src/components/sessions/__tests__/session-list-panel.test.tsx
+index 6024b6087..369dd90d7 100644
+--- a/frontend/src/components/sessions/__tests__/session-list-panel.test.tsx
++++ b/frontend/src/components/sessions/__tests__/session-list-panel.test.tsx
+@@ -3138,14 +3138,16 @@ describe("SessionListPanel 群行归档与删除操作（task-06）", () => {
+   });
+ });
+ 
+-// ── 14. 行首状态槽语义 + 执行完成通知（2026-10-15-session-status-dot-semantics） ──
++// ── 14. 行首状态槽语义 + 执行完成通知（2026-10-15-session-status-dot-semantics；
++//        2026-10-15-session-turn-completion-semantics 完成口径改轮次级） ──
+ //
+ // 语义矩阵（用户确认，参考 deepseek-harness StateDot 五态）：failed→红点 /
+ // ended→绿点 / 活性 working→动态转圈 / 活性 blocked→琥珀点 / reconnecting→
+-// 动态转圈 / 其余（active 空闲/pending/suspended/活性 idle/unknown/无活性）
+-// →留白（槽占位零可见标识）；终态权威优先于活性。行尾活性小灯退役：悬停卡/
+-// 未读红角标平移至行首槽。执行完成通知：非终态→ended 且当前不在该会话上 →
+-// 绿色角标，点击进入（selected 边沿）后消失。
++// 动态转圈 / 活性 idle+完成标记→绿点（一轮刚跑完待查看）/ 其余（已读空闲/
++// active 空闲/pending/suspended/活性 unknown/无活性）→留白（槽占位零可见
++// 标识）；终态权威优先于活性。行尾活性小灯退役，悬停卡平移至行首槽。执行
++// 完成通知两来源共键：①非终态→ended（面板检测）②working/blocked→idle 轮次
++// 完成（hook 检测）→ 绿色角标，点击进入（selected 边沿）后消失。
+ 
+ describe("SessionListPanel 行首状态槽语义（2026-10-15-session-status-dot-semantics）", () => {
+   /**
+@@ -3262,6 +3264,17 @@ describe("SessionListPanel 行首状态槽语义（2026-10-15-session-status-dot
+     expect(screen.getByText(/^推导时间：/)).toBeInTheDocument();
+   });
+ 
++  it("active + 活性 idle + 完成标记（一轮刚跑完待查看）→ 绿点 + 完成角标", async () => {
++    window.localStorage.setItem(
++      "sillyhub:session-completed-unread:s-a",
++      String(Date.now()),
++    );
++    slotFixture({ status: "active" }, "idle");
++    const row = await renderRow();
++    expect(row.querySelector('[aria-label="执行完成"]')).toBeTruthy();
++    expect(screen.getByLabelText("此会话已执行完成")).toBeTruthy();
++  });
++
+   it("活性 idle：留白但悬停卡仍可查（详情不丢）", async () => {
+     slotFixture({ status: "active" }, "idle");
+     renderPanel(<SessionListPanel />);
+@@ -3292,7 +3305,7 @@ describe("SessionListPanel 行首状态槽语义（2026-10-15-session-status-dot
+   });
+ });
+ 
+-describe("SessionListPanel 活性未读红角标（原行尾小灯迁入行首槽）", () => {
++describe("SessionListPanel 轮次完成绿角标（working/blocked→idle 转移，2026-10-15-session-turn-completion-semantics）", () => {
+   /** 带 client 句柄的渲染（转移用例需 refetchQueries 模拟 30s 轮询到点）。 */
+   function renderPanelWithClient(ui: React.ReactElement) {
+     const client = new QueryClient({
+@@ -3321,20 +3334,21 @@ describe("SessionListPanel 活性未读红角标（原行尾小灯迁入行首
+     });
+   }
+ 
+-  it("红点出现：prevState=working → current=idle 转移标记未读", async () => {
++  it("绿点+完成角标出现：prevState=working → current=idle 转移写完成标记", async () => {
+     livenessFixture();
+     const { client } = renderPanelWithClient(<SessionListPanel />);
+     await openGroup("SillyHub");
+     await screen.findByTestId("session-status-indicator");
+-    // 首轮 working：state 键落盘（首见不触发未读，无红点）
++    // 首轮 working：state 键落盘（首见不触发完成标记，转圈显示）
+     await waitFor(() =>
+       expect(window.localStorage.getItem("sillyhub:liveness-state:s-a")).toBe(
+         "working",
+       ),
+     );
+-    expect(screen.queryByLabelText("有新的空闲状态未读")).toBeNull();
++    expect(screen.queryByLabelText("此会话已执行完成")).toBeNull();
+ 
+-    // 下一轮 idle（refetch 模拟 30s 轮询到点）：转移检测写未读 → 红点出现
++    // 下一轮 idle（refetch 模拟 30s 轮询到点）：转移检测写完成标记
++    // → 绿点（执行完成）+ 绿角标出现
+     mocks.listWorkspaceAgentLogs.mockResolvedValue({
+       items: [makeLivenessEntry({ agent_session_id: "s-a", state: "idle" })],
+     });
+@@ -3343,11 +3357,14 @@ describe("SessionListPanel 活性未读红角标（原行尾小灯迁入行首
+         queryKey: ["agent-liveness-overview", "all"],
+       });
+     });
+-    await screen.findByLabelText("有新的空闲状态未读");
+-    expect(window.localStorage.getItem("sillyhub:liveness-unread:s-a")).not.toBeNull();
++    await screen.findByLabelText("此会话已执行完成");
++    expect(screen.getByLabelText("执行完成")).toBeTruthy();
++    expect(
++      window.localStorage.getItem("sillyhub:session-completed-unread:s-a"),
++    ).not.toBeNull();
+   });
+ 
+-  it("红点随 selected 置真消失（点击/Enter/深链三路入口共用的 selected 边沿）", async () => {
++  it("点击进入（selected 置真）→ 角标与绿点一并消失、落盘清除（空闲回归留白）", async () => {
+     livenessFixture();
+     const { client, rerender } = renderPanelWithClient(<SessionListPanel />);
+     await openGroup("SillyHub");
+@@ -3360,25 +3377,28 @@ describe("SessionListPanel 活性未读红角标（原行尾小灯迁入行首
+         queryKey: ["agent-liveness-overview", "all"],
+       });
+     });
+-    await screen.findByLabelText("有新的空闲状态未读");
++    await screen.findByLabelText("此会话已执行完成");
+ 
+-    // selectedSessionId 置真（门户三路入口最终都落到该 prop）→ 边沿清除红点
++    // selectedSessionId 置真（门户三路入口最终都落到该 prop）→ 边沿清除完成通知
+     rerender(
+       <QueryClientProvider client={client}>
+         <SessionListPanel selectedSessionId="s-a" />
+       </QueryClientProvider>,
+     );
+     await waitFor(() =>
+-      expect(screen.queryByLabelText("有新的空闲状态未读")).toBeNull(),
++      expect(screen.queryByLabelText("此会话已执行完成")).toBeNull(),
+     );
+     expect(
+-      window.localStorage.getItem("sillyhub:liveness-unread:s-a"),
++      window.localStorage.getItem("sillyhub:session-completed-unread:s-a"),
+     ).toBeNull();
+-    // 状态槽本体保留（清除只影响红角标）
+-    expect(screen.getByTestId("session-status-indicator")).toBeInTheDocument();
++    // 会话仍 active + 已读空闲 → 绿点一并消失，回归留白
++    const row = screen.getByRole("button", { name: "会话 核对变更" });
++    expect(
++      row.querySelector('[data-testid="session-status-indicator"]')?.textContent,
++    ).toBe("");
+   });
+ 
+-  it("首见不亮：无 prevState（localStorage 无 state 键）直接 idle 不标未读", async () => {
++  it("首见不标：无 prevState（localStorage 无 state 键）直接 idle 留白", async () => {
+     livenessFixture();
+     // 首轮直接 idle（首见无 prevState）
+     mocks.listWorkspaceAgentLogs.mockResolvedValue({
+@@ -3387,14 +3407,42 @@ describe("SessionListPanel 活性未读红角标（原行尾小灯迁入行首
+     renderPanel(<SessionListPanel />);
+     await openGroup("SillyHub");
+     await screen.findByTestId("session-status-indicator");
+-    // state 键首见落盘为 idle，未读键不写
++    // state 键首见落盘为 idle，完成标记不写
+     await waitFor(() =>
+       expect(window.localStorage.getItem("sillyhub:liveness-state:s-a")).toBe(
+         "idle",
+       ),
+     );
+-    expect(window.localStorage.getItem("sillyhub:liveness-unread:s-a")).toBeNull();
+-    expect(screen.queryByLabelText("有新的空闲状态未读")).toBeNull();
++    expect(
++      window.localStorage.getItem("sillyhub:session-completed-unread:s-a"),
++    ).toBeNull();
++    expect(screen.queryByLabelText("此会话已执行完成")).toBeNull();
++  });
++
++  it("正选中该会话时完成（suppress 谓词）→ 不标记不亮角标", async () => {
++    livenessFixture();
++    const { client } = renderPanelWithClient(
++      <SessionListPanel selectedSessionId="s-a" />,
++    );
++    // 选中会话所在组豁免默认折叠（ql-20260824-001）——无需点击展开。
++    await screen.findByTestId("session-status-indicator");
++    mocks.listWorkspaceAgentLogs.mockResolvedValue({
++      items: [makeLivenessEntry({ agent_session_id: "s-a", state: "idle" })],
++    });
++    await act(async () => {
++      await client.refetchQueries({
++        queryKey: ["agent-liveness-overview", "all"],
++      });
++    });
++    await waitFor(() =>
++      expect(window.localStorage.getItem("sillyhub:liveness-state:s-a")).toBe(
++        "idle",
++      ),
++    );
++    expect(
++      window.localStorage.getItem("sillyhub:session-completed-unread:s-a"),
++    ).toBeNull();
++    expect(screen.queryByLabelText("此会话已执行完成")).toBeNull();
+   });
+ });
+ 
+diff --git a/frontend/src/components/sessions/session-list-panel.tsx b/frontend/src/components/sessions/session-list-panel.tsx
+index 483478031..65fbb3657 100644
+--- a/frontend/src/components/sessions/session-list-panel.tsx
++++ b/frontend/src/components/sessions/session-list-panel.tsx
+@@ -176,11 +176,14 @@ import type { AgentLogListItem } from "@/lib/agent-logs";
+ // 2026-10-15-session-status-dot-semantics：LivenessDot 随行尾小灯退役，仅存
+ // LIVENESS_META（悬停卡 SessionLivenessPopoverContent 仍消费五态色/文案）。
+ import { LIVENESS_META } from "@/components/agent-log/liveness-badge";
++// 2026-10-15-session-turn-completion-semantics：完成通知存储单一源（会话终态
++// 与轮次完成两来源共用一键一角标）；原红色「空闲未读」isUnread/clearUnread 退役。
++import { useSessionLiveness } from "@/hooks/use-session-liveness";
+ import {
+-  clearUnread,
+-  isUnread,
+-  useSessionLiveness,
+-} from "@/hooks/use-session-liveness";
++  clearCompletedUnread,
++  isCompletedUnread,
++  markCompletedUnread,
++} from "@/lib/session-completed-unread";
+ import { MemberFacepile } from "@/components/group-chat/create-group-wizard";
+ import { listPersonalPlanTasks } from "@/lib/ppm/task";
+ import { listProblems } from "@/lib/ppm/problem";
+@@ -582,14 +585,17 @@ function engineValueOf(s: AgentSessionRead): string | null {
+ /**
+  * 行首状态标识形态（2026-10-15-session-status-dot-semantics 语义重定义，
+  * 参考 deepseek-harness StateDot 五态：done 绿 / ongoing 转圈 / error 红 /
+- * warning 琥珀 / idle 弱化）：
++ * warning 琥珀 / idle 弱化；2026-10-15-session-turn-completion-semantics 完成
++ * 口径改轮次级）：
+  *   - failed        → 红点（异常）
+- *   - ended         → 绿点（执行完成）
++ *   - ended         → 绿点（执行完成——会话级终态）
+  *   - 活性 working  → 动态转圈（正在执行——本平台 active 只表示「会话开着」
+  *                     哪怕空闲，故「进行中」以活性推导 working 为准）
+  *   - 活性 blocked  → 琥珀点（在等你：等审批/等回答）
+  *   - reconnecting  → 动态转圈（断线恢复中，动态过程）
+- *   - 其余（active 空闲 / pending 排队 / suspended 挂起 / 活性 idle/unknown /
++ *   - 活性 idle + 完成标记 → 绿点（一轮任务刚跑完待查看——working/blocked→idle
++ *                     转移写的完成通知，点击进入后随角标一并消失回归留白）
++ *   - 其余（空闲已读 / active 空闲 / pending / suspended / 活性 unknown /
+  *     无活性数据）→ null：行首槽零可见内容，视觉留白。
+  * 判定序即优先级：终态（failed/ended）权威优先，不被陈旧活性数据覆盖。
+  */
+@@ -598,10 +604,11 @@ type SessionStatusIndicator =
+   | { kind: "spinner"; label: string }
+   | null;
+ 
+-/** 行首状态标识单一源（status × 活性 state → 形态；纯函数便于单测）。 */
++/** 行首状态标识单一源（status × 活性 state × 完成标记 → 形态；纯函数便于单测）。 */
+ function sessionStatusIndicator(
+   status: AgentSessionStatus,
+   livenessState?: AgentLogListItem["state"] | null,
++  completedUnread?: boolean,
+ ): SessionStatusIndicator {
+   if (status === "failed")
+     return { kind: "dot", cls: "bg-destructive", label: "异常失败" };
+@@ -611,6 +618,8 @@ function sessionStatusIndicator(
+   if (livenessState === "blocked")
+     return { kind: "dot", cls: "bg-warning-500", label: "在等你" };
+   if (status === "reconnecting") return { kind: "spinner", label: "恢复中" };
++  if (livenessState === "idle" && completedUnread)
++    return { kind: "dot", cls: "bg-success", label: "执行完成" };
+   return null;
+ }
+ 
+@@ -695,50 +704,6 @@ interface GroupSection {
+   sessions: AgentSessionRead[];
+ }
+ 
+-/* ────────── 执行完成通知（2026-10-15-session-status-dot-semantics 用户补充） ────────── */
+-
+-/**
+- * 会话执行完成通知：非终态 → ended 且当前不在该会话上 → 行首槽亮绿色通知
+- * 角标（「此会话已执行完成」），点击进入（selected 边沿）后消失——与活性
+- * 未读（use-session-liveness isUnread/clearUnread）同款通知语义。
+- * 键名风格对齐 `sillyhub:liveness-unread:` 前缀惯例；全 try/catch 降级
+- * （存储不可用不误亮不崩溃）。
+- */
+-const COMPLETED_UNREAD_KEY_PREFIX = "sillyhub:session-completed-unread:";
+-
+-/** 完成通知角标判定（渲染期直读存储；不可用恒 false——fail-open 不误亮）。 */
+-function isCompletedUnread(sessionId: string): boolean {
+-  try {
+-    return (
+-      window.localStorage.getItem(COMPLETED_UNREAD_KEY_PREFIX + sessionId) !==
+-      null
+-    );
+-  } catch {
+-    return false;
+-  }
+-}
+-
+-/** 写完成通知标记（值为发现完成的时刻，仅存在性语义）。 */
+-function markCompletedUnread(sessionId: string): void {
+-  try {
+-    window.localStorage.setItem(
+-      COMPLETED_UNREAD_KEY_PREFIX + sessionId,
+-      String(Date.now()),
+-    );
+-  } catch {
+-    // 存储不可用：通知不亮，不崩。
+-  }
+-}
+-
+-/** 清除完成通知标记（selected 置真时由 SessionRow 调，覆盖点击/Enter/深链）。 */
+-function clearCompletedUnread(sessionId: string): void {
+-  try {
+-    window.localStorage.removeItem(COMPLETED_UNREAD_KEY_PREFIX + sessionId);
+-  } catch {
+-    // 同上降级。
+-  }
+-}
+-
+ /* ────────────────────── 组件 ────────────────────── */
+ 
+ export function SessionListPanel(props: SessionListPanelProps) {
+@@ -1065,23 +1030,27 @@ function WorkspaceTreeList({
+   const totalFromServer = sessionsQuery.data?.total ?? 0;
+ 
+   // ── 2026-09-08-session-list-liveness-dot task-02 / FR-01 / D-001@v2 ─────
+-  // 行尾活性小灯数据源：useSessionLiveness 固定 all 槽 30s 轮询 + 客户端
+-  // working/blocked→idle 转移检测（未读标记）。本面板调一次建 map，经
+-  // WorkspaceGroupNode → SessionRow props 链按 session.id 命中下发（map 未命
+-  // 中不传 → 不渲染灯，fail-open 与无日志会话现状一致）。
++  // 活性数据源：useSessionLiveness 固定 all 槽 30s 轮询。本面板调一次建 map，
++  // 经 WorkspaceGroupNode → SessionRow props 链按 session.id 命中下发（map 未
++  // 命中不传 → 非终态行留白，fail-open 与无日志会话现状一致）。
+   // quick（ql-20260916-007）：活性灯条件轮询——全空闲列表灯无渲染意义
+   // （行不命中 map 不亮），hasActiveSessions=false 时停 30s 轮询省空闲噪音。
++  // 2026-10-15-session-turn-completion-semantics：hook 的转移检测负责「轮次
++  // 完成」标记（working/blocked→idle）；正选中该会话时 suppress——用户就在
++  // 其上看完收尾，无需通知。
+   const hasActiveSessionsForLiveness = sessions.some(
+     (s) => s.status !== "ended" && s.status !== "failed",
+   );
+   const { bySessionId: livenessBySessionId } = useSessionLiveness({
+     enabled: hasActiveSessionsForLiveness,
++    suppress: (id) => id === selectedSessionId,
+   });
+ 
+-  // ── 执行完成通知检测（2026-10-15-session-status-dot-semantics 用户补充）──
+-  // 会话由非终态翻 ended 且当前不选中该会话（用户不在其上）→ 落盘完成通知
+-  // 标记 + 自增 epoch 强制行重读（isCompletedUnread 渲染期直读存储，与活性
+-  // 未读 unreadEpoch 同款机制）。selected 边沿清除归 SessionRow（点击/Enter/
++  // ── 执行完成通知检测·会话终态来源（2026-10-15-session-status-dot-semantics
++  // 用户补充）──会话由非终态翻 ended 且当前不选中该会话（用户不在其上）→ 落盘
++  // 完成通知标记 + 自增 epoch 强制行重读（isCompletedUnread 渲染期直读存储）。
++  // 轮次完成来源（working/blocked→idle）在 use-session-liveness hook 内检测，
++  // 两来源共用同一键与同一角标。selected 边沿清除归 SessionRow（点击/Enter/
+   // 深链三路入口）。检测基线 prevStatusRef 在内存：挂载后首个快照为基线——
+   // 历史已终态会话不误报；页面关闭期间完成的会话不补报（挂载期轮询检测）。
+   const prevStatusRef = useRef<Map<string, AgentSessionStatus>>(new Map());
+@@ -2980,7 +2949,6 @@ function WorkspaceGroupNode({
+                           hideEngineChip={hideEngineChip}
+                           onSelect={onSelect}
+                           liveness={liveness}
+-                          livenessUnread={liveness ? isUnread(s.id) : undefined}
+                           completedUnread={isCompletedUnread(s.id)}
+                           batchMode={batchActive}
+                           checked={checkedIds.has(s.id)}
+@@ -3048,11 +3016,6 @@ function WorkspaceGroupNode({
+                                   onSelect={onSelect}
+                                   /* task-02：分身行照主行透传（map 命中才有值）。 */
+                                   liveness={livenessBySessionId?.get(c.id)}
+-                                  livenessUnread={
+-                                    livenessBySessionId?.get(c.id)
+-                                      ? isUnread(c.id)
+-                                      : undefined
+-                                  }
+                                   completedUnread={isCompletedUnread(c.id)}
+                                   batchMode={batchActive}
+                                   checked={checkedIds.has(c.id)}
+@@ -3124,11 +3087,6 @@ function WorkspaceGroupNode({
+                                   hideEngineChip={hideEngineChip}
+                                   onSelect={onSelect}
+                                   liveness={livenessBySessionId?.get(c.id)}
+-                                  livenessUnread={
+-                                    livenessBySessionId?.get(c.id)
+-                                      ? isUnread(c.id)
+-                                      : undefined
+-                                  }
+                                   completedUnread={isCompletedUnread(c.id)}
+                                   batchMode={batchActive}
+                                   checked={checkedIds.has(c.id)}
+@@ -3223,11 +3181,11 @@ interface SessionRowProps {
+    * 行尾小灯——无关联日志会话行为与现状一致）。
+    */
+   liveness?: AgentLogListItem;
+-  /** working/blocked→idle 新转移未读（isUnread 命中才传；selected 置真清除）。 */
+-  livenessUnread?: boolean;
+   /**
+-   * 执行完成通知（2026-10-15 用户补充）：会话翻 ended 时不在本会话上 → 绿色
+-   * 通知角标，点击进入（selected 边沿）后消失——isCompletedUnread 渲染期取值。
++   * 执行完成通知（2026-10-15-session-turn-completion-semantics）：两来源共用
++   * ——①会话非终态→ended（面板检测）②活性 working/blocked→idle 轮次完成
++   * （hook 检测）——落同一键，行首亮绿色完成角标+绿点，点击进入（selected
++   * 边沿）后消失（isCompletedUnread 渲染期取值）。
+    */
+   completedUnread?: boolean;
+ }
+@@ -3281,25 +3239,25 @@ function SessionLivenessPopoverContent({ entry }: { entry: AgentLogListItem }) {
+ }
+ 
+ /**
+- * 行首状态槽（2026-10-15-session-status-dot-semantics）：原 6px 状态点与行尾
+- * 活性灯合并后的单一标识位——18px flex-none 槽恒渲染（留白行透明占位，保各
+- * 行标题对齐），槽内按 indicator 形态渲染：
+- *   - dot：8px 语义色圆点（红=异常 / 绿=完成 / 琥珀=在等你）
++ * 行首状态槽（2026-10-15-session-status-dot-semantics；2026-10-15-session-turn-
++ * completion-semantics 角标统一）：原 6px 状态点与行尾活性灯合并后的单一标识
++ * 位——18px flex-none 槽恒渲染（留白行透明占位，保各行标题对齐），槽内按
++ * indicator 形态渲染：
++ *   - dot：8px 语义色圆点（红=异常 / 绿=执行完成（会话终态或轮次刚完成待查看）/
++ *     琥珀=在等你）
+  *   - spinner：Loader2 12px 动态转圈（正在执行 / 断线恢复中）
+- *   - null：零可见内容（空闲/排队/挂起/未知——「没有动态的留白」）
+- * 角标两枚（absolute 右上，互斥场景不叠加）：活性未读红角标（原行尾灯位迁
+- * 入）+ 执行完成通知绿角标（点击进入后消失）。活性条目命中时整槽包 Popover
+- * （原行尾灯悬停卡平移，portal 渲染防行根 overflow-hidden 裁剪——Grill BL-02）。
++ *   - null：零可见内容（空闲已读/排队/挂起/未知——「没有动态的留白」）
++ * 角标一枚：执行完成通知绿角标（会话终态与轮次完成两来源共一键，点击进入后
++ * 随绿点一并消失）。活性条目命中时整槽包 Popover（悬停卡，portal 渲染防行根
++ * overflow-hidden 裁剪——Grill BL-02）。
+  */
+ function SessionStatusSlot({
+   indicator,
+   liveness,
+-  unread,
+   completedUnread,
+ }: {
+   indicator: SessionStatusIndicator;
+   liveness?: AgentLogListItem;
+-  unread?: boolean;
+   completedUnread?: boolean;
+ }) {
+   const slot = (
+@@ -3319,12 +3277,6 @@ function SessionStatusSlot({
+           className="h-3 w-3 shrink-0 animate-spin text-muted-foreground"
+         />
+       )}
+-      {unread && (
+-        <span
+-          aria-label="有新的空闲状态未读"
+-          className="absolute right-0 top-0 h-[7px] w-[7px] rounded-full border-[1.5px] border-card bg-destructive"
+-        />
+-      )}
+       {completedUnread && (
+         <span
+           aria-label="此会话已执行完成"
+@@ -3369,7 +3321,6 @@ function SessionRow({
+   exporting,
+   hideEngineChip,
+   liveness,
+-  livenessUnread,
+   completedUnread,
+ }: SessionRowProps) {
+   // ── task-07（2026-09-07-session-pin-rename-scheduled-send / FR-02）：行内
+@@ -3377,21 +3328,16 @@ function SessionRow({
+   // renameCancelledRef 标记 Esc 路径，防 setEditing(false) 触发的 blur 再提交。
+   const [editing, setEditing] = useState(false);
+   const renameCancelledRef = useRef(false);
+-  // ── 2026-09-08-session-list-liveness-dot task-02 / FR-03 / D-001@v2：selected
+-  // prop false→true 边沿清除该会话 idle 未读标记——覆盖点击选中 / 行级 Enter /
+-  // 深链 ?session= 三路入口（深链经 selected 初挂即 true，wasSelectedRef 初值
+-  // false 首跑即清）；批量模式勾选走 onToggleCheck 不动 selected，不触发清除。
++  // ── selected prop false→true 边沿清除完成通知（原活性 idle 未读同槽位，
++  // 2026-10-15-session-turn-completion-semantics 起统一为绿色完成角标）——覆盖
++  // 点击选中 / 行级 Enter / 深链 ?session= 三路入口（深链经 selected 初挂即
++  // true，wasSelectedRef 初值 false 首跑即清）；批量模式勾选走 onToggleCheck
++  // 不动 selected，不触发清除。
+   const wasSelectedRef = useRef(false);
+-  // 未读红点本地显示态：真源是 localStorage（isUnread 经 props 每渲染期取值），
+-  // 但 selected 边沿的 clearUnread 在 effect 里执行后需要本行即时重渲染红点才
+-  // 消失（否则要等下一轮轮询重渲染，最长 30s 残影）——本地态跟随 props 同步、
+-  // 边沿清除时立即置 false。
+-  const [unreadVisible, setUnreadVisible] = useState(Boolean(livenessUnread));
+-  useEffect(() => {
+-    setUnreadVisible(Boolean(livenessUnread));
+-  }, [livenessUnread]);
+-  // 完成通知角标本地显示态（与 unreadVisible 同款模式：真源 localStorage，
+-  // selected 边沿清除后本地即时置 false，防等下轮渲染残影）。
++  // 完成通知本地显示态：真源是 localStorage（isCompletedUnread 经 props 每渲染
++  // 期取值），但 selected 边沿的 clearCompletedUnread 在 effect 里执行后需要本
++  // 行即时重渲染角标才消失（否则要等下一轮轮询重渲染，最长 30s 残影）——本地
++  // 态跟随 props 同步、边沿清除时立即置 false。
+   const [completedUnreadVisible, setCompletedUnreadVisible] = useState(
+     Boolean(completedUnread),
+   );
+@@ -3400,9 +3346,6 @@ function SessionRow({
+   }, [completedUnread]);
+   useEffect(() => {
+     if (selected && !wasSelectedRef.current) {
+-      clearUnread(session.id);
+-      setUnreadVisible(false);
+-      // 完成通知同边沿清除（点击/Enter/深链三路入口共用）。
+       clearCompletedUnread(session.id);
+       setCompletedUnreadVisible(false);
+     }
+@@ -3508,9 +3451,12 @@ function SessionRow({
+              + 行尾活性灯合并——两套点并存语义打架，单一源 sessionStatusIndicator
+              四分类+琥珀；无标识时槽透明留白，仅占位对齐不渲染任何可见点）。 */
+           <SessionStatusSlot
+-            indicator={sessionStatusIndicator(session.status, liveness?.state)}
++            indicator={sessionStatusIndicator(
++              session.status,
++              liveness?.state,
++              completedUnreadVisible,
++            )}
+             liveness={liveness}
+-            unread={unreadVisible}
+             completedUnread={completedUnreadVisible}
+           />
+         )}
+diff --git a/frontend/src/hooks/__tests__/use-session-liveness.test.ts b/frontend/src/hooks/__tests__/use-session-liveness.test.ts
+index 7956d2abe..5e0c39c7f 100644
+--- a/frontend/src/hooks/__tests__/use-session-liveness.test.ts
++++ b/frontend/src/hooks/__tests__/use-session-liveness.test.ts
+@@ -1,18 +1,21 @@
+ /**
+  * useSessionLiveness 单测（2026-09-08-session-list-liveness-dot task-03 /
+- * FR-01 / FR-03 / D-001@v2 / D-003@v1）。
++ * FR-01 / FR-03 / D-001@v2 / D-003@v1；2026-10-15-session-turn-completion-
++ * semantics 转移检测重定义）。
+  *
+  * 依据：
+- *   - hooks/use-session-liveness.ts（task-01 实现：固定 all 槽 30s 轮询 +
+- *     map DESC 首胜 + 客户端转移检测状态机）；
+- *   - tasks/task-03.md acceptance：map 构建首个胜出 / queryKey 固定 all 槽 /
+- *     转移各边（working→idle 亮、blocked→idle 亮、unknown→idle 不亮、首见不
+- *     亮）/ 存储异常降级不崩；
++ *   - hooks/use-session-liveness.ts（固定 all 槽 30s 轮询 + map DESC 首胜 +
++ *     客户端转移检测状态机；working/blocked→idle = 一轮执行结束 → 写完成通知
++ *     标记 lib/session-completed-unread，取代原红色「空闲未读」）；
++ *   - tasks 验收：map 构建首个胜出 / queryKey 固定 all 槽 / 转移各边
++ *     （working→idle 标、blocked→idle 标、unknown→idle 不标、首见不标）/
++ *     suppress 谓词（正选中会话不标）/ 存储异常降级不崩；
+  *   - use-scheduled-messages.test.ts 既有 hook 测试模式（vi.mock 数据源模块 +
+  *     renderHook + QueryClientProvider wrapper 经 createElement 包，.ts 免 JSX）。
+  *
+- * localStorage 用真实 jsdom localStorage 造数（转移 prevState 种子/未读断言），
+- * beforeEach 清 sillyhub:liveness-* 键隔离跨用例。
++ * localStorage 用真实 jsdom localStorage 造数（转移 prevState 种子/完成标记
++ * 断言），beforeEach 清 sillyhub:liveness-state:* 与 sillyhub:session-completed-
++ * unread:* 键隔离跨用例。
+  */
+ import { describe, it, expect, vi, beforeEach } from "vitest";
+ import { renderHook, waitFor } from "@testing-library/react";
+@@ -22,10 +25,12 @@ import * as React from "react";
+ import {
+   SESSION_LIVENESS_QUERY_KEY,
+   buildLivenessBySessionId,
+-  clearUnread,
+-  isUnread,
+   useSessionLiveness,
+ } from "@/hooks/use-session-liveness";
++import {
++  clearCompletedUnread,
++  isCompletedUnread,
++} from "@/lib/session-completed-unread";
+ import type { AgentLogListItem } from "@/lib/agent-logs";
+ 
+ const mocks = vi.hoisted(() => ({
+@@ -73,14 +78,14 @@ function makeWrapper() {
+ }
+ 
+ const STATE_KEY = (id: string) => `sillyhub:liveness-state:${id}`;
+-const UNREAD_KEY = (id: string) => `sillyhub:liveness-unread:${id}`;
++const COMPLETED_KEY = (id: string) => `sillyhub:session-completed-unread:${id}`;
+ 
+-/** 清 liveness 两族 localStorage 键（跨用例隔离）。 */
++/** 清 liveness state 与完成通知两族 localStorage 键（跨用例隔离）。 */
+ function clearLivenessStorage() {
+   for (const key of Object.keys(window.localStorage)) {
+     if (
+       key.startsWith("sillyhub:liveness-state:") ||
+-      key.startsWith("sillyhub:liveness-unread:")
++      key.startsWith("sillyhub:session-completed-unread:")
+     ) {
+       window.localStorage.removeItem(key);
+     }
+@@ -149,13 +154,15 @@ describe("useSessionLiveness queryKey 固定 all 槽", () => {
+   });
+ });
+ 
+-// ── 转移检测状态机（D-001@v2：仅比较 prevState 与 current 的 state 值） ────
++// ── 转移检测状态机（2026-10-15-session-turn-completion-semantics：仅比较
++//    prevState 与 current 的 state 值；working/blocked→idle = 轮次完成） ────
+ 
+-describe("useSessionLiveness 转移检测状态机", () => {
++describe("useSessionLiveness 轮次完成转移检测", () => {
+   /** 种 prevState 后挂载 hook 并等到数据到位。 */
+   async function mountWithState(
+     prevState: string | null,
+     current: AgentLogListItem["state"],
++    opts: { suppress?: (_sessionId: string) => boolean } = {},
+   ) {
+     if (prevState !== null) {
+       window.localStorage.setItem(STATE_KEY("sess-1"), prevState);
+@@ -164,7 +171,7 @@ describe("useSessionLiveness 转移检测状态机", () => {
+       items: [makeLivenessEntry({ agent_session_id: "sess-1", state: current })],
+     });
+     const { wrapper } = makeWrapper();
+-    const { result } = renderHook(() => useSessionLiveness(), { wrapper });
++    const { result } = renderHook(() => useSessionLiveness(opts), { wrapper });
+     await waitFor(() => expect(result.current.bySessionId.size).toBe(1));
+     // effect 落盘后再断言（state 键更新到位 = 状态机跑完）。
+     await waitFor(() =>
+@@ -173,55 +180,63 @@ describe("useSessionLiveness 转移检测状态机", () => {
+     return result;
+   }
+ 
+-  it("working→idle：写未读标记（红点来源）", async () => {
++  it("working→idle：写轮次完成标记（绿角标来源）", async () => {
+     await mountWithState("working", "idle");
+-    expect(window.localStorage.getItem(UNREAD_KEY("sess-1"))).not.toBeNull();
+-    expect(isUnread("sess-1")).toBe(true);
++    expect(window.localStorage.getItem(COMPLETED_KEY("sess-1"))).not.toBeNull();
++    expect(isCompletedUnread("sess-1")).toBe(true);
+   });
+ 
+-  it("blocked→idle：同写未读标记", async () => {
++  it("blocked→idle：同写轮次完成标记", async () => {
+     await mountWithState("blocked", "idle");
+-    expect(isUnread("sess-1")).toBe(true);
++    expect(isCompletedUnread("sess-1")).toBe(true);
+   });
+ 
+-  it("unknown→idle：不写未读（仅 working/blocked 是来源态）", async () => {
++  it("unknown→idle：不写完成标记（仅 working/blocked 是来源态）", async () => {
+     await mountWithState("unknown", "idle");
+-    expect(window.localStorage.getItem(UNREAD_KEY("sess-1"))).toBeNull();
+-    expect(isUnread("sess-1")).toBe(false);
++    expect(window.localStorage.getItem(COMPLETED_KEY("sess-1"))).toBeNull();
++    expect(isCompletedUnread("sess-1")).toBe(false);
+   });
+ 
+-  it("首见（无 prevState）→idle：不写未读，仅落 state 键", async () => {
++  it("首见（无 prevState）→idle：不写完成标记，仅落 state 键", async () => {
+     await mountWithState(null, "idle");
+-    expect(window.localStorage.getItem(UNREAD_KEY("sess-1"))).toBeNull();
+-    expect(isUnread("sess-1")).toBe(false);
++    expect(window.localStorage.getItem(COMPLETED_KEY("sess-1"))).toBeNull();
++    expect(isCompletedUnread("sess-1")).toBe(false);
+   });
+ 
+-  it("working→ended（非 idle 目标态）：不写未读，state 键照常更新", async () => {
++  it("working→ended（非 idle 目标态）：不写完成标记，state 键照常更新", async () => {
+     await mountWithState("working", "ended");
+-    expect(window.localStorage.getItem(UNREAD_KEY("sess-1"))).toBeNull();
++    expect(window.localStorage.getItem(COMPLETED_KEY("sess-1"))).toBeNull();
+     expect(window.localStorage.getItem(STATE_KEY("sess-1"))).toBe("ended");
+   });
++
++  it("suppress 谓词命中（正选中该会话）：转移不标记，state 键照常更新", async () => {
++    await mountWithState("working", "idle", {
++      suppress: (id) => id === "sess-1",
++    });
++    expect(window.localStorage.getItem(COMPLETED_KEY("sess-1"))).toBeNull();
++    expect(isCompletedUnread("sess-1")).toBe(false);
++  });
+ });
+ 
+-// ── 未读 helper（isUnread / clearUnread） ────────────────────────────────
++// ── 完成标记 helper（lib/session-completed-unread 往返） ─────────────────
+ 
+-describe("useSessionLiveness 未读 helper", () => {
+-  it("isUnread 按 unread 键存在性判定；clearUnread 删除标记", () => {
+-    expect(isUnread("sess-x")).toBe(false);
+-    window.localStorage.setItem(UNREAD_KEY("sess-x"), String(Date.now()));
+-    expect(isUnread("sess-x")).toBe(true);
+-    clearUnread("sess-x");
+-    expect(isUnread("sess-x")).toBe(false);
+-    expect(window.localStorage.getItem(UNREAD_KEY("sess-x"))).toBeNull();
++describe("完成通知标记 helper（lib/session-completed-unread）", () => {
++  it("isCompletedUnread 按键存在性判定；clearCompletedUnread 删除标记", () => {
++    expect(isCompletedUnread("sess-x")).toBe(false);
++    window.localStorage.setItem(COMPLETED_KEY("sess-x"), String(Date.now()));
++    expect(isCompletedUnread("sess-x")).toBe(true);
++    clearCompletedUnread("sess-x");
++    expect(isCompletedUnread("sess-x")).toBe(false);
++    expect(window.localStorage.getItem(COMPLETED_KEY("sess-x"))).toBeNull();
+   });
+ });
+ 
+-// ── 存储异常降级（localStorage 不可用不崩、不亮红点） ─────────────────────
++// ── 存储异常降级（localStorage 不可用不崩、不亮角标） ─────────────────────
+ 
+ describe("useSessionLiveness 存储异常降级", () => {
+   // jsdom 的 localStorage 是 Proxy（实例级 spyOn 拦不到转发后的底层方法），
+   // 降级注入点打在 Storage.prototype 上。
+-  it("setItem 抛错：转移检测停摆（不写未读）但 hook 正常返回数据不崩", async () => {
++  it("setItem 抛错：转移检测停摆（不写完成标记）但 hook 正常返回数据不崩", async () => {
+     window.localStorage.setItem(STATE_KEY("sess-1"), "working");
+     const setItemSpy = vi
+       .spyOn(Storage.prototype, "setItem")
+@@ -235,20 +250,20 @@ describe("useSessionLiveness 存储异常降级", () => {
+     const { result } = renderHook(() => useSessionLiveness(), { wrapper });
+     await waitFor(() => expect(result.current.bySessionId.size).toBe(1));
+     expect(result.current.bySessionId.get("sess-1")?.state).toBe("idle");
+-    // 写不进 → 未读不亮，且渲染/取数无异常抛出。
+-    expect(window.localStorage.getItem(UNREAD_KEY("sess-1"))).toBeNull();
++    // 写不进 → 完成标记不落，且渲染/取数无异常抛出。
++    expect(window.localStorage.getItem(COMPLETED_KEY("sess-1"))).toBeNull();
+     setItemSpy.mockRestore();
+   });
+ 
+-  it("getItem 抛错：isUnread 恒 false（fail-open 不误亮）", () => {
+-    // 先种真实未读键，证伪「读不到键所以 false」——抛错路径也必须收敛 false。
+-    window.localStorage.setItem(UNREAD_KEY("sess-y"), String(Date.now()));
++  it("getItem 抛错：isCompletedUnread 恒 false（fail-open 不误亮）", () => {
++    // 先种真实完成键，证伪「读不到键所以 false」——抛错路径也必须收敛 false。
++    window.localStorage.setItem(COMPLETED_KEY("sess-y"), String(Date.now()));
+     const getItemSpy = vi
+       .spyOn(Storage.prototype, "getItem")
+       .mockImplementation(() => {
+         throw new Error("SecurityError");
+       });
+-    expect(isUnread("sess-y")).toBe(false);
++    expect(isCompletedUnread("sess-y")).toBe(false);
+     getItemSpy.mockRestore();
+   });
+ });
+diff --git a/frontend/src/hooks/use-session-liveness.ts b/frontend/src/hooks/use-session-liveness.ts
+index eaa46790c..57e329767 100644
+--- a/frontend/src/hooks/use-session-liveness.ts
++++ b/frontend/src/hooks/use-session-liveness.ts
+@@ -13,21 +13,24 @@
+  * - map 构建：按 API 返回序（last_seen_at DESC）**首个胜出**——同
+  *   agent_session_id 多行时取最新行（Grill CC-13），仅收 agent_session_id
+  *   有值条目。
+- * - 转移检测状态机（D-001@v2 / Grill BL-01 修订）：每轮数据到达对每个会话读
+- *   localStorage `sillyhub:liveness-state:${id}` 得 prevState；prevState ∈
+- *   {working, blocked} 且 current == idle → 写 `sillyhub:liveness-unread:${id}`
+- *   = Date.now()；随后更新 state 键。首见（无 prevState）不触发；不用
+- *   state_derived_at 做判定（它是 tailer 每 10s 无条件覆写的心跳戳）。
++ * - 转移检测状态机（2026-10-15-session-turn-completion-semantics 重定义）：
++ *   每轮数据到达对每个会话读 localStorage `sillyhub:liveness-state:${id}` 得
++ *   prevState；prevState ∈ {working, blocked} 且 current == idle → 一轮执行
++ *   结束，写完成通知标记 `sillyhub:session-completed-unread:${id}`（绿色
++ *   「此会话已执行完成」角标，取代原红色「空闲未读」——展示与清除归
++ *   session-list-panel，标记存储在 lib/session-completed-unread）。首见（无
++ *   prevState）不触发；不用 state_derived_at 做判定（它是 tailer 每 10s 无条件
++ *   覆写的心跳戳）。opts.suppress(sessionId) 为真的会话跳过标记（面板传
++ *   「正选中该会话」——用户就在其上看完收尾，无需通知）。
+  * - localStorage 读写全程 try/catch 降级——存储不可用时转移检测停摆（不亮
+- *   红点）不崩溃。
+- *
+- * isUnread/clearUnread 为模块级导出（组件直接调；存储实现细节模块内私有）。
++ *   角标）不崩溃。
+  */
+ 
+ import { useEffect, useMemo, useState } from "react";
+ import { useQuery } from "@tanstack/react-query";
+ 
+ import { listWorkspaceAgentLogs, type AgentLogListItem } from "@/lib/agent-logs";
++import { markCompletedUnread } from "@/lib/session-completed-unread";
+ 
+ /**
+  * 固定缓存槽（D-001@v2 / Grill CC-01 修订）：第二段恒 "all"——与工作台总览卡
+@@ -41,12 +44,11 @@ const LIVENESS_POLL_INTERVAL_MS = 30_000;
+ /** 拉取条数上限：100，对齐工作台总览卡口径（design R-02）。 */
+ const LIVENESS_LIST_LIMIT = 100;
+ 
+-/** localStorage 键前缀（仅本地 UI 状态，不上行）。 */
++/** localStorage 键前缀（仅本地 UI 状态，不上行；转移检测的 prevState 记忆）。 */
+ const STATE_KEY_PREFIX = "sillyhub:liveness-state:";
+-const UNREAD_KEY_PREFIX = "sillyhub:liveness-unread:";
+ 
+-/** 触发未读标记的来源状态（working/blocked → idle 才算「新空闲」）。 */
+-const UNREAD_SOURCE_STATES: ReadonlySet<string> = new Set(["working", "blocked"]);
++/** 触发轮次完成标记的来源状态（working/blocked → idle 才算「这轮执行结束」）。 */
++const COMPLETION_SOURCE_STATES: ReadonlySet<string> = new Set(["working", "blocked"]);
+ 
+ /* ── 存储访问（模块内私有，全 try/catch 降级） ─────────────────────────── */
+ 
+@@ -64,37 +66,7 @@ function writeLastState(sessionId: string, state: string): void {
+   try {
+     window.localStorage.setItem(STATE_KEY_PREFIX + sessionId, state);
+   } catch {
+-    // 存储不可用：转移检测停摆（不亮红点），不崩。
+-  }
+-}
+-
+-/** 写未读标记（值为发现转移的时刻，仅存在性语义）。 */
+-function markUnread(sessionId: string): void {
+-  try {
+-    window.localStorage.setItem(
+-      UNREAD_KEY_PREFIX + sessionId,
+-      String(Date.now()),
+-    );
+-  } catch {
+-    // 同上降级。
+-  }
+-}
+-
+-/** 未读红点判定（组件渲染期直接调；存储不可用恒 false——fail-open 不误亮）。 */
+-export function isUnread(sessionId: string): boolean {
+-  try {
+-    return window.localStorage.getItem(UNREAD_KEY_PREFIX + sessionId) !== null;
+-  } catch {
+-    return false;
+-  }
+-}
+-
+-/** 清除未读标记（selected 置真时由 SessionRow useEffect 调，覆盖点击/Enter/深链）。 */
+-export function clearUnread(sessionId: string): void {
+-  try {
+-    window.localStorage.removeItem(UNREAD_KEY_PREFIX + sessionId);
+-  } catch {
+-    // 同上降级。
++    // 存储不可用：转移检测停摆（不亮角标），不崩。
+   }
+ }
+ 
+@@ -130,14 +102,21 @@ export interface UseSessionLivenessReturn {
+  * quick（ql-20260916-007）：空闲降频——opts.enabled 条件轮询。活性灯只在列表存在
+  * 进行中会话时才有渲染意义（行不命中 map 不亮灯），全空闲列表挂 30s 轮询是纯
+  * 噪音；宿主传 hasActiveSessions（由列表数据派生，无需新请求）。缺省 true 零回归
+- * （既有挂载点显式传值）。
++ * （既有挂载点显式传值）。opts.suppress：轮次完成标记的跳过谓词（面板传
++ * 「正选中该会话」——用户就在其上时转移不通知；缺省不跳过）。
+  */
+-export function useSessionLiveness(opts: { enabled?: boolean } = {}): UseSessionLivenessReturn {
++export function useSessionLiveness(opts: {
++  enabled?: boolean;
++  suppress?: (_sessionId: string) => boolean;
++} = {}): UseSessionLivenessReturn {
++  // 解构后引用（effect deps 收敛到稳定局部量，规避 exhaustive-deps 对整个
++  // opts 字面量的告警——opts 缺省 {} 每渲染新引用）。
++  const { enabled = true, suppress } = opts;
+   const query = useQuery({
+     queryKey: SESSION_LIVENESS_QUERY_KEY,
+     queryFn: () => listWorkspaceAgentLogs(LIVENESS_LIST_LIMIT),
+     refetchInterval: LIVENESS_POLL_INTERVAL_MS,
+-    enabled: opts.enabled ?? true,
++    enabled,
+   });
+ 
+   const entries = useMemo(() => query.data?.items ?? [], [query.data]);
+@@ -146,10 +125,11 @@ export function useSessionLiveness(opts: { enabled?: boolean } = {}): UseSession
+     [entries],
+   );
+ 
+-  // 转移检测状态机（D-001@v2）：effect 里跑（不在渲染期写 localStorage）；
+-  // unreadEpoch 在本轮标记过未读时自增——isUnread 是模块函数读存储，宿主组件
+-  // 需要一次重渲染才能在渲染期取到新标记值（setState 即触发，无需进 deps）。
+-  const [, setUnreadEpoch] = useState(0);
++  // 转移检测状态机（2026-10-15-session-turn-completion-semantics 重定义）：
++  // effect 里跑（不在渲染期写 localStorage）；completedEpoch 在本轮标记过完成
++  // 时自增——isCompletedUnread 是模块函数读存储，宿主组件需要一次重渲染才能
++  // 在渲染期取到新标记值（setState 即触发，无需进 deps）。
++  const [, setCompletedEpoch] = useState(0);
+   useEffect(() => {
+     let marked = false;
+     for (const [sessionId, entry] of bySessionId) {
+@@ -157,16 +137,17 @@ export function useSessionLiveness(opts: { enabled?: boolean } = {}): UseSession
+       const prev = readLastState(sessionId);
+       if (
+         prev !== null &&
+-        UNREAD_SOURCE_STATES.has(prev) &&
+-        current === "idle"
++        COMPLETION_SOURCE_STATES.has(prev) &&
++        current === "idle" &&
++        !suppress?.(sessionId)
+       ) {
+-        markUnread(sessionId);
++        markCompletedUnread(sessionId);
+         marked = true;
+       }
+       if (prev !== current) writeLastState(sessionId, current);
+     }
+-    if (marked) setUnreadEpoch((n) => n + 1);
+-  }, [bySessionId]);
++    if (marked) setCompletedEpoch((n) => n + 1);
++  }, [bySessionId, suppress]);
+ 
+   return { bySessionId, entries, isLoading: query.isLoading };
+ }
+diff --git a/frontend/src/lib/session-completed-unread.ts b/frontend/src/lib/session-completed-unread.ts
+new file mode 100644
+index 000000000..5bf7b5354
+--- /dev/null
++++ b/frontend/src/lib/session-completed-unread.ts
+@@ -0,0 +1,49 @@
++/**
++ * session-completed-unread —— 会话「执行完成」通知标记存储（2026-10-15-
++ * session-turn-completion-semantics）。
++ *
++ * 两个标记来源共用同一落盘键与同一展示（行首绿色完成角标，点击进入后消失）：
++ *   ① 会话终态转移：非终态 → ended（面板检测，2026-10-15-session-status-dot-
++ *      semantics FR-06 迁入）；
++ *   ② 轮次完成转移：活性 working/blocked → idle（use-session-liveness 检测，
++ *      取代原红色「空闲未读」角标——「这轮跑完了回来看看」统一为执行完成语义）。
++ *
++ * 键名风格对齐 `sillyhub:liveness-unread:` 前缀惯例；全 try/catch 降级（存储
++ * 不可用不误亮不崩溃；SSR 下 ReferenceError 同样被 catch 兜住返回 false）。
++ */
++
++/** localStorage 键前缀（仅本地 UI 状态，不上行）。 */
++const COMPLETED_UNREAD_KEY_PREFIX = "sillyhub:session-completed-unread:";
++
++/** 完成通知角标判定（渲染期直读存储；不可用恒 false——fail-open 不误亮）。 */
++export function isCompletedUnread(sessionId: string): boolean {
++  try {
++    return (
++      window.localStorage.getItem(COMPLETED_UNREAD_KEY_PREFIX + sessionId) !==
++      null
++    );
++  } catch {
++    return false;
++  }
++}
++
++/** 写完成通知标记（值为发现完成的时刻，仅存在性语义）。 */
++export function markCompletedUnread(sessionId: string): void {
++  try {
++    window.localStorage.setItem(
++      COMPLETED_UNREAD_KEY_PREFIX + sessionId,
++      String(Date.now()),
++    );
++  } catch {
++    // 存储不可用：通知不亮，不崩。
++  }
++}
++
++/** 清除完成通知标记（selected 置真时由 SessionRow 调，覆盖点击/Enter/深链）。 */
++export function clearCompletedUnread(sessionId: string): void {
++  try {
++    window.localStorage.removeItem(COMPLETED_UNREAD_KEY_PREFIX + sessionId);
++  } catch {
++    // 同上降级。
++  }
++}

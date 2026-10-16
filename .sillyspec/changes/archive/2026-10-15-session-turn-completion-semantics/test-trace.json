@@ -1,0 +1,90 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-15-session-turn-completion-semantics",
+  "rows": [
+    {
+      "anchor": "FR-01",
+      "row_id": "2026-10-15-session-turn-completion-semantics:flow:测试绑定FR-01",
+      "tests": [
+        "frontend/src/components/sessions/__tests__/session-list-panel.test.tsx「active + 活性 idle + 完成标记…→ 绿点 + 完成角标」",
+        "frontend/src/components/sessions/__tests__/session-list-panel.test.tsx「点击进入…消失（空闲回归留白）」",
+        "frontend/src/components/sessions/__tests__/session-list-panel.test.tsx「绿点+完成角标出现」",
+        "frontend/src/hooks/__tests__/use-session-liveness.test.ts「working→idle：写轮次完成标记」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-15-session-turn-completion-semantics"
+    },
+    {
+      "anchor": "FR-02",
+      "row_id": "2026-10-15-session-turn-completion-semantics:flow:测试绑定FR-02",
+      "tests": [
+        "frontend/src/components/sessions/__tests__/session-list-panel.test.tsx「执行完成通知（2026-10-15 用户补充：非终态→ended 且不在该会话上）」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-15-session-turn-completion-semantics"
+    },
+    {
+      "anchor": "FR-03",
+      "row_id": "2026-10-15-session-turn-completion-semantics:flow:测试绑定FR-03",
+      "tests": [
+        "frontend/src/components/sessions/__tests__/session-list-panel.test.tsx「active 空闲（无活性数据）→ 留白」",
+        "frontend/src/hooks/__tests__/use-session-liveness.test.ts"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-15-session-turn-completion-semantics"
+    },
+    {
+      "anchor": "FR-04",
+      "row_id": "2026-10-15-session-turn-completion-semantics:flow:测试绑定FR-04",
+      "tests": [
+        "frontend/src/components/sessions/__tests__/session-list-panel.test.tsx「完成时正选中该会话（用户就在其上）→ 不标记不亮角标」",
+        "frontend/src/components/sessions/__tests__/session-list-panel.test.tsx「首见不标」",
+        "frontend/src/hooks/__tests__/use-session-liveness.test.ts「suppress 谓词命中」",
+        "frontend/src/hooks/__tests__/use-session-liveness.test.ts「首见（无 prevState）→idle：不写完成标记」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-15-session-turn-completion-semantics"
+    },
+    {
+      "anchor": "FR-05",
+      "row_id": "2026-10-15-session-turn-completion-semantics:flow:测试绑定FR-05",
+      "tests": [
+        "frontend/src/components/sessions/__tests__/session-list-panel.test.tsx",
+        "frontend/src/components/sessions/__tests__/sessions-portal.test.tsx",
+        "frontend/src/hooks/__tests__/use-session-liveness.test.ts"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-15-session-turn-completion-semantics"
+    }
+  ]
+}
