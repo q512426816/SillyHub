@@ -12,6 +12,9 @@
 //   2. 无基线：manifest 缺失/首拉 → 全量落地（既有行为不变）。
 //   3. 恢复通道：opts.restoreDeleted / env SILLYHUB_DAEMON_RESTORE_DELETED=1 → 跳过抑制。
 //   4. 排除口径：isUploadExcludedPath 命中的 manifest 残留行（projects/ 等）不进抑制面。
+//   5. 窗口内重建保护（2026-10-17-audit-risk-followup）：下载窗口内重建的同名文件
+//      不进抑制面（抑制面 pre_swap 后现算）——不删本地、不并回陈旧条目。
+//   6. 越界键防线（2026-10-17-audit-risk-followup）：manifest 越界键（../）跳过 rm 并告警。
 //
 // vitest.config.ts: globals=false → 显式 import；HOME/USERPROFILE 覆盖让 specDir 落 tmp。
 
@@ -22,6 +25,7 @@ import { dirname, join } from 'node:path';
 
 import {
   pullSpecBundle,
+  applyResurrectSuppress,
   resolveSpecDir,
   resolveManifestCachePath,
 } from '../src/spec-sync.js';
@@ -198,5 +202,69 @@ describe('pullSpecBundle 防复活抑制（2026-10-16-daemon-pull-antiresurrect�
     expect(await readFile(join(specDir as string, 'projects/x.yaml'), 'utf-8')).toBe('proj');
     const warned = warnSpy.mock.calls.map((c) => String(c[0])).join('\n');
     expect(warned).not.toContain('projects/x.yaml');
+  });
+
+  it('用例5（窗口内重建保护）：下载窗口内重建的同名文件不进抑制面——不删本地、不并回陈旧条目（2026-10-17-audit-risk-followup）', async () => {
+    // T0：manifest 有 docs/b.md、盘面无（已删未上行）。旧实现在 getSpecBundle 之前
+    // 一次性算出抑制面；下载在途时 agent/用户重建 b.md（getSpecBundle mock 内写盘
+    // 模拟窗口写入）——修复后抑制面在 pre_swap 之后现算，b.md 盘面存在 → 自动退出
+    // 抑制面。旧实现该场景：重建文件被 swap 进 trash 删除 + 陈旧条目并回 manifest
+    // → 下轮 push 生成 delete op 把服务器刚留底的重建内容一并软删（双侧丢失）。
+    const specDir = await seedDisk({ 'docs/a.md': 'local-a' });
+    await seedManifest(['docs/a.md', 'docs/b.md']);
+    const bundle = buildTar([
+      { name: 'docs/a.md', content: 'server-a' },
+      { name: 'docs/b.md', content: 'server-b' },
+    ]);
+    const client = {
+      getSpecBundle: vi.fn().mockImplementation(async () => {
+        // 下载在途：窗口内重建（T0 时盘面无，此刻重建）。
+        await mkdir(dirname(join(specDir, 'docs/b.md')), { recursive: true });
+        await writeFile(join(specDir, 'docs/b.md'), 'rebuilt-b', 'utf-8');
+        return bundle;
+      }),
+      postSpecSync: vi.fn().mockResolvedValue({ ok: true }),
+    } as never;
+
+    const out = await pullSpecBundle(client, WS, { unsyncedChecker: async () => false });
+
+    expect(out).toBe(specDir);
+    // 不抑制不删除：b.md 落地（bundle 旧内容；重建内容已在服务器留底，下跳心跳
+    // 拉齐自愈——对齐既有「窗口写入」语义，本地与服务器两侧均无丢失）。
+    expect(await readFile(join(specDir, 'docs/b.md'), 'utf-8')).toBe('server-b');
+    // 不并回陈旧条目：manifest 行来自落地树现算（hash 非 T0 陈旧值 'h-docs/b.md'）。
+    const manifestAfter = JSON.parse(
+      await readFile(resolveManifestCachePath(WS), 'utf-8'),
+    ) as { files: Record<string, { hash: string }> };
+    expect(manifestAfter.files['docs/b.md']).toBeTruthy();
+    expect(manifestAfter.files['docs/b.md'].hash).not.toBe('h-docs/b.md');
+    // 无抑制面 → 不触发抑制 warn。
+    const warned = warnSpy.mock.calls.map((c) => String(c[0])).join('\n');
+    expect(warned).not.toContain('防复活抑制');
+  });
+
+  it('用例6（越界键防线）：applyResurrectSuppress 对越界键（../）跳过 rm 并告警——dir 外文件幸存', async () => {
+    // manifest 键受信边界含服务端 new_versions 回写与本地半写损坏；旧实现直接
+    // join+rm，越界键可把 rm -r 打到 dir 之外（含性校验对齐 extractTar Tar Slip 防线）。
+    const dir = await mkdtemp(join(tmpdir(), 'suppress-containment-'));
+    const victimRel = '../suppress-containment-victim.md';
+    const victimPath = join(dir, victimRel);
+    try {
+      await writeFile(victimPath, 'victim', 'utf-8');
+      await writeFile(join(dir, 'inside.md'), 'x', 'utf-8');
+
+      const skipped = await applyResurrectSuppress(dir, new Set(['inside.md', victimRel]));
+
+      // 正常键照删、越界键跳过且点名。
+      expect(skipped).toEqual(['inside.md']);
+      await expect(readFile(join(dir, 'inside.md'), 'utf-8')).rejects.toThrow();
+      expect(await readFile(victimPath, 'utf-8')).toBe('victim');
+      const warned = warnSpy.mock.calls.map((c) => String(c[0])).join('\n');
+      expect(warned).toContain('越界');
+      expect(warned).toContain(victimRel);
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+      await rm(victimPath, { force: true }).catch(() => {});
+    }
   });
 });

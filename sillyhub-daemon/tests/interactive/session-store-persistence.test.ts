@@ -15,6 +15,7 @@ import { mkdtempSync, rmSync, readFileSync, writeFileSync, existsSync, statSync,
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { JsonSessionPersistence } from '../../src/interactive/session-store-persistence.js';
+import { INTERACTIVE_PROVIDERS } from '../../src/interactive/providers.js';
 import {
   SESSION_FILE_VERSION,
   type PersistedSessionRecord,
@@ -167,7 +168,33 @@ describe('JsonSessionPersistence.load', () => {
     expect(records.some((r) => r.sessionId === 's-pi')).toBe(true);
   });
 
-  it('单条记录 provider 非 claude/codex/pi → 该条丢弃', async () => {
+  it('单源守护：INTERACTIVE_PROVIDERS 全部键的记录载入保留（2026-10-17-audit-risk-followup——手写白名单漏 dsh/zcode 曾致重启静默丢记录，pi/cursor 同坑各一次）', async () => {
+    const providers = Object.keys(INTERACTIVE_PROVIDERS);
+    expect(providers).toContain('dsh');
+    expect(providers).toContain('zcode');
+    const recs = providers.map((prov) => ({
+      ...mkRecord({ sessionId: `s-${prov}` }),
+      provider: prov as never,
+    }));
+    writeFileSync(
+      file,
+      JSON.stringify({
+        version: SESSION_FILE_VERSION,
+        savedAt: 'x',
+        sessions: recs,
+      }),
+    );
+    const p = new JsonSessionPersistence(file);
+    const records = await p.load();
+    // 注册表键全集逐一保留——未来新引擎接入注册表即自动纳入本守护，
+    // 白名单（已改单源推导）若再与注册表脱钩将在此当场红。
+    expect(records).toHaveLength(recs.length);
+    for (const prov of providers) {
+      expect(records.some((r) => r.sessionId === `s-${prov}`), prov).toBe(true);
+    }
+  });
+
+  it('单条记录 provider 不在注册表（如 foo）→ 该条丢弃', async () => {
     const bad = { ...mkRecord({ sessionId: 's2' }), provider: 'foo' as never };
     writeFileSync(
       file,

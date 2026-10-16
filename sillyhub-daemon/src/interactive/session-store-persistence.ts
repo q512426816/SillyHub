@@ -45,6 +45,7 @@ import {
 } from 'node:fs/promises';
 import { join, basename, dirname } from 'node:path';
 import { daemonStateDir } from '../config.js';
+import { INTERACTIVE_PROVIDERS } from './providers.js';
 import {
   SESSION_FILE_VERSION,
   type PersistedSessionFile,
@@ -83,7 +84,10 @@ export class SessionPersistenceError extends Error {
 // 2026-09-04-provider-pi-onboarding 冒烟 F-2：载入白名单缺 provider 会静默丢弃会话记录，
 // daemon 本地重启恢复缺失（inject parked 60s 超时，靠 backend sweep 兜底）。
 // 2026-09-08-cursor-interactive-session task-06：加 cursor，同坑。
-const VALID_PROVIDERS = new Set(['claude', 'codex', 'pi', 'cursor']);
+// 2026-10-17-audit-risk-followup：dsh/zcode 第三次踩同坑后改单源推导——从
+// INTERACTIVE_PROVIDERS 注册表键派生（照 session-manager.ts PROVIDER_RELOAD_ENGINES
+// 手法），新引擎接入注册表即自动覆盖，「装配加键、白名单漏改」类缺陷就此消绝。
+const VALID_PROVIDERS: ReadonlySet<string> = new Set(Object.keys(INTERACTIVE_PROVIDERS));
 
 /**
  * P0-1：字符串数组字段守卫（mcpRefs/skillRefs/effectiveAllowedRoots 用）。
@@ -186,7 +190,7 @@ function validateRecord(raw: unknown): PersistedSessionRecord | null {
     leaseId,
     agentSessionId,
     cwd,
-    provider: provider as 'claude' | 'codex',
+    provider: provider as PersistedSessionRecord['provider'],
     turnCount,
     lastActiveAt,
   };

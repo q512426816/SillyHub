@@ -120,12 +120,23 @@ async function pushUnsyncedIfDirty(
 }
 
 /** 防复活抑制落地：删除 dir 下命中已删面的解包产物，返回真实挡下的路径（供 warn 点名）。
- *  抑制集为空时零开销直返。路径来自 manifest（'/' 分隔），join 后 rm 容忍不存在。 */
-async function applyResurrectSuppress(dir: string, suppress: Set<string>): Promise<string[]> {
+ *  抑制集为空时零开销直返。路径来自 manifest（'/' 分隔），join 后 rm 容忍不存在；
+ *  越界键（../ 或绝对形态）跳过并告警——manifest 键受信边界含服务端 new_versions
+ *  回写与本地半写损坏，rm 是删除执行器，包含性校验对齐 extractTar 的 Tar Slip
+ *  双重防线（2026-10-17-audit-risk-followup）。导出仅供单测。 */
+export async function applyResurrectSuppress(
+  dir: string,
+  suppress: Set<string>,
+): Promise<string[]> {
   if (suppress.size === 0) return [];
   const skipped: string[] = [];
   for (const rel of suppress) {
     const p = join(dir, rel);
+    const relFromDir = relative(dir, p);
+    if (relFromDir.startsWith('..') || isAbsolute(relFromDir)) {
+      console.warn(`⚠️ [spec_sync] 防复活抑制跳过越界 manifest 键（疑似损坏/篡改）: ${rel}`);
+      continue;
+    }
     if (await pathExists(p)) {
       await rm(p, { recursive: true, force: true }).catch(() => {});
       skipped.push(rel);
@@ -237,35 +248,8 @@ export async function pullSpecBundle(
   // 判据无状态现算：LocalManifest（pull/push 落地后均回写 = 上次成功同步的文件全集）
   // 有、当前盘面无、且属同步面（!isUploadExcludedPath，对齐上传排除口径）= 本地已删面；
   // 解包产物跳过这些路径。删除 op 上行成功后 manifest 不再含该路径 → 抑制面自然衰减。
-  // manifest 缺失/解析失败 = 无抑制面（首拉/全新环境全量回放，既有行为不变）。
-  // restoreDeleted（opts 或 env SILLYHUB_DAEMON_RESTORE_DELETED=1）= 显式恢复，跳过抑制。
-  // 已知权衡（与 CLI 同构）：抑制集在本时刻现算，pre_swap 二次回灌成功上行删除后本窗口
-  // 不重算——此时 bundle 通常已不含该文件，误抑制面趋零。
-  const suppressResurrect = new Set<string>();
-  // 被抑制行的基线条目（评审 P2 修复）：pull 末尾落地重建会把抑制行从基线抹掉，而
-  // delete op 生成条件恰是「缓存有/盘面无」——缓存行没了 delete op 永不生成，服务器
-  // bundle 永远携带该文件，下次自动 pull 抑制集为空复活照旧。落地重建时并回这些行
-  // （仅当落地树确实无该路径），delete op 链与跨 pull 抑制同时保活。
-  const suppressEntries = new Map<string, { hash: string; version: number; mtime: number }>();
-  const restoreDeleted =
-    opts.restoreDeleted === true || process.env.SILLYHUB_DAEMON_RESTORE_DELETED === '1';
-  if (!restoreDeleted) {
-    try {
-      const cachedManifest = await readLocalManifest(wsId);
-      if (cachedManifest) {
-        for (const rel of Object.keys(cachedManifest.files)) {
-          if (isUploadExcludedPath(rel)) continue;
-          if (!(await pathExists(join(specDir, rel)))) {
-            suppressResurrect.add(rel);
-            suppressEntries.set(rel, cachedManifest.files[rel]!);
-          }
-        }
-      }
-    } catch {
-      /* 基线缺失/损坏 = 无抑制面（首拉/全新环境全量回放，既有行为不变） */
-    }
-  }
-
+  // 防复活抑制面在 pre_swap 之后现算（计算块已下移至 pre_swap 回灌之后——
+  // 时机变更理由见下移处注释，2026-10-17-audit-risk-followup）。
   let tarBuf: Buffer;
   try {
     tarBuf = await client.getSpecBundle(wsId);
@@ -314,6 +298,40 @@ export async function pullSpecBundle(
   } catch (e) {
     await rm(tmpDir, { recursive: true, force: true }).catch(() => {});
     throw e;
+  }
+  // 防复活抑制面：pre_swap 之后现算（2026-10-17-audit-risk-followup）——原实现
+  // 在 getSpecBundle 之前（T0）一次性计算，此后下载/解包长窗口内若「已删」同名
+  // 文件被重建，重建内容虽经上方 pre_swap 上行留底，本地仍被抑制面从解包产物
+  // 剔除 + 整树交换清掉，且陈旧条目并回基线后下轮 push 会把服务器端一并软删
+  //（窗口内重建 = 双侧真数据丢失）。现算语义：抑制只作用于「此刻盘面仍无」的
+  // 已删面——窗口内重建的行自动退出抑制面（bundle 旧内容落地，重建内容已在
+  // 服务器留底、下跳心跳对齐自愈，与既有「窗口写入」语义一致）。CLI 侧同款
+  // 残余窗口（sillyspec 仓 da8d2449 同构移植）待后续变更同构收口。
+  // manifest 缺失/解析失败 = 无抑制面（首拉/全新环境全量回放，既有行为不变）。
+  // restoreDeleted（opts 或 env SILLYHUB_DAEMON_RESTORE_DELETED=1）= 显式恢复，跳过抑制。
+  const suppressResurrect = new Set<string>();
+  // 被抑制行的基线条目（评审 P2 修复）：pull 末尾落地重建会把抑制行从基线抹掉，而
+  // delete op 生成条件恰是「缓存有/盘面无」——缓存行没了 delete op 永不生成，服务器
+  // bundle 永远携带该文件，下次自动 pull 抑制集为空复活照旧。落地重建时并回这些行
+  // （仅当落地树确实无该路径），delete op 链与跨 pull 抑制同时保活。
+  const suppressEntries = new Map<string, { hash: string; version: number; mtime: number }>();
+  const restoreDeleted =
+    opts.restoreDeleted === true || process.env.SILLYHUB_DAEMON_RESTORE_DELETED === '1';
+  if (!restoreDeleted) {
+    try {
+      const cachedManifest = await readLocalManifest(wsId);
+      if (cachedManifest) {
+        for (const rel of Object.keys(cachedManifest.files)) {
+          if (isUploadExcludedPath(rel)) continue;
+          if (!(await pathExists(join(specDir, rel)))) {
+            suppressResurrect.add(rel);
+            suppressEntries.set(rel, cachedManifest.files[rel]!);
+          }
+        }
+      }
+    } catch {
+      /* 基线缺失/损坏 = 无抑制面（首拉/全新环境全量回放，既有行为不变） */
+    }
   }
   // 防复活抑制落地（swap 前）：命中已删面的解包条目不进交换（swap 后即不复活）。
   // 宁可吵不可静默复活：被挡路径点名（截断防刷屏），出路指 SILLYHUB_DAEMON_RESTORE_DELETED=1。
