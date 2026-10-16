@@ -714,7 +714,14 @@ function DetailDeleteAction({
     onSuccess: async () => {
       notify.success(`变更 ${changeKey} 已删除`);
       await queryClient.invalidateQueries({ queryKey: ["changes", workspaceId] });
-      router.push(`/workspaces/${workspaceId}/changes`);
+      // 2026-10-16-change-center-delete-back-keeps-state：删除后返回保来路列表状态——
+      // 可后退时 back 回带 query 的列表 URL（列表页从 URL 恢复 tab/页码，同
+      // BackToListLink 链路）；新标签深链（length<=1）兜底 push 默认列表。
+      if (typeof window !== "undefined" && window.history.length > 1) {
+        router.back();
+      } else {
+        router.push(`/workspaces/${workspaceId}/changes`);
+      }
     },
     onError: (err) => {
       notify.error(err, "删除变更失败");

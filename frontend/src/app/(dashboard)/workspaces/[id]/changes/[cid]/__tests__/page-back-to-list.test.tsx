@@ -46,12 +46,14 @@ const mocks = vi.hoisted(() => ({
   getChange: vi.fn(),
   listWorkspaceAgentSessions: vi.fn(),
   listQuicklogEntries: vi.fn(),
+  deleteChange: vi.fn(),
 }));
 
 vi.mock("@/lib/changes", () => ({
   getChange: mocks.getChange,
   getAgentStatus: vi.fn().mockRejectedValue(new Error("no-agent-in-back-tests")),
   submitStageReview: vi.fn(),
+  deleteChange: mocks.deleteChange,
   getChangeTimeline: vi.fn().mockRejectedValue(new Error("no-timeline-in-back-tests")),
   getChangeAssets: vi.fn().mockRejectedValue(new Error("no-assets-in-back-tests")),
   getChangeUsage: vi.fn().mockRejectedValue(new Error("no-usage-in-back-tests")),
@@ -66,15 +68,25 @@ vi.mock("@/lib/quicklog", () => ({
   listQuicklogEntries: mocks.listQuicklogEntries,
 }));
 
-// 删除入口权限固定无（真实 hook 走 session/fetchMe，本文件无登录态恒 false）；
-// 部分 mock 保留 canDeleteChange/DeleteChangeConfirm 真实导出（页面渲染仍引用）
+// 删除 onSuccess 走 notify.success（antd App 上下文）——测试树无 <App> 包裹时
+// App.useApp() 的 message 为 undefined 会抛错使 mutation 误入 onError；本文件
+// 断言面是 back/push 跳转，toast 静音即可
+vi.mock("@/lib/errors", () => ({
+  useNotify: () => ({ success: vi.fn(), error: vi.fn(), warning: vi.fn() }),
+}));
+
+// 删除入口权限可切换 holder（真实 hook 走 session/fetchMe）：默认无权限（不渲染
+// 删除按钮），删除用例置平台管理员开启入口；真实 canDeleteChange 保持导出
+const accessMock = vi.hoisted(() => ({
+  value: { userId: null, isPlatformAdmin: false, workspaceRole: null },
+}));
 vi.mock("@/components/delete-change-confirm", async (importOriginal) => {
   const actual = await importOriginal<
     typeof import("@/components/delete-change-confirm")
   >();
   return {
     ...actual,
-    useChangeDeleteAccess: () => ({ userId: null, isPlatformAdmin: false, workspaceRole: null }),
+    useChangeDeleteAccess: () => accessMock.value,
   };
 });
 
@@ -143,6 +155,52 @@ describe("详情页返回列表入口（2026-10-16-change-center-back-keeps-list
     renderPage();
     const backLink = await screen.findByRole("link", { name: "变更列表" });
     fireEvent.click(backLink);
+    expect(navMocks.back).not.toHaveBeenCalled();
+  });
+});
+
+// ── 删除成功后的返回（2026-10-16-change-center-delete-back-keeps-state）────────
+// 删除后 router.push 无参列表会丢来路 tab/页码——改为与 BackToListLink 同款判定：
+// 可后退 back 回带 query 的列表 URL（列表从 URL 快照恢复），深链兜底 push 默认列表。
+describe("详情页删除成功后返回列表（2026-10-16-change-center-delete-back-keeps-state）", () => {
+  beforeEach(() => {
+    navMocks.searchParams = new URLSearchParams();
+    mocks.getChange.mockResolvedValue(makeChange());
+    mocks.listWorkspaceAgentSessions.mockResolvedValue([]);
+    mocks.listQuicklogEntries.mockResolvedValue({ items: [], total: 0 });
+    mocks.deleteChange.mockResolvedValue({});
+    accessMock.value = { userId: null, isPlatformAdmin: true, workspaceRole: null };
+  });
+  afterEach(() => {
+    vi.clearAllMocks();
+    cleanup();
+    accessMock.value = { userId: null, isPlatformAdmin: false, workspaceRole: null };
+    delete (window.history as unknown as { length?: number }).length;
+  });
+
+  /** 打开删除确认弹层并输入末段启用「确认删除」后点击（changeKeyTail 去日期前缀）。 */
+  async function confirmDelete() {
+    fireEvent.click(await screen.findByTestId("change-delete-entry"));
+    const input = await screen.findByTestId("delete-change-confirm-input");
+    fireEvent.change(input, { target: { value: "back-to-list" } });
+    fireEvent.click(screen.getByText("确认删除"));
+  }
+
+  it("历史可后退（length=2）：删除成功后 router.back() 回来路列表（不 push）", async () => {
+    stubHistoryLength(2);
+    renderPage();
+    await confirmDelete();
+    await waitFor(() => expect(navMocks.back).toHaveBeenCalledTimes(1));
+    expect(navMocks.push).not.toHaveBeenCalled();
+  });
+
+  it("无历史可退（length=1）：删除成功后兜底 push 默认列表", async () => {
+    stubHistoryLength(1);
+    renderPage();
+    await confirmDelete();
+    await waitFor(() =>
+      expect(navMocks.push).toHaveBeenCalledWith("/workspaces/ws-1/changes"),
+    );
     expect(navMocks.back).not.toHaveBeenCalled();
   });
 });

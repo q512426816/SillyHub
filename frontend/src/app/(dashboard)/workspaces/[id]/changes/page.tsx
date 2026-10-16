@@ -425,6 +425,21 @@ export default function ChangesPage({ params }: Props) {
   const total = changesQuery.data?.total ?? 0;
   const workspace = changesQuery.data?.workspace ?? null;
 
+  // 页码超界钳回（2026-10-16-change-center-delete-back-keeps-state）：删除/并发变更
+  // 使总数缩水后，URL 恢复的（或停留的）page 可能超过最后一页——真实响应页空时自动
+  // 钳回 ceil(total/pageSize) 并重取。isPlaceholderData 守卫：keepPreviousData 下
+  // placeholder 是上一页数据，不能用于判空。total=0（真空列表）与 page 未超界不动作
+  // （空状态展示维持现状）；quicklog tab 主查询禁用，不参与。
+  useEffect(() => {
+    if (tab === "quicklog") return;
+    if (!changesQuery.isSuccess || changesQuery.isPlaceholderData) return;
+    const totalNow = changesQuery.data?.total ?? 0;
+    const itemsNow = changesQuery.data?.items?.length ?? 0;
+    if (itemsNow > 0 || totalNow <= 0 || page <= 1) return;
+    const lastPage = Math.max(1, Math.ceil(totalNow / pageSize));
+    if (page > lastPage) setPage(lastPage);
+  }, [changesQuery.data, changesQuery.isSuccess, changesQuery.isPlaceholderData, tab, page, pageSize]);
+
   // ── 删除入口（task-07 / design §6.3 / FR-05d）──────────────────────────
   // 可见性启发式（owner 本人 / 平台管理员 / 工作区所有者）——仅控制按钮显隐，
   // 后端 DELETE 组合权限为权威（判漏 403 兜底走 onError toast）。

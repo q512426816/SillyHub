@@ -1143,4 +1143,58 @@ describe("列表状态 URL 快照（2026-10-16-change-center-back-keeps-list-sta
       }),
     ).toBe("");
   });
+
+  // ── 页码超界钳回（2026-10-16-change-center-delete-back-keeps-state）────────
+  // 删除使总数缩水后，URL 恢复的 page 可能超过最后一页：真实响应页空时钳回
+  // ceil(total/pageSize) 并重取；total=0（真空列表）不钳回。
+
+  it("页码超界钳回：?tab=archive&page=5 深链但最后一页为 4 → 钳回 page=4 并写回 URL", async () => {
+    mocks.listChanges.mockImplementation((_wid: string, params: any) => {
+      if (params?.pageSize === 1) {
+        return Promise.resolve({
+          items: [],
+          total: params?.location === "archive" ? 80 : 0,
+        });
+      }
+      // 超界页（>4）响应页空、total 仍 80；有效页返回数据
+      if ((params?.page ?? 1) > 4) {
+        return Promise.resolve({ items: [], total: 80 });
+      }
+      return Promise.resolve({ items: [makeChange()], total: 80 });
+    });
+    mocks.searchParams = new URLSearchParams("tab=archive&page=5");
+    try {
+      await renderAndWait();
+      // 钳回后重取第 4 页
+      await waitFor(() => expect(lastMainLoadParams()?.page).toBe(4));
+      // URL 写回跟随钳回（replaceState 快照）
+      await waitFor(() =>
+        expect(window.location.search).toBe("?tab=archive&page=4"),
+      );
+    } finally {
+      mocks.searchParams = new URLSearchParams();
+    }
+  });
+
+  it("真空列表不钳回：page=3 深链且 total=0 → page 保持 3，空态展示", async () => {
+    mocks.listChanges.mockImplementation((_wid: string, params: any) =>
+      Promise.resolve(
+        params?.pageSize === 1
+          ? { items: [], total: 0 }
+          : { items: [], total: 0 },
+      ),
+    );
+    mocks.searchParams = new URLSearchParams("tab=archive&page=3");
+    try {
+      await renderAndWait();
+      // 等主 load 完成（副标题渲染 workspace 名），钳回不触发
+      await waitFor(() =>
+        expect(lastMainLoadParams()?.page).toBe(3),
+      );
+      expect(window.location.search).toBe("?tab=archive&page=3");
+      expect(screen.getByText(/还没有归档的变更/)).toBeInTheDocument();
+    } finally {
+      mocks.searchParams = new URLSearchParams();
+    }
+  });
 });
