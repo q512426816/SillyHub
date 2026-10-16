@@ -1136,3 +1136,24 @@ created_at: 2026-09-28T13:29:24.005Z
 摘要：数字一致
 全文：.sillyspec/changes/archive/2026-10-16-pg-index-local-followup/requirements.md#FR-03
 最近确认：08aa9fa699db804e74b848e3aa801de390550c08
+
+## FR-auto-sillyspec-086 _module-map.yaml 新增 sillyspec 模块卡，paths 覆盖 .sillyspec/knowledge/**，配套模块文档 modules/sillyspec.md 创建
+变更：2026-10-16-knowledge-module-card
+状态：active
+摘要：登记后蒸馏落真域
+全文：.sillyspec/changes/archive/2026-10-16-knowledge-module-card/requirements.md#FR-01
+最近确认：cc1c9a3f91f025c3685e89bf4416c635aef318d6
+
+## FR-auto-sillyspec-087 FR-auto-sillyspec-083~085 三条迁入 knowledge/fr/sillyspec.md，条目 ID 不变（迁域不换号），伪域 fr/auto-sillyspec.md 清空或移除
+变更：2026-10-16-knowledge-module-card
+状态：active
+摘要：迁域不换号
+全文：.sillyspec/changes/archive/2026-10-16-knowledge-module-card/requirements.md#FR-02
+最近确认：cc1c9a3f91f025c3685e89bf4416c635aef318d6
+
+## FR-auto-sillyspec-088 redomain 干跑与 --write 输出一致无报错，迁移后 git diff 仅涉及模块图/模块文档/知识 fr 文件
+变更：2026-10-16-knowledge-module-card
+状态：active
+摘要：变更面干净
+全文：.sillyspec/changes/archive/2026-10-16-knowledge-module-card/requirements.md#FR-03
+最近确认：cc1c9a3f91f025c3685e89bf4416c635aef318d6

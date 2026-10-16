@@ -230,4 +230,3 @@
 - core|FR|需求|承接 → [fr/core.md](fr/core.md)
 - docs|FR|需求|承接 → [fr/docs.md](fr/docs.md)
 - app-workspace-pages|FR|需求|承接 → [fr/app-workspace-pages.md](fr/app-workspace-pages.md)
-- auto-sillyspec|sillyspec|FR|需求|承接 → [fr/auto-sillyspec.md](fr/auto-sillyspec.md)
