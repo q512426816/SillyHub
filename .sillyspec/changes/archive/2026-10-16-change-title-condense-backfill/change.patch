@@ -1,0 +1,2015 @@
+diff --git a/.sillyspec/docs/SillyHub/modules/frontend_app.changelog.md b/.sillyspec/docs/SillyHub/modules/frontend_app.changelog.md
+index 9a5f3efa4..1df4c9b1a 100644
+--- a/.sillyspec/docs/SillyHub/modules/frontend_app.changelog.md
++++ b/.sillyspec/docs/SillyHub/modules/frontend_app.changelog.md
+@@ -26,3 +26,4 @@ created_at: 2026-09-03 14:49:48
+ - 2026-10-15-pseudo-domain-migration | 用户指令：把平台仓存量伪域迁真域。背景：sillyspec 仓 2026-10-15-module-…
+ - 2026-10-15-workspace-session-agent-only | 工作区中新建会话不再选机器：机器已由工作区绑定决定，浮层只让用户选智能体类型
+ - 2026-10-16-archived-files-tab | 归档变更也要显示「文件与对账」tab：归档留档区不展示 spec 文档全貌，用户需要文件树与范围对账…
++- 2026-10-16-change-center-back-keeps-list-state | 变更中心列表切「已归档」tab或翻页后点行进详情,点详情页「变更列表」返回入口回到列表会重置为进行中…
+diff --git a/.sillyspec/docs/backend/modules/change.changelog.md b/.sillyspec/docs/backend/modules/change.changelog.md
+index 576f6e42b..380afec12 100644
+--- a/.sillyspec/docs/backend/modules/change.changelog.md
++++ b/.sillyspec/docs/backend/modules/change.changelog.md
+@@ -23,3 +23,4 @@ created_at: 2026-08-29 22:56:30
+ - 2026-10-14-files-refresh-explicit-sync | 动机：文件树刷新前置同步的触发面挂在了 GET files 接口本体上——会话悬浮面板 15s 自动轮询、初始加载等非主
+ - 2026-10-14-change-center-lineage-tag-and-filter | 变更中心列表只给轻量出身行显示「轻量」标签，完整流程变更没有任何标签，且筛选下拉里只有「轻量变更」（走 stage=th
+ - 2026-10-16-change-files-sync-result | change 文件树「刷新」同步链路三层静默失败——后端 RPC 预算 3s 短于实测 6~13.5…
++- 2026-10-16-change-center-back-keeps-list-state | 变更中心列表切「已归档」tab或翻页后点行进详情,点详情页「变更列表」返回入口回到列表会重置为进行中…
+diff --git a/.sillyspec/docs/multi-agent-platform/modules/backend.changelog.md b/.sillyspec/docs/multi-agent-platform/modules/backend.changelog.md
+index acfbf5386..fd03e0372 100644
+--- a/.sillyspec/docs/multi-agent-platform/modules/backend.changelog.md
++++ b/.sillyspec/docs/multi-agent-platform/modules/backend.changelog.md
+@@ -57,3 +57,4 @@
+ - 2026-10-15-server-logs-dockerfile-fix | 服务器信息页日志卡在生产容器显示「日志文件尚未生成」——容器内 repo_root 推导到 /，默认…
+ - 2026-10-16-change-files-sync-result | change 文件树「刷新」同步链路三层静默失败——后端 RPC 预算 3s 短于实测 6~13.5…
+ - 2026-10-16-agent-session-field-pin-sync | 清偿跨变更存量债：2026-10-16-backend-mem-polling task-08 给 …
++- 2026-10-16-change-center-back-keeps-list-state | 变更中心列表切「已归档」tab或翻页后点行进详情,点详情页「变更列表」返回入口回到列表会重置为进行中…
+diff --git a/.sillyspec/docs/multi-agent-platform/modules/frontend.changelog.md b/.sillyspec/docs/multi-agent-platform/modules/frontend.changelog.md
+index f31c6fe38..4edbd2786 100644
+--- a/.sillyspec/docs/multi-agent-platform/modules/frontend.changelog.md
++++ b/.sillyspec/docs/multi-agent-platform/modules/frontend.changelog.md
+@@ -116,3 +116,4 @@
+ | 2026-10-16 | 2026-10-15-session-turn-completion-semantics | 上一变更把绿点/完成通知锚定在会话终态 ended 上，但平台里一轮任务跑完后会话仍为 active… |
+ | 2026-10-16 | 2026-10-16-session-run-status-realtime | 会话列表行首状态目前只靠 daemon 10 秒日志推导活性链（基线），用户触发会话后转圈/完成提示… |
+ | 2026-10-16 | 2026-10-16-change-files-sync-result | change 文件树「刷新」同步链路三层静默失败——后端 RPC 预算 3s 短于实测 6~13.5… |
++| 2026-10-16 | 2026-10-16-change-center-back-keeps-list-state | 变更中心列表切「已归档」tab或翻页后点行进详情,点详情页「变更列表」返回入口回到列表会重置为进行中… |
+diff --git a/backend/app/modules/change/router.py b/backend/app/modules/change/router.py
+index c5a2526ef..4623265de 100644
+--- a/backend/app/modules/change/router.py
++++ b/backend/app/modules/change/router.py
+@@ -44,6 +44,8 @@ from app.modules.change.schema import (
+     ChangeList,
+     ChangePatchFileRead,
+     ChangeRead,
++    ChangeRenameRequest,
++    ChangeRenameResponse,
+     ChangeReparseResponse,
+     ChangeReparseStats,
+     ChangeSummary,
+@@ -435,6 +437,53 @@ async def delete_change(
+     return await service.delete_change(workspace_id, change_id, actor_id=user.id)
+ 
+ 
++@router.patch(
++    "/changes/{change_id}/title",
++    response_model=ChangeRenameResponse,
++)
++async def rename_change_title(
++    workspace_id: uuid.UUID,
++    change_id: uuid.UUID,
++    payload: ChangeRenameRequest,
++    session: SessionDep,
++    user: Annotated[User, Depends(get_current_principal)],
++) -> ChangeRenameResponse:
++    """平台改名入口（2026-10-16-change-title-condense-backfill FR-05，用户口径 2026-10-16）。
++
++    组合权限与删除端点同款三元组——变更责任人本人（``change.owner_id == 当前
++    用户``）**或** ``CHANGE_ARCHIVE``（workspace_owner 角色内置、platform_admin
++    经 has_permission 短路），即「管理员 || 平台责任人 || 变更责任人」；实现为
++    端点内组合校验（delete_change 同款先例）。带宽校验（10-30 字必须，strip 后
++    判，越带 422）、已删行 409、rename 审计事件由 ``ChangeService.rename_title``
++    给出。改名后的语义 title 不被 CLI 兜底上行回翻（is_fallback 收养守卫）。
++    """
++    service = ChangeService(session)
++    change = await service.get(workspace_id, change_id)
++    allowed = change.owner_id == user.id
++    if not allowed:
++        allowed = await has_permission(
++            session,
++            user=user,
++            permission=Permission.CHANGE_ARCHIVE,
++            workspace_id=workspace_id,
++        )
++    if not allowed:
++        raise PermissionDenied(
++            "无权改名该变更：仅变更责任人本人、平台管理员或工作区负责人可操作。",
++            details={
++                "permission": Permission.CHANGE_ARCHIVE.value,
++                "workspace_id": str(workspace_id),
++                "change_id": str(change_id),
++            },
++        )
++    renamed = await service.rename_title(
++        workspace_id, change_id, title=payload.title, actor_id=user.id
++    )
++    return ChangeRenameResponse(
++        id=renamed.id, change_key=renamed.change_key, title=renamed.title or ""
++    )
++
++
+ @router.get(
+     "/changes/{change_id}/documents",
+     response_model=ChangeDocMatrix,
+diff --git a/backend/app/modules/change/schema.py b/backend/app/modules/change/schema.py
+index 3ffa99c22..3cf43222a 100644
+--- a/backend/app/modules/change/schema.py
++++ b/backend/app/modules/change/schema.py
+@@ -186,6 +186,25 @@ class ChangeDeleteResponse(BaseModel):
+     file_count: int
+ 
+ 
++class ChangeRenameRequest(BaseModel):
++    """PATCH /changes/{cid}/title 请求（2026-10-16-change-title-condense-backfill FR-05）。
++
++    人工命名带宽（用户口径 2026-10-16：10-30 字之内必须、建议约 20）在服务层
++    strip 后校验（DTO 不设长度约束——错误信息要带当前字数与带宽说明，统一走
++    AppError 422 而非 pydantic 422）。
++    """
++
++    title: str
++
++
++class ChangeRenameResponse(BaseModel):
++    """PATCH /changes/{cid}/title 响应（FR-05）：变更标识 + 改名后的新 title。"""
++
++    id: uuid.UUID
++    change_key: str
++    title: str
++
++
+ class ChangeDocMatrixEntry(BaseModel):
+     doc_type: str
+     exists: bool
+diff --git a/backend/app/modules/change/service.py b/backend/app/modules/change/service.py
+index 00e7730b5..74431280d 100644
+--- a/backend/app/modules/change/service.py
++++ b/backend/app/modules/change/service.py
+@@ -510,6 +510,94 @@ class ChangeService:
+             )
+         return ChangeDeleteResponse(ok=True, backup_dir=backup_dir, file_count=file_count)
+ 
++    async def rename_title(
++        self,
++        workspace_id: uuid.UUID,
++        change_id: uuid.UUID,
++        *,
++        title: str,
++        actor_id: uuid.UUID,
++    ) -> Change:
++        """平台改名入口服务层（2026-10-16-change-title-condense-backfill FR-05）。
++
++        组合权限（变更责任人本人 OR CHANGE_ARCHIVE——管理员/平台责任人/变更责任人
++        三元组，用户口径 2026-10-16）在 router 层组合完成（delete_change 同款，
++        require_permission 依赖工厂不支持行级 OR）；本方法只做服务顺序：
++
++        1. 取行：不存在 404（``get``）；行已 ``location='deleted'`` 幂等拒绝
++           （409 ``code='change_deleted'``，与 delete 口径一致）；
++        2. strip 后带宽校验：10-30 字之内必须（``TITLE_CONDENSE_MIN_LEN`` /
++           ``TITLE_CONDENSE_MAX_LEN`` 单源共享，用户口径：建议约 20 字），越带
++           422（code=change_title_length_invalid，错误信息带当前字数与带宽）；
++        3. 改 title + touch updated_at + ``change_events`` ``event_type='rename'``
++           （detail 含 renamed_by/old_title/new_title/change_key，savepoint 范式
++           同 delete ④）+ commit。
++
++        改名后的 title 为语义形态：CLI 上行兜底标题不被回翻（is_fallback 收养
++        守卫自然保证）；CLI ``--title`` 自定义 H1 文档推送仍可覆盖（改名通道
++        语义保留——两端都算权威人工命名）。
++        """
++        from app.modules.change.title_norm import (
++            TITLE_CONDENSE_MAX_LEN,
++            TITLE_CONDENSE_MIN_LEN,
++        )
++
++        change = await self.get(workspace_id, change_id)
++        if change.location == "deleted":
++            raise AppError(
++                "该变更已在平台删除，无法改名。",
++                code="change_deleted",
++                http_status=409,
++                details={
++                    "workspace_id": str(workspace_id),
++                    "change_id": str(change_id),
++                    "change_key": change.change_key,
++                },
++            )
++        new_title = (title or "").strip()
++        if not (TITLE_CONDENSE_MIN_LEN <= len(new_title) <= TITLE_CONDENSE_MAX_LEN):
++            raise AppError(
++                f"标题需 10-30 字之内（当前 {len(new_title)} 字），建议 20 字左右概括变更内容。",
++                code="change_title_length_invalid",
++                http_status=422,
++                details={
++                    "workspace_id": str(workspace_id),
++                    "change_id": str(change_id),
++                    "change_key": change.change_key,
++                    "title_length": len(new_title),
++                    "min_len": TITLE_CONDENSE_MIN_LEN,
++                    "max_len": TITLE_CONDENSE_MAX_LEN,
++                },
++            )
++        old_title = change.title
++        change.title = new_title
++        change.updated_at = datetime.now(UTC)
++        async with self._session.begin_nested():
++            self._session.add(
++                ChangeEventORM(
++                    id=uuid.uuid4(),
++                    workspace_id=workspace_id,
++                    change_id=change.id,
++                    event_type="rename",
++                    detail={
++                        "renamed_by": str(actor_id),
++                        "change_key": change.change_key,
++                        "old_title": old_title,
++                        "new_title": new_title,
++                    },
++                    created_by=actor_id,
++                )
++            )
++            await self._session.flush()
++        await self._session.commit()
++        log.info(
++            "change.title_renamed",
++            workspace_id=str(workspace_id),
++            change_id=str(change_id),
++            change_key=change.change_key,
++        )
++        return change
++
+     # ── File tree (task-03/04/05/07, 2026-07-02-change-detail-file-tree-editor) ──
+ 
+     # is_text 判定的文本扩展名（编辑器对非文本只读，D-007）。
+diff --git a/backend/app/modules/change/tests/test_rename_title.py b/backend/app/modules/change/tests/test_rename_title.py
+new file mode 100644
+index 000000000..8791f28eb
+--- /dev/null
++++ b/backend/app/modules/change/tests/test_rename_title.py
+@@ -0,0 +1,276 @@
++"""PATCH /api/workspaces/{ws}/changes/{cid}/title 平台改名入口测试。
++
++Change 2026-10-16-change-title-condense-backfill task-06（FR-05，用户口径
++2026-10-16：允许管理员/平台责任人/变更责任人重命名 title，10-30 字必须）：
++
++- 权限矩阵：owner 本人 200 / 非 owner 持 change:archive 200 / 非 owner 无权限
++  403（delete_change 同款三元组组合）；
++- 带宽校验：strip 后 10-30 字之内（<10 或 >30 → 422 change_title_length_invalid，
++  错误信息带当前字数与带宽说明）；strip 本身生效（两端空白不占字数）；
++- 语义：改名后行 title/updated_at 更新 + change_events[rename] 审计
++  （detail 四字段 renamed_by/old_title/new_title/change_key）；
++- 不存在 404（resource-hiding）/ 已删行 409（code=change_deleted）。
++
++测试范式照 test_delete_change.py（真实建 Role/RolePermission/UserWorkspaceRole
++跑真实 SQL，不 mock service）。
++"""
++
++from __future__ import annotations
++
++import uuid
++from datetime import UTC, datetime
++
++from sqlalchemy import select
++from sqlalchemy.ext.asyncio import AsyncSession
++
++from app.core.config import get_settings
++from app.core.security import create_access_token, password_hasher
++from app.modules.auth.model import Role, RolePermission, User, UserWorkspaceRole
++from app.modules.change.model import Change, ChangeEventORM
++from app.modules.workspace.model import Workspace
++
++#: 合法带宽内的改名样例（12 字，用户口径：10-30 必须、建议约 20）
++_VALID_TITLE = "用户登录态莫名失效的双侧治理"
++
++
++def _headers(token: str) -> dict[str, str]:
++    return {"Authorization": f"Bearer {token}"}
++
++
++async def _make_user(db_session: AsyncSession) -> tuple[User, str]:
++    """普通用户 + JWT（test_delete_change._make_user 同款）。"""
++    user = User(
++        id=uuid.uuid4(),
++        email=f"rename-change-{uuid.uuid4().hex[:8]}@example.com",
++        password_hash=password_hasher.hash("x"),
++        status="active",
++        is_platform_admin=False,
++    )
++    db_session.add(user)
++    await db_session.commit()
++    await db_session.refresh(user)
++    token, _ = create_access_token(
++        user_id=user.id,
++        email=user.email,
++        is_admin=user.is_platform_admin,
++        settings=get_settings(),
++    )
++    return user, token
++
++
++async def _grant_archive_role(db_session: AsyncSession, *, user: User, ws: Workspace) -> None:
++    """给 user 授 change:archive（workspace_owner 等价形态，test_delete_change 同款）。"""
++    role = Role(
++        id=uuid.uuid4(),
++        key=f"title_renamer_{uuid.uuid4().hex[:6]}",
++        name="Title Renamer",
++        description="test role with change:archive",
++    )
++    db_session.add(role)
++    db_session.add(RolePermission(role_id=role.id, permission="change:archive"))
++    db_session.add(
++        UserWorkspaceRole(
++            user_id=user.id,
++            workspace_id=ws.id,
++            role_id=role.id,
++            granted_by=None,
++            granted_at=datetime.now(UTC),
++        )
++    )
++    await db_session.commit()
++
++
++async def _make_env(
++    db_session: AsyncSession,
++    *,
++    owner_id: uuid.UUID | None = None,
++    title: str | None = None,
++    location: str = "active",
++) -> dict:
++    """建 workspace + 变更行（改名不触镜像文件，无需 spec workspace/manifest）。"""
++    ws = Workspace(
++        id=uuid.uuid4(),
++        name=f"rename-ws-{uuid.uuid4().hex[:6]}",
++        slug=f"rename-ws-{uuid.uuid4().hex[:6]}",
++        root_path=f"/tmp/rename-ws-{uuid.uuid4().hex[:8]}",
++        status="active",
++    )
++    change = Change(
++        id=uuid.uuid4(),
++        workspace_id=ws.id,
++        change_key="2026-10-16-rename-me",
++        title=title or "2026-10-16-rename-me",
++        status="active",
++        location=location,
++        path="changes/2026-10-16-rename-me",
++        owner_id=owner_id,
++        current_stage="execute",
++    )
++    db_session.add(ws)
++    db_session.add(change)
++    await db_session.commit()
++    await db_session.refresh(ws)
++    await db_session.refresh(change)
++    return {"ws": ws, "change": change}
++
++
++async def _rename(client, token: str, ws_id: uuid.UUID, cid: uuid.UUID, title: str):
++    return await client.patch(
++        f"/api/workspaces/{ws_id}/changes/{cid}/title",
++        headers=_headers(token),
++        json={"title": title},
++    )
++
++
++async def _get_change(db_session: AsyncSession, cid: uuid.UUID) -> Change:
++    row = (await db_session.execute(select(Change).where(Change.id == cid))).scalars().one()
++    await db_session.refresh(row)
++    return row
++
++
++class TestRenamePermissionMatrix:
++    async def test_owner_can_rename(self, client, db_session) -> None:
++        """owner 本人（无任何角色）→ 200，行 title/updated_at 更新 + rename 事件。"""
++        owner, token = await _make_user(db_session)
++        env = await _make_env(db_session, owner_id=owner.id)
++        old_updated = env["change"].updated_at
++
++        resp = await _rename(client, token, env["ws"].id, env["change"].id, _VALID_TITLE)
++        assert resp.status_code == 200, resp.text
++        body = resp.json()
++        assert body["title"] == _VALID_TITLE
++        assert body["change_key"] == "2026-10-16-rename-me"
++
++        row = await _get_change(db_session, env["change"].id)
++        assert row.title == _VALID_TITLE
++        assert row.updated_at > old_updated
++        event = (
++            (
++                await db_session.execute(
++                    select(ChangeEventORM).where(
++                        ChangeEventORM.change_id == env["change"].id,
++                        ChangeEventORM.event_type == "rename",
++                    )
++                )
++            )
++            .scalars()
++            .one()
++        )
++        assert event.detail["new_title"] == _VALID_TITLE
++        assert event.detail["old_title"] == "2026-10-16-rename-me"
++        assert event.detail["renamed_by"] == str(owner.id)
++        assert event.detail["change_key"] == "2026-10-16-rename-me"
++
++    async def test_non_owner_with_archive_permission_200(self, client, db_session) -> None:
++        """非 owner 持 change:archive（平台责任人等价形态）→ 200。"""
++        _owner, _owner_token = await _make_user(db_session)
++        manager, manager_token = await _make_user(db_session)
++        env = await _make_env(db_session, owner_id=_owner.id)
++        await _grant_archive_role(db_session, user=manager, ws=env["ws"])
++
++        resp = await _rename(client, manager_token, env["ws"].id, env["change"].id, _VALID_TITLE)
++        assert resp.status_code == 200, resp.text
++        assert (await _get_change(db_session, env["change"].id)).title == _VALID_TITLE
++
++    async def test_platform_admin_200(self, client, db_session) -> None:
++        """平台管理员（is_platform_admin，has_permission 短路）→ 200。"""
++        _owner, _owner_token = await _make_user(db_session)
++        admin = User(
++            id=uuid.uuid4(),
++            email=f"rename-admin-{uuid.uuid4().hex[:8]}@example.com",
++            password_hash=password_hasher.hash("x"),
++            status="active",
++            is_platform_admin=True,
++        )
++        db_session.add(admin)
++        await db_session.commit()
++        await db_session.refresh(admin)
++        token, _ = create_access_token(
++            user_id=admin.id,
++            email=admin.email,
++            is_admin=admin.is_platform_admin,
++            settings=get_settings(),
++        )
++        env = await _make_env(db_session, owner_id=_owner.id)
++
++        resp = await _rename(client, token, env["ws"].id, env["change"].id, _VALID_TITLE)
++        assert resp.status_code == 200, resp.text
++
++    async def test_non_owner_without_permission_403(self, client, db_session) -> None:
++        """非 owner 无 change:archive → 403，行 title 不变。"""
++        _owner, _owner_token = await _make_user(db_session)
++        _stranger, stranger_token = await _make_user(db_session)
++        env = await _make_env(db_session, owner_id=_owner.id)
++
++        resp = await _rename(client, stranger_token, env["ws"].id, env["change"].id, _VALID_TITLE)
++        assert resp.status_code == 403
++        assert (await _get_change(db_session, env["change"].id)).title == ("2026-10-16-rename-me")
++
++    async def test_missing_change_404(self, client, db_session) -> None:
++        """行不存在 → 404（resource-hiding）。"""
++        user, token = await _make_user(db_session)
++        env = await _make_env(db_session, owner_id=user.id)
++
++        resp = await _rename(client, token, env["ws"].id, uuid.uuid4(), _VALID_TITLE)
++        assert resp.status_code == 404
++
++
++class TestRenameValidation:
++    async def test_strip_then_validate(self, client, db_session) -> None:
++        """strip 先行：两端空白不占字数，strip 后落带内 → 200 且落库为 strip 值。"""
++        owner, token = await _make_user(db_session)
++        env = await _make_env(db_session, owner_id=owner.id)
++
++        resp = await _rename(client, token, env["ws"].id, env["change"].id, f"  {_VALID_TITLE}  ")
++        assert resp.status_code == 200, resp.text
++        assert (await _get_change(db_session, env["change"].id)).title == _VALID_TITLE
++
++    async def test_too_short_422(self, client, db_session) -> None:
++        """strip 后 <10 字 → 422 change_title_length_invalid，提示带宽。"""
++        owner, token = await _make_user(db_session)
++        env = await _make_env(db_session, owner_id=owner.id)
++
++        resp = await _rename(client, token, env["ws"].id, env["change"].id, "标题太短了")
++        assert resp.status_code == 422
++        body = resp.json()
++        assert body.get("code") == "change_title_length_invalid" or "10-30" in str(body)
++        assert (await _get_change(db_session, env["change"].id)).title == ("2026-10-16-rename-me")
++
++    async def test_too_long_422(self, client, db_session) -> None:
++        """strip 后 >30 字 → 422。"""
++        owner, token = await _make_user(db_session)
++        env = await _make_env(db_session, owner_id=owner.id)
++
++        resp = await _rename(
++            client,
++            token,
++            env["ws"].id,
++            env["change"].id,
++            "一二三四五六七八九十一二三四五六七八九十一二三四五六七八九十超",
++        )
++        assert resp.status_code == 422
++
++    async def test_boundary_lengths_ok(self, client, db_session) -> None:
++        """边界 10 字与 30 字 → 200（带宽含端点）。"""
++        owner, token = await _make_user(db_session)
++        env = await _make_env(db_session, owner_id=owner.id)
++
++        resp = await _rename(client, token, env["ws"].id, env["change"].id, "十个字整的标题啊呀吧")
++        assert resp.status_code == 200, resp.text
++        resp = await _rename(
++            client,
++            token,
++            env["ws"].id,
++            env["change"].id,
++            "一二三四五六七八九十一二三四五六七八九十一二三四五六七八九十",
++        )
++        assert resp.status_code == 200, resp.text
++
++    async def test_deleted_change_409(self, client, db_session) -> None:
++        """已删行（location='deleted'）→ 409 code=change_deleted。"""
++        owner, token = await _make_user(db_session)
++        env = await _make_env(db_session, owner_id=owner.id, location="deleted")
++
++        resp = await _rename(client, token, env["ws"].id, env["change"].id, _VALID_TITLE)
++        assert resp.status_code == 409
++        assert resp.json().get("code") == "change_deleted"
+diff --git a/backend/app/modules/change/tests/test_title_normalization.py b/backend/app/modules/change/tests/test_title_normalization.py
+index 9e69aa4ce..bedd8b74d 100644
+--- a/backend/app/modules/change/tests/test_title_normalization.py
++++ b/backend/app/modules/change/tests/test_title_normalization.py
+@@ -469,6 +469,202 @@ class TestAdoptedTitleClobberGuard:
+         assert row.title == "新自定义名", "自定义 H1 派生值仍应覆盖（改名能力不回归）"
+ 
+ 
++# ── 短标题提炼（2026-10-16-change-title-condense-backfill）────────────────────
++# 病根样本即用例：完整变更 title=变更名兜底、轻量变更 title=CLI 50 字硬截长句；
++# condense_title 是收养口防御（FR-02）与存量回填（FR-03）的共享提炼规则，
++# CLI 侧（sillyspec quicklog）后续上同规则实现，两边以本组样本锚定防漂移。
++
++
++class TestCondenseTitle:
++    """纯函数：长文本 → 自然标点截断的约 20 字短标题（上限 30）。"""
++
++    def test_strong_break_em_dash_no_ellipsis(self) -> None:
++        """实证样本①：em dash 强边界截断，不加省略号。"""
++        from app.modules.change.title_norm import condense_title
++
++        out = condense_title(
++            "change 文件树「刷新」同步链路三层静默失败"
++            "——后端 RPC 预算 3s 短于实测 6~13.5s，需要把预算拉平到实测上限"
++        )
++        assert out == "change 文件树「刷新」同步链路三层静默失败"
++        assert len(out) <= 30 and not out.endswith("…")
++
++    def test_strong_break_period_strips_trailing_punct(self) -> None:
++        """实证样本②：首个句号强边界截断，尾句号剥除、收引号保留。"""
++        from app.modules.change.title_norm import condense_title
++
++        out = condense_title(
++            "用户报告“登录的账户有时候莫名其妙被退出登录”。"
++            "排查定位两个代码层根因：后端 refresh token 复用检测把旧凭证超窗复用"
++            "判为重放攻击并吊销该用户全部会话"
++        )
++        assert out == "用户报告“登录的账户有时候莫名其妙被退出登录”"
++
++    def test_strong_break_leading_date_dash(self) -> None:
++        """实证样本③：日期开头 + em dash——日期段不得被截掉。"""
++        from app.modules.change.title_norm import condense_title
++
++        out = condense_title(
++            "2026-10-16 生产互覆事故——另一会话从分叉分支打包部署，"
++            "静默回退 main 上已修复的 /api/auth/refresh 逻辑"
++        )
++        assert out == "2026-10-16 生产互覆事故"
++
++    def test_weak_break_colon_fallback(self) -> None:
++        """必须带 [10,30] 内无任何边界 → 兜底带 [8,10) 弱边界（语义完整优先于凑长度）。"""
++        from app.modules.change.title_norm import condense_title
++
++        out = condense_title(
++            "清偿跨变更存量债：2026-10-16-backend-mem-polling task-08 "
++            "给 sillyhub-daemon 补齐 hasUnsyncedLocalChanges 删除面判定"
++        )
++        assert out == "清偿跨变更存量债"
++
++    def test_prefer_boundary_in_must_band_over_earlier_floor(self) -> None:
++        """10-30 必须带（用户口径 2026-10-16）：弱边界落在 8~10 时优先取必须带内的
++        更远强边界，兜底带仅在必须带完全无边界时启用。"""
++        from app.modules.change.title_norm import condense_title
++
++        # 弱边界「：」在第 9 字（兜底带），强边界「。」在第 27 字（必须带）——取强边界
++        out = condense_title("清偿跨变更存量债：把 daemon 侧删除面判定补齐到位。其余若干收尾")
++        assert out == "清偿跨变更存量债：把 daemon 侧删除面判定补齐到位"
++
++    def test_weak_break_tab_label(self) -> None:
++        """实证样本：含英文词与书名号的冒号弱边界。"""
++        from app.modules.change.title_norm import condense_title
++
++        out = condense_title(
++            "归档变更也要显示「文件与对账」tab：归档留档区不展示 spec 文档全貌，"
++            "用户需要文件树与范围对账入口"
++        )
++        assert out == "归档变更也要显示「文件与对账」tab"
++
++    def test_short_input_returned_as_is(self) -> None:
++        from app.modules.change.title_norm import condense_title
++
++        assert condense_title("归档变更也要显示文件与对账") == "归档变更也要显示文件与对账"
++        assert condense_title("reset 软删守卫补齐") == "reset 软删守卫补齐"
++
++    def test_hard_cut_appends_ellipsis(self) -> None:
++        """必须带与兜底带均无边界 → 硬截 max_len-1 字加省略号（总长恰 max_len）。"""
++        from app.modules.change.title_norm import TITLE_CONDENSE_MAX_LEN, condense_title
++
++        text = "没有标点的一段超长文本就是一直往下说没有任何停顿符号所以只能硬截处理掉超长部分"
++        out = condense_title(text)
++        assert out.startswith(text[: TITLE_CONDENSE_MAX_LEN - 1])
++        assert out.endswith("…")
++        assert len(out) == TITLE_CONDENSE_MAX_LEN, "硬截总长含省略号不得超带宽上限"
++
++    def test_leading_label_prefix_stripped(self) -> None:
++        """行首标签前缀剥除（CLI deriveChangeTitle 同款白名单）——生产回填实证：
++        thin 动机原文常带「动机：」头，不剥则标题以标签开头。"""
++        from app.modules.change.title_norm import condense_title
++
++        out = condense_title("动机：change 文件树「刷新」同步链路三层静默失败——后端 RPC 预算不足")
++        assert out == "change 文件树「刷新」同步链路三层静默失败"
++
++    def test_empty_inputs(self) -> None:
++        from app.modules.change.title_norm import condense_title
++
++        assert condense_title(None) == ""
++        assert condense_title("") == ""
++        assert condense_title("   ") == ""
++
++    def test_whitespace_collapsed(self) -> None:
++        from app.modules.change.title_norm import condense_title
++
++        assert condense_title("多  行\n文本\t折叠") == "多 行 文本 折叠"
++
++    def test_custom_bounds(self) -> None:
++        """min/max 可调：上限收窄时在更小区间内取边界。"""
++        from app.modules.change.title_norm import condense_title
++
++        out = condense_title(
++            "修复登录态失效的根因。前端后端两侧一起治理到位",
++            min_len=4,
++            max_len=12,
++        )
++        assert out == "修复登录态失效的根因"
++
++    def test_strong_break_preferred_over_earlier_weak(self) -> None:
++        """弱边界在前、强边界也在区间内时取强边界（句读完整优先）。"""
++        from app.modules.change.title_norm import condense_title
++
++        # 弱边界「，」在第 11 字，强边界「。」在第 21 字（区间 [8,30] 内）——取强边界
++        out = condense_title(
++            "登录态莫名失效的问题，涉及前后端两侧根因。后续已逐一定位并修复完毕不再复现"
++        )
++        assert out == "登录态莫名失效的问题，涉及前后端两侧根因"
++
++
++# ── 2026-10-16-change-title-condense-backfill：收养口超长标题提炼防御 ──────────
++
++
++class TestAdoptTitleCondenseGuard:
++    """收养口（_ensure_change_row 两入口）对 >30 字 CLI 上行标题先提炼再入库。"""
++
++    #: 旧版 CLI「--input 首行 50 字硬截」实证产物（变更中心轻量行烂标题原文）
++    _LONG_BLOB = (
++        "change 文件树「刷新」同步链路三层静默失败"
++        "——后端 RPC 预算 3s 短于实测 6~13.5s，需要把预算拉平到实测上限"
++    )
++
++    async def test_long_cli_title_condensed_on_adopt(self, db_session) -> None:
++        ws_id = await _make_workspace(db_session)
++        name = "2026-10-16-condense-adopt"
++        await _seed_change_row(db_session, ws_id, name, name)
++        await _adopt_cli_title(db_session, ws_id, name, self._LONG_BLOB)
++        row = await _get_change(db_session, ws_id, name)
++        assert row.title == "change 文件树「刷新」同步链路三层静默失败"
++        assert len(row.title) <= 30 and not row.title.endswith("…")
++
++    async def test_short_title_adopted_verbatim(self, db_session) -> None:
++        """≤30 字上行标题原样收养（既有收养行为不回归）。"""
++        ws_id = await _make_workspace(db_session)
++        name = "2026-10-16-condense-verbatim"
++        await _seed_change_row(db_session, ws_id, name, None)
++        await _adopt_cli_title(db_session, ws_id, name, "知识页伪域池一键归位")
++        assert (await _get_change(db_session, ws_id, name)).title == "知识页伪域池一键归位"
++
++    async def test_condense_to_empty_aborts_adopt(self, db_session) -> None:
++        """提炼结果为空串（纯边界标点长串）→ 放弃收养，行内 title 不动。"""
++        ws_id = await _make_workspace(db_session)
++        name = "2026-10-16-condense-empty"
++        await _seed_change_row(db_session, ws_id, name, name)
++        await _adopt_cli_title(db_session, ws_id, name, "…" * 31)
++        assert (await _get_change(db_session, ws_id, name)).title == name
++
++    async def test_placeholder_row_long_title_condensed(self, db_session) -> None:
++        """占位建行入口同防御：行缺失时超长 body title 提炼后落库。"""
++        from app.modules.change.model import Change
++
++        ws_id = await _make_workspace(db_session)
++        name = "2026-10-16-condense-placeholder"
++        body = {
++            "changes": [
++                {
++                    "name": name,
++                    "current_stage": "execute",
++                    "status": "in_progress",
++                    "title": self._LONG_BLOB,
++                }
++            ]
++        }
++        from app.modules.platform_sync.service import PlatformSyncService
++
++        await PlatformSyncService(db_session)._ensure_change_row(ws_id, name, body)
++        row = (
++            (
++                await db_session.execute(
++                    select(Change).where(Change.workspace_id == ws_id, Change.change_key == name)
++                )
++            )
++            .scalars()
++            .one()
++        )
++        assert row.title == "change 文件树「刷新」同步链路三层静默失败"
++
++
+ # ── _sync_docs 存量 MASTER 脏行清理（P3 收敛环）───────────────────────────────
+ 
+ 
+diff --git a/backend/app/modules/change/title_backfill.py b/backend/app/modules/change/title_backfill.py
+new file mode 100644
+index 000000000..a199f51f7
+--- /dev/null
++++ b/backend/app/modules/change/title_backfill.py
+@@ -0,0 +1,120 @@
++"""存量变更标题回填服务（2026-10-16-change-title-condense-backfill）。
++
++变更中心两类烂标题的病根在 CLI 侧（完整变更=变更名兜底、轻量变更=「--input
++首行 50 字硬截」长句），平台侧负责存量修复：``changes.description`` 列已存
++动机段提取文本（2026-09-28-change-list-description，与 title 同源解析），是
++现成的语义来源。选中规则：
++
++- ``location IN ('active','archive')``——``deleted`` 行明确排除（防复活守卫
++  语义不被搅动，deleted 行也不进任何列表展示面）；
++- title 为兜底形态（``is_fallback_display_title``：空/等于 key/去日期前缀语义
++  名/裸模板 H1 文本）**或** 长度 > ``TITLE_CONDENSE_MAX_LEN``（轻量长句病灶，
++  非兜底形态也要提炼）；
++- ``description`` 非空——无描述的老行跳过计数（纯 DB 面，不读工作区盘上
++  proposal，读盘归 reparse 职责）。
++
++新 title = ``condense_title(description)``：自然标点截断、约 20 字上限 30。
++写集只有 ``changes.title`` 一列；调用方负责事务边界（本服务只改字段 + flush
++不 commit，与 backfill_service 同约定）——dry-run 由脚本侧事务回滚保证零触碰。
++幂等：回填后 title 为语义短句（非兜底、≤30 字），不再命中选中条件，重跑恒 0。
++"""
++
++from __future__ import annotations
++
++import uuid
++from dataclasses import dataclass, field
++
++from sqlalchemy import select
++from sqlalchemy.ext.asyncio import AsyncSession
++from sqlmodel import col
++
++from app.modules.change.model import Change
++from app.modules.change.title_norm import (
++    TITLE_CONDENSE_MAX_LEN,
++    condense_title,
++    is_fallback_display_title,
++)
++
++
++@dataclass
++class TitleBackfillDetail:
++    """单行命中明细（dry-run / apply 同口径收集，供脚本逐行打印核对）。"""
++
++    change_key: str
++    old_title: str | None
++    new_title: str
++
++
++@dataclass
++class TitleBackfillStats:
++    """单个工作区（或汇总）的回填计数（dry-run / apply 同口径上报）。"""
++
++    scanned: int = 0
++    #: 命中选中条件（title 兜底/超长）的行数
++    selected: int = 0
++    #: 实际改写 title 的行数（apply 与 dry-run 同口径——dry-run 也计数不落库）
++    updated: int = 0
++    #: 命中选中但 description 为空 → 无语义来源可提炼
++    skipped_no_description: int = 0
++    #: 有 description 但提炼结果为空或与现 title 相同
++    skipped_empty_or_same: int = 0
++    details: list[TitleBackfillDetail] = field(default_factory=list)
++
++    def merge(self, other: TitleBackfillStats) -> None:
++        self.scanned += other.scanned
++        self.selected += other.selected
++        self.updated += other.updated
++        self.skipped_no_description += other.skipped_no_description
++        self.skipped_empty_or_same += other.skipped_empty_or_same
++        self.details.extend(other.details)
++
++
++class TitleBackfillService:
++    """存量行 title 回填（选中 → 提炼 → 改写；事务边界归调用方）。"""
++
++    def __init__(self, db: AsyncSession):
++        self._db = db
++
++    async def backfill_workspace(
++        self, workspace_id: uuid.UUID, *, apply: bool = False
++    ) -> TitleBackfillStats:
++        stats = TitleBackfillStats()
++        rows = (
++            (
++                await self._db.execute(
++                    select(Change).where(
++                        col(Change.workspace_id) == workspace_id,
++                        col(Change.location).in_(("active", "archive")),
++                    )
++                )
++            )
++            .scalars()
++            .all()
++        )
++        for row in rows:
++            stats.scanned += 1
++            current = (row.title or "").strip()
++            if not (
++                is_fallback_display_title(current, row.change_key)
++                or len(current) > TITLE_CONDENSE_MAX_LEN
++            ):
++                continue  # 语义短标题，不选中
++            stats.selected += 1
++            if not (row.description or "").strip():
++                stats.skipped_no_description += 1
++                continue
++            new_title = condense_title(row.description)
++            if not new_title or new_title == current:
++                stats.skipped_empty_or_same += 1
++                continue
++            stats.details.append(
++                TitleBackfillDetail(
++                    change_key=row.change_key, old_title=row.title, new_title=new_title
++                )
++            )
++            stats.updated += 1
++            if apply:
++                row.title = new_title
++        if apply:
++            await self._db.flush()
++        return stats
+diff --git a/backend/app/modules/change/title_norm.py b/backend/app/modules/change/title_norm.py
+index 7263aff1c..453e52eb4 100644
+--- a/backend/app/modules/change/title_norm.py
++++ b/backend/app/modules/change/title_norm.py
+@@ -105,6 +105,85 @@ def normalize_display_title(h1: str | None, change_key: str) -> str:
+ TITLE_MAX_LEN = 500
+ 
+ 
++# ── 短标题提炼（2026-10-16-change-title-condense-backfill）──────────────────
++#
++# 病根：完整变更 title 恒为变更名兜底、轻量变更 title 为 CLI「--input 首行 50 字
++# 硬截」长句（sillyspec quicklog.deriveChangeTitle 口径），变更中心不可读。平台侧
++# 两个消费点（收养口防御 + 存量回填脚本）共用本提炼：在自然标点处截断产出约
++# 20 字（区间 [8,30]）短句，语义来源=动机段 description。CLI 侧后续上同规则
++# 实现（sillyspec quicklog），两边用同一组实证样本锚定测试防漂移。
++
++#: 提炼带宽（用户口径 2026-10-16：标题必须简洁达意，10-30 字之内，建议约 20）：
++#: 自然边界**首选**落在 [10,30]（必须带）内；区间内无任何边界时才允许 8~10 的
++#: 兜底下限（短句语义完整优先于凑长度——「清偿跨变更存量债」级别的干净短句
++#: 不为凑 10 字硬切成乱码）。
++TITLE_CONDENSE_MIN_LEN = 10
++TITLE_CONDENSE_FLOOR_LEN = 8
++TITLE_CONDENSE_MAX_LEN = 30
++
++#: 强边界：句读完整处（句号/叹号/问号/分号/省略号/em dash——「——」按单字符两连
++#: 命中，尾随 run 统一剥）。截在此处句子语义完整，不加省略号。
++_CONDENSE_STRONG_BREAKS = "。！？；…—"
++
++#: 弱边界：句内停顿（冒号/逗号/顿号/半角逗号分号冒号）——区间内无强边界时兜底。
++#: 半角句点故意不收（数字小数/文件名误伤面大）。
++_CONDENSE_WEAK_BREAKS = "：，、,;:"
++
++#: 截断后剥除的尾随字符：边界标点 run + 空白（「失败——」截在首个 — 后连剥两个
++#: dash）。引号/括号/书名号不剥——「…被退出登录”」的收引号是语义成分。
++_CONDENSE_TRAILING_RE = re.compile(rf"[{_CONDENSE_STRONG_BREAKS}{_CONDENSE_WEAK_BREAKS}\s]+$")
++
++#: 行首标签前缀（CLI deriveChangeTitle 同款白名单，2026-10-16 生产回填实证：
++#: thin 动机原文常带「动机：」头——不剥则标题以「动机：」开头）。剥完为空则保留原文。
++_CONDENSE_LABEL_RE = re.compile(r"^(?:需求|动机|背景|任务|标题|动机与背景|背景与动机)\s*[:：]\s*")
++
++
++def condense_title(
++    text: str | None,
++    *,
++    min_len: int = TITLE_CONDENSE_MIN_LEN,
++    floor_len: int = TITLE_CONDENSE_FLOOR_LEN,
++    max_len: int = TITLE_CONDENSE_MAX_LEN,
++) -> str:
++    """长文本 → 自然标点截断的短标题（纯函数，10-30 字带、建议约 20）。
++
++    规则（保守：任何一步无产出按序降级）：
++
++    1. 空白折叠单行；长度 ≤ ``max_len`` 原样返回；
++    2. 在 ``[min_len, max_len]``（必须带）找首个**强**边界（句读完整处）截断，
++       无强边界取首个**弱**边界（句内停顿）；自然边界截断不加省略号；
++    3. 必须带内无任何边界 → 降级扫 ``[floor_len, min_len)`` 兜底带（短句语义
++       完整优先于凑长度），仍无才硬截 ``max_len - 1`` 字加 ``…``（总长恰
++       ``max_len``——产物全量落在带内，回填重跑不再因 31 字残留命中）；
++    4. 截断结果剥尾随边界标点 run 与空白（收引号/括号保留）。
++    """
++    if not text:
++        return ""
++    s = re.sub(r"\s+", " ", text).strip()
++    s = _CONDENSE_LABEL_RE.sub("", s) or re.sub(r"\s+", " ", text).strip()
++    if len(s) <= max_len:
++        return s
++
++    def _scan(lo: int, hi: int) -> tuple[int, int]:
++        strong_cut = weak_cut = 0
++        for i in range(max(lo, 1), hi + 1):
++            ch = s[i - 1]
++            if ch in _CONDENSE_STRONG_BREAKS:
++                strong_cut = i
++                break
++            if ch in _CONDENSE_WEAK_BREAKS and not weak_cut:
++                weak_cut = i
++        return strong_cut, weak_cut
++
++    strong_cut, weak_cut = _scan(min_len, max_len)
++    if not (strong_cut or weak_cut):
++        strong_cut, weak_cut = _scan(floor_len, min_len - 1)
++    cut = strong_cut or weak_cut
++    if cut:
++        return _CONDENSE_TRAILING_RE.sub("", s[:cut])
++    return _CONDENSE_TRAILING_RE.sub("", s[: max_len - 1]) + "…"
++
++
+ def is_fallback_display_title(title: str | None, change_key: str) -> bool:
+     """title 是否为兜底形态：空 / 等于 change_key / 等于去日期前缀语义名 / 裸模板 H1 文本。
+ 
+diff --git a/backend/app/modules/platform_sync/service.py b/backend/app/modules/platform_sync/service.py
+index 8b052cd79..ddac30ea1 100644
+--- a/backend/app/modules/platform_sync/service.py
++++ b/backend/app/modules/platform_sync/service.py
+@@ -48,7 +48,9 @@ from app.modules.change.model import Change, ChangeSessionLink, QuicklogSessionL
+ from app.modules.change.pending_cache import bump_pending_epoch
+ from app.modules.change.title_norm import (
+     DISPLAY_KEY_PREFIX_RE,
++    TITLE_CONDENSE_MAX_LEN,
+     TITLE_MAX_LEN,
++    condense_title,
+     is_fallback_display_title,
+ )
+ from app.modules.daemon.session_events import publish_sessions_changed
+@@ -715,6 +717,12 @@ class PlatformSyncService:
+                 {},
+             )
+             body_title = str(info_existing.get("title") or "").strip()[:TITLE_MAX_LEN]
++            # 2026-10-16-change-title-condense-backfill：超长上行标题先提炼再收养——
++            # 旧版 CLI「--input 首行 50 字硬截」产物（动机长句带尾省略号）原样入库
++            # 即变更中心烂标题；30 字内原样收养（语义概括不受影响），提炼为空
++            # （纯标点/空白）放弃本次收养保持行内原值。
++            if len(body_title) > TITLE_CONDENSE_MAX_LEN:
++                body_title = condense_title(body_title)
+             if (
+                 body_title
+                 and is_fallback_display_title(existing.title, name)
+@@ -754,13 +762,18 @@ class PlatformSyncService:
+             ),
+             {},
+         )
++        # 同收养段口径：CLI body title 裸 dict 无校验，截 TITLE_MAX_LEN 防列宽溢出；
++        # 空/提炼后为空回落 change_key（2026-09-30-title-adopt-clobber-guard）。
++        # 2026-10-16-change-title-condense-backfill：超 30 字同走 condense 提炼
++        # （占位建行与既有行收养两个入口同防御，防旧版 CLI 长标题从占位路径入库）。
++        placeholder_title = str(info.get("title") or "").strip()[:TITLE_MAX_LEN]
++        if len(placeholder_title) > TITLE_CONDENSE_MAX_LEN:
++            placeholder_title = condense_title(placeholder_title)
+         row = Change(
+             id=uuid.uuid4(),
+             workspace_id=workspace_id,
+             change_key=name,
+-            # 同收养段口径：CLI body title 裸 dict 无校验，截 TITLE_MAX_LEN
+-            # 防列宽溢出；空值回落 change_key（2026-09-30-title-adopt-clobber-guard）。
+-            title=(str(info.get("title") or "").strip()[:TITLE_MAX_LEN]) or name,
++            title=placeholder_title or name,
+             status="draft",
+             location="active",
+             # platform-managed 镜像扁平布局（无 .sillyspec/ 包裹），与 parser
+diff --git a/backend/app/modules/platform_sync/tests/test_change_deleted_guard.py b/backend/app/modules/platform_sync/tests/test_change_deleted_guard.py
+index 5001af83f..30ffe0682 100644
+--- a/backend/app/modules/platform_sync/tests/test_change_deleted_guard.py
++++ b/backend/app/modules/platform_sync/tests/test_change_deleted_guard.py
+@@ -594,11 +594,12 @@ async def test_body_title_adopted_for_existing_row(client, db_session):
+ 
+ 
+ async def test_long_cli_title_truncated_progress_still_ok(client, db_session):
+-    """body.changes[].title 超 500 字 → 截断 500 落库、progress 上行仍 200。
++    """body.changes[].title 超 500 字 → 先提炼为短标题落库、progress 上行仍 200。
+ 
+     body 裸 dict 无 schema 长度校验，Change.title 为 String(500)（Postgres 强制
+-    列宽、SQLite 测试库不强制）——写侧统一截断防生产溢出，且截断/收养写库
+-    best-effort 不阻断上行主流程。
++    列宽、SQLite 测试库不强制）——写侧先截 TITLE_MAX_LEN 再提炼（2026-10-16-
++    change-title-condense-backfill：超 30 字走 condense_title，无标点文本硬截
++    30 字加省略号），提炼/截断/收养写库 best-effort 不阻断上行主流程。
+     """
+     from datetime import UTC, datetime
+ 
+@@ -641,6 +642,7 @@ async def test_long_cli_title_truncated_progress_still_ok(client, db_session):
+             "approvals": [],
+         },
+     )
+-    assert resp.status_code == 200, "超长 title 截断后落库，不得阻断 progress 上行"
++    assert resp.status_code == 200, "超长 title 提炼后落库，不得阻断 progress 上行"
+     change = await _get_change(db_session, ws_id, name)
+-    assert change.title == "甲" * 500, "落库前应截断到 TITLE_MAX_LEN（Change.title String(500)）"
++    # 无标点 600 字 → condense_title 无边界 → 硬截 29 字加省略号（总长恰 30）
++    assert change.title == "甲" * 29 + "…", "超长 title 应提炼为带宽内短标题"
+diff --git a/backend/openapi.json b/backend/openapi.json
+index e81a8ff88..35b5e9cf4 100644
+--- a/backend/openapi.json
++++ b/backend/openapi.json
+@@ -4782,6 +4782,70 @@
+         }
+       }
+     },
++    "/api/workspaces/{workspace_id}/changes/{change_id}/title": {
++      "patch": {
++        "tags": [
++          "change"
++        ],
++        "summary": "Rename Change Title",
++        "description": "平台改名入口（2026-10-16-change-title-condense-backfill FR-05，用户口径 2026-10-16）。\n\n组合权限与删除端点同款三元组——变更责任人本人（``change.owner_id == 当前\n用户``）**或** ``CHANGE_ARCHIVE``（workspace_owner 角色内置、platform_admin\n经 has_permission 短路），即「管理员 || 平台责任人 || 变更责任人」；实现为\n端点内组合校验（delete_change 同款先例）。带宽校验（10-30 字必须，strip 后\n判，越带 422）、已删行 409、rename 审计事件由 ``ChangeService.rename_title``\n给出。改名后的语义 title 不被 CLI 兜底上行回翻（is_fallback 收养守卫）。",
++        "operationId": "rename_change_title_api_workspaces__workspace_id__changes__change_id__title_patch",
++        "parameters": [
++          {
++            "name": "workspace_id",
++            "in": "path",
++            "required": true,
++            "schema": {
++              "type": "string",
++              "format": "uuid",
++              "title": "Workspace Id"
++            }
++          },
++          {
++            "name": "change_id",
++            "in": "path",
++            "required": true,
++            "schema": {
++              "type": "string",
++              "format": "uuid",
++              "title": "Change Id"
++            }
++          }
++        ],
++        "requestBody": {
++          "required": true,
++          "content": {
++            "application/json": {
++              "schema": {
++                "$ref": "#/components/schemas/ChangeRenameRequest"
++              }
++            }
++          }
++        },
++        "responses": {
++          "200": {
++            "description": "Successful Response",
++            "content": {
++              "application/json": {
++                "schema": {
++                  "$ref": "#/components/schemas/ChangeRenameResponse"
++                }
++              }
++            }
++          },
++          "422": {
++            "description": "Validation Error",
++            "content": {
++              "application/json": {
++                "schema": {
++                  "$ref": "#/components/schemas/HTTPValidationError"
++                }
++              }
++            }
++          }
++        }
++      }
++    },
+     "/api/workspaces/{workspace_id}/changes/{change_id}/documents": {
+       "get": {
+         "tags": [
+@@ -41779,6 +41843,45 @@
+         "title": "ChangeRejectProcessReq",
+         "description": "变更流 rejectProcess — 驳回到已作废 (仅审核节点)。"
+       },
++      "ChangeRenameRequest": {
++        "properties": {
++          "title": {
++            "type": "string",
++            "title": "Title"
++          }
++        },
++        "type": "object",
++        "required": [
++          "title"
++        ],
++        "title": "ChangeRenameRequest",
++        "description": "PATCH /changes/{cid}/title 请求（2026-10-16-change-title-condense-backfill FR-05）。\n\n人工命名带宽（用户口径 2026-10-16：10-30 字之内必须、建议约 20）在服务层\nstrip 后校验（DTO 不设长度约束——错误信息要带当前字数与带宽说明，统一走\nAppError 422 而非 pydantic 422）。"
++      },
++      "ChangeRenameResponse": {
++        "properties": {
++          "id": {
++            "type": "string",
++            "format": "uuid",
++            "title": "Id"
++          },
++          "change_key": {
++            "type": "string",
++            "title": "Change Key"
++          },
++          "title": {
++            "type": "string",
++            "title": "Title"
++          }
++        },
++        "type": "object",
++        "required": [
++          "id",
++          "change_key",
++          "title"
++        ],
++        "title": "ChangeRenameResponse",
++        "description": "PATCH /changes/{cid}/title 响应（FR-05）：变更标识 + 改名后的新 title。"
++      },
+       "ChangeReparseResponse": {
+         "properties": {
+           "workspace_id": {
+diff --git a/backend/scripts/backfill_change_titles.py b/backend/scripts/backfill_change_titles.py
+new file mode 100644
+index 000000000..2c836b6eb
+--- /dev/null
++++ b/backend/scripts/backfill_change_titles.py
+@@ -0,0 +1,156 @@
++"""一次性运维脚本：存量变更标题回填（2026-10-16-change-title-condense-backfill）。
++
++背景：变更中心两类烂标题（完整变更=变更名兜底如 ``10-16-fix-auth-random-logout``、
++轻量变更=CLI「--input 首行 50 字硬截」长句带尾省略号）病根在 CLI 侧（工具侧另
++变更修复增量），存量已入库行由本脚本按 ``title_backfill.TitleBackfillService``
++从 ``changes.description``（动机段提取）经 ``condense_title`` 提炼回填——自然标
++点截断、约 20 字上限 30。
++
++选中：location IN ('active','archive') 且（title 兜底形态 或 >30 字）且
++description 非空；写集只有 ``changes.title``；幂等可重跑（回填后短句 title 不
++再命中选中条件）。无 description 的行跳过计数——这类行等 CLI 侧修复后再由
++reparse/documents 通道刷新 description 后重跑本脚本即可。
++
++用法（在 backend/ 目录或容器 /app）：
++
++    python scripts/backfill_change_titles.py                        # dry-run（全工作区）
++    python scripts/backfill_change_titles.py --workspace <uuid> ... # 限定工作区（可多次）
++    python scripts/backfill_change_titles.py --apply                # 落库（单事务）
++    python scripts/backfill_change_titles.py --apply --yes          # 全工作区落库确认门
++
++建议低峰执行；dry-run 与 --apply 计数同口径，先 dry-run 核对明细再 apply。
++"""
++
++from __future__ import annotations
++
++import argparse
++import asyncio
++import sys
++import uuid
++from pathlib import Path
++
++# scripts/ 不是包：直接执行时 sys.path[0] 是 scripts 目录，`import app` 不可达——
++# 照 backfill_run_change_context.py 先例引导仓库根。
++sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
++
++from sqlalchemy.ext.asyncio import create_async_engine
++
++from app.core.config import get_settings
++from app.modules.change.title_backfill import (
++    TitleBackfillService,
++    TitleBackfillStats,
++)
++
++
++def _load_full_model_registry() -> None:
++    """导入全部模块 model（同 backfill_run_change_context.py 先例）——ORM 注册表
++    缺远端表时 flush 的 mapper 配置可能抛 NoReferencedTableError；walk_packages
++    递归容错导入（无 model 子模块的跳过）。"""
++    import importlib
++    import pkgutil
++
++    import app.modules as _pkg
++
++    for m in pkgutil.walk_packages(_pkg.__path__, prefix="app.modules."):
++        if not m.ispkg and m.name.rsplit(".", 1)[-1] == "model":
++            try:
++                importlib.import_module(m.name)
++            except ModuleNotFoundError:
++                continue
++
++
++def _print_stats(title: str, stats: TitleBackfillStats) -> None:
++    print(
++        f"  {title}: 扫描 {stats.scanned} | 命中 {stats.selected} | "
++        f"回填 {stats.updated} | 无描述跳过 {stats.skipped_no_description} | "
++        f"提炼空/同值跳过 {stats.skipped_empty_or_same}"
++    )
++    for d in stats.details:
++        old = (d.old_title or "").replace("\n", " ")
++        print(f"    - {d.change_key}\n        旧: {old}\n        新: {d.new_title}")
++
++
++async def _run(apply: bool, workspace_ids: list[uuid.UUID]) -> int:
++    engine = create_async_engine(get_settings().database_url)
++    try:
++        async with engine.connect() as conn:
++            try:
++                # 单事务：begin() 块正常退出即 commit（--apply）；dry-run 抛
++                # _DryRunRollback 触发回滚（库零触碰）——backfill_run_change_context
++                # 先例同款控制流。
++                async with conn.begin():
++                    from sqlalchemy import select
++                    from sqlalchemy.ext.asyncio import AsyncSession
++
++                    from app.modules.workspace.model import Workspace
++
++                    db = AsyncSession(conn, expire_on_commit=False)
++                    svc = TitleBackfillService(db)
++                    targets: list[uuid.UUID]
++                    if workspace_ids:
++                        targets = workspace_ids
++                    else:
++                        rows = (await db.execute(select(Workspace.id))).all()
++                        targets = [r[0] for r in rows]
++                    total = TitleBackfillStats()
++                    mode = "APPLY（落库）" if apply else "DRY-RUN（事务回滚，库零触碰）"
++                    print(f"=== 存量变更标题回填 · {mode} · 工作区 {len(targets)} 个 ===")
++                    for ws_id in targets:
++                        stats = await svc.backfill_workspace(ws_id, apply=apply)
++                        if stats.scanned == 0:
++                            continue
++                        print(f"[workspace {ws_id}]")
++                        _print_stats("workspace 小计", stats)
++                        total.merge(stats)
++                    print("=== 总计 ===")
++                    _print_stats("全部工作区", total)
++                    if not apply:
++                        raise _DryRunRollback()
++            except _DryRunRollback:
++                print("dry-run 完成：事务已回滚，数据库零触碰。核对明细后加 --apply 执行。")
++    finally:
++        await engine.dispose()
++    return 0
++
++
++class _DryRunRollback(Exception):
++    """dry-run 控制流：抛出使 begin() 块回滚（不用 rollback() 显式调用以便单路径）。"""
++
++
++def main() -> int:
++    parser = argparse.ArgumentParser(description="存量变更标题回填（默认 dry-run）")
++    parser.add_argument(
++        "--apply", action="store_true", help="落库（缺省 dry-run：事务回滚只打印明细）"
++    )
++    parser.add_argument(
++        "--workspace",
++        action="append",
++        default=[],
++        metavar="UUID",
++        help="限定工作区 id（可多次；缺省处理全部工作区）",
++    )
++    parser.add_argument(
++        "--yes",
++        action="store_true",
++        help="全工作区 --apply 的显式确认门（带 --workspace 的定向 apply 不需要）",
++    )
++    args = parser.parse_args()
++    workspace_ids: list[uuid.UUID] = []
++    for raw in args.workspace:
++        try:
++            workspace_ids.append(uuid.UUID(raw))
++        except ValueError:
++            print(f"❌ --workspace 不是合法 UUID：{raw}", file=sys.stderr)
++            return 2
++    if args.apply and not workspace_ids and not args.yes:
++        print(
++            "❌ 全工作区 --apply 影响面大：确认请加 --yes，或用 --workspace <uuid> 定向执行。",
++            file=sys.stderr,
++        )
++        return 2
++    _load_full_model_registry()
++    return asyncio.run(_run(apply=args.apply, workspace_ids=workspace_ids))
++
++
++if __name__ == "__main__":
++    raise SystemExit(main())
+diff --git a/docs/sillyspec/active-pitfalls.md b/docs/sillyspec/active-pitfalls.md
+index 73ddebecc..594591a25 100644
+--- a/docs/sillyspec/active-pitfalls.md
++++ b/docs/sillyspec/active-pitfalls.md
+@@ -13,3 +13,4 @@
+ <!-- verify-test-grouping-cwd-mismatch.md：verify 实测模块分组不稳定——daemon 测试文件偶发分进 frontend vitest 组（cwd 错配 No test files found 假红）；skipped 聚合档（已跑全绿+缺件跳过）在部分路径被判 failed（2026-10-15-server-logs-panel 实证） -->
+ <!-- deploy-multi-session-overwrite.md：多会话各自打包部署覆盖生产（分叉分支回退 main 修复事故，2026-10-16） -->
+ <!-- conflict-compare-full-tree-label-mismatch.md：跨多变更的全量冲突平台按单变更归因、CLI 落盘 full-tree 名 → 对比恒 conflict_record_missing 且「刷新冲突列表」无效（2026-10-16 生产实证） -->
++<!-- change-title-not-readable.md：变更标题不可读——完整变更恒变更名兜底、轻量变更50字截断长句；工具侧需强制agent命名10-30字（2026-10-16，平台侧提炼防御+存量回填已落） -->
+diff --git a/docs/sillyspec/change-title-not-readable.md b/docs/sillyspec/change-title-not-readable.md
+new file mode 100644
+index 000000000..4fdf02501
+--- /dev/null
++++ b/docs/sillyspec/change-title-not-readable.md
+@@ -0,0 +1,27 @@
++<!-- 活跃坑索引：处置完成的条目移入 finished/（单坑单文件） -->
++<!-- change-title-not-readable.md：变更标题不可读——完整变更恒变更名兜底、轻量变更 50 字截断长句；工具侧需强制 agent 命名（10-30 字），平台侧已上提炼防御+存量回填（2026-10-16） -->
++
++# 变更标题不可读：完整变更恒变更名兜底、轻量变更 50 字截断长句（工具侧改进）
++
++- **发现日期**：2026-10-16（multi-agent-platform 变更中心用户实证）
++- **影响面**：sillyspec CLI（`src/quicklog.js` `deriveChangeTitle`/`deriveTitleFromLinkedChange`、`src/flow.js`、`src/run/command.js`）；平台侧已做防御与存量回填（multi-agent-platform 仓 2026-10-16-change-title-condense-backfill），增量病根在 CLI。
++- **用户验收口径（2026-10-16 定）**：标题必须简洁、让人明确认识到变更大概做什么；**建议约 20 字，10-30 字之内（必须）**；可强制让 agent 命名。
++
++## 现象（本地进度库 2026-10-16 实测 20 条）
++
++- 7 条 title=变更名兜底（`10-16-fix-auth-random-logout` 等）——完整流程 `run brainstorm --change <名>` 无 --input，`initChange` 用变更名兜底；agent 写完 proposal 后 H1 仍是模板字面 `# 提案书（Proposal）`，`deriveTitleFromLinkedChange` 剥完模板前缀为空即放弃，标题永远不刷新。
++- 8 条 title=50 字硬截长句带尾省略号——轻量流程 `deriveChangeTitle` 取 `--input` 首行原样截 50 字，而 agent 常把整段动机当首行写（例：「change 文件树「刷新」同步链路三层静默失败——后端 RPC 预算 3s 短于实测 6~13.5…」）。
++- 仅 5 条勉强合格。2026-09-29 约定（title=中文概括 ≤50 字、建议 ~20 字）纯靠 agent 自觉，无强制，长期不稳。
++
++## 工具侧改进要求（待工具组实施）
++
++1. **强制命名门（核心）**：`flow start` 必须拿到 10-30 字中文概括才放行——`--title` 显式给或 `--input` 首行（≤30 字）满足；两者皆缺/超带时 exit 2 给修正指引（对齐既有清晰度门形态）。`run` 完整流程同口径：brainstorm 收口时校验 proposal 首节生成 10-30 字概括写 title，不满足在完成门拦截。
++2. **deriveChangeTitle 排版对齐**：截断从「50 字硬截」改为「自然标点截断，10-30 字带、约 20 字目标」——强边界（。！？；…——）优先、弱边界（：，、）兜底、无边界才硬截加省略号；与平台侧 `title_norm.condense_title` 同规则（平台侧已有 Python 实现+实证样本单测，可直接对照移植）。
++3. **deriveTitleFromLinkedChange 补回退**：H1 剥模板前缀为空时，回退读 proposal `## 动机` 首个非空段过同款提炼产出标题（平台侧 description 提取同源规则已在 `title_norm.extract_description`）。
++4. **存量修复通道**：CLI 侧可选 `progress repair-titles --dry-run/--apply`（本地进度库同规则重派生）；平台侧存量已由回填脚本处理，CLI 侧修复只影响本地显示与后续上行。
++
++## 平台侧已落（对照面）
++
++- `backend/app/modules/change/title_norm.py` `condense_title`：10-30 必须带 + 8~10 兜底带 + 硬截省略号，实证坏样本全量单测。
++- `_ensure_change_row` 两入口（既有行收养/占位建行）对 >30 字上行标题先提炼再入库。
++- `backend/scripts/backfill_change_titles.py` 存量回填（dry-run 缺省/--apply/--yes 门），从 description 提炼回填兜底或超长 title 行。
+diff --git a/frontend/src/app/(dashboard)/workspaces/[id]/changes/[cid]/__tests__/page-rename-title.test.tsx b/frontend/src/app/(dashboard)/workspaces/[id]/changes/[cid]/__tests__/page-rename-title.test.tsx
+new file mode 100644
+index 000000000..456870d76
+--- /dev/null
++++ b/frontend/src/app/(dashboard)/workspaces/[id]/changes/[cid]/__tests__/page-rename-title.test.tsx
+@@ -0,0 +1,187 @@
++// 2026-10-16-change-title-condense-backfill FR-06：详情页改名入口行为测试。
++//
++// 覆盖三面（用户口径 2026-10-16：管理员/平台责任人/变更责任人可重命名 title，
++// 10-30 字必须）：
++// 1. 权限三元组可见（owner 本人）+ 保存链路——弹层预填当前 title、strip 后
++//    调 renameChangeTitle、成功后失效缓存（getChange 重取）；
++// 2. 越带禁用——<10 字保存禁用 + 实时字数提示；
++// 3. 无权限不渲染入口——三判全空无「改名」按钮。
++//
++// mock 范式对齐同目录 page-back-to-list.test.tsx（useChangeDeleteAccess mock 控权限）。
++import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
++import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
++import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
++
++import ChangeDetailPage from "@/app/(dashboard)/workspaces/[id]/changes/[cid]/page";
++import type { ChangeRead } from "@/lib/changes";
++
++const navMocks = vi.hoisted(() => ({
++  push: vi.fn(),
++  replace: vi.fn(),
++  back: vi.fn(),
++  searchParams: new URLSearchParams(),
++}));
++vi.mock("next/navigation", () => ({
++  useRouter: () => ({ push: navMocks.push, replace: navMocks.replace, back: navMocks.back }),
++  useSearchParams: () => navMocks.searchParams,
++}));
++vi.mock("next/link", () => ({
++  default: ({
++    children,
++    href,
++    className,
++  }: {
++    children: React.ReactNode;
++    href: string;
++    className?: string;
++  }) => (
++    <a href={href} className={className}>
++      {children}
++    </a>
++  ),
++}));
++
++const mocks = vi.hoisted(() => ({
++  getChange: vi.fn(),
++  renameChangeTitle: vi.fn(),
++  listWorkspaceAgentSessions: vi.fn(),
++  listQuicklogEntries: vi.fn(),
++  /** 权限三元组（useChangeDeleteAccess mock 返回值；用例内改写控制可见性）。 */
++  access: { userId: null as string | null, isPlatformAdmin: false, workspaceRole: null as string | null },
++}));
++
++vi.mock("@/lib/changes", () => ({
++  getChange: mocks.getChange,
++  renameChangeTitle: mocks.renameChangeTitle,
++  getAgentStatus: vi.fn().mockRejectedValue(new Error("no-agent-in-rename-tests")),
++  submitStageReview: vi.fn(),
++  getChangeTimeline: vi.fn().mockRejectedValue(new Error("no-timeline-in-rename-tests")),
++  getChangeAssets: vi.fn().mockRejectedValue(new Error("no-assets-in-rename-tests")),
++  getChangeUsage: vi.fn().mockRejectedValue(new Error("no-usage-in-rename-tests")),
++  getScopeAudit: vi.fn().mockRejectedValue(new Error("no-audit-in-rename-tests")),
++}));
++
++vi.mock("@/lib/daemon", () => ({
++  listWorkspaceAgentSessions: mocks.listWorkspaceAgentSessions,
++}));
++
++vi.mock("@/lib/quicklog", () => ({
++  listQuicklogEntries: mocks.listQuicklogEntries,
++}));
++
++// useNotify 走 antd App 上下文（jsdom 未挂载 App 时 message.error 非函数）——
++// 照 agent-profiles 页测试惯例 mock 成 vi.fn 三件套
++const notifyMock = vi.hoisted(() => ({
++  success: vi.fn(),
++  error: vi.fn(),
++  warning: vi.fn(),
++}));
++vi.mock("@/lib/errors", async () => {
++  const actual =
++    await vi.importActual<typeof import("@/lib/errors")>("@/lib/errors");
++  return { ...actual, useNotify: () => notifyMock };
++});
++
++vi.mock("@/components/delete-change-confirm", async (importOriginal) => {
++  const actual = await importOriginal<
++    typeof import("@/components/delete-change-confirm")
++  >();
++  return {
++    ...actual,
++    useChangeDeleteAccess: () => mocks.access,
++  };
++});
++
++function makeChange(): ChangeRead {
++  return {
++    id: "ch-1",
++    change_key: "2026-10-16-rename-title",
++    title: "旧标题占位",
++    owner_id: "u-owner",
++    current_stage: "execute",
++    pending_review: null,
++    status: "in_progress",
++    location: "active",
++    change_type: null,
++    is_thin: false,
++    affected_components: [],
++    updated_at: "2026-10-16T10:00:00Z",
++    stages: {},
++  } as unknown as ChangeRead;
++}
++
++function renderPage() {
++  const client = new QueryClient({
++    defaultOptions: { queries: { retry: false, gcTime: 0, refetchInterval: false } },
++  });
++  return render(
++    <QueryClientProvider client={client}>
++      <ChangeDetailPage params={{ id: "ws-1", cid: "ch-1" }} />
++    </QueryClientProvider>,
++  );
++}
++
++describe("详情页改名入口（2026-10-16-change-title-condense-backfill FR-06）", () => {
++  beforeEach(() => {
++    navMocks.searchParams = new URLSearchParams();
++    mocks.getChange.mockResolvedValue(makeChange());
++    mocks.listWorkspaceAgentSessions.mockResolvedValue([]);
++    mocks.listQuicklogEntries.mockResolvedValue({ items: [], total: 0 });
++    mocks.access = { userId: null, isPlatformAdmin: false, workspaceRole: null };
++  });
++  afterEach(() => {
++    vi.clearAllMocks();
++    cleanup();
++  });
++
++  it("owner 可见入口，保存走 strip 后的新标题并失效缓存", async () => {
++    mocks.access = { userId: "u-owner", isPlatformAdmin: false, workspaceRole: null };
++    mocks.renameChangeTitle.mockResolvedValue({
++      id: "ch-1",
++      change_key: "2026-10-16-rename-title",
++      title: "变更中心标题提炼与存量回填方案",
++    });
++    renderPage();
++    const entry = await screen.findByTestId("change-rename-entry");
++    fireEvent.click(entry);
++
++    const input = screen.getByTestId("change-rename-input") as HTMLInputElement;
++    expect(input.value).toBe("旧标题占位");
++    fireEvent.change(input, { target: { value: "  变更中心标题提炼与存量回填方案  " } });
++
++    const save = screen.getByTestId("change-rename-save") as HTMLButtonElement;
++    expect(save).not.toBeDisabled();
++    fireEvent.click(save);
++
++    await waitFor(() => {
++      expect(mocks.renameChangeTitle).toHaveBeenCalledWith(
++        "ws-1",
++        "ch-1",
++        "变更中心标题提炼与存量回填方案",
++      );
++    });
++    // 成功后关弹层 + 缓存失效触发 getChange 重取
++    await waitFor(() => {
++      expect(screen.queryByTestId("change-rename-dialog")).toBeNull();
++      expect(mocks.getChange.mock.calls.length).toBeGreaterThan(1);
++    });
++  });
++
++  it("越带（<10 字）保存禁用并提示字数", async () => {
++    mocks.access = { userId: "u-owner", isPlatformAdmin: false, workspaceRole: null };
++    renderPage();
++    fireEvent.click(await screen.findByTestId("change-rename-entry"));
++
++    const input = screen.getByTestId("change-rename-input");
++    fireEvent.change(input, { target: { value: "太短" } });
++
++    expect(screen.getByTestId("change-rename-save")).toBeDisabled();
++    expect(screen.getByTestId("change-rename-hint").textContent).toContain("2");
++  });
++
++  it("无权限三元组不渲染改名入口", async () => {
++    renderPage();
++    await screen.findByText("旧标题占位");
++    expect(screen.queryByTestId("change-rename-entry")).toBeNull();
++  });
++});
+diff --git a/frontend/src/app/(dashboard)/workspaces/[id]/changes/[cid]/page.tsx b/frontend/src/app/(dashboard)/workspaces/[id]/changes/[cid]/page.tsx
+index 3a6f2e6d5..5d2735a40 100644
+--- a/frontend/src/app/(dashboard)/workspaces/[id]/changes/[cid]/page.tsx
++++ b/frontend/src/app/(dashboard)/workspaces/[id]/changes/[cid]/page.tsx
+@@ -57,6 +57,7 @@ import {
+   deleteChange,
+   getChange,
+   getChangeTimeline,
++  renameChangeTitle,
+   submitStageReview,
+   type ChangeRead,
+ } from "@/lib/changes";
+@@ -148,6 +149,44 @@ function stageSpans(rows: UnifiedRow[]): Array<{ label: string; value: string }>
+   return items.length > 0 ? items : [{ label: "阶段跨度", value: "暂无带时间戳的记录" }];
+ }
+ 
++/**
++ * 返回列表入口（2026-10-16-change-center-back-keeps-list-state）——breadcrumb「变更列表」
++ * 与错误态「← 变更列表」共用。历史可后退时点击走 router.back()（回离开前带 query 的列表
++ * URL，列表页从 URL 恢复 tab/页码，见列表页同变更的 URL 快照）；新标签深链（length<=1）
++ * 保持 Link 默认导航到默认列表。href 始终保留（新标签打开/收藏语义不变）；SSR 渲染输出
++ * 与客户端一致（判定只影响 onClick，不进 DOM），无 hydration mismatch。
++ */
++function BackToListLink({
++  workspaceId,
++  className,
++  children,
++}: {
++  workspaceId: string;
++  className?: string;
++  children: React.ReactNode;
++}) {
++  const router = useRouter();
++  // Next 14.2.5 history.state 无栈深标记（idx 为 Next 15+ 字段），以 length 判定：
++  // 从列表/其他页进入必有前置条目（>1）；新标签深链 =1。已知取舍：从站外页点进来时
++  // back 回站外页（标准返回语义，内部工具罕见）。
++  const canBack = typeof window !== "undefined" && window.history.length > 1;
++  return (
++    <Link
++      href={`/workspaces/${workspaceId}/changes`}
++      prefetch={false}
++      className={className}
++      onClick={(e) => {
++        if (canBack) {
++          e.preventDefault();
++          router.back();
++        }
++      }}
++    >
++      {children}
++    </Link>
++  );
++}
++
+ export default function ChangeDetailPage({ params }: Props) {
+   const workspaceId = params.id;
+   const changeId = params.cid;
+@@ -319,12 +358,12 @@ export default function ChangeDetailPage({ params }: Props) {
+         <div className="rounded border border-destructive/30 bg-red-50 px-3 py-2 text-xs text-destructive">
+           {loadError ?? "变更未找到"}
+         </div>
+-        <Link
+-          href={`/workspaces/${workspaceId}/changes`}
++        <BackToListLink
++          workspaceId={workspaceId}
+           className="mt-3 inline-block text-xs text-primary hover:underline"
+         >
+           ← 变更列表
+-        </Link>
++        </BackToListLink>
+       </PageContainer>
+     );
+   }
+@@ -348,9 +387,9 @@ export default function ChangeDetailPage({ params }: Props) {
+       <PageHead
+         breadcrumb={
+           <span className="flex items-center gap-1.5">
+-            <Link href={`/workspaces/${workspaceId}/changes`} className="hover:underline">
++            <BackToListLink workspaceId={workspaceId} className="hover:underline">
+               变更列表
+-            </Link>
++            </BackToListLink>
+             <span className="text-muted-foreground/60">/</span>
+             <span className="text-foreground">{change.change_key}</span>
+           </span>
+@@ -388,6 +427,15 @@ export default function ChangeDetailPage({ params }: Props) {
+         }
+         actions={
+           <span className="flex items-center gap-2">
++            {/* 2026-10-16-change-title-condense-backfill FR-06：改名入口与删除入口
++                同权限三元组可见（启发式少给无权者看按钮，后端 403 兜底）。 */}
++            {canDeleteChange(change, deleteAccess) ? (
++              <DetailRenameAction
++                workspaceId={workspaceId}
++                changeId={changeId}
++                currentTitle={change.title ?? change.change_key}
++              />
++            ) : null}
+             {canDeleteChange(change, deleteAccess) ? (
+               <DetailDeleteAction
+                 workspaceId={workspaceId}
+@@ -534,6 +582,114 @@ export default function ChangeDetailPage({ params }: Props) {
+   );
+ }
+ 
++/** 人工命名带宽（后端同款口径：strip 后 10-30 字必须，建议约 20，FR-05/06 单源）。 */
++const TITLE_MIN_LEN = 10;
++const TITLE_MAX_LEN = 30;
++
++/**
++ * 详情页改名动作——按钮 + 受控弹层（2026-10-16-change-title-condense-backfill
++ * FR-06，用户口径 2026-10-16：管理员/平台责任人/变更责任人可重命名 title）。
++ * 照 DetailDeleteAction 受控弹层范式；输入 strip 后 10-30 字内才启用保存，
++ * 越带禁用并实时提示字数；保存成功关弹层 + 失效详情/列表缓存（失败走 onError
++ * toast 不重开弹层，与删除动作一致）。
++ */
++function DetailRenameAction({
++  workspaceId,
++  changeId,
++  currentTitle,
++}: {
++  workspaceId: string;
++  changeId: string;
++  currentTitle: string;
++}) {
++  const queryClient = useQueryClient();
++  const notify = useNotify();
++  const [open, setOpen] = useState(false);
++  const [draft, setDraft] = useState(currentTitle);
++  const trimmed = draft.trim();
++  const inBand =
++    trimmed.length >= TITLE_MIN_LEN && trimmed.length <= TITLE_MAX_LEN;
++  const renameMutation = useMutation({
++    mutationFn: () => renameChangeTitle(workspaceId, changeId, trimmed),
++    onSuccess: async (res) => {
++      notify.success(`变更标题已更新：${res.title}`);
++      setOpen(false);
++      await queryClient.invalidateQueries({
++        queryKey: ["change", workspaceId, changeId],
++      });
++      await queryClient.invalidateQueries({
++        queryKey: ["changes", workspaceId],
++      });
++    },
++    onError: (err) => {
++      notify.error(err, "改名失败");
++    },
++  });
++  return (
++    <>
++      <Button
++        size="sm"
++        variant="outline"
++        data-testid="change-rename-entry"
++        className="text-muted-foreground"
++        onClick={() => {
++          setDraft(currentTitle);
++          setOpen(true);
++        }}
++      >
++        改名
++      </Button>
++      {open && (
++        <div
++          data-testid="change-rename-dialog"
++          className="fixed inset-0 z-50 flex items-center justify-center bg-black/30"
++        >
++          <div className="w-96 rounded-md border bg-background p-5 shadow-lg">
++            <h3 className="text-sm font-semibold">修改变更标题</h3>
++            <p className="mt-1 break-all font-mono text-xs text-muted-foreground">
++              10-30 字之内，建议 20 字左右概括变更内容
++            </p>
++            <input
++              id="change-rename-input"
++              value={draft}
++              onChange={(e) => setDraft(e.target.value)}
++              placeholder={currentTitle}
++              maxLength={80}
++              data-testid="change-rename-input"
++              className="mt-3 h-9 w-full rounded border border-input bg-background px-2.5 text-sm focus:border-ring focus:outline-none"
++            />
++            <div
++              className={`mt-1.5 text-xs ${
++                inBand ? "text-muted-foreground" : "text-destructive"
++              }`}
++              data-testid="change-rename-hint"
++            >
++              {trimmed.length} / 带宽 10-30 字
++            </div>
++            <div className="mt-4 flex justify-end gap-2">
++              <Button
++                size="sm"
++                variant="outline"
++                onClick={() => setOpen(false)}
++              >
++                取消
++              </Button>
++              <Button
++                size="sm"
++                disabled={!inBand || renameMutation.isPending}
++                data-testid="change-rename-save"
++                onClick={() => renameMutation.mutate()}
++              >
++                保存
++              </Button>
++            </div>
++          </div>
++        </div>
++      )}
++    </>
++  );
++}
++
+ /**
+  * 详情页删除动作——危险按钮 + 受控弹层（PageHead actions slot 挂载；仅权限可见者挂载
+  * 该子组件，未挂载即不触碰 router —— 无 app-router 上下文的环境不触发 invariant）。
+diff --git a/frontend/src/lib/api-types.ts b/frontend/src/lib/api-types.ts
+index 393accac3..b9eb4adea 100644
+--- a/frontend/src/lib/api-types.ts
++++ b/frontend/src/lib/api-types.ts
+@@ -1888,6 +1888,33 @@ export interface paths {
+         patch?: never;
+         trace?: never;
+     };
++    "/api/workspaces/{workspace_id}/changes/{change_id}/title": {
++        parameters: {
++            query?: never;
++            header?: never;
++            path?: never;
++            cookie?: never;
++        };
++        get?: never;
++        put?: never;
++        post?: never;
++        delete?: never;
++        options?: never;
++        head?: never;
++        /**
++         * Rename Change Title
++         * @description 平台改名入口（2026-10-16-change-title-condense-backfill FR-05，用户口径 2026-10-16）。
++         *
++         *     组合权限与删除端点同款三元组——变更责任人本人（``change.owner_id == 当前
++         *     用户``）**或** ``CHANGE_ARCHIVE``（workspace_owner 角色内置、platform_admin
++         *     经 has_permission 短路），即「管理员 || 平台责任人 || 变更责任人」；实现为
++         *     端点内组合校验（delete_change 同款先例）。带宽校验（10-30 字必须，strip 后
++         *     判，越带 422）、已删行 409、rename 审计事件由 ``ChangeService.rename_title``
++         *     给出。改名后的语义 title 不被 CLI 兜底上行回翻（is_fallback 收养守卫）。
++         */
++        patch: operations["rename_change_title_api_workspaces__workspace_id__changes__change_id__title_patch"];
++        trace?: never;
++    };
+     "/api/workspaces/{workspace_id}/changes/{change_id}/documents": {
+         parameters: {
+             query?: never;
+@@ -14620,6 +14647,33 @@ export interface components {
+             /** Comment */
+             comment?: string | null;
+         };
++        /**
++         * ChangeRenameRequest
++         * @description PATCH /changes/{cid}/title 请求（2026-10-16-change-title-condense-backfill FR-05）。
++         *
++         *     人工命名带宽（用户口径 2026-10-16：10-30 字之内必须、建议约 20）在服务层
++         *     strip 后校验（DTO 不设长度约束——错误信息要带当前字数与带宽说明，统一走
++         *     AppError 422 而非 pydantic 422）。
++         */
++        ChangeRenameRequest: {
++            /** Title */
++            title: string;
++        };
++        /**
++         * ChangeRenameResponse
++         * @description PATCH /changes/{cid}/title 响应（FR-05）：变更标识 + 改名后的新 title。
++         */
++        ChangeRenameResponse: {
++            /**
++             * Id
++             * Format: uuid
++             */
++            id: string;
++            /** Change Key */
++            change_key: string;
++            /** Title */
++            title: string;
++        };
+         /** ChangeReparseResponse */
+         ChangeReparseResponse: {
+             /**
+@@ -33058,6 +33112,42 @@ export interface operations {
+             };
+         };
+     };
++    rename_change_title_api_workspaces__workspace_id__changes__change_id__title_patch: {
++        parameters: {
++            query?: never;
++            header?: never;
++            path: {
++                workspace_id: string;
++                change_id: string;
++            };
++            cookie?: never;
++        };
++        requestBody: {
++            content: {
++                "application/json": components["schemas"]["ChangeRenameRequest"];
++            };
++        };
++        responses: {
++            /** @description Successful Response */
++            200: {
++                headers: {
++                    [name: string]: unknown;
++                };
++                content: {
++                    "application/json": components["schemas"]["ChangeRenameResponse"];
++                };
++            };
++            /** @description Validation Error */
++            422: {
++                headers: {
++                    [name: string]: unknown;
++                };
++                content: {
++                    "application/json": components["schemas"]["HTTPValidationError"];
++                };
++            };
++        };
++    };
+     get_change_documents_api_workspaces__workspace_id__changes__change_id__documents_get: {
+         parameters: {
+             query?: never;
+diff --git a/frontend/src/lib/changes.ts b/frontend/src/lib/changes.ts
+index 3420d49da..f05888a18 100644
+--- a/frontend/src/lib/changes.ts
++++ b/frontend/src/lib/changes.ts
+@@ -247,6 +247,30 @@ export function deleteChange(workspaceId: string, changeId: string) {
+   );
+ }
+ 
++// ── 变更改名（2026-10-16-change-title-condense-backfill task-07，FR-06）──
++
++/** PATCH /changes/{cid}/title 响应。对齐后端 schema（gen:types 生成）。 */
++export type ChangeRenameResponse = components["schemas"]["ChangeRenameResponse"];
++
++/**
++ * 改名变更标题 — PATCH /api/workspaces/{wid}/changes/{cid}/title
++ *
++ * 后端语义（FR-05）：权限三元组（变更责任人本人 OR change:archive——管理员/
++ * 平台责任人）+ strip 后 10-30 字校验（越带 422 code=change_title_length_invalid）+
++ * rename 审计事件；改名后的语义 title 不被 CLI 兜底上行回翻（is_fallback 守卫）。
++ * 入口可见性复用 canDeleteChange 三元组启发式（后端 403 兜底）。
++ */
++export function renameChangeTitle(
++  workspaceId: string,
++  changeId: string,
++  title: string,
++) {
++  return apiFetch<ChangeRenameResponse>(
++    `/api/workspaces/${workspaceId}/changes/${changeId}/title`,
++    { method: "PATCH", json: { title } },
++  );
++}
++
+ export function reparseChanges(workspaceId: string) {
+   return apiFetch<ChangeReparseResponse>(
+     `/api/workspaces/${workspaceId}/changes/reparse`,
+diff --git a/sillyhub-daemon/src/api-types.ts b/sillyhub-daemon/src/api-types.ts
+index 393accac3..b9eb4adea 100644
+--- a/sillyhub-daemon/src/api-types.ts
++++ b/sillyhub-daemon/src/api-types.ts
+@@ -1888,6 +1888,33 @@ export interface paths {
+         patch?: never;
+         trace?: never;
+     };
++    "/api/workspaces/{workspace_id}/changes/{change_id}/title": {
++        parameters: {
++            query?: never;
++            header?: never;
++            path?: never;
++            cookie?: never;
++        };
++        get?: never;
++        put?: never;
++        post?: never;
++        delete?: never;
++        options?: never;
++        head?: never;
++        /**
++         * Rename Change Title
++         * @description 平台改名入口（2026-10-16-change-title-condense-backfill FR-05，用户口径 2026-10-16）。
++         *
++         *     组合权限与删除端点同款三元组——变更责任人本人（``change.owner_id == 当前
++         *     用户``）**或** ``CHANGE_ARCHIVE``（workspace_owner 角色内置、platform_admin
++         *     经 has_permission 短路），即「管理员 || 平台责任人 || 变更责任人」；实现为
++         *     端点内组合校验（delete_change 同款先例）。带宽校验（10-30 字必须，strip 后
++         *     判，越带 422）、已删行 409、rename 审计事件由 ``ChangeService.rename_title``
++         *     给出。改名后的语义 title 不被 CLI 兜底上行回翻（is_fallback 收养守卫）。
++         */
++        patch: operations["rename_change_title_api_workspaces__workspace_id__changes__change_id__title_patch"];
++        trace?: never;
++    };
+     "/api/workspaces/{workspace_id}/changes/{change_id}/documents": {
+         parameters: {
+             query?: never;
+@@ -14620,6 +14647,33 @@ export interface components {
+             /** Comment */
+             comment?: string | null;
+         };
++        /**
++         * ChangeRenameRequest
++         * @description PATCH /changes/{cid}/title 请求（2026-10-16-change-title-condense-backfill FR-05）。
++         *
++         *     人工命名带宽（用户口径 2026-10-16：10-30 字之内必须、建议约 20）在服务层
++         *     strip 后校验（DTO 不设长度约束——错误信息要带当前字数与带宽说明，统一走
++         *     AppError 422 而非 pydantic 422）。
++         */
++        ChangeRenameRequest: {
++            /** Title */
++            title: string;
++        };
++        /**
++         * ChangeRenameResponse
++         * @description PATCH /changes/{cid}/title 响应（FR-05）：变更标识 + 改名后的新 title。
++         */
++        ChangeRenameResponse: {
++            /**
++             * Id
++             * Format: uuid
++             */
++            id: string;
++            /** Change Key */
++            change_key: string;
++            /** Title */
++            title: string;
++        };
+         /** ChangeReparseResponse */
+         ChangeReparseResponse: {
+             /**
+@@ -33058,6 +33112,42 @@ export interface operations {
+             };
+         };
+     };
++    rename_change_title_api_workspaces__workspace_id__changes__change_id__title_patch: {
++        parameters: {
++            query?: never;
++            header?: never;
++            path: {
++                workspace_id: string;
++                change_id: string;
++            };
++            cookie?: never;
++        };
++        requestBody: {
++            content: {
++                "application/json": components["schemas"]["ChangeRenameRequest"];
++            };
++        };
++        responses: {
++            /** @description Successful Response */
++            200: {
++                headers: {
++                    [name: string]: unknown;
++                };
++                content: {
++                    "application/json": components["schemas"]["ChangeRenameResponse"];
++                };
++            };
++            /** @description Validation Error */
++            422: {
++                headers: {
++                    [name: string]: unknown;
++                };
++                content: {
++                    "application/json": components["schemas"]["HTTPValidationError"];
++                };
++            };
++        };
++    };
+     get_change_documents_api_workspaces__workspace_id__changes__change_id__documents_get: {
+         parameters: {
+             query?: never;

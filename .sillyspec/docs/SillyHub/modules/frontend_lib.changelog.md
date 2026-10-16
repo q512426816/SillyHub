@@ -10,3 +10,4 @@ created_at: 2026-10-16 16:40:00
 - `api.ts` 401 收口契约注释同步（代码逻辑不变：null 才 clear+redirect，抛错自然传播）。
 - 用例：frontend/src/lib/__tests__/token-refresh.test.ts +3（503/504 抛错不清会话、408/429 归类、401 返 null）；13 处 `ensureFreshAccessToken` 调用点抛错容错审计通过（app-shell catch 兜底；其余与 timeout 先例同构）。
 - 2026-10-16-change-files-sync-result | change 文件树「刷新」同步链路三层静默失败——后端 RPC 预算 3s 短于实测 6~13.5…
+- 2026-10-16-change-title-condense-backfill | 变更中心标题提炼与存量回填

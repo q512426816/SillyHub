@@ -236,3 +236,105 @@ created_at: 2026-10-02T02:55:12.745Z
   confirmed_at: null
   source_change: 2026-10-16-change-center-back-keeps-list-state
   status: active
+
+## FR-change-011 title_norm 新增 condense_title 纯函数并在强/弱标点截断、上限30、硬截加省略号各形态有单测（用实证坏样本做用例）
+变更：2026-10-16-change-title-condense-backfill
+状态：active
+摘要：强边界截断不加省略号；句号强边界截断；无边界硬截加省略号；短文本原样返回；空输入
+全文：.sillyspec/changes/archive/2026-10-16-change-title-condense-backfill/requirements.md#FR-01
+最近确认：26271e914c9bd670faf2da32ab0851025c5e6598
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-16-change-title-condense-backfill:flow:测试绑定FR-01
+  tests: backend/app/modules/change/tests/test_title_normalization.py「TestCondenseTitle」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-16-change-title-condense-backfill
+  status: active
+
+## FR-change-012 _ensure_change_row 收养口对超30字上行标题提炼后入库、不超30字原样收养，有单测
+变更：2026-10-16-change-title-condense-backfill
+状态：active
+摘要：超长标题收养被提炼；常规标题原样收养；提炼结果为空放弃收养
+全文：.sillyspec/changes/archive/2026-10-16-change-title-condense-backfill/requirements.md#FR-02
+最近确认：26271e914c9bd670faf2da32ab0851025c5e6598
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-16-change-title-condense-backfill:flow:测试绑定FR-02
+  tests: backend/app/modules/change/tests/test_title_normalization.py「TestAdoptTitleCondenseGuard」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-16-change-title-condense-backfill
+  status: active
+
+## FR-change-013 新增一次性回填脚本 backend/scripts/backfill_change_titles.py：默认 dry-run、--apply 落库、--workspace 可定向，title 为兜底形态或超30字的行从 description 回填，服务层有单测且幂等
+变更：2026-10-16-change-title-condense-backfill
+状态：active
+摘要：兜底 title 从 description 回填；超长语义 title 同样回填；语义短 title 不动；无 description 跳过；幂等重跑
+全文：.sillyspec/changes/archive/2026-10-16-change-title-condense-backfill/requirements.md#FR-03
+最近确认：26271e914c9bd670faf2da32ab0851025c5e6598
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-16-change-title-condense-backfill:flow:测试绑定FR-03
+  tests: backend/app/modules/change/tests/test_title_backfill.py「TestTitleBackfillService」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-16-change-title-condense-backfill
+  status: active
+
+## FR-change-014 本地开发库 dry-run 核对计数后 --apply，抽查回填结果为约20字短句
+变更：2026-10-16-change-title-condense-backfill
+状态：active
+摘要：本地开发库回填执行
+全文：.sillyspec/changes/archive/2026-10-16-change-title-condense-backfill/requirements.md#FR-04
+最近确认：26271e914c9bd670faf2da32ab0851025c5e6598
+
+## FR-change-015 后端提供变更标题改名端点——管理员/平台责任人/变更责任人三元组可改，10-30 字校验，rename 事件留痕
+变更：2026-10-16-change-title-condense-backfill
+状态：active
+摘要：变更责任人本人改名成功；无权限用户 403；越带标题 422；已删行 409
+全文：.sillyspec/changes/archive/2026-10-16-change-title-condense-backfill/requirements.md#FR-05
+最近确认：26271e914c9bd670faf2da32ab0851025c5e6598
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-16-change-title-condense-backfill:flow:测试绑定FR-05
+  tests: backend/app/modules/change/tests/test_rename_title.py「TestRenameTitle」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-16-change-title-condense-backfill
+  status: active
+
+## FR-change-016 前端详情页提供改名入口（权限三元组可见，10-30 字校验提示，保存走新端点并刷新）
+变更：2026-10-16-change-title-condense-backfill
+状态：active
+摘要：权限可见与保存链路；无权限不可见
+全文：.sillyspec/changes/archive/2026-10-16-change-title-condense-backfill/requirements.md#FR-06
+最近确认：26271e914c9bd670faf2da32ab0851025c5e6598
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-16-change-title-condense-backfill:flow:测试绑定FR-06
+  tests: frontend/src/app/(dashboard)/workspaces/[id]/changes/[cid]/__tests__/page-rename-title.test.tsx「改名入口权限与保存链路」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-16-change-title-condense-backfill
+  status: active
