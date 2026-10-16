@@ -20,7 +20,7 @@ def test_agent_session_tablename() -> None:
     assert AgentSession.__tablename__ == "agent_sessions"
 
 
-def test_agent_session_has_all_34_fields() -> None:
+def test_agent_session_has_all_35_fields() -> None:
     expected = {
         "id",
         "user_id",
@@ -76,12 +76,17 @@ def test_agent_session_has_all_34_fields() -> None:
         "fork_of_session_id",
         "fork_at_run_id",
         "engine_fork_anchor",
+        # 2026-10-16-backend-mem-polling task-08：列表派生标题持久化列
+        # （首条 user_input 前 64 字符源；路由惰性回写自愈，NULL=漏网/''=已计算哨兵）。
+        # 钉子补录于 2026-10-16-agent-session-field-pin-sync（原变更漏更，
+        # 2026-10-16-fix-auth-random-logout verify 质量扫描拦截后清偿）。
+        "title_fallback",
     }
     actual = set(AgentSession.model_fields.keys())
     assert actual == expected, (
         f"AgentSession field mismatch. missing={expected - actual}, extra={actual - expected}"
     )
-    assert len(AgentSession.model_fields) == 34
+    assert len(AgentSession.model_fields) == 35
 
 
 def test_agent_session_defaults() -> None:
