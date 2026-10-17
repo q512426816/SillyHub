@@ -10,7 +10,7 @@ created_at: 2026-10-17T03:39:40.718Z
 
 本变更解决「zcode 会话创建成功但每轮 turn.failed：Select a model before continuing」。三重证据（宿主有效 provider_config.json / zcode.cjs bundle 内 `.strict()` schema 与写盘器输出 / daemon.log 三次同错误）钉死两层根因：① `zcode-settings.ts` 把 `providerConfigRules` 写成裸数组，而引擎文件级 schema 要求 `{providerRules:[...]}` 对象包裹（附 `modelConfigRules` 两键），裸数组被引擎静默丢弃 → 注册表无 sillyhub 提供程序；② `_applyModel` 在目录等待超时/精确命中两条路径上 `resolvedModelId` 保持 `undefined`，把 `modelId:undefined` 发给 setModel 必败。修复即改这两处：注入形状对齐引擎写盘器输出；`_applyModel` 以归一化字符串为初值、目录命中时附带引擎自报的 `options.reasoningLevel`（JSON-RPC 对象路径走严格校验，缺 reasoningLevel 即拒——探针 + 真机双实证）。
 
-inject → inputQueue → 驱动消费链路经 dl-out.log 实证无问题（会话 368a0ed6 的 inject 有缓冲有消费、restore 会话 idle 挂 `pulling input` 属正常等待），按用户要求核实后 inject/push 两侧**未加**验证日志；本修复新增的可观测性面仅一处——_applyModel 目录等待超时的目录快照 warn（诊断注入 provider 未注册用）。
+inject → inputQueue → 驱动消费链路经 dl-out.log 实证无问题（会话 368a0ed6 的 inject 有缓冲有消费、restore 会话 idle 挂 `pulling input` 属正常等待），按用户要求核实后 inject/push 两侧**未加**验证日志。本修复的行为面仅 env 覆盖一处（ZCODE_PERSONAL_PROVIDER_CONFIG_FILE 改指 per-session 文件，已入文件变更清单）+ 驱动侧诊断日志若干（spawn env keys / step 标记 / 目录快照 warn——真机排障面，随本变更提交入档）。
 
 ## 接口契约
 
