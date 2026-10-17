@@ -6667,3 +6667,79 @@ superseded_by：FR-app-workspace-pages-002
   confirmed_at: null
   source_change: 2026-10-15-assets-graph-depth
   status: active
+
+## FR-frontend-005 storage 回放改为只回放与本地当前状态实际不同的字段，回放值与本地完全一致时不调用 setState（不产生 localStorage 写盘），切断乒乓环路
+变更：2026-10-17-session-replay-pingpong-fix
+状态：active
+摘要：主路径
+全文：.sillyspec/changes/archive/2026-10-17-session-replay-pingpong-fix/requirements.md#FR-01
+最近确认：ec360c91bacb3ba997a8249f7c3e6d015d2f3e78
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-17-session-replay-pingpong-fix:flow:测试绑定FR-01
+  tests: frontend/src/stores/session.test.ts「同值回放（user 经 JSON 往返产生新引用）静默跳过：不改状态、不写 localStorage」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-17-session-replay-pingpong-fix
+  status: active
+
+## FR-frontend-006 真实跨标签同步语义保留：对方标签的 accessToken/refreshToken/user 真实变化仍正确回放到本页
+变更：2026-10-17-session-replay-pingpong-fix
+状态：active
+摘要：主路径
+全文：.sillyspec/changes/archive/2026-10-17-session-replay-pingpong-fix/requirements.md#FR-02
+最近确认：ec360c91bacb3ba997a8249f7c3e6d015d2f3e78
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-17-session-replay-pingpong-fix:flow:测试绑定FR-02
+  tests: frontend/src/stores/session.test.ts「仅 token 变化时只回放 token（本页 user 对象引用保持不动）」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-17-session-replay-pingpong-fix
+  status: active
+
+## FR-frontend-007 新增单测覆盖：同值回放跳过、异值回放生效、部分字段差异只回放差异字段
+变更：2026-10-17-session-replay-pingpong-fix
+状态：active
+摘要：主路径
+全文：.sillyspec/changes/archive/2026-10-17-session-replay-pingpong-fix/requirements.md#FR-03
+最近确认：ec360c91bacb3ba997a8249f7c3e6d015d2f3e78
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-17-session-replay-pingpong-fix:flow:测试绑定FR-03
+  tests: frontend/src/stores/session.test.ts
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-17-session-replay-pingpong-fix
+  status: active
+
+## FR-frontend-008 既有 token-refresh 等相关测试不回归
+变更：2026-10-17-session-replay-pingpong-fix
+状态：active
+摘要：主路径
+全文：.sillyspec/changes/archive/2026-10-17-session-replay-pingpong-fix/requirements.md#FR-04
+最近确认：ec360c91bacb3ba997a8249f7c3e6d015d2f3e78
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-17-session-replay-pingpong-fix:flow:测试绑定FR-04
+  tests: frontend/src/lib/__tests__/token-refresh.test.ts | frontend/src/stores/session.test.ts
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-17-session-replay-pingpong-fix
+  status: active

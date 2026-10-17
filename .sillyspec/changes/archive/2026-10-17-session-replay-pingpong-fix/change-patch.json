@@ -1,0 +1,77 @@
+{
+  "change": "2026-10-17-session-replay-pingpong-fix",
+  "baseline": "9abf0918bd6da10798030bd09476b4f87d8d1758",
+  "head": "ec360c91bacb3ba997a8249f7c3e6d015d2f3e78",
+  "files": [
+    "frontend/src/stores/session.test.ts",
+    "frontend/src/stores/session.ts"
+  ],
+  "totals": {
+    "files": 2,
+    "additions": 125,
+    "deletions": 11
+  },
+  "savedAt": "2026-10-17T13:02:52.040Z",
+  "note": "flow done 时点冻结（本变更可归属交付面：baseline..HEAD 提交面过滤 .sillyspec/ 只留 .sillyspec/docs/ 交付文档 + 独占树未提交交付；治理工件目录不入冻结——2026-10-12-close-trace-freeze-integrity FR-01）",
+  "modules": [
+    {
+      "id": "frontend",
+      "files": 2,
+      "doc": "docs/multi-agent-platform/modules/frontend.md",
+      "docTouched": false,
+      "docMissing": false
+    },
+    {
+      "id": "frontend_stores",
+      "files": 2,
+      "doc": "docs/SillyHub/modules/frontend_stores.md",
+      "docTouched": false,
+      "docMissing": false
+    }
+  ],
+  "uncoveredDirs": [],
+  "moduleMaps": [
+    "docs/backend/modules/_module-map.yaml",
+    "docs/frontend/modules/_module-map.yaml",
+    "docs/multi-agent-platform/modules/_module-map.yaml",
+    "docs/SillyHub/modules/_module-map.yaml",
+    "docs/sillyhub-daemon/modules/_module-map.yaml"
+  ],
+  "acceptedDirtyGap": 2,
+  "scopeAudit": {
+    "mode": "full-flow",
+    "ok": true,
+    "degradedReason": null,
+    "baseAnchor": "9abf0918bd6da10798030bd09476b4f87d8d1758",
+    "totals": {
+      "files": 2,
+      "additions": 125,
+      "deletions": 11
+    },
+    "rows": [
+      {
+        "path": "frontend/src/stores/session.test.ts",
+        "additions": 74,
+        "deletions": 1,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "planned"
+      },
+      {
+        "path": "frontend/src/stores/session.ts",
+        "additions": 51,
+        "deletions": 10,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "planned"
+      }
+    ],
+    "excluded": {
+      "foreignDeclared": []
+    },
+    "note": "flow done 时点冻结（本文件落盘时采集）",
+    "closedBy": "flow done"
+  },
+  "patchSha256": "9986153f835e521e4ceb8498286a908db0e46d25a42796613118f87640ebd036",
+  "patchStatus": "ok"
+}

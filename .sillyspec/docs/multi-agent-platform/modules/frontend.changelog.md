@@ -123,3 +123,4 @@
 | 2026-10-16 | 2026-10-16-change-center-delete-back-keeps-state | 变更详情页删除成功后 router.push 无参列表,丢 tab/页码(删归档区变更后回进行中第一… |
 - 2026-10-16-conflict-full-tree-compare | 原型视图 conflict-sync-states-view.tsx 与 prototype-build.mjs 重编译对账（原型产物 git diff 为空），改动面聚焦回归 44 用例绿
 | 2026-10-16 | 2026-10-17-audit-risk-followup | 24h 审计六连修收口：dsh/zcode 会话恢复白名单漏登记（daemon 重启静默丢记录）、r… |
+| 2026-10-17 | 2026-10-17-session-replay-pingpong-fix | 生产环境后端日志 HTTP_401_AUTH_TOKEN_EXPIRED 每秒约10条持续刷屏（单日… |

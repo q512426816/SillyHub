@@ -1,0 +1,67 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-17-session-replay-pingpong-fix",
+  "rows": [
+    {
+      "anchor": "FR-01",
+      "row_id": "2026-10-17-session-replay-pingpong-fix:flow:测试绑定FR-01",
+      "tests": [
+        "frontend/src/stores/session.test.ts「同值回放（user 经 JSON 往返产生新引用）静默跳过：不改状态、不写 localStorage」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-17-session-replay-pingpong-fix"
+    },
+    {
+      "anchor": "FR-02",
+      "row_id": "2026-10-17-session-replay-pingpong-fix:flow:测试绑定FR-02",
+      "tests": [
+        "frontend/src/stores/session.test.ts「仅 token 变化时只回放 token（本页 user 对象引用保持不动）」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-17-session-replay-pingpong-fix"
+    },
+    {
+      "anchor": "FR-03",
+      "row_id": "2026-10-17-session-replay-pingpong-fix:flow:测试绑定FR-03",
+      "tests": [
+        "frontend/src/stores/session.test.ts"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-17-session-replay-pingpong-fix"
+    },
+    {
+      "anchor": "FR-04",
+      "row_id": "2026-10-17-session-replay-pingpong-fix:flow:测试绑定FR-04",
+      "tests": [
+        "frontend/src/lib/__tests__/token-refresh.test.ts",
+        "frontend/src/stores/session.test.ts"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-17-session-replay-pingpong-fix"
+    }
+  ]
+}

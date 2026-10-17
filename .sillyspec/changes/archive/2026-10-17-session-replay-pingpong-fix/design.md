@@ -12,6 +12,11 @@ created_at: 2026-10-17T12:52:24.206Z
 
 选此方案依据：乒乓环路的自持能量来自「回放→persist 写盘→对方 storage 事件→回放」，从回放侧掐掉同值写盘即让环路失去自持条件（生产实证 2026-10-17：两标签各持不同过期 token，/api/auth/me 每秒 10 条 401 刷屏 11 小时）；同时不改 persist 配置、不动任何调用方，真实跨标签同步语义完整保留，改动面最小。
 
+## 文件变更清单
+
+- `frontend/src/stores/session.ts`（实现：回放差异比对 + sessionUserKey/isSameUser + 模块注释勘误）
+- `frontend/src/stores/session.test.ts`（测试：新增「session storage 同值回放静默（乒乓环路切断）」describe 3 用例）
+
 ## 接口契约
 
 动了哪些函数/端点/命令/文件格式？对外可见的签名或行为变化是什么（含「无」的说明）？

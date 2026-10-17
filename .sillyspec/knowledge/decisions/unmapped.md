@@ -490,3 +490,11 @@
 锚点：未记录
 最近确认：3fe545c63a4538a83f96a965c92579982bd388e9
 理由：最大风险：dsh 下个版本再改 compatProfile/valueId 形状——探针脚本 + configOptions 运行时可观测（模型目录出现/消失一目了然），回归成本低。已放弃：保留 compat 块仅修正漂移字段（rc.2 schema 字段集未文档化，逐字段试探成本高于整块去除——catalog 默认值由引擎按 api 协议自动补齐，语义无损）。
+
+## D-unmapped-081@v1 设计期风险与放弃方案（底稿）
+状态：implemented
+变更：2026-10-17-session-replay-pingpong-fix
+原编号：D-001@v1
+锚点：未记录
+最近确认：ec360c91bacb3ba997a8249f7c3e6d015d2f3e78
+理由：最大风险：比较漏判让乒乓换个字段复活。user 若未来从扁平对象演化为嵌套可变对象，现行「键排序后序列化」只对顶层键排序、不递归——需升级为递归 canonical（或改存单调版本号比对），session.test.ts 的键序用例会先红提示。 放弃的方案：①自定义 storage 包装层做写前去重——改动所有落盘路径，风险大于收益；②比较完整信封原始字符串——两端内存 user 对象键序不同会令字符串恒不等，乒乓换字段复活；③给 (dashboard)/layout 的 fetchMe 加节流——只治标，每秒 10+ 次 setItem 的写盘风暴仍在。
