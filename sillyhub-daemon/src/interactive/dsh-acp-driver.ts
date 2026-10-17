@@ -334,7 +334,9 @@ export class DshAcpDriver implements InteractiveDriver {
     });
     child.on('exit', (code, signal) => {
       if (ctx.closed) return;
-      // 非收口退出（进程自杀/崩溃）：结构化上报（对齐 zcode exit 语义）。
+      // 非收口退出（进程自杀/崩溃）：留痕可见。注意——此处仅日志，不做终态收敛
+      //（收敛缺口系既有语义，等输入态崩溃需等下一轮 30s 超时暴露；zcode 式
+      // finalizeWithError 收敛为后续任务，评审 P2 留档）。
       // eslint-disable-next-line no-console
       console.error(`[dsh-driver] child exited unexpectedly (code=${code ?? 'null'} signal=${signal ?? 'null'})`);
     });

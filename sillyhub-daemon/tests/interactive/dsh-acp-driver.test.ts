@@ -160,7 +160,8 @@ async function feedHandshake(useModel = false): Promise<void> {
   fake.stdout.push(resp(2, { sessionId: 'acp-s1' }));
   if (useModel) {
     fake.stdout.push(resp(3, {}));
-    await waitFor(() => readStdin(fake).includes('"optionId":"model"'));
+    // dsh rc.2 扁平形状（评审 P3：旧 optionId 等待条件已随驱动升级失效）
+    await waitFor(() => readStdin(fake).includes('"configId":"model"'));
   }
   await waitFor(() => readStdin(fake).includes('"method":"session/new"'));
 }
