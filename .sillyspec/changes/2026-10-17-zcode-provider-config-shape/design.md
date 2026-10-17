@@ -21,6 +21,17 @@ inject → inputQueue → 驱动消费链路经 dl-out.log 实证无问题（会
 - `ZcodeModelCatalogEntry`（zcode-events.ts）：新增可选字段 `reasoningDefaultLevel?: string`（提取自 state.updated 的 `reasoning.defaultLevel`）；对既有消费方向后兼容（可选字段）。
 - 端点/命令/表结构：无变化。
 
+## 文件变更清单（自声明对账面）
+
+| 操作 | 文件路径 | 说明 |
+|---|---|---|
+| 修改 | sillyhub-daemon/src/zcode-settings.ts | 注入形状修正（providerRules 对象包裹 + modelConfigRules 两键）+ 头注释同步 |
+| 修改 | sillyhub-daemon/src/interactive/zcode-app-server-driver.ts | _applyModel：字符串 modelId 三路径 + options.reasoningLevel + 等待窗 60s + 超时目录快照诊断 |
+| 修改 | sillyhub-daemon/src/interactive/zcode-events.ts | ZcodeModelCatalogEntry 增 reasoningDefaultLevel 提取 |
+| 修改 | sillyhub-daemon/tests/zcode-settings.test.ts | 形状钉板更新（对象包裹 + modelConfigRules） |
+| 修改 | sillyhub-daemon/tests/interactive/zcode-app-server-driver.test.ts | mock 目录带 levels/defaultLevel；setModel 参数形状钉板 |
+| 修改 | sillyhub-daemon/tests/interactive/zcode-events.test.ts | defaultLevel 提取钉板 |
+
 ## 边界与并发（盲维四问——每问必答，答不了即设计缺口）
 
 4. 作用域：跨工作区/跨仓/多实例时数据会不会串台？
