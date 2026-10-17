@@ -5354,3 +5354,74 @@
 摘要：主路径
 全文：.sillyspec/changes/archive/2026-10-17-dsh-rc2-protocol-fix/requirements.md#FR-04
 最近确认：162dbfefd8fa71afb10e792dc493c59dfaae4c0b
+
+## FR-daemon-163 writeDshHome 写三件套（package.json 模板清单 + pnpm-workspace.yaml + 无 compat 的 patch），单测钉三件与「禁 compat」
+变更：2026-10-17-dsh-rc2-routing-restore
+状态：active
+摘要：主路径
+全文：.sillyspec/changes/archive/2026-10-17-dsh-rc2-routing-restore/requirements.md#FR-01
+最近确认：3fe545c63a4538a83f96a965c92579982bd388e9
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-17-dsh-rc2-routing-restore:flow:测试绑定FR-01
+  tests: sillyhub-daemon/tests/dsh-settings.test.ts
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-17-dsh-rc2-routing-restore
+  status: active
+
+## FR-daemon-164 驱动 set_config_option 模型值 = ["sillyhub","<model>"] JSON 数组串，单测钉板
+变更：2026-10-17-dsh-rc2-routing-restore
+状态：active
+摘要：主路径
+全文：.sillyspec/changes/archive/2026-10-17-dsh-rc2-routing-restore/requirements.md#FR-02
+最近确认：3fe545c63a4538a83f96a965c92579982bd388e9
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-17-dsh-rc2-routing-restore:flow:测试绑定FR-02
+  tests: sillyhub-daemon/tests/interactive/dsh-acp-driver.test.ts「model + thinkingLevel=medium → set_config_option 扁平形状…」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-17-dsh-rc2-routing-restore
+  status: active
+
+## FR-daemon-165 通知信封拆包兼容两种形状（有 update 键即拆），单测/真机验证回复落库
+变更：2026-10-17-dsh-rc2-routing-restore
+状态：active
+摘要：主路径
+全文：.sillyspec/changes/archive/2026-10-17-dsh-rc2-routing-restore/requirements.md#FR-03
+最近确认：3fe545c63a4538a83f96a965c92579982bd388e9
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-17-dsh-rc2-routing-restore:flow:测试绑定FR-03
+  tests: sillyhub-daemon/tests/interactive/dsh-acp-driver.test.ts | sillyhub-daemon/tests/interactive/dsh-acp-events.test.ts
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-17-dsh-rc2-routing-restore
+  status: active
+
+## FR-daemon-166 UI 真机一轮：dsh 会话回复正常渲染，模型自答 GLM-5.3-FlashX/智谱
+变更：2026-10-17-dsh-rc2-routing-restore
+状态：active
+摘要：主路径
+全文：.sillyspec/changes/archive/2026-10-17-dsh-rc2-routing-restore/requirements.md#FR-04
+最近确认：3fe545c63a4538a83f96a965c92579982bd388e9
+
+## FR-daemon-167 typecheck + dsh 相关单测全绿
+变更：2026-10-17-dsh-rc2-routing-restore
+状态：active
+摘要：主路径
+全文：.sillyspec/changes/archive/2026-10-17-dsh-rc2-routing-restore/requirements.md#FR-05
+最近确认：3fe545c63a4538a83f96a965c92579982bd388e9

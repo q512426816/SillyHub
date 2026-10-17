@@ -6,15 +6,27 @@ created_at: 2026-10-17T09:09:32.394Z
 
 ## 做法概述
 
+本变更怎么解决问题？改哪里、为什么选这个方案（一两段）。
+
 dsh-rc2-protocol-fix 后轮次可达但暴露三层：① compat 块被 rc.2 compatProfile 新 schema 静默拒收（整条 provider 不激活——探针双轮实证带/不带 compat 的模型目录差异）；② 模型 valueId 变 JSON 数组串；③ 通知信封未拆包致回复零落库。修法：writeDshHome 改三件套布局（package.json 模板清单 + workspace + 无 compat patch——catalog 默认值由引擎按 api 协议补齐，compat 留给引擎自带）；驱动模型值组装 `["sillyhub","<model>"]`（DSH_PROVIDER_ID 单源）；通知处理兼容信封拆包。UI 真机终验：模型自答 GLM-5.3-FlashX/智谱，路由完整恢复。
 
 ## 接口契约
+
+动了哪些函数/端点/命令/文件格式？对外可见的签名或行为变化是什么（含「无」的说明）？
 
 - `writeDshHome`（dsh-settings.ts）：写 profiles/acp/ 三件套（新增 package.json + pnpm-workspace.yaml），patch 去 compat 块；新导出 DSH_PROVIDER_ID。
 - `DshAcpDriver.consume`：模型 set_config_option 值改 valueId 数组串；通知处理信封拆包（兼容旧直发形状）。
 - 端点/命令/表结构：无变化。
 
 ## 边界与并发（盲维四问——每问必答，答不了即设计缺口）
+
+4. 作用域：跨工作区/跨仓/多实例时数据会不会串台？
+
+3. 切换/生命周期：会话、请求或变更中途切换/中断时状态是否安全？
+
+2. 并发写：两个执行体同时操作同一数据/文件会发生什么？
+
+1. 乱序/迟到到达：输入或事件乱序时，本设计的假设还成立吗？
 
 1. 乱序/迟到到达：通知拆包在驱动消费侧即时判形状，无时序假设。
 2. 并发写：per-session 目录独占写，三件套为单写方（provider-file-settings 分派层串行调用）。
@@ -31,5 +43,7 @@ dsh-rc2-protocol-fix 后轮次可达但暴露三层：① compat 块被 rc.2 com
 | 修改 | sillyhub-daemon/tests/interactive/dsh-acp-driver.test.ts | valueId 数组串钉板 |
 
 ## 风险与死路
+
+本方案最大的风险是什么？试过但放弃的方案及放弃理由？
 
 最大风险：dsh 下个版本再改 compatProfile/valueId 形状——探针脚本 + configOptions 运行时可观测（模型目录出现/消失一目了然），回归成本低。已放弃：保留 compat 块仅修正漂移字段（rc.2 schema 字段集未文档化，逐字段试探成本高于整块去除——catalog 默认值由引擎按 api 协议自动补齐，语义无损）。

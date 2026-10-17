@@ -1,6 +1,12 @@
 tier: thin
 legacy_fallback: false
-substeps: {}
+substeps:
+  artifacts: done
+  ledger: done
+  patch: done
+  review: done
+  probes: done
+  distill: done
 born_face: thin
 with_tasks: false
 review_force: null
@@ -25,11 +31,19 @@ input: >-
   - UI 真机一轮：dsh 会话回复正常渲染，模型自答 GLM-5.3-FlashX/智谱
 
   - typecheck + dsh 相关单测全绿
-autopilot: false
+autopilot: true
 prestage_ack: true
 baseline_commit: 162dbfefd8fa71afb10e792dc493c59dfaae4c0b
-updatedAt: '2026-10-17T09:09:32.411Z'
+updatedAt: '2026-10-17T09:23:32.946Z'
 cross_baselines:
   sillyspec: 560af6a23a038e6ee6118a7bcce7b6b3d2481e22
 baseline_sha256: afc6fae2e08fb2496278ca7bedc20f11b52d9846b3f8a138012b5aa8f22594af
+batch_ticked: true
+gate_summary: >-
+  test: passed ← module[]+deps(py35+jsx9+jsx34)+fr(78)（294.3s）
+  结果：C:\Users\qinyi\IdeaProjects\multi-agent-platform\.sillyspec\.runtime\verify-runs\20261017091602\test-result.json｜lint:
+  passed ← cd backend && uv run ruff check . && uv run ruff format --check . && uv run mypy app && cd ../frontend &&
+  pnpm lint && cd ../sillyhub-daemon && pnpm typecheck（13.9s）
+  结果：C:\Users\qinyi\IdeaProjects\multi-agent-platform\.sillyspec\.runtime\verify-runs\20261017091602\test-result.json｜门文件
+  8 个
 

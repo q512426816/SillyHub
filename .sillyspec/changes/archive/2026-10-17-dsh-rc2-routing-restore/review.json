@@ -1,0 +1,50 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-17-dsh-rc2-routing-restore",
+  "reviewer": "subagent",
+  "verdict": "PASS",
+  "reviewedAgainst": "3fe545c63a4538a83f96a965c92579982bd388e9",
+  "baseline": "162dbfefd8fa71afb10e792dc493c59dfaae4c0b",
+  "findings": [
+    {
+      "severity": "P3",
+      "title": "提交信息用例数声称失实：「37→40 用例全绿」不可复现，交付面实际零新增用例（P2 清偿补 1 例后三文件共 38）",
+      "evidence": "git diff 162dbfefd8..4202ca4d1 对三测试文件的用例数：基线与交付恒等（dsh-settings 9 + dsh-acp-driver 15 + dsh-acp-events 13 = 37，逐文件 git show 计数一致）；交付只重写 1 例（settings 三件套）+ 改 1 例断言（driver valueId）。复跑 pnpm vitest run 三文件 = 37 passed (37)。40 在提交信息所述口径下不可复现。P2 清偿（3fe545c6）补入信封拆包回归钉后为 38。测试本体全绿无疑，属留痕准确性问题（CLAUDE.md 规则 18 注释/留痕与实现一致纪律的提交信息版）。",
+      "location": "提交 4b6ae3b8e message；sillyhub-daemon/tests/（用例计数）"
+    },
+    {
+      "severity": "P3",
+      "title": "patch 内 models 元数据硬编码魔法值（contextWindow:200000/maxTokens:128000/reasoningEfforts:false）无文档出处，且与「引擎自动补齐」表述存在张力",
+      "evidence": "writeDshHome 对任意模型一刀切写死窗口 200000/128000（dsh-settings.ts:113-117），design.md/requirements.md 均未提这些值；同文件头注与函数头注称「catalog 默认值由引擎按 api 协议自动补齐」（去 compat 的理由），既然引擎补齐，models 元数据具体值的来源（探针钉板 or 猜测）未声明。影响面：usage_update 的 context_size 分母与引擎上下文管理按 200K 口径（实际模型窗口未必），reasoningEfforts:false 与驱动发送 reasoning_effort 档位并存（引擎拒收走既有非致命 warn 降级兜底）。真机终验路由已实证工作，低危留痕。",
+      "location": "sillyhub-daemon/src/dsh-settings.ts:110-117"
+    },
+    {
+      "severity": "P3",
+      "title": "旧版 dsh（rc.2 之前）兼容边界未显式声明——形状依据注释诚实，支持矩阵缺一句",
+      "evidence": "两处头注均如实声明形状依据为「dsh 0.2.0-rc.2 内 @agentclientprotocol/sdk zod schema + llm-pi-ai lib profile schema（2026-10-17 探针三轮钉板）」（dsh-settings.ts:15-16/73-82；dsh-acp-driver.ts:258-260），被评审问到的「是否如实声明形状依据（rc.2 钉板）」答案为是。但未写「rc.2 之前版本不在支持矩阵」：valueId 数组串/扁平 set_config_option 在旧版会 Invalid params（走非致命 warn + 引擎默认模型软着陆，可接受），三件套布局对旧版引擎 boot 的影响未验证。按 CLAUDE.md 规则 11（未上线不要求历史兼容）+ 平台 pin rc.2 可接受；建议补一句支持矩阵声明防误配旧版 dsh 的用户排障走弯路。",
+      "location": "sillyhub-daemon/src/dsh-settings.ts:14-16"
+    },
+    {
+      "severity": "P3",
+      "title": "信息性：PATCH_DIR_PARTS 注释漂移 + 裸 writeFile 非原子写 + 拆包判据不区分通知 method（均为既有/理论面）",
+      "evidence": "① dsh-settings.ts:34 注释仍称「patch 相对路径」，常量已改指三件套所在目录（PATCH_DIR_PARTS），措辞轻微滞后；② writeDshHome 用裸 writeFile + Promise.all 三文件并发（创建顺序不定、非 writeFileAtomic），热切换时引擎 HMR 理论可读半写文件——窗口极窄且为既有模式（改前亦裸 writeFile），非本次引入；③ 拆包判据「有 update 键即拆」按形状即时判定无时序假设（盲维①成立），但 AcpJsonRpcConnection._onLine 对所有通知 method 无差别分发（:539-540），若未来某非 session/update 通知 params 恰含 update 键会误拆——ACP 现有通知族无此形状，理论面留痕。",
+      "location": "sillyhub-daemon/src/dsh-settings.ts:34-35/120-129; sillyhub-daemon/src/interactive/dsh-acp-driver.ts:539-540"
+    }
+  ],
+  "dimensionNotes": {
+    "乱序": "ok——信封拆包在驱动消费侧即时判形状（有 update 键即拆/无键透传旧直发），零时序假设（dsh-acp-driver.ts:295-299）；通知监听 per-turn 注册 unregister（:290/:323），轮外通知不串轮；_early 早到响应暂存机制不受影响。",
+    "并发": "ok——DSH_HOME=<daemonStateDir>/dsh/<sessionKey> per-session 隔离（provider-file-settings.ts:137，sessionKey=agent_sessions.id），写方唯一（provider-file-settings 分派层）：create 路径会话生命周期内写一次，reload 重写由显式切换触发；裸 writeFile 半写窗口为既有模式（见 P3-④）。",
+    "切换": "ok——写盘先于 spawn 由构造保证：daemon.ts:9253 await applyProviderFileSettings → env 合并（DSH_HOME 键）→ sessionManager.create → driver.start；reload 同序（session-manager.ts:2021 await → 2077 driver.start）。热切换重写幂等有单测（「幂等重写」用例）。",
+    "作用域": "ok——per-session 目录隔离 + provider 键固定 sillyhub 常量（DSH_PROVIDER_ID 单源导出），无跨仓/跨工作区串台。安全面核查通过：三件套内容零密钥明文——apiKeyEnv 只存变量名 SILLYHUB_DSH_API_KEY（密钥本体经 DshCredentialInjector 注子进程 env），单测钉 not.toContain('sk-test')；package.json/pnpm-workspace.yaml 无敏感面；baseURL 落盘为既有语义。",
+    "三方一致": "ok——FR-01 三件套写盘（package.json dsh.profile.bundles 模板清单 + pnpm-workspace.yaml + 无 compat patch）实现与单测逐面钉板一致（manifest.bundles 精确断言、not.toContain('compat')）；FR-02 valueId 数组串 JSON.stringify([DSH_PROVIDER_ID, opts.model])（driver:261）与单测断言「value:[\\\"sillyhub\\\",\\\"deepseek-v4\\\"]」一致，patch providers 键（dsh-settings.ts:105）与驱动组装（driver:261）经 DSH_PROVIDER_ID 同源、无字面量漂移；FR-03 实现符合「有 update 键即拆、兼容旧直发形状」；FR-04/FR-05 绑定补答如实（命令级实测留痕，4202ca4d1 补 FR-05）。",
+    "P2清偿留痕": "首评 P2（FR-03 信封拆包无单测钉板）已于 3fe545c63a 清偿并复核关单：新增用例「rc.2 信封形状（params={sessionId,update:{…}}）→ 拆包后内容事件照常产出」——updateEnvelopeLine helper 喂官方 SDK 信封 params={sessionId:'acp-s1', update:{agent_message_chunk…}}，断言 text 事件产出且 content='信封答'；拆包分支若被删，normalizeAcpUpdate({sessionId,update}) 走 default 返回 [] → 断言必红，回归钉真实有效。清偿提交父提交核实为 4202ca4d1（被审交付 HEAD），仅触 tests/interactive/dsh-acp-driver.test.ts（+36 行，零源文件改动），三文件复跑 38/38 全绿（16+9+13）。",
+    "生成物": "ok——交付 diff 零 api-types/openapi 触碰（后端 schema 未动，gen:types 义务不触发）；change-patch.json 冻结面（4 代码文件 + 2 changelog）与实际交付一致；changelog 新增行为 protocol-fix 归档留痕（本变更未归档故无行，惯例一致）。范围核对：162dbfefd8..4202ca4d1 实为 2 个交付提交（4b6ae3b8e 交付 + 4202ca4d1 FR-05 补答）+ 1 个评审清偿提交（3fe545c6，纯测试），非评审任务书最初所述三个；protocol-fix 归档产物随 4b6ae3b8e 入库（flow done 惯例，非越权面）。",
+    "旧版兼容": "形状依据注释如实声明 rc.2 钉板（见 P3-③）；set_config_option 失败非致命降级为旧版 dsh 提供软着陆（warn + 引擎默认模型继续），三件套布局对旧版引擎影响未验证——按项目未上线规则 11 可接受。"
+  },
+  "verification": {
+    "tests": "pnpm vitest run tests/dsh-settings.test.ts tests/interactive/dsh-acp-driver.test.ts tests/interactive/dsh-acp-events.test.ts → Test Files 3 passed (3), Tests 38 passed (38)（P2 清偿后；交付时点为 37，提交信息声称 40 不可复现——见 P3-①）",
+    "typecheck": "pnpm -C sillyhub-daemon typecheck → tsc --noEmit 零输出通过（评审独立复跑）",
+    "uiE2e": "不适用评审复跑（真机终验留痕采信：会话 12b39e8b 模型自答 GLM-5.3-FlashX/智谱 + 探针三轮钉板 + 401 到达 bigmodel 假 key 路由证据，与会话 e201445d 负样本构成闭环）"
+  },
+  "reviewedAt": "2026-10-17T17:45:00+08:00"
+}
