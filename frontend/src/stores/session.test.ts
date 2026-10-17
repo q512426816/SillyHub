@@ -199,3 +199,127 @@ describe("session storage 同值回放静默（乒乓环路切断）", () => {
     expect(useSession.getState().user).toBe(USER_A);
   });
 });
+
+// ── 信封 rev 防乱序（2026-10-17-session-envelope-rev-stale-guard）───────────
+//
+// 回放无版本概念时，迟到的旧信封（内容基于已过时的本页状态）仍会覆盖较新本地
+// 值——已登出/已续票的标签页可能被幽灵复活（评审 P3-3）。单调 rev：用户驱动的
+// 三个变更加一，回放只采纳远端 rev；rev 更旧的信封整体忽略。
+describe("session 信封 rev 防乱序（陈旧忽略/采纳）", () => {
+  let setItemSpy: ReturnType<typeof vi.spyOn>;
+
+  beforeEach(() => {
+    useSession.setState({
+      user: USER_A,
+      accessToken: "tok-a",
+      refreshToken: "rf-a",
+      rev: 3,
+      hydrated: true,
+    });
+    window.localStorage.clear();
+    setItemSpy = vi.spyOn(Storage.prototype, "setItem");
+  });
+
+  afterEach(() => {
+    setItemSpy.mockRestore();
+  });
+
+  it("陈旧信封（rev 小于本地）整体忽略：内容不同也不采纳、不写盘", () => {
+    fireRemoteWrite(
+      persisted({
+        accessToken: "tok-x",
+        refreshToken: "rf-x",
+        user: USER_A,
+        hydrated: true,
+        rev: 2,
+      }),
+    );
+    expect(useSession.getState().accessToken).toBe("tok-a");
+    expect(useSession.getState().refreshToken).toBe("rf-a");
+    expect(useSession.getState().rev).toBe(3);
+    expect(setItemSpy).not.toHaveBeenCalled();
+  });
+
+  it("新 rev 信封采纳：内容同步且 rev 跟随远端（回放不自行加一）", () => {
+    fireRemoteWrite(
+      persisted({
+        accessToken: "tok-b",
+        refreshToken: "rf-b",
+        user: USER_A,
+        hydrated: true,
+        rev: 7,
+      }),
+    );
+    expect(useSession.getState().accessToken).toBe("tok-b");
+    expect(useSession.getState().rev).toBe(7);
+  });
+
+  it("内容全等但 rev 更新 → 仅同步 rev（内容引用不动）", () => {
+    fireRemoteWrite(
+      persisted({
+        accessToken: "tok-a",
+        refreshToken: "rf-a",
+        user: USER_A,
+        hydrated: true,
+        rev: 9,
+      }),
+    );
+    expect(useSession.getState().accessToken).toBe("tok-a");
+    expect(useSession.getState().user).toBe(USER_A);
+    expect(useSession.getState().rev).toBe(9);
+  });
+
+  it("等 rev + 同内容 → 静默不写盘（乒乓切断语义在 rev 层仍成立）", () => {
+    setItemSpy.mockClear();
+    fireRemoteWrite(
+      persisted({
+        accessToken: "tok-a",
+        refreshToken: "rf-a",
+        user: USER_A,
+        hydrated: true,
+        rev: 3,
+      }),
+    );
+    expect(useSession.getState().rev).toBe(3);
+    expect(useSession.getState().user).toBe(USER_A);
+    expect(setItemSpy).not.toHaveBeenCalled();
+  });
+
+  it("等 rev + 不同内容 → 采纳远端（并发写冲突以后到为准）", () => {
+    fireRemoteWrite(
+      persisted({
+        accessToken: "tok-b",
+        refreshToken: "rf-a",
+        user: USER_A,
+        hydrated: true,
+        rev: 3,
+      }),
+    );
+    expect(useSession.getState().accessToken).toBe("tok-b");
+    expect(useSession.getState().rev).toBe(3);
+  });
+
+  it("无 rev 旧形状信封 → 走既有内容比对路径（向后兼容）", () => {
+    fireRemoteWrite(
+      persisted({
+        accessToken: "tok-legacy",
+        refreshToken: "rf-legacy",
+        user: USER_A,
+        hydrated: true,
+      }),
+    );
+    expect(useSession.getState().accessToken).toBe("tok-legacy");
+    expect(useSession.getState().rev).toBe(3); // 旧信封不动本地 rev
+  });
+
+  it("用户驱动变更加一：setTokens/clear 各 +1，markHydrated 不加", () => {
+    const before = useSession.getState().rev;
+    useSession.getState().setTokens({ accessToken: "n1", refreshToken: "n2" });
+    expect(useSession.getState().rev).toBe(before + 1);
+    useSession.getState().markHydrated();
+    expect(useSession.getState().rev).toBe(before + 1);
+    useSession.getState().clear();
+    expect(useSession.getState().accessToken).toBeNull();
+    expect(useSession.getState().rev).toBe(before + 2);
+  });
+});

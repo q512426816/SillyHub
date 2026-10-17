@@ -1,0 +1,29 @@
+tier: thin
+legacy_fallback: false
+substeps: {}
+born_face: thin
+with_tasks: false
+review_force: null
+input: >-
+  动机：2026-10-17-session-replay-pingpong-fix 评审
+  P3-3——跨标签回放无版本概念，迟到的旧信封（内容基于已过时的本页状态）仍会覆盖较新的本地值，可造成已登出/已续票标签页的幽灵状态复活，与刚修掉的 11 小时 401 风暴同源子系统隐患；修法小而内聚值得现在收口。
+
+  成功标准：
+
+  - SessionState 新增单调 rev 计数器：setTokens/setUser/clear 三个用户驱动变更加一，storage 回放不自动加一而是采纳远端 rev
+
+  - 回放守卫：远端信封 rev 严格小于本地 rev 时整体忽略（陈旧）；等于时走既有内容比对（同值静默）；大于时采纳内容并同步 rev；内容全等但 rev 更新时仅同步 rev
+
+  - 向后兼容：无 rev 字段的旧形状信封走既有内容比对路径，既有 6+3 用例语义不变
+
+  - 新增单测覆盖：陈旧忽略、新 rev 采纳并同步、同内容仅同步 rev、等值同内容静默、变更加一
+
+  - 既有 token-refresh/session 测试不回归
+autopilot: true
+prestage_ack: false
+baseline_commit: 21da837decca77034d48eba3ca907588eb9373ee
+updatedAt: '2026-10-17T13:14:59.553Z'
+cross_baselines:
+  sillyspec: df205821aee3fe73700e812f13fe720b28f45312
+baseline_sha256: 10035b2734a2ea973e38533479eba6160c63000be10143da8fac407f4a95fc1e
+
