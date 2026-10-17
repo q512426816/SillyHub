@@ -136,6 +136,17 @@ function updateLine(update: Record<string, unknown>): string {
   return JSON.stringify({ jsonrpc: '2.0', method: 'session/update', params: update }) + '\n';
 }
 
+/** session/update 通知行——rc.2 官方 ACP SDK 信封形状（params={sessionId, update:{…}}）。 */
+function updateEnvelopeLine(update: Record<string, unknown>): string {
+  return (
+    JSON.stringify({
+      jsonrpc: '2.0',
+      method: 'session/update',
+      params: { sessionId: 'acp-s1', update },
+    }) + '\n'
+  );
+}
+
 /** 服务端权限请求行（id 由服务端分配，此处用 100+）。 */
 function permissionRequestLine(
   id: number,
@@ -277,6 +288,31 @@ describe('DshAcpDriver：turn 循环与打断', () => {
       is_error: false,
       session_id: 'acp-s1',
     });
+    q.close();
+    await consuming;
+  });
+
+  it('rc.2 信封形状（params={sessionId,update:{…}}）→ 拆包后内容事件照常产出（评审 P2 回归钉：不拆则回复零落库）', async () => {
+    const driver = new DshAcpDriver();
+    const q = makeInputQueue();
+    const handle = await driver.start(q.queue, makeOpts());
+    const { cb, messages, results } = makeCallbacks();
+    const consuming = driver.consume(handle, cb);
+    await feedHandshake();
+    q.push('你好');
+    await waitFor(() => readStdin(fake).includes('"method":"session/prompt"'));
+    // 官方 ACP SDK v2 信封：update 嵌在 params.update 内
+    fake.stdout.push(
+      updateEnvelopeLine({
+        sessionUpdate: 'agent_message_chunk',
+        messageId: 'm1',
+        content: { type: 'text', text: '信封答' },
+      }),
+    );
+    fake.stdout.push(resp(3, { stopReason: 'end_turn' }));
+    await waitFor(() => results.length === 1);
+    expect(messages.map((m) => m.type)).toEqual(['text']);
+    expect(messages[0]).toMatchObject({ content: '信封答' });
     q.close();
     await consuming;
   });
