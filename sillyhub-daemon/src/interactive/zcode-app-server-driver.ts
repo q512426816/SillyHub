@@ -115,17 +115,21 @@ export class ZcodeAppServerDriver implements InteractiveDriver {
   private readonly readyTimeoutMs: number;
   private readonly controlTimeoutMs: number;
   private readonly compactTimeoutMs: number;
+  /** 模型目录等待窗（_applyModel；生产 ~30–45s 到达，默认 60s 余量；测试注入小值）。 */
+  private readonly catalogWaitTimeoutMs: number;
 
   constructor(
     opts: {
       readyTimeoutMs?: number;
       controlTimeoutMs?: number;
       compactTimeoutMs?: number;
+      catalogWaitTimeoutMs?: number;
     } = {},
   ) {
     this.readyTimeoutMs = opts.readyTimeoutMs ?? DEFAULT_READY_TIMEOUT_MS;
     this.controlTimeoutMs = opts.controlTimeoutMs ?? DEFAULT_CONTROL_TIMEOUT_MS;
     this.compactTimeoutMs = opts.compactTimeoutMs ?? DEFAULT_COMPACT_TIMEOUT_MS;
+    this.catalogWaitTimeoutMs = opts.catalogWaitTimeoutMs ?? 60_000;
   }
 
   async start(
@@ -616,7 +620,9 @@ export class ZcodeAppServerDriver implements InteractiveDriver {
    * 严格校验路径（Vie），options.reasoningLevel 缺失即报「Reasoning level is
    * required」（目录条目 levels=[low,high,max] defaultLevel=max——个人模型恒非
    * 空 levels，真机实证）。故目录命中时必带 options.reasoningLevel（引擎自报
-   * defaultLevel ?? 末档）；目录 30s 仍未到达时兜底裸发（保持非致命语义）。
+   * defaultLevel ?? 末档）；目录 60s 仍未到达时兜底裸发（保持非致命语义）。
+   * levels 推导统一在等待循环之后做——精确命中与大小写命中两条退出路径都要
+   * 附带（评审 P2：推导内联在大小写分支会让精确命中裸发被引擎拒）。
    */
   private async _applyModel(h: ZcodeHandle, model: string | { modelId?: unknown; providerId?: unknown }): Promise<void> {
     let resolvedProviderId = ZCODE_PROVIDER_ID;
@@ -631,36 +637,38 @@ export class ZcodeAppServerDriver implements InteractiveDriver {
         : String(model);
     let reasoningLevel: string | undefined;
     const modelId = resolvedModelId;
-    // 等模型目录出现目标 model（最多 60s）：个人 provider 注册 + 目录推送实测
-    // 需要 ~30s（spawn 起算，真机实证 30~45s 漂移到达），窗口留出余量。
-    const catalogDeadline = Date.now() + 60_000;
-    while (!(h.stateSnapshot && h.stateSnapshot.modelCatalog && h.stateSnapshot.modelCatalog.some(
-      (e) => e.modelId === modelId))) {
+    // 精确 → 大小写不敏感两级匹配（平台 glm-5.3 vs registry GLM-5.3）。
+    const findEntry = () =>
+      h.stateSnapshot?.modelCatalog?.find((e) => e.modelId === modelId)
+      ?? h.stateSnapshot?.modelCatalog?.find(
+        (e) => e.modelId.toLowerCase() === modelId.toLowerCase());
+    // 等模型目录出现目标 model（最多 catalogWaitTimeoutMs，默认 60s）：个人
+    // provider 注册 + 目录推送实测 ~30–45s（spawn 起算，真机漂移），窗口留余量。
+    const catalogDeadline = Date.now() + this.catalogWaitTimeoutMs;
+    let found = findEntry();
+    while (!found) {
       if (Date.now() > catalogDeadline) {
         // 目录始终未含目标模型：大多为注入 provider 配置未注册（形状/时序）。
         // 留目录快照诊断（不抛——setModel 失败由调用方降级 warn）。
         const catalog = h.stateSnapshot?.modelCatalog?.map((e) => e.modelId) ?? [];
         console.warn(
-          `[zcode-driver] model catalog 未含 '${modelId}'（60s 等待超时），目录=${JSON.stringify(catalog).slice(0, 400)}`,
+          `[zcode-driver] model catalog 未含 '${modelId}'（${this.catalogWaitTimeoutMs}ms 等待超时），目录=${JSON.stringify(catalog).slice(0, 400)}`,
         );
-        break;
-      }
-      // 大小写不敏感匹配（平台 glm-5.3 vs registry GLM-5.3）。
-      const found = h.stateSnapshot && h.stateSnapshot.modelCatalog && h.stateSnapshot.modelCatalog.find(
-        (e) => e.modelId.toLowerCase() === modelId.toLowerCase());
-      if (found) {
-        resolvedProviderId = found.providerId;
-        resolvedModelId = found.modelId;
-        // 严格路径要求 reasoningLevel（引擎自报默认档，末档兜底——引擎约定
-        // values.at(-1)=defaultLevel，探针实证 [low,high,max] default=max）。
-        reasoningLevel = found.reasoningDefaultLevel
-          ?? (found.reasoningLevels && found.reasoningLevels.length > 0
-            ? found.reasoningLevels[found.reasoningLevels.length - 1]
-            : undefined);
         break;
       }
       if (h.closing) return;
       await new Promise<void>((r) => setTimeout(r, 300));
+      found = findEntry();
+    }
+    if (found) {
+      resolvedProviderId = found.providerId;
+      resolvedModelId = found.modelId;
+      // 严格路径要求 reasoningLevel（引擎自报默认档，末档兜底——引擎约定
+      // values.at(-1)=defaultLevel，探针实证 [low,high,max] default=max）。
+      reasoningLevel = found.reasoningDefaultLevel
+        ?? (found.reasoningLevels && found.reasoningLevels.length > 0
+          ? found.reasoningLevels[found.reasoningLevels.length - 1]
+          : undefined);
     }
     await h.envelope.request(
       'session/setModel',

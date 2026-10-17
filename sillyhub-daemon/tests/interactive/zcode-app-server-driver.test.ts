@@ -398,6 +398,49 @@ describe('consume 全链路（ready → create/subscribe → send → 流式 →
     expect(errors).toHaveLength(0);
   }, 15_000);
 
+  it('setModel 目录精确命中（大小写一致）同样附带 options.reasoningLevel（评审 P2 回归钉：推导不得内联在大小写分支）', async () => {
+    const child = createFakeChild();
+    vi.mocked(spawn).mockReturnValue(child as never);
+    const server = new FakeZcodeServer(child);
+    // model 与目录条目同为 'glm-5.3'（精确命中）——旧实现 while 条件直接退出、
+    // reasoningLevel 未赋值 → 裸发被引擎严格路径拒「Reasoning level is required」
+    const driver = new ZcodeAppServerDriver();
+    const iq = makeInputQueue();
+    const handle = (await driver.start(iq.queue, makeOpts({ model: 'glm-5.3' }))) as ZcodeHandle;
+    const { cb } = makeCallbacks();
+    const consumePromise = driver.consume(handle, cb);
+    await until(() => vi.mocked(spawn).mock.calls.length > 0);
+    server.startReady();
+    await until(() => server.requestsOf('session/setModel').length > 0);
+    iq.close();
+    await consumePromise;
+    expect(server.requestsOf('session/setModel')[0]?.params).toEqual({
+      sessionId: ZSID,
+      model: { providerId: 'sillyhub', modelId: 'glm-5.3', options: { reasoningLevel: 'max' } },
+    });
+  }, 15_000);
+
+  it('setModel 目录 60s 等待超时（注入小窗口）→ 兜底裸发字符串 modelId（无 options）+ 目录快照 warn', async () => {
+    const child = createFakeChild();
+    vi.mocked(spawn).mockReturnValue(child as never);
+    const server = new FakeZcodeServer(child);
+    // 目录只有 glm-5.3，请求 no-such-model → 永不命中 → 超时裸发（非致命语义）
+    const driver = new ZcodeAppServerDriver({ catalogWaitTimeoutMs: 300 });
+    const iq = makeInputQueue();
+    const handle = (await driver.start(iq.queue, makeOpts({ model: 'no-such-model' }))) as ZcodeHandle;
+    const { cb } = makeCallbacks();
+    const consumePromise = driver.consume(handle, cb);
+    await until(() => vi.mocked(spawn).mock.calls.length > 0);
+    server.startReady();
+    await until(() => server.requestsOf('session/setModel').length > 0);
+    iq.close();
+    await consumePromise;
+    expect(server.requestsOf('session/setModel')[0]?.params).toEqual({
+      sessionId: ZSID,
+      model: { providerId: 'sillyhub', modelId: 'no-such-model' },
+    });
+  }, 15_000);
+
   it('consume 自然退出（iq.close）→ finally 对齐 codex：清 _finishTurnOnClose 槽位 + 兜底 close（幂等单次）（2026-10-17-audit-risk-followup）', async () => {
     const child = createFakeChild();
     vi.mocked(spawn).mockReturnValue(child as never);
