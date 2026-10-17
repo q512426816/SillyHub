@@ -1,0 +1,40 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-17-zcode-provider-config-shape",
+  "reviewer": "subagent",
+  "verdict": "PASS",
+  "reviewedAgainst": "cb20c33e7aeb10c494a6cd916a04da2b9d564d93",
+  "findings": [
+    {
+      "severity": "P2",
+      "title": "精确命中路径缺 options.reasoningLevel，FR-02「目录命中…必须附带」条款在该子路径未兑现",
+      "evidence": "轮询 while 以精确匹配为退出条件，精确命中时循环体（大小写命中分支内的 reasoningLevel 赋值）从不执行，reasoningLevel 保持 undefined → setModel 裸发；个人模型 levels 恒非空 + 引擎严格校验缺失即拒 → 该子路径 setModel 必被拒，仅靠调用点 .catch 降级 warn，会话静默落回引擎默认模型（平台路由失效，非致命）。当前真机实证形态为大小写不一致（走 found 分支带 reasoningLevel）故未触发，属潜伏面。",
+      "location": "sillyhub-daemon/src/interactive/zcode-app-server-driver.ts:637"
+    },
+    {
+      "severity": "P3",
+      "title": "FR-02 标题承诺「单测钉超时回退路径」未兑现，60s 超时回退路径无测试覆盖",
+      "evidence": "绑定测试（全链路）只钉大小写命中路径的 setModel 形状；catalogDeadline 硬编码 60s 不可注入，超时回退（裸发字符串 modelId）无任何单测钉板，FR 标题与测试绑定行不一致。",
+      "location": "sillyhub-daemon/tests/interactive/zcode-app-server-driver.test.ts:372"
+    },
+    {
+      "severity": "P3",
+      "title": "_applyModel JSDoc 写「目录 30s 仍未到达时兜底裸发」与实现 60s 不一致",
+      "evidence": "JSDoc 注释说 30s，实现为 Date.now() + 60_000（60s）；注释/实现不一致（CLAUDE.md 规则 18），易误导后续维护者对等待窗的判断。",
+      "location": "sillyhub-daemon/src/interactive/zcode-app-server-driver.ts:619"
+    },
+    {
+      "severity": "P3",
+      "title": "未声明的行为/诊断面：ZCODE_PERSONAL_PROVIDER_CONFIG_FILE env 覆盖与多处 console.log step 标记未入 design 接口契约/文件清单说明",
+      "evidence": "spawn env 覆盖 ZCODE_PERSONAL_PROVIDER_CONFIG_FILE 是行为变更（design 仅四问 Q4 侧面提及，接口契约/做法概述未列）；spawn env keys 日志与 waiting ready/create ok/pulling input 等 step 日志同提交加入，而 design.md 第 13 行声称「未加验证日志」，声明面与交付面不一致（无正确性影响）。",
+      "location": "sillyhub-daemon/src/interactive/zcode-app-server-driver.ts:168"
+    }
+  ],
+  "dimensionNotes": {
+    "乱序": "ok",
+    "并发": "ok",
+    "切换": "ok",
+    "作用域": "ok"
+  },
+  "reviewedAt": "2026-10-17T04:41:00Z"
+}

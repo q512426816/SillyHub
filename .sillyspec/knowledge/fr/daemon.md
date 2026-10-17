@@ -5230,3 +5230,75 @@
 - 场景：默认场景 — Given 后端 compare 响应新增可选字段；When 本变更交付；Then `backend/openapi.json`、`frontend/src/lib/api-types.ts`、`sillyhub-daemon/src/api-
 全文：.sillyspec/changes/archive/2026-10-16-conflict-full-tree-compare/requirements.md#FR-05
 最近确认：d3c425bf6
+
+## FR-daemon-155 buildZcodeProviderConfig 输出形状与宿主有效配置一致（providerConfigRules:{providerRules:[...]} + modelConfigRules:{providerModelRules:[],manualProviderModelRules:[]}），单测钉形状
+变更：2026-10-17-zcode-provider-config-shape
+状态：active
+摘要：主路径
+场景正文：
+- 场景：主路径 — Given 有效 baseUrl/apiKey/model 的 provider；When 调用 buildZcodeProviderConfig；Then 返回对象满足上述形状（单测全等断言钉板）
+全文：.sillyspec/changes/archive/2026-10-17-zcode-provider-config-shape/requirements.md#FR-01
+最近确认：40217abbd7f2a0d0cac4d6af1e0f784f68e21689
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-17-zcode-provider-config-shape:flow:测试绑定FR-01
+  tests: sillyhub-daemon/tests/zcode-settings.test.ts「schemaVersion=1 + providerOrder + providerRules 对象包裹 + modelConfigRules 两键（逐字段对齐宿主有效实例）」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-17-zcode-provider-config-shape
+  status: active
+
+## FR-daemon-156 _applyModel 三路径（精确命中/大小写命中/超时回退）均发送字符串 modelId，单测钉超时回退路径
+变更：2026-10-17-zcode-provider-config-shape
+状态：active
+摘要：主路径
+场景正文：
+- 场景：主路径 — Given start opts.model='GLM-5.3' 且引擎推送目录条目 modelId='glm-5.3'（levels=[low,high,max], de；When _applyModel 执行；Then setModel 参数为 `{providerId:'sillyhub', modelId:'glm-5.3', options:{reasoningLevel
+全文：.sillyspec/changes/archive/2026-10-17-zcode-provider-config-shape/requirements.md#FR-02
+最近确认：40217abbd7f2a0d0cac4d6af1e0f784f68e21689
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-17-zcode-provider-config-shape:flow:测试绑定FR-02
+  tests: sillyhub-daemon/tests/interactive/zcode-app-server-driver.test.ts「create → subscribe → setModel → 乒乓一轮全链路（帧形状钉板）」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-17-zcode-provider-config-shape
+  status: active
+
+## FR-daemon-157 单测全绿（zcode-settings + zcode driver 相关）
+变更：2026-10-17-zcode-provider-config-shape
+状态：active
+摘要：主路径
+场景正文：
+- 场景：主路径 — When `pnpm vitest run <三文件>` 与 `pnpm typecheck`；Then 全部通过、无类型错误
+全文：.sillyspec/changes/archive/2026-10-17-zcode-provider-config-shape/requirements.md#FR-03
+最近确认：40217abbd7f2a0d0cac4d6af1e0f784f68e21689
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-17-zcode-provider-config-shape:flow:测试绑定FR-03
+  tests: sillyhub-daemon/tests/interactive/zcode-app-server-driver.test.ts | sillyhub-daemon/tests/interactive/zcode-events.test.ts | sillyhub-daemon/tests/zcode-settings.test.ts
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-17-zcode-provider-config-shape
+  status: active
+
+## FR-daemon-158 重建 bundle 安装到本机 daemon 并重启，生产后端实测：新建 zcode 会话发一轮消息，turn 完成、回复落库渲染、模型路由走 SillyHub provider（daemon.log 无 Provider Registry/Select a model 错误）
+变更：2026-10-17-zcode-provider-config-shape
+状态：active
+摘要：主路径
+场景正文：
+- 场景：主路径 — Given 新 bundle 已安装且 daemon 重启完成；When 经 POST /api/daemon/sessions 创建 zcode（及 dsh）会话发一轮消息；Then run completed、tokens 消费为真值、无上述错误日志
+全文：.sillyspec/changes/archive/2026-10-17-zcode-provider-config-shape/requirements.md#FR-04
+最近确认：40217abbd7f2a0d0cac4d6af1e0f784f68e21689
