@@ -48,16 +48,28 @@ describe('isDshFormSufficient（写盘门槛）', () => {
 });
 
 describe('writeDshHome（per-session 路由写盘）', () => {
-  it('anthropic base_url → llm-pi-ai 路由 anthropic-messages + apiKeyEnv 引用 + models 键', async () => {
+  it('anthropic base_url → 三件套布局（package.json 模板清单 + workspace + 无 compat 的 patch）', async () => {
     const dir = mkdtempSync(join(tmpdir(), 'dsh-home-'));
     try {
       await writeDshHome({ dshHome: dir, provider: makeProvider() });
-      const yaml = readFileSync(join(dir, 'profiles', 'acp', 'cordis.patch.yml'), 'utf8');
+      const acp = join(dir, 'profiles', 'acp');
+      // rc.2 布局：package.json（dsh.profile.bundles 模板清单）+ workspace + patch
+      const manifest = JSON.parse(readFileSync(join(acp, 'package.json'), 'utf-8')) as {
+        dsh?: { profile?: { bundles?: string[] } };
+      };
+      expect(manifest.dsh?.profile?.bundles).toEqual([
+        '@deepseek-ai/dsh-base',
+        '@deepseek-ai/dsh-acp-app',
+      ]);
+      expect(readFileSync(join(acp, 'pnpm-workspace.yaml'), 'utf-8')).toContain('nodeLinker: hoisted');
+      const yaml = readFileSync(join(acp, 'cordis.patch.yml'), 'utf8');
       expect(yaml).toContain('- id: llm-pi-ai');
       expect(yaml).toContain('api: anthropic-messages');
       expect(yaml).toContain('baseURL: https://api.example.com/anthropic');
       expect(yaml).toContain(`apiKeyEnv: ${DSH_API_KEY_ENV}`);
-      expect(yaml).toContain('deepseek-v4: {}');
+      expect(yaml).toContain('- id: deepseek-v4');
+      // rc.2 毒源（评审+探针实证）：compat 块存在即整条 provider 被静默拒收——禁止写盘
+      expect(yaml).not.toContain('compat');
       // 密钥明文不落盘（R-02：patch 只存变量名）
       expect(yaml).not.toContain('sk-test');
     } finally {

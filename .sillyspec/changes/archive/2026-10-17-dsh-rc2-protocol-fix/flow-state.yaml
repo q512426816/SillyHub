@@ -1,6 +1,12 @@
 tier: thin
 legacy_fallback: false
-substeps: {}
+substeps:
+  artifacts: done
+  ledger: done
+  patch: done
+  review: done
+  probes: done
+  distill: done
 born_face: thin
 with_tasks: false
 review_force: null
@@ -22,11 +28,19 @@ input: >-
   - 驱动失败路径留痕：握手里程碑、consume failed 原因、子进程退出，daemon.log 可见
 
   - dsh 驱动相关单测全绿（15 用例）；typecheck 干净
-autopilot: false
+autopilot: true
 prestage_ack: true
 baseline_commit: cde242bc04fb9f870308d49c7d7507f997afcddb
-updatedAt: '2026-10-17T07:57:35.115Z'
+updatedAt: '2026-10-17T08:11:14.895Z'
 cross_baselines:
   sillyspec: 560af6a23a038e6ee6118a7bcce7b6b3d2481e22
 baseline_sha256: edb6e36c6beb530543fe0fd704ec1835bb4431c38e670a873fc854f4098fbc63
+batch_ticked: true
+gate_summary: >-
+  test: passed ← module[]+deps(py35+jsx9+jsx34)+fr(78)（293.5s）
+  结果：C:\Users\qinyi\IdeaProjects\multi-agent-platform\.sillyspec\.runtime\verify-runs\20261017080320\test-result.json｜lint:
+  passed ← cd backend && uv run ruff check . && uv run ruff format --check . && uv run mypy app && cd ../frontend &&
+  pnpm lint && cd ../sillyhub-daemon && pnpm typecheck（14.0s）
+  结果：C:\Users\qinyi\IdeaProjects\multi-agent-platform\.sillyspec\.runtime\verify-runs\20261017080320\test-result.json｜门文件
+  8 个
 

@@ -1,0 +1,77 @@
+{
+  "change": "2026-10-17-dsh-rc2-protocol-fix",
+  "baseline": "cde242bc04fb9f870308d49c7d7507f997afcddb",
+  "head": "162dbfefd8fa71afb10e792dc493c59dfaae4c0b",
+  "files": [
+    "sillyhub-daemon/src/interactive/dsh-acp-driver.ts",
+    "sillyhub-daemon/tests/interactive/dsh-acp-driver.test.ts"
+  ],
+  "totals": {
+    "files": 2,
+    "additions": 67,
+    "deletions": 15
+  },
+  "savedAt": "2026-10-17T08:11:14.154Z",
+  "note": "flow done 时点冻结（本变更可归属交付面：baseline..HEAD 提交面过滤 .sillyspec/ 只留 .sillyspec/docs/ 交付文档 + 独占树未提交交付；治理工件目录不入冻结——2026-10-12-close-trace-freeze-integrity FR-01）",
+  "modules": [
+    {
+      "id": "sillyhub-daemon",
+      "files": 2,
+      "doc": "docs/multi-agent-platform/modules/sillyhub-daemon.md",
+      "docTouched": false,
+      "docMissing": false
+    },
+    {
+      "id": "daemon",
+      "files": 2,
+      "doc": "docs/SillyHub/modules/daemon.md",
+      "docTouched": false,
+      "docMissing": false
+    }
+  ],
+  "uncoveredDirs": [],
+  "moduleMaps": [
+    "docs/backend/modules/_module-map.yaml",
+    "docs/frontend/modules/_module-map.yaml",
+    "docs/multi-agent-platform/modules/_module-map.yaml",
+    "docs/SillyHub/modules/_module-map.yaml",
+    "docs/sillyhub-daemon/modules/_module-map.yaml"
+  ],
+  "acceptedDirtyGap": 6,
+  "scopeAudit": {
+    "mode": "full-flow",
+    "ok": true,
+    "degradedReason": null,
+    "baseAnchor": "cde242bc04fb9f870308d49c7d7507f997afcddb",
+    "totals": {
+      "files": 2,
+      "additions": 67,
+      "deletions": 15
+    },
+    "rows": [
+      {
+        "path": "sillyhub-daemon/src/interactive/dsh-acp-driver.ts",
+        "additions": 59,
+        "deletions": 11,
+        "kind": "modified",
+        "planned": "修改",
+        "verdict": "planned"
+      },
+      {
+        "path": "sillyhub-daemon/tests/interactive/dsh-acp-driver.test.ts",
+        "additions": 8,
+        "deletions": 4,
+        "kind": "modified",
+        "planned": "修改",
+        "verdict": "planned"
+      }
+    ],
+    "excluded": {
+      "foreignDeclared": []
+    },
+    "note": "flow done 时点冻结（本文件落盘时采集）",
+    "closedBy": "flow done"
+  },
+  "patchSha256": "ee177b8485af4e4ad756d8f9975f74e021a284d10107b210d4489ac2c2b814fa",
+  "patchStatus": "ok"
+}

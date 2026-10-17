@@ -32,6 +32,7 @@
 
 import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
 import { resolveWindowsCmdShim } from '../cmd-shim.js';
+import { DSH_PROVIDER_ID } from '../dsh-settings.js';
 import { LfLineFramer } from './pi-rpc-driver.js';
 import type {
   AgentEvent,
@@ -254,7 +255,10 @@ export class DshAcpDriver implements InteractiveDriver {
           await conn.request('session/set_config_option', {
             sessionId: ctx.acpSessionId,
             configId: 'model',
-            value: opts.model,
+            // rc.2 模型 valueId 形状 = `["<provider键>","<modelId>"]` JSON 数组串
+            //（configOptions.model.options[].value 同形；探针实证设此形状后
+            // currentValue 翻转且轮次路由到该 provider）。
+            value: JSON.stringify([DSH_PROVIDER_ID, opts.model]),
           });
         } catch (e) {
           // eslint-disable-next-line no-console
@@ -284,7 +288,16 @@ export class DshAcpDriver implements InteractiveDriver {
         ctx.activePrompt = true;
         let turnError: string | undefined;
         const unregister = conn.onNotification((params) => {
-          const events = normalizeAcpUpdate(params as AcpSessionUpdate);
+          // rc.2（官方 ACP SDK）信封：params={sessionId, update:{sessionUpdate,…}}；
+          // 旧 dsh 直发内层 update。兼容两种形状——有 update 键即拆信封（真机实证：
+          // 不拆则 sessionUpdate 恒 undefined，全部内容事件被静默丢弃，轮次完成
+          // 但回复零落库，会话 e201445d）。
+          const envelopeParams = params as { update?: AcpSessionUpdate } | undefined;
+          const update =
+            envelopeParams && typeof envelopeParams === 'object' && envelopeParams.update !== undefined
+              ? envelopeParams.update
+              : (params as AcpSessionUpdate);
+          const events = normalizeAcpUpdate(update);
           if (events.length > 0) {
             void callbacks.onTurnMessage?.(envelope(events));
           }

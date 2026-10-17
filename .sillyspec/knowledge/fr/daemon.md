@@ -5302,3 +5302,55 @@
 - 场景：主路径 — Given 新 bundle 已安装且 daemon 重启完成；When 经 POST /api/daemon/sessions 创建 zcode（及 dsh）会话发一轮消息；Then run completed、tokens 消费为真值、无上述错误日志
 全文：.sillyspec/changes/archive/2026-10-17-zcode-provider-config-shape/requirements.md#FR-04
 最近确认：40217abbd7f2a0d0cac4d6af1e0f784f68e21689
+
+## FR-daemon-159 session/new 恒带 mcpServers:[] 占位（rc.2 必填、旧版兼容），探针验证握手通过
+变更：2026-10-17-dsh-rc2-protocol-fix
+状态：active
+摘要：主路径
+全文：.sillyspec/changes/archive/2026-10-17-dsh-rc2-protocol-fix/requirements.md#FR-01
+最近确认：162dbfefd8fa71afb10e792dc493c59dfaae4c0b
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-17-dsh-rc2-protocol-fix:flow:测试绑定FR-01
+  tests: sillyhub-daemon/tests/interactive/dsh-acp-driver.test.ts「model + thinkingLevel=medium → set_config_option 扁平形状(configId=model/reasoning_effort)；off → 不发档位」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-17-dsh-rc2-protocol-fix
+  status: active
+
+## FR-daemon-160 set_config_option 改扁平形状（configId=model/reasoning_effort），设置失败降级 warn 非致命（不再杀会话），单测钉新形状
+变更：2026-10-17-dsh-rc2-protocol-fix
+状态：active
+摘要：主路径
+全文：.sillyspec/changes/archive/2026-10-17-dsh-rc2-protocol-fix/requirements.md#FR-02
+最近确认：162dbfefd8fa71afb10e792dc493c59dfaae4c0b
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-17-dsh-rc2-protocol-fix:flow:测试绑定FR-02
+  tests: sillyhub-daemon/tests/interactive/dsh-acp-driver.test.ts
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-17-dsh-rc2-protocol-fix
+  status: active
+
+## FR-daemon-161 驱动失败路径留痕：握手里程碑、consume failed 原因、子进程退出，daemon.log 可见
+变更：2026-10-17-dsh-rc2-protocol-fix
+状态：active
+摘要：主路径
+全文：.sillyspec/changes/archive/2026-10-17-dsh-rc2-protocol-fix/requirements.md#FR-03
+最近确认：162dbfefd8fa71afb10e792dc493c59dfaae4c0b
+
+## FR-daemon-162 dsh 驱动相关单测全绿（15 用例）；typecheck 干净
+变更：2026-10-17-dsh-rc2-protocol-fix
+状态：active
+摘要：主路径
+全文：.sillyspec/changes/archive/2026-10-17-dsh-rc2-protocol-fix/requirements.md#FR-04
+最近确认：162dbfefd8fa71afb10e792dc493c59dfaae4c0b

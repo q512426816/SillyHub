@@ -474,3 +474,11 @@
 锚点：未记录
 最近确认：40217abbd7f2a0d0cac4d6af1e0f784f68e21689
 理由：最大风险：引擎版本演进改目录推送时序或 setModel schema（如将来允许字符串/免 reasoningLevel）——60s 窗口与 levels 提取按当前实证形状钉死，引擎升级需回归（MIN_VERSIONS zcode (0,16,9) 已有版本门兜底）。已试并放弃：裸 setModel 兜底重试（引擎对象路径缺 reasoningLevel 恒拒，重试无意义）；setModel 前置到会话空闲期后台执行（engine 默认模型不保证等于平台路由模型，turn 1 可能脱路由——保持阻塞确定性优先）。
+
+## D-unmapped-079@v1 设计期风险与放弃方案（底稿）
+状态：implemented
+变更：2026-10-17-dsh-rc2-protocol-fix
+原编号：D-001@v1
+锚点：未记录
+最近确认：162dbfefd8fa71afb10e792dc493c59dfaae4c0b
+理由：最大风险：dsh 后续 rc.x 再改 schema（alpha 通道本质）——非致命降级兜底使其退化为「默认模型 + warn」而非会话死亡；overlay（llm-pi-ai 路由）对 rc.2 的适配是独立后续任务（与本修复解耦）。已放弃：版本回 pin（npm latest 即 rc.2，next 线 0.2.1-rc.1 同代 schema，无更稳旧版可退）。

@@ -232,11 +232,12 @@ describe('DshAcpDriver：启动与握手', () => {
     fake.stdout.push(resp(3, {})); // model
     fake.stdout.push(resp(4, {})); // reasoning_effort
     // dsh 0.2.0-rc.2（官方 ACP SDK v2 schema）：扁平 {sessionId, configId, value}——
-    // 旧嵌套 {option:{optionId,value}} 回 Invalid params（真机实证 2026-10-17）
+    // 旧嵌套 {option:{optionId,value}} 回 Invalid params（真机实证 2026-10-17）；
+    // 模型 valueId = `["sillyhub","<modelId>"]` JSON 数组串（configOptions 同形）
     await waitFor(() => readStdin(fake).includes('"configId":"reasoning_effort"'));
     const stdinText = readStdin(fake);
     expect(stdinText).toContain('"configId":"model"');
-    expect(stdinText).toContain('"value":"deepseek-v4"');
+    expect(stdinText).toContain('"value":"[\\"sillyhub\\",\\"deepseek-v4\\"]"');
     expect(stdinText).toContain('"value":"medium"');
     expect(stdinText).not.toContain('"optionId"');
     q.close();

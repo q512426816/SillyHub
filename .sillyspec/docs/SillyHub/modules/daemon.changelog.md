@@ -51,3 +51,4 @@ created_at: 2026-08-27 14:32:24
 - 2026-10-16-change-title-condense-backfill | 变更中心标题提炼与存量回填
 - 2026-10-17-audit-risk-followup | 24h 审计六连修收口：dsh/zcode 会话恢复白名单漏登记（daemon 重启静默丢记录）、r…
 - 2026-10-17-zcode-provider-config-shape | zcode 引擎会话全挂：注入 provider 配置形状错误致注册表无模型
+- 2026-10-17-dsh-rc2-protocol-fix | dsh rc.2 协议断裂修复——会话 3 秒静默死两连
