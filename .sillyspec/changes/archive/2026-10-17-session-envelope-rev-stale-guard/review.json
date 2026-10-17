@@ -1,0 +1,28 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-17-session-envelope-rev-stale-guard",
+  "reviewer": "subagent",
+  "verdict": "PASS",
+  "reviewedAgainst": "166ea374aaa46cc0045c43bb4cb71a25e87063fa",
+  "findings": [
+    {
+      "severity": "P3",
+      "title": "remote.rev 无类型/有限性校验，同源坏数据可投毒 rev 使标签页短暂失聪",
+      "evidence": "守卫仅判 undefined；建议 typeof number+isFinite 收紧。自愈路径存在，后端 60s grace 兜底。",
+      "location": "frontend/src/stores/session.ts:153"
+    },
+    {
+      "severity": "P3",
+      "title": "混合版本过渡窗口内无 rev 信封绕过守卫，旧标签页仍可幽灵复活新标签页",
+      "evidence": "pre-deploy 旧标签页信封无 rev 字段走内容比对；一次性过渡风险非回退。",
+      "location": "frontend/src/stores/session.ts:151"
+    }
+  ],
+  "dimensionNotes": {
+    "乱序": "ok",
+    "并发": "ok",
+    "切换": "ok",
+    "作用域": "ok"
+  },
+  "reviewedAt": "2026-10-17T13:23:05Z"
+}

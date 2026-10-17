@@ -1,0 +1,13 @@
+{"ts":1792242903587,"kind":"file","stage":"design","detail":"design.md 出现","provisional":true}
+{"ts":1792242903587,"kind":"file","stage":"tasks","detail":"tasks.md 出现","provisional":true}
+{"ts":1792243043900,"kind":"file-update","stage":"requirements","detail":"requirements.md 内容变更","provisional":true}
+{"ts":1792243043900,"kind":"file-update","stage":"design","detail":"design.md 内容变更","provisional":true}
+{"ts":1792243043900,"kind":"file-update","stage":"tasks","detail":"tasks.md 内容变更","provisional":true}
+{"ts":1792243043900,"kind":"task-done","stage":"tasks","detail":"checked 0→5","provisional":true}
+{"ts":1792243044234,"kind":"warning","stage":null,"rule":"scope-drift","severity":"warning","detail":"声明面之外的代码文件被改：rontend/src/stores/session.test.ts——范围漂移嫌疑（并行会话改动/越界，人判）","provisional":true}
+{"ts":1792243054978,"kind":"commit","stage":null,"detail":"d375a86dc","provisional":true}
+{"ts":1792243089637,"kind":"file-update","stage":"design","detail":"design.md 内容变更","provisional":true}
+{"ts":1792243093252,"kind":"file-update","stage":"requirements","detail":"requirements.md 内容变更","provisional":true}
+{"ts":1792243100225,"kind":"commit","stage":null,"detail":"166ea374a","provisional":true}
+{"ts":1792243103919,"kind":"file-update","stage":"design","detail":"design.md 内容变更","provisional":true}
+{"ts":1792243114247,"kind":"gate-run","stage":"verify","detail":"门实测 passed（3.2s） · 20261017131832","provisional":true}

@@ -124,3 +124,4 @@
 - 2026-10-16-conflict-full-tree-compare | 原型视图 conflict-sync-states-view.tsx 与 prototype-build.mjs 重编译对账（原型产物 git diff 为空），改动面聚焦回归 44 用例绿
 | 2026-10-16 | 2026-10-17-audit-risk-followup | 24h 审计六连修收口：dsh/zcode 会话恢复白名单漏登记（daemon 重启静默丢记录）、r… |
 | 2026-10-17 | 2026-10-17-session-replay-pingpong-fix | 生产环境后端日志 HTTP_401_AUTH_TOKEN_EXPIRED 每秒约10条持续刷屏（单日… |
+| 2026-10-17 | 2026-10-17-session-envelope-rev-stale-guard | 2026-10-17-session-replay-pingpong-fix 评审 P3-3——跨标… |

@@ -6743,3 +6743,98 @@ superseded_by：FR-app-workspace-pages-002
   confirmed_at: null
   source_change: 2026-10-17-session-replay-pingpong-fix
   status: active
+
+## FR-frontend-009 SessionState 新增单调 rev 计数器：setTokens/setUser/clear 三个用户驱动变更加一，storage 回放不自动加一而是采纳远端 rev
+变更：2026-10-17-session-envelope-rev-stale-guard
+状态：active
+摘要：主路径
+全文：.sillyspec/changes/archive/2026-10-17-session-envelope-rev-stale-guard/requirements.md#FR-01
+最近确认：166ea374aaa46cc0045c43bb4cb71a25e87063fa
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-17-session-envelope-rev-stale-guard:flow:测试绑定FR-01
+  tests: frontend/src/stores/session.test.ts「用户驱动变更加一：setTokens/clear 各 +1，markHydrated 不加」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-17-session-envelope-rev-stale-guard
+  status: active
+
+## FR-frontend-010 回放守卫：远端信封 rev 严格小于本地 rev 时整体忽略（陈旧）；等于时走既有内容比对（同值静默）；大于时采纳内容并同步 rev；内容全等但 rev 更新时仅同步 rev
+变更：2026-10-17-session-envelope-rev-stale-guard
+状态：active
+摘要：主路径
+全文：.sillyspec/changes/archive/2026-10-17-session-envelope-rev-stale-guard/requirements.md#FR-02
+最近确认：166ea374aaa46cc0045c43bb4cb71a25e87063fa
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-17-session-envelope-rev-stale-guard:flow:测试绑定FR-02
+  tests: frontend/src/stores/session.test.ts「陈旧信封（rev 小于本地）整体忽略：内容不同也不采纳、不写盘」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-17-session-envelope-rev-stale-guard
+  status: active
+
+## FR-frontend-011 向后兼容：无 rev 字段的旧形状信封走既有内容比对路径，既有 6+3 用例语义不变
+变更：2026-10-17-session-envelope-rev-stale-guard
+状态：active
+摘要：主路径
+全文：.sillyspec/changes/archive/2026-10-17-session-envelope-rev-stale-guard/requirements.md#FR-03
+最近确认：166ea374aaa46cc0045c43bb4cb71a25e87063fa
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-17-session-envelope-rev-stale-guard:flow:测试绑定FR-03
+  tests: frontend/src/stores/session.test.ts「无 rev 旧形状信封 → 走既有内容比对路径（向后兼容）」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-17-session-envelope-rev-stale-guard
+  status: active
+
+## FR-frontend-012 新增单测覆盖：陈旧忽略、新 rev 采纳并同步、同内容仅同步 rev、等值同内容静默、变更加一
+变更：2026-10-17-session-envelope-rev-stale-guard
+状态：active
+摘要：主路径
+全文：.sillyspec/changes/archive/2026-10-17-session-envelope-rev-stale-guard/requirements.md#FR-04
+最近确认：166ea374aaa46cc0045c43bb4cb71a25e87063fa
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-17-session-envelope-rev-stale-guard:flow:测试绑定FR-04
+  tests: frontend/src/stores/session.test.ts
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-17-session-envelope-rev-stale-guard
+  status: active
+
+## FR-frontend-013 既有 token-refresh/session 测试不回归
+变更：2026-10-17-session-envelope-rev-stale-guard
+状态：active
+摘要：主路径
+全文：.sillyspec/changes/archive/2026-10-17-session-envelope-rev-stale-guard/requirements.md#FR-05
+最近确认：166ea374aaa46cc0045c43bb4cb71a25e87063fa
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-17-session-envelope-rev-stale-guard:flow:测试绑定FR-05
+  tests: frontend/src/lib/__tests__/token-refresh.test.ts | frontend/src/stores/session.test.ts
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-17-session-envelope-rev-stale-guard
+  status: active
