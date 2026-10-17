@@ -16,7 +16,7 @@
 //   5. 旧形状缺字段 → 只回放存在的字段，不误清
 //   6. hydrated 为本页生命周期标记，不被远端回放改写
 
-import { describe, it, expect, beforeEach } from "vitest";
+import { afterEach, describe, it, expect, beforeEach, vi } from "vitest";
 
 import {
   useSession,
@@ -124,5 +124,78 @@ describe("session store 跨标签页同步（storage 事件回放）", () => {
       }),
     );
     expect(useSession.getState().hydrated).toBe(true);
+  });
+});
+
+// ── 乒乓环路切断（2026-10-17-session-replay-pingpong-fix）───────────────────
+//
+// persist 中间件对每次 setState（含回放）都会写回 localStorage，回放必然再触发
+// 对方标签 storage 事件——若同值也回放，两标签各持不同已过期 token 时形成
+// A写→B回放→B写→A回放 无限乒乓：accessToken 字符串在 X↔Y 间翻转反复重触发
+// (dashboard)/layout.tsx 的 fetchMe effect，而 /api/auth/* 不走 401 自动续期，
+// 循环永不自愈（生产实证：/api/auth/me 每秒 10 条 401 刷屏 11 小时）。
+// 修复后：回放只回放与本地实际不同的字段，全等时静默（不 setState 即不写盘）。
+describe("session storage 同值回放静默（乒乓环路切断）", () => {
+  let setItemSpy: ReturnType<typeof vi.spyOn>;
+
+  beforeEach(() => {
+    useSession.setState({
+      user: USER_A,
+      accessToken: "tok-a",
+      refreshToken: "rf-a",
+      hydrated: true,
+    });
+    window.localStorage.clear();
+    setItemSpy = vi.spyOn(Storage.prototype, "setItem");
+  });
+
+  afterEach(() => {
+    setItemSpy.mockRestore();
+  });
+
+  it("同值回放（user 经 JSON 往返产生新引用）静默跳过：不改状态、不写 localStorage", () => {
+    setItemSpy.mockClear();
+    // 远端字节与本页状态内容完全一致；JSON.parse 使 user 成为新对象引用，
+    // 逐引用比较会误判为变化——这正是被切断的乒乓环路的一条腿。
+    fireRemoteWrite(
+      persisted({
+        accessToken: "tok-a",
+        refreshToken: "rf-a",
+        user: USER_A,
+        hydrated: true,
+      }),
+    );
+    expect(useSession.getState().accessToken).toBe("tok-a");
+    expect(useSession.getState().user).toBe(USER_A); // 引用不变：未发生 setState
+    expect(setItemSpy).not.toHaveBeenCalled();
+  });
+
+  it("user 内容相同但键序不同（跨端序列化顺序差异）同样静默跳过", () => {
+    setItemSpy.mockClear();
+    fireRemoteWrite(
+      persisted({
+        accessToken: "tok-a",
+        refreshToken: "rf-a",
+        // 键序故意打乱：内容等价，不能因序列化键序差异回写盘
+        user: { displayName: "用户A", email: "a@example.com", id: "u-1" },
+        hydrated: true,
+      }),
+    );
+    expect(useSession.getState().user).toBe(USER_A);
+    expect(setItemSpy).not.toHaveBeenCalled();
+  });
+
+  it("仅 token 变化时只回放 token（本页 user 对象引用保持不动）", () => {
+    fireRemoteWrite(
+      persisted({
+        accessToken: "tok-b",
+        refreshToken: "rf-a",
+        user: USER_A,
+        hydrated: true,
+      }),
+    );
+    expect(useSession.getState().accessToken).toBe("tok-b");
+    expect(useSession.getState().refreshToken).toBe("rf-a");
+    expect(useSession.getState().user).toBe(USER_A);
   });
 });
