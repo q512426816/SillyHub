@@ -53,8 +53,8 @@ created_at: 2026-10-17T13:14:59.532Z
 
 ## 测试绑定（每条 FR 至少一行——`FR-NN: test/路径「用例名」`；空行/待填在 flow done 拒收）
 
-FR-01: （待填——哪个测试文件/用例覆盖这条 FR；无测试面写「不适用：理由」）
-FR-02: （待填——哪个测试文件/用例覆盖这条 FR；无测试面写「不适用：理由」）
-FR-03: （待填——哪个测试文件/用例覆盖这条 FR；无测试面写「不适用：理由」）
-FR-04: （待填——哪个测试文件/用例覆盖这条 FR；无测试面写「不适用：理由」）
-FR-05: （待填——哪个测试文件/用例覆盖这条 FR；无测试面写「不适用：理由」）
+FR-01: frontend/src/stores/session.test.ts「用户驱动变更加一：setTokens/clear 各 +1，markHydrated 不加」+「新 rev 信封采纳：内容同步且 rev 跟随远端（回放不自行加一）」
+FR-02: frontend/src/stores/session.test.ts「陈旧信封（rev 小于本地）整体忽略：内容不同也不采纳、不写盘」+「内容全等但 rev 更新 → 仅同步 rev（内容引用不动）」+「等 rev + 同内容 → 静默不写盘（乒乓切断语义在 rev 层仍成立）」+「等 rev + 不同内容 → 采纳远端（并发写冲突以后到为准）」
+FR-03: frontend/src/stores/session.test.ts「无 rev 旧形状信封 → 走既有内容比对路径（向后兼容）」+ 既有 describe「跨标签页同步（storage 事件回放）」「同值回放静默（乒乓环路切断）」全部 9 用例
+FR-04: frontend/src/stores/session.test.ts describe「session 信封 rev 防乱序（陈旧忽略/采纳）」全部 7 用例
+FR-05: frontend/src/lib/__tests__/token-refresh.test.ts 全量 14 用例 + session.test.ts 全量 16 用例（2026-10-17 实测 30/30，未改既有断言）
