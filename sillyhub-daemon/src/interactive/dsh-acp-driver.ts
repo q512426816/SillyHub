@@ -219,31 +219,63 @@ export class DshAcpDriver implements InteractiveDriver {
 
     try {
       // ── 握手（失败 → 结构化 error，D-002 兜底：不重试不降级）──
+      // 真机诊断（2026-10-17 dsh 会话静默终止排查）：驱动失败路径此前零日志——
+      // 握手/prompt 错误只走回调（SessionManager.fail → notifySessionEnd），
+      // daemon.log 全程无痕，用户侧只见会话 3 秒即死。补里程碑 + 错误留痕。
+      // eslint-disable-next-line no-console
+      console.log('[dsh-driver] handshake: initialize…');
       await conn.request('initialize', {
         protocolVersion: ACP_PROTOCOL_VERSION,
         clientCapabilities: {},
       });
-      const newOrResume: Record<string, unknown> = { cwd: opts.cwd };
+      const newOrResume: Record<string, unknown> = {
+        cwd: opts.cwd,
+        // dsh 0.2.0-rc.2 起 mcpServers 为 session/new 必填（缺失回 JSON-RPC -32602
+        // "Invalid params"，会话 ready 后 ~3s 静默终止——真机实证 2026-10-17，R-01
+        // alpha 破坏性变更兑现）。恒发空数组占位：旧版本兼容（字段原本可选），
+        // 平台 MCP 声明面后续按需接入。
+        mcpServers: [],
+      };
       if (opts.resume) newOrResume.sessionId = opts.resume;
       const sessionResp = (await conn.request(
         opts.resume ? 'session/resume' : 'session/new',
         newOrResume,
       )) as { sessionId?: string };
       ctx.acpSessionId = sessionResp.sessionId;
+      // eslint-disable-next-line no-console
+      console.log(`[dsh-driver] handshake ok (acpSessionId=${ctx.acpSessionId ?? 'null'})`);
       // 模型/思考档位（provider_config 路由的 model + 平台档位本地三档映射）。
+      // dsh 0.2.0-rc.2（官方 @agentclientprotocol/sdk v2 schema）：set_config_option
+      // 参数为扁平 {sessionId, configId, value}——旧嵌套 {option:{optionId,value}}
+      // 形状回 Invalid params（真机实证 2026-10-17）。设置失败降级 warn 不杀会话
+      //（引擎用默认模型继续；参数随 rc.x 演进时只降级不死）。
       if (opts.model) {
-        await conn.request('session/set_config_option', {
-          sessionId: ctx.acpSessionId,
-          option: { optionId: 'model', value: opts.model },
-        });
+        try {
+          await conn.request('session/set_config_option', {
+            sessionId: ctx.acpSessionId,
+            configId: 'model',
+            value: opts.model,
+          });
+        } catch (e) {
+          // eslint-disable-next-line no-console
+          console.warn(`[dsh-driver] set model 失败（非致命，保留引擎默认模型）: ${e instanceof Error ? e.message : String(e)}`);
+        }
       }
       const effort = mapThinkingLevel(opts.thinkingLevel);
       if (effort !== undefined) {
-        await conn.request('session/set_config_option', {
-          sessionId: ctx.acpSessionId,
-          option: { optionId: 'reasoning_effort', value: effort },
-        });
+        try {
+          await conn.request('session/set_config_option', {
+            sessionId: ctx.acpSessionId,
+            configId: 'reasoning_effort',
+            value: effort,
+          });
+        } catch (e) {
+          // eslint-disable-next-line no-console
+          console.warn(`[dsh-driver] set reasoning_effort 失败（非致命）: ${e instanceof Error ? e.message : String(e)}`);
+        }
       }
+      // eslint-disable-next-line no-console
+      console.log('[dsh-driver] setup complete, entering turn loop');
 
       // ── 逐 turn 循环 ──
       for await (const turn of ctx.input) {
@@ -264,6 +296,8 @@ export class DshAcpDriver implements InteractiveDriver {
           })) as AcpPromptResponse;
           const stopReason = resp.stopReason ?? 'end_turn';
           const isError = stopReason !== 'end_turn';
+          // eslint-disable-next-line no-console
+          console.log(`[dsh-driver] prompt done (stopReason=${stopReason})`);
           callbacks.onTurnResult({
             subtype: isError ? `acp_${stopReason}` : 'success',
             is_error: isError,
@@ -279,6 +313,8 @@ export class DshAcpDriver implements InteractiveDriver {
         if (turnError !== undefined) throw new Error(turnError);
       }
     } catch (err) {
+      // eslint-disable-next-line no-console
+      console.error('[dsh-driver] consume failed:', err instanceof Error ? err.message : String(err));
       callbacks.onTurnError?.(err);
       callbacks.onTurnResult({
         subtype: 'error_during_execution',
@@ -290,8 +326,17 @@ export class DshAcpDriver implements InteractiveDriver {
     }
 
     // 输入流自然结束（session end 路径）：等子进程退出由 close 负责，此处收敛。
-    child.once('exit', () => {
+    child.once('exit', (code, signal) => {
+      // 真机诊断（同上）：子进程退出此前零留痕。
+      // eslint-disable-next-line no-console
+      console.log(`[dsh-driver] child exit (code=${code ?? 'null'} signal=${signal ?? 'null'})`);
       conn.dispose();
+    });
+    child.on('exit', (code, signal) => {
+      if (ctx.closed) return;
+      // 非收口退出（进程自杀/崩溃）：结构化上报（对齐 zcode exit 语义）。
+      // eslint-disable-next-line no-console
+      console.error(`[dsh-driver] child exited unexpectedly (code=${code ?? 'null'} signal=${signal ?? 'null'})`);
     });
   }
 
@@ -322,7 +367,8 @@ export class DshAcpDriver implements InteractiveDriver {
     try {
       await ctx.conn.request('session/set_config_option', {
         sessionId: ctx.acpSessionId,
-        option: { optionId: 'reasoning_effort', value: effort },
+        configId: 'reasoning_effort',
+        value: effort,
       });
       return { ok: true };
     } catch (err) {

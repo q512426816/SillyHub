@@ -216,7 +216,7 @@ describe('DshAcpDriver：启动与握手', () => {
     await consuming;
   });
 
-  it('model + thinkingLevel=medium → set_config_option(model / reasoning_effort=medium)；off → 不发档位', async () => {
+  it('model + thinkingLevel=medium → set_config_option 扁平形状(configId=model/reasoning_effort)；off → 不发档位', async () => {
     const driver = new DshAcpDriver();
     const q = makeInputQueue();
     const handle = await driver.start(
@@ -230,11 +230,14 @@ describe('DshAcpDriver：启动与握手', () => {
     fake.stdout.push(resp(2, { sessionId: 'acp-s1' }));
     fake.stdout.push(resp(3, {})); // model
     fake.stdout.push(resp(4, {})); // reasoning_effort
-    await waitFor(() => readStdin(fake).includes('"optionId":"reasoning_effort"'));
+    // dsh 0.2.0-rc.2（官方 ACP SDK v2 schema）：扁平 {sessionId, configId, value}——
+    // 旧嵌套 {option:{optionId,value}} 回 Invalid params（真机实证 2026-10-17）
+    await waitFor(() => readStdin(fake).includes('"configId":"reasoning_effort"'));
     const stdinText = readStdin(fake);
-    expect(stdinText).toContain('"optionId":"model"');
+    expect(stdinText).toContain('"configId":"model"');
     expect(stdinText).toContain('"value":"deepseek-v4"');
     expect(stdinText).toContain('"value":"medium"');
+    expect(stdinText).not.toContain('"optionId"');
     q.close();
     await consuming;
   });
