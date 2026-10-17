@@ -52,4 +52,4 @@ FR-01: tests/dsh-settings.test.ts「anthropic base_url → 三件套布局（pac
 FR-02: tests/interactive/dsh-acp-driver.test.ts「model + thinkingLevel=medium → set_config_option 扁平形状…」（valueId 数组串钉板）
 FR-03: tests/interactive/dsh-acp-driver.test.ts + dsh-acp-events.test.ts（28 用例全绿；信封拆包真机实证于 UI 终验）
 FR-04: 不适用：UI 真机一轮对话为命令级实测（会话 12b39e8b，模型自答 GLM-5.3-FlashX/智谱），无单测面
-FR-05: （待填——哪个测试文件/用例覆盖这条 FR；无测试面写「不适用：理由」）
+FR-05: 不适用：typecheck 为命令级实测（pnpm typecheck），单测面已由 FR-01..03 绑定覆盖
