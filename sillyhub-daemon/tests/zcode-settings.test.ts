@@ -1,6 +1,8 @@
 // tests/zcode-settings.test.ts
 // 2026-10-15-zcode-engine-appserver task-05：per-session provider_config.json 写入器单测。
-// 形状钉板 = 本机实测 provider_config.json 实例（decisions.md D-003 evidence）。
+// 形状钉板 = 宿主有效 provider_config.json + zcode.cjs bundle .strict() schema
+//（2026-10-17 修正：providerConfigRules 必须 {providerRules:[...]} 对象包裹——
+// 裸数组被引擎静默丢弃 → 注册表无模型 → 每轮 turn.failed，腾讯云真机实证）。
 
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { mkdtempSync, readFileSync, rmSync, existsSync } from 'node:fs';
@@ -33,25 +35,31 @@ afterEach(() => {
 });
 
 describe('buildZcodeProviderConfig 形状（anthropic-messages 形态）', () => {
-  it('schemaVersion=1 + providerOrder + 单条个人 Provider 规则（逐字段对齐实测实例）', () => {
+  it('schemaVersion=1 + providerOrder + providerRules 对象包裹 + modelConfigRules 两键（逐字段对齐宿主有效实例）', () => {
     const cfg = buildZcodeProviderConfig({ zcodeDir: dir, provider: baseProvider() });
     expect(cfg).toEqual({
       schemaVersion: 1,
       config: {
         providerOrder: ['sillyhub'],
-        providerConfigRules: [
-          {
-            providerId: 'sillyhub',
-            providerName: 'SillyHub',
-            config: {
-              group: 'standard-personal',
-              access: { type: 'api-key', apiKey: 'sk-test-key' },
-              api: { type: 'anthropic-messages', baseUrl: 'https://open.bigmodel.cn/api/anthropic' },
-              personalModelIds: ['GLM-5.3'],
-              modelOrder: ['GLM-5.3'],
+        providerConfigRules: {
+          providerRules: [
+            {
+              providerId: 'sillyhub',
+              providerName: 'SillyHub',
+              config: {
+                group: 'standard-personal',
+                access: { type: 'api-key', apiKey: 'sk-test-key' },
+                api: { type: 'anthropic-messages', baseUrl: 'https://open.bigmodel.cn/api/anthropic' },
+                personalModelIds: ['GLM-5.3'],
+                modelOrder: ['GLM-5.3'],
+              },
             },
-          },
-        ],
+          ],
+        },
+        modelConfigRules: {
+          providerModelRules: [],
+          manualProviderModelRules: [],
+        },
       },
     });
   });
@@ -68,8 +76,8 @@ describe('buildZcodeProviderConfig 形状（anthropic-messages 形态）', () =>
       }),
       daemonApiKey: 'daemon-key',
       });
-    const rule = (cfg as { config: { providerConfigRules: Array<{ config: Record<string, unknown> }> } })
-      .config.providerConfigRules[0]!;
+    const rule = (cfg as { config: { providerConfigRules: { providerRules: Array<{ config: Record<string, unknown> }> } } })
+      .config.providerConfigRules.providerRules[0]!;
     expect((rule.config['api'] as Record<string, unknown>)).toEqual({
       type: 'openai-chat-completions',
       baseUrl: 'http://127.0.0.1:15721',
@@ -84,8 +92,8 @@ describe('buildZcodeProviderConfig 形状（anthropic-messages 形态）', () =>
       provider: baseProvider({ api_format: 'openai_chat', litellm_base_url: 'http://hub/proxy', litellm_proxy: true }),
       daemonApiKey: 'daemon-key',
     });
-    const rule = (cfg as { config: { providerConfigRules: Array<{ config: { access: Record<string, unknown> } }> } })
-      .config.providerConfigRules[0]!;
+    const rule = (cfg as { config: { providerConfigRules: { providerRules: Array<{ config: { access: Record<string, unknown> } }> } } })
+      .config.providerConfigRules.providerRules[0]!;
     expect(rule.config.access['apiKey']).toBe('daemon-key');
   });
 
@@ -94,8 +102,8 @@ describe('buildZcodeProviderConfig 形状（anthropic-messages 形态）', () =>
       zcodeDir: dir,
       provider: baseProvider({ model: 'low', default_fallback_model: 'high' }),
     });
-    const rule = (cfg as { config: { providerConfigRules: Array<{ config: { modelOrder: string[] } }> } })
-      .config.providerConfigRules[0]!;
+    const rule = (cfg as { config: { providerConfigRules: { providerRules: Array<{ config: { modelOrder: string[] } }> } } })
+      .config.providerConfigRules.providerRules[0]!;
     expect(rule.config.modelOrder).toEqual(['high']);
   });
 
@@ -155,7 +163,7 @@ describe('writeZcodeProviderConfig 落盘', () => {
     });
     const parsed = JSON.parse(
       readFileSync(join(dir, '.zcode', 'v2', 'provider_config.json'), 'utf-8'),
-    ) as { config: { providerConfigRules: Array<{ config: { modelOrder: string[] } }> } };
-    expect(parsed.config.providerConfigRules[0]!.config.modelOrder).toEqual(['GLM-5.3-FlashX']);
+    ) as { config: { providerConfigRules: { providerRules: Array<{ config: { modelOrder: string[] } }> } } };
+    expect(parsed.config.providerConfigRules.providerRules[0]!.config.modelOrder).toEqual(['GLM-5.3-FlashX']);
   });
 });

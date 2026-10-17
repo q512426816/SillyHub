@@ -4,13 +4,19 @@
  * 2026-10-15-zcode-engine-appserver task-05（D-002 / D-003）。风格对齐 codex-settings /
  * pi-settings（纯函数 + 显式路径入参；写盘器不自建根目录，调用方 spawn 前创建）。
  *
- * 背景（2026-10-15 实测钉板，decisions.md D-003 evidence）：
+ * 背景（2026-10-15 实测钉板，decisions.md D-003 evidence；2026-10-17 形状修正）：
  *   - ZCODE_DATA_BASE_DIR 重定向 ZCode 配置面根（实测：value=T 时引擎读 T/.zcode/v2/
  *     下 provider_config.json / credentials.json / setting.json 等）；
- *   - 个人 Provider 体系形状（本机实证实例）：{schemaVersion:1, config:{providerOrder,
- *     providerConfigRules:[{providerId, providerName, config:{group, access:{type:'api-key',
- *     apiKey}, api:{type:'anthropic-messages'|'openai-chat-completions', baseUrl},
- *     personalModelIds, modelOrder}}]}}——注入该文件后模型轮真实跑在注入 Provider 上（实测）；
+ *   - 个人 Provider 体系形状（2026-10-17 宿主有效配置 + zcode.cjs bundle .strict()
+ *     schema 双证据钉板）：{schemaVersion:1, config:{providerOrder,
+ *     providerConfigRules:{providerRules:[{providerId, providerName, config:{group,
+ *     access:{type:'api-key', apiKey}, api:{type:'anthropic-messages'|
+ *     'openai-chat-completions', baseUrl}, personalModelIds, modelOrder}}]},
+ *     modelConfigRules:{providerModelRules:[], manualProviderModelRules:[]}}}。
+ *     2026-10-15 初版把 providerConfigRules 写成裸数组——引擎文件级 schema 对该键
+ *     .strict()（bundle 内 providerConfigRules:{templateRules,providerRules} 写盘器
+ *     形状为唯一合法面），裸数组被静默丢弃 → 注册表无模型 → setModel 必败 → 每轮
+ *     turn.failed「Select a model before continuing」（腾讯云真机三会话实证）；
  *   - 会话数据库（~/.zcode/cli/db）不受 ZCODE_DATA_BASE_DIR 重定向（机器级共享，D-002
  *     接受），本写盘器只负责配置面。
  *
@@ -136,19 +142,30 @@ export function buildZcodeProviderConfig(
     schemaVersion: 1,
     config: {
       providerOrder: [PROVIDER_ID],
-      providerConfigRules: [
-        {
-          providerId: PROVIDER_ID,
-          providerName: PROVIDER_DISPLAY_NAME,
-          config: {
-            group: 'standard-personal',
-            access: { type: 'api-key', apiKey },
-            api: { type: zcodeApiType(provider), baseUrl },
-            personalModelIds: [model],
-            modelOrder: [model],
+      // 引擎合法形状（2026-10-17 钉板）：providerConfigRules 必须是
+      // {providerRules:[...]} 对象包裹——裸数组被 .strict() schema 静默丢弃
+      //（真机实证：注册表无模型 → 每轮 turn.failed「Select a model before
+      // continuing」）。modelConfigRules 两键随引擎写盘器形状补齐（空数组 =
+      // 无逐模型属性覆写，模型面以 provider rule 的 personalModelIds 为准）。
+      providerConfigRules: {
+        providerRules: [
+          {
+            providerId: PROVIDER_ID,
+            providerName: PROVIDER_DISPLAY_NAME,
+            config: {
+              group: 'standard-personal',
+              access: { type: 'api-key', apiKey },
+              api: { type: zcodeApiType(provider), baseUrl },
+              personalModelIds: [model],
+              modelOrder: [model],
+            },
           },
-        },
-      ],
+        ],
+      },
+      modelConfigRules: {
+        providerModelRules: [],
+        manualProviderModelRules: [],
+      },
     },
   };
 }

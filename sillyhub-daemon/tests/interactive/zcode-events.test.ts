@@ -214,7 +214,7 @@ describe('normalizeZcodeNotification：state.updated 快照', () => {
                   providerLabel: 'bigmodel-api',
                   contextWindow: 200000,
                   maxOutputTokens: 128000,
-                  reasoning: { levels: [{ value: 'low' }, { value: 'high' }] },
+                  reasoning: { levels: [{ value: 'low' }, { value: 'high' }], defaultLevel: 'high' },
                 },
                 {
                   ref: { providerId: 'kimi', modelId: 'k3' },
@@ -241,6 +241,7 @@ describe('normalizeZcodeNotification：state.updated 快照', () => {
       contextWindow: 200000,
       maxOutputTokens: 128000,
       reasoningLevels: ['low', 'high'], // {value} 对象数组取 value
+      reasoningDefaultLevel: 'high', // 引擎自报默认档（setModel 需带 reasoningLevel 时消费）
     });
   });
 

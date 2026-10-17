@@ -176,6 +176,12 @@ class FakeZcodeServer {
           messages: [],
           settings: {},
         });
+        // 真机行为：create 后服务端推 state.updated 模型目录（驱动 setModel 前置等待）
+        // reasoning 形状 = 2026-10-17 探针钉板：levels 对象数组 + defaultLevel 末档
+        this.emitNotification('state.updated', {
+          sessionId: ZSID,
+          patch: { model: { current: { providerId: 'sillyhub', modelId: 'glm-5.3' }, available: [{ ref: { providerId: 'sillyhub', modelId: 'glm-5.3' }, label: 'glm-5.3', contextWindow: 200000, maxOutputTokens: 128000, reasoning: { levels: [{ value: 'low' }, { value: 'high' }, { value: 'max' }], defaultLevel: 'max' } }] } },
+        });
         return;
       case 'session/subscribe':
         this.reply(req.id, {});
@@ -360,6 +366,12 @@ describe('consume 全链路（ready → create/subscribe → send → 流式 →
     expect(server.requestsOf('session/subscribe')[0]?.params).toEqual({
       sessionId: ZSID,
       deliveryKind: 'desktop-continuous',
+    });
+    // setModel 带引擎自报默认 reasoningLevel（JSON-RPC 对象路径严格校验必需——
+    // 缺失即「Reasoning level is required」，2026-10-17 探针 + 真机双实证）
+    expect(server.requestsOf('session/setModel')[0]?.params).toEqual({
+      sessionId: ZSID,
+      model: { providerId: 'sillyhub', modelId: 'glm-5.3', options: { reasoningLevel: 'max' } },
     });
 
     // 事件流：session_started + text delta
@@ -762,10 +774,12 @@ describe('写盘器 api_format 词表映射（buildZcodeProviderConfig）', () =
     const config = (
       content as {
         config: {
-          providerConfigRules: Array<{ config: { api: { type: string; baseUrl: string } } }>;
+          providerConfigRules: {
+            providerRules: Array<{ config: { api: { type: string; baseUrl: string } } }>;
+          };
         };
       }
-    ).config.providerConfigRules[0]!.config;
+    ).config.providerConfigRules.providerRules[0]!.config;
     return config.api;
   }
 
