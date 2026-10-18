@@ -1,0 +1,119 @@
+{
+  "change": "2026-10-18-audit-log-redact-yaml-quote",
+  "baseline": "4233abb9e7520b2db779ad7143033ec28d90a299",
+  "head": "60f8d9e41e2ccb9446325a0679f0fb6a5ec2c31e",
+  "files": [
+    "docs/sillyspec/active-pitfalls.md",
+    "docs/sillyspec/finished/archive-half-state-location-stuck-active.md",
+    "sillyhub-daemon/src/dsh-settings.ts",
+    "sillyhub-daemon/src/interactive/zcode-app-server-driver.ts",
+    "sillyhub-daemon/tests/dsh-settings.test.ts",
+    "sillyhub-daemon/tests/interactive/zcode-app-server-driver.test.ts"
+  ],
+  "totals": {
+    "files": 6,
+    "additions": 102,
+    "deletions": 7
+  },
+  "savedAt": "2026-10-18T07:57:48.075Z",
+  "note": "flow done 时点冻结（本变更可归属交付面：baseline..HEAD 提交面过滤 .sillyspec/ 只留 .sillyspec/docs/ 交付文档 + 独占树未提交交付；治理工件目录不入冻结——2026-10-12-close-trace-freeze-integrity FR-01）",
+  "modules": [
+    {
+      "id": "sillyhub-daemon",
+      "files": 4,
+      "doc": "docs/multi-agent-platform/modules/sillyhub-daemon.md",
+      "docTouched": false,
+      "docMissing": false
+    },
+    {
+      "id": "docs",
+      "files": 2,
+      "doc": "docs/multi-agent-platform/modules/docs.md",
+      "docTouched": false,
+      "docMissing": false
+    },
+    {
+      "id": "daemon",
+      "files": 4,
+      "doc": "docs/SillyHub/modules/daemon.md",
+      "docTouched": false,
+      "docMissing": false
+    }
+  ],
+  "uncoveredDirs": [],
+  "moduleMaps": [
+    "docs/backend/modules/_module-map.yaml",
+    "docs/frontend/modules/_module-map.yaml",
+    "docs/multi-agent-platform/modules/_module-map.yaml",
+    "docs/SillyHub/modules/_module-map.yaml",
+    "docs/sillyhub-daemon/modules/_module-map.yaml"
+  ],
+  "scopeAudit": {
+    "mode": "full-flow",
+    "ok": true,
+    "degradedReason": null,
+    "baseAnchor": "4233abb9e7520b2db779ad7143033ec28d90a299",
+    "totals": {
+      "files": 6,
+      "additions": 102,
+      "deletions": 7
+    },
+    "rows": [
+      {
+        "path": "docs/sillyspec/active-pitfalls.md",
+        "additions": 1,
+        "deletions": 0,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": "docs/sillyspec/finished/archive-half-state-location-stuck-active.md",
+        "additions": 22,
+        "deletions": 0,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": "sillyhub-daemon/src/dsh-settings.ts",
+        "additions": 15,
+        "deletions": 4,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "planned"
+      },
+      {
+        "path": "sillyhub-daemon/src/interactive/zcode-app-server-driver.ts",
+        "additions": 16,
+        "deletions": 1,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "planned"
+      },
+      {
+        "path": "sillyhub-daemon/tests/dsh-settings.test.ts",
+        "additions": 23,
+        "deletions": 2,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "planned"
+      },
+      {
+        "path": "sillyhub-daemon/tests/interactive/zcode-app-server-driver.test.ts",
+        "additions": 25,
+        "deletions": 0,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "planned"
+      }
+    ],
+    "excluded": {
+      "foreignDeclared": []
+    },
+    "note": "flow done 时点冻结（本文件落盘时采集）",
+    "closedBy": "flow done"
+  },
+  "patchSha256": "5bf2eb8b734f6160d46fa086344b49cd1e92a929c563a5cb501ffe399cb55428",
+  "patchStatus": "ok"
+}

@@ -188,3 +188,66 @@ created_at: 2026-10-15T16:16:15.707Z
   confirmed_at: null
   source_change: 2026-10-17-audit-risk-followup
   status: active
+
+## FR-docs-013 zcode 驱动 env 诊断日志的值统一走脱敏 helper：KEY/TOKEN 键整值 <redacted>，其余值内 scheme://user:pass@host 形态的 userinfo 段打码为 ***，普通值原样保留（诊断能力不回退）
+变更：2026-10-18-audit-log-redact-yaml-quote
+状态：active
+摘要：代理 URL 凭据打码；KEY/TOKEN 整值脱敏
+场景正文：
+- 场景：代理 URL 凭据打码 — Given env 含 `HTTPS_PROXY=http://user:secret@proxy.example.com:3128` 与 `ANTHROPIC_BASE_；When zcode 会话 spawn 打印 env 诊断日志；Then 日志中代理值为 `http://***@proxy.example.com:3128`，BASE_URL 值原样保留。
+- 场景：KEY/TOKEN 整值脱敏 — Given env 含 `ANTHROPIC_API_KEY=sk-xxx` 与 `ANTHROPIC_AUTH_TOKEN=tok-yyy`；When 同上；Then 日志中两键的值均为 `<redacted>`，密钥本体不落日志。
+全文：.sillyspec/changes/archive/2026-10-18-audit-log-redact-yaml-quote/requirements.md#FR-01
+最近确认：60f8d9e41e2ccb9446325a0679f0fb6a5ec2c31e
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-18-audit-log-redact-yaml-quote:flow:测试绑定FR-01
+  tests: sillyhub-daemon/tests/interactive/zcode-app-server-driver.test.ts「redactEnvValueForLog 脱敏三态（代理 userinfo 打码/KEY-TOKEN 整值 <redacted>/普通值透传）」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-18-audit-log-redact-yaml-quote
+  status: active
+
+## FR-docs-014 dsh cordis.patch.yml 的 model id/name 与 baseURL 一律 YAML 单引号包裹并按规范双写转义内嵌单引号，含冒号/空格/#/单引号的模型名不再破坏 YAML 结构
+变更：2026-10-18-audit-log-redact-yaml-quote
+状态：active
+摘要：特殊字符模型名；常规值幂等
+场景正文：
+- 场景：特殊字符模型名 — Given provider 的 model 含 `: `（键值分隔）、`#`（注释起始）、`'`（单引号）等 YAML 特殊字符；When writeDshHome 写盘；Then patch 中该值被单引号包裹且内嵌单引号双写转义，YAML 结构不破坏（不产生多余键/注释吞噬后续行）。
+- 场景：常规值幂等 — Given provider 为常规形态（model=deepseek-v4、baseURL=https://api.example.com/anthropic）；When writeDshHome 写盘；Then 输出为 `'deepseek-v4'` / `'https://api.example.com/anthropic'` 形态，同配置二次写内容一致（幂等语义不变
+全文：.sillyspec/changes/archive/2026-10-18-audit-log-redact-yaml-quote/requirements.md#FR-02
+最近确认：60f8d9e41e2ccb9446325a0679f0fb6a5ec2c31e
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-18-audit-log-redact-yaml-quote:flow:测试绑定FR-02
+  tests: sillyhub-daemon/tests/dsh-settings.test.ts「特殊字符模型名/URL 单引号转义不破坏 YAML」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-18-audit-log-redact-yaml-quote
+  status: active
+
+## FR-docs-015 新增单测钉板两处（zcode 脱敏 helper 纯函数用例 + dsh 特殊字符模型名写盘用例），既有用例断言同步更新，dsh-settings 与 zcode 驱动相关测试全绿，tsc 零错
+变更：2026-10-18-audit-log-redact-yaml-quote
+状态：active
+摘要：（无场景名）
+全文：.sillyspec/changes/archive/2026-10-18-audit-log-redact-yaml-quote/requirements.md#FR-03
+最近确认：60f8d9e41e2ccb9446325a0679f0fb6a5ec2c31e
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-18-audit-log-redact-yaml-quote:flow:测试绑定FR-03
+  tests: sillyhub-daemon/tests/dsh-settings.test.ts「writeDshHome（per-session 路由写盘）」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-18-audit-log-redact-yaml-quote
+  status: active
