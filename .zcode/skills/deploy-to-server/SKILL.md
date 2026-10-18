@@ -163,11 +163,16 @@ ssh -i ~/.ssh/tencent_deploy ubuntu@124.222.127.242 '
 
 ### 1. 写记录 md（契约与 sillyhub-docker-deploy skill 的「发布记录」节完全一致）
 
-取锚点：`GET https://<域名>/api/deploy-records`（需登录 token）拿最近一条 `commit_to` 与
-`seq`；或本地锚定（`docs/releases/` 目录最大 seq+1，目录空=001）。提交范围
+取锚点：`commit_from` 取 `GET https://<域名>/api/deploy-records`（需登录 token）最近一条的
+`commit_to`（不可达则看本地 `docs/releases/` 最大日期记录）；**`seq` 一律取号器**
+`bash deploy/scripts/next-release-seq.sh`（全局最大 frontmatter seq + 1，2026-10-18 修
+「seq 经常错」后单一取号源——勿按文件名日期段/当天序号/API 最近一条 +1 取号：文件名 NNN
+是「当天第几次」跨天重置，API 最近一条会传染历史错值；frontmatter `seq` 是全局部署序号，
+前端徽标 #NNN 用它）。提交范围
 `git log <from>..HEAD`，按 🆕新增/🔧修复/⚡优化 分组规整成中文总结，写
-`docs/releases/YYYY-MM-DD-<三位序号>-<HEAD短SHA>.md`（frontmatter 8 字段 + 正文；失败部署
-也写 status: failed）。模板照 sillyhub-docker-deploy SKILL.md，记录随代码一起 commit 推送。
+`docs/releases/YYYY-MM-DD-<三位序号>-<HEAD短SHA>.md`（文件名 NNN=当天序号从 001 起；
+frontmatter 8 字段 + 正文；失败部署也写 status: failed）。模板照 sillyhub-docker-deploy
+SKILL.md，记录随代码一起 commit 推送。
 
 ### 2. 同步到服务器镜像目录（本 skill 专属步骤）
 

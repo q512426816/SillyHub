@@ -348,8 +348,11 @@ Get-NetFirewallProfile | Select-Object Name,Enabled
      | jq '.[0] // empty'
    ```
 
-   有记录 → `commit_from` 取返回的 `commit_to`，`seq` = 返回的 `seq + 1`。
-   平台不可达 / 无记录（首次）→ 回退本地锚定：`seq` = `ls docs/releases/ | grep -oP '^\d{4}-\d{2}-\d{2}-\K\d{3}' | sort -n | tail -1` 的结果 +1（目录空则 001），`commit_from` 写 null。
+   有记录 → `commit_from` 取返回的 `commit_to`；平台不可达 / 无记录（首次）→ `commit_from` 写 null。
+   **`seq` 一律取号器**：`bash deploy/scripts/next-release-seq.sh`（全局最大 frontmatter seq + 1，
+   2026-10-18 修「seq 经常错」后单一取号源）。⚠️ 勿按文件名日期段/当天序号/API 最近一条 +1 取号
+   ——文件名 NNN 是「当天第几次」（跨天重置），API 最近一条会传染历史错值；frontmatter `seq`
+   是全局部署序号（前端徽标 #NNN、跨天单调递增），两个数不是一回事。
 
 2. **取提交列表**：
 
@@ -395,7 +398,8 @@ Get-NetFirewallProfile | Select-Object Name,Enabled
    ````
 
    字段规则（frontmatter 是平台解析契约，缺字段/语法错会被标记 invalid）：
-   - `seq`：三位序号 int；`deployed_at`：本地时间 `"YYYY-MM-DD HH:mm:ss"` 带引号；
+   - `seq`：全局部署序号 int（`next-release-seq.sh` 取号，跨天单调递增；文件名 NNN 才是当天序号）；
+     `deployed_at`：本地时间 `"YYYY-MM-DD HH:mm:ss"` 带引号；
    - `status`：`success` 或 `failed`；失败时正文第一小节写 `## ❌ 失败原因`；
    - `commits`：列表（无新提交的重部署写 `[]`）；message 含冒号/引号时整体加引号；
    - `agent`：执行部署的 agent 标识（如 zcode-agent / claude-agent）。
