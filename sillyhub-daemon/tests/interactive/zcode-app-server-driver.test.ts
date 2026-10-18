@@ -17,6 +17,7 @@ import { spawn } from 'node:child_process';
 import {
   ZcodeAppServerDriver,
   ZcodeExecutableNotFoundError,
+  redactEnvValueForLog,
   type ZcodeHandle,
   type ZcodeStartOptions,
   type ZcodeSessionPermissionHooks,
@@ -851,5 +852,29 @@ describe('写盘器 api_format 词表映射（buildZcodeProviderConfig）', () =
       expect(api.type).toBe('anthropic-messages');
       expect(api.baseUrl).toBe('https://api.upstream.example');
     }
+  });
+});
+
+describe('redactEnvValueForLog 脱敏（2026-10-18-audit-log-redact-yaml-quote）', () => {
+  it('代理 URL userinfo 段打码，host/port 保留供诊断', () => {
+    expect(redactEnvValueForLog('HTTPS_PROXY', 'http://user:secret@proxy.example.com:3128')).toBe(
+      'http://***@proxy.example.com:3128',
+    );
+    expect(redactEnvValueForLog('ALL_PROXY', 'socks5://alice@10.0.0.2:1080')).toBe(
+      'socks5://***@10.0.0.2:1080',
+    );
+  });
+
+  it('KEY/TOKEN 键整值 <redacted>（密钥本体不落日志）', () => {
+    expect(redactEnvValueForLog('ANTHROPIC_API_KEY', 'sk-ant-secret')).toBe('<redacted>');
+    expect(redactEnvValueForLog('ANTHROPIC_AUTH_TOKEN', 'tok-yyy')).toBe('<redacted>');
+  });
+
+  it('普通值透传 + 60 字符截断语义保留', () => {
+    expect(redactEnvValueForLog('ANTHROPIC_BASE_URL', 'https://api.example.com')).toBe(
+      'https://api.example.com',
+    );
+    const long = 'x'.repeat(80);
+    expect(redactEnvValueForLog('ZCODE_DATA_BASE_DIR', long)).toBe('x'.repeat(60));
   });
 });

@@ -65,13 +65,34 @@ describe('writeDshHome（per-session 路由写盘）', () => {
       const yaml = readFileSync(join(acp, 'cordis.patch.yml'), 'utf8');
       expect(yaml).toContain('- id: llm-pi-ai');
       expect(yaml).toContain('api: anthropic-messages');
-      expect(yaml).toContain('baseURL: https://api.example.com/anthropic');
+      // 外部数据插值点一律单引号包裹（2026-10-18-audit-log-redact-yaml-quote）
+      expect(yaml).toContain("baseURL: 'https://api.example.com/anthropic'");
       expect(yaml).toContain(`apiKeyEnv: ${DSH_API_KEY_ENV}`);
-      expect(yaml).toContain('- id: deepseek-v4');
+      expect(yaml).toContain("- id: 'deepseek-v4'");
+      expect(yaml).toContain("name: 'deepseek-v4'");
       // rc.2 毒源（评审+探针实证）：compat 块存在即整条 provider 被静默拒收——禁止写盘
       expect(yaml).not.toContain('compat');
       // 密钥明文不落盘（R-02：patch 只存变量名）
       expect(yaml).not.toContain('sk-test');
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('特殊字符模型名 → 单引号包裹 + 内嵌单引号双写，YAML 结构不破坏', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'dsh-home-'));
+    try {
+      // : 空格 # 在裸插值下分别制造假键值/注释吞噬；' 检验双写转义
+      const hostile = "glm: 4.7 # fast'ed";
+      await writeDshHome({ dshHome: dir, provider: makeProvider({ model: hostile }) });
+      const yaml = readFileSync(join(dir, 'profiles', 'acp', 'cordis.patch.yml'), 'utf8');
+      const quoted = `'${hostile.replace(/'/g, "''")}'`;
+      expect(yaml).toContain(`- id: ${quoted}`);
+      expect(yaml).toContain(`name: ${quoted}`);
+      // 裸插值形态不再出现（假键值/注释行会破坏结构）
+      expect(yaml).not.toContain(`- id: ${hostile}`);
+      // 注释吞噬防线：# 后内容仍在引号内，后续行（maxTokens）完好
+      expect(yaml).toContain('maxTokens: 128000');
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }

@@ -67,6 +67,21 @@ const DEFAULT_COMPACT_TIMEOUT_MS = 30_000;
 /** close 时 stdin.end 后 SIGTERM 升级宽限（对齐 codex KILL_GRACE_MS=2000）。 */
 const KILL_GRACE_MS = 2_000;
 
+/**
+ * env 诊断日志脱敏（2026-10-18-audit-log-redact-yaml-quote）：
+ * - 键名含 KEY/TOKEN → 整值 `<redacted>`（密钥类无诊断定位价值）；
+ * - 其余值 URL userinfo 段打码 `scheme://***@host`（代理 host/port 是诊断定位
+ *   信息只抹凭据段；userinfo 正则取 `://` 后不含 /、@、空白的首段，覆盖
+ *   user 与 user:pass——用户名 URL 编码 %40 形态不匹配，残余面已在 design 风险节声明）。
+ * 导出仅供单测（先例：spec-sync applyResurrectSuppress）。
+ */
+export function redactEnvValueForLog(key: string, value: unknown): string {
+  if (/KEY|TOKEN/i.test(key)) return '<redacted>';
+  return String(value)
+    .replace(/([a-zA-Z][a-zA-Z0-9+.-]*:\/\/)([^/@\s]+)@/g, '$1***@')
+    .slice(0, 60);
+}
+
 /** zcode 驱动专用启动选项（InteractiveDriverStartOptions 的 zcode 视图）。 */
 export interface ZcodeStartOptions extends InteractiveDriverStartOptions {
   /** zcode 可执行文件路径（_agentPaths.get('zcode')，.cjs/.exe/.cmd 均可）。 */
@@ -169,7 +184,7 @@ export class ZcodeAppServerDriver implements InteractiveDriver {
     // eslint-disable-next-line no-console
     console.log('[zcode-driver] spawn:', JSON.stringify({ cmd: spawnCmd, args: spawnArgs, cwd: opts.cwd, zcode_data: env['ZCODE_DATA_BASE_DIR'] }));
     // eslint-disable-next-line no-console
-    console.log('[zcode-driver] spawn env keys:', Object.keys(env).filter(k => /ANTHROPIC|CLAUDE|ZCODE|PROXY|NODE_OPTIONS|SILLYHUB/i.test(k)).map(k => k + '=' + (k.includes('KEY') || k.includes('TOKEN') ? '<redacted>' : String(env[k]).slice(0, 60))).join(' | '));
+    console.log('[zcode-driver] spawn env keys:', Object.keys(env).filter(k => /ANTHROPIC|CLAUDE|ZCODE|PROXY|NODE_OPTIONS|SILLYHUB/i.test(k)).map(k => k + '=' + redactEnvValueForLog(k, env[k])).join(' | '));
     // ZCode 桌面端设置用户级 env 把个人 Provider 配置硬指回宿主文件（真机实证：
     // ZCODE_PERSONAL_PROVIDER_CONFIG_FILE=C:Usersqinyi.zcode2provider_config.json）——
     // 不改指则 per-session 注入被完全无视，setModel/模型路由全部失效（Provider
