@@ -20,3 +20,4 @@ gate_summary: >-
   . && uv run ruff format --check . && uv run mypy app && cd ../frontend && pnpm lint && cd ../sillyhub-daemon && pnpm
   typecheck（11.1s）｜门文件 23 个
 
+commit_type: feat

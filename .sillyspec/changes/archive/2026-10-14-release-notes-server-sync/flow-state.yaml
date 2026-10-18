@@ -34,3 +34,4 @@ spec_approved_channel: user-confirmed
 spec_attested_by: anon@DESKTOP-HJ0AM09
 gate_summary: 'test: —｜lint: —｜门文件 2 个'
 
+commit_type: feat

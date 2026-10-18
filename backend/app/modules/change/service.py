@@ -3004,7 +3004,13 @@ class ChangeService:
         # 与 title 同口径整体覆盖——动机段被删/清空时描述随 None。
         row.description = parsed.description
         # change_type: only overwrite when DB value is None (protect user-set values)
-        if row.change_type is None and parsed.change_type is not None:
+        # 2026-10-18-change-type-git-conventional：flow-state.yaml commit_type 是权威
+        # 源（git conventional 前缀，回填脚本/CLI 写入），允许覆盖既有值——存量被
+        # 目录推断默认填成的 feature 错值靠它纠正；目录形状推断值仍只为空回填
+        # （保护 change_writer 建行时写入的用户语义类型不被猜测值回翻）。
+        if parsed.change_type is not None and (
+            row.change_type is None or parsed.change_type_authoritative
+        ):
             row.change_type = parsed.change_type
         # affected_components: always overwrite (inferred value is more accurate)
         if parsed.affected_components:

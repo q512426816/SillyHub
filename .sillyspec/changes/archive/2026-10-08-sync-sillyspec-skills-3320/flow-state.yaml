@@ -26,3 +26,4 @@ baseline_sha256: 687f44e564a21cd4bbe1f34c8277e2dd266ad54a65ae2631ac2aebd75bb77f5
 autopilot_ticked: 4
 gate_summary: 'test: —｜lint: —｜门文件 23 个'
 
+commit_type: chore

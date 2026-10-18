@@ -23,3 +23,4 @@ gate_summary: >-
   passed ← cd backend && uv run ruff check . && uv run ruff format --check . && uv run mypy app && cd ../frontend &&
   pnpm lint && cd ../sillyhub-daemon && pnpm typecheck（5.8s）｜门文件 21 个
 
+commit_type: fix

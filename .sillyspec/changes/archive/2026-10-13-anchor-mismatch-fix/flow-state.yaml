@@ -38,3 +38,4 @@ gate_summary: >-
   pnpm lint && cd ../sillyhub-daemon && pnpm typecheck（4.4s） — 跳过原因：环境缺件：二进制「next」不存在（'next'
   不是内部或外部命令，也不是可运行的程序）——非代码失败不拦门；在对应包目录补装依赖（pnpm/npm install、uv sync 等）后 lint 恢复实测。｜门文件 4 个
 
+commit_type: feat

@@ -28,3 +28,4 @@ spec_approved_at: '2026-10-12T05:10:48.947Z'
 spec_approved_by: anon@DESKTOP-2BN7FDC
 gate_summary: 'test: —｜lint: —｜门文件 20 个'
 
+commit_type: feat

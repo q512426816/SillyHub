@@ -37,6 +37,41 @@ interface Row {
 
 const DASH = "—";
 
+/**
+ * git conventional 前缀 → 标签配色（2026-10-18-change-type-git-conventional）。
+ * 类型值来自 flow-state.yaml commit_type（权威，回填/CLI 写入）；未知类型走
+ * 中性配色显示原值。旧枚举 feature 语义等同 feat，显示层等价映射（数据不动）。
+ */
+const COMMIT_TYPE_STYLES: Record<string, string> = {
+  feat: "border-emerald-500/40 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400",
+  fix: "border-red-500/40 bg-red-500/10 text-red-600 dark:text-red-400",
+  docs: "border-blue-500/40 bg-blue-500/10 text-blue-600 dark:text-blue-400",
+  refactor: "border-violet-500/40 bg-violet-500/10 text-violet-600 dark:text-violet-400",
+  test: "border-amber-500/40 bg-amber-500/10 text-amber-600 dark:text-amber-400",
+  perf: "border-cyan-500/40 bg-cyan-500/10 text-cyan-600 dark:text-cyan-400",
+  build: "border-orange-500/40 bg-orange-500/10 text-orange-600 dark:text-orange-400",
+  ci: "border-teal-500/40 bg-teal-500/10 text-teal-600 dark:text-teal-400",
+  chore: "border-slate-500/40 bg-slate-500/10 text-slate-600 dark:text-slate-400",
+  style: "border-pink-500/40 bg-pink-500/10 text-pink-600 dark:text-pink-400",
+};
+
+const COMMIT_TYPE_DISPLAY: Record<string, string> = {
+  feature: "feat", // 旧枚举语义等价映射（仅显示层）
+};
+
+function CommitTypeChip({ type }: { type: string }) {
+  const display = COMMIT_TYPE_DISPLAY[type] ?? type;
+  const cls = COMMIT_TYPE_STYLES[display] ?? "border-border bg-muted text-muted-foreground";
+  return (
+    <span
+      data-testid="commit-type-chip"
+      className={`inline-flex h-5 shrink-0 items-center rounded border px-1.5 font-mono text-[10px] font-semibold ${cls}`}
+    >
+      {display}
+    </span>
+  );
+}
+
 /** 用量七项压缩行（与卡片同源口径，仅改排版密度）。 */
 function usageRows(usage: NonNullable<ReturnType<typeof useChangeUsage>["data"]>): Row[] {
   const t = usage.totals;
@@ -142,7 +177,15 @@ export function ChangeOverviewSide({
       <MetaPanel className="w-full">
       <MetaPanelSection title="基本信息">
         <RowView k="变更 key" v={change.change_key} />
-        <RowView k="类型" v={change.change_type ?? DASH} />
+        {/* 类型行改 git conventional 彩色标签（2026-10-18-change-type-git-conventional） */}
+        <div className="flex items-center justify-between gap-3 text-xs">
+          <span className="text-muted-foreground">类型</span>
+          {change.change_type ? (
+            <CommitTypeChip type={change.change_type} />
+          ) : (
+            <span className="text-muted-foreground">{DASH}</span>
+          )}
+        </div>
         <RowView k="创建" v={change.created_at ? formatCompactTime(change.created_at) : DASH} />
         <RowView k="负责人" v={change.owner_name ?? DASH} />
       </MetaPanelSection>

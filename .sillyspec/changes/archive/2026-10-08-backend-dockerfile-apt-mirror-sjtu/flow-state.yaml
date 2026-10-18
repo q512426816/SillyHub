@@ -29,3 +29,4 @@ updatedAt: '2026-10-08T01:35:37.541Z'
 baseline_sha256: 7dae29eac9ef5279e45855d40836dd7c3b24016d56a4c9f8396fd376fb96f043
 gate_summary: 'test: —｜lint: —｜门文件 2 个'
 
+commit_type: build

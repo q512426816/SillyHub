@@ -32,3 +32,4 @@ baseline_sha256: bb864ad7bb9b72f0574ad17981c111818879211bf4f34676741a9bf70e81995
 autopilot_ticked: 4
 gate_summary: 'test: —｜lint: —｜门文件 1 个'
 
+commit_type: build
