@@ -126,3 +126,4 @@
 | 2026-10-17 | 2026-10-17-session-replay-pingpong-fix | 生产环境后端日志 HTTP_401_AUTH_TOKEN_EXPIRED 每秒约10条持续刷屏（单日… |
 | 2026-10-17 | 2026-10-17-session-envelope-rev-stale-guard | 2026-10-17-session-replay-pingpong-fix 评审 P3-3——跨标… |
 | 2026-10-18 | 2026-10-18-change-type-git-conventional | 变更类型改用git惯用前缀彩色标签 |
+| 2026-10-18 | 2026-10-18-change-list-type-filter | 变更列表加类型标签与类型筛选 |

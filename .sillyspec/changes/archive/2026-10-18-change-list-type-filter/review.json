@@ -1,0 +1,22 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-18-change-list-type-filter",
+  "reviewer": "inline-self（环境无已注册子代理，主会话代行）",
+  "verdict": "PASS",
+  "reviewedAgainst": "857d8af461ea4aa3705016087c3d9124105a3180",
+  "findings": [
+    {
+      "severity": "P3",
+      "title": "筛选值集两处维护（前端 TYPE_OPTIONS / 后端白名单）",
+      "evidence": "前端下拉未列 ci/revert/quick 而后端白名单含之，深链手输可筛、下拉不可选；design 已声明为防下拉过长的有意取舍，两端各有测试钉 feat↔feature 口径",
+      "location": "frontend/src/app/(dashboard)/workspaces/[id]/changes/page.tsx:143"
+    }
+  ],
+  "dimensionNotes": {
+    "乱序": "ok——筛选是无状态 SQL where，URL 非法值经 TYPE_OPTIONS 白名单解析回默认",
+    "并发": "ok——纯读路径（GET + useQuery），无新共享状态；queryKey 含 changeType 防串缓存",
+    "切换": "ok——重置/tab 切换随既有筛选一并回默认；URL replaceState 快照契约不变（buildChangesQuery 空值省略）；quicklog tab 查询区整体隐藏不涉类型筛选",
+    "作用域": "ok——where 绑定既有 workspace_id base，跨工作区不串台；feat 别名 SQL 层展开同值同语义。边界已裁决：可接受（值集取舍 + 双端测试钉口径）"
+  },
+  "reviewedAt": "2026-10-18T22:04:40+08:00"
+}

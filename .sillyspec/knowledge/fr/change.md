@@ -398,3 +398,76 @@ created_at: 2026-10-02T02:55:12.745Z
 - 场景：主路径 — Given 本仓 641 个归档变更与 5020 条提交，When 实跑脚本，Then 抽验变更末行含
 全文：.sillyspec/changes/archive/2026-10-18-change-type-git-conventional/requirements.md#FR-05
 最近确认：261a333678e8722856b7120606385f52e31e8579
+
+## FR-change-022 后端 list_ 与 GET /changes 新增 change_type 筛选参数：白名单（conventional 前缀 + feature/prototype/quick 旧值），feat 筛选等价命中旧值 feature（与显示层映射口径一致），未知/缺省值不过滤
+变更：2026-10-18-change-list-type-filter
+状态：active
+摘要：主路径；白名单外
+场景正文：
+- 场景：主路径 — Given 库内行 feat/feature/fix 各一，When list_(change_type="feat")，Then 返回
+- 场景：白名单外 — Given 同上三行，When change_type="garbage"，Then 全部返回不过滤（与缺省同）。
+全文：.sillyspec/changes/archive/2026-10-18-change-list-type-filter/requirements.md#FR-01
+最近确认：857d8af461ea4aa3705016087c3d9124105a3180
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-18-change-list-type-filter:flow:测试绑定FR-01
+  tests: backend/app/modules/change/tests/test_change_lineage_filter.py「test_change_type_filter_feat_aliases_legacy_feature / test_change_type_filter_exact_match_and_fallback」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-18-change-list-type-filter
+  status: active
+
+## FR-change-023 CommitTypeChip 从详情页抽为公共组件，列表行 meta 行 change_key 后复用渲染类型彩色标签（含 feature→feat 显示映射、空值零占位）
+变更：2026-10-18-change-list-type-filter
+状态：active
+摘要：主路径
+场景正文：
+- 场景：主路径 — Given 列表行 change_type=fix/feature/null 各一，Then 渲染恰两枚标签（文本
+全文：.sillyspec/changes/archive/2026-10-18-change-list-type-filter/requirements.md#FR-02
+最近确认：857d8af461ea4aa3705016087c3d9124105a3180
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-18-change-list-type-filter:flow:测试绑定FR-02
+  tests: frontend/src/components/changes/detail/__tests__/change-overview-side.test.tsx「类型行：已知前缀渲染彩色标签（fix 红色阶 / docs 蓝色阶）」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-18-change-list-type-filter
+  status: active
+
+## FR-change-024 前端筛选栏新增「类型」下拉（全部类型/feat/fix/docs/chore/test/refactor/perf/build/style/原型），URL 参数 type 持久化、tab 切换随既有筛选一并回默认、与 tab/搜索/分类/聚焦组合生效
+变更：2026-10-18-change-list-type-filter
+状态：active
+摘要：主路径
+场景正文：
+- 场景：主路径 — Given 列表页，When 下拉选「fix（修复）」，Then listChanges 收到
+全文：.sillyspec/changes/archive/2026-10-18-change-list-type-filter/requirements.md#FR-03
+最近确认：857d8af461ea4aa3705016087c3d9124105a3180
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-18-change-list-type-filter:flow:测试绑定FR-03
+  tests: changes/__tests__/page.test.tsx「类型下拉选择「fix」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-18-change-list-type-filter
+  status: active
+
+## FR-change-025 聚焦测试：后端 change_type 筛选用例（feat 等价命中 feature、未知值不过滤）+ 前端列表页筛选与行标签用例全绿；tsc 通过
+变更：2026-10-18-change-list-type-filter
+状态：active
+摘要：主路径
+场景正文：
+- 场景：主路径 — Given 改动落地，When 跑 test_change_lineage_filter.py + 列表页/侧栏组件测试，；Then 全绿（8 + 52 + 11 passed），tsc exit 0，ruff/mypy 干净。
+全文：.sillyspec/changes/archive/2026-10-18-change-list-type-filter/requirements.md#FR-04
+最近确认：857d8af461ea4aa3705016087c3d9124105a3180

@@ -522,3 +522,11 @@
 锚点：未记录
 最近确认：261a333678e8722856b7120606385f52e31e8579
 理由：最大风险：提交归属误判。两类实证坑已堵——① 跨变更引用（提交信息正文提及评审 出处变更 key）：按「信息中**最后一个** key 形态 token」归属，不按出现过即归属； ② CLI 基线检查点提交 `sillyspec: baseline checkpoint for <key> …` 的 `sillyspec:` 撞 conventional 前缀正则：类型白名单（feat/fix/perf/refactor/test/docs/style/ build/ci/chore/revert）外一律不认。残余面：变更唯一提及在 release-notes 类提交 里 → 归 docs（可接受，此类变更本就是文档面）；老变更提交不带 key（215 个 no_match）→ 不猜不写，保持现状显示。 试过放弃：A. 平台侧解析 timeline.md 提交锚——主提交只有裸哈希无标题，判不出 fix（实证：session-envelope 会错判 docs）；B. 标题/动机关键词推导——「防迟到旧值 覆盖」类中文概括无稳定关键词，猜错比不猜伤害大；C. 新增平台端点直写类型——要动 鉴权/审计面，而 spec-sync 镜像通道现成且 reparse 已消费该目录。
+
+## D-unmapped-085@v1 设计期风险与放弃方案（底稿）
+状态：implemented
+变更：2026-10-18-change-list-type-filter
+原编号：D-001@v1
+锚点：未记录
+最近确认：857d8af461ea4aa3705016087c3d9124105a3180
+理由：最大风险：筛选值集与展示映射漂移（feat↔feature 口径在后端 aliases、前端 COMMIT_TYPE_DISPLAY 两处维护）。缓解：两端各有测试钉（后端 feat 等价命中用例 / 前端 feature→feat 显示用例），且值集注释互指对方为权威。残余面：TYPE_OPTIONS 未 列 ci/revert/quick（防下拉过长），后端白名单仍可筛——深链手输 URL 可用，下拉不可 选，属有意取舍。 试过放弃：A. 类型筛选复用 lineage 的「全局集合→SQL IN」两阶段——类型是列值非 投影字段，直接 where 即可，无需两阶段；B. 前端本地过滤——total/分页会错 （pending_review_only gap② 前车之鉴），必须服务端筛。

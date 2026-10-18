@@ -26,3 +26,4 @@ created_at: 2026-08-29 22:56:30
 - 2026-10-16-change-center-back-keeps-list-state | 变更中心列表切「已归档」tab或翻页后点行进详情,点详情页「变更列表」返回入口回到列表会重置为进行中…
 - 2026-10-16-change-title-condense-backfill | 变更中心标题提炼与存量回填
 - 2026-10-18-change-type-git-conventional | 变更类型改用git惯用前缀彩色标签
+- 2026-10-18-change-list-type-filter | 变更列表加类型标签与类型筛选
