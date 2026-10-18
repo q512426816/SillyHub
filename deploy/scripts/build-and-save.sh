@@ -4,7 +4,7 @@
 #
 # 用法：
 #   # 打包给生产服务器（前端浏览器 API 地址用生产值）：
-#   PROD_API_URL=http://192.168.0.143:8001 ./deploy/scripts/build-and-save.sh
+#   PROD_API_URL=https://crrcdt.ppdmq.top ./deploy/scripts/build-and-save.sh
 #
 #   # 仅本地验证流程（API 地址用 deploy/.env 的本地开发值）：
 #   ./deploy/scripts/build-and-save.sh
