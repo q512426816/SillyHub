@@ -58,3 +58,25 @@ sillyspec platform sync --change <已归档变更名>
 ```
 
 文件树通道整树重推（本轮 24 文件变更上行成功），平台 location 随即翻转为 archive。
+
+## 处置记录（2026-10-18 定时收口：核心缺口已修，关闭归档）
+
+- **「中改」方向已落地**（sillyspec 仓 2026-10-17-archive-terminal-sync-strict，5147c63f）：
+  新增 `triggerSyncTerminalStrict`（src/run/shared.js:1067）——终态判定驱动（DB status
+  ∈ archived/deleted 才强校验，非终态原样委托既有 best-effort triggerSync 零行为变化）、
+  内联有界（绕过后台化直跑，预算 ≥45s，结果当场可判）、失败显性化（syncSpecTree
+  `treeOk!==true` 判未收敛 → 🚨 告警 + 自救命令 `sillyspec platform sync --change <名>`
+  + exit 1，对齐 _submitApproval「终态网络失败必须可见」先例）。接线三终态点：
+  flow done（src/run/complete.js:834 completion 面 + src/flow.js:2535）与
+  change-delete（src/change-delete.js:163）。归档/删除终态动作从此「要么收敛、要么响亮失败」，
+  重试不再挂「下一条命令」死事件源。
+- **后续缺陷修复 + 实战验证**（2026-10-17-strict-sync-signal-shape，560af6a2）：raceWithAbort
+  默认路径 signal 形状套娃致树通道恒假败——上一变更归档 dogfood 当场被强校验 🚨 抓获，
+  按自救命令收敛半态，安全网本身工作正常得到生产实证。
+- **测试证据**：test/terminal-sync-strict.test.mjs 本轮复跑 10/10 绿（终态判定/内联有界/
+  失败显性化/quick 委托/未连接跳过/冲突不重复告警等面全覆盖）。
+- **遗留项（不影响关闭）**：①修复上线前产生的存量半态仍需一次手动 `platform sync
+  --change <名>`（「近改」的 progress show 红标未单独实现——新半态已被终态强校验在
+  源头拦截，存量面一次性手工收敛即可，再遇可补）；②「远改」时间驱动 watchdog 未做——
+  终态内联阻塞校验后新静默半态不再产生，watchdog 降级为可选增强。
+- 处置结论：坑核心（静默半态 + 重试挂在可能永不到来的事件源）已在源头解决，本文件移入 finished/。

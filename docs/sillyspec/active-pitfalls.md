@@ -19,3 +19,4 @@
 <!-- cli-cwd-coupling.md：sillyspec CLI cwd 耦合——worktree/子目录内跑把 cwd 当独立 spec root（进度库分裂风险；入口守卫已收窄，自动锚定主仓根延后为设计级变更）（2026-10-12 记录，2026-10-13 处置复核：保持活跃） -->
 <!-- external-mode-no-root-session-resolution.md：双形态契约守则——external 模式（无根会话）parent 链/根会话解析（已知断裂点已修+冒烟用例已落；守则参考文档长期活跃，不随单点修复归档）（2026-09-11） -->
 <!-- verify-gate-worktree-crossrepo-three-defects.md：verify 门禁三缺陷——同文件叠加多变更快照破（设计项余留）/跨仓 node:test 行级误计（已修）/冒烟 cwd 假阳性（已修）（2026-09-21，保持活跃：仅缺陷二余项） -->
+<!-- archive-half-state-location-stuck-active.md：归档半态保底缺口——location（文件树通道）与 status（DB 通道）双通道半成功 + 重试挂「下一条命令」死事件源，已归档变更平台「进行中」幽灵滞留（2026-10-17 实证 54 分钟）→ 已关闭（2026-10-17-archive-terminal-sync-strict 5147c63f：triggerSyncTerminalStrict 三终态点强校验——终态判定/内联有界/🚨+自救命令+exit1；560af6a2 signal 形状修复 dogfood 实战验证；terminal-sync-strict 10/10 绿；存量半态一次性手动 platform sync 收敛；2026-10-18 已移入 finished/） -->
