@@ -26,7 +26,7 @@ input: >-
 autopilot: false
 prestage_ack: false
 baseline_commit: 4c7b939fa0386dcead9cd0bbb5f554ab5e6461de
-updatedAt: '2026-10-18T13:56:51.292Z'
+updatedAt: '2026-10-18T13:57:37.747Z'
 cross_baselines:
   sillyspec: 9b8a1031fff3966e85fee2f2b45dbd76ecd9aca7
 baseline_sha256: 94e4da6f72c69ff4e896f94eda770801efacf7ed2c7749374c45c83fc10a6da1
@@ -35,4 +35,5 @@ spec_approved_at: '2026-10-18T13:56:50.524Z'
 spec_approved_by: anon@DESKTOP-HJ0AM09
 spec_approved_channel: user-confirmed
 spec_attested_by: anon@DESKTOP-HJ0AM09
+batch_ticked: true
 
