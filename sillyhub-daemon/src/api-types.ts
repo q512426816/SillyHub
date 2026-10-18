@@ -33015,6 +33015,7 @@ export interface operations {
                 search?: string | null;
                 current_stage?: string | null;
                 lineage?: string | null;
+                change_type?: string | null;
                 sort?: string;
                 pending_review_only?: boolean;
                 page?: number;
