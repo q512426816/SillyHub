@@ -1,0 +1,38 @@
+tier: thin
+legacy_fallback: false
+substeps:
+  artifacts: done
+born_face: thin
+with_tasks: false
+review_force: null
+input: >-
+  变更列表加类型标签与类型筛选
+
+
+  动机：变更类型 git 惯用前缀通道已上线（详情页类型行彩色标签 + 426 个存量回填），但变更中心列表页看不到类型信息、也无筛选入口。列表行加同源类型标签、筛选栏加类型下拉，与既有分类（出身）筛选正交组合。
+
+
+  成功标准：
+
+  - 后端 list_ 与 GET /changes 新增 change_type 筛选参数：白名单（conventional 前缀 + feature/prototype/quick 旧值），feat 筛选等价命中旧值
+  feature（与显示层映射口径一致），未知/缺省值不过滤
+
+  - CommitTypeChip 从详情页抽为公共组件，列表行 meta 行 change_key 后复用渲染类型彩色标签（含 feature→feat 显示映射、空值零占位）
+
+  - 前端筛选栏新增「类型」下拉（全部类型/feat/fix/docs/chore/test/refactor/perf/build/style/原型），URL 参数 type 持久化、tab 切换随既有筛选一并回默认、与
+  tab/搜索/分类/聚焦组合生效
+
+  - 聚焦测试：后端 change_type 筛选用例（feat 等价命中 feature、未知值不过滤）+ 前端列表页筛选与行标签用例全绿；tsc 通过
+autopilot: false
+prestage_ack: false
+baseline_commit: 4c7b939fa0386dcead9cd0bbb5f554ab5e6461de
+updatedAt: '2026-10-18T13:56:51.292Z'
+cross_baselines:
+  sillyspec: 9b8a1031fff3966e85fee2f2b45dbd76ecd9aca7
+baseline_sha256: 94e4da6f72c69ff4e896f94eda770801efacf7ed2c7749374c45c83fc10a6da1
+spec_approved: true
+spec_approved_at: '2026-10-18T13:56:50.524Z'
+spec_approved_by: anon@DESKTOP-HJ0AM09
+spec_approved_channel: user-confirmed
+spec_attested_by: anon@DESKTOP-HJ0AM09
+

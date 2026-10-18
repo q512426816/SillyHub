@@ -187,6 +187,10 @@ class ChangeService:
         search: str | None = None,
         current_stage: str | None = None,
         lineage: str | None = None,
+        # 2026-10-18-change-list-type-filter：类型筛选（git conventional 前缀 +
+        # 旧枚举值），feat 等价命中旧值 feature（与显示层映射口径一致）；
+        # 白名单外/缺省不过滤（对齐 sort/lineage fallback 风格）。
+        change_type: str | None = None,
         sort: str = "updated_at_desc",
         pending_review_only: bool = False,
         page: int = 1,
@@ -273,6 +277,12 @@ class ChangeService:
                 pass
         if current_stage:
             base = base.where(col(Change.current_stage) == current_stage)
+        # 2026-10-18-change-list-type-filter：类型筛选（feat 别名命中旧值 feature，
+        # 筛「feat」不漏存量旧值行）；白名单外不过滤（对齐 lineage/sort fallback 风格）。
+        ctype_norm = (change_type or "").strip().lower()
+        if ctype_norm in self._CHANGE_TYPE_FILTER_WHITELIST:
+            aliases = self._CHANGE_TYPE_FILTER_ALIASES.get(ctype_norm, (ctype_norm,))
+            base = base.where(col(Change.change_type).in_(aliases))
         if search:
             pattern = f"%{search}%"
             # 2026-09-28-change-list-description：description 入搜索面——title 归一化
@@ -2188,6 +2198,28 @@ class ChangeService:
 
     # thin 分流上线日（thin-badge-survives-archive D-001）：此后变更才按轻量出身。
     _THIN_FLOW_LIVE_SINCE = datetime(2026, 9, 25, tzinfo=UTC)
+
+    # 2026-10-18-change-list-type-filter：类型筛选白名单（conventional 前缀 + 旧枚举）
+    # 与别名展开（feat 等价命中旧值 feature——显示层 feature→feat 映射的逆口径）。
+    _CHANGE_TYPE_FILTER_WHITELIST = frozenset(
+        {
+            "feat",
+            "fix",
+            "docs",
+            "chore",
+            "test",
+            "refactor",
+            "perf",
+            "build",
+            "style",
+            "ci",
+            "revert",
+            "feature",
+            "prototype",
+            "quick",
+        }
+    )
+    _CHANGE_TYPE_FILTER_ALIASES: dict[str, tuple[str, ...]] = {"feat": ("feat", "feature")}
     # 标准工作流阶段痕迹（步骤 stage 命中任一即非 thin 出身）。
     _THIN_LINEAGE_EXCLUDE_STAGES = frozenset({"brainstorm", "plan", "execute", "verify"})
 

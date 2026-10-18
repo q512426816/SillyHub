@@ -96,7 +96,9 @@ export function listChanges(
   workspaceId: string,
   // 2026-10-14-change-center-lineage-tag-and-filter：lineage 出身分类筛选
   // （thin|full，后端 _is_thin_lineage 三分支投影口径；缺省/未知值不过滤）。
-  params?: { location?: string; status?: string; owner?: string; search?: string; currentStage?: string; lineage?: string; sort?: string; pendingReviewOnly?: boolean; page?: number; pageSize?: number },
+  // 2026-10-18-change-list-type-filter：changeType 类型筛选（conventional 前缀 +
+  // 旧枚举；feat 后端等价命中 feature，缺省/未知值不过滤）。
+  params?: { location?: string; status?: string; owner?: string; search?: string; currentStage?: string; lineage?: string; changeType?: string; sort?: string; pendingReviewOnly?: boolean; page?: number; pageSize?: number },
 ) {
   const searchParams = new URLSearchParams();
   if (params?.location) searchParams.set("location", params.location);
@@ -105,6 +107,7 @@ export function listChanges(
   if (params?.search) searchParams.set("search", params.search);
   if (params?.currentStage) searchParams.set("current_stage", params.currentStage);
   if (params?.lineage) searchParams.set("lineage", params.lineage);
+  if (params?.changeType) searchParams.set("change_type", params.changeType);
   if (params?.sort) searchParams.set("sort", params.sort);
   if (params?.pendingReviewOnly) searchParams.set("pending_review_only", "true");
   if (params?.page) searchParams.set("page", String(params.page));

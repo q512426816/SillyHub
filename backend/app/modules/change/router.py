@@ -351,6 +351,9 @@ async def list_changes(
     # 透传 service.list_（_is_thin_lineage 三分支投影口径，含归档兜底行）；
     # 缺省/未知值不过滤（对齐 sort 白名单 fallback 风格）。
     lineage: str | None = Query(None),
+    # 2026-10-18-change-list-type-filter：类型筛选（conventional 前缀 + 旧枚举），
+    # 透传 service.list_（feat 别名等价命中旧值 feature）；白名单外/缺省不过滤。
+    change_type: str | None = Query(None),
     # task-02（2026-08-13-change-center-rework / D-004 / FR-02 / FR-04）：排序白名单
     # 透传 service.list_（默认 updated_at desc，最近活动优先，R-05）。
     sort: str = Query("updated_at_desc"),
@@ -370,6 +373,7 @@ async def list_changes(
         search=search,
         current_stage=current_stage,
         lineage=lineage,
+        change_type=change_type,
         sort=sort,
         pending_review_only=pending_review_only,
         page=page,

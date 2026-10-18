@@ -25,6 +25,7 @@ import { Button, buttonVariants } from "@/components/ui/button";
 import { ErrorBanner } from "@/components/ui/error-banner";
 import { ChangeStepBadge } from "@/components/changes/change-step-badge";
 import { ChangeActivityBadge } from "@/components/changes/change-activity-badge";
+import { CommitTypeChip } from "@/components/changes/commit-type-chip";
 import { PlatformSyncSection } from "@/components/changes/platform-sync-section";
 import { QuicklogDrawer } from "@/components/changes/quicklog-drawer";
 import { QuicklogTable } from "@/components/changes/quicklog-table";
@@ -84,7 +85,7 @@ function parseTab(v: string | null): ChangesTab {
 
 /**
  * 构造列表状态 querystring（写回用）：空值/默认值参数省略——默认状态 URL 干净。
- * 参数名固定：tab / search / stage / lineage / mine / sort / page / pageSize。
+ * 参数名固定：tab / search / stage / lineage / type / mine / sort / page / pageSize。
  * 导出供详情页返回测试钉两端参数名契约（back 目标 query ↔ 本页解析端）。
  */
 export function buildChangesQuery(s: {
@@ -92,6 +93,7 @@ export function buildChangesQuery(s: {
   search: string;
   stageFilter: string;
   lineageFilter: string;
+  typeFilter: string;
   focusMine: boolean;
   sortDir: SortDir;
   page: number;
@@ -102,6 +104,7 @@ export function buildChangesQuery(s: {
   if (s.search) p.set("search", s.search);
   if (s.stageFilter) p.set("stage", s.stageFilter);
   if (s.lineageFilter) p.set("lineage", s.lineageFilter);
+  if (s.typeFilter) p.set("type", s.typeFilter);
   if (s.focusMine) p.set("mine", "1");
   if (s.sortDir !== "updated_at_desc") p.set("sort", s.sortDir);
   if (s.page !== 1) p.set("page", String(s.page));
@@ -138,6 +141,23 @@ const LINEAGE_OPTIONS = [
   { value: "", label: "全部分类" },
   { value: "full", label: "完整变更" },
   { value: "thin", label: "轻量变更" },
+] as const;
+
+// 2026-10-18-change-list-type-filter：类型筛选（type 参数，conventional 前缀 +
+// 原型旧值）。feat 后端等价命中旧值 feature（存量行不漏筛）；值集与后端
+// _CHANGE_TYPE_FILTER_WHITELIST 对齐（前端仅列常用项，防止下拉过长）。
+const TYPE_OPTIONS = [
+  { value: "", label: "全部类型" },
+  { value: "feat", label: "feat（功能）" },
+  { value: "fix", label: "fix（修复）" },
+  { value: "docs", label: "docs（文档）" },
+  { value: "chore", label: "chore（杂务）" },
+  { value: "test", label: "test（测试）" },
+  { value: "refactor", label: "refactor（重构）" },
+  { value: "perf", label: "perf（性能）" },
+  { value: "build", label: "build（构建）" },
+  { value: "style", label: "style（样式）" },
+  { value: "prototype", label: "原型" },
 ] as const;
 
 // ── 「执行」列（task-08 / FR-05 / D-004@v1，视觉对齐 prototype-change-center-
@@ -331,6 +351,11 @@ export default function ChangesPage({ params }: Props) {
     const v = searchParams.get("lineage") ?? "";
     return LINEAGE_OPTIONS.some((o) => o.value === v) ? v : "";
   });
+  // 2026-10-18-change-list-type-filter：类型筛选（"" = 全部类型；与出身分类正交）
+  const [typeFilter, setTypeFilter] = useState(() => {
+    const v = searchParams.get("type") ?? "";
+    return TYPE_OPTIONS.some((o) => o.value === v) ? v : "";
+  });
   const [sortDir, setSortDir] = useState<SortDir>(() =>
     searchParams.get("sort") === "updated_at_asc" ? "updated_at_asc" : "updated_at_desc",
   );
@@ -361,6 +386,7 @@ export default function ChangesPage({ params }: Props) {
       search,
       stageFilter,
       lineageFilter,
+      typeFilter,
       focusMine,
       sortDir,
       page,
@@ -371,7 +397,7 @@ export default function ChangesPage({ params }: Props) {
     if (window.location.pathname + window.location.search !== target) {
       window.history.replaceState(window.history.state, "", target);
     }
-  }, [tab, search, stageFilter, lineageFilter, focusMine, sortDir, page, pageSize, workspaceId]);
+  }, [tab, search, stageFilter, lineageFilter, typeFilter, focusMine, sortDir, page, pageSize, workspaceId]);
 
   // 主 load（task-06 / D-004@v1：裸 useEffect+useState 改 useQuery）。
   // queryKey = workspaceId + 全部请求参数（tab/search/stageFilter/sortDir/
@@ -388,6 +414,7 @@ export default function ChangesPage({ params }: Props) {
         search,
         currentStage: stageFilter,
         lineage: lineageFilter,
+        changeType: typeFilter,
         sort: sortDir,
         // D-007：进行中 + 聚焦 → 只看待我处理（pending_review 非空）
         pendingReviewOnly: tab === "active" && focusMine,
@@ -402,6 +429,7 @@ export default function ChangesPage({ params }: Props) {
           search: search || undefined,
           currentStage: stageFilter || undefined,
           lineage: lineageFilter || undefined,
+          changeType: typeFilter || undefined,
           sort: sortDir,
           pendingReviewOnly: tab === "active" && focusMine,
           page,
@@ -522,6 +550,8 @@ export default function ChangesPage({ params }: Props) {
     setStageFilter("");
     // 2026-10-14-change-center-lineage-tag-and-filter：分类筛选一并回默认
     setLineageFilter("");
+    // 2026-10-18-change-list-type-filter：类型筛选一并回默认
+    setTypeFilter("");
     // ql-20260818-004：聚焦下放查询条件后，重置一并回默认（不勾选）
     setFocusMine(false);
     setPage(1);
@@ -698,6 +728,9 @@ export default function ChangesPage({ params }: Props) {
           <span className="font-mono text-xs text-muted-foreground">
             {c.change_key}
           </span>
+          {/* 2026-10-18-change-list-type-filter：类型彩色标签（与详情页「类型」行
+              同源 CommitTypeChip；无类型旧行零占位） */}
+          {c.change_type && <CommitTypeChip type={c.change_type} />}
           {c.affected_components.length > 0 &&
             c.affected_components.map((comp) => (
               <span
@@ -804,7 +837,7 @@ export default function ChangesPage({ params }: Props) {
   const renderEmpty = (): ReactNode => {
     if (items.length > 0) return null;
     // 有 filter 无匹配 → 简短文案（不显示 CTA，避免误导）
-    if (search || stageFilter || lineageFilter) {
+    if (search || stageFilter || lineageFilter || typeFilter) {
       return (
         <div className="py-10 text-center text-xs text-muted-foreground">
           没有匹配的变更。
@@ -956,6 +989,23 @@ export default function ChangesPage({ params }: Props) {
             className="w-32"
           >
             {LINEAGE_OPTIONS.map((opt) => (
+              <Select.Option key={opt.value} value={opt.value}>
+                {opt.label}
+              </Select.Option>
+            ))}
+          </Select>
+          {/* 2026-10-18-change-list-type-filter：类型下拉（conventional 前缀 +
+              原型；feat 后端等价命中旧值 feature） */}
+          <Select
+            aria-label="筛选类型"
+            value={typeFilter}
+            onChange={(v) => {
+              setTypeFilter(v ?? "");
+              setPage(1);
+            }}
+            className="w-40"
+          >
+            {TYPE_OPTIONS.map((opt) => (
               <Select.Option key={opt.value} value={opt.value}>
                 {opt.label}
               </Select.Option>

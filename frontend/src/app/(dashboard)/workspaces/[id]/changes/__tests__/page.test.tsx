@@ -968,6 +968,42 @@ describe("变更中心列表页（task-06 重做行为 + useQuery 改造）", ()
     );
   });
 
+  // ── 2026-10-18-change-list-type-filter：类型标签 + 类型筛选 ──
+
+  it("行 meta 显示类型彩色标签：fix 原值、feature 等价映射 feat、空值零占位", async () => {
+    setupListChanges({
+      items: [
+        makeChange({ id: "ch-fix", change_key: "fix-change", change_type: "fix" }),
+        makeChange({ id: "ch-feat", change_key: "feat-change", change_type: "feature" }),
+        makeChange({ id: "ch-none", change_key: "none-change", change_type: null }),
+      ],
+      total: 3,
+    });
+    await renderAndWait();
+    const chips = screen.getAllByTestId("commit-type-chip");
+    // fix 原值红阶 + feature 显示层映射 feat（数据不动）；null 行零占位 → 恰 2 枚
+    expect(chips.map((c) => c.textContent)).toEqual(["fix", "feat"]);
+    expect(chips.at(0)!.className).toContain("border-red");
+  });
+
+  it("类型下拉选择「fix」→ listChanges 收到 changeType=fix；重置后清除", async () => {
+    await renderAndWait();
+    expect(lastMainLoadParams()?.changeType).toBeUndefined();
+
+    fireEvent.mouseDown(screen.getByLabelText("筛选类型"));
+    fireEvent.click(await screen.findByText("fix（修复）"));
+    await waitFor(() =>
+      expect(lastMainLoadParams()?.changeType).toBe("fix"),
+    );
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: /重\s*置/ }));
+    });
+    await waitFor(() =>
+      expect(lastMainLoadParams()?.changeType).toBeUndefined(),
+    );
+  });
+
   it("分类下拉选择「完整变更」→ lineage=full；阶段下拉不含「轻量变更」选项", async () => {
     await renderAndWait();
 
@@ -1123,6 +1159,7 @@ describe("列表状态 URL 快照（2026-10-16-change-center-back-keeps-list-sta
         search: "",
         stageFilter: "",
         lineageFilter: "",
+        typeFilter: "",
         focusMine: false,
         sortDir: "updated_at_desc",
         page: 3,
@@ -1136,6 +1173,7 @@ describe("列表状态 URL 快照（2026-10-16-change-center-back-keeps-list-sta
         search: "",
         stageFilter: "",
         lineageFilter: "",
+        typeFilter: "",
         focusMine: false,
         sortDir: "updated_at_desc",
         page: 1,
