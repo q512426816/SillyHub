@@ -338,3 +338,63 @@ created_at: 2026-10-02T02:55:12.745Z
   confirmed_at: null
   source_change: 2026-10-16-change-title-condense-backfill
   status: active
+
+## FR-change-017 后端 reparse：变更目录 flow-state.yaml 含 commit_type 字段时作为权威类型写入 change_type（允许覆盖库中已有旧值）；无该字段的变更保持现有目录推断与只为空回填行为不变
+变更：2026-10-18-change-type-git-conventional
+状态：active
+摘要：主路径；无字段回落
+场景正文：
+- 场景：主路径 — Given 归档变更目录含 flow-state.yaml（tier: thin + commit_type: fix）且库行
+- 场景：无字段回落 — Given flow-state.yaml 无 commit_type 字段，When reparse，Then change_type 保持
+全文：.sillyspec/changes/archive/2026-10-18-change-type-git-conventional/requirements.md#FR-01
+最近确认：261a333678e8722856b7120606385f52e31e8579
+
+## FR-change-018 回填脚本：遍历归档变更，git 提交信息反查变更 key，排除 chore(archive)，按优先级（feat/fix > perf/refactor/test > docs/style > build/chore）取主类型，幂等写入该变更 flow-state.yaml（已存在则替换该行，最小 diff）
+变更：2026-10-18-change-type-git-conventional
+状态：active
+摘要：主路径；伪前缀拒识
+场景正文：
+- 场景：主路径 — Given 变更 key 在 git 历史中有 fix(frontend) 主提交与 docs(spec) 工件提交，When
+- 场景：伪前缀拒识 — Given 提交 `sillyspec: baseline checkpoint for <key>`，When 归属，Then 该提交不
+全文：.sillyspec/changes/archive/2026-10-18-change-type-git-conventional/requirements.md#FR-02
+最近确认：261a333678e8722856b7120606385f52e31e8579
+
+## FR-change-019 前端详情页「类型」行改为彩色标签：已知类型（feat/fix/docs/chore/perf/refactor/test/build/style）固定配色，未知类型中性样式显示原值，空值显示 —
+变更：2026-10-18-change-type-git-conventional
+状态：active
+摘要：主路径；未知与空值
+场景正文：
+- 场景：主路径 — Given change_type='fix'，Then 标签文本 fix 且红色阶（border-red）；'docs' 为蓝色阶。
+- 场景：未知与空值 — Given change_type='hotfix'（未知），Then 中性配色原样显示；change_type=null，；Then 该行显示 — 且无标签节点。
+全文：.sillyspec/changes/archive/2026-10-18-change-type-git-conventional/requirements.md#FR-03
+最近确认：261a333678e8722856b7120606385f52e31e8579
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-18-change-type-git-conventional:flow:测试绑定FR-03
+  tests: frontend/src/components/changes/detail/__tests__/change-overview-side.test.tsx「类型行：已知前缀渲染彩色标签（fix 红色阶 / docs 蓝色阶）/ 旧枚举 feature 显示层等价映射 feat / 未知前缀中性配色显示原值 / change_type 为空 → 显示 —」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-18-change-type-git-conventional
+  status: active
+
+## FR-change-020 聚焦测试：parser commit_type 读取用例、_apply_parsed 权威覆盖用例、change-overview-side 类型标签用例全绿；前端 tsc 通过
+变更：2026-10-18-change-type-git-conventional
+状态：active
+摘要：主路径
+场景正文：
+- 场景：主路径 — Given 改动落地，When 跑 test_parser.py + test_reparse_guard.py + 侧栏组件测试，；Then 全绿（60 + 11 passed），tsc exit 0。
+全文：.sillyspec/changes/archive/2026-10-18-change-type-git-conventional/requirements.md#FR-04
+最近确认：261a333678e8722856b7120606385f52e31e8579
+
+## FR-change-021 本仓回填 dogfood：脚本跑完后抽验 2026-10-17-session-envelope-rev-stale-guard 的 flow-state.yaml 含 commit_type: fix
+变更：2026-10-18-change-type-git-conventional
+状态：active
+摘要：主路径
+场景正文：
+- 场景：主路径 — Given 本仓 641 个归档变更与 5020 条提交，When 实跑脚本，Then 抽验变更末行含
+全文：.sillyspec/changes/archive/2026-10-18-change-type-git-conventional/requirements.md#FR-05
+最近确认：261a333678e8722856b7120606385f52e31e8579

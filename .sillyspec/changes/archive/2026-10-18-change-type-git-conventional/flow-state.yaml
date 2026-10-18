@@ -2,6 +2,13 @@ tier: thin
 legacy_fallback: false
 substeps:
   artifacts: done
+  ledger: done
+  patch: done
+  review: done
+  probes: done
+  distill: done
+  archive: done
+  events: done
 born_face: thin
 with_tasks: false
 review_force: null
@@ -29,7 +36,7 @@ input: >-
 autopilot: false
 prestage_ack: false
 baseline_commit: a492bb67e51126fa04418c83337a4a1666be8c52
-updatedAt: '2026-10-18T12:54:41.433Z'
+updatedAt: '2026-10-18T13:08:31.365Z'
 cross_baselines:
   sillyspec: 9b8a1031fff3966e85fee2f2b45dbd76ecd9aca7
 baseline_sha256: f9a88ff80d68ebe88f0ad738d9ca71dc22c26f644fae6d41ba1951346d8a202c
@@ -38,4 +45,12 @@ spec_approved_at: '2026-10-18T12:54:32.760Z'
 spec_approved_by: anon@DESKTOP-HJ0AM09
 spec_approved_channel: user-confirmed
 spec_attested_by: anon@DESKTOP-HJ0AM09
+batch_ticked: true
+gate_summary: >-
+  test: passed ← module[]+deps(py44+jsx29+jsx19)+fr(90)（399.1s）
+  结果：C:\Users\qinyi\IdeaProjects\multi-agent-platform\.sillyspec\.runtime\verify-runs\20261018130604\test-result.json｜lint:
+  passed ← cd backend && uv run ruff check . && uv run ruff format --check . && uv run mypy app && cd ../frontend &&
+  pnpm lint && cd ../sillyhub-daemon && pnpm typecheck（25.6s）
+  结果：C:\Users\qinyi\IdeaProjects\multi-agent-platform\.sillyspec\.runtime\verify-runs\20261018130604\test-result.json｜门文件
+  9 个
 

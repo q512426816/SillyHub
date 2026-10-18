@@ -59,6 +59,24 @@ spec-sync 镜像同步到平台，reparse 已扫该目录，零新增端点/零 
 4. 作用域：parser 逐 change_dir 读取，无跨工作区共享状态；脚本只在主仓根跑
    （CLAUDE.md 规则 22），git 反查限定本仓 --all 历史。
 
+## 文件变更清单（提交面自声明）
+
+代码与测试（提交 261a33367，随 tasks.md 勾选同一提交入库）：
+
+- backend/app/modules/change/parser.py（_read_flow_state_commit_type + authoritative 字段接线）
+- backend/app/modules/change/service.py（_apply_parsed 权威覆盖规则）
+- backend/app/modules/change/tests/test_parser.py（TestCommitTypeFlowState 五用例）
+- backend/app/modules/change/tests/test_reparse_guard.py（change_type 三分支持用例）
+- frontend/src/components/changes/detail/change-overview-side.tsx（CommitTypeChip + 类型行）
+- frontend/src/components/changes/detail/__tests__/change-overview-side.test.tsx（标签四用例）
+- scripts/backfill_commit_type.py（存量回填脚本）
+
+数据面（同提交）：.sillyspec/changes/{archive/,}*/flow-state.yaml ×426（244 追加一行
++ 182 新建最小文件，幂等复跑 unchanged）；.sillyspec/changes/2026-10-18-change-type-
+git-conventional/ 变更工件。工作区另有 frontend/src/lib/api-types.ts 与
+sillyhub-daemon/src/api-types.ts 两处未提交改动属并行会话在途（本会话开始前已存在，
+与本变更无关，以 --accept-dirty-gap 处置不卷入）。
+
 ## 风险与死路
 
 本方案最大的风险是什么？试过但放弃的方案及放弃理由？
