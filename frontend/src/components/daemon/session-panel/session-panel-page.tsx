@@ -2392,8 +2392,11 @@ export function SessionPanelPage({
           }, HIGHLIGHT_TURN_CLEAR_MS);
         } else if (result === "failed") {
           notify.error("该轮加载失败，请稍后重试");
+        } else if (result === "empty") {
+          // 2026-10-19-preview-card-empty-turn-fix：零正文不再纯静默——轻提示替代
+          // 「点了没反应」（幂等标记已记，下次点击仍短路；卡片与请求行为不变）。
+          notify.warning("该轮无对话内容");
         }
-        // empty：幂等标记已记，卡片保持（下次点击短路）——零正文轮无内容可展开。
       });
     },
     [sessionId, notify, fetchAndAttachTurn],

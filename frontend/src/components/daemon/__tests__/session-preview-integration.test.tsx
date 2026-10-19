@@ -21,6 +21,20 @@ vi.mock("@/components/ui/markdown-text", () => ({
   ),
 }));
 
+// 2026-10-19-preview-card-empty-turn-fix：useNotify 换 spy（测试环境无 <AntApp>
+// 包裹，不起 message DOM）——empty 轻提示断言面（先例 session-input-bar-upload）。
+const notifyMock = vi.hoisted(() => ({
+  success: vi.fn(),
+  error: vi.fn(),
+  warning: vi.fn(),
+}));
+vi.mock("@/lib/errors", async () => {
+  const actual = await vi.importActual<typeof import("@/lib/errors")>(
+    "@/lib/errors",
+  );
+  return { ...actual, useNotify: () => notifyMock };
+});
+
 const sessionApi = vi.hoisted(() => ({
   getSessionUsage: vi.fn().mockResolvedValue(null),
   injectSession: vi.fn(), interruptSession: vi.fn(), endSession: vi.fn(),
@@ -263,5 +277,84 @@ describe("消息流预览卡集成（FR-01 / FR-03 / FR-04）", () => {
     fireEvent.click(tickE!);
     await new Promise((r) => setTimeout(r, 300));
     expect(runIdCalls().filter((r) => r === "run-e").length).toBe(callsAfterFirst);
+  });
+
+  it("2026-10-19：纯切换轮（started_at 空、零日志）不出预览卡，渲染孤儿配置行", async () => {
+    // 实测形态（会话 54317e42 第 2/4/7 轮）：切换档案建 run 零日志、started_at
+    // 空、摘要双空——刷新后大纲含它，但归并层须透传孤儿配置行（紧凑配置行语义
+    // 保留，2026-10-14 design 非目标），不得替换成永久展不开的「点击展开」死卡。
+    sessionApi.fetchSessionTurnOutline.mockResolvedValue({
+      session_id: "s1",
+      total_turns: 2,
+      items: [
+        { run_id: "run-c", seq: 1, created_at: "2026-08-26T10:10:00.0Z", started_at: "2026-08-26T10:10:00.0Z", status: "completed", prompt_summary: "第三轮提问摘要" },
+        { run_id: "run-sw", seq: 2, created_at: "2026-08-26T10:12:00.0Z", started_at: null, status: "completed", prompt_summary: null, answer_summary: null },
+      ],
+    });
+    // runs 快照带档案名（孤儿配置行 whoLine 数据源；finished_at 在已加载窗口内）。
+    sessionApi.listSessionRuns.mockResolvedValue([
+      { id: "run-sw", status: "completed", error_code: null, error_detail: null, started_at: null, created_at: "2026-08-26T10:12:00.0Z", finished_at: "2026-08-26T10:12:01.0Z", user_id: null, sender_name: null, input_tokens: null, output_tokens: null, ctx_tokens: null, duration_api_ms: null, llm_provider_id: null, agent_profile_snapshot: { name: "Claude Code 默认" }, metadata: null, engine_anchor: null, failure_summary: null, run_kind: null, cwd: null, config_snapshot: null },
+    ] as never);
+    sessionApi.getAgentSessionLogs.mockImplementation(
+      async (_sid: string, opts?: { runId?: string; before?: string }) => {
+        if (opts?.runId === "run-sw") return [];
+        if (opts?.before) return [];
+        return turnLogs("run-c", 1, 10);
+      },
+    );
+    await attachSession("s1", /第1轮提问内容/);
+    // 孤儿配置行上屏（时间线内 data-turn-key 非 preview 行，含档案名；选择器
+    // 限定滚动容器，避开导航刻度同名锚点——先例 run-x 用例同款）。
+    await waitFor(() => {
+      const row = document.querySelector(
+        '[data-testid="turn-timeline-scroll"] [data-turn-key="run-sw"]:not([data-turn-preview])',
+      );
+      expect(row).toBeTruthy();
+      expect(row!.textContent).toContain("Claude Code 默认");
+    });
+    // 全程无「点击展开」死卡；无内容轮不进展开链路（不发起单轮拉取）。
+    expect(screen.queryByTestId("turn-preview-card")).not.toBeInTheDocument();
+    expect(runIdCalls()).not.toContain("run-sw");
+  });
+
+  it("2026-10-19：真零正文轮点卡片出轻提示，重复点击幂等不再请求", async () => {
+    // started_at 有值的零摘要轮（群聊空 user_input 形态）仍出预览卡（2026-09-29
+    // 语义不变）；点击查回零正文 → empty 出 warning 轻提示（不再纯静默），卡片
+    // 保持，再次点击被幂等标记短路不重复请求。
+    sessionApi.fetchSessionTurnOutline.mockResolvedValue({
+      session_id: "s1",
+      total_turns: 2,
+      items: [
+        { run_id: "run-e2", seq: 1, created_at: "2026-08-26T10:00:00.0Z", started_at: "2026-08-26T10:00:00.0Z", status: "completed", prompt_summary: null },
+        { run_id: "run-c", seq: 2, created_at: "2026-08-26T10:10:00.0Z", started_at: "2026-08-26T10:10:00.0Z", status: "completed", prompt_summary: "第三轮提问摘要" },
+      ],
+    });
+    sessionApi.getAgentSessionLogs.mockImplementation(
+      async (_sid: string, opts?: { runId?: string; before?: string }) => {
+        if (opts?.runId === "run-e2") {
+          // 群聊空 user_input 形态：一条无关紧要的系统行，装配无 prompt 无 output。
+          return [
+            { id: "log-run-e2-s", run_id: "run-e2", timestamp: "2026-08-26T10:00:30.0Z", channel: "system", content_redacted: "" },
+          ];
+        }
+        if (opts?.runId === "run-c") return turnLogs("run-c", 2, 10);
+        if (opts?.before) return [];
+        return turnLogs("run-c", 2, 10);
+      },
+    );
+    await attachSession("s1", /第2轮提问内容/);
+    const card = screen.getByTestId("turn-preview-card");
+    expect(card.getAttribute("data-turn-key")).toBe("run-e2");
+    fireEvent.click(card);
+    await waitFor(() => expect(runIdCalls()).toContain("run-e2"));
+    await waitFor(() =>
+      expect(notifyMock.warning).toHaveBeenCalledWith("该轮无对话内容"),
+    );
+    // 零正文：卡片保持（无内容可展开），重复点击短路不重复请求。
+    expect(screen.getAllByTestId("turn-preview-card")).toHaveLength(1);
+    const callsAfterFirst = runIdCalls().filter((r) => r === "run-e2").length;
+    fireEvent.click(card);
+    await new Promise((r) => setTimeout(r, 300));
+    expect(runIdCalls().filter((r) => r === "run-e2").length).toBe(callsAfterFirst);
   });
 });
