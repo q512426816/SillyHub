@@ -943,6 +943,10 @@ class ChangePatchRepo(BaseModel):
     degraded_reason: str | None = None
     patch_sha256: str | None = None
     has_patch: bool = False
+    # 仓内文件清单（2026-10-19-cross-repo-patch-slicing）：从 repos[].patch 头解析的
+    # 新侧路径投影（卡面点击走 patch-file?repo=… 切片）；无正文仓恒空。
+    file_list: list[str] = Field(default_factory=list)
+    files_truncated: bool = False
 
 
 class ChangePatchMeta(BaseModel):

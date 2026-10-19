@@ -453,7 +453,7 @@ describe("ChangeAssetsCard", () => {
 
     fireEvent.click(screen.getByTestId("change-assets-patch-file-src/flow.js"));
     await waitFor(() =>
-      expect(mockPatch).toHaveBeenCalledWith("ws-1", "c-1", "src/flow.js"),
+      expect(mockPatch).toHaveBeenCalledWith("ws-1", "c-1", "src/flow.js", undefined),
     );
     expect(await screen.findByTestId("diff-view")).toBeInTheDocument();
   });
@@ -917,6 +917,8 @@ describe("跨仓冻结面", () => {
             degraded_reason: null,
             patch_sha256: "54dae3786803ce49",
             has_patch: true,
+            file_list: ["src/routes/Fire/Ledger/LedgerTable.js", "src/routes/Fire/Ledger/fireLedger.less"],
+            files_truncated: false,
           },
           {
             key: "broken",
@@ -933,6 +935,8 @@ describe("跨仓冻结面", () => {
             degraded_reason: "仓路径不可达",
             patch_sha256: null,
             has_patch: false,
+            file_list: [],
+            files_truncated: false,
           },
         ],
       },
@@ -949,6 +953,28 @@ describe("跨仓冻结面", () => {
       "仓路径不可达",
     );
     expect(screen.getByText(/主仓 patch/)).toBeInTheDocument();
+    // 仓内文件清单（2026-10-19-cross-repo-patch-slicing）：点开单文件 → repo 参数切片。
+    const fileList = await screen.findByTestId("change-assets-cross-repo-files");
+    expect(fileList).toHaveTextContent("LedgerTable.js");
+    expect(fileList).toHaveTextContent("subgrid 改动文件");
+    mockPatch.mockResolvedValue({
+      path: "src/routes/Fire/Ledger/LedgerTable.js",
+      diff: "+跨仓切片",
+      truncated: false,
+    });
+    fireEvent.click(
+      screen.getByTestId("change-assets-cross-repo-file-subgrid-src/routes/Fire/Ledger/LedgerTable.js"),
+    );
+    await waitFor(() =>
+      expect(mockPatch).toHaveBeenCalledWith(
+        "ws-1",
+        "c-1",
+        "src/routes/Fire/Ledger/LedgerTable.js",
+        "subgrid",
+      ),
+    );
+    expect(await screen.findByText("+跨仓切片")).toBeInTheDocument();
+    expect(screen.getByText(/跨仓 subgrid · src\/routes/)).toBeInTheDocument();
   });
 
   it("无 repos 键时旧展示零变化（不渲染跨仓段、不加主仓标注）", async () => {

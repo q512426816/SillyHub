@@ -2163,6 +2163,8 @@ export interface paths {
          *     ``path`` 复用 scope-audit 单文件比对的同一白名单校验（拒 ``..``/
          *     绝对路径/pathspec magic → 422）；切片命中与否由响应 ``diff``/``note`` 表达，
          *     不抛 404（读不到留档是展示面降级，不是资源不存在）。
+         *     ``repo``（2026-10-19-cross-repo-patch-slicing FR-01）：跨仓切片——正文取
+         *     ``change-patch.json scopeAudit.repos[repo].patch``；键不在冻结面同样 note 降级。
          */
         get: operations["get_change_patch_file_api_workspaces__workspace_id__changes__change_id__assets_patch_file_get"];
         put?: never;
@@ -14619,6 +14621,13 @@ export interface components {
              * @default false
              */
             has_patch: boolean;
+            /** File List */
+            file_list?: string[];
+            /**
+             * Files Truncated
+             * @default false
+             */
+            files_truncated: boolean;
         };
         /**
          * ChangePatchRepoAnchor
@@ -33590,6 +33599,8 @@ export interface operations {
             query: {
                 /** @description 变更目录相对文件路径（如 src/flow.js） */
                 path: string;
+                /** @description 跨仓键（scopeAudit.repos 的 key）——在场时切片取该仓内联 patch 而非主仓 change.patch */
+                repo?: string | null;
             };
             header?: never;
             path: {

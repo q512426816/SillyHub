@@ -814,8 +814,10 @@ export function getChangePatchFile(
   workspaceId: string,
   changeId: string,
   path: string,
+  repo?: string,
 ): Promise<ChangePatchFileResponse> {
-  const q = new URLSearchParams({ path });
+  // repo（2026-10-19-cross-repo-patch-slicing）：跨仓切片——正文取该仓 scopeAudit.repos[].patch；
+  const q = new URLSearchParams({ path, ...(repo ? { repo } : {}) });
   return apiFetch<ChangePatchFileResponse>(
     `/api/workspaces/${workspaceId}/changes/${changeId}/assets/patch-file?${q.toString()}`,
   );

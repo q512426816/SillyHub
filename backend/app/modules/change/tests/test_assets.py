@@ -1013,3 +1013,60 @@ async def test_patch_meta_without_repos_key_is_backward_compatible(
     assert result.patch is not None
     assert result.patch.repos == []
     assert result.patch.file_list == ["src/flow.js", "test/x.test.mjs"]
+
+
+# ===========================================================================
+# 跨仓单文件切片（2026-10-19-cross-repo-patch-slicing / FR-01~02）
+# ===========================================================================
+
+
+async def test_patch_meta_repo_file_list(db_session, tmp_path: Path) -> None:
+    """repos[].file_list 从 patch 头解析投影；无正文仓恒空。"""
+    spec_root = tmp_path / "spec-root-slice1"
+    _seed_mirror(spec_root, with_trace=False)
+    _seed_cross_repo_meta(spec_root)
+    change_dir = spec_root / "changes" / "archive" / KEY
+    meta = json.loads((change_dir / "change-patch.json").read_text(encoding="utf-8"))
+    meta["scopeAudit"]["repos"][0]["patch"] = (
+        "diff --git a/src/x.js b/src/x.js\n--- a/src/x.js\n+++ b/src/x.js\n@@ -1 +1 @@\n-a\n+b\n"
+        "diff --git a/src/y.js b/src/y.js\n--- /dev/null\n+++ b/src/y.js\n@@ -0,0 +1 @@\n+new\n"
+    )
+    (change_dir / "change-patch.json").write_text(json.dumps(meta), encoding="utf-8")
+    ws = await _make_ws_spec(db_session, spec_root)
+    change = await _make_change(db_session, ws, archived=True)
+
+    result = await ChangeAssetsQueryService(db_session).get_change_assets(ws.id, change.id)
+    assert result.patch is not None
+    healthy = result.patch.repos[0]
+    assert healthy.file_list == ["src/x.js", "src/y.js"]
+    assert healthy.files_truncated is False
+    assert result.patch.repos[1].file_list == []
+
+
+async def test_patch_file_diff_repo_hit_and_unknown(db_session, tmp_path: Path) -> None:
+    """repo 命中切片该仓 patch；未知仓/无正文仓给 note（fail-open 不抛）。"""
+    spec_root = tmp_path / "spec-root-slice2"
+    _seed_mirror(spec_root, with_trace=False)
+    _seed_cross_repo_meta(spec_root)
+    change_dir = spec_root / "changes" / "archive" / KEY
+    meta = json.loads((change_dir / "change-patch.json").read_text(encoding="utf-8"))
+    meta["scopeAudit"]["repos"][0]["patch"] = (
+        "diff --git a/src/x.js b/src/x.js\n--- a/src/x.js\n+++ b/src/x.js\n@@ -1 +1 @@\n-a\n+b\n"
+        "diff --git a/src/y.js b/src/y.js\n--- a/src/y.js\n+++ b/src/y.js\n@@ -1 +1 @@\n-c\n+d\n"
+    )
+    (change_dir / "change-patch.json").write_text(json.dumps(meta), encoding="utf-8")
+    ws = await _make_ws_spec(db_session, spec_root)
+    change = await _make_change(db_session, ws, archived=True)
+    service = ChangeAssetsQueryService(db_session)
+
+    hit = await service.get_patch_file_diff(ws.id, change.id, "src/y.js", repo="subgrid")
+    assert hit.diff is not None and "+++ b/src/y.js" in hit.diff and "+d" in hit.diff
+    assert hit.note is None
+
+    unknown = await service.get_patch_file_diff(ws.id, change.id, "src/x.js", repo="nosuch")
+    assert unknown.diff is None
+    assert unknown.note is not None and "nosuch" in unknown.note
+
+    bare = await service.get_patch_file_diff(ws.id, change.id, "src/x.js", repo="broken")
+    assert bare.diff is None
+    assert bare.note is not None and "subgrid" not in bare.note

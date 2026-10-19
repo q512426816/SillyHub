@@ -225,6 +225,25 @@ def _str_or_none(value: object) -> str | None:
     return value if isinstance(value, str) else None
 
 
+def _patch_header_paths(patch_text: object) -> list[str]:
+    """跨仓 patch 正文 → 新侧文件清单（``diff --git a/x b/y`` 的 y 侧，引号/转义还原）。
+
+    2026-10-19-cross-repo-patch-slicing：资产卡仓段逐文件点开需要仓内文件表——
+    repos[].patch 是内联正文，没有独立清单，从块头解析是零新增冻结字段的取法。
+    """
+    if not isinstance(patch_text, str):
+        return []
+    out: list[str] = []
+    for line in patch_text.splitlines():
+        m = _PATCH_HEADER_RE.match(line)
+        if not m:
+            continue
+        p = _strip_ab_prefix(_unquote_patch_path(m.group("new")))
+        if p and p not in out:
+            out.append(p)
+    return out
+
+
 def _read_patch_repos(data: dict) -> list[ChangePatchRepo]:
     """``scopeAudit.repos[]`` 元数据投影（2026-10-19-change-assets-cross-repo-repos）。
 
@@ -264,6 +283,10 @@ def _read_patch_repos(data: dict) -> list[ChangePatchRepo]:
                 untouched=_int_or_none(totals_raw.get("untouched")),
             )
         patch_text = raw.get("patch")
+        has_patch = isinstance(patch_text, str) and len(patch_text) > 0
+        # 仓内文件清单（2026-10-19-cross-repo-patch-slicing）：从 patch 头解析新侧路径，
+        # 供卡面逐文件点开（patch-file?repo=…）；超上限截断标注。
+        repo_file_list = _patch_header_paths(patch_text) if has_patch else []
         repos.append(
             ChangePatchRepo(
                 key=key,
@@ -272,7 +295,9 @@ def _read_patch_repos(data: dict) -> list[ChangePatchRepo]:
                 degraded=raw.get("degraded") is True,
                 degraded_reason=_str_or_none(raw.get("degradedReason")),
                 patch_sha256=_str_or_none(raw.get("patchSha256")),
-                has_patch=isinstance(patch_text, str) and len(patch_text) > 0,
+                has_patch=has_patch,
+                file_list=repo_file_list[:_PATCH_FILES_MAX],
+                files_truncated=len(repo_file_list) > _PATCH_FILES_MAX,
             )
         )
     return repos
@@ -397,6 +422,47 @@ def slice_patch_for_file(patch_text: str, rel_path: str) -> str | None:
         if rel_path in candidates:
             return "".join(block)
     return None
+
+
+def _read_repo_patch_file_diff(change_dir: Path, repo: str, rel_path: str) -> ChangePatchFileRead:
+    """跨仓单文件切片（2026-10-19-cross-repo-patch-slicing FR-01）：``scopeAudit.repos[repo].patch``。
+
+    与主仓同款 fail-open 语义：未知仓键/该仓无正文/未命中一律 ``note`` 说明（读不到
+    跨仓留档是展示面降级，不是资源不存在）；命中切该文件 diff 段，超 ``_PATCH_FILE_MAX_CHARS``
+    截断标注。JSON-only 跨仓冻结（无 change.patch）同样可用——正文本就内联在 JSON。
+    """
+    data = _read_json_dict(change_dir / "change-patch.json")
+    repos = (
+        data.get("scopeAudit", {}).get("repos")
+        if isinstance(data, dict) and isinstance(data.get("scopeAudit"), dict)
+        else None
+    )
+    entry = None
+    if isinstance(repos, list):
+        entry = next((r for r in repos if isinstance(r, dict) and r.get("key") == repo), None)
+    if entry is None:
+        return ChangePatchFileRead(
+            path=rel_path,
+            note=f"跨仓键「{repo}」不在本变更冻结面（scopeAudit.repos）——无法切片。",
+        )
+    patch_text = entry.get("patch")
+    if not isinstance(patch_text, str) or not patch_text:
+        return ChangePatchFileRead(
+            path=rel_path,
+            note=f"跨仓「{repo}」没有冻结 patch 正文（采集失败或空窗），无法比对具体改动。",
+        )
+    sliced = slice_patch_for_file(patch_text, rel_path)
+    if sliced is None:
+        return ChangePatchFileRead(
+            path=rel_path,
+            note=f"该文件不在跨仓「{repo}」的冻结 patch 内（留档窗口外，或仅改了不纳入 patch 的面）。",
+        )
+    truncated = len(sliced) > _PATCH_FILE_MAX_CHARS
+    return ChangePatchFileRead(
+        path=rel_path,
+        diff=sliced[:_PATCH_FILE_MAX_CHARS] if truncated else sliced,
+        truncated=truncated,
+    )
 
 
 def _read_patch_file_diff(change_dir: Path, rel_path: str) -> ChangePatchFileRead:
@@ -653,15 +719,24 @@ class ChangeAssetsQueryService:
         return result
 
     async def get_patch_file_diff(
-        self, workspace_id: uuid.UUID, change_id: uuid.UUID, rel_path: str
+        self,
+        workspace_id: uuid.UUID,
+        change_id: uuid.UUID,
+        rel_path: str,
+        repo: str | None = None,
     ) -> ChangePatchFileRead:
         """归档留档单文件 diff 切片（FR-04；``rel_path`` 已由 router 白名单校验）。
 
         在途变更同样允许调用——归档目录件不存在时由 ``_read_patch_file_diff``
         以 note 说明，不额外分支（展示面 fail-open，读不到不是错误面）。
+        ``repo``（2026-10-19-cross-repo-patch-slicing FR-01）：跨仓切片——源正文取
+        ``change-patch.json scopeAudit.repos[repo].patch`` 内联串，键不在冻结面时
+        同样 note 降级（不抛 404，与主仓切片同语义）。
         """
         change = await self._get_change(workspace_id, change_id)
         change_dir = await self._resolve_change_dir(workspace_id, change)
+        if repo is not None:
+            return await asyncio.to_thread(_read_repo_patch_file_diff, change_dir, repo, rel_path)
         return await asyncio.to_thread(_read_patch_file_diff, change_dir, rel_path)
 
     async def _get_change(self, workspace_id: uuid.UUID, change_id: uuid.UUID) -> Change:
