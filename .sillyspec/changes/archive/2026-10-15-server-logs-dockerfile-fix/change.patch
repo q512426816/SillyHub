@@ -1,0 +1,415 @@
+diff --git a/.sillyspec/docs/SillyHub/modules/daemon.changelog.md b/.sillyspec/docs/SillyHub/modules/daemon.changelog.md
+index d79b4c0b0..d1a2bb882 100644
+--- a/.sillyspec/docs/SillyHub/modules/daemon.changelog.md
++++ b/.sillyspec/docs/SillyHub/modules/daemon.changelog.md
+@@ -45,3 +45,4 @@ created_at: 2026-08-27 14:32:24
+ - 2026-10-15-pseudo-domain-migration | 用户指令：把平台仓存量伪域迁真域。背景：sillyspec 仓 2026-10-15-module-…
+ - 2026-10-15-workspace-session-agent-only | 工作区中新建会话不再选机器：机器已由工作区绑定决定，浮层只让用户选智能体类型
+ - 2026-10-16-driver-audit-fixes | 24h 只读风险审查发现 zcode 驱动三处缺陷（轮次进行中 close 令 consume 永久…
++- 2026-10-16-session-run-status-realtime | 会话列表行首状态目前只靠 daemon 10 秒日志推导活性链（基线），用户触发会话后转圈/完成提示…
+diff --git a/.sillyspec/docs/backend/modules/daemon.changelog.md b/.sillyspec/docs/backend/modules/daemon.changelog.md
+index e24a12be2..20e95107c 100644
+--- a/.sillyspec/docs/backend/modules/daemon.changelog.md
++++ b/.sillyspec/docs/backend/modules/daemon.changelog.md
+@@ -49,3 +49,4 @@ created_at: 2026-08-29 22:56:30
+ | 2026-10-13 | 2026-10-14-ci-red-batch-fix | 动机：main 最新 push（4347239）后 backend-ci / daemon-ci / frontend- |
+ | 2026-10-15 | 2026-10-15-pseudo-domain-migration | 用户指令：把平台仓存量伪域迁真域。背景：sillyspec 仓 2026-10-15-module-… |
+ | 2026-10-15 | 2026-10-15-workspace-session-agent-only | 工作区中新建会话不再选机器：机器已由工作区绑定决定，浮层只让用户选智能体类型 |
++| 2026-10-16 | 2026-10-16-session-run-status-realtime | 会话列表行首状态目前只靠 daemon 10 秒日志推导活性链（基线），用户触发会话后转圈/完成提示… |
+diff --git a/.sillyspec/docs/multi-agent-platform/modules/backend.changelog.md b/.sillyspec/docs/multi-agent-platform/modules/backend.changelog.md
+index 294136589..80cc60c2f 100644
+--- a/.sillyspec/docs/multi-agent-platform/modules/backend.changelog.md
++++ b/.sillyspec/docs/multi-agent-platform/modules/backend.changelog.md
+@@ -53,3 +53,4 @@
+ - change 2026-10-15-platform-knowledge-search | 平台知识搜索端点 POST /api/workspaces/{wid}/knowledge/search（KNOWLEDGE_READ 门控）：语料 = spec 根 knowledge/ + docs/ 全域（排 INDEX.md）；三档结构切块（decisions 条目 D-xxx@vN / fr 条目 FR-xxx-NNN / 标题块 + 超长滑窗 1500/1000/150）；进程内懒索引（全语料指纹失效 + 锁内 single-flight + 构建后复算，独立于 CLI vector-search 的 decisions 索引）；词面（anchor/title/path 权重）与向量（fastembed bge-small-zh-v1.5，embedder 单一源 settings.knowledge_embedding_model）融合 0.6/0.4 + 标题面保底 0.9；docs/ 类结果按 SCAN_DOCS_READ 经 has_permission 服务端过滤（3×limit 候选后过滤截断）；embedder 不可用 fail-soft（model_ready=false + 纯词面 + reason）。NEW search.py + schema 三模型；测试 test_knowledge_search 25 + test_router 搜索段 8，knowledge 模块 199 绿；gen:types 三端同步（openapi.json 545 paths）。实测：首查含索引构建 304.67s（437 文件/6586 chunks）、缓存命中 0.47s（启动预热建议后续变更落地，改 main.py 未纳入本变更边界）。CLI 向量端点零改动（D-009@v1）。
+ - change 2026-10-15-knowledge-search-pgvector | 知识搜索向量索引持久化（backend 侧）：索引从进程内存迁至 PG pgvector——两表 knowledge_search_chunks（embedding vector(512)+content_hash 差量键；uq 建后又 drop——生产重号条目撞约束实证，迁移 20261016010000，键改行号坐标 (spec_path,start_line)）/knowledge_search_state（语料指纹+model_version），迁移 20261015200000（CREATE EXTENSION vector+方言守卫+镜像未换 fail-closed）；search_sync 改 async 编排（DB await 原生+CPU/IO 经 asyncio.to_thread，run_in_threadpool 退役）；懒同步差量四态+asyncio.Lock per-workspace single-flight；查询双路方言分叉（PG 原生 SQL `embedding <=> CAST(:qv AS vector)` KNN / SQLite 拉回 Python 余弦 / ILIKE 词面候选）；DB 异常词面降级永不 5xx。部署：PG 镜像 pgvector/pgvector:pg16 + fastembed 模型缓存挂载（服务器无外网）+ backend mem_limit 1100m；全量建库本机 20 核经 SSH 隧道直写生产库（228.7s/6712 chunks）；生产首查 3.3s（改造前 304s）、二次 0.72s。测试 205+46 绿+契约零 diff；CLI 向量端点零改动（D-001 边界）。
+ - 2026-10-16-driver-audit-fixes | 24h 只读风险审查发现 zcode 驱动三处缺陷（轮次进行中 close 令 consume 永久…
++- 2026-10-16-session-run-status-realtime | 会话列表行首状态目前只靠 daemon 10 秒日志推导活性链（基线），用户触发会话后转圈/完成提示…
+diff --git a/.sillyspec/docs/multi-agent-platform/modules/sillyhub-daemon.changelog.md b/.sillyspec/docs/multi-agent-platform/modules/sillyhub-daemon.changelog.md
+index 3ce1e1d86..f32620ee5 100644
+--- a/.sillyspec/docs/multi-agent-platform/modules/sillyhub-daemon.changelog.md
++++ b/.sillyspec/docs/multi-agent-platform/modules/sillyhub-daemon.changelog.md
+@@ -1,3 +1,4 @@
+ # sillyhub-daemon 变更索引
+ - change 2026-10-15-platform-knowledge-search | api-types.ts 再生成（gen:types 双端义务，规则 21）：新增 KnowledgeSearchIn/KnowledgeSearchResultItem/KnowledgeSearchOut 三 schema 与 /knowledge/search 路径面，纯新增零改写；daemon 运行时代码零改动。
+ - 2026-10-16-driver-audit-fixes | 24h 只读风险审查发现 zcode 驱动三处缺陷（轮次进行中 close 令 consume 永久…
++- 2026-10-16-session-run-status-realtime | 会话列表行首状态目前只靠 daemon 10 秒日志推导活性链（基线），用户触发会话后转圈/完成提示…
+diff --git a/.zcode/skills/deploy-to-server/SKILL.md b/.zcode/skills/deploy-to-server/SKILL.md
+index 2fe365313..a960217ba 100644
+--- a/.zcode/skills/deploy-to-server/SKILL.md
++++ b/.zcode/skills/deploy-to-server/SKILL.md
+@@ -1,18 +1,36 @@
+ ---
+ name: deploy-to-server
+-description: 本地打包镜像→远程服务器（阿里云）部署，替代服务器现场构建。适合用户说"部署到服务器"、"远程部署"、"更新生产环境"、"首次部署到阿里云"、"打包传镜像"、"不在服务器构建"。区分首次部署（服务器从零）和更新部署（已有环境换镜像）。
++description: 本地打包镜像→生产服务器（腾讯云轻量）部署；域名入口仍是阿里云 nginx + SSH 隧道。适合用户说"部署到服务器"、"远程部署"、"更新生产环境"、"打包传镜像"、"不在服务器构建"。区分更新部署（已有环境换镜像）和首次部署（服务器从零）。
+ ---
+ 
+-# 远程服务器部署（本地打包 → 阿里云）
++# 远程服务器部署（本地打包 → 腾讯云生产服务器）
++
++## 拓扑（2026-10-16 服务器迁移起）
++
++```
++用户浏览器 → https://crrcdt.ppdmq.top
++  → 阿里云 47.113.145.252 nginx（443/LE 证书，upstream 仍是 127.0.0.1:8001|3001，零改动）
++  → systemd tencent-tunnel.service（SSH -L 本地转发隧道，流量加密）
++  → 腾讯云轻量 124.222.127.242（整套栈：backend/frontend/postgres/redis/minio）
++```
++
++- 隧道存在的原因：**腾讯轻量控制台防火墙默认只开 22**（3001/8001/80/443 全在云层被拦，
++  服务器自身 ufw 是关的，服务器上改不了，只能腾讯控制台开）。若日后在控制台放行
++  3001/8001，可把 nginx upstream 直接指向 `http://124.222.127.242:8001|3001` 并
++  `systemctl disable --now tencent-tunnel` 撤掉隧道。
++- 阿里云旧栈：已停止且 `docker update --restart=no`，是迁移 rollback 快照（数据冻结在
++  2026-10-16 11:00），不承担服务。
++- 阿里云入口机上还有别的项目容器（ppdmq-*），不要碰。
+ 
+ ## 目标
+ 
+-把当前仓库部署到阿里云服务器，**本地构建镜像、传到服务器、服务器不构建直接起**——避开服务器 2 核前端 `next build` 15-20 分钟的瓶颈。用 `docker save`/`load`，不需要镜像仓库（registry）。
++把当前仓库部署到腾讯云生产服务器，**本地构建镜像、传到服务器、服务器不构建直接起**——
++避开服务器上前端 `next build` 的耗时。用 `docker save`/`load`，不需要镜像仓库（registry）。
+ 
+ 先判断走哪条路径：
+ 
+ ```bash
+-ssh -i ~/.ssh/aliyun_deploy root@47.113.145.252 'docker compose ls 2>/dev/null; ls /opt/sillyhub/deploy/deploy/.env 2>/dev/null'
++ssh -i ~/.ssh/tencent_deploy ubuntu@124.222.127.242 'docker compose ls 2>/dev/null; ls /opt/sillyhub/deploy/deploy/.env 2>/dev/null'
+ ```
+ 
+ - 有 `multi-agent-platform` running + `.env` 存在 → **更新部署**
+@@ -20,11 +38,14 @@ ssh -i ~/.ssh/aliyun_deploy root@47.113.145.252 'docker compose ls 2>/dev/null;
+ 
+ ## 服务器固定信息
+ 
+-- SSH：`ssh -i ~/.ssh/aliyun_deploy root@47.113.145.252`（密钥在本机 `~/.ssh/aliyun_deploy`，直连或走 Clash SOCKS5 7897 代理）
+-- 活跃 compose 目录：`/opt/sillyhub/deploy/deploy/`（**双层 deploy，不是 `/opt/sillyhub/deploy/`**，两份都存在，活跃的是深层那份）
+-- 端口：前端 3001、后端 8001（宿主映射）
+-- 规格：2 核 / 40G 盘
++- 生产机 SSH：`ssh -i ~/.ssh/tencent_deploy ubuntu@124.222.127.242`（ubuntu 用户，免密 sudo，
++  已入 docker 组——docker 命令直接跑不用 sudo）
++- 生产机规格：腾讯云轻量 lhins-2fh4az6u，4 核 / 8G / 60G SSD，5Mbps 带宽 / 500G 月流量
++- compose 目录：`/opt/sillyhub/deploy/deploy/`（与老阿里云机同路径）
++- 端口：前端 3001、后端 8001（宿主映射；仅本机监听面，公网被轻量防火墙拦）
+ - 架构：linux/amd64（和本地 Docker Desktop 构建出的 linux/amd64 一致，**无需交叉编译**）
++- 入口机（阿里云 47.113.145.252，root，密钥 `~/.ssh/aliyun_deploy`）：只剩 nginx +
++  `tencent-tunnel.service` 两个职责；隧道排障 `systemctl status tencent-tunnel`。
+ 
+ ## 更新部署（日常用，最常用）
+ 
+@@ -46,13 +67,13 @@ PROD_API_URL=http://192.168.0.143:8001 bash deploy/scripts/build-and-save.sh
+ ### 2. 传到服务器
+ 
+ ```bash
+-scp -i ~/.ssh/aliyun_deploy deploy/images.tar.gz deploy/scripts/load-and-up.sh \
+-  root@47.113.145.252:/opt/sillyhub/deploy/deploy/
++scp -i ~/.ssh/tencent_deploy deploy/images.tar.gz deploy/scripts/load-and-up.sh \
++  ubuntu@124.222.127.242:/opt/sillyhub/deploy/deploy/
+ ```
+ 
+ 传完确认脚本是 LF（CRLF 会让服务器 bash 报 `bad interpreter`）：
+ ```bash
+-ssh -i ~/.ssh/aliyun_deploy root@47.113.145.252 "grep -c \$'\r' /opt/sillyhub/deploy/deploy/load-and-up.sh"
++ssh -i ~/.ssh/tencent_deploy ubuntu@124.222.127.242 "grep -c \$'\r' /opt/sillyhub/deploy/deploy/load-and-up.sh"
+ # 应返回 0
+ ```
+ 
+@@ -60,7 +81,7 @@ ssh -i ~/.ssh/aliyun_deploy root@47.113.145.252 "grep -c \$'\r' /opt/sillyhub/de
+ 
+ **稳妥做法（先备份旧镜像再 load，便于回滚）**：
+ ```bash
+-ssh -i ~/.ssh/aliyun_deploy root@47.113.145.252 'cd /opt/sillyhub/deploy/deploy && \
++ssh -i ~/.ssh/tencent_deploy ubuntu@124.222.127.242 'cd /opt/sillyhub/deploy/deploy && \
+   STAMP=$(date +%Y%m%d-%H%M) && \
+   docker tag multi-agent-platform-backend:latest  multi-agent-platform-backend:backup-$STAMP && \
+   docker tag multi-agent-platform-frontend:latest multi-agent-platform-frontend:backup-$STAMP && \
+@@ -71,13 +92,13 @@ ssh -i ~/.ssh/aliyun_deploy root@47.113.145.252 'cd /opt/sillyhub/deploy/deploy
+ 
+ **日常重复部署（load + up + 清 dangling + 删 tar 一条龙）**：
+ ```bash
+-ssh -i ~/.ssh/aliyun_deploy root@47.113.145.252 'cd /opt/sillyhub/deploy/deploy && bash load-and-up.sh'
++ssh -i ~/.ssh/tencent_deploy ubuntu@124.222.127.242 'cd /opt/sillyhub/deploy/deploy && bash load-and-up.sh'
+ ```
+ 
+ ### 4. 验证
+ 
+ ```bash
+-ssh -i ~/.ssh/aliyun_deploy root@47.113.145.252 'cd /opt/sillyhub/deploy/deploy && \
++ssh -i ~/.ssh/tencent_deploy ubuntu@124.222.127.242 'cd /opt/sillyhub/deploy/deploy && \
+   docker compose ps && \
+   curl -s http://127.0.0.1:8001/api/health'
+ ```
+@@ -86,7 +107,7 @@ ssh -i ~/.ssh/aliyun_deploy root@47.113.145.252 'cd /opt/sillyhub/deploy/deploy
+ 
+ backend 镜像变更会自动跑 `alembic upgrade head`，看 logs 确认无报错：
+ ```bash
+-ssh -i ~/.ssh/aliyun_deploy root@47.113.145.252 'cd /opt/sillyhub/deploy/deploy && docker compose logs backend --tail=40'
++ssh -i ~/.ssh/tencent_deploy ubuntu@124.222.127.242 'cd /opt/sillyhub/deploy/deploy && docker compose logs backend --tail=40'
+ ```
+ - 看到 `Application startup complete` + `Uvicorn running on http://0.0.0.0:8000` = 成功
+ - 看到 alembic 报错 / 容器反复重启 = migration 问题，见下方「回滚」
+@@ -96,7 +117,7 @@ ssh -i ~/.ssh/aliyun_deploy root@47.113.145.252 'cd /opt/sillyhub/deploy/deploy
+ 20260912050000 清库迁移已改 no-op（不再随 `alembic upgrade head` 自动执行）。按 DG-03 时序：backend 发布（本次部署）→ CLI/daemon 新版铺开 → **手动执行一次**清库脚本，之后由新版 CLI 重推重建正确归属。服务器端（镜像内 `/app/scripts/`，`COPY . .` 随源码进镜像）：
+ 
+ ```bash
+-ssh -i ~/.ssh/aliyun_deploy root@47.113.145.252 \
++ssh -i ~/.ssh/tencent_deploy ubuntu@124.222.127.242 \
+   'docker exec multi-agent-platform-backend-1 /opt/venv/bin/python /app/scripts/reset_agent_log_attribution.py'
+ # dry-run 看四类影响计数；确认后加 --apply（单事务 + 前后计数回报，执行后计数应全 0）
+ ```
+@@ -106,7 +127,7 @@ ssh -i ~/.ssh/aliyun_deploy root@47.113.145.252 \
+ **若本次动了 daemon bundle 或 install 脚本，再验 daemon 分发端点**（公网经 nginx 与后端容器
+ 必须一致，不一致 = nginx 在用静态旧副本，见下方「nginx 与 daemon 分发」）：
+ ```bash
+-ssh -i ~/.ssh/aliyun_deploy root@47.113.145.252 '
++ssh -i ~/.ssh/tencent_deploy ubuntu@124.222.127.242 '
+   curl -s -H "Cache-Control: no-cache" https://<域名>/daemon/latest.json; echo
+   curl -s http://127.0.0.1:8001/daemon/latest.json; echo'
+ ```
+@@ -128,13 +149,13 @@ ssh -i ~/.ssh/aliyun_deploy root@47.113.145.252 '
+ 
+ 服务器平台经 `/tmp`→`/host-projects` 挂载读记录，镜像目录固定为
+ `/tmp/sillyhub-repos/multi-agent-platform/docs/releases/`（workspace
+-「multi-agent-platform-镜像」指向它）：
++「multi-agent-platform-镜像」指向它）——**2026-10-16 迁移后该目录在腾讯云生产机上**：
+ 
+ ```bash
+-ssh -i ~/.ssh/aliyun_deploy root@47.113.145.252 \
++ssh -i ~/.ssh/tencent_deploy ubuntu@124.222.127.242 \
+   'mkdir -p /tmp/sillyhub-repos/multi-agent-platform/docs/releases'
+-scp -i ~/.ssh/aliyun_deploy docs/releases/*.md \
+-  root@47.113.145.252:/tmp/sillyhub-repos/multi-agent-platform/docs/releases/
++scp -i ~/.ssh/tencent_deploy docs/releases/*.md \
++  ubuntu@124.222.127.242:/tmp/sillyhub-repos/multi-agent-platform/docs/releases/
+ ```
+ 
+ > /tmp 服务器重启可能被清——无所谓：每次部署本节都会全量重传，目录自愈。
+@@ -143,38 +164,51 @@ scp -i ~/.ssh/aliyun_deploy docs/releases/*.md \
+ 
+ ## 回滚
+ 
++**镜像级回滚（日常，只回退版本）**——在腾讯云生产机上：
+ ```bash
+-ssh -i ~/.ssh/aliyun_deploy root@47.113.145.252 'cd /opt/sillyhub/deploy/deploy && \
++ssh -i ~/.ssh/tencent_deploy ubuntu@124.222.127.242 'cd /opt/sillyhub/deploy/deploy && \
+   docker tag multi-agent-platform-backend:backup-<时间>  multi-agent-platform-backend:latest && \
+   docker tag multi-agent-platform-frontend:backup-<时间> multi-agent-platform-frontend:latest && \
+   docker compose --env-file .env up -d'
+ ```
+ （`<时间>` 用 `docker images | grep backup` 查。）
+ 
++**整机级回滚（迁回阿里云旧栈，数据是 2026-10-16 11:00 冻结点，会丢其后新数据）**：
++```bash
++# 阿里云：停隧道 → 起旧栈（nginx upstream 不用改，8001/3001 会被旧栈接管）
++ssh -i ~/.ssh/aliyun_deploy root@47.113.145.252 '
++  systemctl stop tencent-tunnel && \
++  cd /opt/sillyhub/deploy/deploy && docker compose --env-file .env up -d'
++```
++
+ ## 首次部署（服务器从零）
+ 
+-### 1. 服务器装 Docker（阿里云内网，配国内源加速）
++### 1. 服务器装 Docker（国内机，apt 源用阿里云镜像）
+ ```bash
+-ssh -i ~/.ssh/aliyun_deploy root@47.113.145.252 '
+-  curl -fsSL https://get.docker.com | bash -s docker --mirror Aliyun &&
+-  systemctl enable --now docker &&
+-  docker compose version'
++ssh -i ~/.ssh/tencent_deploy ubuntu@124.222.127.242 '
++sudo install -m 0755 -d /etc/apt/keyrings
++curl -fsSL https://mirrors.aliyun.com/docker-ce/linux/ubuntu/gpg | sudo tee /etc/apt/keyrings/docker.asc >/dev/null
++echo "deb [arch=amd64 signed-by=/etc/apt/keyrings/docker.asc] https://mirrors.aliyun.com/docker-ce/linux/ubuntu $(lsb_release -cs) stable" | sudo tee /etc/apt/sources.list.d/docker.list >/dev/null
++sudo apt-get update -qq && sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
++sudo systemctl enable --now docker && sudo usermod -aG docker ubuntu && docker compose version'
+ ```
++> 实测坑（2026-10-16 腾讯轻量）：`curl https://get.docker.com` 直连被重置，get-docker.sh
++> 下不来；必须走上面 apt 源方式。装完 `usermod -aG docker` 后要重开 ssh 会话才免 sudo。
+ 
+ ### 2. 建目录、放部署文件
+ ```bash
+-ssh -i ~/.ssh/aliyun_deploy root@47.113.145.252 'mkdir -p /opt/sillyhub/deploy/deploy'
+-scp -r -i ~/.ssh/aliyun_deploy deploy/docker-compose.yml deploy/.env.example deploy/scripts \
+-  root@47.113.145.252:/opt/sillyhub/deploy/deploy/
++ssh -i ~/.ssh/tencent_deploy ubuntu@124.222.127.242 'sudo mkdir -p /opt/sillyhub/deploy/deploy'
++scp -r -i ~/.ssh/tencent_deploy deploy/docker-compose.yml deploy/.env.example deploy/scripts \
++  ubuntu@124.222.127.242:/opt/sillyhub/deploy/deploy/
+ ```
+ 
+ ### 3. 配 .env（生产值）
+ ```bash
+-ssh -i ~/.ssh/aliyun_deploy root@47.113.145.252 'cd /opt/sillyhub/deploy/deploy && cp .env.example .env'
++ssh -i ~/.ssh/tencent_deploy ubuntu@124.222.127.242 'cd /opt/sillyhub/deploy/deploy && cp .env.example .env'
+ # 本地生成密钥：
+ python -c "import secrets; print('SECRET_KEY='+secrets.token_urlsafe(32)); print('SILLYSPEC_MASTER_KEY=v1:'+secrets.token_hex(32))"
+ # SSH 进去填（或本地编辑后 scp 覆盖）：
+-ssh -i ~/.ssh/aliyun_deploy root@47.113.145.252 'vi /opt/sillyhub/deploy/deploy/.env'
++ssh -i ~/.ssh/tencent_deploy ubuntu@124.222.127.242 'vi /opt/sillyhub/deploy/deploy/.env'
+ ```
+ 
+ 必填生产值（**不要把真实 token/密码写进 skill 或提交**）：
+@@ -196,9 +230,9 @@ PLATFORM_BOOTSTRAP_ADMIN_PASSWORD=<强密码>
+ 
+ **推荐：本地打包传镜像**（和「更新部署」1-3 步完全一样，服务器不构建）。首次因为没有"旧 latest"可备份，跳过备份直接 load + up。
+ 
+-备选：服务器直接构建（2 核前端要 15-20 分钟，需服务器上有完整源码 + `sillyhub-daemon/build/bundle/`）：
++备选：服务器直接构建（需服务器上有完整源码 + `sillyhub-daemon/build/bundle/`）：
+ ```bash
+-ssh -i ~/.ssh/aliyun_deploy root@47.113.145.252 'cd /opt/sillyhub/deploy/deploy && \
++ssh -i ~/.ssh/tencent_deploy ubuntu@124.222.127.242 'cd /opt/sillyhub/deploy/deploy && \
+   export COMMIT_SHA=$(cd /opt/sillyhub && git rev-parse --short HEAD 2>/dev/null || echo local) && \
+   docker compose --env-file .env up --build -d'
+ ```
+@@ -207,7 +241,7 @@ ssh -i ~/.ssh/aliyun_deploy root@47.113.145.252 'cd /opt/sillyhub/deploy/deploy
+ 
+ 同「更新部署」第 4 步。首次额外建 workspace（`root_path` 落在 compose 挂载目录）：
+ ```bash
+-TOKEN=$(ssh -i ~/.ssh/aliyun_deploy root@47.113.145.252 'curl -fsS -H "Content-Type: application/json" \
++TOKEN=$(ssh -i ~/.ssh/tencent_deploy ubuntu@124.222.127.242 'curl -fsS -H "Content-Type: application/json" \
+   -d "{\"email\":\"admin@sillyhub.local\",\"password\":\"<密码>\"}" \
+   http://127.0.0.1:8001/api/auth/login' | jq -r .access_token)
+ ```
+@@ -215,6 +249,11 @@ TOKEN=$(ssh -i ~/.ssh/aliyun_deploy root@47.113.145.252 'curl -fsS -H "Content-T
+ 
+ ## nginx 路由（/daemon/* 与 /mcp 必须走后端）
+ 
++> 2026-10-16 迁移后：这层 nginx 仍在**阿里云入口机**上，所有 upstream
++> （`127.0.0.1:8001|3001`）**零改动**——这两个本地端口实际由 `tencent-tunnel.service`
++> 的 SSH 转发接到腾讯云生产机。本节 location 调优（SSE/WS/410 特例）全部继续生效；
++> 动 nginx 的操作也全部仍在阿里云机上做。
++
+ 对外域名（如 `crrcdt.ppdmq.top`）前面有一层宿主机 nginx 反代，默认只把 `/api/` 与
+ `/daemon/` 代理到后端，其余走前端 Next.js——**`/mcp` 不加 location 会落到前端**：
+ MCP client `POST /mcp/` 收到 Next.js 的 308 去尾斜杠重定向 → HTML，表现为「远端未暴露
+@@ -298,7 +337,7 @@ curl -s -o /dev/null -w "%{http_code}\n" -X POST https://<域名>/mcp/ \
+ **部署/排障时怎么发现脱节**：对比「公网经 nginx」与「后端容器直出」是否一致——
+ 
+ ```bash
+-ssh -i ~/.ssh/aliyun_deploy root@47.113.145.252 '
++ssh -i ~/.ssh/tencent_deploy ubuntu@124.222.127.242 '
+   echo "— 公网 latest.json —"; curl -s -H "Cache-Control: no-cache" https://<域名>/daemon/latest.json; echo
+   echo "— 后端 latest.json —"; curl -s http://127.0.0.1:8001/daemon/latest.json; echo
+   echo "— 公网 bundle 版本 —"; curl -s https://<域名>/daemon/latest/sillyhub-daemon.js | grep -oa "0\.1\.[0-9]*" | sort -u
+@@ -314,11 +353,15 @@ ssh -i ~/.ssh/aliyun_deploy root@47.113.145.252 '
+ 
+ ## 常见坑
+ 
+-- **活跃 compose 目录是 `/opt/sillyhub/deploy/deploy/`**（双层 deploy），scp 和 ssh 都进深层目录，不是 `/opt/sillyhub/deploy/`。
++- **活跃 compose 目录是 `/opt/sillyhub/deploy/deploy/`**（双层 deploy；腾讯云机上只有这一层，路径沿用老服务器保持一致），scp 和 ssh 都进深层目录。
++- **腾讯轻量防火墙只开 22**（2026-10-16 实测）：控制台云层拦截 80/443/3001/8001（服务器 ufw 是关的、服务器上改不了），任何跨机直连生产端口的尝试都会超时——所以域名流量走阿里云 nginx + SSH 隧道（见顶部拓扑）。要在控制台开端口只能用户在腾讯云控制台操作；开了之后可把 nginx upstream 直指 `124.222.127.242` 并撤隧道。
++- **隧道是阿里云 systemd 服务**：`systemctl status/restart tencent-tunnel`（阿里云机上）；`Restart=always` 断线自动重连；隧道用的密钥 `/root/.ssh/aliyun_tunnel` 在腾讯侧 authorized_keys 里是 `restrict,port-forwarding`（只能转发不能登录 shell）。
++- **域名突然变旧数据/502 时先查隧道**：`systemctl is-active tencent-tunnel`；再确认阿里云旧栈没被误起（旧栈起会抢 8001/3001 端口把隧道挤掉）。
++- **远程 pkill -f 自杀坑**（2026-10-16 实测）：ssh 进去 `pkill -f "xxx"`，模式串会匹配到自己这条 ssh 会话的命令行把自己杀掉（exit 255 无输出）；用括号技巧 `pkill -f "[x]xx"` 或先 pgrep 拿 PID 再 kill。
+ - **PROD_API_URL 必须覆盖**：本地 `deploy/.env` 的 `NEXT_PUBLIC_API_BASE_URL=127.0.0.1:8001` 是开发值，直接打包给生产，浏览器会连用户自己机器。用 `PROD_API_URL=生产地址` 覆盖（环境变量 > `.env`）。
+ - **.sh 必须 LF**：`.gitattributes` 已强制 `*.sh eol=lf`，scp 前确认 `grep \r = 0`，否则服务器 `bash\r: bad interpreter`。
+ - **backend Dockerfile apt 源用清华 tuna**：`mirrors.aliyun.com` 的 debian trixie Packages 索引缺失会让 backend build 卡死（2026-07-17 已改 tuna）。
+-- **磁盘**：40G 盘。`load-and-up.sh` 自动 `image prune -f` + 删 tar。但 `backup-<时间>` tag 会累积，定期手动清：`docker images | grep backup` → `docker rmi <旧backup>`。
++- **磁盘**：60G 盘（腾讯云）。`load-and-up.sh` 自动 `image prune -f` + 删 tar。但 `backup-<时间>` tag 会累积，定期手动清：`docker images | grep backup` → `docker rmi <旧backup>`。
+ - **commit_sha=unknown**：health 端点这个字段恒 `unknown` 是既有问题（compose 运行时 `COMMIT_SHA` 覆盖镜像 build 值），不影响功能，见 memory `compose-commit-sha-runtime-override`。
+ - **backend 变更触发 alembic**：load + up 后 backend 启动跑 `alembic upgrade head`。migration 链断裂会 crash-loop，看 logs 诊断；项目未上线，可 `docker compose down -v` 重置 DB（先确认数据可丢）。
+ - **清库迁移已改 no-op（2026-09-13 部署裁决）**：20260912050000 的破坏性清库 DML **不随** `alembic upgrade head` 自动执行（旧逻辑会在 CLI 升级前自动清库、清空白做；且迁移链重放会把已重建的正确数据再清一遍）。清库改 `backend/scripts/reset_agent_log_attribution.py` 手动执行——见「更新部署 §4」的一次性运维动作段；**只跑一次，CLI 重推开始后禁跑**。
+diff --git a/backend/Dockerfile b/backend/Dockerfile
+index 8def684c4..2cd97e124 100644
+--- a/backend/Dockerfile
++++ b/backend/Dockerfile
+@@ -127,8 +127,11 @@ COPY --from=node-tools /usr/local/lib/node_modules/sillyspec/package.json /app/s
+ # task-04（DG-02）：install.ps1 兜底转 CRLF——PowerShell 偏好 CRLF，与 install.sh 去 CR（LF）相反。
+ # 源文件已 CRLF 则幂等无副作用；被 git 在镜像构建前转成 LF 则此处修复回来。注意不并入上面的
+ # `sed 's/\r$//' install.sh`（那行明确只列 install.sh + entrypoint，bash 要 LF）。
+-RUN mkdir -p /app/.cache /app/.config /data/spec-workspaces \
+- && chown -R app:app /app /data/spec-workspaces \
++# 2026-10-15-server-logs-dockerfile-fix：预建 /data/logs（日志轮转文件默认目录）——容器内
++# repo_root 推导到 /，非 root 用户 app 运行期 mkdir /data/logs 会权限被拒 → FileWriter 静默
++# 降级 stderr-only，页面日志卡永远「尚未生成」。对齐 /data/spec-workspaces 既有惯例。
++RUN mkdir -p /app/.cache /app/.config /data/spec-workspaces /data/logs \
++ && chown -R app:app /app /data/spec-workspaces /data/logs \
+  && sed -i 's/\r$//' /app/docker-entrypoint.sh /app/daemon-dist/install.sh \
+  && chmod +x /app/docker-entrypoint.sh \
+  && sed -i 's/$/\r/' /app/daemon-dist/install.ps1 \
+diff --git a/backend/app/core/logging.py b/backend/app/core/logging.py
+index 4ea6be748..871225000 100644
+--- a/backend/app/core/logging.py
++++ b/backend/app/core/logging.py
+@@ -118,8 +118,16 @@ def configure_logging(level: str = "INFO") -> None:
+         log_path = get_log_file_path()
+         log_path.parent.mkdir(parents=True, exist_ok=True)
+         file_writer = FileWriter(log_path)
+-    except OSError:
++    except OSError as exc:
++        # 降级必须留痕（2026-10-15-server-logs-dockerfile-fix）：容器内目录权限
++        # 被拒时静默退回 stderr-only，页面日志卡只剩「尚未生成」无从排查——
++        # 直接往 stderr 打一条含原因的可见警告（容器日志 docker logs 可查）。
+         file_writer = None
++        print(
++            f"[logging] 文件日志不可用，已降级为仅 stderr 输出：{type(exc).__name__}: {exc}",
++            file=sys.stderr,
++            flush=True,
++        )
+ 
+     # FileWriter 插在 JSONRenderer 之前：先写文件（自渲染）、再透传由
+     # JSONRenderer 渲染输出 stderr——两份 JSON 同源同构。
+diff --git a/backend/tests/test_server_log_filer.py b/backend/tests/test_server_log_filer.py
+index 54b42824b..90829a28f 100644
+--- a/backend/tests/test_server_log_filer.py
++++ b/backend/tests/test_server_log_filer.py
+@@ -13,6 +13,7 @@ from __future__ import annotations
+ import json
+ from pathlib import Path
+ 
++import pytest
+ import structlog
+ 
+ from app.core.logging import (
+@@ -107,6 +108,24 @@ def test_write_failure_does_not_raise(tmp_path: Path) -> None:
+     assert out == event, "processor 必须原样返回 event_dict 供后续输出"
+ 
+ 
++def test_configure_degraded_prints_warning(
++    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
++) -> None:
++    """目录不可建（2026-10-15-server-logs-dockerfile-fix：容器权限被拒场景）
++    → configure_logging 不抛 + stderr 打降级警告（含原因）——降级不再无声。"""
++    blocker = tmp_path / "blocker.txt"
++    blocker.write_text("x", encoding="utf-8")
++    # log_dir 指向「文件路径下的子目录」→ mkdir 报 NotADirectoryError（OSError 子类）
++    monkeypatch.setenv("LOG_DIR", str(blocker / "sub" / "logs"))
++    configure_logging("INFO")
++
++    captured = capsys.readouterr()
++    assert "文件日志不可用" in captured.err
++    # Windows 抛 FileExistsError / POSIX 抛 NotADirectoryError——同为 OSError 族，
++    # 断言只锁定「降级警告含原因」不锁具体异常类型
++    assert "Error" in captured.err
++
++
+ def test_configure_idempotent_and_path_derivation(tmp_path: Path) -> None:
+     """configure_logging 幂等；get_log_file_path 空值走默认派生、显式值尊重。"""
+     configure_logging("INFO")
+diff --git a/docs/releases/2026-10-16-007-2b1b58796.md b/docs/releases/2026-10-16-007-2b1b58796.md
+new file mode 100644
+index 000000000..48d610638
+--- /dev/null
++++ b/docs/releases/2026-10-16-007-2b1b58796.md
+@@ -0,0 +1,22 @@
++---
++seq: 7
++deployed_at: "2026-10-16 11:34:00"
++status: success
++commit_from: f566e4dce
++commit_to: f566e4dce
++summary: 去隧道直连：控制台放行 3001/8001 后 nginx upstream 切 124.222.127.242 直指腾讯机（无代码变更）
++agent: zcode-agent
++commits: []
++---
++
++## 🏗 基础设施变更（无代码变更，承接 006 迁移）
++
++- 用户在腾讯轻量控制台放行 3001/8001 后，阿里云 nginx 5 处 upstream 从隧道本地转发（127.0.0.1）切为直连 `http://124.222.127.242:3001|8001`（改前备份至 `/etc/nginx/backups/`）。
++- `systemctl disable --now tencent-tunnel` 撤掉 SSH 隧道；隧道 unit 与受限密钥保留作应急（若轻量防火墙重新关端口，可启用隧道 + upstream 改回 127.0.0.1 恢复）。
++- 整机级回滚路径相应更新：先起阿里云旧栈接管端口，再 upstream 改回本机 reload（见 deploy-to-server skill）。
++
++## 📝 部署验证
++
++- 阿里云→腾讯直连：8001 `/api/health` ok、3001 前端 200。
++- 切换后域名全链路：`/api/health` ok、`POST /mcp/` 401 JSON、`/daemon/latest.json` 版本 `b28df688-20261015140624` 一致、前端 200；撤隧道后复测同样全绿（确认流量走直连）。
++- 遗留建议：轻量防火墙 3001/8001 规则来源限定为 `47.113.145.252`，避免后端裸端口全网暴露。

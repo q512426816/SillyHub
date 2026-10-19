@@ -96,7 +96,9 @@ export function listChanges(
   workspaceId: string,
   // 2026-10-14-change-center-lineage-tag-and-filter：lineage 出身分类筛选
   // （thin|full，后端 _is_thin_lineage 三分支投影口径；缺省/未知值不过滤）。
-  params?: { location?: string; status?: string; owner?: string; search?: string; currentStage?: string; lineage?: string; sort?: string; pendingReviewOnly?: boolean; page?: number; pageSize?: number },
+  // 2026-10-18-change-list-type-filter：changeType 类型筛选（conventional 前缀 +
+  // 旧枚举；feat 后端等价命中 feature，缺省/未知值不过滤）。
+  params?: { location?: string; status?: string; owner?: string; search?: string; currentStage?: string; lineage?: string; changeType?: string; sort?: string; pendingReviewOnly?: boolean; page?: number; pageSize?: number },
 ) {
   const searchParams = new URLSearchParams();
   if (params?.location) searchParams.set("location", params.location);
@@ -105,6 +107,7 @@ export function listChanges(
   if (params?.search) searchParams.set("search", params.search);
   if (params?.currentStage) searchParams.set("current_stage", params.currentStage);
   if (params?.lineage) searchParams.set("lineage", params.lineage);
+  if (params?.changeType) searchParams.set("change_type", params.changeType);
   if (params?.sort) searchParams.set("sort", params.sort);
   if (params?.pendingReviewOnly) searchParams.set("pending_review_only", "true");
   if (params?.page) searchParams.set("page", String(params.page));
@@ -244,6 +247,30 @@ export function deleteChange(workspaceId: string, changeId: string) {
   return apiFetch<ChangeDeleteResponse>(
     `/api/workspaces/${workspaceId}/changes/${changeId}`,
     { method: "DELETE" },
+  );
+}
+
+// ── 变更改名（2026-10-16-change-title-condense-backfill task-07，FR-06）──
+
+/** PATCH /changes/{cid}/title 响应。对齐后端 schema（gen:types 生成）。 */
+export type ChangeRenameResponse = components["schemas"]["ChangeRenameResponse"];
+
+/**
+ * 改名变更标题 — PATCH /api/workspaces/{wid}/changes/{cid}/title
+ *
+ * 后端语义（FR-05）：权限三元组（变更责任人本人 OR change:archive——管理员/
+ * 平台责任人）+ strip 后 10-30 字校验（越带 422 code=change_title_length_invalid）+
+ * rename 审计事件；改名后的语义 title 不被 CLI 兜底上行回翻（is_fallback 守卫）。
+ * 入口可见性复用 canDeleteChange 三元组启发式（后端 403 兜底）。
+ */
+export function renameChangeTitle(
+  workspaceId: string,
+  changeId: string,
+  title: string,
+) {
+  return apiFetch<ChangeRenameResponse>(
+    `/api/workspaces/${workspaceId}/changes/${changeId}/title`,
+    { method: "PATCH", json: { title } },
   );
 }
 

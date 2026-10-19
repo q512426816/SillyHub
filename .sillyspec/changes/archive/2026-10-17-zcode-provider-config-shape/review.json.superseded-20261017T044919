@@ -1,0 +1,22 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-17-zcode-provider-config-shape",
+  "reviewer": "subagent",
+  "verdict": "PASS",
+  "reviewedAgainst": "3eba93e466551fa8ac75ad4076840f7381a536ad",
+  "findings": [
+    {
+      "severity": "P3",
+      "title": "design 做法概述「本修复新增的可观测性面仅一处（目录快照 warn）」措辞窄于交付面",
+      "evidence": "同变更（ba409b94c）还新增了 spawn env keys 日志与 waiting ready/ready ok/create ok/setup complete/pulling input/input pulled 共 7 处 console.log，「仅一处」字面不成立；后续按 design 对账日志面会漏掉这批驱动侧诊断输出。首轮 P3-③ 已大幅收敛（env 覆盖已入文件清单、『未加验证日志』已限定为 inject/push 两侧），仅剩此句措辞精度，无正确性影响。",
+      "location": ".sillyspec/changes/2026-10-17-zcode-provider-config-shape/design.md:13"
+    }
+  ],
+  "dimensionNotes": {
+    "乱序": "ok",
+    "并发": "ok",
+    "切换": "ok",
+    "作用域": "ok"
+  },
+  "reviewedAt": "2026-10-17T04:48:45Z"
+}

@@ -1,6 +1,7 @@
 """Tests for Auth 配置字段(task-01)。
 
-覆盖 FR-03、D-002@v1(refresh grace=60s)、D-003@v1(access TTL 15→30min)。
+覆盖 FR-03、D-002@v1(refresh grace 初值 60s;2026-10-16-fix-auth-random-logout
+D-003@v1 默认 60→300s)、D-003@v1(access TTL 15→30min)。
 用例对应蓝图 task-01 §TDD + §边界处理 B-01..B-07。
 """
 
@@ -22,9 +23,9 @@ def _base_kwargs(**overrides):
 
 
 class TestAuthRefreshGraceSeconds:
-    def test_default_is_60(self):
+    def test_default_is_300(self):
         s = Settings(**_base_kwargs())
-        assert s.auth_refresh_grace_seconds == 60
+        assert s.auth_refresh_grace_seconds == 300
 
     def test_env_override(self, monkeypatch):
         monkeypatch.setenv("AUTH_REFRESH_GRACE_SECONDS", "120")

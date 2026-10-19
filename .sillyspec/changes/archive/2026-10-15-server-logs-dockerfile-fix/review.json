@@ -1,0 +1,15 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-15-server-logs-dockerfile-fix",
+  "reviewer": "inline-self（环境无已注册子代理，主会话代行——降级留痕）",
+  "verdict": "PASS",
+  "reviewedAgainst": "145bd757934b3ecdf4dc33f855f937b1000cb9f8",
+  "findings": [],
+  "dimensionNotes": {
+    "乱序": "n/a",
+    "并发": "ok",
+    "切换": "ok",
+    "作用域": "n/a"
+  },
+  "reviewedAt": "2026-10-16T03:50:00Z"
+}

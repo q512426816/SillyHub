@@ -187,6 +187,10 @@ class ChangeService:
         search: str | None = None,
         current_stage: str | None = None,
         lineage: str | None = None,
+        # 2026-10-18-change-list-type-filter：类型筛选（git conventional 前缀 +
+        # 旧枚举值），feat 等价命中旧值 feature（与显示层映射口径一致）；
+        # 白名单外/缺省不过滤（对齐 sort/lineage fallback 风格）。
+        change_type: str | None = None,
         sort: str = "updated_at_desc",
         pending_review_only: bool = False,
         page: int = 1,
@@ -273,6 +277,12 @@ class ChangeService:
                 pass
         if current_stage:
             base = base.where(col(Change.current_stage) == current_stage)
+        # 2026-10-18-change-list-type-filter：类型筛选（feat 别名命中旧值 feature，
+        # 筛「feat」不漏存量旧值行）；白名单外不过滤（对齐 lineage/sort fallback 风格）。
+        ctype_norm = (change_type or "").strip().lower()
+        if ctype_norm in self._CHANGE_TYPE_FILTER_WHITELIST:
+            aliases = self._CHANGE_TYPE_FILTER_ALIASES.get(ctype_norm, (ctype_norm,))
+            base = base.where(col(Change.change_type).in_(aliases))
         if search:
             pattern = f"%{search}%"
             # 2026-09-28-change-list-description：description 入搜索面——title 归一化
@@ -509,6 +519,94 @@ class ChangeService:
                 error=str(exc),
             )
         return ChangeDeleteResponse(ok=True, backup_dir=backup_dir, file_count=file_count)
+
+    async def rename_title(
+        self,
+        workspace_id: uuid.UUID,
+        change_id: uuid.UUID,
+        *,
+        title: str,
+        actor_id: uuid.UUID,
+    ) -> Change:
+        """平台改名入口服务层（2026-10-16-change-title-condense-backfill FR-05）。
+
+        组合权限（变更责任人本人 OR CHANGE_ARCHIVE——管理员/平台责任人/变更责任人
+        三元组，用户口径 2026-10-16）在 router 层组合完成（delete_change 同款，
+        require_permission 依赖工厂不支持行级 OR）；本方法只做服务顺序：
+
+        1. 取行：不存在 404（``get``）；行已 ``location='deleted'`` 幂等拒绝
+           （409 ``code='change_deleted'``，与 delete 口径一致）；
+        2. strip 后带宽校验：10-30 字之内必须（``TITLE_CONDENSE_MIN_LEN`` /
+           ``TITLE_CONDENSE_MAX_LEN`` 单源共享，用户口径：建议约 20 字），越带
+           422（code=change_title_length_invalid，错误信息带当前字数与带宽）；
+        3. 改 title + touch updated_at + ``change_events`` ``event_type='rename'``
+           （detail 含 renamed_by/old_title/new_title/change_key，savepoint 范式
+           同 delete ④）+ commit。
+
+        改名后的 title 为语义形态：CLI 上行兜底标题不被回翻（is_fallback 收养
+        守卫自然保证）；CLI ``--title`` 自定义 H1 文档推送仍可覆盖（改名通道
+        语义保留——两端都算权威人工命名）。
+        """
+        from app.modules.change.title_norm import (
+            TITLE_CONDENSE_MAX_LEN,
+            TITLE_CONDENSE_MIN_LEN,
+        )
+
+        change = await self.get(workspace_id, change_id)
+        if change.location == "deleted":
+            raise AppError(
+                "该变更已在平台删除，无法改名。",
+                code="change_deleted",
+                http_status=409,
+                details={
+                    "workspace_id": str(workspace_id),
+                    "change_id": str(change_id),
+                    "change_key": change.change_key,
+                },
+            )
+        new_title = (title or "").strip()
+        if not (TITLE_CONDENSE_MIN_LEN <= len(new_title) <= TITLE_CONDENSE_MAX_LEN):
+            raise AppError(
+                f"标题需 10-30 字之内（当前 {len(new_title)} 字），建议 20 字左右概括变更内容。",
+                code="change_title_length_invalid",
+                http_status=422,
+                details={
+                    "workspace_id": str(workspace_id),
+                    "change_id": str(change_id),
+                    "change_key": change.change_key,
+                    "title_length": len(new_title),
+                    "min_len": TITLE_CONDENSE_MIN_LEN,
+                    "max_len": TITLE_CONDENSE_MAX_LEN,
+                },
+            )
+        old_title = change.title
+        change.title = new_title
+        change.updated_at = datetime.now(UTC)
+        async with self._session.begin_nested():
+            self._session.add(
+                ChangeEventORM(
+                    id=uuid.uuid4(),
+                    workspace_id=workspace_id,
+                    change_id=change.id,
+                    event_type="rename",
+                    detail={
+                        "renamed_by": str(actor_id),
+                        "change_key": change.change_key,
+                        "old_title": old_title,
+                        "new_title": new_title,
+                    },
+                    created_by=actor_id,
+                )
+            )
+            await self._session.flush()
+        await self._session.commit()
+        log.info(
+            "change.title_renamed",
+            workspace_id=str(workspace_id),
+            change_id=str(change_id),
+            change_key=change.change_key,
+        )
+        return change
 
     # ── File tree (task-03/04/05/07, 2026-07-02-change-detail-file-tree-editor) ──
 
@@ -823,6 +921,10 @@ class ChangeService:
             match.created_at = datetime.now(UTC)
             self._session.add(match)
             await self._session.commit()
+            # task-06：commit 后轻通知 daemon 立即拉取（best-effort，兜底轮询仍在）
+            from app.modules.daemon.ws_hub import notify_change_write_available
+
+            await notify_change_write_available(self._session, runtime_id, workspace.id)
             return match.id
 
         new_row = DaemonChangeWrite(
@@ -836,6 +938,9 @@ class ChangeService:
         )
         self._session.add(new_row)
         await self._session.commit()
+        from app.modules.daemon.ws_hub import notify_change_write_available
+
+        await notify_change_write_available(self._session, runtime_id, workspace.id)
         return new_row.id
 
     async def _resync_change_docs(self, workspace_id: uuid.UUID, change_id: uuid.UUID) -> None:
@@ -2093,6 +2198,28 @@ class ChangeService:
 
     # thin 分流上线日（thin-badge-survives-archive D-001）：此后变更才按轻量出身。
     _THIN_FLOW_LIVE_SINCE = datetime(2026, 9, 25, tzinfo=UTC)
+
+    # 2026-10-18-change-list-type-filter：类型筛选白名单（conventional 前缀 + 旧枚举）
+    # 与别名展开（feat 等价命中旧值 feature——显示层 feature→feat 映射的逆口径）。
+    _CHANGE_TYPE_FILTER_WHITELIST = frozenset(
+        {
+            "feat",
+            "fix",
+            "docs",
+            "chore",
+            "test",
+            "refactor",
+            "perf",
+            "build",
+            "style",
+            "ci",
+            "revert",
+            "feature",
+            "prototype",
+            "quick",
+        }
+    )
+    _CHANGE_TYPE_FILTER_ALIASES: dict[str, tuple[str, ...]] = {"feat": ("feat", "feature")}
     # 标准工作流阶段痕迹（步骤 stage 命中任一即非 thin 出身）。
     _THIN_LINEAGE_EXCLUDE_STAGES = frozenset({"brainstorm", "plan", "execute", "verify"})
 
@@ -2909,7 +3036,13 @@ class ChangeService:
         # 与 title 同口径整体覆盖——动机段被删/清空时描述随 None。
         row.description = parsed.description
         # change_type: only overwrite when DB value is None (protect user-set values)
-        if row.change_type is None and parsed.change_type is not None:
+        # 2026-10-18-change-type-git-conventional：flow-state.yaml commit_type 是权威
+        # 源（git conventional 前缀，回填脚本/CLI 写入），允许覆盖既有值——存量被
+        # 目录推断默认填成的 feature 错值靠它纠正；目录形状推断值仍只为空回填
+        # （保护 change_writer 建行时写入的用户语义类型不被猜测值回翻）。
+        if parsed.change_type is not None and (
+            row.change_type is None or parsed.change_type_authoritative
+        ):
             row.change_type = parsed.change_type
         # affected_components: always overwrite (inferred value is more accurate)
         if parsed.affected_components:

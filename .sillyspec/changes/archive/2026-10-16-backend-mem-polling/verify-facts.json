@@ -1,0 +1,130 @@
+{
+  "schemaVersion": 2,
+  "change": "2026-10-16-backend-mem-polling",
+  "generatedAt": "2026-10-16T05:51:23.181Z",
+  "probes": {
+    "probe1": {
+      "command": "sillyspec verify-probes --change 2026-10-16-backend-mem-polling",
+      "metrics": {
+        "matches": 0,
+        "skippedFiles": 0,
+        "worktreeHits": 4,
+        "globEntries": 0
+      }
+    },
+    "probe3": {
+      "command": "sillyspec verify-probes --change 2026-10-16-backend-mem-polling",
+      "metrics": {
+        "tasks": 10,
+        "hasTest": 10
+      }
+    },
+    "probe5": {
+      "command": "sillyspec verify-probes --change 2026-10-16-backend-mem-polling",
+      "metrics": {
+        "backendEndpoints": 3722,
+        "frontendCalls": 0
+      }
+    },
+    "probe6": {
+      "command": "sillyspec verify-probes --change 2026-10-16-backend-mem-polling",
+      "metrics": {
+        "deletions": 0,
+        "unavailable": false
+      }
+    },
+    "probe8": {
+      "command": "sillyspec verify-probes --change 2026-10-16-backend-mem-polling",
+      "metrics": {
+        "mispairs": 0,
+        "feOnly": 0,
+        "missingNotNull": 0,
+        "contractCount": 0,
+        "contractOrphans": 0,
+        "missingRequired": 0,
+        "feKeys": 0,
+        "backendFields": 0
+      }
+    },
+    "probe9": {
+      "command": "sillyspec verify-probes --change 2026-10-16-backend-mem-polling",
+      "metrics": {
+        "javaFileCount": 0,
+        "groupCount": 0,
+        "inconsistentGroups": 0
+      }
+    },
+    "probe10": {
+      "command": "sillyspec verify-probes --change 2026-10-16-backend-mem-polling",
+      "metrics": {
+        "checkedFiles": 11,
+        "unclearedFiles": 0
+      }
+    }
+  },
+  "apiFace": {
+    "endpoints": [],
+    "declared": null,
+    "writeEndpoints": []
+  },
+  "conclusion": "PASS WITH NOTES",
+  "runtimeEvidence": [
+    {
+      "claim": "腾讯生产部署成功且四指标达标（deployment-critical 实测回执）",
+      "command": "ssh ubuntu@124.222.127.242 'docker compose ps; curl -s http://127.0.0.1:8001/api/health'",
+      "exitCode": 0,
+      "logPath": "docs/releases/2026-10-16-008-f62065e2f.md（五容器 healthy/迁移 20261016100000 成功/RSS 211MiB/漏网检测 0.5ms/idle-txn 零新增）"
+    }
+  ],
+  "handover": {
+    "count": 3,
+    "items": [
+      {
+        "type": "manual-acceptance",
+        "item": "用户本机 daemon 升级（sillyhub-daemon 自更新或重装）后复核轮询降载——预期 pending-change-writes 请求率从基线 35 次/3min 显著下降（服务器端 120s 兜底+推送已就位）",
+        "condition": "升级后 `docker logs --since 5m multi-agent-platform-backend-1` 统计 pending-change-writes 计数对比基线",
+        "severity": "advisory"
+      },
+      {
+        "type": "manual-acceptance",
+        "item": "服务器 sysctl vm.swappiness=10（部署文档已写入建议；默认 60 在小内存机过早换页；腾讯 8G 机优先级低）",
+        "condition": "`sysctl -w vm.swappiness=10` + 持久化 /etc/sysctl.d/99-swappiness.conf",
+        "severity": "advisory"
+      },
+      {
+        "type": "other",
+        "item": "compose oom_score_adj:-500 被服务器 compose 版本忽略（inspect OomScoreAdj=0）、entrypoint 写负值缺 CAP_SYS_RESOURCE——OOM 保护生产缺失=改造前现状非回归；升 docker compose 后即生效",
+        "condition": "升级后 `docker inspect multi-agent-platform-backend-1 --format '{{.HostConfig.OomScoreAdj}}'` 应为 -500",
+        "severity": "advisory"
+      }
+    ]
+  },
+  "dbScriptDeclarations": [],
+  "runtimeEndpointExcluded": false,
+  "integrationRan": "ran",
+  "matrixPartialRows": 0,
+  "consumerHints": {
+    "script": [
+      "backend/app/modules/knowledge/tests/test_embedding_subprocess.py",
+      "backend/app/modules/daemon/tests/test_ws_hub.py",
+      "backend/app/modules/daemon/tests/test_permission_http_uplink.py",
+      "backend/app/modules/daemon/tests/test_session_router.py",
+      "sillyhub-daemon/tests/protocol.contract.test.ts",
+      "sillyhub-daemon/tests/config.test.ts",
+      "sillyhub-daemon/tests/daemon-change-write-push.test.ts"
+    ]
+  },
+  "smokeRan": "not-configured",
+  "factsConsistency": {
+    "checked": [
+      "probe1",
+      "probe3",
+      "probe5",
+      "probe6",
+      "probe8",
+      "probe9"
+    ],
+    "verdict": "match",
+    "detail": null
+  }
+}

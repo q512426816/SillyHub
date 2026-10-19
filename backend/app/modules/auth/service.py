@@ -198,7 +198,15 @@ class AuthService:
             # is_grace=True 时 session 已 revoked+rotated,跳过避免刷新 rotated_at
             # 导致 grace 窗口被无限续期(关键防线)。
             await self._mark_session_rotated(session)
-        pair = await self._issue_token_pair(user, user_agent=user_agent, ip=ip)
+        # 会话族传递（2026-10-16-fix-auth-random-logout task-02 / D-001@v1）：新行继承
+        # 被消费 session 的族；存量 NULL 行以自身 id 兜底（`family_id or id`，design
+        # Grill B-001——写错则族吊销 fail-open）。rotate 与 grace 两路径共用本签发点。
+        pair = await self._issue_token_pair(
+            user,
+            user_agent=user_agent,
+            ip=ip,
+            family_id=session.family_id or session.id,
+        )
         await self._db.commit()
         log.info("auth.refresh.success", user_id=str(user.id), grace=is_grace)
         return user, pair
@@ -218,7 +226,13 @@ class AuthService:
         log.info("auth.logout.success", session_id=str(session.id))
 
     async def revoke_all_user_sessions(self, *, user_id: uuid.UUID) -> int:
-        """Used by reuse-attack detection. Returns the number of sessions killed."""
+        """吊销该用户全部存活 session。返回吊销行数。
+
+        用途已收窄（2026-10-16-fix-auth-random-logout D-002@v1）：本方法**不再是**
+        复用检测的响应（现走 :meth:`_revoke_session_family` 族级吊销）。admin/settings
+        的「踢全部会话」端点走 UserService.revoke_all_sessions（users 域），不在此。
+        保留供管理语义/测试引用，注释防与族级吊销混用。
+        """
         now = _utc_now()
         result = await self._db.execute(
             update(SessionRow)
@@ -231,6 +245,41 @@ class AuthService:
         log.warning(
             "auth.sessions.revoked_all",
             user_id=str(user_id),
+            count=rowcount,
+        )
+        return rowcount
+
+    async def _revoke_session_family(self, *, user_id: uuid.UUID, family: uuid.UUID) -> int:
+        """复用检测专用（2026-10-16-fix-auth-random-logout task-02 / D-002@v1）：
+        吊销 ``(user_id, family)`` 范围内的存活 session，返回吊销行数。
+
+        谓词两形态：新格式行 ``family_id = :family``；存量 NULL 行
+        ``family_id IS NULL AND id = :family``（自成一族，D-001@v1 兜底语义）。
+        ``user_id`` 前导过滤防跨用户误灭（同 id 概率可忽略但谓词必须自守）。
+
+        **内部 commit 是必须的**（非破坏性执行期裁决）：复用分支在 UPDATE 后立即
+        raise :class:`AuthRefreshReused`，而 ``get_session`` 依赖对异常路径做
+        ``session.rollback()``（backend/app/core/db.py:163-167）——不先行提交则
+        族吊销会被回滚成空操作（历史 ``revoke_all_user_sessions`` 同款内部 commit
+        语义，继承之）。
+        """
+        now = _utc_now()
+        result = await self._db.execute(
+            update(SessionRow)
+            .where(col(SessionRow.user_id) == user_id)
+            .where(col(SessionRow.revoked_at).is_(None))
+            .where(
+                (col(SessionRow.family_id) == family)
+                | ((col(SessionRow.family_id).is_(None)) & (col(SessionRow.id) == family))
+            )
+            .values(revoked_at=now)
+        )
+        await self._db.commit()
+        rowcount = int(getattr(result, "rowcount", 0) or 0)
+        log.warning(
+            "auth.sessions.revoked_family",
+            user_id=str(user_id),
+            family=str(family),
             count=rowcount,
         )
         return rowcount
@@ -332,6 +381,7 @@ class AuthService:
         *,
         user_agent: str | None,
         ip: str | None,
+        family_id: uuid.UUID | None = None,
     ) -> TokenPair:
         access_token, payload = create_access_token(
             user_id=user.id,
@@ -350,6 +400,9 @@ class AuthService:
             ip=ip,
             created_at=_utc_now(),
             expires_at=expires_at,
+            # 会话族（task-02 / D-001@v1）：None=开新族（login 路径）；refresh 路径
+            # 显式传继承族（service.refresh 传 `session.family_id or session.id`）。
+            family_id=family_id if family_id is not None else uuid.uuid4(),
         )
         self._db.add(row)
         await self._db.flush()
@@ -421,10 +474,16 @@ class AuthService:
                     seconds=self._settings.auth_refresh_grace_seconds
                 ):
                     return user, revoked, True
-            # 超 grace 或非 rotate 吊销 → 重放攻击,吊销该用户全部 session。
-            await self.revoke_all_user_sessions(user_id=revoked.user_id)
+            # 超 grace 或非 rotate 吊销 → 重放攻击。吊销**本族**（task-02 / D-002@v1，
+            # 2026-10-16-fix-auth-random-logout）：只灭命中族系——窃取者用旧 token
+            # 轮换出的后代 session 同族同灭（安全属性保留）；同用户其他登录族不牵连。
+            # 存量 NULL 行以自身 id 兜底（design Grill B-001：只写 family_id 会 fail-open）。
+            await self._revoke_session_family(
+                user_id=revoked.user_id,
+                family=revoked.family_id or revoked.id,
+            )
             raise AuthRefreshReused(
-                "登录凭证已被使用过（可能存在安全风险），所有会话已注销，请重新登录。",
+                "登录凭证已被使用过（可能存在安全风险），该设备的登录已注销，请重新登录。",
                 details={"user_id": str(revoked.user_id)},
             )
 

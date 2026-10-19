@@ -149,6 +149,16 @@ class Session(BaseModel, table=True):
         default=None,
         sa_column=Column(DateTime(timezone=True), nullable=True),
     )
+    # 会话族标识（2026-10-16-fix-auth-random-logout task-01 / D-001@v1）：同一次登录
+    # 衍生的全部 session 共享一个族值——login 开新族（uuid4），refresh rotate/grace
+    # 续期继承被消费 session 的族（service 侧 `family_id or id` 兜底）。复用检测超窗
+    # 命中时只吊销本族（D-002@v1），不牵连同用户其他登录。nullable=True 兼容存量旧行
+    # （family_id NULL 视为自成一族）。迁移 c3f8a1d6e2b4 仅加列、不回填、不加索引
+    # （族谓词走既有 ix_sessions_user_revoked）。
+    family_id: uuid.UUID | None = Field(
+        default=None,
+        sa_column=Column(Uuid(as_uuid=True), nullable=True),
+    )
 
 
 class Role(BaseModel, table=True):

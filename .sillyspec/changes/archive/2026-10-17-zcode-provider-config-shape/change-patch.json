@@ -1,0 +1,113 @@
+{
+  "change": "2026-10-17-zcode-provider-config-shape",
+  "baseline": "81706c635fdcef4644600d693a8f6d399b8ea2b6",
+  "head": "40217abbd7f2a0d0cac4d6af1e0f784f68e21689",
+  "files": [
+    "sillyhub-daemon/src/interactive/zcode-app-server-driver.ts",
+    "sillyhub-daemon/src/interactive/zcode-events.ts",
+    "sillyhub-daemon/src/zcode-settings.ts",
+    "sillyhub-daemon/tests/interactive/zcode-app-server-driver.test.ts",
+    "sillyhub-daemon/tests/interactive/zcode-events.test.ts",
+    "sillyhub-daemon/tests/zcode-settings.test.ts"
+  ],
+  "totals": {
+    "files": 6,
+    "additions": 225,
+    "deletions": 50
+  },
+  "savedAt": "2026-10-17T04:49:20.128Z",
+  "note": "flow done 时点冻结（本变更可归属交付面：baseline..HEAD 提交面过滤 .sillyspec/ 只留 .sillyspec/docs/ 交付文档 + 独占树未提交交付；治理工件目录不入冻结——2026-10-12-close-trace-freeze-integrity FR-01）",
+  "modules": [
+    {
+      "id": "sillyhub-daemon",
+      "files": 6,
+      "doc": "docs/multi-agent-platform/modules/sillyhub-daemon.md",
+      "docTouched": false,
+      "docMissing": false
+    },
+    {
+      "id": "daemon",
+      "files": 6,
+      "doc": "docs/SillyHub/modules/daemon.md",
+      "docTouched": false,
+      "docMissing": false
+    }
+  ],
+  "uncoveredDirs": [],
+  "moduleMaps": [
+    "docs/backend/modules/_module-map.yaml",
+    "docs/frontend/modules/_module-map.yaml",
+    "docs/multi-agent-platform/modules/_module-map.yaml",
+    "docs/SillyHub/modules/_module-map.yaml",
+    "docs/sillyhub-daemon/modules/_module-map.yaml"
+  ],
+  "acceptedDirtyGap": 6,
+  "scopeAudit": {
+    "mode": "full-flow",
+    "ok": true,
+    "degradedReason": null,
+    "baseAnchor": "81706c635fdcef4644600d693a8f6d399b8ea2b6",
+    "totals": {
+      "files": 6,
+      "additions": 225,
+      "deletions": 50
+    },
+    "rows": [
+      {
+        "path": "sillyhub-daemon/src/interactive/zcode-app-server-driver.ts",
+        "additions": 96,
+        "deletions": 8,
+        "kind": "modified",
+        "planned": "修改",
+        "verdict": "planned"
+      },
+      {
+        "path": "sillyhub-daemon/src/interactive/zcode-events.ts",
+        "additions": 4,
+        "deletions": 0,
+        "kind": "modified",
+        "planned": "修改",
+        "verdict": "planned"
+      },
+      {
+        "path": "sillyhub-daemon/src/zcode-settings.ts",
+        "additions": 34,
+        "deletions": 17,
+        "kind": "modified",
+        "planned": "修改",
+        "verdict": "planned"
+      },
+      {
+        "path": "sillyhub-daemon/tests/interactive/zcode-app-server-driver.test.ts",
+        "additions": 59,
+        "deletions": 2,
+        "kind": "modified",
+        "planned": "修改",
+        "verdict": "planned"
+      },
+      {
+        "path": "sillyhub-daemon/tests/interactive/zcode-events.test.ts",
+        "additions": 2,
+        "deletions": 1,
+        "kind": "modified",
+        "planned": "修改",
+        "verdict": "planned"
+      },
+      {
+        "path": "sillyhub-daemon/tests/zcode-settings.test.ts",
+        "additions": 30,
+        "deletions": 22,
+        "kind": "modified",
+        "planned": "修改",
+        "verdict": "planned"
+      }
+    ],
+    "excluded": {
+      "foreignDeclared": []
+    },
+    "note": "flow done 时点冻结（本文件落盘时采集）",
+    "closedBy": "flow done"
+  },
+  "patchSha256": "dc6bf49298b8e4913d6efb2b7d00309516287abd85b92a1f80af657af935051d",
+  "patchStatus": "ok"
+}

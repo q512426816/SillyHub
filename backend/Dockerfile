@@ -42,6 +42,9 @@ WORKDIR /build
 # pyproject.toml references README.md as the long_description, so both files
 # must be present before `uv pip install -e .` runs.
 COPY pyproject.toml README.md ./
+# 2026-10-16-backend-mem-polling task-10：wheel 下载默认 30s 超时在国内网络抖动下
+# 构建即挂（filelock 拉取 timeout 实证）——放宽到 300s。
+ENV UV_HTTP_TIMEOUT=300
 # Lock-less install is acceptable for V1; once we add uv.lock, switch to `uv sync --frozen`.
 RUN uv venv /opt/venv \
  && uv pip install --python /opt/venv/bin/python --no-cache -e . \

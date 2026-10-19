@@ -28,6 +28,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import re
 import uuid
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -59,8 +60,58 @@ SNAPSHOT_RPC_TIMEOUT_SECONDS = 15
 # → 可行动的用户文案（其余维持「请稍后重试」现状；details 仍透传原始码/消息）。
 _GATEWAY_MESSAGE_BY_CODE: dict[str, str] = {
     "workspace_root_unknown": "该工作区尚未被本机认领，请先在该工作区发起一次会话后重试。",
-    "conflict_record_missing": "冲突记录已失效，请刷新冲突列表。",
+    # 2026-10-16-conflict-full-tree-compare（D-005@v1）：原「请刷新冲突列表」是无效建议
+    # （刷新不关闭平台注册表行）——改为可行动的「重新同步」口径。
+    "conflict_record_missing": "该冲突在本机已无快照（可能已随同步清理或已裁决），请重新同步后再试。",
 }
+
+#: full-tree 记录标签——CLI 对跨 ≥2 变更名的全量冲突落盘
+#: ``spec-sync-conflict-full-tree.json``（attributeChangeLabel 口径）。仅在 <change>
+#: 记录缺失时作为兜底读取名（2026-10-16-conflict-full-tree-compare / D-001@v1/D-009@v1）。
+FULL_TREE_RECORD_LABEL = "full-tree"
+
+#: `changes/(archive/)?<名>/` 归因正则——与前端 platform-sync-section 归因口径一致。
+_CHANGE_PATH_RE = re.compile(r"^changes/(?:archive/)?([^/]+)/")
+
+
+def _path_belongs_to_change(path: str, change: str) -> bool:
+    """段边界前缀匹配——名字后必须紧跟 ``/``，防 ``foo`` 误吞 ``foobar``（D-012@v1/R-01）。"""
+    return path.startswith(f"changes/{change}/") or path.startswith(f"changes/archive/{change}/")
+
+
+def _scope_snapshot_to_change(snapshot: dict[str, Any], change: str) -> dict[str, Any] | None:
+    """把 full-tree 快照裁成 ``<change>`` 范围并附来源元数据；无归属路径返回 None。
+
+    输入面固定为快照 ``files[].path``——daemon 侧读记录时已把 conflicting_paths 截
+    300 转成 files[]，快照**没有** conflicting_paths 字段（D-006@v2）。entry 完整保留
+    （``_build_spec_tree_compare`` 依赖 path/missing/mtime/content/binary/truncated）。
+    返回裁剪后快照的浅拷贝 + ``record_label``/``covered_changes``（裁剪前全量路径按
+    变更名归因去重）/``path_total``（裁剪前路径条数；受 daemon 300 路径帽截断，
+    不声称记录真实总数）。
+    """
+    raw_files = snapshot.get("files")
+    files = [f for f in raw_files if isinstance(f, dict)] if isinstance(raw_files, list) else []
+    path_total = len(files)
+    scoped = [
+        f
+        for f in files
+        if isinstance(f.get("path"), str) and _path_belongs_to_change(f["path"], change)
+    ]
+    if not scoped:
+        return None
+    covered: list[str] = []
+    for f in files:
+        m = _CHANGE_PATH_RE.match(str(f.get("path") or ""))
+        if m is not None and m.group(1) not in covered:
+            covered.append(m.group(1))
+    return {
+        **snapshot,
+        "files": scoped,
+        "record_label": FULL_TREE_RECORD_LABEL,
+        "covered_changes": covered,
+        "path_total": path_total,
+    }
+
 
 # 双截断护栏（design §5 Phase 2 / §8）。
 DIFF_ROW_CAP_PER_FILE = 5000
@@ -414,7 +465,38 @@ class SillySpecCompareService:
         kind: CompareKind,
         workspace_id: uuid.UUID,
     ) -> dict[str, Any]:
-        """RPC 拉取 daemon 侧冲突快照（§7.1；机器级以 instance_id 作 daemon_id 路由）。
+        """RPC 拉取 daemon 侧冲突快照；spec-tree 记录缺失时以 full-tree 记录兜底。
+
+        主取以变更名作记录名（记录名=变更名）；**仅** ``kind=spec-tree`` 且主取失败为
+        ``conflict_record_missing`` 时，以 ``FULL_TREE_RECORD_LABEL`` 重取一次（不递归，
+        D-009@v1），并把快照裁成 ``<change>`` 范围（D-006@v2）。裁剪不命中（记录不含该
+        变更路径）或兜底本身失败 → 抛主取原错误，错误路径与兜底前完全一致。
+        """
+        try:
+            return await self._request_snapshot(instance_id, change, kind, workspace_id)
+        except DaemonRpcRemoteGatewayError as exc:
+            daemon_code = (exc.details or {}).get("daemon_code")
+            if kind != "spec-tree" or daemon_code != "conflict_record_missing":
+                raise
+            try:
+                snapshot = await self._request_snapshot(
+                    instance_id, FULL_TREE_RECORD_LABEL, kind, workspace_id
+                )
+            except DaemonRpcRemoteGatewayError:
+                raise exc from None
+            scoped = _scope_snapshot_to_change(snapshot, change)
+            if scoped is None:
+                raise exc from None
+            return scoped
+
+    async def _request_snapshot(
+        self,
+        instance_id: uuid.UUID,
+        record_label: str,
+        kind: CompareKind,
+        workspace_id: uuid.UUID,
+    ) -> dict[str, Any]:
+        """单次快照 RPC（``record_label`` 即 daemon 侧记录名，通常等于变更名）。
 
         2026-09-09-conflict-root-workspace-scoping task-03（FR-01）：params 携带
         workspace_id——daemon 据此按工作区映射取根（未命中 workspace_root_unknown，
@@ -433,13 +515,13 @@ class SillySpecCompareService:
             return await hub.send_rpc(
                 instance_id,
                 SNAPSHOT_RPC_METHOD,
-                {"change": change, "kind": kind, "workspace_id": str(workspace_id)},
+                {"change": record_label, "kind": kind, "workspace_id": str(workspace_id)},
                 timeout=SNAPSHOT_RPC_TIMEOUT_SECONDS,
             )
         except DaemonRpcRemoteError as exc:
             # 2026-09-09-conflict-root-workspace-scoping task-05（FR-06，可选）：按
             # daemon_code 分叉文案——workspace_root_unknown / conflict_record_missing
-            # 的失败原因可行动（认领工作区 / 刷新列表），「请稍后重试」误导重试。
+            # 的失败原因可行动（认领工作区 / 重新同步），「请稍后重试」误导重试。
             message = (
                 _GATEWAY_MESSAGE_BY_CODE.get(exc.code) or "读取机器侧冲突快照失败，请稍后重试。"
             )
@@ -559,6 +641,10 @@ class SillySpecCompareService:
             ),
             "response_truncated": False,
             "dropped_paths": dropped_paths,
+            # full-tree 兜底来源元数据（主取命中时三键缺省 → None/[]/None；D-006@v2/D-009@v1）。
+            "record_label": snapshot.get("record_label"),
+            "covered_changes": snapshot.get("covered_changes") or [],
+            "path_total": snapshot.get("path_total"),
             "files": files_out,
             "progress_rows": [],
         }

@@ -47,6 +47,9 @@ def _make_parsed(
     parsed.description = None
     parsed.status = "active"
     parsed.change_type = "feature"
+    # 2026-10-18-change-type-git-conventional：权威标志显式 False——MagicMock 隐式
+    # 属性返回 truthy Mock，会让既有 None-fill 用例意外走权威覆盖分支。
+    parsed.change_type_authoritative = False
     parsed.affected_components = []
     parsed.change_key = change_key
     parsed.location = "active"
@@ -75,6 +78,48 @@ def test_apply_parsed_overrides_stage_when_owner_id_none():
     parsed = _make_parsed(current_stage="brainstorm")
     ChangeService._apply_parsed(row, parsed, workspace_id=uuid.uuid4())
     assert row.current_stage == "brainstorm"  # 被覆盖
+
+
+def test_apply_parsed_change_type_inference_only_fills_none():
+    """2026-10-18-change-type-git-conventional：非权威推断值仍只为空回填。
+
+    库值非 None（change_writer 建行写入的语义类型）+ 目录形状推断值 → 不覆盖，
+    既有保护语义不变。
+    """
+    from app.modules.change.service import ChangeService
+
+    row = _make_row(owner_id=None)
+    row.change_type = "quick"
+    parsed = _make_parsed()  # change_type="feature", authoritative=False
+    ChangeService._apply_parsed(row, parsed, workspace_id=uuid.uuid4())
+    assert row.change_type == "quick"  # 不被猜测值回翻
+
+
+def test_apply_parsed_change_type_none_fill_unchanged():
+    """库值为空 + 推断值 → 回填（既有行为不回归，权威标志 False 同样成立）。"""
+    from app.modules.change.service import ChangeService
+
+    row = _make_row(owner_id=None)  # change_type=None
+    parsed = _make_parsed()
+    ChangeService._apply_parsed(row, parsed, workspace_id=uuid.uuid4())
+    assert row.change_type == "feature"
+
+
+def test_apply_parsed_authoritative_commit_type_overwrites():
+    """权威值（flow-state.yaml commit_type，git 前缀回填）允许覆盖库中旧值。
+
+    存量行被目录推断默认填成 feature 的错值，靠 authoritative 标志纠正——
+    这是回填脚本生效的关键通道。
+    """
+    from app.modules.change.service import ChangeService
+
+    row = _make_row(owner_id=None)
+    row.change_type = "feature"
+    parsed = _make_parsed()
+    parsed.change_type = "fix"
+    parsed.change_type_authoritative = True
+    ChangeService._apply_parsed(row, parsed, workspace_id=uuid.uuid4())
+    assert row.change_type == "fix"  # 被权威值覆盖
 
 
 async def test_reparse_created_unique_violation_falls_back_to_update(db_session, monkeypatch):

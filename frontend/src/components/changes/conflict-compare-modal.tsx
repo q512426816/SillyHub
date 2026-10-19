@@ -28,6 +28,7 @@ import { App, Modal } from "antd";
 
 import { parseIsoLikeMs } from "@/components/changes/change-activity-badge";
 import { Button } from "@/components/ui/button";
+import { ApiError } from "@/lib/api";
 import type { components } from "@/lib/api-types";
 import {
   getSillySpecConflictCompare,
@@ -97,6 +98,63 @@ const STRATEGY_TEXT: Record<
 /** 旧 daemon 兜底提示（与 platform-sync-section 同文案）。 */
 const DAEMON_VERSION_NOTE =
   "指令需较新版本 daemon 支持，旧版本会静默忽略（150 秒无回报将自动恢复按钮）。";
+
+/** 失败卡分支臂（2026-10-16-conflict-full-tree-compare / FR-03 / D-004@v1 / D-012@v1）。 */
+export type FailureCardArm = "record_missing" | "root_unknown" | "offline_timeout" | "generic";
+
+export interface FailureCardBranch {
+  arm: FailureCardArm;
+  message: string;
+  /** false = 不渲染「重试」——记录缺失/工作区未认领时重试必然同样失败。 */
+  retry: boolean;
+}
+
+/** 外层 504 家族错误码（机器离线 / RPC 超时，runtime/service.py:83-99）。 */
+const OFFLINE_TIMEOUT_CODES = new Set([
+  "HTTP_504_DAEMON_RUNTIME_OFFLINE",
+  "HTTP_504_DAEMON_RPC_TIMEOUT",
+]);
+
+/**
+ * 失败卡分支判定（纯函数）——匹配键**必须**是 ``details.daemon_code``：
+ * daemon 业务失败时外层 code 恒为 ``HTTP_502_DAEMON_RPC_REMOTE``，用它区分
+ * ``conflict_record_missing`` 永不命中（D-012@v1，生产实证）。未知码回退
+ * 通用失败臂（保留「重试」）。
+ */
+export function failureCardBranch(err: unknown): FailureCardBranch {
+  const code = err instanceof ApiError ? err.code : null;
+  const details =
+    err instanceof ApiError && err.details !== null && typeof err.details === "object"
+      ? (err.details as Record<string, unknown>)
+      : null;
+  const daemonCode = typeof details?.daemon_code === "string" ? details.daemon_code : null;
+  if (daemonCode === "conflict_record_missing") {
+    return {
+      arm: "record_missing",
+      message: "该冲突在本机已无快照（可能已随同步清理或已裁决），请重新同步后再试。",
+      retry: false,
+    };
+  }
+  if (daemonCode === "workspace_root_unknown") {
+    return {
+      arm: "root_unknown",
+      message: "该工作区尚未被本机认领，请先在该工作区发起一次会话后重试。",
+      retry: false,
+    };
+  }
+  if (code !== null && OFFLINE_TIMEOUT_CODES.has(code)) {
+    return {
+      arm: "offline_timeout",
+      message: "机器当前离线或响应超时（504），请确认数据源机器在线后重试。",
+      retry: true,
+    };
+  }
+  return {
+    arm: "generic",
+    message: "读取机器侧冲突快照失败，请稍后重试。",
+    retry: true,
+  };
+}
 
 /** 文件清单徽章（四分类；色阶走语义 token，原型 .fstat 视觉基准）。 */
 const FILE_STATUS_META: Record<
@@ -258,20 +316,32 @@ export function ConflictCompareModal({
       );
     }
     if (failed) {
+      const branch = failureCardBranch(compareQ.error);
+      const serverMessage =
+        compareQ.error instanceof Error && compareQ.error.message
+          ? compareQ.error.message
+          : "";
       return (
         <div className="flex min-h-[420px] flex-col items-center justify-center gap-4 p-8 text-center">
           <p className="text-sm font-semibold text-foreground">
             读取对比数据失败
           </p>
-          <p className="max-w-md text-xs text-muted-foreground">
-            机器可能离线或对比读取超时（504）。请确认数据源机器在线后重试；
-            {compareQ.error instanceof Error && compareQ.error.message
-              ? `（${compareQ.error.message}）`
-              : ""}
+          <p
+            className="max-w-md text-xs leading-5 text-muted-foreground"
+            data-testid="compare-failure-message"
+          >
+            {branch.message}
           </p>
-          <Button variant="outline" onClick={() => void compareQ.refetch()}>
-            重试
-          </Button>
+          {serverMessage && serverMessage !== branch.message ? (
+            <p className="max-w-md break-all text-[11px] text-muted-foreground/70">
+              服务端消息：{serverMessage}
+            </p>
+          ) : null}
+          {branch.retry ? (
+            <Button variant="outline" onClick={() => void compareQ.refetch()}>
+              重试
+            </Button>
+          ) : null}
         </div>
       );
     }
@@ -283,6 +353,20 @@ export function ConflictCompareModal({
   const renderSpecTreeBody = () => {
     return (
       <div className="flex min-h-0 flex-1 flex-col">
+        {/* full-tree 兜底来源提示（FR-02 / D-006@v2）：固定说明行、无关闭控件 */}
+        {data?.record_label === "full-tree" && (
+          <p
+            className="border-b bg-muted/60 px-5 py-1.5 text-xs text-muted-foreground"
+            data-testid="compare-record-source"
+          >
+            该记录由全量同步产生（覆盖 {(data.covered_changes ?? []).length} 个变更
+            {(data.path_total ?? null) !== null
+              ? `，快照共 ${data.path_total} 个路径`
+              : ""}
+            ），本次仅展示与{" "}
+            <code className="font-mono">{data.change}</code> 相关的 {files.length} 个路径。
+          </p>
+        )}
         {/* 整响应超限提示（2MB 帽丢部分差异明细；措辞避开与单文件截断提示混排） */}
         {data?.response_truncated && (
           <p className="border-b border-warning/30 bg-warning/10 px-5 py-1.5 text-xs text-warning">

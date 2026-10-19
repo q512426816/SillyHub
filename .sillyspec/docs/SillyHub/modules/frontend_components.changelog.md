@@ -83,3 +83,7 @@ created_at: 2026-08-30 22:23:33
 | 2026-10-16 | 2026-10-15-session-turn-completion-semantics | 上一变更把绿点/完成通知锚定在会话终态 ended 上，但平台里一轮任务跑完后会话仍为 active… |
 | 2026-10-16 | 2026-10-16-session-run-status-realtime | 会话列表行首状态目前只靠 daemon 10 秒日志推导活性链（基线），用户触发会话后转圈/完成提示… |
 | 2026-10-16 | 2026-10-16-session-pill-dock-drag | 会话页右下角两个悬浮 pill（待决策/变更文件）合并为竖排可拖拽停靠组，点击展开替代 hover |
+| 2026-10-16 | 2026-10-16-change-files-sync-result | change 文件树「刷新」同步链路三层静默失败——后端 RPC 预算 3s 短于实测 6~13.5… |
+| 2026-10-16 | 2026-10-17-audit-risk-followup | 24h 审计六连修收口：dsh/zcode 会话恢复白名单漏登记（daemon 重启静默丢记录）、r… |
+| 2026-10-18 | 2026-10-18-change-type-git-conventional | 变更类型改用git惯用前缀彩色标签 |
+| 2026-10-18 | 2026-10-18-change-list-type-filter | 变更列表加类型标签与类型筛选 |

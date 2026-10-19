@@ -48,7 +48,9 @@ from app.modules.change.model import Change, ChangeSessionLink, QuicklogSessionL
 from app.modules.change.pending_cache import bump_pending_epoch
 from app.modules.change.title_norm import (
     DISPLAY_KEY_PREFIX_RE,
+    TITLE_CONDENSE_MAX_LEN,
     TITLE_MAX_LEN,
+    condense_title,
     is_fallback_display_title,
 )
 from app.modules.daemon.session_events import publish_sessions_changed
@@ -715,6 +717,12 @@ class PlatformSyncService:
                 {},
             )
             body_title = str(info_existing.get("title") or "").strip()[:TITLE_MAX_LEN]
+            # 2026-10-16-change-title-condense-backfill：超长上行标题先提炼再收养——
+            # 旧版 CLI「--input 首行 50 字硬截」产物（动机长句带尾省略号）原样入库
+            # 即变更中心烂标题；30 字内原样收养（语义概括不受影响），提炼为空
+            # （纯标点/空白）放弃本次收养保持行内原值。
+            if len(body_title) > TITLE_CONDENSE_MAX_LEN:
+                body_title = condense_title(body_title)
             if (
                 body_title
                 and is_fallback_display_title(existing.title, name)
@@ -754,13 +762,18 @@ class PlatformSyncService:
             ),
             {},
         )
+        # 同收养段口径：CLI body title 裸 dict 无校验，截 TITLE_MAX_LEN 防列宽溢出；
+        # 空/提炼后为空回落 change_key（2026-09-30-title-adopt-clobber-guard）。
+        # 2026-10-16-change-title-condense-backfill：超 30 字同走 condense 提炼
+        # （占位建行与既有行收养两个入口同防御，防旧版 CLI 长标题从占位路径入库）。
+        placeholder_title = str(info.get("title") or "").strip()[:TITLE_MAX_LEN]
+        if len(placeholder_title) > TITLE_CONDENSE_MAX_LEN:
+            placeholder_title = condense_title(placeholder_title)
         row = Change(
             id=uuid.uuid4(),
             workspace_id=workspace_id,
             change_key=name,
-            # 同收养段口径：CLI body title 裸 dict 无校验，截 TITLE_MAX_LEN
-            # 防列宽溢出；空值回落 change_key（2026-09-30-title-adopt-clobber-guard）。
-            title=(str(info.get("title") or "").strip()[:TITLE_MAX_LEN]) or name,
+            title=placeholder_title or name,
             status="draft",
             location="active",
             # platform-managed 镜像扁平布局（无 .sillyspec/ 包裹），与 parser

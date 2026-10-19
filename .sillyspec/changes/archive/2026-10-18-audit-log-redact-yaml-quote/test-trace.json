@@ -1,0 +1,51 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-18-audit-log-redact-yaml-quote",
+  "rows": [
+    {
+      "anchor": "FR-01",
+      "row_id": "2026-10-18-audit-log-redact-yaml-quote:flow:测试绑定FR-01",
+      "tests": [
+        "sillyhub-daemon/tests/interactive/zcode-app-server-driver.test.ts「redactEnvValueForLog 脱敏三态（代理 userinfo 打码/KEY-TOKEN 整值 <redacted>/普通值透传）」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-18-audit-log-redact-yaml-quote"
+    },
+    {
+      "anchor": "FR-02",
+      "row_id": "2026-10-18-audit-log-redact-yaml-quote:flow:测试绑定FR-02",
+      "tests": [
+        "sillyhub-daemon/tests/dsh-settings.test.ts「特殊字符模型名/URL 单引号转义不破坏 YAML」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-18-audit-log-redact-yaml-quote"
+    },
+    {
+      "anchor": "FR-03",
+      "row_id": "2026-10-18-audit-log-redact-yaml-quote:flow:测试绑定FR-03",
+      "tests": [
+        "sillyhub-daemon/tests/dsh-settings.test.ts「writeDshHome（per-session 路由写盘）」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-18-audit-log-redact-yaml-quote"
+    }
+  ]
+}

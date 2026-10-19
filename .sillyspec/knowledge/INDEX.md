@@ -233,3 +233,4 @@
 - auto-frontend|frontend|FR|需求|承接 → [fr/auto-frontend.md](fr/auto-frontend.md)
 - test-utils|FR|需求|承接 → [fr/test-utils.md](fr/test-utils.md)
 - agent-skills|FR|需求|承接 → [fr/agent-skills.md](fr/agent-skills.md)
+- auth|FR|需求|承接 → [fr/auth.md](fr/auth.md)

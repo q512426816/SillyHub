@@ -24,7 +24,11 @@ quicklog 双源合并查询（平台上行条目 × 文件条目）也在本模�
   `GET /{change_id}/documents`、`.../documents/{doc_id}`（文档内容）。
 - 重解析：`POST /changes/reparse`——body 可带 scope 列表；scoped 模式零 delete、
   rename 检测仅全量模式（见关键逻辑）。
-- 文件子域：`GET /{change_id}/files`（变更文件树）、
+- 文件子域：`GET /{change_id}/files`（变更文件树；`?sync=1` 先经绑定 daemon 触发
+  定向上行同步再返回，RPC 预算 15s，响应带可选 `sync_result` 回执
+  triggered/ok/reason/stderr_tail——未绑定/离线 vs 执行失败/超时 vs 防抖跳过三态，
+  纯读恒 null；daemon 失败回执透传 reason 与 CLI stderr 尾段并记 warning，GET 永不
+  因同步失败报错——2026-10-16-change-files-sync-result）、
   `GET|PUT /{change_id}/files/content`（读/写文件内容）、
   `GET /{change_id}/files/raw`（二进制原字节流，2026-08-26-file-fullscreen-preview：
   StreamingResponse + guess_type Content-Type + inline RFC5987 filename*，CHANGE_READ，

@@ -465,6 +465,81 @@ class TestInferCurrentStageThin:
         assert ChangeParser._infer_current_stage(empty_dir, "active") == "brainstorm"
 
 
+class TestCommitTypeFlowState:
+    """flow-state.yaml 顶层 commit_type 权威类型源（2026-10-18-change-type-git-conventional）。
+
+    语义类型（git conventional 前缀）由回填脚本 / 后续 CLI flow done 写入
+    flow-state.yaml；读到即覆盖目录形状推断（quick 通道退役后轻量变更推断恒落
+    默认 feature）并置 change_type_authoritative（_apply_parsed 允许覆盖库值）。
+    """
+
+    def test_read_returns_lowercase_value(self, tmp_path: Path) -> None:
+        """顶层 commit_type 读出并小写化（大写前缀归一）。"""
+        change_dir = tmp_path / "2026-10-18-demo"
+        change_dir.mkdir()
+        (change_dir / "flow-state.yaml").write_text(
+            "tier: thin\ncommit_type: Fix\n", encoding="utf-8"
+        )
+        assert ChangeParser._read_flow_state_commit_type(change_dir) == "fix"
+
+    def test_read_missing_file_or_field_returns_none(self, tmp_path: Path) -> None:
+        """缺文件 / 有文件缺字段 / 空串 / 非 str 值 → None（回落推断路径）。"""
+        no_file = tmp_path / "a"
+        no_file.mkdir()
+        assert ChangeParser._read_flow_state_commit_type(no_file) is None
+
+        no_field = tmp_path / "b"
+        no_field.mkdir()
+        (no_field / "flow-state.yaml").write_text("tier: thin\n", encoding="utf-8")
+        assert ChangeParser._read_flow_state_commit_type(no_field) is None
+
+        empty_val = tmp_path / "c"
+        empty_val.mkdir()
+        (empty_val / "flow-state.yaml").write_text("commit_type: ''\n", encoding="utf-8")
+        assert ChangeParser._read_flow_state_commit_type(empty_val) is None
+
+        non_str = tmp_path / "d"
+        non_str.mkdir()
+        (non_str / "flow-state.yaml").write_text("commit_type: 42\n", encoding="utf-8")
+        assert ChangeParser._read_flow_state_commit_type(non_str) is None
+
+    def test_read_corrupted_yaml_returns_none(self, tmp_path: Path) -> None:
+        """损坏 YAML 不抛（safe_load 异常吞掉返 None，fail-open 回落推断）。"""
+        change_dir = tmp_path / "e"
+        change_dir.mkdir()
+        (change_dir / "flow-state.yaml").write_text("tier: [unclosed\n", encoding="utf-8")
+        assert ChangeParser._read_flow_state_commit_type(change_dir) is None
+
+    def test_parse_workspace_commit_type_overrides_inference(
+        self, parser: ChangeParser, silly_root: Path
+    ) -> None:
+        """集成：tasks.md 形态推断本应 feature，flow-state commit_type=fix 覆盖并置权威。"""
+        change_dir = silly_root / ".sillyspec" / "changes" / "2026-10-18-commit-type-demo"
+        change_dir.mkdir()
+        (change_dir / "tasks.md").write_text("# tasks\n", encoding="utf-8")
+        (change_dir / "design.md").write_text("# demo\n", encoding="utf-8")
+        (change_dir / "flow-state.yaml").write_text(
+            "tier: thin\ncommit_type: fix\n", encoding="utf-8"
+        )
+        result = parser.parse_workspace(silly_root)
+        parsed = next(c for c in result.changes if c.change_key == "2026-10-18-commit-type-demo")
+        assert parsed.change_type == "fix"
+        assert parsed.change_type_authoritative is True
+
+    def test_parse_workspace_without_field_keeps_inference_not_authoritative(
+        self, parser: ChangeParser, silly_root: Path
+    ) -> None:
+        """无 commit_type 字段：推断值照旧，authoritative=False（只为空回填语义不变）。"""
+        change_dir = silly_root / ".sillyspec" / "changes" / "2026-10-18-inferred-demo"
+        change_dir.mkdir()
+        (change_dir / "tasks.md").write_text("# tasks\n", encoding="utf-8")
+        (change_dir / "design.md").write_text("# demo\n", encoding="utf-8")
+        result = parser.parse_workspace(silly_root)
+        parsed = next(c for c in result.changes if c.change_key == "2026-10-18-inferred-demo")
+        assert parsed.change_type == "feature"
+        assert parsed.change_type_authoritative is False
+
+
 class TestInferAffectedComponentsFromManifest:
     """thin-affected-modules-from-patch-manifest：change-patch.json files 第三来源。
 

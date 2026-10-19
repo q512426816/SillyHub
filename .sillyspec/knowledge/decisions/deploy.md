@@ -39,3 +39,21 @@
 理由：①docker-compose 的 postgres 镜像 postgres:16-alpine → pgvector/pgvector:pg16（数据卷不丢，官方同源镜像+vector 扩展）；②扩展安装放 alembic 迁移内（CREATE EXTENSION IF NOT EXISTS vector + 方言守卫——pgcrypto/pg_trgm 同款）；③升级顺序：换镜像重启 PG → 跑迁移 → 重启 backend；④升级前生产库跑验证 SQL（SELECT name FROM pg_available_extensions WHERE name='vector'）确认扩展可用（用户可能手动装过——核实过代码无痕迹，但手工操作查不到）。dev compose 同步换。
 故障面：迁移先于镜像替换执行 → 方言守卫内检查 extension 可用性，缺失时报错中止（信息含修复指引），不留半态表。
 退役判据：无。
+
+## D-backend-025@v1 治理技术方案选型——子进程封装 + WS 推送 + 预览持久化（方案 A）
+状态：implemented
+变更：2026-10-16-backend-mem-polling
+原编号：D-001@v1
+锚点：backend/app/modules/knowledge/vector_search.py:137
+最近确认：439cdc46c
+理由：**方案 A**。四个机制组合：①嵌入计算子进程封装（闲置自退+OOM 保主进程）；②change-writes 改 WS 事件推送，30s 轮询降 120s 兜底；③会话标题预览持久化为列；④部署内存配额重分配。
+
+## D-deploy-001@v1 落选——方案 B（嵌入独立 Docker 容器 + 长轮询 + 索引优化）
+状态：rejected
+变更：2026-10-16-backend-mem-polling
+原编号：D-002@v1
+锚点：未记录
+最近确认：439cdc46c
+理由：落选。sidecar 嵌入容器方案。
+否决理由：①小内存机器上模型常驻 200-300M 总常驻反而恶化；②compose 拓扑/镜像/部署脚本全动；③长轮询占连接；④索引优化治标。
+复潮条件：服务器升配 ≥4G 且嵌入查询成为高频热路径时重评。

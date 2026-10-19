@@ -118,3 +118,13 @@
 | 2026-10-16 | 2026-10-15-session-turn-completion-semantics | 上一变更把绿点/完成通知锚定在会话终态 ended 上，但平台里一轮任务跑完后会话仍为 active… |
 | 2026-10-16 | 2026-10-16-session-run-status-realtime | 会话列表行首状态目前只靠 daemon 10 秒日志推导活性链（基线），用户触发会话后转圈/完成提示… |
 | 2026-10-16 | 2026-10-16-session-pill-dock-drag | 会话页右下角两个悬浮 pill（待决策/变更文件）合并为竖排可拖拽停靠组，点击展开替代 hover |
+| 2026-10-16 | 2026-10-16-change-files-sync-result | change 文件树「刷新」同步链路三层静默失败——后端 RPC 预算 3s 短于实测 6~13.5… |
+| 2026-10-16 | 2026-10-16-change-center-back-keeps-list-state | 变更中心列表切「已归档」tab或翻页后点行进详情,点详情页「变更列表」返回入口回到列表会重置为进行中… |
+| 2026-10-16 | 2026-10-16-change-title-condense-backfill | 变更中心标题提炼与存量回填 |
+| 2026-10-16 | 2026-10-16-change-center-delete-back-keeps-state | 变更详情页删除成功后 router.push 无参列表,丢 tab/页码(删归档区变更后回进行中第一… |
+- 2026-10-16-conflict-full-tree-compare | 原型视图 conflict-sync-states-view.tsx 与 prototype-build.mjs 重编译对账（原型产物 git diff 为空），改动面聚焦回归 44 用例绿
+| 2026-10-16 | 2026-10-17-audit-risk-followup | 24h 审计六连修收口：dsh/zcode 会话恢复白名单漏登记（daemon 重启静默丢记录）、r… |
+| 2026-10-17 | 2026-10-17-session-replay-pingpong-fix | 生产环境后端日志 HTTP_401_AUTH_TOKEN_EXPIRED 每秒约10条持续刷屏（单日… |
+| 2026-10-17 | 2026-10-17-session-envelope-rev-stale-guard | 2026-10-17-session-replay-pingpong-fix 评审 P3-3——跨标… |
+| 2026-10-18 | 2026-10-18-change-type-git-conventional | 变更类型改用git惯用前缀彩色标签 |
+| 2026-10-18 | 2026-10-18-change-list-type-filter | 变更列表加类型标签与类型筛选 |

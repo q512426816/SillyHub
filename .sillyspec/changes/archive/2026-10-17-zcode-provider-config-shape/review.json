@@ -1,0 +1,15 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-17-zcode-provider-config-shape",
+  "reviewer": "subagent",
+  "verdict": "PASS",
+  "reviewedAgainst": "40217abbd7f2a0d0cac4d6af1e0f784f68e21689",
+  "findings": [],
+  "dimensionNotes": {
+    "乱序": "ok",
+    "并发": "ok",
+    "切换": "ok",
+    "作用域": "ok"
+  },
+  "reviewedAt": "2026-10-17T04:49:51Z"
+}

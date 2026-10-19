@@ -30,7 +30,12 @@ from app.modules.storage.factory import get_storage_backend
 
 from .model import SessionAttachment
 from .schema import AttachmentKind, AttachmentRead
-from .service import SessionAttachmentService
+from .service import (
+    MAX_FILE_BYTES,
+    MAX_IMAGE_BYTES,
+    SessionAttachmentService,
+    SessionAttachmentTooLarge,
+)
 from .storage import SessionAttachmentStorage
 
 log = get_logger(__name__)
@@ -56,8 +61,21 @@ async def upload_attachment(
 
     成功即建草稿行（session_id NULL）；限制校验（大小/白名单/PIL magic）
     在 service 抛 413/415（AppError 惯例同 file 模块）。
+
+    2026-10-16-backend-mem-polling task-05 / D-004@v1：读内容**前**先查
+    ``UploadFile.size``（Starlette spool 时已知）超限直接 413——超限文件
+    不再整读进内存（上限值 import 自 service 单一源，不双写）。
     """
     service = SessionAttachmentService(session, storage)
+    size = getattr(file, "size", None)
+    if isinstance(size, int) and size >= 0:
+        limit = MAX_IMAGE_BYTES if kind == "image" else MAX_FILE_BYTES
+        if size > limit:
+            label = "图片超过单张上限" if kind == "image" else "文件超过单份上限"
+            raise SessionAttachmentTooLarge(
+                f"{label} {limit // (1024 * 1024)}MB。",
+                details={"bytes": size, "limit": limit},
+            )
     data = await file.read()
     return await service.upload(
         user_id=current_user.id,

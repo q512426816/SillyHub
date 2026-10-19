@@ -1,0 +1,207 @@
+diff --git a/frontend/src/app/(dashboard)/workspaces/[id]/changes/[cid]/__tests__/page-back-to-list.test.tsx b/frontend/src/app/(dashboard)/workspaces/[id]/changes/[cid]/__tests__/page-back-to-list.test.tsx
+index fbba916b4..184db8212 100644
+--- a/frontend/src/app/(dashboard)/workspaces/[id]/changes/[cid]/__tests__/page-back-to-list.test.tsx
++++ b/frontend/src/app/(dashboard)/workspaces/[id]/changes/[cid]/__tests__/page-back-to-list.test.tsx
+@@ -46,12 +46,14 @@ const mocks = vi.hoisted(() => ({
+   getChange: vi.fn(),
+   listWorkspaceAgentSessions: vi.fn(),
+   listQuicklogEntries: vi.fn(),
++  deleteChange: vi.fn(),
+ }));
+ 
+ vi.mock("@/lib/changes", () => ({
+   getChange: mocks.getChange,
+   getAgentStatus: vi.fn().mockRejectedValue(new Error("no-agent-in-back-tests")),
+   submitStageReview: vi.fn(),
++  deleteChange: mocks.deleteChange,
+   getChangeTimeline: vi.fn().mockRejectedValue(new Error("no-timeline-in-back-tests")),
+   getChangeAssets: vi.fn().mockRejectedValue(new Error("no-assets-in-back-tests")),
+   getChangeUsage: vi.fn().mockRejectedValue(new Error("no-usage-in-back-tests")),
+@@ -66,15 +68,25 @@ vi.mock("@/lib/quicklog", () => ({
+   listQuicklogEntries: mocks.listQuicklogEntries,
+ }));
+ 
+-// 删除入口权限固定无（真实 hook 走 session/fetchMe，本文件无登录态恒 false）；
+-// 部分 mock 保留 canDeleteChange/DeleteChangeConfirm 真实导出（页面渲染仍引用）
++// 删除 onSuccess 走 notify.success（antd App 上下文）——测试树无 <App> 包裹时
++// App.useApp() 的 message 为 undefined 会抛错使 mutation 误入 onError；本文件
++// 断言面是 back/push 跳转，toast 静音即可
++vi.mock("@/lib/errors", () => ({
++  useNotify: () => ({ success: vi.fn(), error: vi.fn(), warning: vi.fn() }),
++}));
++
++// 删除入口权限可切换 holder（真实 hook 走 session/fetchMe）：默认无权限（不渲染
++// 删除按钮），删除用例置平台管理员开启入口；真实 canDeleteChange 保持导出
++const accessMock = vi.hoisted(() => ({
++  value: { userId: null, isPlatformAdmin: false, workspaceRole: null },
++}));
+ vi.mock("@/components/delete-change-confirm", async (importOriginal) => {
+   const actual = await importOriginal<
+     typeof import("@/components/delete-change-confirm")
+   >();
+   return {
+     ...actual,
+-    useChangeDeleteAccess: () => ({ userId: null, isPlatformAdmin: false, workspaceRole: null }),
++    useChangeDeleteAccess: () => accessMock.value,
+   };
+ });
+ 
+@@ -146,3 +158,49 @@ describe("详情页返回列表入口（2026-10-16-change-center-back-keeps-list
+     expect(navMocks.back).not.toHaveBeenCalled();
+   });
+ });
++
++// ── 删除成功后的返回（2026-10-16-change-center-delete-back-keeps-state）────────
++// 删除后 router.push 无参列表会丢来路 tab/页码——改为与 BackToListLink 同款判定：
++// 可后退 back 回带 query 的列表 URL（列表从 URL 快照恢复），深链兜底 push 默认列表。
++describe("详情页删除成功后返回列表（2026-10-16-change-center-delete-back-keeps-state）", () => {
++  beforeEach(() => {
++    navMocks.searchParams = new URLSearchParams();
++    mocks.getChange.mockResolvedValue(makeChange());
++    mocks.listWorkspaceAgentSessions.mockResolvedValue([]);
++    mocks.listQuicklogEntries.mockResolvedValue({ items: [], total: 0 });
++    mocks.deleteChange.mockResolvedValue({});
++    accessMock.value = { userId: null, isPlatformAdmin: true, workspaceRole: null };
++  });
++  afterEach(() => {
++    vi.clearAllMocks();
++    cleanup();
++    accessMock.value = { userId: null, isPlatformAdmin: false, workspaceRole: null };
++    delete (window.history as unknown as { length?: number }).length;
++  });
++
++  /** 打开删除确认弹层并输入末段启用「确认删除」后点击（changeKeyTail 去日期前缀）。 */
++  async function confirmDelete() {
++    fireEvent.click(await screen.findByTestId("change-delete-entry"));
++    const input = await screen.findByTestId("delete-change-confirm-input");
++    fireEvent.change(input, { target: { value: "back-to-list" } });
++    fireEvent.click(screen.getByText("确认删除"));
++  }
++
++  it("历史可后退（length=2）：删除成功后 router.back() 回来路列表（不 push）", async () => {
++    stubHistoryLength(2);
++    renderPage();
++    await confirmDelete();
++    await waitFor(() => expect(navMocks.back).toHaveBeenCalledTimes(1));
++    expect(navMocks.push).not.toHaveBeenCalled();
++  });
++
++  it("无历史可退（length=1）：删除成功后兜底 push 默认列表", async () => {
++    stubHistoryLength(1);
++    renderPage();
++    await confirmDelete();
++    await waitFor(() =>
++      expect(navMocks.push).toHaveBeenCalledWith("/workspaces/ws-1/changes"),
++    );
++    expect(navMocks.back).not.toHaveBeenCalled();
++  });
++});
+diff --git a/frontend/src/app/(dashboard)/workspaces/[id]/changes/[cid]/page.tsx b/frontend/src/app/(dashboard)/workspaces/[id]/changes/[cid]/page.tsx
+index 5d2735a40..f31d4a268 100644
+--- a/frontend/src/app/(dashboard)/workspaces/[id]/changes/[cid]/page.tsx
++++ b/frontend/src/app/(dashboard)/workspaces/[id]/changes/[cid]/page.tsx
+@@ -714,7 +714,14 @@ function DetailDeleteAction({
+     onSuccess: async () => {
+       notify.success(`变更 ${changeKey} 已删除`);
+       await queryClient.invalidateQueries({ queryKey: ["changes", workspaceId] });
+-      router.push(`/workspaces/${workspaceId}/changes`);
++      // 2026-10-16-change-center-delete-back-keeps-state：删除后返回保来路列表状态——
++      // 可后退时 back 回带 query 的列表 URL（列表页从 URL 恢复 tab/页码，同
++      // BackToListLink 链路）；新标签深链（length<=1）兜底 push 默认列表。
++      if (typeof window !== "undefined" && window.history.length > 1) {
++        router.back();
++      } else {
++        router.push(`/workspaces/${workspaceId}/changes`);
++      }
+     },
+     onError: (err) => {
+       notify.error(err, "删除变更失败");
+diff --git a/frontend/src/app/(dashboard)/workspaces/[id]/changes/__tests__/page.test.tsx b/frontend/src/app/(dashboard)/workspaces/[id]/changes/__tests__/page.test.tsx
+index 797646aae..44d96bb77 100644
+--- a/frontend/src/app/(dashboard)/workspaces/[id]/changes/__tests__/page.test.tsx
++++ b/frontend/src/app/(dashboard)/workspaces/[id]/changes/__tests__/page.test.tsx
+@@ -1143,4 +1143,58 @@ describe("列表状态 URL 快照（2026-10-16-change-center-back-keeps-list-sta
+       }),
+     ).toBe("");
+   });
++
++  // ── 页码超界钳回（2026-10-16-change-center-delete-back-keeps-state）────────
++  // 删除使总数缩水后，URL 恢复的 page 可能超过最后一页：真实响应页空时钳回
++  // ceil(total/pageSize) 并重取；total=0（真空列表）不钳回。
++
++  it("页码超界钳回：?tab=archive&page=5 深链但最后一页为 4 → 钳回 page=4 并写回 URL", async () => {
++    mocks.listChanges.mockImplementation((_wid: string, params: any) => {
++      if (params?.pageSize === 1) {
++        return Promise.resolve({
++          items: [],
++          total: params?.location === "archive" ? 80 : 0,
++        });
++      }
++      // 超界页（>4）响应页空、total 仍 80；有效页返回数据
++      if ((params?.page ?? 1) > 4) {
++        return Promise.resolve({ items: [], total: 80 });
++      }
++      return Promise.resolve({ items: [makeChange()], total: 80 });
++    });
++    mocks.searchParams = new URLSearchParams("tab=archive&page=5");
++    try {
++      await renderAndWait();
++      // 钳回后重取第 4 页
++      await waitFor(() => expect(lastMainLoadParams()?.page).toBe(4));
++      // URL 写回跟随钳回（replaceState 快照）
++      await waitFor(() =>
++        expect(window.location.search).toBe("?tab=archive&page=4"),
++      );
++    } finally {
++      mocks.searchParams = new URLSearchParams();
++    }
++  });
++
++  it("真空列表不钳回：page=3 深链且 total=0 → page 保持 3，空态展示", async () => {
++    mocks.listChanges.mockImplementation((_wid: string, params: any) =>
++      Promise.resolve(
++        params?.pageSize === 1
++          ? { items: [], total: 0 }
++          : { items: [], total: 0 },
++      ),
++    );
++    mocks.searchParams = new URLSearchParams("tab=archive&page=3");
++    try {
++      await renderAndWait();
++      // 等主 load 完成（副标题渲染 workspace 名），钳回不触发
++      await waitFor(() =>
++        expect(lastMainLoadParams()?.page).toBe(3),
++      );
++      expect(window.location.search).toBe("?tab=archive&page=3");
++      expect(screen.getByText(/还没有归档的变更/)).toBeInTheDocument();
++    } finally {
++      mocks.searchParams = new URLSearchParams();
++    }
++  });
+ });
+diff --git a/frontend/src/app/(dashboard)/workspaces/[id]/changes/page.tsx b/frontend/src/app/(dashboard)/workspaces/[id]/changes/page.tsx
+index 6a3d1d861..483db7984 100644
+--- a/frontend/src/app/(dashboard)/workspaces/[id]/changes/page.tsx
++++ b/frontend/src/app/(dashboard)/workspaces/[id]/changes/page.tsx
+@@ -425,6 +425,21 @@ export default function ChangesPage({ params }: Props) {
+   const total = changesQuery.data?.total ?? 0;
+   const workspace = changesQuery.data?.workspace ?? null;
+ 
++  // 页码超界钳回（2026-10-16-change-center-delete-back-keeps-state）：删除/并发变更
++  // 使总数缩水后，URL 恢复的（或停留的）page 可能超过最后一页——真实响应页空时自动
++  // 钳回 ceil(total/pageSize) 并重取。isPlaceholderData 守卫：keepPreviousData 下
++  // placeholder 是上一页数据，不能用于判空。total=0（真空列表）与 page 未超界不动作
++  // （空状态展示维持现状）；quicklog tab 主查询禁用，不参与。
++  useEffect(() => {
++    if (tab === "quicklog") return;
++    if (!changesQuery.isSuccess || changesQuery.isPlaceholderData) return;
++    const totalNow = changesQuery.data?.total ?? 0;
++    const itemsNow = changesQuery.data?.items?.length ?? 0;
++    if (itemsNow > 0 || totalNow <= 0 || page <= 1) return;
++    const lastPage = Math.max(1, Math.ceil(totalNow / pageSize));
++    if (page > lastPage) setPage(lastPage);
++  }, [changesQuery.data, changesQuery.isSuccess, changesQuery.isPlaceholderData, tab, page, pageSize]);
++
+   // ── 删除入口（task-07 / design §6.3 / FR-05d）──────────────────────────
+   // 可见性启发式（owner 本人 / 平台管理员 / 工作区所有者）——仅控制按钮显隐，
+   // 后端 DELETE 组合权限为权威（判漏 403 兜底走 onError toast）。

@@ -1,0 +1,22 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-16-change-center-delete-back-keeps-state",
+  "reviewer": "subagent",
+  "verdict": "PASS",
+  "reviewedAgainst": "7da2c5633e9545629ed1e8967bbeba405e4a1055",
+  "findings": [
+    {
+      "severity": "P3",
+      "title": "design 风险③的「写回先落 ?page=5」机理描述与实际不符（结论不受影响）",
+      "evidence": "列表页从 URL 恢复状态且每次状态变化即 replaceState 写回（上一变更链路），用户进详情前 URL 已是 ?page=5，删除后 back 回来挂载时写回 effect 首跑因目标与当前地址相同跳过（page.tsx:371 同址跳过），不存在「写回先落 ?page=5」的额外动作；「URL 一次可见翻转（5→4）、窗口小于首查往返、终态正确」的结论与实际一致，纯文档机理描述瑕疵。",
+      "location": ".sillyspec/changes/2026-10-16-change-center-delete-back-keeps-state/design.md:63-65"
+    }
+  ],
+  "dimensionNotes": {
+    "乱序": "ok",
+    "并发": "ok",
+    "切换": "ok",
+    "作用域": "ok"
+  },
+  "reviewedAt": "2026-10-16T22:42:00+08:00"
+}

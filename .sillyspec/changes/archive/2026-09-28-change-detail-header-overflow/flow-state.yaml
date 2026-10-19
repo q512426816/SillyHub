@@ -21,3 +21,4 @@ gate_summary: >-
   ruff check . && uv run ruff format --check . && uv run mypy app && cd ../frontend && pnpm lint && cd
   ../sillyhub-daemon && pnpm typecheck（59.0s）｜门文件 4 个
 
+commit_type: chore

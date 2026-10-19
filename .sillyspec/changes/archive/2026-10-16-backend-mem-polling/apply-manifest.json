@@ -1,0 +1,140 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-16-backend-mem-polling",
+  "appliedAt": "2026-10-16T07:15:59.214Z",
+  "baseHash": "9ba22a6d4b77e8b493f3d81f525dccdb7e315984",
+  "files": [
+    {
+      "path": "backend/Dockerfile",
+      "sha256": "967467bdaef0a729712754932836f38193a02c8d0edabc7f10c0456969fb9f08"
+    },
+    {
+      "path": "backend/app/core/config.py",
+      "sha256": "43ad26916c154892051c1fc2f2f0ff35f80a3432611be7e0cde190c5ae59eba5"
+    },
+    {
+      "path": "backend/app/modules/agent/model.py",
+      "sha256": "31cbe5aa6dcdcacc02128015d9ede32fa7bcdf7e3f0cc70f4694e8ccd3e8257e"
+    },
+    {
+      "path": "backend/app/modules/change/service.py",
+      "sha256": "a6b93242e5bad9e14fda8e82459aa98c9a46923e4bba60a66838fcd494db185a"
+    },
+    {
+      "path": "backend/app/modules/change_writer/proxy.py",
+      "sha256": "87cb83c8f94bd012ffb829e064371470c6ece71f2b8e35618179d0883a8b69d3"
+    },
+    {
+      "path": "backend/app/modules/daemon/permission_service.py",
+      "sha256": "56ca25574791e552e0df686d72e41c2e1f87cee9c9eb1844cc8b402a693b2d1b"
+    },
+    {
+      "path": "backend/app/modules/daemon/protocol.py",
+      "sha256": "d5577ecad37409709babaf82e090acc59e9843f30610b698e78b7658f82d8723"
+    },
+    {
+      "path": "backend/app/modules/daemon/router/gateway_misc.py",
+      "sha256": "a1ad9688fda29309cd75302dfa8655cd39b6ef091ddf2e0b0d94d01c4c58f446"
+    },
+    {
+      "path": "backend/app/modules/daemon/router/session_crud.py",
+      "sha256": "13eb70827504c5f8d653066b7add8e708dd1c38aed3a973ce5dbc076c4dbe19e"
+    },
+    {
+      "path": "backend/app/modules/daemon/tests/test_permission_http_uplink.py",
+      "sha256": "d5c33e48c7de04ec08ccbca8423e489e2d3aea1286d05c6f6f77e3e074e5bcf0"
+    },
+    {
+      "path": "backend/app/modules/daemon/tests/test_session_router.py",
+      "sha256": "a1748072e5df299462a1902644a5a7c08f0f02b48d5f3fcca644b65c25b809d8"
+    },
+    {
+      "path": "backend/app/modules/daemon/tests/test_ws_hub.py",
+      "sha256": "971369cc285da4b3eac92ef8be6ae3fc94877af483619b079d15dc255b087f4d"
+    },
+    {
+      "path": "backend/app/modules/daemon/tests/test_ws_rpc.py",
+      "sha256": "a73f0a132cc4656474659961cd1f30234278149baf21cec721775aff65ce89a9"
+    },
+    {
+      "path": "backend/app/modules/daemon/ws_hub.py",
+      "sha256": "8a4ff17b8d1fa3bf7f39bb19a82ccbc8b6afb04f9df2646ac0172b0220d9ff34"
+    },
+    {
+      "path": "backend/app/modules/knowledge/embedding_worker.py",
+      "sha256": "ea3fd4bd33131a6807d7d875749f52335864c026a96e17579d4b1d704256a60c"
+    },
+    {
+      "path": "backend/app/modules/knowledge/tests/test_embedding_subprocess.py",
+      "sha256": "de4aa54bf4ff68c395a33d508a2b04ba020a7e863a3cb9f86cccecbc694c4083"
+    },
+    {
+      "path": "backend/app/modules/knowledge/vector_search.py",
+      "sha256": "56cb25c5195e74a9df19018a553b59510ea1172307b00badd7819806096dace2"
+    },
+    {
+      "path": "backend/app/modules/session_attachment/router.py",
+      "sha256": "5896a4a224dd9ae9ddf781468320f67607806865be4476f69dcdaf8946c007c3"
+    },
+    {
+      "path": "backend/app/modules/session_attachment/tests/test_upload_precheck.py",
+      "sha256": "1b76b0e7f2d530351898cb233774542fceb872061a37f00b80abb5dc878c99b2"
+    },
+    {
+      "path": "backend/app/modules/spec_workspace/router.py",
+      "sha256": "5c9c35a9e249840ed63a9259c5bd9d51a8a530bdc77c99fad7e556044ace5772"
+    },
+    {
+      "path": "backend/app/modules/spec_workspace/service.py",
+      "sha256": "7f9c0ac1b2a47a446475ae3f90e3a86096fe8e2a91c12c97ff7987eae06de079"
+    },
+    {
+      "path": "backend/app/modules/spec_workspace/tests/test_bundle_sync.py",
+      "sha256": "0869421baae4ae02be59736616777c85773f6986ca4a179691db8ff846e5fe05"
+    },
+    {
+      "path": "backend/docker-entrypoint.sh",
+      "sha256": "10febf2fb1fabebc4d908863c0023787ace549e747fe6dd497dcc56a4171fbc8"
+    },
+    {
+      "path": "backend/migrations/versions/20261016100000_agent_session_title_fallback.py",
+      "sha256": "aaedd461209bcc3c4f03aee6b2061de43c3bfa6a4a0df7fe7f0566ea6665a65d"
+    },
+    {
+      "path": "backend/tests/test_align_platform_change_events_migration.py",
+      "sha256": "13b07a200847b38a249e014aa38482176617dfb9e261035dbdd03de9f4de6695"
+    },
+    {
+      "path": "deploy/docker-compose.yml",
+      "sha256": "228753033b756f828115f2b6575c3803cd65271363347a1bf5eda6cb3868d066"
+    },
+    {
+      "path": "docs/releases/2026-10-16-008-f62065e2f.md",
+      "sha256": "834a0e8a88665318cfa107f584e0974651602e0cf2c398f1ebe0413f5696ff47"
+    },
+    {
+      "path": "sillyhub-daemon/src/config.ts",
+      "sha256": "c65d1c8e86474336298d94386529c9c2daa5b2f824a3cc69e81dc39b3c876717"
+    },
+    {
+      "path": "sillyhub-daemon/src/daemon.ts",
+      "sha256": "2028351d9396693fb8ee3d75821d7dc7f738714a99bdb62eca90b9a778b9d224"
+    },
+    {
+      "path": "sillyhub-daemon/src/protocol.ts",
+      "sha256": "0646199c87d3fdea9f08f7874cecab80315dc4c6e6a73f95b9cd1db8205f8106"
+    },
+    {
+      "path": "sillyhub-daemon/tests/config.test.ts",
+      "sha256": "42ea42d66541cd3403bc0f14bf4f7a0ad9066ff7da0a5f4d9dbe3bcae60d8e13"
+    },
+    {
+      "path": "sillyhub-daemon/tests/daemon-change-write-push.test.ts",
+      "sha256": "4f4f3a76839831fcc590e37cd00faaf760ef6ea0d5ad7617e0a7395f1f79a267"
+    },
+    {
+      "path": "sillyhub-daemon/tests/protocol-session-contract.test.ts",
+      "sha256": "e59ddcad74148715d98ba38dfbf22ee7a7add4407d5041830a056ae6b15c09cd"
+    }
+  ]
+}

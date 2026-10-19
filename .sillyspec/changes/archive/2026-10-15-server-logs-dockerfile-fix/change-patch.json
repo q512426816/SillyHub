@@ -1,0 +1,148 @@
+{
+  "change": "2026-10-15-server-logs-dockerfile-fix",
+  "baseline": "2b1b5879611b957b37cc9f982c79053c5ea8e126",
+  "head": "7eaa1dd036eed2ad076a1615cb5e9a2709a7bb7b",
+  "files": [
+    ".sillyspec/docs/SillyHub/modules/daemon.changelog.md",
+    ".sillyspec/docs/backend/modules/daemon.changelog.md",
+    ".sillyspec/docs/multi-agent-platform/modules/backend.changelog.md",
+    ".sillyspec/docs/multi-agent-platform/modules/sillyhub-daemon.changelog.md",
+    ".zcode/skills/deploy-to-server/SKILL.md",
+    "backend/Dockerfile",
+    "backend/app/core/logging.py",
+    "backend/tests/test_server_log_filer.py",
+    "docs/releases/2026-10-16-007-2b1b58796.md"
+  ],
+  "totals": {
+    "files": 9,
+    "additions": 144,
+    "deletions": 41
+  },
+  "savedAt": "2026-10-16T03:46:34.230Z",
+  "note": "flow done 时点冻结（本变更可归属交付面：baseline..HEAD 提交面过滤 .sillyspec/ 只留 .sillyspec/docs/ 交付文档 + 独占树未提交交付；治理工件目录不入冻结——2026-10-12-close-trace-freeze-integrity FR-01）",
+  "modules": [
+    {
+      "id": "core",
+      "files": 1,
+      "doc": "docs/backend/modules/core.md",
+      "docTouched": false,
+      "docMissing": false
+    },
+    {
+      "id": "build",
+      "files": 1,
+      "doc": "docs/backend/modules/build.md",
+      "docTouched": false,
+      "docMissing": false
+    },
+    {
+      "id": "backend",
+      "files": 3,
+      "doc": "docs/multi-agent-platform/modules/backend.md",
+      "docTouched": false,
+      "docMissing": false
+    },
+    {
+      "id": "docs",
+      "files": 1,
+      "doc": "docs/multi-agent-platform/modules/docs.md",
+      "docTouched": false,
+      "docMissing": false
+    },
+    {
+      "id": "core",
+      "files": 1,
+      "doc": "docs/SillyHub/modules/core.md",
+      "docTouched": false,
+      "docMissing": false
+    }
+  ],
+  "uncoveredDirs": [
+    {
+      "dir": ".zcode/skills/deploy-to-server",
+      "files": 1
+    }
+  ],
+  "moduleMaps": [
+    "docs/backend/modules/_module-map.yaml",
+    "docs/frontend/modules/_module-map.yaml",
+    "docs/multi-agent-platform/modules/_module-map.yaml",
+    "docs/SillyHub/modules/_module-map.yaml",
+    "docs/sillyhub-daemon/modules/_module-map.yaml"
+  ],
+  "acceptedUnmappedDirs": 1,
+  "scopeAudit": {
+    "mode": "full-flow",
+    "ok": true,
+    "degradedReason": null,
+    "baseAnchor": "2b1b5879611b957b37cc9f982c79053c5ea8e126",
+    "totals": {
+      "files": 9,
+      "additions": 144,
+      "deletions": 41
+    },
+    "rows": [
+      {
+        "path": ".sillyspec/docs/SillyHub/modules/daemon.changelog.md",
+        "additions": 1,
+        "deletions": 0,
+        "kind": "modified"
+      },
+      {
+        "path": ".sillyspec/docs/backend/modules/daemon.changelog.md",
+        "additions": 1,
+        "deletions": 0,
+        "kind": "modified"
+      },
+      {
+        "path": ".sillyspec/docs/multi-agent-platform/modules/backend.changelog.md",
+        "additions": 1,
+        "deletions": 0,
+        "kind": "modified"
+      },
+      {
+        "path": ".sillyspec/docs/multi-agent-platform/modules/sillyhub-daemon.changelog.md",
+        "additions": 1,
+        "deletions": 0,
+        "kind": "modified"
+      },
+      {
+        "path": ".zcode/skills/deploy-to-server/SKILL.md",
+        "additions": 85,
+        "deletions": 38,
+        "kind": "modified"
+      },
+      {
+        "path": "backend/Dockerfile",
+        "additions": 5,
+        "deletions": 2,
+        "kind": "modified"
+      },
+      {
+        "path": "backend/app/core/logging.py",
+        "additions": 9,
+        "deletions": 1,
+        "kind": "modified"
+      },
+      {
+        "path": "backend/tests/test_server_log_filer.py",
+        "additions": 19,
+        "deletions": 0,
+        "kind": "modified"
+      },
+      {
+        "path": "docs/releases/2026-10-16-007-2b1b58796.md",
+        "additions": 22,
+        "deletions": 0,
+        "kind": "new"
+      }
+    ],
+    "excluded": {
+      "foreignDeclared": []
+    },
+    "note": "flow done 时点冻结（本文件落盘时采集）",
+    "closedBy": "flow done"
+  },
+  "patchSha256": "fe4709c8bb636beb19a8cbe7632e7ce84350e3124610555fff9d63147dca2ed5",
+  "patchStatus": "ok"
+}

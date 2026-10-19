@@ -19,6 +19,7 @@ import Link from "next/link";
 import { useQuery } from "@tanstack/react-query";
 
 import { MetaPanel, MetaPanelSection } from "@/components/primer";
+import { CommitTypeChip } from "@/components/changes/commit-type-chip";
 import {
   cacheHitRate,
   formatCompactTime,
@@ -36,6 +37,9 @@ interface Row {
 }
 
 const DASH = "—";
+
+// 2026-10-18-change-list-type-filter：类型标签抽公共件（列表行/详情侧栏同源），
+// 本文件改从公共组件导入（样式与映射随组件走，两处渲染口径恒一致）。
 
 /** 用量七项压缩行（与卡片同源口径，仅改排版密度）。 */
 function usageRows(usage: NonNullable<ReturnType<typeof useChangeUsage>["data"]>): Row[] {
@@ -142,7 +146,15 @@ export function ChangeOverviewSide({
       <MetaPanel className="w-full">
       <MetaPanelSection title="基本信息">
         <RowView k="变更 key" v={change.change_key} />
-        <RowView k="类型" v={change.change_type ?? DASH} />
+        {/* 类型行改 git conventional 彩色标签（2026-10-18-change-type-git-conventional） */}
+        <div className="flex items-center justify-between gap-3 text-xs">
+          <span className="text-muted-foreground">类型</span>
+          {change.change_type ? (
+            <CommitTypeChip type={change.change_type} />
+          ) : (
+            <span className="text-muted-foreground">{DASH}</span>
+          )}
+        </div>
         <RowView k="创建" v={change.created_at ? formatCompactTime(change.created_at) : DASH} />
         <RowView k="负责人" v={change.owner_name ?? DASH} />
       </MetaPanelSection>

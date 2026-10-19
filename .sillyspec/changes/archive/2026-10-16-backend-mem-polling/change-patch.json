@@ -1,0 +1,348 @@
+{
+  "change": "2026-10-16-backend-mem-polling",
+  "baseline": "9ba22a6d4b77e8b493f3d81f525dccdb7e315984",
+  "head": "9d40341aae3baa9d25dcf9a0cc75c314b48d8708",
+  "files": [
+    ".zcode/skills/deploy-to-server/SKILL.md",
+    "backend/Dockerfile",
+    "backend/app/core/config.py",
+    "backend/app/modules/agent/model.py",
+    "backend/app/modules/change/service.py",
+    "backend/app/modules/change_writer/proxy.py",
+    "backend/app/modules/daemon/permission_service.py",
+    "backend/app/modules/daemon/protocol.py",
+    "backend/app/modules/daemon/router/gateway_misc.py",
+    "backend/app/modules/daemon/router/session_crud.py",
+    "backend/app/modules/daemon/tests/test_permission_http_uplink.py",
+    "backend/app/modules/daemon/tests/test_session_router.py",
+    "backend/app/modules/daemon/tests/test_ws_hub.py",
+    "backend/app/modules/daemon/tests/test_ws_rpc.py",
+    "backend/app/modules/daemon/ws_hub.py",
+    "backend/app/modules/knowledge/embedding_worker.py",
+    "backend/app/modules/knowledge/tests/test_embedding_subprocess.py",
+    "backend/app/modules/knowledge/vector_search.py",
+    "backend/app/modules/session_attachment/router.py",
+    "backend/app/modules/session_attachment/tests/test_upload_precheck.py",
+    "backend/app/modules/spec_workspace/router.py",
+    "backend/app/modules/spec_workspace/service.py",
+    "backend/app/modules/spec_workspace/tests/test_bundle_sync.py",
+    "backend/docker-entrypoint.sh",
+    "backend/migrations/versions/20261016100000_agent_session_title_fallback.py",
+    "backend/tests/test_align_platform_change_events_migration.py",
+    "deploy/docker-compose.yml",
+    "docs/releases/2026-10-16-008-f62065e2f.md",
+    "sillyhub-daemon/src/config.ts",
+    "sillyhub-daemon/src/daemon.ts",
+    "sillyhub-daemon/src/protocol.ts",
+    "sillyhub-daemon/tests/config.test.ts",
+    "sillyhub-daemon/tests/daemon-change-write-push.test.ts",
+    "sillyhub-daemon/tests/protocol-session-contract.test.ts"
+  ],
+  "totals": {
+    "files": 34,
+    "additions": 1830,
+    "deletions": 76
+  },
+  "savedAt": "2026-10-16T05:15:37.481Z",
+  "note": "execute --done 时点冻结（沉淀资产面：主仓实改行投影——thin flow done 对等；治理工件目录与其后 verify/archive 演进不在内）",
+  "scopeAudit": {
+    "mode": "full-flow",
+    "ok": true,
+    "degradedReason": null,
+    "baseAnchor": "9ba22a6d4b77e8b493f3d81f525dccdb7e315984",
+    "totals": {
+      "files": 35,
+      "additions": 1830,
+      "deletions": 76
+    },
+    "rows": [
+      {
+        "path": ".zcode/skills/deploy-to-server/SKILL.md",
+        "additions": 1,
+        "deletions": 0,
+        "kind": "modified",
+        "planned": "修改",
+        "verdict": "planned"
+      },
+      {
+        "path": "backend/Dockerfile",
+        "additions": 3,
+        "deletions": 0,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": "backend/app/core/config.py",
+        "additions": 18,
+        "deletions": 0,
+        "kind": "modified",
+        "planned": "修改",
+        "verdict": "planned"
+      },
+      {
+        "path": "backend/app/modules/agent/model.py",
+        "additions": 9,
+        "deletions": 0,
+        "kind": "modified",
+        "planned": "修改",
+        "verdict": "planned"
+      },
+      {
+        "path": "backend/app/modules/change/service.py",
+        "additions": 7,
+        "deletions": 0,
+        "kind": "modified",
+        "planned": "修改",
+        "verdict": "planned"
+      },
+      {
+        "path": "backend/app/modules/change_writer/proxy.py",
+        "additions": 6,
+        "deletions": 0,
+        "kind": "modified",
+        "planned": "修改",
+        "verdict": "planned"
+      },
+      {
+        "path": "backend/app/modules/daemon/permission_service.py",
+        "additions": 40,
+        "deletions": 3,
+        "kind": "modified",
+        "planned": "修改",
+        "verdict": "planned"
+      },
+      {
+        "path": "backend/app/modules/daemon/protocol.py",
+        "additions": 4,
+        "deletions": 0,
+        "kind": "modified",
+        "planned": "修改",
+        "verdict": "planned"
+      },
+      {
+        "path": "backend/app/modules/daemon/router/gateway_misc.py",
+        "additions": 28,
+        "deletions": 2,
+        "kind": "modified",
+        "planned": "修改",
+        "verdict": "planned"
+      },
+      {
+        "path": "backend/app/modules/daemon/router/session_crud.py",
+        "additions": 35,
+        "deletions": 23,
+        "kind": "modified",
+        "planned": "修改",
+        "verdict": "planned"
+      },
+      {
+        "path": "backend/app/modules/daemon/tests/test_permission_http_uplink.py",
+        "additions": 107,
+        "deletions": 0,
+        "kind": "modified",
+        "planned": "修改",
+        "verdict": "planned"
+      },
+      {
+        "path": "backend/app/modules/daemon/tests/test_session_router.py",
+        "additions": 200,
+        "deletions": 0,
+        "kind": "modified",
+        "planned": "修改",
+        "verdict": "planned"
+      },
+      {
+        "path": "backend/app/modules/daemon/tests/test_ws_hub.py",
+        "additions": 164,
+        "deletions": 0,
+        "kind": "modified",
+        "planned": "修改",
+        "verdict": "planned"
+      },
+      {
+        "path": "backend/app/modules/daemon/tests/test_ws_rpc.py",
+        "additions": 3,
+        "deletions": 2,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": "backend/app/modules/daemon/ws_hub.py",
+        "additions": 63,
+        "deletions": 2,
+        "kind": "modified",
+        "planned": "修改",
+        "verdict": "planned"
+      },
+      {
+        "path": "backend/app/modules/knowledge/embedding_worker.py",
+        "additions": 121,
+        "deletions": 0,
+        "kind": "new",
+        "planned": "新增",
+        "verdict": "planned"
+      },
+      {
+        "path": "backend/app/modules/knowledge/tests/test_embedding_subprocess.py",
+        "additions": 216,
+        "deletions": 0,
+        "kind": "new",
+        "planned": "新增",
+        "verdict": "planned"
+      },
+      {
+        "path": "backend/app/modules/knowledge/vector_search.py",
+        "additions": 216,
+        "deletions": 28,
+        "kind": "modified",
+        "planned": "修改",
+        "verdict": "planned"
+      },
+      {
+        "path": "backend/app/modules/session_attachment/router.py",
+        "additions": 19,
+        "deletions": 1,
+        "kind": "modified",
+        "planned": "修改",
+        "verdict": "planned"
+      },
+      {
+        "path": "backend/app/modules/session_attachment/tests/test_upload_precheck.py",
+        "additions": 109,
+        "deletions": 0,
+        "kind": "new",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": "backend/app/modules/spec_workspace/router.py",
+        "additions": 4,
+        "deletions": 0,
+        "kind": "modified",
+        "planned": "修改",
+        "verdict": "planned"
+      },
+      {
+        "path": "backend/app/modules/spec_workspace/service.py",
+        "additions": 28,
+        "deletions": 1,
+        "kind": "modified",
+        "planned": "修改",
+        "verdict": "planned"
+      },
+      {
+        "path": "backend/app/modules/spec_workspace/tests/test_bundle_sync.py",
+        "additions": 58,
+        "deletions": 0,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": "backend/docker-entrypoint.sh",
+        "additions": 7,
+        "deletions": 0,
+        "kind": "modified",
+        "planned": "修改",
+        "verdict": "planned"
+      },
+      {
+        "path": "backend/migrations/versions/20261016100000_agent_session_title_fallback.py",
+        "additions": 64,
+        "deletions": 0,
+        "kind": "new",
+        "planned": "新增",
+        "verdict": "planned"
+      },
+      {
+        "path": "backend/tests/test_align_platform_change_events_migration.py",
+        "additions": 2,
+        "deletions": 1,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": "deploy/docker-compose.yml",
+        "additions": 7,
+        "deletions": 3,
+        "kind": "modified",
+        "planned": "修改",
+        "verdict": "planned"
+      },
+      {
+        "path": "docs/releases/2026-10-16-008-f62065e2f.md",
+        "additions": 50,
+        "deletions": 0,
+        "kind": "new",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": "sillyhub-daemon/src/config.ts",
+        "additions": 3,
+        "deletions": 0,
+        "kind": "modified",
+        "planned": "修改",
+        "verdict": "planned"
+      },
+      {
+        "path": "sillyhub-daemon/src/daemon.ts",
+        "additions": 58,
+        "deletions": 7,
+        "kind": "modified",
+        "planned": "修改",
+        "verdict": "planned"
+      },
+      {
+        "path": "sillyhub-daemon/src/protocol.ts",
+        "additions": 17,
+        "deletions": 0,
+        "kind": "modified",
+        "planned": "修改",
+        "verdict": "planned"
+      },
+      {
+        "path": "sillyhub-daemon/tests/config.test.ts",
+        "additions": 3,
+        "deletions": 0,
+        "kind": "modified",
+        "planned": "修改",
+        "verdict": "planned"
+      },
+      {
+        "path": "sillyhub-daemon/tests/daemon-change-write-push.test.ts",
+        "additions": 155,
+        "deletions": 0,
+        "kind": "new",
+        "planned": "新增",
+        "verdict": "planned"
+      },
+      {
+        "path": "sillyhub-daemon/tests/protocol-session-contract.test.ts",
+        "additions": 5,
+        "deletions": 3,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": "sillyhub-daemon/tests/protocol.contract.test.ts",
+        "planned": "修改",
+        "additions": 0,
+        "deletions": 0,
+        "kind": "modified",
+        "verdict": "untouched"
+      }
+    ],
+    "excluded": {
+      "foreignDeclared": []
+    },
+    "note": "execute --done 时点冻结（本文件落盘时采集）",
+    "closedBy": "execute --done"
+  },
+  "patchSha256": "f60f7dbac964abacb86d1930e44b73ed2050124080b7804c98062cd6216ff386",
+  "patchStatus": "ok"
+}

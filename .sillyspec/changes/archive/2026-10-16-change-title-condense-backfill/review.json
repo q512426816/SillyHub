@@ -1,0 +1,70 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-16-change-title-condense-backfill",
+  "reviewer": "subagent",
+  "verdict": "PASS",
+  "reviewedAgainst": "26271e914c9bd670faf2da32ab0851025c5e6598",
+  "findings": [
+    {
+      "severity": "P2",
+      "title": "FR-03 绑定测试 test_title_backfill.py 不在本变更两个提交面内——先行落入他变更收口提交，main 瞬时红态",
+      "evidence": "该测试文件于 3963621a8（21:46:16，change-center-back-keeps-list-state 收口 docs 提交）先行入库，而实现 title_backfill.py 于 ed3fc43bf（22:00:18）才提交：21:46~22:00 之间 main 处于「测试 import 尚不存在的 app.modules.change.title_backfill」的红态；本变更 diff（81fde1b5b..26271e914）因此不含 FR-03 测试。缓解：carrier 提交信息显式声明「文件归属仍属 title-condense-backfill 变更、代为解除 pre-commit ruff-format 门」；HEAD 处 TestTitleBackfillService 9 用例齐全且实测全绿，FR↔测试绑定在 reviewedAgainst 上成立。属提交边界流程瑕疵，非交付缺陷。",
+      "location": "3963621a8:backend/app/modules/change/tests/test_title_backfill.py"
+    },
+    {
+      "severity": "P3",
+      "title": "FR-01 硬截场景文案与正文契约自相矛盾（30+省略号=31 vs 总长恰 30）",
+      "evidence": "requirements.md:32 场景写「返回前 30 字加 …」（隐含 31 字），与同 FR 正文「硬截 max_len-1 字并追加省略号（产物总长恰 max_len）」矛盾；实现 title_norm.py:184 与测试 test_hard_cut_appends_ellipsis（len==30）按正文契约，行为正确，仅需求文档措辞瑕疵。",
+      "location": ".sillyspec/changes/2026-10-16-change-title-condense-backfill/requirements.md:32"
+    },
+    {
+      "severity": "P3",
+      "title": "design 文件变更清单称 TestCondenseTitle 12 用例，实际 13 用例",
+      "evidence": "test_title_normalization.py 中 TestCondenseTitle 实际 13 个测试方法（strong_preferred_over_earlier_weak 等全数存在），文档计数误差不影响行为覆盖——FR-01 全部形态（强/弱边界、兜底带、硬截、标签剥除、空输入、自定义带宽）均有断言。",
+      "location": ".sillyspec/changes/2026-10-16-change-title-condense-backfill/design.md:36"
+    },
+    {
+      "severity": "P3",
+      "title": "design 乱序披露「过渡期最坏情形=个别行回退为 key 名」机理未锚定、易误读",
+      "evidence": "已回填行 title 为语义短句（非兜底、≤30）→ 不再命中 is_fallback 收养守卫，老版 CLI 兜底回推**不会**覆盖已回填成果；真实暴露面仅为「仍处兜底形态的行」（无 description 跳过行）继续被兜底收养，这不构成已回填行的回退。披露方向正确、缓解（重跑幂等，测试 test_idempotent_rerun_selects_zero）真实，但表述缺机理支撑。",
+      "location": ".sillyspec/changes/2026-10-16-change-title-condense-backfill/design.md:65"
+    },
+    {
+      "severity": "P3",
+      "title": "前端越带校验测试只覆盖 <10 字，未覆盖 >30 的 UI 禁用路径",
+      "evidence": "page-rename-title.test.tsx 仅「太短」用例断言保存禁用；>30 走同一 inBand 布尔表达式（page.tsx DetailRenameAction trimmed.length 双侧判断）且后端 test_too_long_422 已测，缺口小。",
+      "location": "frontend/src/app/(dashboard)/workspaces/[id]/changes/[cid]/__tests__/page-rename-title.test.tsx:124"
+    },
+    {
+      "severity": "P3",
+      "title": "condense_title 对以标点 run（如长破折号串）开头的超长文本在首个边界即截断并剥空，返回空串",
+      "evidence": "_scan 命中首个强边界即 break（title_norm.py:178），输入「——…——+正文」类文本会在首个 — 处截断、尾随 run 全剥为空串；安全降级（收养口放弃、回填计入 skipped_empty_or_same，不产脏数据）但该 description 永远回填不上。极端输入面，实际动机散文样本未见此形态。",
+      "location": "backend/app/modules/change/title_norm.py:178"
+    },
+    {
+      "severity": "P3",
+      "title": "披露边界裁决①②：人工改名可被 CLI --title/H1 文档推送覆盖【可接受】；回填跳过无 description 行不读盘【可接受】",
+      "evidence": "① design 明示 CLI --title 自定义 H1 推送仍可覆盖人工改名——两类人工命名同为权威语义，TestAdoptedTitleClobberGuard 锚定该覆盖为既有契约（改名能力不回归），且 rename 事件+时间线留痕可追溯、可随时再改回，采纳权在人。② 无 description 跳过（不读盘 proposal）——纯 DB 面与 reparse 职责划分成立，跳过有计数（skipped_no_description），CLI 侧修复后重跑路径闭合。",
+      "location": ".sillyspec/changes/2026-10-16-change-title-condense-backfill/design.md:17"
+    },
+    {
+      "severity": "P3",
+      "title": "披露边界裁决③④：老版 CLI 兜底过渡期可再覆盖【可接受，表述见 P3 机理条】；dry-run 靠事务回滚【可接受】",
+      "evidence": "③ 兜底过渡期风险已披露并以幂等重跑缓解，实际不威胁已回填成果（见 P3 机理条）。④ dry-run 零触碰依赖 _DryRunRollback 单事务回滚（backfill_change_titles.py 照 backfill_run_change_context.py 先例控制流，begin() 块异常即回滚，单连接单事务下回滚失败即连接异常），先例已验证，可接受。",
+      "location": "backend/scripts/backfill_change_titles.py:78"
+    },
+    {
+      "severity": "P3",
+      "title": "披露边界裁决⑤：condense_title 平台/CLI 双实现各留一份、靠同组实证样本锚定防漂移【可接受】",
+      "evidence": "双实现漂移风险真实存在；缓解=同组坏样本锚定测试 + docs/sillyspec/change-title-not-readable.md 已将「同规则移植 CLI」列入工具侧改进清单（第 2 条），闭环有记录。",
+      "location": "docs/sillyspec/change-title-not-readable.md:15"
+    }
+  ],
+  "dimensionNotes": {
+    "乱序": "ok — design 披露与代码事实吻合：is_fallback_display_title 及收养守卫条件在 diff 中未改动（title_norm.py 仅新增函数，platform_sync/service.py:726 守卫条件原样）；「迟到 documents 推送不回翻语义 title」有既有 TestAdoptedTitleClobberGuard 锚定；唯一保留意见是披露文字机理含糊（记 P3）",
+    "并发": "ok — rename_title 单行 UPDATE + ChangeEventORM 在 begin_nested savepoint 内同事务 commit（service.py rename_title，测试断言事件落库）；回填服务 flush 不 commit、事务边界归调用方，脚本单事务 apply/回滚；title 为展示元信息，最后写者胜披露成立",
+    "切换": "ok — dry-run 经 _DryRunRollback 单事务回滚零触碰；apply 中断整体回滚、重跑幂等（test_idempotent_rerun_selects_zero）；rename 失败路径 403/404/409/422 全部在字段赋值前 raise，零写库（测试逐条断言 title 不变）",
+    "作用域": "ok — 回填 SQL location IN ('active','archive') 显式排除 deleted（test_deleted_location_excluded）且按 workspace_id 过滤（test_workspace_isolation）；rename 端点 workspace+change 联合 get 404（service.py:332 get 双键查询）无越权串台；rename 端点先 get 后判权限与 delete_change 先例逐字同构、403/404 语义与 FR-05 规格一致"
+  },
+  "reviewedAt": "2026-10-16T22:14:54+08:00"
+}

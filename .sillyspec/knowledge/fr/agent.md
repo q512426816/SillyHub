@@ -268,3 +268,54 @@ created_at: 2026-10-14T02:51:35.432Z
   confirmed_at: null
   source_change: 2026-10-15-workspace-session-agent-only
   status: active
+
+## FR-agent-012 backend/app/modules/agent/tests/test_agent_session_model.py 期望字段集补 title_fallback（含来源注释），字段数断言 34→35
+变更：2026-10-16-agent-session-field-pin-sync
+状态：active
+摘要：主路径
+场景正文：
+- 场景：主路径 — Given AgentSession 模型（含 title_fallback 列，共 35 字段）；When 运行 `test_agent_session_has_all_35_fields`；Then 断言通过，missing/extra 均为空集
+全文：.sillyspec/changes/archive/2026-10-16-agent-session-field-pin-sync/requirements.md#FR-01
+最近确认：cd5c6760fd82584b7b25b8e8d89947f6360a55b6
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-16-agent-session-field-pin-sync:flow:测试绑定FR-01
+  tests: backend/app/modules/agent/tests/test_agent_session_model.py「test_agent_session_has_all_35_fields」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-16-agent-session-field-pin-sync
+  status: active
+
+## FR-agent-013 该测试单跑通过；删除 .sillyspec/local.yaml 中 '^E\s+AssertionError: AgentSession field mismatch' 豁免行后质量扫描不再依赖豁免
+变更：2026-10-16-agent-session-field-pin-sync
+状态：active
+摘要：主路径
+场景正文：
+- 场景：主路径 — Given local.yaml 已删除 `^E\s+AssertionError: AgentSession field mismatch` 豁免行；When 运行 `uv run pytest app/modules/agent/tests/test_agent_session_model.py -q`；Then 12 passed、0 failed
+全文：.sillyspec/changes/archive/2026-10-16-agent-session-field-pin-sync/requirements.md#FR-02
+最近确认：cd5c6760fd82584b7b25b8e8d89947f6360a55b6
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-16-agent-session-field-pin-sync:flow:测试绑定FR-02
+  tests: backend/app/modules/agent/tests/test_agent_session_model.py「test_agent_session_has_all_35_fields」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-16-agent-session-field-pin-sync
+  status: active
+
+## FR-agent-014 不改任何模型/业务代码，仅测试与配置
+变更：2026-10-16-agent-session-field-pin-sync
+状态：active
+摘要：主路径
+场景正文：
+- 场景：主路径 — Given 本变更交付完成；When 核对 git diff；Then 变更仅含 `backend/app/modules/agent/tests/test_agent_session_model.py` 一个文件（local.ya
+全文：.sillyspec/changes/archive/2026-10-16-agent-session-field-pin-sync/requirements.md#FR-03
+最近确认：cd5c6760fd82584b7b25b8e8d89947f6360a55b6

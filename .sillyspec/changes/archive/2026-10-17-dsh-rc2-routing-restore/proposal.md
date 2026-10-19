@@ -1,0 +1,34 @@
+---
+author: flow-machine-draft
+created_at: 2026-10-17T09:09:32.394Z
+---
+# 提案书（Proposal）— 2026-10-17-dsh-rc2-routing-restore
+
+## 动机
+
+任务原话转写：dsh rc.2 模型路由恢复——overlay 三件套 + valueId 数组串 + 信封拆包
+动机：dsh-rc2-protocol-fix 修复后轮次可达但暴露三层后续：① 本机 profile 目录缺 package.json/dsh.profile 清单时引擎虽自愈 seed 但写盘器不显式落盘（跨版本漂移面）；② cordis.patch.yml 的 compat 块被 rc.2 compatProfile 新 schema 静默拒收（整条 provider 不激活，路由目录无 sillyhub 组——探针双轮实证：带 compat 无/去 compat 有）；③ 模型选择 valueId 形状变为 JSON 数组串 ["<provider键>","<modelId>"]（configOptions.model.options[].value 同形）；④ 连接层通知信封未拆包（rc.2 params={sessionId,update:{...}}，旧形状直发内层）致全部内容事件静默丢弃——轮次完成但回复零落库（会话 e201445d 实证）。UI 真机终验：dsh 引擎对「你是什么模型」自答「GLM-5.3-FlashX，智谱（Z.ai）」——路由到平台智谱供应商完整恢复。
+
+成功标准：
+- writeDshHome 写三件套（package.json 模板清单 + pnpm-workspace.yaml + 无 compat 的 patch），单测钉三件与「禁 compat」
+- 驱动 set_config_option 模型值 = ["sillyhub","<model>"] JSON 数组串，单测钉板
+- 通知信封拆包兼容两种形状（有 update 键即拆），单测/真机验证回复落库
+- UI 真机一轮：dsh 会话回复正常渲染，模型自答 GLM-5.3-FlashX/智谱
+- typecheck + dsh 相关单测全绿
+
+## 变更范围
+
+按成功标准机械推导，共 5 条验收面：
+1. writeDshHome 写三件套（package.json 模板清单 + pnpm-workspace.yaml + 无 compat 的 patch），单测钉三件与「禁 compat」
+2. 驱动 set_config_option 模型值 = ["sillyhub","<model>"] JSON 数组串，单测钉板
+3. 通知信封拆包兼容两种形状（有 update 键即拆），单测/真机验证回复落库
+4. UI 真机一轮：dsh 会话回复正常渲染，模型自答 GLM-5.3-FlashX/智谱
+5. typecheck + dsh 相关单测全绿
+
+## 成功标准（可验证）
+
+1. writeDshHome 写三件套（package.json 模板清单 + pnpm-workspace.yaml + 无 compat 的 patch），单测钉三件与「禁 compat」
+2. 驱动 set_config_option 模型值 = ["sillyhub","<model>"] JSON 数组串，单测钉板
+3. 通知信封拆包兼容两种形状（有 update 键即拆），单测/真机验证回复落库
+4. UI 真机一轮：dsh 会话回复正常渲染，模型自答 GLM-5.3-FlashX/智谱
+5. typecheck + dsh 相关单测全绿

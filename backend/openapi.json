@@ -4610,6 +4610,22 @@
             }
           },
           {
+            "name": "change_type",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Change Type"
+            }
+          },
+          {
             "name": "sort",
             "in": "query",
             "required": false,
@@ -4765,6 +4781,70 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/ChangeDeleteResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/workspaces/{workspace_id}/changes/{change_id}/title": {
+      "patch": {
+        "tags": [
+          "change"
+        ],
+        "summary": "Rename Change Title",
+        "description": "平台改名入口（2026-10-16-change-title-condense-backfill FR-05，用户口径 2026-10-16）。\n\n组合权限与删除端点同款三元组——变更责任人本人（``change.owner_id == 当前\n用户``）**或** ``CHANGE_ARCHIVE``（workspace_owner 角色内置、platform_admin\n经 has_permission 短路），即「管理员 || 平台责任人 || 变更责任人」；实现为\n端点内组合校验（delete_change 同款先例）。带宽校验（10-30 字必须，strip 后\n判，越带 422）、已删行 409、rename 审计事件由 ``ChangeService.rename_title``\n给出。改名后的语义 title 不被 CLI 兜底上行回翻（is_fallback 收养守卫）。",
+        "operationId": "rename_change_title_api_workspaces__workspace_id__changes__change_id__title_patch",
+        "parameters": [
+          {
+            "name": "workspace_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Workspace Id"
+            }
+          },
+          {
+            "name": "change_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Change Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ChangeRenameRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ChangeRenameResponse"
                 }
               }
             }
@@ -4948,7 +5028,7 @@
           "change"
         ],
         "summary": "List Change Files",
-        "description": "变更文件树清单（2026-07-02-change-detail-file-tree-editor）。\n\n2026-10-14-files-refresh-explicit-sync：触发面收窄——默认（sync=false）纯读，\n直接返回平台镜像数据、不碰 daemon 通道（悬浮面板轮询/初始加载零同步开销）；\n仅显式 sync=true（前端「刷新」按钮点击、错误重试）先经绑定 daemon 触发一次\n此变更的定向上行同步（在线才触发，失败静默降级——``_sync_change_via_daemon``\n任何情况不抛），使主动刷新尽量拿到 daemon 本机最新文档。\n``service.list_files`` 本体纯读语义零改动。",
+        "description": "变更文件树清单（2026-07-02-change-detail-file-tree-editor）。\n\n2026-10-14-files-refresh-explicit-sync：触发面收窄——默认（sync=false）纯读，\n直接返回平台镜像数据、不碰 daemon 通道（悬浮面板轮询/初始加载零同步开销）；\n仅显式 sync=true（前端「刷新」按钮点击、错误重试）先经绑定 daemon 触发一次\n此变更的定向上行同步（在线才触发，失败降级不抛——``_sync_change_via_daemon``\n任何情况不抛），使主动刷新尽量拿到 daemon 本机最新文档。\n2026-10-16-change-files-sync-result：sync=true 时降级不再无声——响应带\n``sync_result`` 回执（触发状态 / 成败 / 机读原因 / CLI 失败尾段），前端据此\n在同步未完成时提示原因；默认纯读回执恒 None。``service.list_files`` 本体\n纯读语义零改动。",
         "operationId": "list_change_files_api_workspaces__workspace_id__changes__change_id__files_get",
         "parameters": [
           {
@@ -18726,7 +18806,7 @@
           "session-attachments"
         ],
         "summary": "Upload Attachment",
-        "description": "上传会话附件（multipart：file + kind 表单；FR-1/FR-3/FR-8）。\n\n成功即建草稿行（session_id NULL）；限制校验（大小/白名单/PIL magic）\n在 service 抛 413/415（AppError 惯例同 file 模块）。",
+        "description": "上传会话附件（multipart：file + kind 表单；FR-1/FR-3/FR-8）。\n\n成功即建草稿行（session_id NULL）；限制校验（大小/白名单/PIL magic）\n在 service 抛 413/415（AppError 惯例同 file 模块）。\n\n2026-10-16-backend-mem-polling task-05 / D-004@v1：读内容**前**先查\n``UploadFile.size``（Starlette spool 时已知）超限直接 413——超限文件\n不再整读进内存（上限值 import 自 service 单一源，不双写）。",
         "operationId": "upload_attachment_api_daemon_session_attachments_post",
         "requestBody": {
           "content": {
@@ -41113,6 +41193,16 @@
             },
             "type": "array",
             "title": "Items"
+          },
+          "sync_result": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ChangeFileSyncResult"
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         },
         "type": "object",
@@ -41121,6 +41211,53 @@
           "items"
         ],
         "title": "ChangeFileList"
+      },
+      "ChangeFileSyncResult": {
+        "properties": {
+          "triggered": {
+            "type": "boolean",
+            "title": "Triggered"
+          },
+          "ok": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ok"
+          },
+          "reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reason"
+          },
+          "stderr_tail": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Stderr Tail"
+          }
+        },
+        "type": "object",
+        "required": [
+          "triggered"
+        ],
+        "title": "ChangeFileSyncResult",
+        "description": "GET files?sync=1 显式同步执行回执（2026-10-16-change-files-sync-result）。\n\n``triggered=False``：RPC 未发出，``reason`` ∈ no_binding / daemon_offline；\n``ok`` 三态——True=daemon 执行成功；False=执行失败或超时（``reason`` 机读短码：\nrpc_timeout / rpc_remote_error / runtime_offline / exception / cli_failed /\nno_workspace_root 等，``stderr_tail`` 为 CLI 失败输出尾段）；None=已触发但\ndaemon 防抖跳过（``skipped_in_flight`` / ``skipped_debounced``）或未触发。\n默认纯读（不带 sync）本对象为 None。"
       },
       "ChangeFileWriteRequest": {
         "properties": {
@@ -41721,6 +41858,45 @@
         "type": "object",
         "title": "ChangeRejectProcessReq",
         "description": "变更流 rejectProcess — 驳回到已作废 (仅审核节点)。"
+      },
+      "ChangeRenameRequest": {
+        "properties": {
+          "title": {
+            "type": "string",
+            "title": "Title"
+          }
+        },
+        "type": "object",
+        "required": [
+          "title"
+        ],
+        "title": "ChangeRenameRequest",
+        "description": "PATCH /changes/{cid}/title 请求（2026-10-16-change-title-condense-backfill FR-05）。\n\n人工命名带宽（用户口径 2026-10-16：10-30 字之内必须、建议约 20）在服务层\nstrip 后校验（DTO 不设长度约束——错误信息要带当前字数与带宽说明，统一走\nAppError 422 而非 pydantic 422）。"
+      },
+      "ChangeRenameResponse": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Id"
+          },
+          "change_key": {
+            "type": "string",
+            "title": "Change Key"
+          },
+          "title": {
+            "type": "string",
+            "title": "Title"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "change_key",
+          "title"
+        ],
+        "title": "ChangeRenameResponse",
+        "description": "PATCH /changes/{cid}/title 响应（FR-05）：变更标识 + 改名后的新 title。"
       },
       "ChangeReparseResponse": {
         "properties": {
@@ -53076,7 +53252,9 @@
               "enum": [
                 "claude",
                 "pi",
-                "codex"
+                "codex",
+                "dsh",
+                "zcode"
               ]
             },
             "type": "array",
@@ -53523,7 +53701,9 @@
                   "enum": [
                     "claude",
                     "pi",
-                    "codex"
+                    "codex",
+                    "dsh",
+                    "zcode"
                   ]
                 },
                 "type": "array",
@@ -71686,6 +71866,35 @@
             "title": "Dropped Paths",
             "default": 0
           },
+          "record_label": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Record Label"
+          },
+          "covered_changes": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Covered Changes"
+          },
+          "path_total": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Path Total"
+          },
           "files": {
             "items": {
               "$ref": "#/components/schemas/SillySpecConflictCompareFile"
@@ -71707,7 +71916,7 @@
           "kind"
         ],
         "title": "SillySpecConflictCompareResponse",
-        "description": "GET /machines/{id}/sillyspec-conflicts/{change}/compare 响应（design §7.2）。\n\nkind=spec-tree → ``files`` 非空 ``progress_rows`` 空；kind=progress 反之。\n``response_truncated``：整响应超 2MB 时按文件倒序丢 diff_rows 后置 True。\n``ql_id``/时间字段为字符串原样透传（daemon 机器本地钟，跨机比较仅辅助）。"
+        "description": "GET /machines/{id}/sillyspec-conflicts/{change}/compare 响应（design §7.2）。\n\nkind=spec-tree → ``files`` 非空 ``progress_rows`` 空；kind=progress 反之。\n``response_truncated``：整响应超 2MB 时按文件倒序丢 diff_rows 后置 True。\n``ql_id``/时间字段为字符串原样透传（daemon 机器本地钟，跨机比较仅辅助）。\n``record_label``/``covered_changes``/``path_total``：full-tree 兜底来源元数据\n（2026-10-16-conflict-full-tree-compare / D-006@v2）——主取命中时为\nNone/[]/None；``path_total`` 是兜底快照返回的路径数（受 daemon 300 路径帽截断，\n非记录真实总数）。"
       },
       "SillySpecConflictDiffRow": {
         "properties": {

@@ -1,0 +1,82 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-17-session-envelope-rev-stale-guard",
+  "rows": [
+    {
+      "anchor": "FR-01",
+      "row_id": "2026-10-17-session-envelope-rev-stale-guard:flow:测试绑定FR-01",
+      "tests": [
+        "frontend/src/stores/session.test.ts「用户驱动变更加一：setTokens/clear 各 +1，markHydrated 不加」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-17-session-envelope-rev-stale-guard"
+    },
+    {
+      "anchor": "FR-02",
+      "row_id": "2026-10-17-session-envelope-rev-stale-guard:flow:测试绑定FR-02",
+      "tests": [
+        "frontend/src/stores/session.test.ts「陈旧信封（rev 小于本地）整体忽略：内容不同也不采纳、不写盘」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-17-session-envelope-rev-stale-guard"
+    },
+    {
+      "anchor": "FR-03",
+      "row_id": "2026-10-17-session-envelope-rev-stale-guard:flow:测试绑定FR-03",
+      "tests": [
+        "frontend/src/stores/session.test.ts「无 rev 旧形状信封 → 走既有内容比对路径（向后兼容）」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-17-session-envelope-rev-stale-guard"
+    },
+    {
+      "anchor": "FR-04",
+      "row_id": "2026-10-17-session-envelope-rev-stale-guard:flow:测试绑定FR-04",
+      "tests": [
+        "frontend/src/stores/session.test.ts"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-17-session-envelope-rev-stale-guard"
+    },
+    {
+      "anchor": "FR-05",
+      "row_id": "2026-10-17-session-envelope-rev-stale-guard:flow:测试绑定FR-05",
+      "tests": [
+        "frontend/src/lib/__tests__/token-refresh.test.ts",
+        "frontend/src/stores/session.test.ts"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-17-session-envelope-rev-stale-guard"
+    }
+  ]
+}

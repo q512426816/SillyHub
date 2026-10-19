@@ -119,6 +119,24 @@ class Settings(BaseSettings):
         "BAAI/bge-small-zh-v1.5",
         description="fastembed model name for /api/spec/knowledge/vector-search (env KNOWLEDGE_EMBEDDING_MODEL).",
     )
+    # 2026-10-16-backend-mem-polling task-01 / D-001@v1：嵌入模型子进程封装——闲置该秒数
+    # 后子进程自动退出（内存确定性归还 OS），下次查询重新拉起（冷启 1~3s）。
+    knowledge_embedding_idle_exit_sec: int = Field(
+        900,
+        description="embedding worker idle exit in seconds (env KNOWLEDGE_EMBEDDING_IDLE_EXIT_SEC).",
+    )
+    # 2026-10-16-backend-mem-polling task-01 / D-004@v1：CLI 向量端点进程内索引的 LRU
+    # 工作区上限（每 ws 索引 11~40MB，无上限会随工作区数无界增长）。
+    knowledge_embedding_index_max_ws: int = Field(
+        4,
+        description="max workspaces cached in-process for vector index, LRU evict beyond (env KNOWLEDGE_EMBEDDING_INDEX_MAX_WS).",
+    )
+    # 2026-10-16-backend-mem-polling task-02 / D-004@v1：spec 包 gzip 整包缓存的
+    # 全局字节帽（per-ws 2 版本策略之上的总量上界；~18MB/ws 曾无上界慢性爬升）。
+    spec_bundle_cache_max_bytes: int = Field(
+        128 * 1024 * 1024,
+        description="global byte cap for spec bundle gzip cache, LRU evict beyond (env SPEC_BUNDLE_CACHE_MAX_BYTES).",
+    )
 
     # 2026-07-07-daemon-skill-execution task-06：sillyspec skills 打包源目录。
     # 镜像内路径由 Dockerfile COPY → /app/sillyspec-skills/（task-07）。
@@ -140,12 +158,14 @@ class Settings(BaseSettings):
     )
     auth_refresh_ttl_days: int = Field(14, ge=1, le=90)
     auth_refresh_grace_seconds: int = Field(
-        60,
+        300,
         ge=0,
         le=600,
         description=(
-            "Refresh token 轮换宽限窗口(秒)。rotate 后窗口内重复提交换新而非 revoke_all"
-            "(并发刷新误杀兜底)。0=退化为旧行为。D-002@v1。"
+            "Refresh token 轮换宽限窗口(秒)。rotate 后窗口内重复提交换新而非族级吊销"
+            "(并发刷新/休眠恢复误杀兜底)。0=退化为旧行为。"
+            "D-002@v1(初值 60s);2026-10-16-fix-auth-random-logout D-003@v1: 默认 60→300"
+            "(覆盖典型休眠/后台标签页节流恢复窗口)。"
         ),
     )
     auth_bcrypt_rounds: int = Field(12, ge=4, le=15)

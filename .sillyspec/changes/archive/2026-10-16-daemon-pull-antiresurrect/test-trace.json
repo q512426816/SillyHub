@@ -1,0 +1,81 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-16-daemon-pull-antiresurrect",
+  "rows": [
+    {
+      "anchor": "FR-01",
+      "row_id": "2026-10-16-daemon-pull-antiresurrect:flow:测试绑定FR-01",
+      "tests": [
+        "sillyhub-daemon/tests/pull-antiresurrect.test.ts「用例1（核心）：manifest 有/盘面无/同步面 → 解包产物不落地（不复活）+ warn 点名」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-16-daemon-pull-antiresurrect"
+    },
+    {
+      "anchor": "FR-02",
+      "row_id": "2026-10-16-daemon-pull-antiresurrect:flow:测试绑定FR-02",
+      "tests": [
+        "sillyhub-daemon/tests/pull-antiresurrect.test.ts「用例2：manifest 缺失（首拉）= 无抑制面，全量落地（既有行为不变）」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-16-daemon-pull-antiresurrect"
+    },
+    {
+      "anchor": "FR-03",
+      "row_id": "2026-10-16-daemon-pull-antiresurrect:flow:测试绑定FR-03",
+      "tests": [
+        "sillyhub-daemon/tests/pull-antiresurrect.test.ts「用例3：restoreDeleted（opts / env）= 显式恢复，跳过抑制」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-16-daemon-pull-antiresurrect"
+    },
+    {
+      "anchor": "FR-04",
+      "row_id": "2026-10-16-daemon-pull-antiresurrect:flow:测试绑定FR-04",
+      "tests": [
+        "sillyhub-daemon/tests/pull-antiresurrect.test.ts「用例1（核心）」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-16-daemon-pull-antiresurrect"
+    },
+    {
+      "anchor": "FR-05",
+      "row_id": "2026-10-16-daemon-pull-antiresurrect:flow:测试绑定FR-05",
+      "tests": [
+        "sillyhub-daemon/tests/pull-antiresurrect.test.ts"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-16-daemon-pull-antiresurrect"
+    }
+  ]
+}

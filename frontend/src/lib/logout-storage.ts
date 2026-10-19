@@ -26,6 +26,9 @@ export const USER_SCOPED_LS_PREFIXES: readonly string[] = [
   "sillyhub:liveness-state:",
   // 会话未读标记 — hooks/use-session-liveness.ts UNREAD_KEY_PREFIX
   "sillyhub:liveness-unread:",
+  // 会话「执行完成」通知标记 — lib/session-completed-unread.ts COMPLETED_UNREAD_KEY_PREFIX
+  //（2026-10-17-audit-risk-followup：键随 fcd4a4048 落地时漏登记，换账号串显前账号角标）
+  "sillyhub:session-completed-unread:",
 ];
 
 /**

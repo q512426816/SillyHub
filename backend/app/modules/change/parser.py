@@ -16,6 +16,8 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
 
+import yaml
+
 from app.core.logging import get_logger
 from app.core.spec_paths import SpecPathResolver
 from app.modules.change.title_norm import extract_description, normalize_display_title
@@ -86,6 +88,11 @@ class ParsedChange:
     location: str = "active"
     path: str = ""
     change_type: str | None = None
+    # 2026-10-18-change-type-git-conventional：change_type 是否来自权威源
+    # （flow-state.yaml 顶层 commit_type，git conventional 前缀）。目录形状推断
+    # （_infer_change_type）值为猜测——quick 通道退役后轻量变更恒落默认 feature；
+    # 权威值允许覆盖库中旧值（service._apply_parsed 消费），猜测值仍只为空回填。
+    change_type_authoritative: bool = False
     owner: str | None = None
     affected_components: list[str] = field(default_factory=list)
     docs: list[ParsedDoc] = field(default_factory=list)
@@ -304,6 +311,38 @@ class ChangeParser:
 
         # 规则 5: 默认
         return "feature"
+
+    # 列宽护栏：Change.change_type 列 String(50)，超长前缀（畸形值）截断防溢出。
+    _COMMIT_TYPE_MAX_LEN = 50
+
+    @classmethod
+    def _read_flow_state_commit_type(cls, change_dir: Path) -> str | None:
+        """读 flow-state.yaml 顶层 ``commit_type``（2026-10-18-change-type-git-conventional）。
+
+        thin 轻量变更进度落 flow-state.yaml；其顶层可选字段 ``commit_type`` 是从
+        本机 git 提交反查出的 conventional 前缀主类型（feat/fix/docs/...，回填
+        脚本对存量写入 / 后续 CLI flow done 对新变更写入；归档 full 变更由回填
+        脚本创建仅含该字段的最小 flow-state.yaml——location=archive 时
+        _infer_current_stage 恒返 archive，不受影响）。
+
+        Returns:
+            小写化前缀（≤50 字符）；缺文件/缺字段/类型非 str/空串/解析失败 →
+            None（调用方回落目录形状推断路径，行为不变）。
+        """
+        path = change_dir / "flow-state.yaml"
+        if not path.is_file():
+            return None
+        try:
+            data = yaml.safe_load(path.read_text(encoding="utf-8"))
+        except (OSError, yaml.YAMLError):
+            return None
+        if not isinstance(data, dict):
+            return None
+        value = data.get("commit_type")
+        if not isinstance(value, str):
+            return None
+        value = value.strip().lower()[: cls._COMMIT_TYPE_MAX_LEN]
+        return value or None
 
     # ------------------------------------------------------------------
     # Affected-components inference (task-02)
@@ -779,6 +818,14 @@ class ChangeParser:
 
         # --- Infer change_type and affected_components ---
         parsed.change_type = self._infer_change_type(change_dir)
+        # 2026-10-18-change-type-git-conventional：flow-state.yaml 顶层 commit_type
+        # （git conventional 前缀主类型，回填脚本 / 后续 CLI flow done 写入）是权威
+        # 类型源，读到即覆盖目录推断并置 authoritative（_apply_parsed 据此允许
+        # 覆盖库中旧值——存量 feature 错值靠它纠正）；缺字段走推断路径不变。
+        commit_type = self._read_flow_state_commit_type(change_dir)
+        if commit_type is not None:
+            parsed.change_type = commit_type
+            parsed.change_type_authoritative = True
         parsed.affected_components = self._infer_affected_components(change_dir, sillyspec_root)
 
         # ql-20260702-001：从文档存在性推断 current_stage（sillyspec.db 未导入时的 fallback）

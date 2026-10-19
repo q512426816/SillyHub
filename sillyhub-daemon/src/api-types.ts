@@ -1888,6 +1888,33 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/workspaces/{workspace_id}/changes/{change_id}/title": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /**
+         * Rename Change Title
+         * @description 平台改名入口（2026-10-16-change-title-condense-backfill FR-05，用户口径 2026-10-16）。
+         *
+         *     组合权限与删除端点同款三元组——变更责任人本人（``change.owner_id == 当前
+         *     用户``）**或** ``CHANGE_ARCHIVE``（workspace_owner 角色内置、platform_admin
+         *     经 has_permission 短路），即「管理员 || 平台责任人 || 变更责任人」；实现为
+         *     端点内组合校验（delete_change 同款先例）。带宽校验（10-30 字必须，strip 后
+         *     判，越带 422）、已删行 409、rename 审计事件由 ``ChangeService.rename_title``
+         *     给出。改名后的语义 title 不被 CLI 兜底上行回翻（is_fallback 收养守卫）。
+         */
+        patch: operations["rename_change_title_api_workspaces__workspace_id__changes__change_id__title_patch"];
+        trace?: never;
+    };
     "/api/workspaces/{workspace_id}/changes/{change_id}/documents": {
         parameters: {
             query?: never;
@@ -1959,9 +1986,12 @@ export interface paths {
          *     2026-10-14-files-refresh-explicit-sync：触发面收窄——默认（sync=false）纯读，
          *     直接返回平台镜像数据、不碰 daemon 通道（悬浮面板轮询/初始加载零同步开销）；
          *     仅显式 sync=true（前端「刷新」按钮点击、错误重试）先经绑定 daemon 触发一次
-         *     此变更的定向上行同步（在线才触发，失败静默降级——``_sync_change_via_daemon``
+         *     此变更的定向上行同步（在线才触发，失败降级不抛——``_sync_change_via_daemon``
          *     任何情况不抛），使主动刷新尽量拿到 daemon 本机最新文档。
-         *     ``service.list_files`` 本体纯读语义零改动。
+         *     2026-10-16-change-files-sync-result：sync=true 时降级不再无声——响应带
+         *     ``sync_result`` 回执（触发状态 / 成败 / 机读原因 / CLI 失败尾段），前端据此
+         *     在同步未完成时提示原因；默认纯读回执恒 None。``service.list_files`` 本体
+         *     纯读语义零改动。
          */
         get: operations["list_change_files_api_workspaces__workspace_id__changes__change_id__files_get"];
         put?: never;
@@ -7361,6 +7391,10 @@ export interface paths {
          *
          *     成功即建草稿行（session_id NULL）；限制校验（大小/白名单/PIL magic）
          *     在 service 抛 413/415（AppError 惯例同 file 模块）。
+         *
+         *     2026-10-16-backend-mem-polling task-05 / D-004@v1：读内容**前**先查
+         *     ``UploadFile.size``（Starlette spool 时已知）超限直接 413——超限文件
+         *     不再整读进内存（上限值 import 自 service 单一源，不双写）。
          */
         post: operations["upload_attachment_api_daemon_session_attachments_post"];
         delete?: never;
@@ -14365,6 +14399,28 @@ export interface components {
             change_id: string;
             /** Items */
             items: components["schemas"]["ChangeFileEntry"][];
+            sync_result?: components["schemas"]["ChangeFileSyncResult"] | null;
+        };
+        /**
+         * ChangeFileSyncResult
+         * @description GET files?sync=1 显式同步执行回执（2026-10-16-change-files-sync-result）。
+         *
+         *     ``triggered=False``：RPC 未发出，``reason`` ∈ no_binding / daemon_offline；
+         *     ``ok`` 三态——True=daemon 执行成功；False=执行失败或超时（``reason`` 机读短码：
+         *     rpc_timeout / rpc_remote_error / runtime_offline / exception / cli_failed /
+         *     no_workspace_root 等，``stderr_tail`` 为 CLI 失败输出尾段）；None=已触发但
+         *     daemon 防抖跳过（``skipped_in_flight`` / ``skipped_debounced``）或未触发。
+         *     默认纯读（不带 sync）本对象为 None。
+         */
+        ChangeFileSyncResult: {
+            /** Triggered */
+            triggered: boolean;
+            /** Ok */
+            ok?: boolean | null;
+            /** Reason */
+            reason?: string | null;
+            /** Stderr Tail */
+            stderr_tail?: string | null;
         };
         /** ChangeFileWriteRequest */
         ChangeFileWriteRequest: {
@@ -14590,6 +14646,33 @@ export interface components {
         ChangeRejectProcessReq: {
             /** Comment */
             comment?: string | null;
+        };
+        /**
+         * ChangeRenameRequest
+         * @description PATCH /changes/{cid}/title 请求（2026-10-16-change-title-condense-backfill FR-05）。
+         *
+         *     人工命名带宽（用户口径 2026-10-16：10-30 字之内必须、建议约 20）在服务层
+         *     strip 后校验（DTO 不设长度约束——错误信息要带当前字数与带宽说明，统一走
+         *     AppError 422 而非 pydantic 422）。
+         */
+        ChangeRenameRequest: {
+            /** Title */
+            title: string;
+        };
+        /**
+         * ChangeRenameResponse
+         * @description PATCH /changes/{cid}/title 响应（FR-05）：变更标识 + 改名后的新 title。
+         */
+        ChangeRenameResponse: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /** Change Key */
+            change_key: string;
+            /** Title */
+            title: string;
         };
         /** ChangeReparseResponse */
         ChangeReparseResponse: {
@@ -19490,7 +19573,7 @@ export interface components {
             /** Name */
             name: string;
             /** Agent Kinds */
-            agent_kinds: ("claude" | "pi" | "codex")[];
+            agent_kinds: ("claude" | "pi" | "codex" | "dsh" | "zcode")[];
             /**
              * Models
              * @default []
@@ -19643,7 +19726,7 @@ export interface components {
             /** Api Format */
             api_format?: ("anthropic" | "openai_chat") | null;
             /** Agent Kinds */
-            agent_kinds?: ("claude" | "pi" | "codex")[] | null;
+            agent_kinds?: ("claude" | "pi" | "codex" | "dsh" | "zcode")[] | null;
             /** Models */
             models?: components["schemas"]["ProviderModelEntry"][] | null;
             /** Extra Env */
@@ -26261,6 +26344,10 @@ export interface components {
          *     kind=spec-tree → ``files`` 非空 ``progress_rows`` 空；kind=progress 反之。
          *     ``response_truncated``：整响应超 2MB 时按文件倒序丢 diff_rows 后置 True。
          *     ``ql_id``/时间字段为字符串原样透传（daemon 机器本地钟，跨机比较仅辅助）。
+         *     ``record_label``/``covered_changes``/``path_total``：full-tree 兜底来源元数据
+         *     （2026-10-16-conflict-full-tree-compare / D-006@v2）——主取命中时为
+         *     None/[]/None；``path_total`` 是兜底快照返回的路径数（受 daemon 300 路径帽截断，
+         *     非记录真实总数）。
          */
         SillySpecConflictCompareResponse: {
             /** Change */
@@ -26288,6 +26375,12 @@ export interface components {
              * @default 0
              */
             dropped_paths: number;
+            /** Record Label */
+            record_label?: string | null;
+            /** Covered Changes */
+            covered_changes?: string[];
+            /** Path Total */
+            path_total?: number | null;
             /** Files */
             files?: components["schemas"]["SillySpecConflictCompareFile"][];
             /** Progress Rows */
@@ -32922,6 +33015,7 @@ export interface operations {
                 search?: string | null;
                 current_stage?: string | null;
                 lineage?: string | null;
+                change_type?: string | null;
                 sort?: string;
                 pending_review_only?: boolean;
                 page?: number;
@@ -33006,6 +33100,42 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ChangeDeleteResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    rename_change_title_api_workspaces__workspace_id__changes__change_id__title_patch: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                workspace_id: string;
+                change_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ChangeRenameRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ChangeRenameResponse"];
                 };
             };
             /** @description Validation Error */

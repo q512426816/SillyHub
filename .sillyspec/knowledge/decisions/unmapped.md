@@ -277,13 +277,163 @@
 
 ## D-unmapped-056@v1 设计期风险与放弃方案（底稿）
 状态：implemented
+变更：2026-10-15-server-logs-dockerfile-fix
+原编号：D-001@v1
+锚点：未记录
+最近确认：145bd757934b3ecdf4dc33f855f937b1000cb9f8
+理由：最大风险：已部署的服务器若以 bind-mount 覆盖 /data（宿主目录属 root），镜像内 chown 不生效——预建目录会被挂载遮蔽，仍可能权限被拒；此时降级警告（修复②）会在容器日志里明示原因，按日志处置（宿主侧 chown 或配 log_dir 指向可写路径）。放弃的方案：改 docker-compose 加 volume 挂载日志目录——引入部署编排变更且服务器侧需手工迁移，超出「镜像自包含」修复边界（如需持久化日志到宿主，后续独立变更处理）。
+
+## D-unmapped-057@v1 落选——方案 C（进程内卸载 + 拉长轮询 + 缓存）
+状态：rejected
+变更：2026-10-16-backend-mem-polling
+原编号：D-003@v1
+锚点：未记录
+最近确认：439cdc46c
+理由：落选。进程内 del+gc 卸载方案。
+否决理由：onnxruntime/Python allocator 进程内卸载不保证归还 OS（arena 棘轮），非确定性根治；轮询拉长恶化派发延迟。
+复潮条件：无（机制性不可靠，非场景性劣势）。
+
+## D-unmapped-058@v1 设计期风险与放弃方案（底稿）
+状态：implemented
+变更：2026-10-16-deploy-convergence-guard
+原编号：D-001@v1
+锚点：未记录
+最近确认：d581d40b43ea8078957e915ff68709fb9f082b94
+理由：最大风险：闸门挡不住「两个会话都从 main 打包、先后部署」的时序互覆（后部署者覆盖先部署者——若两者都是 main 且后者更旧则仍回退）。兜底：§0 的部署后 commit_sha 核对能立即发现；彻底解（部署互斥/登记表）留待需要更多实证后做。放弃的方案：a) 只改 skill 文档不加脚本闸——事故证明纯约定无效（并行会话各行其是），机械闸必须；b) 部署登记文件 .last-deploy 比对——需要 load-and-up.sh 也改+跨会话写同一文件，复杂度高于本次 thin 边界，列为后续。
+
+## D-unmapped-059@v1 设计期风险与放弃方案（底稿）
+状态：implemented
+变更：2026-10-16-change-files-sync-result
+原编号：D-001@v1
+锚点：未记录
+最近确认：7ca3e7ba66d5d065715a08ea885d064b2617e3e9
+理由：- 最大风险：15s 预算让「刷新」在同步窗口内最长等 15s（原 3s 秒回旧数据）——用「等待换正确」；极端大仓首同步 >15s 仍会超时，但 daemon 侧继续完成、防抖 TTL 内重点秒回新数据（有明确降级路径，不卡死）。若未来实测普遍 >15s，应改异步推送而非继续加预算（本变更未做，留作后续观察项）。 - 死路（已否决，勿复潮）：fire-and-forget + 前端二次刷新启发式（2026-10-13 D-006@v1）；新增显式 POST 同步端点（D-007@v1）；「继续 3s 只补日志」——治不了「刷不到」主诉，只增排障信息，不采。 - 运维同根因（服务器属主漂移致 spec-sync 500）属部署面，已由 ops 修复 + deploy skill 探针守护，代码面不做属主自动修补（越权面）。
+
+## D-unmapped-060@v1 sessions 表增 family_id 列建模会话族
+状态：implemented
+变更：2026-10-16-fix-auth-random-logout
+原编号：D-001@v1
+锚点：未记录
+最近确认：d43971698
+理由：我的判断：sessions 表新增 nullable UUID 列 `family_id`。login 签发时生成新 uuid 作为族根；refresh 轮换/grace 续期签发的新 session 继承被消费 session 的族（`family_id ?? id` 兜底存量 NULL 行——旧行自成一族）。族查询条件 `user_id=? AND revoked_at IS NULL AND (family_id=? OR (family_id IS NULL AND id=?))`，复用既有索引 ix_sessions_user_revoked，不加新索引（每用户 session 行数少）。迁移走 alembic 增量加列（PPM 已上线有生产数据，禁重置；加列 nullable 零停机零强制登出）
+故障面：family_id 写错族会把无关设备牵连进吊销面（与旧全吊销等价），靠 FR-02 测试族隔离性兜底
+退役判据：若未来引入服务端全设备会话管理 UI 且要求误杀面趋零，可评估改为「复用检测仅拒绝不吊销」
+
+## D-unmapped-061@v1 refresh 复用检测从全用户吊销改为族级吊销
+状态：implemented
+变更：2026-10-16-fix-auth-random-logout
+原编号：D-002@v1
+锚点：未记录
+最近确认：d43971698
+理由：用户已定向（「复用检测只吊销会话族」）：复用检测分支改调新增的 `_revoke_session_family(user_id, family)`，只吊销该 token 所属族系（含其后代——攻击者用窃取 token 轮换出的新 session 同族，同样被灭，安全属性保留）；其他设备/其他登录族不受影响。`revoke_all_user_sessions` 方法保留（改密码场景 service.py:243 注释已说明另有内联实现；admin/settings 端点走 UserService.revoke_all_sessions 不受影响）。AuthRefreshReused 报错文案同步改「该设备登录已注销」（原「所有会话已注销」不再准确）
+故障面：攻击者在 grace 窗内重放仍可得新对（既有 grace 权衡，不变）；grace 窗外重放只灭单族，若攻击者已独立另行登录（异族）不受牵连——可接受（异族本就是合法登录）
+退役判据：出现实际窃取事故且需要全设备熔断时，可配置回退全吊销
+
+## D-unmapped-062@v1 grace 宽限窗默认 60s → 300s
+状态：implemented
+变更：2026-10-16-fix-auth-random-logout
+原编号：D-003@v1
+锚点：未记录
+最近确认：d43971698
+理由：我的判断：`auth_refresh_grace_seconds` 默认 60 → 300（config 上限 le=600 内）。依据：休眠唤醒/后台标签页节流恢复后旧 token 复用常超 60s；300s 覆盖典型恢复窗口，且族级吊销上线后超窗误杀的爆炸半径已缩到单设备，双保险。攻击者在窗内重放可换新对是既有权衡，内部平台威胁模型可接受
+
+## D-unmapped-063@v1 前端 doRefresh 按状态码分流——5xx 抛错不清会话
+状态：implemented
+变更：2026-10-16-fix-auth-random-logout
+原编号：D-004@v1
+锚点：frontend/src/lib/token-refresh.ts:86
+最近确认：d43971698
+理由：用户已定向（「对 5xx 不清会话」）：doRefresh 分流——2xx → 返回 token 对；401/403/其余 4xx → 返回 null（上层 clear+redirect，明确失效）；5xx/408/429 → 抛 ApiError（对齐 ql-20260917-005 timeout 先例：抛错路径不清会话、不跳登录，调用方 catch 展示可重试错误）。app-shell.tsx:216 主动续票已有 .catch(() => {}) 兜底；api.ts 401 收口处 await 抛错时原 401 ApiError 被 refresh 错误替代传播（与 timeout 行为一致）
+故障面：5xx 时原 401 错误被替换为 refresh 5xx 错误展示（与 timeout 先例一致，可接受）；瞬时 5xx 期间页面报错但登录态保留，恢复后自愈
+退役判据：后端或代理层能保证 refresh 请求不经受 5xx/网络抖动窗口（如本机直连）时，可收敛为单一 null 语义
+
+## D-unmapped-064@v1 根因一实现方案选 A（会话族吊销 + 宽限窗加大）
+状态：implemented
+变更：2026-10-16-fix-auth-random-logout
+原编号：D-005@v1
+锚点：未记录
+最近确认：d43971698
+理由：用户选 A：sessions 加 family_id 建模会话族，复用检测只吊销该族（窃取凭证换出的后代同族同灭，安全属性保留），宽限窗 60→300s 双保险。理由要点：B 治标（全吊销语义未变，超 600s 上限仍团灭）；C 丢失窃取响应（纯拒绝弱于 BCP 族级吊销标准）
+故障面：family 谓词或族继承写错时，误杀面在「全用户」与「单设备」之间漂移（靠 FR-01/FR-02 测试网兜底）
+退役判据：OAuth BCP 实现升级为服务端 per-token introspection 后可重估
+
+## D-unmapped-065@v1 方案 B（只加大宽限窗，不加族系列）
+状态：rejected
+变更：2026-10-16-fix-auth-random-logout
+原编号：D-006@v1
+锚点：未记录
+最近确认：d43971698
+理由：落选：一行配置改动最小，但「全用户吊销」语义未变——休眠/离线超过宽限上限（config le=600 即 10 分钟）仍全设备团灭；且单纯加宽窗口给真实窃取者更长重放窗口，治标不治本
+否决理由：全吊销语义未根除，仅推迟触发；安全与可用性双输
+复潮条件：若后端禁止 schema 变更（如生产库冻结期）且急需止血，可作为临时缓解先上线
+
+## D-unmapped-066@v1 方案 C（复用检测只拒绝不吊销）
+状态：rejected
+变更：2026-10-16-fix-auth-random-logout
+原编号：D-007@v1
+锚点：未记录
+最近确认：d43971698
+理由：落选：误杀面归零且零迁移，但丢失对凭证窃取的安全响应——OAuth BCP 对 refresh 轮换复用的标准响应是吊销 token family，纯拒绝使攻击者已换出的新凭证不受影响，安全姿态弱化
+否决理由：安全响应弱于 BCP 族级吊销标准
+复潮条件：平台威胁模型明确接受弱响应（如纯内网无外部暴露）且要求零 schema 变更时
+
+## D-unmapped-067@v1 族吊销必须内部 commit（执行期裁决，纠正 design 笔误）
+状态：implemented
+变更：2026-10-16-fix-auth-random-logout
+原编号：D-008@v1
+锚点：未记录
+最近确认：d43971698
+理由：内部 commit（对齐 revoke_all_user_sessions 既有语义）。依据：复用分支 UPDATE 后立即 raise AuthRefreshReused，而 get_session 依赖对异常路径 session.rollback()（backend/app/core/db.py:163-167）——不先行提交则族吊销被回滚成空操作（安全响应静默丢失）。design.md 对应措辞已同步修正
+
+## D-unmapped-068@v1 设计期风险与放弃方案（底稿）
+状态：implemented
+变更：2026-10-16-agent-session-field-pin-sync
+原编号：D-001@v1
+锚点：未记录
+最近确认：cd5c6760fd82584b7b25b8e8d89947f6360a55b6
+理由：最大风险：钉子与真实模型再次漂移（后续给 agent_sessions 加列的人再次漏更）——护栏恰是本钉子自身（届时实测门会再拦，按本次同款流程补钉即可，local.yaml 豁免仅作过渡不长期留存）。曾考虑的替代方案：把字段集断言放宽为"包含关键列子集"以降低维护成本——放弃：钉子的价值恰在精确集，放宽即失去"未登记列变更"的探测能力。
+
+## D-unmapped-069@v1 设计期风险与放弃方案（底稿）
+状态：implemented
+变更：2026-10-16-daemon-pull-antiresurrect
+原编号：D-001@v1
+锚点：未记录
+最近确认：056cff30397de0c5001874901cbbe03d6319df65
+理由：- 最大风险：**误抑制**（用户删除后又在秒级窗口手工恢复同名文件，pull_start 现算的抑制集会把 bundle 版本挡掉）——与 CLI 同构接受（窗口极窄，且有 restoreDeleted/env 显式恢复通道兜底）。 - 次风险：manifest 长期失真（如历史版本缓存含已不在同步面的路径）导致抑制面偏大——已用 `isUploadExcludedPath` 同口径过滤 + 「删除上行成功自然衰减」收敛；且只影响 pull 恢复面，不损伤任何现存文件。 - 首版缺口（独立评审 P2 实证，已修复）：首版只读 manifest、落地重建不并回被抑制行——delete op 生成条件「缓存有/盘面无」随重建断裂，抑制只活一个 pull 周期，第二次自动 pull 复活照旧。修复：落地重建时并回被抑制行（FR-04 持久性语义），新增第二次 pull 持久性测试断言。 - 试过但放弃：①改 `extractTar` 加 skip 参数（侵入面大、in-place 兜底仍需补刀）→ 放弃，改为解包后对命中路径 rm（两路径统一、签名不动）；②在 `hasUnsyncedLocalChanges` 加删除检测（pending/mtime 信号反推）→ 放弃，删除检测本质需要基线快照，重复造 manifest 已有的能力且动既有判定函数风险更高；③照搬 CLI 在 rm 前读基线文件的形态 → 放弃，daemon 的 manifest 缓存已是等价基线且生命周期管理（pull/push 双点回写）更完备。
+
+## D-unmapped-070@v1 设计期风险与放弃方案（底稿）
+状态：implemented
+变更：2026-10-16-change-center-back-keeps-list-state
+原编号：D-001@v1
+锚点：未记录
+最近确认：3963621a86777b6dc2696f5118a8f1fa1125edc2
+理由：- **风险①（已知取舍）**：`history.length > 1` 判定在「从站外页点链接进详情」场景会 back 回站外页——内部工具场景罕见，且符合浏览器标准「返回」语义；Next 14.2.5 的 history.state 无可靠栈深标记（idx 为 Next 15+ 字段），无法精确判定「上一条是否本站」， 接受该取舍。 - **风险②**：原生 replaceState 后浏览器「后退」退出列表（不回溯列表内翻页历史）——与 改造前行为一致（useState 翻页本就不产生历史条目），非行为退化；URL 与 UI 的瞬时不一致 仅出现在列表页内按浏览器后退的瞬间（随即整页离开列表），用户实证范围内不可见。 - **死路 A（放弃）**：router.replace 写回——每次翻页触发 RSC 导航请求（页面是 server component 树根），快速翻页产生请求风暴且可能互相竞态。 - **死路 B（放弃）**：sessionStorage 记「最后列表 URL」——多标签页隐式共享面、SSR hydration 需要挂载后二次渲染切 href，复杂度高于收益。 - **死路 C（放弃）**：详情页 URL 反向携带列表 query——污染详情 URL（分享/收藏语义脏）， 且从工作区首页等非列表入口进详情时无 query 可带。
+
+## D-unmapped-071@v1 设计期风险与放弃方案（底稿）
+状态：implemented
+变更：2026-10-16-change-title-condense-backfill
+原编号：D-001@v1
+锚点：未记录
+最近确认：26271e914c9bd670faf2da32ab0851025c5e6598
+理由：最大风险：提炼结果语义跑偏（标点切断点选错把句子切成病句）。缓解：强边界（句读完整处）优先、必须带 [10,30] 内取首个边界、本仓实证坏样本全部进单测人工核过产出；且 title 只是展示面，错了可由人工改名端点（FR-05/06）随时纠正——这也是补改名能力的动机：提炼是兜底自动化，最终命名权在人。 试过放弃的方案：(a) 在前端展示层动态截 title——治标不治数据，详情页/搜索/通知等其余消费面仍旧烂，弃；(b) 回填脚本去工作区盘上重读 proposal.md 取动机——读盘逻辑与 reparse 职责重叠且工作区可能已迁移/不可达，description 列已是同源提取结果，弃；(c) 放宽收养守卫让 CLI 短标题覆盖平台已有语义标题——动 2026-09-30-title-adopt-clobber-guard 的防回翻语义，影响面大，存量修复不需要它，弃；(d) 复活 change:update 权限做改名——该权限 2026-10-08 刚因零消费被清理，改名复用删除端点已验证的 owner OR CHANGE_ARCHIVE 三元组（与用户点名组完全一致），弃。
+
+## D-unmapped-072@v1 设计期风险与放弃方案（底稿）
+状态：implemented
+变更：2026-10-16-change-center-delete-back-keeps-state
+原编号：D-001@v1
+锚点：未记录
+最近确认：7da2c5633e9545629ed1e8967bbeba405e4a1055
+理由：- **风险①（已知取舍）**：history.length>1 判定在「从站外页进详情后删除」场景 back 回 站外页——与上一变更 BackToListLink 同款取舍（Next 14.2.5 无栈深标记，内部工具罕见， 标准返回语义），接受。 - **风险②（已知取舍）**：bfcache 恢复路径下列表数据短暂陈旧（已删行可能闪现一帧，随后 focus refetch 收敛）——跨 document 无法主动失效，与现状删除行为一致，非本变更引入。 - **风险③**：钳回与 URL 写回的时序——真实路径下进详情前列表 URL 已是超界态 （如 ？page=5，上一变更写回 effect 落的），back/整页载入挂载后写回首跑同址跳过； 数据到达后钳回 setPage(4) 再写回 ？page=4，URL 一次翻转、终态正确，窗口小于首查 往返时长，接受。（评审 P3 修正：原稿误写为挂载写回先落 ？page=5——挂载首跑同址 跳过，不存在该额外动作。） - **死路 A（放弃）**：详情页删除后 push 带 query 的列表 URL——详情页不知道来路列表的 tab/page（无 channel），伪造默认状态等于维持现状 bug。 - **死路 B（放弃）**：删除后一律回第 1 页——用户在归档区第 5 页连续清理时每次被甩回 首页，体验差且与「返回保状态」诉求相悖。
+
+## D-unmapped-073@v1 设计期风险与放弃方案（底稿）
+状态：implemented
 变更：2026-10-16-pg-index-local-followup
 原编号：D-001@v1
 锚点：未记录
 最近确认：08aa9fa699db804e74b848e3aa801de390550c08
 理由：最大风险：补记落 uncategorized 暂存域，未被分类吸收前检索命中率依赖关键词；缓解——小节标题复用事故条目核心词（索引静默损坏/amcheck/归档后仍进行中），与原条目同主题可串联检索。死路：改写既有生产条目把本地数字并入——已放弃，违反 FR-02 且抹掉两次发病的实例差异（需去重 vs 免去重），而该差异恰是「容器被杀风暴后遗症」家族谱系里最有复用价值的分叉知识。
 
-## D-unmapped-057@v1 设计期风险与放弃方案（底稿）
+## D-unmapped-074@v1 设计期风险与放弃方案（底稿）
 状态：implemented
 变更：2026-10-16-knowledge-module-card
 原编号：D-001@v1
@@ -291,7 +441,7 @@
 最近确认：cc1c9a3f91f025c3685e89bf4416c635aef318d6
 理由：最大风险：`_module-map.yaml` 头部标注 generator: sillyspec-scan——后续重跑 scan 若全量重生成可能冲掉手改条目；缓解：文件头同时注明「可手动修改」，scan 为 advisory 流程（人工确认后才落盘），且本条目 paths 是 scan 无法推导的规范资产域（scan 只扫代码路径），冲突概率低。死路：手工把 3 条 FR 剪切粘贴到新文件并自行重编号——已放弃，违反迁域不换号铁律（ID 是绑定/supersede 链寻址键），且伪域文件清理状态（清空 vs 移除）手搬无法与 CLI 的 fr-index 幂等提炼状态机对齐。
 
-## D-unmapped-058@v1 rejected 方案 B——后端聚合端点 GET /sessions/{id}/decisions
+## D-unmapped-075@v1 rejected 方案 B——后端聚合端点 GET /sessions/{id}/decisions
 状态：rejected
 变更：2026-10-16-session-decision-pill
 原编号：D-006@v1
@@ -301,13 +451,86 @@
 否决理由：跨模块后端改动（daemon 模块 + OpenAPI + 前端/daemon 双端 gen:types 义务）与功能价值不成比例；普通审批在后端内存态重启照丢，聚合收益有限
 复潮条件：决策数据需要刷新强一致（含内存 pending）或移动端/第三方也要消费会话决策聚合时
 
-## D-unmapped-059@v1 设计期风险与放弃方案（底稿）
+## D-unmapped-076@v1 设计期风险与放弃方案（底稿）
 状态：implemented
 变更：2026-10-16-decision-pill-no-workspace
 原编号：D-001@v1
 锚点：未记录
 最近确认：256aa6feb2c4349f3d4a1b513e94fb9fa5fddd0e
 理由：最大风险：无（渲染条件放宽面极小——待决策 pill 自带三类全空渲染 null 的显隐门）。放弃的方案：给老会话回填 workspace_id（数据修复面大且改变会话归属语义，否决——显隐不应依赖归属字段完整性）。
+
+## D-unmapped-077@v1 设计期风险与放弃方案（底稿）
+状态：implemented
+变更：2026-10-17-audit-risk-followup
+原编号：D-001@v1
+锚点：未记录
+最近确认：7faec5bfa12ed2e7159077f469589243fb36ee5b
+理由：最大风险：FR-04 时机后移后，pre_swap 至抑制应用之间若「已删」文件被重建，落地的是 bundle 旧内容（覆盖重建内容）——但重建内容已经 pre_swap 在服务器留底、下跳心跳拉齐自愈，无净丢失，与既有「窗口写入」语义一致，非新引入风险。试过但放弃：在抑制应用处对「窗口内重建」做内容级区分（bundle 旧内容 vs 重建内容择优保留）——需缓存窗口内写入快照并做内容合并，复杂度与收益不成比例。CLI 仓（sillyspec da8d2449 同构移植）的同类残余窗口留待后续变更同构收口。
+
+## D-unmapped-078@v1 设计期风险与放弃方案（底稿）
+状态：implemented
+变更：2026-10-17-zcode-provider-config-shape
+原编号：D-001@v1
+锚点：未记录
+最近确认：40217abbd7f2a0d0cac4d6af1e0f784f68e21689
+理由：最大风险：引擎版本演进改目录推送时序或 setModel schema（如将来允许字符串/免 reasoningLevel）——60s 窗口与 levels 提取按当前实证形状钉死，引擎升级需回归（MIN_VERSIONS zcode (0,16,9) 已有版本门兜底）。已试并放弃：裸 setModel 兜底重试（引擎对象路径缺 reasoningLevel 恒拒，重试无意义）；setModel 前置到会话空闲期后台执行（engine 默认模型不保证等于平台路由模型，turn 1 可能脱路由——保持阻塞确定性优先）。
+
+## D-unmapped-079@v1 设计期风险与放弃方案（底稿）
+状态：implemented
+变更：2026-10-17-dsh-rc2-protocol-fix
+原编号：D-001@v1
+锚点：未记录
+最近确认：162dbfefd8fa71afb10e792dc493c59dfaae4c0b
+理由：最大风险：dsh 后续 rc.x 再改 schema（alpha 通道本质）——非致命降级兜底使其退化为「默认模型 + warn」而非会话死亡；overlay（llm-pi-ai 路由）对 rc.2 的适配是独立后续任务（与本修复解耦）。已放弃：版本回 pin（npm latest 即 rc.2，next 线 0.2.1-rc.1 同代 schema，无更稳旧版可退）。
+
+## D-unmapped-080@v1 设计期风险与放弃方案（底稿）
+状态：implemented
+变更：2026-10-17-dsh-rc2-routing-restore
+原编号：D-001@v1
+锚点：未记录
+最近确认：3fe545c63a4538a83f96a965c92579982bd388e9
+理由：最大风险：dsh 下个版本再改 compatProfile/valueId 形状——探针脚本 + configOptions 运行时可观测（模型目录出现/消失一目了然），回归成本低。已放弃：保留 compat 块仅修正漂移字段（rc.2 schema 字段集未文档化，逐字段试探成本高于整块去除——catalog 默认值由引擎按 api 协议自动补齐，语义无损）。
+
+## D-unmapped-081@v1 设计期风险与放弃方案（底稿）
+状态：implemented
+变更：2026-10-17-session-replay-pingpong-fix
+原编号：D-001@v1
+锚点：未记录
+最近确认：ec360c91bacb3ba997a8249f7c3e6d015d2f3e78
+理由：最大风险：比较漏判让乒乓换个字段复活。user 若未来从扁平对象演化为嵌套可变对象，现行「键排序后序列化」只对顶层键排序、不递归——需升级为递归 canonical（或改存单调版本号比对），session.test.ts 的键序用例会先红提示。 放弃的方案：①自定义 storage 包装层做写前去重——改动所有落盘路径，风险大于收益；②比较完整信封原始字符串——两端内存 user 对象键序不同会令字符串恒不等，乒乓换字段复活；③给 (dashboard)/layout 的 fetchMe 加节流——只治标，每秒 10+ 次 setItem 的写盘风暴仍在。
+
+## D-unmapped-082@v1 设计期风险与放弃方案（底稿）
+状态：implemented
+变更：2026-10-17-session-envelope-rev-stale-guard
+原编号：D-001@v1
+锚点：未记录
+最近确认：166ea374aaa46cc0045c43bb4cb71a25e87063fa
+理由：最大风险：rev 分叉后同 rev 异内容互相覆盖出现「状态回摆」——分析后不成立：等 rev 内容比对必收敛到后写盘值，且真实 token 变更前总有一次网络往返（续票/登录），窗口内双写概率趋零；即便发生也是一次往返内自愈，非环。 放弃的方案：①用 Date.now() 时间戳做序——同机时钟看似可行，但测试确定性与「用户回拨系统时间」边缘不可控，计数器更简单；②在 persist 外再包自定义 storage 做写前去重——改动所有落盘路径，风险大于收益；③维持现状只记风险——幽灵复活虽罕见但后果（看似已登出实则持有撤销会话）难排查，趁 P3 记忆新鲜收口。
+
+## D-unmapped-083@v1 设计期风险与放弃方案（底稿）
+状态：implemented
+变更：2026-10-18-audit-log-redact-yaml-quote
+原编号：D-001@v1
+锚点：未记录
+最近确认：60f8d9e41e2ccb9446325a0679f0fb6a5ec2c31e
+理由：最大风险：userinfo 打码正则漏形态。正则取 `scheme://` 后不含 `/`、`@`、空白的第一段为 userinfo（覆盖 `user` 与 `user:pass`）；用户名含 URL 编码 `%40` 时不匹配、原样输出——残余暴露面收窄但未归零（与 KEY/TOKEN 整值红action 的严格度差异在函数注释声明）。已放弃方案：a) PROXY 键整值 `<redacted>`——丢 host 诊断价值，与该日志存留目的冲突；b) YAML 双引号 + JSON.stringify 转义——对控制字符更严但转义面大，无需求支撑。
+
+## D-unmapped-084@v1 设计期风险与放弃方案（底稿）
+状态：implemented
+变更：2026-10-18-change-type-git-conventional
+原编号：D-001@v1
+锚点：未记录
+最近确认：261a333678e8722856b7120606385f52e31e8579
+理由：最大风险：提交归属误判。两类实证坑已堵——① 跨变更引用（提交信息正文提及评审 出处变更 key）：按「信息中**最后一个** key 形态 token」归属，不按出现过即归属； ② CLI 基线检查点提交 `sillyspec: baseline checkpoint for <key> …` 的 `sillyspec:` 撞 conventional 前缀正则：类型白名单（feat/fix/perf/refactor/test/docs/style/ build/ci/chore/revert）外一律不认。残余面：变更唯一提及在 release-notes 类提交 里 → 归 docs（可接受，此类变更本就是文档面）；老变更提交不带 key（215 个 no_match）→ 不猜不写，保持现状显示。 试过放弃：A. 平台侧解析 timeline.md 提交锚——主提交只有裸哈希无标题，判不出 fix（实证：session-envelope 会错判 docs）；B. 标题/动机关键词推导——「防迟到旧值 覆盖」类中文概括无稳定关键词，猜错比不猜伤害大；C. 新增平台端点直写类型——要动 鉴权/审计面，而 spec-sync 镜像通道现成且 reparse 已消费该目录。
+
+## D-unmapped-085@v1 设计期风险与放弃方案（底稿）
+状态：implemented
+变更：2026-10-18-change-list-type-filter
+原编号：D-001@v1
+锚点：未记录
+最近确认：857d8af461ea4aa3705016087c3d9124105a3180
+理由：最大风险：筛选值集与展示映射漂移（feat↔feature 口径在后端 aliases、前端 COMMIT_TYPE_DISPLAY 两处维护）。缓解：两端各有测试钉（后端 feat 等价命中用例 / 前端 feature→feat 显示用例），且值集注释互指对方为权威。残余面：TYPE_OPTIONS 未 列 ci/revert/quick（防下拉过长），后端白名单仍可筛——深链手输 URL 可用，下拉不可 选，属有意取舍。 试过放弃：A. 类型筛选复用 lineage 的「全局集合→SQL IN」两阶段——类型是列值非 投影字段，直接 where 即可，无需两阶段；B. 前端本地过滤——total/分页会错 （pending_review_only gap② 前车之鉴），必须服务端筛。
+
 
 ## D-unmapped-060@v1 设计期风险与放弃方案（底稿）
 状态：implemented

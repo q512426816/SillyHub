@@ -5073,7 +5073,360 @@
 全文：.sillyspec/changes/archive/2026-10-16-session-run-status-realtime/requirements.md#FR-05
 最近确认：3472327464a8e8f9d8829a5e9b35fda123a9b719
 
-## FR-daemon-145 平台内切换供应商时，resume 前必须清洗 transcript 里的供应商私有块
+## FR-daemon-145 pullSpecBundle 落地前按 LocalManifest 算「本地已删面」（manifest 有/盘面无/属同步面），解包产物命中文件不落地，swap 与 in-place 兜底两路径均不复活
+变更：2026-10-16-daemon-pull-antiresurrect
+状态：active
+摘要：主路径
+场景正文：
+- 场景：主路径 — Given LocalManifest 含 docs/b.md 且盘面 specDir 下无 docs/b.md（本地已删除、删除 op 未上行），When pullSpe
+全文：.sillyspec/changes/archive/2026-10-16-daemon-pull-antiresurrect/requirements.md#FR-01
+最近确认：056cff30397de0c5001874901cbbe03d6319df65
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-16-daemon-pull-antiresurrect:flow:测试绑定FR-01
+  tests: sillyhub-daemon/tests/pull-antiresurrect.test.ts「用例1（核心）：manifest 有/盘面无/同步面 → 解包产物不落地（不复活）+ warn 点名」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-16-daemon-pull-antiresurrect
+  status: active
+
+## FR-daemon-146 manifest 缺失/解析失败/首拉 = 无抑制面，既有全量回放行为不变
+变更：2026-10-16-daemon-pull-antiresurrect
+状态：active
+摘要：主路径
+场景正文：
+- 场景：主路径 — Given 本地无 manifest 缓存（首拉），When pullSpecBundle 消费含任意文件的 bundle，Then bundle 全部文件落地、无防复活抑
+全文：.sillyspec/changes/archive/2026-10-16-daemon-pull-antiresurrect/requirements.md#FR-02
+最近确认：056cff30397de0c5001874901cbbe03d6319df65
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-16-daemon-pull-antiresurrect:flow:测试绑定FR-02
+  tests: sillyhub-daemon/tests/pull-antiresurrect.test.ts「用例2：manifest 缺失（首拉）= 无抑制面，全量落地（既有行为不变）」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-16-daemon-pull-antiresurrect
+  status: active
+
+## FR-daemon-147 命中面 warn 点名（截断 5）+ 恢复通道（PullSpecBundleOptions.restoreDeleted 或环境变量 SILLYHUB_DAEMON_RESTORE_DELETED=1 跳过抑制）
+变更：2026-10-16-daemon-pull-antiresurrect
+状态：active
+摘要：主路径
+场景正文：
+- 场景：主路径 — Given 抑制面非空且 bundle 携带命中文件，When 不设恢复通道执行 pull，Then warn 日志点名被挡路径；When 设置 opts.restoreD
+全文：.sillyspec/changes/archive/2026-10-16-daemon-pull-antiresurrect/requirements.md#FR-03
+最近确认：056cff30397de0c5001874901cbbe03d6319df65
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-16-daemon-pull-antiresurrect:flow:测试绑定FR-03
+  tests: sillyhub-daemon/tests/pull-antiresurrect.test.ts「用例3：restoreDeleted（opts / env）= 显式恢复，跳过抑制」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-16-daemon-pull-antiresurrect
+  status: active
+
+## FR-daemon-148 抑制跨 pull 持久——落地重建基线保留被抑制行，直至删除 op 上行成功自然衰减
+变更：2026-10-16-daemon-pull-antiresurrect
+状态：active
+摘要：主路径
+场景正文：
+- 场景：主路径 — Given 被抑制 pull 完成且删除 op 未上行（manifest 基线仍含该行），When 第二次 pullSpecBundle 消费仍携带该文件的 bundle，
+全文：.sillyspec/changes/archive/2026-10-16-daemon-pull-antiresurrect/requirements.md#FR-04
+最近确认：056cff30397de0c5001874901cbbe03d6319df65
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-16-daemon-pull-antiresurrect:flow:测试绑定FR-04
+  tests: sillyhub-daemon/tests/pull-antiresurrect.test.ts「用例1（核心）」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-16-daemon-pull-antiresurrect
+  status: active
+
+## FR-daemon-149 vitest 新用例覆盖抑制/无基线全量/恢复通道/排除口径四点，既有测试零回归，tsc 通过
+变更：2026-10-16-daemon-pull-antiresurrect
+状态：active
+摘要：主路径
+场景正文：
+- 场景：主路径 — 
+全文：.sillyspec/changes/archive/2026-10-16-daemon-pull-antiresurrect/requirements.md#FR-05
+最近确认：056cff30397de0c5001874901cbbe03d6319df65
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-16-daemon-pull-antiresurrect:flow:测试绑定FR-05
+  tests: sillyhub-daemon/tests/pull-antiresurrect.test.ts
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-16-daemon-pull-antiresurrect
+  status: active
+
+## FR-daemon-150 兜底读取 full-tree 记录，让跨变更冲突的对比可用
+变更：2026-10-16-conflict-full-tree-compare
+状态：active
+摘要：默认场景；主路径（兜底命中）
+依据决策：D-001@v1
+场景正文：
+- 场景：默认场景 — Given 某冲突在机器上落盘为 `spec-sync-conflict-full-tree.json` 且平台行按单变更名 `<change>` 请求对比；When `kind=spec-tree` 且按 `<change>` 读取记录返回 `conflict_record_missing`，而 `full-tree` 记录；Then 平台必须（MUST）以 `full-tree` 记录构建该变更范围内的对比并返回 200；兜底**必须只重试一次**（MUST NOT 递归或多次重取）；实现*
+- 场景：主路径（兜底命中） — Given full-tree 记录含 `changes/archive/<change>/…` 路径；When 对比请求先失败为 `conflict_record_missing`；Then 返回 200 且 `record_label="full-tree"`；daemon RPC 恰好被调用两次（先 `<change>` 后 `full-tree
+全文：.sillyspec/changes/archive/2026-10-16-conflict-full-tree-compare/requirements.md#FR-01
+最近确认：d3c425bf6
+
+## FR-daemon-151 对比只呈现所请求变更的范围，并标注来源
+变更：2026-10-16-conflict-full-tree-compare
+状态：active
+摘要：默认场景；段边界防误吞
+依据决策：D-006@v2
+场景正文：
+- 场景：默认场景 — Given 兜底命中且 `full-tree` 快照覆盖多个变更的路径；When 生成对比响应；Then 文件清单与 diff **必须（MUST）只包含** `changes/<change>/` 或 `changes/archive/<change>/` 属于该
+- 场景：段边界防误吞 — Given full-tree 记录只含 `changes/foobar/…` 路径；When 请求 `<change>=foo`；Then 兜底不命中（MUST 返回原 `conflict_record_missing` 错误），不得把 `foobar` 的文件混入对比
+全文：.sillyspec/changes/archive/2026-10-16-conflict-full-tree-compare/requirements.md#FR-02
+最近确认：d3c425bf6
+
+## FR-daemon-152 失败文案按真实错误码分支
+变更：2026-10-16-conflict-full-tree-compare
+状态：active
+摘要：默认场景；记录缺失分支
+依据决策：D-004@v1
+场景正文：
+- 场景：默认场景 — Given 对比请求失败；When 前端渲染失败卡；Then 分支键**必须（MUST）**为 `details.daemon_code`（daemon 业务失败时外层 `ApiError.code` 恒为 `HTTP_5
+- 场景：记录缺失分支 — Given 对比返回 502 且 `details.daemon_code="conflict_record_missing"`；When 失败卡渲染；Then 文案为「该冲突在本机已无快照…请重新同步后再试」且页面上**不存在**「重试」按钮与「504」「离线」字样
+全文：.sillyspec/changes/archive/2026-10-16-conflict-full-tree-compare/requirements.md#FR-03
+最近确认：d3c425bf6
+
+## FR-daemon-153 冲突行手动关闭入口（标记已处理）
+变更：2026-10-16-conflict-full-tree-compare
+状态：active
+摘要：默认场景；关闭后消失与可复现
+依据决策：D-003@v1
+场景正文：
+- 场景：默认场景 — Given 可操作者看到一条来自平台注册表的未决冲突行；When 点击行上「标记已处理」并二次确认；Then 前端**必须（MUST）**调 `POST /api/workspaces/{workspace_id}/spec-conflicts/{conflict_id
+- 场景：关闭后消失与可复现 — Given 注册表有 1 条 open 行（含 2 个变更名的并列展示行）；When 可操作者确认「标记已处理」；Then 两行同时从列表消失；若该冲突仍在本机存在，下一次冲突推送**可以（MAY）**重新登记新的 open 行（不视为回归）
+全文：.sillyspec/changes/archive/2026-10-16-conflict-full-tree-compare/requirements.md#FR-04
+最近确认：d3c425bf6
+
+## FR-daemon-154 契约与类型同步
+变更：2026-10-16-conflict-full-tree-compare
+状态：active
+摘要：默认场景
+场景正文：
+- 场景：默认场景 — Given 后端 compare 响应新增可选字段；When 本变更交付；Then `backend/openapi.json`、`frontend/src/lib/api-types.ts`、`sillyhub-daemon/src/api-
+全文：.sillyspec/changes/archive/2026-10-16-conflict-full-tree-compare/requirements.md#FR-05
+最近确认：d3c425bf6
+
+## FR-daemon-155 buildZcodeProviderConfig 输出形状与宿主有效配置一致（providerConfigRules:{providerRules:[...]} + modelConfigRules:{providerModelRules:[],manualProviderModelRules:[]}），单测钉形状
+变更：2026-10-17-zcode-provider-config-shape
+状态：active
+摘要：主路径
+场景正文：
+- 场景：主路径 — Given 有效 baseUrl/apiKey/model 的 provider；When 调用 buildZcodeProviderConfig；Then 返回对象满足上述形状（单测全等断言钉板）
+全文：.sillyspec/changes/archive/2026-10-17-zcode-provider-config-shape/requirements.md#FR-01
+最近确认：40217abbd7f2a0d0cac4d6af1e0f784f68e21689
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-17-zcode-provider-config-shape:flow:测试绑定FR-01
+  tests: sillyhub-daemon/tests/zcode-settings.test.ts「schemaVersion=1 + providerOrder + providerRules 对象包裹 + modelConfigRules 两键（逐字段对齐宿主有效实例）」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-17-zcode-provider-config-shape
+  status: active
+
+## FR-daemon-156 _applyModel 三路径（精确命中/大小写命中/超时回退）均发送字符串 modelId，单测钉超时回退路径
+变更：2026-10-17-zcode-provider-config-shape
+状态：active
+摘要：主路径
+场景正文：
+- 场景：主路径 — Given start opts.model='GLM-5.3' 且引擎推送目录条目 modelId='glm-5.3'（levels=[low,high,max], de；When _applyModel 执行；Then setModel 参数为 `{providerId:'sillyhub', modelId:'glm-5.3', options:{reasoningLevel
+全文：.sillyspec/changes/archive/2026-10-17-zcode-provider-config-shape/requirements.md#FR-02
+最近确认：40217abbd7f2a0d0cac4d6af1e0f784f68e21689
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-17-zcode-provider-config-shape:flow:测试绑定FR-02
+  tests: sillyhub-daemon/tests/interactive/zcode-app-server-driver.test.ts「create → subscribe → setModel → 乒乓一轮全链路（帧形状钉板）」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-17-zcode-provider-config-shape
+  status: active
+
+## FR-daemon-157 单测全绿（zcode-settings + zcode driver 相关）
+变更：2026-10-17-zcode-provider-config-shape
+状态：active
+摘要：主路径
+场景正文：
+- 场景：主路径 — When `pnpm vitest run <三文件>` 与 `pnpm typecheck`；Then 全部通过、无类型错误
+全文：.sillyspec/changes/archive/2026-10-17-zcode-provider-config-shape/requirements.md#FR-03
+最近确认：40217abbd7f2a0d0cac4d6af1e0f784f68e21689
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-17-zcode-provider-config-shape:flow:测试绑定FR-03
+  tests: sillyhub-daemon/tests/interactive/zcode-app-server-driver.test.ts | sillyhub-daemon/tests/interactive/zcode-events.test.ts | sillyhub-daemon/tests/zcode-settings.test.ts
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-17-zcode-provider-config-shape
+  status: active
+
+## FR-daemon-158 重建 bundle 安装到本机 daemon 并重启，生产后端实测：新建 zcode 会话发一轮消息，turn 完成、回复落库渲染、模型路由走 SillyHub provider（daemon.log 无 Provider Registry/Select a model 错误）
+变更：2026-10-17-zcode-provider-config-shape
+状态：active
+摘要：主路径
+场景正文：
+- 场景：主路径 — Given 新 bundle 已安装且 daemon 重启完成；When 经 POST /api/daemon/sessions 创建 zcode（及 dsh）会话发一轮消息；Then run completed、tokens 消费为真值、无上述错误日志
+全文：.sillyspec/changes/archive/2026-10-17-zcode-provider-config-shape/requirements.md#FR-04
+最近确认：40217abbd7f2a0d0cac4d6af1e0f784f68e21689
+
+## FR-daemon-159 session/new 恒带 mcpServers:[] 占位（rc.2 必填、旧版兼容），探针验证握手通过
+变更：2026-10-17-dsh-rc2-protocol-fix
+状态：active
+摘要：主路径
+全文：.sillyspec/changes/archive/2026-10-17-dsh-rc2-protocol-fix/requirements.md#FR-01
+最近确认：162dbfefd8fa71afb10e792dc493c59dfaae4c0b
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-17-dsh-rc2-protocol-fix:flow:测试绑定FR-01
+  tests: sillyhub-daemon/tests/interactive/dsh-acp-driver.test.ts「model + thinkingLevel=medium → set_config_option 扁平形状(configId=model/reasoning_effort)；off → 不发档位」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-17-dsh-rc2-protocol-fix
+  status: active
+
+## FR-daemon-160 set_config_option 改扁平形状（configId=model/reasoning_effort），设置失败降级 warn 非致命（不再杀会话），单测钉新形状
+变更：2026-10-17-dsh-rc2-protocol-fix
+状态：active
+摘要：主路径
+全文：.sillyspec/changes/archive/2026-10-17-dsh-rc2-protocol-fix/requirements.md#FR-02
+最近确认：162dbfefd8fa71afb10e792dc493c59dfaae4c0b
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-17-dsh-rc2-protocol-fix:flow:测试绑定FR-02
+  tests: sillyhub-daemon/tests/interactive/dsh-acp-driver.test.ts
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-17-dsh-rc2-protocol-fix
+  status: active
+
+## FR-daemon-161 驱动失败路径留痕：握手里程碑、consume failed 原因、子进程退出，daemon.log 可见
+变更：2026-10-17-dsh-rc2-protocol-fix
+状态：active
+摘要：主路径
+全文：.sillyspec/changes/archive/2026-10-17-dsh-rc2-protocol-fix/requirements.md#FR-03
+最近确认：162dbfefd8fa71afb10e792dc493c59dfaae4c0b
+
+## FR-daemon-162 dsh 驱动相关单测全绿（15 用例）；typecheck 干净
+变更：2026-10-17-dsh-rc2-protocol-fix
+状态：active
+摘要：主路径
+全文：.sillyspec/changes/archive/2026-10-17-dsh-rc2-protocol-fix/requirements.md#FR-04
+最近确认：162dbfefd8fa71afb10e792dc493c59dfaae4c0b
+
+## FR-daemon-163 writeDshHome 写三件套（package.json 模板清单 + pnpm-workspace.yaml + 无 compat 的 patch），单测钉三件与「禁 compat」
+变更：2026-10-17-dsh-rc2-routing-restore
+状态：active
+摘要：主路径
+全文：.sillyspec/changes/archive/2026-10-17-dsh-rc2-routing-restore/requirements.md#FR-01
+最近确认：3fe545c63a4538a83f96a965c92579982bd388e9
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-17-dsh-rc2-routing-restore:flow:测试绑定FR-01
+  tests: sillyhub-daemon/tests/dsh-settings.test.ts
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-17-dsh-rc2-routing-restore
+  status: active
+
+## FR-daemon-164 驱动 set_config_option 模型值 = ["sillyhub","<model>"] JSON 数组串，单测钉板
+变更：2026-10-17-dsh-rc2-routing-restore
+状态：active
+摘要：主路径
+全文：.sillyspec/changes/archive/2026-10-17-dsh-rc2-routing-restore/requirements.md#FR-02
+最近确认：3fe545c63a4538a83f96a965c92579982bd388e9
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-17-dsh-rc2-routing-restore:flow:测试绑定FR-02
+  tests: sillyhub-daemon/tests/interactive/dsh-acp-driver.test.ts「model + thinkingLevel=medium → set_config_option 扁平形状…」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-17-dsh-rc2-routing-restore
+  status: active
+
+## FR-daemon-165 通知信封拆包兼容两种形状（有 update 键即拆），单测/真机验证回复落库
+变更：2026-10-17-dsh-rc2-routing-restore
+状态：active
+摘要：主路径
+全文：.sillyspec/changes/archive/2026-10-17-dsh-rc2-routing-restore/requirements.md#FR-03
+最近确认：3fe545c63a4538a83f96a965c92579982bd388e9
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-17-dsh-rc2-routing-restore:flow:测试绑定FR-03
+  tests: sillyhub-daemon/tests/interactive/dsh-acp-driver.test.ts | sillyhub-daemon/tests/interactive/dsh-acp-events.test.ts
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-17-dsh-rc2-routing-restore
+  status: active
+
+## FR-daemon-166 UI 真机一轮：dsh 会话回复正常渲染，模型自答 GLM-5.3-FlashX/智谱
+变更：2026-10-17-dsh-rc2-routing-restore
+状态：active
+摘要：主路径
+全文：.sillyspec/changes/archive/2026-10-17-dsh-rc2-routing-restore/requirements.md#FR-04
+最近确认：3fe545c63a4538a83f96a965c92579982bd388e9
+
+## FR-daemon-167 typecheck + dsh 相关单测全绿
+变更：2026-10-17-dsh-rc2-routing-restore
+状态：active
+摘要：主路径
+全文：.sillyspec/changes/archive/2026-10-17-dsh-rc2-routing-restore/requirements.md#FR-05
+最近确认：3fe545c63a4538a83f96a965c92579982bd388e9
+
+## FR-daemon-168 平台内切换供应商时，resume 前必须清洗 transcript 里的供应商私有块
 变更：2026-10-16-provider-switch-transcript-sanitize
 状态：active
 摘要：主路径——切供应商后 resume 读到的历史已干净；边界——非切换轮不清洗 / 探测不到则不阻断
@@ -5095,7 +5448,7 @@
   source_change: 2026-10-16-provider-switch-transcript-sanitize
   status: active
 
-## FR-daemon-146 清洗后的历史必须能被真实新供应商接受（实测证据）
+## FR-daemon-169 清洗后的历史必须能被真实新供应商接受（实测证据）
 变更：2026-10-16-provider-switch-transcript-sanitize
 状态：active
 摘要：对照实验——同一形态两种编码，端点一拒一收
@@ -5104,7 +5457,7 @@
 全文：.sillyspec/changes/archive/2026-10-16-provider-switch-transcript-sanitize/requirements.md#FR-02
 最近确认：030eceeece1388442415e8cd66c3cd3cc443083d
 
-## FR-daemon-147 模型错误分类器必须识别「供应商拒收历史」签名并给出可执行提示
+## FR-daemon-170 模型错误分类器必须识别「供应商拒收历史」签名并给出可执行提示
 变更：2026-10-16-provider-switch-transcript-sanitize
 状态：active
 摘要：签名命中与不误伤
@@ -5125,7 +5478,7 @@
   source_change: 2026-10-16-provider-switch-transcript-sanitize
   status: active
 
-## FR-daemon-148 守护测试必须覆盖清洗内核三类形态、链路完整性与备份
+## FR-daemon-171 守护测试必须覆盖清洗内核三类形态、链路完整性与备份
 变更：2026-10-16-provider-switch-transcript-sanitize
 状态：active
 摘要：测试面全绿
@@ -5146,7 +5499,7 @@
   source_change: 2026-10-16-provider-switch-transcript-sanitize
   status: active
 
-## FR-daemon-149 宿主机档位变化 → 本机默认会话引擎自动重载
+## FR-daemon-172 宿主机档位变化 → 本机默认会话引擎自动重载
 变更：2026-10-19-host-settings-live-reload
 状态：active
 摘要：主路径——空闲本机默认会话即时跟随；边界——运行中与终态
@@ -5168,7 +5521,7 @@
   source_change: 2026-10-19-host-settings-live-reload
   status: active
 
-## FR-daemon-150 触发精度与零误伤
+## FR-daemon-173 触发精度与零误伤
 变更：2026-10-19-host-settings-live-reload
 状态：active
 摘要：精度——非 env 变化与损坏容错
@@ -5189,7 +5542,7 @@
   source_change: 2026-10-19-host-settings-live-reload
   status: active
 
-## FR-daemon-151 守护测试与真机验证留痕
+## FR-daemon-174 守护测试与真机验证留痕
 变更：2026-10-19-host-settings-live-reload
 状态：active
 摘要：测试面全绿

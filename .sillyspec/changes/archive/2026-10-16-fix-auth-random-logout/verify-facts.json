@@ -1,0 +1,126 @@
+{
+  "apiFace": {
+    "endpoints": [],
+    "declared": 0,
+    "writeEndpoints": []
+  },
+  "schemaVersion": 2,
+  "change": "2026-10-16-fix-auth-random-logout",
+  "generatedAt": "2026-10-16T09:11:21.371Z",
+  "probes": {
+    "probe1": {
+      "command": "sillyspec verify-probes --change 2026-10-16-fix-auth-random-logout",
+      "metrics": {
+        "matches": 1,
+        "skippedFiles": 0,
+        "worktreeHits": 0,
+        "globEntries": 0
+      }
+    },
+    "probe3": {
+      "command": "sillyspec verify-probes --change 2026-10-16-fix-auth-random-logout",
+      "metrics": {
+        "tasks": 4,
+        "hasTest": 3
+      }
+    },
+    "probe5": {
+      "command": "sillyspec verify-probes --change 2026-10-16-fix-auth-random-logout",
+      "metrics": {
+        "backendEndpoints": 2406,
+        "frontendCalls": 1
+      }
+    },
+    "probe6": {
+      "command": "sillyspec verify-probes --change 2026-10-16-fix-auth-random-logout",
+      "metrics": {
+        "deletions": 0,
+        "unavailable": false
+      }
+    },
+    "probe8": {
+      "command": "sillyspec verify-probes --change 2026-10-16-fix-auth-random-logout",
+      "metrics": {
+        "mispairs": 0,
+        "feOnly": 0,
+        "missingNotNull": 0,
+        "contractCount": 0,
+        "contractOrphans": 0,
+        "missingRequired": 0,
+        "feKeys": 0,
+        "backendFields": 0
+      }
+    },
+    "probe9": {
+      "command": "sillyspec verify-probes --change 2026-10-16-fix-auth-random-logout",
+      "metrics": {
+        "javaFileCount": 0,
+        "groupCount": 0,
+        "inconsistentGroups": 0
+      }
+    },
+    "probe10": {
+      "command": "sillyspec verify-probes --change 2026-10-16-fix-auth-random-logout",
+      "metrics": {
+        "checkedFiles": 5,
+        "unclearedFiles": 0
+      }
+    }
+  },
+  "conclusion": "PASS WITH NOTES",
+  "handover": {
+    "count": 3,
+    "items": [
+      {
+        "type": "env-blocked",
+        "item": "本地 PG 全链 `uv run alembic upgrade head` 被既有 pgvector 镜像欠账阻塞（迁移 `20261015200000` fail-closed；2026-10-15 变更本地环境债，非本变更引入）",
+        "condition": "本地 postgres 镜像换 `pgvector/pgvector:pg16`（deploy/docker-compose*.yml）后重启 PG 再跑 `cd backend && uv run alembic upgrade head`（数据卷不丢）；本变更迁移段已在 SQLite 隔离实操验证（`stamp 20261016100000 → upgrade`），生产容器启动链自带 upgrade head",
+        "severity": "blocking"
+      },
+      {
+        "type": "manual-acceptance",
+        "item": "P3 cosmetic：`backend/tests/modules/auth/test_refresh_grace_window.py:23-27` 历史 TDD 阶段注释（\"红/绿\"叙事）残留，建议顺手清理（探针 1 命中源，语义已复核非未实现标记）",
+        "condition": "下次触碰该文件时删除该段或改写为现行语义（不阻断）",
+        "severity": "advisory"
+      },
+      {
+        "type": "manual-acceptance",
+        "item": "跨变更存量债：`backend/app/modules/agent/tests/test_agent_session_model.py` 字段钉 34 未含 mem-polling 新增 `title_fallback`（预存失败，非本变更所致；本次以窄锚豁免放行，`.sillyspec/local.yaml` 已留归因注释）",
+        "condition": "独立 quick/小变更：expected 集补 `title_fallback` + `len == 34` 改 35（参照 11c4a5d51 同款先例，“实测门拦截后清偿”），修后删除 local.yaml 对应豁免行",
+        "severity": "advisory"
+      }
+    ]
+  },
+  "dbScriptDeclarations": [],
+  "runtimeEndpointExcluded": false,
+  "integrationRan": "not-ran",
+  "matrixPartialRows": 0,
+  "consumerHints": {
+    "script": [
+      "backend/tests/test_align_platform_change_events_migration.py",
+      "backend/app/core/tests/test_config_auth.py",
+      "backend/tests/modules/auth/test_refresh_family_revocation.py",
+      "backend/tests/modules/auth/test_refresh_grace_window.py"
+    ]
+  },
+  "smokeRan": "not-configured",
+  "factsConsistency": {
+    "checked": [
+      "probe1",
+      "probe3",
+      "probe5",
+      "probe6",
+      "probe8",
+      "probe9"
+    ],
+    "verdict": "match",
+    "detail": null
+  },
+  "tests": {
+    "command": "module[]+deps(py54+jsx55+jsx1)+fr(107)",
+    "exitCode": 0,
+    "strategy": "dynamic-subset",
+    "failedRemaining": [],
+    "passedAt": "2026-10-16T10:37:59.446Z"
+  }
+}

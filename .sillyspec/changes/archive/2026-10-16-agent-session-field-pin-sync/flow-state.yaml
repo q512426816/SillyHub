@@ -1,0 +1,47 @@
+tier: thin
+legacy_fallback: false
+substeps:
+  artifacts: done
+  ledger: done
+  patch: done
+  review: done
+  probes: done
+  distill: done
+  archive: done
+  events: done
+born_face: thin
+with_tasks: false
+review_force: null
+input: >-
+  清偿跨变更存量债：2026-10-16-backend-mem-polling task-08 给 agent_sessions 加 title_fallback 列后漏更 AgentSession 字段钉测试（期望 34 实际
+  35，实测在 2026-10-16-fix-auth-random-logout verify 质量扫描拦截，local.yaml 已留窄锚豁免与归因）。
+
+
+  成功标准：
+
+  - backend/app/modules/agent/tests/test_agent_session_model.py 期望字段集补 title_fallback（含来源注释），字段数断言 34→35
+
+  - 该测试单跑通过；删除 .sillyspec/local.yaml 中 '^E\s+AssertionError: AgentSession field mismatch' 豁免行后质量扫描不再依赖豁免
+
+  - 不改任何模型/业务代码，仅测试与配置
+autopilot: false
+prestage_ack: false
+baseline_commit: 4d5f9ac3fee88780186ce89b1d385d201f6c7246
+updatedAt: '2026-10-16T11:20:01.646Z'
+cross_baselines:
+  sillyspec: 5e99dc88c608bb75df090bd59419aaa2909e4bd2
+baseline_sha256: 3e9d963b3e56496e209e1f52dae71f43c0d91139b951c1cda98b35d43ad26d85
+spec_approved: true
+spec_approved_at: '2026-10-16T11:16:16.627Z'
+spec_approved_by: anon@DESKTOP-HJ0AM09
+spec_approved_channel: user-confirmed
+spec_attested_by: anon@DESKTOP-HJ0AM09
+batch_ticked: true
+gate_summary: >-
+  test: passed ← module[]+deps(py7)+fr(7)（32.8s）
+  结果：C:\Users\qinyi\IdeaProjects\multi-agent-platform\.sillyspec\.runtime\verify-runs\20261016111734\test-result.json｜lint:
+  passed ← cd backend && uv run ruff check . && uv run ruff format --check . && uv run mypy app && cd ../frontend &&
+  pnpm lint && cd ../sillyhub-daemon && pnpm typecheck（11.4s）
+  结果：C:\Users\qinyi\IdeaProjects\multi-agent-platform\.sillyspec\.runtime\verify-runs\20261016111734\test-result.json｜门文件
+  5 个
+

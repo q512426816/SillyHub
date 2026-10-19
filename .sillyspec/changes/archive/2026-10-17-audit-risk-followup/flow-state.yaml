@@ -1,0 +1,54 @@
+tier: thin
+legacy_fallback: false
+substeps:
+  artifacts: done
+  ledger: done
+  patch: done
+  review: done
+  probes: done
+  distill: done
+  archive: done
+  events: done
+born_face: thin
+with_tasks: false
+review_force: null
+input: >-
+  24h 审计六连修收口：dsh/zcode 会话恢复白名单漏登记（daemon 重启静默丢记录）、run 完成角标活跃期误报、登出清理注册表漏键、防复活抑制面现算时机过早误杀下载窗口内重建文件、zcode consume finally
+  未按 codex 清理、抑制删除无路径包含性校验
+
+  成功标准：
+
+  - daemon 重启载入时 dsh/zcode 会话记录通过 VALID_PROVIDERS 校验不再静默丢弃，守护测试断言白名单与驱动注册表键一致
+
+  - run 仍活跃（current_run_status 非 null）时不再误标「已执行完成」角标，活跃转 null 仍正确标记，测试覆盖 running 持续不标与 running 转 null 标记两态
+
+  - 登出清理注册表收录 sillyhub:session-completed-unread: 前缀，测试断言该前缀键被清理
+
+  - 防复活抑制面改为 pre_swap 之后现算：下载窗口内重建的同名文件不再被本地删除、陈旧 manifest 条目不再并回，测试覆盖窗口内重建场景
+
+  - zcode consume finally 对齐 codex：清 _finishTurnOnClose 槽位并 await close，幂等不双重关闭
+
+  - applyResurrectSuppress 对越界（路径穿越）manifest 键跳过并告警，测试覆盖越界键不触发删除'
+autopilot: false
+prestage_ack: false
+baseline_commit: 09a10bbf7e145ed5a524bf3fddb1952bd23d606d
+updatedAt: '2026-10-16T23:26:46.361Z'
+cross_baselines:
+  sillyspec: d47f7cf058236166c5a47cb841690f2dfe5c0e23
+baseline_sha256: 548a4b2fde92c4ef1f495af15e94e84e7bb206e912917c223210b2134b25b9b5
+spec_approved: true
+spec_approved_at: '2026-10-16T23:13:32.410Z'
+spec_approved_by: anon@DESKTOP-HJ0AM09
+spec_approved_channel: user-confirmed
+spec_attested_by: anon@DESKTOP-HJ0AM09
+batch_ticked: true
+gate_summary: >-
+  test: skipped ← module[]+deps(py36+nontest-skip1+jsx19+jsx44)+fr(98)（288.7s）
+  结果：C:\Users\qinyi\IdeaProjects\multi-agent-platform\.sillyspec\.runtime\verify-runs\20261016232049\test-result.json —
+  跳过原因：模块子集含环境缺件跳过（已跑模块全绿）：deps(auto-nontest-skip)——补装依赖后恢复实测。｜lint: passed ← cd backend && uv run ruff check . && uv
+  run ruff format --check . && uv run mypy app && cd ../frontend && pnpm lint && cd ../sillyhub-daemon && pnpm
+  typecheck（14.0s）
+  结果：C:\Users\qinyi\IdeaProjects\multi-agent-platform\.sillyspec\.runtime\verify-runs\20261016232049\test-result.json｜门文件
+  22 个
+
+commit_type: fix

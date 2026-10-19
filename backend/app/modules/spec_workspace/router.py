@@ -231,6 +231,10 @@ async def sync_manual_spec_workspace(
     session.add(cw)
     await session.commit()
     await session.refresh(cw)
+    # task-06：commit 后轻通知 daemon 立即拉取（best-effort，兜底轮询仍在）。
+    from app.modules.daemon.ws_hub import notify_change_write_available
+
+    await notify_change_write_available(session, runtime_id, workspace_id)
     log.info(
         "spec_workspace.sync_manual_dispatched",
         workspace_id=str(workspace_id),

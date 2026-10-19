@@ -1,0 +1,38 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-15-server-logs-dockerfile-fix",
+  "rows": [
+    {
+      "anchor": "FR-02",
+      "row_id": "2026-10-15-server-logs-dockerfile-fix:flow:测试绑定FR-02",
+      "tests": [
+        "backend/tests/test_server_log_filer.py「test_configure_degraded_prints_warning」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-15-server-logs-dockerfile-fix"
+    },
+    {
+      "anchor": "FR-03",
+      "row_id": "2026-10-15-server-logs-dockerfile-fix:flow:测试绑定FR-03",
+      "tests": [
+        "backend/tests/test_health.py",
+        "backend/tests/test_server_log_filer.py",
+        "backend/tests/test_server_logs_api.py"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-15-server-logs-dockerfile-fix"
+    }
+  ]
+}

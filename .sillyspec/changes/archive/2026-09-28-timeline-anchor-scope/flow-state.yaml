@@ -22,3 +22,4 @@ updatedAt: '2026-09-28T10:48:38.455Z'
 upgrade_reason: verify 实测失败（实测失败：lint（命令与输出尾部见上；修复后重跑 --done 不丢进度））——失败自动升厚
 with_tasks: false
 
+commit_type: chore

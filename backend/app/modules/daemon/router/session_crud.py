@@ -34,6 +34,7 @@ import app.modules.daemon.router as _router
 from app.core.auth_deps import is_service_credential_request
 from app.core.errors import PermissionDenied
 from app.core.logging import get_logger
+from app.modules.agent.model import AgentSession  # task-08：自愈回写 title_fallback
 from app.modules.auth.model import User
 from app.modules.daemon.model import DaemonTaskLease
 from app.modules.daemon.router import SessionDep, TaskRunAgentUser, router
@@ -318,19 +319,18 @@ async def list_sessions(
         for r in reads:
             if r.lease_id and r.lease_id in term_map:
                 r.terminating_at = term_map[r.lease_id]
-    # FR-08 / D-006: 复用 list_change_sessions 的首条 user_input 摘要逻辑（前 30 字）。
-    # 逻辑与 change/router.py:list_change_sessions 保持同步（R-7），未来可抽共享 helper。
-    # 2026-09-09 阿里云 slow.query 实测（本查询 3.1s）：①只对 title 为空的会话查——
-    # 有 title 的会话走 session.title 派生（下方 get(r.id) or 不变），tool_report
-    # 会话已带自动标题，直接跳过整个摘要查询；②SQL 内 substr 截到 64 字符，免把
-    # 单行均值 33KB 的 TOAST 全文解压拉回（消费方 [:30]，substr 双方言语符语义，
-    # 64 > 30 保证派生零回归）。
+    # FR-08 / D-006: 首条 user_input 摘要（前 30 字）作标题回退。
+    # 2026-10-16-backend-mem-polling task-08 / D-001@v1：摘要改读持久化列
+    # ``title_fallback``（迁移 20261016100000 已回填存量；NULL=漏网、''=已计算
+    # 无预览哨兵）——列表路径不再对全页 title-NULL 会话做窗口函数扫描（生产
+    # 实测 1.4s 随日志量线性）。仅两列皆 NULL 的漏网会话跑一次收窄版窗口查询
+    # 并回写（列或哨兵），自愈后永不再查；title 展示语义与旧路径逐字节一致。
+    # 摘要口径与 change/router.py:list_change_sessions 保持同步（R-7）。
     if items:
-        session_ids = [item.id for item in items if not item.title]
-        if session_ids:
-            # P5（2026-08-24 会话审查）：窗口函数分区取每会话首条 user_input——
-            # 原实现拉页内会话全部 user_input 行（50KB 文本）Python 取最早，
-            # 长会话下列表请求随轮数线性放大。PG/SQLite 双方言支持。
+        fallback_map: dict[uuid.UUID, str | None] = {item.id: item.title_fallback for item in items}
+        missing = [item.id for item in items if not item.title and item.title_fallback is None]
+        if missing:
+            # 收窄版窗口查询（仅漏网会话；口径同迁移 20261016100000 BACKFILL_SQL）
             rn = (
                 sa_func.row_number()
                 .over(
@@ -347,7 +347,7 @@ async def list_sessions(
                 )
                 .join(AgentRunLog, AgentRunLog.run_id == AgentRun.id)
                 .where(
-                    AgentRun.agent_session_id.in_(session_ids),
+                    AgentRun.agent_session_id.in_(missing),
                     AgentRunLog.channel == "user_input",
                 )
                 .subquery()
@@ -359,18 +359,30 @@ async def list_sessions(
                     )
                 )
             ).all()
-            content_by = {row.session_id: (row.content or "") for row in title_rows}
-            title_map = {sid: (content or "")[:30] or None for sid, content in content_by.items()}
-        else:
-            title_map = {}
-        # task-05（2026-08-23-agent-activity-sessions / design §3.3.4）：标题派生改
-        # session.title（ORM 持久化列，tool_report 会话由 task-04 服务端写自动标题）
-        # 优先，无标题回落既有首条 user_input 前 30 字派生——chat 会话 title 列恒
-        # NULL，行为与现状逐字节一致（零回归）；详情端点 title 为 ORM 列经
-        # from_attributes 自动映射，无需本段注入。
+            healed = {row.session_id: (row.content or "") for row in title_rows}
+            for sid in missing:
+                fallback_map[sid] = healed.get(sid, "")
+            # 自愈回写（列或哨兵 ''）——之后该会话永不再触发收窄查询；
+            # 显式 commit（GET 路径依赖层不保证提交，写回必须落库否则每轮重查）
+            from sqlalchemy import case as sa_case
+            from sqlalchemy import update as sa_update
+
+            await session.execute(
+                sa_update(AgentSession)
+                .where(AgentSession.id.in_(missing))
+                .values(
+                    title_fallback=sa_case(
+                        *[(AgentSession.id == sid, fallback_map.get(sid) or "") for sid in missing]
+                    )
+                )
+            )
+            await session.commit()
         session_titles: dict[uuid.UUID, str | None] = {item.id: item.title for item in items}
         for r in reads:
-            r.title = session_titles.get(r.id) or title_map.get(r.id)
+            # title 优先；回退展示截 30 字（列存 64 源、消费口径与旧路径逐字节一致），
+            # 哨兵 ''/None 均保持 title=None（与旧零输入语义一致）
+            fb = (fallback_map.get(r.id) or "")[:30]
+            r.title = session_titles.get(r.id) or (fb or None)
     return AgentSessionListResponse(
         items=reads,
         total=total,

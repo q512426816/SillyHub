@@ -284,3 +284,44 @@ async def test_lineage_deleted_rows_never_thin_matches_is_thin_projection(
     rows, _ = await service.list_(ws.id, location="archive")
     enriched = await service.enrich_summaries(rows)
     assert [(s.change_key, s.is_thin) for s in enriched] == [("c-tombstone-quick", False)]
+
+
+# ── 2026-10-18-change-list-type-filter：类型筛选（change_type 参数）──────────
+
+
+@pytest.mark.asyncio
+async def test_change_type_filter_feat_aliases_legacy_feature(db_session: AsyncSession) -> None:
+    """feat 筛选等价命中旧值 feature（显示层 feature→feat 映射的逆口径，存量行不漏筛）。"""
+    ws = await _make_workspace(db_session)
+    service = ChangeService(db_session)
+    await _make_change(db_session, ws.id, "c-feat-new", change_type="feat")
+    await _make_change(db_session, ws.id, "c-feat-legacy", change_type="feature")
+    await _make_change(db_session, ws.id, "c-fix", change_type="fix")
+
+    items, total = await service.list_(ws.id, change_type="feat")
+    assert {c.change_key for c in items} == {"c-feat-new", "c-feat-legacy"}
+    assert total == 2
+
+
+@pytest.mark.asyncio
+async def test_change_type_filter_exact_match_and_fallback(db_session: AsyncSession) -> None:
+    """非别名类型精确匹配；白名单外/缺省值不过滤（对齐 lineage/sort fallback 风格）。"""
+    ws = await _make_workspace(db_session)
+    service = ChangeService(db_session)
+    await _make_change(db_session, ws.id, "c-fix", change_type="fix")
+    await _make_change(db_session, ws.id, "c-prototype", change_type="prototype")
+    await _make_change(db_session, ws.id, "c-none", change_type=None)
+
+    # fix 精确匹配（feature/feat 行不混入）
+    items, total = await service.list_(ws.id, change_type="fix")
+    assert {c.change_key for c in items} == {"c-fix"}
+    assert total == 1
+    # prototype 旧值可筛
+    items_proto, _ = await service.list_(ws.id, change_type="prototype")
+    assert {c.change_key for c in items_proto} == {"c-prototype"}
+    # 白名单外值不过滤（全部返回）
+    _, total_garbage = await service.list_(ws.id, change_type="garbage")
+    assert total_garbage == 3
+    # 缺省不过滤
+    _, total_none = await service.list_(ws.id)
+    assert total_none == 3

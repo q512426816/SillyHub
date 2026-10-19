@@ -1,0 +1,21 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-18-change-type-git-conventional",
+  "rows": [
+    {
+      "anchor": "FR-03",
+      "row_id": "2026-10-18-change-type-git-conventional:flow:测试绑定FR-03",
+      "tests": [
+        "frontend/src/components/changes/detail/__tests__/change-overview-side.test.tsx「类型行：已知前缀渲染彩色标签（fix 红色阶 / docs 蓝色阶）/ 旧枚举 feature 显示层等价映射 feat / 未知前缀中性配色显示原值 / change_type 为空 → 显示 —」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-18-change-type-git-conventional"
+    }
+  ]
+}

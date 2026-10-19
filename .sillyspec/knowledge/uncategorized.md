@@ -6,6 +6,14 @@
 
 （2026-09-28 清账：本文件原有 41 条（40 个 `##` 条目 + 1 条丢标题的 SSE 路由条目）已全部迁出到五个分类文件并在 INDEX.md 补索引，见变更 2026-09-28-knowledge-inbox-clear。当前收件箱为空，新踩坑从下方追加。）
 
+## vi.doMock 计划生效前先动态 import 了依赖方，会以"真实 store 代际"冻结被测模块
+
+`frontend/src/lib/__tests__/token-refresh.test.ts` 的隔离范式是 beforeEach `resetModules` + `vi.doMock("@/stores/session", mockStore)` 后动态 `import("@/lib/token-refresh")`。新增用例若为了取同一代际的 `ApiError` 而**先** `await import("@/lib/api")`，会连带把 token-refresh 以**真实 zustand store**（未 mock）代际加载——随后 `loadTokenRefresh` 里的 doMock 对已缓存模块不再生效，`ensureFreshAccessToken` 读真实 store（refreshToken=null）早退返回 null，被测的 5xx/408 抛错路径被静默绕过（症状：期待 reject 的断言收到 resolve，且**不报错**）。正确顺序恒定：**先** `loadTokenRefresh(mockStore)`，**再** `await import("@/lib/api")` 取同类代际的类（instanceof 才能匹配）。来源：2026-10-16-fix-auth-random-logout task-03（红阶段 2 用例假红→排序修正后 14/14）。
+
+## xfail(strict=False) 会把「顺带的无关失败」一起吞成假绿——清偿时先跑真断言
+
+`backend/tests/modules/auth/test_refresh_grace_window.py` 两处历史 `xfail(strict=False)`（红-绿分阶段遗留）：标记本意只针对当时的过渡态，但 strict=False 下**任何**失败都被容忍——用例 2/3 实际因「邮箱形式账号（`u2@example.com`）传给纯 username 登录（D-001）」而持续失败，被 xfail 吞成假绿数月无人发现。清偿 xfail 必须按「先去掉标记跑一次真断言，再修真实原因」顺序（本次即：去掉后暴露 login 失败 → 改 username 形式即绿）。判据：过期 xfail 的 reason 里出现「届时……移除」承诺时，凡承诺成立（前置改造已落地）即应即时清偿。来源：2026-10-16-fix-auth-random-logout task-02。
+
 
 ## 跨仓 worktree task 用直接 git commit，wt-commit 只认主仓 worktree
 

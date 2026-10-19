@@ -1,0 +1,81 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-16-change-title-condense-backfill",
+  "rows": [
+    {
+      "anchor": "FR-01",
+      "row_id": "2026-10-16-change-title-condense-backfill:flow:测试绑定FR-01",
+      "tests": [
+        "backend/app/modules/change/tests/test_title_normalization.py「TestCondenseTitle」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-16-change-title-condense-backfill"
+    },
+    {
+      "anchor": "FR-02",
+      "row_id": "2026-10-16-change-title-condense-backfill:flow:测试绑定FR-02",
+      "tests": [
+        "backend/app/modules/change/tests/test_title_normalization.py「TestAdoptTitleCondenseGuard」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-16-change-title-condense-backfill"
+    },
+    {
+      "anchor": "FR-03",
+      "row_id": "2026-10-16-change-title-condense-backfill:flow:测试绑定FR-03",
+      "tests": [
+        "backend/app/modules/change/tests/test_title_backfill.py「TestTitleBackfillService」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-16-change-title-condense-backfill"
+    },
+    {
+      "anchor": "FR-05",
+      "row_id": "2026-10-16-change-title-condense-backfill:flow:测试绑定FR-05",
+      "tests": [
+        "backend/app/modules/change/tests/test_rename_title.py「TestRenameTitle」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-16-change-title-condense-backfill"
+    },
+    {
+      "anchor": "FR-06",
+      "row_id": "2026-10-16-change-title-condense-backfill:flow:测试绑定FR-06",
+      "tests": [
+        "frontend/src/app/(dashboard)/workspaces/[id]/changes/[cid]/__tests__/page-rename-title.test.tsx「改名入口权限与保存链路」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-16-change-title-condense-backfill"
+    }
+  ]
+}

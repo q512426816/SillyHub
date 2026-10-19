@@ -23,7 +23,7 @@ SillyHub 前端 API 客户端层与基础设施库（frontend/src/lib/**）。�
   - 可选请求超时（ql-20260831-006-6d67）：`timeoutMs` 到时 abort 并抛 `code="timeout"`（文案经 `timeoutMessage` 定制，缺省「请求超时，请重试」）；调用方自带 `signal` 的外部 abort 仍走 `network_error`（streamSession resync 静默语义不回归）。当前接入点：`injectSession` 30s + 「草稿已保留」专用文案——后端劣化请求挂起时撤占位轮 + 错误横幅兜底，占位轮不再永久「排队中」
   - 401 处理：非 /api/auth/* 端点且未带 `x-auth-retry` 时单飞刷新拿新 token 重试一次（防无限重试）
 - `api-circuit.ts`（ql-20260917-011）：API 全局熔断——连续 5 次系统性失败（网络错/超时 status=0 或 ≥500；4xx 业务态不算）开闸，15s 冷却内 apiFetch 短路非 /api/auth/* 请求（circuit_open，不发网络护住浏览器连接池——此前部署窗口风暴直到 ERR_INSUFFICIENT_RESOURCES 页签报废），冷却后半开放行探测、成功闭合/失败重开；notifications SSE 重连对齐 retryAt；circuit-banner 订阅展示。与 api.ts 循环引用安全（仅函数体内用 ApiError）。
-- `token-refresh.ts`：`ensureFreshAccessToken()` — 模块级 inflight 单飞，并发 401 风暴只发一次 POST /api/auth/refresh 并写回 store；未登录/未 hydrate/refresh 失败返 null；doRefresh 带 15s AbortController 超时（ql-20260917-005：apiFetch 的 GET 30s 超时不覆盖刷新等待，连接僵死曾致 inflight 永久挂起、调用方永久加载态——超时抛 ApiError(timeout) 交调用方 catch 展示，不清会话不强制跳登录，网络异常传播行为不变）；`decodeJwtExp` 解析过期时间。
+- `token-refresh.ts`：`ensureFreshAccessToken()` — 模块级 inflight 单飞，并发 401 风暴只发一次 POST /api/auth/refresh 并写回 store；未登录/未 hydrate/refresh 收到 4xx（明确失效）返 null 交上层清会话；**5xx/408/429 抛 ApiError 不清会话**（2026-10-16-fix-auth-random-logout D-004@v1 状态码分流：部署窗口/代理抖动不误踢在线用户）；doRefresh 带 15s AbortController 超时（ql-20260917-005：apiFetch 的 GET 30s 超时不覆盖刷新等待，连接僵死曾致 inflight 永久挂起、调用方永久加载态——超时抛 ApiError(timeout) 交调用方 catch 展示，不清会话不强制跳登录，网络异常传播行为不变）；`decodeJwtExp` 解析过期时间。
 - `fetch-sse.ts`：fetch + ReadableStream 的 EventSource 替代品。
   - 动机：EventSource 无法自定义请求头，token 只能拼 URL query 会被访问日志明文记录；本 helper 把 token 放 Authorization header（backend auth_deps 已 header-only）。
   - 接口形状贴齐 EventSource（onopen/onmessage/onerror/addEventListener/readyState/close），从 EventSource 迁移只改构造方式。
@@ -31,7 +31,8 @@ SillyHub 前端 API 客户端层与基础设施库（frontend/src/lib/**）。�
   - 已知例外债：lib/api/llm-providers.ts 手写 DTO（文件头显式登记，整体迁移到生成类型是独立坑）。
 - `agent-logs.ts`：本地 Agent 会话日志双通道（2026-08-23-agent-log-conversation-view）——`readAgentLogMessages(entryId, beforeSeq?)` 对话化归一化消息（status 四值均 200 分层，仅 parsed 可渲染，蛇形字段原样）；`readAgentLogContent` 原文尾部 256KB（回落与二进制格式唯一通道）；ApiError 一律抛出交调用方回落。
 - `api/session-attachments.ts`：`fetchAttachmentBlob(id)`（2026-08-25-session-attachment-preview）——预览 Modal 用的 Blob 拉取（docx/xlsx/md 渲染需 ArrayBuffer/text），401 经 ensureFreshAccessToken 单飞刷新重试一次（对齐 file/api.ts 的 fetchFileBlob 语义）；既有 `fetchAttachmentObjectUrl`（objectURL 版）行为不变。
-- `change-files.ts`：`fetchChangeFileRaw(workspaceId, changeId, path)`（2026-08-26-file-fullscreen-preview，D-009）——变更文件二进制 Blob 拉取（GET files/raw），裸 fetch+Bearer+401 单飞重试（对齐 explorer.ts fetchDownload 范式）；变更文件预览（全屏弹窗/图片内联）恒走此函数，不走 1MB 截断的 getChangeFileContent（编辑流仍走 content 端点）。
+- `change-files.ts`：`fetchChangeFileRaw(workspaceId, changeId, path)`（2026-08-26-file-fullscreen-preview，D-009）——变更文件二进制 Blob 拉取（GET files/raw），裸 fetch+Bearer+401 单飞重试（对齐 explorer.ts fetchDownload 范式）；变更文件预览（全屏弹窗/图片内联）恒走此函数，不走 1MB 截断的 getChangeFileContent（编辑流仍走 content 端点）。`listChangeFiles` 的 `ChangeFileList` 类型含可选 `sync_result`（2026-10-16-change-files-sync-result）。
+- `change-file-sync.ts`：`changeFileSyncWarningText(sr)`（2026-10-16-change-files-sync-result，零依赖纯函数）——GET files?sync=1 响应 `sync_result` 回执 → 提示文案：ok=false→「同步未完成」含中文原因（SYNC_REASON_CN 表）与 stderr 尾段；triggered=false→「同步未执行」；成功/防抖跳过/纯读（null）→ null（不提示）；未知 reason 原样透出。change-file-tree 刷新后接线展示。
 - react-query 装配：
   - `query-client.ts` `makeQueryClient()` — freshness-first 默认：staleTime 15s + refetchOnWindowFocus（仅对 >15s 数据重取）；retry 仅 ApiError 5xx ≤3 次（4xx 含 401/403/404 不重试）；全局不设 refetchInterval。
   - `providers.tsx` `AppProviders` — QueryClientProvider 用 useState 工厂建每会话实例（禁模块级单例，防 SSR 跨请求泄漏缓存）；DevTools 仅 dev。

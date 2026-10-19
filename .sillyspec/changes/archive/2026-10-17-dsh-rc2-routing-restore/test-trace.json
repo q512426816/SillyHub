@@ -1,0 +1,52 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-17-dsh-rc2-routing-restore",
+  "rows": [
+    {
+      "anchor": "FR-01",
+      "row_id": "2026-10-17-dsh-rc2-routing-restore:flow:测试绑定FR-01",
+      "tests": [
+        "sillyhub-daemon/tests/dsh-settings.test.ts"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-17-dsh-rc2-routing-restore"
+    },
+    {
+      "anchor": "FR-02",
+      "row_id": "2026-10-17-dsh-rc2-routing-restore:flow:测试绑定FR-02",
+      "tests": [
+        "sillyhub-daemon/tests/interactive/dsh-acp-driver.test.ts「model + thinkingLevel=medium → set_config_option 扁平形状…」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-17-dsh-rc2-routing-restore"
+    },
+    {
+      "anchor": "FR-03",
+      "row_id": "2026-10-17-dsh-rc2-routing-restore:flow:测试绑定FR-03",
+      "tests": [
+        "sillyhub-daemon/tests/interactive/dsh-acp-driver.test.ts",
+        "sillyhub-daemon/tests/interactive/dsh-acp-events.test.ts"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-17-dsh-rc2-routing-restore"
+    }
+  ]
+}

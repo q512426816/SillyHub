@@ -75,7 +75,184 @@ created_at: 2026-10-15T16:16:15.707Z
   source_change: 2026-10-16-decision-pill-no-workspace
   status: active
 
-## FR-docs-007 待决策 pill 与变更文件 pill 渲染在同一悬浮组内竖向排列，各自空数据不渲染的显隐契约不变
+## FR-docs-007 daemon 重启载入时 dsh/zcode 会话记录通过 VALID_PROVIDERS 校验不再静默丢弃，守护测试断言白名单与驱动注册表键一致
+变更：2026-10-17-audit-risk-followup
+状态：active
+摘要：主路径
+全文：.sillyspec/changes/archive/2026-10-17-audit-risk-followup/requirements.md#FR-01
+最近确认：7faec5bfa12ed2e7159077f469589243fb36ee5b
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-17-audit-risk-followup:flow:测试绑定FR-01
+  tests: test/sillyhub-daemon/tests/interactive/session-store-persistence.test.ts「单源守护：INTERACTIVE_PROVIDERS 全部键的记录载入保留（2026-10-17-audit-risk-followup——手写白名单漏 dsh/zcode 曾致重启静默丢记录，pi/cursor 同坑各一次）」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-17-audit-risk-followup
+  status: active
+
+## FR-docs-008 run 仍活跃（current_run_status 非 null）时不再误标「已执行完成」角标，活跃转 null 仍正确标记，测试覆盖 running 持续不标与 running 转 null 标记两态
+变更：2026-10-17-audit-risk-followup
+状态：active
+摘要：主路径
+全文：.sillyspec/changes/archive/2026-10-17-audit-risk-followup/requirements.md#FR-02
+最近确认：7faec5bfa12ed2e7159077f469589243fb36ee5b
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-17-audit-risk-followup:flow:测试绑定FR-02
+  tests: test/frontend/src/components/sessions/__tests__/session-list-panel.test.tsx「run 跨刷新仍活跃（running→running，列表数据有变化）→ 不误标完成角标（活跃期误报回归）」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-17-audit-risk-followup
+  status: active
+
+## FR-docs-009 登出清理注册表收录 sillyhub:session-completed-unread: 前缀，测试断言该前缀键被清理
+变更：2026-10-17-audit-risk-followup
+状态：active
+摘要：主路径
+全文：.sillyspec/changes/archive/2026-10-17-audit-risk-followup/requirements.md#FR-03
+最近确认：7faec5bfa12ed2e7159077f469589243fb36ee5b
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-17-audit-risk-followup:flow:测试绑定FR-03
+  tests: test/frontend/src/lib/__tests__/logout-storage.test.ts「7 类用户域前缀全清、设备级键保留、前缀精确匹配」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-17-audit-risk-followup
+  status: active
+
+## FR-docs-010 防复活抑制面改为 pre_swap 之后现算：下载窗口内重建的同名文件不再被本地删除、陈旧 manifest 条目不再并回，测试覆盖窗口内重建场景
+变更：2026-10-17-audit-risk-followup
+状态：active
+摘要：主路径
+全文：.sillyspec/changes/archive/2026-10-17-audit-risk-followup/requirements.md#FR-04
+最近确认：7faec5bfa12ed2e7159077f469589243fb36ee5b
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-17-audit-risk-followup:flow:测试绑定FR-04
+  tests: test/sillyhub-daemon/tests/pull-antiresurrect.test.ts「用例5（窗口内重建保护）：下载窗口内重建的同名文件不进抑制面——不删本地、不并回陈旧条目（2026-10-17-audit-risk-followup）」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-17-audit-risk-followup
+  status: active
+
+## FR-docs-011 zcode consume finally 对齐 codex：清 _finishTurnOnClose 槽位并 await close，幂等不双重关闭
+变更：2026-10-17-audit-risk-followup
+状态：active
+摘要：主路径
+全文：.sillyspec/changes/archive/2026-10-17-audit-risk-followup/requirements.md#FR-05
+最近确认：7faec5bfa12ed2e7159077f469589243fb36ee5b
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-17-audit-risk-followup:flow:测试绑定FR-05
+  tests: test/sillyhub-daemon/tests/interactive/zcode-app-server-driver.test.ts「consume 自然退出（iq.close）→ finally 对齐 codex：清 _finishTurnOnClose 槽位 + 兜底 close（幂等单次）（2026-10-17-audit-risk-followup）」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-17-audit-risk-followup
+  status: active
+
+## FR-docs-012 applyResurrectSuppress 对越界（路径穿越）manifest 键跳过并告警，测试覆盖越界键不触发删除'
+变更：2026-10-17-audit-risk-followup
+状态：active
+摘要：主路径
+全文：.sillyspec/changes/archive/2026-10-17-audit-risk-followup/requirements.md#FR-06
+最近确认：7faec5bfa12ed2e7159077f469589243fb36ee5b
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-17-audit-risk-followup:flow:测试绑定FR-06
+  tests: test/sillyhub-daemon/tests/pull-antiresurrect.test.ts「用例6（越界键防线）：applyResurrectSuppress 对越界键（../）跳过 rm 并告警——dir 外文件幸存」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-17-audit-risk-followup
+  status: active
+
+## FR-docs-013 zcode 驱动 env 诊断日志的值统一走脱敏 helper：KEY/TOKEN 键整值 <redacted>，其余值内 scheme://user:pass@host 形态的 userinfo 段打码为 ***，普通值原样保留（诊断能力不回退）
+变更：2026-10-18-audit-log-redact-yaml-quote
+状态：active
+摘要：代理 URL 凭据打码；KEY/TOKEN 整值脱敏
+场景正文：
+- 场景：代理 URL 凭据打码 — Given env 含 `HTTPS_PROXY=http://user:secret@proxy.example.com:3128` 与 `ANTHROPIC_BASE_；When zcode 会话 spawn 打印 env 诊断日志；Then 日志中代理值为 `http://***@proxy.example.com:3128`，BASE_URL 值原样保留。
+- 场景：KEY/TOKEN 整值脱敏 — Given env 含 `ANTHROPIC_API_KEY=sk-xxx` 与 `ANTHROPIC_AUTH_TOKEN=tok-yyy`；When 同上；Then 日志中两键的值均为 `<redacted>`，密钥本体不落日志。
+全文：.sillyspec/changes/archive/2026-10-18-audit-log-redact-yaml-quote/requirements.md#FR-01
+最近确认：60f8d9e41e2ccb9446325a0679f0fb6a5ec2c31e
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-18-audit-log-redact-yaml-quote:flow:测试绑定FR-01
+  tests: sillyhub-daemon/tests/interactive/zcode-app-server-driver.test.ts「redactEnvValueForLog 脱敏三态（代理 userinfo 打码/KEY-TOKEN 整值 <redacted>/普通值透传）」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-18-audit-log-redact-yaml-quote
+  status: active
+
+## FR-docs-014 dsh cordis.patch.yml 的 model id/name 与 baseURL 一律 YAML 单引号包裹并按规范双写转义内嵌单引号，含冒号/空格/#/单引号的模型名不再破坏 YAML 结构
+变更：2026-10-18-audit-log-redact-yaml-quote
+状态：active
+摘要：特殊字符模型名；常规值幂等
+场景正文：
+- 场景：特殊字符模型名 — Given provider 的 model 含 `: `（键值分隔）、`#`（注释起始）、`'`（单引号）等 YAML 特殊字符；When writeDshHome 写盘；Then patch 中该值被单引号包裹且内嵌单引号双写转义，YAML 结构不破坏（不产生多余键/注释吞噬后续行）。
+- 场景：常规值幂等 — Given provider 为常规形态（model=deepseek-v4、baseURL=https://api.example.com/anthropic）；When writeDshHome 写盘；Then 输出为 `'deepseek-v4'` / `'https://api.example.com/anthropic'` 形态，同配置二次写内容一致（幂等语义不变
+全文：.sillyspec/changes/archive/2026-10-18-audit-log-redact-yaml-quote/requirements.md#FR-02
+最近确认：60f8d9e41e2ccb9446325a0679f0fb6a5ec2c31e
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-18-audit-log-redact-yaml-quote:flow:测试绑定FR-02
+  tests: sillyhub-daemon/tests/dsh-settings.test.ts「特殊字符模型名/URL 单引号转义不破坏 YAML」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-18-audit-log-redact-yaml-quote
+  status: active
+
+## FR-docs-015 新增单测钉板两处（zcode 脱敏 helper 纯函数用例 + dsh 特殊字符模型名写盘用例），既有用例断言同步更新，dsh-settings 与 zcode 驱动相关测试全绿，tsc 零错
+变更：2026-10-18-audit-log-redact-yaml-quote
+状态：active
+摘要：（无场景名）
+全文：.sillyspec/changes/archive/2026-10-18-audit-log-redact-yaml-quote/requirements.md#FR-03
+最近确认：60f8d9e41e2ccb9446325a0679f0fb6a5ec2c31e
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-18-audit-log-redact-yaml-quote:flow:测试绑定FR-03
+  tests: sillyhub-daemon/tests/dsh-settings.test.ts「writeDshHome（per-session 路由写盘）」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-18-audit-log-redact-yaml-quote
+  status: active
+
+## FR-docs-016 待决策 pill 与变更文件 pill 渲染在同一悬浮组内竖向排列，各自空数据不渲染的显隐契约不变
 变更：2026-10-16-session-pill-dock-drag
 状态：active
 摘要：主路径
@@ -94,7 +271,7 @@ created_at: 2026-10-15T16:16:15.707Z
   source_change: 2026-10-16-session-pill-dock-drag
   status: active
 
-## FR-docs-008 两 pill 的下拉均为点击展开（hover 不触发）、再点或点外部收起
+## FR-docs-017 两 pill 的下拉均为点击展开（hover 不触发）、再点或点外部收起
 变更：2026-10-16-session-pill-dock-drag
 状态：active
 摘要：主路径
@@ -113,7 +290,7 @@ created_at: 2026-10-15T16:16:15.707Z
   source_change: 2026-10-16-session-pill-dock-drag
   status: active
 
-## FR-docs-009 悬浮组按住可在 viewport 范围内拖动，松手自动吸附较近的左右边界，纵向钳制在窗口内，位置 localStorage 持久化
+## FR-docs-018 悬浮组按住可在 viewport 范围内拖动，松手自动吸附较近的左右边界，纵向钳制在窗口内，位置 localStorage 持久化
 变更：2026-10-16-session-pill-dock-drag
 状态：active
 摘要：主路径
@@ -132,7 +309,7 @@ created_at: 2026-10-15T16:16:15.707Z
   source_change: 2026-10-16-session-pill-dock-drag
   status: active
 
-## FR-docs-010 位移小于阈值视为点击不触发拖拽，拖拽结束后的残余 click 被吞掉，pill 按钮点击行为不受影响
+## FR-docs-019 位移小于阈值视为点击不触发拖拽，拖拽结束后的残余 click 被吞掉，pill 按钮点击行为不受影响
 变更：2026-10-16-session-pill-dock-drag
 状态：active
 摘要：主路径
@@ -151,7 +328,7 @@ created_at: 2026-10-15T16:16:15.707Z
   source_change: 2026-10-16-session-pill-dock-drag
   status: active
 
-## FR-docs-011 相关组件测试与 tsc 通过
+## FR-docs-020 相关组件测试与 tsc 通过
 变更：2026-10-16-session-pill-dock-drag
 状态：active
 摘要：主路径

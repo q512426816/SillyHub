@@ -38,3 +38,4 @@ gate_summary: >-
   结果：F:\WorkNew\SillyHub\.sillyspec\.runtime\verify-runs\20261012073841\test-result.json｜lint: skipped — 跳过原因：local.yaml
   未配置 commands.lint（或标记 unavailable）。｜门文件 22 个
 
+commit_type: fix

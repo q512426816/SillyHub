@@ -1,0 +1,2463 @@
+diff --git a/.zcode/skills/deploy-to-server/SKILL.md b/.zcode/skills/deploy-to-server/SKILL.md
+index 2fe365313..c8e6b875a 100644
+--- a/.zcode/skills/deploy-to-server/SKILL.md
++++ b/.zcode/skills/deploy-to-server/SKILL.md
+@@ -318,6 +318,7 @@ ssh -i ~/.ssh/aliyun_deploy root@47.113.145.252 '
+ - **PROD_API_URL 必须覆盖**：本地 `deploy/.env` 的 `NEXT_PUBLIC_API_BASE_URL=127.0.0.1:8001` 是开发值，直接打包给生产，浏览器会连用户自己机器。用 `PROD_API_URL=生产地址` 覆盖（环境变量 > `.env`）。
+ - **.sh 必须 LF**：`.gitattributes` 已强制 `*.sh eol=lf`，scp 前确认 `grep \r = 0`，否则服务器 `bash\r: bad interpreter`。
+ - **backend Dockerfile apt 源用清华 tuna**：`mirrors.aliyun.com` 的 debian trixie Packages 索引缺失会让 backend build 卡死（2026-07-17 已改 tuna）。
++- **内存与 OOM 排障（2026-10-16-backend-mem-polling）**：服务器 1.6G 内存，容器配额总和须 ≤1.85G（backend 1100m+postgres 256m+frontend 300m+minio 128m+redis 64m，见 compose）。backend 有嵌入子进程（闲置自灭）与 oom_score_adj:-500 主进程保护——若再见 OOM 强杀，先 `dmesg -T | grep 'Killed process'` 判被杀的是 python 主进程还是子进程。**建议服务器 sysctl `vm.swappiness=10`**（默认 60 在小内存机上过早换页放大卡顿；手动 `sysctl -w vm.swappiness=10` + 写入 /etc/sysctl.d/99-swappiness.conf，不入库）。
+ - **磁盘**：40G 盘。`load-and-up.sh` 自动 `image prune -f` + 删 tar。但 `backup-<时间>` tag 会累积，定期手动清：`docker images | grep backup` → `docker rmi <旧backup>`。
+ - **commit_sha=unknown**：health 端点这个字段恒 `unknown` 是既有问题（compose 运行时 `COMMIT_SHA` 覆盖镜像 build 值），不影响功能，见 memory `compose-commit-sha-runtime-override`。
+ - **backend 变更触发 alembic**：load + up 后 backend 启动跑 `alembic upgrade head`。migration 链断裂会 crash-loop，看 logs 诊断；项目未上线，可 `docker compose down -v` 重置 DB（先确认数据可丢）。
+diff --git a/backend/Dockerfile b/backend/Dockerfile
+index 8def684c4..fec38ecac 100644
+--- a/backend/Dockerfile
++++ b/backend/Dockerfile
+@@ -42,6 +42,9 @@ WORKDIR /build
+ # pyproject.toml references README.md as the long_description, so both files
+ # must be present before `uv pip install -e .` runs.
+ COPY pyproject.toml README.md ./
++# 2026-10-16-backend-mem-polling task-10：wheel 下载默认 30s 超时在国内网络抖动下
++# 构建即挂（filelock 拉取 timeout 实证）——放宽到 300s。
++ENV UV_HTTP_TIMEOUT=300
+ # Lock-less install is acceptable for V1; once we add uv.lock, switch to `uv sync --frozen`.
+ RUN uv venv /opt/venv \
+  && uv pip install --python /opt/venv/bin/python --no-cache -e . \
+diff --git a/backend/app/core/config.py b/backend/app/core/config.py
+index 13133c890..7f70ee855 100644
+--- a/backend/app/core/config.py
++++ b/backend/app/core/config.py
+@@ -119,6 +119,24 @@ class Settings(BaseSettings):
+         "BAAI/bge-small-zh-v1.5",
+         description="fastembed model name for /api/spec/knowledge/vector-search (env KNOWLEDGE_EMBEDDING_MODEL).",
+     )
++    # 2026-10-16-backend-mem-polling task-01 / D-001@v1：嵌入模型子进程封装——闲置该秒数
++    # 后子进程自动退出（内存确定性归还 OS），下次查询重新拉起（冷启 1~3s）。
++    knowledge_embedding_idle_exit_sec: int = Field(
++        900,
++        description="embedding worker idle exit in seconds (env KNOWLEDGE_EMBEDDING_IDLE_EXIT_SEC).",
++    )
++    # 2026-10-16-backend-mem-polling task-01 / D-004@v1：CLI 向量端点进程内索引的 LRU
++    # 工作区上限（每 ws 索引 11~40MB，无上限会随工作区数无界增长）。
++    knowledge_embedding_index_max_ws: int = Field(
++        4,
++        description="max workspaces cached in-process for vector index, LRU evict beyond (env KNOWLEDGE_EMBEDDING_INDEX_MAX_WS).",
++    )
++    # 2026-10-16-backend-mem-polling task-02 / D-004@v1：spec 包 gzip 整包缓存的
++    # 全局字节帽（per-ws 2 版本策略之上的总量上界；~18MB/ws 曾无上界慢性爬升）。
++    spec_bundle_cache_max_bytes: int = Field(
++        128 * 1024 * 1024,
++        description="global byte cap for spec bundle gzip cache, LRU evict beyond (env SPEC_BUNDLE_CACHE_MAX_BYTES).",
++    )
+ 
+     # 2026-07-07-daemon-skill-execution task-06：sillyspec skills 打包源目录。
+     # 镜像内路径由 Dockerfile COPY → /app/sillyspec-skills/（task-07）。
+diff --git a/backend/app/modules/agent/model.py b/backend/app/modules/agent/model.py
+index 556d4d143..9905032c1 100644
+--- a/backend/app/modules/agent/model.py
++++ b/backend/app/modules/agent/model.py
+@@ -872,6 +872,15 @@ class AgentSession(BaseModel, table=True):
+         default=None,
+         sa_column=Column(String(255), nullable=True),
+     )
++    # 2026-10-16-backend-mem-polling task-08 / D-001@v1：chat 会话首条 user_input
++    # 前 30 字预览的服务端持久化缓存（迁移一次性回填；列表读列消窗口函数扫描）。
++    # 三态：NULL=未计算（漏网，列表路径惰性回写自愈）；''=已计算无预览（哨兵，
++    # 防零输入会话每轮重查）；非空=预览文本。title 列语义不动（tool_report 自动
++    # 标题 / chat 恒 NULL 派生路径保持）。
++    title_fallback: str | None = Field(
++        default=None,
++        sa_column=Column(String(64), nullable=True),
++    )
+     agent_session_id: str | None = Field(
+         default=None,
+         sa_column=Column(String(255), nullable=True),
+diff --git a/backend/app/modules/change/service.py b/backend/app/modules/change/service.py
+index 7812b81ad..00e7730b5 100644
+--- a/backend/app/modules/change/service.py
++++ b/backend/app/modules/change/service.py
+@@ -823,6 +823,10 @@ class ChangeService:
+             match.created_at = datetime.now(UTC)
+             self._session.add(match)
+             await self._session.commit()
++            # task-06：commit 后轻通知 daemon 立即拉取（best-effort，兜底轮询仍在）
++            from app.modules.daemon.ws_hub import notify_change_write_available
++
++            await notify_change_write_available(self._session, runtime_id, workspace.id)
+             return match.id
+ 
+         new_row = DaemonChangeWrite(
+@@ -836,6 +840,9 @@ class ChangeService:
+         )
+         self._session.add(new_row)
+         await self._session.commit()
++        from app.modules.daemon.ws_hub import notify_change_write_available
++
++        await notify_change_write_available(self._session, runtime_id, workspace.id)
+         return new_row.id
+ 
+     async def _resync_change_docs(self, workspace_id: uuid.UUID, change_id: uuid.UUID) -> None:
+diff --git a/backend/app/modules/change_writer/proxy.py b/backend/app/modules/change_writer/proxy.py
+index 8d0b46d19..5ea08aab0 100644
+--- a/backend/app/modules/change_writer/proxy.py
++++ b/backend/app/modules/change_writer/proxy.py
+@@ -419,6 +419,12 @@ async def proxy_create_change(
+     await session.commit()
+     await session.refresh(change_write)
+ 
++    # task-06：commit 后轻通知 daemon 立即拉取（best-effort，兜底轮询仍在）——
++    # 也加速下方 60s 回执等待（原纯 30s 轮询派发）。
++    from app.modules.daemon.ws_hub import notify_change_write_available
++
++    await notify_change_write_available(session, runtime_id, workspace_id)
++
+     log.info(
+         "proxy_change_write_dispatched",
+         change_write_id=str(change_write.id),
+diff --git a/backend/app/modules/daemon/permission_service.py b/backend/app/modules/daemon/permission_service.py
+index c17e91776..a28d10417 100644
+--- a/backend/app/modules/daemon/permission_service.py
++++ b/backend/app/modules/daemon/permission_service.py
+@@ -1553,6 +1553,13 @@ class DaemonPermissionService:
+         ``permission_resolved{reason:timeout}`` SSE so the frontend card can
+         dismiss. Either failure is logged but not raised — the daemon-side
+         fallback timer is the ultimate fail-closed safety net.
++
++        2026-10-16-backend-mem-polling task-03 / D-004@v1：收尾不再复用外层请求域
++        的 ``self._svc._session``（请求早返回后该 session 已关闭，定时器把它 pin 了
++        整整 5 分钟，且 ``route_key None`` 早退路径不提交——生产 postgres
++        idle-in-transaction FATAL 的直接元凶）。改为在全新短会话上构造绑定该会话
++        的 service 实例执行 ``_timeout_denouement``，成功 commit / 异常 rollback，
++        任何路径不再留下挂起事务。
+         """
+         try:
+             await asyncio.sleep(self._timeout_sec)
+@@ -1566,11 +1573,41 @@ class DaemonPermissionService:
+         if current is not None and current.done() is False and current is asyncio.current_task():
+             self._timers.pop(request_id, None)
+ 
++        from app.core.db import get_session_factory
++
++        session_factory = get_session_factory()
++        try:
++            async with session_factory() as fresh_session:
++                fresh_psv = DaemonPermissionService(DaemonService(fresh_session), self._hub)
++                try:
++                    await fresh_psv._timeout_denouement(session_id, run_id, request_id, runtime_id)
++                    await fresh_session.commit()
++                except Exception:
++                    await fresh_session.rollback()
++                    raise
++        except Exception:
++            # best-effort 语义保持：收尾链任一步失败仅告警不抛（daemon 侧兜底
++            # 定时器是最终 fail-closed 防线），但不再遗留 idle-in-transaction。
++            log.warning(
++                "permission_timeout_denouement_failed",
++                session_id=str(session_id),
++                request_id=request_id,
++                exc_info=True,
++            )
++
++    async def _timeout_denouement(
++        self,
++        session_id: uuid.UUID,
++        run_id: uuid.UUID,
++        request_id: str,
++        runtime_id: uuid.UUID | None,
++    ) -> None:
++        """超时 deny 收尾体（由 _on_timeout 在全新短会话上构造的实例调用，勿直接用）。"""
+         # task-06（2026-08-29-approval-notify-push / FR-06 / §7.3③）：超时失效
+         # 时向 owner 发 permission_timeout 通知。回调只收请求 id → 重查会话行
+-        # 取 owner（D-010@v1：AgentSession.user_id）。本回调后续 ControlCommand
+-        # 落库本就使用 self._svc._session，owner 重查同源复用（既有惯例优先于
+-        # 新开短 session）。best-effort：失败仅 log.warning（D-001@v1）。
++        # 取 owner（D-010@v1：AgentSession.user_id）。2026-10-16 task-03 起本方法
++        # 运行在 _on_timeout 新开的短会话上（self 绑定 fresh session）。
++        # best-effort：失败仅 log.warning（D-001@v1）。
+         # v1 取舍 R-09：不消解历史 permission_request 通知。
+         try:
+             from app.modules.agent.model import AgentSession as _AgentSession
+diff --git a/backend/app/modules/daemon/protocol.py b/backend/app/modules/daemon/protocol.py
+index 644764d53..4c48f331f 100644
+--- a/backend/app/modules/daemon/protocol.py
++++ b/backend/app/modules/daemon/protocol.py
+@@ -48,6 +48,10 @@ DAEMON_MSG_SESSION_RESUME = "daemon:session_resume"  # Server → Daemon, FR-2
+ # task-02 / FR-02：前端对 plan 模式的确认/修订/取消决策，经 WS Hub 下发 daemon。
+ DAEMON_MSG_PLAN_RESPONSE = "daemon:plan_response"  # Server → Daemon, FR-02
+ DAEMON_MSG_PERMISSION_REQUEST = "daemon:permission_request"  # Daemon → Server, FR-07 / D-007
++# 2026-10-16-backend-mem-polling task-06 / D-001@v1：change-write pending 行落库后的
++# 轻通知（payload 只带 runtime_id/workspace_id，daemon 收到即拉既有 GET pending-change-writes）。
++# 与 sillyhub-daemon/src/protocol.ts 逐字对齐；旧 daemon default 分支 warn 丢弃落到兜底轮询。
++DAEMON_MSG_CHANGE_WRITE_AVAILABLE = "daemon:change_write_available"  # Server → Daemon, task-06
+ DAEMON_MSG_PERMISSION_RESPONSE = "daemon:permission_response"  # Server → Daemon, FR-07 / D-007
+ DAEMON_MSG_SELF_UPDATE = "daemon:self_update"  # Server → Daemon, 推送 daemon 自更新指令
+ 
+diff --git a/backend/app/modules/daemon/router/gateway_misc.py b/backend/app/modules/daemon/router/gateway_misc.py
+index 315b81512..0bb8c92b1 100644
+--- a/backend/app/modules/daemon/router/gateway_misc.py
++++ b/backend/app/modules/daemon/router/gateway_misc.py
+@@ -105,6 +105,27 @@ _LLM_PROXY_TIMEOUT = httpx.Timeout(connect=10.0, read=300.0, write=60.0, pool=10
+ # reset fixture 直接对包属性赋 None，本模块经 ``_router`` 延迟读写保持可复位。
+ 
+ 
++# 2026-10-16-backend-mem-polling task-05 / D-004@v1：WS 消息日志截断阈值——
++# spec bundle RPC 回包可达数十 MB，整条进日志是内存/CPU 尖峰 + 日志爆量。
++_WS_LOG_TRUNCATE_BYTES = 8 * 1024
++_WS_LOG_KEEP_EACH_SIDE = 4 * 1024
++
++
++def _truncate_ws_log_msg(data: Any) -> Any:
++    """超阈值消息截断为 repr 前后各 4KB + 总长标注（≤8KB 原样返回）。"""
++    try:
++        text = repr(data)
++    except Exception:  # repr 本身异常（极端对象）→ 只回类型名
++        return f"<unrepresentable {type(data).__name__}>"
++    if len(text) <= _WS_LOG_TRUNCATE_BYTES:
++        return data
++    return (
++        f"{text[:_WS_LOG_KEEP_EACH_SIDE]}"
++        f"...<truncated total={len(text)} chars>"
++        f"{text[-_WS_LOG_KEEP_EACH_SIDE:]}"
++    )
++
++
+ def _get_llm_proxy_client() -> httpx.AsyncClient:
+     """Return (and lazily create) the process-wide upstream forward client."""
+     client = _router._LLM_PROXY_CLIENT
+@@ -530,7 +551,10 @@ async def daemon_websocket(
+                     log.warning(
+                         "ws_rpc_result_missing_id",
+                         daemon_id=str(daemon_id),
+-                        msg=data,
++                        # 2026-10-16-backend-mem-polling task-05 / D-004@v1：WS 消息
++                        # 可达数十 MB（spec bundle RPC 回包），整条进日志是内存/CPU
++                        # 尖峰+日志爆量——截断后只留首尾。
++                        msg=_truncate_ws_log_msg(data),
+                     )
+                     continue
+                 await hub.resolve_rpc(rpc_id, payload)
+@@ -587,7 +611,9 @@ async def daemon_websocket(
+     except Exception:
+         log.exception("ws_unexpected_error", daemon_id=str(daemon_id))
+     finally:
+-        await hub.disconnect(daemon_id)
++        # 传 ws 做连接身份校验：快速重连时旧 handler 的收尾不得踢掉新连接
++        # （2026-10-16-backend-mem-polling task-04，ws_hub.disconnect 对齐 _evict_stale）。
++        await hub.disconnect(daemon_id, ws=websocket)
+ 
+ 
+ async def _payload_runtime_id(
+diff --git a/backend/app/modules/daemon/router/session_crud.py b/backend/app/modules/daemon/router/session_crud.py
+index 7e736e223..a7356a39f 100644
+--- a/backend/app/modules/daemon/router/session_crud.py
++++ b/backend/app/modules/daemon/router/session_crud.py
+@@ -34,6 +34,7 @@ import app.modules.daemon.router as _router
+ from app.core.auth_deps import is_service_credential_request
+ from app.core.errors import PermissionDenied
+ from app.core.logging import get_logger
++from app.modules.agent.model import AgentSession  # task-08：自愈回写 title_fallback
+ from app.modules.auth.model import User
+ from app.modules.daemon.model import DaemonTaskLease
+ from app.modules.daemon.router import SessionDep, TaskRunAgentUser, router
+@@ -318,19 +319,18 @@ async def list_sessions(
+         for r in reads:
+             if r.lease_id and r.lease_id in term_map:
+                 r.terminating_at = term_map[r.lease_id]
+-    # FR-08 / D-006: 复用 list_change_sessions 的首条 user_input 摘要逻辑（前 30 字）。
+-    # 逻辑与 change/router.py:list_change_sessions 保持同步（R-7），未来可抽共享 helper。
+-    # 2026-09-09 阿里云 slow.query 实测（本查询 3.1s）：①只对 title 为空的会话查——
+-    # 有 title 的会话走 session.title 派生（下方 get(r.id) or 不变），tool_report
+-    # 会话已带自动标题，直接跳过整个摘要查询；②SQL 内 substr 截到 64 字符，免把
+-    # 单行均值 33KB 的 TOAST 全文解压拉回（消费方 [:30]，substr 双方言语符语义，
+-    # 64 > 30 保证派生零回归）。
++    # FR-08 / D-006: 首条 user_input 摘要（前 30 字）作标题回退。
++    # 2026-10-16-backend-mem-polling task-08 / D-001@v1：摘要改读持久化列
++    # ``title_fallback``（迁移 20261016100000 已回填存量；NULL=漏网、''=已计算
++    # 无预览哨兵）——列表路径不再对全页 title-NULL 会话做窗口函数扫描（生产
++    # 实测 1.4s 随日志量线性）。仅两列皆 NULL 的漏网会话跑一次收窄版窗口查询
++    # 并回写（列或哨兵），自愈后永不再查；title 展示语义与旧路径逐字节一致。
++    # 摘要口径与 change/router.py:list_change_sessions 保持同步（R-7）。
+     if items:
+-        session_ids = [item.id for item in items if not item.title]
+-        if session_ids:
+-            # P5（2026-08-24 会话审查）：窗口函数分区取每会话首条 user_input——
+-            # 原实现拉页内会话全部 user_input 行（50KB 文本）Python 取最早，
+-            # 长会话下列表请求随轮数线性放大。PG/SQLite 双方言支持。
++        fallback_map: dict[uuid.UUID, str | None] = {item.id: item.title_fallback for item in items}
++        missing = [item.id for item in items if not item.title and item.title_fallback is None]
++        if missing:
++            # 收窄版窗口查询（仅漏网会话；口径同迁移 20261016100000 BACKFILL_SQL）
+             rn = (
+                 sa_func.row_number()
+                 .over(
+@@ -347,7 +347,7 @@ async def list_sessions(
+                 )
+                 .join(AgentRunLog, AgentRunLog.run_id == AgentRun.id)
+                 .where(
+-                    AgentRun.agent_session_id.in_(session_ids),
++                    AgentRun.agent_session_id.in_(missing),
+                     AgentRunLog.channel == "user_input",
+                 )
+                 .subquery()
+@@ -359,18 +359,30 @@ async def list_sessions(
+                     )
+                 )
+             ).all()
+-            content_by = {row.session_id: (row.content or "") for row in title_rows}
+-            title_map = {sid: (content or "")[:30] or None for sid, content in content_by.items()}
+-        else:
+-            title_map = {}
+-        # task-05（2026-08-23-agent-activity-sessions / design §3.3.4）：标题派生改
+-        # session.title（ORM 持久化列，tool_report 会话由 task-04 服务端写自动标题）
+-        # 优先，无标题回落既有首条 user_input 前 30 字派生——chat 会话 title 列恒
+-        # NULL，行为与现状逐字节一致（零回归）；详情端点 title 为 ORM 列经
+-        # from_attributes 自动映射，无需本段注入。
++            healed = {row.session_id: (row.content or "") for row in title_rows}
++            for sid in missing:
++                fallback_map[sid] = healed.get(sid, "")
++            # 自愈回写（列或哨兵 ''）——之后该会话永不再触发收窄查询；
++            # 显式 commit（GET 路径依赖层不保证提交，写回必须落库否则每轮重查）
++            from sqlalchemy import case as sa_case
++            from sqlalchemy import update as sa_update
++
++            await session.execute(
++                sa_update(AgentSession)
++                .where(AgentSession.id.in_(missing))
++                .values(
++                    title_fallback=sa_case(
++                        *[(AgentSession.id == sid, fallback_map.get(sid) or "") for sid in missing]
++                    )
++                )
++            )
++            await session.commit()
+         session_titles: dict[uuid.UUID, str | None] = {item.id: item.title for item in items}
+         for r in reads:
+-            r.title = session_titles.get(r.id) or title_map.get(r.id)
++            # title 优先；回退展示截 30 字（列存 64 源、消费口径与旧路径逐字节一致），
++            # 哨兵 ''/None 均保持 title=None（与旧零输入语义一致）
++            fb = (fallback_map.get(r.id) or "")[:30]
++            r.title = session_titles.get(r.id) or (fb or None)
+     return AgentSessionListResponse(
+         items=reads,
+         total=total,
+diff --git a/backend/app/modules/daemon/tests/test_permission_http_uplink.py b/backend/app/modules/daemon/tests/test_permission_http_uplink.py
+index ce0aa64e9..67c7ea296 100644
+--- a/backend/app/modules/daemon/tests/test_permission_http_uplink.py
++++ b/backend/app/modules/daemon/tests/test_permission_http_uplink.py
+@@ -429,3 +429,110 @@ class TestPermissionHttpUplink:
+         assert _permission_timers["req-share-1"] is not first_timer
+         # 未使用 lease（防 lint 未用告警的显式引用）。
+         assert lease.kind == "interactive"
++
++
++# ── task-03（2026-10-16-backend-mem-polling / D-004@v1）：超时回调会话治理 ──────
++
++
++class TestTimeoutFreshSession:
++    """_on_timeout 收尾必须用全新短会话并全路径 commit/rollback。
++
++    回调不得复用外层请求域的已关闭 session（定时器 pin 它 5 分钟 +
++    route_key None 早退不提交——生产 idle-in-transaction FATAL 元凶）。
++    """
++
++    @staticmethod
++    def _fresh_factory(monkeypatch: pytest.MonkeyPatch) -> list:
++        """patch app.core.db.get_session_factory（源头模块属性），返回捕获列表。"""
++        import app.core.db as core_db
++
++        created: list = []
++
++        class _Ctx:
++            def __init__(self, s):
++                self.s = s
++
++            async def __aenter__(self):
++                return self.s
++
++            async def __aexit__(self, *a):
++                return False
++
++        class _Factory:
++            def __call__(self):
++                from unittest.mock import MagicMock
++
++                s = AsyncMock()
++                # execute 返回值须为同步 MagicMock（AsyncMock 自动推导会让
++                # scalar_one_or_none 变协程——与真实 AsyncSession.execute 行为不符）
++                ret = MagicMock()
++                ret.scalar_one_or_none.return_value = None
++                s.execute.return_value = ret
++                created.append(s)
++                return _Ctx(s)
++
++        monkeypatch.setattr(core_db, "get_session_factory", lambda: _Factory())
++        return created
++
++    @pytest.mark.asyncio
++    async def test_timeout_uses_fresh_session_and_commits(
++        self, db_session: AsyncSession, monkeypatch: pytest.MonkeyPatch
++    ) -> None:
++        """route_key None 早退路径（历史不提交的元凶路径）也必须 commit 新会话。"""
++        import asyncio
++
++        from app.modules.daemon import permission_service as ps
++        from app.modules.daemon.service import DaemonService
++
++        # 外层 session 模拟"已关闭"：任何复用必然炸——用于证明回调切到了新会话。
++        dead = AsyncMock()
++        dead.execute.side_effect = RuntimeError("outer session closed")
++
++        created = self._fresh_factory(monkeypatch)
++        # publish/notify 走 daemon 服务真实链路依赖 redis，单测打桩隔离（测的是会话治理本身）
++        monkeypatch.setattr(DaemonService, "_publish_session_event", AsyncMock(), raising=False)
++
++        psv = ps.DaemonPermissionService(
++            ps.DaemonService(db_session), AsyncMock(), timeout_sec=0.01
++        )
++        psv._svc._session = dead
++
++        sid, rid = uuid.uuid4(), uuid.uuid4()
++        task = asyncio.create_task(psv._on_timeout(sid, rid, "req-fresh-1", None))
++        ps._permission_timers["req-fresh-1"] = task
++        await task
++
++        assert len(created) == 1, "必须经工厂开恰好一个新短会话"
++        fresh = created[0]
++        fresh.commit.await_count == 1 or fresh.commit.assert_awaited_once()
++        fresh.rollback.assert_not_awaited()
++        dead.execute.assert_not_called(), "不得复用外层已关闭 session"
++        assert "req-fresh-1" not in ps._permission_timers, "timer 自清"
++
++    @pytest.mark.asyncio
++    async def test_timeout_denouement_failure_rolls_back_and_never_raises(
++        self, db_session: AsyncSession, monkeypatch: pytest.MonkeyPatch
++    ) -> None:
++        """收尾链异常 → rollback + 仅告警不抛（best-effort 语义保持）。"""
++
++        from app.modules.daemon import permission_service as ps
++        from app.modules.daemon.service import DaemonService
++
++        created = self._fresh_factory(monkeypatch)
++        monkeypatch.setattr(
++            DaemonService,
++            "_publish_session_event",
++            AsyncMock(side_effect=RuntimeError("publish down")),
++            raising=False,
++        )
++
++        psv = ps.DaemonPermissionService(
++            ps.DaemonService(db_session), AsyncMock(), timeout_sec=0.01
++        )
++        sid, rid = uuid.uuid4(), uuid.uuid4()
++        # 不抛异常即通过（失败被 best-effort 吞掉）
++        await psv._on_timeout(sid, rid, "req-fresh-2", None)
++
++        assert len(created) == 1
++        created[0].rollback.assert_awaited_once()
++        created[0].commit.assert_not_awaited()
+diff --git a/backend/app/modules/daemon/tests/test_session_router.py b/backend/app/modules/daemon/tests/test_session_router.py
+index fc31c3d55..3acf33835 100644
+--- a/backend/app/modules/daemon/tests/test_session_router.py
++++ b/backend/app/modules/daemon/tests/test_session_router.py
+@@ -773,3 +773,203 @@ class TestSessionTerminatingAtExposure:
+         items = {i["id"]: i for i in resp.json()["items"]}
+         assert items[str(sid_term)]["terminating_at"] is not None
+         assert items[str(sid_plain)]["terminating_at"] is None
++
++
++# ── task-08（2026-10-16-backend-mem-polling / D-001@v1）：title_fallback 持久化 ─
++
++
++class TestTitleFallbackPersistence:
++    """列表标题回退读 title_fallback 列；漏网自愈回写；哨兵''防重查。"""
++
++    @pytest.mark.asyncio
++    async def test_fallback_column_serves_title_without_user_input_rows(
++        self,
++        client: AsyncClient,
++        auth_headers: dict[str, str],
++        db_session: AsyncSession,
++    ) -> None:
++        """列非空直接作 title——无任何 user_input 日志行（零窗口查询）。"""
++        from app.modules.agent.model import AgentSession
++        from app.modules.auth.model import User
++
++        admin = (
++            (await db_session.execute(select(User).where(User.email == "admin@example.com")))
++            .scalars()
++            .first()
++        )
++        rt = await _create_runtime(db_session, admin.id)
++        sid = uuid.uuid4()
++        db_session.add(
++            AgentSession(
++                id=sid,
++                user_id=admin.id,
++                runtime_id=rt.id,
++                provider="claude",
++                status="ended",
++                title_fallback="列存预览文本",
++            )
++        )
++        await db_session.commit()
++
++        resp = await client.get("/api/daemon/sessions", headers=auth_headers)
++        assert resp.status_code == 200, resp.text
++        kept = next(i for i in resp.json()["items"] if i["id"] == str(sid))
++        assert kept["title"] == "列存预览文本"
++
++    @pytest.mark.asyncio
++    async def test_zero_input_session_heals_sentinel_and_never_shows_title(
++        self,
++        client: AsyncClient,
++        auth_headers: dict[str, str],
++        db_session: AsyncSession,
++    ) -> None:
++        """零 user_input 会话：首轮列表回写哨兵 ''、title 保持 None（旧语义）。"""
++        from app.modules.agent.model import AgentSession
++        from app.modules.auth.model import User
++
++        admin = (
++            (await db_session.execute(select(User).where(User.email == "admin@example.com")))
++            .scalars()
++            .first()
++        )
++        rt = await _create_runtime(db_session, admin.id)
++        sid = uuid.uuid4()
++        db_session.add(
++            AgentSession(
++                id=sid, user_id=admin.id, runtime_id=rt.id, provider="claude", status="ended"
++            )
++        )
++        await db_session.commit()
++
++        resp = await client.get("/api/daemon/sessions", headers=auth_headers)
++        assert resp.status_code == 200, resp.text
++        kept = next(i for i in resp.json()["items"] if i["id"] == str(sid))
++        assert kept["title"] is None  # 零输入无预览（与旧语义一致）
++
++        row = (
++            await db_session.execute(select(AgentSession).where(AgentSession.id == sid))
++        ).scalar_one()
++        assert row.title_fallback == "", "首轮列表必须回写哨兵空串（自愈）"
++
++        # 第二轮：fallback 非 NULL → 不再进收窄查询（结构保证），展示不变
++        resp2 = await client.get("/api/daemon/sessions", headers=auth_headers)
++        kept2 = next(i for i in resp2.json()["items"] if i["id"] == str(sid))
++        assert kept2["title"] is None
++
++    @pytest.mark.asyncio
++    async def test_migration_backfill_sql_both_semantics_on_sqlite(self) -> None:
++        """迁移回填 SQL 双语义在 SQLite 方言验证（盲区4）：首条 user_input 预览 + 零输入哨兵。"""
++        import importlib.util
++        from pathlib import Path
++
++        import sqlalchemy as sa
++        from sqlalchemy.ext.asyncio import create_async_engine
++
++        from app.modules.agent.model import AgentRun, AgentRunLog, AgentSession
++
++        # 迁移文件名以数字开头，不能常规 import——importlib 按路径加载
++        mig_path = (
++            Path(__file__).resolve().parents[4]
++            / "migrations"
++            / "versions"
++            / "20261016100000_agent_session_title_fallback.py"
++        )
++        spec = importlib.util.spec_from_file_location("mig_title_fallback", mig_path)
++        assert spec is not None and spec.loader is not None
++        mig = importlib.util.module_from_spec(spec)
++        spec.loader.exec_module(mig)
++
++        engine = create_async_engine("sqlite+aiosqlite://")
++        try:
++            async with engine.begin() as conn:
++                await conn.run_sync(
++                    lambda sc: AgentSession.metadata.create_all(
++                        sc,
++                        tables=[AgentSession.__table__, AgentRun.__table__, AgentRunLog.__table__],
++                    )
++                )
++                sid_with, sid_zero = uuid.uuid4(), uuid.uuid4()
++                run = AgentRun(
++                    id=uuid.uuid4(),
++                    agent_type="claude_code",
++                    provider="claude",
++                    status="completed",
++                    spec_strategy="interactive",
++                    agent_session_id=sid_with,
++                    started_at=datetime.now(UTC),
++                )
++                now_ts = datetime.now(UTC)
++                await conn.execute(
++                    AgentSession.__table__.insert(),
++                    [
++                        {
++                            "id": sid_with,
++                            "user_id": uuid.uuid4(),
++                            "provider": "claude",
++                            "status": "ended",
++                            "created_at": now_ts,
++                            "updated_at": now_ts,
++                        },
++                        {
++                            "id": sid_zero,
++                            "user_id": uuid.uuid4(),
++                            "provider": "claude",
++                            "status": "ended",
++                            "created_at": now_ts,
++                            "updated_at": now_ts,
++                        },
++                    ],
++                )
++                await conn.execute(
++                    AgentRun.__table__.insert(),
++                    [
++                        {
++                            "id": run.id,
++                            "agent_session_id": sid_with,
++                            "agent_type": "claude_code",
++                            "provider": "claude",
++                            "spec_strategy": "interactive",
++                            "status": "completed",
++                            "started_at": now_ts,
++                            "created_at": now_ts,
++                            "updated_at": now_ts,
++                        }
++                    ],
++                )
++                await conn.execute(
++                    AgentRunLog.__table__.insert(),
++                    [
++                        {
++                            "id": uuid.uuid4(),
++                            "run_id": run.id,
++                            "timestamp": now_ts,
++                            "channel": "assistant",
++                            "content_redacted": "不是输入",
++                            "created_at": now_ts,
++                        },
++                        {
++                            "id": uuid.uuid4(),
++                            "run_id": run.id,
++                            "timestamp": now_ts,
++                            "channel": "user_input",
++                            "content_redacted": "第一条用户输入应该被选中" + "x" * 80,
++                            "created_at": now_ts,
++                        },
++                    ],
++                )
++                await conn.execute(sa.text(mig.BACKFILL_SQL))
++                await conn.execute(sa.text(mig.SENTINEL_SQL))
++                rows = {
++                    r[0]: r[1]
++                    for r in (
++                        await conn.execute(
++                            sa.select(
++                                AgentSession.__table__.c.id, AgentSession.__table__.c.title_fallback
++                            )
++                        )
++                    ).all()
++                }
++        finally:
++            await engine.dispose()
++        assert rows[sid_with] == "第一条用户输入应该被选中" + "x" * (64 - 12)
++        assert rows[sid_zero] == "", "零输入会话必须回写哨兵空串"
+diff --git a/backend/app/modules/daemon/tests/test_ws_hub.py b/backend/app/modules/daemon/tests/test_ws_hub.py
+index 10a85cab8..a3bb39f03 100644
+--- a/backend/app/modules/daemon/tests/test_ws_hub.py
++++ b/backend/app/modules/daemon/tests/test_ws_hub.py
+@@ -487,3 +487,167 @@ class TestFullLifecycle:
+         # B still receives messages
+         await hub.send_heartbeat_ack(rid_b)
+         assert len(ws_b.sent_messages) == 1
++
++
++# ── task-04（2026-10-16-backend-mem-polling / D-004@v1）：泄漏径与身份校验 ────
++
++
++class TestDisconnectIdentityCheck:
++    """disconnect(ws=...) 连接身份校验：旧 handler 收尾不得踢新连接。"""
++
++    @pytest.mark.asyncio
++    async def test_stale_handler_disconnect_keeps_new_connection(self) -> None:
++        """快速重连：connect 换新 ws 后，旧 handler 的 disconnect(ws=旧) 不清表。"""
++        hub = DaemonWsHub()
++        rid = uuid.uuid4()
++        old_ws = _make_mock_ws()
++        new_ws = _make_mock_ws()
++
++        await hub.connect(rid, old_ws)
++        await hub.connect(rid, new_ws)  # 替换注册（connect 内关旧 ws）
++
++        await hub.disconnect(rid, ws=old_ws)  # 旧 handler 的滞后收尾
++
++        assert hub.is_connected(rid) is True, "新连接必须幸存"
++        assert hub._connections.get(rid) is new_ws
++
++        await hub.disconnect(rid, ws=new_ws)  # 新 handler 正常收尾
++        assert hub.is_connected(rid) is False
++
++    @pytest.mark.asyncio
++    async def test_disconnect_without_ws_keeps_legacy_semantics(self) -> None:
++        """不传 ws 保持旧语义（无条件 pop）——存量调用/测试零回归。"""
++        hub = DaemonWsHub()
++        rid = uuid.uuid4()
++        ws = _make_mock_ws()
++        await hub.connect(rid, ws)
++        await hub.disconnect(rid)  # 不带身份校验
++        assert hub.is_connected(rid) is False
++
++
++class TestPendingRpcsCleanup:
++    """_pending_rpcs 两条泄漏径：外部取消清理 / done future 早退前 pop。"""
++
++    @pytest.mark.asyncio
++    async def test_send_rpc_external_cancel_cleans_pending(self) -> None:
++        """HTTP 调用方在等待中被取消 → 条目清理，不残留。"""
++        hub = DaemonWsHub()
++        rid = uuid.uuid4()
++        ws = _make_mock_ws()
++        await hub.connect(rid, ws)
++
++        import asyncio
++
++        from app.modules.daemon.runtime.service import DaemonRuntimeOffline
++
++        outer = asyncio.create_task(hub.send_rpc(rid, "list_dir", {"path": "/x"}, timeout=5.0))
++        await asyncio.sleep(0.05)  # 让 send_rpc 注册 pending 并进入等待
++        outer.cancel()
++        with pytest.raises((asyncio.CancelledError, DaemonRuntimeOffline)):
++            await outer
++        await asyncio.sleep(0.05)  # 让 CancelledError 分支的清理完成
++        # 外层取消会级联取消内层 wait_for → CancelledError 分支 → _cancel_rpc 清表
++        pending = [k for k, v in hub._pending_rpcs.items() if v[0] == rid]
++        assert pending == [], f"外部取消后不得残留 pending 条目: {pending}"
++        await hub.disconnect(rid)
++
++    @pytest.mark.asyncio
++    async def test_resolve_rpc_done_future_pops_entry(self) -> None:
++        """迟到回包命中 done future → 早退前 pop（不永久驻留）。"""
++        import asyncio
++
++        hub = DaemonWsHub()
++
++        fut: asyncio.Future = asyncio.get_event_loop().create_future()
++        fut.set_result({"result": {"first": True}})  # 已完成（模拟超时后被取消/置结果）
++        hub._pending_rpcs["rpc-done-1"] = (uuid.uuid4(), fut)
++
++        await hub.resolve_rpc("rpc-done-1", {"result": {"late": True}})
++
++        assert "rpc-done-1" not in hub._pending_rpcs, "done future 早退前必须 pop"
++
++
++# ── task-06（2026-10-16-backend-mem-polling / D-001@v1）：change-write 轻通知 ─
++
++
++class TestNotifyChangeWriteAvailable:
++    """notify_change_write_available：解析→定向推送；best-effort 三态不抛。"""
++
++    @pytest.mark.asyncio
++    async def test_notify_sends_payload_with_resolved_daemon(self, monkeypatch) -> None:
++        import app.modules.daemon.ws_hub as hub_mod
++
++        rid, did, wid = uuid.uuid4(), uuid.uuid4(), uuid.uuid4()
++        sent_messages: list = []
++
++        class _FakeHub:
++            async def send_to_runtime(self, daemon_id, message):
++                sent_messages.append((daemon_id, message))
++                return True
++
++        monkeypatch.setattr(hub_mod, "get_daemon_ws_hub", lambda: _FakeHub())
++
++        async def _fake_resolve(session, runtime_id):
++            assert runtime_id == rid
++            return did
++
++        monkeypatch.setattr(
++            "app.modules.daemon.session.service._resolve_daemon_id_for_runtime", _fake_resolve
++        )
++        # 间接引用（helper 内函数级 import 从源模块取属性——testing-gotchas 惯例）
++
++        ok = await hub_mod.notify_change_write_available(None, rid, wid)
++        assert ok is True
++        assert sent_messages == [
++            (
++                did,
++                {
++                    "type": "daemon:change_write_available",
++                    "payload": {"runtime_id": str(rid), "workspace_id": str(wid)},
++                },
++            )
++        ]
++
++    @pytest.mark.asyncio
++    async def test_notify_no_daemon_returns_false_without_send(self, monkeypatch) -> None:
++        import app.modules.daemon.ws_hub as hub_mod
++
++        rid = uuid.uuid4()
++        called = []
++
++        class _FakeHub:
++            async def send_to_runtime(self, *a, **k):  # pragma: no cover - 不应被调
++                called.append(a)
++                return True
++
++        monkeypatch.setattr(hub_mod, "get_daemon_ws_hub", lambda: _FakeHub())
++
++        async def _none_resolve(session, runtime_id):
++            return None
++
++        monkeypatch.setattr(
++            "app.modules.daemon.session.service._resolve_daemon_id_for_runtime", _none_resolve
++        )
++        assert await hub_mod.notify_change_write_available(None, rid) is False
++        assert called == []
++
++    @pytest.mark.asyncio
++    async def test_notify_send_exception_swallowed(self, monkeypatch) -> None:
++        import app.modules.daemon.ws_hub as hub_mod
++
++        rid, did = uuid.uuid4(), uuid.uuid4()
++
++        class _FakeHub:
++            async def send_to_runtime(self, daemon_id, message):
++                raise RuntimeError("ws broken")
++
++        monkeypatch.setattr(hub_mod, "get_daemon_ws_hub", lambda: _FakeHub())
++
++        async def _ok_resolve(session, runtime_id):
++            return did
++
++        monkeypatch.setattr(
++            "app.modules.daemon.session.service._resolve_daemon_id_for_runtime", _ok_resolve
++        )
++        # 发送异常被吞（best-effort），返回 False 不抛
++        assert await hub_mod.notify_change_write_available(None, rid) is False
+diff --git a/backend/app/modules/daemon/tests/test_ws_rpc.py b/backend/app/modules/daemon/tests/test_ws_rpc.py
+index 673399371..580e5a835 100644
+--- a/backend/app/modules/daemon/tests/test_ws_rpc.py
++++ b/backend/app/modules/daemon/tests/test_ws_rpc.py
+@@ -358,8 +358,9 @@ class TestResolveRpcEdgeCases:
+         hub._pending_rpcs["r1"] = (uuid.uuid4(), fut)
+ 
+         await hub.resolve_rpc("r1", {"rpc_id": "r1", "result": {"entries": []}})
+-        # Already resolved — map untouched (the entry we added manually stays).
+-        assert "r1" in hub._pending_rpcs
++        # Already resolved — 2026-10-16-backend-mem-polling task-04 起早退前 pop
++        # （done future 条目残留是 _pending_rpcs 泄漏径，旧断言钉死的是缺陷行为）。
++        assert "r1" not in hub._pending_rpcs
+ 
+ 
+ # ── Endpoint: POST /api/daemon/runtimes/{id}/list-dir ────────────────────────
+diff --git a/backend/app/modules/daemon/ws_hub.py b/backend/app/modules/daemon/ws_hub.py
+index 15ce80dd3..0aaec224f 100644
+--- a/backend/app/modules/daemon/ws_hub.py
++++ b/backend/app/modules/daemon/ws_hub.py
+@@ -12,6 +12,7 @@ from fastapi import WebSocket
+ 
+ from app.core.logging import get_logger
+ from app.modules.daemon.protocol import (
++    DAEMON_MSG_CHANGE_WRITE_AVAILABLE,
+     DAEMON_MSG_CLEANUP,
+     DAEMON_MSG_HEARTBEAT_ACK,
+     DAEMON_MSG_PERMISSION_RESPONSE,
+@@ -111,9 +112,19 @@ class DaemonWsHub:
+             total_connected=len(self._connections),
+         )
+ 
+-    async def disconnect(self, daemon_id: uuid.UUID) -> None:
+-        """Remove a daemon entity's WebSocket connection."""
++    async def disconnect(self, daemon_id: uuid.UUID, *, ws: WebSocket | None = None) -> None:
++        """Remove a daemon entity's WebSocket connection.
++
++        2026-10-16-backend-mem-polling task-04 / D-004@v1：可选 ``ws`` 连接身份
++        校验（对齐 :meth:`_evict_stale` 先例）——快速重连场景下旧端点 handler 的
++        finally 持陈旧 ws 调本方法，若不校验会误 pop 刚注册的新连接（重连风暴
++        自我放大器）。传 ``ws`` 时仅当注册表当前连接仍是它才清理；不传保持旧
++        语义（无条件 pop，向后兼容存量调用/测试）。
++        """
+         async with self._lock:
++            if ws is not None and self._connections.get(daemon_id) is not ws:
++                # 已被新连接替换——本次断连属于陈旧 handler，新连接无辜，不清理。
++                return
+             removed = self._connections.pop(daemon_id, None)
+ 
+         if removed is not None:
+@@ -605,6 +616,10 @@ class DaemonWsHub:
+             ) from None
+         except asyncio.CancelledError:
+             # future.cancel() — most likely disconnect → cancel_pending_for_daemon.
++            # 2026-10-16-backend-mem-polling task-04：外部取消（HTTP 调用方断开/
++            # 超时取消/重连风暴）同样清理 _pending_rpcs 条目——future 已 done，
++            # 此前不清表会让条目永久驻留（迟到回包也只 warn 不 pop，见 resolve_rpc）。
++            await self._cancel_rpc(rpc_id)
+             # Re-raise as DaemonRuntimeOffline so callers map to 504.
+             raise DaemonRuntimeOffline(
+                 f"daemon '{daemon_id}' disconnected mid-rpc.",
+@@ -638,6 +653,10 @@ class DaemonWsHub:
+                 return
+             future = entry[1]
+             if future.done():
++                # 2026-10-16-backend-mem-polling task-04：done future 早退前先 pop
++                # 条目——该 rpc_id 已被超时/取消路径标记完成，条目残留只会在
++                # 后续重复回包时反复 warn 且永不释放。
++                self._pending_rpcs.pop(rpc_id, None)
+                 log.warning(
+                     "ws_rpc_already_resolved",
+                     rpc_id=rpc_id,
+@@ -815,3 +834,45 @@ def get_daemon_ws_hub() -> DaemonWsHub:
+ 
+ # Alias — shorter name used by placement and other integration points.
+ get_ws_hub = get_daemon_ws_hub
++
++
++async def notify_change_write_available(
++    session: Any,
++    runtime_id: uuid.UUID,
++    workspace_id: uuid.UUID | None = None,
++) -> bool:
++    """change-write pending 行落库并 commit 后的定向轻通知（task-06 / D-001@v1）。
++
++    经 ``_resolve_daemon_id_for_runtime``（session.service 单一真相源）解析
++    WS 路由键后推送 ``daemon:change_write_available``（payload 只带
++    runtime_id / workspace_id，daemon 收到即调既有 GET pending-change-writes
++    拉取——幂等，不在 WS 上传任务体）。**best-effort**：解析失败 / 离线 /
++    发送异常仅 debug/warning 日志，不抛不重试——兜底轮询永在（旧 daemon 不
++    识别本消息按 default 分支 warn 丢弃，同样落到兜底轮询）。返回 True 表示
++    已下发。
++    """
++    from app.modules.daemon.session.service import _resolve_daemon_id_for_runtime
++
++    try:
++        daemon_id = await _resolve_daemon_id_for_runtime(session, runtime_id)
++        if daemon_id is None:
++            log.debug("change_write_notify_no_daemon", runtime_id=str(runtime_id))
++            return False
++        message = {
++            "type": DAEMON_MSG_CHANGE_WRITE_AVAILABLE,
++            "payload": {
++                "runtime_id": str(runtime_id),
++                "workspace_id": str(workspace_id) if workspace_id is not None else None,
++            },
++        }
++        sent = await get_daemon_ws_hub().send_to_runtime(daemon_id, message)
++        if not sent:
++            log.debug("change_write_notify_offline", runtime_id=str(runtime_id))
++        return sent
++    except Exception:
++        log.warning(
++            "change_write_notify_failed",
++            runtime_id=str(runtime_id),
++            exc_info=True,
++        )
++        return False
+diff --git a/backend/app/modules/knowledge/embedding_worker.py b/backend/app/modules/knowledge/embedding_worker.py
+new file mode 100644
+index 000000000..ea5021fcf
+--- /dev/null
++++ b/backend/app/modules/knowledge/embedding_worker.py
+@@ -0,0 +1,121 @@
++"""嵌入子进程 worker（change 2026-10-16-backend-mem-polling task-01 / D-001@v1）。
++
++模型加载在独立子进程内完成（主进程零 fastembed/ONNX 常驻），主进程经
++``vector_search.EmbeddingSubprocessProxy`` 与本进程按行协议通信：
++
++- 请求（单行 JSON）：``{"id": int, "op": "embed", "texts": [str, ...]}``
++- 响应（单行 JSON）：``{"id": int, "ok": true, "vectors": [[float, ...], ...]}``
++  或失败 ``{"id": int, "ok": false, "error": str}``
++
++三闸自灭（进程退出 = 内存确定性归还 OS）：
++
++1. 闲置闸：``idle_exit_sec``（主进程注入，默认 900s）无请求主动退出；
++2. 父进程闸：stdin EOF（父死亡/管道关闭）立即退出——父环境消失后靠本闸自灭，
++   不依赖 spawn 侧环境变量；
++3. 硬寿命帽：连续运行 ``WORKER_MAX_LIFETIME_SEC``（3600s）无条件退出。
++
++启动即把自身 ``oom_score_adj`` 重置为 0（子进程会继承父进程的保护分，必须显式
++重置；Windows/macOS 无 /proc → fail-soft 跳过）。stdin 等待用读线程 + 队列
++（Windows 管道无 select，跨平台唯一解）。
++
++命令行：``python -m app.modules.knowledge.embedding_worker <model_name> [idle_exit_sec]``
++"""
++
++from __future__ import annotations
++
++import json
++import queue
++import sys
++import threading
++import time
++
++WORKER_MAX_LIFETIME_SEC = 3600.0
++
++_EOF = object()  # 读线程 stdin 结束哨兵
++
++
++def _reader_thread(stdin: object, out: queue.Queue) -> None:
++    """逐行读 stdin 入队；EOF/异常入哨兵（daemon 线程，进程退出不阻塞）。"""
++    try:
++        for line in stdin:
++            out.put(line)
++    except Exception:  # 管道断裂等一律按 EOF 处理
++        pass
++    finally:
++        out.put(_EOF)
++
++
++def _reset_oom_score() -> None:
++    """把自身 oom_score_adj 重置为 0（容器 OOM 时优先牺牲本子进程而非主进程）。
++
++    Windows/macOS 无 /proc——写入失败仅跳过（fail-soft，三平台兼容）。
++    """
++    try:
++        with open("/proc/self/oom_score_adj", "w") as f:
++            f.write("0")
++    except OSError:
++        pass
++
++
++def _embed_once(model: object, texts: list[str]) -> list[list[float]]:
++    """单次嵌入：texts → 向量列表（numpy 数组元素逐个转 float）。"""
++    out: list[list[float]] = []
++    for vec in model.embed(texts):
++        out.append([float(x) for x in vec])
++    return out
++
++
++def main(argv: list[str] | None = None) -> int:
++    args = list(sys.argv[1:] if argv is None else argv)
++    if not args:
++        print(json.dumps({"id": None, "ok": False, "error": "model_name required"}))
++        return 2
++    model_name = args[0]
++    try:
++        idle_exit_sec = float(args[1]) if len(args) > 1 else 900.0
++    except ValueError:
++        idle_exit_sec = 900.0
++
++    _reset_oom_score()
++
++    from fastembed import TextEmbedding  # lazy import：缺席时主进程 fail-soft 降级
++
++    model = TextEmbedding(model_name=model_name)
++
++    lines: queue.Queue = queue.Queue()
++    threading.Thread(target=_reader_thread, args=(sys.stdin, lines), daemon=True).start()
++    started = time.monotonic()
++    last_active = started
++    while True:
++        now = time.monotonic()
++        if now - last_active >= idle_exit_sec:  # 闸 1：闲置
++            break
++        if now - started >= WORKER_MAX_LIFETIME_SEC:  # 闸 3：硬寿命帽
++            break
++        timeout = max(0.05, min(1.0, idle_exit_sec - (now - last_active)))
++        try:
++            item = lines.get(timeout=timeout)
++        except queue.Empty:
++            continue
++        if item is _EOF:  # 闸 2：父进程消失
++            break
++        last_active = time.monotonic()
++        req_id = None
++        try:
++            req = json.loads(item)
++            req_id = req.get("id") if isinstance(req, dict) else None
++            if not isinstance(req, dict) or req.get("op") != "embed":
++                raise ValueError(f"unknown op: {req.get('op') if isinstance(req, dict) else req!r}")
++            texts = req["texts"]
++            if not isinstance(texts, list) or not all(isinstance(t, str) for t in texts):
++                raise ValueError("texts must be list[str]")
++            resp = {"id": req_id, "ok": True, "vectors": _embed_once(model, texts)}
++        except Exception as exc:  # 单请求失败不断进程（下一条照常）
++            resp = {"id": req_id, "ok": False, "error": f"{type(exc).__name__}: {exc}"}
++        sys.stdout.write(json.dumps(resp, ensure_ascii=False) + "\n")
++        sys.stdout.flush()
++    return 0
++
++
++if __name__ == "__main__":
++    raise SystemExit(main())
+diff --git a/backend/app/modules/knowledge/tests/test_embedding_subprocess.py b/backend/app/modules/knowledge/tests/test_embedding_subprocess.py
+new file mode 100644
+index 000000000..1367a3cf2
+--- /dev/null
++++ b/backend/app/modules/knowledge/tests/test_embedding_subprocess.py
+@@ -0,0 +1,216 @@
++"""task-01 子进程嵌入封装测试（2026-10-16-backend-mem-polling / D-001@v1）。
++
++用假 worker（临时 python 脚本说同款行协议）注入 ``worker_cmd`` 测代理全路径——
++不依赖 fastembed/模型下载（CI 无外网也能跑）。
++
++覆盖：
++- 行协议往返（假 worker 回显 [[len(t)] for t in texts]）
++- 闲置自灭后重启（假 worker idle_exit_sec=1 → 1.2s 后进程自退 → 再 embed 重启）
++- 连续崩溃 3 次进入退避（available=False / retry_at 未来）与退避到点恢复
++- get_embedder fail-soft（构造异常缓存原因；崩溃退避期返回 None+reason）
++- _index_cache_put/get LRU 上限淘汰与新鲜度刷新
++- worker 纯函数（_reader EOF 哨兵 / _reset_oom_score 跨平台 fail-soft）
++"""
++
++from __future__ import annotations
++
++import io
++import time
++from pathlib import Path
++
++import pytest
++
++from app.modules.knowledge import vector_search as vs
++from app.modules.knowledge.embedding_worker import _reader_thread, _reset_oom_score
++from app.modules.knowledge.vector_search import (
++    EmbeddingSubprocessError,
++    EmbeddingSubprocessProxy,
++)
++
++# -- 假 worker 脚本 ---------------------------------------------------------------
++
++# 正常 worker：回显每条文本长度作向量；idle_exit_sec 位置参数控制闲置闸。
++_FAKE_WORKER = """
++import json, sys, time
++
++idle = float(sys.argv[1]) if len(sys.argv) > 1 else 900.0
++started = time.monotonic()
++last = started
++buf = ""
++while True:
++    now = time.monotonic()
++    if now - last >= idle or now - started >= 3600.0:
++        break
++    line = sys.stdin.readline()
++    if not line:
++        break
++    last = time.monotonic()
++    try:
++        req = json.loads(line)
++        texts = req["texts"]
++        resp = {"id": req.get("id"), "ok": True, "vectors": [[float(len(t))] for t in texts]}
++    except Exception as exc:
++        resp = {"id": None, "ok": False, "error": str(exc)}
++    sys.stdout.write(json.dumps(resp) + "\\n")
++    sys.stdout.flush()
++"""
++
++# 崩溃 worker：立即退出（模拟模型加载失败/启动即死）。
++_CRASH_WORKER = """
++import sys
++sys.exit(3)
++"""
++
++
++@pytest.fixture()
++def fake_worker_path(tmp_path: Path) -> Path:
++    p = tmp_path / "fake_worker.py"
++    p.write_text(_FAKE_WORKER, encoding="utf-8")
++    return p
++
++
++@pytest.fixture()
++def crash_worker_path(tmp_path: Path) -> Path:
++    p = tmp_path / "crash_worker.py"
++    p.write_text(_CRASH_WORKER, encoding="utf-8")
++    return p
++
++
++@pytest.fixture(autouse=True)
++def _reset_embedder():
++    vs.reset_embedder_for_tests()
++    vs.reset_index_for_tests()
++    yield
++    vs.reset_embedder_for_tests()
++    vs.reset_index_for_tests()
++
++
++def _cmd(python_file: Path, idle: str = "900") -> list[str]:
++    import sys
++
++    return [sys.executable, str(python_file), idle]
++
++
++# -- 代理行协议与生命周期 ------------------------------------------------------------
++
++
++def test_proxy_embed_roundtrip(fake_worker_path: Path):
++    proxy = EmbeddingSubprocessProxy("fake-model", worker_cmd=_cmd(fake_worker_path))
++    try:
++        assert proxy.embed(["ab", "cdef"]) == [[2.0], [4.0]]
++        assert proxy.embed(["x"]) == [[1.0]]
++        assert proxy.consecutive_crashes == 0
++    finally:
++        proxy.close()
++
++
++def test_proxy_restarts_after_worker_idle_exit(fake_worker_path: Path):
++    """闲置闸自灭后下一请求重新拉起（进程退出=内存归还，重启透明）。"""
++    proxy = EmbeddingSubprocessProxy("fake-model", worker_cmd=_cmd(fake_worker_path, idle="1"))
++    try:
++        assert proxy.embed(["ab"]) == [[2.0]]
++        time.sleep(1.5)  # 假 worker 闲置 1s 自灭
++        assert proxy.embed(["abc"]) == [[3.0]]  # 重启后照常
++    finally:
++        proxy.close()
++
++
++def test_proxy_consecutive_crash_backoff(crash_worker_path: Path):
++    """连续 3 次崩溃进入退避（available=False），退避到点恢复可重试。"""
++    proxy = EmbeddingSubprocessProxy("fake-model", worker_cmd=_cmd(crash_worker_path))
++    try:
++        for _ in range(3):
++            with pytest.raises(EmbeddingSubprocessError):
++                proxy.embed(["x"])
++        assert proxy.consecutive_crashes == 3
++        assert proxy.available is False
++        assert proxy.retry_at > time.monotonic()
++        # 退避到点后 available 翻真（get_embedder 据此重建）
++        proxy.retry_at = time.monotonic() - 1
++        assert proxy.available is True
++    finally:
++        proxy.close()
++
++
++def test_proxy_crash_count_resets_on_success(fake_worker_path: Path):
++    proxy = EmbeddingSubprocessProxy("fake-model", worker_cmd=_cmd(fake_worker_path))
++    try:
++        proxy._on_crash()
++        proxy._on_crash()
++        assert proxy.consecutive_crashes == 2
++        assert proxy.embed(["ok"]) == [[2.0]]  # 成功清零
++        assert proxy.consecutive_crashes == 0
++    finally:
++        proxy.close()
++
++
++# -- get_embedder fail-soft ------------------------------------------------------------
++
++
++def test_get_embedder_construction_error_cached(monkeypatch: pytest.MonkeyPatch):
++    """构造异常 → (None, 原因)，且同模型名内缓存不重试；换模型名重置。"""
++
++    def _boom(*_a, **_k):
++        raise RuntimeError("config unavailable")
++
++    monkeypatch.setattr(vs, "EmbeddingSubprocessProxy", _boom)
++    emb, err = vs.get_embedder("m1")
++    assert emb is None and err and "config unavailable" in err
++    # 同模型缓存原因（不重试）
++    emb2, err2 = vs.get_embedder("m1")
++    assert emb2 is None and err2 == err
++    monkeypatch.undo()
++    # 换模型名 → 重新构造成功
++    emb3, err3 = vs.get_embedder("m2")
++    assert emb3 is not None and err3 is None
++
++
++def test_get_embedder_backoff_window_returns_none(
++    fake_worker_path: Path, monkeypatch: pytest.MonkeyPatch
++):
++    """代理进入崩溃退避期 → (None, reason)，不返回坏代理。"""
++    proxy = EmbeddingSubprocessProxy("m1", worker_cmd=_cmd(fake_worker_path))
++    monkeypatch.setattr(vs, "_embedder_instance", proxy, raising=False)
++    monkeypatch.setattr(vs, "_embedder_model", "m1", raising=False)
++    monkeypatch.setattr(vs, "_embedder_error", "embedding subprocess crash backoff", raising=False)
++    proxy.consecutive_crashes = EmbeddingSubprocessProxy.MAX_CONSECUTIVE_CRASHES
++    proxy.retry_at = time.monotonic() + 600
++    emb, err = vs.get_embedder("m1")
++    assert emb is None and err and "backoff" in err
++    proxy.close()
++
++
++# -- 索引 LRU 上限 ---------------------------------------------------------------------
++
++
++def test_index_cache_lru_eviction(monkeypatch: pytest.MonkeyPatch):
++    monkeypatch.setattr(vs, "_index_cache_max", lambda: 2)
++    k1, k2, k3 = ("ws1", "m"), ("ws2", "m"), ("ws3", "m")
++    vs._index_cache_put(k1, {"fingerprint": 1})
++    vs._index_cache_put(k2, {"fingerprint": 2})
++    # k1 命中刷新新鲜度 → 淘汰的应是最久未用的 k2
++    assert vs._index_cache_get(k1) == {"fingerprint": 1}
++    vs._index_cache_put(k3, {"fingerprint": 3})
++    assert vs._index_cache_get(k2) is None
++    assert vs._index_cache_get(k1) == {"fingerprint": 1}
++    assert vs._index_cache_get(k3) == {"fingerprint": 3}
++    # 刚写入的 key 永不自淘汰（上限 2 但 3 个 key 里最新两个保留）
++    assert len(vs._indexes) == 2
++
++
++# -- worker 纯函数 ----------------------------------------------------------------------
++
++
++def test_reader_thread_eof_sentinel():
++    import queue as _queue
++
++    q: _queue.Queue = _queue.Queue()
++    _reader_thread(io.StringIO('{"id": 1}\n'), q)
++    assert q.get_nowait() == '{"id": 1}\n'
++    sentinel = q.get_nowait()
++    assert sentinel is not None and not isinstance(sentinel, str)  # EOF 哨兵
++
++
++def test_reset_oom_score_never_raises():
++    # Windows/macOS 无 /proc → fail-soft 静默；POSIX 写 0 成功亦不抛
++    _reset_oom_score()
+diff --git a/backend/app/modules/knowledge/vector_search.py b/backend/app/modules/knowledge/vector_search.py
+index 047deb8d7..2330e07bc 100644
+--- a/backend/app/modules/knowledge/vector_search.py
++++ b/backend/app/modules/knowledge/vector_search.py
+@@ -25,8 +25,12 @@ Body ``{query, limit}`` → ``200 {ok, results:[{spec_path, anchor, change, scor
+ 
+ from __future__ import annotations
+ 
++import json
++import queue
+ import re
++import sys
+ import threading
++import time
+ from dataclasses import dataclass
+ from pathlib import Path
+ 
+@@ -111,45 +115,199 @@ def decisions_fingerprint(spec_root: Path) -> tuple | None:
+     return tuple(sorted(parts))
+ 
+ 
+-# ── embedder（fastembed 懒加载单例；不可用态 fail-soft）────────────────────────
++# ── embedder（子进程封装；不可用态 fail-soft）──────────────────────────────────
++#
++# 2026-10-16-backend-mem-polling task-01 / D-001@v1：fastembed 模型从进程内单例
++# 改为独立子进程（app.modules.knowledge.embedding_worker），主进程只持管道——
++# 模型内存"用时有峰、闲时归零"（子进程三闸自灭=进程退出，内存确定性归还 OS）。
++# 失败语义与旧版模型缺席一致（model_ready=false + 词面兜底），**不回退进程内加载**。
+ 
+ _embedder_lock = threading.Lock()
+ _embedder_instance: object | None = None
+ _embedder_model: str | None = None
+ _embedder_error: str | None = None
+ 
++# 子进程连续崩溃达到阈值后的退避时长（防崩溃循环烧 CPU）
++_EMBEDDER_CRASH_BACKOFF_SEC = 600.0
+ 
+-class FastembedEmbedder:
+-    """fastembed 封装（构造即加载模型——调用方持有单例，不反复初始化）。"""
+ 
+-    def __init__(self, model_name: str) -> None:
+-        from fastembed import TextEmbedding  # lazy import：缺席=不可用态，不阻塞启动
++class EmbeddingSubprocessError(RuntimeError):
++    """子进程嵌入失败（崩溃/超时/协议错误），调用方按 fail-soft 降级处理。"""
+ 
+-        self._model = TextEmbedding(model_name=model_name)
++
++class EmbeddingSubprocessProxy:
++    """fastembed 子进程代理——embed() 经 stdin/stdout 行协议往返，签名与旧
++    ``FastembedEmbedder`` 一致（调用方 duck-typing 零改动）。
++
++    - 子进程懒启动（首次 embed 才 spawn）；崩溃自动重启，连续
++      ``MAX_CONSECUTIVE_CRASHES`` 次后进入不可用退避（``available=False``）；
++      退避满 ``retry_at`` 后代理自身恢复可用（get_embedder 审查 available
++      通过即复用原代理，embed 内懒重启子进程——不另建新代理实例）。
++    - 响应读取用常驻读线程 + 队列（Windows 管道无 select）。
++    - ``worker_cmd`` 仅测试注入假 worker 用；生产默认 -m 拉真 worker。
++    """
++
++    REQUEST_TIMEOUT_SEC = 300.0
++    MAX_CONSECUTIVE_CRASHES = 3
++
++    def __init__(
++        self,
++        model_name: str,
++        idle_exit_sec: int = 900,
++        worker_cmd: list[str] | None = None,
++    ) -> None:
++        import subprocess
++
++        self._subprocess = subprocess
++        self._model_name = model_name
++        self._idle_exit_sec = idle_exit_sec
++        self._worker_cmd = worker_cmd
++        self._proc: object | None = None
++        self._responses: queue.Queue = queue.Queue()
++        self._lock = threading.Lock()
++        self._next_id = 0
++        self.consecutive_crashes = 0
++        self.retry_at = 0.0
++
++    # -- 生命周期 -----------------------------------------------------------
++
++    def _poll(self) -> int | None:
++        return self._proc.poll() if self._proc is not None else 0
++
++    def _stop(self) -> None:
++        if self._proc is not None:
++            try:
++                self._proc.kill()
++                self._proc.wait(timeout=5)
++            except Exception:
++                pass
++        self._proc = None
++
++    def _ensure_started(self) -> None:
++        """确保子进程与读线程在位（懒启动 + 崩溃重启共用）。"""
++        import threading as _threading
++
++        if self._proc is not None and self._poll() is None:
++            return
++        self._stop()
++        cmd = self._worker_cmd or [
++            sys.executable,
++            "-m",
++            "app.modules.knowledge.embedding_worker",
++            self._model_name,
++            str(self._idle_exit_sec),
++        ]
++        self._responses = queue.Queue()
++        self._proc = self._subprocess.Popen(
++            cmd,
++            stdin=self._subprocess.PIPE,
++            stdout=self._subprocess.PIPE,
++            stderr=self._subprocess.DEVNULL,
++            text=True,
++            encoding="utf-8",
++            bufsize=1,
++        )
++        _threading.Thread(target=self._reader, args=(self._proc.stdout,), daemon=True).start()
++
++    def _reader(self, stdout: object) -> None:
++        """读线程：响应行入队；EOF/断裂入哨兵。"""
++        eof_resp = object()
++        try:
++            for line in stdout:
++                self._responses.put(line)
++        except Exception:
++            pass
++        finally:
++            self._responses.put(eof_resp)
++
++    # -- 对外接口（与 FastembedEmbedder 同签名）------------------------------
++
++    @property
++    def available(self) -> bool:
++        """未进入崩溃退避期（True 时可继续 embed）。"""
++        return self.consecutive_crashes < self.MAX_CONSECUTIVE_CRASHES or (
++            time.monotonic() >= self.retry_at
++        )
+ 
+     def embed(self, texts: list[str]) -> list[list[float]]:
+-        out = []
+-        for vec in self._model.embed(texts):
+-            out.append(vec.tolist() if hasattr(vec, "tolist") else [float(x) for x in vec])
+-        return out
++        """阻塞式嵌入一批文本；失败抛 EmbeddingSubprocessError（fail-soft 由调用方降级）。
++
++        子进程自灭（闲置/寿命帽）后的首次请求做**单次透明重启重试**——对调用方
++        等价于"重启即恢复"；重试仍失败或已进崩溃退避则抛。
++        """
++        if not self.available:
++            raise EmbeddingSubprocessError(
++                f"embedding subprocess in crash backoff until {self.retry_at:.0f}"
++            )
++        deadline = time.monotonic() + self.REQUEST_TIMEOUT_SEC
++        with self._lock:
++            attempts = 0
++            while True:
++                attempts += 1
++                try:
++                    self._ensure_started()
++                    self._next_id += 1
++                    rid = self._next_id
++                    req_line = json.dumps({"id": rid, "op": "embed", "texts": texts})
++                    self._proc.stdin.write(req_line + "\n")
++                    self._proc.stdin.flush()
++                    resp_line = self._responses.get(timeout=max(0.1, deadline - time.monotonic()))
++                    if not isinstance(resp_line, str):
++                        raise EmbeddingSubprocessError("embedding worker exited")
++                    resp = json.loads(resp_line)
++                    if not isinstance(resp, dict) or resp.get("id") != rid:
++                        raise EmbeddingSubprocessError(f"protocol mismatch: {resp_line[:200]!r}")
++                    if not resp.get("ok"):
++                        raise EmbeddingSubprocessError(str(resp.get("error") or "embed failed"))
++                    self.consecutive_crashes = 0
++                    return resp["vectors"]
++                except EmbeddingSubprocessError:
++                    self._on_crash()
++                    if attempts >= 2 or not self.available:
++                        raise
++                    continue  # 单次透明重启重试（覆盖闲置/寿命帽自灭场景）
++                except Exception as exc:  # 管道断裂/超时/JSON 损坏一律按崩溃处理
++                    self._on_crash()
++                    raise EmbeddingSubprocessError(f"{type(exc).__name__}: {exc}") from exc
++
++    def _on_crash(self) -> None:
++        self._stop()
++        self.consecutive_crashes += 1
++        if self.consecutive_crashes >= self.MAX_CONSECUTIVE_CRASHES:
++            self.retry_at = time.monotonic() + _EMBEDDER_CRASH_BACKOFF_SEC
++
++    def close(self) -> None:
++        with self._lock:
++            self._stop()
+ 
+ 
+ def get_embedder(model_name: str) -> tuple[object | None, str | None]:
+-    """返回 ``(embedder | None, 不可用原因 | None)``；初始化失败缓存原因（进程级一次）。"""
++    """返回 ``(embedder | None, 不可用原因 | None)``。
++
++    子进程代理懒启动（构造不 spawn，首次 embed 才拉起），构造失败缓存原因
++    （进程级一次，到换模型为止）；连续崩溃进入退避期的代理在 ``retry_at``
++    到点后由本入口重建新代理（旧代理条目替换）。
++    """
+     global _embedder_instance, _embedder_model, _embedder_error
+     with _embedder_lock:
+         if _embedder_instance is not None and _embedder_model == model_name:
+-            return _embedder_instance, None
++            proxy = _embedder_instance
++            assert isinstance(proxy, EmbeddingSubprocessProxy)
++            if proxy.available:
++                return proxy, None
++            return None, _embedder_error or "embedding subprocess unavailable (crash backoff)"
+         if _embedder_error is not None and _embedder_model == model_name:
+             return None, _embedder_error
+         try:
+-            _embedder_instance = FastembedEmbedder(model_name)
+-            _embedder_model = model_name
+-            _embedder_error = None
+-            return _embedder_instance, None
+-        except Exception as exc:  # 依赖缺席/模型下载失败/显存不足一律 fail-soft
+-            _embedder_instance = None
+-            _embedder_model = model_name
++            from app.core.config import get_settings
++
++            proxy = EmbeddingSubprocessProxy(
++                model_name, idle_exit_sec=get_settings().knowledge_embedding_idle_exit_sec
++            )
++            _embedder_instance, _embedder_model, _embedder_error = proxy, model_name, None
++            return proxy, None
++        except Exception as exc:  # 依赖缺席/配置异常一律 fail-soft
++            _embedder_instance, _embedder_model = None, model_name
+             _embedder_error = f"{type(exc).__name__}: {exc}"
+             return None, _embedder_error
+ 
+@@ -158,17 +316,48 @@ def reset_embedder_for_tests() -> None:
+     """测试隔离：清空单例与错误缓存（生产勿调）。"""
+     global _embedder_instance, _embedder_model, _embedder_error
+     with _embedder_lock:
++        if isinstance(_embedder_instance, EmbeddingSubprocessProxy):
++            _embedder_instance.close()
+         _embedder_instance = None
+         _embedder_model = None
+         _embedder_error = None
+ 
+ 
+-# ── 索引（per-workspace 懒构建 + 指纹失效）与检索 ─────────────────────────────
++# ── 索引（per-workspace 懒构建 + 指纹失效 + LRU 工作区上限）与检索 ─────────────
+ 
+ _index_lock = threading.Lock()
+ _indexes: dict[
+     tuple[str, str], dict
+-] = {}  # (workspace_id, model_name) → {fingerprint, entries, vectors}
++] = {}  # (workspace_id, model_name) → {fingerprint, entries, vectors}；插入序=LRU 序
++
++
++def _index_cache_max() -> int:
++    """LRU 工作区上限（settings.knowledge_embedding_index_max_ws，默认 4）。"""
++    from app.core.config import get_settings
++
++    return max(1, get_settings().knowledge_embedding_index_max_ws)
++
++
++def _index_cache_get(key: tuple[str, str]) -> dict | None:
++    """取缓存并刷新 LRU 新鲜度（命中即移到最旧淘汰序末尾）。"""
++    with _index_lock:
++        cached = _indexes.get(key)
++        if cached is not None:
++            del _indexes[key]
++            _indexes[key] = cached
++        return cached
++
++
++def _index_cache_put(key: tuple[str, str], value: dict) -> None:
++    """写入并按 LRU 上限淘汰最久未用（本 key 刚写永不自淘汰）。"""
++    with _index_lock:
++        _indexes.pop(key, None)
++        _indexes[key] = value
++        while len(_indexes) > _index_cache_max():
++            oldest = next(iter(_indexes))
++            if oldest == key:
++                break
++            del _indexes[oldest]
+ 
+ 
+ def _normalize(vec: list[float]) -> list[float]:
+@@ -224,13 +413,12 @@ def search_sync(
+     if fp is None:
+         return {"results": [], "model_ready": True, "reason": None}
+     key = (workspace_key, model_name)
+-    with _index_lock:
+-        cached = _indexes.get(key)
+-        if cached is None or cached["fingerprint"] != fp:
+-            entries = parse_decision_entries(spec_root)
+-            vectors = embedder.embed([e.text for e in entries]) if entries else []
+-            cached = {"fingerprint": fp, "entries": entries, "vectors": vectors}
+-            _indexes[key] = cached
++    cached = _index_cache_get(key)
++    if cached is None or cached["fingerprint"] != fp:
++        entries = parse_decision_entries(spec_root)
++        vectors = embedder.embed([e.text for e in entries]) if entries else []
++        cached = {"fingerprint": fp, "entries": entries, "vectors": vectors}
++        _index_cache_put(key, cached)
+     results = _cosine_top_k(embedder.embed([q])[0], cached["entries"], cached["vectors"], limit)
+     return {"results": results, "model_ready": True, "reason": None}
+ 
+diff --git a/backend/app/modules/session_attachment/router.py b/backend/app/modules/session_attachment/router.py
+index 87aca8401..53e2d5709 100644
+--- a/backend/app/modules/session_attachment/router.py
++++ b/backend/app/modules/session_attachment/router.py
+@@ -30,7 +30,12 @@ from app.modules.storage.factory import get_storage_backend
+ 
+ from .model import SessionAttachment
+ from .schema import AttachmentKind, AttachmentRead
+-from .service import SessionAttachmentService
++from .service import (
++    MAX_FILE_BYTES,
++    MAX_IMAGE_BYTES,
++    SessionAttachmentService,
++    SessionAttachmentTooLarge,
++)
+ from .storage import SessionAttachmentStorage
+ 
+ log = get_logger(__name__)
+@@ -56,8 +61,21 @@ async def upload_attachment(
+ 
+     成功即建草稿行（session_id NULL）；限制校验（大小/白名单/PIL magic）
+     在 service 抛 413/415（AppError 惯例同 file 模块）。
++
++    2026-10-16-backend-mem-polling task-05 / D-004@v1：读内容**前**先查
++    ``UploadFile.size``（Starlette spool 时已知）超限直接 413——超限文件
++    不再整读进内存（上限值 import 自 service 单一源，不双写）。
+     """
+     service = SessionAttachmentService(session, storage)
++    size = getattr(file, "size", None)
++    if isinstance(size, int) and size >= 0:
++        limit = MAX_IMAGE_BYTES if kind == "image" else MAX_FILE_BYTES
++        if size > limit:
++            label = "图片超过单张上限" if kind == "image" else "文件超过单份上限"
++            raise SessionAttachmentTooLarge(
++                f"{label} {limit // (1024 * 1024)}MB。",
++                details={"bytes": size, "limit": limit},
++            )
+     data = await file.read()
+     return await service.upload(
+         user_id=current_user.id,
+diff --git a/backend/app/modules/session_attachment/tests/test_upload_precheck.py b/backend/app/modules/session_attachment/tests/test_upload_precheck.py
+new file mode 100644
+index 000000000..510e82b9c
+--- /dev/null
++++ b/backend/app/modules/session_attachment/tests/test_upload_precheck.py
+@@ -0,0 +1,109 @@
++"""task-05 测试（2026-10-16-backend-mem-polling / D-004@v1）。
++
++1. 附件上传先检后读：``UploadFile.size`` 超限 → 413 且 ``file.read()`` 零调用
++   （超限文件不再整读进内存）；正常路径行为不变。
++2. WS 大消息日志截断：超 8KB 只留 repr 前后各 4KB + 总长标注；≤8KB 原样。
++"""
++
++from __future__ import annotations
++
++import pytest
++
++from app.modules.daemon.router.gateway_misc import _truncate_ws_log_msg
++from app.modules.session_attachment.router import upload_attachment
++from app.modules.session_attachment.service import MAX_IMAGE_BYTES
++
++
++class _FakeUploadFile:
++    """duck-typing 假上传文件（不继承 UploadFile——其属性只读不可注入）——
++    带预置 size，read 打桩计数验证「超限零读取」。"""
++
++    def __init__(self, *, size: int, content: bytes = b"x") -> None:
++        self.size = size
++        self.filename = "probe.bin"
++        self.content_type = "application/octet-stream"
++        self._content = content
++        self.read_calls = 0
++
++    async def read(self) -> bytes:
++        self.read_calls += 1
++        return self._content
++
++
++class TestUploadPrecheck:
++    async def test_oversized_file_413_without_read(self, monkeypatch: pytest.MonkeyPatch) -> None:
++        """size 超 image 上限 → SessionAttachmentTooLarge(413)，内容零读取。"""
++        from app.core.errors import AppError
++
++        file = _FakeUploadFile(size=MAX_IMAGE_BYTES + 1)
++        called = []
++
++        async def _noop_upload(self, **kwargs):  # pragma: no cover - 不应被调
++            called.append(kwargs)
++            raise AssertionError("service.upload 不应在预检拒绝后被调用")
++
++        import app.modules.session_attachment.service as svc_mod
++
++        monkeypatch.setattr(svc_mod.SessionAttachmentService, "upload", _noop_upload)
++
++        with pytest.raises(AppError) as ei:
++            await upload_attachment(
++                session=None,  # 预检在 session 使用前短路
++                storage=None,
++                current_user=type("U", (), {"id": "u1"})(),
++                file=file,
++                kind="image",
++            )
++        assert ei.value.code == "HTTP_413_SESSION_ATTACHMENT_TOO_LARGE"
++        assert file.read_calls == 0, "超限文件不得整读进内存"
++        assert called == []
++
++    async def test_normal_file_reads_and_passes_to_service(
++        self, monkeypatch: pytest.MonkeyPatch
++    ) -> None:
++        """size 在限内 → 正常 read 并把内容交给 service（行为不变）。"""
++        file = _FakeUploadFile(size=16, content=b"small-bytes")
++        captured = {}
++
++        async def _fake_upload(self, *, data, **kwargs):
++            captured["data"] = data
++            captured.update(kwargs)
++            return object()  # 返回值原样透传，构造细节与预检无关
++
++        import app.modules.session_attachment.service as svc_mod
++
++        monkeypatch.setattr(svc_mod.SessionAttachmentService, "upload", _fake_upload)
++
++        await upload_attachment(
++            session=None,
++            storage=None,
++            current_user=type("U", (), {"id": "u1"})(),
++            file=file,
++            kind="image",
++        )
++        assert file.read_calls == 1
++        assert captured["data"] == b"small-bytes"
++
++
++class TestWsLogTruncate:
++    def test_small_message_untouched(self):
++        data = {"type": "daemon:rpc_result", "payload": {"rpc_id": "r1"}}
++        assert _truncate_ws_log_msg(data) is data
++
++    def test_large_message_truncated_with_marker(self):
++        big = {"payload": "x" * (64 * 1024)}
++        out = _truncate_ws_log_msg(big)
++        assert isinstance(out, str)
++        assert "<truncated total=" in out
++        assert len(out) < 9 * 1024, "截断结果必须显著小于原文"
++        # 首尾各保留 4KB（原文 repr 首部含 {'payload': ' 前缀）
++        assert out.startswith("{'payload': '")
++        assert out.endswith("'}")
++
++    def test_unrepresentable_object_degrades_to_typename(self):
++        class _Bad:
++            def __repr__(self):  # pragma: no cover
++                raise RuntimeError("no repr")
++
++        out = _truncate_ws_log_msg(_Bad())
++        assert out == "<unrepresentable _Bad>"
+diff --git a/backend/app/modules/spec_workspace/router.py b/backend/app/modules/spec_workspace/router.py
+index 0f4e3fdf3..235622229 100644
+--- a/backend/app/modules/spec_workspace/router.py
++++ b/backend/app/modules/spec_workspace/router.py
+@@ -231,6 +231,10 @@ async def sync_manual_spec_workspace(
+     session.add(cw)
+     await session.commit()
+     await session.refresh(cw)
++    # task-06：commit 后轻通知 daemon 立即拉取（best-effort，兜底轮询仍在）。
++    from app.modules.daemon.ws_hub import notify_change_write_available
++
++    await notify_change_write_available(session, runtime_id, workspace_id)
+     log.info(
+         "spec_workspace.sync_manual_dispatched",
+         workspace_id=str(workspace_id),
+diff --git a/backend/app/modules/spec_workspace/service.py b/backend/app/modules/spec_workspace/service.py
+index a82b6a4c7..69c2f1a4f 100644
+--- a/backend/app/modules/spec_workspace/service.py
++++ b/backend/app/modules/spec_workspace/service.py
+@@ -190,11 +190,21 @@ _BUNDLE_CANCEL_JOIN_S = 5.0
+ #
+ # 内存边界（对齐审计 P1-性能④精神）：仅缓存 gzip 变体（~树大小/4），每
+ # workspace 保留最新 2 个版本，plain/identity 路径零缓存零行为变化。
++# 2026-10-16-backend-mem-polling task-02 / D-004@v1：per-ws 2 版本策略之上加
++# **全局字节帽**（spec_bundle_cache_max_bytes，默认 128MB）LRU 淘汰——多
++# workspace 线性囤包（~18MB/ws）曾无上界，是 backend RSS 慢性爬升源之一。
+ _BUNDLE_CACHE_VERSIONS_PER_WS = 2
+ _bundle_gzip_cache: dict[tuple[uuid.UUID, int], bytes] = {}
+ _bundle_gzip_cache_lock = threading.Lock()
+ 
+ 
++def _bundle_cache_max_bytes() -> int:
++    """全局字节帽（settings.spec_bundle_cache_max_bytes，默认 128MB）。"""
++    from app.core.config import get_settings
++
++    return max(1, get_settings().spec_bundle_cache_max_bytes)
++
++
+ class _BundleStreamLike(Protocol):
+     """build_bundle 三种产出流的消费协议：同步分块迭代 + 显式 close 清理。
+ 
+@@ -209,7 +219,12 @@ class _BundleStreamLike(Protocol):
+ 
+ def _bundle_gzip_cache_get(key: tuple[uuid.UUID, int]) -> bytes | None:
+     with _bundle_gzip_cache_lock:
+-        return _bundle_gzip_cache.get(key)
++        data = _bundle_gzip_cache.get(key)
++        if data is not None:
++            # LRU 新鲜度：命中移到插入序末尾（dict 保序，淘汰取最旧）
++            del _bundle_gzip_cache[key]
++            _bundle_gzip_cache[key] = data
++        return data
+ 
+ 
+ def _bundle_gzip_cache_put(key: tuple[uuid.UUID, int], data: bytes) -> None:
+@@ -218,7 +233,19 @@ def _bundle_gzip_cache_put(key: tuple[uuid.UUID, int], data: bytes) -> None:
+         if len(same_ws) >= _BUNDLE_CACHE_VERSIONS_PER_WS and key not in _bundle_gzip_cache:
+             oldest = min(same_ws, key=lambda k: k[1])
+             _bundle_gzip_cache.pop(oldest, None)
++        _bundle_gzip_cache.pop(key, None)
+         _bundle_gzip_cache[key] = data
++        # 2026-10-16-backend-mem-polling task-02 / D-004@v1：全局字节帽——超帽按
++        # 插入序（≈LRU）淘汰最旧条目至帽内；刚写入的 key 永不自淘汰。
++        total = sum(len(v) for v in _bundle_gzip_cache.values())
++        max_bytes = _bundle_cache_max_bytes()
++        if total > max_bytes:
++            for old_key in list(_bundle_gzip_cache):
++                if old_key == key:
++                    continue
++                total -= len(_bundle_gzip_cache.pop(old_key))
++                if total <= max_bytes:
++                    break
+ 
+ 
+ class _ReplayBundleStream:
+diff --git a/backend/app/modules/spec_workspace/tests/test_bundle_sync.py b/backend/app/modules/spec_workspace/tests/test_bundle_sync.py
+index 8c26c19cd..dcc52332c 100644
+--- a/backend/app/modules/spec_workspace/tests/test_bundle_sync.py
++++ b/backend/app/modules/spec_workspace/tests/test_bundle_sync.py
+@@ -656,3 +656,61 @@ class TestBundleGzip:
+         list(_plain)
+         assert len(spec_svc._bundle_gzip_cache) == n_before
+         assert all(k[0] == ws.id for k in spec_svc._bundle_gzip_cache)
++
++
++# ── task-02（2026-10-16-backend-mem-polling / D-004@v1）：全局字节帽 LRU ─────
++
++
++class TestBundleCacheGlobalCap:
++    """_bundle_gzip_cache 全局字节帽：超帽按 LRU 淘汰最旧、刚写入不自淘汰。"""
++
++    @pytest.fixture(autouse=True)
++    def _clean_cache(self):
++        import app.modules.spec_workspace.service as svc
++
++        svc._bundle_gzip_cache.clear()
++        yield
++        svc._bundle_gzip_cache.clear()
++
++    @staticmethod
++    def _key(i: int):
++        import uuid
++
++        return (uuid.UUID(int=i), 100 + i)
++
++    async def test_global_cap_evicts_oldest_until_under(self, monkeypatch):
++        import app.modules.spec_workspace.service as svc
++
++        monkeypatch.setattr(svc, "_bundle_cache_max_bytes", lambda: 1000)
++        svc._bundle_gzip_cache_put(self._key(1), b"a" * 400)
++        svc._bundle_gzip_cache_put(self._key(2), b"b" * 400)
++        assert len(svc._bundle_gzip_cache) == 2
++        svc._bundle_gzip_cache_put(self._key(3), b"c" * 400)  # 总 1200 > 1000
++        assert len(svc._bundle_gzip_cache) == 2, "超帽必须淘汰到帽内"
++        assert svc._bundle_gzip_cache_get(self._key(1)) is None, "最旧被淘汰"
++        assert svc._bundle_gzip_cache_get(self._key(3)) == b"c" * 400  # 刚写不自淘汰
++
++    async def test_get_refreshes_lru_recency(self, monkeypatch):
++        import app.modules.spec_workspace.service as svc
++
++        monkeypatch.setattr(svc, "_bundle_cache_max_bytes", lambda: 1000)
++        svc._bundle_gzip_cache_put(self._key(1), b"a" * 400)
++        svc._bundle_gzip_cache_put(self._key(2), b"b" * 400)
++        assert svc._bundle_gzip_cache_get(self._key(1)) == b"a" * 400  # k1 变最新
++        svc._bundle_gzip_cache_put(self._key(3), b"c" * 400)
++        assert svc._bundle_gzip_cache_get(self._key(2)) is None, "淘汰最久未用的 k2"
++        assert svc._bundle_gzip_cache_get(self._key(1)) == b"a" * 400
++
++    async def test_per_ws_two_version_policy_unchanged(self, monkeypatch):
++        """per-ws 2 版本保留策略在帽内照旧（全局帽是叠加不是替换）。"""
++        import uuid
++
++        import app.modules.spec_workspace.service as svc
++
++        monkeypatch.setattr(svc, "_bundle_cache_max_bytes", lambda: 10**9)
++        ws = uuid.uuid4()
++        svc._bundle_gzip_cache_put((ws, 1), b"a" * 10)
++        svc._bundle_gzip_cache_put((ws, 2), b"b" * 10)
++        svc._bundle_gzip_cache_put((ws, 3), b"c" * 10)
++        assert (ws, 1) not in svc._bundle_gzip_cache
++        assert set(k[1] for k in svc._bundle_gzip_cache if k[0] == ws) == {2, 3}
+diff --git a/backend/docker-entrypoint.sh b/backend/docker-entrypoint.sh
+index 802a040a5..3995a3909 100644
+--- a/backend/docker-entrypoint.sh
++++ b/backend/docker-entrypoint.sh
+@@ -15,4 +15,11 @@ mkdir -p /data/spec-workspaces
+ # Allow git operations on bind-mounted host directories
+ git config --global --add safe.directory '*' 2>/dev/null || true
+ 
++# 2026-10-16-backend-mem-polling task-09 / D-001@v1：主进程 OOM 保护 try-best 兜底
++# （主路径=compose 服务级 oom_score_adj: -500；本写法在无 CAP_SYS_RESOURCE 等场景
++# 会 EPERM——失败仅告警不阻塞启动，保护缺失=现状，非回归）。
++if [ -w /proc/self/oom_score_adj ]; then
++  echo -500 > /proc/self/oom_score_adj 2>/dev/null     || echo "[entrypoint] oom_score_adj 写入失败（compose 级设置仍生效则无碍）"
++fi
++
+ exec "$@"
+diff --git a/backend/migrations/versions/20261016100000_agent_session_title_fallback.py b/backend/migrations/versions/20261016100000_agent_session_title_fallback.py
+new file mode 100644
+index 000000000..9b89845f6
+--- /dev/null
++++ b/backend/migrations/versions/20261016100000_agent_session_title_fallback.py
+@@ -0,0 +1,64 @@
++"""agent_sessions 加 title_fallback 列 + 存量回填（2026-10-16-backend-mem-polling task-08）。
++
++背景：会话列表 ``GET /api/daemon/sessions`` 对 agent_run_logs 做窗口函数派生
++标题（生产实测 1.4s，随日志量线性）。本迁移把派生结果持久化为
++``agent_sessions.title_fallback``（String(64)，首条 user_input 前 64 字符源、
++消费侧 [:30]），列表路径改读列（漏网会话由路由惰性回写自愈）。
++
++回填口径与 router 现查询逐字一致（session_crud.py:336-365）：按会话取
++``channel='user_input'`` 中 ``(timestamp asc, id asc)`` 首条的
++``substr(content_redacted, 1, 64)``；零 user_input 会话回写哨兵空串（防每轮
++列表重查）。窗口函数 UPDATE...FROM 在 PG 与 SQLite（≥3.33）双方言均可用。
++"""
++
++from collections.abc import Sequence
++
++from alembic import op
++
++revision: str = "20261016100000"
++down_revision: str | Sequence[str] | None = "20261016010000"
++branch_labels: str | Sequence[str] | None = None
++depends_on: str | Sequence[str] | None = None
++
++# 模块级常量供迁移本体与单测共用（测试在 SQLite 建元数据后直接执行验证双方言）。
++BACKFILL_SQL = """
++UPDATE agent_sessions AS s
++SET title_fallback = t.content
++FROM (
++    SELECT agent_sessions.id AS sid,
++           SUBSTR(agent_run_logs.content_redacted, 1, 64) AS content,
++           ROW_NUMBER() OVER (
++               PARTITION BY agent_sessions.id
++               ORDER BY agent_run_logs.timestamp ASC, agent_run_logs.id ASC
++           ) AS rn
++    FROM agent_sessions
++    JOIN agent_runs ON agent_runs.agent_session_id = agent_sessions.id
++    JOIN agent_run_logs
++        ON agent_run_logs.run_id = agent_runs.id
++       AND agent_run_logs.channel = 'user_input'
++) AS t
++WHERE s.id = t.sid AND t.rn = 1 AND s.title_fallback IS NULL
++"""
++
++SENTINEL_SQL = """
++UPDATE agent_sessions SET title_fallback = '' WHERE title_fallback IS NULL
++"""
++
++
++def upgrade() -> None:
++    op.add_column(
++        "agent_sessions",
++        sa_column_nullable_string64(),
++    )
++    op.execute(BACKFILL_SQL)
++    op.execute(SENTINEL_SQL)
++
++
++def downgrade() -> None:
++    op.drop_column("agent_sessions", "title_fallback")
++
++
++def sa_column_nullable_string64():
++    import sqlalchemy as sa
++
++    return sa.Column("title_fallback", sa.String(64), nullable=True)
+diff --git a/backend/tests/test_align_platform_change_events_migration.py b/backend/tests/test_align_platform_change_events_migration.py
+index b968a23aa..9141e2977 100644
+--- a/backend/tests/test_align_platform_change_events_migration.py
++++ b/backend/tests/test_align_platform_change_events_migration.py
+@@ -112,7 +112,8 @@ class TestMigrationStructure:
+         # （knowledge_search pgvector 两表，2026-10-15-knowledge-search-pgvector）→
+         # 20261016010000（drop uq_kssc_workspace_path_anchor_title——生产语料
+         # 重号条目撞约束实证，2026-10-15-knowledge-search-pgvector）。
+-        assert heads[0] == "20261016010000"  # 知识搜索去 uq 迁移成为新 head（注释链续写）
++        # 20261016100000（agent_sessions 加 title_fallback 列+回填——2026-10-16-backend-mem-polling task-08）
++        assert heads[0] == "20261016100000"  # title_fallback 迁移成为新 head（注释链续写）
+ 
+     def test_revision_chain(self) -> None:
+         mod = _load_migration_module()
+diff --git a/deploy/docker-compose.yml b/deploy/docker-compose.yml
+index 040a6d02f..9ef7dfa31 100644
+--- a/deploy/docker-compose.yml
++++ b/deploy/docker-compose.yml
+@@ -35,7 +35,7 @@ services:
+       interval: 5s
+       timeout: 3s
+       retries: 20
+-    mem_limit: 128m
++    mem_limit: 64m
+ 
+   minio:
+     image: minio/minio:latest
+@@ -57,7 +57,7 @@ services:
+       interval: 5s
+       timeout: 3s
+       retries: 20
+-    mem_limit: 256m
++    mem_limit: 128m
+ 
+   backend:
+     # 固定 tag：本地 build / 服务器 docker load / compose up 三者复用同一镜像名。
+@@ -165,6 +165,10 @@ services:
+     # 服务本体合计超限被 cgroup OOM（预建进程 247M 时容器总量触顶）——提至 1100m；
+     # 服务器 1.6G：backend 1100 + 其他实际 ~270 + 系统 ~150 仍在总量内。
+     mem_limit: 1100m
++    # 2026-10-16-backend-mem-polling task-09 / D-001@v1：主进程 OOM 保护——容器
++    # 内存告急时内核优先牺牲嵌入子进程（worker 启动时自重置 oom_score_adj=0），
++    # 主服务存活。compose 服务级设置免 entrypoint CAP_SYS_RESOURCE 权限问题。
++    oom_score_adj: -500
+ 
+   frontend:
+     image: multi-agent-platform-frontend:latest
+@@ -190,7 +194,7 @@ services:
+       # 时不覆盖。
+     ports:
+       - "${FRONTEND_PORT:-3000}:3000"
+-    mem_limit: 400m
++    mem_limit: 300m
+ 
+ volumes:
+   pgdata:
+diff --git a/docs/releases/2026-10-16-008-f62065e2f.md b/docs/releases/2026-10-16-008-f62065e2f.md
+new file mode 100644
+index 000000000..9f585ace7
+--- /dev/null
++++ b/docs/releases/2026-10-16-008-f62065e2f.md
+@@ -0,0 +1,50 @@
++---
++seq: 8
++deployed_at: "2026-10-16 12:58:00"
++status: success
++commit_from: 9ba22a6d4
++commit_to: f62065e2f
++summary: backend 内存治理+轮询减负+慢查询持久化（嵌入子进程/缓存上限/ws_hub修复/权限会话治理/title_fallback/change-write WS推送/配额重分配）
++agent: zcode-agent
++commits:
++  - sha: 7b24709db
++    message: "feat(knowledge): 嵌入模型子进程封装三闸自灭+向量索引 LRU 上限（task-01）"
++  - sha: 779190a60
++    message: "fix(daemon): 权限超时回调改新短会话全路径提交，消 idle-in-transaction（task-03）"
++  - sha: ea92af245
++    message: "fix(daemon): 附件上传先检后读+WS 大消息日志截断（task-05）"
++  - sha: c07b5ca82
++    message: "feat(spec-workspace): gzip 包缓存全局字节帽 LRU（task-02）"
++  - sha: 98a8848e5
++    message: "fix(daemon): ws_hub 泄漏两径清理+disconnect 连接身份校验（task-04）"
++  - sha: 1fd4260a7
++    message: "feat(daemon): 会话标题预览持久化 title_fallback（task-08）"
++  - sha: 47f578d5b
++    message: "feat(daemon): change-write WS 轻通知 backend 侧（task-06）"
++  - sha: 0279cd175
++    message: "chore(deploy): 容器配额去超卖+主进程 OOM 保护（task-09）"
++  - sha: f6b346e22
++    message: "feat(daemon): change-write WS 轻通知 daemon 侧+兜底轮询独立 120s（task-07）"
++  - sha: f62065e2f
++    message: "chore(deploy): backend Dockerfile 加 UV_HTTP_TIMEOUT=300（task-10）"
++---
++
++## ⚡ 优化
++
++- **backend 内存治理**：fastembed 嵌入模型移出主进程（独立子进程，闲置 15min/stdin 断/寿命 1h 三闸自灭，进程退出=内存确定性归还）；向量索引缓存与 spec 包缓存加上限（LRU 淘汰）；权限超时定时器不再 pin 数据库会话（idle-in-transaction 根因消除）；ws_hub 两条 RPC 待办泄漏路径修复+断连身份校验（重连风暴放大器拆除）。
++- **轮询减负**：change-write 任务改 WS 事件推送为主通道（30s 轮询降级 120s 兜底，daemon 升级后生效；旧版 daemon 完全兼容继续走轮询）。
++- **慢查询根治**：会话列表标题预览持久化为列（迁移已回填 1128 个会话），查询从全页窗口扫描（142ms）降到漏网检测（0.5ms，快 270 倍）。
++- **部署健壮性**：容器内存配额去超卖（2.14G→1.85G）；backend Dockerfile 依赖下载超时放宽 300s（国内网络抖动不再挂构建）。
++
++## 🔧 修复
++
++- 附件上传先查大小再读内容（超限文件不再整读进内存）；WS 大消息日志截断（防数十 MB 正文进日志）。
++
++## 📝 部署验证
++
++- 腾讯云轻量（124.222.127.242）：本地打包 278M 镜像 scp → 旧镜像备份 tag `backup-20261016-1253` → load + up。
++- 五容器全 healthy；`/api/health` ok（commit_sha f62065e2f）；公网域名 `/api/health` 226ms/200。
++- 迁移 `20261016100000` 成功执行（title_fallback 列+回填，生产日志确认）。
++- 四指标实测：①backend RSS 211MiB（治理前阿里云 324MB→750MB 爬升）；②change-write 轮询服务器端 120s 兜底就位，当前 35 次/3min 为本机旧 daemon 30s 节奏（daemon 升级后降 ~75%）；③列表漏网检测 0.5ms vs 旧窗口查询 142ms；④idle-in-transaction 部署后零新增。
++- 已知残留：compose `oom_score_adj` 键被当前 compose 版本忽略（inspect=0）——R-02 预判情形，非回归（OOM 保护缺失=改造前现状）；腾讯机 8G 内存下风险极低。
++- 回滚路径：`docker tag multi-agent-platform-*:backup-20261016-1253 ...:latest && docker compose --env-file .env up -d`。
+diff --git a/sillyhub-daemon/src/config.ts b/sillyhub-daemon/src/config.ts
+index 6467f1eea..1080100bb 100644
+--- a/sillyhub-daemon/src/config.ts
++++ b/sillyhub-daemon/src/config.ts
+@@ -271,6 +271,8 @@ export interface DaemonConfig {
+   workspace_dir: string;
+   /** HTTP 轮询间隔（秒），默认 30。 */
+   poll_interval: number;
++  /** task-07（2026-10-16-backend-mem-polling）：change-write 兜底轮询独立间隔（秒，默认 120）——推送为主、轮询兜底；与 poll_interval（lease 通道）解耦。 */
++  change_write_poll_interval: number;
+   /** WS 心跳间隔（秒），默认 15。 */
+   heartbeat_interval: number;
+   /** 最大并发任务数，默认 5。 */
+@@ -470,6 +472,7 @@ export const DEFAULT_CONFIG: Readonly<DaemonConfig> = Object.freeze({
+   profile: 'default',
+   workspace_dir: join(homedir(), 'sillyhub_workspaces'),
+   poll_interval: 30,
++  change_write_poll_interval: 120,
+   heartbeat_interval: 15,
+   max_concurrent_tasks: 5,
+   log_level: 'info',
+diff --git a/sillyhub-daemon/src/daemon.ts b/sillyhub-daemon/src/daemon.ts
+index 3ff8a4964..87e459140 100644
+--- a/sillyhub-daemon/src/daemon.ts
++++ b/sillyhub-daemon/src/daemon.ts
+@@ -1349,6 +1349,20 @@ function isWorkspaceIdShape(v: unknown): v is string {
+ // 常量导出便于测试注入时间（task-09 constraints）。
+ export const LEASE_POLL_SKIP_MS = 90_000;
+ 
++/**
++ * task-07（2026-10-16-backend-mem-polling）：change-write 兜底轮询节奏门——
++ * 距上次拉取 ≥ intervalSec 才到期（0/负间隔恒 true 防配置错误卡死兜底通道）。
++ * 纯函数导出供单测；推送即时拉取不经本门。
++ */
++export function changeWritePollDue(
++  lastPullAt: number,
++  intervalSec: number,
++  nowMs: number,
++): boolean {
++  if (!Number.isFinite(intervalSec) || intervalSec <= 0) return true;
++  return nowMs - lastPullAt >= intervalSec * 1000;
++}
++
+ // 假活看门狗阈值（2026-08-27 网络切换 WS 永久假连事故）：WsClient 自称
+ // Connected 但 lastMessageAt（消息+pong）陈旧超过该值 → 判假活，_wsLoop
+ // 强制关闭重建。健康链路 ping/pong（30s 周期）恒刷新新鲜度，不会误杀；
+@@ -6142,6 +6156,10 @@ export class Daemon {
+    * （TASK_AVAILABLE 推送兜底分发，跳过本轮 lease HTTP 轮询）。断连 / 消息陈旧
+    *（假活，R-05）/ 无 WS 客户端 → false（照常轮询兜底）。
+    */
++  // task-07：change-write 兜底轮询上次执行时刻（0=从未；推送即时拉取不重置它，
++  // 兜底节奏独立计时）。
++  private _lastChangeWritePullAt = 0;
++
+   private _leasePollSkippable(): boolean {
+     const ws = this._wsClient;
+     if (!ws || !ws.isConnected) return false;
+@@ -6159,6 +6177,16 @@ export class Daemon {
+         // task-09 / D-003@v1：lease 通道门控——WS 健康且消息新鲜时整轮跳过 lease
+         // 轮询（推送兜底）。计算一次、整轮复用（各 rid 共享同一条 WS）。
+         const skipLeasePoll = this._leasePollSkippable();
++        // task-07：兜底节奏门（推送即时拉取不走本门；门函数导出供单测）
++        const nowMs = Date.now();
++        const changeWriteDue = changeWritePollDue(
++          this._lastChangeWritePullAt,
++          this._config.change_write_poll_interval,
++          nowMs,
++        );
++        if (changeWriteDue) {
++          this._lastChangeWritePullAt = nowMs;
++        }
+         for (const rid of allIds) {
+           if (skipLeasePoll) {
+             this._logger.debug('poll_lease_skipped_ws_healthy', { rid });
+@@ -6166,13 +6194,17 @@ export class Daemon {
+             await this._pullPendingLeasesOnce(rid);
+           }
+ 
+-          // task-11 / FR-08 / D-004@v1：change-write 轮询分支（与 lease 轮询同节奏，
+-          // 独立通道，**不走** _runLeaseStateMachine 的 claim→start→runLease→complete
+-          // lease 三段；走 claim→本地写→complete→spec 回灌轻量流，FR-10 不启 agent）。
+-          // perf-remediation task-09 / Grill B-1：该分支**永不被 WS 门控跳过**——
+-          // protocol 无 change-write 消息类型、change_writer 不走 ws_hub，30s 轮询
+-          // 是唯一分发通道，门控会让 change 写任务失联。
+-          await this._pullPendingChangeWritesOnce(rid);
++          // task-11 / FR-08 / D-004@v1：change-write 轮询分支（独立通道，**不走**
++          // _runLeaseStateMachine 的 claim→start→runLease→complete lease 三段；
++          // 走 claim→本地写→complete→spec 回灌轻量流，FR-10 不启 agent）。
++          // 2026-10-16-backend-mem-polling task-07：分发主通道改为 WS 推送
++          // （CHANGE_WRITE_AVAILABLE → 立即拉取，见 _handleWsMessage），本分支降级
++          // 为兜底——间隔独立为 change_write_poll_interval（默认 120s，原随
++          // poll_interval=30s），与 lease 轮询节奏解耦；永不被 WS 门控跳过
++          // （推送丢失时兜底轮询仍须可达）。
++          if (changeWriteDue) {
++            await this._pullPendingChangeWritesOnce(rid);
++          }
+         }
+       } catch (e) {
+         if (e instanceof AbortError) break;
+@@ -7538,6 +7570,25 @@ export class Daemon {
+         (rawPayload.agent_run_id as string | undefined),
+     };
+     switch (msgType) {
++      // 2026-10-16-backend-mem-polling task-07 / D-001@v1：change-write 轻通知。
++      // payload 校验 runtime_id 非空（缺失 warn 丢弃，对齐 SILLYSPEC_TOMBSTONE_CLEANUP
++      // 先例）；命中即调既有 _pullPendingChangeWritesOnce 立即拉取（幂等，payload
++      // 不带任务体）。旧 backend 无此消息纯走兜底轮询。
++      case MSG.CHANGE_WRITE_AVAILABLE: {
++        const cwPayload = (msg as { payload?: { runtime_id?: unknown } }).payload;
++        const cwRid =
++          (cwPayload?.runtime_id as string | undefined) ??
++          (rawPayload.runtimeId as string | undefined);
++        if (!cwRid || typeof cwRid !== 'string') {
++          this._logger.warn('change_write_available_invalid_runtime', {
++            runtime_id: cwRid,
++          });
++          return;
++        }
++        this._logger.info('change_write_available_received', { runtime_id: cwRid });
++        await this._pullPendingChangeWritesOnce(cwRid);
++        return;
++      }
+       case MSG.TASK_AVAILABLE: {
+         this._logger.info('task_available', { lease_id: payload.leaseId });
+         if (!this._taskRunner) {
+diff --git a/sillyhub-daemon/src/protocol.ts b/sillyhub-daemon/src/protocol.ts
+index 8e99698cc..6e54a1dc4 100644
+--- a/sillyhub-daemon/src/protocol.ts
++++ b/sillyhub-daemon/src/protocol.ts
+@@ -290,8 +290,25 @@ export const MSG = {
+    * 走 default 仅 warn（静默忽略，前端 150s 回显超时兜底）。
+    */
+   SILLYSPEC_TOMBSTONE_CLEANUP: 'daemon:sillyspec_tombstone_cleanup',
++  /**
++   * 2026-10-16-backend-mem-polling task-07 / D-001@v1：change-write pending 行
++   * 轻通知（Server → Daemon）。backend 四落库点 commit 后经 ws_hub 定向推送，
++   * payload 只带 runtime_id / workspace_id（恒携带可 null）——收到即调既有
++   * GET pending-change-writes 拉取（幂等）；与 backend DAEMON_MSG_CHANGE_WRITE_AVAILABLE
++   * 逐字对齐。兜底轮询仍在（change_write_poll_interval，默认 120s）。
++   */
++  CHANGE_WRITE_AVAILABLE: 'daemon:change_write_available',
+ } as const;
+ 
++/**
++ * CHANGE_WRITE_AVAILABLE 消息 payload（与 backend notify_change_write_available
++ * 组装的 payload 逐字对齐；runtime_id 空/缺失 → daemon warn 丢弃）。
++ */
++export interface ChangeWriteAvailablePayload {
++  runtime_id: string;
++  workspace_id: string | null;
++}
++
+ /** WebSocket 消息类型联合（字面量），用于 DaemonMessage.type。 */
+ export type MsgType = (typeof MSG)[keyof typeof MSG];
+ 
+diff --git a/sillyhub-daemon/tests/config.test.ts b/sillyhub-daemon/tests/config.test.ts
+index d7c7041cb..468cad76f 100644
+--- a/sillyhub-daemon/tests/config.test.ts
++++ b/sillyhub-daemon/tests/config.test.ts
+@@ -48,6 +48,7 @@ describe('config', () => {
+       expect(Object.keys(DEFAULT_CONFIG).sort()).toEqual([
+         'allowed_roots',
+         'api_key',
++        'change_write_poll_interval',
+         'default_timeout_seconds',
+         'disconnect_log_threshold_sec',
+         'heartbeat_interval',
+@@ -110,6 +111,8 @@ describe('config', () => {
+       expect(DEFAULT_CONFIG.runtime_id).toBe(''); // 占位空串，load 时生成（对齐 Python None）
+       expect(DEFAULT_CONFIG.profile).toBe('default');
+       expect(DEFAULT_CONFIG.poll_interval).toBe(30);
++      // task-07（2026-10-16-backend-mem-polling）：change-write 兜底轮询独立间隔默认 120
++      expect(DEFAULT_CONFIG.change_write_poll_interval).toBe(120);
+       expect(DEFAULT_CONFIG.heartbeat_interval).toBe(15);
+       expect(DEFAULT_CONFIG.max_concurrent_tasks).toBe(5);
+       expect(DEFAULT_CONFIG.log_level).toBe('info');
+diff --git a/sillyhub-daemon/tests/daemon-change-write-push.test.ts b/sillyhub-daemon/tests/daemon-change-write-push.test.ts
+new file mode 100644
+index 000000000..ae601ab96
+--- /dev/null
++++ b/sillyhub-daemon/tests/daemon-change-write-push.test.ts
+@@ -0,0 +1,155 @@
++/**
++ * 2026-10-16-backend-mem-polling task-07：change-write WS 轻通知 daemon 侧测试
++ * （D-001@v1 / FR-07 / FR-08）。
++ *
++ * 覆盖：
++ *   - 分发：CHANGE_WRITE_AVAILABLE 合法 payload → _pullPendingChangeWritesOnce
++ *     立即拉取；缺 runtime_id → warn 丢弃不拉取（盲区1 旧 daemon 兼容面由
++ *     protocol.contract.test 锁双端字面量）；
++ *   - 兜底节奏门 changeWritePollDue：≥interval 到期 / 未到 / 非法间隔恒 true；
++ *   - config 默认 change_write_poll_interval=120（轮询降级依据）。
++ *
++ * 策略：daemon 分发照 sillyspec-tombstone-cleanup.test.ts 的 makeDispatchHarness
++ * 惯例（依赖注入 + spy 私有方法）；纯函数直测。
++ *
++ * @module daemon-change-write-push.test
++ */
++
++import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
++
++import { Daemon } from '../src/daemon.js';
++import { changeWritePollDue } from '../src/daemon.js';
++import type { DaemonConfig } from '../src/config.js';
++import type { DaemonMessage } from '../src/types.js';
++import { MSG } from '../src/protocol.js';
++
++function makeConfig(overrides: Partial<DaemonConfig> = {}): DaemonConfig {
++  return {
++    server_url: 'http://127.0.0.1:8000',
++    token: null,
++    api_key: null,
++    runtime_id: 'rt-cw01',
++    profile: 'default',
++    workspace_dir: '/tmp/ws-cw01',
++    poll_interval: 9999,
++    heartbeat_interval: 9999,
++    change_write_poll_interval: 120,
++    max_concurrent_tasks: 5,
++    log_level: 'debug',
++    default_timeout_seconds: 1800,
++    max_retries: 1,
++    retry_max_attempts: 3,
++    retry_base_delay_ms: 1000,
++    retry_backoff_factor: 2,
++    retry_jitter: 0.2,
++    loop_restart_backoff_ms: 5000,
++    max_loop_restarts: 10,
++    outbox_max_per_run: 500,
++    outbox_max_total: 5000,
++    disconnect_log_threshold_sec: 30,
++    terminal_observer_enabled: false,
++    terminal_observer_mode: 'parsed',
++    terminal_observer_close_on_exit: false,
++    terminal_observer_command: null,
++    lease_heartbeat_interval: 5,
++    allowed_roots: [],
++    spec_root_map: '',
++    self_reload_check_interval_sec: 600,
++    sillyspec_update_interval_sec: 9999,
++    sillyspec_status_interval_sec: 0,
++    sillyspec_command_timeout_sec: 120,
++    ...overrides,
++  };
++}
++
++describe('task-07 change-write WS 轻通知 daemon 侧', () => {
++  let restoreConsole: () => void;
++
++  beforeEach(() => {
++    const warnOrig = console.warn;
++    const infoOrig = console.info;
++    console.warn = () => {};
++    console.info = () => {};
++    restoreConsole = () => {
++      console.warn = warnOrig;
++      console.info = infoOrig;
++    };
++  });
++  afterEach(() => {
++    restoreConsole();
++    vi.restoreAllMocks();
++  });
++
++  function makeHarness() {
++    const daemon = new Daemon(
++      makeConfig(),
++      { heartbeat: vi.fn(async () => ({})) } as never,
++      null as never,
++      { sessionManager: null },
++    );
++    const pullSpy = vi
++      .spyOn(daemon as never as { _pullPendingChangeWritesOnce: (rid: string) => Promise<void> }, '_pullPendingChangeWritesOnce')
++      .mockResolvedValue(undefined);
++    const handleWsMessage = (msg: DaemonMessage): Promise<void> =>
++      (daemon as unknown as { _handleWsMessage: (m: DaemonMessage) => Promise<void> })
++        ._handleWsMessage(msg);
++    return { daemon, pullSpy, handleWsMessage };
++  }
++
++  it('双端契约：MSG.CHANGE_WRITE_AVAILABLE 与 backend 常量字面量逐字对齐', () => {
++    expect(MSG.CHANGE_WRITE_AVAILABLE).toBe('daemon:change_write_available');
++  });
++
++  it('合法 payload → 立即拉取该 runtime 的 pending change-writes', async () => {
++    const h = makeHarness();
++    await expect(
++      h.handleWsMessage({
++        type: MSG.CHANGE_WRITE_AVAILABLE,
++        payload: { runtime_id: 'rt-cw-target', workspace_id: null },
++      } as unknown as DaemonMessage),
++    ).resolves.toBeUndefined();
++    expect(h.pullSpy).toHaveBeenCalledTimes(1);
++    expect(h.pullSpy).toHaveBeenCalledWith('rt-cw-target');
++  });
++
++  it('缺 runtime_id / 空 runtime_id → warn 丢弃不拉取', async () => {
++    const h = makeHarness();
++    await expect(
++      h.handleWsMessage({
++        type: MSG.CHANGE_WRITE_AVAILABLE,
++        payload: { workspace_id: 'ws-1' },
++      } as unknown as DaemonMessage),
++    ).resolves.toBeUndefined();
++    await expect(
++      h.handleWsMessage({
++        type: MSG.CHANGE_WRITE_AVAILABLE,
++        payload: { runtime_id: '', workspace_id: null },
++      } as unknown as DaemonMessage),
++    ).resolves.toBeUndefined();
++    expect(h.pullSpy).not.toHaveBeenCalled();
++  });
++
++  it('兜底节奏门：到期/未到/非法间隔三态', () => {
++    const interval = 120;
++    expect(changeWritePollDue(0, interval, 120_000)).toBe(true);
++    expect(changeWritePollDue(0, interval, 119_999)).toBe(false);
++    expect(changeWritePollDue(1000, interval, 1000 + 120_000)).toBe(true);
++    // 非法间隔恒 true（防配置错误卡死兜底通道）
++    expect(changeWritePollDue(Date.now(), 0, Date.now())).toBe(true);
++    expect(changeWritePollDue(Date.now(), -5, Date.now())).toBe(true);
++    expect(changeWritePollDue(Date.now(), Number.NaN, Date.now())).toBe(true);
++  });
++
++  it('config 默认：change_write_poll_interval=120（轮询降级为兜底）', async () => {
++    const { DEFAULT_CONFIG } = await import('../src/config.js');
++    expect(DEFAULT_CONFIG.change_write_poll_interval).toBe(120);
++  });
++
++  it('旧 backend 兼容面：未知消息 default 分支 warn 丢弃不崩（盲区1）', async () => {
++    const h = makeHarness();
++    await expect(
++      h.handleWsMessage({ type: 'daemon:not_a_real_type', payload: {} } as unknown as DaemonMessage),
++    ).resolves.toBeUndefined();
++    expect(h.pullSpy).not.toHaveBeenCalled();
++  });
++});
+diff --git a/sillyhub-daemon/tests/protocol-session-contract.test.ts b/sillyhub-daemon/tests/protocol-session-contract.test.ts
+index 8c9ed49b6..f69abdc5a 100644
+--- a/sillyhub-daemon/tests/protocol-session-contract.test.ts
++++ b/sillyhub-daemon/tests/protocol-session-contract.test.ts
+@@ -115,10 +115,12 @@ describe('protocol — batch 协议常量值不回归（FR-09 / AC-08）', () =>
+     expect(MSG.RPC_RESULT).toBe('daemon:rpc_result');
+   });
+ 
+-  it('MSG 总数 = 25（10 旧 + 5 session/permission + 1 SESSION_RESUME + 1 SELF_UPDATE + 1 LEASE_CANCEL + 1 PLAN_RESPONSE + 1 PROVIDER_CONFIG_CHANGED + 1 CLEANUP + 1 SILLYSPEC_UPDATE + 2 平台同步命令 + 1 TOMBSTONE_CLEANUP），互不干扰', () => {
++  it('MSG 总数 = 26（10 旧 + 5 session/permission + 1 SESSION_RESUME + 1 SELF_UPDATE + 1 LEASE_CANCEL + 1 PLAN_RESPONSE + 1 PROVIDER_CONFIG_CHANGED + 1 CLEANUP + 1 SILLYSPEC_UPDATE + 2 平台同步命令 + 1 TOMBSTONE_CLEANUP + 1 CHANGE_WRITE_AVAILABLE），互不干扰', () => {
+     // 0b09d1555（2026-10-09-tombstone-conflict-root-fix）加 SILLYSPEC_TOMBSTONE_CLEANUP
+-    // 漏更本钉——24→25。
+-    expect(Object.keys(MSG)).toHaveLength(25);
++    // 漏更本钉——24→25；2026-10-16-backend-mem-polling task-07 加
++    // CHANGE_WRITE_AVAILABLE——25→26。
++    expect(Object.keys(MSG)).toHaveLength(26);
++    expect(MSG.CHANGE_WRITE_AVAILABLE).toBe('daemon:change_write_available');
+   });
+ 
+   it('SILLYSPEC_UPDATE（sillyspec 升级指令）字符串值 = daemon:sillyspec_update（与 backend DAEMON_MSG_SILLYSPEC_UPDATE 逐字对齐）', () => {

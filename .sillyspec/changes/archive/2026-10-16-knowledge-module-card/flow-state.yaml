@@ -39,3 +39,4 @@ spec_approved_channel: user-confirmed
 spec_attested_by: anon@DESKTOP-2BN7FDC
 gate_summary: 'test: —｜lint: —｜门文件 1 个'
 
+commit_type: docs

@@ -27,3 +27,4 @@ updatedAt: '2026-10-08T03:32:40.941Z'
 baseline_sha256: 32ecb268feaa60a2e711483492d22e8ba2b1726aee12f9d277beb0415bedfc85
 gate_summary: 'test: —｜lint: —｜门文件 3 个'
 
+commit_type: fix

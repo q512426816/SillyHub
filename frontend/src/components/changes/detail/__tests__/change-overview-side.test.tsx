@@ -2,7 +2,7 @@
 // 概览右侧信息栏测试——五组渲染（基本信息/执行用量/会话/范围对账/产出速览）、
 // 用量取数复用（同一 hook 与 queryKey）、归档态用量形态（标题「执行用量（合计）」+
 // MUST NOT 提供按模型明细入口）、范围对账入口在两态下的指向（归档不留死链）。
-import { render, screen, within } from "@testing-library/react";
+import { cleanup, render, screen, within } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -35,12 +35,13 @@ const SESSIONS: AgentSessionListItem[] = [
   { id: "sess-2", title: "第二个会话", status: "ended" } as AgentSessionListItem,
 ];
 
-function renderSide(archived = false) {
+function renderSide(archived = false, changePatch: Partial<ChangeRead> = {}) {
+  const change = { ...CHANGE, ...changePatch } as ChangeRead;
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   return render(
     <QueryClientProvider client={client}>
       <ChangeOverviewSide
-        change={CHANGE}
+        change={change}
         workspaceId="ws-1"
         changeId="c-1"
         archived={archived}
@@ -110,6 +111,40 @@ describe("ChangeOverviewSide", () => {
     }
     expect(screen.getByText("2026-10-15-demo")).toBeInTheDocument();
     expect(screen.getByText("qinyi")).toBeInTheDocument();
+  });
+
+  // ── 类型行 git conventional 彩色标签（2026-10-18-change-type-git-conventional）──
+
+  it("类型行：已知前缀渲染彩色标签（fix 红色阶 / docs 蓝色阶）", () => {
+    renderSide(false, { change_type: "fix" });
+    const chip = screen.getByTestId("commit-type-chip");
+    expect(chip).toHaveTextContent("fix");
+    expect(chip.className).toContain("border-red");
+
+    cleanup();
+    renderSide(false, { change_type: "docs" });
+    const docsChip = screen.getByTestId("commit-type-chip");
+    expect(docsChip).toHaveTextContent("docs");
+    expect(docsChip.className).toContain("border-blue");
+  });
+
+  it("类型行：旧枚举 feature 显示层等价映射 feat（数据不动）", () => {
+    renderSide(false, { change_type: "feature" });
+    expect(screen.getByTestId("commit-type-chip")).toHaveTextContent("feat");
+  });
+
+  it("类型行：未知前缀中性配色显示原值（不误配色）", () => {
+    renderSide(false, { change_type: "hotfix" });
+    const chip = screen.getByTestId("commit-type-chip");
+    expect(chip).toHaveTextContent("hotfix");
+    expect(chip.className).not.toContain("border-red");
+  });
+
+  it("类型行：change_type 为空 → 显示 —（无标签）", () => {
+    renderSide(false, { change_type: null });
+    expect(screen.queryByTestId("commit-type-chip")).not.toBeInTheDocument();
+    const typeRow = screen.getByText("类型").closest("div");
+    expect(typeRow).toHaveTextContent("—");
   });
 
   it("用量七项压缩行与用量卡同源（耗时/轮次/输入/输出/缓存读取/请求次数/命中率）", async () => {

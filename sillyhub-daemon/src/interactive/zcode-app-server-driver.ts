@@ -35,9 +35,11 @@
  */
 
 import { spawn, type ChildProcess } from 'node:child_process';
+import { join } from 'node:path';
 import { StringDecoder } from 'node:string_decoder';
 import { resolveWindowsCmdShim } from '../cmd-shim.js';
 import { ZcodeEnvelope, ZcodeProtocolError } from '../adapters/zcode-envelope.js';
+import { PROVIDER_ID as ZCODE_PROVIDER_ID } from '../zcode-settings.js';
 import {
   normalizeZcodeNotification,
   type ZcodeModelCatalogEntry,
@@ -64,6 +66,21 @@ const DEFAULT_CONTROL_TIMEOUT_MS = 30_000;
 const DEFAULT_COMPACT_TIMEOUT_MS = 30_000;
 /** close 时 stdin.end 后 SIGTERM 升级宽限（对齐 codex KILL_GRACE_MS=2000）。 */
 const KILL_GRACE_MS = 2_000;
+
+/**
+ * env 诊断日志脱敏（2026-10-18-audit-log-redact-yaml-quote）：
+ * - 键名含 KEY/TOKEN → 整值 `<redacted>`（密钥类无诊断定位价值）；
+ * - 其余值 URL userinfo 段打码 `scheme://***@host`（代理 host/port 是诊断定位
+ *   信息只抹凭据段；userinfo 正则取 `://` 后不含 /、@、空白的首段，覆盖
+ *   user 与 user:pass——用户名 URL 编码 %40 形态不匹配，残余面已在 design 风险节声明）。
+ * 导出仅供单测（先例：spec-sync applyResurrectSuppress）。
+ */
+export function redactEnvValueForLog(key: string, value: unknown): string {
+  if (/KEY|TOKEN/i.test(key)) return '<redacted>';
+  return String(value)
+    .replace(/([a-zA-Z][a-zA-Z0-9+.-]*:\/\/)([^/@\s]+)@/g, '$1***@')
+    .slice(0, 60);
+}
 
 /** zcode 驱动专用启动选项（InteractiveDriverStartOptions 的 zcode 视图）。 */
 export interface ZcodeStartOptions extends InteractiveDriverStartOptions {
@@ -113,17 +130,21 @@ export class ZcodeAppServerDriver implements InteractiveDriver {
   private readonly readyTimeoutMs: number;
   private readonly controlTimeoutMs: number;
   private readonly compactTimeoutMs: number;
+  /** 模型目录等待窗（_applyModel；生产 ~30–45s 到达，默认 60s 余量；测试注入小值）。 */
+  private readonly catalogWaitTimeoutMs: number;
 
   constructor(
     opts: {
       readyTimeoutMs?: number;
       controlTimeoutMs?: number;
       compactTimeoutMs?: number;
+      catalogWaitTimeoutMs?: number;
     } = {},
   ) {
     this.readyTimeoutMs = opts.readyTimeoutMs ?? DEFAULT_READY_TIMEOUT_MS;
     this.controlTimeoutMs = opts.controlTimeoutMs ?? DEFAULT_CONTROL_TIMEOUT_MS;
     this.compactTimeoutMs = opts.compactTimeoutMs ?? DEFAULT_COMPACT_TIMEOUT_MS;
+    this.catalogWaitTimeoutMs = opts.catalogWaitTimeoutMs ?? 60_000;
   }
 
   async start(
@@ -157,6 +178,19 @@ export class ZcodeAppServerDriver implements InteractiveDriver {
     } else {
       spawnCmd = exe;
       spawnArgs = args;
+    }
+
+    // spawn 参数本地留痕（真机诊断：8fad6a97 会话子进程未出现，抓实际参数）
+    // eslint-disable-next-line no-console
+    console.log('[zcode-driver] spawn:', JSON.stringify({ cmd: spawnCmd, args: spawnArgs, cwd: opts.cwd, zcode_data: env['ZCODE_DATA_BASE_DIR'] }));
+    // eslint-disable-next-line no-console
+    console.log('[zcode-driver] spawn env keys:', Object.keys(env).filter(k => /ANTHROPIC|CLAUDE|ZCODE|PROXY|NODE_OPTIONS|SILLYHUB/i.test(k)).map(k => k + '=' + redactEnvValueForLog(k, env[k])).join(' | '));
+    // ZCode 桌面端设置用户级 env 把个人 Provider 配置硬指回宿主文件（真机实证：
+    // ZCODE_PERSONAL_PROVIDER_CONFIG_FILE=C:Usersqinyi.zcode2provider_config.json）——
+    // 不改指则 per-session 注入被完全无视，setModel/模型路由全部失效（Provider
+    // Registry 中不存在 Model）。改指 per-session 注入文件，平台供应商路由生效。
+    if (env.ZCODE_DATA_BASE_DIR) {
+      env.ZCODE_PERSONAL_PROVIDER_CONFIG_FILE = join(env.ZCODE_DATA_BASE_DIR, '.zcode', 'v2', 'provider_config.json');
     }
 
     const child = spawn(spawnCmd, spawnArgs, {
@@ -287,6 +321,9 @@ export class ZcodeAppServerDriver implements InteractiveDriver {
       for (const ev of events) {
         if (ev.type === 'error') {
           pendingTurnError = ev.content || pendingTurnError;
+          // 轮级错误本地留痕（真机诊断：backend 只存 run failed，错误内容仅此一处）
+          // eslint-disable-next-line no-console
+          console.error('[zcode-driver] turn error:', (ev.content || '').slice(0, 300));
         }
         if (ev.type === 'turn_result') {
           const outcome: TurnOutcome = {
@@ -379,7 +416,9 @@ export class ZcodeAppServerDriver implements InteractiveDriver {
 
     try {
       // 1. 就绪门
+      console.log('[zcode-driver] step: waiting ready');
       await withTimeout(readyPromise, this.readyTimeoutMs, 'startup ready 超时');
+      console.log('[zcode-driver] step: ready ok');
       // 2. 建会话
       const created = (await h.envelope.request(
         'session/create',
@@ -407,6 +446,7 @@ export class ZcodeAppServerDriver implements InteractiveDriver {
           ],
         }),
       ).catch(() => {});
+      console.log('[zcode-driver] step: create ok');
       // 3. 订阅内容流（desktop-continuous——session/event 推送前提，实测钉板）
       await h.envelope.request(
         'session/subscribe',
@@ -416,12 +456,22 @@ export class ZcodeAppServerDriver implements InteractiveDriver {
       );
       // 4. 初始模型/思考档位
       if (ctx.opts.model) {
-        await this._applyModel(h, ctx.opts.model);
+        // setModel 失败非致命（真机实证：ZCode registry 对未预置的 provider/model
+        // 组合抛 Provider Registry 中不存在 Model——会话仍可用默认模型跑通轮次，
+        // 杀掉会话反而误伤。降级为 warn 继续会话创建）。
+        await this._applyModel(h, ctx.opts.model).catch((e: unknown) => {
+          // eslint-disable-next-line no-console
+          console.warn('[zcode-driver] setModel 失败（非致命，保留引擎默认模型）:', e instanceof Error ? e.message : String(e));
+        });
       }
       if (ctx.opts.thinkingLevel) {
-        await this.setThinkingLevel(h, ctx.opts.thinkingLevel);
+        await this.setThinkingLevel(h, ctx.opts.thinkingLevel).catch((e: unknown) => {
+          // eslint-disable-next-line no-console
+          console.warn('[zcode-driver] setThinkingLevel 失败（非致命）:', e instanceof Error ? e.message : String(e));
+        });
       }
 
+      console.log('[zcode-driver] step: setup complete, entering input loop');
       // 5. 轮循环：逐输入 → send → 等收敛。
       // while + 手动拉取（对齐 codex 主循环形态）：terminateSession 顺序是
       // driver.close() 先于 queue.close()，for-await 会在 next() 上多挂一段窗口；
@@ -429,7 +479,9 @@ export class ZcodeAppServerDriver implements InteractiveDriver {
       // 静默收敛（终态归 close 链，不报幽灵 result、不回队列拉新输入）。
       const inputIt = ctx.input[Symbol.asyncIterator]();
       while (!h.closing && !finalized) {
+        console.log('[zcode-driver] pulling input');
         const res = await inputIt.next();
+        console.log('[zcode-driver] input pulled, done:', res.done);
         if (h.closing || finalized || res.done) break;
         const item = res.value;
         if (item.type !== 'user' || item.text.trim() === '') continue;
@@ -481,8 +533,15 @@ export class ZcodeAppServerDriver implements InteractiveDriver {
         err instanceof Error ? err.message : `zcode consume 失败：${String(err)}`,
       );
     } finally {
+      // 对齐 codex consume finally（codex-app-server-driver.ts 同位）：清 close 槽位
+      //（闭包含 onResult/onMessage 回调与 currentTurnPromise，不清则滞留到 handle GC）
+      // 并兜底 close 子进程——现网 close 链由 terminateSession/reload 发起时 h.closing
+      // 幂等守卫直接返回；未来任何「consume 自然退出」新路径也不泄漏子进程
+      //（2026-10-17-audit-risk-followup，评审 P3 清偿）。
+      delete (h as { _finishTurnOnClose?: () => void })._finishTurnOnClose;
       finalized = true;
       h.envelope.dispose();
+      await h.close();
     }
   }
 
@@ -564,11 +623,78 @@ export class ZcodeAppServerDriver implements InteractiveDriver {
     }
   }
 
-  /** 初始/热切换模型（providers.ts provider_config_changed 路径复用）。 */
-  private async _applyModel(h: ZcodeHandle, model: string): Promise<void> {
+  // 实测形状（ZCode zod Pu schema）：model 必须是 { providerId, modelId } 对象——字符串直接传报 Invalid params（腾讯云真机实证）。providerId = zcode-settings 注入的个人 Provider 键。
+  /** 初始/热切换模型（providers.ts provider_config_changed 路径复用）。
+   *
+   * 等待 app-server 模型目录就绪（state.updated 携带 model catalog）后再下发
+   * session/setModel——个人 Provider 异步加载，spawn 后立刻 setModel 会因
+   * registry 未就绪报「Provider Registry 中不存在 Model」（真机实证，会话
+   * 34d3858f/dd2e4895），轮次随之挂死（无模型可选）。
+   *
+   * 2026-10-17 探针钉板（app.setModel 双路径）：JSON-RPC 面只收对象 → 引擎走
+   * 严格校验路径（Vie），options.reasoningLevel 缺失即报「Reasoning level is
+   * required」（目录条目 levels=[low,high,max] defaultLevel=max——个人模型恒非
+   * 空 levels，真机实证）。故目录命中时必带 options.reasoningLevel（引擎自报
+   * defaultLevel ?? 末档）；目录 60s 仍未到达时兜底裸发（保持非致命语义）。
+   * levels 推导统一在等待循环之后做——精确命中与大小写命中两条退出路径都要
+   * 附带（评审 P2：推导内联在大小写分支会让精确命中裸发被引擎拒）。
+   */
+  private async _applyModel(h: ZcodeHandle, model: string | { modelId?: unknown; providerId?: unknown }): Promise<void> {
+    let resolvedProviderId = ZCODE_PROVIDER_ID;
+    // 归一后的字符串 modelId 作为兜底初值：精确命中退出/目录等待超时两条路径
+    // 不再发送 modelId:undefined（真机实证：undefined 直发 = setModel 必败
+    // 「Provider Registry 中不存在 Model」→ 引擎无模型 → 每轮 turn.failed
+    // 「Select a model before continuing」，会话 368a0ed6）。
+    let resolvedModelId: string =
+      typeof model === 'string' ? model
+      : model && typeof model === 'object' && typeof (model as { modelId?: unknown }).modelId === 'string'
+        ? (model as { modelId: string }).modelId
+        : String(model);
+    let reasoningLevel: string | undefined;
+    const modelId = resolvedModelId;
+    // 精确 → 大小写不敏感两级匹配（平台 glm-5.3 vs registry GLM-5.3）。
+    const findEntry = () =>
+      h.stateSnapshot?.modelCatalog?.find((e) => e.modelId === modelId)
+      ?? h.stateSnapshot?.modelCatalog?.find(
+        (e) => e.modelId.toLowerCase() === modelId.toLowerCase());
+    // 等模型目录出现目标 model（最多 catalogWaitTimeoutMs，默认 60s）：个人
+    // provider 注册 + 目录推送实测 ~30–45s（spawn 起算，真机漂移），窗口留余量。
+    const catalogDeadline = Date.now() + this.catalogWaitTimeoutMs;
+    let found = findEntry();
+    while (!found) {
+      if (Date.now() > catalogDeadline) {
+        // 目录始终未含目标模型：大多为注入 provider 配置未注册（形状/时序）。
+        // 留目录快照诊断（不抛——setModel 失败由调用方降级 warn）。
+        const catalog = h.stateSnapshot?.modelCatalog?.map((e) => e.modelId) ?? [];
+        console.warn(
+          `[zcode-driver] model catalog 未含 '${modelId}'（${this.catalogWaitTimeoutMs}ms 等待超时），目录=${JSON.stringify(catalog).slice(0, 400)}`,
+        );
+        break;
+      }
+      if (h.closing) return;
+      await new Promise<void>((r) => setTimeout(r, 300));
+      found = findEntry();
+    }
+    if (found) {
+      resolvedProviderId = found.providerId;
+      resolvedModelId = found.modelId;
+      // 严格路径要求 reasoningLevel（引擎自报默认档，末档兜底——引擎约定
+      // values.at(-1)=defaultLevel，探针实证 [low,high,max] default=max）。
+      reasoningLevel = found.reasoningDefaultLevel
+        ?? (found.reasoningLevels && found.reasoningLevels.length > 0
+          ? found.reasoningLevels[found.reasoningLevels.length - 1]
+          : undefined);
+    }
     await h.envelope.request(
       'session/setModel',
-      { sessionId: h.zcodeSessionId, model },
+      {
+        sessionId: h.zcodeSessionId,
+        model: {
+          providerId: resolvedProviderId,
+          modelId: resolvedModelId,
+          ...(reasoningLevel !== undefined ? { options: { reasoningLevel } } : {}),
+        },
+      },
       (line) => h.child.stdin?.write(line),
       { timeoutMs: this.controlTimeoutMs },
     );

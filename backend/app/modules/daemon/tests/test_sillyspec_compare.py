@@ -321,9 +321,13 @@ class _SnapshotRpcStub:
         self,
         result: dict[str, Any] | None = None,
         error: Exception | None = None,
+        by_change: dict[str, dict[str, Any] | Exception] | None = None,
     ) -> None:
         self.result = result
         self.error = error
+        # 按记录名分派（full-tree 兜底用例）：命中值为 Exception 即抛、否则为返回快照；
+        # 未登记的记录名直接 AssertionError（兜底不该发生的场景会当场炸出来）。
+        self.by_change = by_change
         self.calls: list[dict[str, Any]] = []
 
     def install(self, monkeypatch: pytest.MonkeyPatch) -> _SnapshotRpcStub:
@@ -345,6 +349,13 @@ class _SnapshotRpcStub:
                     "timeout": timeout,
                 }
             )
+            if stub.by_change is not None:
+                outcome = stub.by_change.get(str(params.get("change")))
+                if outcome is None:
+                    raise AssertionError(f"未预期的记录名: {params.get('change')!r}")
+                if isinstance(outcome, Exception):
+                    raise outcome
+                return outcome
             if stub.error is not None:
                 raise stub.error
             return stub.result or {}
@@ -1261,7 +1272,9 @@ async def test_ensure_workspace_member_action_parameter_forks_message(
     ("daemon_code", "expected_fragment"),
     [
         ("workspace_root_unknown", "尚未被本机认领"),
-        ("conflict_record_missing", "冲突记录已失效"),
+        # 2026-10-16-conflict-full-tree-compare（D-005@v1）：文案改「重新同步」口径
+        # （原「冲突记录已失效，请刷新冲突列表」是无效建议——刷新不关闭注册表行）。
+        ("conflict_record_missing", "重新同步"),
     ],
     ids=["workspace-root-unknown", "conflict-record-missing"],
 )
@@ -1316,3 +1329,143 @@ async def test_compare_gateway_message_keeps_default_for_unknown_code(
     )
     assert resp.status_code == 502, resp.text
     assert "请稍后重试" in resp.json()["message"]
+
+
+# ── full-tree 兜底（2026-10-16-conflict-full-tree-compare / FR-01/FR-02 /
+#    D-001@v1 / D-006@v2 / D-009@v1）────────────────────────────────────────────
+
+_CHANGE_A = "2026-10-13-fire-unitadd-form-import"
+_CHANGE_B = "2026-10-13-fire-unitadd-relayout"
+
+
+def _full_tree_snapshot() -> dict[str, Any]:
+    """跨 2 个变更名的 full-tree 记录快照（files[] 是唯一输入面——快照无 conflicting_paths）。"""
+    return _snapshot(
+        change="full-tree",
+        files=[
+            _local_file(f"changes/archive/{_CHANGE_A}/design.md", "A design"),
+            _local_file(f"changes/archive/{_CHANGE_B}/proposal.md", "B proposal"),
+            _local_file("knowledge/fr/sillyspec.md", "kb"),
+        ],
+    )
+
+
+@pytest.mark.asyncio
+async def test_compare_full_tree_fallback_scopes_to_change(
+    client: AsyncClient,
+    db_session: AsyncSession,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """主取 conflict_record_missing → 以 full-tree 重取一次，裁剪为该变更范围并附来源元数据。"""
+    from app.modules.daemon.runtime.service import DaemonRpcRemoteError
+
+    _owner, token, inst, ws, _root = await _seed_full_env(db_session, tmp_path, tag="ft-hit")
+    stub = _SnapshotRpcStub(
+        by_change={
+            _CHANGE_A: DaemonRpcRemoteError(
+                {"code": "conflict_record_missing", "message": "冲突记录不存在：x.json"}
+            ),
+            "full-tree": _full_tree_snapshot(),
+        }
+    ).install(monkeypatch)
+
+    resp = await client.get(
+        _compare_url(inst.id, _CHANGE_A, kind="spec-tree", workspace_id=ws.id),
+        headers=_headers(token),
+    )
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["record_label"] == "full-tree"
+    assert body["covered_changes"] == [_CHANGE_A, _CHANGE_B]
+    assert body["path_total"] == 3
+    assert [f["path"] for f in body["files"]] == [f"changes/archive/{_CHANGE_A}/design.md"], (
+        "只含请求变更路径（兄弟变更与 knowledge/ 不混入）"
+    )
+    assert len(stub.calls) == 2, "兜底恰一次"
+    assert stub.calls[0]["params"]["change"] == _CHANGE_A
+    assert stub.calls[1]["params"]["change"] == "full-tree"
+    assert stub.calls[1]["timeout"] == 15
+
+
+@pytest.mark.asyncio
+async def test_compare_full_tree_fallback_miss_keeps_original_error(
+    client: AsyncClient,
+    db_session: AsyncSession,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """记录不含该变更路径（段边界防误吞）→ 兜底不命中，维持原 conflict_record_missing。"""
+    from app.modules.daemon.runtime.service import DaemonRpcRemoteError
+
+    _owner, token, inst, ws, _root = await _seed_full_env(db_session, tmp_path, tag="ft-miss")
+    stub = _SnapshotRpcStub(
+        by_change={
+            "foo": DaemonRpcRemoteError(
+                {"code": "conflict_record_missing", "message": "冲突记录不存在：foo.json"}
+            ),
+            "full-tree": _snapshot(
+                change="full-tree", files=[_local_file("changes/foobar/x.md", "x")]
+            ),
+        }
+    ).install(monkeypatch)
+
+    resp = await client.get(
+        _compare_url(inst.id, "foo", kind="spec-tree", workspace_id=ws.id),
+        headers=_headers(token),
+    )
+    assert resp.status_code == 502, resp.text
+    body = resp.json()
+    assert body["details"]["daemon_code"] == "conflict_record_missing"
+    assert "重新同步" in body["message"]
+    assert len(stub.calls) == 2
+
+
+@pytest.mark.asyncio
+async def test_compare_full_tree_fallback_not_triggered_for_progress_kind(
+    client: AsyncClient,
+    db_session: AsyncSession,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """kind=progress 主取 conflict_record_missing → 不触发兜底（恰 1 次 RPC）。"""
+    from app.modules.daemon.runtime.service import DaemonRpcRemoteError
+
+    _owner, token, inst, ws, _root = await _seed_full_env(db_session, tmp_path, tag="ft-prog")
+    stub = _SnapshotRpcStub(
+        by_change={
+            _CHANGE: DaemonRpcRemoteError(
+                {"code": "conflict_record_missing", "message": "冲突记录不存在：p.json"}
+            ),
+        }
+    ).install(monkeypatch)
+
+    resp = await client.get(
+        _compare_url(inst.id, _CHANGE, kind="progress", workspace_id=ws.id),
+        headers=_headers(token),
+    )
+    assert resp.status_code == 502, resp.text
+    assert len(stub.calls) == 1, "progress 不兜底（多一次会被 stub 以未预期记录名炸出）"
+
+
+@pytest.mark.asyncio
+async def test_compare_full_tree_fallback_not_triggered_when_primary_succeeds(
+    client: AsyncClient,
+    db_session: AsyncSession,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """主取成功 → 恰 1 次 RPC 且来源字段为缺省（None/[]/None，旧响应形状不变）。"""
+    _owner, token, inst, ws, _root = await _seed_full_env(db_session, tmp_path, tag="ft-ok")
+    stub = _SnapshotRpcStub(result=_snapshot(files=[])).install(monkeypatch)
+
+    resp = await client.get(
+        _compare_url(inst.id, _CHANGE, kind="spec-tree", workspace_id=ws.id),
+        headers=_headers(token),
+    )
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["record_label"] is None
+    assert body["covered_changes"] == []
+    assert body["path_total"] is None
+    assert len(stub.calls) == 1

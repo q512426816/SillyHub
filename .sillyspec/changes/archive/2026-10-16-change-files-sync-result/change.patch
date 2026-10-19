@@ -1,0 +1,1387 @@
+diff --git a/.sillyspec/docs/SillyHub/modules/change.md b/.sillyspec/docs/SillyHub/modules/change.md
+index 76e7e7b33..67dc63af3 100644
+--- a/.sillyspec/docs/SillyHub/modules/change.md
++++ b/.sillyspec/docs/SillyHub/modules/change.md
+@@ -20,6 +20,7 @@ created_at: 2026-08-18 01:45:00
+   - 文档矩阵与单文档内容；重解析（全量重扫 + rename 检测 + `_sync_docs` 增量同步入库 + 占位行过滤）。
+   - 阶段档案配置更新（update_stage_profile）、agent 状态视图（get_agent_status）。
+ - **变更文件**：文件树列表 / 读内容 / 写内容（`_enqueue_edit_write` 经 daemon host_fs 通道下发，写后 `_resync_change_docs` 回灌文档矩阵）/ pending 文件列表——会话驱动模式下平台侧读写 agent 写盘结果的口。is_text 判定 = `_TEXT_SUFFIXES` 白名单（md/mdx/html/htm/yaml/yml/json/txt + ql-20260917-004 补 log/patch/diff——verify-logs/*.log 与 scope-audit.patch 此前被误判非文本，文件树给只读占位且全屏预览落 fallback）。
++  - 刷新同步回执（2026-10-16-change-files-sync-result）：`GET files?sync=1` 返回前先经绑定 daemon 触发定向上行同步（`sillyspec_sync_change` RPC，预算 15s——实测同步 5.5~13.5s，原 3s 恒超时），响应新增可选 `sync_result`（triggered/ok/reason/stderr_tail 三态：未绑定/离线 vs 执行失败/超时 vs 防抖跳过；纯读恒 null）；daemon ok:false 回执不再丢弃（reason 与 CLI stderr 尾段透传 + warning 日志 `change.files_refresh_sync_failed`），GET 仍永不因同步失败报错。
+ - **阶段流转与审核**：
+   - `transition`（FSM `can_transition` 校验）/ `advance_stage`（阶段推进，可带 agent_profile_id 透传派发）/ `complete_stage` + `rerun_stage`（返回结构化结果）。
+   - 四类人工审核面板：`proposal_review / plan_review / human_test / archive_confirm`（pending_review 停靠态的放行/打回，打回走 `_record_stage_rework`）。
+diff --git a/.sillyspec/docs/SillyHub/modules/frontend_components.md b/.sillyspec/docs/SillyHub/modules/frontend_components.md
+index fa0ac5f3a..ab78fcd11 100644
+--- a/.sillyspec/docs/SillyHub/modules/frontend_components.md
++++ b/.sillyspec/docs/SillyHub/modules/frontend_components.md
+@@ -187,6 +187,7 @@ active = matchLength 是 sidebarSections 全部菜单中的最大值
+ - 2026-08-19-sessions-workspace-selector | 新建会话工作区选择器：workspace-session-picker 组件 + new-session-form 接入（工作区→绑定机器联动、提交体 workspace_id）
+ - ql-20260819-001-b742 | 会话列表和面板头部增加工作区信息显示（session-list-panel chips + session header badge）
+ - 2026-08-19-session-stream-ux | 会话流结构化重构：共享装配器 session-log-assembler（分段/归属嵌套/override 撤回收敛两处副本）+ turn-segment-views 段渲染族 + turn-status-bar 轮级状态条 + subagent-catalog 子代理目录 + TurnTimeline v2 段模型渲染（FR-01..06）
++- 2026-10-16-change-files-sync-result | 变更文件树刷新同步回执提示：change-file-tree 点「刷新」（GET files?sync=1）后按响应 `sync_result` 展示非阻塞琥珀提示条（「同步未执行」未绑定/离线｜「同步未完成」CLI 失败/超时 + 中文原因与 stderr 尾段；成功/防抖跳过/纯读清除），文件树照常展示不被遮挡；文案纯函数 `changeFileSyncWarningText` 归 lib/change-file-sync.ts（data-testid=change-files-sync-warning）
+ 
+ ## 文件结构更新（2026-09-07-arch-large-file-split）
+ 
+diff --git a/.sillyspec/docs/SillyHub/modules/frontend_lib.md b/.sillyspec/docs/SillyHub/modules/frontend_lib.md
+index 1b908d81b..5f6178998 100644
+--- a/.sillyspec/docs/SillyHub/modules/frontend_lib.md
++++ b/.sillyspec/docs/SillyHub/modules/frontend_lib.md
+@@ -23,7 +23,7 @@ SillyHub 前端 API 客户端层与基础设施库（frontend/src/lib/**）。
+   - 可选请求超时（ql-20260831-006-6d67）：`timeoutMs` 到时 abort 并抛 `code="timeout"`（文案经 `timeoutMessage` 定制，缺省「请求超时，请重试」）；调用方自带 `signal` 的外部 abort 仍走 `network_error`（streamSession resync 静默语义不回归）。当前接入点：`injectSession` 30s + 「草稿已保留」专用文案——后端劣化请求挂起时撤占位轮 + 错误横幅兜底，占位轮不再永久「排队中」
+   - 401 处理：非 /api/auth/* 端点且未带 `x-auth-retry` 时单飞刷新拿新 token 重试一次（防无限重试）
+ - `api-circuit.ts`（ql-20260917-011）：API 全局熔断——连续 5 次系统性失败（网络错/超时 status=0 或 ≥500；4xx 业务态不算）开闸，15s 冷却内 apiFetch 短路非 /api/auth/* 请求（circuit_open，不发网络护住浏览器连接池——此前部署窗口风暴直到 ERR_INSUFFICIENT_RESOURCES 页签报废），冷却后半开放行探测、成功闭合/失败重开；notifications SSE 重连对齐 retryAt；circuit-banner 订阅展示。与 api.ts 循环引用安全（仅函数体内用 ApiError）。
+-- `token-refresh.ts`：`ensureFreshAccessToken()` — 模块级 inflight 单飞，并发 401 风暴只发一次 POST /api/auth/refresh 并写回 store；未登录/未 hydrate/refresh 失败返 null；doRefresh 带 15s AbortController 超时（ql-20260917-005：apiFetch 的 GET 30s 超时不覆盖刷新等待，连接僵死曾致 inflight 永久挂起、调用方永久加载态——超时抛 ApiError(timeout) 交调用方 catch 展示，不清会话不强制跳登录，网络异常传播行为不变）；`decodeJwtExp` 解析过期时间。
++- `token-refresh.ts`：`ensureFreshAccessToken()` — 模块级 inflight 单飞，并发 401 风暴只发一次 POST /api/auth/refresh 并写回 store；未登录/未 hydrate/refresh 收到 4xx（明确失效）返 null 交上层清会话；**5xx/408/429 抛 ApiError 不清会话**（2026-10-16-fix-auth-random-logout D-004@v1 状态码分流：部署窗口/代理抖动不误踢在线用户）；doRefresh 带 15s AbortController 超时（ql-20260917-005：apiFetch 的 GET 30s 超时不覆盖刷新等待，连接僵死曾致 inflight 永久挂起、调用方永久加载态——超时抛 ApiError(timeout) 交调用方 catch 展示，不清会话不强制跳登录，网络异常传播行为不变）；`decodeJwtExp` 解析过期时间。
+ - `fetch-sse.ts`：fetch + ReadableStream 的 EventSource 替代品。
+   - 动机：EventSource 无法自定义请求头，token 只能拼 URL query 会被访问日志明文记录；本 helper 把 token 放 Authorization header（backend auth_deps 已 header-only）。
+   - 接口形状贴齐 EventSource（onopen/onmessage/onerror/addEventListener/readyState/close），从 EventSource 迁移只改构造方式。
+@@ -31,7 +31,8 @@ SillyHub 前端 API 客户端层与基础设施库（frontend/src/lib/**）。
+   - 已知例外债：lib/api/llm-providers.ts 手写 DTO（文件头显式登记，整体迁移到生成类型是独立坑）。
+ - `agent-logs.ts`：本地 Agent 会话日志双通道（2026-08-23-agent-log-conversation-view）——`readAgentLogMessages(entryId, beforeSeq?)` 对话化归一化消息（status 四值均 200 分层，仅 parsed 可渲染，蛇形字段原样）；`readAgentLogContent` 原文尾部 256KB（回落与二进制格式唯一通道）；ApiError 一律抛出交调用方回落。
+ - `api/session-attachments.ts`：`fetchAttachmentBlob(id)`（2026-08-25-session-attachment-preview）——预览 Modal 用的 Blob 拉取（docx/xlsx/md 渲染需 ArrayBuffer/text），401 经 ensureFreshAccessToken 单飞刷新重试一次（对齐 file/api.ts 的 fetchFileBlob 语义）；既有 `fetchAttachmentObjectUrl`（objectURL 版）行为不变。
+-- `change-files.ts`：`fetchChangeFileRaw(workspaceId, changeId, path)`（2026-08-26-file-fullscreen-preview，D-009）——变更文件二进制 Blob 拉取（GET files/raw），裸 fetch+Bearer+401 单飞重试（对齐 explorer.ts fetchDownload 范式）；变更文件预览（全屏弹窗/图片内联）恒走此函数，不走 1MB 截断的 getChangeFileContent（编辑流仍走 content 端点）。
++- `change-files.ts`：`fetchChangeFileRaw(workspaceId, changeId, path)`（2026-08-26-file-fullscreen-preview，D-009）——变更文件二进制 Blob 拉取（GET files/raw），裸 fetch+Bearer+401 单飞重试（对齐 explorer.ts fetchDownload 范式）；变更文件预览（全屏弹窗/图片内联）恒走此函数，不走 1MB 截断的 getChangeFileContent（编辑流仍走 content 端点）。`listChangeFiles` 的 `ChangeFileList` 类型含可选 `sync_result`（2026-10-16-change-files-sync-result）。
++- `change-file-sync.ts`：`changeFileSyncWarningText(sr)`（2026-10-16-change-files-sync-result，零依赖纯函数）——GET files?sync=1 响应 `sync_result` 回执 → 提示文案：ok=false→「同步未完成」含中文原因（SYNC_REASON_CN 表）与 stderr 尾段；triggered=false→「同步未执行」；成功/防抖跳过/纯读（null）→ null（不提示）；未知 reason 原样透出。change-file-tree 刷新后接线展示。
+ - react-query 装配：
+   - `query-client.ts` `makeQueryClient()` — freshness-first 默认：staleTime 15s + refetchOnWindowFocus（仅对 >15s 数据重取）；retry 仅 ApiError 5xx ≤3 次（4xx 含 401/403/404 不重试）；全局不设 refetchInterval。
+   - `providers.tsx` `AppProviders` — QueryClientProvider 用 useState 工厂建每会话实例（禁模块级单例，防 SSR 跨请求泄漏缓存）；DevTools 仅 dev。
+diff --git a/.sillyspec/docs/backend/modules/change.md b/.sillyspec/docs/backend/modules/change.md
+index eb273356d..f7ebc7f70 100644
+--- a/.sillyspec/docs/backend/modules/change.md
++++ b/.sillyspec/docs/backend/modules/change.md
+@@ -24,7 +24,11 @@ quicklog 双源合并查询（平台上行条目 × 文件条目）也在本模
+   `GET /{change_id}/documents`、`.../documents/{doc_id}`（文档内容）。
+ - 重解析：`POST /changes/reparse`——body 可带 scope 列表；scoped 模式零 delete、
+   rename 检测仅全量模式（见关键逻辑）。
+-- 文件子域：`GET /{change_id}/files`（变更文件树）、
++- 文件子域：`GET /{change_id}/files`（变更文件树；`?sync=1` 先经绑定 daemon 触发
++  定向上行同步再返回，RPC 预算 15s，响应带可选 `sync_result` 回执
++  triggered/ok/reason/stderr_tail——未绑定/离线 vs 执行失败/超时 vs 防抖跳过三态，
++  纯读恒 null；daemon 失败回执透传 reason 与 CLI stderr 尾段并记 warning，GET 永不
++  因同步失败报错——2026-10-16-change-files-sync-result）、
+   `GET|PUT /{change_id}/files/content`（读/写文件内容）、
+   `GET /{change_id}/files/raw`（二进制原字节流，2026-08-26-file-fullscreen-preview：
+   StreamingResponse + guess_type Content-Type + inline RFC5987 filename*，CHANGE_READ，
+diff --git a/.sillyspec/docs/multi-agent-platform/flows/auth-flow.md b/.sillyspec/docs/multi-agent-platform/flows/auth-flow.md
+index dcfdc337d..6e0ae1033 100644
+--- a/.sillyspec/docs/multi-agent-platform/flows/auth-flow.md
++++ b/.sillyspec/docs/multi-agent-platform/flows/auth-flow.md
+@@ -3,7 +3,6 @@ author: qinyi
+ created_at: 2026-06-24T01:50:01
+ source_commit: ba87eec
+ ---
+-
+ # 用户认证流程
+ 
+ ## 目标
+@@ -13,8 +12,8 @@ source_commit: ba87eec
+ - **backend/auth**：`/login`、`/refresh`、`/logout`、`/me`、`/api-keys`（`app/modules/auth/router.py`）
+ - **backend/core/security**：JWT 签发/校验（HS256）、refresh token 生成/bcrypt 存储
+ - **backend/core/auth_deps**：`Authorization: Bearer` 与 `X-API-Key` 依赖注入、权限校验
+-- **frontend**：token 存储、自动注入 Authorization、401 刷新拦截
+-- **database**：用户凭证、Session（`hash(refresh_token)` + expires_at）
++- **frontend**：token 存储、自动注入 Authorization、401 刷新拦截（token-refresh 单飞 + 状态码分流）
++- **database**：用户凭证、Session（`hash(refresh_token)` + `expires_at` + `family_id` 会话族）
+ 
+ ## 流程摘要
+ ```text
+@@ -24,32 +23,40 @@ source_commit: ba87eec
+ [backend/auth] bcrypt 校验密码
+       │ 通过
+       ▼
+-[backend/core/security] 发放 Token Pair
+-   access_token  (JWT HS256, 15min)
+-   refresh_token (随机串, 7days)
+-      │ DB 存 hash(refresh_token) + expires_at
++[backend/core/security] 发放 Token Pair + 开新会话族
++   access_token  (JWT HS256, 30min)
++   refresh_token (随机串, 14 days)
++      │ DB 存 hash(refresh_token) + expires_at + family_id(新族根 uuid4)
+       ▼
+ [frontend] access→memory / refresh→secure
+ 
+ —— 正常请求 ——
+ [frontend] API 请求 (Bearer access)  ──► [backend] 鉴权通过
+-      │ access 15min 过期 → 401
++      │ access 30min 过期 → 401
+       ▼
+ [frontend] POST /refresh (refresh_token)
+-      │ 校验 + 作废旧 refresh + 发放新 pair
++      │ 校验 + 作废旧 refresh（写 rotated_at）+ 发放新 pair（继承族）
++      │ grace 宽限窗（默认 300s）内旧 token 再提交 → 换发新对不吊销
++      │ 超窗复用旧 token → 族级吊销（见失败回滚）
+ ```
+ > API Key 备选：`X-API-Key` 头由 `auth_deps` 解析，走独立鉴权路径。
+ 
++## 前端刷新契约（2026-10-16-fix-auth-random-logout）
++- `/api/auth/refresh` 响应按状态码分流：**2xx** 换发新对；**401/403/其余 4xx** = 凭证明确失效 → 清会话跳登录；**5xx / 408 / 429（含超时/网络异常）** = 链路瞬态故障 → 抛错保持登录态（部署窗口/代理抖动不误踢在线用户，可重试自愈）。
++
+ ## 失败回滚
+ | 失败点 | 处理 |
+ |--------|------|
+ | 密码错误 | 401，审计日志记录失败尝试 |
+ | access token 伪造/过期 | `decode_access_token` 抛 AccessTokenError → 401 |
+-| refresh token 重放/失配 | `verify_refresh_token` 失败 → 撤销会话，强制重登 |
++| refresh token 重放（超 grace 窗复用已轮换的旧 token） | 族级吊销：仅注销该 token 所属**会话族**（同一次登录衍生的全部 session，含窃取者换出的后代），同用户其他设备登录不受影响；返 401 `auth_refresh_reused` 强制该设备重登 |
++| refresh token 失配/无法解析 | `verify_refresh_token` 失败 → 401 `auth_token_invalid` |
+ | 用户已停用 | 403，拒绝发放 token |
+ 
+ ## 关键术语
+-- **access_token**：HS256 JWT，15min TTL，`typ=access`
+-- **refresh_token**：随机串，7d，DB 存 `hash_refresh_token`（bcrypt）
+-- **Session**：DB 记录，`hash(refresh_token)` + `expires_at`
++- **access_token**：HS256 JWT，30min TTL（`auth_access_ttl_minutes`），`typ=access`
++- **refresh_token**：随机串（`{token_id}.{secret}` 两段式），14d（`auth_refresh_ttl_days`），DB 存 `hash_refresh_token`（bcrypt）+ `token_id_hmac` 索引
++- **Session**：DB 记录，`hash(refresh_token)` + `expires_at` + `rotated_at`（轮换锚点）+ `family_id`（会话族；NULL=存量旧行自成一族）
++- **会话族（family）**：同一次登录衍生的 session 谱系；refresh 轮换/grace 续期继承族值，复用检测按族吊销（2026-10-16-fix-auth-random-logout）
++- **grace 宽限窗**：rotate 后 `auth_refresh_grace_seconds`（默认 300s）内旧 token 再提交换发新对不吊销——并发刷新/休眠恢复误杀兜底；0=关闭
+ - **TokenPair**：login/refresh 响应体
+diff --git a/.sillyspec/docs/multi-agent-platform/modules/deploy.md b/.sillyspec/docs/multi-agent-platform/modules/deploy.md
+index 5f008e8b4..b87a39905 100644
+--- a/.sillyspec/docs/multi-agent-platform/modules/deploy.md
++++ b/.sillyspec/docs/multi-agent-platform/modules/deploy.md
+@@ -55,3 +55,4 @@ multi-agent-platform 的一体化部署编排组件，用 Docker Compose 把 bac
+ - change 2026-08-08-llm-provider-openai-format | deploy 加 litellm + litellm-db 服务（OpenAI↔Anthropic 转换网关，D-012 外包）+ `LITELLM_MASTER_KEY`/`STORE_MODEL_IN_DB` env + `.env.example` 占位 + openai 端到端链路说明
+ - 2026-10-14-litellm-retire | litellm 退役拍板（用户 2026-10-14 裁决：彻底退役）：v1.95.0 坏构建坑挂 12 天分叉未拍板，
+ - change 2026-10-15-knowledge-search-pgvector | postgres 换 pgvector/pgvector:pg16（知识搜索向量持久化，vector(512) 两表）+ backend fastembed 模型缓存挂载 + mem_limit 800m→1100m（生产 OOM/无外网实证）
++- 2026-10-16-deploy-convergence-guard | 2026-10-16 生产互覆事故——另一会话从分叉分支打包部署，静默回退 main 上已修复的 /…
+diff --git a/.zcode/skills/deploy-to-server/SKILL.md b/.zcode/skills/deploy-to-server/SKILL.md
+index d2b45000e..3aef51c1d 100644
+--- a/.zcode/skills/deploy-to-server/SKILL.md
++++ b/.zcode/skills/deploy-to-server/SKILL.md
+@@ -119,11 +119,13 @@ ssh -i ~/.ssh/tencent_deploy ubuntu@124.222.127.242 'cd /opt/sillyhub/deploy/dep
+ ```bash
+ ssh -i ~/.ssh/tencent_deploy ubuntu@124.222.127.242 'cd /opt/sillyhub/deploy/deploy && \
+   docker compose ps && \
+-  curl -s http://127.0.0.1:8001/api/health'
++  curl -s http://127.0.0.1:8001/api/health && \
++  docker exec multi-agent-platform-backend-1 sh -c "touch /data/spec-workspaces/.w && rm /data/spec-workspaces/.w && echo SPEC_MIRROR_WRITE_OK"'
+ ```
+ - 5 个容器全 healthy（backend / frontend / postgres / redis / minio）
+ - health 返回 `{"status":"ok","db":"ok","redis":"ok",...}`
+ - **`commit_sha` 必须与打包时打印的短 sha 一致**（2026-10-16 互覆事故后强制）——不一致说明部署后已被其他会话覆盖，见 §0「被覆盖的识别与恢复」
++- `SPEC_MIRROR_WRITE_OK` = spec 镜像目录对容器可写（缺了它变更文件树同步会全线 500，见「常见坑」属主项；迁移/搬数据后必查）
+ 
+ backend 镜像变更会自动跑 `alembic upgrade head`，看 logs 确认无报错：
+ ```bash
+@@ -389,6 +391,15 @@ ssh -i ~/.ssh/tencent_deploy ubuntu@124.222.127.242 '
+ - **backend 变更触发 alembic**：load + up 后 backend 启动跑 `alembic upgrade head`。migration 链断裂会 crash-loop，看 logs 诊断；项目未上线，可 `docker compose down -v` 重置 DB（先确认数据可丢）。
+ - **清库迁移已改 no-op（2026-09-13 部署裁决）**：20260912050000 的破坏性清库 DML **不随** `alembic upgrade head` 自动执行（旧逻辑会在 CLI 升级前自动清库、清空白做；且迁移链重放会把已重建的正确数据再清一遍）。清库改 `backend/scripts/reset_agent_log_attribution.py` 手动执行——见「更新部署 §4」的一次性运维动作段；**只跑一次，CLI 重推开始后禁跑**。
+ - **daemon bundle**：backend 镜像依赖 `sillyhub-daemon/build/bundle/`。daemon 的 `src/` 改过必须 `pnpm bundle` 再打包；只改 `scripts/install.*` 不影响 bundle JS（随 rebuild 自动 COPY 最新源）。
++- **spec 镜像目录属主必须跟容器用户（2026-10-16 迁移实锤，变更文件树同步全线 500 的根因）**：
++  `/data/spec-workspaces`（`SPEC_DATA_HOST_DIR`，宿主 bind mount → 容器同路径）的**工作区树必须属
++  `999:999`**（容器内 `app` 用户 uid/gid=999；宿主上 uid 999 的属名显示为 `dnsmasq`/`systemd-journal`）。
++  迁移/rsync/scp 搬家后若属主变成 `ubuntu`（或任何非 999）且权限 755，后端写落盘即
++  `PermissionError: [Errno 13]` → `POST /api/changes/-/spec-sync` 恒 500 → CLI 端症状为
++  「同步请求失败 HTTP 500（文件树本次未同步，下次自动重试）」无限重试、变更详情页文件树永远空。
++  修复：`sudo chown -R 999:999 /data/spec-workspaces`（顶层目录保持 777 供容器新建 workspace 树）；
++  验证：进容器 `touch` 某个已有工作区树的 `changes/.w` 不报 Permission denied。
++  老阿里云机实证属主就是 999:999——每次迁移/搬数据后都要对齐（已加进「更新部署 §4 验证」探针）。
+ - **不要碰 ppdmq-\***：服务器另有 `ppdmq-app/redis/mysql` 是别的项目，部署只动 `multi-agent-platform-*` 容器。
+ - **容器端口用 127.0.0.1**：本机 curl 验证服务器映射端口用 `127.0.0.1`（在服务器上 ssh 内执行），不要用 `localhost`（IPv6 解析问题）。
+ - **`/daemon/` 别让 nginx 静态 alias**：宿主机 `/var/www/sillyhub/daemon/` 这类静态副本不随镜像更新，会吐旧 bundle/旧 install.ps1（无 BOM、`{{SERVER_URL}}` 未替换）。整段 `location /daemon/` 必须 `proxy_pass` 到后端。排障/部署后对比公网与后端 latest.json 版本是否一致。详见上方「nginx 路由」。
+diff --git a/backend/app/modules/change/router.py b/backend/app/modules/change/router.py
+index 1d55351e4..c5a2526ef 100644
+--- a/backend/app/modules/change/router.py
++++ b/backend/app/modules/change/router.py
+@@ -38,6 +38,7 @@ from app.modules.change.schema import (
+     ChangeFileContent,
+     ChangeFileEntry,
+     ChangeFileList,
++    ChangeFileSyncResult,
+     ChangeFileWriteRequest,
+     ChangeFileWriteResponse,
+     ChangeList,
+@@ -82,6 +83,11 @@ from app.modules.change.scope_audit import (
+ from app.modules.change.service import ChangeService
+ from app.modules.change.timeline import ChangeTimelineQueryService
+ from app.modules.change.usage_service import ChangeUsageQueryService
++from app.modules.daemon.runtime.service import (
++    DaemonRpcRemoteError,
++    DaemonRpcTimeout,
++    DaemonRuntimeOffline,
++)
+ from app.modules.daemon.schema import AgentSessionListItem, ChangeSessionAuthor
+ from app.modules.workspace.service import WorkspaceService
+ 
+@@ -102,12 +108,18 @@ def _get_user_role(user: User) -> str:
+     return "business_user"
+ 
+ 
+-# GET files 显式同步预算（2026-10-14-files-refresh-explicit-sync / 承 2026-10-13
+-# change-files-refresh-sync D-002@v1）：仅 sync=1（用户点「刷新」按钮）触发，
+-# 等 daemon 串行两条 sillyspec CLI 的 RPC 硬预算从 15s 收窄到 3s——点击刷新多数
+-# 情况在预算内拿到同步后数据，超时静默降级返回现有镜像数据（daemon 防抖 15s
+-# 内再点秒回新数据），任何一次点击都不会长时间卡住。默认（不带 sync）纯读零同步。
+-_FILES_REFRESH_SYNC_RPC_TIMEOUT_S = 3.0
++# GET files 显式同步预算（2026-10-16-change-files-sync-result 修订；承 2026-10-14
++# files-refresh-explicit-sync / 2026-10-13-change-files-refresh-sync D-002@v1）：
++# 仅 sync=1（用户点「刷新」按钮）触发。原 3s 预算窄于真实同步耗时——daemon 串行
++# ``platform sync`` + ``sync-docs`` 两条 CLI 实测 5.5~13.5s（daemon.log 2026-10-13~
++# 14 多例），3s 下真同步恒超时→静默降级，「刷新」永远拿旧数据。放宽到 15s 覆盖
++# 实测上界并留余量；超时仍静默降级不阻断 GET（并已带 sync_result 回执明示原因）。
++# 默认（不带 sync）纯读零同步。
++_FILES_REFRESH_SYNC_RPC_TIMEOUT_S = 15.0
++
++# stderr_tail 入库/回执前的长度硬帽（daemon 侧 cliOutputSnippet 已截短，此处兜底
++# 防异常长输出随响应放大）。
++_FILES_REFRESH_SYNC_STDERR_TAIL_MAX = 500
+ 
+ 
+ async def _sync_change_via_daemon(
+@@ -115,18 +127,27 @@ async def _sync_change_via_daemon(
+     workspace_id: uuid.UUID,
+     change: Change,
+     user_id: uuid.UUID,
+-) -> None:
++) -> dict[str, Any]:
+     """GET files 刷新前置：绑定 daemon 在线则触发其对此变更的定向上行同步。
+ 
+-    2026-10-13-change-files-refresh-sync task-04（D-002/D-003@v1）。链路：
+-    per-member binding 解析（未绑定 = 等效离线，不接入借用兜底——避免借他机
+-    CLI 的副作用）→ daemon 在线判断 → ``send_rpc('sillyspec_sync_change')``
+-    （daemon 串行 ``platform sync --change`` 落镜像 + ``platform sync-docs
+-    --change`` 落 DB 四件套，15s 防抖防频繁刷新打爆 CLI）。降级铁律（D-003）：
+-    未绑定 / 离线 / DaemonRpcTimeout / DaemonRpcRemoteError（含老 daemon 未注册
+-    method 的 method not found）四路全部 log.info 后静默返回——本函数任何情况
+-    不抛，GET files 永不因同步失败报错。
++    2026-10-13-change-files-refresh-sync task-04（D-002/D-003@v1）建立链路；
++    2026-10-16-change-files-sync-result 修订：**回执不再丢弃**——返回
++    ``{"triggered", "ok", "reason", "stderr_tail"}`` 结构化结果（endpoint 组装进
++    ``ChangeFileList.sync_result`` 供前端展示失败原因），失败路径从无声 log.info
++    升级为 log.warning 留痕。链路：per-member binding 解析（未绑定 = 等效离线，
++    不接入借用兜底——避免借他机 CLI 的副作用）→ daemon 在线判断 →
++    ``send_rpc('sillyspec_sync_change')``（daemon 串行 ``platform sync --change``
++    落镜像 + ``platform sync-docs --change`` 落 DB 四件套，15s 防抖防频繁刷新
++    打爆 CLI）。降级铁律（D-003@v1）不变：未绑定 / 离线 / DaemonRpcTimeout /
++    DaemonRpcRemoteError（含老 daemon 未注册 method 的 method not found）各路
++    均不抛，GET files 永不因同步失败报错——只把失败事实与原因如实带回。
+     """
++    result: dict[str, Any] = {
++        "triggered": False,
++        "ok": None,
++        "reason": None,
++        "stderr_tail": None,
++    }
+     try:
+         from app.modules.daemon.ws_hub import get_daemon_ws_hub
+         from app.modules.workspace.member_runtimes.queries import (
+@@ -142,16 +163,32 @@ async def _sync_change_via_daemon(
+             session, workspace_id, user_id
+         )
+         if binding is None or binding.daemon_id is None:
+-            return
++            result["reason"] = "no_binding"
++            log.info(
++                "change.files_refresh_sync_skipped",
++                workspace_id=str(workspace_id),
++                change_id=str(change.id),
++                reason="no_binding",
++            )
++            return result
+         daemon_id = (
+             binding.daemon_id
+             if isinstance(binding.daemon_id, uuid.UUID)
+             else uuid.UUID(str(binding.daemon_id))
+         )
+         if await query_daemon_online_by_id(session, daemon_id, user_id) is None:
+-            return
++            result["reason"] = "daemon_offline"
++            log.info(
++                "change.files_refresh_sync_skipped",
++                workspace_id=str(workspace_id),
++                change_id=str(change.id),
++                daemon_id=str(daemon_id),
++                reason="daemon_offline",
++            )
++            return result
+ 
+         hub = get_daemon_ws_hub()
++        result["triggered"] = True
+         log.info(
+             "change.files_refresh_sync_triggered",
+             workspace_id=str(workspace_id),
+@@ -159,7 +196,7 @@ async def _sync_change_via_daemon(
+             change_key=change.change_key,
+             daemon_id=str(daemon_id),
+         )
+-        await hub.send_rpc(
++        rpc_result = await hub.send_rpc(
+             daemon_id,
+             "sillyspec_sync_change",
+             {
+@@ -168,13 +205,85 @@ async def _sync_change_via_daemon(
+             },
+             timeout=_FILES_REFRESH_SYNC_RPC_TIMEOUT_S,
+         )
++        # daemon 回执消费（2026-10-16 修复核心）：manager 恒以 ok/skipped 形态
++        # resolve，绝不被吞——ok:false 带 reason（cli_failed / no_workspace_root /
++        # …）与 stderr_tail 原样透传进回执。
++        if isinstance(rpc_result, dict) and rpc_result.get("ok") is False:
++            result["ok"] = False
++            result["reason"] = str(rpc_result.get("reason") or "cli_failed")
++            tail = rpc_result.get("stderr_tail")
++            result["stderr_tail"] = (
++                str(tail)[:_FILES_REFRESH_SYNC_STDERR_TAIL_MAX] if tail else None
++            )
++            log.warning(
++                "change.files_refresh_sync_failed",
++                workspace_id=str(workspace_id),
++                change_id=str(change.id),
++                change_key=change.change_key,
++                daemon_id=str(daemon_id),
++                reason=result["reason"],
++                stderr_tail=result["stderr_tail"],
++            )
++        elif isinstance(rpc_result, dict) and rpc_result.get("skipped"):
++            # 防抖跳过（15s TTL / in-flight 去重）：刚同步过或正在同步，非失败。
++            result["reason"] = f"skipped_{rpc_result['skipped']}"
++            log.info(
++                "change.files_refresh_sync_skipped",
++                workspace_id=str(workspace_id),
++                change_id=str(change.id),
++                reason=result["reason"],
++            )
++        else:
++            result["ok"] = True
++            log.info(
++                "change.files_refresh_sync_done",
++                workspace_id=str(workspace_id),
++                change_id=str(change.id),
++                change_key=change.change_key,
++                daemon_id=str(daemon_id),
++                actions=rpc_result.get("actions") if isinstance(rpc_result, dict) else None,
++            )
++    except DaemonRpcTimeout as exc:
++        result["ok"] = False
++        result["reason"] = "rpc_timeout"
++        log.warning(
++            "change.files_refresh_sync_failed",
++            workspace_id=str(workspace_id),
++            change_id=str(change.id),
++            reason="rpc_timeout",
++            error=f"{type(exc).__name__}: {exc}",
++        )
++    except DaemonRpcRemoteError as exc:
++        result["ok"] = False
++        result["reason"] = "rpc_remote_error"
++        log.warning(
++            "change.files_refresh_sync_failed",
++            workspace_id=str(workspace_id),
++            change_id=str(change.id),
++            reason="rpc_remote_error",
++            error=f"{type(exc).__name__}: {exc}",
++        )
++    except DaemonRuntimeOffline as exc:
++        result["ok"] = False
++        result["reason"] = "runtime_offline"
++        log.warning(
++            "change.files_refresh_sync_failed",
++            workspace_id=str(workspace_id),
++            change_id=str(change.id),
++            reason="runtime_offline",
++            error=f"{type(exc).__name__}: {exc}",
++        )
+     except Exception as exc:  # 降级收口：同步失败绝不阻断 GET（D-003@v1）
+-        log.info(
+-            "change.files_refresh_sync_skipped",
++        result["ok"] = False
++        result["reason"] = "exception"
++        log.warning(
++            "change.files_refresh_sync_failed",
+             workspace_id=str(workspace_id),
+             change_id=str(change.id),
++            reason="exception",
+             error=f"{type(exc).__name__}: {exc}",
+         )
++    return result
+ 
+ 
+ async def _build_transition_response(
+@@ -456,18 +565,23 @@ async def list_change_files(
+     2026-10-14-files-refresh-explicit-sync：触发面收窄——默认（sync=false）纯读，
+     直接返回平台镜像数据、不碰 daemon 通道（悬浮面板轮询/初始加载零同步开销）；
+     仅显式 sync=true（前端「刷新」按钮点击、错误重试）先经绑定 daemon 触发一次
+-    此变更的定向上行同步（在线才触发，失败静默降级——``_sync_change_via_daemon``
++    此变更的定向上行同步（在线才触发，失败降级不抛——``_sync_change_via_daemon``
+     任何情况不抛），使主动刷新尽量拿到 daemon 本机最新文档。
+-    ``service.list_files`` 本体纯读语义零改动。
++    2026-10-16-change-files-sync-result：sync=true 时降级不再无声——响应带
++    ``sync_result`` 回执（触发状态 / 成败 / 机读原因 / CLI 失败尾段），前端据此
++    在同步未完成时提示原因；默认纯读回执恒 None。``service.list_files`` 本体
++    纯读语义零改动。
+     """
+     service = ChangeService(session)
+     change = await service.get(workspace_id, change_id)
++    sync_result: dict[str, Any] | None = None
+     if sync:
+-        await _sync_change_via_daemon(session, workspace_id, change, user.id)
++        sync_result = await _sync_change_via_daemon(session, workspace_id, change, user.id)
+     items = await service.list_files(workspace_id, change_id)
+     return ChangeFileList(
+         change_id=change_id,
+         items=[ChangeFileEntry(**it) for it in items],
++        sync_result=ChangeFileSyncResult(**sync_result) if sync_result else None,
+     )
+ 
+ 
+diff --git a/backend/app/modules/change/schema.py b/backend/app/modules/change/schema.py
+index d862e9c7a..3ffa99c22 100644
+--- a/backend/app/modules/change/schema.py
++++ b/backend/app/modules/change/schema.py
+@@ -221,9 +221,27 @@ class ChangeFileEntry(BaseModel):
+     is_text: bool
+ 
+ 
++class ChangeFileSyncResult(BaseModel):
++    """GET files?sync=1 显式同步执行回执（2026-10-16-change-files-sync-result）。
++
++    ``triggered=False``：RPC 未发出，``reason`` ∈ no_binding / daemon_offline；
++    ``ok`` 三态——True=daemon 执行成功；False=执行失败或超时（``reason`` 机读短码：
++    rpc_timeout / rpc_remote_error / runtime_offline / exception / cli_failed /
++    no_workspace_root 等，``stderr_tail`` 为 CLI 失败输出尾段）；None=已触发但
++    daemon 防抖跳过（``skipped_in_flight`` / ``skipped_debounced``）或未触发。
++    默认纯读（不带 sync）本对象为 None。
++    """
++
++    triggered: bool
++    ok: bool | None = None
++    reason: str | None = None
++    stderr_tail: str | None = None
++
++
+ class ChangeFileList(BaseModel):
+     change_id: uuid.UUID
+     items: list[ChangeFileEntry]
++    sync_result: ChangeFileSyncResult | None = None
+ 
+ 
+ class ChangeFileContent(BaseModel):
+diff --git a/backend/app/modules/change/tests/test_files_refresh_sync.py b/backend/app/modules/change/tests/test_files_refresh_sync.py
+index 9c5d1b9b3..0cd70b346 100644
+--- a/backend/app/modules/change/tests/test_files_refresh_sync.py
++++ b/backend/app/modules/change/tests/test_files_refresh_sync.py
+@@ -4,7 +4,12 @@
+ DaemonRpcTimeout / DaemonRpcRemoteError / DaemonRuntimeOffline）与触发成功
+ 路径（D-002@v1：method / change_key / workspace_id / timeout 透传断言）。
+ 镜像扫描本体 ``service.list_files`` 零改动——既有 test_files_router.py 为回归
+-防线（本套件共用其 fixture 形态，不重复断言文件树内容细节）。"""
++防线（本套件共用其 fixture 形态，不重复断言文件树内容细节）。
++
++2026-10-16-change-files-sync-result：降级不再无声——响应新增 ``sync_result``
++回执（triggered/ok/reason/stderr_tail），下方各用例同时断言回执字段；新增
++daemon 结构化失败回执透传（ok:false → reason/stderr_tail）、防抖跳过与
++RPC 预算锁定三路。"""
+ 
+ from __future__ import annotations
+ 
+@@ -27,11 +32,13 @@ CHANGE_FIXTURES = Path(__file__).parent / "fixtures" / "changes"
+ 
+ 
+ class FakeHub:
+-    """capture send_rpc 调用参数；exc 编程化注入四路异常场景。"""
++    """capture send_rpc 调用参数；exc 编程化注入四路异常场景；result 注入回执形态。"""
+ 
+     def __init__(self) -> None:
+         self.calls: list[dict[str, Any]] = []
+         self.exc: Exception | None = None
++        # daemon 结构化回执（默认成功；ok:false / skipped 形态由用例覆写）
++        self.result: dict[str, Any] = {"ok": True, "actions": []}
+ 
+     async def send_rpc(
+         self,
+@@ -51,7 +58,7 @@ class FakeHub:
+         )
+         if self.exc is not None:
+             raise self.exc
+-        return {"ok": True, "actions": []}
++        return self.result
+ 
+ 
+ class FakeBinding:
+@@ -119,10 +126,20 @@ def _install_sync_mocks(
+     monkeypatch.setattr(ws_hub_module, "get_daemon_ws_hub", lambda: hub)
+ 
+ 
++def test_sync_budget_covers_measured_cli_runtime() -> None:
++    """RPC 预算锁定 15s（2026-10-16 实测同步耗时 5.5~13.5s，原 3s 恒超时）。
++
++    原 3s 预算下真实同步（daemon 串行两条 CLI）必然超时→静默降级，用户点刷新
++    永远拿到旧数据；15s 覆盖实测上界并留余量。"""
++    assert _FILES_REFRESH_SYNC_RPC_TIMEOUT_S == 15.0
++
++
+ async def test_online_triggers_sync_before_list(
+     client, files_ws: dict, auth_headers: dict[str, str], monkeypatch: pytest.MonkeyPatch
+ ) -> None:
+-    """sync=1 且绑定在线：send_rpc 被调且 method/change_key/workspace_id/timeout 透传正确，其后返回清单。"""
++    """sync=1 且绑定在线：send_rpc 被调且 method/change_key/workspace_id/timeout 透传正确，其后返回清单。
++
++    回执成功形态：triggered=True / ok=True / reason=None / stderr_tail=None。"""
+     hub = FakeHub()
+     daemon_id = uuid.uuid4()
+     _install_sync_mocks(monkeypatch, hub, binding=FakeBinding(daemon_id), daemon_online=True)
+@@ -141,12 +158,18 @@ async def test_online_triggers_sync_before_list(
+     body = resp.json()
+     assert body["change_id"] == files_ws["change_id"]
+     assert any(it["path"].endswith(".md") for it in body["items"])
++    assert body["sync_result"] == {
++        "triggered": True,
++        "ok": True,
++        "reason": None,
++        "stderr_tail": None,
++    }
+ 
+ 
+ async def test_default_read_only_skips_sync(
+     client, files_ws: dict, auth_headers: dict[str, str], monkeypatch: pytest.MonkeyPatch
+ ) -> None:
+-    """默认（不带 sync）：纯读——绑定在线也不触发 send_rpc，直接返回平台镜像数据。"""
++    """默认（不带 sync）：纯读——绑定在线也不触发 send_rpc，直接返回平台镜像数据，回执恒 null。"""
+     hub = FakeHub()
+     _install_sync_mocks(monkeypatch, hub, binding=FakeBinding(uuid.uuid4()), daemon_online=True)
+     resp = await client.get(
+@@ -155,13 +178,15 @@ async def test_default_read_only_skips_sync(
+     )
+     assert resp.status_code == 200, resp.text
+     assert hub.calls == []
+-    assert any(it["path"].endswith(".md") for it in resp.json()["items"])
++    body = resp.json()
++    assert any(it["path"].endswith(".md") for it in body["items"])
++    assert body["sync_result"] is None
+ 
+ 
+ async def test_no_binding_skips_sync(
+     client, files_ws: dict, auth_headers: dict[str, str], monkeypatch: pytest.MonkeyPatch
+ ) -> None:
+-    """sync=1 但未绑定 daemon（等效离线）：不触 send_rpc，正常返回现有镜像数据。"""
++    """sync=1 但未绑定 daemon（等效离线）：不触 send_rpc，回执 triggered=False / no_binding。"""
+     hub = FakeHub()
+     _install_sync_mocks(monkeypatch, hub, binding=None)
+     resp = await client.get(
+@@ -170,12 +195,18 @@ async def test_no_binding_skips_sync(
+     )
+     assert resp.status_code == 200, resp.text
+     assert hub.calls == []
++    assert resp.json()["sync_result"] == {
++        "triggered": False,
++        "ok": None,
++        "reason": "no_binding",
++        "stderr_tail": None,
++    }
+ 
+ 
+ async def test_daemon_offline_skips_sync(
+     client, files_ws: dict, auth_headers: dict[str, str], monkeypatch: pytest.MonkeyPatch
+ ) -> None:
+-    """sync=1 但绑定 daemon 离线：不触 send_rpc，正常返回。"""
++    """sync=1 但绑定 daemon 离线：不触 send_rpc，回执 triggered=False / daemon_offline。"""
+     hub = FakeHub()
+     _install_sync_mocks(monkeypatch, hub, binding=FakeBinding(uuid.uuid4()), daemon_online=False)
+     resp = await client.get(
+@@ -184,14 +215,20 @@ async def test_daemon_offline_skips_sync(
+     )
+     assert resp.status_code == 200, resp.text
+     assert hub.calls == []
++    assert resp.json()["sync_result"] == {
++        "triggered": False,
++        "ok": None,
++        "reason": "daemon_offline",
++        "stderr_tail": None,
++    }
+ 
+ 
+ async def test_rpc_timeout_degrades(
+     client, files_ws: dict, auth_headers: dict[str, str], monkeypatch: pytest.MonkeyPatch
+ ) -> None:
+-    """sync=1 且 RPC 超时（3s 预算尽）：降级返回现有镜像数据，HTTP 恒 200。"""
++    """sync=1 且 RPC 超时（预算尽）：降级返回现有镜像数据，HTTP 恒 200，回执 ok=False / rpc_timeout。"""
+     hub = FakeHub()
+-    hub.exc = DaemonRpcTimeout("timed out", details={"timeout_seconds": 3})
++    hub.exc = DaemonRpcTimeout("timed out", details={"timeout_seconds": 15})
+     _install_sync_mocks(monkeypatch, hub, binding=FakeBinding(uuid.uuid4()), daemon_online=True)
+     resp = await client.get(
+         f"/api/workspaces/{files_ws['ws_id']}/changes/{files_ws['change_id']}/files?sync=1",
+@@ -199,13 +236,20 @@ async def test_rpc_timeout_degrades(
+     )
+     assert resp.status_code == 200, resp.text
+     assert len(hub.calls) == 1
+-    assert any(it["path"].endswith(".md") for it in resp.json()["items"])
++    body = resp.json()
++    assert any(it["path"].endswith(".md") for it in body["items"])
++    assert body["sync_result"] == {
++        "triggered": True,
++        "ok": False,
++        "reason": "rpc_timeout",
++        "stderr_tail": None,
++    }
+ 
+ 
+ async def test_rpc_remote_error_degrades_old_daemon(
+     client, files_ws: dict, auth_headers: dict[str, str], monkeypatch: pytest.MonkeyPatch
+ ) -> None:
+-    """老 daemon 未注册 method → DaemonRpcRemoteError：降级返回（前后端无版本耦合）。"""
++    """老 daemon 未注册 method → DaemonRpcRemoteError：降级返回，回执 ok=False / rpc_remote_error。"""
+     hub = FakeHub()
+     hub.exc = DaemonRpcRemoteError({"code": "method_not_found", "message": "unknown method"})
+     _install_sync_mocks(monkeypatch, hub, binding=FakeBinding(uuid.uuid4()), daemon_online=True)
+@@ -214,13 +258,16 @@ async def test_rpc_remote_error_degrades_old_daemon(
+         headers=auth_headers,
+     )
+     assert resp.status_code == 200, resp.text
+-    assert any(it["path"].endswith(".md") for it in resp.json()["items"])
++    body = resp.json()
++    assert any(it["path"].endswith(".md") for it in body["items"])
++    assert body["sync_result"]["ok"] is False
++    assert body["sync_result"]["reason"] == "rpc_remote_error"
+ 
+ 
+ async def test_runtime_offline_degrades(
+     client, files_ws: dict, auth_headers: dict[str, str], monkeypatch: pytest.MonkeyPatch
+ ) -> None:
+-    """send 阶段连接丢失（DaemonRuntimeOffline）：降级返回。"""
++    """send 阶段连接丢失（DaemonRuntimeOffline）：降级返回，回执 ok=False / runtime_offline。"""
+     hub = FakeHub()
+     hub.exc = DaemonRuntimeOffline("offline", details={})
+     _install_sync_mocks(monkeypatch, hub, binding=FakeBinding(uuid.uuid4()), daemon_online=True)
+@@ -229,13 +276,16 @@ async def test_runtime_offline_degrades(
+         headers=auth_headers,
+     )
+     assert resp.status_code == 200, resp.text
+-    assert any(it["path"].endswith(".md") for it in resp.json()["items"])
++    body = resp.json()
++    assert any(it["path"].endswith(".md") for it in body["items"])
++    assert body["sync_result"]["ok"] is False
++    assert body["sync_result"]["reason"] == "runtime_offline"
+ 
+ 
+ async def test_binding_without_daemon_id_skips_sync(
+     client, files_ws: dict, auth_headers: dict[str, str], monkeypatch: pytest.MonkeyPatch
+ ) -> None:
+-    """sync=1 但绑定行 daemon_id 为空（旧行未迁移）：等效未绑定，不触 send_rpc。"""
++    """sync=1 但绑定行 daemon_id 为空（旧行未迁移）：等效未绑定，不触 send_rpc，reason=no_binding。"""
+     hub = FakeHub()
+     _install_sync_mocks(monkeypatch, hub, binding=FakeBinding(None))
+     resp = await client.get(
+@@ -244,3 +294,68 @@ async def test_binding_without_daemon_id_skips_sync(
+     )
+     assert resp.status_code == 200, resp.text
+     assert hub.calls == []
++    assert resp.json()["sync_result"]["reason"] == "no_binding"
++
++
++async def test_daemon_cli_failure_result_propagates(
++    client, files_ws: dict, auth_headers: dict[str, str], monkeypatch: pytest.MonkeyPatch
++) -> None:
++    """daemon 结构化失败回执（ok:false）不再被吞：reason 与 stderr_tail 原样透传（2026-10-16 修复核心）。
++
++    现场案例：CLI 在服务器镜像落盘被拒（HTTP 500）时 daemon 回 ok:false +
++    stderr_tail，旧实现整个回执丢弃——用户端零提示、排障无据。"""
++    hub = FakeHub()
++    hub.result = {
++        "ok": False,
++        "reason": "cli_failed",
++        "failed_cmd": "sync",
++        "stderr_tail": "exit 1 sync 请求失败 HTTP 500（服务器内部错误）",
++    }
++    _install_sync_mocks(monkeypatch, hub, binding=FakeBinding(uuid.uuid4()), daemon_online=True)
++    resp = await client.get(
++        f"/api/workspaces/{files_ws['ws_id']}/changes/{files_ws['change_id']}/files?sync=1",
++        headers=auth_headers,
++    )
++    assert resp.status_code == 200, resp.text
++    body = resp.json()
++    assert any(it["path"].endswith(".md") for it in body["items"])
++    assert body["sync_result"]["triggered"] is True
++    assert body["sync_result"]["ok"] is False
++    assert body["sync_result"]["reason"] == "cli_failed"
++    assert "HTTP 500" in body["sync_result"]["stderr_tail"]
++
++
++async def test_daemon_no_workspace_root_result_propagates(
++    client, files_ws: dict, auth_headers: dict[str, str], monkeypatch: pytest.MonkeyPatch
++) -> None:
++    """daemon 未认领工作区回执（no_workspace_root）透传：与 CLI 失败可区分，供前端差异化提示。"""
++    hub = FakeHub()
++    hub.result = {"ok": False, "reason": "no_workspace_root"}
++    _install_sync_mocks(monkeypatch, hub, binding=FakeBinding(uuid.uuid4()), daemon_online=True)
++    resp = await client.get(
++        f"/api/workspaces/{files_ws['ws_id']}/changes/{files_ws['change_id']}/files?sync=1",
++        headers=auth_headers,
++    )
++    assert resp.status_code == 200, resp.text
++    assert resp.json()["sync_result"]["ok"] is False
++    assert resp.json()["sync_result"]["reason"] == "no_workspace_root"
++
++
++async def test_daemon_debounce_skip_maps_to_info(
++    client, files_ws: dict, auth_headers: dict[str, str], monkeypatch: pytest.MonkeyPatch
++) -> None:
++    """daemon 防抖跳过（15s 内已同步过）：ok=None / reason=skipped_debounced，不算失败。"""
++    hub = FakeHub()
++    hub.result = {"skipped": "debounced", "last_sync_at": 1760600000000}
++    _install_sync_mocks(monkeypatch, hub, binding=FakeBinding(uuid.uuid4()), daemon_online=True)
++    resp = await client.get(
++        f"/api/workspaces/{files_ws['ws_id']}/changes/{files_ws['change_id']}/files?sync=1",
++        headers=auth_headers,
++    )
++    assert resp.status_code == 200, resp.text
++    assert resp.json()["sync_result"] == {
++        "triggered": True,
++        "ok": None,
++        "reason": "skipped_debounced",
++        "stderr_tail": None,
++    }
+diff --git a/backend/openapi.json b/backend/openapi.json
+index 48e9230f7..e5266bd7d 100644
+--- a/backend/openapi.json
++++ b/backend/openapi.json
+@@ -4948,7 +4948,7 @@
+           "change"
+         ],
+         "summary": "List Change Files",
+-        "description": "变更文件树清单（2026-07-02-change-detail-file-tree-editor）。\n\n2026-10-14-files-refresh-explicit-sync：触发面收窄——默认（sync=false）纯读，\n直接返回平台镜像数据、不碰 daemon 通道（悬浮面板轮询/初始加载零同步开销）；\n仅显式 sync=true（前端「刷新」按钮点击、错误重试）先经绑定 daemon 触发一次\n此变更的定向上行同步（在线才触发，失败静默降级——``_sync_change_via_daemon``\n任何情况不抛），使主动刷新尽量拿到 daemon 本机最新文档。\n``service.list_files`` 本体纯读语义零改动。",
++        "description": "变更文件树清单（2026-07-02-change-detail-file-tree-editor）。\n\n2026-10-14-files-refresh-explicit-sync：触发面收窄——默认（sync=false）纯读，\n直接返回平台镜像数据、不碰 daemon 通道（悬浮面板轮询/初始加载零同步开销）；\n仅显式 sync=true（前端「刷新」按钮点击、错误重试）先经绑定 daemon 触发一次\n此变更的定向上行同步（在线才触发，失败降级不抛——``_sync_change_via_daemon``\n任何情况不抛），使主动刷新尽量拿到 daemon 本机最新文档。\n2026-10-16-change-files-sync-result：sync=true 时降级不再无声——响应带\n``sync_result`` 回执（触发状态 / 成败 / 机读原因 / CLI 失败尾段），前端据此\n在同步未完成时提示原因；默认纯读回执恒 None。``service.list_files`` 本体\n纯读语义零改动。",
+         "operationId": "list_change_files_api_workspaces__workspace_id__changes__change_id__files_get",
+         "parameters": [
+           {
+@@ -18726,7 +18726,7 @@
+           "session-attachments"
+         ],
+         "summary": "Upload Attachment",
+-        "description": "上传会话附件（multipart：file + kind 表单；FR-1/FR-3/FR-8）。\n\n成功即建草稿行（session_id NULL）；限制校验（大小/白名单/PIL magic）\n在 service 抛 413/415（AppError 惯例同 file 模块）。",
++        "description": "上传会话附件（multipart：file + kind 表单；FR-1/FR-3/FR-8）。\n\n成功即建草稿行（session_id NULL）；限制校验（大小/白名单/PIL magic）\n在 service 抛 413/415（AppError 惯例同 file 模块）。\n\n2026-10-16-backend-mem-polling task-05 / D-004@v1：读内容**前**先查\n``UploadFile.size``（Starlette spool 时已知）超限直接 413——超限文件\n不再整读进内存（上限值 import 自 service 单一源，不双写）。",
+         "operationId": "upload_attachment_api_daemon_session_attachments_post",
+         "requestBody": {
+           "content": {
+@@ -41113,6 +41113,16 @@
+             },
+             "type": "array",
+             "title": "Items"
++          },
++          "sync_result": {
++            "anyOf": [
++              {
++                "$ref": "#/components/schemas/ChangeFileSyncResult"
++              },
++              {
++                "type": "null"
++              }
++            ]
+           }
+         },
+         "type": "object",
+@@ -41122,6 +41132,53 @@
+         ],
+         "title": "ChangeFileList"
+       },
++      "ChangeFileSyncResult": {
++        "properties": {
++          "triggered": {
++            "type": "boolean",
++            "title": "Triggered"
++          },
++          "ok": {
++            "anyOf": [
++              {
++                "type": "boolean"
++              },
++              {
++                "type": "null"
++              }
++            ],
++            "title": "Ok"
++          },
++          "reason": {
++            "anyOf": [
++              {
++                "type": "string"
++              },
++              {
++                "type": "null"
++              }
++            ],
++            "title": "Reason"
++          },
++          "stderr_tail": {
++            "anyOf": [
++              {
++                "type": "string"
++              },
++              {
++                "type": "null"
++              }
++            ],
++            "title": "Stderr Tail"
++          }
++        },
++        "type": "object",
++        "required": [
++          "triggered"
++        ],
++        "title": "ChangeFileSyncResult",
++        "description": "GET files?sync=1 显式同步执行回执（2026-10-16-change-files-sync-result）。\n\n``triggered=False``：RPC 未发出，``reason`` ∈ no_binding / daemon_offline；\n``ok`` 三态——True=daemon 执行成功；False=执行失败或超时（``reason`` 机读短码：\nrpc_timeout / rpc_remote_error / runtime_offline / exception / cli_failed /\nno_workspace_root 等，``stderr_tail`` 为 CLI 失败输出尾段）；None=已触发但\ndaemon 防抖跳过（``skipped_in_flight`` / ``skipped_debounced``）或未触发。\n默认纯读（不带 sync）本对象为 None。"
++      },
+       "ChangeFileWriteRequest": {
+         "properties": {
+           "path": {
+diff --git a/docs/sillyspec/verify-probe7-matrix-prefill-four-defects.md b/docs/sillyspec/finished/verify-probe7-matrix-prefill-four-defects.md
+similarity index 89%
+rename from docs/sillyspec/verify-probe7-matrix-prefill-four-defects.md
+rename to docs/sillyspec/finished/verify-probe7-matrix-prefill-four-defects.md
+index 06983a39f..416705186 100644
+--- a/docs/sillyspec/verify-probe7-matrix-prefill-four-defects.md
++++ b/docs/sillyspec/finished/verify-probe7-matrix-prefill-four-defects.md
+@@ -1,7 +1,7 @@
+ # verify 探针 7「验收×测试覆盖矩阵」预填噪音四缺陷（假 covered/目录级候选灌水/锚点空心/真 covered 误标 partial）
+ 
+ > 记录时间：2026-10-16 · 来源变更：2026-10-16-backend-mem-polling verify 收口实测
+-> 状态：活跃坑（人工三轮复核改写完成验收，预填净成本为负，待工具修复）
++> 状态：已修复并移入 finished/（sillyspec@2026-10-16-probe7-prefill-noise-fix，实现 5ca368a0 / 归档 d118e023，2026-10-16）——四缺陷逐条落地：①部署/文档类条目直判 non-testable + 全条目命中卡不注入 FR 候选池；②covered 仅测试名级命中（锚点=测试函数名行），正文命中封顶 partial；③同波次新增/修改测试零命中 → covered+待人工复核；④候选>5 交人工。回归断言锁在 sillyspec 仓 test/probe7-prefill-noise.test.mjs（6 用例）+ 既有 probe7 测试面改写
+ 
+ ## 背景
+ 
+diff --git a/frontend/src/components/__tests__/change-file-tree-sync-feedback.test.tsx b/frontend/src/components/__tests__/change-file-tree-sync-feedback.test.tsx
+new file mode 100644
+index 000000000..acb67b9cb
+--- /dev/null
++++ b/frontend/src/components/__tests__/change-file-tree-sync-feedback.test.tsx
+@@ -0,0 +1,171 @@
++import { describe, it, expect, vi, beforeAll, afterEach } from "vitest";
++
++// 只 mock 取数 API；change-file-sync 提示文案纯函数保持真实实现（本文件断言
++// 展示结果 = 组件接线 + 真实文案映射的合成行为，2026-10-16-change-files-sync-result）。
++vi.mock("@/lib/change-files", () => ({
++  buildChangeFileTree: (items: { path: string; name: string; is_text: boolean }[]) =>
++    items.map((i) => ({ name: i.name, path: i.path, children: [], doc: i })),
++  listChangeFiles: vi.fn(),
++  getChangeFileContent: vi.fn(),
++  saveChangeFileContent: vi.fn(),
++  listPendingChangeFiles: vi.fn(),
++  fetchChangeFileRaw: vi.fn(),
++  changeFileCnName: () => null,
++}));
++
++// FilePreviewModal 浅 stub：本文件只验提示条接线，防真实弹窗树拖累 jsdom。
++vi.mock("@/components/files/file-preview-modal", () => ({
++  FilePreviewModal: () => null,
++}));
++
++// 变更名自动链接引入 useQuery（见 change-file-tree.test.tsx 同款说明），名单查询空表即可。
++vi.mock("@/lib/changes", () => ({
++  listChanges: vi.fn().mockResolvedValue({ items: [] }),
++}));
++
++import { render, fireEvent, screen, waitFor } from "@testing-library/react";
++import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
++import type { ReactElement } from "react";
++import { ChangeFileTree } from "@/components/change-file-tree";
++import { listChangeFiles, listPendingChangeFiles } from "@/lib/change-files";
++import type { ChangeFileSyncResult } from "@/lib/change-file-sync";
++
++const mockedList = vi.mocked(listChangeFiles);
++const mockedPending = vi.mocked(listPendingChangeFiles);
++
++const BASE_ITEMS = [
++  { path: "proposal.md", name: "proposal.md", size: 10, last_modified_at: null, is_text: true },
++];
++
++function fileResp(syncResult?: ChangeFileSyncResult | null) {
++  return {
++    change_id: "c1",
++    items: BASE_ITEMS,
++    sync_result: syncResult ?? null,
++  };
++}
++
++/** 初始纯读返回无回执；显式刷新（sync=true）返回给定回执——区分调用形态。 */
++function mockListWithSync(syncResult: ChangeFileSyncResult) {
++  mockedList.mockImplementation((_ws, _chg, options) =>
++    Promise.resolve(options?.sync ? fileResp(syncResult) : fileResp()),
++  );
++}
++
++function renderTree(ui: ReactElement) {
++  const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
++  return render(<QueryClientProvider client={qc}>{ui}</QueryClientProvider>);
++}
++
++async function renderAndSettle() {
++  renderTree(<ChangeFileTree workspaceId="ws" changeId="c1" />);
++  await waitFor(() => expect(screen.getByText("proposal.md")).toBeInTheDocument());
++}
++
++function clickRefresh() {
++  fireEvent.click(screen.getByText("刷新"));
++}
++
++beforeAll(() => {
++  // jsdom 未实现 blob URL（对齐既有测试 beforeAll 模式）
++  Object.defineProperty(URL, "createObjectURL", { value: vi.fn(() => "blob:mock"), writable: true });
++  Object.defineProperty(URL, "revokeObjectURL", { value: vi.fn(), writable: true });
++});
++
++afterEach(() => {
++  vi.clearAllMocks();
++});
++
++describe("ChangeFileTree 刷新同步回执提示（2026-10-16-change-files-sync-result）", () => {
++  it("纯读初始加载：不带 sync 也无提示条", async () => {
++    mockedList.mockResolvedValue(fileResp());
++    mockedPending.mockResolvedValue({ items: [] });
++
++    await renderAndSettle();
++
++    expect(mockedList.mock.calls[0]?.[2]).toEqual({ sync: undefined });
++    expect(screen.queryByTestId("change-files-sync-warning")).not.toBeInTheDocument();
++  });
++
++  it("刷新成功（ok=true）：文件树更新且不出现提示条", async () => {
++    mockedPending.mockResolvedValue({ items: [] });
++    mockListWithSync({ triggered: true, ok: true, reason: null, stderr_tail: null });
++
++    await renderAndSettle();
++    clickRefresh();
++
++    await waitFor(() => expect(mockedList.mock.calls.length).toBeGreaterThan(1));
++    expect(mockedList.mock.calls.at(-1)?.[2]).toEqual({ sync: true });
++    await waitFor(() => expect(screen.queryByTestId("change-files-sync-warning")).not.toBeInTheDocument());
++  });
++
++  it("刷新 CLI 失败（cli_failed + stderr 尾段）：提示条带中文原因与尾段，文件树照常展示", async () => {
++    mockedPending.mockResolvedValue({ items: [] });
++    mockListWithSync({
++      triggered: true,
++      ok: false,
++      reason: "cli_failed",
++      stderr_tail: "exit 1 sync 请求失败 HTTP 500（服务器内部错误）",
++    });
++
++    await renderAndSettle();
++    clickRefresh();
++
++    const warning = await screen.findByTestId("change-files-sync-warning");
++    expect(warning).toHaveTextContent("同步未完成");
++    expect(warning).toHaveTextContent("CLI");
++    expect(warning).toHaveTextContent("HTTP 500");
++    // 非阻塞：文件树仍展示
++    expect(screen.getByText("proposal.md")).toBeInTheDocument();
++  });
++
++  it("刷新 RPC 超时（rpc_timeout）：提示条说明超时原因", async () => {
++    mockedPending.mockResolvedValue({ items: [] });
++    mockListWithSync({ triggered: true, ok: false, reason: "rpc_timeout", stderr_tail: null });
++
++    await renderAndSettle();
++    clickRefresh();
++
++    const warning = await screen.findByTestId("change-files-sync-warning");
++    expect(warning).toHaveTextContent("同步未完成");
++    expect(warning).toHaveTextContent("超时");
++  });
++
++  it("未绑定 daemon（triggered=false / no_binding）：提示条为「同步未执行」", async () => {
++    mockedPending.mockResolvedValue({ items: [] });
++    mockListWithSync({ triggered: false, ok: null, reason: "no_binding", stderr_tail: null });
++
++    await renderAndSettle();
++    clickRefresh();
++
++    const warning = await screen.findByTestId("change-files-sync-warning");
++    expect(warning).toHaveTextContent("同步未执行");
++    expect(warning).toHaveTextContent("未绑定");
++  });
++
++  it("先失败后成功：再次刷新成功清除提示条", async () => {
++    mockedPending.mockResolvedValue({ items: [] });
++    let syncAttempt = 0;
++    mockedList.mockImplementation(() => {
++      if ((mockedList.mock.calls.at(-1)?.[2])?.sync) {
++        syncAttempt += 1;
++        return Promise.resolve(
++          syncAttempt === 1
++            ? fileResp({ triggered: true, ok: false, reason: "rpc_timeout", stderr_tail: null })
++            : fileResp({ triggered: true, ok: true, reason: null, stderr_tail: null }),
++        );
++      }
++      return Promise.resolve(fileResp());
++    });
++
++    await renderAndSettle();
++
++    clickRefresh();
++    await screen.findByTestId("change-files-sync-warning");
++
++    clickRefresh();
++    await waitFor(() =>
++      expect(screen.queryByTestId("change-files-sync-warning")).not.toBeInTheDocument(),
++    );
++  });
++});
+diff --git a/frontend/src/components/change-file-tree.tsx b/frontend/src/components/change-file-tree.tsx
+index 74d327ad4..1eb69b9ba 100644
+--- a/frontend/src/components/change-file-tree.tsx
++++ b/frontend/src/components/change-file-tree.tsx
+@@ -38,6 +38,9 @@ import { ApiError } from "@/lib/api";
+ // 变更名自动链接（2026-08-31 变更关联审计 P3）：变更文档正文提名的变更名
+ // 渲染为详情页直链（含归档变更；名单 staleTime 5 分钟，见 lib/change-autolink）
+ import { remarkChangeLink, useChangeNameIndex } from "@/lib/change-autolink";
++// 同步回执 → 提示文案（2026-10-16-change-files-sync-result）：独立零依赖模块，
++// 组件只做 state 接线（详见 lib/change-file-sync.ts 顶部注释）
++import { changeFileSyncWarningText } from "@/lib/change-file-sync";
+ import { formatFileSize } from "@/lib/file/utils";
+ import {
+   buildChangeFileTree,
+@@ -422,6 +425,9 @@ export function ChangeFileTree({
+   const [previewTarget, setPreviewTarget] = useState<FilePreviewTarget | null>(null);
+   const [previewOpen, setPreviewOpen] = useState(false);
+   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
++  // 显式刷新（sync=1）同步未完成时的提示条文案（2026-10-16-change-files-sync-result）：
++  // 仅刷新点击回执驱动；成功/防抖跳过置 null（清除），纯读刷新不动它。
++  const [syncWarning, setSyncWarning] = useState<string | null>(null);
+ 
+   // 变更名自动链接（2026-08-31 变更关联审计 P3）：名单为空（查询未就绪/无变更）
+   // 时不挂插件，渲染行为与改造前逐字节一致
+@@ -438,13 +444,18 @@ export function ChangeFileTree({
+ 
+   const pendingPaths = new Set(pending.map((p) => p.path));
+ 
+-  // sync（2026-10-14-files-refresh-explicit-sync）：仅用户主动点击（「刷新」按钮/
+-  // 错误重试）传 true——触发绑定 daemon 定向上行同步（backend 等待预算 3s）；初始
+-  // 挂载、autoRefreshMs 轮询、保存后刷新不传（纯读，直接秒回平台镜像数据）。
++  // sync（2026-10-14-files-refresh-explicit-sync；2026-10-16-change-files-sync-result
++  // 修订）：仅用户主动点击（「刷新」按钮/错误重试）传 true——触发绑定 daemon 定向
++  // 上行同步（backend 等待预算 15s）；初始挂载、autoRefreshMs 轮询、保存后刷新不传
++  // （纯读，直接秒回平台镜像数据）。同步回执翻成提示条文案：未完成/未执行时展示
++  // 原因（不再无声），成功/防抖跳过/纯读清空或保持 null。
+   const refreshTree = useCallback(async (sync?: boolean) => {
+     try {
+       const resp = await listChangeFiles(workspaceId, changeId, { sync });
+       setTree(buildChangeFileTree(resp.items));
++      if (sync) {
++        setSyncWarning(changeFileSyncWarningText(resp.sync_result ?? null));
++      }
+     } catch (err) {
+       setError(err instanceof ApiError ? err.message : "加载文件树失败");
+     }
+@@ -617,6 +628,18 @@ export function ChangeFileTree({
+         </div>
+       )}
+ 
++      {/* 显式刷新同步未完成提示（2026-10-16-change-files-sync-result）：
++          刷新点击后带 sync_result 回执时展示/清除，非阻塞（文件树照常显示）。 */}
++      {syncWarning && (
++        <div
++          data-testid="change-files-sync-warning"
++          role="status"
++          className="mx-3 mt-2 rounded border border-amber-200 bg-amber-50 px-2.5 py-1.5 text-[11px] text-amber-700"
++        >
++          ⚠️ {syncWarning}
++        </div>
++      )}
++
+       {error && (
+         <div className="m-3">
+           <ErrorBanner message={error} onRetry={() => void refreshTree(true)} />
+diff --git a/frontend/src/lib/__tests__/change-file-sync.test.ts b/frontend/src/lib/__tests__/change-file-sync.test.ts
+new file mode 100644
+index 000000000..625b2c5b1
+--- /dev/null
++++ b/frontend/src/lib/__tests__/change-file-sync.test.ts
+@@ -0,0 +1,81 @@
++import { describe, expect, it } from "vitest";
++
++import { changeFileSyncWarningText, type ChangeFileSyncResult } from "@/lib/change-file-sync";
++
++function sr(partial: Partial<ChangeFileSyncResult>): ChangeFileSyncResult {
++  return { triggered: true, ok: true, reason: null, stderr_tail: null, ...partial };
++}
++
++describe("changeFileSyncWarningText（2026-10-16-change-files-sync-result）", () => {
++  it("回执 null（纯读/旧后端）不产出提示", () => {
++    expect(changeFileSyncWarningText(null)).toBeNull();
++  });
++
++  it("执行成功（ok=true）不产出提示", () => {
++    expect(changeFileSyncWarningText(sr({ ok: true }))).toBeNull();
++  });
++
++  it("防抖跳过（已触发且 ok=null）不产出提示——刚同步过/正在同步，非失败", () => {
++    expect(
++      changeFileSyncWarningText(sr({ ok: null, reason: "skipped_debounced" })),
++    ).toBeNull();
++    expect(changeFileSyncWarningText(sr({ ok: null, reason: "skipped_in_flight" }))).toBeNull();
++  });
++
++  it("未绑定（triggered=false）：提示「同步未执行」并带中文原因", () => {
++    const text = changeFileSyncWarningText(
++      sr({ triggered: false, ok: null, reason: "no_binding" }),
++    );
++    expect(text).toContain("同步未执行");
++    expect(text).toContain("未绑定");
++    expect(text).toContain("平台镜像数据");
++  });
++
++  it("daemon 离线（triggered=false）：提示「同步未执行」并带中文原因", () => {
++    const text = changeFileSyncWarningText(
++      sr({ triggered: false, ok: null, reason: "daemon_offline" }),
++    );
++    expect(text).toContain("同步未执行");
++    expect(text).toContain("离线");
++  });
++
++  it("CLI 失败（ok=false）：提示「同步未完成」，中文原因 + stderr 尾段齐带上", () => {
++    const text = changeFileSyncWarningText(
++      sr({ ok: false, reason: "cli_failed", stderr_tail: "exit 1 HTTP 500（服务器内部错误）" }),
++    );
++    expect(text).toContain("同步未完成");
++    expect(text).toContain("CLI");
++    expect(text).toContain("HTTP 500");
++    expect(text).toContain("可稍后重试");
++  });
++
++  it("RPC 超时（ok=false）：映射中文「超时」", () => {
++    const text = changeFileSyncWarningText(sr({ ok: false, reason: "rpc_timeout" }));
++    expect(text).toContain("同步未完成");
++    expect(text).toContain("超时");
++  });
++
++  it("daemon 未认领工作区 / 拒绝执行 / 连接中断：各映射独立中文原因", () => {
++    expect(changeFileSyncWarningText(sr({ ok: false, reason: "no_workspace_root" }))).toContain(
++      "尚未认领",
++    );
++    expect(changeFileSyncWarningText(sr({ ok: false, reason: "rpc_remote_error" }))).toContain(
++      "拒绝执行",
++    );
++    expect(changeFileSyncWarningText(sr({ ok: false, reason: "runtime_offline" }))).toContain(
++      "连接中断",
++    );
++  });
++
++  it("未知 reason 原样透出（宁多勿吞），不产出「未知原因」占位", () => {
++    const text = changeFileSyncWarningText(sr({ ok: false, reason: "weird_new_reason" }));
++    expect(text).toContain("weird_new_reason");
++    expect(text).not.toContain("未知原因");
++  });
++
++  it("reason 缺失（异常兜底）回落「未知原因」，仍产出提示", () => {
++    const text = changeFileSyncWarningText(sr({ ok: false, reason: null }));
++    expect(text).toContain("同步未完成");
++    expect(text).toContain("未知原因");
++  });
++});
+diff --git a/frontend/src/lib/api-types.ts b/frontend/src/lib/api-types.ts
+index 92be21dd9..8c2b70a43 100644
+--- a/frontend/src/lib/api-types.ts
++++ b/frontend/src/lib/api-types.ts
+@@ -1959,9 +1959,12 @@ export interface paths {
+          *     2026-10-14-files-refresh-explicit-sync：触发面收窄——默认（sync=false）纯读，
+          *     直接返回平台镜像数据、不碰 daemon 通道（悬浮面板轮询/初始加载零同步开销）；
+          *     仅显式 sync=true（前端「刷新」按钮点击、错误重试）先经绑定 daemon 触发一次
+-         *     此变更的定向上行同步（在线才触发，失败静默降级——``_sync_change_via_daemon``
++         *     此变更的定向上行同步（在线才触发，失败降级不抛——``_sync_change_via_daemon``
+          *     任何情况不抛），使主动刷新尽量拿到 daemon 本机最新文档。
+-         *     ``service.list_files`` 本体纯读语义零改动。
++         *     2026-10-16-change-files-sync-result：sync=true 时降级不再无声——响应带
++         *     ``sync_result`` 回执（触发状态 / 成败 / 机读原因 / CLI 失败尾段），前端据此
++         *     在同步未完成时提示原因；默认纯读回执恒 None。``service.list_files`` 本体
++         *     纯读语义零改动。
+          */
+         get: operations["list_change_files_api_workspaces__workspace_id__changes__change_id__files_get"];
+         put?: never;
+@@ -7361,6 +7364,10 @@ export interface paths {
+          *
+          *     成功即建草稿行（session_id NULL）；限制校验（大小/白名单/PIL magic）
+          *     在 service 抛 413/415（AppError 惯例同 file 模块）。
++         *
++         *     2026-10-16-backend-mem-polling task-05 / D-004@v1：读内容**前**先查
++         *     ``UploadFile.size``（Starlette spool 时已知）超限直接 413——超限文件
++         *     不再整读进内存（上限值 import 自 service 单一源，不双写）。
+          */
+         post: operations["upload_attachment_api_daemon_session_attachments_post"];
+         delete?: never;
+@@ -14365,6 +14372,28 @@ export interface components {
+             change_id: string;
+             /** Items */
+             items: components["schemas"]["ChangeFileEntry"][];
++            sync_result?: components["schemas"]["ChangeFileSyncResult"] | null;
++        };
++        /**
++         * ChangeFileSyncResult
++         * @description GET files?sync=1 显式同步执行回执（2026-10-16-change-files-sync-result）。
++         *
++         *     ``triggered=False``：RPC 未发出，``reason`` ∈ no_binding / daemon_offline；
++         *     ``ok`` 三态——True=daemon 执行成功；False=执行失败或超时（``reason`` 机读短码：
++         *     rpc_timeout / rpc_remote_error / runtime_offline / exception / cli_failed /
++         *     no_workspace_root 等，``stderr_tail`` 为 CLI 失败输出尾段）；None=已触发但
++         *     daemon 防抖跳过（``skipped_in_flight`` / ``skipped_debounced``）或未触发。
++         *     默认纯读（不带 sync）本对象为 None。
++         */
++        ChangeFileSyncResult: {
++            /** Triggered */
++            triggered: boolean;
++            /** Ok */
++            ok?: boolean | null;
++            /** Reason */
++            reason?: string | null;
++            /** Stderr Tail */
++            stderr_tail?: string | null;
+         };
+         /** ChangeFileWriteRequest */
+         ChangeFileWriteRequest: {
+diff --git a/frontend/src/lib/change-file-sync.ts b/frontend/src/lib/change-file-sync.ts
+new file mode 100644
+index 000000000..128edcd1d
+--- /dev/null
++++ b/frontend/src/lib/change-file-sync.ts
+@@ -0,0 +1,48 @@
++// 变更文件树「刷新」同步回执 → 提示文案（2026-10-16-change-files-sync-result）。
++//
++// 独立小模块（不引 api/会话等重依赖）：`change-file-tree.tsx` 消费、单测直接跑
++// 真实函数。类型对齐 backend change/schema.py ChangeFileSyncResult——后端在
++// sync=1 时随 GET files 响应带回同步执行回执（triggered/ok/reason/stderr_tail）。
++
++export type ChangeFileSyncResult = {
++  /** RPC 是否已发出（false = 未绑定 / daemon 离线，等效未执行） */
++  triggered: boolean;
++  /** true=daemon 执行成功；false=执行失败或超时；null=已触发但防抖跳过或未触发 */
++  ok: boolean | null;
++  /** 机读原因短码（no_binding / rpc_timeout / cli_failed / skipped_debounced / ...） */
++  reason: string | null;
++  /** CLI 失败输出尾段（daemon 已截短，后端兜底截断） */
++  stderr_tail: string | null;
++};
++
++/** 机读原因 → 中文标注；未收录的新 reason 原样透出（宁多勿吞）。 */
++const SYNC_REASON_CN: Record<string, string> = {
++  no_binding: "当前账号未绑定本机 daemon",
++  daemon_offline: "绑定的 daemon 离线",
++  rpc_timeout: "daemon 响应超时",
++  rpc_remote_error: "daemon 拒绝执行（可能版本过旧）",
++  runtime_offline: "daemon 连接中断",
++  cli_failed: "本机 sillyspec CLI 执行失败",
++  no_workspace_root: "daemon 尚未认领该工作区目录",
++  exception: "同步链路异常",
++};
++
++/**
++ * 同步回执 → 警示文案；无需提示返回 null。
++ *
++ * 不提示的三种情形：纯读/旧后端（回执 null）、执行成功（ok=true）、防抖跳过
++ * （已触发且 ok=null——刚同步过或正在同步，数据新鲜度足够）。
++ * 提示两档：「同步未执行」（triggered=false，未绑定/离线）；「同步未完成」
++ * （ok=false，含 CLI 失败尾段）。
++ */
++export function changeFileSyncWarningText(sr: ChangeFileSyncResult | null): string | null {
++  if (!sr) return null;
++  if (sr.ok === true) return null;
++  if (sr.ok === null && sr.triggered) return null; // skipped_in_flight / skipped_debounced
++  const label = (sr.reason && SYNC_REASON_CN[sr.reason]) || sr.reason || "未知原因";
++  if (sr.ok === false) {
++    const tail = sr.stderr_tail ? `：${sr.stderr_tail}` : "";
++    return `同步未完成：${label}${tail}（文件树为平台镜像数据，可稍后重试）`;
++  }
++  return `同步未执行：${label}（文件树为平台镜像数据）`;
++}
+diff --git a/frontend/src/lib/change-files.ts b/frontend/src/lib/change-files.ts
+index 766b55e18..9593b1ee7 100644
+--- a/frontend/src/lib/change-files.ts
++++ b/frontend/src/lib/change-files.ts
+@@ -1,9 +1,12 @@
+ import { ApiError, apiFetch, safeUUID } from "./api";
+ import { ensureFreshAccessToken } from "@/lib/token-refresh";
+ import { useSession } from "@/stores/session";
++import type { ChangeFileSyncResult } from "./change-file-sync";
+ 
+ // ── Types（对齐 backend change/schema.py file tree DTOs）──────────────
+ 
++export type { ChangeFileSyncResult };
++
+ export type ChangeFileEntry = {
+   path: string; // 相对变更目录 posix，如 "tasks/task-01.md"
+   name: string;
+@@ -15,6 +18,9 @@ export type ChangeFileEntry = {
+ export type ChangeFileList = {
+   change_id: string;
+   items: ChangeFileEntry[];
++  // 2026-10-16-change-files-sync-result：仅 sync=true 时后端带回同步执行回执，
++  // 纯读（初始加载/轮询）恒 null；消费方 change-file-tree 翻成中文提示条。
++  sync_result?: ChangeFileSyncResult | null;
+ };
+ 
+ export type ChangeFileContent = {
+@@ -52,10 +58,11 @@ export type ChangeFileTreeNode = {
+ 
+ // ── API 封装 ──────────────────────────────────────────────────────────
+ 
+-// sync=true（2026-10-14-files-refresh-explicit-sync）：仅「刷新」按钮等用户主动
+-// 点击使用——触发绑定 daemon 定向上行同步后再返回（backend 等待预算 3s，超时
+-// 降级返回现有镜像数据）；默认不传=纯读，直接返回平台镜像数据（悬浮面板轮询/
+-// 初始加载零同步开销）。
++// sync=true（2026-10-14-files-refresh-explicit-sync；2026-10-16-change-files-
++// sync-result 修订）：仅「刷新」按钮等用户主动点击使用——触发绑定 daemon
++// 定向上行同步后再返回（backend 等待预算 15s——实测同步耗时 5.5~13.5s，原 3s
++// 恒超时；超时降级返回现有镜像数据并带 sync_result 回执明示原因）；默认不传=
++// 纯读，直接返回平台镜像数据（悬浮面板轮询/初始加载零同步开销）。
+ export function listChangeFiles(
+   workspaceId: string,
+   changeId: string,
+diff --git a/sillyhub-daemon/src/api-types.ts b/sillyhub-daemon/src/api-types.ts
+index 92be21dd9..8c2b70a43 100644
+--- a/sillyhub-daemon/src/api-types.ts
++++ b/sillyhub-daemon/src/api-types.ts
+@@ -1959,9 +1959,12 @@ export interface paths {
+          *     2026-10-14-files-refresh-explicit-sync：触发面收窄——默认（sync=false）纯读，
+          *     直接返回平台镜像数据、不碰 daemon 通道（悬浮面板轮询/初始加载零同步开销）；
+          *     仅显式 sync=true（前端「刷新」按钮点击、错误重试）先经绑定 daemon 触发一次
+-         *     此变更的定向上行同步（在线才触发，失败静默降级——``_sync_change_via_daemon``
++         *     此变更的定向上行同步（在线才触发，失败降级不抛——``_sync_change_via_daemon``
+          *     任何情况不抛），使主动刷新尽量拿到 daemon 本机最新文档。
+-         *     ``service.list_files`` 本体纯读语义零改动。
++         *     2026-10-16-change-files-sync-result：sync=true 时降级不再无声——响应带
++         *     ``sync_result`` 回执（触发状态 / 成败 / 机读原因 / CLI 失败尾段），前端据此
++         *     在同步未完成时提示原因；默认纯读回执恒 None。``service.list_files`` 本体
++         *     纯读语义零改动。
+          */
+         get: operations["list_change_files_api_workspaces__workspace_id__changes__change_id__files_get"];
+         put?: never;
+@@ -7361,6 +7364,10 @@ export interface paths {
+          *
+          *     成功即建草稿行（session_id NULL）；限制校验（大小/白名单/PIL magic）
+          *     在 service 抛 413/415（AppError 惯例同 file 模块）。
++         *
++         *     2026-10-16-backend-mem-polling task-05 / D-004@v1：读内容**前**先查
++         *     ``UploadFile.size``（Starlette spool 时已知）超限直接 413——超限文件
++         *     不再整读进内存（上限值 import 自 service 单一源，不双写）。
+          */
+         post: operations["upload_attachment_api_daemon_session_attachments_post"];
+         delete?: never;
+@@ -14365,6 +14372,28 @@ export interface components {
+             change_id: string;
+             /** Items */
+             items: components["schemas"]["ChangeFileEntry"][];
++            sync_result?: components["schemas"]["ChangeFileSyncResult"] | null;
++        };
++        /**
++         * ChangeFileSyncResult
++         * @description GET files?sync=1 显式同步执行回执（2026-10-16-change-files-sync-result）。
++         *
++         *     ``triggered=False``：RPC 未发出，``reason`` ∈ no_binding / daemon_offline；
++         *     ``ok`` 三态——True=daemon 执行成功；False=执行失败或超时（``reason`` 机读短码：
++         *     rpc_timeout / rpc_remote_error / runtime_offline / exception / cli_failed /
++         *     no_workspace_root 等，``stderr_tail`` 为 CLI 失败输出尾段）；None=已触发但
++         *     daemon 防抖跳过（``skipped_in_flight`` / ``skipped_debounced``）或未触发。
++         *     默认纯读（不带 sync）本对象为 None。
++         */
++        ChangeFileSyncResult: {
++            /** Triggered */
++            triggered: boolean;
++            /** Ok */
++            ok?: boolean | null;
++            /** Reason */
++            reason?: string | null;
++            /** Stderr Tail */
++            stderr_tail?: string | null;
+         };
+         /** ChangeFileWriteRequest */
+         ChangeFileWriteRequest: {

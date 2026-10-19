@@ -57,6 +57,7 @@ import {
   deleteChange,
   getChange,
   getChangeTimeline,
+  renameChangeTitle,
   submitStageReview,
   type ChangeRead,
 } from "@/lib/changes";
@@ -146,6 +147,44 @@ function stageSpans(rows: UnifiedRow[]): Array<{ label: string; value: string }>
     };
   });
   return items.length > 0 ? items : [{ label: "阶段跨度", value: "暂无带时间戳的记录" }];
+}
+
+/**
+ * 返回列表入口（2026-10-16-change-center-back-keeps-list-state）——breadcrumb「变更列表」
+ * 与错误态「← 变更列表」共用。历史可后退时点击走 router.back()（回离开前带 query 的列表
+ * URL，列表页从 URL 恢复 tab/页码，见列表页同变更的 URL 快照）；新标签深链（length<=1）
+ * 保持 Link 默认导航到默认列表。href 始终保留（新标签打开/收藏语义不变）；SSR 渲染输出
+ * 与客户端一致（判定只影响 onClick，不进 DOM），无 hydration mismatch。
+ */
+function BackToListLink({
+  workspaceId,
+  className,
+  children,
+}: {
+  workspaceId: string;
+  className?: string;
+  children: React.ReactNode;
+}) {
+  const router = useRouter();
+  // Next 14.2.5 history.state 无栈深标记（idx 为 Next 15+ 字段），以 length 判定：
+  // 从列表/其他页进入必有前置条目（>1）；新标签深链 =1。已知取舍：从站外页点进来时
+  // back 回站外页（标准返回语义，内部工具罕见）。
+  const canBack = typeof window !== "undefined" && window.history.length > 1;
+  return (
+    <Link
+      href={`/workspaces/${workspaceId}/changes`}
+      prefetch={false}
+      className={className}
+      onClick={(e) => {
+        if (canBack) {
+          e.preventDefault();
+          router.back();
+        }
+      }}
+    >
+      {children}
+    </Link>
+  );
 }
 
 export default function ChangeDetailPage({ params }: Props) {
@@ -319,12 +358,12 @@ export default function ChangeDetailPage({ params }: Props) {
         <div className="rounded border border-destructive/30 bg-red-50 px-3 py-2 text-xs text-destructive">
           {loadError ?? "变更未找到"}
         </div>
-        <Link
-          href={`/workspaces/${workspaceId}/changes`}
+        <BackToListLink
+          workspaceId={workspaceId}
           className="mt-3 inline-block text-xs text-primary hover:underline"
         >
           ← 变更列表
-        </Link>
+        </BackToListLink>
       </PageContainer>
     );
   }
@@ -348,9 +387,9 @@ export default function ChangeDetailPage({ params }: Props) {
       <PageHead
         breadcrumb={
           <span className="flex items-center gap-1.5">
-            <Link href={`/workspaces/${workspaceId}/changes`} className="hover:underline">
+            <BackToListLink workspaceId={workspaceId} className="hover:underline">
               变更列表
-            </Link>
+            </BackToListLink>
             <span className="text-muted-foreground/60">/</span>
             <span className="text-foreground">{change.change_key}</span>
           </span>
@@ -388,6 +427,15 @@ export default function ChangeDetailPage({ params }: Props) {
         }
         actions={
           <span className="flex items-center gap-2">
+            {/* 2026-10-16-change-title-condense-backfill FR-06：改名入口与删除入口
+                同权限三元组可见（启发式少给无权者看按钮，后端 403 兜底）。 */}
+            {canDeleteChange(change, deleteAccess) ? (
+              <DetailRenameAction
+                workspaceId={workspaceId}
+                changeId={changeId}
+                currentTitle={change.title ?? change.change_key}
+              />
+            ) : null}
             {canDeleteChange(change, deleteAccess) ? (
               <DetailDeleteAction
                 workspaceId={workspaceId}
@@ -534,6 +582,114 @@ export default function ChangeDetailPage({ params }: Props) {
   );
 }
 
+/** 人工命名带宽（后端同款口径：strip 后 10-30 字必须，建议约 20，FR-05/06 单源）。 */
+const TITLE_MIN_LEN = 10;
+const TITLE_MAX_LEN = 30;
+
+/**
+ * 详情页改名动作——按钮 + 受控弹层（2026-10-16-change-title-condense-backfill
+ * FR-06，用户口径 2026-10-16：管理员/平台责任人/变更责任人可重命名 title）。
+ * 照 DetailDeleteAction 受控弹层范式；输入 strip 后 10-30 字内才启用保存，
+ * 越带禁用并实时提示字数；保存成功关弹层 + 失效详情/列表缓存（失败走 onError
+ * toast 不重开弹层，与删除动作一致）。
+ */
+function DetailRenameAction({
+  workspaceId,
+  changeId,
+  currentTitle,
+}: {
+  workspaceId: string;
+  changeId: string;
+  currentTitle: string;
+}) {
+  const queryClient = useQueryClient();
+  const notify = useNotify();
+  const [open, setOpen] = useState(false);
+  const [draft, setDraft] = useState(currentTitle);
+  const trimmed = draft.trim();
+  const inBand =
+    trimmed.length >= TITLE_MIN_LEN && trimmed.length <= TITLE_MAX_LEN;
+  const renameMutation = useMutation({
+    mutationFn: () => renameChangeTitle(workspaceId, changeId, trimmed),
+    onSuccess: async (res) => {
+      notify.success(`变更标题已更新：${res.title}`);
+      setOpen(false);
+      await queryClient.invalidateQueries({
+        queryKey: ["change", workspaceId, changeId],
+      });
+      await queryClient.invalidateQueries({
+        queryKey: ["changes", workspaceId],
+      });
+    },
+    onError: (err) => {
+      notify.error(err, "改名失败");
+    },
+  });
+  return (
+    <>
+      <Button
+        size="sm"
+        variant="outline"
+        data-testid="change-rename-entry"
+        className="text-muted-foreground"
+        onClick={() => {
+          setDraft(currentTitle);
+          setOpen(true);
+        }}
+      >
+        改名
+      </Button>
+      {open && (
+        <div
+          data-testid="change-rename-dialog"
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/30"
+        >
+          <div className="w-96 rounded-md border bg-background p-5 shadow-lg">
+            <h3 className="text-sm font-semibold">修改变更标题</h3>
+            <p className="mt-1 break-all font-mono text-xs text-muted-foreground">
+              10-30 字之内，建议 20 字左右概括变更内容
+            </p>
+            <input
+              id="change-rename-input"
+              value={draft}
+              onChange={(e) => setDraft(e.target.value)}
+              placeholder={currentTitle}
+              maxLength={80}
+              data-testid="change-rename-input"
+              className="mt-3 h-9 w-full rounded border border-input bg-background px-2.5 text-sm focus:border-ring focus:outline-none"
+            />
+            <div
+              className={`mt-1.5 text-xs ${
+                inBand ? "text-muted-foreground" : "text-destructive"
+              }`}
+              data-testid="change-rename-hint"
+            >
+              {trimmed.length} / 带宽 10-30 字
+            </div>
+            <div className="mt-4 flex justify-end gap-2">
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={() => setOpen(false)}
+              >
+                取消
+              </Button>
+              <Button
+                size="sm"
+                disabled={!inBand || renameMutation.isPending}
+                data-testid="change-rename-save"
+                onClick={() => renameMutation.mutate()}
+              >
+                保存
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
+    </>
+  );
+}
+
 /**
  * 详情页删除动作——危险按钮 + 受控弹层（PageHead actions slot 挂载；仅权限可见者挂载
  * 该子组件，未挂载即不触碰 router —— 无 app-router 上下文的环境不触发 invariant）。
@@ -558,7 +714,14 @@ function DetailDeleteAction({
     onSuccess: async () => {
       notify.success(`变更 ${changeKey} 已删除`);
       await queryClient.invalidateQueries({ queryKey: ["changes", workspaceId] });
-      router.push(`/workspaces/${workspaceId}/changes`);
+      // 2026-10-16-change-center-delete-back-keeps-state：删除后返回保来路列表状态——
+      // 可后退时 back 回带 query 的列表 URL（列表页从 URL 恢复 tab/页码，同
+      // BackToListLink 链路）；新标签深链（length<=1）兜底 push 默认列表。
+      if (typeof window !== "undefined" && window.history.length > 1) {
+        router.back();
+      } else {
+        router.push(`/workspaces/${workspaceId}/changes`);
+      }
     },
     onError: (err) => {
       notify.error(err, "删除变更失败");

@@ -1,0 +1,34 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-17-session-replay-pingpong-fix",
+  "reviewer": "subagent",
+  "verdict": "PASS",
+  "reviewedAgainst": "ec360c91bacb3ba997a8249f7c3e6d015d2f3e78",
+  "findings": [
+    {
+      "severity": "P3",
+      "title": "sessionUserKey 假差异噪音：avatar null-vs-缺失、is_platform_admin false-vs-undefined、permissions 顺序不稳会各触发一次多余回放+写盘",
+      "evidence": "filter 只滤 undefined 值，permissions 数组保序比较；由「采纳远端值后本页写盘信封与触发信封在比较字段上内容恒同→对方必静默」的不变式保证不成环，仅一次性收敛噪音。",
+      "location": "frontend/src/stores/session.ts:62-64"
+    },
+    {
+      "severity": "P3",
+      "title": "sessionUserKey 仅顶层键排序不递归嵌套对象",
+      "evidence": "当前 SessionUser 无嵌套对象无实际影响；design.md 风险节已声明升级路径，键序测试用例会先红。",
+      "location": "frontend/src/stores/session.ts:58-66"
+    },
+    {
+      "severity": "P3",
+      "title": "迟到异值旧信封仍会覆盖较新本地值（乱序场景，与修复前行为一致非本次引入）",
+      "evidence": "监听器无版本/时间戳排序；同值事件已被静默。",
+      "location": "frontend/src/stores/session.ts:137-157"
+    }
+  ],
+  "dimensionNotes": {
+    "乱序": "ok",
+    "并发": "ok",
+    "切换": "ok",
+    "作用域": "ok"
+  },
+  "reviewedAt": "2026-10-17T21:05:25+08:00"
+}

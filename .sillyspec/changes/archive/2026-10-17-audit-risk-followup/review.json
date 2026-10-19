@@ -1,0 +1,22 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-17-audit-risk-followup",
+  "reviewer": "subagent",
+  "verdict": "PASS",
+  "reviewedAgainst": "7faec5bfa12ed2e7159077f469589243fb36ee5b",
+  "findings": [
+    {
+      "severity": "P3",
+      "title": "change.patch 冻结件含 design 文件变更清单未声明的 docs 记账改动（3 处 pitfall 关闭/迁移 finished/）",
+      "evidence": "change.patch 含 docs/sillyspec/active-pitfalls.md 三条 pitfall 关闭注记与 tick-timing-squash-blindspot.md 迁移 finished/ 的 diff，而 design「文件变更清单」仅声明 10 个代码/测试文件、未列这批 docs 变更——纯交付面追溯性差异，无代码行为影响，且内容与六条 FR 无关（属搭车记账）",
+      "location": ".sillyspec/changes/2026-10-17-audit-risk-followup/change.patch:1-34"
+    }
+  ],
+  "dimensionNotes": {
+    "乱序": "ok（边界已裁决：可接受）",
+    "并发": "ok（边界已裁决：可接受）",
+    "切换": "ok（边界已裁决：可接受）",
+    "作用域": "ok（边界已裁决：可接受）"
+  },
+  "reviewedAt": "2026-10-17T07:26:18+08:00"
+}

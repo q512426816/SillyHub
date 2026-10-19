@@ -594,11 +594,12 @@ async def test_body_title_adopted_for_existing_row(client, db_session):
 
 
 async def test_long_cli_title_truncated_progress_still_ok(client, db_session):
-    """body.changes[].title 超 500 字 → 截断 500 落库、progress 上行仍 200。
+    """body.changes[].title 超 500 字 → 先提炼为短标题落库、progress 上行仍 200。
 
     body 裸 dict 无 schema 长度校验，Change.title 为 String(500)（Postgres 强制
-    列宽、SQLite 测试库不强制）——写侧统一截断防生产溢出，且截断/收养写库
-    best-effort 不阻断上行主流程。
+    列宽、SQLite 测试库不强制）——写侧先截 TITLE_MAX_LEN 再提炼（2026-10-16-
+    change-title-condense-backfill：超 30 字走 condense_title，无标点文本硬截
+    30 字加省略号），提炼/截断/收养写库 best-effort 不阻断上行主流程。
     """
     from datetime import UTC, datetime
 
@@ -641,6 +642,7 @@ async def test_long_cli_title_truncated_progress_still_ok(client, db_session):
             "approvals": [],
         },
     )
-    assert resp.status_code == 200, "超长 title 截断后落库，不得阻断 progress 上行"
+    assert resp.status_code == 200, "超长 title 提炼后落库，不得阻断 progress 上行"
     change = await _get_change(db_session, ws_id, name)
-    assert change.title == "甲" * 500, "落库前应截断到 TITLE_MAX_LEN（Change.title String(500)）"
+    # 无标点 600 字 → condense_title 无边界 → 硬截 29 字加省略号（总长恰 30）
+    assert change.title == "甲" * 29 + "…", "超长 title 应提炼为带宽内短标题"

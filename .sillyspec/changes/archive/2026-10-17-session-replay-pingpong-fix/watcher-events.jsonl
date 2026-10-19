@@ -1,0 +1,12 @@
+{"ts":1792241547975,"kind":"file","stage":"requirements","detail":"requirements.md 出现","provisional":true}
+{"ts":1792241547975,"kind":"file","stage":"design","detail":"design.md 出现","provisional":true}
+{"ts":1792241547975,"kind":"file","stage":"tasks","detail":"tasks.md 出现","provisional":true}
+{"ts":1792241762437,"kind":"file-update","stage":"design","detail":"design.md 内容变更","provisional":true}
+{"ts":1792241772755,"kind":"file-update","stage":"requirements","detail":"requirements.md 内容变更","provisional":true}
+{"ts":1792241782989,"kind":"file-update","stage":"design","detail":"design.md 内容变更","provisional":true}
+{"ts":1792241827759,"kind":"file-update","stage":"tasks","detail":"tasks.md 内容变更","provisional":true}
+{"ts":1792241827759,"kind":"task-done","stage":"tasks","detail":"checked 0→4","provisional":true}
+{"ts":1792241831481,"kind":"commit","stage":null,"detail":"ec360c91b","provisional":true}
+{"ts":1792242114548,"kind":"gate-run","stage":"verify","detail":"门实测 passed（260.4s） · 20261017130154","provisional":true}
+{"ts":1792242172011,"kind":"file-update","stage":"design","detail":"design.md 内容变更","provisional":true}
+{"ts":1792242172297,"kind":"warning","stage":null,"rule":"scope-drift","severity":"warning","detail":"声明面之外的代码文件被改：frontend/src/lib/api-types.ts——范围漂移嫌疑（并行会话改动/越界，人判）","provisional":true}

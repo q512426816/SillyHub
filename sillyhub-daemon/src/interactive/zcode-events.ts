@@ -48,6 +48,8 @@ export interface ZcodeModelCatalogEntry {
   readonly contextWindow?: number;
   readonly maxOutputTokens?: number;
   readonly reasoningLevels?: readonly string[];
+  /** 引擎自报默认档（reasoning.defaultLevel；setModel 需带 reasoningLevel 时优先取此值）。 */
+  readonly reasoningDefaultLevel?: string;
 }
 
 /** state.updated 提取出的会话快照（驱动缓存消费）。 */
@@ -257,6 +259,8 @@ function extractStateSnapshot(params: Record<string, unknown>): ZcodeStateSnapsh
         maxOutputTokens:
           typeof e.maxOutputTokens === 'number' ? e.maxOutputTokens : undefined,
         reasoningLevels: extractReasoningLevels(reasoning.levels),
+        reasoningDefaultLevel:
+          typeof reasoning.defaultLevel === 'string' ? reasoning.defaultLevel : undefined,
       });
     }
     snapshot.modelCatalog = catalog;

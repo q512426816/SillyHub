@@ -1,0 +1,607 @@
+diff --git a/backend/app/modules/change/parser.py b/backend/app/modules/change/parser.py
+index ecfbf0501..c9b24cd1d 100644
+--- a/backend/app/modules/change/parser.py
++++ b/backend/app/modules/change/parser.py
+@@ -16,6 +16,8 @@ from dataclasses import dataclass, field
+ from datetime import UTC, datetime
+ from pathlib import Path
+ 
++import yaml
++
+ from app.core.logging import get_logger
+ from app.core.spec_paths import SpecPathResolver
+ from app.modules.change.title_norm import extract_description, normalize_display_title
+@@ -86,6 +88,11 @@ class ParsedChange:
+     location: str = "active"
+     path: str = ""
+     change_type: str | None = None
++    # 2026-10-18-change-type-git-conventional：change_type 是否来自权威源
++    # （flow-state.yaml 顶层 commit_type，git conventional 前缀）。目录形状推断
++    # （_infer_change_type）值为猜测——quick 通道退役后轻量变更恒落默认 feature；
++    # 权威值允许覆盖库中旧值（service._apply_parsed 消费），猜测值仍只为空回填。
++    change_type_authoritative: bool = False
+     owner: str | None = None
+     affected_components: list[str] = field(default_factory=list)
+     docs: list[ParsedDoc] = field(default_factory=list)
+@@ -305,6 +312,38 @@ class ChangeParser:
+         # 规则 5: 默认
+         return "feature"
+ 
++    # 列宽护栏：Change.change_type 列 String(50)，超长前缀（畸形值）截断防溢出。
++    _COMMIT_TYPE_MAX_LEN = 50
++
++    @classmethod
++    def _read_flow_state_commit_type(cls, change_dir: Path) -> str | None:
++        """读 flow-state.yaml 顶层 ``commit_type``（2026-10-18-change-type-git-conventional）。
++
++        thin 轻量变更进度落 flow-state.yaml；其顶层可选字段 ``commit_type`` 是从
++        本机 git 提交反查出的 conventional 前缀主类型（feat/fix/docs/...，回填
++        脚本对存量写入 / 后续 CLI flow done 对新变更写入；归档 full 变更由回填
++        脚本创建仅含该字段的最小 flow-state.yaml——location=archive 时
++        _infer_current_stage 恒返 archive，不受影响）。
++
++        Returns:
++            小写化前缀（≤50 字符）；缺文件/缺字段/类型非 str/空串/解析失败 →
++            None（调用方回落目录形状推断路径，行为不变）。
++        """
++        path = change_dir / "flow-state.yaml"
++        if not path.is_file():
++            return None
++        try:
++            data = yaml.safe_load(path.read_text(encoding="utf-8"))
++        except (OSError, yaml.YAMLError):
++            return None
++        if not isinstance(data, dict):
++            return None
++        value = data.get("commit_type")
++        if not isinstance(value, str):
++            return None
++        value = value.strip().lower()[: cls._COMMIT_TYPE_MAX_LEN]
++        return value or None
++
+     # ------------------------------------------------------------------
+     # Affected-components inference (task-02)
+     # ------------------------------------------------------------------
+@@ -779,6 +818,14 @@ class ChangeParser:
+ 
+         # --- Infer change_type and affected_components ---
+         parsed.change_type = self._infer_change_type(change_dir)
++        # 2026-10-18-change-type-git-conventional：flow-state.yaml 顶层 commit_type
++        # （git conventional 前缀主类型，回填脚本 / 后续 CLI flow done 写入）是权威
++        # 类型源，读到即覆盖目录推断并置 authoritative（_apply_parsed 据此允许
++        # 覆盖库中旧值——存量 feature 错值靠它纠正）；缺字段走推断路径不变。
++        commit_type = self._read_flow_state_commit_type(change_dir)
++        if commit_type is not None:
++            parsed.change_type = commit_type
++            parsed.change_type_authoritative = True
+         parsed.affected_components = self._infer_affected_components(change_dir, sillyspec_root)
+ 
+         # ql-20260702-001：从文档存在性推断 current_stage（sillyspec.db 未导入时的 fallback）
+diff --git a/backend/app/modules/change/service.py b/backend/app/modules/change/service.py
+index 74431280d..4cdc95c24 100644
+--- a/backend/app/modules/change/service.py
++++ b/backend/app/modules/change/service.py
+@@ -3004,7 +3004,13 @@ class ChangeService:
+         # 与 title 同口径整体覆盖——动机段被删/清空时描述随 None。
+         row.description = parsed.description
+         # change_type: only overwrite when DB value is None (protect user-set values)
+-        if row.change_type is None and parsed.change_type is not None:
++        # 2026-10-18-change-type-git-conventional：flow-state.yaml commit_type 是权威
++        # 源（git conventional 前缀，回填脚本/CLI 写入），允许覆盖既有值——存量被
++        # 目录推断默认填成的 feature 错值靠它纠正；目录形状推断值仍只为空回填
++        # （保护 change_writer 建行时写入的用户语义类型不被猜测值回翻）。
++        if parsed.change_type is not None and (
++            row.change_type is None or parsed.change_type_authoritative
++        ):
+             row.change_type = parsed.change_type
+         # affected_components: always overwrite (inferred value is more accurate)
+         if parsed.affected_components:
+diff --git a/backend/app/modules/change/tests/test_parser.py b/backend/app/modules/change/tests/test_parser.py
+index 7f4d849d1..e6849c2a6 100644
+--- a/backend/app/modules/change/tests/test_parser.py
++++ b/backend/app/modules/change/tests/test_parser.py
+@@ -465,6 +465,81 @@ class TestInferCurrentStageThin:
+         assert ChangeParser._infer_current_stage(empty_dir, "active") == "brainstorm"
+ 
+ 
++class TestCommitTypeFlowState:
++    """flow-state.yaml 顶层 commit_type 权威类型源（2026-10-18-change-type-git-conventional）。
++
++    语义类型（git conventional 前缀）由回填脚本 / 后续 CLI flow done 写入
++    flow-state.yaml；读到即覆盖目录形状推断（quick 通道退役后轻量变更推断恒落
++    默认 feature）并置 change_type_authoritative（_apply_parsed 允许覆盖库值）。
++    """
++
++    def test_read_returns_lowercase_value(self, tmp_path: Path) -> None:
++        """顶层 commit_type 读出并小写化（大写前缀归一）。"""
++        change_dir = tmp_path / "2026-10-18-demo"
++        change_dir.mkdir()
++        (change_dir / "flow-state.yaml").write_text(
++            "tier: thin\ncommit_type: Fix\n", encoding="utf-8"
++        )
++        assert ChangeParser._read_flow_state_commit_type(change_dir) == "fix"
++
++    def test_read_missing_file_or_field_returns_none(self, tmp_path: Path) -> None:
++        """缺文件 / 有文件缺字段 / 空串 / 非 str 值 → None（回落推断路径）。"""
++        no_file = tmp_path / "a"
++        no_file.mkdir()
++        assert ChangeParser._read_flow_state_commit_type(no_file) is None
++
++        no_field = tmp_path / "b"
++        no_field.mkdir()
++        (no_field / "flow-state.yaml").write_text("tier: thin\n", encoding="utf-8")
++        assert ChangeParser._read_flow_state_commit_type(no_field) is None
++
++        empty_val = tmp_path / "c"
++        empty_val.mkdir()
++        (empty_val / "flow-state.yaml").write_text("commit_type: ''\n", encoding="utf-8")
++        assert ChangeParser._read_flow_state_commit_type(empty_val) is None
++
++        non_str = tmp_path / "d"
++        non_str.mkdir()
++        (non_str / "flow-state.yaml").write_text("commit_type: 42\n", encoding="utf-8")
++        assert ChangeParser._read_flow_state_commit_type(non_str) is None
++
++    def test_read_corrupted_yaml_returns_none(self, tmp_path: Path) -> None:
++        """损坏 YAML 不抛（safe_load 异常吞掉返 None，fail-open 回落推断）。"""
++        change_dir = tmp_path / "e"
++        change_dir.mkdir()
++        (change_dir / "flow-state.yaml").write_text("tier: [unclosed\n", encoding="utf-8")
++        assert ChangeParser._read_flow_state_commit_type(change_dir) is None
++
++    def test_parse_workspace_commit_type_overrides_inference(
++        self, parser: ChangeParser, silly_root: Path
++    ) -> None:
++        """集成：tasks.md 形态推断本应 feature，flow-state commit_type=fix 覆盖并置权威。"""
++        change_dir = silly_root / ".sillyspec" / "changes" / "2026-10-18-commit-type-demo"
++        change_dir.mkdir()
++        (change_dir / "tasks.md").write_text("# tasks\n", encoding="utf-8")
++        (change_dir / "design.md").write_text("# demo\n", encoding="utf-8")
++        (change_dir / "flow-state.yaml").write_text(
++            "tier: thin\ncommit_type: fix\n", encoding="utf-8"
++        )
++        result = parser.parse_workspace(silly_root)
++        parsed = next(c for c in result.changes if c.change_key == "2026-10-18-commit-type-demo")
++        assert parsed.change_type == "fix"
++        assert parsed.change_type_authoritative is True
++
++    def test_parse_workspace_without_field_keeps_inference_not_authoritative(
++        self, parser: ChangeParser, silly_root: Path
++    ) -> None:
++        """无 commit_type 字段：推断值照旧，authoritative=False（只为空回填语义不变）。"""
++        change_dir = silly_root / ".sillyspec" / "changes" / "2026-10-18-inferred-demo"
++        change_dir.mkdir()
++        (change_dir / "tasks.md").write_text("# tasks\n", encoding="utf-8")
++        (change_dir / "design.md").write_text("# demo\n", encoding="utf-8")
++        result = parser.parse_workspace(silly_root)
++        parsed = next(c for c in result.changes if c.change_key == "2026-10-18-inferred-demo")
++        assert parsed.change_type == "feature"
++        assert parsed.change_type_authoritative is False
++
++
+ class TestInferAffectedComponentsFromManifest:
+     """thin-affected-modules-from-patch-manifest：change-patch.json files 第三来源。
+ 
+diff --git a/backend/app/modules/change/tests/test_reparse_guard.py b/backend/app/modules/change/tests/test_reparse_guard.py
+index 58349c3ea..d7dac6be7 100644
+--- a/backend/app/modules/change/tests/test_reparse_guard.py
++++ b/backend/app/modules/change/tests/test_reparse_guard.py
+@@ -47,6 +47,9 @@ def _make_parsed(
+     parsed.description = None
+     parsed.status = "active"
+     parsed.change_type = "feature"
++    # 2026-10-18-change-type-git-conventional：权威标志显式 False——MagicMock 隐式
++    # 属性返回 truthy Mock，会让既有 None-fill 用例意外走权威覆盖分支。
++    parsed.change_type_authoritative = False
+     parsed.affected_components = []
+     parsed.change_key = change_key
+     parsed.location = "active"
+@@ -77,6 +80,48 @@ def test_apply_parsed_overrides_stage_when_owner_id_none():
+     assert row.current_stage == "brainstorm"  # 被覆盖
+ 
+ 
++def test_apply_parsed_change_type_inference_only_fills_none():
++    """2026-10-18-change-type-git-conventional：非权威推断值仍只为空回填。
++
++    库值非 None（change_writer 建行写入的语义类型）+ 目录形状推断值 → 不覆盖，
++    既有保护语义不变。
++    """
++    from app.modules.change.service import ChangeService
++
++    row = _make_row(owner_id=None)
++    row.change_type = "quick"
++    parsed = _make_parsed()  # change_type="feature", authoritative=False
++    ChangeService._apply_parsed(row, parsed, workspace_id=uuid.uuid4())
++    assert row.change_type == "quick"  # 不被猜测值回翻
++
++
++def test_apply_parsed_change_type_none_fill_unchanged():
++    """库值为空 + 推断值 → 回填（既有行为不回归，权威标志 False 同样成立）。"""
++    from app.modules.change.service import ChangeService
++
++    row = _make_row(owner_id=None)  # change_type=None
++    parsed = _make_parsed()
++    ChangeService._apply_parsed(row, parsed, workspace_id=uuid.uuid4())
++    assert row.change_type == "feature"
++
++
++def test_apply_parsed_authoritative_commit_type_overwrites():
++    """权威值（flow-state.yaml commit_type，git 前缀回填）允许覆盖库中旧值。
++
++    存量行被目录推断默认填成 feature 的错值，靠 authoritative 标志纠正——
++    这是回填脚本生效的关键通道。
++    """
++    from app.modules.change.service import ChangeService
++
++    row = _make_row(owner_id=None)
++    row.change_type = "feature"
++    parsed = _make_parsed()
++    parsed.change_type = "fix"
++    parsed.change_type_authoritative = True
++    ChangeService._apply_parsed(row, parsed, workspace_id=uuid.uuid4())
++    assert row.change_type == "fix"  # 被权威值覆盖
++
++
+ async def test_reparse_created_unique_violation_falls_back_to_update(db_session, monkeypatch):
+     """AC-07：created 分支撞 ux_changes_workspace_key → savepoint rollback 转 update 不抛 500。
+ 
+diff --git a/frontend/src/components/changes/detail/__tests__/change-overview-side.test.tsx b/frontend/src/components/changes/detail/__tests__/change-overview-side.test.tsx
+index 109ff7311..5999444c3 100644
+--- a/frontend/src/components/changes/detail/__tests__/change-overview-side.test.tsx
++++ b/frontend/src/components/changes/detail/__tests__/change-overview-side.test.tsx
+@@ -2,7 +2,7 @@
+ // 概览右侧信息栏测试——五组渲染（基本信息/执行用量/会话/范围对账/产出速览）、
+ // 用量取数复用（同一 hook 与 queryKey）、归档态用量形态（标题「执行用量（合计）」+
+ // MUST NOT 提供按模型明细入口）、范围对账入口在两态下的指向（归档不留死链）。
+-import { render, screen, within } from "@testing-library/react";
++import { cleanup, render, screen, within } from "@testing-library/react";
+ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+ import { beforeEach, describe, expect, it, vi } from "vitest";
+ 
+@@ -35,12 +35,13 @@ const SESSIONS: AgentSessionListItem[] = [
+   { id: "sess-2", title: "第二个会话", status: "ended" } as AgentSessionListItem,
+ ];
+ 
+-function renderSide(archived = false) {
++function renderSide(archived = false, changePatch: Partial<ChangeRead> = {}) {
++  const change = { ...CHANGE, ...changePatch } as ChangeRead;
+   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+   return render(
+     <QueryClientProvider client={client}>
+       <ChangeOverviewSide
+-        change={CHANGE}
++        change={change}
+         workspaceId="ws-1"
+         changeId="c-1"
+         archived={archived}
+@@ -112,6 +113,40 @@ describe("ChangeOverviewSide", () => {
+     expect(screen.getByText("qinyi")).toBeInTheDocument();
+   });
+ 
++  // ── 类型行 git conventional 彩色标签（2026-10-18-change-type-git-conventional）──
++
++  it("类型行：已知前缀渲染彩色标签（fix 红色阶 / docs 蓝色阶）", () => {
++    renderSide(false, { change_type: "fix" });
++    const chip = screen.getByTestId("commit-type-chip");
++    expect(chip).toHaveTextContent("fix");
++    expect(chip.className).toContain("border-red");
++
++    cleanup();
++    renderSide(false, { change_type: "docs" });
++    const docsChip = screen.getByTestId("commit-type-chip");
++    expect(docsChip).toHaveTextContent("docs");
++    expect(docsChip.className).toContain("border-blue");
++  });
++
++  it("类型行：旧枚举 feature 显示层等价映射 feat（数据不动）", () => {
++    renderSide(false, { change_type: "feature" });
++    expect(screen.getByTestId("commit-type-chip")).toHaveTextContent("feat");
++  });
++
++  it("类型行：未知前缀中性配色显示原值（不误配色）", () => {
++    renderSide(false, { change_type: "hotfix" });
++    const chip = screen.getByTestId("commit-type-chip");
++    expect(chip).toHaveTextContent("hotfix");
++    expect(chip.className).not.toContain("border-red");
++  });
++
++  it("类型行：change_type 为空 → 显示 —（无标签）", () => {
++    renderSide(false, { change_type: null });
++    expect(screen.queryByTestId("commit-type-chip")).not.toBeInTheDocument();
++    const typeRow = screen.getByText("类型").closest("div");
++    expect(typeRow).toHaveTextContent("—");
++  });
++
+   it("用量七项压缩行与用量卡同源（耗时/轮次/输入/输出/缓存读取/请求次数/命中率）", async () => {
+     renderSide();
+     expect(await screen.findByText("耗时")).toBeInTheDocument();
+diff --git a/frontend/src/components/changes/detail/change-overview-side.tsx b/frontend/src/components/changes/detail/change-overview-side.tsx
+index 51a356215..7d9464406 100644
+--- a/frontend/src/components/changes/detail/change-overview-side.tsx
++++ b/frontend/src/components/changes/detail/change-overview-side.tsx
+@@ -37,6 +37,41 @@ interface Row {
+ 
+ const DASH = "—";
+ 
++/**
++ * git conventional 前缀 → 标签配色（2026-10-18-change-type-git-conventional）。
++ * 类型值来自 flow-state.yaml commit_type（权威，回填/CLI 写入）；未知类型走
++ * 中性配色显示原值。旧枚举 feature 语义等同 feat，显示层等价映射（数据不动）。
++ */
++const COMMIT_TYPE_STYLES: Record<string, string> = {
++  feat: "border-emerald-500/40 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400",
++  fix: "border-red-500/40 bg-red-500/10 text-red-600 dark:text-red-400",
++  docs: "border-blue-500/40 bg-blue-500/10 text-blue-600 dark:text-blue-400",
++  refactor: "border-violet-500/40 bg-violet-500/10 text-violet-600 dark:text-violet-400",
++  test: "border-amber-500/40 bg-amber-500/10 text-amber-600 dark:text-amber-400",
++  perf: "border-cyan-500/40 bg-cyan-500/10 text-cyan-600 dark:text-cyan-400",
++  build: "border-orange-500/40 bg-orange-500/10 text-orange-600 dark:text-orange-400",
++  ci: "border-teal-500/40 bg-teal-500/10 text-teal-600 dark:text-teal-400",
++  chore: "border-slate-500/40 bg-slate-500/10 text-slate-600 dark:text-slate-400",
++  style: "border-pink-500/40 bg-pink-500/10 text-pink-600 dark:text-pink-400",
++};
++
++const COMMIT_TYPE_DISPLAY: Record<string, string> = {
++  feature: "feat", // 旧枚举语义等价映射（仅显示层）
++};
++
++function CommitTypeChip({ type }: { type: string }) {
++  const display = COMMIT_TYPE_DISPLAY[type] ?? type;
++  const cls = COMMIT_TYPE_STYLES[display] ?? "border-border bg-muted text-muted-foreground";
++  return (
++    <span
++      data-testid="commit-type-chip"
++      className={`inline-flex h-5 shrink-0 items-center rounded border px-1.5 font-mono text-[10px] font-semibold ${cls}`}
++    >
++      {display}
++    </span>
++  );
++}
++
+ /** 用量七项压缩行（与卡片同源口径，仅改排版密度）。 */
+ function usageRows(usage: NonNullable<ReturnType<typeof useChangeUsage>["data"]>): Row[] {
+   const t = usage.totals;
+@@ -142,7 +177,15 @@ export function ChangeOverviewSide({
+       <MetaPanel className="w-full">
+       <MetaPanelSection title="基本信息">
+         <RowView k="变更 key" v={change.change_key} />
+-        <RowView k="类型" v={change.change_type ?? DASH} />
++        {/* 类型行改 git conventional 彩色标签（2026-10-18-change-type-git-conventional） */}
++        <div className="flex items-center justify-between gap-3 text-xs">
++          <span className="text-muted-foreground">类型</span>
++          {change.change_type ? (
++            <CommitTypeChip type={change.change_type} />
++          ) : (
++            <span className="text-muted-foreground">{DASH}</span>
++          )}
++        </div>
+         <RowView k="创建" v={change.created_at ? formatCompactTime(change.created_at) : DASH} />
+         <RowView k="负责人" v={change.owner_name ?? DASH} />
+       </MetaPanelSection>
+diff --git a/scripts/backfill_commit_type.py b/scripts/backfill_commit_type.py
+new file mode 100644
+index 000000000..0bc620bcc
+--- /dev/null
++++ b/scripts/backfill_commit_type.py
+@@ -0,0 +1,221 @@
++#!/usr/bin/env python3
++"""回填变更的 git conventional 提交类型（2026-10-18-change-type-git-conventional）。
++
++平台变更详情页「类型」行想要 git 惯用前缀式语义分类（feat/fix/docs/...），但语义
++类型只存在于本机 git 提交信息（平台无 git 历史）。本脚本把每个变更的主提交类型
++写入其 flow-state.yaml 顶层 ``commit_type:`` 字段——平台 reparse 将其作为权威类型源
++（backend parser._read_flow_state_commit_type，允许覆盖库中旧值）。
++
++归属规则（防跨变更引用误判）：
++- 提交信息里常引用其它变更 key（如评审出处），因此按「信息中**最后一个**形如
++  YYYY-MM-DD-<slug> 的 key」归属，不按「出现过即归属」；
++- chore(archive)（归档留档提交）不参与主类型判定；
++- 主类型按优先级取：feat/fix > perf/refactor/test > docs/style > build/ci/chore
++  > 其它（一个变更常有 docs(spec)/chore(archive) 工件提交，功能提交优先）。
++
++写入规则（幂等、最小 diff）：
++- 顶层已有 ``commit_type:`` 行 → 原位替换；值相同则不写（防 mtime churn）；
++- 无该行 → 文件末尾追加一行；
++- 仅**归档**变更允许新建最小 flow-state.yaml（只含该字段）——active 变更新建该
++  文件会被 parser._infer_current_stage 误判 thin，绝对禁止。
++
++用法（主仓库根目录）：
++  python scripts/backfill_commit_type.py            # 回填（含统计输出）
++  python scripts/backfill_commit_type.py --dry-run  # 只看会写什么，不落盘
++
++写入后需等 sillyspec 自动同步（或手动触发）+ 平台「重新扫描」reparse 方在界面生效。
++"""
++
++from __future__ import annotations
++
++import argparse
++import re
++import subprocess
++import sys
++from pathlib import Path
++
++# conventional 前缀：type 或 type(scope)，后接可选 ! 与冒号
++_TYPE_RE = re.compile(r"^\s*([A-Za-z]+)(?:\([^)]*\))?!?:\s")
++# 类型白名单：非 conventional「伪前缀」不认（实证坑：CLI 基线检查点提交
++# 「sillyspec: baseline checkpoint for <key> …」的 sillyspec: 会撞前缀正则）
++_KNOWN_TYPES = {
++    "feat",
++    "fix",
++    "perf",
++    "refactor",
++    "test",
++    "docs",
++    "style",
++    "build",
++    "ci",
++    "chore",
++    "revert",
++}
++# 变更 key 形态：YYYY-MM-DD-slug
++_KEY_RE = re.compile(r"\d{4}-\d{2}-\d{2}-[A-Za-z0-9][A-Za-z0-9.-]*")
++# 主类型优先级（未知类型不进优先级表——白名单外直接不参与归属）
++_TYPE_PRIORITY = [
++    "feat",
++    "fix",
++    "perf",
++    "refactor",
++    "test",
++    "docs",
++    "style",
++    "build",
++    "ci",
++    "chore",
++    "revert",
++]
++# 归档留档提交（chore(archive): <key> 归档留档）不参与主类型
++_ARCHIVE_PREFIX = "chore(archive)"
++
++
++def git_subjects(repo_root: Path) -> list[str]:
++    """一次取全量提交 subject（--all 含已归档分支历史）。"""
++    out = subprocess.run(
++        ["git", "-C", str(repo_root), "log", "--all", "--format=%s"],
++        capture_output=True,
++        text=True,
++        encoding="utf-8",
++        errors="replace",
++        check=True,
++    )
++    return [line for line in out.stdout.splitlines() if line.strip()]
++
++
++def subject_main_key(subject: str) -> str | None:
++    """提交归属的变更 key = 信息中最后一个 key 形态 token（跨变更引用出现在正文前部）。"""
++    keys = _KEY_RE.findall(subject)
++    return keys[-1] if keys else None
++
++
++def subject_type(subject: str) -> str | None:
++    m = _TYPE_RE.match(subject)
++    if m is None:
++        return None
++    t = m.group(1).lower()
++    return t if t in _KNOWN_TYPES else None
++
++
++def type_rank(t: str) -> tuple[int, int]:
++    """白名单内按优先级表排序键（min() 消费；表外值不会进入——白名单前置过滤）。"""
++    return (0, _TYPE_PRIORITY.index(t))
++
++
++def collect_change_types(subjects: list[str]) -> dict[str, list[str]]:
++    """key → 按出现顺序的 conventional 类型列表（已排除归档留档提交）。"""
++    by_key: dict[str, list[str]] = {}
++    for subject in subjects:
++        if subject.startswith(_ARCHIVE_PREFIX):
++            continue
++        key = subject_main_key(subject)
++        t = subject_type(subject)
++        if key is None or t is None:
++            continue
++        by_key.setdefault(key, []).append(t)
++    return by_key
++
++
++def pick_main_type(types: list[str]) -> str | None:
++    """优先级取主类型（feat/fix 优先于 docs/chore 工件提交）。"""
++    if not types:
++        return None
++    return min(types, key=type_rank)
++
++
++def write_commit_type(change_dir: Path, value: str, *, dry_run: bool) -> str:
++    """幂等写入 flow-state.yaml 顶层 commit_type（行存在替换 / 缺则末尾追加）。
++
++    Returns:
++        动作描述：wrote / replaced / unchanged / created（dry_run 时前缀 [dry]）。
++    """
++    path = change_dir / "flow-state.yaml"
++    line = f"commit_type: {value}"
++    if path.is_file():
++        # newline=''：原样保留行尾（LF/CRLF），防整文件行尾翻转造成同步 diff 噪音
++        with open(path, "r", encoding="utf-8", newline="") as f:
++            raw = f.read()
++        lines = raw.splitlines(keepends=True)
++        for i, existing in enumerate(lines):
++            if existing.startswith("commit_type:"):
++                if existing.rstrip("\r\n") == line:
++                    return "unchanged"
++                if not dry_run:
++                    eol = existing[len(existing.rstrip("\r\n")) :] or "\n"
++                    lines[i] = line + eol
++                    with open(path, "w", encoding="utf-8", newline="") as f:
++                        f.write("".join(lines))
++                return "replaced"
++        if not dry_run:
++            with_sep = raw if raw.endswith("\n") or raw == "" else raw + "\n"
++            with open(path, "w", encoding="utf-8", newline="") as f:
++                f.write(with_sep + line + "\n")
++        return "appended"
++    if not dry_run:
++        with open(path, "w", encoding="utf-8", newline="") as f:
++            f.write(line + "\n")
++    return "created"
++
++
++def main() -> int:
++    parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
++    parser.add_argument("--dry-run", action="store_true", help="只打印计划写入，不落盘")
++    args = parser.parse_args()
++
++    repo_root = Path(__file__).resolve().parent.parent
++    changes_root = repo_root / ".sillyspec" / "changes"
++
++    subjects = git_subjects(repo_root)
++    by_key = collect_change_types(subjects)
++
++    stats: dict[str, int] = {}
++    rows: list[tuple[str, str, str]] = []  # (change_key, main_type, action)
++
++    # 候选 = 归档区 + 活跃区全部变更目录
++    candidates: list[Path] = []
++    archive_root = changes_root / "archive"
++    if archive_root.is_dir():
++        candidates.extend(sorted(p for p in archive_root.iterdir() if p.is_dir()))
++    if changes_root.is_dir():
++        candidates.extend(
++            sorted(
++                p for p in changes_root.iterdir() if p.is_dir() and p.name != "archive"
++            )
++        )
++
++    for change_dir in candidates:
++        key = change_dir.name
++        types = by_key.get(key, [])
++        main_type = pick_main_type(types)
++        if main_type is None:
++            stats["no_match"] = stats.get("no_match", 0) + 1
++            continue
++        is_archived = archive_root in change_dir.parents
++        has_flow_state = (change_dir / "flow-state.yaml").is_file()
++        # 守卫：active 变更禁止新建 flow-state.yaml（_infer_current_stage 会误判 thin）
++        if not has_flow_state and not is_archived:
++            stats["skipped_active_no_flowstate"] = (
++                stats.get("skipped_active_no_flowstate", 0) + 1
++            )
++            continue
++        action = write_commit_type(change_dir, main_type, dry_run=args.dry_run)
++        stats[action if action != "unchanged" else "unchanged"] = (
++            stats.get(action if action != "unchanged" else "unchanged", 0) + 1
++        )
++        if action != "unchanged":
++            rows.append((key, main_type, action))
++
++    prefix = "[dry] " if args.dry_run else ""
++    for key, t, action in rows:
++        print(f"{prefix}{action:9s} {key} -> {t}")
++    print(
++        f"\n汇总：提交 {len(subjects)} 条，变更候选 {len(candidates)} 个，"
++        + "，".join(f"{k}={v}" for k, v in sorted(stats.items()))
++    )
++    print("提示：写入后需 sillyspec 同步 + 平台「重新扫描」reparse 方在界面生效。")
++    return 0
++
++
++if __name__ == "__main__":
++    sys.exit(main())

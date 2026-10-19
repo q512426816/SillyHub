@@ -26,6 +26,7 @@ const VIEWS = [
   { file: "workspace-overview-view", title: "工作区概览", desc: "Repo 式页头/守护横幅/统计四格/两栏+About" },
   { file: "session-portal-view", title: "会话门户", desc: "三栏：会话列表/消息流/信息面板" },
   { file: "sillyspec-flow-view", title: "SillySpec 变更流程", desc: "流程类原型：轻量道/完整道双泳道状态机（FlowDiagram）" },
+  { file: "conflict-sync-states-view", title: "同步冲突状态", desc: "冲突行「标记已处理」入口/失败卡按 daemon_code 三分支/full-tree 兜底来源提示" },
 ];
 
 function run(cmd, args) {

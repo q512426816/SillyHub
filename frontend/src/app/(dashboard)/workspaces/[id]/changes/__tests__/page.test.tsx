@@ -968,6 +968,42 @@ describe("变更中心列表页（task-06 重做行为 + useQuery 改造）", ()
     );
   });
 
+  // ── 2026-10-18-change-list-type-filter：类型标签 + 类型筛选 ──
+
+  it("行 meta 显示类型彩色标签：fix 原值、feature 等价映射 feat、空值零占位", async () => {
+    setupListChanges({
+      items: [
+        makeChange({ id: "ch-fix", change_key: "fix-change", change_type: "fix" }),
+        makeChange({ id: "ch-feat", change_key: "feat-change", change_type: "feature" }),
+        makeChange({ id: "ch-none", change_key: "none-change", change_type: null }),
+      ],
+      total: 3,
+    });
+    await renderAndWait();
+    const chips = screen.getAllByTestId("commit-type-chip");
+    // fix 原值红阶 + feature 显示层映射 feat（数据不动）；null 行零占位 → 恰 2 枚
+    expect(chips.map((c) => c.textContent)).toEqual(["fix", "feat"]);
+    expect(chips.at(0)!.className).toContain("border-red");
+  });
+
+  it("类型下拉选择「fix」→ listChanges 收到 changeType=fix；重置后清除", async () => {
+    await renderAndWait();
+    expect(lastMainLoadParams()?.changeType).toBeUndefined();
+
+    fireEvent.mouseDown(screen.getByLabelText("筛选类型"));
+    fireEvent.click(await screen.findByText("fix（修复）"));
+    await waitFor(() =>
+      expect(lastMainLoadParams()?.changeType).toBe("fix"),
+    );
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: /重\s*置/ }));
+    });
+    await waitFor(() =>
+      expect(lastMainLoadParams()?.changeType).toBeUndefined(),
+    );
+  });
+
   it("分类下拉选择「完整变更」→ lineage=full；阶段下拉不含「轻量变更」选项", async () => {
     await renderAndWait();
 
@@ -1029,6 +1065,174 @@ describe("变更列表行内删除入口防劫持（2026-09-28-audit-risk-fixes�
         writable: true,
         configurable: true,
       });
+    }
+  });
+});
+
+// ── 列表状态 URL 快照（2026-10-16-change-center-back-keeps-list-state）────────
+// tab/页码/筛选原本只活在 useState：详情页「变更列表」返回入口客户端导航回无参
+// /changes，组件重挂载状态全丢（用户实证）。本组用例钉住：①挂载从 URL 初始化
+// （深链/返回恢复）；②状态变化 replaceState 写回 URL（恢复快照，不产生历史条目）。
+describe("列表状态 URL 快照（2026-10-16-change-center-back-keeps-list-state）", () => {
+  beforeEach(() => {
+    setupListChanges();
+    bindingApi.fetchMyBinding.mockResolvedValue(null);
+    // 重置 jsdom 地址（前序用例写回的 query 残留不影响本组初始化断言）
+    window.history.replaceState(null, "", "/workspaces/ws-1/changes");
+  });
+  afterEach(() => {
+    vi.clearAllMocks();
+    cleanup();
+    window.history.replaceState(null, "", "/workspaces/ws-1/changes");
+  });
+
+  it("?tab=archive&page=3 深链：主 load 按已归档第3页请求", async () => {
+    mocks.searchParams = new URLSearchParams("tab=archive&page=3");
+    try {
+      await renderAndWait();
+      const params = lastMainLoadParams();
+      expect(params?.location).toBe("archive");
+      expect(params?.page).toBe(3);
+    } finally {
+      mocks.searchParams = new URLSearchParams();
+    }
+  });
+
+  it("URL 非法值防御：page=abc/pageSize=99/未知 stage 回默认", async () => {
+    mocks.searchParams = new URLSearchParams("page=abc&pageSize=99&stage=nope&mine=1");
+    try {
+      await renderAndWait();
+      const params = lastMainLoadParams();
+      expect(params?.page).toBe(1);
+      expect(params?.pageSize).toBe(20);
+      expect(params?.currentStage).toBeUndefined();
+      // mine=1 合法：聚焦生效（进行中 tab + pendingReviewOnly）
+      expect(params?.pendingReviewOnly).toBe(true);
+    } finally {
+      mocks.searchParams = new URLSearchParams();
+    }
+  });
+
+  it("切已归档 tab 后 URL 写回 tab=archive（replaceState，历史条目数不变）", async () => {
+    await renderAndWait();
+    const lenBefore = window.history.length;
+    await act(async () => {
+      fireEvent.click(screen.getByRole("tab", { name: /已归档/ }));
+    });
+    await waitFor(() =>
+      expect(window.location.search).toBe("?tab=archive"),
+    );
+    // replaceState 语义：不新增历史条目
+    expect(window.history.length).toBe(lenBefore);
+  });
+
+  it("翻页后 URL 写回 page=N，主 load 按新页请求", async () => {
+    setupListChanges({
+      items: [makeChange()],
+      total: 60,
+      activeTotal: 60,
+    });
+    await renderAndWait();
+    const nextBtn = document.querySelector(".ant-pagination-next button");
+    expect(nextBtn).not.toBeNull();
+    // 受控 Pagination 分步点击（同 act 连点读到旧 current）
+    await act(async () => {
+      fireEvent.click(nextBtn!);
+    });
+    await waitFor(() => expect(lastMainLoadParams()?.page).toBe(2));
+    await act(async () => {
+      fireEvent.click(document.querySelector(".ant-pagination-next button")!);
+    });
+    await waitFor(() => expect(window.location.search).toBe("?page=3"));
+    expect(lastMainLoadParams()?.page).toBe(3);
+  });
+
+  it("契约对齐：buildChangesQuery 产出 tab/page 参数名与 URL 解析端一致", async () => {
+    // back 恢复链路的两端——详情页返回入口 back 到本函数产出的 URL，本页挂载解析
+    // 同名参数。参数名漂移即两端失配，此用例直接钉死序列化形态。
+    const { buildChangesQuery } = await import(
+      "@/app/(dashboard)/workspaces/[id]/changes/page"
+    );
+    expect(
+      buildChangesQuery({
+        tab: "archive",
+        search: "",
+        stageFilter: "",
+        lineageFilter: "",
+        typeFilter: "",
+        focusMine: false,
+        sortDir: "updated_at_desc",
+        page: 3,
+        pageSize: 20,
+      }),
+    ).toBe("tab=archive&page=3");
+    // 默认状态 → 空 query（URL 干净）
+    expect(
+      buildChangesQuery({
+        tab: "active",
+        search: "",
+        stageFilter: "",
+        lineageFilter: "",
+        typeFilter: "",
+        focusMine: false,
+        sortDir: "updated_at_desc",
+        page: 1,
+        pageSize: 20,
+      }),
+    ).toBe("");
+  });
+
+  // ── 页码超界钳回（2026-10-16-change-center-delete-back-keeps-state）────────
+  // 删除使总数缩水后，URL 恢复的 page 可能超过最后一页：真实响应页空时钳回
+  // ceil(total/pageSize) 并重取；total=0（真空列表）不钳回。
+
+  it("页码超界钳回：?tab=archive&page=5 深链但最后一页为 4 → 钳回 page=4 并写回 URL", async () => {
+    mocks.listChanges.mockImplementation((_wid: string, params: any) => {
+      if (params?.pageSize === 1) {
+        return Promise.resolve({
+          items: [],
+          total: params?.location === "archive" ? 80 : 0,
+        });
+      }
+      // 超界页（>4）响应页空、total 仍 80；有效页返回数据
+      if ((params?.page ?? 1) > 4) {
+        return Promise.resolve({ items: [], total: 80 });
+      }
+      return Promise.resolve({ items: [makeChange()], total: 80 });
+    });
+    mocks.searchParams = new URLSearchParams("tab=archive&page=5");
+    try {
+      await renderAndWait();
+      // 钳回后重取第 4 页
+      await waitFor(() => expect(lastMainLoadParams()?.page).toBe(4));
+      // URL 写回跟随钳回（replaceState 快照）
+      await waitFor(() =>
+        expect(window.location.search).toBe("?tab=archive&page=4"),
+      );
+    } finally {
+      mocks.searchParams = new URLSearchParams();
+    }
+  });
+
+  it("真空列表不钳回：page=3 深链且 total=0 → page 保持 3，空态展示", async () => {
+    mocks.listChanges.mockImplementation((_wid: string, params: any) =>
+      Promise.resolve(
+        params?.pageSize === 1
+          ? { items: [], total: 0 }
+          : { items: [], total: 0 },
+      ),
+    );
+    mocks.searchParams = new URLSearchParams("tab=archive&page=3");
+    try {
+      await renderAndWait();
+      // 等主 load 完成（副标题渲染 workspace 名），钳回不触发
+      await waitFor(() =>
+        expect(lastMainLoadParams()?.page).toBe(3),
+      );
+      expect(window.location.search).toBe("?tab=archive&page=3");
+      expect(screen.getByText(/还没有归档的变更/)).toBeInTheDocument();
+    } finally {
+      mocks.searchParams = new URLSearchParams();
     }
   });
 });

@@ -358,8 +358,9 @@ class TestResolveRpcEdgeCases:
         hub._pending_rpcs["r1"] = (uuid.uuid4(), fut)
 
         await hub.resolve_rpc("r1", {"rpc_id": "r1", "result": {"entries": []}})
-        # Already resolved — map untouched (the entry we added manually stays).
-        assert "r1" in hub._pending_rpcs
+        # Already resolved — 2026-10-16-backend-mem-polling task-04 起早退前 pop
+        # （done future 条目残留是 _pending_rpcs 泄漏径，旧断言钉死的是缺陷行为）。
+        assert "r1" not in hub._pending_rpcs
 
 
 # ── Endpoint: POST /api/daemon/runtimes/{id}/list-dir ────────────────────────

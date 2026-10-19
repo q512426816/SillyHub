@@ -1,0 +1,36 @@
+tier: thin
+legacy_fallback: false
+substeps:
+  artifacts: done
+  ledger: done
+  patch: done
+  review: done
+  probes: done
+  distill: done
+  archive: done
+  events: done
+born_face: thin
+with_tasks: false
+review_force: null
+input: |-
+  动机：2026-10-16 生产互覆事故——另一会话从分叉分支打包部署，静默回退 main 上已修复的 /data/logs 目录预建（页面日志再次不可见）；多会话各自打包覆盖同一生产，无任何并流校验与部署登记。
+  成功标准：
+  - build-and-save.sh 打包前必须校验当前分支为 main（非 main 时告警并需 ALLOW_NON_MAIN_DEPLOY=1 显式放行），并打印将要打包的 commit hash 与分支供留痕
+  - deploy-to-server skill 必须新增「部署并流校验」节：打包前基于 main 校验、部署后 health commit_sha 与打包一致核对（不一致=被覆盖，附识别与恢复路径）
+  - skill 中过期的 PROD_API_URL 示例必须更新为当前生产值 https://crrcdt.ppdmq.top
+autopilot: false
+prestage_ack: false
+baseline_commit: c729e46af0d1ae81a1eaab575d6fa42d5a37d5e7
+updatedAt: '2026-10-16T07:53:03.744Z'
+cross_baselines:
+  sillyspec: 7f4892ce1d41c5fc03e0f8f590455506584e8fc9
+baseline_sha256: b1b273424c9a57dd1d095a838e8bb091208d24d147f45b1f6a7d778c44927b0b
+spec_approved: true
+spec_approved_at: '2026-10-16T07:52:30.348Z'
+spec_approved_by: anon@DESKTOP-HJ0AM09
+spec_approved_channel: user-confirmed
+spec_attested_by: anon@DESKTOP-HJ0AM09
+batch_ticked: true
+gate_summary: 'test: —｜lint: —｜门文件 3 个'
+
+commit_type: chore

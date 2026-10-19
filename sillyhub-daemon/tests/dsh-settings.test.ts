@@ -48,18 +48,51 @@ describe('isDshFormSufficient（写盘门槛）', () => {
 });
 
 describe('writeDshHome（per-session 路由写盘）', () => {
-  it('anthropic base_url → llm-pi-ai 路由 anthropic-messages + apiKeyEnv 引用 + models 键', async () => {
+  it('anthropic base_url → 三件套布局（package.json 模板清单 + workspace + 无 compat 的 patch）', async () => {
     const dir = mkdtempSync(join(tmpdir(), 'dsh-home-'));
     try {
       await writeDshHome({ dshHome: dir, provider: makeProvider() });
-      const yaml = readFileSync(join(dir, 'profiles', 'acp', 'cordis.patch.yml'), 'utf8');
+      const acp = join(dir, 'profiles', 'acp');
+      // rc.2 布局：package.json（dsh.profile.bundles 模板清单）+ workspace + patch
+      const manifest = JSON.parse(readFileSync(join(acp, 'package.json'), 'utf-8')) as {
+        dsh?: { profile?: { bundles?: string[] } };
+      };
+      expect(manifest.dsh?.profile?.bundles).toEqual([
+        '@deepseek-ai/dsh-base',
+        '@deepseek-ai/dsh-acp-app',
+      ]);
+      expect(readFileSync(join(acp, 'pnpm-workspace.yaml'), 'utf-8')).toContain('nodeLinker: hoisted');
+      const yaml = readFileSync(join(acp, 'cordis.patch.yml'), 'utf8');
       expect(yaml).toContain('- id: llm-pi-ai');
       expect(yaml).toContain('api: anthropic-messages');
-      expect(yaml).toContain('baseURL: https://api.example.com/anthropic');
+      // 外部数据插值点一律单引号包裹（2026-10-18-audit-log-redact-yaml-quote）
+      expect(yaml).toContain("baseURL: 'https://api.example.com/anthropic'");
       expect(yaml).toContain(`apiKeyEnv: ${DSH_API_KEY_ENV}`);
-      expect(yaml).toContain('deepseek-v4: {}');
+      expect(yaml).toContain("- id: 'deepseek-v4'");
+      expect(yaml).toContain("name: 'deepseek-v4'");
+      // rc.2 毒源（评审+探针实证）：compat 块存在即整条 provider 被静默拒收——禁止写盘
+      expect(yaml).not.toContain('compat');
       // 密钥明文不落盘（R-02：patch 只存变量名）
       expect(yaml).not.toContain('sk-test');
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('特殊字符模型名 → 单引号包裹 + 内嵌单引号双写，YAML 结构不破坏', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'dsh-home-'));
+    try {
+      // : 空格 # 在裸插值下分别制造假键值/注释吞噬；' 检验双写转义
+      const hostile = "glm: 4.7 # fast'ed";
+      await writeDshHome({ dshHome: dir, provider: makeProvider({ model: hostile }) });
+      const yaml = readFileSync(join(dir, 'profiles', 'acp', 'cordis.patch.yml'), 'utf8');
+      const quoted = `'${hostile.replace(/'/g, "''")}'`;
+      expect(yaml).toContain(`- id: ${quoted}`);
+      expect(yaml).toContain(`name: ${quoted}`);
+      // 裸插值形态不再出现（假键值/注释行会破坏结构）
+      expect(yaml).not.toContain(`- id: ${hostile}`);
+      // 注释吞噬防线：# 后内容仍在引号内，后续行（maxTokens）完好
+      expect(yaml).toContain('maxTokens: 128000');
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }

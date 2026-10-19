@@ -48,6 +48,7 @@ describe('config', () => {
       expect(Object.keys(DEFAULT_CONFIG).sort()).toEqual([
         'allowed_roots',
         'api_key',
+        'change_write_poll_interval',
         'default_timeout_seconds',
         'disconnect_log_threshold_sec',
         'heartbeat_interval',
@@ -110,6 +111,8 @@ describe('config', () => {
       expect(DEFAULT_CONFIG.runtime_id).toBe(''); // 占位空串，load 时生成（对齐 Python None）
       expect(DEFAULT_CONFIG.profile).toBe('default');
       expect(DEFAULT_CONFIG.poll_interval).toBe(30);
+      // task-07（2026-10-16-backend-mem-polling）：change-write 兜底轮询独立间隔默认 120
+      expect(DEFAULT_CONFIG.change_write_poll_interval).toBe(120);
       expect(DEFAULT_CONFIG.heartbeat_interval).toBe(15);
       expect(DEFAULT_CONFIG.max_concurrent_tasks).toBe(5);
       expect(DEFAULT_CONFIG.log_level).toBe('info');

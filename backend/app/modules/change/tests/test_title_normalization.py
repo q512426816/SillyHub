@@ -469,6 +469,202 @@ class TestAdoptedTitleClobberGuard:
         assert row.title == "新自定义名", "自定义 H1 派生值仍应覆盖（改名能力不回归）"
 
 
+# ── 短标题提炼（2026-10-16-change-title-condense-backfill）────────────────────
+# 病根样本即用例：完整变更 title=变更名兜底、轻量变更 title=CLI 50 字硬截长句；
+# condense_title 是收养口防御（FR-02）与存量回填（FR-03）的共享提炼规则，
+# CLI 侧（sillyspec quicklog）后续上同规则实现，两边以本组样本锚定防漂移。
+
+
+class TestCondenseTitle:
+    """纯函数：长文本 → 自然标点截断的约 20 字短标题（上限 30）。"""
+
+    def test_strong_break_em_dash_no_ellipsis(self) -> None:
+        """实证样本①：em dash 强边界截断，不加省略号。"""
+        from app.modules.change.title_norm import condense_title
+
+        out = condense_title(
+            "change 文件树「刷新」同步链路三层静默失败"
+            "——后端 RPC 预算 3s 短于实测 6~13.5s，需要把预算拉平到实测上限"
+        )
+        assert out == "change 文件树「刷新」同步链路三层静默失败"
+        assert len(out) <= 30 and not out.endswith("…")
+
+    def test_strong_break_period_strips_trailing_punct(self) -> None:
+        """实证样本②：首个句号强边界截断，尾句号剥除、收引号保留。"""
+        from app.modules.change.title_norm import condense_title
+
+        out = condense_title(
+            "用户报告“登录的账户有时候莫名其妙被退出登录”。"
+            "排查定位两个代码层根因：后端 refresh token 复用检测把旧凭证超窗复用"
+            "判为重放攻击并吊销该用户全部会话"
+        )
+        assert out == "用户报告“登录的账户有时候莫名其妙被退出登录”"
+
+    def test_strong_break_leading_date_dash(self) -> None:
+        """实证样本③：日期开头 + em dash——日期段不得被截掉。"""
+        from app.modules.change.title_norm import condense_title
+
+        out = condense_title(
+            "2026-10-16 生产互覆事故——另一会话从分叉分支打包部署，"
+            "静默回退 main 上已修复的 /api/auth/refresh 逻辑"
+        )
+        assert out == "2026-10-16 生产互覆事故"
+
+    def test_weak_break_colon_fallback(self) -> None:
+        """必须带 [10,30] 内无任何边界 → 兜底带 [8,10) 弱边界（语义完整优先于凑长度）。"""
+        from app.modules.change.title_norm import condense_title
+
+        out = condense_title(
+            "清偿跨变更存量债：2026-10-16-backend-mem-polling task-08 "
+            "给 sillyhub-daemon 补齐 hasUnsyncedLocalChanges 删除面判定"
+        )
+        assert out == "清偿跨变更存量债"
+
+    def test_prefer_boundary_in_must_band_over_earlier_floor(self) -> None:
+        """10-30 必须带（用户口径 2026-10-16）：弱边界落在 8~10 时优先取必须带内的
+        更远强边界，兜底带仅在必须带完全无边界时启用。"""
+        from app.modules.change.title_norm import condense_title
+
+        # 弱边界「：」在第 9 字（兜底带），强边界「。」在第 27 字（必须带）——取强边界
+        out = condense_title("清偿跨变更存量债：把 daemon 侧删除面判定补齐到位。其余若干收尾")
+        assert out == "清偿跨变更存量债：把 daemon 侧删除面判定补齐到位"
+
+    def test_weak_break_tab_label(self) -> None:
+        """实证样本：含英文词与书名号的冒号弱边界。"""
+        from app.modules.change.title_norm import condense_title
+
+        out = condense_title(
+            "归档变更也要显示「文件与对账」tab：归档留档区不展示 spec 文档全貌，"
+            "用户需要文件树与范围对账入口"
+        )
+        assert out == "归档变更也要显示「文件与对账」tab"
+
+    def test_short_input_returned_as_is(self) -> None:
+        from app.modules.change.title_norm import condense_title
+
+        assert condense_title("归档变更也要显示文件与对账") == "归档变更也要显示文件与对账"
+        assert condense_title("reset 软删守卫补齐") == "reset 软删守卫补齐"
+
+    def test_hard_cut_appends_ellipsis(self) -> None:
+        """必须带与兜底带均无边界 → 硬截 max_len-1 字加省略号（总长恰 max_len）。"""
+        from app.modules.change.title_norm import TITLE_CONDENSE_MAX_LEN, condense_title
+
+        text = "没有标点的一段超长文本就是一直往下说没有任何停顿符号所以只能硬截处理掉超长部分"
+        out = condense_title(text)
+        assert out.startswith(text[: TITLE_CONDENSE_MAX_LEN - 1])
+        assert out.endswith("…")
+        assert len(out) == TITLE_CONDENSE_MAX_LEN, "硬截总长含省略号不得超带宽上限"
+
+    def test_leading_label_prefix_stripped(self) -> None:
+        """行首标签前缀剥除（CLI deriveChangeTitle 同款白名单）——生产回填实证：
+        thin 动机原文常带「动机：」头，不剥则标题以标签开头。"""
+        from app.modules.change.title_norm import condense_title
+
+        out = condense_title("动机：change 文件树「刷新」同步链路三层静默失败——后端 RPC 预算不足")
+        assert out == "change 文件树「刷新」同步链路三层静默失败"
+
+    def test_empty_inputs(self) -> None:
+        from app.modules.change.title_norm import condense_title
+
+        assert condense_title(None) == ""
+        assert condense_title("") == ""
+        assert condense_title("   ") == ""
+
+    def test_whitespace_collapsed(self) -> None:
+        from app.modules.change.title_norm import condense_title
+
+        assert condense_title("多  行\n文本\t折叠") == "多 行 文本 折叠"
+
+    def test_custom_bounds(self) -> None:
+        """min/max 可调：上限收窄时在更小区间内取边界。"""
+        from app.modules.change.title_norm import condense_title
+
+        out = condense_title(
+            "修复登录态失效的根因。前端后端两侧一起治理到位",
+            min_len=4,
+            max_len=12,
+        )
+        assert out == "修复登录态失效的根因"
+
+    def test_strong_break_preferred_over_earlier_weak(self) -> None:
+        """弱边界在前、强边界也在区间内时取强边界（句读完整优先）。"""
+        from app.modules.change.title_norm import condense_title
+
+        # 弱边界「，」在第 11 字，强边界「。」在第 21 字（区间 [8,30] 内）——取强边界
+        out = condense_title(
+            "登录态莫名失效的问题，涉及前后端两侧根因。后续已逐一定位并修复完毕不再复现"
+        )
+        assert out == "登录态莫名失效的问题，涉及前后端两侧根因"
+
+
+# ── 2026-10-16-change-title-condense-backfill：收养口超长标题提炼防御 ──────────
+
+
+class TestAdoptTitleCondenseGuard:
+    """收养口（_ensure_change_row 两入口）对 >30 字 CLI 上行标题先提炼再入库。"""
+
+    #: 旧版 CLI「--input 首行 50 字硬截」实证产物（变更中心轻量行烂标题原文）
+    _LONG_BLOB = (
+        "change 文件树「刷新」同步链路三层静默失败"
+        "——后端 RPC 预算 3s 短于实测 6~13.5s，需要把预算拉平到实测上限"
+    )
+
+    async def test_long_cli_title_condensed_on_adopt(self, db_session) -> None:
+        ws_id = await _make_workspace(db_session)
+        name = "2026-10-16-condense-adopt"
+        await _seed_change_row(db_session, ws_id, name, name)
+        await _adopt_cli_title(db_session, ws_id, name, self._LONG_BLOB)
+        row = await _get_change(db_session, ws_id, name)
+        assert row.title == "change 文件树「刷新」同步链路三层静默失败"
+        assert len(row.title) <= 30 and not row.title.endswith("…")
+
+    async def test_short_title_adopted_verbatim(self, db_session) -> None:
+        """≤30 字上行标题原样收养（既有收养行为不回归）。"""
+        ws_id = await _make_workspace(db_session)
+        name = "2026-10-16-condense-verbatim"
+        await _seed_change_row(db_session, ws_id, name, None)
+        await _adopt_cli_title(db_session, ws_id, name, "知识页伪域池一键归位")
+        assert (await _get_change(db_session, ws_id, name)).title == "知识页伪域池一键归位"
+
+    async def test_condense_to_empty_aborts_adopt(self, db_session) -> None:
+        """提炼结果为空串（纯边界标点长串）→ 放弃收养，行内 title 不动。"""
+        ws_id = await _make_workspace(db_session)
+        name = "2026-10-16-condense-empty"
+        await _seed_change_row(db_session, ws_id, name, name)
+        await _adopt_cli_title(db_session, ws_id, name, "…" * 31)
+        assert (await _get_change(db_session, ws_id, name)).title == name
+
+    async def test_placeholder_row_long_title_condensed(self, db_session) -> None:
+        """占位建行入口同防御：行缺失时超长 body title 提炼后落库。"""
+        from app.modules.change.model import Change
+
+        ws_id = await _make_workspace(db_session)
+        name = "2026-10-16-condense-placeholder"
+        body = {
+            "changes": [
+                {
+                    "name": name,
+                    "current_stage": "execute",
+                    "status": "in_progress",
+                    "title": self._LONG_BLOB,
+                }
+            ]
+        }
+        from app.modules.platform_sync.service import PlatformSyncService
+
+        await PlatformSyncService(db_session)._ensure_change_row(ws_id, name, body)
+        row = (
+            (
+                await db_session.execute(
+                    select(Change).where(Change.workspace_id == ws_id, Change.change_key == name)
+                )
+            )
+            .scalars()
+            .one()
+        )
+        assert row.title == "change 文件树「刷新」同步链路三层静默失败"
+
+
 # ── _sync_docs 存量 MASTER 脏行清理（P3 收敛环）───────────────────────────────
 
 

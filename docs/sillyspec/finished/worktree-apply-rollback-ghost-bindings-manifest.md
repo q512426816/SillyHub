@@ -46,3 +46,15 @@
 **测试**：apply-conflict-hardening + binding-extract + dynamic 三族 24/24 本日复跑绿；
 坑内「未提交需收编」注：补丁仍在工具仓工作树（`worktree-apply.js`/`test-bindings.js`/
 `plan-postcheck.js` 为并行会话在途集），随其变更收口。归档。
+
+## 第四坑（同批实证）：cli.ts drivers 装配行漏改——providers.ts 加键 ≠ 引擎可用
+
+- **现象**：dsh 与 zcode 两变更交付后，真机建会话抛 `UNSUPPORTED_PROVIDER: only 'claude' supported in Wave1/2`（腾讯云桌面机 daemon 实证，两引擎各一中招）。
+- **根因**：`sillyhub-daemon/src/cli.ts` 的 SessionManager `deps.drivers` 装配是硬编码白名单 `{claude, codex, pi, cursor}`——`_getDriver` 走 deps.drivers 注入而非 descriptor 的 createDriver 工厂（agent-provider-onboarding.md §4.2「三处硬编码必改点」①）。两变更都只改了 providers.ts 聚合表（②前端单一源与③backend Literal 均已覆盖），①双双漏改；两变更的 e2e 冒烟测试都直构 driver 未走 cli 装配，测试面盲区未被暴露。
+- **修复（已实施，545f7df7c）**：装配行展开为逐行 map 含 `dsh: new DshAcpDriver()` / `zcode: new ZcodeAppServerDriver()`，bundle 重建热替换桌面机 daemon（备份 .bak-manual-20261017-000621）。
+- **建议**：①补守护测试——drivers 装配键集 ⊇ INTERACTIVE_PROVIDERS 键集（源读取式，防第三连败）；②两变更的冒烟测试加「走 cli.ts 装配路径」的集成形态断言。
+## 第五/六坑（真机复测连环）：zcode setModel 形状 + dsh 引擎版本不达标
+
+- **zcode setModel**：驱动传字符串 model → ZCode zod Pu schema 要求 `model = { providerId, modelId }` 对象（Invalid params expected object received string，会话 7327927a 实证）。修复：`_applyModel` 传 `{ providerId: ZCODE_PROVIDER_ID(sillyhub), modelId: model }`（1b2197708）；形状从 zcode.cjs Pu= 定义挖出。
+- **dsh 版本**：桌面机装的是 0.1.0-rc.6（低于 MIN_VERSIONS 0.2.1 警告门）且 **acp profile 不存在**（0.1.x 无此 profile，`dsh --profile acp` 报 does not exist; create it with plugin add）——会话创建挂起 31s 无回报被 session_end 杀（29fafb16 实证）。修复：升级 `@deepseek-ai/dsh@0.2.0-rc.2`（runtime 注册版本已刷为 0.2.0），`dsh --profile acp` stdio initialize 握手实测通过（agentInfo=deepseek-harness-acp）。
+- **教训**：MIN_VERSIONS 警告不硬拒的设计下，引擎「可探测」≠「可用」——acp profile 这类能力缺失要靠真机冒烟首轮暴露；新引擎上线前的真机冒烟应作为发布清单必过项（本次两坑都是跳过冒烟直接交付的后果）。

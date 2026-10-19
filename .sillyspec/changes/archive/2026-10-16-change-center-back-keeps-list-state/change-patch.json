@@ -1,0 +1,125 @@
+{
+  "change": "2026-10-16-change-center-back-keeps-list-state",
+  "baseline": "39b17126f8da79c0193e42a52ab399f18e9a9088",
+  "head": "3963621a86777b6dc2696f5118a8f1fa1125edc2",
+  "files": [
+    "backend/app/modules/change/tests/test_title_backfill.py",
+    "frontend/src/app/(dashboard)/workspaces/[id]/changes/[cid]/__tests__/page-back-to-list.test.tsx",
+    "frontend/src/app/(dashboard)/workspaces/[id]/changes/[cid]/page.tsx",
+    "frontend/src/app/(dashboard)/workspaces/[id]/changes/__tests__/page.test.tsx",
+    "frontend/src/app/(dashboard)/workspaces/[id]/changes/page.tsx"
+  ],
+  "totals": {
+    "files": 5,
+    "additions": 584,
+    "deletions": 19
+  },
+  "savedAt": "2026-10-16T13:46:35.530Z",
+  "note": "flow done 时点冻结（本变更可归属交付面：baseline..HEAD 提交面过滤 .sillyspec/ 只留 .sillyspec/docs/ 交付文档 + 独占树未提交交付；治理工件目录不入冻结——2026-10-12-close-trace-freeze-integrity FR-01）",
+  "modules": [
+    {
+      "id": "change",
+      "files": 1,
+      "doc": "docs/backend/modules/change.md",
+      "docTouched": false,
+      "docMissing": false
+    },
+    {
+      "id": "backend",
+      "files": 1,
+      "doc": "docs/multi-agent-platform/modules/backend.md",
+      "docTouched": false,
+      "docMissing": false
+    },
+    {
+      "id": "frontend",
+      "files": 4,
+      "doc": "docs/multi-agent-platform/modules/frontend.md",
+      "docTouched": false,
+      "docMissing": false
+    },
+    {
+      "id": "change",
+      "files": 1,
+      "doc": "docs/SillyHub/modules/change.md",
+      "docTouched": false,
+      "docMissing": false
+    },
+    {
+      "id": "frontend_app",
+      "files": 4,
+      "doc": "docs/SillyHub/modules/frontend_app.md",
+      "docTouched": false,
+      "docMissing": false
+    }
+  ],
+  "uncoveredDirs": [],
+  "moduleMaps": [
+    "docs/backend/modules/_module-map.yaml",
+    "docs/frontend/modules/_module-map.yaml",
+    "docs/multi-agent-platform/modules/_module-map.yaml",
+    "docs/SillyHub/modules/_module-map.yaml",
+    "docs/sillyhub-daemon/modules/_module-map.yaml"
+  ],
+  "acceptedDirtyGap": 14,
+  "scopeAudit": {
+    "mode": "full-flow",
+    "ok": true,
+    "degradedReason": null,
+    "baseAnchor": "39b17126f8da79c0193e42a52ab399f18e9a9088",
+    "totals": {
+      "files": 5,
+      "additions": 584,
+      "deletions": 19
+    },
+    "rows": [
+      {
+        "path": "backend/app/modules/change/tests/test_title_backfill.py",
+        "additions": 190,
+        "deletions": 0,
+        "kind": "new",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": "frontend/src/app/(dashboard)/workspaces/[id]/changes/[cid]/__tests__/page-back-to-list.test.tsx",
+        "additions": 148,
+        "deletions": 0,
+        "kind": "new",
+        "planned": "新增",
+        "verdict": "planned"
+      },
+      {
+        "path": "frontend/src/app/(dashboard)/workspaces/[id]/changes/[cid]/page.tsx",
+        "additions": 43,
+        "deletions": 5,
+        "kind": "modified",
+        "planned": "修改",
+        "verdict": "planned"
+      },
+      {
+        "path": "frontend/src/app/(dashboard)/workspaces/[id]/changes/__tests__/page.test.tsx",
+        "additions": 112,
+        "deletions": 0,
+        "kind": "modified",
+        "planned": "修改",
+        "verdict": "planned"
+      },
+      {
+        "path": "frontend/src/app/(dashboard)/workspaces/[id]/changes/page.tsx",
+        "additions": 91,
+        "deletions": 14,
+        "kind": "modified",
+        "planned": "修改",
+        "verdict": "planned"
+      }
+    ],
+    "excluded": {
+      "foreignDeclared": []
+    },
+    "note": "flow done 时点冻结（本文件落盘时采集）",
+    "closedBy": "flow done"
+  },
+  "patchSha256": "9deacbb5317cbf903f6569e941544630c679f6751781d0e2c9b6aada070d0364",
+  "patchStatus": "ok"
+}

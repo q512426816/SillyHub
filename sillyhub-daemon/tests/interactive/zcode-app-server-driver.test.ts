@@ -17,6 +17,7 @@ import { spawn } from 'node:child_process';
 import {
   ZcodeAppServerDriver,
   ZcodeExecutableNotFoundError,
+  redactEnvValueForLog,
   type ZcodeHandle,
   type ZcodeStartOptions,
   type ZcodeSessionPermissionHooks,
@@ -176,9 +177,18 @@ class FakeZcodeServer {
           messages: [],
           settings: {},
         });
+        // 真机行为：create 后服务端推 state.updated 模型目录（驱动 setModel 前置等待）
+        // reasoning 形状 = 2026-10-17 探针钉板：levels 对象数组 + defaultLevel 末档
+        this.emitNotification('state.updated', {
+          sessionId: ZSID,
+          patch: { model: { current: { providerId: 'sillyhub', modelId: 'glm-5.3' }, available: [{ ref: { providerId: 'sillyhub', modelId: 'glm-5.3' }, label: 'glm-5.3', contextWindow: 200000, maxOutputTokens: 128000, reasoning: { levels: [{ value: 'low' }, { value: 'high' }, { value: 'max' }], defaultLevel: 'max' } }] } },
+        });
         return;
       case 'session/subscribe':
         this.reply(req.id, {});
+        return;
+        // 模型目录就绪信号（驱动 setModel 前等待 state.updated）
+        this.emitNotification('state.updated', { sessionId: ZSID, patch: { model: { current: { providerId: 'sillyhub', modelId: 'glm-5.3' }, available: [{ ref: { providerId: 'sillyhub', modelId: 'glm-5.3' }, label: 'glm-5.3', contextWindow: 200000, maxOutputTokens: 128000, reasoning: { levels: [] } }] } } });
         return;
       case 'session/setModel':
         this.reply(req.id, {});
@@ -358,6 +368,12 @@ describe('consume 全链路（ready → create/subscribe → send → 流式 →
       sessionId: ZSID,
       deliveryKind: 'desktop-continuous',
     });
+    // setModel 带引擎自报默认 reasoningLevel（JSON-RPC 对象路径严格校验必需——
+    // 缺失即「Reasoning level is required」，2026-10-17 探针 + 真机双实证）
+    expect(server.requestsOf('session/setModel')[0]?.params).toEqual({
+      sessionId: ZSID,
+      model: { providerId: 'sillyhub', modelId: 'glm-5.3', options: { reasoningLevel: 'max' } },
+    });
 
     // 事件流：session_started + text delta
     const allEvents = envelopes.flatMap((e) => e.events as Array<Record<string, unknown>>);
@@ -381,6 +397,78 @@ describe('consume 全链路（ready → create/subscribe → send → 流式 →
       api_duration_ms: 800,
     });
     expect(errors).toHaveLength(0);
+  }, 15_000);
+
+  it('setModel 目录精确命中（大小写一致）同样附带 options.reasoningLevel（评审 P2 回归钉：推导不得内联在大小写分支）', async () => {
+    const child = createFakeChild();
+    vi.mocked(spawn).mockReturnValue(child as never);
+    const server = new FakeZcodeServer(child);
+    // model 与目录条目同为 'glm-5.3'（精确命中）——旧实现 while 条件直接退出、
+    // reasoningLevel 未赋值 → 裸发被引擎严格路径拒「Reasoning level is required」
+    const driver = new ZcodeAppServerDriver();
+    const iq = makeInputQueue();
+    const handle = (await driver.start(iq.queue, makeOpts({ model: 'glm-5.3' }))) as ZcodeHandle;
+    const { cb } = makeCallbacks();
+    const consumePromise = driver.consume(handle, cb);
+    await until(() => vi.mocked(spawn).mock.calls.length > 0);
+    server.startReady();
+    await until(() => server.requestsOf('session/setModel').length > 0);
+    iq.close();
+    await consumePromise;
+    expect(server.requestsOf('session/setModel')[0]?.params).toEqual({
+      sessionId: ZSID,
+      model: { providerId: 'sillyhub', modelId: 'glm-5.3', options: { reasoningLevel: 'max' } },
+    });
+  }, 15_000);
+
+  it('setModel 目录 60s 等待超时（注入小窗口）→ 兜底裸发字符串 modelId（无 options）+ 目录快照 warn', async () => {
+    const child = createFakeChild();
+    vi.mocked(spawn).mockReturnValue(child as never);
+    const server = new FakeZcodeServer(child);
+    // 目录只有 glm-5.3，请求 no-such-model → 永不命中 → 超时裸发（非致命语义）
+    const driver = new ZcodeAppServerDriver({ catalogWaitTimeoutMs: 300 });
+    const iq = makeInputQueue();
+    const handle = (await driver.start(iq.queue, makeOpts({ model: 'no-such-model' }))) as ZcodeHandle;
+    const { cb } = makeCallbacks();
+    const consumePromise = driver.consume(handle, cb);
+    await until(() => vi.mocked(spawn).mock.calls.length > 0);
+    server.startReady();
+    await until(() => server.requestsOf('session/setModel').length > 0);
+    iq.close();
+    await consumePromise;
+    expect(server.requestsOf('session/setModel')[0]?.params).toEqual({
+      sessionId: ZSID,
+      model: { providerId: 'sillyhub', modelId: 'no-such-model' },
+    });
+  }, 15_000);
+
+  it('consume 自然退出（iq.close）→ finally 对齐 codex：清 _finishTurnOnClose 槽位 + 兜底 close（幂等单次）（2026-10-17-audit-risk-followup）', async () => {
+    const child = createFakeChild();
+    vi.mocked(spawn).mockReturnValue(child as never);
+    const server = new FakeZcodeServer(child);
+    const driver = new ZcodeAppServerDriver();
+    const iq = makeInputQueue();
+    const handle = (await driver.start(iq.queue, makeOpts({ model: 'GLM-5.3' }))) as ZcodeHandle;
+    const { cb, results } = makeCallbacks();
+
+    const consumePromise = driver.consume(handle, cb);
+    await until(() => vi.mocked(spawn).mock.calls.length > 0);
+    server.startReady();
+    await until(() => server.requestsOf('session/setModel').length > 0);
+    iq.push('只回复两个字：乒乓');
+    await until(() => results.length > 0);
+
+    // 自然退出路径（非 terminateSession 发起 close）：finally 必须自清槽位并
+    // 兜底 close 子进程——旧实现两步全缺，槽位闭包滞留到 GC、子进程回收完全
+    // 依赖外部 close 链（codex 同位有 delete + await close，zcode 缺席）。
+    const closeSpy = vi.spyOn(handle, 'close');
+    iq.close();
+    await consumePromise;
+
+    expect(closeSpy).toHaveBeenCalledTimes(1);
+    expect(
+      (handle as { _finishTurnOnClose?: () => void })._finishTurnOnClose,
+    ).toBeUndefined();
   }, 15_000);
 
   it('ready 门超时 → 结构化 error result（failed）', async () => {
@@ -730,10 +818,12 @@ describe('写盘器 api_format 词表映射（buildZcodeProviderConfig）', () =
     const config = (
       content as {
         config: {
-          providerConfigRules: Array<{ config: { api: { type: string; baseUrl: string } } }>;
+          providerConfigRules: {
+            providerRules: Array<{ config: { api: { type: string; baseUrl: string } } }>;
+          };
         };
       }
-    ).config.providerConfigRules[0]!.config;
+    ).config.providerConfigRules.providerRules[0]!.config;
     return config.api;
   }
 
@@ -762,5 +852,29 @@ describe('写盘器 api_format 词表映射（buildZcodeProviderConfig）', () =
       expect(api.type).toBe('anthropic-messages');
       expect(api.baseUrl).toBe('https://api.upstream.example');
     }
+  });
+});
+
+describe('redactEnvValueForLog 脱敏（2026-10-18-audit-log-redact-yaml-quote）', () => {
+  it('代理 URL userinfo 段打码，host/port 保留供诊断', () => {
+    expect(redactEnvValueForLog('HTTPS_PROXY', 'http://user:secret@proxy.example.com:3128')).toBe(
+      'http://***@proxy.example.com:3128',
+    );
+    expect(redactEnvValueForLog('ALL_PROXY', 'socks5://alice@10.0.0.2:1080')).toBe(
+      'socks5://***@10.0.0.2:1080',
+    );
+  });
+
+  it('KEY/TOKEN 键整值 <redacted>（密钥本体不落日志）', () => {
+    expect(redactEnvValueForLog('ANTHROPIC_API_KEY', 'sk-ant-secret')).toBe('<redacted>');
+    expect(redactEnvValueForLog('ANTHROPIC_AUTH_TOKEN', 'tok-yyy')).toBe('<redacted>');
+  });
+
+  it('普通值透传 + 60 字符截断语义保留', () => {
+    expect(redactEnvValueForLog('ANTHROPIC_BASE_URL', 'https://api.example.com')).toBe(
+      'https://api.example.com',
+    );
+    const long = 'x'.repeat(80);
+    expect(redactEnvValueForLog('ZCODE_DATA_BASE_DIR', long)).toBe('x'.repeat(60));
   });
 });

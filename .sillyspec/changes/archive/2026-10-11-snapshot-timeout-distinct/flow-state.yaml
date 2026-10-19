@@ -36,3 +36,4 @@ spec_approved_by: anon@DESKTOP-HJ0AM09
 upgrade_reason: verify 实测失败（实测失败：test（命令与输出尾部见上；修复后重跑 --done 不丢进度））——失败自动升厚
 gate_summary: 'test: —｜lint: —｜门文件 16 个'
 
+commit_type: fix

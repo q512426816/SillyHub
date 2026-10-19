@@ -667,3 +667,100 @@ supersedes：D-005@v1
 理由：（落选）不选混合双通道。
 否决理由：两套触发路径 = 最大复杂度；收益与 A 重叠（A 已覆盖查询正确性）；维护两份同步态。
 复潮条件：同 D-012。
+
+## D-backend-025@v1 治理技术方案选型——子进程封装 + WS 推送 + 预览持久化（方案 A）
+状态：implemented
+变更：2026-10-16-backend-mem-polling
+原编号：D-001@v1
+锚点：backend/app/modules/knowledge/vector_search.py:137
+最近确认：439cdc46c
+理由：**方案 A**。四个机制组合：①嵌入计算子进程封装（闲置自退+OOM 保主进程）；②change-writes 改 WS 事件推送，30s 轮询降 120s 兜底；③会话标题预览持久化为列；④部署内存配额重分配。
+
+## D-backend-026@v1 深扫发现的三处高危内存缺陷纳入本变更任务面
+状态：implemented
+变更：2026-10-16-backend-mem-polling
+原编号：D-004@v1
+锚点：backend/app/modules/knowledge/vector_search.py:168
+最近确认：439cdc46c
+理由：纳入。①knowledge/vector_search.py `_indexes` 无界索引缓存（LRU 工作区上限）；②spec_workspace/service.py `_bundle_gzip_cache` 无全局帽（128MB LRU）；③permission_service.py 权限定时器 pin 已关 session 且 route_key None 路径不提交（idle-in-transaction 元凶，新开短 session+全路径提交）。中危配套（ws_hub _pending_rpcs 泄漏两径/disconnect 无身份校验/附件先读后检/WS 大消息日志）一并治理。
+
+## D-backend-027@v1 执行期裁决——task-04 disconnect 身份校验需调用方透传 ws（边界微扩）
+状态：implemented
+变更：2026-10-16-backend-mem-polling
+原编号：D-005@v1
+锚点：backend/app/modules/daemon/ws_hub.py:114
+最近确认：439cdc46c
+理由：disconnect 加可选 ws 参数（不传保持旧语义向后兼容）；gateway_misc.py 调用点 +1 行透传。非破坏性（可选参数、1 行接线），随 task-04 一并提交。
+
+## D-backend-028@v1 full-tree 冲突记录的兜底读由后端承担（不是 daemon）
+状态：implemented
+变更：2026-10-16-conflict-full-tree-compare
+原编号：D-001@v1
+锚点：未记录
+最近确认：d3c425bf6
+理由：用户确认放后端——后端在 daemon 返回 `conflict_record_missing` 时，以记录名 `full-tree` 重发快照 RPC，并在平台侧按该变更路径前缀过滤后做对比。理由：平台部署即生效，不依赖每台机器 daemon 自更新（daemon 侧修复要等自更新铺开）。
+故障面：缺失场景多一次 RPC 往返；后端必须自证「路径归属」过滤正确——漏过滤会把别的变更的文件混入对比。
+退役判据：CLI 侧记录命名与平台行归因口径统一（记录名即变更名）后，本兜底可删。
+
+## D-backend-029@v1 「裁决」本轮不修，跨变更记录的裁决留 CLI 侧后续 change
+状态：implemented
+变更：2026-10-16-conflict-full-tree-compare
+原编号：D-002@v1
+锚点：未记录
+最近确认：d3c425bf6
+理由：用户确认本轮只修对比+文案；裁决入口行为保持现状，平台对该类行的正确引导是「重新同步」或 CLI 侧 `sillyspec platform resolve full-tree`；CLI 口径改动另开 change。
+
+## D-backend-030@v1 新增平台侧「标记已处理」关闭入口（复用已有 resolve 接口）
+状态：implemented
+变更：2026-10-16-conflict-full-tree-compare
+原编号：D-003@v1
+锚点：未记录
+最近确认：d3c425bf6
+理由：用户确认加——冲突行上加「标记已处理」，调用已有 `POST /api/workspaces/{workspace_id}/spec-conflicts/{conflict_id}/resolve`，仅可操作者（canOperate）可见/可点。
+
+## D-backend-031@v2 兜底裁剪输入面与来源提示语义修订（supersedes D-006@v1）
+状态：implemented
+变更：2026-10-16-conflict-full-tree-compare
+原编号：D-006@v2
+锚点：未记录
+最近确认：d3c425bf6
+理由：修订为——归属校验与裁剪一律以 **`snapshot.files[].path`** 为输入（entry 保持完整，与 `_build_spec_tree_compare` 的消费面一致）；`path_total` 语义＝**兜底快照返回的路径总数**（受 daemon 300 路径帽截断，不声称记录真实总数）；来源提示为**固定说明行、无关闭控件**（告知性质；如需关闭控件另开）。
+supersedes：D-006@v1
+
+## D-backend-032@v1 实现方案选定——后端「失败即重试 full-tree」兜底（方案 A）
+状态：implemented
+变更：2026-10-16-conflict-full-tree-compare
+原编号：D-009@v1
+锚点：未记录
+最近确认：d3c425bf6
+理由：用户选定方案 A：compare 端点收到 `conflict_record_missing` 时以 `change='full-tree'` 重发一次快照 RPC，后端校验该变更路径在记录内并裁成该变更范围后走既有 diff；响应标注记录来源。理由要点：与 D-001 一致（平台侧落地、无 daemon 依赖）、落地面最小、部署即生效；B/C 的抗未来命名变化收益在 CLI 口径未变前属过度设计且需跨端发布。
+故障面：多一次 RPC 往返（仅缺失场景）；裁剪逻辑若按前缀误配（如变更名前缀互相包含）会把无关路径带入——实现需按 `changes/(archive/)?<change>/` 段边界匹配并以测试钉住。
+退役判据：CLI 记录命名与平台行归因口径统一（记录名=变更名）后，兜底删除回落到单次 RPC。
+
+## D-backend-033@v1 落选——平台行携带记录名（方案 B）
+状态：rejected
+变更：2026-10-16-conflict-full-tree-compare
+原编号：D-010@v1
+锚点：未记录
+最近确认：d3c425bf6
+理由：方案 B 落选（用户选 A）。
+否决理由：需改外部 CLI 仓并发布，存量行无该字段仍要兜底，跨仓联动周期长、收益兑现慢。
+复潮条件：CLI 侧因其他需求必须改动 spec-sync 推送负载（顺带携带记录名零成本）时，可重议并以「记录名直读」取代名字兜底。
+
+## D-sillyhub-daemon-001@v1 落选——新增 daemon「列记录」RPC（方案 C）
+状态：rejected
+变更：2026-10-16-conflict-full-tree-compare
+原编号：D-011@v1
+锚点：未记录
+最近确认：d3c425bf6
+理由：方案 C 落选（用户选 A）。
+否决理由：必须等 daemon 自更新铺开才生效，新增 RPC 带来协议/权限/测试成本，而当前机器侧只有 full-tree 一种已成形形态，收益是假想的未来变化。
+复潮条件：机器侧出现第三种以上记录命名形态（如按工作区/轮次改名）导致「猜名字」清单不可维护时，重议升级为目录发现。
+
+## D-backend-034@v1 首轮独立审查其余修订项（分支键/失效键/关闭范围/保真损失）
+状态：implemented
+变更：2026-10-16-conflict-full-tree-compare
+原编号：D-012@v1
+锚点：未记录
+最近确认：d3c425bf6
+理由：全部按审查结论修订进 design/requirements/tasks——①失败卡分支键＝`details.daemon_code`（daemon 业务失败时外层 `ApiError.code` 恒为 `HTTP_502_DAEMON_RPC_REMOTE`，不可作键；离线/超时臂按外层 `HTTP_504_DAEMON_RUNTIME_OFFLINE` / `HTTP_504_DAEMON_RPC_TIMEOUT`）；②关闭成功后 invalidate 键＝`["platform-sync-section","spec-conflicts",workspaceId]`（`QUERY_KEY_ROOT=["platform-sync-section"]` 实际值）；③「标记已处理」关闭范围＝整条注册表记录（一条记录可含多个变更名，并列展示的兄弟行会一起消失），写进确认文案并记 R-07；④兜底命中时 `ql_id` 恒 null、archive 路径排序沉底、>300 路径时属该变更的路径可能被帽截掉（表现为缺路径）——均接受为已知边界，记 R-08/R-02。

@@ -1,0 +1,470 @@
+diff --git a/backend/app/modules/change/router.py b/backend/app/modules/change/router.py
+index 4623265de..174e3d19b 100644
+--- a/backend/app/modules/change/router.py
++++ b/backend/app/modules/change/router.py
+@@ -351,6 +351,9 @@ async def list_changes(
+     # 透传 service.list_（_is_thin_lineage 三分支投影口径，含归档兜底行）；
+     # 缺省/未知值不过滤（对齐 sort 白名单 fallback 风格）。
+     lineage: str | None = Query(None),
++    # 2026-10-18-change-list-type-filter：类型筛选（conventional 前缀 + 旧枚举），
++    # 透传 service.list_（feat 别名等价命中旧值 feature）；白名单外/缺省不过滤。
++    change_type: str | None = Query(None),
+     # task-02（2026-08-13-change-center-rework / D-004 / FR-02 / FR-04）：排序白名单
+     # 透传 service.list_（默认 updated_at desc，最近活动优先，R-05）。
+     sort: str = Query("updated_at_desc"),
+@@ -370,6 +373,7 @@ async def list_changes(
+         search=search,
+         current_stage=current_stage,
+         lineage=lineage,
++        change_type=change_type,
+         sort=sort,
+         pending_review_only=pending_review_only,
+         page=page,
+diff --git a/backend/app/modules/change/service.py b/backend/app/modules/change/service.py
+index 4cdc95c24..a0f351726 100644
+--- a/backend/app/modules/change/service.py
++++ b/backend/app/modules/change/service.py
+@@ -187,6 +187,10 @@ class ChangeService:
+         search: str | None = None,
+         current_stage: str | None = None,
+         lineage: str | None = None,
++        # 2026-10-18-change-list-type-filter：类型筛选（git conventional 前缀 +
++        # 旧枚举值），feat 等价命中旧值 feature（与显示层映射口径一致）；
++        # 白名单外/缺省不过滤（对齐 sort/lineage fallback 风格）。
++        change_type: str | None = None,
+         sort: str = "updated_at_desc",
+         pending_review_only: bool = False,
+         page: int = 1,
+@@ -273,6 +277,12 @@ class ChangeService:
+                 pass
+         if current_stage:
+             base = base.where(col(Change.current_stage) == current_stage)
++        # 2026-10-18-change-list-type-filter：类型筛选（feat 别名命中旧值 feature，
++        # 筛「feat」不漏存量旧值行）；白名单外不过滤（对齐 lineage/sort fallback 风格）。
++        ctype_norm = (change_type or "").strip().lower()
++        if ctype_norm in self._CHANGE_TYPE_FILTER_WHITELIST:
++            aliases = self._CHANGE_TYPE_FILTER_ALIASES.get(ctype_norm, (ctype_norm,))
++            base = base.where(col(Change.change_type).in_(aliases))
+         if search:
+             pattern = f"%{search}%"
+             # 2026-09-28-change-list-description：description 入搜索面——title 归一化
+@@ -2188,6 +2198,28 @@ class ChangeService:
+ 
+     # thin 分流上线日（thin-badge-survives-archive D-001）：此后变更才按轻量出身。
+     _THIN_FLOW_LIVE_SINCE = datetime(2026, 9, 25, tzinfo=UTC)
++
++    # 2026-10-18-change-list-type-filter：类型筛选白名单（conventional 前缀 + 旧枚举）
++    # 与别名展开（feat 等价命中旧值 feature——显示层 feature→feat 映射的逆口径）。
++    _CHANGE_TYPE_FILTER_WHITELIST = frozenset(
++        {
++            "feat",
++            "fix",
++            "docs",
++            "chore",
++            "test",
++            "refactor",
++            "perf",
++            "build",
++            "style",
++            "ci",
++            "revert",
++            "feature",
++            "prototype",
++            "quick",
++        }
++    )
++    _CHANGE_TYPE_FILTER_ALIASES: dict[str, tuple[str, ...]] = {"feat": ("feat", "feature")}
+     # 标准工作流阶段痕迹（步骤 stage 命中任一即非 thin 出身）。
+     _THIN_LINEAGE_EXCLUDE_STAGES = frozenset({"brainstorm", "plan", "execute", "verify"})
+ 
+diff --git a/backend/app/modules/change/tests/test_change_lineage_filter.py b/backend/app/modules/change/tests/test_change_lineage_filter.py
+index 1731f68fb..b86bf84a3 100644
+--- a/backend/app/modules/change/tests/test_change_lineage_filter.py
++++ b/backend/app/modules/change/tests/test_change_lineage_filter.py
+@@ -284,3 +284,44 @@ async def test_lineage_deleted_rows_never_thin_matches_is_thin_projection(
+     rows, _ = await service.list_(ws.id, location="archive")
+     enriched = await service.enrich_summaries(rows)
+     assert [(s.change_key, s.is_thin) for s in enriched] == [("c-tombstone-quick", False)]
++
++
++# ── 2026-10-18-change-list-type-filter：类型筛选（change_type 参数）──────────
++
++
++@pytest.mark.asyncio
++async def test_change_type_filter_feat_aliases_legacy_feature(db_session: AsyncSession) -> None:
++    """feat 筛选等价命中旧值 feature（显示层 feature→feat 映射的逆口径，存量行不漏筛）。"""
++    ws = await _make_workspace(db_session)
++    service = ChangeService(db_session)
++    await _make_change(db_session, ws.id, "c-feat-new", change_type="feat")
++    await _make_change(db_session, ws.id, "c-feat-legacy", change_type="feature")
++    await _make_change(db_session, ws.id, "c-fix", change_type="fix")
++
++    items, total = await service.list_(ws.id, change_type="feat")
++    assert {c.change_key for c in items} == {"c-feat-new", "c-feat-legacy"}
++    assert total == 2
++
++
++@pytest.mark.asyncio
++async def test_change_type_filter_exact_match_and_fallback(db_session: AsyncSession) -> None:
++    """非别名类型精确匹配；白名单外/缺省值不过滤（对齐 lineage/sort fallback 风格）。"""
++    ws = await _make_workspace(db_session)
++    service = ChangeService(db_session)
++    await _make_change(db_session, ws.id, "c-fix", change_type="fix")
++    await _make_change(db_session, ws.id, "c-prototype", change_type="prototype")
++    await _make_change(db_session, ws.id, "c-none", change_type=None)
++
++    # fix 精确匹配（feature/feat 行不混入）
++    items, total = await service.list_(ws.id, change_type="fix")
++    assert {c.change_key for c in items} == {"c-fix"}
++    assert total == 1
++    # prototype 旧值可筛
++    items_proto, _ = await service.list_(ws.id, change_type="prototype")
++    assert {c.change_key for c in items_proto} == {"c-prototype"}
++    # 白名单外值不过滤（全部返回）
++    _, total_garbage = await service.list_(ws.id, change_type="garbage")
++    assert total_garbage == 3
++    # 缺省不过滤
++    _, total_none = await service.list_(ws.id)
++    assert total_none == 3
+diff --git a/frontend/src/app/(dashboard)/workspaces/[id]/changes/__tests__/page.test.tsx b/frontend/src/app/(dashboard)/workspaces/[id]/changes/__tests__/page.test.tsx
+index 44d96bb77..97789a333 100644
+--- a/frontend/src/app/(dashboard)/workspaces/[id]/changes/__tests__/page.test.tsx
++++ b/frontend/src/app/(dashboard)/workspaces/[id]/changes/__tests__/page.test.tsx
+@@ -968,6 +968,42 @@ describe("变更中心列表页（task-06 重做行为 + useQuery 改造）", ()
+     );
+   });
+ 
++  // ── 2026-10-18-change-list-type-filter：类型标签 + 类型筛选 ──
++
++  it("行 meta 显示类型彩色标签：fix 原值、feature 等价映射 feat、空值零占位", async () => {
++    setupListChanges({
++      items: [
++        makeChange({ id: "ch-fix", change_key: "fix-change", change_type: "fix" }),
++        makeChange({ id: "ch-feat", change_key: "feat-change", change_type: "feature" }),
++        makeChange({ id: "ch-none", change_key: "none-change", change_type: null }),
++      ],
++      total: 3,
++    });
++    await renderAndWait();
++    const chips = screen.getAllByTestId("commit-type-chip");
++    // fix 原值红阶 + feature 显示层映射 feat（数据不动）；null 行零占位 → 恰 2 枚
++    expect(chips.map((c) => c.textContent)).toEqual(["fix", "feat"]);
++    expect(chips.at(0)!.className).toContain("border-red");
++  });
++
++  it("类型下拉选择「fix」→ listChanges 收到 changeType=fix；重置后清除", async () => {
++    await renderAndWait();
++    expect(lastMainLoadParams()?.changeType).toBeUndefined();
++
++    fireEvent.mouseDown(screen.getByLabelText("筛选类型"));
++    fireEvent.click(await screen.findByText("fix（修复）"));
++    await waitFor(() =>
++      expect(lastMainLoadParams()?.changeType).toBe("fix"),
++    );
++
++    await act(async () => {
++      fireEvent.click(screen.getByRole("button", { name: /重\s*置/ }));
++    });
++    await waitFor(() =>
++      expect(lastMainLoadParams()?.changeType).toBeUndefined(),
++    );
++  });
++
+   it("分类下拉选择「完整变更」→ lineage=full；阶段下拉不含「轻量变更」选项", async () => {
+     await renderAndWait();
+ 
+@@ -1123,6 +1159,7 @@ describe("列表状态 URL 快照（2026-10-16-change-center-back-keeps-list-sta
+         search: "",
+         stageFilter: "",
+         lineageFilter: "",
++        typeFilter: "",
+         focusMine: false,
+         sortDir: "updated_at_desc",
+         page: 3,
+@@ -1136,6 +1173,7 @@ describe("列表状态 URL 快照（2026-10-16-change-center-back-keeps-list-sta
+         search: "",
+         stageFilter: "",
+         lineageFilter: "",
++        typeFilter: "",
+         focusMine: false,
+         sortDir: "updated_at_desc",
+         page: 1,
+diff --git a/frontend/src/app/(dashboard)/workspaces/[id]/changes/page.tsx b/frontend/src/app/(dashboard)/workspaces/[id]/changes/page.tsx
+index 483db7984..71a4c69e1 100644
+--- a/frontend/src/app/(dashboard)/workspaces/[id]/changes/page.tsx
++++ b/frontend/src/app/(dashboard)/workspaces/[id]/changes/page.tsx
+@@ -25,6 +25,7 @@ import { Button, buttonVariants } from "@/components/ui/button";
+ import { ErrorBanner } from "@/components/ui/error-banner";
+ import { ChangeStepBadge } from "@/components/changes/change-step-badge";
+ import { ChangeActivityBadge } from "@/components/changes/change-activity-badge";
++import { CommitTypeChip } from "@/components/changes/commit-type-chip";
+ import { PlatformSyncSection } from "@/components/changes/platform-sync-section";
+ import { QuicklogDrawer } from "@/components/changes/quicklog-drawer";
+ import { QuicklogTable } from "@/components/changes/quicklog-table";
+@@ -84,7 +85,7 @@ function parseTab(v: string | null): ChangesTab {
+ 
+ /**
+  * 构造列表状态 querystring（写回用）：空值/默认值参数省略——默认状态 URL 干净。
+- * 参数名固定：tab / search / stage / lineage / mine / sort / page / pageSize。
++ * 参数名固定：tab / search / stage / lineage / type / mine / sort / page / pageSize。
+  * 导出供详情页返回测试钉两端参数名契约（back 目标 query ↔ 本页解析端）。
+  */
+ export function buildChangesQuery(s: {
+@@ -92,6 +93,7 @@ export function buildChangesQuery(s: {
+   search: string;
+   stageFilter: string;
+   lineageFilter: string;
++  typeFilter: string;
+   focusMine: boolean;
+   sortDir: SortDir;
+   page: number;
+@@ -102,6 +104,7 @@ export function buildChangesQuery(s: {
+   if (s.search) p.set("search", s.search);
+   if (s.stageFilter) p.set("stage", s.stageFilter);
+   if (s.lineageFilter) p.set("lineage", s.lineageFilter);
++  if (s.typeFilter) p.set("type", s.typeFilter);
+   if (s.focusMine) p.set("mine", "1");
+   if (s.sortDir !== "updated_at_desc") p.set("sort", s.sortDir);
+   if (s.page !== 1) p.set("page", String(s.page));
+@@ -140,6 +143,23 @@ const LINEAGE_OPTIONS = [
+   { value: "thin", label: "轻量变更" },
+ ] as const;
+ 
++// 2026-10-18-change-list-type-filter：类型筛选（type 参数，conventional 前缀 +
++// 原型旧值）。feat 后端等价命中旧值 feature（存量行不漏筛）；值集与后端
++// _CHANGE_TYPE_FILTER_WHITELIST 对齐（前端仅列常用项，防止下拉过长）。
++const TYPE_OPTIONS = [
++  { value: "", label: "全部类型" },
++  { value: "feat", label: "feat（功能）" },
++  { value: "fix", label: "fix（修复）" },
++  { value: "docs", label: "docs（文档）" },
++  { value: "chore", label: "chore（杂务）" },
++  { value: "test", label: "test（测试）" },
++  { value: "refactor", label: "refactor（重构）" },
++  { value: "perf", label: "perf（性能）" },
++  { value: "build", label: "build（构建）" },
++  { value: "style", label: "style（样式）" },
++  { value: "prototype", label: "原型" },
++] as const;
++
+ // ── 「执行」列（task-08 / FR-05 / D-004@v1，视觉对齐 prototype-change-center-
+ // usage.html 场景一 .exec-cell）──────────────────────────────────────────
+ // 与 quicklog-table.tsx 的同名列互为镜像实现（allowed_paths 不含公共模块文件，
+@@ -331,6 +351,11 @@ export default function ChangesPage({ params }: Props) {
+     const v = searchParams.get("lineage") ?? "";
+     return LINEAGE_OPTIONS.some((o) => o.value === v) ? v : "";
+   });
++  // 2026-10-18-change-list-type-filter：类型筛选（"" = 全部类型；与出身分类正交）
++  const [typeFilter, setTypeFilter] = useState(() => {
++    const v = searchParams.get("type") ?? "";
++    return TYPE_OPTIONS.some((o) => o.value === v) ? v : "";
++  });
+   const [sortDir, setSortDir] = useState<SortDir>(() =>
+     searchParams.get("sort") === "updated_at_asc" ? "updated_at_asc" : "updated_at_desc",
+   );
+@@ -361,6 +386,7 @@ export default function ChangesPage({ params }: Props) {
+       search,
+       stageFilter,
+       lineageFilter,
++      typeFilter,
+       focusMine,
+       sortDir,
+       page,
+@@ -371,7 +397,7 @@ export default function ChangesPage({ params }: Props) {
+     if (window.location.pathname + window.location.search !== target) {
+       window.history.replaceState(window.history.state, "", target);
+     }
+-  }, [tab, search, stageFilter, lineageFilter, focusMine, sortDir, page, pageSize, workspaceId]);
++  }, [tab, search, stageFilter, lineageFilter, typeFilter, focusMine, sortDir, page, pageSize, workspaceId]);
+ 
+   // 主 load（task-06 / D-004@v1：裸 useEffect+useState 改 useQuery）。
+   // queryKey = workspaceId + 全部请求参数（tab/search/stageFilter/sortDir/
+@@ -388,6 +414,7 @@ export default function ChangesPage({ params }: Props) {
+         search,
+         currentStage: stageFilter,
+         lineage: lineageFilter,
++        changeType: typeFilter,
+         sort: sortDir,
+         // D-007：进行中 + 聚焦 → 只看待我处理（pending_review 非空）
+         pendingReviewOnly: tab === "active" && focusMine,
+@@ -402,6 +429,7 @@ export default function ChangesPage({ params }: Props) {
+           search: search || undefined,
+           currentStage: stageFilter || undefined,
+           lineage: lineageFilter || undefined,
++          changeType: typeFilter || undefined,
+           sort: sortDir,
+           pendingReviewOnly: tab === "active" && focusMine,
+           page,
+@@ -522,6 +550,8 @@ export default function ChangesPage({ params }: Props) {
+     setStageFilter("");
+     // 2026-10-14-change-center-lineage-tag-and-filter：分类筛选一并回默认
+     setLineageFilter("");
++    // 2026-10-18-change-list-type-filter：类型筛选一并回默认
++    setTypeFilter("");
+     // ql-20260818-004：聚焦下放查询条件后，重置一并回默认（不勾选）
+     setFocusMine(false);
+     setPage(1);
+@@ -698,6 +728,9 @@ export default function ChangesPage({ params }: Props) {
+           <span className="font-mono text-xs text-muted-foreground">
+             {c.change_key}
+           </span>
++          {/* 2026-10-18-change-list-type-filter：类型彩色标签（与详情页「类型」行
++              同源 CommitTypeChip；无类型旧行零占位） */}
++          {c.change_type && <CommitTypeChip type={c.change_type} />}
+           {c.affected_components.length > 0 &&
+             c.affected_components.map((comp) => (
+               <span
+@@ -804,7 +837,7 @@ export default function ChangesPage({ params }: Props) {
+   const renderEmpty = (): ReactNode => {
+     if (items.length > 0) return null;
+     // 有 filter 无匹配 → 简短文案（不显示 CTA，避免误导）
+-    if (search || stageFilter || lineageFilter) {
++    if (search || stageFilter || lineageFilter || typeFilter) {
+       return (
+         <div className="py-10 text-center text-xs text-muted-foreground">
+           没有匹配的变更。
+@@ -961,6 +994,23 @@ export default function ChangesPage({ params }: Props) {
+               </Select.Option>
+             ))}
+           </Select>
++          {/* 2026-10-18-change-list-type-filter：类型下拉（conventional 前缀 +
++              原型；feat 后端等价命中旧值 feature） */}
++          <Select
++            aria-label="筛选类型"
++            value={typeFilter}
++            onChange={(v) => {
++              setTypeFilter(v ?? "");
++              setPage(1);
++            }}
++            className="w-40"
++          >
++            {TYPE_OPTIONS.map((opt) => (
++              <Select.Option key={opt.value} value={opt.value}>
++                {opt.label}
++              </Select.Option>
++            ))}
++          </Select>
+           {tab === "active" && (
+             <Checkbox
+               checked={focusMine}
+diff --git a/frontend/src/components/changes/commit-type-chip.tsx b/frontend/src/components/changes/commit-type-chip.tsx
+new file mode 100644
+index 000000000..b3533d4da
+--- /dev/null
++++ b/frontend/src/components/changes/commit-type-chip.tsx
+@@ -0,0 +1,37 @@
++/**
++ * git conventional 前缀类型标签（2026-10-18-change-type-git-conventional 抽公共件）。
++ *
++ * 类型值来自 flow-state.yaml commit_type（权威，回填/CLI 写入）；未知类型走中性
++ * 配色显示原值。旧枚举 feature 语义等同 feat，显示层等价映射（数据不动）。
++ * 消费方：变更详情页概览侧栏「类型」行、变更中心列表行 meta 行（两处同源同款）。
++ */
++
++const COMMIT_TYPE_STYLES: Record<string, string> = {
++  feat: "border-emerald-500/40 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400",
++  fix: "border-red-500/40 bg-red-500/10 text-red-600 dark:text-red-400",
++  docs: "border-blue-500/40 bg-blue-500/10 text-blue-600 dark:text-blue-400",
++  refactor: "border-violet-500/40 bg-violet-500/10 text-violet-600 dark:text-violet-400",
++  test: "border-amber-500/40 bg-amber-500/10 text-amber-600 dark:text-amber-400",
++  perf: "border-cyan-500/40 bg-cyan-500/10 text-cyan-600 dark:text-cyan-400",
++  build: "border-orange-500/40 bg-orange-500/10 text-orange-600 dark:text-orange-400",
++  ci: "border-teal-500/40 bg-teal-500/10 text-teal-600 dark:text-teal-400",
++  chore: "border-slate-500/40 bg-slate-500/10 text-slate-600 dark:text-slate-400",
++  style: "border-pink-500/40 bg-pink-500/10 text-pink-600 dark:text-pink-400",
++};
++
++const COMMIT_TYPE_DISPLAY: Record<string, string> = {
++  feature: "feat", // 旧枚举语义等价映射（仅显示层）
++};
++
++export function CommitTypeChip({ type }: { type: string }) {
++  const display = COMMIT_TYPE_DISPLAY[type] ?? type;
++  const cls = COMMIT_TYPE_STYLES[display] ?? "border-border bg-muted text-muted-foreground";
++  return (
++    <span
++      data-testid="commit-type-chip"
++      className={`inline-flex h-5 shrink-0 items-center rounded border px-1.5 font-mono text-[10px] font-semibold ${cls}`}
++    >
++      {display}
++    </span>
++  );
++}
+diff --git a/frontend/src/components/changes/detail/change-overview-side.tsx b/frontend/src/components/changes/detail/change-overview-side.tsx
+index 7d9464406..d0e2835d5 100644
+--- a/frontend/src/components/changes/detail/change-overview-side.tsx
++++ b/frontend/src/components/changes/detail/change-overview-side.tsx
+@@ -19,6 +19,7 @@ import Link from "next/link";
+ import { useQuery } from "@tanstack/react-query";
+ 
+ import { MetaPanel, MetaPanelSection } from "@/components/primer";
++import { CommitTypeChip } from "@/components/changes/commit-type-chip";
+ import {
+   cacheHitRate,
+   formatCompactTime,
+@@ -37,40 +38,8 @@ interface Row {
+ 
+ const DASH = "—";
+ 
+-/**
+- * git conventional 前缀 → 标签配色（2026-10-18-change-type-git-conventional）。
+- * 类型值来自 flow-state.yaml commit_type（权威，回填/CLI 写入）；未知类型走
+- * 中性配色显示原值。旧枚举 feature 语义等同 feat，显示层等价映射（数据不动）。
+- */
+-const COMMIT_TYPE_STYLES: Record<string, string> = {
+-  feat: "border-emerald-500/40 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400",
+-  fix: "border-red-500/40 bg-red-500/10 text-red-600 dark:text-red-400",
+-  docs: "border-blue-500/40 bg-blue-500/10 text-blue-600 dark:text-blue-400",
+-  refactor: "border-violet-500/40 bg-violet-500/10 text-violet-600 dark:text-violet-400",
+-  test: "border-amber-500/40 bg-amber-500/10 text-amber-600 dark:text-amber-400",
+-  perf: "border-cyan-500/40 bg-cyan-500/10 text-cyan-600 dark:text-cyan-400",
+-  build: "border-orange-500/40 bg-orange-500/10 text-orange-600 dark:text-orange-400",
+-  ci: "border-teal-500/40 bg-teal-500/10 text-teal-600 dark:text-teal-400",
+-  chore: "border-slate-500/40 bg-slate-500/10 text-slate-600 dark:text-slate-400",
+-  style: "border-pink-500/40 bg-pink-500/10 text-pink-600 dark:text-pink-400",
+-};
+-
+-const COMMIT_TYPE_DISPLAY: Record<string, string> = {
+-  feature: "feat", // 旧枚举语义等价映射（仅显示层）
+-};
+-
+-function CommitTypeChip({ type }: { type: string }) {
+-  const display = COMMIT_TYPE_DISPLAY[type] ?? type;
+-  const cls = COMMIT_TYPE_STYLES[display] ?? "border-border bg-muted text-muted-foreground";
+-  return (
+-    <span
+-      data-testid="commit-type-chip"
+-      className={`inline-flex h-5 shrink-0 items-center rounded border px-1.5 font-mono text-[10px] font-semibold ${cls}`}
+-    >
+-      {display}
+-    </span>
+-  );
+-}
++// 2026-10-18-change-list-type-filter：类型标签抽公共件（列表行/详情侧栏同源），
++// 本文件改从公共组件导入（样式与映射随组件走，两处渲染口径恒一致）。
+ 
+ /** 用量七项压缩行（与卡片同源口径，仅改排版密度）。 */
+ function usageRows(usage: NonNullable<ReturnType<typeof useChangeUsage>["data"]>): Row[] {
+diff --git a/frontend/src/lib/changes.ts b/frontend/src/lib/changes.ts
+index f05888a18..0432e1cf1 100644
+--- a/frontend/src/lib/changes.ts
++++ b/frontend/src/lib/changes.ts
+@@ -96,7 +96,9 @@ export function listChanges(
+   workspaceId: string,
+   // 2026-10-14-change-center-lineage-tag-and-filter：lineage 出身分类筛选
+   // （thin|full，后端 _is_thin_lineage 三分支投影口径；缺省/未知值不过滤）。
+-  params?: { location?: string; status?: string; owner?: string; search?: string; currentStage?: string; lineage?: string; sort?: string; pendingReviewOnly?: boolean; page?: number; pageSize?: number },
++  // 2026-10-18-change-list-type-filter：changeType 类型筛选（conventional 前缀 +
++  // 旧枚举；feat 后端等价命中 feature，缺省/未知值不过滤）。
++  params?: { location?: string; status?: string; owner?: string; search?: string; currentStage?: string; lineage?: string; changeType?: string; sort?: string; pendingReviewOnly?: boolean; page?: number; pageSize?: number },
+ ) {
+   const searchParams = new URLSearchParams();
+   if (params?.location) searchParams.set("location", params.location);
+@@ -105,6 +107,7 @@ export function listChanges(
+   if (params?.search) searchParams.set("search", params.search);
+   if (params?.currentStage) searchParams.set("current_stage", params.currentStage);
+   if (params?.lineage) searchParams.set("lineage", params.lineage);
++  if (params?.changeType) searchParams.set("change_type", params.changeType);
+   if (params?.sort) searchParams.set("sort", params.sort);
+   if (params?.pendingReviewOnly) searchParams.set("pending_review_only", "true");
+   if (params?.page) searchParams.set("page", String(params.page));

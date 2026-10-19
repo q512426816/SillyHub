@@ -136,6 +136,17 @@ function updateLine(update: Record<string, unknown>): string {
   return JSON.stringify({ jsonrpc: '2.0', method: 'session/update', params: update }) + '\n';
 }
 
+/** session/update 通知行——rc.2 官方 ACP SDK 信封形状（params={sessionId, update:{…}}）。 */
+function updateEnvelopeLine(update: Record<string, unknown>): string {
+  return (
+    JSON.stringify({
+      jsonrpc: '2.0',
+      method: 'session/update',
+      params: { sessionId: 'acp-s1', update },
+    }) + '\n'
+  );
+}
+
 /** 服务端权限请求行（id 由服务端分配，此处用 100+）。 */
 function permissionRequestLine(
   id: number,
@@ -160,7 +171,8 @@ async function feedHandshake(useModel = false): Promise<void> {
   fake.stdout.push(resp(2, { sessionId: 'acp-s1' }));
   if (useModel) {
     fake.stdout.push(resp(3, {}));
-    await waitFor(() => readStdin(fake).includes('"optionId":"model"'));
+    // dsh rc.2 扁平形状（评审 P3：旧 optionId 等待条件已随驱动升级失效）
+    await waitFor(() => readStdin(fake).includes('"configId":"model"'));
   }
   await waitFor(() => readStdin(fake).includes('"method":"session/new"'));
 }
@@ -216,7 +228,7 @@ describe('DshAcpDriver：启动与握手', () => {
     await consuming;
   });
 
-  it('model + thinkingLevel=medium → set_config_option(model / reasoning_effort=medium)；off → 不发档位', async () => {
+  it('model + thinkingLevel=medium → set_config_option 扁平形状(configId=model/reasoning_effort)；off → 不发档位', async () => {
     const driver = new DshAcpDriver();
     const q = makeInputQueue();
     const handle = await driver.start(
@@ -230,11 +242,15 @@ describe('DshAcpDriver：启动与握手', () => {
     fake.stdout.push(resp(2, { sessionId: 'acp-s1' }));
     fake.stdout.push(resp(3, {})); // model
     fake.stdout.push(resp(4, {})); // reasoning_effort
-    await waitFor(() => readStdin(fake).includes('"optionId":"reasoning_effort"'));
+    // dsh 0.2.0-rc.2（官方 ACP SDK v2 schema）：扁平 {sessionId, configId, value}——
+    // 旧嵌套 {option:{optionId,value}} 回 Invalid params（真机实证 2026-10-17）；
+    // 模型 valueId = `["sillyhub","<modelId>"]` JSON 数组串（configOptions 同形）
+    await waitFor(() => readStdin(fake).includes('"configId":"reasoning_effort"'));
     const stdinText = readStdin(fake);
-    expect(stdinText).toContain('"optionId":"model"');
-    expect(stdinText).toContain('"value":"deepseek-v4"');
+    expect(stdinText).toContain('"configId":"model"');
+    expect(stdinText).toContain('"value":"[\\"sillyhub\\",\\"deepseek-v4\\"]"');
     expect(stdinText).toContain('"value":"medium"');
+    expect(stdinText).not.toContain('"optionId"');
     q.close();
     await consuming;
   });
@@ -272,6 +288,31 @@ describe('DshAcpDriver：turn 循环与打断', () => {
       is_error: false,
       session_id: 'acp-s1',
     });
+    q.close();
+    await consuming;
+  });
+
+  it('rc.2 信封形状（params={sessionId,update:{…}}）→ 拆包后内容事件照常产出（评审 P2 回归钉：不拆则回复零落库）', async () => {
+    const driver = new DshAcpDriver();
+    const q = makeInputQueue();
+    const handle = await driver.start(q.queue, makeOpts());
+    const { cb, messages, results } = makeCallbacks();
+    const consuming = driver.consume(handle, cb);
+    await feedHandshake();
+    q.push('你好');
+    await waitFor(() => readStdin(fake).includes('"method":"session/prompt"'));
+    // 官方 ACP SDK v2 信封：update 嵌在 params.update 内
+    fake.stdout.push(
+      updateEnvelopeLine({
+        sessionUpdate: 'agent_message_chunk',
+        messageId: 'm1',
+        content: { type: 'text', text: '信封答' },
+      }),
+    );
+    fake.stdout.push(resp(3, { stopReason: 'end_turn' }));
+    await waitFor(() => results.length === 1);
+    expect(messages.map((m) => m.type)).toEqual(['text']);
+    expect(messages[0]).toMatchObject({ content: '信封答' });
     q.close();
     await consuming;
   });

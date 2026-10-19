@@ -1,0 +1,47 @@
+tier: thin
+legacy_fallback: false
+substeps:
+  artifacts: done
+  ledger: done
+  patch: done
+  review: done
+  probes: done
+  distill: done
+  archive: done
+  events: done
+born_face: thin
+with_tasks: false
+review_force: null
+input: >-
+  动机：服务器信息页日志卡在生产容器显示「日志文件尚未生成」——容器内 repo_root 推导到 /，默认日志路径成 /data/logs，而镜像以非 root 用户 app 运行且构建期未预建 /data/logs（/data 属
+  root），mkdir 权限被拒后 FileWriter 按设计静默降级 stderr-only，页面无从知晓原因。
+
+  成功标准：
+
+  - Dockerfile 构建期预建 /data/logs 并 chown 给 app 用户（对齐 /data/spec-workspaces 既有惯例），容器启动后日志文件可正常创建写入
+
+  - configure_logging 建目录/挂 FileWriter 失败时向 stderr 输出一条警告（含失败原因），不再无声降级
+
+  - 聚焦测试（test_server_log_filer.py）全绿且补降级警告断言用例
+autopilot: false
+prestage_ack: false
+baseline_commit: 2b1b5879611b957b37cc9f982c79053c5ea8e126
+updatedAt: '2026-10-16T03:48:27.274Z'
+cross_baselines:
+  sillyspec: 5848cf3c432ff63fb38da7cd21d5881c654da14d
+baseline_sha256: 452c9040f377ca3a0d5a5b4f01a1426b2c43febe955a3cd19e3f0aedfabe7843
+spec_approved: true
+spec_approved_at: '2026-10-16T03:43:22.102Z'
+spec_approved_by: anon@DESKTOP-HJ0AM09
+spec_approved_channel: user-confirmed
+spec_attested_by: anon@DESKTOP-HJ0AM09
+batch_ticked: true
+gate_summary: >-
+  test: passed ← module[]+deps(py2+jsx2)+fr(4)（35.7s）
+  结果：C:\Users\qinyi\IdeaProjects\multi-agent-platform\.sillyspec\.runtime\verify-runs\20261016034559\test-result.json｜lint:
+  passed ← cd backend && uv run ruff check . && uv run ruff format --check . && uv run mypy app && cd ../frontend &&
+  pnpm lint && cd ../sillyhub-daemon && pnpm typecheck（11.9s）
+  结果：C:\Users\qinyi\IdeaProjects\multi-agent-platform\.sillyspec\.runtime\verify-runs\20261016034559\test-result.json｜门文件
+  5 个
+
+commit_type: fix

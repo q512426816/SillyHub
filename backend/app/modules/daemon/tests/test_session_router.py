@@ -773,3 +773,203 @@ class TestSessionTerminatingAtExposure:
         items = {i["id"]: i for i in resp.json()["items"]}
         assert items[str(sid_term)]["terminating_at"] is not None
         assert items[str(sid_plain)]["terminating_at"] is None
+
+
+# ── task-08（2026-10-16-backend-mem-polling / D-001@v1）：title_fallback 持久化 ─
+
+
+class TestTitleFallbackPersistence:
+    """列表标题回退读 title_fallback 列；漏网自愈回写；哨兵''防重查。"""
+
+    @pytest.mark.asyncio
+    async def test_fallback_column_serves_title_without_user_input_rows(
+        self,
+        client: AsyncClient,
+        auth_headers: dict[str, str],
+        db_session: AsyncSession,
+    ) -> None:
+        """列非空直接作 title——无任何 user_input 日志行（零窗口查询）。"""
+        from app.modules.agent.model import AgentSession
+        from app.modules.auth.model import User
+
+        admin = (
+            (await db_session.execute(select(User).where(User.email == "admin@example.com")))
+            .scalars()
+            .first()
+        )
+        rt = await _create_runtime(db_session, admin.id)
+        sid = uuid.uuid4()
+        db_session.add(
+            AgentSession(
+                id=sid,
+                user_id=admin.id,
+                runtime_id=rt.id,
+                provider="claude",
+                status="ended",
+                title_fallback="列存预览文本",
+            )
+        )
+        await db_session.commit()
+
+        resp = await client.get("/api/daemon/sessions", headers=auth_headers)
+        assert resp.status_code == 200, resp.text
+        kept = next(i for i in resp.json()["items"] if i["id"] == str(sid))
+        assert kept["title"] == "列存预览文本"
+
+    @pytest.mark.asyncio
+    async def test_zero_input_session_heals_sentinel_and_never_shows_title(
+        self,
+        client: AsyncClient,
+        auth_headers: dict[str, str],
+        db_session: AsyncSession,
+    ) -> None:
+        """零 user_input 会话：首轮列表回写哨兵 ''、title 保持 None（旧语义）。"""
+        from app.modules.agent.model import AgentSession
+        from app.modules.auth.model import User
+
+        admin = (
+            (await db_session.execute(select(User).where(User.email == "admin@example.com")))
+            .scalars()
+            .first()
+        )
+        rt = await _create_runtime(db_session, admin.id)
+        sid = uuid.uuid4()
+        db_session.add(
+            AgentSession(
+                id=sid, user_id=admin.id, runtime_id=rt.id, provider="claude", status="ended"
+            )
+        )
+        await db_session.commit()
+
+        resp = await client.get("/api/daemon/sessions", headers=auth_headers)
+        assert resp.status_code == 200, resp.text
+        kept = next(i for i in resp.json()["items"] if i["id"] == str(sid))
+        assert kept["title"] is None  # 零输入无预览（与旧语义一致）
+
+        row = (
+            await db_session.execute(select(AgentSession).where(AgentSession.id == sid))
+        ).scalar_one()
+        assert row.title_fallback == "", "首轮列表必须回写哨兵空串（自愈）"
+
+        # 第二轮：fallback 非 NULL → 不再进收窄查询（结构保证），展示不变
+        resp2 = await client.get("/api/daemon/sessions", headers=auth_headers)
+        kept2 = next(i for i in resp2.json()["items"] if i["id"] == str(sid))
+        assert kept2["title"] is None
+
+    @pytest.mark.asyncio
+    async def test_migration_backfill_sql_both_semantics_on_sqlite(self) -> None:
+        """迁移回填 SQL 双语义在 SQLite 方言验证（盲区4）：首条 user_input 预览 + 零输入哨兵。"""
+        import importlib.util
+        from pathlib import Path
+
+        import sqlalchemy as sa
+        from sqlalchemy.ext.asyncio import create_async_engine
+
+        from app.modules.agent.model import AgentRun, AgentRunLog, AgentSession
+
+        # 迁移文件名以数字开头，不能常规 import——importlib 按路径加载
+        mig_path = (
+            Path(__file__).resolve().parents[4]
+            / "migrations"
+            / "versions"
+            / "20261016100000_agent_session_title_fallback.py"
+        )
+        spec = importlib.util.spec_from_file_location("mig_title_fallback", mig_path)
+        assert spec is not None and spec.loader is not None
+        mig = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mig)
+
+        engine = create_async_engine("sqlite+aiosqlite://")
+        try:
+            async with engine.begin() as conn:
+                await conn.run_sync(
+                    lambda sc: AgentSession.metadata.create_all(
+                        sc,
+                        tables=[AgentSession.__table__, AgentRun.__table__, AgentRunLog.__table__],
+                    )
+                )
+                sid_with, sid_zero = uuid.uuid4(), uuid.uuid4()
+                run = AgentRun(
+                    id=uuid.uuid4(),
+                    agent_type="claude_code",
+                    provider="claude",
+                    status="completed",
+                    spec_strategy="interactive",
+                    agent_session_id=sid_with,
+                    started_at=datetime.now(UTC),
+                )
+                now_ts = datetime.now(UTC)
+                await conn.execute(
+                    AgentSession.__table__.insert(),
+                    [
+                        {
+                            "id": sid_with,
+                            "user_id": uuid.uuid4(),
+                            "provider": "claude",
+                            "status": "ended",
+                            "created_at": now_ts,
+                            "updated_at": now_ts,
+                        },
+                        {
+                            "id": sid_zero,
+                            "user_id": uuid.uuid4(),
+                            "provider": "claude",
+                            "status": "ended",
+                            "created_at": now_ts,
+                            "updated_at": now_ts,
+                        },
+                    ],
+                )
+                await conn.execute(
+                    AgentRun.__table__.insert(),
+                    [
+                        {
+                            "id": run.id,
+                            "agent_session_id": sid_with,
+                            "agent_type": "claude_code",
+                            "provider": "claude",
+                            "spec_strategy": "interactive",
+                            "status": "completed",
+                            "started_at": now_ts,
+                            "created_at": now_ts,
+                            "updated_at": now_ts,
+                        }
+                    ],
+                )
+                await conn.execute(
+                    AgentRunLog.__table__.insert(),
+                    [
+                        {
+                            "id": uuid.uuid4(),
+                            "run_id": run.id,
+                            "timestamp": now_ts,
+                            "channel": "assistant",
+                            "content_redacted": "不是输入",
+                            "created_at": now_ts,
+                        },
+                        {
+                            "id": uuid.uuid4(),
+                            "run_id": run.id,
+                            "timestamp": now_ts,
+                            "channel": "user_input",
+                            "content_redacted": "第一条用户输入应该被选中" + "x" * 80,
+                            "created_at": now_ts,
+                        },
+                    ],
+                )
+                await conn.execute(sa.text(mig.BACKFILL_SQL))
+                await conn.execute(sa.text(mig.SENTINEL_SQL))
+                rows = {
+                    r[0]: r[1]
+                    for r in (
+                        await conn.execute(
+                            sa.select(
+                                AgentSession.__table__.c.id, AgentSession.__table__.c.title_fallback
+                            )
+                        )
+                    ).all()
+                }
+        finally:
+            await engine.dispose()
+        assert rows[sid_with] == "第一条用户输入应该被选中" + "x" * (64 - 12)
+        assert rows[sid_zero] == "", "零输入会话必须回写哨兵空串"

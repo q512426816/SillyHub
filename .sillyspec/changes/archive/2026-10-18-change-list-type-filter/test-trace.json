@@ -1,0 +1,51 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-18-change-list-type-filter",
+  "rows": [
+    {
+      "anchor": "FR-01",
+      "row_id": "2026-10-18-change-list-type-filter:flow:测试绑定FR-01",
+      "tests": [
+        "backend/app/modules/change/tests/test_change_lineage_filter.py「test_change_type_filter_feat_aliases_legacy_feature / test_change_type_filter_exact_match_and_fallback」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-18-change-list-type-filter"
+    },
+    {
+      "anchor": "FR-02",
+      "row_id": "2026-10-18-change-list-type-filter:flow:测试绑定FR-02",
+      "tests": [
+        "frontend/src/components/changes/detail/__tests__/change-overview-side.test.tsx「类型行：已知前缀渲染彩色标签（fix 红色阶 / docs 蓝色阶）」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-18-change-list-type-filter"
+    },
+    {
+      "anchor": "FR-03",
+      "row_id": "2026-10-18-change-list-type-filter:flow:测试绑定FR-03",
+      "tests": [
+        "changes/__tests__/page.test.tsx「类型下拉选择「fix」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-18-change-list-type-filter"
+    }
+  ]
+}

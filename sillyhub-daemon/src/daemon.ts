@@ -1349,6 +1349,20 @@ function isWorkspaceIdShape(v: unknown): v is string {
 // 常量导出便于测试注入时间（task-09 constraints）。
 export const LEASE_POLL_SKIP_MS = 90_000;
 
+/**
+ * task-07（2026-10-16-backend-mem-polling）：change-write 兜底轮询节奏门——
+ * 距上次拉取 ≥ intervalSec 才到期（0/负间隔恒 true 防配置错误卡死兜底通道）。
+ * 纯函数导出供单测；推送即时拉取不经本门。
+ */
+export function changeWritePollDue(
+  lastPullAt: number,
+  intervalSec: number,
+  nowMs: number,
+): boolean {
+  if (!Number.isFinite(intervalSec) || intervalSec <= 0) return true;
+  return nowMs - lastPullAt >= intervalSec * 1000;
+}
+
 // 假活看门狗阈值（2026-08-27 网络切换 WS 永久假连事故）：WsClient 自称
 // Connected 但 lastMessageAt（消息+pong）陈旧超过该值 → 判假活，_wsLoop
 // 强制关闭重建。健康链路 ping/pong（30s 周期）恒刷新新鲜度，不会误杀；
@@ -6142,6 +6156,10 @@ export class Daemon {
    * （TASK_AVAILABLE 推送兜底分发，跳过本轮 lease HTTP 轮询）。断连 / 消息陈旧
    *（假活，R-05）/ 无 WS 客户端 → false（照常轮询兜底）。
    */
+  // task-07：change-write 兜底轮询上次执行时刻（0=从未；推送即时拉取不重置它，
+  // 兜底节奏独立计时）。
+  private _lastChangeWritePullAt = 0;
+
   private _leasePollSkippable(): boolean {
     const ws = this._wsClient;
     if (!ws || !ws.isConnected) return false;
@@ -6159,6 +6177,16 @@ export class Daemon {
         // task-09 / D-003@v1：lease 通道门控——WS 健康且消息新鲜时整轮跳过 lease
         // 轮询（推送兜底）。计算一次、整轮复用（各 rid 共享同一条 WS）。
         const skipLeasePoll = this._leasePollSkippable();
+        // task-07：兜底节奏门（推送即时拉取不走本门；门函数导出供单测）
+        const nowMs = Date.now();
+        const changeWriteDue = changeWritePollDue(
+          this._lastChangeWritePullAt,
+          this._config.change_write_poll_interval,
+          nowMs,
+        );
+        if (changeWriteDue) {
+          this._lastChangeWritePullAt = nowMs;
+        }
         for (const rid of allIds) {
           if (skipLeasePoll) {
             this._logger.debug('poll_lease_skipped_ws_healthy', { rid });
@@ -6166,13 +6194,17 @@ export class Daemon {
             await this._pullPendingLeasesOnce(rid);
           }
 
-          // task-11 / FR-08 / D-004@v1：change-write 轮询分支（与 lease 轮询同节奏，
-          // 独立通道，**不走** _runLeaseStateMachine 的 claim→start→runLease→complete
-          // lease 三段；走 claim→本地写→complete→spec 回灌轻量流，FR-10 不启 agent）。
-          // perf-remediation task-09 / Grill B-1：该分支**永不被 WS 门控跳过**——
-          // protocol 无 change-write 消息类型、change_writer 不走 ws_hub，30s 轮询
-          // 是唯一分发通道，门控会让 change 写任务失联。
-          await this._pullPendingChangeWritesOnce(rid);
+          // task-11 / FR-08 / D-004@v1：change-write 轮询分支（独立通道，**不走**
+          // _runLeaseStateMachine 的 claim→start→runLease→complete lease 三段；
+          // 走 claim→本地写→complete→spec 回灌轻量流，FR-10 不启 agent）。
+          // 2026-10-16-backend-mem-polling task-07：分发主通道改为 WS 推送
+          // （CHANGE_WRITE_AVAILABLE → 立即拉取，见 _handleWsMessage），本分支降级
+          // 为兜底——间隔独立为 change_write_poll_interval（默认 120s，原随
+          // poll_interval=30s），与 lease 轮询节奏解耦；永不被 WS 门控跳过
+          // （推送丢失时兜底轮询仍须可达）。
+          if (changeWriteDue) {
+            await this._pullPendingChangeWritesOnce(rid);
+          }
         }
       } catch (e) {
         if (e instanceof AbortError) break;
@@ -7538,6 +7570,25 @@ export class Daemon {
         (rawPayload.agent_run_id as string | undefined),
     };
     switch (msgType) {
+      // 2026-10-16-backend-mem-polling task-07 / D-001@v1：change-write 轻通知。
+      // payload 校验 runtime_id 非空（缺失 warn 丢弃，对齐 SILLYSPEC_TOMBSTONE_CLEANUP
+      // 先例）；命中即调既有 _pullPendingChangeWritesOnce 立即拉取（幂等，payload
+      // 不带任务体）。旧 backend 无此消息纯走兜底轮询。
+      case MSG.CHANGE_WRITE_AVAILABLE: {
+        const cwPayload = (msg as { payload?: { runtime_id?: unknown } }).payload;
+        const cwRid =
+          (cwPayload?.runtime_id as string | undefined) ??
+          (rawPayload.runtimeId as string | undefined);
+        if (!cwRid || typeof cwRid !== 'string') {
+          this._logger.warn('change_write_available_invalid_runtime', {
+            runtime_id: cwRid,
+          });
+          return;
+        }
+        this._logger.info('change_write_available_received', { runtime_id: cwRid });
+        await this._pullPendingChangeWritesOnce(cwRid);
+        return;
+      }
       case MSG.TASK_AVAILABLE: {
         this._logger.info('task_available', { lease_id: payload.leaseId });
         if (!this._taskRunner) {

@@ -190,9 +190,19 @@ _BUNDLE_CANCEL_JOIN_S = 5.0
 #
 # 内存边界（对齐审计 P1-性能④精神）：仅缓存 gzip 变体（~树大小/4），每
 # workspace 保留最新 2 个版本，plain/identity 路径零缓存零行为变化。
+# 2026-10-16-backend-mem-polling task-02 / D-004@v1：per-ws 2 版本策略之上加
+# **全局字节帽**（spec_bundle_cache_max_bytes，默认 128MB）LRU 淘汰——多
+# workspace 线性囤包（~18MB/ws）曾无上界，是 backend RSS 慢性爬升源之一。
 _BUNDLE_CACHE_VERSIONS_PER_WS = 2
 _bundle_gzip_cache: dict[tuple[uuid.UUID, int], bytes] = {}
 _bundle_gzip_cache_lock = threading.Lock()
+
+
+def _bundle_cache_max_bytes() -> int:
+    """全局字节帽（settings.spec_bundle_cache_max_bytes，默认 128MB）。"""
+    from app.core.config import get_settings
+
+    return max(1, get_settings().spec_bundle_cache_max_bytes)
 
 
 class _BundleStreamLike(Protocol):
@@ -209,7 +219,12 @@ class _BundleStreamLike(Protocol):
 
 def _bundle_gzip_cache_get(key: tuple[uuid.UUID, int]) -> bytes | None:
     with _bundle_gzip_cache_lock:
-        return _bundle_gzip_cache.get(key)
+        data = _bundle_gzip_cache.get(key)
+        if data is not None:
+            # LRU 新鲜度：命中移到插入序末尾（dict 保序，淘汰取最旧）
+            del _bundle_gzip_cache[key]
+            _bundle_gzip_cache[key] = data
+        return data
 
 
 def _bundle_gzip_cache_put(key: tuple[uuid.UUID, int], data: bytes) -> None:
@@ -218,7 +233,19 @@ def _bundle_gzip_cache_put(key: tuple[uuid.UUID, int], data: bytes) -> None:
         if len(same_ws) >= _BUNDLE_CACHE_VERSIONS_PER_WS and key not in _bundle_gzip_cache:
             oldest = min(same_ws, key=lambda k: k[1])
             _bundle_gzip_cache.pop(oldest, None)
+        _bundle_gzip_cache.pop(key, None)
         _bundle_gzip_cache[key] = data
+        # 2026-10-16-backend-mem-polling task-02 / D-004@v1：全局字节帽——超帽按
+        # 插入序（≈LRU）淘汰最旧条目至帽内；刚写入的 key 永不自淘汰。
+        total = sum(len(v) for v in _bundle_gzip_cache.values())
+        max_bytes = _bundle_cache_max_bytes()
+        if total > max_bytes:
+            for old_key in list(_bundle_gzip_cache):
+                if old_key == key:
+                    continue
+                total -= len(_bundle_gzip_cache.pop(old_key))
+                if total <= max_bytes:
+                    break
 
 
 class _ReplayBundleStream:

@@ -132,7 +132,7 @@ hint = 「历史里有上一家供应商专有的工具块，新供应商无法�
 
 平台侧同步（收口自动回写）：`.sillyspec/docs/SillyHub/modules/daemon.changelog.md`、
 `.sillyspec/docs/multi-agent-platform/modules/sillyhub-daemon.changelog.md`、
-`.sillyspec/knowledge/fr/daemon.md`（FR-daemon-145~148）、`.sillyspec/knowledge/decisions/unmapped.md`。
+`.sillyspec/knowledge/fr/daemon.md`（FR-daemon-168~171）、`.sillyspec/knowledge/decisions/unmapped.md`。
 
 仓库外一次性数据修复（实证产线，非交付面，留痕备查）：
 `C:/Users/12532/.claude/projects/F--WorkNew-SillyHub/0f782746-790b-4c1b-8043-1d278fb50452.jsonl`

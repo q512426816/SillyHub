@@ -1,0 +1,52 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-16-daemon-pull-antiresurrect",
+  "reviewer": "subagent",
+  "verdict": "PASS",
+  "reviewedAgainst": "056cff30397de0c5001874901cbbe03d6319df65",
+  "findings": [
+    {
+      "severity": "P2",
+      "title": "已修复（增量复审确认 056cff30）：抑制不跨 pull 持久——pull 后 manifest 全量重建抹掉已删行，delete op 永远无法上行，下一次 pull 仍复活",
+      "evidence": "【原始发现】抑制生效后落地树不含被挡文件，pull 末尾 writeLocalManifest(buildFullManifest(落地树))（ql-20260904-019 既有语义）把该路径从缓存基线删除；computeIncrementalOps 生成 delete op 的条件是「缓存有/盘面无」，缓存行消失 → 删除 op 永不生成 → 服务器 bundle 永远携带该文件 → 下一次自动 pull 抑制集为空复活照旧。【修复确认】056cff30 增 suppressEntries Map（与抑制 Set 同点捕获基线行，保留原 hash/version/mtime，delete op base_version 正确），落地重建后仅将「落地树确实无该路径」（rel 不在 rebuilt.files）的行并回再落盘（spec-sync.ts:353-366）——in-place 兜底路径同样经过此重建；404 早返回不触重建、manifest 原样不丢行；writeLocalManifest 失败仅 warn 时旧缓存（含抑制行）保留下次 pull 照旧抑制；衰减链闭合（delete op 上行成功 → push 侧回写只装 localFiles → 行自然消失）。测试用例1 增持久性断言：重建后基线仍含 b.md 行 + 第二次 pull bundle 仍携带依旧不落地，正中原 P2 场景；4/4 绿、tsc 零错（实现者报告，静态复核未见阻断）",
+      "location": "sillyhub-daemon/src/spec-sync.ts:346-351"
+    },
+    {
+      "severity": "P3",
+      "title": "applyResurrectSuppress 的 rm 失败仍计入 skipped，warn 声称已挡但文件可能仍落地",
+      "evidence": "rm(...).catch(() => {}) 吞错后无条件 skipped.push(rel)——rm 失败时文件仍留在 tmpDir 被换入（或 in-place 落地），复活发生且点名日志与实际不符；低概率（新解包 tmp 内文件 force rm），但与「宁可吵不可静默复活」的立意相悖",
+      "location": "sillyhub-daemon/src/spec-sync.ts:129-133"
+    },
+    {
+      "severity": "P3",
+      "title": "in-place 兜底 warn 无路径点名也无 env 出路提示",
+      "evidence": "swap 主路径 warn 含被挡路径点名（截断 5）与 SILLYHUB_DAEMON_RESTORE_DELETED=1 出路，in-place 兜底 warn 仅报数量（spec-sync.ts:328-331），FR-03「被挡路径点名」在兜底路径打折",
+      "location": "sillyhub-daemon/src/spec-sync.ts:328-331"
+    },
+    {
+      "severity": "P3",
+      "title": "抑制集计算串行 stat 遍历 manifest 全量键，大清单每次 pull 增加串行 IO 延迟",
+      "evidence": "for 循环内逐键 await pathExists（spec-sync.ts:251-254），manifest 千级条目（实证 3563 文件量级）每次自动 pull 都串行 stat 一遍，与 ql-20260904-016 的会话首响优化方向相悖；可 Promise.all 有界并发批量化",
+      "location": "sillyhub-daemon/src/spec-sync.ts:251-254"
+    },
+    {
+      "severity": "P3",
+      "title": "manifest 键未做路径安全校验即 join + recursive rm",
+      "evidence": "readLocalManifest 不过滤 '..'/绝对路径段，缓存文件被手改/污染后 join(specDir, rel) 可越界、rm recursive 可删 specDir 之外内容（spec-sync.ts:128、253）；daemon 私有本地可信态，实际风险低，建议 readLocalManifest 增加归一化校验作纵深防御",
+      "location": "sillyhub-daemon/src/spec-sync.ts:128"
+    },
+    {
+      "severity": "P3",
+      "title": "测试缺口：FR-02「解析失败」分支无用例；无「抑制后二次 pull」持久性用例",
+      "evidence": "用例2 只覆盖 manifest 缺失，未覆盖损坏 JSON（readLocalManifest catch→null 分支 spec-sync.ts:711-727）；P2 所述「首个 pull 抑制、二次 pull 复活」无守护用例，恰是语义最脆点",
+      "location": "sillyhub-daemon/tests/pull-antiresurrect.test.ts"
+    }
+  ],
+  "dimensionNotes": {
+    "乱序": "ok",
+    "并发": "ok",
+    "切换": "ok",
+    "作用域": "ok"
+  },
+  "reviewedAt": "2026-10-16T20:54:35+08:00"
+}

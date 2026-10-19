@@ -555,3 +555,46 @@ supersedes：D-003@v1
 理由：我的判断（执行期非破坏性裁决）——归档概览的「归档留档」渲染为**统计摘要**（patch 的 文件数/增删行 + delta 的 Before/Delta 行）并附一行「改动文件清单与单文件 diff 见『产出 · 归档留档』」；**文件清单与「看 diff」入口只在「产出」tab 出现一次**（MUST NOT 重复渲染同一清单）。数据取同一 queryKey（`["changeAssets", …]`），零额外请求。
 故障面：若后续在概览补回完整清单，会与产出 tab 双重维护并复现「两处看同一件事」的原始问题——恢复前需先复核本裁决。
 退役判据：若「产出」tab 被取消（归档态只留概览），清单可回归概览。
+
+## D-backend-029@v1 「裁决」本轮不修，跨变更记录的裁决留 CLI 侧后续 change
+状态：implemented
+变更：2026-10-16-conflict-full-tree-compare
+原编号：D-002@v1
+锚点：未记录
+最近确认：d3c425bf6
+理由：用户确认本轮只修对比+文案；裁决入口行为保持现状，平台对该类行的正确引导是「重新同步」或 CLI 侧 `sillyspec platform resolve full-tree`；CLI 口径改动另开 change。
+
+## D-backend-030@v1 新增平台侧「标记已处理」关闭入口（复用已有 resolve 接口）
+状态：implemented
+变更：2026-10-16-conflict-full-tree-compare
+原编号：D-003@v1
+锚点：未记录
+最近确认：d3c425bf6
+理由：用户确认加——冲突行上加「标记已处理」，调用已有 `POST /api/workspaces/{workspace_id}/spec-conflicts/{conflict_id}/resolve`，仅可操作者（canOperate）可见/可点。
+
+## D-backend-031@v2 兜底裁剪输入面与来源提示语义修订（supersedes D-006@v1）
+状态：implemented
+变更：2026-10-16-conflict-full-tree-compare
+原编号：D-006@v2
+锚点：未记录
+最近确认：d3c425bf6
+理由：修订为——归属校验与裁剪一律以 **`snapshot.files[].path`** 为输入（entry 保持完整，与 `_build_spec_tree_compare` 的消费面一致）；`path_total` 语义＝**兜底快照返回的路径总数**（受 daemon 300 路径帽截断，不声称记录真实总数）；来源提示为**固定说明行、无关闭控件**（告知性质；如需关闭控件另开）。
+supersedes：D-006@v1
+
+## D-frontend-019@v2 本变更生成真码原型（supersedes D-007@v1 的「跳过」判断）
+状态：implemented
+变更：2026-10-16-conflict-full-tree-compare
+原编号：D-007@v2
+锚点：frontend/src/components/prototype/conflict-sync-states-view.tsx
+最近确认：d3c425bf6
+理由：我的判断：改为生成真码原型——新增 `frontend/src/components/prototype/conflict-sync-states-view.tsx`（primer/Tailwind/token 方言，fixture 覆盖三个界面态：行级关闭入口、失败卡四臂分支、full-tree 兜底来源提示），`pnpm prototype:build` 编译产物拷入变更目录 `prototype-conflict-sync-states.html`；构建脚本 VIEWS 登记一行。
+故障面：新增常驻原型视图会进入每次 prototype:build 的产物集，后续改动需保持产物对账（重编译后 git diff 为空）。
+退役判据：该视图长期不再被引用（连续多个变更不再涉及冲突同步界面）时可从 VIEWS 与目录中移除。
+
+## D-backend-034@v1 首轮独立审查其余修订项（分支键/失效键/关闭范围/保真损失）
+状态：implemented
+变更：2026-10-16-conflict-full-tree-compare
+原编号：D-012@v1
+锚点：未记录
+最近确认：d3c425bf6
+理由：全部按审查结论修订进 design/requirements/tasks——①失败卡分支键＝`details.daemon_code`（daemon 业务失败时外层 `ApiError.code` 恒为 `HTTP_502_DAEMON_RPC_REMOTE`，不可作键；离线/超时臂按外层 `HTTP_504_DAEMON_RUNTIME_OFFLINE` / `HTTP_504_DAEMON_RPC_TIMEOUT`）；②关闭成功后 invalidate 键＝`["platform-sync-section","spec-conflicts",workspaceId]`（`QUERY_KEY_ROOT=["platform-sync-section"]` 实际值）；③「标记已处理」关闭范围＝整条注册表记录（一条记录可含多个变更名，并列展示的兄弟行会一起消失），写进确认文案并记 R-07；④兜底命中时 `ql_id` 恒 null、archive 路径排序沉底、>300 路径时属该变更的路径可能被帽截掉（表现为缺路径）——均接受为已知边界，记 R-08/R-02。

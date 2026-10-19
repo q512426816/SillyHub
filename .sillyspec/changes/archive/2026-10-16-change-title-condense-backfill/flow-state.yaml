@@ -1,0 +1,50 @@
+tier: thin
+legacy_fallback: false
+substeps:
+  artifacts: done
+  ledger: done
+  patch: done
+  review: done
+  probes: done
+  distill: done
+  archive: done
+  events: done
+born_face: thin
+with_tasks: false
+review_force: null
+input: >-
+  变更中心标题提炼与存量回填
+
+  动机：变更中心完整变更标题恒为变更名兜底、轻量变更标题为50字截断长句，用户要求约20字可读短标题。平台侧做两件事：收养口对超长标题防御性提炼、存量行从description按同规则回填；提炼规则在自然标点处截断，目标20字、上限30字，无边界才硬截加省略号。
+
+  成功标准：
+
+  - title_norm 新增 condense_title 纯函数并在强/弱标点截断、上限30、硬截加省略号各形态有单测（用实证坏样本做用例）
+
+  - _ensure_change_row 收养口对超30字上行标题提炼后入库、不超30字原样收养，有单测
+
+  - 新增一次性回填脚本 backend/scripts/backfill_change_titles.py：默认 dry-run、--apply 落库、--workspace 可定向，title 为兜底形态或超30字的行从
+  description 回填，服务层有单测且幂等
+
+  - 本地开发库 dry-run 核对计数后 --apply，抽查回填结果为约20字短句
+autopilot: false
+prestage_ack: false
+baseline_commit: 39b17126f8da79c0193e42a52ab399f18e9a9088
+updatedAt: '2026-10-16T14:15:53.491Z'
+cross_baselines:
+  sillyspec: f6f22faa3e34eb8c01eabeb2fc6501fc93b3d2d6
+baseline_sha256: 5caa1e049e0410d7ff1d8fe54c663853e03fa30b90d7631cff177848bd7abddc
+spec_approved: true
+spec_approved_at: '2026-10-16T13:20:34.092Z'
+spec_approved_by: anon@DESKTOP-HJ0AM09
+spec_approved_channel: user-confirmed
+spec_attested_by: anon@DESKTOP-HJ0AM09
+gate_summary: >-
+  test: passed ← module[]+deps(py24+jsx27)+fr(49)（292.1s）
+  结果：C:\Users\qinyi\IdeaProjects\multi-agent-platform\.sillyspec\.runtime\verify-runs\20261016140626\test-result.json｜lint:
+  passed ← cd backend && uv run ruff check . && uv run ruff format --check . && uv run mypy app && cd ../frontend &&
+  pnpm lint && cd ../sillyhub-daemon && pnpm typecheck（38.9s）
+  结果：C:\Users\qinyi\IdeaProjects\multi-agent-platform\.sillyspec\.runtime\verify-runs\20261016140626\test-result.json｜门文件
+  18 个
+
+commit_type: feat

@@ -32,6 +32,7 @@
 
 import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
 import { resolveWindowsCmdShim } from '../cmd-shim.js';
+import { DSH_PROVIDER_ID } from '../dsh-settings.js';
 import { LfLineFramer } from './pi-rpc-driver.js';
 import type {
   AgentEvent,
@@ -219,31 +220,66 @@ export class DshAcpDriver implements InteractiveDriver {
 
     try {
       // ── 握手（失败 → 结构化 error，D-002 兜底：不重试不降级）──
+      // 真机诊断（2026-10-17 dsh 会话静默终止排查）：驱动失败路径此前零日志——
+      // 握手/prompt 错误只走回调（SessionManager.fail → notifySessionEnd），
+      // daemon.log 全程无痕，用户侧只见会话 3 秒即死。补里程碑 + 错误留痕。
+      // eslint-disable-next-line no-console
+      console.log('[dsh-driver] handshake: initialize…');
       await conn.request('initialize', {
         protocolVersion: ACP_PROTOCOL_VERSION,
         clientCapabilities: {},
       });
-      const newOrResume: Record<string, unknown> = { cwd: opts.cwd };
+      const newOrResume: Record<string, unknown> = {
+        cwd: opts.cwd,
+        // dsh 0.2.0-rc.2 起 mcpServers 为 session/new 必填（缺失回 JSON-RPC -32602
+        // "Invalid params"，会话 ready 后 ~3s 静默终止——真机实证 2026-10-17，R-01
+        // alpha 破坏性变更兑现）。恒发空数组占位：旧版本兼容（字段原本可选），
+        // 平台 MCP 声明面后续按需接入。
+        mcpServers: [],
+      };
       if (opts.resume) newOrResume.sessionId = opts.resume;
       const sessionResp = (await conn.request(
         opts.resume ? 'session/resume' : 'session/new',
         newOrResume,
       )) as { sessionId?: string };
       ctx.acpSessionId = sessionResp.sessionId;
+      // eslint-disable-next-line no-console
+      console.log(`[dsh-driver] handshake ok (acpSessionId=${ctx.acpSessionId ?? 'null'})`);
       // 模型/思考档位（provider_config 路由的 model + 平台档位本地三档映射）。
+      // dsh 0.2.0-rc.2（官方 @agentclientprotocol/sdk v2 schema）：set_config_option
+      // 参数为扁平 {sessionId, configId, value}——旧嵌套 {option:{optionId,value}}
+      // 形状回 Invalid params（真机实证 2026-10-17）。设置失败降级 warn 不杀会话
+      //（引擎用默认模型继续；参数随 rc.x 演进时只降级不死）。
       if (opts.model) {
-        await conn.request('session/set_config_option', {
-          sessionId: ctx.acpSessionId,
-          option: { optionId: 'model', value: opts.model },
-        });
+        try {
+          await conn.request('session/set_config_option', {
+            sessionId: ctx.acpSessionId,
+            configId: 'model',
+            // rc.2 模型 valueId 形状 = `["<provider键>","<modelId>"]` JSON 数组串
+            //（configOptions.model.options[].value 同形；探针实证设此形状后
+            // currentValue 翻转且轮次路由到该 provider）。
+            value: JSON.stringify([DSH_PROVIDER_ID, opts.model]),
+          });
+        } catch (e) {
+          // eslint-disable-next-line no-console
+          console.warn(`[dsh-driver] set model 失败（非致命，保留引擎默认模型）: ${e instanceof Error ? e.message : String(e)}`);
+        }
       }
       const effort = mapThinkingLevel(opts.thinkingLevel);
       if (effort !== undefined) {
-        await conn.request('session/set_config_option', {
-          sessionId: ctx.acpSessionId,
-          option: { optionId: 'reasoning_effort', value: effort },
-        });
+        try {
+          await conn.request('session/set_config_option', {
+            sessionId: ctx.acpSessionId,
+            configId: 'reasoning_effort',
+            value: effort,
+          });
+        } catch (e) {
+          // eslint-disable-next-line no-console
+          console.warn(`[dsh-driver] set reasoning_effort 失败（非致命）: ${e instanceof Error ? e.message : String(e)}`);
+        }
       }
+      // eslint-disable-next-line no-console
+      console.log('[dsh-driver] setup complete, entering turn loop');
 
       // ── 逐 turn 循环 ──
       for await (const turn of ctx.input) {
@@ -252,7 +288,16 @@ export class DshAcpDriver implements InteractiveDriver {
         ctx.activePrompt = true;
         let turnError: string | undefined;
         const unregister = conn.onNotification((params) => {
-          const events = normalizeAcpUpdate(params as AcpSessionUpdate);
+          // rc.2（官方 ACP SDK）信封：params={sessionId, update:{sessionUpdate,…}}；
+          // 旧 dsh 直发内层 update。兼容两种形状——有 update 键即拆信封（真机实证：
+          // 不拆则 sessionUpdate 恒 undefined，全部内容事件被静默丢弃，轮次完成
+          // 但回复零落库，会话 e201445d）。
+          const envelopeParams = params as { update?: AcpSessionUpdate } | undefined;
+          const update =
+            envelopeParams && typeof envelopeParams === 'object' && envelopeParams.update !== undefined
+              ? envelopeParams.update
+              : (params as AcpSessionUpdate);
+          const events = normalizeAcpUpdate(update);
           if (events.length > 0) {
             void callbacks.onTurnMessage?.(envelope(events));
           }
@@ -264,6 +309,8 @@ export class DshAcpDriver implements InteractiveDriver {
           })) as AcpPromptResponse;
           const stopReason = resp.stopReason ?? 'end_turn';
           const isError = stopReason !== 'end_turn';
+          // eslint-disable-next-line no-console
+          console.log(`[dsh-driver] prompt done (stopReason=${stopReason})`);
           callbacks.onTurnResult({
             subtype: isError ? `acp_${stopReason}` : 'success',
             is_error: isError,
@@ -279,6 +326,8 @@ export class DshAcpDriver implements InteractiveDriver {
         if (turnError !== undefined) throw new Error(turnError);
       }
     } catch (err) {
+      // eslint-disable-next-line no-console
+      console.error('[dsh-driver] consume failed:', err instanceof Error ? err.message : String(err));
       callbacks.onTurnError?.(err);
       callbacks.onTurnResult({
         subtype: 'error_during_execution',
@@ -290,8 +339,19 @@ export class DshAcpDriver implements InteractiveDriver {
     }
 
     // 输入流自然结束（session end 路径）：等子进程退出由 close 负责，此处收敛。
-    child.once('exit', () => {
+    child.once('exit', (code, signal) => {
+      // 真机诊断（同上）：子进程退出此前零留痕。
+      // eslint-disable-next-line no-console
+      console.log(`[dsh-driver] child exit (code=${code ?? 'null'} signal=${signal ?? 'null'})`);
       conn.dispose();
+    });
+    child.on('exit', (code, signal) => {
+      if (ctx.closed) return;
+      // 非收口退出（进程自杀/崩溃）：留痕可见。注意——此处仅日志，不做终态收敛
+      //（收敛缺口系既有语义，等输入态崩溃需等下一轮 30s 超时暴露；zcode 式
+      // finalizeWithError 收敛为后续任务，评审 P2 留档）。
+      // eslint-disable-next-line no-console
+      console.error(`[dsh-driver] child exited unexpectedly (code=${code ?? 'null'} signal=${signal ?? 'null'})`);
     });
   }
 
@@ -322,7 +382,8 @@ export class DshAcpDriver implements InteractiveDriver {
     try {
       await ctx.conn.request('session/set_config_option', {
         sessionId: ctx.acpSessionId,
-        option: { optionId: 'reasoning_effort', value: effort },
+        configId: 'reasoning_effort',
+        value: effort,
       });
       return { ok: true };
     } catch (err) {

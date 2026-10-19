@@ -38,11 +38,14 @@ from app.modules.change.schema import (
     ChangeFileContent,
     ChangeFileEntry,
     ChangeFileList,
+    ChangeFileSyncResult,
     ChangeFileWriteRequest,
     ChangeFileWriteResponse,
     ChangeList,
     ChangePatchFileRead,
     ChangeRead,
+    ChangeRenameRequest,
+    ChangeRenameResponse,
     ChangeReparseResponse,
     ChangeReparseStats,
     ChangeSummary,
@@ -82,6 +85,11 @@ from app.modules.change.scope_audit import (
 from app.modules.change.service import ChangeService
 from app.modules.change.timeline import ChangeTimelineQueryService
 from app.modules.change.usage_service import ChangeUsageQueryService
+from app.modules.daemon.runtime.service import (
+    DaemonRpcRemoteError,
+    DaemonRpcTimeout,
+    DaemonRuntimeOffline,
+)
 from app.modules.daemon.schema import AgentSessionListItem, ChangeSessionAuthor
 from app.modules.workspace.service import WorkspaceService
 
@@ -102,12 +110,18 @@ def _get_user_role(user: User) -> str:
     return "business_user"
 
 
-# GET files 显式同步预算（2026-10-14-files-refresh-explicit-sync / 承 2026-10-13
-# change-files-refresh-sync D-002@v1）：仅 sync=1（用户点「刷新」按钮）触发，
-# 等 daemon 串行两条 sillyspec CLI 的 RPC 硬预算从 15s 收窄到 3s——点击刷新多数
-# 情况在预算内拿到同步后数据，超时静默降级返回现有镜像数据（daemon 防抖 15s
-# 内再点秒回新数据），任何一次点击都不会长时间卡住。默认（不带 sync）纯读零同步。
-_FILES_REFRESH_SYNC_RPC_TIMEOUT_S = 3.0
+# GET files 显式同步预算（2026-10-16-change-files-sync-result 修订；承 2026-10-14
+# files-refresh-explicit-sync / 2026-10-13-change-files-refresh-sync D-002@v1）：
+# 仅 sync=1（用户点「刷新」按钮）触发。原 3s 预算窄于真实同步耗时——daemon 串行
+# ``platform sync`` + ``sync-docs`` 两条 CLI 实测 5.5~13.5s（daemon.log 2026-10-13~
+# 14 多例），3s 下真同步恒超时→静默降级，「刷新」永远拿旧数据。放宽到 15s 覆盖
+# 实测上界并留余量；超时仍静默降级不阻断 GET（并已带 sync_result 回执明示原因）。
+# 默认（不带 sync）纯读零同步。
+_FILES_REFRESH_SYNC_RPC_TIMEOUT_S = 15.0
+
+# stderr_tail 入库/回执前的长度硬帽（daemon 侧 cliOutputSnippet 已截短，此处兜底
+# 防异常长输出随响应放大）。
+_FILES_REFRESH_SYNC_STDERR_TAIL_MAX = 500
 
 
 async def _sync_change_via_daemon(
@@ -115,18 +129,27 @@ async def _sync_change_via_daemon(
     workspace_id: uuid.UUID,
     change: Change,
     user_id: uuid.UUID,
-) -> None:
+) -> dict[str, Any]:
     """GET files 刷新前置：绑定 daemon 在线则触发其对此变更的定向上行同步。
 
-    2026-10-13-change-files-refresh-sync task-04（D-002/D-003@v1）。链路：
-    per-member binding 解析（未绑定 = 等效离线，不接入借用兜底——避免借他机
-    CLI 的副作用）→ daemon 在线判断 → ``send_rpc('sillyspec_sync_change')``
-    （daemon 串行 ``platform sync --change`` 落镜像 + ``platform sync-docs
-    --change`` 落 DB 四件套，15s 防抖防频繁刷新打爆 CLI）。降级铁律（D-003）：
-    未绑定 / 离线 / DaemonRpcTimeout / DaemonRpcRemoteError（含老 daemon 未注册
-    method 的 method not found）四路全部 log.info 后静默返回——本函数任何情况
-    不抛，GET files 永不因同步失败报错。
+    2026-10-13-change-files-refresh-sync task-04（D-002/D-003@v1）建立链路；
+    2026-10-16-change-files-sync-result 修订：**回执不再丢弃**——返回
+    ``{"triggered", "ok", "reason", "stderr_tail"}`` 结构化结果（endpoint 组装进
+    ``ChangeFileList.sync_result`` 供前端展示失败原因），失败路径从无声 log.info
+    升级为 log.warning 留痕。链路：per-member binding 解析（未绑定 = 等效离线，
+    不接入借用兜底——避免借他机 CLI 的副作用）→ daemon 在线判断 →
+    ``send_rpc('sillyspec_sync_change')``（daemon 串行 ``platform sync --change``
+    落镜像 + ``platform sync-docs --change`` 落 DB 四件套，15s 防抖防频繁刷新
+    打爆 CLI）。降级铁律（D-003@v1）不变：未绑定 / 离线 / DaemonRpcTimeout /
+    DaemonRpcRemoteError（含老 daemon 未注册 method 的 method not found）各路
+    均不抛，GET files 永不因同步失败报错——只把失败事实与原因如实带回。
     """
+    result: dict[str, Any] = {
+        "triggered": False,
+        "ok": None,
+        "reason": None,
+        "stderr_tail": None,
+    }
     try:
         from app.modules.daemon.ws_hub import get_daemon_ws_hub
         from app.modules.workspace.member_runtimes.queries import (
@@ -142,16 +165,32 @@ async def _sync_change_via_daemon(
             session, workspace_id, user_id
         )
         if binding is None or binding.daemon_id is None:
-            return
+            result["reason"] = "no_binding"
+            log.info(
+                "change.files_refresh_sync_skipped",
+                workspace_id=str(workspace_id),
+                change_id=str(change.id),
+                reason="no_binding",
+            )
+            return result
         daemon_id = (
             binding.daemon_id
             if isinstance(binding.daemon_id, uuid.UUID)
             else uuid.UUID(str(binding.daemon_id))
         )
         if await query_daemon_online_by_id(session, daemon_id, user_id) is None:
-            return
+            result["reason"] = "daemon_offline"
+            log.info(
+                "change.files_refresh_sync_skipped",
+                workspace_id=str(workspace_id),
+                change_id=str(change.id),
+                daemon_id=str(daemon_id),
+                reason="daemon_offline",
+            )
+            return result
 
         hub = get_daemon_ws_hub()
+        result["triggered"] = True
         log.info(
             "change.files_refresh_sync_triggered",
             workspace_id=str(workspace_id),
@@ -159,7 +198,7 @@ async def _sync_change_via_daemon(
             change_key=change.change_key,
             daemon_id=str(daemon_id),
         )
-        await hub.send_rpc(
+        rpc_result = await hub.send_rpc(
             daemon_id,
             "sillyspec_sync_change",
             {
@@ -168,13 +207,85 @@ async def _sync_change_via_daemon(
             },
             timeout=_FILES_REFRESH_SYNC_RPC_TIMEOUT_S,
         )
-    except Exception as exc:  # 降级收口：同步失败绝不阻断 GET（D-003@v1）
-        log.info(
-            "change.files_refresh_sync_skipped",
+        # daemon 回执消费（2026-10-16 修复核心）：manager 恒以 ok/skipped 形态
+        # resolve，绝不被吞——ok:false 带 reason（cli_failed / no_workspace_root /
+        # …）与 stderr_tail 原样透传进回执。
+        if isinstance(rpc_result, dict) and rpc_result.get("ok") is False:
+            result["ok"] = False
+            result["reason"] = str(rpc_result.get("reason") or "cli_failed")
+            tail = rpc_result.get("stderr_tail")
+            result["stderr_tail"] = (
+                str(tail)[:_FILES_REFRESH_SYNC_STDERR_TAIL_MAX] if tail else None
+            )
+            log.warning(
+                "change.files_refresh_sync_failed",
+                workspace_id=str(workspace_id),
+                change_id=str(change.id),
+                change_key=change.change_key,
+                daemon_id=str(daemon_id),
+                reason=result["reason"],
+                stderr_tail=result["stderr_tail"],
+            )
+        elif isinstance(rpc_result, dict) and rpc_result.get("skipped"):
+            # 防抖跳过（15s TTL / in-flight 去重）：刚同步过或正在同步，非失败。
+            result["reason"] = f"skipped_{rpc_result['skipped']}"
+            log.info(
+                "change.files_refresh_sync_skipped",
+                workspace_id=str(workspace_id),
+                change_id=str(change.id),
+                reason=result["reason"],
+            )
+        else:
+            result["ok"] = True
+            log.info(
+                "change.files_refresh_sync_done",
+                workspace_id=str(workspace_id),
+                change_id=str(change.id),
+                change_key=change.change_key,
+                daemon_id=str(daemon_id),
+                actions=rpc_result.get("actions") if isinstance(rpc_result, dict) else None,
+            )
+    except DaemonRpcTimeout as exc:
+        result["ok"] = False
+        result["reason"] = "rpc_timeout"
+        log.warning(
+            "change.files_refresh_sync_failed",
             workspace_id=str(workspace_id),
             change_id=str(change.id),
+            reason="rpc_timeout",
             error=f"{type(exc).__name__}: {exc}",
         )
+    except DaemonRpcRemoteError as exc:
+        result["ok"] = False
+        result["reason"] = "rpc_remote_error"
+        log.warning(
+            "change.files_refresh_sync_failed",
+            workspace_id=str(workspace_id),
+            change_id=str(change.id),
+            reason="rpc_remote_error",
+            error=f"{type(exc).__name__}: {exc}",
+        )
+    except DaemonRuntimeOffline as exc:
+        result["ok"] = False
+        result["reason"] = "runtime_offline"
+        log.warning(
+            "change.files_refresh_sync_failed",
+            workspace_id=str(workspace_id),
+            change_id=str(change.id),
+            reason="runtime_offline",
+            error=f"{type(exc).__name__}: {exc}",
+        )
+    except Exception as exc:  # 降级收口：同步失败绝不阻断 GET（D-003@v1）
+        result["ok"] = False
+        result["reason"] = "exception"
+        log.warning(
+            "change.files_refresh_sync_failed",
+            workspace_id=str(workspace_id),
+            change_id=str(change.id),
+            reason="exception",
+            error=f"{type(exc).__name__}: {exc}",
+        )
+    return result
 
 
 async def _build_transition_response(
@@ -240,6 +351,9 @@ async def list_changes(
     # 透传 service.list_（_is_thin_lineage 三分支投影口径，含归档兜底行）；
     # 缺省/未知值不过滤（对齐 sort 白名单 fallback 风格）。
     lineage: str | None = Query(None),
+    # 2026-10-18-change-list-type-filter：类型筛选（conventional 前缀 + 旧枚举），
+    # 透传 service.list_（feat 别名等价命中旧值 feature）；白名单外/缺省不过滤。
+    change_type: str | None = Query(None),
     # task-02（2026-08-13-change-center-rework / D-004 / FR-02 / FR-04）：排序白名单
     # 透传 service.list_（默认 updated_at desc，最近活动优先，R-05）。
     sort: str = Query("updated_at_desc"),
@@ -259,6 +373,7 @@ async def list_changes(
         search=search,
         current_stage=current_stage,
         lineage=lineage,
+        change_type=change_type,
         sort=sort,
         pending_review_only=pending_review_only,
         page=page,
@@ -324,6 +439,53 @@ async def delete_change(
             },
         )
     return await service.delete_change(workspace_id, change_id, actor_id=user.id)
+
+
+@router.patch(
+    "/changes/{change_id}/title",
+    response_model=ChangeRenameResponse,
+)
+async def rename_change_title(
+    workspace_id: uuid.UUID,
+    change_id: uuid.UUID,
+    payload: ChangeRenameRequest,
+    session: SessionDep,
+    user: Annotated[User, Depends(get_current_principal)],
+) -> ChangeRenameResponse:
+    """平台改名入口（2026-10-16-change-title-condense-backfill FR-05，用户口径 2026-10-16）。
+
+    组合权限与删除端点同款三元组——变更责任人本人（``change.owner_id == 当前
+    用户``）**或** ``CHANGE_ARCHIVE``（workspace_owner 角色内置、platform_admin
+    经 has_permission 短路），即「管理员 || 平台责任人 || 变更责任人」；实现为
+    端点内组合校验（delete_change 同款先例）。带宽校验（10-30 字必须，strip 后
+    判，越带 422）、已删行 409、rename 审计事件由 ``ChangeService.rename_title``
+    给出。改名后的语义 title 不被 CLI 兜底上行回翻（is_fallback 收养守卫）。
+    """
+    service = ChangeService(session)
+    change = await service.get(workspace_id, change_id)
+    allowed = change.owner_id == user.id
+    if not allowed:
+        allowed = await has_permission(
+            session,
+            user=user,
+            permission=Permission.CHANGE_ARCHIVE,
+            workspace_id=workspace_id,
+        )
+    if not allowed:
+        raise PermissionDenied(
+            "无权改名该变更：仅变更责任人本人、平台管理员或工作区负责人可操作。",
+            details={
+                "permission": Permission.CHANGE_ARCHIVE.value,
+                "workspace_id": str(workspace_id),
+                "change_id": str(change_id),
+            },
+        )
+    renamed = await service.rename_title(
+        workspace_id, change_id, title=payload.title, actor_id=user.id
+    )
+    return ChangeRenameResponse(
+        id=renamed.id, change_key=renamed.change_key, title=renamed.title or ""
+    )
 
 
 @router.get(
@@ -456,18 +618,23 @@ async def list_change_files(
     2026-10-14-files-refresh-explicit-sync：触发面收窄——默认（sync=false）纯读，
     直接返回平台镜像数据、不碰 daemon 通道（悬浮面板轮询/初始加载零同步开销）；
     仅显式 sync=true（前端「刷新」按钮点击、错误重试）先经绑定 daemon 触发一次
-    此变更的定向上行同步（在线才触发，失败静默降级——``_sync_change_via_daemon``
+    此变更的定向上行同步（在线才触发，失败降级不抛——``_sync_change_via_daemon``
     任何情况不抛），使主动刷新尽量拿到 daemon 本机最新文档。
-    ``service.list_files`` 本体纯读语义零改动。
+    2026-10-16-change-files-sync-result：sync=true 时降级不再无声——响应带
+    ``sync_result`` 回执（触发状态 / 成败 / 机读原因 / CLI 失败尾段），前端据此
+    在同步未完成时提示原因；默认纯读回执恒 None。``service.list_files`` 本体
+    纯读语义零改动。
     """
     service = ChangeService(session)
     change = await service.get(workspace_id, change_id)
+    sync_result: dict[str, Any] | None = None
     if sync:
-        await _sync_change_via_daemon(session, workspace_id, change, user.id)
+        sync_result = await _sync_change_via_daemon(session, workspace_id, change, user.id)
     items = await service.list_files(workspace_id, change_id)
     return ChangeFileList(
         change_id=change_id,
         items=[ChangeFileEntry(**it) for it in items],
+        sync_result=ChangeFileSyncResult(**sync_result) if sync_result else None,
     )
 
 

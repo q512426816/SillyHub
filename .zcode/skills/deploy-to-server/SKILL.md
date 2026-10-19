@@ -5,22 +5,27 @@ description: 本地打包镜像→生产服务器（腾讯云轻量）部署；�
 
 # 远程服务器部署（本地打包 → 腾讯云生产服务器）
 
-## 拓扑（2026-10-16 服务器迁移起）
+## 拓扑（2026-10-16 服务器迁移；同日已去隧道直连）
 
 ```
 用户浏览器 → https://crrcdt.ppdmq.top
-  → 阿里云 47.113.145.252 nginx（443/LE 证书，upstream 仍是 127.0.0.1:8001|3001，零改动）
-  → systemd tencent-tunnel.service（SSH -L 本地转发隧道，流量加密）
+  → 阿里云 47.113.145.252 nginx（443/LE 证书）
+  → 直连 http://124.222.127.242:3001|8001（腾讯轻量控制台防火墙已放行两端口）
   → 腾讯云轻量 124.222.127.242（整套栈：backend/frontend/postgres/redis/minio）
 ```
 
-- 隧道存在的原因：**腾讯轻量控制台防火墙默认只开 22**（3001/8001/80/443 全在云层被拦，
-  服务器自身 ufw 是关的，服务器上改不了，只能腾讯控制台开）。若日后在控制台放行
-  3001/8001，可把 nginx upstream 直接指向 `http://124.222.127.242:8001|3001` 并
-  `systemctl disable --now tencent-tunnel` 撤掉隧道。
-- 阿里云旧栈：已停止且 `docker update --restart=no`，是迁移 rollback 快照（数据冻结在
-  2026-10-16 11:00），不承担服务。
+- 迁移当天先经 SSH 隧道过渡（轻量防火墙默认只开 22），用户在控制台放行 3001/8001 后
+  已切直连并 `systemctl disable --now tencent-tunnel`。隧道 unit + 受限密钥保留作应急：
+  若控制台把端口重新关掉，`systemctl enable --now tencent-tunnel` + 把 nginx upstream
+  改回 `127.0.0.1` 即恢复服务。
+- nginx 5 处 upstream 现指向 `124.222.127.242`（备份在阿里云 `/etc/nginx/backups/`）。
+- 阿里云旧栈：2026-10-16 下午起容器与镜像已彻底清理（含 litellm 遗物；清理前发现旧栈曾被
+  误启动过一次，删除后此隐患消除），释放约 5G。**仅保留**：数据卷（数据冻结在
+  2026-10-16 11:00 的快照）、compose 目录、nginx 配置备份、隧道应急件与
+  `/root/migrate/` 迁移脚本日志。整机回滚需先从腾讯机取回镜像 tar（见「回滚」）。
 - 阿里云入口机上还有别的项目容器（ppdmq-*），不要碰。
+- 安全建议：轻量防火墙 3001/8001 规则来源最好限定为 `47.113.145.252`（只让阿里云 nginx
+  访问），避免全网直打后端裸端口（后端有鉴权，但没必要暴露）。
 
 ## 目标
 
@@ -49,6 +54,21 @@ ssh -i ~/.ssh/tencent_deploy ubuntu@124.222.127.242 'docker compose ls 2>/dev/nu
 
 ## 更新部署（日常用，最常用）
 
+### 0. 部署并流校验（2026-10-16 互覆事故后强制）
+
+**背景**：多会话共享同一台生产服务器，各会话从自己的 worktree/分支打包部署会**互相覆盖**——2026-10-16 实证：分叉分支部署静默回退 main 上当天已修复的 `/data/logs` 预建，页面日志再次不可见（生产跑起了一个不含主线修复的版本）。
+
+**铁律：打包必须基于 main 主线**（主仓 `git rev-parse --abbrev-ref HEAD` 为 main，且应用目录无未提交改动）。`build-and-save.sh` 已内置两道闸门：
+- 非 main 分支打包 → 直接退出（确需分支部署时 `ALLOW_NON_MAIN_DEPLOY=1` 显式放行并留痕）；
+- `backend/frontend/sillyhub-daemon/deploy` 有未提交改动 → 退出（`ALLOW_DIRTY_DEPLOY=1` 放行）——镜像=工作区快照，脏工作区会把未合入代码带上生产。
+
+**部署后必须核对版本**（见 §4）：health 的 `commit_sha` 与打包时打印的 commit 一致才算验收通过；不一致 = 刚被别人覆盖部署，按下方处置。
+
+**被覆盖的识别与恢复**：
+1. 服务器上 `curl -s http://127.0.0.1:8001/api/health` 拿 `commit_sha`；与打包 commit 不符即被覆盖（另可 `docker images | grep backend` 看 created 时间判断）；
+2. 恢复：在 main 主线重新打包 → scp → load-and-up（**勿用分支版本"就地回滚"**——分叉分支缺主线修复，这正是事故本身；要保留对方分支的未合入交付，先合流再部署）；
+3. 记录：按发布记录惯例写明"恢复部署（被 X 覆盖）"。
+
 ### 1. 本地打包（20 核，几分钟）
 
 daemon 的 `src/` 改过才要重打 bundle（只改 install 脚本不影响 bundle JS，可跳过）：
@@ -58,8 +78,9 @@ cd sillyhub-daemon && pnpm bundle && cd ..   # 产出 build/bundle/{sillyhub-dae
 
 打包（生产 API 地址覆盖前端 build-arg；本地 `.env` 的 `127.0.0.1` 是开发值，必须覆盖）：
 ```bash
-PROD_API_URL=http://192.168.0.143:8001 bash deploy/scripts/build-and-save.sh
+PROD_API_URL=https://crrcdt.ppdmq.top bash deploy/scripts/build-and-save.sh
 # 产出 deploy/images.tar.gz（backend + frontend 两镜像 gzip，约 300M）
+# 输出会打印「打包源: 分支 main @ <short-sha>」——记下该 sha，部署后核对用
 ```
 
 > `PROD_API_URL` 是生产环境前端浏览器访问后端的地址（取自服务器 `.env` 的 `NEXT_PUBLIC_API_BASE_URL`）。改了必须重新打包前端（`NEXT_PUBLIC_` 是 build 时固化到客户端的）。
@@ -100,10 +121,13 @@ ssh -i ~/.ssh/tencent_deploy ubuntu@124.222.127.242 'cd /opt/sillyhub/deploy/dep
 ```bash
 ssh -i ~/.ssh/tencent_deploy ubuntu@124.222.127.242 'cd /opt/sillyhub/deploy/deploy && \
   docker compose ps && \
-  curl -s http://127.0.0.1:8001/api/health'
+  curl -s http://127.0.0.1:8001/api/health && \
+  docker exec multi-agent-platform-backend-1 sh -c "touch /data/spec-workspaces/.w && rm /data/spec-workspaces/.w && echo SPEC_MIRROR_WRITE_OK"'
 ```
 - 5 个容器全 healthy（backend / frontend / postgres / redis / minio）
 - health 返回 `{"status":"ok","db":"ok","redis":"ok",...}`
+- **`commit_sha` 必须与打包时打印的短 sha 一致**（2026-10-16 互覆事故后强制）——不一致说明部署后已被其他会话覆盖，见 §0「被覆盖的识别与恢复」
+- `SPEC_MIRROR_WRITE_OK` = spec 镜像目录对容器可写（缺了它变更文件树同步会全线 500，见「常见坑」属主项；迁移/搬数据后必查）
 
 backend 镜像变更会自动跑 `alembic upgrade head`，看 logs 确认无报错：
 ```bash
@@ -139,11 +163,16 @@ ssh -i ~/.ssh/tencent_deploy ubuntu@124.222.127.242 '
 
 ### 1. 写记录 md（契约与 sillyhub-docker-deploy skill 的「发布记录」节完全一致）
 
-取锚点：`GET https://<域名>/api/deploy-records`（需登录 token）拿最近一条 `commit_to` 与
-`seq`；或本地锚定（`docs/releases/` 目录最大 seq+1，目录空=001）。提交范围
+取锚点：`commit_from` 取 `GET https://<域名>/api/deploy-records`（需登录 token）最近一条的
+`commit_to`（不可达则看本地 `docs/releases/` 最大日期记录）；**`seq` 一律取号器**
+`bash deploy/scripts/next-release-seq.sh`（全局最大 frontmatter seq + 1，2026-10-18 修
+「seq 经常错」后单一取号源——勿按文件名日期段/当天序号/API 最近一条 +1 取号：文件名 NNN
+是「当天第几次」跨天重置，API 最近一条会传染历史错值；frontmatter `seq` 是全局部署序号，
+前端徽标 #NNN 用它）。提交范围
 `git log <from>..HEAD`，按 🆕新增/🔧修复/⚡优化 分组规整成中文总结，写
-`docs/releases/YYYY-MM-DD-<三位序号>-<HEAD短SHA>.md`（frontmatter 8 字段 + 正文；失败部署
-也写 status: failed）。模板照 sillyhub-docker-deploy SKILL.md，记录随代码一起 commit 推送。
+`docs/releases/YYYY-MM-DD-<三位序号>-<HEAD短SHA>.md`（文件名 NNN=当天序号从 001 起；
+frontmatter 8 字段 + 正文；失败部署也写 status: failed）。模板照 sillyhub-docker-deploy
+SKILL.md，记录随代码一起 commit 推送。
 
 ### 2. 同步到服务器镜像目录（本 skill 专属步骤）
 
@@ -174,12 +203,20 @@ ssh -i ~/.ssh/tencent_deploy ubuntu@124.222.127.242 'cd /opt/sillyhub/deploy/dep
 （`<时间>` 用 `docker images | grep backup` 查。）
 
 **整机级回滚（迁回阿里云旧栈，数据是 2026-10-16 11:00 冻结点，会丢其后新数据）**：
+2026-10-16 下午旧栈容器/镜像已清理，先取回镜像 tar（腾讯机 staging 观察期内保留；
+阿里云机 `tencent_push` 临时密钥已删，本机中转最省事，或临时加回一个可登录密钥走服务器直传）：
 ```bash
-# 阿里云：停隧道 → 起旧栈（nginx upstream 不用改，8001/3001 会被旧栈接管）
+# 1) 本机中转取回镜像 tar
+ssh -i ~/.ssh/tencent_deploy ubuntu@124.222.127.242 'cat /home/ubuntu/migrate/staging/images.tar.gz' > /tmp/images.tar.gz
+scp -i ~/.ssh/aliyun_deploy /tmp/images.tar.gz root@47.113.145.252:/root/migrate/
+# 2) 阿里云：load → 起旧栈接管 8001/3001 → upstream 改回本机 → reload（顺序别反，避免 502 窗口）
 ssh -i ~/.ssh/aliyun_deploy root@47.113.145.252 '
-  systemctl stop tencent-tunnel && \
-  cd /opt/sillyhub/deploy/deploy && docker compose --env-file .env up -d'
+  gunzip -c /root/migrate/images.tar.gz | docker load && \
+  cd /opt/sillyhub/deploy/deploy && docker compose --env-file .env up -d && \
+  sed -i "s#proxy_pass http://124.222.127.242:#proxy_pass http://127.0.0.1:#g" /etc/nginx/sites-enabled/crrcdt && \
+  nginx -t && systemctl reload nginx'
 ```
+（旧栈数据卷仍在阿里云 = 11:00 冻结点；后端/前端镜像只能从该 tar 恢复。）
 
 ## 首次部署（服务器从零）
 
@@ -249,9 +286,9 @@ TOKEN=$(ssh -i ~/.ssh/tencent_deploy ubuntu@124.222.127.242 'curl -fsS -H "Conte
 
 ## nginx 路由（/daemon/* 与 /mcp 必须走后端）
 
-> 2026-10-16 迁移后：这层 nginx 仍在**阿里云入口机**上，所有 upstream
-> （`127.0.0.1:8001|3001`）**零改动**——这两个本地端口实际由 `tencent-tunnel.service`
-> 的 SSH 转发接到腾讯云生产机。本节 location 调优（SSE/WS/410 特例）全部继续生效；
+> 2026-10-16 迁移后：这层 nginx 仍在**阿里云入口机**上，upstream 已指向
+> `http://124.222.127.242:8001|3001`（当日上午短暂走 SSH 隧道过渡，控制台放行端口后
+> 已切直连）。本节 location 调优（SSE/WS/410 特例）全部继续生效；
 > 动 nginx 的操作也全部仍在阿里云机上做。
 
 对外域名（如 `crrcdt.ppdmq.top`）前面有一层宿主机 nginx 反代，默认只把 `/api/` 与
@@ -279,7 +316,7 @@ MCP gateway」（2026-09-10 spike P0-1 实测）。规范接入端点是 `https:
 # Daemon 分发文件统一走后端 dist_router（镜像 /app/daemon-dist/ 吐最新版）。
 # 禁止 alias 到宿主机静态目录——静态副本不随镜像更新会脱节（见 SKILL「nginx 与 daemon 分发」）。
 location /daemon/ {
-    proxy_pass http://127.0.0.1:8001;
+    proxy_pass http://124.222.127.242:8001;
     proxy_http_version 1.1;
     proxy_set_header Host $host;
     proxy_set_header X-Real-IP $remote_addr;
@@ -299,7 +336,7 @@ location /daemon/ {
 # MCP gateway（规范端点 /mcp/ 带尾斜杠）。POST 不跟随重定向，务必带尾斜杠访问。
 # SSE 长连接需要 buffering off + 长 read timeout（对齐 /api/daemon/ws 的 3600s）。
 location /mcp {
-    proxy_pass http://127.0.0.1:8001;
+    proxy_pass http://124.222.127.242:8001;
     proxy_http_version 1.1;
     proxy_set_header Host $host;
     proxy_set_header X-Real-IP $remote_addr;
@@ -354,18 +391,29 @@ ssh -i ~/.ssh/tencent_deploy ubuntu@124.222.127.242 '
 ## 常见坑
 
 - **活跃 compose 目录是 `/opt/sillyhub/deploy/deploy/`**（双层 deploy；腾讯云机上只有这一层，路径沿用老服务器保持一致），scp 和 ssh 都进深层目录。
-- **腾讯轻量防火墙只开 22**（2026-10-16 实测）：控制台云层拦截 80/443/3001/8001（服务器 ufw 是关的、服务器上改不了），任何跨机直连生产端口的尝试都会超时——所以域名流量走阿里云 nginx + SSH 隧道（见顶部拓扑）。要在控制台开端口只能用户在腾讯云控制台操作；开了之后可把 nginx upstream 直指 `124.222.127.242` 并撤隧道。
-- **隧道是阿里云 systemd 服务**：`systemctl status/restart tencent-tunnel`（阿里云机上）；`Restart=always` 断线自动重连；隧道用的密钥 `/root/.ssh/aliyun_tunnel` 在腾讯侧 authorized_keys 里是 `restrict,port-forwarding`（只能转发不能登录 shell）。
-- **域名突然变旧数据/502 时先查隧道**：`systemctl is-active tencent-tunnel`；再确认阿里云旧栈没被误起（旧栈起会抢 8001/3001 端口把隧道挤掉）。
+- **腾讯轻量防火墙默认只开 22**（2026-10-16 实测）：控制台云层拦 80/443/3001/8001（服务器 ufw 是关的、机器上改不了），只能用户在腾讯控制台开。现已放行 3001/8001（nginx 直连）；若被重新关掉，应急恢复 = 阿里云 `systemctl enable --now tencent-tunnel` + upstream 改回 `127.0.0.1`（隧道 unit 与受限密钥保留未删）。
+- **跨公网明文提示**：阿里云 nginx → `124.222.127.242` 这段是公网 HTTP（内网工具可接受）；要加密可退回隧道方案（加密但单流）或给腾讯机挂自签 TLS。轻量防火墙规则来源限定 `47.113.145.252` 可显著收窄暴露面。
+- **域名突然 502/变旧数据时**：先 `systemctl status nginx`，再从阿里云 `curl -m 5 http://124.222.127.242:8001/api/health` 测直连（超时=轻量防火墙被关，走隧道应急）。阿里云旧栈容器/镜像已删（2026-10-16 下午），不存在旧栈被误起的风险。
 - **远程 pkill -f 自杀坑**（2026-10-16 实测）：ssh 进去 `pkill -f "xxx"`，模式串会匹配到自己这条 ssh 会话的命令行把自己杀掉（exit 255 无输出）；用括号技巧 `pkill -f "[x]xx"` 或先 pgrep 拿 PID 再 kill。
 - **PROD_API_URL 必须覆盖**：本地 `deploy/.env` 的 `NEXT_PUBLIC_API_BASE_URL=127.0.0.1:8001` 是开发值，直接打包给生产，浏览器会连用户自己机器。用 `PROD_API_URL=生产地址` 覆盖（环境变量 > `.env`）。
 - **.sh 必须 LF**：`.gitattributes` 已强制 `*.sh eol=lf`，scp 前确认 `grep \r = 0`，否则服务器 `bash\r: bad interpreter`。
 - **backend Dockerfile apt 源用清华 tuna**：`mirrors.aliyun.com` 的 debian trixie Packages 索引缺失会让 backend build 卡死（2026-07-17 已改 tuna）。
 - **磁盘**：60G 盘（腾讯云）。`load-and-up.sh` 自动 `image prune -f` + 删 tar。但 `backup-<时间>` tag 会累积，定期手动清：`docker images | grep backup` → `docker rmi <旧backup>`。
+- **内存与 OOM 排障（2026-10-16-backend-mem-polling）**：容器配额总和须 ≤1.85G（backend 1100m+postgres 256m+frontend 300m+minio 128m+redis 64m，见 compose）。backend 有嵌入子进程（闲置自灭）与 oom_score_adj 保护设计（注意：compose 服务级 oom_score_adj 键被部分 compose 版本忽略——`docker inspect ... OomScoreAdj` 复核）。若再见 OOM 强杀，先 `dmesg -T | grep 'Killed process'` 判被杀的是主进程还是嵌入子进程。建议 sysctl `vm.swappiness=10`（默认 60 在小内存机过早换页放大卡顿；`sysctl -w` + 持久化 /etc/sysctl.d/99-swappiness.conf，不入库；腾讯 8G 机优先级低）。
+
 - **commit_sha=unknown**：health 端点这个字段恒 `unknown` 是既有问题（compose 运行时 `COMMIT_SHA` 覆盖镜像 build 值），不影响功能，见 memory `compose-commit-sha-runtime-override`。
 - **backend 变更触发 alembic**：load + up 后 backend 启动跑 `alembic upgrade head`。migration 链断裂会 crash-loop，看 logs 诊断；项目未上线，可 `docker compose down -v` 重置 DB（先确认数据可丢）。
 - **清库迁移已改 no-op（2026-09-13 部署裁决）**：20260912050000 的破坏性清库 DML **不随** `alembic upgrade head` 自动执行（旧逻辑会在 CLI 升级前自动清库、清空白做；且迁移链重放会把已重建的正确数据再清一遍）。清库改 `backend/scripts/reset_agent_log_attribution.py` 手动执行——见「更新部署 §4」的一次性运维动作段；**只跑一次，CLI 重推开始后禁跑**。
 - **daemon bundle**：backend 镜像依赖 `sillyhub-daemon/build/bundle/`。daemon 的 `src/` 改过必须 `pnpm bundle` 再打包；只改 `scripts/install.*` 不影响 bundle JS（随 rebuild 自动 COPY 最新源）。
+- **spec 镜像目录属主必须跟容器用户（2026-10-16 迁移实锤，变更文件树同步全线 500 的根因）**：
+  `/data/spec-workspaces`（`SPEC_DATA_HOST_DIR`，宿主 bind mount → 容器同路径）的**工作区树必须属
+  `999:999`**（容器内 `app` 用户 uid/gid=999；宿主上 uid 999 的属名显示为 `dnsmasq`/`systemd-journal`）。
+  迁移/rsync/scp 搬家后若属主变成 `ubuntu`（或任何非 999）且权限 755，后端写落盘即
+  `PermissionError: [Errno 13]` → `POST /api/changes/-/spec-sync` 恒 500 → CLI 端症状为
+  「同步请求失败 HTTP 500（文件树本次未同步，下次自动重试）」无限重试、变更详情页文件树永远空。
+  修复：`sudo chown -R 999:999 /data/spec-workspaces`（顶层目录保持 777 供容器新建 workspace 树）；
+  验证：进容器 `touch` 某个已有工作区树的 `changes/.w` 不报 Permission denied。
+  老阿里云机实证属主就是 999:999——每次迁移/搬数据后都要对齐（已加进「更新部署 §4 验证」探针）。
 - **不要碰 ppdmq-\***：服务器另有 `ppdmq-app/redis/mysql` 是别的项目，部署只动 `multi-agent-platform-*` 容器。
 - **容器端口用 127.0.0.1**：本机 curl 验证服务器映射端口用 `127.0.0.1`（在服务器上 ssh 内执行），不要用 `localhost`（IPv6 解析问题）。
 - **`/daemon/` 别让 nginx 静态 alias**：宿主机 `/var/www/sillyhub/daemon/` 这类静态副本不随镜像更新，会吐旧 bundle/旧 install.ps1（无 BOM、`{{SERVER_URL}}` 未替换）。整段 `location /daemon/` 必须 `proxy_pass` 到后端。排障/部署后对比公网与后端 latest.json 版本是否一致。详见上方「nginx 路由」。

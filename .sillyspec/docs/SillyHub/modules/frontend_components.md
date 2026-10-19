@@ -187,6 +187,7 @@ active = matchLength 是 sidebarSections 全部菜单中的最大值
 - 2026-08-19-sessions-workspace-selector | 新建会话工作区选择器：workspace-session-picker 组件 + new-session-form 接入（工作区→绑定机器联动、提交体 workspace_id）
 - ql-20260819-001-b742 | 会话列表和面板头部增加工作区信息显示（session-list-panel chips + session header badge）
 - 2026-08-19-session-stream-ux | 会话流结构化重构：共享装配器 session-log-assembler（分段/归属嵌套/override 撤回收敛两处副本）+ turn-segment-views 段渲染族 + turn-status-bar 轮级状态条 + subagent-catalog 子代理目录 + TurnTimeline v2 段模型渲染（FR-01..06）
+- 2026-10-16-change-files-sync-result | 变更文件树刷新同步回执提示：change-file-tree 点「刷新」（GET files?sync=1）后按响应 `sync_result` 展示非阻塞琥珀提示条（「同步未执行」未绑定/离线｜「同步未完成」CLI 失败/超时 + 中文原因与 stderr 尾段；成功/防抖跳过/纯读清除），文件树照常展示不被遮挡；文案纯函数 `changeFileSyncWarningText` 归 lib/change-file-sync.ts（data-testid=change-files-sync-warning）
 
 ## 文件结构更新（2026-09-07-arch-large-file-split）
 

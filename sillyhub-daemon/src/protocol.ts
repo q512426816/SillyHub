@@ -290,7 +290,24 @@ export const MSG = {
    * 走 default 仅 warn（静默忽略，前端 150s 回显超时兜底）。
    */
   SILLYSPEC_TOMBSTONE_CLEANUP: 'daemon:sillyspec_tombstone_cleanup',
+  /**
+   * 2026-10-16-backend-mem-polling task-07 / D-001@v1：change-write pending 行
+   * 轻通知（Server → Daemon）。backend 四落库点 commit 后经 ws_hub 定向推送，
+   * payload 只带 runtime_id / workspace_id（恒携带可 null）——收到即调既有
+   * GET pending-change-writes 拉取（幂等）；与 backend DAEMON_MSG_CHANGE_WRITE_AVAILABLE
+   * 逐字对齐。兜底轮询仍在（change_write_poll_interval，默认 120s）。
+   */
+  CHANGE_WRITE_AVAILABLE: 'daemon:change_write_available',
 } as const;
+
+/**
+ * CHANGE_WRITE_AVAILABLE 消息 payload（与 backend notify_change_write_available
+ * 组装的 payload 逐字对齐；runtime_id 空/缺失 → daemon warn 丢弃）。
+ */
+export interface ChangeWriteAvailablePayload {
+  runtime_id: string;
+  workspace_id: string | null;
+}
 
 /** WebSocket 消息类型联合（字面量），用于 DaemonMessage.type。 */
 export type MsgType = (typeof MSG)[keyof typeof MSG];

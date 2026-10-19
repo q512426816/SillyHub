@@ -50,7 +50,9 @@ multi-agent-platform 的一体化部署编排组件，用 Docker Compose 把 bac
 <!-- MANUAL_NOTES_END -->
 
 ## 变更索引
+- 2026-10-16-backend-mem-polling task-09/10 | 配额去超卖+OOM 保护+构建稳定性（0279cd175/f62065e2f）：compose redis 128m→64m、minio 256m→128m、frontend 400m→300m（backend 1100m+postgres 256m 保持，总 2.14G→1.85G）；backend 服务级 oom_score_adj:-500（注意：当前 compose 版本忽略该键——inspect OomScoreAdj=0，entrypoint try-best 写 /proc 亦 EPERM，保护缺失=改造前现状非回归，升 compose 后生效）；backend Dockerfile ENV UV_HTTP_TIMEOUT=300（wheel 下载 30s 默认超时国内网络抖动挂构建，filelock 实证）。2026-10-16 部署腾讯轻量（124.222.127.242）四指标实测达标（RSS 211MiB/迁移 20261016100000 回填 1128 行/列表 0.5ms/idle-txn 归零）；回滚 tag backup-20261016-1253。
 - ql-20260722-012-dddb | 补 backend environment S3 配置（默认 `http://minio:9000`）+ `.env.example` 同步，修复容器内连不通 minio 致平台文件中心上传 500
 - change 2026-08-08-llm-provider-openai-format | deploy 加 litellm + litellm-db 服务（OpenAI↔Anthropic 转换网关，D-012 外包）+ `LITELLM_MASTER_KEY`/`STORE_MODEL_IN_DB` env + `.env.example` 占位 + openai 端到端链路说明
 - 2026-10-14-litellm-retire | litellm 退役拍板（用户 2026-10-14 裁决：彻底退役）：v1.95.0 坏构建坑挂 12 天分叉未拍板，
 - change 2026-10-15-knowledge-search-pgvector | postgres 换 pgvector/pgvector:pg16（知识搜索向量持久化，vector(512) 两表）+ backend fastembed 模型缓存挂载 + mem_limit 800m→1100m（生产 OOM/无外网实证）
+- 2026-10-16-deploy-convergence-guard | 2026-10-16 生产互覆事故——另一会话从分叉分支打包部署，静默回退 main 上已修复的 /…

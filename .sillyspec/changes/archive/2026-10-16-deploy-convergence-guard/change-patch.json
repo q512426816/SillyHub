@@ -1,0 +1,71 @@
+{
+  "change": "2026-10-16-deploy-convergence-guard",
+  "baseline": "c729e46af0d1ae81a1eaab575d6fa42d5a37d5e7",
+  "head": "d581d40b43ea8078957e915ff68709fb9f082b94",
+  "files": [
+    ".zcode/skills/deploy-to-server/SKILL.md",
+    "deploy/scripts/build-and-save.sh"
+  ],
+  "totals": {
+    "files": 2,
+    "additions": 39,
+    "deletions": 1
+  },
+  "savedAt": "2026-10-16T07:53:01.029Z",
+  "note": "flow done 时点冻结（本变更可归属交付面：baseline..HEAD 提交面过滤 .sillyspec/ 只留 .sillyspec/docs/ 交付文档 + 独占树未提交交付；治理工件目录不入冻结——2026-10-12-close-trace-freeze-integrity FR-01）",
+  "modules": [
+    {
+      "id": "deploy",
+      "files": 1,
+      "doc": "docs/multi-agent-platform/modules/deploy.md",
+      "docTouched": false,
+      "docMissing": false
+    }
+  ],
+  "uncoveredDirs": [
+    {
+      "dir": ".zcode/skills/deploy-to-server",
+      "files": 1
+    }
+  ],
+  "moduleMaps": [
+    "docs/backend/modules/_module-map.yaml",
+    "docs/frontend/modules/_module-map.yaml",
+    "docs/multi-agent-platform/modules/_module-map.yaml",
+    "docs/SillyHub/modules/_module-map.yaml",
+    "docs/sillyhub-daemon/modules/_module-map.yaml"
+  ],
+  "acceptedUnmappedDirs": 1,
+  "scopeAudit": {
+    "mode": "full-flow",
+    "ok": true,
+    "degradedReason": null,
+    "baseAnchor": "c729e46af0d1ae81a1eaab575d6fa42d5a37d5e7",
+    "totals": {
+      "files": 2,
+      "additions": 39,
+      "deletions": 1
+    },
+    "rows": [
+      {
+        "path": ".zcode/skills/deploy-to-server/SKILL.md",
+        "additions": 18,
+        "deletions": 1,
+        "kind": "modified"
+      },
+      {
+        "path": "deploy/scripts/build-and-save.sh",
+        "additions": 21,
+        "deletions": 0,
+        "kind": "modified"
+      }
+    ],
+    "excluded": {
+      "foreignDeclared": []
+    },
+    "note": "flow done 时点冻结（本文件落盘时采集）",
+    "closedBy": "flow done"
+  },
+  "patchSha256": "603d7f7325d1a51c5b7e181404073fbbc5a14ac1f579bff0ee58d0a65d59ca36",
+  "patchStatus": "ok"
+}

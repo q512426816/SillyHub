@@ -1,0 +1,150 @@
+{
+  "change": "2026-10-18-change-type-git-conventional",
+  "baseline": "a492bb67e51126fa04418c83337a4a1666be8c52",
+  "head": "261a333678e8722856b7120606385f52e31e8579",
+  "files": [
+    "backend/app/modules/change/parser.py",
+    "backend/app/modules/change/service.py",
+    "backend/app/modules/change/tests/test_parser.py",
+    "backend/app/modules/change/tests/test_reparse_guard.py",
+    "frontend/src/components/changes/detail/__tests__/change-overview-side.test.tsx",
+    "frontend/src/components/changes/detail/change-overview-side.tsx",
+    "scripts/backfill_commit_type.py"
+  ],
+  "totals": {
+    "files": 7,
+    "additions": 477,
+    "deletions": 5
+  },
+  "savedAt": "2026-10-18T13:07:39.353Z",
+  "note": "flow done 时点冻结（本变更可归属交付面：baseline..HEAD 提交面过滤 .sillyspec/ 只留 .sillyspec/docs/ 交付文档 + 独占树未提交交付；治理工件目录不入冻结——2026-10-12-close-trace-freeze-integrity FR-01）",
+  "modules": [
+    {
+      "id": "change",
+      "files": 4,
+      "doc": "docs/backend/modules/change.md",
+      "docTouched": false,
+      "docMissing": false
+    },
+    {
+      "id": "backend",
+      "files": 4,
+      "doc": "docs/multi-agent-platform/modules/backend.md",
+      "docTouched": false,
+      "docMissing": false
+    },
+    {
+      "id": "frontend",
+      "files": 2,
+      "doc": "docs/multi-agent-platform/modules/frontend.md",
+      "docTouched": false,
+      "docMissing": false
+    },
+    {
+      "id": "scripts",
+      "files": 1,
+      "doc": "docs/multi-agent-platform/modules/scripts.md",
+      "docTouched": false,
+      "docMissing": false
+    },
+    {
+      "id": "change",
+      "files": 4,
+      "doc": "docs/SillyHub/modules/change.md",
+      "docTouched": false,
+      "docMissing": false
+    },
+    {
+      "id": "frontend_components",
+      "files": 2,
+      "doc": "docs/SillyHub/modules/frontend_components.md",
+      "docTouched": false,
+      "docMissing": false
+    }
+  ],
+  "uncoveredDirs": [],
+  "moduleMaps": [
+    "docs/backend/modules/_module-map.yaml",
+    "docs/frontend/modules/_module-map.yaml",
+    "docs/multi-agent-platform/modules/_module-map.yaml",
+    "docs/SillyHub/modules/_module-map.yaml",
+    "docs/sillyhub-daemon/modules/_module-map.yaml"
+  ],
+  "acceptedDirtyGap": 2,
+  "scopeAudit": {
+    "mode": "full-flow",
+    "ok": true,
+    "degradedReason": null,
+    "baseAnchor": "a492bb67e51126fa04418c83337a4a1666be8c52",
+    "totals": {
+      "files": 7,
+      "additions": 477,
+      "deletions": 5
+    },
+    "rows": [
+      {
+        "path": "backend/app/modules/change/parser.py",
+        "additions": 47,
+        "deletions": 0,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "planned"
+      },
+      {
+        "path": "backend/app/modules/change/service.py",
+        "additions": 7,
+        "deletions": 1,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "planned"
+      },
+      {
+        "path": "backend/app/modules/change/tests/test_parser.py",
+        "additions": 75,
+        "deletions": 0,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "planned"
+      },
+      {
+        "path": "backend/app/modules/change/tests/test_reparse_guard.py",
+        "additions": 45,
+        "deletions": 0,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "planned"
+      },
+      {
+        "path": "frontend/src/components/changes/detail/__tests__/change-overview-side.test.tsx",
+        "additions": 38,
+        "deletions": 3,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "planned"
+      },
+      {
+        "path": "frontend/src/components/changes/detail/change-overview-side.tsx",
+        "additions": 44,
+        "deletions": 1,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "planned"
+      },
+      {
+        "path": "scripts/backfill_commit_type.py",
+        "additions": 221,
+        "deletions": 0,
+        "kind": "new",
+        "planned": null,
+        "verdict": "planned"
+      }
+    ],
+    "excluded": {
+      "foreignDeclared": []
+    },
+    "note": "flow done 时点冻结（本文件落盘时采集）",
+    "closedBy": "flow done"
+  },
+  "patchSha256": "6e7a4233356da8cf1aba81e6a3cb5376c88d571c199701c3deb05cd5fbe1bea5",
+  "patchStatus": "ok"
+}

@@ -1,0 +1,53 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-17-zcode-provider-config-shape",
+  "rows": [
+    {
+      "anchor": "FR-01",
+      "row_id": "2026-10-17-zcode-provider-config-shape:flow:测试绑定FR-01",
+      "tests": [
+        "sillyhub-daemon/tests/zcode-settings.test.ts「schemaVersion=1 + providerOrder + providerRules 对象包裹 + modelConfigRules 两键（逐字段对齐宿主有效实例）」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-17-zcode-provider-config-shape"
+    },
+    {
+      "anchor": "FR-02",
+      "row_id": "2026-10-17-zcode-provider-config-shape:flow:测试绑定FR-02",
+      "tests": [
+        "sillyhub-daemon/tests/interactive/zcode-app-server-driver.test.ts「create → subscribe → setModel → 乒乓一轮全链路（帧形状钉板）」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-17-zcode-provider-config-shape"
+    },
+    {
+      "anchor": "FR-03",
+      "row_id": "2026-10-17-zcode-provider-config-shape:flow:测试绑定FR-03",
+      "tests": [
+        "sillyhub-daemon/tests/interactive/zcode-app-server-driver.test.ts",
+        "sillyhub-daemon/tests/interactive/zcode-events.test.ts",
+        "sillyhub-daemon/tests/zcode-settings.test.ts"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-17-zcode-provider-config-shape"
+    }
+  ]
+}

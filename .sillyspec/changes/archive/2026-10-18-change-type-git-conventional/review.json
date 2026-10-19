@@ -1,0 +1,28 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-18-change-type-git-conventional",
+  "reviewer": "inline-self（环境无已注册子代理，主会话代行）",
+  "verdict": "PASS",
+  "reviewedAgainst": "261a333678e8722856b7120606385f52e31e8579",
+  "findings": [
+    {
+      "severity": "P3",
+      "title": "回填脚本写 flow-state.yaml 与 spec-sync 读盘存在理论竞窗",
+      "evidence": "脚本整文件重写（scripts/backfill_commit_type.py write_commit_type）期间若恰好有并行 spec-sync 读同文件可读到半态；design 边界四问已声明『建议无并行变更时跑』且脚本为人工一次性工具，实际暴露面极小",
+      "location": "scripts/backfill_commit_type.py:101"
+    },
+    {
+      "severity": "P3",
+      "title": "active 变更回填的类型随提交面增长会过时",
+      "evidence": "脚本对 active thin 变更按当前已落提交取主类型，后续新增更高优先级类型提交（如再补 feat）不会自动更新，需复跑脚本或等 CLI flow done 版本；幂等替换语义保证复跑可纠正",
+      "location": "scripts/backfill_commit_type.py:171"
+    }
+  ],
+  "dimensionNotes": {
+    "乱序": "ok——边界已裁决：可接受（commit_type 为终态事实，迟到只表现为一次权威覆盖；解析侧 fail-open）",
+    "并发": "ok——边界已裁决：可接受（写入方为人工一次性脚本+后续 CLI 串行收口点；reparse 只读；P3 竞窗已登记）",
+    "切换": "ok——脚本中断可幂等重跑（unchanged/replaced/appended 三态实测）；parser 损坏 YAML 返 None 不阻断 reparse（用例钉）",
+    "作用域": "ok——parser 逐目录读取无共享态；脚本限主仓根跑、git 反查限本仓 --all；api-types.ts 两处并行在途文件以 --accept-dirty-gap 显式隔离不卷入（边界已裁决：可接受）"
+  },
+  "reviewedAt": "2026-10-18T21:08:07+08:00"
+}

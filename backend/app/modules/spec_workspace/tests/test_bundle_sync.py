@@ -656,3 +656,61 @@ class TestBundleGzip:
         list(_plain)
         assert len(spec_svc._bundle_gzip_cache) == n_before
         assert all(k[0] == ws.id for k in spec_svc._bundle_gzip_cache)
+
+
+# ── task-02（2026-10-16-backend-mem-polling / D-004@v1）：全局字节帽 LRU ─────
+
+
+class TestBundleCacheGlobalCap:
+    """_bundle_gzip_cache 全局字节帽：超帽按 LRU 淘汰最旧、刚写入不自淘汰。"""
+
+    @pytest.fixture(autouse=True)
+    def _clean_cache(self):
+        import app.modules.spec_workspace.service as svc
+
+        svc._bundle_gzip_cache.clear()
+        yield
+        svc._bundle_gzip_cache.clear()
+
+    @staticmethod
+    def _key(i: int):
+        import uuid
+
+        return (uuid.UUID(int=i), 100 + i)
+
+    async def test_global_cap_evicts_oldest_until_under(self, monkeypatch):
+        import app.modules.spec_workspace.service as svc
+
+        monkeypatch.setattr(svc, "_bundle_cache_max_bytes", lambda: 1000)
+        svc._bundle_gzip_cache_put(self._key(1), b"a" * 400)
+        svc._bundle_gzip_cache_put(self._key(2), b"b" * 400)
+        assert len(svc._bundle_gzip_cache) == 2
+        svc._bundle_gzip_cache_put(self._key(3), b"c" * 400)  # 总 1200 > 1000
+        assert len(svc._bundle_gzip_cache) == 2, "超帽必须淘汰到帽内"
+        assert svc._bundle_gzip_cache_get(self._key(1)) is None, "最旧被淘汰"
+        assert svc._bundle_gzip_cache_get(self._key(3)) == b"c" * 400  # 刚写不自淘汰
+
+    async def test_get_refreshes_lru_recency(self, monkeypatch):
+        import app.modules.spec_workspace.service as svc
+
+        monkeypatch.setattr(svc, "_bundle_cache_max_bytes", lambda: 1000)
+        svc._bundle_gzip_cache_put(self._key(1), b"a" * 400)
+        svc._bundle_gzip_cache_put(self._key(2), b"b" * 400)
+        assert svc._bundle_gzip_cache_get(self._key(1)) == b"a" * 400  # k1 变最新
+        svc._bundle_gzip_cache_put(self._key(3), b"c" * 400)
+        assert svc._bundle_gzip_cache_get(self._key(2)) is None, "淘汰最久未用的 k2"
+        assert svc._bundle_gzip_cache_get(self._key(1)) == b"a" * 400
+
+    async def test_per_ws_two_version_policy_unchanged(self, monkeypatch):
+        """per-ws 2 版本保留策略在帽内照旧（全局帽是叠加不是替换）。"""
+        import uuid
+
+        import app.modules.spec_workspace.service as svc
+
+        monkeypatch.setattr(svc, "_bundle_cache_max_bytes", lambda: 10**9)
+        ws = uuid.uuid4()
+        svc._bundle_gzip_cache_put((ws, 1), b"a" * 10)
+        svc._bundle_gzip_cache_put((ws, 2), b"b" * 10)
+        svc._bundle_gzip_cache_put((ws, 3), b"c" * 10)
+        assert (ws, 1) not in svc._bundle_gzip_cache
+        assert set(k[1] for k in svc._bundle_gzip_cache if k[0] == ws) == {2, 3}

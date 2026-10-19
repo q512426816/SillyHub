@@ -15,4 +15,11 @@ mkdir -p /data/spec-workspaces
 # Allow git operations on bind-mounted host directories
 git config --global --add safe.directory '*' 2>/dev/null || true
 
+# 2026-10-16-backend-mem-polling task-09 / D-001@v1：主进程 OOM 保护 try-best 兜底
+# （主路径=compose 服务级 oom_score_adj: -500；本写法在无 CAP_SYS_RESOURCE 等场景
+# 会 EPERM——失败仅告警不阻塞启动，保护缺失=现状，非回归）。
+if [ -w /proc/self/oom_score_adj ]; then
+  echo -500 > /proc/self/oom_score_adj 2>/dev/null     || echo "[entrypoint] oom_score_adj 写入失败（compose 级设置仍生效则无碍）"
+fi
+
 exec "$@"
