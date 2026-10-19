@@ -66,3 +66,4 @@
 - 2026-10-19-change-list-created-sort | 变更中心列表默认按创建时间倒序
 - 2026-10-19-knowledge-search-build-switch | 知识搜索禁建库开关：根治首搜建库地雷
 - 2026-10-19-thinking-zh-translate | 思考内容离线翻译为中文展示
+- 2026-10-19-translate-live-verify | 翻译真机验证：换模型源与EOS修复

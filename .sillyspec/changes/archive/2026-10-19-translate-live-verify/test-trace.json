@@ -1,0 +1,36 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-19-translate-live-verify",
+  "rows": [
+    {
+      "anchor": "FR-01",
+      "row_id": "2026-10-19-translate-live-verify:flow:测试绑定FR-01",
+      "tests": [
+        "backend/app/modules/translate/tests/test_live_engine.py「test_live_worker_subprocess_translates_cleanly」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-19-translate-live-verify"
+    },
+    {
+      "anchor": "FR-01",
+      "row_id": "2026-10-19-translate-live-verify:flow:测试绑定FR-01",
+      "tests": [
+        "backend/app/modules/translate/tests/test_live_engine.py「test_live_endpoint_full_chain」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-19-translate-live-verify"
+    }
+  ]
+}

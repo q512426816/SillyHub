@@ -336,3 +336,43 @@ created_at: 2026-10-15T11:57:05.061Z
   confirmed_at: null
   source_change: 2026-10-19-thinking-zh-translate
   status: active
+
+## FR-core-012 真机 live 测试全绿：worker 子进程译文含中文且无重复循环乱码；端点全链路 engine_ready=true、译文 translated=true、围栏代码块与 URL 保护段原样保留
+变更：2026-10-19-translate-live-verify
+状态：active
+摘要：真模型推理；EOS 协议回归锚
+场景正文：
+- 场景：真模型推理 — Given 默认模型仓库已下载到本机 HF 缓存，When 以 TRANSLATE_LIVE_TEST=1 运行 live 测试，Then worker 与端点两级用例全部
+- 场景：EOS 协议回归锚 — Given sentencepiece 分词路径（transformers 缺席），When 编码源文本，Then 必须手动追加 `</s>`（ct2 opus-mt 转换
+全文：.sillyspec/changes/archive/2026-10-19-translate-live-verify/requirements.md#FR-01
+最近确认：ffd511d4eb260046f3803cfa16492f4e0e55a0a7
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-19-translate-live-verify:flow:测试绑定FR-01
+  tests: backend/app/modules/translate/tests/test_live_engine.py「test_live_endpoint_full_chain」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-19-translate-live-verify
+  status: active
+
+## FR-core-013 既有 translate 模块测试（mock 面）全绿零回归
+变更：2026-10-19-translate-live-verify
+状态：active
+摘要：默认跳过
+场景正文：
+- 场景：默认跳过 — Given 未设置 TRANSLATE_LIVE_TEST，When 运行 translate 模块测试，Then live 用例 skip、其余全绿。
+全文：.sillyspec/changes/archive/2026-10-19-translate-live-verify/requirements.md#FR-02
+最近确认：ffd511d4eb260046f3803cfa16492f4e0e55a0a7
+
+## FR-core-014 config.py 默认 repo 与 backend/app/modules/translate/README.md 一致指向可用仓库
+变更：2026-10-19-translate-live-verify
+状态：active
+摘要：默认开箱可用
+场景正文：
+- 场景：默认开箱可用 — Given 联网（或 HF 镜像）环境零配置启动，When 首次翻译请求触发模型下载，Then 默认 repo 可解析下载并正常推理。
+全文：.sillyspec/changes/archive/2026-10-19-translate-live-verify/requirements.md#FR-03
+最近确认：ffd511d4eb260046f3803cfa16492f4e0e55a0a7

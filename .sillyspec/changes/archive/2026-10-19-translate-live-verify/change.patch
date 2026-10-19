@@ -1,0 +1,194 @@
+diff --git a/backend/app/core/config.py b/backend/app/core/config.py
+index 309780347..ae9e7a0bb 100644
+--- a/backend/app/core/config.py
++++ b/backend/app/core/config.py
+@@ -155,9 +155,12 @@ class Settings(BaseSettings):
+         description="master switch for offline thinking translation (env TRANSLATE_THINKING_ENABLED).",
+     )
+     # HF repo id（ct2 格式）。换更大模型只改本值；离线部署用 translate_model_dir
+-    # 指本地预置目录绕过下载。
++    # 指本地预置目录绕过下载。默认仓库 2026-10-19 真机验证更换：原
++    # michaelfeil/ct2fast-opus-mt-en-zh 已 404（hf-mirror 实测），现默认
++    # jiangzhuo9357/opus-mt-en-zh-ct2（config.json+model.bin+source/target.spm
++    # 完整布局，真机推理译文流畅）。
+     translate_model_repo: str = Field(
+-        "michaelfeil/ct2fast-opus-mt-en-zh",
++        "jiangzhuo9357/opus-mt-en-zh-ct2",
+         description="CTranslate2-format opus-mt en-zh repo id (env TRANSLATE_MODEL_REPO).",
+     )
+     # 非空 = 直接用该本地模型目录（含 config.json 的 ct2 模型目录），零下载。
+diff --git a/backend/app/modules/translate/README.md b/backend/app/modules/translate/README.md
+index 11bd26f1f..5186112c3 100644
+--- a/backend/app/modules/translate/README.md
++++ b/backend/app/modules/translate/README.md
+@@ -9,7 +9,7 @@ API——推理在本地 CTranslate2 子进程完成（opus-mt-en-zh int8 量化
+ | 变量 | 默认 | 说明 |
+ |---|---|---|
+ | `TRANSLATE_THINKING_ENABLED` | `true` | 总闸；`false` 时端点直接原文透传 |
+-| `TRANSLATE_MODEL_REPO` | `michaelfeil/ct2fast-opus-mt-en-zh` | ct2 格式模型 repo id（换更大模型只改这里） |
++| `TRANSLATE_MODEL_REPO` | `jiangzhuo9357/opus-mt-en-zh-ct2` | ct2 格式模型 repo id（换更大模型只改这里） |
+ | `TRANSLATE_MODEL_DIR` | 空 | 本地模型目录（含 `config.json` 的 ct2 目录）；非空时零下载 |
+ | `TRANSLATE_WORKER_IDLE_EXIT_SEC` | `600` | 翻译子进程闲置自灭秒数 |
+ | `TRANSLATE_CACHE_MAX_ENTRIES` | `2048` | 进程内译文 LRU 条目上限 |
+@@ -22,7 +22,7 @@ API——推理在本地 CTranslate2 子进程完成（opus-mt-en-zh int8 量化
+ 
+ ```bash
+ # 有网机器上一次性下载模型目录（HF 镜像可加 HF_ENDPOINT=https://hf-mirror.com）
+-python -c "from huggingface_hub import snapshot_download; print(snapshot_download('michaelfeil/ct2fast-opus-mt-en-zh'))"
++python -c "from huggingface_hub import snapshot_download; print(snapshot_download('jiangzhuo9357/opus-mt-en-zh-ct2'))"
+ 
+ # 把输出的缓存目录整体拷到部署机（如 /opt/models/opus-mt-en-zh），然后：
+ TRANSLATE_MODEL_DIR=/opt/models/opus-mt-en-zh
+@@ -32,7 +32,7 @@ Docker 预烤（可选）：在 backend Dockerfile 依赖安装后加
+ 
+ ```dockerfile
+ RUN python -c "from huggingface_hub import snapshot_download" \
+-    && python -c "from huggingface_hub import snapshot_download as s; s('michaelfeil/ct2fast-opus-mt-en-zh', local_dir='/opt/models/opus-mt-en-zh')" \
++    && python -c "from huggingface_hub import snapshot_download as s; s('jiangzhuo9357/opus-mt-en-zh-ct2', local_dir='/opt/models/opus-mt-en-zh')" \
+     || true
+ ENV TRANSLATE_MODEL_DIR=/opt/models/opus-mt-en-zh
+ ```
+diff --git a/backend/app/modules/translate/tests/test_live_engine.py b/backend/app/modules/translate/tests/test_live_engine.py
+new file mode 100644
+index 000000000..27f44c4ae
+--- /dev/null
++++ b/backend/app/modules/translate/tests/test_live_engine.py
+@@ -0,0 +1,107 @@
++"""真模型端到端验证（env 门控，默认跳过——CI/无模型环境零成本）。
++
++运行方式（2026-10-19 真机验证实证）：
++
++    TRANSLATE_LIVE_TEST=1 python -m pytest app/modules/translate/tests/test_live_engine.py -v -s
++    # 国内直连被墙环境加：HF_ENDPOINT=https://hf-mirror.com（模型缓存后仍走 etag 校验）
++
++覆盖（2026-10-19-thinking-zh-translate 验证轮新增）：
++- worker 子进程真模型推理：en→zh 译文含 CJK、无 EOS 缺失导致的重复循环乱码
++  （回归锚：add_source_eos=false 协议下 spm 路径必须手动追加 </s>）；
++- POST /api/translate/thinking 端点全链路（真引擎无 mock）：engine_ready=true、
++  译文 translated=true、围栏代码块与 URL 保护段原样保留。
++"""
++
++from __future__ import annotations
++
++import json
++import os
++import re
++import subprocess
++import sys
++from pathlib import Path
++
++import pytest
++
++from app.modules.translate.engine import reset_translator_for_tests
++from app.modules.translate.service import reset_cache_for_tests
++
++pytestmark = pytest.mark.skipif(
++    os.environ.get("TRANSLATE_LIVE_TEST") != "1",
++    reason="live model test gated by TRANSLATE_LIVE_TEST=1 (loads real ct2 model)",
++)
++
++_CJK_RE = re.compile(r"[\u4e00-\u9fff]")
++# 重复循环乱码特征：同一 2 字符片段连续重复 ≥8 次（EOS 缺失回归的指纹）
++_REPEAT_RE = re.compile(r"(.{2})\1{7,}")
++
++_EN_THINKING = (
++    "The agent examines the repository structure, reads the existing module code, "
++    "and decides to implement the feature by adding a new service function first."
++)
++_EN_WITH_CODE = "Run this first:\n```\nls -la\n```\nthen check https://example.com/x for details."
++
++
++def _model_spec() -> str:
++    from app.core.config import get_settings
++
++    settings = get_settings()
++    return settings.translate_model_dir or settings.translate_model_repo
++
++
++@pytest.fixture(autouse=True)
++def _reset_engine_state():
++    reset_translator_for_tests()
++    reset_cache_for_tests()
++    yield
++    reset_translator_for_tests()
++    reset_cache_for_tests()
++
++
++async def test_live_worker_subprocess_translates_cleanly() -> None:
++    """worker 子进程 + 真模型：译文含中文、无重复循环乱码（EOS 协议回归锚）。"""
++    proc = subprocess.Popen(
++        [sys.executable, "-m", "app.modules.translate.translate_worker", _model_spec(), "60"],
++        stdin=subprocess.PIPE,
++        stdout=subprocess.PIPE,
++        stderr=subprocess.DEVNULL,
++        text=True,
++        encoding="utf-8",
++        bufsize=1,
++        cwd=str(Path(__file__).resolve().parents[4]),  # backend/（-m 需要 app 包可达）
++    )
++    try:
++        req = {"id": 1, "op": "translate", "texts": [_EN_THINKING, _EN_WITH_CODE]}
++        proc.stdin.write(json.dumps(req, ensure_ascii=False) + "\n")
++        proc.stdin.flush()
++        resp = json.loads(proc.stdout.readline())
++    finally:
++        proc.stdin.close() if proc.stdin else None
++        proc.terminate()
++        proc.wait(timeout=10)
++    assert resp.get("ok") is True, resp
++    translations = resp["translations"]
++    assert len(translations) == 2
++    for out in translations:
++        assert _CJK_RE.search(out), f"译文无中文: {out!r}"
++        assert not _REPEAT_RE.search(out), f"重复循环乱码（EOS 回归）: {out[:80]!r}"
++
++
++async def test_live_endpoint_full_chain(client, auth_headers) -> None:
++    """POST /api/translate/thinking 真引擎全链路：保护段原样 + 译文中文。"""
++    resp = await client.post(
++        "/api/translate/thinking",
++        json={"items": [{"id": "a", "text": _EN_THINKING}, {"id": "b", "text": _EN_WITH_CODE}]},
++        headers=auth_headers,
++    )
++    assert resp.status_code == 200, resp.text
++    body = resp.json()
++    assert body["engine_ready"] is True, body.get("reason")
++    items = {i["id"]: i for i in body["items"]}
++    assert items["a"]["translated"] is True
++    assert _CJK_RE.search(items["a"]["text"])
++    assert not _REPEAT_RE.search(items["a"]["text"])
++    # 保护语义：围栏代码块与 URL 原样保留在译文里
++    assert "```\nls -la\n```" in items["b"]["text"]
++    assert "https://example.com/x" in items["b"]["text"]
++    assert items["b"]["translated"] is True
+diff --git a/backend/app/modules/translate/translate_worker.py b/backend/app/modules/translate/translate_worker.py
+index 12d30c8b4..64e5b5d2c 100644
+--- a/backend/app/modules/translate/translate_worker.py
++++ b/backend/app/modules/translate/translate_worker.py
+@@ -98,18 +98,24 @@ class _Tokenizers:
+ 
+         self._src_sp = spm.SentencePieceProcessor(model_file=str(_find(("source.spm",))))
+         self._tgt_sp = spm.SentencePieceProcessor(model_file=str(_find(("target.spm",))))
++        # EOS 协议：ct2 的 opus-mt 转换 config 是 add_source_eos=false——调用方必须
++        # 自行在源 token 尾追加 </s>（缺席则解码端无终止信号 → 重复循环到
++        # max_decoding_length 的乱码输出，2026-10-19 真模型冒烟实证）。
++        eos_id = self._src_sp.eos_id()
++        self._eos_piece = self._src_sp.id_to_piece(eos_id) if eos_id >= 0 else "</s>"
++        self._special_pieces = {"<s>", "</s>", "<unk>", "<pad>"}
+ 
+     def encode(self, text: str) -> list[str]:
+         if self._hf_tok is not None:
+             ids = self._hf_tok(text, add_special_tokens=True)["input_ids"]
+             return self._hf_tok.convert_ids_to_tokens(ids)
+-        return self._src_sp.encode(text, out_type=str)
++        return [*self._src_sp.encode(text, out_type=str), self._eos_piece]
+ 
+     def decode(self, pieces: list[str]) -> str:
+         if self._hf_tok is not None:
+             ids = self._hf_tok.convert_tokens_to_ids(pieces)
+             return self._hf_tok.decode(ids, skip_special_tokens=True)
+-        return self._tgt_sp.decode(pieces)
++        return self._tgt_sp.decode([p for p in pieces if p not in self._special_pieces])
+ 
+ 
+ def _translate_once(translator: object, toks: _Tokenizers, texts: list[str]) -> list[str]:

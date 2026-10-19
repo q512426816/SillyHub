@@ -1,0 +1,34 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-19-translate-live-verify",
+  "reviewer": "subagent",
+  "verdict": "PASS",
+  "reviewedAgainst": "ffd511d4eb260046f3803cfa16492f4e0e55a0a7",
+  "findings": [
+    {
+      "severity": "P3",
+      "title": "乱码指纹正则对周期≥3的循环存在盲区（与 FR-01 规格一致，非违反）",
+      "evidence": "`(.{2})\\1{7,}` 只命中 2 字符周期循环（含 ≥16 字符单字符流，如「代理代理…」「。 。 」均命中）；周期 3+ 的循环（ABCABC…×8）不命中——FR-01 定义的指纹本身就是「同一 2 字符片段重复≥8 次」，实现与规格逐字一致，正常译文/URL/代码块不构成 2 字符周期 16 连续字符、无误伤，故记观察不记缺陷。",
+      "location": "backend/app/modules/translate/tests/test_live_engine.py:92"
+    },
+    {
+      "severity": "P3",
+      "title": "decode 特殊 piece 集为硬编码四元集而非 vocab 派生",
+      "evidence": "{\"<s>\",\"</s>\",\"<unk>\",\"<pad>\"} 对 opus-mt 模型族（unk/s/eos 三控制 piece + 可选 pad）完备，byte-fallback piece <0xXX> 有语义不剥是正确的；但 TRANSLATE_MODEL_REPO env 可换任意 ct2 仓（design 自述逃生口），换特殊 token 不同的仓时该集需手改——encode 侧 eos 已做 vocab 派生，decode 侧不对称。",
+      "location": "backend/app/modules/translate/translate_worker.py:106"
+    },
+    {
+      "severity": "P3",
+      "title": "worker 子进程测试的 stdout.readline() 无超时兜底",
+      "evidence": "worker 若卡死（模型下载悬置等），readline 永久阻塞导致测试挂起而非失败，只能靠 pytest 全局超时兜底；对 env 门控的手动 live 测试面可接受。",
+      "location": "backend/app/modules/translate/tests/test_live_engine.py:133"
+    }
+  ],
+  "dimensionNotes": {
+    "乱序": "ok",
+    "并发": "ok",
+    "切换": "ok",
+    "作用域": "ok"
+  },
+  "reviewedAt": "2026-10-19T15:42:47+08:00"
+}
