@@ -47,6 +47,9 @@ from app.modules.change.schema import (
     ChangeKnowledgeTouch,
     ChangePatchFileRead,
     ChangePatchMeta,
+    ChangePatchRepo,
+    ChangePatchRepoAnchor,
+    ChangePatchRepoTotals,
     ChangeTestRow,
     ChangeTouchedModule,
 )
@@ -213,19 +216,86 @@ def _read_json_dict(path: Path) -> dict | None:
     return data if isinstance(data, dict) else None
 
 
+def _int_or_none(value: object) -> int | None:
+    """计数投影：只认 int（bool 是 int 子类，显式排除），其余 None（fail-open）。"""
+    return value if isinstance(value, int) and not isinstance(value, bool) else None
+
+
+def _str_or_none(value: object) -> str | None:
+    return value if isinstance(value, str) else None
+
+
+def _read_patch_repos(data: dict) -> list[ChangePatchRepo]:
+    """``scopeAudit.repos[]`` 元数据投影（2026-10-19-change-assets-cross-repo-repos）。
+
+    只取展示面字段：仓键/锚点/三态计数/降级/sha/是否有正文；**patch 正文与 repoPath
+    不投影**（正文体积可达数 MB、repoPath 是本机布局）。坏条目（非 dict/无 key）跳过，
+    单条失败不影响整组（fail-open）。
+    """
+    scope = data.get("scopeAudit")
+    raw_repos = scope.get("repos") if isinstance(scope, dict) else None
+    if not isinstance(raw_repos, list):
+        return []
+    repos: list[ChangePatchRepo] = []
+    for raw in raw_repos:
+        if not isinstance(raw, dict):
+            continue
+        key = raw.get("key")
+        if not isinstance(key, str) or not key:
+            continue
+        anchor_raw = raw.get("anchor")
+        anchor = None
+        if isinstance(anchor_raw, dict):
+            anchor = ChangePatchRepoAnchor(
+                source=_str_or_none(anchor_raw.get("source")),
+                base=_str_or_none(anchor_raw.get("base")),
+                head=_str_or_none(anchor_raw.get("head")),
+                label=_str_or_none(anchor_raw.get("label")),
+            )
+        totals_raw = raw.get("totals")
+        totals = None
+        if isinstance(totals_raw, dict):
+            totals = ChangePatchRepoTotals(
+                files=_int_or_none(totals_raw.get("files")),
+                additions=_int_or_none(totals_raw.get("additions")),
+                deletions=_int_or_none(totals_raw.get("deletions")),
+                planned=_int_or_none(totals_raw.get("planned")),
+                unplanned=_int_or_none(totals_raw.get("unplanned")),
+                untouched=_int_or_none(totals_raw.get("untouched")),
+            )
+        patch_text = raw.get("patch")
+        repos.append(
+            ChangePatchRepo(
+                key=key,
+                anchor=anchor,
+                totals=totals,
+                degraded=raw.get("degraded") is True,
+                degraded_reason=_str_or_none(raw.get("degradedReason")),
+                patch_sha256=_str_or_none(raw.get("patchSha256")),
+                has_patch=isinstance(patch_text, str) and len(patch_text) > 0,
+            )
+        )
+    return repos
+
+
 def _read_patch_meta(change_dir: Path) -> ChangePatchMeta | None:
     """读 ``change-patch.json`` 的 totals + files 投影；缺件回退 ``scope-audit.json``。
 
     回退（2026-10-07-assets-patch-scope-audit-fallback）：厚流程 execute --done
     只落 scope-audit.json/patch、不冻 change-patch.json——回退时 totals/patchStatus/
     savedAt 同构直取，file_list 改从 ``rows[].path`` 投影。两份都缺/损坏 → None。
+
+    ``repos``（2026-10-19-change-assets-cross-repo-repos）：跨仓冻结面元数据投影；
+    scope-audit.json 回退形态无该键 → 空数组。
     """
     data = _read_json_dict(change_dir / "change-patch.json")
     file_list: list[str] = []
+    repos: list[ChangePatchRepo] = []
     if data is not None:
         raw_files = data.get("files")
         if isinstance(raw_files, list):
             file_list = [f for f in raw_files if isinstance(f, str)]
+        repos = _read_patch_repos(data)
     else:
         data = _read_json_dict(change_dir / "scope-audit.json")
         if data is None:
@@ -239,13 +309,14 @@ def _read_patch_meta(change_dir: Path) -> ChangePatchMeta | None:
             ]
     totals = data.get("totals") or {}
     return ChangePatchMeta(
-        files=totals.get("files"),
-        additions=totals.get("additions"),
-        deletions=totals.get("deletions"),
+        files=_int_or_none(totals.get("files")),
+        additions=_int_or_none(totals.get("additions")),
+        deletions=_int_or_none(totals.get("deletions")),
         patch_status=data.get("patchStatus"),
         saved_at=data.get("savedAt"),
         file_list=file_list[:_PATCH_FILES_MAX],
         files_truncated=len(file_list) > _PATCH_FILES_MAX,
+        repos=repos,
     )
 
 

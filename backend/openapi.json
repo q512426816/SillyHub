@@ -21952,7 +21952,7 @@
           "knowledge"
         ],
         "summary": "Search Knowledge",
-        "description": "知识搜索：spec 根 knowledge/ + docs/ 语料内词面 + 向量融合召回。\n\n- 检索主体为 async 编排（2026-10-15-knowledge-search-pgvector / D-005@v2）：DB await\n  原生执行，CPU/IO（嵌入/扫描）由 search_sync 内部 asyncio.to_thread 分段卸载；\n- docs/ 类结果按 SCAN_DOCS_READ 服务端过滤——判定经 ``has_permission`` 同一\n  权威函数（admin 短路在内；禁读 user.permissions 快照，D-005@v1）；先取\n  3×limit 候选再过滤截断，防 top-k 被过滤挤空；\n- embedder 不可用 → fail-soft：200 + model_ready=False + 纯词面结果（D-004@v1）。",
+        "description": "知识搜索：spec 根 knowledge/ + docs/ 语料内词面 + 向量融合召回。\n\n- 检索主体为 async 编排（2026-10-15-knowledge-search-pgvector / D-005@v2）：DB await\n  原生执行，CPU/IO（嵌入/扫描）由 search_sync 内部 asyncio.to_thread 分段卸载；\n- docs/ 类结果按 SCAN_DOCS_READ 服务端过滤——判定经 ``has_permission`` 同一\n  权威函数（admin 短路在内；禁读 user.permissions 快照，D-005@v1）；先取\n  3×limit 候选再过滤截断，防 top-k 被过滤挤空；\n- embedder 不可用 → fail-soft：200 + model_ready=False + 纯词面结果（D-004@v1）；\n- 服务器禁建库（KNOWLEDGE_SEARCH_SERVER_BUILD=0，2026-10-19-knowledge-search-build-switch）：\n  小内存生产容器跳过懒同步嵌入；未建索引 ws 首搜词面内存降级 + reason=index_not_built。",
         "operationId": "search_knowledge_api_workspaces__workspace_id__knowledge_search_post",
         "parameters": [
           {
@@ -22173,6 +22173,48 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/VectorSearchOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/translate/thinking": {
+      "post": {
+        "tags": [
+          "translate"
+        ],
+        "summary": "Translate Thinking",
+        "description": "思考内容批量离线翻译（en→zh）；语义与降级见模块 docstring 与 service.py。",
+        "operationId": "translate_thinking_api_translate_thinking_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TranslateRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TranslateResponse"
                 }
               }
             }
@@ -41578,11 +41620,208 @@
             "type": "boolean",
             "title": "Files Truncated",
             "default": false
+          },
+          "repos": {
+            "items": {
+              "$ref": "#/components/schemas/ChangePatchRepo"
+            },
+            "type": "array",
+            "title": "Repos"
           }
         },
         "type": "object",
         "title": "ChangePatchMeta",
-        "description": "patch 留档统计（change-patch.json 优先，缺件回退 scope-audit.json；两缺 → None）。\n\n``files`` 是 CLI totals 的文件计数（既有语义不动）；``file_list`` 的清单投影\n按留档来源二形（2026-09-25-change-detail-assets-usability / FR-04 起供卡面\n列出具体改动面）：change-patch.json 取 ``files`` 数组，scope-audit.json 回退\n形态取 ``rows[].path``；超上限时 ``files_truncated=True`` 显式标注。\n\n单套演进（2026-10-09-close-trace-single-set，CLI 侧）：新收口只落 change.patch +\nchange-patch.json 两件——对账面并入后者的 ``scopeAudit`` 子对象（顶级键原位不动，\n本 DTO 读的顶级字段零变化），scope-audit.json/.patch 停写；回退链保留兜其他仓/本仓\n存量旧形态归档。"
+        "description": "patch 留档统计（change-patch.json 优先，缺件回退 scope-audit.json；两缺 → None）。\n\n``files`` 是 CLI totals 的文件计数（既有语义不动）；``file_list`` 的清单投影\n按留档来源二形（2026-09-25-change-detail-assets-usability / FR-04 起供卡面\n列出具体改动面）：change-patch.json 取 ``files`` 数组，scope-audit.json 回退\n形态取 ``rows[].path``；超上限时 ``files_truncated=True`` 显式标注。\n\n单套演进（2026-10-09-close-trace-single-set，CLI 侧）：新收口只落 change.patch +\nchange-patch.json 两件——对账面并入后者的 ``scopeAudit`` 子对象（顶级键原位不动，\n本 DTO 读的顶级字段零变化），scope-audit.json/.patch 停写；回退链保留兜其他仓/本仓\n存量旧形态归档。\n\n``repos``（2026-10-19-change-assets-cross-repo-repos）：跨仓冻结面元数据投影——\n空面跨仓冻结只落 JSON（无 change.patch），此时 ``files`` 主仓面为 0，真实交付面\n在 repos[]；旧归档/单仓变更无该键 → 空数组（additive，读侧零适配）。"
+      },
+      "ChangePatchRepo": {
+        "properties": {
+          "key": {
+            "type": "string",
+            "title": "Key"
+          },
+          "anchor": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ChangePatchRepoAnchor"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "totals": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ChangePatchRepoTotals"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "degraded": {
+            "type": "boolean",
+            "title": "Degraded",
+            "default": false
+          },
+          "degraded_reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Degraded Reason"
+          },
+          "patch_sha256": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Patch Sha256"
+          },
+          "has_patch": {
+            "type": "boolean",
+            "title": "Has Patch",
+            "default": false
+          }
+        },
+        "type": "object",
+        "required": [
+          "key"
+        ],
+        "title": "ChangePatchRepo",
+        "description": "跨仓冻结面元数据（2026-10-19-change-assets-cross-repo-repos / FR-01）。\n\n只投影展示所需元数据，**不回传 patch 正文**（单仓 patch 可数 MB、且正文只在\nchange-patch.json 全屏预览消费——资产卡给仓键/锚点/计数/降级/sha 与指路）。\n``repo_path`` 为产出端本机绝对路径，恒不投影（本机布局不外泄）。"
+      },
+      "ChangePatchRepoAnchor": {
+        "properties": {
+          "source": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source"
+          },
+          "base": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Base"
+          },
+          "head": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Head"
+          },
+          "label": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Label"
+          }
+        },
+        "type": "object",
+        "title": "ChangePatchRepoAnchor",
+        "description": "跨仓冻结锚点投影（change-patch.json ``scopeAudit.repos[].anchor``）。"
+      },
+      "ChangePatchRepoTotals": {
+        "properties": {
+          "files": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Files"
+          },
+          "additions": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Additions"
+          },
+          "deletions": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Deletions"
+          },
+          "planned": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Planned"
+          },
+          "unplanned": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Unplanned"
+          },
+          "untouched": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Untouched"
+          }
+        },
+        "type": "object",
+        "title": "ChangePatchRepoTotals",
+        "description": "跨仓单仓对账计数（planned/unplanned/untouched 为 CLI 三态原值）。"
       },
       "ChangeProcessReq": {
         "properties": {
@@ -52446,7 +52685,7 @@
           "results"
         ],
         "title": "KnowledgeSearchOut",
-        "description": "检索出参：model_ready=False 时 results 非空（纯词面）+ reason 带因（fail-soft）。"
+        "description": "检索出参：model_ready=False 时 results 非空（纯词面）+ reason 带因（fail-soft；\nreason=index_not_built 表示服务器禁建库且该 ws 索引未建）。"
       },
       "KnowledgeSearchResultItem": {
         "properties": {
@@ -76429,6 +76668,116 @@
         ],
         "title": "TransitionResponse",
         "description": "POST /changes/{id}/transition 的返回类型。\n\n包含变更状态和 agent dispatch 信息。"
+      },
+      "TranslateItemIn": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "Id"
+          },
+          "text": {
+            "type": "string",
+            "maxLength": 20000,
+            "minLength": 1,
+            "title": "Text"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "text"
+        ],
+        "title": "TranslateItemIn",
+        "description": "单条待翻文本。id 由客户端生成（stable，响应原样带回配对）。"
+      },
+      "TranslateItemOut": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "text": {
+            "type": "string",
+            "title": "Text"
+          },
+          "translated": {
+            "type": "boolean",
+            "title": "Translated"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "text",
+          "translated"
+        ],
+        "title": "TranslateItemOut",
+        "description": "单条翻译结果。translated=false 表示原文透传（不值得翻/引擎不可用）。"
+      },
+      "TranslateRequest": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/TranslateItemIn"
+            },
+            "type": "array",
+            "maxItems": 16,
+            "minItems": 1,
+            "title": "Items"
+          },
+          "target": {
+            "type": "string",
+            "const": "zh",
+            "title": "Target",
+            "default": "zh"
+          }
+        },
+        "type": "object",
+        "required": [
+          "items"
+        ],
+        "title": "TranslateRequest",
+        "description": "批量翻译请求。target 固定 zh（本变更唯一目标语言，扩语言时再放开）。"
+      },
+      "TranslateResponse": {
+        "properties": {
+          "ok": {
+            "type": "boolean",
+            "title": "Ok",
+            "default": true
+          },
+          "engine_ready": {
+            "type": "boolean",
+            "title": "Engine Ready"
+          },
+          "reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reason"
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/TranslateItemOut"
+            },
+            "type": "array",
+            "title": "Items"
+          }
+        },
+        "type": "object",
+        "required": [
+          "engine_ready",
+          "items"
+        ],
+        "title": "TranslateResponse",
+        "description": "fail-soft 契约：engine_ready=false 时 items 原文透传，HTTP 仍 200。"
       },
       "TurnOutlineItemRead": {
         "properties": {

@@ -877,3 +877,85 @@ describe("ChangeAssetsCard 资产透明面", () => {
     expect(screen.queryByTestId("change-assets-touched-modules")).toBeNull();
   });
 });
+
+// 跨仓冻结面（2026-10-19-change-assets-cross-repo-repos）：空面跨仓冻结没有主仓
+// files，真实交付面在 patch.repos[]——资产卡按仓展示元数据并指路全屏预览；
+// 旧归档无 repos 键时零变化。
+describe("跨仓冻结面", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockSearch.mockResolvedValue(matchesOf([]));
+  });
+
+  it("按仓渲染锚点/计数/降级，主仓 patch 标注口径", async () => {
+    mockGet.mockResolvedValue({
+      ...FULL,
+      patch: {
+        ...FULL.patch,
+        files: 0,
+        additions: 0,
+        deletions: 0,
+        file_list: [],
+        repos: [
+          {
+            key: "subgrid",
+            anchor: {
+              source: "flow-start-baseline",
+              base: "cf20b9428adcac0e811a8c51e8ddcfa12ed21f75",
+              head: null,
+              label: "flow-start 跨仓基线窗口",
+            },
+            totals: {
+              files: 112,
+              additions: 55207,
+              deletions: 55200,
+              planned: 0,
+              unplanned: 110,
+              untouched: 2,
+            },
+            degraded: false,
+            degraded_reason: null,
+            patch_sha256: "54dae3786803ce49",
+            has_patch: true,
+          },
+          {
+            key: "broken",
+            anchor: { source: "degraded", base: null, head: null, label: "degraded" },
+            totals: {
+              files: 0,
+              additions: 0,
+              deletions: 0,
+              planned: 0,
+              unplanned: 0,
+              untouched: 0,
+            },
+            degraded: true,
+            degraded_reason: "仓路径不可达",
+            patch_sha256: null,
+            has_patch: false,
+          },
+        ],
+      },
+    });
+    renderCard();
+
+    const block = await screen.findByTestId("change-assets-cross-repos");
+    expect(block).toHaveTextContent("完整 diff 见 change-patch.json 全屏预览");
+    const seg = screen.getByTestId("scope-audit-repo-seg-subgrid");
+    expect(seg).toHaveTextContent("subgrid");
+    expect(seg).toHaveTextContent("cf20b94");
+    expect(seg).toHaveTextContent("112 文件");
+    expect(screen.getByTestId("scope-audit-repo-degraded-broken")).toHaveTextContent(
+      "仓路径不可达",
+    );
+    expect(screen.getByText(/主仓 patch/)).toBeInTheDocument();
+  });
+
+  it("无 repos 键时旧展示零变化（不渲染跨仓段、不加主仓标注）", async () => {
+    mockGet.mockResolvedValue(FULL);
+    renderCard();
+    await screen.findByTestId("change-assets-audit");
+    expect(screen.queryByTestId("change-assets-cross-repos")).toBeNull();
+    expect(screen.queryByText(/主仓 patch/)).toBeNull();
+  });
+});

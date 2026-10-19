@@ -908,6 +908,43 @@ class ChangeTestRow(BaseModel):
     raw_binding: str | None = None
 
 
+class ChangePatchRepoAnchor(BaseModel):
+    """跨仓冻结锚点投影（change-patch.json ``scopeAudit.repos[].anchor``）。"""
+
+    source: str | None = None
+    base: str | None = None
+    head: str | None = None
+    label: str | None = None
+
+
+class ChangePatchRepoTotals(BaseModel):
+    """跨仓单仓对账计数（planned/unplanned/untouched 为 CLI 三态原值）。"""
+
+    files: int | None = None
+    additions: int | None = None
+    deletions: int | None = None
+    planned: int | None = None
+    unplanned: int | None = None
+    untouched: int | None = None
+
+
+class ChangePatchRepo(BaseModel):
+    """跨仓冻结面元数据（2026-10-19-change-assets-cross-repo-repos / FR-01）。
+
+    只投影展示所需元数据，**不回传 patch 正文**（单仓 patch 可数 MB、且正文只在
+    change-patch.json 全屏预览消费——资产卡给仓键/锚点/计数/降级/sha 与指路）。
+    ``repo_path`` 为产出端本机绝对路径，恒不投影（本机布局不外泄）。
+    """
+
+    key: str
+    anchor: ChangePatchRepoAnchor | None = None
+    totals: ChangePatchRepoTotals | None = None
+    degraded: bool = False
+    degraded_reason: str | None = None
+    patch_sha256: str | None = None
+    has_patch: bool = False
+
+
 class ChangePatchMeta(BaseModel):
     """patch 留档统计（change-patch.json 优先，缺件回退 scope-audit.json；两缺 → None）。
 
@@ -920,6 +957,10 @@ class ChangePatchMeta(BaseModel):
     change-patch.json 两件——对账面并入后者的 ``scopeAudit`` 子对象（顶级键原位不动，
     本 DTO 读的顶级字段零变化），scope-audit.json/.patch 停写；回退链保留兜其他仓/本仓
     存量旧形态归档。
+
+    ``repos``（2026-10-19-change-assets-cross-repo-repos）：跨仓冻结面元数据投影——
+    空面跨仓冻结只落 JSON（无 change.patch），此时 ``files`` 主仓面为 0，真实交付面
+    在 repos[]；旧归档/单仓变更无该键 → 空数组（additive，读侧零适配）。
     """
 
     files: int | None = None
@@ -929,6 +970,7 @@ class ChangePatchMeta(BaseModel):
     saved_at: str | None = None
     file_list: list[str] = Field(default_factory=list)
     files_truncated: bool = False
+    repos: list[ChangePatchRepo] = Field(default_factory=list)
 
 
 class ChangePatchFileRead(BaseModel):

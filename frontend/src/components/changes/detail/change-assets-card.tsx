@@ -5,7 +5,7 @@ import Link from "next/link";
 import { useQuery } from "@tanstack/react-query";
 
 import { FilePreview } from "@/components/explorer/file-preview";
-import { DiffView } from "@/components/files/structured-views";
+import { DiffView, ScopeAuditRepoSeg } from "@/components/files/structured-views";
 import { EntryCardList } from "@/components/knowledge/entry-card-list";
 import {
   Dialog,
@@ -296,6 +296,10 @@ export function ChangeAssetsCard({
     frCount + decCount + rowCount + (hasAudit ? 1 : 0) + (touchList.length > 0 ? 1 : 0) +
     (moduleList.length > 0 ? 1 : 0);
   const patchFileList = data?.patch?.file_list ?? [];
+  // 跨仓冻结面（2026-10-19-change-assets-cross-repo-repos）：空面跨仓冻结只落
+  // change-patch.json（无 change.patch），主仓 files 为 0——真实交付面在这组元数据；
+  // 完整 diff 正文不进资产卡（可达数 MB），指路全屏预览。
+  const crossRepos = data?.patch?.repos ?? [];
 
   return (
     <section
@@ -610,7 +614,8 @@ export function ChangeAssetsCard({
               <div className="mt-1 flex shrink-0 flex-wrap gap-x-3 gap-y-1">
                 {data.patch ? (
                   <span>
-                    patch{" "}
+                    {/* 跨仓条目在场时显式标「主仓」，避免与各仓计数并读成同一口径。 */}
+                    {crossRepos.length > 0 ? "主仓 " : ""}patch{" "}
                     <b className="text-foreground">
                       {data.patch.files ?? "?"} 文件 +{data.patch.additions ?? "?"}/−
                       {data.patch.deletions ?? "?"}
@@ -627,6 +632,46 @@ export function ChangeAssetsCard({
                   </span>
                 ) : null}
               </div>
+              {crossRepos.length > 0 ? (
+                <div
+                  className="mt-1.5 flex flex-col gap-1.5 border-t border-dashed pt-1.5"
+                  data-testid="change-assets-cross-repos"
+                >
+                  <div className="flex shrink-0 items-center justify-between gap-2 text-[10px] text-muted-foreground/70">
+                    <span>跨仓冻结面（完整 diff 见 change-patch.json 全屏预览）</span>
+                  </div>
+                  {crossRepos.map((r) => (
+                    <ScopeAuditRepoSeg
+                      key={r.key}
+                      repoKey={r.key}
+                      repo={{
+                        key: r.key,
+                        anchor: r.anchor
+                          ? {
+                              source: r.anchor.source ?? null,
+                              base: r.anchor.base ?? null,
+                              head: r.anchor.head ?? null,
+                              label: r.anchor.label ?? null,
+                            }
+                          : null,
+                        totals: r.totals
+                          ? {
+                              files: r.totals.files ?? 0,
+                              additions: r.totals.additions ?? 0,
+                              deletions: r.totals.deletions ?? 0,
+                              planned: r.totals.planned ?? 0,
+                              unplanned: r.totals.unplanned ?? 0,
+                              untouched: r.totals.untouched ?? 0,
+                            }
+                          : null,
+                        degraded: r.degraded,
+                        degradedReason: r.degraded_reason ?? null,
+                        patchSha256: r.patch_sha256 ?? null,
+                      }}
+                    />
+                  ))}
+                </div>
+              ) : null}
               {patchFileList.length > 0 ? (
                 <div className="mt-1.5 flex min-h-0 flex-1 flex-col overflow-hidden border-t border-dashed pt-1.5">
                   <div className="mb-1 flex shrink-0 items-center justify-between gap-2 text-[10px] text-muted-foreground/70">
