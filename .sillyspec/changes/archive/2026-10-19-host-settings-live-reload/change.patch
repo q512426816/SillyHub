@@ -1,0 +1,772 @@
+diff --git a/sillyhub-daemon/src/interactive/host-settings-watcher.ts b/sillyhub-daemon/src/interactive/host-settings-watcher.ts
+new file mode 100644
+index 000000000..c59623715
+--- /dev/null
++++ b/sillyhub-daemon/src/interactive/host-settings-watcher.ts
+@@ -0,0 +1,152 @@
++/**
++ * host-settings-watcher —— 宿主机 ~/.claude/settings.json 的 env 块变化监听。
++ *
++ * 2026-10-19-host-settings-live-reload：本机默认（未绑平台供应商）会话的 claude 引擎
++ * 对宿主 settings.json 的实测行为是「网关（base_url/token）每轮热重读、**模型名一经
++ * 确定不再重解析**」——MiniMax 档（显式写 ANTHROPIC_MODEL）期间启动的会话、或被
++ * `/model` 钉过模型的会话，模型名被烙死；cc-switch 切回 GLM 后这些会话「停留在旧
++ * 供应商」，下一轮还会以旧模型名打新网关（400 modelCode 不存在，ql-20260822-001
++ * 同款）。本模块给出变化信号，SessionManager 据此重载本机默认会话引擎（新引擎按
++ * 当前档位重新解析网关与模型，/model 钉随旧进程消亡）。
++ *
++ * 侦测语义（design §做法概述）：
++ *   - 轮询（默认 3s，setInterval + unref，跨平台零依赖——CLAUDE.md 规则 13；放弃
++ *     fs.watch：Windows 替换写会掉 watch，见 design 死路 2）；
++ *   - 指纹 = env 块键排序后的稳定 JSON（非 env 字段变化不触发——permissions/hooks
++ *     改动不打扰会话）；
++ *   - 去抖 = 新指纹**连续两拍一致且 ≠ 基线**才确认（抵御原子替换/半写的瞬时态）；
++ *   - 文件缺失 / JSON 损坏 → 本轮跳过不抛（下拍自愈），不污染候选态；
++ *   - 启动第一拍只建基线，不触发。
++ *
++ * 本模块只负责「读 + 判 + 回调」，不持有任何会话状态；回调异常由调用方兜底。
++ *
++ * @module interactive/host-settings-watcher
++ */
++
++import { readFile } from 'node:fs/promises';
++import { homedir } from 'node:os';
++import { join } from 'node:path';
++
++/** 宿主 settings.json 默认路径（与 claude-transcript-dir 的 home 侧同根）。 */
++export function defaultHostSettingsPath(): string {
++  return join(homedir(), '.claude', 'settings.json');
++}
++
++/**
++ * env 块稳定指纹：键排序后 `JSON.stringify`。
++ *
++ * 返回 null = 文件不是合法 JSON 对象（调用方按「本轮跳过」处理，不触发不抛）。
++ * 仅看 `env` 子对象——cc-switch 换档改的是 env 块；permissions/hooks 等其余字段
++ * 变化对引擎网关/模型无影响，不构成重载理由。
++ */
++export function envBlockFingerprint(text: string): string | null {
++  let parsed: unknown;
++  try {
++    parsed = JSON.parse(text);
++  } catch {
++    return null;
++  }
++  if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) {
++    return null;
++  }
++  const env = (parsed as { env?: unknown }).env;
++  if (env === undefined || env === null) return 'null-env';
++  if (typeof env !== 'object' || Array.isArray(env)) return null;
++  const sorted: Record<string, unknown> = {};
++  for (const key of Object.keys(env as Record<string, unknown>).sort()) {
++    sorted[key] = (env as Record<string, unknown>)[key];
++  }
++  return JSON.stringify(sorted);
++}
++
++/** 监听选项。 */
++export interface HostSettingsWatchOptions {
++  /** 被监听文件（生产 defaultHostSettingsPath()；测试注入 tmp 路径）。 */
++  settingsPath: string;
++  /** 轮询间隔毫秒，默认 3000（≤0 视为非法按默认处理）。 */
++  pollIntervalMs?: number;
++  /** 确认变化后的回调（同步签名；重载动作由调用方自行 fire-and-forget）。 */
++  onChange: (fingerprint: string) => void;
++}
++
++/** 监听句柄：stop() 清定时器（幂等）。 */
++export interface HostSettingsWatcherHandle {
++  stop(): void;
++}
++
++/**
++ * 起监听。读文件失败（缺失/权限）按「本轮跳过」处理——基线保持，文件恢复后照常比对。
++ * 定时器 unref，不阻塞 daemon 退出。
++ */
++export function startHostSettingsWatcher(
++  opts: HostSettingsWatchOptions,
++): HostSettingsWatcherHandle {
++  const interval = Math.max(1, opts.pollIntervalMs ?? 3000);
++  /** 已确认基线（null = 尚未建立——第一拍建立）。 */
++  let baseline: string | null = null;
++  /** 候选指纹与连续命中拍数（去抖）。 */
++  let candidate: string | null = null;
++  let candidateCount = 0;
++  let stopped = false;
++  let timer: ReturnType<typeof setInterval> | null = null;
++
++  const poll = async (): Promise<void> => {
++    if (stopped) return;
++    let fingerprint: string | null;
++    try {
++      fingerprint = envBlockFingerprint(await readFile(opts.settingsPath, 'utf-8'));
++    } catch {
++      // 文件缺失/不可读：本轮跳过（不推进基线也不清候选——瞬时态按未发生处理）。
++      return;
++    }
++    if (fingerprint === null) {
++      // 半写/损坏 JSON：同上，等待下拍自愈。
++      return;
++    }
++    if (baseline === null) {
++      // 第一拍：建基线，不触发。
++      baseline = fingerprint;
++      return;
++    }
++    if (fingerprint === baseline) {
++      // 回到基线：清候选（换档中途又换回来的抖动不触发）。
++      candidate = null;
++      candidateCount = 0;
++      return;
++    }
++    if (fingerprint === candidate) {
++      candidateCount += 1;
++    } else {
++      candidate = fingerprint;
++      candidateCount = 1;
++    }
++    // 连续两拍一致且异于基线 → 确认变化（去抖：原子替换/半写的瞬时态活不过两拍）。
++    if (candidateCount >= 2) {
++      baseline = fingerprint;
++      candidate = null;
++      candidateCount = 0;
++      try {
++        opts.onChange(fingerprint);
++      } catch {
++        // 回调异常不杀轮询（调用方重载动作自有兜底；此处保活）。
++      }
++    }
++  };
++
++  timer = setInterval(() => {
++    void poll();
++  }, interval);
++  if (typeof timer.unref === 'function') {
++    timer.unref();
++  }
++
++  return {
++    stop(): void {
++      stopped = true;
++      if (timer !== null) {
++        clearInterval(timer);
++        timer = null;
++      }
++    },
++  };
++}
+diff --git a/sillyhub-daemon/src/interactive/session-manager.ts b/sillyhub-daemon/src/interactive/session-manager.ts
+index cc5443c61..549922c3c 100644
+--- a/sillyhub-daemon/src/interactive/session-manager.ts
++++ b/sillyhub-daemon/src/interactive/session-manager.ts
+@@ -126,6 +126,7 @@ import {
+   applyTranscriptConfigDir,
+   defaultTranscriptDirs,
+   findClaudeTranscriptPath,
++  locateClaudeTranscript,
+   migrateClaudeTranscriptToHost,
+   migrateClaudeTranscriptToIsolated,
+   type TranscriptDirs,
+@@ -133,6 +134,14 @@ import {
+ // 2026-10-16-provider-switch-transcript-sanitize：切供应商前清洗不可跨供应商重放的
+ // 供应商私有块（server_tool_use / mcp_tool_use 及其结果块），详见模块头。
+ import { sanitizeClaudeTranscriptForReplay } from './transcript-sanitize.js';
++// 2026-10-19-host-settings-live-reload：宿主机 ~/.claude/settings.json env 块变化
++// 监听——本机默认会话热跟随 cc-switch 换档（引擎重载重新解析网关与模型），见
++// SessionManager.reloadHostDefaultSessions。
++import {
++  defaultHostSettingsPath,
++  startHostSettingsWatcher,
++  type HostSettingsWatcherHandle,
++} from './host-settings-watcher.js';
+ import type { PolicyEngine } from '../policy/filesystem-policy.js';
+ import type { SessionInjectAttachment } from '../protocol.js';
+ import {
+@@ -496,6 +505,16 @@ export class SessionManager {
+    */
+   private readonly _resumeDirs: TranscriptDirs;
+ 
++  /**
++   * 2026-10-19-host-settings-live-reload：宿主 settings.json 监听选项
++   * （enabled/settingsPath/pollIntervalMs，见 SessionManagerOptions.hostSettingsWatch）
++   * 与运行句柄（start() 起、stop() 停；句柄 null = 未启）。
++   */
++  private readonly _hostSettingsWatch: NonNullable<
++    SessionManagerOptions['hostSettingsWatch']
++  >;
++  private _hostWatchHandle: HostSettingsWatcherHandle | null = null;
++
+   /**
+    * task-08（D-007@v1 / FR-07）：canUseTool 远程人审三件套。
+    *
+@@ -632,6 +651,8 @@ export class SessionManager {
+       Number.isFinite(gateRaw) && gateRaw >= 0 ? gateRaw : DEFAULT_MAX_ACTIVE_SESSIONS;
+     // ql-20260822-001：resume transcript 目录对（测试注入 tmp 对，生产取缺省）。
+     this._resumeDirs = opts.resumeDirs ?? defaultTranscriptDirs();
++    // 2026-10-19-host-settings-live-reload：宿主 settings 监听选项（句柄 start() 起）。
++    this._hostSettingsWatch = opts.hostSettingsWatch ?? {};
+ 
+     // task-02（D-001@v1）：构造 drivers registry。显式 registry 优先；兼容旧单 driver 入参。
+     const explicitDrivers = deps.drivers ?? {};
+@@ -1356,11 +1377,100 @@ export class SessionManager {
+   }
+ 
+   start(): void {
+-    return start(this._core());
++    start(this._core());
++    // 2026-10-19-host-settings-live-reload：宿主档位监听随生命周期起停（daemon.ts
++    // 在装配完成处调本方法，零额外接线）。
++    this._startHostSettingsWatcher();
+   }
+ 
+   stop(): void {
+-    return stop(this._core());
++    this._stopHostSettingsWatcher();
++    stop(this._core());
++  }
++
++  /**
++   * 2026-10-19-host-settings-live-reload：起宿主 settings.json env 块监听。
++   *
++   * 关闭阀（任一命中即不起）：opts 显式 `enabled:false`；env
++   * `SILLYHUB_HOST_SETTINGS_WATCH=0`（start 时读一次——逃生口，出问题可免重启关掉）。
++   * 重复 start 幂等（句柄已存在直接返回）。
++   */
++  private _startHostSettingsWatcher(): void {
++    if (this._hostWatchHandle !== null) return;
++    if (this._hostSettingsWatch.enabled === false) return;
++    if ((process.env.SILLYHUB_HOST_SETTINGS_WATCH ?? '').trim() === '0') return;
++    this._hostWatchHandle = startHostSettingsWatcher({
++      settingsPath:
++        this._hostSettingsWatch.settingsPath ?? defaultHostSettingsPath(),
++      pollIntervalMs: this._hostSettingsWatch.pollIntervalMs,
++      onChange: () => {
++        // fire-and-forget（同步回调签名；批量重载内部逐会话兜错，外层防御性 catch）。
++        void this.reloadHostDefaultSessions('host_settings_env_changed').catch(() => {});
++      },
++    });
++  }
++
++  private _stopHostSettingsWatcher(): void {
++    this._hostWatchHandle?.stop();
++    this._hostWatchHandle = null;
++  }
++
++  /**
++   * 2026-10-19-host-settings-live-reload：宿主机档位变化 → 本机默认会话引擎批量重载。
++   *
++   * 背景：本机默认（未绑平台供应商）会话的引擎对宿主 settings.json 的行为是
++   * 「网关每轮热重读、模型名一经确定不再重解析」（2026-10-19 受控实验实证）——
++   * MiniMax 档（显式 ANTHROPIC_MODEL）期间启动的会话、或被 `/model` 钉过模型的
++   * 会话，切档后模型名被烙死（下一轮可能跨供应商 400 modelCode 不存在）。重载
++   * 引擎 = 按当前宿主档位重新解析网关与模型；`/model` 会话级钉随旧进程消亡。
++   *
++   * 实现完全复用既有配置切换状态机（markPendingConfigSwitch + config-only 载荷：
++   * profile=null 不切人格、providerConfig 缺席不切供应商、prompt 空不喂轮）：
++   *   - 空闲会话 → 立即 reloadWithConfig（重建 env + `--resume` 同一会话）；
++   *   - 运行中会话 → 挂 pendingConfigSwitch 到轮边界（不打断当前轮）；
++   *   - 失败回滚旧句柄（R-01）、per-session 串行（_reloadChains）——全部既有语义。
++   *
++   * 筛选（design §作用域）：claude 引擎 + `providerConfig == null`（未绑平台供应商）+
++   * 有 agentSessionId（首 turn 完成才有 resume key）+ 非终态 + transcript 实际位于
++   * 宿主机目录（`locateClaudeTranscript === 'host'`——与 resume/reload 判定
++   * CLAUDE_CONFIG_DIR 的同一单一来源：宿主目录 transcript ⟺ 引擎读宿主配置）。
++   * 平台供应商会话（隔离 env）与隔离目录 transcript 会话不受宿主档位影响，零触碰。
++   *
++   * @returns 受影响（已安排重载）的会话数（异步：逐会话探测 transcript 位置）
++   */
++  async reloadHostDefaultSessions(reason: string): Promise<number> {
++    let count = 0;
++    for (const [sessionId, state] of this._store) {
++      if (state.provider !== 'claude') continue;
++      if (state.status === 'ended' || state.status === 'failed') continue;
++      if (state.providerConfig != null) continue;
++      if (!state.agentSessionId) continue;
++      // transcript 位置探测（与 resume 同源）：仅宿主目录会话受宿主档位影响。
++      if ((await locateClaudeTranscript(state.agentSessionId, this._resumeDirs)) !== 'host') {
++        continue;
++      }
++      try {
++        // config-only 载荷：空 runId/claimToken/prompt 不产生任何轮状态副作用。
++        this.markPendingConfigSwitch(sessionId, {
++          sessionId,
++          runId: '',
++          claimToken: '',
++          prompt: '',
++          profile: null,
++          providerConfig: undefined,
++        });
++        count += 1;
++      } catch {
++        // 遍历自身 _store，SessionNotFoundError 不可达；防御性吞掉不中断批量。
++      }
++    }
++    if (count > 0) {
++      console.warn('[session-manager] host_settings_change_reload', {
++        reason,
++        sessions: count,
++      });
++    }
++    return count;
+   }
+ 
+   async scanOnce(): Promise<void> {
+diff --git a/sillyhub-daemon/src/interactive/session-manager/types.ts b/sillyhub-daemon/src/interactive/session-manager/types.ts
+index 95b3d1cd3..c6b4e6acf 100644
+--- a/sillyhub-daemon/src/interactive/session-manager/types.ts
++++ b/sillyhub-daemon/src/interactive/session-manager/types.ts
+@@ -97,6 +97,23 @@ export interface SessionManagerOptions {
+    * 完整覆盖「home jsonl → 切供应商 → 迁移隔离」链路而不触碰真实 ~/.claude。
+    */
+   resumeDirs?: TranscriptDirs;
++  /**
++   * 2026-10-19-host-settings-live-reload：宿主机 ~/.claude/settings.json env 块变化
++   * 监听（本机默认会话热跟随 cc-switch 换档）。
++   *
++   * - `enabled`：缺省 true；显式 false 或 env `SILLYHUB_HOST_SETTINGS_WATCH=0` 关闭
++   *   （逃生口，start() 时读取）。
++   * - `settingsPath`：缺省 `defaultHostSettingsPath()`；测试注入 tmp 路径。
++   * - `pollIntervalMs`：缺省 3000；测试注入小间隔。
++   *
++   * 触发后对「claude 引擎 + 未绑平台供应商 + 宿主目录 transcript + 非终态」会话走
++   * 既有配置切换状态机重载引擎（见 SessionManager.reloadHostDefaultSessions）。
++   */
++  hostSettingsWatch?: {
++    enabled?: boolean;
++    settingsPath?: string;
++    pollIntervalMs?: number;
++  };
+   /**
+    * task-08（D-007@v1 / FR-07）：是否启用 canUseTool 远程人审。
+    *
+diff --git a/sillyhub-daemon/tests/interactive/host-settings-watcher.test.ts b/sillyhub-daemon/tests/interactive/host-settings-watcher.test.ts
+new file mode 100644
+index 000000000..b7d4a749a
+--- /dev/null
++++ b/sillyhub-daemon/tests/interactive/host-settings-watcher.test.ts
+@@ -0,0 +1,170 @@
++/**
++ * interactive/host-settings-watcher 单测（2026-10-19-host-settings-live-reload /
++ * FR-02 / FR-04）。
++ *
++ * 覆盖（真定时器 + 15ms 短轮询 + waitFor/静默窗；tmp 文件）：
++ *   - envBlockFingerprint：键序无关 / 无 env 块 / 非法 JSON / 非对象 → 各自口径；
++ *   - 启动第一拍只建基线不触发；
++ *   - env 块变化 → 连续两拍一致才触发一次（去抖），载荷 = 新指纹；
++ *   - 非 env 字段变化（permissions/hooks）→ 不触发；
++ *   - 半写（损坏 JSON）→ 跳过不触发不抛；恢复后正常确认；
++ *   - 文件缺失 → 不抛不触发；
++ *   - stop() 后变化不再触发。
++ *
++ * 不用 vitest fake timers：poll 走 node:fs/promises（libuv 线程池宏任务），
++ * fake timers 的 advanceTimersByTimeAsync 只刷微任务，fs 完成事件不可确定性推进
++ * （实测首拍 readFile 未落、基线建到新值上 → 用例假红）。
++ *
++ * @module host-settings-watcher.test
++ */
++
++import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
++import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
++import { tmpdir } from 'node:os';
++import { join } from 'node:path';
++import {
++  envBlockFingerprint,
++  startHostSettingsWatcher,
++} from '../../src/interactive/host-settings-watcher.js';
++
++const ENV_GLM = JSON.stringify({
++  env: { ANTHROPIC_BASE_URL: 'https://open.bigmodel.cn/api/anthropic' },
++});
++const ENV_MINIMAX = JSON.stringify({
++  env: { ANTHROPIC_BASE_URL: 'https://api.minimax.cn/anthropic' },
++});
++// 非 env 变化口径：env 块与 ENV_GLM 完全一致，只增/改 env 之外的字段。
++const ENV_GLM_PLUS_NON_ENV = JSON.stringify({
++  env: { ANTHROPIC_BASE_URL: 'https://open.bigmodel.cn/api/anthropic' },
++  permissions: { allow: ['Bash(ls *)'] },
++  hooks: { PreToolUse: [] },
++});
++const INTERVAL_MS = 15;
++
++let root: string;
++let settingsPath: string;
++
++/** 等待条件成立（真定时器轮询；超时抛错信息带 timeout 标记）。 */
++async function waitFor(cond: () => boolean, timeoutMs = 3000): Promise<void> {
++  const deadline = Date.now() + timeoutMs;
++  while (!cond()) {
++    if (Date.now() > deadline) throw new Error('waitFor timeout');
++    await new Promise((r) => setTimeout(r, 10));
++  }
++}
++
++/** 静默窗：走过 ≥N 拍且确认没有触发。 */
++async function quietWindow(ms = 8 * INTERVAL_MS): Promise<void> {
++  await new Promise((r) => setTimeout(r, ms));
++}
++
++beforeEach(() => {
++  root = mkdtempSync(join(tmpdir(), 'host-watch-'));
++  settingsPath = join(root, 'settings.json');
++});
++
++afterEach(() => {
++  rmSync(root, { recursive: true, force: true });
++});
++
++/** 建基线：写入初始文件、起监听、走过数拍（断言未触发）。 */
++async function establishBaseline(onChange: ReturnType<typeof vi.fn>) {
++  writeFileSync(settingsPath, ENV_GLM, 'utf-8');
++  const handle = startHostSettingsWatcher({
++    settingsPath,
++    pollIntervalMs: INTERVAL_MS,
++    onChange,
++  });
++  await quietWindow();
++  expect(onChange).not.toHaveBeenCalled();
++  return handle;
++}
++
++describe('envBlockFingerprint — 纯函数口径', () => {
++  it('键序无关 + 值参与', () => {
++    expect(envBlockFingerprint('{"env":{"B":"2","A":"1"}}')).toBe(
++      envBlockFingerprint('{"env":{"A":"1","B":"2"}}'),
++    );
++    expect(envBlockFingerprint('{"env":{"A":"1"}}')).not.toBe(
++      envBlockFingerprint('{"env":{"A":"2"}}'),
++    );
++  });
++
++  it('无 env 块 → 常量；非法 JSON / 数组 / env 非对象 → null', () => {
++    expect(envBlockFingerprint('{"permissions":{}}')).toBe('null-env');
++    expect(envBlockFingerprint('not json{')).toBeNull();
++    expect(envBlockFingerprint('[1,2]')).toBeNull();
++    expect(envBlockFingerprint('{"env":["x"]}')).toBeNull();
++  });
++});
++
++describe('startHostSettingsWatcher — 轮询/去抖/容错', () => {
++  it('启动第一拍只建基线，不触发', async () => {
++    const onChange = vi.fn();
++    await establishBaseline(onChange);
++    expect(onChange).not.toHaveBeenCalled();
++  });
++
++  it('env 变化：去抖确认后触发一次并携带新指纹；基线推进后静默', async () => {
++    const onChange = vi.fn();
++    const handle = await establishBaseline(onChange);
++
++    writeFileSync(settingsPath, ENV_MINIMAX, 'utf-8');
++    await waitFor(() => onChange.mock.calls.length === 1);
++    expect(onChange.mock.calls[0]![0]).toBe(envBlockFingerprint(ENV_MINIMAX));
++
++    // 内容不变再走数拍（基线已推进）不再触发。
++    await quietWindow();
++    expect(onChange).toHaveBeenCalledTimes(1);
++
++    handle.stop();
++  });
++
++  it('非 env 字段变化（permissions/hooks）→ 不触发', async () => {
++    const onChange = vi.fn();
++    const handle = await establishBaseline(onChange);
++
++    writeFileSync(settingsPath, ENV_GLM_PLUS_NON_ENV, 'utf-8');
++    await quietWindow();
++    expect(onChange).not.toHaveBeenCalled();
++
++    handle.stop();
++  });
++
++  it('半写损坏 → 跳过不抛；恢复后正常确认', async () => {
++    const onChange = vi.fn();
++    const handle = await establishBaseline(onChange);
++
++    writeFileSync(settingsPath, '{"env":{"ANTHROPIC_BASE_URL":"https://api.m', 'utf-8');
++    await quietWindow();
++    expect(onChange).not.toHaveBeenCalled();
++
++    writeFileSync(settingsPath, ENV_MINIMAX, 'utf-8');
++    await waitFor(() => onChange.mock.calls.length === 1);
++    expect(onChange.mock.calls[0]![0]).toBe(envBlockFingerprint(ENV_MINIMAX));
++
++    handle.stop();
++  });
++
++  it('文件缺失 → 不抛不触发', async () => {
++    const onChange = vi.fn();
++    const handle = await establishBaseline(onChange);
++
++    rmSync(settingsPath, { force: true });
++    await quietWindow();
++    expect(onChange).not.toHaveBeenCalled();
++
++    handle.stop();
++  });
++
++  it('stop() 后变化不再触发（幂等停）', async () => {
++    const onChange = vi.fn();
++    const handle = await establishBaseline(onChange);
++
++    handle.stop();
++    handle.stop(); // 幂等
++    writeFileSync(settingsPath, ENV_MINIMAX, 'utf-8');
++    await quietWindow();
++    expect(onChange).not.toHaveBeenCalled();
++  });
++});
+diff --git a/sillyhub-daemon/tests/interactive/session-manager-config-switch.test.ts b/sillyhub-daemon/tests/interactive/session-manager-config-switch.test.ts
+index 457dfd6e5..a6efaac47 100644
+--- a/sillyhub-daemon/tests/interactive/session-manager-config-switch.test.ts
++++ b/sillyhub-daemon/tests/interactive/session-manager-config-switch.test.ts
+@@ -1778,3 +1778,249 @@ describe('2026-10-16-provider-switch-transcript-sanitize / 切供应商清洗历
+     }
+   });
+ });
++
++// ── 2026-10-19-host-settings-live-reload：宿主机档位变化 → 本机默认会话热重载 ──
++// 背景（受控实验实证）：本机默认会话引擎对宿主 settings.json「网关每轮热重读、模型名
++// 一经确定不再重解析」——MiniMax 档（显式 ANTHROPIC_MODEL）期间启动的会话、或被 /model
++// 钉过模型的会话切档后模型烙死。修法：watcher 发现 env 块变化 →
++// reloadHostDefaultSessions 走既有切换状态机重载（空闲立即 / 运行中挂轮边界）。
++
++describe('2026-10-19-host-settings-live-reload / 宿主档位变化热重载', () => {
++  const buildDirs = () => {
++    const root = mkdtempSync(join(tmpdir(), 'sm-hostwatch-'));
++    return { root, isolated: join(root, 'iso-claude-config'), home: join(root, 'home-claude') };
++  };
++  const writeJsonl = (
++    dirs: ReturnType<typeof buildDirs>,
++    which: 'home' | 'isolated',
++    sid: string,
++  ) => {
++    const dir = join(dirs[which], 'projects', 'C--work');
++    mkdirSync(dir, { recursive: true });
++    writeFileSync(join(dir, `${sid}.jsonl`), '{}\n', 'utf8');
++  };
++
++  it('HOST-1: 本机默认 + 宿主目录 transcript + 空闲 → 立即重载（resume 不变、不喂轮）', async () => {
++    const dirs = buildDirs();
++    try {
++      writeJsonl(dirs, 'home', 'sdk-sess-h1');
++      const mock = makeMockClaudeDriver();
++      const sm = new SessionManager(
++        { driver: mock.driver, ...makeDeps() },
++        { resumeDirs: dirs },
++      );
++      await sm.create({ ...BASE_INPUT });
++      mock.emitMessage(systemInitMessage('sdk-sess-h1'));
++      await flushMicrotasks();
++      mock.emitResult(resultSuccess());
++      await flushMicrotasks();
++      expect(mock.driver.start).toHaveBeenCalledTimes(1);
++
++      const n = await sm.reloadHostDefaultSessions('test');
++
++      expect(n).toBe(1);
++      // config-only 重载链含真实 fs 探测/迁移 no-op（多个 IO 宏任务），轮询等待完成。
++      const deadline = Date.now() + 5000;
++      while (mock.driver.start.mock.calls.length < 2 && Date.now() < deadline) {
++        await new Promise((r) => setTimeout(r, 20));
++      }
++      // config-only 重载：新句柄 + resume 同一会话；无 prompt 喂入（不出新轮）。
++      expect(mock.driver.start).toHaveBeenCalledTimes(2);
++      expect(mock.startCalls[1].opts['resume']).toBe('sdk-sess-h1');
++      expect(mock.closeSpyAt(0)).toHaveBeenCalledTimes(1);
++      const state = readState(sm, BASE_INPUT.sessionId)!;
++      expect(state.status).toBe('active');
++      expect(state.currentRunId).toBeUndefined();
++    } finally {
++      rmSync(dirs.root, { recursive: true, force: true });
++    }
++  });
++
++  it('HOST-2: 绑平台供应商的会话 → 零触碰（不重载）', async () => {
++    const dirs = buildDirs();
++    try {
++      writeJsonl(dirs, 'home', 'sdk-sess-h2');
++      const mock = makeMockClaudeDriver();
++      const sm = new SessionManager(
++        { driver: mock.driver, ...makeDeps() },
++        { resumeDirs: dirs },
++      );
++      await sm.create({ ...BASE_INPUT });
++      mock.emitMessage(systemInitMessage('sdk-sess-h2'));
++      await flushMicrotasks();
++      mock.emitResult(resultSuccess());
++      await flushMicrotasks();
++      // 切到平台供应商（迁移隔离 + providerConfig 落 state）→ 该会话不再读宿主配置。
++      await sm.reloadWithProvider(BASE_INPUT.sessionId, newProviderConfig());
++      expect(mock.driver.start).toHaveBeenCalledTimes(2);
++
++      const n = await sm.reloadHostDefaultSessions('test');
++
++      expect(n).toBe(0);
++      await flushMicrotasks();
++      expect(mock.driver.start).toHaveBeenCalledTimes(2);
++    } finally {
++      rmSync(dirs.root, { recursive: true, force: true });
++    }
++  });
++
++  it('HOST-3: 隔离目录 transcript（未绑供应商）→ 零触碰（resume 读隔离目录，宿主档位无关）', async () => {
++    const dirs = buildDirs();
++    try {
++      writeJsonl(dirs, 'isolated', 'sdk-sess-h3');
++      const mock = makeMockClaudeDriver();
++      const sm = new SessionManager(
++        { driver: mock.driver, ...makeDeps() },
++        { resumeDirs: dirs },
++      );
++      await sm.create({ ...BASE_INPUT });
++      mock.emitMessage(systemInitMessage('sdk-sess-h3'));
++      await flushMicrotasks();
++      mock.emitResult(resultSuccess());
++      await flushMicrotasks();
++
++      const n = await sm.reloadHostDefaultSessions('test');
++
++      // transcript 位于隔离目录（locateClaudeTranscript=isolated）→ 引擎不读宿主
++      // settings.json，重载无意义且会误伤隔离语义 → 跳过。
++      expect(n).toBe(0);
++      await new Promise((r) => setTimeout(r, 120));
++      expect(mock.driver.start).toHaveBeenCalledTimes(1);
++    } finally {
++      rmSync(dirs.root, { recursive: true, force: true });
++    }
++  });
++
++  it('HOST-4: 运行中会话 → 不打断当前轮，挂标记到轮边界后重载', async () => {
++    const dirs = buildDirs();
++    try {
++      writeJsonl(dirs, 'home', 'sdk-sess-h4');
++      const mock = makeMockClaudeDriver();
++      const sm = new SessionManager(
++        { driver: mock.driver, ...makeDeps() },
++        { resumeDirs: dirs },
++      );
++      await sm.create({ ...BASE_INPUT });
++      // init 到达（agentSessionId 就位）但不 emit result → 首 turn 维持生成中。
++      mock.emitMessage(systemInitMessage('sdk-sess-h4'));
++      await flushMicrotasks();
++
++      const n = await sm.reloadHostDefaultSessions('test');
++
++      expect(n).toBe(1);
++      await new Promise((r) => setTimeout(r, 120));
++      expect(mock.driver.start).toHaveBeenCalledTimes(1); // 未打断
++      expect(readState(sm, BASE_INPUT.sessionId)!.pendingConfigSwitch).toBeDefined();
++
++      // 轮收尾（result 注入）→ 消费标记触发重载（IO 宏任务链，轮询等待）。
++      mock.emitResult(resultSuccess());
++      const deadline = Date.now() + 5000;
++      while (mock.driver.start.mock.calls.length < 2 && Date.now() < deadline) {
++        await new Promise((r) => setTimeout(r, 20));
++      }
++      expect(mock.driver.start).toHaveBeenCalledTimes(2);
++      expect(mock.startCalls[1].opts['resume']).toBe('sdk-sess-h4');
++      expect(readState(sm, BASE_INPUT.sessionId)!.pendingConfigSwitch).toBeUndefined();
++    } finally {
++      rmSync(dirs.root, { recursive: true, force: true });
++    }
++  });
++
++  it('HOST-5: 集成——真实 start() 后宿主 settings env 变化 → watcher 触发自动重载', async () => {
++    const dirs = buildDirs();
++    try {
++      writeJsonl(dirs, 'home', 'sdk-sess-h5');
++      const settingsPath = join(dirs.root, 'host-settings.json');
++      writeFileSync(
++        settingsPath,
++        JSON.stringify({ env: { ANTHROPIC_BASE_URL: 'https://glm.example.com' } }),
++        'utf8',
++      );
++      const mock = makeMockClaudeDriver();
++      const sm = new SessionManager(
++        { driver: mock.driver, ...makeDeps() },
++        {
++          resumeDirs: dirs,
++          hostSettingsWatch: { settingsPath, pollIntervalMs: 15 },
++        },
++      );
++      await sm.create({ ...BASE_INPUT });
++      mock.emitMessage(systemInitMessage('sdk-sess-h5'));
++      await flushMicrotasks();
++      mock.emitResult(resultSuccess());
++      await flushMicrotasks();
++      sm.start();
++      try {
++        expect(mock.driver.start).toHaveBeenCalledTimes(1);
++        // 基线窗：让 watcher 首拍完成（建基线）再换档——否则基线被建到新值上。
++        await new Promise((r) => setTimeout(r, 100));
++
++        // 模拟 cc-switch 换档：env 块换新值（非 env 字段变化不触发同由 watcher 单测覆盖）。
++        writeFileSync(
++          settingsPath,
++          JSON.stringify({ env: { ANTHROPIC_BASE_URL: 'https://minimax.example.com' } }),
++          'utf8',
++        );
++        const deadline = Date.now() + 5000;
++        while (mock.driver.start.mock.calls.length < 2 && Date.now() < deadline) {
++          await new Promise((r) => setTimeout(r, 20));
++        }
++        await flushMicrotasks();
++
++        expect(mock.driver.start).toHaveBeenCalledTimes(2);
++        expect(mock.startCalls[1].opts['resume']).toBe('sdk-sess-h5');
++        const state = readState(sm, BASE_INPUT.sessionId)!;
++        expect(state.status).toBe('active'); // 不喂轮
++      } finally {
++        sm.stop();
++      }
++    } finally {
++      rmSync(dirs.root, { recursive: true, force: true });
++    }
++  });
++
++  it('HOST-6: 关闭阀（env SILLYHUB_HOST_SETTINGS_WATCH=0）→ start 不起监听，变化零重载', async () => {
++    const dirs = buildDirs();
++    try {
++      writeJsonl(dirs, 'home', 'sdk-sess-h6');
++      const settingsPath = join(dirs.root, 'host-settings.json');
++      writeFileSync(
++        settingsPath,
++        JSON.stringify({ env: { ANTHROPIC_BASE_URL: 'https://glm.example.com' } }),
++        'utf8',
++      );
++      const mock = makeMockClaudeDriver();
++      const sm = new SessionManager(
++        { driver: mock.driver, ...makeDeps() },
++        {
++          resumeDirs: dirs,
++          hostSettingsWatch: { settingsPath, pollIntervalMs: 15 },
++        },
++      );
++      await sm.create({ ...BASE_INPUT });
++      mock.emitMessage(systemInitMessage('sdk-sess-h6'));
++      await flushMicrotasks();
++      mock.emitResult(resultSuccess());
++      await flushMicrotasks();
++
++      vi.stubEnv('SILLYHUB_HOST_SETTINGS_WATCH', '0');
++      try {
++        sm.start();
++        // 基线窗（同 HOST-5）：确保「未触发」不是基线没建成的假阴性。
++        await new Promise((r) => setTimeout(r, 100));
++        writeFileSync(
++          settingsPath,
++          JSON.stringify({ env: { ANTHROPIC_BASE_URL: 'https://minimax.example.com' } }),
++          'utf8',
++        );
++        await new Promise((r) => setTimeout(r, 200)); // 15ms×多拍静默窗
++        expect(mock.driver.start).toHaveBeenCalledTimes(1);
++      } finally {
++        sm.stop();
++        vi.unstubAllEnvs();
++      }
++    } finally {
++      rmSync(dirs.root, { recursive: true, force: true });
++    }
++  });
++});

@@ -1,0 +1,93 @@
+{
+  "change": "2026-10-19-host-settings-live-reload",
+  "baseline": "d9991d9096be84f55a9a2e9c4c726d6af87ca989",
+  "head": "e58694ced25b84f1f22510fdfd45cb0b46197f45",
+  "files": [
+    "sillyhub-daemon/src/interactive/host-settings-watcher.ts",
+    "sillyhub-daemon/src/interactive/session-manager.ts",
+    "sillyhub-daemon/src/interactive/session-manager/types.ts",
+    "sillyhub-daemon/tests/interactive/host-settings-watcher.test.ts",
+    "sillyhub-daemon/tests/interactive/session-manager-config-switch.test.ts"
+  ],
+  "totals": {
+    "files": 5,
+    "additions": 697,
+    "deletions": 2
+  },
+  "savedAt": "2026-10-19T01:58:37.822Z",
+  "note": "flow done 时点冻结（本变更可归属交付面：baseline..HEAD 提交面过滤 .sillyspec/ 只留 .sillyspec/docs/ 交付文档 + 独占树未提交交付；治理工件目录不入冻结——2026-10-12-close-trace-freeze-integrity FR-01）",
+  "modules": [
+    {
+      "id": "sillyhub-daemon",
+      "files": 5,
+      "doc": "docs/multi-agent-platform/modules/sillyhub-daemon.md",
+      "docTouched": false,
+      "docMissing": false
+    },
+    {
+      "id": "daemon",
+      "files": 5,
+      "doc": "docs/SillyHub/modules/daemon.md",
+      "docTouched": false,
+      "docMissing": false
+    }
+  ],
+  "uncoveredDirs": [],
+  "moduleMaps": [
+    "docs/backend/modules/_module-map.yaml",
+    "docs/frontend/modules/_module-map.yaml",
+    "docs/multi-agent-platform/modules/_module-map.yaml",
+    "docs/SillyHub/modules/_module-map.yaml",
+    "docs/sillyhub-daemon/modules/_module-map.yaml"
+  ],
+  "scopeAudit": {
+    "mode": "full-flow",
+    "ok": true,
+    "degradedReason": null,
+    "baseAnchor": "d9991d9096be84f55a9a2e9c4c726d6af87ca989",
+    "totals": {
+      "files": 5,
+      "additions": 697,
+      "deletions": 2
+    },
+    "rows": [
+      {
+        "path": "sillyhub-daemon/src/interactive/host-settings-watcher.ts",
+        "additions": 152,
+        "deletions": 0,
+        "kind": "new"
+      },
+      {
+        "path": "sillyhub-daemon/src/interactive/session-manager.ts",
+        "additions": 112,
+        "deletions": 2,
+        "kind": "modified"
+      },
+      {
+        "path": "sillyhub-daemon/src/interactive/session-manager/types.ts",
+        "additions": 17,
+        "deletions": 0,
+        "kind": "modified"
+      },
+      {
+        "path": "sillyhub-daemon/tests/interactive/host-settings-watcher.test.ts",
+        "additions": 170,
+        "deletions": 0,
+        "kind": "new"
+      },
+      {
+        "path": "sillyhub-daemon/tests/interactive/session-manager-config-switch.test.ts",
+        "additions": 246,
+        "deletions": 0,
+        "kind": "modified"
+      }
+    ],
+    "excluded": {
+      "foreignDeclared": []
+    },
+    "note": "flow done 时点冻结（本文件落盘时采集）",
+    "closedBy": "flow done"
+  },
+  "patchSha256": "607bfd42ccab0858af7a12e631ce54a284daa690124f6b5eeec8ac678bac96ca",
+  "patchStatus": "ok"
+}

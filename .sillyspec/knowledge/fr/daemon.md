@@ -5145,3 +5145,55 @@
   confirmed_at: null
   source_change: 2026-10-16-provider-switch-transcript-sanitize
   status: active
+
+## FR-daemon-149 宿主机档位变化 → 本机默认会话引擎自动重载
+变更：2026-10-19-host-settings-live-reload
+状态：active
+摘要：主路径——空闲本机默认会话即时跟随；边界——运行中与终态
+场景正文：
+- 场景：主路径——空闲本机默认会话即时跟随 — Given 一个本机默认、宿主目录 transcript、空闲的 claude 会话，且 watcher 已建基线；；When 宿主 settings.json 的 env 块被换成新档位（如 GLM → MiniMax）且连续两拍一致；；Then 该会话引擎被重载（旧句柄 close、新句柄 `--resume` 同一 agentSessionId、env 重建），
+- 场景：边界——运行中与终态 — Given 同类会话正处于生成中（首 turn 未收尾）；；Then 标记 `pendingConfigSwitch`，当前轮不被打断，轮收尾后才重载；终态（ended/failed）与
+全文：.sillyspec/changes/archive/2026-10-19-host-settings-live-reload/requirements.md#FR-01
+最近确认：e5a2c7ee31881d2d20c3f831c729ca01c07a81e5
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-19-host-settings-live-reload:flow:测试绑定FR-01
+  tests: sillyhub-daemon/tests/interactive/session-manager-config-switch.test.ts「HOST-1 本机默认 + 宿主目录 transcript + 空闲 → 立即重载（resume 不变、不喂轮）」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-19-host-settings-live-reload
+  status: active
+
+## FR-daemon-150 触发精度与零误伤
+变更：2026-10-19-host-settings-live-reload
+状态：active
+摘要：精度——非 env 变化与损坏容错
+场景正文：
+- 场景：精度——非 env 变化与损坏容错 — Given watcher 已建基线；；When 仅改 permissions/hooks 字段、或写入半截 JSON、或删除文件；；Then 不触发任何重载且进程不抛异常；文件恢复且 env 块确有变化后照常确认触发。
+全文：.sillyspec/changes/archive/2026-10-19-host-settings-live-reload/requirements.md#FR-02
+最近确认：e5a2c7ee31881d2d20c3f831c729ca01c07a81e5
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-19-host-settings-live-reload:flow:测试绑定FR-02
+  tests: sillyhub-daemon/tests/interactive/host-settings-watcher.test.ts | sillyhub-daemon/tests/interactive/session-manager-config-switch.test.ts「HOST-2 绑平台供应商的会话 → 零触碰」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-19-host-settings-live-reload
+  status: active
+
+## FR-daemon-151 守护测试与真机验证留痕
+变更：2026-10-19-host-settings-live-reload
+状态：active
+摘要：测试面全绿
+场景正文：
+- 场景：测试面全绿 — Given 本变更两份测试文件与 interactive 套件；；When 跑 `vitest run tests/interactive` + `tsc --noEmit`；；Then 全绿零失败。
+全文：.sillyspec/changes/archive/2026-10-19-host-settings-live-reload/requirements.md#FR-03
+最近确认：e5a2c7ee31881d2d20c3f831c729ca01c07a81e5
