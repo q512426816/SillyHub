@@ -21,6 +21,9 @@
   余弦，纯 Python 不引 numpy 耦合）融合 ``0.6*vec + 0.4*word``；title/path 词面命中者
   保底 0.9（精确编号/文件名排前的下界；可断言形态 = 相对排序 rank=1）。embedder 不可用
   （fastembed 缺席/模型加载失败）→ ``model_ready=False`` + 纯词面结果 + reason（fail-soft）。
+- **服务器禁建库**（2026-10-19-knowledge-search-build-switch）：``server_build=False``
+  （env ``KNOWLEDGE_SEARCH_SERVER_BUILD=0``）跳过懒同步全量/差量嵌入；无索引工作区
+  词面内存直查降级（``reason="index_not_built"``），索引新鲜度职责归外部预建机器。
 """
 
 from __future__ import annotations
@@ -758,12 +761,17 @@ async def search_sync(
     *,
     embedder_error: str | None = None,
     session_factory: object | None = None,
+    server_build: bool = True,
 ) -> dict:
     """检索：返回 ``{results, model_ready, reason}``（形态与上变更内存版逐字段一致）。
 
     ``results`` 项 = ``{spec_path, kind, title, anchor, snippet, score}``（融合分降序；
     去重取最高分）。embedder None → 纯词面 + ``model_ready=False``；DB 异常 →
     词面内存直查降级（reason 带 ``knowledge_search_db_degraded:`` 前缀，搜索永不 5xx）。
+    ``server_build=False``（服务器禁建库，KNOWLEDGE_SEARCH_SERVER_BUILD=0）：跳过懒同步
+    （全量/差量嵌入一律禁，索引新鲜度职责移交外部预建机器）；无 state 行的工作区词面
+    内存直查降级，``model_ready=False + reason="index_not_built"``，首搜秒回不超时
+    （known-issues「首搜建库地雷」根治口径）。
     """
     q = str(query or "").strip()
     model_ready = embedder is not None
@@ -780,11 +788,26 @@ async def search_sync(
 
     try:
         async with await _db_session(session_factory) as session:
-            lock = _get_sync_lock(workspace_key)
-            async with lock:
-                await _ensure_synced(
-                    session, spec_root, ws_id, workspace_key, fp_now, model_name, embedder
-                )
+            if server_build:
+                lock = _get_sync_lock(workspace_key)
+                async with lock:
+                    await _ensure_synced(
+                        session, spec_root, ws_id, workspace_key, fp_now, model_name, embedder
+                    )
+            else:
+                # 禁建库：只读判 state——无索引工作区直接词面内存降级（不 scan 落库、
+                # 不嵌语料、不写任何行）；有索引则跳过 sync 直查存量行（查询向量嵌入保留）。
+                state_row = (
+                    await session.execute(
+                        select(KnowledgeSearchState.id).where(
+                            KnowledgeSearchState.workspace_id == ws_id
+                        )
+                    )
+                ).first()
+                if state_row is None:
+                    return await _fallback_word_scan(
+                        spec_root, q, limit, model_ready=False, reason="index_not_built"
+                    )
             # 查询双路（同步完成后读——不读半态）
             q_vec = None
             if embedder is not None:
