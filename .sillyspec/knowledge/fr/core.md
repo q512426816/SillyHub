@@ -201,3 +201,48 @@ created_at: 2026-10-15T11:57:05.061Z
   confirmed_at: 7af8e0e32720f2cdad8183f10b8853ba08ac70ab
   source_change: 2026-10-15-server-logs-panel
   status: active
+
+## FR-core-005 新增配置开关（默认开启建库=现行为零变化）；关闭时未建索引工作区首搜不触发建库/嵌入，直接词面降级返回且带 reason=index_not_built，秒回不超时
+变更：2026-10-19-knowledge-search-build-switch
+状态：active
+摘要：开关关闭+未建索引工作区首搜；默认开关（不传/为 True）
+全文：.sillyspec/changes/archive/2026-10-19-knowledge-search-build-switch/requirements.md#FR-01
+最近确认：54a1e8db39d4d8ac991d645e2942a370d146e4ff
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-19-knowledge-search-build-switch:flow:测试绑定FR-01
+  tests: backend/app/modules/knowledge/tests/test_knowledge_search.py「禁建库：未建索引工作区首搜词面降级零建库」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-19-knowledge-search-build-switch
+  status: active
+
+## FR-core-006 关闭路径 pytest 单测覆盖（不建库断言+降级语义+reason 字段），指定面全绿
+变更：2026-10-19-knowledge-search-build-switch
+状态：active
+摘要：主路径
+全文：.sillyspec/changes/archive/2026-10-19-knowledge-search-build-switch/requirements.md#FR-02
+最近确认：54a1e8db39d4d8ac991d645e2942a370d146e4ff
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-19-knowledge-search-build-switch:flow:测试绑定FR-02
+  tests: backend/app/modules/knowledge/tests/test_knowledge_search.py「禁建库：有索引直接查库跳过 sync / 默认缺省仍懒建库」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-19-knowledge-search-build-switch
+  status: active
+
+## FR-core-007 known-issues 该条目状态更新为已根治（运维缓解+代码根治双闭环）
+变更：2026-10-19-knowledge-search-build-switch
+状态：active
+摘要：主路径
+全文：.sillyspec/changes/archive/2026-10-19-knowledge-search-build-switch/requirements.md#FR-03
+最近确认：54a1e8db39d4d8ac991d645e2942a370d146e4ff

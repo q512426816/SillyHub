@@ -1,0 +1,51 @@
+tier: thick
+legacy_fallback: false
+substeps:
+  artifacts: done
+  ledger: done
+  patch: done
+  review: done
+  probes: done
+  distill: done
+  archive: done
+  events: done
+born_face: thin
+with_tasks: false
+review_force: null
+input: >-
+  知识搜索禁建库开关：根治首搜建库地雷
+
+  依据 known-issues「平台知识搜索首搜建库地雷」条目：未建索引工作区首搜触发容器内全量嵌入建库，大语料 OOM 杀容器、小语料也必超时（nginx
+  掐断→事务回滚→重试永远从头）。根治=加服务器禁建库开关，建库一律外部机器预建。
+
+
+  成功标准：
+
+  - 新增配置开关（默认开启建库=现行为零变化）；关闭时未建索引工作区首搜不触发建库/嵌入，直接词面降级返回且带 reason=index_not_built，秒回不超时
+
+  - 关闭路径 pytest 单测覆盖（不建库断言+降级语义+reason 字段），指定面全绿
+
+  - known-issues 该条目状态更新为已根治（运维缓解+代码根治双闭环）
+autopilot: true
+prestage_ack: false
+baseline_commit: 8dd5c8b98a7e6086e24a973e0c9dde528582b867
+updatedAt: '2026-10-19T06:32:27.934Z'
+cross_baselines:
+  sillyspec: 875511d25454cf584c99ab491fa0cd03231f71ad
+baseline_sha256: 9ccde842b8bf4c7b12d47fd66e18f1a67e28fe8e39c5664a1b6688cbb971e8d1
+spec_approved: true
+spec_approved_at: '2026-10-19T05:51:03.087Z'
+spec_approved_by: zcode-knowledge-search-build-switch
+spec_approved_channel: user-confirmed
+spec_attested_by: zcode-knowledge-search-build-switch
+batch_ticked: true
+upgrade_reason: verify 实测失败（实测失败：lint（命令与输出尾部见上；修复后重跑 --done 不丢进度））——失败自动升厚
+gate_summary: >-
+  test: skipped ← module[]+deps(py72+nontest-skip1+jsx54+jsx6)+fr(129)（551.3s）
+  结果：C:\Users\qinyi\IdeaProjects\multi-agent-platform\.sillyspec\.runtime\verify-runs\20261019061622\test-result.json —
+  跳过原因：模块子集含环境缺件跳过（已跑模块全绿）：deps(auto-nontest-skip)——补装依赖后恢复实测。｜lint: passed ← cd backend && uv run ruff check . && uv
+  run ruff format --check . && uv run mypy app && cd ../frontend && pnpm lint && cd ../sillyhub-daemon && pnpm
+  typecheck（30.3s）
+  结果：C:\Users\qinyi\IdeaProjects\multi-agent-platform\.sillyspec\.runtime\verify-runs\20261019061622\test-result.json｜门文件
+  22 个
+

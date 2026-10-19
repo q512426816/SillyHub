@@ -1,0 +1,28 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-19-knowledge-search-build-switch",
+  "reviewer": "subagent",
+  "verdict": "PASS",
+  "reviewedAgainst": "899a20ad03d4b4c7a5a6d5a00fc8b6261002574e",
+  "findings": [
+    {
+      "severity": "P3",
+      "title": "change.patch 冻结面产物缺 known-issues.md hunk（FR-03 交付物不在唯一代码事实源内）",
+      "evidence": "冻结面 8dd5c8b98..899a20ad0 经 git diff --name-only 含 .sillyspec/knowledge/known-issues.md，但 change.patch 全部 21 个 diff 头无该文件；HEAD 实态正确（git show 0a728b4e9 已核实状态行更新），属 patch 打包遗漏而非代码缺陷。",
+      "location": ".sillyspec/changes/2026-10-19-knowledge-search-build-switch/change.patch"
+    },
+    {
+      "severity": "P3",
+      "title": "禁建库跳过 _ensure_synced 连带跳过 model_version 变更触发的全量重算，跨模型向量空间混查未在披露边界单列",
+      "evidence": "server_build=False + state 行存在时直接以当前 settings 模型嵌入查询向量、与旧模型嵌入的存量 chunk 向量做余弦（_ensure_synced 的 model_version 全量重算分支被整体跳过）；机理上属风险③「跳过 sync 服务存量行」同族，但 design 风险③只点名语料指纹过期，建议文档显式补「换嵌入模型需外部重建」一句。",
+      "location": "backend/app/modules/knowledge/search.py:791-798"
+    }
+  ],
+  "dimensionNotes": {
+    "乱序": "ok",
+    "并发": "ok",
+    "切换": "ok",
+    "作用域": "ok"
+  },
+  "reviewedAt": "2026-10-19T14:23:33+08:00"
+}
