@@ -471,3 +471,116 @@ created_at: 2026-10-02T02:55:12.745Z
 - 场景：主路径 — Given 改动落地，When 跑 test_change_lineage_filter.py + 列表页/侧栏组件测试，；Then 全绿（8 + 52 + 11 passed），tsc exit 0，ruff/mypy 干净。
 全文：.sillyspec/changes/archive/2026-10-18-change-list-type-filter/requirements.md#FR-04
 最近确认：857d8af461ea4aa3705016087c3d9124105a3180
+
+## FR-change-026 C 件 parser：reparse 对含 timeline.md 的变更，从「任务面」锚定哈希 × 🔀 行标题提取白名单内主类型（优先级 feat/fix > perf/refactor/test > docs/style > build/chore/revert），作权威类型（允许覆盖；flow-state.yaml 显式 commit_type 字段仍最优先，目录推断兜底不变）；无 timeline/无锚定哈希/无命中类型 → 回落不写
+变更：2026-10-19-platform-auto-commit-type
+状态：active
+摘要：主路径；并行噪音；权威序
+场景正文：
+- 场景：主路径 — Given timeline.md（🔀 含 fix 主提交 + docs/chore 工件提交，任务面锚定 fix 哈希），；When 提取，Then 返 fix（优先级 feat/fix 高于 docs/chorie 工件）。
+- 场景：并行噪音 — Given 🔀 行含他变更提交哈希（不在任务面锚集），When 提取，Then 该提交不参与判定；
+- 场景：权威序 — Given flow-state commit_type=docs 与 timeline 提取 fix 同场，When reparse，；Then change_type=docs（flow-state 最优先）。
+全文：.sillyspec/changes/archive/2026-10-19-platform-auto-commit-type/requirements.md#FR-01
+最近确认：44f12324e768fad638b278a57a46073d566cdbd6
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-19-platform-auto-commit-type:flow:测试绑定FR-01
+  tests: backend/app/modules/change/tests/test_parser.py「TestTimelineCommitType::test_anchored_hash_extracts_main_type / test_unanchored_parallel_commits_ignored / test_missing_timeline_or_no_anchor_returns_none / test_unknown_pseudo_prefix_rejected / test_flow_state_field_beats_timeline / test_timeline_source_authoritative_when_no_flow_state」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-19-platform-auto-commit-type
+  status: active
+
+## FR-change-027 B 件同步重扫：spec-sync 落盘 ops 后，路径命中 flow-state.yaml 或 timeline.md 的变更键集合非空时，以后台任务对该集合跑 scoped reparse（独立 session、失败仅告警不阻断同步响应）
+变更：2026-10-19-platform-auto-commit-type
+状态：active
+摘要：主路径
+场景正文：
+- 场景：主路径 — Given CLI 归档同步推 rename op（changes/<key>/ → changes/archive/<key>/），When
+全文：.sillyspec/changes/archive/2026-10-19-platform-auto-commit-type/requirements.md#FR-02
+最近确认：44f12324e768fad638b278a57a46073d566cdbd6
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-19-platform-auto-commit-type:flow:测试绑定FR-02
+  tests: backend/app/modules/spec_workspace/tests/test_incremental_reparse_trigger.py
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-19-platform-auto-commit-type
+  status: active
+
+## FR-change-028 聚焦测试：timeline 提取用例（含并行噪音排除/截断标题/无锚回退）+ 既有 parser/reparse 测试零回归；ruff/mypy 干净
+变更：2026-10-19-platform-auto-commit-type
+状态：active
+摘要：主路径
+场景正文：
+- 场景：主路径 — Given 改动落地，When 跑 test_parser.py + test_reparse_guard.py，Then 全绿
+全文：.sillyspec/changes/archive/2026-10-19-platform-auto-commit-type/requirements.md#FR-03
+最近确认：44f12324e768fad638b278a57a46073d566cdbd6
+
+## FR-change-029 本机真数据端到端验证：以模块方式对真实归档批量对照 timeline 提取与 git 全历史口径，抽样核验分歧语义
+变更：2026-10-19-platform-auto-commit-type
+状态：active
+摘要：主路径
+场景正文：
+- 场景：主路径 — Given 本仓 208 个含 timeline 归档，When 批量对照，Then 提取非空 135（98 一致 +
+全文：.sillyspec/changes/archive/2026-10-19-platform-auto-commit-type/requirements.md#FR-04
+最近确认：44f12324e768fad638b278a57a46073d566cdbd6
+
+## FR-change-030 后端 _resolve_order_by 白名单新增 created_at_desc/created_at_asc；API 缺省 fallback 保持 updated_at_desc 不变
+变更：2026-10-19-change-list-created-sort
+状态：active
+摘要：主路径
+场景正文：
+- 场景：主路径 — Given 三行创建时间相差一天，When sort=created_at_desc，Then 越新越靠前；
+全文：.sillyspec/changes/archive/2026-10-19-change-list-created-sort/requirements.md#FR-01
+最近确认：e935e8c671e20cda72d65ea44ebbe9adb65b0d47
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-19-change-list-created-sort:flow:测试绑定FR-01
+  tests: backend/app/modules/change/tests/test_change_lineage_filter.py「test_sort_created_at_desc_newest_first」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-19-change-list-created-sort
+  status: active
+
+## FR-change-031 前端列表默认 created_at_desc；列头「创建时间」点击切换降/升序；旧深链兼容
+变更：2026-10-19-change-list-created-sort
+状态：active
+摘要：主路径
+场景正文：
+- 场景：主路径 — Given 无 sort 参数进列表，Then listChanges 收 sort=created_at_desc；点列头 →
+全文：.sillyspec/changes/archive/2026-10-19-change-list-created-sort/requirements.md#FR-02
+最近确认：e935e8c671e20cda72d65ea44ebbe9adb65b0d47
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-19-change-list-created-sort:flow:测试绑定FR-02
+  tests: changes/__tests__/page.test.tsx「点创建时间列头 → sortDir 切换，默认 created_at_desc 点击后 asc」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-19-change-list-created-sort
+  status: active
+
+## FR-change-032 聚焦测试：后端排序用例 + 前端默认/切换/契约用例全绿；tsc 通过
+变更：2026-10-19-change-list-created-sort
+状态：active
+摘要：主路径
+场景正文：
+- 场景：主路径 — Given 改动落地，When 跑 test_change_lineage_filter.py + 列表页测试，Then 全绿
+全文：.sillyspec/changes/archive/2026-10-19-change-list-created-sort/requirements.md#FR-03
+最近确认：e935e8c671e20cda72d65ea44ebbe9adb65b0d47

@@ -103,3 +103,150 @@ created_at: 2026-10-16T01:30:35.950Z
   confirmed_at: null
   source_change: 2026-10-15-session-turn-completion-semantics
   status: active
+
+## FR-test-utils-006 预会话态(sessionId 为空)下,用户无自有机器且无「共享给我的」机器、且存在 runtime_online 的平台共享智能体时,预会话档案自动默认选中第一个在线共享智能体
+变更：2026-10-19-shared-agent-onboarding-hint
+状态：active
+摘要：主路径
+全文：.sillyspec/changes/archive/2026-10-19-shared-agent-onboarding-hint/requirements.md#FR-01
+最近确认：fc51c25c69c3ea98a401554b486d58d256156be4
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-19-shared-agent-onboarding-hint:flow:测试绑定FR-01
+  tests: frontend/src/components/daemon/__tests__/session-panel-platform-shared.test.tsx「无自有/共享机器 + 在线共享智能体 → 默认选中并显示读写约束引导提示」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-19-shared-agent-onboarding-hint
+  status: active
+
+## FR-test-utils-007 用户手动切换过档案(含选「不指定」)后,自动默认选中不再覆盖用户选择
+变更：2026-10-19-shared-agent-onboarding-hint
+状态：active
+摘要：手动选回不指定
+全文：.sillyspec/changes/archive/2026-10-19-shared-agent-onboarding-hint/requirements.md#FR-02
+最近确认：fc51c25c69c3ea98a401554b486d58d256156be4
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-19-shared-agent-onboarding-hint:flow:测试绑定FR-02
+  tests: frontend/src/components/daemon/__tests__/session-panel-platform-shared.test.tsx「手动选『不指定』后自动选中让位，提示消失且不再被改回」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-19-shared-agent-onboarding-hint
+  status: active
+
+## FR-test-utils-008 满足默认选中条件时,预会话区显示引导提示,说明该共享智能体读平台源码不受限、写操作限制在共享输出目录,且可在智能体下拉切换
+变更：2026-10-19-shared-agent-onboarding-hint
+状态：active
+摘要：主路径
+全文：.sillyspec/changes/archive/2026-10-19-shared-agent-onboarding-hint/requirements.md#FR-03
+最近确认：fc51c25c69c3ea98a401554b486d58d256156be4
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-19-shared-agent-onboarding-hint:flow:测试绑定FR-03
+  tests: frontend/src/components/daemon/__tests__/session-panel-platform-shared.test.tsx「无自有/共享机器 + 在线共享智能体 → 默认选中并显示读写约束引导提示」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-19-shared-agent-onboarding-hint
+  status: active
+
+## FR-test-utils-009 有自有机器或有共享机器、共享智能体全部离线、机器数据加载中或请求失败时,均不自动选中也不显示提示(fail-open 不阻塞)
+变更：2026-10-19-shared-agent-onboarding-hint
+状态：active
+摘要：机器请求失败
+全文：.sillyspec/changes/archive/2026-10-19-shared-agent-onboarding-hint/requirements.md#FR-04
+最近确认：fc51c25c69c3ea98a401554b486d58d256156be4
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-19-shared-agent-onboarding-hint:flow:测试绑定FR-04
+  tests: frontend/src/components/daemon/__tests__/session-panel-platform-shared.test.tsx「共享智能体全部离线 → 不自动选中、不显示提示」 | frontend/src/components/daemon/__tests__/session-panel-platform-shared.test.tsx「共享智能体生效列表请求失败（降级 []）→ 门控不成立，不选中不提示」 | frontend/src/components/daemon/__tests__/session-panel-platform-shared.test.tsx「有『共享给我的』机器 → 不自动选中、不显示提示」 | frontend/src/components/daemon/__tests__/session-panel-platform-shared.test.tsx「有自有机器（total>0）→ 不自动选中、不显示提示」 | frontend/src/components/daemon/__tests__/session-panel-platform-shared.test.tsx「门控机器查询失败 → fail-open 不选中不提示，面板正常」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-19-shared-agent-onboarding-hint
+  status: active
+
+## FR-test-utils-010 聚焦测试覆盖上述分支,tsc 0 错误
+变更：2026-10-19-shared-agent-onboarding-hint
+状态：active
+摘要：主路径
+全文：.sillyspec/changes/archive/2026-10-19-shared-agent-onboarding-hint/requirements.md#FR-05
+最近确认：fc51c25c69c3ea98a401554b486d58d256156be4
+
+## FR-test-utils-011 真会话(非 provisional)档案下拉必须隐藏平台共享智能体条目(按 active 生效列表的 agent_profile_id 集合过滤,不按名称匹配)
+变更：2026-10-19-hide-shared-profile-in-session
+状态：active
+摘要：主路径
+全文：.sillyspec/changes/archive/2026-10-19-hide-shared-profile-in-session/requirements.md#FR-01
+最近确认：4d992afc3f615222da8f0017cd75303fd4777cf8
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-19-hide-shared-profile-in-session:flow:测试绑定FR-01
+  tests: frontend/src/components/sessions/__tests__/session-config-bar.test.tsx「真会话档案下拉隐藏共享智能体条目（按 active id 过滤）」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-19-hide-shared-profile-in-session
+  status: active
+
+## FR-test-utils-012 当前会话档案本身恰为共享智能体时,该条目在真会话下拉中保留可见(共享会话不被饿死,但不提供共享档案互切)
+变更：2026-10-19-hide-shared-profile-in-session
+状态：active
+摘要：共享会话自身
+全文：.sillyspec/changes/archive/2026-10-19-hide-shared-profile-in-session/requirements.md#FR-02
+最近确认：4d992afc3f615222da8f0017cd75303fd4777cf8
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-19-hide-shared-profile-in-session:flow:测试绑定FR-02
+  tests: frontend/src/components/sessions/__tests__/session-config-bar.test.tsx「当前会话档案为共享智能体时该条目保留可见」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-19-hide-shared-profile-in-session
+  status: active
+
+## FR-test-utils-013 预会话(provisional)档案下拉保留共享智能体条目且置顶显示(排序在普通档案之前,普通档案间保持原序)
+变更：2026-10-19-hide-shared-profile-in-session
+状态：active
+摘要：主路径
+全文：.sillyspec/changes/archive/2026-10-19-hide-shared-profile-in-session/requirements.md#FR-03
+最近确认：4d992afc3f615222da8f0017cd75303fd4777cf8
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-19-hide-shared-profile-in-session:flow:测试绑定FR-03
+  tests: frontend/src/components/sessions/__tests__/session-config-bar.test.tsx「预会话档案下拉共享智能体置顶且带共享标识」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-19-hide-shared-profile-in-session
+  status: active
+
+## FR-test-utils-014 聚焦测试覆盖上述分支,tsc 0 错误
+变更：2026-10-19-hide-shared-profile-in-session
+状态：active
+摘要：主路径
+全文：.sillyspec/changes/archive/2026-10-19-hide-shared-profile-in-session/requirements.md#FR-04
+最近确认：4d992afc3f615222da8f0017cd75303fd4777cf8

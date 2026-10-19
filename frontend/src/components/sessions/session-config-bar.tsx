@@ -326,6 +326,25 @@ export function SessionConfigBar({
     [activeSharedAgents],
   );
   const { profiles } = useMineAgentProfiles();
+  // 2026-10-19-hide-shared-profile-in-session：档案下拉可见集派生。判定按
+  // shared-agents/active 的 agent_profile_id 集合（真实库数据，非名称匹配）：
+  //   - 真会话：隐藏共享智能体条目——会话内切档案只换人格提示词（后端
+  //     D-013），与用户对「共享智能体=整套环境」的预期不符，防中途误选；
+  //     当前会话档案恰为共享智能体时豁免保留（共享会话仍可见可保持，
+  //     不提供共享档案互切）。active 失败降级 []（空集）→ 不过滤零回归。
+  //   - 预会话：共享条目置顶（无机器用户靠它建会话，2026-10-19-shared-
+  //     agent-onboarding-hint 默认选中引导同源），普通档案保持原序。
+  const visibleProfiles = useMemo(() => {
+    if (provisional) {
+      return [
+        ...profiles.filter((p) => sharedProfileIds.has(p.id)),
+        ...profiles.filter((p) => !sharedProfileIds.has(p.id)),
+      ];
+    }
+    return profiles.filter(
+      (p) => !sharedProfileIds.has(p.id) || p.id === agentProfileId,
+    );
+  }, [profiles, sharedProfileIds, provisional, agentProfileId]);
   const notify = useNotify();
   const qc = useQueryClient();
   // quick（ql-20260916-006）：裸 listProviders() 统一 basic 键（与 sessions-portal
@@ -920,7 +939,7 @@ export function SessionConfigBar({
                 })
               }
             />
-            {profiles.map((p) => (
+            {visibleProfiles.map((p) => (
               <SwitchItem
                 key={p.id}
                 icon={<User aria-hidden className="h-3 w-3" />}

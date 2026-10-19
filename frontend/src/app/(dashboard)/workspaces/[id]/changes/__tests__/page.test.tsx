@@ -560,20 +560,20 @@ describe("变更中心列表页（task-06 重做行为 + useQuery 改造）", ()
 
   // ── 5. 排序切换 ────────────────────────────────────────────────────────
 
-  it("点更新时间列头 → sortDir 切换，listChanges sort 参数 desc→asc", async () => {
+  it("点创建时间列头 → sortDir 切换，默认 created_at_desc 点击后 asc（2026-10-19-change-list-created-sort）", async () => {
     setupListChanges({
       items: [makeChange({ owner_id: "owner1234" })],
     });
     await renderAndWait();
-    // 默认 updated_at_desc
-    expect(lastMainLoadParams()?.sort).toBe("updated_at_desc");
+    // 默认 created_at_desc（越新的越靠前）
+    expect(lastMainLoadParams()?.sort).toBe("created_at_desc");
 
-    // 列头按钮（含「更新时间」文案 + ↑/↓ 指示）
+    // 列头按钮（含「创建时间」文案 + ↑/↓ 指示）
     await act(async () => {
-      fireEvent.click(screen.getByRole("button", { name: /更新时间/ }));
+      fireEvent.click(screen.getByRole("button", { name: /创建时间/ }));
     });
     await waitFor(() =>
-      expect(lastMainLoadParams()?.sort).toBe("updated_at_asc"),
+      expect(lastMainLoadParams()?.sort).toBe("created_at_asc"),
     );
   });
 
@@ -1161,12 +1161,12 @@ describe("列表状态 URL 快照（2026-10-16-change-center-back-keeps-list-sta
         lineageFilter: "",
         typeFilter: "",
         focusMine: false,
-        sortDir: "updated_at_desc",
+        sortDir: "created_at_desc",
         page: 3,
         pageSize: 20,
       }),
     ).toBe("tab=archive&page=3");
-    // 默认状态 → 空 query（URL 干净）
+    // 默认状态 → 空 query（URL 干净；默认排序 = created_at_desc）
     expect(
       buildChangesQuery({
         tab: "active",
@@ -1175,7 +1175,7 @@ describe("列表状态 URL 快照（2026-10-16-change-center-back-keeps-list-sta
         lineageFilter: "",
         typeFilter: "",
         focusMine: false,
-        sortDir: "updated_at_desc",
+        sortDir: "created_at_desc",
         page: 1,
         pageSize: 20,
       }),

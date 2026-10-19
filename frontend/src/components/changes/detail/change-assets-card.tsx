@@ -656,6 +656,14 @@ export function ChangeAssetsCard({
                       </li>
                     ))}
                   </ul>
+                  {/* 2026-10-19-assets-audit-expand-toggle：六组统一「最多 5 行 +
+                      展开全部」形态漏了本组——大清单被钉死在前 5 条且无展开。 */}
+                  <GroupToggle
+                    total={patchFileList.length}
+                    expanded={isExpanded("audit")}
+                    onToggle={() => toggleGroup("audit")}
+                    unit="个文件"
+                  />
                 </div>
               ) : null}
             </div>

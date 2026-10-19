@@ -739,3 +739,92 @@ class TestLoadModuleMapMultiProjectMerge:
             "change",
             "app-pages",
         ]
+
+
+class TestTimelineCommitType:
+    """timeline.md 类型提取（2026-10-19-platform-auto-commit-type C 件）。
+
+    轻量出身归档烤制的 timeline.md：🔀 行 = 时刻+哈希+标题（56 字符截断，
+    尾部变更 key 截掉但开头前缀不受影响）；「任务面」task-NN 行尾 = 本变更
+    自己的交付提交哈希（哈希交集排除并行变更提交噪音）。权威序：flow-state
+    显式 commit_type > timeline > 目录推断。
+    """
+
+    TIMELINE = (
+        "📅 demo — 合成时间线（thin｜事件流 × tasks.md × git 提交锚）\n"
+        "── 事件时间轴 ──\n"
+        "21:17:34  🔀 d375a86dc  fix(frontend): 会话信封单调 rev 防迟到旧值覆盖——setTokens/setUser/cl…\n"
+        "21:18:20  🔀 166ea374a  docs(spec): rev 防乱序变更工件补填——design 四节+文件清单+FR 测试绑定（2026-…\n"
+        "21:20:01  🔀 78d868278  chore(archive): 2026-10-16-backend-mem-polling 归档留档\n"
+        "── 任务面（勾选时刻：精确=task tick 侧车留痕）──\n"
+        "task-01  ≈21:17:23   SessionState 新增单调 rev 计数器：setTokens/setUser…  d375a86dc\n"
+        "task-02  ≈21:17:23   回放守卫：远端信封 rev 严格小于本地 rev 时整体忽略…  d375a86dc\n"
+    )
+
+    def _dir(self, tmp_path: Path, name: str = "2026-10-19-timeline-demo") -> Path:
+        d = tmp_path / name
+        d.mkdir(parents=True, exist_ok=True)
+        return d
+
+    def test_anchored_hash_extracts_main_type(self, tmp_path: Path) -> None:
+        """锚定哈希命中 fix 主提交 → fix（docs/chore 工件提交优先级靠后不夺主）。"""
+        d = self._dir(tmp_path)
+        (d / "timeline.md").write_text(self.TIMELINE, encoding="utf-8")
+        assert ChangeParser._read_timeline_commit_type(d) == "fix"
+
+    def test_unanchored_parallel_commits_ignored(self, tmp_path: Path) -> None:
+        """未锚定哈希（并行变更提交混入时间窗）不参与主类型判定。"""
+        d = self._dir(tmp_path)
+        # 任务面锚全部指向他哈希 → 🔀 行的 d375a86dc 不在锚集内（166ea374a 同理）
+        timeline = self.TIMELINE.replace("…  d375a86dc", "…  eeeeeeeeeee")
+        (d / "timeline.md").write_text(timeline, encoding="utf-8")
+        assert ChangeParser._read_timeline_commit_type(d) is None
+
+    def test_missing_timeline_or_no_anchor_returns_none(self, tmp_path: Path) -> None:
+        """缺 timeline.md / 有文件无任务面锚 → None（回落推断路径）。"""
+        no_file = self._dir(tmp_path, "a")
+        assert ChangeParser._read_timeline_commit_type(no_file) is None
+
+        no_anchor = self._dir(tmp_path, "b")
+        (no_anchor / "timeline.md").write_text(
+            "── 事件时间轴 ──\n21:00:00  🔀 d375a86dc  fix(x): y\n",
+            encoding="utf-8",
+        )
+        assert ChangeParser._read_timeline_commit_type(no_anchor) is None
+
+    def test_unknown_pseudo_prefix_rejected(self, tmp_path: Path) -> None:
+        """白名单外伪前缀（sillyspec: 基线检查点）不认；唯一来源时整体 None。"""
+        d = self._dir(tmp_path)
+        timeline = (
+            "── 事件时间轴 ──\n"
+            "09:00:00  🔀 1234567ab  sillyspec: baseline checkpoint for demo\n"
+            "── 任务面 ──\n"
+            "task-01  ≈09:00:00   干活  1234567ab\n"
+        )
+        (d / "timeline.md").write_text(timeline, encoding="utf-8")
+        assert ChangeParser._read_timeline_commit_type(d) is None
+
+    def test_flow_state_field_beats_timeline(self, parser: ChangeParser, silly_root: Path) -> None:
+        """权威序：flow-state 显式 commit_type 最优先（timeline 不同值不被采纳）。"""
+        change_dir = silly_root / ".sillyspec" / "changes" / "2026-10-19-priority-demo"
+        change_dir.mkdir()
+        (change_dir / "timeline.md").write_text(self.TIMELINE, encoding="utf-8")
+        (change_dir / "flow-state.yaml").write_text(
+            "tier: thin\ncommit_type: docs\n", encoding="utf-8"
+        )
+        result = parser.parse_workspace(silly_root)
+        parsed = next(c for c in result.changes if c.change_key == "2026-10-19-priority-demo")
+        assert parsed.change_type == "docs"
+        assert parsed.change_type_authoritative is True
+
+    def test_timeline_source_authoritative_when_no_flow_state(
+        self, parser: ChangeParser, silly_root: Path
+    ) -> None:
+        """无 flow-state 字段：timeline 源同样置权威（允许覆盖库中旧值）。"""
+        change_dir = silly_root / ".sillyspec" / "changes" / "2026-10-19-timeline-src-demo"
+        change_dir.mkdir()
+        (change_dir / "timeline.md").write_text(self.TIMELINE, encoding="utf-8")
+        result = parser.parse_workspace(silly_root)
+        parsed = next(c for c in result.changes if c.change_key == "2026-10-19-timeline-src-demo")
+        assert parsed.change_type == "fix"
+        assert parsed.change_type_authoritative is True

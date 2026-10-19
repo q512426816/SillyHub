@@ -801,10 +801,26 @@ describe("SessionConfigBar 切换档案", () => {
 });
 
 // ── 5.5 task-10：共享智能体档案标识（2026-08-28-daemon-agent-share / FR-05 / D-004@v2；
-//        机器共享徽标用例随 task-09 机器块移除而退役） ──
+//        机器共享徽标用例随 task-09 机器块移除而退役）──
+// 2026-10-19-hide-shared-profile-in-session：真会话下拉隐藏共享条目（防中途
+// 误选——会话内切档案只换人格，与「共享智能体=整套环境」预期不符），当前
+// 会话档案豁免；预会话保留且置顶。标识展示用例随之迁至预会话场景。
 
-describe("SessionConfigBar 共享标识（task-10 / D-004@v2 仅展示）", () => {
-  it("档案下拉：active 共享智能体档案带「共享」标识，普通档案无标识", async () => {
+describe("SessionConfigBar 共享智能体条目可见性（2026-10-19-hide-shared-profile-in-session）", () => {
+  /** active 共享智能体列表 fixture（agent_profile_id=prof-shared）。 */
+  function mockActiveShared() {
+    mocks.apiFetch.mockResolvedValue([
+      {
+        id: "grant-1",
+        agent_profile_id: "prof-shared",
+        display_name: "平台源码助手",
+        provider: "claude",
+        runtime_online: true,
+      },
+    ]);
+  }
+
+  it("真会话档案下拉隐藏共享智能体条目（按 active id 过滤，普通档案照常可选）", async () => {
     mocks.profilesHook.mockReturnValue({
       profiles: [
         { id: "prof-1", name: "知识经理" },
@@ -816,6 +832,34 @@ describe("SessionConfigBar 共享标识（task-10 / D-004@v2 仅展示）", () =
       error: null,
       refetch: vi.fn(),
     });
+    mockActiveShared();
+    renderBar();
+    openCtrl("配置-档案");
+    // active 列表异步到达后才过滤——waitFor 轮询至共享条目消失；普通档案
+    // 始终在列（到达前后都渲染）。
+    await waitFor(() =>
+      expect(
+        screen.queryByRole("button", { name: "选择 平台源码助手" }),
+      ).not.toBeInTheDocument(),
+    );
+    expect(
+      screen.getByRole("button", { name: "选择 知识经理" }),
+    ).toBeInTheDocument();
+  });
+
+  it("当前会话档案为共享智能体时该条目保留可见（带当前项，其余共享档案仍隐藏）", async () => {
+    mocks.profilesHook.mockReturnValue({
+      profiles: [
+        { id: "prof-1", name: "知识经理" },
+        { id: "prof-shared", name: "平台源码助手" },
+      ],
+      isLoading: false,
+      isFetching: false,
+      isError: false,
+      error: null,
+      refetch: vi.fn(),
+    });
+    // active 两条共享（prof-shared 当前 + prof-shared-2 其它）——豁免只保当前。
     mocks.apiFetch.mockResolvedValue([
       {
         id: "grant-1",
@@ -824,16 +868,80 @@ describe("SessionConfigBar 共享标识（task-10 / D-004@v2 仅展示）", () =
         provider: "claude",
         runtime_online: true,
       },
+      {
+        id: "grant-2",
+        agent_profile_id: "prof-shared-2",
+        display_name: "另一共享",
+        provider: "claude",
+        runtime_online: true,
+      },
     ]);
+    renderBar({ agentProfileId: "prof-shared" });
+    openCtrl("配置-档案");
+    const currentShared = await screen.findByRole("button", {
+      name: "选择 平台源码助手",
+    });
+    expect(currentShared.textContent).toContain("✓");
+    expect(
+      screen.queryByRole("button", { name: "选择 另一共享" }),
+    ).not.toBeInTheDocument();
+  });
+
+  it("active 列表请求失败降级 [] → 真会话不过滤（零回归），共享档案照常可选", async () => {
+    mocks.profilesHook.mockReturnValue({
+      profiles: [
+        { id: "prof-1", name: "知识经理" },
+        { id: "prof-shared", name: "平台源码助手" },
+      ],
+      isLoading: false,
+      isFetching: false,
+      isError: false,
+      error: null,
+      refetch: vi.fn(),
+    });
+    // 评审 P3-2：真实 rejection 走 useActiveSharedAgents 的 catch(()=>[])
+    // 降级路径（空成功数组测不到 catch 分支）。
+    mocks.apiFetch.mockRejectedValue(new Error("网络错误"));
     renderBar();
     openCtrl("配置-档案");
-    // active 列表经 react-query 异步到达 → findBy 等待「共享」Tag 出现，
-    // 且 Tag 落在共享档案行（按钮）内。
+    expect(
+      await screen.findByRole("button", { name: "选择 平台源码助手" }),
+    ).toBeInTheDocument();
+  });
+
+  it("预会话档案下拉共享智能体置顶且带「共享」标识，普通档案无标识保持原序", async () => {
+    mocks.profilesHook.mockReturnValue({
+      profiles: [
+        { id: "prof-1", name: "知识经理" },
+        { id: "prof-shared", name: "平台源码助手" },
+        { id: "prof-2", name: "严肃代码审查员" },
+      ],
+      isLoading: false,
+      isFetching: false,
+      isError: false,
+      error: null,
+      refetch: vi.fn(),
+    });
+    mockActiveShared();
+    renderBar({ provisional: true });
+    openCtrl("配置-档案");
+    // active 到达后：共享条目置顶（首个档案项）+「共享」Tag 落在其行内。
     const tag = await screen.findByText("共享");
     const sharedRow = tag.closest("button");
     expect(sharedRow).not.toBeNull();
     expect(sharedRow?.textContent).toContain("平台源码助手");
-    // 普通档案行无共享标识。
+    // 档案项按钮顺序断言（含首项「不指定」）：不指定 → 共享 → 知识经理 →
+    // 严肃代码审查员（共享置顶、普通档案保原序）。
+    const itemLabels = screen
+      .getAllByRole("button")
+      .filter((b) => b.getAttribute("aria-label")?.startsWith("选择 "))
+      .map((b) => b.getAttribute("aria-label"));
+    expect(itemLabels.slice(0, 4)).toEqual([
+      "选择 不指定（无人格）",
+      "选择 平台源码助手",
+      "选择 知识经理",
+      "选择 严肃代码审查员",
+    ]);
     const normalRow = screen.getByRole("button", { name: "选择 知识经理" });
     expect(normalRow.textContent).not.toContain("共享");
   });

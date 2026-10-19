@@ -1,0 +1,213 @@
+diff --git a/.sillyspec/docs/SillyHub/modules/frontend_components.changelog.md b/.sillyspec/docs/SillyHub/modules/frontend_components.changelog.md
+index 11237e85f..c2afd0d44 100644
+--- a/.sillyspec/docs/SillyHub/modules/frontend_components.changelog.md
++++ b/.sillyspec/docs/SillyHub/modules/frontend_components.changelog.md
+@@ -88,3 +88,4 @@ created_at: 2026-08-30 22:23:33
+ | 2026-10-18 | 2026-10-18-change-list-type-filter | 变更列表加类型标签与类型筛选 |
+ | 2026-10-19 | 2026-10-19-assets-audit-expand-toggle | 归档留档改动文件清单漏展开按钮，超5条只能看前5条 |
+ | 2026-10-19 | 2026-10-19-shared-agent-onboarding-hint | 无自有 daemon 且无工作区共享机器的新用户(如 180072)在会话创建处不知道要选「平台共享… |
++| 2026-10-19 | 2026-10-19-hide-shared-profile-in-session | 用户担心普通会话中途误选「平台向导」类平台共享智能体档案(切换后仅换人格提示词,但用户预期是整套环境… |
+diff --git a/.sillyspec/docs/backend/modules/change.changelog.md b/.sillyspec/docs/backend/modules/change.changelog.md
+index e4af8838d..50401e7bf 100644
+--- a/.sillyspec/docs/backend/modules/change.changelog.md
++++ b/.sillyspec/docs/backend/modules/change.changelog.md
+@@ -27,3 +27,4 @@ created_at: 2026-08-29 22:56:30
+ - 2026-10-16-change-title-condense-backfill | 变更中心标题提炼与存量回填
+ - 2026-10-18-change-type-git-conventional | 变更类型改用git惯用前缀彩色标签
+ - 2026-10-18-change-list-type-filter | 变更列表加类型标签与类型筛选
++- 2026-10-19-platform-auto-commit-type | 平台侧自动写入变更类型闭环
+diff --git a/.sillyspec/docs/multi-agent-platform/modules/backend.changelog.md b/.sillyspec/docs/multi-agent-platform/modules/backend.changelog.md
+index 3a923836c..3847fbe4f 100644
+--- a/.sillyspec/docs/multi-agent-platform/modules/backend.changelog.md
++++ b/.sillyspec/docs/multi-agent-platform/modules/backend.changelog.md
+@@ -62,3 +62,4 @@
+ - 2026-10-16-conflict-full-tree-compare | 后端 full-tree 兜底——compare spec-tree 主取 conflict_record_missing 时以 full-tree 记录重取一次并按 files[].path 段边界（changes/(archive/)?<change>/）裁剪；响应 schema 增可选 record_label/covered_changes/path_total；记录缺失文案改「重新同步」口径（test_sillyspec_compare.py 追加兜底/段边界/kind 分支用例）
+ - 2026-10-18-change-type-git-conventional | 变更类型改用git惯用前缀彩色标签
+ - 2026-10-18-change-list-type-filter | 变更列表加类型标签与类型筛选
++- 2026-10-19-platform-auto-commit-type | 平台侧自动写入变更类型闭环
+diff --git a/.sillyspec/docs/multi-agent-platform/modules/frontend.changelog.md b/.sillyspec/docs/multi-agent-platform/modules/frontend.changelog.md
+index 90c014486..c335e1471 100644
+--- a/.sillyspec/docs/multi-agent-platform/modules/frontend.changelog.md
++++ b/.sillyspec/docs/multi-agent-platform/modules/frontend.changelog.md
+@@ -129,3 +129,4 @@
+ | 2026-10-18 | 2026-10-18-change-list-type-filter | 变更列表加类型标签与类型筛选 |
+ | 2026-10-19 | 2026-10-19-assets-audit-expand-toggle | 归档留档改动文件清单漏展开按钮，超5条只能看前5条 |
+ | 2026-10-19 | 2026-10-19-shared-agent-onboarding-hint | 无自有 daemon 且无工作区共享机器的新用户(如 180072)在会话创建处不知道要选「平台共享… |
++| 2026-10-19 | 2026-10-19-hide-shared-profile-in-session | 用户担心普通会话中途误选「平台向导」类平台共享智能体档案(切换后仅换人格提示词,但用户预期是整套环境… |
+diff --git a/backend/app/modules/change/service.py b/backend/app/modules/change/service.py
+index a0f351726..fca365397 100644
+--- a/backend/app/modules/change/service.py
++++ b/backend/app/modules/change/service.py
+@@ -2793,6 +2793,13 @@ class ChangeService:
+             return col(Change.updated_at).asc()
+         if sort == "change_key":
+             return col(Change.change_key).asc()
++        # 2026-10-19-change-list-created-sort：创建时间排序（用户需求「越新的越靠前」）
++        # ——API 缺省/未知值 fallback 仍 updated_at_desc（契约零变化），前端列表页
++        # 默认显式传 created_at_desc。
++        if sort == "created_at_asc":
++            return col(Change.created_at).asc()
++        if sort == "created_at_desc":
++            return col(Change.created_at).desc()
+         # 默认 + 未知值 fallback：最近活动优先（updated_at desc）。
+         return col(Change.updated_at).desc()
+ 
+diff --git a/backend/app/modules/change/tests/test_change_lineage_filter.py b/backend/app/modules/change/tests/test_change_lineage_filter.py
+index b86bf84a3..724cda2cd 100644
+--- a/backend/app/modules/change/tests/test_change_lineage_filter.py
++++ b/backend/app/modules/change/tests/test_change_lineage_filter.py
+@@ -325,3 +325,30 @@ async def test_change_type_filter_exact_match_and_fallback(db_session: AsyncSess
+     # 缺省不过滤
+     _, total_none = await service.list_(ws.id)
+     assert total_none == 3
++
++
++@pytest.mark.asyncio
++async def test_sort_created_at_desc_newest_first(db_session: AsyncSession) -> None:
++    """created_at_desc 白名单键：越新的越靠前（2026-10-19-change-list-created-sort）。
++
++    API 缺省 fallback 仍 updated_at_desc（契约零变化）；前端列表页默认显式传新键。
++    """
++    from datetime import timedelta
++
++    ws = await _make_workspace(db_session)
++    service = ChangeService(db_session)
++    base = datetime.now(UTC)
++    await _make_change(db_session, ws.id, "c-old", created_at=base - timedelta(days=2))
++    await _make_change(db_session, ws.id, "c-mid", created_at=base - timedelta(days=1))
++    await _make_change(db_session, ws.id, "c-new", created_at=base)
++
++    items, total = await service.list_(ws.id, sort="created_at_desc")
++    assert [c.change_key for c in items] == ["c-new", "c-mid", "c-old"]
++    assert total == 3
++
++    items_asc, _ = await service.list_(ws.id, sort="created_at_asc")
++    assert [c.change_key for c in items_asc] == ["c-old", "c-mid", "c-new"]
++
++    # 未知值 fallback 默认 updated_at_desc 不回归
++    items_fb, _ = await service.list_(ws.id, sort="garbage")
++    assert len(items_fb) == 3
+diff --git a/frontend/src/app/(dashboard)/workspaces/[id]/changes/__tests__/page.test.tsx b/frontend/src/app/(dashboard)/workspaces/[id]/changes/__tests__/page.test.tsx
+index 97789a333..54b62fe6a 100644
+--- a/frontend/src/app/(dashboard)/workspaces/[id]/changes/__tests__/page.test.tsx
++++ b/frontend/src/app/(dashboard)/workspaces/[id]/changes/__tests__/page.test.tsx
+@@ -560,20 +560,20 @@ describe("变更中心列表页（task-06 重做行为 + useQuery 改造）", ()
+ 
+   // ── 5. 排序切换 ────────────────────────────────────────────────────────
+ 
+-  it("点更新时间列头 → sortDir 切换，listChanges sort 参数 desc→asc", async () => {
++  it("点创建时间列头 → sortDir 切换，默认 created_at_desc 点击后 asc（2026-10-19-change-list-created-sort）", async () => {
+     setupListChanges({
+       items: [makeChange({ owner_id: "owner1234" })],
+     });
+     await renderAndWait();
+-    // 默认 updated_at_desc
+-    expect(lastMainLoadParams()?.sort).toBe("updated_at_desc");
++    // 默认 created_at_desc（越新的越靠前）
++    expect(lastMainLoadParams()?.sort).toBe("created_at_desc");
+ 
+-    // 列头按钮（含「更新时间」文案 + ↑/↓ 指示）
++    // 列头按钮（含「创建时间」文案 + ↑/↓ 指示）
+     await act(async () => {
+-      fireEvent.click(screen.getByRole("button", { name: /更新时间/ }));
++      fireEvent.click(screen.getByRole("button", { name: /创建时间/ }));
+     });
+     await waitFor(() =>
+-      expect(lastMainLoadParams()?.sort).toBe("updated_at_asc"),
++      expect(lastMainLoadParams()?.sort).toBe("created_at_asc"),
+     );
+   });
+ 
+@@ -1161,12 +1161,12 @@ describe("列表状态 URL 快照（2026-10-16-change-center-back-keeps-list-sta
+         lineageFilter: "",
+         typeFilter: "",
+         focusMine: false,
+-        sortDir: "updated_at_desc",
++        sortDir: "created_at_desc",
+         page: 3,
+         pageSize: 20,
+       }),
+     ).toBe("tab=archive&page=3");
+-    // 默认状态 → 空 query（URL 干净）
++    // 默认状态 → 空 query（URL 干净；默认排序 = created_at_desc）
+     expect(
+       buildChangesQuery({
+         tab: "active",
+@@ -1175,7 +1175,7 @@ describe("列表状态 URL 快照（2026-10-16-change-center-back-keeps-list-sta
+         lineageFilter: "",
+         typeFilter: "",
+         focusMine: false,
+-        sortDir: "updated_at_desc",
++        sortDir: "created_at_desc",
+         page: 1,
+         pageSize: 20,
+       }),
+diff --git a/frontend/src/app/(dashboard)/workspaces/[id]/changes/page.tsx b/frontend/src/app/(dashboard)/workspaces/[id]/changes/page.tsx
+index 71a4c69e1..5807853cf 100644
+--- a/frontend/src/app/(dashboard)/workspaces/[id]/changes/page.tsx
++++ b/frontend/src/app/(dashboard)/workspaces/[id]/changes/page.tsx
+@@ -106,7 +106,7 @@ export function buildChangesQuery(s: {
+   if (s.lineageFilter) p.set("lineage", s.lineageFilter);
+   if (s.typeFilter) p.set("type", s.typeFilter);
+   if (s.focusMine) p.set("mine", "1");
+-  if (s.sortDir !== "updated_at_desc") p.set("sort", s.sortDir);
++  if (s.sortDir !== "created_at_desc") p.set("sort", s.sortDir);
+   if (s.page !== 1) p.set("page", String(s.page));
+   if (s.pageSize !== 20) p.set("pageSize", String(s.pageSize));
+   return p.toString();
+@@ -286,8 +286,17 @@ function UsageExecCell({
+   );
+ }
+ 
+-// 排序方向（task-06 / D-004）：默认最近活动优先。
+-type SortDir = "updated_at_desc" | "updated_at_asc";
++// 排序方向（task-06 / D-004；2026-10-19-change-list-created-sort：默认改创建时间
++// 倒序「越新的越靠前」，旧 updated_at_* 深链仍兼容解析）。
++type SortDir = "updated_at_desc" | "updated_at_asc" | "created_at_desc" | "created_at_asc";
++
++const SORT_DIR_DEFAULT: SortDir = "created_at_desc";
++
++/** URL sort 参数解析：白名单内原样收，缺省/非法回 created_at_desc（旧 updated_at_* 深链兼容）。 */
++function parseSortDir(v: string | null): SortDir {
++  const all: SortDir[] = ["updated_at_desc", "updated_at_asc", "created_at_desc", "created_at_asc"];
++  return all.includes(v as SortDir) ? (v as SortDir) : SORT_DIR_DEFAULT;
++}
+ 
+ // ── 智能轮询纯函数（task-06 / design §5 Phase 2.4 / Grill #2，导出供测试）──────
+ //
+@@ -356,9 +365,7 @@ export default function ChangesPage({ params }: Props) {
+     const v = searchParams.get("type") ?? "";
+     return TYPE_OPTIONS.some((o) => o.value === v) ? v : "";
+   });
+-  const [sortDir, setSortDir] = useState<SortDir>(() =>
+-    searchParams.get("sort") === "updated_at_asc" ? "updated_at_asc" : "updated_at_desc",
+-  );
++  const [sortDir, setSortDir] = useState<SortDir>(() => parseSortDir(searchParams.get("sort")));
+   const [page, setPage] = useState(() => parsePositiveInt(searchParams.get("page"), 1));
+   const [pageSize, setPageSize] = useState(() => {
+     const v = parsePositiveInt(searchParams.get("pageSize"), 20);
+@@ -564,8 +571,12 @@ export default function ChangesPage({ params }: Props) {
+   };
+ 
+   const toggleSort = () => {
++    // 2026-10-19-change-list-created-sort：默认创建时间排序，降/升序在 created_at 内切换；
++    // 旧 updated_at 深链首次点击迁回 created_at 降序（默认口径收敛）。
+     setSortDir((prev) =>
+-      prev === "updated_at_desc" ? "updated_at_asc" : "updated_at_desc",
++      prev === "created_at_desc"
++        ? "created_at_asc"
++        : "created_at_desc",
+     );
+     setPage(1);
+   };
+@@ -1076,8 +1087,8 @@ export default function ChangesPage({ params }: Props) {
+                   className="inline-flex items-center gap-0.5 hover:underline"
+                   title="点击切换升序/降序"
+                 >
+-                  更新时间
+-                  <span aria-hidden>{sortDir === "updated_at_desc" ? "↓" : "↑"}</span>
++                  创建时间
++                  <span aria-hidden>{sortDir === "created_at_desc" ? "↓" : "↑"}</span>
+                 </button>
+               }
+             />

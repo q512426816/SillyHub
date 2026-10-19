@@ -1,0 +1,15 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-19-shared-agent-onboarding-hint",
+  "reviewer": "subagent-recheck",
+  "verdict": "PASS",
+  "reviewedAgainst": "fee4b8f364e9377c726d8b18aa6126dc1bdf0271",
+  "findings": [],
+  "dimensionNotes": {
+    "乱序": "ok",
+    "并发": "ok",
+    "切换": "ok",
+    "作用域": "ok"
+  },
+  "reviewedAt": "2026-10-19T10:16:34+08:00"
+}

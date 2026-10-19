@@ -109,7 +109,7 @@ import { getQuicklogDetail } from "@/lib/quicklog";
 // task-03（2026-09-27-session-fast-replay / FR-04 FR-05）：fetchSessionTurnOutline
 // 打开链路并行拉取全量轮次大纲（导航骨架 + 未加载轮 run_id 直达跳转）。
 import {
-  ScheduledMessageRead, cancelTeamMission, compactSession, createScheduledMessage, createSession, fetchPendingDialogs, fetchSessionDialogHistory, fetchSessionTurnOutline, getAgentSession, getAgentSessionLogs, injectSession, interruptSession, resetToolReportSession, takeoverSession, listSessionRuns, maxLogTimestamp, reopenSession, streamSession, triggerSessionTeamMission, type PlanSummary, type SessionCreateTeamMission, type SessionDialogRead, type SessionPermissionRequest, type SessionRunRead, type SessionStreamConnection, type SessionTurnOutlineRead, type TeamMissionTriggerRequest, updateSessionAutoResume, updateSessionCtxWindow,
+  ScheduledMessageRead, cancelTeamMission, compactSession, createScheduledMessage, createSession, fetchPendingDialogs, fetchSessionDialogHistory, fetchSessionTurnOutline, getAgentSession, getAgentSessionLogs, injectSession, interruptSession, listDaemonMachines, resetToolReportSession, takeoverSession, listSessionRuns, maxLogTimestamp, reopenSession, streamSession, triggerSessionTeamMission, type PlanSummary, type SessionCreateTeamMission, type SessionDialogRead, type SessionPermissionRequest, type SessionRunRead, type SessionStreamConnection, type SessionTurnOutlineRead, type TeamMissionTriggerRequest, updateSessionAutoResume, updateSessionCtxWindow,
 } from "@/lib/daemon";
 import { getProviderCaps, PROVIDER_SWITCH_ENGINES } from "@/lib/provider-caps";
 import { cn } from "@/lib/utils";
@@ -989,6 +989,35 @@ export function SessionPanelPage({
   // 重置清空不传——引擎默认零回归；显式选「默认」off=上送，daemon 按引擎映射）。
   const [preThinkingLevel, setPreThinkingLevel] = useState("");
   const [preError, setPreError] = useState<string | null>(null);
+  // ── 2026-10-19-shared-agent-onboarding-hint：预会话共享智能体默认选中引导 ──
+  // 门控数据：轻量机器查询（limit=1 仅探 total/shared_to_me 有无）。不复用
+  // machines prop——它是门户融合候选且无 loading 语义（加载中空数组会误判
+  // 「无机器」），独立查询以 data!=null 守卫天然 fail-open。仅预会话态发起。
+  const sharedAgentOnboardingQ = useQuery({
+    queryKey: ["daemonMachines", "sharedAgentOnboarding"],
+    queryFn: () => listDaemonMachines({ limit: 1 }),
+    enabled: sessionId === null,
+    staleTime: 30_000,
+  });
+  const noOwnNoSharedMachine =
+    sharedAgentOnboardingQ.data != null &&
+    sharedAgentOnboardingQ.data.total === 0 &&
+    (sharedAgentOnboardingQ.data.shared_to_me?.length ?? 0) === 0;
+  // 首个在线平台共享智能体（activeSharedAgents 失败降级 []，门控自然不成立）。
+  const firstOnlineSharedAgent = useMemo(
+    () => activeSharedAgents.find((a) => a.runtime_online) ?? null,
+    [activeSharedAgents],
+  );
+  // 用户手动操作过档案（含选「不指定」）后置 true——自动默认选中从此让位
+  // （否则用户手动选回「不指定」会被 effect 改回共享智能体，覆盖用户选择）。
+  const preProfileTouchedRef = useRef(false);
+  useEffect(() => {
+    if (sessionId !== null) return;
+    if (preProfileTouchedRef.current) return;
+    if (!noOwnNoSharedMachine || !firstOnlineSharedAgent) return;
+    if (preProfileId === firstOnlineSharedAgent.agent_profile_id) return;
+    setPreProfileId(firstOnlineSharedAgent.agent_profile_id);
+  }, [sessionId, noOwnNoSharedMachine, firstOnlineSharedAgent, preProfileId]);
   // task-13（FR-05/D-009@v2）：预会话团队 payload 暂存——弹层确认后暂存（含
   // task-12 主 agent 选择器落定的 orchestrator_workspace_id），首句 createSession
   // 随 team_mission 上送；成功清空、失败保留可原地重试（R-02 语义延伸）。
@@ -4486,6 +4515,20 @@ export function SessionPanelPage({
           {/* ql-20260823-008：配置控件条同构挂载（provisional 暂存模式）——
               供应商/档案可选暂存随首句生效（task-09 起配置条仅此两块）。 */}
           <div className="px-5 pb-3">
+            {/* 2026-10-19-shared-agent-onboarding-hint：无自有/共享机器用户的
+                共享智能体引导条——仅当选中值确为共享智能体时渲染（用户手动改选
+                其它档案即自然消失，不依赖 touchedRef）。 */}
+            {noOwnNoSharedMachine &&
+              firstOnlineSharedAgent &&
+              preProfileId === firstOnlineSharedAgent.agent_profile_id && (
+                <p
+                  data-testid="pre-session-shared-agent-hint"
+                  className="mb-1.5 rounded border border-brand-300/60 bg-brand-50/60 px-3 py-2 text-xs text-brand-700 dark:bg-brand-950/30 dark:text-brand-300"
+                >
+                  已为你选中平台共享智能体「
+                  {firstOnlineSharedAgent.display_name ?? "平台共享智能体"}」——读平台源码不受限，写操作限制在共享输出目录；可在下方「智能体」中切换。
+                </p>
+              )}
             <SessionConfigBar
               sessionId=""
               provisional
@@ -4498,7 +4541,12 @@ export function SessionPanelPage({
               variant={variant}
               onProvisionalSwitch={(field, value) => {
                 if (field === "llm_provider_id") setPreProviderId(value);
-                else setPreProfileId(value);
+                else {
+                  // 2026-10-19-shared-agent-onboarding-hint：手动触档后自动
+                  // 默认选中永久让位（含选回「不指定」）。
+                  preProfileTouchedRef.current = true;
+                  setPreProfileId(value);
+                }
               }}
               // D-002@v1：模型暂存专用回调（onProvisionalSwitch 二分收值会误写档案）。
               onProvisionalModelSwitch={setPreModelId}

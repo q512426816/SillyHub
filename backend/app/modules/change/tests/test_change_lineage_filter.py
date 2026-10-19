@@ -325,3 +325,30 @@ async def test_change_type_filter_exact_match_and_fallback(db_session: AsyncSess
     # 缺省不过滤
     _, total_none = await service.list_(ws.id)
     assert total_none == 3
+
+
+@pytest.mark.asyncio
+async def test_sort_created_at_desc_newest_first(db_session: AsyncSession) -> None:
+    """created_at_desc 白名单键：越新的越靠前（2026-10-19-change-list-created-sort）。
+
+    API 缺省 fallback 仍 updated_at_desc（契约零变化）；前端列表页默认显式传新键。
+    """
+    from datetime import timedelta
+
+    ws = await _make_workspace(db_session)
+    service = ChangeService(db_session)
+    base = datetime.now(UTC)
+    await _make_change(db_session, ws.id, "c-old", created_at=base - timedelta(days=2))
+    await _make_change(db_session, ws.id, "c-mid", created_at=base - timedelta(days=1))
+    await _make_change(db_session, ws.id, "c-new", created_at=base)
+
+    items, total = await service.list_(ws.id, sort="created_at_desc")
+    assert [c.change_key for c in items] == ["c-new", "c-mid", "c-old"]
+    assert total == 3
+
+    items_asc, _ = await service.list_(ws.id, sort="created_at_asc")
+    assert [c.change_key for c in items_asc] == ["c-old", "c-mid", "c-new"]
+
+    # 未知值 fallback 默认 updated_at_desc 不回归
+    items_fb, _ = await service.list_(ws.id, sort="garbage")
+    assert len(items_fb) == 3

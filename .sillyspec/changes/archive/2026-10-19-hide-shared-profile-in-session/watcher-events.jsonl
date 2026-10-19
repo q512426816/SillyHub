@@ -1,0 +1,24 @@
+{"ts":1792376630469,"kind":"file","stage":"proposal","detail":"proposal.md 出现","provisional":true}
+{"ts":1792376630469,"kind":"file","stage":"requirements","detail":"requirements.md 出现","provisional":true}
+{"ts":1792376630469,"kind":"file","stage":"design","detail":"design.md 出现","provisional":true}
+{"ts":1792376630469,"kind":"file","stage":"tasks","detail":"tasks.md 出现","provisional":true}
+{"ts":1792376690842,"kind":"file-update","stage":"requirements","detail":"requirements.md 内容变更","provisional":true}
+{"ts":1792376710955,"kind":"file-update","stage":"design","detail":"design.md 内容变更","provisional":true}
+{"ts":1792376711254,"kind":"warning","stage":null,"rule":"scope-drift","severity":"warning","detail":"声明面之外的代码文件被改：.openclaw/——范围漂移嫌疑（并行会话改动/越界，人判）","provisional":true}
+{"ts":1792376725510,"kind":"file-update","stage":"tasks","detail":"tasks.md 内容变更","provisional":true}
+{"ts":1792376922348,"kind":"task-done","stage":"tasks","detail":"checked 0→1","provisional":true,"source":"task-tick"}
+{"ts":1792376922859,"kind":"task-done","stage":"tasks","detail":"checked 1→2","provisional":true,"source":"task-tick"}
+{"ts":1792376923300,"kind":"task-done","stage":"tasks","detail":"checked 2→3","provisional":true,"source":"task-tick"}
+{"ts":1792376923219,"kind":"file-update","stage":"tasks","detail":"tasks.md 内容变更","provisional":true}
+{"ts":1792376923219,"kind":"task-done","stage":"tasks","detail":"checked 0→2","provisional":true}
+{"ts":1792376923696,"kind":"task-done","stage":"tasks","detail":"checked 3→4","provisional":true,"source":"task-tick"}
+{"ts":1792376926969,"kind":"file-update","stage":"tasks","detail":"tasks.md 内容变更","provisional":true}
+{"ts":1792376926969,"kind":"task-done","stage":"tasks","detail":"checked 2→4","provisional":true}
+{"ts":1792376926969,"kind":"commit","stage":null,"detail":"c9562e57c","provisional":true}
+{"ts":1792376937415,"kind":"file-update","stage":"design","detail":"design.md 内容变更","provisional":true}
+{"ts":1792376960827,"kind":"gate-run","stage":"verify","detail":"门实测 passed（15.4s） · 20261019022920","provisional":true}
+{"ts":1792377000925,"kind":"config-change","stage":null,"detail":"本地配置 local.yaml 有变更（内容不上行）","provisional":true}
+{"ts":1792377328987,"kind":"file-update","stage":"design","detail":"design.md 内容变更","provisional":true}
+{"ts":1792377328987,"kind":"commit","stage":null,"detail":"968192e79","provisional":true}
+{"ts":1792377582061,"kind":"commit","stage":null,"detail":"f2aa61b29","provisional":true}
+{"ts":1792377702408,"kind":"file-update","stage":"design","detail":"design.md 内容变更","provisional":true}

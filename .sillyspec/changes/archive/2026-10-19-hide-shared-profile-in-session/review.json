@@ -1,0 +1,15 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-19-hide-shared-profile-in-session",
+  "reviewer": "subagent-recheck2",
+  "verdict": "PASS",
+  "reviewedAgainst": "f2aa61b29c7c2d3ab2437b579f4c8af8c17883cf",
+  "findings": [],
+  "dimensionNotes": {
+    "乱序": "ok",
+    "并发": "ok",
+    "切换": "ok",
+    "作用域": "ok"
+  },
+  "reviewedAt": "2026-10-19T02:41:16Z"
+}

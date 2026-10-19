@@ -1,0 +1,36 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-19-change-list-created-sort",
+  "rows": [
+    {
+      "anchor": "FR-01",
+      "row_id": "2026-10-19-change-list-created-sort:flow:测试绑定FR-01",
+      "tests": [
+        "backend/app/modules/change/tests/test_change_lineage_filter.py「test_sort_created_at_desc_newest_first」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-19-change-list-created-sort"
+    },
+    {
+      "anchor": "FR-02",
+      "row_id": "2026-10-19-change-list-created-sort:flow:测试绑定FR-02",
+      "tests": [
+        "changes/__tests__/page.test.tsx「点创建时间列头 → sortDir 切换，默认 created_at_desc 点击后 asc」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-19-change-list-created-sort"
+    }
+  ]
+}

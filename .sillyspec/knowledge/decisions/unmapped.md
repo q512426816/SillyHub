@@ -531,6 +531,7 @@
 最近确认：857d8af461ea4aa3705016087c3d9124105a3180
 理由：最大风险：筛选值集与展示映射漂移（feat↔feature 口径在后端 aliases、前端 COMMIT_TYPE_DISPLAY 两处维护）。缓解：两端各有测试钉（后端 feat 等价命中用例 / 前端 feature→feat 显示用例），且值集注释互指对方为权威。残余面：TYPE_OPTIONS 未 列 ci/revert/quick（防下拉过长），后端白名单仍可筛——深链手输 URL 可用，下拉不可 选，属有意取舍。 试过放弃：A. 类型筛选复用 lineage 的「全局集合→SQL IN」两阶段——类型是列值非 投影字段，直接 where 即可，无需两阶段；B. 前端本地过滤——total/分页会错 （pending_review_only gap② 前车之鉴），必须服务端筛。
 
+
 ## D-unmapped-060@v1 设计期风险与放弃方案（底稿）
 状态：implemented
 变更：2026-10-16-session-pill-dock-drag
@@ -562,8 +563,47 @@
 锚点：未记录
 最近确认：ee8bc717b7b00bcc4e78a5e1da5788638735b776
 理由：- **最大风险**：空转读文件频率 ×3（每秒读 2-6KB + JSON 解析）。量级可忽略（单核微秒级）， 定时器仍 unref；接受。 - **风险 2**：重载风暴更密（用户连续快速换档时，每 2 秒可触发一波）。上一变更已论证 per-session 串行 + 覆盖写幂等承载得住；去抖两拍本身就是节流。 - **死路（放弃）**：去抖单拍化（见做法概述）；fs.watch（同上变更死路 2）。 - **遗留**：UI 可感知提示（切换时平台界面出 notice）需 daemon→backend→frontend 三端契约 （新端点 + SSE 帧 + 类型再生成），本变更明确不做，留待单独立项。
-
 ## D-unmapped-086@v1 设计期风险与放弃方案（底稿）
+状态：implemented
+变更：2026-10-19-assets-audit-expand-toggle
+原编号：D-001@v1
+锚点：未记录
+最近确认：c86998d373e27dba83a1ff8c4e7ed39924cad0c8
+理由：最大风险：展开 180 条时卡片自然高度变得很长——但这是六组统一形态的设计决定（design.md「自然高度 + 展开全部」取代内滚），其它组同样如此，本修复不改该决定。试过但不做：给清单恢复组内滚动/固定高度——正是 2026-10-15 改版明确否掉的旧形态（多内滚小窗是「乱」的主要来源），回退会造成 audit 组与其它五组形态分裂。
+
+## D-unmapped-087@v1 设计期风险与放弃方案（底稿）
+状态：implemented
+变更：2026-10-19-shared-agent-onboarding-hint
+原编号：D-001@v1
+锚点：未记录
+最近确认：fc51c25c69c3ea98a401554b486d58d256156be4
+理由：最大风险：把「机器数据加载中」误判为「无机器」而错误默认选中——以 `data != null` 守卫消除（loading/error 均 undefined → 门控 false）。 试过放弃的方案：①复用 `machines` prop 判定——无 loading 语义有误判窗口，且依赖门户传参形态，放弃；②把引导提示塞进 SessionConfigBar 内部——该组件是会话内配置面（真会话/预会话共用），预会话引导属页面语义，改共享组件还会扩大既有测试面，放弃。
+
+## D-unmapped-088@v1 设计期风险与放弃方案（底稿）
+状态：implemented
+变更：2026-10-19-hide-shared-profile-in-session
+原编号：D-001@v1
+锚点：未记录
+最近确认：4d992afc3f615222da8f0017cd75303fd4777cf8
+理由：最大风险：真会话隐藏后，用户想在中途把普通会话「升级」为共享智能体会话无入口——这是刻意边界（共享智能体环境是创建时服务端强制的钉定+约束，中途切入既然后端也不会生效，隐藏正是对齐真实语义）；需要共享环境应新建会话。放弃的方案：①按名称过滤——用户明确指出名称不可靠，必须按 active 列表 id；②提升到机器/智能体选择层——改动面与 thin 不匹配（见做法概述）。
+
+## D-unmapped-089@v1 设计期风险与放弃方案（底稿）
+状态：implemented
+变更：2026-10-19-platform-auto-commit-type
+原编号：D-001@v1
+锚点：未记录
+最近确认：44f12324e768fad638b278a57a46073d566cdbd6
+理由：最大风险：timeline 口径与 git 口径分歧（27%）造成「同类变更不同来源类型不同」的 观感。缓解：生产链路上每变更只有一种来源生效（有回填 → flow-state 优先；无回填 → timeline），不存在同一行两口径交替覆盖；分歧样本语义核验 timeline 不劣（git 口径 会被后补提交带偏）。watcher 盲窗导致锚缺失 → None 回落不猜。 试过放弃：A. 排除工件性 scope（docs(spec)/chore(archive)）提升一致率——实验发现 分歧主因是口径哲学非工件噪音，且 git 对照口径本身含噪，不值得为对齐一个含噪基准 加规则；B. daemon 控制命令通道（平台下发 git 提取命令）——覆盖面更全但异步回传 + 离线重试复杂度高一个量级，留作中期备选；C. 等 sillyspec CLI flow done 写类型—— 用户明确不改 CLI，平台侧自闭环。
+
+## D-unmapped-090@v1 设计期风险与放弃方案（底稿）
+状态：implemented
+变更：2026-10-19-change-list-created-sort
+原编号：D-001@v1
+锚点：未记录
+最近确认：e935e8c671e20cda72d65ea44ebbe9adb65b0d47
+理由：风险：默认排序变化改变用户既有习惯（最近活动 → 创建时间）——正是用户主动要求， 非回归。created_at 与 updated_at 在 reparse 回填 mtime 时的差异：created_at 是 建行时刻（CLI 创建顺序），语义即用户诉求。放弃方案：改后端缺省值——会波及全部 不传 sort 的调用方（change-autolink 等），契约面无谓扩大。
+
+## D-unmapped-091@v1 设计期风险与放弃方案（底稿）
 状态：implemented
 变更：2026-10-19-preview-card-empty-turn-fix
 原编号：D-001@v1

@@ -1,0 +1,51 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-19-hide-shared-profile-in-session",
+  "rows": [
+    {
+      "anchor": "FR-01",
+      "row_id": "2026-10-19-hide-shared-profile-in-session:flow:测试绑定FR-01",
+      "tests": [
+        "frontend/src/components/sessions/__tests__/session-config-bar.test.tsx「真会话档案下拉隐藏共享智能体条目（按 active id 过滤）」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-19-hide-shared-profile-in-session"
+    },
+    {
+      "anchor": "FR-02",
+      "row_id": "2026-10-19-hide-shared-profile-in-session:flow:测试绑定FR-02",
+      "tests": [
+        "frontend/src/components/sessions/__tests__/session-config-bar.test.tsx「当前会话档案为共享智能体时该条目保留可见」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-19-hide-shared-profile-in-session"
+    },
+    {
+      "anchor": "FR-03",
+      "row_id": "2026-10-19-hide-shared-profile-in-session:flow:测试绑定FR-03",
+      "tests": [
+        "frontend/src/components/sessions/__tests__/session-config-bar.test.tsx「预会话档案下拉共享智能体置顶且带共享标识」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-19-hide-shared-profile-in-session"
+    }
+  ]
+}

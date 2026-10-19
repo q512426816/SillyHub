@@ -106,7 +106,7 @@ export function buildChangesQuery(s: {
   if (s.lineageFilter) p.set("lineage", s.lineageFilter);
   if (s.typeFilter) p.set("type", s.typeFilter);
   if (s.focusMine) p.set("mine", "1");
-  if (s.sortDir !== "updated_at_desc") p.set("sort", s.sortDir);
+  if (s.sortDir !== "created_at_desc") p.set("sort", s.sortDir);
   if (s.page !== 1) p.set("page", String(s.page));
   if (s.pageSize !== 20) p.set("pageSize", String(s.pageSize));
   return p.toString();
@@ -286,8 +286,17 @@ function UsageExecCell({
   );
 }
 
-// 排序方向（task-06 / D-004）：默认最近活动优先。
-type SortDir = "updated_at_desc" | "updated_at_asc";
+// 排序方向（task-06 / D-004；2026-10-19-change-list-created-sort：默认改创建时间
+// 倒序「越新的越靠前」，旧 updated_at_* 深链仍兼容解析）。
+type SortDir = "updated_at_desc" | "updated_at_asc" | "created_at_desc" | "created_at_asc";
+
+const SORT_DIR_DEFAULT: SortDir = "created_at_desc";
+
+/** URL sort 参数解析：白名单内原样收，缺省/非法回 created_at_desc（旧 updated_at_* 深链兼容）。 */
+function parseSortDir(v: string | null): SortDir {
+  const all: SortDir[] = ["updated_at_desc", "updated_at_asc", "created_at_desc", "created_at_asc"];
+  return all.includes(v as SortDir) ? (v as SortDir) : SORT_DIR_DEFAULT;
+}
 
 // ── 智能轮询纯函数（task-06 / design §5 Phase 2.4 / Grill #2，导出供测试）──────
 //
@@ -356,9 +365,7 @@ export default function ChangesPage({ params }: Props) {
     const v = searchParams.get("type") ?? "";
     return TYPE_OPTIONS.some((o) => o.value === v) ? v : "";
   });
-  const [sortDir, setSortDir] = useState<SortDir>(() =>
-    searchParams.get("sort") === "updated_at_asc" ? "updated_at_asc" : "updated_at_desc",
-  );
+  const [sortDir, setSortDir] = useState<SortDir>(() => parseSortDir(searchParams.get("sort")));
   const [page, setPage] = useState(() => parsePositiveInt(searchParams.get("page"), 1));
   const [pageSize, setPageSize] = useState(() => {
     const v = parsePositiveInt(searchParams.get("pageSize"), 20);
@@ -564,8 +571,12 @@ export default function ChangesPage({ params }: Props) {
   };
 
   const toggleSort = () => {
+    // 2026-10-19-change-list-created-sort：默认创建时间排序，降/升序在 created_at 内切换；
+    // 旧 updated_at 深链首次点击迁回 created_at 降序（默认口径收敛）。
     setSortDir((prev) =>
-      prev === "updated_at_desc" ? "updated_at_asc" : "updated_at_desc",
+      prev === "created_at_desc"
+        ? "created_at_asc"
+        : "created_at_desc",
     );
     setPage(1);
   };
@@ -1076,8 +1087,8 @@ export default function ChangesPage({ params }: Props) {
                   className="inline-flex items-center gap-0.5 hover:underline"
                   title="点击切换升序/降序"
                 >
-                  更新时间
-                  <span aria-hidden>{sortDir === "updated_at_desc" ? "↓" : "↑"}</span>
+                  创建时间
+                  <span aria-hidden>{sortDir === "created_at_desc" ? "↓" : "↑"}</span>
                 </button>
               }
             />

@@ -1,0 +1,22 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-19-assets-audit-expand-toggle",
+  "reviewer": "subagent",
+  "verdict": "PASS",
+  "reviewedAgainst": "c86998d373e27dba83a1ff8c4e7ed39924cad0c8",
+  "findings": [
+    {
+      "severity": "P3",
+      "title": "披露取舍裁决（非缺陷）：展开 180 条时卡片自然高度变长——可接受",
+      "evidence": "design.md「风险与死路」已显式声明该取舍；本评审裁决为可接受：六组统一「自然高度 + 展开全部」是 2026-10-15-change-detail-redesign FR-06 的既定设计决定，展开后内容经页面级滚动全部可达，而回退组内滚动/固定高度正是该改版明确否掉的旧形态、会造成 audit 组与其余五组形态分裂（design 亦记录此死路），故不构成否决项。",
+      "location": ".sillyspec/changes/2026-10-19-assets-audit-expand-toggle/design.md:38"
+    }
+  ],
+  "dimensionNotes": {
+    "乱序": "n/a",
+    "并发": "n/a",
+    "切换": "ok",
+    "作用域": "n/a"
+  },
+  "reviewedAt": "2026-10-19T01:15:47Z"
+}

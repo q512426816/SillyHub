@@ -62,3 +62,5 @@
 - 2026-10-16-conflict-full-tree-compare | 后端 full-tree 兜底——compare spec-tree 主取 conflict_record_missing 时以 full-tree 记录重取一次并按 files[].path 段边界（changes/(archive/)?<change>/）裁剪；响应 schema 增可选 record_label/covered_changes/path_total；记录缺失文案改「重新同步」口径（test_sillyspec_compare.py 追加兜底/段边界/kind 分支用例）
 - 2026-10-18-change-type-git-conventional | 变更类型改用git惯用前缀彩色标签
 - 2026-10-18-change-list-type-filter | 变更列表加类型标签与类型筛选
+- 2026-10-19-platform-auto-commit-type | 平台侧自动写入变更类型闭环
+- 2026-10-19-change-list-created-sort | 变更中心列表默认按创建时间倒序
