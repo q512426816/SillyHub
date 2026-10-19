@@ -1,0 +1,3329 @@
+diff --git a/.sillyspec/docs/backend/modules/knowledge.changelog.md b/.sillyspec/docs/backend/modules/knowledge.changelog.md
+index 8788310b4..d7d959386 100644
+--- a/.sillyspec/docs/backend/modules/knowledge.changelog.md
++++ b/.sillyspec/docs/backend/modules/knowledge.changelog.md
+@@ -1,3 +1,4 @@
+ # knowledge 变更索引
+ - change 2026-10-15-knowledge-search-pgvector | 知识搜索向量索引持久化到 PG pgvector：两表（chunks embedding vector(512)+content_hash 差量键 / state 指纹+model_version）+ 迁移 20261015200000（CREATE EXTENSION vector+方言守卫+镜像未换 fail-closed）+ pgvector>=0.3 依赖（with_variant：PG Vector/SQLite JSON 测试可建）；search_sync 改 async 协程（DB await 原生+CPU to_thread 卸载，run_in_threadpool 退役）；懒同步差量四态（指纹 list 归一化+asyncio.Lock single-flight+model_version 全量重算）；查询双路方言分叉（PG KNN cosine_distance/SQLite Python 余弦/词面 ILIKE 候选）；DB 异常词面内存直查降级（永不 5xx）。部署：镜像 pgvector/pgvector:pg16。测试 205+46 全绿+契约零 diff；实测重启后首查 0.003s 仅嵌 query（零重建）+差量只嵌变更文件。CLI 向量端点零改动。**部署期四连修（生产实证）**：建库写入分批+Core 批量 INSERT（容器 800m OOM 三连修，mem_limit→1100m）；uq(workspace_id,spec_path,anchor,title) drop（生产重号条目撞约束，迁移 20261016010000，键改行号坐标）；PG KNN 改原生 SQL（with_variant 列取不到 ORM cosine_distance）；fastembed 模型缓存挂载（服务器无外网）。本机隧道建库 228.7s/6712 chunks；生产首查 3.3s（改造前 304s）/二次 0.72s。
+ - 2026-10-16-driver-audit-fixes | 24h 只读风险审查发现 zcode 驱动三处缺陷（轮次进行中 close 令 consume 永久…
++- 2026-10-19-knowledge-search-build-switch | 知识搜索禁建库开关：根治首搜建库地雷
+diff --git a/.sillyspec/docs/backend/modules/knowledge.md b/.sillyspec/docs/backend/modules/knowledge.md
+index ec3ab3d69..ae2fbd3fc 100644
+--- a/.sillyspec/docs/backend/modules/knowledge.md
++++ b/.sillyspec/docs/backend/modules/knowledge.md
+@@ -51,6 +51,7 @@ get: 全量 parse 后内存按 filename 精确匹配（filename 含子目录段
+ - **懒同步**：查询时指纹比对（`list(map(list))` 归一化）→ 一致直查 / 失配差量四态（新键插入/hash 变重嵌/消失删除/mtime 漂移被 hash 吸收）/model_version 变更全量重算；`asyncio.Lock`（per-workspace）single-flight + DB 幂等（uq 已 drop；并发兜底 = 进程锁 + 全量清空重建语义）。重启零重建（实测 0.003s 仅嵌 query）。
+ - **查询双路方言分叉**：PG = pgvector KNN（原生 SQL `embedding <=> CAST(:qv AS vector)` cosine_distance，1-dist 转相似度；with_variant 列取不到 ORM `cosine_distance` 方法故走 text SQL + `_HitRow` 统一候选视图）；SQLite（测试）= 拉回 embedding Python 余弦；词面路 = SQL ILIKE 候选（LIMIT 500）+ Python 打分（口径与内存版逐字段一致）。
+ - **降级链**：DB 异常 → `scan_corpus` + `_word_score` 词面内存直查（reason 带 `knowledge_search_db_degraded:` 前缀，搜索永不 5xx）；embedder 缺席 → 纯词面（原语义）。
++- **服务器禁建库开关**（2026-10-19-knowledge-search-build-switch）：`Settings.knowledge_search_server_build`（env `KNOWLEDGE_SEARCH_SERVER_BUILD`，默认 True=懒建库行为零变化）。=0 时 `search_sync(server_build=False)` 跳过懒同步（全量/差量嵌入一律禁）：无 state 行的工作区首搜词面内存直查降级（`model_ready=False + reason="index_not_built"`，零建库零写库秒回——known-issues「首搜建库地雷」根治）；有 state 行直查存量行（查询向量嵌入保留；指纹过期静默服务陈旧行=显式边界，新鲜度职责移交外部预建机器）。**换嵌入模型（model_version 变更）同样被跳过——新模型查询向量会与旧模型存量 chunk 向量跨空间余弦，必须外部预建机全量重建后再切**。小内存生产容器必配 =0。
+ - **部署**：PG 镜像 `pgvector/pgvector:pg16`（生产+dev compose）；升级顺序 = 换镜像 → 迁移 → 重启 backend → 首查建库。生产实证（2026-10-15 部署）：服务器无外网须预置 fastembed 模型缓存挂载 + mem_limit 1100m；全量建库改本机 20 核经 `ssh -L` 隧道直写生产库（228.7s/6712 chunks，容器内跑必 OOM）；生产首查 3.3s（改造前同场景 304s）、二次 0.72s。
+ - CLI 向量端点（vector_search.py/vector_router.py）维持内存实现零改动（D-001 边界）。
+ 
+diff --git a/.sillyspec/docs/multi-agent-platform/modules/backend.changelog.md b/.sillyspec/docs/multi-agent-platform/modules/backend.changelog.md
+index 381b65b62..8f034fe8a 100644
+--- a/.sillyspec/docs/multi-agent-platform/modules/backend.changelog.md
++++ b/.sillyspec/docs/multi-agent-platform/modules/backend.changelog.md
+@@ -64,3 +64,4 @@
+ - 2026-10-18-change-list-type-filter | 变更列表加类型标签与类型筛选
+ - 2026-10-19-platform-auto-commit-type | 平台侧自动写入变更类型闭环
+ - 2026-10-19-change-list-created-sort | 变更中心列表默认按创建时间倒序
++- 2026-10-19-knowledge-search-build-switch | 知识搜索禁建库开关：根治首搜建库地雷
+diff --git a/backend/app/core/config.py b/backend/app/core/config.py
+index d2b75627e..309780347 100644
+--- a/backend/app/core/config.py
++++ b/backend/app/core/config.py
+@@ -131,6 +131,14 @@ class Settings(BaseSettings):
+         4,
+         description="max workspaces cached in-process for vector index, LRU evict beyond (env KNOWLEDGE_EMBEDDING_INDEX_MAX_WS).",
+     )
++    # 2026-10-19-knowledge-search-build-switch：服务器禁建库开关——小内存生产容器禁容器内
++    # 懒建库/嵌入（known-issues「首搜建库地雷」根治：未建索引 ws 首搜曾全量嵌入致 OOM/超时）。
++    # 关闭后懒同步全量/差量嵌入一律跳过，无索引工作区首搜词面内存直查降级
++    # （model_ready=False + reason=index_not_built）；索引一律外部机器隧道预建。
++    knowledge_search_server_build: bool = Field(
++        True,
++        description="allow lazy in-process knowledge index build (full/delta embedding) on search; set false on small-memory servers (env KNOWLEDGE_SEARCH_SERVER_BUILD).",
++    )
+     # 2026-10-16-backend-mem-polling task-02 / D-004@v1：spec 包 gzip 整包缓存的
+     # 全局字节帽（per-ws 2 版本策略之上的总量上界；~18MB/ws 曾无上界慢性爬升）。
+     spec_bundle_cache_max_bytes: int = Field(
+@@ -138,6 +146,36 @@ class Settings(BaseSettings):
+         description="global byte cap for spec bundle gzip cache, LRU evict beyond (env SPEC_BUNDLE_CACHE_MAX_BYTES).",
+     )
+ 
++    # ── 思考内容离线翻译（2026-10-19-thinking-zh-translate）──────────────────
++    # 后端 CTranslate2 int8 opus-mt-en-zh 子进程推理（embedding worker 同款三闸
++    # 自灭模式）。模型缺席/加载失败 → /api/translate/thinking fail-soft 返回
++    # engine_ready=false 原文透传，应用启动零阻塞；零外部云翻译 API。
++    translate_thinking_enabled: bool = Field(
++        True,
++        description="master switch for offline thinking translation (env TRANSLATE_THINKING_ENABLED).",
++    )
++    # HF repo id（ct2 格式）。换更大模型只改本值；离线部署用 translate_model_dir
++    # 指本地预置目录绕过下载。
++    translate_model_repo: str = Field(
++        "michaelfeil/ct2fast-opus-mt-en-zh",
++        description="CTranslate2-format opus-mt en-zh repo id (env TRANSLATE_MODEL_REPO).",
++    )
++    # 非空 = 直接用该本地模型目录（含 config.json 的 ct2 模型目录），零下载。
++    translate_model_dir: str = Field(
++        "",
++        description="local CTranslate2 model dir override for offline deploys (env TRANSLATE_MODEL_DIR).",
++    )
++    # 翻译子进程闲置自灭秒数（内存归零口径同 knowledge_embedding_idle_exit_sec）。
++    translate_worker_idle_exit_sec: int = Field(
++        600,
++        description="translate worker idle exit in seconds (env TRANSLATE_WORKER_IDLE_EXIT_SEC).",
++    )
++    # 进程内译文 LRU 条目上限（块粒度，≤1000 字符/块）。
++    translate_cache_max_entries: int = Field(
++        2048,
++        description="in-process translated-chunk LRU entries cap (env TRANSLATE_CACHE_MAX_ENTRIES).",
++    )
++
+     # 2026-07-07-daemon-skill-execution task-06：sillyspec skills 打包源目录。
+     # 镜像内路径由 Dockerfile COPY → /app/sillyspec-skills/（task-07）。
+     # 2026-10-08-backend-image-slim-no-claude：历史上不放 /app/.claude/skills/ 是因
+diff --git a/backend/app/main.py b/backend/app/main.py
+index c740447e2..1c7bdfedb 100644
+--- a/backend/app/main.py
++++ b/backend/app/main.py
+@@ -97,6 +97,7 @@ from app.modules.spec_workspace.router import router as spec_workspace_router
+ from app.modules.task import task_router
+ from app.modules.tool_gateway.policy_router import router as policy_crud_router
+ from app.modules.tool_gateway.router import router as tool_gateway_router
++from app.modules.translate.router import router as translate_router
+ from app.modules.workflow.router import router as workflow_router
+ from app.modules.workspace import workspace_router
+ from app.modules.workspace.link_router import router as ppm_project_link_router
+@@ -963,6 +964,8 @@ def create_app() -> FastAPI:
+     app.include_router(incident_router, prefix="/api")
+     app.include_router(knowledge_router, prefix="/api")
+     app.include_router(knowledge_vector_router, prefix="/api")
++    # 2026-10-19-thinking-zh-translate：思考内容离线翻译（fail-soft 端点）。
++    app.include_router(translate_router, prefix="/api")
+     app.include_router(release_router, prefix="/api")
+     app.include_router(deploy_records_router, prefix="/api")
+     app.include_router(notification_router, prefix="/api")
+diff --git a/backend/app/modules/knowledge/router.py b/backend/app/modules/knowledge/router.py
+index 7d1e208bc..451fdb4b2 100644
+--- a/backend/app/modules/knowledge/router.py
++++ b/backend/app/modules/knowledge/router.py
+@@ -477,7 +477,9 @@ async def search_knowledge(
+     - docs/ 类结果按 SCAN_DOCS_READ 服务端过滤——判定经 ``has_permission`` 同一
+       权威函数（admin 短路在内；禁读 user.permissions 快照，D-005@v1）；先取
+       3×limit 候选再过滤截断，防 top-k 被过滤挤空；
+-    - embedder 不可用 → fail-soft：200 + model_ready=False + 纯词面结果（D-004@v1）。
++    - embedder 不可用 → fail-soft：200 + model_ready=False + 纯词面结果（D-004@v1）；
++    - 服务器禁建库（KNOWLEDGE_SEARCH_SERVER_BUILD=0，2026-10-19-knowledge-search-build-switch）：
++      小内存生产容器跳过懒同步嵌入；未建索引 ws 首搜词面内存降级 + reason=index_not_built。
+     """
+     from app.core.config import get_settings
+     from app.core.db import get_session_factory
+@@ -510,6 +512,7 @@ async def search_knowledge(
+         settings.knowledge_embedding_model,
+         embedder_error=embedder_error,
+         session_factory=get_session_factory(),
++        server_build=settings.knowledge_search_server_build,
+     )
+     filtered = [
+         KnowledgeSearchResultItem(**item)
+diff --git a/backend/app/modules/knowledge/schema.py b/backend/app/modules/knowledge/schema.py
+index 69fb9d110..c513525db 100644
+--- a/backend/app/modules/knowledge/schema.py
++++ b/backend/app/modules/knowledge/schema.py
+@@ -615,7 +615,9 @@ class VectorSearchOut(BaseModel):
+ # ── 平台知识搜索（change 2026-10-15-platform-knowledge-search / D-001@v1）────────
+ # 契约见 design.md「接口定义」：results 条目为可展示的召回 {spec_path, kind, title,
+ # anchor, snippet, score}；docs/ 类结果已按 SCAN_DOCS_READ 服务端过滤（D-005@v1）；
+-# model_ready=False 表示语义模型不可用、results 为纯词面降级结果（reason 带因）。
++# model_ready=False 表示语义模型不可用、results 为纯词面降级结果（reason 带因；
++# 词表：embedder 错误原文 / knowledge_search_db_degraded:* / index_not_built——
++# 服务器禁建库且索引未建，2026-10-19-knowledge-search-build-switch）。
+ 
+ 
+ class KnowledgeSearchIn(BaseModel):
+@@ -637,7 +639,8 @@ class KnowledgeSearchResultItem(BaseModel):
+ 
+ 
+ class KnowledgeSearchOut(BaseModel):
+-    """检索出参：model_ready=False 时 results 非空（纯词面）+ reason 带因（fail-soft）。"""
++    """检索出参：model_ready=False 时 results 非空（纯词面）+ reason 带因（fail-soft；
++    reason=index_not_built 表示服务器禁建库且该 ws 索引未建）。"""
+ 
+     ok: bool = True
+     results: list[KnowledgeSearchResultItem]
+diff --git a/backend/app/modules/knowledge/search.py b/backend/app/modules/knowledge/search.py
+index 787cad527..1e39fefe0 100644
+--- a/backend/app/modules/knowledge/search.py
++++ b/backend/app/modules/knowledge/search.py
+@@ -21,6 +21,9 @@
+   余弦，纯 Python 不引 numpy 耦合）融合 ``0.6*vec + 0.4*word``；title/path 词面命中者
+   保底 0.9（精确编号/文件名排前的下界；可断言形态 = 相对排序 rank=1）。embedder 不可用
+   （fastembed 缺席/模型加载失败）→ ``model_ready=False`` + 纯词面结果 + reason（fail-soft）。
++- **服务器禁建库**（2026-10-19-knowledge-search-build-switch）：``server_build=False``
++  （env ``KNOWLEDGE_SEARCH_SERVER_BUILD=0``）跳过懒同步全量/差量嵌入；无索引工作区
++  词面内存直查降级（``reason="index_not_built"``），索引新鲜度职责归外部预建机器。
+ """
+ 
+ from __future__ import annotations
+@@ -758,12 +761,17 @@ async def search_sync(
+     *,
+     embedder_error: str | None = None,
+     session_factory: object | None = None,
++    server_build: bool = True,
+ ) -> dict:
+     """检索：返回 ``{results, model_ready, reason}``（形态与上变更内存版逐字段一致）。
+ 
+     ``results`` 项 = ``{spec_path, kind, title, anchor, snippet, score}``（融合分降序；
+     去重取最高分）。embedder None → 纯词面 + ``model_ready=False``；DB 异常 →
+     词面内存直查降级（reason 带 ``knowledge_search_db_degraded:`` 前缀，搜索永不 5xx）。
++    ``server_build=False``（服务器禁建库，KNOWLEDGE_SEARCH_SERVER_BUILD=0）：跳过懒同步
++    （全量/差量嵌入一律禁，索引新鲜度职责移交外部预建机器）；无 state 行的工作区词面
++    内存直查降级，``model_ready=False + reason="index_not_built"``，首搜秒回不超时
++    （known-issues「首搜建库地雷」根治口径）。
+     """
+     q = str(query or "").strip()
+     model_ready = embedder is not None
+@@ -780,11 +788,26 @@ async def search_sync(
+ 
+     try:
+         async with await _db_session(session_factory) as session:
+-            lock = _get_sync_lock(workspace_key)
+-            async with lock:
+-                await _ensure_synced(
+-                    session, spec_root, ws_id, workspace_key, fp_now, model_name, embedder
+-                )
++            if server_build:
++                lock = _get_sync_lock(workspace_key)
++                async with lock:
++                    await _ensure_synced(
++                        session, spec_root, ws_id, workspace_key, fp_now, model_name, embedder
++                    )
++            else:
++                # 禁建库：只读判 state——无索引工作区直接词面内存降级（不 scan 落库、
++                # 不嵌语料、不写任何行）；有索引则跳过 sync 直查存量行（查询向量嵌入保留）。
++                state_row = (
++                    await session.execute(
++                        select(KnowledgeSearchState.id).where(
++                            KnowledgeSearchState.workspace_id == ws_id
++                        )
++                    )
++                ).first()
++                if state_row is None:
++                    return await _fallback_word_scan(
++                        spec_root, q, limit, model_ready=False, reason="index_not_built"
++                    )
+             # 查询双路（同步完成后读——不读半态）
+             q_vec = None
+             if embedder is not None:
+diff --git a/backend/app/modules/knowledge/tests/test_knowledge_search.py b/backend/app/modules/knowledge/tests/test_knowledge_search.py
+index 6f0ae4a6f..fa54b0dd6 100644
+--- a/backend/app/modules/knowledge/tests/test_knowledge_search.py
++++ b/backend/app/modules/knowledge/tests/test_knowledge_search.py
+@@ -541,3 +541,96 @@ async def test_search_delta_reembeds_only_changed_file(tmp_path: Path, search_en
+     # known-issues.md 原 1 块 + 新增 1 块 = 重嵌 2 块 + query 1 次
+     assert fake.embedded_texts == baseline + 2
+     assert any(r["title"] == "新增小节" for r in out["results"]), "新内容应可搜到"
++
++
++# ── 服务器禁建库开关（2026-10-19-knowledge-search-build-switch）──────────────
++
++
++async def test_search_server_build_off_unbuilt_ws_lexical_fallback_no_build(
++    tmp_path: Path, search_env
++) -> None:
++    """禁建库 + 无索引 ws 首搜：零建库零嵌入零写库，词面内存降级 reason=index_not_built。"""
++    from sqlalchemy import select
++
++    from app.modules.knowledge.search import KnowledgeSearchChunk, KnowledgeSearchState
++
++    _mini_corpus(tmp_path)
++    fake = FakeEmbedder()
++    out = await search_sync(
++        tmp_path,
++        search_env[0],
++        "会话状态点",
++        5,
++        fake,
++        "fake-model",
++        session_factory=search_env[1],
++        server_build=False,
++    )
++    assert fake.embed_calls == 0, "禁建库路径不得有任何嵌入调用（语料与 query 均零）"
++    assert out["model_ready"] is False
++    assert out["reason"] == "index_not_built"
++    assert out["results"], "词面降级仍应可命中语料"
++    top = out["results"][0]
++    assert top["score"] >= 0.6 and "会话状态点" in top["title"]
++    async with search_env[1]() as session:
++        assert (await session.execute(select(KnowledgeSearchState))).first() is None, (
++            "禁建库不得写 state 行"
++        )
++        assert (await session.execute(select(KnowledgeSearchChunk))).first() is None, (
++            "禁建库不得写 chunk 行"
++        )
++
++
++async def test_search_server_build_off_with_index_serves_without_resync(
++    tmp_path: Path, search_env
++) -> None:
++    """禁建库 + 有索引：跳过懒同步（语料变更也不差量重嵌），直接查存量行。"""
++    _mini_corpus(tmp_path)
++    fake = FakeEmbedder()
++    # 先以默认开关建好索引
++    await search_sync(
++        tmp_path, search_env[0], "状态点", 5, fake, "fake-model", session_factory=search_env[1]
++    )
++    calls_after_build = fake.embed_calls
++    assert calls_after_build >= 2
++    # 语料新增文件（指纹过期）→ 禁建库搜索不得触发差量重嵌
++    _write(tmp_path, "knowledge/extra.md", "# 额外\n\n## 新落地小节\n\n缓存索引点。\n")
++    out = await search_sync(
++        tmp_path,
++        search_env[0],
++        "状态点",
++        5,
++        fake,
++        "fake-model",
++        session_factory=search_env[1],
++        server_build=False,
++    )
++    assert fake.embed_calls == calls_after_build + 1, "仅 query embed，禁建库不得重嵌语料"
++    assert out["model_ready"] is True
++    assert out["reason"] is None
++    assert out["results"], "存量索引应可查"
++    assert all(r["title"] != "新落地小节" for r in out["results"]), (
++        "未重嵌：新内容不在结果（显式边界：新鲜度归外部预建机器）"
++    )
++
++
++async def test_search_server_build_default_true_keeps_lazy_build(
++    tmp_path: Path, search_env
++) -> None:
++    """默认值回归：不传 server_build（缺省 True）仍懒建库（现行为零变化）。"""
++    from sqlalchemy import select
++
++    from app.modules.knowledge.search import KnowledgeSearchState
++
++    _mini_corpus(tmp_path)
++    fake = FakeEmbedder()
++    out = await search_sync(
++        tmp_path, search_env[0], "会话状态点", 5, fake, "fake-model", session_factory=search_env[1]
++    )
++    assert fake.embed_calls >= 2, "缺省开关必须保持懒建库"
++    assert out["model_ready"] is True
++    assert out["reason"] is None
++    async with search_env[1]() as session:
++        assert (await session.execute(select(KnowledgeSearchState))).first() is not None, (
++            "缺省开关应落 state 行"
++        )
+diff --git a/backend/app/modules/translate/README.md b/backend/app/modules/translate/README.md
+new file mode 100644
+index 000000000..11bd26f1f
+--- /dev/null
++++ b/backend/app/modules/translate/README.md
+@@ -0,0 +1,56 @@
++# 思考内容离线翻译（translate 模块）
++
++会话/日志里 agent 思考内容（`[THINKING]` 流）的 en→zh 离线翻译服务。零外部云翻译
++API——推理在本地 CTranslate2 子进程完成（opus-mt-en-zh int8 量化，复刻
++`knowledge/embedding_worker` 三闸自灭模式：闲置 600s / 父进程消失 / 1h 寿命帽）。
++
++## 环境变量
++
++| 变量 | 默认 | 说明 |
++|---|---|---|
++| `TRANSLATE_THINKING_ENABLED` | `true` | 总闸；`false` 时端点直接原文透传 |
++| `TRANSLATE_MODEL_REPO` | `michaelfeil/ct2fast-opus-mt-en-zh` | ct2 格式模型 repo id（换更大模型只改这里） |
++| `TRANSLATE_MODEL_DIR` | 空 | 本地模型目录（含 `config.json` 的 ct2 目录）；非空时零下载 |
++| `TRANSLATE_WORKER_IDLE_EXIT_SEC` | `600` | 翻译子进程闲置自灭秒数 |
++| `TRANSLATE_CACHE_MAX_ENTRIES` | `2048` | 进程内译文 LRU 条目上限 |
++
++模型首用从 HuggingFace 自动下载（~100-150MB，尊重 `HF_ENDPOINT` 镜像与 `HF_HOME`
++缓存变量）。**下载/加载失败一律 fail-soft**：端点返回 `engine_ready=false` + 原文
++透传，应用启动零阻塞；前端显示原文 + 「离线翻译未就绪」轻提示并 60s 退避。
++
++## 离线部署（预置模型，零下载）
++
++```bash
++# 有网机器上一次性下载模型目录（HF 镜像可加 HF_ENDPOINT=https://hf-mirror.com）
++python -c "from huggingface_hub import snapshot_download; print(snapshot_download('michaelfeil/ct2fast-opus-mt-en-zh'))"
++
++# 把输出的缓存目录整体拷到部署机（如 /opt/models/opus-mt-en-zh），然后：
++TRANSLATE_MODEL_DIR=/opt/models/opus-mt-en-zh
++```
++
++Docker 预烤（可选）：在 backend Dockerfile 依赖安装后加
++
++```dockerfile
++RUN python -c "from huggingface_hub import snapshot_download" \
++    && python -c "from huggingface_hub import snapshot_download as s; s('michaelfeil/ct2fast-opus-mt-en-zh', local_dir='/opt/models/opus-mt-en-zh')" \
++    || true
++ENV TRANSLATE_MODEL_DIR=/opt/models/opus-mt-en-zh
++```
++
++（`|| true` 保持构建可离线重试；烤失败时运行期自动回退 repo 下载路径。）
++
++tokenizer 加载分层回退：transformers `AutoTokenizer` → sentencepiece
++（`source.spm`/`target.spm`）→ 都缺席时报错退出（fail-soft 降级原文）。
++
++## 质量预期
++
++opus-mt 是轻量模型（int8 量化），目标是「能看懂大意」而非信达雅；代码块 / 行内
++代码 / URL 保护不送翻（`chunking.py`），前端每处展开视图可一键切回原文。质量不
++满意时换更大 ct2 模型（改 `TRANSLATE_MODEL_REPO` 指向即可，接口契约不变）。
++
++## 端点契约
++
++`POST /api/translate/thinking`（`task:run_agent` 权限）：
++`{items: [{id, text ≤20000 字符} × ≤16], target: "zh"}` →
++`{ok, engine_ready, reason, items: [{id, text, translated}]}`。限额超界 422；
++`translated=false` = 原文透传（不值得翻 / 引擎不可用）。
+diff --git a/backend/app/modules/translate/__init__.py b/backend/app/modules/translate/__init__.py
+new file mode 100644
+index 000000000..b3ce118e6
+--- /dev/null
++++ b/backend/app/modules/translate/__init__.py
+@@ -0,0 +1,8 @@
++"""思考内容离线翻译模块（change 2026-10-19-thinking-zh-translate）。
++
++后端本地 en→zh 翻译服务：CTranslate2 int8 量化 opus-mt-en-zh 子进程推理
++（复刻 knowledge/embedding_worker 三闸自灭模式）+ 双层缓存（进程内 LRU +
++Redis best-effort）。POST /api/translate/thinking 端点 fail-soft：引擎缺席
++返回 engine_ready=false 原文透传，不阻塞应用启动。代码块/行内代码/URL
++保护不送翻（chunking.py）。零外部云翻译 API 调用。
++"""
+diff --git a/backend/app/modules/translate/chunking.py b/backend/app/modules/translate/chunking.py
+new file mode 100644
+index 000000000..ca96fb0af
+--- /dev/null
++++ b/backend/app/modules/translate/chunking.py
+@@ -0,0 +1,161 @@
++"""翻译前文本处理（纯函数，零外部依赖）。
++
++三件事：
++
++1. **保护切分** ``split_protected``：围栏代码块（```…```）、行内代码（`…`）、
++   URL 不送翻原样保留——agent 思考里全是代码与路径，送翻必破坏。未闭合
++   围栏（流式截断形态）不匹配保护、内容按正文送翻（fail-open，半截代码
++   翻坏不致命；闭合后自然恢复保护）。
++2. **值得翻判定** ``is_translation_worthy``：中文为主（CJK 占比 ≥0.6）或过短
++   （压平 <30 字符）或拉丁字母太少（<8 个）跳过——与前端
++   ``lib/thinking-translate.ts needsTranslation`` 同规则双判定（前端跳过
++   直接不发请求，后端兜底防穿透）。
++3. **分块** ``split_translatable``：自然段优先、超长段按句界二次切，块
++   ≤max_chars（默认 1000——opus-mt 位置编码 512 token，英文 ~4 字符/token
++   留安全余量）。块拼接恒等于原文（reassembly 保真）。
++"""
++
++from __future__ import annotations
++
++import re
++from dataclasses import dataclass
++
++# 保护模式：围栏代码（多行）| 行内代码（不跨行）| URL。交替单遍扫描。
++_PROTECT_RE = re.compile(
++    r"```.*?```"  # fenced code block（DOTALL 跨行，懒惰配对）
++    r"|`[^`\n]+`"  # inline code
++    r"|https?://[^\s`]+"  # http(s) URL（止于空白/反引号）
++    r"|www\.[^\s`]+",  # 裸 www
++    re.DOTALL,
++)
++
++_CJK_RE = re.compile(r"[\u3400-\u4dbf\u4e00-\u9fff]")
++_LATIN_RE = re.compile(r"[A-Za-z]")
++
++# 值得翻判定阈值（与前端 lib/thinking-translate.ts 常量同源，改动须双侧同步）。
++WORTHY_MIN_FLAT_CHARS = 30
++WORTHY_MIN_LATIN_CHARS = 8
++WORTHY_CJK_RATIO_MAX = 0.6
++
++# 分块粒度（opus-mt 512 token 位置编码的安全字符预算）。
++CHUNK_MAX_CHARS = 1000
++
++# 句界切分：句末标点后的空白（空白归属下一块开头）。
++_SENTENCE_SPLIT_RE = re.compile(r"(?<=[.!?])\s+")
++
++
++@dataclass(frozen=True, slots=True)
++class SourceSegment:
++    """一段原文切片：translatable=True 送翻，False 原样保留（代码/URL）。"""
++
++    text: str
++    translatable: bool
++
++
++def split_protected(text: str) -> list[SourceSegment]:
++    """按保护模式切分为交替的正文/保护段。
++
++    空白归属：保护段之间的正文（含其前后空白）整体送翻由模型消化；保护段
++    精确原样输出。纯保护内容（整段是代码块）→ 单个非翻译段。
++    """
++    out: list[SourceSegment] = []
++    pos = 0
++    for m in _PROTECT_RE.finditer(text):
++        if m.start() > pos:
++            out.append(SourceSegment(text[pos : m.start()], True))
++        out.append(SourceSegment(m.group(0), False))
++        pos = m.end()
++    if pos < len(text):
++        out.append(SourceSegment(text[pos:], True))
++    # 合并相邻同类型段（regex 不产生，防御性保持不变量）
++    merged: list[SourceSegment] = []
++    for seg in out:
++        if merged and merged[-1].translatable == seg.translatable:
++            merged[-1] = SourceSegment(merged[-1].text + seg.text, seg.translatable)
++        else:
++            merged.append(seg)
++    return merged
++
++
++def is_translation_worthy(text: str) -> bool:
++    """是否值得送翻：英文为主且够长才翻；中文为主/过短/几乎无拉丁字母跳过。"""
++    flat = re.sub(r"\s+", " ", text).strip()
++    if len(flat) < WORTHY_MIN_FLAT_CHARS:
++        return False
++    cjk = len(_CJK_RE.findall(flat))
++    latin = len(_LATIN_RE.findall(flat))
++    denom = cjk + latin
++    if denom == 0:
++        return False
++    if cjk / denom >= WORTHY_CJK_RATIO_MAX:
++        return False
++    return latin >= WORTHY_MIN_LATIN_CHARS
++
++
++def split_translatable(text: str, max_chars: int = CHUNK_MAX_CHARS) -> list[str]:
++    """把一段送翻正文切为 ≤max_chars 的块，拼接恒等于原文。
++
++    段（\n\n+）优先（分隔符归上一段尾部保保真）；段内超限按句界（.!? 后
++    空白，空白归上一句）二切；单句仍超限硬切。最后保序贪心合并填满预算
++    （减少块数=减少推理批次）。
++    """
++    if max_chars <= 0:
++        raise ValueError("max_chars must be positive")
++    if not text:
++        return []
++    if len(text) <= max_chars:
++        return [text]
++
++    def _emit(pieces: list[str], s: str) -> None:
++        while len(s) > max_chars:  # 单句仍超限：硬切
++            pieces.append(s[:max_chars])
++            s = s[max_chars:]
++        if s:
++            pieces.append(s)
++
++    # 段切分：捕获分隔符并归上一段（join 逐字符还原的保真关键）
++    parts = re.split(r"(\n\n+)", text)
++    paragraphs = [
++        parts[i] + (parts[i + 1] if i + 1 < len(parts) else "") for i in range(0, len(parts), 2)
++    ]
++    pieces: list[str] = []
++    for para in paragraphs:
++        if len(para) <= max_chars:
++            pieces.append(para)
++            continue
++        # 句段列表（句末空白归上一句保真），先硬切超长单句再贪心装箱
++        sentences: list[str] = []
++        prev = 0
++        for m in _SENTENCE_SPLIT_RE.finditer(para):
++            sentences.append(para[prev : m.end()])
++            prev = m.end()
++        sentences.append(para[prev:])
++        packed_para: list[str] = []
++        for sent in sentences:
++            if len(sent) > max_chars:
++                _emit(packed_para, sent)
++                continue
++            if packed_para and len(packed_para[-1]) + len(sent) <= max_chars:
++                packed_para[-1] += sent
++            else:
++                packed_para.append(sent)
++        pieces.extend(packed_para)
++    # 保序贪心合并
++    packed: list[str] = []
++    for piece in pieces:
++        if packed and len(packed[-1]) + len(piece) <= max_chars:
++            packed[-1] += piece
++        else:
++            packed.append(piece)
++    total = sum(len(p) for p in packed)
++    assert total == len(text), f"reassembly mismatch: {total} != {len(text)}"
++    return packed
++
++
++def collect_chunks(segments: list[SourceSegment]) -> list[str]:
++    """从切分结果抽取全部送翻块（供批量送模型）。"""
++    chunks: list[str] = []
++    for seg in segments:
++        if seg.translatable:
++            chunks.extend(split_translatable(seg.text))
++    return chunks
+diff --git a/backend/app/modules/translate/engine.py b/backend/app/modules/translate/engine.py
+new file mode 100644
+index 000000000..2fb561ac9
+--- /dev/null
++++ b/backend/app/modules/translate/engine.py
+@@ -0,0 +1,219 @@
++"""翻译子进程代理（change 2026-10-19-thinking-zh-translate）。
++
++``TranslateSubprocessProxy`` 与 ``knowledge/vector_search.EmbeddingSubprocessProxy``
++同款模式（2026-10-16-backend-mem-polling D-001@v1 的翻译版）：
++
++- 子进程懒启动（首次 translate 才 spawn），行协议往返（Windows 管道无
++  select → 常驻读线程 + 队列）；
++- 崩溃自动重启 + 连续 ``MAX_CONSECUTIVE_CRASHES`` 次进入退避
++  （``available=False``，退避满后懒重启恢复）；
++- 模型内存"用时有峰、闲时归零"（worker 三闸自灭），不回退进程内加载。
++
++worker 侧模型解析（本地目录优先 / HF 自动下载）见 translate_worker.py。
++"""
++
++from __future__ import annotations
++
++import json
++import queue
++import sys
++import threading
++import time
++
++_engine_lock = threading.Lock()
++_engine_instance: object | None = None
++_engine_model: str | None = None
++_engine_error: str | None = None
++
++# 子进程连续崩溃达到阈值后的退避时长（防崩溃循环烧 CPU）
++_ENGINE_CRASH_BACKOFF_SEC = 600.0
++
++
++class TranslateSubprocessError(RuntimeError):
++    """翻译子进程失败（崩溃/超时/协议错误），调用方按 fail-soft 降级处理。"""
++
++
++class TranslateSubprocessProxy:
++    """CTranslate2 翻译子进程代理——translate() 经 stdin/stdout 行协议往返。
++
++    - ``worker_cmd`` 仅测试注入假 worker 用；生产默认 -m 拉真 worker。
++    - 响应读取用常驻读线程 + 队列（Windows 管道无 select）。
++    """
++
++    REQUEST_TIMEOUT_SEC = 300.0
++    MAX_CONSECUTIVE_CRASHES = 3
++
++    def __init__(
++        self,
++        model_spec: str,
++        idle_exit_sec: int = 600,
++        worker_cmd: list[str] | None = None,
++    ) -> None:
++        import subprocess
++
++        self._subprocess = subprocess
++        self._model_spec = model_spec
++        self._idle_exit_sec = idle_exit_sec
++        self._worker_cmd = worker_cmd
++        self._proc: object | None = None
++        self._responses: queue.Queue = queue.Queue()
++        self._lock = threading.Lock()
++        self._next_id = 0
++        self.consecutive_crashes = 0
++        self.retry_at = 0.0
++
++    # -- 生命周期 -----------------------------------------------------------
++
++    def _poll(self) -> int | None:
++        return self._proc.poll() if self._proc is not None else 0
++
++    def _stop(self) -> None:
++        if self._proc is not None:
++            try:
++                self._proc.kill()
++                self._proc.wait(timeout=5)
++            except Exception:
++                pass
++        self._proc = None
++
++    def _ensure_started(self) -> None:
++        """确保子进程与读线程在位（懒启动 + 崩溃重启共用）。"""
++        import threading as _threading
++
++        if self._proc is not None and self._poll() is None:
++            return
++        self._stop()
++        cmd = self._worker_cmd or [
++            sys.executable,
++            "-m",
++            "app.modules.translate.translate_worker",
++            self._model_spec,
++            str(self._idle_exit_sec),
++        ]
++        self._responses = queue.Queue()
++        self._proc = self._subprocess.Popen(
++            cmd,
++            stdin=self._subprocess.PIPE,
++            stdout=self._subprocess.PIPE,
++            stderr=self._subprocess.DEVNULL,
++            text=True,
++            encoding="utf-8",
++            bufsize=1,
++        )
++        _threading.Thread(target=self._reader, args=(self._proc.stdout,), daemon=True).start()
++
++    def _reader(self, stdout: object) -> None:
++        """读线程：响应行入队；EOF/断裂入哨兵。"""
++        eof_resp = object()
++        try:
++            for line in stdout:
++                self._responses.put(line)
++        except Exception:
++            pass
++        finally:
++            self._responses.put(eof_resp)
++
++    # -- 对外接口 -----------------------------------------------------------
++
++    @property
++    def available(self) -> bool:
++        """未进入崩溃退避期（True 时可继续 translate）。"""
++        return self.consecutive_crashes < self.MAX_CONSECUTIVE_CRASHES or (
++            time.monotonic() >= self.retry_at
++        )
++
++    def translate(self, texts: list[str]) -> list[str]:
++        """阻塞式翻译一批文本；失败抛 TranslateSubprocessError（fail-soft 由调用方降级）。
++
++        子进程自灭（闲置/寿命帽）后的首次请求做**单次透明重启重试**——对调用方
++        等价于"重启即恢复"；重试仍失败或已进崩溃退避则抛。
++        """
++        if not self.available:
++            raise TranslateSubprocessError(
++                f"translate subprocess in crash backoff until {self.retry_at:.0f}"
++            )
++        deadline = time.monotonic() + self.REQUEST_TIMEOUT_SEC
++        with self._lock:
++            attempts = 0
++            while True:
++                attempts += 1
++                try:
++                    self._ensure_started()
++                    self._next_id += 1
++                    rid = self._next_id
++                    req_line = json.dumps(
++                        {"id": rid, "op": "translate", "texts": texts}, ensure_ascii=False
++                    )
++                    self._proc.stdin.write(req_line + "\n")
++                    self._proc.stdin.flush()
++                    resp_line = self._responses.get(timeout=max(0.1, deadline - time.monotonic()))
++                    if not isinstance(resp_line, str):
++                        raise TranslateSubprocessError("translate worker exited")
++                    resp = json.loads(resp_line)
++                    if not isinstance(resp, dict) or resp.get("id") != rid:
++                        raise TranslateSubprocessError(f"protocol mismatch: {resp_line[:200]!r}")
++                    if not resp.get("ok"):
++                        raise TranslateSubprocessError(str(resp.get("error") or "translate failed"))
++                    self.consecutive_crashes = 0
++                    return resp["translations"]
++                except TranslateSubprocessError:
++                    self._on_crash()
++                    if attempts >= 2 or not self.available:
++                        raise
++                    continue  # 单次透明重启重试（覆盖闲置/寿命帽自灭场景）
++                except Exception as exc:  # 管道断裂/超时/JSON 损坏一律按崩溃处理
++                    self._on_crash()
++                    raise TranslateSubprocessError(f"{type(exc).__name__}: {exc}") from exc
++
++    def _on_crash(self) -> None:
++        self._stop()
++        self.consecutive_crashes += 1
++        if self.consecutive_crashes >= self.MAX_CONSECUTIVE_CRASHES:
++            self.retry_at = time.monotonic() + _ENGINE_CRASH_BACKOFF_SEC
++
++    def close(self) -> None:
++        with self._lock:
++            self._stop()
++
++
++def get_translator(model_spec: str) -> tuple[object | None, str | None]:
++    """返回 ``(translator | None, 不可用原因 | None)``——get_embedder 同款语义。
++
++    代理懒启动（构造不 spawn，首次 translate 才拉起）；构造失败缓存原因
++    （进程级一次，到换模型为止）；连续崩溃进入退避期的代理在 ``retry_at``
++    到点后 ``available`` 判定自然翻回 True——本入口复用同一代理实例（其
++    translate 内懒重启子进程），不重建新代理。
++    """
++    global _engine_instance, _engine_model, _engine_error
++    with _engine_lock:
++        if _engine_instance is not None and _engine_model == model_spec:
++            proxy = _engine_instance
++            assert isinstance(proxy, TranslateSubprocessProxy)
++            if proxy.available:
++                return proxy, None
++            return None, _engine_error or "translate subprocess unavailable (crash backoff)"
++        if _engine_error is not None and _engine_model == model_spec:
++            return None, _engine_error
++        try:
++            from app.core.config import get_settings
++
++            proxy = TranslateSubprocessProxy(
++                model_spec, idle_exit_sec=get_settings().translate_worker_idle_exit_sec
++            )
++            _engine_instance, _engine_model, _engine_error = proxy, model_spec, None
++            return proxy, None
++        except Exception as exc:  # 配置异常一律 fail-soft
++            _engine_instance, _engine_model = None, model_spec
++            _engine_error = f"{type(exc).__name__}: {exc}"
++            return None, _engine_error
++
++
++def reset_translator_for_tests() -> None:
++    """测试隔离：清空单例与错误缓存（生产勿调）。"""
++    global _engine_instance, _engine_model, _engine_error
++    with _engine_lock:
++        if isinstance(_engine_instance, TranslateSubprocessProxy):
++            _engine_instance.close()
++        _engine_instance = None
++        _engine_model = None
++        _engine_error = None
+diff --git a/backend/app/modules/translate/router.py b/backend/app/modules/translate/router.py
+new file mode 100644
+index 000000000..6fb2853f4
+--- /dev/null
++++ b/backend/app/modules/translate/router.py
+@@ -0,0 +1,39 @@
++"""POST /api/translate/thinking 端点（change 2026-10-19-thinking-zh-translate）。
++
++鉴权：``require_permission_any(Permission.TASK_RUN_AGENT)``——思考内容的可见
++面即该权限（daemon 会话 logs 读侧同款，daemon/router/__init__.py:119），
++无 workspace 维度。
++
++fail-soft 契约（对齐 vector-search 的 model_ready）：引擎缺席/总闸关闭 →
++200 + ``engine_ready=false`` + 原文透传，不抛 5xx。限额（items ≤16 /
++单条 ≤20000 / 总量 ≤80000）由 schema.py 的 pydantic 约束给 422。
++"""
++
++from __future__ import annotations
++
++from typing import Annotated
++
++from fastapi import APIRouter, Depends
++
++from app.core.auth_deps import require_permission_any
++from app.modules.auth.model import User
++from app.modules.auth.permissions import Permission
++from app.modules.translate.schema import TranslateRequest, TranslateResponse
++from app.modules.translate.service import translate_items
++
++router = APIRouter(tags=["translate"])
++
++
++@router.post("/translate/thinking", response_model=TranslateResponse)
++async def translate_thinking(
++    body: TranslateRequest,
++    user: Annotated[User, Depends(require_permission_any(Permission.TASK_RUN_AGENT))],
++) -> TranslateResponse:
++    """思考内容批量离线翻译（en→zh）；语义与降级见模块 docstring 与 service.py。"""
++    out = await translate_items(body.items, target=body.target)
++    return TranslateResponse(
++        ok=True,
++        engine_ready=out["engine_ready"],
++        reason=out["reason"],
++        items=out["items"],
++    )
+diff --git a/backend/app/modules/translate/schema.py b/backend/app/modules/translate/schema.py
+new file mode 100644
+index 000000000..4577bf6f5
+--- /dev/null
++++ b/backend/app/modules/translate/schema.py
+@@ -0,0 +1,57 @@
++"""POST /api/translate/thinking 请求/响应 DTO 与限额常量。
++
++限额口径（design 接口契约）：items ≤16 条/请求、单条 ≤20000 字符（与后端
++思考块封顶 20000 同源，sdk_pipeline.py:481）、总字符 ≤80000。超限 422 由
++pydantic Field 约束直接给出。
++"""
++
++from __future__ import annotations
++
++from typing import Literal
++
++from pydantic import BaseModel, Field, model_validator
++
++# 单条文本上限：对齐 sdk_pipeline 思考块封顶（20000 字符），再翻没有意义。
++ITEM_MAX_CHARS = 20_000
++# 单请求条数上限：前端合批粒度（16）即此值——防一次请求撑爆 worker 批推理。
++ITEMS_MAX_COUNT = 16
++# 单请求总字符上限：批推理时长帽（int8 CPU 上数秒级）。
++REQUEST_MAX_TOTAL_CHARS = 80_000
++
++
++class TranslateItemIn(BaseModel):
++    """单条待翻文本。id 由客户端生成（stable，响应原样带回配对）。"""
++
++    id: str = Field(min_length=1, max_length=128)
++    text: str = Field(min_length=1, max_length=ITEM_MAX_CHARS)
++
++
++class TranslateRequest(BaseModel):
++    """批量翻译请求。target 固定 zh（本变更唯一目标语言，扩语言时再放开）。"""
++
++    items: list[TranslateItemIn] = Field(min_length=1, max_length=ITEMS_MAX_COUNT)
++    target: Literal["zh"] = "zh"
++
++    @model_validator(mode="after")
++    def _check_total_chars(self) -> "TranslateRequest":
++        total = sum(len(item.text) for item in self.items)
++        if total > REQUEST_MAX_TOTAL_CHARS:
++            raise ValueError(f"请求总字符超限：{total} > {REQUEST_MAX_TOTAL_CHARS}，请分批请求")
++        return self
++
++
++class TranslateItemOut(BaseModel):
++    """单条翻译结果。translated=false 表示原文透传（不值得翻/引擎不可用）。"""
++
++    id: str
++    text: str
++    translated: bool
++
++
++class TranslateResponse(BaseModel):
++    """fail-soft 契约：engine_ready=false 时 items 原文透传，HTTP 仍 200。"""
++
++    ok: bool = True
++    engine_ready: bool
++    reason: str | None = None
++    items: list[TranslateItemOut]
+diff --git a/backend/app/modules/translate/service.py b/backend/app/modules/translate/service.py
+new file mode 100644
+index 000000000..f51d286f7
+--- /dev/null
++++ b/backend/app/modules/translate/service.py
+@@ -0,0 +1,245 @@
++"""翻译编排：值得翻判定 → 双层缓存 → 子进程推理 → 保真重组。
++
++缓存双层（design 边界四问之并发写：纯函数结果幂等）：
++
++- 进程内 LRU（``OrderedDict``，上限 ``settings.translate_cache_max_entries``）；
++- Redis best-effort 层（key ``translate:v1:zh:{sha1(text)}``，TTL 7 天）——
++  Redis 缺席/超时静默跳过并进入 60s 冷却（避免每请求重复付超时成本）。
++
++缓存粒度=送翻块（≤1000 字符），非整条 item——同前缀文本的摘要/全文两次
++请求间无共享是设计接受的代价（design 风险节）。
++"""
++
++from __future__ import annotations
++
++import hashlib
++import threading
++import time
++from collections import OrderedDict
++from typing import Any
++
++from app.modules.translate.chunking import (
++    SourceSegment,
++    collect_chunks,
++    is_translation_worthy,
++    split_protected,
++)
++from app.modules.translate.schema import TranslateItemIn, TranslateItemOut
++
++# ── 进程内 LRU ────────────────────────────────────────────────────────────────
++
++_lru_lock = threading.Lock()
++_lru: OrderedDict[str, str] = OrderedDict()
++
++
++def _lru_max() -> int:
++    from app.core.config import get_settings
++
++    return max(16, get_settings().translate_cache_max_entries)
++
++
++def _lru_get(key: str) -> str | None:
++    with _lru_lock:
++        val = _lru.get(key)
++        if val is not None:
++            _lru.move_to_end(key)
++        return val
++
++
++def _lru_put(key: str, value: str) -> None:
++    with _lru_lock:
++        _lru[key] = value
++        _lru.move_to_end(key)
++        while len(_lru) > _lru_max():
++            _lru.popitem(last=False)
++
++
++# ── Redis best-effort 层 ─────────────────────────────────────────────────────
++
++_REDIS_TTL_SEC = 7 * 24 * 3600
++_REDIS_COOLDOWN_SEC = 60.0
++_redis_skip_until = 0.0
++
++
++def _cache_key(text: str, target: str) -> str:
++    digest = hashlib.sha1(f"{target}\x00{text}".encode()).hexdigest()
++    return f"translate:v1:{target}:{digest}"
++
++
++def _redis_client() -> Any | None:
++    if time.monotonic() < _redis_skip_until:
++        return None
++    try:
++        from app.core.redis import get_redis
++
++        return get_redis()
++    except Exception:
++        return None
++
++
++async def _redis_get(key: str) -> str | None:
++    client = _redis_client()
++    if client is None:
++        return None
++    try:
++        return await client.get(key)
++    except Exception:
++        global _redis_skip_until
++        _redis_skip_until = time.monotonic() + _REDIS_COOLDOWN_SEC
++        return None
++
++
++async def _redis_put(key: str, value: str) -> None:
++    client = _redis_client()
++    if client is None:
++        return
++    try:
++        await client.set(key, value, ex=_REDIS_TTL_SEC)
++    except Exception:
++        global _redis_skip_until
++        _redis_skip_until = time.monotonic() + _REDIS_COOLDOWN_SEC
++
++
++def reset_cache_for_tests() -> None:
++    """测试隔离：清空 LRU 与 Redis 冷却标记（生产勿调）。"""
++    global _redis_skip_until
++    with _lru_lock:
++        _lru.clear()
++    _redis_skip_until = 0.0
++
++
++# ── 编排主体 ─────────────────────────────────────────────────────────────────
++
++
++async def translate_items(items: list[TranslateItemIn], target: str = "zh") -> dict:
++    """批量翻译编排。返回 ``{engine_ready, reason, items}``（router 直接组装响应）。
++
++    fail-soft 语义：总闸关闭/引擎不可用 → ``engine_ready=False`` 且全部原文
++    透传（``translated=False``）；单条不值得翻（中文为主/过短）→ 该条透传但
++    不影响 engine_ready。
++    """
++    from app.core.config import get_settings
++
++    settings = get_settings()
++    if not settings.translate_thinking_enabled:
++        return {
++            "engine_ready": False,
++            "reason": "translation disabled by settings",
++            "items": [TranslateItemOut(id=i.id, text=i.text, translated=False) for i in items],
++        }
++
++    results: dict[str, TranslateItemOut] = {}
++    # 待推理项：item id → 保护切分后的段列表（送翻段占位 None 待填）
++    pending: dict[str, list[SourceSegment]] = {}
++    # 全局送翻块队列（跨 item 合批送模型）
++    pending_chunks: list[str] = []
++    # chunk 在 pending_chunks 中的归属填充游标：按 (item_id, seg_idx) 顺序消费
++    chunk_owners: list[tuple[str, int]] = []
++
++    for item in items:
++        if not is_translation_worthy(item.text):
++            results[item.id] = TranslateItemOut(id=item.id, text=item.text, translated=False)
++            continue
++        segments = split_protected(item.text)
++        pending[item.id] = segments
++        for seg_idx, seg in enumerate(segments):
++            # 纯空白正文段（如两代码块间的空行）按原样保留，不进翻译管线
++            if not seg.translatable or not seg.text.strip():
++                continue
++            seg_chunks = collect_chunks([seg])
++            if not seg_chunks:
++                continue
++            # 送翻段清空为占位——译文按块顺序回填（重组=保护段原样+译文段拼接）
++            pending[item.id][seg_idx] = SourceSegment("", True)
++            for chunk in seg_chunks:
++                key = _cache_key(chunk, target)
++                cached = _lru_get(key)
++                if cached is None:
++                    cached = await _redis_get(key)
++                if cached is not None:
++                    _lru_put(key, cached)  # Redis 命中回填 LRU
++                    _fill_chunk(pending, item.id, seg_idx, cached)
++                else:
++                    chunk_owners.append((item.id, seg_idx))
++                    pending_chunks.append(chunk)
++
++    engine_ready = True
++    reason: str | None = None
++    if pending_chunks:
++        model_spec = settings.translate_model_dir or settings.translate_model_repo
++        from app.modules.translate.engine import get_translator
++
++        translator, engine_error = get_translator(model_spec)
++        if translator is None:
++            engine_ready = False
++            reason = engine_error or "translate engine unavailable"
++        else:
++            from fastapi.concurrency import run_in_threadpool
++
++            try:
++                translations = await run_in_threadpool(translator.translate, pending_chunks)
++            except Exception as exc:  # 引擎崩溃（退避/超时）→ fail-soft 全量透传
++                engine_ready = False
++                reason = f"{type(exc).__name__}: {exc}"
++                translations = None
++            if translations is not None:
++                if len(translations) != len(pending_chunks):  # 协议异常防御
++                    engine_ready = False
++                    reason = "translation count mismatch"
++                else:
++                    cache_writes: list[tuple[str, str]] = []
++                    for (item_id, seg_idx), chunk, translated in zip(
++                        chunk_owners, pending_chunks, translations, strict=True
++                    ):
++                        _fill_chunk(pending, item_id, seg_idx, translated)
++                        cache_writes.append((_cache_key(chunk, target), translated))
++                    for key, value in cache_writes:
++                        _lru_put(key, value)
++                        await _redis_put(key, value)
++
++    if not engine_ready:
++        # 引擎不可用：全部原文透传（含已缓存命中的项也回退——统一降级口径，
++        # 避免同屏半译半原文的混乱；缓存仍在，恢复后即命中）
++        return {
++            "engine_ready": False,
++            "reason": reason,
++            "items": [TranslateItemOut(id=i.id, text=i.text, translated=False) for i in items],
++        }
++
++    # 重组：送翻段的占位填充后逐段拼接（保护段原样）
++    for item in items:
++        if item.id in results:
++            continue
++        segments = pending[item.id]
++        rebuilt = "".join(seg.text for seg in segments)
++        results[item.id] = TranslateItemOut(
++            id=item.id,
++            text=rebuilt,
++            translated=_has_translation(segments),
++        )
++    return {
++        "engine_ready": True,
++        "reason": None,
++        "items": [results[i.id] for i in items],
++    }
++
++
++def _fill_chunk(
++    pending: dict[str, list[SourceSegment]],
++    item_id: str,
++    seg_idx: int,
++    translated: str,
++) -> None:
++    """把单块译文按序填回所属送翻段（段内块顺序拼接）。
++
++    送翻段在 pending 中临时以 ``SourceSegment(text=已译拼接, translatable=True)``
++    累积；块按产生顺序到达（缓存命中乱序于请求流内不会发生——同请求内先查
++    缓存后推理，两类写入按 chunk_owners 顺序执行）。
++    """
++    segs = pending[item_id]
++    segs[seg_idx] = SourceSegment(text=segs[seg_idx].text + translated, translatable=True)
++
++
++def _has_translation(segments: list[SourceSegment]) -> bool:
++    """该项是否真的发生了翻译（有送翻段且译文非空）。"""
++    return any(seg.translatable and seg.text.strip() for seg in segments)
+diff --git a/backend/app/modules/translate/tests/__init__.py b/backend/app/modules/translate/tests/__init__.py
+new file mode 100644
+index 000000000..3417c0aa0
+--- /dev/null
++++ b/backend/app/modules/translate/tests/__init__.py
+@@ -0,0 +1 @@
++"""translate 模块测试包（2026-10-19-thinking-zh-translate）。"""
+diff --git a/backend/app/modules/translate/tests/test_chunking.py b/backend/app/modules/translate/tests/test_chunking.py
+new file mode 100644
+index 000000000..28084f41c
+--- /dev/null
++++ b/backend/app/modules/translate/tests/test_chunking.py
+@@ -0,0 +1,149 @@
++"""chunking 纯函数测试：保护切分 / 值得翻判定 / 分块保真（零外部依赖）。"""
++
++from __future__ import annotations
++
++import pytest
++
++from app.modules.translate.chunking import (
++    SourceSegment,
++    collect_chunks,
++    is_translation_worthy,
++    split_protected,
++    split_translatable,
++)
++
++# -- split_protected ---------------------------------------------------------------
++
++
++def test_pure_code_block_is_single_protected_segment() -> None:
++    text = "```python\nprint('hi')\n```"
++    segs = split_protected(text)
++    assert segs == [SourceSegment(text=text, translatable=False)]
++
++
++def test_prose_and_inline_code_and_url_split() -> None:
++    text = "I will read `src/app.py` and docs at https://example.com/a?b=1 then continue."
++    segs = split_protected(text)
++    kinds = [s.translatable for s in segs]
++    # 交替：正文 / 行内代码 / 正文 / URL / 正文
++    assert kinds == [True, False, True, False, True]
++    assert segs[1].text == "`src/app.py`"
++    assert segs[3].text == "https://example.com/a?b=1"
++    assert "".join(s.text for s in segs) == text
++
++
++def test_fenced_block_protected_across_lines() -> None:
++    text = "First run this:\n```\nSELECT 1;\nSELECT 2;\n```\nthen check www.foo.bar/x for results."
++    segs = split_protected(text)
++    fenced = [s for s in segs if not s.translatable]
++    assert any("SELECT 1;" in s.text for s in fenced)
++    assert any(s.text == "www.foo.bar/x" for s in fenced)
++    assert "".join(s.text for s in segs) == text
++
++
++def test_unterminated_fence_fails_open_as_prose() -> None:
++    # 流式截断形态：未闭合围栏不匹配保护 → 全文按正文（fail-open 设计）
++    text = "```python\nprint('streaming...'"
++    segs = split_protected(text)
++    assert all(s.translatable for s in segs)
++
++
++def test_adjacent_same_kind_merged() -> None:
++    # URL 紧跟行内代码（中间无正文）→ 两个相邻保护段合并为一个
++    text = "see `a.py`https://x.io/y now"
++    segs = split_protected(text)
++    assert [s.translatable for s in segs] == [True, False, True]
++
++
++# -- is_translation_worthy ---------------------------------------------------------
++
++
++def test_short_text_not_worthy() -> None:
++    assert not is_translation_worthy("too short")
++
++
++def test_cjk_dominant_not_worthy() -> None:
++    assert not is_translation_worthy(
++        "这段思考内容大部分都是中文字符，只有少量 English words 夹杂其中。"
++    )
++
++
++def test_latin_dominant_worthy() -> None:
++    assert is_translation_worthy(
++        "The agent decided to read the config file first before running the migration."
++    )
++
++
++def test_no_letters_not_worthy() -> None:
++    assert not is_translation_worthy("12345 67890 !!! ??? ... /// $$$ %%% 12345678901234")
++
++
++def test_empty_not_worthy() -> None:
++    assert not is_translation_worthy("   \n\t  ")
++
++
++# -- split_translatable ------------------------------------------------------------
++
++
++def test_short_text_single_chunk() -> None:
++    assert split_translatable("hello world") == ["hello world"]
++
++
++def test_empty_text_no_chunks() -> None:
++    assert split_translatable("") == []
++
++
++def test_paragraph_boundaries_reassembly_fidelity() -> None:
++    text = "Para one here.\n\nPara two here.\n\n\nPara three after multi-newline."
++    chunks = split_translatable(text, max_chars=1000)
++    assert "".join(chunks) == text
++
++
++def test_long_text_chunk_caps_and_fidelity() -> None:
++    sentence = "This is a reasonably long sentence about agent reasoning steps. "
++    text = sentence * 200  # ~10800 字符
++    chunks = split_translatable(text, max_chars=1000)
++    assert all(len(c) <= 1000 for c in chunks)
++    assert "".join(chunks) == text
++    assert len(chunks) >= 10  # 确实切了
++
++
++def test_sentence_split_on_oversize_paragraph() -> None:
++    text = "First sentence ends here. " * 150  # 无换行单段 ~3300 字符
++    chunks = split_translatable(text, max_chars=1000)
++    assert all(len(c) <= 1000 for c in chunks)
++    assert "".join(chunks) == text
++    # 句界切分：块数应远少于硬切上限（3300/1000=4 块足矣）
++    assert len(chunks) <= 5
++
++
++def test_hard_split_unsplittable_run() -> None:
++    text = "x" * 2500  # 无句界无段界
++    chunks = split_translatable(text, max_chars=1000)
++    assert [len(c) for c in chunks] == [1000, 1000, 500]
++    assert "".join(chunks) == text
++
++
++def test_max_chars_zero_raises() -> None:
++    with pytest.raises(ValueError):
++        split_translatable("abc", max_chars=0)
++
++
++def test_greedy_packing_fills_budget() -> None:
++    # 两段各 400 字符 → 合并为一块 ≤1000
++    text = "a" * 400 + "\n\n" + "b" * 400
++    chunks = split_translatable(text, max_chars=1000)
++    assert len(chunks) == 1
++    assert "".join(chunks) == text
++
++
++# -- collect_chunks ----------------------------------------------------------------
++
++
++def test_collect_chunks_only_translatable() -> None:
++    segs = [
++        SourceSegment("hello ", True),
++        SourceSegment("`code`", False),
++        SourceSegment("world", True),
++    ]
++    assert collect_chunks(segs) == ["hello ", "world"]
+diff --git a/backend/app/modules/translate/tests/test_engine.py b/backend/app/modules/translate/tests/test_engine.py
+new file mode 100644
+index 000000000..8cf71cc65
+--- /dev/null
++++ b/backend/app/modules/translate/tests/test_engine.py
+@@ -0,0 +1,158 @@
++"""翻译子进程代理测试（fake worker 注入，不依赖 ctranslate2/模型下载）。
++
++对齐 knowledge/tests/test_embedding_subprocess.py 的假 worker 模式：
++- 行协议往返（假 worker 回显 "译:<len>" 形态）
++- 闲置自灭后单次透明重启
++- 连续崩溃 3 次进入退避与到点恢复
++- get_translator fail-soft（构造异常缓存原因）
++"""
++
++from __future__ import annotations
++
++import time
++from pathlib import Path
++
++import pytest
++
++from app.modules.translate import engine
++from app.modules.translate.engine import (
++    TranslateSubprocessError,
++    TranslateSubprocessProxy,
++    get_translator,
++    reset_translator_for_tests,
++)
++
++# -- 假 worker 脚本 ---------------------------------------------------------------
++
++# 正常 worker：每条文本回显 "T:" 前缀；argv[2] 位置参数控制闲置闸（对齐真
++# worker 的 <model_spec> [idle_exit_sec] 命令行形态）。
++_FAKE_WORKER = """
++import json, sys, time
++
++idle = float(sys.argv[2]) if len(sys.argv) > 2 else 900.0
++started = time.monotonic()
++last = started
++while True:
++    now = time.monotonic()
++    if now - last >= idle or now - started >= 3600.0:
++        break
++    line = sys.stdin.readline()
++    if not line:
++        break
++    last = time.monotonic()
++    try:
++        req = json.loads(line)
++        texts = req["texts"]
++        resp = {"id": req.get("id"), "ok": True,
++                "translations": ["T:" + t for t in texts]}
++    except Exception as exc:
++        resp = {"id": None, "ok": False, "error": str(exc)}
++    sys.stdout.write(json.dumps(resp, ensure_ascii=False) + "\\n")
++    sys.stdout.flush()
++"""
++
++# 模型加载失败 worker：打一行结构化错误后退出码 3（对齐真 worker 加载失败形态）。
++_CRASH_WORKER = """
++import json, sys
++sys.stdout.write(json.dumps({"id": None, "ok": False, "error": "model load failed"}) + "\\n")
++sys.stdout.flush()
++sys.exit(3)
++"""
++
++
++@pytest.fixture()
++def fake_worker_path(tmp_path: Path) -> Path:
++    p = tmp_path / "fake_worker.py"
++    p.write_text(_FAKE_WORKER, encoding="utf-8")
++    return p
++
++
++@pytest.fixture()
++def crash_worker_path(tmp_path: Path) -> Path:
++    p = tmp_path / "crash_worker.py"
++    p.write_text(_CRASH_WORKER, encoding="utf-8")
++    return p
++
++
++@pytest.fixture(autouse=True)
++def _reset_engine():
++    reset_translator_for_tests()
++    yield
++    reset_translator_for_tests()
++
++
++def _cmd(python_file: Path, idle: str = "900") -> list[str]:
++    import sys
++
++    return [sys.executable, str(python_file), "unused-model-spec", idle]
++
++
++def test_protocol_roundtrip(fake_worker_path: Path) -> None:
++    proxy = TranslateSubprocessProxy("unused", worker_cmd=_cmd(fake_worker_path))
++    try:
++        out = proxy.translate(["hello world", "second text"])
++        assert out == ["T:hello world", "T:second text"]
++        # 二次调用复用同一子进程（同实例连续往返）
++        assert proxy.translate(["again"]) == ["T:again"]
++    finally:
++        proxy.close()
++
++
++def test_idle_exit_then_transparent_restart(fake_worker_path: Path) -> None:
++    proxy = TranslateSubprocessProxy("unused", worker_cmd=_cmd(fake_worker_path, idle="1"))
++    try:
++        assert proxy.translate(["first"]) == ["T:first"]
++        time.sleep(1.5)  # 越过闲置闸 → 子进程自灭
++        # 自灭后首次请求：单次透明重启重试，调用方等价"重启即恢复"
++        assert proxy.translate(["second"]) == ["T:second"]
++    finally:
++        proxy.close()
++
++
++def test_crash_backoff_and_recovery(fake_worker_path: Path, crash_worker_path: Path) -> None:
++    proxy = TranslateSubprocessProxy("unused", worker_cmd=_cmd(crash_worker_path))
++    try:
++        # 连续崩溃：每次调用失败并累计 consecutive_crashes
++        for _ in range(TranslateSubprocessProxy.MAX_CONSECUTIVE_CRASHES):
++            with pytest.raises(TranslateSubprocessError):
++                proxy.translate(["x"])
++        assert not proxy.available
++        assert proxy.retry_at > time.monotonic()
++        # 退避期内：不拉子进程直接抛
++        with pytest.raises(TranslateSubprocessError, match="backoff"):
++            proxy.translate(["y"])
++    finally:
++        proxy.close()
++    # 退避到点恢复：手动回拨 retry_at → available → 换正常 worker 语义由
++    # get_translator 重建；此处直接验证 available 判定翻转
++    proxy2 = TranslateSubprocessProxy("unused", worker_cmd=_cmd(fake_worker_path))
++    proxy2.consecutive_crashes = TranslateSubprocessProxy.MAX_CONSECUTIVE_CRASHES
++    proxy2.retry_at = time.monotonic() - 1  # 已过退避点
++    assert proxy2.available
++    proxy2.close()
++
++
++def test_get_translator_fail_soft_on_construction_error(
++    monkeypatch: pytest.MonkeyPatch,
++) -> None:
++    def _boom(*args: object, **kwargs: object) -> None:
++        raise RuntimeError("no such setting")
++
++    monkeypatch.setattr(engine, "TranslateSubprocessProxy", _boom)
++    translator, reason = get_translator("spec-a")
++    assert translator is None
++    assert reason and "RuntimeError" in reason
++    # 原因按 model_spec 缓存（进程级一次）
++    translator2, reason2 = get_translator("spec-a")
++    assert translator2 is None and reason2 == reason
++
++
++def test_get_translator_returns_proxy_and_backoff_reason(fake_worker_path: Path) -> None:
++    translator, reason = get_translator("unused")
++    assert translator is not None and reason is None
++    assert isinstance(translator, TranslateSubprocessProxy)
++    # 拉入退避 → get_translator 报不可用
++    translator.consecutive_crashes = TranslateSubprocessProxy.MAX_CONSECUTIVE_CRASHES
++    translator.retry_at = time.monotonic() + 999
++    translator2, reason2 = get_translator("unused")
++    assert translator2 is None and reason2 and "unavailable" in reason2
+diff --git a/backend/app/modules/translate/tests/test_router.py b/backend/app/modules/translate/tests/test_router.py
+new file mode 100644
+index 000000000..cbc1fcf4f
+--- /dev/null
++++ b/backend/app/modules/translate/tests/test_router.py
+@@ -0,0 +1,92 @@
++"""POST /api/translate/thinking HTTP 端点测试：鉴权 / 限额 422 / fail-soft。"""
++
++from __future__ import annotations
++
++import pytest
++
++from app.modules.translate.schema import ITEM_MAX_CHARS, ITEMS_MAX_COUNT
++
++
++@pytest.fixture(autouse=True)
++def _reset_caches():
++    from app.modules.translate.service import reset_cache_for_tests
++
++    reset_cache_for_tests()
++    yield
++    reset_cache_for_tests()
++
++
++async def test_translate_endpoint_requires_auth(client) -> None:
++    resp = await client.post(
++        "/api/translate/thinking", json={"items": [{"id": "a", "text": "hello"}]}
++    )
++    assert resp.status_code in (401, 403)
++
++
++async def test_translate_endpoint_fail_soft_when_engine_missing(
++    client, auth_headers, monkeypatch: pytest.MonkeyPatch
++) -> None:
++    monkeypatch.setattr(
++        "app.modules.translate.engine.get_translator", lambda spec: (None, "no model")
++    )
++    resp = await client.post(
++        "/api/translate/thinking",
++        json={"items": [{"id": "a", "text": "The agent is thinking about the next step."}]},
++        headers=auth_headers,
++    )
++    assert resp.status_code == 200, resp.text
++    body = resp.json()
++    assert body["ok"] is True
++    assert body["engine_ready"] is False
++    assert body["items"][0]["translated"] is False
++    assert body["items"][0]["text"] == "The agent is thinking about the next step."
++
++
++async def test_translate_endpoint_translates_with_fake_engine(
++    client, auth_headers, monkeypatch: pytest.MonkeyPatch
++) -> None:
++    class _Fake:
++        def translate(self, texts: list[str]) -> list[str]:
++            return [f"[译]{t}" for t in texts]
++
++    monkeypatch.setattr("app.modules.translate.engine.get_translator", lambda spec: (_Fake(), None))
++    resp = await client.post(
++        "/api/translate/thinking",
++        json={
++            "items": [
++                {"id": "a", "text": "First english thinking segment worth translating."},
++                {"id": "b", "text": "这段中文为主的思考不需要翻译，直接透传。"},
++            ]
++        },
++        headers=auth_headers,
++    )
++    assert resp.status_code == 200, resp.text
++    body = resp.json()
++    assert body["engine_ready"] is True
++    assert body["items"][0]["translated"] is True
++    assert body["items"][0]["text"].startswith("[译]")
++    assert body["items"][1]["translated"] is False
++
++
++async def test_translate_endpoint_limit_rejections(client, auth_headers) -> None:
++    # 条数超限 → 422
++    too_many = {"items": [{"id": f"i{n}", "text": "x" * 40} for n in range(ITEMS_MAX_COUNT + 1)]}
++    resp = await client.post("/api/translate/thinking", json=too_many, headers=auth_headers)
++    assert resp.status_code == 422
++    # 单条超长 → 422
++    resp = await client.post(
++        "/api/translate/thinking",
++        json={"items": [{"id": "a", "text": "e" * (ITEM_MAX_CHARS + 1)}]},
++        headers=auth_headers,
++    )
++    assert resp.status_code == 422
++    # 总量超限（16 条 × 20000 字符中的子集触发总量帽）→ 422
++    resp = await client.post(
++        "/api/translate/thinking",
++        json={"items": [{"id": f"i{n}", "text": "e" * 19000} for n in range(5)]},
++        headers=auth_headers,
++    )
++    assert resp.status_code == 422
++    # 空请求 → 422
++    resp = await client.post("/api/translate/thinking", json={"items": []}, headers=auth_headers)
++    assert resp.status_code == 422
+diff --git a/backend/app/modules/translate/tests/test_service.py b/backend/app/modules/translate/tests/test_service.py
+new file mode 100644
+index 000000000..8a525befe
+--- /dev/null
++++ b/backend/app/modules/translate/tests/test_service.py
+@@ -0,0 +1,151 @@
++"""service 编排测试：总闸 / 值得翻跳过 / 引擎不可用 fail-soft / 缓存 / 重组。"""
++
++from __future__ import annotations
++
++import pytest
++
++from app.modules.translate.schema import TranslateItemIn
++from app.modules.translate.service import reset_cache_for_tests, translate_items
++
++
++class _FakeTranslator:
++    """同步假引擎：按块回显 "译[{n}]:{chunk}" 并计数（缓存命中断言用）。"""
++
++    def __init__(self) -> None:
++        self.calls = 0
++
++    def translate(self, texts: list[str]) -> list[str]:
++        self.calls += 1
++        return [f"译[{i}]:{t}" for i, t in enumerate(texts)]
++
++
++@pytest.fixture(autouse=True)
++def _reset_caches():
++    reset_cache_for_tests()
++    yield
++    reset_cache_for_tests()
++
++
++@pytest.fixture()
++def fake_translator(monkeypatch: pytest.MonkeyPatch) -> _FakeTranslator:
++    t = _FakeTranslator()
++    monkeypatch.setattr("app.modules.translate.engine.get_translator", lambda spec: (t, None))
++    return t
++
++
++async def test_master_switch_disabled_passthrough(monkeypatch: pytest.MonkeyPatch) -> None:
++    from app.core.config import get_settings
++
++    monkeypatch.setattr(get_settings(), "translate_thinking_enabled", False)
++    out = await translate_items([TranslateItemIn(id="a", text="hello world agent")])
++    assert out["engine_ready"] is False
++    assert out["items"][0].text == "hello world agent"
++    assert out["items"][0].translated is False
++
++
++async def test_unworthy_items_passthrough_without_engine(
++    fake_translator: _FakeTranslator,
++) -> None:
++    out = await translate_items(
++        [
++            TranslateItemIn(id="cjk", text="这段内容以中文为主，不需要翻译处理，直接透传即可。"),
++            TranslateItemIn(id="short", text="ok"),
++        ]
++    )
++    assert out["engine_ready"] is True
++    assert all(i.translated is False for i in out["items"])
++    assert fake_translator.calls == 0  # 全跳过 → 零推理
++
++
++async def test_engine_unavailable_fail_soft(monkeypatch: pytest.MonkeyPatch) -> None:
++    monkeypatch.setattr("app.modules.translate.engine.get_translator", lambda spec: (None, "boom"))
++    out = await translate_items(
++        [TranslateItemIn(id="a", text="The agent reads the file and continues the work.")]
++    )
++    assert out["engine_ready"] is False
++    assert out["reason"] == "boom"
++    assert out["items"][0].text == "The agent reads the file and continues the work."
++    assert out["items"][0].translated is False
++
++
++async def test_translation_reassembly_with_protected_segments(
++    fake_translator: _FakeTranslator,
++) -> None:
++    text = "Run this first:\n```\nls -la\n```\nthen read https://example.com/x for details."
++    out = await translate_items([TranslateItemIn(id="a", text=text)])
++    item = out["items"][0]
++    assert item.translated is True
++    # 精确全等：保护段原样 + 送翻段译文（fence 后换行属下段正文，随段送翻）
++    assert (
++        item.text
++        == "译[0]:Run this first:\n"
++        + "```\nls -la\n```"
++        + "译[1]:\nthen read "
++        + "https://example.com/x"
++        + "译[2]: for details."
++    )
++    assert fake_translator.calls == 1
++
++
++async def test_cache_hit_skips_engine(fake_translator: _FakeTranslator) -> None:
++    item = TranslateItemIn(id="a", text="One two three four five six seven eight nine ten.")
++    out1 = await translate_items([item])
++    assert fake_translator.calls == 1
++    out2 = await translate_items([item])
++    assert fake_translator.calls == 1  # 全命中缓存，零新增推理
++    assert out2["items"][0].text == out1["items"][0].text
++    assert out2["items"][0].translated is True
++
++
++async def test_engine_error_fail_soft(monkeypatch: pytest.MonkeyPatch) -> None:
++    class _Boom:
++        def translate(self, texts: list[str]) -> list[str]:
++            raise RuntimeError("worker died")
++
++    monkeypatch.setattr("app.modules.translate.engine.get_translator", lambda spec: (_Boom(), None))
++    out = await translate_items(
++        [TranslateItemIn(id="a", text="Some english text that is long enough to translate.")]
++    )
++    assert out["engine_ready"] is False
++    assert "RuntimeError" in (out["reason"] or "")
++    assert out["items"][0].translated is False
++
++
++async def test_lru_eviction_beyond_cap(
++    fake_translator: _FakeTranslator, monkeypatch: pytest.MonkeyPatch
++) -> None:
++    from app.core.config import get_settings
++
++    monkeypatch.setattr(get_settings(), "translate_cache_max_entries", 16)
++    # 8 条不同文本（每条至少一块）填满后逐条再翻——淘汰后重翻不报错
++    items = [
++        TranslateItemIn(id=f"i{n}", text=f"unique text number {n} with enough words to pass gate.")
++        for n in range(8)
++    ]
++    out = await translate_items(items)
++    assert all(i.translated for i in out["items"])
++    out2 = await translate_items(items)
++    assert all(i.translated for i in out2["items"])
++
++
++async def test_redis_absence_is_silent(
++    fake_translator: _FakeTranslator, monkeypatch: pytest.MonkeyPatch
++) -> None:
++    # get_redis 抛异常 → 冷却标记 + 静默跳过（不 crash、不阻断翻译）
++    def _raise() -> None:
++        raise RuntimeError("redis down")
++
++    monkeypatch.setattr("app.core.redis.get_redis", _raise)
++    out = await translate_items(
++        [TranslateItemIn(id="a", text="Redis is down but translation must still work fine.")]
++    )
++    assert out["engine_ready"] is True
++    assert out["items"][0].translated is True
++
++
++async def test_pure_code_content_translated_false(fake_translator: _FakeTranslator) -> None:
++    text = "```\ngit status\ngit diff\n```"
++    out = await translate_items([TranslateItemIn(id="a", text=text)])
++    assert out["items"][0].translated is False
++    assert out["items"][0].text == text
++    assert fake_translator.calls == 0
+diff --git a/backend/app/modules/translate/translate_worker.py b/backend/app/modules/translate/translate_worker.py
+new file mode 100644
+index 000000000..12d30c8b4
+--- /dev/null
++++ b/backend/app/modules/translate/translate_worker.py
+@@ -0,0 +1,199 @@
++"""翻译子进程 worker（change 2026-10-19-thinking-zh-translate）。
++
++CTranslate2 opus-mt-en-zh int8 模型加载与推理在独立子进程内完成（主进程零
++ctranslate2 常驻内存），主进程经 ``engine.TranslateSubprocessProxy`` 与本进程
++按行协议通信（embedding_worker 同款）：
++
++- 请求（单行 JSON）：``{"id": int, "op": "translate", "texts": [str, ...]}``
++- 响应（单行 JSON）：``{"id": int, "ok": true, "translations": [str, ...]}`
++  或失败 ``{"id": int, "ok": false, "error": str}``
++
++三闸自灭：闲置 ``idle_exit_sec`` / 父进程 stdin EOF / 硬寿命帽
++``WORKER_MAX_LIFETIME_SEC``。启动重置 oom_score_adj（Windows/macOS 跳过）。
++
++模型解析（``_resolve_model_dir``）：
++
++1. 入参是含 ``config.json`` 的本地目录（TRANSLATE_MODEL_DIR 离线预置形态）
++   → 直接使用零下载；
++2. 否则视为 HF repo id → ``huggingface_hub.snapshot_download``（尊重
++   HF_ENDPOINT 镜像与 HF_HOME 缓存变量）。
++
++tokenize 分层回退（``_load_tokenizers``）：transformers AutoTokenizer →
++sentencepiece（source.spm/target.spm）→ 都缺席时报错退出（主进程 fail-soft）。
++
++命令行：``python -m app.modules.translate.translate_worker <model_spec> [idle_exit_sec]``
++"""
++
++from __future__ import annotations
++
++import json
++import queue
++import sys
++import threading
++import time
++from pathlib import Path
++
++WORKER_MAX_LIFETIME_SEC = 3600.0
++
++_EOF = object()  # 读线程 stdin 结束哨兵
++
++
++def _reader_thread(stdin: object, out: queue.Queue) -> None:
++    """逐行读 stdin 入队；EOF/异常入哨兵（daemon 线程，进程退出不阻塞）。"""
++    try:
++        for line in stdin:
++            out.put(line)
++    except Exception:  # 管道断裂等一律按 EOF 处理
++        pass
++    finally:
++        out.put(_EOF)
++
++
++def _reset_oom_score() -> None:
++    """把自身 oom_score_adj 重置为 0（容器 OOM 时优先牺牲本子进程）。
++
++    Windows/macOS 无 /proc——写入失败仅跳过（fail-soft，三平台兼容）。
++    """
++    try:
++        with open("/proc/self/oom_score_adj", "w") as f:
++            f.write("0")
++    except OSError:
++        pass
++
++
++def _resolve_model_dir(model_spec: str) -> str:
++    """模型目录解析：本地目录直用 / repo id 自动下载。"""
++    spec_path = Path(model_spec)
++    if spec_path.is_dir() and (spec_path / "config.json").is_file():
++        return str(spec_path)
++    from huggingface_hub import snapshot_download  # lazy：缺席时 fail-soft 报错
++
++    return snapshot_download(repo_id=model_spec)
++
++
++class _Tokenizers:
++    """source tokenize / target detokenize 双侧封装（分层回退见模块 docstring）。"""
++
++    def __init__(self, model_dir: str) -> None:
++        self._hf_tok = None
++        self._src_sp = None
++        self._tgt_sp = None
++        try:
++            from transformers import AutoTokenizer
++
++            self._hf_tok = AutoTokenizer.from_pretrained(model_dir)
++            return
++        except Exception:
++            pass  # transformers 缺席/目录无其识别的 tokenizer 文件 → sentencepiece
++        import sentencepiece as spm
++
++        def _find(prefixes: tuple[str, ...]) -> Path:
++            for name in prefixes:
++                cand = Path(model_dir) / name
++                if cand.is_file():
++                    return cand
++            raise RuntimeError(
++                f"no tokenizer files found in {model_dir} (tried transformers + {prefixes})"
++            )
++
++        self._src_sp = spm.SentencePieceProcessor(model_file=str(_find(("source.spm",))))
++        self._tgt_sp = spm.SentencePieceProcessor(model_file=str(_find(("target.spm",))))
++
++    def encode(self, text: str) -> list[str]:
++        if self._hf_tok is not None:
++            ids = self._hf_tok(text, add_special_tokens=True)["input_ids"]
++            return self._hf_tok.convert_ids_to_tokens(ids)
++        return self._src_sp.encode(text, out_type=str)
++
++    def decode(self, pieces: list[str]) -> str:
++        if self._hf_tok is not None:
++            ids = self._hf_tok.convert_tokens_to_ids(pieces)
++            return self._hf_tok.decode(ids, skip_special_tokens=True)
++        return self._tgt_sp.decode(pieces)
++
++
++def _translate_once(translator: object, toks: _Tokenizers, texts: list[str]) -> list[str]:
++
++    batch = [toks.encode(t) for t in texts]
++    results = translator.translate_batch(
++        batch, beam_size=4, max_decoding_length=512, max_batch_size=32
++    )
++    return [toks.decode(r.hypotheses[0]) for r in results]
++
++
++def main(argv: list[str] | None = None) -> int:
++    args = list(sys.argv[1:] if argv is None else argv)
++    if not args:
++        print(json.dumps({"id": None, "ok": False, "error": "model_spec required"}))
++        return 2
++    model_spec = args[0]
++    try:
++        idle_exit_sec = float(args[1]) if len(args) > 1 else 600.0
++    except ValueError:
++        idle_exit_sec = 600.0
++
++    _reset_oom_score()
++
++    try:
++        model_dir = _resolve_model_dir(model_spec)
++        import ctranslate2
++
++        translator = ctranslate2.Translator(model_dir, device="cpu", compute_type="int8")
++        toks = _Tokenizers(model_dir)
++    except Exception as exc:  # 模型解析/加载失败：报错退出，主进程按不可用降级
++        print(
++            json.dumps(
++                {
++                    "id": None,
++                    "ok": False,
++                    "error": f"model load failed: {type(exc).__name__}: {exc}",
++                }
++            )
++        )
++        sys.stdout.flush()
++        return 3
++
++    lines: queue.Queue = queue.Queue()
++    threading.Thread(target=_reader_thread, args=(sys.stdin, lines), daemon=True).start()
++    started = time.monotonic()
++    last_active = started
++    while True:
++        now = time.monotonic()
++        if now - last_active >= idle_exit_sec:  # 闸 1：闲置
++            break
++        if now - started >= WORKER_MAX_LIFETIME_SEC:  # 闸 3：硬寿命帽
++            break
++        timeout = max(0.05, min(1.0, idle_exit_sec - (now - last_active)))
++        try:
++            item = lines.get(timeout=timeout)
++        except queue.Empty:
++            continue
++        if item is _EOF:  # 闸 2：父进程消失
++            break
++        last_active = time.monotonic()
++        req_id = None
++        try:
++            req = json.loads(item)
++            req_id = req.get("id") if isinstance(req, dict) else None
++            if not isinstance(req, dict) or req.get("op") != "translate":
++                raise ValueError(f"unknown op: {req.get('op') if isinstance(req, dict) else req!r}")
++            texts = req["texts"]
++            if not isinstance(texts, list) or not all(isinstance(t, str) for t in texts):
++                raise ValueError("texts must be list[str]")
++            if not texts:
++                resp: dict[str, object] = {"id": req_id, "ok": True, "translations": []}
++            else:
++                resp = {
++                    "id": req_id,
++                    "ok": True,
++                    "translations": _translate_once(translator, toks, texts),
++                }
++        except Exception as exc:  # 单请求失败不断进程（下一条照常）
++            resp = {"id": req_id, "ok": False, "error": f"{type(exc).__name__}: {exc}"}
++        sys.stdout.write(json.dumps(resp, ensure_ascii=False) + "\n")
++        sys.stdout.flush()
++    return 0
++
++
++if __name__ == "__main__":
++    raise SystemExit(main())
+diff --git a/backend/pyproject.toml b/backend/pyproject.toml
+index 88f78b1a9..670350331 100644
+--- a/backend/pyproject.toml
++++ b/backend/pyproject.toml
+@@ -46,6 +46,13 @@ dependencies = [
+   # 与 design D-007「FastMCP mount」+ task-05/06 写法冲突，故锁 <2 取最新 1.29.0。
+   # v1.x 仍持续收 critical bugfix/security patch（见 GitHub v1.x 分支）。
+   "mcp>=1.29,<2",
++  # 2026-10-19-thinking-zh-translate：思考内容离线翻译 en→zh 推理（子进程加载
++  # ct2 格式 opus-mt int8 模型；懒加载，缺席时端点 fail-soft 原文透传）。
++  "ctranslate2>=4.5,<5",
++  # ct2 模型 tokenizer 分层回退的 sentencepiece 线（transformers 缺席时）+
++  # HF repo 自动下载（尊重 HF_ENDPOINT；离线部署用 TRANSLATE_MODEL_DIR 免下载）。
++  "sentencepiece>=0.2",
++  "huggingface-hub>=0.23",
+ ]
+ 
+ [project.optional-dependencies]
+diff --git a/backend/uv.lock b/backend/uv.lock
+index d17efdf1d..8c3d5e8ef 100644
+--- a/backend/uv.lock
++++ b/backend/uv.lock
+@@ -744,6 +744,37 @@ wheels = [
+     { url = "https://files.pythonhosted.org/packages/9d/9a/0fea98a70cf1749d41d738836f6349d97945f7c89433a259a6c2642eefeb/cryptography-48.0.0-cp39-abi3-win_amd64.whl", hash = "sha256:16cd65b9330583e4619939b3a3843eec1e6e789744bb01e7c7e2e62e33c239c8", size = 3792100, upload-time = "2026-05-04T22:59:14.884Z" },
+ ]
+ 
++[[package]]
++name = "ctranslate2"
++version = "4.8.3"
++source = { registry = "https://pypi.org/simple" }
++dependencies = [
++    { name = "numpy" },
++    { name = "pyyaml" },
++]
++wheels = [
++    { url = "https://files.pythonhosted.org/packages/94/b2/a0908acaef272524e084b022775e0e5c5877e6216057246fb30b9957341f/ctranslate2-4.8.3-cp312-cp312-macosx_11_0_arm64.whl", hash = "sha256:116b7d90fbd704e990ba21f87b484dbdd3b1d9836fb7e642f4939237322bac83", size = 1285912, upload-time = "2026-10-13T05:57:13.373Z" },
++    { url = "https://files.pythonhosted.org/packages/4d/e0/f82cd7926e74f812b1cb88b3616baa8cbdca3a8231ece516f773b61a373b/ctranslate2-4.8.3-cp312-cp312-macosx_11_0_x86_64.whl", hash = "sha256:2bcbc6d49aca405dbb94f06437e8060107e52db9df0235c49a7aa9d99a3996e4", size = 11946098, upload-time = "2026-10-13T05:57:14.708Z" },
++    { url = "https://files.pythonhosted.org/packages/68/99/e08d28c28d45102c589fec3780a4410fe57d9e59a0839ad7f79dbc508cfb/ctranslate2-4.8.3-cp312-cp312-manylinux_2_27_aarch64.manylinux_2_28_aarch64.whl", hash = "sha256:1b9ff80ed67ce7974cb0eafdf7ad79407678b5bea70db934c0d20aaa9db57964", size = 17565485, upload-time = "2026-10-13T05:57:16.904Z" },
++    { url = "https://files.pythonhosted.org/packages/b4/39/438c9236c57443099763789ee009d6d43a65fb58283163fb0d6e6dadacd7/ctranslate2-4.8.3-cp312-cp312-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl", hash = "sha256:7e161eb031fcf2a5d81ce3a1cd8be4954c7df758d96cfaba57aeecc69a0c00ae", size = 40256883, upload-time = "2026-10-13T05:57:19.183Z" },
++    { url = "https://files.pythonhosted.org/packages/db/f8/1aec2aaf0e8a09987085dd2e4a876619fee6026f20ed28a2c2efc6235bec/ctranslate2-4.8.3-cp312-cp312-win_amd64.whl", hash = "sha256:b5daf0758d522a422c76e53eb02ce9f42465a9aba938a86b27249fb5db2571b9", size = 19230360, upload-time = "2026-10-13T05:57:21.518Z" },
++    { url = "https://files.pythonhosted.org/packages/d2/af/6a3e6bd4b82aced0d39aa09fecae0a140980dc503f441a3a5cfefb3dd4f9/ctranslate2-4.8.3-cp313-cp313-macosx_11_0_arm64.whl", hash = "sha256:a88f2782708edc20d03c3b811ecfec50ef12f9a92d7a6b5bd86edb1a4adb9cd7", size = 1286052, upload-time = "2026-10-13T05:57:23.485Z" },
++    { url = "https://files.pythonhosted.org/packages/d2/c4/f09a8ddcfa53f5572b0af79266a8cb8687d46d175ead4fa923e8054295ac/ctranslate2-4.8.3-cp313-cp313-macosx_11_0_x86_64.whl", hash = "sha256:86daaf7f6b8b5527d7ea21205c5ab998d660a9f370451fd2861a00252d5b8115", size = 11946148, upload-time = "2026-10-13T05:57:24.635Z" },
++    { url = "https://files.pythonhosted.org/packages/e0/e2/06129fd90ce89a6c33551cb33e5a8310e662a4d709ba3a5d76322de8051f/ctranslate2-4.8.3-cp313-cp313-manylinux_2_27_aarch64.manylinux_2_28_aarch64.whl", hash = "sha256:34f3ce8a4306a0d44d916fda7605fb71c6fa81411a147fb09ffe819ac4590f1b", size = 17570120, upload-time = "2026-10-13T05:57:26.357Z" },
++    { url = "https://files.pythonhosted.org/packages/16/f0/38111e687f35c4b85682738455989331ff9917c6e2818c2fa0c8cff8e293/ctranslate2-4.8.3-cp313-cp313-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl", hash = "sha256:19deb5b17497bf588bb200f4114b1339f884929b3cba6644dc62a833acb0e623", size = 40251927, upload-time = "2026-10-13T05:57:28.888Z" },
++    { url = "https://files.pythonhosted.org/packages/1d/d0/86d89881ffaa29ac54bb01a2da0b0680d39a9b737f5d0f799056ffc00bfe/ctranslate2-4.8.3-cp313-cp313-win_amd64.whl", hash = "sha256:c3c5d19b83df19f9f708ed16145fbc20b06827462f1a68c5286efc0ad41aa0c1", size = 19230496, upload-time = "2026-10-13T05:57:31.154Z" },
++    { url = "https://files.pythonhosted.org/packages/85/b1/1956d225ce13e27fed1bfa5d5f1637bbab3f7e954a0493c882bff3fa673e/ctranslate2-4.8.3-cp314-cp314-macosx_11_0_arm64.whl", hash = "sha256:851152c108e063db9c03620828f6ee0105f481f0360944207a12a3f361fc7e65", size = 1286563, upload-time = "2026-10-13T05:57:33.005Z" },
++    { url = "https://files.pythonhosted.org/packages/db/cc/080d5b3c68771b7bc068c63ce9343e34742470edaa507bce0274f1b4d768/ctranslate2-4.8.3-cp314-cp314-macosx_11_0_x86_64.whl", hash = "sha256:69e62610ef4e6874c00fc2addf2218dd491652bd94cae42d4e8b326a497a3cd1", size = 11946486, upload-time = "2026-10-13T05:57:34.232Z" },
++    { url = "https://files.pythonhosted.org/packages/eb/4a/735687d9bb5141e2a5ac6531482a4b1de2b06d7320c6f500590bb834b3bf/ctranslate2-4.8.3-cp314-cp314-manylinux_2_27_aarch64.manylinux_2_28_aarch64.whl", hash = "sha256:9f90e240ccb0b29d1296e435be2b73a915cf5770bf13b12d21d61470d9ce80c0", size = 17556520, upload-time = "2026-10-13T05:57:36.108Z" },
++    { url = "https://files.pythonhosted.org/packages/b2/97/db80101f993f6febd1fbf91249cd900fc38af927cd90e04952400296ab45/ctranslate2-4.8.3-cp314-cp314-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl", hash = "sha256:7039b9b9f0520a891108b795c7bd960413cd54df9db319f9afc4c164d28336dc", size = 40230282, upload-time = "2026-10-13T05:57:38.369Z" },
++    { url = "https://files.pythonhosted.org/packages/15/99/7c3e8d0b8527acc4ed18ddc97f96d70928a672faba37d60cea1fe7bc831e/ctranslate2-4.8.3-cp314-cp314-win_amd64.whl", hash = "sha256:03b0ad8c6325f142341a7a7431b5ab693b51f43918be1c116b80ebb6e3c1f85e", size = 19485275, upload-time = "2026-10-13T05:57:40.63Z" },
++    { url = "https://files.pythonhosted.org/packages/bb/88/f7e1728f4de81926854eadb5a1ea3fadd650dcc19cb49682ac7a47ac92b1/ctranslate2-4.8.3-cp314-cp314t-macosx_11_0_arm64.whl", hash = "sha256:d3eb9dad7a3781edd0ea921473288d085a21284f0c6d00a3b01c479b36e30ae7", size = 1311870, upload-time = "2026-10-13T05:57:42.526Z" },
++    { url = "https://files.pythonhosted.org/packages/77/e4/ff45605bf894250ec2e378fd5427a2ed5b5a702b4e41d63d92317f2e472f/ctranslate2-4.8.3-cp314-cp314t-macosx_11_0_x86_64.whl", hash = "sha256:30ec30fde852c236698890ff5c475ef32dcdaeed2f0cc92bbc23ef79199c274a", size = 11971188, upload-time = "2026-10-13T05:57:43.877Z" },
++    { url = "https://files.pythonhosted.org/packages/21/7b/e520909e654cf1785cea29cc9f732317e08a50bacc70713fc7ac0ddf7ec4/ctranslate2-4.8.3-cp314-cp314t-manylinux_2_27_aarch64.manylinux_2_28_aarch64.whl", hash = "sha256:387da8d4c281d4e4284e398a96b89afc7c555fca270b7814de41a15a95306bf0", size = 17801031, upload-time = "2026-10-13T05:57:45.717Z" },
++    { url = "https://files.pythonhosted.org/packages/2d/af/8edb114b4f8d9dcd64142f2c7e0f00e6224c942090cabc831c29d11ef077/ctranslate2-4.8.3-cp314-cp314t-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl", hash = "sha256:604a163b486c7dcd1d6684dcd91675376168b6cb58d03a083474b24d42a80196", size = 40441828, upload-time = "2026-10-13T05:57:47.986Z" },
++    { url = "https://files.pythonhosted.org/packages/3b/6c/2b4491e1b4578a1fb76f9c97054b3cb3471da9af5d40e7e301b4fb6dcf6b/ctranslate2-4.8.3-cp314-cp314t-win_amd64.whl", hash = "sha256:3e5f45b09cfd576d445de0f243e1f3419af96aaeda6b660074a884601cd8a66e", size = 19510760, upload-time = "2026-10-13T05:57:50.611Z" },
++]
++
+ [[package]]
+ name = "distlib"
+ version = "0.4.1"
+@@ -1496,9 +1527,11 @@ dependencies = [
+     { name = "aiobotocore" },
+     { name = "alembic" },
+     { name = "asyncpg" },
++    { name = "ctranslate2" },
+     { name = "fastapi" },
+     { name = "fastembed" },
+     { name = "httpx" },
++    { name = "huggingface-hub" },
+     { name = "mcp" },
+     { name = "openpyxl" },
+     { name = "passlib", extra = ["bcrypt"] },
+@@ -1513,6 +1546,7 @@ dependencies = [
+     { name = "python-multipart" },
+     { name = "pyyaml" },
+     { name = "redis" },
++    { name = "sentencepiece" },
+     { name = "sqlalchemy", extra = ["asyncio"] },
+     { name = "sqlmodel" },
+     { name = "structlog" },
+@@ -1549,9 +1583,11 @@ requires-dist = [
+     { name = "alembic", specifier = ">=1.13" },
+     { name = "anyio", marker = "extra == 'dev'", specifier = ">=4" },
+     { name = "asyncpg", specifier = ">=0.29" },
++    { name = "ctranslate2", specifier = ">=4.5,<5" },
+     { name = "fastapi", specifier = ">=0.115" },
+     { name = "fastembed", specifier = ">=0.4" },
+     { name = "httpx", specifier = ">=0.27" },
++    { name = "huggingface-hub", specifier = ">=0.23" },
+     { name = "mcp", specifier = ">=1.29,<2" },
+     { name = "mypy", marker = "extra == 'dev'", specifier = ">=1.11" },
+     { name = "openpyxl", specifier = ">=3.1" },
+@@ -1573,6 +1609,7 @@ requires-dist = [
+     { name = "pyyaml", specifier = ">=6" },
+     { name = "redis", specifier = ">=5.0" },
+     { name = "ruff", marker = "extra == 'dev'", specifier = ">=0.6" },
++    { name = "sentencepiece", specifier = ">=0.2" },
+     { name = "sqlalchemy", extras = ["asyncio"], specifier = ">=2.0" },
+     { name = "sqlmodel", specifier = ">=0.0.22" },
+     { name = "structlog", specifier = ">=24.4" },
+@@ -2757,6 +2794,49 @@ wheels = [
+     { url = "https://files.pythonhosted.org/packages/62/d5/bc97ff895ec35cf3925d4bd60f3b39d822f377a446906ec9bcc87405e59b/ruff-0.15.14-py3-none-win_arm64.whl", hash = "sha256:ff47b90a9ef6a40c9e2f3b479c1fb78531adf055b94c1eba0a7ba04b31951826", size = 11208607, upload-time = "2026-05-21T14:34:26.525Z" },
+ ]
+ 
++[[package]]
++name = "sentencepiece"
++version = "0.2.2"
++source = { registry = "https://pypi.org/simple" }
++sdist = { url = "https://files.pythonhosted.org/packages/cc/33/ea3cb3839607eb175da835244a798f797f478c5ddf0e8ecdf57ea85a4c70/sentencepiece-0.2.2.tar.gz", hash = "sha256:3d2b5e824b5622038dc7b490897efe05ebbbb9e7350fc142f3ecc8789ef9bdf6", size = 8218435, upload-time = "2026-07-12T08:39:34.701Z" }
++wheels = [
++    { url = "https://files.pythonhosted.org/packages/b8/13/7a562289c8d5b49ebdf3f9c1e8ab67cf14a8743b1d90c8f406bfdec36b72/sentencepiece-0.2.2-cp312-cp312-macosx_10_13_universal2.whl", hash = "sha256:1edb10e520e4bddf74d85b0f5ae74cc2d60c2b448885080bfb618bc2b3a49f6b", size = 2188384, upload-time = "2026-07-12T08:38:28.486Z" },
++    { url = "https://files.pythonhosted.org/packages/85/d1/912f14fd5eae168aba726ffb6a9a2dc1c71fe7676c53da6f5c442b886d4a/sentencepiece-0.2.2-cp312-cp312-macosx_10_13_x86_64.whl", hash = "sha256:f7c06c751c19d923435a54bff4f7e66e728fad160e8da28254f133abc9725820", size = 1441553, upload-time = "2026-07-12T08:38:30.552Z" },
++    { url = "https://files.pythonhosted.org/packages/bd/44/caa9cab5f261a019e2808bc5046152775dc57352ba9cbae7525e9e7a1ed4/sentencepiece-0.2.2-cp312-cp312-macosx_11_0_arm64.whl", hash = "sha256:38111ed1f79268f399c505028023d5eaaf0ab4e5eafceb709468b0d3323e7838", size = 1347176, upload-time = "2026-07-12T08:38:32.211Z" },
++    { url = "https://files.pythonhosted.org/packages/19/90/cd798935668cff71d309d8ff10385844ecf216b1fe454f1993ed8bf2cb91/sentencepiece-0.2.2-cp312-cp312-manylinux_2_27_aarch64.manylinux_2_28_aarch64.whl", hash = "sha256:cbce24284f51f71d10a42b7b9c964dcb9048b28f1c8e5db40bcbcb6f428cba6a", size = 1325200, upload-time = "2026-07-12T08:38:33.689Z" },
++    { url = "https://files.pythonhosted.org/packages/b6/2d/37e3da037318a70066ded0d51bc2a7f35491ae6338dd993d5eb1503fc3b5/sentencepiece-0.2.2-cp312-cp312-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl", hash = "sha256:c8a168b040bc61681293f79a949b5d911c8e25086f4260285b8d97ab5f1195da", size = 1397736, upload-time = "2026-07-12T08:38:35.771Z" },
++    { url = "https://files.pythonhosted.org/packages/8d/11/753fca2e6b109be3ab7867abf357dfe48677fe726ae5a5363d0b54ca9450/sentencepiece-0.2.2-cp312-cp312-win_amd64.whl", hash = "sha256:7c6e7bf684dc12145bfa685d3060beaea55139134ba848289bee514ed42e7383", size = 1248030, upload-time = "2026-07-12T08:38:37.604Z" },
++    { url = "https://files.pythonhosted.org/packages/e2/0a/70efbe861ca182d7d4b6e1a20f58e043400848fa9f2915229f082e221648/sentencepiece-0.2.2-cp312-cp312-win_arm64.whl", hash = "sha256:76ff5814db72e7462dece042d7593cdf102b8ec82c2b1cc201a2add34ee3050d", size = 1187325, upload-time = "2026-07-12T08:38:39.348Z" },
++    { url = "https://files.pythonhosted.org/packages/b9/a3/b3b05095c174d6e80d37d5ddc2f57c2c56237333e7bbd6079cf3243c2a8a/sentencepiece-0.2.2-cp313-cp313-macosx_10_13_universal2.whl", hash = "sha256:77c3ce990b23441e5ecfa5bce181fd6f408b564aeb6d7e1d1e7de9c5612501c8", size = 2188346, upload-time = "2026-07-12T08:38:41.089Z" },
++    { url = "https://files.pythonhosted.org/packages/ca/f3/72ebc4acb10a06bcf7503fbc6091c8f5db68300f6aac4356c09e6c76e0e1/sentencepiece-0.2.2-cp313-cp313-macosx_10_13_x86_64.whl", hash = "sha256:fd523c4992041faa5c2b3cde62253d11a96c30d73a34afe48a486e8e2254cd1c", size = 1441434, upload-time = "2026-07-12T08:38:42.56Z" },
++    { url = "https://files.pythonhosted.org/packages/34/db/f9ea1a6844b4fa5dfe2312095cd866a1f724cd0905054ab9d5991778ba50/sentencepiece-0.2.2-cp313-cp313-macosx_11_0_arm64.whl", hash = "sha256:201a8e0f55501a76e08dbf2c54bc45f4642b379271e89c667d517bfbc2191f2a", size = 1347267, upload-time = "2026-07-12T08:38:44.389Z" },
++    { url = "https://files.pythonhosted.org/packages/32/4f/31c1073314ad94466bca37d29581761d70110237ee3d46b0efece59a8c1e/sentencepiece-0.2.2-cp313-cp313-manylinux_2_27_aarch64.manylinux_2_28_aarch64.whl", hash = "sha256:8eed98514bffe5ecac37f493f91869c351fbb05629328bfdbc08502c6c094dc0", size = 1324980, upload-time = "2026-07-12T08:38:46.304Z" },
++    { url = "https://files.pythonhosted.org/packages/59/b4/a0356fa04d6a14337a6e0e443556785a0422c53ec58baae6b9568120eb0f/sentencepiece-0.2.2-cp313-cp313-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl", hash = "sha256:64b656f025355cf8c51abe9fbe3848540756c6d7ca5e6791b1afa664bc24c7cb", size = 1397593, upload-time = "2026-07-12T08:38:48.302Z" },
++    { url = "https://files.pythonhosted.org/packages/09/fa/d2d6369257fd2f0de616b1c7110b73fab409ef61b14f1b9e0010ed325914/sentencepiece-0.2.2-cp313-cp313-win_amd64.whl", hash = "sha256:74f0ee601047c0c12a783088b51be4e6214a62ecd9e02278c477433cd16e0ed9", size = 1247987, upload-time = "2026-07-12T08:38:50.15Z" },
++    { url = "https://files.pythonhosted.org/packages/17/ee/2bb594da6fd95e32f29057f1aa7fa996701b8980090923c2d8711fdc0a24/sentencepiece-0.2.2-cp313-cp313-win_arm64.whl", hash = "sha256:b23fe17779834d3c27aaf2edac9486d04cca1a7deb8f5facda35150ac6263a91", size = 1187250, upload-time = "2026-07-12T08:38:52.246Z" },
++    { url = "https://files.pythonhosted.org/packages/58/9c/dfc82846460e7a712310f5613f23d8b553cabb4e2e648663c11d8382af56/sentencepiece-0.2.2-cp313-cp313t-macosx_10_13_universal2.whl", hash = "sha256:72b7825b331b1b7e7c45be2e674b3e3c65af608fa376bad2d851b20aaf0cdc78", size = 2223080, upload-time = "2026-07-12T08:38:54.391Z" },
++    { url = "https://files.pythonhosted.org/packages/8d/4e/3ff12cebe6d31662d9ceeabfb282de20bd0d6098fa282b4a3b8305abc7e8/sentencepiece-0.2.2-cp313-cp313t-macosx_10_13_x86_64.whl", hash = "sha256:d795c4ac689a57f9d4ba2288126ec7901d389ad5827d2f8b8533c883974fe563", size = 1458511, upload-time = "2026-07-12T08:38:56.811Z" },
++    { url = "https://files.pythonhosted.org/packages/59/5a/16d51d05360be4cee3ebfe4837c184054c4eed16cabaeb3b039524e9a000/sentencepiece-0.2.2-cp313-cp313t-macosx_11_0_arm64.whl", hash = "sha256:3ab3f1ae98970b5590e2209341522718900ba19bcc2c207ffaa6bd417ad960c5", size = 1361138, upload-time = "2026-07-12T08:38:58.808Z" },
++    { url = "https://files.pythonhosted.org/packages/0f/af/c30ee2a9f99d51db9844acaa8fa0b611a97c2fa7116646fa43db3300b187/sentencepiece-0.2.2-cp313-cp313t-manylinux_2_27_aarch64.manylinux_2_28_aarch64.whl", hash = "sha256:3ec27c152a1f1b24bc9168b55a5880f3c16e2334e697da6f55a1046a22405a3d", size = 1328625, upload-time = "2026-07-12T08:39:00.849Z" },
++    { url = "https://files.pythonhosted.org/packages/3e/1a/4c6b39d03f5ba8439509adbd5a23c9538088a3cb679e7a47b911e8442bc6/sentencepiece-0.2.2-cp313-cp313t-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl", hash = "sha256:59d6588712101ccfcae9b03692be3aaae1514c2078666d7b05f15ba3a702e41b", size = 1398595, upload-time = "2026-07-12T08:39:02.86Z" },
++    { url = "https://files.pythonhosted.org/packages/0f/bc/9eedddcec1fd57bc70200fa3ebf792d18fa63527a5369581cd416c81f97f/sentencepiece-0.2.2-cp313-cp313t-win_amd64.whl", hash = "sha256:89625fb43765cccaa1443b9adb61f283e5fe4cb1536728205d06bada730caa53", size = 1259346, upload-time = "2026-07-12T08:39:04.559Z" },
++    { url = "https://files.pythonhosted.org/packages/41/15/7e74c8533848866ff560b29f7d8719921b76c4ec7149592d6d28e0deee75/sentencepiece-0.2.2-cp313-cp313t-win_arm64.whl", hash = "sha256:4f0603267cd15b92b68c2c0e852a441507614b70dc7773659baa6b8c214a91fd", size = 1196596, upload-time = "2026-07-12T08:39:06.454Z" },
++    { url = "https://files.pythonhosted.org/packages/0b/7e/f5df63edb6bcb46c1343cfa5d9192d73a4eb61af2e800d9402efff387523/sentencepiece-0.2.2-cp314-cp314-macosx_10_15_universal2.whl", hash = "sha256:c62bd361cec1f5b556eb8210264ecfff37486cd990c3386cc00310f26c54090a", size = 2190240, upload-time = "2026-07-12T08:39:08.178Z" },
++    { url = "https://files.pythonhosted.org/packages/52/0a/095d183b453b2a2e20b016829029c58eca90adc1c9911113e5d26fff45ed/sentencepiece-0.2.2-cp314-cp314-macosx_10_15_x86_64.whl", hash = "sha256:46ba07b543add034de0ff47ac5f907e9a06682f91d85121a972764628933be6b", size = 1442220, upload-time = "2026-07-12T08:39:09.91Z" },
++    { url = "https://files.pythonhosted.org/packages/d1/18/823954c9c90e74eba09fb96752dc37a5555df00d69866cb9406d1725dc7e/sentencepiece-0.2.2-cp314-cp314-macosx_11_0_arm64.whl", hash = "sha256:79bac5a251f23a7341e28fda9ce0d5319edf45328239ce037c0682936f137906", size = 1348056, upload-time = "2026-07-12T08:39:11.744Z" },
++    { url = "https://files.pythonhosted.org/packages/10/ca/1b6c251321901cbf8a2d2e48b8b70eb82a449011b766af52a228d0a90b6b/sentencepiece-0.2.2-cp314-cp314-manylinux_2_27_aarch64.manylinux_2_28_aarch64.whl", hash = "sha256:1402d8ee36f0d851cea8eee4dbb85fea14643b7503cf4d00d102eec0fe3ca719", size = 1325463, upload-time = "2026-07-12T08:39:13.413Z" },
++    { url = "https://files.pythonhosted.org/packages/24/b3/718847349da7b25c8220ed86d85b89080af94740b2d87a59198104ae5c51/sentencepiece-0.2.2-cp314-cp314-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl", hash = "sha256:8d44b20234905ff022b7d535f79d1f823ad7670c9851cc4f03cdc34787cdb3ab", size = 1398138, upload-time = "2026-07-12T08:39:15.564Z" },
++    { url = "https://files.pythonhosted.org/packages/33/fe/4906f12c458274edd96387e4baaad7c6f064a2b7c11a1cc2401c8a7bd483/sentencepiece-0.2.2-cp314-cp314-win_amd64.whl", hash = "sha256:63250cfab8b80a1ef82a614eb2b3cadfec2c405f870cedc139d08e2f063eb708", size = 1356144, upload-time = "2026-07-12T08:39:17.313Z" },
++    { url = "https://files.pythonhosted.org/packages/d3/eb/22f89b6542aba400b0007cf0b1697cc3f99be8fb682fdb4c05eec450e33f/sentencepiece-0.2.2-cp314-cp314-win_arm64.whl", hash = "sha256:65d84ec36888de4a848eee5f910e67fbc79b064685ef1e10a502e14520ead9c9", size = 1294351, upload-time = "2026-07-12T08:39:18.967Z" },
++    { url = "https://files.pythonhosted.org/packages/84/c4/7afe8c2315b76e46818851a057e50a378a0382aa00b970a1fa444181b6f6/sentencepiece-0.2.2-cp314-cp314t-macosx_10_15_universal2.whl", hash = "sha256:d254c98ca6387655400b3959c33c83efd807f5edeb608e3aca45800ceaa77151", size = 2223281, upload-time = "2026-07-12T08:39:20.978Z" },
++    { url = "https://files.pythonhosted.org/packages/98/42/fb678e472c554ef086be6375d20060ca610a2c4218854d4c091001fc6f91/sentencepiece-0.2.2-cp314-cp314t-macosx_10_15_x86_64.whl", hash = "sha256:3fd9ce2ab4460c713cfdeb4aca693ca6732a11538e05fb332d5af42e3d7fde25", size = 1458779, upload-time = "2026-07-12T08:39:22.812Z" },
++    { url = "https://files.pythonhosted.org/packages/78/52/ffe402b13bce1889228a98dc6cd86ae8afac1112362236be3468be784441/sentencepiece-0.2.2-cp314-cp314t-macosx_11_0_arm64.whl", hash = "sha256:7fc14c1585139fa6b68775e616a6b90cf622ebf219f9558c0aeaf5d253ee6c9b", size = 1361736, upload-time = "2026-07-12T08:39:24.602Z" },
++    { url = "https://files.pythonhosted.org/packages/78/4a/2288f60e7283583ec0a0f16e72f9c8e68557d7e7a4b585d2cda4f9f47e64/sentencepiece-0.2.2-cp314-cp314t-manylinux_2_27_aarch64.manylinux_2_28_aarch64.whl", hash = "sha256:df88b0c34f2fa909d322f7b06b1398e1e81af4b2f42a7b8e3556f928b25d1811", size = 1328155, upload-time = "2026-07-12T08:39:26.422Z" },
++    { url = "https://files.pythonhosted.org/packages/26/31/5dd6882ebe899f741a5cfe40ff56c6efc06bc26ee287abdb723b671f409c/sentencepiece-0.2.2-cp314-cp314t-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl", hash = "sha256:3f5851441ab1ef8634963a5100b733a8bbeefe623e0c5c005b1f1f3880e574cf", size = 1398307, upload-time = "2026-07-12T08:39:28.637Z" },
++    { url = "https://files.pythonhosted.org/packages/da/05/7d7780fa63f4b8c1821953b916e25f89ae8f14d4da6ba91e10f6d06dc2b4/sentencepiece-0.2.2-cp314-cp314t-win_amd64.whl", hash = "sha256:046b15ea22d8042e2e173561d464ec3b64a9c2081324df70ebce7bf7ebb3e497", size = 1367133, upload-time = "2026-07-12T08:39:30.546Z" },
++    { url = "https://files.pythonhosted.org/packages/49/a1/70007fef3f818c688de4a730f98024a671599ab67f20270f8efb03d69dcc/sentencepiece-0.2.2-cp314-cp314t-win_arm64.whl", hash = "sha256:fa9f5ef0e2a82233dd0b8b32ea3f5710e0c44afbc07ed3620219f32601e56090", size = 1302760, upload-time = "2026-07-12T08:39:32.457Z" },
++]
++
+ [[package]]
+ name = "six"
+ version = "1.17.0"
+diff --git a/frontend/src/components/__tests__/agent-log-viewer.test.tsx b/frontend/src/components/__tests__/agent-log-viewer.test.tsx
+index 5718258df..0eefd922b 100644
+--- a/frontend/src/components/__tests__/agent-log-viewer.test.tsx
++++ b/frontend/src/components/__tests__/agent-log-viewer.test.tsx
+@@ -201,8 +201,10 @@ describe("task-15: thinking 默认折叠为单行摘要", () => {
+     );
+     // 折叠标题"思考"可见
+     expect(screen.getByText("思考")).toBeInTheDocument();
+-    // 折叠态：摘要带 "..." 截断标记可见（证明 summary 生效）
+-    expect(screen.getByText(/\.\.\.$/)).toBeInTheDocument();
++    // 折叠态：摘要带 "…" 截断标记可见（证明 summary 生效）。2026-10-19-
++    // thinking-zh-translate 起三路径摘要统一走 useThinkingSummary（尾部 "…"
++    // 单字符省略号，对齐会话面板既有形态），非旧 "..." 三点。
++    expect(screen.getByText(/…$/)).toBeInTheDocument();
+     // 摘要前 30 字符可见
+     expect(screen.getByText(new RegExp(longThinking.slice(0, 20)))).toBeInTheDocument();
+     // 全文（完整长内容，含末尾"必须按顺序执行。"）在折叠态不应渲染
+diff --git a/frontend/src/components/agent-log-viewer.tsx b/frontend/src/components/agent-log-viewer.tsx
+index c7395f769..3cde69af8 100644
+--- a/frontend/src/components/agent-log-viewer.tsx
++++ b/frontend/src/components/agent-log-viewer.tsx
+@@ -56,6 +56,10 @@ import {
+ import { ToolCallPreview, CollapsibleSection, ToolResultCard } from "./agent-log/tool-renderers";
+ import { RunErrorItem } from "./agent-log/run-error-item";
+ import { toolKindMeta } from "./agent-log/tool-kind-meta";
++import {
++  TranslatedThinkingBody,
++  useThinkingSummary,
++} from "@/components/thinking-translate";
+ import type { AgentLogInputControls, ProcessedLog, ScanCheckResult, SemanticCategory } from "./agent-log/types";
+ 
+ /* ------------------------------------------------------------------ */
+@@ -226,10 +230,22 @@ export function groupIntoTurns(logs: ProcessedLog[]): ProcessedLog[][] {
+  *
+  * 边界（task-15 边界 2）：超长截断；短内容（< 60）原样返回不带 "..."。
+  */
+-function thinkingSummary(content: string): string {
+-  const flat = content.replace(/\s+/g, " ").trim();
+-  if (flat.length <= 60) return flat;
+-  return flat.slice(0, 60) + "...";
++/**
++ * 2026-10-19-thinking-zh-translate / FR-04：思考折叠块（接入离线翻译）。
++ * 抽出为组件以挂 useThinkingSummary hook——折叠摘要流结束/静态挂载后译中，
++ * 展开正文默认译文可一键切原文（plain 形态，保持原 whitespace-pre-wrap 样式）。
++ */
++function ThinkingCollapsibleSection({ content }: { content: string }) {
++  const summary = useThinkingSummary(content);
++  return (
++    <CollapsibleSection title="思考" defaultOpen={false} summary={summary}>
++      <TranslatedThinkingBody
++        text={content}
++        variant="plain"
++        className="text-zinc-600"
++      />
++    </CollapsibleSection>
++  );
+ }
+ 
+ function formatLogClock(iso: string): string {
+@@ -453,18 +469,12 @@ export function AgentLogRow({
+           /* ql-20260617-011 + task-15 / FR-10：纯 [THINKING] delta 合并后渲染为完整段落。
+              task-15：thinking 默认折叠成单行摘要（60 字符 + "..."），点击展开全文。
+              参照 prototype:62-69 `.thinking-toggle/.thinking-summary`。
+-             [SYSTEM] 折叠块保持原样（defaultOpen=true，非 thinking 内容）。 */
++             [SYSTEM] 折叠块保持原样（defaultOpen=true，非 thinking 内容）。
++             2026-10-19-thinking-zh-translate / FR-04：思考块接入离线翻译
++             （ThinkingCollapsibleSection——摘要译中 + 展开正文默认译文可切原文）。 */
+           <div className="font-mono [overflow-wrap:anywhere]">
+             {processedLog.mergedThinkingContent != null ? (
+-              <CollapsibleSection
+-                title="思考"
+-                defaultOpen={false}
+-                summary={thinkingSummary(processedLog.mergedThinkingContent)}
+-              >
+-                <div className="whitespace-pre-wrap break-words text-zinc-600">
+-                  {processedLog.mergedThinkingContent}
+-                </div>
+-              </CollapsibleSection>
++              <ThinkingCollapsibleSection content={processedLog.mergedThinkingContent} />
+             ) : (
+               <CollapsibleSection title="系统">
+                 {renderLogLines(contentSafe)}
+diff --git a/frontend/src/components/daemon/__tests__/turn-segment-views-thinking-translate.test.tsx b/frontend/src/components/daemon/__tests__/turn-segment-views-thinking-translate.test.tsx
+new file mode 100644
+index 000000000..0cd1a6d26
+--- /dev/null
++++ b/frontend/src/components/daemon/__tests__/turn-segment-views-thinking-translate.test.tsx
+@@ -0,0 +1,102 @@
++// 2026-10-19-thinking-zh-translate / FR-04：ThinkingRowView 接入离线翻译的组件测试。
++//
++// 覆盖维度（会话面板主路径的接入行为）：
++//   1. 流式中——折叠摘要显示原文（「思考中」脉冲旁）、零翻译请求；展开正文也显示原文；
++//   2. 流结束——折叠摘要自动换中文译文；
++//   3. 展开——正文默认译文 + 「显示原文」切换（本地视图切换，不写偏好）；
++//   4. 偏好关闭——摘要与正文均原文零请求。
++//
++// lib/thinking-translate 局部 mock（translateText/isTranslationUnavailable），组件
++// 本体零 mock（真实 ThinkingRowView + Collapsible 交互）；store 直用真实 zustand。
++
++import { describe, it, expect, vi, beforeEach } from "vitest";
++import { render, screen, fireEvent, act, waitFor } from "@testing-library/react";
++
++const translateTextMock = vi.fn();
++vi.mock("@/lib/thinking-translate", async (importOriginal) => {
++  const actual = await importOriginal<typeof import("@/lib/thinking-translate")>();
++  return {
++    ...actual,
++    translateText: (...args: unknown[]) => translateTextMock(...args),
++    isTranslationUnavailable: () => false,
++  };
++});
++
++// MarkdownText 用 next/dynamic + ssr:false——jsdom 同步渲染处于 loading(null)，
++// 批量并发下动态解析慢于断言窗口造成竞态假败（agent-log-viewer.test.tsx 同款
++// 先例注释）。本文件测翻译接入交互，不测 markdown 渲染本身（库保证）。
++vi.mock("@/components/ui/markdown-text", () => ({
++  MarkdownText: ({ content }: { content: string }) => (
++    <div data-testid="markdown-text">{content}</div>
++  ),
++}));
++
++import { ThinkingRowView } from "@/components/daemon/turn-segment-views";
++import type { ThinkingTurnSegment } from "@/components/daemon/turn-segment-views";
++import { useThinkingTranslateStore } from "@/stores/thinking-translate";
++
++const EN = "The agent examines the repository structure and plans the refactor carefully.";
++const ZH = "智能体检查了仓库结构并规划重构方案。";
++
++function makeSegment(overrides: Partial<ThinkingTurnSegment> = {}): ThinkingTurnSegment {
++  return {
++    kind: "thinking",
++    id: "seg-1",
++    text: EN,
++    streaming: false,
++    ts: 1700000000000,
++    ...overrides,
++  } as ThinkingTurnSegment;
++}
++
++beforeEach(() => {
++  translateTextMock.mockReset();
++  act(() => useThinkingTranslateStore.getState().setEnabled(true));
++});
++
++function expandRow() {
++  fireEvent.click(screen.getByRole("button", { name: /思考过程/ }));
++}
++
++describe("ThinkingRowView 离线翻译接入", () => {
++  it("流式中：摘要与展开正文均显示原文，零翻译请求", async () => {
++    translateTextMock.mockResolvedValue(ZH);
++    render(<ThinkingRowView segment={makeSegment({ streaming: true })} />);
++    expect(screen.getByText(/The agent examines/)).toBeInTheDocument(); // 折叠摘要=原文
++    expect(screen.getByText("思考中")).toBeInTheDocument();
++    expandRow();
++    expect(await screen.findByText(EN)).toBeInTheDocument(); // 正文=原文（展开渲染让一拍）
++    expect(translateTextMock).not.toHaveBeenCalled();
++  });
++
++  it("流结束：折叠摘要自动换中文译文", async () => {
++    translateTextMock.mockImplementation(
++      (input: string) => Promise.resolve(`${ZH}（前缀：${input.slice(0, 6)}…）`),
++    );
++    render(<ThinkingRowView segment={makeSegment()} />);
++    await waitFor(() => expect(screen.getByText(/^智能体检查了仓库结构/)).toBeInTheDocument());
++    expect(translateTextMock).toHaveBeenCalledTimes(1); // 摘要前缀单次请求
++  });
++
++  it("展开：正文默认译文，「显示原文」本地切换往返", async () => {
++    translateTextMock.mockResolvedValue(ZH);
++    render(<ThinkingRowView segment={makeSegment()} />);
++    await waitFor(() => expect(screen.getByText(/^智能体检查了仓库结构/)).toBeInTheDocument());
++    expandRow();
++    await screen.findByText(ZH);
++    fireEvent.click(screen.getByRole("button", { name: "显示原文" }));
++    expect(screen.getByText(EN)).toBeInTheDocument();
++    fireEvent.click(screen.getByRole("button", { name: "显示译文" }));
++    expect(screen.getByText(ZH)).toBeInTheDocument();
++  });
++
++  it("偏好关闭：摘要与正文均原文零请求", () => {
++    act(() => useThinkingTranslateStore.getState().setEnabled(false));
++    translateTextMock.mockResolvedValue(ZH);
++    render(<ThinkingRowView segment={makeSegment()} />);
++    expect(screen.getByText(/The agent examines/)).toBeInTheDocument();
++    expandRow();
++    expect(screen.getByText(EN)).toBeInTheDocument();
++    expect(translateTextMock).not.toHaveBeenCalled();
++  });
++});
+diff --git a/frontend/src/components/daemon/agent-log-card.tsx b/frontend/src/components/daemon/agent-log-card.tsx
+index b36888f9a..5ad68c951 100644
+--- a/frontend/src/components/daemon/agent-log-card.tsx
++++ b/frontend/src/components/daemon/agent-log-card.tsx
+@@ -59,6 +59,10 @@ import {
+ import { ApiError } from "@/lib/api";
+ import { queryKeys } from "@/lib/query-keys";
+ import { cn } from "@/lib/utils";
++import {
++  TranslatedThinkingBody,
++  useThinkingSummary,
++} from "@/components/thinking-translate";
+ import {
+   CollapsibleSection,
+   ToolCallPreview,
+@@ -146,12 +150,6 @@ function formatSegmentTime(ts: string | null): string | null {
+   });
+ }
+ 
+-/** thinking 折叠态单行摘要（agent-log-viewer thinkingSummary 同款：压平 + 截 60 字符）。 */
+-function thinkingSummary(content: string): string {
+-  const flat = content.replace(/\s+/g, " ").trim();
+-  return flat.length <= 60 ? flat : `${flat.slice(0, 60)}...`;
+-}
+-
+ /** 黄条回落文案尾巴（原文端点口径：尾部 256KB）。 */
+ const FALLBACK_TAIL = "已回落原文尾部查看（最多 256KB）";
+ 
+@@ -348,6 +346,22 @@ function RawLogContent({ data }: { data: AgentLogContentResponse }) {
+   );
+ }
+ 
++/**
++ * 思考段卡片（2026-10-19-thinking-zh-translate / FR-04 接入离线翻译）：
++ * 抽出为组件以挂 useThinkingSummary——折叠摘要译中、展开正文默认译文可切
++ * 原文（plain 形态保持原 whitespace-pre-wrap 样式）。
++ */
++function ThinkingSegment({ text }: { text: string }) {
++  const summary = useThinkingSummary(text);
++  return (
++    <CollapsibleSection title="思考过程" defaultOpen={false} summary={summary}>
++      <div className="text-[11.5px] leading-relaxed text-muted-foreground">
++        <TranslatedThinkingBody text={text} variant="plain" />
++      </div>
++    </CollapsibleSection>
++  );
++}
++
+ /** 单段渲染分支（design §7.3：reply→MarkdownText / thinking→折叠 / tool→卡片）。 */
+ function renderSegment(seg: ConversationSegment) {
+   switch (seg.kind) {
+@@ -361,18 +375,7 @@ function renderSegment(seg: ConversationSegment) {
+         </div>
+       );
+     case "thinking":
+-      return (
+-        <CollapsibleSection
+-          key={seg.seq}
+-          title="思考过程"
+-          defaultOpen={false}
+-          summary={thinkingSummary(seg.text)}
+-        >
+-          <div className="whitespace-pre-wrap break-words text-[11.5px] leading-relaxed text-muted-foreground">
+-            {seg.text}
+-          </div>
+-        </CollapsibleSection>
+-      );
++      return <ThinkingSegment key={seg.seq} text={seg.text} />;
+     case "tool_use":
+       // 配对成功：复用 ToolCallPreview（agent-log-viewer 同款导出）+ 结果并入
+       // 卡片结果区（mergedResult），is_error 经 entry.success 着失败红。
+diff --git a/frontend/src/components/daemon/turn-segment-views.tsx b/frontend/src/components/daemon/turn-segment-views.tsx
+index feee8081e..3e1eed986 100644
+--- a/frontend/src/components/daemon/turn-segment-views.tsx
++++ b/frontend/src/components/daemon/turn-segment-views.tsx
+@@ -70,6 +70,10 @@ import { CopyButton } from "@/components/daemon/copy-button";
+ import { FileMessageCard } from "@/components/daemon/file-message-card";
+ import { useSubagentPanel } from "@/components/daemon/subagent-panel-context";
+ import { ToolExpandBody } from "@/components/daemon/tool-args-detail";
++import {
++  TranslatedThinkingBody,
++  useThinkingSummary,
++} from "@/components/thinking-translate";
+ // ql-20260920-006：user_msg 段文本剥附件标记行（页内 import 惯例——turn-timeline
+ // 同源引用 runtime-session-helpers 的既有 util，此处沿用）。
+ import { parseAttachmentMarkers } from "@/components/daemon/runtime-session-helpers";
+@@ -656,10 +660,14 @@ export const TextSegmentView = memo(function TextSegmentView({ segment }: TextSe
+  * 箭头 + 💭 思考过程 + 摘要（空白折叠 60 字截断，流式自动跟随段文本更新）；
+  * streaming 时标题旁「思考中」脉冲标记；默认折叠（R-03 展开才挂载正文）；
+  * 展开正文 MarkdownText 限高 180px 滚动。
++ *
++ * 2026-10-19-thinking-zh-translate / FR-01·FR-04：摘要与展开正文接入离线翻译
++ * （useThinkingSummary / TranslatedThinkingBody）——流式中显示原文零请求，
++ * 流结束后摘要换中文；展开正文默认译文、可一键切原文。
+  */
+ export const ThinkingRowView = memo(function ThinkingRowView({ segment }: ThinkingRowViewProps) {
+   const [open, setOpen] = useState(false);
+-  const summary = summaryOf(segment.text);
++  const summary = useThinkingSummary(segment.text, segment.streaming);
+   return (
+     <div className="w-full">
+       <button
+@@ -696,7 +704,7 @@ export const ThinkingRowView = memo(function ThinkingRowView({ segment }: Thinki
+             不能塞进滚动容器内（overflow-y-auto 会裁掉浮出按钮）；折叠态不渲染（R-03）。 */
+         <div className="group relative mt-1">
+           <div className="max-h-[180px] overflow-y-auto rounded-lg bg-muted px-3 py-2 text-[11.5px] leading-relaxed text-muted-foreground">
+-            <MarkdownText content={segment.text} />
++            <TranslatedThinkingBody text={segment.text} streaming={segment.streaming} />
+           </div>
+           <CopyButton text={segment.text} />
+         </div>
+diff --git a/frontend/src/components/daemon/turn-timeline.tsx b/frontend/src/components/daemon/turn-timeline.tsx
+index e27917ea1..de562df62 100644
+--- a/frontend/src/components/daemon/turn-timeline.tsx
++++ b/frontend/src/components/daemon/turn-timeline.tsx
+@@ -168,6 +168,10 @@ function formatTurnDuration(ms: number): string {
+ }
+ import { ErrorBoundary } from "@/components/error-boundary";
+ import { MarkdownText } from "@/components/ui/markdown-text";
++import {
++  TranslatedThinkingBody,
++  useThinkingSummary,
++} from "@/components/thinking-translate";
+ // ql-20260825-006：会话页提问卡最小化——右下角浮动胶囊 + 标题推导（与 approvals
+ // 聚合页 SessionPermissionPanel 共用一套 UI）。
+ import {
+@@ -2017,6 +2021,22 @@ function SegmentedTurnBody({
+   );
+ }
+ 
++/**
++ * 「全部」视图的思考组卡片（2026-10-19-thinking-zh-translate / FR-04 抽出为
++ * 组件以挂翻译 hook）：折叠摘要离线译中、展开正文默认译文可切原文（无
++ * streaming 标记——静态回放直翻、实时增长文本走 1.2s 稳定窗防抖）。
++ */
++function ThinkingProcessCard({ text }: { text: string }) {
++  const summary = useThinkingSummary(text);
++  return (
++    <SessionCollapsible tone="thinking" title="思考过程" summary={summary}>
++      <div className="rounded-md bg-muted/50 px-2.5 py-1.5 text-[11px] leading-5 text-muted-foreground">
++        <TranslatedThinkingBody text={text} />
++      </div>
++    </SessionCollapsible>
++  );
++}
++
+ /**
+  * ql-20260729-005：「全部」视图的过程项列表，按真实到达顺序渲染。
+  * 缩进对齐答复气泡（ml-9 ≈ 助手图标宽度），左侧竖线表示"执行过程"语义。
+@@ -2084,19 +2104,7 @@ function TurnDetailsList({
+     <div className="ml-9 space-y-1 border-l-2 border-muted pl-3">
+       {grouped.map((item, idx) => {
+         if (item.kind === "thinking") {
+-          const summary = item.text.replace(/\s+/g, " ").trim();
+-          return (
+-            <SessionCollapsible
+-              key={idx}
+-              tone="thinking"
+-              title="思考过程"
+-              summary={summary.slice(0, 60) + (summary.length > 60 ? "…" : "")}
+-            >
+-              <div className="rounded-md bg-muted/50 px-2.5 py-1.5 text-[11px] leading-5 text-muted-foreground">
+-                <MarkdownText content={item.text} />
+-              </div>
+-            </SessionCollapsible>
+-          );
++          return <ThinkingProcessCard key={idx} text={item.text} />;
+         }
+         if (item.kind === "tool") {
+           return <ToolEventCard key={idx} event={item.event} />;
+diff --git a/frontend/src/components/thinking-translate/__tests__/translated-thinking.test.tsx b/frontend/src/components/thinking-translate/__tests__/translated-thinking.test.tsx
+new file mode 100644
+index 000000000..917ddd5ac
+--- /dev/null
++++ b/frontend/src/components/thinking-translate/__tests__/translated-thinking.test.tsx
+@@ -0,0 +1,182 @@
++// 2026-10-19-thinking-zh-translate / FR-01：翻译渲染层（hook + 组件）单测。
++//
++// 覆盖维度：
++//   1. hook 状态机——偏好关闭/流式中/中文内容 → off 零请求；译文到达换展示；
++//      译文未就绪先显示原文（无布局跳变）；「显示原文」本地切换；
++//   2. useThinkingSummary——前 500 字符送翻、译文截 60 字符；
++//   3. TranslatedThinkingBody——状态行（翻译中脉冲/未就绪提示/切换按钮）与
++//      markdown/plain 双形态渲染。
++//
++// lib/thinking-translate 全量 mock（网络与合批归 lib 自己的测试面）；偏好 store
++// 直用真实 zustand store（setEnabled 切换）。
++
++import { describe, it, expect, vi, beforeEach } from "vitest";
++import { render, screen, fireEvent, act, waitFor } from "@testing-library/react";
++import { renderHook } from "@testing-library/react";
++
++const translateTextMock = vi.fn();
++const isUnavailableMock = vi.fn();
++vi.mock("@/lib/thinking-translate", async (importOriginal) => {
++  const actual = await importOriginal<typeof import("@/lib/thinking-translate")>();
++  return {
++    ...actual,
++    translateText: (...args: unknown[]) => translateTextMock(...args),
++    isTranslationUnavailable: () => isUnavailableMock(),
++  };
++});
++
++// MarkdownText 用 next/dynamic + ssr:false——jsdom 同步渲染处于 loading(null)，
++// 批量并发下动态解析慢于断言窗口造成竞态假败（agent-log-viewer.test.tsx 同款
++// 先例注释）。本文件测翻译状态机与切换交互，不测 markdown 渲染本身（库保证），
++// mock 成纯文本渲染消除竞态。
++vi.mock("@/components/ui/markdown-text", () => ({
++  MarkdownText: ({ content }: { content: string }) => (
++    <div data-testid="markdown-text">{content}</div>
++  ),
++}));
++
++import {
++  TranslatedThinkingBody,
++  useThinkingSummary,
++  useThinkingTranslation,
++} from "@/components/thinking-translate";
++import { useThinkingTranslateStore } from "@/stores/thinking-translate";
++
++const EN = "The agent reads the file and decides what to do next in this long thinking.";
++const ZH = "这段思考内容大部分是中文，不需要翻译处理，直接展示原文即可。";
++
++beforeEach(() => {
++  translateTextMock.mockReset();
++  isUnavailableMock.mockReturnValue(false);
++  act(() => useThinkingTranslateStore.getState().setEnabled(true));
++});
++
++describe("useThinkingTranslation 状态机", () => {
++  it("流式中 → off：显示原文且零请求", () => {
++    const { result } = renderHook(() => useThinkingTranslation(EN, { streaming: true }));
++    expect(result.current.state).toBe("off");
++    expect(result.current.displayText).toBe(EN);
++    expect(translateTextMock).not.toHaveBeenCalled();
++  });
++
++  it("偏好关闭 → off 零请求（回退原文不发请求）", () => {
++    act(() => useThinkingTranslateStore.getState().setEnabled(false));
++    const { result } = renderHook(() => useThinkingTranslation(EN));
++    expect(result.current.state).toBe("off");
++    expect(translateTextMock).not.toHaveBeenCalled();
++  });
++
++  it("中文为主 → off 零请求", () => {
++    const { result } = renderHook(() => useThinkingTranslation(ZH));
++    expect(result.current.state).toBe("off");
++    expect(translateTextMock).not.toHaveBeenCalled();
++  });
++
++  it("翻译中先显示原文，译文到达后切换", async () => {
++    let resolveFn: (v: string | null) => void = () => {};
++    translateTextMock.mockReturnValue(
++      new Promise((resolve) => {
++        resolveFn = resolve;
++      }),
++    );
++    const { result } = renderHook(() => useThinkingTranslation(EN));
++    expect(result.current.state).toBe("translating");
++    expect(result.current.displayText).toBe(EN); // 未就绪显示原文（无跳变）
++    await act(async () => {
++      resolveFn("智能体读取文件后决定下一步操作。");
++      await Promise.resolve();
++    });
++    expect(result.current.state).toBe("translated");
++    expect(result.current.displayText).toBe("智能体读取文件后决定下一步操作。");
++  });
++
++  it("失败 → unavailable：显示原文（lib 层退避已生效）", async () => {
++    translateTextMock.mockResolvedValue(null);
++    isUnavailableMock.mockReturnValue(true);
++    const { result } = renderHook(() => useThinkingTranslation(EN));
++    await waitFor(() => expect(result.current.state).toBe("unavailable"));
++    expect(result.current.displayText).toBe(EN);
++  });
++
++  it("「显示原文」本地切换：译文⇄原文往返", async () => {
++    translateTextMock.mockResolvedValue("这是中文译文内容。");
++    const { result } = renderHook(() => useThinkingTranslation(EN));
++    await waitFor(() => expect(result.current.state).toBe("translated"));
++    act(() => result.current.toggleOriginal());
++    expect(result.current.displayText).toBe(EN);
++    expect(result.current.showOriginal).toBe(true);
++    act(() => result.current.toggleOriginal());
++    expect(result.current.displayText).toBe("这是中文译文内容。");
++  });
++});
++
++describe("useThinkingSummary 摘要", () => {
++  it("长英文 → 送翻前 500 字符，译文截 60 字符加省略号", async () => {
++    translateTextMock.mockImplementation(
++      (input: string) => Promise.resolve(`译${input.slice(0, 20)}`),
++    );
++    const longEn = `${EN} `.repeat(30); // ~2900 字符
++    const { result } = renderHook(() => useThinkingSummary(longEn));
++    await waitFor(() => expect(result.current.startsWith("译")).toBe(true));
++    expect(result.current.length).toBeLessThanOrEqual(61); // 60 + 省略号
++    expect((translateTextMock.mock.calls[0]![0] as string).length).toBeLessThanOrEqual(500);
++  });
++
++  it("评审 P2 回归：前缀截断吸附最近句界（不送翻半句）", async () => {
++    translateTextMock.mockResolvedValue("译");
++    const sentence = "A full sentence that ends with a period. ";
++    const longEn = sentence.repeat(30); // 尾部回看窗内必有句界
++    renderHook(() => useThinkingSummary(longEn));
++    await waitFor(() => expect(translateTextMock).toHaveBeenCalled());
++    const sent = translateTextMock.mock.calls[0]![0] as string;
++    expect(sent.length).toBeLessThanOrEqual(500);
++    // 末尾吸附在句号处（而非硬切半句；句号后空格不属吸附范围）
++    expect(sent.endsWith(".")).toBe(true);
++  });
++
++  it("流式中 → 原文摘要（压平截 60）", () => {
++    const { result } = renderHook(() => useThinkingSummary(`${EN} `.repeat(10), true));
++    expect(result.current.startsWith("The agent reads")).toBe(true);
++    expect(translateTextMock).not.toHaveBeenCalled();
++  });
++});
++
++describe("TranslatedThinkingBody 组件", () => {
++  it("translated：渲染译文 + 切换按钮；点击切回原文", async () => {
++    translateTextMock.mockResolvedValue("组件译文展示内容。");
++    render(<TranslatedThinkingBody text={EN} />);
++    expect(await screen.findByText("组件译文展示内容。")).toBeInTheDocument();
++    const toggle = screen.getByRole("button", { name: "显示原文" });
++    fireEvent.click(toggle);
++    expect(screen.getByText(EN)).toBeInTheDocument();
++    expect(screen.getByRole("button", { name: "显示译文" })).toBeInTheDocument();
++  });
++
++  it("translating：状态行显示「翻译中…」，正文显示原文", () => {
++    translateTextMock.mockReturnValue(new Promise(() => {})); // 永在途
++    render(<TranslatedThinkingBody text={EN} />);
++    expect(screen.getByText("翻译中…")).toBeInTheDocument();
++    expect(screen.getByText(EN)).toBeInTheDocument();
++  });
++
++  it("unavailable：显示「离线翻译未就绪」提示 + 原文", async () => {
++    translateTextMock.mockResolvedValue(null);
++    isUnavailableMock.mockReturnValue(true);
++    render(<TranslatedThinkingBody text={EN} />);
++    await screen.findByText("🌐 离线翻译未就绪");
++    expect(screen.getByText(EN)).toBeInTheDocument();
++  });
++
++  it("plain 形态：纯文本节点渲染（AgentLogViewer 路径）", async () => {
++    translateTextMock.mockResolvedValue("纯文本形态译文。");
++    render(<TranslatedThinkingBody text={EN} variant="plain" />);
++    await screen.findByText("纯文本形态译文。");
++  });
++
++  it("off（中文内容）：无状态行、无切换按钮", () => {
++    render(<TranslatedThinkingBody text={ZH} />);
++    expect(screen.getByText(ZH)).toBeInTheDocument();
++    expect(screen.queryByRole("button")).toBeNull();
++    expect(screen.queryByText("翻译中…")).toBeNull();
++  });
++});
+diff --git a/frontend/src/components/thinking-translate/index.tsx b/frontend/src/components/thinking-translate/index.tsx
+new file mode 100644
+index 000000000..b105667b8
+--- /dev/null
++++ b/frontend/src/components/thinking-translate/index.tsx
+@@ -0,0 +1,199 @@
++"use client";
++
++/**
++ * 思考内容离线翻译共享渲染层（2026-10-19-thinking-zh-translate / FR-01·FR-04）。
++ *
++ * 三条思考渲染路径（daemon 会话面板 ThinkingRowView / TurnDetailsList、
++ * AgentLogViewer、agent-logs 回放卡）统一接入本文件，禁止各自拷贝逻辑：
++ *
++ * - ``useThinkingTranslation``：译文状态机（off/original/translating/translated/
++ *   unavailable）。流式中（streaming=true）不请求显示原文；streaming 缺省（静态
++ *   回放/无标记路径）时文本稳定 1.2s 才送翻（防增长中正文重复请求）；译文
++ *   到达前先显示原文避免布局跳变；「显示原文」为组件本地切换不写全局偏好。
++ * - ``useThinkingSummary``：折叠摘要——压平取前 500 字符（头部早稳定，一次
++ *   请求终身缓存命中）送翻，译文压平截 60 字符展示；流式中显示原文摘要。
++ * - ``TranslatedThinkingBody``：正文渲染组件（markdown / plain 双形态）+
++ *   右上角状态行（翻译中脉冲 / 未就绪一次性提示 / 原文↔译文切换）。
++ */
++import { useEffect, useState } from "react";
++
++import { MarkdownText } from "@/components/ui/markdown-text";
++import { isTranslationUnavailable, needsTranslation, translateText } from "@/lib/thinking-translate";
++import { cn } from "@/lib/utils";
++import { useThinkingTranslateStore } from "@/stores/thinking-translate";
++
++/** 折叠摘要送翻的前缀长度（压平后）。 */
++const SUMMARY_PREFIX_CHARS = 500;
++/** 句界吸附回看窗口：前缀截断点向前找最近句界的范围。 */
++const SUMMARY_SENTENCE_LOOKBACK = 120;
++/** streaming 缺省路径的文本稳定窗口（ms）。 */
++const STABLE_WINDOW_MS = 1200;
++
++/**
++ * 摘要送翻前缀（design 承诺「截断到最近句界」——2026-10-19 评审 P2 修复）：
++ * 超 500 字符时在尾部回看窗内吸附最近句末标点（中英文句界），避免半句送翻
++ * 产出残缺译文；回看窗内无句界则保持硬截断（极罕见，预览语义可接受）。
++ */
++function summaryPrefix(flat: string): string {
++  if (flat.length <= SUMMARY_PREFIX_CHARS) return flat;
++  const lookback = flat.slice(
++    Math.max(0, SUMMARY_PREFIX_CHARS - SUMMARY_SENTENCE_LOOKBACK),
++    SUMMARY_PREFIX_CHARS,
++  );
++  const lastStop = Math.max(
++    lookback.lastIndexOf("."),
++    lookback.lastIndexOf("!"),
++    lookback.lastIndexOf("?"),
++    lookback.lastIndexOf("。"),
++    lookback.lastIndexOf("！"),
++    lookback.lastIndexOf("？"),
++  );
++  if (lastStop >= 0) {
++    return flat.slice(0, SUMMARY_PREFIX_CHARS - SUMMARY_SENTENCE_LOOKBACK + lastStop + 1);
++  }
++  return flat.slice(0, SUMMARY_PREFIX_CHARS);
++}
++
++export type ThinkingTranslationState =
++  | "off" // 偏好关闭/不值得翻/流式中——原样展示且零请求
++  | "translating"
++  | "translated"
++  | "unavailable"; // 引擎不可用/网络失败——原文 + 一次性轻提示
++
++export interface UseThinkingTranslationResult {
++  /** 该展示的文本（原文或译文——译文未就绪时恒为原文，无布局跳变）。 */
++  displayText: string;
++  state: ThinkingTranslationState;
++  /** 当前是否处于「用户切回原文」视图（仅 translated 态有意义）。 */
++  showOriginal: boolean;
++  toggleOriginal: () => void;
++}
++
++/**
++ * 单条思考文本的翻译状态机（摘要/正文共用；分块/合批/缓存归
++ * lib/thinking-translate，本 hook 只管订阅与展示态）。
++ */
++export function useThinkingTranslation(
++  text: string,
++  opts: { streaming?: boolean; enabled?: boolean } = {},
++): UseThinkingTranslationResult {
++  const prefEnabled = useThinkingTranslateStore((s) => s.enabled);
++  const [translated, setTranslated] = useState<string | null>(null);
++  const [failed, setFailed] = useState(false);
++  const [showOriginal, setShowOriginal] = useState(false);
++  // streaming 缺省路径：文本稳定窗口后的值才作为送翻输入（增长中正文防抖）；
++  // 展示源恒为最新 text——译文只在恰好对应当前文本时切入，避免显示陈旧内容
++  const [stableText, setStableText] = useState(text);
++
++  const streaming = opts.streaming ?? null;
++  useEffect(() => {
++    if (streaming !== null) return; // 显式 streaming 标记优先，跳过防抖
++    const timer = setTimeout(() => setStableText(text), STABLE_WINDOW_MS);
++    return () => clearTimeout(timer);
++  }, [text, streaming]);
++
++  const translationInput = streaming === null ? stableText : text;
++  const active =
++    prefEnabled && opts.enabled !== false && !streaming && needsTranslation(translationInput);
++
++  useEffect(() => {
++    if (!active) return;
++    let cancelled = false;
++    setFailed(false);
++    translateText(translationInput).then((result) => {
++      if (cancelled) return;
++      if (result === null) setFailed(true);
++      else setTranslated(result);
++    });
++    return () => {
++      cancelled = true;
++    };
++  }, [active, translationInput]);
++
++  const noOp = () => {};
++  if (!active) {
++    return { displayText: text, state: "off", showOriginal: false, toggleOriginal: noOp };
++  }
++  if (translated !== null && text === translationInput) {
++    return {
++      displayText: showOriginal ? text : translated,
++      state: "translated",
++      showOriginal,
++      toggleOriginal: () => setShowOriginal((v) => !v),
++    };
++  }
++  return {
++    displayText: text,
++    state: failed && isTranslationUnavailable() ? "unavailable" : "translating",
++    showOriginal: false,
++    toggleOriginal: noOp,
++  };
++}
++
++/** 折叠摘要：前 500 字符（句界吸附）送翻 → 译文压平截 60 字符（+“…”）。 */
++export function useThinkingSummary(text: string, streaming?: boolean): string {
++  const flat = text.replace(/\s+/g, " ").trim();
++  const prefix = summaryPrefix(flat);
++  const { displayText } = useThinkingTranslation(prefix, { streaming });
++  const displayFlat = displayText.replace(/\s+/g, " ").trim();
++  return displayFlat.length > 60 ? `${displayFlat.slice(0, 60)}…` : displayFlat;
++}
++
++/**
++ * 思考正文翻译渲染体：状态行（翻译中/未就绪/原文切换）+ markdown 或纯文本。
++ * 调用方保留自己的容器样式与折叠逻辑，把原先直接渲染 ``text`` 的位置换成
++ * 本组件即可。
++ */
++export function TranslatedThinkingBody({
++  text,
++  streaming,
++  variant = "markdown",
++  className,
++}: {
++  text: string;
++  streaming?: boolean;
++  /** markdown：MarkdownText 渲染（会话面板/时间线/回放卡）；plain：whitespace-pre-wrap（AgentLogViewer）。 */
++  variant?: "markdown" | "plain";
++  className?: string;
++}) {
++  const { displayText, state, showOriginal, toggleOriginal } = useThinkingTranslation(text, {
++    streaming,
++  });
++  const showMetaRow = state === "translating" || state === "unavailable" || state === "translated";
++  return (
++    <div className="relative w-full">
++      {showMetaRow && (
++        <div className="mb-1 flex items-center justify-end gap-2 text-[10px] text-muted-foreground/70">
++          {state === "translating" && (
++            <span className="inline-flex items-center gap-1">
++              <span
++                aria-hidden
++                className="h-[4px] w-[4px] animate-pulse rounded-full bg-brand-600"
++              />
++              翻译中…
++            </span>
++          )}
++          {state === "unavailable" && (
++            <span title="后端离线翻译模型未就绪（或网络失败），已回退显示原文">
++              🌐 离线翻译未就绪
++            </span>
++          )}
++          {state === "translated" && (
++            <button
++              type="button"
++              onClick={toggleOriginal}
++              className="cursor-pointer rounded px-1 py-[1px] hover:bg-muted"
++            >
++              {showOriginal ? "显示译文" : "显示原文"}
++            </button>
++          )}
++        </div>
++      )}
++      {variant === "markdown" ? (
++        <MarkdownText content={displayText} />
++      ) : (
++        <div className={cn("whitespace-pre-wrap break-words", className)}>{displayText}</div>
++      )}
++    </div>
++  );
++}
+diff --git a/frontend/src/lib/__tests__/thinking-translate.test.ts b/frontend/src/lib/__tests__/thinking-translate.test.ts
+new file mode 100644
+index 000000000..7a2b3cf0a
+--- /dev/null
++++ b/frontend/src/lib/__tests__/thinking-translate.test.ts
+@@ -0,0 +1,189 @@
++// 2026-10-19-thinking-zh-translate / FR-01·FR-03：离线翻译 client 单测。
++//
++// 覆盖维度：
++//   1. needsTranslation 启发式——中文为主/过短/无拉丁字母跳过，英文为主通过
++//      （与后端 chunking.py 同规则，前端跳过 = 零请求）；
++//   2. splitIntoChunks——拼接保真、上限合规、贪心合并；
++//   3. 合批与去重——250ms 窗口内多条文本合为单请求、同文本共享单次在途；
++//   4. 缓存——同文本第二次调用零请求；
++//   5. 降级——engine_ready=false / 网络失败 → null + 60s 退避（退避期内零请求）。
++//
++// apiFetch 全量 mock（不触网）；fake timers 推进 250ms 合批窗口。
++
++import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
++
++const apiFetchMock = vi.fn();
++vi.mock("@/lib/api", () => ({ apiFetch: (...args: unknown[]) => apiFetchMock(...args) }));
++
++import {
++  needsTranslation,
++  resetThinkingTranslateForTests,
++  splitIntoChunks,
++  translateText,
++} from "@/lib/thinking-translate";
++
++function okResponse(items: { id: string; text: string; translated: boolean }[]) {
++  return { ok: true, engine_ready: true, reason: null, items };
++}
++
++beforeEach(() => {
++  resetThinkingTranslateForTests();
++  apiFetchMock.mockReset();
++  vi.useFakeTimers();
++});
++
++afterEach(() => {
++  vi.useRealTimers();
++});
++
++describe("needsTranslation 启发式（与后端同规则）", () => {
++  it("英文为主且够长 → true", () => {
++    expect(needsTranslation("The agent decided to read the config file before migrating.")).toBe(
++      true,
++    );
++  });
++  it("中文为主 → false", () => {
++    expect(needsTranslation("这段思考内容大部分是中文，夹杂少量 English 单词而已。")).toBe(false);
++  });
++  it("过短 → false", () => {
++    expect(needsTranslation("too short")).toBe(false);
++  });
++  it("无字母 → false", () => {
++    expect(needsTranslation("1234 5678 9012 3456 !!! ???")).toBe(false);
++  });
++});
++
++describe("splitIntoChunks 分块", () => {
++  it("短文单块", () => {
++    expect(splitIntoChunks("hello world")).toEqual(["hello world"]);
++  });
++  it("拼接保真（段界归上一块尾）", () => {
++    const text = "Para one.\n\nPara two.\n\n\nPara three.";
++    expect(splitIntoChunks(text, 100).join("")).toBe(text);
++  });
++  it("超长文切块且每块 ≤ 上限", () => {
++    const text = "Sentence about agent reasoning. ".repeat(300); // ~9900 字符
++    const chunks = splitIntoChunks(text, 1800);
++    expect(chunks.length).toBeGreaterThan(1);
++    expect(chunks.every((c) => c.length <= 1800)).toBe(true);
++    expect(chunks.join("")).toBe(text);
++  });
++});
++
++describe("translateText 合批/缓存/降级", () => {
++  it("不值得翻 → 立即 null 零请求", async () => {
++    const out = await translateText("这段中文思考不需要翻译。");
++    expect(out).toBeNull();
++    expect(apiFetchMock).not.toHaveBeenCalled();
++  });
++
++  it("250ms 窗口内多条合为单请求，同文本去重共享单次在途", async () => {
++    apiFetchMock.mockResolvedValue(
++      okResponse([
++        { id: "0", text: "译甲", translated: true },
++        { id: "1", text: "译乙", translated: true },
++      ]),
++    );
++    const p1 = translateText("first english thinking text worth translating.");
++    const p1dup = translateText("first english thinking text worth translating.");
++    const p2 = translateText("second english thinking text also worth it.");
++    await vi.advanceTimersByTimeAsync(250);
++    const [out1, out2] = await Promise.all([p1, p2]);
++    await p1dup;
++    expect(out1).toBe("译甲");
++    expect(out2).toBe("译乙");
++    expect(apiFetchMock).toHaveBeenCalledTimes(1);
++    const body = (apiFetchMock.mock.calls[0]![1] as { json: { items: unknown[]; target: string } }).json;
++    expect(body.items).toHaveLength(2); // 去重后 2 条
++    expect(body.target).toBe("zh");
++  });
++
++  it("缓存命中——同文本第二次调用零请求", async () => {
++    const text = "cached english text for the second call check.";
++    apiFetchMock.mockResolvedValue(okResponse([{ id: "0", text: "译缓存", translated: true }]));
++    const first = translateText(text);
++    await vi.advanceTimersByTimeAsync(250);
++    await expect(first).resolves.toBe("译缓存");
++    await expect(translateText(text)).resolves.toBe("译缓存");
++    expect(apiFetchMock).toHaveBeenCalledTimes(1);
++  });
++
++  it("engine_ready=false → null 且 60s 退避期内后续调用零请求", async () => {
++    apiFetchMock.mockResolvedValue({
++      ok: true,
++      engine_ready: false,
++      reason: "no model",
++      items: [{ id: "0", text: "x", translated: false }],
++    });
++    const p1 = translateText("engine unavailable backoff english text.");
++    await vi.advanceTimersByTimeAsync(250);
++    await expect(p1).resolves.toBeNull();
++    // 退避期内：新文本直接 null，不再发请求
++    await expect(translateText("another english text during backoff window.")).resolves.toBeNull();
++    expect(apiFetchMock).toHaveBeenCalledTimes(1);
++    // 退避期满（advance 60s+）恢复请求
++    await vi.advanceTimersByTimeAsync(60_100);
++    apiFetchMock.mockResolvedValue(
++      okResponse([{ id: "0", text: "恢复了", translated: true }]),
++    );
++    const p2 = translateText("recovered english text after backoff expires.");
++    await vi.advanceTimersByTimeAsync(250);
++    await expect(p2).resolves.toBe("恢复了");
++  });
++
++  it("网络失败（apiFetch reject）→ null + 退避", async () => {
++    apiFetchMock.mockRejectedValue(new Error("network down"));
++    const p = translateText("network failure path english text check.");
++    await vi.advanceTimersByTimeAsync(250);
++    await expect(p).resolves.toBeNull();
++    await expect(translateText("second text after network failure.")).resolves.toBeNull();
++    expect(apiFetchMock).toHaveBeenCalledTimes(1);
++  });
++
++  it("超长文按块拆分为多个 item，译文按序拼回", async () => {
++    const part = "Long english paragraph for chunk splitting test. ".repeat(40); // ~2640
++    const text = `${part}\n\n${part}`;
++    apiFetchMock.mockImplementation(
++      async (_path: string, options: { json: { items: Array<{ id: string; text: string }> } }) => {
++        const items = options.json.items.map((it, idx) => ({
++          id: it.id,
++          text: `[${idx}]`,
++          translated: true,
++        }));
++        return okResponse(items);
++      },
++    );
++    const p = translateText(text);
++    await vi.advanceTimersByTimeAsync(250);
++    const out = await p;
++    const body = (apiFetchMock.mock.calls[0]![1] as { json: { items: Array<{ text: string }> } }).json;
++    expect(body.items.length).toBeGreaterThan(1);
++    expect(body.items.every((it) => it.text.length <= 1800)).toBe(true);
++    expect(out).toBe(body.items.map((_, i) => `[${i}]`).join(""));
++  });
++
++  it("评审 P2 回归：>16 块巨型文本跨多批续传不卡队（旧形态空批 return 后队列永久卡死）", async () => {
++    // ~45000 字符 → 25 块（1800/块），超单批 16 上限，需两批接力
++    const sentence = "Giant english thinking text spanning many chunk batches. ";
++    const text = sentence.repeat(800); // ~46400
++    apiFetchMock.mockImplementation(
++      async (_path: string, options: { json: { items: Array<{ id: string; text: string }> } }) => {
++        const items = options.json.items.map((it) => ({
++          id: it.id,
++          text: it.text.length === 0 ? "" : `${it.text.length}`,
++          translated: true,
++        }));
++        return okResponse(items);
++      },
++    );
++    const p = translateText(text);
++    // 第一批（16 块）后仍剩 9 块在队——批完成回调须已排程下一轮 flush
++    await vi.advanceTimersByTimeAsync(250);
++    expect(apiFetchMock).toHaveBeenCalledTimes(1);
++    await vi.advanceTimersByTimeAsync(250);
++    expect(apiFetchMock).toHaveBeenCalledTimes(2);
++    const out = await p;
++    // 每块译文=块字符数，拼接后总长=原文字符数（按序无损重组）
++    expect(out).toBe(splitIntoChunks(text).map((c) => `${c.length}`).join(""));
++  });
++});
+diff --git a/frontend/src/lib/thinking-translate.ts b/frontend/src/lib/thinking-translate.ts
+new file mode 100644
+index 000000000..d67aa190e
+--- /dev/null
++++ b/frontend/src/lib/thinking-translate.ts
+@@ -0,0 +1,247 @@
++/**
++ * 思考内容离线翻译 client（2026-10-19-thinking-zh-translate / FR-03 性能核心）。
++ *
++ * 职责（模块级单例，页面内共享）：
++ * - ``needsTranslation`` 启发式：与后端 chunking.py 同规则（中文为主/过短/
++ *   拉丁字母太少跳过）——不值得翻直接返回 null 零请求；
++ * - ``splitIntoChunks``：长文按段界切 ≤1800 字符/块（后端单条上限 20000、
++ *   每请求 16 条——块即请求 item，天然合规）；
++ * - 合批队列：250ms 窗口聚合同屏多条为单请求（≤16 item），同文本跨组件
++ *   共享单次在途 Promise（Map 去重）；
++ * - 内存缓存（full text → 译文，FIFO 上限 500 条）；
++ * - 引擎不可用退避：engine_ready=false 后 60s 内直接返回 null（防请求风暴，
++ *   FR-01 场景「不可用降级」）。
++ *
++ * 端点契约：POST /api/translate/thinking（鉴权走 apiFetch 全局 JWT）。
++ */
++import { apiFetch } from "@/lib/api";
++
++/** 后端限额同源常量（schema.py：ITEMS_MAX_COUNT=16）。 */
++const BATCH_MAX_ITEMS = 16;
++/** 合批窗口：同屏多条摘要聚成一个网络往返。 */
++const BATCH_WINDOW_MS = 250;
++/** 引擎不可用退避时长。 */
++const UNAVAILABLE_BACKOFF_MS = 60_000;
++/** 内存缓存条目上限（FIFO 淘汰——译文纯函数结果，先入者先淘汰足够）。 */
++const CACHE_MAX_ENTRIES = 500;
++
++// ── 启发式（与后端 chunking.py 常量同源，改动须双侧同步）────────────────────
++
++const WORTHY_MIN_FLAT_CHARS = 30;
++const WORTHY_MIN_LATIN_CHARS = 8;
++const WORTHY_CJK_RATIO_MAX = 0.6;
++const CJK_RE = /[\u3400-\u4dbf\u4e00-\u9fff]/g;
++const LATIN_RE = /[A-Za-z]/g;
++
++/** 是否值得送翻：英文为主且够长才翻（后端同规则兜底双判定）。 */
++export function needsTranslation(text: string): boolean {
++  const flat = text.replace(/\s+/g, " ").trim();
++  if (flat.length < WORTHY_MIN_FLAT_CHARS) return false;
++  const cjk = (flat.match(CJK_RE) || []).length;
++  const latin = (flat.match(LATIN_RE) || []).length;
++  const denom = cjk + latin;
++  if (denom === 0) return false;
++  if (cjk / denom >= WORTHY_CJK_RATIO_MAX) return false;
++  return latin >= WORTHY_MIN_LATIN_CHARS;
++}
++
++// ── 分块（段界优先保段落完整；拼接保真）──────────────────────────────────────
++
++/** 长文按 \n\n+ 段界切为 ≤maxChars 的块（分隔符归上一块尾），拼接恒等于原文。 */
++export function splitIntoChunks(text: string, maxChars = 1800): string[] {
++  if (!text) return [];
++  if (text.length <= maxChars) return [text];
++  const parts = text.split(/(\n\n+)/);
++  const paragraphs: string[] = [];
++  for (let i = 0; i < parts.length; i += 2) {
++    paragraphs.push(parts[i] + (parts[i + 1] ?? ""));
++  }
++  const chunks: string[] = [];
++  for (const para of paragraphs) {
++    if (para.length > maxChars) {
++      // 段内超限：按 maxChars 硬切（前端不做句界——后端送翻前还会二次细切）
++      for (let j = 0; j < para.length; j += maxChars) {
++        chunks.push(para.slice(j, j + maxChars));
++      }
++    } else {
++      const last = chunks[chunks.length - 1];
++      if (last !== undefined && last.length + para.length <= maxChars) {
++        chunks[chunks.length - 1] = last + para;
++      } else {
++        chunks.push(para);
++      }
++    }
++  }
++  return chunks;
++}
++
++// ── 端点类型（手写，不进 api-types 自动生成面——daemon/sessions.ts 先例）────
++
++interface TranslateApiItemOut {
++  id: string;
++  text: string;
++  translated: boolean;
++}
++interface TranslateApiResponse {
++  ok: boolean;
++  engine_ready: boolean;
++  reason: string | null;
++  items: TranslateApiItemOut[];
++}
++
++// ── 模块级缓存 / 退避 / 合批队列 ─────────────────────────────────────────────
++
++const translationCache = new Map<string, string>();
++let unavailableUntil = 0;
++
++/**
++ * 块级队列（2026-10-19 评审 P2 修复）：队列条目=单块（1 请求 item），跨请求
++ * 的多块文本经 Assembler 聚合——任一块所在批次完成即回填，收齐 resolve。
++ * 旧「job 整体入队」形态在 >16 块（>28800 字符）时队头永远装不进单批，
++ * flush 空批 return 后无人再排程 → 队列卡死（UI 恒「翻译中…」且阻塞后续）。
++ */
++interface Assembler {
++  source: string;
++  /** 块译文槽：undefined=未回填，null=该块失败，string=成功。 */
++  parts: (string | null | undefined)[];
++  received: number;
++  resolve: (translated: string | null) => void;
++}
++interface QueueEntry {
++  assembler: Assembler;
++  chunkIndex: number;
++  chunk: string;
++}
++let queue: QueueEntry[] = [];
++let flushTimer: ReturnType<typeof setTimeout> | null = null;
++/** 同文本在途去重：text → 共享 Promise。 */
++const inflight = new Map<string, Promise<string | null>>();
++
++function cacheGet(text: string): string | null {
++  return translationCache.get(text) ?? null;
++}
++
++function cachePut(text: string, translated: string): void {
++  if (translationCache.size >= CACHE_MAX_ENTRIES) {
++    const oldest = translationCache.keys().next().value;
++    if (oldest !== undefined) translationCache.delete(oldest);
++  }
++  translationCache.set(text, translated);
++}
++
++/** 块译文回填：收齐全部块后拼装 resolve + 写缓存（部分失败整条回退 null）。 */
++function fillEntry(entry: QueueEntry, translated: string | null): void {
++  const asm = entry.assembler;
++  if (asm.parts[entry.chunkIndex] !== undefined) return; // 防御：重复回填
++  asm.parts[entry.chunkIndex] = translated;
++  asm.received += 1;
++  if (asm.received < asm.parts.length) return;
++  if (asm.parts.every((p) => p !== null)) {
++    const joined = asm.parts.join("");
++    cachePut(asm.source, joined);
++    asm.resolve(joined);
++  } else {
++    asm.resolve(null);
++  }
++}
++
++function failEntries(entries: QueueEntry[]): void {
++  for (const entry of entries) fillEntry(entry, null);
++}
++
++async function requestBatch(entries: QueueEntry[]): Promise<void> {
++  const items = entries.map((entry, idx) => ({ id: `${idx}`, text: entry.chunk }));
++  let resp: TranslateApiResponse;
++  try {
++    resp = await apiFetch<TranslateApiResponse>("/api/translate/thinking", {
++      method: "POST",
++      json: { items, target: "zh" },
++    });
++  } catch {
++    // 网络失败与引擎不可用同语义：本批回退原文 + 退避（防风暴）
++    unavailableUntil = Date.now() + UNAVAILABLE_BACKOFF_MS;
++    failEntries(entries);
++    return;
++  }
++  if (!resp.engine_ready) {
++    unavailableUntil = Date.now() + UNAVAILABLE_BACKOFF_MS;
++    failEntries(entries);
++    return;
++  }
++  const byId = new Map(resp.items.map((it) => [it.id, it]));
++  entries.forEach((entry, idx) => {
++    const it = byId.get(`${idx}`);
++    fillEntry(entry, it && it.translated ? it.text : null);
++  });
++}
++
++function flush(): void {
++  flushTimer = null;
++  if (Date.now() < unavailableUntil) {
++    // 退避期：队列整体回退原文（清空防积压）
++    const pending = queue;
++    queue = [];
++    failEntries(pending);
++    return;
++  }
++  // 块级条目恒可装满（1 item/条）——不存在装不进单批的队头（P2 卡死根因已消除）
++  const batch = queue.splice(0, BATCH_MAX_ITEMS);
++  if (!batch.length) return;
++  void requestBatch(batch).finally(() => {
++    if (queue.length) scheduleFlush();
++  });
++}
++
++function scheduleFlush(): void {
++  if (flushTimer == null) {
++    flushTimer = setTimeout(() => flush(), BATCH_WINDOW_MS);
++  }
++}
++
++/**
++ * 翻译一段思考文本；返回译文或 null（不值得翻/不可用/失败——null 即展示原文）。
++ * 结果进内存缓存，同文本重复调用零请求。
++ */
++export function translateText(text: string): Promise<string | null> {
++  if (!needsTranslation(text)) return Promise.resolve(null);
++  const cached = cacheGet(text);
++  if (cached !== null) return Promise.resolve(cached);
++  // 引擎不可用退避期：入口快失败（不等合批窗口——该请求必然回退原文）
++  if (Date.now() < unavailableUntil) return Promise.resolve(null);
++  const existing = inflight.get(text);
++  if (existing) return existing;
++  const promise = new Promise<string | null>((resolve) => {
++    const chunks = splitIntoChunks(text);
++    const assembler: Assembler = {
++      source: chunks.join(""),
++      parts: new Array<string | null | undefined>(chunks.length),
++      received: 0,
++      resolve,
++    };
++    chunks.forEach((chunk, chunkIndex) => queue.push({ assembler, chunkIndex, chunk }));
++    scheduleFlush();
++  }).finally(() => {
++    inflight.delete(text);
++  });
++  inflight.set(text, promise);
++  return promise;
++}
++
++/** 引擎是否处于不可用退避期（组件据此展示一次性「未就绪」提示）。 */
++export function isTranslationUnavailable(): boolean {
++  return Date.now() < unavailableUntil;
++}
++
++/** 测试隔离：清空缓存/队列/退避/在途去重（生产勿用）。 */
++export function resetThinkingTranslateForTests(): void {
++  translationCache.clear();
++  unavailableUntil = 0;
++  if (flushTimer != null) {
++    clearTimeout(flushTimer);
++    flushTimer = null;
++  }
++  const pending = queue;
++  queue = [];
++  failEntries(pending);
++  inflight.clear();
++}
+diff --git a/frontend/src/stores/thinking-translate.ts b/frontend/src/stores/thinking-translate.ts
+new file mode 100644
+index 000000000..297093559
+--- /dev/null
++++ b/frontend/src/stores/thinking-translate.ts
+@@ -0,0 +1,39 @@
++/**
++ * 思考内容离线翻译偏好 store（2026-10-19-thinking-zh-translate / FR-01）。
++ *
++ * localStorage 即真相源：persist 写 localStorage["sillyhub-thinking-translate"]
++ * （partialize 仅 enabled 字段）。默认开启（用户诉求「默认翻译成中文展示」）；
++ * 关闭后所有思考渲染路径回退原文展示且不发请求（lib/thinking-translate 出口
++ * 统一判定，组件不各自读 localStorage）。
++ *
++ * 结构对照 stores/theme.ts 先例（create + persist + partialize）。
++ */
++import { create } from "zustand";
++import { persist } from "zustand/middleware";
++
++/** 翻译偏好 store 的状态与动作签名。 */
++export interface ThinkingTranslateState {
++  /** 思考内容是否默认翻译为中文展示；初始与兜底均为 true。 */
++  enabled: boolean;
++  setEnabled: (_enabled: boolean) => void;
++}
++
++export const useThinkingTranslateStore = create<ThinkingTranslateState>()(
++  persist(
++    (set) => ({
++      enabled: true,
++      setEnabled: (enabled) => set({ enabled }),
++    }),
++    {
++      name: "sillyhub-thinking-translate",
++      partialize: (state) => ({ enabled: state.enabled }),
++      // 非法持久化值（非 boolean）回退默认开启
++      merge: (persistedState, currentState) => {
++        const persisted = (persistedState ?? {}) as Partial<ThinkingTranslateState>;
++        const enabled =
++          typeof persisted.enabled === "boolean" ? persisted.enabled : true;
++        return { ...currentState, enabled };
++      },
++    },
++  ),
++);

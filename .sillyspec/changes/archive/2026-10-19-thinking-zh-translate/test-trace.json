@@ -1,0 +1,171 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-19-thinking-zh-translate",
+  "rows": [
+    {
+      "anchor": "FR-01",
+      "row_id": "2026-10-19-thinking-zh-translate:flow:测试绑定FR-01",
+      "tests": [
+        "backend/app/modules/translate/tests/test_router.py「test_translate_endpoint_requires_auth」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-19-thinking-zh-translate"
+    },
+    {
+      "anchor": "FR-01",
+      "row_id": "2026-10-19-thinking-zh-translate:flow:测试绑定FR-01",
+      "tests": [
+        "frontend/src/lib/__tests__/thinking-translate.test.ts「needsTranslation 启发式（中文为主/过短零请求）」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-19-thinking-zh-translate"
+    },
+    {
+      "anchor": "FR-01",
+      "row_id": "2026-10-19-thinking-zh-translate:flow:测试绑定FR-01",
+      "tests": [
+        "frontend/src/components/thinking-translate/__tests__/translated-thinking.test.tsx「偏好关闭 → off 零请求（回退原文不发请求）」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-19-thinking-zh-translate"
+    },
+    {
+      "anchor": "FR-01",
+      "row_id": "2026-10-19-thinking-zh-translate:flow:测试绑定FR-01",
+      "tests": [
+        "frontend/src/components/thinking-translate/__tests__/translated-thinking.test.tsx「展开默认译文 + 一键切原文」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-19-thinking-zh-translate"
+    },
+    {
+      "anchor": "FR-02",
+      "row_id": "2026-10-19-thinking-zh-translate:flow:测试绑定FR-02",
+      "tests": [
+        "backend/app/modules/translate/tests/test_engine.py「fake worker 子进程协议/崩溃退避/透明重启」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-19-thinking-zh-translate"
+    },
+    {
+      "anchor": "FR-02",
+      "row_id": "2026-10-19-thinking-zh-translate:flow:测试绑定FR-02",
+      "tests": [
+        "backend/app/modules/translate/tests/test_router.py「engine 不可用 fail-soft 返回 engine_ready=false」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-19-thinking-zh-translate"
+    },
+    {
+      "anchor": "FR-02",
+      "row_id": "2026-10-19-thinking-zh-translate:flow:测试绑定FR-02",
+      "tests": [
+        "backend/app/modules/translate/tests/test_chunking.py「代码块/行内代码/URL 保护不送翻」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-19-thinking-zh-translate"
+    },
+    {
+      "anchor": "FR-03",
+      "row_id": "2026-10-19-thinking-zh-translate:flow:测试绑定FR-03",
+      "tests": [
+        "backend/app/modules/translate/tests/test_service.py「LRU 缓存命中与淘汰」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-19-thinking-zh-translate"
+    },
+    {
+      "anchor": "FR-03",
+      "row_id": "2026-10-19-thinking-zh-translate:flow:测试绑定FR-03",
+      "tests": [
+        "frontend/src/lib/__tests__/thinking-translate.test.ts「合批队列与同文本去重」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-19-thinking-zh-translate"
+    },
+    {
+      "anchor": "FR-03",
+      "row_id": "2026-10-19-thinking-zh-translate:flow:测试绑定FR-03",
+      "tests": [
+        "backend/app/modules/translate/tests/test_chunking.py「长文按段分块边界」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-19-thinking-zh-translate"
+    },
+    {
+      "anchor": "FR-04",
+      "row_id": "2026-10-19-thinking-zh-translate:flow:测试绑定FR-04",
+      "tests": [
+        "frontend/src/components/daemon/__tests__/turn-segment-views-thinking-translate.test.tsx「ThinkingRowView 接入翻译」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-19-thinking-zh-translate"
+    }
+  ]
+}

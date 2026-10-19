@@ -4924,7 +4924,7 @@
 测试绑定：
 <!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
 - row: 2026-10-15-zcode-engine-appserver:task-05:acc-0-35889f68
-  tests: - sillyhub-daemon/tests/interactive/provider-registry.test.ts | backend/app/modules/agent/tests/test_provider_caps_alignment.py | frontend/src/components/sessions/__tests__/pre-session-picker.test.tsx | sillyhub-daemon/tests/zcode-settings.test.ts
+  tests: backend/app/modules/agent/tests/test_provider_caps_alignment.py | frontend/src/components/sessions/__tests__/pre-session-picker.test.tsx | sillyhub-daemon/tests/interactive/provider-registry.test.ts | sillyhub-daemon/tests/zcode-settings.test.ts
   reason: spec
   state: active
   discovery: machine
@@ -4933,7 +4933,7 @@
   source_change: 2026-10-15-zcode-engine-appserver
   status: active
 - row: 2026-10-15-zcode-engine-appserver:task-05:acc-1-769899ea
-  tests: - sillyhub-daemon/tests/interactive/provider-registry.test.ts | backend/app/modules/agent/tests/test_provider_caps_alignment.py | frontend/src/components/sessions/__tests__/pre-session-picker.test.tsx | sillyhub-daemon/tests/zcode-settings.test.ts
+  tests: backend/app/modules/agent/tests/test_provider_caps_alignment.py | frontend/src/components/sessions/__tests__/pre-session-picker.test.tsx | sillyhub-daemon/tests/interactive/provider-registry.test.ts | sillyhub-daemon/tests/zcode-settings.test.ts
   reason: spec
   state: active
   discovery: machine

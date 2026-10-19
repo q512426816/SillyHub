@@ -634,7 +634,7 @@ created_at: 2026-10-15T18:08:11.679Z
 测试绑定：
 <!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
 - row: 2026-10-16-change-center-delete-back-keeps-state:flow:测试绑定FR-02
-  tests: changes/__tests__/page.test.tsx「页码超界钳回最后一页并重新请求」
+  tests: frontend/src/app/page.test.tsx「页码超界钳回最后一页并重新请求」
   reason: spec
   state: candidate
   discovery: machine

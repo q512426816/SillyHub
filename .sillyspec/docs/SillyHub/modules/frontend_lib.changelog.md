@@ -13,3 +13,4 @@ created_at: 2026-10-16 16:40:00
 - 2026-10-16-change-title-condense-backfill | 变更中心标题提炼与存量回填
 - 2026-10-17-audit-risk-followup | 24h 审计六连修收口：dsh/zcode 会话恢复白名单漏登记（daemon 重启静默丢记录）、r…
 - 2026-10-18-change-list-type-filter | 变更列表加类型标签与类型筛选
+- 2026-10-19-thinking-zh-translate | 思考内容离线翻译为中文展示

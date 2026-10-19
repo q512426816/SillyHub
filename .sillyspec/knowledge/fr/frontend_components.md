@@ -1137,7 +1137,7 @@ created_at: 2026-10-15T08:08:24.452Z
 测试绑定：
 <!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
 - row: 2026-10-15-session-status-dot-semantics:flow:测试绑定FR-05
-  tests: frontend/src/components/sessions/__tests__/session-list-panel.test.tsx | frontend/src/components/sessions/__tests__/sessions-portal.test.tsx | frontend/src/hooks/__tests__/use-session-liveness.test.ts | sessions/page.test.tsx
+  tests: frontend/src/app/page.test.tsx | frontend/src/components/sessions/__tests__/session-list-panel.test.tsx | frontend/src/components/sessions/__tests__/sessions-portal.test.tsx | frontend/src/hooks/__tests__/use-session-liveness.test.ts
   reason: spec
   state: candidate
   discovery: machine

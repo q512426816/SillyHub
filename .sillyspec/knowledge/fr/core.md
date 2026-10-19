@@ -246,3 +246,93 @@ created_at: 2026-10-15T11:57:05.061Z
 摘要：主路径
 全文：.sillyspec/changes/archive/2026-10-19-knowledge-search-build-switch/requirements.md#FR-03
 最近确认：54a1e8db39d4d8ac991d645e2942a370d146e4ff
+
+## FR-core-008 会话思考内容默认显示中文译文，可一键切回原文；折叠摘要流式结束后亦译为中文
+变更：2026-10-19-thinking-zh-translate
+状态：active
+摘要：展开查看译文；流式中不发请求；中文内容跳过；模型不可用降级
+场景正文：
+- 场景：展开查看译文 — Given 一条英文思考内容已流式完成，When 用户展开思考折叠块，Then 正文默认显示中文译文（未就绪时短暂显示原文 + 翻译中标记），且提供「显示原文」切换。
+- 场景：流式中不发请求 — Given 思考内容正在流式增量到达，When 折叠摘要实时更新，Then 不发起任何翻译请求（摘要显示原文 + 思考中脉冲）；流结束后摘要自动换为中文。
+- 场景：中文内容跳过 — Given 思考文本以中文为主，When 渲染，Then 直接展示原文，不发起翻译请求。
+- 场景：模型不可用降级 — Given 后端翻译模型未就绪，When 用户展开思考块，Then 显示原文并出现一次性的「离线翻译未就绪」轻提示，后续请求按退避节流。
+全文：.sillyspec/changes/archive/2026-10-19-thinking-zh-translate/requirements.md#FR-01
+最近确认：bfa6357537da5377966ec9d747dc47fbd9e53709
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-19-thinking-zh-translate:flow:测试绑定FR-01
+  tests: frontend/src/components/thinking-translate/__tests__/translated-thinking.test.tsx「展开默认译文 + 一键切原文」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-19-thinking-zh-translate
+  status: active
+
+## FR-core-009 翻译为本地离线推理（后端 CTranslate2 + opus-mt-en-zh int8 量化模型，首用自动下载、可配置本地目录），全程无外部云翻译 API 调用
+变更：2026-10-19-thinking-zh-translate
+状态：active
+摘要：离线部署；模型缺席
+场景正文：
+- 场景：离线部署 — Given 部署环境无外网且已预置模型目录（TRANSLATE_MODEL_DIR），When 前端请求翻译，Then 本地推理正常返回译文。
+- 场景：模型缺席 — Given 模型未下载且无法联网，When 前端请求翻译，Then 返回 200 + engine_ready=false + 原文透传，前端降级显示原文。
+全文：.sillyspec/changes/archive/2026-10-19-thinking-zh-translate/requirements.md#FR-02
+最近确认：bfa6357537da5377966ec9d747dc47fbd9e53709
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-19-thinking-zh-translate:flow:测试绑定FR-02
+  tests: backend/app/modules/translate/tests/test_chunking.py「代码块/行内代码/URL 保护不送翻」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-19-thinking-zh-translate
+  status: active
+
+## FR-core-010 性能可控：按需触发（用户展开或流式结束后）、文本分块并发、译文缓存（内存 LRU + Redis），不阻塞会话流式渲染；模型不可用时优雅降级显示原文
+变更：2026-10-19-thinking-zh-translate
+状态：active
+摘要：同屏多思考块；缓存命中；超长思考
+场景正文：
+- 场景：同屏多思考块 — Given 「全部」视图一次挂载 10 个思考折叠块，When 流已结束，Then 10 条摘要翻译合并为 1 个批量请求（单次网络往返）。
+- 场景：缓存命中 — Given 同一思考文本第二次被请求（刷新页面/重新展开），When 后端收到请求，Then LRU/Redis 命中直接返回，不触发模型推理。
+- 场景：超长思考 — Given 单条思考 20000 字符，When 用户展开，Then 前端按段分块多请求按序渲染，不出现整条超时。
+全文：.sillyspec/changes/archive/2026-10-19-thinking-zh-translate/requirements.md#FR-03
+最近确认：bfa6357537da5377966ec9d747dc47fbd9e53709
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-19-thinking-zh-translate:flow:测试绑定FR-03
+  tests: backend/app/modules/translate/tests/test_chunking.py「长文按段分块边界」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-19-thinking-zh-translate
+  status: active
+
+## FR-core-011 覆盖三条思考渲染路径：daemon 会话面板时间线、AgentLogViewer、agent-logs 回放卡
+变更：2026-10-19-thinking-zh-translate
+状态：active
+摘要：三路径一致
+场景正文：
+- 场景：三路径一致 — Given 翻译引擎正常，When 分别在会话面板、AgentLogViewer、回放卡查看英文思考，Then 三处均默认中文展示且可切原文。
+全文：.sillyspec/changes/archive/2026-10-19-thinking-zh-translate/requirements.md#FR-04
+最近确认：bfa6357537da5377966ec9d747dc47fbd9e53709
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-19-thinking-zh-translate:flow:测试绑定FR-04
+  tests: frontend/src/components/daemon/__tests__/turn-segment-views-thinking-translate.test.tsx「ThinkingRowView 接入翻译」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-19-thinking-zh-translate
+  status: active

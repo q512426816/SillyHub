@@ -1,0 +1,58 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-19-thinking-zh-translate",
+  "reviewer": "subagent",
+  "verdict": "PASS",
+  "reviewedAgainst": "bfa6357537da5377966ec9d747dc47fbd9e53709",
+  "findings": [],
+  "dimensionNotes": {
+    "乱序": "ok",
+    "并发": "ok",
+    "切换": "ok",
+    "作用域": "ok"
+  },
+  "previousFindingsResolution": [
+    {
+      "id": "P2-1",
+      "title": "摘要截断到最近句界再送翻未实现（旧裸 slice(0,500)）",
+      "status": "fixed",
+      "evidence": "frontend/src/components/thinking-translate/index.tsx 新增 summaryPrefix()：flat>500 时在 [500-120,500) 回看窗内找 .!?。！？ 最近句末标点，吸附切片含标点（slice(0, 380+lastStop+1)，恒 ≤500 且 ≥381；窗内无句界保底硬截并注释声明罕见可接受）；useThinkingSummary 全部摘要路径经此函数送翻。回归测试 translated-thinking.test.tsx「评审 P2 回归：前缀截断吸附最近句界」断言送翻长度 ≤500 且 endsWith('.')。未引入回归（摘要 60 字截断展示逻辑不变）。"
+    },
+    {
+      "id": "P2-2",
+      "title": "flush() 对超 16 块 job 空批 return 不再排程 → 队头永久卡死",
+      "status": "fixed",
+      "evidence": "frontend/src/lib/thinking-translate.ts 重构为块级队列：QueueEntry=单块（1 item/条）恒可装满单批，旧「job 整体入队」根因消除；flush() splice(0,16) 后 requestBatch().finally(() => { if (queue.length) scheduleFlush(); }) 保证剩余块续排程。跨批重组重点核验均正确：①部分批次失败 failEntries→fillEntry(null)，assembler.parts 含 null 时整条 resolve(null) 回退原文且不写半截缓存（与后端统一降级口径一致）；②cache key=asm.source=chunks.join('')，splitIntoChunks 拼接保真有测试锚定，与入口 cacheGet(text) 同 key；③重填防护 fillEntry 以 parts[i]!==undefined 拦截重复回填（null 已填也拦）；④批内混多 assembler 的块按各自 chunkIndex 槽位回填互不干扰；⑤退避期 flush 清空队列 failEntries，无积压。回归测试 thinking-translate.test.ts「评审 P2 回归：>16 块巨型文本跨多批续传不卡队」断言两批接力（2 次请求）+按序无损重组。"
+    },
+    {
+      "id": "P3-1",
+      "title": "FR-01 测试绑定行「偏好开关」与实际覆盖不符",
+      "status": "fixed",
+      "evidence": "requirements.md 测试绑定行改为「偏好关闭 → off 零请求（回退原文不发请求）」，与 translated-thinking.test.tsx 实际用例名逐字一致，该用例断言 state=off + translateTextMock 零调用，真实存在且断言该行为。"
+    },
+    {
+      "id": "P3-2",
+      "title": "engine.py docstring「重建新代理」与实际复用同代理不符",
+      "status": "fixed",
+      "evidence": "backend/app/modules/translate/engine.py get_translator docstring 改为「本入口复用同一代理实例（其 translate 内懒重启子进程），不重建新代理」，与代码一致（_engine_instance 单例命中 model_spec 即复用；退避满后 available 判定自然翻 True 走同实例）。"
+    }
+  ],
+  "dimensionNotesDetail": {
+    "乱序": "ok：流式 partial 乱序归既有 assembler（本变更零碰流通道）；前端块级队列按 chunkIndex 槽位回填，跨批乱序返回安全；后端块按 chunk_owners 顺序 zip 回填、缓存命中即时追加保序；summaryPrefix 锚定头部稳定前缀，design 声明与实现相符。",
+    "并发": "ok：后端 LRU 持 _lru_lock、子进程请求经 proxy._lock 串行、Redis 写幂等+异常 60s 冷却；前端合批队列/缓存/inflight 在单 JS 线程事件循环内无竞态；run_in_threadpool 卸载阻塞推理不卡事件循环。",
+    "切换": "ok：worker 三闸自灭（闲置/父亡 EOF/寿命帽）+ 代理单次透明重启重试 + 连续 3 崩溃退避 600s；组件卸载 cancelled 标记丢弃迟到译文；译文仅在 text===translationInput 时切入避免陈旧内容。",
+    "作用域": "ok：Redis key translate:v1:zh:{sha1(target+text)} 命名空间隔离；译文缓存不分用户为显式声明边界（纯函数无用户元数据，泄漏面为零——裁决可接受）；TRANSLATE_MODEL_DIR 按主机本地由部署方保证。"
+  },
+  "declaredBoundariesRuling": [
+    "design「opus-mt 翻译质量一般（能看懂大意非信达雅）」：可接受——代码/URL 保护缩小破坏面 + 一键切原文 + 模型 repo 可配置替换，接口契约不变。",
+    "design「摘要前 500 字符截断恰在句中」：已由句界吸附修复；残余边界「120 字符回看窗内无句界仍硬截」：可接受——极罕见且仅为折叠预览摘要，降级语义无损（显示原文前缀）。",
+    "design「模型首用下载 ~100-150MB 弱网不可达」：可接受——TRANSLATE_MODEL_DIR 预置 + HF_ENDPOINT 镜像 + 全链 fail-soft（engine_ready=false 原文透传，启动零阻塞），README 预烤文档化。",
+    "design（service.py）「缓存粒度=送翻块，摘要/全文两请求间无共享」：可接受——翻译为纯函数，代价仅为重复推理一次，声明明确。",
+    "service.py「引擎不可用时缓存已命中的项也统一回退原文」：可接受——避免同屏半译半原文的混乱展示，缓存保留恢复即命中。",
+    "前端注释「内存缓存 FIFO 而非 LRU」「段内超限硬切（后端二次细切）」：可接受——纯函数结果 FIFO 足够；后端 split_translatable 对每块再按句界细切兜底。",
+    "requirements.md 无额外声明边界（场景条目为需求本身，非边界披露）。"
+  ],
+  "protectionClaimsVerified": "reassembly 保真 assert（chunking.py split_translatable 尾部 total==len(text) 断言）真实存在且有测试锚定；未闭合围栏 fail-open（chunking docstring+测试）；engine 协议 mismatch/数量 mismatch 双防御（resp.id 比对 + service translations 长度校验）；fillEntry 重填防护；store merge 非法持久化值回退默认开；LRU 超限 popitem 淘汰。生成物 README.md 环境变量表/端点契约/限额常量与 config.py、schema.py、前端常量（16/20000/80000、启发式 30/8/0.6、CJK 范围）逐项对齐。",
+  "notes": "change.patch 为工作区全量 diff，混入另一活跃变更 2026-10-19-knowledge-search-build-switch 的文件（knowledge search 开关及其测试）——属共享仓多 change 并行的 patch 机制产物，非本变更缺陷，未计入 findings。",
+  "reviewedAt": "2026-10-19T15:11:59+08:00"
+}

@@ -171,7 +171,7 @@ created_at: 2026-10-02T02:55:12.745Z
 测试绑定：
 <!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
 - row: 2026-10-16-change-center-back-keeps-list-state:flow:测试绑定FR-01
-  tests: changes/__tests__/page.test.tsx「?tab=archive&page=3 深链：主 load 按已归档第3页请求」 | changes/__tests__/page.test.tsx「切已归档 tab 后 URL 写回 tab=archive」 | changes/__tests__/page.test.tsx「翻页后 URL 写回 page=N」
+  tests: frontend/src/app/page.test.tsx「?tab=archive&page=3 深链：主 load 按已归档第3页请求」 | frontend/src/app/page.test.tsx「切已归档 tab 后 URL 写回 tab=archive」 | frontend/src/app/page.test.tsx「翻页后 URL 写回 page=N」
   reason: spec
   state: candidate
   discovery: machine
@@ -454,7 +454,7 @@ created_at: 2026-10-02T02:55:12.745Z
 测试绑定：
 <!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
 - row: 2026-10-18-change-list-type-filter:flow:测试绑定FR-03
-  tests: changes/__tests__/page.test.tsx「类型下拉选择「fix」
+  tests: frontend/src/app/page.test.tsx「类型下拉选择「fix」
   reason: spec
   state: candidate
   discovery: machine
@@ -567,7 +567,7 @@ created_at: 2026-10-02T02:55:12.745Z
 测试绑定：
 <!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
 - row: 2026-10-19-change-list-created-sort:flow:测试绑定FR-02
-  tests: changes/__tests__/page.test.tsx「点创建时间列头 → sortDir 切换，默认 created_at_desc 点击后 asc」
+  tests: frontend/src/app/page.test.tsx「点创建时间列头 → sortDir 切换，默认 created_at_desc 点击后 asc」
   reason: spec
   state: candidate
   discovery: machine

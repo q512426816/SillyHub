@@ -1,0 +1,46 @@
+tier: thick
+legacy_fallback: false
+substeps:
+  artifacts: done
+  ledger: done
+  patch: done
+  review: done
+  probes: done
+  distill: done
+  archive: done
+  events: done
+born_face: thin
+with_tasks: false
+review_force: null
+input: |-
+  思考内容离线翻译为中文展示
+
+  动机：平台会话中 agent 思考内容常为英文，用户看不懂。集成离线翻译能力（不依赖云翻译 API），默认将思考内容译成中文展示，同时控制性能开销。
+
+  成功标准：
+  - 会话思考内容默认显示中文译文，可一键切回原文；折叠摘要流式结束后亦译为中文
+  - 翻译为本地离线推理（后端 CTranslate2 + opus-mt-en-zh int8 量化模型，首用自动下载、可配置本地目录），全程无外部云翻译 API 调用
+  - 性能可控：按需触发（用户展开或流式结束后）、文本分块并发、译文缓存（内存 LRU + Redis），不阻塞会话流式渲染；模型不可用时优雅降级显示原文
+  - 覆盖三条思考渲染路径：daemon 会话面板时间线、AgentLogViewer、agent-logs 回放卡
+autopilot: true
+prestage_ack: false
+baseline_commit: b35291abb389dae5869b8a6c7e9c6a000f40ec82
+updatedAt: '2026-10-19T07:13:07.398Z'
+cross_baselines:
+  sillyspec: 875511d25454cf584c99ab491fa0cd03231f71ad
+baseline_sha256: 373363f770b0e92db4a42c2b57cf05bc443e8c4639d103babaf748790f4af46f
+spec_approved: true
+spec_approved_at: '2026-10-19T05:42:08.475Z'
+spec_approved_by: zcode-thinking-translate
+spec_approved_channel: user-confirmed
+spec_attested_by: zcode-thinking-translate
+batch_ticked: true
+upgrade_reason: verify 实测失败（实测失败：test（命令与输出尾部见上；修复后重跑 --done 不丢进度））——失败自动升厚
+gate_summary: >-
+  test: passed ← module[]+deps(jsx2)（16.1s）
+  结果：C:\Users\qinyi\IdeaProjects\multi-agent-platform\.sillyspec\.runtime\verify-runs\20261019065259\test-result.json｜lint:
+  passed ← cd backend && uv run ruff check . && uv run ruff format --check . && uv run mypy app && cd ../frontend &&
+  pnpm lint && cd ../sillyhub-daemon && pnpm typecheck（7.3s）
+  结果：C:\Users\qinyi\IdeaProjects\multi-agent-platform\.sillyspec\.runtime\verify-runs\20261019065259\test-result.json｜门文件
+  34 个
+

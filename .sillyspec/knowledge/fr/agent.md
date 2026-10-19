@@ -133,7 +133,7 @@ created_at: 2026-10-14T02:51:35.432Z
 测试绑定：
 <!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
 - row: 2026-10-15-workspace-session-agent-only:flow:测试绑定FR-01
-  tests: test/frontend/src/components/floating/floating-session-host.test.tsx「工作区组「＋」 | test/frontend/src/components/sessions/__tests__/pre-session-picker.test.tsx「绑定机器在线：无「① 机器」 | test/frontend/src/components/sessions/__tests__/sessions-portal.test.tsx「workspace 组「＋」
+  tests: frontend/src/components/floating/floating-session-host.test.tsx「工作区组「＋」 | frontend/src/components/sessions/__tests__/pre-session-picker.test.tsx「绑定机器在线：无「① 机器」 | frontend/src/components/sessions/__tests__/sessions-portal.test.tsx「workspace 组「＋」
   reason: spec
   state: candidate
   discovery: machine
@@ -155,7 +155,7 @@ created_at: 2026-10-14T02:51:35.432Z
 测试绑定：
 <!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
 - row: 2026-10-15-workspace-session-agent-only:flow:测试绑定FR-02
-  tests: test/frontend/src/components/sessions/__tests__/pre-session-picker.test.tsx「绑定机器离线：离线空态文案，不落机器列表也不列智能体」 | test/frontend/src/components/sessions/__tests__/sessions-portal.test.tsx「绑定机器离线 → 浮层离线空态（不落全机器列表，不弹机器步）」
+  tests: frontend/src/components/sessions/__tests__/pre-session-picker.test.tsx「绑定机器离线：离线空态文案，不落机器列表也不列智能体」 | frontend/src/components/sessions/__tests__/sessions-portal.test.tsx「绑定机器离线 → 浮层离线空态（不落全机器列表，不弹机器步）」
   reason: spec
   state: candidate
   discovery: machine
@@ -177,7 +177,7 @@ created_at: 2026-10-14T02:51:35.432Z
 测试绑定：
 <!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
 - row: 2026-10-15-workspace-session-agent-only:flow:测试绑定FR-03
-  tests: frontend/src/app/m/workspaces/[id]/sessions/__tests__/page.m-sessions.test.tsx「零回归：无绑定（fetchMyBinding null）→ boundMachineId 为 null（原两步流程）」 | test/frontend/src/components/floating/floating-session-host.test.tsx「零回归：工作区组「＋」 | test/frontend/src/components/sessions/__tests__/pre-session-picker.test.tsx「boundMachineId=null：保持原两步流程（缺省不传由既有用例守护）」 | test/frontend/src/components/sessions/__tests__/sessions-portal.test.tsx「零回归：无绑定（bindings 空集）时 workspace 组「＋」
+  tests: frontend/src/app/m/workspaces/[id]/sessions/__tests__/page.m-sessions.test.tsx「零回归：无绑定（fetchMyBinding null）→ boundMachineId 为 null（原两步流程）」 | frontend/src/components/floating/floating-session-host.test.tsx「零回归：工作区组「＋」 | frontend/src/components/sessions/__tests__/pre-session-picker.test.tsx「boundMachineId=null：保持原两步流程（缺省不传由既有用例守护）」 | frontend/src/components/sessions/__tests__/sessions-portal.test.tsx「零回归：无绑定（bindings 空集）时 workspace 组「＋」
   reason: spec
   state: candidate
   discovery: machine
@@ -198,7 +198,7 @@ created_at: 2026-10-14T02:51:35.432Z
 测试绑定：
 <!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
 - row: 2026-10-15-workspace-session-agent-only:flow:测试绑定FR-04
-  tests: test/frontend/src/components/floating/floating-session-host.test.tsx「组「＋」 | test/frontend/src/components/sessions/__tests__/sessions-portal.test.tsx「筛选 agent=Codex（机器筛的是另一台）+ 绑定机器该引擎在线 → 直带：runtime 取绑定机器（不取筛选机器）」
+  tests: frontend/src/components/floating/floating-session-host.test.tsx「组「＋」 | frontend/src/components/sessions/__tests__/sessions-portal.test.tsx「筛选 agent=Codex（机器筛的是另一台）+ 绑定机器该引擎在线 → 直带：runtime 取绑定机器（不取筛选机器）」
   reason: spec
   state: candidate
   discovery: machine
@@ -220,7 +220,7 @@ created_at: 2026-10-14T02:51:35.432Z
 测试绑定：
 <!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
 - row: 2026-10-15-workspace-session-agent-only:flow:测试绑定FR-05
-  tests: test/frontend/src/components/floating/floating-session-host.test.tsx「工作区页「＋ 新会话」 | test/frontend/src/components/sessions/__tests__/sessions-portal.test.tsx「?new=1（workspace scope）+ 绑定命中 → 绑定优先于 D-005（localStorage 指向另一台仍直进绑定机器）」
+  tests: frontend/src/components/floating/floating-session-host.test.tsx「工作区页「＋ 新会话」 | frontend/src/components/sessions/__tests__/sessions-portal.test.tsx「?new=1（workspace scope）+ 绑定命中 → 绑定优先于 D-005（localStorage 指向另一台仍直进绑定机器）」
   reason: spec
   state: candidate
   discovery: machine

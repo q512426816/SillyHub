@@ -1,0 +1,58 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-19-thinking-zh-translate",
+  "reviewer": "subagent",
+  "verdict": "PASS",
+  "reviewedAgainst": "b98bd550e5317bdc5ceb4c96ac4d073dff2a64da",
+  "findings": [
+    {
+      "severity": "P2",
+      "title": "设计声明的「摘要截断到最近句界再送翻」未实现——useThinkingSummary 是裸 500 字符切片",
+      "evidence": "design.md 风险节承诺「截断到最近句界再送翻，避免半句译文」，但 index.tsx 的 useThinkingSummary 直接 flat.slice(0, 500)，无任何句界吸附逻辑；送翻前缀可能在句中被截断产生半句译文。影响有界：折叠摘要只展示译文前 60 字符、展开正文走全文分块不受影响，故降 P2 不升 P1。已核对 HEAD 同源行（index.tsx:109）。",
+      "location": "frontend/src/components/thinking-translate/index.tsx:107-110"
+    },
+    {
+      "severity": "P2",
+      "title": "合批队列头排超限 job 永久卡死——flush() 空 batch 直接 return 不再排程，注释声称的「下轮 flush 续传」不会发生",
+      "evidence": "单条文本 >16 块（>28800 字符，块上限 1800）时 while 循环在队头 break，batch 为空走 if (!batch.length) return，既不发请求也不 scheduleFlush，该 job 的 Promise 永不 resolve（UI 恒挂「翻译中…」，inflight 泄漏），且队头阻塞使后续所有翻译请求同样卡死。前端对送翻文本无 20000 字符封顶（后端 sdk_pipeline 封顶仅覆盖单思考块；AgentLogViewer mergedThinkingContent / TurnDetailsList 思考组可合并多块内容越过 28800）。FR-03 声明场景上限 20000 字符（12 块≤16）不触发，属边缘路径缺陷+注释声明行为未兑现，非 P1。已核对 HEAD 同源行（thinking-translate.ts:172-175）。",
+      "location": "frontend/src/lib/thinking-translate.ts:156-179"
+    },
+    {
+      "severity": "P3",
+      "title": "FR-01 测试绑定文案「needsTranslation 启发式与偏好开关」中「偏好开关」在所绑 lib 测试文件无用例",
+      "evidence": "thinking-translate.test.ts 仅覆盖启发式/分块/合批/缓存/降级，偏好关闭行为实际由 translated-thinking.test.tsx「偏好关闭 → off 零请求」覆盖——行为已测但绑定标注的落点文件不精确。",
+      "location": ".sillyspec/changes/2026-10-19-thinking-zh-translate/requirements.md:80"
+    },
+    {
+      "severity": "P3",
+      "title": "get_translator docstring 声称退避恢复「由本入口重建新代理」，实际复用同一代理靠 available 翻转",
+      "evidence": "退避到点后 get_translator 走 `if proxy.available: return proxy` 返回原实例，并未重建；功能等价（下次 translate 时 _ensure_started 重启子进程、成功后清零 crashes，test_crash_backoff_and_recovery 已验证翻转），仅注释与实现不符。",
+      "location": "backend/app/modules/translate/engine.py:166-172"
+    }
+  ],
+  "dimensionNotes": {
+    "乱序": "ok（块按请求内 `${jobIdx}:${chunkIdx}` id 重组；摘要锚定前 500 字符稳定前缀；译文仅在 text===translationInput 时切入不显陈旧；无 streaming 标记路径 1.2s 稳定窗防抖——实时增长文本在 delta 间歇 >1.2s 会中途发请求，与 FR-01 字面「流式中不发请求」有偏差，但代码注释已显式披露且受缓存/去重/退避约束，边界已裁决：可接受）",
+    "并发": "ok（后端 LRU 持锁、子进程单 _lock 串行、缓存写幂等纯函数结果；前端模块级状态单 JS 线程；多 worker 副本各自进程缓存最终一致——与 design 作答一致，代码核实无误）",
+    "切换": "ok（三闸自灭+单次透明重启+连续 3 崩溃 600s 退避实测覆盖；译文/原文切换为组件本地 state；fetch 无副作用纯读+幂等缓存写，页面关闭无残留——作答属实）",
+    "作用域": "ok（边界已裁决：可接受——缓存 key=translate:v1:zh:{sha1} 命名空间隔离不分用户，译文是文本纯函数且可见面对齐 TASK_RUN_AGENT 权限，无用户/会话元数据泄漏面，与 daemon 会话 logs 读权限同款）"
+  },
+  "boundaryAdjudications": [
+    "「译文缓存不分用户（纯文本函数无隔离语义）」design 边界四问-作用域：可接受——同文本同译文，不含用户/会话元数据，可见性与鉴权面一致",
+    "「缓存粒度=送翻块，摘要/全文两次请求间无共享是接受的代价」service.py docstring：可接受——重复推理每文本至多两次，换块级命中",
+    "「引擎不可用全部原文透传（含已缓存命中项）统一降级口径」service.py：可接受——避免同屏半译半原文，缓存保留恢复即命中",
+    "「未闭合围栏 fail-open 按正文送翻」chunking.py docstring：可接受——送翻时机在流结束/文本稳定后，围栏已闭合；未闭合仅限本身残缺的内容且有测试锚定",
+    "「opus-mt 质量一般，预期懂大意非信达雅 + 一键切原文」design 风险节：可接受——体验边界，换模型仅改配置项",
+    "「译文不落库（原文是审计真相源），翻译是展示层语义」design 接口契约：可接受",
+    "「无 streaming 标记路径实时增长文本走 1.2s 稳定窗」turn-timeline/index.tsx 注释：可接受——有界请求受缓存/去重/退避三重约束",
+    "「单 job 超 16 块留在队列下轮 flush 续传」thinking-translate.ts:173 注释：不可接受——声明行为未实现且队头永久卡死（P2 finding）",
+    "「摘要前 500 字符截断到最近句界再送翻」design 风险节：不可接受——代码为裸切片无句界吸附（P2 finding）"
+  ],
+  "frVerification": {
+    "FR-01": "兑现：默认译文+未就绪显原文防跳变/一键切原文本地态/摘要流结束或静态挂载翻译/流式中零请求（streaming 标记路径）/CJK≥0.6·<30 字符前后端双判定跳过/偏好 localStorage 默认开。绑定测试 3 条均存在且断言对应行为（P3：『偏好开关』落点文件标注不精确）",
+    "FR-02": "兑现：CTranslate2 int8 子进程推理零云 API/TRANSLATE_MODEL_DIR 离线零下载+HF_ENDPOINT 自动下载/缺席 200+engine_ready=false fail-soft/三闸自灭（600s 闲置+stdin EOF+3600s 寿命帽）+3 崩溃退避/围栏·行内代码·URL 保护正则+测试锚定",
+    "FR-03": "兑现：按需触发/后端 ≤1000 字符块+前端 ≤1800×16 item/请求（后端限额 16·20000·80000 三重 422）/LRU(2048 可配)+Redis TTL7d best-effort 60s 冷却/250ms 合批+同文本在途去重/缓存命中零推理实测/SSE 流通道零改动（patch 无任何流通道文件）。超 28800 字符边缘路径存在队列卡死缺陷（P2）",
+    "FR-04": "兑现：ThinkingRowView/TurnDetailsList(ThinkingProcessCard)/AgentLogViewer(ThinkingCollapsibleSection)/回放卡(ThinkingSegment) 四处统一接入同一 thinking-translate 模块，三份旧 thinkingSummary 拷贝删除，降级行为同源一致"
+  },
+  "artifactSync": "手写前端类型与 schema.py 字段逐一一致（ok/engine_ready/reason/items[{id,text,translated}]，按 design 声明不进 api-types 自动面）；pyproject+uv.lock（ctranslate2 4.8.3/sentencepiece 0.2.2/huggingface-hub）与 worker import 对齐；main.py 挂载已核 HEAD；README 部署文档在位",
+  "reviewedAt": "2026-10-19T14:59:04+0800"
+}
