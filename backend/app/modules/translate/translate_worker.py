@@ -98,18 +98,24 @@ class _Tokenizers:
 
         self._src_sp = spm.SentencePieceProcessor(model_file=str(_find(("source.spm",))))
         self._tgt_sp = spm.SentencePieceProcessor(model_file=str(_find(("target.spm",))))
+        # EOS 协议：ct2 的 opus-mt 转换 config 是 add_source_eos=false——调用方必须
+        # 自行在源 token 尾追加 </s>（缺席则解码端无终止信号 → 重复循环到
+        # max_decoding_length 的乱码输出，2026-10-19 真模型冒烟实证）。
+        eos_id = self._src_sp.eos_id()
+        self._eos_piece = self._src_sp.id_to_piece(eos_id) if eos_id >= 0 else "</s>"
+        self._special_pieces = {"<s>", "</s>", "<unk>", "<pad>"}
 
     def encode(self, text: str) -> list[str]:
         if self._hf_tok is not None:
             ids = self._hf_tok(text, add_special_tokens=True)["input_ids"]
             return self._hf_tok.convert_ids_to_tokens(ids)
-        return self._src_sp.encode(text, out_type=str)
+        return [*self._src_sp.encode(text, out_type=str), self._eos_piece]
 
     def decode(self, pieces: list[str]) -> str:
         if self._hf_tok is not None:
             ids = self._hf_tok.convert_tokens_to_ids(pieces)
             return self._hf_tok.decode(ids, skip_special_tokens=True)
-        return self._tgt_sp.decode(pieces)
+        return self._tgt_sp.decode([p for p in pieces if p not in self._special_pieces])
 
 
 def _translate_once(translator: object, toks: _Tokenizers, texts: list[str]) -> list[str]:

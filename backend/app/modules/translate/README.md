@@ -9,7 +9,7 @@ API——推理在本地 CTranslate2 子进程完成（opus-mt-en-zh int8 量化
 | 变量 | 默认 | 说明 |
 |---|---|---|
 | `TRANSLATE_THINKING_ENABLED` | `true` | 总闸；`false` 时端点直接原文透传 |
-| `TRANSLATE_MODEL_REPO` | `michaelfeil/ct2fast-opus-mt-en-zh` | ct2 格式模型 repo id（换更大模型只改这里） |
+| `TRANSLATE_MODEL_REPO` | `jiangzhuo9357/opus-mt-en-zh-ct2` | ct2 格式模型 repo id（换更大模型只改这里） |
 | `TRANSLATE_MODEL_DIR` | 空 | 本地模型目录（含 `config.json` 的 ct2 目录）；非空时零下载 |
 | `TRANSLATE_WORKER_IDLE_EXIT_SEC` | `600` | 翻译子进程闲置自灭秒数 |
 | `TRANSLATE_CACHE_MAX_ENTRIES` | `2048` | 进程内译文 LRU 条目上限 |
@@ -22,7 +22,7 @@ API——推理在本地 CTranslate2 子进程完成（opus-mt-en-zh int8 量化
 
 ```bash
 # 有网机器上一次性下载模型目录（HF 镜像可加 HF_ENDPOINT=https://hf-mirror.com）
-python -c "from huggingface_hub import snapshot_download; print(snapshot_download('michaelfeil/ct2fast-opus-mt-en-zh'))"
+python -c "from huggingface_hub import snapshot_download; print(snapshot_download('jiangzhuo9357/opus-mt-en-zh-ct2'))"
 
 # 把输出的缓存目录整体拷到部署机（如 /opt/models/opus-mt-en-zh），然后：
 TRANSLATE_MODEL_DIR=/opt/models/opus-mt-en-zh
@@ -32,7 +32,7 @@ Docker 预烤（可选）：在 backend Dockerfile 依赖安装后加
 
 ```dockerfile
 RUN python -c "from huggingface_hub import snapshot_download" \
-    && python -c "from huggingface_hub import snapshot_download as s; s('michaelfeil/ct2fast-opus-mt-en-zh', local_dir='/opt/models/opus-mt-en-zh')" \
+    && python -c "from huggingface_hub import snapshot_download as s; s('jiangzhuo9357/opus-mt-en-zh-ct2', local_dir='/opt/models/opus-mt-en-zh')" \
     || true
 ENV TRANSLATE_MODEL_DIR=/opt/models/opus-mt-en-zh
 ```

@@ -155,9 +155,12 @@ class Settings(BaseSettings):
         description="master switch for offline thinking translation (env TRANSLATE_THINKING_ENABLED).",
     )
     # HF repo id（ct2 格式）。换更大模型只改本值；离线部署用 translate_model_dir
-    # 指本地预置目录绕过下载。
+    # 指本地预置目录绕过下载。默认仓库 2026-10-19 真机验证更换：原
+    # michaelfeil/ct2fast-opus-mt-en-zh 已 404（hf-mirror 实测），现默认
+    # jiangzhuo9357/opus-mt-en-zh-ct2（config.json+model.bin+source/target.spm
+    # 完整布局，真机推理译文流畅）。
     translate_model_repo: str = Field(
-        "michaelfeil/ct2fast-opus-mt-en-zh",
+        "jiangzhuo9357/opus-mt-en-zh-ct2",
         description="CTranslate2-format opus-mt en-zh repo id (env TRANSLATE_MODEL_REPO).",
     )
     # 非空 = 直接用该本地模型目录（含 config.json 的 ct2 模型目录），零下载。
