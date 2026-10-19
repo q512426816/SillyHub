@@ -1,0 +1,35 @@
+tier: thin
+legacy_fallback: false
+substeps: {}
+born_face: thin
+with_tasks: false
+review_force: null
+input: >-
+  动机:用户担心普通会话中途误选「平台向导」类平台共享智能体档案(切换后仅换人格提示词,但用户预期是整套环境,产生困惑)。需求原话:过程中不要出现共享的档案选择,避免误选;名称不一定,要取真实库里的(shared-agents/active
+  的 agent_profile_id);但要保证新会话时候要有这个选项,或者置顶到新建弹窗和选择机器/智能体一层。
+
+
+  成功标准:
+
+  - 真会话(非 provisional)档案下拉必须隐藏平台共享智能体条目(按 active 生效列表的 agent_profile_id 集合过滤,不按名称匹配)
+
+  - 当前会话档案本身恰为共享智能体时,该条目在真会话下拉中保留可见(共享会话不被饿死,但不提供共享档案互切)
+
+  - 预会话(provisional)档案下拉保留共享智能体条目且置顶显示(排序在普通档案之前,普通档案间保持原序)
+
+  - active 列表请求失败降级 [] 时,真会话下拉不过滤(零回归)、预会话不置顶
+
+  - 聚焦测试覆盖上述分支,tsc 0 错误
+autopilot: false
+prestage_ack: true
+baseline_commit: 9a5be9648defe49c94b35b38d3ef9a51a060a4e9
+updatedAt: '2026-10-19T02:25:34.126Z'
+cross_baselines:
+  sillyspec: 9b8a1031fff3966e85fee2f2b45dbd76ecd9aca7
+baseline_sha256: 1b163012e00986236c429a56d6b5381d92c8107747a09feff5e9948843654fcb
+spec_approved: true
+spec_approved_at: '2026-10-19T02:25:34.126Z'
+spec_approved_by: anon@DESKTOP-HJ0AM09
+spec_approved_channel: user-confirmed
+spec_attested_by: anon@DESKTOP-HJ0AM09
+
