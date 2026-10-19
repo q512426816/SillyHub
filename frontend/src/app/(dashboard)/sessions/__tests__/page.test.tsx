@@ -2962,9 +2962,13 @@ describe("SessionPanel 轮次导航集成（task-06：跳转链路 + mobile Draw
         runId: "r-old",
       }),
     );
+    // 2026-10-19-preview-card-empty-turn-fix：固定文案改走 warning 原文——
+    // notify.error 收纯字符串会被 errMessage 吞成默认「操作失败」（errors.ts
+    // misuse guard），真机导航点击实证只显示「操作失败」四个字。
     await waitFor(() =>
-      expect(mocks.notifyError).toHaveBeenCalledWith("该轮次日志不存在（可能已被清理）"),
+      expect(mocks.notifyWarning).toHaveBeenCalledWith("该轮次日志不存在（可能已被清理）"),
     );
+    expect(mocks.notifyError).not.toHaveBeenCalled();
     // 直达路径直接收口，不空转翻页。
     expect(beforeCallCount()).toBe(0);
   });
