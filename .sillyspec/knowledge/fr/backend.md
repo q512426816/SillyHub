@@ -7197,3 +7197,31 @@ superseded_by：FR-auth-003
   confirmed_at: null
   source_change: 2026-10-15-server-logs-dockerfile-fix
   status: active
+
+## FR-backend-004 uncategorized.md 16 条全部迁出至五个分类文件（known-issues/patterns/conventions/testing-gotchas/sillyspec-gotchas），收件箱归零并留清账记录
+变更：2026-10-19-knowledge-inbox-triage
+状态：active
+摘要：主路径
+全文：.sillyspec/changes/archive/2026-10-19-knowledge-inbox-triage/requirements.md#FR-01
+最近确认：db6542205b5982cd4adc16dc5af45b316446a8a8
+
+## FR-backend-005 INDEX.md 对应分类节补齐索引行，锚点与目标标题一致
+变更：2026-10-19-knowledge-inbox-triage
+状态：active
+摘要：主路径
+全文：.sillyspec/changes/archive/2026-10-19-knowledge-inbox-triage/requirements.md#FR-02
+最近确认：db6542205b5982cd4adc16dc5af45b316446a8a8
+
+## FR-backend-006 已修复条目带状态标注（🟢/🟡 口径或文内注明），【待确认】逐条裁决留痕
+变更：2026-10-19-knowledge-inbox-triage
+状态：active
+摘要：主路径
+全文：.sillyspec/changes/archive/2026-10-19-knowledge-inbox-triage/requirements.md#FR-03
+最近确认：db6542205b5982cd4adc16dc5af45b316446a8a8
+
+## FR-backend-007 sillyspec knowledge validate 无 errors
+变更：2026-10-19-knowledge-inbox-triage
+状态：active
+摘要：主路径
+全文：.sillyspec/changes/archive/2026-10-19-knowledge-inbox-triage/requirements.md#FR-04
+最近确认：db6542205b5982cd4adc16dc5af45b316446a8a8

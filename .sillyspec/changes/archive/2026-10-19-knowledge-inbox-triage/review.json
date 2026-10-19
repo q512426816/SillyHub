@@ -1,0 +1,22 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-19-knowledge-inbox-triage",
+  "reviewer": "subagent",
+  "verdict": "PASS",
+  "reviewedAgainst": "db6542205b5982cd4adc16dc5af45b316446a8a8",
+  "findings": [
+    {
+      "severity": "P3",
+      "title": "两处迁出正文存在 design「仅三类最小改写」清单外的语境适配微调",
+      "evidence": "daemon.start() 条目正文「（待确认后可立独立小变更）」改为「（待独立小变更立项）」；require_permission 条目正文「本变更新端点」改为「2026-10-14-deploy-release-notes 新端点」——均为信息无损的语境适配（原「本变更」在新文件上下文失指、去残留「待确认」措辞），但 design 声明「仅做三类最小改写（标题去前缀/状态前缀/状态尾行）」未涵盖，FR-01 场景「正文原样保真」严格意义上不完全成立；无数据正确性风险",
+      "location": ".sillyspec/knowledge/testing-gotchas.md (daemon.start() 条目尾段) / .sillyspec/knowledge/known-issues.md (require_permission 条目正文)"
+    }
+  ],
+  "dimensionNotes": {
+    "乱序": "n/a",
+    "并发": "ok",
+    "切换": "ok",
+    "作用域": "ok"
+  },
+  "reviewedAt": "2026-10-19T13:45:05+08:00"
+}

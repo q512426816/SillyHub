@@ -531,7 +531,6 @@
 最近确认：857d8af461ea4aa3705016087c3d9124105a3180
 理由：最大风险：筛选值集与展示映射漂移（feat↔feature 口径在后端 aliases、前端 COMMIT_TYPE_DISPLAY 两处维护）。缓解：两端各有测试钉（后端 feat 等价命中用例 / 前端 feature→feat 显示用例），且值集注释互指对方为权威。残余面：TYPE_OPTIONS 未 列 ci/revert/quick（防下拉过长），后端白名单仍可筛——深链手输 URL 可用，下拉不可 选，属有意取舍。 试过放弃：A. 类型筛选复用 lineage 的「全局集合→SQL IN」两阶段——类型是列值非 投影字段，直接 where 即可，无需两阶段；B. 前端本地过滤——total/分页会错 （pending_review_only gap② 前车之鉴），必须服务端筛。
 
-
 ## D-unmapped-060@v1 设计期风险与放弃方案（底稿）
 状态：implemented
 变更：2026-10-16-session-pill-dock-drag
@@ -563,6 +562,7 @@
 锚点：未记录
 最近确认：ee8bc717b7b00bcc4e78a5e1da5788638735b776
 理由：- **最大风险**：空转读文件频率 ×3（每秒读 2-6KB + JSON 解析）。量级可忽略（单核微秒级）， 定时器仍 unref；接受。 - **风险 2**：重载风暴更密（用户连续快速换档时，每 2 秒可触发一波）。上一变更已论证 per-session 串行 + 覆盖写幂等承载得住；去抖两拍本身就是节流。 - **死路（放弃）**：去抖单拍化（见做法概述）；fs.watch（同上变更死路 2）。 - **遗留**：UI 可感知提示（切换时平台界面出 notice）需 daemon→backend→frontend 三端契约 （新端点 + SSE 帧 + 类型再生成），本变更明确不做，留待单独立项。
+
 ## D-unmapped-086@v1 设计期风险与放弃方案（底稿）
 状态：implemented
 变更：2026-10-19-assets-audit-expand-toggle
@@ -602,3 +602,11 @@
 锚点：未记录
 最近确认：e935e8c671e20cda72d65ea44ebbe9adb65b0d47
 理由：风险：默认排序变化改变用户既有习惯（最近活动 → 创建时间）——正是用户主动要求， 非回归。created_at 与 updated_at 在 reparse 回填 mtime 时的差异：created_at 是 建行时刻（CLI 创建顺序），语义即用户诉求。放弃方案：改后端缺省值——会波及全部 不传 sort 的调用方（change-autolink 等），契约面无谓扩大。
+
+## D-unmapped-091@v1 设计期风险与放弃方案（底稿）
+状态：implemented
+变更：2026-10-19-knowledge-inbox-triage
+原编号：D-001@v1
+锚点：未记录
+最近确认：db6542205b5982cd4adc16dc5af45b316446a8a8
+理由：- 风险①：INDEX 锚点 slug 手写错 → 索引断链。对策：用 node 脚本按 GitHub slugger 规则（小写、去非常量词符、空格→连字符）对 16 个标题生成锚点再写入，`knowledge validate` 兜底。 - 风险②：并行会话的 INDEX.md hunk 被我扫入提交。对策：显式 pathspec + `git diff --cached --name-only` 全量核对 + 临时回插隔离（见并发问 2），提交后核对工作区恢复其未提交态。 - 风险③：分类归属争议（如 node_modules junction 事件可归 known-issues 也可归 sillyspec-gotchas）。对策：按「与既有同族条目聚簇便于检索」原则定（junction 族→sillyspec-gotchas），争议归属在设计期即定死，收口不再摇摆。 - 放弃方案：走 `sillyspec knowledge propose` 逐条提议再人工合并——propose 仅写 `proposed/` 待人工审核，会产生 16 条待审噪音且仍需人工逐条合并，不满足用户「清账」目标；用户本次指令已明确授权直接归类，且直接编辑分类文件有 2026-09-28-knowledge-inbox-clear 同款先例，故放弃 propose 通道。
