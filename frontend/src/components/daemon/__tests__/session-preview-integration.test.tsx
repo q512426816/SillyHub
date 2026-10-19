@@ -357,4 +357,77 @@ describe("消息流预览卡集成（FR-01 / FR-03 / FR-04）", () => {
     await new Promise((r) => setTimeout(r, 300));
     expect(runIdCalls().filter((r) => r === "run-e2").length).toBe(callsAfterFirst);
   });
+
+  it("2026-10-19：静默切换轮导航刻度点击直接定位配置行——无 toast 无请求", async () => {
+    // 真机验收发现的第三面：点静默轮导航刻度弹「操作失败」（直达查回 0 条日志
+    // 走 notify.error 字符串被吞）。修复后：早退定位既有配置行，不发请求不弹 toast。
+    sessionApi.fetchSessionTurnOutline.mockResolvedValue({
+      session_id: "s1",
+      total_turns: 2,
+      items: [
+        { run_id: "run-c", seq: 1, created_at: "2026-08-26T10:10:00.0Z", started_at: "2026-08-26T10:10:00.0Z", status: "completed", prompt_summary: "第三轮提问摘要" },
+        { run_id: "run-sw", seq: 2, created_at: "2026-08-26T10:12:00.0Z", started_at: null, status: "completed", prompt_summary: null, answer_summary: null },
+      ],
+    });
+    sessionApi.listSessionRuns.mockResolvedValue([
+      { id: "run-sw", status: "completed", error_code: null, error_detail: null, started_at: null, created_at: "2026-08-26T10:12:00.0Z", finished_at: "2026-08-26T10:12:01.0Z", user_id: null, sender_name: null, input_tokens: null, output_tokens: null, ctx_tokens: null, duration_api_ms: null, llm_provider_id: null, agent_profile_snapshot: { name: "Claude Code 默认" }, metadata: null, engine_anchor: null, failure_summary: null, run_kind: null, cwd: null, config_snapshot: null },
+    ] as never);
+    sessionApi.getAgentSessionLogs.mockImplementation(
+      async (_sid: string, opts?: { runId?: string; before?: string }) => {
+        if (opts?.runId === "run-sw") return [];
+        if (opts?.before) return [];
+        return turnLogs("run-c", 1, 10);
+      },
+    );
+    await attachSession("s1", /第1轮提问内容/);
+    const tickSw = screen
+      .getAllByTestId("turn-nav-tick")
+      .find((el) => el.getAttribute("aria-label")?.startsWith("第2轮"));
+    expect(tickSw).toBeTruthy();
+    fireEvent.click(tickSw!);
+    await new Promise((r) => setTimeout(r, 300));
+    // 不发单轮请求、不弹任何 toast；配置行仍在（定位目标）。
+    expect(runIdCalls()).not.toContain("run-sw");
+    expect(notifyMock.error).not.toHaveBeenCalled();
+    expect(notifyMock.warning).not.toHaveBeenCalled();
+    expect(
+      document.querySelector(
+        '[data-testid="turn-timeline-scroll"] [data-turn-key="run-sw"]:not([data-turn-preview])',
+      ),
+    ).toBeTruthy();
+    // 二次点击幂等同径（仍无请求无 toast）。
+    fireEvent.click(tickSw!);
+    await new Promise((r) => setTimeout(r, 300));
+    expect(runIdCalls()).not.toContain("run-sw");
+    expect(notifyMock.error).not.toHaveBeenCalled();
+  });
+
+  it("2026-10-19：真缺失日志轮（started_at 有值查回 0 条）导航点击报原文 warning 而非「操作失败」", async () => {
+    // notify.error 收纯字符串会被 errMessage 吞成默认「操作失败」（errors.ts
+    // misuse guard）；固定文案必须走 warning 原文。
+    sessionApi.fetchSessionTurnOutline.mockResolvedValue({
+      session_id: "s1",
+      total_turns: 2,
+      items: [
+        { run_id: "run-m", seq: 1, created_at: "2026-08-26T10:00:00.0Z", started_at: "2026-08-26T10:00:00.0Z", status: "completed", prompt_summary: "缺失轮摘要" },
+        { run_id: "run-c", seq: 2, created_at: "2026-08-26T10:10:00.0Z", started_at: "2026-08-26T10:10:00.0Z", status: "completed", prompt_summary: "第三轮提问摘要" },
+      ],
+    });
+    sessionApi.getAgentSessionLogs.mockImplementation(
+      async (_sid: string, opts?: { runId?: string; before?: string }) => {
+        if (opts?.runId === "run-m") return [];
+        if (opts?.before) return [];
+        return turnLogs("run-c", 2, 10);
+      },
+    );
+    await attachSession("s1", /第2轮提问内容/);
+    const tickM = screen
+      .getAllByTestId("turn-nav-tick")
+      .find((el) => el.getAttribute("aria-label")?.startsWith("第1轮"));
+    fireEvent.click(tickM!);
+    await waitFor(() =>
+      expect(notifyMock.warning).toHaveBeenCalledWith("该轮次日志不存在（可能已被清理）"),
+    );
+    expect(notifyMock.error).not.toHaveBeenCalled();
+  });
 });

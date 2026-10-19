@@ -12,6 +12,8 @@ created_at: 2026-10-19T05:48:31.294Z
 
 方案（前端两处小改）：① preview-merge.ts 新增 isContentlessTerminalItem 判定（started_at 空 + error_code 空 + 摘要双空 + previewTurnStatusOf 映射 completed/killed 终态），命中该类大纲条目不再合成预览卡——turns 有命中（孤儿配置行/已加载空壳）原引用透传并盖 seq（恢复 2026-10-14 design 非目标「静默配置切换轮紧凑配置行语义保留」），无命中不生成条目（深历史静默轮回到 preview-cards 之前的不可见语义）；② handleExpandPreview 对 empty 结果补 notify.warning 轻提示，兜底消灭「点了没反应」。判据核心是 started_at：正常轮派发引擎后必有值，纯切换轮从未派发恒空；群聊空 user_input 轮（2026-09-29 幂等语义）、失败族（失败卡是内容）、活跃族（后续可能出内容）都被 started_at/error_code/终态三条件天然排除，行为零变化。
 
+追加（真机验收发现，同缺陷家族第三面——导航跳转链路）：③ 修复上线后真机点左侧导航的静默轮刻度弹「操作失败」——直达链路对零日志轮走 notify.error("该轮次日志不存在…")，纯字符串被 errMessage 吞成默认「操作失败」（errors.ts misuse guard），且无内容终态轮本就不该报错。修法：isContentlessTerminalItem 导出复用（单一判定源），handleJumpToTurn 命中即早退——不发请求，直接定位高亮既有配置行并记幂等；三处固定文案（直达零日志 / 回退翻页到头 / 展开失败）改 notify.warning 原文；prefetchNearbyTurns 跳过无内容邻居不再发无效请求。
+
 ## 接口契约
 
 动了哪些函数/端点/命令/文件格式？对外可见的签名或行为变化是什么（含「无」的说明）？
@@ -46,7 +48,7 @@ preview-merge.ts 新增模块内私有函数 isContentlessTerminalItem（不导�
 
 | 操作 | 路径 | 说明 |
 | --- | --- | --- |
-| 修改 | frontend/src/components/daemon/session-panel/preview-merge.ts | 新增 isContentlessTerminalItem 判定 + 归并循环前置分支（透传盖章/跳过），文件头归并规则注释同步 |
-| 修改 | frontend/src/components/daemon/session-panel/session-panel-page.tsx | handleExpandPreview 对 empty 结果补 notify.warning 轻提示 |
+| 修改 | frontend/src/components/daemon/session-panel/preview-merge.ts | 新增 isContentlessTerminalItem 判定 + 归并循环前置分支（透传盖章/跳过），文件头归并规则注释同步；追加：isContentlessTerminalItem 导出（跳转/预取链路复用，单一判定源） |
+| 修改 | frontend/src/components/daemon/session-panel/session-panel-page.tsx | handleExpandPreview 对 empty 结果补 notify.warning 轻提示；追加：handleJumpToTurn 无内容终态轮早退定位、三处固定文案 notify.error→notify.warning、prefetchNearbyTurns 跳过无内容邻居 |
 | 修改 | frontend/src/components/daemon/session-panel/__tests__/preview-merge.test.ts | 新增「无内容终态轮」describe 五用例；outlineItem fixture 默认补 started_at（对齐真实契约：正常轮必有值），既有断言语义不变 |
 | 修改 | frontend/src/components/daemon/__tests__/session-preview-integration.test.tsx | 新增「静默切换轮不出预览卡渲染配置行」集成用例；真零正文轮用例补轻提示断言（mock @/lib/errors useNotify） |

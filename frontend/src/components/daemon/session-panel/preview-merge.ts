@@ -104,8 +104,10 @@ function hasRenderableBody(t: SessionTurnView): boolean {
  *   - 摘要双空 = 大纲侧确无提问/答复文本（带摘要轮必有内容可展开）；
  *   - previewTurnStatusOf 映射 completed/killed 终态（running/pending 轮后续
  *     可能产出内容，保留预览卡实时形态）。
+ * 导出供跳转（handleJumpToTurn 早退）与预取（prefetchNearbyTurns 跳过）链路
+ * 复用——单一判定源，三处口径永不漂移。
  */
-function isContentlessTerminalItem(item: SessionTurnOutlineItem): boolean {
+export function isContentlessTerminalItem(item: SessionTurnOutlineItem): boolean {
   if (item.started_at != null || item.error_code != null) return false;
   if (item.prompt_summary != null || item.answer_summary != null) return false;
   const ui = previewTurnStatusOf(item.status, item.error_code);

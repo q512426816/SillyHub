@@ -62,6 +62,22 @@ created_at: 2026-10-19T05:48:31.294Z
 - When：运行上述三个测试文件
 - Then：全部用例通过（含既有用例零语义变化）
 
+### FR-06: 导航刻度点击无内容终态轮直接定位既有配置行（不发请求不报错）；三处固定文案 toast 改 warning 通道不再显示为「操作失败」
+
+- handleJumpToTurn 对命中 isContentlessTerminalItem 的大纲条目必须在发起直达请求前短路：直接定位高亮既有孤儿配置行并记零正文幂等标记，禁止发起单轮请求、禁止弹任何错误/警告；「该轮次日志不存在（可能已被清理）」（直达零日志与回退翻页到头两处）与「该轮加载失败，请稍后重试」三条固定文案必须改走 notify.warning 原文展示——notify.error 收纯字符串会被 errMessage 吞成「操作失败」（errors.ts misuse guard），禁止再用字面量调 notify.error；prefetchNearbyTurns 必须跳过无内容终态邻居（不发无效请求）。
+
+#### 场景：导航点击静默切换轮
+
+- Given：会话大纲含无内容终态条目（started_at 空、摘要双空、completed），消息流已渲染其孤儿配置行
+- When：用户点击左侧导航该轮刻度
+- Then：滚动定位并高亮该配置行（双 rAF + 2.2s 自清），不发起 run_id 请求，不出现任何 toast；再次点击走幂等短路同径定位
+
+#### 场景：真缺失日志轮（started_at 有值但查回 0 条）
+
+- Given：大纲条目 started_at 有值（正常轮形态），run_id 直达查回 0 条日志
+- When：用户点击该轮导航刻度
+- Then：toast 显示「该轮次日志不存在（可能已被清理）」原文（warning 通道），不显示「操作失败」
+
 ## 测试绑定（每条 FR 至少一行——`FR-NN: test/路径「用例名」`；空行/待填在 flow done 拒收）
 
 FR-01: frontend/src/components/daemon/session-panel/__tests__/preview-merge.test.ts「纯切换轮命中孤儿配置行原引用透传并盖 seq，不出预览卡」「纯切换轮未命中不生成条目」
@@ -69,3 +85,4 @@ FR-02: frontend/src/components/daemon/session-panel/__tests__/preview-merge.test
 FR-03: frontend/src/components/daemon/__tests__/session-preview-integration.test.tsx「真零正文轮点击出轻提示且幂等语义不变」
 FR-04: frontend/src/components/daemon/session-panel/__tests__/preview-merge.test.ts「无内容终态轮」describe 块五用例（含 fixture started_at 缺省对齐）
 FR-05: frontend/src/components/daemon/session-panel/__tests__/preview-merge.test.ts + frontend/src/components/daemon/__tests__/turn-preview-card.test.tsx + frontend/src/components/daemon/__tests__/session-preview-integration.test.tsx 全量通过
+FR-06: frontend/src/components/daemon/__tests__/session-preview-integration.test.tsx「纯切换轮导航刻度点击直接定位配置行不报错不发请求」「真缺失日志轮导航点击报原文 warning 而非操作失败」
