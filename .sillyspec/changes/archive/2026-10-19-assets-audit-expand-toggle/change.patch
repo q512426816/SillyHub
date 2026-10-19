@@ -1,0 +1,59 @@
+diff --git a/frontend/src/components/changes/detail/__tests__/change-assets-card.test.tsx b/frontend/src/components/changes/detail/__tests__/change-assets-card.test.tsx
+index 178182064..281a30ebd 100644
+--- a/frontend/src/components/changes/detail/__tests__/change-assets-card.test.tsx
++++ b/frontend/src/components/changes/detail/__tests__/change-assets-card.test.tsx
+@@ -485,6 +485,35 @@ describe("ChangeAssetsCard", () => {
+ 
+     expect(await screen.findByText("清单已截断")).toBeInTheDocument();
+   });
++
++  // 2026-10-19-assets-audit-expand-toggle：六组统一「最多 5 行 + 展开全部」形态中
++  // 归档留档清单漏了 GroupToggle——180 文件只能看前 5 条、无滚动无展开，疑似丢数据。
++  it("归档留档：改动文件超 5 条可展开全部/收起", async () => {
++    const fileList = Array.from({ length: 7 }, (_, i) => `src/f${i}.js`);
++    mockGet.mockResolvedValue({
++      ...FULL,
++      patch: { ...FULL.patch, files: 7, file_list: fileList },
++    });
++    renderCard();
++    await screen.findByTestId("change-assets-patch-file-src/f0.js");
++
++    // 默认 5 条 + 展开按钮（与其它五组同形态）
++    expect(screen.getByTestId("change-assets-patch-file-src/f4.js")).toBeInTheDocument();
++    expect(screen.queryByTestId("change-assets-patch-file-src/f5.js")).toBeNull();
++    fireEvent.click(screen.getByRole("button", { name: /展开全部 7 个文件/ }));
++    expect(screen.getByTestId("change-assets-patch-file-src/f5.js")).toBeInTheDocument();
++    expect(screen.getByTestId("change-assets-patch-file-src/f6.js")).toBeInTheDocument();
++    fireEvent.click(screen.getByRole("button", { name: /^收起$/ }));
++    expect(screen.queryByTestId("change-assets-patch-file-src/f5.js")).toBeNull();
++  });
++
++  it("归档留档：清单 ≤5 条不显示展开按钮（与其它分组一致）", async () => {
++    mockGet.mockResolvedValue(FULL); // file_list 2 条，全卡各组均 ≤5
++    renderCard();
++    await screen.findByTestId("change-assets-patch-file-src/flow.js");
++    expect(screen.getByTestId("change-assets-patch-file-test/x.test.mjs")).toBeInTheDocument();
++    expect(screen.queryByTestId("change-assets-group-toggle")).toBeNull();
++  });
+ });
+ 
+ // ── 路径解析兜底（2026-09-26-assets-testfile-path-resolve / FR-01~02）────────
+diff --git a/frontend/src/components/changes/detail/change-assets-card.tsx b/frontend/src/components/changes/detail/change-assets-card.tsx
+index b206ba97e..d46721df0 100644
+--- a/frontend/src/components/changes/detail/change-assets-card.tsx
++++ b/frontend/src/components/changes/detail/change-assets-card.tsx
+@@ -656,6 +656,14 @@ export function ChangeAssetsCard({
+                       </li>
+                     ))}
+                   </ul>
++                  {/* 2026-10-19-assets-audit-expand-toggle：六组统一「最多 5 行 +
++                      展开全部」形态漏了本组——大清单被钉死在前 5 条且无展开。 */}
++                  <GroupToggle
++                    total={patchFileList.length}
++                    expanded={isExpanded("audit")}
++                    onToggle={() => toggleGroup("audit")}
++                    unit="个文件"
++                  />
+                 </div>
+               ) : null}
+             </div>

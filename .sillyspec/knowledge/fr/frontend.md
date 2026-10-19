@@ -6838,3 +6838,60 @@ superseded_by：FR-app-workspace-pages-002
   confirmed_at: null
   source_change: 2026-10-17-session-envelope-rev-stale-guard
   status: active
+
+## FR-frontend-014 改动文件清单超 5 条时显示「展开全部 N 个文件」按钮，点击展开完整清单，再点「收起」回到 5 条
+变更：2026-10-19-assets-audit-expand-toggle
+状态：active
+摘要：主路径；大清单（用户实证）
+全文：.sillyspec/changes/archive/2026-10-19-assets-audit-expand-toggle/requirements.md#FR-01
+最近确认：c86998d373e27dba83a1ff8c4e7ed39924cad0c8
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-19-assets-audit-expand-toggle:flow:测试绑定FR-01
+  tests: frontend/src/components/changes/detail/__tests__/change-assets-card.test.tsx「归档留档：改动文件超 5 条可展开全部/收起」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-19-assets-audit-expand-toggle
+  status: active
+
+## FR-frontend-015 清单 5 条及以内不显示展开按钮，与其它分组形态一致
+变更：2026-10-19-assets-audit-expand-toggle
+状态：active
+摘要：小清单
+全文：.sillyspec/changes/archive/2026-10-19-assets-audit-expand-toggle/requirements.md#FR-02
+最近确认：c86998d373e27dba83a1ff8c4e7ed39924cad0c8
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-19-assets-audit-expand-toggle:flow:测试绑定FR-02
+  tests: frontend/src/components/changes/detail/__tests__/change-assets-card.test.tsx「归档留档：清单 ≤5 条不显示展开按钮」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-19-assets-audit-expand-toggle
+  status: active
+
+## FR-frontend-016 既有分组交互、清单截断标注行为不变，聚焦测试全绿且 tsc 零错误
+变更：2026-10-19-assets-audit-expand-toggle
+状态：active
+摘要：回归面
+全文：.sillyspec/changes/archive/2026-10-19-assets-audit-expand-toggle/requirements.md#FR-03
+最近确认：c86998d373e27dba83a1ff8c4e7ed39924cad0c8
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-19-assets-audit-expand-toggle:flow:测试绑定FR-03
+  tests: frontend/src/components/changes/detail/__tests__/change-assets-card.test.tsx「归档留档：清单渲染 + 点开命中文件出 diff 弹窗（FR-04）」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-19-assets-audit-expand-toggle
+  status: active

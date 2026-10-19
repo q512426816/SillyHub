@@ -1,0 +1,51 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-19-assets-audit-expand-toggle",
+  "rows": [
+    {
+      "anchor": "FR-01",
+      "row_id": "2026-10-19-assets-audit-expand-toggle:flow:测试绑定FR-01",
+      "tests": [
+        "frontend/src/components/changes/detail/__tests__/change-assets-card.test.tsx「归档留档：改动文件超 5 条可展开全部/收起」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-19-assets-audit-expand-toggle"
+    },
+    {
+      "anchor": "FR-02",
+      "row_id": "2026-10-19-assets-audit-expand-toggle:flow:测试绑定FR-02",
+      "tests": [
+        "frontend/src/components/changes/detail/__tests__/change-assets-card.test.tsx「归档留档：清单 ≤5 条不显示展开按钮」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-19-assets-audit-expand-toggle"
+    },
+    {
+      "anchor": "FR-03",
+      "row_id": "2026-10-19-assets-audit-expand-toggle:flow:测试绑定FR-03",
+      "tests": [
+        "frontend/src/components/changes/detail/__tests__/change-assets-card.test.tsx「归档留档：清单渲染 + 点开命中文件出 diff 弹窗（FR-04）」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-19-assets-audit-expand-toggle"
+    }
+  ]
+}
