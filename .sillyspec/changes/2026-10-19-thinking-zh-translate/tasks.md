@@ -10,4 +10,4 @@ created_at: 2026-10-19T05:30:09.503Z
 - [x] task-04: 前端 lib/thinking-translate.ts（needsTranslation 启发式、splitIntoChunks、250ms 合批队列、同文本去重、内存缓存）+ stores/thinking-translate.ts（zustand persist 默认开）；thinking-translate.test.ts 全绿后勾
 - [x] task-05: 共享组件 components/thinking-translate/（useTranslatedText hook：流式中不请求/结束后摘要翻前 500 字符/展开翻全文/失败退避 + TranslatedThinkingBody：译文默认+原文一键切换+翻译中标记+不可用轻提示）；组件测试全绿后勾
 - [x] task-06: 三条渲染路径接入（turn-segment-views.tsx ThinkingRowView、turn-timeline.tsx TurnDetailsList、agent-log-viewer.tsx、agent-log-card.tsx）+ 接入测试；vitest + tsc 全绿后勾
-- [ ] task-07: 部署文档（模型预烤/TRANSLATE_MODEL_DIR 离线配置/HF_ENDPOINT 镜像说明）+ 后端全量 pytest + 前端全量 vitest 回归绿后勾
+- [x] task-07: 部署文档（模型预烤/TRANSLATE_MODEL_DIR 离线配置/HF_ENDPOINT 镜像说明）+ 后端全量 pytest + 前端全量 vitest 回归绿后勾

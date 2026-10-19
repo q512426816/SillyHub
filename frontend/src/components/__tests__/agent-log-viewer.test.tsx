@@ -201,8 +201,10 @@ describe("task-15: thinking 默认折叠为单行摘要", () => {
     );
     // 折叠标题"思考"可见
     expect(screen.getByText("思考")).toBeInTheDocument();
-    // 折叠态：摘要带 "..." 截断标记可见（证明 summary 生效）
-    expect(screen.getByText(/\.\.\.$/)).toBeInTheDocument();
+    // 折叠态：摘要带 "…" 截断标记可见（证明 summary 生效）。2026-10-19-
+    // thinking-zh-translate 起三路径摘要统一走 useThinkingSummary（尾部 "…"
+    // 单字符省略号，对齐会话面板既有形态），非旧 "..." 三点。
+    expect(screen.getByText(/…$/)).toBeInTheDocument();
     // 摘要前 30 字符可见
     expect(screen.getByText(new RegExp(longThinking.slice(0, 20)))).toBeInTheDocument();
     // 全文（完整长内容，含末尾"必须按顺序执行。"）在折叠态不应渲染
