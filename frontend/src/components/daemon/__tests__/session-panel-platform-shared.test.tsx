@@ -321,6 +321,8 @@ describe("预会话共享智能体默认选中引导（2026-10-19-shared-agent-o
     expect(hint.textContent).toContain("平台源码助手");
     expect(hint.textContent).toContain("读平台源码不受限");
     expect(hint.textContent).toContain("写操作限制在共享输出目录");
+    // FR-03：切换指引文案。
+    expect(hint.textContent).toContain("可在下方「智能体」中切换");
     // 默认选中生效：配置条档案按钮显示共享智能体名。
     expect(screen.getByLabelText("配置-档案 平台源码助手")).toBeInTheDocument();
   });
@@ -394,6 +396,21 @@ describe("预会话共享智能体默认选中引导（2026-10-19-shared-agent-o
 
     const panel = await screen.findByTestId("session-pre-session-panel");
     expect(panel).toBeInTheDocument();
+    expect(
+      screen.queryByTestId("pre-session-shared-agent-hint"),
+    ).not.toBeInTheDocument();
+    expect(screen.getByLabelText("配置-档案 未指定")).toBeInTheDocument();
+  });
+
+  it("共享智能体生效列表请求失败（降级 []）→ 门控不成立，不选中不提示", async () => {
+    sessionApi.listDaemonMachines.mockResolvedValue(makeMachines(0));
+    sharedApi.apiFetch.mockRejectedValue(new Error("网络错误"));
+    profileApi.useMineAgentProfiles.mockReturnValue({
+      profiles: [{ id: "prof-shared", name: "平台源码助手" }],
+    });
+    setupPreSession();
+
+    await screen.findByTestId("session-pre-session-panel");
     expect(
       screen.queryByTestId("pre-session-shared-agent-hint"),
     ).not.toBeInTheDocument();

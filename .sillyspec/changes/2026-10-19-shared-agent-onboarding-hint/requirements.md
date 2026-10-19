@@ -56,8 +56,8 @@ created_at: 2026-10-19T01:56:39.052Z
 
 ## 测试绑定（每条 FR 至少一行——`FR-NN: test/路径「用例名」`；空行/待填在 flow done 拒收）
 
-FR-01: frontend/src/components/daemon/__tests__/session-panel-platform-shared.test.tsx「无机器且无共享机器 + 在线共享智能体 → 预会话默认选中并显示引导提示」
-FR-02: frontend/src/components/daemon/__tests__/session-panel-platform-shared.test.tsx「手动选『不指定』后自动选中不再覆盖」
-FR-03: frontend/src/components/daemon/__tests__/session-panel-platform-shared.test.tsx「引导提示文案含读写约束与切换指引」
-FR-04: frontend/src/components/daemon/__tests__/session-panel-platform-shared.test.tsx「有机器/共享智能体离线/机器请求失败 → 不选中不提示」
+FR-01: frontend/src/components/daemon/__tests__/session-panel-platform-shared.test.tsx「无自有/共享机器 + 在线共享智能体 → 默认选中并显示读写约束引导提示」
+FR-02: frontend/src/components/daemon/__tests__/session-panel-platform-shared.test.tsx「手动选『不指定』后自动选中让位，提示消失且不再被改回」
+FR-03: frontend/src/components/daemon/__tests__/session-panel-platform-shared.test.tsx「无自有/共享机器 + 在线共享智能体 → 默认选中并显示读写约束引导提示」（读写约束与切换指引断言并入该用例）
+FR-04: frontend/src/components/daemon/__tests__/session-panel-platform-shared.test.tsx「有自有机器（total>0）→ 不自动选中、不显示提示」「有『共享给我的』机器 → 不自动选中、不显示提示」「共享智能体全部离线 → 不自动选中、不显示提示」「门控机器查询失败 → fail-open 不选中不提示，面板正常」「共享智能体生效列表请求失败（降级 []）→ 门控不成立，不选中不提示」
 FR-05: 不适用：tsc 与聚焦测试命令为质量门槛（CI 面），非单条用例可断言；测试覆盖由 FR-01~04 绑定行承担

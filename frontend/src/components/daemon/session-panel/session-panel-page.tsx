@@ -4500,7 +4500,7 @@ export function SessionPanelPage({
                   className="mb-1.5 rounded border border-brand-300/60 bg-brand-50/60 px-3 py-2 text-xs text-brand-700 dark:bg-brand-950/30 dark:text-brand-300"
                 >
                   已为你选中平台共享智能体「
-                  {firstOnlineSharedAgent.display_name}」——读平台源码不受限，写操作限制在共享输出目录；可在下方「智能体」中切换。
+                  {firstOnlineSharedAgent.display_name ?? "平台共享智能体"}」——读平台源码不受限，写操作限制在共享输出目录；可在下方「智能体」中切换。
                 </p>
               )}
             <SessionConfigBar
