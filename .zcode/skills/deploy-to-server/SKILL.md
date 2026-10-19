@@ -19,6 +19,11 @@ description: 本地打包镜像→生产服务器（腾讯云轻量）部署；�
   若控制台把端口重新关掉，`systemctl enable --now tencent-tunnel` + 把 nginx upstream
   改回 `127.0.0.1` 即恢复服务。
 - nginx 5 处 upstream 现指向 `124.222.127.242`（备份在阿里云 `/etc/nginx/backups/`）。
+- **入口带宽瓶颈（2026-10-19 实测）**：阿里云入口机是经济型 `ecs.e-c1m1.large`，**公网出方向仅 ~1Mbps**
+  ——全站用户流量挤这条小水管：页面 JS/CSS 拉取秒级、5MB daemon bundle 裸传 80s。腾讯云栈本身
+  健康（本机 API 3ms、负载 0.15、带宽 5Mbps 未用）。已做的缓解：crrcdt 站点 nginx 开 gzip
+  （JS/CSS/JSON/文本类，见「常见坑」末条）。彻底解法（待用户拍板）：入口迁腾讯云（需控制台
+  放行 80/443 + DNS 切到 124.222.127.242，nginx 配置随迁）或升阿里云带宽。
 - 阿里云旧栈：2026-10-16 下午起容器与镜像已彻底清理（含 litellm 遗物；清理前发现旧栈曾被
   误启动过一次，删除后此隐患消除），释放约 5G。**仅保留**：数据卷（数据冻结在
   2026-10-16 11:00 的快照）、compose 目录、nginx 配置备份、隧道应急件与
@@ -419,3 +424,4 @@ ssh -i ~/.ssh/tencent_deploy ubuntu@124.222.127.242 '
 - **`/daemon/` 别让 nginx 静态 alias**：宿主机 `/var/www/sillyhub/daemon/` 这类静态副本不随镜像更新，会吐旧 bundle/旧 install.ps1（无 BOM、`{{SERVER_URL}}` 未替换）。整段 `location /daemon/` 必须 `proxy_pass` 到后端。排障/部署后对比公网与后端 latest.json 版本是否一致。详见上方「nginx 路由」。
 - **`/mcp` 必须显式加 nginx location**：不配会落到前端 Next.js（308 → HTML），表现为远端 MCP gateway 未暴露；SSE 长连接还需 `proxy_buffering off` + 长 read timeout。详见上方「/mcp」节。
 - **nginx 备份别留在 `sites-enabled/`**：nginx include 目录内全部文件，`.bak` 里的重复 `default_server` 会让 `nginx -t` 直接失败；备份放 `/etc/nginx/backups/`。
+- **crrcdt 站点 nginx 已开 gzip（2026-10-19，别回退）**：入口公网带宽仅 ~1Mbps，Ubuntu nginx 默认 `gzip_types` 只有 text/html，JS/CSS/JSON 全裸传。已在 `sites-enabled/crrcdt` 443 块加 `gzip on` + `gzip_types`（JS/JSON/CSS/SVG/wasm/shell/ps1 等，level 6，min 1K）。实测 daemon bundle 5.22MB→1.42MB（28.5%）。注意 `_next/static` 资源的压缩其实来自 Next.js 上游自带 compress（浏览器带 Accept-Encoding 时一直有），nginx gzip 的增益主要在后端直出的 `/daemon/*` 与 `/api/*` 大 JSON。排障对比压缩前后必须带同样的 `Accept-Encoding` 头，否则是无效对比。

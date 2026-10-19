@@ -49,8 +49,8 @@ plan 的步骤是动态的：`generate_plan`（生成分级计划）→ `review_
 
 `review_plan` 步骤在 `tier=independent` 时产出一个 stage 级 `review.json`，CLI `Stage Review Gate` 硬校验其 schema 与 `docHash` 真实性。
 
-- 路径：`.sillyspec/.runtime/stage-reviews/plan-review-<stage-review-run-id>/review.json`（目录可能不存在需手建；run-id 由该步 `--done` prompt 输出指定）。marker 文件 `.runtime/current-stage-review-run-id-plan-<变更名>`。
-- **run-id / marker 由 CLI 自动生成注入**（review step prompt 渲染时 echo 完整目录路径 + 写 marker；撞 gate 报缺 review.json 时 gate 也 echo 完整路径 + 写 marker）。直接用 CLI 给的路径写 review.json，**勿手算 run-id（必须 `review-` 前缀）、勿手写 marker**。卡住时用 `sillyspec register-stage-review --change <名> --stage plan` 一步生成。
+- 路径：`.sillyspec/.runtime/stage-reviews/plan-<run-id>/review.json`——**目录名 = `plan-` + marker 值原样**（run-id 本身已带 `review-` 前缀：marker 值 `review-2026-10-15-001431` → 目录 `plan-review-2026-10-15-001431`。勿再拼一层 review-，也勿拿 marker 值当完整目录名）。目录可能不存在需手建；run-id 由该步 `--done` prompt 输出指定；marker 文件 `.runtime/current-stage-review-run-id-plan-<变更名>`。
+- **run-id / marker 由 CLI 自动生成注入**（review step prompt 渲染时 echo 完整目录路径 + 写 marker；撞 gate 报缺 review.json 时 gate 也 echo 完整路径 + 写 marker）。直接用 CLI 给的路径写 review.json，**勿手算 run-id、勿手写 marker**。卡住时用 `sillyspec register-stage-review --change <名> --stage plan` 一步生成。
 - 字段（`schemaVersion:1`，`reviewType=plan` —— plan 阶段主审查文档是 `plan.md`；execute 阶段才是 `acceptance`）：
 
   ```json
