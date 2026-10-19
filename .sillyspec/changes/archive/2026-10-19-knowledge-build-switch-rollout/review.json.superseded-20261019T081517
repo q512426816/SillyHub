@@ -1,0 +1,114 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-19-knowledge-build-switch-rollout",
+  "reviewer": "subagent",
+  "verdict": "PASS",
+  "reviewedAgainst": "4566ee7a8c544e3f3ee3f3c240e3758354be716c",
+  "findings": [
+    {
+      "severity": "P2",
+      "title": "发布记录 commits 列表不完整，遗漏 20 条已随镜像部署的提交",
+      "evidence": "git rev-list --first-parent --count 0a0e9c76..d789317d = 35，记录仅列 15 条；遗漏的 ad9f8c48b/e51503a6f/9e9b47078/0ce73bec8 等经 git merge-base --is-ancestor 核实均为镜像构建快照 7e9c795ef 的祖先（已部署）；另有 11/15 条 message 与 git subject 非逐字一致（截断/改写），与 deploy skill「git log commit_from..HEAD --pretty=format:'%h|%an|%s'」取列表口径不符。",
+      "location": "docs/releases/2026-10-19-013-d789317d.md:9-54"
+    },
+    {
+      "severity": "P2",
+      "title": ".env.example 对空值的语义说明错误：显式空串会导致 backend 启动失败",
+      "evidence": "注释写「缺省（不设/空）=1 保持懒建库行为」，但容器内实测 KNOWLEDGE_SEARCH_SERVER_BUILD= 空串触发 pydantic ValidationError（bool_parsing, input_value=''），Settings 构造即失败；只有完全不设该变量才回退默认 True。运维若按注释显式留空将造成 backend crash-loop。",
+      "location": "deploy/.env.example:110-111"
+    },
+    {
+      "severity": "P3",
+      "title": "端到端证据 JSON 仅存响应体，未随件携带 HTTP 码/耗时/计数",
+      "evidence": "search-result*.json 只有 {ok,results,model_ready,reason}；HTTP 200 与耗时 20594/2934/12841/15136/4002ms 仅见 docker logs 的 slow.request 行，state/chunks 0|0 为评审现场 SELECT 复核。结论成立，但单靠这三个文件无法自证 FR-02 要求的码/耗时/计数。",
+      "location": ".sillyspec/.runtime/temp/search-result.json、search-result2.json、search-result3.json"
+    },
+    {
+      "severity": "P3",
+      "title": "冻结面混入并行变更的 5 条 changelog 行",
+      "evidence": "change.patch 前 45 行是 5 个模块 changelog 的「2026-10-19-thinking-zh-translate」条目，来自并行提交 d789317d4，scopeAudit 标为 unplanned 且不在 design.md 文件清单内；仅审计噪音，不涉及本次部署行为或数据。",
+      "location": ".sillyspec/changes/2026-10-19-knowledge-build-switch-rollout/change.patch:1-45"
+    },
+    {
+      "severity": "P3",
+      "title": "known-issues.md 交付物不在 change.patch 冻结面（.sillyspec/ 过滤）",
+      "evidence": "design.md 文件清单列了 .sillyspec/knowledge/known-issues.md，commit a414172c 也确实改了该文件（状态行更新为「本地已配实证」），但 change.patch / change-patch.json 只含 7 文件（5 changelog + .env.example + 发布记录）；FR-03 交付需靠 git show 核对，属审计面缺口。",
+      "location": ".sillyspec/changes/2026-10-19-knowledge-build-switch-rollout/change.patch"
+    },
+    {
+      "severity": "P3",
+      "title": "FR-02 的代理超时判据未在代理链路实测（20.6s 冷查为直连 backend）",
+      "evidence": "三次实测均直连 backend:8001，未经 frontend Next.js rewrite 代理；known-issues 记录该代理 ~20-30s 会 socket hang up，冷查 20.594s 已贴近该带。发布记录只写「无超时螺旋」，未声明代理路径未测；属证据面缺口，不推翻零建库/零嵌入结论。",
+      "location": "docs/releases/2026-10-19-013-d789317d.md:73-76"
+    },
+    {
+      "severity": "P3",
+      "title": "变更提交信息缺变更名尾缀，无法按变更名检索",
+      "evidence": "a414172c 的 subject 只有 chore(deploy)+描述+(task-01..03)，不含 (2026-10-19-knowledge-build-switch-rollout)；git log --all --grep='2026-10-19-knowledge-build-switch-rollout' 为空，而同批并行提交均带变更名。共享主仓多会话场景下削弱变更到提交的可追溯性。",
+      "location": "git commit a414172c"
+    },
+    {
+      "severity": "P3",
+      "title": "known-issues 状态行写「生产两项」与 FR-03 约定的「生产剩 env 一动作」不一致",
+      "evidence": "状态行正文为「剩余动作=生产服务器 deploy/.env 配 =0 + 未建索引 ws 走外部机器预建——生产两项落地后本条转 🟢」；FR-03 要求状态行为「本地已配实证、生产剩 env 一动作」。前者更准确（外部预建确为既有遗留动作），但与需求原文的「一动作」表述不符，属文档口径偏差。",
+      "location": ".sillyspec/knowledge/known-issues.md:335"
+    }
+  ],
+  "dimensionNotes": {
+    "乱序": "ok",
+    "并发": "ok",
+    "切换": "ok",
+    "作用域": "ok"
+  },
+  "declaredBoundariesRuling": [
+    {
+      "boundary": "deploy/.env 因 gitignore 不入冻结面",
+      "ruling": "可接受",
+      "reason": ".gitignore:47 覆盖 deploy/.env，design.md 已显式标注范围确认；容器内 settings 实测 False、grep 命中开关代码，运行面已核，审计缺口是该文件本就不入库的固有属性。"
+    },
+    {
+      "boundary": "5 个未提交外来脏文件以 --accept-dirty-gap 接受审计缺口",
+      "ruling": "可接受",
+      "reason": "实为 .tmp/answers/ 4 个（architecture html/md、lifecycle-video html/md）+ .tmp/espeak-uninstall.log 共 5 个；均非本变更交付物、未入镜像，change-patch.json 已记 acceptedDirtyGap=5。"
+    },
+    {
+      "boundary": "实测耗时抖动（冷 20.6s/热 2.9-15.1s、sillyspec 4.0s）如实记录、未触发超时螺旋",
+      "ruling": "可接受",
+      "reason": "日志原始行可复核，无 504/OOM；但冷查 20.594s 仅直连 backend，未走 frontend 代理，代理路径贴近 known-issues 的 20-30s 断连带（另列 P3）。"
+    },
+    {
+      "boundary": "仅重建 backend，前端未部署",
+      "ruling": "可接受",
+      "reason": "发布记录已注记前端与 daemon 未重建、翻译 UI 待下次前端部署；本变更范围仅后端开关，前端容器仍 healthy，无行为承诺被破坏。"
+    },
+    {
+      "boundary": "镜像快照约 7e9c795ef，其后提交（含并行 translate 评审修复）未进入本镜像",
+      "ruling": "可接受",
+      "reason": "容器内 config.py/search.py/translate_worker.py 哈希与 7e9c795ef 期 blob 一致，bfa635753 的 engine.py docstring 改动确不在镜像；记录已显式注记。注：bfa 还含一处 backend engine.py docstring hunk，「前端/测试/文档面」措辞略不精确但无运行时影响。"
+    },
+    {
+      "boundary": "seq=22 取号与并行会话存在潜在竞争",
+      "ruling": "可接受",
+      "reason": "docs/releases 全量 seq 去重无 22 重复，next-release-seq.sh 当前返回 23；潜在竞争未实际发生，记录可被平台正常解析。"
+    }
+  ],
+  "protectionClaimsVerified": [
+    {
+      "claim": "postgres 先于 backend 完成切换（否则 pgvector 迁移 fail-closed crash-loop）",
+      "verified": true,
+      "evidence": "postgres 容器 Created 07:02:21/Started 07:02:25，backend Started 07:05:13；backend-rebuild.log 显示 postgres Running/Healthy 后才 Starting/Started backend；pgvector 扩展 0.8.7 可用，迁移 20261015200000 已 apply。"
+    },
+    {
+      "claim": "全栈 healthy",
+      "verified": true,
+      "evidence": "docker ps / docker compose ps 显示 backend、postgres、redis、frontend、minio 全 healthy；直连 8001 /api/health 返回 status/db/redis ok，frontend 3001 代理 /api/health 亦 200。"
+    },
+    {
+      "claim": "数据卷沿用、可回滚",
+      "verified": true,
+      "evidence": "pgdata 卷 CreatedAt 2026-07-14（远早于本次切换），workspaces 19 行仍在；旧 postgres:16-alpine 镜像与旧 backend 镜像（dangling 1ac9b7467b7f，COMMIT_SHA=595eb98cc）均保留。"
+    }
+  ],
+  "notes": "评审期间仓库 HEAD 已由并行会话推进到 ffd511d4e（translate-live-verify），但评审对象按任务书锚定 4566ee7a8；该并行提交与 a414172c 零交互（未触及 deploy/、docs/releases、known-issues、knowledge 模块）。所有结论基于只读 git/docker/psql/curl 与现场复跑。",
+  "reviewedAt": "2026-10-19T16:11:18+08:00"
+}

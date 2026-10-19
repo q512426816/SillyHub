@@ -1,0 +1,22 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-19-knowledge-build-switch-rollout",
+  "reviewer": "subagent",
+  "verdict": "PASS",
+  "reviewedAgainst": "cb7394b3637b8bab1e1d746dbb2454c658bb6e85",
+  "findings": [
+    {
+      "severity": "P3",
+      "title": "commits[19].sha 未加引号被 YAML 解析为整数，sha 字段类型不一致",
+      "evidence": "625268389 为全数字短 SHA，frontmatter 写作 `- sha: 625268389`，yaml.safe_load 得到 int（其余 34 条均为 str）。原始文本与 git %h 逐字一致，且当前唯一消费方 deploy_records 只取 commits_count，无功能影响；但未来若按字符串比对/展示 sha 会类型不符，建议改为 sha: \"625268389\"。",
+      "location": "docs/releases/2026-10-19-013-d789317d.md:67"
+    }
+  ],
+  "dimensionNotes": {
+    "乱序": "ok",
+    "并发": "ok",
+    "切换": "ok",
+    "作用域": "ok"
+  },
+  "reviewedAt": "2026-10-19T16:18:20+08:00"
+}

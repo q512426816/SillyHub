@@ -376,3 +376,24 @@ created_at: 2026-10-15T11:57:05.061Z
 - 场景：默认开箱可用 — Given 联网（或 HF 镜像）环境零配置启动，When 首次翻译请求触发模型下载，Then 默认 repo 可解析下载并正常推理。
 全文：.sillyspec/changes/archive/2026-10-19-translate-live-verify/requirements.md#FR-03
 最近确认：ffd511d4eb260046f3803cfa16492f4e0e55a0a7
+
+## FR-core-015 deploy/.env 追加 KNOWLEDGE_SEARCH_SERVER_BUILD=0（gitignore 不入库），backend 镜像重建+容器 force-recreate 后容器内 settings.knowledge_search_server_build 实测为 False 且新代码在场
+变更：2026-10-19-knowledge-build-switch-rollout
+状态：active
+摘要：主路径
+全文：.sillyspec/changes/archive/2026-10-19-knowledge-build-switch-rollout/requirements.md#FR-01
+最近确认：cb7394b3637b8bab1e1d746dbb2454c658bb6e85
+
+## FR-core-016 未建索引工作区首搜端到端实测：秒级返回 + reason=index_not_built + knowledge_search_state/chunks 零新增（证据落盘）
+变更：2026-10-19-knowledge-build-switch-rollout
+状态：active
+摘要：主路径
+全文：.sillyspec/changes/archive/2026-10-19-knowledge-build-switch-rollout/requirements.md#FR-02
+最近确认：cb7394b3637b8bab1e1d746dbb2454c658bb6e85
+
+## FR-core-017 发布记录按 deploy skill 规范写入 docs/releases/；known-issues 地雷条目状态更新（本地已配实证、生产剩 env 一动作）
+变更：2026-10-19-knowledge-build-switch-rollout
+状态：active
+摘要：主路径
+全文：.sillyspec/changes/archive/2026-10-19-knowledge-build-switch-rollout/requirements.md#FR-03
+最近确认：cb7394b3637b8bab1e1d746dbb2454c658bb6e85
