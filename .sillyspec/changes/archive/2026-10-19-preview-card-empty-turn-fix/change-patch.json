@@ -1,0 +1,135 @@
+{
+  "change": "2026-10-19-preview-card-empty-turn-fix",
+  "baseline": "0ce73bec85996bca31a1a2979f667181dfa78025",
+  "head": "fb6904c3a66945eeda96ec80090c41e25e156b93",
+  "files": [
+    "docs/releases/2026-10-19-013-205a79f71.md",
+    "docs/releases/2026-10-19-014-5b9c2ce4c.md",
+    "frontend/src/app/(dashboard)/sessions/__tests__/page.test.tsx",
+    "frontend/src/components/daemon/__tests__/session-preview-integration.test.tsx",
+    "frontend/src/components/daemon/session-panel/__tests__/preview-merge.test.ts",
+    "frontend/src/components/daemon/session-panel/preview-merge.ts",
+    "frontend/src/components/daemon/session-panel/session-panel-page.tsx"
+  ],
+  "totals": {
+    "files": 7,
+    "additions": 380,
+    "deletions": 7
+  },
+  "savedAt": "2026-10-19T07:08:23.323Z",
+  "note": "flow done 时点冻结（本变更可归属交付面：baseline..HEAD 提交面过滤 .sillyspec/ 只留 .sillyspec/docs/ 交付文档 + 独占树未提交交付；治理工件目录不入冻结——2026-10-12-close-trace-freeze-integrity FR-01）",
+  "modules": [
+    {
+      "id": "frontend",
+      "files": 5,
+      "doc": "docs/multi-agent-platform/modules/frontend.md",
+      "docTouched": false,
+      "docMissing": false
+    },
+    {
+      "id": "docs",
+      "files": 2,
+      "doc": "docs/multi-agent-platform/modules/docs.md",
+      "docTouched": false,
+      "docMissing": false
+    },
+    {
+      "id": "frontend_app",
+      "files": 1,
+      "doc": "docs/SillyHub/modules/frontend_app.md",
+      "docTouched": false,
+      "docMissing": false
+    },
+    {
+      "id": "frontend_components",
+      "files": 4,
+      "doc": "docs/SillyHub/modules/frontend_components.md",
+      "docTouched": false,
+      "docMissing": false
+    }
+  ],
+  "uncoveredDirs": [],
+  "moduleMaps": [
+    "docs/backend/modules/_module-map.yaml",
+    "docs/frontend/modules/_module-map.yaml",
+    "docs/multi-agent-platform/modules/_module-map.yaml",
+    "docs/SillyHub/modules/_module-map.yaml",
+    "docs/sillyhub-daemon/modules/_module-map.yaml"
+  ],
+  "scopeAudit": {
+    "mode": "full-flow",
+    "ok": true,
+    "degradedReason": null,
+    "baseAnchor": "0ce73bec85996bca31a1a2979f667181dfa78025",
+    "totals": {
+      "files": 7,
+      "additions": 380,
+      "deletions": 7
+    },
+    "rows": [
+      {
+        "path": "docs/releases/2026-10-19-013-205a79f71.md",
+        "additions": 38,
+        "deletions": 0,
+        "kind": "new",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": "docs/releases/2026-10-19-014-5b9c2ce4c.md",
+        "additions": 29,
+        "deletions": 0,
+        "kind": "new",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": "frontend/src/app/(dashboard)/sessions/__tests__/page.test.tsx",
+        "additions": 5,
+        "deletions": 1,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": "frontend/src/components/daemon/__tests__/session-preview-integration.test.tsx",
+        "additions": 166,
+        "deletions": 0,
+        "kind": "modified",
+        "planned": "修改",
+        "verdict": "planned"
+      },
+      {
+        "path": "frontend/src/components/daemon/session-panel/__tests__/preview-merge.test.ts",
+        "additions": 78,
+        "deletions": 1,
+        "kind": "modified",
+        "planned": "修改",
+        "verdict": "planned"
+      },
+      {
+        "path": "frontend/src/components/daemon/session-panel/preview-merge.ts",
+        "additions": 33,
+        "deletions": 0,
+        "kind": "modified",
+        "planned": "修改",
+        "verdict": "planned"
+      },
+      {
+        "path": "frontend/src/components/daemon/session-panel/session-panel-page.tsx",
+        "additions": 31,
+        "deletions": 5,
+        "kind": "modified",
+        "planned": "修改",
+        "verdict": "planned"
+      }
+    ],
+    "excluded": {
+      "foreignDeclared": []
+    },
+    "note": "flow done 时点冻结（本文件落盘时采集）",
+    "closedBy": "flow done"
+  },
+  "patchSha256": "c82700688bf4ae641766f9650221d55125d0f2e84dae6e2639ab39dfd941306e",
+  "patchStatus": "ok"
+}

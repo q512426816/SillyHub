@@ -1,0 +1,102 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-19-preview-card-empty-turn-fix",
+  "rows": [
+    {
+      "anchor": "FR-01",
+      "row_id": "2026-10-19-preview-card-empty-turn-fix:flow:测试绑定FR-01",
+      "tests": [
+        "frontend/src/components/daemon/session-panel/__tests__/preview-merge.test.ts「纯切换轮命中孤儿配置行原引用透传并盖 seq，不出预览卡」",
+        "frontend/src/components/daemon/session-panel/__tests__/preview-merge.test.ts「纯切换轮未命中不生成条目」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-19-preview-card-empty-turn-fix"
+    },
+    {
+      "anchor": "FR-02",
+      "row_id": "2026-10-19-preview-card-empty-turn-fix:flow:测试绑定FR-02",
+      "tests": [
+        "frontend/src/components/daemon/session-panel/__tests__/preview-merge.test.ts「error_code 轮（started_at 空）仍出预览卡」",
+        "frontend/src/components/daemon/session-panel/__tests__/preview-merge.test.ts「running 轮（started_at 空）仍出预览卡」",
+        "frontend/src/components/daemon/session-panel/__tests__/preview-merge.test.ts「started_at 有值零摘要轮（群聊空轮）仍出预览卡」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-19-preview-card-empty-turn-fix"
+    },
+    {
+      "anchor": "FR-03",
+      "row_id": "2026-10-19-preview-card-empty-turn-fix:flow:测试绑定FR-03",
+      "tests": [
+        "frontend/src/components/daemon/__tests__/session-preview-integration.test.tsx「真零正文轮点击出轻提示且幂等语义不变」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-19-preview-card-empty-turn-fix"
+    },
+    {
+      "anchor": "FR-04",
+      "row_id": "2026-10-19-preview-card-empty-turn-fix:flow:测试绑定FR-04",
+      "tests": [
+        "frontend/src/components/daemon/session-panel/__tests__/preview-merge.test.ts「无内容终态轮」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-19-preview-card-empty-turn-fix"
+    },
+    {
+      "anchor": "FR-05",
+      "row_id": "2026-10-19-preview-card-empty-turn-fix:flow:测试绑定FR-05",
+      "tests": [
+        "frontend/src/components/daemon/__tests__/session-preview-integration.test.tsx",
+        "frontend/src/components/daemon/__tests__/turn-preview-card.test.tsx",
+        "frontend/src/components/daemon/session-panel/__tests__/preview-merge.test.ts"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-19-preview-card-empty-turn-fix"
+    },
+    {
+      "anchor": "FR-06",
+      "row_id": "2026-10-19-preview-card-empty-turn-fix:flow:测试绑定FR-06",
+      "tests": [
+        "frontend/src/components/daemon/__tests__/session-preview-integration.test.tsx「真缺失日志轮导航点击报原文 warning 而非操作失败」",
+        "frontend/src/components/daemon/__tests__/session-preview-integration.test.tsx「纯切换轮导航刻度点击直接定位配置行不报错不发请求」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-19-preview-card-empty-turn-fix"
+    }
+  ]
+}

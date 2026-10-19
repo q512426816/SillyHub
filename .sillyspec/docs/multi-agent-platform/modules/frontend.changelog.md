@@ -128,3 +128,4 @@
 | 2026-10-17 | 2026-10-17-session-envelope-rev-stale-guard | 2026-10-17-session-replay-pingpong-fix 评审 P3-3——跨标… |
 | 2026-10-18 | 2026-10-18-change-type-git-conventional | 变更类型改用git惯用前缀彩色标签 |
 | 2026-10-18 | 2026-10-18-change-list-type-filter | 变更列表加类型标签与类型筛选 |
+| 2026-10-19 | 2026-10-19-preview-card-empty-turn-fix | 切换档案产生的静默轮（started_at 空、无日志、无 error_code 的终态轮）刷新后进… |
