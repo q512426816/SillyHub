@@ -60,6 +60,10 @@ import { ApiError } from "@/lib/api";
 import { queryKeys } from "@/lib/query-keys";
 import { cn } from "@/lib/utils";
 import {
+  TranslatedThinkingBody,
+  useThinkingSummary,
+} from "@/components/thinking-translate";
+import {
   CollapsibleSection,
   ToolCallPreview,
   ToolResultCard,
@@ -144,12 +148,6 @@ function formatSegmentTime(ts: string | null): string | null {
     hour: "2-digit",
     minute: "2-digit",
   });
-}
-
-/** thinking 折叠态单行摘要（agent-log-viewer thinkingSummary 同款：压平 + 截 60 字符）。 */
-function thinkingSummary(content: string): string {
-  const flat = content.replace(/\s+/g, " ").trim();
-  return flat.length <= 60 ? flat : `${flat.slice(0, 60)}...`;
 }
 
 /** 黄条回落文案尾巴（原文端点口径：尾部 256KB）。 */
@@ -348,6 +346,22 @@ function RawLogContent({ data }: { data: AgentLogContentResponse }) {
   );
 }
 
+/**
+ * 思考段卡片（2026-10-19-thinking-zh-translate / FR-04 接入离线翻译）：
+ * 抽出为组件以挂 useThinkingSummary——折叠摘要译中、展开正文默认译文可切
+ * 原文（plain 形态保持原 whitespace-pre-wrap 样式）。
+ */
+function ThinkingSegment({ text }: { text: string }) {
+  const summary = useThinkingSummary(text);
+  return (
+    <CollapsibleSection title="思考过程" defaultOpen={false} summary={summary}>
+      <div className="text-[11.5px] leading-relaxed text-muted-foreground">
+        <TranslatedThinkingBody text={text} variant="plain" />
+      </div>
+    </CollapsibleSection>
+  );
+}
+
 /** 单段渲染分支（design §7.3：reply→MarkdownText / thinking→折叠 / tool→卡片）。 */
 function renderSegment(seg: ConversationSegment) {
   switch (seg.kind) {
@@ -361,18 +375,7 @@ function renderSegment(seg: ConversationSegment) {
         </div>
       );
     case "thinking":
-      return (
-        <CollapsibleSection
-          key={seg.seq}
-          title="思考过程"
-          defaultOpen={false}
-          summary={thinkingSummary(seg.text)}
-        >
-          <div className="whitespace-pre-wrap break-words text-[11.5px] leading-relaxed text-muted-foreground">
-            {seg.text}
-          </div>
-        </CollapsibleSection>
-      );
+      return <ThinkingSegment key={seg.seq} text={seg.text} />;
     case "tool_use":
       // 配对成功：复用 ToolCallPreview（agent-log-viewer 同款导出）+ 结果并入
       // 卡片结果区（mergedResult），is_error 经 entry.success 着失败红。

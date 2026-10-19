@@ -70,6 +70,10 @@ import { CopyButton } from "@/components/daemon/copy-button";
 import { FileMessageCard } from "@/components/daemon/file-message-card";
 import { useSubagentPanel } from "@/components/daemon/subagent-panel-context";
 import { ToolExpandBody } from "@/components/daemon/tool-args-detail";
+import {
+  TranslatedThinkingBody,
+  useThinkingSummary,
+} from "@/components/thinking-translate";
 // ql-20260920-006：user_msg 段文本剥附件标记行（页内 import 惯例——turn-timeline
 // 同源引用 runtime-session-helpers 的既有 util，此处沿用）。
 import { parseAttachmentMarkers } from "@/components/daemon/runtime-session-helpers";
@@ -656,10 +660,14 @@ export const TextSegmentView = memo(function TextSegmentView({ segment }: TextSe
  * 箭头 + 💭 思考过程 + 摘要（空白折叠 60 字截断，流式自动跟随段文本更新）；
  * streaming 时标题旁「思考中」脉冲标记；默认折叠（R-03 展开才挂载正文）；
  * 展开正文 MarkdownText 限高 180px 滚动。
+ *
+ * 2026-10-19-thinking-zh-translate / FR-01·FR-04：摘要与展开正文接入离线翻译
+ * （useThinkingSummary / TranslatedThinkingBody）——流式中显示原文零请求，
+ * 流结束后摘要换中文；展开正文默认译文、可一键切原文。
  */
 export const ThinkingRowView = memo(function ThinkingRowView({ segment }: ThinkingRowViewProps) {
   const [open, setOpen] = useState(false);
-  const summary = summaryOf(segment.text);
+  const summary = useThinkingSummary(segment.text, segment.streaming);
   return (
     <div className="w-full">
       <button
@@ -696,7 +704,7 @@ export const ThinkingRowView = memo(function ThinkingRowView({ segment }: Thinki
             不能塞进滚动容器内（overflow-y-auto 会裁掉浮出按钮）；折叠态不渲染（R-03）。 */
         <div className="group relative mt-1">
           <div className="max-h-[180px] overflow-y-auto rounded-lg bg-muted px-3 py-2 text-[11.5px] leading-relaxed text-muted-foreground">
-            <MarkdownText content={segment.text} />
+            <TranslatedThinkingBody text={segment.text} streaming={segment.streaming} />
           </div>
           <CopyButton text={segment.text} />
         </div>

@@ -168,6 +168,10 @@ function formatTurnDuration(ms: number): string {
 }
 import { ErrorBoundary } from "@/components/error-boundary";
 import { MarkdownText } from "@/components/ui/markdown-text";
+import {
+  TranslatedThinkingBody,
+  useThinkingSummary,
+} from "@/components/thinking-translate";
 // ql-20260825-006：会话页提问卡最小化——右下角浮动胶囊 + 标题推导（与 approvals
 // 聚合页 SessionPermissionPanel 共用一套 UI）。
 import {
@@ -2018,6 +2022,22 @@ function SegmentedTurnBody({
 }
 
 /**
+ * 「全部」视图的思考组卡片（2026-10-19-thinking-zh-translate / FR-04 抽出为
+ * 组件以挂翻译 hook）：折叠摘要离线译中、展开正文默认译文可切原文（无
+ * streaming 标记——静态回放直翻、实时增长文本走 1.2s 稳定窗防抖）。
+ */
+function ThinkingProcessCard({ text }: { text: string }) {
+  const summary = useThinkingSummary(text);
+  return (
+    <SessionCollapsible tone="thinking" title="思考过程" summary={summary}>
+      <div className="rounded-md bg-muted/50 px-2.5 py-1.5 text-[11px] leading-5 text-muted-foreground">
+        <TranslatedThinkingBody text={text} />
+      </div>
+    </SessionCollapsible>
+  );
+}
+
+/**
  * ql-20260729-005：「全部」视图的过程项列表，按真实到达顺序渲染。
  * 缩进对齐答复气泡（ml-9 ≈ 助手图标宽度），左侧竖线表示"执行过程"语义。
  * ql-20260730-003：连续 thinking 合并成一整段「思考过程」卡片，被工具/stderr 打断则
@@ -2084,19 +2104,7 @@ function TurnDetailsList({
     <div className="ml-9 space-y-1 border-l-2 border-muted pl-3">
       {grouped.map((item, idx) => {
         if (item.kind === "thinking") {
-          const summary = item.text.replace(/\s+/g, " ").trim();
-          return (
-            <SessionCollapsible
-              key={idx}
-              tone="thinking"
-              title="思考过程"
-              summary={summary.slice(0, 60) + (summary.length > 60 ? "…" : "")}
-            >
-              <div className="rounded-md bg-muted/50 px-2.5 py-1.5 text-[11px] leading-5 text-muted-foreground">
-                <MarkdownText content={item.text} />
-              </div>
-            </SessionCollapsible>
-          );
+          return <ThinkingProcessCard key={idx} text={item.text} />;
         }
         if (item.kind === "tool") {
           return <ToolEventCard key={idx} event={item.event} />;
