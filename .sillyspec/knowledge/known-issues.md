@@ -297,3 +297,39 @@ session_id 列 NOT NULL + default_factory=uuid4（为兼容 ~50 处存量构造�
 ## wt-commit 的 -- 路径分隔符被 PowerShell 5.1 吞掉——用 --pathspec-from-file
 
 Windows PowerShell 5.1 向原生命令传参时裸 `--` 会被剥掉，`sillyspec wt-commit --change X -m "..." -- path1 path2` 报「缺少提交路径」且加引号无效。规避：路径写入临时文件后 `sillyspec wt-commit --change X -m "..." --pathspec-from-file <file>`（每行一个路径，UTF-8）。Git Bash / PowerShell 7 无此问题。（来源：2026-09-23-md-card-render task-01）
+
+## 🟡 require_permission 隐式 Path(workspace_id) 依赖：平台级（无 ws 前缀）端点直接 422
+
+`auth_deps.require_permission(Permission.X)` 的 checker 签名含 `workspace_id: Annotated[uuid.UUID, Path(...)]`——路由路径里没有 `{workspace_id}` 时 FastAPI 请求校验直接 422（`loc=["path","workspace_id"]`，报错像路由冲突极具迷惑性；2026-10-14-deploy-release-notes 新端点 GET /api/deploy-records 实测踩中，路由匹配调试零收获）。平台级端点（聚合多 workspace / 无 ws 前缀）应使用 `require_permission_any`（auth_deps.py 注释口径「used by APIs without ws_id」）。判别信号：422 details 里 loc 指向 path 参数名而非业务字段。来源：2026-10-14-deploy-release-notes task-02（router.py 注释留痕）。
+
+- 状态（2026-10-19 归类核实，原【待确认】已裁决）：结构性坑现行有效——平台级新端点一律 `require_permission_any`，判别信号见正文。
+
+## 🟡 .zcode 部分 skill 文件在 main 是已跟踪文件：git rm --cached 会把分支做成「删除态」
+
+`.zcode` 整体在 .gitignore，但 sillyhub-docker-deploy 等 skill 文件历史上已入库跟踪（gitignore 对已跟踪文件无效；`git ls-tree main -- <path>` 可判）。worktree 里改这类文件后 `git add` 被拒（按 ignore 规则报错，需 -f）；若误跑 `git rm --cached` 再 amend，分支相对 main 变成 375 行全删——merge 会把 skill 文件从 main 抹掉。正确姿势：确认 tracked 后 `git add -f`，diff main..HEAD --stat 应显示 +N 修改而非 N deletions。来源：2026-10-14-deploy-release-notes task-06 收口提交实操。
+
+- 状态（2026-10-19 归类核实，原【待确认】已裁决）：仓库存量状态现行有效——被跟踪的 `.zcode` skill 文件 git 操作按正文判据处理。
+
+## 🟢 生产小内存服务器（1.6G）容器内跑大模型嵌入不可行——本机嵌入+SSH 隧道直写生产库 + 六连坑（已定案）
+
+2026-10-15-knowledge-search-pgvector 部署实证。**核心结论**：backend 容器 mem_limit 800m（后提 1100m）内跑 fastembed 全量嵌入（6712 chunks）被 cgroup OOM 连续杀（模型 ~350M + 服务本体 515M 合计超容器限额；杀掉的是 cgroup 内最大进程，dmesg 有 "Memory cgroup out of memory" 可查）。**终解** = 本机（20 核）嵌入 + `ssh -L 15432:<PG容器IP>:5432` 隧道直写生产 DB（228.7s 全量建库一次完成），服务器容器只跑查询。**六连坑**（同批量部署会再踩）：① 容器内后台进程用 `docker exec` 不加 `-d` 会随 ssh 会话结束被杀（长任务必须 `docker exec -d` + 容器内日志文件轮询）；② `docker cp` 进容器的脚本随容器重建蒸发（命令链须先 cp 再跑）；③ 模型缓存挂载目录必须容器 uid 可写（chown/chmod——否则 fastembed 静默卡死加载，无报错）；④ PG 容器端口未映射宿主（known-issues 既有），ssh -L 转发目标必须写**容器 IP** 而非 127.0.0.1；⑤ SQLAlchemy `with_variant` 列取不到方言方法（`embedding.cosine_distance` 在 JSON 基类型 InstrumentedAttribute 上不存在）——PG 专有算子走原生 `text()` SQL + `CAST(:qv AS vector)`；⑥ 决策库跨变更重号 + 模板化同标题条目（多个「## D-001@v1 风险与死路（design 槽4 收割）」）使 `(workspace_id, spec_path, anchor, title)` 唯一约束在真实语料下必撞——切块键改行号坐标 `(spec_path, start_line)` 或去 uq。
+
+- 状态（2026-10-19 归类核实）：已定案——本机嵌入 + SSH 隧道直写为既定部署路径（2026-10-15/16 两轮实证），容器内嵌入列为禁止操作。
+
+## 🟢 平台 spec 清单唯一索引静默损坏（容器反复被杀后遗症）——归档后平台仍显示「进行中」+ spec-sync 恒 422（已修复）
+
+现象：变更本地已归档并推送，平台变更中心仍显示进行中、不在归档列表；CLI 文件树同步恒 HTTP 422（「同步包无效：源文件缺失的重命名操作必须携带文件内容」），而终态墓碑（status=archived）上行正常。根因：生产 `spec_file_manifest` 的 `ux_spec_manifest_ws_path (workspace_id, path)` 唯一索引**静默损坏**（索引缺项——走索引查不到实际存在的行，谓词相同、禁索引强扫即命中），apply_ops 预取 miss → rename 被判 R-07「源文件缺失」→ 422。坏索引同时放行了重复插入：4 个高频热文件（knowledge/INDEX.md、decisions/backend.md、frontend.md、scan/CONVENTIONS.md）各混入 1 条 v1/v2 幻影行（upsert 漏检变 INSERT）。amcheck 全库扫描再揪出 **17 个额外坏索引**（RBAC/changes/workspaces/scan_docs/change_documents 等唯一索引——「item order invariant violated」「high key invariant violated」），共 18 个；唯一表查重仅 spec_file_manifest 有重复。护栏：① 容器反复被杀/重启风暴后必须对 DB 跑 `CREATE EXTENSION amcheck` + 逐索引 `bt_index_check(oid, true)`（heapallindexed 专查「堆有行、索引缺项」，本例 360 索引扫出 18 坏）；② REINDEX（CONCURRENTLY 亦然）报 "could not create unique index ... duplicated" = 坏索引已放行重复行的信号——先备份→按 max version 保留真身去重→再重建（去重 DELETE 也要禁索引扫描，防走坏索引漏删）；③ 索引损坏的指纹：同一谓词「带索引 0 行 / 禁索引 1 行」且逐条件单独查都命中——遇 SQL 语义矛盾先怀疑索引；④ 平台「归档后仍进行中」排查序：终态墓碑是否上行 → 文件树 spec-sync 是否 200 → DB manifest 是否有 changes/archive/ 行。证据：备份表 `spec_file_manifest_dup_backup_20261016`（8 行）留档服务器；修复后 amcheck checked=360 bad=0；重推同步 26 文件落地（archive 25 行/active 0 行）。
+
+- 状态（2026-10-19 归类核实）：已修复——amcheck 复验 checked=360 bad=0、重推同步落地；本条保留为「归档后仍进行中 + spec-sync 恒 422」的诊断 playbook。
+
+## 🟢 本地 docker 平台同款索引静默损坏复发——免去重 REINDEX 分叉 + amcheck 必须 JOIN pg_am 过滤 btree + 同步静默断档信号（已修复；遗留：本地墓碑处置待拍板）
+
+2026-10-16 晨生产条目（上条）收尾后同日上午，本地 docker 平台（127.0.0.1，与生产各自独立 postgres 数据卷）复发同族故障：变更 2026-10-14-turn-anchor-cache-eviction 本地 10-14 05:45 已归档提交，平台变更中心仍显示进行中。四点分叉/新增经验：① **免去重分支**——本地坏索引 btree 12/360 且全部唯一索引查重为 0（9 张唯一表 GROUP BY HAVING 全空），直接 REINDEX 12 个即愈（复验 checked=360 bad=0）；坏索引未放行重复行时可跳过「备份→去重→重建」整段——**先查重再定修复路径**。② **amcheck 扫描必须 JOIN pg_am 限定 btree**——`bt_index_check` 对 GIN 索引（ppm 问题清单的 *_trgm 全文索引等）必然报错、被异常吞掉计成「坏」，本地首扫 29 报中 17 个是 GIN 误报、btree 真坏 12；生产条目的「18 坏」若当时未过滤 btree，同源可能虚高。③ **同步静默断档**是「归档后仍进行中」的第二成因：`platform_sync_tokens.last_used_at` 停在 2026-10-15 02:27 UTC 之后零同步请求（工作转移到生产侧后本地平台断粮）——不是 422 失败路径，是压根没有请求发出；排查序应在生产四步（终态墓碑→spec-sync 200→manifest archive 行）之前先查 last_used_at 是否长期停滞。④ 断档叠加 10-14 批量回填曾以归档前快照为锚，错误 active 状态存活两天无自愈。恢复全链：修索引 → `sillyspec platform sync` 全树重推（spec_file_manifest 10152→10680 行）→ 后端 reparse 自动翻转（changes 表 614 行收敛、目标变更 location=archive）。遗留待拍板：2026-09-08-session-turn-nav 平台删除墓碑（10-12 建）vs 本地 archive 19 文件——恢复走 manifest-heal 清墓碑重推 / 接受删除走 tombstone_cleanup 隔离本机目录，二选一。工具改进线索：spec-sync 残留行实为 exists=false 软删墓碑、follow-server 守卫对使用者不可见，收敛判定目前须翻 DB（建议 sync 回执直接报软删墓碑行数）。
+
+- 状态（2026-10-19 归类核实）：索引损坏与同步断档链已修复（复验 checked=360 bad=0、reparse 翻转落地）；遗留=正文④ 墓碑处置二选一待拍板。
+
+## 🟡 平台知识搜索「首搜建库地雷」——未建索引工作区的第一次搜索必超时（大语料 OOM 整栈停摆）
+
+2026-10-16 生产实证（第二次容器内嵌入事故）：用户在平台搜 sillyspec 工作区 → 该 ws 无 knowledge_search_state 行 → 懒同步走全量建库 → 容器内嵌入（mem_limit 1100m 也扛不住 6625 chunks）→ backend OOM(137) 被杀 → 整栈随后被手动停掉。**小语料也一样超时**：2 核嵌入速率 ~2.6 chunks/s，几百 chunks 就是数分钟，nginx 掐断连接后 uvicorn 取消请求任务 → 建库事务回滚 → 重试永远从头再来——**未建索引的 ws 搜索永远 504/超时**。运维解（本次实证）：从服务器 tar 拉 ws 语料（knowledge+docs）到本机 → `prod-index-batch.py` 模式（隧道直写生产库，embedder 单次加载循环建库，108 md/7 ws 共 28.7s）批量预建；指纹含 mtime 但 tar 保 mtime + 内容 hash 吸收漂移，建完服务器首查 0.8s 直查零重建。**根治缺口（待代码变更）**：`search_sync`/端点应支持「服务器禁建库」开关（如 KNOWLEDGE_SEARCH_SERVER_BUILD=0 → 无 state 行时跳过建库直接词面降级 + reason=index_not_built），新工作区首搜不再地雷；建库一律外部机器（本机隧道）预建。
+
+- 状态（2026-10-19 归类核实）：现行 🟡——运维缓解已落地（外部批量预建），根治缺口（服务器禁建库开关）待代码变更。

@@ -99,3 +99,13 @@ worktree doctor 静默失败后手动补链时（上一条 junction 坑的修复
 - 现象：子代理按「工作目录 = worktree」跑 task-07 全量回归 + 模块文档同步，把 verify-result.md、模块文档修改等产物写进 worktree 并提交到 worktree 分支；主仓库同路径文件未更新。SillySpec CLI 在主仓库运行，验收/归档阶段可能看不到 verify-result.md；未来合并 worktree 分支时，若主仓库也补了一份同内容文件，会触发 both-added 冲突。
 - 根因：代码实现与测试必须在 worktree（隔离其它并发变更），但 SillySpec 进度产物（verify-result.md、tasks.md、review.json、模块文档变更索引）属于项目级文档，主仓库的 SillySpec 流程实时消费它们。
 - 规避：派发 regression/docs 类 task 时，在 prompt 里明确分层——源码/测试命令在 worktree 执行，`.sillyspec/changes/<change>/verify-result.md`、`.sillyspec/docs/.../modules/*.md` 等产物回写主仓库；或在子代理返回后由主代理复核并把产物从 worktree 同步到主仓库。不要依赖「worktree 分支合并后再消费」，否则主仓库 execute/verify 进度对账会缺证据。
+
+## 跨仓 worktree task 用直接 git commit，wt-commit 只认主仓 worktree
+
+`sillyspec wt-commit --change <变更名>` 固定在**主仓** worktree（`.sillyspec/.runtime/worktrees/<变更名>`）跑 `git add/commit`；跨仓 task（task 卡 `repo: sillyspec` 等）的 worktree 是 `<变更名>--<repo-key>` 后缀目录，在跨仓 worktree 内跑 wt-commit 会被 CLI 当成 sillyspec 仓自己的项目实例（找它自己的 .sillyspec）报「worktree 不存在」。正确做法：跨仓 worktree 内直接 `git -C <worktree> add + commit`（execute step 指引「跨仓 worktree task」段本就钉了此方式），apply 阶段 CLI 统一把跨仓 worktree 交付 patch 回对应主工作区。另注意 wt-commit 的 `-m` 缺失会报错（不是可选参数）。来源：task-05/task-02 提交实操（2026-10-09-tombstone-conflict-root-fix）。
+
+## 并行会话删主仓 frontend/node_modules 顶层链接——worktree 与主仓前端全瘫（vitest not found）
+
+现场：worktree frontend 的 node_modules 是指向主仓的 junction；主仓 node_modules 顶层目录从数百个被删到 26 个（.bin 消失、顶层包链接消失，仅 .pnpm store 完好）。症状链：worktree `pnpm exec vitest` 报 vitest not found；绕 .pnpm 直连 `node vitest.mjs` 报 Cannot find module 'vitest/config'（模块解析链断，绕不过）。修复：worktree frontend 内 `pnpm install --force`（经 junction 重建主仓顶层链接；普通 install 可能命中缓存不修——规则 21 既有口径）后再 `pnpm install` 补全；修完主仓与 worktree 均恢复。判断根因是并行会话的 install/清理动作打到共享 node_modules——多会话共用主仓 node_modules 时这是结构性竞态，建议会话内避免任何 node_modules 级清理（来源 task-05，2026-10-15-knowledge-search-pgvector 实证）。
+
+- 状态（2026-10-19 归类核实）：2026-10-15 事故已修复（主仓与 worktree 均恢复）；结构性竞态现行有效——多会话期禁止任何 node_modules 级清理。
