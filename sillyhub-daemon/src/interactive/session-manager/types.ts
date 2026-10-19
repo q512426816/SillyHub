@@ -104,7 +104,7 @@ export interface SessionManagerOptions {
    * - `enabled`：缺省 true；显式 false 或 env `SILLYHUB_HOST_SETTINGS_WATCH=0` 关闭
    *   （逃生口，start() 时读取）。
    * - `settingsPath`：缺省 `defaultHostSettingsPath()`；测试注入 tmp 路径。
-   * - `pollIntervalMs`：缺省 3000；测试注入小间隔。
+   * - `pollIntervalMs`：缺省 HOST_SETTINGS_POLL_INTERVAL_MS（1000，2026-10-19 提速 3s→1s）；测试注入小间隔。
    *
    * 触发后对「claude 引擎 + 未绑平台供应商 + 宿主目录 transcript + 非终态」会话走
    * 既有配置切换状态机重载引擎（见 SessionManager.reloadHostDefaultSessions）。

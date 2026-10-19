@@ -1,0 +1,28 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-19-host-settings-reload-latency",
+  "reviewer": "subagent",
+  "verdict": "PASS",
+  "reviewedAgainst": "68f0b240d676a635bf1c75ae69d0f912403ab716",
+  "findings": [
+    {
+      "severity": "P2",
+      "title": "FR-01 承诺的真机端到端实测留痕不存在，而 task-03 已勾 [x]（自述与实态不符）",
+      "evidence": "requirements.md:14 与 :42 将「端到端（切档→引擎重载完成）真机实测 ≤4 秒并留痕（发布记录）」绑定为 FR-01 交付的一部分；tasks.md:10 task-03 已勾 [x] 并含「部署后真机端到端延迟实测 ≤4s 留痕（发布记录）」。但实态：docs/releases/ 最新为 2026-10-19-011-a38597189.md（上一变更 host-settings-live-reload 的发布记录，commit_to=a38597189）；本变更两提交（1ca50c955、68f0b240）及工作区（git status 无 docs/releases 未跟踪文件）均无任何本变更的发布记录或实测留痕。注：仓库先例（上一变更 review 先行、发布记录 011 覆盖归档后提交）表明部署/发布记录在流程上可后置于 review——若按该排序，本条属「未到期但提前勾选」；但按零自述标准，勾 [x] 时留痕必须已存在。收口/归档前必须补落实测记录（≤4s）并同步勾选态。",
+      "location": ".sillyspec/changes/2026-10-19-host-settings-reload-latency/tasks.md:10；docs/releases/（缺失）"
+    },
+    {
+      "severity": "P3",
+      "title": "残留过时文档注释：session-manager/types.ts 仍写「pollIntervalMs：缺省 3000」",
+      "evidence": "本变更将默认节拍收窄为 HOST_SETTINGS_POLL_INTERVAL_MS=1000（host-settings-watcher.ts:80）且未同步 session-manager/types.ts:107 的选项注释「pollIntervalMs：缺省 3000；测试注入小间隔」——注释与新默认矛盾（CLAUDE.md 规则 18：注释与实现不一致是万恶之源）。运行时无影响（代码默认确为单一源 1000），纯文档漂移；单源声明在代码口径上成立。",
+      "location": "sillyhub-daemon/src/interactive/session-manager/types.ts:107"
+    }
+  ],
+  "dimensionNotes": {
+    "乱序": "ok",
+    "并发": "ok",
+    "切换": "ok",
+    "作用域": "ok"
+  },
+  "reviewedAt": "2026-10-19T02:45:39.000Z"
+}
