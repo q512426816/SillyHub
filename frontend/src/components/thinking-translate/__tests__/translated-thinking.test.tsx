@@ -25,6 +25,16 @@ vi.mock("@/lib/thinking-translate", async (importOriginal) => {
   };
 });
 
+// MarkdownText 用 next/dynamic + ssr:false——jsdom 同步渲染处于 loading(null)，
+// 批量并发下动态解析慢于断言窗口造成竞态假败（agent-log-viewer.test.tsx 同款
+// 先例注释）。本文件测翻译状态机与切换交互，不测 markdown 渲染本身（库保证），
+// mock 成纯文本渲染消除竞态。
+vi.mock("@/components/ui/markdown-text", () => ({
+  MarkdownText: ({ content }: { content: string }) => (
+    <div data-testid="markdown-text">{content}</div>
+  ),
+}));
+
 import {
   TranslatedThinkingBody,
   useThinkingSummary,
