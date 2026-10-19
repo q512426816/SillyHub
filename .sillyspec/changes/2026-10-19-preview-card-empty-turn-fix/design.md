@@ -51,4 +51,7 @@ preview-merge.ts 新增模块内私有函数 isContentlessTerminalItem（不导�
 | 修改 | frontend/src/components/daemon/session-panel/preview-merge.ts | 新增 isContentlessTerminalItem 判定 + 归并循环前置分支（透传盖章/跳过），文件头归并规则注释同步；追加：isContentlessTerminalItem 导出（跳转/预取链路复用，单一判定源） |
 | 修改 | frontend/src/components/daemon/session-panel/session-panel-page.tsx | handleExpandPreview 对 empty 结果补 notify.warning 轻提示；追加：handleJumpToTurn 无内容终态轮早退定位、三处固定文案 notify.error→notify.warning、prefetchNearbyTurns 跳过无内容邻居 |
 | 修改 | frontend/src/components/daemon/session-panel/__tests__/preview-merge.test.ts | 新增「无内容终态轮」describe 五用例；outlineItem fixture 默认补 started_at（对齐真实契约：正常轮必有值），既有断言语义不变 |
-| 修改 | frontend/src/components/daemon/__tests__/session-preview-integration.test.tsx | 新增「静默切换轮不出预览卡渲染配置行」集成用例；真零正文轮用例补轻提示断言（mock @/lib/errors useNotify） |
+| 修改 | frontend/src/components/daemon/__tests__/session-preview-integration.test.tsx | 新增「静默切换轮不出预览卡渲染配置行」集成用例；真零正文轮用例补轻提示断言（mock @/lib/errors useNotify）；追加导航刻度点击两用例（静默轮无 toast 无请求定位 / 真缺失日志报原文 warning） |
+| 修改 | frontend/src/app/(dashboard)/sessions/__tests__/page.test.tsx | 既有导航零日志兜底用例断言同步新通道：notifyError → notifyWarning 原文（FR-06 行为变更追踪，旧断言锁的是被 errMessage 吞文案的坏通道） |
+| 新增 | docs/releases/2026-10-19-013-205a79f71.md | 发布记录（frontend 首次重建上线本次修复，容器内 chunk 校验） |
+| 新增 | docs/releases/2026-10-19-014-5b9c2ce4c.md | 发布记录（真机验收追加修复——导航静默轮「操作失败」，frontend 二次重建） |

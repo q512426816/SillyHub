@@ -1,0 +1,21 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-19-preview-card-empty-turn-fix",
+  "reviewer": "subagent",
+  "verdict": "PASS",
+  "reviewedAgainst": "fb6904c3a66945eeda96ec80090c41e25e156b93",
+  "findings": [],
+  "dimensionNotes": {
+    "乱序": "ok（边界已裁决：可接受——①历史 started_at 缺失正常轮退化为不可见：需 started_at 缺失+摘要双空+终态三条件同时成立的病态数据形态，该形态本无摘要可预览、导航早退仍可定位既有行，实测当前库正常轮均有 started_at，低概率可接受降级；②stale outline 挂载后不重拉留作后续：判定纯字段驱动+归并按 seq 稳定排序+大纲外轮尾部追加保留，迟到大纲下一次派生自愈，且透传方案已消刷新前后形态漂移。核对属实：isContentlessTerminalItem 仅消费条目自身字段 preview-merge.ts:110-115，无跨源时序假设）",
+    "并发": "ok（核对属实：归并纯函数，WeakMap 盖章按原引用幂等 preview-merge.ts:151-161，无新增写路径；notify 走 antd 串行；本维度无声明边界）",
+    "切换": "ok（核对属实：无新增状态，早退分支仅写入既有 jumpEmptyJumpedRunIdsRef，会话切换重置链 session-panel-page.tsx:1138 不变，settleFollow/纪元/卸载守卫未动；本维度无声明边界）",
+    "作用域": "ok（核对属实：判定键为单会话大纲条目，ref 均为会话内生命周期、切换即重置，后端/daemon 零改动、多实例数据面与现状一致；本维度无声明边界）"
+  },
+  "reviewNotes": {
+    "FR核验": "6/6 兑现。FR-01: preview-merge.ts:110-115 四条件判定 + :187-190 命中透传盖章/未命中跳过；FR-02: 非无内容路径 :191-195 逐字节未动（失败族 error_code 非空、活跃族 running 映射、群聊空轮 started_at 有值均被 :111-113 天然排除，三用例锁定）；FR-03: session-panel-page.tsx:2403 empty→notify.warning('该轮无对话内容')，:2381 幂等短路未动；FR-04: preview-merge.test.ts「无内容终态轮」describe 五用例 + fixture 默认补 started_at，既有断言语义未改（仅一处 it 标题更名，断言体零变化）；FR-05: 评审员实测运行四测试文件 85/85 全绿（preview-merge 19 + turn-preview-card 7 + 集成 10 + page 49）；FR-06: :2593-2598 直达请求前早退（记幂等+settleFollow+locateAndHighlight），二次点击走 :2564 同径短路，三处固定文案 notify.error→notify.warning（:2399/:2535/:2617），grep 证全文件已无 notify.error 字面量调用，:2424 预取跳过无内容邻居。",
+    "防护声明核验": "四条件判定（started_at 空+error_code 空+摘要双空+completed/killed 终态）真实存在于 preview-merge.ts:110-115 且三处链路（归并/跳转/预取）单一判定源复用；幂等标记防重复请求核验属实（:2381/:2564/:2436，集成测试断言二次点击零请求）。",
+    "生成物同步": "证属实：change.patch 与 HEAD fb6904c3 代码面一致（fb6904c3 为 patch 内最后一笔），git status 仅 sillyspec 元数据变更；patch 触达面仅 frontend src 两源文件+三测试文件+docs/releases 两篇，无 api-types/后端/daemon 改动，与「无端点/schema 改动」声明一致。",
+    "盲维四问真实性": "四问作答与代码核对一致，无「说不适用实则存在风险面」情形（详见 dimensionNotes）。"
+  },
+  "reviewedAt": "2026-10-19T15:14:17+08:00"
+}
