@@ -1,22 +1,15 @@
 {
   "schemaVersion": 1,
   "change": "2026-10-19-hide-shared-profile-in-session",
-  "reviewer": "subagent-recheck",
+  "reviewer": "subagent-recheck2",
   "verdict": "PASS",
-  "reviewedAgainst": "968192e797e84f0744fdd4a4598b35e4ee220b9f",
-  "findings": [
-    {
-      "severity": "P3",
-      "title": "P3-1「误报」结论不成立：特性提交确实夹带档案条目图标尺寸变化 h-3 w-3 → h-3.5 w-3.5，且引入同下拉内图标尺寸不一致",
-      "evidence": "git show c9562e57 -- frontend/src/components/sessions/session-config-bar.tsx 的 hunk 在 profiles.map→visibleProfiles.map 同一改动块内含 '- icon={<User aria-hidden className=\"h-3 w-3\" />}' → '+ icon={<User aria-hidden className=\"h-3.5 w-3.5\" />}'。父提交 c9562e57^ 同文件中该 profiles.map 条目图标（约 926 行）为 h-3 w-3；父提交中 4 处 h-3.5 w-3.5（732 Cloud/876 Brain/898 User/1008 Settings2）全部是控件按钮图标而非下拉条目图标——前轮核实把按钮图标（898 行 h-3.5）误当「档案项图标历史即 h-3.5」，结论错误。现状：固定项「不指定（无人格）」图标仍 h-3（931 行）而 map 条目 h-3.5（945 行），同一下拉内不一致。纯外观、非阻塞；建议后续单独变更统一（两取其一），不影响本变更行为与测试。",
-      "location": "frontend/src/components/sessions/session-config-bar.tsx:945"
-    }
-  ],
+  "reviewedAgainst": "f2aa61b29c7c2d3ab2437b579f4c8af8c17883cf",
+  "findings": [],
   "dimensionNotes": {
     "乱序": "ok",
     "并发": "ok",
     "切换": "ok",
     "作用域": "ok"
   },
-  "reviewedAt": "2026-10-19T10:38:33+08:00"
+  "reviewedAt": "2026-10-19T02:41:16Z"
 }
