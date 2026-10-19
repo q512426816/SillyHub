@@ -1,0 +1,21 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-19-host-settings-reload-latency",
+  "rows": [
+    {
+      "anchor": "FR-01",
+      "row_id": "2026-10-19-host-settings-reload-latency:flow:测试绑定FR-01",
+      "tests": [
+        "sillyhub-daemon/tests/interactive/host-settings-watcher.test.ts「HOST_SETTINGS_POLL_INTERVAL_MS — 默认节拍单一源：默认轮询节拍为 1000ms（提速 3s→1s；注入覆盖口径不变）」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-19-host-settings-reload-latency"
+    }
+  ]
+}

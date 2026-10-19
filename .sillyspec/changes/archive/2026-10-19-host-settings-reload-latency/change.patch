@@ -1,0 +1,209 @@
+diff --git a/.sillyspec/docs/SillyHub/modules/_module-map.yaml b/.sillyspec/docs/SillyHub/modules/_module-map.yaml
+index cd8347833..b7e64831e 100644
+--- a/.sillyspec/docs/SillyHub/modules/_module-map.yaml
++++ b/.sillyspec/docs/SillyHub/modules/_module-map.yaml
+@@ -814,3 +814,23 @@ modules:
+     needs_review: false
+     concerns: []
+     review_reasons: []
++
++  # 2026-10-19-host-settings-reload-latency：agent 技能文档（本地 ZCode 宿主的
++  # .zcode/skills/**——sillyhub-docker-deploy / deploy-to-server 等部署与运维技能；
++  # 部分在库部分本地，属工具文档面非运行时代码）登记进模块图，供收口 probes 归因。
++  agent-skills:
++    status: active
++    doc: modules/agent-skills.md
++    paths:
++      - .zcode/skills/**
++    tags: [agent-skills, tooling, docs]
++    aliases: [zcode-skills]
++    entrypoints: []
++    main_symbols:
++      - skills/sillyhub-docker-deploy/SKILL.md（本机 Docker Compose 部署流程）
++      - skills/deploy-to-server/SKILL.md（生产服务器镜像部署流程）
++    depends_on: []
++    used_by: [部署/运维任务（按技能名触发）]
++    needs_review: false
++    concerns: []
++    review_reasons: []
+diff --git a/.sillyspec/docs/SillyHub/modules/agent-skills.md b/.sillyspec/docs/SillyHub/modules/agent-skills.md
+new file mode 100644
+index 000000000..ee49d04c8
+--- /dev/null
++++ b/.sillyspec/docs/SillyHub/modules/agent-skills.md
+@@ -0,0 +1,19 @@
++# agent-skills — 本地 agent 技能文档（.zcode/skills/**）
++
++## 定位
++
++ZCode 宿主在本仓库的技能文档面（非运行时代码）：部署/运维类技能的流程知识，按技能名触发，
++agent 照文档执行。部分文件在 git 库中（历史先例 204 个 `.zcode/**` 跟踪文件），部分仅本地。
++
++## 主要内容
++
++- `sillyhub-docker-deploy/SKILL.md` — 本机 Docker Compose 部署流程（构建/启动/验证/发布记录）。
++  2026-10-19-host-settings-reload-latency 修正：`/daemon/latest/sillyhub-daemon.js` 分发验证
++  用 GET（`-o /dev/null -w '%{http_code} %{content_type}'`）——该端点仅允许 GET，HEAD 实测 405。
++- `deploy-to-server/SKILL.md` — 生产服务器镜像部署流程（本地打包 → 腾讯云 load）。
++- 其余技能见目录。
++
++## 维护口径
++
++- 文档命令必须与端点/脚本实际行为一致（CLAUDE.md 规则 18 同源精神）；发现失真随手修，
++  走所在变更的 probes 归因（本模块已在 `_module-map.yaml` 登记 paths）。
+diff --git a/.zcode/skills/sillyhub-docker-deploy/SKILL.md b/.zcode/skills/sillyhub-docker-deploy/SKILL.md
+index 49cc78594..5db9ce79a 100644
+--- a/.zcode/skills/sillyhub-docker-deploy/SKILL.md
++++ b/.zcode/skills/sillyhub-docker-deploy/SKILL.md
+@@ -303,7 +303,8 @@ docker compose --env-file deploy/.env -f deploy/docker-compose.yml exec -T backe
+ curl -fsS http://127.0.0.1:8001/api/health        # commit_sha 应为真实 git short SHA，非 unknown
+ curl -fsS http://127.0.0.1:8001/daemon/install.sh | head -n 3
+ curl -fsS http://127.0.0.1:8001/daemon/latest.json
+-curl -fsSI http://127.0.0.1:8001/daemon/latest/sillyhub-daemon.js
++# ⚠️ 该端点仅允许 GET（HEAD 实测 405 Method Not Allowed，2026-10-19 验证）——用 GET 校验状态码与类型：
++curl -fsS -o /dev/null -w '%{http_code} %{content_type}\n' http://127.0.0.1:8001/daemon/latest/sillyhub-daemon.js
+ # install.sh 经 Windows core.autocrlf=true 易被搞成 CRLF，curl|bash 会报
+ # `set: pipefail: invalid option name`。bash -n 确认 LF 干净（Dockerfile 已
+ # 对 /app/daemon-dist/install.sh 做 sed 's/\r$//'，.gitattributes 强制 *.sh eol=lf）。
+@@ -311,7 +312,7 @@ curl -fsS http://127.0.0.1:8001/daemon/install.sh | bash -n && echo SYNTAX_OK
+ ```
+ 
+ - `latest.json` 应为 `{"version":"...","downloadUrl":"/daemon/latest/sillyhub-daemon.js"}`
+-- `sillyhub-daemon.js` 应返回 `200` + `application/javascript`
++- `sillyhub-daemon.js` 应返回 `200` + `application/javascript`（经上方 GET 命令校验；HEAD 不被该端点支持）
+ - `commit_sha` 为 `unknown` → 启动前未 `export COMMIT_SHA`（见「启动」节）。**注意：本机（Windows）按上文豁免故意不传，`unknown` 是稳定性权衡的预期结果，非缺陷。**
+ - 任一 `/daemon/*` 返回 `404` → daemon bundle 没构建进镜像，回「启动」节先 `pnpm bundle` 再 `--build --force-recreate` 重建 backend
+ 
+diff --git a/docs/releases/2026-10-19-012-0a0e9c76.md b/docs/releases/2026-10-19-012-0a0e9c76.md
+new file mode 100644
+index 000000000..9e898fdd5
+--- /dev/null
++++ b/docs/releases/2026-10-19-012-0a0e9c76.md
+@@ -0,0 +1,47 @@
++---
++seq: 12
++deployed_at: "2026-10-19 10:52:30"
++status: success
++commit_from: a38597189
++commit_to: 0a0e9c76
++summary: 宿主机档位热跟随提速（3s→1s 轮询，端到端 1.5-1.8s）+ deploy 技能文档 HEAD→GET 修正 + 模块图登记 agent-skills
++agent: zcode-agent
++commits:
++  - sha: 0a0e9c76
++    message: "fix(daemon): 评审 P3 收口——types.ts 轮询缺省注释同步新默认；随附独立评审 review.json（PASS）"
++    author: WhaleFall
++  - sha: 68f0b240
++    message: "docs(sillyspec): 模块图登记 agent-skills（.zcode/skills/** 工具文档面）"
++    author: WhaleFall
++  - sha: 1ca50c95
++    message: "perf(daemon): 宿主机档位热跟随提速——默认轮询 3s→1s（单一源常量），去抖/指纹/容错零回退"
++    author: WhaleFall
++  - sha: fa241629
++    message: "docs(release): 2026-10-19-011 本机默认会话热跟随宿主机档位发布记录"
++    author: WhaleFall
++---
++
++## ⚡ 优化
++
++- **档位热跟随提速**（2026-10-19-host-settings-reload-latency）：宿主机 settings.json 监听默认轮询
++  3s→1s（单一源常量 `HOST_SETTINGS_POLL_INTERVAL_MS`，守护测试断言防漂移）；两拍去抖/指纹/容错/
++  关闭阀语义零回退。**端到端延迟 4-6s → 实测 1.5-1.8s**（9 个引擎全量换新，见部署验证）。
++- deploy 技能文档（`.zcode/skills/sillyhub-docker-deploy/SKILL.md`）：daemon bundle 分发验证命令
++  HEAD → GET 口径（该端点仅允许 GET，HEAD 实测 405）；判定语义（200 + application/javascript）保留。
++- 模块图登记 `agent-skills`（`.zcode/skills/**`，工具文档面）——收口模块门归因。
++
++## 📝 部署验证
++
++- `pnpm -C sillyhub-daemon run bundle` → 镜像重建 + `--force-recreate` backend；容器 `Up (healthy)`；
++  `/api/health` ok；`/daemon/latest.json` → `0a0e9c76-20261019104654`；镜像内 bundle 含
++  `HOST_SETTINGS_POLL_INTERVAL_MS`（grep=3）。
++- 本机 daemon 自更新：10:48:12 `self_update_done 0a0e9c76-20261019104654` → `session_recover_done
++  total=7 recovered=7`。
++- **真机延迟实测**（探针键法，字节级备份/还原，三轮回测）：
++  - 触发延迟（切档 → `host_settings_change_reload` 波次）：**1.3-1.6s**（两拍 1s 去抖）；
++  - **端到端（切档 → 9 个引擎全部换新）：1.49-1.79s**（引擎 CreationDate 相对翻转时刻的分布），
++    达成 ≤4s 目标（上一版本为 4-6s）；
++  - 验后 `settings.json` 字节级还原、探针键无残留；还原动作本身再触发一波（预期，双向生效）。
++- 单测：watcher 9 例（含默认节拍单一源断言）+ HOST-1~6；`vitest run tests/interactive` 78 文件
++  1235 例绿（+1 skipped）+ `tsc --noEmit` 零错；独立评审 PASS（1×P2 真机留痕——本节即补齐；
++  1×P3 注释漂移——已修，见 0a0e9c76）。
+diff --git a/sillyhub-daemon/src/interactive/host-settings-watcher.ts b/sillyhub-daemon/src/interactive/host-settings-watcher.ts
+index c59623715..9919905f0 100644
+--- a/sillyhub-daemon/src/interactive/host-settings-watcher.ts
++++ b/sillyhub-daemon/src/interactive/host-settings-watcher.ts
+@@ -10,7 +10,8 @@
+  * 当前档位重新解析网关与模型，/model 钉随旧进程消亡）。
+  *
+  * 侦测语义（design §做法概述）：
+- *   - 轮询（默认 3s，setInterval + unref，跨平台零依赖——CLAUDE.md 规则 13；放弃
++ *   - 轮询（默认 {@link HOST_SETTINGS_POLL_INTERVAL_MS}=1s，setInterval + unref，跨平台
++ *     零依赖——CLAUDE.md 规则 13；放弃
+  *     fs.watch：Windows 替换写会掉 watch，见 design 死路 2）；
+  *   - 指纹 = env 块键排序后的稳定 JSON（非 env 字段变化不触发——permissions/hooks
+  *     改动不打扰会话）；
+@@ -63,12 +64,21 @@ export function envBlockFingerprint(text: string): string | null {
+ export interface HostSettingsWatchOptions {
+   /** 被监听文件（生产 defaultHostSettingsPath()；测试注入 tmp 路径）。 */
+   settingsPath: string;
+-  /** 轮询间隔毫秒，默认 3000（≤0 视为非法按默认处理）。 */
++  /** 轮询间隔毫秒，默认 {@link HOST_SETTINGS_POLL_INTERVAL_MS}（≤0 视为非法按默认处理）。 */
+   pollIntervalMs?: number;
+   /** 确认变化后的回调（同步签名；重载动作由调用方自行 fire-and-forget）。 */
+   onChange: (fingerprint: string) => void;
+ }
+ 
++/**
++ * 默认轮询节拍（毫秒）——单一源导出，守护测试断言用（防魔数漂移）。
++ *
++ * 2026-10-19-host-settings-reload-latency：3000 → 1000。端到端延迟（切档 → 引擎重载
++ * 完成）由 4-6s 收窄到 2-4s（两拍去抖 6s→2s + 引擎重启 1-3s）；去抖/指纹/容错语义
++ * 零变化，收益全部来自节拍。空转成本：每秒读 2-6KB + JSON 解析，微秒级，unref 定时器。
++ */
++export const HOST_SETTINGS_POLL_INTERVAL_MS = 1000;
++
+ /** 监听句柄：stop() 清定时器（幂等）。 */
+ export interface HostSettingsWatcherHandle {
+   stop(): void;
+@@ -81,7 +91,7 @@ export interface HostSettingsWatcherHandle {
+ export function startHostSettingsWatcher(
+   opts: HostSettingsWatchOptions,
+ ): HostSettingsWatcherHandle {
+-  const interval = Math.max(1, opts.pollIntervalMs ?? 3000);
++  const interval = Math.max(1, opts.pollIntervalMs ?? HOST_SETTINGS_POLL_INTERVAL_MS);
+   /** 已确认基线（null = 尚未建立——第一拍建立）。 */
+   let baseline: string | null = null;
+   /** 候选指纹与连续命中拍数（去抖）。 */
+diff --git a/sillyhub-daemon/src/interactive/session-manager/types.ts b/sillyhub-daemon/src/interactive/session-manager/types.ts
+index c6b4e6acf..d7beecf31 100644
+--- a/sillyhub-daemon/src/interactive/session-manager/types.ts
++++ b/sillyhub-daemon/src/interactive/session-manager/types.ts
+@@ -104,7 +104,7 @@ export interface SessionManagerOptions {
+    * - `enabled`：缺省 true；显式 false 或 env `SILLYHUB_HOST_SETTINGS_WATCH=0` 关闭
+    *   （逃生口，start() 时读取）。
+    * - `settingsPath`：缺省 `defaultHostSettingsPath()`；测试注入 tmp 路径。
+-   * - `pollIntervalMs`：缺省 3000；测试注入小间隔。
++   * - `pollIntervalMs`：缺省 HOST_SETTINGS_POLL_INTERVAL_MS（1000，2026-10-19 提速 3s→1s）；测试注入小间隔。
+    *
+    * 触发后对「claude 引擎 + 未绑平台供应商 + 宿主目录 transcript + 非终态」会话走
+    * 既有配置切换状态机重载引擎（见 SessionManager.reloadHostDefaultSessions）。
+diff --git a/sillyhub-daemon/tests/interactive/host-settings-watcher.test.ts b/sillyhub-daemon/tests/interactive/host-settings-watcher.test.ts
+index b7d4a749a..4e0f7ca9c 100644
+--- a/sillyhub-daemon/tests/interactive/host-settings-watcher.test.ts
++++ b/sillyhub-daemon/tests/interactive/host-settings-watcher.test.ts
+@@ -24,9 +24,16 @@ import { tmpdir } from 'node:os';
+ import { join } from 'node:path';
+ import {
+   envBlockFingerprint,
++  HOST_SETTINGS_POLL_INTERVAL_MS,
+   startHostSettingsWatcher,
+ } from '../../src/interactive/host-settings-watcher.js';
+ 
++describe('HOST_SETTINGS_POLL_INTERVAL_MS — 默认节拍单一源（2026-10-19-host-settings-reload-latency）', () => {
++  it('默认轮询节拍为 1000ms（提速 3s→1s；注入覆盖口径不变）', () => {
++    expect(HOST_SETTINGS_POLL_INTERVAL_MS).toBe(1000);
++  });
++});
++
+ const ENV_GLM = JSON.stringify({
+   env: { ANTHROPIC_BASE_URL: 'https://open.bigmodel.cn/api/anthropic' },
+ });

@@ -1,0 +1,28 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-19-host-settings-reload-latency",
+  "reviewer": "subagent-delta",
+  "verdict": "PASS",
+  "reviewedAgainst": "ee8bc717b7b00bcc4e78a5e1da5788638735b776",
+  "findings": [],
+  "dimensionNotes": {
+    "乱序": "ok——增量两提交为纯注释/纯文档，控制流与事件序零改动，前轮维度结论继承且无新面",
+    "并发": "ok——无代码行为改动（0a0e9c76 仅 types.ts:107 注释一行 + review.json 落盘；ee8bc717 仅新增 docs/releases/2026-10-19-012-0a0e9c76.md）",
+    "切换": "ok——HOST_SETTINGS_POLL_INTERVAL_MS=1000 单一源未再触碰；types.ts:107 注释已与实现对齐（缺省 HOST_SETTINGS_POLL_INTERVAL_MS（1000…））",
+    "作用域": "ok——全仓 grep 无过时「缺省 3000」残留：命中项均为变更事实描述（design/proposal/requirements 的 3000→1000 表述）、历史归档快照（archive/2026-10-19-host-settings-live-reload 与 release-011 记录当时 3s，时点准确）或无关测试辅助超时默认（timeout=3000 的 waitFor helper）"
+  },
+  "reviewedAt": "2026-10-19T02:54:59.000Z",
+  "previousReview": {
+    "reviewedAgainst": "68f0b240d676a635bf1c75ae69d0f912403ab716",
+    "verdict": "PASS",
+    "resolved": [
+      "P2-真机留痕：已确认修掉——docs/releases/2026-10-19-012-0a0e9c76.md（ee8bc717）落盘，三要素齐备：触发延迟 1.3-1.6s（两拍 1s 去抖）、端到端 9 引擎全部换新 1.49-1.79s（≤4s 目标达成，上版 4-6s）、settings.json 字节级还原且探针键无残留；tasks.md:9 task-03 勾 [x] 与实态一致化成立",
+      "P3-注释漂移：已确认修掉——types.ts:107（0a0e9c76）改为「缺省 HOST_SETTINGS_POLL_INTERVAL_MS（1000，2026-10-19 提速 3s→1s）」，与 host-settings-watcher.ts:80（=1000）一致，全仓无其它过时缺省声明"
+    ]
+  },
+  "verification": {
+    "tests": "pnpm exec vitest run tests/interactive/host-settings-watcher.test.ts → 1 文件 9 例全部通过（9 passed, 0 failed, 1443ms, vitest 2.1.9）",
+    "typeCheck": "pnpm exec tsc --noEmit（sillyhub-daemon）→ exit 0，零错误",
+    "behaviorDelta": "零行为变化——两提交 diff 合计：types.ts 注释 1 行修改 + 2 个新增纯文档文件（review.json、release md），无任何代码/逻辑/配置改动"
+  }
+}
