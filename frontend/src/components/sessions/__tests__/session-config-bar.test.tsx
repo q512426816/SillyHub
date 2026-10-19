@@ -899,7 +899,9 @@ describe("SessionConfigBar 共享智能体条目可见性（2026-10-19-hide-shar
       error: null,
       refetch: vi.fn(),
     });
-    mocks.apiFetch.mockResolvedValue([]);
+    // 评审 P3-2：真实 rejection 走 useActiveSharedAgents 的 catch(()=>[])
+    // 降级路径（空成功数组测不到 catch 分支）。
+    mocks.apiFetch.mockRejectedValue(new Error("网络错误"));
     renderBar();
     openCtrl("配置-档案");
     expect(
