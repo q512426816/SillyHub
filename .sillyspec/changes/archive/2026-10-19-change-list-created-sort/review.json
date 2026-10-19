@@ -1,0 +1,22 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-19-change-list-created-sort",
+  "reviewer": "inline-self（环境无已注册子代理，主会话代行）",
+  "verdict": "PASS",
+  "reviewedAgainst": "e935e8c671e20cda72d65ea44ebbe9adb65b0d47",
+  "findings": [
+    {
+      "severity": "P3",
+      "title": "默认排序变化改变既有用户习惯（最近活动 → 创建时间）",
+      "evidence": "用户主动要求（需求原话），非回归；旧口径仍可经列头切回旧深链（sort=updated_at_asc）可达——但 UI 入口已切 created_at，updated_at 口径实际不可再从 UI 达（仅深链），属有意收敛",
+      "location": "frontend/src/app/(dashboard)/workspaces/[id]/changes/page.tsx:toggleSort"
+    }
+  ],
+  "dimensionNotes": {
+    "乱序": "ok——排序为每请求无状态 order_by，无中间态",
+    "并发": "ok——纯读路径；created_at 建行后不变排序稳定。边界已裁决：可接受",
+    "切换": "ok——URL 白名单解析非法回默认；旧深链兼容（parseSortDir 用例钉）",
+    "作用域": "ok——order_by 限定本 workspace 分页查询；API 缺省 fallback 未动，其他消费方（change-autolink 等）零影响。边界已裁决：可接受"
+  },
+  "reviewedAt": "2026-10-19T11:31:00+08:00"
+}

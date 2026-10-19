@@ -1,0 +1,136 @@
+{
+  "change": "2026-10-19-change-list-created-sort",
+  "baseline": "8e4d53926b6bd205103999e7c6ec2c325f5af934",
+  "head": "e935e8c671e20cda72d65ea44ebbe9adb65b0d47",
+  "files": [
+    ".sillyspec/docs/SillyHub/modules/frontend_components.changelog.md",
+    ".sillyspec/docs/backend/modules/change.changelog.md",
+    ".sillyspec/docs/multi-agent-platform/modules/backend.changelog.md",
+    ".sillyspec/docs/multi-agent-platform/modules/frontend.changelog.md",
+    "backend/app/modules/change/service.py",
+    "backend/app/modules/change/tests/test_change_lineage_filter.py",
+    "frontend/src/app/(dashboard)/workspaces/[id]/changes/__tests__/page.test.tsx",
+    "frontend/src/app/(dashboard)/workspaces/[id]/changes/page.tsx"
+  ],
+  "totals": {
+    "files": 8,
+    "additions": 67,
+    "deletions": 18
+  },
+  "savedAt": "2026-10-19T03:30:41.015Z",
+  "note": "flow done 时点冻结（本变更可归属交付面：baseline..HEAD 提交面过滤 .sillyspec/ 只留 .sillyspec/docs/ 交付文档 + 独占树未提交交付；治理工件目录不入冻结——2026-10-12-close-trace-freeze-integrity FR-01）",
+  "modules": [
+    {
+      "id": "change",
+      "files": 2,
+      "doc": "docs/backend/modules/change.md",
+      "docTouched": false,
+      "docMissing": false
+    },
+    {
+      "id": "backend",
+      "files": 2,
+      "doc": "docs/multi-agent-platform/modules/backend.md",
+      "docTouched": false,
+      "docMissing": false
+    },
+    {
+      "id": "frontend",
+      "files": 2,
+      "doc": "docs/multi-agent-platform/modules/frontend.md",
+      "docTouched": false,
+      "docMissing": false
+    },
+    {
+      "id": "change",
+      "files": 2,
+      "doc": "docs/SillyHub/modules/change.md",
+      "docTouched": false,
+      "docMissing": false
+    },
+    {
+      "id": "frontend_app",
+      "files": 2,
+      "doc": "docs/SillyHub/modules/frontend_app.md",
+      "docTouched": false,
+      "docMissing": false
+    }
+  ],
+  "uncoveredDirs": [],
+  "moduleMaps": [
+    "docs/backend/modules/_module-map.yaml",
+    "docs/frontend/modules/_module-map.yaml",
+    "docs/multi-agent-platform/modules/_module-map.yaml",
+    "docs/SillyHub/modules/_module-map.yaml",
+    "docs/sillyhub-daemon/modules/_module-map.yaml"
+  ],
+  "acceptedDirtyGap": 40,
+  "scopeAudit": {
+    "mode": "full-flow",
+    "ok": true,
+    "degradedReason": null,
+    "baseAnchor": "8e4d53926b6bd205103999e7c6ec2c325f5af934",
+    "totals": {
+      "files": 8,
+      "additions": 67,
+      "deletions": 18
+    },
+    "rows": [
+      {
+        "path": ".sillyspec/docs/SillyHub/modules/frontend_components.changelog.md",
+        "additions": 1,
+        "deletions": 0,
+        "kind": "modified"
+      },
+      {
+        "path": ".sillyspec/docs/backend/modules/change.changelog.md",
+        "additions": 1,
+        "deletions": 0,
+        "kind": "modified"
+      },
+      {
+        "path": ".sillyspec/docs/multi-agent-platform/modules/backend.changelog.md",
+        "additions": 1,
+        "deletions": 0,
+        "kind": "modified"
+      },
+      {
+        "path": ".sillyspec/docs/multi-agent-platform/modules/frontend.changelog.md",
+        "additions": 1,
+        "deletions": 0,
+        "kind": "modified"
+      },
+      {
+        "path": "backend/app/modules/change/service.py",
+        "additions": 7,
+        "deletions": 0,
+        "kind": "modified"
+      },
+      {
+        "path": "backend/app/modules/change/tests/test_change_lineage_filter.py",
+        "additions": 27,
+        "deletions": 0,
+        "kind": "modified"
+      },
+      {
+        "path": "frontend/src/app/(dashboard)/workspaces/[id]/changes/__tests__/page.test.tsx",
+        "additions": 9,
+        "deletions": 9,
+        "kind": "modified"
+      },
+      {
+        "path": "frontend/src/app/(dashboard)/workspaces/[id]/changes/page.tsx",
+        "additions": 20,
+        "deletions": 9,
+        "kind": "modified"
+      }
+    ],
+    "excluded": {
+      "foreignDeclared": []
+    },
+    "note": "flow done 时点冻结（本文件落盘时采集）",
+    "closedBy": "flow done"
+  },
+  "patchSha256": "154c690abf22c18e2cbb3df068f330759250e71419b004d27e5acd2b1a15c5ef",
+  "patchStatus": "ok"
+}

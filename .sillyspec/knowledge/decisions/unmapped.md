@@ -594,3 +594,11 @@
 锚点：未记录
 最近确认：44f12324e768fad638b278a57a46073d566cdbd6
 理由：最大风险：timeline 口径与 git 口径分歧（27%）造成「同类变更不同来源类型不同」的 观感。缓解：生产链路上每变更只有一种来源生效（有回填 → flow-state 优先；无回填 → timeline），不存在同一行两口径交替覆盖；分歧样本语义核验 timeline 不劣（git 口径 会被后补提交带偏）。watcher 盲窗导致锚缺失 → None 回落不猜。 试过放弃：A. 排除工件性 scope（docs(spec)/chore(archive)）提升一致率——实验发现 分歧主因是口径哲学非工件噪音，且 git 对照口径本身含噪，不值得为对齐一个含噪基准 加规则；B. daemon 控制命令通道（平台下发 git 提取命令）——覆盖面更全但异步回传 + 离线重试复杂度高一个量级，留作中期备选；C. 等 sillyspec CLI flow done 写类型—— 用户明确不改 CLI，平台侧自闭环。
+
+## D-unmapped-090@v1 设计期风险与放弃方案（底稿）
+状态：implemented
+变更：2026-10-19-change-list-created-sort
+原编号：D-001@v1
+锚点：未记录
+最近确认：e935e8c671e20cda72d65ea44ebbe9adb65b0d47
+理由：风险：默认排序变化改变用户既有习惯（最近活动 → 创建时间）——正是用户主动要求， 非回归。created_at 与 updated_at 在 reparse 回填 mtime 时的差异：created_at 是 建行时刻（CLI 创建顺序），语义即用户诉求。放弃方案：改后端缺省值——会波及全部 不传 sort 的调用方（change-autolink 等），契约面无谓扩大。
