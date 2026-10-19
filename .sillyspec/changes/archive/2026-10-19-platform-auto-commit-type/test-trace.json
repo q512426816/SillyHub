@@ -1,0 +1,36 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-19-platform-auto-commit-type",
+  "rows": [
+    {
+      "anchor": "FR-01",
+      "row_id": "2026-10-19-platform-auto-commit-type:flow:测试绑定FR-01",
+      "tests": [
+        "backend/app/modules/change/tests/test_parser.py「TestTimelineCommitType::test_anchored_hash_extracts_main_type / test_unanchored_parallel_commits_ignored / test_missing_timeline_or_no_anchor_returns_none / test_unknown_pseudo_prefix_rejected / test_flow_state_field_beats_timeline / test_timeline_source_authoritative_when_no_flow_state」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-19-platform-auto-commit-type"
+    },
+    {
+      "anchor": "FR-02",
+      "row_id": "2026-10-19-platform-auto-commit-type:flow:测试绑定FR-02",
+      "tests": [
+        "backend/app/modules/spec_workspace/tests/test_incremental_reparse_trigger.py"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-19-platform-auto-commit-type"
+    }
+  ]
+}

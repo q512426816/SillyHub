@@ -1,0 +1,28 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-19-platform-auto-commit-type",
+  "reviewer": "inline-self（环境无已注册子代理，主会话代行）",
+  "verdict": "PASS",
+  "reviewedAgainst": "44f12324e768fad638b278a57a46073d566cdbd6",
+  "findings": [
+    {
+      "severity": "P3",
+      "title": "timeline 口径与 git 全历史口径存在 27% 分歧",
+      "evidence": "208 归档批量对照：非空提取 135 中一致 98 分歧 37；抽样核验分歧为口径哲学差异（git 按最后带 key 提交归属会被后补 fix 提交带偏，timeline 锚定执行窗交付提交更贴变更本体），非提取错误；flow-state 优先级保证已回填行不被覆盖",
+      "location": "backend/app/modules/change/parser.py:_read_timeline_commit_type"
+    },
+    {
+      "severity": "P3",
+      "title": "watcher 盲窗导致任务面锚缺失时提取为空",
+      "evidence": "208 中 73 个提取为 None（锚缺失/伪前缀），回落不猜显示现状值；此类变更可由回填脚本兜底",
+      "location": "backend/app/modules/change/parser.py:_read_timeline_commit_type"
+    }
+  ],
+  "dimensionNotes": {
+    "乱序": "ok——类型为终态事实，迟到同步只表现为一次权威覆盖；解析 fail-open 不抛（用例钉）",
+    "并发": "ok——parser 只读 timeline.md；写入方仅 CLI 归档收口串行点；reparse 后台 single-flight 既有机制",
+    "切换": "ok——timeline 缺失/无锚回落 None 行为同旧；flow-state 显式字段永不被 timeline 覆盖（用例钉）。边界已裁决：可接受",
+    "作用域": "ok——逐 change_dir 读取无共享态；哈希锚定天然限定本变更提交。边界已裁决：可接受"
+  },
+  "reviewedAt": "2026-10-19T11:27:12+08:00"
+}

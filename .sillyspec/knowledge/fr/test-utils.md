@@ -186,3 +186,67 @@ created_at: 2026-10-16T01:30:35.950Z
 摘要：主路径
 全文：.sillyspec/changes/archive/2026-10-19-shared-agent-onboarding-hint/requirements.md#FR-05
 最近确认：fc51c25c69c3ea98a401554b486d58d256156be4
+
+## FR-test-utils-011 真会话(非 provisional)档案下拉必须隐藏平台共享智能体条目(按 active 生效列表的 agent_profile_id 集合过滤,不按名称匹配)
+变更：2026-10-19-hide-shared-profile-in-session
+状态：active
+摘要：主路径
+全文：.sillyspec/changes/archive/2026-10-19-hide-shared-profile-in-session/requirements.md#FR-01
+最近确认：4d992afc3f615222da8f0017cd75303fd4777cf8
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-19-hide-shared-profile-in-session:flow:测试绑定FR-01
+  tests: frontend/src/components/sessions/__tests__/session-config-bar.test.tsx「真会话档案下拉隐藏共享智能体条目（按 active id 过滤）」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-19-hide-shared-profile-in-session
+  status: active
+
+## FR-test-utils-012 当前会话档案本身恰为共享智能体时,该条目在真会话下拉中保留可见(共享会话不被饿死,但不提供共享档案互切)
+变更：2026-10-19-hide-shared-profile-in-session
+状态：active
+摘要：共享会话自身
+全文：.sillyspec/changes/archive/2026-10-19-hide-shared-profile-in-session/requirements.md#FR-02
+最近确认：4d992afc3f615222da8f0017cd75303fd4777cf8
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-19-hide-shared-profile-in-session:flow:测试绑定FR-02
+  tests: frontend/src/components/sessions/__tests__/session-config-bar.test.tsx「当前会话档案为共享智能体时该条目保留可见」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-19-hide-shared-profile-in-session
+  status: active
+
+## FR-test-utils-013 预会话(provisional)档案下拉保留共享智能体条目且置顶显示(排序在普通档案之前,普通档案间保持原序)
+变更：2026-10-19-hide-shared-profile-in-session
+状态：active
+摘要：主路径
+全文：.sillyspec/changes/archive/2026-10-19-hide-shared-profile-in-session/requirements.md#FR-03
+最近确认：4d992afc3f615222da8f0017cd75303fd4777cf8
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-19-hide-shared-profile-in-session:flow:测试绑定FR-03
+  tests: frontend/src/components/sessions/__tests__/session-config-bar.test.tsx「预会话档案下拉共享智能体置顶且带共享标识」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-19-hide-shared-profile-in-session
+  status: active
+
+## FR-test-utils-014 聚焦测试覆盖上述分支,tsc 0 错误
+变更：2026-10-19-hide-shared-profile-in-session
+状态：active
+摘要：主路径
+全文：.sillyspec/changes/archive/2026-10-19-hide-shared-profile-in-session/requirements.md#FR-04
+最近确认：4d992afc3f615222da8f0017cd75303fd4777cf8
