@@ -46,6 +46,13 @@ dependencies = [
   # 与 design D-007「FastMCP mount」+ task-05/06 写法冲突，故锁 <2 取最新 1.29.0。
   # v1.x 仍持续收 critical bugfix/security patch（见 GitHub v1.x 分支）。
   "mcp>=1.29,<2",
+  # 2026-10-19-thinking-zh-translate：思考内容离线翻译 en→zh 推理（子进程加载
+  # ct2 格式 opus-mt int8 模型；懒加载，缺席时端点 fail-soft 原文透传）。
+  "ctranslate2>=4.5,<5",
+  # ct2 模型 tokenizer 分层回退的 sentencepiece 线（transformers 缺席时）+
+  # HF repo 自动下载（尊重 HF_ENDPOINT；离线部署用 TRANSLATE_MODEL_DIR 免下载）。
+  "sentencepiece>=0.2",
+  "huggingface-hub>=0.23",
 ]
 
 [project.optional-dependencies]
