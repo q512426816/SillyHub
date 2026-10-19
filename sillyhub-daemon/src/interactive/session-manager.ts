@@ -126,6 +126,7 @@ import {
   applyTranscriptConfigDir,
   defaultTranscriptDirs,
   findClaudeTranscriptPath,
+  locateClaudeTranscript,
   migrateClaudeTranscriptToHost,
   migrateClaudeTranscriptToIsolated,
   type TranscriptDirs,
@@ -133,6 +134,14 @@ import {
 // 2026-10-16-provider-switch-transcript-sanitize：切供应商前清洗不可跨供应商重放的
 // 供应商私有块（server_tool_use / mcp_tool_use 及其结果块），详见模块头。
 import { sanitizeClaudeTranscriptForReplay } from './transcript-sanitize.js';
+// 2026-10-19-host-settings-live-reload：宿主机 ~/.claude/settings.json env 块变化
+// 监听——本机默认会话热跟随 cc-switch 换档（引擎重载重新解析网关与模型），见
+// SessionManager.reloadHostDefaultSessions。
+import {
+  defaultHostSettingsPath,
+  startHostSettingsWatcher,
+  type HostSettingsWatcherHandle,
+} from './host-settings-watcher.js';
 import type { PolicyEngine } from '../policy/filesystem-policy.js';
 import type { SessionInjectAttachment } from '../protocol.js';
 import {
@@ -497,6 +506,16 @@ export class SessionManager {
   private readonly _resumeDirs: TranscriptDirs;
 
   /**
+   * 2026-10-19-host-settings-live-reload：宿主 settings.json 监听选项
+   * （enabled/settingsPath/pollIntervalMs，见 SessionManagerOptions.hostSettingsWatch）
+   * 与运行句柄（start() 起、stop() 停；句柄 null = 未启）。
+   */
+  private readonly _hostSettingsWatch: NonNullable<
+    SessionManagerOptions['hostSettingsWatch']
+  >;
+  private _hostWatchHandle: HostSettingsWatcherHandle | null = null;
+
+  /**
    * task-08（D-007@v1 / FR-07）：canUseTool 远程人审三件套。
    *
    * 实例级配置——manualApproval=true 时必需 resolverFactory + wsClient；
@@ -632,6 +651,8 @@ export class SessionManager {
       Number.isFinite(gateRaw) && gateRaw >= 0 ? gateRaw : DEFAULT_MAX_ACTIVE_SESSIONS;
     // ql-20260822-001：resume transcript 目录对（测试注入 tmp 对，生产取缺省）。
     this._resumeDirs = opts.resumeDirs ?? defaultTranscriptDirs();
+    // 2026-10-19-host-settings-live-reload：宿主 settings 监听选项（句柄 start() 起）。
+    this._hostSettingsWatch = opts.hostSettingsWatch ?? {};
 
     // task-02（D-001@v1）：构造 drivers registry。显式 registry 优先；兼容旧单 driver 入参。
     const explicitDrivers = deps.drivers ?? {};
@@ -1356,11 +1377,100 @@ export class SessionManager {
   }
 
   start(): void {
-    return start(this._core());
+    start(this._core());
+    // 2026-10-19-host-settings-live-reload：宿主档位监听随生命周期起停（daemon.ts
+    // 在装配完成处调本方法，零额外接线）。
+    this._startHostSettingsWatcher();
   }
 
   stop(): void {
-    return stop(this._core());
+    this._stopHostSettingsWatcher();
+    stop(this._core());
+  }
+
+  /**
+   * 2026-10-19-host-settings-live-reload：起宿主 settings.json env 块监听。
+   *
+   * 关闭阀（任一命中即不起）：opts 显式 `enabled:false`；env
+   * `SILLYHUB_HOST_SETTINGS_WATCH=0`（start 时读一次——逃生口，出问题可免重启关掉）。
+   * 重复 start 幂等（句柄已存在直接返回）。
+   */
+  private _startHostSettingsWatcher(): void {
+    if (this._hostWatchHandle !== null) return;
+    if (this._hostSettingsWatch.enabled === false) return;
+    if ((process.env.SILLYHUB_HOST_SETTINGS_WATCH ?? '').trim() === '0') return;
+    this._hostWatchHandle = startHostSettingsWatcher({
+      settingsPath:
+        this._hostSettingsWatch.settingsPath ?? defaultHostSettingsPath(),
+      pollIntervalMs: this._hostSettingsWatch.pollIntervalMs,
+      onChange: () => {
+        // fire-and-forget（同步回调签名；批量重载内部逐会话兜错，外层防御性 catch）。
+        void this.reloadHostDefaultSessions('host_settings_env_changed').catch(() => {});
+      },
+    });
+  }
+
+  private _stopHostSettingsWatcher(): void {
+    this._hostWatchHandle?.stop();
+    this._hostWatchHandle = null;
+  }
+
+  /**
+   * 2026-10-19-host-settings-live-reload：宿主机档位变化 → 本机默认会话引擎批量重载。
+   *
+   * 背景：本机默认（未绑平台供应商）会话的引擎对宿主 settings.json 的行为是
+   * 「网关每轮热重读、模型名一经确定不再重解析」（2026-10-19 受控实验实证）——
+   * MiniMax 档（显式 ANTHROPIC_MODEL）期间启动的会话、或被 `/model` 钉过模型的
+   * 会话，切档后模型名被烙死（下一轮可能跨供应商 400 modelCode 不存在）。重载
+   * 引擎 = 按当前宿主档位重新解析网关与模型；`/model` 会话级钉随旧进程消亡。
+   *
+   * 实现完全复用既有配置切换状态机（markPendingConfigSwitch + config-only 载荷：
+   * profile=null 不切人格、providerConfig 缺席不切供应商、prompt 空不喂轮）：
+   *   - 空闲会话 → 立即 reloadWithConfig（重建 env + `--resume` 同一会话）；
+   *   - 运行中会话 → 挂 pendingConfigSwitch 到轮边界（不打断当前轮）；
+   *   - 失败回滚旧句柄（R-01）、per-session 串行（_reloadChains）——全部既有语义。
+   *
+   * 筛选（design §作用域）：claude 引擎 + `providerConfig == null`（未绑平台供应商）+
+   * 有 agentSessionId（首 turn 完成才有 resume key）+ 非终态 + transcript 实际位于
+   * 宿主机目录（`locateClaudeTranscript === 'host'`——与 resume/reload 判定
+   * CLAUDE_CONFIG_DIR 的同一单一来源：宿主目录 transcript ⟺ 引擎读宿主配置）。
+   * 平台供应商会话（隔离 env）与隔离目录 transcript 会话不受宿主档位影响，零触碰。
+   *
+   * @returns 受影响（已安排重载）的会话数（异步：逐会话探测 transcript 位置）
+   */
+  async reloadHostDefaultSessions(reason: string): Promise<number> {
+    let count = 0;
+    for (const [sessionId, state] of this._store) {
+      if (state.provider !== 'claude') continue;
+      if (state.status === 'ended' || state.status === 'failed') continue;
+      if (state.providerConfig != null) continue;
+      if (!state.agentSessionId) continue;
+      // transcript 位置探测（与 resume 同源）：仅宿主目录会话受宿主档位影响。
+      if ((await locateClaudeTranscript(state.agentSessionId, this._resumeDirs)) !== 'host') {
+        continue;
+      }
+      try {
+        // config-only 载荷：空 runId/claimToken/prompt 不产生任何轮状态副作用。
+        this.markPendingConfigSwitch(sessionId, {
+          sessionId,
+          runId: '',
+          claimToken: '',
+          prompt: '',
+          profile: null,
+          providerConfig: undefined,
+        });
+        count += 1;
+      } catch {
+        // 遍历自身 _store，SessionNotFoundError 不可达；防御性吞掉不中断批量。
+      }
+    }
+    if (count > 0) {
+      console.warn('[session-manager] host_settings_change_reload', {
+        reason,
+        sessions: count,
+      });
+    }
+    return count;
   }
 
   async scanOnce(): Promise<void> {

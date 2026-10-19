@@ -1778,3 +1778,249 @@ describe('2026-10-16-provider-switch-transcript-sanitize / 切供应商清洗历
     }
   });
 });
+
+// ── 2026-10-19-host-settings-live-reload：宿主机档位变化 → 本机默认会话热重载 ──
+// 背景（受控实验实证）：本机默认会话引擎对宿主 settings.json「网关每轮热重读、模型名
+// 一经确定不再重解析」——MiniMax 档（显式 ANTHROPIC_MODEL）期间启动的会话、或被 /model
+// 钉过模型的会话切档后模型烙死。修法：watcher 发现 env 块变化 →
+// reloadHostDefaultSessions 走既有切换状态机重载（空闲立即 / 运行中挂轮边界）。
+
+describe('2026-10-19-host-settings-live-reload / 宿主档位变化热重载', () => {
+  const buildDirs = () => {
+    const root = mkdtempSync(join(tmpdir(), 'sm-hostwatch-'));
+    return { root, isolated: join(root, 'iso-claude-config'), home: join(root, 'home-claude') };
+  };
+  const writeJsonl = (
+    dirs: ReturnType<typeof buildDirs>,
+    which: 'home' | 'isolated',
+    sid: string,
+  ) => {
+    const dir = join(dirs[which], 'projects', 'C--work');
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(join(dir, `${sid}.jsonl`), '{}\n', 'utf8');
+  };
+
+  it('HOST-1: 本机默认 + 宿主目录 transcript + 空闲 → 立即重载（resume 不变、不喂轮）', async () => {
+    const dirs = buildDirs();
+    try {
+      writeJsonl(dirs, 'home', 'sdk-sess-h1');
+      const mock = makeMockClaudeDriver();
+      const sm = new SessionManager(
+        { driver: mock.driver, ...makeDeps() },
+        { resumeDirs: dirs },
+      );
+      await sm.create({ ...BASE_INPUT });
+      mock.emitMessage(systemInitMessage('sdk-sess-h1'));
+      await flushMicrotasks();
+      mock.emitResult(resultSuccess());
+      await flushMicrotasks();
+      expect(mock.driver.start).toHaveBeenCalledTimes(1);
+
+      const n = await sm.reloadHostDefaultSessions('test');
+
+      expect(n).toBe(1);
+      // config-only 重载链含真实 fs 探测/迁移 no-op（多个 IO 宏任务），轮询等待完成。
+      const deadline = Date.now() + 5000;
+      while (mock.driver.start.mock.calls.length < 2 && Date.now() < deadline) {
+        await new Promise((r) => setTimeout(r, 20));
+      }
+      // config-only 重载：新句柄 + resume 同一会话；无 prompt 喂入（不出新轮）。
+      expect(mock.driver.start).toHaveBeenCalledTimes(2);
+      expect(mock.startCalls[1].opts['resume']).toBe('sdk-sess-h1');
+      expect(mock.closeSpyAt(0)).toHaveBeenCalledTimes(1);
+      const state = readState(sm, BASE_INPUT.sessionId)!;
+      expect(state.status).toBe('active');
+      expect(state.currentRunId).toBeUndefined();
+    } finally {
+      rmSync(dirs.root, { recursive: true, force: true });
+    }
+  });
+
+  it('HOST-2: 绑平台供应商的会话 → 零触碰（不重载）', async () => {
+    const dirs = buildDirs();
+    try {
+      writeJsonl(dirs, 'home', 'sdk-sess-h2');
+      const mock = makeMockClaudeDriver();
+      const sm = new SessionManager(
+        { driver: mock.driver, ...makeDeps() },
+        { resumeDirs: dirs },
+      );
+      await sm.create({ ...BASE_INPUT });
+      mock.emitMessage(systemInitMessage('sdk-sess-h2'));
+      await flushMicrotasks();
+      mock.emitResult(resultSuccess());
+      await flushMicrotasks();
+      // 切到平台供应商（迁移隔离 + providerConfig 落 state）→ 该会话不再读宿主配置。
+      await sm.reloadWithProvider(BASE_INPUT.sessionId, newProviderConfig());
+      expect(mock.driver.start).toHaveBeenCalledTimes(2);
+
+      const n = await sm.reloadHostDefaultSessions('test');
+
+      expect(n).toBe(0);
+      await flushMicrotasks();
+      expect(mock.driver.start).toHaveBeenCalledTimes(2);
+    } finally {
+      rmSync(dirs.root, { recursive: true, force: true });
+    }
+  });
+
+  it('HOST-3: 隔离目录 transcript（未绑供应商）→ 零触碰（resume 读隔离目录，宿主档位无关）', async () => {
+    const dirs = buildDirs();
+    try {
+      writeJsonl(dirs, 'isolated', 'sdk-sess-h3');
+      const mock = makeMockClaudeDriver();
+      const sm = new SessionManager(
+        { driver: mock.driver, ...makeDeps() },
+        { resumeDirs: dirs },
+      );
+      await sm.create({ ...BASE_INPUT });
+      mock.emitMessage(systemInitMessage('sdk-sess-h3'));
+      await flushMicrotasks();
+      mock.emitResult(resultSuccess());
+      await flushMicrotasks();
+
+      const n = await sm.reloadHostDefaultSessions('test');
+
+      // transcript 位于隔离目录（locateClaudeTranscript=isolated）→ 引擎不读宿主
+      // settings.json，重载无意义且会误伤隔离语义 → 跳过。
+      expect(n).toBe(0);
+      await new Promise((r) => setTimeout(r, 120));
+      expect(mock.driver.start).toHaveBeenCalledTimes(1);
+    } finally {
+      rmSync(dirs.root, { recursive: true, force: true });
+    }
+  });
+
+  it('HOST-4: 运行中会话 → 不打断当前轮，挂标记到轮边界后重载', async () => {
+    const dirs = buildDirs();
+    try {
+      writeJsonl(dirs, 'home', 'sdk-sess-h4');
+      const mock = makeMockClaudeDriver();
+      const sm = new SessionManager(
+        { driver: mock.driver, ...makeDeps() },
+        { resumeDirs: dirs },
+      );
+      await sm.create({ ...BASE_INPUT });
+      // init 到达（agentSessionId 就位）但不 emit result → 首 turn 维持生成中。
+      mock.emitMessage(systemInitMessage('sdk-sess-h4'));
+      await flushMicrotasks();
+
+      const n = await sm.reloadHostDefaultSessions('test');
+
+      expect(n).toBe(1);
+      await new Promise((r) => setTimeout(r, 120));
+      expect(mock.driver.start).toHaveBeenCalledTimes(1); // 未打断
+      expect(readState(sm, BASE_INPUT.sessionId)!.pendingConfigSwitch).toBeDefined();
+
+      // 轮收尾（result 注入）→ 消费标记触发重载（IO 宏任务链，轮询等待）。
+      mock.emitResult(resultSuccess());
+      const deadline = Date.now() + 5000;
+      while (mock.driver.start.mock.calls.length < 2 && Date.now() < deadline) {
+        await new Promise((r) => setTimeout(r, 20));
+      }
+      expect(mock.driver.start).toHaveBeenCalledTimes(2);
+      expect(mock.startCalls[1].opts['resume']).toBe('sdk-sess-h4');
+      expect(readState(sm, BASE_INPUT.sessionId)!.pendingConfigSwitch).toBeUndefined();
+    } finally {
+      rmSync(dirs.root, { recursive: true, force: true });
+    }
+  });
+
+  it('HOST-5: 集成——真实 start() 后宿主 settings env 变化 → watcher 触发自动重载', async () => {
+    const dirs = buildDirs();
+    try {
+      writeJsonl(dirs, 'home', 'sdk-sess-h5');
+      const settingsPath = join(dirs.root, 'host-settings.json');
+      writeFileSync(
+        settingsPath,
+        JSON.stringify({ env: { ANTHROPIC_BASE_URL: 'https://glm.example.com' } }),
+        'utf8',
+      );
+      const mock = makeMockClaudeDriver();
+      const sm = new SessionManager(
+        { driver: mock.driver, ...makeDeps() },
+        {
+          resumeDirs: dirs,
+          hostSettingsWatch: { settingsPath, pollIntervalMs: 15 },
+        },
+      );
+      await sm.create({ ...BASE_INPUT });
+      mock.emitMessage(systemInitMessage('sdk-sess-h5'));
+      await flushMicrotasks();
+      mock.emitResult(resultSuccess());
+      await flushMicrotasks();
+      sm.start();
+      try {
+        expect(mock.driver.start).toHaveBeenCalledTimes(1);
+        // 基线窗：让 watcher 首拍完成（建基线）再换档——否则基线被建到新值上。
+        await new Promise((r) => setTimeout(r, 100));
+
+        // 模拟 cc-switch 换档：env 块换新值（非 env 字段变化不触发同由 watcher 单测覆盖）。
+        writeFileSync(
+          settingsPath,
+          JSON.stringify({ env: { ANTHROPIC_BASE_URL: 'https://minimax.example.com' } }),
+          'utf8',
+        );
+        const deadline = Date.now() + 5000;
+        while (mock.driver.start.mock.calls.length < 2 && Date.now() < deadline) {
+          await new Promise((r) => setTimeout(r, 20));
+        }
+        await flushMicrotasks();
+
+        expect(mock.driver.start).toHaveBeenCalledTimes(2);
+        expect(mock.startCalls[1].opts['resume']).toBe('sdk-sess-h5');
+        const state = readState(sm, BASE_INPUT.sessionId)!;
+        expect(state.status).toBe('active'); // 不喂轮
+      } finally {
+        sm.stop();
+      }
+    } finally {
+      rmSync(dirs.root, { recursive: true, force: true });
+    }
+  });
+
+  it('HOST-6: 关闭阀（env SILLYHUB_HOST_SETTINGS_WATCH=0）→ start 不起监听，变化零重载', async () => {
+    const dirs = buildDirs();
+    try {
+      writeJsonl(dirs, 'home', 'sdk-sess-h6');
+      const settingsPath = join(dirs.root, 'host-settings.json');
+      writeFileSync(
+        settingsPath,
+        JSON.stringify({ env: { ANTHROPIC_BASE_URL: 'https://glm.example.com' } }),
+        'utf8',
+      );
+      const mock = makeMockClaudeDriver();
+      const sm = new SessionManager(
+        { driver: mock.driver, ...makeDeps() },
+        {
+          resumeDirs: dirs,
+          hostSettingsWatch: { settingsPath, pollIntervalMs: 15 },
+        },
+      );
+      await sm.create({ ...BASE_INPUT });
+      mock.emitMessage(systemInitMessage('sdk-sess-h6'));
+      await flushMicrotasks();
+      mock.emitResult(resultSuccess());
+      await flushMicrotasks();
+
+      vi.stubEnv('SILLYHUB_HOST_SETTINGS_WATCH', '0');
+      try {
+        sm.start();
+        // 基线窗（同 HOST-5）：确保「未触发」不是基线没建成的假阴性。
+        await new Promise((r) => setTimeout(r, 100));
+        writeFileSync(
+          settingsPath,
+          JSON.stringify({ env: { ANTHROPIC_BASE_URL: 'https://minimax.example.com' } }),
+          'utf8',
+        );
+        await new Promise((r) => setTimeout(r, 200)); // 15ms×多拍静默窗
+        expect(mock.driver.start).toHaveBeenCalledTimes(1);
+      } finally {
+        sm.stop();
+        vi.unstubAllEnvs();
+      }
+    } finally {
+      rmSync(dirs.root, { recursive: true, force: true });
+    }
+  });
+});

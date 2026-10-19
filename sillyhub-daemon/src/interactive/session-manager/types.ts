@@ -98,6 +98,23 @@ export interface SessionManagerOptions {
    */
   resumeDirs?: TranscriptDirs;
   /**
+   * 2026-10-19-host-settings-live-reload：宿主机 ~/.claude/settings.json env 块变化
+   * 监听（本机默认会话热跟随 cc-switch 换档）。
+   *
+   * - `enabled`：缺省 true；显式 false 或 env `SILLYHUB_HOST_SETTINGS_WATCH=0` 关闭
+   *   （逃生口，start() 时读取）。
+   * - `settingsPath`：缺省 `defaultHostSettingsPath()`；测试注入 tmp 路径。
+   * - `pollIntervalMs`：缺省 3000；测试注入小间隔。
+   *
+   * 触发后对「claude 引擎 + 未绑平台供应商 + 宿主目录 transcript + 非终态」会话走
+   * 既有配置切换状态机重载引擎（见 SessionManager.reloadHostDefaultSessions）。
+   */
+  hostSettingsWatch?: {
+    enabled?: boolean;
+    settingsPath?: string;
+    pollIntervalMs?: number;
+  };
+  /**
    * task-08（D-007@v1 / FR-07）：是否启用 canUseTool 远程人审。
    *
    * 默认 false：driver 不注入 canUseTool，SDK 走内置默认策略（spike H1 行为不变）；
