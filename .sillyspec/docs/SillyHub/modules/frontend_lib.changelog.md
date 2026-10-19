@@ -15,3 +15,4 @@ created_at: 2026-10-16 16:40:00
 - 2026-10-18-change-list-type-filter | 变更列表加类型标签与类型筛选
 - 2026-10-19-thinking-zh-translate | 思考内容离线翻译为中文展示
 - 2026-10-19-change-assets-cross-repo-repos | 变更资产卡展示跨仓冻结面
+- 2026-10-19-cross-repo-patch-slicing | 资产卡跨仓单文件 diff 切片

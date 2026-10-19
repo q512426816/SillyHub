@@ -58,3 +58,4 @@ created_at: 2026-08-27 14:32:24
 - 2026-10-17-dsh-rc2-routing-restore | dsh rc.2 模型路由恢复——overlay 三件套 + valueId 数组串 + 信封拆包
 - 2026-10-18-audit-log-redact-yaml-quote | 2026-10-18 只读审计两项风险清偿：zcode 驱动 spawn env 诊断日志未脱敏带凭…
 - 2026-10-19-change-assets-cross-repo-repos | 变更资产卡展示跨仓冻结面
+- 2026-10-19-cross-repo-patch-slicing | 资产卡跨仓单文件 diff 切片

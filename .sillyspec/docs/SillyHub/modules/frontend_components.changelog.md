@@ -92,3 +92,4 @@ created_at: 2026-08-30 22:23:33
 | 2026-10-19 | 2026-10-19-hide-shared-profile-in-session | 用户担心普通会话中途误选「平台向导」类平台共享智能体档案(切换后仅换人格提示词,但用户预期是整套环境… |
 | 2026-10-19 | 2026-10-19-thinking-zh-translate | 思考内容离线翻译为中文展示 |
 | 2026-10-19 | 2026-10-19-change-assets-cross-repo-repos | 变更资产卡展示跨仓冻结面 |
+| 2026-10-19 | 2026-10-19-cross-repo-patch-slicing | 资产卡跨仓单文件 diff 切片 |

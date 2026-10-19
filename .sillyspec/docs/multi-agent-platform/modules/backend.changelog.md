@@ -69,3 +69,4 @@
 - 2026-10-19-translate-live-verify | 翻译真机验证：换模型源与EOS修复
 - 2026-10-19-knowledge-build-switch-rollout | 禁建库开关本地部署落地与首搜实测
 - 2026-10-19-change-assets-cross-repo-repos | 变更资产卡展示跨仓冻结面
+- 2026-10-19-cross-repo-patch-slicing | 资产卡跨仓单文件 diff 切片

@@ -134,3 +134,4 @@
 | 2026-10-19 | 2026-10-19-change-list-created-sort | 变更中心列表默认按创建时间倒序 |
 | 2026-10-19 | 2026-10-19-thinking-zh-translate | 思考内容离线翻译为中文展示 |
 | 2026-10-19 | 2026-10-19-change-assets-cross-repo-repos | 变更资产卡展示跨仓冻结面 |
+| 2026-10-19 | 2026-10-19-cross-repo-patch-slicing | 资产卡跨仓单文件 diff 切片 |

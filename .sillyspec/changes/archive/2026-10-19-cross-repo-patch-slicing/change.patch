@@ -1,0 +1,545 @@
+diff --git a/backend/app/modules/change/assets.py b/backend/app/modules/change/assets.py
+index c76f0a7a8..4e50154c4 100644
+--- a/backend/app/modules/change/assets.py
++++ b/backend/app/modules/change/assets.py
+@@ -225,6 +225,25 @@ def _str_or_none(value: object) -> str | None:
+     return value if isinstance(value, str) else None
+ 
+ 
++def _patch_header_paths(patch_text: object) -> list[str]:
++    """跨仓 patch 正文 → 新侧文件清单（``diff --git a/x b/y`` 的 y 侧，引号/转义还原）。
++
++    2026-10-19-cross-repo-patch-slicing：资产卡仓段逐文件点开需要仓内文件表——
++    repos[].patch 是内联正文，没有独立清单，从块头解析是零新增冻结字段的取法。
++    """
++    if not isinstance(patch_text, str):
++        return []
++    out: list[str] = []
++    for line in patch_text.splitlines():
++        m = _PATCH_HEADER_RE.match(line)
++        if not m:
++            continue
++        p = _strip_ab_prefix(_unquote_patch_path(m.group("new")))
++        if p and p not in out:
++            out.append(p)
++    return out
++
++
+ def _read_patch_repos(data: dict) -> list[ChangePatchRepo]:
+     """``scopeAudit.repos[]`` 元数据投影（2026-10-19-change-assets-cross-repo-repos）。
+ 
+@@ -264,6 +283,10 @@ def _read_patch_repos(data: dict) -> list[ChangePatchRepo]:
+                 untouched=_int_or_none(totals_raw.get("untouched")),
+             )
+         patch_text = raw.get("patch")
++        has_patch = isinstance(patch_text, str) and len(patch_text) > 0
++        # 仓内文件清单（2026-10-19-cross-repo-patch-slicing）：从 patch 头解析新侧路径，
++        # 供卡面逐文件点开（patch-file?repo=…）；超上限截断标注。
++        repo_file_list = _patch_header_paths(patch_text) if has_patch else []
+         repos.append(
+             ChangePatchRepo(
+                 key=key,
+@@ -272,7 +295,9 @@ def _read_patch_repos(data: dict) -> list[ChangePatchRepo]:
+                 degraded=raw.get("degraded") is True,
+                 degraded_reason=_str_or_none(raw.get("degradedReason")),
+                 patch_sha256=_str_or_none(raw.get("patchSha256")),
+-                has_patch=isinstance(patch_text, str) and len(patch_text) > 0,
++                has_patch=has_patch,
++                file_list=repo_file_list[:_PATCH_FILES_MAX],
++                files_truncated=len(repo_file_list) > _PATCH_FILES_MAX,
+             )
+         )
+     return repos
+@@ -399,6 +424,47 @@ def slice_patch_for_file(patch_text: str, rel_path: str) -> str | None:
+     return None
+ 
+ 
++def _read_repo_patch_file_diff(change_dir: Path, repo: str, rel_path: str) -> ChangePatchFileRead:
++    """跨仓单文件切片（2026-10-19-cross-repo-patch-slicing FR-01）：``scopeAudit.repos[repo].patch``。
++
++    与主仓同款 fail-open 语义：未知仓键/该仓无正文/未命中一律 ``note`` 说明（读不到
++    跨仓留档是展示面降级，不是资源不存在）；命中切该文件 diff 段，超 ``_PATCH_FILE_MAX_CHARS``
++    截断标注。JSON-only 跨仓冻结（无 change.patch）同样可用——正文本就内联在 JSON。
++    """
++    data = _read_json_dict(change_dir / "change-patch.json")
++    repos = (
++        data.get("scopeAudit", {}).get("repos")
++        if isinstance(data, dict) and isinstance(data.get("scopeAudit"), dict)
++        else None
++    )
++    entry = None
++    if isinstance(repos, list):
++        entry = next((r for r in repos if isinstance(r, dict) and r.get("key") == repo), None)
++    if entry is None:
++        return ChangePatchFileRead(
++            path=rel_path,
++            note=f"跨仓键「{repo}」不在本变更冻结面（scopeAudit.repos）——无法切片。",
++        )
++    patch_text = entry.get("patch")
++    if not isinstance(patch_text, str) or not patch_text:
++        return ChangePatchFileRead(
++            path=rel_path,
++            note=f"跨仓「{repo}」没有冻结 patch 正文（采集失败或空窗），无法比对具体改动。",
++        )
++    sliced = slice_patch_for_file(patch_text, rel_path)
++    if sliced is None:
++        return ChangePatchFileRead(
++            path=rel_path,
++            note=f"该文件不在跨仓「{repo}」的冻结 patch 内（留档窗口外，或仅改了不纳入 patch 的面）。",
++        )
++    truncated = len(sliced) > _PATCH_FILE_MAX_CHARS
++    return ChangePatchFileRead(
++        path=rel_path,
++        diff=sliced[:_PATCH_FILE_MAX_CHARS] if truncated else sliced,
++        truncated=truncated,
++    )
++
++
+ def _read_patch_file_diff(change_dir: Path, rel_path: str) -> ChangePatchFileRead:
+     """读 ``change.patch``（缺件回退 ``scope-audit.patch``）并切出目标文件段。
+ 
+@@ -653,15 +719,24 @@ class ChangeAssetsQueryService:
+         return result
+ 
+     async def get_patch_file_diff(
+-        self, workspace_id: uuid.UUID, change_id: uuid.UUID, rel_path: str
++        self,
++        workspace_id: uuid.UUID,
++        change_id: uuid.UUID,
++        rel_path: str,
++        repo: str | None = None,
+     ) -> ChangePatchFileRead:
+         """归档留档单文件 diff 切片（FR-04；``rel_path`` 已由 router 白名单校验）。
+ 
+         在途变更同样允许调用——归档目录件不存在时由 ``_read_patch_file_diff``
+         以 note 说明，不额外分支（展示面 fail-open，读不到不是错误面）。
++        ``repo``（2026-10-19-cross-repo-patch-slicing FR-01）：跨仓切片——源正文取
++        ``change-patch.json scopeAudit.repos[repo].patch`` 内联串，键不在冻结面时
++        同样 note 降级（不抛 404，与主仓切片同语义）。
+         """
+         change = await self._get_change(workspace_id, change_id)
+         change_dir = await self._resolve_change_dir(workspace_id, change)
++        if repo is not None:
++            return await asyncio.to_thread(_read_repo_patch_file_diff, change_dir, repo, rel_path)
+         return await asyncio.to_thread(_read_patch_file_diff, change_dir, rel_path)
+ 
+     async def _get_change(self, workspace_id: uuid.UUID, change_id: uuid.UUID) -> Change:
+diff --git a/backend/app/modules/change/router.py b/backend/app/modules/change/router.py
+index 174e3d19b..feb87653d 100644
+--- a/backend/app/modules/change/router.py
++++ b/backend/app/modules/change/router.py
+@@ -887,6 +887,10 @@ async def get_change_patch_file(
+     session: SessionDep,
+     _user: Annotated[User, Depends(require_permission(Permission.CHANGE_READ))],
+     path: str = Query(..., description="变更目录相对文件路径（如 src/flow.js）"),
++    repo: str | None = Query(
++        None,
++        description="跨仓键（scopeAudit.repos 的 key）——在场时切片取该仓内联 patch 而非主仓 change.patch",
++    ),
+ ) -> ChangePatchFileRead:
+     """归档留档单文件 diff 切片（2026-09-25-change-detail-assets-usability / FR-04）。
+ 
+@@ -896,10 +900,12 @@ async def get_change_patch_file(
+     ``path`` 复用 scope-audit 单文件比对的同一白名单校验（拒 ``..``/
+     绝对路径/pathspec magic → 422）；切片命中与否由响应 ``diff``/``note`` 表达，
+     不抛 404（读不到留档是展示面降级，不是资源不存在）。
++    ``repo``（2026-10-19-cross-repo-patch-slicing FR-01）：跨仓切片——正文取
++    ``change-patch.json scopeAudit.repos[repo].patch``；键不在冻结面同样 note 降级。
+     """
+     service = ChangeAssetsQueryService(session)
+     return await service.get_patch_file_diff(
+-        workspace_id, change_id, normalize_scope_file_path(path)
++        workspace_id, change_id, normalize_scope_file_path(path), repo=repo
+     )
+ 
+ 
+diff --git a/backend/app/modules/change/schema.py b/backend/app/modules/change/schema.py
+index 644dc8259..6a53bb51b 100644
+--- a/backend/app/modules/change/schema.py
++++ b/backend/app/modules/change/schema.py
+@@ -943,6 +943,10 @@ class ChangePatchRepo(BaseModel):
+     degraded_reason: str | None = None
+     patch_sha256: str | None = None
+     has_patch: bool = False
++    # 仓内文件清单（2026-10-19-cross-repo-patch-slicing）：从 repos[].patch 头解析的
++    # 新侧路径投影（卡面点击走 patch-file?repo=… 切片）；无正文仓恒空。
++    file_list: list[str] = Field(default_factory=list)
++    files_truncated: bool = False
+ 
+ 
+ class ChangePatchMeta(BaseModel):
+diff --git a/backend/app/modules/change/tests/test_assets.py b/backend/app/modules/change/tests/test_assets.py
+index 31a9cc129..e13b22e8e 100644
+--- a/backend/app/modules/change/tests/test_assets.py
++++ b/backend/app/modules/change/tests/test_assets.py
+@@ -1013,3 +1013,60 @@ async def test_patch_meta_without_repos_key_is_backward_compatible(
+     assert result.patch is not None
+     assert result.patch.repos == []
+     assert result.patch.file_list == ["src/flow.js", "test/x.test.mjs"]
++
++
++# ===========================================================================
++# 跨仓单文件切片（2026-10-19-cross-repo-patch-slicing / FR-01~02）
++# ===========================================================================
++
++
++async def test_patch_meta_repo_file_list(db_session, tmp_path: Path) -> None:
++    """repos[].file_list 从 patch 头解析投影；无正文仓恒空。"""
++    spec_root = tmp_path / "spec-root-slice1"
++    _seed_mirror(spec_root, with_trace=False)
++    _seed_cross_repo_meta(spec_root)
++    change_dir = spec_root / "changes" / "archive" / KEY
++    meta = json.loads((change_dir / "change-patch.json").read_text(encoding="utf-8"))
++    meta["scopeAudit"]["repos"][0]["patch"] = (
++        "diff --git a/src/x.js b/src/x.js\n--- a/src/x.js\n+++ b/src/x.js\n@@ -1 +1 @@\n-a\n+b\n"
++        "diff --git a/src/y.js b/src/y.js\n--- /dev/null\n+++ b/src/y.js\n@@ -0,0 +1 @@\n+new\n"
++    )
++    (change_dir / "change-patch.json").write_text(json.dumps(meta), encoding="utf-8")
++    ws = await _make_ws_spec(db_session, spec_root)
++    change = await _make_change(db_session, ws, archived=True)
++
++    result = await ChangeAssetsQueryService(db_session).get_change_assets(ws.id, change.id)
++    assert result.patch is not None
++    healthy = result.patch.repos[0]
++    assert healthy.file_list == ["src/x.js", "src/y.js"]
++    assert healthy.files_truncated is False
++    assert result.patch.repos[1].file_list == []
++
++
++async def test_patch_file_diff_repo_hit_and_unknown(db_session, tmp_path: Path) -> None:
++    """repo 命中切片该仓 patch；未知仓/无正文仓给 note（fail-open 不抛）。"""
++    spec_root = tmp_path / "spec-root-slice2"
++    _seed_mirror(spec_root, with_trace=False)
++    _seed_cross_repo_meta(spec_root)
++    change_dir = spec_root / "changes" / "archive" / KEY
++    meta = json.loads((change_dir / "change-patch.json").read_text(encoding="utf-8"))
++    meta["scopeAudit"]["repos"][0]["patch"] = (
++        "diff --git a/src/x.js b/src/x.js\n--- a/src/x.js\n+++ b/src/x.js\n@@ -1 +1 @@\n-a\n+b\n"
++        "diff --git a/src/y.js b/src/y.js\n--- a/src/y.js\n+++ b/src/y.js\n@@ -1 +1 @@\n-c\n+d\n"
++    )
++    (change_dir / "change-patch.json").write_text(json.dumps(meta), encoding="utf-8")
++    ws = await _make_ws_spec(db_session, spec_root)
++    change = await _make_change(db_session, ws, archived=True)
++    service = ChangeAssetsQueryService(db_session)
++
++    hit = await service.get_patch_file_diff(ws.id, change.id, "src/y.js", repo="subgrid")
++    assert hit.diff is not None and "+++ b/src/y.js" in hit.diff and "+d" in hit.diff
++    assert hit.note is None
++
++    unknown = await service.get_patch_file_diff(ws.id, change.id, "src/x.js", repo="nosuch")
++    assert unknown.diff is None
++    assert unknown.note is not None and "nosuch" in unknown.note
++
++    bare = await service.get_patch_file_diff(ws.id, change.id, "src/x.js", repo="broken")
++    assert bare.diff is None
++    assert bare.note is not None and "subgrid" not in bare.note
+diff --git a/backend/openapi.json b/backend/openapi.json
+index a5fc94580..7fb79811a 100644
+--- a/backend/openapi.json
++++ b/backend/openapi.json
+@@ -5372,7 +5372,7 @@
+           "change"
+         ],
+         "summary": "Get Change Patch File",
+-        "description": "归档留档单文件 diff 切片（2026-09-25-change-detail-assets-usability / FR-04）。\n\n卡面「归档留档」清单点开某文件时，读该变更归档目录 ``change.patch``（缺件回退\n``scope-audit.patch``——厚流程归档只落快照留档）并切出该文件的 diff 段——冻结\n在收尾时点、无后续演进混入（与范围对账的实时窗口锚不同源，两者不可互替）。\n``path`` 复用 scope-audit 单文件比对的同一白名单校验（拒 ``..``/\n绝对路径/pathspec magic → 422）；切片命中与否由响应 ``diff``/``note`` 表达，\n不抛 404（读不到留档是展示面降级，不是资源不存在）。",
++        "description": "归档留档单文件 diff 切片（2026-09-25-change-detail-assets-usability / FR-04）。\n\n卡面「归档留档」清单点开某文件时，读该变更归档目录 ``change.patch``（缺件回退\n``scope-audit.patch``——厚流程归档只落快照留档）并切出该文件的 diff 段——冻结\n在收尾时点、无后续演进混入（与范围对账的实时窗口锚不同源，两者不可互替）。\n``path`` 复用 scope-audit 单文件比对的同一白名单校验（拒 ``..``/\n绝对路径/pathspec magic → 422）；切片命中与否由响应 ``diff``/``note`` 表达，\n不抛 404（读不到留档是展示面降级，不是资源不存在）。\n``repo``（2026-10-19-cross-repo-patch-slicing FR-01）：跨仓切片——正文取\n``change-patch.json scopeAudit.repos[repo].patch``；键不在冻结面同样 note 降级。",
+         "operationId": "get_change_patch_file_api_workspaces__workspace_id__changes__change_id__assets_patch_file_get",
+         "parameters": [
+           {
+@@ -5405,6 +5405,24 @@
+               "title": "Path"
+             },
+             "description": "变更目录相对文件路径（如 src/flow.js）"
++          },
++          {
++            "name": "repo",
++            "in": "query",
++            "required": false,
++            "schema": {
++              "anyOf": [
++                {
++                  "type": "string"
++                },
++                {
++                  "type": "null"
++                }
++              ],
++              "description": "跨仓键（scopeAudit.repos 的 key）——在场时切片取该仓内联 patch 而非主仓 change.patch",
++              "title": "Repo"
++            },
++            "description": "跨仓键（scopeAudit.repos 的 key）——在场时切片取该仓内联 patch 而非主仓 change.patch"
+           }
+         ],
+         "responses": {
+@@ -41690,6 +41708,18 @@
+             "type": "boolean",
+             "title": "Has Patch",
+             "default": false
++          },
++          "file_list": {
++            "items": {
++              "type": "string"
++            },
++            "type": "array",
++            "title": "File List"
++          },
++          "files_truncated": {
++            "type": "boolean",
++            "title": "Files Truncated",
++            "default": false
+           }
+         },
+         "type": "object",
+diff --git a/frontend/src/components/changes/detail/__tests__/change-assets-card.test.tsx b/frontend/src/components/changes/detail/__tests__/change-assets-card.test.tsx
+index 6f365039c..57f44ff5c 100644
+--- a/frontend/src/components/changes/detail/__tests__/change-assets-card.test.tsx
++++ b/frontend/src/components/changes/detail/__tests__/change-assets-card.test.tsx
+@@ -453,7 +453,7 @@ describe("ChangeAssetsCard", () => {
+ 
+     fireEvent.click(screen.getByTestId("change-assets-patch-file-src/flow.js"));
+     await waitFor(() =>
+-      expect(mockPatch).toHaveBeenCalledWith("ws-1", "c-1", "src/flow.js"),
++      expect(mockPatch).toHaveBeenCalledWith("ws-1", "c-1", "src/flow.js", undefined),
+     );
+     expect(await screen.findByTestId("diff-view")).toBeInTheDocument();
+   });
+@@ -917,6 +917,8 @@ describe("跨仓冻结面", () => {
+             degraded_reason: null,
+             patch_sha256: "54dae3786803ce49",
+             has_patch: true,
++            file_list: ["src/routes/Fire/Ledger/LedgerTable.js", "src/routes/Fire/Ledger/fireLedger.less"],
++            files_truncated: false,
+           },
+           {
+             key: "broken",
+@@ -933,6 +935,8 @@ describe("跨仓冻结面", () => {
+             degraded_reason: "仓路径不可达",
+             patch_sha256: null,
+             has_patch: false,
++            file_list: [],
++            files_truncated: false,
+           },
+         ],
+       },
+@@ -949,6 +953,28 @@ describe("跨仓冻结面", () => {
+       "仓路径不可达",
+     );
+     expect(screen.getByText(/主仓 patch/)).toBeInTheDocument();
++    // 仓内文件清单（2026-10-19-cross-repo-patch-slicing）：点开单文件 → repo 参数切片。
++    const fileList = await screen.findByTestId("change-assets-cross-repo-files");
++    expect(fileList).toHaveTextContent("LedgerTable.js");
++    expect(fileList).toHaveTextContent("subgrid 改动文件");
++    mockPatch.mockResolvedValue({
++      path: "src/routes/Fire/Ledger/LedgerTable.js",
++      diff: "+跨仓切片",
++      truncated: false,
++    });
++    fireEvent.click(
++      screen.getByTestId("change-assets-cross-repo-file-subgrid-src/routes/Fire/Ledger/LedgerTable.js"),
++    );
++    await waitFor(() =>
++      expect(mockPatch).toHaveBeenCalledWith(
++        "ws-1",
++        "c-1",
++        "src/routes/Fire/Ledger/LedgerTable.js",
++        "subgrid",
++      ),
++    );
++    expect(await screen.findByText("+跨仓切片")).toBeInTheDocument();
++    expect(screen.getByText(/跨仓 subgrid · src\/routes/)).toBeInTheDocument();
+   });
+ 
+   it("无 repos 键时旧展示零变化（不渲染跨仓段、不加主仓标注）", async () => {
+diff --git a/frontend/src/components/changes/detail/change-assets-card.tsx b/frontend/src/components/changes/detail/change-assets-card.tsx
+index e7cc809fc..b6515971e 100644
+--- a/frontend/src/components/changes/detail/change-assets-card.tsx
++++ b/frontend/src/components/changes/detail/change-assets-card.tsx
+@@ -209,8 +209,8 @@ export function ChangeAssetsCard({
+   };
+   /** 测试文件预览目标（null = 关）。 */
+   const [testPath, setTestPath] = useState<string | null>(null);
+-  /** 归档留档 diff 目标（null = 关）。 */
+-  const [patchPath, setPatchPath] = useState<string | null>(null);
++  /** 归档留档 diff 目标（null = 关）。repo 在场 = 跨仓切片（2026-10-19-cross-repo-patch-slicing）。 */
++  const [patchFile, setPatchFile] = useState<{ path: string; repo?: string } | null>(null);
+   /** 模块文档预览目标（镜像内相对路径，null = 关）。 */
+   const [moduleDoc, setModuleDoc] = useState<string | null>(null);
+   // 知识条目预览目标（2026-10-14-assets-knowledge-popup-preview）：FR 索引 /
+@@ -224,9 +224,10 @@ export function ChangeAssetsCard({
+   const qualifiedAnchor = (id: string) => (changeKey ? `${changeKey}#${id}` : id);
+ 
+   const patchQ = useQuery({
+-    queryKey: ["changePatchFile", workspaceId, changeId, patchPath],
+-    queryFn: () => getChangePatchFile(workspaceId, changeId, patchPath!),
+-    enabled: patchPath !== null,
++    queryKey: ["changePatchFile", workspaceId, changeId, patchFile?.path, patchFile?.repo ?? null],
++    queryFn: () =>
++      getChangePatchFile(workspaceId, changeId, patchFile!.path, patchFile!.repo),
++    enabled: patchFile !== null,
+     retry: false,
+     refetchOnWindowFocus: false,
+   });
+@@ -670,6 +671,48 @@ export function ChangeAssetsCard({
+                       }}
+                     />
+                   ))}
++                  {/* 仓内文件清单（2026-10-19-cross-repo-patch-slicing FR-02）：
++                      后端从 repos[].patch 头解析投影——点开走 patch-file?repo=… 切片。 */}
++                  {crossRepos.some((r) => (r.file_list?.length ?? 0) > 0) ? (
++                    <ul data-testid="change-assets-cross-repo-files" className="mt-1 space-y-1">
++                      {crossRepos.map((r) =>
++                        (r.file_list?.length ?? 0) > 0 ? (
++                          <li key={r.key}>
++                            <div className="mb-0.5 flex items-center justify-between gap-2 text-[10px] text-muted-foreground/70">
++                              <span>{r.key} 改动文件（点开看该仓冻结 diff）</span>
++                              {r.files_truncated ? (
++                                <span className="shrink-0 text-warning">清单已截断</span>
++                              ) : null}
++                            </div>
++                            <ul>
++                              {cap(r.file_list ?? [], `cross-${r.key}`).map((p) => (
++                                <li key={p} className="border-b border-dashed last:border-b-0">
++                                  <button
++                                    type="button"
++                                    data-testid={`change-assets-cross-repo-file-${r.key}-${p}`}
++                                    onClick={() => setPatchFile({ path: p, repo: r.key })}
++                                    title={`查看 ${p} 在跨仓 ${r.key} 冻结 patch 中的 diff`}
++                                    className="flex w-full items-baseline gap-2 py-1 text-left hover:underline"
++                                  >
++                                    <span className="min-w-0 flex-1 truncate font-mono text-[10.5px] text-foreground">
++                                      {p}
++                                    </span>
++                                    <span className="shrink-0 text-[10px] text-brand-700">看 diff</span>
++                                  </button>
++                                </li>
++                              ))}
++                            </ul>
++                            <GroupToggle
++                              total={r.file_list?.length ?? 0}
++                              expanded={isExpanded(`cross-${r.key}`)}
++                              onToggle={() => toggleGroup(`cross-${r.key}`)}
++                              unit="个文件"
++                            />
++                          </li>
++                        ) : null,
++                      )}
++                    </ul>
++                  ) : null}
+                 </div>
+               ) : null}
+               {patchFileList.length > 0 ? (
+@@ -689,7 +732,7 @@ export function ChangeAssetsCard({
+                         <button
+                           type="button"
+                           data-testid={`change-assets-patch-file-${p}`}
+-                          onClick={() => setPatchPath(p)}
++                          onClick={() => setPatchFile({ path: p })}
+                           title={`查看 ${p} 在 change.patch 中的 diff`}
+                           className="flex w-full items-baseline gap-2 py-1 text-left hover:underline"
+                         >
+@@ -763,12 +806,15 @@ export function ChangeAssetsCard({
+       </Dialog>
+ 
+       {/* 归档留档单文件 diff 弹窗（FR-04）：冻结 patch 切片，非实时窗口。 */}
+-      <Dialog open={patchPath !== null} onOpenChange={(v) => !v && setPatchPath(null)}>
++      <Dialog open={patchFile !== null} onOpenChange={(v) => !v && setPatchFile(null)}>
+         <DialogContent className="flex h-[80vh] max-w-5xl flex-col gap-0 p-0">
+           <DialogHeader className="border-b px-4 py-3">
+             <DialogTitle className="text-sm">归档留档 · 单文件 diff</DialogTitle>
+             <DialogDescription className="truncate font-mono text-[11px]">
+-              {patchPath} · change.patch（收尾时点冻结）
++              {patchFile?.repo ? `跨仓 ${patchFile.repo} · ${patchFile.path}` : patchFile?.path} ·
++              {patchFile?.repo
++                ? " change-patch.json scopeAudit.repos[]（收尾时点冻结）"
++                : " change.patch（收尾时点冻结）"}
+             </DialogDescription>
+           </DialogHeader>
+           <div className="flex min-h-0 flex-1 flex-col overflow-hidden p-3">
+diff --git a/frontend/src/lib/api-types.ts b/frontend/src/lib/api-types.ts
+index 997ec8672..bb1b34be8 100644
+--- a/frontend/src/lib/api-types.ts
++++ b/frontend/src/lib/api-types.ts
+@@ -2163,6 +2163,8 @@ export interface paths {
+          *     ``path`` 复用 scope-audit 单文件比对的同一白名单校验（拒 ``..``/
+          *     绝对路径/pathspec magic → 422）；切片命中与否由响应 ``diff``/``note`` 表达，
+          *     不抛 404（读不到留档是展示面降级，不是资源不存在）。
++         *     ``repo``（2026-10-19-cross-repo-patch-slicing FR-01）：跨仓切片——正文取
++         *     ``change-patch.json scopeAudit.repos[repo].patch``；键不在冻结面同样 note 降级。
+          */
+         get: operations["get_change_patch_file_api_workspaces__workspace_id__changes__change_id__assets_patch_file_get"];
+         put?: never;
+@@ -14619,6 +14621,13 @@ export interface components {
+              * @default false
+              */
+             has_patch: boolean;
++            /** File List */
++            file_list?: string[];
++            /**
++             * Files Truncated
++             * @default false
++             */
++            files_truncated: boolean;
+         };
+         /**
+          * ChangePatchRepoAnchor
+@@ -33590,6 +33599,8 @@ export interface operations {
+             query: {
+                 /** @description 变更目录相对文件路径（如 src/flow.js） */
+                 path: string;
++                /** @description 跨仓键（scopeAudit.repos 的 key）——在场时切片取该仓内联 patch 而非主仓 change.patch */
++                repo?: string | null;
+             };
+             header?: never;
+             path: {
+diff --git a/frontend/src/lib/changes.ts b/frontend/src/lib/changes.ts
+index 0432e1cf1..ba26c597f 100644
+--- a/frontend/src/lib/changes.ts
++++ b/frontend/src/lib/changes.ts
+@@ -814,8 +814,10 @@ export function getChangePatchFile(
+   workspaceId: string,
+   changeId: string,
+   path: string,
++  repo?: string,
+ ): Promise<ChangePatchFileResponse> {
+-  const q = new URLSearchParams({ path });
++  // repo（2026-10-19-cross-repo-patch-slicing）：跨仓切片——正文取该仓 scopeAudit.repos[].patch；
++  const q = new URLSearchParams({ path, ...(repo ? { repo } : {}) });
+   return apiFetch<ChangePatchFileResponse>(
+     `/api/workspaces/${workspaceId}/changes/${changeId}/assets/patch-file?${q.toString()}`,
+   );
+diff --git a/sillyhub-daemon/src/api-types.ts b/sillyhub-daemon/src/api-types.ts
+index 997ec8672..bb1b34be8 100644
+--- a/sillyhub-daemon/src/api-types.ts
++++ b/sillyhub-daemon/src/api-types.ts
+@@ -2163,6 +2163,8 @@ export interface paths {
+          *     ``path`` 复用 scope-audit 单文件比对的同一白名单校验（拒 ``..``/
+          *     绝对路径/pathspec magic → 422）；切片命中与否由响应 ``diff``/``note`` 表达，
+          *     不抛 404（读不到留档是展示面降级，不是资源不存在）。
++         *     ``repo``（2026-10-19-cross-repo-patch-slicing FR-01）：跨仓切片——正文取
++         *     ``change-patch.json scopeAudit.repos[repo].patch``；键不在冻结面同样 note 降级。
+          */
+         get: operations["get_change_patch_file_api_workspaces__workspace_id__changes__change_id__assets_patch_file_get"];
+         put?: never;
+@@ -14619,6 +14621,13 @@ export interface components {
+              * @default false
+              */
+             has_patch: boolean;
++            /** File List */
++            file_list?: string[];
++            /**
++             * Files Truncated
++             * @default false
++             */
++            files_truncated: boolean;
+         };
+         /**
+          * ChangePatchRepoAnchor
+@@ -33590,6 +33599,8 @@ export interface operations {
+             query: {
+                 /** @description 变更目录相对文件路径（如 src/flow.js） */
+                 path: string;
++                /** @description 跨仓键（scopeAudit.repos 的 key）——在场时切片取该仓内联 patch 而非主仓 change.patch */
++                repo?: string | null;
+             };
+             header?: never;
+             path: {
