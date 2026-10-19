@@ -332,4 +332,4 @@ Windows PowerShell 5.1 向原生命令传参时裸 `--` 会被剥掉，`sillyspe
 
 2026-10-16 生产实证（第二次容器内嵌入事故）：用户在平台搜 sillyspec 工作区 → 该 ws 无 knowledge_search_state 行 → 懒同步走全量建库 → 容器内嵌入（mem_limit 1100m 也扛不住 6625 chunks）→ backend OOM(137) 被杀 → 整栈随后被手动停掉。**小语料也一样超时**：2 核嵌入速率 ~2.6 chunks/s，几百 chunks 就是数分钟，nginx 掐断连接后 uvicorn 取消请求任务 → 建库事务回滚 → 重试永远从头再来——**未建索引的 ws 搜索永远 504/超时**。运维解（本次实证）：从服务器 tar 拉 ws 语料（knowledge+docs）到本机 → `prod-index-batch.py` 模式（隧道直写生产库，embedder 单次加载循环建库，108 md/7 ws 共 28.7s）批量预建；指纹含 mtime 但 tar 保 mtime + 内容 hash 吸收漂移，建完服务器首查 0.8s 直查零重建。**根治缺口（待代码变更）**：`search_sync`/端点应支持「服务器禁建库」开关（如 KNOWLEDGE_SEARCH_SERVER_BUILD=0 → 无 state 行时跳过建库直接词面降级 + reason=index_not_built），新工作区首搜不再地雷；建库一律外部机器（本机隧道）预建。
 
-- 状态（2026-10-19 归类核实）：现行 🟡——运维缓解已落地（外部批量预建），根治缺口（服务器禁建库开关）待代码变更。
+- 状态（2026-10-19 根治落地）：代码根治已合入（2026-10-19-knowledge-search-build-switch）——服务器禁建库开关 `KNOWLEDGE_SEARCH_SERVER_BUILD`（`Settings.knowledge_search_server_build`，默认 True 全兼容；生产容器设 =0 后无索引 ws 首搜词面内存降级 `reason=index_not_built` 秒回、容器内零建库嵌入，测试 217 绿）。剩余动作=生产 `deploy/.env` 配 =0 + 未建索引 ws 走外部机器预建，两者落地后本条转 🟢。
