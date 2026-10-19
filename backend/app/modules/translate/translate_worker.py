@@ -181,7 +181,7 @@ def main(argv: list[str] | None = None) -> int:
             if not isinstance(texts, list) or not all(isinstance(t, str) for t in texts):
                 raise ValueError("texts must be list[str]")
             if not texts:
-                resp = {"id": req_id, "ok": True, "translations": []}
+                resp: dict[str, object] = {"id": req_id, "ok": True, "translations": []}
             else:
                 resp = {
                     "id": req_id,
