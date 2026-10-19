@@ -303,7 +303,8 @@ docker compose --env-file deploy/.env -f deploy/docker-compose.yml exec -T backe
 curl -fsS http://127.0.0.1:8001/api/health        # commit_sha 应为真实 git short SHA，非 unknown
 curl -fsS http://127.0.0.1:8001/daemon/install.sh | head -n 3
 curl -fsS http://127.0.0.1:8001/daemon/latest.json
-curl -fsSI http://127.0.0.1:8001/daemon/latest/sillyhub-daemon.js
+# ⚠️ 该端点仅允许 GET（HEAD 实测 405 Method Not Allowed，2026-10-19 验证）——用 GET 校验状态码与类型：
+curl -fsS -o /dev/null -w '%{http_code} %{content_type}\n' http://127.0.0.1:8001/daemon/latest/sillyhub-daemon.js
 # install.sh 经 Windows core.autocrlf=true 易被搞成 CRLF，curl|bash 会报
 # `set: pipefail: invalid option name`。bash -n 确认 LF 干净（Dockerfile 已
 # 对 /app/daemon-dist/install.sh 做 sed 's/\r$//'，.gitattributes 强制 *.sh eol=lf）。
@@ -311,7 +312,7 @@ curl -fsS http://127.0.0.1:8001/daemon/install.sh | bash -n && echo SYNTAX_OK
 ```
 
 - `latest.json` 应为 `{"version":"...","downloadUrl":"/daemon/latest/sillyhub-daemon.js"}`
-- `sillyhub-daemon.js` 应返回 `200` + `application/javascript`
+- `sillyhub-daemon.js` 应返回 `200` + `application/javascript`（经上方 GET 命令校验；HEAD 不被该端点支持）
 - `commit_sha` 为 `unknown` → 启动前未 `export COMMIT_SHA`（见「启动」节）。**注意：本机（Windows）按上文豁免故意不传，`unknown` 是稳定性权衡的预期结果，非缺陷。**
 - 任一 `/daemon/*` 返回 `404` → daemon bundle 没构建进镜像，回「启动」节先 `pnpm bundle` 再 `--build --force-recreate` 重建 backend
 

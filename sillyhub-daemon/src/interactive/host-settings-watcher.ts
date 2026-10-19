@@ -10,7 +10,8 @@
  * 当前档位重新解析网关与模型，/model 钉随旧进程消亡）。
  *
  * 侦测语义（design §做法概述）：
- *   - 轮询（默认 3s，setInterval + unref，跨平台零依赖——CLAUDE.md 规则 13；放弃
+ *   - 轮询（默认 {@link HOST_SETTINGS_POLL_INTERVAL_MS}=1s，setInterval + unref，跨平台
+ *     零依赖——CLAUDE.md 规则 13；放弃
  *     fs.watch：Windows 替换写会掉 watch，见 design 死路 2）；
  *   - 指纹 = env 块键排序后的稳定 JSON（非 env 字段变化不触发——permissions/hooks
  *     改动不打扰会话）；
@@ -63,11 +64,20 @@ export function envBlockFingerprint(text: string): string | null {
 export interface HostSettingsWatchOptions {
   /** 被监听文件（生产 defaultHostSettingsPath()；测试注入 tmp 路径）。 */
   settingsPath: string;
-  /** 轮询间隔毫秒，默认 3000（≤0 视为非法按默认处理）。 */
+  /** 轮询间隔毫秒，默认 {@link HOST_SETTINGS_POLL_INTERVAL_MS}（≤0 视为非法按默认处理）。 */
   pollIntervalMs?: number;
   /** 确认变化后的回调（同步签名；重载动作由调用方自行 fire-and-forget）。 */
   onChange: (fingerprint: string) => void;
 }
+
+/**
+ * 默认轮询节拍（毫秒）——单一源导出，守护测试断言用（防魔数漂移）。
+ *
+ * 2026-10-19-host-settings-reload-latency：3000 → 1000。端到端延迟（切档 → 引擎重载
+ * 完成）由 4-6s 收窄到 2-4s（两拍去抖 6s→2s + 引擎重启 1-3s）；去抖/指纹/容错语义
+ * 零变化，收益全部来自节拍。空转成本：每秒读 2-6KB + JSON 解析，微秒级，unref 定时器。
+ */
+export const HOST_SETTINGS_POLL_INTERVAL_MS = 1000;
 
 /** 监听句柄：stop() 清定时器（幂等）。 */
 export interface HostSettingsWatcherHandle {
@@ -81,7 +91,7 @@ export interface HostSettingsWatcherHandle {
 export function startHostSettingsWatcher(
   opts: HostSettingsWatchOptions,
 ): HostSettingsWatcherHandle {
-  const interval = Math.max(1, opts.pollIntervalMs ?? 3000);
+  const interval = Math.max(1, opts.pollIntervalMs ?? HOST_SETTINGS_POLL_INTERVAL_MS);
   /** 已确认基线（null = 尚未建立——第一拍建立）。 */
   let baseline: string | null = null;
   /** 候选指纹与连续命中拍数（去抖）。 */

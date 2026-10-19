@@ -1,0 +1,36 @@
+tier: thin
+legacy_fallback: false
+substeps: {}
+born_face: thin
+with_tasks: false
+review_force: null
+input: >-
+  宿主机档位热跟随提速与部署技能文档修正
+
+
+  动机与背景：已上线的本机默认会话热跟随（2026-10-19-host-settings-live-reload）端到端延迟 4-6 秒（3s 轮询 × 两拍去抖 + 引擎重启 1-3s），实测用户曾在切回 GLM 后 2
+  秒查询被旧值误导（会话 21b530c6：10:13:43 切回、10:13:49 重载完成、10:13:47 查到旧 MiniMax）。收窄轮询节拍可把窗口压半。另：deploy
+  技能（.zcode/skills/sillyhub-docker-deploy/SKILL.md）验证命令 curl -fsSI /daemon/latest/sillyhub-daemon.js 期望 200，实测该端点只允许
+  GET（HEAD 405）——文档失真。
+
+
+  成功标准：
+
+  - 轮询默认节拍 3000ms 收窄到 1000ms（单一源导出常量，注入覆盖口径不变），两拍一致去抖防半写语义零回退；端到端（切档→引擎重载完成）真机实测 ≤4 秒留痕
+
+  - 既有行为零回退：watcher 8 例 + HOST-1~6 筛选矩阵全绿；关闭阀/精度（非 env 不触发、损坏缺失容错）不变
+
+  - deploy 技能文档 HEAD 命令改为 GET 口径（-o /dev/null -w 状态码与 content-type），与端点实际行为一致
+
+  - 相关 daemon 测试绿 + tsc 零错；部署后发布记录留痕
+autopilot: false
+prestage_ack: true
+baseline_commit: fa241629fad7a0d3b3fc1fa698ded448de4820e9
+updatedAt: '2026-10-19T02:31:42.253Z'
+baseline_sha256: 1048c3eae942c556cfd2909d4d6a61fd7fb897b18ec0ba1374447799bac42fed
+spec_approved: true
+spec_approved_at: '2026-10-19T02:31:42.252Z'
+spec_approved_by: anon@DESKTOP-2BN7FDC
+spec_approved_channel: agent-self
+spec_attested_by: anon@DESKTOP-2BN7FDC
+

@@ -24,8 +24,15 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
   envBlockFingerprint,
+  HOST_SETTINGS_POLL_INTERVAL_MS,
   startHostSettingsWatcher,
 } from '../../src/interactive/host-settings-watcher.js';
+
+describe('HOST_SETTINGS_POLL_INTERVAL_MS — 默认节拍单一源（2026-10-19-host-settings-reload-latency）', () => {
+  it('默认轮询节拍为 1000ms（提速 3s→1s；注入覆盖口径不变）', () => {
+    expect(HOST_SETTINGS_POLL_INTERVAL_MS).toBe(1000);
+  });
+});
 
 const ENV_GLM = JSON.stringify({
   env: { ANTHROPIC_BASE_URL: 'https://open.bigmodel.cn/api/anthropic' },
