@@ -80,8 +80,8 @@ describe("translateText 合批/缓存/降级", () => {
   it("250ms 窗口内多条合为单请求，同文本去重共享单次在途", async () => {
     apiFetchMock.mockResolvedValue(
       okResponse([
-        { id: "0:0", text: "译甲", translated: true },
-        { id: "1:0", text: "译乙", translated: true },
+        { id: "0", text: "译甲", translated: true },
+        { id: "1", text: "译乙", translated: true },
       ]),
     );
     const p1 = translateText("first english thinking text worth translating.");
@@ -100,7 +100,7 @@ describe("translateText 合批/缓存/降级", () => {
 
   it("缓存命中——同文本第二次调用零请求", async () => {
     const text = "cached english text for the second call check.";
-    apiFetchMock.mockResolvedValue(okResponse([{ id: "0:0", text: "译缓存", translated: true }]));
+    apiFetchMock.mockResolvedValue(okResponse([{ id: "0", text: "译缓存", translated: true }]));
     const first = translateText(text);
     await vi.advanceTimersByTimeAsync(250);
     await expect(first).resolves.toBe("译缓存");
@@ -113,7 +113,7 @@ describe("translateText 合批/缓存/降级", () => {
       ok: true,
       engine_ready: false,
       reason: "no model",
-      items: [{ id: "0:0", text: "x", translated: false }],
+      items: [{ id: "0", text: "x", translated: false }],
     });
     const p1 = translateText("engine unavailable backoff english text.");
     await vi.advanceTimersByTimeAsync(250);
@@ -124,7 +124,7 @@ describe("translateText 合批/缓存/降级", () => {
     // 退避期满（advance 60s+）恢复请求
     await vi.advanceTimersByTimeAsync(60_100);
     apiFetchMock.mockResolvedValue(
-      okResponse([{ id: "0:0", text: "恢复了", translated: true }]),
+      okResponse([{ id: "0", text: "恢复了", translated: true }]),
     );
     const p2 = translateText("recovered english text after backoff expires.");
     await vi.advanceTimersByTimeAsync(250);
@@ -160,5 +160,30 @@ describe("translateText 合批/缓存/降级", () => {
     expect(body.items.length).toBeGreaterThan(1);
     expect(body.items.every((it) => it.text.length <= 1800)).toBe(true);
     expect(out).toBe(body.items.map((_, i) => `[${i}]`).join(""));
+  });
+
+  it("评审 P2 回归：>16 块巨型文本跨多批续传不卡队（旧形态空批 return 后队列永久卡死）", async () => {
+    // ~45000 字符 → 25 块（1800/块），超单批 16 上限，需两批接力
+    const sentence = "Giant english thinking text spanning many chunk batches. ";
+    const text = sentence.repeat(800); // ~46400
+    apiFetchMock.mockImplementation(
+      async (_path: string, options: { json: { items: Array<{ id: string; text: string }> } }) => {
+        const items = options.json.items.map((it) => ({
+          id: it.id,
+          text: it.text.length === 0 ? "" : `${it.text.length}`,
+          translated: true,
+        }));
+        return okResponse(items);
+      },
+    );
+    const p = translateText(text);
+    // 第一批（16 块）后仍剩 9 块在队——批完成回调须已排程下一轮 flush
+    await vi.advanceTimersByTimeAsync(250);
+    expect(apiFetchMock).toHaveBeenCalledTimes(1);
+    await vi.advanceTimersByTimeAsync(250);
+    expect(apiFetchMock).toHaveBeenCalledTimes(2);
+    const out = await p;
+    // 每块译文=块字符数，拼接后总长=原文字符数（按序无损重组）
+    expect(out).toBe(splitIntoChunks(text).map((c) => `${c.length}`).join(""));
   });
 });

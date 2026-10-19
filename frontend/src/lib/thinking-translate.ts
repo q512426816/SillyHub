@@ -94,11 +94,25 @@ interface TranslateApiResponse {
 const translationCache = new Map<string, string>();
 let unavailableUntil = 0;
 
-interface QueueJob {
-  chunks: string[];
+/**
+ * 块级队列（2026-10-19 评审 P2 修复）：队列条目=单块（1 请求 item），跨请求
+ * 的多块文本经 Assembler 聚合——任一块所在批次完成即回填，收齐 resolve。
+ * 旧「job 整体入队」形态在 >16 块（>28800 字符）时队头永远装不进单批，
+ * flush 空批 return 后无人再排程 → 队列卡死（UI 恒「翻译中…」且阻塞后续）。
+ */
+interface Assembler {
+  source: string;
+  /** 块译文槽：undefined=未回填，null=该块失败，string=成功。 */
+  parts: (string | null | undefined)[];
+  received: number;
   resolve: (translated: string | null) => void;
 }
-let queue: QueueJob[] = [];
+interface QueueEntry {
+  assembler: Assembler;
+  chunkIndex: number;
+  chunk: string;
+}
+let queue: QueueEntry[] = [];
 let flushTimer: ReturnType<typeof setTimeout> | null = null;
 /** 同文本在途去重：text → 共享 Promise。 */
 const inflight = new Map<string, Promise<string | null>>();
@@ -115,10 +129,28 @@ function cachePut(text: string, translated: string): void {
   translationCache.set(text, translated);
 }
 
-async function requestBatch(jobs: QueueJob[]): Promise<void> {
-  const items = jobs.flatMap((job, jobIdx) =>
-    job.chunks.map((chunk, chunkIdx) => ({ id: `${jobIdx}:${chunkIdx}`, text: chunk })),
-  );
+/** 块译文回填：收齐全部块后拼装 resolve + 写缓存（部分失败整条回退 null）。 */
+function fillEntry(entry: QueueEntry, translated: string | null): void {
+  const asm = entry.assembler;
+  if (asm.parts[entry.chunkIndex] !== undefined) return; // 防御：重复回填
+  asm.parts[entry.chunkIndex] = translated;
+  asm.received += 1;
+  if (asm.received < asm.parts.length) return;
+  if (asm.parts.every((p) => p !== null)) {
+    const joined = asm.parts.join("");
+    cachePut(asm.source, joined);
+    asm.resolve(joined);
+  } else {
+    asm.resolve(null);
+  }
+}
+
+function failEntries(entries: QueueEntry[]): void {
+  for (const entry of entries) fillEntry(entry, null);
+}
+
+async function requestBatch(entries: QueueEntry[]): Promise<void> {
+  const items = entries.map((entry, idx) => ({ id: `${idx}`, text: entry.chunk }));
   let resp: TranslateApiResponse;
   try {
     resp = await apiFetch<TranslateApiResponse>("/api/translate/thinking", {
@@ -126,28 +158,20 @@ async function requestBatch(jobs: QueueJob[]): Promise<void> {
       json: { items, target: "zh" },
     });
   } catch {
-    // 网络失败与引擎不可用同语义：整批回退原文 + 退避（防风暴）
+    // 网络失败与引擎不可用同语义：本批回退原文 + 退避（防风暴）
     unavailableUntil = Date.now() + UNAVAILABLE_BACKOFF_MS;
-    for (const job of jobs) job.resolve(null);
+    failEntries(entries);
     return;
   }
   if (!resp.engine_ready) {
     unavailableUntil = Date.now() + UNAVAILABLE_BACKOFF_MS;
-    for (const job of jobs) job.resolve(null);
+    failEntries(entries);
     return;
   }
   const byId = new Map(resp.items.map((it) => [it.id, it]));
-  jobs.forEach((job, jobIdx) => {
-    const rebuilt = job.chunks
-      .map((_, chunkIdx) => byId.get(`${jobIdx}:${chunkIdx}`))
-      .map((it) => (it && it.translated ? it.text : null));
-    if (rebuilt.every((part) => part !== null)) {
-      const joined = rebuilt.join("");
-      cachePut(job.chunks.join(""), joined);
-      job.resolve(joined);
-    } else {
-      job.resolve(null);
-    }
+  entries.forEach((entry, idx) => {
+    const it = byId.get(`${idx}`);
+    fillEntry(entry, it && it.translated ? it.text : null);
   });
 }
 
@@ -157,20 +181,12 @@ function flush(): void {
     // 退避期：队列整体回退原文（清空防积压）
     const pending = queue;
     queue = [];
-    for (const job of pending) job.resolve(null);
+    failEntries(pending);
     return;
   }
-  const batch: QueueJob[] = [];
-  let itemCount = 0;
-  while (queue.length) {
-    const next = queue[0];
-    if (next === undefined || itemCount + next.chunks.length > BATCH_MAX_ITEMS) break;
-    queue.shift();
-    batch.push(next);
-    itemCount += next.chunks.length;
-  }
+  // 块级条目恒可装满（1 item/条）——不存在装不进单批的队头（P2 卡死根因已消除）
+  const batch = queue.splice(0, BATCH_MAX_ITEMS);
   if (!batch.length) return;
-  // 单 job 超 16 块（>28k 字符）留在队列，下轮 flush 续传（块序保持）
   void requestBatch(batch).finally(() => {
     if (queue.length) scheduleFlush();
   });
@@ -195,7 +211,14 @@ export function translateText(text: string): Promise<string | null> {
   const existing = inflight.get(text);
   if (existing) return existing;
   const promise = new Promise<string | null>((resolve) => {
-    queue.push({ chunks: splitIntoChunks(text), resolve });
+    const chunks = splitIntoChunks(text);
+    const assembler: Assembler = {
+      source: chunks.join(""),
+      parts: new Array<string | null | undefined>(chunks.length),
+      received: 0,
+      resolve,
+    };
+    chunks.forEach((chunk, chunkIndex) => queue.push({ assembler, chunkIndex, chunk }));
     scheduleFlush();
   }).finally(() => {
     inflight.delete(text);
@@ -219,6 +242,6 @@ export function resetThinkingTranslateForTests(): void {
   }
   const pending = queue;
   queue = [];
-  for (const job of pending) job.resolve(null);
+  failEntries(pending);
   inflight.clear();
 }

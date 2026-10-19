@@ -122,6 +122,18 @@ describe("useThinkingSummary 摘要", () => {
     expect((translateTextMock.mock.calls[0]![0] as string).length).toBeLessThanOrEqual(500);
   });
 
+  it("评审 P2 回归：前缀截断吸附最近句界（不送翻半句）", async () => {
+    translateTextMock.mockResolvedValue("译");
+    const sentence = "A full sentence that ends with a period. ";
+    const longEn = sentence.repeat(30); // 尾部回看窗内必有句界
+    renderHook(() => useThinkingSummary(longEn));
+    await waitFor(() => expect(translateTextMock).toHaveBeenCalled());
+    const sent = translateTextMock.mock.calls[0]![0] as string;
+    expect(sent.length).toBeLessThanOrEqual(500);
+    // 末尾吸附在句号处（而非硬切半句；句号后空格不属吸附范围）
+    expect(sent.endsWith(".")).toBe(true);
+  });
+
   it("流式中 → 原文摘要（压平截 60）", () => {
     const { result } = renderHook(() => useThinkingSummary(`${EN} `.repeat(10), true));
     expect(result.current.startsWith("The agent reads")).toBe(true);

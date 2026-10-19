@@ -24,8 +24,35 @@ import { useThinkingTranslateStore } from "@/stores/thinking-translate";
 
 /** 折叠摘要送翻的前缀长度（压平后）。 */
 const SUMMARY_PREFIX_CHARS = 500;
+/** 句界吸附回看窗口：前缀截断点向前找最近句界的范围。 */
+const SUMMARY_SENTENCE_LOOKBACK = 120;
 /** streaming 缺省路径的文本稳定窗口（ms）。 */
 const STABLE_WINDOW_MS = 1200;
+
+/**
+ * 摘要送翻前缀（design 承诺「截断到最近句界」——2026-10-19 评审 P2 修复）：
+ * 超 500 字符时在尾部回看窗内吸附最近句末标点（中英文句界），避免半句送翻
+ * 产出残缺译文；回看窗内无句界则保持硬截断（极罕见，预览语义可接受）。
+ */
+function summaryPrefix(flat: string): string {
+  if (flat.length <= SUMMARY_PREFIX_CHARS) return flat;
+  const lookback = flat.slice(
+    Math.max(0, SUMMARY_PREFIX_CHARS - SUMMARY_SENTENCE_LOOKBACK),
+    SUMMARY_PREFIX_CHARS,
+  );
+  const lastStop = Math.max(
+    lookback.lastIndexOf("."),
+    lookback.lastIndexOf("!"),
+    lookback.lastIndexOf("?"),
+    lookback.lastIndexOf("。"),
+    lookback.lastIndexOf("！"),
+    lookback.lastIndexOf("？"),
+  );
+  if (lastStop >= 0) {
+    return flat.slice(0, SUMMARY_PREFIX_CHARS - SUMMARY_SENTENCE_LOOKBACK + lastStop + 1);
+  }
+  return flat.slice(0, SUMMARY_PREFIX_CHARS);
+}
 
 export type ThinkingTranslationState =
   | "off" // 偏好关闭/不值得翻/流式中——原样展示且零请求
@@ -103,10 +130,10 @@ export function useThinkingTranslation(
   };
 }
 
-/** 折叠摘要：前 500 字符送翻 → 译文压平截 60 字符（+“…”）。 */
+/** 折叠摘要：前 500 字符（句界吸附）送翻 → 译文压平截 60 字符（+“…”）。 */
 export function useThinkingSummary(text: string, streaming?: boolean): string {
   const flat = text.replace(/\s+/g, " ").trim();
-  const prefix = flat.slice(0, SUMMARY_PREFIX_CHARS);
+  const prefix = summaryPrefix(flat);
   const { displayText } = useThinkingTranslation(prefix, { streaming });
   const displayFlat = displayText.replace(/\s+/g, " ").trim();
   return displayFlat.length > 60 ? `${displayFlat.slice(0, 60)}…` : displayFlat;

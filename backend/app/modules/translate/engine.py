@@ -181,7 +181,8 @@ def get_translator(model_spec: str) -> tuple[object | None, str | None]:
 
     代理懒启动（构造不 spawn，首次 translate 才拉起）；构造失败缓存原因
     （进程级一次，到换模型为止）；连续崩溃进入退避期的代理在 ``retry_at``
-    到点后由本入口重建新代理。
+    到点后 ``available`` 判定自然翻回 True——本入口复用同一代理实例（其
+    translate 内懒重启子进程），不重建新代理。
     """
     global _engine_instance, _engine_model, _engine_error
     with _engine_lock:
