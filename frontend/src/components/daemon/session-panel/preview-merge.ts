@@ -9,6 +9,11 @@
  *     活跃」→ 透传真实轮原引用（下游 memo 命中）；命中但是空壳块（enrich 孤儿
  *     补建的静默配置行等）→ 预览条目原位替代（配置行墙由预览卡统一收敛，用户
  *     痛点）；未命中 → 预览条目。
+ *   - 无内容终态轮（2026-10-19-preview-card-empty-turn-fix，isContentlessTerminalItem）
+ *     不出预览卡：纯切换档案轮（backend inject.py silent_config_switch）建 run
+ *     刻意零日志，单轮直达查回 0 条走 empty 短路，「点击展开」是永久展不开的
+ *     死卡——命中（孤儿配置行/已加载空壳）原引用透传（紧凑配置行语义保留，
+ *     2026-10-14 design 非目标），未命中不生成条目（深历史静默轮不可见）。
  *   - turns 中大纲外轮（实时新轮 SSE 先到 / 大纲滞后）：原样尾部追加，顺序保持
  *     （enrich 孤儿窗口规则 ql-20260916-016 的既有语义不归本函数管，保守不吞）。
  *   - outline 缺失 / 空（拉取失败、旧 daemon、空会话）→ 原样返回输入引用（FR-04
@@ -88,6 +93,27 @@ function hasRenderableBody(t: SessionTurnView): boolean {
   return t.prompt.trim().length > 0 || t.output.trim().length > 0;
 }
 
+/**
+ * 无内容终态轮判定（2026-10-19-preview-card-empty-turn-fix）——纯切换档案轮
+ * （backend inject.py silent_config_switch：建 run 刻意零日志，实测会话 54317e42
+ * 第 2/4/7 轮）。这类轮没有可展开内容，出「点击展开」预览卡只会得到单轮直达
+ * 查回 0 条日志、走 empty 静默短路的永久死卡。四条件同时成立才收敛：
+ *   - started_at 空 = 从未派发引擎（正常轮派发后必有值；群聊空 user_input 轮
+ *     已派发，2026-09-29 幂等语义保留，不归本判定管）；
+ *   - error_code 空 = 非失败族（失败轮的失败详情卡是真实内容，展开链路照旧）；
+ *   - 摘要双空 = 大纲侧确无提问/答复文本（带摘要轮必有内容可展开）；
+ *   - previewTurnStatusOf 映射 completed/killed 终态（running/pending 轮后续
+ *     可能产出内容，保留预览卡实时形态）。
+ * 导出供跳转（handleJumpToTurn 早退）与预取（prefetchNearbyTurns 跳过）链路
+ * 复用——单一判定源，三处口径永不漂移。
+ */
+export function isContentlessTerminalItem(item: SessionTurnOutlineItem): boolean {
+  if (item.started_at != null || item.error_code != null) return false;
+  if (item.prompt_summary != null || item.answer_summary != null) return false;
+  const ui = previewTurnStatusOf(item.status, item.error_code);
+  return ui === "completed" || ui === "killed";
+}
+
 /** 大纲条目 → 预览条目（SessionTurnView 全形状；segments/processItems 空产物，
  *  渲染层预览分支最前置不消费段模型）。 */
 function buildPreviewTurn(item: SessionTurnOutlineItem): SessionTurnView {
@@ -155,6 +181,13 @@ export function mergePreviewIntoDisplayTurns(
   for (const item of ordered) {
     seen.add(item.run_id);
     const hit = byKey.get(item.run_id);
+    // 2026-10-19-preview-card-empty-turn-fix：无内容终态轮（纯切换档案轮）不出
+    // 预览卡——命中孤儿配置行/已加载空壳原引用透传（盖章对齐 seq，紧凑配置行
+    // 语义保留），未命中不生成条目（无可展示内容，深历史静默轮不可见）。
+    if (isContentlessTerminalItem(item)) {
+      if (hit) out.push(stampOutlineSeq(hit, item.seq));
+      continue;
+    }
     if (hit && hasRenderableBody(hit)) {
       out.push(stampOutlineSeq(hit, item.seq));
       continue;

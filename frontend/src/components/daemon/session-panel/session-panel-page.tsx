@@ -124,7 +124,10 @@ import {
 import { highlightSearchHit, searchResultLabel, searchResultText } from "./search";
 // task-01（2026-10-14-session-turn-preview-cards）：消息流归并层（单一数据源，
 // 未加载轮合成预览条目，D-004 方案 A）。
-import { mergePreviewIntoDisplayTurns } from "./preview-merge";
+import {
+  isContentlessTerminalItem,
+  mergePreviewIntoDisplayTurns,
+} from "./preview-merge";
 import { ScheduledSendModal, ScheduledSysHints } from "./scheduled-send";
 import { TeamTriggerRow } from "./team-trigger-row";
 import { WorkerSessionOverlay } from "./worker-session-overlay";
@@ -2420,9 +2423,14 @@ export function SessionPanelPage({
             setHighlightTurnKey(null);
           }, HIGHLIGHT_TURN_CLEAR_MS);
         } else if (result === "failed") {
-          notify.error("该轮加载失败，请稍后重试");
+          // 2026-10-19：固定文案走 warning 原文——notify.error 收纯字符串会被
+          // errMessage 吞成默认「操作失败」（errors.ts misuse guard）。
+          notify.warning("该轮加载失败，请稍后重试");
+        } else if (result === "empty") {
+          // 2026-10-19-preview-card-empty-turn-fix：零正文不再纯静默——轻提示替代
+          // 「点了没反应」（幂等标记已记，下次点击仍短路；卡片与请求行为不变）。
+          notify.warning("该轮无对话内容");
         }
-        // empty：幂等标记已记，卡片保持（下次点击短路）——零正文轮无内容可展开。
       });
     },
     [sessionId, notify, fetchAndAttachTurn],
@@ -2441,6 +2449,8 @@ export function SessionPanelPage({
       const neighbors = [turnOutline.items[idx - 1], turnOutline.items[idx + 1]];
       for (const item of neighbors) {
         if (!item) continue;
+        // 2026-10-19：无内容终态轮不预取——查回恒 0 条只白记幂等黑名单。
+        if (isContentlessTerminalItem(item)) continue;
         const key = item.run_id;
         const hit = turnsRef.current.find((t) => (t.realRunId ?? t.runId) === key);
         // defect-fixes：同 anyBody 口径（含 prompt 与 #e 装饰后缀）。
@@ -2549,7 +2559,9 @@ export function SessionPanelPage({
             settleFollow();
             if (!mountedRef.current) return;
             if (!hit()) {
-              if (!hasEarlierRef.current) notify.error("该轮次日志不存在（可能已被清理）");
+              // 2026-10-19：固定文案走 warning 原文（notify.error 纯字符串会被
+              // errMessage 吞成「操作失败」，真机验收实证）。
+              if (!hasEarlierRef.current) notify.warning("该轮次日志不存在（可能已被清理）");
               else notify.warning(`已连续加载 ${JUMP_LOAD_EARLIER_MAX_PAGES} 页仍未到达，可再次点击继续加载`);
             }
             return;
@@ -2602,6 +2614,17 @@ export function SessionPanelPage({
           (item) => item.run_id === entry.key,
         );
         if (outlineHit && sessionId) {
+          // 2026-10-19-preview-card-empty-turn-fix：无内容终态轮（纯切换档案轮，
+          // started_at 空）零日志恒空——直达请求必然查回 0 条走「日志不存在」
+          // 误报（真机验收实证弹「操作失败」）。不发请求，直接定位高亮既有孤儿
+          // 配置行（locateAndHighlight 裸 querySelector 降级命中短行），记幂等
+          // 标记后续点击走上方短路同径定位。
+          if (isContentlessTerminalItem(outlineHit)) {
+            jumpEmptyJumpedRunIdsRef.current.add(entry.key);
+            settleFollow();
+            locateAndHighlight();
+            return;
+          }
           jumpSuppressLoadEarlierRef.current = true;
           const epochAtStart = sessionEpochRef.current;
           try {
@@ -2615,9 +2638,12 @@ export function SessionPanelPage({
             }
             if (turnLogs.length === 0) {
               // run 存在但无日志（派发失败轮等）：与循环到头的口径一致。
+              // 2026-10-19：固定文案走 warning 原文（notify.error 纯字符串会被
+              // errMessage 吞成「操作失败」）；无内容终态轮已被上方早退分支拦截，
+              // 到这里的是真缺失（started_at 有值却零日志）。
               jumpSuppressLoadEarlierRef.current = false;
               settleFollow();
-              notify.error("该轮次日志不存在（可能已被清理）");
+              notify.warning("该轮次日志不存在（可能已被清理）");
               return;
             }
             // 游标前移（复合游标 ts+id 同步写，与触顶翻页同款）：目标轮比当前

@@ -15,6 +15,9 @@ import type { SessionTurnOutlineItem, SessionTurnOutlineRead } from "@/lib/daemo
 function outlineItem(over: Partial<SessionTurnOutlineItem> & { run_id: string; seq: number }): SessionTurnOutlineItem {
   return {
     created_at: "2026-10-08T10:00:00Z",
+    // 真实契约默认值：正常轮派发引擎后 started_at 必有值（纯切换轮显式传 null，
+    // 2026-10-19-preview-card-empty-turn-fix fixture 对齐）。
+    started_at: "2026-10-08T10:00:01Z",
     status: "completed",
     ...over,
   } as SessionTurnOutlineItem;
@@ -83,7 +86,7 @@ describe("mergePreviewIntoDisplayTurns 轮序与预览条目", () => {
 });
 
 describe("mergePreviewIntoDisplayTurns 原位替换与孤儿", () => {
-  it("孤儿空块（静默配置行）命中大纲 → 被预览条目原位替换，无双块", () => {
+  it("空壳块命中带摘要大纲条目 → 被预览条目原位替换，无双块（半截轮/孤儿墙收敛）", () => {
     const orphan = turn({
       runId: "__attach_history_7__",
       realRunId: "a",
@@ -180,6 +183,80 @@ describe("mergePreviewIntoDisplayTurns 轮号盖章（2026-10-14-session-preview
     const ok = turn({ runId: "z", turn: 5, prompt: "x", output: "y" });
     const ol = outline([outlineItem({ run_id: "z", seq: 5 })]);
     expect(mergePreviewIntoDisplayTurns(ol, [ok])[0]).toBe(ok);
+  });
+});
+
+describe("mergePreviewIntoDisplayTurns 无内容终态轮（2026-10-19-preview-card-empty-turn-fix）", () => {
+  it("纯切换轮（started_at 空+摘要双空+completed）命中孤儿配置行 → 原引用透传并盖 seq，不出预览卡", () => {
+    // 实测形态（会话 54317e42 第 2/4/7 轮）：切换档案建 run 零日志，enrich 孤儿
+    // 补建紧凑配置行（whoLine）；归并须透传该行（design 非目标「紧凑配置行语义
+    // 保留」），不得替换成永久展不开的「（无内容记录）」死卡。
+    const orphan = turn({
+      runId: "__attach_history_9__",
+      realRunId: "sw",
+      whoLine: { profileName: "Claude Code 默认", agentName: "DESKTOP-2BN7FDC", providerName: "本机默认" },
+      replyAt: "2026-10-08T10:00:00Z",
+    });
+    const ol = outline([
+      outlineItem({ run_id: "a", seq: 1, prompt_summary: "首轮提问" }),
+      outlineItem({ run_id: "sw", seq: 2, started_at: null, prompt_summary: null, answer_summary: null }),
+    ]);
+    const merged = mergePreviewIntoDisplayTurns(ol, [orphan]);
+    expect(merged).toHaveLength(2);
+    expect(merged[0]!.preview?.promptSummary).toBe("首轮提问");
+    expect(merged[1]!.realRunId).toBe("sw");
+    expect(merged[1]!.preview).toBeUndefined();
+    expect(merged[1]!.whoLine?.profileName).toBe("Claude Code 默认");
+    // 盖章 null→seq 2（同 defect-fixes 轮号单源口径）。
+    expect(merged[1]!.turn).toBe(2);
+  });
+
+  it("纯切换轮未命中（无孤儿未加载）→ 不生成条目（深历史静默轮不可见）", () => {
+    const loaded = turn({ runId: "a", prompt: "用户消息", output: "答复" });
+    const ol = outline([
+      outlineItem({ run_id: "a", seq: 1, prompt_summary: "首轮提问" }),
+      outlineItem({ run_id: "sw", seq: 2, started_at: null }),
+    ]);
+    const merged = mergePreviewIntoDisplayTurns(ol, [loaded]);
+    expect(merged).toHaveLength(1);
+    expect(merged[0]!.runId).toBe("a");
+    expect(merged[0]!.preview).toBeUndefined();
+  });
+
+  it("started_at 有值的零摘要轮（群聊空 user_input 轮）仍出预览卡——2026-09-29 幂等语义不变", () => {
+    const ol = outline([
+      outlineItem({ run_id: "ge", seq: 1, prompt_summary: null, answer_summary: null }),
+    ]);
+    const merged = mergePreviewIntoDisplayTurns(ol, []);
+    expect(merged).toHaveLength(1);
+    expect(merged[0]!.preview).toBeDefined();
+    expect(merged[0]!.status).toBe("completed");
+  });
+
+  it("error_code 轮（started_at 空）仍出预览卡——失败卡是真实内容", () => {
+    const ol = outline([
+      outlineItem({
+        run_id: "fx",
+        seq: 1,
+        started_at: null,
+        status: "failed",
+        error_code: "provider_quota_exceeded",
+      }),
+    ]);
+    const merged = mergePreviewIntoDisplayTurns(ol, []);
+    expect(merged).toHaveLength(1);
+    expect(merged[0]!.preview).toBeDefined();
+    expect(merged[0]!.status).toBe("failed");
+  });
+
+  it("running 轮（started_at 空、排队中）仍出预览卡", () => {
+    const ol = outline([
+      outlineItem({ run_id: "rq", seq: 1, started_at: null, status: "running" }),
+    ]);
+    const merged = mergePreviewIntoDisplayTurns(ol, []);
+    expect(merged).toHaveLength(1);
+    expect(merged[0]!.preview).toBeDefined();
+    expect(merged[0]!.status).toBe("running");
   });
 });
 

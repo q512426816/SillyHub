@@ -346,3 +346,117 @@ created_at: 2026-10-15T16:16:15.707Z
   confirmed_at: null
   source_change: 2026-10-16-session-pill-dock-drag
   status: active
+
+## FR-docs-021 preview-merge 归并层对「started_at 为空 + 无 error_code + previewTurnStatusOf 映射终态完成/中止族」的大纲条目不再合成预览卡：命中已加载轮/孤儿配置行时原引用透传并盖 seq，未命中时不生成条目
+变更：2026-10-19-preview-card-empty-turn-fix
+状态：active
+摘要：纯切换轮命中孤儿配置行（用户实测主路径）；纯切换轮未命中（深历史静默轮）
+全文：.sillyspec/changes/archive/2026-10-19-preview-card-empty-turn-fix/requirements.md#FR-01
+最近确认：99f758c6f7d64b6bc36a05a1aead5a30a42389aa
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-19-preview-card-empty-turn-fix:flow:测试绑定FR-01
+  tests: frontend/src/components/daemon/session-panel/__tests__/preview-merge.test.ts「纯切换轮命中孤儿配置行原引用透传并盖 seq，不出预览卡」 | frontend/src/components/daemon/session-panel/__tests__/preview-merge.test.ts「纯切换轮未命中不生成条目」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-19-preview-card-empty-turn-fix
+  status: active
+
+## FR-docs-022 失败族（status failed/error 或 error_code 非空）与活跃族（running/pending 等）大纲条目仍照旧合成预览卡，展开/跳转/预取链路行为不变
+变更：2026-10-19-preview-card-empty-turn-fix
+状态：active
+摘要：三类轮不受影响
+全文：.sillyspec/changes/archive/2026-10-19-preview-card-empty-turn-fix/requirements.md#FR-02
+最近确认：99f758c6f7d64b6bc36a05a1aead5a30a42389aa
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-19-preview-card-empty-turn-fix:flow:测试绑定FR-02
+  tests: frontend/src/components/daemon/session-panel/__tests__/preview-merge.test.ts「error_code 轮（started_at 空）仍出预览卡」 | frontend/src/components/daemon/session-panel/__tests__/preview-merge.test.ts「running 轮（started_at 空）仍出预览卡」 | frontend/src/components/daemon/session-panel/__tests__/preview-merge.test.ts「started_at 有值零摘要轮（群聊空轮）仍出预览卡」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-19-preview-card-empty-turn-fix
+  status: active
+
+## FR-docs-023 handleExpandPreview 对 empty 结果给出 notify 轻提示（该轮无对话内容），不再纯静默；failed 提示语义不变
+变更：2026-10-19-preview-card-empty-turn-fix
+状态：active
+摘要：零正文轮点击有反馈
+全文：.sillyspec/changes/archive/2026-10-19-preview-card-empty-turn-fix/requirements.md#FR-03
+最近确认：99f758c6f7d64b6bc36a05a1aead5a30a42389aa
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-19-preview-card-empty-turn-fix:flow:测试绑定FR-03
+  tests: frontend/src/components/daemon/__tests__/session-preview-integration.test.tsx「真零正文轮点击出轻提示且幂等语义不变」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-19-preview-card-empty-turn-fix
+  status: active
+
+## FR-docs-024 新增单测覆盖无内容终态条目透传与跳过两分支、error_code 轮仍出卡、running 轮仍出卡
+变更：2026-10-19-preview-card-empty-turn-fix
+状态：active
+摘要：主路径
+全文：.sillyspec/changes/archive/2026-10-19-preview-card-empty-turn-fix/requirements.md#FR-04
+最近确认：99f758c6f7d64b6bc36a05a1aead5a30a42389aa
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-19-preview-card-empty-turn-fix:flow:测试绑定FR-04
+  tests: frontend/src/components/daemon/session-panel/__tests__/preview-merge.test.ts「无内容终态轮」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-19-preview-card-empty-turn-fix
+  status: active
+
+## FR-docs-025 既有 preview-merge / turn-preview-card / session-preview-integration 相关测试面全部通过，零回归
+变更：2026-10-19-preview-card-empty-turn-fix
+状态：active
+摘要：主路径
+全文：.sillyspec/changes/archive/2026-10-19-preview-card-empty-turn-fix/requirements.md#FR-05
+最近确认：99f758c6f7d64b6bc36a05a1aead5a30a42389aa
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-19-preview-card-empty-turn-fix:flow:测试绑定FR-05
+  tests: frontend/src/components/daemon/__tests__/session-preview-integration.test.tsx | frontend/src/components/daemon/__tests__/turn-preview-card.test.tsx | frontend/src/components/daemon/session-panel/__tests__/preview-merge.test.ts
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-19-preview-card-empty-turn-fix
+  status: active
+
+## FR-docs-026 导航刻度点击无内容终态轮直接定位既有配置行（不发请求不报错）；三处固定文案 toast 改 warning 通道不再显示为「操作失败」
+变更：2026-10-19-preview-card-empty-turn-fix
+状态：active
+摘要：导航点击静默切换轮；真缺失日志轮（started_at 有值但查回 0 条）
+全文：.sillyspec/changes/archive/2026-10-19-preview-card-empty-turn-fix/requirements.md#FR-06
+最近确认：99f758c6f7d64b6bc36a05a1aead5a30a42389aa
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-19-preview-card-empty-turn-fix:flow:测试绑定FR-06
+  tests: frontend/src/components/daemon/__tests__/session-preview-integration.test.tsx「真缺失日志轮导航点击报原文 warning 而非操作失败」 | frontend/src/components/daemon/__tests__/session-preview-integration.test.tsx「纯切换轮导航刻度点击直接定位配置行不报错不发请求」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-19-preview-card-empty-turn-fix
+  status: active

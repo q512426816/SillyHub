@@ -1,0 +1,527 @@
+diff --git a/docs/releases/2026-10-19-013-205a79f71.md b/docs/releases/2026-10-19-013-205a79f71.md
+new file mode 100644
+index 000000000..f43a39b22
+--- /dev/null
++++ b/docs/releases/2026-10-19-013-205a79f71.md
+@@ -0,0 +1,38 @@
++---
++seq: 22
++deployed_at: "2026-10-19 14:15:15"
++status: success
++commit_from: 0a0e9c76
++commit_to: 205a79f71
++summary: 会话预览卡死卡修复——切换档案静默轮恢复灰色配置行，零正文点击加轻提示
++agent: zcode-agent
++commits:
++  - sha: 487caa09b
++    message: "fix(session-panel): 纯切换档案轮不再渲染永久展不开的预览卡——归并层识别无内容终态轮，命中孤儿配置行透传盖章、未命中跳过"
++    author: WhaleFall
++  - sha: 25d736bc9
++    message: "fix(session-panel): 预览卡零正文点击补 warning 轻提示；集成测试补纯切换轮与点卡轻提示两用例"
++    author: WhaleFall
++  - sha: 205a79f71
++    message: "test(session-panel): 回归面收口——三测试文件 34/34 全绿，tsc 干净"
++    author: WhaleFall
++  - sha: 9e9b47078
++    message: "chore(archive): 2026-10-19-host-settings-reload-latency 归档留档"
++    author: WhaleFall
++  - sha: 0ce73bec8
++    message: "Merge remote-tracking branch 'origin/main'"
++    author: WhaleFall
++---
++
++## 🔧 修复
++
++- 刷新会话面板后，「切换档案」产生的静默轮（无任何日志的轮次记录）不再被渲染成「未加载 · 点击展开」的预览死卡（点了没反应、永远展不开）。这类轮恢复为此前的灰色紧凑配置行形态（显示切换时间与档案名）；没有配置行数据时干脆不显示。刷新前后形态从此一致。
++- 预览卡点击后如果该轮确实没有对话内容，现在会弹出「该轮无对话内容」的轻提示，不再无声吞掉点击。失败轮（如额度耗尽）、运行中轮、群聊空轮的既有行为全部不变（有测试锁定）。
++
++## 📝 部署验证
++
++- 仅重建 frontend 镜像并 `--force-recreate`（本次为前端-only 改动；backend/postgres/redis 未动，均 healthy）。
++- `docker compose ps` 全部 healthy；`/api/health` 返回 ok；会话页 `/sessions?session=54317e42…` HTTP 200。
++- 容器内产物 grep 校验：新文案「该轮无对话内容」已存在于 `.next` 客户端与服务端 chunk（确认新代码进容器，非旧镜像）。
++- 部署前测试：preview-merge / turn-preview-card / session-preview-integration 三文件 34/34 全绿，`tsc --noEmit` 干净。
++- 待人工复核：刷新 `http://127.0.0.1:3000/sessions?session=54317e42-6fea-4c5a-9302-70360c2fe05e`，确认第 2/4/7 轮显示为灰色配置行且不再出现「（无内容记录）」卡片。
+diff --git a/docs/releases/2026-10-19-014-5b9c2ce4c.md b/docs/releases/2026-10-19-014-5b9c2ce4c.md
+new file mode 100644
+index 000000000..1097b0f27
+--- /dev/null
++++ b/docs/releases/2026-10-19-014-5b9c2ce4c.md
+@@ -0,0 +1,29 @@
++---
++seq: 23
++deployed_at: "2026-10-19 14:45:36"
++status: success
++commit_from: 205a79f71
++commit_to: 5b9c2ce4c
++summary: 预览卡修复真机验收追加——导航点击静默切换轮不再弹「操作失败」，直接定位配置行
++agent: zcode-agent
++commits:
++  - sha: 2e2c1ea57
++    message: "fix(session-panel): 导航点击静默切换轮不再弹「操作失败」——无内容终态轮早退直接定位配置行，三处固定文案 notify.error→notify.warning 原文展示，预取跳过无内容邻居"
++    author: WhaleFall
++  - sha: 5b9c2ce4c
++    message: "test(session-panel): 追加回归面收口——三测试文件 36/36 全绿，tsc 干净"
++    author: WhaleFall
++---
++
++## 🔧 修复
++
++- 真机验收发现（发布 #22 的追加修复）：点左侧轮次导航的「切换档案」静默轮刻度会弹「操作失败」。根因两层：① 这类轮零日志是设计使然，导航直达却按"日志被清理"报错；② 报错文案走 `notify.error` 传纯字符串，被统一错误处理吞成默认「操作失败」。修复后：点静默轮刻度不发请求、不弹任何提示，直接滚动定位并高亮那行灰色配置行，再次点击同径短路。
++- 顺带修正同族文案通道：单轮加载失败（"该轮加载失败，请稍后重试"）、回退翻页到头（"已连续加载 N 页仍未到达"）此前同样会被吞成「操作失败」，现在都按原文展示；真缺失日志的轮（正常形态但查回 0 条）提示原文「该轮次日志不存在（可能已被清理）」。
++- 跳转后的附近轮预取跳过无内容终态轮，不再发必然空手而归的请求。
++
++## 📝 部署验证
++
++- 仅重建 frontend 并 `--force-recreate`；容器全 healthy，`/` 返回 200。
++- 容器内产物校验：客户端新 chunk（hash 更新）含「该轮次日志不存在」文案，确认追加修复已进容器。
++- 部署前测试：三测试文件 36/36 全绿（preview-merge 19 + turn-preview-card 7 + 集成 10，含两新用例），`tsc --noEmit` 干净。
++- 待人工复核：刷新 `http://127.0.0.1:3000/sessions?session=54317e42…`，点左侧导航第 2/4/7 轮刻度——预期滚动定位到对应灰色配置行且无任何报错。
+diff --git a/frontend/src/app/(dashboard)/sessions/__tests__/page.test.tsx b/frontend/src/app/(dashboard)/sessions/__tests__/page.test.tsx
+index 51f638a57..08a474ec7 100644
+--- a/frontend/src/app/(dashboard)/sessions/__tests__/page.test.tsx
++++ b/frontend/src/app/(dashboard)/sessions/__tests__/page.test.tsx
+@@ -2962,9 +2962,13 @@ describe("SessionPanel 轮次导航集成（task-06：跳转链路 + mobile Draw
+         runId: "r-old",
+       }),
+     );
++    // 2026-10-19-preview-card-empty-turn-fix：固定文案改走 warning 原文——
++    // notify.error 收纯字符串会被 errMessage 吞成默认「操作失败」（errors.ts
++    // misuse guard），真机导航点击实证只显示「操作失败」四个字。
+     await waitFor(() =>
+-      expect(mocks.notifyError).toHaveBeenCalledWith("该轮次日志不存在（可能已被清理）"),
++      expect(mocks.notifyWarning).toHaveBeenCalledWith("该轮次日志不存在（可能已被清理）"),
+     );
++    expect(mocks.notifyError).not.toHaveBeenCalled();
+     // 直达路径直接收口，不空转翻页。
+     expect(beforeCallCount()).toBe(0);
+   });
+diff --git a/frontend/src/components/daemon/__tests__/session-preview-integration.test.tsx b/frontend/src/components/daemon/__tests__/session-preview-integration.test.tsx
+index 3bb92697e..340178bfa 100644
+--- a/frontend/src/components/daemon/__tests__/session-preview-integration.test.tsx
++++ b/frontend/src/components/daemon/__tests__/session-preview-integration.test.tsx
+@@ -21,6 +21,20 @@ vi.mock("@/components/ui/markdown-text", () => ({
+   ),
+ }));
+ 
++// 2026-10-19-preview-card-empty-turn-fix：useNotify 换 spy（测试环境无 <AntApp>
++// 包裹，不起 message DOM）——empty 轻提示断言面（先例 session-input-bar-upload）。
++const notifyMock = vi.hoisted(() => ({
++  success: vi.fn(),
++  error: vi.fn(),
++  warning: vi.fn(),
++}));
++vi.mock("@/lib/errors", async () => {
++  const actual = await vi.importActual<typeof import("@/lib/errors")>(
++    "@/lib/errors",
++  );
++  return { ...actual, useNotify: () => notifyMock };
++});
++
+ const sessionApi = vi.hoisted(() => ({
+   getSessionUsage: vi.fn().mockResolvedValue(null),
+   injectSession: vi.fn(), interruptSession: vi.fn(), endSession: vi.fn(),
+@@ -264,4 +278,156 @@ describe("消息流预览卡集成（FR-01 / FR-03 / FR-04）", () => {
+     await new Promise((r) => setTimeout(r, 300));
+     expect(runIdCalls().filter((r) => r === "run-e").length).toBe(callsAfterFirst);
+   });
++
++  it("2026-10-19：纯切换轮（started_at 空、零日志）不出预览卡，渲染孤儿配置行", async () => {
++    // 实测形态（会话 54317e42 第 2/4/7 轮）：切换档案建 run 零日志、started_at
++    // 空、摘要双空——刷新后大纲含它，但归并层须透传孤儿配置行（紧凑配置行语义
++    // 保留，2026-10-14 design 非目标），不得替换成永久展不开的「点击展开」死卡。
++    sessionApi.fetchSessionTurnOutline.mockResolvedValue({
++      session_id: "s1",
++      total_turns: 2,
++      items: [
++        { run_id: "run-c", seq: 1, created_at: "2026-08-26T10:10:00.0Z", started_at: "2026-08-26T10:10:00.0Z", status: "completed", prompt_summary: "第三轮提问摘要" },
++        { run_id: "run-sw", seq: 2, created_at: "2026-08-26T10:12:00.0Z", started_at: null, status: "completed", prompt_summary: null, answer_summary: null },
++      ],
++    });
++    // runs 快照带档案名（孤儿配置行 whoLine 数据源；finished_at 在已加载窗口内）。
++    sessionApi.listSessionRuns.mockResolvedValue([
++      { id: "run-sw", status: "completed", error_code: null, error_detail: null, started_at: null, created_at: "2026-08-26T10:12:00.0Z", finished_at: "2026-08-26T10:12:01.0Z", user_id: null, sender_name: null, input_tokens: null, output_tokens: null, ctx_tokens: null, duration_api_ms: null, llm_provider_id: null, agent_profile_snapshot: { name: "Claude Code 默认" }, metadata: null, engine_anchor: null, failure_summary: null, run_kind: null, cwd: null, config_snapshot: null },
++    ] as never);
++    sessionApi.getAgentSessionLogs.mockImplementation(
++      async (_sid: string, opts?: { runId?: string; before?: string }) => {
++        if (opts?.runId === "run-sw") return [];
++        if (opts?.before) return [];
++        return turnLogs("run-c", 1, 10);
++      },
++    );
++    await attachSession("s1", /第1轮提问内容/);
++    // 孤儿配置行上屏（时间线内 data-turn-key 非 preview 行，含档案名；选择器
++    // 限定滚动容器，避开导航刻度同名锚点——先例 run-x 用例同款）。
++    await waitFor(() => {
++      const row = document.querySelector(
++        '[data-testid="turn-timeline-scroll"] [data-turn-key="run-sw"]:not([data-turn-preview])',
++      );
++      expect(row).toBeTruthy();
++      expect(row!.textContent).toContain("Claude Code 默认");
++    });
++    // 全程无「点击展开」死卡；无内容轮不进展开链路（不发起单轮拉取）。
++    expect(screen.queryByTestId("turn-preview-card")).not.toBeInTheDocument();
++    expect(runIdCalls()).not.toContain("run-sw");
++  });
++
++  it("2026-10-19：真零正文轮点卡片出轻提示，重复点击幂等不再请求", async () => {
++    // started_at 有值的零摘要轮（群聊空 user_input 形态）仍出预览卡（2026-09-29
++    // 语义不变）；点击查回零正文 → empty 出 warning 轻提示（不再纯静默），卡片
++    // 保持，再次点击被幂等标记短路不重复请求。
++    sessionApi.fetchSessionTurnOutline.mockResolvedValue({
++      session_id: "s1",
++      total_turns: 2,
++      items: [
++        { run_id: "run-e2", seq: 1, created_at: "2026-08-26T10:00:00.0Z", started_at: "2026-08-26T10:00:00.0Z", status: "completed", prompt_summary: null },
++        { run_id: "run-c", seq: 2, created_at: "2026-08-26T10:10:00.0Z", started_at: "2026-08-26T10:10:00.0Z", status: "completed", prompt_summary: "第三轮提问摘要" },
++      ],
++    });
++    sessionApi.getAgentSessionLogs.mockImplementation(
++      async (_sid: string, opts?: { runId?: string; before?: string }) => {
++        if (opts?.runId === "run-e2") {
++          // 群聊空 user_input 形态：一条无关紧要的系统行，装配无 prompt 无 output。
++          return [
++            { id: "log-run-e2-s", run_id: "run-e2", timestamp: "2026-08-26T10:00:30.0Z", channel: "system", content_redacted: "" },
++          ];
++        }
++        if (opts?.runId === "run-c") return turnLogs("run-c", 2, 10);
++        if (opts?.before) return [];
++        return turnLogs("run-c", 2, 10);
++      },
++    );
++    await attachSession("s1", /第2轮提问内容/);
++    const card = screen.getByTestId("turn-preview-card");
++    expect(card.getAttribute("data-turn-key")).toBe("run-e2");
++    fireEvent.click(card);
++    await waitFor(() => expect(runIdCalls()).toContain("run-e2"));
++    await waitFor(() =>
++      expect(notifyMock.warning).toHaveBeenCalledWith("该轮无对话内容"),
++    );
++    // 零正文：卡片保持（无内容可展开），重复点击短路不重复请求。
++    expect(screen.getAllByTestId("turn-preview-card")).toHaveLength(1);
++    const callsAfterFirst = runIdCalls().filter((r) => r === "run-e2").length;
++    fireEvent.click(card);
++    await new Promise((r) => setTimeout(r, 300));
++    expect(runIdCalls().filter((r) => r === "run-e2").length).toBe(callsAfterFirst);
++  });
++
++  it("2026-10-19：静默切换轮导航刻度点击直接定位配置行——无 toast 无请求", async () => {
++    // 真机验收发现的第三面：点静默轮导航刻度弹「操作失败」（直达查回 0 条日志
++    // 走 notify.error 字符串被吞）。修复后：早退定位既有配置行，不发请求不弹 toast。
++    sessionApi.fetchSessionTurnOutline.mockResolvedValue({
++      session_id: "s1",
++      total_turns: 2,
++      items: [
++        { run_id: "run-c", seq: 1, created_at: "2026-08-26T10:10:00.0Z", started_at: "2026-08-26T10:10:00.0Z", status: "completed", prompt_summary: "第三轮提问摘要" },
++        { run_id: "run-sw", seq: 2, created_at: "2026-08-26T10:12:00.0Z", started_at: null, status: "completed", prompt_summary: null, answer_summary: null },
++      ],
++    });
++    sessionApi.listSessionRuns.mockResolvedValue([
++      { id: "run-sw", status: "completed", error_code: null, error_detail: null, started_at: null, created_at: "2026-08-26T10:12:00.0Z", finished_at: "2026-08-26T10:12:01.0Z", user_id: null, sender_name: null, input_tokens: null, output_tokens: null, ctx_tokens: null, duration_api_ms: null, llm_provider_id: null, agent_profile_snapshot: { name: "Claude Code 默认" }, metadata: null, engine_anchor: null, failure_summary: null, run_kind: null, cwd: null, config_snapshot: null },
++    ] as never);
++    sessionApi.getAgentSessionLogs.mockImplementation(
++      async (_sid: string, opts?: { runId?: string; before?: string }) => {
++        if (opts?.runId === "run-sw") return [];
++        if (opts?.before) return [];
++        return turnLogs("run-c", 1, 10);
++      },
++    );
++    await attachSession("s1", /第1轮提问内容/);
++    const tickSw = screen
++      .getAllByTestId("turn-nav-tick")
++      .find((el) => el.getAttribute("aria-label")?.startsWith("第2轮"));
++    expect(tickSw).toBeTruthy();
++    fireEvent.click(tickSw!);
++    await new Promise((r) => setTimeout(r, 300));
++    // 不发单轮请求、不弹任何 toast；配置行仍在（定位目标）。
++    expect(runIdCalls()).not.toContain("run-sw");
++    expect(notifyMock.error).not.toHaveBeenCalled();
++    expect(notifyMock.warning).not.toHaveBeenCalled();
++    expect(
++      document.querySelector(
++        '[data-testid="turn-timeline-scroll"] [data-turn-key="run-sw"]:not([data-turn-preview])',
++      ),
++    ).toBeTruthy();
++    // 二次点击幂等同径（仍无请求无 toast）。
++    fireEvent.click(tickSw!);
++    await new Promise((r) => setTimeout(r, 300));
++    expect(runIdCalls()).not.toContain("run-sw");
++    expect(notifyMock.error).not.toHaveBeenCalled();
++  });
++
++  it("2026-10-19：真缺失日志轮（started_at 有值查回 0 条）导航点击报原文 warning 而非「操作失败」", async () => {
++    // notify.error 收纯字符串会被 errMessage 吞成默认「操作失败」（errors.ts
++    // misuse guard）；固定文案必须走 warning 原文。
++    sessionApi.fetchSessionTurnOutline.mockResolvedValue({
++      session_id: "s1",
++      total_turns: 2,
++      items: [
++        { run_id: "run-m", seq: 1, created_at: "2026-08-26T10:00:00.0Z", started_at: "2026-08-26T10:00:00.0Z", status: "completed", prompt_summary: "缺失轮摘要" },
++        { run_id: "run-c", seq: 2, created_at: "2026-08-26T10:10:00.0Z", started_at: "2026-08-26T10:10:00.0Z", status: "completed", prompt_summary: "第三轮提问摘要" },
++      ],
++    });
++    sessionApi.getAgentSessionLogs.mockImplementation(
++      async (_sid: string, opts?: { runId?: string; before?: string }) => {
++        if (opts?.runId === "run-m") return [];
++        if (opts?.before) return [];
++        return turnLogs("run-c", 2, 10);
++      },
++    );
++    await attachSession("s1", /第2轮提问内容/);
++    const tickM = screen
++      .getAllByTestId("turn-nav-tick")
++      .find((el) => el.getAttribute("aria-label")?.startsWith("第1轮"));
++    fireEvent.click(tickM!);
++    await waitFor(() =>
++      expect(notifyMock.warning).toHaveBeenCalledWith("该轮次日志不存在（可能已被清理）"),
++    );
++    expect(notifyMock.error).not.toHaveBeenCalled();
++  });
+ });
+diff --git a/frontend/src/components/daemon/session-panel/__tests__/preview-merge.test.ts b/frontend/src/components/daemon/session-panel/__tests__/preview-merge.test.ts
+index 3c0a291d0..93ed31500 100644
+--- a/frontend/src/components/daemon/session-panel/__tests__/preview-merge.test.ts
++++ b/frontend/src/components/daemon/session-panel/__tests__/preview-merge.test.ts
+@@ -15,6 +15,9 @@ import type { SessionTurnOutlineItem, SessionTurnOutlineRead } from "@/lib/daemo
+ function outlineItem(over: Partial<SessionTurnOutlineItem> & { run_id: string; seq: number }): SessionTurnOutlineItem {
+   return {
+     created_at: "2026-10-08T10:00:00Z",
++    // 真实契约默认值：正常轮派发引擎后 started_at 必有值（纯切换轮显式传 null，
++    // 2026-10-19-preview-card-empty-turn-fix fixture 对齐）。
++    started_at: "2026-10-08T10:00:01Z",
+     status: "completed",
+     ...over,
+   } as SessionTurnOutlineItem;
+@@ -83,7 +86,7 @@ describe("mergePreviewIntoDisplayTurns 轮序与预览条目", () => {
+ });
+ 
+ describe("mergePreviewIntoDisplayTurns 原位替换与孤儿", () => {
+-  it("孤儿空块（静默配置行）命中大纲 → 被预览条目原位替换，无双块", () => {
++  it("空壳块命中带摘要大纲条目 → 被预览条目原位替换，无双块（半截轮/孤儿墙收敛）", () => {
+     const orphan = turn({
+       runId: "__attach_history_7__",
+       realRunId: "a",
+@@ -183,6 +186,80 @@ describe("mergePreviewIntoDisplayTurns 轮号盖章（2026-10-14-session-preview
+   });
+ });
+ 
++describe("mergePreviewIntoDisplayTurns 无内容终态轮（2026-10-19-preview-card-empty-turn-fix）", () => {
++  it("纯切换轮（started_at 空+摘要双空+completed）命中孤儿配置行 → 原引用透传并盖 seq，不出预览卡", () => {
++    // 实测形态（会话 54317e42 第 2/4/7 轮）：切换档案建 run 零日志，enrich 孤儿
++    // 补建紧凑配置行（whoLine）；归并须透传该行（design 非目标「紧凑配置行语义
++    // 保留」），不得替换成永久展不开的「（无内容记录）」死卡。
++    const orphan = turn({
++      runId: "__attach_history_9__",
++      realRunId: "sw",
++      whoLine: { profileName: "Claude Code 默认", agentName: "DESKTOP-2BN7FDC", providerName: "本机默认" },
++      replyAt: "2026-10-08T10:00:00Z",
++    });
++    const ol = outline([
++      outlineItem({ run_id: "a", seq: 1, prompt_summary: "首轮提问" }),
++      outlineItem({ run_id: "sw", seq: 2, started_at: null, prompt_summary: null, answer_summary: null }),
++    ]);
++    const merged = mergePreviewIntoDisplayTurns(ol, [orphan]);
++    expect(merged).toHaveLength(2);
++    expect(merged[0]!.preview?.promptSummary).toBe("首轮提问");
++    expect(merged[1]!.realRunId).toBe("sw");
++    expect(merged[1]!.preview).toBeUndefined();
++    expect(merged[1]!.whoLine?.profileName).toBe("Claude Code 默认");
++    // 盖章 null→seq 2（同 defect-fixes 轮号单源口径）。
++    expect(merged[1]!.turn).toBe(2);
++  });
++
++  it("纯切换轮未命中（无孤儿未加载）→ 不生成条目（深历史静默轮不可见）", () => {
++    const loaded = turn({ runId: "a", prompt: "用户消息", output: "答复" });
++    const ol = outline([
++      outlineItem({ run_id: "a", seq: 1, prompt_summary: "首轮提问" }),
++      outlineItem({ run_id: "sw", seq: 2, started_at: null }),
++    ]);
++    const merged = mergePreviewIntoDisplayTurns(ol, [loaded]);
++    expect(merged).toHaveLength(1);
++    expect(merged[0]!.runId).toBe("a");
++    expect(merged[0]!.preview).toBeUndefined();
++  });
++
++  it("started_at 有值的零摘要轮（群聊空 user_input 轮）仍出预览卡——2026-09-29 幂等语义不变", () => {
++    const ol = outline([
++      outlineItem({ run_id: "ge", seq: 1, prompt_summary: null, answer_summary: null }),
++    ]);
++    const merged = mergePreviewIntoDisplayTurns(ol, []);
++    expect(merged).toHaveLength(1);
++    expect(merged[0]!.preview).toBeDefined();
++    expect(merged[0]!.status).toBe("completed");
++  });
++
++  it("error_code 轮（started_at 空）仍出预览卡——失败卡是真实内容", () => {
++    const ol = outline([
++      outlineItem({
++        run_id: "fx",
++        seq: 1,
++        started_at: null,
++        status: "failed",
++        error_code: "provider_quota_exceeded",
++      }),
++    ]);
++    const merged = mergePreviewIntoDisplayTurns(ol, []);
++    expect(merged).toHaveLength(1);
++    expect(merged[0]!.preview).toBeDefined();
++    expect(merged[0]!.status).toBe("failed");
++  });
++
++  it("running 轮（started_at 空、排队中）仍出预览卡", () => {
++    const ol = outline([
++      outlineItem({ run_id: "rq", seq: 1, started_at: null, status: "running" }),
++    ]);
++    const merged = mergePreviewIntoDisplayTurns(ol, []);
++    expect(merged).toHaveLength(1);
++    expect(merged[0]!.preview).toBeDefined();
++    expect(merged[0]!.status).toBe("running");
++  });
++});
++
+ describe("previewTurnStatusOf", () => {
+   it("词表映射：completed/finished→completed，failed→failed，运行族→running，中止族→killed，未知→pending", () => {
+     expect(previewTurnStatusOf("completed")).toBe("completed");
+diff --git a/frontend/src/components/daemon/session-panel/preview-merge.ts b/frontend/src/components/daemon/session-panel/preview-merge.ts
+index b01f6c828..47e5c2901 100644
+--- a/frontend/src/components/daemon/session-panel/preview-merge.ts
++++ b/frontend/src/components/daemon/session-panel/preview-merge.ts
+@@ -9,6 +9,11 @@
+  *     活跃」→ 透传真实轮原引用（下游 memo 命中）；命中但是空壳块（enrich 孤儿
+  *     补建的静默配置行等）→ 预览条目原位替代（配置行墙由预览卡统一收敛，用户
+  *     痛点）；未命中 → 预览条目。
++ *   - 无内容终态轮（2026-10-19-preview-card-empty-turn-fix，isContentlessTerminalItem）
++ *     不出预览卡：纯切换档案轮（backend inject.py silent_config_switch）建 run
++ *     刻意零日志，单轮直达查回 0 条走 empty 短路，「点击展开」是永久展不开的
++ *     死卡——命中（孤儿配置行/已加载空壳）原引用透传（紧凑配置行语义保留，
++ *     2026-10-14 design 非目标），未命中不生成条目（深历史静默轮不可见）。
+  *   - turns 中大纲外轮（实时新轮 SSE 先到 / 大纲滞后）：原样尾部追加，顺序保持
+  *     （enrich 孤儿窗口规则 ql-20260916-016 的既有语义不归本函数管，保守不吞）。
+  *   - outline 缺失 / 空（拉取失败、旧 daemon、空会话）→ 原样返回输入引用（FR-04
+@@ -88,6 +93,27 @@ function hasRenderableBody(t: SessionTurnView): boolean {
+   return t.prompt.trim().length > 0 || t.output.trim().length > 0;
+ }
+ 
++/**
++ * 无内容终态轮判定（2026-10-19-preview-card-empty-turn-fix）——纯切换档案轮
++ * （backend inject.py silent_config_switch：建 run 刻意零日志，实测会话 54317e42
++ * 第 2/4/7 轮）。这类轮没有可展开内容，出「点击展开」预览卡只会得到单轮直达
++ * 查回 0 条日志、走 empty 静默短路的永久死卡。四条件同时成立才收敛：
++ *   - started_at 空 = 从未派发引擎（正常轮派发后必有值；群聊空 user_input 轮
++ *     已派发，2026-09-29 幂等语义保留，不归本判定管）；
++ *   - error_code 空 = 非失败族（失败轮的失败详情卡是真实内容，展开链路照旧）；
++ *   - 摘要双空 = 大纲侧确无提问/答复文本（带摘要轮必有内容可展开）；
++ *   - previewTurnStatusOf 映射 completed/killed 终态（running/pending 轮后续
++ *     可能产出内容，保留预览卡实时形态）。
++ * 导出供跳转（handleJumpToTurn 早退）与预取（prefetchNearbyTurns 跳过）链路
++ * 复用——单一判定源，三处口径永不漂移。
++ */
++export function isContentlessTerminalItem(item: SessionTurnOutlineItem): boolean {
++  if (item.started_at != null || item.error_code != null) return false;
++  if (item.prompt_summary != null || item.answer_summary != null) return false;
++  const ui = previewTurnStatusOf(item.status, item.error_code);
++  return ui === "completed" || ui === "killed";
++}
++
+ /** 大纲条目 → 预览条目（SessionTurnView 全形状；segments/processItems 空产物，
+  *  渲染层预览分支最前置不消费段模型）。 */
+ function buildPreviewTurn(item: SessionTurnOutlineItem): SessionTurnView {
+@@ -155,6 +181,13 @@ export function mergePreviewIntoDisplayTurns(
+   for (const item of ordered) {
+     seen.add(item.run_id);
+     const hit = byKey.get(item.run_id);
++    // 2026-10-19-preview-card-empty-turn-fix：无内容终态轮（纯切换档案轮）不出
++    // 预览卡——命中孤儿配置行/已加载空壳原引用透传（盖章对齐 seq，紧凑配置行
++    // 语义保留），未命中不生成条目（无可展示内容，深历史静默轮不可见）。
++    if (isContentlessTerminalItem(item)) {
++      if (hit) out.push(stampOutlineSeq(hit, item.seq));
++      continue;
++    }
+     if (hit && hasRenderableBody(hit)) {
+       out.push(stampOutlineSeq(hit, item.seq));
+       continue;
+diff --git a/frontend/src/components/daemon/session-panel/session-panel-page.tsx b/frontend/src/components/daemon/session-panel/session-panel-page.tsx
+index e2fd796e3..a24bbe987 100644
+--- a/frontend/src/components/daemon/session-panel/session-panel-page.tsx
++++ b/frontend/src/components/daemon/session-panel/session-panel-page.tsx
+@@ -124,7 +124,10 @@ import {
+ import { highlightSearchHit, searchResultLabel, searchResultText } from "./search";
+ // task-01（2026-10-14-session-turn-preview-cards）：消息流归并层（单一数据源，
+ // 未加载轮合成预览条目，D-004 方案 A）。
+-import { mergePreviewIntoDisplayTurns } from "./preview-merge";
++import {
++  isContentlessTerminalItem,
++  mergePreviewIntoDisplayTurns,
++} from "./preview-merge";
+ import { ScheduledSendModal, ScheduledSysHints } from "./scheduled-send";
+ import { TeamTriggerRow } from "./team-trigger-row";
+ import { WorkerSessionOverlay } from "./worker-session-overlay";
+@@ -2391,9 +2394,14 @@ export function SessionPanelPage({
+             setHighlightTurnKey(null);
+           }, HIGHLIGHT_TURN_CLEAR_MS);
+         } else if (result === "failed") {
+-          notify.error("该轮加载失败，请稍后重试");
++          // 2026-10-19：固定文案走 warning 原文——notify.error 收纯字符串会被
++          // errMessage 吞成默认「操作失败」（errors.ts misuse guard）。
++          notify.warning("该轮加载失败，请稍后重试");
++        } else if (result === "empty") {
++          // 2026-10-19-preview-card-empty-turn-fix：零正文不再纯静默——轻提示替代
++          // 「点了没反应」（幂等标记已记，下次点击仍短路；卡片与请求行为不变）。
++          notify.warning("该轮无对话内容");
+         }
+-        // empty：幂等标记已记，卡片保持（下次点击短路）——零正文轮无内容可展开。
+       });
+     },
+     [sessionId, notify, fetchAndAttachTurn],
+@@ -2412,6 +2420,8 @@ export function SessionPanelPage({
+       const neighbors = [turnOutline.items[idx - 1], turnOutline.items[idx + 1]];
+       for (const item of neighbors) {
+         if (!item) continue;
++        // 2026-10-19：无内容终态轮不预取——查回恒 0 条只白记幂等黑名单。
++        if (isContentlessTerminalItem(item)) continue;
+         const key = item.run_id;
+         const hit = turnsRef.current.find((t) => (t.realRunId ?? t.runId) === key);
+         // defect-fixes：同 anyBody 口径（含 prompt 与 #e 装饰后缀）。
+@@ -2520,7 +2530,9 @@ export function SessionPanelPage({
+             settleFollow();
+             if (!mountedRef.current) return;
+             if (!hit()) {
+-              if (!hasEarlierRef.current) notify.error("该轮次日志不存在（可能已被清理）");
++              // 2026-10-19：固定文案走 warning 原文（notify.error 纯字符串会被
++              // errMessage 吞成「操作失败」，真机验收实证）。
++              if (!hasEarlierRef.current) notify.warning("该轮次日志不存在（可能已被清理）");
+               else notify.warning(`已连续加载 ${JUMP_LOAD_EARLIER_MAX_PAGES} 页仍未到达，可再次点击继续加载`);
+             }
+             return;
+@@ -2573,6 +2585,17 @@ export function SessionPanelPage({
+           (item) => item.run_id === entry.key,
+         );
+         if (outlineHit && sessionId) {
++          // 2026-10-19-preview-card-empty-turn-fix：无内容终态轮（纯切换档案轮，
++          // started_at 空）零日志恒空——直达请求必然查回 0 条走「日志不存在」
++          // 误报（真机验收实证弹「操作失败」）。不发请求，直接定位高亮既有孤儿
++          // 配置行（locateAndHighlight 裸 querySelector 降级命中短行），记幂等
++          // 标记后续点击走上方短路同径定位。
++          if (isContentlessTerminalItem(outlineHit)) {
++            jumpEmptyJumpedRunIdsRef.current.add(entry.key);
++            settleFollow();
++            locateAndHighlight();
++            return;
++          }
+           jumpSuppressLoadEarlierRef.current = true;
+           const epochAtStart = sessionEpochRef.current;
+           try {
+@@ -2586,9 +2609,12 @@ export function SessionPanelPage({
+             }
+             if (turnLogs.length === 0) {
+               // run 存在但无日志（派发失败轮等）：与循环到头的口径一致。
++              // 2026-10-19：固定文案走 warning 原文（notify.error 纯字符串会被
++              // errMessage 吞成「操作失败」）；无内容终态轮已被上方早退分支拦截，
++              // 到这里的是真缺失（started_at 有值却零日志）。
+               jumpSuppressLoadEarlierRef.current = false;
+               settleFollow();
+-              notify.error("该轮次日志不存在（可能已被清理）");
++              notify.warning("该轮次日志不存在（可能已被清理）");
+               return;
+             }
+             // 游标前移（复合游标 ts+id 同步写，与触顶翻页同款）：目标轮比当前
