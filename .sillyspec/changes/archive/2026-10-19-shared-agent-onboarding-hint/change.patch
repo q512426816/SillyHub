@@ -1,0 +1,308 @@
+diff --git a/frontend/src/components/daemon/__tests__/session-panel-platform-shared.test.tsx b/frontend/src/components/daemon/__tests__/session-panel-platform-shared.test.tsx
+index e0872e43d..897d0d753 100644
+--- a/frontend/src/components/daemon/__tests__/session-panel-platform-shared.test.tsx
++++ b/frontend/src/components/daemon/__tests__/session-panel-platform-shared.test.tsx
+@@ -15,7 +15,7 @@
+ // 断言用 aria-label/data-testid 避开 antd 中文按钮 autoLetterSpacing 拆分坑。
+ 
+ import { describe, it, expect, beforeEach, vi } from "vitest";
+-import { render, screen } from "@testing-library/react";
++import { render, screen, fireEvent } from "@testing-library/react";
+ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+ 
+ import { SessionPanel } from "../session-panel";
+@@ -56,6 +56,9 @@ const sessionApi = vi.hoisted(() => ({
+   // 字段的共享智能体条目，ScheduledMessagesBar 渲染时 summarizeScheduledPrompt
+   // 读 undefined.length 异步崩溃拖 exit 1（时序性）。mock 成空列表切断污染。
+   listScheduledMessages: vi.fn().mockResolvedValue([]),
++  // 2026-10-19-shared-agent-onboarding-hint：预会话门控查询（listDaemonMachines
++  // limit=1）——真会话用例 enabled=false 不会调用；预会话用例内显式 mock。
++  listDaemonMachines: vi.fn(),
+ }));
+ 
+ vi.mock("@/lib/daemon", async () => {
+@@ -84,6 +87,8 @@ vi.mock("@/lib/daemon", async () => {
+     retrySessionQueueEntry: sessionApi.retrySessionQueueEntry,
+     // ScheduledMessagesBar 挂载即取数（I 组 flaky 根因，见 sessionApi 块注释）。
+     listScheduledMessages: sessionApi.listScheduledMessages,
++    // 2026-10-19-shared-agent-onboarding-hint：门控机器查询 mock（见 sessionApi 块）。
++    listDaemonMachines: sessionApi.listDaemonMachines,
+   };
+ });
+ 
+@@ -104,6 +109,18 @@ const workspaceApi = vi.hoisted(() => ({
+   listWorkspaces: vi.fn(),
+ }));
+ 
++// useNotify mock（测试环境无 antd App 包裹，先例 session-panel-draft-scope.test：
++// 预会话引导交互用例点档案项触发 notify.success 会炸 message 未挂载）。
++vi.mock("@/lib/errors", async () => {
++  const actual = await vi.importActual<typeof import("@/lib/errors")>(
++    "@/lib/errors",
++  );
++  return {
++    ...actual,
++    useNotify: () => ({ success: vi.fn(), error: vi.fn(), warning: vi.fn() }),
++  };
++});
++
+ vi.mock("@/lib/workspaces", async () => {
+   const actual = await vi.importActual<typeof import("@/lib/workspaces")>(
+     "@/lib/workspaces",
+@@ -113,6 +130,9 @@ vi.mock("@/lib/workspaces", async () => {
+ 
+ // page 模式 chrome（SessionConfigBar）数据 hook：无网络，空数据
+ //（本文件只测会话头徽标，config-bar 徽标归 session-config-bar.test.tsx）。
++// 2026-10-19-shared-agent-onboarding-hint：useMineAgentProfiles 改可配置
++//（预会话引导用例需提供共享智能体档案让 profileLabel 解析名字）。
++const profileApi = vi.hoisted(() => ({ useMineAgentProfiles: vi.fn() }));
+ vi.mock("@/lib/use-daemon-machines", () => ({
+   useDaemonMachines: () => ({ items: [] }),
+ }));
+@@ -120,7 +140,7 @@ vi.mock("@/lib/agent-profiles", async () => {
+   const actual = await vi.importActual<typeof import("@/lib/agent-profiles")>(
+     "@/lib/agent-profiles",
+   );
+-  return { ...actual, useMineAgentProfiles: () => ({ profiles: [] }) };
++  return { ...actual, useMineAgentProfiles: profileApi.useMineAgentProfiles };
+ });
+ vi.mock("@/lib/api/llm-providers", async () => {
+   const actual = await vi.importActual<typeof import("@/lib/api/llm-providers")>(
+@@ -207,6 +227,8 @@ beforeEach(() => {
+   workspaceApi.listWorkspaces.mockResolvedValue({ items: [] });
+   // task-10：active 共享智能体默认生效列表（用例内覆盖失败场景）。
+   sharedApi.apiFetch.mockResolvedValue(makeActiveShared());
++  // 2026-10-19-shared-agent-onboarding-hint：档案列表默认空（预会话引导用例内覆盖）。
++  profileApi.useMineAgentProfiles.mockReturnValue({ profiles: [] });
+ });
+ 
+ describe("SessionPanel「平台共享」会话徽标（task-10 / FR-05）", () => {
+@@ -254,3 +276,144 @@ describe("SessionPanel「平台共享」会话徽标（task-10 / FR-05）", () =
+     ).not.toBeInTheDocument();
+   });
+ });
++
++/* ----- 2026-10-19-shared-agent-onboarding-hint：预会话共享智能体默认选中引导 ----- */
++
++/** 门控机器响应（DaemonMachineListResponse 形态，预会话查询只读 total/shared_to_me）。 */
++function makeMachines(total: number, sharedCount = 0) {
++  return {
++    items: [],
++    total,
++    limit: 1,
++    offset: 0,
++    shared_to_me: Array.from({ length: sharedCount }, (_, i) => ({
++      machine_id: `m-${i}`,
++      display_name: `共享机${i}`,
++      lender_display_name: null,
++      source_workspace_id: null,
++      online: true,
++      runtimes: [],
++    })),
++  };
++}
++
++/** 预会话挂载（sessionId=null 走预会话分支）。 */
++function setupPreSession() {
++  const qc = new QueryClient({
++    defaultOptions: { queries: { retry: false } },
++  });
++  return render(
++    <QueryClientProvider client={qc}>
++      <SessionPanel mode="page" sessionId={null} machines={[]} llmProviders={[]} />
++    </QueryClientProvider>,
++  );
++}
++
++describe("预会话共享智能体默认选中引导（2026-10-19-shared-agent-onboarding-hint）", () => {
++  it("无自有/共享机器 + 在线共享智能体 → 默认选中并显示读写约束引导提示", async () => {
++    sessionApi.listDaemonMachines.mockResolvedValue(makeMachines(0));
++    profileApi.useMineAgentProfiles.mockReturnValue({
++      profiles: [{ id: "prof-shared", name: "平台源码助手" }],
++    });
++    setupPreSession();
++
++    const hint = await screen.findByTestId("pre-session-shared-agent-hint");
++    expect(hint.textContent).toContain("平台源码助手");
++    expect(hint.textContent).toContain("读平台源码不受限");
++    expect(hint.textContent).toContain("写操作限制在共享输出目录");
++    // FR-03：切换指引文案。
++    expect(hint.textContent).toContain("可在下方「智能体」中切换");
++    // 默认选中生效：配置条档案按钮显示共享智能体名。
++    expect(screen.getByLabelText("配置-档案 平台源码助手")).toBeInTheDocument();
++  });
++
++  it("手动选『不指定』后自动选中让位，提示消失且不再被改回", async () => {
++    sessionApi.listDaemonMachines.mockResolvedValue(makeMachines(0));
++    profileApi.useMineAgentProfiles.mockReturnValue({
++      profiles: [{ id: "prof-shared", name: "平台源码助手" }],
++    });
++    setupPreSession();
++    await screen.findByTestId("pre-session-shared-agent-hint");
++
++    // 打开档案下拉并选「不指定（无人格）」（aria-label 由 SwitchItem 拼装）。
++    fireEvent.click(screen.getByLabelText("配置-档案 平台源码助手"));
++    fireEvent.click(screen.getByLabelText("选择 不指定（无人格）"));
++
++    // 档案回到未指定且提示消失；门控仍成立但自动选中不再覆盖（touchedRef）。
++    expect(await screen.findByLabelText("配置-档案 未指定")).toBeInTheDocument();
++    expect(
++      screen.queryByTestId("pre-session-shared-agent-hint"),
++    ).not.toBeInTheDocument();
++  });
++
++  it("有自有机器（total>0）→ 不自动选中、不显示提示", async () => {
++    sessionApi.listDaemonMachines.mockResolvedValue(makeMachines(1));
++    setupPreSession();
++
++    await screen.findByTestId("session-pre-session-panel");
++    expect(
++      screen.queryByTestId("pre-session-shared-agent-hint"),
++    ).not.toBeInTheDocument();
++    expect(screen.getByLabelText("配置-档案 未指定")).toBeInTheDocument();
++  });
++
++  it("有『共享给我的』机器 → 不自动选中、不显示提示", async () => {
++    sessionApi.listDaemonMachines.mockResolvedValue(makeMachines(0, 1));
++    setupPreSession();
++
++    await screen.findByTestId("session-pre-session-panel");
++    expect(
++      screen.queryByTestId("pre-session-shared-agent-hint"),
++    ).not.toBeInTheDocument();
++  });
++
++  it("共享智能体全部离线 → 不自动选中、不显示提示", async () => {
++    sessionApi.listDaemonMachines.mockResolvedValue(makeMachines(0));
++    sharedApi.apiFetch.mockResolvedValue([
++      {
++        id: "grant-off",
++        agent_profile_id: "prof-shared",
++        display_name: "平台源码助手",
++        provider: "claude",
++        runtime_online: false,
++      },
++    ]);
++    setupPreSession();
++
++    await screen.findByTestId("session-pre-session-panel");
++    expect(
++      screen.queryByTestId("pre-session-shared-agent-hint"),
++    ).not.toBeInTheDocument();
++    expect(screen.getByLabelText("配置-档案 未指定")).toBeInTheDocument();
++  });
++
++  it("门控机器查询失败 → fail-open 不选中不提示，面板正常", async () => {
++    sessionApi.listDaemonMachines.mockRejectedValue(new Error("网络错误"));
++    profileApi.useMineAgentProfiles.mockReturnValue({
++      profiles: [{ id: "prof-shared", name: "平台源码助手" }],
++    });
++    setupPreSession();
++
++    const panel = await screen.findByTestId("session-pre-session-panel");
++    expect(panel).toBeInTheDocument();
++    expect(
++      screen.queryByTestId("pre-session-shared-agent-hint"),
++    ).not.toBeInTheDocument();
++    expect(screen.getByLabelText("配置-档案 未指定")).toBeInTheDocument();
++  });
++
++  it("共享智能体生效列表请求失败（降级 []）→ 门控不成立，不选中不提示", async () => {
++    sessionApi.listDaemonMachines.mockResolvedValue(makeMachines(0));
++    sharedApi.apiFetch.mockRejectedValue(new Error("网络错误"));
++    profileApi.useMineAgentProfiles.mockReturnValue({
++      profiles: [{ id: "prof-shared", name: "平台源码助手" }],
++    });
++    setupPreSession();
++
++    await screen.findByTestId("session-pre-session-panel");
++    expect(
++      screen.queryByTestId("pre-session-shared-agent-hint"),
++    ).not.toBeInTheDocument();
++    expect(screen.getByLabelText("配置-档案 未指定")).toBeInTheDocument();
++  });
++});
+diff --git a/frontend/src/components/daemon/session-panel/session-panel-page.tsx b/frontend/src/components/daemon/session-panel/session-panel-page.tsx
+index 919007f7f..4f6483e55 100644
+--- a/frontend/src/components/daemon/session-panel/session-panel-page.tsx
++++ b/frontend/src/components/daemon/session-panel/session-panel-page.tsx
+@@ -108,7 +108,7 @@ import { getQuicklogDetail } from "@/lib/quicklog";
+ // task-03（2026-09-27-session-fast-replay / FR-04 FR-05）：fetchSessionTurnOutline
+ // 打开链路并行拉取全量轮次大纲（导航骨架 + 未加载轮 run_id 直达跳转）。
+ import {
+-  ScheduledMessageRead, cancelTeamMission, compactSession, createScheduledMessage, createSession, fetchPendingDialogs, fetchSessionDialogHistory, fetchSessionTurnOutline, getAgentSession, getAgentSessionLogs, injectSession, interruptSession, resetToolReportSession, takeoverSession, listSessionRuns, maxLogTimestamp, reopenSession, streamSession, triggerSessionTeamMission, type PlanSummary, type SessionCreateTeamMission, type SessionDialogRead, type SessionPermissionRequest, type SessionRunRead, type SessionStreamConnection, type SessionTurnOutlineRead, type TeamMissionTriggerRequest, updateSessionAutoResume, updateSessionCtxWindow,
++  ScheduledMessageRead, cancelTeamMission, compactSession, createScheduledMessage, createSession, fetchPendingDialogs, fetchSessionDialogHistory, fetchSessionTurnOutline, getAgentSession, getAgentSessionLogs, injectSession, interruptSession, listDaemonMachines, resetToolReportSession, takeoverSession, listSessionRuns, maxLogTimestamp, reopenSession, streamSession, triggerSessionTeamMission, type PlanSummary, type SessionCreateTeamMission, type SessionDialogRead, type SessionPermissionRequest, type SessionRunRead, type SessionStreamConnection, type SessionTurnOutlineRead, type TeamMissionTriggerRequest, updateSessionAutoResume, updateSessionCtxWindow,
+ } from "@/lib/daemon";
+ import { getProviderCaps, PROVIDER_SWITCH_ENGINES } from "@/lib/provider-caps";
+ import { cn } from "@/lib/utils";
+@@ -985,6 +985,35 @@ export function SessionPanelPage({
+   // 重置清空不传——引擎默认零回归；显式选「默认」off=上送，daemon 按引擎映射）。
+   const [preThinkingLevel, setPreThinkingLevel] = useState("");
+   const [preError, setPreError] = useState<string | null>(null);
++  // ── 2026-10-19-shared-agent-onboarding-hint：预会话共享智能体默认选中引导 ──
++  // 门控数据：轻量机器查询（limit=1 仅探 total/shared_to_me 有无）。不复用
++  // machines prop——它是门户融合候选且无 loading 语义（加载中空数组会误判
++  // 「无机器」），独立查询以 data!=null 守卫天然 fail-open。仅预会话态发起。
++  const sharedAgentOnboardingQ = useQuery({
++    queryKey: ["daemonMachines", "sharedAgentOnboarding"],
++    queryFn: () => listDaemonMachines({ limit: 1 }),
++    enabled: sessionId === null,
++    staleTime: 30_000,
++  });
++  const noOwnNoSharedMachine =
++    sharedAgentOnboardingQ.data != null &&
++    sharedAgentOnboardingQ.data.total === 0 &&
++    (sharedAgentOnboardingQ.data.shared_to_me?.length ?? 0) === 0;
++  // 首个在线平台共享智能体（activeSharedAgents 失败降级 []，门控自然不成立）。
++  const firstOnlineSharedAgent = useMemo(
++    () => activeSharedAgents.find((a) => a.runtime_online) ?? null,
++    [activeSharedAgents],
++  );
++  // 用户手动操作过档案（含选「不指定」）后置 true——自动默认选中从此让位
++  // （否则用户手动选回「不指定」会被 effect 改回共享智能体，覆盖用户选择）。
++  const preProfileTouchedRef = useRef(false);
++  useEffect(() => {
++    if (sessionId !== null) return;
++    if (preProfileTouchedRef.current) return;
++    if (!noOwnNoSharedMachine || !firstOnlineSharedAgent) return;
++    if (preProfileId === firstOnlineSharedAgent.agent_profile_id) return;
++    setPreProfileId(firstOnlineSharedAgent.agent_profile_id);
++  }, [sessionId, noOwnNoSharedMachine, firstOnlineSharedAgent, preProfileId]);
+   // task-13（FR-05/D-009@v2）：预会话团队 payload 暂存——弹层确认后暂存（含
+   // task-12 主 agent 选择器落定的 orchestrator_workspace_id），首句 createSession
+   // 随 team_mission 上送；成功清空、失败保留可原地重试（R-02 语义延伸）。
+@@ -4459,6 +4488,20 @@ export function SessionPanelPage({
+           {/* ql-20260823-008：配置控件条同构挂载（provisional 暂存模式）——
+               供应商/档案可选暂存随首句生效（task-09 起配置条仅此两块）。 */}
+           <div className="px-5 pb-3">
++            {/* 2026-10-19-shared-agent-onboarding-hint：无自有/共享机器用户的
++                共享智能体引导条——仅当选中值确为共享智能体时渲染（用户手动改选
++                其它档案即自然消失，不依赖 touchedRef）。 */}
++            {noOwnNoSharedMachine &&
++              firstOnlineSharedAgent &&
++              preProfileId === firstOnlineSharedAgent.agent_profile_id && (
++                <p
++                  data-testid="pre-session-shared-agent-hint"
++                  className="mb-1.5 rounded border border-brand-300/60 bg-brand-50/60 px-3 py-2 text-xs text-brand-700 dark:bg-brand-950/30 dark:text-brand-300"
++                >
++                  已为你选中平台共享智能体「
++                  {firstOnlineSharedAgent.display_name ?? "平台共享智能体"}」——读平台源码不受限，写操作限制在共享输出目录；可在下方「智能体」中切换。
++                </p>
++              )}
+             <SessionConfigBar
+               sessionId=""
+               provisional
+@@ -4471,7 +4514,12 @@ export function SessionPanelPage({
+               variant={variant}
+               onProvisionalSwitch={(field, value) => {
+                 if (field === "llm_provider_id") setPreProviderId(value);
+-                else setPreProfileId(value);
++                else {
++                  // 2026-10-19-shared-agent-onboarding-hint：手动触档后自动
++                  // 默认选中永久让位（含选回「不指定」）。
++                  preProfileTouchedRef.current = true;
++                  setPreProfileId(value);
++                }
+               }}
+               // D-002@v1：模型暂存专用回调（onProvisionalSwitch 二分收值会误写档案）。
+               onProvisionalModelSwitch={setPreModelId}

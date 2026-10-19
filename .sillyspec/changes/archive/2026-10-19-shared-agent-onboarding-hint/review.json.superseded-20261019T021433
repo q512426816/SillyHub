@@ -1,0 +1,34 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-19-shared-agent-onboarding-hint",
+  "reviewer": "subagent",
+  "verdict": "PASS",
+  "reviewedAgainst": "1602efcdc5aaefa66ce9288cdb45263c29e66d2c",
+  "findings": [
+    {
+      "severity": "P2",
+      "title": "FR-05 声称测试覆盖「四类 fail-open」，但 FR-04 第四类（共享智能体生效列表请求失败→降级 []）无聚焦用例",
+      "evidence": "新增 describe 六个用例实际覆盖：有自有机器(total>0)/有共享机器/共享智能体全部离线/机器查询失败；useActiveSharedAgents 的 catch(()=>[]) 降级路径（session-config-bar.tsx:149，design 自述『既有降级 []，不新增处理』）在预会话场景无任何断言，FR-04 绑定行也只列了三类场景，与 FR-05『覆盖 FR-01~FR-04 全部分支（…四类 fail-open）』的承诺不符（机器『加载中』与『失败』共用 data!=null 守卫，可由失败用例代偿，不另计缺）",
+      "location": "frontend/src/components/daemon/__tests__/session-panel-platform-shared.test.tsx:312"
+    },
+    {
+      "severity": "P2",
+      "title": "FR-03 绑定作答声称的用例「引导提示文案含读写约束与切换指引」不存在，且「切换指引」文案无任何断言",
+      "evidence": "全测试文件无该用例名；最接近的用例（第 313 行）只断言提示含名称/「读平台源码不受限」/「写操作限制在共享输出目录」，未断言切换指引文案（session-panel-page.tsx:4502 的『可在下方「智能体」中切换』），FR-03 要求的『可在智能体下拉切换的指引』部分未被测试锁定",
+      "location": "frontend/src/components/daemon/__tests__/session-panel-platform-shared.test.tsx:313"
+    },
+    {
+      "severity": "P3",
+      "title": "提示条对可空 display_name 无兜底，极端情况下名称渲染为空",
+      "evidence": "生成类型 SharedAgentActiveView.display_name?: string | null（api-types.ts:26076 块内），提示条直接插值 {firstOnlineSharedAgent.display_name}（session-panel-page.tsx:4502），为 null/undefined 时渲染「」空名，FR-03『内容必须包含该共享智能体名称』字面不成立；正常后端数据恒有名，风险极低",
+      "location": "frontend/src/components/daemon/session-panel/session-panel-page.tsx:4501"
+    }
+  ],
+  "dimensionNotes": {
+    "乱序": "ok",
+    "并发": "ok",
+    "切换": "ok",
+    "作用域": "ok"
+  },
+  "reviewedAt": "2026-10-19T02:12:11Z"
+}

@@ -88,3 +88,4 @@ created_at: 2026-08-30 22:23:33
 | 2026-10-18 | 2026-10-18-change-type-git-conventional | 变更类型改用git惯用前缀彩色标签 |
 | 2026-10-18 | 2026-10-18-change-list-type-filter | 变更列表加类型标签与类型筛选 |
 | 2026-10-19 | 2026-10-19-assets-audit-expand-toggle | 归档留档改动文件清单漏展开按钮，超5条只能看前5条 |
+| 2026-10-19 | 2026-10-19-shared-agent-onboarding-hint | 无自有 daemon 且无工作区共享机器的新用户(如 180072)在会话创建处不知道要选「平台共享… |
