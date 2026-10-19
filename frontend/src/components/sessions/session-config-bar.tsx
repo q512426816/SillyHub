@@ -942,7 +942,7 @@ export function SessionConfigBar({
             {visibleProfiles.map((p) => (
               <SwitchItem
                 key={p.id}
-                icon={<User aria-hidden className="h-3.5 w-3.5" />}
+                icon={<User aria-hidden className="h-3 w-3" />}
                 // D-013：不做引擎过滤；Codex 下仅标注人格不注入（原 D-003）。
                 label={
                   effectiveEngine === "codex"
