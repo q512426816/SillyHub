@@ -397,3 +397,79 @@ created_at: 2026-10-15T11:57:05.061Z
 摘要：主路径
 全文：.sillyspec/changes/archive/2026-10-19-knowledge-build-switch-rollout/requirements.md#FR-03
 最近确认：cb7394b3637b8bab1e1d746dbb2454c658bb6e85
+
+## FR-core-018 assets DTO 增 scopeAudit.repos 元数据（key/锚点/计数/降级/patchSha256，不回传 patch 正文），旧归档无 repos 时零变化
+变更：2026-10-19-change-assets-cross-repo-repos
+状态：active
+摘要：跨仓冻结投影；旧归档兼容
+全文：.sillyspec/changes/archive/2026-10-19-change-assets-cross-repo-repos/requirements.md#FR-01
+最近确认：9043c1a83f53bb4bcd5fd05fe3fd8529a5c0132d
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-19-change-assets-cross-repo-repos:flow:测试绑定FR-01
+  tests: backend/app/modules/change/tests/test_assets.py::test_patch_meta_projects_cross_repo_metadata | backend/app/modules/change/tests/test_assets.py::test_patch_meta_without_repos_key_is_backward_compatible
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-19-change-assets-cross-repo-repos
+  status: active
+
+## FR-core-019 变更资产卡按仓分段展示跨仓冻结面，并标注主仓/各仓口径避免双计歧义
+变更：2026-10-19-change-assets-cross-repo-repos
+状态：active
+摘要：有跨仓面；无跨仓面
+全文：.sillyspec/changes/archive/2026-10-19-change-assets-cross-repo-repos/requirements.md#FR-02
+最近确认：9043c1a83f53bb4bcd5fd05fe3fd8529a5c0132d
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-19-change-assets-cross-repo-repos:flow:测试绑定FR-02
+  tests: frontend/src/components/changes/detail/__tests__/change-assets-card.test.tsx::跨仓冻结面
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-19-change-assets-cross-repo-repos
+  status: active
+
+## FR-core-020 后端单测覆盖 repos 投影与缺键/降级形态，前端类型检查与构建通过
+变更：2026-10-19-change-assets-cross-repo-repos
+状态：active
+摘要：验证面
+全文：.sillyspec/changes/archive/2026-10-19-change-assets-cross-repo-repos/requirements.md#FR-03
+最近确认：9043c1a83f53bb4bcd5fd05fe3fd8529a5c0132d
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-19-change-assets-cross-repo-repos:flow:测试绑定FR-03
+  tests: backend/app/modules/change/tests/test_assets.py::test_patch_meta_projects_cross_repo_metadata | frontend/src/components/changes/detail/__tests__/change-assets-card.test.tsx::跨仓冻结面
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-19-change-assets-cross-repo-repos
+  status: active
+
+## FR-core-021 既有 patch 语义不变：files/totals 仍为主仓面
+变更：2026-10-19-change-assets-cross-repo-repos
+状态：active
+摘要：主仓面隔离
+全文：.sillyspec/changes/archive/2026-10-19-change-assets-cross-repo-repos/requirements.md#FR-04
+最近确认：9043c1a83f53bb4bcd5fd05fe3fd8529a5c0132d
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-19-change-assets-cross-repo-repos:flow:测试绑定FR-04
+  tests: backend/app/modules/change/tests/test_assets.py::test_patch_meta_projects_cross_repo_metadata
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-19-change-assets-cross-repo-repos
+  status: active

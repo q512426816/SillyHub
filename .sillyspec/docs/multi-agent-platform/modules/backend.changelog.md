@@ -68,3 +68,4 @@
 - 2026-10-19-thinking-zh-translate | 思考内容离线翻译为中文展示
 - 2026-10-19-translate-live-verify | 翻译真机验证：换模型源与EOS修复
 - 2026-10-19-knowledge-build-switch-rollout | 禁建库开关本地部署落地与首搜实测
+- 2026-10-19-change-assets-cross-repo-repos | 变更资产卡展示跨仓冻结面

@@ -57,3 +57,4 @@ multi-agent-platform 的一体化部署编排组件，用 Docker Compose 把 bac
 - change 2026-10-15-knowledge-search-pgvector | postgres 换 pgvector/pgvector:pg16（知识搜索向量持久化，vector(512) 两表）+ backend fastembed 模型缓存挂载 + mem_limit 800m→1100m（生产 OOM/无外网实证）
 - 2026-10-16-deploy-convergence-guard | 2026-10-16 生产互覆事故——另一会话从分叉分支打包部署，静默回退 main 上已修复的 /…
 - 2026-10-19-knowledge-build-switch-rollout | 禁建库开关本地部署落地与首搜实测
+- 2026-10-19-change-assets-cross-repo-repos | 变更资产卡展示跨仓冻结面

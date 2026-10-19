@@ -1,0 +1,1690 @@
+diff --git a/.sillyspec/docs/SillyHub/modules/frontend_components.changelog.md b/.sillyspec/docs/SillyHub/modules/frontend_components.changelog.md
+index 8e085212e..1bbde0bfc 100644
+--- a/.sillyspec/docs/SillyHub/modules/frontend_components.changelog.md
++++ b/.sillyspec/docs/SillyHub/modules/frontend_components.changelog.md
+@@ -90,3 +90,4 @@ created_at: 2026-08-30 22:23:33
+ | 2026-10-19 | 2026-10-19-assets-audit-expand-toggle | 归档留档改动文件清单漏展开按钮，超5条只能看前5条 |
+ | 2026-10-19 | 2026-10-19-shared-agent-onboarding-hint | 无自有 daemon 且无工作区共享机器的新用户(如 180072)在会话创建处不知道要选「平台共享… |
+ | 2026-10-19 | 2026-10-19-hide-shared-profile-in-session | 用户担心普通会话中途误选「平台向导」类平台共享智能体档案(切换后仅换人格提示词,但用户预期是整套环境… |
++| 2026-10-19 | 2026-10-19-thinking-zh-translate | 思考内容离线翻译为中文展示 |
+diff --git a/.sillyspec/docs/SillyHub/modules/frontend_lib.changelog.md b/.sillyspec/docs/SillyHub/modules/frontend_lib.changelog.md
+index be18fd8a2..890321851 100644
+--- a/.sillyspec/docs/SillyHub/modules/frontend_lib.changelog.md
++++ b/.sillyspec/docs/SillyHub/modules/frontend_lib.changelog.md
+@@ -13,3 +13,4 @@ created_at: 2026-10-16 16:40:00
+ - 2026-10-16-change-title-condense-backfill | 变更中心标题提炼与存量回填
+ - 2026-10-17-audit-risk-followup | 24h 审计六连修收口：dsh/zcode 会话恢复白名单漏登记（daemon 重启静默丢记录）、r…
+ - 2026-10-18-change-list-type-filter | 变更列表加类型标签与类型筛选
++- 2026-10-19-thinking-zh-translate | 思考内容离线翻译为中文展示
+diff --git a/.sillyspec/docs/backend/modules/knowledge.changelog.md b/.sillyspec/docs/backend/modules/knowledge.changelog.md
+index d7d959386..45cc1d6fc 100644
+--- a/.sillyspec/docs/backend/modules/knowledge.changelog.md
++++ b/.sillyspec/docs/backend/modules/knowledge.changelog.md
+@@ -2,3 +2,4 @@
+ - change 2026-10-15-knowledge-search-pgvector | 知识搜索向量索引持久化到 PG pgvector：两表（chunks embedding vector(512)+content_hash 差量键 / state 指纹+model_version）+ 迁移 20261015200000（CREATE EXTENSION vector+方言守卫+镜像未换 fail-closed）+ pgvector>=0.3 依赖（with_variant：PG Vector/SQLite JSON 测试可建）；search_sync 改 async 协程（DB await 原生+CPU to_thread 卸载，run_in_threadpool 退役）；懒同步差量四态（指纹 list 归一化+asyncio.Lock single-flight+model_version 全量重算）；查询双路方言分叉（PG KNN cosine_distance/SQLite Python 余弦/词面 ILIKE 候选）；DB 异常词面内存直查降级（永不 5xx）。部署：镜像 pgvector/pgvector:pg16。测试 205+46 全绿+契约零 diff；实测重启后首查 0.003s 仅嵌 query（零重建）+差量只嵌变更文件。CLI 向量端点零改动。**部署期四连修（生产实证）**：建库写入分批+Core 批量 INSERT（容器 800m OOM 三连修，mem_limit→1100m）；uq(workspace_id,spec_path,anchor,title) drop（生产重号条目撞约束，迁移 20261016010000，键改行号坐标）；PG KNN 改原生 SQL（with_variant 列取不到 ORM cosine_distance）；fastembed 模型缓存挂载（服务器无外网）。本机隧道建库 228.7s/6712 chunks；生产首查 3.3s（改造前 304s）/二次 0.72s。
+ - 2026-10-16-driver-audit-fixes | 24h 只读风险审查发现 zcode 驱动三处缺陷（轮次进行中 close 令 consume 永久…
+ - 2026-10-19-knowledge-search-build-switch | 知识搜索禁建库开关：根治首搜建库地雷
++- 2026-10-19-thinking-zh-translate | 思考内容离线翻译为中文展示
+diff --git a/.sillyspec/docs/multi-agent-platform/modules/backend.changelog.md b/.sillyspec/docs/multi-agent-platform/modules/backend.changelog.md
+index 8f034fe8a..145f0eb4b 100644
+--- a/.sillyspec/docs/multi-agent-platform/modules/backend.changelog.md
++++ b/.sillyspec/docs/multi-agent-platform/modules/backend.changelog.md
+@@ -65,3 +65,5 @@
+ - 2026-10-19-platform-auto-commit-type | 平台侧自动写入变更类型闭环
+ - 2026-10-19-change-list-created-sort | 变更中心列表默认按创建时间倒序
+ - 2026-10-19-knowledge-search-build-switch | 知识搜索禁建库开关：根治首搜建库地雷
++- 2026-10-19-thinking-zh-translate | 思考内容离线翻译为中文展示
++- 2026-10-19-translate-live-verify | 翻译真机验证：换模型源与EOS修复
+diff --git a/.sillyspec/docs/multi-agent-platform/modules/frontend.changelog.md b/.sillyspec/docs/multi-agent-platform/modules/frontend.changelog.md
+index 3f1b6c7c2..0e08733c5 100644
+--- a/.sillyspec/docs/multi-agent-platform/modules/frontend.changelog.md
++++ b/.sillyspec/docs/multi-agent-platform/modules/frontend.changelog.md
+@@ -132,3 +132,4 @@
+ | 2026-10-19 | 2026-10-19-shared-agent-onboarding-hint | 无自有 daemon 且无工作区共享机器的新用户(如 180072)在会话创建处不知道要选「平台共享… |
+ | 2026-10-19 | 2026-10-19-hide-shared-profile-in-session | 用户担心普通会话中途误选「平台向导」类平台共享智能体档案(切换后仅换人格提示词,但用户预期是整套环境… |
+ | 2026-10-19 | 2026-10-19-change-list-created-sort | 变更中心列表默认按创建时间倒序 |
++| 2026-10-19 | 2026-10-19-thinking-zh-translate | 思考内容离线翻译为中文展示 |
+diff --git a/backend/app/core/config.py b/backend/app/core/config.py
+index 309780347..ae9e7a0bb 100644
+--- a/backend/app/core/config.py
++++ b/backend/app/core/config.py
+@@ -155,9 +155,12 @@ class Settings(BaseSettings):
+         description="master switch for offline thinking translation (env TRANSLATE_THINKING_ENABLED).",
+     )
+     # HF repo id（ct2 格式）。换更大模型只改本值；离线部署用 translate_model_dir
+-    # 指本地预置目录绕过下载。
++    # 指本地预置目录绕过下载。默认仓库 2026-10-19 真机验证更换：原
++    # michaelfeil/ct2fast-opus-mt-en-zh 已 404（hf-mirror 实测），现默认
++    # jiangzhuo9357/opus-mt-en-zh-ct2（config.json+model.bin+source/target.spm
++    # 完整布局，真机推理译文流畅）。
+     translate_model_repo: str = Field(
+-        "michaelfeil/ct2fast-opus-mt-en-zh",
++        "jiangzhuo9357/opus-mt-en-zh-ct2",
+         description="CTranslate2-format opus-mt en-zh repo id (env TRANSLATE_MODEL_REPO).",
+     )
+     # 非空 = 直接用该本地模型目录（含 config.json 的 ct2 模型目录），零下载。
+diff --git a/backend/app/modules/change/assets.py b/backend/app/modules/change/assets.py
+index e4131cdfc..c76f0a7a8 100644
+--- a/backend/app/modules/change/assets.py
++++ b/backend/app/modules/change/assets.py
+@@ -47,6 +47,9 @@ from app.modules.change.schema import (
+     ChangeKnowledgeTouch,
+     ChangePatchFileRead,
+     ChangePatchMeta,
++    ChangePatchRepo,
++    ChangePatchRepoAnchor,
++    ChangePatchRepoTotals,
+     ChangeTestRow,
+     ChangeTouchedModule,
+ )
+@@ -213,19 +216,86 @@ def _read_json_dict(path: Path) -> dict | None:
+     return data if isinstance(data, dict) else None
+ 
+ 
++def _int_or_none(value: object) -> int | None:
++    """计数投影：只认 int（bool 是 int 子类，显式排除），其余 None（fail-open）。"""
++    return value if isinstance(value, int) and not isinstance(value, bool) else None
++
++
++def _str_or_none(value: object) -> str | None:
++    return value if isinstance(value, str) else None
++
++
++def _read_patch_repos(data: dict) -> list[ChangePatchRepo]:
++    """``scopeAudit.repos[]`` 元数据投影（2026-10-19-change-assets-cross-repo-repos）。
++
++    只取展示面字段：仓键/锚点/三态计数/降级/sha/是否有正文；**patch 正文与 repoPath
++    不投影**（正文体积可达数 MB、repoPath 是本机布局）。坏条目（非 dict/无 key）跳过，
++    单条失败不影响整组（fail-open）。
++    """
++    scope = data.get("scopeAudit")
++    raw_repos = scope.get("repos") if isinstance(scope, dict) else None
++    if not isinstance(raw_repos, list):
++        return []
++    repos: list[ChangePatchRepo] = []
++    for raw in raw_repos:
++        if not isinstance(raw, dict):
++            continue
++        key = raw.get("key")
++        if not isinstance(key, str) or not key:
++            continue
++        anchor_raw = raw.get("anchor")
++        anchor = None
++        if isinstance(anchor_raw, dict):
++            anchor = ChangePatchRepoAnchor(
++                source=_str_or_none(anchor_raw.get("source")),
++                base=_str_or_none(anchor_raw.get("base")),
++                head=_str_or_none(anchor_raw.get("head")),
++                label=_str_or_none(anchor_raw.get("label")),
++            )
++        totals_raw = raw.get("totals")
++        totals = None
++        if isinstance(totals_raw, dict):
++            totals = ChangePatchRepoTotals(
++                files=_int_or_none(totals_raw.get("files")),
++                additions=_int_or_none(totals_raw.get("additions")),
++                deletions=_int_or_none(totals_raw.get("deletions")),
++                planned=_int_or_none(totals_raw.get("planned")),
++                unplanned=_int_or_none(totals_raw.get("unplanned")),
++                untouched=_int_or_none(totals_raw.get("untouched")),
++            )
++        patch_text = raw.get("patch")
++        repos.append(
++            ChangePatchRepo(
++                key=key,
++                anchor=anchor,
++                totals=totals,
++                degraded=raw.get("degraded") is True,
++                degraded_reason=_str_or_none(raw.get("degradedReason")),
++                patch_sha256=_str_or_none(raw.get("patchSha256")),
++                has_patch=isinstance(patch_text, str) and len(patch_text) > 0,
++            )
++        )
++    return repos
++
++
+ def _read_patch_meta(change_dir: Path) -> ChangePatchMeta | None:
+     """读 ``change-patch.json`` 的 totals + files 投影；缺件回退 ``scope-audit.json``。
+ 
+     回退（2026-10-07-assets-patch-scope-audit-fallback）：厚流程 execute --done
+     只落 scope-audit.json/patch、不冻 change-patch.json——回退时 totals/patchStatus/
+     savedAt 同构直取，file_list 改从 ``rows[].path`` 投影。两份都缺/损坏 → None。
++
++    ``repos``（2026-10-19-change-assets-cross-repo-repos）：跨仓冻结面元数据投影；
++    scope-audit.json 回退形态无该键 → 空数组。
+     """
+     data = _read_json_dict(change_dir / "change-patch.json")
+     file_list: list[str] = []
++    repos: list[ChangePatchRepo] = []
+     if data is not None:
+         raw_files = data.get("files")
+         if isinstance(raw_files, list):
+             file_list = [f for f in raw_files if isinstance(f, str)]
++        repos = _read_patch_repos(data)
+     else:
+         data = _read_json_dict(change_dir / "scope-audit.json")
+         if data is None:
+@@ -239,13 +309,14 @@ def _read_patch_meta(change_dir: Path) -> ChangePatchMeta | None:
+             ]
+     totals = data.get("totals") or {}
+     return ChangePatchMeta(
+-        files=totals.get("files"),
+-        additions=totals.get("additions"),
+-        deletions=totals.get("deletions"),
++        files=_int_or_none(totals.get("files")),
++        additions=_int_or_none(totals.get("additions")),
++        deletions=_int_or_none(totals.get("deletions")),
+         patch_status=data.get("patchStatus"),
+         saved_at=data.get("savedAt"),
+         file_list=file_list[:_PATCH_FILES_MAX],
+         files_truncated=len(file_list) > _PATCH_FILES_MAX,
++        repos=repos,
+     )
+ 
+ 
+diff --git a/backend/app/modules/change/schema.py b/backend/app/modules/change/schema.py
+index 3cf43222a..644dc8259 100644
+--- a/backend/app/modules/change/schema.py
++++ b/backend/app/modules/change/schema.py
+@@ -908,6 +908,43 @@ class ChangeTestRow(BaseModel):
+     raw_binding: str | None = None
+ 
+ 
++class ChangePatchRepoAnchor(BaseModel):
++    """跨仓冻结锚点投影（change-patch.json ``scopeAudit.repos[].anchor``）。"""
++
++    source: str | None = None
++    base: str | None = None
++    head: str | None = None
++    label: str | None = None
++
++
++class ChangePatchRepoTotals(BaseModel):
++    """跨仓单仓对账计数（planned/unplanned/untouched 为 CLI 三态原值）。"""
++
++    files: int | None = None
++    additions: int | None = None
++    deletions: int | None = None
++    planned: int | None = None
++    unplanned: int | None = None
++    untouched: int | None = None
++
++
++class ChangePatchRepo(BaseModel):
++    """跨仓冻结面元数据（2026-10-19-change-assets-cross-repo-repos / FR-01）。
++
++    只投影展示所需元数据，**不回传 patch 正文**（单仓 patch 可数 MB、且正文只在
++    change-patch.json 全屏预览消费——资产卡给仓键/锚点/计数/降级/sha 与指路）。
++    ``repo_path`` 为产出端本机绝对路径，恒不投影（本机布局不外泄）。
++    """
++
++    key: str
++    anchor: ChangePatchRepoAnchor | None = None
++    totals: ChangePatchRepoTotals | None = None
++    degraded: bool = False
++    degraded_reason: str | None = None
++    patch_sha256: str | None = None
++    has_patch: bool = False
++
++
+ class ChangePatchMeta(BaseModel):
+     """patch 留档统计（change-patch.json 优先，缺件回退 scope-audit.json；两缺 → None）。
+ 
+@@ -920,6 +957,10 @@ class ChangePatchMeta(BaseModel):
+     change-patch.json 两件——对账面并入后者的 ``scopeAudit`` 子对象（顶级键原位不动，
+     本 DTO 读的顶级字段零变化），scope-audit.json/.patch 停写；回退链保留兜其他仓/本仓
+     存量旧形态归档。
++
++    ``repos``（2026-10-19-change-assets-cross-repo-repos）：跨仓冻结面元数据投影——
++    空面跨仓冻结只落 JSON（无 change.patch），此时 ``files`` 主仓面为 0，真实交付面
++    在 repos[]；旧归档/单仓变更无该键 → 空数组（additive，读侧零适配）。
+     """
+ 
+     files: int | None = None
+@@ -929,6 +970,7 @@ class ChangePatchMeta(BaseModel):
+     saved_at: str | None = None
+     file_list: list[str] = Field(default_factory=list)
+     files_truncated: bool = False
++    repos: list[ChangePatchRepo] = Field(default_factory=list)
+ 
+ 
+ class ChangePatchFileRead(BaseModel):
+diff --git a/backend/app/modules/change/tests/test_assets.py b/backend/app/modules/change/tests/test_assets.py
+index ccb30b796..31a9cc129 100644
+--- a/backend/app/modules/change/tests/test_assets.py
++++ b/backend/app/modules/change/tests/test_assets.py
+@@ -899,3 +899,117 @@ async def test_live_touch_archived_ignores_review_marks(db_session, tmp_path: Pa
+         ("FR-auto-test-003", "fr/auto-test.md"),
+         ("陷阱条目", "testing-gotchas.md"),
+     ]
++
++
++# ===========================================================================
++# 跨仓冻结面元数据（2026-10-19-change-assets-cross-repo-repos / FR-01）
++# ===========================================================================
++
++
++def _seed_cross_repo_meta(spec_root: Path) -> None:
++    """JSON-only 跨仓冻结：顶级主仓面为空，scopeAudit.repos[] 承载各仓元数据+正文。"""
++    change_dir = spec_root / "changes" / "archive" / KEY
++    change_dir.mkdir(parents=True, exist_ok=True)
++    (change_dir / "change-patch.json").write_text(
++        json.dumps(
++            {
++                "change": KEY,
++                "files": [],
++                "totals": {"files": 0, "additions": 0, "deletions": 0},
++                "patchStatus": "ok",
++                "savedAt": "2026-10-19T05:17:20.840Z",
++                "scopeAudit": {
++                    "repos": [
++                        {
++                            "key": "subgrid",
++                            "repoPath": "/mnt/e/Web/crrc/sub-grid-security",
++                            "anchor": {
++                                "source": "flow-start-baseline",
++                                "base": "cf20b9428adcac0e811a8c51e8ddcfa12ed21f75",
++                                "head": None,
++                                "label": "flow-start 跨仓基线窗口",
++                            },
++                            "totals": {
++                                "files": 112,
++                                "additions": 55207,
++                                "deletions": 55200,
++                                "planned": 0,
++                                "unplanned": 110,
++                                "untouched": 2,
++                            },
++                            "degraded": False,
++                            "degradedReason": None,
++                            "patch": "diff --git a/src/x.js b/src/x.js\n--- a/src/x.js\n+++ b/src/x.js\n",
++                            "patchSha256": "54dae3786803ce49aaaa",
++                        },
++                        {
++                            "key": "broken",
++                            "repoPath": None,
++                            "anchor": {
++                                "source": "degraded",
++                                "base": None,
++                                "head": None,
++                                "label": "degraded",
++                            },
++                            "totals": {"files": 0, "additions": 0, "deletions": 0},
++                            "degraded": True,
++                            "degradedReason": "仓路径不可达",
++                            "patch": None,
++                            "patchSha256": None,
++                        },
++                        {"noKey": True},
++                        "not-a-dict",
++                    ]
++                },
++            }
++        ),
++        encoding="utf-8",
++    )
++
++
++async def test_patch_meta_projects_cross_repo_metadata(db_session, tmp_path: Path) -> None:
++    """repos[] 投影元数据（锚点/计数/降级/sha/has_patch），patch 正文不回传。"""
++    spec_root = tmp_path / "spec-root-cross1"
++    _seed_mirror(spec_root, with_trace=False)
++    _seed_cross_repo_meta(spec_root)
++    ws = await _make_ws_spec(db_session, spec_root)
++    change = await _make_change(db_session, ws, archived=True)
++
++    result = await ChangeAssetsQueryService(db_session).get_change_assets(ws.id, change.id)
++    assert result.patch is not None
++    assert result.patch.files == 0
++    assert result.patch.repos, "跨仓元数据必须投影"
++    assert [r.key for r in result.patch.repos] == ["subgrid", "broken"], "坏条目跳过"
++    healthy = result.patch.repos[0]
++    assert not hasattr(healthy, "repo_path"), "repoPath 含本机布局，不投影"
++    assert healthy.anchor is not None
++    assert healthy.anchor.source == "flow-start-baseline"
++    assert healthy.anchor.base.startswith("cf20b942")
++    assert healthy.anchor.label == "flow-start 跨仓基线窗口"
++    assert healthy.totals is not None
++    assert healthy.totals.files == 112
++    assert healthy.totals.unplanned == 110
++    assert healthy.patch_sha256 == "54dae3786803ce49aaaa"
++    assert healthy.has_patch is True
++    assert healthy.degraded is False
++    assert not hasattr(healthy, "patch"), "patch 正文不回传（体积/越权面）"
++    degraded = result.patch.repos[1]
++    assert degraded.degraded is True
++    assert degraded.degraded_reason == "仓路径不可达"
++    assert degraded.has_patch is False
++
++
++async def test_patch_meta_without_repos_key_is_backward_compatible(
++    db_session, tmp_path: Path
++) -> None:
++    """旧归档无 scopeAudit.repos → repos 恒空数组（零行为变化）。"""
++    spec_root = tmp_path / "spec-root-cross2"
++    _seed_mirror(spec_root, with_trace=False)
++    _seed_patch_archive(spec_root)
++    ws = await _make_ws_spec(db_session, spec_root)
++    change = await _make_change(db_session, ws, archived=True)
++
++    result = await ChangeAssetsQueryService(db_session).get_change_assets(ws.id, change.id)
++    assert result.patch is not None
++    assert result.patch.repos == []
++    assert result.patch.file_list == ["src/flow.js", "test/x.test.mjs"]
+diff --git a/backend/app/modules/translate/README.md b/backend/app/modules/translate/README.md
+index 11bd26f1f..5186112c3 100644
+--- a/backend/app/modules/translate/README.md
++++ b/backend/app/modules/translate/README.md
+@@ -9,7 +9,7 @@ API——推理在本地 CTranslate2 子进程完成（opus-mt-en-zh int8 量化
+ | 变量 | 默认 | 说明 |
+ |---|---|---|
+ | `TRANSLATE_THINKING_ENABLED` | `true` | 总闸；`false` 时端点直接原文透传 |
+-| `TRANSLATE_MODEL_REPO` | `michaelfeil/ct2fast-opus-mt-en-zh` | ct2 格式模型 repo id（换更大模型只改这里） |
++| `TRANSLATE_MODEL_REPO` | `jiangzhuo9357/opus-mt-en-zh-ct2` | ct2 格式模型 repo id（换更大模型只改这里） |
+ | `TRANSLATE_MODEL_DIR` | 空 | 本地模型目录（含 `config.json` 的 ct2 目录）；非空时零下载 |
+ | `TRANSLATE_WORKER_IDLE_EXIT_SEC` | `600` | 翻译子进程闲置自灭秒数 |
+ | `TRANSLATE_CACHE_MAX_ENTRIES` | `2048` | 进程内译文 LRU 条目上限 |
+@@ -22,7 +22,7 @@ API——推理在本地 CTranslate2 子进程完成（opus-mt-en-zh int8 量化
+ 
+ ```bash
+ # 有网机器上一次性下载模型目录（HF 镜像可加 HF_ENDPOINT=https://hf-mirror.com）
+-python -c "from huggingface_hub import snapshot_download; print(snapshot_download('michaelfeil/ct2fast-opus-mt-en-zh'))"
++python -c "from huggingface_hub import snapshot_download; print(snapshot_download('jiangzhuo9357/opus-mt-en-zh-ct2'))"
+ 
+ # 把输出的缓存目录整体拷到部署机（如 /opt/models/opus-mt-en-zh），然后：
+ TRANSLATE_MODEL_DIR=/opt/models/opus-mt-en-zh
+@@ -32,7 +32,7 @@ Docker 预烤（可选）：在 backend Dockerfile 依赖安装后加
+ 
+ ```dockerfile
+ RUN python -c "from huggingface_hub import snapshot_download" \
+-    && python -c "from huggingface_hub import snapshot_download as s; s('michaelfeil/ct2fast-opus-mt-en-zh', local_dir='/opt/models/opus-mt-en-zh')" \
++    && python -c "from huggingface_hub import snapshot_download as s; s('jiangzhuo9357/opus-mt-en-zh-ct2', local_dir='/opt/models/opus-mt-en-zh')" \
+     || true
+ ENV TRANSLATE_MODEL_DIR=/opt/models/opus-mt-en-zh
+ ```
+diff --git a/backend/app/modules/translate/tests/test_live_engine.py b/backend/app/modules/translate/tests/test_live_engine.py
+new file mode 100644
+index 000000000..27f44c4ae
+--- /dev/null
++++ b/backend/app/modules/translate/tests/test_live_engine.py
+@@ -0,0 +1,107 @@
++"""真模型端到端验证（env 门控，默认跳过——CI/无模型环境零成本）。
++
++运行方式（2026-10-19 真机验证实证）：
++
++    TRANSLATE_LIVE_TEST=1 python -m pytest app/modules/translate/tests/test_live_engine.py -v -s
++    # 国内直连被墙环境加：HF_ENDPOINT=https://hf-mirror.com（模型缓存后仍走 etag 校验）
++
++覆盖（2026-10-19-thinking-zh-translate 验证轮新增）：
++- worker 子进程真模型推理：en→zh 译文含 CJK、无 EOS 缺失导致的重复循环乱码
++  （回归锚：add_source_eos=false 协议下 spm 路径必须手动追加 </s>）；
++- POST /api/translate/thinking 端点全链路（真引擎无 mock）：engine_ready=true、
++  译文 translated=true、围栏代码块与 URL 保护段原样保留。
++"""
++
++from __future__ import annotations
++
++import json
++import os
++import re
++import subprocess
++import sys
++from pathlib import Path
++
++import pytest
++
++from app.modules.translate.engine import reset_translator_for_tests
++from app.modules.translate.service import reset_cache_for_tests
++
++pytestmark = pytest.mark.skipif(
++    os.environ.get("TRANSLATE_LIVE_TEST") != "1",
++    reason="live model test gated by TRANSLATE_LIVE_TEST=1 (loads real ct2 model)",
++)
++
++_CJK_RE = re.compile(r"[\u4e00-\u9fff]")
++# 重复循环乱码特征：同一 2 字符片段连续重复 ≥8 次（EOS 缺失回归的指纹）
++_REPEAT_RE = re.compile(r"(.{2})\1{7,}")
++
++_EN_THINKING = (
++    "The agent examines the repository structure, reads the existing module code, "
++    "and decides to implement the feature by adding a new service function first."
++)
++_EN_WITH_CODE = "Run this first:\n```\nls -la\n```\nthen check https://example.com/x for details."
++
++
++def _model_spec() -> str:
++    from app.core.config import get_settings
++
++    settings = get_settings()
++    return settings.translate_model_dir or settings.translate_model_repo
++
++
++@pytest.fixture(autouse=True)
++def _reset_engine_state():
++    reset_translator_for_tests()
++    reset_cache_for_tests()
++    yield
++    reset_translator_for_tests()
++    reset_cache_for_tests()
++
++
++async def test_live_worker_subprocess_translates_cleanly() -> None:
++    """worker 子进程 + 真模型：译文含中文、无重复循环乱码（EOS 协议回归锚）。"""
++    proc = subprocess.Popen(
++        [sys.executable, "-m", "app.modules.translate.translate_worker", _model_spec(), "60"],
++        stdin=subprocess.PIPE,
++        stdout=subprocess.PIPE,
++        stderr=subprocess.DEVNULL,
++        text=True,
++        encoding="utf-8",
++        bufsize=1,
++        cwd=str(Path(__file__).resolve().parents[4]),  # backend/（-m 需要 app 包可达）
++    )
++    try:
++        req = {"id": 1, "op": "translate", "texts": [_EN_THINKING, _EN_WITH_CODE]}
++        proc.stdin.write(json.dumps(req, ensure_ascii=False) + "\n")
++        proc.stdin.flush()
++        resp = json.loads(proc.stdout.readline())
++    finally:
++        proc.stdin.close() if proc.stdin else None
++        proc.terminate()
++        proc.wait(timeout=10)
++    assert resp.get("ok") is True, resp
++    translations = resp["translations"]
++    assert len(translations) == 2
++    for out in translations:
++        assert _CJK_RE.search(out), f"译文无中文: {out!r}"
++        assert not _REPEAT_RE.search(out), f"重复循环乱码（EOS 回归）: {out[:80]!r}"
++
++
++async def test_live_endpoint_full_chain(client, auth_headers) -> None:
++    """POST /api/translate/thinking 真引擎全链路：保护段原样 + 译文中文。"""
++    resp = await client.post(
++        "/api/translate/thinking",
++        json={"items": [{"id": "a", "text": _EN_THINKING}, {"id": "b", "text": _EN_WITH_CODE}]},
++        headers=auth_headers,
++    )
++    assert resp.status_code == 200, resp.text
++    body = resp.json()
++    assert body["engine_ready"] is True, body.get("reason")
++    items = {i["id"]: i for i in body["items"]}
++    assert items["a"]["translated"] is True
++    assert _CJK_RE.search(items["a"]["text"])
++    assert not _REPEAT_RE.search(items["a"]["text"])
++    # 保护语义：围栏代码块与 URL 原样保留在译文里
++    assert "```\nls -la\n```" in items["b"]["text"]
++    assert "https://example.com/x" in items["b"]["text"]
++    assert items["b"]["translated"] is True
+diff --git a/backend/app/modules/translate/translate_worker.py b/backend/app/modules/translate/translate_worker.py
+index 12d30c8b4..64e5b5d2c 100644
+--- a/backend/app/modules/translate/translate_worker.py
++++ b/backend/app/modules/translate/translate_worker.py
+@@ -98,18 +98,24 @@ class _Tokenizers:
+ 
+         self._src_sp = spm.SentencePieceProcessor(model_file=str(_find(("source.spm",))))
+         self._tgt_sp = spm.SentencePieceProcessor(model_file=str(_find(("target.spm",))))
++        # EOS 协议：ct2 的 opus-mt 转换 config 是 add_source_eos=false——调用方必须
++        # 自行在源 token 尾追加 </s>（缺席则解码端无终止信号 → 重复循环到
++        # max_decoding_length 的乱码输出，2026-10-19 真模型冒烟实证）。
++        eos_id = self._src_sp.eos_id()
++        self._eos_piece = self._src_sp.id_to_piece(eos_id) if eos_id >= 0 else "</s>"
++        self._special_pieces = {"<s>", "</s>", "<unk>", "<pad>"}
+ 
+     def encode(self, text: str) -> list[str]:
+         if self._hf_tok is not None:
+             ids = self._hf_tok(text, add_special_tokens=True)["input_ids"]
+             return self._hf_tok.convert_ids_to_tokens(ids)
+-        return self._src_sp.encode(text, out_type=str)
++        return [*self._src_sp.encode(text, out_type=str), self._eos_piece]
+ 
+     def decode(self, pieces: list[str]) -> str:
+         if self._hf_tok is not None:
+             ids = self._hf_tok.convert_tokens_to_ids(pieces)
+             return self._hf_tok.decode(ids, skip_special_tokens=True)
+-        return self._tgt_sp.decode(pieces)
++        return self._tgt_sp.decode([p for p in pieces if p not in self._special_pieces])
+ 
+ 
+ def _translate_once(translator: object, toks: _Tokenizers, texts: list[str]) -> list[str]:
+diff --git a/backend/openapi.json b/backend/openapi.json
+index 6992a6b41..a5fc94580 100644
+--- a/backend/openapi.json
++++ b/backend/openapi.json
+@@ -21952,7 +21952,7 @@
+           "knowledge"
+         ],
+         "summary": "Search Knowledge",
+-        "description": "知识搜索：spec 根 knowledge/ + docs/ 语料内词面 + 向量融合召回。\n\n- 检索主体为 async 编排（2026-10-15-knowledge-search-pgvector / D-005@v2）：DB await\n  原生执行，CPU/IO（嵌入/扫描）由 search_sync 内部 asyncio.to_thread 分段卸载；\n- docs/ 类结果按 SCAN_DOCS_READ 服务端过滤——判定经 ``has_permission`` 同一\n  权威函数（admin 短路在内；禁读 user.permissions 快照，D-005@v1）；先取\n  3×limit 候选再过滤截断，防 top-k 被过滤挤空；\n- embedder 不可用 → fail-soft：200 + model_ready=False + 纯词面结果（D-004@v1）。",
++        "description": "知识搜索：spec 根 knowledge/ + docs/ 语料内词面 + 向量融合召回。\n\n- 检索主体为 async 编排（2026-10-15-knowledge-search-pgvector / D-005@v2）：DB await\n  原生执行，CPU/IO（嵌入/扫描）由 search_sync 内部 asyncio.to_thread 分段卸载；\n- docs/ 类结果按 SCAN_DOCS_READ 服务端过滤——判定经 ``has_permission`` 同一\n  权威函数（admin 短路在内；禁读 user.permissions 快照，D-005@v1）；先取\n  3×limit 候选再过滤截断，防 top-k 被过滤挤空；\n- embedder 不可用 → fail-soft：200 + model_ready=False + 纯词面结果（D-004@v1）；\n- 服务器禁建库（KNOWLEDGE_SEARCH_SERVER_BUILD=0，2026-10-19-knowledge-search-build-switch）：\n  小内存生产容器跳过懒同步嵌入；未建索引 ws 首搜词面内存降级 + reason=index_not_built。",
+         "operationId": "search_knowledge_api_workspaces__workspace_id__knowledge_search_post",
+         "parameters": [
+           {
+@@ -22190,6 +22190,48 @@
+         }
+       }
+     },
++    "/api/translate/thinking": {
++      "post": {
++        "tags": [
++          "translate"
++        ],
++        "summary": "Translate Thinking",
++        "description": "思考内容批量离线翻译（en→zh）；语义与降级见模块 docstring 与 service.py。",
++        "operationId": "translate_thinking_api_translate_thinking_post",
++        "requestBody": {
++          "content": {
++            "application/json": {
++              "schema": {
++                "$ref": "#/components/schemas/TranslateRequest"
++              }
++            }
++          },
++          "required": true
++        },
++        "responses": {
++          "200": {
++            "description": "Successful Response",
++            "content": {
++              "application/json": {
++                "schema": {
++                  "$ref": "#/components/schemas/TranslateResponse"
++                }
++              }
++            }
++          },
++          "422": {
++            "description": "Validation Error",
++            "content": {
++              "application/json": {
++                "schema": {
++                  "$ref": "#/components/schemas/HTTPValidationError"
++                }
++              }
++            }
++          }
++        }
++      }
++    },
+     "/api/workspaces/{workspace_id}/releases": {
+       "post": {
+         "tags": [
+@@ -41578,11 +41620,208 @@
+             "type": "boolean",
+             "title": "Files Truncated",
+             "default": false
++          },
++          "repos": {
++            "items": {
++              "$ref": "#/components/schemas/ChangePatchRepo"
++            },
++            "type": "array",
++            "title": "Repos"
+           }
+         },
+         "type": "object",
+         "title": "ChangePatchMeta",
+-        "description": "patch 留档统计（change-patch.json 优先，缺件回退 scope-audit.json；两缺 → None）。\n\n``files`` 是 CLI totals 的文件计数（既有语义不动）；``file_list`` 的清单投影\n按留档来源二形（2026-09-25-change-detail-assets-usability / FR-04 起供卡面\n列出具体改动面）：change-patch.json 取 ``files`` 数组，scope-audit.json 回退\n形态取 ``rows[].path``；超上限时 ``files_truncated=True`` 显式标注。\n\n单套演进（2026-10-09-close-trace-single-set，CLI 侧）：新收口只落 change.patch +\nchange-patch.json 两件——对账面并入后者的 ``scopeAudit`` 子对象（顶级键原位不动，\n本 DTO 读的顶级字段零变化），scope-audit.json/.patch 停写；回退链保留兜其他仓/本仓\n存量旧形态归档。"
++        "description": "patch 留档统计（change-patch.json 优先，缺件回退 scope-audit.json；两缺 → None）。\n\n``files`` 是 CLI totals 的文件计数（既有语义不动）；``file_list`` 的清单投影\n按留档来源二形（2026-09-25-change-detail-assets-usability / FR-04 起供卡面\n列出具体改动面）：change-patch.json 取 ``files`` 数组，scope-audit.json 回退\n形态取 ``rows[].path``；超上限时 ``files_truncated=True`` 显式标注。\n\n单套演进（2026-10-09-close-trace-single-set，CLI 侧）：新收口只落 change.patch +\nchange-patch.json 两件——对账面并入后者的 ``scopeAudit`` 子对象（顶级键原位不动，\n本 DTO 读的顶级字段零变化），scope-audit.json/.patch 停写；回退链保留兜其他仓/本仓\n存量旧形态归档。\n\n``repos``（2026-10-19-change-assets-cross-repo-repos）：跨仓冻结面元数据投影——\n空面跨仓冻结只落 JSON（无 change.patch），此时 ``files`` 主仓面为 0，真实交付面\n在 repos[]；旧归档/单仓变更无该键 → 空数组（additive，读侧零适配）。"
++      },
++      "ChangePatchRepo": {
++        "properties": {
++          "key": {
++            "type": "string",
++            "title": "Key"
++          },
++          "anchor": {
++            "anyOf": [
++              {
++                "$ref": "#/components/schemas/ChangePatchRepoAnchor"
++              },
++              {
++                "type": "null"
++              }
++            ]
++          },
++          "totals": {
++            "anyOf": [
++              {
++                "$ref": "#/components/schemas/ChangePatchRepoTotals"
++              },
++              {
++                "type": "null"
++              }
++            ]
++          },
++          "degraded": {
++            "type": "boolean",
++            "title": "Degraded",
++            "default": false
++          },
++          "degraded_reason": {
++            "anyOf": [
++              {
++                "type": "string"
++              },
++              {
++                "type": "null"
++              }
++            ],
++            "title": "Degraded Reason"
++          },
++          "patch_sha256": {
++            "anyOf": [
++              {
++                "type": "string"
++              },
++              {
++                "type": "null"
++              }
++            ],
++            "title": "Patch Sha256"
++          },
++          "has_patch": {
++            "type": "boolean",
++            "title": "Has Patch",
++            "default": false
++          }
++        },
++        "type": "object",
++        "required": [
++          "key"
++        ],
++        "title": "ChangePatchRepo",
++        "description": "跨仓冻结面元数据（2026-10-19-change-assets-cross-repo-repos / FR-01）。\n\n只投影展示所需元数据，**不回传 patch 正文**（单仓 patch 可数 MB、且正文只在\nchange-patch.json 全屏预览消费——资产卡给仓键/锚点/计数/降级/sha 与指路）。\n``repo_path`` 为产出端本机绝对路径，恒不投影（本机布局不外泄）。"
++      },
++      "ChangePatchRepoAnchor": {
++        "properties": {
++          "source": {
++            "anyOf": [
++              {
++                "type": "string"
++              },
++              {
++                "type": "null"
++              }
++            ],
++            "title": "Source"
++          },
++          "base": {
++            "anyOf": [
++              {
++                "type": "string"
++              },
++              {
++                "type": "null"
++              }
++            ],
++            "title": "Base"
++          },
++          "head": {
++            "anyOf": [
++              {
++                "type": "string"
++              },
++              {
++                "type": "null"
++              }
++            ],
++            "title": "Head"
++          },
++          "label": {
++            "anyOf": [
++              {
++                "type": "string"
++              },
++              {
++                "type": "null"
++              }
++            ],
++            "title": "Label"
++          }
++        },
++        "type": "object",
++        "title": "ChangePatchRepoAnchor",
++        "description": "跨仓冻结锚点投影（change-patch.json ``scopeAudit.repos[].anchor``）。"
++      },
++      "ChangePatchRepoTotals": {
++        "properties": {
++          "files": {
++            "anyOf": [
++              {
++                "type": "integer"
++              },
++              {
++                "type": "null"
++              }
++            ],
++            "title": "Files"
++          },
++          "additions": {
++            "anyOf": [
++              {
++                "type": "integer"
++              },
++              {
++                "type": "null"
++              }
++            ],
++            "title": "Additions"
++          },
++          "deletions": {
++            "anyOf": [
++              {
++                "type": "integer"
++              },
++              {
++                "type": "null"
++              }
++            ],
++            "title": "Deletions"
++          },
++          "planned": {
++            "anyOf": [
++              {
++                "type": "integer"
++              },
++              {
++                "type": "null"
++              }
++            ],
++            "title": "Planned"
++          },
++          "unplanned": {
++            "anyOf": [
++              {
++                "type": "integer"
++              },
++              {
++                "type": "null"
++              }
++            ],
++            "title": "Unplanned"
++          },
++          "untouched": {
++            "anyOf": [
++              {
++                "type": "integer"
++              },
++              {
++                "type": "null"
++              }
++            ],
++            "title": "Untouched"
++          }
++        },
++        "type": "object",
++        "title": "ChangePatchRepoTotals",
++        "description": "跨仓单仓对账计数（planned/unplanned/untouched 为 CLI 三态原值）。"
+       },
+       "ChangeProcessReq": {
+         "properties": {
+@@ -52446,7 +52685,7 @@
+           "results"
+         ],
+         "title": "KnowledgeSearchOut",
+-        "description": "检索出参：model_ready=False 时 results 非空（纯词面）+ reason 带因（fail-soft）。"
++        "description": "检索出参：model_ready=False 时 results 非空（纯词面）+ reason 带因（fail-soft；\nreason=index_not_built 表示服务器禁建库且该 ws 索引未建）。"
+       },
+       "KnowledgeSearchResultItem": {
+         "properties": {
+@@ -76430,6 +76669,116 @@
+         "title": "TransitionResponse",
+         "description": "POST /changes/{id}/transition 的返回类型。\n\n包含变更状态和 agent dispatch 信息。"
+       },
++      "TranslateItemIn": {
++        "properties": {
++          "id": {
++            "type": "string",
++            "maxLength": 128,
++            "minLength": 1,
++            "title": "Id"
++          },
++          "text": {
++            "type": "string",
++            "maxLength": 20000,
++            "minLength": 1,
++            "title": "Text"
++          }
++        },
++        "type": "object",
++        "required": [
++          "id",
++          "text"
++        ],
++        "title": "TranslateItemIn",
++        "description": "单条待翻文本。id 由客户端生成（stable，响应原样带回配对）。"
++      },
++      "TranslateItemOut": {
++        "properties": {
++          "id": {
++            "type": "string",
++            "title": "Id"
++          },
++          "text": {
++            "type": "string",
++            "title": "Text"
++          },
++          "translated": {
++            "type": "boolean",
++            "title": "Translated"
++          }
++        },
++        "type": "object",
++        "required": [
++          "id",
++          "text",
++          "translated"
++        ],
++        "title": "TranslateItemOut",
++        "description": "单条翻译结果。translated=false 表示原文透传（不值得翻/引擎不可用）。"
++      },
++      "TranslateRequest": {
++        "properties": {
++          "items": {
++            "items": {
++              "$ref": "#/components/schemas/TranslateItemIn"
++            },
++            "type": "array",
++            "maxItems": 16,
++            "minItems": 1,
++            "title": "Items"
++          },
++          "target": {
++            "type": "string",
++            "const": "zh",
++            "title": "Target",
++            "default": "zh"
++          }
++        },
++        "type": "object",
++        "required": [
++          "items"
++        ],
++        "title": "TranslateRequest",
++        "description": "批量翻译请求。target 固定 zh（本变更唯一目标语言，扩语言时再放开）。"
++      },
++      "TranslateResponse": {
++        "properties": {
++          "ok": {
++            "type": "boolean",
++            "title": "Ok",
++            "default": true
++          },
++          "engine_ready": {
++            "type": "boolean",
++            "title": "Engine Ready"
++          },
++          "reason": {
++            "anyOf": [
++              {
++                "type": "string"
++              },
++              {
++                "type": "null"
++              }
++            ],
++            "title": "Reason"
++          },
++          "items": {
++            "items": {
++              "$ref": "#/components/schemas/TranslateItemOut"
++            },
++            "type": "array",
++            "title": "Items"
++          }
++        },
++        "type": "object",
++        "required": [
++          "engine_ready",
++          "items"
++        ],
++        "title": "TranslateResponse",
++        "description": "fail-soft 契约：engine_ready=false 时 items 原文透传，HTTP 仍 200。"
++      },
+       "TurnOutlineItemRead": {
+         "properties": {
+           "run_id": {
+diff --git a/deploy/.env.example b/deploy/.env.example
+index 35fe78262..c81ad7aec 100644
+--- a/deploy/.env.example
++++ b/deploy/.env.example
+@@ -104,3 +104,8 @@ NEXT_PUBLIC_API_BASE_URL=http://localhost:8000
+ # 2026-09-26-deploy-eng-hardening：NEXT_PUBLIC_COMMIT_SHA 已改由镜像构建烘焙——此处
+ # 留空会经 env_file 旁路覆盖镜像 ENV；需要服务器现场构建时再取消注释填值。
+ # NEXT_PUBLIC_COMMIT_SHA=
++
++# 2026-10-19-knowledge-build-switch-rollout：服务器禁建库开关——=0 时容器内不跑知识索引懒建库
++# （未建索引 ws 首搜词面降级 reason=index_not_built，防小内存容器全量嵌入 OOM）；
++# 索引走外部机器预建。缺省（不设/空）=1 保持懒建库行为。
++# KNOWLEDGE_SEARCH_SERVER_BUILD=0
+diff --git a/docs/releases/2026-10-19-013-d789317d.md b/docs/releases/2026-10-19-013-d789317d.md
+new file mode 100644
+index 000000000..45ab3f638
+--- /dev/null
++++ b/docs/releases/2026-10-19-013-d789317d.md
+@@ -0,0 +1,77 @@
++---
++seq: 22
++deployed_at: "2026-10-19 15:17:42"
++status: success
++commit_from: 0a0e9c76
++commit_to: d789317d
++summary: 知识搜索禁建库开关后端上线（首搜建库地雷根治）+ postgres 切 pgvector 镜像 + 离线翻译后端随镜像上线
++agent: zcode-agent
++commits:
++  - sha: d789317d4
++    message: "chore(archive): 2026-10-19-thinking-zh-translate 归档留档"
++    author: qinyi
++  - sha: bfa635753
++    message: "fix(translate): 独立评审 P2×2+P3×2 落地——摘要前缀句界吸附/队头卡死根治（块级合批）/FR-01 测试绑定对齐/engine docstring 修正"
++    author: qinyi
++  - sha: b98bd550e
++    message: "test(translate): 修复翻译测试批量并发 flake（MarkdownText 按先例 mock 纯文本渲染）"
++    author: qinyi
++  - sha: 7e9c795ef
++    message: "docs(translate): 离线翻译部署文档——模型预置零下载/镜像源/fail-soft 语义/换模型路径"
++    author: qinyi
++  - sha: 0bff3fcc8
++    message: "chore(archive): 2026-10-19-knowledge-search-build-switch 归档留档"
++    author: qinyi
++  - sha: 54a1e8db3
++    message: "docs(knowledge): 禁建库开关节补评审 P3——换嵌入模型亦被跳过须外部预建机全量重建后再切"
++    author: qinyi
++  - sha: 49bada6ae
++    message: "feat(translate): 思考内容离线翻译前端——合批窗口/双层缓存/共享渲染层/四处渲染点接入"
++    author: qinyi
++  - sha: 899a20ad0
++    message: "fix(translate): 跨变更共享 lint 门修复——translate_worker.py resp 补 dict[str, object] 类型标注"
++    author: qinyi
++  - sha: d792d3de4
++    message: "feat(translate): 思考内容离线翻译后端——CTranslate2 int8 子进程推理/双层缓存/POST /api/translate/thinking"
++    author: qinyi
++  - sha: 0a728b4e9
++    message: "docs(knowledge): 首搜建库地雷条目状态更新 + knowledge 模块文档补禁建库开关节"
++    author: qinyi
++  - sha: 724940c91
++    message: "feat(knowledge): 知识搜索服务器禁建库开关——search_sync server_build 分支/reason=index_not_built/3 用例"
++    author: qinyi
++  - sha: 8dd5c8b98
++    message: "chore(archive): 2026-10-19-knowledge-inbox-triage 归档留档"
++    author: qinyi
++  - sha: db6542205
++    message: "docs(knowledge): 知识收件箱清账——16 条经验归类五分类文件并补 INDEX 索引"
++    author: qinyi
++  - sha: b35291abb
++    message: "chore(sillyspec): v3.33.1 init 模板全量刷新（AGENTS.md 自包含中文指引 + 五工具 skills 模板）"
++    author: qinyi
++  - sha: b775bc5e6
++    message: "chore(archive): 2026-10-19-change-list-created-sort 归档留档"
++    author: qinyi
++---
++
++## 🆕 新增
++
++- **知识搜索禁建库开关**（`KNOWLEDGE_SEARCH_SERVER_BUILD`）：=0 时容器内不跑知识索引懒建库/嵌入，未建索引工作区首搜词面内存降级返回（`reason=index_not_built`），索引一律外部机器预建——根治 known-issues「首搜建库地雷」（容器内全量嵌入 OOM / 未建索引 ws 搜索必超时）。
++- **思考内容离线翻译**（后端 + 前端）：CTranslate2 opus-mt-en-zh int8 子进程推理 + `/api/translate/thinking` 端点；前端合批窗口/双层缓存/四处渲染点接入。
++
++## 🔧 修复
++
++- 知识收件箱 16 条经验归类归档（known-issues 6 / testing-gotchas 4 / conventions 3 / sillyspec-gotchas 2 / patterns 1）+ INDEX 索引与残留冲突标记清理。
++- translate_worker mypy 类型标注（跨变更共享 lint 门修复）。
++- 翻译前端评审 P2/P3：摘要前缀句界吸附、合批队头卡死根治（块级条目）、测试 flake 修复。
++
++## 📝 部署验证
++
++- `docker compose ps`：backend/postgres/redis/frontend/minio 全 healthy；`/api/health` 返回 `{"status":"ok","db":"ok","redis":"ok"}`。
++- **postgres 镜像切换**：运行实例从 `postgres:16-alpine` 切到 compose 声明的 `pgvector/pgvector:pg16`（数据卷沿用不变）；pgvector 扩展 0.8.7 可用；迁移表 `knowledge_search_state` / `knowledge_search_chunks` 新建（此前本地平台从未跑过 pgvector 迁移——若无此切换，backend 启动将因 CREATE EXTENSION fail-closed crash-loop）。
++- 容器内代码校验：`config.py` 命中 knowledge_search_server_build；`get_settings().knowledge_search_server_build=False` 实测生效。
++- **端到端首搜实测**（两个未建索引工作区，管理员 token）：
++  - `multi-agent-platform` ws：HTTP 200，`model_ready=false`，`reason=index_not_built`；冷查 20.6s / 热查 2.9–15.1s（Windows Docker VM I/O 抖动主导）。
++  - `sillyspec` ws：HTTP 200，`reason=index_not_built`，4.0s。
++  - 全库 `knowledge_search_state`/`knowledge_search_chunks` 始终 0|0——**零建库零嵌入**（对照原失败模式：全量嵌入 OOM / 504 死循环不触发）。
++- 范围注记：本次仅重建 **backend** 镜像（构建起始工作树快照 ≈ `7e9c795ef`；其后 `bfa635753`/`b98bd550e`/`d789317d4` 为前端/测试/文档/存档面，未进入本镜像）。**前端与 daemon 未重建**，前端侧翻译 UI 待下次前端部署生效。
+diff --git a/frontend/src/components/changes/detail/__tests__/change-assets-card.test.tsx b/frontend/src/components/changes/detail/__tests__/change-assets-card.test.tsx
+index 281a30ebd..6f365039c 100644
+--- a/frontend/src/components/changes/detail/__tests__/change-assets-card.test.tsx
++++ b/frontend/src/components/changes/detail/__tests__/change-assets-card.test.tsx
+@@ -877,3 +877,85 @@ describe("ChangeAssetsCard 资产透明面", () => {
+     expect(screen.queryByTestId("change-assets-touched-modules")).toBeNull();
+   });
+ });
++
++// 跨仓冻结面（2026-10-19-change-assets-cross-repo-repos）：空面跨仓冻结没有主仓
++// files，真实交付面在 patch.repos[]——资产卡按仓展示元数据并指路全屏预览；
++// 旧归档无 repos 键时零变化。
++describe("跨仓冻结面", () => {
++  beforeEach(() => {
++    vi.clearAllMocks();
++    mockSearch.mockResolvedValue(matchesOf([]));
++  });
++
++  it("按仓渲染锚点/计数/降级，主仓 patch 标注口径", async () => {
++    mockGet.mockResolvedValue({
++      ...FULL,
++      patch: {
++        ...FULL.patch,
++        files: 0,
++        additions: 0,
++        deletions: 0,
++        file_list: [],
++        repos: [
++          {
++            key: "subgrid",
++            anchor: {
++              source: "flow-start-baseline",
++              base: "cf20b9428adcac0e811a8c51e8ddcfa12ed21f75",
++              head: null,
++              label: "flow-start 跨仓基线窗口",
++            },
++            totals: {
++              files: 112,
++              additions: 55207,
++              deletions: 55200,
++              planned: 0,
++              unplanned: 110,
++              untouched: 2,
++            },
++            degraded: false,
++            degraded_reason: null,
++            patch_sha256: "54dae3786803ce49",
++            has_patch: true,
++          },
++          {
++            key: "broken",
++            anchor: { source: "degraded", base: null, head: null, label: "degraded" },
++            totals: {
++              files: 0,
++              additions: 0,
++              deletions: 0,
++              planned: 0,
++              unplanned: 0,
++              untouched: 0,
++            },
++            degraded: true,
++            degraded_reason: "仓路径不可达",
++            patch_sha256: null,
++            has_patch: false,
++          },
++        ],
++      },
++    });
++    renderCard();
++
++    const block = await screen.findByTestId("change-assets-cross-repos");
++    expect(block).toHaveTextContent("完整 diff 见 change-patch.json 全屏预览");
++    const seg = screen.getByTestId("scope-audit-repo-seg-subgrid");
++    expect(seg).toHaveTextContent("subgrid");
++    expect(seg).toHaveTextContent("cf20b94");
++    expect(seg).toHaveTextContent("112 文件");
++    expect(screen.getByTestId("scope-audit-repo-degraded-broken")).toHaveTextContent(
++      "仓路径不可达",
++    );
++    expect(screen.getByText(/主仓 patch/)).toBeInTheDocument();
++  });
++
++  it("无 repos 键时旧展示零变化（不渲染跨仓段、不加主仓标注）", async () => {
++    mockGet.mockResolvedValue(FULL);
++    renderCard();
++    await screen.findByTestId("change-assets-audit");
++    expect(screen.queryByTestId("change-assets-cross-repos")).toBeNull();
++    expect(screen.queryByText(/主仓 patch/)).toBeNull();
++  });
++});
+diff --git a/frontend/src/components/changes/detail/change-assets-card.tsx b/frontend/src/components/changes/detail/change-assets-card.tsx
+index d46721df0..e7cc809fc 100644
+--- a/frontend/src/components/changes/detail/change-assets-card.tsx
++++ b/frontend/src/components/changes/detail/change-assets-card.tsx
+@@ -5,7 +5,7 @@ import Link from "next/link";
+ import { useQuery } from "@tanstack/react-query";
+ 
+ import { FilePreview } from "@/components/explorer/file-preview";
+-import { DiffView } from "@/components/files/structured-views";
++import { DiffView, ScopeAuditRepoSeg } from "@/components/files/structured-views";
+ import { EntryCardList } from "@/components/knowledge/entry-card-list";
+ import {
+   Dialog,
+@@ -296,6 +296,10 @@ export function ChangeAssetsCard({
+     frCount + decCount + rowCount + (hasAudit ? 1 : 0) + (touchList.length > 0 ? 1 : 0) +
+     (moduleList.length > 0 ? 1 : 0);
+   const patchFileList = data?.patch?.file_list ?? [];
++  // 跨仓冻结面（2026-10-19-change-assets-cross-repo-repos）：空面跨仓冻结只落
++  // change-patch.json（无 change.patch），主仓 files 为 0——真实交付面在这组元数据；
++  // 完整 diff 正文不进资产卡（可达数 MB），指路全屏预览。
++  const crossRepos = data?.patch?.repos ?? [];
+ 
+   return (
+     <section
+@@ -610,7 +614,8 @@ export function ChangeAssetsCard({
+               <div className="mt-1 flex shrink-0 flex-wrap gap-x-3 gap-y-1">
+                 {data.patch ? (
+                   <span>
+-                    patch{" "}
++                    {/* 跨仓条目在场时显式标「主仓」，避免与各仓计数并读成同一口径。 */}
++                    {crossRepos.length > 0 ? "主仓 " : ""}patch{" "}
+                     <b className="text-foreground">
+                       {data.patch.files ?? "?"} 文件 +{data.patch.additions ?? "?"}/−
+                       {data.patch.deletions ?? "?"}
+@@ -627,6 +632,46 @@ export function ChangeAssetsCard({
+                   </span>
+                 ) : null}
+               </div>
++              {crossRepos.length > 0 ? (
++                <div
++                  className="mt-1.5 flex flex-col gap-1.5 border-t border-dashed pt-1.5"
++                  data-testid="change-assets-cross-repos"
++                >
++                  <div className="flex shrink-0 items-center justify-between gap-2 text-[10px] text-muted-foreground/70">
++                    <span>跨仓冻结面（完整 diff 见 change-patch.json 全屏预览）</span>
++                  </div>
++                  {crossRepos.map((r) => (
++                    <ScopeAuditRepoSeg
++                      key={r.key}
++                      repoKey={r.key}
++                      repo={{
++                        key: r.key,
++                        anchor: r.anchor
++                          ? {
++                              source: r.anchor.source ?? null,
++                              base: r.anchor.base ?? null,
++                              head: r.anchor.head ?? null,
++                              label: r.anchor.label ?? null,
++                            }
++                          : null,
++                        totals: r.totals
++                          ? {
++                              files: r.totals.files ?? 0,
++                              additions: r.totals.additions ?? 0,
++                              deletions: r.totals.deletions ?? 0,
++                              planned: r.totals.planned ?? 0,
++                              unplanned: r.totals.unplanned ?? 0,
++                              untouched: r.totals.untouched ?? 0,
++                            }
++                          : null,
++                        degraded: r.degraded,
++                        degradedReason: r.degraded_reason ?? null,
++                        patchSha256: r.patch_sha256 ?? null,
++                      }}
++                    />
++                  ))}
++                </div>
++              ) : null}
+               {patchFileList.length > 0 ? (
+                 <div className="mt-1.5 flex min-h-0 flex-1 flex-col overflow-hidden border-t border-dashed pt-1.5">
+                   <div className="mb-1 flex shrink-0 items-center justify-between gap-2 text-[10px] text-muted-foreground/70">
+diff --git a/frontend/src/components/files/structured-views.tsx b/frontend/src/components/files/structured-views.tsx
+index c047c378a..abb909194 100644
+--- a/frontend/src/components/files/structured-views.tsx
++++ b/frontend/src/components/files/structured-views.tsx
+@@ -317,7 +317,7 @@ const VERDICT_ORDER = ["planned", "unplanned", "untouched"] as const;
+  * degraded 整段 ⚠️。patch 面（折叠 diff 正文/未采集留痕）仅非降级段渲染——
+  * 「采集失败或空窗」对整仓不可达是误描述。repoPath 字段可能含本机布局，恒不渲染。
+  */
+-function ScopeAuditRepoSeg({ repo, repoKey }: { repo: JsonRecord; repoKey: string }) {
++export function ScopeAuditRepoSeg({ repo, repoKey }: { repo: JsonRecord; repoKey: string }) {
+   const [patchOpen, setPatchOpen] = useState(false);
+   const anchor = isRecord(repo.anchor) ? repo.anchor : {};
+   const anchorLabel = typeof anchor.label === "string" && anchor.label ? anchor.label : null;
+diff --git a/frontend/src/lib/api-types.ts b/frontend/src/lib/api-types.ts
+index 54cbf83af..997ec8672 100644
+--- a/frontend/src/lib/api-types.ts
++++ b/frontend/src/lib/api-types.ts
+@@ -8464,7 +8464,9 @@ export interface paths {
+          *     - docs/ 类结果按 SCAN_DOCS_READ 服务端过滤——判定经 ``has_permission`` 同一
+          *       权威函数（admin 短路在内；禁读 user.permissions 快照，D-005@v1）；先取
+          *       3×limit 候选再过滤截断，防 top-k 被过滤挤空；
+-         *     - embedder 不可用 → fail-soft：200 + model_ready=False + 纯词面结果（D-004@v1）。
++         *     - embedder 不可用 → fail-soft：200 + model_ready=False + 纯词面结果（D-004@v1）；
++         *     - 服务器禁建库（KNOWLEDGE_SEARCH_SERVER_BUILD=0，2026-10-19-knowledge-search-build-switch）：
++         *       小内存生产容器跳过懒同步嵌入；未建索引 ws 首搜词面内存降级 + reason=index_not_built。
+          */
+         post: operations["search_knowledge_api_workspaces__workspace_id__knowledge_search_post"];
+         delete?: never;
+@@ -8551,6 +8553,26 @@ export interface paths {
+         patch?: never;
+         trace?: never;
+     };
++    "/api/translate/thinking": {
++        parameters: {
++            query?: never;
++            header?: never;
++            path?: never;
++            cookie?: never;
++        };
++        get?: never;
++        put?: never;
++        /**
++         * Translate Thinking
++         * @description 思考内容批量离线翻译（en→zh）；语义与降级见模块 docstring 与 service.py。
++         */
++        post: operations["translate_thinking_api_translate_thinking_post"];
++        delete?: never;
++        options?: never;
++        head?: never;
++        patch?: never;
++        trace?: never;
++    };
+     "/api/workspaces/{workspace_id}/releases": {
+         parameters: {
+             query?: never;
+@@ -14544,6 +14566,10 @@ export interface components {
+          *     change-patch.json 两件——对账面并入后者的 ``scopeAudit`` 子对象（顶级键原位不动，
+          *     本 DTO 读的顶级字段零变化），scope-audit.json/.patch 停写；回退链保留兜其他仓/本仓
+          *     存量旧形态归档。
++         *
++         *     ``repos``（2026-10-19-change-assets-cross-repo-repos）：跨仓冻结面元数据投影——
++         *     空面跨仓冻结只落 JSON（无 change.patch），此时 ``files`` 主仓面为 0，真实交付面
++         *     在 repos[]；旧归档/单仓变更无该键 → 空数组（additive，读侧零适配）。
+          */
+         ChangePatchMeta: {
+             /** Files */
+@@ -14563,6 +14589,68 @@ export interface components {
+              * @default false
+              */
+             files_truncated: boolean;
++            /** Repos */
++            repos?: components["schemas"]["ChangePatchRepo"][];
++        };
++        /**
++         * ChangePatchRepo
++         * @description 跨仓冻结面元数据（2026-10-19-change-assets-cross-repo-repos / FR-01）。
++         *
++         *     只投影展示所需元数据，**不回传 patch 正文**（单仓 patch 可数 MB、且正文只在
++         *     change-patch.json 全屏预览消费——资产卡给仓键/锚点/计数/降级/sha 与指路）。
++         *     ``repo_path`` 为产出端本机绝对路径，恒不投影（本机布局不外泄）。
++         */
++        ChangePatchRepo: {
++            /** Key */
++            key: string;
++            anchor?: components["schemas"]["ChangePatchRepoAnchor"] | null;
++            totals?: components["schemas"]["ChangePatchRepoTotals"] | null;
++            /**
++             * Degraded
++             * @default false
++             */
++            degraded: boolean;
++            /** Degraded Reason */
++            degraded_reason?: string | null;
++            /** Patch Sha256 */
++            patch_sha256?: string | null;
++            /**
++             * Has Patch
++             * @default false
++             */
++            has_patch: boolean;
++        };
++        /**
++         * ChangePatchRepoAnchor
++         * @description 跨仓冻结锚点投影（change-patch.json ``scopeAudit.repos[].anchor``）。
++         */
++        ChangePatchRepoAnchor: {
++            /** Source */
++            source?: string | null;
++            /** Base */
++            base?: string | null;
++            /** Head */
++            head?: string | null;
++            /** Label */
++            label?: string | null;
++        };
++        /**
++         * ChangePatchRepoTotals
++         * @description 跨仓单仓对账计数（planned/unplanned/untouched 为 CLI 三态原值）。
++         */
++        ChangePatchRepoTotals: {
++            /** Files */
++            files?: number | null;
++            /** Additions */
++            additions?: number | null;
++            /** Deletions */
++            deletions?: number | null;
++            /** Planned */
++            planned?: number | null;
++            /** Unplanned */
++            unplanned?: number | null;
++            /** Untouched */
++            untouched?: number | null;
+         };
+         /**
+          * ChangeProcessReq
+@@ -19176,7 +19264,8 @@ export interface components {
+         };
+         /**
+          * KnowledgeSearchOut
+-         * @description 检索出参：model_ready=False 时 results 非空（纯词面）+ reason 带因（fail-soft）。
++         * @description 检索出参：model_ready=False 时 results 非空（纯词面）+ reason 带因（fail-soft；
++         *     reason=index_not_built 表示服务器禁建库且该 ws 索引未建）。
+          */
+         KnowledgeSearchOut: {
+             /**
+@@ -28272,6 +28361,59 @@ export interface components {
+             /** @description Agent dispatch 结果（无 dispatch 时为 null） */
+             agent_dispatch?: components["schemas"]["TransitionDispatchResponse"] | null;
+         };
++        /**
++         * TranslateItemIn
++         * @description 单条待翻文本。id 由客户端生成（stable，响应原样带回配对）。
++         */
++        TranslateItemIn: {
++            /** Id */
++            id: string;
++            /** Text */
++            text: string;
++        };
++        /**
++         * TranslateItemOut
++         * @description 单条翻译结果。translated=false 表示原文透传（不值得翻/引擎不可用）。
++         */
++        TranslateItemOut: {
++            /** Id */
++            id: string;
++            /** Text */
++            text: string;
++            /** Translated */
++            translated: boolean;
++        };
++        /**
++         * TranslateRequest
++         * @description 批量翻译请求。target 固定 zh（本变更唯一目标语言，扩语言时再放开）。
++         */
++        TranslateRequest: {
++            /** Items */
++            items: components["schemas"]["TranslateItemIn"][];
++            /**
++             * Target
++             * @default zh
++             * @constant
++             */
++            target: "zh";
++        };
++        /**
++         * TranslateResponse
++         * @description fail-soft 契约：engine_ready=false 时 items 原文透传，HTTP 仍 200。
++         */
++        TranslateResponse: {
++            /**
++             * Ok
++             * @default true
++             */
++            ok: boolean;
++            /** Engine Ready */
++            engine_ready: boolean;
++            /** Reason */
++            reason?: string | null;
++            /** Items */
++            items: components["schemas"]["TranslateItemOut"][];
++        };
+         /**
+          * TurnOutlineItemRead
+          * @description turn-outline 单轮摘要项（FR-01）。
+@@ -43736,6 +43878,39 @@ export interface operations {
+             };
+         };
+     };
++    translate_thinking_api_translate_thinking_post: {
++        parameters: {
++            query?: never;
++            header?: never;
++            path?: never;
++            cookie?: never;
++        };
++        requestBody: {
++            content: {
++                "application/json": components["schemas"]["TranslateRequest"];
++            };
++        };
++        responses: {
++            /** @description Successful Response */
++            200: {
++                headers: {
++                    [name: string]: unknown;
++                };
++                content: {
++                    "application/json": components["schemas"]["TranslateResponse"];
++                };
++            };
++            /** @description Validation Error */
++            422: {
++                headers: {
++                    [name: string]: unknown;
++                };
++                content: {
++                    "application/json": components["schemas"]["HTTPValidationError"];
++                };
++            };
++        };
++    };
+     list_releases_api_workspaces__workspace_id__releases_get: {
+         parameters: {
+             query?: {
+diff --git a/sillyhub-daemon/src/api-types.ts b/sillyhub-daemon/src/api-types.ts
+index 54cbf83af..997ec8672 100644
+--- a/sillyhub-daemon/src/api-types.ts
++++ b/sillyhub-daemon/src/api-types.ts
+@@ -8464,7 +8464,9 @@ export interface paths {
+          *     - docs/ 类结果按 SCAN_DOCS_READ 服务端过滤——判定经 ``has_permission`` 同一
+          *       权威函数（admin 短路在内；禁读 user.permissions 快照，D-005@v1）；先取
+          *       3×limit 候选再过滤截断，防 top-k 被过滤挤空；
+-         *     - embedder 不可用 → fail-soft：200 + model_ready=False + 纯词面结果（D-004@v1）。
++         *     - embedder 不可用 → fail-soft：200 + model_ready=False + 纯词面结果（D-004@v1）；
++         *     - 服务器禁建库（KNOWLEDGE_SEARCH_SERVER_BUILD=0，2026-10-19-knowledge-search-build-switch）：
++         *       小内存生产容器跳过懒同步嵌入；未建索引 ws 首搜词面内存降级 + reason=index_not_built。
+          */
+         post: operations["search_knowledge_api_workspaces__workspace_id__knowledge_search_post"];
+         delete?: never;
+@@ -8551,6 +8553,26 @@ export interface paths {
+         patch?: never;
+         trace?: never;
+     };
++    "/api/translate/thinking": {
++        parameters: {
++            query?: never;
++            header?: never;
++            path?: never;
++            cookie?: never;
++        };
++        get?: never;
++        put?: never;
++        /**
++         * Translate Thinking
++         * @description 思考内容批量离线翻译（en→zh）；语义与降级见模块 docstring 与 service.py。
++         */
++        post: operations["translate_thinking_api_translate_thinking_post"];
++        delete?: never;
++        options?: never;
++        head?: never;
++        patch?: never;
++        trace?: never;
++    };
+     "/api/workspaces/{workspace_id}/releases": {
+         parameters: {
+             query?: never;
+@@ -14544,6 +14566,10 @@ export interface components {
+          *     change-patch.json 两件——对账面并入后者的 ``scopeAudit`` 子对象（顶级键原位不动，
+          *     本 DTO 读的顶级字段零变化），scope-audit.json/.patch 停写；回退链保留兜其他仓/本仓
+          *     存量旧形态归档。
++         *
++         *     ``repos``（2026-10-19-change-assets-cross-repo-repos）：跨仓冻结面元数据投影——
++         *     空面跨仓冻结只落 JSON（无 change.patch），此时 ``files`` 主仓面为 0，真实交付面
++         *     在 repos[]；旧归档/单仓变更无该键 → 空数组（additive，读侧零适配）。
+          */
+         ChangePatchMeta: {
+             /** Files */
+@@ -14563,6 +14589,68 @@ export interface components {
+              * @default false
+              */
+             files_truncated: boolean;
++            /** Repos */
++            repos?: components["schemas"]["ChangePatchRepo"][];
++        };
++        /**
++         * ChangePatchRepo
++         * @description 跨仓冻结面元数据（2026-10-19-change-assets-cross-repo-repos / FR-01）。
++         *
++         *     只投影展示所需元数据，**不回传 patch 正文**（单仓 patch 可数 MB、且正文只在
++         *     change-patch.json 全屏预览消费——资产卡给仓键/锚点/计数/降级/sha 与指路）。
++         *     ``repo_path`` 为产出端本机绝对路径，恒不投影（本机布局不外泄）。
++         */
++        ChangePatchRepo: {
++            /** Key */
++            key: string;
++            anchor?: components["schemas"]["ChangePatchRepoAnchor"] | null;
++            totals?: components["schemas"]["ChangePatchRepoTotals"] | null;
++            /**
++             * Degraded
++             * @default false
++             */
++            degraded: boolean;
++            /** Degraded Reason */
++            degraded_reason?: string | null;
++            /** Patch Sha256 */
++            patch_sha256?: string | null;
++            /**
++             * Has Patch
++             * @default false
++             */
++            has_patch: boolean;
++        };
++        /**
++         * ChangePatchRepoAnchor
++         * @description 跨仓冻结锚点投影（change-patch.json ``scopeAudit.repos[].anchor``）。
++         */
++        ChangePatchRepoAnchor: {
++            /** Source */
++            source?: string | null;
++            /** Base */
++            base?: string | null;
++            /** Head */
++            head?: string | null;
++            /** Label */
++            label?: string | null;
++        };
++        /**
++         * ChangePatchRepoTotals
++         * @description 跨仓单仓对账计数（planned/unplanned/untouched 为 CLI 三态原值）。
++         */
++        ChangePatchRepoTotals: {
++            /** Files */
++            files?: number | null;
++            /** Additions */
++            additions?: number | null;
++            /** Deletions */
++            deletions?: number | null;
++            /** Planned */
++            planned?: number | null;
++            /** Unplanned */
++            unplanned?: number | null;
++            /** Untouched */
++            untouched?: number | null;
+         };
+         /**
+          * ChangeProcessReq
+@@ -19176,7 +19264,8 @@ export interface components {
+         };
+         /**
+          * KnowledgeSearchOut
+-         * @description 检索出参：model_ready=False 时 results 非空（纯词面）+ reason 带因（fail-soft）。
++         * @description 检索出参：model_ready=False 时 results 非空（纯词面）+ reason 带因（fail-soft；
++         *     reason=index_not_built 表示服务器禁建库且该 ws 索引未建）。
+          */
+         KnowledgeSearchOut: {
+             /**
+@@ -28272,6 +28361,59 @@ export interface components {
+             /** @description Agent dispatch 结果（无 dispatch 时为 null） */
+             agent_dispatch?: components["schemas"]["TransitionDispatchResponse"] | null;
+         };
++        /**
++         * TranslateItemIn
++         * @description 单条待翻文本。id 由客户端生成（stable，响应原样带回配对）。
++         */
++        TranslateItemIn: {
++            /** Id */
++            id: string;
++            /** Text */
++            text: string;
++        };
++        /**
++         * TranslateItemOut
++         * @description 单条翻译结果。translated=false 表示原文透传（不值得翻/引擎不可用）。
++         */
++        TranslateItemOut: {
++            /** Id */
++            id: string;
++            /** Text */
++            text: string;
++            /** Translated */
++            translated: boolean;
++        };
++        /**
++         * TranslateRequest
++         * @description 批量翻译请求。target 固定 zh（本变更唯一目标语言，扩语言时再放开）。
++         */
++        TranslateRequest: {
++            /** Items */
++            items: components["schemas"]["TranslateItemIn"][];
++            /**
++             * Target
++             * @default zh
++             * @constant
++             */
++            target: "zh";
++        };
++        /**
++         * TranslateResponse
++         * @description fail-soft 契约：engine_ready=false 时 items 原文透传，HTTP 仍 200。
++         */
++        TranslateResponse: {
++            /**
++             * Ok
++             * @default true
++             */
++            ok: boolean;
++            /** Engine Ready */
++            engine_ready: boolean;
++            /** Reason */
++            reason?: string | null;
++            /** Items */
++            items: components["schemas"]["TranslateItemOut"][];
++        };
+         /**
+          * TurnOutlineItemRead
+          * @description turn-outline 单轮摘要项（FR-01）。
+@@ -43736,6 +43878,39 @@ export interface operations {
+             };
+         };
+     };
++    translate_thinking_api_translate_thinking_post: {
++        parameters: {
++            query?: never;
++            header?: never;
++            path?: never;
++            cookie?: never;
++        };
++        requestBody: {
++            content: {
++                "application/json": components["schemas"]["TranslateRequest"];
++            };
++        };
++        responses: {
++            /** @description Successful Response */
++            200: {
++                headers: {
++                    [name: string]: unknown;
++                };
++                content: {
++                    "application/json": components["schemas"]["TranslateResponse"];
++                };
++            };
++            /** @description Validation Error */
++            422: {
++                headers: {
++                    [name: string]: unknown;
++                };
++                content: {
++                    "application/json": components["schemas"]["HTTPValidationError"];
++                };
++            };
++        };
++    };
+     list_releases_api_workspaces__workspace_id__releases_get: {
+         parameters: {
+             query?: {
