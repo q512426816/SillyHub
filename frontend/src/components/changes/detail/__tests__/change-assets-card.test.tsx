@@ -506,6 +506,14 @@ describe("ChangeAssetsCard", () => {
     fireEvent.click(screen.getByRole("button", { name: /^收起$/ }));
     expect(screen.queryByTestId("change-assets-patch-file-src/f5.js")).toBeNull();
   });
+
+  it("归档留档：清单 ≤5 条不显示展开按钮（与其它分组一致）", async () => {
+    mockGet.mockResolvedValue(FULL); // file_list 2 条，全卡各组均 ≤5
+    renderCard();
+    await screen.findByTestId("change-assets-patch-file-src/flow.js");
+    expect(screen.getByTestId("change-assets-patch-file-test/x.test.mjs")).toBeInTheDocument();
+    expect(screen.queryByTestId("change-assets-group-toggle")).toBeNull();
+  });
 });
 
 // ── 路径解析兜底（2026-09-26-assets-testfile-path-resolve / FR-01~02）────────
