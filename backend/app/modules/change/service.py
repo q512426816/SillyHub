@@ -2793,6 +2793,13 @@ class ChangeService:
             return col(Change.updated_at).asc()
         if sort == "change_key":
             return col(Change.change_key).asc()
+        # 2026-10-19-change-list-created-sort：创建时间排序（用户需求「越新的越靠前」）
+        # ——API 缺省/未知值 fallback 仍 updated_at_desc（契约零变化），前端列表页
+        # 默认显式传 created_at_desc。
+        if sort == "created_at_asc":
+            return col(Change.created_at).asc()
+        if sort == "created_at_desc":
+            return col(Change.created_at).desc()
         # 默认 + 未知值 fallback：最近活动优先（updated_at desc）。
         return col(Change.updated_at).desc()
 
