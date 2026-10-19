@@ -1,0 +1,36 @@
+tier: thin
+legacy_fallback: false
+substeps: {}
+born_face: thin
+with_tasks: false
+review_force: null
+input: >-
+  动机:无自有 daemon 且无工作区共享机器的新用户(如
+  180072)在会话创建处不知道要选「平台共享智能体」(如平台向导)才能开会话,首句创建因无可用机器失败——实测该类用户档案下拉里本就有生效共享智能体,缺的是引导。需求与成功标准来自用户原话(会话创建处增强引导:当用户无自有
+  daemon 且无工作区共享机器时,智能体下拉默认选中/高亮可用的平台共享智能体并提示其读写约束)。
+
+
+  成功标准:
+
+  - 预会话态(sessionId 为空)下,用户无自有机器且无「共享给我的」机器、且存在 runtime_online 的平台共享智能体时,预会话档案自动默认选中第一个在线共享智能体
+
+  - 用户手动切换过档案(含选「不指定」)后,自动默认选中不再覆盖用户选择
+
+  - 满足默认选中条件时,预会话区显示引导提示,说明该共享智能体读平台源码不受限、写操作限制在共享输出目录,且可在智能体下拉切换
+
+  - 有自有机器或有共享机器、共享智能体全部离线、机器数据加载中或请求失败时,均不自动选中也不显示提示(fail-open 不阻塞)
+
+  - 聚焦测试覆盖上述分支,tsc 0 错误
+autopilot: false
+prestage_ack: true
+baseline_commit: 2487b5d7b7c92f450d37496b889d8467c1a7cf9e
+updatedAt: '2026-10-19T01:59:08.086Z'
+cross_baselines:
+  sillyspec: 9b8a1031fff3966e85fee2f2b45dbd76ecd9aca7
+baseline_sha256: b03ccfd6f9ae313154cb0b56e03aa0d27c380c5584ab69261fb5f11d5d638044
+spec_approved: true
+spec_approved_at: '2026-10-19T01:59:08.086Z'
+spec_approved_by: anon@DESKTOP-HJ0AM09
+spec_approved_channel: user-confirmed
+spec_attested_by: anon@DESKTOP-HJ0AM09
+
