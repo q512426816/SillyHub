@@ -315,6 +315,77 @@ class ChangeParser:
     # 列宽护栏：Change.change_type 列 String(50)，超长前缀（畸形值）截断防溢出。
     _COMMIT_TYPE_MAX_LEN = 50
 
+    # ── timeline.md 类型提取（2026-10-19-platform-auto-commit-type C 件）──────────
+    # 轻量出身变更归档收口时 CLI 烤制 timeline.md：🔀 行 = 时刻 + 提交哈希 + 标题
+    # （56 字符截断——尾部变更 key 会截掉，但开头 conventional 前缀不受影响）；
+    # 「任务面」task-NN 行尾 = 本变更自己的交付提交哈希（并行变更提交混进时间窗时，
+    # 哈希交集天然排除噪音）。
+
+    # conventional 类型白名单 + 主类型优先级（与 scripts/backfill_commit_type.py 同源；
+    # CLI 基线检查点「sillyspec:」等伪前缀白名单外不认）。
+    _TIMELINE_KNOWN_TYPES = (
+        "feat",
+        "fix",
+        "perf",
+        "refactor",
+        "test",
+        "docs",
+        "style",
+        "build",
+        "ci",
+        "chore",
+        "revert",
+    )
+    # 🔀 行：时刻 + 哈希(7-12 hex) + 标题
+    _TIMELINE_COMMIT_LINE_RE = re.compile(r"🔀\s+([0-9a-f]{7,12})\s+(\S.*)$")
+    # 「任务面」task 行尾哈希
+    _TIMELINE_TASK_ANCHOR_RE = re.compile(r"^task-\d+\b.*\s([0-9a-f]{7,12})\s*$")
+    # 标题开头 conventional 前缀（type 或 type(scope)，可选 !）
+    _TIMELINE_TYPE_PREFIX_RE = re.compile(r"^([A-Za-z]+)(?:\([^)]*\))?!?:")
+
+    @classmethod
+    def _read_timeline_commit_type(cls, change_dir: Path) -> str | None:
+        """从 timeline.md 提取本变更的主提交类型（权威源之一，次序在 flow-state 之后）。
+
+        Returns:
+            白名单内主类型（优先级 feat/fix > perf/refactor/test > docs/style >
+            build/chore/revert）；缺文件/无任务面锚/锚不命中任何 🔀 行/前缀全在
+            白名单外 → None（调用方回落目录推断路径）。
+        """
+        path = change_dir / "timeline.md"
+        if not path.is_file():
+            return None
+        try:
+            text = path.read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            return None
+        # 任务面锚定哈希（本变更自己的交付提交）；空集 → 无可靠归属，不猜。
+        anchored: set[str] = set()
+        for line in text.splitlines():
+            m = cls._TIMELINE_TASK_ANCHOR_RE.match(line.strip())
+            if m:
+                anchored.add(m.group(1))
+        if not anchored:
+            return None
+        types: list[str] = []
+        for line in text.splitlines():
+            m = cls._TIMELINE_COMMIT_LINE_RE.search(line)
+            if not m:
+                continue
+            if m.group(1) not in anchored:
+                continue  # 非本变更锚定的提交（并行变更/他仓提交混入时间窗）
+            tm = cls._TIMELINE_TYPE_PREFIX_RE.match(m.group(2))
+            if not tm:
+                continue
+            t = tm.group(1).lower()
+            if t in cls._TIMELINE_KNOWN_TYPES:
+                types.append(t)
+        if not types:
+            return None
+        # 主类型 = 优先级序最小者（min 稳定：同优先级取首次出现）。
+        priority = {t: i for i, t in enumerate(cls._TIMELINE_KNOWN_TYPES)}
+        return min(types, key=lambda t: priority[t])
+
     @classmethod
     def _read_flow_state_commit_type(cls, change_dir: Path) -> str | None:
         """读 flow-state.yaml 顶层 ``commit_type``（2026-10-18-change-type-git-conventional）。
@@ -822,7 +893,12 @@ class ChangeParser:
         # （git conventional 前缀主类型，回填脚本 / 后续 CLI flow done 写入）是权威
         # 类型源，读到即覆盖目录推断并置 authoritative（_apply_parsed 据此允许
         # 覆盖库中旧值——存量 feature 错值靠它纠正）；缺字段走推断路径不变。
+        # 2026-10-19-platform-auto-commit-type：timeline.md 是次级权威源（轻量出身
+        # 归档烤制产物，任务面锚定哈希 × 🔀 标题提取）——flow-state 显式字段最优先
+        # （人工/脚本写入语义不被覆盖），timeline 次之，目录推断兜底不变。
         commit_type = self._read_flow_state_commit_type(change_dir)
+        if commit_type is None:
+            commit_type = self._read_timeline_commit_type(change_dir)
         if commit_type is not None:
             parsed.change_type = commit_type
             parsed.change_type_authoritative = True
