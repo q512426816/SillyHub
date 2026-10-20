@@ -714,3 +714,11 @@
 锚点：未记录
 最近确认：409315def4b848f950771392b7be388068c7304f
 理由：最大风险：`requires_openai_auth` 是 codex CLI 的非 stability-guaranteed 配置键（cc-switch 生产配置与官方智谱接入文档均在用，当前 CLI 0.162.0 实测有效），未来 codex 大版本若更名/移除该键，症状回归为「不发认证 → 断流」——与 wire_api="chat" 被移除的先例同类。缓解：daemon 已有版本基线注记惯例（R-03），本变更在常量注释处注明 CLI 基线与实测依据；升级 codex 基线时冒烟面覆盖。 试过但放弃的方案： - 改走 openai_chat/litellm 代理通道（零代码）：模型选择退化为 usr-<uid>-<pid> 路由键、链路多 hub+LiteLLM 两跳，且该通道对 codex 从未被真实验证过（30 天零成功 run）；放弃。 - base_url 层面绕过（如要求用户把 key 拼进 URL）：bigmodel 不支持 URL 内嵌 key，且 key 进 URL 有日志泄漏面；放弃。 - 供应商配置面透传任意 provider 表键（settings_config 加 codex 专属段）：配置面扩大、需要 backend+daemon 双端改动，超出本次最小修复面；如未来需要 per-provider 差异键再立变更。
+
+## D-unmapped-105@v1 设计期风险与放弃方案（底稿）
+状态：implemented
+变更：2026-10-20-codex-models-fetch-candidates
+原编号：D-001@v1
+锚点：未记录
+最近确认：aa64d06245f0473307dc8ea88dfc9dd46c871e9a
+理由：最大风险：追加候选使「全候选 404」场景多一次上游请求（每条 models 拉取至多多 1 次 GET），对中转站限流面略增——量级可忽略（手动触发的低频操作）。次风险：`base+"/models"` 对某些会把 `/models` 当模型名路由的网关返回 200 非 models JSON——`_parse_models_response` 已有「body 不可解析/缺 data 字段 → AllFailed」兜底，不会误报成功。 试过但放弃的方案： - 按 provider 名/域名特判端点（如 bigmodel → /api/paas/v4/models）：vendor 分支进 service，维护面差、新供应商每次都要改代码；放弃。 - 前端对 codex 条目隐藏拉取按钮：不解决根因，且智谱/OpenCode 端点本就支持拉取；放弃。

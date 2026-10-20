@@ -253,3 +253,4 @@
 - agent-skills|FR|需求|承接 → [fr/agent-skills.md](fr/agent-skills.md)
 - auth|FR|需求|承接 → [fr/auth.md](fr/auth.md)
 - scripts|FR|需求|承接 → [fr/scripts.md](fr/scripts.md)
+- llm_provider|FR|需求|承接 → [fr/llm_provider.md](fr/llm_provider.md)
