@@ -6,6 +6,8 @@ created_at: 2026-10-20T00:46:19.189Z
 
 ## 做法概述
 
+本变更怎么解决问题？改哪里、为什么选这个方案（一两段）。
+
 现状:`session-floating-pill-dock.tsx` 的停靠组 className 硬编码 `items-end`,吸附左/右缘时 pill 内容一律右对齐,贴左视觉上"没贴齐"。
 
 方案:对齐方向跟随吸附侧,而吸附侧的判据 `snapPos` 里已有(组中心在边界左/右半边)——让吸附结果携带侧别标记,渲染时按侧切换对齐类。具体:`DockPos` 增加可选字段 `left?: boolean`(吸附侧标记),`snapPos` 吸附时与 x 同步写入 `left`;render 的 className 把硬编码 `items-end` 改为 `pos.left ? "items-start" : "items-end"`。所有产生吸附态的路径(settle 收敛 / ResizeObserver / window resize / 拖拽松手)都经 `snapPos`,标记自动一致;存档恢复路径从裸 `clampPos` 改走 `snapPos`(幂等,x/y 不变),使恢复首帧即有正确对齐,不依赖后续收敛补写。
@@ -13,6 +15,8 @@ created_at: 2026-10-20T00:46:19.189Z
 存档格式保持 `{x, y}` 不变:`persist` 只写 x/y(对齐不入档,由吸附判据从坐标重推导),旧存档无缝兼容;`left` 仅内存态。
 
 ## 接口契约
+
+动了哪些函数/端点/命令/文件格式？对外可见的签名或行为变化是什么（含「无」的说明）？
 
 - `DockPos` 类型:`{ x: number; y: number }` → `{ x: number; y: number; left?: boolean }`(组件内部类型,无外部消费方)。
 - `snapPos` 返回值:增加 `left` 字段(纯函数内部,无外部调用方)。
@@ -34,6 +38,8 @@ created_at: 2026-10-20T00:46:19.189Z
    同一浏览器 origin 共用 key(既有口径不变,非本变更引入);left 不入档不参与序列化,无新增串台面。
 
 ## 风险与死路
+
+本方案最大的风险是什么？试过但放弃的方案及放弃理由？
 
 最大风险:存档恢复首帧对齐闪动(恢复帧 items-end、下一帧切 items-start)。已消除——恢复路径改走 `snapPos`,首帧即携带正确 left。
 试过但放弃的方案:① render 期读 `dockRef.getBoundingClientRect()` + bounds 现算对齐——render 读 DOM 不纯(ref 首帧为 null),且每次 render 强制布局;② 持久化存档带 left 字段——存档格式变化,既有 toEqual 断言与旧档兼容都要跟着动,left 可从坐标幂等重推导,入档属冗余状态。两案均弃,采用吸附判据单源派生。

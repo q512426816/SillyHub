@@ -1,0 +1,22 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-20-pill-dock-left-align",
+  "reviewer": "subagent",
+  "verdict": "PASS",
+  "reviewedAgainst": "a303e730226d05a93ba959773366a676cf54aa09",
+  "findings": [
+    {
+      "severity": "P3",
+      "title": "拖拽过程中对齐方向短暂回落 items-end（clampPos 不携带 left）",
+      "evidence": "onPointerMove 经 clampPos 产生中间态，返回值无 left 字段，拖动中 pos.left=undefined 时渲染按 items-end 兜底；左停靠组开始拖动后组内 pill 会先翻成右对齐，松手 snapPos 后恢复。仅拖拽过渡期视觉抖动，非吸附态，无数据正确性风险，FR-01/02 均只约束吸附完成与恢复首帧，不构成承诺违反。",
+      "location": "frontend/src/components/daemon/session-floating-pill-dock.tsx:225"
+    }
+  ],
+  "dimensionNotes": {
+    "乱序": "ok",
+    "并发": "ok",
+    "切换": "ok",
+    "作用域": "ok"
+  },
+  "reviewedAt": "2026-10-20T08:54:34+08:00"
+}

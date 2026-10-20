@@ -250,3 +250,60 @@ created_at: 2026-10-16T01:30:35.950Z
 摘要：主路径
 全文：.sillyspec/changes/archive/2026-10-19-hide-shared-profile-in-session/requirements.md#FR-04
 最近确认：4d992afc3f615222da8f0017cd75303fd4777cf8
+
+## FR-test-utils-015 拖拽吸附到边界容器左侧后,停靠组内容左对齐;吸附右侧后保持右对齐
+变更：2026-10-20-pill-dock-left-align
+状态：active
+摘要：主路径；右吸附不受影响
+全文：.sillyspec/changes/archive/2026-10-20-pill-dock-left-align/requirements.md#FR-01
+最近确认：a303e730226d05a93ba959773366a676cf54aa09
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-20-pill-dock-left-align:flow:测试绑定FR-01
+  tests: test/frontend/src/components/daemon/__tests__/session-floating-pill-dock.test.tsx「拖到右半屏松手吸附右缘(新增 items-end 断言)」 | test/frontend/src/components/daemon/__tests__/session-floating-pill-dock.test.tsx「按住拖动超过阈值：跟手且钳制窗内，松手吸附较近左缘并持久化(新增 items-start 断言)」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-20-pill-dock-left-align
+  status: active
+
+## FR-test-utils-016 持久化位置重载后对齐方向与吸附侧一致
+变更：2026-10-20-pill-dock-left-align
+状态：active
+摘要：主路径
+全文：.sillyspec/changes/archive/2026-10-20-pill-dock-left-align/requirements.md#FR-02
+最近确认：a303e730226d05a93ba959773366a676cf54aa09
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-20-pill-dock-left-align:flow:测试绑定FR-02
+  tests: test/frontend/src/components/daemon/__tests__/session-floating-pill-dock.test.tsx「持久化位置恢复按吸附侧呈现对齐方向(新增两侧存档恢复用例)」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-20-pill-dock-left-align
+  status: active
+
+## FR-test-utils-017 现有 dock 测试与新增断言全绿
+变更：2026-10-20-pill-dock-left-align
+状态：active
+摘要：主路径
+全文：.sillyspec/changes/archive/2026-10-20-pill-dock-left-align/requirements.md#FR-03
+最近确认：a303e730226d05a93ba959773366a676cf54aa09
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-20-pill-dock-left-align:flow:测试绑定FR-03
+  tests: test/frontend/src/components/daemon/__tests__/session-floating-pill-dock.test.tsx「全量用例(含既有 11 例回归)」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-20-pill-dock-left-align
+  status: active
