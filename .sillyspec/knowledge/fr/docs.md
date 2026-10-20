@@ -595,3 +595,60 @@ created_at: 2026-10-15T16:16:15.707Z
   confirmed_at: null
   source_change: 2026-10-20-codex-requires-openai-auth
   status: active
+
+## FR-docs-036 智谱 GLM / OpenCode Go 两个预设声明 codex 专用端点覆盖（base_url+默认模型，模型均为实测可用）
+变更：2026-10-20-preset-engine-endpoint
+状态：active
+摘要：预设常量
+全文：.sillyspec/changes/archive/2026-10-20-preset-engine-endpoint/requirements.md#FR-01
+最近确认：bc88187dcee54e94289c2fcc742a802ffef45c00
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-20-preset-engine-endpoint:flow:测试绑定FR-01
+  tests: frontend/src/components/llm-providers/__tests__/llmProviderPresets.test.ts「zhipu_glm/opencode_go 声明 codex 覆盖且端点/模型正确；其余预设无覆盖」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-20-preset-engine-endpoint
+  status: active
+
+## FR-docs-037 表单勾选 Codex 时：选中带覆盖的预设 → base_url/默认模型联动切到 codex 端点，并自动取消 Claude 勾选（一条凭证一个端点的平台约束），notice 提示为 Claude 另建一条；取消 Codex → 回 claude 形态
+变更：2026-10-20-preset-engine-endpoint
+状态：active
+摘要：勾 Codex 联动；恢复 claude 形态（经对称勾回分支）
+全文：.sillyspec/changes/archive/2026-10-20-preset-engine-endpoint/requirements.md#FR-02
+最近确认：bc88187dcee54e94289c2fcc742a802ffef45c00
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-20-preset-engine-endpoint:flow:测试绑定FR-02
+  tests: frontend/src/components/llm-providers/__tests__/llm-provider-form.test.tsx「勾选 Codex 联动切换 codex 端点并取消 Claude 勾选；取消 Codex 恢复 claude 形态」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-20-preset-engine-endpoint
+  status: active
+
+## FR-docs-038 未选中预设或预设无覆盖时勾选行为与现状零回归（自定义/其它预设不受影响）
+变更：2026-10-20-preset-engine-endpoint
+状态：active
+摘要：自定义零回归
+全文：.sillyspec/changes/archive/2026-10-20-preset-engine-endpoint/requirements.md#FR-03
+最近确认：bc88187dcee54e94289c2fcc742a802ffef45c00
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-20-preset-engine-endpoint:flow:测试绑定FR-03
+  tests: frontend/src/components/llm-providers/__tests__/llm-provider-form.test.tsx「自定义表单勾选 Codex 零联动（base_url/模型不变）」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-20-preset-engine-endpoint
+  status: active
