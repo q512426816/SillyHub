@@ -238,6 +238,12 @@ async def db_engine() -> AsyncIterator[Any]:
     from app.modules.scan_docs import conflict_model as _scan_conflict_model  # noqa: F401
     from app.modules.scan_docs import model as _scan_docs_model  # noqa: F401
     from app.modules.skills import model as _skills_model  # noqa: F401
+
+    # 2026-10-20-conflict-platform-archive：spec_conflicts 表（定义在 spec_profile/
+    # model.py）。compare 留档回退（sillyspec_compare._load_archived_snapshot）在
+    # daemon 域查询该表——daemon 测试不 import spec_profile 时 create_all 缺表
+    # （单跑 vs 全模块跑差异），按本 fixture 既有惯例补根注册消除 import 顺序依赖。
+    from app.modules.spec_profile import model as _spec_profile_model  # noqa: F401
     from app.modules.spec_workspace import model as _spec_ws_model  # noqa: F401
     from app.modules.task import model as _task_model  # noqa: F401
     from app.modules.tool_gateway import tool_policy as _tool_policy_model  # noqa: F401
