@@ -298,7 +298,8 @@ class TestFetchModelsHttpxMocked:
         base_url=``https://open.bigmodel.cn/api/v1``（2026-10-20-codex-models-fetch-candidates）：
         - 候选1 ``/api/v1/v1/models`` → 200 但错误 JSON（智谱网关对未知路径 200
           兜底，实测 2026-10-20）→ 视为本候选失败继续
-        - 候选2 ``/api/v1/models``（base+/models 兜底，真实 models）→ 命中
+        - 候选2 ``/api/v1/models``（base+/models 兜底）→ 200 ``{models:[{slug}]}``
+          （智谱 coding 端点真实形态：列表字段 models、id 缺失取 slug）→ 命中
         """
         with (
             patch("app.modules.tool_gateway.tool_policy.socket.getaddrinfo") as mock_gai,
@@ -308,8 +309,11 @@ class TestFetchModelsHttpxMocked:
             client = _wire_async_client(
                 mock_cls,
                 get_side_effect=[
-                    _make_response(200, {"error": {"code": "1211", "message": "model not found"}}),
-                    _make_response(200, _FETCH_MODELS_BODY),
+                    _make_response(200, {"code": 500, "msg": "404 NOT_FOUND", "success": False}),
+                    _make_response(
+                        200,
+                        {"models": [{"slug": "glm-5.3", "display_name": "glm-5.3"}]},
+                    ),
                 ],
             )
 
@@ -327,7 +331,7 @@ class TestFetchModelsHttpxMocked:
         second_url = client.get.await_args_list[1].args[0]
         assert first_url == "https://open.bigmodel.cn/api/v1/v1/models"
         assert second_url == "https://open.bigmodel.cn/api/v1/models"
-        assert [m.id for m in resp.models] == ["claude-sonnet-4", "claude-opus-4"]
+        assert [m.id for m in resp.models] == ["glm-5.3"]
 
     @pytest.mark.asyncio
     async def test_opencode_openai_v1_strip_fallback_succeeds(

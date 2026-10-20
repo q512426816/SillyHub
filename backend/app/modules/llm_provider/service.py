@@ -794,10 +794,13 @@ class LlmProviderService:
         resp: httpx.Response,
         url: str,
     ) -> FetchModelsResponse:
-        """解析上游 /v1/models 响应（OpenAI 兼容 ``{data: [{id, owned_by, ...}]}``）。
+        """解析上游 models 响应（OpenAI 兼容 ``{data: [{id, owned_by, ...}]}``）。
 
         Anthropic 官方 /v1/models 不返 ``owned_by`` → 该字段缺失视为 None。
-        非 200 由调用方分类；200 但 body 不可解析 → ``LlmProviderModelsAllFailed``。
+        智谱 coding 端点（/api/v1/models）返回 ``{models: [{slug, ...}]}``（无
+        id 字段，slug 为模型名，实测 2026-10-20）→ 列表字段 ``models`` 兜底 +
+        id 缺失时取 ``slug``。非 200 由调用方分类；200 但 body 不可解析 →
+        ``LlmProviderModelsAllFailed``。
         """
         try:
             body = resp.json()
@@ -808,6 +811,9 @@ class LlmProviderService:
             ) from exc
         data = body.get("data") if isinstance(body, dict) else None
         if not isinstance(data, list):
+            alt = body.get("models") if isinstance(body, dict) else None
+            data = alt if isinstance(alt, list) else None
+        if not isinstance(data, list):
             raise LlmProviderModelsAllFailed(
                 "上游响应缺少模型列表字段，请稍后重试。",
                 details={"url": url},
@@ -817,6 +823,8 @@ class LlmProviderService:
             if not isinstance(item, dict):
                 continue
             item_id = item.get("id")
+            if not isinstance(item_id, str):
+                item_id = item.get("slug")
             if not isinstance(item_id, str):
                 continue
             owned = item.get("owned_by")
