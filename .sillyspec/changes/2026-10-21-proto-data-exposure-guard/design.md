@@ -20,6 +20,19 @@ created_at: 2026-10-20T23:36:08.889Z
 - `view.tsx` ProtoPage：移除 `payload===null` 时的 `fetch("/__proto/session-export.json")` effect——SSR 未读到即恒占位符（该兜底原就与 SSR 读同一份文件，文件在则 SSR 必中，兜底实际不可达；移除后行为差异仅剩「SSR 失败且文件在」这一原就自相矛盾的场景）。
 - 无 API 端点/命令/文件格式变化；数据文件本身原样搬移（字节不动）。
 
+## 文件变更清单
+
+| 操作 | 路径 | 说明 |
+|---|---|---|
+| 移动 | frontend/public/__proto__/session-export.json → frontend/.proto-staging/session-export.json | 真实会话数据移出免鉴权静态面；两处均不入 git（后者 gitignore 覆盖） |
+| 修改 | frontend/src/app/proto/session-redesign/staged-session-export.ts | 读取路径常量随迁 + 注释同步（**未跟踪文件**：进行中变更 2026-10-20-session-page-dsh-alignment 交付物，本变更不将其纳入提交面，改动以工作树状态随迁） |
+| 修改 | frontend/src/app/proto/session-redesign/view.tsx | 删 public URL fetch 兜底、payload 直取 props、注释同步（未跟踪文件，同上） |
+| 修改 | frontend/src/app/proto/session-redesign/types.ts | 注释路径同步（未跟踪文件，同上） |
+| 修改 | frontend/src/app/proto/session-redesign/proto-fixtures.ts | 注释路径同步（未跟踪文件，同上） |
+| 删除 | frontend/public/__proto__/（目录） | 数据迁出后清除，gitignore 防重建 |
+| 修改 | .gitignore | 补 /.tmp/、backend/pytest-of-*/、*.TMP |
+| 修改 | frontend/.gitignore | 补 /.proto-staging/、/public/__proto*/ |
+
 ## 边界与并发（盲维四问——每问必答，答不了即设计缺口）
 
 1. 乱序/迟到到达：输入或事件乱序时，本设计的假设还成立吗？
