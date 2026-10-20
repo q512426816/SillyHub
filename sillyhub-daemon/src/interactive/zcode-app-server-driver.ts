@@ -180,9 +180,8 @@ export class ZcodeAppServerDriver implements InteractiveDriver {
       spawnArgs = args;
     }
 
-    // spawn 参数本地留痕（真机诊断：8fad6a97 会话子进程未出现，抓实际参数）
-    // eslint-disable-next-line no-console
-    console.log('[zcode-driver] spawn:', JSON.stringify({ cmd: spawnCmd, args: spawnArgs, cwd: opts.cwd, zcode_data: env['ZCODE_DATA_BASE_DIR'] }));
+    // spawn env 键诊断日志（值经 redactEnvValueForLog 脱敏；2026-10-20 移除相邻的
+    // spawn 参数明文日志——cmd/args/cwd 未脱敏，用户路径不应落 daemon 日志）。
     // eslint-disable-next-line no-console
     console.log('[zcode-driver] spawn env keys:', Object.keys(env).filter(k => /ANTHROPIC|CLAUDE|ZCODE|PROXY|NODE_OPTIONS|SILLYHUB/i.test(k)).map(k => k + '=' + redactEnvValueForLog(k, env[k])).join(' | '));
     // ZCode 桌面端设置用户级 env 把个人 Provider 配置硬指回宿主文件（真机实证：
