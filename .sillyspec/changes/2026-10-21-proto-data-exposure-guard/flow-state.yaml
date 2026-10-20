@@ -1,0 +1,34 @@
+tier: thin
+legacy_fallback: false
+substeps: {}
+born_face: thin
+with_tasks: false
+review_force: null
+input: >-
+  预览真实会话数据移出静态目录并补 gitignore
+
+  动机：昨夜只读审查发现 frontend/public/__proto__/session-export.json 为 3.3MB 真实会话导出（含用户对话原文与会话 id），public/ 被 Next.js 免鉴权静态服务；且根
+  .tmp/、backend/pytest-of-qinyi/、daemon 目录 *.TMP 残留均无 .gitignore 覆盖——多 agent 共享仓下构成数据暴露与误提交双风险。
+
+
+  成功标准：
+
+  - frontend/public/ 下不再有会话导出数据（移至 frontend/.proto-staging/，该目录 gitignore 覆盖）
+
+  - proto 预览页 SSR 读取路径随迁，dev 预览渲染真实数据能力不回归
+
+  - .git immersion 覆盖 /.tmp/、backend/pytest-of-*/、frontend/.proto-staging/、frontend/public/__proto/、*.TMP，git status
+  不再列出上述任何路径
+autopilot: false
+prestage_ack: true
+baseline_commit: e625198b56c7b972450c3dbff4a2550a1f0c5c0f
+updatedAt: '2026-10-20T23:39:16.097Z'
+cross_baselines:
+  sillyspec: 3a08fff5afd86299560003a7f0db9048e1fedd31
+baseline_sha256: a28568d2fbbfcda827bc5c7a478fa8233c33f65e6d9a2f81226b140462f8281b
+spec_approved: true
+spec_approved_at: '2026-10-20T23:39:16.097Z'
+spec_approved_by: zcode-proto-guard
+spec_approved_channel: user-confirmed
+spec_attested_by: zcode-proto-guard
+
