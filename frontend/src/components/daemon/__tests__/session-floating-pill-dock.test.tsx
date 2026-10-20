@@ -71,6 +71,21 @@ describe("SessionFloatingPillDock（2026-10-16-session-pill-dock-drag）", () =>
     unmount();
   });
 
+  it("存档恢复首帧即按吸附侧呈现对齐方向（左档 items-start / 右档 items-end）", () => {
+    // 左缘档位恢复：snapPos 重推导 left=true，首帧 items-start 无闪动
+    window.localStorage.setItem(DOCK_KEY, JSON.stringify({ x: 16, y: 40 }));
+    renderDock();
+    expect(dockEl().className).toContain("items-start");
+    expect(dockEl().style.left).toBe("16px");
+
+    // 右缘档位恢复：items-end
+    window.localStorage.setItem(DOCK_KEY, JSON.stringify({ x: 1008, y: 40 }));
+    render(<SessionFloatingPillDock><i /></SessionFloatingPillDock>);
+    const dock2 = screen.getAllByTestId("session-pill-dock").at(-1)!;
+    expect(dock2.style.left).toBe("1008px");
+    expect(dock2.className).toContain("items-end");
+  });
+
   it("按住拖动超过阈值：跟手且钳制窗内，松手吸附较近左缘并持久化", () => {
     renderDock();
     const dock = dockEl();
@@ -82,9 +97,12 @@ describe("SessionFloatingPillDock（2026-10-16-session-pill-dock-drag）", () =>
     expect(dock.className).toContain("cursor-grabbing");
 
     fireEvent(window, pointerEvt("pointerup", { pointerId: 7, clientX: 400, clientY: 300 }));
-    // 408+0/2 ≤ 512 → 吸附左缘 EDGE_GAP=16；纵向保持
+    // 408+0/2 ≤ 512 → 吸附左缘 EDGE_GAP=16；纵向保持；贴左组内容左对齐
     expect(dock.style.left).toBe("16px");
     expect(dock.style.top).toBe("312px");
+    expect(dock.className).toContain("items-start");
+    expect(dock.className).not.toContain("items-end");
+    // 存档格式不带入 left（对齐由吸附判据从坐标重推导）
     expect(JSON.parse(window.localStorage.getItem(DOCK_KEY)!)).toEqual({ x: 16, y: 312 });
   });
 
@@ -94,8 +112,9 @@ describe("SessionFloatingPillDock（2026-10-16-session-pill-dock-drag）", () =>
     fireEvent(dock, pointerEvt("pointerdown", { button: 0, pointerId: 7, clientX: 1000, clientY: 660 }));
     fireEvent(window, pointerEvt("pointermove", { pointerId: 7, clientX: 1015, clientY: 300 }));
     fireEvent(window, pointerEvt("pointerup", { pointerId: 7, clientX: 1015, clientY: 300 }));
-    // 钳到 1023 ≥ 512 → 右缘 1024-0-16=1008
+    // 钳到 1023 ≥ 512 → 右缘 1024-0-16=1008；贴右保持右对齐
     expect(dock.style.left).toBe("1008px");
+    expect(dock.className).toContain("items-end");
     expect(JSON.parse(window.localStorage.getItem(DOCK_KEY)!).x).toBe(1008);
   });
 
@@ -192,9 +211,10 @@ describe("SessionFloatingPillDock 边界容器模式（2026-10-16-session-pill-d
     fireEvent(window, pointerEvt("pointermove", { pointerId: 5, clientX: 130, clientY: 0 }));
     expect(dock.style.left).toBe("134px");
     expect(dock.style.top).toBe("50px");
-    // 松手吸附容器左缘 100+16=116（不是视口左缘 16）
+    // 松手吸附容器左缘 100+16=116（不是视口左缘 16）；贴左内容左对齐
     fireEvent(window, pointerEvt("pointerup", { pointerId: 5, clientX: 130, clientY: 0 }));
     expect(dock.style.left).toBe("116px");
+    expect(dock.className).toContain("items-start");
     expect(JSON.parse(window.localStorage.getItem(DOCK_KEY)!)).toEqual({ x: 116, y: 50 });
     el.remove();
   });
