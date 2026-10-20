@@ -99,3 +99,29 @@ describe("LLM_PROVIDER_PRESETS — 不预填认证键（ql-20260823-007）", () 
     }
   });
 });
+
+// 2026-10-20-preset-engine-endpoint：codex 引擎端点覆盖常量断言——只允许实测
+// 跑通的两家声明覆盖（R-05 不臆造），端点/模型与官方文档及 2026-10-20 实测一致。
+describe("LLM_PROVIDER_PRESETS — codex 引擎端点覆盖（2026-10-20-preset-engine-endpoint）", () => {
+  it("zhipu_glm/opencode_go 声明 codex 覆盖且端点/模型正确；其余预设无覆盖", () => {
+    expect(PRESET_BY_KEY["zhipu_glm"]!.codex).toEqual({
+      base_url: "https://open.bigmodel.cn/api/v1",
+      default_model: "glm-5.3",
+    });
+    expect(PRESET_BY_KEY["opencode_go"]!.codex).toEqual({
+      base_url: "https://opencode.ai/inference/go/openai/v1",
+      default_model: "gpt-6-luna",
+    });
+    const withCodex = LLM_PROVIDER_PRESETS.filter((p) => p.codex).map(
+      (p) => p.key,
+    );
+    expect(withCodex).toEqual(["zhipu_glm", "opencode_go"]);
+  });
+
+  it("codex 覆盖端点与各自 claude base_url 不同（同端点无需覆盖）", () => {
+    for (const p of LLM_PROVIDER_PRESETS) {
+      if (!p.codex) continue;
+      expect(p.codex.base_url, `预设 ${p.key}`).not.toBe(p.base_url);
+    }
+  });
+});

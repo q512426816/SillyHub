@@ -18,7 +18,11 @@ import {
   type LlmProviderRoleMapping,
 } from "@/lib/api/llm-providers";
 import { errMessage } from "@/lib/errors";
-import { PRESETS_BY_CATEGORY, type LlmProviderPreset } from "@/config/llmProviderPresets";
+import {
+  PRESETS_BY_CATEGORY,
+  PRESET_BY_KEY,
+  type LlmProviderPreset,
+} from "@/config/llmProviderPresets";
 import { cn } from "@/lib/utils";
 import { ModelInputWithFetch, type FetchedModel } from "./model-input-with-fetch";
 
@@ -623,37 +627,70 @@ export function LlmProviderForm({
   };
 
   /**
-   * 套用预设（task-07 / D-001）：一键预填 name / base_url / auth_field /
-   * default_fallback_model / website_url / settings_config（settings_config_partial
-   * 序列化为美化 JSON，复用既有单一真相）+ 角色映射（default_model 套用到全部 4 角色，
-   * 照 handleAutoFill 范式）；**api_key 始终留空**给用户填（永不预填明文 token）。
-   * 仅新建模式调用（编辑模式不渲染选择器，避免覆盖既有配置）。
+   * 按引擎应用预设表单形态（2026-10-20-preset-engine-endpoint）。
+   *
+   * claude 形态 = 既有行为（base_url/默认模型/env 模板）；codex 形态 = 预设
+   * codex 覆盖（同一家供应商 codex 走不同协议端点，仅实测过的预设声明）——
+   * base_url/默认模型取覆盖值，settings_config 不预填（ANTHROPIC_* env 是
+   * claude 注入模板，对 codex 直连无意义）。name/auth_field/api_format/
+   * website_url 引擎无关，归 applyPreset 统一设置。
    */
-  const applyPreset = (preset: LlmProviderPreset): void => {
-    setSelectedPresetKey(preset.key);
-    setName(preset.name);
-    setBaseUrl(preset.base_url);
-    setAuthField(preset.auth_field);
-    setApiFormat(preset.api_format);
-    setWebsiteUrl(preset.website_url);
-    setApiKey("");
-    try {
-      setSettingsConfigJson(
-        JSON.stringify(preset.settings_config_partial ?? {}, null, 2),
-      );
-    } catch {
-      setSettingsConfigJson("{}");
-    }
-    // D-001：预设 default_model → 首行模型条目（带 sonnet 主标记；无则清空列表）。
-    const model = preset.default_model ?? "";
+  const applyPresetForm = (
+    preset: LlmProviderPreset,
+    engine: "claude" | "codex",
+  ): void => {
+    const codex = engine === "codex" ? preset.codex : undefined;
+    if (!codex && engine === "codex") return; // 无覆盖预设不进 codex 形态（调用方保证）
+    setBaseUrl(codex?.base_url ?? preset.base_url);
+    const model = codex?.default_model ?? preset.default_model ?? "";
     setModelRows(
       model
         ? [{ name: model, multimodal: "auto", roles: ["sonnet"], one_m: false }]
         : [],
     );
+    if (codex) {
+      setSettingsConfigJson("{}");
+    } else {
+      try {
+        setSettingsConfigJson(
+          JSON.stringify(preset.settings_config_partial ?? {}, null, 2),
+        );
+      } catch {
+        setSettingsConfigJson("{}");
+      }
+    }
+  };
+
+  /**
+   * 套用预设（task-07 / D-001）：一键预填 name / base_url / auth_field /
+   * default_fallback_model / website_url / settings_config（settings_config_partial
+   * 序列化为美化 JSON，复用既有单一真相）+ 角色映射（default_model 套用到全部 4 角色，
+   * 照 handleAutoFill 范式）；**api_key 始终留空**给用户填（永不预填明文 token）。
+   * 仅新建模式调用（编辑模式不渲染选择器，避免覆盖既有配置）。
+   * 2026-10-20-preset-engine-endpoint：当前勾选仅 codex（无 claude）且预设带
+   * codex 覆盖 → 直接应用 codex 形态；否则 claude 形态（既有行为）。
+   */
+  const applyPreset = (preset: LlmProviderPreset): void => {
+    setSelectedPresetKey(preset.key);
+    setName(preset.name);
+    setAuthField(preset.auth_field);
+    setApiFormat(preset.api_format);
+    setWebsiteUrl(preset.website_url);
+    setApiKey("");
+    const codexForm =
+      Boolean(preset.codex) &&
+      !agentKinds.includes("claude") &&
+      agentKinds.includes("codex");
+    applyPresetForm(preset, codexForm ? "codex" : "claude");
     setNotice({
       kind: "ok",
-      msg: `✓ 已套用「${preset.name}」预设，请填写 API Key 后保存。`,
+      msg: codexForm
+        ? `✓ 已套用「${preset.name}」预设（Codex 专用端点 ${preset.codex?.base_url}），请填写 API Key 后保存。`
+        : `✓ 已套用「${preset.name}」预设，请填写 API Key 后保存。${
+            preset.codex
+              ? "勾选 Codex 会自动切换到 Codex 专用端点（与 Claude 端点不同，一条凭证只能服务一个引擎）。"
+              : ""
+          }`,
     });
   };
 
@@ -817,11 +854,51 @@ export function LlmProviderForm({
                         ? [...agentKinds, v]
                         : agentKinds.filter((k) => k !== v);
                       if (next.length === 0) return; // 至少保留一个（UI 层不产生空集）
-                      setAgentKinds(next);
+                      // 2026-10-20-preset-engine-endpoint：选中带 codex 覆盖的预设时，
+                      // 勾 Codex → 切 codex 端点形态并自动取消 Claude（一条凭证一个
+                      // 端点，两引擎同勾必有一侧拿到错端点）；取消 Codex（回落仅
+                      // Claude）→ 恢复 claude 形态。无预设/无覆盖零联动（FR-03）。
+                      const activePreset = selectedPresetKey
+                        ? PRESET_BY_KEY[selectedPresetKey]
+                        : null;
+                      let finalKinds = next;
+                      let switchNotice: string | null = null;
+                      if (activePreset?.codex && v === "codex") {
+                        if (e.target.checked) {
+                          applyPresetForm(activePreset, "codex");
+                          if (next.includes("claude")) {
+                            finalKinds = next.filter((k) => k !== "claude");
+                            switchNotice = `已切换到 Codex 专用端点（${activePreset.codex.base_url}）并取消 Claude 勾选——同一供应商两引擎端点不同，一条凭证只能服务一个引擎，Claude 请用同预设另建一条。`;
+                          } else {
+                            switchNotice = `已切换到 Codex 专用端点（${activePreset.codex.base_url}）。`;
+                          }
+                        } else if (
+                          !next.includes("codex") &&
+                          next.includes("claude")
+                        ) {
+                          applyPresetForm(activePreset, "claude");
+                          switchNotice = `已恢复 ${activePreset.name} 的 Claude 端点形态（${activePreset.base_url}）。`;
+                        }
+                      } else if (
+                        activePreset?.codex &&
+                        v === "claude" &&
+                        e.target.checked &&
+                        next.includes("codex")
+                      ) {
+                        // 对称互斥：codex 形态下勾回 Claude → 保持 claude 形态并
+                        // 取消 codex（勾选集合永不同时含两引擎，见 FR-02 约束）。
+                        finalKinds = next.filter((k) => k !== "codex");
+                        applyPresetForm(activePreset, "claude");
+                        switchNotice = `已恢复 Claude 端点（${activePreset.base_url}）并取消 Codex 勾选——Codex 请用同预设另建一条（专用端点 ${activePreset.codex.base_url}）。`;
+                      }
+                      setAgentKinds(finalKinds);
+                      if (switchNotice) {
+                        setNotice({ kind: "ok", msg: switchNotice });
+                      }
                       // 取消 pi 勾选后若 auth_field 是 pi 自由输入 env 名（不在两
                       // 选项内）→ 归一回缺省，避免下拉空值（单选时代同款归一）。
                       if (
-                        !next.includes("pi") &&
+                        !finalKinds.includes("pi") &&
                         !AUTH_FIELD_OPTIONS.some((opt) => opt.value === authField)
                       ) {
                         setAuthField("ANTHROPIC_AUTH_TOKEN");
