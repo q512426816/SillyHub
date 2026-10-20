@@ -484,19 +484,24 @@ def _distill_local_archive(ops: list["FileOp"]) -> list[dict[str, Any]]:
     entries: list[dict[str, Any]] = []
     total_bytes = 0
     for op in ops[:ARCHIVE_ENTRY_CAP]:
+        # mtime Unix 秒 → ISO 串（daemon 快照 files[].mtime 同形态，对比响应 DTO
+        # local_mtime 为 str——留档条目与快照条目同构，回退路径零转换）。病态值
+        # （超范围浮点）fail-soft 为 None，不炸整次蒸馏（评审 P3 清偿）。
+        try:
+            mtime_iso = (
+                datetime.fromtimestamp(op.mtime, tz=UTC).isoformat()
+                if op.mtime is not None
+                else None
+            )
+        except (OverflowError, OSError, ValueError):
+            mtime_iso = None
         entry: dict[str, Any] = {
             "path": op.new_path if op.op == "rename" else op.path,
             "missing": op.op == "delete",
             "content": None,
             "binary": False,
             "truncated": False,
-            # Unix 秒 → ISO 串（daemon 快照 files[].mtime 同形态，对比响应 DTO
-            # local_mtime 为 str——留档条目与快照条目同构，回退路径零转换）。
-            "mtime": (
-                datetime.fromtimestamp(op.mtime, tz=UTC).isoformat()
-                if op.mtime is not None
-                else None
-            ),
+            "mtime": mtime_iso,
         }
         if op.op != "delete" and op.content is not None:
             try:

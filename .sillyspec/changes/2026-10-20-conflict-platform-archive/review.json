@@ -1,0 +1,22 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-20-conflict-platform-archive",
+  "reviewer": "subagent",
+  "verdict": "PASS",
+  "reviewedAgainst": "e94cc6e8ecdc61129b65bc70bf769a7cd3a116a2",
+  "findings": [
+    {
+      "severity": "P3",
+      "title": "蒸馏器单条 fail-soft 未覆盖 mtime 转换：病态 mtime 使整次冲突注册降级而非仅该条目",
+      "evidence": "service.py:496 `datetime.fromtimestamp(op.mtime, tz=UTC)` 位于仅包裹 base64/utf8 解码的 per-entry try（:502-504）之外；FileOp.mtime 为 float|None 无范围校验（schema.py:104），极端值（1e300/负值/NaN 等可经 JSON 传入）令 fromtimestamp 抛 ValueError/OverflowError，逃逸到 apply_ops:2830 的 best-effort try——推送仍成功不崩溃，但该次 _upsert_sync_conflict 整体失败（open 行不建/不刷新，含既有 server_versions/conflicting_paths 键），与 docstring「单条蒸馏异常 fail-soft 为 binary 条目」的声称不符（该声称实际只覆盖内容解码；尺寸计算处 json.dumps(...).encode 对孤立代理字符抛 UnicodeEncodeError 同理逃逸）。对照既有防线：落盘路径 _apply_file_mtime（service.py:1968-1986）已有毫秒启发式 + OSError/ValueError/TypeError 捕获，蒸馏路径未复用同款防护。",
+      "location": "backend/app/modules/spec_workspace/service.py:496"
+    }
+  ],
+  "dimensionNotes": {
+    "乱序": "ok",
+    "并发": "ok",
+    "切换": "ok",
+    "作用域": "ok"
+  },
+  "reviewedAt": "2026-10-20T00:53:48Z"
+}

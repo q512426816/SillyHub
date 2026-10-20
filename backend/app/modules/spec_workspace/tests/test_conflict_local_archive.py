@@ -194,6 +194,22 @@ class TestDistillLocalArchive:
             "mtime": None,
         }
 
+    def test_pathological_mtime_fail_soft_to_none(self):
+        # 评审 P3：病态 mtime（超范围浮点）不炸蒸馏——fail-soft 为 None，
+        # 其余条目字段照常。
+        entries = _distill_local_archive(
+            [
+                _op(
+                    "add",
+                    "changes/foo/x.md",
+                    content=_b64("ok"),
+                    mtime=1e300,
+                )
+            ]
+        )
+        assert entries[0]["mtime"] is None
+        assert entries[0]["content"] == "ok"
+
     def test_non_utf8_content_is_binary(self):
         entries = _distill_local_archive(
             [_op("add", "bin/file.bin", content=base64.b64encode(b"\xff\xfe\x00").decode())]
