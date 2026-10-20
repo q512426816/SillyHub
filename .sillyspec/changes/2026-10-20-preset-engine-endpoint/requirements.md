@@ -25,11 +25,12 @@ created_at: 2026-10-20T05:34:08.284Z
 - When 勾选 Codex
 - Then base_url 变为 https://opencode.ai/inference/go/openai/v1、模型行变 gpt-6-luna、env 清空、Claude 勾选自动取消、出现说明 notice
 
-#### 场景：取消 Codex 回 claude 形态
+#### 场景：恢复 claude 形态（经对称勾回分支）
 
-- Given 上一步的 codex 形态表单
-- When 取消 Codex 勾选（引擎回落 Claude）
-- Then base_url 恢复 /zen/go、模型行恢复 deepseek-v4.1-flash、env 恢复预设模板
+- Given codex 形态表单（勾选集合仅剩 Codex——Claude 已被互斥取消）
+- When 用户勾回 Claude Code（对称互斥分支：自动取消 Codex 并恢复 claude 端点/模型/env）
+- Then base_url 恢复预设 claude 端点、模型行恢复 claude 默认模型、env 恢复预设模板、Codex 勾选自动取消、出现恢复 notice
+- 注：直接取消最后一个 Codex 勾选被既有「至少保留一个引擎」守卫拦（不产生空集），故 claude 形态恢复的可达路径是勾回 Claude 的对称分支（本场景）；仅剩 [codex, pi] 时取消 Codex 的恢复分支为规格留白（pi 与 claude 端点语义不同，恢复 claude 形态对 pi 无意义，评审 P3 留白接受）。
 
 ### FR-03: 未选中预设或预设无覆盖时勾选行为与现状零回归（自定义/其它预设不受影响）
 
