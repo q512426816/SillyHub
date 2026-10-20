@@ -70,6 +70,7 @@ upsert 本就在 apply 主事务后的独立 try 内 best-effort（失败仅告�
 |---|---|---|
 | 修改 | backend/app/modules/spec_workspace/service.py | 七处被拒点收集 conflicted_ops；_distill_local_archive 纯函数（三重帽）；_upsert_sync_conflict 增参与 local_archive 键 |
 | 修改 | backend/app/modules/daemon/sillyspec_compare.py | compare() spec-tree 分支捕获 conflict_record_missing 回退 _load_archived_snapshot；_scope_snapshot_to_change 参数化 label |
+| 修改 | backend/conftest.py | db_engine 补 spec_profile 模型根注册——daemon 域测试不 import spec_profile 时 create_all 缺 spec_conflicts 表（单跑 vs 全模块跑差异，fixture 既有惯例） |
 | 新增 | backend/app/modules/spec_workspace/tests/test_conflict_local_archive.py | FR-01：七类被拒点条目形态 + 三重帽 + upsert 落库断言 |
 | 修改 | backend/app/modules/daemon/tests/test_sillyspec_compare.py | FR-02/03：回退命中构造（200 + platform-archive + 裁剪）/ 不命中重抛 / 非 missing 不回退 |
 | 修改 | frontend/src/components/changes/conflict-compare-modal.tsx | FR-04：platform-archive 来源横幅 |
