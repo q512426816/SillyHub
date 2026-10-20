@@ -1,0 +1,56 @@
+tier: thin
+legacy_fallback: false
+substeps:
+  artifacts: done
+  ledger: done
+  patch: done
+  review: done
+  probes: done
+  distill: done
+  archive: done
+  events: done
+born_face: thin
+with_tasks: false
+review_force: null
+input: >-
+  左侧会话状态标签与右侧实时同步
+
+
+  用户反馈：会话页左侧列表的进度状态标签与右侧会话内容有延迟，用起来很难受。机制已查明：右侧是逐会话 SSE 推送（run 状态秒级到达），左侧列表依赖 10s/30s 条件轮询 + agent_sessions:changed
+  哑信号，但后端 publish_sessions_changed 只覆盖会话生命周期事件（创建/终态翻转/lease kill/子会话），run 级状态迁移点全部不发布信号——run
+  创建（发消息）、pending→running（run_sync/submit_commit.py 激活块）、→pending_approval（agent/coordinator.py
+  request_approval）、approve 恢复 running、多轮会话 run 终态但会话 keep-active（run_sync/close_run_steps.py _close_flip_session else
+  分支明确零发布）。左侧徽标信号源 current_run_status 恰来自这些 run 状态，导致右侧已执行/已等审批而左侧最长 10~30s 不动；轮询间隔在列表全静默时退化为 30s 进一步放大。
+
+
+  成功标准：
+
+  - 后端在上述 run 状态迁移点补发 publish_sessions_changed（复用既有哑信号链路，Redis 抖动静默容错不拖挂业务写路径）
+
+  - 前端收到信号后经既有 400ms 去抖失效列表查询，左侧状态标签在 run 状态迁移后秒级（≤2s）更新，与右侧会话状态一致，不再依赖轮询 tick
+
+  - 多轮会话 run 完成（会话保持 active）时左侧转圈徽标同样秒级收敛
+
+  - 既有信号点（会话创建/终态/删除/群聊 audience）行为零回归
+
+  - 新增信号点有单测覆盖；触及的前后端测试全绿
+autopilot: false
+prestage_ack: true
+baseline_commit: 3550e7c20bc01a549fb6f108afb85ff42c0e2dba
+updatedAt: '2026-10-20T08:15:26.199Z'
+cross_baselines:
+  sillyspec: 0ac7c4e6b5d95d595c09491be6d039589c1f642e
+baseline_sha256: 15ce01eb3bde24d675c03842205d40d5f77be94d3678ed2c04828cbcea9a4862
+spec_approved: true
+spec_approved_at: '2026-10-20T07:10:13.442Z'
+spec_approved_by: zcode-session-status-live-sync
+spec_approved_channel: agent-self
+spec_attested_by: zcode-session-status-live-sync
+gate_summary: >-
+  test: passed ← module[]+deps(py19+jsx35+jsx5)+fr(53)（145.8s）
+  结果：C:\Users\qinyi\IdeaProjects\multi-agent-platform\.sillyspec\.runtime\verify-runs\20261020075129\test-result.json｜lint:
+  passed ← cd backend && uv run ruff check . && uv run ruff format --check . && uv run mypy app && cd ../frontend &&
+  pnpm lint && cd ../sillyhub-daemon && pnpm typecheck（16.1s）
+  结果：C:\Users\qinyi\IdeaProjects\multi-agent-platform\.sillyspec\.runtime\verify-runs\20261020075129\test-result.json｜门文件
+  15 个
+

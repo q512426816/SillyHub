@@ -1,0 +1,96 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-20-session-status-live-sync",
+  "rows": [
+    {
+      "anchor": "FR-01",
+      "row_id": "2026-10-20-session-status-live-sync:flow:测试绑定FR-01",
+      "tests": [
+        "backend/app/modules/daemon/tests/test_session_list_live_signal.py「inject 新轮 commit 后发布 status_changed；纯切换轮不发布」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-20-session-status-live-sync"
+    },
+    {
+      "anchor": "FR-01",
+      "row_id": "2026-10-20-session-status-live-sync:flow:测试绑定FR-01",
+      "tests": [
+        "backend/app/modules/daemon/tests/test_submit_messages_no_overwrite_terminal.py「run 激活经 PublishIntent 标量补发列表信号；rowcount=0 不发；publish 消费段发/None 零调用」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-20-session-status-live-sync"
+    },
+    {
+      "anchor": "FR-01",
+      "row_id": "2026-10-20-session-status-live-sync:flow:测试绑定FR-01",
+      "tests": [
+        "backend/app/modules/agent/tests/test_coordinator_approval_signal.py「request_approval/approve 成功发布、拒绝路径不发布」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-20-session-status-live-sync"
+    },
+    {
+      "anchor": "FR-02",
+      "row_id": "2026-10-20-session-status-live-sync:flow:测试绑定FR-02",
+      "tests": [
+        "frontend/src/components/daemon/__tests__/session-panel-approval-list-refresh.test.tsx「permission_request 触发 onSessionListRefresh」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-20-session-status-live-sync"
+    },
+    {
+      "anchor": "FR-03",
+      "row_id": "2026-10-20-session-status-live-sync:flow:测试绑定FR-03",
+      "tests": [
+        "backend/app/modules/daemon/tests/test_close_interactive_run_session_status.py「多轮 keep-active 终态发布列表信号（扩展既有用例断言）」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-20-session-status-live-sync"
+    },
+    {
+      "anchor": "FR-04",
+      "row_id": "2026-10-20-session-status-live-sync:flow:测试绑定FR-04",
+      "tests": [
+        "backend/app/modules/daemon/tests/test_close_interactive_run_session_status.py「既有终态翻转发布用例回归全绿」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-20-session-status-live-sync"
+    }
+  ]
+}

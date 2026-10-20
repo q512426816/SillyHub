@@ -140,3 +140,4 @@
 | 2026-10-20 | 2026-10-20-session-error-visibility | 会话页失败轮错误信息不可见修复 |
 | 2026-10-20 | 2026-10-20-codex-requires-openai-auth | 腾讯云平台 codex 会话选直连（anthropic 形态）供应商时稳定断流（stream dis… |
 | 2026-10-20 | 2026-10-20-preset-engine-endpoint | 新建供应商点「OpenCode Go」预设自动填 https://opencode.ai/zen/g… |
+| 2026-10-20 | 2026-10-20-session-status-live-sync | 左侧会话状态标签与右侧实时同步 |

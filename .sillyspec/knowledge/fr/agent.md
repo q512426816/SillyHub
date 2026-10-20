@@ -319,3 +319,86 @@ created_at: 2026-10-14T02:51:35.432Z
 - 场景：主路径 — Given 本变更交付完成；When 核对 git diff；Then 变更仅含 `backend/app/modules/agent/tests/test_agent_session_model.py` 一个文件（local.ya
 全文：.sillyspec/changes/archive/2026-10-16-agent-session-field-pin-sync/requirements.md#FR-03
 最近确认：cd5c6760fd82584b7b25b8e8d89947f6360a55b6
+
+## FR-agent-015 后端在上述 run 状态迁移点补发 publish_sessions_changed（复用既有哑信号链路，Redis 抖动静默容错不拖挂业务写路径）
+变更：2026-10-20-session-status-live-sync
+状态：active
+摘要：发消息后左侧立即转圈；等待审批即时可见；审批通过恢复执行；run 激活不发假信号
+全文：.sillyspec/changes/archive/2026-10-20-session-status-live-sync/requirements.md#FR-01
+最近确认：59007127f0d130be7ea5e131f4f61154806d37a0
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-20-session-status-live-sync:flow:测试绑定FR-01
+  tests: backend/app/modules/agent/tests/test_coordinator_approval_signal.py「request_approval/approve 成功发布、拒绝路径不发布」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-20-session-status-live-sync
+  status: active
+
+## FR-agent-016 前端收到信号后经既有 400ms 去抖失效列表查询，左侧状态标签在 run 状态迁移后秒级（≤2s）更新，与右侧会话状态一致，不再依赖轮询 tick
+变更：2026-10-20-session-status-live-sync
+状态：active
+摘要：审批弹框与左侧徽标同步
+全文：.sillyspec/changes/archive/2026-10-20-session-status-live-sync/requirements.md#FR-02
+最近确认：59007127f0d130be7ea5e131f4f61154806d37a0
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-20-session-status-live-sync:flow:测试绑定FR-02
+  tests: frontend/src/components/daemon/__tests__/session-panel-approval-list-refresh.test.tsx「permission_request 触发 onSessionListRefresh」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-20-session-status-live-sync
+  status: active
+
+## FR-agent-017 多轮会话 run 完成（会话保持 active）时左侧转圈徽标同样秒级收敛
+变更：2026-10-20-session-status-live-sync
+状态：active
+摘要：多轮完成转圈收敛
+全文：.sillyspec/changes/archive/2026-10-20-session-status-live-sync/requirements.md#FR-03
+最近确认：59007127f0d130be7ea5e131f4f61154806d37a0
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-20-session-status-live-sync:flow:测试绑定FR-03
+  tests: backend/app/modules/daemon/tests/test_close_interactive_run_session_status.py「多轮 keep-active 终态发布列表信号（扩展既有用例断言）」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-20-session-status-live-sync
+  status: active
+
+## FR-agent-018 既有信号点（会话创建/终态/删除/群聊 audience）行为零回归
+变更：2026-10-20-session-status-live-sync
+状态：active
+摘要：既有回归面
+全文：.sillyspec/changes/archive/2026-10-20-session-status-live-sync/requirements.md#FR-04
+最近确认：59007127f0d130be7ea5e131f4f61154806d37a0
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-20-session-status-live-sync:flow:测试绑定FR-04
+  tests: backend/app/modules/daemon/tests/test_close_interactive_run_session_status.py「既有终态翻转发布用例回归全绿」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-20-session-status-live-sync
+  status: active
+
+## FR-agent-019 新增信号点有单测覆盖；触及的前后端测试全绿
+变更：2026-10-20-session-status-live-sync
+状态：active
+摘要：守卫路径不发布
+全文：.sillyspec/changes/archive/2026-10-20-session-status-live-sync/requirements.md#FR-05
+最近确认：59007127f0d130be7ea5e131f4f61154806d37a0
