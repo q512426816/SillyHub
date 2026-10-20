@@ -2135,3 +2135,24 @@ superseded_by：FR-app-workspace-pages-009
   confirmed_at: null
   source_change: 2026-10-15-platform-vector-search
   status: active
+
+## FR-build-141 根级 ruff 配置存在且 line-length=100；从仓库根与 backend/ 两个 cwd 对 scripts/backfill_commit_type.py 的 ruff format --check 判定一致（均通过），且对 88<x<=100 行宽探针行两口径判定一致（均不拆）
+变更：2026-10-20-root-ruff-config
+状态：active
+摘要：双入口一致裁决；钩子建议命令修完不再回弹
+全文：.sillyspec/changes/archive/2026-10-20-root-ruff-config/requirements.md#FR-01
+最近确认：978336829578f84f9c18d7ded93c25ce05f432da
+
+## FR-build-142 钩子（根 cwd）对 backend/ 内文件的裁决不受影响（生效配置仍是 backend/pyproject 的行宽 100 与完整 lint select，--show-settings 实证）
+变更：2026-10-20-root-ruff-config
+状态：active
+摘要：backend 子树分层不变
+全文：.sillyspec/changes/archive/2026-10-20-root-ruff-config/requirements.md#FR-02
+最近确认：978336829578f84f9c18d7ded93c25ce05f432da
+
+## FR-build-143 scripts/ 目录全部 .py 在新口径下 ruff format --check 通过（存量清干净，不给未来提交埋雷）；ruff check 默认规则零新增拦截
+变更：2026-10-20-root-ruff-config
+状态：active
+摘要：存量清零 + 工具脚本不回归
+全文：.sillyspec/changes/archive/2026-10-20-root-ruff-config/requirements.md#FR-03
+最近确认：978336829578f84f9c18d7ded93c25ce05f432da
