@@ -1,0 +1,66 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-20-codex-requires-openai-auth",
+  "rows": [
+    {
+      "anchor": "FR-01",
+      "row_id": "2026-10-20-codex-requires-openai-auth:flow:测试绑定FR-01",
+      "tests": [
+        "sillyhub-daemon/tests/codex-settings.test.ts「全新目录写 config.toml：顶层 model/model_provider + [model_providers.sillyhub] 表，wire_api=responses」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-20-codex-requires-openai-auth"
+    },
+    {
+      "anchor": "FR-01",
+      "row_id": "2026-10-20-codex-requires-openai-auth:flow:测试绑定FR-01",
+      "tests": [
+        "sillyhub-daemon/tests/codex-settings.test.ts「requires_openai_auth：anthropic 形态有 key 时写出该行（wire_api 行后）」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-20-codex-requires-openai-auth"
+    },
+    {
+      "anchor": "FR-02",
+      "row_id": "2026-10-20-codex-requires-openai-auth:flow:测试绑定FR-02",
+      "tests": [
+        "sillyhub-daemon/tests/codex-settings.test.ts"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-20-codex-requires-openai-auth"
+    },
+    {
+      "anchor": "FR-02",
+      "row_id": "2026-10-20-codex-requires-openai-auth:flow:测试绑定FR-02",
+      "tests": [
+        "sillyhub-daemon/tests/codex-settings.test.ts「key=daemonApiKey / base_url=litellm_base_url / model=litellm_model_name」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-20-codex-requires-openai-auth"
+    }
+  ]
+}

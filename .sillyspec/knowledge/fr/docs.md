@@ -557,3 +557,41 @@ created_at: 2026-10-15T16:16:15.707Z
   confirmed_at: null
   source_change: 2026-10-20-session-error-visibility
   status: active
+
+## FR-docs-034 daemon 对有 api_key 的 anthropic 直连形态 codex 供应商，写出的 config.toml [model_providers.sillyhub] 段含 requires_openai_auth = true；端到端：平台 codex 会话选直连供应商真实对话跑通（不再 stream disconnected）
+变更：2026-10-20-codex-requires-openai-auth
+状态：active
+摘要：有 key 直连供应商
+全文：.sillyspec/changes/archive/2026-10-20-codex-requires-openai-auth/requirements.md#FR-01
+最近确认：409315def4b848f950771392b7be388068c7304f
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-20-codex-requires-openai-auth:flow:测试绑定FR-01
+  tests: sillyhub-daemon/tests/codex-settings.test.ts「requires_openai_auth：anthropic 形态有 key 时写出该行（wire_api 行后）」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-20-codex-requires-openai-auth
+  status: active
+
+## FR-docs-035 keyless 供应商（api_key 缺省）行为不变：不写该键，产物与现状逐字一致（spike A3a keyless 语义零回归）
+变更：2026-10-20-codex-requires-openai-auth
+状态：active
+摘要：keyless 直连供应商；openai_chat 形态零回归
+全文：.sillyspec/changes/archive/2026-10-20-codex-requires-openai-auth/requirements.md#FR-02
+最近确认：409315def4b848f950771392b7be388068c7304f
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-20-codex-requires-openai-auth:flow:测试绑定FR-02
+  tests: sillyhub-daemon/tests/codex-settings.test.ts「key=daemonApiKey / base_url=litellm_base_url / model=litellm_model_name」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-20-codex-requires-openai-auth
+  status: active
