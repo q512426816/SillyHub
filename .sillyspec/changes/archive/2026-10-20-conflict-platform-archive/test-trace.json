@@ -1,0 +1,84 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-20-conflict-platform-archive",
+  "rows": [
+    {
+      "anchor": "FR-01",
+      "row_id": "2026-10-20-conflict-platform-archive:flow:测试绑定FR-01",
+      "tests": [
+        "backend/app/modules/spec_workspace/tests/test_conflict_local_archive.py「六类被拒点留档形态与三重帽」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-20-conflict-platform-archive"
+    },
+    {
+      "anchor": "FR-02",
+      "row_id": "2026-10-20-conflict-platform-archive:flow:测试绑定FR-02",
+      "tests": [
+        "backend/app/modules/daemon/tests/test_sillyspec_compare.py「platform-archive 回退命中构造」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-20-conflict-platform-archive"
+    },
+    {
+      "anchor": "FR-03",
+      "row_id": "2026-10-20-conflict-platform-archive:flow:测试绑定FR-03",
+      "tests": [
+        "backend/app/modules/daemon/tests/test_sillyspec_compare.py「无留档/不含变更路径/非 missing 错误不回退」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-20-conflict-platform-archive"
+    },
+    {
+      "anchor": "FR-04",
+      "row_id": "2026-10-20-conflict-platform-archive:flow:测试绑定FR-04",
+      "tests": [
+        "frontend/src/components/changes/__tests__/conflict-compare-modal.test.tsx「platform-archive 留档横幅」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-20-conflict-platform-archive"
+    },
+    {
+      "anchor": "FR-05",
+      "row_id": "2026-10-20-conflict-platform-archive:flow:测试绑定FR-05",
+      "tests": [
+        "backend/app/modules/daemon/tests/test_sillyspec_compare.py",
+        "backend/app/modules/spec_workspace/tests/test_platform_deleted_guard.py",
+        "backend/app/modules/spec_workspace/tests/test_sync_incremental.py",
+        "frontend/src/components/changes/__tests__/conflict-compare-modal.test.tsx「既有套件零回归」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-20-conflict-platform-archive"
+    }
+  ]
+}

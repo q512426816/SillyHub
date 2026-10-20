@@ -1,0 +1,1176 @@
+diff --git a/backend/app/modules/daemon/sillyspec_compare.py b/backend/app/modules/daemon/sillyspec_compare.py
+index ea3bd0b47..89531b053 100644
+--- a/backend/app/modules/daemon/sillyspec_compare.py
++++ b/backend/app/modules/daemon/sillyspec_compare.py
+@@ -79,15 +79,18 @@ def _path_belongs_to_change(path: str, change: str) -> bool:
+     return path.startswith(f"changes/{change}/") or path.startswith(f"changes/archive/{change}/")
+ 
+ 
+-def _scope_snapshot_to_change(snapshot: dict[str, Any], change: str) -> dict[str, Any] | None:
+-    """把 full-tree 快照裁成 ``<change>`` 范围并附来源元数据；无归属路径返回 None。
++def _scope_snapshot_to_change(
++    snapshot: dict[str, Any], change: str, *, label: str = FULL_TREE_RECORD_LABEL
++) -> dict[str, Any] | None:
++    """把跨变更快照裁成 ``<change>`` 范围并附来源元数据；无归属路径返回 None。
+ 
+     输入面固定为快照 ``files[].path``——daemon 侧读记录时已把 conflicting_paths 截
+     300 转成 files[]，快照**没有** conflicting_paths 字段（D-006@v2）。entry 完整保留
+     （``_build_spec_tree_compare`` 依赖 path/missing/mtime/content/binary/truncated）。
+-    返回裁剪后快照的浅拷贝 + ``record_label``/``covered_changes``（裁剪前全量路径按
+-    变更名归因去重）/``path_total``（裁剪前路径条数；受 daemon 300 路径帽截断，
+-    不声称记录真实总数）。
++    返回裁剪后快照的浅拷贝 + ``record_label``（full-tree 兜底或 platform-archive
++    留档，2026-10-20-conflict-platform-archive 参数化）/``covered_changes``（裁剪前
++    全量路径按变更名归因去重）/``path_total``（裁剪前路径条数；受 daemon 300 路径
++    帽截断，不声称记录真实总数）。
+     """
+     raw_files = snapshot.get("files")
+     files = [f for f in raw_files if isinstance(f, dict)] if isinstance(raw_files, list) else []
+@@ -107,7 +110,7 @@ def _scope_snapshot_to_change(snapshot: dict[str, Any], change: str) -> dict[str
+     return {
+         **snapshot,
+         "files": scoped,
+-        "record_label": FULL_TREE_RECORD_LABEL,
++        "record_label": label,
+         "covered_changes": covered,
+         "path_total": path_total,
+     }
+@@ -424,7 +427,19 @@ class SillySpecCompareService:
+             )
+         else:
+             spec_root = await self._load_spec_root(workspace_id)
+-            snapshot = await self._fetch_snapshot(instance_id, change, kind, workspace_id)
++            # 2026-10-20-conflict-platform-archive（FR-02/FR-03）：机器记录亡
++            # （行开记录亡——<change> 与 full-tree 双缺）→ open 行 local_archive
++            # 留档自足回退（机器侧=冲突时点留档，平台侧仍实时读 spec_root）；
++            # 无留档/不含该变更路径/非 conflict_record_missing → 重抛原错误
++            # （错误路径与回退前逐字节一致）。
++            try:
++                snapshot = await self._fetch_snapshot(instance_id, change, kind, workspace_id)
++            except DaemonRpcRemoteGatewayError as exc:
++                if (exc.details or {}).get("daemon_code") != "conflict_record_missing":
++                    raise
++                snapshot = await self._load_archived_snapshot(workspace_id, change)
++                if snapshot is None:
++                    raise
+             # ql-20260909-012：比对全程同步 FS IO（逐文件 stat+read_text 全量读）+
+             # difflib（大文件最坏 O(n²)）——spec 树几百文件时阻塞事件循环数百 ms
+             # 至秒级，丢线程池解放并发请求（纯函数不改共享状态，线程安全）。
+@@ -555,6 +570,51 @@ class SillySpecCompareService:
+         spec_ws = await SpecWorkspaceService(self._session).get(workspace_id)
+         return Path(spec_ws.spec_root)
+ 
++    async def _load_archived_snapshot(
++        self, workspace_id: uuid.UUID, change: str
++    ) -> dict[str, Any] | None:
++        """open 行 local_archive → 机器侧留档快照（2026-10-20-conflict-platform-archive FR-02）。
++
++        「行开记录亡」回退面：冲突推送时 apply_ops 蒸馏的被拒 op 机器侧内容
++        （details_json.local_archive，条目与 daemon 快照 files[] 同构）。查该
++        workspace 的 open spec-sync 行，details_json fail-soft 解析（损坏按无
++        留档处理），条目裁剪成 ``<change>`` 范围并附 ``record_label=
++        "platform-archive"`` 与 covered_changes/path_total（full-tree 兜底同口径）；
++        无行/无留档/不含该变更路径 → None（调用方重抛原错误）。
++        """
++        from app.modules.spec_profile.model import SpecConflict
++
++        row = (
++            (
++                await self._session.execute(
++                    select(SpecConflict)
++                    .where(
++                        SpecConflict.workspace_id == workspace_id,
++                        SpecConflict.stage == SpecWorkspaceService.SYNC_CONFLICT_STAGE,
++                        SpecConflict.status == "open",
++                    )
++                    .limit(1)
++                )
++            )
++            .scalars()
++            .first()
++        )
++        if row is None:
++            return None
++        try:
++            details = json.loads(row.details_json) if row.details_json else {}
++        except (TypeError, ValueError):
++            return None
++        files = details.get("local_archive") if isinstance(details, dict) else None
++        if not isinstance(files, list) or not files:
++            return None
++        snapshot = {
++            "files": files,
++            "conflict_created_at": row.created_at.isoformat() if row.created_at else None,
++            "local_updated_at": None,
++        }
++        return _scope_snapshot_to_change(snapshot, change, label="platform-archive")
++
+     # ── spec-tree 比对 ──────────────────────────────────────────────────────
+ 
+     def _build_spec_tree_compare(
+diff --git a/backend/app/modules/daemon/tests/test_sillyspec_compare.py b/backend/app/modules/daemon/tests/test_sillyspec_compare.py
+index a2587c1be..5dec8e708 100644
+--- a/backend/app/modules/daemon/tests/test_sillyspec_compare.py
++++ b/backend/app/modules/daemon/tests/test_sillyspec_compare.py
+@@ -40,6 +40,7 @@ progress 归一化在真实读取路径上被断言（跨平台：tmp_path + POS
+ 
+ from __future__ import annotations
+ 
++import json
+ import urllib.parse
+ import uuid
+ from pathlib import Path
+@@ -1469,3 +1470,258 @@ async def test_compare_full_tree_fallback_not_triggered_when_primary_succeeds(
+     assert body["covered_changes"] == []
+     assert body["path_total"] is None
+     assert len(stub.calls) == 1
++
++
++# ── 平台留档回退（2026-10-20-conflict-platform-archive / FR-02 / FR-03）────────
++#    「行开记录亡」：daemon 记录双缺（change + full-tree 均
++#    conflict_record_missing）→ open 行 local_archive 自足回退；无留档/不命中/
++#    非 missing 错误维持原 502 四臂。
++
++
++def _archive_entry(
++    path: str,
++    content: str | None = None,
++    *,
++    missing: bool = False,
++    binary: bool = False,
++    truncated: bool = False,
++) -> dict[str, Any]:
++    """local_archive 单条（apply_ops 蒸馏器产物形态；mtime 为 ISO 串与快照同构）。"""
++    return {
++        "path": path,
++        "missing": missing,
++        "content": content,
++        "binary": binary,
++        "truncated": truncated,
++        "mtime": "2026-10-19T08:00:00+00:00",
++    }
++
++
++async def _seed_open_conflict_row(
++    db_session: AsyncSession,
++    workspace_id: uuid.UUID,
++    local_archive: list[dict[str, Any]] | None,
++    *,
++    status: str = "open",
++    details_json: str | None = None,
++) -> None:
++    """直插 spec_conflicts 行（仿 service._upsert_sync_conflict 落库终态）。"""
++    from app.modules.spec_profile.model import SpecConflict
++
++    if details_json is None:
++        details_json = json.dumps(
++            {
++                "kind": "incremental_push_conflict",
++                "server_versions": {},
++                "platform_deleted": [],
++                "conflicting_paths": [e["path"] for e in (local_archive or [])],
++                "last_seen_at": "2026-10-20T00:00:00+00:00",
++                "local_archive": local_archive,
++            },
++            ensure_ascii=False,
++        )
++    db_session.add(
++        SpecConflict(
++            workspace_id=workspace_id,
++            stage="spec-sync",
++            conflict_type="sync",
++            details_json=details_json,
++            status=status,
++        )
++    )
++    await db_session.commit()
++
++
++def _dead_record_stub(monkeypatch: pytest.MonkeyPatch, change: str) -> _SnapshotRpcStub:
++    """change 与 full-tree 双缺（记录亡形态）的 RPC stub。"""
++    from app.modules.daemon.runtime.service import DaemonRpcRemoteError
++
++    return _SnapshotRpcStub(
++        by_change={
++            change: DaemonRpcRemoteError(
++                {"code": "conflict_record_missing", "message": f"冲突记录不存在：{change}.json"}
++            ),
++            "full-tree": DaemonRpcRemoteError(
++                {"code": "conflict_record_missing", "message": "冲突记录不存在：full-tree.json"}
++            ),
++        }
++    ).install(monkeypatch)
++
++
++@pytest.mark.asyncio
++async def test_compare_archive_fallback_serves_local_archive(
++    client: AsyncClient,
++    db_session: AsyncSession,
++    tmp_path: Path,
++    monkeypatch: pytest.MonkeyPatch,
++) -> None:
++    """记录双缺 + open 行留档覆盖 → 200 platform-archive：机器侧=留档、平台侧=实时盘。"""
++    _owner, token, inst, ws, root = await _seed_full_env(db_session, tmp_path, tag="arc-hit")
++    stub = _dead_record_stub(monkeypatch, _CHANGE_A)
++    await _seed_open_conflict_row(
++        db_session,
++        ws.id,
++        [
++            _archive_entry(f"changes/archive/{_CHANGE_A}/design.md", "machine at conflict"),
++            _archive_entry(f"changes/archive/{_CHANGE_B}/proposal.md", "B proposal"),
++            _archive_entry("knowledge/fr/sillyspec.md", "kb"),
++        ],
++    )
++    _write_platform_file(root, f"changes/archive/{_CHANGE_A}/design.md", "platform now")
++
++    resp = await client.get(
++        _compare_url(inst.id, _CHANGE_A, kind="spec-tree", workspace_id=ws.id),
++        headers=_headers(token),
++    )
++    assert resp.status_code == 200, resp.text
++    body = resp.json()
++    assert body["record_label"] == "platform-archive"
++    assert body["covered_changes"] == [_CHANGE_A, _CHANGE_B]
++    assert body["path_total"] == 3
++    assert [f["path"] for f in body["files"]] == [f"changes/archive/{_CHANGE_A}/design.md"]
++    entry = body["files"][0]
++    assert entry["status"] == "modified"
++    assert entry["diff_rows"], "留档内容 vs 平台当前内容必须出真实 diff"
++    texts = {(r["type"], r.get("local_text"), r.get("platform_text")) for r in entry["diff_rows"]}
++    assert ("delete", "machine at conflict", None) in texts
++    assert ("insert", None, "platform now") in texts
++    assert len(stub.calls) == 2, "先试变更名再试 full-tree，均缺后才回退留档"
++
++
++@pytest.mark.asyncio
++async def test_compare_archive_fallback_missing_entry_is_platform_only(
++    client: AsyncClient,
++    db_session: AsyncSession,
++    tmp_path: Path,
++    monkeypatch: pytest.MonkeyPatch,
++) -> None:
++    """留档 missing 条目（机器侧已删）+ 平台文件存在 → platform_only（daemon 快照同语义）。"""
++    _owner, token, inst, ws, root = await _seed_full_env(db_session, tmp_path, tag="arc-miss")
++    _dead_record_stub(monkeypatch, _CHANGE_A)
++    await _seed_open_conflict_row(
++        db_session, ws.id, [_archive_entry(f"changes/{_CHANGE_A}/x.md", missing=True)]
++    )
++    _write_platform_file(root, f"changes/{_CHANGE_A}/x.md", "platform keeps it")
++
++    resp = await client.get(
++        _compare_url(inst.id, _CHANGE_A, kind="spec-tree", workspace_id=ws.id),
++        headers=_headers(token),
++    )
++    assert resp.status_code == 200, resp.text
++    assert resp.json()["files"][0]["status"] == "platform_only"
++
++
++@pytest.mark.asyncio
++async def test_compare_archive_fallback_segment_boundary_miss(
++    client: AsyncClient,
++    db_session: AsyncSession,
++    tmp_path: Path,
++    monkeypatch: pytest.MonkeyPatch,
++) -> None:
++    """留档只含 foobar 路径 → 段边界不命中，维持原 conflict_record_missing。"""
++    _owner, token, inst, ws, _root = await _seed_full_env(db_session, tmp_path, tag="arc-seg")
++    _dead_record_stub(monkeypatch, "foo")
++    await _seed_open_conflict_row(db_session, ws.id, [_archive_entry("changes/foobar/x.md", "x")])
++
++    resp = await client.get(
++        _compare_url(inst.id, "foo", kind="spec-tree", workspace_id=ws.id),
++        headers=_headers(token),
++    )
++    assert resp.status_code == 502, resp.text
++    body = resp.json()
++    assert body["details"]["daemon_code"] == "conflict_record_missing"
++    assert "重新同步" in body["message"]
++
++
++@pytest.mark.asyncio
++async def test_compare_archive_fallback_no_open_row_keeps_error(
++    client: AsyncClient,
++    db_session: AsyncSession,
++    tmp_path: Path,
++    monkeypatch: pytest.MonkeyPatch,
++) -> None:
++    """无 open 行（从未冲突/已关闭）→ 维持原 502。"""
++    _owner, token, inst, ws, _root = await _seed_full_env(db_session, tmp_path, tag="arc-norow")
++    _dead_record_stub(monkeypatch, _CHANGE_A)
++
++    resp = await client.get(
++        _compare_url(inst.id, _CHANGE_A, kind="spec-tree", workspace_id=ws.id),
++        headers=_headers(token),
++    )
++    assert resp.status_code == 502, resp.text
++    assert resp.json()["details"]["daemon_code"] == "conflict_record_missing"
++
++
++@pytest.mark.asyncio
++async def test_compare_archive_fallback_resolved_row_not_used(
++    client: AsyncClient,
++    db_session: AsyncSession,
++    tmp_path: Path,
++    monkeypatch: pytest.MonkeyPatch,
++) -> None:
++    """resolved 行的留档不回退（回退只查 open 行——关闭即退役）。"""
++    _owner, token, inst, ws, _root = await _seed_full_env(db_session, tmp_path, tag="arc-res")
++    _dead_record_stub(monkeypatch, _CHANGE_A)
++    await _seed_open_conflict_row(
++        db_session,
++        ws.id,
++        [_archive_entry(f"changes/{_CHANGE_A}/design.md", "stale")],
++        status="resolved",
++    )
++
++    resp = await client.get(
++        _compare_url(inst.id, _CHANGE_A, kind="spec-tree", workspace_id=ws.id),
++        headers=_headers(token),
++    )
++    assert resp.status_code == 502, resp.text
++
++
++@pytest.mark.asyncio
++async def test_compare_archive_fallback_corrupt_details_keeps_error(
++    client: AsyncClient,
++    db_session: AsyncSession,
++    tmp_path: Path,
++    monkeypatch: pytest.MonkeyPatch,
++) -> None:
++    """details_json 非法 JSON → 按无留档处理维持原错误（fail-soft 不 500）。"""
++    _owner, token, inst, ws, _root = await _seed_full_env(db_session, tmp_path, tag="arc-bad")
++    _dead_record_stub(monkeypatch, _CHANGE_A)
++    await _seed_open_conflict_row(db_session, ws.id, None, details_json="not-json{")
++
++    resp = await client.get(
++        _compare_url(inst.id, _CHANGE_A, kind="spec-tree", workspace_id=ws.id),
++        headers=_headers(token),
++    )
++    assert resp.status_code == 502, resp.text
++
++
++@pytest.mark.asyncio
++async def test_compare_archive_fallback_not_triggered_for_other_daemon_code(
++    client: AsyncClient,
++    db_session: AsyncSession,
++    tmp_path: Path,
++    monkeypatch: pytest.MonkeyPatch,
++) -> None:
++    """workspace_root_unknown（非记录缺失）→ 不回退留档，恰 1 次 RPC。"""
++    from app.modules.daemon.runtime.service import DaemonRpcRemoteError
++
++    _owner, token, inst, ws, _root = await _seed_full_env(db_session, tmp_path, tag="arc-code")
++    stub = _SnapshotRpcStub(
++        by_change={
++            _CHANGE_A: DaemonRpcRemoteError(
++                {"code": "workspace_root_unknown", "message": "工作区未认领"}
++            ),
++        }
++    ).install(monkeypatch)
++    await _seed_open_conflict_row(
++        db_session, ws.id, [_archive_entry(f"changes/{_CHANGE_A}/design.md", "unused")]
++    )
++
++    resp = await client.get(
++        _compare_url(inst.id, _CHANGE_A, kind="spec-tree", workspace_id=ws.id),
++        headers=_headers(token),
++    )
++    assert resp.status_code == 502, resp.text
++    body = resp.json()
++    assert body["details"]["daemon_code"] == "workspace_root_unknown"
++    assert len(stub.calls) == 1, "非记录缺失错误不得触发 full-tree 兜底或留档回退"
+diff --git a/backend/app/modules/spec_workspace/service.py b/backend/app/modules/spec_workspace/service.py
+index 69c2f1a4f..e09ddb3cd 100644
+--- a/backend/app/modules/spec_workspace/service.py
++++ b/backend/app/modules/spec_workspace/service.py
+@@ -458,6 +458,71 @@ def _spec_bundle_invalid(message: str, **details: object) -> AppError:
+     )
+ 
+ 
++# ── 冲突推送平台留档（2026-10-20-conflict-platform-archive）──────────────────
++# 被拒 op 的机器侧内容蒸馏进 spec_conflicts open 行 details_json.local_archive：
++# 机器本地记录亡（conflict_record_missing）时，对比端点以留档自足回退——「行开
++# 记录亡」不再恒 502（坑 conflict-compare-full-tree-label-mismatch 残留断层）。
++
++#: 单文件文本帽（字符）——超出截断置 truncated（该文件 diff 呈现部分行）。
++ARCHIVE_TEXT_CAP_PER_FILE_CHARS = 32_000
++#: 留档总量帽（字节，条目序列化口径）——超出后停止附加 content 仅保路径清单。
++ARCHIVE_TOTAL_BYTE_CAP = 512 * 1024
++#: 留档条目数帽（与 daemon 冲突快照 300 路径帽同口径）。
++ARCHIVE_ENTRY_CAP = 300
++
++
++def _distill_local_archive(ops: list["FileOp"]) -> list[dict[str, Any]]:
++    """被拒 op 列表 → 机器侧留档条目（纯函数；单条蒸馏异常 fail-soft 为 binary 条目）。
++
++    条目形态与 daemon 冲突快照 ``files[]`` 同构（path/missing/content/binary/
++    truncated/mtime），对比端点在记录缺失时直接作为机器侧快照消费
++    （sillyspec_compare ``_load_archived_snapshot``）。蒸馏规则：add/update/rename
++    以 new_path（rename）或 path 为机器侧路径、content 解码为 utf8 文本；delete
++    为机器侧已删（missing）；非法 base64 / 非 utf8 置 binary 不存文本。三重帽
++    逐级降级：单文件截断 → 总量停存 content → 条目数截断（路径清单优先保真）。
++    """
++    entries: list[dict[str, Any]] = []
++    total_bytes = 0
++    for op in ops[:ARCHIVE_ENTRY_CAP]:
++        # mtime Unix 秒 → ISO 串（daemon 快照 files[].mtime 同形态，对比响应 DTO
++        # local_mtime 为 str——留档条目与快照条目同构，回退路径零转换）。病态值
++        # （超范围浮点）fail-soft 为 None，不炸整次蒸馏（评审 P3 清偿）。
++        try:
++            mtime_iso = (
++                datetime.fromtimestamp(op.mtime, tz=UTC).isoformat()
++                if op.mtime is not None
++                else None
++            )
++        except (OverflowError, OSError, ValueError):
++            mtime_iso = None
++        entry: dict[str, Any] = {
++            "path": op.new_path if op.op == "rename" else op.path,
++            "missing": op.op == "delete",
++            "content": None,
++            "binary": False,
++            "truncated": False,
++            "mtime": mtime_iso,
++        }
++        if op.op != "delete" and op.content is not None:
++            try:
++                text = base64.b64decode(op.content, validate=True).decode("utf-8")
++            except (ValueError, UnicodeDecodeError):
++                entry["binary"] = True
++            else:
++                truncated = False
++                if len(text) > ARCHIVE_TEXT_CAP_PER_FILE_CHARS:
++                    text = text[:ARCHIVE_TEXT_CAP_PER_FILE_CHARS]
++                    truncated = True
++                candidate = {**entry, "content": text, "truncated": truncated}
++                size = len(json.dumps(candidate, ensure_ascii=False).encode("utf-8"))
++                if total_bytes + size <= ARCHIVE_TOTAL_BYTE_CAP:
++                    entry = candidate
++                    total_bytes += size
++                # 超总量帽：content 维持 None（路径/missing/binary/mtime 保留）。
++        entries.append(entry)
++    return entries
++
++
+ class _BatchProgressWriter:
+     """批量进度回写器（perf-remediation task-03 / D-002@v1）。
+ 
+@@ -1314,11 +1379,15 @@ class SpecWorkspaceService:
+         workspace_id: uuid.UUID,
+         server_versions: dict[str, int],
+         platform_deleted: list[str],
++        *,
++        conflicted_ops: list[FileOp] | None = None,
+     ) -> None:
+         """增量冲突 → spec_conflicts 开放行（幂等：同工作区同 stage 只更新不重复建）。
+ 
+         details_json 携带 server_versions / platform_deleted / 冲突路径与 last_seen_at，
+         供 GET /spec-conflicts 与前端横幅机器消费；created_at 保持首见时间。
++        local_archive（2026-10-20-conflict-platform-archive FR-01）：被拒 op 的机器侧
++        留档条目——对比端点在机器记录亡时以留档自足回退（每次冲突推送整体替换）。
+         """
+         from app.modules.spec_profile.model import SpecConflict
+ 
+@@ -1345,6 +1414,7 @@ class SpecWorkspaceService:
+                 "platform_deleted": platform_deleted,
+                 "conflicting_paths": conflicting,
+                 "last_seen_at": datetime.now(UTC).isoformat(),
++                "local_archive": _distill_local_archive(conflicted_ops or []),
+             },
+             ensure_ascii=False,
+         )
+@@ -2265,6 +2335,10 @@ class SpecWorkspaceService:
+         # task-02（design §5.4/§11）：被 platform_deleted 墓碑拒绝的 add/rename 路径
+         # （返回 dict 新增键，conflict 语义的显式回告——CLI 可感知被拒路径）。
+         platform_deleted_paths: list[str] = []
++        # 2026-10-20-conflict-platform-archive：被拒 op 收集（七处被拒点 append）——
++        # 推送本身携带机器侧事实（content/mtime/new_path），收尾蒸馏进 open 行
++        # local_archive 供对比自足回退，零新增 RPC。
++        conflicted_ops: list[FileOp] = []
+         # task-02（design §5.1 / FR-02）：本次 ops 涉及目录（delete 的 op.path /
+         # rename 的源与目标路径的父目录）——循环后统一自底向上清理空目录（仅涉及
+         # 目录链，R-03 禁整树扫描）。
+@@ -2360,6 +2434,7 @@ class SpecWorkspaceService:
+                     and op.path.replace("\\", "/").startswith(platform_deleted_prefixes)
+                 ):
+                     conflict = True
++                    conflicted_ops.append(op)
+                     if row is not None:
+                         if server_versions is None:
+                             server_versions = {}
+@@ -2383,6 +2458,7 @@ class SpecWorkspaceService:
+                     # （design §11），行维持墓碑不翻 exists。
+                     if row.platform_deleted:
+                         conflict = True
++                        conflicted_ops.append(op)
+                         if server_versions is None:
+                             server_versions = {}
+                         server_versions[op.path] = row.version
+@@ -2411,6 +2487,7 @@ class SpecWorkspaceService:
+                 # 由其派生但两处独立判定更稳）；行维持墓碑不翻 exists。
+                 if op.op == "update" and row is not None and row.platform_deleted:
+                     conflict = True
++                    conflicted_ops.append(op)
+                     if server_versions is None:
+                         server_versions = {}
+                     server_versions[op.path] = row.version
+@@ -2430,6 +2507,7 @@ class SpecWorkspaceService:
+                         new_versions[op.path] = row.version
+                         continue
+                     conflict = True
++                    conflicted_ops.append(op)
+                     if server_versions is None:
+                         server_versions = {}
+                     server_versions[op.path] = row.version
+@@ -2510,6 +2588,7 @@ class SpecWorkspaceService:
+                         platform_deleted_prefixes
+                     ):
+                         conflict = True
++                        conflicted_ops.append(op)
+                         if target_row is not None:
+                             if server_versions is None:
+                                 server_versions = {}
+@@ -2523,6 +2602,7 @@ class SpecWorkspaceService:
+                     # platform_deleted 项，不落盘不复活（区别于普通软删墓碑的放行复活）。
+                     if target_row is not None and target_row.platform_deleted:
+                         conflict = True
++                        conflicted_ops.append(op)
+                         if server_versions is None:
+                             server_versions = {}
+                         server_versions[op.new_path] = target_row.version
+@@ -2531,6 +2611,7 @@ class SpecWorkspaceService:
+                         continue
+                     if target_row is not None and target_row.exists:
+                         conflict = True
++                        conflicted_ops.append(op)
+                         if server_versions is None:
+                             server_versions = {}
+                         server_versions[op.new_path] = target_row.version
+@@ -2754,7 +2835,10 @@ class SpecWorkspaceService:
+         try:
+             if conflict or platform_deleted_paths:
+                 await self._upsert_sync_conflict(
+-                    workspace_id, server_versions or {}, platform_deleted_paths
++                    workspace_id,
++                    server_versions or {},
++                    platform_deleted_paths,
++                    conflicted_ops=conflicted_ops,
+                 )
+             else:
+                 await self._close_open_sync_conflicts(workspace_id)
+diff --git a/backend/app/modules/spec_workspace/tests/test_conflict_local_archive.py b/backend/app/modules/spec_workspace/tests/test_conflict_local_archive.py
+new file mode 100644
+index 000000000..75b7415a8
+--- /dev/null
++++ b/backend/app/modules/spec_workspace/tests/test_conflict_local_archive.py
+@@ -0,0 +1,392 @@
++"""冲突推送平台留档（local_archive）构建与落库守护测试。
++
++Change 2026-10-20-conflict-platform-archive task-01/02（design §做法概述 /
++§接口契约）：
++
++- 蒸馏器 `_distill_local_archive` 纯函数直测：
++  - add/update/rename 条目形态（utf8 文本 content / mtime 透传 / rename 取
++    new_path、delete 取 missing）；
++  - 非 utf8 / 非法 base64 → binary 条目不存文本（fail-soft 不抛）；
++  - 三重帽：单文件 32000 字符截断置 truncated；总量 512KB 后续条目停存
++    content（路径/missing/binary/mtime 保留）；条目数 300 帽。
++- apply_ops 七类被拒点 → open 行 details_json.local_archive 落库断言
++  （乐观锁冲突 add / delete 冲突 missing / 墓碑前缀拦截 / rename 目标占用），
++  以及冲突推送整体替换语义（第二次冲突推送覆盖第一次留档）。
++
++对照锚：全绿推送不建行、既有 details 键（conflicting_paths/server_versions/
++platform_deleted/last_seen_at）不缺——本变更只**新增** local_archive 键。
++
++author: qinyi
++created_at: 2026-10-20
++"""
++
++from __future__ import annotations
++
++import base64
++import hashlib
++import json
++import uuid
++from datetime import UTC, datetime
++from pathlib import Path
++
++from sqlalchemy import select
++
++from app.modules.spec_profile.model import SpecConflict
++from app.modules.spec_workspace.model import SpecFileManifest, SpecWorkspace
++from app.modules.spec_workspace.schema import FileOp
++from app.modules.spec_workspace.service import (
++    ARCHIVE_ENTRY_CAP,
++    ARCHIVE_TEXT_CAP_PER_FILE_CHARS,
++    ARCHIVE_TOTAL_BYTE_CAP,
++    SpecWorkspaceService,
++    _distill_local_archive,
++)
++from app.modules.workspace.model import Workspace
++
++# ---------------------------------------------------------------------------
++# Helpers（对齐 test_platform_deleted_guard.py 范式）
++# ---------------------------------------------------------------------------
++
++
++def _b64(text: str) -> str:
++    return base64.b64encode(text.encode("utf-8")).decode("ascii")
++
++
++def _op(op: str, path: str, base_version: int = 0, **extra: object) -> FileOp:
++    return FileOp(op=op, path=path, base_version=base_version, **extra)
++
++
++async def _make_workspace(db_session) -> Workspace:
++    ws = Workspace(
++        id=uuid.uuid4(),
++        name="conflict-local-archive ws",
++        slug=f"cla-{uuid.uuid4().hex[:8]}",
++        root_path="/tmp/conflict-local-archive-test",
++        status="active",
++        component_key="comp",
++    )
++    db_session.add(ws)
++    await db_session.commit()
++    await db_session.refresh(ws)
++    return ws
++
++
++async def _make_spec_workspace(db_session, workspace: Workspace, spec_root: Path) -> SpecWorkspace:
++    spec_ws = SpecWorkspace(
++        id=uuid.uuid4(),
++        workspace_id=workspace.id,
++        spec_root=str(spec_root),
++        strategy="platform-managed",
++        sync_status="clean",
++    )
++    db_session.add(spec_ws)
++    await db_session.commit()
++    await db_session.refresh(spec_ws)
++    return spec_ws
++
++
++async def _seed_manifest(
++    db_session,
++    ws_id: uuid.UUID,
++    path: str,
++    *,
++    version: int,
++    content: bytes,
++    exists: bool = True,
++    platform_deleted: bool = False,
++) -> SpecFileManifest:
++    row = SpecFileManifest(
++        id=uuid.uuid4(),
++        workspace_id=ws_id,
++        path=path,
++        content_hash=hashlib.sha256(content).hexdigest(),
++        version=version,
++        exists=exists,
++        platform_deleted=platform_deleted,
++    )
++    db_session.add(row)
++    await db_session.commit()
++    await db_session.refresh(row)
++    return row
++
++
++async def _open_conflict_row(db_session, ws_id: uuid.UUID) -> SpecConflict | None:
++    return (
++        (
++            await db_session.execute(
++                select(SpecConflict).where(
++                    SpecConflict.workspace_id == ws_id,
++                    SpecConflict.stage == "spec-sync",
++                    SpecConflict.status == "open",
++                )
++            )
++        )
++        .scalars()
++        .first()
++    )
++
++
++# ---------------------------------------------------------------------------
++# 蒸馏器纯函数
++# ---------------------------------------------------------------------------
++
++
++class TestDistillLocalArchive:
++    def test_add_utf8_entry_shape(self):
++        entries = _distill_local_archive(
++            [
++                _op(
++                    "add",
++                    "changes/foo/design.md",
++                    content=_b64("# 设计\n正文"),
++                    mtime=1_760_000_000.5,
++                )
++            ]
++        )
++        assert entries == [
++            {
++                "path": "changes/foo/design.md",
++                "missing": False,
++                "content": "# 设计\n正文",
++                "binary": False,
++                "truncated": False,
++                "mtime": datetime.fromtimestamp(1_760_000_000.5, tz=UTC).isoformat(),
++            }
++        ]
++
++    def test_delete_entry_missing(self):
++        entries = _distill_local_archive([_op("delete", "changes/foo/tasks.md", base_version=1)])
++        assert entries == [
++            {
++                "path": "changes/foo/tasks.md",
++                "missing": True,
++                "content": None,
++                "binary": False,
++                "truncated": False,
++                "mtime": None,
++            }
++        ]
++
++    def test_rename_entry_uses_new_path(self):
++        entries = _distill_local_archive(
++            [
++                _op(
++                    "rename",
++                    "changes/foo/old.md",
++                    new_path="changes/archive/foo/old.md",
++                    content=_b64("搬运内容"),
++                    base_version=3,
++                )
++            ]
++        )
++        assert entries[0]["path"] == "changes/archive/foo/old.md"
++        assert entries[0]["content"] == "搬运内容"
++        assert entries[0]["missing"] is False
++
++    def test_rename_without_content_kept_as_no_text(self):
++        entries = _distill_local_archive([_op("rename", "a.md", new_path="b.md", base_version=1)])
++        assert entries[0] == {
++            "path": "b.md",
++            "missing": False,
++            "content": None,
++            "binary": False,
++            "truncated": False,
++            "mtime": None,
++        }
++
++    def test_pathological_mtime_fail_soft_to_none(self):
++        # 评审 P3：病态 mtime（超范围浮点）不炸蒸馏——fail-soft 为 None，
++        # 其余条目字段照常。
++        entries = _distill_local_archive(
++            [
++                _op(
++                    "add",
++                    "changes/foo/x.md",
++                    content=_b64("ok"),
++                    mtime=1e300,
++                )
++            ]
++        )
++        assert entries[0]["mtime"] is None
++        assert entries[0]["content"] == "ok"
++
++    def test_non_utf8_content_is_binary(self):
++        entries = _distill_local_archive(
++            [_op("add", "bin/file.bin", content=base64.b64encode(b"\xff\xfe\x00").decode())]
++        )
++        assert entries[0]["binary"] is True
++        assert entries[0]["content"] is None
++
++    def test_invalid_base64_fail_soft_as_binary(self):
++        entries = _distill_local_archive([_op("add", "x.md", content="not-base64!!!")])
++        assert entries[0]["binary"] is True
++        assert entries[0]["content"] is None
++
++    def test_per_file_text_cap_truncates(self):
++        big = "x" * (ARCHIVE_TEXT_CAP_PER_FILE_CHARS + 8_000)
++        entries = _distill_local_archive([_op("update", "big.md", content=_b64(big))])
++        assert len(entries[0]["content"]) == ARCHIVE_TEXT_CAP_PER_FILE_CHARS
++        assert entries[0]["truncated"] is True
++
++    def test_total_byte_cap_stops_storing_content_not_paths(self):
++        # 每条 30000 字符（低于单文件 32000 帽不触发截断），~17 条起超出 512KB
++        # 总量帽 → 后续条目 content=None（路径/missing 保留）。
++        per_file = "y" * 30_000
++        ops = [_op("update", f"changes/foo/f{i:02d}.md", content=_b64(per_file)) for i in range(20)]
++        entries = _distill_local_archive(ops)
++        stored = [e for e in entries if e["content"] is not None]
++        dropped = [e for e in entries if e["content"] is None]
++        assert len(entries) == 20  # 路径清单必须完整保留
++        assert 15 <= len(stored) <= 18  # 512KB / ~30KB ≈ 17 条文本
++        assert dropped, "总量帽后必须有停存 content 的条目"
++        assert all(e["path"] for e in dropped)
++        assert all(e["content"] is None and e["missing"] is False for e in dropped)
++        serialized = len(json.dumps(entries, ensure_ascii=False).encode("utf-8"))
++        assert serialized <= ARCHIVE_TOTAL_BYTE_CAP + 30_000  # 停存后不失控膨胀
++
++    def test_entry_cap_300(self):
++        ops = [
++            _op("delete", f"changes/foo/d{i:04d}.md", base_version=1)
++            for i in range(ARCHIVE_ENTRY_CAP + 5)
++        ]
++        entries = _distill_local_archive(ops)
++        assert len(entries) == ARCHIVE_ENTRY_CAP
++        assert entries[0]["path"] == "changes/foo/d0000.md"
++
++    def test_empty_ops_empty_archive(self):
++        assert _distill_local_archive([]) == []
++
++
++# ---------------------------------------------------------------------------
++# apply_ops 被拒点 → open 行 local_archive 落库
++# ---------------------------------------------------------------------------
++
++
++class TestApplyOpsArchiveUpsert:
++    async def test_optimistic_lock_conflict_archives_content(self, db_session, tmp_path):
++        ws = await _make_workspace(db_session)
++        await _make_spec_workspace(db_session, ws, tmp_path)
++        svc = SpecWorkspaceService(db_session)
++        await _seed_manifest(
++            db_session, ws.id, "changes/foo/design.md", version=2, content=b"server v2"
++        )
++        result = await svc.apply_ops(
++            ws.id,
++            [
++                _op(
++                    "update",
++                    "changes/foo/design.md",
++                    base_version=1,
++                    content=_b64("machine v9"),
++                    mtime=1.5,
++                )
++            ],
++        )
++        assert result["conflict"] is True
++        row = await _open_conflict_row(db_session, ws.id)
++        assert row is not None
++        details = json.loads(row.details_json)
++        entry = details["local_archive"][0]
++        assert entry["path"] == "changes/foo/design.md"
++        assert entry["content"] == "machine v9"
++        assert entry["missing"] is False
++        assert entry["mtime"] == datetime.fromtimestamp(1.5, tz=UTC).isoformat()
++        # 既有键不缺（本变更只新增键）。
++        assert details["conflicting_paths"] == ["changes/foo/design.md"]
++        assert details["server_versions"] == {"changes/foo/design.md": 2}
++
++    async def test_delete_conflict_archives_missing(self, db_session, tmp_path):
++        ws = await _make_workspace(db_session)
++        await _make_spec_workspace(db_session, ws, tmp_path)
++        svc = SpecWorkspaceService(db_session)
++        await _seed_manifest(
++            db_session, ws.id, "changes/foo/tasks.md", version=2, content=b"server"
++        )
++        result = await svc.apply_ops(ws.id, [_op("delete", "changes/foo/tasks.md", base_version=1)])
++        assert result["conflict"] is True
++        details = json.loads((await _open_conflict_row(db_session, ws.id)).details_json)
++        assert details["local_archive"] == [
++            {
++                "path": "changes/foo/tasks.md",
++                "missing": True,
++                "content": None,
++                "binary": False,
++                "truncated": False,
++                "mtime": None,
++            }
++        ]
++
++    async def test_tombstone_prefix_rejection_archives(self, db_session, tmp_path):
++        ws = await _make_workspace(db_session)
++        await _make_spec_workspace(db_session, ws, tmp_path)
++        svc = SpecWorkspaceService(db_session)
++        await _seed_manifest(
++            db_session,
++            ws.id,
++            "changes/gone/old.md",
++            version=1,
++            content=b"x",
++            exists=False,
++            platform_deleted=True,
++        )
++        result = await svc.apply_ops(
++            ws.id,
++            [_op("add", "changes/gone/new.md", base_version=0, content=_b64("复活企图"))],
++        )
++        assert result["conflict"] is True
++        assert result["platform_deleted"] == ["changes/gone/new.md"]
++        details = json.loads((await _open_conflict_row(db_session, ws.id)).details_json)
++        assert details["local_archive"][0]["path"] == "changes/gone/new.md"
++        assert details["local_archive"][0]["content"] == "复活企图"
++
++    async def test_rename_target_occupied_archives_new_path(self, db_session, tmp_path):
++        ws = await _make_workspace(db_session)
++        await _make_spec_workspace(db_session, ws, tmp_path)
++        svc = SpecWorkspaceService(db_session)
++        # 源文件存在（本地与平台一致），目标被占用。
++        await _seed_manifest(db_session, ws.id, "changes/foo/a.md", version=1, content=b"a")
++        await _seed_manifest(db_session, ws.id, "changes/foo/b.md", version=4, content=b"occupied")
++        (tmp_path / "changes/foo").mkdir(parents=True, exist_ok=True)
++        (tmp_path / "changes/foo/a.md").write_bytes(b"a")
++        (tmp_path / "changes/foo/b.md").write_bytes(b"occupied")
++        result = await svc.apply_ops(
++            ws.id,
++            [
++                _op(
++                    "rename",
++                    "changes/foo/a.md",
++                    new_path="changes/foo/b.md",
++                    base_version=1,
++                )
++            ],
++        )
++        assert result["conflict"] is True
++        details = json.loads((await _open_conflict_row(db_session, ws.id)).details_json)
++        assert details["local_archive"][0]["path"] == "changes/foo/b.md"
++        assert details["local_archive"][0]["missing"] is False
++
++    async def test_second_conflict_push_replaces_archive(self, db_session, tmp_path):
++        ws = await _make_workspace(db_session)
++        await _make_spec_workspace(db_session, ws, tmp_path)
++        svc = SpecWorkspaceService(db_session)
++        await _seed_manifest(
++            db_session, ws.id, "changes/foo/design.md", version=2, content=b"server v2"
++        )
++        await svc.apply_ops(
++            ws.id,
++            [_op("update", "changes/foo/design.md", base_version=1, content=_b64("第一次"))],
++        )
++        await svc.apply_ops(
++            ws.id,
++            [_op("update", "changes/foo/design.md", base_version=1, content=_b64("第二次"))],
++        )
++        row = await _open_conflict_row(db_session, ws.id)
++        details = json.loads(row.details_json)
++        assert [e["content"] for e in details["local_archive"]] == ["第二次"]
++
++    async def test_green_push_leaves_no_open_row(self, db_session, tmp_path):
++        ws = await _make_workspace(db_session)
++        await _make_spec_workspace(db_session, ws, tmp_path)
++        svc = SpecWorkspaceService(db_session)
++        await svc.apply_ops(ws.id, [_op("add", "changes/foo/new.md", content=_b64("ok"))])
++        assert await _open_conflict_row(db_session, ws.id) is None
+diff --git a/backend/conftest.py b/backend/conftest.py
+index 59ea219c9..483be11ff 100644
+--- a/backend/conftest.py
++++ b/backend/conftest.py
+@@ -238,6 +238,12 @@ async def db_engine() -> AsyncIterator[Any]:
+     from app.modules.scan_docs import conflict_model as _scan_conflict_model  # noqa: F401
+     from app.modules.scan_docs import model as _scan_docs_model  # noqa: F401
+     from app.modules.skills import model as _skills_model  # noqa: F401
++
++    # 2026-10-20-conflict-platform-archive：spec_conflicts 表（定义在 spec_profile/
++    # model.py）。compare 留档回退（sillyspec_compare._load_archived_snapshot）在
++    # daemon 域查询该表——daemon 测试不 import spec_profile 时 create_all 缺表
++    # （单跑 vs 全模块跑差异），按本 fixture 既有惯例补根注册消除 import 顺序依赖。
++    from app.modules.spec_profile import model as _spec_profile_model  # noqa: F401
+     from app.modules.spec_workspace import model as _spec_ws_model  # noqa: F401
+     from app.modules.task import model as _task_model  # noqa: F401
+     from app.modules.tool_gateway import tool_policy as _tool_policy_model  # noqa: F401
+diff --git a/docs/releases/2026-10-20-001-e94cc6e8e.md b/docs/releases/2026-10-20-001-e94cc6e8e.md
+new file mode 100644
+index 000000000..6a1c2d952
+--- /dev/null
++++ b/docs/releases/2026-10-20-001-e94cc6e8e.md
+@@ -0,0 +1,99 @@
++---
++seq: 24
++deployed_at: "2026-10-20 08:49:14"
++status: success
++commit_from: 1df70b207
++commit_to: e94cc6e8e
++summary: 冲突对比平台留档自足回退全链路上线（留档构建+502 回退+前端来源横幅）；随版会话面板静默轮两连修、zcode 日志脱敏清偿与根级 ruff 拉锯根治
++agent: zcode-agent
++commits:
++  - sha: e94cc6e8e
++    message: "docs(spec): 文件变更清单补 conftest.py 自声明（spec_profile 根注册属本变更交付面——收口夹带嫌疑清偿） (2026-10-20-conflict-platform-archive)"
++    author: qinyi
++  - sha: 3bdec08b1
++    message: "docs(sillyspec): v3.33.1 AGENTS.md/CLAUDE.md 事件坑关闭转 finished——2026-10-19 用户裁决落地 + 2026-10-20 工具面核查，文件内补处置收口段与索引关闭留痕行 (坑清扫独立于 2026-10-20-conflict-platform-archive 变更面)"
++    author: qinyi
++  - sha: d620b8210
++    message: "chore(archive): 2026-10-20-sillyspec-gotchas-session 归档留档 + 蒸馏产物（独立评审一次 PASS 0 findings @06e0a0cc；纯 docs 变更实测门跳过；knowledge validate 0 错 0 警）"
++    author: qinyi
++  - sha: 06e0a0cc5
++    message: "docs(spec): 2026-10-20-sillyspec-gotchas-session 规格工件入库（requirements FR×3+design 四问+proposal+flow-state 基线锚） (2026-10-20-sillyspec-gotchas-session)"
++    author: qinyi
++  - sha: 76ef51f8f
++    message: "docs(knowledge): sillyspec-gotchas 四条工具负面问题入坑库——route-hindsight 改写率阈值对小任务偏紧且拦截成本错位 / flow done dirty 缺口三选一缺并行会话文件处置 / 归档提交 pathspec 打印到执行窗口共享暂存区竞态 / design 四问题面逐字钉死只在报错时学到；INDEX 同步 4 行索引 (2026-10-20-sillyspec-gotchas-session)"
++    author: qinyi
++  - sha: c424321d6
++    message: "feat(spec-workspace,daemon): 冲突推送平台留档与对比自足回退——service.py _distill_local_archive 纯函数（七处被拒点收集、三重帽 32000/512KB/300）+ _upsert_sync_conflict 增参 local_archive；sillyspec_compare.py compare 捕获 conflict_record_missing 回退 _load_archived_snapshot（fail-soft/record_label=platform-archive）；新增回退 7 用例，59/59 绿 (2026-10-20-conflict-platform-archive) (task-01) (task-02) (task-03)"
++    author: qinyi
++  - sha: 567d07ab0
++    message: "chore(test): 回归清偿——四套件 109 过 1 平台性跳过（symlink Windows 预存）、conftest I001 空行修正、ruff format 对齐、mypy 两源文件零问题 (2026-10-20-conflict-platform-archive) (task-05)"
++    author: qinyi
++  - sha: 4d3a4c0cc
++    message: "feat(frontend): 对比弹窗 platform-archive 留档来源横幅——机器侧为冲突时点平台留档、平台侧为当前内容，与 full-tree 横幅同款样式且互斥；modal 套件 20/20 绿 (2026-10-20-conflict-platform-archive) (task-04)"
++    author: qinyi
++  - sha: ec0927d36
++    message: "chore(archive): 2026-10-20-root-ruff-config 归档留档 + 蒸馏产物（独立评审 PASS @97833682 含 1×P3 留债：spikes/ 6 文件待后续清到 100 口径）"
++    author: qinyi
++  - sha: 978336829
++    message: "docs(spec): 2026-10-20-root-ruff-config 规格工件入库 (2026-10-20-root-ruff-config)"
++    author: qinyi
++  - sha: 7396ebb76
++    message: "fix(build): 根级ruff配置锚定行宽消除钩子拉锯——新增根 ruff.toml（line-length=100 与 backend/pyproject 同源），pre-commit ruff-format 钩子与拦截建议命令对根级 scripts/*.py 的双向拆台根治；backend 子树零影响；assertion-surfaces 闸门实跑过+scan-drift 32 用例绿 (2026-10-20-root-ruff-config)"
++    author: qinyi
++  - sha: c265bd922
++    message: "chore(archive): 2026-10-20-backfill-dryrun-log-scrub 归档留档 + 蒸馏产物（独立评审一次 PASS 0 findings @3490518aa；实测门绿）"
++    author: qinyi
++  - sha: 3490518aa
++    message: "docs(spec): 2026-10-20-backfill-dryrun-log-scrub 规格工件入库 (2026-10-20-backfill-dryrun-log-scrub)"
++    author: qinyi
++  - sha: 046ad8e46
++    message: "fix(scripts,daemon): 回填脚本缺省dry-run加yes门与zcode spawn明文日志移除——backfill_commit_type.py 裸跑改零落盘（缺省 dry-run/--apply/--yes 确认门）；zcode-app-server-driver 移除未脱敏 cwd/cmd/args 明文诊断日志；sandbox 冒烟四步绿 + zcode 相关 3 文件 50 用例绿 + daemon tsc 0 错 (2026-10-20-backfill-dryrun-log-scrub)"
++    author: qinyi
++  - sha: 382aa4cda
++    message: "Merge remote-tracking branch 'origin/main'（并行变更整合：本地 cross-repo-patch-slicing 系列 25 提交 × 远端 preview-card-empty-turn-fix 系列 11 提交）"
++    author: qinyi
++  - sha: d0ca134eb
++    message: "chore(archive): 2026-10-19-cross-repo-patch-slicing 源侧目录注销（随归档搬移）"
++    author: qinyi
++  - sha: 5de267a07
++    message: "docs(release): seq23 发布记录——跨仓冻结面全链路上线 + 随版翻译真机轮 (2026-10-19-cross-repo-patch-slicing)"
++    author: qinyi
++---
++
++## 本次部署
++
++冲突对比「行开记录亡」痛点根治全链路上线（2026-10-20-conflict-platform-archive，本部署主交付）：
++
++- 🆕 **平台留档构建**（c424321d6）：冲突推送时被拒 op 的机器侧内容（add/update 的 base64
++  content 与 mtime、rename 目标路径）蒸馏留档进 open 行 `details_json.local_archive`——
++  单文件 32K 字符帽截断留标记、总量 512KB 帽停存留路径清单、300 文件帽；推送主流程零新增
++  RPC、留档失败不阻断。
++- 🆕 **对比自足回退**（c424321d6）：对比端点在 daemon 返回 `conflict_record_missing` 且留档
++  覆盖所请求路径时，以留档构造对比响应（`record_label=platform-archive`）——机器本地记录
++  消亡后对比不再恒 502，无留档时错误路径与现状逐字节一致。
++- 🆕 **前端来源横幅**（4d3a4c0cc）：对比弹窗对 platform-archive 显示「平台留档快照·冲突时点
++  机器侧内容 vs 平台当前内容」横幅，与 full-tree 横幅同款样式且互斥。
++
++随版合入（并行会话已完成变更）：
++
++- 🔧 会话面板静默轮两连修（preview-card-empty-turn-fix，10-19 013/014 已先期上线，本部署
++  随全量重建固化）：纯切换档案轮不再渲染展不开的死卡；导航点击静默轮改原文 warning 轻提示。
++- 🔧 zcode spawn 明文诊断日志移除（脱敏缺口清偿）+ 回填脚本缺省 dry-run 安全门
++  （046ad8e46）。
++- ⚡ 根级 ruff.toml 锚定行宽，根治 pre-commit 钩子拉锯（7396ebb76）。
++- 📄 v3.33.1 事件坑关闭、sillyspec-gotchas 坑库四条入库、各变更归档蒸馏件。
++
++## 📝 部署验证
++
++- daemon bundle 重打（build id `76ef51f8-20261020083935`）：`/daemon/latest.json` 分发版本
++  吻合；`/daemon/latest/sillyhub-daemon.js` GET 200 + `application/javascript`；
++  `install.sh` `bash -n` SYNTAX_OK。
++- backend + frontend 镜像重建 + `--force-recreate`，五容器全部 healthy；
++  `/api/health`（8001 直连 / 3001 代理）均 `status:ok db:ok redis:ok`
++  （`commit_sha=unknown` 为 Windows 免 export COMMIT_SHA 的稳定性豁免预期值）。
++- 容器内新代码实证：backend `service.py` 含 `_distill_local_archive`（2 处）、
++  `sillyspec_compare.py` 含 `platform-archive`（6 处）；frontend chunk 含
++  `platform-archive` 与「平台留档」横幅文案。
++- 备注：平台 API 登录字段已从 `email` 变为 `account`（技能文档待同步），且当前 DB 管理员
++  密码与 `deploy/.env` 不一致（bootstrap 只建不改，401）——本次锚点取自本地记录 seq23
++  @1df70b207（2026-10-19 19:42:00，晚于并行 014@14:45）。
+diff --git a/docs/sillyspec/active-pitfalls.md b/docs/sillyspec/active-pitfalls.md
+index 032c13634..9d28d60e4 100644
+--- a/docs/sillyspec/active-pitfalls.md
++++ b/docs/sillyspec/active-pitfalls.md
+@@ -20,3 +20,4 @@
+ <!-- external-mode-no-root-session-resolution.md：双形态契约守则——external 模式（无根会话）parent 链/根会话解析（已知断裂点已修+冒烟用例已落；守则参考文档长期活跃，不随单点修复归档）（2026-09-11） -->
+ <!-- verify-gate-worktree-crossrepo-three-defects.md：verify 门禁三缺陷——同文件叠加多变更快照破（设计项余留）/跨仓 node:test 行级误计（已修）/冒烟 cwd 假阳性（已修）（2026-09-21，保持活跃：仅缺陷二余项） -->
+ <!-- archive-half-state-location-stuck-active.md：归档半态保底缺口——location（文件树通道）与 status（DB 通道）双通道半成功 + 重试挂「下一条命令」死事件源，已归档变更平台「进行中」幽灵滞留（2026-10-17 实证 54 分钟）→ 已关闭（2026-10-17-archive-terminal-sync-strict 5147c63f：triggerSyncTerminalStrict 三终态点强校验——终态判定/内联有界/🚨+自救命令+exit1；560af6a2 signal 形状修复 dogfood 实战验证；terminal-sync-strict 10/10 绿；存量半态一次性手动 platform sync 收敛；2026-10-18 已移入 finished/） -->
++<!-- 2026-10-19-sillyspec-v3.33.1-rewrites-agents-md-deletes-claude-md.md：v3.33.1 自升级静默重写 AGENTS.md + 删 .claude/CLAUDE.md（工作区事件 + 工具三项修复要求）→ 已关闭（2026-10-19 用户裁决落地 b35291abb 全部提交、CLAUDE.md 恢复入库；2026-10-20 核查：CLI 面注入仅显式 init 可达、无删除 CLAUDE.md 路径、升级不覆盖仅告警（src/init.js:195/:244）、工具模板剔出交付/冻结/跨仓面（71b3ff3e+6049c3e0）；daemon 平台模式自动 init 属设计语义留文件内注记；2026-10-20 已移入 finished/） -->
+diff --git a/docs/sillyspec/2026-10-19-sillyspec-v3.33.1-rewrites-agents-md-deletes-claude-md.md b/docs/sillyspec/finished/2026-10-19-sillyspec-v3.33.1-rewrites-agents-md-deletes-claude-md.md
+similarity index 54%
+rename from docs/sillyspec/2026-10-19-sillyspec-v3.33.1-rewrites-agents-md-deletes-claude-md.md
+rename to docs/sillyspec/finished/2026-10-19-sillyspec-v3.33.1-rewrites-agents-md-deletes-claude-md.md
+index 4a703619f..3a2b287c0 100644
+--- a/docs/sillyspec/2026-10-19-sillyspec-v3.33.1-rewrites-agents-md-deletes-claude-md.md
++++ b/docs/sillyspec/finished/2026-10-19-sillyspec-v3.33.1-rewrites-agents-md-deletes-claude-md.md
+@@ -25,3 +25,26 @@
+ - **给后续会话的提醒**：进仓库先核对 `.claude/CLAUDE.md` 存在且与
+   `git show HEAD:.claude/CLAUDE.md` 一致；暂存一律用精确 pathspec，禁 `git add -A`
+   （本次 `add -A` 曾把 CLAUDE.md 的删除一并暂存，已及时撤掉）。
++
++## 处置收口（2026-10-20 关闭核查）
++
++- **用户裁决已落地**（2026-10-19，b35291abb）：AGENTS.md 新版（v3.33.1 自包含指引）经
++  用户指示全部提交，`.claude/CLAUDE.md` 已恢复并入库——本坑记录的工作区事件
++  （静默重写 + 未暂存删除）闭环，仓库两文件现为一致的已提交态。
++- **工具侧现状核查**（sillyspec 仓 main，2026-10-20）：
++  1. init 注入唯一入口是显式 `sillyspec init`（src/index.js:454；injectAgentsInstructions
++     无其它调用方）；CLI 入口自动迁移只有 migrateRuntimeLayout（仅 .runtime 布局，不碰
++     AGENTS.md/CLAUDE.md）；全 src 无删除 CLAUDE.md 的代码路径（cleanupRuntimeResidue 只清
++     legacy `.sillyspec/codebase` 与 `.runtime`）；
++  2. 完整态 AGENTS.md 与旧版完整 CLAUDE.md 升级时均「不覆盖，仅 stderr 告警 + 备份后手动
++     迁移」指引（src/init.js:195 / :244）——「删除前确认/留痕」与「输出报告」两项在 CLI 面
++     已满足；
++  3. 工具治理模板（.claude/.codex/.gemini/.opencode/.zcode/.cursor + CLAUDE.md）已整体剔出
++     冻结/提交/独占脏面/孤儿面与跨仓对账面（sillyspec 2026-10-19-freeze-filter-tool-scaffold
++     71b3ff3e + 2026-10-19-cross-repo-face-tool-filter 6049c3e0），模板变更不再随交付面流入
++     消费仓。
++- **遗留注记（不影响关闭）**：daemon 平台模式仍按编排自动 spawn `sillyspec init` 与自动
++  升级（sillyhub-daemon preflight.ts / spec-sync.ts，平台模式设计语义）；本次事件的确切
++  触发路径未复现定位——若再现，将落在「模板不入交付面 + init 不删文件 + 有输出报告」的
++  新口径下，危害面已收窄。
++- 处置结论：工作区事件已裁决闭环 + 待工具修复三项在现行 CLI 面满足，本文件移入 finished/。
+diff --git a/frontend/src/components/changes/__tests__/conflict-compare-modal.test.tsx b/frontend/src/components/changes/__tests__/conflict-compare-modal.test.tsx
+index 944f668e7..9d3200acd 100644
+--- a/frontend/src/components/changes/__tests__/conflict-compare-modal.test.tsx
++++ b/frontend/src/components/changes/__tests__/conflict-compare-modal.test.tsx
+@@ -462,6 +462,24 @@ describe("ConflictCompareModal（task-06 红态锚定 / design §7.2）", () =>
+     expect(screen.queryByTestId("compare-record-source")).toBeNull();
+   });
+ 
++  it("platform-archive 留档回退——留档来源横幅 + full-tree 横幅互斥", async () => {
++    mocks.getCompare.mockResolvedValue({
++      ...SPEC_TREE_RESP,
++      record_label: "platform-archive",
++      covered_changes: ["2026-09-02-my-change", "2026-09-03-sibling-change"],
++      path_total: 9,
++    });
++    renderModal();
++
++    await screen.findByText(/涉及 4 个文件/);
++    const notice = screen.getByTestId("compare-archive-source");
++    expect(notice).toHaveTextContent(/本机冲突记录已不存在/);
++    expect(notice).toHaveTextContent(/平台留档快照/);
++    expect(notice).toHaveTextContent(/平台侧为当前内容/);
++    expect(notice).toHaveTextContent(/覆盖 2 个变更/);
++    expect(screen.queryByTestId("compare-record-source")).toBeNull();
++  });
++
+   // ── 5. 截断与二进制占位（§7.2 local_truncated / diff_truncated / binary）──
+ 
+   it("截断与二进制——local_truncated/diff_truncated 提示条 + binary「无法文本对比」占位", async () => {
+diff --git a/frontend/src/components/changes/conflict-compare-modal.tsx b/frontend/src/components/changes/conflict-compare-modal.tsx
+index 912a8c040..81561cce0 100644
+--- a/frontend/src/components/changes/conflict-compare-modal.tsx
++++ b/frontend/src/components/changes/conflict-compare-modal.tsx
+@@ -367,6 +367,19 @@ export function ConflictCompareModal({
+             <code className="font-mono">{data.change}</code> 相关的 {files.length} 个路径。
+           </p>
+         )}
++        {/* 平台留档快照来源提示（2026-10-20-conflict-platform-archive FR-04）：本机
++            记录已亡，机器侧内容为冲突时点的平台留档、平台侧为当前内容 */}
++        {data?.record_label === "platform-archive" && (
++          <p
++            className="border-b bg-muted/60 px-5 py-1.5 text-xs text-muted-foreground"
++            data-testid="compare-archive-source"
++          >
++            本机冲突记录已不存在——机器侧内容为冲突时点的平台留档快照（非本机实时
++            状态），平台侧为当前内容；留档覆盖{" "}
++            {(data.covered_changes ?? []).length} 个变更，本次仅展示与{" "}
++            <code className="font-mono">{data.change}</code> 相关的 {files.length} 个路径。
++          </p>
++        )}
+         {/* 整响应超限提示（2MB 帽丢部分差异明细；措辞避开与单文件截断提示混排） */}
+         {data?.response_truncated && (
+           <p className="border-b border-warning/30 bg-warning/10 px-5 py-1.5 text-xs text-warning">

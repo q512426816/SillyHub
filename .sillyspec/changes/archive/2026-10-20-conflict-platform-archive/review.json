@@ -1,0 +1,15 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-20-conflict-platform-archive",
+  "reviewer": "subagent",
+  "verdict": "PASS",
+  "reviewedAgainst": "ffab0aa2e9dafa7c1fa67528d15f08941d4ee87b",
+  "findings": [],
+  "dimensionNotes": {
+    "乱序": "ok",
+    "并发": "ok",
+    "切换": "ok",
+    "作用域": "ok"
+  },
+  "reviewedAt": "2026-10-20T00:56:36Z"
+}
