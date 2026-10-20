@@ -56,6 +56,7 @@ created_at: 2026-10-20T07:02:11.489Z
 |---|---|---|
 | 修改 | backend/app/modules/daemon/session/service/inject.py | `_inject_into_session` commit 后补发 status_changed（非纯切换轮） |
 | 修改 | backend/app/modules/daemon/run_sync/service/submit_commit.py | 激活块构造 `PublishIntent.list_signal` 标量 |
+| 修改 | backend/app/modules/daemon/run_sync/service/submit_steps.py | `_SubmitState` 新增 list_signal 字段（激活块置位、finalize 读取） |
 | 修改 | backend/app/modules/daemon/run_sync/service/publish.py | PublishIntent 新增 list_signal 字段；publish_submitted_messages 消费补发 |
 | 修改 | backend/app/modules/agent/coordinator.py | request_approval/approve commit 后补发 |
 | 修改 | backend/app/modules/daemon/run_sync/service/close_run_steps.py | `_close_flip_session` active 分支也置 sessions_changed_intent（注释同步更新） |
@@ -64,4 +65,5 @@ created_at: 2026-10-20T07:02:11.489Z
 | 修改 | backend/app/modules/daemon/tests/test_submit_messages_no_overwrite_terminal.py | 激活信号标量用例（发+rowcount=0 不发+publish 消费段） |
 | 新增 | backend/app/modules/agent/tests/test_coordinator_approval_signal.py | 审批两点用例（成功发+拒绝不发） |
 | 修改 | backend/app/modules/daemon/tests/test_close_interactive_run_session_status.py | 多轮 keep-active 用例扩展 publish 断言 |
+| 修改 | backend/app/modules/daemon/tests/test_session_events_cross.py | 信号契约钉子测试随新行为更新（多轮 keep-active 照发） |
 | 新增 | frontend/src/components/daemon/__tests__/session-panel-approval-list-refresh.test.tsx | permission_request→列表刷新用例 |
