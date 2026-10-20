@@ -1,0 +1,51 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-20-preset-engine-endpoint",
+  "rows": [
+    {
+      "anchor": "FR-01",
+      "row_id": "2026-10-20-preset-engine-endpoint:flow:测试绑定FR-01",
+      "tests": [
+        "frontend/src/components/llm-providers/__tests__/llmProviderPresets.test.ts「zhipu_glm/opencode_go 声明 codex 覆盖且端点/模型正确；其余预设无覆盖」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-20-preset-engine-endpoint"
+    },
+    {
+      "anchor": "FR-02",
+      "row_id": "2026-10-20-preset-engine-endpoint:flow:测试绑定FR-02",
+      "tests": [
+        "frontend/src/components/llm-providers/__tests__/llm-provider-form.test.tsx「勾选 Codex 联动切换 codex 端点并取消 Claude 勾选；取消 Codex 恢复 claude 形态」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-20-preset-engine-endpoint"
+    },
+    {
+      "anchor": "FR-03",
+      "row_id": "2026-10-20-preset-engine-endpoint:flow:测试绑定FR-03",
+      "tests": [
+        "frontend/src/components/llm-providers/__tests__/llm-provider-form.test.tsx「自定义表单勾选 Codex 零联动（base_url/模型不变）」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-20-preset-engine-endpoint"
+    }
+  ]
+}
