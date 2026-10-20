@@ -43,5 +43,6 @@ created_at: 2026-10-20T01:13:17.386Z
 
 | 操作 | 路径 | 说明 |
 |---|---|---|
-| 修改 | frontend/src/components/daemon/session-floating-pill-dock.tsx | clampPos 返回值透传 p.left(拖拽中间态继承吸附侧标记) |
+| 修改 | frontend/src/components/daemon/session-floating-pill-dock.tsx | clampPos 返回值透传 p.left(拖拽中间态继承吸附侧标记);dragRef 拖拽起点快照记录吸附侧,onPointerMove 构造携带 |
 | 修改 | frontend/src/components/daemon/__tests__/session-floating-pill-dock.test.tsx | 新增左停靠拖拽中保持 items-start 用例;既有拖拽用例补拖拽中 items-end 断言 |
+| 修改 | .gitignore | 收口处置伴随:ignore `deploy/models/fastembed_cache/`(backend 容器重启生成的运行时模型缓存,污染冻结面被收口阻断,治本入库规则) |

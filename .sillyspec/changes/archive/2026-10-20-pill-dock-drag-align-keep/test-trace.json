@@ -1,0 +1,52 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-20-pill-dock-drag-align-keep",
+  "rows": [
+    {
+      "anchor": "FR-01",
+      "row_id": "2026-10-20-pill-dock-drag-align-keep:flow:测试绑定FR-01",
+      "tests": [
+        "frontend/src/components/daemon/__tests__/session-floating-pill-dock.test.tsx「左停靠拖拽过程中保持左对齐(新增:吸附左后二次拖拽中断言 items-start)」",
+        "frontend/src/components/daemon/__tests__/session-floating-pill-dock.test.tsx「按住拖动超过阈值…(补拖拽中 items-end 断言)」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-20-pill-dock-drag-align-keep"
+    },
+    {
+      "anchor": "FR-02",
+      "row_id": "2026-10-20-pill-dock-drag-align-keep:flow:测试绑定FR-02",
+      "tests": [
+        "frontend/src/components/daemon/__tests__/session-floating-pill-dock.test.tsx「左停靠拖拽过程中保持左对齐(用例尾段:拖回右半边松手吸附后切 items-end)」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-20-pill-dock-drag-align-keep"
+    },
+    {
+      "anchor": "FR-03",
+      "row_id": "2026-10-20-pill-dock-drag-align-keep:flow:测试绑定FR-03",
+      "tests": [
+        "frontend/src/components/daemon/__tests__/session-floating-pill-dock.test.tsx「全量用例(含既有 12 例回归)」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-20-pill-dock-drag-align-keep"
+    }
+  ]
+}

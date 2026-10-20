@@ -307,3 +307,60 @@ created_at: 2026-10-16T01:30:35.950Z
   confirmed_at: null
   source_change: 2026-10-20-pill-dock-left-align
   status: active
+
+## FR-test-utils-018 左停靠的组拖拽过程中内容保持左对齐,不再翻回右对齐;右停靠同理保持右对齐
+变更：2026-10-20-pill-dock-drag-align-keep
+状态：active
+摘要：主路径；右停靠拖拽不受影响
+全文：.sillyspec/changes/archive/2026-10-20-pill-dock-drag-align-keep/requirements.md#FR-01
+最近确认：4f77e50c12b353f42e8442aed1fcdfea34234511
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-20-pill-dock-drag-align-keep:flow:测试绑定FR-01
+  tests: frontend/src/components/daemon/__tests__/session-floating-pill-dock.test.tsx「左停靠拖拽过程中保持左对齐(新增:吸附左后二次拖拽中断言 items-start)」 | frontend/src/components/daemon/__tests__/session-floating-pill-dock.test.tsx「按住拖动超过阈值…(补拖拽中 items-end 断言)」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-20-pill-dock-drag-align-keep
+  status: active
+
+## FR-test-utils-019 松手吸附后仍按吸附侧正确切换对齐(既有行为不变)
+变更：2026-10-20-pill-dock-drag-align-keep
+状态：active
+摘要：主路径
+全文：.sillyspec/changes/archive/2026-10-20-pill-dock-drag-align-keep/requirements.md#FR-02
+最近确认：4f77e50c12b353f42e8442aed1fcdfea34234511
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-20-pill-dock-drag-align-keep:flow:测试绑定FR-02
+  tests: frontend/src/components/daemon/__tests__/session-floating-pill-dock.test.tsx「左停靠拖拽过程中保持左对齐(用例尾段:拖回右半边松手吸附后切 items-end)」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-20-pill-dock-drag-align-keep
+  status: active
+
+## FR-test-utils-020 dock 测试全绿(新增拖拽中对齐保持断言)
+变更：2026-10-20-pill-dock-drag-align-keep
+状态：active
+摘要：主路径
+全文：.sillyspec/changes/archive/2026-10-20-pill-dock-drag-align-keep/requirements.md#FR-03
+最近确认：4f77e50c12b353f42e8442aed1fcdfea34234511
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-20-pill-dock-drag-align-keep:flow:测试绑定FR-03
+  tests: frontend/src/components/daemon/__tests__/session-floating-pill-dock.test.tsx「全量用例(含既有 12 例回归)」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-20-pill-dock-drag-align-keep
+  status: active

@@ -1,0 +1,100 @@
+diff --git a/.gitignore b/.gitignore
+index 19eee4ce3..5b85ebcfb 100644
+--- a/.gitignore
++++ b/.gitignore
+@@ -97,3 +97,6 @@ attachments/[0-9a-f]*
+ 
+ # 2026-10-15-server-logs-panel：后端轮转日志运行产物（data/logs/backend.log 等）
+ data/logs/
++
++# fastembed 模型运行时缓存（backend 容器挂载 deploy/models 生成，勿入库）
++deploy/models/fastembed_cache/
+diff --git a/frontend/src/components/daemon/__tests__/session-floating-pill-dock.test.tsx b/frontend/src/components/daemon/__tests__/session-floating-pill-dock.test.tsx
+index f915ea800..de8cbdb4a 100644
+--- a/frontend/src/components/daemon/__tests__/session-floating-pill-dock.test.tsx
++++ b/frontend/src/components/daemon/__tests__/session-floating-pill-dock.test.tsx
+@@ -95,6 +95,8 @@ describe("SessionFloatingPillDock（2026-10-16-session-pill-dock-drag）", () =>
+     expect(dock.style.left).toBe("408px");
+     expect(dock.style.top).toBe("312px");
+     expect(dock.className).toContain("cursor-grabbing");
++    // 拖拽中间态透传起步吸附侧（默认右下位）→ 保持右对齐
++    expect(dock.className).toContain("items-end");
+ 
+     fireEvent(window, pointerEvt("pointerup", { pointerId: 7, clientX: 400, clientY: 300 }));
+     // 408+0/2 ≤ 512 → 吸附左缘 EDGE_GAP=16；纵向保持；贴左组内容左对齐
+@@ -106,6 +108,29 @@ describe("SessionFloatingPillDock（2026-10-16-session-pill-dock-drag）", () =>
+     expect(JSON.parse(window.localStorage.getItem(DOCK_KEY)!)).toEqual({ x: 16, y: 312 });
+   });
+ 
++  it("左停靠拖拽过程中保持左对齐，拖到右半边松手吸附后切右对齐", () => {
++    renderDock();
++    const dock = dockEl();
++    // 铺垫：拖到左半边松手吸附左缘（左停靠态，items-start）
++    fireEvent(dock, pointerEvt("pointerdown", { button: 0, pointerId: 7, clientX: 1000, clientY: 660 }));
++    fireEvent(window, pointerEvt("pointermove", { pointerId: 7, clientX: 400, clientY: 300 }));
++    fireEvent(window, pointerEvt("pointerup", { pointerId: 7, clientX: 400, clientY: 300 }));
++    expect(dock.style.left).toBe("16px");
++    expect(dock.className).toContain("items-start");
++
++    // 二次拖拽（拖拽中）：中间态透传吸附侧标记，保持 items-start 不翻回右对齐
++    fireEvent(dock, pointerEvt("pointerdown", { button: 0, pointerId: 8, clientX: 20, clientY: 312 }));
++    fireEvent(window, pointerEvt("pointermove", { pointerId: 8, clientX: 600, clientY: 300 }));
++    expect(dock.className).toContain("cursor-grabbing");
++    expect(dock.className).toContain("items-start");
++    expect(dock.className).not.toContain("items-end");
++
++    // 拖到右半边松手：吸附右缘，对齐才切回 items-end（松手定侧）
++    fireEvent(window, pointerEvt("pointerup", { pointerId: 8, clientX: 600, clientY: 300 }));
++    expect(dock.style.left).toBe("1008px");
++    expect(dock.className).toContain("items-end");
++  });
++
+   it("拖到右半屏松手吸附右缘", () => {
+     renderDock();
+     const dock = dockEl();
+diff --git a/frontend/src/components/daemon/session-floating-pill-dock.tsx b/frontend/src/components/daemon/session-floating-pill-dock.tsx
+index cca4f1497..b009b90ec 100644
+--- a/frontend/src/components/daemon/session-floating-pill-dock.tsx
++++ b/frontend/src/components/daemon/session-floating-pill-dock.tsx
+@@ -57,11 +57,14 @@ function viewportBounds(): DockBounds {
+   };
+ }
+ 
+-/** 钳制组左上角使整组留在边界内（w/h 为组实际尺寸）。 */
++/** 钳制组左上角使整组留在边界内（w/h 为组实际尺寸）。透传 p.left——
++    拖拽中间态继承最近吸附态的侧别标记，渲染保持拖拽前对齐方向，松手
++    snapPos 重判覆盖。 */
+ function clampPos(p: DockPos, w: number, h: number, b: DockBounds): DockPos {
+   return {
+     x: Math.min(Math.max(p.x, b.left), Math.max(b.left, b.right - w)),
+     y: Math.min(Math.max(p.y, b.top), Math.max(b.top, b.bottom - h)),
++    left: p.left,
+   };
+ }
+ 
+@@ -98,6 +101,8 @@ export function SessionFloatingPillDock({
+     startY: number;
+     baseX: number;
+     baseY: number;
++    /** 拖拽起点吸附侧标记——拖拽中间态继承它保持对齐方向，松手 snapPos 重判。 */
++    left?: boolean;
+     moved: boolean;
+   } | null>(null);
+   /** 拖拽松手时刻（click 吞除时间窗）。 */
+@@ -222,7 +227,7 @@ export function SessionFloatingPillDock({
+     d.moved = true;
+     setDragging(true);
+     const { w, h } = dockSize();
+-    setPos(clampPos({ x: d.baseX + dx, y: d.baseY + dy }, w, h, getBounds()));
++    setPos(clampPos({ x: d.baseX + dx, y: d.baseY + dy, left: d.left }, w, h, getBounds()));
+   }, [getBounds]);
+ 
+   const endDrag = useCallback(
+@@ -258,6 +263,7 @@ export function SessionFloatingPillDock({
+         startY: e.clientY,
+         baseX: pos.x,
+         baseY: pos.y,
++        left: pos.left,
+         moved: false,
+       };
+       window.addEventListener("pointermove", onPointerMove);

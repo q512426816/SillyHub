@@ -1,0 +1,85 @@
+{
+  "change": "2026-10-20-pill-dock-drag-align-keep",
+  "baseline": "c2d5979778ea293d451c0de116bf6c73332c341c",
+  "head": "4f77e50c12b353f42e8442aed1fcdfea34234511",
+  "files": [
+    ".gitignore",
+    "frontend/src/components/daemon/__tests__/session-floating-pill-dock.test.tsx",
+    "frontend/src/components/daemon/session-floating-pill-dock.tsx"
+  ],
+  "totals": {
+    "files": 3,
+    "additions": 36,
+    "deletions": 2
+  },
+  "savedAt": "2026-10-20T01:21:00.183Z",
+  "note": "flow done 时点冻结（本变更可归属交付面：baseline..HEAD 提交面过滤 .sillyspec/ 只留 .sillyspec/docs/ 交付文档 + 独占树未提交交付；治理工件目录不入冻结——2026-10-12-close-trace-freeze-integrity FR-01）",
+  "modules": [
+    {
+      "id": "frontend",
+      "files": 2,
+      "doc": "docs/multi-agent-platform/modules/frontend.md",
+      "docTouched": false,
+      "docMissing": false
+    },
+    {
+      "id": "frontend_components",
+      "files": 2,
+      "doc": "docs/SillyHub/modules/frontend_components.md",
+      "docTouched": false,
+      "docMissing": false
+    }
+  ],
+  "uncoveredDirs": [],
+  "moduleMaps": [
+    "docs/backend/modules/_module-map.yaml",
+    "docs/frontend/modules/_module-map.yaml",
+    "docs/multi-agent-platform/modules/_module-map.yaml",
+    "docs/SillyHub/modules/_module-map.yaml",
+    "docs/sillyhub-daemon/modules/_module-map.yaml"
+  ],
+  "scopeAudit": {
+    "mode": "full-flow",
+    "ok": true,
+    "degradedReason": null,
+    "baseAnchor": "c2d5979778ea293d451c0de116bf6c73332c341c",
+    "totals": {
+      "files": 3,
+      "additions": 36,
+      "deletions": 2
+    },
+    "rows": [
+      {
+        "path": ".gitignore",
+        "additions": 3,
+        "deletions": 0,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": "frontend/src/components/daemon/__tests__/session-floating-pill-dock.test.tsx",
+        "additions": 25,
+        "deletions": 0,
+        "kind": "modified",
+        "planned": "修改",
+        "verdict": "planned"
+      },
+      {
+        "path": "frontend/src/components/daemon/session-floating-pill-dock.tsx",
+        "additions": 8,
+        "deletions": 2,
+        "kind": "modified",
+        "planned": "修改",
+        "verdict": "planned"
+      }
+    ],
+    "excluded": {
+      "foreignDeclared": []
+    },
+    "note": "flow done 时点冻结（本文件落盘时采集）",
+    "closedBy": "flow done"
+  },
+  "patchSha256": "2434f5747898bd9b06f2ac6bc678a8b9c7cfee97d5e90f18a8d9e9d05f9eb33a",
+  "patchStatus": "ok"
+}
