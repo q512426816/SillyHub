@@ -22,7 +22,8 @@ from sqlmodel import col
 from app.core.errors import AppError
 from app.core.logging import get_logger
 from app.modules.agent.base import AgentSpecBundle
-from app.modules.agent.model import AgentRun
+from app.modules.agent.model import AgentRun, AgentSession
+from app.modules.daemon.session_events import publish_sessions_changed
 
 log = get_logger(__name__)
 
@@ -341,6 +342,21 @@ class ExecutionCoordinatorService:
     # 6. Approval
     # ------------------------------------------------------------------
 
+    async def _publish_run_status_signal(self, run: AgentRun) -> None:
+        """2026-10-20-session-status-live-sync：run 审批态迁移 → 列表变更信号。
+
+        广播 status_changed 哑信号——左侧徽标「正在执行」↔「在等你」秒级翻转，
+        不等 10s/30s 轮询 tick。属主取 session.user_id（列表 SSE 受众过滤口径）；
+        run 无绑定会话/会话行缺失静默跳过；publish 内部静默容错（Redis 抖动不
+        拖挂审批路径）。
+        """
+        if run.agent_session_id is None:
+            return
+        session = await self.session.get(AgentSession, run.agent_session_id)
+        if session is None:
+            return
+        await publish_sessions_changed("status_changed", session.id, session.user_id)
+
     async def request_approval(self, run_id: uuid.UUID) -> str:
         """Generate an approval_token and mark the run as pending_approval.
 
@@ -368,6 +384,9 @@ class ExecutionCoordinatorService:
         self.session.add(run)
         await self.session.commit()
         await self.session.refresh(run)
+
+        # 2026-10-20-session-status-live-sync：→pending_approval 广播列表信号。
+        await self._publish_run_status_signal(run)
 
         log.info("approval_requested", run_id=str(run_id))
         return token
@@ -416,6 +435,10 @@ class ExecutionCoordinatorService:
         self.session.add(run)
         await self.session.commit()
         await self.session.refresh(run)
+
+        # 2026-10-20-session-status-live-sync：审批通过翻回 pending（随后派发
+        # 链再激活）广播列表信号——左侧徽标翻回「正在执行」。
+        await self._publish_run_status_signal(run)
 
         log.info("run_approved", run_id=str(run_id))
         return run
