@@ -25,6 +25,9 @@
 - pydantic|派生字段|model_validate|model_copy|必填|ValidationError → [2026-07-08 — Pydantic 必填派生字段不能用 model_validate(ORM)+model_copy 两段式](conventions.md#2026-07-08--pydantic-必填派生字段不能用-model_validateormmodel_copy-两段式)
 - execFile|ENOENT|npm|全局 CLI|shell:true|cmd-shim|PATHEXT → [2026-08-19 — Windows 下 execFile 调 npm 全局 CLI 必 ENOENT，须 spawn+shell 或 cmd-shim 解析](conventions.md#2026-08-19--windows-下-execfile-调-npm-全局-cli-必-enoent须-spawnshell-或-cmd-shim-解析)
 - mcpServers|env|白名单|注入|claude.exe|MCP_SESSION_ID → [MCP server 子进程不继承 claude.exe 完整环境：env 必须放 mcpServers[*].env](conventions.md#mcp-server-子进程不继承-claudeexe-完整环境env-必须放-mcpserversenv)
+- pi|mcp.json|PI_CODING_AGENT_DIR|原生 MCP|codex 同风格|配置目录 → [pi 1.0+ 原生 MCP：PI_CODING_AGENT_DIR 重定向后 mcp.json 平铺在目录根（无 agent 子层）](conventions.md#pi-10-原生-mcppi_coding_agent_dir-重定向后-mcpjson-平铺在目录根无-agent-子层)
+- @modelcontextprotocol/sdk|registerTool|mcp sdk 1.29|zod raw shape|工具注册 → [@modelcontextprotocol/sdk 1.29 高级 API 是 registerTool（tool() 旧三参形状已不兼容）](conventions.md#modelcontextprotocolsdk-129-高级-api-是-registertooltool-旧三参形状已不兼容)
+- mcp-server|MCP_SERVER_BACKEND_URL|MCP_TOOLSET|env 契约|X-API-Key|fail-closed → [daemon mcp-server 的 env 契约：MCP_SERVER_BACKEND_URL + MCP_TOOLSET（file/mission_worker 两档）](conventions.md#daemon-mcp-server-的-env-契约mcp_server_backend_url--mcp_toolsetfilemission_worker-两档)
 
 ## Patterns
 
@@ -45,6 +48,7 @@
 - task_started|task_notification|task_updated|SDK|后台任务|生命周期|0.3.181 → [Claude Agent SDK 0.3.181 的 task_* 生命周期系统消息可消费](patterns.md#claude-agent-sdk-03181-的-task_-生命周期系统消息可消费)
 - token|计费|上下文窗口|ctx_tokens|usage|口径|cache_read → [2026-08-27 — 会话 token 两套口径：计费量（跨调用可加）vs 上下文量（瞬时，取最近一次调用）](patterns.md#2026-08-27--会话-token-两套口径计费量跨调用可加vs-上下文量瞬时取最近一次调用)
 - antd|v6|App|useApp|AntdApp|provider → [patterns.md#antd v6 App.useApp() 无 <AntdApp> provider 时 message 为 undefined——组件测试须包 AntdApp](patterns.md#antd v6 App.useApp() 无 <AntdApp> provider 时 message 为 undefined——组件测试须包 AntdApp)
+- rollback|MissingGreenlet|SQLAlchemy async|expire_on_commit|greenlet|标量先捕获 → [async session rollback 后访问 ORM 对象属性触发 MissingGreenlet（异常路径标量先捕获）](patterns.md#async-session-rollback-后访问-orm-对象属性触发-missinggreenlet异常路径标量先捕获)
 
 ## Known Issues
 - 导出|乱码|GBK|控制台码页|PYTHONIOENCODING|TOOL_RESULT|替换字符 → [会话日志 TOOL_RESULT 中文乱码（Windows 控制台码页，落库即坏不可导出还原）](known-issues.md#会话日志-tool_result-中文乱码windows-控制台码页落库即坏不可导出还原)
@@ -88,6 +92,12 @@
 - sessions/events|路由顺序|422|uuid_parsing|多行装饰器|路由表断言 → [🟢 daemon sessions /events 字面量路由被 /sessions/{session_id} 参数路由吞掉（FastAPI 路由顺序，commit 0c7860f7）](known-issues.md#-daemon-sessions-events-字面量路由被-sessionssession_id-参数路由吞掉fastapi-路由顺序commit-0c7860f7)
 - antd v6|wrapperclassname|styles.container|vi.mock|桶导出|fullscreen → [🟡 2026-08-26 — antd v6 实测三坑：Image 无 wrapperClassName、Modal 语义 styles.container、枚举式 vi.mock 须随桶导出同步](known-issues.md#-2026-08-26--antd-v6-实测三坑image-无-wrapperclassnamemodal-语义-stylescontainer枚举式-vimock-须随桶导出同步)
 - wt|commit|路径分隔符被|PowerShell|吞掉|pathspec → [known-issues.md#wt-commit 的 -- 路径分隔符被 PowerShell 5.1 吞掉——用 --pathspec-from-file](known-issues.md#wt-commit 的 -- 路径分隔符被 PowerShell 5.1 吞掉——用 --pathspec-from-file)
+- require_permission|workspace_id|422|平台级端点|require_permission_any|Path 校验 → [🟡 require_permission 隐式 Path(workspace_id) 依赖：平台级（无 ws 前缀）端点直接 422](known-issues.md#-require_permission-隐式-pathworkspace_id-依赖平台级无-ws-前缀端点直接-422)
+- .zcode|gitignore|已跟踪|git rm --cached|git add -f|删除态 → [🟡 .zcode 部分 skill 文件在 main 是已跟踪文件：git rm --cached 会把分支做成「删除态」](known-issues.md#-zcode-部分-skill-文件在-main-是已跟踪文件git-rm---cached-会把分支做成删除态)
+- 嵌入|fastembed|OOM|cgroup|小内存服务器|ssh 隧道|docker exec -d|pgvector → [🟢 生产小内存服务器（1.6G）容器内跑大模型嵌入不可行——本机嵌入+SSH 隧道直写生产库 + 六连坑（已定案）](known-issues.md#-生产小内存服务器16g容器内跑大模型嵌入不可行本机嵌入ssh-隧道直写生产库--六连坑已定案)
+- amcheck|唯一索引损坏|spec_file_manifest|REINDEX|归档显示进行中|spec-sync 422|bt_index_check → [🟢 平台 spec 清单唯一索引静默损坏（容器反复被杀后遗症）——归档后平台仍显示「进行中」+ spec-sync 恒 422（已修复）](known-issues.md#-平台-spec-清单唯一索引静默损坏容器反复被杀后遗症归档后平台仍显示进行中-spec-sync-恒-422已修复)
+- amcheck|pg_am|btree|GIN 误报|last_used_at|断档|墓碑|REINDEX → [🟢 本地 docker 平台同款索引静默损坏复发——免去重 REINDEX 分叉 + amcheck 必须 JOIN pg_am 过滤 btree + 同步静默断档信号（已修复；遗留：本地墓碑处置待拍板）](known-issues.md#-本地-docker-平台同款索引静默损坏复发免去重-reindex-分叉--amcheck-必须-join-pg_am-过滤-btree--同步静默断档信号已修复遗留本地墓碑处置待拍板)
+- 知识搜索|首搜建库|超时|504|KNOWLEDGE_SEARCH_SERVER_BUILD|懒同步|预建索引 → [🟡 平台知识搜索「首搜建库地雷」——未建索引工作区的第一次搜索必超时（大语料 OOM 整栈停摆）](known-issues.md#-平台知识搜索首搜建库地雷未建索引工作区的第一次搜索必超时大语料-oom-整栈停摆)
 
 ## SillySpec Gotchas
 
@@ -105,6 +115,12 @@
 - worktree|doctor|junction|installed|静默失败|复核 → [worktree doctor 标记 installed 但 node_modules junction 实际未建](sillyspec-gotchas.md#worktree-doctor-标记-installed-但-node_modules-junction-实际未建)
 - mklink|junction|msys|powershell|new-item|cygpath → [Git Bash 下修 worktree node_modules junction：cmd mklink 传参必败，用 PowerShell New-Item Junction](sillyspec-gotchas.md#git-bash-下修-worktree-node_modules-junctioncmd-mklink-传参必败用-powershell-new-item-junction)
 - worktree|verify-result|产物分裂|主仓库|模块文档|回写 → [worktree 内执行回归/文档任务时 SillySpec 产物与主仓库分裂](sillyspec-gotchas.md#worktree-内执行回归文档任务时-sillyspec-产物与主仓库分裂)
+- wt-commit|跨仓 worktree|repo-key|git commit|apply 回灌 → [跨仓 worktree task 用直接 git commit，wt-commit 只认主仓 worktree](sillyspec-gotchas.md#跨仓-worktree-task-用直接-git-commitwt-commit-只认主仓-worktree)
+- node_modules|junction|并行会话|pnpm install --force|vitest not found|顶层链接 → [并行会话删主仓 frontend/node_modules 顶层链接——worktree 与主仓前端全瘫（vitest not found）](sillyspec-gotchas.md#并行会话删主仓-frontendnode_modules-顶层链接worktree-与主仓前端全瘫vitest-not-found)
+- route-hindsight|改写率|0.6|同意门|no-prestage|小任务|预段 → [route-hindsight 改写率阈值对小任务偏紧且拦截成本错位到下一变更](sillyspec-gotchas.md#route-hindsight-改写率阈值对小任务偏紧且拦截成本错位到下一变更)
+- flow done|dirty|缺口|三选一|并行会话|freeze-dirty|accept-dirty-gap → [flow done dirty 缺口三选一缺并行会话文件处置选项](sillyspec-gotchas.md#flow-done-dirty-缺口三选一缺并行会话文件处置选项)
+- 归档|pathspec|暂存区|竞态|git diff cached|全量核对|裸 commit → [归档提交 pathspec 打印到执行窗口的共享暂存区竞态](sillyspec-gotchas.md#归档提交-pathspec-打印到执行窗口的共享暂存区竞态)
+- design|四问|题面|逐字钉死|approve|改写|锚定 → [design 四问题面逐字钉死规则只在报错时学到](sillyspec-gotchas.md#design-四问题面逐字钉死规则只在报错时学到)
 
 ## Testing Gotchas
 
@@ -124,10 +140,14 @@
 - jsdom|avatar|avatarimage|window.image|objecturl|stub → [前端：jsdom 下 shadcn/Radix Avatar 的 AvatarImage 永不渲染，需 stub window.Image](testing-gotchas.md#前端jsdom-下-shadcnradix-avatar-的-avatarimage-永不渲染需-stub-windowimage)
 - git bash|e2e|/tmp|curl|json|sqlite|dev 后端 → [Git Bash 本地 e2e 验收环境坑：/tmp 路径分叉、curl 多行 JSON 传参、无 PG 起 dev 后端](testing-gotchas.md#git-bash-本地-e2e-验收环境坑tmp-路径分叉curl-多行-json-传参无-pg-起-dev-后端)
 - vitest|fake timers|waitFor|advanceTimersByTimeAsync|useFakeTimers|微任务 → [fake timers 下 waitFor 不推进](testing-gotchas.md#前端fake-timers-下-testing-library-waitfor-不-推进挂载微任务用-advancetimersbytimeasync0-排干)
+- vi.doMock|动态 import|resetModules|代际|zustand store|mock 顺序 → [前端：vi.doMock 计划生效前先动态 import 了依赖方，会以"真实 store 代际"冻结被测模块](testing-gotchas.md#前端vidomock-计划生效前先动态-import-了依赖方会以真实-store-代际冻结被测模块)
+- xfail|strict=False|假绿|清偿|pytest → [后端：xfail(strict=False) 会把「顺带的无关失败」一起吞成假绿——清偿时先跑真断言](testing-gotchas.md#后端xfailstrictfalse-会把顺带的无关失败一起吞成假绿清偿时先跑真断言)
+- daemon.start|npm view|系统代理|Clash|preflight|probeLatest|vi.mock → [daemon：集成测试 daemon.start() 被系统代理黑洞拖死（npm view 30s×2）](testing-gotchas.md#daemon集成测试-daemonstart-被系统代理黑洞拖死npm-view-30s2)
+- monkeypatch|has_permission|双 patch|导入时绑定|auth_deps|rbac|403 → [后端：monkeypatch has_permission 必须双 patch（auth_deps 导入时绑定 + rbac 模块属性）](testing-gotchas.md#后端monkeypatch-has_permission-必须双-patchauth_deps-导入时绑定--rbac-模块属性)
 
 ## Uncategorized（暂存区，未加索引）
 
-`uncategorized.md` 是知识收件箱：execute/verify 中发现的坑先暂存于此，条目成熟后迁出到上述分类文件并在对应节加索引。**2026-09-28 清账**：原有 41 条已全部归类（known-issues 18 / patterns 6 / conventions 5 / testing-gotchas 8 / sillyspec-gotchas 4，见变更 2026-09-28-knowledge-inbox-clear），当前收件箱为空。
+`uncategorized.md` 是知识收件箱：execute/verify 中发现的坑先暂存于此，条目成熟后迁出到上述分类文件并在对应节加索引。**2026-09-28 清账**：原有 41 条已全部归类（known-issues 18 / patterns 6 / conventions 5 / testing-gotchas 8 / sillyspec-gotchas 4，见变更 2026-09-28-knowledge-inbox-clear）。**2026-10-19 清账**：积压 16 条已全部归类（known-issues 6 / testing-gotchas 4 / conventions 3 / sillyspec-gotchas 2 / patterns 1，见变更 2026-10-19-knowledge-inbox-triage），当前收件箱为空。
 
 ## Decisions
 - backend|decision|决策|变更删除|软删|location=deleted|防复活|platform_deleted|镜像驱动收敛|墓碑 → [decisions/backend.md](decisions/backend.md)
@@ -218,7 +238,6 @@
 - api-types|FR|需求|承接 → [fr/api-types.md](fr/api-types.md)
 - components-agent-log|FR|需求|承接 → [fr/components-agent-log.md](fr/components-agent-log.md)
 - policy|FR|需求|承接 → [fr/policy.md](fr/policy.md)
-||||||| C:/Users/12532/AppData/Local/Temp/d.base
 - lib-agent|FR|需求|承接 → [fr/lib-agent.md](fr/lib-agent.md)
 - agent|FR|需求|承接 → [fr/agent.md](fr/agent.md)
 - deploy_records|FR|需求|承接 → [fr/deploy_records.md](fr/deploy_records.md)
@@ -230,7 +249,7 @@
 - core|FR|需求|承接 → [fr/core.md](fr/core.md)
 - docs|FR|需求|承接 → [fr/docs.md](fr/docs.md)
 - app-workspace-pages|FR|需求|承接 → [fr/app-workspace-pages.md](fr/app-workspace-pages.md)
-- auto-frontend|frontend|FR|需求|承接 → [fr/auto-frontend.md](fr/auto-frontend.md)
 - test-utils|FR|需求|承接 → [fr/test-utils.md](fr/test-utils.md)
 - agent-skills|FR|需求|承接 → [fr/agent-skills.md](fr/agent-skills.md)
 - auth|FR|需求|承接 → [fr/auth.md](fr/auth.md)
+- scripts|FR|需求|承接 → [fr/scripts.md](fr/scripts.md)

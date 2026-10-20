@@ -4924,7 +4924,7 @@
 测试绑定：
 <!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
 - row: 2026-10-15-zcode-engine-appserver:task-05:acc-0-35889f68
-  tests: - sillyhub-daemon/tests/interactive/provider-registry.test.ts | backend/app/modules/agent/tests/test_provider_caps_alignment.py | frontend/src/components/sessions/__tests__/pre-session-picker.test.tsx | sillyhub-daemon/tests/zcode-settings.test.ts
+  tests: backend/app/modules/agent/tests/test_provider_caps_alignment.py | frontend/src/components/sessions/__tests__/pre-session-picker.test.tsx | sillyhub-daemon/tests/interactive/provider-registry.test.ts | sillyhub-daemon/tests/zcode-settings.test.ts
   reason: spec
   state: active
   discovery: machine
@@ -4933,7 +4933,7 @@
   source_change: 2026-10-15-zcode-engine-appserver
   status: active
 - row: 2026-10-15-zcode-engine-appserver:task-05:acc-1-769899ea
-  tests: - sillyhub-daemon/tests/interactive/provider-registry.test.ts | backend/app/modules/agent/tests/test_provider_caps_alignment.py | frontend/src/components/sessions/__tests__/pre-session-picker.test.tsx | sillyhub-daemon/tests/zcode-settings.test.ts
+  tests: backend/app/modules/agent/tests/test_provider_caps_alignment.py | frontend/src/components/sessions/__tests__/pre-session-picker.test.tsx | sillyhub-daemon/tests/interactive/provider-registry.test.ts | sillyhub-daemon/tests/zcode-settings.test.ts
   reason: spec
   state: active
   discovery: machine
@@ -5550,3 +5550,111 @@
 - 场景：测试面全绿 — Given 本变更两份测试文件与 interactive 套件；；When 跑 `vitest run tests/interactive` + `tsc --noEmit`；；Then 全绿零失败。
 全文：.sillyspec/changes/archive/2026-10-19-host-settings-live-reload/requirements.md#FR-03
 最近确认：e5a2c7ee31881d2d20c3f831c729ca01c07a81e5
+
+## FR-daemon-175 冲突推送（base_version 乐观锁冲突/墓碑拦截/rename 目标占用六类被拒点）时，被拒 op 的机器侧内容蒸馏留档进 open 行 details_json.local_archive（单文件文本 32K 字符帽截断留标记、总量 512KB 帽超出停存内容仅留路径清单、300 文件帽），推送主流程零新增 RPC 且留档失败不阻断
+变更：2026-10-20-conflict-platform-archive
+状态：active
+摘要：乐观锁冲突的 add/update 留档内容；delete 冲突留档为缺失；非 utf8 内容置 binary 不存文本；三重帽逐级降级
+场景正文：
+- 场景：乐观锁冲突的 add/update 留档内容 — Given 清单行 version=2，daemon 推 add/update base_version=1 且 hash 不符（冲突被拒）；When apply_ops 处理该 op；Then open 行 `local_archive` 含条目 `{path, missing: false, content: <解码后文本>, binary: fal
+- 场景：delete 冲突留档为缺失 — Given 清单行 version=2，daemon 推 delete base_version=1（冲突被拒）；Then 条目为 `{path, missing: true, content: null}`——机器侧状态是「已删除」
+- 场景：非 utf8 内容置 binary 不存文本 — Given 被拒 add 的 content 解码后非 utf8；Then 条目 `{path, binary: true, content: null, missing: false}`
+- 场景：三重帽逐级降级 — Given 单文件解码后 40000 字符 → 截断至 32000 且 truncated=true；Given 留档累计序列化超 512KB → 后续条目 content
+全文：.sillyspec/changes/archive/2026-10-20-conflict-platform-archive/requirements.md#FR-01
+最近确认：ffab0aa2e9dafa7c1fa67528d15f08941d4ee87b
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-20-conflict-platform-archive:flow:测试绑定FR-01
+  tests: backend/app/modules/spec_workspace/tests/test_conflict_local_archive.py「六类被拒点留档形态与三重帽」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-20-conflict-platform-archive
+  status: active
+
+## FR-daemon-176 对比端点在 daemon 返回 conflict_record_missing 且行内 local_archive 覆盖所请求变更路径时，以留档构造对比响应（record_label=platform-archive、covered_changes/path_total 同口径裁剪），平台侧仍实时读 spec_root——记录亡后对比不再 502
+变更：2026-10-20-conflict-platform-archive
+状态：active
+摘要：记录双缺 + 留档覆盖（主路径）；留档条目为 missing（机器侧已删）
+场景正文：
+- 场景：记录双缺 + 留档覆盖（主路径） — Given 机器上 `<change>` 记录与 `full-tree` 记录双缺（conflict_record_missing），open 行 local_archiv；When 请求该变更对比；Then 返回 200，`record_label="platform-archive"`，文件清单只含该变更路径，diff 为留档内容 vs 平台当前内容
+- 场景：留档条目为 missing（机器侧已删） — Given 留档条目 `{path: changes/<change>/x.md, missing: true}`，平台侧该文件存在；Then 该文件分类为 `platform_only`（与 daemon 快照 missing 条目同语义）
+全文：.sillyspec/changes/archive/2026-10-20-conflict-platform-archive/requirements.md#FR-02
+最近确认：ffab0aa2e9dafa7c1fa67528d15f08941d4ee87b
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-20-conflict-platform-archive:flow:测试绑定FR-02
+  tests: backend/app/modules/daemon/tests/test_sillyspec_compare.py「platform-archive 回退命中构造」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-20-conflict-platform-archive
+  status: active
+
+## FR-daemon-177 无留档或留档不含所请求变更路径时，错误路径与现状逐字节一致（四臂文案不变）
+变更：2026-10-20-conflict-platform-archive
+状态：active
+摘要：留档不含所请求变更；损坏的 details_json
+场景正文：
+- 场景：留档不含所请求变更 — Given open 行 local_archive 只含 `changes/foobar/…` 路径，请求 `<change>=foo`；Then 重抛原 conflict_record_missing 网关错误，不把 foobar 路径混入对比
+- 场景：损坏的 details_json — Given open 行 details_json 非法 JSON 或 local_archive 非法结构；Then 按无留档处理重抛原错误（fail-soft，不 500）
+全文：.sillyspec/changes/archive/2026-10-20-conflict-platform-archive/requirements.md#FR-03
+最近确认：ffab0aa2e9dafa7c1fa67528d15f08941d4ee87b
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-20-conflict-platform-archive:flow:测试绑定FR-03
+  tests: backend/app/modules/daemon/tests/test_sillyspec_compare.py「无留档/不含变更路径/非 missing 错误不回退」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-20-conflict-platform-archive
+  status: active
+
+## FR-daemon-178 前端对比弹窗对 record_label=platform-archive 显示留档来源横幅（平台留档快照·冲突时点机器侧内容 vs 平台当前内容）
+变更：2026-10-20-conflict-platform-archive
+状态：active
+摘要：留档横幅与 full-tree 横幅互斥呈现
+场景正文：
+- 场景：留档横幅与 full-tree 横幅互斥呈现 — Given 响应 record_label="platform-archive"；Then 弹窗顶部出现留档横幅且 full-tree 横幅不出现（record_label 单值互斥）
+全文：.sillyspec/changes/archive/2026-10-20-conflict-platform-archive/requirements.md#FR-04
+最近确认：ffab0aa2e9dafa7c1fa67528d15f08941d4ee87b
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-20-conflict-platform-archive:flow:测试绑定FR-04
+  tests: frontend/src/components/changes/__tests__/conflict-compare-modal.test.tsx「platform-archive 留档横幅」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-20-conflict-platform-archive
+  status: active
+
+## FR-daemon-179 既有对比/增量同步/墓碑守卫测试零回归，新增后端留档构建+回退与前端横幅测试
+变更：2026-10-20-conflict-platform-archive
+状态：active
+摘要：（无场景名）
+全文：.sillyspec/changes/archive/2026-10-20-conflict-platform-archive/requirements.md#FR-05
+最近确认：ffab0aa2e9dafa7c1fa67528d15f08941d4ee87b
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-20-conflict-platform-archive:flow:测试绑定FR-05
+  tests: backend/app/modules/daemon/tests/test_sillyspec_compare.py | backend/app/modules/spec_workspace/tests/test_platform_deleted_guard.py | backend/app/modules/spec_workspace/tests/test_sync_incremental.py | frontend/src/components/changes/__tests__/conflict-compare-modal.test.tsx「既有套件零回归」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-20-conflict-platform-archive
+  status: active

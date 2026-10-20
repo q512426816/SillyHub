@@ -317,7 +317,7 @@ const VERDICT_ORDER = ["planned", "unplanned", "untouched"] as const;
  * degraded 整段 ⚠️。patch 面（折叠 diff 正文/未采集留痕）仅非降级段渲染——
  * 「采集失败或空窗」对整仓不可达是误描述。repoPath 字段可能含本机布局，恒不渲染。
  */
-function ScopeAuditRepoSeg({ repo, repoKey }: { repo: JsonRecord; repoKey: string }) {
+export function ScopeAuditRepoSeg({ repo, repoKey }: { repo: JsonRecord; repoKey: string }) {
   const [patchOpen, setPatchOpen] = useState(false);
   const anchor = isRecord(repo.anchor) ? repo.anchor : {};
   const anchorLabel = typeof anchor.label === "string" && anchor.label ? anchor.label : null;

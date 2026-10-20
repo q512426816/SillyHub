@@ -477,7 +477,9 @@ async def search_knowledge(
     - docs/ 类结果按 SCAN_DOCS_READ 服务端过滤——判定经 ``has_permission`` 同一
       权威函数（admin 短路在内；禁读 user.permissions 快照，D-005@v1）；先取
       3×limit 候选再过滤截断，防 top-k 被过滤挤空；
-    - embedder 不可用 → fail-soft：200 + model_ready=False + 纯词面结果（D-004@v1）。
+    - embedder 不可用 → fail-soft：200 + model_ready=False + 纯词面结果（D-004@v1）；
+    - 服务器禁建库（KNOWLEDGE_SEARCH_SERVER_BUILD=0，2026-10-19-knowledge-search-build-switch）：
+      小内存生产容器跳过懒同步嵌入；未建索引 ws 首搜词面内存降级 + reason=index_not_built。
     """
     from app.core.config import get_settings
     from app.core.db import get_session_factory
@@ -510,6 +512,7 @@ async def search_knowledge(
         settings.knowledge_embedding_model,
         embedder_error=embedder_error,
         session_factory=get_session_factory(),
+        server_build=settings.knowledge_search_server_build,
     )
     filtered = [
         KnowledgeSearchResultItem(**item)

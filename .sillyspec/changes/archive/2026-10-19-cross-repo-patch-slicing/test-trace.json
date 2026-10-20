@@ -1,0 +1,54 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-19-cross-repo-patch-slicing",
+  "rows": [
+    {
+      "anchor": "FR-01",
+      "row_id": "2026-10-19-cross-repo-patch-slicing:flow:测试绑定FR-01",
+      "tests": [
+        "backend/app/modules/change/tests/test_assets.py::test_patch_file_diff_repo_hit_and_unknown"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-19-cross-repo-patch-slicing"
+    },
+    {
+      "anchor": "FR-02",
+      "row_id": "2026-10-19-cross-repo-patch-slicing:flow:测试绑定FR-02",
+      "tests": [
+        "backend/app/modules/change/tests/test_assets.py::test_patch_meta_repo_file_list",
+        "frontend/src/components/changes/detail/__tests__/change-assets-card.test.tsx::跨仓冻结面"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-19-cross-repo-patch-slicing"
+    },
+    {
+      "anchor": "FR-03",
+      "row_id": "2026-10-19-cross-repo-patch-slicing:flow:测试绑定FR-03",
+      "tests": [
+        "backend/app/modules/change/tests/test_assets.py::test_patch_file_diff_repo_hit_and_unknown",
+        "backend/app/modules/change/tests/test_assets.py::test_patch_meta_repo_file_list",
+        "frontend/src/components/changes/detail/__tests__/change-assets-card.test.tsx::跨仓冻结面"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-19-cross-repo-patch-slicing"
+    }
+  ]
+}

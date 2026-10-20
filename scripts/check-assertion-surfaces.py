@@ -90,9 +90,7 @@ RULES: tuple[SurfaceRule, ...] = (
         glob="frontend/src/lib/provider-caps.ts",
         mode="diff",
         diff_pattern=r"interface ProviderCaps|ProviderCaps =|^\s*\w+: (?:true|false)[,;]?\s*$",
-        requires=(
-            "frontend/src/components/sessions/__tests__/pre-session-picker.test.tsx",
-        ),
+        requires=("frontend/src/components/sessions/__tests__/pre-session-picker.test.tsx",),
         hint="全对象 toEqual 钉两处逐键同步（b8afd807c 误删 multimodal 实证）",
     ),
     SurfaceRule(

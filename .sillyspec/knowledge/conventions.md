@@ -131,3 +131,15 @@ Tailwind 的 `md:` / `lg:` 等前缀按**浏览器视口**宽度生效，与组�
 ## MCP server 子进程不继承 claude.exe 完整环境：env 必须放 mcpServers[*].env
 
 claude.exe（2.1.x）spawn MCP server 子进程时 env 为「白名单基线（PATH/HOME 等 12 个）+ per-server env 覆盖合并」，不继承完整父环境。给 MCP server 注入自定义变量（如 MCP_SESSION_ID）必须放在 options.mcpServers['<server>'].env（daemon mcp-config.ts 的 server config env 字段），放 SDK 顶层 options.env 无效。证据链：claude-sdk-driver.ts:407 透传 → sdk.d.ts:1092 McpStdioServerConfig.env → sdk.mjs --mcp-config 全量序列化 → claude.exe StdioClientTransport.start spawn env 合并。来源：2026-08-22-team-session-unify spike-01。
+
+## pi 1.0+ 原生 MCP：PI_CODING_AGENT_DIR 重定向后 mcp.json 平铺在目录根（无 agent 子层）
+
+pi 1.1.0 内置 MCP 客户端（pi mcp 子命令 / --no-mcp 开关 / mcp__<server>__<tool> 命名空间），配置读 ~/.pi/agent/mcp.json（全局）或 .pi/mcp.json（项目）。设 PI_CODING_AGENT_DIR 重定向后 pi root 直接对应 agent 层——per-session MCP 配置必须写 `<PI_CODING_AGENT_DIR>/mcp.json`（平铺），不是 `<dir>/agent/mcp.json`；格式与 codex 同风格 `{"mcpServers": {name: {command, args?, env?}}}`，per-server env（MCP_SESSION_ID）经条目 env 字段透传。`pi mcp list --json` 可离线验证连接与工具枚举。来源：2026-10-10-all-engines-mcp-injection task-01/task-05（SPIKE-00）。
+
+## @modelcontextprotocol/sdk 1.29 高级 API 是 registerTool（tool() 旧三参形状已不兼容）
+
+sdk 1.29 的 McpServer 注册工具用 `server.registerTool(name, { description, inputSchema: ZodRawShape }, handler)`；旧 `server.tool(name, schemaShape, handler)` 三参形状会抛 "expected a Zod schema or ToolAnnotations"。inputSchema 要 Zod raw shape——纯 JSON schema 对象不行，无参工具可省略 inputSchema。来源：2026-10-10-all-engines-mcp-injection SPIKE-00 echo server 实测。
+
+## daemon mcp-server 的 env 契约：MCP_SERVER_BACKEND_URL + MCP_TOOLSET（file/mission_worker 两档）
+
+daemon 侧 stdio MCP server（mcp-server.js）从 env 读 backend URL：键名是 `MCP_SERVER_BACKEND_URL`（不是 MCP_HUB_BASE_URL），token 走 `MCP_SERVER_DAEMON_API_KEY`（X-API-Key 优先）+ `MCP_SERVER_DAEMON_TOKEN`（Bearer）；工具集由 `MCP_TOOLSET` env 控制且仅认字面量 file / mission_worker，拼写错误或漏配**容错回落编排 5 工具**（不报错）——手动探测时工具集不对先查这个键。上传 fail-closed：MCP_ALLOWED_ROOT 未设时 upload_file 一律拒绝。来源：2026-10-10-all-engines-mcp-injection task-09 端到端实测。

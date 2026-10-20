@@ -187,3 +187,9 @@ SDK 0.3.181（捆 CLI 2.1.181+）运行时确实发射 `system/task_started`（t
 ## antd v6 App.useApp() 无 <AntdApp> provider 时 message 为 undefined——组件测试须包 AntdApp
 
 组件内 `const { message } = App.useApp()` 在无 `<App>` provider 的测试环境（testing-library 裸 render）返回的 message 是 **undefined**（antd v6 无静态 fallback），点击路径调 message.success 抛 `TypeError: message.success is not a function`。生产有全局 AntdProviders 兜住；测试 render helper 统一包 `<AntdApp>` 对齐生产。另：测试里 mock navigator.clipboard 勿用裸 `Object.defineProperty`（默认 writable:false 会把属性锁死，污染后续用例的 Object.assign 赋值——configurable+writable 都给 true）。（来源：2026-09-23-md-card-render task-02）
+
+## async session rollback 后访问 ORM 对象属性触发 MissingGreenlet（异常路径标量先捕获）
+
+SQLAlchemy async（expire_on_commit 语义）下，`await session.rollback()` 会 expire 会话内全部 ORM 对象——异常处理路径里再访问 `obj.attr`（哪怕记日志 `str(agent_run.id)`）会触发同步 lazy load → `MissingGreenlet: greenlet_spawn has not been called`，且该异常常发生在 except 块自身，把原异常吞成误导性的 greenlet 报错（2026-10-12-session-defects task-08 实证：auto_resume 压缩失败分支 rollback 后记日志访问 agent_run.id 连环爆）。修法：进入可能 rollback 的 try 前把异常路径需要的标量先捕获（`co_run_id = str(agent_run.id)`），rollback 后需要对象时经 `await session.get(Model, pk)` 异步重载再操作。来源：task-08（commit 954cb88f 修正过程）。
+
+- 状态（2026-10-19 归类核实，原【待确认】已裁决）：修法已随 2026-10-12-session-defects task-08 落地（commit 954cb88f），事故闭环；本条保留为同类 async ORM 代码的通用模式。

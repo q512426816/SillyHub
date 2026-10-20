@@ -541,3 +541,96 @@ async def test_search_delta_reembeds_only_changed_file(tmp_path: Path, search_en
     # known-issues.md 原 1 块 + 新增 1 块 = 重嵌 2 块 + query 1 次
     assert fake.embedded_texts == baseline + 2
     assert any(r["title"] == "新增小节" for r in out["results"]), "新内容应可搜到"
+
+
+# ── 服务器禁建库开关（2026-10-19-knowledge-search-build-switch）──────────────
+
+
+async def test_search_server_build_off_unbuilt_ws_lexical_fallback_no_build(
+    tmp_path: Path, search_env
+) -> None:
+    """禁建库 + 无索引 ws 首搜：零建库零嵌入零写库，词面内存降级 reason=index_not_built。"""
+    from sqlalchemy import select
+
+    from app.modules.knowledge.search import KnowledgeSearchChunk, KnowledgeSearchState
+
+    _mini_corpus(tmp_path)
+    fake = FakeEmbedder()
+    out = await search_sync(
+        tmp_path,
+        search_env[0],
+        "会话状态点",
+        5,
+        fake,
+        "fake-model",
+        session_factory=search_env[1],
+        server_build=False,
+    )
+    assert fake.embed_calls == 0, "禁建库路径不得有任何嵌入调用（语料与 query 均零）"
+    assert out["model_ready"] is False
+    assert out["reason"] == "index_not_built"
+    assert out["results"], "词面降级仍应可命中语料"
+    top = out["results"][0]
+    assert top["score"] >= 0.6 and "会话状态点" in top["title"]
+    async with search_env[1]() as session:
+        assert (await session.execute(select(KnowledgeSearchState))).first() is None, (
+            "禁建库不得写 state 行"
+        )
+        assert (await session.execute(select(KnowledgeSearchChunk))).first() is None, (
+            "禁建库不得写 chunk 行"
+        )
+
+
+async def test_search_server_build_off_with_index_serves_without_resync(
+    tmp_path: Path, search_env
+) -> None:
+    """禁建库 + 有索引：跳过懒同步（语料变更也不差量重嵌），直接查存量行。"""
+    _mini_corpus(tmp_path)
+    fake = FakeEmbedder()
+    # 先以默认开关建好索引
+    await search_sync(
+        tmp_path, search_env[0], "状态点", 5, fake, "fake-model", session_factory=search_env[1]
+    )
+    calls_after_build = fake.embed_calls
+    assert calls_after_build >= 2
+    # 语料新增文件（指纹过期）→ 禁建库搜索不得触发差量重嵌
+    _write(tmp_path, "knowledge/extra.md", "# 额外\n\n## 新落地小节\n\n缓存索引点。\n")
+    out = await search_sync(
+        tmp_path,
+        search_env[0],
+        "状态点",
+        5,
+        fake,
+        "fake-model",
+        session_factory=search_env[1],
+        server_build=False,
+    )
+    assert fake.embed_calls == calls_after_build + 1, "仅 query embed，禁建库不得重嵌语料"
+    assert out["model_ready"] is True
+    assert out["reason"] is None
+    assert out["results"], "存量索引应可查"
+    assert all(r["title"] != "新落地小节" for r in out["results"]), (
+        "未重嵌：新内容不在结果（显式边界：新鲜度归外部预建机器）"
+    )
+
+
+async def test_search_server_build_default_true_keeps_lazy_build(
+    tmp_path: Path, search_env
+) -> None:
+    """默认值回归：不传 server_build（缺省 True）仍懒建库（现行为零变化）。"""
+    from sqlalchemy import select
+
+    from app.modules.knowledge.search import KnowledgeSearchState
+
+    _mini_corpus(tmp_path)
+    fake = FakeEmbedder()
+    out = await search_sync(
+        tmp_path, search_env[0], "会话状态点", 5, fake, "fake-model", session_factory=search_env[1]
+    )
+    assert fake.embed_calls >= 2, "缺省开关必须保持懒建库"
+    assert out["model_ready"] is True
+    assert out["reason"] is None
+    async with search_env[1]() as session:
+        assert (await session.execute(select(KnowledgeSearchState))).first() is not None, (
+            "缺省开关应落 state 行"
+        )

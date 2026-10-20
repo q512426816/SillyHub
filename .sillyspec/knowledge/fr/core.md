@@ -201,3 +201,275 @@ created_at: 2026-10-15T11:57:05.061Z
   confirmed_at: 7af8e0e32720f2cdad8183f10b8853ba08ac70ab
   source_change: 2026-10-15-server-logs-panel
   status: active
+
+## FR-core-005 新增配置开关（默认开启建库=现行为零变化）；关闭时未建索引工作区首搜不触发建库/嵌入，直接词面降级返回且带 reason=index_not_built，秒回不超时
+变更：2026-10-19-knowledge-search-build-switch
+状态：active
+摘要：开关关闭+未建索引工作区首搜；默认开关（不传/为 True）
+全文：.sillyspec/changes/archive/2026-10-19-knowledge-search-build-switch/requirements.md#FR-01
+最近确认：54a1e8db39d4d8ac991d645e2942a370d146e4ff
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-19-knowledge-search-build-switch:flow:测试绑定FR-01
+  tests: backend/app/modules/knowledge/tests/test_knowledge_search.py「禁建库：未建索引工作区首搜词面降级零建库」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-19-knowledge-search-build-switch
+  status: active
+
+## FR-core-006 关闭路径 pytest 单测覆盖（不建库断言+降级语义+reason 字段），指定面全绿
+变更：2026-10-19-knowledge-search-build-switch
+状态：active
+摘要：主路径
+全文：.sillyspec/changes/archive/2026-10-19-knowledge-search-build-switch/requirements.md#FR-02
+最近确认：54a1e8db39d4d8ac991d645e2942a370d146e4ff
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-19-knowledge-search-build-switch:flow:测试绑定FR-02
+  tests: backend/app/modules/knowledge/tests/test_knowledge_search.py「禁建库：有索引直接查库跳过 sync / 默认缺省仍懒建库」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-19-knowledge-search-build-switch
+  status: active
+
+## FR-core-007 known-issues 该条目状态更新为已根治（运维缓解+代码根治双闭环）
+变更：2026-10-19-knowledge-search-build-switch
+状态：active
+摘要：主路径
+全文：.sillyspec/changes/archive/2026-10-19-knowledge-search-build-switch/requirements.md#FR-03
+最近确认：54a1e8db39d4d8ac991d645e2942a370d146e4ff
+
+## FR-core-008 会话思考内容默认显示中文译文，可一键切回原文；折叠摘要流式结束后亦译为中文
+变更：2026-10-19-thinking-zh-translate
+状态：active
+摘要：展开查看译文；流式中不发请求；中文内容跳过；模型不可用降级
+场景正文：
+- 场景：展开查看译文 — Given 一条英文思考内容已流式完成，When 用户展开思考折叠块，Then 正文默认显示中文译文（未就绪时短暂显示原文 + 翻译中标记），且提供「显示原文」切换。
+- 场景：流式中不发请求 — Given 思考内容正在流式增量到达，When 折叠摘要实时更新，Then 不发起任何翻译请求（摘要显示原文 + 思考中脉冲）；流结束后摘要自动换为中文。
+- 场景：中文内容跳过 — Given 思考文本以中文为主，When 渲染，Then 直接展示原文，不发起翻译请求。
+- 场景：模型不可用降级 — Given 后端翻译模型未就绪，When 用户展开思考块，Then 显示原文并出现一次性的「离线翻译未就绪」轻提示，后续请求按退避节流。
+全文：.sillyspec/changes/archive/2026-10-19-thinking-zh-translate/requirements.md#FR-01
+最近确认：bfa6357537da5377966ec9d747dc47fbd9e53709
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-19-thinking-zh-translate:flow:测试绑定FR-01
+  tests: frontend/src/components/thinking-translate/__tests__/translated-thinking.test.tsx「展开默认译文 + 一键切原文」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-19-thinking-zh-translate
+  status: active
+
+## FR-core-009 翻译为本地离线推理（后端 CTranslate2 + opus-mt-en-zh int8 量化模型，首用自动下载、可配置本地目录），全程无外部云翻译 API 调用
+变更：2026-10-19-thinking-zh-translate
+状态：active
+摘要：离线部署；模型缺席
+场景正文：
+- 场景：离线部署 — Given 部署环境无外网且已预置模型目录（TRANSLATE_MODEL_DIR），When 前端请求翻译，Then 本地推理正常返回译文。
+- 场景：模型缺席 — Given 模型未下载且无法联网，When 前端请求翻译，Then 返回 200 + engine_ready=false + 原文透传，前端降级显示原文。
+全文：.sillyspec/changes/archive/2026-10-19-thinking-zh-translate/requirements.md#FR-02
+最近确认：bfa6357537da5377966ec9d747dc47fbd9e53709
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-19-thinking-zh-translate:flow:测试绑定FR-02
+  tests: backend/app/modules/translate/tests/test_chunking.py「代码块/行内代码/URL 保护不送翻」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-19-thinking-zh-translate
+  status: active
+
+## FR-core-010 性能可控：按需触发（用户展开或流式结束后）、文本分块并发、译文缓存（内存 LRU + Redis），不阻塞会话流式渲染；模型不可用时优雅降级显示原文
+变更：2026-10-19-thinking-zh-translate
+状态：active
+摘要：同屏多思考块；缓存命中；超长思考
+场景正文：
+- 场景：同屏多思考块 — Given 「全部」视图一次挂载 10 个思考折叠块，When 流已结束，Then 10 条摘要翻译合并为 1 个批量请求（单次网络往返）。
+- 场景：缓存命中 — Given 同一思考文本第二次被请求（刷新页面/重新展开），When 后端收到请求，Then LRU/Redis 命中直接返回，不触发模型推理。
+- 场景：超长思考 — Given 单条思考 20000 字符，When 用户展开，Then 前端按段分块多请求按序渲染，不出现整条超时。
+全文：.sillyspec/changes/archive/2026-10-19-thinking-zh-translate/requirements.md#FR-03
+最近确认：bfa6357537da5377966ec9d747dc47fbd9e53709
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-19-thinking-zh-translate:flow:测试绑定FR-03
+  tests: backend/app/modules/translate/tests/test_chunking.py「长文按段分块边界」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-19-thinking-zh-translate
+  status: active
+
+## FR-core-011 覆盖三条思考渲染路径：daemon 会话面板时间线、AgentLogViewer、agent-logs 回放卡
+变更：2026-10-19-thinking-zh-translate
+状态：active
+摘要：三路径一致
+场景正文：
+- 场景：三路径一致 — Given 翻译引擎正常，When 分别在会话面板、AgentLogViewer、回放卡查看英文思考，Then 三处均默认中文展示且可切原文。
+全文：.sillyspec/changes/archive/2026-10-19-thinking-zh-translate/requirements.md#FR-04
+最近确认：bfa6357537da5377966ec9d747dc47fbd9e53709
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-19-thinking-zh-translate:flow:测试绑定FR-04
+  tests: frontend/src/components/daemon/__tests__/turn-segment-views-thinking-translate.test.tsx「ThinkingRowView 接入翻译」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-19-thinking-zh-translate
+  status: active
+
+## FR-core-012 真机 live 测试全绿：worker 子进程译文含中文且无重复循环乱码；端点全链路 engine_ready=true、译文 translated=true、围栏代码块与 URL 保护段原样保留
+变更：2026-10-19-translate-live-verify
+状态：active
+摘要：真模型推理；EOS 协议回归锚
+场景正文：
+- 场景：真模型推理 — Given 默认模型仓库已下载到本机 HF 缓存，When 以 TRANSLATE_LIVE_TEST=1 运行 live 测试，Then worker 与端点两级用例全部
+- 场景：EOS 协议回归锚 — Given sentencepiece 分词路径（transformers 缺席），When 编码源文本，Then 必须手动追加 `</s>`（ct2 opus-mt 转换
+全文：.sillyspec/changes/archive/2026-10-19-translate-live-verify/requirements.md#FR-01
+最近确认：ffd511d4eb260046f3803cfa16492f4e0e55a0a7
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-19-translate-live-verify:flow:测试绑定FR-01
+  tests: backend/app/modules/translate/tests/test_live_engine.py「test_live_endpoint_full_chain」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-19-translate-live-verify
+  status: active
+
+## FR-core-013 既有 translate 模块测试（mock 面）全绿零回归
+变更：2026-10-19-translate-live-verify
+状态：active
+摘要：默认跳过
+场景正文：
+- 场景：默认跳过 — Given 未设置 TRANSLATE_LIVE_TEST，When 运行 translate 模块测试，Then live 用例 skip、其余全绿。
+全文：.sillyspec/changes/archive/2026-10-19-translate-live-verify/requirements.md#FR-02
+最近确认：ffd511d4eb260046f3803cfa16492f4e0e55a0a7
+
+## FR-core-014 config.py 默认 repo 与 backend/app/modules/translate/README.md 一致指向可用仓库
+变更：2026-10-19-translate-live-verify
+状态：active
+摘要：默认开箱可用
+场景正文：
+- 场景：默认开箱可用 — Given 联网（或 HF 镜像）环境零配置启动，When 首次翻译请求触发模型下载，Then 默认 repo 可解析下载并正常推理。
+全文：.sillyspec/changes/archive/2026-10-19-translate-live-verify/requirements.md#FR-03
+最近确认：ffd511d4eb260046f3803cfa16492f4e0e55a0a7
+
+## FR-core-015 deploy/.env 追加 KNOWLEDGE_SEARCH_SERVER_BUILD=0（gitignore 不入库），backend 镜像重建+容器 force-recreate 后容器内 settings.knowledge_search_server_build 实测为 False 且新代码在场
+变更：2026-10-19-knowledge-build-switch-rollout
+状态：active
+摘要：主路径
+全文：.sillyspec/changes/archive/2026-10-19-knowledge-build-switch-rollout/requirements.md#FR-01
+最近确认：cb7394b3637b8bab1e1d746dbb2454c658bb6e85
+
+## FR-core-016 未建索引工作区首搜端到端实测：秒级返回 + reason=index_not_built + knowledge_search_state/chunks 零新增（证据落盘）
+变更：2026-10-19-knowledge-build-switch-rollout
+状态：active
+摘要：主路径
+全文：.sillyspec/changes/archive/2026-10-19-knowledge-build-switch-rollout/requirements.md#FR-02
+最近确认：cb7394b3637b8bab1e1d746dbb2454c658bb6e85
+
+## FR-core-017 发布记录按 deploy skill 规范写入 docs/releases/；known-issues 地雷条目状态更新（本地已配实证、生产剩 env 一动作）
+变更：2026-10-19-knowledge-build-switch-rollout
+状态：active
+摘要：主路径
+全文：.sillyspec/changes/archive/2026-10-19-knowledge-build-switch-rollout/requirements.md#FR-03
+最近确认：cb7394b3637b8bab1e1d746dbb2454c658bb6e85
+
+## FR-core-018 assets DTO 增 scopeAudit.repos 元数据（key/锚点/计数/降级/patchSha256，不回传 patch 正文），旧归档无 repos 时零变化
+变更：2026-10-19-change-assets-cross-repo-repos
+状态：active
+摘要：跨仓冻结投影；旧归档兼容
+全文：.sillyspec/changes/archive/2026-10-19-change-assets-cross-repo-repos/requirements.md#FR-01
+最近确认：9043c1a83f53bb4bcd5fd05fe3fd8529a5c0132d
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-19-change-assets-cross-repo-repos:flow:测试绑定FR-01
+  tests: backend/app/modules/change/tests/test_assets.py::test_patch_meta_projects_cross_repo_metadata | backend/app/modules/change/tests/test_assets.py::test_patch_meta_without_repos_key_is_backward_compatible
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-19-change-assets-cross-repo-repos
+  status: active
+
+## FR-core-019 变更资产卡按仓分段展示跨仓冻结面，并标注主仓/各仓口径避免双计歧义
+变更：2026-10-19-change-assets-cross-repo-repos
+状态：active
+摘要：有跨仓面；无跨仓面
+全文：.sillyspec/changes/archive/2026-10-19-change-assets-cross-repo-repos/requirements.md#FR-02
+最近确认：9043c1a83f53bb4bcd5fd05fe3fd8529a5c0132d
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-19-change-assets-cross-repo-repos:flow:测试绑定FR-02
+  tests: frontend/src/components/changes/detail/__tests__/change-assets-card.test.tsx::跨仓冻结面
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-19-change-assets-cross-repo-repos
+  status: active
+
+## FR-core-020 后端单测覆盖 repos 投影与缺键/降级形态，前端类型检查与构建通过
+变更：2026-10-19-change-assets-cross-repo-repos
+状态：active
+摘要：验证面
+全文：.sillyspec/changes/archive/2026-10-19-change-assets-cross-repo-repos/requirements.md#FR-03
+最近确认：9043c1a83f53bb4bcd5fd05fe3fd8529a5c0132d
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-19-change-assets-cross-repo-repos:flow:测试绑定FR-03
+  tests: backend/app/modules/change/tests/test_assets.py::test_patch_meta_projects_cross_repo_metadata | frontend/src/components/changes/detail/__tests__/change-assets-card.test.tsx::跨仓冻结面
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-19-change-assets-cross-repo-repos
+  status: active
+
+## FR-core-021 既有 patch 语义不变：files/totals 仍为主仓面
+变更：2026-10-19-change-assets-cross-repo-repos
+状态：active
+摘要：主仓面隔离
+全文：.sillyspec/changes/archive/2026-10-19-change-assets-cross-repo-repos/requirements.md#FR-04
+最近确认：9043c1a83f53bb4bcd5fd05fe3fd8529a5c0132d
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-19-change-assets-cross-repo-repos:flow:测试绑定FR-04
+  tests: backend/app/modules/change/tests/test_assets.py::test_patch_meta_projects_cross_repo_metadata
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-19-change-assets-cross-repo-repos
+  status: active

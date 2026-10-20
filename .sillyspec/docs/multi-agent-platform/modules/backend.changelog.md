@@ -64,3 +64,10 @@
 - 2026-10-18-change-list-type-filter | 变更列表加类型标签与类型筛选
 - 2026-10-19-platform-auto-commit-type | 平台侧自动写入变更类型闭环
 - 2026-10-19-change-list-created-sort | 变更中心列表默认按创建时间倒序
+- 2026-10-19-knowledge-search-build-switch | 知识搜索禁建库开关：根治首搜建库地雷
+- 2026-10-19-thinking-zh-translate | 思考内容离线翻译为中文展示
+- 2026-10-19-translate-live-verify | 翻译真机验证：换模型源与EOS修复
+- 2026-10-19-knowledge-build-switch-rollout | 禁建库开关本地部署落地与首搜实测
+- 2026-10-19-change-assets-cross-repo-repos | 变更资产卡展示跨仓冻结面
+- 2026-10-19-cross-repo-patch-slicing | 资产卡跨仓单文件 diff 切片
+- 2026-10-20-conflict-platform-archive | 冲突对比平台留档快照自足回退

@@ -132,6 +132,10 @@
 | 2026-10-19 | 2026-10-19-shared-agent-onboarding-hint | 无自有 daemon 且无工作区共享机器的新用户(如 180072)在会话创建处不知道要选「平台共享… |
 | 2026-10-19 | 2026-10-19-hide-shared-profile-in-session | 用户担心普通会话中途误选「平台向导」类平台共享智能体档案(切换后仅换人格提示词,但用户预期是整套环境… |
 | 2026-10-19 | 2026-10-19-change-list-created-sort | 变更中心列表默认按创建时间倒序 |
+| 2026-10-19 | 2026-10-19-thinking-zh-translate | 思考内容离线翻译为中文展示 |
+| 2026-10-19 | 2026-10-19-change-assets-cross-repo-repos | 变更资产卡展示跨仓冻结面 |
+| 2026-10-19 | 2026-10-19-cross-repo-patch-slicing | 资产卡跨仓单文件 diff 切片 |
 | 2026-10-19 | 2026-10-19-preview-card-empty-turn-fix | 切换档案产生的静默轮（started_at 空、无日志、无 error_code 的终态轮）刷新后进… |
 | 2026-10-20 | 2026-10-20-pill-dock-left-align | 悬浮 pill 停靠组贴左吸附时内容改左对齐 |
 | 2026-10-20 | 2026-10-20-pill-dock-drag-align-keep | 悬浮 pill 停靠组拖拽过程中保持拖拽前对齐方向 |
+| 2026-10-20 | 2026-10-20-conflict-platform-archive | 冲突对比平台留档快照自足回退 |

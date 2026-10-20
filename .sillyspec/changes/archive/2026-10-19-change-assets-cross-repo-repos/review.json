@@ -1,0 +1,40 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-19-change-assets-cross-repo-repos",
+  "reviewer": "subagent（ZCode 独立子代理）",
+  "verdict": "PASS",
+  "reviewedAgainst": "cb7394b3637b8bab1e1d746dbb2454c658bb6e85",
+  "findings": [
+    {
+      "severity": "P2",
+      "title": "degraded_reason 原样投影可携带 repoPath 绝对路径——「本机绝对路径不外泄」声明在降级仓形态下不成立",
+      "evidence": "CLI 产出端 cross-repo-reconcile.js:219 在注册路径不可达分支把 `${repoPath}` 拼进 degradedReason；后端 _read_patch_repos 只做 _str_or_none 透传（assets.py:273），资产卡把 degraded_reason 原样交给 ScopeAuditRepoSeg（change-assets-card.tsx:668），组件直接渲染（structured-views.tsx:353）。repo_path 字段本身确实未进 DTO（测试与 openapi 均验证），但同一绝对路径经原因文本绕过了披露边界。该文本在既有 scope-audit 卡已同样暴露（非本变更新增信息类），故定 P2 而非 P1；建议在 CLI/daemon 产出端脱敏该分支文案。",
+      "location": "backend/app/modules/change/assets.py:273"
+    },
+    {
+      "severity": "P3",
+      "title": "heavy 冻结形态 repos[] 首位含 key=main，资产卡未过滤——「跨仓冻结面」段内出现第二个「主仓」口径",
+      "evidence": "CLI computeFullFlowAudit 的 reposOut 固定以 { key: 'main', ... } 打头（scope-audit.js:1275-1285），execute --done 经 writeCloseTraceArtifacts 原样写入 change-patch.json.scopeAudit（complete.js:1104-1117、flow-parity.js:749）。资产卡对 crossRepos 全量 map 且不筛 key==='main'（change-assets-card.tsx:643），于是「跨仓冻结面」标题下会再出现一个「主仓」段；该段 files 来自 repoTotals 全行（含 untouched），与顶级「主仓 patch」face（projectTraceFaceRows 排除 untouched）可能不同，同屏两个主仓数。thin 空面跨仓形态无 main 条目，现有前后端夹具也只含跨仓仓，未覆盖该形态。",
+      "location": "frontend/src/components/changes/detail/change-assets-card.tsx:643"
+    },
+    {
+      "severity": "P3",
+      "title": "design 并发声明称生成器有未提交改动守卫，daemon 侧 gen-api-types 无此守卫",
+      "evidence": "design.md:29 用「gen-api-types.mjs 已内建未提交改动中止」支撑并发安全；frontend/scripts/gen-api-types.mjs:24-44 定义 assertNoDirtyGenerated 并在 :83 调用，而 sillyhub-daemon/scripts/gen-api-types.mjs 全文无脏工作树检查（:73 直接 execSync 生成）。本变更两处生成物经独立重生成均与提交内容一致，无实际混入，但该声明对 daemon 侧不成立。",
+      "location": "sillyhub-daemon/scripts/gen-api-types.mjs:73"
+    },
+    {
+      "severity": "P3",
+      "title": "FR-04 绑定用例只断言 files==0，未钉住 file_list=[] 与 additions/deletions==0",
+      "evidence": "requirements.md FR-04 场景要求「patch.files=0 且 file_list=[]，跨仓 112 只在 repos[].totals」；test_patch_meta_projects_cross_repo_metadata 断言了 files==0、repos 键序与 repos[0].totals.files==112（test_assets.py:978-993），但未断言 result.patch.file_list==[]、additions==0、deletions==0。实现本身正确（种子 files=[]，_read_patch_meta 主仓面读取路径未改），属绑定断言面不全。",
+      "location": "backend/app/modules/change/tests/test_assets.py:978"
+    }
+  ],
+  "dimensionNotes": {
+    "乱序": "ok",
+    "并发": "finding",
+    "切换": "ok",
+    "作用域": "finding"
+  },
+  "reviewedAt": "2026-10-19T18:15:55+08:00"
+}

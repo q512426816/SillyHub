@@ -1,0 +1,22 @@
+{"ts":1792455344672,"kind":"file","stage":"design","detail":"design.md 出现","provisional":true}
+{"ts":1792455344672,"kind":"file","stage":"tasks","detail":"tasks.md 出现","provisional":true}
+{"ts":1792455440704,"kind":"file-update","stage":"requirements","detail":"requirements.md 内容变更","provisional":true}
+{"ts":1792455467285,"kind":"file-update","stage":"design","detail":"design.md 内容变更","provisional":true}
+{"ts":1792455477328,"kind":"file-update","stage":"tasks","detail":"tasks.md 内容变更","provisional":true}
+{"ts":1792455497687,"kind":"warning","stage":null,"rule":"scope-drift","severity":"warning","detail":"声明面之外的代码文件被改：ruff.toml——范围漂移嫌疑（并行会话改动/越界，人判）","provisional":true}
+{"ts":1792455517922,"kind":"warning","stage":null,"rule":"scope-drift","severity":"warning","detail":"声明面之外的代码文件被改：scripts/_width_probe_tmp.py——范围漂移嫌疑（并行会话改动/越界，人判）","provisional":true}
+{"ts":1792455595948,"kind":"task-done","stage":"tasks","detail":"checked 0→1","provisional":true,"source":"task-tick"}
+{"ts":1792455596290,"kind":"task-done","stage":"tasks","detail":"checked 1→2","provisional":true,"source":"task-tick"}
+{"ts":1792455596636,"kind":"task-done","stage":"tasks","detail":"checked 2→3","provisional":true,"source":"task-tick"}
+{"ts":1792455597189,"kind":"file-update","stage":"tasks","detail":"tasks.md 内容变更","provisional":true}
+{"ts":1792455597189,"kind":"task-done","stage":"tasks","detail":"checked 0→3","provisional":true}
+{"ts":1792455617353,"kind":"commit","stage":null,"detail":"7396ebb76","provisional":true}
+{"ts":1792455687166,"kind":"commit","stage":null,"detail":"978336829","provisional":true}
+{"ts":1792455690940,"kind":"warning","stage":null,"rule":"scope-drift","severity":"warning","detail":"声明面之外的代码文件被改：backend/app/modules/spec_workspace/tests/test_conflict_local_archive.py——范围漂移嫌疑（并行会话改动/越界，人判）","provisional":true}
+{"ts":1792455694397,"kind":"warning","stage":null,"rule":"scope-drift","severity":"warning","detail":"声明面之外的代码文件被改：sillyspec/changes/2026-10-20-root-ruff-config/flow-state.yaml——范围漂移嫌疑（并行会话改动/越界，人判）","provisional":true}
+{"ts":1792455727308,"kind":"gate-run","stage":"verify","detail":"门实测 passed（29.2s） · 20261020002206","provisional":true}
+{"ts":1792455764047,"kind":"warning","stage":null,"rule":"scope-drift","severity":"warning","detail":"声明面之外的代码文件被改：backend/app/modules/spec_workspace/service.py——范围漂移嫌疑（并行会话改动/越界，人判）","provisional":true}
+{"ts":1792455978059,"kind":"warning","stage":null,"rule":"scope-drift","severity":"warning","detail":"声明面之外的代码文件被改：backend/app/modules/daemon/tests/test_sillyspec_compare.py——范围漂移嫌疑（并行会话改动/越界，人判）","provisional":true}
+{"ts":1792456011156,"kind":"warning","stage":null,"rule":"scope-drift","severity":"warning","detail":"声明面之外的代码文件被改：backend/app/modules/daemon/tests/test_sillyspec_compare.py——范围漂移嫌疑（并行会话改动/越界，人判）","provisional":true}
+{"ts":1792456050813,"kind":"warning","stage":null,"rule":"scope-drift","severity":"warning","detail":"声明面之外的代码文件被改：backend/app/modules/daemon/sillyspec_compare.py——范围漂移嫌疑（并行会话改动/越界，人判）","provisional":true}
+{"ts":1792456106634,"kind":"file","stage":"proposal","detail":"decisions.md 出现","provisional":true}

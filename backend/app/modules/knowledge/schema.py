@@ -615,7 +615,9 @@ class VectorSearchOut(BaseModel):
 # ── 平台知识搜索（change 2026-10-15-platform-knowledge-search / D-001@v1）────────
 # 契约见 design.md「接口定义」：results 条目为可展示的召回 {spec_path, kind, title,
 # anchor, snippet, score}；docs/ 类结果已按 SCAN_DOCS_READ 服务端过滤（D-005@v1）；
-# model_ready=False 表示语义模型不可用、results 为纯词面降级结果（reason 带因）。
+# model_ready=False 表示语义模型不可用、results 为纯词面降级结果（reason 带因；
+# 词表：embedder 错误原文 / knowledge_search_db_degraded:* / index_not_built——
+# 服务器禁建库且索引未建，2026-10-19-knowledge-search-build-switch）。
 
 
 class KnowledgeSearchIn(BaseModel):
@@ -637,7 +639,8 @@ class KnowledgeSearchResultItem(BaseModel):
 
 
 class KnowledgeSearchOut(BaseModel):
-    """检索出参：model_ready=False 时 results 非空（纯词面）+ reason 带因（fail-soft）。"""
+    """检索出参：model_ready=False 时 results 非空（纯词面）+ reason 带因（fail-soft；
+    reason=index_not_built 表示服务器禁建库且该 ws 索引未建）。"""
 
     ok: bool = True
     results: list[KnowledgeSearchResultItem]

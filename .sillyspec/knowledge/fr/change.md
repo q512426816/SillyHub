@@ -171,7 +171,7 @@ created_at: 2026-10-02T02:55:12.745Z
 测试绑定：
 <!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
 - row: 2026-10-16-change-center-back-keeps-list-state:flow:测试绑定FR-01
-  tests: changes/__tests__/page.test.tsx「?tab=archive&page=3 深链：主 load 按已归档第3页请求」 | changes/__tests__/page.test.tsx「切已归档 tab 后 URL 写回 tab=archive」 | changes/__tests__/page.test.tsx「翻页后 URL 写回 page=N」
+  tests: frontend/src/app/page.test.tsx「?tab=archive&page=3 深链：主 load 按已归档第3页请求」 | frontend/src/app/page.test.tsx「切已归档 tab 后 URL 写回 tab=archive」 | frontend/src/app/page.test.tsx「翻页后 URL 写回 page=N」
   reason: spec
   state: candidate
   discovery: machine
@@ -454,7 +454,7 @@ created_at: 2026-10-02T02:55:12.745Z
 测试绑定：
 <!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
 - row: 2026-10-18-change-list-type-filter:flow:测试绑定FR-03
-  tests: changes/__tests__/page.test.tsx「类型下拉选择「fix」
+  tests: frontend/src/app/page.test.tsx「类型下拉选择「fix」
   reason: spec
   state: candidate
   discovery: machine
@@ -567,7 +567,7 @@ created_at: 2026-10-02T02:55:12.745Z
 测试绑定：
 <!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
 - row: 2026-10-19-change-list-created-sort:flow:测试绑定FR-02
-  tests: changes/__tests__/page.test.tsx「点创建时间列头 → sortDir 切换，默认 created_at_desc 点击后 asc」
+  tests: frontend/src/app/page.test.tsx「点创建时间列头 → sortDir 切换，默认 created_at_desc 点击后 asc」
   reason: spec
   state: candidate
   discovery: machine
@@ -584,3 +584,60 @@ created_at: 2026-10-02T02:55:12.745Z
 - 场景：主路径 — Given 改动落地，When 跑 test_change_lineage_filter.py + 列表页测试，Then 全绿
 全文：.sillyspec/changes/archive/2026-10-19-change-list-created-sort/requirements.md#FR-03
 最近确认：e935e8c671e20cda72d65ea44ebbe9adb65b0d47
+
+## FR-change-033 assets/patch-file 端点新增可选 repo 参数（未命中已解析 repos keys 按 note 降级不抛错），切片取 change-patch.json 对应仓 repos[].patch 内联正文，复用既有切片与上限逻辑
+变更：2026-10-19-cross-repo-patch-slicing
+状态：active
+摘要：跨仓命中切片；未知仓/无正文仓
+全文：.sillyspec/changes/archive/2026-10-19-cross-repo-patch-slicing/requirements.md#FR-01
+最近确认：2b87056a6bd73e6dfa932232adec16c5bde2415b
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-19-cross-repo-patch-slicing:flow:测试绑定FR-01
+  tests: backend/app/modules/change/tests/test_assets.py::test_patch_file_diff_repo_hit_and_unknown
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-19-cross-repo-patch-slicing
+  status: active
+
+## FR-change-034 资产卡仓段下列出该仓文件清单（后端从 patch 头解析投影，超上限截断标注），点开单文件弹窗看跨仓 diff
+变更：2026-10-19-cross-repo-patch-slicing
+状态：active
+摘要：仓段文件清单
+全文：.sillyspec/changes/archive/2026-10-19-cross-repo-patch-slicing/requirements.md#FR-02
+最近确认：2b87056a6bd73e6dfa932232adec16c5bde2415b
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-19-cross-repo-patch-slicing:flow:测试绑定FR-02
+  tests: backend/app/modules/change/tests/test_assets.py::test_patch_meta_repo_file_list | frontend/src/components/changes/detail/__tests__/change-assets-card.test.tsx::跨仓冻结面
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-19-cross-repo-patch-slicing
+  status: active
+
+## FR-change-035 后端单测覆盖命中/未知仓/无 repos 三态，前端组件测试覆盖列表与点开弹窗，类型重生成同步
+变更：2026-10-19-cross-repo-patch-slicing
+状态：active
+摘要：验证面
+全文：.sillyspec/changes/archive/2026-10-19-cross-repo-patch-slicing/requirements.md#FR-03
+最近确认：2b87056a6bd73e6dfa932232adec16c5bde2415b
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-19-cross-repo-patch-slicing:flow:测试绑定FR-03
+  tests: backend/app/modules/change/tests/test_assets.py::test_patch_file_diff_repo_hit_and_unknown | backend/app/modules/change/tests/test_assets.py::test_patch_meta_repo_file_list | frontend/src/components/changes/detail/__tests__/change-assets-card.test.tsx::跨仓冻结面
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-19-cross-repo-patch-slicing
+  status: active

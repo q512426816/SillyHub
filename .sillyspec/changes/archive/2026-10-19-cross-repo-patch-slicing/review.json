@@ -1,0 +1,22 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-19-cross-repo-patch-slicing",
+  "reviewer": "subagent（ZCode 独立子代理）",
+  "verdict": "PASS",
+  "reviewedAgainst": "2b87056a6bd73e6dfa932232adec16c5bde2415b",
+  "findings": [
+    {
+      "severity": "P3",
+      "title": "repo 侧 file_list 截断 True 分支无测试断言（仅测 False 侧）",
+      "evidence": "test_patch_meta_repo_file_list 只断言 files_truncated is False 与空仓恒空；assets.py:299-300 的 file_list[:_PATCH_FILES_MAX] 与 len>max 截断标注分支（FR-02 MUST 行为已实现且与主仓面同构）无 >500 用例——主仓面既有 monkeypatch _PATCH_FILES_MAX=1 的截断断言先例（test_assets.py:425-436），repo 侧未循。行为正确性经代码同构比对成立，属覆盖缺口非数据风险。",
+      "location": "backend/app/modules/change/tests/test_assets.py:1042"
+    }
+  ],
+  "dimensionNotes": {
+    "乱序": "ok",
+    "并发": "ok",
+    "切换": "ok",
+    "作用域": "ok"
+  },
+  "reviewedAt": "2026-10-19T19:33:57+08:00"
+}

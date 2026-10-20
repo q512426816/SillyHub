@@ -85,7 +85,7 @@ created_at: 2026-10-15T16:16:15.707Z
 测试绑定：
 <!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
 - row: 2026-10-17-audit-risk-followup:flow:测试绑定FR-01
-  tests: test/sillyhub-daemon/tests/interactive/session-store-persistence.test.ts「单源守护：INTERACTIVE_PROVIDERS 全部键的记录载入保留（2026-10-17-audit-risk-followup——手写白名单漏 dsh/zcode 曾致重启静默丢记录，pi/cursor 同坑各一次）」
+  tests: sillyhub-daemon/tests/interactive/session-store-persistence.test.ts「单源守护：INTERACTIVE_PROVIDERS 全部键的记录载入保留（2026-10-17-audit-risk-followup——手写白名单漏 dsh/zcode 曾致重启静默丢记录，pi/cursor 同坑各一次）」
   reason: spec
   state: candidate
   discovery: machine
@@ -104,7 +104,7 @@ created_at: 2026-10-15T16:16:15.707Z
 测试绑定：
 <!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
 - row: 2026-10-17-audit-risk-followup:flow:测试绑定FR-02
-  tests: test/frontend/src/components/sessions/__tests__/session-list-panel.test.tsx「run 跨刷新仍活跃（running→running，列表数据有变化）→ 不误标完成角标（活跃期误报回归）」
+  tests: frontend/src/components/sessions/__tests__/session-list-panel.test.tsx「run 跨刷新仍活跃（running→running，列表数据有变化）→ 不误标完成角标（活跃期误报回归）」
   reason: spec
   state: candidate
   discovery: machine
@@ -123,7 +123,7 @@ created_at: 2026-10-15T16:16:15.707Z
 测试绑定：
 <!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
 - row: 2026-10-17-audit-risk-followup:flow:测试绑定FR-03
-  tests: test/frontend/src/lib/__tests__/logout-storage.test.ts「7 类用户域前缀全清、设备级键保留、前缀精确匹配」
+  tests: frontend/src/lib/__tests__/logout-storage.test.ts「7 类用户域前缀全清、设备级键保留、前缀精确匹配」
   reason: spec
   state: candidate
   discovery: machine
@@ -142,7 +142,7 @@ created_at: 2026-10-15T16:16:15.707Z
 测试绑定：
 <!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
 - row: 2026-10-17-audit-risk-followup:flow:测试绑定FR-04
-  tests: test/sillyhub-daemon/tests/pull-antiresurrect.test.ts「用例5（窗口内重建保护）：下载窗口内重建的同名文件不进抑制面——不删本地、不并回陈旧条目（2026-10-17-audit-risk-followup）」
+  tests: sillyhub-daemon/tests/pull-antiresurrect.test.ts「用例5（窗口内重建保护）：下载窗口内重建的同名文件不进抑制面——不删本地、不并回陈旧条目（2026-10-17-audit-risk-followup）」
   reason: spec
   state: candidate
   discovery: machine
@@ -161,7 +161,7 @@ created_at: 2026-10-15T16:16:15.707Z
 测试绑定：
 <!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
 - row: 2026-10-17-audit-risk-followup:flow:测试绑定FR-05
-  tests: test/sillyhub-daemon/tests/interactive/zcode-app-server-driver.test.ts「consume 自然退出（iq.close）→ finally 对齐 codex：清 _finishTurnOnClose 槽位 + 兜底 close（幂等单次）（2026-10-17-audit-risk-followup）」
+  tests: sillyhub-daemon/tests/interactive/zcode-app-server-driver.test.ts「consume 自然退出（iq.close）→ finally 对齐 codex：清 _finishTurnOnClose 槽位 + 兜底 close（幂等单次）（2026-10-17-audit-risk-followup）」
   reason: spec
   state: candidate
   discovery: machine
@@ -180,7 +180,7 @@ created_at: 2026-10-15T16:16:15.707Z
 测试绑定：
 <!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
 - row: 2026-10-17-audit-risk-followup:flow:测试绑定FR-06
-  tests: test/sillyhub-daemon/tests/pull-antiresurrect.test.ts「用例6（越界键防线）：applyResurrectSuppress 对越界键（../）跳过 rm 并告警——dir 外文件幸存」
+  tests: sillyhub-daemon/tests/pull-antiresurrect.test.ts「用例6（越界键防线）：applyResurrectSuppress 对越界键（../）跳过 rm 并告警——dir 外文件幸存」
   reason: spec
   state: candidate
   discovery: machine
@@ -262,7 +262,7 @@ created_at: 2026-10-15T16:16:15.707Z
 测试绑定：
 <!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
 - row: 2026-10-16-session-pill-dock-drag:flow:测试绑定FR-01
-  tests: test/frontend/src/components/daemon/__tests__/session-change-files-hover.test.tsx「无关联变更（data 空数组/未就绪）不渲染入口」 | test/frontend/src/components/daemon/__tests__/session-decisions-hover.test.tsx「三类全空（pending 空 + 历史空/未加载）不渲染入口（FR-01）」 | test/frontend/src/components/daemon/__tests__/session-floating-pill-dock.test.tsx「竖排停靠组：children 渲染成组（flex-col 右对齐），portal 挂 body」
+  tests: frontend/src/components/daemon/__tests__/session-change-files-hover.test.tsx「无关联变更（data 空数组/未就绪）不渲染入口」 | frontend/src/components/daemon/__tests__/session-decisions-hover.test.tsx「三类全空（pending 空 + 历史空/未加载）不渲染入口（FR-01）」 | frontend/src/components/daemon/__tests__/session-floating-pill-dock.test.tsx「竖排停靠组：children 渲染成组（flex-col 右对齐），portal 挂 body」
   reason: spec
   state: candidate
   discovery: machine
@@ -281,7 +281,7 @@ created_at: 2026-10-15T16:16:15.707Z
 测试绑定：
 <!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
 - row: 2026-10-16-session-pill-dock-drag:flow:测试绑定FR-02
-  tests: test/frontend/src/components/daemon/__tests__/session-change-files-hover.test.tsx「点击弹下拉（hover 不再触发）：进行中置顶（轻量徽标+阶段），已归档默认折叠」 | test/frontend/src/components/daemon/__tests__/session-decisions-hover.test.tsx「点击弹下拉（hover 不再触发）：待决策置顶（提问/Plan 徽标），已答历史默认折叠（FR-02）」
+  tests: frontend/src/components/daemon/__tests__/session-change-files-hover.test.tsx「点击弹下拉（hover 不再触发）：进行中置顶（轻量徽标+阶段），已归档默认折叠」 | frontend/src/components/daemon/__tests__/session-decisions-hover.test.tsx「点击弹下拉（hover 不再触发）：待决策置顶（提问/Plan 徽标），已答历史默认折叠（FR-02）」
   reason: spec
   state: candidate
   discovery: machine
@@ -300,7 +300,7 @@ created_at: 2026-10-15T16:16:15.707Z
 测试绑定：
 <!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
 - row: 2026-10-16-session-pill-dock-drag:flow:测试绑定FR-03
-  tests: test/frontend/src/components/daemon/__tests__/session-floating-pill-dock.test.tsx「拖到右半屏松手吸附右缘」 | test/frontend/src/components/daemon/__tests__/session-floating-pill-dock.test.tsx「拖拽越界钳回窗内：y 不出上下边」 | test/frontend/src/components/daemon/__tests__/session-floating-pill-dock.test.tsx「持久化位置恢复；损坏存档静默回落默认右下」 | test/frontend/src/components/daemon/__tests__/session-floating-pill-dock.test.tsx「按住拖动超过阈值：跟手且钳制窗内，松手吸附较近左缘并持久化」 | test/frontend/src/components/daemon/__tests__/session-floating-pill-dock.test.tsx「视口缩放：钳回窗内并保持吸附侧」
+  tests: frontend/src/components/daemon/__tests__/session-floating-pill-dock.test.tsx「拖到右半屏松手吸附右缘」 | frontend/src/components/daemon/__tests__/session-floating-pill-dock.test.tsx「拖拽越界钳回窗内：y 不出上下边」 | frontend/src/components/daemon/__tests__/session-floating-pill-dock.test.tsx「持久化位置恢复；损坏存档静默回落默认右下」 | frontend/src/components/daemon/__tests__/session-floating-pill-dock.test.tsx「按住拖动超过阈值：跟手且钳制窗内，松手吸附较近左缘并持久化」 | frontend/src/components/daemon/__tests__/session-floating-pill-dock.test.tsx「视口缩放：钳回窗内并保持吸附侧」
   reason: spec
   state: candidate
   discovery: machine
@@ -319,7 +319,7 @@ created_at: 2026-10-15T16:16:15.707Z
 测试绑定：
 <!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
 - row: 2026-10-16-session-pill-dock-drag:flow:测试绑定FR-04
-  tests: test/frontend/src/components/daemon/__tests__/session-floating-pill-dock.test.tsx「位移小于阈值不算拖拽：click 放行给 pill 按钮」 | test/frontend/src/components/daemon/__tests__/session-floating-pill-dock.test.tsx「拖拽结束后的残余 click 被吞；时间窗外恢复点击」
+  tests: frontend/src/components/daemon/__tests__/session-floating-pill-dock.test.tsx「位移小于阈值不算拖拽：click 放行给 pill 按钮」 | frontend/src/components/daemon/__tests__/session-floating-pill-dock.test.tsx「拖拽结束后的残余 click 被吞；时间窗外恢复点击」
   reason: spec
   state: candidate
   discovery: machine
@@ -460,3 +460,24 @@ created_at: 2026-10-15T16:16:15.707Z
   confirmed_at: null
   source_change: 2026-10-19-preview-card-empty-turn-fix
   status: active
+
+## FR-docs-027 sillyspec-gotchas.md 新增 4 条目（格式对齐既有条目：## 标题+机理+规避/做法+来源标注时点与 CLI 版本）
+变更：2026-10-20-sillyspec-gotchas-session
+状态：active
+摘要：格式与内容对齐
+全文：.sillyspec/changes/archive/2026-10-20-sillyspec-gotchas-session/requirements.md#FR-01
+最近确认：06e0a0cc5908aa37fbbc2e79ab0b741fb1b6381a
+
+## FR-docs-028 INDEX.md SillySpec 坑段同步 4 行关键词索引（锚点与条目标题一致）
+变更：2026-10-20-sillyspec-gotchas-session
+状态：active
+摘要：索引可检索
+全文：.sillyspec/changes/archive/2026-10-20-sillyspec-gotchas-session/requirements.md#FR-02
+最近确认：06e0a0cc5908aa37fbbc2e79ab0b741fb1b6381a
+
+## FR-docs-029 sillyspec knowledge validate 0 错 0 警
+变更：2026-10-20-sillyspec-gotchas-session
+状态：active
+摘要：知识库完整性
+全文：.sillyspec/changes/archive/2026-10-20-sillyspec-gotchas-session/requirements.md#FR-03
+最近确认：06e0a0cc5908aa37fbbc2e79ab0b741fb1b6381a

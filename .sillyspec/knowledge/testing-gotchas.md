@@ -123,3 +123,21 @@ sillyhub-daemon 的 vitest.config.ts include 仅 `tests/**/*.test.ts`——src �
 
 vi.useFakeTimers() 后用 waitFor 等「挂载 effect 的异步链已发出请求」会挂满 testTimeout：fake timers 冻结了 waitFor 轮询依赖的计时器（vitest waitFor 走 setInterval），微任务队列又不随真实时间推进。修法：挂载后直接 await vi.advanceTimersByTimeAsync(0)（零毫秒但排干微任务队列，初始请求落地）再断言 mock 已调用；后续周期断言用 advanceTimersByTimeAsync(ms) 同步推进（fake timers 与 fake microtasks 需同源推进，advanceTimersByTimeAsync 两者都排）。实证：2026-10-13-session-change-files-hover task-02 change-file-tree-autorefresh.test.tsx 首跑 3 用例 45s 全超时挂，改后 3/3 绿 125ms。
 - 来源：2026-10-13-session-change-files-hover（task-02 测试调通实证）
+
+## 前端：vi.doMock 计划生效前先动态 import 了依赖方，会以"真实 store 代际"冻结被测模块
+
+`frontend/src/lib/__tests__/token-refresh.test.ts` 的隔离范式是 beforeEach `resetModules` + `vi.doMock("@/stores/session", mockStore)` 后动态 `import("@/lib/token-refresh")`。新增用例若为了取同一代际的 `ApiError` 而**先** `await import("@/lib/api")`，会连带把 token-refresh 以**真实 zustand store**（未 mock）代际加载——随后 `loadTokenRefresh` 里的 doMock 对已缓存模块不再生效，`ensureFreshAccessToken` 读真实 store（refreshToken=null）早退返回 null，被测的 5xx/408 抛错路径被静默绕过（症状：期待 reject 的断言收到 resolve，且**不报错**）。正确顺序恒定：**先** `loadTokenRefresh(mockStore)`，**再** `await import("@/lib/api")` 取同类代际的类（instanceof 才能匹配）。来源：2026-10-16-fix-auth-random-logout task-03（红阶段 2 用例假红→排序修正后 14/14）。
+
+## 后端：xfail(strict=False) 会把「顺带的无关失败」一起吞成假绿——清偿时先跑真断言
+
+`backend/tests/modules/auth/test_refresh_grace_window.py` 两处历史 `xfail(strict=False)`（红-绿分阶段遗留）：标记本意只针对当时的过渡态，但 strict=False 下**任何**失败都被容忍——用例 2/3 实际因「邮箱形式账号（`u2@example.com`）传给纯 username 登录（D-001）」而持续失败，被 xfail 吞成假绿数月无人发现。清偿 xfail 必须按「先去掉标记跑一次真断言，再修真实原因」顺序（本次即：去掉后暴露 login 失败 → 改 username 形式即绿）。判据：过期 xfail 的 reason 里出现「届时……移除」承诺时，凡承诺成立（前置改造已落地）即应即时清偿。来源：2026-10-16-fix-auth-random-logout task-02。
+
+## daemon：集成测试 daemon.start() 被系统代理黑洞拖死（npm view 30s×2）
+
+`daemon.start()` 链上 `runPreflight`（preflight.ts runSillySpecCheck）与 `_registerDaemon` 的 `probeLatest`（sillyspec-manager.ts，未注入 sillyspecManager 时）各起一次 `npm view sillyspec version --prefer-online` 子进程；npm 12 在 Windows **遵循系统代理**（WinINET ProxyServer，如 Clash 127.0.0.1:7897），代理对 npm 流量黑洞时每次外呼挂满 runCmd 的 30s 超时帽 → 每个 `daemon.start()` 用例白付 30-60s，满套件整文件超时（2026-10-10 实测 daemon-borrow-sandbox 全红、daemon-kind-dispatch 20 用例 60s 超时；主仓 HEAD 对照复现=环境归因非代码回归）。`npm_config_registry`/`npm_config_proxy` env 钉法无效（系统代理优先级更高）。**修法（2026-10-10-borrow-sandbox-workspace-context task-04 已示范）**：测试文件 `vi.mock('../src/preflight.js', ...)` no-op 掉 runPreflight（182s→1.3s）+ 构造器注入 no-op `sillyspecManager`（官方注入口，daemon.ts ctorOpts）；不断言 preflight 行为的用例组语义无损。候选推广：daemon-kind-dispatch.test.ts 等所有真起 daemon.start() 的测试文件同款 mock（待独立小变更立项）。来源：task-04 排障（reg query ProxyEnable=1 ProxyServer=127.0.0.1:7897 + spawn 计时二分定位）。
+
+- 状态（2026-10-19 归类核实，原【待确认】已裁决）：复现与修法均已实证属实；遗留=向其余真起 `daemon.start()` 的测试文件推广同款 mock，待独立小变更。
+
+## 后端：monkeypatch has_permission 必须双 patch（auth_deps 导入时绑定 + rbac 模块属性）
+
+`backend/app/core/auth_deps.py:40` 是 `from app.modules.auth.rbac import has_permission`（导入时绑定）——只 patch `app.modules.auth.rbac.has_permission` 不会影响 `require_permission` 门控依赖（改的是 rbac 模块属性，auth_deps 里的名字仍指向原函数，403 用例会被放行成 200）；只 patch `auth_deps.has_permission` 又管不到端点函数内联 `from app.modules.auth.rbac import has_permission` 的取值源。写权限相关端点测试（mock 放行/拒绝）时两处都要 patch（来源 task-02，2026-10-15-platform-knowledge-search；实证：test_knowledge_search_requires_knowledge_read 首轮 200 未 403）。

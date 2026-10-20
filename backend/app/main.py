@@ -97,6 +97,7 @@ from app.modules.spec_workspace.router import router as spec_workspace_router
 from app.modules.task import task_router
 from app.modules.tool_gateway.policy_router import router as policy_crud_router
 from app.modules.tool_gateway.router import router as tool_gateway_router
+from app.modules.translate.router import router as translate_router
 from app.modules.workflow.router import router as workflow_router
 from app.modules.workspace import workspace_router
 from app.modules.workspace.link_router import router as ppm_project_link_router
@@ -963,6 +964,8 @@ def create_app() -> FastAPI:
     app.include_router(incident_router, prefix="/api")
     app.include_router(knowledge_router, prefix="/api")
     app.include_router(knowledge_vector_router, prefix="/api")
+    # 2026-10-19-thinking-zh-translate：思考内容离线翻译（fail-soft 端点）。
+    app.include_router(translate_router, prefix="/api")
     app.include_router(release_router, prefix="/api")
     app.include_router(deploy_records_router, prefix="/api")
     app.include_router(notification_router, prefix="/api")

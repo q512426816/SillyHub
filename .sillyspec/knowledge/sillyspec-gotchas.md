@@ -99,3 +99,44 @@ worktree doctor 静默失败后手动补链时（上一条 junction 坑的修复
 - 现象：子代理按「工作目录 = worktree」跑 task-07 全量回归 + 模块文档同步，把 verify-result.md、模块文档修改等产物写进 worktree 并提交到 worktree 分支；主仓库同路径文件未更新。SillySpec CLI 在主仓库运行，验收/归档阶段可能看不到 verify-result.md；未来合并 worktree 分支时，若主仓库也补了一份同内容文件，会触发 both-added 冲突。
 - 根因：代码实现与测试必须在 worktree（隔离其它并发变更），但 SillySpec 进度产物（verify-result.md、tasks.md、review.json、模块文档变更索引）属于项目级文档，主仓库的 SillySpec 流程实时消费它们。
 - 规避：派发 regression/docs 类 task 时，在 prompt 里明确分层——源码/测试命令在 worktree 执行，`.sillyspec/changes/<change>/verify-result.md`、`.sillyspec/docs/.../modules/*.md` 等产物回写主仓库；或在子代理返回后由主代理复核并把产物从 worktree 同步到主仓库。不要依赖「worktree 分支合并后再消费」，否则主仓库 execute/verify 进度对账会缺证据。
+
+## 跨仓 worktree task 用直接 git commit，wt-commit 只认主仓 worktree
+
+`sillyspec wt-commit --change <变更名>` 固定在**主仓** worktree（`.sillyspec/.runtime/worktrees/<变更名>`）跑 `git add/commit`；跨仓 task（task 卡 `repo: sillyspec` 等）的 worktree 是 `<变更名>--<repo-key>` 后缀目录，在跨仓 worktree 内跑 wt-commit 会被 CLI 当成 sillyspec 仓自己的项目实例（找它自己的 .sillyspec）报「worktree 不存在」。正确做法：跨仓 worktree 内直接 `git -C <worktree> add + commit`（execute step 指引「跨仓 worktree task」段本就钉了此方式），apply 阶段 CLI 统一把跨仓 worktree 交付 patch 回对应主工作区。另注意 wt-commit 的 `-m` 缺失会报错（不是可选参数）。来源：task-05/task-02 提交实操（2026-10-09-tombstone-conflict-root-fix）。
+
+## 并行会话删主仓 frontend/node_modules 顶层链接——worktree 与主仓前端全瘫（vitest not found）
+
+现场：worktree frontend 的 node_modules 是指向主仓的 junction；主仓 node_modules 顶层目录从数百个被删到 26 个（.bin 消失、顶层包链接消失，仅 .pnpm store 完好）。症状链：worktree `pnpm exec vitest` 报 vitest not found；绕 .pnpm 直连 `node vitest.mjs` 报 Cannot find module 'vitest/config'（模块解析链断，绕不过）。修复：worktree frontend 内 `pnpm install --force`（经 junction 重建主仓顶层链接；普通 install 可能命中缓存不修——规则 21 既有口径）后再 `pnpm install` 补全；修完主仓与 worktree 均恢复。判断根因是并行会话的 install/清理动作打到共享 node_modules——多会话共用主仓 node_modules 时这是结构性竞态，建议会话内避免任何 node_modules 级清理（来源 task-05，2026-10-15-knowledge-search-pgvector 实证）。
+
+- 状态（2026-10-19 归类核实）：2026-10-15 事故已修复（主仓与 worktree 均恢复）；结构性竞态现行有效——多会话期禁止任何 node_modules 级清理。
+
+## route-hindsight 改写率阈值对小任务偏紧且拦截成本错位到下一变更
+
+（2026-10-20，CLI v3.33.1）`flow done` 收口时 route-hindsight 以「tasks 机器预填稿改写率 > 0.6」标记「疑似该走头脑风暴预段未走」，标记后**下一个全新 `flow start`** 被预段同意门拦下要求显式选道（`--no-prestage` 声明或 run brainstorm）。两连正常轻量小变更连续被标（backfill-dryrun-log-scrub 改写率 0.67、root-ruff-config 0.75）——任务总数只有 2-3 格的小变更按真实实现路径改写机器种子是**正常形态**（种子本就是模板粒度），阈值对任务数少的变更系统性偏紧。
+
+- 拦截成本错位：标记的因果源是上一变更的任务形态，拦截动作却落在**下一个无关变更**的启动口——治理信号变成了对后续变更的开机税。
+- 现行兜底：需求确已含决策时带 `--no-prestage` 声明留痕即过（同意门纯声明制不阻断）。
+- 改进方向：任务总数 ≤3 的变更豁免或降低改写率权重；或标记只出 advisory 不进同意门。
+
+## flow done dirty 缺口三选一缺并行会话文件处置选项
+
+（2026-10-20，CLI v3.33.1）共享主仓多 agent 并行时，`flow done` 的「未提交交付文件」缺口处置只有三选一：① git commit 这些文件（**会把并行会话的在途半成品提交掉**）；② `--freeze-dirty`（**虚假声称归属本变更**）；③ `--accept-dirty-gap`（留缺口，但**缺口数把并行会话文件也计入本变更审计面**）。三选一对「dirty 文件根本不属于本变更、也不该计入本变更审计面」的现实场景没有语义正确的选项。
+
+- 实证：2026-10-20-backfill-dryrun-log-scrub 收口时工作树混有并行会话的 docs/sillyspec 文档移动（D+?? 成对）与 .tmp/，只能选③并接受缺口数虚高。
+- 现行兜底：自己的 spec 文档先提交入冻结面（缩小缺口），剩余并行条目选③并在提交消息/归档件里如实注明缺口构成（缺口≠遗漏交付，是并行会话在途）。
+- 改进方向：缺口清单支持按路径声明「非本变更归属」，该部分不计缺口数只留 ignored 记录。
+
+## 归档提交 pathspec 打印到执行窗口的共享暂存区竞态
+
+（2026-10-20，CLI v3.33.1）`flow done` 归档子步**不自动执行** git commit，而是打印一条拼好的 pathspec 提交命令交 agent 跑——打印与执行之间共享暂存区可能被并行会话改动（CLI 自己也在输出里警告此点）。实战实证：root-ruff-config 归档时暂存区混入并行活跃变更（2026-10-20-conflict-platform-archive）的 4 个 staged 文件；靠 pathspec 限定提交范围把它们原样留给对方未被带走（pathspec commit 语义正确），但这依赖 agent **逐字照抄命令 + 执行前 `git diff --cached --name-only` 全量核对**（AGENTS.md 规则 11 的人肉面）。
+
+- 风险：agent 若跑裸 `git commit`（不带 pathspec），共享暂存区里他侧文件会被一并扫入——正是规则 11 禁止的形态；pathspec 报「不匹配」（路径被并行操作挪走）时需要全量重核重拼。
+- 现行兜底：①照抄 CLI 给的 pathspec（不自行增删）；②执行前 `git diff --cached --name-only` 全量读暂存面（禁过滤式核对）；③核对与提交分两条命令（留拦截点）。
+- 改进方向：CLI 打印命令时快照暂存面，执行校验面不一致即重拼；或归档提交由 CLI 在锁内自动执行（打印命令交 agent 的设计本身是竞态根源）。
+
+## design 四问题面逐字钉死规则只在报错时学到
+
+（2026-10-20，CLI v3.33.1）design.md 四节（做法概述/接口契约/盲维四问/风险）的**问题原文行必须逐字保留、答案写在问题下方**——首次 `flow approve` 若按常规文档写作习惯把模板问句删掉换成自己的标题/正文，批准校验报「问题文本被改写」拦截（列出原文让手工恢复）。规则本身合理（锚定机器对账），但 `flow start` 横幅只说「答案写在问题下方」，**没说题面行不能删**——每个新会话第一次写 design.md 几乎必踩一次报错才学会。
+
+- 现行兜底：写 design 时保留骨架的全部标题行与问句行原样，答案段落写在问句下方；被拦后按报错里的原文逐字恢复再重跑 approve。
+- 改进方向：横幅/骨架注释里显式加一句「题面行逐字保留勿删」；或骨架生成时把问句行标注为锚，让规则在书写面可见而非只在校验面存在。

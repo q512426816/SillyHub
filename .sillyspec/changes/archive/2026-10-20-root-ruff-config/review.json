@@ -1,0 +1,22 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-20-root-ruff-config",
+  "reviewer": "subagent",
+  "verdict": "PASS",
+  "reviewedAgainst": "978336829578f84f9c18d7ded93c25ce05f432da",
+  "findings": [
+    {
+      "severity": "P3",
+      "title": "根配置管辖面超出已清理存量：spikes/ 6 文件从 88-clean 翻转为 100-unclean，未在 requirements/design 显式裁决",
+      "evidence": "实测 ruff format --check spikes/ 在 100 口径 6 文件 would reformat、--line-length 88 口径全 formatted；pre-commit ruff-format 钩子（backend/.pre-commit-config.yaml，types:[python] 无 exclude）对任何被提交的 py 文件生效——下次触碰 spikes 文件会被钩子拦（一轮重排可解，建议命令口径已一致无循环）；ruff.toml 注释自认管辖 spikes/，但 FR-03 清理与 design 盲维 Q3「不存在配置已入存量未清中间态」的承诺均只覆盖 scripts/，spikes 存量未清属未声明残留（.zcode/.claude skills 脚本 88 口径本就 683 dirty、100 口径 679 dirty，属既有债且净改善，非本变更回归）",
+      "location": "ruff.toml:1-13; spikes/; backend/.pre-commit-config.yaml:15-22"
+    }
+  ],
+  "dimensionNotes": {
+    "乱序": "ok",
+    "并发": "ok",
+    "切换": "ok",
+    "作用域": "finding"
+  },
+  "reviewedAt": "2026-10-20T08:27:50+08:00"
+}

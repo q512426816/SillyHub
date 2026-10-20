@@ -29,3 +29,5 @@ created_at: 2026-08-29 22:56:30
 - 2026-10-18-change-list-type-filter | 变更列表加类型标签与类型筛选
 - 2026-10-19-platform-auto-commit-type | 平台侧自动写入变更类型闭环
 - 2026-10-19-change-list-created-sort | 变更中心列表默认按创建时间倒序
+- 2026-10-19-change-assets-cross-repo-repos | 变更资产卡展示跨仓冻结面
+- 2026-10-19-cross-repo-patch-slicing | 资产卡跨仓单文件 diff 切片

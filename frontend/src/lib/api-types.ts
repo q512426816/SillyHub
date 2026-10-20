@@ -2163,6 +2163,8 @@ export interface paths {
          *     ``path`` 复用 scope-audit 单文件比对的同一白名单校验（拒 ``..``/
          *     绝对路径/pathspec magic → 422）；切片命中与否由响应 ``diff``/``note`` 表达，
          *     不抛 404（读不到留档是展示面降级，不是资源不存在）。
+         *     ``repo``（2026-10-19-cross-repo-patch-slicing FR-01）：跨仓切片——正文取
+         *     ``change-patch.json scopeAudit.repos[repo].patch``；键不在冻结面同样 note 降级。
          */
         get: operations["get_change_patch_file_api_workspaces__workspace_id__changes__change_id__assets_patch_file_get"];
         put?: never;
@@ -8464,7 +8466,9 @@ export interface paths {
          *     - docs/ 类结果按 SCAN_DOCS_READ 服务端过滤——判定经 ``has_permission`` 同一
          *       权威函数（admin 短路在内；禁读 user.permissions 快照，D-005@v1）；先取
          *       3×limit 候选再过滤截断，防 top-k 被过滤挤空；
-         *     - embedder 不可用 → fail-soft：200 + model_ready=False + 纯词面结果（D-004@v1）。
+         *     - embedder 不可用 → fail-soft：200 + model_ready=False + 纯词面结果（D-004@v1）；
+         *     - 服务器禁建库（KNOWLEDGE_SEARCH_SERVER_BUILD=0，2026-10-19-knowledge-search-build-switch）：
+         *       小内存生产容器跳过懒同步嵌入；未建索引 ws 首搜词面内存降级 + reason=index_not_built。
          */
         post: operations["search_knowledge_api_workspaces__workspace_id__knowledge_search_post"];
         delete?: never;
@@ -8545,6 +8549,26 @@ export interface paths {
          * @description 向量检索：token 派生 workspace 语料内语义召回（契约与 fail-soft 见模块 docstring）。
          */
         post: operations["vector_search_endpoint_api_spec_knowledge_vector_search_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/translate/thinking": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Translate Thinking
+         * @description 思考内容批量离线翻译（en→zh）；语义与降级见模块 docstring 与 service.py。
+         */
+        post: operations["translate_thinking_api_translate_thinking_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -14544,6 +14568,10 @@ export interface components {
          *     change-patch.json 两件——对账面并入后者的 ``scopeAudit`` 子对象（顶级键原位不动，
          *     本 DTO 读的顶级字段零变化），scope-audit.json/.patch 停写；回退链保留兜其他仓/本仓
          *     存量旧形态归档。
+         *
+         *     ``repos``（2026-10-19-change-assets-cross-repo-repos）：跨仓冻结面元数据投影——
+         *     空面跨仓冻结只落 JSON（无 change.patch），此时 ``files`` 主仓面为 0，真实交付面
+         *     在 repos[]；旧归档/单仓变更无该键 → 空数组（additive，读侧零适配）。
          */
         ChangePatchMeta: {
             /** Files */
@@ -14563,6 +14591,75 @@ export interface components {
              * @default false
              */
             files_truncated: boolean;
+            /** Repos */
+            repos?: components["schemas"]["ChangePatchRepo"][];
+        };
+        /**
+         * ChangePatchRepo
+         * @description 跨仓冻结面元数据（2026-10-19-change-assets-cross-repo-repos / FR-01）。
+         *
+         *     只投影展示所需元数据，**不回传 patch 正文**（单仓 patch 可数 MB、且正文只在
+         *     change-patch.json 全屏预览消费——资产卡给仓键/锚点/计数/降级/sha 与指路）。
+         *     ``repo_path`` 为产出端本机绝对路径，恒不投影（本机布局不外泄）。
+         */
+        ChangePatchRepo: {
+            /** Key */
+            key: string;
+            anchor?: components["schemas"]["ChangePatchRepoAnchor"] | null;
+            totals?: components["schemas"]["ChangePatchRepoTotals"] | null;
+            /**
+             * Degraded
+             * @default false
+             */
+            degraded: boolean;
+            /** Degraded Reason */
+            degraded_reason?: string | null;
+            /** Patch Sha256 */
+            patch_sha256?: string | null;
+            /**
+             * Has Patch
+             * @default false
+             */
+            has_patch: boolean;
+            /** File List */
+            file_list?: string[];
+            /**
+             * Files Truncated
+             * @default false
+             */
+            files_truncated: boolean;
+        };
+        /**
+         * ChangePatchRepoAnchor
+         * @description 跨仓冻结锚点投影（change-patch.json ``scopeAudit.repos[].anchor``）。
+         */
+        ChangePatchRepoAnchor: {
+            /** Source */
+            source?: string | null;
+            /** Base */
+            base?: string | null;
+            /** Head */
+            head?: string | null;
+            /** Label */
+            label?: string | null;
+        };
+        /**
+         * ChangePatchRepoTotals
+         * @description 跨仓单仓对账计数（planned/unplanned/untouched 为 CLI 三态原值）。
+         */
+        ChangePatchRepoTotals: {
+            /** Files */
+            files?: number | null;
+            /** Additions */
+            additions?: number | null;
+            /** Deletions */
+            deletions?: number | null;
+            /** Planned */
+            planned?: number | null;
+            /** Unplanned */
+            unplanned?: number | null;
+            /** Untouched */
+            untouched?: number | null;
         };
         /**
          * ChangeProcessReq
@@ -19176,7 +19273,8 @@ export interface components {
         };
         /**
          * KnowledgeSearchOut
-         * @description 检索出参：model_ready=False 时 results 非空（纯词面）+ reason 带因（fail-soft）。
+         * @description 检索出参：model_ready=False 时 results 非空（纯词面）+ reason 带因（fail-soft；
+         *     reason=index_not_built 表示服务器禁建库且该 ws 索引未建）。
          */
         KnowledgeSearchOut: {
             /**
@@ -28273,6 +28371,59 @@ export interface components {
             agent_dispatch?: components["schemas"]["TransitionDispatchResponse"] | null;
         };
         /**
+         * TranslateItemIn
+         * @description 单条待翻文本。id 由客户端生成（stable，响应原样带回配对）。
+         */
+        TranslateItemIn: {
+            /** Id */
+            id: string;
+            /** Text */
+            text: string;
+        };
+        /**
+         * TranslateItemOut
+         * @description 单条翻译结果。translated=false 表示原文透传（不值得翻/引擎不可用）。
+         */
+        TranslateItemOut: {
+            /** Id */
+            id: string;
+            /** Text */
+            text: string;
+            /** Translated */
+            translated: boolean;
+        };
+        /**
+         * TranslateRequest
+         * @description 批量翻译请求。target 固定 zh（本变更唯一目标语言，扩语言时再放开）。
+         */
+        TranslateRequest: {
+            /** Items */
+            items: components["schemas"]["TranslateItemIn"][];
+            /**
+             * Target
+             * @default zh
+             * @constant
+             */
+            target: "zh";
+        };
+        /**
+         * TranslateResponse
+         * @description fail-soft 契约：engine_ready=false 时 items 原文透传，HTTP 仍 200。
+         */
+        TranslateResponse: {
+            /**
+             * Ok
+             * @default true
+             */
+            ok: boolean;
+            /** Engine Ready */
+            engine_ready: boolean;
+            /** Reason */
+            reason?: string | null;
+            /** Items */
+            items: components["schemas"]["TranslateItemOut"][];
+        };
+        /**
          * TurnOutlineItemRead
          * @description turn-outline 单轮摘要项（FR-01）。
          *
@@ -33448,6 +33599,8 @@ export interface operations {
             query: {
                 /** @description 变更目录相对文件路径（如 src/flow.js） */
                 path: string;
+                /** @description 跨仓键（scopeAudit.repos 的 key）——在场时切片取该仓内联 patch 而非主仓 change.patch */
+                repo?: string | null;
             };
             header?: never;
             path: {
@@ -43723,6 +43876,39 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["VectorSearchOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    translate_thinking_api_translate_thinking_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["TranslateRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TranslateResponse"];
                 };
             };
             /** @description Validation Error */

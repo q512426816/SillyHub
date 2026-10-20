@@ -1,0 +1,167 @@
+diff --git a/ruff.toml b/ruff.toml
+new file mode 100644
+index 000000000..7ee94d90f
+--- /dev/null
++++ b/ruff.toml
+@@ -0,0 +1,13 @@
++# 根级 Python 文件（scripts/、spikes/ 等 backend 子树外）的 ruff 配置。
++#
++# 背景（2026-10-20-backfill-dryrun-log-scrub 实证）：pre-commit 的 ruff-format
++# 钩子在仓库根 cwd 执行——ruff 对 cwd 子树内文件按文件路径最近配置裁决，
++# backend 子树外文件曾无配置可命中而落到默认行宽 88；而钩子拦截时建议的
++# 修复命令在 backend/ cwd 执行（cwd 子树外文件回退到 backend/pyproject 的
++# line-length=100）——两口径对根级 py 文件互相拆台（按建议修完再提交被再拦）。
++#
++# 本文件把根级行宽锚定为与 backend/pyproject.toml [tool.ruff] 同源的 100，
++# 使任意 cwd/入口对根级文件裁决一致。lint 规则保持默认面（不配 select），
++# 不扩大根级存量检查。backend 子树零影响：其文件分层更近命中自身 pyproject。
++line-length = 100
++target-version = "py312"
+diff --git a/scripts/check-assertion-surfaces.py b/scripts/check-assertion-surfaces.py
+index 42f48ab5c..7e983de03 100644
+--- a/scripts/check-assertion-surfaces.py
++++ b/scripts/check-assertion-surfaces.py
+@@ -90,9 +90,7 @@ RULES: tuple[SurfaceRule, ...] = (
+         glob="frontend/src/lib/provider-caps.ts",
+         mode="diff",
+         diff_pattern=r"interface ProviderCaps|ProviderCaps =|^\s*\w+: (?:true|false)[,;]?\s*$",
+-        requires=(
+-            "frontend/src/components/sessions/__tests__/pre-session-picker.test.tsx",
+-        ),
++        requires=("frontend/src/components/sessions/__tests__/pre-session-picker.test.tsx",),
+         hint="全对象 toEqual 钉两处逐键同步（b8afd807c 误删 multimodal 实证）",
+     ),
+     SurfaceRule(
+diff --git a/scripts/scan-drift-check.py b/scripts/scan-drift-check.py
+index f6bada4db..46552cfa5 100644
+--- a/scripts/scan-drift-check.py
++++ b/scripts/scan-drift-check.py
+@@ -145,9 +145,7 @@ def parse_source_commit(doc_path: Path) -> str | None:
+     return val or None
+ 
+ 
+-def _run_git(
+-    args: list[str], cwd: Path | None = None
+-) -> subprocess.CompletedProcess[str] | None:
++def _run_git(args: list[str], cwd: Path | None = None) -> subprocess.CompletedProcess[str] | None:
+     """跑 git 子进程（list 参数，不开 shell，跨平台）。失败返回 None。"""
+     try:
+         return subprocess.run(
+diff --git a/scripts/test_scan_drift_check.py b/scripts/test_scan_drift_check.py
+index 917255973..83ecb74fe 100644
+--- a/scripts/test_scan_drift_check.py
++++ b/scripts/test_scan_drift_check.py
+@@ -38,9 +38,7 @@ _spec.loader.exec_module(sdk)
+ 
+ def _git(args: list[str], cwd: Path) -> subprocess.CompletedProcess[str]:
+     """在 cwd 跑 git，check=True 失败抛错。"""
+-    return subprocess.run(
+-        ["git", *args], cwd=str(cwd), capture_output=True, text=True, check=True
+-    )
++    return subprocess.run(["git", *args], cwd=str(cwd), capture_output=True, text=True, check=True)
+ 
+ 
+ def _make_git_repo(root: Path) -> str:
+@@ -114,9 +112,7 @@ def test_parse_source_commit_empty_value(tmp_path: Path) -> None:
+ def test_parse_source_commit_unclosed_frontmatter(tmp_path: Path) -> None:
+     """格式异常：frontmatter 没有结束分隔符 → None（不会把正文里的误当 frontmatter）。"""
+     doc = tmp_path / "D.md"
+-    doc.write_text(
+-        "---\nsource_commit: abc1234\nbody without closer\n", encoding="utf-8"
+-    )
++    doc.write_text("---\nsource_commit: abc1234\nbody without closer\n", encoding="utf-8")
+     assert sdk.parse_source_commit(doc) is None
+ 
+ 
+@@ -150,27 +146,21 @@ def test_parse_source_commit_read_error(tmp_path: Path) -> None:
+ # ---------------------------------------------------------------------------
+ 
+ 
+-def test_commits_behind_valid_ancestor(
+-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+-) -> None:
++def test_commits_behind_valid_ancestor(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+     first = _make_git_repo(tmp_path)
+     monkeypatch.chdir(tmp_path)
+     # first 是 HEAD 的祖先，HEAD 比 first 多 1 个 commit。
+     assert sdk.commits_behind(first, "HEAD") == 1
+ 
+ 
+-def test_commits_behind_equal_returns_zero(
+-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+-) -> None:
++def test_commits_behind_equal_returns_zero(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+     _make_git_repo(tmp_path)
+     monkeypatch.chdir(tmp_path)
+     head = _git(["rev-parse", "HEAD"], tmp_path).stdout.strip()
+     assert sdk.commits_behind(head, "HEAD") == 0
+ 
+ 
+-def test_commits_behind_non_ancestor(
+-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+-) -> None:
++def test_commits_behind_non_ancestor(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+     """非祖先（source 在另一条分叉）→ None。"""
+     _make_git_repo(tmp_path)
+     monkeypatch.chdir(tmp_path)
+@@ -185,18 +175,14 @@ def test_commits_behind_non_ancestor(
+     assert sdk.commits_behind(side, "HEAD") is None
+ 
+ 
+-def test_commits_behind_bad_hash(
+-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+-) -> None:
++def test_commits_behind_bad_hash(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+     """哈希不存在 → None（不崩，R-03）。"""
+     _make_git_repo(tmp_path)
+     monkeypatch.chdir(tmp_path)
+     assert sdk.commits_behind("0" * 40, "HEAD") is None
+ 
+ 
+-def test_commits_behind_no_git_repo(
+-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+-) -> None:
++def test_commits_behind_no_git_repo(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+     """不在 git 仓库里 → None（不崩）。"""
+     monkeypatch.chdir(tmp_path)
+     assert sdk.commits_behind("abc1234", "HEAD") is None
+@@ -255,9 +241,7 @@ def test_extract_file_refs_bare_directory_not_extracted(tmp_path: Path) -> None:
+ def test_extract_file_refs_tsx_not_eaten_by_ts(tmp_path: Path) -> None:
+     """.tsx 不被 .ts 吃（R-02 铁律：长在前 + 负向前瞻）。"""
+     doc = tmp_path / "D.md"
+-    doc.write_text(
+-        "组件 frontend/src/components/ppm-resource-table.tsx 在。\n", encoding="utf-8"
+-    )
++    doc.write_text("组件 frontend/src/components/ppm-resource-table.tsx 在。\n", encoding="utf-8")
+     refs = sdk.extract_file_refs(doc)
+     assert "frontend/src/components/ppm-resource-table.tsx" in refs
+     assert not any(r.endswith(".ts") and r.endswith("table.ts") for r in refs), refs
+@@ -301,9 +285,7 @@ def test_extract_file_refs_negative_outside_prefix(tmp_path: Path) -> None:
+ def test_extract_file_refs_negative_example_path(tmp_path: Path) -> None:
+     """示例/截断路径不命中：不带前缀的 package.js 不在白名单，不报。"""
+     doc = tmp_path / "D.md"
+-    doc.write_text(
+-        "例如 package.js 是一个示例文件名（无四端前缀）。\n", encoding="utf-8"
+-    )
++    doc.write_text("例如 package.js 是一个示例文件名（无四端前缀）。\n", encoding="utf-8")
+     refs = sdk.extract_file_refs(doc)
+     assert refs == [], f"应无命中，实际：{refs}"
+ 
+@@ -332,17 +314,13 @@ def test_extract_file_refs_all_extensions(tmp_path: Path) -> None:
+ # ---------------------------------------------------------------------------
+ 
+ 
+-def _write_scan_doc(
+-    scan_dir: Path, name: str, source_commit: str | None, body: str
+-) -> Path:
++def _write_scan_doc(scan_dir: Path, name: str, source_commit: str | None, body: str) -> Path:
+     scan_dir.mkdir(parents=True, exist_ok=True)
+     doc = scan_dir / name
+     if source_commit is None:
+         doc.write_text(f"# {name}\n\n{body}\n", encoding="utf-8")
+     else:
+-        doc.write_text(
+-            f"---\nsource_commit: {source_commit}\n---\n\n{body}\n", encoding="utf-8"
+-        )
++        doc.write_text(f"---\nsource_commit: {source_commit}\n---\n\n{body}\n", encoding="utf-8")
+     return doc

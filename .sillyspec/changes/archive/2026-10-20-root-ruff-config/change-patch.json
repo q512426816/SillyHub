@@ -1,0 +1,88 @@
+{
+  "change": "2026-10-20-root-ruff-config",
+  "baseline": "c265bd92296e784917db011afbc168c1736d9f3d",
+  "head": "978336829578f84f9c18d7ded93c25ce05f432da",
+  "files": [
+    "ruff.toml",
+    "scripts/check-assertion-surfaces.py",
+    "scripts/scan-drift-check.py",
+    "scripts/test_scan_drift_check.py"
+  ],
+  "totals": {
+    "files": 4,
+    "additions": 26,
+    "deletions": 39
+  },
+  "savedAt": "2026-10-20T00:22:10.212Z",
+  "note": "flow done 时点冻结（本变更可归属交付面：baseline..HEAD 提交面过滤 .sillyspec/ 只留 .sillyspec/docs/ 交付文档 + 独占树未提交交付；治理工件目录不入冻结——2026-10-12-close-trace-freeze-integrity FR-01）",
+  "modules": [
+    {
+      "id": "scripts",
+      "files": 3,
+      "doc": "docs/multi-agent-platform/modules/scripts.md",
+      "docTouched": false,
+      "docMissing": false
+    }
+  ],
+  "uncoveredDirs": [],
+  "moduleMaps": [
+    "docs/backend/modules/_module-map.yaml",
+    "docs/frontend/modules/_module-map.yaml",
+    "docs/multi-agent-platform/modules/_module-map.yaml",
+    "docs/SillyHub/modules/_module-map.yaml",
+    "docs/sillyhub-daemon/modules/_module-map.yaml"
+  ],
+  "acceptedDirtyGap": 8,
+  "scopeAudit": {
+    "mode": "full-flow",
+    "ok": true,
+    "degradedReason": null,
+    "baseAnchor": "c265bd92296e784917db011afbc168c1736d9f3d",
+    "totals": {
+      "files": 4,
+      "additions": 26,
+      "deletions": 39
+    },
+    "rows": [
+      {
+        "path": "ruff.toml",
+        "additions": 13,
+        "deletions": 0,
+        "kind": "new",
+        "planned": null,
+        "verdict": "planned"
+      },
+      {
+        "path": "scripts/check-assertion-surfaces.py",
+        "additions": 1,
+        "deletions": 3,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "planned"
+      },
+      {
+        "path": "scripts/scan-drift-check.py",
+        "additions": 1,
+        "deletions": 3,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "planned"
+      },
+      {
+        "path": "scripts/test_scan_drift_check.py",
+        "additions": 11,
+        "deletions": 33,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "planned"
+      }
+    ],
+    "excluded": {
+      "foreignDeclared": []
+    },
+    "note": "flow done 时点冻结（本文件落盘时采集）",
+    "closedBy": "flow done"
+  },
+  "patchSha256": "2481518eb3b325424e2f9a39e597e53c13459d5e3a7c6326507f42d51ffc92fa",
+  "patchStatus": "ok"
+}

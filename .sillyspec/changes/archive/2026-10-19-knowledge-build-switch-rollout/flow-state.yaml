@@ -1,0 +1,50 @@
+tier: thin
+legacy_fallback: false
+substeps:
+  artifacts: done
+  ledger: done
+  patch: done
+  review: done
+  probes: done
+  distill: done
+  archive: done
+  events: done
+born_face: thin
+with_tasks: false
+review_force: null
+input: >-
+  禁建库开关本地部署落地与首搜实测
+
+  上变更交付的 KNOWLEDGE_SEARCH_SERVER_BUILD 开关需在真实部署环境落地并端到端验证：本地 docker 平台（backend 容器 mem_limit 1100m，与生产同款 OOM 面）配
+  =0、重建镜像，实测未建索引工作区首搜走词面降级不触发建库。
+
+
+  成功标准：
+
+  - deploy/.env 追加 KNOWLEDGE_SEARCH_SERVER_BUILD=0（gitignore 不入库），backend 镜像重建+容器 force-recreate 后容器内
+  settings.knowledge_search_server_build 实测为 False 且新代码在场
+
+  - 未建索引工作区首搜端到端实测：秒级返回 + reason=index_not_built + knowledge_search_state/chunks 零新增（证据落盘）
+
+  - 发布记录按 deploy skill 规范写入 docs/releases/；known-issues 地雷条目状态更新（本地已配实证、生产剩 env 一动作）
+autopilot: true
+prestage_ack: false
+baseline_commit: b98bd550e5317bdc5ceb4c96ac4d073dff2a64da
+updatedAt: '2026-10-19T08:19:26.761Z'
+cross_baselines:
+  sillyspec: 875511d25454cf584c99ab491fa0cd03231f71ad
+baseline_sha256: 911a4f373a83d815f5be7772e16107e666a19e66e64666dedc3200baa85d7d16
+spec_approved: true
+spec_approved_at: '2026-10-19T07:20:22.728Z'
+spec_approved_by: zcode-build-switch-rollout
+spec_approved_channel: user-confirmed
+spec_attested_by: zcode-build-switch-rollout
+batch_ticked: true
+gate_summary: >-
+  test: passed ← module[]+deps(py45+jsx62+jsx1)+fr(108)（411.0s）
+  结果：C:\Users\qinyi\IdeaProjects\multi-agent-platform\.sillyspec\.runtime\verify-runs\20261019072835\test-result.json｜lint:
+  passed ← cd backend && uv run ruff check . && uv run ruff format --check . && uv run mypy app && cd ../frontend &&
+  pnpm lint && cd ../sillyhub-daemon && pnpm typecheck（39.6s）
+  结果：C:\Users\qinyi\IdeaProjects\multi-agent-platform\.sillyspec\.runtime\verify-runs\20261019072835\test-result.json｜门文件
+  10 个
+

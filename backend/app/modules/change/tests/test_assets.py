@@ -899,3 +899,174 @@ async def test_live_touch_archived_ignores_review_marks(db_session, tmp_path: Pa
         ("FR-auto-test-003", "fr/auto-test.md"),
         ("陷阱条目", "testing-gotchas.md"),
     ]
+
+
+# ===========================================================================
+# 跨仓冻结面元数据（2026-10-19-change-assets-cross-repo-repos / FR-01）
+# ===========================================================================
+
+
+def _seed_cross_repo_meta(spec_root: Path) -> None:
+    """JSON-only 跨仓冻结：顶级主仓面为空，scopeAudit.repos[] 承载各仓元数据+正文。"""
+    change_dir = spec_root / "changes" / "archive" / KEY
+    change_dir.mkdir(parents=True, exist_ok=True)
+    (change_dir / "change-patch.json").write_text(
+        json.dumps(
+            {
+                "change": KEY,
+                "files": [],
+                "totals": {"files": 0, "additions": 0, "deletions": 0},
+                "patchStatus": "ok",
+                "savedAt": "2026-10-19T05:17:20.840Z",
+                "scopeAudit": {
+                    "repos": [
+                        {
+                            "key": "subgrid",
+                            "repoPath": "/mnt/e/Web/crrc/sub-grid-security",
+                            "anchor": {
+                                "source": "flow-start-baseline",
+                                "base": "cf20b9428adcac0e811a8c51e8ddcfa12ed21f75",
+                                "head": None,
+                                "label": "flow-start 跨仓基线窗口",
+                            },
+                            "totals": {
+                                "files": 112,
+                                "additions": 55207,
+                                "deletions": 55200,
+                                "planned": 0,
+                                "unplanned": 110,
+                                "untouched": 2,
+                            },
+                            "degraded": False,
+                            "degradedReason": None,
+                            "patch": "diff --git a/src/x.js b/src/x.js\n--- a/src/x.js\n+++ b/src/x.js\n",
+                            "patchSha256": "54dae3786803ce49aaaa",
+                        },
+                        {
+                            "key": "broken",
+                            "repoPath": None,
+                            "anchor": {
+                                "source": "degraded",
+                                "base": None,
+                                "head": None,
+                                "label": "degraded",
+                            },
+                            "totals": {"files": 0, "additions": 0, "deletions": 0},
+                            "degraded": True,
+                            "degradedReason": "仓路径不可达",
+                            "patch": None,
+                            "patchSha256": None,
+                        },
+                        {"noKey": True},
+                        "not-a-dict",
+                    ]
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+
+
+async def test_patch_meta_projects_cross_repo_metadata(db_session, tmp_path: Path) -> None:
+    """repos[] 投影元数据（锚点/计数/降级/sha/has_patch），patch 正文不回传。"""
+    spec_root = tmp_path / "spec-root-cross1"
+    _seed_mirror(spec_root, with_trace=False)
+    _seed_cross_repo_meta(spec_root)
+    ws = await _make_ws_spec(db_session, spec_root)
+    change = await _make_change(db_session, ws, archived=True)
+
+    result = await ChangeAssetsQueryService(db_session).get_change_assets(ws.id, change.id)
+    assert result.patch is not None
+    assert result.patch.files == 0
+    assert result.patch.repos, "跨仓元数据必须投影"
+    assert [r.key for r in result.patch.repos] == ["subgrid", "broken"], "坏条目跳过"
+    healthy = result.patch.repos[0]
+    assert not hasattr(healthy, "repo_path"), "repoPath 含本机布局，不投影"
+    assert healthy.anchor is not None
+    assert healthy.anchor.source == "flow-start-baseline"
+    assert healthy.anchor.base.startswith("cf20b942")
+    assert healthy.anchor.label == "flow-start 跨仓基线窗口"
+    assert healthy.totals is not None
+    assert healthy.totals.files == 112
+    assert healthy.totals.unplanned == 110
+    assert healthy.patch_sha256 == "54dae3786803ce49aaaa"
+    assert healthy.has_patch is True
+    assert healthy.degraded is False
+    assert not hasattr(healthy, "patch"), "patch 正文不回传（体积/越权面）"
+    degraded = result.patch.repos[1]
+    assert degraded.degraded is True
+    assert degraded.degraded_reason == "仓路径不可达"
+    assert degraded.has_patch is False
+
+
+async def test_patch_meta_without_repos_key_is_backward_compatible(
+    db_session, tmp_path: Path
+) -> None:
+    """旧归档无 scopeAudit.repos → repos 恒空数组（零行为变化）。"""
+    spec_root = tmp_path / "spec-root-cross2"
+    _seed_mirror(spec_root, with_trace=False)
+    _seed_patch_archive(spec_root)
+    ws = await _make_ws_spec(db_session, spec_root)
+    change = await _make_change(db_session, ws, archived=True)
+
+    result = await ChangeAssetsQueryService(db_session).get_change_assets(ws.id, change.id)
+    assert result.patch is not None
+    assert result.patch.repos == []
+    assert result.patch.file_list == ["src/flow.js", "test/x.test.mjs"]
+
+
+# ===========================================================================
+# 跨仓单文件切片（2026-10-19-cross-repo-patch-slicing / FR-01~02）
+# ===========================================================================
+
+
+async def test_patch_meta_repo_file_list(db_session, tmp_path: Path) -> None:
+    """repos[].file_list 从 patch 头解析投影；无正文仓恒空。"""
+    spec_root = tmp_path / "spec-root-slice1"
+    _seed_mirror(spec_root, with_trace=False)
+    _seed_cross_repo_meta(spec_root)
+    change_dir = spec_root / "changes" / "archive" / KEY
+    meta = json.loads((change_dir / "change-patch.json").read_text(encoding="utf-8"))
+    meta["scopeAudit"]["repos"][0]["patch"] = (
+        "diff --git a/src/x.js b/src/x.js\n--- a/src/x.js\n+++ b/src/x.js\n@@ -1 +1 @@\n-a\n+b\n"
+        "diff --git a/src/y.js b/src/y.js\n--- /dev/null\n+++ b/src/y.js\n@@ -0,0 +1 @@\n+new\n"
+    )
+    (change_dir / "change-patch.json").write_text(json.dumps(meta), encoding="utf-8")
+    ws = await _make_ws_spec(db_session, spec_root)
+    change = await _make_change(db_session, ws, archived=True)
+
+    result = await ChangeAssetsQueryService(db_session).get_change_assets(ws.id, change.id)
+    assert result.patch is not None
+    healthy = result.patch.repos[0]
+    assert healthy.file_list == ["src/x.js", "src/y.js"]
+    assert healthy.files_truncated is False
+    assert result.patch.repos[1].file_list == []
+
+
+async def test_patch_file_diff_repo_hit_and_unknown(db_session, tmp_path: Path) -> None:
+    """repo 命中切片该仓 patch；未知仓/无正文仓给 note（fail-open 不抛）。"""
+    spec_root = tmp_path / "spec-root-slice2"
+    _seed_mirror(spec_root, with_trace=False)
+    _seed_cross_repo_meta(spec_root)
+    change_dir = spec_root / "changes" / "archive" / KEY
+    meta = json.loads((change_dir / "change-patch.json").read_text(encoding="utf-8"))
+    meta["scopeAudit"]["repos"][0]["patch"] = (
+        "diff --git a/src/x.js b/src/x.js\n--- a/src/x.js\n+++ b/src/x.js\n@@ -1 +1 @@\n-a\n+b\n"
+        "diff --git a/src/y.js b/src/y.js\n--- a/src/y.js\n+++ b/src/y.js\n@@ -1 +1 @@\n-c\n+d\n"
+    )
+    (change_dir / "change-patch.json").write_text(json.dumps(meta), encoding="utf-8")
+    ws = await _make_ws_spec(db_session, spec_root)
+    change = await _make_change(db_session, ws, archived=True)
+    service = ChangeAssetsQueryService(db_session)
+
+    hit = await service.get_patch_file_diff(ws.id, change.id, "src/y.js", repo="subgrid")
+    assert hit.diff is not None and "+++ b/src/y.js" in hit.diff and "+d" in hit.diff
+    assert hit.note is None
+
+    unknown = await service.get_patch_file_diff(ws.id, change.id, "src/x.js", repo="nosuch")
+    assert unknown.diff is None
+    assert unknown.note is not None and "nosuch" in unknown.note
+
+    bare = await service.get_patch_file_diff(ws.id, change.id, "src/x.js", repo="broken")
+    assert bare.diff is None
+    assert bare.note is not None and "subgrid" not in bare.note

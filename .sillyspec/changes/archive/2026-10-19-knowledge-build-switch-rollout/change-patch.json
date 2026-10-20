@@ -1,0 +1,187 @@
+{
+  "change": "2026-10-19-knowledge-build-switch-rollout",
+  "baseline": "b98bd550e5317bdc5ceb4c96ac4d073dff2a64da",
+  "head": "cb7394b3637b8bab1e1d746dbb2454c658bb6e85",
+  "files": [
+    ".sillyspec/docs/SillyHub/modules/frontend_components.changelog.md",
+    ".sillyspec/docs/SillyHub/modules/frontend_lib.changelog.md",
+    ".sillyspec/docs/backend/modules/knowledge.changelog.md",
+    ".sillyspec/docs/multi-agent-platform/modules/backend.changelog.md",
+    ".sillyspec/docs/multi-agent-platform/modules/frontend.changelog.md",
+    "backend/app/core/config.py",
+    "backend/app/modules/translate/README.md",
+    "backend/app/modules/translate/tests/test_live_engine.py",
+    "backend/app/modules/translate/translate_worker.py",
+    "deploy/.env.example",
+    "docs/releases/2026-10-19-013-d789317d.md"
+  ],
+  "totals": {
+    "files": 11,
+    "additions": 273,
+    "deletions": 7
+  },
+  "savedAt": "2026-10-19T08:15:18.566Z",
+  "note": "flow done 时点冻结（本变更可归属交付面：baseline..HEAD 提交面过滤 .sillyspec/ 只留 .sillyspec/docs/ 交付文档 + 独占树未提交交付；治理工件目录不入冻结——2026-10-12-close-trace-freeze-integrity FR-01）",
+  "modules": [
+    {
+      "id": "core",
+      "files": 1,
+      "doc": "docs/backend/modules/core.md",
+      "docTouched": false,
+      "docMissing": false
+    },
+    {
+      "id": "backend",
+      "files": 4,
+      "doc": "docs/multi-agent-platform/modules/backend.md",
+      "docTouched": false,
+      "docMissing": false
+    },
+    {
+      "id": "deploy",
+      "files": 1,
+      "doc": "docs/multi-agent-platform/modules/deploy.md",
+      "docTouched": false,
+      "docMissing": false
+    },
+    {
+      "id": "docs",
+      "files": 1,
+      "doc": "docs/multi-agent-platform/modules/docs.md",
+      "docTouched": false,
+      "docMissing": false
+    },
+    {
+      "id": "core",
+      "files": 1,
+      "doc": "docs/SillyHub/modules/core.md",
+      "docTouched": false,
+      "docMissing": false
+    }
+  ],
+  "uncoveredDirs": [],
+  "moduleMaps": [
+    "docs/backend/modules/_module-map.yaml",
+    "docs/frontend/modules/_module-map.yaml",
+    "docs/multi-agent-platform/modules/_module-map.yaml",
+    "docs/SillyHub/modules/_module-map.yaml",
+    "docs/sillyhub-daemon/modules/_module-map.yaml"
+  ],
+  "acceptedDirtyGap": 5,
+  "scopeAudit": {
+    "mode": "full-flow",
+    "ok": true,
+    "degradedReason": null,
+    "baseAnchor": "b98bd550e5317bdc5ceb4c96ac4d073dff2a64da",
+    "totals": {
+      "files": 12,
+      "additions": 273,
+      "deletions": 7
+    },
+    "rows": [
+      {
+        "path": ".sillyspec/docs/SillyHub/modules/frontend_components.changelog.md",
+        "additions": 1,
+        "deletions": 0,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": ".sillyspec/docs/SillyHub/modules/frontend_lib.changelog.md",
+        "additions": 1,
+        "deletions": 0,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": ".sillyspec/docs/backend/modules/knowledge.changelog.md",
+        "additions": 1,
+        "deletions": 0,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": ".sillyspec/docs/multi-agent-platform/modules/backend.changelog.md",
+        "additions": 2,
+        "deletions": 0,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": ".sillyspec/docs/multi-agent-platform/modules/frontend.changelog.md",
+        "additions": 1,
+        "deletions": 0,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": "backend/app/core/config.py",
+        "additions": 5,
+        "deletions": 2,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": "backend/app/modules/translate/README.md",
+        "additions": 3,
+        "deletions": 3,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": "backend/app/modules/translate/tests/test_live_engine.py",
+        "additions": 107,
+        "deletions": 0,
+        "kind": "new",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": "backend/app/modules/translate/translate_worker.py",
+        "additions": 8,
+        "deletions": 2,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": "deploy/.env.example",
+        "additions": 5,
+        "deletions": 0,
+        "kind": "modified",
+        "planned": "修改",
+        "verdict": "planned"
+      },
+      {
+        "path": "docs/releases/2026-10-19-013-d789317d.md",
+        "additions": 139,
+        "deletions": 0,
+        "kind": "new",
+        "planned": "新增",
+        "verdict": "planned"
+      },
+      {
+        "path": "deploy/.env",
+        "planned": "修改",
+        "additions": 0,
+        "deletions": 0,
+        "kind": "modified",
+        "verdict": "untouched"
+      }
+    ],
+    "excluded": {
+      "foreignDeclared": []
+    },
+    "note": "flow done 时点冻结（本文件落盘时采集）",
+    "closedBy": "flow done"
+  },
+  "patchSha256": "2b8f8a27ddb17ba9b592e062d4355ab0922f9fb8c130b031c18d519e0de62690",
+  "patchStatus": "ok"
+}

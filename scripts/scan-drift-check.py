@@ -145,9 +145,7 @@ def parse_source_commit(doc_path: Path) -> str | None:
     return val or None
 
 
-def _run_git(
-    args: list[str], cwd: Path | None = None
-) -> subprocess.CompletedProcess[str] | None:
+def _run_git(args: list[str], cwd: Path | None = None) -> subprocess.CompletedProcess[str] | None:
     """跑 git 子进程（list 参数，不开 shell，跨平台）。失败返回 None。"""
     try:
         return subprocess.run(

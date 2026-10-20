@@ -79,15 +79,18 @@ def _path_belongs_to_change(path: str, change: str) -> bool:
     return path.startswith(f"changes/{change}/") or path.startswith(f"changes/archive/{change}/")
 
 
-def _scope_snapshot_to_change(snapshot: dict[str, Any], change: str) -> dict[str, Any] | None:
-    """把 full-tree 快照裁成 ``<change>`` 范围并附来源元数据；无归属路径返回 None。
+def _scope_snapshot_to_change(
+    snapshot: dict[str, Any], change: str, *, label: str = FULL_TREE_RECORD_LABEL
+) -> dict[str, Any] | None:
+    """把跨变更快照裁成 ``<change>`` 范围并附来源元数据；无归属路径返回 None。
 
     输入面固定为快照 ``files[].path``——daemon 侧读记录时已把 conflicting_paths 截
     300 转成 files[]，快照**没有** conflicting_paths 字段（D-006@v2）。entry 完整保留
     （``_build_spec_tree_compare`` 依赖 path/missing/mtime/content/binary/truncated）。
-    返回裁剪后快照的浅拷贝 + ``record_label``/``covered_changes``（裁剪前全量路径按
-    变更名归因去重）/``path_total``（裁剪前路径条数；受 daemon 300 路径帽截断，
-    不声称记录真实总数）。
+    返回裁剪后快照的浅拷贝 + ``record_label``（full-tree 兜底或 platform-archive
+    留档，2026-10-20-conflict-platform-archive 参数化）/``covered_changes``（裁剪前
+    全量路径按变更名归因去重）/``path_total``（裁剪前路径条数；受 daemon 300 路径
+    帽截断，不声称记录真实总数）。
     """
     raw_files = snapshot.get("files")
     files = [f for f in raw_files if isinstance(f, dict)] if isinstance(raw_files, list) else []
@@ -107,7 +110,7 @@ def _scope_snapshot_to_change(snapshot: dict[str, Any], change: str) -> dict[str
     return {
         **snapshot,
         "files": scoped,
-        "record_label": FULL_TREE_RECORD_LABEL,
+        "record_label": label,
         "covered_changes": covered,
         "path_total": path_total,
     }
@@ -424,7 +427,19 @@ class SillySpecCompareService:
             )
         else:
             spec_root = await self._load_spec_root(workspace_id)
-            snapshot = await self._fetch_snapshot(instance_id, change, kind, workspace_id)
+            # 2026-10-20-conflict-platform-archive（FR-02/FR-03）：机器记录亡
+            # （行开记录亡——<change> 与 full-tree 双缺）→ open 行 local_archive
+            # 留档自足回退（机器侧=冲突时点留档，平台侧仍实时读 spec_root）；
+            # 无留档/不含该变更路径/非 conflict_record_missing → 重抛原错误
+            # （错误路径与回退前逐字节一致）。
+            try:
+                snapshot = await self._fetch_snapshot(instance_id, change, kind, workspace_id)
+            except DaemonRpcRemoteGatewayError as exc:
+                if (exc.details or {}).get("daemon_code") != "conflict_record_missing":
+                    raise
+                snapshot = await self._load_archived_snapshot(workspace_id, change)
+                if snapshot is None:
+                    raise
             # ql-20260909-012：比对全程同步 FS IO（逐文件 stat+read_text 全量读）+
             # difflib（大文件最坏 O(n²)）——spec 树几百文件时阻塞事件循环数百 ms
             # 至秒级，丢线程池解放并发请求（纯函数不改共享状态，线程安全）。
@@ -554,6 +569,51 @@ class SillySpecCompareService:
         """
         spec_ws = await SpecWorkspaceService(self._session).get(workspace_id)
         return Path(spec_ws.spec_root)
+
+    async def _load_archived_snapshot(
+        self, workspace_id: uuid.UUID, change: str
+    ) -> dict[str, Any] | None:
+        """open 行 local_archive → 机器侧留档快照（2026-10-20-conflict-platform-archive FR-02）。
+
+        「行开记录亡」回退面：冲突推送时 apply_ops 蒸馏的被拒 op 机器侧内容
+        （details_json.local_archive，条目与 daemon 快照 files[] 同构）。查该
+        workspace 的 open spec-sync 行，details_json fail-soft 解析（损坏按无
+        留档处理），条目裁剪成 ``<change>`` 范围并附 ``record_label=
+        "platform-archive"`` 与 covered_changes/path_total（full-tree 兜底同口径）；
+        无行/无留档/不含该变更路径 → None（调用方重抛原错误）。
+        """
+        from app.modules.spec_profile.model import SpecConflict
+
+        row = (
+            (
+                await self._session.execute(
+                    select(SpecConflict)
+                    .where(
+                        SpecConflict.workspace_id == workspace_id,
+                        SpecConflict.stage == SpecWorkspaceService.SYNC_CONFLICT_STAGE,
+                        SpecConflict.status == "open",
+                    )
+                    .limit(1)
+                )
+            )
+            .scalars()
+            .first()
+        )
+        if row is None:
+            return None
+        try:
+            details = json.loads(row.details_json) if row.details_json else {}
+        except (TypeError, ValueError):
+            return None
+        files = details.get("local_archive") if isinstance(details, dict) else None
+        if not isinstance(files, list) or not files:
+            return None
+        snapshot = {
+            "files": files,
+            "conflict_created_at": row.created_at.isoformat() if row.created_at else None,
+            "local_updated_at": None,
+        }
+        return _scope_snapshot_to_change(snapshot, change, label="platform-archive")
 
     # ── spec-tree 比对 ──────────────────────────────────────────────────────
 

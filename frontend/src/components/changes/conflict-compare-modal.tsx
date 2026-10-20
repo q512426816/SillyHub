@@ -367,6 +367,19 @@ export function ConflictCompareModal({
             <code className="font-mono">{data.change}</code> 相关的 {files.length} 个路径。
           </p>
         )}
+        {/* 平台留档快照来源提示（2026-10-20-conflict-platform-archive FR-04）：本机
+            记录已亡，机器侧内容为冲突时点的平台留档、平台侧为当前内容 */}
+        {data?.record_label === "platform-archive" && (
+          <p
+            className="border-b bg-muted/60 px-5 py-1.5 text-xs text-muted-foreground"
+            data-testid="compare-archive-source"
+          >
+            本机冲突记录已不存在——机器侧内容为冲突时点的平台留档快照（非本机实时
+            状态），平台侧为当前内容；留档覆盖{" "}
+            {(data.covered_changes ?? []).length} 个变更，本次仅展示与{" "}
+            <code className="font-mono">{data.change}</code> 相关的 {files.length} 个路径。
+          </p>
+        )}
         {/* 整响应超限提示（2MB 帽丢部分差异明细；措辞避开与单文件截断提示混排） */}
         {data?.response_truncated && (
           <p className="border-b border-warning/30 bg-warning/10 px-5 py-1.5 text-xs text-warning">

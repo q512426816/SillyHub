@@ -51,6 +51,7 @@ get: 全量 parse 后内存按 filename 精确匹配（filename 含子目录段�
 - **懒同步**：查询时指纹比对（`list(map(list))` 归一化）→ 一致直查 / 失配差量四态（新键插入/hash 变重嵌/消失删除/mtime 漂移被 hash 吸收）/model_version 变更全量重算；`asyncio.Lock`（per-workspace）single-flight + DB 幂等（uq 已 drop；并发兜底 = 进程锁 + 全量清空重建语义）。重启零重建（实测 0.003s 仅嵌 query）。
 - **查询双路方言分叉**：PG = pgvector KNN（原生 SQL `embedding <=> CAST(:qv AS vector)` cosine_distance，1-dist 转相似度；with_variant 列取不到 ORM `cosine_distance` 方法故走 text SQL + `_HitRow` 统一候选视图）；SQLite（测试）= 拉回 embedding Python 余弦；词面路 = SQL ILIKE 候选（LIMIT 500）+ Python 打分（口径与内存版逐字段一致）。
 - **降级链**：DB 异常 → `scan_corpus` + `_word_score` 词面内存直查（reason 带 `knowledge_search_db_degraded:` 前缀，搜索永不 5xx）；embedder 缺席 → 纯词面（原语义）。
+- **服务器禁建库开关**（2026-10-19-knowledge-search-build-switch）：`Settings.knowledge_search_server_build`（env `KNOWLEDGE_SEARCH_SERVER_BUILD`，默认 True=懒建库行为零变化）。=0 时 `search_sync(server_build=False)` 跳过懒同步（全量/差量嵌入一律禁）：无 state 行的工作区首搜词面内存直查降级（`model_ready=False + reason="index_not_built"`，零建库零写库秒回——known-issues「首搜建库地雷」根治）；有 state 行直查存量行（查询向量嵌入保留；指纹过期静默服务陈旧行=显式边界，新鲜度职责移交外部预建机器）。**换嵌入模型（model_version 变更）同样被跳过——新模型查询向量会与旧模型存量 chunk 向量跨空间余弦，必须外部预建机全量重建后再切**。小内存生产容器必配 =0。
 - **部署**：PG 镜像 `pgvector/pgvector:pg16`（生产+dev compose）；升级顺序 = 换镜像 → 迁移 → 重启 backend → 首查建库。生产实证（2026-10-15 部署）：服务器无外网须预置 fastembed 模型缓存挂载 + mem_limit 1100m；全量建库改本机 20 核经 `ssh -L` 隧道直写生产库（228.7s/6712 chunks，容器内跑必 OOM）；生产首查 3.3s（改造前同场景 304s）、二次 0.72s。
 - CLI 向量端点（vector_search.py/vector_router.py）维持内存实现零改动（D-001 边界）。
 

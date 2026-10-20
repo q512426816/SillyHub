@@ -1,0 +1,51 @@
+tier: thin
+legacy_fallback: false
+substeps:
+  artifacts: done
+  ledger: done
+  patch: done
+  review: done
+  probes: done
+  distill: done
+  archive: done
+  events: done
+born_face: thin
+with_tasks: false
+review_force: null
+input: >-
+  回填脚本改缺省dry-run并移除诊断日志
+
+
+  动机与背景：24 小时风险审查（2026-10-20 会话）发现两条高置信中危：① scripts/backfill_commit_type.py 裸跑即落盘改写各变更目录 flow-state.yaml 且无确认门，与同仓
+  backend/scripts/backfill_change_titles.py 的缺省 dry-run + --yes 口径相反；②
+  sillyhub-daemon/src/interactive/zcode-app-server-driver.ts:185 真机诊断 console.log 残留，每次 zcode 会话 spawn 把用户 cwd 明文记入
+  daemon 日志（187 行 env 值已走 redactEnvValueForLog 脱敏，185 行未脱敏）。
+
+
+  成功标准：
+
+  - python scripts/backfill_commit_type.py 裸跑零落盘（输出计划写入与汇总）；--apply 不带 --yes 拒绝执行退出码 2；--apply --yes 落盘行为与原执行路径一致（幂等
+  unchanged 不写、CRLF 保留）
+
+  - zcode-app-server-driver.ts 不再输出含 cwd 的 spawn 明文日志；daemon 既有 zcode 相关测试全绿
+autopilot: false
+prestage_ack: false
+baseline_commit: 382aa4cda689d10c6cf1e28a17dedbc19695d209
+updatedAt: '2026-10-20T00:11:45.505Z'
+cross_baselines:
+  sillyspec: 045fa7bf4220317cef0c61558afa42649b3d323d
+baseline_sha256: 843473b99e461399730ced1a149a02e1269e7e99078d33603d875a5190a961c6
+spec_approved: true
+spec_approved_at: '2026-10-19T23:55:26.733Z'
+spec_approved_by: zcode-review-fix-20261020
+spec_approved_channel: user-confirmed
+spec_attested_by: zcode-review-fix-20261020
+batch_ticked: true
+gate_summary: >-
+  test: passed ← module[]+deps(py24+jsx5+jsx17)+fr(46)（174.5s）
+  结果：C:\Users\qinyi\IdeaProjects\multi-agent-platform\.sillyspec\.runtime\verify-runs\20261020000808\test-result.json｜lint:
+  passed ← cd backend && uv run ruff check . && uv run ruff format --check . && uv run mypy app && cd ../frontend &&
+  pnpm lint && cd ../sillyhub-daemon && pnpm typecheck（11.7s）
+  结果：C:\Users\qinyi\IdeaProjects\multi-agent-platform\.sillyspec\.runtime\verify-runs\20261020000808\test-result.json｜门文件
+  6 个
+

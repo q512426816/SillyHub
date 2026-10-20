@@ -1,0 +1,102 @@
+{
+  "change": "2026-10-19-translate-live-verify",
+  "baseline": "4566ee7a8c544e3f3ee3f3c240e3758354be716c",
+  "head": "ffd511d4eb260046f3803cfa16492f4e0e55a0a7",
+  "files": [
+    "backend/app/core/config.py",
+    "backend/app/modules/translate/README.md",
+    "backend/app/modules/translate/tests/test_live_engine.py",
+    "backend/app/modules/translate/translate_worker.py"
+  ],
+  "totals": {
+    "files": 4,
+    "additions": 123,
+    "deletions": 7
+  },
+  "savedAt": "2026-10-19T07:37:04.590Z",
+  "note": "flow done 时点冻结（本变更可归属交付面：baseline..HEAD 提交面过滤 .sillyspec/ 只留 .sillyspec/docs/ 交付文档 + 独占树未提交交付；治理工件目录不入冻结——2026-10-12-close-trace-freeze-integrity FR-01）",
+  "modules": [
+    {
+      "id": "core",
+      "files": 1,
+      "doc": "docs/backend/modules/core.md",
+      "docTouched": false,
+      "docMissing": false
+    },
+    {
+      "id": "backend",
+      "files": 4,
+      "doc": "docs/multi-agent-platform/modules/backend.md",
+      "docTouched": false,
+      "docMissing": false
+    },
+    {
+      "id": "core",
+      "files": 1,
+      "doc": "docs/SillyHub/modules/core.md",
+      "docTouched": false,
+      "docMissing": false
+    }
+  ],
+  "uncoveredDirs": [],
+  "moduleMaps": [
+    "docs/backend/modules/_module-map.yaml",
+    "docs/frontend/modules/_module-map.yaml",
+    "docs/multi-agent-platform/modules/_module-map.yaml",
+    "docs/SillyHub/modules/_module-map.yaml",
+    "docs/sillyhub-daemon/modules/_module-map.yaml"
+  ],
+  "acceptedDirtyGap": 5,
+  "scopeAudit": {
+    "mode": "full-flow",
+    "ok": true,
+    "degradedReason": null,
+    "baseAnchor": "4566ee7a8c544e3f3ee3f3c240e3758354be716c",
+    "totals": {
+      "files": 4,
+      "additions": 123,
+      "deletions": 7
+    },
+    "rows": [
+      {
+        "path": "backend/app/core/config.py",
+        "additions": 5,
+        "deletions": 2,
+        "kind": "modified",
+        "planned": "修改",
+        "verdict": "planned"
+      },
+      {
+        "path": "backend/app/modules/translate/README.md",
+        "additions": 3,
+        "deletions": 3,
+        "kind": "modified",
+        "planned": "修改",
+        "verdict": "planned"
+      },
+      {
+        "path": "backend/app/modules/translate/tests/test_live_engine.py",
+        "additions": 107,
+        "deletions": 0,
+        "kind": "new",
+        "planned": "新增",
+        "verdict": "planned"
+      },
+      {
+        "path": "backend/app/modules/translate/translate_worker.py",
+        "additions": 8,
+        "deletions": 2,
+        "kind": "modified",
+        "planned": "修改",
+        "verdict": "planned"
+      }
+    ],
+    "excluded": {
+      "foreignDeclared": []
+    },
+    "note": "flow done 时点冻结（本文件落盘时采集）",
+    "closedBy": "flow done"
+  },
+  "patchSha256": "5092469fdf067b2485f0f1747eebec745a0418f6286d1a52e473276bd02a28c7",
+  "patchStatus": "ok"
+}

@@ -531,7 +531,7 @@
 最近确认：857d8af461ea4aa3705016087c3d9124105a3180
 理由：最大风险：筛选值集与展示映射漂移（feat↔feature 口径在后端 aliases、前端 COMMIT_TYPE_DISPLAY 两处维护）。缓解：两端各有测试钉（后端 feat 等价命中用例 / 前端 feature→feat 显示用例），且值集注释互指对方为权威。残余面：TYPE_OPTIONS 未 列 ci/revert/quick（防下拉过长），后端白名单仍可筛——深链手输 URL 可用，下拉不可 选，属有意取舍。 试过放弃：A. 类型筛选复用 lineage 的「全局集合→SQL IN」两阶段——类型是列值非 投影字段，直接 where 即可，无需两阶段；B. 前端本地过滤——total/分页会错 （pending_review_only gap② 前车之鉴），必须服务端筛。
 
-## D-unmapped-060@v1 设计期风险与放弃方案（底稿）
+## D-unmapped-105@v1 设计期风险与放弃方案（底稿）
 状态：implemented
 变更：2026-10-16-session-pill-dock-drag
 原编号：D-001@v1
@@ -539,7 +539,7 @@
 最近确认：f0ba3f3fb30b7b0743ad3265a86578205a46ed43
 理由：最大风险：拖拽与点击手势冲突（按住 pill 移动一点算点击还是拖拽）。口径=位移阈值 6px（小于阈值放行 click）+ 松手后 250ms 吞 click 时间窗（比布尔位稳：拖出元素外松手 click 不触发，布尔位会误吞下一次真点击）——两者均沿用悬浮球实测过的先例。 试过但放弃：a) pointer capture 实现拖拽——jsdom 无实现（测试不可达）且 capture 会劫持 click 目标破坏 pill 点击；b) 拖动过程每次 setPos 都持久化——localStorage 高频写（悬浮球现状），改为松手单点写；c) 保留 hover 双触发——用户明确要求纯点击防误触；d) 沿用挂载点 absolute 容器改竖排——拖不出面板且受祖先裁剪，改 portal body fixed。
 
-## D-unmapped-061@v1 设计期风险与放弃方案（底稿）
+## D-unmapped-106@v1 设计期风险与放弃方案（底稿）
 状态：implemented
 变更：2026-10-16-provider-switch-transcript-sanitize
 原编号：D-001@v1
@@ -547,7 +547,7 @@
 最近确认：030eceeece1388442415e8cd66c3cd3cc443083d
 理由：- **最大风险**：把「工具块」降级成 text 块会改变历史的结构语义（模型看到的是一次纯文本陈述而非工具调用）。 影响面评估：本次实证的私有块 `input` 为空、价值全在结果文本里，文本形态保留了全部信息，且优于 「换供应商后该会话永久 400」。 - **死路 1（放弃）**：请求期代理改写——需要 daemon 代理全部 anthropic 流量，性能/安全/越权面不可控。 - **死路 2（放弃）**：直接删除脏块所在记录——会打断 `uuid`/`parentUuid` 链，CLI resume 可能失配； 改为「替换成 text、记录条数不变」。 - **死路 3（放弃）**：直接删私有块、结果文本丢弃——丢上下文且无必要，文本化成本更低。 - **遗留（明确不在本变更范围）**：本机默认会话 + 用户手改宿主机 `~/.claude/settings.json` 换档的路径， 平台无任何变更信号可挂钩，自动化清洗不覆盖；本变更以「分类器可读提示 + 一次性修复实证（task-02）」 兜底，后续如需自动覆盖需单独立项（涉及平台是否代管宿主配置的取舍）。
 
-## D-unmapped-062@v1 设计期风险与放弃方案（底稿）
+## D-unmapped-107@v1 设计期风险与放弃方案（底稿）
 状态：implemented
 变更：2026-10-19-host-settings-live-reload
 原编号：D-001@v1
@@ -555,7 +555,7 @@
 最近确认：e5a2c7ee31881d2d20c3f831c729ca01c07a81e5
 理由：- **最大风险**：换档瞬间的批量重载会让所有本机默认会话引擎各重启一次（每个约 1-3s、各会话独立 并行）；正在等用户输入的会话无感（下一轮才用新引擎），运行中会话延迟到轮边界。可接受——比 「模型烙死 + 跨供应商 400」轻得多；且有关闭阀。 - **风险 2**：若用户以非 cc-switch 方式频繁改 settings.json 的 env 块（如脚本），会周期性触发重载。 去抖（两拍一致）+ 3s 节拍已把频率压到「真实变化」粒度；重载本身幂等无害。 - **死路 1（放弃）**：daemon 注入 env 覆盖模型/网关——平台不知道宿主档位语义，且实验实证 settings 的 base_url 本来就每轮热生效，注入反而制造新的钉。 - **死路 2（放弃）**：fs.watch（事件式）——Windows 下 cc-switch 若走替换写会掉 watch/漏事件， 还需目录级 watch 兜底；轮询+指纹在 2-6KB 文件上成本可忽略且行为确定（跨平台一致性优先， CLAUDE.md 规则 13）。 - **死路 3（放弃）**：只做 UI 提示不改行为——用户已明确要免手动处理。 - **遗留（明确不在本变更范围）**：宿主机档位变化对「运行中那一轮」仍不生效（轮边界语义，与平台内 切供应商一致）；`/model` 钉在重载后清零属预期副作用（正是解钉手段）。
 
-## D-unmapped-063@v1 设计期风险与放弃方案（底稿）
+## D-unmapped-108@v1 设计期风险与放弃方案（底稿）
 状态：implemented
 变更：2026-10-19-host-settings-reload-latency
 原编号：D-001@v1
@@ -605,13 +605,103 @@
 
 ## D-unmapped-091@v1 设计期风险与放弃方案（底稿）
 状态：implemented
+变更：2026-10-19-knowledge-inbox-triage
+原编号：D-001@v1
+锚点：未记录
+最近确认：db6542205b5982cd4adc16dc5af45b316446a8a8
+理由：- 风险①：INDEX 锚点 slug 手写错 → 索引断链。对策：用 node 脚本按 GitHub slugger 规则（小写、去非常量词符、空格→连字符）对 16 个标题生成锚点再写入，`knowledge validate` 兜底。 - 风险②：并行会话的 INDEX.md hunk 被我扫入提交。对策：显式 pathspec + `git diff --cached --name-only` 全量核对 + 临时回插隔离（见并发问 2），提交后核对工作区恢复其未提交态。 - 风险③：分类归属争议（如 node_modules junction 事件可归 known-issues 也可归 sillyspec-gotchas）。对策：按「与既有同族条目聚簇便于检索」原则定（junction 族→sillyspec-gotchas），争议归属在设计期即定死，收口不再摇摆。 - 放弃方案：走 `sillyspec knowledge propose` 逐条提议再人工合并——propose 仅写 `proposed/` 待人工审核，会产生 16 条待审噪音且仍需人工逐条合并，不满足用户「清账」目标；用户本次指令已明确授权直接归类，且直接编辑分类文件有 2026-09-28-knowledge-inbox-clear 同款先例，故放弃 propose 通道。
+
+## D-unmapped-092@v1 设计期风险与放弃方案（底稿）
+状态：implemented
+变更：2026-10-19-knowledge-search-build-switch
+原编号：D-001@v1
+锚点：未记录
+最近确认：54a1e8db39d4d8ac991d645e2942a370d146e4ff
+理由：- 风险①：默认值写错（如 False）会让所有部署静默失去懒建库。对策：默认 True + FR-02 用例③显式回归「缺省=仍建库」。 - 风险②：`reason="index_not_built"` 语义与 `model_ready=False` 的既有口径（「语义模型不可用」）有细微偏移——此处模型可能可用但索引缺失。裁决：沿用该字段（schema 注释已写「model_ready=False + results 纯词面 + reason 带因」的 fail-soft 语义，reason 词表扩一个值），文档同步说明。 - 风险③：关闭时跳过差量 sync，state 行存在但指纹过期的 ws 会静默服务陈旧索引。这是显式交付边界：禁建库服务器的索引新鲜度职责移交外部预建机器（known-issues 运维解既有口径），服务器端不做部分嵌入（部分嵌入=重新打开容器内嵌入门）。 - 风险④：无索引词面降级每次搜索全语料 scan（文件读放大）。裁决：可接受——仅发生在「未预建的 ws + 禁建库服务器」组合，本就是运维例外态；量级 ~百文件（生产实证 108 md/7 ws），且 DB 异常降级路径已是同款实现先例。 - 放弃方案A：开关关闭时对无索引 ws 返回空结果（不词面降级）——搜索完全不可用，违背「搜索永不 5xx/可查」的既有设计底线，放弃。 - 放弃方案B：per-workspace 建库白名单（哪些 ws 允许容器内建）——配置面与运维模型复杂化（known-issues 口径是「建库一律外部机器」，全局开关即够），放弃。
+
+## D-unmapped-093@v1 设计期风险与放弃方案（底稿）
+状态：implemented
+变更：2026-10-19-thinking-zh-translate
+原编号：D-001@v1
+锚点：未记录
+最近确认：bfa6357537da5377966ec9d747dc47fbd9e53709
+理由：最大风险：**opus-mt en→zh 对技术思考文本的翻译质量一般**（2020 年代模型，专有名词/代码混杂句式偶有生硬）——预期是「能看懂大意」而非信达雅；缓解：代码块/URL/行内代码保护不送翻（减少破坏面），「显示原文」一键可退。若后续要更好质量，模型 repo 是配置项可换（如更大 ct2 模型），接口契约不变。 次要风险：①模型首用下载 ~100-150MB，离线/弱网环境不可达——TRANSLATE_MODEL_DIR 预置 + fail-soft 已覆盖，Docker 预烤文档化；②ctranslate2 依赖体积（wheel 数十 MB）——后端镜像可接受，Dockerfile 是 lock-less 安装直接生效；③摘要翻译对「前 500 字符截断处恰在句中」的边界——截断到最近句界再送翻，避免半句译文。 试过放弃的方案：浏览器端 transformers.js（性能不可接受，见做法概述）；argos-translate（Python 包管理器下载源不可配镜像、版本锁死，不如直接 ct2）；译文落库（违反「原文是审计真相源」原则且膨胀存储，缓存层已足够）；SSE 流式逐 delta 翻译（80 字符/120ms 的增量粒度翻译必产生请求风暴与重复推理，折叠默认态根本不需要实时译文——按需模式把负载降 2-3 个数量级）。
+
+## D-unmapped-094@v1 设计期风险与放弃方案（底稿）
+状态：implemented
+变更：2026-10-19-translate-live-verify
+原编号：D-001@v1
+锚点：未记录
+最近确认：ffd511d4eb260046f3803cfa16492f4e0e55a0a7
+理由：最大风险：第三方个人仓库（jiangzhuo9357）可能失联/删除——缓解：TRANSLATE_MODEL_REPO env 可换任意 ct2 仓库、TRANSLATE_MODEL_DIR 指本地目录彻底离线、README 预烤文档已覆盖。放弃的方案：`ooeoeo/opus-mt-en-zh-ct2-float16`（float16 权重 CPU 推理不友好，且无必要）；本地 ct2-transformers-converter 自行转换 Helsinki-NLP/opus-mt-en-zh（需装 torch ~200MB，重且慢于直接用现成 int8 转换）。
+
+## D-unmapped-095@v1 设计期风险与放弃方案（底稿）
+状态：implemented
+变更：2026-10-19-knowledge-build-switch-rollout
+原编号：D-001@v1
+锚点：未记录
+最近确认：cb7394b3637b8bab1e1d746dbb2454c658bb6e85
+理由：- 风险①：镜像重建卷入并行会话的在途提交（构建用工作树快照，非 HEAD）——已核：构建起始 ≈7e9c795ef，其后提交均为前端/测试/文档/存档面（发布记录显式注记）。对策：构建前确认工作树解并记录快照锚。 - 风险②：后端新镜像携带未在生产验证过的 pgvector 迁移 + translate 新功能——本地平台本就是验证环境（数据可清空口径），迁移 fail-closed 设计自带护栏；translate 有 37 测试 + 评审。接受。 - 风险③：部署记录 seq 与并行会话的记录取号竞争（同用 next-release-seq.sh）——取号 22 立即落盘；若并发同号，后写者可据文件核对修正（留待观察）。 - 风险④：未建索引词面降级每次搜索全语料扫描（热查 2.9-15.1s 抖动）——设计期已裁决可接受（运维例外态）；本次实测数据佐证并如实记录，未触发超时螺旋即满足底线。 - 放弃方案A：仅 restart backend 不重建镜像——新镜像才是开关生效前提（代码在镜像内），否决。 - 放弃方案B：同时重建 frontend——本次范围仅后端开关落地；前端翻译 UI 部署归后续前端部署，避免扩大爆炸半径。
+
+## D-unmapped-096@v1 设计期风险与放弃方案（底稿）
+状态：implemented
+变更：2026-10-19-change-assets-cross-repo-repos
+原编号：D-001@v1
+锚点：未记录
+最近确认：9043c1a83f53bb4bcd5fd05fe3fd8529a5c0132d
+理由：最大风险：读侧新增字段被误读成「主仓统计的一部分」——已在资产卡显式区分「主仓 patch / 跨仓各仓」并对 totals 不做相加。另一个风险是每次 assets 读取需解析可能数 MB 的 change-patch.json（repos 正文在场时），但既有实现本就整文件 JSON.parse 提取 files，增量可接受；如后续成为热点再做流式/缓存。放弃方案：①后端把 patch 正文一起回传给前端做切片——单仓正文 3.5MB 且会重复传输，违背「元数据进卡片、正文走全屏预览」的既有分工；②按仓切片端点（A2）——本次不需要，留待卡内直接看 diff 的需求出现再加。
+
+## D-unmapped-097@v1 设计期风险与放弃方案（底稿）
+状态：implemented
+变更：2026-10-19-cross-repo-patch-slicing
+原编号：D-001@v1
+锚点：未记录
+最近确认：2b87056a6bd73e6dfa932232adec16c5bde2415b
+理由：最大风险：`file_list` 从 patch 头解析（而非独立清单字段），若 CLI 未来改 patch 格式（如 no-prefix diff）清单会静默变空——投影是 best-effory 展示面，切片命中与否仍有 note 兜底，可接受。放弃方案：①CLI 在冻结件里新增独立 repos[].files 字段——要跨仓改冻结契约且需 CLI 发版协同，解析现有内联正文零协同即可达成同一效果；②未知 repo 键抛 422 白名单——与端点「读不到留档是展示面降级」的既有语义冲突，且无安全面收益；③前端自行拉全量 change-patch.json 解析清单——4MB 传输只为拿文件名，浪费且受 content 端点截断限制。
+
+## D-unmapped-098@v1 设计期风险与放弃方案（底稿）
+状态：implemented
 变更：2026-10-19-preview-card-empty-turn-fix
 原编号：D-001@v1
 锚点：未记录
 最近确认：99f758c6f7d64b6bc36a05a1aead5a30a42389aa
 理由：最大风险：判定把「有内容但零摘要」的轮误收敛成不可见（例如仅 tool 通道日志的轮）。防护：started_at 有值即排除（tool-only 轮必然派发过引擎），摘要双空 + error_code 空 + started_at 空三条件同时成立才收敛；失败族/活跃族显式排除并有单测锁定。次风险：历史数据存在 started_at 缺失的正常轮（字段后补）——实测当前库正常轮 started_at 均有值；若真出现，该轮退化为不可见（无预览卡），导航刻度仍可跳转，属可接受降级。放弃方案：①后端大纲剔除纯切换轮——会导致全局轮号重排（seq 权威序），导航与轮次徽章全部错位，否决；②仅把卡片改置灰不可点——丢失配置行的档案/引擎信息且刷新前后形态仍不一致，否决；③大纲挂载后失效重拉（消除 stale outline）——治标不治本（拉到新大纲后死卡依旧），且本次透传方案已让两态一致，留作后续独立评估。
 
-## D-unmapped-092@v1 设计期风险与放弃方案（底稿）
+## D-unmapped-099@v1 设计期风险与放弃方案（底稿）
+状态：implemented
+变更：2026-10-20-backfill-dryrun-log-scrub
+原编号：D-001@v1
+锚点：未记录
+最近确认：3490518aa9925709efdbf3880a441593fb04d89f
+理由：最大风险：已习惯旧口径（裸跑即写）的使用者肌肉记忆被翻转——首次 `--apply` 忘带 `--yes` 得到退出码 2。缓解：docstring 用法段与 `--yes` 报错信息都给出明确指引；且 261a33367 提交信息记载本仓已回填完毕（复跑应全 unchanged），日常无人需要再跑 `--apply`。 试过但放弃的方案：① 交互式确认提示（裸跑问 y/N）——破坏可脚本化性，CI/批处理无法应答，flag 门（`--yes`）是 backfill_change_titles.py 已验证先例；② 连同 :187 env 键日志一并删除——该行已脱敏且承载 provider 路由排障信息，删除超出审查发现的事实面。
+
+## D-unmapped-100@v1 设计期风险与放弃方案（底稿）
+状态：implemented
+变更：2026-10-20-root-ruff-config
+原编号：D-001@v1
+锚点：未记录
+最近确认：978336829578f84f9c18d7ded93c25ce05f432da
+理由：最大风险：格式化 `check-assertion-surfaces.py`（pre-commit assertion-surfaces 闸门脚本）与 `scan-drift-check.py`（local.yaml scan:check 命令）——若重排意外破坏行为会卡全仓提交。缓解：ruff format 是纯空白/换行重排（无 token 变换），交付前闸门实跑 + test_scan_drift_check 用例回归 + diff 逐行核对仅空白类变化。 试过但放弃的方案：① 只改钩子建议文案按路径分流——治标：钩子仍按 88 裁根级文件，与任何手动 backend-cwd format 依旧不一致，且文案分支逻辑要进 pre-commit config 维护；② 根 ruff.toml 配齐 backend 全套 lint select——放弃：会瞬间扩大根级存量 lint 面（UP/SIM/N 等规则对存量 scripts 文件的未知违规），本变更范围膨胀，与「修行宽拉锯」的目标无关；③ 升级 ruff 至支持项目级多配置合并的版本——放弃：工具链版本变更影响面远大于本缺口，且 0.15.14 双入口数值同源后已无矛盾。
+
+## D-unmapped-101@v1 设计期风险与放弃方案（底稿）
+状态：implemented
+变更：2026-10-20-sillyspec-gotchas-session
+原编号：D-001@v1
+锚点：未记录
+最近确认：06e0a0cc5908aa37fbbc2e79ab0b741fb1b6381a
+理由：最大风险：条目描述的工具体验问题部分依赖 CLI 内部阈值/实现细节（如改写率 0.6 阈值、归档提交打印逻辑），后续版本演进可能修复——按文件头惯例每条标注踩坑时点与版本（2026-10-20 / v3.33.1），演进后由 knowledge digest 的 rot 信号自然处置。 试过但放弃的方案：①`knowledge propose` 收件箱通道——语义未文档化、proposed/ 为空，且 4 条是已实证成熟条目非待裁决提议；②只写会话汇报不落库——用户显式指令「记录下」，且不落库则后续会话不可检索、工具改进无留痕面。
+
+## D-unmapped-102@v1 设计期风险与放弃方案（底稿）
+状态：implemented
+变更：2026-10-20-conflict-platform-archive
+原编号：D-001@v1
+锚点：未记录
+最近确认：ffab0aa2e9dafa7c1fa67528d15f08941d4ee87b
+理由：最大风险：details_json 膨胀——三重帽兜底（32000 字符/文件、512KB 总量停存内容、300 条目），上限与一次冲突推送的请求体同量级（推送本身已携带这些 content），不放大既有存储压力。次风险：留档内容是**冲突时点**快照，机器侧后续演进不反映——横幅文案明示，且这恰是排障需要的时点证据。 试过但放弃的方案：①服务端 upsert 时经 daemon RPC 抓记录快照——时序必竞态（机器记录由 CLI 收到响应后落盘）+ Workspace 无 instance 绑定（无从寻址机器）；②平台行携带记录 label 驱动对比——只修名口径不修记录死亡，10-16 已用 full-tree 兜底覆盖记录活着场景；③机器离线/超时（504 家族）也回退留档——前端对比按钮对离线机器本就禁用，需求面（坑文）只覆盖记录缺失态，维持四臂文案现状，超范围不做。
+
+
+
+## D-unmapped-103@v1 设计期风险与放弃方案（底稿）
 状态：implemented
 变更：2026-10-20-pill-dock-left-align
 原编号：D-001@v1
@@ -619,7 +709,7 @@
 最近确认：a303e730226d05a93ba959773366a676cf54aa09
 理由：最大风险:存档恢复首帧对齐闪动(恢复帧 items-end、下一帧切 items-start)。已消除——恢复路径改走 `snapPos`,首帧即携带正确 left。 试过但放弃的方案:① render 期读 `dockRef.getBoundingClientRect()` + bounds 现算对齐——render 读 DOM 不纯(ref 首帧为 null),且每次 render 强制布局;② 持久化存档带 left 字段——存档格式变化,既有 toEqual 断言与旧档兼容都要跟着动,left 可从坐标幂等重推导,入档属冗余状态。两案均弃,采用吸附判据单源派生。
 
-## D-unmapped-093@v1 设计期风险与放弃方案（底稿）
+## D-unmapped-104@v1 设计期风险与放弃方案（底稿）
 状态：implemented
 变更：2026-10-20-pill-dock-drag-align-keep
 原编号：D-001@v1

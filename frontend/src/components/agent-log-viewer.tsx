@@ -56,6 +56,10 @@ import {
 import { ToolCallPreview, CollapsibleSection, ToolResultCard } from "./agent-log/tool-renderers";
 import { RunErrorItem } from "./agent-log/run-error-item";
 import { toolKindMeta } from "./agent-log/tool-kind-meta";
+import {
+  TranslatedThinkingBody,
+  useThinkingSummary,
+} from "@/components/thinking-translate";
 import type { AgentLogInputControls, ProcessedLog, ScanCheckResult, SemanticCategory } from "./agent-log/types";
 
 /* ------------------------------------------------------------------ */
@@ -226,10 +230,22 @@ export function groupIntoTurns(logs: ProcessedLog[]): ProcessedLog[][] {
  *
  * 边界（task-15 边界 2）：超长截断；短内容（< 60）原样返回不带 "..."。
  */
-function thinkingSummary(content: string): string {
-  const flat = content.replace(/\s+/g, " ").trim();
-  if (flat.length <= 60) return flat;
-  return flat.slice(0, 60) + "...";
+/**
+ * 2026-10-19-thinking-zh-translate / FR-04：思考折叠块（接入离线翻译）。
+ * 抽出为组件以挂 useThinkingSummary hook——折叠摘要流结束/静态挂载后译中，
+ * 展开正文默认译文可一键切原文（plain 形态，保持原 whitespace-pre-wrap 样式）。
+ */
+function ThinkingCollapsibleSection({ content }: { content: string }) {
+  const summary = useThinkingSummary(content);
+  return (
+    <CollapsibleSection title="思考" defaultOpen={false} summary={summary}>
+      <TranslatedThinkingBody
+        text={content}
+        variant="plain"
+        className="text-zinc-600"
+      />
+    </CollapsibleSection>
+  );
 }
 
 function formatLogClock(iso: string): string {
@@ -453,18 +469,12 @@ export function AgentLogRow({
           /* ql-20260617-011 + task-15 / FR-10：纯 [THINKING] delta 合并后渲染为完整段落。
              task-15：thinking 默认折叠成单行摘要（60 字符 + "..."），点击展开全文。
              参照 prototype:62-69 `.thinking-toggle/.thinking-summary`。
-             [SYSTEM] 折叠块保持原样（defaultOpen=true，非 thinking 内容）。 */
+             [SYSTEM] 折叠块保持原样（defaultOpen=true，非 thinking 内容）。
+             2026-10-19-thinking-zh-translate / FR-04：思考块接入离线翻译
+             （ThinkingCollapsibleSection——摘要译中 + 展开正文默认译文可切原文）。 */
           <div className="font-mono [overflow-wrap:anywhere]">
             {processedLog.mergedThinkingContent != null ? (
-              <CollapsibleSection
-                title="思考"
-                defaultOpen={false}
-                summary={thinkingSummary(processedLog.mergedThinkingContent)}
-              >
-                <div className="whitespace-pre-wrap break-words text-zinc-600">
-                  {processedLog.mergedThinkingContent}
-                </div>
-              </CollapsibleSection>
+              <ThinkingCollapsibleSection content={processedLog.mergedThinkingContent} />
             ) : (
               <CollapsibleSection title="系统">
                 {renderLogLines(contentSafe)}

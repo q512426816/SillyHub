@@ -1,0 +1,46 @@
+tier: thin
+legacy_fallback: false
+substeps:
+  artifacts: done
+  ledger: done
+  patch: done
+  review: done
+  probes: done
+  distill: done
+  archive: done
+  events: done
+born_face: thin
+with_tasks: false
+review_force: null
+input: >-
+  记录sillyspec工具负面问题四条入知识库
+
+
+  动机与背景：2026-10-20 两连轻量变更（backfill-dryrun-log-scrub、root-ruff-config）全程使用 sillyspec
+  CLI，收口汇报中积累的工具体验负面问题需按用户指令「负面问题记录下」沉淀到知识库 sillyspec-gotchas.md（含 INDEX 索引同步），供后续会话与工具改进参考。四条：①route-hindsight
+  改写率阈值对小任务偏紧且拦截成本错位到下一变更；②flow done dirty 缺口三选一缺「并行会话文件」处置选项；③归档提交 pathspec 打印→执行窗口的共享暂存区竞态（归档提交不自动执行是根源之一）；④design
+  四问「题面逐字钉死」规则只在报错时才学到。（选道声明：用户显式指令记录，需求已含决策）
+
+
+  成功标准：
+
+  - sillyspec-gotchas.md 新增 4 条目（格式对齐既有条目：## 标题+机理+规避/做法+来源标注时点与 CLI 版本）
+
+  - INDEX.md SillySpec 坑段同步 4 行关键词索引（锚点与条目标题一致）
+
+  - sillyspec knowledge validate 0 错 0 警
+autopilot: false
+prestage_ack: true
+baseline_commit: 567d07ab047e7f237844908aa59da4af5f7e04d0
+updatedAt: '2026-10-20T00:43:36.044Z'
+cross_baselines:
+  sillyspec: 045fa7bf4220317cef0c61558afa42649b3d323d
+baseline_sha256: 31848923e786aedba31c63d6309ce3595ed287b86cd6da628c1c09313d44da7a
+spec_approved: true
+spec_approved_at: '2026-10-20T00:37:36.111Z'
+spec_approved_by: zcode-review-fix-20261020
+spec_approved_channel: user-confirmed
+spec_attested_by: zcode-review-fix-20261020
+batch_ticked: true
+gate_summary: 'test: —｜lint: —｜门文件 5 个'
+

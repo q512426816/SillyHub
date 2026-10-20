@@ -1,0 +1,36 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-19-knowledge-search-build-switch",
+  "rows": [
+    {
+      "anchor": "FR-01",
+      "row_id": "2026-10-19-knowledge-search-build-switch:flow:测试绑定FR-01",
+      "tests": [
+        "backend/app/modules/knowledge/tests/test_knowledge_search.py「禁建库：未建索引工作区首搜词面降级零建库」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-19-knowledge-search-build-switch"
+    },
+    {
+      "anchor": "FR-02",
+      "row_id": "2026-10-19-knowledge-search-build-switch:flow:测试绑定FR-02",
+      "tests": [
+        "backend/app/modules/knowledge/tests/test_knowledge_search.py「禁建库：有索引直接查库跳过 sync / 默认缺省仍懒建库」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-19-knowledge-search-build-switch"
+    }
+  ]
+}

@@ -1,0 +1,39 @@
+tier: thin
+legacy_fallback: false
+substeps:
+  artifacts: done
+  ledger: done
+  patch: done
+  review: done
+  probes: done
+  distill: done
+  archive: done
+  events: done
+born_face: thin
+with_tasks: false
+review_force: null
+input: |-
+  资产卡跨仓单文件 diff 切片
+
+  动机与背景：跨仓冻结元数据已上资产卡（2026-10-19-change-assets-cross-repo-repos），但想看跨仓某文件的具体 diff 只能进全屏预览读数 MB JSON；主仓文件可点开切片，跨仓没有对等能力。
+
+  成功标准：
+  - assets/patch-file 端点新增可选 repo 参数（值须命中已解析 repos keys），切片取 change-patch.json 对应仓 repos[].patch 内联正文，复用既有切片与上限逻辑
+  - 资产卡仓段下列出该仓文件清单（后端从 patch 头解析投影，超上限截断标注），点开单文件弹窗看跨仓 diff
+  - 后端单测覆盖命中/未知仓/无 repos 三态，前端组件测试覆盖列表与点开弹窗，类型重生成同步
+autopilot: true
+prestage_ack: true
+baseline_commit: 6e6327c3d539503840d5b4da8aea29a65fe24d14
+updatedAt: '2026-10-19T11:34:35.870Z'
+cross_baselines:
+  sillyspec: 6049c3e03f039afa71dde0956f5600407e2ff129
+baseline_sha256: e0771c21adf3f346c76cc5b95a34ec0d8233f2629b5ea861cdf8e7981bce5eb3
+batch_ticked: true
+gate_summary: >-
+  test: passed ← module[]+deps(py68+jsx74+jsx45)+fr(187)（365.3s）
+  结果：C:\Users\qinyi\IdeaProjects\multi-agent-platform\.sillyspec\.runtime\verify-runs\20261019112852\test-result.json｜lint:
+  passed ← cd backend && uv run ruff check . && uv run ruff format --check . && uv run mypy app && cd ../frontend &&
+  pnpm lint && cd ../sillyhub-daemon && pnpm typecheck（16.0s）
+  结果：C:\Users\qinyi\IdeaProjects\multi-agent-platform\.sillyspec\.runtime\verify-runs\20261019112852\test-result.json｜门文件
+  12 个
+

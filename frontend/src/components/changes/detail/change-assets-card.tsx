@@ -5,7 +5,7 @@ import Link from "next/link";
 import { useQuery } from "@tanstack/react-query";
 
 import { FilePreview } from "@/components/explorer/file-preview";
-import { DiffView } from "@/components/files/structured-views";
+import { DiffView, ScopeAuditRepoSeg } from "@/components/files/structured-views";
 import { EntryCardList } from "@/components/knowledge/entry-card-list";
 import {
   Dialog,
@@ -209,8 +209,8 @@ export function ChangeAssetsCard({
   };
   /** 测试文件预览目标（null = 关）。 */
   const [testPath, setTestPath] = useState<string | null>(null);
-  /** 归档留档 diff 目标（null = 关）。 */
-  const [patchPath, setPatchPath] = useState<string | null>(null);
+  /** 归档留档 diff 目标（null = 关）。repo 在场 = 跨仓切片（2026-10-19-cross-repo-patch-slicing）。 */
+  const [patchFile, setPatchFile] = useState<{ path: string; repo?: string } | null>(null);
   /** 模块文档预览目标（镜像内相对路径，null = 关）。 */
   const [moduleDoc, setModuleDoc] = useState<string | null>(null);
   // 知识条目预览目标（2026-10-14-assets-knowledge-popup-preview）：FR 索引 /
@@ -224,9 +224,10 @@ export function ChangeAssetsCard({
   const qualifiedAnchor = (id: string) => (changeKey ? `${changeKey}#${id}` : id);
 
   const patchQ = useQuery({
-    queryKey: ["changePatchFile", workspaceId, changeId, patchPath],
-    queryFn: () => getChangePatchFile(workspaceId, changeId, patchPath!),
-    enabled: patchPath !== null,
+    queryKey: ["changePatchFile", workspaceId, changeId, patchFile?.path, patchFile?.repo ?? null],
+    queryFn: () =>
+      getChangePatchFile(workspaceId, changeId, patchFile!.path, patchFile!.repo),
+    enabled: patchFile !== null,
     retry: false,
     refetchOnWindowFocus: false,
   });
@@ -296,6 +297,10 @@ export function ChangeAssetsCard({
     frCount + decCount + rowCount + (hasAudit ? 1 : 0) + (touchList.length > 0 ? 1 : 0) +
     (moduleList.length > 0 ? 1 : 0);
   const patchFileList = data?.patch?.file_list ?? [];
+  // 跨仓冻结面（2026-10-19-change-assets-cross-repo-repos）：空面跨仓冻结只落
+  // change-patch.json（无 change.patch），主仓 files 为 0——真实交付面在这组元数据；
+  // 完整 diff 正文不进资产卡（可达数 MB），指路全屏预览。
+  const crossRepos = data?.patch?.repos ?? [];
 
   return (
     <section
@@ -610,7 +615,8 @@ export function ChangeAssetsCard({
               <div className="mt-1 flex shrink-0 flex-wrap gap-x-3 gap-y-1">
                 {data.patch ? (
                   <span>
-                    patch{" "}
+                    {/* 跨仓条目在场时显式标「主仓」，避免与各仓计数并读成同一口径。 */}
+                    {crossRepos.length > 0 ? "主仓 " : ""}patch{" "}
                     <b className="text-foreground">
                       {data.patch.files ?? "?"} 文件 +{data.patch.additions ?? "?"}/−
                       {data.patch.deletions ?? "?"}
@@ -627,6 +633,88 @@ export function ChangeAssetsCard({
                   </span>
                 ) : null}
               </div>
+              {crossRepos.length > 0 ? (
+                <div
+                  className="mt-1.5 flex flex-col gap-1.5 border-t border-dashed pt-1.5"
+                  data-testid="change-assets-cross-repos"
+                >
+                  <div className="flex shrink-0 items-center justify-between gap-2 text-[10px] text-muted-foreground/70">
+                    <span>跨仓冻结面（完整 diff 见 change-patch.json 全屏预览）</span>
+                  </div>
+                  {crossRepos.map((r) => (
+                    <ScopeAuditRepoSeg
+                      key={r.key}
+                      repoKey={r.key}
+                      repo={{
+                        key: r.key,
+                        anchor: r.anchor
+                          ? {
+                              source: r.anchor.source ?? null,
+                              base: r.anchor.base ?? null,
+                              head: r.anchor.head ?? null,
+                              label: r.anchor.label ?? null,
+                            }
+                          : null,
+                        totals: r.totals
+                          ? {
+                              files: r.totals.files ?? 0,
+                              additions: r.totals.additions ?? 0,
+                              deletions: r.totals.deletions ?? 0,
+                              planned: r.totals.planned ?? 0,
+                              unplanned: r.totals.unplanned ?? 0,
+                              untouched: r.totals.untouched ?? 0,
+                            }
+                          : null,
+                        degraded: r.degraded,
+                        degradedReason: r.degraded_reason ?? null,
+                        patchSha256: r.patch_sha256 ?? null,
+                      }}
+                    />
+                  ))}
+                  {/* 仓内文件清单（2026-10-19-cross-repo-patch-slicing FR-02）：
+                      后端从 repos[].patch 头解析投影——点开走 patch-file?repo=… 切片。 */}
+                  {crossRepos.some((r) => (r.file_list?.length ?? 0) > 0) ? (
+                    <ul data-testid="change-assets-cross-repo-files" className="mt-1 space-y-1">
+                      {crossRepos.map((r) =>
+                        (r.file_list?.length ?? 0) > 0 ? (
+                          <li key={r.key}>
+                            <div className="mb-0.5 flex items-center justify-between gap-2 text-[10px] text-muted-foreground/70">
+                              <span>{r.key} 改动文件（点开看该仓冻结 diff）</span>
+                              {r.files_truncated ? (
+                                <span className="shrink-0 text-warning">清单已截断</span>
+                              ) : null}
+                            </div>
+                            <ul>
+                              {cap(r.file_list ?? [], `cross-${r.key}`).map((p) => (
+                                <li key={p} className="border-b border-dashed last:border-b-0">
+                                  <button
+                                    type="button"
+                                    data-testid={`change-assets-cross-repo-file-${r.key}-${p}`}
+                                    onClick={() => setPatchFile({ path: p, repo: r.key })}
+                                    title={`查看 ${p} 在跨仓 ${r.key} 冻结 patch 中的 diff`}
+                                    className="flex w-full items-baseline gap-2 py-1 text-left hover:underline"
+                                  >
+                                    <span className="min-w-0 flex-1 truncate font-mono text-[10.5px] text-foreground">
+                                      {p}
+                                    </span>
+                                    <span className="shrink-0 text-[10px] text-brand-700">看 diff</span>
+                                  </button>
+                                </li>
+                              ))}
+                            </ul>
+                            <GroupToggle
+                              total={r.file_list?.length ?? 0}
+                              expanded={isExpanded(`cross-${r.key}`)}
+                              onToggle={() => toggleGroup(`cross-${r.key}`)}
+                              unit="个文件"
+                            />
+                          </li>
+                        ) : null,
+                      )}
+                    </ul>
+                  ) : null}
+                </div>
+              ) : null}
               {patchFileList.length > 0 ? (
                 <div className="mt-1.5 flex min-h-0 flex-1 flex-col overflow-hidden border-t border-dashed pt-1.5">
                   <div className="mb-1 flex shrink-0 items-center justify-between gap-2 text-[10px] text-muted-foreground/70">
@@ -644,7 +732,7 @@ export function ChangeAssetsCard({
                         <button
                           type="button"
                           data-testid={`change-assets-patch-file-${p}`}
-                          onClick={() => setPatchPath(p)}
+                          onClick={() => setPatchFile({ path: p })}
                           title={`查看 ${p} 在 change.patch 中的 diff`}
                           className="flex w-full items-baseline gap-2 py-1 text-left hover:underline"
                         >
@@ -718,12 +806,15 @@ export function ChangeAssetsCard({
       </Dialog>
 
       {/* 归档留档单文件 diff 弹窗（FR-04）：冻结 patch 切片，非实时窗口。 */}
-      <Dialog open={patchPath !== null} onOpenChange={(v) => !v && setPatchPath(null)}>
+      <Dialog open={patchFile !== null} onOpenChange={(v) => !v && setPatchFile(null)}>
         <DialogContent className="flex h-[80vh] max-w-5xl flex-col gap-0 p-0">
           <DialogHeader className="border-b px-4 py-3">
             <DialogTitle className="text-sm">归档留档 · 单文件 diff</DialogTitle>
             <DialogDescription className="truncate font-mono text-[11px]">
-              {patchPath} · change.patch（收尾时点冻结）
+              {patchFile?.repo ? `跨仓 ${patchFile.repo} · ${patchFile.path}` : patchFile?.path} ·
+              {patchFile?.repo
+                ? " change-patch.json scopeAudit.repos[]（收尾时点冻结）"
+                : " change.patch（收尾时点冻结）"}
             </DialogDescription>
           </DialogHeader>
           <div className="flex min-h-0 flex-1 flex-col overflow-hidden p-3">

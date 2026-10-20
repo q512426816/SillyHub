@@ -131,11 +131,52 @@ class Settings(BaseSettings):
         4,
         description="max workspaces cached in-process for vector index, LRU evict beyond (env KNOWLEDGE_EMBEDDING_INDEX_MAX_WS).",
     )
+    # 2026-10-19-knowledge-search-build-switch：服务器禁建库开关——小内存生产容器禁容器内
+    # 懒建库/嵌入（known-issues「首搜建库地雷」根治：未建索引 ws 首搜曾全量嵌入致 OOM/超时）。
+    # 关闭后懒同步全量/差量嵌入一律跳过，无索引工作区首搜词面内存直查降级
+    # （model_ready=False + reason=index_not_built）；索引一律外部机器隧道预建。
+    knowledge_search_server_build: bool = Field(
+        True,
+        description="allow lazy in-process knowledge index build (full/delta embedding) on search; set false on small-memory servers (env KNOWLEDGE_SEARCH_SERVER_BUILD).",
+    )
     # 2026-10-16-backend-mem-polling task-02 / D-004@v1：spec 包 gzip 整包缓存的
     # 全局字节帽（per-ws 2 版本策略之上的总量上界；~18MB/ws 曾无上界慢性爬升）。
     spec_bundle_cache_max_bytes: int = Field(
         128 * 1024 * 1024,
         description="global byte cap for spec bundle gzip cache, LRU evict beyond (env SPEC_BUNDLE_CACHE_MAX_BYTES).",
+    )
+
+    # ── 思考内容离线翻译（2026-10-19-thinking-zh-translate）──────────────────
+    # 后端 CTranslate2 int8 opus-mt-en-zh 子进程推理（embedding worker 同款三闸
+    # 自灭模式）。模型缺席/加载失败 → /api/translate/thinking fail-soft 返回
+    # engine_ready=false 原文透传，应用启动零阻塞；零外部云翻译 API。
+    translate_thinking_enabled: bool = Field(
+        True,
+        description="master switch for offline thinking translation (env TRANSLATE_THINKING_ENABLED).",
+    )
+    # HF repo id（ct2 格式）。换更大模型只改本值；离线部署用 translate_model_dir
+    # 指本地预置目录绕过下载。默认仓库 2026-10-19 真机验证更换：原
+    # michaelfeil/ct2fast-opus-mt-en-zh 已 404（hf-mirror 实测），现默认
+    # jiangzhuo9357/opus-mt-en-zh-ct2（config.json+model.bin+source/target.spm
+    # 完整布局，真机推理译文流畅）。
+    translate_model_repo: str = Field(
+        "jiangzhuo9357/opus-mt-en-zh-ct2",
+        description="CTranslate2-format opus-mt en-zh repo id (env TRANSLATE_MODEL_REPO).",
+    )
+    # 非空 = 直接用该本地模型目录（含 config.json 的 ct2 模型目录），零下载。
+    translate_model_dir: str = Field(
+        "",
+        description="local CTranslate2 model dir override for offline deploys (env TRANSLATE_MODEL_DIR).",
+    )
+    # 翻译子进程闲置自灭秒数（内存归零口径同 knowledge_embedding_idle_exit_sec）。
+    translate_worker_idle_exit_sec: int = Field(
+        600,
+        description="translate worker idle exit in seconds (env TRANSLATE_WORKER_IDLE_EXIT_SEC).",
+    )
+    # 进程内译文 LRU 条目上限（块粒度，≤1000 字符/块）。
+    translate_cache_max_entries: int = Field(
+        2048,
+        description="in-process translated-chunk LRU entries cap (env TRANSLATE_CACHE_MAX_ENTRIES).",
     )
 
     # 2026-07-07-daemon-skill-execution task-06：sillyspec skills 打包源目录。

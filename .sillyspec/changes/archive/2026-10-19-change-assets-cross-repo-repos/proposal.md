@@ -1,0 +1,32 @@
+---
+author: flow-machine-draft
+created_at: 2026-10-19T07:14:26.388Z
+---
+# 提案书（Proposal）— 2026-10-19-change-assets-cross-repo-repos
+
+## 动机
+
+任务原话转写：变更资产卡展示跨仓冻结面
+
+动机与背景：跨仓冻结成功时真实代码 diff 存在 change-patch.json 的 scopeAudit.repos[]，但平台 assets 聚合只读顶级 files[]，资产卡显示 0/模板文件，跨仓面不可见（消防工作区 4e9eb05b 实证：header-autofit 的 subgrid 112 文件 diff 全隐藏）。
+
+成功标准：
+- assets DTO 增 scopeAudit.repos 元数据（key/锚点/计数/降级/patchSha256，不回传 patch 正文），旧归档无 repos 时零变化
+- 变更资产卡按仓分段展示跨仓冻结面，并标注主仓/各仓口径避免双计歧义
+- 后端单测覆盖 repos 投影与缺键/降级形态，前端类型检查与构建通过
+- 既有 patch 语义不变：files/totals 仍为主仓面
+
+## 变更范围
+
+按成功标准机械推导，共 4 条验收面：
+1. assets DTO 增 scopeAudit.repos 元数据（key/锚点/计数/降级/patchSha256，不回传 patch 正文），旧归档无 repos 时零变化
+2. 变更资产卡按仓分段展示跨仓冻结面，并标注主仓/各仓口径避免双计歧义
+3. 后端单测覆盖 repos 投影与缺键/降级形态，前端类型检查与构建通过
+4. 既有 patch 语义不变：files/totals 仍为主仓面
+
+## 成功标准（可验证）
+
+1. assets DTO 增 scopeAudit.repos 元数据（key/锚点/计数/降级/patchSha256，不回传 patch 正文），旧归档无 repos 时零变化
+2. 变更资产卡按仓分段展示跨仓冻结面，并标注主仓/各仓口径避免双计歧义
+3. 后端单测覆盖 repos 投影与缺键/降级形态，前端类型检查与构建通过
+4. 既有 patch 语义不变：files/totals 仍为主仓面

@@ -1,0 +1,38 @@
+tier: thin
+legacy_fallback: false
+substeps:
+  artifacts: done
+  ledger: done
+  patch: done
+  review: done
+  probes: done
+  distill: done
+  archive: done
+  events: done
+born_face: thin
+with_tasks: false
+review_force: null
+input: |-
+  知识收件箱清账：16 条经验归类与状态标注
+  收件箱 uncategorized.md 积压 16 条待归类经验（2026-09-28 清账后新增），需逐条判类迁出并标注修复状态；INDEX.md 同步补索引。
+
+  成功标准：
+  - uncategorized.md 16 条全部迁出至五个分类文件（known-issues/patterns/conventions/testing-gotchas/sillyspec-gotchas），收件箱归零并留清账记录
+  - INDEX.md 对应分类节补齐索引行，锚点与目标标题一致
+  - 已修复条目带状态标注（🟢/🟡 口径或文内注明），【待确认】逐条裁决留痕
+  - sillyspec knowledge validate 无 errors
+autopilot: true
+prestage_ack: false
+baseline_commit: b35291abb389dae5869b8a6c7e9c6a000f40ec82
+updatedAt: '2026-10-19T05:45:32.386Z'
+cross_baselines:
+  sillyspec: 875511d25454cf584c99ab491fa0cd03231f71ad
+baseline_sha256: ddfcbc504d878d436abe9eaa2837096f2b7addb7ff2d963e8630da488b9b9960
+spec_approved: true
+spec_approved_at: '2026-10-19T05:39:10.781Z'
+spec_approved_by: zcode-knowledge-inbox-cleanup
+spec_approved_channel: user-confirmed
+spec_attested_by: zcode-knowledge-inbox-cleanup
+batch_ticked: true
+gate_summary: 'test: —｜lint: —｜门文件 1 个'
+

@@ -1,3 +1,5 @@
 # knowledge 变更索引
 - change 2026-10-15-knowledge-search-pgvector | 知识搜索向量索引持久化到 PG pgvector：两表（chunks embedding vector(512)+content_hash 差量键 / state 指纹+model_version）+ 迁移 20261015200000（CREATE EXTENSION vector+方言守卫+镜像未换 fail-closed）+ pgvector>=0.3 依赖（with_variant：PG Vector/SQLite JSON 测试可建）；search_sync 改 async 协程（DB await 原生+CPU to_thread 卸载，run_in_threadpool 退役）；懒同步差量四态（指纹 list 归一化+asyncio.Lock single-flight+model_version 全量重算）；查询双路方言分叉（PG KNN cosine_distance/SQLite Python 余弦/词面 ILIKE 候选）；DB 异常词面内存直查降级（永不 5xx）。部署：镜像 pgvector/pgvector:pg16。测试 205+46 全绿+契约零 diff；实测重启后首查 0.003s 仅嵌 query（零重建）+差量只嵌变更文件。CLI 向量端点零改动。**部署期四连修（生产实证）**：建库写入分批+Core 批量 INSERT（容器 800m OOM 三连修，mem_limit→1100m）；uq(workspace_id,spec_path,anchor,title) drop（生产重号条目撞约束，迁移 20261016010000，键改行号坐标）；PG KNN 改原生 SQL（with_variant 列取不到 ORM cosine_distance）；fastembed 模型缓存挂载（服务器无外网）。本机隧道建库 228.7s/6712 chunks；生产首查 3.3s（改造前 304s）/二次 0.72s。
 - 2026-10-16-driver-audit-fixes | 24h 只读风险审查发现 zcode 驱动三处缺陷（轮次进行中 close 令 consume 永久…
+- 2026-10-19-knowledge-search-build-switch | 知识搜索禁建库开关：根治首搜建库地雷
+- 2026-10-19-thinking-zh-translate | 思考内容离线翻译为中文展示

@@ -462,6 +462,24 @@ describe("ConflictCompareModal（task-06 红态锚定 / design §7.2）", () => 
     expect(screen.queryByTestId("compare-record-source")).toBeNull();
   });
 
+  it("platform-archive 留档回退——留档来源横幅 + full-tree 横幅互斥", async () => {
+    mocks.getCompare.mockResolvedValue({
+      ...SPEC_TREE_RESP,
+      record_label: "platform-archive",
+      covered_changes: ["2026-09-02-my-change", "2026-09-03-sibling-change"],
+      path_total: 9,
+    });
+    renderModal();
+
+    await screen.findByText(/涉及 4 个文件/);
+    const notice = screen.getByTestId("compare-archive-source");
+    expect(notice).toHaveTextContent(/本机冲突记录已不存在/);
+    expect(notice).toHaveTextContent(/平台留档快照/);
+    expect(notice).toHaveTextContent(/平台侧为当前内容/);
+    expect(notice).toHaveTextContent(/覆盖 2 个变更/);
+    expect(screen.queryByTestId("compare-record-source")).toBeNull();
+  });
+
   // ── 5. 截断与二进制占位（§7.2 local_truncated / diff_truncated / binary）──
 
   it("截断与二进制——local_truncated/diff_truncated 提示条 + binary「无法文本对比」占位", async () => {
