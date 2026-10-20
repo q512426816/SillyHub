@@ -5,3 +5,8 @@ playwright-report/
 coverage/
 e2e/.env.e2e
 prototype-dist/.build/
+
+# 2026-10-21-proto-data-exposure-guard：真实会话数据只允许 staging 在免鉴权静态面
+#（public/）之外，且不进 git/构建；public/__proto* 防同名目录被重建后误提交。
+/.proto-staging/
+/public/__proto*/

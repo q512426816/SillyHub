@@ -97,3 +97,9 @@ attachments/[0-9a-f]*
 
 # 2026-10-15-server-logs-panel：后端轮转日志运行产物（data/logs/backend.log 等）
 data/logs/
+
+# 2026-10-21-proto-data-exposure-guard：本地产物机制防线——多 agent 共享仓防误提交
+#（纪律防线=AGENTS.md 规则 11 禁目录级 add；此处补机制防线）
+/.tmp/
+backend/pytest-of-*/
+*.TMP
