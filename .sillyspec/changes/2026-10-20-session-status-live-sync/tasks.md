@@ -9,4 +9,4 @@ created_at: 2026-10-20T07:02:11.490Z
 - [x] task-03: PublishIntent 加 list_signal 标量，submit_commit 激活块置位、publish_submitted_messages 消费补发，扩展 test_tool_report_activation.py 覆盖发/rowcount=0 不发；跑绿
 - [x] task-04: coordinator request_approval/approve commit 后补发，新增 test_coordinator_approval_signal.py 覆盖成功发/拒绝路径不发；跑绿
 - [x] task-05: session-panel-page.tsx onPermissionRequest 加 onSessionListRefresh 兜底，新增 session-panel-approval-list-refresh.test.tsx；跑绿
-- [ ] task-06: 全量回归：backend pytest（agent/daemon 触及面 + 信号相关既有用例）+ frontend vitest 触及面 + lint，结果记入本变更
+- [x] task-06: 全量回归：backend pytest（agent/daemon 触及面 + 信号相关既有用例）+ frontend vitest 触及面 + lint，结果记入本变更
