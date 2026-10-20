@@ -828,6 +828,15 @@ async def _inject_into_session(
             },
         )
 
+    # 2026-10-20-session-status-live-sync：新轮 run 落库即广播列表变更信号——
+    # 左侧徽标的 current_run_status 随新 run（pending）点亮「正在执行」，不再
+    # 等 10s/30s 轮询 tick。纯切换轮 run 直接落 completed（非活跃态，列表无
+    # 可见状态变化）不发。publish 内部静默容错（Redis 抖动不拖挂注入路径）。
+    if not silent_config_switch:
+        from app.modules.daemon.session_events import publish_sessions_changed
+
+        await publish_sessions_changed("status_changed", session.id, session.user_id)
+
     # task-08 拆分：commit 后派发段（ready 等待 + SESSION_SWITCH_CONFIG /
     # SESSION_INJECT 下发 + 失败收敛）下沉 control._dispatch_inject_turn。
     return await _dispatch_inject_turn(
