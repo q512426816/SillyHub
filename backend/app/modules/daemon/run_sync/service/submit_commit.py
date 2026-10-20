@@ -219,6 +219,19 @@ async def _submit_finalize(svc, st: _SubmitState) -> SubmittedMessages:
                     agent_run_id=str(st.agent_run_id),
                     lease_id=str(st.lease_id),
                 )
+                # 2026-10-20-session-status-live-sync：激活成功（rowcount>0）→
+                # 事务内提取列表信号标量（主键 get，publish 阶段不查库）。属主
+                # 取 session.user_id（列表 SSE 按属主过滤的受众口径）；查不到
+                # 会话（极端：会话行已删）不置，publish 阶段零发布。
+                if st.agent_run.agent_session_id is not None:
+                    activated_session = await svc._session.get(
+                        AgentSession, st.agent_run.agent_session_id
+                    )
+                    if activated_session is not None:
+                        st.list_signal = (
+                            activated_session.id,
+                            activated_session.user_id,
+                        )
         # ql-20260616-004：实时 token 写回。仅在数值增大时覆盖（防御乱序），
         # 让前端 5s 轮询拿到中间过程的累积 token，不必等 result 事件汇总。
         if st.latest_input_tokens is not None and (
@@ -426,6 +439,9 @@ async def _submit_finalize(svc, st: _SubmitState) -> SubmittedMessages:
             duration_api_ms=publish_duration_api_ms,
             agent_session_id=publish_session_id,
             timestamp_iso=st.now.isoformat().replace("+00:00", "Z"),
+            # 2026-10-20-session-status-live-sync：run 激活标量（未激活/无会话
+            # 为 None，publish 阶段零发布）。
+            list_signal=st.list_signal,
             # task-05：群桥接标量快照（事务内已解析的群上下文 + 最后投影行 id）。
             # 非群场景 group_id=None → publish_submitted_messages 群分支零进入。
             group_id=st.group_bridge.group_id if st.group_bridge is not None else None,

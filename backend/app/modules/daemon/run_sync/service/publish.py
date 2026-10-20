@@ -23,6 +23,7 @@ from pydantic import BaseModel
 import app.modules.daemon.run_sync.service as _rsvc
 from app.modules.daemon.event_publish import publish_json_event
 from app.modules.daemon.schema import BashChunkEvent
+from app.modules.daemon.session_events import publish_sessions_changed
 
 # ── QueuePool 修复 3：submit_messages 的发布意图 + 延迟 publish ────────────────
 # Redis publish 从 RunSyncService.submit_messages 迁出到 router（DB session 已
@@ -69,11 +70,17 @@ class PublishIntent:
     projection_log_id: str | None = None
     # ── quick 投影统一标记制（2026-09-02）：@轮与直聊轮同款 ──
     # publish 群分支只发 group_projection_events 里的 [[GROUP]] 转发段事件：每段
-    # 一项（{"log_id": 投影行 id, "content": 段文本, "timestamp": iso}），与投影
-    # 行一一对应（partial 从未投影、override 令箭不发——无渲染可撤）。
-    # shadow_direct 仅标记直聊轮（观测用；兜底行/互@链路按轮型区分）。
+    # 一项（{"log_id": 投影行 id, "content": "段文本, "timestamp": iso}），与投影
+    # 行一一对应（partial 从未投影、override 令箭不发——无渲染可撤）。shadow_direct
+    # 仅标记直聊轮（观测用；兜底行/互@链路按轮型区分）。
     shadow_direct: bool = False
     group_projection_events: list[dict] = field(default_factory=list)
+    # 2026-10-20-session-status-live-sync：run 激活（pending→running）列表信号
+    # 标量（session_id + 会话属主 user_id），激活块事务内提取（publish 阶段不
+    # 查库）。publish_submitted_messages 消费补发 publish_sessions_changed(
+    # "status_changed")——左侧徽标秒级亮「正在执行」，不等 10s/30s 轮询 tick。
+    # None = 本次上报未触发激活（条件 UPDATE rowcount=0）/ run 无绑定会话，零发布。
+    list_signal: tuple[uuid.UUID, uuid.UUID | None] | None = None
 
 
 class SubmittedMessages(int):
@@ -236,6 +243,14 @@ async def publish_submitted_messages(intent: PublishIntent) -> None:
             agent_run_id=str(intent.agent_run_id),
             agent_session_id=str(intent.agent_session_id),
         )
+
+    # 2026-10-20-session-status-live-sync：run 激活 → 列表变更信号（哑信号，
+    # 前端收到即失效列表查询，左侧徽标秒级亮「正在执行」）。须在下方群分支
+    # 早退（group_id is None: return）之前消费——非群场景是主路径。
+    # publish_sessions_changed 内部静默容错，不拖垮本函数其余发布。
+    if intent.list_signal is not None:
+        signal_sid, signal_uid = intent.list_signal
+        await publish_sessions_changed("status_changed", signal_sid, signal_uid)
 
     # task-05（2026-09-01-session-group-chat / design §5.2 改动点①的 publish 半段）
     # + quick 投影统一标记制（2026-09-02）：群频道发布——@轮与直聊轮同款，只发
