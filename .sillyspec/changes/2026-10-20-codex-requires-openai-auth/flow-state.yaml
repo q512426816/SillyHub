@@ -1,0 +1,32 @@
+tier: thin
+legacy_fallback: false
+substeps: {}
+born_face: thin
+with_tasks: false
+review_force: null
+input: >-
+  动机与背景：腾讯云平台 codex 会话选直连（anthropic 形态）供应商时稳定断流（stream disconnected before completion）。根因已 A/B 实验锁定：daemon
+  codex-settings.ts 写 per-session config.toml 时只写 name/base_url/wire_api，从不写 requires_openai_auth——codex CLI 对自定义
+  provider 默认不发 Authorization，auth.json 里的 key 永远不带出；上游（智谱 bigmodel 等）对无认证的流式请求直接掐流。2026-10-16 供应商 agent_kinds 合并后 codex
+  挂上 claude 的 anthropic 端点供应商，双重叠加（端点错 + 无认证头）暴露。端点错已由配置层拆分修复（新建「智谱 GLM Codex (wp)」/api/v1 条目），本变更修代码层的认证头缺失。
+
+
+  成功标准：
+
+  - daemon 对有 api_key 的 anthropic 直连形态 codex 供应商，写出的 config.toml [model_providers.sillyhub] 段含 requires_openai_auth =
+  true；端到端：平台 codex 会话选直连供应商真实对话跑通（不再 stream disconnected）
+
+  - keyless 供应商（api_key 缺省）行为不变：不写该键，产物与现状逐字一致（spike A3a keyless 语义零回归）
+autopilot: false
+prestage_ack: false
+baseline_commit: 1e3c24ebfd960880eb85908c71f4532c1ef0c6c7
+updatedAt: '2026-10-20T03:47:40.205Z'
+cross_baselines:
+  sillyspec: 0ac7c4e6b5d95d595c09491be6d039589c1f642e
+baseline_sha256: 6a7b46346fafd87d7c65c4d3e0d8c1ef8c829ae0abe7b52265290bd4456f4477
+spec_approved: true
+spec_approved_at: '2026-10-20T03:47:40.204Z'
+spec_approved_by: zcode-codex-provider-fix
+spec_approved_channel: user-confirmed
+spec_attested_by: zcode-codex-provider-fix
+
