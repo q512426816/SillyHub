@@ -95,6 +95,8 @@ describe("SessionFloatingPillDock（2026-10-16-session-pill-dock-drag）", () =>
     expect(dock.style.left).toBe("408px");
     expect(dock.style.top).toBe("312px");
     expect(dock.className).toContain("cursor-grabbing");
+    // 拖拽中间态透传起步吸附侧（默认右下位）→ 保持右对齐
+    expect(dock.className).toContain("items-end");
 
     fireEvent(window, pointerEvt("pointerup", { pointerId: 7, clientX: 400, clientY: 300 }));
     // 408+0/2 ≤ 512 → 吸附左缘 EDGE_GAP=16；纵向保持；贴左组内容左对齐
@@ -104,6 +106,29 @@ describe("SessionFloatingPillDock（2026-10-16-session-pill-dock-drag）", () =>
     expect(dock.className).not.toContain("items-end");
     // 存档格式不带入 left（对齐由吸附判据从坐标重推导）
     expect(JSON.parse(window.localStorage.getItem(DOCK_KEY)!)).toEqual({ x: 16, y: 312 });
+  });
+
+  it("左停靠拖拽过程中保持左对齐，拖到右半边松手吸附后切右对齐", () => {
+    renderDock();
+    const dock = dockEl();
+    // 铺垫：拖到左半边松手吸附左缘（左停靠态，items-start）
+    fireEvent(dock, pointerEvt("pointerdown", { button: 0, pointerId: 7, clientX: 1000, clientY: 660 }));
+    fireEvent(window, pointerEvt("pointermove", { pointerId: 7, clientX: 400, clientY: 300 }));
+    fireEvent(window, pointerEvt("pointerup", { pointerId: 7, clientX: 400, clientY: 300 }));
+    expect(dock.style.left).toBe("16px");
+    expect(dock.className).toContain("items-start");
+
+    // 二次拖拽（拖拽中）：中间态透传吸附侧标记，保持 items-start 不翻回右对齐
+    fireEvent(dock, pointerEvt("pointerdown", { button: 0, pointerId: 8, clientX: 20, clientY: 312 }));
+    fireEvent(window, pointerEvt("pointermove", { pointerId: 8, clientX: 600, clientY: 300 }));
+    expect(dock.className).toContain("cursor-grabbing");
+    expect(dock.className).toContain("items-start");
+    expect(dock.className).not.toContain("items-end");
+
+    // 拖到右半边松手：吸附右缘，对齐才切回 items-end（松手定侧）
+    fireEvent(window, pointerEvt("pointerup", { pointerId: 8, clientX: 600, clientY: 300 }));
+    expect(dock.style.left).toBe("1008px");
+    expect(dock.className).toContain("items-end");
   });
 
   it("拖到右半屏松手吸附右缘", () => {

@@ -57,11 +57,14 @@ function viewportBounds(): DockBounds {
   };
 }
 
-/** 钳制组左上角使整组留在边界内（w/h 为组实际尺寸）。 */
+/** 钳制组左上角使整组留在边界内（w/h 为组实际尺寸）。透传 p.left——
+    拖拽中间态继承最近吸附态的侧别标记，渲染保持拖拽前对齐方向，松手
+    snapPos 重判覆盖。 */
 function clampPos(p: DockPos, w: number, h: number, b: DockBounds): DockPos {
   return {
     x: Math.min(Math.max(p.x, b.left), Math.max(b.left, b.right - w)),
     y: Math.min(Math.max(p.y, b.top), Math.max(b.top, b.bottom - h)),
+    left: p.left,
   };
 }
 
@@ -98,6 +101,8 @@ export function SessionFloatingPillDock({
     startY: number;
     baseX: number;
     baseY: number;
+    /** 拖拽起点吸附侧标记——拖拽中间态继承它保持对齐方向，松手 snapPos 重判。 */
+    left?: boolean;
     moved: boolean;
   } | null>(null);
   /** 拖拽松手时刻（click 吞除时间窗）。 */
@@ -222,7 +227,7 @@ export function SessionFloatingPillDock({
     d.moved = true;
     setDragging(true);
     const { w, h } = dockSize();
-    setPos(clampPos({ x: d.baseX + dx, y: d.baseY + dy }, w, h, getBounds()));
+    setPos(clampPos({ x: d.baseX + dx, y: d.baseY + dy, left: d.left }, w, h, getBounds()));
   }, [getBounds]);
 
   const endDrag = useCallback(
@@ -258,6 +263,7 @@ export function SessionFloatingPillDock({
         startY: e.clientY,
         baseX: pos.x,
         baseY: pos.y,
+        left: pos.left,
         moved: false,
       };
       window.addEventListener("pointermove", onPointerMove);

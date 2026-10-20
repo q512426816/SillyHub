@@ -1,0 +1,32 @@
+tier: thin
+legacy_fallback: false
+substeps: {}
+born_face: thin
+with_tasks: false
+review_force: null
+input: >-
+  悬浮 pill 停靠组拖拽过程中保持拖拽前对齐方向
+
+
+  用户实测反馈:左停靠的 pill 组在鼠标拖拽过程中内容固定右对齐,松手吸附后才恢复左对齐——因 onPointerMove 走 clampPos 产生的中间态不携带吸附侧标记 left,渲染按 items-end
+  兜底。修复:clampPos 透传 p.left,拖拽中保持拖拽前吸附侧的对齐,松手 snapPos 重判。
+
+
+  成功标准:
+
+  - 左停靠的组拖拽过程中内容保持左对齐,不再翻回右对齐;右停靠同理保持右对齐
+
+  - 松手吸附后仍按吸附侧正确切换对齐(既有行为不变)
+
+  - dock 测试全绿(新增拖拽中对齐保持断言)
+autopilot: false
+prestage_ack: false
+baseline_commit: c2d5979778ea293d451c0de116bf6c73332c341c
+updatedAt: '2026-10-20T01:17:23.082Z'
+baseline_sha256: 73353e2c404434bb7857fdea85c6ff6e23e629fbcc1f632ceac4a8e8b68a7b5d
+spec_approved: true
+spec_approved_at: '2026-10-20T01:17:23.081Z'
+spec_approved_by: zcode-pill-dock-drag-align
+spec_approved_channel: agent-self
+spec_attested_by: zcode-pill-dock-drag-align
+
