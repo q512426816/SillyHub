@@ -53,6 +53,7 @@ created_at: 2026-10-20T03:44:06.234Z
 |---|---|---|
 | 修改 | frontend/src/components/daemon/session-panel/page-helpers.tsx | enrichOne killed 分支精化：error_detail 可解析则升级 failed + errorDetail |
 | 修改 | frontend/src/components/daemon/session-panel/session-panel-page.tsx | 实时终态错误详情拉取条件扩展 + 回补翻 status=failed |
+| 修改 | frontend/src/components/daemon/session-panel/session-panel-dialog.tsx | dialog 模式同款拉取条件扩展 + killed 升级分支（评审 P2 清偿——与 page 同源拷贝，dialog 里同样被旧条件跳过） |
 | 修改 | frontend/src/components/agent-log/run-error-item.tsx | raw 首行摘要默认渲染（截断）+ 折叠保留全文 |
 | 新增 | frontend/src/components/daemon/__tests__/page-helpers-error-visibility.test.ts | 快照升级判定 + 真打断零回归用例 |
 | 修改 | frontend/src/components/agent-log/__tests__/run-error-item.test.tsx | raw 摘要默认可见断言 |

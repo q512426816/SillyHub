@@ -1,0 +1,34 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-20-session-error-visibility",
+  "reviewer": "subagent",
+  "verdict": "PASS",
+  "reviewedAgainst": "b4c5c1fa65a87d55452b504669bc3ab5ce4653f4",
+  "findings": [
+    {
+      "severity": "P2",
+      "title": "dialog 渲染路径同源缺陷未修且未声明边界：interactive_interrupted 模型失败轮在 dialog 模式仍「已中止」零错误卡",
+      "evidence": "session-panel-dialog.tsx onTurnCompleted 的错误详情拉取条件仍为旧式 terminal===\"failed\"（无 killedByInterrupted 扩展），且 dialog 模式无 runsMeta 快照派生链（同文件 R7 注释：turns 原样喂 TurnTimeline），enrichOne 快照升级也缺席——同一会话 page 模式可见错误卡、dialog 模式（index.tsx 注释：弹窗/内嵌，4 个消费方）完全不可见；requirements/design/文件清单及 tasks/proposal 全文均无 dialog 边界声明，属未披露残留而非显式取舍",
+      "location": "frontend/src/components/daemon/session-panel/session-panel-dialog.tsx:694"
+    },
+    {
+      "severity": "P3",
+      "title": "实时升级分支零直接测试，requirements 测试绑定声称的「同源判定覆盖」只覆盖共享解析器",
+      "evidence": "requirements.md:58 声称「enrichDisplayTurns 与终态回补共用 buildErrorLogItem，快照用例即契约锚」；实际共用面仅 buildErrorLogItem（normalize.ts:436），session-panel-page.tsx 的 killedByInterrupted 三条件门控（terminal===\"killed\" && env.status===\"failed\" && env.error_code===\"interactive_interrupted\"）与升级守卫（!modelItem return、!t.errorDetail 只补缺）均无用例——实时门控回归（如 error_code 条件误删）现有套件不会红；实际跑测验证 7+50=57 用例全绿但全部锚在快照路径与组件层",
+      "location": "frontend/src/components/daemon/session-panel/session-panel-page.tsx:1518"
+    },
+    {
+      "severity": "P3",
+      "title": "RunErrorItem 首行为空白行的 raw 摘要与展开口同时消失，raw 非空却零露出",
+      "evidence": "rawFirstLine 取 split 首行 trim 后为空即返回 null → 摘要行不渲染；hasMoreRaw = rawFirstLine !== null && ... 随之为 false →「查看详情」按钮不出现（无 onViewDetail 时）——raw=\"\\ncodex exited code=1\" 形态下后行真实内容完全不可见，违反 FR-02「raw 非空时必须默认展示首行摘要、按钮保留展开完整 raw」的字面契约；测试仅覆盖首行非空形态（run-error-item.test.tsx:407-477）",
+      "location": "frontend/src/components/agent-log/run-error-item.tsx:284"
+    }
+  ],
+  "dimensionNotes": {
+    "乱序": "ok",
+    "并发": "ok",
+    "切换": "ok",
+    "作用域": "ok"
+  },
+  "reviewedAt": "2026-10-20T12:22:06+08:00"
+}
