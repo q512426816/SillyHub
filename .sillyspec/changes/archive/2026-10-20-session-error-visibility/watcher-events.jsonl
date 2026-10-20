@@ -1,0 +1,52 @@
+{"ts":1792467849980,"kind":"file","stage":"requirements","detail":"requirements.md 出现","provisional":true}
+{"ts":1792467849980,"kind":"file","stage":"design","detail":"design.md 出现","provisional":true}
+{"ts":1792467849980,"kind":"file","stage":"tasks","detail":"tasks.md 出现","provisional":true}
+{"ts":1792467960283,"kind":"file-update","stage":"requirements","detail":"requirements.md 内容变更","provisional":true}
+{"ts":1792467980262,"kind":"file-update","stage":"design","detail":"design.md 内容变更","provisional":true}
+{"ts":1792467987058,"kind":"file-update","stage":"tasks","detail":"tasks.md 内容变更","provisional":true}
+{"ts":1792468023424,"kind":"file-update","stage":"design","detail":"design.md 内容变更","provisional":true}
+{"ts":1792468033560,"kind":"file-update","stage":"requirements","detail":"requirements.md 内容变更","provisional":true}
+{"ts":1792468040391,"kind":"file-update","stage":"requirements","detail":"requirements.md 内容变更","provisional":true}
+{"ts":1792468073895,"kind":"warning","stage":null,"rule":"scope-drift","severity":"warning","detail":"声明面之外的代码文件被改：sillyhub-daemon/src/codex-settings.ts——范围漂移嫌疑（并行会话改动/越界，人判）","provisional":true}
+{"ts":1792468093609,"kind":"file-update","stage":"requirements","detail":"requirements.md 内容变更","provisional":true}
+{"ts":1792468123720,"kind":"warning","stage":null,"rule":"scope-drift","severity":"warning","detail":"声明面之外的代码文件被改：sillyhub-daemon/tests/codex-settings.test.ts——范围漂移嫌疑（并行会话改动/越界，人判）","provisional":true}
+{"ts":1792468170140,"kind":"task-done","stage":"tasks","detail":"checked 0→1","provisional":true,"source":"task-tick"}
+{"ts":1792468173018,"kind":"file-update","stage":"tasks","detail":"tasks.md 内容变更","provisional":true}
+{"ts":1792468173018,"kind":"task-done","stage":"tasks","detail":"checked 0→1","provisional":true}
+{"ts":1792468193275,"kind":"commit","stage":null,"detail":"e3aa14dc8","provisional":true}
+{"ts":1792468193539,"kind":"warning","stage":null,"rule":"scope-drift","severity":"warning","detail":"声明面之外的代码文件被改：illyhub-daemon/src/codex-settings.ts——范围漂移嫌疑（并行会话改动/越界，人判）","provisional":true}
+{"ts":1792468230651,"kind":"warning","stage":null,"rule":"scope-drift","severity":"warning","detail":"声明面之外的代码文件被改：rontend/src/components/daemon/session-panel/page-helpers.tsx、sillyhub-daemon/src/codex-settings.ts——范围漂移嫌疑（并行会话改动/越界，人判）","provisional":true}
+{"ts":1792468272332,"kind":"task-done","stage":"tasks","detail":"checked 1→2","provisional":true,"source":"task-tick"}
+{"ts":1792468274943,"kind":"file-update","stage":"tasks","detail":"tasks.md 内容变更","provisional":true}
+{"ts":1792468274943,"kind":"task-done","stage":"tasks","detail":"checked 1→2","provisional":true}
+{"ts":1792468292362,"kind":"commit","stage":null,"detail":"6afbc5b46","provisional":true}
+{"ts":1792468293026,"kind":"warning","stage":null,"rule":"scope-drift","severity":"warning","detail":"声明面之外的代码文件被改：illyhub-daemon/src/codex-settings.ts——范围漂移嫌疑（并行会话改动/越界，人判）","provisional":true}
+{"ts":1792468330581,"kind":"warning","stage":null,"rule":"scope-drift","severity":"warning","detail":"声明面之外的代码文件被改：rontend/src/components/daemon/session-panel/session-panel-page.tsx、sillyhub-daemon/src/codex-settings.ts——范围漂移嫌疑（并行会话改动/越界，人判）","provisional":true}
+{"ts":1792468367357,"kind":"warning","stage":null,"rule":"scope-drift","severity":"warning","detail":"声明面之外的代码文件被改：rontend/src/components/agent-log/run-error-item.tsx——范围漂移嫌疑（并行会话改动/越界，人判）","provisional":true}
+{"ts":1792468405413,"kind":"warning","stage":null,"rule":"scope-drift","severity":"warning","detail":"声明面之外的代码文件被改：rontend/src/components/agent-log/__tests__/run-error-item.test.tsx——范围漂移嫌疑（并行会话改动/越界，人判）","provisional":true}
+{"ts":1792468628049,"kind":"task-done","stage":"tasks","detail":"checked 2→3","provisional":true,"source":"task-tick"}
+{"ts":1792468628442,"kind":"task-done","stage":"tasks","detail":"checked 3→4","provisional":true,"source":"task-tick"}
+{"ts":1792468630528,"kind":"file-update","stage":"tasks","detail":"tasks.md 内容变更","provisional":true}
+{"ts":1792468630528,"kind":"task-done","stage":"tasks","detail":"checked 2→4","provisional":true}
+{"ts":1792468630796,"kind":"warning","stage":null,"rule":"scope-drift","severity":"warning","detail":"声明面之外的代码文件被改：sillyspec/changes/2026-10-20-session-error-visibility/task-ticks.jsonl——范围漂移嫌疑（并行会话改动/越界，人判）","provisional":true}
+{"ts":1792468642440,"kind":"commit","stage":null,"detail":"a7581a819","provisional":true}
+{"ts":1792468642701,"kind":"warning","stage":null,"rule":"scope-drift","severity":"warning","detail":"声明面之外的代码文件被改：illyhub-daemon/src/codex-settings.ts——范围漂移嫌疑（并行会话改动/越界，人判）","provisional":true}
+{"ts":1792468659802,"kind":"warning","stage":null,"rule":"scope-drift","severity":"warning","detail":"声明面之外的代码文件被改：sillyhub-daemon/tests/provider-injection-smoke.integ.test.ts——范围漂移嫌疑（并行会话改动/越界，人判）","provisional":true}
+{"ts":1792468679985,"kind":"warning","stage":null,"rule":"scope-drift","severity":"warning","detail":"声明面之外的代码文件被改：illyhub-daemon/src/codex-settings.ts、sillyhub-daemon/tests/codex-settings.test.ts、sillyhub-daemon/tests/provider-injection-smoke.integ.test.ts——范围漂移嫌疑（并行会话改动/越界，人判）","provisional":true}
+{"ts":1792468897541,"kind":"commit","stage":null,"detail":"ae7233cbf","provisional":true}
+{"ts":1792468927811,"kind":"commit","stage":null,"detail":"50dfdf231","provisional":true}
+{"ts":1792469018556,"kind":"warning","stage":null,"rule":"scope-drift","severity":"warning","detail":"声明面之外的代码文件被改：sillyspec/changes/2026-10-20-codex-requires-openai-auth/task-ticks.jsonl——范围漂移嫌疑（并行会话改动/越界，人判）","provisional":true}
+{"ts":1792469533448,"kind":"commit","stage":null,"detail":"bd1c14a6f","provisional":true}
+{"ts":1792469580366,"kind":"task-done","stage":"tasks","detail":"checked 4→5","provisional":true,"source":"task-tick"}
+{"ts":1792469580892,"kind":"file-update","stage":"tasks","detail":"tasks.md 内容变更","provisional":true}
+{"ts":1792469580892,"kind":"task-done","stage":"tasks","detail":"checked 4→5","provisional":true}
+{"ts":1792469584939,"kind":"commit","stage":null,"detail":"b4c5c1fa6","provisional":true}
+{"ts":1792469679935,"kind":"gate-run","stage":"verify","detail":"门实测 passed（75.0s） · 20261020041438","provisional":true}
+{"ts":1792469830360,"kind":"commit","stage":null,"detail":"3f7089d0c","provisional":true}
+{"ts":1792470179519,"kind":"warning","stage":null,"rule":"scope-drift","severity":"warning","detail":"声明面之外的代码文件被改：frontend/src/components/daemon/session-panel/session-panel-dialog.tsx——范围漂移嫌疑（并行会话改动/越界，人判）","provisional":true}
+{"ts":1792470189543,"kind":"file-update","stage":"design","detail":"design.md 内容变更","provisional":true}
+{"ts":1792470246786,"kind":"warning","stage":null,"rule":"scope-drift","severity":"warning","detail":"声明面之外的代码文件被改：sillyspec/changes/2026-10-20-codex-requires-openai-auth/flow-state.yaml——范围漂移嫌疑（并行会话改动/越界，人判）","provisional":true}
+{"ts":1792470250069,"kind":"commit","stage":null,"detail":"0e13585a7","provisional":true}
+{"ts":1792470310291,"kind":"warning","stage":null,"rule":"scope-drift","severity":"warning","detail":"声明面之外的代码文件被改：sillyspec/changes/2026-10-20-codex-requires-openai-auth/flow-state.yaml——范围漂移嫌疑（并行会话改动/越界，人判）","provisional":true}
+{"ts":1792470313508,"kind":"commit","stage":null,"detail":"bbf14a992","provisional":true}
+{"ts":1792470396943,"kind":"commit","stage":null,"detail":"6f2fe0baf","provisional":true}

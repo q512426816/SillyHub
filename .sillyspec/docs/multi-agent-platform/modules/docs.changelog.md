@@ -13,3 +13,4 @@
 - 2026-10-19-change-assets-cross-repo-repos | 变更资产卡展示跨仓冻结面
 - 2026-10-19-preview-card-empty-turn-fix | 切换档案产生的静默轮（started_at 空、无日志、无 error_code 的终态轮）刷新后进…
 - 2026-10-20-conflict-platform-archive | 冲突对比平台留档快照自足回退
+- 2026-10-20-session-error-visibility | 会话页失败轮错误信息不可见修复

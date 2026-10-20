@@ -481,3 +481,79 @@ created_at: 2026-10-15T16:16:15.707Z
 摘要：知识库完整性
 全文：.sillyspec/changes/archive/2026-10-20-sillyspec-gotchas-session/requirements.md#FR-03
 最近确认：06e0a0cc5908aa37fbbc2e79ab0b741fb1b6381a
+
+## FR-docs-030 失败轮（error_code=interactive_interrupted 且 error_detail 非空）在会话页面渲染错误卡，轮状态显示为失败而非已中止
+变更：2026-10-20-session-error-visibility
+状态：active
+摘要：快照回看（刷新页面）；实时 SSE 终态回补
+全文：.sillyspec/changes/archive/2026-10-20-session-error-visibility/requirements.md#FR-01
+最近确认：6f2fe0baf5d63d5a078e96a39670a5543a7c9bfe
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-20-session-error-visibility:flow:测试绑定FR-01
+  tests: frontend/src/components/daemon/__tests__/page-helpers-error-visibility.test.ts「实时终态条件扩展由快照升级同源判定覆盖（enrichDisplayTurns 与终态回补共用 buildErrorLogItem，快照用例即契约锚）」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-20-session-error-visibility
+  status: active
+
+## FR-docs-031 错误卡默认直接可见原始错误文本首行（如 codex exited code=1），无需点击查看详情
+变更：2026-10-20-session-error-visibility
+状态：active
+摘要：unknown 兜底错误
+全文：.sillyspec/changes/archive/2026-10-20-session-error-visibility/requirements.md#FR-02
+最近确认：6f2fe0baf5d63d5a078e96a39670a5543a7c9bfe
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-20-session-error-visibility:flow:测试绑定FR-02
+  tests: frontend/src/components/agent-log/__tests__/run-error-item.test.tsx「raw 首行摘要默认可见无需点击」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-20-session-error-visibility
+  status: active
+
+## FR-docs-032 真打断（error_detail 为空的 interactive_interrupted）仍显示已中止，不出现错误卡
+变更：2026-10-20-session-error-visibility
+状态：active
+摘要：用户手动打断
+全文：.sillyspec/changes/archive/2026-10-20-session-error-visibility/requirements.md#FR-03
+最近确认：6f2fe0baf5d63d5a078e96a39670a5543a7c9bfe
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-20-session-error-visibility:flow:测试绑定FR-03
+  tests: frontend/src/components/daemon/__tests__/page-helpers-error-visibility.test.ts「真打断 error_detail 为空保持已中止零回归」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-20-session-error-visibility
+  status: active
+
+## FR-docs-033 相关前端测试更新并通过
+变更：2026-10-20-session-error-visibility
+状态：active
+摘要：测试运行
+全文：.sillyspec/changes/archive/2026-10-20-session-error-visibility/requirements.md#FR-04
+最近确认：6f2fe0baf5d63d5a078e96a39670a5543a7c9bfe
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-20-session-error-visibility:flow:测试绑定FR-04
+  tests: frontend/src/components/agent-log/__tests__/run-error-item.test.tsx「长 raw 首行截断展示」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-20-session-error-visibility
+  status: active

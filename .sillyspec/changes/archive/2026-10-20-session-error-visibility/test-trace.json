@@ -1,0 +1,81 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-20-session-error-visibility",
+  "rows": [
+    {
+      "anchor": "FR-01",
+      "row_id": "2026-10-20-session-error-visibility:flow:测试绑定FR-01",
+      "tests": [
+        "frontend/src/components/daemon/__tests__/page-helpers-error-visibility.test.ts「interrupted 带 error_detail 快照升级为失败并回填 errorDetail」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-20-session-error-visibility"
+    },
+    {
+      "anchor": "FR-01",
+      "row_id": "2026-10-20-session-error-visibility:flow:测试绑定FR-01",
+      "tests": [
+        "frontend/src/components/daemon/__tests__/page-helpers-error-visibility.test.ts「实时终态条件扩展由快照升级同源判定覆盖（enrichDisplayTurns 与终态回补共用 buildErrorLogItem，快照用例即契约锚）」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-20-session-error-visibility"
+    },
+    {
+      "anchor": "FR-02",
+      "row_id": "2026-10-20-session-error-visibility:flow:测试绑定FR-02",
+      "tests": [
+        "frontend/src/components/agent-log/__tests__/run-error-item.test.tsx「raw 首行摘要默认可见无需点击」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-20-session-error-visibility"
+    },
+    {
+      "anchor": "FR-03",
+      "row_id": "2026-10-20-session-error-visibility:flow:测试绑定FR-03",
+      "tests": [
+        "frontend/src/components/daemon/__tests__/page-helpers-error-visibility.test.ts「真打断 error_detail 为空保持已中止零回归」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-20-session-error-visibility"
+    },
+    {
+      "anchor": "FR-04",
+      "row_id": "2026-10-20-session-error-visibility:flow:测试绑定FR-04",
+      "tests": [
+        "frontend/src/components/agent-log/__tests__/run-error-item.test.tsx「长 raw 首行截断展示」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-20-session-error-visibility"
+    }
+  ]
+}
