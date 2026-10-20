@@ -117,6 +117,10 @@
 - worktree|verify-result|产物分裂|主仓库|模块文档|回写 → [worktree 内执行回归/文档任务时 SillySpec 产物与主仓库分裂](sillyspec-gotchas.md#worktree-内执行回归文档任务时-sillyspec-产物与主仓库分裂)
 - wt-commit|跨仓 worktree|repo-key|git commit|apply 回灌 → [跨仓 worktree task 用直接 git commit，wt-commit 只认主仓 worktree](sillyspec-gotchas.md#跨仓-worktree-task-用直接-git-commitwt-commit-只认主仓-worktree)
 - node_modules|junction|并行会话|pnpm install --force|vitest not found|顶层链接 → [并行会话删主仓 frontend/node_modules 顶层链接——worktree 与主仓前端全瘫（vitest not found）](sillyspec-gotchas.md#并行会话删主仓-frontendnode_modules-顶层链接worktree-与主仓前端全瘫vitest-not-found)
+- route-hindsight|改写率|0.6|同意门|no-prestage|小任务|预段 → [route-hindsight 改写率阈值对小任务偏紧且拦截成本错位到下一变更](sillyspec-gotchas.md#route-hindsight-改写率阈值对小任务偏紧且拦截成本错位到下一变更)
+- flow done|dirty|缺口|三选一|并行会话|freeze-dirty|accept-dirty-gap → [flow done dirty 缺口三选一缺并行会话文件处置选项](sillyspec-gotchas.md#flow-done-dirty-缺口三选一缺并行会话文件处置选项)
+- 归档|pathspec|暂存区|竞态|git diff cached|全量核对|裸 commit → [归档提交 pathspec 打印到执行窗口的共享暂存区竞态](sillyspec-gotchas.md#归档提交-pathspec-打印到执行窗口的共享暂存区竞态)
+- design|四问|题面|逐字钉死|approve|改写|锚定 → [design 四问题面逐字钉死规则只在报错时学到](sillyspec-gotchas.md#design-四问题面逐字钉死规则只在报错时学到)
 
 ## Testing Gotchas
 
