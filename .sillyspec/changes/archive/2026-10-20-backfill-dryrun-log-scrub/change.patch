@@ -1,0 +1,96 @@
+diff --git a/scripts/backfill_commit_type.py b/scripts/backfill_commit_type.py
+index 0bc620bcc..ebad7b59c 100644
+--- a/scripts/backfill_commit_type.py
++++ b/scripts/backfill_commit_type.py
+@@ -20,8 +20,10 @@
+   文件会被 parser._infer_current_stage 误判 thin，绝对禁止。
+ 
+ 用法（主仓库根目录）：
+-  python scripts/backfill_commit_type.py            # 回填（含统计输出）
+-  python scripts/backfill_commit_type.py --dry-run  # 只看会写什么，不落盘
++  python scripts/backfill_commit_type.py                  # dry-run：只看会写什么，不落盘
++  python scripts/backfill_commit_type.py --apply --yes    # 落盘（--apply 必须带 --yes 确认门）
++
++缺省 dry-run 对齐 backend/scripts/backfill_change_titles.py 口径（误裸跑零副作用）。
+ 
+ 写入后需等 sillyspec 自动同步（或手动触发）+ 平台「重新扫描」reparse 方在界面生效。
+ """
+@@ -160,8 +162,26 @@ def write_commit_type(change_dir: Path, value: str, *, dry_run: bool) -> str:
+ 
+ def main() -> int:
+     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+-    parser.add_argument("--dry-run", action="store_true", help="只打印计划写入，不落盘")
++    parser.add_argument(
++        # 尾随逗号冻结逐参换行：根级 scripts/ 同时受钩子（默认行宽 88）与
++        # backend 口径（行宽 100）两套 ruff format 裁决，magic trailing comma
++        # 是两口径下都稳定的唯一形态（2026-10-20 实证双向拉锯）
++        "--apply",
++        action="store_true",
++        help="落盘（缺省 dry-run：只打印计划写入，不落盘）",
++    )
++    parser.add_argument(
++        "--yes",
++        action="store_true",
++        help="--apply 的显式确认门（全仓扫描写 flow-state.yaml，裸 --apply 拒绝执行）",
++    )
+     args = parser.parse_args()
++    if args.apply and not args.yes:
++        print(
++            "❌ --apply 会全仓写入 flow-state.yaml：确认请加 --yes，或先裸跑 dry-run 核对明细。",
++            file=sys.stderr,
++        )
++        return 2
+ 
+     repo_root = Path(__file__).resolve().parent.parent
+     changes_root = repo_root / ".sillyspec" / "changes"
+@@ -178,11 +198,8 @@ def main() -> int:
+     if archive_root.is_dir():
+         candidates.extend(sorted(p for p in archive_root.iterdir() if p.is_dir()))
+     if changes_root.is_dir():
+-        candidates.extend(
+-            sorted(
+-                p for p in changes_root.iterdir() if p.is_dir() and p.name != "archive"
+-            )
+-        )
++        non_archive = [p for p in changes_root.iterdir() if p.name != "archive"]
++        candidates.extend(sorted(p for p in non_archive if p.is_dir()))
+ 
+     for change_dir in candidates:
+         key = change_dir.name
+@@ -196,17 +213,17 @@ def main() -> int:
+         # 守卫：active 变更禁止新建 flow-state.yaml（_infer_current_stage 会误判 thin）
+         if not has_flow_state and not is_archived:
+             stats["skipped_active_no_flowstate"] = (
+-                stats.get("skipped_active_no_flowstate", 0) + 1
++                stats.get("skipped_active_no_flowstate", 0) + 1,
+             )
+             continue
+-        action = write_commit_type(change_dir, main_type, dry_run=args.dry_run)
++        action = write_commit_type(change_dir, main_type, dry_run=not args.apply)
+         stats[action if action != "unchanged" else "unchanged"] = (
+             stats.get(action if action != "unchanged" else "unchanged", 0) + 1
+         )
+         if action != "unchanged":
+             rows.append((key, main_type, action))
+ 
+-    prefix = "[dry] " if args.dry_run else ""
++    prefix = "[dry] " if not args.apply else ""
+     for key, t, action in rows:
+         print(f"{prefix}{action:9s} {key} -> {t}")
+     print(
+diff --git a/sillyhub-daemon/src/interactive/zcode-app-server-driver.ts b/sillyhub-daemon/src/interactive/zcode-app-server-driver.ts
+index df689e685..70cdd74ff 100644
+--- a/sillyhub-daemon/src/interactive/zcode-app-server-driver.ts
++++ b/sillyhub-daemon/src/interactive/zcode-app-server-driver.ts
+@@ -180,9 +180,8 @@ export class ZcodeAppServerDriver implements InteractiveDriver {
+       spawnArgs = args;
+     }
+ 
+-    // spawn 参数本地留痕（真机诊断：8fad6a97 会话子进程未出现，抓实际参数）
+-    // eslint-disable-next-line no-console
+-    console.log('[zcode-driver] spawn:', JSON.stringify({ cmd: spawnCmd, args: spawnArgs, cwd: opts.cwd, zcode_data: env['ZCODE_DATA_BASE_DIR'] }));
++    // spawn env 键诊断日志（值经 redactEnvValueForLog 脱敏；2026-10-20 移除相邻的
++    // spawn 参数明文日志——cmd/args/cwd 未脱敏，用户路径不应落 daemon 日志）。
+     // eslint-disable-next-line no-console
+     console.log('[zcode-driver] spawn env keys:', Object.keys(env).filter(k => /ANTHROPIC|CLAUDE|ZCODE|PROXY|NODE_OPTIONS|SILLYHUB/i.test(k)).map(k => k + '=' + redactEnvValueForLog(k, env[k])).join(' | '));
+     // ZCode 桌面端设置用户级 env 把个人 Provider 配置硬指回宿主文件（真机实证：

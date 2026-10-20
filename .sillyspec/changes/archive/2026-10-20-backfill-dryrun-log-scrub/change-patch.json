@@ -1,0 +1,84 @@
+{
+  "change": "2026-10-20-backfill-dryrun-log-scrub",
+  "baseline": "382aa4cda689d10c6cf1e28a17dedbc19695d209",
+  "head": "3490518aa9925709efdbf3880a441593fb04d89f",
+  "files": [
+    "scripts/backfill_commit_type.py",
+    "sillyhub-daemon/src/interactive/zcode-app-server-driver.ts"
+  ],
+  "totals": {
+    "files": 2,
+    "additions": 30,
+    "deletions": 14
+  },
+  "savedAt": "2026-10-20T00:09:31.430Z",
+  "note": "flow done 时点冻结（本变更可归属交付面：baseline..HEAD 提交面过滤 .sillyspec/ 只留 .sillyspec/docs/ 交付文档 + 独占树未提交交付；治理工件目录不入冻结——2026-10-12-close-trace-freeze-integrity FR-01）",
+  "modules": [
+    {
+      "id": "sillyhub-daemon",
+      "files": 1,
+      "doc": "docs/multi-agent-platform/modules/sillyhub-daemon.md",
+      "docTouched": false,
+      "docMissing": false
+    },
+    {
+      "id": "scripts",
+      "files": 1,
+      "doc": "docs/multi-agent-platform/modules/scripts.md",
+      "docTouched": false,
+      "docMissing": false
+    },
+    {
+      "id": "daemon",
+      "files": 1,
+      "doc": "docs/SillyHub/modules/daemon.md",
+      "docTouched": false,
+      "docMissing": false
+    }
+  ],
+  "uncoveredDirs": [],
+  "moduleMaps": [
+    "docs/backend/modules/_module-map.yaml",
+    "docs/frontend/modules/_module-map.yaml",
+    "docs/multi-agent-platform/modules/_module-map.yaml",
+    "docs/SillyHub/modules/_module-map.yaml",
+    "docs/sillyhub-daemon/modules/_module-map.yaml"
+  ],
+  "acceptedDirtyGap": 8,
+  "scopeAudit": {
+    "mode": "full-flow",
+    "ok": true,
+    "degradedReason": null,
+    "baseAnchor": "382aa4cda689d10c6cf1e28a17dedbc19695d209",
+    "totals": {
+      "files": 2,
+      "additions": 30,
+      "deletions": 14
+    },
+    "rows": [
+      {
+        "path": "scripts/backfill_commit_type.py",
+        "additions": 28,
+        "deletions": 11,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "planned"
+      },
+      {
+        "path": "sillyhub-daemon/src/interactive/zcode-app-server-driver.ts",
+        "additions": 2,
+        "deletions": 3,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "planned"
+      }
+    ],
+    "excluded": {
+      "foreignDeclared": []
+    },
+    "note": "flow done 时点冻结（本文件落盘时采集）",
+    "closedBy": "flow done"
+  },
+  "patchSha256": "2a38999f798b5dc1bbda7e8c6cf41f8d39ed88cfc380419514e47dfecdf0d743",
+  "patchStatus": "ok"
+}

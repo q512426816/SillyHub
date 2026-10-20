@@ -59,3 +59,4 @@ created_at: 2026-08-27 14:32:24
 - 2026-10-18-audit-log-redact-yaml-quote | 2026-10-18 只读审计两项风险清偿：zcode 驱动 spawn env 诊断日志未脱敏带凭…
 - 2026-10-19-change-assets-cross-repo-repos | 变更资产卡展示跨仓冻结面
 - 2026-10-19-cross-repo-patch-slicing | 资产卡跨仓单文件 diff 切片
+- 2026-10-20-backfill-dryrun-log-scrub | 回填脚本改缺省dry-run并移除诊断日志

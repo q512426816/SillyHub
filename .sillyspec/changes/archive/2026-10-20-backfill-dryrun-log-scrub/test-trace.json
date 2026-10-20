@@ -1,0 +1,21 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-20-backfill-dryrun-log-scrub",
+  "rows": [
+    {
+      "anchor": "FR-02",
+      "row_id": "2026-10-20-backfill-dryrun-log-scrub:flow:测试绑定FR-02",
+      "tests": [
+        "sillyhub-daemon/tests/interactive/zcode-app-server-driver.test.ts「既有 zcode driver 用例全绿（回归面，行为零变化）」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-20-backfill-dryrun-log-scrub"
+    }
+  ]
+}

@@ -1,0 +1,15 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-20-backfill-dryrun-log-scrub",
+  "reviewer": "subagent",
+  "verdict": "PASS",
+  "reviewedAgainst": "3490518aa9925709efdbf3880a441593fb04d89f",
+  "findings": [],
+  "dimensionNotes": {
+    "乱序": "ok",
+    "并发": "ok",
+    "切换": "ok",
+    "作用域": "ok"
+  },
+  "reviewedAt": "2026-10-20T08:11:22+08:00"
+}
