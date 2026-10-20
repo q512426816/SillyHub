@@ -1,0 +1,81 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-20-codex-models-fetch-candidates",
+  "rows": [
+    {
+      "anchor": "FR-01",
+      "row_id": "2026-10-20-codex-models-fetch-candidates:flow:测试绑定FR-01",
+      "tests": [
+        "backend/app/modules/llm_provider/tests/test_fetch_models.py「智谱 coding 范式：base=/api/v1 候选含 base+/models 兜底命中」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-20-codex-models-fetch-candidates"
+    },
+    {
+      "anchor": "FR-02",
+      "row_id": "2026-10-20-codex-models-fetch-candidates:flow:测试绑定FR-02",
+      "tests": [
+        "backend/app/modules/llm_provider/tests/test_fetch_models.py「OpenCode 范式：base 尾缀 /openai/v1 剥离候选命中」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-20-codex-models-fetch-candidates"
+    },
+    {
+      "anchor": "FR-03",
+      "row_id": "2026-10-20-codex-models-fetch-candidates:flow:测试绑定FR-03",
+      "tests": [
+        "backend/app/modules/llm_provider/tests/test_fetch_models.py「test_404_candidate_fallback_succeeds」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-20-codex-models-fetch-candidates"
+    },
+    {
+      "anchor": "FR-04",
+      "row_id": "2026-10-20-codex-models-fetch-candidates:flow:测试绑定FR-04",
+      "tests": [
+        "backend/app/modules/llm_provider/tests/test_fetch_models.py「test_zhipu_coding_base_models_fallback_succeeds」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-20-codex-models-fetch-candidates"
+    },
+    {
+      "anchor": "FR-05",
+      "row_id": "2026-10-20-codex-models-fetch-candidates:flow:测试绑定FR-05",
+      "tests": [
+        "backend/app/modules/llm_provider/tests/test_fetch_models.py「test_zhipu_coding_base_models_fallback_succeeds」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-20-codex-models-fetch-candidates"
+    }
+  ]
+}

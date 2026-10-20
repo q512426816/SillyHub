@@ -1,0 +1,40 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-20-codex-models-fetch-candidates",
+  "reviewer": "subagent",
+  "verdict": "PASS",
+  "reviewedAgainst": "c15380d65fe38ff734ecbbb133b664180370f92b",
+  "findings": [
+    {
+      "severity": "P2",
+      "title": "规格未随三连修后两修（fed80ce0a/cd6aa493e）更新：design 接口契约「其余形态响应不变」失真，②③修无 FR/测试绑定",
+      "evidence": "design.md:19 声明「其余形态响应不变」，但 fed80ce0a（service.py:645-655）使所有 anthropic 候选的 200-坏-body 行为从「立即 AllFailed」变为「继续下一候选」——旧单候选形态（如 base=api.anthropic.com）终态报错消息由『上游返回了无法解析的响应内容…』变为『尝试全部候选地址后仍未拉到模型列表』+last_kind=parse_failed，且全失败场景上游 GET 数 +1~+2，客户端可见响应已变；design.md:40 风险段描述的「body 不可解析/缺 data → AllFailed 兜底」仍是 ② 修前的即抛语义；requirements.md 仅 FR-01/02/03（全对应 ① 候选扩展与零回归），②（200-parse-failed 继续）与 ③（models/slug 解析）无 FR 与测试绑定，仅靠 FR-01 智谱用例顺带覆盖。git show 两 commit --stat 证实均未触规格文件。披露边界逐条裁决：边界(b) 200-非-models-JSON 兜底——可接受（终态仍 AllFailed 不误报成功，②修后语义更强：还能命中后续候选），但 design 声明内容与现行行为脱节；边界(c) 放弃 vendor 特判——可接受（候选序列通用容错，免 per-vendor 分支维护负担，与 cc-switch 范式一致）；边界(d) 放弃前端隐藏按钮——可接受（不解决根因，智谱/OpenCode 端点本就支持拉取）。",
+      "location": ".sillyspec/changes/2026-10-20-codex-models-fetch-candidates/design.md:19"
+    },
+    {
+      "severity": "P3",
+      "title": "限流面风险声明量化不准：「每条 models 拉取至多多 1 次 GET」实际最坏 +2",
+      "evidence": "design.md:40 声明全候选失败场景「至多多 1 次 GET」。base 尾缀 /openai/v1（OpenCode 形态）旧候选 1 个（base+/v1/models），新候选 3 个（…/openai/v1/v1/models、剥后 …/v1/models、尾 base+/models），全失败场景多 2 次 GET。披露边界(a) 多一次上游请求的限流面——裁决可接受（手动触发低频操作、NFR-03 顺序不并发、SSRF 逐候选生效），但量化表述应更正。",
+      "location": ".sillyspec/changes/2026-10-20-codex-models-fetch-candidates/design.md:40"
+    },
+    {
+      "severity": "P3",
+      "title": "_candidate_urls / fetch_models 函数级 docstring 与行为脱节，「逐字不变（NFR-02）」声明失真",
+      "evidence": "service.py:765-766 仍只列 /anthropic|/compatibility|/api 三后缀并声称候选「逐字不变（NFR-02）」——实际 _STRIP_SUFFIXES 已追加 /openai/v1（:575-580）且尾部新增 base+/models 候选（:787-789）；service.py:594 fetch_models docstring 的候选描述同样未含 /openai/v1 与尾候选。新增代码处有行内注释（:573、:784-786）且 _parse_models_response docstring 已同步（:793-805），仅这两个函数级契约文案陈旧。防护声明核查：models 字段兜底不误匹配 OpenAI 响应——data 优先（:810），仅 data 非列表才回退 body.get(\"models\")（:812-814），Anthropic 官方 {data:[…]} 与 OpenAI {data:[…]} 均不受影响。",
+      "location": "backend/app/modules/llm_provider/service.py:765"
+    },
+    {
+      "severity": "P3",
+      "title": "200-坏-body 终态报错丢失 parse_error 细节（观测面小损，语义仍正确）",
+      "evidence": "防护声明核查：except LlmProviderModelsAllFailed → continue（service.py:645-655）确实把「上游真 200 但 body 坏」吞成继续尝试——恒定坏 mock 下逐候选耗尽后终态仍 AllFailed（last_status=200 非 404/405，:663-680），错误类与对外语义正确，既有 test_non_json_body_raises_all_failed / test_missing_data_list_raises_all_failed 用例经此路径仍绿；但 _parse_models_response 抛出时携带的 parse_error 字符串（:806-810）在终态 details 中仅剩 last_kind=\"parse_failed\"，具体解析错误丢失。混序终态（前候选 parse_failed、末候选 404）按既有「按最后一次失败类型分类」规则报 Unsupported，与改动前混状态规则一致，非新缺陷。",
+      "location": "backend/app/modules/llm_provider/service.py:645"
+    }
+  ],
+  "dimensionNotes": {
+    "乱序": "ok",
+    "并发": "ok",
+    "切换": "ok",
+    "作用域": "ok"
+  },
+  "reviewedAt": "2026-10-20T13:26:48+08:00"
+}

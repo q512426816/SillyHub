@@ -1,0 +1,109 @@
+{
+  "change": "2026-10-20-codex-models-fetch-candidates",
+  "baseline": "e32b3f44a0e22e07be992072ff7b1ce1e34cb817",
+  "head": "aa64d06245f0473307dc8ea88dfc9dd46c871e9a",
+  "files": [
+    "backend/app/modules/llm_provider/service.py",
+    "backend/app/modules/llm_provider/tests/test_api_format.py",
+    "backend/app/modules/llm_provider/tests/test_fetch_models.py",
+    "docs/releases/2026-10-20-004-cd6aa49.md"
+  ],
+  "totals": {
+    "files": 4,
+    "additions": 168,
+    "deletions": 9
+  },
+  "savedAt": "2026-10-20T05:28:24.931Z",
+  "note": "flow done 时点冻结（本变更可归属交付面：baseline..HEAD 提交面过滤 .sillyspec/ 只留 .sillyspec/docs/ 交付文档 + 独占树未提交交付；治理工件目录不入冻结——2026-10-12-close-trace-freeze-integrity FR-01）",
+  "modules": [
+    {
+      "id": "llm_provider",
+      "files": 3,
+      "doc": "docs/backend/modules/llm_provider.md",
+      "docTouched": false,
+      "docMissing": false
+    },
+    {
+      "id": "backend",
+      "files": 3,
+      "doc": "docs/multi-agent-platform/modules/backend.md",
+      "docTouched": false,
+      "docMissing": false
+    },
+    {
+      "id": "docs",
+      "files": 1,
+      "doc": "docs/multi-agent-platform/modules/docs.md",
+      "docTouched": false,
+      "docMissing": false
+    },
+    {
+      "id": "llm_provider",
+      "files": 3,
+      "doc": "docs/SillyHub/modules/llm_provider.md",
+      "docTouched": false,
+      "docMissing": false
+    }
+  ],
+  "uncoveredDirs": [],
+  "moduleMaps": [
+    "docs/backend/modules/_module-map.yaml",
+    "docs/frontend/modules/_module-map.yaml",
+    "docs/multi-agent-platform/modules/_module-map.yaml",
+    "docs/SillyHub/modules/_module-map.yaml",
+    "docs/sillyhub-daemon/modules/_module-map.yaml"
+  ],
+  "acceptedDirtyGap": 12,
+  "scopeAudit": {
+    "mode": "full-flow",
+    "ok": true,
+    "degradedReason": null,
+    "baseAnchor": "e32b3f44a0e22e07be992072ff7b1ce1e34cb817",
+    "totals": {
+      "files": 4,
+      "additions": 168,
+      "deletions": 9
+    },
+    "rows": [
+      {
+        "path": "backend/app/modules/llm_provider/service.py",
+        "additions": 35,
+        "deletions": 4,
+        "kind": "modified",
+        "planned": "修改",
+        "verdict": "planned"
+      },
+      {
+        "path": "backend/app/modules/llm_provider/tests/test_api_format.py",
+        "additions": 12,
+        "deletions": 5,
+        "kind": "modified",
+        "planned": "修改",
+        "verdict": "planned"
+      },
+      {
+        "path": "backend/app/modules/llm_provider/tests/test_fetch_models.py",
+        "additions": 83,
+        "deletions": 0,
+        "kind": "modified",
+        "planned": "修改",
+        "verdict": "planned"
+      },
+      {
+        "path": "docs/releases/2026-10-20-004-cd6aa49.md",
+        "additions": 38,
+        "deletions": 0,
+        "kind": "new",
+        "planned": null,
+        "verdict": "unplanned"
+      }
+    ],
+    "excluded": {
+      "foreignDeclared": []
+    },
+    "note": "flow done 时点冻结（本文件落盘时采集）",
+    "closedBy": "flow done"
+  },
+  "patchSha256": "522bb67a02d74a0b8ba9020e5d1987bb910a96962da0bbe5361085f66290cbb9",
+  "patchStatus": "ok"
+}
