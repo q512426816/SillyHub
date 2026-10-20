@@ -7004,3 +7004,24 @@ superseded_by：FR-app-workspace-pages-002
   confirmed_at: null
   source_change: 2026-10-16-session-decision-pill
   status: active
+
+## FR-frontend-017 会话导出数据移出免鉴权静态服务面
+变更：2026-10-21-proto-data-exposure-guard
+状态：active
+摘要：静态暴露通道关闭；staging 数据仍可被服务端读取
+全文：.sillyspec/changes/archive/2026-10-21-proto-data-exposure-guard/requirements.md#FR-01
+最近确认：c4eaa0643bc55e62fd2457cefbf504d4266a1522
+
+## FR-frontend-018 proto 预览读取路径随迁，dev 预览能力不回归
+变更：2026-10-21-proto-data-exposure-guard
+状态：active
+摘要：SSR 预览主路径不回归；容错路径行为保持
+全文：.sillyspec/changes/archive/2026-10-21-proto-data-exposure-guard/requirements.md#FR-02
+最近确认：c4eaa0643bc55e62fd2457cefbf504d4266a1522
+
+## FR-frontend-019 .gitignore 机制防线覆盖全部残留产物
+变更：2026-10-21-proto-data-exposure-guard
+状态：active
+摘要：误提交面收敛
+全文：.sillyspec/changes/archive/2026-10-21-proto-data-exposure-guard/requirements.md#FR-03
+最近确认：c4eaa0643bc55e62fd2457cefbf504d4266a1522
