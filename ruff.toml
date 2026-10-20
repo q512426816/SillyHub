@@ -1,0 +1,13 @@
+# 根级 Python 文件（scripts/、spikes/ 等 backend 子树外）的 ruff 配置。
+#
+# 背景（2026-10-20-backfill-dryrun-log-scrub 实证）：pre-commit 的 ruff-format
+# 钩子在仓库根 cwd 执行——ruff 对 cwd 子树内文件按文件路径最近配置裁决，
+# backend 子树外文件曾无配置可命中而落到默认行宽 88；而钩子拦截时建议的
+# 修复命令在 backend/ cwd 执行（cwd 子树外文件回退到 backend/pyproject 的
+# line-length=100）——两口径对根级 py 文件互相拆台（按建议修完再提交被再拦）。
+#
+# 本文件把根级行宽锚定为与 backend/pyproject.toml [tool.ruff] 同源的 100，
+# 使任意 cwd/入口对根级文件裁决一致。lint 规则保持默认面（不配 select），
+# 不扩大根级存量检查。backend 子树零影响：其文件分层更近命中自身 pyproject。
+line-length = 100
+target-version = "py312"
