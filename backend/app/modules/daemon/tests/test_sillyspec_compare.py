@@ -40,6 +40,7 @@ progress 归一化在真实读取路径上被断言（跨平台：tmp_path + POS
 
 from __future__ import annotations
 
+import json
 import urllib.parse
 import uuid
 from pathlib import Path
@@ -1469,3 +1470,258 @@ async def test_compare_full_tree_fallback_not_triggered_when_primary_succeeds(
     assert body["covered_changes"] == []
     assert body["path_total"] is None
     assert len(stub.calls) == 1
+
+
+# ── 平台留档回退（2026-10-20-conflict-platform-archive / FR-02 / FR-03）────────
+#    「行开记录亡」：daemon 记录双缺（change + full-tree 均
+#    conflict_record_missing）→ open 行 local_archive 自足回退；无留档/不命中/
+#    非 missing 错误维持原 502 四臂。
+
+
+def _archive_entry(
+    path: str,
+    content: str | None = None,
+    *,
+    missing: bool = False,
+    binary: bool = False,
+    truncated: bool = False,
+) -> dict[str, Any]:
+    """local_archive 单条（apply_ops 蒸馏器产物形态；mtime 为 ISO 串与快照同构）。"""
+    return {
+        "path": path,
+        "missing": missing,
+        "content": content,
+        "binary": binary,
+        "truncated": truncated,
+        "mtime": "2026-10-19T08:00:00+00:00",
+    }
+
+
+async def _seed_open_conflict_row(
+    db_session: AsyncSession,
+    workspace_id: uuid.UUID,
+    local_archive: list[dict[str, Any]] | None,
+    *,
+    status: str = "open",
+    details_json: str | None = None,
+) -> None:
+    """直插 spec_conflicts 行（仿 service._upsert_sync_conflict 落库终态）。"""
+    from app.modules.spec_profile.model import SpecConflict
+
+    if details_json is None:
+        details_json = json.dumps(
+            {
+                "kind": "incremental_push_conflict",
+                "server_versions": {},
+                "platform_deleted": [],
+                "conflicting_paths": [e["path"] for e in (local_archive or [])],
+                "last_seen_at": "2026-10-20T00:00:00+00:00",
+                "local_archive": local_archive,
+            },
+            ensure_ascii=False,
+        )
+    db_session.add(
+        SpecConflict(
+            workspace_id=workspace_id,
+            stage="spec-sync",
+            conflict_type="sync",
+            details_json=details_json,
+            status=status,
+        )
+    )
+    await db_session.commit()
+
+
+def _dead_record_stub(monkeypatch: pytest.MonkeyPatch, change: str) -> _SnapshotRpcStub:
+    """change 与 full-tree 双缺（记录亡形态）的 RPC stub。"""
+    from app.modules.daemon.runtime.service import DaemonRpcRemoteError
+
+    return _SnapshotRpcStub(
+        by_change={
+            change: DaemonRpcRemoteError(
+                {"code": "conflict_record_missing", "message": f"冲突记录不存在：{change}.json"}
+            ),
+            "full-tree": DaemonRpcRemoteError(
+                {"code": "conflict_record_missing", "message": "冲突记录不存在：full-tree.json"}
+            ),
+        }
+    ).install(monkeypatch)
+
+
+@pytest.mark.asyncio
+async def test_compare_archive_fallback_serves_local_archive(
+    client: AsyncClient,
+    db_session: AsyncSession,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """记录双缺 + open 行留档覆盖 → 200 platform-archive：机器侧=留档、平台侧=实时盘。"""
+    _owner, token, inst, ws, root = await _seed_full_env(db_session, tmp_path, tag="arc-hit")
+    stub = _dead_record_stub(monkeypatch, _CHANGE_A)
+    await _seed_open_conflict_row(
+        db_session,
+        ws.id,
+        [
+            _archive_entry(f"changes/archive/{_CHANGE_A}/design.md", "machine at conflict"),
+            _archive_entry(f"changes/archive/{_CHANGE_B}/proposal.md", "B proposal"),
+            _archive_entry("knowledge/fr/sillyspec.md", "kb"),
+        ],
+    )
+    _write_platform_file(root, f"changes/archive/{_CHANGE_A}/design.md", "platform now")
+
+    resp = await client.get(
+        _compare_url(inst.id, _CHANGE_A, kind="spec-tree", workspace_id=ws.id),
+        headers=_headers(token),
+    )
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["record_label"] == "platform-archive"
+    assert body["covered_changes"] == [_CHANGE_A, _CHANGE_B]
+    assert body["path_total"] == 3
+    assert [f["path"] for f in body["files"]] == [f"changes/archive/{_CHANGE_A}/design.md"]
+    entry = body["files"][0]
+    assert entry["status"] == "modified"
+    assert entry["diff_rows"], "留档内容 vs 平台当前内容必须出真实 diff"
+    texts = {(r["type"], r.get("local_text"), r.get("platform_text")) for r in entry["diff_rows"]}
+    assert ("delete", "machine at conflict", None) in texts
+    assert ("insert", None, "platform now") in texts
+    assert len(stub.calls) == 2, "先试变更名再试 full-tree，均缺后才回退留档"
+
+
+@pytest.mark.asyncio
+async def test_compare_archive_fallback_missing_entry_is_platform_only(
+    client: AsyncClient,
+    db_session: AsyncSession,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """留档 missing 条目（机器侧已删）+ 平台文件存在 → platform_only（daemon 快照同语义）。"""
+    _owner, token, inst, ws, root = await _seed_full_env(db_session, tmp_path, tag="arc-miss")
+    _dead_record_stub(monkeypatch, _CHANGE_A)
+    await _seed_open_conflict_row(
+        db_session, ws.id, [_archive_entry(f"changes/{_CHANGE_A}/x.md", missing=True)]
+    )
+    _write_platform_file(root, f"changes/{_CHANGE_A}/x.md", "platform keeps it")
+
+    resp = await client.get(
+        _compare_url(inst.id, _CHANGE_A, kind="spec-tree", workspace_id=ws.id),
+        headers=_headers(token),
+    )
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["files"][0]["status"] == "platform_only"
+
+
+@pytest.mark.asyncio
+async def test_compare_archive_fallback_segment_boundary_miss(
+    client: AsyncClient,
+    db_session: AsyncSession,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """留档只含 foobar 路径 → 段边界不命中，维持原 conflict_record_missing。"""
+    _owner, token, inst, ws, _root = await _seed_full_env(db_session, tmp_path, tag="arc-seg")
+    _dead_record_stub(monkeypatch, "foo")
+    await _seed_open_conflict_row(db_session, ws.id, [_archive_entry("changes/foobar/x.md", "x")])
+
+    resp = await client.get(
+        _compare_url(inst.id, "foo", kind="spec-tree", workspace_id=ws.id),
+        headers=_headers(token),
+    )
+    assert resp.status_code == 502, resp.text
+    body = resp.json()
+    assert body["details"]["daemon_code"] == "conflict_record_missing"
+    assert "重新同步" in body["message"]
+
+
+@pytest.mark.asyncio
+async def test_compare_archive_fallback_no_open_row_keeps_error(
+    client: AsyncClient,
+    db_session: AsyncSession,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """无 open 行（从未冲突/已关闭）→ 维持原 502。"""
+    _owner, token, inst, ws, _root = await _seed_full_env(db_session, tmp_path, tag="arc-norow")
+    _dead_record_stub(monkeypatch, _CHANGE_A)
+
+    resp = await client.get(
+        _compare_url(inst.id, _CHANGE_A, kind="spec-tree", workspace_id=ws.id),
+        headers=_headers(token),
+    )
+    assert resp.status_code == 502, resp.text
+    assert resp.json()["details"]["daemon_code"] == "conflict_record_missing"
+
+
+@pytest.mark.asyncio
+async def test_compare_archive_fallback_resolved_row_not_used(
+    client: AsyncClient,
+    db_session: AsyncSession,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """resolved 行的留档不回退（回退只查 open 行——关闭即退役）。"""
+    _owner, token, inst, ws, _root = await _seed_full_env(db_session, tmp_path, tag="arc-res")
+    _dead_record_stub(monkeypatch, _CHANGE_A)
+    await _seed_open_conflict_row(
+        db_session,
+        ws.id,
+        [_archive_entry(f"changes/{_CHANGE_A}/design.md", "stale")],
+        status="resolved",
+    )
+
+    resp = await client.get(
+        _compare_url(inst.id, _CHANGE_A, kind="spec-tree", workspace_id=ws.id),
+        headers=_headers(token),
+    )
+    assert resp.status_code == 502, resp.text
+
+
+@pytest.mark.asyncio
+async def test_compare_archive_fallback_corrupt_details_keeps_error(
+    client: AsyncClient,
+    db_session: AsyncSession,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """details_json 非法 JSON → 按无留档处理维持原错误（fail-soft 不 500）。"""
+    _owner, token, inst, ws, _root = await _seed_full_env(db_session, tmp_path, tag="arc-bad")
+    _dead_record_stub(monkeypatch, _CHANGE_A)
+    await _seed_open_conflict_row(db_session, ws.id, None, details_json="not-json{")
+
+    resp = await client.get(
+        _compare_url(inst.id, _CHANGE_A, kind="spec-tree", workspace_id=ws.id),
+        headers=_headers(token),
+    )
+    assert resp.status_code == 502, resp.text
+
+
+@pytest.mark.asyncio
+async def test_compare_archive_fallback_not_triggered_for_other_daemon_code(
+    client: AsyncClient,
+    db_session: AsyncSession,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """workspace_root_unknown（非记录缺失）→ 不回退留档，恰 1 次 RPC。"""
+    from app.modules.daemon.runtime.service import DaemonRpcRemoteError
+
+    _owner, token, inst, ws, _root = await _seed_full_env(db_session, tmp_path, tag="arc-code")
+    stub = _SnapshotRpcStub(
+        by_change={
+            _CHANGE_A: DaemonRpcRemoteError(
+                {"code": "workspace_root_unknown", "message": "工作区未认领"}
+            ),
+        }
+    ).install(monkeypatch)
+    await _seed_open_conflict_row(
+        db_session, ws.id, [_archive_entry(f"changes/{_CHANGE_A}/design.md", "unused")]
+    )
+
+    resp = await client.get(
+        _compare_url(inst.id, _CHANGE_A, kind="spec-tree", workspace_id=ws.id),
+        headers=_headers(token),
+    )
+    assert resp.status_code == 502, resp.text
+    body = resp.json()
+    assert body["details"]["daemon_code"] == "workspace_root_unknown"
+    assert len(stub.calls) == 1, "非记录缺失错误不得触发 full-tree 兜底或留档回退"

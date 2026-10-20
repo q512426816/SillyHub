@@ -458,6 +458,66 @@ def _spec_bundle_invalid(message: str, **details: object) -> AppError:
     )
 
 
+# ── 冲突推送平台留档（2026-10-20-conflict-platform-archive）──────────────────
+# 被拒 op 的机器侧内容蒸馏进 spec_conflicts open 行 details_json.local_archive：
+# 机器本地记录亡（conflict_record_missing）时，对比端点以留档自足回退——「行开
+# 记录亡」不再恒 502（坑 conflict-compare-full-tree-label-mismatch 残留断层）。
+
+#: 单文件文本帽（字符）——超出截断置 truncated（该文件 diff 呈现部分行）。
+ARCHIVE_TEXT_CAP_PER_FILE_CHARS = 32_000
+#: 留档总量帽（字节，条目序列化口径）——超出后停止附加 content 仅保路径清单。
+ARCHIVE_TOTAL_BYTE_CAP = 512 * 1024
+#: 留档条目数帽（与 daemon 冲突快照 300 路径帽同口径）。
+ARCHIVE_ENTRY_CAP = 300
+
+
+def _distill_local_archive(ops: list["FileOp"]) -> list[dict[str, Any]]:
+    """被拒 op 列表 → 机器侧留档条目（纯函数；单条蒸馏异常 fail-soft 为 binary 条目）。
+
+    条目形态与 daemon 冲突快照 ``files[]`` 同构（path/missing/content/binary/
+    truncated/mtime），对比端点在记录缺失时直接作为机器侧快照消费
+    （sillyspec_compare ``_load_archived_snapshot``）。蒸馏规则：add/update/rename
+    以 new_path（rename）或 path 为机器侧路径、content 解码为 utf8 文本；delete
+    为机器侧已删（missing）；非法 base64 / 非 utf8 置 binary 不存文本。三重帽
+    逐级降级：单文件截断 → 总量停存 content → 条目数截断（路径清单优先保真）。
+    """
+    entries: list[dict[str, Any]] = []
+    total_bytes = 0
+    for op in ops[:ARCHIVE_ENTRY_CAP]:
+        entry: dict[str, Any] = {
+            "path": op.new_path if op.op == "rename" else op.path,
+            "missing": op.op == "delete",
+            "content": None,
+            "binary": False,
+            "truncated": False,
+            # Unix 秒 → ISO 串（daemon 快照 files[].mtime 同形态，对比响应 DTO
+            # local_mtime 为 str——留档条目与快照条目同构，回退路径零转换）。
+            "mtime": (
+                datetime.fromtimestamp(op.mtime, tz=UTC).isoformat()
+                if op.mtime is not None
+                else None
+            ),
+        }
+        if op.op != "delete" and op.content is not None:
+            try:
+                text = base64.b64decode(op.content, validate=True).decode("utf-8")
+            except (ValueError, UnicodeDecodeError):
+                entry["binary"] = True
+            else:
+                truncated = False
+                if len(text) > ARCHIVE_TEXT_CAP_PER_FILE_CHARS:
+                    text = text[:ARCHIVE_TEXT_CAP_PER_FILE_CHARS]
+                    truncated = True
+                candidate = {**entry, "content": text, "truncated": truncated}
+                size = len(json.dumps(candidate, ensure_ascii=False).encode("utf-8"))
+                if total_bytes + size <= ARCHIVE_TOTAL_BYTE_CAP:
+                    entry = candidate
+                    total_bytes += size
+                # 超总量帽：content 维持 None（路径/missing/binary/mtime 保留）。
+        entries.append(entry)
+    return entries
+
+
 class _BatchProgressWriter:
     """批量进度回写器（perf-remediation task-03 / D-002@v1）。
 
@@ -1314,11 +1374,15 @@ class SpecWorkspaceService:
         workspace_id: uuid.UUID,
         server_versions: dict[str, int],
         platform_deleted: list[str],
+        *,
+        conflicted_ops: list[FileOp] | None = None,
     ) -> None:
         """增量冲突 → spec_conflicts 开放行（幂等：同工作区同 stage 只更新不重复建）。
 
         details_json 携带 server_versions / platform_deleted / 冲突路径与 last_seen_at，
         供 GET /spec-conflicts 与前端横幅机器消费；created_at 保持首见时间。
+        local_archive（2026-10-20-conflict-platform-archive FR-01）：被拒 op 的机器侧
+        留档条目——对比端点在机器记录亡时以留档自足回退（每次冲突推送整体替换）。
         """
         from app.modules.spec_profile.model import SpecConflict
 
@@ -1345,6 +1409,7 @@ class SpecWorkspaceService:
                 "platform_deleted": platform_deleted,
                 "conflicting_paths": conflicting,
                 "last_seen_at": datetime.now(UTC).isoformat(),
+                "local_archive": _distill_local_archive(conflicted_ops or []),
             },
             ensure_ascii=False,
         )
@@ -2265,6 +2330,10 @@ class SpecWorkspaceService:
         # task-02（design §5.4/§11）：被 platform_deleted 墓碑拒绝的 add/rename 路径
         # （返回 dict 新增键，conflict 语义的显式回告——CLI 可感知被拒路径）。
         platform_deleted_paths: list[str] = []
+        # 2026-10-20-conflict-platform-archive：被拒 op 收集（七处被拒点 append）——
+        # 推送本身携带机器侧事实（content/mtime/new_path），收尾蒸馏进 open 行
+        # local_archive 供对比自足回退，零新增 RPC。
+        conflicted_ops: list[FileOp] = []
         # task-02（design §5.1 / FR-02）：本次 ops 涉及目录（delete 的 op.path /
         # rename 的源与目标路径的父目录）——循环后统一自底向上清理空目录（仅涉及
         # 目录链，R-03 禁整树扫描）。
@@ -2360,6 +2429,7 @@ class SpecWorkspaceService:
                     and op.path.replace("\\", "/").startswith(platform_deleted_prefixes)
                 ):
                     conflict = True
+                    conflicted_ops.append(op)
                     if row is not None:
                         if server_versions is None:
                             server_versions = {}
@@ -2383,6 +2453,7 @@ class SpecWorkspaceService:
                     # （design §11），行维持墓碑不翻 exists。
                     if row.platform_deleted:
                         conflict = True
+                        conflicted_ops.append(op)
                         if server_versions is None:
                             server_versions = {}
                         server_versions[op.path] = row.version
@@ -2411,6 +2482,7 @@ class SpecWorkspaceService:
                 # 由其派生但两处独立判定更稳）；行维持墓碑不翻 exists。
                 if op.op == "update" and row is not None and row.platform_deleted:
                     conflict = True
+                    conflicted_ops.append(op)
                     if server_versions is None:
                         server_versions = {}
                     server_versions[op.path] = row.version
@@ -2430,6 +2502,7 @@ class SpecWorkspaceService:
                         new_versions[op.path] = row.version
                         continue
                     conflict = True
+                    conflicted_ops.append(op)
                     if server_versions is None:
                         server_versions = {}
                     server_versions[op.path] = row.version
@@ -2510,6 +2583,7 @@ class SpecWorkspaceService:
                         platform_deleted_prefixes
                     ):
                         conflict = True
+                        conflicted_ops.append(op)
                         if target_row is not None:
                             if server_versions is None:
                                 server_versions = {}
@@ -2523,6 +2597,7 @@ class SpecWorkspaceService:
                     # platform_deleted 项，不落盘不复活（区别于普通软删墓碑的放行复活）。
                     if target_row is not None and target_row.platform_deleted:
                         conflict = True
+                        conflicted_ops.append(op)
                         if server_versions is None:
                             server_versions = {}
                         server_versions[op.new_path] = target_row.version
@@ -2531,6 +2606,7 @@ class SpecWorkspaceService:
                         continue
                     if target_row is not None and target_row.exists:
                         conflict = True
+                        conflicted_ops.append(op)
                         if server_versions is None:
                             server_versions = {}
                         server_versions[op.new_path] = target_row.version
@@ -2754,7 +2830,10 @@ class SpecWorkspaceService:
         try:
             if conflict or platform_deleted_paths:
                 await self._upsert_sync_conflict(
-                    workspace_id, server_versions or {}, platform_deleted_paths
+                    workspace_id,
+                    server_versions or {},
+                    platform_deleted_paths,
+                    conflicted_ops=conflicted_ops,
                 )
             else:
                 await self._close_open_sync_conflicts(workspace_id)
