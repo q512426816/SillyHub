@@ -156,22 +156,29 @@ class TestCandidateUrls:
         assert "https://x.example/v1/models" in urls
 
     def test_anthropic_default_unchanged_regression(self) -> None:
-        """NFR-02：anthropic（默认）候选 URL 与改动前逐字一致。"""
+        """NFR-02：anthropic（默认）既有候选前缀不变（尾候选 base+/models 为
+        2026-10-20-codex-models-fetch-candidates 有意追加）。"""
         urls = LlmProviderService._candidate_urls("https://api.anthropic.com")
-        assert urls == ["https://api.anthropic.com/v1/models"]
+        assert urls == [
+            "https://api.anthropic.com/v1/models",
+            "https://api.anthropic.com/models",
+        ]
 
     def test_anthropic_strip_subpath_regression(self) -> None:
-        """NFR-02：anthropic 剥 /anthropic 子路径双候选不变。"""
+        """NFR-02：anthropic 剥 /anthropic 子路径双候选前缀不变（尾候选为
+        2026-10-20-codex-models-fetch-candidates 有意追加）。"""
         urls = LlmProviderService._candidate_urls("https://relay.example.com/anthropic")
         assert urls == [
             "https://relay.example.com/anthropic/v1/models",
             "https://relay.example.com/v1/models",
+            "https://relay.example.com/anthropic/models",
         ]
 
     def test_no_api_format_defaults_anthropic(self) -> None:
-        """不传 api_format → anthropic 行为（NFR-02）。"""
+        """不传 api_format → anthropic 行为（NFR-02，含尾候选兜底）。"""
         assert LlmProviderService._candidate_urls("https://api.anthropic.com") == [
-            "https://api.anthropic.com/v1/models"
+            "https://api.anthropic.com/v1/models",
+            "https://api.anthropic.com/models",
         ]
 
 

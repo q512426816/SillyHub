@@ -570,7 +570,14 @@ class LlmProviderService:
     # ── fetch-models（task-02 / D-001/D-006）──────────────────────────────
 
     _FETCH_TIMEOUT: float = 10.0  # NFR-03：上游 /v1/models 超时 10s
-    _STRIP_SUFFIXES: tuple[str, ...] = ("/anthropic", "/compatibility", "/api")
+    # 剥离候选后缀（cc-switch 范式）。"/openai/v1"（2026-10-20-codex-models-fetch-candidates）：
+    # OpenCode 网关范式 base=…/inference/go/openai/v1，真实 models 在网关根 /v1/models。
+    _STRIP_SUFFIXES: tuple[str, ...] = (
+        "/anthropic",
+        "/compatibility",
+        "/api",
+        "/openai/v1",
+    )
     _USAGE_TIMEOUT: float = 15.0  # 用量查询上游超时 15s（task-03）
 
     async def fetch_models(
@@ -764,6 +771,12 @@ class LlmProviderService:
                 url = f"{stripped}/v1/models"
                 if url not in candidates:
                     candidates.append(url)
+        # 2026-10-20-codex-models-fetch-candidates：base 已含版本段的 OpenAI 风格
+        # 端点兜底（智谱 coding /api/v1 → /api/v1/models，实测 200）。置于最后，
+        # 既有候选尝试顺序零变化。
+        base_models_url = f"{base}/models"
+        if base_models_url not in candidates:
+            candidates.append(base_models_url)
         return candidates
 
     @staticmethod
