@@ -1508,8 +1508,19 @@ export function SessionPanelPage({
             }
 
             // 失败轮拉取结构化错误详情（同 run 只拉一次，供 RunErrorItem 渲染）。
+            // 2026-10-20-session-error-visibility：backend 对 SDK
+            // error_during_execution（含全部模型错误）统一落 error_code=
+            // interactive_interrupted，deriveTurnTerminalStatus 归 killed 后本拉取
+            // 被跳过 → 实时失败轮错误卡永不渲染（仅快照路径能修正）。条件扩展：
+            // killed 且 env.status=failed 且 interrupted 也拉——error_detail 可解析
+            // （模型错误）升级 failed + 错误卡；真打断（error_detail 空）保持 killed
+            // 无卡（不落 system 兜底，防打断被误报为失败）。
+            const killedByInterrupted =
+              terminal === "killed" &&
+              env.status === "failed" &&
+              env.error_code === "interactive_interrupted";
             if (
-              terminal === "failed" &&
+              (terminal === "failed" || killedByInterrupted) &&
               env.run_id &&
               !fetchedErrorRunIdsRef.current.has(env.run_id)
             ) {
@@ -1519,10 +1530,25 @@ export function SessionPanelPage({
                 try {
                   const runs = await fetchRunsForErrorDetail();
                   const matched = runs.find((r) => r.id === failedRunId);
+                  const modelItem = buildErrorLogItem(matched?.error_detail ?? null);
+                  if (killedByInterrupted) {
+                    // killed 升级分支：仅模型错误（error_detail 可解析）升级
+                    // failed + 错误卡；真打断零触碰（保持 killed、无 errorDetail）。
+                    if (!modelItem) return;
+                    setTurnState((prev) => ({
+                      ...prev,
+                      turns: prev.turns.map((t) =>
+                        t.runId === failedRunId && !t.errorDetail
+                          ? { ...t, errorDetail: modelItem, status: "failed" as const }
+                          : t,
+                      ),
+                    }));
+                    return;
+                  }
                   // ql-20260831-004：error_detail（模型层）为空的系统级失败（撞闸/
                   // inject 过期）兜 failure_summary + error_code 映射（normalize）。
                   const item =
-                    buildErrorLogItem(matched?.error_detail ?? null) ??
+                    modelItem ??
                     buildSystemFailureItem(
                       matched?.error_code ?? null,
                       matched?.failure_summary ?? null,
