@@ -296,8 +296,9 @@ class TestFetchModelsHttpxMocked:
         """智谱 coding 范式：base 已含版本段 → base+/models 兜底候选命中。
 
         base_url=``https://open.bigmodel.cn/api/v1``（2026-10-20-codex-models-fetch-candidates）：
-        - 候选1 ``/api/v1/v1/models`` → 404
-        - 候选2 ``/api/v1/models``（base+/models 兜底，实测上游 200）→ 命中
+        - 候选1 ``/api/v1/v1/models`` → 200 但错误 JSON（智谱网关对未知路径 200
+          兜底，实测 2026-10-20）→ 视为本候选失败继续
+        - 候选2 ``/api/v1/models``（base+/models 兜底，真实 models）→ 命中
         """
         with (
             patch("app.modules.tool_gateway.tool_policy.socket.getaddrinfo") as mock_gai,
@@ -307,7 +308,7 @@ class TestFetchModelsHttpxMocked:
             client = _wire_async_client(
                 mock_cls,
                 get_side_effect=[
-                    _make_response(404),
+                    _make_response(200, {"error": {"code": "1211", "message": "model not found"}}),
                     _make_response(200, _FETCH_MODELS_BODY),
                 ],
             )

@@ -642,7 +642,17 @@ class LlmProviderService:
                     details={"status": resp.status_code, "url": url},
                 )
             if resp.status_code == 200:
-                return self._parse_models_response(resp, url)
+                # 200 但响应非 models 结构（网关对未知路径 200 兜底，如实测智谱
+                # /api/v1/v1/models 返 200 错误 JSON）→ 视为本候选失败继续尝试
+                # （2026-10-20-codex-models-fetch-candidates），全候选耗尽再按
+                # 解析失败收口。
+                try:
+                    return self._parse_models_response(resp, url)
+                except LlmProviderModelsAllFailed:
+                    last_status = 200
+                    last_kind = "parse_failed"
+                    last_url = url
+                    continue
 
             # 404 / 405 / 5xx 等 → 记录并尝试下一候选
             last_status = resp.status_code
