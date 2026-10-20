@@ -207,10 +207,19 @@ async def test_single_turn_failed_marks_session_failed(
 
 @pytest.mark.asyncio
 async def test_multi_turn_completed_keeps_session_active(
-    db_session: AsyncSession, mocked_redis
+    db_session: AsyncSession, mocked_redis, monkeypatch
 ) -> None:
     """多轮对话（spec_strategy=='interactive' AND change_id is None）run completed
     → session 保持 active + last_active_at 刷新，ended_at 仍 None。"""
+    # 2026-10-20-session-status-live-sync：keep-active 分支也广播列表信号——
+    # 列表项 current_run_status 随 run 终态变 None，左侧「正在执行」转圈徽标
+    # 需秒级收敛（经 _rsvc 延迟解析，monkeypatch 拦截 publish 调用）。
+    publish_calls: list[tuple[str, uuid.UUID, object]] = []
+
+    async def spy_publish(event, sid, uid, **kwargs):
+        publish_calls.append((event, sid, uid))
+
+    monkeypatch.setattr("app.modules.daemon.run_sync.service.publish_sessions_changed", spy_publish)
     lease_id, run_id, token, session_id = await _seed_session_and_run(
         db_session,
         spec_strategy="interactive",
@@ -246,6 +255,8 @@ async def test_multi_turn_completed_keeps_session_active(
         else refreshed.last_active_at
     )
     assert stored > datetime(2020, 1, 1)
+    # run 终态（多轮 keep-active）→ 恰一条 status_changed 列表信号
+    assert publish_calls == [("status_changed", session_id, refreshed.user_id)]
 
 
 # ── 幂等：session 已 ended/failed 不覆盖 -----------------------------------
@@ -253,10 +264,17 @@ async def test_multi_turn_completed_keeps_session_active(
 
 @pytest.mark.asyncio
 async def test_session_already_ended_not_overwritten(
-    db_session: AsyncSession, mocked_redis
+    db_session: AsyncSession, mocked_redis, monkeypatch
 ) -> None:
     """session 已 ended → _apply_session_terminal_status 返 None，回写不覆盖
-    既有 ended 终态（D-005）。"""
+    既有 ended 终态（D-005）。2026-10-20-session-status-live-sync：幂等守卫
+    跳过时零列表信号发布（迟到终态不刷列表）。"""
+    publish_calls: list[tuple[str, uuid.UUID, object]] = []
+
+    async def spy_publish(event, sid, uid, **kwargs):
+        publish_calls.append((event, sid, uid))
+
+    monkeypatch.setattr("app.modules.daemon.run_sync.service.publish_sessions_changed", spy_publish)
     ended_at = datetime(2020, 1, 1, tzinfo=UTC)
     lease_id, run_id, token, session_id = await _seed_session_and_run(
         db_session,
@@ -290,6 +308,8 @@ async def test_session_already_ended_not_overwritten(
     )
     expected = ended_at.replace(tzinfo=None)
     assert stored == expected
+    # 幂等守卫跳过回写 → 不发布列表信号
+    assert publish_calls == []
 
 
 # ── ql-20260823-006：run 终态翻会话终态 → 补发 SESSION_END 清理 daemon 内存 ──

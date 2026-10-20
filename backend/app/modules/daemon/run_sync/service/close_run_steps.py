@@ -464,9 +464,12 @@ async def _close_flip_session(
     # _apply_session_terminal_status 守卫（已 ended/failed 返 None）。
     session_end_intent: tuple[uuid.UUID, uuid.UUID | None, uuid.UUID | None] | None = None
     # task-03（2026-08-24-sessions-live-updates）：run 终态翻 session ended/failed
-    # 时记下列表信号意图（session_id + user_id），commit 后广播 status_changed——
-    # 多轮对话仅刷 last_active_at 的分支不置此意图（列表视图无状态变化，不发）。
-    # user_id 同样须在 expire_on_commit 前取标量。
+    # 时记下列表信号意图（session_id + user_id），commit 后广播 status_changed。
+    # 2026-10-20-session-status-live-sync：多轮 keep-active 分支（仅刷
+    # last_active_at）同样置此意图——列表项的 current_run_status 随 run 终态
+    # 从 running 变 None，左侧徽标需秒级收敛（原「列表视图无状态变化，不发」
+    # 的假设已过时）。幂等守卫不变：new_status=None（会话已 ended/failed）
+    # 时整体跳过不发。user_id 同样须在 expire_on_commit 前取标量。
     sessions_changed_intent: tuple[uuid.UUID, uuid.UUID | None] | None = None
     if agent_run.agent_session_id is not None:
         # AgentSession 走模块顶 import（与上方 task-03 model_usage 块共用）：
@@ -489,9 +492,9 @@ async def _close_flip_session(
                 new_status = "failed"
             if new_status is not None:
                 session.status = new_status
+                sessions_changed_intent = (session.id, session.user_id)
                 if new_status in ("ended", "failed"):
                     session.ended_at = now
-                    sessions_changed_intent = (session.id, session.user_id)
                     # ql-20260823-006：会话被 run 终态翻成 ended/failed 时记下
                     # 发送意图，commit 后补发 SESSION_END 清理 daemon 内存副本——
                     # 否则 daemon SessionStore 残留活条目（backend 终态 ≠ daemon
@@ -555,8 +558,10 @@ async def _close_post_commit(
 
     # task-03（design §3 生命周期契约表）：run 终态翻 session ended/failed →
     # 广播列表变更信号（status_changed），打开的会话列表秒级收敛。publish 内部
-    # 静默容错（Redis 抖动不拖垮已 commit 的终态）；仅刷 last_active_at 的多轮
-    # 分支意图为 None，零发布。
+    # 静默容错（Redis 抖动不拖垮已 commit 的终态）。2026-10-20-session-status-
+    # live-sync：多轮 keep-active 分支同样置意图——列表 current_run_status 随
+    # run 终态变 None，左侧转圈徽标需秒级收敛；会话已终态（幂等守卫跳过）
+    # 意图为 None，零发布。
     if sessions_changed_intent is not None:
         changed_sid, changed_uid = sessions_changed_intent
         await _rsvc.publish_sessions_changed("status_changed", changed_sid, changed_uid)
