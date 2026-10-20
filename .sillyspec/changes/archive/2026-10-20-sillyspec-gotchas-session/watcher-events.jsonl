@@ -1,0 +1,20 @@
+{"ts":1792456566207,"kind":"file","stage":"design","detail":"design.md 出现","provisional":true}
+{"ts":1792456566207,"kind":"file","stage":"tasks","detail":"tasks.md 出现","provisional":true}
+{"ts":1792456586330,"kind":"file-update","stage":"requirements","detail":"requirements.md 内容变更","provisional":true}
+{"ts":1792456610621,"kind":"file-update","stage":"design","detail":"design.md 内容变更","provisional":true}
+{"ts":1792456639372,"kind":"file-update","stage":"tasks","detail":"tasks.md 内容变更","provisional":true}
+{"ts":1792456639372,"kind":"commit","stage":null,"detail":"c424321d6","provisional":true}
+{"ts":1792456658623,"kind":"warning","stage":null,"rule":"scope-drift","severity":"warning","detail":"声明面之外的代码文件被改：sillyspec/changes/2026-10-20-conflict-platform-archive/flow-state.yaml——范围漂移嫌疑（并行会话改动/越界，人判）","provisional":true}
+{"ts":1792456712064,"kind":"warning","stage":null,"rule":"scope-drift","severity":"warning","detail":"声明面之外的代码文件被改：rontend/src/lib/api-types.ts——范围漂移嫌疑（并行会话改动/越界，人判）","provisional":true}
+{"ts":1792456716083,"kind":"warning","stage":null,"rule":"scope-drift","severity":"warning","detail":"声明面之外的代码文件被改：sillyhub-daemon/src/api-types.ts——范围漂移嫌疑（并行会话改动/越界，人判）","provisional":true}
+{"ts":1792456719623,"kind":"warning","stage":null,"rule":"scope-drift","severity":"warning","detail":"声明面之外的代码文件被改：frontend/src/lib/api-types.ts、sillyspec/changes/2026-10-20-conflict-platform-archive/flow-state.yaml——范围漂移嫌疑（并行会话改动/越界，人判）","provisional":true}
+{"ts":1792456752358,"kind":"task-done","stage":"tasks","detail":"checked 0→1","provisional":true,"source":"task-tick"}
+{"ts":1792456752828,"kind":"task-done","stage":"tasks","detail":"checked 1→2","provisional":true,"source":"task-tick"}
+{"ts":1792456753296,"kind":"task-done","stage":"tasks","detail":"checked 2→3","provisional":true,"source":"task-tick"}
+{"ts":1792456753226,"kind":"file-update","stage":"tasks","detail":"tasks.md 内容变更","provisional":true}
+{"ts":1792456753226,"kind":"task-done","stage":"tasks","detail":"checked 0→2","provisional":true}
+{"ts":1792456757263,"kind":"file-update","stage":"tasks","detail":"tasks.md 内容变更","provisional":true}
+{"ts":1792456757263,"kind":"task-done","stage":"tasks","detail":"checked 2→3","provisional":true}
+{"ts":1792456774581,"kind":"commit","stage":null,"detail":"76ef51f8f","provisional":true}
+{"ts":1792456791547,"kind":"commit","stage":null,"detail":"06e0a0cc5","provisional":true}
+{"ts":1792456791897,"kind":"warning","stage":null,"rule":"scope-drift","severity":"warning","detail":"声明面之外的代码文件被改：sillyspec/changes/2026-10-20-conflict-platform-archive/flow-state.yaml——范围漂移嫌疑（并行会话改动/越界，人判）","provisional":true}

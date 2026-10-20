@@ -1,0 +1,15 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-20-sillyspec-gotchas-session",
+  "reviewer": "subagent",
+  "verdict": "PASS",
+  "reviewedAgainst": "06e0a0cc5908aa37fbbc2e79ab0b741fb1b6381a",
+  "findings": [],
+  "dimensionNotes": {
+    "乱序": "ok",
+    "并发": "ok",
+    "切换": "ok",
+    "作用域": "ok"
+  },
+  "reviewedAt": "2026-10-20T08:43:00+08:00"
+}

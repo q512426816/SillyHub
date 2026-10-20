@@ -1,6 +1,14 @@
 tier: thin
 legacy_fallback: false
-substeps: {}
+substeps:
+  artifacts: done
+  ledger: done
+  patch: done
+  review: done
+  probes: done
+  distill: done
+  archive: done
+  events: done
 born_face: thin
 with_tasks: false
 review_force: null
@@ -24,7 +32,7 @@ input: >-
 autopilot: false
 prestage_ack: true
 baseline_commit: 567d07ab047e7f237844908aa59da4af5f7e04d0
-updatedAt: '2026-10-20T00:37:36.111Z'
+updatedAt: '2026-10-20T00:43:36.044Z'
 cross_baselines:
   sillyspec: 045fa7bf4220317cef0c61558afa42649b3d323d
 baseline_sha256: 31848923e786aedba31c63d6309ce3595ed287b86cd6da628c1c09313d44da7a
@@ -33,4 +41,6 @@ spec_approved_at: '2026-10-20T00:37:36.111Z'
 spec_approved_by: zcode-review-fix-20261020
 spec_approved_channel: user-confirmed
 spec_attested_by: zcode-review-fix-20261020
+batch_ticked: true
+gate_summary: 'test: —｜lint: —｜门文件 5 个'
 

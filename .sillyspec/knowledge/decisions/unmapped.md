@@ -682,3 +682,11 @@
 锚点：未记录
 最近确认：978336829578f84f9c18d7ded93c25ce05f432da
 理由：最大风险：格式化 `check-assertion-surfaces.py`（pre-commit assertion-surfaces 闸门脚本）与 `scan-drift-check.py`（local.yaml scan:check 命令）——若重排意外破坏行为会卡全仓提交。缓解：ruff format 是纯空白/换行重排（无 token 变换），交付前闸门实跑 + test_scan_drift_check 用例回归 + diff 逐行核对仅空白类变化。 试过但放弃的方案：① 只改钩子建议文案按路径分流——治标：钩子仍按 88 裁根级文件，与任何手动 backend-cwd format 依旧不一致，且文案分支逻辑要进 pre-commit config 维护；② 根 ruff.toml 配齐 backend 全套 lint select——放弃：会瞬间扩大根级存量 lint 面（UP/SIM/N 等规则对存量 scripts 文件的未知违规），本变更范围膨胀，与「修行宽拉锯」的目标无关；③ 升级 ruff 至支持项目级多配置合并的版本——放弃：工具链版本变更影响面远大于本缺口，且 0.15.14 双入口数值同源后已无矛盾。
+
+## D-unmapped-101@v1 设计期风险与放弃方案（底稿）
+状态：implemented
+变更：2026-10-20-sillyspec-gotchas-session
+原编号：D-001@v1
+锚点：未记录
+最近确认：06e0a0cc5908aa37fbbc2e79ab0b741fb1b6381a
+理由：最大风险：条目描述的工具体验问题部分依赖 CLI 内部阈值/实现细节（如改写率 0.6 阈值、归档提交打印逻辑），后续版本演进可能修复——按文件头惯例每条标注踩坑时点与版本（2026-10-20 / v3.33.1），演进后由 knowledge digest 的 rot 信号自然处置。 试过但放弃的方案：①`knowledge propose` 收件箱通道——语义未文档化、proposed/ 为空，且 4 条是已实证成熟条目非待裁决提议；②只写会话汇报不落库——用户显式指令「记录下」，且不落库则后续会话不可检索、工具改进无留痕面。

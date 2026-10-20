@@ -460,3 +460,24 @@ created_at: 2026-10-15T16:16:15.707Z
   confirmed_at: null
   source_change: 2026-10-19-preview-card-empty-turn-fix
   status: active
+
+## FR-docs-027 sillyspec-gotchas.md 新增 4 条目（格式对齐既有条目：## 标题+机理+规避/做法+来源标注时点与 CLI 版本）
+变更：2026-10-20-sillyspec-gotchas-session
+状态：active
+摘要：格式与内容对齐
+全文：.sillyspec/changes/archive/2026-10-20-sillyspec-gotchas-session/requirements.md#FR-01
+最近确认：06e0a0cc5908aa37fbbc2e79ab0b741fb1b6381a
+
+## FR-docs-028 INDEX.md SillySpec 坑段同步 4 行关键词索引（锚点与条目标题一致）
+变更：2026-10-20-sillyspec-gotchas-session
+状态：active
+摘要：索引可检索
+全文：.sillyspec/changes/archive/2026-10-20-sillyspec-gotchas-session/requirements.md#FR-02
+最近确认：06e0a0cc5908aa37fbbc2e79ab0b741fb1b6381a
+
+## FR-docs-029 sillyspec knowledge validate 0 错 0 警
+变更：2026-10-20-sillyspec-gotchas-session
+状态：active
+摘要：知识库完整性
+全文：.sillyspec/changes/archive/2026-10-20-sillyspec-gotchas-session/requirements.md#FR-03
+最近确认：06e0a0cc5908aa37fbbc2e79ab0b741fb1b6381a
