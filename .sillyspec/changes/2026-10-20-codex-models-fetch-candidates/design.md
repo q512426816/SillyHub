@@ -16,7 +16,9 @@ created_at: 2026-10-20T04:50:02.475Z
 
 - `LlmProviderService._STRIP_SUFFIXES`（类常量）：`("/anthropic", "/compatibility", "/api")` → 追加 `"/openai/v1"`。
 - `LlmProviderService._candidate_urls`（类方法，内部）：anthropic 分支返回列表尾部多一个 `base+"/models"` 候选（去重）。
-- HTTP 端点 `POST /api/llm-providers/fetch-models` 行为：对上述两种 base_url 形态从恒 404（报「该供应商不支持拉取模型列表」）变为命中返回模型列表；其余形态响应不变。
+- `LlmProviderService._parse_models_response`（静态方法，内部）：body 无 `data` 列表字段时回退读 `models` 列表（智谱 coding 形态）；条目无 `id` 时回退取 `slug`。`data` 优先级不变。
+- `fetch_models` 候选循环：候选返回 200 但解析失败（body 不可解析/缺模型列表字段）→ 视为本候选失败 continue（原为直接 AllFailed 终报；智谱网关 200 兜底实测驱动）。
+- HTTP 端点 `POST /api/llm-providers/fetch-models` 行为：对上述两种 base_url 形态从恒 404（报「该供应商不支持拉取模型列表」）变为命中返回模型列表；200-坏-body 首候选场景从直接终报变为继续尝试；其余错误分类（401/403 鉴权、404/405 不支持、超时）不变。
 - DB schema / daemon / 前端：无变化。
 
 ## 边界与并发（盲维四问——每问必答，答不了即设计缺口）
