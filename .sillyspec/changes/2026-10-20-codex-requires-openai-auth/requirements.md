@@ -35,6 +35,6 @@ created_at: 2026-10-20T03:44:58.848Z
 ## 测试绑定（每条 FR 至少一行——`FR-NN: test/路径「用例名」`；空行/待填在 flow done 拒收）
 
 FR-01: sillyhub-daemon/tests/codex-settings.test.ts「全新目录写 config.toml：顶层 model/model_provider + [model_providers.sillyhub] 表，wire_api=responses」（golden 同步更新含新行）
-FR-01: sillyhub-daemon/tests/codex-settings.test.ts「requires_openai_auth：anthropic 形态有 key 时写出该行」（新增用例）
-FR-02: sillyhub-daemon/tests/codex-settings.test.ts「requires_openai_auth：keyless（api_key 缺省、base_url 满足门槛）不写该行、产物与现状逐字一致」（新增用例）
-FR-02: sillyhub-daemon/tests/codex-settings.test.ts「openai_chat 形态产物不含 requires_openai_auth（零回归）」（新增用例）
+FR-01: sillyhub-daemon/tests/codex-settings.test.ts「requires_openai_auth：anthropic 形态有 key 时写出该行（wire_api 行后）」（新增用例）
+FR-02: sillyhub-daemon/tests/codex-settings.test.ts「key 缺省（仅 base_url）→ auth.json 不写（spike A3a keyless provider 合法），config.toml 照写且无 model 行（model 缺省）；keyless 不写 requires_openai_auth（产物与现状逐字一致，零回归）」（既有用例改名强化，逐字 toBe 守卫）
+FR-02: sillyhub-daemon/tests/codex-settings.test.ts「key=daemonApiKey / base_url=litellm_base_url / model=litellm_model_name」（openai_chat golden 逐字 toBe 零回归守卫，含注释明示）
