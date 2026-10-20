@@ -1612,6 +1612,11 @@ export function SessionPanelPage({
                 ? prev
                 : [...prev, req],
             );
+            // 2026-10-20-session-status-live-sync：审批等待边沿即时刷左栏列表
+            //（徽标翻「在等你」，经 400ms 去抖）——Redis 列表信号丢失时的本地
+            // 兜底；与 turn_completed 新完成分支同款调用，dialog 模式不传
+            // onSessionListRefresh 天然不受影响。
+            onSessionListRefresh?.();
           },
           onPermissionResolved: (resolved) => {
             setPendingRequests((prev) =>
