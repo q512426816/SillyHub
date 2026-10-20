@@ -485,7 +485,10 @@ describe('task-07 真实 CLI 冒烟：provider-injection 全链（mock 三条 + 
     });
 
     // 产物 2：config.toml —— spike golden a2b-config.toml 逐字段（D-002）：
-    //   顶层 model/model_provider + [model_providers.sillyhub] 四键，块间单空行。
+    //   顶层 model/model_provider + [model_providers.sillyhub] 五键（含
+    //   requires_openai_auth，2026-10-20-codex-requires-openai-auth：无该键
+    //   codex 对自定义 provider 不发 Authorization——mock 抓包 + 公网 A/B 实证），
+    //   块间单空行。
     const toml = readFileSync(join(codexHome, 'config.toml'), 'utf-8');
     expect(toml).toBe(
       [
@@ -496,6 +499,7 @@ describe('task-07 真实 CLI 冒烟：provider-injection 全链（mock 三条 + 
         'name = "SillyHub"',
         `base_url = "http://127.0.0.1:${mockPort}/v1"`,
         'wire_api = "responses"',
+        'requires_openai_auth = true',
         '',
       ].join('\n'),
     );

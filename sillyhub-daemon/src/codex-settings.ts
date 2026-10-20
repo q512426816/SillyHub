@@ -42,6 +42,15 @@
  *     name = "SillyHub"
  *     base_url = <per-form base_url>  （缺省不写该行）
  *     wire_api = "responses"          （唯一合法值，0.147.0 基线）
+ *     requires_openai_auth = true     （仅 anthropic 形态且有 key 时写，见下方）
+ *
+ * requires_openai_auth（2026-10-20-codex-requires-openai-auth）：codex CLI 对自定义
+ * [model_providers.*] provider 默认不发 Authorization——auth.json 的 OPENAI_API_KEY
+ * 仅在 provider 表声明 requires_openai_auth = true 时才作为 Bearer 头发出（cc-switch
+ * 生产配置同键 + A/B 实测：同 key 同端点，带键成功、缺键上游掐流 stream
+ * disconnected）。CLI 基线 0.162.0；升级 codex 基线时冒烟面覆盖（R-03 惯例）。
+ * keyless（spike A3a）与 openai_chat 形态不写——keyless 写了也无凭证可发，
+ * openai_chat 走 hub 代理通道，本键语义属直连认证，不动其现状。
  *
  * 保守合并（托管段差量替换、非托管行原样保留——ai-toolbox managed-config 模式）：
  *   - 托管段 = 顶层 model / model_provider（含根区 `model_providers = {...}` 内联表行，
@@ -117,6 +126,13 @@ interface CodexFormValues {
   key: string | undefined;
   baseUrl: string | undefined;
   model: string | undefined;
+  /**
+   * 是否写 `requires_openai_auth = true`（2026-10-20-codex-requires-openai-auth）。
+   * anthropic 直连形态且有 key 时 true（codex 对自定义 provider 默认不发
+   * Authorization，无此行则 auth.json 的 key 不随请求带出、上游掐流）；
+   * openai_chat / keyless 恒 false（产物与既有逐字一致）。
+   */
+  requireOpenAiAuth: boolean;
   /** per-form 必需字段是否满足（D-012 门槛：必需字段「至少一项」非「全部」）。 */
   sufficient: boolean;
   /** 门槛不满足时缺失的 per-form 必需字段名（仅字段名，不含值，日志安全）。 */
@@ -144,6 +160,7 @@ function resolveCodexForm(
       key: nonEmpty(daemonApiKey),
       baseUrl,
       model,
+      requireOpenAiAuth: false,
       sufficient: baseUrl !== undefined || model !== undefined,
       missingFields:
         baseUrl === undefined && model === undefined
@@ -159,6 +176,7 @@ function resolveCodexForm(
     key,
     baseUrl,
     model,
+    requireOpenAiAuth: key !== undefined,
     sufficient: key !== undefined || baseUrl !== undefined,
     missingFields:
       key === undefined && baseUrl === undefined ? ['api_key', 'base_url'] : [],
@@ -279,6 +297,11 @@ function mergeConfigToml(existing: string, v: CodexFormValues): string {
     managedSection.push(`base_url = ${tomlString(v.baseUrl)}`);
   }
   managedSection.push(`wire_api = ${tomlString(WIRE_API)}`);
+  // 2026-10-20-codex-requires-openai-auth：codex 对自定义 provider 默认不发
+  // Authorization——有 key 的直连形态必须声明本键，key 才作为 Bearer 发出。
+  if (v.requireOpenAiAuth) {
+    managedSection.push('requires_openai_auth = true');
+  }
 
   const blocks = [rootKept, managedRoot, managedSection, tailKept].filter(
     (b) => b.length > 0,
