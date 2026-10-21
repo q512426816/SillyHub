@@ -57,6 +57,9 @@ created_at: 2026-10-21T07:19:34.302Z
 |---|---|---|
 | 改 | sillyhub-daemon/src/interactive/types.ts | SessionManagerDeps 增可选 onTurnStartTimeout 回调 |
 | 改 | sillyhub-daemon/src/interactive/session-manager.ts | `_turnStartWatchdogs` Map + arm/disarm API + stop 清理 |
+| 改 | sillyhub-daemon/src/interactive/session-manager/types.ts | SessionManagerCore 增看门狗 Map 字段与 arm/disarm 方法声明 |
+| 改 | sillyhub-daemon/src/cli.ts | deps 注入 onTurnStartTimeout → daemon.onTurnStartTimeout 桥接 |
+| 改 | sillyhub-daemon/tests/interactive/session-manager-lifecycle-turn-anchor-eviction.test.ts | 测试桩补 `_disarmTurnStartWatchdog` 成员（core 契约跟进） |
 | 改 | sillyhub-daemon/src/interactive/session-manager/turn-control.ts | inject 首轮路径布防看门狗 |
 | 改 | sillyhub-daemon/src/interactive/session-manager/events.ts | onMessage/onResult 撤防 |
 | 改 | sillyhub-daemon/src/interactive/session-manager/lifecycle.ts | terminateSession 撤防 |
@@ -68,5 +71,6 @@ created_at: 2026-10-21T07:19:34.302Z
 | 改 | backend/app/modules/daemon/sweep.py | pending_run_start_sweep_once + 挂 sweeper 轮 + SSE 发布 |
 | 增 | backend/app/modules/daemon/tests/test_interrupt_payload_run_id.py | FR-02 后端测试 |
 | 增 | backend/app/modules/daemon/tests/test_pending_run_start_sweep.py | FR-03 测试 |
-| 改 | frontend/src/components/daemon/session-panel/session-panel-page.tsx | handleInterrupt 15s 超时回退 + 提示 |
+| 改 | frontend/src/components/daemon/session-panel/session-panel-page.tsx | handleInterrupt 15s 超时回退 + 提示（hook 接线） |
+| 增 | frontend/src/components/daemon/session-panel/interrupt-timeout.ts | useInterruptFeedbackTimeout 定时器簿记 hook |
 | 增 | frontend/src/components/daemon/session-panel/__tests__/interrupt-timeout.test.ts | FR-04 测试 |
