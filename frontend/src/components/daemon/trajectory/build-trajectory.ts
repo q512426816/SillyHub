@@ -648,6 +648,22 @@ export function buildTrajectory(
     rows.push(...turnRows);
   }
 
+  return assembleTrajectory(rows, turns, timingByRunId);
+}
+
+/**
+ * 装配收口（2026-10-22-session-trajectory-view 抽出的公共尾段）：
+ * 行/轮 + 可选 timing → 窗口、泳道、覆盖率、口径。
+ *
+ * 抽出的唯一目的：让「日志驱动」（`buildTrajectory`）与「轮视图驱动」
+ * （`from-turn-views.ts` 的产品会话页路径）共用同一套窗口/覆盖率/口径数学，
+ * 避免第二套实现漂移。行为与原内联尾段逐行等价。
+ */
+export function assembleTrajectory(
+  rows: TrajectoryRow[],
+  turns: TrajectoryTurn[],
+  timingByRunId: Map<string, TurnTimingSnapshot> = new Map(),
+): Trajectory {
   let windowStart = Number.POSITIVE_INFINITY;
   let windowEnd = Number.NEGATIVE_INFINITY;
   for (const turn of turns) {

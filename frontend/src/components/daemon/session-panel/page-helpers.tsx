@@ -246,6 +246,16 @@ export function enrichDisplayTurns(
           terminal === null && meta.status != null && ACTIVE_RUN_STATUSES.has(meta.status)
             ? (parseRunStartedAt(meta.started_at) ?? t.turnStartedAt ?? null)
             : (t.turnStartedAt ?? parseRunStartedAt(meta.started_at)),
+        // 2026-10-22-session-trajectory-view（D-035）：把 `/runs` 的 `timing`（daemon
+        // TTFT/attempt 采集）透传到轮视图——轨迹面板据此把模型条从「近似空档」切成
+        // 真实占用区间（`modelBasis="observed"`）。老 daemon / 无采样 → null，面板
+        // 保持单色近似并标「近似」，不伪造。
+        // 注：`frontend/src/lib/daemon/sessions.ts` 的手工镜像 `SessionRunRead` 尚未补
+        // 该列（R-17 已登记），这里按可选字段结构化读取，镜像补齐后可去掉断言。
+        timing:
+          t.timing ??
+          (meta as { timing?: SessionTurnView["timing"] }).timing ??
+          null,
       };
     };
     // ql-20260903-025：身份稳定守卫——补齐字段与原值全部一致时返回**原对象**：
@@ -266,7 +276,10 @@ export function enrichDisplayTurns(
         candidate.apiDurationMs !== t.apiDurationMs ||
         candidate.replyAt !== t.replyAt ||
         candidate.turnStartedAt !== t.turnStartedAt ||
-        candidate.errorDetail !== t.errorDetail;
+        candidate.errorDetail !== t.errorDetail ||
+        // 缺省归一（undefined ≡ null）：无 timing 的轮不得因多出一个 null 键
+        // 丢掉引用稳定性（守卫命中前提是逐字段值等价，不是键集合等价）。
+        (candidate.timing ?? null) !== (t.timing ?? null);
       return changed ? candidate : t;
     });
     // ql-20260818-011：runsMeta 中的静默切换 run 无 SSE 事件→不在 turns

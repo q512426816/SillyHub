@@ -58,6 +58,11 @@ import { RunErrorItem } from "@/components/agent-log/run-error-item";
 import { formatScheduledTime } from "@/components/daemon/scheduled-messages-bar";
 import type { ErrorLogItem } from "@/components/agent-log/normalize";
 import type { TurnSegment } from "@/components/daemon/session-log-assembler";
+// 2026-10-22-session-trajectory-view（D-035）：第三视图「轨迹」——三泳道时间轴由当前
+// 轮视图派生（零网络请求、零后端改动），复用 dev 路由同一套 TrajectoryView。
+import { trajectoryFromTurnViews } from "@/components/daemon/trajectory/from-turn-views";
+import { TrajectoryView } from "@/components/daemon/trajectory/trajectory-view";
+import type { TurnTimingSnapshot } from "@/components/daemon/trajectory/build-trajectory";
 import {
   CompactNoticeChip,
   CompactStatusRowView,
@@ -309,6 +314,13 @@ export interface SessionTurnView {
    */
   apiDurationMs?: number | null;
   /**
+   * 2026-10-22-session-trajectory-view（D-035）：该轮 daemon TTFT/attempt 采样
+   * （`GET /sessions/{id}/runs` 的 `timing`，由 page-helpers 从 run 快照透传）。
+   * 有 attempts → 轨迹「模型」泳道按真实占用区间出条（`modelBasis="observed"`）；
+   * null/缺省（老 daemon / 无采样 / 运行中）→ 保持近似空档并标「近似」。
+   */
+  timing?: TurnTimingSnapshot | null;
+  /**
    * 2026-07-29-model-error-visibility / FR-04：turn 终态=failed 时拉取的结构化错误
    * 详情（GET /sessions/{id}/runs 的 error_detail 经 buildErrorLogItem 映射）。
    * null/undefined（成功 turn / brownfield / attach 历史 turn）→ 不渲染 RunErrorItem。
@@ -403,7 +415,9 @@ export interface SessionTurnView {
 }
 
 /** 消息视图模式（ql-20260729-005）：对话=用户消息+答复正文+文件卡片（交付物，
- * agent-file-upload-mcp FR-01）；全部=追加思考/工具等过程项。 */
+ * agent-file-upload-mcp FR-01）；全部=追加思考/工具等过程项。
+ * 2026-10-22-session-trajectory-view（D-035）：**两态不变**——轨迹是「进度」视图内的
+ * 呈现方式（时间线 / 轨迹），不是第三种视图模式。 */
 export type SessionViewMode = "conversation" | "all";
 
 export interface TurnTimelineProps {
@@ -1273,6 +1287,37 @@ export function autoRecoverHintForTurn(
  *  窗口期内每帧核对高度并重申贴底。 */
 const BOTTOM_REASSERT_WINDOW_MS = 2500;
 
+/**
+ * 「进度」视图的轨迹呈现（2026-10-22-session-trajectory-view / D-035）。
+ *
+ * 数据来源＝当前会话已加载的轮视图（`SessionTurnView[]`）：`trajectoryFromTurnViews`
+ * 纯函数派生三泳道所需行/轮，再交给 dev 路由同款 `TrajectoryView` 渲染。**零网络请求**
+ * （不调任何 API、不读 `.proto-staging`），因此产品页与 dev 预览的差别只在数据来源。
+ *
+ * 空态：整段会话都没有可比对的时间戳（`rows` 为空）→ 出显式提示，**不白屏、不伪造条**
+ * （伪造会让「没有数据」看起来像「这轮没有活动」）。
+ */
+function TrajectoryPane({ turns }: { turns: SessionTurnView[] }) {
+  const trajectory = useMemo(() => trajectoryFromTurnViews(turns), [turns]);
+  if (trajectory.rows.length === 0) {
+    return (
+      <div
+        data-testid="trajectory-empty"
+        className="rounded-md border border-dashed border-border px-4 py-6 text-center text-[12px] text-muted-foreground"
+      >
+        本轮会话没有可绘制的时间数据（历史轮缺少时间戳）。
+        <br />
+        产生新的对话轮后，这里会显示输入 / 模型 / 工具三泳道时间轴。
+      </div>
+    );
+  }
+  return (
+    <div data-testid="trajectory-pane" className="min-w-0">
+      <TrajectoryView trajectory={trajectory} />
+    </div>
+  );
+}
+
 export function TurnTimeline({
   turns,
   viewMode,
@@ -1297,6 +1342,10 @@ export function TurnTimeline({
   fileChangesSummary = true,
 }: TurnTimelineProps) {
   const scrollRef = useRef<HTMLDivElement>(null);
+  // 2026-10-22-session-trajectory-view（D-035）：「进度」视图的呈现方式——时间线（现状）
+  // 或轨迹（三泳道）。仅 all 视图内生效；conversation 视图不出现该开关。
+  const [progressLens, setProgressLens] = useState<"timeline" | "trajectory">("timeline");
+  const showTrajectory = viewMode === "all" && progressLens === "trajectory";
 
   // ql-20260822-010：贴底跟随——原实现每次 turns 更新无条件 scrollTo 底部，
   // 用户上滚读历史时被流式更新反复拉回底部。改为：onScroll 维护「距底 <
@@ -1760,6 +1809,37 @@ export function TurnTimeline({
            2026-10-21 用户裁决「轮间 1px hairline 多余」：**只保留留白，不再画线**
            （原 `border-b border-border last:border-b-0` 已移除）；轮与轮靠白处分节。 */
         <div>
+          {/* 2026-10-22-session-trajectory-view（D-035）：轨迹是「进度」视图内的**呈现方式**
+              （时间线 / 轨迹），不是第三种视图模式——D-004 的两态约束不变。 */}
+          {viewMode === "all" && (
+            <div
+              role="tablist"
+              aria-label="进度视图呈现方式"
+              data-testid="progress-lens"
+              className="mb-3 inline-flex items-center rounded-full border bg-muted/50 p-0.5"
+            >
+              {(["timeline", "trajectory"] as const).map((lens) => (
+                <button
+                  key={lens}
+                  role="tab"
+                  aria-selected={progressLens === lens}
+                  onClick={() => setProgressLens(lens)}
+                  className={cn(
+                    "rounded-full px-2.5 py-1 text-[11px] leading-none transition-colors",
+                    progressLens === lens
+                      ? "bg-card font-medium text-foreground shadow-sm"
+                      : "text-muted-foreground hover:text-foreground",
+                  )}
+                >
+                  {lens === "timeline" ? "时间线" : "轨迹"}
+                </button>
+              ))}
+            </div>
+          )}
+          {showTrajectory ? (
+            <TrajectoryPane turns={turns} />
+          ) : (
+            <>
           {/* task-11（FR-16 / design E7）：会话级文件改动汇总——会话流顶部（首轮之前）。
               无数据时组件自身返回 null（零占位）；`fileChangesSummary={false}` 可关闭。 */}
           {fileChangesSummary && (
@@ -1812,6 +1892,8 @@ export function TurnTimeline({
               2026-10-20-session-page-dsh-alignment：流容器由 space-y-5 改逐轮
               padding+hairline 后，末尾注入位自身的上间距由末轮 pb-7 提供。 */}
           {streamFooter}
+            </>
+          )}
         </div>
       )}
     </div>

@@ -1,0 +1,39 @@
+tier: thick
+legacy_fallback: false
+substeps:
+  artifacts: done
+born_face: thin
+with_tasks: false
+review_force: null
+input: >-
+  会话页接入轨迹第三视图
+
+
+  轨迹档 1 目前只挂在 dev 路由 /proto/session-trajectory，产品会话页只有「对话 / 全部（进度）」两视图。D-022
+  原始意图即「作为第三个视图接入、不替换现有进度视图」，本次接进产品会话页，数据复用页面已加载的轮/段数据，零后端改动。
+
+
+  成功标准：
+
+  - 会话页视图切换出现第三个「轨迹」按钮，选中后渲染三泳道时间轴（输入 / 模型 / 工具）+ 共享轴 + 账本 + 检查器；「对话」「全部（进度）」两视图行为逐字不变
+
+  - 轨迹数据由当前会话已加载的 SessionTurnView[] 派生（零新增网络请求、零后端改动、零 API 变更）
+
+  - 无可用时序数据时显示显式空态提示，不白屏、不伪造条
+
+  - tsc 退出 0；既有 turn-segment-views 93 / turn-time-display 8 / session-list-panel 119 / trajectory 61 例不回归，新增第三视图渲染用例全绿
+autopilot: false
+prestage_ack: true
+baseline_commit: 3da9e8d44310bfa5fe016e010780e4c9606a726e
+updatedAt: '2026-10-21T23:42:23.154Z'
+cross_baselines:
+  sillyspec: 0503cf4632803e7b6b9e5efd5df10b2b32b0263e
+baseline_sha256: 4223a5d6061b019ef9d85697a888c76f0d7c17e2905803e0c1432acbdeebaa76
+spec_approved: true
+spec_approved_at: '2026-10-21T23:31:02.285Z'
+spec_approved_by: dsh-handoff-session-page
+spec_approved_channel: user-confirmed
+spec_attested_by: dsh-handoff-session-page
+batch_ticked: true
+upgrade_reason: verify 实测失败（实测失败：test（命令与输出尾部见上；修复后重跑 --done 不丢进度））——失败自动升厚
+
