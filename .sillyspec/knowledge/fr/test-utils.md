@@ -262,6 +262,7 @@ created_at: 2026-10-16T01:30:35.950Z
 <!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
 - row: 2026-10-21-files-refresh-spinner:flow:测试绑定FR-01
   tests: frontend/src/components/__tests__/change-file-tree-autorefresh.test.tsx「点击刷新：同步进行中按钮禁用+转圈，返回后恢复」
+
 ## FR-test-utils-015 拖拽吸附到边界容器左侧后,停靠组内容左对齐;吸附右侧后保持右对齐
 变更：2026-10-20-pill-dock-left-align
 状态：active
@@ -476,4 +477,110 @@ created_at: 2026-10-16T01:30:35.950Z
   confirmed_at: null
   source_change: 2026-10-21-task-wakeup-restore
   source_change: 2026-10-20-pill-dock-drag-align-keep
+  status: active
+
+## FR-test-utils-023 「进度」视图内提供「时间线 / 轨迹」呈现方式开关；默认「时间线」＝现状零变化，「对话」视图不出现该开关
+变更：2026-10-22-session-trajectory-view
+状态：active
+摘要：主路径；默认与零回归
+场景正文：
+- 场景：主路径 — Given 一个有历史轮的会话；When 切到「进度」并点「轨迹」；Then 出现 `data-testid="trajectory-pane"`（含恰 3 个 `traj
+- 场景：默认与零回归 — Given 同一会话；When 切到「进度」（默认「时间线」）；Then `turn-block` 照常渲染且不出现轨迹面板。And When 处于「对话」；Then 页面
+全文：.sillyspec/changes/archive/2026-10-22-session-trajectory-view/requirements.md#FR-01
+最近确认：4553d4410c53ba2798b50ef66c742190e10f5289
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-22-session-trajectory-view:flow:测试绑定FR-01
+  tests: frontend/src/components/daemon/__tests__/turn-timeline-trajectory-view.test.tsx
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-22-session-trajectory-view
+  status: active
+
+## FR-test-utils-024 轨迹数据由当前会话已加载的 SessionTurnView[] 派生（零新增网络请求、零后端改动、零 API 变更）
+变更：2026-10-22-session-trajectory-view
+状态：active
+摘要：主路径
+场景正文：
+- 场景：主路径 — 
+全文：.sillyspec/changes/archive/2026-10-22-session-trajectory-view/requirements.md#FR-02
+最近确认：4553d4410c53ba2798b50ef66c742190e10f5289
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-22-session-trajectory-view:flow:测试绑定FR-02
+  tests: frontend/src/components/daemon/trajectory/__tests__/build-trajectory.test.ts | frontend/src/components/daemon/trajectory/__tests__/from-turn-views.test.ts
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-22-session-trajectory-view
+  status: active
+
+## FR-test-utils-025 `/runs` 的 `timing` 透传到轮视图：有 TTFT/attempt 采样时模型泳道标「真实占用」，无采样标「近似」，不伪造
+变更：2026-10-22-session-trajectory-view
+状态：active
+摘要：主路径
+场景正文：
+- 场景：主路径 — 
+全文：.sillyspec/changes/archive/2026-10-22-session-trajectory-view/requirements.md#FR-03
+最近确认：4553d4410c53ba2798b50ef66c742190e10f5289
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-22-session-trajectory-view:flow:测试绑定FR-03
+  tests: frontend/src/components/daemon/__tests__/page-helpers-enrich-api-duration.test.ts | frontend/src/components/daemon/__tests__/runtime-session-helpers.test.tsx | frontend/src/components/daemon/__tests__/turn-timeline-trajectory-view.test.tsx | frontend/src/components/daemon/trajectory/__tests__/from-turn-views.test.ts
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-22-session-trajectory-view
+  status: active
+
+## FR-test-utils-026 无可用时序数据时显示显式空态提示，不白屏、不伪造条
+变更：2026-10-22-session-trajectory-view
+状态：active
+摘要：主路径
+场景正文：
+- 场景：主路径 — Given 轮视图缺 `turnStartedAt`、缺 `replyAt` 且无段；When 打开「轨迹」；Then 出现空态提示且不出现三泳道面板、不出现轮块。
+全文：.sillyspec/changes/archive/2026-10-22-session-trajectory-view/requirements.md#FR-04
+最近确认：4553d4410c53ba2798b50ef66c742190e10f5289
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-22-session-trajectory-view:flow:测试绑定FR-04
+  tests: frontend/src/components/daemon/__tests__/turn-timeline-trajectory-view.test.tsx | frontend/src/components/daemon/trajectory/__tests__/from-turn-views.test.ts
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-22-session-trajectory-view
+  status: active
+
+## FR-test-utils-027 tsc 退出 0；既有 trajectory 61 / turn-segment-views / turn-time-display / session-list-panel 用例不回归，新增适配器与呈现开关用例全绿
+变更：2026-10-22-session-trajectory-view
+状态：active
+摘要：主路径
+场景正文：
+- 场景：主路径 — Given 变更落盘；When 跑 `tsc --noEmit` 与 `src/components/daemon` + `src/pages/sessions` + `s
+全文：.sillyspec/changes/archive/2026-10-22-session-trajectory-view/requirements.md#FR-05
+最近确认：4553d4410c53ba2798b50ef66c742190e10f5289
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-22-session-trajectory-view:flow:测试绑定FR-05
+  tests: frontend/src/components/daemon/__tests__/turn-timeline-trajectory-view.test.tsx | frontend/src/components/daemon/trajectory/__tests__/from-turn-views.test.ts
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-22-session-trajectory-view
   status: active

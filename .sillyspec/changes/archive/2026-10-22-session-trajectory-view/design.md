@@ -30,7 +30,7 @@ created_at: 2026-10-21T22:49:03.254Z
 
 3. 切换/生命周期：会话、请求或变更中途切换/中断时状态是否安全？
 
-切「轨迹」只换进度容器内的渲染分支，`TurnTimeline` 的 SSE 订阅、贴底跟随、prepend 分页逻辑全未动；`timing` 透传只在既有 `enrichDisplayTurns` 里加字段，不新增 effect、不改轮状态机。`progressLens` 是组件本地 state（不持久化），切视图/重进回到「时间线」，不存在上一次选择劫持下次打开的问题。
+切「轨迹」只换进度容器内的渲染分支，`TurnTimeline` 的 SSE 订阅、贴底跟随、prepend 分页逻辑全未动；`timing` 透传只在既有 `enrichDisplayTurns` 里加字段，不新增 effect、不改轮状态机。`progressLens` 是组件本地 state（**不持久化**）：**换会话 / 重进页面**（`TurnTimeline` 以 `key={sessionId}` 重挂载）回到「时间线」；**同一会话内**切「对话」再切回「进度」会保留上次的「轨迹」选择——这是显式取舍（跨会话不劫持、同会话内不打断用户视线），R-21 记录评审要求补的措辞澄清。
 
 2. 并发写：两个执行体同时操作同一数据/文件会发生什么？
 
@@ -49,15 +49,10 @@ created_at: 2026-10-21T22:49:03.254Z
 
 ## 文件变更清单（自声明面——收口对账用，与提交面逐项对应）
 
-**生产代码（4）**
-
 - `frontend/src/components/daemon/trajectory/build-trajectory.ts`（改）——抽出并导出 `assembleTrajectory`，`buildTrajectory` 改为调用它（行为零变化）。
 - `frontend/src/components/daemon/trajectory/from-turn-views.ts`（新增）——`trajectoryFromTurnViews(turns, opts?)` 纯函数适配器（含 `timing` 按 runId 收集）。
 - `frontend/src/components/daemon/turn-timeline.tsx`（改）——新增 `TrajectoryPane`（含空态）、进度视图呈现开关（`progressLens`）、`SessionTurnView.timing` 可选字段。
 - `frontend/src/components/daemon/session-panel/page-helpers.tsx`（改）——`enrichDisplayTurns` 透传 `/runs` 的 `timing`，身份稳定守卫按缺省归一比较。
-
-**测试（2 新增）**
-
 - `frontend/src/components/daemon/trajectory/__tests__/from-turn-views.test.ts`（新增，9 例）。
 - `frontend/src/components/daemon/__tests__/turn-timeline-trajectory-view.test.tsx`（新增，5 例）。
 

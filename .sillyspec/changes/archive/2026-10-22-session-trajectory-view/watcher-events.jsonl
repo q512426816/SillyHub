@@ -1,0 +1,15 @@
+{"ts":1792623884586,"kind":"file-update","stage":"requirements","detail":"requirements.md 内容变更","provisional":true}
+{"ts":1792623902984,"kind":"file-update","stage":"design","detail":"design.md 内容变更","provisional":true}
+{"ts":1792623911167,"kind":"file-update","stage":"design","detail":"design.md 内容变更","provisional":true}
+{"ts":1792624634647,"kind":"file-update","stage":"requirements","detail":"requirements.md 内容变更","provisional":true}
+{"ts":1792624656680,"kind":"file-update","stage":"design","detail":"design.md 内容变更","provisional":true}
+{"ts":1792624704574,"kind":"file","stage":"proposal","detail":"decisions.md 出现","provisional":true}
+{"ts":1792624711829,"kind":"file-update","stage":"tasks","detail":"tasks.md 内容变更","provisional":true}
+{"ts":1792624711829,"kind":"task-done","stage":"tasks","detail":"checked 0→5","provisional":true}
+{"ts":1792624719542,"kind":"file-update","stage":"proposal","detail":"proposal.md 内容变更","provisional":true}
+{"ts":1792624974313,"kind":"commit","stage":null,"detail":"1cb0742d4","provisional":true}
+{"ts":1792625459216,"kind":"file-update","stage":"design","detail":"design.md 内容变更","provisional":true}
+{"ts":1792625621072,"kind":"gate-run","stage":"verify","detail":"门实测 failed（129.4s） · 20261021233338","provisional":true}
+{"ts":1792625978529,"kind":"gate-run","stage":"verify","detail":"门实测 failed（89.8s） · 20261021233936","provisional":true}
+{"ts":1792626010629,"kind":"commit","stage":null,"detail":"c4976d205","provisional":true}
+{"ts":1792626134411,"kind":"config-change","stage":null,"detail":"本地配置 local.yaml 有变更（内容不上行）","provisional":true}
