@@ -15,6 +15,8 @@ import {
   formToCreate,
   formToUpdate,
   listProviders,
+  setDefaultProvider,
+  unsetDefaultProvider,
   updateProvider,
   type LlmProviderFormValues,
   type LlmProviderRead,
@@ -27,11 +29,14 @@ import { UsageFooter } from "./usage-footer";
  * 「我的供应商」区块（task-11）。
  *
  * 列表 + 新建/编辑表单 + 删除，配置跟随账号、所有工作空间通用（D-002）。
- * 供应商生效方式为 /sessions 会话级选择（session_llm_provider_id），本页只做
- * 纯 CRUD 管理，不再有全局启动/停止（set-default）概念（ql-20260820-006）。
+ * 供应商生效方式：/sessions 会话级显式选择（session_llm_provider_id）优先；
+ * 未显式选择时经 claim 链路注入本页设置的默认供应商（2026-10-21-provider-set-default-ui
+ * 恢复「设为默认」入口——2026-08-20 ql-20260820-006 删除后 is_default 长期无 UI 可设，
+ * 会话默认恒落本机凭证）。默认变更仅对新会话生效（D-002：后端热切换已移除，
+ * 运行中会话独立）。
  *
  * 状态机：list ↔ form（create/edit）。form 打开时只渲染表单，取消回列表。
- * 操作后即时 reload 列表（删除/新建/编辑均刷新）。
+ * 操作后即时 reload 列表（删除/新建/编辑/设默认均刷新；探测失败不刷新）。
  */
 
 /** 角色显示顺序，用于模型摘要。 */
@@ -68,6 +73,7 @@ export function LlmProviderSection() {
   const [error, setError] = useState<string | null>(null);
   const [formMode, setFormMode] = useState<FormMode>(null);
   const [submitting, setSubmitting] = useState(false);
+  const [switchingId, setSwitchingId] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -101,6 +107,42 @@ export function LlmProviderSection() {
       notify.error(err, formMode?.kind === "edit" ? "更新失败" : "创建失败");
     } finally {
       setSubmitting(false);
+    }
+  };
+
+  const handleSetDefault = async (p: LlmProviderRead) => {
+    setSwitchingId(p.id);
+    try {
+      const result = await setDefaultProvider(p.id);
+      if (!result.switched) {
+        // 后端凭证探测失败：未置位，列表状态不变（FR-01 场景）。
+        // errMessage 只认 Error 实例，包一层让后端中文 error 原样透出。
+        notify.error(new Error(result.error ?? "凭证探测失败，未设为默认"));
+        return;
+      }
+      if (result.litellm_registered === false) {
+        // openai 格式 LiteLLM 网关注册失败（后端 task-09 既有降级契约）。
+        notify.error("网关注册失败，Claude Code 暂不可用，请重试或联系管理员");
+      }
+      notify.success("已设为默认，新会话生效");
+      await load();
+    } catch (err) {
+      notify.error(err, "设为默认失败");
+    } finally {
+      setSwitchingId(null);
+    }
+  };
+
+  const handleUnsetDefault = async (p: LlmProviderRead) => {
+    setSwitchingId(p.id);
+    try {
+      await unsetDefaultProvider(p.id);
+      notify.success("已取消默认，新会话起回落默认链");
+      await load();
+    } catch (err) {
+      notify.error(err, "取消默认失败");
+    } finally {
+      setSwitchingId(null);
     }
   };
 
@@ -182,7 +224,8 @@ export function LlmProviderSection() {
     >
       <p className="mb-3 text-[11px] text-muted-foreground">
         管理你用于 Claude Code 的 LLM 供应商。配置跟随你的账号，<b>所有工作空间通用</b>；
-        在 <b>/sessions 新建会话时选择</b>哪个供应商生效。
+        在 <b>/sessions 新建会话时选择</b>哪个供应商生效，未选择时用你在此
+        <b>设为默认</b>的供应商（未设默认走本机凭证）。设默认只对新会话生效，运行中的会话不变。
         填好 API Key 和请求地址就能用；模型映射等高级项默认折叠，用中转站时再展开。
       </p>
 
@@ -223,6 +266,9 @@ export function LlmProviderSection() {
               >
                 <div className="flex flex-wrap items-center gap-2">
                   <span className="text-sm font-medium">{p.name}</span>
+                  {p.is_default && (
+                    <Badge title="未显式选供应商的会话默认使用它（仅新会话生效）">默认</Badge>
+                  )}
                   {(p.agent_kinds ?? []).map((k) => (
                     <Badge key={k} variant="warning">
                       {k}
@@ -239,6 +285,27 @@ export function LlmProviderSection() {
                     </Badge>
                   )}
                   <div className="ml-auto flex items-center gap-1.5">
+                    {p.is_default ? (
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        className="h-7 text-[11px]"
+                        disabled={switchingId === p.id}
+                        onClick={() => void handleUnsetDefault(p)}
+                      >
+                        取消默认
+                      </Button>
+                    ) : (
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        className="h-7 text-[11px]"
+                        disabled={switchingId === p.id}
+                        onClick={() => void handleSetDefault(p)}
+                      >
+                        设为默认
+                      </Button>
+                    )}
                     <Button
                       variant="outline"
                       size="sm"
