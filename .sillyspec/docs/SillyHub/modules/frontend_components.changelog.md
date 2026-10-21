@@ -101,3 +101,4 @@ created_at: 2026-08-30 22:23:33
 | 2026-10-20 | 2026-10-20-session-status-live-sync | 左侧会话状态标签与右侧实时同步 |
 | 2026-10-21 | 2026-10-21-gitlog-quotepath-fix | 修复git日志非ASCII路径展示与空diff |
 | 2026-10-21 | 2026-10-21-overview-card-mainflow-scan | 总览卡主管线去scan并隐藏thin零步骤 |
+| 2026-10-21 | 2026-10-21-mobile-scan-birth-cleanup | 移动端与变更中心scan起步口径清零 |

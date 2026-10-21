@@ -144,3 +144,4 @@
 | 2026-10-20 | 2026-10-21-proto-data-exposure-guard | 预览真实会话数据移出静态目录并补 gitignore |
 | 2026-10-21 | 2026-10-21-gitlog-quotepath-fix | 修复git日志非ASCII路径展示与空diff |
 | 2026-10-21 | 2026-10-21-overview-card-mainflow-scan | 总览卡主管线去scan并隐藏thin零步骤 |
+| 2026-10-21 | 2026-10-21-mobile-scan-birth-cleanup | 移动端与变更中心scan起步口径清零 |

@@ -7225,3 +7225,66 @@ superseded_by：FR-auth-003
 摘要：主路径
 全文：.sillyspec/changes/archive/2026-10-19-knowledge-inbox-triage/requirements.md#FR-04
 最近确认：db6542205b5982cd4adc16dc5af45b316446a8a8
+
+## FR-backend-008 移动端变更详情 stepper 阶段序列无 scan（brainstorm→archive 五段口径）
+变更：2026-10-21-mobile-scan-birth-cleanup
+状态：active
+摘要：步骤条五段
+场景正文：
+- 场景：步骤条五段 — Given 一个 current_stage='plan' 的变更在移动端详情打开；When 渲染步骤条；Then 依次出现「需求分析/规划/执行/验证/归档」五个标签且不含「扫描」，当前阶段「规划」高亮。
+全文：.sillyspec/changes/archive/2026-10-21-mobile-scan-birth-cleanup/requirements.md#FR-01
+最近确认：bbc224288e8daa873a122695fc50a3ad418d9ce7
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-21-mobile-scan-birth-cleanup:flow:测试绑定FR-01
+  tests: frontend/src/components/mobile/mobile-change-detail.test.tsx「步骤条：横向滚动容器 + 六阶段标签 + 当前阶段高亮 + 非线性阶段降级不渲染」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-21-mobile-scan-birth-cleanup
+  status: active
+
+## FR-backend-009 变更中心与移动卡片两处 current_stage 缺省兜底为 brainstorm，缺失兜底不再显 scan
+变更：2026-10-21-mobile-scan-birth-cleanup
+状态：active
+摘要：缺省兜底
+场景正文：
+- 场景：缺省兜底 — Given current_stage=null 的变更行；When 渲染阶段徽标；Then 显示「需求分析」（brainstorm），不显示「扫描」。
+全文：.sillyspec/changes/archive/2026-10-21-mobile-scan-birth-cleanup/requirements.md#FR-02
+最近确认：bbc224288e8daa873a122695fc50a3ad418d9ce7
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-21-mobile-scan-birth-cleanup:flow:测试绑定FR-02
+  tests: frontend/src/components/mobile/mobile-change-card.test.tsx「current_stage 缺省 → 降级 scan 标签（与桌面列降级口径一致）」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-21-mobile-scan-birth-cleanup
+  status: active
+
+## FR-backend-010 受影响组件测试更新后全绿
+变更：2026-10-21-mobile-scan-birth-cleanup
+状态：active
+摘要：测试面回归
+场景正文：
+- 场景：测试面回归 — Given 组件与测试改毕；When 运行两个测试文件；Then 全部用例通过、零失败。
+全文：.sillyspec/changes/archive/2026-10-21-mobile-scan-birth-cleanup/requirements.md#FR-03
+最近确认：bbc224288e8daa873a122695fc50a3ad418d9ce7
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-21-mobile-scan-birth-cleanup:flow:测试绑定FR-03
+  tests: frontend/src/components/mobile/mobile-change-card.test.tsx | frontend/src/components/mobile/mobile-change-detail.test.tsx「步骤条：横向滚动容器 + 六阶段标签 + 当前阶段高亮 + 非线性阶段降级不渲染」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-21-mobile-scan-birth-cleanup
+  status: active
