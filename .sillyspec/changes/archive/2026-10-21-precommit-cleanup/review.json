@@ -1,0 +1,23 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-21-precommit-cleanup",
+  "reviewer": "subagent",
+  "verdict": "PASS",
+  "reviewedAgainst": "68ae72e85d8261a4c49924cc6edaec5dc61d4f4c",
+  "findings": [
+    {
+      "severity": "P3",
+      "title": "design.md 工作区存在未提交微调：.tmp/hooks 从 git 交付清单表移为尾注",
+      "evidence": "git diff 显示工作区相对 HEAD 68ae72e8 将「| 删 | .tmp/hooks/ |」表行移除并追加尾注（.tmp/hooks 为 gitignored 运行时残留的物理删除，无 git 提交面）。方向合理（gitignored 文件不入 git 交付清单表）、未撤回任何承诺（删除动作与零引用核验仍完整记载于做法概述与 FR-01），但若不随收口入库，归档件与工作区将持续漂移。",
+      "location": ".sillyspec/changes/2026-10-21-precommit-cleanup/design.md:45-51"
+    }
+  ],
+  "dimensionNotes": {
+    "乱序": "ok",
+    "并发": "ok",
+    "切换": "ok",
+    "作用域": "ok",
+    "披露边界": "边界已裁决：可接受——风险①（search 索引非即时）：FR-03 以 search 实证命中为验收门兜底，未命中可重跑触发同步，自愈路径明确；风险②（INDEX 锚点 slug 点击 404）：检索主路径为 CLI 关键词路由不依赖锚点，影响仅手工点击面且有既有格式对照缓解；死路①（AGENTS.md 弃选）：环境事实与流程规则分面治理理由成立，按需路由优于全局横幅注入；死路②（.tmp/hooks 双通道备份弃选）：非官方通道留存即诱导复用，与 FR-01 统一官方链目标一致"
+  },
+  "reviewedAt": "2026-10-21T01:42:30Z"
+}

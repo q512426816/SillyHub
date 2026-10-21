@@ -44,6 +44,7 @@ created_at: 2026-10-21T01:35:13.760Z
 
 | 操作 | 路径 | 说明 |
 |---|---|---|
-| 删 | .tmp/hooks/ | gitignored 会话等价 hook 面（官方链已替代；不入库，grep 核验零引用留痕提交消息） |
 | 改 | .sillyspec/knowledge/known-issues.md | 尾部追加 🟡「agent 沙箱把 python.exe 子树 IL 降为 Low」条目（症状/根因/WSL bash 误解析坑/处置） |
 | 改 | .sillyspec/knowledge/INDEX.md | known-issues 小节加路由行（沙箱/Low IL/msys/0xC0000022/pre-commit/WSL bash/PRE_COMMIT_HOME 关键词） |
+
+（`.tmp/hooks/` 为 gitignored 运行时残留的物理删除，无 git 提交面——非交付条目，删除动作与零引用核验留痕于做法概述与 FR-01、交付提交消息。）

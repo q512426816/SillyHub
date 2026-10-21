@@ -7146,3 +7146,24 @@ superseded_by：FR-app-workspace-pages-002
   confirmed_at: null
   source_change: 2026-10-21-overview-card-mainflow-scan
   status: active
+
+## FR-frontend-026 .tmp/hooks 会话等价 hook 面删除，仓内无任何链路再引用它（配置注释与知识文档统一指向官方链 + export PRE_COMMIT_HOME 会话指引）
+变更：2026-10-21-precommit-cleanup
+状态：active
+摘要：主路径
+全文：.sillyspec/changes/archive/2026-10-21-precommit-cleanup/requirements.md#FR-01
+最近确认：68ae72e85d8261a4c49924cc6edaec5dc61d4f4c
+
+## FR-frontend-027 .sillyspec/knowledge 新增「agent 沙箱 python 子树 Low IL 限制」条目：症状（python→msys 嵌套 0xC0000022 崩、profile 缓存写被拒）、根因（沙箱驱动降 IL、token 无 CodexSandboxUsers、DACL 修复无效）、WSL bash 误解析坑（python spawn bash 命中 System32 WSL 而非 Git Bash）、处置（去 msys 入口 + PRE_COMMIT_HOME 会话指引），INDEX 可路由
+变更：2026-10-21-precommit-cleanup
+状态：active
+摘要：主路径
+全文：.sillyspec/changes/archive/2026-10-21-precommit-cleanup/requirements.md#FR-02
+最近确认：68ae72e85d8261a4c49924cc6edaec5dc61d4f4c
+
+## FR-frontend-028 sillyspec knowledge search 关键词实证命中；交付提交走默认官方 hook 链留痕
+变更：2026-10-21-precommit-cleanup
+状态：active
+摘要：主路径
+全文：.sillyspec/changes/archive/2026-10-21-precommit-cleanup/requirements.md#FR-03
+最近确认：68ae72e85d8261a4c49924cc6edaec5dc61d4f4c
