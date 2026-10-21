@@ -879,7 +879,7 @@ async def pending_run_start_sweep_once(session: AsyncSession) -> int:
     # -Envelope：event/status/exit_code/error_code/input/output_tokens）。
     final_rows = (
         await session.execute(
-            select(
+            select(  # type: ignore[misc]  # mypy overload 组合爆炸（多列 select 的 union 展开上限，同仓 redis stub 先例）
                 AgentRun.id,
                 AgentRun.agent_session_id,
                 AgentRun.lease_id,
