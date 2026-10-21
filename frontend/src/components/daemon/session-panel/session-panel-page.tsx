@@ -4038,9 +4038,17 @@ export function SessionPanelPage({
     },
     [turnState.turns],
   );
-  const { arm: armInterruptFeedbackTimeout } = useInterruptFeedbackTimeout(
-    handleInterruptFeedbackTimeout,
-  );
+  const { arm: armInterruptFeedbackTimeout, clear: clearInterruptFeedbackTimeout } =
+    useInterruptFeedbackTimeout(handleInterruptFeedbackTimeout);
+  // FR-04 字面要求：该轮终态到达即清定时器（到点裁决兜底仍在，双保险不误报）。
+  const interruptArmedRunIdRef = useRef<string | null>(null);
+  useEffect(() => {
+    const armed = interruptArmedRunIdRef.current;
+    if (armed !== null && !isTurnStillInterrupting(turnState.turns, armed)) {
+      clearInterruptFeedbackTimeout();
+      interruptArmedRunIdRef.current = null;
+    }
+  }, [turnState.turns, clearInterruptFeedbackTimeout]);
 
   const handleInterrupt = useCallback(async () => {
     // task-03（R-01）：预会话态无可打断轮（按钮本就禁用，防御性短路）。
@@ -4074,8 +4082,9 @@ export function SessionPanelPage({
       // turn 终态由 SSE turn_completed 决定；session 仍 active。
       // 2026-10-21-daemon-zombie-turn FR-04：15s 超时回退——打断信号已送达但
       // 终态迟迟不到（daemon 侧空转 / 僵尸轮）时回退 running + 提示，避免
-      // 永久停在「打断中」。到点时该轮已非 interrupting（终态已到/已处理）
-      // 则回调内自查 no-op，天然免除对终态到达的显式清定时器依赖。
+      // 永久停在「打断中」。终态到达由上方 effect 清定时器（规格字面要求），
+      // 到点仍以 isTurnStillInterrupting 二次裁决（双保险不误报）。
+      interruptArmedRunIdRef.current = localRunId;
       armInterruptFeedbackTimeout(localRunId);
     } catch (err) {
       const apiErr = err as ApiError;
