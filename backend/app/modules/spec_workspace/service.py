@@ -695,6 +695,20 @@ class SpecWorkspaceService:
         since`` 的行（SQL NULL 比较语义天然排除迁移前存量行，见 model 列注释）。
         增量与全量同构返回，调用方以 since 是否传参选择形态。
         """
+        # 先读 spec_version 再读行（评审 P2-2 修复）：PG READ COMMITTED 下每条
+        # 语句独立快照——若先读行后读版本，apply commit 落在两语句之间会出现
+        # 「旧行集 + 新 spec_version」，since 客户端游标前移却没拿到本批行（跳行，
+        # 且客户端单调性检查测不出）。调换后最坏是「新行集 + 旧 spec_version」
+        # ——多出的行是本批已盖章行（landing_version > 旧版本），下次增量幂等
+        # 重发，无害。
+        current_version = (
+            await self._session.execute(
+                select(SpecWorkspace.spec_version).where(
+                    SpecWorkspace.workspace_id == workspace_id,
+                )
+            )
+        ).scalar_one_or_none()
+        spec_version: int = int(current_version or 0)
         stmt = select(SpecFileManifest).where(
             SpecFileManifest.workspace_id == workspace_id,
         )
@@ -710,14 +724,6 @@ class SpecWorkspaceService:
             }
             for row in rows
         }
-        current_version = (
-            await self._session.execute(
-                select(SpecWorkspace.spec_version).where(
-                    SpecWorkspace.workspace_id == workspace_id,
-                )
-            )
-        ).scalar_one_or_none()
-        spec_version: int = int(current_version or 0)
         return files, spec_version
 
     async def ensure_spec_workspace(self, workspace_id: uuid.UUID) -> SpecWorkspace:
@@ -1348,8 +1354,13 @@ class SpecWorkspaceService:
         paths 的行 platform_deleted 置 False、exists 置 True（version 不动，下一轮
         常规同步自然重定基线），并同步关闭开放的 spec-sync 冲突行（heal 即人工
         宣告已解决）。非墓碑行跳过计入 skipped（幂等重放安全）。
+
+        2026-10-21-spec-manifest-incremental（评审 P2-1 修复）：healed 行盖章
+        landing_version 并 bump spec_version（同 commit）——本方法也是清单写点，
+        exists 翻转对增量游标消费方必须可见，否则 healed 行在增量侧永久持墓碑。
+        row.version 维持不动（既有语义：下一轮常规同步自然重定基线）。
         """
-        await self.get(workspace_id)
+        spec_ws = await self.get(workspace_id)
         rows = (
             (
                 await self._session.execute(
@@ -1369,6 +1380,7 @@ class SpecWorkspaceService:
                 "清单中存在工作区未登记的路径。",
                 path=missing[0],
             )
+        landing_version = (spec_ws.spec_version or 0) + 1
         healed: list[str] = []
         skipped: list[str] = []
         for p in paths:
@@ -1376,10 +1388,13 @@ class SpecWorkspaceService:
             if row.platform_deleted or row.exists is False:
                 row.platform_deleted = False
                 row.exists = True
+                row.landing_version = landing_version
                 row.updated_at = datetime.now(UTC)
                 healed.append(p)
             else:
                 skipped.append(p)
+        if healed:
+            spec_ws.spec_version = landing_version
         await self._session.commit()
         log.info(
             "spec_workspace.manifest_healed",

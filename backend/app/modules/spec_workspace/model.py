@@ -177,9 +177,9 @@ class SpecFileManifest(BaseModel, table=True):
     # landing_version > since 过滤增量行。与行级 ``version``（每行独立 +1 的
     # 乐观锁谱系，跨行不可比）语义不同：本列跨行单调可比。NULL=迁移前存量行，
     # 永不进增量流（只经全量清单出场），语义自洽无需回填。全部清单写点
-    # （apply_ops / _write_spec_root 后逐行对齐 / soft_delete_change_dir）
-    # 必须在与 bump spec_version 同一事务内盖章——新增清单写点必须盖章，
-    # 否则增量消费方永远看不到该写点的行变化。
+    # （apply_ops / _write_spec_root 后逐行对齐 / soft_delete_change_dir /
+    # heal_manifest_tombstones）必须在与 bump spec_version 同一事务内盖章
+    # ——新增清单写点必须盖章，否则增量消费方永远看不到该写点的行变化。
     landing_version: int | None = Field(
         default=None,
         sa_column=Column(Integer, nullable=True),
