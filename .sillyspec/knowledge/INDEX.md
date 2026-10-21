@@ -55,6 +55,7 @@
 
 - daemon|python|node|重写|typescript → [sillyhub-daemon 从 Python 重写为 Node.js](known-issues.md#-sillyhub-daemon-于-2026-06-14-从-python-重写为-nodejs)
 - ci|hook|git-add|绕过|pretooluse → [CI hook 复合命令可绕过 claude PreToolUse 层](known-issues.md#-ci-hook-复合命令可绕过-claude-pretooluse-层)
+- 沙箱|Low IL|python 子树|msys|0xC0000022|NtCreateDirectoryObject|pre-commit|WSL bash|PRE_COMMIT_HOME|CodexSandboxUsers → [agent 沙箱把 python.exe 子树 IL 降为 Low：python→msys 嵌套必崩、profile 写被驱动白名单拦（含 WSL bash 误解析坑）](known-issues.md#agent-沙箱把-pythonexe-子树-il-降为-lowpythonmsys-嵌套必崩profile-写被驱动白名单拦含-wsl-bash-误解析坑)
 - daemon|session|卡死|重启|recovery|已修复 → [daemon 重启 session 恢复已修复](known-issues.md#-daemon-重启-session-恢复已修复gap-83--commit-40e21d3)
 - agentrunlog|metadata|日志|submit-messages → [AgentRunLog 无 metadata 列](known-issues.md#-agentrunlog-无-metadata-列--三层日志-metadata-丢失)
 - daemon|实例|taskkill|pid → [本机可能存在多个 daemon 实例](known-issues.md#-本机可能存在多个-daemon-实例)
