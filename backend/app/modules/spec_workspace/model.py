@@ -142,6 +142,9 @@ class SpecFileManifest(BaseModel, table=True):
             unique=True,
         ),
         Index("ix_spec_manifest_version", "version"),
+        # 2026-10-21-spec-manifest-incremental task-01：增量清单过滤
+        # （landing_version > since 且带 workspace_id）的支撑索引。
+        Index("ix_spec_manifest_ws_landing", "workspace_id", "landing_version"),
     )
 
     id: uuid.UUID = Field(
@@ -168,6 +171,18 @@ class SpecFileManifest(BaseModel, table=True):
     exists: bool = Field(
         default=True,
         sa_column=Column(Boolean, nullable=False),
+    )
+    # 2026-10-21-spec-manifest-incremental task-01：行最后写入时的工作区
+    # spec_version 印章——GET /api/changes/-/spec-manifest?since=<v> 按
+    # landing_version > since 过滤增量行。与行级 ``version``（每行独立 +1 的
+    # 乐观锁谱系，跨行不可比）语义不同：本列跨行单调可比。NULL=迁移前存量行，
+    # 永不进增量流（只经全量清单出场），语义自洽无需回填。全部清单写点
+    # （apply_ops / _write_spec_root 后逐行对齐 / soft_delete_change_dir）
+    # 必须在与 bump spec_version 同一事务内盖章——新增清单写点必须盖章，
+    # 否则增量消费方永远看不到该写点的行变化。
+    landing_version: int | None = Field(
+        default=None,
+        sa_column=Column(Integer, nullable=True),
     )
     # Change 2026-08-29-change-delete-closure-and-spec-pull task-01（design §5.4）：
     # 平台删除墓碑。变更中心删除入口（task-06）把 changes/{name}/ 下行置 TRUE 后，
