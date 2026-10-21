@@ -673,22 +673,36 @@ class SpecWorkspaceService:
             )
         return result
 
-    async def get_manifest(self, workspace_id: uuid.UUID) -> dict[str, dict[str, str | int | bool]]:
+    async def get_manifest(
+        self,
+        workspace_id: uuid.UUID,
+        since: int | None = None,
+    ) -> tuple[dict[str, dict[str, str | int | bool]], int]:
         """读服务器权威 per-file 清单（Change 2026-08-17-spec-file-incremental-sync task-01，design §5.3）。
 
         查询该 workspace 的 ``SpecFileManifest`` 全部行（**含 ``exists=False`` 的软删
         行**——CLI diff 据此识别服务器侧已删文件并下发 delete 对齐），返回
-        ``{path: {"hash": content_hash, "version": version, "exists": exists}}``。
-        按 path 排序保证响应确定性（便于 CLI diff / 人工核对）。纯读方法，不触碰
-        清单行——唯一写者仍是 ``apply_ops``（D-011 单写者语义不变）。
+        ``(files, spec_version)``：files 为 ``{path: {"hash": content_hash,
+        "version": version, "exists": exists}}``（按 path 排序保证响应确定性，
+        便于 CLI diff / 人工核对），spec_version 为工作区当前权威版本
+        （无 spec_workspaces 行时 0，保持既有「空清单」行为不 404）。
+        纯读方法，不触碰清单行——唯一写者仍是 ``apply_ops``（D-011 单写者
+        语义不变；2026-10-21 后另有 _write_spec_root 对齐块/soft_delete_change_dir
+        两写点，均盖章 landing_version）。
+
+        2026-10-21-spec-manifest-incremental task-03：``since``（工作区
+        spec_version 游标）非空时走**增量过滤**——只返回 ``landing_version >
+        since`` 的行（SQL NULL 比较语义天然排除迁移前存量行，见 model 列注释）。
+        增量与全量同构返回，调用方以 since 是否传参选择形态。
         """
-        stmt = (
-            select(SpecFileManifest)
-            .where(SpecFileManifest.workspace_id == workspace_id)
-            .order_by(SpecFileManifest.path)
+        stmt = select(SpecFileManifest).where(
+            SpecFileManifest.workspace_id == workspace_id,
         )
+        if since is not None:
+            stmt = stmt.where(SpecFileManifest.landing_version > since)
+        stmt = stmt.order_by(SpecFileManifest.path)
         rows = (await self._session.execute(stmt)).scalars().all()
-        return {
+        files = {
             row.path: {
                 "hash": row.content_hash,
                 "version": row.version,
@@ -696,6 +710,14 @@ class SpecWorkspaceService:
             }
             for row in rows
         }
+        spec_version = (
+            await self._session.execute(
+                select(SpecWorkspace.spec_version).where(
+                    SpecWorkspace.workspace_id == workspace_id,
+                )
+            )
+        ).scalar_one_or_none() or 0
+        return files, spec_version
 
     async def ensure_spec_workspace(self, workspace_id: uuid.UUID) -> SpecWorkspace:
         """Ensure a SpecWorkspace exists for the given workspace_id (D-009).
@@ -1774,6 +1796,14 @@ class SpecWorkspaceService:
             .all()
         )
         manifest_by_path = {r.path: r for r in manifest_rows}
+        # 2026-10-21-spec-manifest-incremental task-02：本对齐块在上方 spec_version
+        # bump 的 commit **之后**执行（独立短事务）——若沿用已 bump 的旧值盖章，
+        # GET 在两 commit 之间取到新 spec_version 而行未盖章，since 消费方会永久
+        # 漏掉本批对齐行。对齐块有行变化时自 bump 一次（新值 = 当前值 +1）并以其
+        # 盖章；版本是新鲜度信号非变更计数，多 bump 一次至多触发一次冗余 pull
+        # （对齐 soft_delete_change_dir 幂等路径同款注释）。
+        align_landing = (spec_ws.spec_version or 0) + 1
+        aligned_any = False
         for rel, ch in landed_hashes.items():
             row = manifest_by_path.get(rel)
             if row is None:
@@ -1784,20 +1814,28 @@ class SpecWorkspaceService:
                         content_hash=ch,
                         version=1,
                         exists=True,
+                        landing_version=align_landing,
                         updated_at=now,
                     )
                 )
+                aligned_any = True
             else:
                 row.content_hash = ch
                 row.version = row.version + 1
                 row.exists = True
+                row.landing_version = align_landing
                 row.updated_at = now
+                aligned_any = True
         for rel in converged_paths:
             row = manifest_by_path.get(rel)
             if row is not None:
                 row.exists = False
                 row.version = row.version + 1
+                row.landing_version = align_landing
                 row.updated_at = now
+                aligned_any = True
+        if aligned_any:
+            spec_ws.spec_version = align_landing
         await self._session.commit()
         if skipped_files > 0:
             log.warning(
@@ -2219,6 +2257,10 @@ class SpecWorkspaceService:
         # （见 apply_ops 同注释）；行改写是纯属性赋值，集中在最终 commit 单事务落库。
         await self._session.commit()
 
+        # 2026-10-21-spec-manifest-incremental task-02：软删印章 = 递增后的工作区
+        # spec_version（终段 bump 复用同值，与行改写同 commit）。
+        landing_version = (spec_ws.spec_version or 0) + 1
+
         settings = get_settings()
         backup_root = self._backup_root(settings, workspace_id)
         ts = datetime.now(UTC).strftime(BACKUP_TS_FORMAT)
@@ -2239,6 +2281,7 @@ class SpecWorkspaceService:
                     pass
                 row.exists = False
                 row.version = row.version + 1
+                row.landing_version = landing_version
                 row.updated_at = now
                 file_count += 1
                 parent = str(PurePosixPath(row.path).parent)
@@ -2253,8 +2296,10 @@ class SpecWorkspaceService:
         # ql-20260905-001：镜像树已变（文件移出 + 墓碑）→ bump spec_version（保鲜
         # + gzip 缓存键联动，理由同 apply_ops 注释）。幂等路径（file_count=0 且全部
         # 行已是墓碑）树未变也 bump——版本是新鲜度信号非变更计数，多 bump 一次
-        # 至多触发一次冗余 pull，无正确性影响。
-        spec_ws.spec_version = (spec_ws.spec_version or 0) + 1
+        # 至多触发一次冗余 pull，无正确性影响。2026-10-21-spec-manifest-incremental：
+        # 复用上方预计算 landing_version（platform_deleted-only 翻转不改清单响应面
+        # {hash,version,exists}，不盖章避免无信息增量行）。
+        spec_ws.spec_version = landing_version
         spec_ws.updated_at = now
         await self._session.commit()
         log.info(
@@ -2382,8 +2427,11 @@ class SpecWorkspaceService:
         # prefetch 读事务；循环内新行/删除改为收集 pending，循环后统一入
         # session + 最终 commit——写仍单事务，原子性不变。
         await self._session.commit()
+        # 2026-10-21-spec-manifest-incremental task-02：本批落地印章 = 递增后的
+        # 工作区 spec_version（终段 bump 复用同值，行盖章与 bump 同 commit——
+        # GET spec-manifest?since=<v> 按 landing_version > v 过滤增量行）。
+        landing_version = (spec_ws.spec_version or 0) + 1
         pending_adds: list[SpecFileManifest] = []
-        pending_deletes: list[SpecFileManifest] = []
         # 2026-09-26-spec-sync-receipt-visibility：回执计数（冲突跳过 / 墓碑跳过；
         # applied 在返回处由总数减得）——「ok:true 却静默丢成员」的绿灯谎言收口。
         skipped_conflict = 0
@@ -2477,6 +2525,7 @@ class SpecWorkspaceService:
                     row.content_hash = ch
                     row.version = row.version + 1
                     row.exists = True
+                    row.landing_version = landing_version
                     row.updated_at = now
                     new_versions[op.path] = row.version
                     await progress.bump()
@@ -2533,6 +2582,7 @@ class SpecWorkspaceService:
                             content_hash=ch,
                             version=1,
                             exists=True,
+                            landing_version=landing_version,
                             updated_at=now,
                         )
                         # ql-20260817-005：收集，循环外统一 add（见上方释放点注释）。
@@ -2544,6 +2594,7 @@ class SpecWorkspaceService:
                         row.content_hash = ch
                         row.version = new_version
                         row.exists = True
+                        row.landing_version = landing_version
                         row.updated_at = now
                         new_versions[op.path] = new_version
 
@@ -2561,6 +2612,7 @@ class SpecWorkspaceService:
                             pass
                         row.version = row.version + 1
                         row.exists = False
+                        row.landing_version = landing_version
                         row.updated_at = now
                         new_versions[op.path] = row.version
                         # ql-20260924：修剪移出 op 循环，循环后至多一次（扫描风暴修复）
@@ -2634,6 +2686,7 @@ class SpecWorkspaceService:
                             target_row.content_hash = ch
                             target_row.version = target_row.version + 1
                             target_row.exists = True
+                            target_row.landing_version = landing_version
                             target_row.updated_at = now
                             new_versions[op.new_path] = target_row.version
                         else:
@@ -2643,6 +2696,7 @@ class SpecWorkspaceService:
                                 content_hash=ch,
                                 version=1,
                                 exists=True,
+                                landing_version=landing_version,
                                 updated_at=now,
                             )
                             pending_adds.append(added_row)  # ql-20260817-005：循环外统一 add
@@ -2670,8 +2724,14 @@ class SpecWorkspaceService:
                         # ql-20260813-008：rename 后 dest 用宿主真实 mtime（move 沿用源 mtime，
                         # 此处按 op.mtime 覆盖为最新宿主态，保持与 add/update 一致）。
                         await asyncio.to_thread(self._apply_file_mtime, dest, op.mtime)
-                    # ql-20260817-005：delete 同样会 autobegin——收集循环外统一删。
-                    pending_deletes.append(row)
+                    # 2026-10-21-spec-manifest-incremental task-02：旧路径行由硬删改
+                    # 软删墓碑（与 delete op 分支同语义）——增量游标协议要求「清单行
+                    # 只墓碑不消失」：硬删行对 since 消费方是不可见盲区（旧行无任何
+                    # delta 行，缓存方永远看不到它消亡，幻影行反复生成 no-op delete）。
+                    row.exists = False
+                    row.version = row.version + 1
+                    row.landing_version = landing_version
+                    row.updated_at = now
                     # ql-20260819-004：目标有软删墓碑 → 原地复活（version 沿目标路径
                     # 自身谱系 +1），不 INSERT 新行（flush 先 INSERT 后 DELETE，同
                     # path 撞唯一约束）；无墓碑 → 照旧插迁移行（旧路径行 version+1）。
@@ -2679,6 +2739,7 @@ class SpecWorkspaceService:
                         target_row.content_hash = new_hash
                         target_row.version = target_row.version + 1
                         target_row.exists = True
+                        target_row.landing_version = landing_version
                         target_row.updated_at = now
                         renamed_row = target_row
                     else:
@@ -2688,6 +2749,7 @@ class SpecWorkspaceService:
                             content_hash=new_hash,
                             version=new_version,
                             exists=True,
+                            landing_version=landing_version,
                             updated_at=now,
                         )
                         pending_adds.append(renamed_row)
@@ -2700,10 +2762,10 @@ class SpecWorkspaceService:
                 # 已 continue 跳过）——批量回写器内存计数，不再逐 op UPDATE。
                 await progress.bump()
 
-            # ql-20260817-005：循环外统一入 session（add/delete 的 autobegin 事务
+            # ql-20260817-005：循环外统一入 session（add 的 autobegin 事务
             # 此刻才打开，紧接 commit，事务窗口毫秒级）——全部写仍是单事务。
-            for stale in pending_deletes:
-                await self._session.delete(stale)
+            # （2026-10-21-spec-manifest-incremental：原 pending_deletes 硬删循环
+            # 已随 rename 旧行墓碑化移除——清单行不再有硬删路径。）
             # ql-20260904-014（P1）：pending_adds 原走 ORM session.add 裸 INSERT——
             # 归档移动等场景下 daemon/CLI 双端基线偏斜会推 add/rename 指向服务器
             # 已存在的 path（in-memory manifest_by_path 未含并发已插入的行），
@@ -2732,6 +2794,7 @@ class SpecWorkspaceService:
                                 "version": r.version,
                                 "exists": r.exists,
                                 "platform_deleted": r.platform_deleted,
+                                "landing_version": r.landing_version,
                                 "updated_at": r.updated_at,
                             }
                             for r in chunk
@@ -2749,6 +2812,9 @@ class SpecWorkspaceService:
                                 else_=SpecFileManifest.version,
                             ),
                             "exists": True,
+                            # 印章无条件取本批值（spec_version 单调递增 → 本批
+                            # landing_version ≥ 行上任何旧印章，不会回退）。
+                            "landing_version": add_stmt.excluded.landing_version,
                             "updated_at": add_stmt.excluded.updated_at,
                         },
                     )
@@ -2758,7 +2824,9 @@ class SpecWorkspaceService:
             # ②gzip 整包缓存键联动：不 bump 则 (ws, spec_version) 同键恒吐增量
             # 落盘前的旧树（e7bef3cc0 缓存引入后的陈旧命中缺口）。conflict 跳过
             # 的 op 不落盘，但同请求其余 op 已 apply，树已变即 bump。
-            spec_ws.spec_version = (spec_ws.spec_version or 0) + 1
+            # 2026-10-21-spec-manifest-incremental：复用循环前预计算的
+            # landing_version（与行印章同 commit 落库，值同源）。
+            spec_ws.spec_version = landing_version
             spec_ws.updated_at = now
             await self._session.commit()
         finally:

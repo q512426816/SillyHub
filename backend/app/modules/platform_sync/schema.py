@@ -208,14 +208,20 @@ class SpecManifestFileEntry(BaseModel):
 
 
 class SpecManifestResponse(BaseModel):
-    """GET /changes/-/spec-manifest 200 响应：服务器权威清单全量 map（design §5.2/§7）。
+    """GET /changes/-/spec-manifest 200 响应：服务器权威清单 map（design §5.2/§7）。
 
     CLI ``spec-sync.js`` 以此为锚 diff 本地 ``.sillyspec/`` 算增量 ops
     （D-004@v1 CLI 无本地缓存，清单即基线）。无清单行（旧 tar 全量同步后失效 /
     全新 workspace）→ 空 ``files``，CLI 走 R-07 兜底全量重算。
+
+    2026-10-21-spec-manifest-incremental task-03：新增顶层 ``spec_version``（全量/
+    增量均带）——CLI 携带 ``?since=<spec_version>`` 时 ``files`` 只含该版本之后
+    落地的行（增量游标形态），并以响应 ``spec_version`` 作下次游标；无 since 为
+    全量（既有 CLI 忽略未知字段，向后兼容）。
     """
 
     files: dict[str, SpecManifestFileEntry] = Field(default_factory=dict)
+    spec_version: int = Field(default=0, description="工作区当前权威版本（下次增量的 since 游标）")
 
 
 # ── Change 2026-08-17-spec-file-incremental-sync task-02（design §5.2/§7）──

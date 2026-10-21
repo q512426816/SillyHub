@@ -85,6 +85,7 @@ async def spec_env(
         "headers": headers,
         "workspace_id": workspace_id,
         "spec_root": spec_root,
+        "db_session": db_session,
     }
 
 
@@ -335,3 +336,157 @@ class TestEdgeCases:
             },
         )
         assert resp.status_code == 422, resp.text
+
+
+class TestIncrementalManifest:
+    """2026-10-21-spec-manifest-incremental：?since=<spec_version> 增量游标。
+
+    背景：全量清单随工作区历史无界增长（生产实测 13k 行/2.2MB/5.5s@受限带宽），
+    CLI 每条命令拉全量吃掉 sillyspec 同步 8s 总预算。增量稳态只传变化行。
+    """
+
+    async def _sync(self, spec_env: dict[str, Any], ops: list[dict[str, Any]]) -> dict[str, Any]:
+        client: AsyncClient = spec_env["client"]
+        resp = await client.post(
+            "/api/changes/-/spec-sync", headers=spec_env["headers"], json={"ops": ops}
+        )
+        assert resp.status_code == 200, resp.text
+        return resp.json()
+
+    async def _get_manifest(
+        self, spec_env: dict[str, Any], since: int | None = None
+    ) -> tuple[dict[str, Any], int]:
+        client: AsyncClient = spec_env["client"]
+        url = "/api/changes/-/spec-manifest"
+        if since is not None:
+            url = f"{url}?since={since}"
+        resp = await client.get(url, headers=spec_env["headers"])
+        assert resp.status_code == 200, resp.text
+        body = resp.json()
+        return body["files"], body["spec_version"]
+
+    async def test_incremental_main_path(self, spec_env: dict[str, Any]) -> None:
+        """增量主路径：首批落地后 since=0 恰见首批；二批落地后 since=1 恰见二批。"""
+        self_body = await self._sync(
+            spec_env,
+            [
+                _op("add", "docs/A.md", base_version=0, content=_b64("# A"), hash=_h("# A")),
+                _op("add", "docs/B.md", base_version=0, content=_b64("# B"), hash=_h("# B")),
+            ],
+        )
+        assert self_body["new_versions"] == {"docs/A.md": 1, "docs/B.md": 1}
+
+        files, v1 = await self._get_manifest(spec_env, since=0)
+        assert set(files) == {"docs/A.md", "docs/B.md"}
+        assert v1 == 1
+
+        await self._sync(
+            spec_env,
+            [
+                _op("update", "docs/A.md", base_version=1, content=_b64("# A2"), hash=_h("# A2")),
+                _op("add", "docs/C.md", base_version=0, content=_b64("# C"), hash=_h("# C")),
+            ],
+        )
+        files, v2 = await self._get_manifest(spec_env, since=v1)
+        assert set(files) == {"docs/A.md", "docs/C.md"}
+        assert files["docs/A.md"]["version"] == 2
+        assert v2 == 2
+
+        # 全量形态仍含 B（未被第二批触碰）
+        files_full, _ = await self._get_manifest(spec_env)
+        assert set(files_full) == {"docs/A.md", "docs/B.md", "docs/C.md"}
+
+    async def test_no_change_returns_empty_files(self, spec_env: dict[str, Any]) -> None:
+        """无变化重复拉取：since=当前 spec_version → files 空对象。"""
+        await self._sync(
+            spec_env,
+            [_op("add", "docs/S.md", base_version=0, content=_b64("s"), hash=_h("s"))],
+        )
+        _files, v = await self._get_manifest(spec_env)
+        files, v_again = await self._get_manifest(spec_env, since=v)
+        assert files == {}
+        assert v_again == v
+
+    async def test_null_landing_rows_excluded_from_incremental(
+        self, spec_env: dict[str, Any]
+    ) -> None:
+        """迁移前存量行（landing_version=NULL）不进增量流，全量仍可见。"""
+        import uuid as _uuid
+
+        db_session = spec_env["db_session"]
+        db_session.add(
+            SpecFileManifest(
+                id=_uuid.uuid4(),
+                workspace_id=spec_env["workspace_id"],
+                path="docs/legacy.md",
+                content_hash="0" * 64,
+                version=7,
+                exists=True,
+            )
+        )
+        await db_session.commit()
+
+        files, _ = await self._get_manifest(spec_env, since=0)
+        assert "docs/legacy.md" not in files
+
+        files_full, _ = await self._get_manifest(spec_env)
+        assert "docs/legacy.md" in files_full
+
+    async def test_rename_old_path_tombstone_visible_in_incremental(
+        self, spec_env: dict[str, Any]
+    ) -> None:
+        """rename 旧行墓碑化（原硬删）后：增量消费方经 since 可见旧路径消亡。"""
+        await self._sync(
+            spec_env,
+            [_op("add", "docs/Old.md", base_version=0, content=_b64("x"), hash=_h("x"))],
+        )
+        _files, v = await self._get_manifest(spec_env)
+
+        body = await self._sync(
+            spec_env,
+            [_op("rename", "docs/Old.md", new_path="docs/New.md", base_version=1)],
+        )
+        assert body["new_versions"] == {"docs/New.md": 2}
+
+        files, _ = await self._get_manifest(spec_env, since=v)
+        assert set(files) == {"docs/Old.md", "docs/New.md"}
+        assert files["docs/Old.md"]["exists"] is False
+        assert files["docs/Old.md"]["version"] == 2
+        assert files["docs/New.md"]["exists"] is True
+
+    async def test_delete_tombstone_visible_in_incremental(self, spec_env: dict[str, Any]) -> None:
+        """delete op 墓碑行同样经增量流可见。"""
+        await self._sync(
+            spec_env,
+            [_op("add", "docs/D.md", base_version=0, content=_b64("d"), hash=_h("d"))],
+        )
+        _files, v = await self._get_manifest(spec_env)
+        await self._sync(spec_env, [_op("delete", "docs/D.md", base_version=1)])
+
+        files, _ = await self._get_manifest(spec_env, since=v)
+        assert set(files) == {"docs/D.md"}
+        assert files["docs/D.md"]["exists"] is False
+
+    async def test_since_invalid_422(self, spec_env: dict[str, Any]) -> None:
+        """since 非整数/负数 → 422（Query 校验）。"""
+        client: AsyncClient = spec_env["client"]
+        headers = spec_env["headers"]
+        resp = await client.get("/api/changes/-/spec-manifest?since=-1", headers=headers)
+        assert resp.status_code == 422
+        resp = await client.get("/api/changes/-/spec-manifest?since=abc", headers=headers)
+        assert resp.status_code == 422
+
+    async def test_full_manifest_carries_spec_version(self, spec_env: dict[str, Any]) -> None:
+        """全量回归：无 since 行为不变，响应新增顶层 spec_version。"""
+        await self._sync(
+            spec_env,
+            [_op("add", "docs/F.md", base_version=0, content=_b64("f"), hash=_h("f"))],
+        )
+        files, v = await self._get_manifest(spec_env)
+        assert set(files) == {"docs/F.md"}
+        assert files["docs/F.md"] == {
+            "hash": _h("f"),
+            "version": 1,
+            "exists": True,
+        }
+        assert v == 1

@@ -210,11 +210,24 @@ async def list_changes(
 async def get_spec_manifest(
     session: Annotated[AsyncSession, Depends(get_session)],
     auth: _write_auth,
+    since: Annotated[
+        int | None,
+        Query(
+            ge=0,
+            description="增量游标（客户端已消费的工作区 spec_version）：只返回该版本之后落地的清单行",
+        ),
+    ] = None,
 ) -> SpecManifestResponse:
     """GET 服务器 spec 文件权威清单（CLI 直跑增量同步锚点，design §5.2/§7）。
 
     CLI ``spec-sync.js`` 以此清单为锚 diff 本地 ``.sillyspec/``，算出增量 ops 后
     POST ``/changes/-/spec-sync``（D-004@v1：CLI 无本地缓存，服务器清单即基线）。
+
+    2026-10-21-spec-manifest-incremental task-03：``?since=<spec_version>`` 增量
+    形态——只返回 ``landing_version > since`` 的行（含软删墓碑行），响应顶层带
+    当前 ``spec_version`` 供客户端作下次游标；无 since 为全量（现状行为，响应
+    仅新增 spec_version 字段）。背景：全量清单随工作区历史无界增长（生产实测
+    13k 行/2.2MB/5.5s@受限带宽），增量稳态只传变化行。
 
     读清单也收紧为写权限（``require_platform_sync_write``，仅 shpsync_ token，
     JWT/shk_live_ 403）——清单是增量写协议的一部分，避免非同步方探测文件布局。
@@ -226,8 +239,10 @@ async def get_spec_manifest(
         # 防御：require_platform_sync_write 的 shpsync_ 通道恒派生 workspace；到达此
         # 分支即凭据形态异常，403 关闭通道（fail-closed）。
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="缺少工作区归属")
-    files = await PlatformSyncService(session).get_spec_manifest(scope.workspace_id)
-    return SpecManifestResponse(files=files)
+    files, spec_version = await PlatformSyncService(session).get_spec_manifest(
+        scope.workspace_id, since=since
+    )
+    return SpecManifestResponse(files=files, spec_version=spec_version)
 
 
 @router.post("/changes/-/spec-sync", response_model=SpecSyncResponse)

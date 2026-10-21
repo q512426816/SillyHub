@@ -1572,18 +1572,23 @@ class PlatformSyncService:
     # ── Change 2026-08-17-spec-file-incremental-sync task-01（design §5.2/§5.3）──
 
     async def get_spec_manifest(
-        self, workspace_id: uuid.UUID
-    ) -> dict[str, dict[str, str | int | bool]]:
+        self, workspace_id: uuid.UUID, since: int | None = None
+    ) -> tuple[dict[str, dict[str, str | int | bool]], int]:
         """GET /changes/-/spec-manifest：透调 ``SpecWorkspaceService.get_manifest``。
 
         workspace 级鉴权与归属校验在 router 层完成（``require_platform_sync_write``
         从 shpsync_ token 派生 workspace_id 后才进来）；本层不重复校验，直接实例化
-        ``SpecWorkspaceService``（共享同一 session）读服务器权威清单全量行
+        ``SpecWorkspaceService``（共享同一 session）读服务器权威清单
         （含 ``exists=False`` 软删行，design §5.3）。
+
+        2026-10-21-spec-manifest-incremental task-03：``since`` 透传——CLI 携带
+        已消费的工作区 spec_version 游标时，返回 ``(增量行, 当前 spec_version)``
+        （只含 ``landing_version > since`` 的行）；无 since 为全量（向后兼容，
+        响应仅新增顶层 spec_version 字段）。
         """
         from app.modules.spec_workspace.service import SpecWorkspaceService
 
-        return await SpecWorkspaceService(self._session).get_manifest(workspace_id)
+        return await SpecWorkspaceService(self._session).get_manifest(workspace_id, since=since)
 
     async def apply_spec_ops(self, workspace_id: uuid.UUID, ops: list[FileOp]) -> dict[str, object]:
         """POST /changes/-/spec-sync：透调 ``SpecWorkspaceService.apply_ops``（design §5.2/§7）。
