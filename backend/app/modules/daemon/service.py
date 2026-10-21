@@ -25,6 +25,8 @@ from app.modules.daemon.schema import (
     ScheduledMessageCreateRequest,
     SessionReopenResponse,
     TeamMissionCreateBlock,
+    TurnFileChangesSnapshot,
+    TurnTimingSnapshot,
 )
 from app.modules.session_attachment.storage import SessionAttachmentStorage
 
@@ -622,6 +624,11 @@ class DaemonService:
         # task-06 / FR-02：模型层错误详情（ModelErrorDTO）。facade 委托签名必须与
         # RunSyncService 同步（service.py:528-531 警告），None=daemon 未传保持兼容。
         error: ModelErrorDTO | None = None,
+        # 1b 轮次快照（2026-10-20-session-page-dsh-alignment task-08 / D-023@v1）：
+        # facade 仅透传，落库在 run_sync close 终态段（与 model_usage 同段）。
+        file_changes: TurnFileChangesSnapshot | None = None,
+        timing: TurnTimingSnapshot | None = None,
+        daemon_version: str | None = None,
     ) -> AgentRun:
         """Close an interactive AgentRun from daemon SDK result (gap-3 / design §4).
 
@@ -665,6 +672,9 @@ class DaemonService:
             model_usage=model_usage,
             api_requests=api_requests,
             error=error,
+            file_changes=file_changes,
+            timing=timing,
+            daemon_version=daemon_version,
         )
 
     # ── Lease expiry / rollback (delegate to LeaseService, task-06) ───────

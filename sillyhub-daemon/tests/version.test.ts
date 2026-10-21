@@ -236,3 +236,34 @@ describe('checkMinVersion', () => {
     expect(checkMinVersion('claude', '3.0.0')).toBeNull();
   });
 });
+
+// ── DAEMON_VERSION × 发版下限（2026-10-20-session-page-dsh-alignment task-13）──
+//
+// daemon 自身版本唯一来源＝`sillyhub-daemon/package.json`（`src/daemon-version.ts`
+// 直接读 `pkg.version`），故发版只改 package.json、不另设常量。
+//
+// 平台侧最低可用 daemon 版本＝**0.2.0**：低于该版本的 daemon 没有 1b 每轮工作区快照
+// （`file_changes`）与 TTFT/attempt 采样（`timing`），平台按 `capability="tool_only"`
+// 降级、模型泳道回落单色「近似」——**只降级、不阻断会话**（D-023@v1 / E8）。
+//
+// 本用例把该下限锁进测试：若 package.json 被回退到 0.1.x，"已随 0.2.0 发布的能力"
+// 与版本号脱钩，发版前必须挡住。
+describe('DAEMON_VERSION × 发版下限 0.2.0', () => {
+  it('是合法 semver 且不低于 0.2.0（1b 快照 + TTFT/attempt 采样能力下限）', async () => {
+    const { DAEMON_VERSION } = await import('../src/daemon-version.js');
+    const parsed = parseSemver(DAEMON_VERSION);
+    expect(parsed, `DAEMON_VERSION=${DAEMON_VERSION} 不可解析为 semver`).not.toBeNull();
+
+    const floor = [0, 2, 0];
+    const compare = (a: number[], b: number[]): number => {
+      for (let i = 0; i < 3; i += 1) {
+        if (a[i] !== b[i]) return a[i]! - b[i]!;
+      }
+      return 0;
+    };
+    expect(
+      compare(parsed!, floor),
+      `DAEMON_VERSION=${DAEMON_VERSION} 低于平台最低可用版本 0.2.0（1b 快照 + TTFT 采样）`,
+    ).toBeGreaterThanOrEqual(0);
+  });
+});

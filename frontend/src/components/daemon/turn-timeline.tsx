@@ -75,6 +75,27 @@ import { FileMessageCard } from "@/components/daemon/file-message-card";
 // + 图片缩略图/文件 chip 渲染。
 import { parseAttachmentMarkers } from "@/components/daemon/runtime-session-helpers";
 import { turnTokenSpeedText } from "@/components/daemon/turn-speed";
+import {
+  foldHeaderText,
+  isTurnFoldable,
+  textOnlySegments,
+  type DetailLevel,
+} from "@/components/daemon/turn-fold";
+<<<<<<< Updated upstream
+// task-11（2026-10-20-session-page-dsh-alignment / FR-14 / FR-16 / D-023@v1）：
+// 轮级文件变更卡与会话级汇总。数据全部由 props 注入（轮视图的 fileChanges /
+// fileChangesCapability，由挂载方从 /runs 读模型透传），本组件零 fetch。
+import {
+  FileChangesCard,
+  type FileChangesCapability,
+} from "@/components/daemon/file-changes/file-changes-card";
+import { FileChangesSummary } from "@/components/daemon/file-changes/file-changes-summary";
+import {
+  toFileChangesCardProps,
+  type TurnFileChangesSnapshot,
+} from "@/components/daemon/file-changes/turn-file-changes";
+=======
+>>>>>>> Stashed changes
 import { InlineAttRefTextWithPreview } from "@/components/daemon/attachment-ref-tag";
 // task-10（2026-09-10-account-avatar-upload / FR-05）：自己（sender.me）的气泡
 // 头像取 useSession user.avatar（选择器订阅仅 avatar 切片）。
@@ -369,6 +390,19 @@ export interface SessionTurnView {
    * 接线后常态有值）。
    */
   turnStartedAt?: number | null;
+  /**
+   * task-11（2026-10-20-session-page-dsh-alignment / FR-14 / D-023@v1）：该轮工作区
+   * 文件变更快照（`GET /sessions/{id}/runs` 的 `file_changes`，挂载方透传）。
+   * `null`/`undefined` = 该轮无快照——**禁止**渲染成「本轮无改动」（E6/E8）；
+   * 是否降级由 `fileChangesCapability` 裁决，不看本字段是否存在。
+   */
+  fileChanges?: TurnFileChangesSnapshot | null;
+  /**
+   * task-11 / FR-16：该轮快照能力档（`full` = daemon 上报了工作区快照；
+   * `tool_only` = 老 daemon 无快照能力）。`undefined` = 挂载方未接线（不出卡、
+   * 不出占位）；`tool_only` → 「仅工具编辑」降级卡（E8 版本门控面）。
+   */
+  fileChangesCapability?: FileChangesCapability | null;
 }
 
 /** 消息视图模式（ql-20260729-005）：对话=用户消息+答复正文+文件卡片（交付物，
@@ -378,6 +412,13 @@ export type SessionViewMode = "conversation" | "all";
 export interface TurnTimelineProps {
   turns: SessionTurnView[];
   viewMode: SessionViewMode;
+  /**
+   * 2026-10-20-session-page-dsh-alignment（D-009）：工作细节档位。
+   * 不传（undefined）＝现行为零变化；传 "compact"/"standard" 时对**可折叠轮**
+   * （isTurnFoldable：仅正常闭合轮）默认收起过程，只留正文 + 折叠头；
+   * 传 "detailed" 等同现行为（不折叠）。dev 预览路由用它做新旧对照。
+   */
+  detailLevel?: DetailLevel;
   errorMsg: string | null;
   /**
    * 2026-09-10-auto-resume-interrupted-turn / FR-07：daemon_restarted 失败卡的
@@ -459,6 +500,14 @@ export interface TurnTimelineProps {
    * 零回归，同 highlightTurnKey 先例的自清节奏约定——清除归本组件定时器）。
    */
   focusDialogRequest?: { requestId: string; nonce: number } | null;
+  /**
+   * task-11（2026-10-20-session-page-dsh-alignment / FR-16 / design E7）：会话级
+   * 「文件改动汇总卡」开关——挂在会话流顶部（首轮之前），按各轮快照去重聚合。
+   * 缺省 `true`（有数据才出卡：无任何快照时不渲染，零占位）；`false` 关闭。
+   * 各轮数据来自 `SessionTurnView.fileChanges` / `fileChangesCapability`，本组件
+   * 不取数（FR-22：不碰取数/分页/SSE）。
+   */
+  fileChangesSummary?: boolean;
 }
 
 /**
@@ -628,6 +677,7 @@ const TurnRow = memo(function TurnRow({
   forkSeq,
   onForkTurn,
   onExpandPreview,
+  detailLevel,
 }: {
   turn: SessionTurnView;
   viewMode: SessionViewMode;
@@ -655,6 +705,8 @@ const TurnRow = memo(function TurnRow({
    *  dialog / /runtimes 弹窗零回归。函数引用由父级 useCallback 保证稳定，同
    *  onResend 先例）。 */
   onExpandPreview?: (_runKey: string) => void;
+  /** 2026-10-20-session-page-dsh-alignment：工作细节档位（undefined＝现行为）。 */
+  detailLevel?: DetailLevel;
 }) {
   // task-07（FR-03 / D-003@v2）：旧路径 output 气泡 askuser 标记拦截——命中则
   // 气泡正文换 textBefore（标记原文不显示，提问卡随气泡原位渲染（下方 ml-9）；
@@ -664,6 +716,36 @@ const TurnRow = memo(function TurnRow({
   // 选择器订阅仅 avatar 切片（避免整 store 订阅引发无关重渲），仅 sender.me
   // 气泡消费；null/undefined 时 ChatMessageAvatar 首字回退现状不动。
   const myAvatar = useSession((s) => s.user?.avatar ?? null);
+  // 2026-10-20-session-page-dsh-alignment（D-009）：整轮折叠——仅当调用方传了
+  // detailLevel（非 detailed）且该轮具备折叠资格时生效；不传＝现行为零变化。
+  const [foldOpen, setFoldOpen] = useState(false);
+  const foldEligible =
+    detailLevel !== undefined && detailLevel !== "detailed" && isTurnFoldable(turn);
+  const folded = foldEligible && !foldOpen;
+  /**
+   * 2026-10-20-session-page-dsh-alignment（FR-01 / D-016① / D-015@v2）：轮元信息
+   * 合并成一行——原先轮尾状态行（第 N 轮 · 状态 · tokens · tok/s）之外还有一条
+   * 「开始 · 结束 · 历时」独立行，同屏两行元信息重复。此处把时间细节派生为一段
+   * 文本，折进状态行的最右端（等宽 / muted / 10.5px，见 RoundDivider.detail 与
+   * 下方 all 视图 span）。信息不丢：轮号/状态/耗时/结束时刻/tokens/tok·s 全在
+   * 同一行；锚点缺失保持原回退（仅显结束时间，不编造开始与历时）。
+   */
+  const metaDetail =
+    turn.replyAt != null
+      ? [
+          turn.turnStartedAt != null
+            ? `开始 ${formatTurnTimeSec(new Date(turn.turnStartedAt).toISOString())}`
+            : null,
+          `结束 ${formatTurnTimeSec(turn.replyAt)}`,
+          turn.turnStartedAt != null
+            ? `历时 ${formatTurnDuration(
+                Math.max(0, Date.parse(turn.replyAt) - turn.turnStartedAt),
+              )}`
+            : null,
+        ]
+          .filter(Boolean)
+          .join(" · ")
+      : null;
   return (
     <>
     {/* task-01（2026-09-08-session-turn-nav / FR-07 / D-007@v1）：轮次跳转 DOM 锚点
@@ -749,21 +831,35 @@ const TurnRow = memo(function TurnRow({
                       token），用户气泡从纯色块浮出时间线底。ql-20260915-009：turn-bubble
                       标记类供 mobile 放大规则定位（globals.css data-variant 块）——
                       2026-09-20-agent-reply-no-bubble task-02 起仅用户气泡持有该标记类
-                      （旧路径答复已换 seg-text-body 无框正文）。 */}
-                  <div className="turn-bubble group relative max-w-[80%] rounded-2xl rounded-br-md bg-primary px-4 py-2.5 text-sm leading-6 text-primary-foreground shadow-primary">
+                      （旧路径答复已换 seg-text-body 无框正文）。
+                      2026-10-20-session-page-dsh-alignment（FR-05 / D-015@v2 / D-016④）：
+                      用户气泡降噪——纯 brand 实色大块曾是全屏第一视觉焦点（抢正文）。
+                      改：①限宽 80%→56%（右侧留白给对话流）②底从 `bg-primary` 实色换
+                      brand 8% 低饱和混合 + 20% brand 细边（`hsl(var(--primary) / 0.08)`
+                      随三主题各自 primary 换肤，浅色不糊、暗色不刺）③字色由
+                      primary-foreground（白）换 foreground（浅底上才是正文对比度）
+                      ④去掉品牌投影（低饱和底配大投影显脏）⑤字号 13.5px。 */}
+                  <div className="turn-bubble group relative max-w-[56%] rounded-2xl rounded-br-md border border-primary/20 bg-primary/[0.08] px-4 py-2.5 text-[13.5px] leading-6 text-foreground">
                     {/* task-13：剥离历史附件标记行（D-3），文本与 chips 分层渲染 */}
                     {(() => {
                       const parsed = parseAttachmentMarkersCached(turn.prompt);
                       return (
                         <>
                           {parsed.attachments.length > 0 && (
-                            <AttachmentChips attachments={parsed.attachments} />
+                            /* 2026-10-20-session-page-dsh-alignment（FR-05）：气泡底已降为
+                               低饱和 brand 浅底，附件 chip 随之走 brand 档（默认 onPrimary
+                               的白色半透明 chip 在浅底上不可见）。 */
+                            <AttachmentChips attachments={parsed.attachments} tone="brand" />
                           )}
                           {parsed.text && (
                             <div className="whitespace-pre-wrap break-words">
                               {/* task-06（2026-10-09-attachment-inline-reference）：
-                                  正文行内引用渲染为可点击标签（点击开预览窗）。 */}
-                              <InlineAttRefTextWithPreview text={parsed.text} tone="onPrimary" />
+                                  正文行内引用渲染为可点击标签（点击开预览窗）。
+                                  2026-10-20-session-page-dsh-alignment（FR-05）：气泡底已
+                                  从 brand 实色降为 8% 混合 + foreground 字色，行内引用标签
+                                  随之由 onPrimary（白底白字，只在实色蓝泡里成立）改
+                                  brand 档（品牌浅底 + brand 字，三主题都可读）。 */}
+                              <InlineAttRefTextWithPreview text={parsed.text} tone="brand" />
                             </div>
                           )}
                           {/* task-11：复制剥离标记后的纯文本（与显示一致，点击时惰性重解析）；
@@ -865,17 +961,34 @@ const TurnRow = memo(function TurnRow({
                   segments undefined（孤儿 turn 构造 / 旧数据）→ 旧渲染路径回退（output
                   单气泡 + processItems），行为与现状等价（回退不崩不空）。 */}
               {turn.segments !== undefined ? (
-                <SegmentedTurnBody
-                  segments={turn.segments}
+                <>
+                  {foldEligible && (
+                    <button
+                      type="button"
+                      onClick={() => setFoldOpen((v) => !v)}
+                      aria-expanded={foldOpen}
+                      className="mb-1 ml-0 flex w-[min(100%,48rem)] items-center gap-1.5 rounded-lg border border-border bg-card px-2.5 py-1 text-[12px] text-muted-foreground hover:bg-muted"
+                    >
+                      <span aria-hidden className="font-mono text-[10.5px]">
+                        {foldOpen ? "▾" : "▸"}
+                      </span>
+                      <span>{foldHeaderText(turn, detailLevel ?? "standard")}</span>
+                      <span className="ml-auto font-mono text-[10.5px]">
+                        {foldOpen ? "收起过程" : "展开过程"}
+                      </span>
+                    </button>
+                  )}
+                  <SegmentedTurnBody
+                    segments={folded ? textOnlySegments(turn.segments) : turn.segments}
                   turnStatus={turn.status}
                   turnStartedAt={turn.turnStartedAt}
                   viewMode={viewMode}
-                  replyAt={turn.replyAt}
                   runKey={turn.realRunId ?? turn.runId}
                   dialogHistory={dialogHistory}
                   markerAnswered={hasLaterUserMessage}
                   onMarkerSubmit={onResend}
-                />
+                  />
+                </>
               ) : (
                 <>
                   {/* 旧路径（回退）：agent 答复正文（左，带助手图标）——seg-text-body
@@ -888,12 +1001,16 @@ const TurnRow = memo(function TurnRow({
                       <div className="flex items-start gap-2.5">
                         <ChatMessageAvatar kind="agent" title="智能体" />
                         <div className="flex items-end gap-1.5">
-                          {/* 2026-09-20-agent-reply-no-bubble task-02：换 v2 主路径同款
-                              seg-text-body 无框正文（不取 w-full——容器在 flex items-end
-                              行内与行尾时间戳并排，内容自适应宽度，时间戳尾随内容边缘）；
-                              ql-20260915-009 的 mobile 放大标记类自此仅用户气泡持有
-                              （globals.css 规则迁移归 task-03）。 */}
-                          <div className="seg-text-body max-w-[min(100%,48rem)]">
+                           {/* 2026-09-20-agent-reply-no-bubble task-02：换 v2 主路径同款
+                               seg-text-body 无框正文（不取 w-full——容器在 flex items-end
+                               行内与行尾时间戳并排，内容自适应宽度，时间戳尾随内容边缘）；
+                               ql-20260915-009 的 mobile 放大标记类自此仅用户气泡持有
+                               （globals.css 规则迁移归 task-03）。
+                               2026-10-20-session-page-dsh-alignment（FR-02 / D-016②）：
+                               阅读限宽 48rem→52rem，与 v2 主路径同宽；字号/行高/段距
+                               （14.5px / 1.78 / 0.6em）由 globals.css 的 .seg-text-body
+                               元素级规则统一承担，两条路径不再各写一套。 */}
+                          <div className="seg-text-body max-w-[min(100%,52rem)]">
                             <HugeOutputBlock text={outputMarker ? outputMarker.textBefore : turn.output} />
                             {/* task-13（FR-05 / D-004@v1）：流式光标——旧路径 output
                                 气泡运行中（isLiveTurn 三态）挂正文尾，轮终态随条件转
@@ -1001,6 +1118,7 @@ const TurnRow = memo(function TurnRow({
                     <RoundDivider
                       label={turn.turn != null ? `第 ${turn.turn} 轮` : "轮次"}
                       status={turn.status}
+                      detail={metaDetail ?? undefined}
                       meta={
                         // ql-20260831-010 语义保持：运行中输入 null 显示「↑执行中…」
                         // 不显示假 ↑0；终态 null（旧 daemon 无数据）按 ↑0 降级（与
@@ -1076,8 +1194,38 @@ const TurnRow = memo(function TurnRow({
                       }
                     />
                   )}
+                  {/* 2026-10-20-session-page-dsh-alignment（FR-01 / D-016①）：
+                      「全部」视图同享合并行——开始/结束/历时右对齐贴到本行尾
+                      （等宽 / muted / 10.5px），与对话视图 RoundDivider.detail
+                      同源同文案；原先轮尾的独立时间行已删除，一轮只有这一条元信息行。 */}
+                  {metaDetail && (
+                    <span
+                      data-testid="turn-meta-detail"
+                      className="ml-auto shrink-0 whitespace-nowrap font-mono text-[10.5px] tabular-nums text-muted-foreground"
+                    >
+                      {metaDetail}
+                    </span>
+                  )}
                 </div>
               )}
+              {/* task-11（2026-10-20-session-page-dsh-alignment / FR-14 / D-023@v1）：
+                  轮级文件变更卡——挂在轮尾状态行**之后**（两视图同位置）。
+                  `toFileChangesCardProps` 返回 null（该轮无快照 / 快照确认零改动 /
+                  挂载方未接线）时**不渲染任何占位**；capability="tool_only" 或快照
+                  不可用 → 「仅工具编辑」降级卡（design E6/E8：绝不显示「本轮无改动」）。 */}
+              {(() => {
+                const cardProps = toFileChangesCardProps(
+                  turn.fileChanges,
+                  turn.fileChangesCapability,
+                  { turnNo: turn.turn ?? undefined },
+                );
+                if (cardProps == null) return null;
+                return (
+                  <div data-testid="turn-file-changes" className="pl-9">
+                    <FileChangesCard {...cardProps} />
+                  </div>
+                );
+              })()}
             </div>
     }
     </>
@@ -1142,12 +1290,14 @@ export function TurnTimeline({
   onSwitchProvider,
   hasOnlineProvider,
   emptyProviderLabel,
+  detailLevel,
   streamFooter,
   highlightTurnKey,
   suppressFollowBottom = false,
   forkEntry,
   expandPreview,
   focusDialogRequest,
+  fileChangesSummary = true,
 }: TurnTimelineProps) {
   const scrollRef = useRef<HTMLDivElement>(null);
 
@@ -1190,6 +1340,17 @@ export function TurnTimeline({
     }
     return flags;
   }, [turns]);
+
+  // task-11（FR-16 / design E7）：会话级汇总只吃各轮已注入的快照字段（props 派生，
+  // 零取数）。挂载方未接线（两字段都缺）的轮由汇总的聚合函数跳过，不出空卡。
+  const fileChangesSummaryEntries = useMemo(
+    () =>
+      turns.map((turn) => ({
+        snapshot: turn.fileChanges ?? null,
+        capability: turn.fileChangesCapability ?? null,
+      })),
+    [turns],
+  );
 
   const lastTurnIdentity = (() => {
     const last = turns[turns.length - 1];
@@ -1597,15 +1758,35 @@ export function TurnTimeline({
           </p>
         </div>
       ) : (
-        <div className="space-y-5">
+        /* 2026-10-20-session-page-dsh-alignment（FR-04 / D-013@v1 / D-016④）：轮间
+           节奏——原 `space-y-5`（20px 等距）改「28px 留白」（每轮下留 pb-7）。
+           2026-10-21 用户裁决「轮间 1px hairline 多余」：**只保留留白，不再画线**
+           （原 `border-b border-border last:border-b-0` 已移除）；轮与轮靠白处分节。 */
+        <div>
+<<<<<<< Updated upstream
+          {/* task-11（FR-16 / design E7）：会话级文件改动汇总——会话流顶部（首轮之前）。
+              无数据时组件自身返回 null（零占位）；`fileChangesSummary={false}` 可关闭。 */}
+          {fileChangesSummary && (
+            <FileChangesSummary turns={fileChangesSummaryEntries} className="mb-3" />
+          )}
+=======
+>>>>>>> Stashed changes
           {/* task-01（FR-07 / D-007@v1 / R-07）：highlightTurnKey 在此逐行派生为
               isHighlighted 布尔再进 memo 行（字符串 prop 直传会在值变化时击穿
               全部行 memo）；data-turn-key 锚点在 TurnRow 两分支根元素上。
               task-07（FR-03）：hasUserMessageAfter 同法逐行派生布尔（marker 卡
               已答态 best-effort 判定数据源）。 */}
           {turns.map((turn, idx) => (
-            <TurnRow
+            /* 2026-10-20-session-page-dsh-alignment（FR-04 / D-016④）：逐轮节容器——
+               只承担视觉分节（pt-0 / pb-28px 留白），不碰任何数据流。
+               2026-10-21 用户裁决：轮间 hairline 多余 → 去掉 border-b，
+               仅留 pb-7（28px）作轮与轮之间的白处分隔。 */
+            <div
               key={turn.runId}
+              data-testid="turn-block"
+              className="pb-7"
+            >
+            <TurnRow
               turn={turn}
               viewMode={viewMode}
               isHighlighted={highlightTurnKey === (turn.realRunId ?? turn.runId)}
@@ -1627,11 +1808,15 @@ export function TurnTimeline({
               forkSeq={turn.turn ?? idx + 1}
               onForkTurn={forkEntry?.onForkTurn}
               onExpandPreview={expandPreview}
+              detailLevel={detailLevel}
             />
+            </div>
           ))}
           {/* ql-20260823-002-6a1a：消息流末尾注入位（props.streamFooter）——
-              最后一个 turn 之后、同一 space-y-5 流容器内渲染，附加信息以
-              「对话流里的一条消息」形态出现（ql-20260904-021 起暂无消费方）。 */}
+              最后一个 turn 之后、同一流容器内渲染，附加信息以
+              「对话流里的一条消息」形态出现（ql-20260904-021 起暂无消费方）。
+              2026-10-20-session-page-dsh-alignment：流容器由 space-y-5 改逐轮
+              padding+hairline 后，末尾注入位自身的上间距由末轮 pb-7 提供。 */}
           {streamFooter}
         </div>
       )}
@@ -1836,7 +2021,6 @@ function SegmentedTurnBody({
   turnStatus,
   turnStartedAt,
   viewMode,
-  replyAt,
   runKey,
   dialogHistory,
   markerAnswered,
@@ -1846,7 +2030,6 @@ function SegmentedTurnBody({
   turnStatus: TurnUiStatus;
   turnStartedAt: number | null | undefined;
   viewMode: SessionViewMode;
-  replyAt: string | null | undefined;
   /** AskUser 提问历史按 run_id 过滤键（realRunId ?? runId，同旧路径）。 */
   runKey: string;
   dialogHistory: SessionDialogRead[];
@@ -1935,7 +2118,15 @@ function SegmentedTurnBody({
         )}
       {/* 「全部（进度）」：完整段时间线（段 + AskUser 按时间戳穿插）。空轮不渲染空容器。 */}
       {timeline != null && timeline.length > 0 && (
-        <div className="ml-9 flex flex-col gap-1.5 border-l-2 border-muted pl-3.5">
+        /* 2026-10-21 用户裁决「对比加强」：助手列（过程行 + 答复正文同列）分两区——
+           行间节奏仍走单一 spacing 值 7px（gap-[7px]），答复正文块（.seg-text-body）
+           额外上留 7px，故「过程块 ↔ 答复块」的实际间隔 = 7 + 7 = 14px，两区读起来
+           是两块而不是一条流水；过程行彼此保持紧凑（不跟着放大到 14px）。
+           纯间距，零行为改动、零颜色改动（三主题共用一条规则）。 */
+        <div
+          data-testid="turn-progress-column"
+          className="ml-9 flex flex-col gap-[7px] border-l-2 border-muted pl-3.5 [&>.seg-text-body]:mt-[7px]"
+        >
           {timeline.map((item) =>
             item.kind === "segment" ? (
               <SegmentView key={item.segment.id} segment={item.segment} />
@@ -2009,26 +2200,12 @@ function SegmentedTurnBody({
       {isLiveTurn(turnStatus) && !segments.some((s) => s.kind === "text") && (
         <ThinkingPlaceholder viewMode={viewMode} />
       )}
-      {/* quick-3c85b05e：轮次时间三段——开始 · 结束 · 历时（悬浮对话/两视图共用本
-          组件同享）。锚点缺失回退单显结束时间（原 formatTurnTime 行为保持）。 */}
-      {replyAt && (
-        <div className="ml-9 flex flex-wrap items-center gap-x-1.5 text-[10.5px] text-muted-foreground">
-          {turnStartedAt != null && (
-            <span>开始 {formatTurnTimeSec(new Date(turnStartedAt).toISOString())}</span>
-          )}
-          {turnStartedAt != null && <span aria-hidden>·</span>}
-          <span>结束 {formatTurnTimeSec(replyAt)}</span>
-          {turnStartedAt != null && (
-            <>
-              <span aria-hidden>·</span>
-              <span>
-                历时{" "}
-                {formatTurnDuration(Math.max(0, Date.parse(replyAt) - turnStartedAt))}
-              </span>
-            </>
-          )}
-        </div>
-      )}
+      {/* 2026-10-20-session-page-dsh-alignment（FR-01 / D-016①）：原 quick-3c85b05e
+          的「开始 · 结束 · 历时」独立行已删除——它与轮尾状态行重复，时间细节改由
+          TurnRow 派生 metaDetail 折进那条唯一元信息行（RoundDivider.detail / all 视图
+          turn-meta-detail）。渲染语义不变：仍是 replyAt 存在才显示，锚点缺失时只显
+          结束时刻。故本组件不再直接渲染该行（turnStartedAt/replyAt 仍用于运行中状态
+          条与调用方派生）。 */}
     </>
   );
 }

@@ -7,7 +7,7 @@ import uuid
 from datetime import datetime
 from typing import Any, Literal
 
-from pydantic import BaseModel, Field, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 # task-02（2026-08-28-session-ppm-task-binding / D-005@v1 / design §7）：PPM 条目
 # 类型 Literal——``plan_task``=个人计划任务（ppm_plan_task）、``problem``=问题清单
@@ -1369,6 +1369,84 @@ class SessionTurnOutlineRead(BaseModel):
     session_id: uuid.UUID
     total_turns: int
     items: list[TurnOutlineItemRead] = []
+
+
+# ── 1b 文件变更 / 时序快照 DTO（2026-10-20-session-page-dsh-alignment task-08）──
+# daemon → backend → 前端三段共用的形状（D-023@v1 / design「文件变更卡 DTO」）。
+# Python 属性用 snake_case（ruff N815 / mypy 友好），**线上字段名**经 alias 与
+# design 逐字对齐（camelCase）；``serialize_by_alias=True`` 保证嵌在轮次读模型
+# 里被 ``model_dump`` / FastAPI 序列化时也输出设计字段名（不是 snake_case）。
+# 契约：字段不得增删；老 daemon 缺字段 → 读模型给 ``null`` + ``"tool_only"``，
+# 禁止把「快照缺失」显示成「本轮无改动」（E6 / E8）。
+
+
+class _CamelSnapshotMirror(BaseModel):
+    """camelCase 线名 ↔ snake_case 属性的镜像基类（仅 1b 快照 DTO 使用）。"""
+
+    model_config = ConfigDict(populate_by_name=True, serialize_by_alias=True)
+
+
+FileChangesCapability = Literal["full", "tool_only"]
+
+
+class TurnFileChange(_CamelSnapshotMirror):
+    """单文件变更行（``TurnFileChangesSnapshot.files[]``）。"""
+
+    path: str  # 仓根相对（design：posix 分隔）
+    # 禁 rename 检测：改名一律呈两条（delete + add），status 由 porcelain XY 裁决。
+    status: Literal["added", "modified", "deleted", "untracked"]
+    added: int  # git diff --numstat；二进制为 0/0 + binary=True
+    deleted: int
+    # 可选字段用 exclude_if 序列化时省略 None（design 的 `binary?` 是「可缺省」
+    # 而非 null——生成的前端类型才是 optional 而非 `| null`）。
+    binary: bool | None = Field(default=None, exclude_if=lambda v: v is None)
+    # edit_patch = 命中本轮 Edit/Write 工具调用；command = 命令行/脚本改动。
+    attribution: Literal["edit_patch", "command"]
+    edit_tool_names: list[str] | None = Field(
+        default=None,
+        alias="editToolNames",
+        exclude_if=lambda v: v is None,
+    )
+    # ignored 目录只能靠 mtime 探测时标 "mtime"；git 口径标 "git" / 缺省。
+    source: Literal["git", "mtime"] | None = Field(
+        default=None,
+        exclude_if=lambda v: v is None,
+    )
+
+
+class TurnFileChangesSnapshot(_CamelSnapshotMirror):
+    """一轮工作区文件变更快照（``GET /sessions/{id}/runs`` 的 ``file_changes``）。"""
+
+    run_id: str = Field(alias="runId")
+    baseline_head: str | None = Field(default=None, alias="baselineHead")  # 非 git 仓 null
+    collected_at: str = Field(alias="collectedAt")  # ISO 字符串（原样透传不重格式化）
+    collect_ms: int = Field(alias="collectMs")
+    status: Literal["ok", "partial", "failed", "unavailable"]
+    # partial 的三种原因：1500ms 超时 / 超上限截断 / 单工作区队列溢出。
+    reason: Literal["timeout", "not_a_repo", "git_missing", "queue_overflow"] | None = Field(
+        default=None, exclude_if=lambda v: v is None
+    )
+    # 改动数超上限被截断（partial，不是错误态——卡片照出、行级 +/− 显示破折号）。
+    truncated: bool | None = Field(default=None, exclude_if=lambda v: v is None)
+    files: list[TurnFileChange] = []
+    # 恒 true：共享工作区可能含并行会话改动（D-023 不引每会话 worktree）。
+    concurrent_sessions_hint: Literal[True] = Field(default=True, alias="concurrentSessionsHint")
+
+
+class TurnTimingSnapshot(_CamelSnapshotMirror):
+    """一轮模型调用时序（``GET /sessions/{id}/runs`` 的 ``timing``）。
+
+    ``attempts[]`` 原样透传为 dict 列表（不新增第 5 个镜像类，字段集由 design
+    钉死：index / startedAt / firstTokenAt / endedAt / model / inputTokens /
+    outputTokens）。``ttftMs`` 只在取到首 token 时有值——**null 不得填 0 冒充**；
+    无采样时整个 timing 为 null（而非空对象），前端保持单色近似（D-025@v1）。
+    """
+
+    run_id: str = Field(alias="runId")
+    basis: Literal["observed", "approx"]
+    ttft_ms: int | None = Field(default=None, alias="ttftMs")
+    total_ms: int = Field(alias="totalMs")
+    attempts: list[dict[str, Any]] = []
 
 
 # ── Change-write task queue (task-09, FR-08 / D-004@v1) ─────────────────────

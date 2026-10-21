@@ -217,6 +217,15 @@ import { isValidPlatformLevel } from './interactive/thinking-levels.js';
 // instanceof 分支用，value import）。
 import { SessionBusyError } from './interactive/types.js';
 import { KnowledgeHitsPeriodicUploader } from './knowledge-hits-periodic.js';
+// 2026-10-20-session-page-dsh-alignment task-09（1b）：快照上报带 daemon 版本
+//（侧表 daemon_version 列 / 发版门控读侧，单一来源 package.json → daemon-version）。
+import { DAEMON_VERSION } from './daemon-version.js';
+// 2026-10-20-session-page-dsh-alignment task-09（1b）：每轮工作区快照上报体
+//（session-manager 采集完成后经 setTurnSnapshotReporter 回调本模块）。
+import type {
+  TurnFileChangesSnapshot,
+  TurnSnapshotReport,
+} from './interactive/turn-file-changes-types.js';
 import type {
   PersistedSessionRecord,
   SessionState,
@@ -845,6 +854,105 @@ interface DetectorLike {
 }
 
 /** daemon 需要的 HubClient 接口子集。 */
+/**
+ * interactive run 终态上报 payload —— `hubClient.notifyRunResult` 的 body 形状
+ *（snake_case，逐字对齐 backend `InteractiveRunResultRequest`）。
+ *
+ * 2026-10-20-session-page-dsh-alignment task-09（1b / D-023@v1 / FR-13/15/16）：
+ * 追加**可选**快照字段（既有字段与必填性零改动）：
+ *   - `file_changes`：每轮工作区快照 `TurnFileChangesSnapshot`（camelCase 内部结构，
+ *     与 backend `daemon_run_snapshots.file_changes` JSON 列同形；`model_usage`
+ *     行内 camelCase 同惯例）；
+ *   - `timing`：task-10 的 TTFT/attempt 快照（本任务不产出 → 键不出现；**同一次
+ *     上报**里追加，禁第二次调用）；
+ *   - `daemon_version`：发版门控（task-13）读侧口径。
+ *
+ * 「字段缺失就不写」的守卫在 daemon `_assembleRunResultPayload` 与
+ * hub-client `notifyRunResult` 两处同源执行（与 `model_usage` 同一惯例）。
+ */
+export interface RunResultPayload {
+  /**
+   * 开放索引签名：payload 同时要喂给 `resilience.SubmitClient.notifyRunResult`
+   * 与 outbox（`Record<string, unknown>` 形状），且本变更只做**附加可选字段**
+   *（task-10 的 timing 同表），故保留开放键面；已知键仍逐个显式声明类型。
+   */
+  [key: string]: unknown;
+  status: string;
+  is_error: boolean;
+  subtype?: string;
+  result_summary?: string;
+  // SDKResultSuccess 透传字段（usage / cost / duration 等）。
+  total_cost_usd?: number;
+  num_turns?: number;
+  duration_ms?: number;
+  duration_api_ms?: number;
+  input_tokens?: number;
+  output_tokens?: number;
+  // task-16：cache 两维（短名，对齐 backend _METADATA_FIELDS）。
+  cache_read_tokens?: number;
+  cache_creation_tokens?: number;
+  // task-06（2026-08-29-usage-by-provider-model）：modelUsage 逐模型明细行 + run
+  // 级 assistant 计数（缺失/空时两字段都不写）。
+  model_usage?: ModelUsageRow[];
+  api_requests?: number;
+  // task-04：模型层结构化错误（is_error=true 且归类器产出时）。
+  error?: ModelError;
+  // ── 2026-10-20-session-page-dsh-alignment task-09（1b）：每轮工作区快照 ──
+  /** 本轮文件变更快照（camelCase 内部结构；缺失就不写）。 */
+  file_changes?: TurnFileChangesSnapshot;
+  /** task-10 预留：TTFT/attempt 快照（缺失就不写；与 file_changes 同一次上报）。 */
+  timing?: Record<string, unknown>;
+  /** daemon 版本（发版门控 / 侧表 daemon_version 列）。 */
+  daemon_version?: string;
+}
+
+/** 后到快照上报复用的终态三字段（`onTurnResult` 首报时记下）。 */
+export interface TerminalRunResultFields {
+  status: string;
+  is_error: boolean;
+  subtype?: string;
+}
+
+/** 终态三字段内存表上限（长会话不无界增长；超出淘汰最旧）。 */
+const DAEMON_TERMINAL_RESULT_MAX = 256;
+
+/**
+ * 后到快照上报 payload 的**唯一组装点**（纯函数，便于单测）。
+ *
+ * - 终态三字段：来自首报记下的 `TerminalRunResultFields`（缺失时回落
+ *   `success`/`false` —— 快照本身与终态成败无关，且 backend 对已终态 run 幂等）；
+ * - `file_changes`：本轮快照（camelCase 内部结构，align backend JSON 列）；
+ * - `timing`：task-10 的 TTFT/attempt（本任务不产出 → 键不出现）；
+ * - `daemon_version`：发版门控（task-13）。
+ *
+ * 守卫统一为「字段缺失就不写」（与 `model_usage` 同一惯例）——task-10 只需在
+ * 这里的 `timing` 入参填值，不新增第二次上报调用。
+ */
+export function buildRunSnapshotPayload(args: {
+  terminal?: TerminalRunResultFields;
+  fileChanges?: TurnFileChangesSnapshot;
+  timing?: Record<string, unknown>;
+  daemonVersion?: string;
+}): RunResultPayload {
+  const payload: RunResultPayload = {
+    status: args.terminal?.status ?? 'success',
+    is_error: args.terminal?.is_error ?? false,
+  };
+  if (args.terminal?.subtype !== undefined) {
+    payload.subtype = args.terminal.subtype;
+  }
+  if (args.fileChanges !== undefined) {
+    payload.file_changes = args.fileChanges;
+  }
+  if (args.timing !== undefined) {
+    payload.timing = args.timing;
+  }
+  if (args.daemonVersion !== undefined) {
+    payload.daemon_version = args.daemonVersion;
+  }
+  return payload;
+}
+
 interface ClientLike {
   /**
    * 2026-10-10-workspec-maintenance task-04：关联仓双落盘结果回报（FR-04；
@@ -981,30 +1089,7 @@ interface ClientLike {
     leaseId: string,
     claimToken: string,
     runId: string,
-    payload: {
-      status: string;
-      is_error: boolean;
-      subtype?: string;
-      result_summary?: string;
-      // SDKResultSuccess 透传字段（usage / cost / duration 等，interactive 路径
-      // 原先丢弃，导致 AgentRun 全 NULL；对齐 batch extractResultStats）。
-      total_cost_usd?: number;
-      num_turns?: number;
-      duration_ms?: number;
-      duration_api_ms?: number;
-      input_tokens?: number;
-      output_tokens?: number;
-      // task-16：cache 两维（短名，对齐 backend _METADATA_FIELDS）。
-      cache_read_tokens?: number;
-      cache_creation_tokens?: number;
-      // task-06（2026-08-29-usage-by-provider-model / FR-01-3/FR-02-1）：
-      // modelUsage 逐模型明细行 + run 级 assistant 计数。modelUsage 缺失/空时
-      // daemon 两字段都不写（老 CLI / Codex 兼容，backend N-01 None）。
-      model_usage?: ModelUsageRow[];
-      api_requests?: number;
-      // task-04：模型层结构化错误（is_error=true 时归类器产出，成功路径不 set）。
-      error?: ModelError;
-    },
+    payload: RunResultPayload,
   ): Promise<unknown>;
   /**
    * 增量上报 agent 执行消息（流式）。interactive + batch 共用端点，
@@ -1865,6 +1950,18 @@ export class Daemon {
    * _modelUsageBaselineBySession（onSessionEnd / onSessionReloaded 回收）。
    */
   private readonly _durationApiBaselineBySession = new Map<string, number>();
+  /**
+   * 2026-10-20-session-page-dsh-alignment task-09（1b）：本轮终态三字段
+   *（runId → status/is_error/subtype）。
+   *
+   * 用途：工作区快照在轮终态**之后**才采完（E2），补报时需复述同一终态——backend
+   * `close_interactive_run` 对已终态 run 幂等，快照走 `(run_id)` 侧表 upsert。
+   * 上限淘汰最旧（DAEMON_TERMINAL_RESULT_MAX），不与会话生命周期绑定。
+   */
+  private readonly _terminalRunResultByRun = new Map<
+    string,
+    TerminalRunResultFields
+  >();
   // ── ql-20260909-011（交互会话逐事件上报微批化）────────────────────────────
   // 实机根因：interactive 路径每条事件一次串行 submitMessages HTTP 往返（onTurnMessage
   // → events.ts 循环逐事件 await → consume 协程读完下一条 SDK 帧前必须等当前帧
@@ -2181,6 +2278,13 @@ export class Daemon {
       options?.wsClientFactory ??
       ((opts) => new WsClient(opts) as unknown as WsClientLike);
     this._sessionManager = options?.sessionManager ?? null;
+    // 2026-10-20-session-page-dsh-alignment task-09（1b / FR-13/15/16 / D-023@v1）：
+    // 每轮工作区快照的上报出口接线——采集在 session-manager 轮终态之后异步完成，
+    // 完成后经本回调到达这里（`_onTurnSnapshot` → notifyRunResult 同端点补报）。
+    // `?.` 双重防御：旧测试替身既无 sessionManager 也无本方法时零影响。
+    this._sessionManager?.setTurnSnapshotReporter?.((report) =>
+      this._onTurnSnapshot(report),
+    );
     this._credentialManager = options?.credentialManager ?? null;
     this._lockManager = options?.lockManager ?? null;
     this._resilience = options?.resilience ?? null;
@@ -4025,27 +4129,10 @@ export class Daemon {
     };
     const status = resultMeta.subtype ?? 'success';
     const isError = resultMeta.is_error === true;
-    const payload: {
-      status: string;
-      is_error: boolean;
-      subtype?: string;
-      result_summary?: string;
-      total_cost_usd?: number;
-      num_turns?: number;
-      duration_ms?: number;
-      duration_api_ms?: number;
-      input_tokens?: number;
-      output_tokens?: number;
-      // task-16：cache 两维（短名），SDK 全名在此处映射注入。
-      cache_read_tokens?: number;
-      cache_creation_tokens?: number;
-      // task-06（2026-08-29-usage-by-provider-model）：模型明细行 + run 级计数
-      //（modelUsage 缺失/空时两字段都不写，见下方组装段）。
-      model_usage?: ModelUsageRow[];
-      api_requests?: number;
-      // task-04：模型层结构化错误（is_error=true 时 session-manager 已挂到 result.modelError）。
-      error?: ModelError;
-    } = {
+    // 2026-10-20-session-page-dsh-alignment task-09（1b）：payload 形状收敛到共享
+    // `RunResultPayload`（hub-client notifyRunResult 同源类型）——本任务只加可选
+    // 快照字段（file_changes / timing），既有字段与组装顺序零改动。
+    const payload: RunResultPayload = {
       status,
       is_error: isError,
     };
@@ -4217,6 +4304,11 @@ export class Daemon {
         ...(resetAt !== null && resetAt !== undefined ? { reset_at: resetAt } : {}),
       } as typeof payload.error;
     }
+    // 2026-10-20-session-page-dsh-alignment task-09（1b / D-023@v1）：记住本轮终态
+    // 三字段——工作区快照**后到**上报（E2 采集在轮终态之后才跑）复用它，保证同一
+    // run 的二次上报与首报同终态（backend close_interactive_run 对已终态 run 幂等，
+    // 快照走 `(run_id)` 侧表 upsert）。上限淘汰最旧，防长会话只增不减。
+    this._rememberTerminalRunResult(runId, payload);
     if (!state.claimToken) {
       // task-07（A5 claim_token 空窗）：终态不再丢弃——kind=run_result 入箱
       //（pending_token 标记），SESSION_INJECT 刷新 token 后 drain 重放；
@@ -4356,6 +4448,151 @@ export class Daemon {
       this._interactiveSpecSyncCtx.get(state.leaseId) ?? null,
       this._client as never,
     );
+  }
+
+  // ── 2026-10-20-session-page-dsh-alignment task-09（1b）：每轮工作区快照上报 ──
+  //
+  // 时序（design 生命周期契约 E2/E3/E4）：
+  //   SessionManager._onResult（轮终态 await 完）→ fire-and-forget 采集（≤3 git
+  //   子进程 / 1500ms 硬超时）→ setTurnSnapshotReporter 回调本模块 → 同一 run-result
+  //   端点补报 `file_changes`（backend 侧 `(run_id)` 幂等覆盖写侧表）。
+  // 为什么不是塞进首报：采集必须在轮终态之后（否则 1500ms 会把 SSE 终态拖住），
+  // 首报载荷无法等待；故快照「后到」，复用同一端点 + 同一终态三字段。
+
+  /**
+   * 记住本轮终态三字段（`runId` → status/is_error/subtype）。
+   *
+   * 后到快照上报必须复述同一终态：backend `close_interactive_run` 对已终态 run
+   * 幂等（不会把 completed 翻回 failed），快照本体走 `(run_id)` 侧表 upsert。
+   * 上限淘汰最旧（长会话不无界增长）。
+   */
+  private _rememberTerminalRunResult(
+    runId: string,
+    payload: RunResultPayload,
+  ): void {
+    const terminal = {
+      status: payload.status,
+      is_error: payload.is_error,
+      ...(payload.subtype !== undefined ? { subtype: payload.subtype } : {}),
+    };
+    this._terminalRunResultByRun.set(runId, terminal);
+    while (this._terminalRunResultByRun.size > DAEMON_TERMINAL_RESULT_MAX) {
+      const oldest = this._terminalRunResultByRun.keys().next().value;
+      if (oldest === undefined) break;
+      this._terminalRunResultByRun.delete(oldest);
+    }
+  }
+
+  /**
+   * 快照上报（SessionManager reporter 回调入口，fire-and-forget）。
+   *
+   * 边界（全部 best-effort，绝不抛）：session 已收口 → warn 丢弃；claimToken 空窗
+   * → 有 resilience 时入箱等 token 刷新后重放（对齐 onTurnResult 的 A5 语义），
+   * 否则 warn 丢弃（该 run 的快照缺失 → backend capability="tool_only"，前端走
+   * 「仅工具编辑」降级卡，**不会被显示成「本轮无改动」**）。
+   */
+  private _onTurnSnapshot(report: TurnSnapshotReport): void {
+    const state = this._sessionManager?.get(report.sessionId);
+    if (!state) {
+      this._logger.warn('on_turn_snapshot_session_not_found', {
+        session_id: report.sessionId,
+        run_id: report.runId,
+      });
+      return;
+    }
+    // 唯一组装点（task-10 的 timing 追加进同一 payload，禁第二次调用）。
+    const payload = buildRunSnapshotPayload({
+      terminal: this._terminalRunResultByRun.get(report.runId),
+      fileChanges: report.fileChanges,
+      ...(report.timing !== undefined ? { timing: report.timing } : {}),
+      daemonVersion: DAEMON_VERSION,
+    });
+    if (!state.claimToken) {
+      this._logger.warn('on_turn_snapshot_no_claim_token', {
+        session_id: report.sessionId,
+        lease_id: state.leaseId,
+        run_id: report.runId,
+      });
+      if (this._resilience) {
+        try {
+          void this._resilience
+            .enqueueRunResult(state.leaseId, '', report.runId, payload)
+            .catch(() => undefined);
+        } catch {
+          // 入箱失败不抛（观测面 best-effort）。
+        }
+      }
+      return;
+    }
+    // 防御旧测试替身缺方法（ClientLike 声明为必填，实际 mock 可能省略）。
+    if (typeof this._client.notifyRunResult !== 'function') {
+      this._logger.debug('on_turn_snapshot_notify_unavailable', {
+        session_id: report.sessionId,
+        run_id: report.runId,
+      });
+      return;
+    }
+    void this._client
+      .notifyRunResult(state.leaseId, state.claimToken, report.runId, payload)
+      .catch((error: unknown) => {
+        // backend 4xx/5xx / 网络错误：只 warn，不重试（下一轮不受影响）。
+        this._logger.warn('on_turn_snapshot_notify_failed', {
+          session_id: report.sessionId,
+          lease_id: state.leaseId,
+          run_id: report.runId,
+          status: report.fileChanges.status,
+          error: String(error),
+        });
+      });
+  }
+
+  /**
+   * 2026-10-21-daemon-zombie-turn FR-01：轮启动看门狗触发的失败回报。
+   *
+   * SessionManager 看门狗到点（inject push 后窗口内零轮事件——消息疑被引擎
+   * 在打断 abort 收尾窗口吞没，生产会话 49d893ab 实证形态）且已重置会话态后
+   * 经 deps.onTurnStartTimeout 到达本方法。用 state 的 leaseId/claimToken 经
+   * notifyRunResult 把该 run 收敛 failed（status='turn_start_timeout' +
+   * is_error=true → backend close_interactive_run 落 error_code=
+   * interactive_failed + result_summary 作可读原因，SSE 终态随之到达前端）。
+   *
+   * 边界：session-manager / state 缺失（终态清理后迟到触发）→ warn no-op；
+   * notifyRunResult 网络/HTTP 失败 → warn 不重试（backend pending run 启动
+   * 超时清扫 300s 兜底，与 _reportInjectDropped 同款收敛姿势）。
+   */
+  async onTurnStartTimeout(sessionId: string, runId: string): Promise<void> {
+    if (!this._sessionManager) {
+      this._logger.warn('on_turn_start_timeout_no_manager', { session_id: sessionId });
+      return;
+    }
+    const state = this._sessionManager.get(sessionId);
+    if (!state) {
+      this._logger.warn('on_turn_start_timeout_session_not_found', {
+        session_id: sessionId,
+      });
+      return;
+    }
+    try {
+      await this._client.notifyRunResult(state.leaseId, state.claimToken, runId, {
+        status: 'turn_start_timeout',
+        is_error: true,
+        result_summary:
+          '消息已送达，但引擎长时间未启动本轮（可能被上一轮打断的收尾竞态吞没）。' +
+          '本轮已自动收敛为失败，请重新发送消息即可继续',
+      });
+      this._logger.info('turn_start_timeout_reported', {
+        session_id: sessionId,
+        run_id: runId,
+        lease_id: state.leaseId,
+      });
+    } catch (e) {
+      this._logger.warn('turn_start_timeout_report_failed', {
+        session_id: sessionId,
+        run_id: runId,
+        lease_id: state.leaseId,
+        error: e,
+      });
+    }
   }
 
   /**

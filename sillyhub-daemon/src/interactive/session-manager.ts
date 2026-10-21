@@ -259,6 +259,28 @@ import {
   registerAsyncReceiptTask,
   writeTaskLine,
 } from './session-manager/background-tasks.js';
+// task-09（2026-10-20-session-page-dsh-alignment / 线 C 1b / D-023@v1 / FR-13/15/16）：
+// 每轮工作区快照采集——E1 轮首基线（inject 成功后记 HEAD）+ E2 轮尾 fire-and-forget
+// 采集（轮终态 await 完之后才跑，禁阻塞 SSE 终态）+ E4 按 runId 覆盖上报。
+// 采集器本身（≤3 条 git 子进程 / 1500ms 硬超时 / 单工作区串行队列）在
+// ./turn-file-changes.ts；本文件只做生命周期接线与上报出口。
+import {
+  collectTurnFileChanges,
+  readBaselineHead,
+  toolCallPathsFromEvent,
+} from './turn-file-changes.js';
+import type {
+  TurnFileChangesSnapshot,
+  TurnSnapshotReport,
+  TurnSnapshotReporter,
+  TurnToolCallPath,
+} from './turn-file-changes-types.js';
+// task-10（2026-10-20-session-page-dsh-alignment / 线 C 1b / D-025@v1 / D-026@v1 /
+// FR-11, FR-15）：每轮 TTFT / attempt 时序。事件时间戳只在 `_onMessage` 旁路累加
+// （内存，不落盘、不改事件协议），派生是纯函数（`./turn-timing.ts`），结果并进
+// task-09 那**一次** `TurnSnapshotReport`（`timing` 字段，禁止第二次上报）。
+import { deriveTurnTiming, timingEventFromAgentEvent } from './turn-timing.js';
+import type { TurnTimingEvent } from './turn-timing.js';
 
 // ── 2026-09-11-provider-adapter-registry task-03（FR-03 / design Wave 2 六处收口）──
 //
@@ -276,6 +298,54 @@ function hasProviderFileWriter(provider: string): boolean {
   >)[provider];
   return adapter !== undefined && 'write' in adapter.fileSettings;
 }
+
+/* ── task-09（1b）：每轮工作区快照的接线承载 ──────────────────────────────── */
+
+/**
+ * 一轮的采集累加器（E1 轮首建，E2 轮尾消费一次即删）。
+ *
+ * 只放**旁路**数据：轮首 HEAD、轮首墙钟、本轮工具调用路径——事件协议零改动
+ *（路径从既有 tool_use 事件的 content 入参 JSON 派生，与 `_registerAgentToolUseMeta`
+ * 同一路），不写 agent_run_logs / edit_patch 表。
+ */
+interface TurnFileChangesTurn {
+  sessionId: string;
+  runId: string;
+  /** 会话工作区根（= SessionState.cwd）。 */
+  workspaceRoot: string;
+  /**
+   * 轮首 HEAD：`undefined` = E1 尚未解析（采集期自取）；`null` = 已解析但无 HEAD
+   *（非 git 仓 / 空仓）；`string` = 已解析。
+   */
+  baselineHead: string | null | undefined;
+  /** 轮首墙钟（ms）：ignored 目录 mtime 探测的「本轮」下界。 */
+  startedAtMs: number;
+  /** 本轮工具调用路径（去重后；归因 + ignored 目录探测输入）。 */
+  toolCallPaths: TurnToolCallPath[];
+  /** 去重键（toolName + 原始路径），防同一工具反复调用同一文件膨胀。 */
+  seenKeys: Set<string>;
+  /**
+   * task-10：本轮事件时序旁路（text / thinking / tool_use / tool_result 的观察
+   * 时刻）。**只存内存**——不改事件协议、不落盘；与 file-changes 共用同一轮
+   * 生命周期（E1 建、E2 消费一次即删），派生见 `./turn-timing.ts`。
+   */
+  timingEvents: TurnTimingEvent[];
+  /** task-10：本轮模型（`SessionState.model` 快照，attempt 未带 model 时回填）。 */
+  model?: string;
+}
+
+/** 在飞轮累加器上限（会话异常未收尾时也不无界增长；超出淘汰最旧）。 */
+const TURN_FILE_CHANGES_TURN_MAX = 128;
+/** 已采快照缓存上限（按 runId 覆盖写；仅供 daemon 内查询 / 后到上报读取）。 */
+const TURN_FILE_CHANGES_SNAPSHOT_MAX = 256;
+/** 单轮工具调用路径上限（工具密集轮的内存护栏）。 */
+const TURN_FILE_CHANGES_MAX_TOOL_PATHS = 500;
+/**
+ * 单轮时序事件上限（task-10 内存护栏）：claude partial flush 走 500ms 节流，
+ * 4096 条约等于 34 分钟连续流式输出；超出后停止累加（轮终态时刻由
+ * `turnEndedAtMs` 单独传入，末段缺失只影响末 attempt 的精度，不炸内存）。
+ */
+const TURN_TIMING_EVENT_MAX = 4096;
 
 export class SessionManager {
   /** 内存 SessionStore。Wave1/2 内存态，daemon 重启丢失（D-003）。 */
@@ -503,6 +573,23 @@ export class SessionManager {
     string,
     { sessionId: string; taskName: string; subagentType?: string }
   >();
+
+  /* ── task-09（1b）：每轮工作区快照（E1 累加器 / (runId) 快照缓存 / 上报出口）── */
+
+  /** 在飞轮的采集累加器（runId → 轮首基线 + 工具调用路径；轮尾消费即删）。 */
+  private readonly _turnFileChangesTurns = new Map<
+    string,
+    TurnFileChangesTurn
+  >();
+
+  /** 已采快照（runId → 快照，覆盖写；供 daemon 内查询与后到上报读取）。 */
+  private readonly _turnFileChangesByRunId = new Map<
+    string,
+    TurnFileChangesSnapshot
+  >();
+
+  /** 上报出口（daemon 装配时 `setTurnSnapshotReporter` 注入；null = 只缓存+日志）。 */
+  private _turnSnapshotReporter: TurnSnapshotReporter | null = null;
 
   /**
    * task-07（FR-06 / D-004@v1）：空闲扫描定时器。start() 启动、stop() 清理。
@@ -1153,6 +1240,9 @@ export class SessionManager {
 
       // 4. 异步 fire driver.consume（不阻塞 create 返回）。
       void this._runConsume(state);
+      // task-09（1b / E1）：首轮也记轮首基线——create 不走 inject，但首轮工区快照
+      // 与后续轮同口径（state.currentRunId 已是 firstRunId）。fire-and-forget。
+      this._armTurnFileChanges(state.sessionId, state.currentRunId);
       // task-10：create 成功排队 flush（agentSessionId 尚未写入，snapshotPersistable
       // 会过滤；真正的「带 agentSessionId 落盘」发生在 _onMessage system/init 后再 flush）。
       this._scheduleFlush();
@@ -1284,7 +1374,18 @@ export class SessionManager {
     attachments?: SessionInjectAttachment[],
     downloadAttachment?: (id: string) => Promise<Buffer>,
   ): Promise<InjectResult> {
-    return inject(this._core(), sessionId, prompt, runId, attachments, downloadAttachment);
+    const injected = await inject(
+      this._core(),
+      sessionId,
+      prompt,
+      runId,
+      attachments,
+      downloadAttachment,
+    );
+    // task-09（1b / E1）：注入成功 = 本轮开始——记轮首 HEAD 基线（fire-and-forget
+    // 的 1 条 git 子进程）与本轮工具调用路径累加器。失败路径（抛错）不建累加器。
+    this._armTurnFileChanges(sessionId, injected.runId);
+    return injected;
   }
 
   async resolvePlanResponse(
@@ -1591,13 +1692,24 @@ export class SessionManager {
   // ── 内部：driver.consume 回调（方法体已下沉 events.ts）──────────────────────
 
   private async _onResult(state: SessionState, result: InteractiveDriverResult): Promise<void> {
-    return onResult(this._core(), state, result);
+    // task-09（1b / E2）：先取 runId——`onResult` 内部会清 `state.currentRunId`
+    //（后台任务锚点场景除外），轮尾采集必须拿到本轮的 runId。
+    const runId = state.currentRunId;
+    await onResult(this._core(), state, result);
+    // 轮终态链路（onTurnResult → SSE 终态）**await 完之后**才 fire-and-forget 采集：
+    // 1500ms 硬超时也拖不到轮结束，快照允许「后到」（design E2 / 问三）。
+    this._startTurnFileChangesCollection(state, runId);
   }
 
   private async _onMessage(
     state: SessionState,
     envelope: TurnMessageEnvelope,
   ): Promise<void> {
+    // task-09（1b）：先旁路累加本轮工具调用路径（只读既有事件字段，改协议=0），
+    // 再走原有消费链——顺序保证事件本身的上报不受影响。
+    this._noteTurnToolCallPaths(state, envelope);
+    // task-10：同一处旁路累加本轮事件时序（同一批事件、同一 runId 键，零协议改动）。
+    this._noteTurnTimingEvents(state, envelope);
     return onMessage(this._core(), state, envelope);
   }
 
@@ -1640,6 +1752,242 @@ export class SessionManager {
     event: SessionEventForBackend,
   ): void {
     return emitSessionEvent(this._core(), sessionId, runId, event);
+  }
+
+  // ── task-09（2026-10-20-session-page-dsh-alignment / 1b / D-023@v1）──────────
+  // 每轮工作区快照：E1 轮首基线（inject/create 成功后）→ E2 轮尾采集（`_onResult`
+  // await 完终态之后，fire-and-forget）→ E3 采集器产快照 → E4 按 runId 覆盖上报。
+  // 采集器本体（≤3 git 子进程 / 1500ms 硬超时 / 单工作区串行队列 / 遥测）在
+  // `./turn-file-changes.ts`，本簇只负责生命周期接线与上报出口。
+
+  /**
+   * E4 上报出口注入（daemon 装配期调用；null = 只缓存快照 + 采集器结构化日志）。
+   *
+   * 单点出口：一轮只回调一次，payload 由 `_buildTurnSnapshotReport` 一次组装——
+   * task-10 的 timing 追加进同一 `TurnSnapshotReport`（`timing` 字段），**禁止**
+   * 另起第二个出口或第二次调用（保证 backend `(run_id)` 幂等覆盖写语义）。
+   */
+  setTurnSnapshotReporter(reporter: TurnSnapshotReporter | null): void {
+    this._turnSnapshotReporter = reporter;
+  }
+
+  /** 按 runId 取最近一次快照（覆盖写语义；未采集 / 已淘汰 → undefined）。 */
+  getTurnFileChanges(runId: string): TurnFileChangesSnapshot | undefined {
+    return this._turnFileChangesByRunId.get(runId);
+  }
+
+  /**
+   * E1 轮首基线：记 workspaceRoot + 轮首墙钟 + 工具调用路径累加器，并
+   * fire-and-forget 解析轮首 HEAD（**零子进程**：读 `.git/HEAD`，见
+   * `readBaselineHead`；不需要 await，也不占工作区 cwd）。
+   *
+   * 解析三态直接喂给采集器：sha = 基线；null = 非 git 仓（采集期不再 rev-parse）；
+   * undefined = 复杂 git 形态（采集期由 git 自己兜底）。**不把「读不到」写成
+   * 「无改动」**——非 git 仓最终由采集器报 unavailable。
+   */
+  private _armTurnFileChanges(
+    sessionId: string,
+    runId: string | undefined,
+  ): void {
+    if (!runId) return;
+    const state = this._store.get(sessionId);
+    const workspaceRoot = state?.cwd;
+    if (!workspaceRoot) return;
+    const turn: TurnFileChangesTurn = {
+      sessionId,
+      runId,
+      workspaceRoot,
+      baselineHead: undefined,
+      startedAtMs: Date.now(),
+      toolCallPaths: [],
+      seenKeys: new Set(),
+      // task-10：本轮时序旁路（首 token 锚点 / attempt 切分的唯一数据源）。
+      timingEvents: [],
+      ...(state.model !== undefined ? { model: state.model } : {}),
+    };
+    this._rememberTurnFileChangesTurn(runId, turn);
+    void readBaselineHead(workspaceRoot).then(
+      (head) => {
+        // 只回填仍指向本对象的条目（被新轮覆盖 / 已过期时不动新条目）。
+        if (this._turnFileChangesTurns.get(runId) === turn) {
+          turn.baselineHead = head;
+        }
+      },
+      () => {
+        if (this._turnFileChangesTurns.get(runId) === turn) {
+          turn.baselineHead = undefined; // 读盘异常 → 交给采集期 git 兜底
+        }
+      },
+    );
+  }
+
+  /** 登记在飞轮累加器（runId 覆盖写 + 上限淘汰最旧，防泄漏）。 */
+  private _rememberTurnFileChangesTurn(
+    runId: string,
+    turn: TurnFileChangesTurn,
+  ): void {
+    this._turnFileChangesTurns.set(runId, turn);
+    while (this._turnFileChangesTurns.size > TURN_FILE_CHANGES_TURN_MAX) {
+      const oldest = this._turnFileChangesTurns.keys().next().value;
+      if (oldest === undefined) break;
+      this._turnFileChangesTurns.delete(oldest);
+    }
+  }
+
+  /**
+   * 本轮工具调用路径累加（`_onMessage` 事件流派生，**不改事件协议**）。
+   *
+   * 数据面与 `_registerAgentToolUseMeta` 同源：tool_use 事件的 `content` 是入参
+   * JSON，只读既有字段派生出路径集合——归因（Edit/Write → `edit_patch`）与
+   * ignored 目录 mtime 探测（路径前缀）共用。无 runId / 无累加器（例如恢复出的
+   * 会话首轮）时静默跳过，事件消费链零影响。
+   */
+  private _noteTurnToolCallPaths(
+    state: SessionState,
+    envelope: TurnMessageEnvelope,
+  ): void {
+    const runId = state.currentRunId;
+    if (!runId) return;
+    const turn = this._turnFileChangesTurns.get(runId);
+    if (!turn) return;
+    const events = Array.isArray(envelope?.events) ? envelope.events : [];
+    for (const ev of events) {
+      if (ev.type !== 'tool_use') continue;
+      for (const call of toolCallPathsFromEvent(ev)) {
+        if (turn.seenKeys.size >= TURN_FILE_CHANGES_MAX_TOOL_PATHS) break;
+        const key = `${call.toolName}\u0000${call.path}`;
+        if (turn.seenKeys.has(key)) continue;
+        turn.seenKeys.add(key);
+        turn.toolCallPaths.push(call);
+      }
+    }
+  }
+
+  /**
+   * task-10：本轮事件时序旁路累加（`_onMessage` 事件流派生，**不改事件协议**）。
+   *
+   * 只读既有事件对象（type / usage / metadata.model），把「事件到达时刻」记成
+   * `atMs`——daemon 事件 IR 本身不带时间戳（spike-02），观察时刻就是唯一可得
+   * 的时序源。只收参与派生的 4 类（text / thinking / tool_use / tool_result），
+   * 其余生命周期信号不占内存；每轮事件数有上限护栏（TURN_TIMING_EVENT_MAX）。
+   *
+   * 无 runId / 无累加器（例如恢复出的会话首轮）时静默跳过，事件消费链零影响。
+   */
+  private _noteTurnTimingEvents(
+    state: SessionState,
+    envelope: TurnMessageEnvelope,
+  ): void {
+    const runId = state.currentRunId;
+    if (!runId) return;
+    const turn = this._turnFileChangesTurns.get(runId);
+    if (!turn) return;
+    const events = Array.isArray(envelope?.events) ? envelope.events : [];
+    if (events.length === 0) return;
+    for (const ev of events) {
+      if (turn.timingEvents.length >= TURN_TIMING_EVENT_MAX) break;
+      const timingEvent = timingEventFromAgentEvent(ev, Date.now());
+      if (timingEvent !== null) turn.timingEvents.push(timingEvent);
+    }
+  }
+
+  /**
+   * E2 轮尾采集（fire-and-forget）：**只在 `_onResult` await 完 `onResult` 之后**
+   * 调用（顺序红线 design E2 /「问三」）——采集绝不 await、绝不让 1500ms 硬超时
+   * 拖住轮结束与 SSE 终态；快照允许「后到」。
+   *
+   * task-10：同一处派生本轮 `timing`，并与 file-changes 快照合并进**同一次**
+   * `_buildTurnSnapshotReport`（不新增上报调用；`turnEndedAtMs` 取进入本方法时的
+   * 墙钟 = `onResult` 刚结束的时刻，后续 git 采集耗时不算进轮时长）。
+   *
+   * 内部全链 try/catch + `void`：采集或上报异常都不得回灌轮终态链路。
+   */
+  private _startTurnFileChangesCollection(
+    state: SessionState,
+    runId: string | undefined,
+  ): void {
+    if (!runId) return;
+    const turn = this._turnFileChangesTurns.get(runId);
+    // 一次性消费：无论有没有累加器都把条目摘掉（防只增不减）。
+    this._turnFileChangesTurns.delete(runId);
+    const workspaceRoot = turn?.workspaceRoot ?? state.cwd;
+    if (!workspaceRoot) return;
+    // task-10：timing 派生（纯函数，无 I/O）。零事件 / 无可驱动时间戳 → null →
+    // `_buildTurnSnapshotReport` 整体省略 `timing` 键（不是空对象、不是 basis 壳）。
+    const turnEndedAtMs = Date.now();
+    const timing = deriveTurnTiming(turn?.timingEvents ?? [], {
+      runId,
+      turnStartedAtMs: turn?.startedAtMs,
+      turnEndedAtMs,
+      model: turn?.model,
+    });
+    void (async () => {
+      try {
+        const snapshot = await collectTurnFileChanges({
+          runId,
+          workspaceRoot,
+          baselineHead: turn?.baselineHead,
+          toolCallPaths: turn?.toolCallPaths ?? [],
+          turnStartedAtMs: turn?.startedAtMs,
+        });
+        this._reportTurnSnapshot(
+          this._buildTurnSnapshotReport({
+            sessionId: state.sessionId,
+            runId,
+            workspaceRoot,
+            fileChanges: snapshot,
+            ...(timing !== null ? { timing } : {}),
+          }),
+        );
+      } catch {
+        // 观测面 best-effort：采集/上报失败都不影响轮终态（采集器本身不抛）。
+      }
+    })();
+  }
+
+  /**
+   * **一次 payload 组装**（唯一收敛点，task-10 的 timing 在同一函数合并）。
+   *
+   * 字段缺失就不写的惯例在本函数显式化：`timing` 未产出时**键不出现**（既不是
+   * 空对象，也不是 `{ basis: "approx" }` 壳）——backend 落 null、前端保持单色
+   * 近似（版本门控 D-025@v1 / E8）；与 `model_usage` 同一手法「缺失就不写」。
+   */
+  private _buildTurnSnapshotReport(args: {
+    sessionId: string;
+    runId: string;
+    workspaceRoot: string;
+    fileChanges: TurnFileChangesSnapshot;
+    /** task-10：本轮 TTFT/attempt（`deriveTurnTiming` 的产出；null 时调用方不传键）。 */
+    timing?: Record<string, unknown>;
+  }): TurnSnapshotReport {
+    return {
+      sessionId: args.sessionId,
+      runId: args.runId,
+      workspaceRoot: args.workspaceRoot,
+      fileChanges: args.fileChanges,
+      ...(args.timing !== undefined ? { timing: args.timing } : {}),
+    };
+  }
+
+  /**
+   * E4 上报：按 `runId` 覆盖写缓存（同一 runId 重复上报等价于最后一次，禁追加）
+   * + 经注入的 reporter 单次回调（未注入 → 只有采集器的结构化日志）。
+   *
+   * reporter 的同步抛错 / 异步 reject 全部吞掉：上报面 best-effort，绝不回灌。
+   */
+  private _reportTurnSnapshot(report: TurnSnapshotReport): void {
+    this._turnFileChangesByRunId.set(report.runId, report.fileChanges);
+    while (this._turnFileChangesByRunId.size > TURN_FILE_CHANGES_SNAPSHOT_MAX) {
+      const oldest = this._turnFileChangesByRunId.keys().next().value;
+      if (oldest === undefined) break;
+      this._turnFileChangesByRunId.delete(oldest);
+    }
+    const reporter = this._turnSnapshotReporter;
+    if (!reporter) return;
+    try {
+      void Promise.resolve(reporter(report)).catch(() => undefined);
+    } catch {
+      // 同步抛错同样吞掉（上报失败不影响轮终态链路）。
+    }
   }
 
   // ── 后台任务生命周期消费簇（方法体已下沉 background-tasks.ts）────────────────

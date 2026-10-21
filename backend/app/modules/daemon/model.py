@@ -476,6 +476,77 @@ class DaemonTaskLease(BaseModel, table=True):
     )
 
 
+class DaemonRunSnapshot(BaseModel, table=True):
+    """1b 轮次快照侧表（2026-10-20-session-page-dsh-alignment task-08 / D-023@v1）。
+
+    daemon 每轮结束后上报的 ``TurnFileChangesSnapshot`` + ``TurnTimingSnapshot``
+    落点：一行 = 一轮（``run_id`` 唯一，``(run_id)`` 幂等覆盖写——重复上报等价
+    最后一次，禁追加）。**侧表而非 agent_runs 加列**：快照是可选观测面，老 daemon
+    不写、绝大多数轮只有一份几百字节 JSON，侧表避免 agent_runs 宽表膨胀与其
+    历史行回填成本；``ondelete CASCADE`` 让轮删除自动回收。
+    """
+
+    __tablename__ = "daemon_run_snapshots"
+    __table_args__ = (
+        # 幂等键：读模型按 run 批量 IN 查询仅命中此唯一索引（不建其他索引）。
+        Index("uq_daemon_run_snapshots_run_id", "run_id", unique=True),
+    )
+
+    id: uuid.UUID = Field(
+        default_factory=uuid.uuid4,
+        sa_column=Column(Uuid(as_uuid=True), primary_key=True, nullable=False),
+    )
+    run_id: uuid.UUID = Field(
+        sa_column=Column(
+            Uuid(as_uuid=True),
+            ForeignKey("agent_runs.id", ondelete="CASCADE"),
+            nullable=False,
+        ),
+    )
+    # 整个 TurnFileChangesSnapshot / TurnTimingSnapshot 原样落 JSON（读模型侧
+    # 再校验成 pydantic 镜像，不做二次聚合）。
+    file_changes: dict | None = Field(
+        default=None,
+        sa_column=Column(JSON, nullable=True),
+    )
+    timing: dict | None = Field(
+        default=None,
+        sa_column=Column(JSON, nullable=True),
+    )
+    # 快照头字段提升为列（供将来审计 / 排查直接用 SQL 过滤，不解析 JSON）：
+    # collectMs / status / reason / truncated 取自 file_changes 快照头。
+    collect_ms: int | None = Field(
+        default=None,
+        sa_column=Column(Integer, nullable=True),
+    )
+    status: str | None = Field(
+        default=None,
+        sa_column=Column(String(16), nullable=True),
+    )
+    reason: str | None = Field(
+        default=None,
+        sa_column=Column(String(32), nullable=True),
+    )
+    truncated: bool = Field(
+        default=False,
+        sa_column=Column(Boolean, nullable=False, server_default=text("false")),
+    )
+    # capability 与快照独立成字段（E6/E8）：daemon 未上报 file_changes →
+    # "tool_only"，读模型据此显式降级，禁止把「字段缺失」透成「本轮无改动」。
+    capability: str = Field(
+        default="tool_only",
+        sa_column=Column(
+            String(16),
+            nullable=False,
+            server_default=text("'tool_only'"),
+        ),
+    )
+    daemon_version: str | None = Field(
+        default=None,
+        sa_column=Column(String(50), nullable=True),
+    )
+
+
 class DaemonChangeWrite(BaseModel, table=True):
     """A change-write task queued for a daemon runtime to execute (D-004@v1).
 

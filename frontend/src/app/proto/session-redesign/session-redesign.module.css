@@ -1,0 +1,185 @@
+/*
+ * 会话页视觉重做（v2 skin）—— 2026-10-20-session-page-dsh-alignment / D-012。
+ *
+ * 目的：不改真实组件的 DOM 契约，只在其外层加一个 skin 作用域，重排
+ *       **字号阶 / 行高 / 垂直节奏 / 层次与对比**（信息密度与观感问题在这三层）。
+ *
+ * 用法：<div className={styles.v2}> …真实 TurnTimeline + 页面 chrome… </div>
+ * 铁律：只用 token（hsl(var(--…)) / --color-*），零字面色；选择器一律锚定在 .v2 下，
+ *       不污染生产样式（本文件只被 /proto/session-redesign 引用）。
+ */
+
+.v2 {
+  /* v2 节奏参数（一处改，全页生效） */
+  --v2-turn-gap: 28px;
+  --v2-row-gap: 6px;
+  --v2-process-size: 12.5px;
+  --v2-meta-size: 11px;
+  --v2-rail: 52rem;
+  background: hsl(var(--background));
+  color: hsl(var(--foreground));
+}
+
+/* ── 会话流：限宽居中 + 呼吸节奏 ───────────────────────────────── */
+.v2 :global([data-turn-key]) {
+  scroll-margin-top: 56px;
+}
+
+/* 正文 15px / 1.8 / 段距 0.65em **不在这里**：由 globals.css 的
+   `.seg-text-body .markdown-text .wmde-markdown` 元素级规则唯一承担（D-021）。
+   本作用域只保留排版骨架（字距 / 阅读限宽）——字号与段距一旦在这里再写一份，
+   就成了「两处参数并存」，任何 CSS 顺序变动都会静默回流成旧字阶（R-04）。 */
+.v2 :global(.seg-text-body) {
+  letter-spacing: -0.003em;
+  max-width: min(100%, var(--v2-rail));
+}
+
+/* ── 过程行：比正文弱两档，不再用卡片框抢注意力 ───────────────── */
+.v2 :global([data-turn-key] details),
+.v2 :global([data-turn-key] summary) {
+  font-size: var(--v2-process-size);
+}
+
+/* ── 上下文 chip / 元信息：降噪 ─────────────────────────────── */
+.v2 :global(.sh-ctx-chip) {
+  font-size: var(--v2-meta-size);
+  opacity: 0.85;
+}
+
+/* ── 页面 chrome（本页自建，非生产组件） ───────────────────── */
+.header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  height: 46px;
+  padding: 0 18px;
+  border-bottom: 1px solid hsl(var(--border));
+  background: hsl(var(--background));
+}
+
+.title {
+  /* 标题 14.5 像素（1rem=16px 时 0.90625rem 恰好等值）——本文件不再出现 D-021
+     之前的正文旧字面量，R-04 的机械验收是全文件 grep，故用 rem 等价式表达。 */
+  font-size: 0.90625rem;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+}
+
+.eyebrow {
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: 10.5px;
+  letter-spacing: 0.02em;
+  color: hsl(var(--muted-foreground));
+  text-transform: uppercase;
+}
+
+.pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 1px 7px;
+  border: 1px solid hsl(var(--border));
+  border-radius: 999px;
+  font-size: 10.5px;
+  color: hsl(var(--muted-foreground));
+}
+
+.dotOk {
+  width: 5px;
+  height: 5px;
+  border-radius: 999px;
+  background: var(--color-success);
+}
+
+.chipRow {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  font-size: 10.5px;
+  color: hsl(var(--muted-foreground));
+}
+
+.mono {
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: 10.5px;
+}
+
+.rail {
+  width: 40px;
+  flex: 0 0 40px;
+  border-left: 1px solid hsl(var(--border));
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 7px;
+  padding-top: 14px;
+}
+
+.railMark {
+  width: 12px;
+  height: 2px;
+  border-radius: 2px;
+  background: hsl(var(--border));
+}
+
+.railMarkOn {
+  background: var(--color-brand-600);
+}
+
+.composerWrap {
+  border-top: 1px solid hsl(var(--border));
+  padding: 8px 18px 12px;
+}
+
+.composerMeta {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 10.5px;
+  color: hsl(var(--muted-foreground));
+  margin-bottom: 6px;
+}
+
+.composer {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 42px;
+  padding: 0 12px;
+  border: 1px solid hsl(var(--border));
+  border-radius: 12px;
+  background: hsl(var(--card));
+  font-size: 13.5px;
+  color: hsl(var(--muted-foreground));
+}
+
+.send {
+  width: 26px;
+  height: 26px;
+  border-radius: 999px;
+  display: grid;
+  place-items: center;
+  background: var(--color-brand-600);
+  color: hsl(var(--card));
+  font-size: 12px;
+}
+
+/* 骨架：未加载轮 */
+.skeleton {
+  height: 9px;
+  width: 96px;
+  border-radius: 3px;
+  background: hsl(var(--muted));
+  animation: pulse 1.6s ease-in-out infinite;
+}
+
+@keyframes pulse {
+  0%,
+  100% {
+    opacity: 0.55;
+  }
+  50% {
+    opacity: 1;
+  }
+}

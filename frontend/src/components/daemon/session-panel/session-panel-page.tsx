@@ -158,6 +158,10 @@ import {
   ACTIVE_RUN_STATUSES, deriveTakeoverChrome,
 } from "./page-helpers";
 import { listAgentLogs } from "@/lib/agent-logs";
+// task-11（2026-10-20-session-page-dsh-alignment / FR-14 / D-023@v1）：`/runs` 读模型的
+// `file_changes` / `file_changes_capability` → 轮视图 camelCase 字段的**纯透传**
+// （snake→camel 投影；取数/分页/SSE 零参与，FR-22）。
+import { attachRunFileChanges } from "@/components/daemon/file-changes/turn-file-changes";
 import { TakeoverBridgeNote } from "./takeover-bridge-note";
 import { copyTextToClipboard } from "@/lib/clipboard";
 
@@ -2974,15 +2978,23 @@ export function SessionPanelPage({
   // 重派生成本可接受）。
   const displayTurns = useMemo(
     () =>
-      mergePreviewIntoDisplayTurns(
-        turnOutline,
-        enrichDisplayTurns(
-          turnState.turns,
-          runsMeta,
-          llmProviders,
-          agentDisplayName,
-          session?.user_id,
+      // task-11（FR-14 / D-023@v1）：`runsMeta` 里已持有的 `file_changes` /
+      // `file_changes_capability` 投影成轮视图的 `fileChanges` / `fileChangesCapability`
+      // （纯 props 透传层：snake→camel + capability 缺省按 tool_only 降级；不取数、
+      // 不改分页、不碰 SSE 编排，FR-22 边界）。投影带对象身份缓存——未变化的轮保持
+      // 原引用，流式 delta 不击穿 TurnRow memo（ql-20260903-025 同款约束）。
+      attachRunFileChanges(
+        mergePreviewIntoDisplayTurns(
+          turnOutline,
+          enrichDisplayTurns(
+            turnState.turns,
+            runsMeta,
+            llmProviders,
+            agentDisplayName,
+            session?.user_id,
+          ),
         ),
+        runsMeta,
       ),
     [turnState.turns, runsMeta, llmProviders, agentDisplayName, session?.user_id, turnOutline],
   );

@@ -33,6 +33,8 @@ from app.modules.daemon.schema import (
     LeaseSyncRequest,
     LeaseSyncResponse,
     ModelUsageItemRead,
+    TurnFileChangesSnapshot,
+    TurnTimingSnapshot,
 )
 from app.modules.daemon.service import (
     DaemonLeaseNotFound,
@@ -219,6 +221,14 @@ class InteractiveRunResultRequest(BaseModel):
     # task-06 / FR-02：daemon classifyModelError 回传的模型层错误（可选）。
     # 旧 daemon 不传 → None → AgentRun.error_detail 保持 None（design §9 兼容）。
     error: ModelErrorDTO | None = None
+    # ── 1b 轮次快照（2026-10-20-session-page-dsh-alignment task-08 / D-023@v1）──
+    # daemon 轮尾采集结果随 run result 上报（可选）：file_changes 缺 → 落
+    # capability="tool_only"；timing 缺 → timing=None（前端单色近似）。字段名与
+    # design「文件变更卡 DTO」逐字一致（camelCase 由 pydantic 镜像 alias 承载）。
+    # 老 daemon 不传 → 三者 None，响应形状零变化（只加侧表行，不改既有字段）。
+    file_changes: TurnFileChangesSnapshot | None = None
+    timing: TurnTimingSnapshot | None = None
+    daemon_version: str | None = Field(default=None, max_length=50)
 
 
 class InteractiveRunResultResponse(BaseModel):
@@ -272,6 +282,9 @@ async def close_interactive_run(
         model_usage=data.model_usage,
         api_requests=data.api_requests,
         error=data.error,
+        file_changes=data.file_changes,
+        timing=data.timing,
+        daemon_version=data.daemon_version,
     )
     return InteractiveRunResultResponse(
         agent_run_id=agent_run.id,
