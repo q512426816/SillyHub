@@ -1,16 +1,17 @@
 """task-11（2026-08-06-provider-switch-live-session）：端到端集成测试 4 场景。
 
-照 design §5 + 蓝图 acceptance 验「运行中会话热切换」全链路（service → probe →
-resolve_default_provider_config → notify_provider_switch → ws_hub.send_session_control）。
+2026-10-21-provider-set-default-ui D-002 起：set/unset-default 的热切换推送已移除
+（默认变更仅对新会话生效，运行中会话独立保持原供应商）。本文件场景一/二/三随之
+改写为「置位成功 + **零推送**（hub 无调用、affected_sessions=0）」的新契约锚定；
+notify_provider_switch / WS 消费链本身仍由 test_provider_switch.py /
+test_control_command_dispatch.py 直测锚定（基础设施保留）。
 
-四场景（蓝图 task-11.md）：
-  1. **启动切换生效**：set_default(新供应商) → probe 通过 → 推 PROVIDER_CONFIG_CHANGED(新 config)
-     → send_session_control 被调（新 config）；老默认互斥清成 False。
-  2. **停止回退本机**：unset_default → 推 provider_config=None → daemon 据此回退本机 claude 凭证
-     （D-004）。
-  3. **生成中等待 turn 边界**：set_default 时 active + reconnecting session 均被推，
-     affected_sessions 计数含生成中会话（前端文案区分）。daemon 侧 turn 边界已由 task-07
-     单测覆盖，本场景后端侧只验推送 + 计数。
+四场景（改写后）：
+  1. **启动置位不推送**：set_default(新供应商) → probe 通过 → 互斥清老置新，
+     但**不推** PROVIDER_CONFIG_CHANGED（运行中会话不受影响）。
+  2. **停止置位不推送**：unset_default → 仅置本行 False，不推 null config；
+     新会话经 claim 回落本机（D-007）。
+  3. **多活跃会话在场同样零推送**：active + reconnecting session 均不被动。
   4. **凭证失败保留原供应商**：set_default probe 失败 → is_default 不变 + 不推送 + 返回
      switched=False+error（D-003 回滚，原供应商继续服务运行中会话）。
 
@@ -18,9 +19,7 @@ mock 策略（不真实 WS / 不真实网络）：
   - ``app.modules.llm_provider.probe.probe_provider`` → ``ProviderProbeResult(ok=True/False)``
     （spike-01：探测形态未实测，网络全 mock）。
   - ``app.modules.daemon.ws_hub.get_daemon_ws_hub`` → 录制型 FakeHub（capture
-    send_session_control 入参 + 可控返回值）。
-  - ``notify_provider_switch`` / ``resolve_default_provider_config`` **走真实路径**（含真实
-    DB JOIN agent_sessions × daemon_task_leases、真实 cipher 解密 api_key），守护全链路联通。
+    send_session_control 入参 + 可控返回值）——断言零调用（D-002）。
   - 用真实 ``CredentialCipher``（conftest 已注 ``SILLYSPEC_MASTER_KEY``）落 ``LlmProvider``
     加密行，set_default 走完整加解密链路（不 mock cipher）。
 
@@ -221,25 +220,24 @@ def _patch_probe(
     monkeypatch.setattr("app.modules.llm_provider.probe.probe_provider", _fake_probe)
 
 
-# ── 场景一：启动切换生效 ─────────────────────────────────────────────────────
+# ── 场景一：启动置位不推送（D-002）──────────────────────────────────────────
 
 
 class TestProviderSwitchStartSwitchesActiveSession:
-    """set_default(新供应商) → probe 通过 → 推 PROVIDER_CONFIG_CHANGED(新 config)。
+    """set_default(新供应商) → probe 通过 → 互斥置位成功，但**不推送**（D-002）。
 
-    守护 design §5 Wave1 step 1-4 全链路联通：
-      service.set_default → probe → _clear_sibling_defaults + is_default=True →
-      resolve_default_provider_config（D-006 单一真相源，解密 api_key）→
-      notify_provider_switch → ws_hub.send_session_control。
+    2026-10-21-provider-set-default-ui 前：本场景守护「set → notify → ws_hub 推送」
+    全链路；D-002 移除热切换后改写为锚定新契约——置位成功 + hub 零调用 +
+    affected_sessions=0（运行中会话独立保持原供应商，新会话经 claim 生效）。
     """
 
     @pytest.mark.asyncio
-    async def test_start_pushes_new_config_and_clears_old_default(
+    async def test_start_sets_default_without_push_and_clears_old_default(
         self, db_session: AsyncSession, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         user_id = await _create_user(db_session, label="start")
         rt = await _create_runtime(db_session, user_id, name_suffix="start")
-        sess_id = await _create_interactive_session(db_session, runtime_id=rt.id, user_id=user_id)
+        await _create_interactive_session(db_session, runtime_id=rt.id, user_id=user_id)
 
         # 老默认（将被互斥清成 False）+ 新候选（将被置成 True）
         old_row = await _seed_provider_row(
@@ -265,9 +263,9 @@ class TestProviderSwitchStartSwitchesActiveSession:
         svc = LlmProviderService(db_session)
         result = await svc.set_default(new_row.id, user_id)
 
-        # 蓝图 acceptance：set_default 成功变更 + 推送计数 = active session 数
+        # D-002 新契约：置位成功但零推送（affected_sessions 恒 0）
         assert result.switched is True
-        assert result.affected_sessions == 1
+        assert result.affected_sessions == 0
         assert result.error is None
 
         # R-05 互斥：老默认被清，新候选置位
@@ -276,39 +274,27 @@ class TestProviderSwitchStartSwitchesActiveSession:
         assert old_row.is_default is False
         assert new_row.is_default is True
 
-        # 推送契约：msg_type + payload 内容
-        assert len(hub.calls) == 1
-        _daemon_id, msg_type, payload = hub.calls[0]
-        assert msg_type == DAEMON_MSG_PROVIDER_CONFIG_CHANGED
-        assert payload["session_id"] == str(sess_id)
-
-        # provider_config 含新供应商字段（D-006 单一真相源：base_url + 解密后明文 api_key）
-        config = payload["provider_config"]
-        assert config is not None
-        assert config["base_url"] == "https://new.example.com"
-        assert config["api_key"] == "sk-new-secret-5678"  # 解密后明文
-        assert config["agent_kind"] == "claude"
-        assert config["auth_field"] == "ANTHROPIC_AUTH_TOKEN"
-        assert config["model"] == "claude-sonnet-4"
+        # D-002：不推送——运行中会话不受影响（hub 零调用）
+        assert hub.calls == []
 
 
 # ── 场景二：停止回退本机 ──────────────────────────────────────────────────────
 
 
 class TestProviderSwitchStopFallsBackToLocal:
-    """unset_default → 推 provider_config=None → daemon 据此回退本机 claude 凭证。
+    """unset_default → 仅置本行 False，**不推送** null config（D-002）。
 
-    守护 D-004@v1：unset_default 不探测、不清兄弟，仅置本行 False + 推 null config
-    让 daemon reloadWithProvider(null) 回退宿主机本机 ~/.claude 路径。
+    新会话经 claim 链路回落本机（D-007）；运行中会话独立不变。原「推 null →
+    daemon reloadWithProvider(null) 回退本机」链路随热切换移除（2026-10-21）。
     """
 
     @pytest.mark.asyncio
-    async def test_stop_pushes_null_config(
+    async def test_stop_clears_default_without_push(
         self, db_session: AsyncSession, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         user_id = await _create_user(db_session, label="stop")
         rt = await _create_runtime(db_session, user_id, name_suffix="stop")
-        sess_id = await _create_interactive_session(db_session, runtime_id=rt.id, user_id=user_id)
+        await _create_interactive_session(db_session, runtime_id=rt.id, user_id=user_id)
 
         row = await _seed_provider_row(
             db_session,
@@ -325,52 +311,42 @@ class TestProviderSwitchStopFallsBackToLocal:
         svc = LlmProviderService(db_session)
         result = await svc.unset_default(row.id, user_id)
 
-        # 蓝图 acceptance：switched 恒 True（unset 不探测、不会失败）
+        # D-002 新契约：置位成功但零推送
         assert result.switched is True
-        assert result.affected_sessions == 1
+        assert result.affected_sessions == 0
         assert result.error is None
 
         await db_session.refresh(row)
         assert row.is_default is False
 
-        # 推送契约：provider_config=None（daemon 回退本机）
-        assert len(hub.calls) == 1
-        _daemon_id, msg_type, payload = hub.calls[0]
-        assert msg_type == DAEMON_MSG_PROVIDER_CONFIG_CHANGED
-        assert payload["session_id"] == str(sess_id)
-        assert payload["provider_config"] is None
+        # D-002：不推送 null config——运行中会话不变，新会话 claim 回落本机
+        assert hub.calls == []
 
 
 # ── 场景三：生成中等待 turn 边界（后端侧验证） ────────────────────────────────
 
 
 class TestProviderSwitchGeneratingSessionsPendingSwitch:
-    """set_default 时 active + reconnecting session 均被推（affected_sessions 计数含生成中）。
+    """多活跃会话在场时 set_default 同样**零推送**（D-002 改写）。
 
-    蓝图 task-11 场景三说明：daemon 侧 turn 边界（pendingSwitch → _onResult reload）已由
-    task-07 单测覆盖；本场景后端侧只验：
-      1. active + reconnecting session 均命中 notify_provider_switch 查询；
-      2. 每个 session 各推一条（payload.session_id 不同）；
-      3. affected_sessions = 在线投递计数 = 2。
-
-    「生成中」语义在 daemon 侧：daemon 收到 PROVIDER_CONFIG_CHANGED 后会 markPendingSwitch
-    等当前 turn 收尾再 reload；后端不感知 turn 状态，统一以 session.status='active'
-    表示「与 daemon 有握手、正在使用」。
+    原场景（2026-08-06 task-11）：active + reconnecting session 均被推送且计数=2。
+    热切换移除后改写为：多活跃会话存在也不被动——hub 零调用、affected_sessions=0，
+    运行中会话（含 reconnecting）独立保持原供应商。
     """
 
     @pytest.mark.asyncio
-    async def test_multiple_active_sessions_all_pushed(
+    async def test_multiple_active_sessions_not_pushed(
         self, db_session: AsyncSession, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         user_id = await _create_user(db_session, label="gen")
         rt = await _create_runtime(db_session, user_id, name_suffix="gen")
 
         # 2 个 session 挂同一 runtime（同 daemon_id，按 (daemon_id, session_id) 各推一次）
-        sess1 = await _create_interactive_session(
+        await _create_interactive_session(
             db_session, runtime_id=rt.id, user_id=user_id, session_status="active"
         )
         # reconnecting 与 active 同等处理（daemon 仍持有 SessionState）
-        sess2 = await _create_interactive_session(
+        await _create_interactive_session(
             db_session, runtime_id=rt.id, user_id=user_id, session_status="reconnecting"
         )
 
@@ -389,14 +365,10 @@ class TestProviderSwitchGeneratingSessionsPendingSwitch:
         svc = LlmProviderService(db_session)
         result = await svc.set_default(new_row.id, user_id)
 
-        # affected_sessions = 2（两个 session 各推一次，全部在线）
+        # D-002：多活跃会话在场同样零推送
         assert result.switched is True
-        assert result.affected_sessions == 2
-
-        # 推送契约：每个 session 各收到一条带自身 session_id 的推送
-        assert len(hub.calls) == 2
-        pushed_session_ids = {call[2]["session_id"] for call in hub.calls}
-        assert pushed_session_ids == {str(sess1), str(sess2)}
+        assert result.affected_sessions == 0
+        assert hub.calls == []
 
         for _did, msg_type, payload in hub.calls:
             assert msg_type == DAEMON_MSG_PROVIDER_CONFIG_CHANGED
