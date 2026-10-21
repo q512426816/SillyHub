@@ -110,13 +110,13 @@ async def _seed_provider_row(
 @pytest.fixture
 def mock_probe_notify(monkeypatch: pytest.MonkeyPatch) -> None:
     """task-03（change 2026-08-06-provider-switch-live-session）：``set_default`` /
-    ``unset_default`` 现调用真实 ``probe_provider``（HTTP 网络）+ ``notify_provider_switch``
-    （DB JOIN ``agent_sessions`` / ``daemon_task_leases`` + WS 推送）。
+    ``unset_default`` 调用真实 ``probe_provider``（HTTP 网络）；notify 推送已在
+    2026-10-21-provider-set-default-ui D-002 移除（notify patch 保留为防回归保险——
+    若未来误恢复推送，SQLite 库无 ``agent_sessions`` 表会让误调用立刻炸出）。
 
     现有 ``is_default`` 互斥测试只断言 DB 行状态（``is_default`` 是否正确互斥清/置），
-    与热切换副作用解耦 —— 真实网络会 timeout/fail（probe 返 ``ok=False`` → set_default
-    回滚不置位 → 互斥断言失败），且 SQLite 测试库无 ``agent_sessions`` 表（notify JOIN
-    报 ``no such table``）。本夹具 patch 源模块替换为 no-op AsyncMock，仅作用于显式声明
+    与探测副作用解耦 —— 真实网络会 timeout/fail（probe 返 ``ok=False`` → set_default
+    回滚不置位 → 互斥断言失败）。本夹具 patch 源模块替换为 no-op AsyncMock，仅作用于显式声明
     该夹具的测试（其它测试不受影响）。
 
     patch 目标是**源模块**而非 ``service.probe_provider``：因 probe.py 顶层
@@ -616,8 +616,10 @@ class TestIsDefaultMutex:
         b = await svc.create(user_id, _create_payload(name="b"))  # default=False
 
         result = await svc.unset_default(a.id, user_id)
-        # task-03：返回 DefaultSwitchResult（unset 不探测，恒 switched=True）
+        # task-03：返回 DefaultSwitchResult（unset 不探测，恒 switched=True）；
+        # D-002：热切换推送已移除，affected_sessions 恒 0。
         assert result.switched is True
+        assert result.affected_sessions == 0
         assert result.error is None
 
         await db_session.refresh(a)
@@ -964,14 +966,14 @@ class TestSetDefaultCredentialsRollback:
         assert notify_calls == []
 
     @pytest.mark.asyncio
-    async def test_set_default_success_dispatches_notify(
+    async def test_set_default_success_does_not_dispatch_notify(
         self, db_session: AsyncSession, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """对照：probe ok=True → notify 被调一次（正向链路,锁定 rollback 测试组的行为基线）。
+        """2026-10-21-provider-set-default-ui D-002：set 成功**不**推送热切换。
 
-        与上面 rollback 测试对照：探测成功时 service 必经 step2 → step3,notify 必被调,
-        参数为 (session, user_id, provider_config dict)。这把「未调 notify」断言锁死
-        为「rollback 真未调」而非「mock 装错」。
+        probe ok=True → 置位成功（switched=True）但 notify_provider_switch 不被调、
+        ``affected_sessions == 0``——默认变更仅对新会话生效，运行中会话不受影响。
+        （原 test_set_default_success_dispatches_notify 断言相反旧行为，随 D-002 改写。）
         """
         user_id = await _create_user(db_session, label="a")
         svc = LlmProviderService(db_session)
@@ -987,7 +989,7 @@ class TestSetDefaultCredentialsRollback:
 
         async def _notify_spy(*args: object, **kwargs: object) -> int:
             notify_calls.append((args, kwargs))
-            return 2  # 模拟 2 条 active session 投递成功
+            return 2  # 若被误调，返回非 0 让 affected 断言也失败
 
         monkeypatch.setattr("app.modules.llm_provider.probe.probe_provider", _probe_ok)
         monkeypatch.setattr(
@@ -997,18 +999,16 @@ class TestSetDefaultCredentialsRollback:
 
         result = await svc.set_default(a.id, user_id)
 
-        # 成功：switched=True,affected_sessions 透传 notify 返回值。
         assert result.switched is True
-        assert result.affected_sessions == 2
+        assert result.affected_sessions == 0
         assert result.error is None
-        # notify 被调一次,参数含 user_id + provider_config dict（非 None）。
-        assert len(notify_calls) == 1
-        args, _kwargs = notify_calls[0]
-        # (session, user_id, provider_config) 位置参数。
-        provider_config = args[2]
-        assert isinstance(provider_config, dict)
-        assert "api_key" in provider_config
-        assert provider_config["agent_kind"] == "claude"
+        assert notify_calls == []  # 热切换推送已移除（D-002）
+
+        # unset 对称：取消默认同样不推送。
+        result_unset = await svc.unset_default(a.id, user_id)
+        assert result_unset.switched is True
+        assert result_unset.affected_sessions == 0
+        assert notify_calls == []
 
 
 # ── task-09 openai 联动 LiteLLM（D-003 / R-09 best-effort / R-03 model_name）──────────

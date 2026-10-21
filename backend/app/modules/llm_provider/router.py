@@ -195,10 +195,10 @@ async def set_default_provider(
 ) -> SetDefaultResult:
     """置本行为默认供应商（cc-switch 式「启动」）。
 
-    task-05（FR-07）：返回结构化 ``SetDefaultResult`` 三字段，供前端区分立即生效 /
-    等待 turn 边界 / 凭证失败三种状态。service 层 ``set_default`` 已在 task-03 改造为
-    返回 ``DefaultSwitchResult``（probe 凭证探测失败时 ``switched=False`` + ``error``
-    不置位、不推送，原供应商继续服务运行中会话，D-003）。
+    task-05（FR-07）：返回结构化 ``SetDefaultResult`` 三字段。service 层 ``set_default``
+    在 task-03 改造为返回 ``DefaultSwitchResult``（probe 凭证探测失败时 ``switched=False``
+    + ``error`` 不置位，D-003）。2026-10-21-provider-set-default-ui D-002：热切换推送
+    已移除——仅置位，**只对新会话生效**，运行中会话不受影响（``affected_sessions`` 恒 0）。
     """
     service = LlmProviderService(session)
     result = await service.set_default(_parse_id(provider_id), user.id)
@@ -219,7 +219,9 @@ async def unset_default_provider(
     """取消默认（cc-switch 式「停止」）。
 
     对称 ``set-default``（「启动」）：取消本行默认。若取消后该用户×agent_kind 无任何
-    默认供应商 → lease 不再下发 provider_config → daemon 回归本机凭证管理（D-007）。
+    默认供应商 → lease 不再下发 provider_config → daemon 回归本机凭证管理（D-007，
+    仅新会话生效；2026-10-21-provider-set-default-ui D-002 热切换推送已移除，运行中
+    会话不受影响）。
 
     task-05（FR-07）：返回结构化 ``SetDefaultResult``（unset 不探测，恒
     ``switched=True`` + ``error=None``）。
