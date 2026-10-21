@@ -111,8 +111,9 @@ async def _seed_provider_row(
 def mock_probe_notify(monkeypatch: pytest.MonkeyPatch) -> None:
     """task-03（change 2026-08-06-provider-switch-live-session）：``set_default`` /
     ``unset_default`` 调用真实 ``probe_provider``（HTTP 网络）；notify 推送已在
-    2026-10-21-provider-set-default-ui D-002 移除（notify patch 保留为防回归保险——
-    若未来误恢复推送，SQLite 库无 ``agent_sessions`` 表会让误调用立刻炸出）。
+    2026-10-21-provider-set-default-ui D-002 移除（notify patch 保留为过渡保险，真实
+    防回归锚定在 test_set_default_success_does_not_dispatch_notify 的 spy 断言与
+    test_provider_switch_integration.py 的 hub 零调用断言）。
 
     现有 ``is_default`` 互斥测试只断言 DB 行状态（``is_default`` 是否正确互斥清/置），
     与探测副作用解耦 —— 真实网络会 timeout/fail（probe 返 ``ok=False`` → set_default

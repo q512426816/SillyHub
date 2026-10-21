@@ -149,8 +149,8 @@ class DefaultSwitchResult:
     字段：
     - ``switched``：本次 set/unset 是否成功变更 ``is_default``。set 凭证探测失败
       回滚时为 ``False``（D-003）；unset 恒为 ``True``（不探测，置 False 不会失败）。
-    - ``affected_sessions``：``notify_provider_switch`` 成功投递的 active interactive
-      session 计数（D-001）；无 active session 或 notify 异常时为 ``0``。
+    - ``affected_sessions``：恒 ``0``（2026-10-21-provider-set-default-ui D-002 热切换
+      推送移除；字段保留兼容）。
     - ``error``：set 凭证探测失败原因（D-003）；成功 / unset 场景为 ``None``。
     """
 

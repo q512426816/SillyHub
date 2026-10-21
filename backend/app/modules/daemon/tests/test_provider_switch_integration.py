@@ -40,7 +40,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.crypto import get_cipher
 from app.modules.agent.model import AgentSession
 from app.modules.daemon.model import DaemonRuntime, DaemonTaskLease
-from app.modules.daemon.protocol import DAEMON_MSG_PROVIDER_CONFIG_CHANGED
 from app.modules.llm_provider.model import LlmProvider
 from app.modules.llm_provider.probe import ProviderProbeResult
 from app.modules.llm_provider.service import LlmProviderService
@@ -369,13 +368,6 @@ class TestProviderSwitchGeneratingSessionsPendingSwitch:
         assert result.switched is True
         assert result.affected_sessions == 0
         assert hub.calls == []
-
-        for _did, msg_type, payload in hub.calls:
-            assert msg_type == DAEMON_MSG_PROVIDER_CONFIG_CHANGED
-            # 新 config 内容一致（同一 daemon_id 的两个 session 共用一份 provider_config）
-            config = payload["provider_config"]
-            assert config is not None
-            assert config["base_url"] == "https://gen.example.com"
 
 
 # ── 场景四：凭证失败保留原供应商 ──────────────────────────────────────────────
