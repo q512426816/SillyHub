@@ -1,0 +1,1598 @@
+diff --git a/backend/app/modules/daemon/router/__init__.py b/backend/app/modules/daemon/router/__init__.py
+index a3259aeb6..d79f7b67f 100644
+--- a/backend/app/modules/daemon/router/__init__.py
++++ b/backend/app/modules/daemon/router/__init__.py
+@@ -220,6 +220,10 @@ _ENDPOINT_ORDER: tuple[str, ...] = (
+     "stream_sessions_events",
+     "export_sessions",
+     "get_session_detail",
++    # 2026-10-21-session-git-branch：会话当前 git 分支实时查询（详情的姊妹
++    # 只读 GET；{session_id}/git-status 双段路径与单段 {session_id} 不同形状，
++    # 无匹配冲突）。
++    "get_session_git_status",
+     "create_session",
+     # 2026-09-22-session-fork-continuation task-05：会话任意点分叉端点（紧跟
+     # create，同为 session_crud 的会话创建类端点；{session_id}/fork 与下方
+diff --git a/backend/app/modules/daemon/router/session_crud.py b/backend/app/modules/daemon/router/session_crud.py
+index a7356a39f..5b3ebdf5d 100644
+--- a/backend/app/modules/daemon/router/session_crud.py
++++ b/backend/app/modules/daemon/router/session_crud.py
+@@ -50,6 +50,7 @@ from app.modules.daemon.schema import (
+     SessionForkLineage,
+     SessionForkRequest,
+     SessionForkResponse,
++    SessionGitStatusResponse,
+     SessionInjectRequest,
+     SessionReopenResponse,
+     SessionResetToolReportResponse,
+@@ -63,6 +64,9 @@ from app.modules.daemon.schema import (
+ from app.modules.daemon.service import DaemonService
+ from app.modules.daemon.session.service.compact import compact_session as _compact_session_svc
+ from app.modules.daemon.session.service.fork import fork_session as _fork_session_svc
++from app.modules.daemon.session.service.git_status import (
++    get_session_git_status as _get_session_git_status_svc,
++)
+ from app.modules.daemon.session.service.thinking_level import (
+     get_session_thinking_levels as _get_thinking_levels_svc,
+ )
+@@ -554,6 +558,25 @@ async def get_session_detail(
+     return read
+ 
+ 
++@router.get(
++    "/sessions/{session_id}/git-status",
++    response_model=SessionGitStatusResponse,
++)
++async def get_session_git_status(
++    session_id: uuid.UUID,
++    session: SessionDep,
++    user: TaskRunAgentUser,
++) -> SessionGitStatusResponse:
++    """会话当前 git 分支实时状态（2026-10-21-session-git-branch / FR-01..03）。
++
++    每请求经 daemon ``git_status`` RPC 现场采集（非创建快照）——root 决策链
++    与错误映射见 ``session/service/git_status.py`` 模块 docstring。会话组件
++    分支指示项的取数端点（≤60s 轮询），与 workspace 维度 git-log/status 互不影响。
++    """
++    svc = DaemonService(session)
++    return await _get_session_git_status_svc(svc, session_id, user.id)
++
++
+ @router.post(
+     "/sessions",
+     response_model=SessionCreateResponse,
+diff --git a/backend/app/modules/daemon/schema.py b/backend/app/modules/daemon/schema.py
+index 2ccbee415..106b99e7d 100644
+--- a/backend/app/modules/daemon/schema.py
++++ b/backend/app/modules/daemon/schema.py
+@@ -124,6 +124,26 @@ class AgentSessionListResponse(BaseModel):
+     offset: int
+ 
+ 
++# ── 会话级 git 状态 DTO（2026-10-21-session-git-branch / FR-01..03）────────────
++# GET /api/daemon/sessions/{session_id}/git-status 响应——会话工作目录（cwd，
++# 缺省回退成员绑定根）的**当前** git 状态，每请求经 daemon git_status RPC 现场
++# 采集（FR-02 非快照）。git_mode 三态：git=正常采集 / no_git=目录非 git 仓库
++# （200 空态）/ no_root=会话无 cwd 且无可解析绑定（200 空态）——空态 branch 等
++# 字段全 None，前端静默隐藏指示项（FR-03）。root 为实际查询根（daemon 宿主
++# 视角，已过 resolve_root_path_for_daemon 改写），供前端 Tooltip 展示。
++
++
++class SessionGitStatusResponse(BaseModel):
++    git_mode: Literal["git", "no_git", "no_root"]
++    root: str | None = None
++    branch: str | None = None
++    detached: bool = False
++    head_short: str | None = None
++    files_changed: int | None = None
++    untracked_count: int | None = None
++    synced_at: str
++
++
+ # ── Interactive session create / inject request DTO（2026-08-14-sessions-portal
+ # task-02 / FR-01 / D-010@v1 / D-011@v1）─────────────────────────────────────
+ # 从 router.py inline 定义（原 :1573/:1591）迁为具名模型，openapi 产出具名 schema
+diff --git a/backend/app/modules/daemon/session/service/git_status.py b/backend/app/modules/daemon/session/service/git_status.py
+new file mode 100644
+index 000000000..0966c376e
+--- /dev/null
++++ b/backend/app/modules/daemon/session/service/git_status.py
+@@ -0,0 +1,242 @@
++"""会话级 git 状态 service（2026-10-21-session-git-branch / FR-01..03）。
++
++会话维度的**当前** git 分支实时查询（FR-02：每请求现场采集，非创建快照）：
++
++- root 决策链：``AgentSession.cwd``（SessionManager working dir，daemon 宿主
++  路径，``resolve_root_path_for_daemon`` 做 container→host 改写）优先；cwd
++  为空回退所属工作区的成员绑定根（``MemberBindingResolver``，只看本人绑定
++  行——git_log ``_resolve_binding`` 同语义）。两者皆无、或 cwd 有值但无
++  workspace 可解析 daemon → 200 ``no_root`` 空态（不报错，FR-03）。
++- 采集：既有平名 RPC ``git_status``（``ws_hub.send_rpc`` 直连 + 显式 30s
++  超时，照 ``git_log/service.py:_send_git_rpc`` 模式）——daemon 内建 fetch
++  降级（no_remote/fetch_failed/fetch_timeout 不阻断分支采集），零 daemon
++  契约变更。
++- 错误面（design「接口契约」）：daemon error 含 "not a git repository"（git
++  标准文案，git_gateway/tests 已依赖同形态）→ 200 ``no_git`` 空态；其余
++  error → 502；RPC forbidden（root 越界 allowed_roots，如 worktree 未入
++  白名单）→ 403；offline/mid-rpc 断连 → 502；timeout → 504。
++
++设计依据：``.sillyspec/changes/2026-10-21-session-git-branch/design.md``。
++"""
++
++from __future__ import annotations
++
++import uuid
++from datetime import UTC, datetime
++from typing import Any, Final, Literal
++
++from app.core.errors import AppError
++from app.modules.daemon.runtime.service import (
++    DaemonRpcRemoteError,
++    DaemonRpcTimeout,
++    DaemonRuntimeOffline,
++)
++from app.modules.daemon.schema import SessionGitStatusResponse
++from app.modules.workspace.member_runtimes.resolver import MemberBindingResolver
++from app.modules.workspace.service import resolve_root_path_for_daemon
++
++# git_status RPC 超时（git_log STATUS_RPC_TIMEOUT_SECONDS 同档：daemon 侧整体
++# 兜底 30s，内含 fetch 15s 局部超时）。
++SESSION_GIT_RPC_TIMEOUT_SECONDS: Final[float] = 30.0
++
++# 非 git 仓库判据：git 标准错误文案（git_gateway/tests/test_router.py 已依赖
++# 同形态），daemon porcelain 失败时经 error 字段回传。
++_NOT_A_GIT_REPO_MARKER: Final[str] = "not a git repository"
++
++
++class SessionGitNotBound(AppError):
++    """会话所属工作区成员未绑定 daemon（或绑定行 daemon_id IS NULL）→ 404 引导。"""
++
++    code = "HTTP_404_SESSION_GIT_NOT_BOUND"
++    http_status = 404
++
++
++class SessionGitDaemonForbidden(AppError):
++    """daemon forbidden（root 越界 allowed_roots，如 worktree 未入白名单）→ 403。"""
++
++    code = "HTTP_403_SESSION_GIT_DAEMON_FORBIDDEN"
++    http_status = 403
++
++
++class SessionGitDaemonOffline(AppError):
++    """daemon 离线 / mid-rpc 断连 → 502。"""
++
++    code = "HTTP_502_SESSION_GIT_DAEMON_OFFLINE"
++    http_status = 502
++
++
++class SessionGitDaemonTimeout(AppError):
++    """RPC 超时 → 504。"""
++
++    code = "HTTP_504_SESSION_GIT_DAEMON_TIMEOUT"
++    http_status = 504
++
++
++class SessionGitDaemonRemoteError(AppError):
++    """daemon 采集真失败（error 非空且非 not-a-git-repo）→ 502。"""
++
++    code = "HTTP_502_SESSION_GIT_DAEMON_REMOTE_ERROR"
++    http_status = 502
++
++
++def _now_iso() -> str:
++    return datetime.now(UTC).isoformat()
++
++
++def _empty(
++    git_mode: Literal["no_git", "no_root"], root: str | None = None
++) -> SessionGitStatusResponse:
++    """空态响应（no_root / no_git）：branch 等字段全 None（FR-03）。"""
++    return SessionGitStatusResponse(
++        git_mode=git_mode,
++        root=root,
++        branch=None,
++        detached=False,
++        head_short=None,
++        files_changed=None,
++        untracked_count=None,
++        synced_at=_now_iso(),
++    )
++
++
++async def get_session_git_status(
++    svc: Any,
++    session_id: uuid.UUID,
++    user_id: uuid.UUID,
++) -> SessionGitStatusResponse:
++    """会话当前 git 状态（FR-01 主路径；错误面见模块 docstring）。
++
++    ``svc`` 为 DaemonService——复用 ``get_agent_session`` 属主校验（缺失/跨
++    用户统一 404 不泄露存在性），DB 会话经 ``svc._session`` 取。
++    """
++    from app.modules.daemon.ws_hub import get_daemon_ws_hub
++
++    agent_session = await svc.get_agent_session(session_id, user_id)
++
++    # ── root 决策链（design「做法概述」）────────────────────────────────────
++    # cwd 优先（daemon 宿主路径快照）；cwd 有值但无 workspace → 无法解析
++    # daemon_id（AgentSession 无 daemon 直连列）→ no_root 空态守护。
++    daemon_id: uuid.UUID | None = None
++    if agent_session.cwd:
++        if agent_session.workspace_id is None:
++            return _empty("no_root")
++        binding = await MemberBindingResolver.resolve_member_binding_or_none(
++            svc._session,
++            agent_session.workspace_id,
++            user_id,
++            log_tag="session_git_resolve_member_binding_unexpected_error",
++        )
++        if binding is None or binding.daemon_id is None:
++            raise SessionGitNotBound(
++                "当前账号未绑定本机工作区，无法查询会话 Git 状态。",
++                details={
++                    "session_id": str(session_id),
++                    "workspace_id": str(agent_session.workspace_id),
++                },
++            )
++        daemon_id = binding.daemon_id
++        root = resolve_root_path_for_daemon(agent_session.cwd)
++    elif agent_session.workspace_id is not None:
++        binding = await MemberBindingResolver.resolve_member_binding_or_none(
++            svc._session,
++            agent_session.workspace_id,
++            user_id,
++            log_tag="session_git_resolve_member_binding_unexpected_error",
++        )
++        if binding is None or binding.daemon_id is None:
++            raise SessionGitNotBound(
++                "当前账号未绑定本机工作区，无法查询会话 Git 状态。",
++                details={
++                    "session_id": str(session_id),
++                    "workspace_id": str(agent_session.workspace_id),
++                },
++            )
++        daemon_id = binding.daemon_id
++        root = resolve_root_path_for_daemon(binding.root_path)
++    else:
++        return _empty("no_root")
++
++    # ── 平名 RPC 直连（git_log _send_git_rpc 同模式：显式超时 + 全量错误映射）──
++    context: dict[str, Any] = {"session_id": str(session_id)}
++    hub = get_daemon_ws_hub()
++    try:
++        result: dict[str, Any] = await hub.send_rpc(
++            daemon_id,
++            "git_status",
++            {"root": root},
++            timeout=SESSION_GIT_RPC_TIMEOUT_SECONDS,
++        )
++    except DaemonRuntimeOffline as exc:
++        # mid-rpc 在途断连 vs 离线，判据同 git_log（ws_hub 文案变更须同步）。
++        details: dict[str, Any] = {
++            "daemon_id": str(daemon_id),
++            "method": "git_status",
++            **(exc.details or {}),
++            **context,
++        }
++        if "mid-rpc" in str(exc):
++            raise SessionGitDaemonOffline(
++                "与守护进程的传输中断，请稍后重试。",
++                details={**details, "reason": "disconnected_mid_rpc"},
++            ) from exc
++        raise SessionGitDaemonOffline(
++            "本机守护进程当前离线，无法查询会话 Git 状态；请确认守护进程在线后重试。",
++            details={**details, "reason": "offline_or_send_failed"},
++        ) from exc
++    except DaemonRpcTimeout as exc:
++        raise SessionGitDaemonTimeout(
++            "会话 Git 状态查询超时，请稍后重试。",
++            details={
++                "daemon_id": str(daemon_id),
++                "method": "git_status",
++                **(exc.details or {}),
++                **context,
++            },
++        ) from exc
++    except DaemonRpcRemoteError as exc:
++        # daemon 平名 git 方法只主动抛 forbidden（root 越界）/ method_not_found
++        # （旧 daemon）——forbidden → 403，其余统一 502（git_log _map_remote_error
++        # 同骨架，文案会话语境）。
++        remote_details: dict[str, Any] = {
++            "daemon_id": str(daemon_id),
++            "method": "git_status",
++            "daemon_code": exc.code,
++            "daemon_message": exc.message,
++            **context,
++        }
++        if exc.code == "forbidden":
++            raise SessionGitDaemonForbidden(
++                "守护进程拒绝访问该会话工作目录：不在允许的访问范围内。",
++                details=remote_details,
++            ) from exc
++        raise SessionGitDaemonRemoteError(
++            "守护进程查询会话 Git 状态失败，请稍后重试。",
++            details=remote_details,
++        ) from exc
++
++    # daemon git_status 失败不抛（结构化 error 回传）：非 git 仓库 → no_git
++    # 空态；其余采集失败 → 502（不静默成空态，防错数据）。
++    error = result.get("error")
++    if error:
++        if _NOT_A_GIT_REPO_MARKER in str(error):
++            return _empty("no_git", root=root)
++        raise SessionGitDaemonRemoteError(
++            "守护进程查询会话 Git 状态失败，请稍后重试。",
++            details={
++                "daemon_id": str(daemon_id),
++                "method": "git_status",
++                "daemon_message": str(error),
++                **context,
++            },
++        )
++
++    return SessionGitStatusResponse(
++        git_mode="git",
++        root=root,
++        branch=result.get("branch"),
++        detached=bool(result.get("detached")),
++        head_short=result.get("head_short"),
++        files_changed=result.get("files_changed"),
++        untracked_count=result.get("untracked_count"),
++        synced_at=_now_iso(),
++    )
+diff --git a/backend/openapi.json b/backend/openapi.json
+index 91d7df8ba..e8b71dddb 100644
+--- a/backend/openapi.json
++++ b/backend/openapi.json
+@@ -16558,6 +16558,50 @@
+         }
+       }
+     },
++    "/api/daemon/sessions/{session_id}/git-status": {
++      "get": {
++        "tags": [
++          "daemon"
++        ],
++        "summary": "Get Session Git Status",
++        "description": "会话当前 git 分支实时状态（2026-10-21-session-git-branch / FR-01..03）。\n\n每请求经 daemon ``git_status`` RPC 现场采集（非创建快照）——root 决策链\n与错误映射见 ``session/service/git_status.py`` 模块 docstring。会话组件\n分支指示项的取数端点（≤60s 轮询），与 workspace 维度 git-log/status 互不影响。",
++        "operationId": "get_session_git_status_api_daemon_sessions__session_id__git_status_get",
++        "parameters": [
++          {
++            "name": "session_id",
++            "in": "path",
++            "required": true,
++            "schema": {
++              "type": "string",
++              "format": "uuid",
++              "title": "Session Id"
++            }
++          }
++        ],
++        "responses": {
++          "200": {
++            "description": "Successful Response",
++            "content": {
++              "application/json": {
++                "schema": {
++                  "$ref": "#/components/schemas/SessionGitStatusResponse"
++                }
++              }
++            }
++          },
++          "422": {
++            "description": "Validation Error",
++            "content": {
++              "application/json": {
++                "schema": {
++                  "$ref": "#/components/schemas/HTTPValidationError"
++                }
++              }
++            }
++          }
++        }
++      }
++    },
+     "/api/daemon/sessions/{session_id}/fork": {
+       "post": {
+         "tags": [
+@@ -35408,8 +35452,29 @@
+           "platform-sync"
+         ],
+         "summary": "Get Spec Manifest",
+-        "description": "GET 服务器 spec 文件权威清单（CLI 直跑增量同步锚点，design §5.2/§7）。\n\nCLI ``spec-sync.js`` 以此清单为锚 diff 本地 ``.sillyspec/``，算出增量 ops 后\nPOST ``/changes/-/spec-sync``（D-004@v1：CLI 无本地缓存，服务器清单即基线）。\n\n读清单也收紧为写权限（``require_platform_sync_write``，仅 shpsync_ token，\nJWT/shk_live_ 403）——清单是增量写协议的一部分，避免非同步方探测文件布局。\nworkspace_id 从 shpsync_ token 派生；无 workspace 归属 → 403 fail-closed\n（对齐 quicklog-entries 范式）。",
++        "description": "GET 服务器 spec 文件权威清单（CLI 直跑增量同步锚点，design §5.2/§7）。\n\nCLI ``spec-sync.js`` 以此清单为锚 diff 本地 ``.sillyspec/``，算出增量 ops 后\nPOST ``/changes/-/spec-sync``（D-004@v1：CLI 无本地缓存，服务器清单即基线）。\n\n2026-10-21-spec-manifest-incremental task-03：``?since=<spec_version>`` 增量\n形态——只返回 ``landing_version > since`` 的行（含软删墓碑行），响应顶层带\n当前 ``spec_version`` 供客户端作下次游标；无 since 为全量（现状行为，响应\n仅新增 spec_version 字段）。背景：全量清单随工作区历史无界增长（生产实测\n13k 行/2.2MB/5.5s@受限带宽），增量稳态只传变化行。\n\n读清单也收紧为写权限（``require_platform_sync_write``，仅 shpsync_ token，\nJWT/shk_live_ 403）——清单是增量写协议的一部分，避免非同步方探测文件布局。\nworkspace_id 从 shpsync_ token 派生；无 workspace 归属 → 403 fail-closed\n（对齐 quicklog-entries 范式）。",
+         "operationId": "get_spec_manifest_api_changes___spec_manifest_get",
++        "parameters": [
++          {
++            "name": "since",
++            "in": "query",
++            "required": false,
++            "schema": {
++              "anyOf": [
++                {
++                  "type": "integer",
++                  "minimum": 0
++                },
++                {
++                  "type": "null"
++                }
++              ],
++              "description": "增量游标（客户端已消费的工作区 spec_version）：只返回该版本之后落地的清单行",
++              "title": "Since"
++            },
++            "description": "增量游标（客户端已消费的工作区 spec_version）：只返回该版本之后落地的清单行"
++          }
++        ],
+         "responses": {
+           "200": {
+             "description": "Successful Response",
+@@ -35420,6 +35485,16 @@
+                 }
+               }
+             }
++          },
++          "422": {
++            "description": "Validation Error",
++            "content": {
++              "application/json": {
++                "schema": {
++                  "$ref": "#/components/schemas/HTTPValidationError"
++                }
++              }
++            }
+           }
+         }
+       }
+@@ -70593,6 +70668,89 @@
+         "title": "SessionForkResponse",
+         "description": "POST /api/daemon/sessions/{id}/fork 响应（design §接口定义）。\n\n``tier``：'native'（引擎真截断：claude resume_at / pi rpc_fork / pi clone）\n| 'seed'（codex 前情转述，有损）。错误语义：404 会话/run 不存在或不属于\n该会话；409 run 进行中；422 caps sessionFork=none 或 native 档锚点缺失。"
+       },
++      "SessionGitStatusResponse": {
++        "properties": {
++          "git_mode": {
++            "type": "string",
++            "enum": [
++              "git",
++              "no_git",
++              "no_root"
++            ],
++            "title": "Git Mode"
++          },
++          "root": {
++            "anyOf": [
++              {
++                "type": "string"
++              },
++              {
++                "type": "null"
++              }
++            ],
++            "title": "Root"
++          },
++          "branch": {
++            "anyOf": [
++              {
++                "type": "string"
++              },
++              {
++                "type": "null"
++              }
++            ],
++            "title": "Branch"
++          },
++          "detached": {
++            "type": "boolean",
++            "title": "Detached",
++            "default": false
++          },
++          "head_short": {
++            "anyOf": [
++              {
++                "type": "string"
++              },
++              {
++                "type": "null"
++              }
++            ],
++            "title": "Head Short"
++          },
++          "files_changed": {
++            "anyOf": [
++              {
++                "type": "integer"
++              },
++              {
++                "type": "null"
++              }
++            ],
++            "title": "Files Changed"
++          },
++          "untracked_count": {
++            "anyOf": [
++              {
++                "type": "integer"
++              },
++              {
++                "type": "null"
++              }
++            ],
++            "title": "Untracked Count"
++          },
++          "synced_at": {
++            "type": "string",
++            "title": "Synced At"
++          }
++        },
++        "type": "object",
++        "required": [
++          "git_mode",
++          "synced_at"
++        ],
++        "title": "SessionGitStatusResponse"
++      },
+       "SessionInjectRequest": {
+         "properties": {
+           "prompt": {
+@@ -73222,11 +73380,17 @@
+             },
+             "type": "object",
+             "title": "Files"
++          },
++          "spec_version": {
++            "type": "integer",
++            "title": "Spec Version",
++            "description": "工作区当前权威版本（下次增量的 since 游标）",
++            "default": 0
+           }
+         },
+         "type": "object",
+         "title": "SpecManifestResponse",
+-        "description": "GET /changes/-/spec-manifest 200 响应：服务器权威清单全量 map（design §5.2/§7）。\n\nCLI ``spec-sync.js`` 以此为锚 diff 本地 ``.sillyspec/`` 算增量 ops\n（D-004@v1 CLI 无本地缓存，清单即基线）。无清单行（旧 tar 全量同步后失效 /\n全新 workspace）→ 空 ``files``，CLI 走 R-07 兜底全量重算。"
++        "description": "GET /changes/-/spec-manifest 200 响应：服务器权威清单 map（design §5.2/§7）。\n\nCLI ``spec-sync.js`` 以此为锚 diff 本地 ``.sillyspec/`` 算增量 ops\n（D-004@v1 CLI 无本地缓存，清单即基线）。无清单行（旧 tar 全量同步后失效 /\n全新 workspace）→ 空 ``files``，CLI 走 R-07 兜底全量重算。\n\n2026-10-21-spec-manifest-incremental task-03：新增顶层 ``spec_version``（全量/\n增量均带）——CLI 携带 ``?since=<spec_version>`` 时 ``files`` 只含该版本之后\n落地的行（增量游标形态），并以响应 ``spec_version`` 作下次游标；无 since 为\n全量（既有 CLI 忽略未知字段，向后兼容）。"
+       },
+       "SpecSyncRequest": {
+         "properties": {
+diff --git a/backend/tests/modules/daemon/test_session_git_status.py b/backend/tests/modules/daemon/test_session_git_status.py
+new file mode 100644
+index 000000000..ed5c1a187
+--- /dev/null
++++ b/backend/tests/modules/daemon/test_session_git_status.py
+@@ -0,0 +1,369 @@
++"""Tests for GET /api/daemon/sessions/{session_id}/git-status（2026-10-21-session-git-branch）.
++
++会话级 git 分支实时查询端点（FR-01/02/03）。覆盖（requirements 测试绑定 +
++design 错误面全表）：
++
++- FR-01 主路径：session.cwd → RPC root=cwd → branch 透出；detached 形态
++  （detached=true + head_short）；
++- FR-02 每请求现查：连续两次请求 → hub 收到两次 git_status（无快照/无缓存）；
++- FR-03 空态：无 cwd 且无 workspace → 200 no_root（hub 零调用）；cwd 非 git
++  仓库（daemon error 含 "not a git repository"）→ 200 no_git；
++- 回退链：cwd 为空 → 成员绑定根 root_path；
++- 404：会话不存在 / 跨用户（get_agent_session 属主过滤）；成员未绑定 → 404；
++- 403：daemon forbidden（root 越界 allowed_roots）；
++- 502：daemon 离线。
++
++造数与 Bearer 手签照 test_session_export.py 先例；FakeHub / 绑定行（含
++daemon_instances 真实行，e2b95aad 起 resolver JOIN 过滤幽灵 id）照
++git_log/tests/test_router.py 先例。
++"""
++
++from __future__ import annotations
++
++import uuid
++from datetime import UTC, datetime
++from typing import Any
++
++import pytest
++from httpx import AsyncClient
++from sqlalchemy.ext.asyncio import AsyncSession
++
++from app.core.config import get_settings
++from app.core.security import create_access_token, password_hasher
++from app.modules.agent.model import AgentSession
++from app.modules.auth.model import User
++from app.modules.daemon.runtime.service import (
++    DaemonRpcRemoteError,
++    DaemonRuntimeOffline,
++)
++from app.modules.workspace.member_runtimes.model import WorkspaceMemberRuntime
++from app.modules.workspace.model import Workspace
++
++pytestmark = pytest.mark.asyncio
++
++# daemon git_status 十四字段契约 fixture（git_log tests _git_status_result 同款）。
++_GIT_STATUS_RESULT: dict[str, Any] = {
++    "branch": "feature-x",
++    "detached": False,
++    "upstream": "origin/feature-x",
++    "ahead": 1,
++    "behind": 0,
++    "files_changed": 2,
++    "additions": 10,
++    "deletions": 4,
++    "untracked_count": 1,
++    "head_short": "1a2b3c4d",
++    "empty": False,
++    "fetch_performed": True,
++    "fetch_error": None,
++    "error": None,
++}
++
++
++class FakeHub:
++    """DaemonWsHub 测试替身——记录调用并按 method 分发预设 result/异常。"""
++
++    def __init__(self) -> None:
++        self.calls: list[dict[str, Any]] = []
++        self._handlers: dict[str, tuple[Any, BaseException | None]] = {}
++
++    def on(self, method: str, *, result: Any = None, exc: BaseException | None = None) -> None:
++        self._handlers[method] = (result, exc)
++
++    async def send_rpc(
++        self,
++        daemon_id: uuid.UUID,
++        method: str,
++        params: dict[str, Any],
++        *,
++        timeout: float | None = None,
++    ) -> dict[str, Any]:
++        self.calls.append(
++            {"daemon_id": daemon_id, "method": method, "params": params, "timeout": timeout}
++        )
++        handler = self._handlers.get(method)
++        if handler is None:
++            return {}
++        result, exc = handler
++        if exc is not None:
++            raise exc
++        return result
++
++
++async def _create_admin(db_session: AsyncSession) -> tuple[User, str]:
++    """platform admin 用户 + 手签 Bearer（自动短路端点 TASK_RUN_AGENT 闸门）。"""
++    user = User(
++        id=uuid.uuid4(),
++        email=f"sgs-{uuid.uuid4().hex[:8]}@example.com",
++        password_hash=password_hasher.hash("x"),
++        display_name="sgs",
++        status="active",
++        is_platform_admin=True,
++    )
++    db_session.add(user)
++    await db_session.commit()
++    await db_session.refresh(user)
++    token, _ = create_access_token(
++        user_id=user.id,
++        email=user.email or "",
++        is_admin=user.is_platform_admin,
++        settings=get_settings(),
++    )
++    return user, token
++
++
++async def _seed_env(
++    db_session: AsyncSession,
++    *,
++    cwd: str | None = r"C:\repo",
++    with_workspace: bool = True,
++    with_binding: bool = True,
++) -> tuple[AgentSession, str, FakeHub, uuid.UUID]:
++    """一键场景：admin 用户 + （可选）工作区 + 绑定行 + AgentSession + 假 hub。
++
++    返回 (session, token, hub, daemon_id)。with_binding=False 时不插
++    WorkspaceMemberRuntime/daemon_instances 行（未绑定 404 用例）。
++    """
++    user, token = await _create_admin(db_session)
++    daemon_id = uuid.uuid4()
++    hub = FakeHub()
++
++    workspace_id: uuid.UUID | None = None
++    if with_workspace:
++        ws = Workspace(
++            id=uuid.uuid4(),
++            name="sgs-ws",
++            slug=f"sgs-{uuid.uuid4().hex[:8]}",
++            root_path=r"C:\repo",
++            status="active",
++            created_by=user.id,
++        )
++        db_session.add(ws)
++        await db_session.flush()
++        workspace_id = ws.id
++        if with_binding:
++            hb = datetime.now(UTC)
++            from sqlalchemy import text
++
++            await db_session.execute(
++                text(
++                    "INSERT INTO daemon_instances (id, user_id, hostname, server_url,"
++                    " allowed_roots, status, last_heartbeat_at, created_at, updated_at)"
++                    " VALUES (:id, :uid, 'sgs-host', 'http://t',"
++                    " '[\"C:/\"]', 'online', :hb, :hb, :hb)"
++                ),
++                {"id": daemon_id.hex, "uid": user.id.hex, "hb": hb},
++            )
++            db_session.add(
++                WorkspaceMemberRuntime(
++                    workspace_id=ws.id,
++                    user_id=user.id,
++                    daemon_id=daemon_id,
++                    root_path=r"C:\repo",
++                    path_source="daemon-client",
++                )
++            )
++
++    sess = AgentSession(
++        id=uuid.uuid4(),
++        user_id=user.id,
++        runtime_id=None,
++        provider="claude",
++        status="idle",
++        turn_count=0,
++        workspace_id=workspace_id,
++        cwd=cwd,
++    )
++    db_session.add(sess)
++    await db_session.commit()
++    await db_session.refresh(sess)
++    return sess, token, hub, daemon_id
++
++
++def _url(session_id: uuid.UUID) -> str:
++    return f"/api/daemon/sessions/{session_id}/git-status"
++
++
++def _git_status_calls(hub: FakeHub) -> list[dict[str, Any]]:
++    return [c for c in hub.calls if c["method"] == "git_status"]
++
++
++async def test_git_status_returns_branch_from_session_cwd(
++    client: AsyncClient, db_session: AsyncSession, monkeypatch
++):
++    """FR-01 主路径：cwd 指向 worktree → RPC root=cwd（非 workspace 根）→ 分支透出。"""
++    sess, token, hub, _daemon_id = await _seed_env(db_session, cwd=r"C:\wt\feature-x")
++    hub.on("git_status", result=dict(_GIT_STATUS_RESULT))
++    monkeypatch.setattr("app.modules.daemon.ws_hub.get_daemon_ws_hub", lambda: hub)
++
++    resp = await client.get(_url(sess.id), headers={"Authorization": f"Bearer {token}"})
++    assert resp.status_code == 200, resp.text
++    body = resp.json()
++    assert body["git_mode"] == "git"
++    assert body["branch"] == "feature-x"
++    assert body["detached"] is False
++    assert body["head_short"] == "1a2b3c4d"
++    assert body["files_changed"] == 2
++    assert body["untracked_count"] == 1
++    assert body["root"] == r"C:\wt\feature-x"
++    assert body["synced_at"]
++
++    rpc_calls = _git_status_calls(hub)
++    assert len(rpc_calls) == 1
++    assert rpc_calls[0]["params"] == {"root": r"C:\wt\feature-x"}
++
++
++async def test_git_status_detached_head(client: AsyncClient, db_session: AsyncSession, monkeypatch):
++    """FR-01 场景：detached HEAD → detached=true + head_short（branch 兜底 head_short）。"""
++    sess, token, hub, _ = await _seed_env(db_session)
++    hub.on(
++        "git_status",
++        result=dict(_GIT_STATUS_RESULT, branch=None, detached=True),
++    )
++    monkeypatch.setattr("app.modules.daemon.ws_hub.get_daemon_ws_hub", lambda: hub)
++
++    resp = await client.get(_url(sess.id), headers={"Authorization": f"Bearer {token}"})
++    assert resp.status_code == 200, resp.text
++    body = resp.json()
++    assert body["detached"] is True
++    assert body["head_short"] == "1a2b3c4d"
++
++
++async def test_git_status_queries_daemon_rpc_per_request_no_snapshot(
++    client: AsyncClient, db_session: AsyncSession, monkeypatch
++):
++    """FR-02 每请求现查：连续两次 GET → 两次 git_status RPC（无快照无缓存）。"""
++    sess, token, hub, _ = await _seed_env(db_session)
++    hub.on("git_status", result=dict(_GIT_STATUS_RESULT))
++    monkeypatch.setattr("app.modules.daemon.ws_hub.get_daemon_ws_hub", lambda: hub)
++
++    for _ in range(2):
++        resp = await client.get(_url(sess.id), headers={"Authorization": f"Bearer {token}"})
++        assert resp.status_code == 200, resp.text
++    assert len(_git_status_calls(hub)) == 2
++
++
++async def test_git_status_no_root_and_no_git_empty_states(
++    client: AsyncClient, db_session: AsyncSession, monkeypatch
++):
++    """FR-03 空态：① 无 cwd 且无 workspace → 200 no_root（hub 零调用）；
++    ② cwd 非 git 仓库（daemon error 含 not a git repository）→ 200 no_git。"""
++    # ① no_root
++    sess, token, hub, _ = await _seed_env(db_session, cwd=None, with_workspace=False)
++    monkeypatch.setattr("app.modules.daemon.ws_hub.get_daemon_ws_hub", lambda: hub)
++    resp = await client.get(_url(sess.id), headers={"Authorization": f"Bearer {token}"})
++    assert resp.status_code == 200, resp.text
++    body = resp.json()
++    assert body["git_mode"] == "no_root"
++    assert body["branch"] is None
++    assert len(hub.calls) == 0
++
++    # ② no_git（cwd 有值但 daemon 报非 git 仓库）
++    sess2, token2, hub2, _ = await _seed_env(db_session, cwd=r"C:\plain-dir")
++    hub2.on(
++        "git_status",
++        result=dict(
++            _GIT_STATUS_RESULT,
++            branch=None,
++            error="fatal: not a git repository (or any of the parent directories): .git",
++        ),
++    )
++    monkeypatch.setattr("app.modules.daemon.ws_hub.get_daemon_ws_hub", lambda: hub2)
++    resp2 = await client.get(_url(sess2.id), headers={"Authorization": f"Bearer {token2}"})
++    assert resp2.status_code == 200, resp2.text
++    body2 = resp2.json()
++    assert body2["git_mode"] == "no_git"
++    assert body2["branch"] is None
++
++
++async def test_git_status_fallback_to_binding_root_when_no_cwd(
++    client: AsyncClient, db_session: AsyncSession, monkeypatch
++):
++    """回退链：cwd 为空 → RPC root=成员绑定行 root_path（git_log 同语义）。"""
++    sess, token, hub, _ = await _seed_env(db_session, cwd=None)
++    hub.on("git_status", result=dict(_GIT_STATUS_RESULT))
++    monkeypatch.setattr("app.modules.daemon.ws_hub.get_daemon_ws_hub", lambda: hub)
++
++    resp = await client.get(_url(sess.id), headers={"Authorization": f"Bearer {token}"})
++    assert resp.status_code == 200, resp.text
++    rpc_calls = _git_status_calls(hub)
++    assert len(rpc_calls) == 1
++    assert rpc_calls[0]["params"] == {"root": r"C:\repo"}
++
++
++async def test_git_status_not_found_variants(
++    client: AsyncClient, db_session: AsyncSession, monkeypatch
++):
++    """404 族：① 不存在的 session id；② 跨用户会话（属主过滤不泄露存在性）。"""
++    sess, token, hub, _ = await _seed_env(db_session)
++    hub.on("git_status", result=dict(_GIT_STATUS_RESULT))
++    monkeypatch.setattr("app.modules.daemon.ws_hub.get_daemon_ws_hub", lambda: hub)
++
++    resp = await client.get(_url(uuid.uuid4()), headers={"Authorization": f"Bearer {token}"})
++    assert resp.status_code == 404, resp.text
++
++    _stranger, stranger_token = await _create_admin(db_session)
++    resp_owner = await client.get(_url(sess.id), headers={"Authorization": f"Bearer {token}"})
++    assert resp_owner.status_code == 200, resp_owner.text  # 属主本人仍可查（对照组）
++    # 跨用户：stranger 查属主会话 → 404 不泄露存在性
++    resp3 = await client.get(_url(sess.id), headers={"Authorization": f"Bearer {stranger_token}"})
++    assert resp3.status_code == 404, resp3.text
++
++
++async def test_git_status_not_bound_404(client: AsyncClient, db_session: AsyncSession, monkeypatch):
++    """有 workspace 但成员未绑定 daemon → 404（SessionGitNotBound）。"""
++    sess, token, hub, _ = await _seed_env(db_session, with_binding=False)
++    monkeypatch.setattr("app.modules.daemon.ws_hub.get_daemon_ws_hub", lambda: hub)
++
++    resp = await client.get(_url(sess.id), headers={"Authorization": f"Bearer {token}"})
++    assert resp.status_code == 404, resp.text
++    assert len(hub.calls) == 0
++
++
++async def test_git_status_forbidden_403(client: AsyncClient, db_session: AsyncSession, monkeypatch):
++    """daemon forbidden（root 越界 allowed_roots，如 worktree 未入白名单）→ 403。"""
++    sess, token, hub, _ = await _seed_env(db_session, cwd=r"C:\outside-wt")
++    hub.on(
++        "git_status",
++        exc=DaemonRpcRemoteError({"code": "forbidden", "message": "outside allowed roots"}),
++    )
++    monkeypatch.setattr("app.modules.daemon.ws_hub.get_daemon_ws_hub", lambda: hub)
++
++    resp = await client.get(_url(sess.id), headers={"Authorization": f"Bearer {token}"})
++    assert resp.status_code == 403, resp.text
++
++
++async def test_git_status_offline_502(client: AsyncClient, db_session: AsyncSession, monkeypatch):
++    """daemon 离线 → 502。"""
++    sess, token, hub, _ = await _seed_env(db_session)
++    hub.on(
++        "git_status",
++        exc=DaemonRuntimeOffline("daemon 'x' is offline (no WS connection)."),
++    )
++    monkeypatch.setattr("app.modules.daemon.ws_hub.get_daemon_ws_hub", lambda: hub)
++
++    resp = await client.get(_url(sess.id), headers={"Authorization": f"Bearer {token}"})
++    assert resp.status_code == 502, resp.text
++
++
++async def test_git_status_other_daemon_error_502(
++    client: AsyncClient, db_session: AsyncSession, monkeypatch
++):
++    """daemon error 非空且非 not-a-git-repo（真采集失败）→ 502（不静默成空态）。"""
++    sess, token, hub, _ = await _seed_env(db_session)
++    hub.on(
++        "git_status",
++        result=dict(_GIT_STATUS_RESULT, branch=None, error="git status failed: corrupted"),
++    )
++    monkeypatch.setattr("app.modules.daemon.ws_hub.get_daemon_ws_hub", lambda: hub)
++
++    resp = await client.get(_url(sess.id), headers={"Authorization": f"Bearer {token}"})
++    assert resp.status_code == 502, resp.text
++
++
++async def test_openapi_lists_session_git_status_path():
++    """openapi 出现新端点路径（gen:types 前置）。"""
++    from app.main import app
++
++    paths = app.openapi()["paths"]
++    assert "/api/daemon/sessions/{session_id}/git-status" in paths
+diff --git a/frontend/src/components/sessions/__tests__/session-config-bar.test.tsx b/frontend/src/components/sessions/__tests__/session-config-bar.test.tsx
+index 88e08f87f..5334f8459 100644
+--- a/frontend/src/components/sessions/__tests__/session-config-bar.test.tsx
++++ b/frontend/src/components/sessions/__tests__/session-config-bar.test.tsx
+@@ -58,6 +58,8 @@ const mocks = vi.hoisted(() => ({
+   // POST 切换）——照 injectSession 局部 mock 形态。
+   getSessionThinkingLevels: vi.fn(),
+   setSessionThinkingLevel: vi.fn(),
++  // 2026-10-21-session-git-branch：分支指示项 GET。
++  fetchSessionGitStatus: vi.fn(),
+   messageSuccess: vi.fn(),
+   messageError: vi.fn(),
+   // task-10：useActiveSharedAgents 直取 /api/daemon/shared-agents/active（apiFetch）。
+@@ -95,6 +97,9 @@ vi.mock("@/lib/daemon", async (importOriginal) => {
+       mocks.getSessionThinkingLevels(...args),
+     setSessionThinkingLevel: (...args: unknown[]) =>
+       mocks.setSessionThinkingLevel(...args),
++    // 2026-10-21-session-git-branch：分支指示项取数（照 injectSession 局部 mock）。
++    fetchSessionGitStatus: (...args: unknown[]) =>
++      mocks.fetchSessionGitStatus(...args),
+   };
+ });
+ 
+@@ -154,11 +159,16 @@ function renderBar(overrides: Record<string, unknown> = {}) {
+       mutations: { retry: false },
+     },
+   });
+-  return render(
+-    <QueryClientProvider client={client}>
+-      <SessionConfigBar {...({ ...BASE_PROPS, ...overrides } as any)} />
+-    </QueryClientProvider>,
+-  );
++  // 2026-10-21-session-git-branch：返回 client 供轮询配置断言（query options
++  // 的 refetchInterval 直读，替代 fake timers 推进 60s 的脆弱写法）。
++  return {
++    client,
++    ...render(
++      <QueryClientProvider client={client}>
++        <SessionConfigBar {...({ ...BASE_PROPS, ...overrides } as any)} />
++      </QueryClientProvider>,
++    ),
++  };
+ }
+ 
+ function openCtrl(labelPart: string) {
+@@ -191,6 +201,18 @@ beforeEach(() => {
+     current: "medium",
+   });
+   mocks.setSessionThinkingLevel.mockReset().mockResolvedValue({ ok: true });
++  // 2026-10-21-session-git-branch：默认正常 git 态（feature-x 分支）——既有
++  // 用例不感知指示项；空态/失败态由本变更新增用例覆盖。
++  mocks.fetchSessionGitStatus.mockReset().mockResolvedValue({
++    git_mode: "git",
++    root: "C:\\repo",
++    branch: "feature-x",
++    detached: false,
++    head_short: "1a2b3c4d",
++    files_changed: 2,
++    untracked_count: 1,
++    synced_at: "2026-10-21T12:00:00Z",
++  });
+   // task-10：active 共享智能体默认空列表（用例内按需覆盖）。
+   mocks.apiFetch.mockReset().mockResolvedValue([]);
+   mocks.messageSuccess.mockReset();
+@@ -1457,3 +1479,90 @@ describe("SessionConfigBar 手机端降噪（ql-20260915-009 variant=mobile）",
+     expect(screen.getByText("运行中切换将于本轮结束后生效")).toBeInTheDocument();
+   });
+ });
++
++// ── 14. 会话 git 分支指示项（2026-10-21-session-git-branch / FR-01..03）─────
++
++describe("SessionConfigBar git 分支指示项（2026-10-21-session-git-branch）", () => {
++  const GIT_OK = {
++    git_mode: "git",
++    root: "C:\wt\feature-x",
++    branch: "feature-x",
++    detached: false,
++    head_short: "1a2b3c4d",
++    files_changed: 2,
++    untracked_count: 1,
++    synced_at: "2026-10-21T12:00:00Z",
++  };
++
++  it("renders git branch indicator after profile control（FR-01：档案控件后显示当前分支）", async () => {
++    renderBar();
++    const badge = await screen.findByTestId("session-git-branch");
++    expect(badge).toHaveTextContent("feature-x");
++    // DOM 顺序：档案按钮在前、指示项紧随其后（用户指定位置）。
++    const profile = screen.getByRole("button", { name: /配置-档案/ });
++    expect(
++      profile.compareDocumentPosition(badge) & Node.DOCUMENT_POSITION_FOLLOWING,
++    ).toBeTruthy();
++  });
++
++  it("detached HEAD 显示 head 短 sha（FR-01 场景）", async () => {
++    mocks.fetchSessionGitStatus.mockResolvedValue({
++      ...GIT_OK,
++      branch: null,
++      detached: true,
++    });
++    renderBar();
++    expect(await screen.findByTestId("session-git-branch")).toHaveTextContent(
++      "1a2b3c4d",
++    );
++  });
++
++  it("git branch indicator polls with refetchInterval（FR-02：60s 轮询动态刷新）", async () => {
++    // 轮询配置直读 query options（fake timers 推进 60s 在 jsdom + react-query
++    // 组合下不稳，用例间污染实证）；动态性用 refetch 驱动验证——数据更新展示
++    // 随之变化（非创建快照）。
++    const { client } = renderBar();
++    await screen.findByTestId("session-git-branch");
++    const query = client
++      .getQueryCache()
++      .find({ queryKey: ["sessionGitStatus", "sess-1"] });
++    // Query.options 的公开类型是收窄子集（不含 refetchInterval），运行时携带
++    // 完整 useQuery options——断言收窄读取。
++    const opts = query?.options as { refetchInterval?: number | false } | undefined;
++    expect(opts?.refetchInterval).toBe(60_000);
++
++    mocks.fetchSessionGitStatus.mockResolvedValue({ ...GIT_OK, branch: "main" });
++    await client.refetchQueries({ queryKey: ["sessionGitStatus", "sess-1"] });
++    expect(await screen.findByTestId("session-git-branch")).toHaveTextContent(
++      "main",
++    );
++  });
++
++  it("hides git branch indicator on no_git / no_root（FR-03 空态静默隐藏）", async () => {
++    mocks.fetchSessionGitStatus.mockResolvedValue({ ...GIT_OK, git_mode: "no_git" });
++    renderBar();
++    await waitFor(() => expect(mocks.fetchSessionGitStatus).toHaveBeenCalledTimes(1));
++    expect(screen.queryByTestId("session-git-branch")).not.toBeInTheDocument();
++
++    mocks.fetchSessionGitStatus.mockResolvedValue({ ...GIT_OK, git_mode: "no_root" });
++    renderBar();
++    await waitFor(() => expect(mocks.fetchSessionGitStatus).toHaveBeenCalledTimes(2));
++    expect(screen.queryByTestId("session-git-branch")).not.toBeInTheDocument();
++  });
++
++  it("查询失败降级占位 ⎇ — 不阻塞其余控件（FR-03 故障形态）", async () => {
++    mocks.fetchSessionGitStatus.mockRejectedValue(new Error("offline"));
++    renderBar();
++    const badge = await screen.findByTestId("session-git-branch");
++    expect(badge).toHaveTextContent("—");
++    // 档案/供应商控件照常渲染。
++    expect(screen.getByRole("button", { name: /配置-档案/ })).toBeInTheDocument();
++    expect(screen.getByRole("button", { name: /配置-供应商/ })).toBeInTheDocument();
++  });
++
++  it("预会话（sessionId 空串）不渲染指示项", () => {
++    renderBar({ sessionId: "" });
++    expect(screen.queryByTestId("session-git-branch")).not.toBeInTheDocument();
++    expect(mocks.fetchSessionGitStatus).not.toHaveBeenCalled();
++  });
++});
+diff --git a/frontend/src/components/sessions/session-config-bar.tsx b/frontend/src/components/sessions/session-config-bar.tsx
+index 74ef4b117..046280106 100644
+--- a/frontend/src/components/sessions/session-config-bar.tsx
++++ b/frontend/src/components/sessions/session-config-bar.tsx
+@@ -54,8 +54,8 @@
+  */
+ import { useEffect, useMemo, useRef, useState } from "react";
+ import { useQuery, useQueryClient } from "@tanstack/react-query";
+-import { Dropdown, Switch, Tag, type MenuProps } from "antd";
+-import { Brain, ChevronDown, Cloud, Settings2, Timer, User } from "lucide-react";
++import { Dropdown, Switch, Tag, Tooltip, type MenuProps } from "antd";
++import { Brain, ChevronDown, Cloud, GitBranch, Settings2, Timer, User } from "lucide-react";
+ 
+ import { ApiError } from "@/lib/api";
+ import type { components } from "@/lib/api-types";
+@@ -63,6 +63,7 @@ import { useMineAgentProfiles } from "@/lib/agent-profiles";
+ import { listProviders } from "@/lib/api/llm-providers";
+ import { useNotify } from "@/lib/errors";
+ import {
++  fetchSessionGitStatus,
+   fetchSharedAgentsActive,
+   getSessionThinkingLevels,
+   injectSession,
+@@ -70,6 +71,7 @@ import {
+ } from "@/lib/daemon";
+ import type {
+   AgentSessionConfigSnapshot,
++  SessionGitStatus,
+   SessionInjectOptions,
+   SessionInjectResponse,
+ } from "@/lib/daemon";
+@@ -298,6 +300,72 @@ export function buildDefaultSwitchPrompt(p: PendingSwitch): string {
+ 
+ /* ────────────────────── 组件 ────────────────────── */
+ 
++/**
++ * 会话当前 git 分支指示项（2026-10-21-session-git-branch / FR-01..03）。
++ *
++ * 「智能体档案」控件后的只读展示：会话工作目录（cwd，缺省回退工作区绑定根）
++ * 的**当前**分支——GET /api/daemon/sessions/{id}/git-status 每请求经 daemon
++ * RPC 现场采集（FR-02 非快照），60s 前台轮询动态刷新（refetchIntervalInBackground
++ * 默认 false，后台标签页暂停）。detached HEAD 显示 head 短 sha；no_git /
++ * no_root 空态静默隐藏（FR-03，不报错不 toast）；查询失败渲染「⎇ —」占位不阻塞其余
++ * 控件（retry=false——失败由下一轮轮询自然重取，不与轮询叠加堆积）。
++ */
++function SessionGitBranchBadge({
++  sessionId,
++  mobile,
++}: {
++  sessionId: string;
++  mobile: boolean;
++}) {
++  const gitQuery = useQuery<SessionGitStatus, ApiError>({
++    queryKey: ["sessionGitStatus", sessionId],
++    queryFn: () => fetchSessionGitStatus(sessionId),
++    refetchInterval: 60_000,
++    retry: false,
++  });
++  const data = gitQuery.data;
++
++  // FR-03 空态：no_git（目录非 git 仓库）/ no_root（无 cwd 且无绑定）不渲染。
++  if (data && data.git_mode !== "git") return null;
++  const label =
++    data == null
++      ? null
++      : (data.branch ?? (data.detached ? (data.head_short ?? "HEAD") : null));
++  // 首帧 loading 与 git 模式无可显值（空仓库 branch null 且非 detached）都不渲染
++  //（不闪骨架，数据到了再出现）；仅失败态走占位。
++  if (!gitQuery.isError && label == null) return null;
++
++  const tooltip = (
++    <div className="max-w-[280px] space-y-0.5 text-xs">
++      <p>会话工作目录当前分支（60s 自动刷新）</p>
++      {data?.root ? <p className="break-all">目录：{data.root}</p> : null}
++      {data && (data.files_changed != null || data.untracked_count != null) ? (
++        <p>
++          改动 {data.files_changed ?? 0} 个文件 · 未跟踪 {data.untracked_count ?? 0} 个
++        </p>
++      ) : null}
++      {gitQuery.isError ? (
++        <p>查询失败（守护进程离线或目录不在允许范围），稍后自动重试</p>
++      ) : null}
++    </div>
++  );
++
++  return (
++    <Tooltip title={tooltip}>
++      <span
++        data-testid="session-git-branch"
++        title={gitQuery.isError ? "会话 Git 状态查询失败" : "会话当前 Git 分支"}
++        className="inline-flex cursor-default items-center gap-1.5 rounded-md px-2 py-1 text-xs text-muted-foreground/80"
++      >
++        <GitBranch aria-hidden className="h-3.5 w-3.5 shrink-0 text-brand-600" />
++        <span className={cn("max-w-[140px] truncate", mobile && "max-w-[100px]")}>
++          {gitQuery.isError ? "—" : label}
++        </span>
++      </span>
++    </Tooltip>
++  );
++}
++
+ export function SessionConfigBar({
+   sessionId,
+   running,
+@@ -972,6 +1040,12 @@ export function SessionConfigBar({
+             )}
+           </ConfigDropdown>,
+         )}
++        {/* 2026-10-21-session-git-branch / FR-01..03：会话当前 git 分支指示项
++            （档案控件后）——组件内自取数（思考级别控件先例），mobile 与档案
++            同收纳（mobileReveal 门控）；预会话（sessionId 空串）不渲染。 */}
++        {mobileReveal && sessionId !== "" && (
++          <SessionGitBranchBadge sessionId={sessionId} mobile={mobile} />
++        )}
+         {/* ql-20260915-009：mobile 不渲染弹性占位（次要开关同收，flex-wrap 行内
+             留它只会把行尾插槽顶到下一行）。 */}
+         {!mobile && <span className="flex-1" />}
+diff --git a/frontend/src/lib/api-types.ts b/frontend/src/lib/api-types.ts
+index d6b6eeda0..0aa41c1ca 100644
+--- a/frontend/src/lib/api-types.ts
++++ b/frontend/src/lib/api-types.ts
+@@ -6298,6 +6298,30 @@ export interface paths {
+         patch?: never;
+         trace?: never;
+     };
++    "/api/daemon/sessions/{session_id}/git-status": {
++        parameters: {
++            query?: never;
++            header?: never;
++            path?: never;
++            cookie?: never;
++        };
++        /**
++         * Get Session Git Status
++         * @description 会话当前 git 分支实时状态（2026-10-21-session-git-branch / FR-01..03）。
++         *
++         *     每请求经 daemon ``git_status`` RPC 现场采集（非创建快照）——root 决策链
++         *     与错误映射见 ``session/service/git_status.py`` 模块 docstring。会话组件
++         *     分支指示项的取数端点（≤60s 轮询），与 workspace 维度 git-log/status 互不影响。
++         */
++        get: operations["get_session_git_status_api_daemon_sessions__session_id__git_status_get"];
++        put?: never;
++        post?: never;
++        delete?: never;
++        options?: never;
++        head?: never;
++        patch?: never;
++        trace?: never;
++    };
+     "/api/daemon/sessions/{session_id}/fork": {
+         parameters: {
+             query?: never;
+@@ -12057,6 +12081,12 @@ export interface paths {
+          *     CLI ``spec-sync.js`` 以此清单为锚 diff 本地 ``.sillyspec/``，算出增量 ops 后
+          *     POST ``/changes/-/spec-sync``（D-004@v1：CLI 无本地缓存，服务器清单即基线）。
+          *
++         *     2026-10-21-spec-manifest-incremental task-03：``?since=<spec_version>`` 增量
++         *     形态——只返回 ``landing_version > since`` 的行（含软删墓碑行），响应顶层带
++         *     当前 ``spec_version`` 供客户端作下次游标；无 since 为全量（现状行为，响应
++         *     仅新增 spec_version 字段）。背景：全量清单随工作区历史无界增长（生产实测
++         *     13k 行/2.2MB/5.5s@受限带宽），增量稳态只传变化行。
++         *
+          *     读清单也收紧为写权限（``require_platform_sync_write``，仅 shpsync_ token，
+          *     JWT/shk_live_ 403）——清单是增量写协议的一部分，避免非同步方探测文件布局。
+          *     workspace_id 从 shpsync_ token 派生；无 workspace 归属 → 403 fail-closed
+@@ -25627,6 +25657,31 @@ export interface components {
+             tier: "native" | "seed";
+             lineage: components["schemas"]["SessionForkLineage"];
+         };
++        /** SessionGitStatusResponse */
++        SessionGitStatusResponse: {
++            /**
++             * Git Mode
++             * @enum {string}
++             */
++            git_mode: "git" | "no_git" | "no_root";
++            /** Root */
++            root?: string | null;
++            /** Branch */
++            branch?: string | null;
++            /**
++             * Detached
++             * @default false
++             */
++            detached: boolean;
++            /** Head Short */
++            head_short?: string | null;
++            /** Files Changed */
++            files_changed?: number | null;
++            /** Untracked Count */
++            untracked_count?: number | null;
++            /** Synced At */
++            synced_at: string;
++        };
+         /**
+          * SessionInjectRequest
+          * @description POST /api/daemon/sessions/{id}/inject 请求体（FR-02 / design §5 Wave1）。
+@@ -26989,17 +27044,28 @@ export interface components {
+         };
+         /**
+          * SpecManifestResponse
+-         * @description GET /changes/-/spec-manifest 200 响应：服务器权威清单全量 map（design §5.2/§7）。
++         * @description GET /changes/-/spec-manifest 200 响应：服务器权威清单 map（design §5.2/§7）。
+          *
+          *     CLI ``spec-sync.js`` 以此为锚 diff 本地 ``.sillyspec/`` 算增量 ops
+          *     （D-004@v1 CLI 无本地缓存，清单即基线）。无清单行（旧 tar 全量同步后失效 /
+          *     全新 workspace）→ 空 ``files``，CLI 走 R-07 兜底全量重算。
++         *
++         *     2026-10-21-spec-manifest-incremental task-03：新增顶层 ``spec_version``（全量/
++         *     增量均带）——CLI 携带 ``?since=<spec_version>`` 时 ``files`` 只含该版本之后
++         *     落地的行（增量游标形态），并以响应 ``spec_version`` 作下次游标；无 since 为
++         *     全量（既有 CLI 忽略未知字段，向后兼容）。
+          */
+         SpecManifestResponse: {
+             /** Files */
+             files?: {
+                 [key: string]: components["schemas"]["SpecManifestFileEntry"];
+             };
++            /**
++             * Spec Version
++             * @description 工作区当前权威版本（下次增量的 since 游标）
++             * @default 0
++             */
++            spec_version: number;
+         };
+         /**
+          * SpecSyncRequest
+@@ -40473,6 +40539,37 @@ export interface operations {
+             };
+         };
+     };
++    get_session_git_status_api_daemon_sessions__session_id__git_status_get: {
++        parameters: {
++            query?: never;
++            header?: never;
++            path: {
++                session_id: string;
++            };
++            cookie?: never;
++        };
++        requestBody?: never;
++        responses: {
++            /** @description Successful Response */
++            200: {
++                headers: {
++                    [name: string]: unknown;
++                };
++                content: {
++                    "application/json": components["schemas"]["SessionGitStatusResponse"];
++                };
++            };
++            /** @description Validation Error */
++            422: {
++                headers: {
++                    [name: string]: unknown;
++                };
++                content: {
++                    "application/json": components["schemas"]["HTTPValidationError"];
++                };
++            };
++        };
++    };
+     fork_session_api_daemon_sessions__session_id__fork_post: {
+         parameters: {
+             query?: never;
+@@ -51464,7 +51561,10 @@ export interface operations {
+     };
+     get_spec_manifest_api_changes___spec_manifest_get: {
+         parameters: {
+-            query?: never;
++            query?: {
++                /** @description 增量游标（客户端已消费的工作区 spec_version）：只返回该版本之后落地的清单行 */
++                since?: number | null;
++            };
+             header?: never;
+             path?: never;
+             cookie?: never;
+@@ -51480,6 +51580,15 @@ export interface operations {
+                     "application/json": components["schemas"]["SpecManifestResponse"];
+                 };
+             };
++            /** @description Validation Error */
++            422: {
++                headers: {
++                    [name: string]: unknown;
++                };
++                content: {
++                    "application/json": components["schemas"]["HTTPValidationError"];
++                };
++            };
+         };
+     };
+     push_spec_sync_api_changes___spec_sync_post: {
+diff --git a/frontend/src/lib/daemon/sessions.ts b/frontend/src/lib/daemon/sessions.ts
+index 6754a6b48..329f00380 100644
+--- a/frontend/src/lib/daemon/sessions.ts
++++ b/frontend/src/lib/daemon/sessions.ts
+@@ -591,6 +591,40 @@ export async function getAgentSession(
+   );
+ }
+ 
++/* ---------- Session git status (2026-10-21-session-git-branch) ---------- */
++
++/**
++ * 会话当前 git 状态（与 backend daemon/schema.py SessionGitStatusResponse
++ * 同构，照 SessionUsageRead 手写过渡形态——gen:types 生成版落地后消费方可
++ * 改引生成版）。git_mode 三态：git=正常采集 / no_git=目录非 git 仓库 /
++ * no_root=无 cwd 且无可解析绑定——空态 branch 等字段全 null，消费方
++ * （SessionConfigBar 分支指示项）静默隐藏。
++ */
++export interface SessionGitStatus {
++  git_mode: "git" | "no_git" | "no_root";
++  root: string | null;
++  branch: string | null;
++  detached: boolean;
++  head_short: string | null;
++  files_changed: number | null;
++  untracked_count: number | null;
++  synced_at: string;
++}
++
++/**
++ * GET /api/daemon/sessions/{id}/git-status — 会话当前 git 分支实时查询
++ * （FR-02：每请求经 daemon git_status RPC 现场采集，非创建快照）。
++ * 仿 getAgentSession 的 GET 封装写法；错误统一走 apiFetch → ApiError
++ * （404 未绑定 / 403 root 越界 / 502 离线 / 504 超时，消费方降级占位）。
++ */
++export async function fetchSessionGitStatus(
++  sessionId: string,
++): Promise<SessionGitStatus> {
++  return apiFetch<SessionGitStatus>(
++    `/api/daemon/sessions/${encodeURIComponent(sessionId)}/git-status`,
++  );
++}
++
+ /* ---------- Session usage stats (2026-08-29-session-usage-stats task-03) ---------- */
+ 
+ /**
+diff --git a/sillyhub-daemon/src/api-types.ts b/sillyhub-daemon/src/api-types.ts
+index d6b6eeda0..0aa41c1ca 100644
+--- a/sillyhub-daemon/src/api-types.ts
++++ b/sillyhub-daemon/src/api-types.ts
+@@ -6298,6 +6298,30 @@ export interface paths {
+         patch?: never;
+         trace?: never;
+     };
++    "/api/daemon/sessions/{session_id}/git-status": {
++        parameters: {
++            query?: never;
++            header?: never;
++            path?: never;
++            cookie?: never;
++        };
++        /**
++         * Get Session Git Status
++         * @description 会话当前 git 分支实时状态（2026-10-21-session-git-branch / FR-01..03）。
++         *
++         *     每请求经 daemon ``git_status`` RPC 现场采集（非创建快照）——root 决策链
++         *     与错误映射见 ``session/service/git_status.py`` 模块 docstring。会话组件
++         *     分支指示项的取数端点（≤60s 轮询），与 workspace 维度 git-log/status 互不影响。
++         */
++        get: operations["get_session_git_status_api_daemon_sessions__session_id__git_status_get"];
++        put?: never;
++        post?: never;
++        delete?: never;
++        options?: never;
++        head?: never;
++        patch?: never;
++        trace?: never;
++    };
+     "/api/daemon/sessions/{session_id}/fork": {
+         parameters: {
+             query?: never;
+@@ -12057,6 +12081,12 @@ export interface paths {
+          *     CLI ``spec-sync.js`` 以此清单为锚 diff 本地 ``.sillyspec/``，算出增量 ops 后
+          *     POST ``/changes/-/spec-sync``（D-004@v1：CLI 无本地缓存，服务器清单即基线）。
+          *
++         *     2026-10-21-spec-manifest-incremental task-03：``?since=<spec_version>`` 增量
++         *     形态——只返回 ``landing_version > since`` 的行（含软删墓碑行），响应顶层带
++         *     当前 ``spec_version`` 供客户端作下次游标；无 since 为全量（现状行为，响应
++         *     仅新增 spec_version 字段）。背景：全量清单随工作区历史无界增长（生产实测
++         *     13k 行/2.2MB/5.5s@受限带宽），增量稳态只传变化行。
++         *
+          *     读清单也收紧为写权限（``require_platform_sync_write``，仅 shpsync_ token，
+          *     JWT/shk_live_ 403）——清单是增量写协议的一部分，避免非同步方探测文件布局。
+          *     workspace_id 从 shpsync_ token 派生；无 workspace 归属 → 403 fail-closed
+@@ -25627,6 +25657,31 @@ export interface components {
+             tier: "native" | "seed";
+             lineage: components["schemas"]["SessionForkLineage"];
+         };
++        /** SessionGitStatusResponse */
++        SessionGitStatusResponse: {
++            /**
++             * Git Mode
++             * @enum {string}
++             */
++            git_mode: "git" | "no_git" | "no_root";
++            /** Root */
++            root?: string | null;
++            /** Branch */
++            branch?: string | null;
++            /**
++             * Detached
++             * @default false
++             */
++            detached: boolean;
++            /** Head Short */
++            head_short?: string | null;
++            /** Files Changed */
++            files_changed?: number | null;
++            /** Untracked Count */
++            untracked_count?: number | null;
++            /** Synced At */
++            synced_at: string;
++        };
+         /**
+          * SessionInjectRequest
+          * @description POST /api/daemon/sessions/{id}/inject 请求体（FR-02 / design §5 Wave1）。
+@@ -26989,17 +27044,28 @@ export interface components {
+         };
+         /**
+          * SpecManifestResponse
+-         * @description GET /changes/-/spec-manifest 200 响应：服务器权威清单全量 map（design §5.2/§7）。
++         * @description GET /changes/-/spec-manifest 200 响应：服务器权威清单 map（design §5.2/§7）。
+          *
+          *     CLI ``spec-sync.js`` 以此为锚 diff 本地 ``.sillyspec/`` 算增量 ops
+          *     （D-004@v1 CLI 无本地缓存，清单即基线）。无清单行（旧 tar 全量同步后失效 /
+          *     全新 workspace）→ 空 ``files``，CLI 走 R-07 兜底全量重算。
++         *
++         *     2026-10-21-spec-manifest-incremental task-03：新增顶层 ``spec_version``（全量/
++         *     增量均带）——CLI 携带 ``?since=<spec_version>`` 时 ``files`` 只含该版本之后
++         *     落地的行（增量游标形态），并以响应 ``spec_version`` 作下次游标；无 since 为
++         *     全量（既有 CLI 忽略未知字段，向后兼容）。
+          */
+         SpecManifestResponse: {
+             /** Files */
+             files?: {
+                 [key: string]: components["schemas"]["SpecManifestFileEntry"];
+             };
++            /**
++             * Spec Version
++             * @description 工作区当前权威版本（下次增量的 since 游标）
++             * @default 0
++             */
++            spec_version: number;
+         };
+         /**
+          * SpecSyncRequest
+@@ -40473,6 +40539,37 @@ export interface operations {
+             };
+         };
+     };
++    get_session_git_status_api_daemon_sessions__session_id__git_status_get: {
++        parameters: {
++            query?: never;
++            header?: never;
++            path: {
++                session_id: string;
++            };
++            cookie?: never;
++        };
++        requestBody?: never;
++        responses: {
++            /** @description Successful Response */
++            200: {
++                headers: {
++                    [name: string]: unknown;
++                };
++                content: {
++                    "application/json": components["schemas"]["SessionGitStatusResponse"];
++                };
++            };
++            /** @description Validation Error */
++            422: {
++                headers: {
++                    [name: string]: unknown;
++                };
++                content: {
++                    "application/json": components["schemas"]["HTTPValidationError"];
++                };
++            };
++        };
++    };
+     fork_session_api_daemon_sessions__session_id__fork_post: {
+         parameters: {
+             query?: never;
+@@ -51464,7 +51561,10 @@ export interface operations {
+     };
+     get_spec_manifest_api_changes___spec_manifest_get: {
+         parameters: {
+-            query?: never;
++            query?: {
++                /** @description 增量游标（客户端已消费的工作区 spec_version）：只返回该版本之后落地的清单行 */
++                since?: number | null;
++            };
+             header?: never;
+             path?: never;
+             cookie?: never;
+@@ -51480,6 +51580,15 @@ export interface operations {
+                     "application/json": components["schemas"]["SpecManifestResponse"];
+                 };
+             };
++            /** @description Validation Error */
++            422: {
++                headers: {
++                    [name: string]: unknown;
++                };
++                content: {
++                    "application/json": components["schemas"]["HTTPValidationError"];
++                };
++            };
+         };
+     };
+     push_spec_sync_api_changes___spec_sync_post: {

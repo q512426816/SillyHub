@@ -1045,3 +1045,11 @@
 最近确认：328788cbe
 理由：**该出**。独立审查（execute stage review）实测：daemon 超时与队列溢出都返回 `files: []`（`turn-file-changes.ts:813-824`、`tests/interactive/turn-file-changes.test.ts:433-435`），而前端 `toFileChangesCardProps` 先把 partial→`truncated`，随后 `if (files.length === 0) return null` 整卡不渲染 → 用户看到「没有卡」，无法区分「采集没完成」与「本轮真的没改文件」，与 design「partial 卡片照出」相悖（E6/E8 立意）。修法取 A（实现意图，而非改口径）：partial 且无文件清单 → 渲染 28px 单行提示卡（`data-testid="file-changes-notice"`），文案「工作区快照未完成（超时或队列溢出），本轮改动未知」。
 故障面：提示卡与「仅工具编辑」降级卡是**两种**话术（前者「没拿到清单」、后者「没有这项能力」），未来若合并会再次丢语义；`reason` 细分（timeout vs queue_overflow）在快照里保留，但 UI 合并表述——若要区分需在 `notice` 上带 reason。
+
+## D-unmapped-142@v1 设计期风险与放弃方案（底稿）
+状态：implemented
+变更：2026-10-21-session-git-branch
+原编号：D-001@v1
+锚点：未记录
+最近确认：4f66ab1e2364cbdfeafb01bb48f3dec9c6d08b3a
+理由：最大风险：每 60s 轮询触发 daemon `git_status`（内含 `git fetch`，15s 超时）——remote 慢时轮询堆积。缓解：fetch 失败/超时在 daemon 内降级（fetch_error 字段），分支采集（本地 porcelain）不受阻；轮询仅前台可见时执行；多会话面板并开时按 sessionId 各自 queryKey 独立节流，最坏面=可见面板数×1 次/60s（与会话列表 10s 轮询同量级，可接受）。 试过放弃的方案：① 复用 `git_refs` RPC 推当前分支（head sha 与 refs/heads 匹配）——同 sha 多分支歧义 + detached 不可判，放弃；② daemon 新增轻量 `git_branch` RPC（免 fetch）——跨服务契约变更 + 旧 daemon method_not_found 兼容面，轻量变更不值得，放弃（若后续轮询负载实证过重再立项）；③ `git_gateway`（backend 本机 subprocess）查 worktree——worktree 物理位于 daemon 宿主时 backend 不可达，且 session cwd 语义就是 daemon 宿主路径，方向错，放弃。

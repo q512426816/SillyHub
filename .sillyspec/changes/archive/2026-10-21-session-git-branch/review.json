@@ -1,0 +1,34 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-21-session-git-branch",
+  "reviewer": "subagent",
+  "verdict": "PASS",
+  "reviewedAgainst": "4f66ab1e2364cbdfeafb01bb48f3dec9c6d08b3a",
+  "findings": [
+    {
+      "severity": "P3",
+      "title": "design 错误面两分支（timeout→504、mid-rpc 断连→502）无测试覆盖",
+      "evidence": "git_status.py:186-195 实现了 DaemonRpcTimeout→504 与 mid-rpc→502 映射，但 test_session_git_status.py 11 用例只测纯离线 502（test_git_status_offline_502），测试文件 docstring 自称覆盖『design 错误面全表』略过誉；映射逻辑照抄已测路径，风险低",
+      "location": "backend/tests/modules/daemon/test_session_git_status.py:1-19"
+    },
+    {
+      "severity": "P3",
+      "title": "mid-rpc 判据靠字符串匹配 ws_hub 异常文案，跨模块隐式契约",
+      "evidence": "git_status.py:177 `if \"mid-rpc\" in str(exc)` 依赖 ws_hub.py:625 的文案不变；与 git_log/service.py:568 同款既有模式且注释已声明同步义务，属沿袭惯例而非新引入风险",
+      "location": "backend/app/modules/daemon/session/service/git_status.py:177"
+    },
+    {
+      "severity": "P3",
+      "title": "工作区重绑他机后旧会话 cwd 经现绑定发往新 daemon 的固有边界未在 design Q4 点名",
+      "evidence": "daemon_id 按当前用户绑定行解析（git_status.py:138-155），用户重绑另一台 daemon 后旧会话 cwd（旧机路径）查新机：路径不存在时 porcelain error 非 not-a-git-repo → 502 占位（安全降级）；若新机同路径恰有另一仓库则显示该仓库分支。低概率、与 git_log 同架构惯例，建议后续在 design 作用域问补一句",
+      "location": "backend/app/modules/daemon/session/service/git_status.py:119-155"
+    }
+  ],
+  "dimensionNotes": {
+    "乱序": "ok",
+    "并发": "ok",
+    "切换": "ok",
+    "作用域": "ok"
+  },
+  "reviewedAt": "2026-10-22T00:19:17+08:00"
+}

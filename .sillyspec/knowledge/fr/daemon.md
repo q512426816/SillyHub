@@ -6597,3 +6597,67 @@
   confirmed_at: 0ca435b1700f9719306ca92a8af3af08711ba3d0
   source_change: 2026-10-20-session-page-dsh-alignment
   status: active
+
+## FR-daemon-219 会话组件底部「智能体档案」后面展示该会话当前所在 git 分支
+变更：2026-10-21-session-git-branch
+状态：active
+摘要：主路径
+全文：.sillyspec/changes/archive/2026-10-21-session-git-branch/requirements.md#FR-01
+最近确认：4f66ab1e2364cbdfeafb01bb48f3dec9c6d08b3a
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-21-session-git-branch:flow:测试绑定FR-01
+  tests: frontend/src/components/sessions/__tests__/session-config-bar.test.tsx「renders git branch indicator after profile control」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-21-session-git-branch
+  status: active
+
+## FR-daemon-220 分支信息为实时查询（非创建时快照）：会话运行期间分支变化后，展示随之更新（轮询刷新）
+变更：2026-10-21-session-git-branch
+状态：active
+摘要：分支切换后自动更新
+全文：.sillyspec/changes/archive/2026-10-21-session-git-branch/requirements.md#FR-02
+最近确认：4f66ab1e2364cbdfeafb01bb48f3dec9c6d08b3a
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-21-session-git-branch:flow:测试绑定FR-02
+  tests: frontend/src/components/sessions/__tests__/session-config-bar.test.tsx「git branch indicator polls with refetchInterval」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-21-session-git-branch
+  status: active
+
+## FR-daemon-221 无 git 仓库/无 cwd 的会话有优雅降级展示，不报错
+变更：2026-10-21-session-git-branch
+状态：active
+摘要：空态与故障
+全文：.sillyspec/changes/archive/2026-10-21-session-git-branch/requirements.md#FR-03
+最近确认：4f66ab1e2364cbdfeafb01bb48f3dec9c6d08b3a
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-21-session-git-branch:flow:测试绑定FR-03
+  tests: frontend/src/components/sessions/__tests__/session-config-bar.test.tsx「hides git branch indicator on no_git / no_root」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-21-session-git-branch
+  status: active
+
+## FR-daemon-222 工作区顶部既有 GitStatusBar 行为不变
+变更：2026-10-21-session-git-branch
+状态：active
+摘要：零回归
+全文：.sillyspec/changes/archive/2026-10-21-session-git-branch/requirements.md#FR-04
+最近确认：4f66ab1e2364cbdfeafb01bb48f3dec9c6d08b3a

@@ -1,0 +1,96 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-21-session-git-branch",
+  "rows": [
+    {
+      "anchor": "FR-01",
+      "row_id": "2026-10-21-session-git-branch:flow:测试绑定FR-01",
+      "tests": [
+        "backend/tests/modules/daemon/test_session_git_status.py「test_git_status_returns_branch_from_session_cwd」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-21-session-git-branch"
+    },
+    {
+      "anchor": "FR-01",
+      "row_id": "2026-10-21-session-git-branch:flow:测试绑定FR-01",
+      "tests": [
+        "frontend/src/components/sessions/__tests__/session-config-bar.test.tsx「renders git branch indicator after profile control」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-21-session-git-branch"
+    },
+    {
+      "anchor": "FR-02",
+      "row_id": "2026-10-21-session-git-branch:flow:测试绑定FR-02",
+      "tests": [
+        "backend/tests/modules/daemon/test_session_git_status.py「test_git_status_queries_daemon_rpc_per_request_no_snapshot」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-21-session-git-branch"
+    },
+    {
+      "anchor": "FR-02",
+      "row_id": "2026-10-21-session-git-branch:flow:测试绑定FR-02",
+      "tests": [
+        "frontend/src/components/sessions/__tests__/session-config-bar.test.tsx「git branch indicator polls with refetchInterval」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-21-session-git-branch"
+    },
+    {
+      "anchor": "FR-03",
+      "row_id": "2026-10-21-session-git-branch:flow:测试绑定FR-03",
+      "tests": [
+        "backend/tests/modules/daemon/test_session_git_status.py「test_git_status_no_root_and_no_git_empty_states」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-21-session-git-branch"
+    },
+    {
+      "anchor": "FR-03",
+      "row_id": "2026-10-21-session-git-branch:flow:测试绑定FR-03",
+      "tests": [
+        "frontend/src/components/sessions/__tests__/session-config-bar.test.tsx「hides git branch indicator on no_git / no_root」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-21-session-git-branch"
+    }
+  ]
+}
