@@ -1,0 +1,53 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-21-profile-default-prehint",
+  "reviewer": "subagent",
+  "verdict": "PASS",
+  "reviewedAgainst": "9711e7721de76c3f71b59ac13d1bb63815c7ed53",
+  "findings": [],
+  "resolvedFindings": [
+    {
+      "id": "R-01",
+      "severity": "info",
+      "title": "is_user_default 字段真实性核验通过",
+      "detail": "useMineAgentProfiles 走 GET /api/agent-profiles?scope=mine 聚合分支（backend/app/modules/agent/profile/router.py 368-380），显式 model_copy(update={is_user_default: user.default_agent_profile_id == e.profile.id}) 按请求者计算；前端类型 AgentProfileAggregatedItem（frontend/src/lib/api-types.ts 13081）声明 is_user_default: boolean。字段真实存在，非前端臆造。",
+      "status": "closed"
+    },
+    {
+      "id": "R-02",
+      "severity": "info",
+      "title": "「创建会话将注入默认」语义前提核实成立",
+      "detail": "backend/app/modules/daemon/session/service/inject_gates.py 258-282（2026-10-21-agent-profile-slim-default task-02）：创建时未显式传 agent_profile_id → 注入 user.default_agent_profile_id（软偏好，失效静默跳过）；存量会话不追溯。FR-01 预示与 FR-02 真值语义的行为基础均在后端闭环，前端仅诚实呈现。",
+      "status": "closed"
+    },
+    {
+      "id": "R-03",
+      "severity": "info",
+      "title": "FR-02 非 provisional 真值无误伤",
+      "detail": "profileLabel 三元结构（session-config-bar.tsx 620-629）：agentProfileId 真值分支优先（与非 provisional 无关），仅 null/undefined 才进 provisional 判定；非 provisional 恒落「未指定」。新测试「非 provisional 未选档案 → 保持『未指定』真值」以 BASE_PROPS 默认（agentProfileId=null、无 provisional、mock 含 is_user_default=true 档案）验证了默认档案存在仍显示真值的场景，误伤路径已排除。",
+      "status": "closed"
+    },
+    {
+      "id": "R-04",
+      "severity": "info",
+      "title": "memo 依赖与行为一致性核验通过",
+      "detail": "noProfileFallbackLabel 依赖 [provisional, profiles] 与函数体引用完全一致，无遗漏；profileLabel 为纯派生值未 memo，无 stale 闭包面。provisional 点「不指定」→ onProvisionalSwitch 空串 → 创建省略 agent_profile_id（session-panel-page.tsx 3814）→ 后端注入默认 → 按钮持续显示默认名，与兜底项文案「不指定（默认：{名}）」语义自洽闭环。",
+      "status": "closed"
+    },
+    {
+      "id": "R-05",
+      "severity": "minor",
+      "title": "测试绑定名为意译而非精确用例名；非 provisional 兜底文案靠既有用例覆盖",
+      "detail": "requirements.md 绑定「provisional 未选档案显示默认档案名」为实际用例名（『provisional 未选档案 + 用户默认档案 → 按钮显示默认档案名；下拉兜底项动态文案』）的意译，可定位不影响追溯；新增 describe 未重复断言非 provisional 下「不指定（无人格）」（该路径由既有用例 794/947 行覆盖，零回归面成立）。两处均为留档观察项，不构成缺陷。",
+      "status": "closed"
+    }
+  ],
+  "dimensionNotes": {
+    "乱序": "ok",
+    "并发": "ok",
+    "切换": "ok",
+    "作用域": "ok"
+  },
+  "reviewedAt": "2026-10-21T22:57:00+08:00",
+  "summary": "单点显示修复实现与 FR-01/FR-02 完全一致：provisional 未选档案预示用户默认档案名（无默认回落「未指定」），非 provisional 保持「未指定」真值，下拉兜底项按 provisional+默认动态文案。is_user_default 数据链路真实（后端 scope=mine 聚合分支按请求者计算透出），「创建时注入默认」前提经 inject_gates.py 258-282 核实成立，memo 依赖正确，指定测试复跑 60/60 全绿，diff 面与 design 文件清单一致。"
+}

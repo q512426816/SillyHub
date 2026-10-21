@@ -390,3 +390,41 @@ created_at: 2026-10-16T01:30:35.950Z
 摘要：未选供应商轮显示默认名
 全文：.sillyspec/changes/archive/2026-10-21-provider-default-ui-hint/requirements.md#FR-02
 最近确认：01207058ca048f4015b4074b38e32f1e2bba4335
+
+## FR-test-utils-023 provisional 态未选档案时，档案按钮显示用户默认档案名（无默认保持「未指定」）
+变更：2026-10-21-profile-default-prehint
+状态：active
+摘要：预会话显示默认
+全文：.sillyspec/changes/archive/2026-10-21-profile-default-prehint/requirements.md#FR-01
+最近确认：9711e7721de76c3f71b59ac13d1bb63815c7ed53
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-21-profile-default-prehint:flow:测试绑定FR-01
+  tests: frontend/src/components/sessions/__tests__/session-config-bar.test.tsx「provisional 未选档案显示默认档案名」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-21-profile-default-prehint
+  status: active
+
+## FR-test-utils-024 运行中/已结束会话未选档案保持「未指定」；下拉「不指定」项 provisional 且有默认时显示「不指定（默认：{名}）」
+变更：2026-10-21-profile-default-prehint
+状态：active
+摘要：运行中会话真值
+全文：.sillyspec/changes/archive/2026-10-21-profile-default-prehint/requirements.md#FR-02
+最近确认：9711e7721de76c3f71b59ac13d1bb63815c7ed53
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-21-profile-default-prehint:flow:测试绑定FR-02
+  tests: frontend/src/components/sessions/__tests__/session-config-bar.test.tsx「下拉兜底项 provisional 动态文案」 | frontend/src/components/sessions/__tests__/session-config-bar.test.tsx「非 provisional 未选保持未指定」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-21-profile-default-prehint
+  status: active
