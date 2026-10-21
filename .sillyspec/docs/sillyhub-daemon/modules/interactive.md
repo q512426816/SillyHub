@@ -164,3 +164,55 @@ restoreAndReconnect: 同上按位置判定 + 迁移 + record.providerConfig 快�
 - **cursor-driver.ts**：零逻辑 diff，仅忽略注释同步（cursor 通道留档分支）。
 - 写盘调用点纪律（D-012@v1）：两处消费均在 driver start 函数体内运行时执行，模块顶层零调用，写盘器（pi-settings/codex-settings）低依赖不回引 interactive/（无 TDZ 环）；driver-factory/driver.ts 注入管道零 diff（引擎无关管道复用）。
 - 端到端证据：acceptance-e2e.md 五环节（注入→connected→工具可见 upload_file/list_uploaded_files→JSON-RPC 调用→backend 出站 401 结构化回传）；真实上传落文件中心为 daemon 部署后线上复验项（D-013@v1）。
+
+## 2026-10-20-session-page-dsh-alignment 增量（每轮工作区快照 1b 与 TTFT/attempt 采集）
+
+> 落地范围：线 C 1b 的 daemon 采集面（task-09 / task-10）+ 上报出口最小扩字段（task-13 / D-028）。
+> 契约形状与生命周期事件见 `.sillyspec/changes/2026-10-20-session-page-dsh-alignment/design.md`
+> 「### 文件变更卡 DTO」「### 1b 承载面与读模型字段」「## 生命周期契约表」（E1-E4）。本段只写已落盘实现。
+
+**承载件与入口**
+
+- `collectTurnFileChanges()`（`sillyhub-daemon/src/interactive/turn-file-changes.ts:803`）：入参 `CollectTurnFileChangesInput`——`runId` / `workspaceRoot` / `baselineHead`（可选：`string` 已解析基线、`null` 非 git 仓、`undefined` 交给采集期 git 兜底）/ `toolCallPaths`（本轮 `tool_use` 派生的路径集合）/ `turnStartedAtMs`（轮首墙钟，ignored 目录 mtime 探测的时间下界）/ `limits` / `execFile`（可注入执行器，测试用）。出参 `TurnFileChangesSnapshot`：`runId`、`baselineHead`、`collectedAt`、`collectMs`、`status`、`reason?`、`truncated?`、`files[]`、`concurrentSessionsHint: true`（恒 true）。**纯采集**：不写库、不上报、永不抛错。
+- `deriveTurnTiming()`（`sillyhub-daemon/src/interactive/turn-timing.ts:217`）：纯函数、零 I/O、零时钟读取，入参是本轮「已到达事件」的时间戳序列 + 轮首/轮终态时刻，出参 `TurnTimingSnapshot`（`runId` / `basis` / `ttftMs` / `totalMs` / `attempts[]`）。零事件 / 缺轮首时刻 / 派生出的 attempt 全零宽或轮总时长 ≤ 0 → `null`——**不返回空壳对象、不填 `ttftMs: 0` 冒充**（版本门控靠「整体省略字段」表达）。
+
+**性能红线（D-023③，验收项不是建议）**
+
+- 每轮 git 子进程 **≤3，实测恒 2**：`status --porcelain -z --untracked-files=normal --no-renames` + `diff --numstat --no-renames <baselineHead>`；不按文件数扩子进程。全局参数恒带 `-c core.preloadIndex=true`、`-c core.quotePath=false`、`--no-optional-locks`（`GIT_BASE_ARGS` 常量，`sillyhub-daemon/src/interactive/turn-file-changes.ts:84`），禁 shell（`execFile` 参数数组）。
+- **E1 轮首基线零子进程**：`readBaselineHead()`（`sillyhub-daemon/src/interactive/turn-file-changes.ts:930`）直接读 `<workspaceRoot>/.git/HEAD`（含 linked worktree 的 `gitdir:` / `commondir` / `packed-refs` 解析），三态 `string`（基线）/ `null`（非 git 仓，采集期不再跑 `rev-parse`）/ `undefined`（复杂形态，采集期由 git 自己兜底——那时已是轮尾，不占工作区 cwd 的短命窗口）；永不抛错。注释里写明「子进程预算因此从 3 降到 2」的理由（Windows 上以工作区为 cwd 的任何子进程都会短暂占住目录）。
+- 复杂度 O(改动数 + 工具调用数)，无全仓扫描；**禁 rename 检测**，`R`/`C` 条目归一成 delete + add 两条（`parsePorcelainZ`，`sillyhub-daemon/src/interactive/turn-file-changes.ts:329`）；`--untracked-files=normal` 下新增目录只报一条 `?? dir/`（不展开逐文件，是上限内的取舍）。
+- **1500ms 硬超时**（`timeoutMs`，见 `DEFAULT_TURN_FILE_CHANGES_LIMITS`，`sillyhub-daemon/src/interactive/turn-file-changes.ts:68`）：`Promise.race` + `AbortController` kill 子进程 → `status="partial"` + `reason="timeout"`、`files: []`。
+- 改动数超 `maxFiles=500` → `truncated=true` + `partial`（卡片照出，行级 +/− 退破折号）；`includeLineCounts=false` 退档（只跑 status）→ `partial` 且**不带 `reason`**（枚举里没有「行数未采」值，`files` 清单仍可信，行数不可信）。
+
+**单工作区串行队列（防与用户操作争 `index.lock`）**
+
+- `Map<workspaceRoot, tail>` 单飞队列，每工作区等待上限 `maxQueueDepth=1`（`reserveQueueSlot`，`sillyhub-daemon/src/interactive/turn-file-changes.ts:153`；`enterQueue`，`sillyhub-daemon/src/interactive/turn-file-changes.ts:174`）；工作区键在 Windows 上小写归一，避免同一目录两条队列。
+- 队列已满 → **立即** `partial` + `reason="queue_overflow"`（不排队、不采集、不阻塞轮收尾）；同一工作区多会话并发轮尾绝不并发跑 git。
+
+**ignored 目录 mtime 探测（R-09 的唯一补偿面）**
+
+- `probeIgnoredByMtime()`（`sillyhub-daemon/src/interactive/turn-file-changes.ts:492`）：只对「不在 git 结果里」的本轮工具调用路径做 `stat` 探测；`mtime`（含 1s 时钟容差）落在轮首之后的文件 → `source="mtime"`、行数记 `0/0`（git 看不到的改动不伪造行数），`birthtime` 也在本轮之后 → `added`，否则 `modified`。
+- **必须有 `turnStartedAtMs` 才探测**（缺省直接跳过）：没有时间下界就分不清「本轮新建」与「早就在那里的普通文件」，宁可不报也不假报。已知边界：tracked 但内容未变、仅 `mtime` 变了的文件可能被判成 `source="mtime"` 的 modified；卡片按来源标注，「不是 git 口径」对用户可见。
+
+**归因**
+
+- `EDIT_TOOL_NAMES` 白名单（edit / write / multiedit / notebookedit / apply_patch / edit_file / write_file，大小写不敏感）命中本轮工具调用路径 → `attribution="edit_patch"` + `editToolNames[]`（来源工具名，保序）；其余一律 `"command"`（命令行/脚本改动）。**禁止用 `edit_patch` 反推改动来源**（D-023：真实导出仅 91/1271 条带 patch，bash/sillyspec 类改动无 patch）。
+
+**时序约束（E2 必须在轮终态落库之后异步执行）**
+
+- 调用点 `SessionManager._onResult`（`sillyhub-daemon/src/interactive/session-manager.ts:1694`）：先取 `const runId = state.currentRunId`（`sillyhub-daemon/src/interactive/session-manager.ts:1697`，`onResult` 内部会清 `currentRunId`，不先取就丢本轮键）→ `await onResult(...)`（`sillyhub-daemon/src/interactive/session-manager.ts:1698`，轮终态 / SSE 终态在此落库）→ `_startTurnFileChangesCollection(state, runId)`（`sillyhub-daemon/src/interactive/session-manager.ts:1701`）**fire-and-forget**。禁止 await 采集：1500ms 硬超时绝不能拖住轮结束与 SSE 终态，快照允许「后到」（前端收到才渲染卡片）。
+- 事件旁路累加在 `_onMessage`（`sillyhub-daemon/src/interactive/session-manager.ts:1704`）内、既有消费链之前：`_noteTurnToolCallPaths`（`sillyhub-daemon/src/interactive/session-manager.ts:1845`，工具入参路径集合）与 `_noteTurnTimingEvents`（`sillyhub-daemon/src/interactive/session-manager.ts:1876`，text/thinking/tool_use/tool_result 四类 + 事件到达墙钟 `atMs`）只读既有事件字段，**不改事件协议**；无 `runId` / 无累加器（恢复出的会话首轮等）时静默跳过，事件消费链零影响；两类累加器各有条数上限护栏（`TURN_FILE_CHANGES_MAX_TOOL_PATHS` / `TURN_TIMING_EVENT_MAX`）。
+- **一次收口**：`_startTurnFileChangesCollection`（`sillyhub-daemon/src/interactive/session-manager.ts:1904`）先摘除累加器（一次性消费，防只增不减）→ `deriveTurnTiming` 派生本轮 timing（`turnEndedAtMs` 取进入本方法时的墙钟，即 `onResult` 刚结束的时刻，后续 git 采集耗时**不算进轮时长**）→ 采集 → `_buildTurnSnapshotReport`（`sillyhub-daemon/src/interactive/session-manager.ts:1954`）组装唯一 payload（`timing` 为 `null` 时**键不出现**，既不是空对象也不是 `{ basis }` 壳）→ `_reportTurnSnapshot`（`sillyhub-daemon/src/interactive/session-manager.ts:1977`）按 `runId` 覆盖写缓存 + 经 `setTurnSnapshotReporter`（`sillyhub-daemon/src/interactive/session-manager.ts:1770`）注入的 reporter 单次回调。全链 try/catch + `void`：采集或上报异常都不得回灌轮终态链路。
+- 上报链路（D-028）：`daemon.ts` 的 `_onTurnSnapshot` 用 `buildRunSnapshotPayload` 把 `file_changes` / `timing` / `daemon_version` 追加进 `RunResultPayload`，**复用同一 run-result 端点补报**（首报载荷无法等待采集，故快照「后到」、复用同端点），不新增端点；`hub-client` 侧只做「字段缺失就不写」的最小扩字段（`undefined` → 键不出现 → backend 写 `capability="tool_only"`）。backend `(run_id)` 幂等覆盖写见 `backend/modules/daemon.md`「run 快照读模型」。
+
+**TTFT / attempt 口径（D-032：实测恒 `approx`）**
+
+- `TURN_TIMING_BASIS` 常量（`sillyhub-daemon/src/interactive/turn-timing.ts:144`）当前值恒为 `'approx'`：spike-02 逐 driver 核对后确认三引擎在 daemon 事件边界上**都没有稳定的「模型请求起点」信号**（claude 的 `message_start` 被归一化器用于 `api_duration_ms` 而不产 `AgentEvent`；codex `turn/started` 只标轮起点；pi `message_start` 是纯生命周期帧），`observed` 分支保留给未来驱动升级，当前无 producer——不装假开关。
+- attempt 切分：起点 = 轮首（首 attempt）或**本批工具全部 `result` 返回**的时刻（并行工具取最后一条）；终点 = 下一个 `tool_use` 或轮终态；首 token = 首个 text/thinking delta。工具执行期到达的 text/thinking **不计入**模型占用，因此 attempt 与工具区间**零重叠**（构造性保证，非靠事后裁剪）。
+- `ttftMs` 只取首个 attempt 的首 token 延迟；未取到 → `null`（禁填 0）。无时间戳的 delta 一旦出现，本 attempt 首 token 时刻永久未知——后到带时间戳的 delta 不得冒充（否则 TTFT 被写大）。
+- 已知偏差（诚实披露）：claude 的 text 事件走 500ms partial 节流，TTFT 观测值最多偏大一个节流窗口；`attempts[].startedAt` 是上述**边界近似**而非请求发送时刻，前端必须按 `basis` 标注（见 `frontend/modules/components-daemon.md` 模型泳道两态）。
+
+**遥测与降级语义**
+
+- `getTurnFileChangesTelemetry()`（`sillyhub-daemon/src/interactive/turn-file-changes.ts:715`）读 50 样本滑窗（`TURN_FILE_CHANGES_TELEMETRY_WINDOW`）出 `samples` / `p50` / `p95` / `degradeRate` / `subprocessCountMax`；红线 p50 > 300ms 或降级率 > 5% 报警。spike-01 安静窗口实测：worktree 语料（21 改动）245ms / 480ms、主仓（111 改动）318ms / 379ms——重脏仓超线已登记 R-07，退档开关 `limits.includeLineCounts=false` 已实现并单测。
+- `partial` **不是错误态**：卡片照出、行级 +/− 显示破折号，不伪造数字；`unavailable`（`not_a_repo` / `git_missing`）与 `failed`（未知 git 错误）由前端按 `capability="tool_only"` 走降级卡。任何情况下都不把「没有快照」写成「本轮无改动」（E6/E8 硬约束）。

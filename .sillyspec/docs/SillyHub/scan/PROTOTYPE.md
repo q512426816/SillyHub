@@ -42,6 +42,23 @@
 | `/proto/session-trajectory` | **轨迹视图**：三泳道（输入 / 模型 / 工具）共享绝对时间轴（缩放 / 平移 / 总览刷子）+ `role="grid"` 账本 + 320px inspector | 同上，读 `.proto-staging/session-export.json`（`force-dynamic`，每次请求读最新导出） |
 | `/proto/session-file-changes` | **文件变更卡形态原型**：折叠 / 展开 / 快照超时降级 / 100 文件内滚四态 + 三主题换肤 | **桩数据**（数据全在页面文件里；卡片组件 props only）。点击文件行只写 dev 日志，不会打开文件 |
 
+### 三条路由的已落地实况与 dev-only 边界（2026-10-20-session-page-dsh-alignment 收口登记）
+
+三条路由源码均在 `frontend/src/app/proto/<名>/page.tsx`，已随本变更联调完成，**不再是待落地项**：
+
+- `/proto/session-redesign`：整页**真组件**——真实 `AppShell`（dev 预览入参：菜单/品牌区/顶栏显示名由调用方给预览值，生产调用方不传则逐字段回落原 store 读取）+ 真实 `SessionListPanel` + 真实 `TurnTimeline`；顶部 dev 说明条 + 「现状 / v2」「对话 / 进度」切换。数据面＝SSR 请求时读 `frontend/.proto-staging/session-export.json`（`STAGED_EXPORT_RELATIVE_PATH` 定义相对路径，`frontend/src/app/proto/session-redesign/staged-session-export.ts:30`；`:36` 是唯一读盘入口），文件缺失/JSON 坏 → 返回 `null` → 占位不白屏。
+- `/proto/session-trajectory`：三泳道（输入 / 模型 / 工具）共享同一条绝对时间轴（缩放 / 平移 / 总览刷子）+ `role="grid"` 账本 + 320px inspector；`force-dynamic` 每次请求读最新导出。模型泳道按 `Trajectory.modelBasis` **明示两态口径**：`observed`→「真实占用」、`approx`→「近似（无 TTFT 采样）」（`frontend/src/components/daemon/trajectory/trajectory-timeline.tsx:100`）；staged 导出无 `timing` 字段 → 常态 `approx`。
+- `/proto/session-file-changes`：文件变更卡**形态原型**（桩数据全在页面文件里，卡片 props only）——折叠（8 文件）/ 展开（3 文件）/ 快照超时 `truncated` + 共享工作区 / 100 文件长列表（限高 240px 内滚）四态 + 三主题换肤；点文件行只 `console.log` 一条 dev 日志（`frontend/src/app/proto/session-file-changes/page.tsx:104`），不打开文件、不取任何真实数据。
+
+**dev-only 边界（四条，缺一条即视为越界）**
+
+1. **不进导航**：`/proto/*` 不出现在任何菜单 / 侧栏 / 快捷入口；`app-shell` / `workspace-switcher` 的预览入参只由 proto 页面传入（`frontend/src/components/app-shell.tsx:159` 为该边界的源码注释：仅 dev 预览路由传入、不进导航、不被生产页引用；生产缺省逐字段等价旧行为）。
+2. **不进 middleware**：`frontend/src/middleware.ts` 无 `/proto` 规则（不鉴权、不重写、不守卫）；三条路由靠「不被生产页面引用」保持 dev-only，不是靠运行时门控或环境变量。
+3. **不被生产代码引用**：全树只有 `frontend/src/app/proto/**` 内部互相 import（生产组件里出现的 `app/proto` 字样仅为边界注释，不是 import）；轨迹 / 文件变更卡组件本身在 `frontend/src/components/daemon/**`，可被生产复用，但 `/proto/*` 页面不反向进入生产路由。
+4. **真实数据不进 `public/`**：真实会话导出只允许 staging 在 `frontend/.proto-staging/`（`frontend/.gitignore:11` 覆盖 —— 不进 git、不进构建产物），取数唯一路径是 server component 的 `readFileSync`（只进 RSC 载荷、不进 JS bundle）；`public/` 是**免鉴权静态服务面**，历史 `public/__proto/` 已迁出，并加 `frontend/.gitignore:12`（`/public/__proto*/`）防同名目录被重建后误提交。
+
+> 分工不变（R-11）：**功能完整性只能回 dev 路由验**，静态导出稿（`export-hydrated.mjs` 产物）只作观感评审；`--with-js` 那段 vanilla shim 不是水合，不能据它宣称「可交互定稿」。
+
 **导出管线：`frontend/scripts/export-hydrated.mjs`**
 
 - **必须水合后序列化 DOM，禁止抓 SSR HTML**（D-018）：该路由的真实答复正文走 `next/dynamic ssr:false`，SSR 稿实测含 138 处 CSR bailout `<template>` 占位、**0 个 `.wmde-markdown`**——正文全缺的稿子不能作为任何结论的依据。脚本流程＝playwright 打开路由 → `networkidle` → `waitForFunction(.wmde-markdown ≥ 阈值)` → 逐片收集 `cssRules` → `outerHTML` → 剥 `<script>`/`<link>`/原 `<style>` → 合并单 `<style>` → 机械校验（各闭合标签恰好一次、正文块计数、无 `<link>`）→ 落盘；不达标 exit 1 且**不落盘**。
