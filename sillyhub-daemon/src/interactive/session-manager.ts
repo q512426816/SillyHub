@@ -253,6 +253,7 @@ import {
   getOrCreateTaskMap,
   handleAgentTaskStatusEvent,
   handleTaskNotificationEvent,
+  scheduleTaskWakeup,
   registerAsyncReceiptTask,
   writeTaskLine,
 } from './session-manager/background-tasks.js';
@@ -464,6 +465,16 @@ export class SessionManager {
   private readonly _backgroundTasks = new Map<
     string,
     Map<string, BackgroundTaskInfo>
+  >();
+
+  /**
+   * 2026-10-21-task-wakeup-restore：终态唤醒 debounce 窗口——sessionId →
+   * { timer, lines }。2s 内多条终态合并为一条注入；fire 后自删，会话终态时
+   * 由 lifecycle 取消（防悬挂 timer）。
+   */
+  private readonly _taskWakeupPending = new Map<
+    string,
+    { timer: NodeJS.Timeout; lines: string[] }
   >();
 
   /**
@@ -1619,6 +1630,19 @@ export class SessionManager {
     ev: AgentEvent,
   ): Promise<void> {
     return handleTaskNotificationEvent(this._core(), state, ev);
+  }
+
+  private _scheduleTaskWakeup(
+    sessionId: string,
+    info: {
+      taskId: string;
+      taskName: string;
+      status: string;
+      elapsedMs?: number;
+      summary?: string;
+    },
+  ): void {
+    return scheduleTaskWakeup(this._core(), sessionId, info);
   }
 
   private async _registerAsyncReceiptTask(

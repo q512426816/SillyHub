@@ -230,6 +230,14 @@ export async function terminateSession(
   //     消亡，task_* 不会再到达；防 Map 泄漏）。
   mgr._clearBackgroundTasks(state.sessionId);
 
+  // 4b-2. 2026-10-21-task-wakeup-restore（ql-20260827-007 原型恢复）：取消未
+  //      fire 的唤醒 debounce（会话已终态，注入无处可去）。
+  const pendingWakeup = mgr._taskWakeupPending.get(state.sessionId);
+  if (pendingWakeup) {
+    clearTimeout(pendingWakeup.timer);
+    mgr._taskWakeupPending.delete(state.sessionId);
+  }
+
   // 4c. 2026-10-14-turn-anchor-cache-eviction：清轮锚 prev 内存缓存（会话终态
   //     不再有新轮，条目滞留 = Map 慢性增长；JSONL 落盘不动，同会话重启续锚走
   //     readLastRecord 尾行兜底）。在飞锚链由清理函数自行挂链收尾后执行。

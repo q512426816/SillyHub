@@ -1396,6 +1396,28 @@ export function SessionPanelPage({
                         ],
                       };
                     }
+                    // 2026-10-21-task-wakeup-restore：唤醒注入改落 task_wakeup
+                    // 留痕段（「收到任务消息」折叠行，与回放路径同口径）——不再
+                    // 整体隐藏（隐藏导致唤醒轮「无人说话 agent 凭空接话」不可溯源）。
+                    if (
+                      isTaskWakeupInjection(env.content ?? "") &&
+                      !next.segments?.some((s) => s.kind === "task_wakeup")
+                    ) {
+                      next = {
+                        ...next,
+                        segments: [
+                          {
+                            kind: "task_wakeup",
+                            id: `wakeup:${env.run_id}`,
+                            text: env.content ?? "",
+                            ts: env.timestamp
+                              ? Date.parse(env.timestamp)
+                              : Date.now(),
+                          },
+                          ...(next.segments ?? []),
+                        ],
+                      };
+                    }
                     if (!next.prompt.trim()) {
                       // 2026-10-10-system-opened-turn-usermsg：仅新鲜轮（无输出段）
                       // 把首条正文写为 prompt——系统注入开轮（[后台任务通知]，

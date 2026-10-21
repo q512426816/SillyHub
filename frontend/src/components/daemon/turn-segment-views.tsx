@@ -1224,6 +1224,57 @@ export function CompactNoticeChip() {
 }
 
 /**
+ * 后台任务唤醒通知折叠行（2026-10-21-task-wakeup-restore）：daemon 注入的
+ * 「[后台任务通知]」轮在时间线的原位留痕——dsh「收到任务消息」同款形态：
+ * 一行弱化折叠行（✈ + 标题 + 用时数），默认收起、点击展开通知全文（展示
+ * 语义平移 PreambleSegmentView：拖选不触发收起守卫）。对话与进度两视图共用
+ * 本组件（通知本身轻量，无需 compact 式双形态）。取代 2026-10-13-
+ * session-taskwakeup-hide 的整体隐藏口径（隐藏导致唤醒轮「无人说话 agent
+ * 凭空接话」不可溯源）。
+ */
+export const TaskWakeupNoticeView = memo(function TaskWakeupNoticeView({
+  segment,
+}: {
+  segment: Extract<TurnSegment, { kind: "task_wakeup" }>;
+}) {
+  const [open, setOpen] = useState(false);
+  const taskCount = (segment.text.match(/^- 任务「/gm) ?? []).length || 1;
+  return (
+    <div className="flex w-full max-w-[86%] flex-col gap-1 self-start">
+      <button
+        type="button"
+        onClick={() => {
+          if (hasActiveTextSelection()) return;
+          setOpen(!open);
+        }}
+        aria-expanded={open}
+        className="flex w-fit cursor-pointer select-text items-center gap-[7px] rounded-md px-1.5 py-[3px] text-left text-[11px] text-muted-foreground hover:bg-muted"
+      >
+        <span aria-hidden className="shrink-0">
+          ✈
+        </span>
+        <span className="shrink-0 font-medium">收到任务消息</span>
+        <span className="shrink-0 opacity-75">{`（${taskCount} 个后台任务已结束）`}</span>
+        <span
+          aria-hidden
+          className={cn(
+            "shrink-0 text-[9px] transition-transform duration-150",
+            open && "rotate-90",
+          )}
+        >
+          ▶
+        </span>
+      </button>
+      {open && (
+        <div className="select-text whitespace-pre-wrap rounded-lg border border-dashed border-brand-300 bg-brand-50/50 px-3 py-2 text-xs leading-5 text-muted-foreground">
+          {segment.text}
+        </div>
+      )}
+    </div>
+  );
+});
+
+/**
  * 压缩过程状态行（ql-20260917-006）：daemon [COMPACT_STATUS] 协议行的渲染——
  * phase=compacting 显示「上下文正在重新压缩…」（运行中轮的实时提示，用户要求的
  * 「压缩过程中回显」）；failed 显示 amber 失败行（压缩失败时续接摘要不会到达，
@@ -1680,6 +1731,10 @@ export const SegmentView = memo(function SegmentView({ segment }: SegmentViewPro
       // 供测试断言；自旧 SteeredMessagesFooter 迁移，正文经 parseAttachmentMarkers
       // 剥附件标记行（同 prompt 气泡展示口径）。
       return <UserMsgSegmentView segment={segment} />;
+    case "task_wakeup":
+      // 2026-10-21-task-wakeup-restore：后台任务唤醒通知折叠行——对话/进度两
+      // 视图共用（通知轻量无需双形态）。
+      return <TaskWakeupNoticeView segment={segment} />;
     default: {
       // 穷尽防御：TurnSegment 新增 kind 时此处编译期报错（never 不兼容）。
       const exhaustive: never = segment;

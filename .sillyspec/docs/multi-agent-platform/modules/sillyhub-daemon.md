@@ -154,6 +154,7 @@ pm；posix: ../lib/node_modules]，ql-20260904-M4 补标准安装器布局）、
 - 2026-10-13-change-files-refresh-sync | 平台刷新文件树触发绑定 daemon 定向上行同步：sillyspec-manager 新增 runSyncChange 执行器（串行 platform sync --change 落镜像 + sync-docs --change 落 DB 四件套）+ daemon.ts 注册 sillyspec_sync_change RPC（SAFE_CHANGE_NAME_RE/UUID 双守卫 + 15s TTL 防抖 + in-flight 去重 + 1000 帽），结构化回执不走结果槽
 - 2026-10-13-spawn-flush-e2e-test | 2026-10-13-review-risk-fixes 评审 P3 留债：spawnAndStream 收尾冲刷只有组
 - 2026-10-13-agent-task-stuck-running | 动机:general-purpose 子代理已完成但 UI 永久显示「运行中」——完成通知在 daemon 失忆时被静默
+- 2026-10-21-task-wakeup-restore | 恢复 2026-10-13-task-wakeup-remove 删除的终态唤醒链（窄化版：completed/failed 2s debounce 合并注入、静默阈值 env SILLYHUB_TASK_WAKEUP_QUIET_MS 缺省 60000/0 关闭阀、stopped 不唤醒）——会话 49d893ab 实证删除后「派发子代理+结束回合」的会话在任务完成时停摆；前端同步加「收到任务消息」折叠行留痕（task_wakeup 段，废止 taskwakeup-hide 整体隐藏）。backend inject/task_wakeup 门控/queue_when_busy 全程零改动
 - 2026-10-13-task-wakeup-remove | 后台子代理任务终态后 daemon 自动注入「[后台任务通知]」开新轮让主代理汇报——用户裁定该自动汇报轮没必要（tok
 - 2026-10-13-editpatch-fullchain | agent-log 视图 Edit 卡与会话化对话视图（agent-log-card）的 Write/Edit 卡仍无行
 - 2026-10-13-editpatch-p3-cleanup | 收编 editpatch-fullchain 评审 P3：①daemon EDIT_PATCH_MAX_CHARS 按 

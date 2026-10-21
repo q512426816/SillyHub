@@ -9,16 +9,18 @@
  * ``mgr`` 改显式传参，行为零变化；类静态 TASK_PROGRESS_LINE_THROTTLE_MS
  * 随方法体落位为本模块常量）。
  *
- * 2026-10-13-task-wakeup-remove：终态唤醒链（_scheduleTaskWakeup 2s debounce
- * 合并 + onTaskWakeupInject 注入「[后台任务通知]」）整体移除——用户裁定终态
- * 自动汇报轮没必要；任务终态只留 emit/[TASK_NOTIFICATION] 落行/注销侧信道，
- * 主代理靠用户下一条消息继续（可 TaskOutput block=false 自取结果）。
+ * 2026-10-13-task-wakeup-remove 曾将终态唤醒链整体移除（用户裁定自动汇报轮
+ * 没必要）；2026-10-21-task-wakeup-restore 窄化恢复——会话 49d893ab 实证主代理
+ * 派发子代理后结束回合、任务完成无唤醒即停摆。恢复后的口径：completed/failed
+ * 终态经 2s debounce 合并注入「[后台任务通知]」（静默阈值 env 可配、0=关闭阀、
+ * stopped 不唤醒），终态侧信道（emit/[TASK_NOTIFICATION] 落行/注销）不变。
  *
  * @module interactive/session-manager/background-tasks
  */
 
 import type { AgentEvent } from '../../types.js';
 import type { SessionState } from '../types.js';
+import { taskWakeupQuietThresholdMs } from '../../daemon.js';
 import { eventMetaOf, numOf, strOf } from './helpers.js';
 import type { BackgroundTaskInfo, SessionManagerCore } from './types.js';
 
@@ -196,8 +198,8 @@ export async function handleAgentTaskStatusEvent(
  * 落 [TASK_NOTIFICATION] 行（不节流）+ 任务表注销（对齐旧
  * _handleTaskNotification，elapsed_ms 服务端权威值经归一化器
  * 从 usage.duration_ms 提升 metadata；缺失时不发，前端本地走秒兜底）。
- * 2026-10-13-task-wakeup-remove：完成/失败触发主代理唤醒的分支随唤醒链整体
- * 移除（原 _scheduleTaskWakeup 2s debounce 合并注入「[后台任务通知]」）。
+ * 2026-10-21-task-wakeup-restore：completed/failed 恢复触发主代理唤醒
+ * （别名补发之后、静默阈值门槛判定 + scheduleTaskWakeup；stopped 不唤醒）。
  */
 export async function handleTaskNotificationEvent(
   mgr: SessionManagerCore,
@@ -308,7 +310,7 @@ export async function handleTaskNotificationEvent(
         task_name: aliasInfo.taskName,
         status: rawStatus,
         ...(aliasInfo.toolUseId ? { tool_use_id: aliasInfo.toolUseId } : {}),
-        ...(summary ? { summary } : {}),
+        ...(summary ? { summary: summary } : {}),
         ...(elapsedMs !== undefined ? { elapsed_ms: elapsedMs } : {}),
       });
       await writeTaskLine(mgr, state.sessionId, aliasRunId, '[TASK_NOTIFICATION]', {
@@ -318,6 +320,98 @@ export async function handleTaskNotificationEvent(
         ...(summary ? { summary: summary } : ''),
       }, aliasInfo.toolUseId);
     }
+  }
+
+  // 2026-10-21-task-wakeup-restore：completed/failed 触发主代理唤醒（stopped
+  // 多为用户/系统主动停止，结果无需汇报，不唤醒防噪）。放在别名补发之后：
+  // 短任务门槛的提前 return 不得跳过补发。
+  if (rawStatus === 'completed' || rawStatus === 'failed') {
+    // 总关闭阀（FR-03）：阈值配置 0 时一律不注入（引擎原生自续跑出现双轮时的
+    // 止血开关）——durationMs < 0 恒假拦不住，须显式分支。
+    const quietMs = taskWakeupQuietThresholdMs();
+    if (quietMs <= 0) return;
+    // 门槛判定（FR-02）：info 已从注册表注销但局部引用仍在，startedAt 可读；
+    // 双缺失（重启窗口孤儿终态）durationMs=undefined → fail-open 放行唤醒。
+    const durationMs =
+      elapsedMs !== undefined
+        ? elapsedMs
+        : info?.startedAt !== undefined
+          ? Date.now() - info.startedAt
+          : undefined;
+    if (durationMs !== undefined && durationMs < quietMs) {
+      return;
+    }
+    scheduleTaskWakeup(mgr, state.sessionId, {
+      taskId,
+      taskName,
+      status: rawStatus,
+      elapsedMs,
+      summary,
+    });
+  }
+}
+
+/**
+ * 2026-10-21-task-wakeup-restore（自 f889832d1^ 恢复，ql-20260827-007 原型）：
+ * 后台任务终态唤醒调度——2s debounce 合并同会话多条通知后，经
+ * deps.onTaskWakeupInject 注入一条「后台任务通知」user 消息（backend inject
+ * 创建新 turn 唤醒主代理汇报；忙态由 queue_when_busy 排队）。未注入回调
+ * （测试/旧构造点）时静默跳过。防环：prompt 明示「汇报后结束本轮、勿重执行」；
+ * 每次唤醒都由真实终态触发，无自持循环（pi 影子任务走 agent_task_status
+ * 路由不进本函数，无「轮结束→注入」反馈环）。
+ */
+export function scheduleTaskWakeup(
+  mgr: SessionManagerCore,
+  sessionId: string,
+  info: {
+    taskId: string;
+    taskName: string;
+    status: string;
+    elapsedMs?: number;
+    summary?: string;
+  },
+): void {
+  const cb = mgr.deps.onTaskWakeupInject;
+  if (!cb) return;
+  const mm = Math.floor((info.elapsedMs ?? 0) / 60000);
+  const ss = Math.floor(((info.elapsedMs ?? 0) % 60000) / 1000);
+  const dur = `${String(mm).padStart(2, '0')}:${String(ss).padStart(2, '0')}`;
+  const summaryClip = (info.summary ?? '').slice(0, 300);
+  const line =
+    `- 任务「${info.taskName}」已${info.status === 'completed' ? '完成' : '失败'}`
+    + `（用时 ${dur}）`
+    + (summaryClip ? `。结果摘要：${summaryClip}` : '')
+    + `（task_id: ${info.taskId}，如需完整输出可调用 TaskOutput 查询，block=false）`;
+  let entry = mgr._taskWakeupPending.get(sessionId);
+  if (!entry) {
+    const timer = setTimeout(() => {
+      const e = mgr._taskWakeupPending.get(sessionId);
+      mgr._taskWakeupPending.delete(sessionId);
+      if (!e || e.lines.length === 0) return;
+      // ql-20260827-008：头部明示总数+全部结束、尾部强制逐条核对——实证主代理
+      // 曾只读第一行漏报后续任务、并凭历史执念声称"仍在等待"（会话 2fe664d9）。
+      const prompt =
+        `[后台任务通知] 以下 ${e.lines.length} 个后台子代理任务已全部结束` +
+        '（列表中的每一个都已终止，没有仍在运行的任务）：\n' +
+        e.lines.join('\n') +
+        `\n请逐条核对上述每个任务（共 ${e.lines.length} 个）的名称与结果，一次性向用户完整汇报（综合归纳，不要逐字照抄，不要遗漏任何一个任务）；` +
+        '禁止声称仍在等待任何任务；汇报完即结束本轮；不要重复执行这些任务；此消息为系统通知，无需向用户复述本通知本身。';
+      void (async () => {
+        try {
+          await cb(sessionId, prompt);
+        } catch (err) {
+          console.error('[session-manager] task wakeup inject failed', {
+            sessionId,
+            error: err instanceof Error ? err.message : String(err),
+          });
+        }
+      })();
+    }, 2000);
+    timer.unref?.();
+    entry = { timer, lines: [line] };
+    mgr._taskWakeupPending.set(sessionId, entry);
+  } else {
+    entry.lines.push(line);
   }
 }
 

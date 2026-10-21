@@ -62,6 +62,7 @@ import {
   CompactNoticeChip,
   CompactStatusRowView,
   SegmentView,
+  TaskWakeupNoticeView,
   TextSegmentView,
   TurnForkEntry,
 } from "@/components/daemon/turn-segment-views";
@@ -1735,6 +1736,9 @@ function segmentTsOf(seg: TurnSegment): number | null {
     // 与 AskUser 记录同款按 ts 穿插；对话视图走段序（实时追加 / 回放按 ts 插入）。
     case "user_msg":
       return seg.ts;
+  // 2026-10-21-task-wakeup-restore：唤醒通知折叠行取捕获时刻（同 preamble 语义）。
+    case "task_wakeup":
+      return seg.ts;
   }
 }
 
@@ -1766,6 +1770,9 @@ function isConversationSegment(seg: TurnSegment): boolean {
   // 压缩」短提示（CompactNoticeChip，替代此前大段摘要气泡刷屏）；compact_status
   // 不在此判定（运行中才进对话流，见 SegmentedTurnBody turnStatus 过滤）。
   if (seg.kind === "compact") return true;
+  // 2026-10-21-task-wakeup-restore：唤醒通知折叠行进对话视图（TaskWakeupNoticeView
+  // 两视图共用——唤醒轮不再「无人说话 agent 凭空接话」不可溯源）。
+  if (seg.kind === "task_wakeup") return true;
   return (
     seg.kind === "tool" &&
     seg.children.length > 0 &&
@@ -1968,6 +1975,11 @@ function SegmentedTurnBody({
               // 运行中实时提示行（CompactStatusRowView，success 渲染 null）。
               if (s.kind === "compact") {
                 return <CompactNoticeChip key={s.id} />;
+              }
+              // 2026-10-21-task-wakeup-restore：唤醒通知折叠行（对话视图原位渲染，
+              // 两视图共用组件）。
+              if (s.kind === "task_wakeup") {
+                return <TaskWakeupNoticeView key={s.id} segment={s} />;
               }
               if (s.kind === "compact_status") {
                 return <CompactStatusRowView key={s.id} segment={s} />;

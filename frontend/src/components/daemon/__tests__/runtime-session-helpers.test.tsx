@@ -723,3 +723,40 @@ describe("logsToTurns 系统通知开轮占位槽（2026-10-10-system-opened-tur
     expect(userMsgs.map((s) => (s as { text: string }).text)).toEqual(["第二句"]);
   });
 });
+
+// ── 2026-10-21-task-wakeup-restore：唤醒通知落 task_wakeup 留痕段 ────────────
+
+describe("logsToTurns 唤醒通知折叠行段（2026-10-21-task-wakeup-restore）", () => {
+  const TS = (sec: number) =>
+    `2026-10-21T03:${String(10 + Math.floor(sec / 60)).padStart(2, "0")}:${String(sec % 60).padStart(2, "0")}.000Z`;
+
+  it("唤醒注入开轮 → task_wakeup 段置于段序列首部（全文留痕），prompt 仍空、无 preamble", () => {
+    const turns = toSegmentTurns([
+      makeLog(
+        "n1",
+        "run-1",
+        "user_input",
+        "[后台任务通知] 以下 1 个后台子代理任务已全部结束（列表中的每一个都已终止，没有仍在运行的任务）：\n- 任务「调研 sgm」已完成（用时 06:26）。结果摘要：调研完成（task_id: t1，如需完整输出可调用 TaskOutput 查询，block=false）",
+        { timestamp: TS(0) },
+      ),
+      makeLog("o1", "run-1", "stdout", "汇报正文", { timestamp: TS(30) }),
+    ]);
+    const turn = turns[0]!;
+    expect(turn.prompt).toBe("");
+    const segs = turn.segments ?? [];
+    const first = segs[0]!;
+    expect(first.kind).toBe("task_wakeup");
+    expect((first as { text: string }).text).toContain("[后台任务通知]");
+    expect((first as { text: string }).text).toContain("任务「调研 sgm」已完成");
+    expect(segs.some((s) => s.kind === "preamble")).toBe(false);
+    expect(segs.some((s) => s.kind === "text" && s.text === "汇报正文")).toBe(true);
+  });
+
+  it("无唤醒注入的普通轮不产出 task_wakeup 段", () => {
+    const turns = toSegmentTurns([
+      makeLog("u1", "run-1", "user_input", "普通问题", { timestamp: TS(0) }),
+      makeLog("o1", "run-1", "stdout", "普通回答", { timestamp: TS(30) }),
+    ]);
+    expect((turns[0]!.segments ?? []).some((s) => s.kind === "task_wakeup")).toBe(false);
+  });
+});

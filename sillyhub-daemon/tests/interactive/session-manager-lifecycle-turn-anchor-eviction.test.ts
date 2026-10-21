@@ -48,6 +48,8 @@ function makeFakeMgr(): { mgr: SessionManagerCore; extras: FakeMgrExtras } {
     _abortPermissionResolver: extras.abortPermissionResolver,
     _clearBorrowSandbox: extras.clearBorrowSandbox,
     _clearBackgroundTasks: extras.clearBackgroundTasks,
+    // 2026-10-21-task-wakeup-restore：4b-2 唤醒 debounce 清理触及的注册表。
+    _taskWakeupPending: new Map(),
     _destroyUsageLedger: extras.destroyUsageLedger,
     _runNotifyChain: vi.fn(async (_sid: string, fn: () => Promise<void>) => {
       await fn();

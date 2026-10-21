@@ -1409,6 +1409,21 @@ export function injectWaitInflightExtendMs(): number {
   return Number.isFinite(v) && v >= 0 ? v : DEFAULT_INJECT_WAIT_INFLIGHT_EXTEND_MS;
 }
 
+// 2026-10-21-task-wakeup-restore：后台任务终态唤醒的静默阈值（2026-10-10 安静
+// 阈值先例的常量回收为 env 可配）。短任务（elapsed_ms 低于阈值）的 completed/failed
+// 不注入唤醒——生产实证 13 分钟会话被 17 条秒级孙任务通知灌满而真长任务 770s；
+// 0 = 总关闭阀（未来引擎若在流式模式原生自续跑出现双轮，设 0 当天止血）。
+// 部署级进程行为（非工作区偏好），沿 SILLYHUB_* env 阀面不落 local.yaml。
+export const DEFAULT_TASK_WAKEUP_QUIET_MS = 60_000;
+
+/** 读取唤醒静默阈值（env SILLYHUB_TASK_WAKEUP_QUIET_MS，非法/负数回落默认；逐次读取便于测试覆写）。 */
+export function taskWakeupQuietThresholdMs(): number {
+  const raw = process.env.SILLYHUB_TASK_WAKEUP_QUIET_MS;
+  if (raw === undefined || raw === '') return DEFAULT_TASK_WAKEUP_QUIET_MS;
+  const v = Number.parseInt(raw, 10);
+  return Number.isFinite(v) && v >= 0 ? v : DEFAULT_TASK_WAKEUP_QUIET_MS;
+}
+
 // ── task-08（design A5 / FR-04）：recover 网络类失败重试退避 + 超龄清理常量 ────
 //
 // _recoverOneSession 遇 recover HTTP 网络类失败（请求未达/超时/5xx——HubHttpError
