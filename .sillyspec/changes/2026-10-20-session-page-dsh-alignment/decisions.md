@@ -395,7 +395,7 @@ change: 2026-10-20-session-page-dsh-alignment
 - question: `fileChanges=null` 时，什么时候出「仅工具编辑」降级卡、什么时候干脆不出卡？
 - answer: 三分法（对齐 design E6/E8）：①`capability="tool_only"`（含 snapshot=null）→ 出「仅工具编辑」降级卡 + 说明行；②`status="failed"|"unavailable"` → 同样降级卡（快照不可信）；③`snapshot=null` **且** `capability` 为 `null/undefined` → **不出卡、不出占位**——这是「挂载方没接线」（dialog / 旧消费方），把它显示成「daemon 老版本」是另一种误导；④`status="ok"` 且 `files=[]` → 不出卡（快照确认零改动，且全树禁止出现「本轮无改动」字样）。
 - normalized_requirement: ①前端**只看 capability，不用字段是否存在判断降级**（E6/E8 硬约束在实现上体现为「capability 缺失 ≠ tool_only」的特例，因为后端该字段 required 且缺省即 tool_only，真实会话页恒有值）；②降级卡必须含「仅工具编辑」文案 + 「daemon 未上报工作区快照，本卡只含 Edit/Write 工具编辑」说明；③轮级卡只挂「完整轮」分支（预览卡 / whoLine-only 紧凑行无轮尾状态行，不挂卡），会话级汇总仍计入这些轮的快照。
-- evidence: `frontend/src/components/daemon/file-changes/turn-file-changes.ts`（三分法 + 降级态构造）、`__tests__/turn-file-changes.test.ts`（`queryByText(/无改动/)` 为 null、`snapshot=null` 两态分支）、`turn-timeline.tsx`（`toFileChangesCardProps(...)==null` 时零占位）
+- evidence: `frontend/src/components/daemon/file-changes/turn-file-changes.ts`（三分法 + 降级态构造）、`__tests__/turn-file-changes.test.ts`（纯函数两态分支）+ 渲染侧三处 `queryByText(/无改动/)` 断言：`__tests__/file-changes-card.test.tsx`、`__tests__/file-changes-summary.test.tsx`、`frontend/src/components/daemon/__tests__/turn-timeline-conversation-file-card.test.tsx`、`turn-timeline.tsx`（`toFileChangesCardProps(...)==null` 时零占位）
 - 故障面: 老 daemon 会话里「每轮一张仅工具编辑卡」会显得吵（20 轮 → 20 张）；这是 E8「显式提示不静默」的代价，收窄需另立设计条目（建议后续：仅末轮/首轮出卡 + 汇总卡统一提示）。
 
 ## D-032@v1: TTFT/attempt 实际只能 `basis="approx"`（三引擎均无「模型请求起点」事件）；attempt 沿用近似起点而非只记终点〔2026-10-21 execute 期实证〕
