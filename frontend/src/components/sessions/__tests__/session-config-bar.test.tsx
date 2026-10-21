@@ -79,9 +79,16 @@ vi.mock("@/lib/agent-profiles", () => ({
   useMineAgentProfiles: () => mocks.profilesHook(),
 }));
 
-vi.mock("@/lib/api/llm-providers", () => ({
-  listProviders: (...args: unknown[]) => mocks.listProviders(...args),
-}));
+vi.mock("@/lib/api/llm-providers", async (importOriginal) => {
+  // 2026-10-21-provider-default-ui-hint：noProviderLabel 走真实实现（纯函数），
+  // listProviders 维持可控 mock。
+  const actual =
+    await importOriginal<typeof import("@/lib/api/llm-providers")>();
+  return {
+    ...actual,
+    listProviders: (...args: unknown[]) => mocks.listProviders(...args),
+  };
+});
 
 // 组件运行时只消费 injectSession（类型导入编译期擦除），局部 mock 不加载真实 daemon.ts。
 // task-06（thinking-level）：组件新增消费 getSessionThinkingLevels /
@@ -1455,5 +1462,36 @@ describe("SessionConfigBar 手机端降噪（ql-20260915-009 variant=mobile）",
   it("desktop：running 提示照旧（零回归锚；ql-20260917-008 文案改排队说明）", () => {
     renderBar({ running: true });
     expect(screen.getByText("运行中切换将于本轮结束后生效")).toBeInTheDocument();
+  });
+});
+
+// ── 2026-10-21-provider-default-ui-hint：兜底项文案动态化 ────────────────────
+
+describe("SessionConfigBar 不指定兜底文案（provider-default-ui-hint）", () => {
+  it("用户有默认供应商 → 兜底项显示「不指定（默认：{name}）」", async () => {
+    mocks.listProviders.mockReset().mockResolvedValue([
+      { id: "prov-kimi", name: "Kimi 中转", models: [], agent_kinds: ["claude"] },
+      { id: "prov-glm", name: "GLM 平台", models: [], agent_kinds: ["claude"], is_default: true },
+    ]);
+    renderBar();
+    // 未选态按钮显示默认供应商名（claim 实际注入它）；下拉兜底项为动态文案。
+    const btn = await screen.findByRole("button", {
+      name: "配置-供应商 GLM 平台",
+    });
+    fireEvent.click(btn);
+    expect(screen.getByTestId("config-dd-provider")).toBeInTheDocument();
+    expect(screen.getByText("不指定（默认：GLM 平台）")).toBeInTheDocument();
+  });
+
+  it("未设默认供应商 → 保持「不指定（本机默认）」（零回归）", async () => {
+    mocks.listProviders.mockReset().mockResolvedValue([
+      { id: "prov-kimi", name: "Kimi 中转", models: [], agent_kinds: ["claude"] },
+    ]);
+    renderBar();
+    const btn = await screen.findByRole("button", {
+      name: "配置-供应商 本机默认",
+    });
+    fireEvent.click(btn);
+    expect(screen.getByText("不指定（本机默认）")).toBeInTheDocument();
   });
 });

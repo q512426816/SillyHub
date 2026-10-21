@@ -53,10 +53,15 @@ const llmProviderApi = vi.hoisted(() => ({
   listProviders: vi.fn(),
   fetchProviderModels: vi.fn(),
 }));
-vi.mock("@/lib/api/llm-providers", () => ({
-  listProviders: llmProviderApi.listProviders,
+vi.mock("@/lib/api/llm-providers", async (importOriginal) => {
+  // provider-default-ui-hint：passthrough 真实导出（noProviderLabel 等），原覆盖保留。
+  const actual = await importOriginal<typeof import("@/lib/api/llm-providers")>();
+  return {
+    ...actual,
+    listProviders: llmProviderApi.listProviders,
   fetchProviderModels: llmProviderApi.fetchProviderModels,
-}));
+  };
+});
 
 const sessionApi = vi.hoisted(() => ({ listAgentSessions: vi.fn() }));
 vi.mock("@/lib/daemon/session-lists", () => ({

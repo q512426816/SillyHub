@@ -60,7 +60,7 @@ import { Brain, ChevronDown, Cloud, Settings2, Timer, User } from "lucide-react"
 import { ApiError } from "@/lib/api";
 import type { components } from "@/lib/api-types";
 import { useMineAgentProfiles } from "@/lib/agent-profiles";
-import { listProviders } from "@/lib/api/llm-providers";
+import { listProviders, noProviderLabel } from "@/lib/api/llm-providers";
 import { useNotify } from "@/lib/errors";
 import {
   fetchSharedAgentsActive,
@@ -289,7 +289,7 @@ export function buildDefaultSwitchPrompt(p: PendingSwitch): string {
   const what = p.field === "llm_provider_id" ? "供应商" : switchFieldWhat(p.field);
   const name =
     p.field === "llm_provider_id" && p.value === SWITCH_NO_PROVIDER_VALUE
-      ? "本机默认"
+      ? (p.label || "本机默认") // 不指定项 label 已动态化（provider-default-ui-hint）
       : p.field === "model" && p.value === SWITCH_MODEL_DEFAULT_VALUE
         ? "默认"
         : p.label;
@@ -355,6 +355,11 @@ export function SessionConfigBar({
     staleTime: 30_000,
   });
   const providers = useMemo(() => providersQ.data ?? [], [providersQ.data]);
+  // 2026-10-21-provider-default-ui-hint：兜底项文案按用户默认供应商动态化。
+  const noProviderFallbackLabel = useMemo(
+    () => noProviderLabel(providers),
+    [providers],
+  );
 
   const [openKind, setOpenKind] = useState<SessionConfigCtrlKind | null>(null);
   const [submitting, setSubmitting] = useState(false);
@@ -612,7 +617,9 @@ export function SessionConfigBar({
     ? providers.find((p) => p.id === llmProviderId)?.name ??
       configSnapshot?.provider_name ??
       llmProviderId
-    : "本机默认";
+    : // 未显式选 → 用户默认供应商名（claim 链实际注入它）；无默认回落本机默认
+      //（2026-10-21-provider-default-ui-hint，与下拉兜底项同源）。
+      providers.find((p) => p.is_default)?.name ?? "本机默认";
 
   /** ql-20260817-010：点选即**静默**切换——prompt 发空串（后端静默切换契约：
    * 有切换字段允许空 prompt；daemon 收到空 prompt 只 reload 配置不喂消息，
@@ -767,13 +774,13 @@ export function SessionConfigBar({
             >
               <SwitchItem
                 icon={<Cloud aria-hidden className="h-3 w-3" />}
-                label="不指定（本机默认）"
+                label={noProviderFallbackLabel}
                 current={llmProviderId == null}
                 onClick={() =>
                   executeSwitch({
                     field: "llm_provider_id",
                     value: SWITCH_NO_PROVIDER_VALUE,
-                    label: "不指定（本机默认）",
+                    label: noProviderFallbackLabel,
                   })
                 }
               />

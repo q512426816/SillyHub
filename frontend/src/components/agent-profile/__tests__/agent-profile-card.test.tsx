@@ -25,9 +25,14 @@ import type { AgentProfileAggregatedItem } from "@/lib/agent-profiles";
 
 // task-08：card 现用 useQuery(listProviders) 做绑定供应商名映射；测试需 QueryClient +
 // mock listProviders（避免真 apiFetch）。默认返回空 → boundProviderName=null → 不渲染。
-vi.mock("@/lib/api/llm-providers", () => ({
-  listProviders: vi.fn().mockResolvedValue([]),
-}));
+vi.mock("@/lib/api/llm-providers", async (importOriginal) => {
+  // provider-default-ui-hint：passthrough 真实导出（noProviderLabel 等），原覆盖保留。
+  const actual = await importOriginal<typeof import("@/lib/api/llm-providers")>();
+  return {
+    ...actual,
+    listProviders: vi.fn().mockResolvedValue([]),
+  };
+});
 
 /** 包 QueryClientProvider 渲染（card 用 useQuery，task-08）。 */
 function renderCard(ui: ReactElement) {

@@ -195,6 +195,21 @@ export async function updateProvider(
   );
 }
 
+/** 兜底项固定文案（无默认用户）。 */
+export const NO_PROVIDER_FALLBACK_LABEL = "不指定（本机默认）";
+
+/**
+ * 供应商下拉「不指定」兜底项文案（2026-10-21-provider-default-ui-hint）：
+ * 用户设了默认供应商 → 「不指定（默认：{name}）」（claim 链会注入它）；
+ * 未设 / 列表未到位 → 现状「不指定（本机默认）」。单源收敛防四处文案漂移。
+ */
+export function noProviderLabel(
+  providers: LlmProviderRead[] | null | undefined,
+): string {
+  const def = (providers ?? []).find((p) => p.is_default);
+  return def ? `不指定（默认：${def.name}）` : NO_PROVIDER_FALLBACK_LABEL;
+}
+
 /** 删除供应商（204）。 */
 export async function deleteProvider(id: string): Promise<void> {
   await apiFetch<void>(`/api/llm-providers/${encodeURIComponent(id)}`, {

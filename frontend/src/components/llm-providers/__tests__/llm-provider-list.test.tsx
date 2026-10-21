@@ -20,8 +20,12 @@ import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { AntdProviders } from "@/components/antd-providers";
 import { LlmProviderSection } from "@/components/llm-providers/llm-provider-list";
 
-vi.mock("@/lib/api/llm-providers", () => ({
-  listProviders: vi.fn(),
+vi.mock("@/lib/api/llm-providers", async (importOriginal) => {
+  // provider-default-ui-hint：passthrough 真实导出（noProviderLabel 等），原覆盖保留。
+  const actual = await importOriginal<typeof import("@/lib/api/llm-providers")>();
+  return {
+    ...actual,
+    listProviders: vi.fn(),
   queryUsage: vi.fn(),
   detectUsageProvider: vi.fn(),
   createProvider: vi.fn(),
@@ -31,7 +35,8 @@ vi.mock("@/lib/api/llm-providers", () => ({
   unsetDefaultProvider: vi.fn(),
   formToCreate: vi.fn(),
   formToUpdate: vi.fn(),
-}));
+  };
+});
 
 import {
   listProviders,

@@ -52,7 +52,7 @@ import { Button, Input, InputNumber, Modal, Select, Switch, Tooltip } from "antd
 import { Bot, Plus, Trash2 } from "lucide-react";
 
 import { useMineAgentProfiles } from "@/lib/agent-profiles";
-import { listProviders } from "@/lib/api/llm-providers";
+import { listProviders, noProviderLabel } from "@/lib/api/llm-providers";
 import { errMessage, useNotify } from "@/lib/errors";
 import { listSimpleProjects, listProjectMembers } from "@/lib/ppm/project";
 import type { ProjectMember } from "@/lib/ppm/types";
@@ -309,11 +309,15 @@ export function CreateGroupWizard({
     staleTime: 30_000,
     enabled: open,
   });
-  const providerOptions = useMemo(
-    () =>
-      (providersQ.data ?? []).map((p) => ({ value: p.id, label: p.name })),
-    [providersQ.data],
-  );
+  const providerOptions = useMemo(() => {
+    const base = (providersQ.data ?? []).map((p) => ({
+      value: p.id,
+      label: p.name,
+    }));
+    // 2026-10-21-provider-default-ui-hint：兜底项文案按用户默认供应商动态化。
+    base.unshift({ value: "", label: noProviderLabel(providersQ.data) });
+    return base;
+  }, [providersQ.data]);
 
   // 智能体方案（AgentProfile 下拉）：useMineAgentProfiles（跨工作区可见，
   // session-config-bar 档案下拉同源）。
@@ -928,17 +932,14 @@ export function CreateGroupWizard({
                         id={`cgw-model-${idx}`}
                         aria-label={`Agent 成员 ${idx + 1} 模型`}
                         className="w-full"
-                        placeholder="不指定（本机默认）"
+                        placeholder={providerOptions[0]?.label ?? "不指定（本机默认）"}
                         allowClear
                         value={card.llmProviderId || undefined}
                         onChange={(v) =>
                           updateCard(card.id, { llmProviderId: v ?? "" })
                         }
                         disabled={card.provider !== "claude"}
-                        options={[
-                          { value: "", label: "不指定（本机默认）" },
-                          ...providerOptions,
-                        ]}
+                        options={providerOptions}
                       />
                       {card.provider !== "claude" && (
                         <span className="text-[11px] text-muted-foreground">
