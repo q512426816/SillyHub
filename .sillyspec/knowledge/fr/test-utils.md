@@ -288,3 +288,105 @@ created_at: 2026-10-16T01:30:35.950Z
   confirmed_at: null
   source_change: 2026-10-21-files-refresh-spinner
   status: active
+
+## FR-test-utils-017 终态唤醒主路径（completed/failed → debounce 合并注入）
+变更：2026-10-21-task-wakeup-restore
+状态：active
+摘要：空闲会话单任务完成；多任务并发终态合并
+全文：.sillyspec/changes/archive/2026-10-21-task-wakeup-restore/requirements.md#FR-01
+最近确认：440f3fd244d4810e1f4fb0a30c875767cab088e3
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-21-task-wakeup-restore:flow:测试绑定FR-01
+  tests: sillyhub-daemon/tests/interactive/task-lifecycle.test.ts「task 终态注入唤醒——单任务汇总 prompt」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-21-task-wakeup-restore
+  status: active
+
+## FR-test-utils-018 不注入面（短任务/stopped/非法终态；双缺失 fail-open）
+变更：2026-10-21-task-wakeup-restore
+状态：active
+摘要：短任务不唤醒；stopped 不唤醒；双缺失 fail-open
+全文：.sillyspec/changes/archive/2026-10-21-task-wakeup-restore/requirements.md#FR-02
+最近确认：440f3fd244d4810e1f4fb0a30c875767cab088e3
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-21-task-wakeup-restore:flow:测试绑定FR-02
+  tests: sillyhub-daemon/tests/interactive/task-lifecycle.test.ts「stopped 终态不注入」 | sillyhub-daemon/tests/interactive/task-lifecycle.test.ts「双缺失 fail-open 放行唤醒」 | sillyhub-daemon/tests/interactive/task-lifecycle.test.ts「短任务低于阈值不注入」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-21-task-wakeup-restore
+  status: active
+
+## FR-test-utils-019 阈值进程级可配（env，缺省 60000，0=关闭）
+变更：2026-10-21-task-wakeup-restore
+状态：active
+摘要：阈值配置生效；0 关闭阀
+全文：.sillyspec/changes/archive/2026-10-21-task-wakeup-restore/requirements.md#FR-03
+最近确认：440f3fd244d4810e1f4fb0a30c875767cab088e3
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-21-task-wakeup-restore:flow:测试绑定FR-03
+  tests: sillyhub-daemon/tests/interactive/task-lifecycle.test.ts「阈值 env 可配与 0 关闭阀」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-21-task-wakeup-restore
+  status: active
+
+## FR-test-utils-020 影子任务路由隔离（pi 轮次聚合不触发唤醒）
+变更：2026-10-21-task-wakeup-restore
+状态：active
+摘要：pi 轮次聚合零注入
+全文：.sillyspec/changes/archive/2026-10-21-task-wakeup-restore/requirements.md#FR-04
+最近确认：440f3fd244d4810e1f4fb0a30c875767cab088e3
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-21-task-wakeup-restore:flow:测试绑定FR-04
+  tests: sillyhub-daemon/tests/interactive/task-lifecycle.test.ts「影子任务 agent_task_status 路由不触发唤醒」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-21-task-wakeup-restore
+  status: active
+
+## FR-test-utils-021 回归与类型门
+变更：2026-10-21-task-wakeup-restore
+状态：active
+摘要：全量回归
+全文：.sillyspec/changes/archive/2026-10-21-task-wakeup-restore/requirements.md#FR-05
+最近确认：440f3fd244d4810e1f4fb0a30c875767cab088e3
+
+## FR-test-utils-022 唤醒轮前端留痕（「收到任务消息」折叠行，执行期用户追加——dsh 同款形态）
+变更：2026-10-21-task-wakeup-restore
+状态：active
+摘要：回放路径；渲染形态
+全文：.sillyspec/changes/archive/2026-10-21-task-wakeup-restore/requirements.md#FR-06
+最近确认：440f3fd244d4810e1f4fb0a30c875767cab088e3
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-21-task-wakeup-restore:flow:测试绑定FR-06
+  tests: frontend/src/components/daemon/__tests__/runtime-session-helpers.test.tsx「唤醒注入开轮 → task_wakeup 段置于段序列首部」 | frontend/src/components/daemon/__tests__/turn-segment-views.test.tsx「默认收起：显示「收到任务消息」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-21-task-wakeup-restore
+  status: active

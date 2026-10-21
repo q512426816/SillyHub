@@ -1,0 +1,33 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-21-task-wakeup-restore",
+  "reviewer": "subagent",
+  "verdict": "PASS",
+  "reviewedAgainst": "e88ffddb76486f445e8bdac23d437a22c39a8ebd",
+  "findings": [
+    {
+      "severity": "P3",
+      "title": "design 盲维①措辞过宽：真正「三无」孤儿终态（无任何 run 归属）在 WARN 后 return，不进入唤醒判定",
+      "evidence": "handleTaskNotificationEvent 的 if(!runId){WARN;return} 位于唤醒块之前——重启窗口零归属孤儿终态不唤醒（保守安全、无 timer 泄漏）；FR-02 规范语义（elapsed_ms/startedAt 双缺失但有归属时 fail-open 放行）已实现且有测试（sess-wu5 经 currentRunId 归属放行）；仅 design.md 边界①「沿三无 WARN 路径，仅在其后进入 fail-open 唤醒判定」一句对零归属子集不成立，属文档精度问题（design 同文自认该窗口 SDK 子进程已亡、实际难达）。",
+      "location": "sillyhub-daemon/src/interactive/session-manager/background-tasks.ts:266-274"
+    },
+    {
+      "severity": "P3",
+      "title": "runtime-session-helpers.tsx 格式滑坡：既有注释被并到代码行尾",
+      "evidence": "本提交把 ql-20260920-006 注释从独立行并到 logsToSegments(...) 行尾（logsToSegments(...) { seenTextDedup: false });    // ql-...），纯格式噪音、无行为变化。",
+      "location": "frontend/src/components/daemon/runtime-session-helpers.tsx:547"
+    },
+    {
+      "severity": "P3",
+      "title": "turn-timeline.tsx 整文件 CRLF→LF 重写撑出 4880 行 diff 噪音 + 新增注释缩进不一致",
+      "evidence": "ignore-cr-at-eol 后实际功能变更仅 +12 行（segmentTsOf 补点/isConversationSegment 放行/对话特判三处），numstat 2446/2434 为行尾规范化；另 segmentTsOf 新注释 2 空格缩进与同级 case 4 空格不一致。纯卫生问题，不影响行为。",
+      "location": "frontend/src/components/daemon/turn-timeline.tsx:1738-1741"
+    }
+  ],
+  "dimensionNotes": {
+    "乱序": "finding",
+    "并发": "ok",
+    "切换": "ok",
+    "作用域": "ok"
+  }
+}

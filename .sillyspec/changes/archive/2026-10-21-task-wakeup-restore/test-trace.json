@@ -1,0 +1,84 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-21-task-wakeup-restore",
+  "rows": [
+    {
+      "anchor": "FR-01",
+      "row_id": "2026-10-21-task-wakeup-restore:flow:测试绑定FR-01",
+      "tests": [
+        "sillyhub-daemon/tests/interactive/task-lifecycle.test.ts「task 终态注入唤醒——单任务汇总 prompt」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-21-task-wakeup-restore"
+    },
+    {
+      "anchor": "FR-02",
+      "row_id": "2026-10-21-task-wakeup-restore:flow:测试绑定FR-02",
+      "tests": [
+        "sillyhub-daemon/tests/interactive/task-lifecycle.test.ts「stopped 终态不注入」",
+        "sillyhub-daemon/tests/interactive/task-lifecycle.test.ts「双缺失 fail-open 放行唤醒」",
+        "sillyhub-daemon/tests/interactive/task-lifecycle.test.ts「短任务低于阈值不注入」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-21-task-wakeup-restore"
+    },
+    {
+      "anchor": "FR-03",
+      "row_id": "2026-10-21-task-wakeup-restore:flow:测试绑定FR-03",
+      "tests": [
+        "sillyhub-daemon/tests/interactive/task-lifecycle.test.ts「阈值 env 可配与 0 关闭阀」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-21-task-wakeup-restore"
+    },
+    {
+      "anchor": "FR-04",
+      "row_id": "2026-10-21-task-wakeup-restore:flow:测试绑定FR-04",
+      "tests": [
+        "sillyhub-daemon/tests/interactive/task-lifecycle.test.ts「影子任务 agent_task_status 路由不触发唤醒」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-21-task-wakeup-restore"
+    },
+    {
+      "anchor": "FR-06",
+      "row_id": "2026-10-21-task-wakeup-restore:flow:测试绑定FR-06",
+      "tests": [
+        "frontend/src/components/daemon/__tests__/runtime-session-helpers.test.tsx「唤醒注入开轮 → task_wakeup 段置于段序列首部」",
+        "frontend/src/components/daemon/__tests__/turn-segment-views.test.tsx「默认收起：显示「收到任务消息」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-21-task-wakeup-restore"
+    }
+  ]
+}
