@@ -76,22 +76,29 @@ export interface EventLoopWatchDeps {
   sleep?: (ms: number, signal: AbortSignal) => Promise<void>;
 }
 
-/** 缺省 abortable sleep：signal 中止即 reject，循环顶部 while 条件收尾。 */
-function defaultSleep(ms: number, signal: AbortSignal): Promise<void> {
+/**
+ * 缺省 abortable sleep：signal 中止即 reject，循环顶部 while 条件收尾。
+ *
+ * 2026-10-22-review-risk-fixes：定时器**正常到期**路径必须摘除 abort 监听器——
+ * `{once:true}` 只在 abort 触发后自摘，正常路径每窗口会在 daemon 生命周期的
+ * signal 上滞留一个监听器+闭包（60s 节拍下每日 ~1.4k，AbortSignal 为
+ * EventTarget 无 MaxListeners 告警，静默慢性泄漏）。
+ */
+export function defaultSleep(ms: number, signal: AbortSignal): Promise<void> {
   return new Promise((resolve, reject) => {
     if (signal.aborted) {
       reject(new Error('aborted'));
       return;
     }
-    const timer = setTimeout(resolve, ms);
-    signal.addEventListener(
-      'abort',
-      () => {
-        clearTimeout(timer);
-        reject(new Error('aborted'));
-      },
-      { once: true },
-    );
+    const onAbort = () => {
+      clearTimeout(timer);
+      reject(new Error('aborted'));
+    };
+    const timer = setTimeout(() => {
+      signal.removeEventListener('abort', onAbort);
+      resolve();
+    }, ms);
+    signal.addEventListener('abort', onAbort, { once: true });
   });
 }
 

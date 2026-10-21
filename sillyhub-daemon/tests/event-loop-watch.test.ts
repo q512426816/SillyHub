@@ -8,7 +8,9 @@
 // 零真实定时器、零真实 monitorEventLoopDelay（factory 注入假直方图）。
 
 import { describe, it, expect } from 'vitest';
+import { getEventListeners } from 'node:events';
 import {
+  defaultSleep,
   summarizeLagHistogram,
   runEventLoopWatch,
 } from '../src/event-loop-watch.js';
@@ -138,5 +140,48 @@ describe('runEventLoopWatch', () => {
     });
     expect(result).toBeUndefined();
     expect(disabled).toBe(1);
+  });
+
+  it('FR-03（2026-10-22-review-risk-fixes）：defaultSleep 正常到期路径摘除 abort 监听器——连续窗口后计数归零（修复前每窗 +1 静默滞留）', async () => {
+    const controller = new AbortController();
+    for (let i = 0; i < 3; i += 1) {
+      await defaultSleep(2, controller.signal);
+    }
+    expect(getEventListeners(controller.signal, 'abort')).toHaveLength(0);
+  });
+
+  it('FR-03：defaultSleep 挂起中被 abort → 立即 reject（P3② 语义不变），且不残留监听器', async () => {
+    const controller = new AbortController();
+    const pending = defaultSleep(5_000, controller.signal);
+    controller.abort();
+    await expect(pending).rejects.toThrow('aborted');
+    // abort 触发后 once 监听器自摘；已被 clearTimeout 的 timer 不再 resolve。
+    expect(getEventListeners(controller.signal, 'abort')).toHaveLength(0);
+  });
+
+  it('FR-03：真实 defaultSleep 走 runEventLoopWatch——abort 前正常窗口循环运转、abort 后优雅退出（不注入 sleep，覆盖缺省路径）', async () => {
+    const controller = new AbortController();
+    let disabled = 0;
+    let resets = 0;
+    const logs: Array<{ level: string; msg: string }> = [];
+    const stopper = setTimeout(() => controller.abort(), 40);
+    await runEventLoopWatch(controller.signal, {
+      log: (level, msg) => logs.push({ level, msg }),
+      intervalMs: 5, // 真实定时器 5ms 窗口（此前用例全注入 sleep，未覆盖缺省 defaultSleep）
+      warnThresholdMs: 5_000,
+      histogramFactory: () => ({
+        ...fakeHisto({ maxNs: 1_000, meanNs: 1, p99Ns: 1 }),
+        disable: () => {
+          disabled++;
+        },
+        reset: () => {
+          resets++;
+        },
+      }),
+    });
+    clearTimeout(stopper);
+    expect(disabled).toBe(1);
+    expect(resets).toBeGreaterThanOrEqual(1); // 至少跑完一个正常窗口后才被外部 abort
+    expect(logs.every((l) => l.msg === 'event_loop_lag_tick')).toBe(true); // 全程未超阈
   });
 });

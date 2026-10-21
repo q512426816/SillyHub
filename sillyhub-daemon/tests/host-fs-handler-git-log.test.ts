@@ -1259,6 +1259,21 @@ describe('HostFsHandler — quotepath 修复（2026-10-21-gitlog-quotepath-fix G
     expect(decodeGitCQuote('"abc\\\\"')).toBe('abc\\');
   });
 
+  it('GL49（2026-10-22-review-risk-fixes）: 混合路径——字面引号转义 + 原样非 ASCII / 增补平面，逐字符还原原文', () => {
+    // quotepath=false 下 git 只对含字面 " 的路径强制 C 引号，其余非 ASCII 原样输出：
+    // 形态 = 引号内「中文原样 + \" 转义」。修复前字面中文按 charCodeAt 入字节数组，
+    // 0x4E2D 被 Buffer.from 截断为 0x2D 产出乱码（本仓 2026-10-22 审查实测机制）。
+    expect(decodeGitCQuote('"中文\\"x中.md"')).toBe('中文"x中.md');
+    // 增补平面（代理对两个 code unit）：按完整 codePoint 的 UTF-8 原字节组装，不拆对。
+    expect(decodeGitCQuote('"🙂\\"a.md"')).toBe('🙂"a.md');
+    // 字面非 ASCII 与八进制转义同串共存：两条字节来源混合后仍按 UTF-8 整体组装。
+    expect(decodeGitCQuote('"中文\\345\\257\\274\\"x.md"')).toBe('中文导"x.md');
+    // 修复只动字面分支：转义/畸形形态行为与 GL47 逐字一致（抽查两条不重复断言面）。
+    expect(decodeGitCQuote('"we\\"ird\\\\name.md"')).toBe('we"ird\\name.md');
+    expect(decodeGitCQuote('"unclosed-quoted')).toBe('"unclosed-quoted');
+    // 注：真实 git 集成（③号用例）不覆盖本形态——Windows 文件名禁字面 "，无法落盘造仓。
+  });
+
   it('GL48: gitShow —— 中文 C 引号 numstat 行解码为原文，非引号行不受影响', async () => {
     const quotedPath =
       '".sillyspec/changes/2026-10-20-unitLedger\\345\\257\\274\\345\\205\\245\\346\\250\\241\\346\\235\\277\\346\\241\\206\\347\\272\\277/design.md"';

@@ -1,0 +1,41 @@
+tier: thin
+legacy_fallback: false
+substeps: {}
+born_face: thin
+with_tasks: false
+review_force: null
+input: >-
+  审查修复：原型路由防线与监听泄漏
+
+
+  昨夜只读审查（61 提交）确认四处缺口：/proto/session-redesign 生产无鉴权且缺 force-dynamic，Next14 构建会把工作树 .proto-staging/ 3.3MB
+  真实会话导出烘进静态预渲染产物，而 frontend/.dockerignore 未排除该目录（gitignore≠dockerignore）；event-loop-watch defaultSleep 正常到期路径不摘 abort
+  监听器，daemon 长生命周期 signal 上每 60s 滞留一个闭包（静默慢性泄漏，Node24 实测无告警）；decodeGitCQuote 字面字符按 charCodeAt 入字节数组，charCode>0xFF 在
+  Buffer.from 截断为低字节，「字面引号+中文」混合路径解码成乱码。
+
+
+  成功标准：
+
+  - /proto/session-redesign/page.tsx 显式 export const dynamic = 'force-dynamic'（对齐 session-trajectory/page.tsx:24
+  同款），消除构建期静态预渲染读盘
+
+  - frontend/.dockerignore 追加 /.proto-staging/，工作树 docker build 不再拷入真实会话导出
+
+  - event-loop-watch 正常窗口走完后 AbortSignal 的 abort 监听器计数不随窗口数增长（新增测试以真实 defaultSleep 断言）
+
+  - decodeGitCQuote 对含字面引号与非 ASCII 混合路径（如 中文"x.md）完整还原原文（新增单测，UTF-8 多字节按原字节组装）
+
+  - daemon 目标测试+既有 event-loop-watch/quotepath 套件回归全绿，frontend tsc --noEmit 零错
+autopilot: false
+prestage_ack: false
+baseline_commit: 3da9e8d44310bfa5fe016e010780e4c9606a726e
+updatedAt: '2026-10-21T23:18:35.659Z'
+cross_baselines:
+  sillyspec: 0503cf4632803e7b6b9e5efd5df10b2b32b0263e
+baseline_sha256: b2885f19500f377860353ce0b26fb9e20743cddb2f401bd3013ff86cecaab713
+spec_approved: true
+spec_approved_at: '2026-10-21T23:18:35.658Z'
+spec_approved_by: zcode-review-fix-20261022
+spec_approved_channel: user-confirmed
+spec_attested_by: zcode-review-fix-20261022
+

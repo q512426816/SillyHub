@@ -776,11 +776,14 @@ function parseGitLogRecord(rec: string): GitLogCommit | null {
  * 解码 git C 引号路径为原文（2026-10-21-gitlog-quotepath-fix，导出供单测）。
  *
  * git 对含字面 `"`、`\` 或控制字符的路径**即便 `-c core.quotepath=false` 也
- * 强制** C 引号包裹（其余非 ASCII 在 quotepath=false 下已原样输出，不会进
- * 本函数的解码分支）。规则对齐 git quote_c_style：
+ * 强制** C 引号包裹（其余非 ASCII 在 quotepath=false 下已原样输出——但会与被
+ * 强制引号的形态共存，见下条）。规则对齐 git quote_c_style：
  * - 非引号形态（绝大多数路径）原样返回；畸形（有头引号无尾引号等）原样返回；
- * - `\NNN` 八进制（1..3 位，git 恒发 3 位）还原字节，字面字符取低字节，
- *   末尾整体按 UTF-8 组装（git 路径字节即提交时编码，本仓语境为 UTF-8）；
+ * - `\NNN` 八进制（1..3 位，git 恒发 3 位）还原字节，末尾整体按 UTF-8 组装
+ *   （git 路径字节即提交时编码，本仓语境为 UTF-8）；
+ * - 引号内的**字面**（非转义）字符按其 codePoint 的 UTF-8 原字节入列（含代理对；
+ *   2026-10-22-review-risk-fixes——此前按 charCodeAt 入列，charCode>0xFF 被
+ *   Buffer.from 截断为低字节，「字面引号转义 + 原样非 ASCII」混合路径解码成乱码）；
  * - `\"` `\\` `\a\b\f\n\r\t\v` 标准转义；
  * - 未知转义（git 不会发）字面回写反斜杠与该字符，防御性保留。
  */
@@ -793,8 +796,10 @@ export function decodeGitCQuote(path: string): string {
   let i = 0;
   while (i < inner.length) {
     if (inner.charAt(i) !== '\\') {
-      bytes.push(inner.charCodeAt(i));
-      i += 1;
+      const cp = inner.codePointAt(i) as number;
+      const charBytes = Buffer.from(String.fromCodePoint(cp), 'utf8');
+      for (const b of charBytes) bytes.push(b);
+      i += cp > 0xffff ? 2 : 1;
       continue;
     }
     const esc = inner.charAt(i + 1);
