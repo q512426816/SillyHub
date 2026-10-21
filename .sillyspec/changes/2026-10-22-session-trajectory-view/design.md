@@ -46,3 +46,21 @@ created_at: 2026-10-21T22:49:03.254Z
 
 - **最大风险**：轮视图的时间戳精度不如原始日志（段级 `startedAt` 可能为 null，只有工具段有真实 `endedAt`），且老 daemon / 未采样轮没有 `timing`——这些轮会走「近似」口径，同一面板可能出现「部分轮真实占用、部分轮近似」的混合（`modelBasis` 按整条泳道降级为 `approx` 并标注，不把近似说成真实）。缓解＝口径标注始终可见 + 适配器对缺锚点的段退回**轮首真实锚点**（不是 `now()`）。
 - **试过但放弃**：①**第三视图**（`viewMode: "trajectory"`，D-022@v1 原方案）——用户裁决「不要第三个视图，放进进度里」，且三态视图要改 `turn-state` 持久化与两处视图切换（page/dialog），回归面更大；②在产品页新增 `GET /sessions/{id}/logs` 拉全量日志再 `buildTrajectory`——多一次全量拉取（长会话 MB 级），与既有分页/懒加载冲突，违反「零新增网络请求」；③把 `buildTrajectory` 逻辑复制一份改成轮视图入参——两份装配数学必然漂移（窗口/覆盖率/口径双维护），故抽 `assembleTrajectory` 共用；④`progressLens` 持久化到 localStorage——用户切回「对话」再回来会被上次选择「劫持」，且与「默认时间线＝现状零变化」的验收口径冲突。
+
+## 文件变更清单（自声明面——收口对账用，与提交面逐项对应）
+
+**生产代码（4）**
+
+- `frontend/src/components/daemon/trajectory/build-trajectory.ts`（改）——抽出并导出 `assembleTrajectory`，`buildTrajectory` 改为调用它（行为零变化）。
+- `frontend/src/components/daemon/trajectory/from-turn-views.ts`（新增）——`trajectoryFromTurnViews(turns, opts?)` 纯函数适配器（含 `timing` 按 runId 收集）。
+- `frontend/src/components/daemon/turn-timeline.tsx`（改）——新增 `TrajectoryPane`（含空态）、进度视图呈现开关（`progressLens`）、`SessionTurnView.timing` 可选字段。
+- `frontend/src/components/daemon/session-panel/page-helpers.tsx`（改）——`enrichDisplayTurns` 透传 `/runs` 的 `timing`，身份稳定守卫按缺省归一比较。
+
+**测试（2 新增）**
+
+- `frontend/src/components/daemon/trajectory/__tests__/from-turn-views.test.ts`（新增，9 例）。
+- `frontend/src/components/daemon/__tests__/turn-timeline-trajectory-view.test.tsx`（新增，5 例）。
+
+**变更工件（本目录）**：`proposal.md` / `requirements.md` / `design.md` / `tasks.md` / `decisions.md` / `visual-evidence.md` / `flow-state.yaml`。
+
+**机读配置（不入 git）**：`.sillyspec/local.yaml` 新增 2 条窄 `known_failures`（并发 flake 豁免，已注释复核条件）。
