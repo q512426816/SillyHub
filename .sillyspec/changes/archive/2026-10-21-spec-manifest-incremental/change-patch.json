@@ -1,0 +1,186 @@
+{
+  "change": "2026-10-21-spec-manifest-incremental",
+  "baseline": "dabeba52fe924b7615a3c79342530449b1430eca",
+  "head": "f9d7657613835078a50e23edf0740b2e799633bf",
+  "files": [
+    "backend/app/modules/platform_sync/router.py",
+    "backend/app/modules/platform_sync/schema.py",
+    "backend/app/modules/platform_sync/service.py",
+    "backend/app/modules/platform_sync/tests/test_spec_sync.py",
+    "backend/app/modules/spec_workspace/model.py",
+    "backend/app/modules/spec_workspace/service.py",
+    "backend/app/modules/spec_workspace/tests/test_soft_delete_change_dir.py",
+    "backend/app/modules/spec_workspace/tests/test_spec_version_and_init_synced.py",
+    "backend/app/modules/spec_workspace/tests/test_sync_incremental.py",
+    "backend/migrations/versions/20261021130000_spec_manifest_landing_version.py",
+    "backend/tests/test_align_platform_change_events_migration.py"
+  ],
+  "totals": {
+    "files": 11,
+    "additions": 396,
+    "deletions": 35
+  },
+  "savedAt": "2026-10-21T13:58:06.174Z",
+  "note": "flow done 时点冻结（本变更可归属交付面：baseline..HEAD 提交面过滤 .sillyspec/ 只留 .sillyspec/docs/ 交付文档 + 独占树未提交交付；治理工件目录不入冻结——2026-10-12-close-trace-freeze-integrity FR-01）",
+  "modules": [
+    {
+      "id": "platform_sync",
+      "files": 4,
+      "doc": "docs/backend/modules/platform_sync.md",
+      "docTouched": false,
+      "docMissing": false
+    },
+    {
+      "id": "spec_workspace",
+      "files": 5,
+      "doc": "docs/backend/modules/spec_workspace.md",
+      "docTouched": false,
+      "docMissing": false
+    },
+    {
+      "id": "migrations",
+      "files": 1,
+      "doc": "docs/backend/modules/migrations.md",
+      "docTouched": false,
+      "docMissing": false
+    },
+    {
+      "id": "backend",
+      "files": 11,
+      "doc": "docs/multi-agent-platform/modules/backend.md",
+      "docTouched": false,
+      "docMissing": false
+    },
+    {
+      "id": "spec_workspace",
+      "files": 5,
+      "doc": "docs/SillyHub/modules/spec_workspace.md",
+      "docTouched": false,
+      "docMissing": false
+    },
+    {
+      "id": "platform_sync",
+      "files": 4,
+      "doc": "docs/SillyHub/modules/platform_sync.md",
+      "docTouched": false,
+      "docMissing": false
+    }
+  ],
+  "uncoveredDirs": [],
+  "moduleMaps": [
+    "docs/backend/modules/_module-map.yaml",
+    "docs/frontend/modules/_module-map.yaml",
+    "docs/multi-agent-platform/modules/_module-map.yaml",
+    "docs/SillyHub/modules/_module-map.yaml",
+    "docs/sillyhub-daemon/modules/_module-map.yaml"
+  ],
+  "acceptedDirtyGap": 22,
+  "scopeAudit": {
+    "mode": "full-flow",
+    "ok": true,
+    "degradedReason": null,
+    "baseAnchor": "dabeba52fe924b7615a3c79342530449b1430eca",
+    "totals": {
+      "files": 11,
+      "additions": 396,
+      "deletions": 35
+    },
+    "rows": [
+      {
+        "path": "backend/app/modules/platform_sync/router.py",
+        "additions": 17,
+        "deletions": 2,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "planned"
+      },
+      {
+        "path": "backend/app/modules/platform_sync/schema.py",
+        "additions": 7,
+        "deletions": 1,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "planned"
+      },
+      {
+        "path": "backend/app/modules/platform_sync/service.py",
+        "additions": 9,
+        "deletions": 4,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "planned"
+      },
+      {
+        "path": "backend/app/modules/platform_sync/tests/test_spec_sync.py",
+        "additions": 155,
+        "deletions": 0,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "planned"
+      },
+      {
+        "path": "backend/app/modules/spec_workspace/model.py",
+        "additions": 15,
+        "deletions": 0,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "planned"
+      },
+      {
+        "path": "backend/app/modules/spec_workspace/service.py",
+        "additions": 87,
+        "deletions": 18,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "planned"
+      },
+      {
+        "path": "backend/app/modules/spec_workspace/tests/test_soft_delete_change_dir.py",
+        "additions": 28,
+        "deletions": 0,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "planned"
+      },
+      {
+        "path": "backend/app/modules/spec_workspace/tests/test_spec_version_and_init_synced.py",
+        "additions": 11,
+        "deletions": 4,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "planned"
+      },
+      {
+        "path": "backend/app/modules/spec_workspace/tests/test_sync_incremental.py",
+        "additions": 14,
+        "deletions": 4,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "planned"
+      },
+      {
+        "path": "backend/migrations/versions/20261021130000_spec_manifest_landing_version.py",
+        "additions": 49,
+        "deletions": 0,
+        "kind": "new",
+        "planned": null,
+        "verdict": "planned"
+      },
+      {
+        "path": "backend/tests/test_align_platform_change_events_migration.py",
+        "additions": 4,
+        "deletions": 2,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "planned"
+      }
+    ],
+    "excluded": {
+      "foreignDeclared": []
+    },
+    "note": "flow done 时点冻结（本文件落盘时采集）",
+    "closedBy": "flow done"
+  },
+  "patchSha256": "947e01601c11beb04554cb32ffde217a19a8b52d81eb2efe814fdfc2663b9706",
+  "patchStatus": "ok"
+}

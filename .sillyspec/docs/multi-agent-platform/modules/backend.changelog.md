@@ -75,3 +75,4 @@
 - 2026-10-20-session-status-live-sync | 左侧会话状态标签与右侧实时同步
 - 2026-10-21-precommit-sandbox-entries | pre-commit钩子入口沙箱会话适配
 - 2026-10-21-daemon-zombie-turn | 修复 daemon 会话僵尸轮与打断无效
+- 2026-10-21-spec-manifest-incremental | spec-manifest 增量游标同步

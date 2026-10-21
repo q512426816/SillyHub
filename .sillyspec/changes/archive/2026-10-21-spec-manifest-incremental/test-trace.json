@@ -1,0 +1,53 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-21-spec-manifest-incremental",
+  "rows": [
+    {
+      "anchor": "FR-01",
+      "row_id": "2026-10-21-spec-manifest-incremental:flow:测试绑定FR-01",
+      "tests": [
+        "backend/app/modules/platform_sync/tests/test_spec_sync.py「增量主路径 / 无变化空响应 / NULL 行不进增量 / since 非法 422」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-21-spec-manifest-incremental"
+    },
+    {
+      "anchor": "FR-02",
+      "row_id": "2026-10-21-spec-manifest-incremental:flow:测试绑定FR-02",
+      "tests": [
+        "backend/app/modules/platform_sync/tests/test_spec_sync.py「全量回归含 spec_version 字段」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-21-spec-manifest-incremental"
+    },
+    {
+      "anchor": "FR-03",
+      "row_id": "2026-10-21-spec-manifest-incremental:flow:测试绑定FR-03",
+      "tests": [
+        "backend/app/modules/platform_sync/tests/test_spec_sync.py「apply_ops 后增量恰含变化行 / rename 增量含旧路径墓碑」",
+        "backend/app/modules/spec_workspace/tests/test_platform_deleted_guard.py「heal 行带印章且增量可见」",
+        "backend/app/modules/spec_workspace/tests/test_soft_delete_change_dir.py「软删行带印章」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-21-spec-manifest-incremental"
+    }
+  ]
+}

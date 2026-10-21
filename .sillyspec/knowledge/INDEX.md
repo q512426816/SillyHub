@@ -255,3 +255,4 @@
 - auth → [fr/auth.md](fr/auth.md)
 - scripts → [fr/scripts.md](fr/scripts.md)
 - llm_provider → [fr/llm_provider.md](fr/llm_provider.md)
+- platform_sync → [fr/platform_sync.md](fr/platform_sync.md)
