@@ -26,8 +26,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 import app.modules.daemon.group.service as _gsvc
 from app.core.errors import AppError
 from app.core.logging import get_logger as _get_logger
-
-_gsvc_log = _get_logger(__name__)
 from app.modules.agent.model import (
     ACTIVE_RUN_STATUSES,
     USER_INPUT_LOG_MAX_CHARS,
@@ -48,6 +46,8 @@ from .helpers import (
     group_attachment_gate_denied,
 )
 from .typing_presence import _publish_group_channel_event
+
+_gsvc_log = _get_logger(__name__)
 
 # 群背景摘要单条截断 / 总长上限（design §4.2）。
 GROUP_CONTEXT_ENTRY_MAX_CHARS = 500

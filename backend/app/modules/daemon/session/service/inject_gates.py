@@ -20,13 +20,13 @@ import uuid
 from dataclasses import dataclass, field
 
 import app.modules.daemon.session.service as _svc
+from app.core.errors import AppError
 from app.modules.agent.model import AgentSession
 from app.modules.auth.permissions import Permission
 
 # allowed_workspace_ids 绑定留在包 __init__（D-007——测试 patch 目标），经 _svc 取。
 from app.modules.daemon.model import DaemonRuntime
 from app.modules.daemon.schema import TeamMissionCreateBlock
-from app.core.errors import AppError
 from app.modules.ppm.common.session_binding import (
     PpmItemKind,
     load_ppm_item,
