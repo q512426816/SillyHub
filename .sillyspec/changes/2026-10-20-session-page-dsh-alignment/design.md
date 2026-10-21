@@ -194,6 +194,7 @@ scale: large
 | 修改 | backend/app/modules/daemon/run_sync/service/close_run_steps.py | **D-027 范围扩**：`_close_apply_terminal` 在 `agent_run_model_usage` upsert（`:379-417`）之后调 `_upsert_run_snapshot`（同事务、异常 best-effort 捕获不拖垮终态）。**D-030**：终态 no-op 分支（`status in TERMINAL_TURN_STATUSES`）也要补写侧表——daemon 采集必然晚于首报 close，否则后到快照被丢弃 |
 | 修改 | backend/app/modules/daemon/service.py | **D-027 范围扩（实现期新增第 4 个）**：`DaemonService.close_interactive_run` facade 加同名可选参数并透传给 RunSyncService（router → facade → run_sync 链路必经，纯透传不改形状） |
 | 新增 | NEW:backend/app/modules/daemon/tests/test_session_file_changes.py | 1b backend 契约单测：`full` / `tool_only` 两分支序列化输出 + 字段名与前端声明一致 |
+| 修改 | backend/tests/test_align_platform_change_events_migration.py | **D-033 范围扩（2026-10-21 实现期登记）**：新增迁移 `20261021120000` 后，仓内「迁移链尾锚」守护测试必须把 `heads[0]` 前移到新 head（注释链续写），否则提交 hook 直接拒签——属加迁移的强制连带改动，非新交付面 |
 | 新增 | NEW:frontend/src/components/daemon/file-changes/turn-file-changes.ts | 1b 第三段（前端，待新建）：`TurnFileChangesSnapshot \| null` → `FileChangesCardProps` 的纯函数（`attribution: "edit_patch" \| "command"` → `source: "tool" \| "shell"`；`partial` → `truncated`；`tool_only` → 降级态；`null` → 不出卡），零 DOM |
 | 新增 | NEW:frontend/src/components/daemon/file-changes/file-changes-summary.tsx | 1b 会话级汇总卡（待新建）：turn 卡聚合去重后给总数与 Σ+/−，`status` 取最差值，恒标「可能含并行会话改动」 |
 | 修改 | frontend/src/components/daemon/session-panel/session-panel-page.tsx | **1b 接线面补口（2026-10-21 plan 阶段登记）**：`runsMeta`（`:1697`、`:1721`）→ `SessionTurnView` 透传 `fileChanges` / `fileChangesCapability`；只加 props 透传，不改取数 / 分页 / SSE 编排（FR-22 边界） |

@@ -408,3 +408,14 @@ change: 2026-10-20-session-page-dsh-alignment
 - normalized_requirement: ①`"observed"` 只保留契约值（无 producer 不造假开关），待引擎上报请求起点再翻转；②design DTO 的 `attempts[].startedAt` 保留**近似起点**（而非 plan 字面「只记终点」）——否则前端按 `startedAt+endedAt` 画条会整条跳过 attempts，「真实区间」收益归零；该偏差写在 `turn-timing.ts` 模块注释；③`ttftMs` 只在取到首 token 时有值，禁填 0；④claude 的 TTFT 含 ≤500ms partial flush 偏差、`totalMs` 含 inject→起跑排队窗口——两条均属 approx 固有偏差，已在模块头披露。
 - evidence: `sillyhub-daemon/src/interactive/turn-timing.ts`（392 行，`deriveTurnTiming` + `timingEventFromAgentEvent` + 模块头偏差披露）、`tests/interactive/turn-timing.test.ts`（19 例）、`session-manager.ts`（`_noteTurnTimingEvents` 内存累加 + `_buildTurnSnapshotReport` 合并 `timing`，同一次上报）
 - 故障面: 前端会**长期**显示「近似（无 TTFT 采样）」而非「真实占用」——UI 的 observed 分支目前只有单测覆盖、生产不可达；若产品要求「真实占用」必须先在 driver 层补 `request_start` 事件（跨 daemon 驱动改造，不在本变更）。
+
+## D-033@v1: 迁移链尾锚测试随新迁移一并前移（提交 hook 强制连带）〔2026-10-21 execute 期登记〕
+- type: consistency
+- priority: P1
+- status: confirmed
+- source: code
+- question: 新增一条 alembic 迁移后，`backend/tests/test_align_platform_change_events_migration.py` 为什么必须改？
+- answer: 仓内 pre-commit hook 的「迁移」钉子会校验迁移链尾锚测试——新增迁移后 `heads[0]` 不再是旧 head，hook **直接拒签**（实测：首次提交被拦，提示「迁移链尾锚测试 heads[0] 前移到新 head（注释链续写）」）。故把 `heads[0]` 由 `c3f8a1d6e2b4` 前移为 `20261021120000` 并在注释链续写一行是本变更的强制连带改动，不是新交付面。
+- normalized_requirement: ①该测试只允许改 `heads[0]` 断言与注释链，不得放宽其它守护断言；②`pytest tests/test_align_platform_change_events_migration.py` 必须 7 passed；③design「文件变更清单」补该行（否则 worktree apply 的清单校验会拒）。
+- evidence: `backend/tests/test_align_platform_change_events_migration.py`（`assert heads[0] == "20261021120000"`）、`uv run --frozen pytest -q --no-cov tests/test_align_platform_change_events_migration.py` → **7 passed**（2026-10-21 17:24）
+- 故障面: 该锚点测试是「迁移双头」的守护，若把它改成不校验（例如 `assert len(heads) == 1` 以外全放行），未来并行迁移再出双头就无人拦。

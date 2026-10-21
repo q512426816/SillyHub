@@ -81,7 +81,6 @@ import {
   textOnlySegments,
   type DetailLevel,
 } from "@/components/daemon/turn-fold";
-<<<<<<< Updated upstream
 // task-11（2026-10-20-session-page-dsh-alignment / FR-14 / FR-16 / D-023@v1）：
 // 轮级文件变更卡与会话级汇总。数据全部由 props 注入（轮视图的 fileChanges /
 // fileChangesCapability，由挂载方从 /runs 读模型透传），本组件零 fetch。
@@ -94,8 +93,6 @@ import {
   toFileChangesCardProps,
   type TurnFileChangesSnapshot,
 } from "@/components/daemon/file-changes/turn-file-changes";
-=======
->>>>>>> Stashed changes
 import { InlineAttRefTextWithPreview } from "@/components/daemon/attachment-ref-tag";
 // task-10（2026-09-10-account-avatar-upload / FR-05）：自己（sender.me）的气泡
 // 头像取 useSession user.avatar（选择器订阅仅 avatar 切片）。
@@ -1763,14 +1760,11 @@ export function TurnTimeline({
            2026-10-21 用户裁决「轮间 1px hairline 多余」：**只保留留白，不再画线**
            （原 `border-b border-border last:border-b-0` 已移除）；轮与轮靠白处分节。 */
         <div>
-<<<<<<< Updated upstream
           {/* task-11（FR-16 / design E7）：会话级文件改动汇总——会话流顶部（首轮之前）。
               无数据时组件自身返回 null（零占位）；`fileChangesSummary={false}` 可关闭。 */}
           {fileChangesSummary && (
             <FileChangesSummary turns={fileChangesSummaryEntries} className="mb-3" />
           )}
-=======
->>>>>>> Stashed changes
           {/* task-01（FR-07 / D-007@v1 / R-07）：highlightTurnKey 在此逐行派生为
               isHighlighted 布尔再进 memo 行（字符串 prop 直传会在值变化时击穿
               全部行 memo）；data-turn-key 锚点在 TurnRow 两分支根元素上。
