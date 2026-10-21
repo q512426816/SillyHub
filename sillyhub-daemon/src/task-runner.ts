@@ -71,7 +71,7 @@ import type { ProtocolAdapter } from './adapters/protocol-adapter.js';
 import { buildSpawnEnv } from './spawn-env.js';
 import { applyClaudeSettings } from './claude-settings.js';
 // 2026-07-08 修复：spawn 前把同步的平台 skills 拷到 workDir/.claude/skills/。
-import { linkSkillsToWorkdir, syncWorkspaceGitSkills } from './skill-manager.js';
+import { linkSkillsToWorkdir, syncWorkspaceGitSkills, pruneSkillsToSubset } from './skill-manager.js';
 // task-03：observer 创建 / cmd-shim 解析 / readline 消费随 _spawnAndStream、
 // _handleLine 方法体下沉到 ./task-runner/spawn-stream.js。
 import type { TerminalObserver } from './terminal-observer.js';
@@ -484,13 +484,18 @@ export class TaskRunner {
             workDir,
           );
         }
-        // task-09（design §9 / D-017）：profile.skill_refs 子集过滤。claim payload
-        //（context.py task-07 透传）带 skillRefs 时，link 全量后按子集裁剪
-        // <workDir>/.claude/skills/，只保留引用的 skill 目录，其余删除（profile 只能收紧）。
-        // skillRefs 缺省/空 → 不裁剪（全量，向后兼容 FR-15）。顺序：全局 link →
-        // ws git 解包（上方）→ prune 按 refs（profile 对并集注入集只能收紧）。
-        const skillRefs = pickStrList(ctx, 'skillRefs', 'skill_refs');
-        if (skillRefs) {
+        // task-09（design §9 / D-017）+ 2026-10-21-agent-profile-slim-default
+        // task-03 严格化：claim payload（context.py task-07 透传）**键在场**（含空
+        // 数组）即严格裁剪——非空=只保留勾选子集、空=清空全部技能；键缺失（旧
+        // lease / 未选档案且无默认）→ 不裁剪（全量，向后兼容）。直读键区分缺失与
+        // 空数组（pickStrList 会把空数组归一 undefined，不能用）。顺序：全局 link →
+        // ws git 解包（上方）→ prune 按 refs。
+        const rawSkillRefs = (ctx as unknown as Record<string, unknown>).skillRefs ??
+          (ctx as unknown as Record<string, unknown>).skill_refs;
+        if (Array.isArray(rawSkillRefs)) {
+          const skillRefs = rawSkillRefs.filter(
+            (v): v is string => typeof v === 'string' && v.length > 0,
+          );
           await pruneSkillsToSubset(workDir, skillRefs, leaseId);
         }
       } catch (e) {
@@ -1733,42 +1738,6 @@ export class TaskRunner {
 }
 
 // ── 内部常量 & 辅助函数 ───────────────────────────────────────────────────────
-
-/**
- * task-09（design §9）：link 全量 platform skills 后按 profile.skillRefs 子集裁剪。
- *
- * 删除 <workDir>/.claude/skills/ 下不在 skillRefs 中的 skill 目录（profile 只能收紧）。
- * 隐藏项（. 开头）与非目录跳过；单条 rm 失败仅 warn（不阻塞 spawn，对齐
- * linkSkillsToWorkdir 容错策略）。目录不存在（linkSkillsToWorkdir 未建 / 全跳过）→ 静默返回。
- */
-async function pruneSkillsToSubset(
-  workDir: string,
-  skillRefs: string[],
-  leaseId: string,
-): Promise<void> {
-  const skillsBase = join(workDir, '.claude', 'skills');
-  let entries: import('node:fs').Dirent[];
-  try {
-    entries = await readdir(skillsBase, { withFileTypes: true });
-  } catch {
-    return; // 目录不存在（linkSkillsToWorkdir 未建 / mock no-op）→ 无可裁剪
-  }
-  const keep = new Set(skillRefs);
-  for (const entry of entries) {
-    if (!entry.isDirectory()) continue;
-    if (entry.name.startsWith('.')) continue;
-    if (!keep.has(entry.name)) {
-      await rm(join(skillsBase, entry.name), { recursive: true, force: true }).catch(
-        (e: unknown) => {
-          console.warn('task_runner: prune_skill_failed', leaseId, {
-            skill: entry.name,
-            error: e,
-          });
-        },
-      );
-    }
-  }
-}
 
 // ── task-09 tar 工具（手工 ustar）已迁移到 ./spec-sync.ts utility
 //（task-05 死代码清理），本文件不再保留手工 ustar 实现。

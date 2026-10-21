@@ -15,10 +15,16 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 // bridges task-04：factory 补 syncWorkspaceGitSkills（task-runner.ts 新增 import——
 // 本文件 ctx 无 workspaceId，mock no-op 即可，防 undefined 绑定）。
-vi.mock('../src/skill-manager.js', () => ({
-  linkSkillsToWorkdir: vi.fn(async () => ({ linked: 0, skipped: true })),
-  syncWorkspaceGitSkills: vi.fn(async () => ({ synced: false, skipped: false, linked: 0 })),
-}));
+vi.mock('../src/skill-manager.js', async (importOriginal) => {
+  // 2026-10-21-agent-profile-slim-default task-03：pruneSkillsToSubset 自 task-runner
+  // 迁入本模块——网络面（link/sync）保持 mock，裁剪用真实实现（端到端验目录删减）。
+  const actual = await importOriginal<typeof import('../src/skill-manager.js')>();
+  return {
+    ...actual,
+    linkSkillsToWorkdir: vi.fn(async () => ({ linked: 0, skipped: true })),
+    syncWorkspaceGitSkills: vi.fn(async () => ({ synced: false, skipped: false, linked: 0 })),
+  };
+});
 
 // vi.mock 必须在 import 之前（vitest 提升 hoist）。
 // mockAdapter 通过闭包变量让测试可热替换。
@@ -1561,6 +1567,38 @@ describe('task-09: batch 消费 profile.skillRefs（design §9 技能子集）',
 
       const remaining = await readdir(skillsDir);
       expect(remaining.sort()).toEqual(['skill-a', 'skill-b']);
+    } finally {
+      await rm(tmpDir, { recursive: true, force: true }).catch(() => undefined);
+    }
+  });
+});
+
+// ── 2026-10-21-agent-profile-slim-default task-03：空数组 = 清空（严格语义）──
+describe('task-03: skillRefs 空数组 → 清空全部技能（严格挂载）', () => {
+  it('payload.skillRefs=[] → .claude/skills/ 目录下技能全删（档案生效即严格按档案）', async () => {
+    const tmpDir = await mkdtemp(join(tmpdir(), 'task03-skills-empty-'));
+    const skillsDir = join(tmpDir, '.claude', 'skills');
+    await mkdir(join(skillsDir, 'skill-a'), { recursive: true });
+    await mkdir(join(skillsDir, 'skill-b'), { recursive: true });
+
+    try {
+      const fakeChild = createFakeChild();
+      mockSpawnReturn(fakeChild);
+      const workspace = makeMockWorkspace({
+        prepareWorkspace: vi.fn().mockResolvedValue(tmpDir),
+      });
+      const { runner } = setupRunner({ workspace });
+
+      const lease = makeLease({ claudeMd: '' });
+      (lease as Record<string, unknown>).skillRefs = [];
+
+      const p = runner.runLease(lease);
+      await waitForSpawn();
+      fakeChild._emitExit(0);
+      await p;
+
+      const remaining = await readdir(skillsDir);
+      expect(remaining).toEqual([]);
     } finally {
       await rm(tmpDir, { recursive: true, force: true }).catch(() => undefined);
     }

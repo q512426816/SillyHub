@@ -15,6 +15,7 @@
 
 import { describe, it, expect, afterEach, vi } from 'vitest';
 import { existsSync, rmSync } from 'node:fs';
+import { mkdir, mkdtemp, readdir, rm } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { Daemon } from '../src/daemon.js';
@@ -996,3 +997,101 @@ describe('daemon lease.kind 分流（D-002@v3）', () => {
   });
 });
 
+
+// ── 2026-10-21-agent-profile-slim-default task-03：interactive 技能严格挂载 ──
+describe('task-03: interactive skillsStep 档案技能裁剪', () => {
+  it('execPayload.skillRefs=[] → <cwd>/.claude/skills/ 清空（档案生效即严格按档案）', async () => {
+    const sessionManager = createMockSessionManager();
+    const tmp = await mkdtemp(join(tmpdir(), 't03-iskills-'));
+    const skillsDir = join(tmp, '.claude', 'skills');
+    await mkdir(join(skillsDir, 'skill-a'), { recursive: true });
+    await mkdir(join(skillsDir, 'skill-b'), { recursive: true });
+    const infoSpy = vi.spyOn(console, 'info').mockImplementation(() => {});
+    const { daemon, client, wsClientMock } = buildDaemon({ sessionManager });
+
+    try {
+      await daemon.start();
+      client.claimLease.mockResolvedValueOnce({
+        claim_token: 'token-t03',
+        payload: {
+          kind: 'interactive',
+          prompt: 'hi',
+          provider: 'claude',
+          agent_session_id: 'sess-t03',
+          agent_run_id: 'run-t03',
+          root_path: tmp,
+          skillRefs: [],
+        },
+      });
+      wsClientMock._injectMessage({
+        type: MSG.TASK_AVAILABLE,
+        payload: {
+          leaseId: 'lease-t03',
+          kind: 'interactive',
+          prompt: 'hi',
+          agentSessionId: 'sess-t03',
+          agentRunId: 'run-t03',
+          rootPath: tmp,
+          skillRefs: [],
+        },
+      });
+      await waitForSpy(sessionManager.create as unknown as { mock: { calls: unknown[][] } });
+      await sleep(50);
+
+      const remaining = await readdir(skillsDir);
+      expect(remaining).toEqual([]);
+      const lines = infoSpy.mock.calls.map((c) => c.map(String).join(' '));
+      expect(lines.some((l) => l.includes('interactive_skills_pruned') && l.includes('keep=0'))).toBe(
+        true,
+      );
+    } finally {
+      infoSpy.mockRestore();
+      await rm(tmp, { recursive: true, force: true }).catch(() => undefined);
+      await daemon.stop();
+    }
+  });
+
+  it('execPayload 无 skillRefs 键 → 不裁剪（全量，现状零回归）', async () => {
+    const sessionManager = createMockSessionManager();
+    const tmp = await mkdtemp(join(tmpdir(), 't03-iskills-full-'));
+    const skillsDir = join(tmp, '.claude', 'skills');
+    await mkdir(join(skillsDir, 'skill-a'), { recursive: true });
+    const { daemon, client, wsClientMock } = buildDaemon({ sessionManager });
+
+    try {
+      await daemon.start();
+      client.claimLease.mockResolvedValueOnce({
+        claim_token: 'token-t03f',
+        payload: {
+          kind: 'interactive',
+          prompt: 'hi',
+          provider: 'claude',
+          agent_session_id: 'sess-t03f',
+          agent_run_id: 'run-t03f',
+          root_path: tmp,
+        },
+      });
+      wsClientMock._injectMessage({
+        type: MSG.TASK_AVAILABLE,
+        payload: {
+          leaseId: 'lease-t03f',
+          kind: 'interactive',
+          prompt: 'hi',
+          agentSessionId: 'sess-t03f',
+          agentRunId: 'run-t03f',
+          rootPath: tmp,
+        },
+      });
+      await waitForSpy(sessionManager.create as unknown as { mock: { calls: unknown[][] } });
+      await sleep(50);
+
+      const remaining = await readdir(skillsDir);
+      // 无键=不裁剪：预建 skill-a 必在（本文件未 mock skill-manager，link 会把
+      // 本机已同步技能一并 link 进来——全量内容依赖运行机，只断言不裁剪证据）。
+      expect(remaining).toContain('skill-a');
+    } finally {
+      await rm(tmp, { recursive: true, force: true }).catch(() => undefined);
+      await daemon.stop();
+    }
+  });
+});

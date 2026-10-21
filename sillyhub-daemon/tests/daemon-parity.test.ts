@@ -70,7 +70,15 @@
 // ============================================================================
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-vi.mock('../src/skill-manager.js', () => ({ linkSkillsToWorkdir: vi.fn(async () => ({ linked: 0, skipped: true })) }));
+vi.mock('../src/skill-manager.js', async (importOriginal) => {
+  // 2026-10-21-agent-profile-slim-default task-03：pruneSkillsToSubset 迁入本模块——
+  // passthrough 真实实现，网络面（link/sync）保持 mock。
+  const actual = await importOriginal<typeof import('../src/skill-manager.js')>();
+  return {
+    ...actual,
+    linkSkillsToWorkdir: vi.fn(async () => ({ linked: 0, skipped: true })),
+  };
+});
 
 // vi.mock 必须在 import 之前（vitest 提升 hoist）。
 let mockAdapter: Record<string, unknown> = {};
