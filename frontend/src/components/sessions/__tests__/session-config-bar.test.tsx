@@ -1495,3 +1495,36 @@ describe("SessionConfigBar 不指定兜底文案（provider-default-ui-hint）",
     expect(screen.getByText("不指定（本机默认）")).toBeInTheDocument();
   });
 });
+
+// ── 2026-10-21-profile-default-prehint：预会话档案显示对齐默认 ───────────────
+
+describe("SessionConfigBar 档案默认预示（profile-default-prehint）", () => {
+  it("provisional 未选档案 + 用户默认档案 → 按钮显示默认档案名；下拉兜底项动态文案", async () => {
+    mocks.profilesHook.mockReset().mockReturnValue({
+      profiles: [
+        { id: "prof-1", name: "SillySpec 极速变更", is_user_default: true },
+        { id: "prof-2", name: "普通档案" },
+      ],
+    });
+    renderBar({ provisional: true });
+    const btn = await screen.findByRole("button", {
+      name: "配置-档案 SillySpec 极速变更",
+    });
+    fireEvent.click(btn);
+    expect(screen.getByTestId("config-dd-profile")).toBeInTheDocument();
+    expect(screen.getByText("不指定（默认：SillySpec 极速变更）")).toBeInTheDocument();
+  });
+
+  it("非 provisional 未选档案 → 保持「未指定」真值（存量会话不追溯注入）", async () => {
+    mocks.profilesHook.mockReset().mockReturnValue({
+      profiles: [
+        { id: "prof-1", name: "SillySpec 极速变更", is_user_default: true },
+      ],
+    });
+    renderBar();
+    // 非 provisional：agentProfileId null（BASE_PROPS 缺省）→ 未指定
+    expect(
+      await screen.findByRole("button", { name: "配置-档案 未指定" }),
+    ).toBeInTheDocument();
+  });
+});

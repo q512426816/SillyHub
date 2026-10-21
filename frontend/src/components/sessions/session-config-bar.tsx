@@ -360,6 +360,15 @@ export function SessionConfigBar({
     () => noProviderLabel(providers),
     [providers],
   );
+  // 2026-10-21-profile-default-prehint：档案兜底项——provisional 且有默认时
+  // 实际效果是「创建时用默认档案」；运行中切不指定=本会话无人格（保持原文案）。
+  const noProfileFallbackLabel = useMemo(() => {
+    if (provisional) {
+      const def = profiles.find((p) => p.is_user_default);
+      if (def) return `不指定（默认：${def.name}）`;
+    }
+    return "不指定（无人格）";
+  }, [provisional, profiles]);
 
   const [openKind, setOpenKind] = useState<SessionConfigCtrlKind | null>(null);
   const [submitting, setSubmitting] = useState(false);
@@ -612,7 +621,12 @@ export function SessionConfigBar({
     ? profiles.find((p) => p.id === agentProfileId)?.name ??
       configSnapshot?.profile_name ??
       agentProfileId
-    : "未指定";
+    : // provisional（将创建）未选 → 预示用户默认档案（创建时注入）；非
+      // provisional 保持「未指定」真值——默认只在创建时注入，存量会话不追溯
+      //（2026-10-21-profile-default-prehint）。
+      provisional
+      ? (profiles.find((p) => p.is_user_default)?.name ?? "未指定")
+      : "未指定";
   const providerLabel = llmProviderId
     ? providers.find((p) => p.id === llmProviderId)?.name ??
       configSnapshot?.provider_name ??
@@ -936,7 +950,7 @@ export function SessionConfigBar({
             {/* ql-20260818-004：取消档案与供应商「不指定」对称——空串语义回无人格。 */}
             <SwitchItem
               icon={<User aria-hidden className="h-3 w-3" />}
-              label="不指定（无人格）"
+              label={noProfileFallbackLabel}
               current={agentProfileId == null}
               onClick={() =>
                 executeSwitch({
