@@ -1,0 +1,108 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-21-daemon-sync-hardening",
+  "rows": [
+    {
+      "anchor": "FR-01",
+      "row_id": "2026-10-21-daemon-sync-hardening:flow:测试绑定FR-01",
+      "tests": [
+        "sillyhub-daemon/tests/spec-sync-off-switch.test.ts「env 整机关闭返回 null 且零请求」",
+        "sillyhub-daemon/tests/spec-sync-off-switch.test.ts「flag 按工作区关闭他 ws 不受影响」",
+        "sillyhub-daemon/tests/spec-sync-off-switch.test.ts「parseSpecSyncOffEnv 大小写与脏值」",
+        "sillyhub-daemon/tests/spec-sync-off-switch.test.ts「关闭态 pending_push 不动」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-21-daemon-sync-hardening"
+    },
+    {
+      "anchor": "FR-02",
+      "row_id": "2026-10-21-daemon-sync-hardening:flow:测试绑定FR-02",
+      "tests": [
+        "sillyhub-daemon/tests/sillyspec-status-collect-guards.test.ts「deps 注入优先于 env」",
+        "sillyhub-daemon/tests/sillyspec-status-collect-guards.test.ts「env 合法覆盖采集超时」",
+        "sillyhub-daemon/tests/sillyspec-status-collect-guards.test.ts「env 非法回退默认 30s」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-21-daemon-sync-hardening"
+    },
+    {
+      "anchor": "FR-03",
+      "row_id": "2026-10-21-daemon-sync-hardening:flow:测试绑定FR-03",
+      "tests": [
+        "sillyhub-daemon/tests/sillyspec-status-collect-guards.test.ts「成功复位重计」",
+        "sillyhub-daemon/tests/sillyspec-status-collect-guards.test.ts「连败 3 次进入退避降频」",
+        "sillyhub-daemon/tests/sillyspec-status-collect-guards.test.ts「退避轮取模实采」",
+        "sillyhub-daemon/tests/sillyspec-status-collect-guards.test.ts「首次进退避 warn 一次」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-21-daemon-sync-hardening"
+    },
+    {
+      "anchor": "FR-04",
+      "row_id": "2026-10-21-daemon-sync-hardening:flow:测试绑定FR-04",
+      "tests": [
+        "sillyhub-daemon/tests/sillyspec-status-collect-guards.test.ts「crossrepo 标记跳过 spawn 且一次性指路」",
+        "sillyhub-daemon/tests/sillyspec-status-collect-guards.test.ts「标记删除恢复采集」",
+        "sillyhub-daemon/tests/sillyspec-status-collect-guards.test.ts「跳过不记失败」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-21-daemon-sync-hardening"
+    },
+    {
+      "anchor": "FR-05",
+      "row_id": "2026-10-21-daemon-sync-hardening:flow:测试绑定FR-05",
+      "tests": [
+        "sillyhub-daemon/tests/hub-client-fetch-timeout-surface.test.ts「hub-client 全部 fetch 带 signal」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-21-daemon-sync-hardening"
+    },
+    {
+      "anchor": "FR-06",
+      "row_id": "2026-10-21-daemon-sync-hardening:flow:测试绑定FR-06",
+      "tests": [
+        "sillyhub-daemon/tests/event-loop-watch.test.ts「循环退出 disable 直方图」",
+        "sillyhub-daemon/tests/event-loop-watch.test.ts「正常窗口静默」",
+        "sillyhub-daemon/tests/event-loop-watch.test.ts「超阈值 warn 携带统计字段」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-21-daemon-sync-hardening"
+    }
+  ]
+}

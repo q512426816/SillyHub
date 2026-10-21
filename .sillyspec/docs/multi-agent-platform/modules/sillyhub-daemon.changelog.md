@@ -22,3 +22,4 @@
 - 2026-10-21-gitlog-quotepath-fix | 修复git日志非ASCII路径展示与空diff
 - 2026-10-21-overview-card-mainflow-scan | 总览卡主管线去scan并隐藏thin零步骤
 - 2026-10-21-gitlog-conflict-quotepath | 合并冲突链路非ASCII路径quotepath修复
+- 2026-10-21-daemon-sync-hardening | 执行端同步加固与状态采集治理

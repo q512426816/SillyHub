@@ -5715,3 +5715,135 @@
   confirmed_at: null
   source_change: 2026-10-21-gitlog-conflict-quotepath
   status: active
+
+## FR-daemon-183 daemon spec 自动推送支持整机关闭（env）与按工作区关闭（flag 文件），关闭态为 no-op（返回 null、不动 pending_push），knowledge hits 上行不受影响
+变更：2026-10-21-daemon-sync-hardening
+状态：active
+摘要：env 整机关闭；按工作区 flag 关闭；pending_push 不动
+场景正文：
+- 场景：env 整机关闭 — Given `SILLYHUB_DAEMON_SPEC_SYNC_OFF=1` 且 mock client 的 postSpecSync 为 spy，When 调 `pos
+- 场景：按工作区 flag 关闭 — Given 仅 `~/.sillyhub/daemon/spec-sync-off/{wsId}.flag` 在位（env 未设），When 该 ws 调 postSpec
+- 场景：pending_push 不动 — Given 关闭态命中且 specRoot/.runtime/pending_push 标记已存在，When 推送被跳过，Then 标记文件保持原样（不写不清）。
+全文：.sillyspec/changes/archive/2026-10-21-daemon-sync-hardening/requirements.md#FR-01
+最近确认：28656ff43d1c7fe40924545732e7445cbaca0492
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-21-daemon-sync-hardening:flow:测试绑定FR-01
+  tests: sillyhub-daemon/tests/spec-sync-off-switch.test.ts「env 整机关闭返回 null 且零请求」 | sillyhub-daemon/tests/spec-sync-off-switch.test.ts「flag 按工作区关闭他 ws 不受影响」 | sillyhub-daemon/tests/spec-sync-off-switch.test.ts「parseSpecSyncOffEnv 大小写与脏值」 | sillyhub-daemon/tests/spec-sync-off-switch.test.ts「关闭态 pending_push 不动」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-21-daemon-sync-hardening
+  status: active
+
+## FR-daemon-184 status 采集超时支持 SILLYHUB_DAEMON_STATUS_TIMEOUT_MS env 覆盖
+变更：2026-10-21-daemon-sync-hardening
+状态：active
+摘要：env 合法生效；非法回退默认
+场景正文：
+- 场景：env 合法生效 — Given env=120000 且构造 manager 未注入 deps.statusTimeoutMs，When 执行一轮采集，Then 传给执行器的 timeoutM
+- 场景：非法回退默认 — Given env 为 'abc'、'-1'、'0' 或空白，When 构造 manager，Then 采集超时为默认 30_000。
+全文：.sillyspec/changes/archive/2026-10-21-daemon-sync-hardening/requirements.md#FR-02
+最近确认：28656ff43d1c7fe40924545732e7445cbaca0492
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-21-daemon-sync-hardening:flow:测试绑定FR-02
+  tests: sillyhub-daemon/tests/sillyspec-status-collect-guards.test.ts「deps 注入优先于 env」 | sillyhub-daemon/tests/sillyspec-status-collect-guards.test.ts「env 合法覆盖采集超时」 | sillyhub-daemon/tests/sillyspec-status-collect-guards.test.ts「env 非法回退默认 30s」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-21-daemon-sync-hardening
+  status: active
+
+## FR-daemon-185 status 采集对连续失败目标自动退避降频，成功即复位
+变更：2026-10-21-daemon-sync-hardening
+状态：active
+摘要：连败退避降频；成功复位
+场景正文：
+- 场景：连败退避降频 — Given 某目标连败 3 次，When 第 4~9 轮采集，Then 跳过 spawn；第 10 轮恢复实采尝试。
+- 场景：成功复位 — Given 目标已处退避态且某轮实采成功，When 之后再次失败，Then 连败从 1 重新计数（不立即退避）。
+全文：.sillyspec/changes/archive/2026-10-21-daemon-sync-hardening/requirements.md#FR-03
+最近确认：28656ff43d1c7fe40924545732e7445cbaca0492
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-21-daemon-sync-hardening:flow:测试绑定FR-03
+  tests: sillyhub-daemon/tests/sillyspec-status-collect-guards.test.ts「成功复位重计」 | sillyhub-daemon/tests/sillyspec-status-collect-guards.test.ts「连败 3 次进入退避降频」 | sillyhub-daemon/tests/sillyspec-status-collect-guards.test.ts「退避轮取模实采」 | sillyhub-daemon/tests/sillyspec-status-collect-guards.test.ts「首次进退避 warn 一次」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-21-daemon-sync-hardening
+  status: active
+
+## FR-daemon-186 登记根带 .git/sillyspec-crossrepo.json 的工作区采集自动跳过并一次性提示
+变更：2026-10-21-daemon-sync-hardening
+状态：active
+摘要：跨仓跳过一次性指路；标记删除后恢复
+场景正文：
+- 场景：跨仓跳过一次性指路 — Given cwd 带 crossrepo 标记（内含 workspace 字段），When 连续多轮采集，Then 不 spawn、info 指路日志只出现一次、不产生失
+- 场景：标记删除后恢复 — Given 某轮标记已被删除，When 下一轮采集，Then 恢复正常 spawn 路径。
+全文：.sillyspec/changes/archive/2026-10-21-daemon-sync-hardening/requirements.md#FR-04
+最近确认：28656ff43d1c7fe40924545732e7445cbaca0492
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-21-daemon-sync-hardening:flow:测试绑定FR-04
+  tests: sillyhub-daemon/tests/sillyspec-status-collect-guards.test.ts「crossrepo 标记跳过 spawn 且一次性指路」 | sillyhub-daemon/tests/sillyspec-status-collect-guards.test.ts「标记删除恢复采集」 | sillyhub-daemon/tests/sillyspec-status-collect-guards.test.ts「跳过不记失败」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-21-daemon-sync-hardening
+  status: active
+
+## FR-daemon-187 hub-client 全部 fetch 带显式 AbortSignal 超时
+变更：2026-10-21-daemon-sync-hardening
+状态：active
+摘要：源码面全量断言
+场景正文：
+- 场景：源码面全量断言 — Given hub-client.ts 全文，When 扫描全部 fetch( 调用点，Then 每一处调用的实参块内均含 signal。
+全文：.sillyspec/changes/archive/2026-10-21-daemon-sync-hardening/requirements.md#FR-05
+最近确认：28656ff43d1c7fe40924545732e7445cbaca0492
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-21-daemon-sync-hardening:flow:测试绑定FR-05
+  tests: sillyhub-daemon/tests/hub-client-fetch-timeout-surface.test.ts「hub-client 全部 fetch 带 signal」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-21-daemon-sync-hardening
+  status: active
+
+## FR-daemon-188 daemon 具备事件循环 lag 周期监控，超阈值留 warn 证据
+变更：2026-10-21-daemon-sync-hardening
+状态：active
+摘要：超阈值告警；正常窗口静默
+场景正文：
+- 场景：超阈值告警 — Given 注入假直方图窗口 max=6000ms、阈值 5000ms，When 一拍采样，Then 输出 warn event_loop_lag 且统计字段齐全。
+- 场景：正常窗口静默 — Given 假直方图 max=100ms，When 一拍采样，Then 不输出 warn（仅 debug tick）。
+全文：.sillyspec/changes/archive/2026-10-21-daemon-sync-hardening/requirements.md#FR-06
+最近确认：28656ff43d1c7fe40924545732e7445cbaca0492
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-21-daemon-sync-hardening:flow:测试绑定FR-06
+  tests: sillyhub-daemon/tests/event-loop-watch.test.ts「循环退出 disable 直方图」 | sillyhub-daemon/tests/event-loop-watch.test.ts「正常窗口静默」 | sillyhub-daemon/tests/event-loop-watch.test.ts「超阈值 warn 携带统计字段」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-21-daemon-sync-hardening
+  status: active
