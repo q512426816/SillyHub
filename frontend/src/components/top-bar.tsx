@@ -22,6 +22,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { WorkspaceSwitcher } from "@/components/workspace-switcher";
+import type { WorkspaceSwitcherPreview } from "@/components/workspace-switcher";
 
 /**
  * 面包屑段名映射：pathname split 后的段值 → 中文标签。
@@ -127,9 +128,15 @@ export interface TopBarProps {
    * 一致（AvatarFallback 首字回退，既有调用方零改动）。
    */
   avatar?: string | null;
+  /**
+   * dev-only 预览入参（2026-10-20-session-page-dsh-alignment / D-010）：透传给
+   * WorkspaceSwitcher 的预览当前工作区。不传（生产 layout 现状）＝切换器走原有
+   * store/URL 派生，行为零变化。
+   */
+  workspacePreview?: WorkspaceSwitcherPreview;
 }
 
-export function TopBar({ displayName, onLogout, avatar }: TopBarProps) {
+export function TopBar({ displayName, onLogout, avatar, workspacePreview }: TopBarProps) {
   const pathname = usePathname();
   const router = useRouter();
   const crumbs = buildBreadcrumbs(pathname);
@@ -149,7 +156,7 @@ export function TopBar({ displayName, onLogout, avatar }: TopBarProps) {
           导航全 absolute），避免顶栏常驻「选择工作区」引导态误导用户以为必须先选工作区。 */}
       {!pathname.startsWith("/ppm") && (
         <div className="flex shrink-0 items-center pr-2">
-          <WorkspaceSwitcher />
+          <WorkspaceSwitcher preview={workspacePreview} />
         </div>
       )}
 

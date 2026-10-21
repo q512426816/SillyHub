@@ -60,6 +60,8 @@ import {
 // 显示覆盖，mergeMenus 把覆盖叠加到权限过滤结果之上（FR-05）。
 import { mergeMenus, useMenuOverrides } from "@/lib/menu-overrides";
 import { useSession } from "@/stores/session";
+import type { SessionUser } from "@/stores/session";
+import type { CurrentWorkspace } from "@/stores/workspace";
 import { ensureFreshAccessToken, decodeJwtExp } from "@/lib/token-refresh";
 import { visibleMenusBySection } from "@/lib/permission";
 // task-10：复用 task-04 的 useWorkspaceContext（URL 派生真相源 + 旁路写 store 缓存）。
@@ -145,14 +147,44 @@ function resolveMenuIcon(menu: MenuPermissionGroup): LucideIcon {
 
 const COLLAPSED_KEY = "sidebar-collapsed";
 
-export function AppShell({ children }: { children: ReactNode }) {
+/**
+ * dev-only 预览覆盖（2026-10-20-session-page-dsh-alignment / D-010 / D-017）。
+ *
+ * 用途：`/proto/*` 预览路由要在**不登录、不连后端**的前提下渲染「真实壳层」——
+ * 壳层的菜单/品牌区/顶栏显示名都从 `useSession` 与 workspace store 派生，未登录
+ * 时菜单恒为空（visibleMenusBySection(null, …) → []），预览页就只能看到空侧栏。
+ * 故给 AppShell 开一个**可选**入参：字段给全时用预览值，不给（生产 layout 现状）
+ * 时逐字段回落到原有 store 读取——生产行为与渲染结果零变化。
+ *
+ * 边界：仅 dev 预览路由（frontend/src/app/proto/**）传入；不进导航、不被生产页
+ * 引用；预览态下「退出登录」换成调用方给的 no-op（防在预览页清掉真实登录态）。
+ */
+export interface AppShellPreview {
+  /** 替代 useSession().user 的预览用户（菜单权限过滤 + 顶栏显示名/头像来源）。 */
+  user: SessionUser | null;
+  /** 替代 workspace store current 的预览工作区（菜单链接前缀/高亮判定来源）。 */
+  workspace?: CurrentWorkspace | null;
+  /** 替代「打开退出确认弹窗」的预览入口（缺省仍走原确认弹窗）。 */
+  onLogoutRequest?: () => void;
+}
+
+export function AppShell({
+  children,
+  preview,
+}: {
+  children: ReactNode;
+  preview?: AppShellPreview;
+}) {
   const pathname = usePathname();
   // task-10：workspaceId 改由 useWorkspaceContext 提供（task-04）。
   // 进入工作区时 hook 内 effect 顺带写 workspace store 缓存（FR-01）。
   // 也取 current（store 缓存）：平台页/列表页（workspaceId=null）若切换器选过工作区，
   // 菜单用 current.id 兜底链接（修复"选了工作区菜单仍灰显"，与 switcher 修复同理）。
-  const { workspaceId, current } = useWorkspaceContext();
-  const { user, accessToken, refreshToken, clear } = useSession();
+  const { workspaceId, current: cachedWorkspace } = useWorkspaceContext();
+  const { user: sessionUser, accessToken, refreshToken, clear } = useSession();
+  // dev 预览覆盖：不给 preview 时逐字段等价于原实现（user / current 原样）。
+  const user = preview ? preview.user : sessionUser;
+  const current = preview ? (preview.workspace ?? null) : cachedWorkspace;
 
   // task-10（FR-05）：全局菜单显示覆盖（改名/隐藏/组内排序）。降级已在 hook 内
   // 收口——拉取失败/首帧 overrides 恒为空数组（NFR-02 直通），组件层不写额外降级分支。
@@ -306,7 +338,9 @@ export function AppShell({ children }: { children: ReactNode }) {
   };
 
   // 用户点退出（TopBar 菜单 / 侧边栏底部）→ 先弹确认，确认后才执行真正登出。
-  const requestLogout = () => setLogoutOpen(true);
+  // dev 预览路由传入 onLogoutRequest 时改走该入口（预览页不得动真实登录态）。
+  const requestLogout =
+    preview?.onLogoutRequest ?? (() => setLogoutOpen(true));
 
   const performLogout = async () => {
     setLogoutOpen(false);
@@ -502,11 +536,22 @@ export function AppShell({ children }: { children: ReactNode }) {
         }`}
       >
         {/* task-09（2026-09-10-account-avatar-upload / FR-05）：顶栏接入平台头像
-            （useSession user.avatar，无头像 null → TopBar 首字回退现状不动）。 */}
+            （useSession user.avatar，无头像 null → TopBar 首字回退现状不动）。
+            dev 预览：preview.workspace 存在时把预览工作区透传给切换器（生产 layout
+            不传 preview → workspacePreview undefined → 切换器走原派生逻辑）。 */}
         <TopBar
           onLogout={requestLogout}
           displayName={displayName}
           avatar={user?.avatar ?? null}
+          workspacePreview={
+            preview?.workspace
+              ? {
+                  name: preview.workspace.name || "未命名工作区",
+                  bound: preview.workspace.daemon_id != null,
+                  online: preview.workspace.daemon_online,
+                }
+              : undefined
+          }
         />
         <div className="min-w-0 flex-1">{children}</div>
         <LogoutConfirmDialog

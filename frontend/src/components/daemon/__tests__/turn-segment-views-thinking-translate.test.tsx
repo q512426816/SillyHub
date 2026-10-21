@@ -55,7 +55,8 @@ beforeEach(() => {
 });
 
 function expandRow() {
-  fireEvent.click(screen.getByRole("button", { name: /思考过程/ }));
+  // D-025：折叠头标题改为固定语义标签「💭 思考」（图标与标签分 span 渲染）。
+  fireEvent.click(screen.getByRole("button", { name: /思考/ }));
 }
 
 describe("ThinkingRowView 离线翻译接入", () => {

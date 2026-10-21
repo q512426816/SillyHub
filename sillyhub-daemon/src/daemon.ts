@@ -4595,54 +4595,6 @@ export class Daemon {
     }
   }
 
-  /**
-   * 2026-10-21-daemon-zombie-turn FR-01：轮启动看门狗触发的失败回报。
-   *
-   * SessionManager 看门狗到点（inject push 后窗口内零轮事件——消息疑被引擎
-   * 在打断 abort 收尾窗口吞没，生产会话 49d893ab 实证形态）且已重置会话态后
-   * 经 deps.onTurnStartTimeout 到达本方法。用 state 的 leaseId/claimToken 经
-   * notifyRunResult 把该 run 收敛 failed（status='turn_start_timeout' +
-   * is_error=true → backend close_interactive_run 落 error_code=
-   * interactive_failed + result_summary 作可读原因，SSE 终态随之到达前端）。
-   *
-   * 边界：session-manager / state 缺失（终态清理后迟到触发）→ warn no-op；
-   * notifyRunResult 网络/HTTP 失败 → warn 不重试（backend pending run 启动
-   * 超时清扫 300s 兜底，与 _reportInjectDropped 同款收敛姿势）。
-   */
-  async onTurnStartTimeout(sessionId: string, runId: string): Promise<void> {
-    if (!this._sessionManager) {
-      this._logger.warn('on_turn_start_timeout_no_manager', { session_id: sessionId });
-      return;
-    }
-    const state = this._sessionManager.get(sessionId);
-    if (!state) {
-      this._logger.warn('on_turn_start_timeout_session_not_found', {
-        session_id: sessionId,
-      });
-      return;
-    }
-    try {
-      await this._client.notifyRunResult(state.leaseId, state.claimToken, runId, {
-        status: 'turn_start_timeout',
-        is_error: true,
-        result_summary:
-          '消息已送达，但引擎长时间未启动本轮（可能被上一轮打断的收尾竞态吞没）。' +
-          '本轮已自动收敛为失败，请重新发送消息即可继续',
-      });
-      this._logger.info('turn_start_timeout_reported', {
-        session_id: sessionId,
-        run_id: runId,
-        lease_id: state.leaseId,
-      });
-    } catch (e) {
-      this._logger.warn('turn_start_timeout_report_failed', {
-        session_id: sessionId,
-        run_id: runId,
-        lease_id: state.leaseId,
-        error: e,
-      });
-    }
-  }
 
   /**
    * 桥接：增量上报 agent 执行消息（流式）。

@@ -25,6 +25,11 @@ const VIEWS = [
   { file: "workspace-list-view", title: "工作区列表", desc: "Repositories 行式列表/守护徽标/Counter/规范分页" },
   { file: "workspace-overview-view", title: "工作区概览", desc: "Repo 式页头/守护横幅/统计四格/两栏+About" },
   { file: "session-portal-view", title: "会话门户", desc: "三栏：会话列表/消息流/信息面板" },
+  {
+    file: "session-fold-view",
+    title: "会话页过程折叠（A/C 双形态）",
+    desc: "单视图可伸缩 vs 保留旧进度入口 + 三档细节 + 边界场景 + 密度两套参数",
+  },
   { file: "sillyspec-flow-view", title: "SillySpec 变更流程", desc: "流程类原型：轻量道/完整道双泳道状态机（FlowDiagram）" },
   { file: "conflict-sync-states-view", title: "同步冲突状态", desc: "冲突行「标记已处理」入口/失败卡按 daemon_code 三分支/full-tree 兜底来源提示" },
 ];

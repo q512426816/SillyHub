@@ -2131,14 +2131,14 @@ describe("SessionPanel（dialog）对话/进度视图切换（ql-20260729-005）
     await waitFor(() => expect(screen.getByText(/文件内容如下/)).toBeInTheDocument());
     expect(screen.queryByText("Read src/a.ts")).not.toBeInTheDocument();
     expect(screen.queryByText(/先想想怎么读/)).not.toBeInTheDocument();
-    expect(screen.queryByText("思考过程")).not.toBeInTheDocument();
+    expect(screen.queryByText("思考")).not.toBeInTheDocument();
 
     // 切「进度」：过程项出现（thinking 折叠块标题 + 摘要，tool 行）
     fireEvent.click(screen.getByRole("tab", { name: "进度" }));
     await waitFor(() => expect(screen.getByText("Read src/a.ts")).toBeInTheDocument());
-    // task-10 段模型适配：ThinkingRowView 折叠头渲染「💭 思考过程」（旧路径是纯
-    // 「思考过程」精确文案），断言改子串匹配
-    expect(screen.getByText(/思考过程/)).toBeInTheDocument();
+    // task-10 段模型适配：ThinkingRowView 折叠头渲染固定语义标签「💭 思考」
+    // （D-025 起由「💭 思考过程」改词表标签；旧路径仍是纯「思考过程」文案）
+    expect(screen.getByText("思考")).toBeInTheDocument();
     // thinking 默认折叠：摘要（截断文本）可见
     expect(screen.getByText(/先想想怎么读/)).toBeInTheDocument();
 

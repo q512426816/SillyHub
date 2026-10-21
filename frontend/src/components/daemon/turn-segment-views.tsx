@@ -7,9 +7,11 @@
  *
  *   - TextSegmentView   文本段无框正文（MarkdownText + streaming 尾部闪烁光标；
  *                       task-11：正文右下角 hover 浮出 CopyButton 复制 segment.text）
- *   - ThinkingRowView   思考折叠行（摘要 60 字截断 + streaming「思考中」脉冲标记；
- *                       task-11：展开正文右下角 hover 浮出 CopyButton 复制 segment.text）
- *   - ToolRowView       工具单行（图标+工具名+主参数+状态徽章+耗时+运行中扫动；
+ *   - ThinkingRowView   思考折叠行（💭 思考 + 「·」+ 摘要 60 字截断 + streaming
+ *                       「思考中」脉冲标记；task-11：展开正文右下角 hover 浮出
+ *                       CopyButton 复制 segment.text）
+ *   - ToolRowView       工具单行（D-025 语义标签 + 工具名 + 主参数 + 状态徽章 +
+ *                       耗时 + 运行中扫动；标签映射见 process-labels.ts）；
  *                       点击整行展开 result，MarkdownText 渲染；复制按钮平移现有
  *                       turn-timeline parseToolRaw 的 copyText 规则；
  *                       task-12：团队 MCP 工具（dispatch_worker 等 5 个）泛化微调
@@ -66,6 +68,7 @@ import { Children, createContext, memo, useContext, useEffect, useMemo, useRef, 
 import type { ReactNode } from "react";
 
 import { MarkdownText } from "@/components/ui/markdown-text";
+import { processLabel } from "@/components/daemon/process-labels";
 import { CopyButton } from "@/components/daemon/copy-button";
 import { FileMessageCard } from "@/components/daemon/file-message-card";
 import { useSubagentPanel } from "@/components/daemon/subagent-panel-context";
@@ -298,23 +301,6 @@ function toolCopyText(raw: string, toolName: string | null): string | null {
     return null;
   }
 }
-
-/** 工具行图标——原型 t-icon 语义映射（未列工具统一 🔧 扳手，同现有 Wrench 语义）。 */
-const TOOL_ICON: Record<string, string> = {
-  Read: "📂",
-  Write: "🎨",
-  Edit: "✏️",
-  Grep: "🔧",
-  Glob: "🔧",
-  Bash: "💻",
-  Task: "🤖",
-  Agent: "🤖",
-};
-
-function toolIconOf(toolName: string | null): string {
-  return (toolName && TOOL_ICON[toolName]) || "🔧";
-}
-
 
 /** 工具状态徽章元数据（图标/颜色/提示文案平移现有 ToolEventCard）。 */
 const TOOL_STATUS_META: Record<
@@ -642,7 +628,11 @@ export const TextSegmentView = memo(function TextSegmentView({ segment }: TextSe
     // 2026-09-20-agent-reply-no-bubble：去气泡——容器改无框正文（w-full +
     // max-w-[min(100%,48rem)]，铺在时间线背景上），排版交 .markdown-text 既有
     // 规则（原 ql-20260909-009 的 80% 收窄 + 描边分层形态被此取代）。
-    <div className="seg-text-body group relative w-full max-w-[min(100%,48rem)] self-start">
+    // 2026-10-20-session-page-dsh-alignment（FR-02 / D-016②）：正文与过程字阶分离——
+    // 阅读限宽 48rem→52rem（宽屏少折行）；字号/行高/段距（14.5px / 1.78 / 0.6em）
+    // 由 globals.css 的 `.seg-text-body` 元素级规则承担（MarkdownText compact 的
+    // !text-xs 带 !important，容器类挂 font-size 压不住它，故不在此写死字号）。
+    <div className="seg-text-body group relative w-full max-w-[min(100%,52rem)] self-start">
       <MarkdownText content={segment.text} />
       {segment.streaming && (
         <span
@@ -657,17 +647,22 @@ export const TextSegmentView = memo(function TextSegmentView({ segment }: TextSe
 
 /**
  * 思考折叠行（原型 seg-thinking / deepseek ReasoningRow 风格）：折叠头部 =
- * 箭头 + 💭 思考过程 + 摘要（空白折叠 60 字截断，流式自动跟随段文本更新）；
+ * 箭头 + 💭 思考 + 「 · 」+ 摘要（空白折叠 60 字截断，流式自动跟随段文本更新）；
  * streaming 时标题旁「思考中」脉冲标记；默认折叠（R-03 展开才挂载正文）；
  * 展开正文 MarkdownText 限高 180px 滚动。
  *
  * 2026-10-19-thinking-zh-translate / FR-01·FR-04：摘要与展开正文接入离线翻译
  * （useThinkingSummary / TranslatedThinkingBody）——流式中显示原文零请求，
  * 流结束后摘要换中文；展开正文默认译文、可一键切原文。
+ *
+ * D-025@v1（2026-10-20-session-page-dsh-alignment）：标题由「💭 思考过程」改为
+ * 固定语义词表「💭 思考」（标签映射见 process-labels.ts，纯展示不改原文）；
+ * 之后补「·」再跟摘要，形成 `icon + 中文标签 + · + 一行摘要`。
  */
 export const ThinkingRowView = memo(function ThinkingRowView({ segment }: ThinkingRowViewProps) {
   const [open, setOpen] = useState(false);
   const summary = useThinkingSummary(segment.text, segment.streaming);
+  const label = processLabel("thinking");
   return (
     <div className="w-full">
       <button
@@ -677,7 +672,10 @@ export const ThinkingRowView = memo(function ThinkingRowView({ segment }: Thinki
           setOpen(!open);
         }}
         aria-expanded={open}
-        className="flex w-full cursor-pointer select-text items-center gap-[7px] rounded-md px-1.5 py-[3px] text-left text-[11.5px] text-muted-foreground hover:bg-muted"
+        /* 2026-10-21 用户裁决「对比加强」：过程行退到正文之后——字号 12px→11.5px、
+           墨色 muted 全额→muted/80（同一 token 的透明度档，三主题各自换肤）。
+           正文侧同期升到 15px（globals.css .seg-text-body 规则）。 */
+        className="flex w-full cursor-pointer select-text items-center gap-[7px] rounded-md px-1.5 py-[3px] text-left text-[11.5px] leading-[1.55] text-muted-foreground/80 hover:bg-muted"
       >
         <span
           aria-hidden
@@ -688,7 +686,10 @@ export const ThinkingRowView = memo(function ThinkingRowView({ segment }: Thinki
         >
           ▶
         </span>
-        <span className="shrink-0 font-medium">💭 思考过程</span>
+        <span className="shrink-0 font-medium">
+          <span aria-hidden className="mr-1">{label.icon}</span>
+          {label.label}
+        </span>
         {segment.streaming && (
           <span className="inline-flex shrink-0 items-center gap-1 text-[10.5px] text-brand-600">
             <span aria-hidden className="h-[5px] w-[5px] animate-pulse rounded-full bg-brand-600" />
@@ -696,14 +697,19 @@ export const ThinkingRowView = memo(function ThinkingRowView({ segment }: Thinki
           </span>
         )}
         {!open && summary && (
-          <span className="ml-1 min-w-0 flex-1 truncate opacity-75">{summary}</span>
+          /* 摘要不再叠自己的 opacity-75：行级已降到 muted/80，两层叠加在浅色主题下
+             会掉到 ~0.6 alpha（对比 <3:1，摘要不可读）。摘要只吃行级 80% 档。 */
+          <>
+            <span aria-hidden className="shrink-0 text-muted-foreground/60">·</span>
+            <span className="min-w-0 flex-1 truncate">{summary}</span>
+          </>
         )}
       </button>
       {open && (
         /* task-11（FR-07）：group+relative 外包一层挂 CopyButton（右下角 hover 浮出）——
             不能塞进滚动容器内（overflow-y-auto 会裁掉浮出按钮）；折叠态不渲染（R-03）。 */
         <div className="group relative mt-1">
-          <div className="max-h-[180px] overflow-y-auto rounded-lg bg-muted px-3 py-2 text-[11.5px] leading-relaxed text-muted-foreground">
+          <div className="max-h-[180px] overflow-y-auto rounded-lg bg-muted px-3 py-2 text-[12px] leading-[1.55] text-muted-foreground">
             <TranslatedThinkingBody text={segment.text} streaming={segment.streaming} />
           </div>
           <CopyButton text={segment.text} />
@@ -714,23 +720,30 @@ export const ThinkingRowView = memo(function ThinkingRowView({ segment }: Thinki
 });
 
 /**
- * 工具行（原型 seg-tool / deepseek ToolRow 风格）：单行摘要 = 图标 + 工具名 +
- * 主参数（truncate）+ 状态徽章（✓/✗/⏳）+ 耗时（起止均有时才显示；运行中不显
- * 秒数——纯组件不读时钟，live 计时归状态条）+ 复制按钮（copyText 规则平移）。
- * status=running 时整行 seg-sweep 扫动动画（1.8s）。点击整行展开 result
- * （MarkdownText，默认折叠，限高 200px 滚动）；运行中无 result 展开显示
- * 「执行中…」占位。toolName 为空：孤儿 result 段显示「工具结果」，解析失败
- * （R-07）主参数位置原样显示 raw。
+ * 工具行（原型 seg-tool / deepseek ToolRow 风格）：单行摘要 = 图标 + 中文语义
+ * 标签 + 「·」+ 工具名 + 主参数（truncate）+ 状态徽章（✓/✗/⏳）+ 耗时（起止均有
+ * 时显示；运行中不显秒数——纯组件不读时钟，live 计时归状态条）+ 复制按钮
+ * （copyText 规则平移）。status=running 时整行 seg-sweep 扫动动画（1.8s）。点击
+ * 整行展开 result（MarkdownText，默认折叠，限高 200px 滚动）；运行中无 result
+ * 展开显示「执行中…」占位。toolName 为空：孤儿 result 段显示「工具结果」，解析
+ * 失败（R-07）主参数位置原样显示 raw。
+ *
+ * D-025@v1（2026-10-20-session-page-dsh-alignment）：图标与标签来自固定语义词表
+ * `processLabel("tool", toolName, status)`（process-labels.ts，纯展示映射）：运行
+ * 命令 / 读写文件 / 搜索 / 其它；status=deny（失败/被拒）时标签恒为「失败」。工具
+ * 名仍原样渲染（brand 色、label 之后），词表外工具显示「其它」而不是隐藏。
  *
  * task-12（2026-08-22-team-session-unify FR-07）团队 MCP 工具泛化微调（原型 §03
  * tool-card）：5 团队工具（mcp__server__ 前缀或裸名）→ 👥 图标 + mcp 来源标识 +
- * 短名（剥前缀）+ 角色/目标主参数摘要；其余工具渲染零改动。
+ * 短名（剥前缀）+ 角色/目标主参数摘要；其余工具渲染零改动（语义标签除外）。
  */
 export const ToolRowView = memo(function ToolRowView({ segment }: ToolRowViewProps) {
   useSegmentAnimations();
   const [open, setOpen] = useState(false);
   const running = segment.status === "running";
   const badge = TOOL_STATUS_META[segment.status];
+  // D-025@v1：展示层语义标签（错误状态优先 → 「失败」）。工具名不参与改写。
+  const label = processLabel("tool", segment.toolName, segment.status);
   const duration =
     segment.startedAt != null && segment.endedAt != null
       ? formatToolDuration(segment.endedAt - segment.startedAt)
@@ -788,12 +801,21 @@ export const ToolRowView = memo(function ToolRowView({ segment }: ToolRowViewPro
           }
         }}
         className={cn(
-          "relative flex w-full cursor-pointer select-text items-center gap-2 overflow-hidden rounded-lg border border-brand-200 bg-brand-50 px-3 py-[5px] text-xs",
+          // 2026-10-20-session-page-dsh-alignment（FR-03 / D-013@v1 / D-016③）：
+          // 工具卡去外框——满宽描边 + brand 浅底卡（rounded-lg border bg-brand-50）
+          // 换成 2px 左规线（border-l-2 + 语义 --border），底透明，左内边距 9px、
+          // 行内间距 9px；hover 时左规线转 brand（语义类，三主题各自成立）。
+          // 2026-10-21 用户裁决「对比加强」：过程行字阶降一档 12px→11.5px，墨色退到
+          // muted/80（同一 token 的透明度档）；左规线静息态降为 border/60（更轻），
+          // hover 仍转 brand——工具行在静息时不与正文抢边界，正文（15px）成为主角。
+          // group 供行尾动作（复制等）默认 opacity-45 → group-hover 复原。
+          "group relative flex w-full cursor-pointer select-text items-center gap-[9px] overflow-hidden border-l-2 border-border/60 py-[4px] pl-[9px] pr-1 text-[11.5px] leading-[1.55] text-muted-foreground/80 hover:border-l-brand-600",
           running && "seg-sweep",
         )}
       >
         <span aria-hidden className="shrink-0 text-xs">
-          {teamTool ? "👥" : toolIconOf(segment.toolName)}
+          {/* 团队工具保留 👥 实体标识；失败行统一换 ⚠（词表「失败」优先）。 */}
+          {teamTool && label.label !== "失败" ? "👥" : label.icon}
         </span>
         {teamTool && (
           <span
@@ -803,16 +825,21 @@ export const ToolRowView = memo(function ToolRowView({ segment }: ToolRowViewPro
             mcp
           </span>
         )}
+        <span className="shrink-0 text-[11.5px] font-medium">{label.label}</span>
+        <span aria-hidden className="shrink-0 text-muted-foreground/60">·</span>
         <span className="shrink-0 text-[11.5px] font-semibold text-brand-600">
           {teamTool ?? segment.toolName ?? (segment.raw ? "工具调用" : "工具结果")}
         </span>
         {desc && (
-          <span
-            className="min-w-0 flex-1 truncate font-mono text-[11px] text-muted-foreground"
-            title={segment.raw || desc}
-          >
-            {desc}
-          </span>
+          <>
+            <span aria-hidden className="shrink-0 text-muted-foreground/60">·</span>
+            <span
+              className="min-w-0 flex-1 truncate font-mono text-[11.5px] text-muted-foreground/80"
+              title={segment.raw || desc}
+            >
+              {desc}
+            </span>
+          </>
         )}
         <span
           className={cn("ml-auto shrink-0 font-mono text-[11px]", badge.cls)}
@@ -841,7 +868,10 @@ export const ToolRowView = memo(function ToolRowView({ segment }: ToolRowViewPro
               e.stopPropagation();
               void copyTextToClipboard(copyText);
             }}
-            className="shrink-0 rounded px-1.5 py-0.5 text-[10px] text-muted-foreground hover:bg-muted hover:text-foreground"
+            // 2026-10-20-session-page-dsh-alignment（FR-03 / D-016③）：行尾动作
+            // 默认压到 45% 透明（工具行不再满宽描边卡，动作退到背景），
+            // hover 本行（容器 group）复原 100%。
+            className="shrink-0 rounded px-1.5 py-0.5 text-[10px] text-muted-foreground opacity-45 transition-opacity hover:bg-muted hover:text-foreground group-hover:opacity-100"
             title="复制命令"
           >
             复制
@@ -849,7 +879,7 @@ export const ToolRowView = memo(function ToolRowView({ segment }: ToolRowViewPro
         )}
       </div>
       {open && (
-        <div className="mt-1 max-h-[200px] overflow-y-auto rounded-lg bg-muted px-3 py-2 text-[11px] leading-relaxed text-muted-foreground">
+        <div className="mt-1 max-h-[200px] overflow-y-auto rounded-lg bg-muted px-3 py-2 text-[12px] leading-[1.55] text-muted-foreground">
           {/* ql-20260824-018/019：展开区内容（参数详情 + result 区）整体收编到
               tool-args-detail 的 ToolExpandBody——Write 内容预览 / Edit 行级 diff /
               Bash 纯文本输出+复制 / Read 行范围+复制 / Grep 参数+命中数 / Agent

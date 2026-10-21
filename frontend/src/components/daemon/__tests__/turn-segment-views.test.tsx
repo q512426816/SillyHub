@@ -3,8 +3,8 @@
 //
 // 覆盖维度：
 //   1. 各段类型渲染——text（MarkdownText 正文 + streaming 光标 .seg-caret）/ thinking
-//      （折叠头「💭 思考过程」+ 摘要 60 字截断）/ tool（工具名 + 主参数 + 状态徽章
-//      ✓/⏳/✗ + result 展开 + 复制按钮）/ stderr（⚠ 前缀）/ tool 带 children → 子代理块 /
+//      （折叠头「💭 思考 · 摘要」+ 摘要 60 字截断）/ tool（D-025 语义标签 + 工具名 +
+//      主参数 + 状态徽章 ✓/⏳/✗ + result 展开 + 复制按钮）/ stderr（⚠ 前缀）/
 //      file（task-08 → FileMessageCard 分流 + 五字段透传，卡片本体另测）；
 //   2. 折叠交互——思考行 / 工具行 / 子代理块默认折叠 → 点击展开内容可见；
 //   3. 扫动动画类名——running 工具行与子代理头含 seg-sweep，ok/deny 不含；
@@ -28,6 +28,8 @@
 
 import { describe, it, expect, vi } from "vitest";
 import { render, screen, fireEvent, act } from "@testing-library/react";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 
 import {
   CompactNoticeChip,
@@ -207,19 +209,42 @@ describe("TextSegmentView 文本段", () => {
     expect(document.querySelector(".seg-caret")).toBeNull();
   });
 
-  it("无框形态：容器挂 seg-text-body（w-full + 48rem 阅读限宽），无气泡框样式类", () => {
+  it("无框形态：容器挂 seg-text-body（w-full + 52rem 阅读限宽），无气泡框样式类", () => {
     // 2026-09-20-agent-reply-no-bubble：容器改无框正文，markdown-text 的直接父容器
     // 即 seg-text-body 容器——断言新类存在 + 旧气泡框类（border/bg-card/shadow-sm/
     // rounded-2xl/px-4）不存在
+    // 2026-10-20-session-page-dsh-alignment（FR-02 / D-016②）：正文与过程字阶分离
+    // ——阅读限宽 48rem→52rem（原先 48rem 断言编码的是旧视觉结构与新稿不符，按新的
+    // 用户可见行为更新）；15px/1.8/0.65em 这套字号由 globals.css 的 .seg-text-body
+    // 元素级规则承担（见本文件「正文/过程字阶分离」用例）。
     render(<TextSegmentView segment={makeTextSeg()} />);
     const container = screen.getByTestId("markdown-text").parentElement;
     expect(container).not.toBeNull();
     expect(container?.className).toContain("seg-text-body");
     expect(container?.className).toContain("w-full");
-    expect(container?.className).toContain("max-w-[min(100%,48rem)]");
+    expect(container?.className).toContain("max-w-[min(100%,52rem)]");
     for (const legacy of ["border", "bg-card", "shadow-sm", "rounded-2xl", "px-4"]) {
       expect(container?.className).not.toContain(legacy);
     }
+  });
+
+  it("正文/过程字阶分离（2026-10-20 / 2026-10-21 对比加强）：正文 15px / 1.8 / 段距 0.65em 由 globals.css 的 .seg-text-body 元素级规则承担", () => {
+    // MarkdownText compact 档对 .wmde-markdown 写死 !text-xs（!important），
+    // 字号只能由同带 !important 且特异度更高的元素级规则压住（容器类无效），
+    // 故这里的契约断言落在 globals.css 规则本体上。
+    // 2026-10-21 用户裁决「对比加强」：14.5px/1.78/0.6em → 15px/1.8/0.65em。
+    const css = readFileSync(
+      join(process.cwd(), "src", "app", "globals.css"),
+      "utf8",
+    );
+    expect(css).toMatch(
+      /\.seg-text-body \.markdown-text \.wmde-markdown \{\s*font-size: 15px !important;\s*line-height: 1\.8 !important;/,
+    );
+    expect(css).toMatch(
+      /\.seg-text-body \.markdown-text \.wmde-markdown p \{\s*margin: 0\.65em 0 !important;/,
+    );
+    // 正文 15px 与过程行 11.5px 的档差是「对比加强」的可量化落点：两者都不能回到旧值。
+    expect(css).not.toContain("font-size: 14.5px !important");
   });
 
   it("task-11 复制按钮：正文容器内常驻挂载（aria-label「复制」），点击写 segment.text 纯文本", () => {
@@ -239,9 +264,12 @@ describe("TextSegmentView 文本段", () => {
 });
 
 describe("ThinkingRowView 思考段", () => {
-  it("默认折叠：显示「💭 思考过程」标题 + 摘要，正文未挂载（R-03 按需挂载）", () => {
+  it("默认折叠：显示「💭 思考 · 摘要」词表标签 + 摘要，正文未挂载（R-03 按需挂载）", () => {
     render(<ThinkingRowView segment={makeThinkingSeg()} />);
-    expect(screen.getByText("💭 思考过程")).toBeInTheDocument();
+    // D-025@v1：固定语义标签词表——标题从「💭 思考过程」改为「💭 思考」，
+    // 标签之后用「·」接一行摘要（图标与标签为相邻 span，文本分开断言）。
+    expect(screen.getByText("思考")).toBeInTheDocument();
+    expect(screen.queryByText("思考过程")).not.toBeInTheDocument();
     expect(screen.getByText("先想想再答")).toBeInTheDocument(); // 短文本摘要原样
     expect(screen.queryByTestId("markdown-text")).toBeNull();
   });
@@ -257,7 +285,7 @@ describe("ThinkingRowView 思考段", () => {
   it("点击折叠头展开正文全文，再点击收起", () => {
     const longText = "开头一句。" + "很长的思考内容。".repeat(10); // 90 字 > 60，摘要≠全文
     render(<ThinkingRowView segment={makeThinkingSeg({ text: longText })} />);
-    const header = screen.getByRole("button", { name: /思考过程/ });
+    const header = screen.getByRole("button", { name: /思考/ });
     expect(header).toHaveAttribute("aria-expanded", "false");
     fireEvent.click(header);
     expect(header).toHaveAttribute("aria-expanded", "true");
@@ -271,12 +299,27 @@ describe("ThinkingRowView 思考段", () => {
     expect(screen.getByText("思考中")).toBeInTheDocument();
   });
 
+  it("过程行退档（2026-10-21 对比加强）：思考行 11.5px + muted/80 墨色，摘要不再叠 opacity-75", () => {
+    render(<ThinkingRowView segment={makeThinkingSeg()} />);
+    const header = screen.getByRole("button", { name: /思考/ });
+    const classes = new Set(header.className.split(/\s+/));
+    // 字阶 12px → 11.5px（正文侧同期 15px，见 globals.css 的 .seg-text-body 规则）
+    expect(classes.has("text-[11.5px]")).toBe(true);
+    expect(classes.has("text-[12px]")).toBe(false);
+    // 墨色退档：muted/80（token 透明度档，三主题各自换肤），不再全额 muted
+    expect(classes.has("text-muted-foreground/80")).toBe(true);
+    expect(classes.has("text-muted-foreground")).toBe(false);
+    // 摘要原本自带 opacity-75，与行级 80% 叠乘后过淡（浅色主题 <3:1）——该叠加已移除
+    const summary = screen.getByText("先想想再答");
+    expect(summary.className).not.toContain("opacity-75");
+  });
+
   it("task-11 复制按钮：折叠态无（正文未挂载），展开态挂载并复制思考全文", () => {
     const writeText = vi.fn().mockResolvedValue(undefined);
     Object.defineProperty(navigator, "clipboard", { value: { writeText }, configurable: true });
     render(<ThinkingRowView segment={makeThinkingSeg({ text: "深度思考的完整内容" })} />);
     expect(screen.queryByRole("button", { name: "复制" })).toBeNull(); // 折叠态正文未挂载（R-03）
-    fireEvent.click(screen.getByRole("button", { name: /思考过程/ })); // 展开折叠头
+    fireEvent.click(screen.getByRole("button", { name: /思考/ })); // 展开折叠头
     fireEvent.click(screen.getByRole("button", { name: "复制" }));
     expect(writeText).toHaveBeenCalledTimes(1);
     expect(writeText).toHaveBeenCalledWith("深度思考的完整内容");
@@ -284,6 +327,29 @@ describe("ThinkingRowView 思考段", () => {
 });
 
 describe("ToolRowView 工具行", () => {
+  it("D-025 语义标签：Bash 行渲染「运行命令」，Read 行渲染「读写文件」，工具名仍原样显示", () => {
+    const bash = render(<ToolRowView segment={makeBashRunningSeg()} />);
+    expect(screen.getByText("运行命令")).toBeInTheDocument();
+    expect(screen.getByText("Bash")).toBeInTheDocument(); // 工具名不被标签改写
+    expect(rowOf("npm test").textContent).toContain("运行命令");
+    expect(rowOf("npm test").textContent).toContain("Bash");
+    bash.unmount();
+
+    render(<ToolRowView segment={makeToolSeg()} />);
+    expect(screen.getByText("读写文件")).toBeInTheDocument();
+    expect(screen.getByText("Read")).toBeInTheDocument();
+    expect(rowOf("Read").textContent).toContain("读写文件");
+  });
+
+  it("D-025：工具行标签后必须用「·」连接摘要（icon + 中文标签 + · + 一行摘要）", () => {
+    render(<ToolRowView segment={makeToolSeg()} />);
+    // 行内文本顺序：图标 / 读写文件 / · / Read / · / src/a.ts（图标 emoji 不参与断言）
+    const text = rowOf("Read").textContent ?? "";
+    expect(text).toContain("读写文件");
+    expect(text.indexOf("读写文件")).toBeLessThan(text.indexOf("Read"));
+    expect(text).toContain("·");
+  });
+
   it("ok：工具名 + 主参数 + ✓ 徽章 + 耗时，无扫动动画类", () => {
     render(<ToolRowView segment={makeToolSeg()} />);
     expect(screen.getByText("Read")).toBeInTheDocument();
@@ -296,7 +362,66 @@ describe("ToolRowView 工具行", () => {
   it("deny：✗ 徽章，无扫动动画类", () => {
     render(<ToolRowView segment={makeToolSeg({ status: "deny", result: "操作被拒绝" })} />);
     expect(screen.getByTitle("执行失败 / 被拒").textContent).toBe("✗");
+    // D-025：错误状态压过类别——Read 行的语义标签变成「失败」，工具名仍原样显示
+    expect(screen.getByText("失败")).toBeInTheDocument();
+    expect(screen.getByText("Read")).toBeInTheDocument();
     expect(rowOf("Read").className).not.toContain("seg-sweep");
+  });
+
+  it("D-025：词表外工具名 → 「其它」，行与工具名都不被隐藏", () => {
+    render(
+      <ToolRowView
+        segment={makeToolSeg({ toolName: "FancyNewTool", primary: "do something" })}
+      />,
+    );
+    expect(screen.getByText("其它")).toBeInTheDocument();
+    expect(screen.getByText("FancyNewTool")).toBeInTheDocument();
+    expect(screen.getByText("do something")).toBeInTheDocument();
+  });
+
+  it("去外框形态（2026-10-20 / D-016③）：无满宽描边与卡底，改 2px 左规线 + hover 转 brand，行尾动作默认 45% 透明", () => {
+    render(
+      <ToolRowView
+        segment={makeToolSeg({ id: "call_b", raw: BASH_RAW, toolName: "Bash", primary: "npm test" })}
+      />,
+    );
+    const row = rowOf("npm test");
+    const classes = new Set(row.className.split(/\s+/));
+    // 旧形态（满宽 1px 描边 + brand 浅底卡 + 圆角 + 12px 内边距）不再存在
+    for (const legacy of ["border", "rounded-lg", "bg-brand-50", "border-brand-200", "px-3"]) {
+      expect(classes.has(legacy)).toBe(false);
+    }
+    // 新形态：2px 左规线（语义 --border 的 60% 档）+ 9px 左内边距 + 9px 行内间距 + hover 转 brand
+    // 2026-10-21「对比加强」：静息态规线由 border-border 全额降到 border-border/60（更轻）。
+    expect(classes.has("border-l-2")).toBe(true);
+    expect(classes.has("border-border/60")).toBe(true);
+    expect(classes.has("hover:border-l-brand-600")).toBe(true);
+    expect(classes.has("pl-[9px]")).toBe(true);
+    expect(classes.has("gap-[9px]")).toBe(true);
+    expect(classes.has("group")).toBe(true);
+    // 行尾动作（复制）默认 opacity-45，hover 本行复原 100%
+    const copy = screen.getByRole("button", { name: "复制" });
+    expect(copy.className).toContain("opacity-45");
+    expect(copy.className).toContain("group-hover:opacity-100");
+  });
+
+  it("过程行退档（2026-10-21 对比加强）：工具行 11.5px + muted/80 墨色，工具名与主参数同档不回升", () => {
+    render(
+      <ToolRowView
+        segment={makeToolSeg({ id: "call_c", raw: BASH_RAW, toolName: "Bash", primary: "npm test" })}
+      />,
+    );
+    const row = rowOf("npm test");
+    const classes = new Set(row.className.split(/\s+/));
+    // 行容器：字阶由 12px 降到 11.5px、墨色由 muted 全额降到 muted/80（同一 token 的透明度档）
+    expect(classes.has("text-[11.5px]")).toBe(true);
+    expect(classes.has("text-[12px]")).toBe(false);
+    expect(classes.has("text-muted-foreground/80")).toBe(true);
+    expect(classes.has("text-muted-foreground")).toBe(false);
+    // 工具名（brand 阶）与主参数：字号跟随行档，主参数不再回写全额 muted
+    expect(screen.getByText("Bash").className).toContain("text-[11.5px]");
+    expect(screen.getByText("npm test").className).toContain("text-[11.5px]");
+    expect(screen.getByText("npm test").className).toContain("text-muted-foreground/80");
   });
 
   it("running：⏳ 徽章 + 行容器含 seg-sweep 扫动类；无 result 展开显示「执行中…」占位", () => {
@@ -750,7 +875,7 @@ describe("SegmentView 统一分发器", () => {
     unmount();
 
     render(<SegmentView segment={makeThinkingSeg()} />);
-    expect(screen.getByText("💭 思考过程")).toBeInTheDocument();
+    expect(screen.getByText("思考")).toBeInTheDocument();
     unmount();
 
     render(<SegmentView segment={makeToolSeg()} />);
@@ -1563,8 +1688,7 @@ describe("CompactSegmentView / CompactStatusRowView / CompactNoticeChip（ql-202
 // 2026-10-21-task-wakeup-restore：后台任务唤醒通知折叠行（「收到任务消息」）。
 describe("TaskWakeupNoticeView（2026-10-21-task-wakeup-restore）", () => {
   const WAKEUP_TEXT =
-    "[后台任务通知] 以下 1 个后台子代理任务已全部结束（列表中的每一个都已终止，没有仍在运行的任务）：
-- 任务「调研 sgm」已完成（用时 06:26）。结果摘要：调研完成（task_id: t1，如需完整输出可调用 TaskOutput 查询，block=false）";
+    "[后台任务通知] 以下 1 个后台子代理任务已全部结束（列表中的每一个都已终止，没有仍在运行的任务）：\n- 任务「调研 sgm」已完成（用时 06:26）。结果摘要：调研完成（task_id: t1，如需完整输出可调用 TaskOutput 查询，block=false）";
 
   const wakeupSeg: Extract<TurnSegment, { kind: "task_wakeup" }> = {
     kind: "task_wakeup",
@@ -1589,8 +1713,7 @@ describe("TaskWakeupNoticeView（2026-10-21-task-wakeup-restore）", () => {
         segment={{
           ...wakeupSeg,
           id: "seg:wu2",
-          text: WAKEUP_TEXT + "
-- 任务「子代理B」已完成（用时 01:02）",
+          text: WAKEUP_TEXT + "\n- 任务「子代理B」已完成（用时 01:02）",
         }}
       />,
     );
