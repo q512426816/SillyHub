@@ -754,3 +754,11 @@
 锚点：未记录
 最近确认：23c936e92bf7871cd0ea0edba46cdf5387e49079
 理由：答：最大风险：既有测试与潜在快照对「六段管线」的隐含依赖——已定位唯一断言面（本组件测试 213-217 行 scan aria 断言）同步更新，全仓 grep 无其他组件消费本卡 MAIN_STAGES（组件内常量未导出）。次要风险：旧 daemon 采集值（CLI 未升级机器）下 thin 变更暂显 brainstorm 主管线——数据源升级自愈，非本变更面（依据：根因修复在 sillyspec 2026-10-21-overview-thin-stage，跨仓不在本冻结面）。放弃方案：①连带改移动端 stepper（mobile-change-detail STEPPER_STAGES 含 scan）与变更中心 `?? "scan"` 兜底——同根因但异仓异面，用户本轮只点名总览卡，扩面应由用户裁决，留后续候选；②改 CLI 侧让 envelope 附带阶段清单驱动前端渲染——过度设计，前端静态常量与 sillyspec MAIN_FLOW_ORDER 对齐即可，增契约无收益。
+
+## D-unmapped-110@v1 设计期风险与放弃方案（底稿）
+状态：implemented
+变更：2026-10-21-gitlog-conflict-quotepath
+原编号：D-001@v1
+锚点：未记录
+最近确认：21e877fc467eca703395f8b9d60dccfa4f67326d
+理由：答：风险①：`git diff --name-only` 输出按行切，文件名含字面换行仍会断行——但含控制字符的路径 git 恒强制 C 引号包裹（`\n` 被转义为字面 `\n` 两字符），单行假设不破，decodeGitCQuote 同款规则兜底（上变更风险③同机理，GL47 已实证）。风险②：`conflicts[].file` 语义变化对 backend converge_mission 的下游消费是修复性变化（原文路径才能 readFile），若存在依赖「转义形态」的下游断言需同步——检索 backend 侧对 conflicts 的消费为透传给 LLM 提示词，无形态依赖。死路①：不改 `_listConflictFiles` 改为 `git status --porcelain` 解析 U 态——porcelain 输出对特殊字符的引号规则随 `-z` 才关、解析面更大，弃。死路②：沿用上变更已弃的 `--numstat -z` 思路改 `-z`——name-only 的 `-z` 需改 NUL 切分且与既有行式解析不兼容，无收益，弃。

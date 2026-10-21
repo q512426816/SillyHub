@@ -5658,3 +5658,60 @@
   confirmed_at: null
   source_change: 2026-10-20-conflict-platform-archive
   status: active
+
+## FR-daemon-180 _listConflictFiles 的 git diff --name-only 调用统一带 -c core.quotepath=false，残余 C 引号形态经 decodeGitCQuote 解码为原文
+变更：2026-10-21-gitlog-conflict-quotepath
+状态：active
+摘要：主路径；残余强制引号
+全文：.sillyspec/changes/archive/2026-10-21-gitlog-conflict-quotepath/requirements.md#FR-01
+最近确认：21e877fc467eca703395f8b9d60dccfa4f67326d
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-21-gitlog-conflict-quotepath:flow:测试绑定FR-01
+  tests: sillyhub-daemon/tests/host-fs-handler-worktree.test.ts「WT4d 冲突列举命令带 -c core.quotepath=false + C 引号中文路径解码」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-21-gitlog-conflict-quotepath
+  status: active
+
+## FR-daemon-181 daemon 单测覆盖中文冲突文件名解析，真实 git 集成实测中文文件名 merge 冲突：conflicts[].file 为原文且 marker_lines 正确计数
+变更：2026-10-21-gitlog-conflict-quotepath
+状态：active
+摘要：真实仓端到端
+全文：.sillyspec/changes/archive/2026-10-21-gitlog-conflict-quotepath/requirements.md#FR-02
+最近确认：21e877fc467eca703395f8b9d60dccfa4f67326d
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-21-gitlog-conflict-quotepath:flow:测试绑定FR-02
+  tests: sillyhub-daemon/tests/host-fs-handler-git-log-quotepath.test.ts「真实 git 中文文件名 merge 冲突：conflicts[].file 原文 + marker_lines 计数」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-21-gitlog-conflict-quotepath
+  status: active
+
+## FR-daemon-182 跑 git merge 相关既有测试全绿，daemon tsc 零错
+变更：2026-10-21-gitlog-conflict-quotepath
+状态：active
+摘要：主路径
+全文：.sillyspec/changes/archive/2026-10-21-gitlog-conflict-quotepath/requirements.md#FR-03
+最近确认：21e877fc467eca703395f8b9d60dccfa4f67326d
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-21-gitlog-conflict-quotepath:flow:测试绑定FR-03
+  tests: sillyhub-daemon/tests/host-fs-handler-worktree.test.ts「WT3/WT3b/WT4/WT4b/WT4c 既有回归全绿」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-21-gitlog-conflict-quotepath
+  status: active

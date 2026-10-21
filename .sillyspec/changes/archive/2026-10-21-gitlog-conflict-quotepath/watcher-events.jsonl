@@ -1,0 +1,18 @@
+{"ts":1792545030986,"kind":"file","stage":"requirements","detail":"requirements.md 出现","provisional":true}
+{"ts":1792545030986,"kind":"file","stage":"design","detail":"design.md 出现","provisional":true}
+{"ts":1792545030986,"kind":"file","stage":"tasks","detail":"tasks.md 出现","provisional":true}
+{"ts":1792545068651,"kind":"file-update","stage":"requirements","detail":"requirements.md 内容变更","provisional":true}
+{"ts":1792545078874,"kind":"file-update","stage":"design","detail":"design.md 内容变更","provisional":true}
+{"ts":1792545142911,"kind":"commit","stage":null,"detail":"208ce12c9","provisional":true}
+{"ts":1792545160263,"kind":"task-done","stage":"tasks","detail":"checked 0→1","provisional":true,"source":"task-tick"}
+{"ts":1792545160795,"kind":"task-done","stage":"tasks","detail":"checked 1→2","provisional":true,"source":"task-tick"}
+{"ts":1792545161254,"kind":"task-done","stage":"tasks","detail":"checked 2→3","provisional":true,"source":"task-tick"}
+{"ts":1792545163317,"kind":"file-update","stage":"tasks","detail":"tasks.md 内容变更","provisional":true}
+{"ts":1792545163317,"kind":"task-done","stage":"tasks","detail":"checked 0→3","provisional":true}
+{"ts":1792545183720,"kind":"commit","stage":null,"detail":"21e877fc4","provisional":true}
+{"ts":1792545214530,"kind":"warning","stage":null,"rule":"scope-drift","severity":"warning","detail":"声明面之外的代码文件被改：backend/tmp8kevcjl1、backend/tmpk8zplqh5——范围漂移嫌疑（并行会话改动/越界，人判）","provisional":true}
+{"ts":1792545257223,"kind":"warning","stage":null,"rule":"scope-drift","severity":"warning","detail":"声明面之外的代码文件被改：frontend/.tmp-probe.mjs——范围漂移嫌疑（并行会话改动/越界，人判）","provisional":true}
+{"ts":1792545299131,"kind":"gate-run","stage":"verify","detail":"门实测 passed（85.8s） · 20261021011457","provisional":true}
+{"ts":1792545396575,"kind":"warning","stage":null,"rule":"scope-drift","severity":"warning","detail":"声明面之外的代码文件被改：frontend/src/components/mobile/mobile-change-detail.tsx——范围漂移嫌疑（并行会话改动/越界，人判）","provisional":true}
+{"ts":1792545413624,"kind":"warning","stage":null,"rule":"scope-drift","severity":"warning","detail":"声明面之外的代码文件被改：frontend/src/app/(dashboard)/workspaces/[id]/changes/page.tsx、frontend/src/components/mobile/mobile-change-card.tsx——范围漂移嫌疑（并行会话改动/越界，人判）","provisional":true}
+{"ts":1792545423892,"kind":"warning","stage":null,"rule":"scope-drift","severity":"warning","detail":"声明面之外的代码文件被改：frontend/src/components/mobile/mobile-change-card.test.tsx、frontend/src/components/mobile/mobile-change-detail.test.tsx——范围漂移嫌疑（并行会话改动/越界，人判）","provisional":true}

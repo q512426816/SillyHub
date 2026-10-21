@@ -1,0 +1,51 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-21-gitlog-conflict-quotepath",
+  "rows": [
+    {
+      "anchor": "FR-01",
+      "row_id": "2026-10-21-gitlog-conflict-quotepath:flow:测试绑定FR-01",
+      "tests": [
+        "sillyhub-daemon/tests/host-fs-handler-worktree.test.ts「WT4d 冲突列举命令带 -c core.quotepath=false + C 引号中文路径解码」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-21-gitlog-conflict-quotepath"
+    },
+    {
+      "anchor": "FR-02",
+      "row_id": "2026-10-21-gitlog-conflict-quotepath:flow:测试绑定FR-02",
+      "tests": [
+        "sillyhub-daemon/tests/host-fs-handler-git-log-quotepath.test.ts「真实 git 中文文件名 merge 冲突：conflicts[].file 原文 + marker_lines 计数」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-21-gitlog-conflict-quotepath"
+    },
+    {
+      "anchor": "FR-03",
+      "row_id": "2026-10-21-gitlog-conflict-quotepath:flow:测试绑定FR-03",
+      "tests": [
+        "sillyhub-daemon/tests/host-fs-handler-worktree.test.ts「WT3/WT3b/WT4/WT4b/WT4c 既有回归全绿」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-21-gitlog-conflict-quotepath"
+    }
+  ]
+}
