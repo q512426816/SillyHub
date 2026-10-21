@@ -1,22 +1,131 @@
-diff --git a/.sillyspec/docs/multi-agent-platform/modules/sillyhub-daemon.changelog.md b/.sillyspec/docs/multi-agent-platform/modules/sillyhub-daemon.changelog.md
-index e07e8560f..8c418205d 100644
---- a/.sillyspec/docs/multi-agent-platform/modules/sillyhub-daemon.changelog.md
-+++ b/.sillyspec/docs/multi-agent-platform/modules/sillyhub-daemon.changelog.md
-@@ -1,4 +1,5 @@
- # sillyhub-daemon 变更索引
-+- 2026-10-21-task-wakeup-restore | 恢复后台任务终态唤醒链（窄化版：completed/failed 2s debounce 合并注入、静默阈值 env SILLYHUB_TASK_WAKEUP_QUIET_MS 缺省 60000/0 关闭阀、stopped 不唤醒；会话 49d893ab 停摆实证驱动）+ 前端「收到任务消息」折叠行留痕（task_wakeup 段，废止 taskwakeup-hide 整体隐藏）。backend inject 链零改动复用
- - change 2026-10-15-platform-knowledge-search | api-types.ts 再生成（gen:types 双端义务，规则 21）：新增 KnowledgeSearchIn/KnowledgeSearchResultItem/KnowledgeSearchOut 三 schema 与 /knowledge/search 路径面，纯新增零改写；daemon 运行时代码零改动。
- - 2026-10-16-driver-audit-fixes | 24h 只读风险审查发现 zcode 驱动三处缺陷（轮次进行中 close 令 consume 永久…
- - 2026-10-16-session-run-status-realtime | 会话列表行首状态目前只靠 daemon 10 秒日志推导活性链（基线），用户触发会话后转圈/完成提示…
-diff --git a/.sillyspec/docs/multi-agent-platform/modules/sillyhub-daemon.md b/.sillyspec/docs/multi-agent-platform/modules/sillyhub-daemon.md
-index ce6d6f88b..cca63c5cf 100644
---- a/.sillyspec/docs/multi-agent-platform/modules/sillyhub-daemon.md
-+++ b/.sillyspec/docs/multi-agent-platform/modules/sillyhub-daemon.md
-@@ -154,6 +154,7 @@ pm；posix: ../lib/node_modules]，ql-20260904-M4 补标准安装器布局）、
- - 2026-10-13-change-files-refresh-sync | 平台刷新文件树触发绑定 daemon 定向上行同步：sillyspec-manager 新增 runSyncChange 执行器（串行 platform sync --change 落镜像 + sync-docs --change 落 DB 四件套）+ daemon.ts 注册 sillyspec_sync_change RPC（SAFE_CHANGE_NAME_RE/UUID 双守卫 + 15s TTL 防抖 + in-flight 去重 + 1000 帽），结构化回执不走结果槽
- - 2026-10-13-spawn-flush-e2e-test | 2026-10-13-review-risk-fixes 评审 P3 留债：spawnAndStream 收尾冲刷只有组
- - 2026-10-13-agent-task-stuck-running | 动机:general-purpose 子代理已完成但 UI 永久显示「运行中」——完成通知在 daemon 失忆时被静默
-+- 2026-10-21-task-wakeup-restore | 恢复 2026-10-13-task-wakeup-remove 删除的终态唤醒链（窄化版：completed/failed 2s debounce 合并注入、静默阈值 env SILLYHUB_TASK_WAKEUP_QUIET_MS 缺省 60000/0 关闭阀、stopped 不唤醒）——会话 49d893ab 实证删除后「派发子代理+结束回合」的会话在任务完成时停摆；前端同步加「收到任务消息」折叠行留痕（task_wakeup 段，废止 taskwakeup-hide 整体隐藏）。backend inject/task_wakeup 门控/queue_when_busy 全程零改动
- - 2026-10-13-task-wakeup-remove | 后台子代理任务终态后 daemon 自动注入「[后台任务通知]」开新轮让主代理汇报——用户裁定该自动汇报轮没必要（tok
- - 2026-10-13-editpatch-fullchain | agent-log 视图 Edit 卡与会话化对话视图（agent-log-card）的 Write/Edit 卡仍无行
- - 2026-10-13-editpatch-p3-cleanup | 收编 editpatch-fullchain 评审 P3：①daemon EDIT_PATCH_MAX_CHARS 按 
+diff --git a/frontend/src/components/__tests__/change-file-tree-autorefresh.test.tsx b/frontend/src/components/__tests__/change-file-tree-autorefresh.test.tsx
+index f8bc9c8ca..fbef0fcbc 100644
+--- a/frontend/src/components/__tests__/change-file-tree-autorefresh.test.tsx
++++ b/frontend/src/components/__tests__/change-file-tree-autorefresh.test.tsx
+@@ -158,3 +158,65 @@ describe("ChangeFileTree sync 触发面（2026-10-14-files-refresh-explicit-sync
+     expect(mockedList.mock.calls[0]?.[2]).toMatchObject({ sync: true });
+   });
+ });
++
++// 2026-10-21-files-refresh-spinner：显式刷新转圈反馈——sync 同步后端等待预算 15s，
++// 点击期间按钮必须自证「已点上」（禁用+图标转圈），返回后恢复；纯读刷新（挂载/轮询）
++// 不碰转圈态（转圈面仅由用户显式点击驱动）。
++describe("ChangeFileTree 刷新按钮转圈反馈（2026-10-21-files-refresh-spinner）", () => {
++  it("点击刷新：同步进行中按钮禁用+转圈，返回后恢复", async () => {
++    vi.useFakeTimers();
++    mockedList.mockResolvedValue(fileResp());
++    mockedPending.mockResolvedValue({ items: [] });
++
++    const { getByRole } = renderTree(
++      <ChangeFileTree workspaceId="ws-1" changeId="chg-1" />,
++    );
++    await flushInitialLoad();
++    mockedList.mockClear();
++
++    // 手工控速：sync 请求挂起不返回，断言转圈中间态
++    let resolveSync!: (_v: ReturnType<typeof fileResp>) => void;
++    mockedList.mockImplementationOnce(
++      () => new Promise((res) => { resolveSync = res; }),
++    );
++
++    fireEvent.click(getByRole("button", { name: /刷新/ }));
++    await vi.advanceTimersByTimeAsync(0);
++
++    const btn = getByRole("button", { name: /刷新/ });
++    expect(btn).toBeDisabled();
++    expect(btn.querySelector(".animate-spin")).not.toBeNull();
++
++    resolveSync(fileResp());
++    await vi.advanceTimersByTimeAsync(0);
++    expect(btn).not.toBeDisabled();
++    expect(btn.querySelector(".animate-spin")).toBeNull();
++  });
++
++  it("纯读刷新（挂载/轮询）不触发转圈态", async () => {
++    vi.useFakeTimers();
++    mockedList.mockResolvedValue(fileResp());
++    mockedPending.mockResolvedValue({ items: [] });
++
++    const { getByRole } = renderTree(
++      <ChangeFileTree workspaceId="ws-1" changeId="chg-1" autoRefreshMs={15000} />,
++    );
++    await flushInitialLoad();
++
++    const btn = getByRole("button", { name: /刷新/ });
++    expect(btn).not.toBeDisabled();
++
++    // 轮询请求挂起在飞时按钮仍可点、无转圈（纯读不驱动同步反馈面）
++    let resolvePoll!: (_v: ReturnType<typeof fileResp>) => void;
++    mockedList.mockImplementationOnce(
++      () => new Promise((res) => { resolvePoll = res; }),
++    );
++    await vi.advanceTimersByTimeAsync(15_000);
++    expect(mockedList).toHaveBeenCalledTimes(2);
++    expect(btn).not.toBeDisabled();
++    expect(btn.querySelector(".animate-spin")).toBeNull();
++
++    resolvePoll(fileResp());
++    await vi.advanceTimersByTimeAsync(0);
++  });
++});
+diff --git a/frontend/src/components/change-file-tree.tsx b/frontend/src/components/change-file-tree.tsx
+index 1eb69b9ba..a0cf39b22 100644
+--- a/frontend/src/components/change-file-tree.tsx
++++ b/frontend/src/components/change-file-tree.tsx
+@@ -3,8 +3,9 @@
+ import { useCallback, useEffect, useMemo, useRef, useState, type ComponentProps, type ReactNode } from "react";
+ 
+ import { Image } from "antd";
+-import { ChevronRight, FileText, Folder, FolderOpen } from "lucide-react";
++import { ChevronRight, FileText, Folder, FolderOpen, RefreshCw } from "lucide-react";
+ 
++import { cn } from "@/lib/utils";
+ import { Badge } from "@/components/ui/badge";
+ import { ErrorBanner } from "@/components/ui/error-banner";
+ import { EmptyState } from "@/components/ui/empty-state";
+@@ -428,6 +429,9 @@ export function ChangeFileTree({
+   // 显式刷新（sync=1）同步未完成时的提示条文案（2026-10-16-change-files-sync-result）：
+   // 仅刷新点击回执驱动；成功/防抖跳过置 null（清除），纯读刷新不动它。
+   const [syncWarning, setSyncWarning] = useState<string | null>(null);
++  // 显式刷新（sync=1）在飞反馈（2026-10-21-files-refresh-spinner）：后端同步等待
++  // 预算 15s，期间按钮转圈+禁用自证「已点上」；仅 sync=true 调用驱动，纯读不碰。
++  const [syncing, setSyncing] = useState(false);
+ 
+   // 变更名自动链接（2026-08-31 变更关联审计 P3）：名单为空（查询未就绪/无变更）
+   // 时不挂插件，渲染行为与改造前逐字节一致
+@@ -450,6 +454,7 @@ export function ChangeFileTree({
+   // （纯读，直接秒回平台镜像数据）。同步回执翻成提示条文案：未完成/未执行时展示
+   // 原因（不再无声），成功/防抖跳过/纯读清空或保持 null。
+   const refreshTree = useCallback(async (sync?: boolean) => {
++    if (sync) setSyncing(true);
+     try {
+       const resp = await listChangeFiles(workspaceId, changeId, { sync });
+       setTree(buildChangeFileTree(resp.items));
+@@ -458,6 +463,8 @@ export function ChangeFileTree({
+       }
+     } catch (err) {
+       setError(err instanceof ApiError ? err.message : "加载文件树失败");
++    } finally {
++      if (sync) setSyncing(false);
+     }
+   }, [workspaceId, changeId]);
+ 
+@@ -616,7 +623,17 @@ export function ChangeFileTree({
+               镜像同步：{new Date(lastSyncedAt).toLocaleString("zh-CN")}
+             </span>
+           )}
+-          <Button variant="ghost" size="sm" className="h-6 px-1.5 text-[11px]" onClick={() => void refreshTree(true)}>
++          {/* 2026-10-21-files-refresh-spinner：sync 同步在飞时转圈+禁用（用户可见
++              「已点上」；纯读轮询不触发）。错误横幅重试同走 refreshTree(true)，
++              共享同一 syncing 态。 */}
++          <Button
++            variant="ghost"
++            size="sm"
++            className="h-6 gap-1 px-1.5 text-[11px]"
++            onClick={() => void refreshTree(true)}
++            disabled={syncing}
++          >
++            <RefreshCw className={cn("h-3 w-3", syncing && "animate-spin")} aria-hidden />
+             刷新
+           </Button>
+         </div>
