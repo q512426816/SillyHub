@@ -1,0 +1,36 @@
+tier: thin
+legacy_fallback: false
+substeps: {}
+born_face: thin
+with_tasks: false
+review_force: null
+input: >-
+  移动端与变更中心scan起步口径清零
+
+
+  动机与背景：总览卡主管线已在 2026-10-21-overview-card-mainflow-scan 去 scan（对齐 2026-09-27-change-birth-stage-brainstorm
+  出生阶段决策），但同根因残留三处未随迁——移动端变更详情 STEPPER_STAGES（mobile-change-detail.tsx:145 含 scan 首段）、变更中心列表兜底 stage={c.current_stage ??
+  "scan"}（changes/page.tsx:764）、移动卡片兜底（mobile-change-card.tsx:261 及其 35 行口径注释）。scan 是按需显式跑的辅助阶段，变更起步即 brainstorm，缺省兜底显
+  scan 是过时口径。
+
+
+  成功标准：
+
+  - 移动端变更详情 stepper 阶段序列无 scan（brainstorm→archive 五段口径）
+
+  - 变更中心与移动卡片两处 current_stage 缺省兜底为 brainstorm，缺失兜底不再显 scan
+
+  - 受影响组件测试更新后全绿
+autopilot: false
+prestage_ack: false
+baseline_commit: 21e877fc467eca703395f8b9d60dccfa4f67326d
+updatedAt: '2026-10-21T01:16:24.282Z'
+cross_baselines:
+  sillyspec: 3fd7cf3b6c29958a54cee8c72b4b89bf628d9a70
+baseline_sha256: 534c7542b3081718693700490bacfbcb60e4d18c481914e17ed84648debbc402
+spec_approved: true
+spec_approved_at: '2026-10-21T01:16:24.281Z'
+spec_approved_by: zcode-mobile-scan-cleanup
+spec_approved_channel: user-confirmed
+spec_attested_by: zcode-mobile-scan-cleanup
+

@@ -141,9 +141,6 @@ const QL_STATUS_META: Record<
   stale: { label: "疑似中断", kind: "error" },
 };
 
-/** 步骤条阶段序列：scan + 主线五阶段（design §5.3「六阶段」；WORKFLOW_STAGES 复用）。 */
-const STEPPER_STAGES: readonly string[] = ["scan", ...WORKFLOW_STAGES];
-
 // ── 自绘基础壳 ───────────────────────────────────────────────────────────────
 
 /** 折叠卡壳（sec-card 模式，design §5.3）：头部折叠按钮（触摸 ≥44px）+ 右侧
@@ -200,7 +197,8 @@ function SecCard({
  * focus 态 brand ring + 标签 brand 高亮，样式范式对齐桌面 change-stage-header），
  * 点击由父组件 toggle focusStage 筛选下方时间线；无步骤数据阶段保持纯展示 div
  * 不可点（无 title 提示与筛选效果）。stepStages 含 quick 等非线性值时仅参与
- * includes 可点判定（步骤条只渲染 STEPPER_STAGES 节点）。
+ * includes 可点判定（步骤条只渲染 WORKFLOW_STAGES 节点——2026-10-21-mobile-scan-birth-cleanup
+ * 起 scan 不进步骤条：出生阶段即 brainstorm，scan 是按需辅助阶段，对齐桌面单一源）。
  */
 function StageStepper({
   currentStage,
@@ -219,7 +217,9 @@ function StageStepper({
   if (!currentStage) return null;
   // 终态别名兼容：CLI 归档会把 current_stage 写成 'archived'（对齐桌面 :56）
   const displayStage = currentStage === "archived" ? "archive" : currentStage;
-  const currentIndex = STEPPER_STAGES.indexOf(displayStage);
+  // WORKFLOW_STAGES 是 as const 字面量元组，indexOf 的 string 实参放宽只读数组
+  // （对齐桌面 changes-overview-card MAIN_STAGES 同款写法）
+  const currentIndex = (WORKFLOW_STAGES as readonly string[]).indexOf(displayStage);
   if (currentIndex < 0) return null;
   return (
     <div
@@ -227,7 +227,7 @@ function StageStepper({
       aria-label="变更阶段进度"
       className="flex items-center gap-1 overflow-x-auto rounded-[var(--radius-lg)] border border-border bg-card p-2 shadow-[var(--shadow-sm)]"
     >
-      {STEPPER_STAGES.map((stage, i) => {
+      {WORKFLOW_STAGES.map((stage, i) => {
         const isCompleted = currentIndex > i;
         const isCurrent = currentIndex === i;
         const hasSteps = stepStages.includes(stage);
@@ -288,7 +288,7 @@ function StageStepper({
               /* 无步骤数据的阶段：纯展示不可点（无筛选效果），保持 div 语义 */
               <div className="flex items-center gap-1 px-1">{nodeInner}</div>
             )}
-            {i < STEPPER_STAGES.length - 1 && (
+            {i < WORKFLOW_STAGES.length - 1 && (
               <span aria-hidden className="mx-1 h-px w-3 shrink-0 bg-border" />
             )}
           </div>
@@ -464,7 +464,7 @@ export function MobileChangeDetail({
   const quicklogItems = quicklogQuery.data?.items ?? [];
 
   // 阶段-步骤联动派生：steps 条目出现的阶段去重（含 quick 等非线性 stage，但
-  // 步骤条只渲染 STEPPER_STAGES 节点，非线性值仅参与 includes 可点判定）——
+  // 步骤条只渲染 WORKFLOW_STAGES 节点，非线性值仅参与 includes 可点判定）——
   // 口径逐字对齐桌面 [cid]/page.tsx:249-252
   const stepStages =
     change.steps && change.steps.length > 0

@@ -466,16 +466,18 @@ describe("MobileChangeDetail 文档卡 / 引导条 / 步骤条 / 会话 / 时间
     expect(guide.textContent).toContain("任务看板与任务执行页请到电脑端操作");
   });
 
-  it("步骤条：横向滚动容器 + 六阶段标签 + 当前阶段高亮 + 非线性阶段降级不渲染", async () => {
+  it("步骤条：横向滚动容器 + 五阶段标签 + 当前阶段高亮 + 非线性阶段降级不渲染", async () => {
     const { container } = renderDetail();
     const stepper = await screen.findByTestId("m-change-stage-steps");
     // 横向滚动容器（自绘紧凑版核心约束，C-15）
     expect(stepper.className).toContain("overflow-x-auto");
-    // 六阶段标签（scan + 主线五阶段，STAGE_LABELS 复用；within 限定步骤条内，
+    // 五阶段标签（2026-10-21-mobile-scan-birth-cleanup 去 scan：出生阶段即
+    // brainstorm，scan 是辅助阶段不进步骤条；within 限定步骤条内，
     // 避免与时间线 stage 组头同名标签（需求分析）冲突）
-    for (const label of ["扫描", "需求分析", "规划", "执行", "验证", "归档"]) {
+    for (const label of ["需求分析", "规划", "执行", "验证", "归档"]) {
       expect(within(stepper).getByText(label)).toBeInTheDocument();
     }
+    expect(within(stepper).queryByText("扫描")).toBeNull();
     // 当前阶段（current_stage=plan）节点高亮，标签为「规划」
     const current = container.querySelector(
       '[data-testid="m-change-stage-steps"] [data-status="current"]',
@@ -786,8 +788,8 @@ describe("MobileChangeDetail 三卡挂载 + 阶段联动（task-06 / FR-05 / FR-
       within(stepper).getByRole("button", { name: "规划" }),
     ).toBeInTheDocument();
     expect(within(stepper).getAllByRole("button")).toHaveLength(2);
-    // 无条目阶段（扫描/执行/验证/归档，含当前阶段「执行」）保持纯展示不可点
-    for (const label of ["扫描", "执行", "验证", "归档"]) {
+    // 无条目阶段（执行/验证/归档，含当前阶段「执行」）保持纯展示不可点
+    for (const label of ["执行", "验证", "归档"]) {
       expect(
         within(stepper).queryByRole("button", { name: label }),
       ).not.toBeInTheDocument();

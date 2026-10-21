@@ -761,7 +761,7 @@ export default function ChangesPage({ params }: Props) {
       right={
         <>
           <ChangeStepBadge
-            stage={c.current_stage ?? "scan"}
+            stage={c.current_stage ?? "brainstorm"}
             stepProgress={c.step_progress ?? null}
           />
           {renderOwner(c)}
