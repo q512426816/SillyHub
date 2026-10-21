@@ -330,6 +330,7 @@ runtime-session-helpers 纯函数）。2026-07-11-unify-runtime-session-dialog �
 - **`tool_only` 降级卡**：`capability="tool_only"`、或 `capability="full"` 却无快照、或快照 `status` 为 `failed` / `unavailable` → 折叠头「仅工具编辑」（`degraded` 分支，`frontend/src/components/daemon/file-changes/file-changes-card.tsx:158`）+ 一行说明「daemon 未上报工作区快照，本卡只含 Edit/Write 工具编辑」（`frontend/src/components/daemon/file-changes/file-changes-card.tsx:232`）；**不渲染任何文件行**、行级统计显示破折号（`noLineStats`，`frontend/src/components/daemon/file-changes/file-changes-card.tsx:136`），绝不出现「本轮无改动」字样（E6/E8）。
 - **null 不出卡**：`fileChanges` 与 `fileChangesCapability` 双双缺省（旧消费方未接线 / 该轮无 run 快照来源）→ `null`，不出卡也不出占位（D-031；输入 `undefined, undefined` 与 `null, null` 同路径）。
 - **`partial` 行级破折号**：`status="partial"` 或 `truncated=true` → 正常卡 + 头部「（部分）」，行级 +/− 显示破折号（`truncated` / `file.binary` 分支，`frontend/src/components/daemon/file-changes/file-changes-card.tsx:285`），不拿残缺累加冒充总数；头部文件数仍给（文件数可靠，行数不可靠）。
+- **`partial` 且无文件清单 → 一行提示卡（D-034）**：超时（`reason="timeout"`）与队列溢出（`reason="queue_overflow"`）在 daemon 侧返回 `files=[]`，前端映射 `notice`（`NOTICE_PARTIAL_NO_FILES`），渲染 `data-testid="file-changes-notice"` 的 28px 单行卡「工作区快照未完成（超时或队列溢出），本轮改动未知」——**不静默**（否则「采集没完成」会被读成「本轮没改文件」，违反 E6/E8）；只有 `status="ok"` 且 `files=[]` 才是真空态（零渲染）。
 - **binary 行破折号**：`binary=true` 同一分支（`frontend/src/components/daemon/file-changes/file-changes-card.tsx:285` 的 `file.binary` 判据），title 写「二进制文件：无行级行数统计」——numstat 对二进制恒 `0/0`，不显示成「+0 −0」。
 
 **会话级汇总（E7，去重 + Σ+/− + 最差 status + 并行横幅）**

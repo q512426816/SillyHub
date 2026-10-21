@@ -87,6 +87,12 @@ export interface FileChangesCardProps {
    * 一行说明，无文件行。**不显示任何「无改动」字样**（E6/E8：没快照 ≠ 没改动）。
    */
   degraded?: boolean;
+  /**
+   * 「有话说但无文件行」的提示形态（D-034）：partial 且 daemon 没拿到文件列表
+   * （1500ms 超时 / 单工作区队列溢出）时，卡片照出但只有一行提示——
+   * 否则用户无法区分「采集没完成」与「本轮真的没改文件」（E6/E8 立意）。
+   */
+  notice?: string;
   onOpenFile?: (path: string) => void;
   className?: string;
 }
@@ -113,6 +119,7 @@ export function FileChangesCard({
   truncated = false,
   capability,
   degraded = false,
+  notice,
   onOpenFile,
   className,
 }: FileChangesCardProps) {
@@ -125,7 +132,33 @@ export function FileChangesCard({
 
   // 空态零渲染（design E6：无快照字段 → 省略卡片，不出「0 个文件」空壳）。
   // 降级态是**有话说**的形态（显式提示缺快照能力），文件行恒空但卡照出。
-  if (files.length === 0 && !degraded) return null;
+  // notice（D-034）同理：partial 但没拿到文件列表 → 一行提示卡，不静默。
+  const isNotice = notice != null && files.length === 0 && !degraded;
+  if (files.length === 0 && !degraded && !isNotice) return null;
+
+  // 无文件行但有话说（partial 超时/队列溢出）：28px 单行提示，与折叠头同高
+  // （绝不写成「无改动」——那是 E6/E8 明令禁止的伪值）。
+  if (isNotice) {
+    return (
+      <div
+        data-testid="file-changes-notice"
+        data-truncated="true"
+        className={cn(
+          "flex h-7 items-center gap-1.5 rounded-md border border-border bg-card px-2 text-[12px]",
+          "text-muted-foreground",
+          className,
+        )}
+      >
+        <FileDiff className="h-3.5 w-3.5 shrink-0" aria-hidden />
+        <span className="min-w-0 truncate">{notice}</span>
+        {turnNo != null && (
+          <span className="ml-auto shrink-0 font-mono text-[11px] tabular-nums text-muted-foreground/80">
+            第 {turnNo} 轮
+          </span>
+        )}
+      </div>
+    );
+  }
 
   const openFile = (path: string) => {
     if (hasActiveTextSelection()) return;

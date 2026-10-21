@@ -419,3 +419,14 @@ change: 2026-10-20-session-page-dsh-alignment
 - normalized_requirement: ①该测试只允许改 `heads[0]` 断言与注释链，不得放宽其它守护断言；②`pytest tests/test_align_platform_change_events_migration.py` 必须 7 passed；③design「文件变更清单」补该行（否则 worktree apply 的清单校验会拒）。
 - evidence: `backend/tests/test_align_platform_change_events_migration.py`（`assert heads[0] == "20261021120000"`）、`uv run --frozen pytest -q --no-cov tests/test_align_platform_change_events_migration.py` → **7 passed**（2026-10-21 17:24）
 - 故障面: 该锚点测试是「迁移双头」的守护，若把它改成不校验（例如 `assert len(heads) == 1` 以外全放行），未来并行迁移再出双头就无人拦。
+
+## D-034@v1: `partial` 且无文件清单时出「一行提示卡」——不得静默成「本轮无改动」〔2026-10-21 execute 期独立审查阻断项修复〕
+- type: boundary
+- priority: P1
+- status: confirmed
+- source: code
+- question: `status="partial"`（超时 / 队列溢出）时 daemon 只返回 `files=[]`，前端还该不该出卡？
+- answer: **该出**。独立审查（execute stage review）实测：daemon 超时与队列溢出都返回 `files: []`（`turn-file-changes.ts:813-824`、`tests/interactive/turn-file-changes.test.ts:433-435`），而前端 `toFileChangesCardProps` 先把 partial→`truncated`，随后 `if (files.length === 0) return null` 整卡不渲染 → 用户看到「没有卡」，无法区分「采集没完成」与「本轮真的没改文件」，与 design「partial 卡片照出」相悖（E6/E8 立意）。修法取 A（实现意图，而非改口径）：partial 且无文件清单 → 渲染 28px 单行提示卡（`data-testid="file-changes-notice"`），文案「工作区快照未完成（超时或队列溢出），本轮改动未知」。
+- normalized_requirement: ①`NOTICE_PARTIAL_NO_FILES` 常量承载文案，映射层返回 `{files:[], truncated:true, notice, capability:"full"}`；②卡片新增可选 `notice`：有 notice 时出提示卡（无文件行、无 +/−、头部不可展开），**仍不出现「无改动」字样**；③`status="ok"` 且 `files=[]` 仍是真空态（零渲染）——两者不得混淆；④补测试：映射 2 例（timeout / queue_overflow）+ 卡片 1 例（28px 单行、无行、无「无改动」）。
+- evidence: `frontend/src/components/daemon/file-changes/turn-file-changes.ts`（`NOTICE_PARTIAL_NO_FILES` + partial 空清单分支）、`file-changes-card.tsx`（`notice` 提示形态）、`__tests__/turn-file-changes.test.ts`（+2 例 → 19）、`__tests__/file-changes-card.test.tsx`（+1 例 → 14）；`vitest run src/components/daemon/file-changes/__tests__/` → **42 passed**，`tsc --noEmit` exit 0（2026-10-21 20:38）
+- 故障面: 提示卡与「仅工具编辑」降级卡是**两种**话术（前者「没拿到清单」、后者「没有这项能力」），未来若合并会再次丢语义；`reason` 细分（timeout vs queue_overflow）在快照里保留，但 UI 合并表述——若要区分需在 `notice` 上带 reason。

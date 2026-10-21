@@ -48,6 +48,15 @@ export interface TurnFileChangesCardOptions {
 }
 
 /**
+ * partial 且无文件列表时的提示文案（D-034）。
+ *
+ * 语义边界：说的是「没拿到改动清单」，**不是**「本轮没改文件」——后者是 E6/E8 明令
+ * 禁止的伪值。超时与队列溢出在快照层面同为 `status="partial"`（daemon 端不区分
+ * files 内容），故文案合并表述；精确 `reason` 仍保留在快照里供检查器读取。
+ */
+export const NOTICE_PARTIAL_NO_FILES = "工作区快照未完成（超时或队列溢出），本轮改动未知";
+
+/**
  * 读模型里与文件变更相关的两字段（后端 `SessionRunRead` 已透传）。
  *
  * 前端手工维护的镜像 `frontend/src/lib/daemon/sessions.ts` 的 `SessionRunRead`
@@ -123,6 +132,20 @@ export function toFileChangesCardProps(
 
   const truncated = snapshot.status === "partial" || snapshot.truncated === true;
   const files = (snapshot.files ?? []).map(toChangedFile);
+  // partial 但 daemon 没拿到文件列表（1500ms 超时 / 队列溢出，见 daemon
+  // `collectTurnFileChanges` 的 partial 收口）：D-034 —— 卡片照出但只有一行提示，
+  // 否则「采集没完成」会被读成「本轮没改文件」（E6/E8 立意）。
+  if (files.length === 0 && truncated) {
+    return {
+      files: [],
+      capability: "full",
+      turnNo: options.turnNo,
+      truncated: true,
+      notice: NOTICE_PARTIAL_NO_FILES,
+      sharedWorkspace: snapshot.concurrentSessionsHint === true,
+      className: options.className,
+    };
+  }
   // 快照齐全且确实零改动 → 空态零渲染（既有卡片语义）；不写「本轮无改动」文案。
   if (files.length === 0) return null;
 

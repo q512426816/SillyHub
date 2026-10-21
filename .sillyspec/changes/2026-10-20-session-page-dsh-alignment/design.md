@@ -425,7 +425,7 @@ export type FileChangesCapability = "full" | "tool_only";
 
 1. **producer（daemon）**：`files[].added/deleted` 只取 `git diff --numstat <baselineHead>`（二进制 → `0/0` + `binary:true`）；`status` 由 `--porcelain -z` 的 `XY` 裁决（`??` → `untracked`、含 `A` → `added`、含 `D` → `deleted`、其余 → `modified`）；禁 rename 检测，改名一律呈现为 delete + add 两条。
 2. **归因**：`attribution="edit_patch"` 只在同一文件命中本轮 `Edit/Write` 的 `edit_patch.path` 时使用（`editToolNames[]` 记录来源工具）；其余一律 `"command"`（「命令行/脚本改动」）。**禁止**用 `edit_patch` 反推改动来源（D-023 已核实 91/1271 覆盖，bash 178 条与 sillyspec 30 条无 patch）。
-3. **降级三态**：`status="ok"` 全量可信；`"partial"` ＝ 1500ms 超时（`reason="timeout"`）或改动数超上限（`truncated=true`）或队列溢出（`reason="queue_overflow"`）——卡片照出，但行级 +/− 显示破折号；`"failed"` / `"unavailable"`（`reason="not_a_repo"` / `"git_missing"`）＝ 前端按 `capability="tool_only"` 走降级卡。`partial` 不是错误态（E3）。
+3. **降级三态**：`status="ok"` 全量可信；`"partial"` ＝ 1500ms 超时（`reason="timeout"`）或改动数超上限（`truncated=true`）或队列溢出（`reason="queue_overflow"`）——**卡片一律照出**：有文件清单时列文件、行级 +/− 显示破折号；**无文件清单时（超时 / 队列溢出，daemon 返回 `files=[]`）出「一行提示卡」**（`data-testid="file-changes-notice"`：「工作区快照未完成（超时或队列溢出），本轮改动未知」，D-034），绝不静默成「本轮无改动」；`"failed"` / `"unavailable"`（`reason="not_a_repo"` / `"git_missing"`）＝ 前端按 `capability="tool_only"` 走降级卡。`partial` 不是错误态（E3）。
 4. **capability 独立成字段**（`"full" | "tool_only"`）：老 daemon 不认这个字段时 backend 必须补 `"tool_only"`；前端**只看 capability、不看字段是否存在**——否则「快照字段缺失」会被误显示成「本轮无改动」（E6 / E8）。
 5. **顺序与幂等**：`(runId)` 为键覆盖写；E2 在轮终态落库**之后**异步执行；同一 `runId` 重复上报必须等价于最后一次上报（禁追加）。
 6. **不含**：不改 `agent_run_logs`、不写 `edit_patch` 表、不新增 HTTP 端点——快照随轮次读模型透传（E5 只读投影）。

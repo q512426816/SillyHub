@@ -181,6 +181,22 @@ describe("FileChangesCard：降级形态与真实快照细节（task-11）", () 
     expect(container.firstChild).toBeNull();
   });
 
+  it("notice（partial 无文件列表）：一行提示卡照出，无文件行、不写「无改动」", () => {
+    const { container } = render(
+      <FileChangesCard files={[]} capability="full" truncated notice="工作区快照未完成（超时或队列溢出），本轮改动未知" turnNo={7} />,
+    );
+
+    const notice = screen.getByTestId("file-changes-notice");
+    expect(notice).toBeInTheDocument();
+    expect(notice.textContent).toContain("本轮改动未知");
+    expect(notice.textContent).toContain("第 7 轮");
+    // 28px 单行（与折叠头同高），无文件行、无 +/− 数字。
+    expect(notice.className).toContain("h-7");
+    expect(screen.queryByTestId("file-changes-row")).toBeNull();
+    expect(screen.queryByTestId("file-changes-card")).toBeNull();
+    expect(container.textContent).not.toContain("无改动");
+  });
+
   it("binary 行：行级 +/− 显示破折号并标注「二进制文件」", () => {
     render(
       <FileChangesCard

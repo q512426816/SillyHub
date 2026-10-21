@@ -18,6 +18,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   attachRunFileChanges,
+  NOTICE_PARTIAL_NO_FILES,
   toChangedFile,
   toFileChangesCardProps,
   type FileChangesTurnFields,
@@ -140,6 +141,28 @@ describe("toFileChangesCardProps：partial / truncated 采样降级", () => {
 
   it("ok 且 files 为空 → null（快照确认零改动：空态零渲染）", () => {
     expect(toFileChangesCardProps(makeSnapshot({ files: [] }), "full")).toBeNull();
+  });
+
+  it("partial 且 files 为空（超时/队列溢出）→ 提示卡而不是 null（D-034：不静默）", () => {
+    const props = toFileChangesCardProps(
+      makeSnapshot({ status: "partial", reason: "timeout", files: [] }),
+      "full",
+    );
+    expect(props).not.toBeNull();
+    expect(props!.files).toEqual([]);
+    expect(props!.notice).toBe(NOTICE_PARTIAL_NO_FILES);
+    expect(props!.truncated).toBe(true);
+    // 文案说的是「没拿到清单」，不是「没改文件」。
+    expect(NOTICE_PARTIAL_NO_FILES).toContain("未知");
+    expect(NOTICE_PARTIAL_NO_FILES).not.toContain("无改动");
+  });
+
+  it("partial 且 files 为空 + concurrentSessionsHint → 提示卡仍带共享工作区标注", () => {
+    const props = toFileChangesCardProps(
+      makeSnapshot({ status: "partial", reason: "queue_overflow", files: [] }),
+      "full",
+    );
+    expect(props!.sharedWorkspace).toBe(true);
   });
 });
 
