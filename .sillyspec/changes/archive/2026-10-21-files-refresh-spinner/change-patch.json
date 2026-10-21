@@ -65,28 +65,45 @@
     "reason": "归档时共享暂存区竞态：本变更交付文件被并行变更 2026-10-21-task-wakeup-restore 的提交 e88ffddb7 连带入库，冻结面按提交归属判定装入他侧两行 .sillyspec/docs hunk、本变更两源码文件被误判 untouched（独立评审 2026-10-21-files-refresh-spinner P3-1 留痕）",
     "originalPatchSha256": "7f14be0a70284b77edabc2f06e671666c6043659093b185f93b330a274655395",
     "originalFiles": [
-      "frontend/src/components/change-file-tree.tsx",
-      "frontend/src/components/__tests__/change-file-tree-autorefresh.test.tsx"
+      ".sillyspec/docs/multi-agent-platform/modules/sillyhub-daemon.changelog.md",
+      ".sillyspec/docs/multi-agent-platform/modules/sillyhub-daemon.md"
     ],
     "originalScopeAuditRows": [
       {
+        "path": ".sillyspec/docs/multi-agent-platform/modules/sillyhub-daemon.changelog.md",
+        "additions": 1,
+        "deletions": 0,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": ".sillyspec/docs/multi-agent-platform/modules/sillyhub-daemon.md",
+        "additions": 1,
+        "deletions": 0,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
         "path": "frontend/src/components/change-file-tree.tsx",
         "planned": "修改",
-        "additions": 19,
-        "deletions": 2,
+        "additions": 0,
+        "deletions": 0,
         "kind": "modified",
-        "verdict": "planned"
+        "verdict": "untouched"
       },
       {
         "path": "frontend/src/components/__tests__/change-file-tree-autorefresh.test.tsx",
         "planned": "修改",
-        "additions": 62,
+        "additions": 0,
         "deletions": 0,
         "kind": "modified",
-        "verdict": "planned"
+        "verdict": "untouched"
       }
     ],
     "basis": "权威面=git diff c71b875a1b3efabf4ce042e065cdf3a9ddda0486..e88ffddb76486f445e8bdac23d437a22c39a8ebd -- 两源码文件（评审实核认定）；行数=git numstat（62/0、19/2）；verdict 枚举取后端权威三态 planned/unplanned/untouched（backend schema.py:745）",
-    "method": "git diff 原样字节重写 change.patch + change-patch.json 数值面修准 + sha256 字节重算回写；剔除的他侧 doc 行原文保留于 originalScopeAuditRows"
+    "method": "git diff 原样字节重写 change.patch + change-patch.json 数值面修准 + sha256 字节重算回写；剔除的他侧 doc 行原文保留于 originalScopeAuditRows",
+    "reviewLoop": "首次评审 28656ff43 FAIL（P2：originalFiles/originalScopeAuditRows 因脚本对象别名 bug 装入修准后新值、原值未留痕）——本提交以 git 父 blob 权威恢复原值修正"
   }
 }
