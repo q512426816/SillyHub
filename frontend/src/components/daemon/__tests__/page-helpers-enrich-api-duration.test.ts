@@ -108,3 +108,41 @@ describe("enrichDisplayTurns — apiDurationMs 回填（FR-01）", () => {
     expect(result[0]!.whoLine).toBe(turn.whoLine);
   });
 });
+
+// ── 2026-10-21-provider-default-ui-hint：whoLine 未选供应商回填默认名 ─────────
+
+describe("enrichDisplayTurns — providerName 未选回填用户默认（FR-02）", () => {
+  it("llm_provider_id=null + 用户默认供应商 → whoLine.providerName=默认名", () => {
+    // makeTurn 预置 whoLine（?? 链不补）——去预置让快照派生。
+    const [enriched] = enrichDisplayTurns(
+      [makeTurn({ whoLine: undefined })],
+      new Map([["run-1", makeRun({ llm_provider_id: null })]]),
+      [{ id: "p1", name: "GLM 平台", is_default: true } as never],
+      "claude",
+      null,
+    );
+    expect(enriched!.whoLine?.providerName).toBe("GLM 平台");
+  });
+
+  it("llm_provider_id=null + 无默认 → 保持 null（TurnTimeline 显「本机默认」）", () => {
+    const [enriched] = enrichDisplayTurns(
+      [makeTurn({ whoLine: undefined })],
+      new Map([["run-1", makeRun({ llm_provider_id: null })]]),
+      [{ id: "p1", name: "Kimi", is_default: false } as never],
+      "claude",
+      null,
+    );
+    expect(enriched!.whoLine?.providerName).toBeNull();
+  });
+
+  it("llm_provider_id 显式 → 按 id 查名（既有行为零回归）", () => {
+    const [enriched] = enrichDisplayTurns(
+      [makeTurn({ whoLine: undefined })],
+      new Map([["run-1", makeRun({ llm_provider_id: "p1" })]]),
+      [{ id: "p1", name: "Kimi", is_default: false } as never],
+      "claude",
+      null,
+    );
+    expect(enriched!.whoLine?.providerName).toBe("Kimi");
+  });
+});

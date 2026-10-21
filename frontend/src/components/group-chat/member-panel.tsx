@@ -1588,10 +1588,16 @@ function AddAgentMemberModal({
       })),
     [projectWorkspacesQ.data],
   );
-  const providerOptions = useMemo(
-    () => (providersQ.data ?? []).map((p) => ({ value: p.id, label: p.name })),
-    [providersQ.data],
-  );
+  const providerOptions = useMemo(() => {
+    const base = (providersQ.data ?? []).map((p) => ({
+      value: p.id,
+      label: p.name,
+    }));
+    // 2026-10-21-provider-default-ui-hint：兜底项文案按用户默认供应商动态化
+    //（评审 R1：与 wizard 同款，防「不指定」显式项丢失）。
+    base.unshift({ value: "", label: noProviderLabel(providersQ.data) });
+    return base;
+  }, [providersQ.data]);
   const profileOptions = useMemo(
     () => profiles.map((p) => ({ value: p.id, label: p.name })),
     [profiles],

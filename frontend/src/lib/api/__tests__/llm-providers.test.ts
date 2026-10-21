@@ -17,6 +17,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
   cleanExtraEnv,
+  noProviderLabel,
   cleanRoleMappings,
   cleanSettingsConfig,
   createProvider,
@@ -314,5 +315,26 @@ describe("cleanSettingsConfig — env 空串占位剔除（ql-20260823-007）", 
   it("settings_config 缺省 → body 落 null（不误造空对象）", () => {
     const created = formToCreate(FORM_VALUES);
     expect(created.settings_config).toBeNull();
+  });
+});
+
+
+// ── noProviderLabel（2026-10-21-provider-default-ui-hint）───────────────────
+
+describe("noProviderLabel — 兜底文案按用户默认供应商动态化", () => {
+  it("有默认供应商 → 「不指定（默认：{name}）」", () => {
+    expect(
+      noProviderLabel([
+        { id: "a", name: "Kimi", is_default: false },
+        { id: "b", name: "GLM 平台", is_default: true },
+      ] as unknown as Parameters<typeof noProviderLabel>[0]),
+    ).toBe("不指定（默认：GLM 平台）");
+  });
+
+  it("无默认 / 空列表 / null → 「不指定（本机默认）」（零回归）", () => {
+    const none = [{ id: "a", name: "Kimi", is_default: false }] as unknown as Parameters<typeof noProviderLabel>[0];
+    expect(noProviderLabel(none)).toBe("不指定（本机默认）");
+    expect(noProviderLabel([])).toBe("不指定（本机默认）");
+    expect(noProviderLabel(null)).toBe("不指定（本机默认）");
   });
 });
