@@ -1,0 +1,977 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-20-session-page-dsh-alignment",
+  "rows": [
+    {
+      "anchor": "FR-01",
+      "row_id": "2026-10-20-session-page-dsh-alignment:task-01:acc-0-19274c8c",
+      "tests": [
+        "frontend/src/components/daemon/__tests__/",
+        "frontend/src/components/sessions/__tests__/"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-20-session-page-dsh-alignment"
+    },
+    {
+      "anchor": "FR-01",
+      "row_id": "2026-10-20-session-page-dsh-alignment:task-01:acc-1-d2dfb31e",
+      "tests": [
+        "frontend/src/components/daemon/__tests__/",
+        "frontend/src/components/sessions/__tests__/"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-20-session-page-dsh-alignment"
+    },
+    {
+      "anchor": "FR-10",
+      "row_id": "2026-10-20-session-page-dsh-alignment:task-02:acc-1-b0ea7d39",
+      "tests": [
+        "backend/app/modules/agent/tests/test_agent_session_model.py",
+        "backend/app/modules/agent/tests/test_cleanup_stale_runs_error_code.py",
+        "backend/app/modules/agent/tests/test_finalizer.py",
+        "backend/app/modules/agent/tests/test_group_chat_models.py",
+        "backend/app/modules/agent/tests/test_mcp_tools.py",
+        "backend/app/modules/agent/tests/test_orchestrator.py",
+        "backend/app/modules/agent/tests/test_placement_borrow_integration.py",
+        "backend/app/modules/agent/tests/test_provider_caps_alignment.py",
+        "backend/app/modules/agent/tests/test_worktree_integration.py",
+        "backend/app/modules/change/tests/test_assets.py",
+        "backend/app/modules/change/tests/test_dispatch_execute_team_mode.py",
+        "backend/app/modules/change/tests/test_files_refresh_sync.py",
+        "backend/app/modules/change/tests/test_files_router.py",
+        "backend/app/modules/change/tests/test_parser.py",
+        "backend/app/modules/change/tests/test_session_changes_endpoint.py",
+        "backend/app/modules/change/tests/test_spec_binding.py",
+        "backend/app/modules/change/tests/test_step_progress.py",
+        "backend/app/modules/change/tests/test_timeline.py",
+        "backend/app/modules/change/tests/test_title_normalization.py",
+        "backend/app/modules/change/tests/test_usage_stats.py"
+      ],
+      "reason": "spec",
+      "state": "active",
+      "discovery": "machine",
+      "confirmed_by": "agent",
+      "confirmed_at": "0ca435b1700f9719306ca92a8af3af08711ba3d0",
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-20-session-page-dsh-alignment"
+    },
+    {
+      "anchor": "FR-10",
+      "row_id": "2026-10-20-session-page-dsh-alignment:task-02:acc-2-182b044c",
+      "tests": [
+        "backend/app/modules/agent/tests/test_agent_session_model.py",
+        "backend/app/modules/agent/tests/test_cleanup_stale_runs_error_code.py",
+        "backend/app/modules/agent/tests/test_finalizer.py",
+        "backend/app/modules/agent/tests/test_group_chat_models.py",
+        "backend/app/modules/agent/tests/test_mcp_tools.py",
+        "backend/app/modules/agent/tests/test_orchestrator.py",
+        "backend/app/modules/agent/tests/test_placement_borrow_integration.py",
+        "backend/app/modules/agent/tests/test_provider_caps_alignment.py",
+        "backend/app/modules/agent/tests/test_worktree_integration.py",
+        "backend/app/modules/change/tests/test_assets.py",
+        "backend/app/modules/change/tests/test_dispatch_execute_team_mode.py",
+        "backend/app/modules/change/tests/test_files_refresh_sync.py",
+        "backend/app/modules/change/tests/test_files_router.py",
+        "backend/app/modules/change/tests/test_parser.py",
+        "backend/app/modules/change/tests/test_session_changes_endpoint.py",
+        "backend/app/modules/change/tests/test_spec_binding.py",
+        "backend/app/modules/change/tests/test_step_progress.py",
+        "backend/app/modules/change/tests/test_timeline.py",
+        "backend/app/modules/change/tests/test_title_normalization.py",
+        "backend/app/modules/change/tests/test_usage_stats.py"
+      ],
+      "reason": "spec",
+      "state": "active",
+      "discovery": "machine",
+      "confirmed_by": "agent",
+      "confirmed_at": "0ca435b1700f9719306ca92a8af3af08711ba3d0",
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-20-session-page-dsh-alignment"
+    },
+    {
+      "anchor": "FR-17",
+      "row_id": "2026-10-20-session-page-dsh-alignment:task-03:acc-0-ba3b1255",
+      "tests": [
+        "frontend/e2e/proto-file-card.spec.ts",
+        "frontend/src/components/daemon/file-changes/__tests__/file-changes-card.test.tsx"
+      ],
+      "reason": "spec",
+      "state": "active",
+      "discovery": "machine",
+      "confirmed_by": "agent",
+      "confirmed_at": "0ca435b1700f9719306ca92a8af3af08711ba3d0",
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-20-session-page-dsh-alignment"
+    },
+    {
+      "anchor": "FR-17",
+      "row_id": "2026-10-20-session-page-dsh-alignment:task-03:acc-1-40b46d82",
+      "tests": [
+        "frontend/e2e/proto-file-card.spec.ts",
+        "frontend/src/components/daemon/file-changes/__tests__/file-changes-card.test.tsx"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-20-session-page-dsh-alignment"
+    },
+    {
+      "anchor": "FR-17",
+      "row_id": "2026-10-20-session-page-dsh-alignment:task-03:acc-2-22949e78",
+      "tests": [
+        "frontend/e2e/proto-file-card.spec.ts",
+        "frontend/src/components/daemon/file-changes/__tests__/file-changes-card.test.tsx"
+      ],
+      "reason": "spec",
+      "state": "active",
+      "discovery": "machine",
+      "confirmed_by": "agent",
+      "confirmed_at": "0ca435b1700f9719306ca92a8af3af08711ba3d0",
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-20-session-page-dsh-alignment"
+    },
+    {
+      "anchor": "FR-23",
+      "row_id": "2026-10-20-session-page-dsh-alignment:task-04:acc-0-13f031ce",
+      "tests": [
+        "backend/app/modules/daemon/tests/test_session_model_usage.py"
+      ],
+      "reason": "spec",
+      "state": "active",
+      "discovery": "machine",
+      "confirmed_by": "agent",
+      "confirmed_at": "0ca435b1700f9719306ca92a8af3af08711ba3d0",
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-20-session-page-dsh-alignment"
+    },
+    {
+      "anchor": "FR-23",
+      "row_id": "2026-10-20-session-page-dsh-alignment:task-04:acc-1-0d0bd63a",
+      "tests": [
+        "backend/app/modules/daemon/tests/test_session_model_usage.py"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-20-session-page-dsh-alignment"
+    },
+    {
+      "anchor": "FR-23",
+      "row_id": "2026-10-20-session-page-dsh-alignment:task-04:acc-2-9339d5f9",
+      "tests": [
+        "backend/app/modules/daemon/tests/test_session_model_usage.py"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-20-session-page-dsh-alignment"
+    },
+    {
+      "anchor": null,
+      "row_id": "2026-10-20-session-page-dsh-alignment:task-05:acc-0-2c3ec4b3",
+      "tests": [
+        "backend/app/modules/agent/tests/test_agent_session_model.py",
+        "backend/app/modules/agent/tests/test_cleanup_stale_runs_error_code.py",
+        "backend/app/modules/agent/tests/test_finalizer.py",
+        "backend/app/modules/agent/tests/test_group_chat_models.py",
+        "backend/app/modules/agent/tests/test_mcp_tools.py",
+        "backend/app/modules/agent/tests/test_orchestrator.py",
+        "backend/app/modules/agent/tests/test_placement_borrow_integration.py",
+        "backend/app/modules/agent/tests/test_provider_caps_alignment.py",
+        "backend/app/modules/agent/tests/test_worktree_integration.py",
+        "backend/app/modules/change/tests/test_assets.py",
+        "backend/app/modules/change/tests/test_dispatch_execute_team_mode.py",
+        "backend/app/modules/change/tests/test_files_refresh_sync.py",
+        "backend/app/modules/change/tests/test_files_router.py",
+        "backend/app/modules/change/tests/test_parser.py",
+        "backend/app/modules/change/tests/test_session_changes_endpoint.py",
+        "backend/app/modules/change/tests/test_spec_binding.py",
+        "backend/app/modules/change/tests/test_step_progress.py",
+        "backend/app/modules/change/tests/test_timeline.py",
+        "backend/app/modules/change/tests/test_title_normalization.py",
+        "backend/app/modules/change/tests/test_usage_stats.py"
+      ],
+      "reason": "spec",
+      "state": "active",
+      "discovery": "machine",
+      "confirmed_by": "agent",
+      "confirmed_at": "0ca435b1700f9719306ca92a8af3af08711ba3d0",
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-20-session-page-dsh-alignment"
+    },
+    {
+      "anchor": null,
+      "row_id": "2026-10-20-session-page-dsh-alignment:task-05:acc-1-d503769a",
+      "tests": [
+        "backend/app/modules/agent/tests/test_agent_session_model.py",
+        "backend/app/modules/agent/tests/test_cleanup_stale_runs_error_code.py",
+        "backend/app/modules/agent/tests/test_finalizer.py",
+        "backend/app/modules/agent/tests/test_group_chat_models.py",
+        "backend/app/modules/agent/tests/test_mcp_tools.py",
+        "backend/app/modules/agent/tests/test_orchestrator.py",
+        "backend/app/modules/agent/tests/test_placement_borrow_integration.py",
+        "backend/app/modules/agent/tests/test_provider_caps_alignment.py",
+        "backend/app/modules/agent/tests/test_worktree_integration.py",
+        "backend/app/modules/change/tests/test_assets.py",
+        "backend/app/modules/change/tests/test_dispatch_execute_team_mode.py",
+        "backend/app/modules/change/tests/test_files_refresh_sync.py",
+        "backend/app/modules/change/tests/test_files_router.py",
+        "backend/app/modules/change/tests/test_parser.py",
+        "backend/app/modules/change/tests/test_session_changes_endpoint.py",
+        "backend/app/modules/change/tests/test_spec_binding.py",
+        "backend/app/modules/change/tests/test_step_progress.py",
+        "backend/app/modules/change/tests/test_timeline.py",
+        "backend/app/modules/change/tests/test_title_normalization.py",
+        "backend/app/modules/change/tests/test_usage_stats.py"
+      ],
+      "reason": "spec",
+      "state": "active",
+      "discovery": "machine",
+      "confirmed_by": "agent",
+      "confirmed_at": "0ca435b1700f9719306ca92a8af3af08711ba3d0",
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-20-session-page-dsh-alignment"
+    },
+    {
+      "anchor": null,
+      "row_id": "2026-10-20-session-page-dsh-alignment:task-05:acc-2-0e4cd85b",
+      "tests": [
+        "backend/app/modules/agent/tests/test_agent_session_model.py",
+        "backend/app/modules/agent/tests/test_cleanup_stale_runs_error_code.py",
+        "backend/app/modules/agent/tests/test_finalizer.py",
+        "backend/app/modules/agent/tests/test_group_chat_models.py",
+        "backend/app/modules/agent/tests/test_mcp_tools.py",
+        "backend/app/modules/agent/tests/test_orchestrator.py",
+        "backend/app/modules/agent/tests/test_placement_borrow_integration.py",
+        "backend/app/modules/agent/tests/test_provider_caps_alignment.py",
+        "backend/app/modules/agent/tests/test_worktree_integration.py",
+        "backend/app/modules/change/tests/test_assets.py",
+        "backend/app/modules/change/tests/test_dispatch_execute_team_mode.py",
+        "backend/app/modules/change/tests/test_files_refresh_sync.py",
+        "backend/app/modules/change/tests/test_files_router.py",
+        "backend/app/modules/change/tests/test_parser.py",
+        "backend/app/modules/change/tests/test_session_changes_endpoint.py",
+        "backend/app/modules/change/tests/test_spec_binding.py",
+        "backend/app/modules/change/tests/test_step_progress.py",
+        "backend/app/modules/change/tests/test_timeline.py",
+        "backend/app/modules/change/tests/test_title_normalization.py",
+        "backend/app/modules/change/tests/test_usage_stats.py"
+      ],
+      "reason": "spec",
+      "state": "active",
+      "discovery": "machine",
+      "confirmed_by": "agent",
+      "confirmed_at": "0ca435b1700f9719306ca92a8af3af08711ba3d0",
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-20-session-page-dsh-alignment"
+    },
+    {
+      "anchor": null,
+      "row_id": "2026-10-20-session-page-dsh-alignment:task-05:acc-3-b2787de9",
+      "tests": [
+        "backend/app/modules/agent/tests/test_agent_session_model.py",
+        "backend/app/modules/agent/tests/test_cleanup_stale_runs_error_code.py",
+        "backend/app/modules/agent/tests/test_finalizer.py",
+        "backend/app/modules/agent/tests/test_group_chat_models.py",
+        "backend/app/modules/agent/tests/test_mcp_tools.py",
+        "backend/app/modules/agent/tests/test_orchestrator.py",
+        "backend/app/modules/agent/tests/test_placement_borrow_integration.py",
+        "backend/app/modules/agent/tests/test_provider_caps_alignment.py",
+        "backend/app/modules/agent/tests/test_worktree_integration.py",
+        "backend/app/modules/change/tests/test_assets.py",
+        "backend/app/modules/change/tests/test_dispatch_execute_team_mode.py",
+        "backend/app/modules/change/tests/test_files_refresh_sync.py",
+        "backend/app/modules/change/tests/test_files_router.py",
+        "backend/app/modules/change/tests/test_parser.py",
+        "backend/app/modules/change/tests/test_session_changes_endpoint.py",
+        "backend/app/modules/change/tests/test_spec_binding.py",
+        "backend/app/modules/change/tests/test_step_progress.py",
+        "backend/app/modules/change/tests/test_timeline.py",
+        "backend/app/modules/change/tests/test_title_normalization.py",
+        "backend/app/modules/change/tests/test_usage_stats.py"
+      ],
+      "reason": "spec",
+      "state": "active",
+      "discovery": "machine",
+      "confirmed_by": "agent",
+      "confirmed_at": "0ca435b1700f9719306ca92a8af3af08711ba3d0",
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-20-session-page-dsh-alignment"
+    },
+    {
+      "anchor": null,
+      "row_id": "2026-10-20-session-page-dsh-alignment:task-06:acc-0-58a86714",
+      "tests": [
+        "backend/app/modules/agent/tests/test_agent_session_model.py",
+        "backend/app/modules/agent/tests/test_cleanup_stale_runs_error_code.py",
+        "backend/app/modules/agent/tests/test_finalizer.py",
+        "backend/app/modules/agent/tests/test_group_chat_models.py",
+        "backend/app/modules/agent/tests/test_mcp_tools.py",
+        "backend/app/modules/agent/tests/test_orchestrator.py",
+        "backend/app/modules/agent/tests/test_placement_borrow_integration.py",
+        "backend/app/modules/agent/tests/test_provider_caps_alignment.py",
+        "backend/app/modules/agent/tests/test_worktree_integration.py",
+        "backend/app/modules/change/tests/test_assets.py",
+        "backend/app/modules/change/tests/test_dispatch_execute_team_mode.py",
+        "backend/app/modules/change/tests/test_files_refresh_sync.py",
+        "backend/app/modules/change/tests/test_files_router.py",
+        "backend/app/modules/change/tests/test_parser.py",
+        "backend/app/modules/change/tests/test_session_changes_endpoint.py",
+        "backend/app/modules/change/tests/test_spec_binding.py",
+        "backend/app/modules/change/tests/test_step_progress.py",
+        "backend/app/modules/change/tests/test_timeline.py",
+        "backend/app/modules/change/tests/test_title_normalization.py",
+        "backend/app/modules/change/tests/test_usage_stats.py"
+      ],
+      "reason": "spec",
+      "state": "active",
+      "discovery": "machine",
+      "confirmed_by": "agent",
+      "confirmed_at": "0ca435b1700f9719306ca92a8af3af08711ba3d0",
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-20-session-page-dsh-alignment"
+    },
+    {
+      "anchor": null,
+      "row_id": "2026-10-20-session-page-dsh-alignment:task-06:acc-2-c57f529a",
+      "tests": [
+        "backend/app/modules/agent/tests/test_agent_session_model.py",
+        "backend/app/modules/agent/tests/test_cleanup_stale_runs_error_code.py",
+        "backend/app/modules/agent/tests/test_finalizer.py",
+        "backend/app/modules/agent/tests/test_group_chat_models.py",
+        "backend/app/modules/agent/tests/test_mcp_tools.py",
+        "backend/app/modules/agent/tests/test_orchestrator.py",
+        "backend/app/modules/agent/tests/test_placement_borrow_integration.py",
+        "backend/app/modules/agent/tests/test_provider_caps_alignment.py",
+        "backend/app/modules/agent/tests/test_worktree_integration.py",
+        "backend/app/modules/change/tests/test_assets.py",
+        "backend/app/modules/change/tests/test_dispatch_execute_team_mode.py",
+        "backend/app/modules/change/tests/test_files_refresh_sync.py",
+        "backend/app/modules/change/tests/test_files_router.py",
+        "backend/app/modules/change/tests/test_parser.py",
+        "backend/app/modules/change/tests/test_session_changes_endpoint.py",
+        "backend/app/modules/change/tests/test_spec_binding.py",
+        "backend/app/modules/change/tests/test_step_progress.py",
+        "backend/app/modules/change/tests/test_timeline.py",
+        "backend/app/modules/change/tests/test_title_normalization.py",
+        "backend/app/modules/change/tests/test_usage_stats.py"
+      ],
+      "reason": "spec",
+      "state": "active",
+      "discovery": "machine",
+      "confirmed_by": "agent",
+      "confirmed_at": "0ca435b1700f9719306ca92a8af3af08711ba3d0",
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-20-session-page-dsh-alignment"
+    },
+    {
+      "anchor": "FR-13",
+      "row_id": "2026-10-20-session-page-dsh-alignment:task-08:acc-0-cae104ca",
+      "tests": [
+        "backend/app/modules/daemon/tests/",
+        "frontend/src/components/daemon/__tests__/turn-timeline-conversation-file-card.test.tsx"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-20-session-page-dsh-alignment"
+    },
+    {
+      "anchor": "FR-13",
+      "row_id": "2026-10-20-session-page-dsh-alignment:task-08:acc-1-c90f4e83",
+      "tests": [
+        "backend/app/modules/daemon/tests/",
+        "frontend/src/components/daemon/__tests__/turn-timeline-conversation-file-card.test.tsx"
+      ],
+      "reason": "spec",
+      "state": "active",
+      "discovery": "machine",
+      "confirmed_by": "agent",
+      "confirmed_at": "0ca435b1700f9719306ca92a8af3af08711ba3d0",
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-20-session-page-dsh-alignment"
+    },
+    {
+      "anchor": "FR-13",
+      "row_id": "2026-10-20-session-page-dsh-alignment:task-08:acc-2-8d4e6538",
+      "tests": [
+        "backend/app/modules/daemon/tests/",
+        "frontend/src/components/daemon/__tests__/turn-timeline-conversation-file-card.test.tsx"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-20-session-page-dsh-alignment"
+    },
+    {
+      "anchor": "FR-13",
+      "row_id": "2026-10-20-session-page-dsh-alignment:task-08:acc-3-89d11596",
+      "tests": [
+        "backend/app/modules/daemon/tests/",
+        "frontend/src/components/daemon/__tests__/turn-timeline-conversation-file-card.test.tsx"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-20-session-page-dsh-alignment"
+    },
+    {
+      "anchor": "FR-13",
+      "row_id": "2026-10-20-session-page-dsh-alignment:task-09:acc-0-9f8f99d4",
+      "tests": [
+        "frontend/src/components/daemon/__tests__/turn-timeline-conversation-file-card.test.tsx",
+        "sillyhub-daemon/tests/interactive/",
+        "sillyhub-daemon/tests/version.test.ts"
+      ],
+      "reason": "spec",
+      "state": "active",
+      "discovery": "machine",
+      "confirmed_by": "agent",
+      "confirmed_at": "0ca435b1700f9719306ca92a8af3af08711ba3d0",
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-20-session-page-dsh-alignment"
+    },
+    {
+      "anchor": "FR-13",
+      "row_id": "2026-10-20-session-page-dsh-alignment:task-09:acc-1-7c06fdc9",
+      "tests": [
+        "frontend/src/components/daemon/__tests__/turn-timeline-conversation-file-card.test.tsx",
+        "sillyhub-daemon/tests/interactive/",
+        "sillyhub-daemon/tests/version.test.ts"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-20-session-page-dsh-alignment"
+    },
+    {
+      "anchor": "FR-13",
+      "row_id": "2026-10-20-session-page-dsh-alignment:task-09:acc-2-0c9d6570",
+      "tests": [
+        "frontend/src/components/daemon/__tests__/turn-timeline-conversation-file-card.test.tsx",
+        "sillyhub-daemon/tests/interactive/",
+        "sillyhub-daemon/tests/version.test.ts"
+      ],
+      "reason": "spec",
+      "state": "active",
+      "discovery": "machine",
+      "confirmed_by": "agent",
+      "confirmed_at": "0ca435b1700f9719306ca92a8af3af08711ba3d0",
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-20-session-page-dsh-alignment"
+    },
+    {
+      "anchor": "FR-13",
+      "row_id": "2026-10-20-session-page-dsh-alignment:task-09:acc-3-ffa5481f",
+      "tests": [
+        "frontend/src/components/daemon/__tests__/turn-timeline-conversation-file-card.test.tsx",
+        "sillyhub-daemon/tests/interactive/",
+        "sillyhub-daemon/tests/version.test.ts"
+      ],
+      "reason": "spec",
+      "state": "active",
+      "discovery": "machine",
+      "confirmed_by": "agent",
+      "confirmed_at": "0ca435b1700f9719306ca92a8af3af08711ba3d0",
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-20-session-page-dsh-alignment"
+    },
+    {
+      "anchor": "FR-13",
+      "row_id": "2026-10-20-session-page-dsh-alignment:task-09:acc-4-c6dc913a",
+      "tests": [
+        "frontend/src/components/daemon/__tests__/turn-timeline-conversation-file-card.test.tsx",
+        "sillyhub-daemon/tests/interactive/",
+        "sillyhub-daemon/tests/version.test.ts"
+      ],
+      "reason": "spec",
+      "state": "active",
+      "discovery": "machine",
+      "confirmed_by": "agent",
+      "confirmed_at": "0ca435b1700f9719306ca92a8af3af08711ba3d0",
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-20-session-page-dsh-alignment"
+    },
+    {
+      "anchor": "FR-11",
+      "row_id": "2026-10-20-session-page-dsh-alignment:task-10:acc-0-789f5890",
+      "tests": [
+        "sillyhub-daemon/tests/interactive/",
+        "sillyhub-daemon/tests/version.test.ts"
+      ],
+      "reason": "spec",
+      "state": "active",
+      "discovery": "machine",
+      "confirmed_by": "agent",
+      "confirmed_at": "0ca435b1700f9719306ca92a8af3af08711ba3d0",
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-20-session-page-dsh-alignment"
+    },
+    {
+      "anchor": "FR-11",
+      "row_id": "2026-10-20-session-page-dsh-alignment:task-10:acc-1-d7e706db",
+      "tests": [
+        "sillyhub-daemon/tests/interactive/",
+        "sillyhub-daemon/tests/version.test.ts"
+      ],
+      "reason": "spec",
+      "state": "active",
+      "discovery": "machine",
+      "confirmed_by": "agent",
+      "confirmed_at": "0ca435b1700f9719306ca92a8af3af08711ba3d0",
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-20-session-page-dsh-alignment"
+    },
+    {
+      "anchor": "FR-11",
+      "row_id": "2026-10-20-session-page-dsh-alignment:task-10:acc-2-44d3e4de",
+      "tests": [
+        "sillyhub-daemon/tests/interactive/",
+        "sillyhub-daemon/tests/version.test.ts"
+      ],
+      "reason": "spec",
+      "state": "active",
+      "discovery": "machine",
+      "confirmed_by": "agent",
+      "confirmed_at": "0ca435b1700f9719306ca92a8af3af08711ba3d0",
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-20-session-page-dsh-alignment"
+    },
+    {
+      "anchor": "FR-11",
+      "row_id": "2026-10-20-session-page-dsh-alignment:task-10:acc-3-12841231",
+      "tests": [
+        "sillyhub-daemon/tests/interactive/",
+        "sillyhub-daemon/tests/version.test.ts"
+      ],
+      "reason": "spec",
+      "state": "active",
+      "discovery": "machine",
+      "confirmed_by": "agent",
+      "confirmed_at": "0ca435b1700f9719306ca92a8af3af08711ba3d0",
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-20-session-page-dsh-alignment"
+    },
+    {
+      "anchor": "FR-11",
+      "row_id": "2026-10-20-session-page-dsh-alignment:task-10:acc-4-8891d819",
+      "tests": [
+        "sillyhub-daemon/tests/interactive/",
+        "sillyhub-daemon/tests/version.test.ts"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-20-session-page-dsh-alignment"
+    },
+    {
+      "anchor": "FR-14",
+      "row_id": "2026-10-20-session-page-dsh-alignment:task-11:acc-0-872866f6",
+      "tests": [
+        "backend/app/modules/daemon/tests/test_session_model_usage.py",
+        "frontend/src/components/daemon/__tests__/turn-segment-views.test.tsx",
+        "frontend/src/components/daemon/__tests__/turn-timeline-conversation-file-card.test.tsx"
+      ],
+      "reason": "spec",
+      "state": "active",
+      "discovery": "machine",
+      "confirmed_by": "agent",
+      "confirmed_at": "0ca435b1700f9719306ca92a8af3af08711ba3d0",
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-20-session-page-dsh-alignment"
+    },
+    {
+      "anchor": "FR-14",
+      "row_id": "2026-10-20-session-page-dsh-alignment:task-11:acc-1-9e593925",
+      "tests": [
+        "backend/app/modules/daemon/tests/test_session_model_usage.py",
+        "frontend/src/components/daemon/__tests__/turn-segment-views.test.tsx",
+        "frontend/src/components/daemon/__tests__/turn-timeline-conversation-file-card.test.tsx"
+      ],
+      "reason": "spec",
+      "state": "active",
+      "discovery": "machine",
+      "confirmed_by": "agent",
+      "confirmed_at": "0ca435b1700f9719306ca92a8af3af08711ba3d0",
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-20-session-page-dsh-alignment"
+    },
+    {
+      "anchor": "FR-14",
+      "row_id": "2026-10-20-session-page-dsh-alignment:task-11:acc-2-643baaa3",
+      "tests": [
+        "backend/app/modules/daemon/tests/test_session_model_usage.py",
+        "frontend/src/components/daemon/__tests__/turn-segment-views.test.tsx",
+        "frontend/src/components/daemon/__tests__/turn-timeline-conversation-file-card.test.tsx"
+      ],
+      "reason": "spec",
+      "state": "active",
+      "discovery": "machine",
+      "confirmed_by": "agent",
+      "confirmed_at": "0ca435b1700f9719306ca92a8af3af08711ba3d0",
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-20-session-page-dsh-alignment"
+    },
+    {
+      "anchor": "FR-14",
+      "row_id": "2026-10-20-session-page-dsh-alignment:task-11:acc-3-2d990048",
+      "tests": [
+        "backend/app/modules/daemon/tests/test_session_model_usage.py",
+        "frontend/src/components/daemon/__tests__/turn-segment-views.test.tsx",
+        "frontend/src/components/daemon/__tests__/turn-timeline-conversation-file-card.test.tsx"
+      ],
+      "reason": "spec",
+      "state": "active",
+      "discovery": "machine",
+      "confirmed_by": "agent",
+      "confirmed_at": "0ca435b1700f9719306ca92a8af3af08711ba3d0",
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-20-session-page-dsh-alignment"
+    },
+    {
+      "anchor": "FR-14",
+      "row_id": "2026-10-20-session-page-dsh-alignment:task-11:acc-4-6b58092d",
+      "tests": [
+        "backend/app/modules/daemon/tests/test_session_model_usage.py",
+        "frontend/src/components/daemon/__tests__/turn-segment-views.test.tsx",
+        "frontend/src/components/daemon/__tests__/turn-timeline-conversation-file-card.test.tsx"
+      ],
+      "reason": "spec",
+      "state": "active",
+      "discovery": "machine",
+      "confirmed_by": "agent",
+      "confirmed_at": "0ca435b1700f9719306ca92a8af3af08711ba3d0",
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-20-session-page-dsh-alignment"
+    },
+    {
+      "anchor": "FR-11",
+      "row_id": "2026-10-20-session-page-dsh-alignment:task-12:acc-0-cf28e0d2",
+      "tests": [
+        "backend/app/modules/daemon/tests/test_session_model_usage.py",
+        "frontend/src/components/daemon/__tests__/turn-segment-views.test.tsx"
+      ],
+      "reason": "spec",
+      "state": "active",
+      "discovery": "machine",
+      "confirmed_by": "agent",
+      "confirmed_at": "0ca435b1700f9719306ca92a8af3af08711ba3d0",
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-20-session-page-dsh-alignment"
+    },
+    {
+      "anchor": "FR-11",
+      "row_id": "2026-10-20-session-page-dsh-alignment:task-12:acc-1-315735c7",
+      "tests": [
+        "backend/app/modules/daemon/tests/test_session_model_usage.py",
+        "frontend/src/components/daemon/__tests__/turn-segment-views.test.tsx"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-20-session-page-dsh-alignment"
+    },
+    {
+      "anchor": "FR-11",
+      "row_id": "2026-10-20-session-page-dsh-alignment:task-12:acc-2-f5a86175",
+      "tests": [
+        "backend/app/modules/daemon/tests/test_session_model_usage.py",
+        "frontend/src/components/daemon/__tests__/turn-segment-views.test.tsx"
+      ],
+      "reason": "spec",
+      "state": "active",
+      "discovery": "machine",
+      "confirmed_by": "agent",
+      "confirmed_at": "0ca435b1700f9719306ca92a8af3af08711ba3d0",
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-20-session-page-dsh-alignment"
+    },
+    {
+      "anchor": "FR-11",
+      "row_id": "2026-10-20-session-page-dsh-alignment:task-12:acc-3-c44bed40",
+      "tests": [
+        "backend/app/modules/daemon/tests/test_session_model_usage.py",
+        "frontend/src/components/daemon/__tests__/turn-segment-views.test.tsx"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-20-session-page-dsh-alignment"
+    },
+    {
+      "anchor": "FR-13",
+      "row_id": "2026-10-20-session-page-dsh-alignment:task-13:acc-0-50152569",
+      "tests": [
+        "backend/app/modules/daemon/tests/test_session_model_usage.py",
+        "frontend/src/components/daemon/__tests__/turn-segment-views.test.tsx",
+        "sillyhub-daemon/tests/version.test.ts"
+      ],
+      "reason": "spec",
+      "state": "active",
+      "discovery": "machine",
+      "confirmed_by": "agent",
+      "confirmed_at": "0ca435b1700f9719306ca92a8af3af08711ba3d0",
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-20-session-page-dsh-alignment"
+    },
+    {
+      "anchor": "FR-13",
+      "row_id": "2026-10-20-session-page-dsh-alignment:task-13:acc-1-7ac5f9a9",
+      "tests": [
+        "backend/app/modules/daemon/tests/test_session_model_usage.py",
+        "frontend/src/components/daemon/__tests__/turn-segment-views.test.tsx",
+        "sillyhub-daemon/tests/version.test.ts"
+      ],
+      "reason": "spec",
+      "state": "active",
+      "discovery": "machine",
+      "confirmed_by": "agent",
+      "confirmed_at": "0ca435b1700f9719306ca92a8af3af08711ba3d0",
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-20-session-page-dsh-alignment"
+    },
+    {
+      "anchor": "FR-13",
+      "row_id": "2026-10-20-session-page-dsh-alignment:task-13:acc-2-8306e2cc",
+      "tests": [
+        "backend/app/modules/daemon/tests/test_session_model_usage.py",
+        "frontend/src/components/daemon/__tests__/turn-segment-views.test.tsx",
+        "sillyhub-daemon/tests/version.test.ts"
+      ],
+      "reason": "spec",
+      "state": "active",
+      "discovery": "machine",
+      "confirmed_by": "agent",
+      "confirmed_at": "0ca435b1700f9719306ca92a8af3af08711ba3d0",
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-20-session-page-dsh-alignment"
+    },
+    {
+      "anchor": "FR-13",
+      "row_id": "2026-10-20-session-page-dsh-alignment:task-13:acc-3-a5935696",
+      "tests": [
+        "backend/app/modules/daemon/tests/test_session_model_usage.py",
+        "frontend/src/components/daemon/__tests__/turn-segment-views.test.tsx",
+        "sillyhub-daemon/tests/version.test.ts"
+      ],
+      "reason": "spec",
+      "state": "active",
+      "discovery": "machine",
+      "confirmed_by": "agent",
+      "confirmed_at": "0ca435b1700f9719306ca92a8af3af08711ba3d0",
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-20-session-page-dsh-alignment"
+    },
+    {
+      "anchor": "FR-17",
+      "row_id": "2026-10-20-session-page-dsh-alignment:task-14:acc-0-67de79b4",
+      "tests": [
+        "backend/app/modules/daemon/tests/test_session_model_usage.py",
+        "frontend/src/components/daemon/__tests__/turn-segment-views.test.tsx"
+      ],
+      "reason": "spec",
+      "state": "active",
+      "discovery": "machine",
+      "confirmed_by": "agent",
+      "confirmed_at": "0ca435b1700f9719306ca92a8af3af08711ba3d0",
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-20-session-page-dsh-alignment"
+    },
+    {
+      "anchor": "FR-17",
+      "row_id": "2026-10-20-session-page-dsh-alignment:task-14:acc-1-4ec07da9",
+      "tests": [
+        "backend/app/modules/daemon/tests/test_session_model_usage.py",
+        "frontend/src/components/daemon/__tests__/turn-segment-views.test.tsx"
+      ],
+      "reason": "spec",
+      "state": "active",
+      "discovery": "machine",
+      "confirmed_by": "agent",
+      "confirmed_at": "0ca435b1700f9719306ca92a8af3af08711ba3d0",
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-20-session-page-dsh-alignment"
+    },
+    {
+      "anchor": "FR-17",
+      "row_id": "2026-10-20-session-page-dsh-alignment:task-14:acc-2-b1e888ad",
+      "tests": [
+        "backend/app/modules/daemon/tests/test_session_model_usage.py",
+        "frontend/src/components/daemon/__tests__/turn-segment-views.test.tsx"
+      ],
+      "reason": "spec",
+      "state": "active",
+      "discovery": "machine",
+      "confirmed_by": "agent",
+      "confirmed_at": "0ca435b1700f9719306ca92a8af3af08711ba3d0",
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-20-session-page-dsh-alignment"
+    },
+    {
+      "anchor": "FR-23",
+      "row_id": "2026-10-20-session-page-dsh-alignment:task-15:acc-0-227c2716",
+      "tests": [
+        "backend/app/modules/daemon/tests/test_session_model_usage.py",
+        "frontend/src/components/daemon/__tests__/turn-segment-views.test.tsx"
+      ],
+      "reason": "spec",
+      "state": "active",
+      "discovery": "machine",
+      "confirmed_by": "agent",
+      "confirmed_at": "0ca435b1700f9719306ca92a8af3af08711ba3d0",
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-20-session-page-dsh-alignment"
+    },
+    {
+      "anchor": "FR-23",
+      "row_id": "2026-10-20-session-page-dsh-alignment:task-15:acc-1-ff03fa06",
+      "tests": [
+        "backend/app/modules/daemon/tests/test_session_model_usage.py",
+        "frontend/src/components/daemon/__tests__/turn-segment-views.test.tsx"
+      ],
+      "reason": "spec",
+      "state": "active",
+      "discovery": "machine",
+      "confirmed_by": "agent",
+      "confirmed_at": "0ca435b1700f9719306ca92a8af3af08711ba3d0",
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-20-session-page-dsh-alignment"
+    },
+    {
+      "anchor": "FR-23",
+      "row_id": "2026-10-20-session-page-dsh-alignment:task-15:acc-2-c68a5787",
+      "tests": [
+        "backend/app/modules/daemon/tests/test_session_model_usage.py",
+        "frontend/src/components/daemon/__tests__/turn-segment-views.test.tsx"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-20-session-page-dsh-alignment"
+    },
+    {
+      "anchor": "FR-23",
+      "row_id": "2026-10-20-session-page-dsh-alignment:task-15:acc-3-2b5dad5f",
+      "tests": [
+        "backend/app/modules/daemon/tests/test_session_model_usage.py",
+        "frontend/src/components/daemon/__tests__/turn-segment-views.test.tsx"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-20-session-page-dsh-alignment"
+    },
+    {
+      "anchor": "FR-23",
+      "row_id": "2026-10-20-session-page-dsh-alignment:task-15:acc-4-0ca61594",
+      "tests": [
+        "backend/app/modules/daemon/tests/test_session_model_usage.py",
+        "frontend/src/components/daemon/__tests__/turn-segment-views.test.tsx"
+      ],
+      "reason": "spec",
+      "state": "active",
+      "discovery": "machine",
+      "confirmed_by": "agent",
+      "confirmed_at": "0ca435b1700f9719306ca92a8af3af08711ba3d0",
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-20-session-page-dsh-alignment"
+    }
+  ]
+}

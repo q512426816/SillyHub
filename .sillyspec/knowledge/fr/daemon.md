@@ -5942,3 +5942,658 @@
   confirmed_at: null
   source_change: 2026-10-21-spec-conflict-autoheal
   status: active
+
+## FR-daemon-196 轮元信息合并为唯一一行
+变更：2026-10-20-session-page-dsh-alignment
+状态：active
+摘要：默认场景
+依据决策：D-002@v1、D-003@v1、D-008@v1、D-016@v1、D-021@v1
+场景正文：
+- 场景：默认场景 — Given 一个已完成轮（`replyAt` 存在）；When 在对话视图或「全部（进度）」视图渲染该轮；Then 轮号 / 状态 / 结束时刻 / 历时 / tokens / tok·s 必须全部落在**同一条**元信息行内（整页「历时」字样只出现一次）；对话视图必须经 `
+全文：.sillyspec/changes/archive/2026-10-20-session-page-dsh-alignment/requirements.md#FR-01
+最近确认：328788cbe
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-20-session-page-dsh-alignment:task-01:acc-0-19274c8c
+  tests: frontend/src/components/daemon/__tests__/ | frontend/src/components/sessions/__tests__/
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-20-session-page-dsh-alignment
+  status: active
+- row: 2026-10-20-session-page-dsh-alignment:task-01:acc-1-d2dfb31e
+  tests: frontend/src/components/daemon/__tests__/ | frontend/src/components/sessions/__tests__/
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-20-session-page-dsh-alignment
+  status: active
+
+## FR-daemon-197 答复正文提档到 15px / 1.8 / 0.65em
+变更：2026-10-20-session-page-dsh-alignment
+状态：active
+摘要：默认场景
+依据决策：D-002@v1、D-003@v1、D-008@v1、D-013@v1、D-016@v1、D-021@v1
+场景正文：
+- 场景：默认场景 — Given 任意一轮的答复正文（段模型 `TextSegmentView`，或旧回退路径的 `seg-text-body` 气泡）；When 桌面端渲染（不在 `[data-variant="mobile"]` 作用域内）；Then `.seg-text-body` 内的 `.wmde-markdown` 必须是 15px / 行高 1.8 / 段距 0.65em（`frontend/src
+全文：.sillyspec/changes/archive/2026-10-20-session-page-dsh-alignment/requirements.md#FR-02
+最近确认：328788cbe
+
+## FR-daemon-198 过程行退档到 11.5px + muted/80，并带 D-025 固定语义标签
+变更：2026-10-20-session-page-dsh-alignment
+状态：active
+摘要：默认场景
+依据决策：D-002@v1、D-013@v1、D-016@v1、D-021@v1、D-025@v1
+场景正文：
+- 场景：默认场景 — Given 思考行或工具行；When 渲染；Then 两者必须同为 `text-[11.5px]` + `text-muted-foreground/80`（`frontend/src/components/dae
+全文：.sillyspec/changes/archive/2026-10-20-session-page-dsh-alignment/requirements.md#FR-03
+最近确认：328788cbe
+
+## FR-daemon-199 工具行去外框、改 2px 左规线
+变更：2026-10-20-session-page-dsh-alignment
+状态：active
+摘要：默认场景
+依据决策：D-016@v1、D-021@v1
+场景正文：
+- 场景：默认场景 — Given 一个工具行（`turn-segment-views.tsx:808` 的工具行容器）；When 静息与 hover 两种态；Then 必须去掉满宽描边与卡底，改 2px 左规线；静息必须 `border-border/60`、hover 必须 `border-l-brand-600`；行尾动作
+全文：.sillyspec/changes/archive/2026-10-20-session-page-dsh-alignment/requirements.md#FR-04
+最近确认：328788cbe
+
+## FR-daemon-200 过程块与答复块 14px 分区
+变更：2026-10-20-session-page-dsh-alignment
+状态：active
+摘要：默认场景
+依据决策：D-021@v1
+场景正文：
+- 场景：默认场景 — Given 「全部（进度）」视图的助手列（`data-testid="turn-progress-column"`，`turn-timeline.tsx:2053`）；When 同时渲染过程段与答复正文段；Then 列内过程行之间必须是 7px（`gap-[7px]`），答复正文块必须额外上留 7px（`[&>.seg-text-body]:mt-[7px]`），两区实际间
+全文：.sillyspec/changes/archive/2026-10-20-session-page-dsh-alignment/requirements.md#FR-05
+最近确认：328788cbe
+
+## FR-daemon-201 轮间只留留白、禁止任何分割线
+变更：2026-10-20-session-page-dsh-alignment
+状态：active
+摘要：默认场景
+依据决策：D-008@v1、D-016@v1、D-020@v1
+场景正文：
+- 场景：默认场景 — Given 任意轮列表（`turn-block` 容器，`turn-timeline.tsx:1712`）；When 渲染轮与轮之间的边界；Then 禁止出现任何边框/分割线（`turn-block` 不得含 `border-b`，也不得含 `border-border`），只允许 28px 留白（`pb-7
+全文：.sillyspec/changes/archive/2026-10-20-session-page-dsh-alignment/requirements.md#FR-06
+最近确认：328788cbe
+
+## FR-daemon-202 用户气泡压暗 + 附件 chips 双档
+变更：2026-10-20-session-page-dsh-alignment
+状态：active
+摘要：默认场景
+依据决策：D-016@v1
+场景正文：
+- 场景：默认场景 — Given 用户气泡及其内部图片/文件 chip；When 会话页（新形态）渲染；Then 用户气泡必须走压暗的 brand 基底 + 细边（不再是整屏最亮的纯亮蓝大块）；附件 chip 必须支持 `tone: "onPrimary" | "brand
+全文：.sillyspec/changes/archive/2026-10-20-session-page-dsh-alignment/requirements.md#FR-07
+最近确认：328788cbe
+
+## FR-daemon-203 左栏 chip 统一 9px、轮数右贴
+变更：2026-10-20-session-page-dsh-alignment
+状态：active
+摘要：默认场景
+依据决策：D-002@v1、D-003@v1、D-016@v1
+场景正文：
+- 场景：默认场景 — Given 会话列表行（`frontend/src/components/sessions/session-list-panel.tsx`）；When 渲染引擎 / 档案 / 轮数 chip 与行时间；Then chip 必须统一 `h-[14px]` + `text-[9px]`（`session-list-panel.tsx:3773`），轮数必须右贴（`ml-au
+全文：.sillyspec/changes/archive/2026-10-20-session-page-dsh-alignment/requirements.md#FR-08
+最近确认：328788cbe
+
+## FR-daemon-204 三主题只走语义 token
+变更：2026-10-20-session-page-dsh-alignment
+状态：active
+摘要：默认场景
+依据决策：D-003@v1、D-013@v1、D-015@v1、D-015@v2
+场景正文：
+- 场景：默认场景 — When 切换 `html[data-theme]`；Then 本变更的全部视觉改动必须只用语义 token（`hsl(var(--…))`、`--color-*` 或 token 派生类名，含 `/80`、`/60` 这类
+全文：.sillyspec/changes/archive/2026-10-20-session-page-dsh-alignment/requirements.md#FR-09
+最近确认：328788cbe
+
+## FR-daemon-205 轨迹装配器必须是纯函数且覆盖全部边界
+变更：2026-10-20-session-page-dsh-alignment
+状态：active
+摘要：默认场景
+依据决策：D-022@v1、D-024@v1、D-026@v1
+场景正文：
+- 场景：默认场景 — Given 真实会话导出的 `logs` + `runs`；When 调用 `buildTrajectory(logs, runs, opts?)`（`frontend/src/components/daemon/trajecto；Then 必须按 `runs` 顺序分组，零日志 run 必须不产轮且不占轮号；轮内必须按事件时间排序（同毫秒用 `agent_event.seq` 稳定，无 seq 的
+全文：.sillyspec/changes/archive/2026-10-20-session-page-dsh-alignment/requirements.md#FR-10
+最近确认：328788cbe
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-20-session-page-dsh-alignment:task-02:acc-1-b0ea7d39
+  tests: backend/app/modules/agent/tests/test_agent_session_model.py | backend/app/modules/agent/tests/test_cleanup_stale_runs_error_code.py | backend/app/modules/agent/tests/test_finalizer.py | backend/app/modules/agent/tests/test_group_chat_models.py | backend/app/modules/agent/tests/test_mcp_tools.py | backend/app/modules/agent/tests/test_orchestrator.py | backend/app/modules/agent/tests/test_placement_borrow_integration.py | backend/app/modules/agent/tests/test_provider_caps_alignment.py | backend/app/modules/agent/tests/test_worktree_integration.py | backend/app/modules/change/tests/test_assets.py | backend/app/modules/change/tests/test_dispatch_execute_team_mode.py | backend/app/modules/change/tests/test_files_refresh_sync.py | backend/app/modules/change/tests/test_files_router.py | backend/app/modules/change/tests/test_parser.py | backend/app/modules/change/tests/test_session_changes_endpoint.py | backend/app/modules/change/tests/test_spec_binding.py | backend/app/modules/change/tests/test_step_progress.py | backend/app/modules/change/tests/test_timeline.py | backend/app/modules/change/tests/test_title_normalization.py | backend/app/modules/change/tests/test_usage_stats.py
+  reason: spec
+  state: active
+  discovery: machine
+  confirmed_by: agent
+  confirmed_at: 0ca435b1700f9719306ca92a8af3af08711ba3d0
+  source_change: 2026-10-20-session-page-dsh-alignment
+  status: active
+- row: 2026-10-20-session-page-dsh-alignment:task-02:acc-2-182b044c
+  tests: backend/app/modules/agent/tests/test_agent_session_model.py | backend/app/modules/agent/tests/test_cleanup_stale_runs_error_code.py | backend/app/modules/agent/tests/test_finalizer.py | backend/app/modules/agent/tests/test_group_chat_models.py | backend/app/modules/agent/tests/test_mcp_tools.py | backend/app/modules/agent/tests/test_orchestrator.py | backend/app/modules/agent/tests/test_placement_borrow_integration.py | backend/app/modules/agent/tests/test_provider_caps_alignment.py | backend/app/modules/agent/tests/test_worktree_integration.py | backend/app/modules/change/tests/test_assets.py | backend/app/modules/change/tests/test_dispatch_execute_team_mode.py | backend/app/modules/change/tests/test_files_refresh_sync.py | backend/app/modules/change/tests/test_files_router.py | backend/app/modules/change/tests/test_parser.py | backend/app/modules/change/tests/test_session_changes_endpoint.py | backend/app/modules/change/tests/test_spec_binding.py | backend/app/modules/change/tests/test_step_progress.py | backend/app/modules/change/tests/test_timeline.py | backend/app/modules/change/tests/test_title_normalization.py | backend/app/modules/change/tests/test_usage_stats.py
+  reason: spec
+  state: active
+  discovery: machine
+  confirmed_by: agent
+  confirmed_at: 0ca435b1700f9719306ca92a8af3af08711ba3d0
+  source_change: 2026-10-20-session-page-dsh-alignment
+  status: active
+
+## FR-daemon-206 轨迹视图是第三个入口，不是替换
+变更：2026-10-20-session-page-dsh-alignment
+状态：active
+摘要：默认场景
+依据决策：D-022@v1、D-024@v1、D-026@v1
+场景正文：
+- 场景：默认场景 — Given 已装配的 `Trajectory`；When 渲染 `TrajectoryView`（`frontend/src/components/daemon/trajectory/trajectory-view.t；Then 必须只做展示（无 fetch / 无 store / 无 context，数据由 props 注入）；必须是三段结构：泳道时间轴（输入 / 模型 / 工具三泳道
+全文：.sillyspec/changes/archive/2026-10-20-session-page-dsh-alignment/requirements.md#FR-11
+最近确认：328788cbe
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-20-session-page-dsh-alignment:task-10:acc-0-789f5890
+  tests: sillyhub-daemon/tests/interactive/ | sillyhub-daemon/tests/version.test.ts
+  reason: spec
+  state: active
+  discovery: machine
+  confirmed_by: agent
+  confirmed_at: 0ca435b1700f9719306ca92a8af3af08711ba3d0
+  source_change: 2026-10-20-session-page-dsh-alignment
+  status: active
+- row: 2026-10-20-session-page-dsh-alignment:task-10:acc-1-d7e706db
+  tests: sillyhub-daemon/tests/interactive/ | sillyhub-daemon/tests/version.test.ts
+  reason: spec
+  state: active
+  discovery: machine
+  confirmed_by: agent
+  confirmed_at: 0ca435b1700f9719306ca92a8af3af08711ba3d0
+  source_change: 2026-10-20-session-page-dsh-alignment
+  status: active
+- row: 2026-10-20-session-page-dsh-alignment:task-10:acc-2-44d3e4de
+  tests: sillyhub-daemon/tests/interactive/ | sillyhub-daemon/tests/version.test.ts
+  reason: spec
+  state: active
+  discovery: machine
+  confirmed_by: agent
+  confirmed_at: 0ca435b1700f9719306ca92a8af3af08711ba3d0
+  source_change: 2026-10-20-session-page-dsh-alignment
+  status: active
+- row: 2026-10-20-session-page-dsh-alignment:task-10:acc-3-12841231
+  tests: sillyhub-daemon/tests/interactive/ | sillyhub-daemon/tests/version.test.ts
+  reason: spec
+  state: active
+  discovery: machine
+  confirmed_by: agent
+  confirmed_at: 0ca435b1700f9719306ca92a8af3af08711ba3d0
+  source_change: 2026-10-20-session-page-dsh-alignment
+  status: active
+- row: 2026-10-20-session-page-dsh-alignment:task-10:acc-4-8891d819
+  tests: sillyhub-daemon/tests/interactive/ | sillyhub-daemon/tests/version.test.ts
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-20-session-page-dsh-alignment
+  status: active
+- row: 2026-10-20-session-page-dsh-alignment:task-12:acc-0-cf28e0d2
+  tests: backend/app/modules/daemon/tests/test_session_model_usage.py | frontend/src/components/daemon/__tests__/turn-segment-views.test.tsx
+  reason: spec
+  state: active
+  discovery: machine
+  confirmed_by: agent
+  confirmed_at: 0ca435b1700f9719306ca92a8af3af08711ba3d0
+  source_change: 2026-10-20-session-page-dsh-alignment
+  status: active
+- row: 2026-10-20-session-page-dsh-alignment:task-12:acc-1-315735c7
+  tests: backend/app/modules/daemon/tests/test_session_model_usage.py | frontend/src/components/daemon/__tests__/turn-segment-views.test.tsx
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-20-session-page-dsh-alignment
+  status: active
+- row: 2026-10-20-session-page-dsh-alignment:task-12:acc-2-f5a86175
+  tests: backend/app/modules/daemon/tests/test_session_model_usage.py | frontend/src/components/daemon/__tests__/turn-segment-views.test.tsx
+  reason: spec
+  state: active
+  discovery: machine
+  confirmed_by: agent
+  confirmed_at: 0ca435b1700f9719306ca92a8af3af08711ba3d0
+  source_change: 2026-10-20-session-page-dsh-alignment
+  status: active
+- row: 2026-10-20-session-page-dsh-alignment:task-12:acc-3-c44bed40
+  tests: backend/app/modules/daemon/tests/test_session_model_usage.py | frontend/src/components/daemon/__tests__/turn-segment-views.test.tsx
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-20-session-page-dsh-alignment
+  status: active
+
+## FR-daemon-207 轨迹数据面由 SSR 读盘注入，禁止回到 public/
+变更：2026-10-20-session-page-dsh-alignment
+状态：active
+摘要：默认场景
+依据决策：D-010@v1、D-018@v1、D-022@v1
+场景正文：
+- 场景：默认场景 — Given dev server 在跑；When `GET /proto/session-trajectory`；Then 必须返回 200，且首屏 SSR HTML 必须已含完整账本（不依赖浏览器 JS 才出现）；真实导出必须由 Server Component 从 `fronte
+全文：.sillyspec/changes/archive/2026-10-20-session-page-dsh-alignment/requirements.md#FR-12
+最近确认：328788cbe
+
+## FR-daemon-208 文件变更卡 1b——daemon 每轮工作区快照
+变更：2026-10-20-session-page-dsh-alignment
+状态：active
+摘要：默认场景
+依据决策：D-023@v1
+场景正文：
+- 场景：默认场景 — Given daemon 侧一轮开始与结束；When 轮首与轮尾；Then 轮首必须记录 HEAD 作为 baseline；轮尾必须执行 `git status --porcelain -z --untracked-files=norm
+全文：.sillyspec/changes/archive/2026-10-20-session-page-dsh-alignment/requirements.md#FR-13
+最近确认：328788cbe
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-20-session-page-dsh-alignment:task-08:acc-0-cae104ca
+  tests: backend/app/modules/daemon/tests/ | frontend/src/components/daemon/__tests__/turn-timeline-conversation-file-card.test.tsx
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-20-session-page-dsh-alignment
+  status: active
+- row: 2026-10-20-session-page-dsh-alignment:task-08:acc-1-c90f4e83
+  tests: backend/app/modules/daemon/tests/ | frontend/src/components/daemon/__tests__/turn-timeline-conversation-file-card.test.tsx
+  reason: spec
+  state: active
+  discovery: machine
+  confirmed_by: agent
+  confirmed_at: 0ca435b1700f9719306ca92a8af3af08711ba3d0
+  source_change: 2026-10-20-session-page-dsh-alignment
+  status: active
+- row: 2026-10-20-session-page-dsh-alignment:task-08:acc-2-8d4e6538
+  tests: backend/app/modules/daemon/tests/ | frontend/src/components/daemon/__tests__/turn-timeline-conversation-file-card.test.tsx
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-20-session-page-dsh-alignment
+  status: active
+- row: 2026-10-20-session-page-dsh-alignment:task-08:acc-3-89d11596
+  tests: backend/app/modules/daemon/tests/ | frontend/src/components/daemon/__tests__/turn-timeline-conversation-file-card.test.tsx
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-20-session-page-dsh-alignment
+  status: active
+- row: 2026-10-20-session-page-dsh-alignment:task-09:acc-0-9f8f99d4
+  tests: frontend/src/components/daemon/__tests__/turn-timeline-conversation-file-card.test.tsx | sillyhub-daemon/tests/interactive/ | sillyhub-daemon/tests/version.test.ts
+  reason: spec
+  state: active
+  discovery: machine
+  confirmed_by: agent
+  confirmed_at: 0ca435b1700f9719306ca92a8af3af08711ba3d0
+  source_change: 2026-10-20-session-page-dsh-alignment
+  status: active
+- row: 2026-10-20-session-page-dsh-alignment:task-09:acc-1-7c06fdc9
+  tests: frontend/src/components/daemon/__tests__/turn-timeline-conversation-file-card.test.tsx | sillyhub-daemon/tests/interactive/ | sillyhub-daemon/tests/version.test.ts
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-20-session-page-dsh-alignment
+  status: active
+- row: 2026-10-20-session-page-dsh-alignment:task-09:acc-2-0c9d6570
+  tests: frontend/src/components/daemon/__tests__/turn-timeline-conversation-file-card.test.tsx | sillyhub-daemon/tests/interactive/ | sillyhub-daemon/tests/version.test.ts
+  reason: spec
+  state: active
+  discovery: machine
+  confirmed_by: agent
+  confirmed_at: 0ca435b1700f9719306ca92a8af3af08711ba3d0
+  source_change: 2026-10-20-session-page-dsh-alignment
+  status: active
+- row: 2026-10-20-session-page-dsh-alignment:task-09:acc-3-ffa5481f
+  tests: frontend/src/components/daemon/__tests__/turn-timeline-conversation-file-card.test.tsx | sillyhub-daemon/tests/interactive/ | sillyhub-daemon/tests/version.test.ts
+  reason: spec
+  state: active
+  discovery: machine
+  confirmed_by: agent
+  confirmed_at: 0ca435b1700f9719306ca92a8af3af08711ba3d0
+  source_change: 2026-10-20-session-page-dsh-alignment
+  status: active
+- row: 2026-10-20-session-page-dsh-alignment:task-09:acc-4-c6dc913a
+  tests: frontend/src/components/daemon/__tests__/turn-timeline-conversation-file-card.test.tsx | sillyhub-daemon/tests/interactive/ | sillyhub-daemon/tests/version.test.ts
+  reason: spec
+  state: active
+  discovery: machine
+  confirmed_by: agent
+  confirmed_at: 0ca435b1700f9719306ca92a8af3af08711ba3d0
+  source_change: 2026-10-20-session-page-dsh-alignment
+  status: active
+- row: 2026-10-20-session-page-dsh-alignment:task-13:acc-0-50152569
+  tests: backend/app/modules/daemon/tests/test_session_model_usage.py | frontend/src/components/daemon/__tests__/turn-segment-views.test.tsx | sillyhub-daemon/tests/version.test.ts
+  reason: spec
+  state: active
+  discovery: machine
+  confirmed_by: agent
+  confirmed_at: 0ca435b1700f9719306ca92a8af3af08711ba3d0
+  source_change: 2026-10-20-session-page-dsh-alignment
+  status: active
+- row: 2026-10-20-session-page-dsh-alignment:task-13:acc-1-7ac5f9a9
+  tests: backend/app/modules/daemon/tests/test_session_model_usage.py | frontend/src/components/daemon/__tests__/turn-segment-views.test.tsx | sillyhub-daemon/tests/version.test.ts
+  reason: spec
+  state: active
+  discovery: machine
+  confirmed_by: agent
+  confirmed_at: 0ca435b1700f9719306ca92a8af3af08711ba3d0
+  source_change: 2026-10-20-session-page-dsh-alignment
+  status: active
+- row: 2026-10-20-session-page-dsh-alignment:task-13:acc-2-8306e2cc
+  tests: backend/app/modules/daemon/tests/test_session_model_usage.py | frontend/src/components/daemon/__tests__/turn-segment-views.test.tsx | sillyhub-daemon/tests/version.test.ts
+  reason: spec
+  state: active
+  discovery: machine
+  confirmed_by: agent
+  confirmed_at: 0ca435b1700f9719306ca92a8af3af08711ba3d0
+  source_change: 2026-10-20-session-page-dsh-alignment
+  status: active
+- row: 2026-10-20-session-page-dsh-alignment:task-13:acc-3-a5935696
+  tests: backend/app/modules/daemon/tests/test_session_model_usage.py | frontend/src/components/daemon/__tests__/turn-segment-views.test.tsx | sillyhub-daemon/tests/version.test.ts
+  reason: spec
+  state: active
+  discovery: machine
+  confirmed_by: agent
+  confirmed_at: 0ca435b1700f9719306ca92a8af3af08711ba3d0
+  source_change: 2026-10-20-session-page-dsh-alignment
+  status: active
+
+## FR-daemon-209 文件变更卡归因与老版本降级
+变更：2026-10-20-session-page-dsh-alignment
+状态：active
+摘要：默认场景
+依据决策：D-023@v1
+场景正文：
+- 场景：默认场景 — Given 一轮结束且快照显示有文件改动；When 前端渲染该轮的变更卡；Then 每个文件必须标注归因：有 `edit_patch` 的指向具体编辑（点开看哪次编辑）；有改动但无 patch 的必须标「命令行/脚本改动」；daemon 版本过
+全文：.sillyspec/changes/archive/2026-10-20-session-page-dsh-alignment/requirements.md#FR-14
+最近确认：328788cbe
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-20-session-page-dsh-alignment:task-11:acc-0-872866f6
+  tests: backend/app/modules/daemon/tests/test_session_model_usage.py | frontend/src/components/daemon/__tests__/turn-segment-views.test.tsx | frontend/src/components/daemon/__tests__/turn-timeline-conversation-file-card.test.tsx
+  reason: spec
+  state: active
+  discovery: machine
+  confirmed_by: agent
+  confirmed_at: 0ca435b1700f9719306ca92a8af3af08711ba3d0
+  source_change: 2026-10-20-session-page-dsh-alignment
+  status: active
+- row: 2026-10-20-session-page-dsh-alignment:task-11:acc-1-9e593925
+  tests: backend/app/modules/daemon/tests/test_session_model_usage.py | frontend/src/components/daemon/__tests__/turn-segment-views.test.tsx | frontend/src/components/daemon/__tests__/turn-timeline-conversation-file-card.test.tsx
+  reason: spec
+  state: active
+  discovery: machine
+  confirmed_by: agent
+  confirmed_at: 0ca435b1700f9719306ca92a8af3af08711ba3d0
+  source_change: 2026-10-20-session-page-dsh-alignment
+  status: active
+- row: 2026-10-20-session-page-dsh-alignment:task-11:acc-2-643baaa3
+  tests: backend/app/modules/daemon/tests/test_session_model_usage.py | frontend/src/components/daemon/__tests__/turn-segment-views.test.tsx | frontend/src/components/daemon/__tests__/turn-timeline-conversation-file-card.test.tsx
+  reason: spec
+  state: active
+  discovery: machine
+  confirmed_by: agent
+  confirmed_at: 0ca435b1700f9719306ca92a8af3af08711ba3d0
+  source_change: 2026-10-20-session-page-dsh-alignment
+  status: active
+- row: 2026-10-20-session-page-dsh-alignment:task-11:acc-3-2d990048
+  tests: backend/app/modules/daemon/tests/test_session_model_usage.py | frontend/src/components/daemon/__tests__/turn-segment-views.test.tsx | frontend/src/components/daemon/__tests__/turn-timeline-conversation-file-card.test.tsx
+  reason: spec
+  state: active
+  discovery: machine
+  confirmed_by: agent
+  confirmed_at: 0ca435b1700f9719306ca92a8af3af08711ba3d0
+  source_change: 2026-10-20-session-page-dsh-alignment
+  status: active
+- row: 2026-10-20-session-page-dsh-alignment:task-11:acc-4-6b58092d
+  tests: backend/app/modules/daemon/tests/test_session_model_usage.py | frontend/src/components/daemon/__tests__/turn-segment-views.test.tsx | frontend/src/components/daemon/__tests__/turn-timeline-conversation-file-card.test.tsx
+  reason: spec
+  state: active
+  discovery: machine
+  confirmed_by: agent
+  confirmed_at: 0ca435b1700f9719306ca92a8af3af08711ba3d0
+  source_change: 2026-10-20-session-page-dsh-alignment
+  status: active
+
+## FR-daemon-210 文件变更卡的性能红线与降级
+变更：2026-10-20-session-page-dsh-alignment
+状态：active
+摘要：默认场景
+依据决策：D-023@v1
+场景正文：
+- 场景：默认场景 — Given 一轮结束时的采集；When 在高轮次会话（21 轮 / 1271 条日志为基线语料）上重复执行
+全文：.sillyspec/changes/archive/2026-10-20-session-page-dsh-alignment/requirements.md#FR-15
+最近确认：328788cbe
+
+## FR-daemon-211 并行会话隔离＝显式标注，不引入每会话 worktree
+变更：2026-10-20-session-page-dsh-alignment
+状态：active
+摘要：默认场景
+依据决策：D-023@v1
+场景正文：
+- 场景：默认场景 — Given 一个共享工作区被多个会话同时使用；When turn 级卡片列出改动文件；Then 卡片必须注明「可能含并行会话改动」；本变更禁止为此强制引入每会话独立 worktree（留作后续根治项）；ignored 目录的探测结果必须标明来源是 mtim
+全文：.sillyspec/changes/archive/2026-10-20-session-page-dsh-alignment/requirements.md#FR-16
+最近确认：328788cbe
+
+## FR-daemon-212 定稿原型必须由真实组件 + 水合后 DOM 产出
+变更：2026-10-20-session-page-dsh-alignment
+状态：active
+摘要：默认场景
+依据决策：D-005@v1、D-009@v1、D-010@v1、D-014@v1、D-017@v1、D-019@v1
+场景正文：
+- 场景：默认场景 — Given 需要给用户看「可双击的真实稿」；When 产出定稿原型；Then 定稿原型必须由 `/proto/*` dev 路由渲染真实生产组件产生，再对**水合后 DOM** 序列化导出（内联 CSS、剥 `<script>` / `<
+全文：.sillyspec/changes/archive/2026-10-20-session-page-dsh-alignment/requirements.md#FR-17
+最近确认：328788cbe
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-20-session-page-dsh-alignment:task-03:acc-0-ba3b1255
+  tests: frontend/e2e/proto-file-card.spec.ts | frontend/src/components/daemon/file-changes/__tests__/file-changes-card.test.tsx
+  reason: spec
+  state: active
+  discovery: machine
+  confirmed_by: agent
+  confirmed_at: 0ca435b1700f9719306ca92a8af3af08711ba3d0
+  source_change: 2026-10-20-session-page-dsh-alignment
+  status: active
+- row: 2026-10-20-session-page-dsh-alignment:task-03:acc-1-40b46d82
+  tests: frontend/e2e/proto-file-card.spec.ts | frontend/src/components/daemon/file-changes/__tests__/file-changes-card.test.tsx
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-20-session-page-dsh-alignment
+  status: active
+- row: 2026-10-20-session-page-dsh-alignment:task-03:acc-2-22949e78
+  tests: frontend/e2e/proto-file-card.spec.ts | frontend/src/components/daemon/file-changes/__tests__/file-changes-card.test.tsx
+  reason: spec
+  state: active
+  discovery: machine
+  confirmed_by: agent
+  confirmed_at: 0ca435b1700f9719306ca92a8af3af08711ba3d0
+  source_change: 2026-10-20-session-page-dsh-alignment
+  status: active
+- row: 2026-10-20-session-page-dsh-alignment:task-14:acc-0-67de79b4
+  tests: backend/app/modules/daemon/tests/test_session_model_usage.py | frontend/src/components/daemon/__tests__/turn-segment-views.test.tsx
+  reason: spec
+  state: active
+  discovery: machine
+  confirmed_by: agent
+  confirmed_at: 0ca435b1700f9719306ca92a8af3af08711ba3d0
+  source_change: 2026-10-20-session-page-dsh-alignment
+  status: active
+- row: 2026-10-20-session-page-dsh-alignment:task-14:acc-1-4ec07da9
+  tests: backend/app/modules/daemon/tests/test_session_model_usage.py | frontend/src/components/daemon/__tests__/turn-segment-views.test.tsx
+  reason: spec
+  state: active
+  discovery: machine
+  confirmed_by: agent
+  confirmed_at: 0ca435b1700f9719306ca92a8af3af08711ba3d0
+  source_change: 2026-10-20-session-page-dsh-alignment
+  status: active
+- row: 2026-10-20-session-page-dsh-alignment:task-14:acc-2-b1e888ad
+  tests: backend/app/modules/daemon/tests/test_session_model_usage.py | frontend/src/components/daemon/__tests__/turn-segment-views.test.tsx
+  reason: spec
+  state: active
+  discovery: machine
+  confirmed_by: agent
+  confirmed_at: 0ca435b1700f9719306ca92a8af3af08711ba3d0
+  source_change: 2026-10-20-session-page-dsh-alignment
+  status: active
+
+## FR-daemon-213 导出脚本自带机械校验，不达标不产出
+变更：2026-10-20-session-page-dsh-alignment
+状态：active
+摘要：默认场景
+依据决策：D-014@v1、D-018@v1、D-019@v1
+场景正文：
+- 场景：默认场景 — Given 运行 `frontend/scripts/export-hydrated.mjs`；When 水合未达标或产物不合格；Then 脚本必须以非 0 退出且**不落盘**（`export-hydrated.mjs:953-957`：`problems` 非空即 `fail()`，落盘 `wr
+全文：.sillyspec/changes/archive/2026-10-20-session-page-dsh-alignment/requirements.md#FR-18
+最近确认：328788cbe
+
+## FR-daemon-214 `/proto/*` 与真实数据面的 dev-only 边界
+变更：2026-10-20-session-page-dsh-alignment
+状态：active
+摘要：默认场景
+依据决策：D-010@v1、D-014@v1、D-018@v1
+场景正文：
+- 场景：默认场景 — Given `/proto/*` 路由与 `frontend/.proto-staging/`；When 生产构建、导航与鉴权；Then 这些路由必须 dev-only：禁止进导航、禁止被生产页面引用（实测 `frontend/src` 下非 `proto` 文件零引用）、且不在 middlewa
+全文：.sillyspec/changes/archive/2026-10-20-session-page-dsh-alignment/requirements.md#FR-19
+最近确认：328788cbe
+
+## FR-daemon-215 折叠只作候选能力，禁止接线成默认行为
+变更：2026-10-20-session-page-dsh-alignment
+状态：active
+摘要：默认场景
+依据决策：D-004@v1、D-009@v1、D-012@v1
+场景正文：
+- 场景：默认场景 — Given `frontend/src/components/daemon/turn-fold.ts` 与 `TurnTimeline.detailLevel`；When 调用方未传 `detailLevel`；Then 必须与现行为等价（零渲染变化）；只有传入非 `detailed` 档且轮状态为 `completed` 时才可折；运行中 / 失败 / 被打断的轮禁止折叠；本变
+全文：.sillyspec/changes/archive/2026-10-20-session-page-dsh-alignment/requirements.md#FR-20
+最近确认：328788cbe
+
+## FR-daemon-216 技术栈边界——禁止客户端插件化架构
+变更：2026-10-20-session-page-dsh-alignment
+状态：active
+摘要：默认场景
+依据决策：D-001@v1
+场景正文：
+- 场景：默认场景 — Given 本仓客户端技术栈（Next.js 14 + React 18 + TanStack Query + antd）；When 引入任何新依赖或新装配机制；Then 禁止引入 Cordis、slot 注册表或客户端插件加载机制；对 DSH 的借鉴必须限于交互模型、数据投影口径与视觉细节；本变更禁止改动 `frontend/p
+全文：.sillyspec/changes/archive/2026-10-20-session-page-dsh-alignment/requirements.md#FR-21
+最近确认：328788cbe
+
+## FR-daemon-217 性能线出界，禁止顺手优化
+变更：2026-10-20-session-page-dsh-alignment
+状态：active
+摘要：默认场景
+依据决策：D-006@v1、D-007@v1
+场景正文：
+- 场景：默认场景 — Given 本变更已改动默认渲染形态（去 hairline、字阶、间距、折叠候选）；When 评估首屏 / 翻页 / 滚动 / 流式四项性能；Then 本变更禁止把性能优化纳入交付（四项症状归性能变更承接）；若某项改动显著改变性能画像，必须由性能变更复测基线，禁止在本变更内顺手优化；本变更禁止改动会话取数与分页
+全文：.sillyspec/changes/archive/2026-10-20-session-page-dsh-alignment/requirements.md#FR-22
+最近确认：328788cbe
+
+## FR-daemon-218 会话 × 模型用量明细只读端点（工作树已落盘的范围内交付）
+变更：2026-10-20-session-page-dsh-alignment
+状态：active
+摘要：默认场景
+场景正文：
+- 场景：默认场景 — Given 一个属于当前用户的会话（`session_id`）；When `GET /api/daemon/sessions/{session_id}/model-usage`；Then 必须返回 `{ session_id, items[], truncated }`，`items[]` 逐条直映 `agent_run_model_usage`
+全文：.sillyspec/changes/archive/2026-10-20-session-page-dsh-alignment/requirements.md#FR-23
+最近确认：328788cbe
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-20-session-page-dsh-alignment:task-04:acc-0-13f031ce
+  tests: backend/app/modules/daemon/tests/test_session_model_usage.py
+  reason: spec
+  state: active
+  discovery: machine
+  confirmed_by: agent
+  confirmed_at: 0ca435b1700f9719306ca92a8af3af08711ba3d0
+  source_change: 2026-10-20-session-page-dsh-alignment
+  status: active
+- row: 2026-10-20-session-page-dsh-alignment:task-04:acc-1-0d0bd63a
+  tests: backend/app/modules/daemon/tests/test_session_model_usage.py
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-20-session-page-dsh-alignment
+  status: active
+- row: 2026-10-20-session-page-dsh-alignment:task-04:acc-2-9339d5f9
+  tests: backend/app/modules/daemon/tests/test_session_model_usage.py
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-20-session-page-dsh-alignment
+  status: active
+- row: 2026-10-20-session-page-dsh-alignment:task-15:acc-0-227c2716
+  tests: backend/app/modules/daemon/tests/test_session_model_usage.py | frontend/src/components/daemon/__tests__/turn-segment-views.test.tsx
+  reason: spec
+  state: active
+  discovery: machine
+  confirmed_by: agent
+  confirmed_at: 0ca435b1700f9719306ca92a8af3af08711ba3d0
+  source_change: 2026-10-20-session-page-dsh-alignment
+  status: active
+- row: 2026-10-20-session-page-dsh-alignment:task-15:acc-1-ff03fa06
+  tests: backend/app/modules/daemon/tests/test_session_model_usage.py | frontend/src/components/daemon/__tests__/turn-segment-views.test.tsx
+  reason: spec
+  state: active
+  discovery: machine
+  confirmed_by: agent
+  confirmed_at: 0ca435b1700f9719306ca92a8af3af08711ba3d0
+  source_change: 2026-10-20-session-page-dsh-alignment
+  status: active
+- row: 2026-10-20-session-page-dsh-alignment:task-15:acc-2-c68a5787
+  tests: backend/app/modules/daemon/tests/test_session_model_usage.py | frontend/src/components/daemon/__tests__/turn-segment-views.test.tsx
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-20-session-page-dsh-alignment
+  status: active
+- row: 2026-10-20-session-page-dsh-alignment:task-15:acc-3-2b5dad5f
+  tests: backend/app/modules/daemon/tests/test_session_model_usage.py | frontend/src/components/daemon/__tests__/turn-segment-views.test.tsx
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-20-session-page-dsh-alignment
+  status: active
+- row: 2026-10-20-session-page-dsh-alignment:task-15:acc-4-0ca61594
+  tests: backend/app/modules/daemon/tests/test_session_model_usage.py | frontend/src/components/daemon/__tests__/turn-segment-views.test.tsx
+  reason: spec
+  state: active
+  discovery: machine
+  confirmed_by: agent
+  confirmed_at: 0ca435b1700f9719306ca92a8af3af08711ba3d0
+  source_change: 2026-10-20-session-page-dsh-alignment
+  status: active
