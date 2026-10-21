@@ -124,6 +124,26 @@ class AgentSessionListResponse(BaseModel):
     offset: int
 
 
+# ── 会话级 git 状态 DTO（2026-10-21-session-git-branch / FR-01..03）────────────
+# GET /api/daemon/sessions/{session_id}/git-status 响应——会话工作目录（cwd，
+# 缺省回退成员绑定根）的**当前** git 状态，每请求经 daemon git_status RPC 现场
+# 采集（FR-02 非快照）。git_mode 三态：git=正常采集 / no_git=目录非 git 仓库
+# （200 空态）/ no_root=会话无 cwd 且无可解析绑定（200 空态）——空态 branch 等
+# 字段全 None，前端静默隐藏指示项（FR-03）。root 为实际查询根（daemon 宿主
+# 视角，已过 resolve_root_path_for_daemon 改写），供前端 Tooltip 展示。
+
+
+class SessionGitStatusResponse(BaseModel):
+    git_mode: Literal["git", "no_git", "no_root"]
+    root: str | None = None
+    branch: str | None = None
+    detached: bool = False
+    head_short: str | None = None
+    files_changed: int | None = None
+    untracked_count: int | None = None
+    synced_at: str
+
+
 # ── Interactive session create / inject request DTO（2026-08-14-sessions-portal
 # task-02 / FR-01 / D-010@v1 / D-011@v1）─────────────────────────────────────
 # 从 router.py inline 定义（原 :1573/:1591）迁为具名模型，openapi 产出具名 schema

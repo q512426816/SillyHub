@@ -6298,6 +6298,30 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/daemon/sessions/{session_id}/git-status": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Session Git Status
+         * @description 会话当前 git 分支实时状态（2026-10-21-session-git-branch / FR-01..03）。
+         *
+         *     每请求经 daemon ``git_status`` RPC 现场采集（非创建快照）——root 决策链
+         *     与错误映射见 ``session/service/git_status.py`` 模块 docstring。会话组件
+         *     分支指示项的取数端点（≤60s 轮询），与 workspace 维度 git-log/status 互不影响。
+         */
+        get: operations["get_session_git_status_api_daemon_sessions__session_id__git_status_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/daemon/sessions/{session_id}/fork": {
         parameters: {
             query?: never;
@@ -12056,6 +12080,12 @@ export interface paths {
          *
          *     CLI ``spec-sync.js`` 以此清单为锚 diff 本地 ``.sillyspec/``，算出增量 ops 后
          *     POST ``/changes/-/spec-sync``（D-004@v1：CLI 无本地缓存，服务器清单即基线）。
+         *
+         *     2026-10-21-spec-manifest-incremental task-03：``?since=<spec_version>`` 增量
+         *     形态——只返回 ``landing_version > since`` 的行（含软删墓碑行），响应顶层带
+         *     当前 ``spec_version`` 供客户端作下次游标；无 since 为全量（现状行为，响应
+         *     仅新增 spec_version 字段）。背景：全量清单随工作区历史无界增长（生产实测
+         *     13k 行/2.2MB/5.5s@受限带宽），增量稳态只传变化行。
          *
          *     读清单也收紧为写权限（``require_platform_sync_write``，仅 shpsync_ token，
          *     JWT/shk_live_ 403）——清单是增量写协议的一部分，避免非同步方探测文件布局。
@@ -25627,6 +25657,31 @@ export interface components {
             tier: "native" | "seed";
             lineage: components["schemas"]["SessionForkLineage"];
         };
+        /** SessionGitStatusResponse */
+        SessionGitStatusResponse: {
+            /**
+             * Git Mode
+             * @enum {string}
+             */
+            git_mode: "git" | "no_git" | "no_root";
+            /** Root */
+            root?: string | null;
+            /** Branch */
+            branch?: string | null;
+            /**
+             * Detached
+             * @default false
+             */
+            detached: boolean;
+            /** Head Short */
+            head_short?: string | null;
+            /** Files Changed */
+            files_changed?: number | null;
+            /** Untracked Count */
+            untracked_count?: number | null;
+            /** Synced At */
+            synced_at: string;
+        };
         /**
          * SessionInjectRequest
          * @description POST /api/daemon/sessions/{id}/inject 请求体（FR-02 / design §5 Wave1）。
@@ -26989,17 +27044,28 @@ export interface components {
         };
         /**
          * SpecManifestResponse
-         * @description GET /changes/-/spec-manifest 200 响应：服务器权威清单全量 map（design §5.2/§7）。
+         * @description GET /changes/-/spec-manifest 200 响应：服务器权威清单 map（design §5.2/§7）。
          *
          *     CLI ``spec-sync.js`` 以此为锚 diff 本地 ``.sillyspec/`` 算增量 ops
          *     （D-004@v1 CLI 无本地缓存，清单即基线）。无清单行（旧 tar 全量同步后失效 /
          *     全新 workspace）→ 空 ``files``，CLI 走 R-07 兜底全量重算。
+         *
+         *     2026-10-21-spec-manifest-incremental task-03：新增顶层 ``spec_version``（全量/
+         *     增量均带）——CLI 携带 ``?since=<spec_version>`` 时 ``files`` 只含该版本之后
+         *     落地的行（增量游标形态），并以响应 ``spec_version`` 作下次游标；无 since 为
+         *     全量（既有 CLI 忽略未知字段，向后兼容）。
          */
         SpecManifestResponse: {
             /** Files */
             files?: {
                 [key: string]: components["schemas"]["SpecManifestFileEntry"];
             };
+            /**
+             * Spec Version
+             * @description 工作区当前权威版本（下次增量的 since 游标）
+             * @default 0
+             */
+            spec_version: number;
         };
         /**
          * SpecSyncRequest
@@ -40473,6 +40539,37 @@ export interface operations {
             };
         };
     };
+    get_session_git_status_api_daemon_sessions__session_id__git_status_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                session_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SessionGitStatusResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     fork_session_api_daemon_sessions__session_id__fork_post: {
         parameters: {
             query?: never;
@@ -51464,7 +51561,10 @@ export interface operations {
     };
     get_spec_manifest_api_changes___spec_manifest_get: {
         parameters: {
-            query?: never;
+            query?: {
+                /** @description 增量游标（客户端已消费的工作区 spec_version）：只返回该版本之后落地的清单行 */
+                since?: number | null;
+            };
             header?: never;
             path?: never;
             cookie?: never;
@@ -51478,6 +51578,15 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["SpecManifestResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };

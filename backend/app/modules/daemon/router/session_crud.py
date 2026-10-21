@@ -50,6 +50,7 @@ from app.modules.daemon.schema import (
     SessionForkLineage,
     SessionForkRequest,
     SessionForkResponse,
+    SessionGitStatusResponse,
     SessionInjectRequest,
     SessionReopenResponse,
     SessionResetToolReportResponse,
@@ -63,6 +64,9 @@ from app.modules.daemon.schema import (
 from app.modules.daemon.service import DaemonService
 from app.modules.daemon.session.service.compact import compact_session as _compact_session_svc
 from app.modules.daemon.session.service.fork import fork_session as _fork_session_svc
+from app.modules.daemon.session.service.git_status import (
+    get_session_git_status as _get_session_git_status_svc,
+)
 from app.modules.daemon.session.service.thinking_level import (
     get_session_thinking_levels as _get_thinking_levels_svc,
 )
@@ -552,6 +556,25 @@ async def get_session_detail(
     )
     read.current_run_id = current_run.id if current_run else None
     return read
+
+
+@router.get(
+    "/sessions/{session_id}/git-status",
+    response_model=SessionGitStatusResponse,
+)
+async def get_session_git_status(
+    session_id: uuid.UUID,
+    session: SessionDep,
+    user: TaskRunAgentUser,
+) -> SessionGitStatusResponse:
+    """会话当前 git 分支实时状态（2026-10-21-session-git-branch / FR-01..03）。
+
+    每请求经 daemon ``git_status`` RPC 现场采集（非创建快照）——root 决策链
+    与错误映射见 ``session/service/git_status.py`` 模块 docstring。会话组件
+    分支指示项的取数端点（≤60s 轮询），与 workspace 维度 git-log/status 互不影响。
+    """
+    svc = DaemonService(session)
+    return await _get_session_git_status_svc(svc, session_id, user.id)
 
 
 @router.post(

@@ -591,6 +591,40 @@ export async function getAgentSession(
   );
 }
 
+/* ---------- Session git status (2026-10-21-session-git-branch) ---------- */
+
+/**
+ * 会话当前 git 状态（与 backend daemon/schema.py SessionGitStatusResponse
+ * 同构，照 SessionUsageRead 手写过渡形态——gen:types 生成版落地后消费方可
+ * 改引生成版）。git_mode 三态：git=正常采集 / no_git=目录非 git 仓库 /
+ * no_root=无 cwd 且无可解析绑定——空态 branch 等字段全 null，消费方
+ * （SessionConfigBar 分支指示项）静默隐藏。
+ */
+export interface SessionGitStatus {
+  git_mode: "git" | "no_git" | "no_root";
+  root: string | null;
+  branch: string | null;
+  detached: boolean;
+  head_short: string | null;
+  files_changed: number | null;
+  untracked_count: number | null;
+  synced_at: string;
+}
+
+/**
+ * GET /api/daemon/sessions/{id}/git-status — 会话当前 git 分支实时查询
+ * （FR-02：每请求经 daemon git_status RPC 现场采集，非创建快照）。
+ * 仿 getAgentSession 的 GET 封装写法；错误统一走 apiFetch → ApiError
+ * （404 未绑定 / 403 root 越界 / 502 离线 / 504 超时，消费方降级占位）。
+ */
+export async function fetchSessionGitStatus(
+  sessionId: string,
+): Promise<SessionGitStatus> {
+  return apiFetch<SessionGitStatus>(
+    `/api/daemon/sessions/${encodeURIComponent(sessionId)}/git-status`,
+  );
+}
+
 /* ---------- Session usage stats (2026-08-29-session-usage-stats task-03) ---------- */
 
 /**

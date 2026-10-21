@@ -16558,6 +16558,50 @@
         }
       }
     },
+    "/api/daemon/sessions/{session_id}/git-status": {
+      "get": {
+        "tags": [
+          "daemon"
+        ],
+        "summary": "Get Session Git Status",
+        "description": "会话当前 git 分支实时状态（2026-10-21-session-git-branch / FR-01..03）。\n\n每请求经 daemon ``git_status`` RPC 现场采集（非创建快照）——root 决策链\n与错误映射见 ``session/service/git_status.py`` 模块 docstring。会话组件\n分支指示项的取数端点（≤60s 轮询），与 workspace 维度 git-log/status 互不影响。",
+        "operationId": "get_session_git_status_api_daemon_sessions__session_id__git_status_get",
+        "parameters": [
+          {
+            "name": "session_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Session Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SessionGitStatusResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/daemon/sessions/{session_id}/fork": {
       "post": {
         "tags": [
@@ -35408,8 +35452,29 @@
           "platform-sync"
         ],
         "summary": "Get Spec Manifest",
-        "description": "GET 服务器 spec 文件权威清单（CLI 直跑增量同步锚点，design §5.2/§7）。\n\nCLI ``spec-sync.js`` 以此清单为锚 diff 本地 ``.sillyspec/``，算出增量 ops 后\nPOST ``/changes/-/spec-sync``（D-004@v1：CLI 无本地缓存，服务器清单即基线）。\n\n读清单也收紧为写权限（``require_platform_sync_write``，仅 shpsync_ token，\nJWT/shk_live_ 403）——清单是增量写协议的一部分，避免非同步方探测文件布局。\nworkspace_id 从 shpsync_ token 派生；无 workspace 归属 → 403 fail-closed\n（对齐 quicklog-entries 范式）。",
+        "description": "GET 服务器 spec 文件权威清单（CLI 直跑增量同步锚点，design §5.2/§7）。\n\nCLI ``spec-sync.js`` 以此清单为锚 diff 本地 ``.sillyspec/``，算出增量 ops 后\nPOST ``/changes/-/spec-sync``（D-004@v1：CLI 无本地缓存，服务器清单即基线）。\n\n2026-10-21-spec-manifest-incremental task-03：``?since=<spec_version>`` 增量\n形态——只返回 ``landing_version > since`` 的行（含软删墓碑行），响应顶层带\n当前 ``spec_version`` 供客户端作下次游标；无 since 为全量（现状行为，响应\n仅新增 spec_version 字段）。背景：全量清单随工作区历史无界增长（生产实测\n13k 行/2.2MB/5.5s@受限带宽），增量稳态只传变化行。\n\n读清单也收紧为写权限（``require_platform_sync_write``，仅 shpsync_ token，\nJWT/shk_live_ 403）——清单是增量写协议的一部分，避免非同步方探测文件布局。\nworkspace_id 从 shpsync_ token 派生；无 workspace 归属 → 403 fail-closed\n（对齐 quicklog-entries 范式）。",
         "operationId": "get_spec_manifest_api_changes___spec_manifest_get",
+        "parameters": [
+          {
+            "name": "since",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "增量游标（客户端已消费的工作区 spec_version）：只返回该版本之后落地的清单行",
+              "title": "Since"
+            },
+            "description": "增量游标（客户端已消费的工作区 spec_version）：只返回该版本之后落地的清单行"
+          }
+        ],
         "responses": {
           "200": {
             "description": "Successful Response",
@@ -35417,6 +35482,16 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/SpecManifestResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
                 }
               }
             }
@@ -70593,6 +70668,89 @@
         "title": "SessionForkResponse",
         "description": "POST /api/daemon/sessions/{id}/fork 响应（design §接口定义）。\n\n``tier``：'native'（引擎真截断：claude resume_at / pi rpc_fork / pi clone）\n| 'seed'（codex 前情转述，有损）。错误语义：404 会话/run 不存在或不属于\n该会话；409 run 进行中；422 caps sessionFork=none 或 native 档锚点缺失。"
       },
+      "SessionGitStatusResponse": {
+        "properties": {
+          "git_mode": {
+            "type": "string",
+            "enum": [
+              "git",
+              "no_git",
+              "no_root"
+            ],
+            "title": "Git Mode"
+          },
+          "root": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Root"
+          },
+          "branch": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Branch"
+          },
+          "detached": {
+            "type": "boolean",
+            "title": "Detached",
+            "default": false
+          },
+          "head_short": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Head Short"
+          },
+          "files_changed": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Files Changed"
+          },
+          "untracked_count": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Untracked Count"
+          },
+          "synced_at": {
+            "type": "string",
+            "title": "Synced At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "git_mode",
+          "synced_at"
+        ],
+        "title": "SessionGitStatusResponse"
+      },
       "SessionInjectRequest": {
         "properties": {
           "prompt": {
@@ -73222,11 +73380,17 @@
             },
             "type": "object",
             "title": "Files"
+          },
+          "spec_version": {
+            "type": "integer",
+            "title": "Spec Version",
+            "description": "工作区当前权威版本（下次增量的 since 游标）",
+            "default": 0
           }
         },
         "type": "object",
         "title": "SpecManifestResponse",
-        "description": "GET /changes/-/spec-manifest 200 响应：服务器权威清单全量 map（design §5.2/§7）。\n\nCLI ``spec-sync.js`` 以此为锚 diff 本地 ``.sillyspec/`` 算增量 ops\n（D-004@v1 CLI 无本地缓存，清单即基线）。无清单行（旧 tar 全量同步后失效 /\n全新 workspace）→ 空 ``files``，CLI 走 R-07 兜底全量重算。"
+        "description": "GET /changes/-/spec-manifest 200 响应：服务器权威清单 map（design §5.2/§7）。\n\nCLI ``spec-sync.js`` 以此为锚 diff 本地 ``.sillyspec/`` 算增量 ops\n（D-004@v1 CLI 无本地缓存，清单即基线）。无清单行（旧 tar 全量同步后失效 /\n全新 workspace）→ 空 ``files``，CLI 走 R-07 兜底全量重算。\n\n2026-10-21-spec-manifest-incremental task-03：新增顶层 ``spec_version``（全量/\n增量均带）——CLI 携带 ``?since=<spec_version>`` 时 ``files`` 只含该版本之后\n落地的行（增量游标形态），并以响应 ``spec_version`` 作下次游标；无 since 为\n全量（既有 CLI 忽略未知字段，向后兼容）。"
       },
       "SpecSyncRequest": {
         "properties": {
