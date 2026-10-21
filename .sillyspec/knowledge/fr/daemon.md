@@ -5875,3 +5875,70 @@
 摘要：主路径
 全文：.sillyspec/changes/archive/2026-10-21-archive-patch-repair/requirements.md#FR-04
 最近确认：5c97d62770d4dddf8fa3d9ea833b8905f3cbd098
+
+## FR-daemon-193 同一工作区连续 2 次推送冲突（rebase 重试仍败）时 daemon 自动备份并删本地 manifest、立即走全量 tar 重推（本地为准），全程零人工
+变更：2026-10-21-spec-conflict-autoheal
+状态：active
+摘要：连续两次冲突触发自愈；单次冲突不触发；env 禁用；成功清零
+场景正文：
+- 场景：连续两次冲突触发自愈 — Given manifest 缓存在位且 mock 客户端增量推送恒 conflict、全量 tar 推送成功，When 连续调两次 postSpecSync，Then 第
+- 场景：单次冲突不触发 — Given 首次冲突，When postSpecSync，Then 必须抛 SpecPushConflict 且 manifests-backup/ 无新文件。
+- 场景：env 禁用 — Given SILLYHUB_DAEMON_CONFLICT_AUTOHEAL=0，When 连续多次冲突，Then 始终照旧上抛、不删 manifest、无备份。
+- 场景：成功清零 — Given 冲突 1 次后推送成功，When 再次冲突，Then 计数从 1 重计（不立即自愈）。
+全文：.sillyspec/changes/archive/2026-10-21-spec-conflict-autoheal/requirements.md#FR-01
+最近确认：2c0969435e1c7c9b5010460bae10d4a20977eced
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-21-spec-conflict-autoheal:flow:测试绑定FR-01
+  tests: sillyhub-daemon/tests/spec-sync-conflict-autoheal.test.ts「env 0 禁用自愈」 | sillyhub-daemon/tests/spec-sync-conflict-autoheal.test.ts「单次冲突不触发」 | sillyhub-daemon/tests/spec-sync-conflict-autoheal.test.ts「成功清零重计」 | sillyhub-daemon/tests/spec-sync-conflict-autoheal.test.ts「连续两次冲突自愈全量重推」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-21-spec-conflict-autoheal
+  status: active
+
+## FR-daemon-194 event-loop 循环 abort 退出不再被 _fire 误记 loop_crashed
+变更：2026-10-21-spec-conflict-autoheal
+状态：active
+摘要：优雅退出
+场景正文：
+- 场景：优雅退出 — Given 注入的 sleep 在第 N 拍 abort reject（reason 为非 AbortError 的 Error），When await runEventL
+全文：.sillyspec/changes/archive/2026-10-21-spec-conflict-autoheal/requirements.md#FR-02
+最近确认：2c0969435e1c7c9b5010460bae10d4a20977eced
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-21-spec-conflict-autoheal:flow:测试绑定FR-02
+  tests: sillyhub-daemon/tests/event-loop-watch.test.ts「abort 退出优雅 resolve 不 reject」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-21-spec-conflict-autoheal
+  status: active
+
+## FR-daemon-195 off 开关命中日志标明来源（env 或 flag）
+变更：2026-10-21-spec-conflict-autoheal
+状态：active
+摘要：env 命中标来源；flag 命中标来源
+场景正文：
+- 场景：env 命中标来源 — Given 仅 env 开启，When postSpecSync 被跳过，Then isDaemonSpecSyncOff 返回 'env' 且 warn 日志含「来源=e
+- 场景：flag 命中标来源 — Given 仅 flag 文件在位，When postSpecSync 被跳过，Then 返回 'flag' 且 warn 日志含「来源=flag」。
+全文：.sillyspec/changes/archive/2026-10-21-spec-conflict-autoheal/requirements.md#FR-03
+最近确认：2c0969435e1c7c9b5010460bae10d4a20977eced
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-21-spec-conflict-autoheal:flow:测试绑定FR-03
+  tests: sillyhub-daemon/tests/spec-sync-off-switch.test.ts「跳过日志含来源字样」 | sillyhub-daemon/tests/spec-sync-off-switch.test.ts「返回值细化 env/flag/null」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-21-spec-conflict-autoheal
+  status: active

@@ -23,3 +23,4 @@
 - 2026-10-21-overview-card-mainflow-scan | 总览卡主管线去scan并隐藏thin零步骤
 - 2026-10-21-gitlog-conflict-quotepath | 合并冲突链路非ASCII路径quotepath修复
 - 2026-10-21-daemon-sync-hardening | 执行端同步加固与状态采集治理
+- 2026-10-21-spec-conflict-autoheal | spec推送冲突自动自愈与日志修整

@@ -1,0 +1,55 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-21-spec-conflict-autoheal",
+  "rows": [
+    {
+      "anchor": "FR-01",
+      "row_id": "2026-10-21-spec-conflict-autoheal:flow:测试绑定FR-01",
+      "tests": [
+        "sillyhub-daemon/tests/spec-sync-conflict-autoheal.test.ts「env 0 禁用自愈」",
+        "sillyhub-daemon/tests/spec-sync-conflict-autoheal.test.ts「单次冲突不触发」",
+        "sillyhub-daemon/tests/spec-sync-conflict-autoheal.test.ts「成功清零重计」",
+        "sillyhub-daemon/tests/spec-sync-conflict-autoheal.test.ts「连续两次冲突自愈全量重推」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-21-spec-conflict-autoheal"
+    },
+    {
+      "anchor": "FR-02",
+      "row_id": "2026-10-21-spec-conflict-autoheal:flow:测试绑定FR-02",
+      "tests": [
+        "sillyhub-daemon/tests/event-loop-watch.test.ts「abort 退出优雅 resolve 不 reject」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-21-spec-conflict-autoheal"
+    },
+    {
+      "anchor": "FR-03",
+      "row_id": "2026-10-21-spec-conflict-autoheal:flow:测试绑定FR-03",
+      "tests": [
+        "sillyhub-daemon/tests/spec-sync-off-switch.test.ts「跳过日志含来源字样」",
+        "sillyhub-daemon/tests/spec-sync-off-switch.test.ts「返回值细化 env/flag/null」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-21-spec-conflict-autoheal"
+    }
+  ]
+}

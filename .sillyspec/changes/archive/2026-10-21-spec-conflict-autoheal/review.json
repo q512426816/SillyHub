@@ -1,0 +1,36 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-21-spec-conflict-autoheal",
+  "reviewer": "subagent",
+  "verdict": "PASS",
+  "reviewedAgainst": "2c0969435e1c7c9b5010460bae10d4a20977eced",
+  "findings": [
+    {
+      "severity": "P3",
+      "title": "自愈重入再失败分支缺显式测试钉住",
+      "evidence": "FR-01 声明「自愈重入若再失败：再冲突不二次递归（计数已清零）/传输失败落 pending_push 后上抛」，测试只覆盖全量重推成功路径；防护本身真实——递归前 conflictStreakByWs.set(wsId,0) 结构性封顶递归深度 1，但无测试断言该分支行为",
+      "location": "sillyhub-daemon/tests/spec-sync-conflict-autoheal.test.ts（缺失场景；防护代码在 sillyhub-daemon/src/spec-sync.ts:1215-1222）"
+    },
+    {
+      "severity": "P3",
+      "title": "event-loop 监控循环对非 abort 异常静默死亡",
+      "evidence": "catch { break } 对 sleep 的任意 reject（含非 abort 真实异常）一律无日志退出，sleep 持续性故障将无声终止 lag 监控且无观测点；代码注释自述对齐「异常 warn 不崩」哲学但实现连 warn 都没有，与 FR-02 只要求 abort 优雅退出不冲突，属超集收敛的可观测性弱点",
+      "location": "sillyhub-daemon/src/event-loop-watch.ts:124-126"
+    }
+  ],
+  "dimensionNotes": {
+    "乱序": "成立——per-ws 连败计数只在 postSpecSync wrapper 串行路径累加/清零（spec-sync.ts:1208-1210/1190），推送无并发回执乱序面；浅冲突被 impl rebase 恰一次重试吸收，能累积到 2 的即持久真分叉，正是自愈目标形态。",
+    "并发": "无锁需求成立——Node 单线程事件循环内串行读写 Map；备份/删缓存针对 daemon 私有缓存（manifests/），最坏后果=下轮重走全量与自愈同语义；递归前清零计数真实存在（spec-sync.ts:1215，先 set 0 再 backupAndClearManifest 再递归），重入再冲突只重新起算、不无限递归。manifest 备份不清理边界已裁决：可接受（自愈低频，每份几 KB，量级可忽略）。",
+    "切换": "安全成立——计数内存态重启回零最多晚一轮自愈边界已裁决：可接受（功能仍收敛，只是延迟一轮）；backupAndClearManifest 全程 try/catch 只 warn 不抛，备份失败不阻断主流程（最坏 manifest 未删→重入再冲突重计，两轮内收敛）；abort/break 修复后 finally disable 恰一次（测试断言），无残留句柄。",
+    "作用域": "不串台成立——conflictStreakByWs 以 wsId 键控，备份文件名含 wsId+时间戳，SILLYHUB_DAEMON_DIR 随 env 重定向隔离实例；「无变化」短路返回 {ok:true} 非 null → 成功清零路径覆盖，无自愈误触发（该路径不抛 SpecPushConflict）。本地为准全量覆盖抹掉服务端他端未同步改动边界已裁决：可接受（D-001 用户 2026-10-21 拍板「以本地为准+部署即生效零手工」背书；缓解=阈值 2 次才触发+manifest 备份留档+conflict_autoheal_local_wins warn 日志显式声明语义）。"
+  },
+  "checklist": {
+    "frImplementationTestAlignment": "三方一致——FR-01：per-ws 计数+成功清零（spec-sync.ts:1190/1208-1210）、阈值常量 2、备份到 manifests-backup/{wsId}-{ts}.json best-effort+删缓存+递归全量 tar、warn 含 conflict_autoheal_local_wins、parseAutohealDisabledEnv '0'/'false' 大小写不敏感且在阈值判断内生效（1211-1214），测试 5 例全覆盖（两次触发/单次不触发/env 禁用/成功清零重计/常量断言）；FR-02：sleep reject 循环内 catch break 优雅退出+finally disable 恰一次，测试用非 AbortError 通用 Error 钉住；FR-03：isDaemonSpecSyncOff 返回 'env'|'flag'|null（env 优先），日志含 来源=env/来源=flag，测试双来源+null 三态断言。",
+    "blindDimensionVerification": "四问均真实作答——①无限递归防护真实：spec-sync.ts:1215 递归前 set(wsId,0)，重入冲突 streak=1<2 上抛，深度封顶 1；②备份失败不阻断：backupAndClearManifest（1123-1140）内部 catch 只 warn；③多 ws 不串台：Map 按 wsId 键控；④无变化短路无自愈误触发：impl 无变化返回 {ok:true}（976-978）非 null → 清零，且该路径不抛冲突。",
+    "boundaryAdjudication": "design「风险与死路」三条边界逐条裁决：①本地为准覆盖他端改动——可接受（D-001 用户拍板背书）；②manifest 备份不清理——可接受（低频小量）；③计数内存态重启回零——可接受（最多晚一轮）。",
+    "protectionClaims": "核实属实——conflictStreakByWs.set(wsId, 0) 真实存在于递归调用之前（spec-sync.ts:1215 vs 1222）；env 关闭分支与阈值在同一条件表达式内（1211-1214），env=0 时落入 throw e 走旧语义，测试 3 连冲突全上抛验证。",
+    "artifactSync": "合规——diff 仅 .sillyspec 文档 ×7、src ×2、tests ×3，无 api-types/契约文件。",
+    "testRerun": "复跑通过——cd sillyhub-daemon && npx vitest run tests/spec-sync-conflict-autoheal.test.ts tests/spec-sync-off-switch.test.ts tests/event-loop-watch.test.ts tests/spec-sync-incremental.test.ts → 4 files / 35 tests passed（498ms，stderr 均为测试模拟失败的预期 warn 输出）"
+  },
+  "reviewedAt": "2026-10-21T12:58:38+08:00"
+}

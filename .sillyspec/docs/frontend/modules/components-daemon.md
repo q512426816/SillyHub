@@ -299,3 +299,19 @@ runtime-session-helpers 纯函数）。2026-07-11-unify-runtime-session-dialog �
 - **session-panel-page `claimPendingPlaceholderTurn`**：user_input 事件到达且尚无该 run_id 的轮时，若存在等待响应的占位轮且正文同文（steerMatchKey 归一——剥 preamble/附件标记行，两端标记行格式同构），占位轮**原地改名**为真实 run_id（prompt/turnStartedAt 保留，status pending→running 对齐 upsertTurn 新建轮口径）——单气泡从 SSE 首事件起保持。page 与 dialog 两挂载点 onLog user_input 分支各插一行（dialog 经 page 模块既有共享导入）。响应侧 replacePlaceholderTurn / handleResend 内联改名不动：认领后 raced 分支 filter 占位 id no-op、prompt 非空不转移，天然幂等兜底。
 - **不认领回落响应侧收敛**（原样返回原引用）：无占位轮（排队派发轮照常建轮）；run_id 已有轮（raced 已建轮/历史/mid-turn 注入活跃轮）；正文不同文（防他轮同窗口派发错认领）；同文键为空（附件-only 空 prompt）。
 - 回归：session-panel-placeholder-claim 新增 7 用例（认领/标记行同构/已有轮/无占位/异文/空键/多条防御）；session-panel-dialog 新增端到端 1 用例（inject 挂起 + user_input SSE 先到 → `.turn-bubble` 同文单气泡，daemon 双提交裸文本版到达仍单气泡——修复前双气泡）。
+
+## 会话轨迹视图（2026-10-20-session-page-dsh-alignment）
+
+会话页第三个读取视角（不替换「对话 / 进度」二视图）。形态依据 `decisions.md` **D-024**（泳道时间轴取代「每轮一行小刻度」）与 **D-026**（扩入缩放 / 平移 / 窗口 + 轴对齐 + model 口径修正，取代 D-022 的「不做区间聚焦与滚轮缩放」子句）；决策与证据落 `.sillyspec/changes/2026-10-20-session-page-dsh-alignment/decisions.md`。
+
+- **分工（谁负责哪一段）**：
+  - `trajectory/build-trajectory.ts`（纯函数，946 行）——**全部业务逻辑**：按 run 分组、轮内排序（同毫秒按 `agent_event.seq`）、`tool_use`/`tool_result` 按 `call_id` 配对、`depth`/`parentCallId` 透传、文本协议前缀剥除、正文默认截 800 字；并派生 `lanes`（`input` / `model` / `tool` 三条泳道的 `TrajectorySpan`）与 `coverage`（`modelMs` / `toolMs` / `windowMs`）。
+  - `trajectory/zoom.ts`（纯函数，272 行，零 DOM / 零 React / 零时间源）——**全部视野数学**：`zoomAt` / `panView` / `clampView` / `tickTimes` / `axisTicks` / `pickSpanAt` 与刻度、范围文案；常量 `MIN_VIEW_SPAN_MS=60_000`、`ZOOM_STEP=1.15`、`HIT_BAND_PX=6`。坐标只有一套：`ratio = (at - view.start) / (view.end - view.start)`，渲染端 `left% = ratio * 100`。
+  - `trajectory/trajectory-timeline.tsx`（泳道时间轴，738 行）——**只做渲染与手势**：指针坐标 → `ratio`、把 `zoomAt`/`panView` 结果存进 `view` state、按 `view` 渲染 `left%`。三泳道共享同一条绝对时间轴；滚轮缩放用非 passive 监听（React `onWheel` 是 passive，`preventDefault` 会被忽略）、拖拽平移（两端钳制，<3px 算点击）、双击 / 「重置」按钮回整窗、10px 总览刷子（拖它平移、点刷子外挪视野中心）、6px 命中带 + 最近中心裁决。`wheel` / `pointermove` 只写 ref + rAF 合帧，一帧最多一次 `setView`。
+  - `trajectory/trajectory-view.tsx`（537 行）——**布局与选中态**：左列＝时间轴（上）+ `role="grid"` 账本（22px 密排行、按 depth 缩进）；右列＝320px inspector（入参/输出 `<pre>`、JSON 美化切换、复制）。时间轴与账本**同列宽上下叠放**，右缘对齐验收 **Δ≤2px**（实测 0.00px）；行级 `content-visibility: auto`，不引虚拟化库。原「时间概览（每轮一行）」已删除（D-024 判该形态为错误）。
+  - **UI 不含业务逻辑**：组件无 fetch / store / context，`buildTrajectory` 的结果由 props 注入（dev 路由 `frontend/src/app/proto/session-trajectory/page.tsx` 在 SSR 读 `.proto-staging/session-export.json` 后传入）；时间数学一律走 `zoom.ts`，组件内不重算时间轴。
+- **model 条是近似，必须标注**：`deriveModelSpans` 的判据是「**整段非工具空档且含 ≥1 条思考/答复行**」，出条前再与工具区间差集，因此与工具条**零重叠**且 `modelMs + toolMs ≤ windowMs`。**没有 TTFT / attempt 采样，它不是引擎真实算力时间**——整窗显示 model 9.2% 偏高（轮首等待、上下文拼装、工具后空闲都计入 gap），轮内真实口径为 模型 26% / 工具 62% / 空档 12%，整窗另有 370min 属轮间空闲；UI 固定显示 `模型 x% · 工具 y% · 空档 z%`，禁止画成 TTFT/decode 双色切分。**等 daemon 上报 TTFT / attempt（D-023 采集落地）后，model 条改回「真实 API 占用区间」，本条口径与文案随之作废**（D-026 退役判据）。
+- **dev-only 边界**：`/proto/session-trajectory` 不进导航、不被生产页面引用、无 middleware 守卫（D-010 同边界）；静态留档 `prototype-session-trajectory.html` 只是水合后 DOM 快照，不能当功能完整性证据。
+- **测试面**：`trajectory/__tests__/build-trajectory.test.ts`（31 例，含泳道/覆盖率/零重叠）、`zoom.test.ts`（18 例）、`trajectory-timeline.test.tsx`（7 例）。
+- **相邻（未接线的形态原型）**：`file-changes/file-changes-card.tsx` 是轮级文件变更卡的**桩数据形态原型**（props only，零 fetch/store），dev 路由 `/proto/session-file-changes`，Playwright 用例 `frontend/e2e/proto-file-card.spec.ts` 1 例；D-023 的 daemon 快照 → backend 透传 → 会话汇总数据链路尚未开始。
+

@@ -68,3 +68,4 @@ created_at: 2026-08-27 14:32:24
 - 2026-10-21-gitlog-conflict-quotepath | 合并冲突链路非ASCII路径quotepath修复
 - 2026-10-21-task-wakeup-restore | 恢复后台任务终态唤醒链并折叠系统行呈现
 - 2026-10-21-daemon-sync-hardening | 执行端同步加固与状态采集治理
+- 2026-10-21-spec-conflict-autoheal | spec推送冲突自动自愈与日志修整

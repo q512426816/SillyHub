@@ -1,0 +1,104 @@
+{
+  "change": "2026-10-21-spec-conflict-autoheal",
+  "baseline": "5c97d62770d4dddf8fa3d9ea833b8905f3cbd098",
+  "head": "2c0969435e1c7c9b5010460bae10d4a20977eced",
+  "files": [
+    "sillyhub-daemon/src/event-loop-watch.ts",
+    "sillyhub-daemon/src/spec-sync.ts",
+    "sillyhub-daemon/tests/event-loop-watch.test.ts",
+    "sillyhub-daemon/tests/spec-sync-conflict-autoheal.test.ts",
+    "sillyhub-daemon/tests/spec-sync-off-switch.test.ts"
+  ],
+  "totals": {
+    "files": 5,
+    "additions": 292,
+    "deletions": 18
+  },
+  "savedAt": "2026-10-21T04:54:18.320Z",
+  "note": "flow done 时点冻结（本变更可归属交付面：baseline..HEAD 提交面过滤 .sillyspec/ 只留 .sillyspec/docs/ 交付文档 + 独占树未提交交付；治理工件目录不入冻结——2026-10-12-close-trace-freeze-integrity FR-01）",
+  "modules": [
+    {
+      "id": "sillyhub-daemon",
+      "files": 5,
+      "doc": "docs/multi-agent-platform/modules/sillyhub-daemon.md",
+      "docTouched": false,
+      "docMissing": false
+    },
+    {
+      "id": "daemon",
+      "files": 5,
+      "doc": "docs/SillyHub/modules/daemon.md",
+      "docTouched": false,
+      "docMissing": false
+    }
+  ],
+  "uncoveredDirs": [],
+  "moduleMaps": [
+    "docs/backend/modules/_module-map.yaml",
+    "docs/frontend/modules/_module-map.yaml",
+    "docs/multi-agent-platform/modules/_module-map.yaml",
+    "docs/SillyHub/modules/_module-map.yaml",
+    "docs/sillyhub-daemon/modules/_module-map.yaml"
+  ],
+  "acceptedDirtyGap": 38,
+  "scopeAudit": {
+    "mode": "full-flow",
+    "ok": true,
+    "degradedReason": null,
+    "baseAnchor": "5c97d62770d4dddf8fa3d9ea833b8905f3cbd098",
+    "totals": {
+      "files": 5,
+      "additions": 292,
+      "deletions": 18
+    },
+    "rows": [
+      {
+        "path": "sillyhub-daemon/src/event-loop-watch.ts",
+        "additions": 11,
+        "deletions": 1,
+        "kind": "modified",
+        "planned": "修改",
+        "verdict": "planned"
+      },
+      {
+        "path": "sillyhub-daemon/src/spec-sync.ts",
+        "additions": 78,
+        "deletions": 12,
+        "kind": "modified",
+        "planned": "修改",
+        "verdict": "planned"
+      },
+      {
+        "path": "sillyhub-daemon/tests/event-loop-watch.test.ts",
+        "additions": 27,
+        "deletions": 0,
+        "kind": "modified",
+        "planned": "修改",
+        "verdict": "planned"
+      },
+      {
+        "path": "sillyhub-daemon/tests/spec-sync-conflict-autoheal.test.ts",
+        "additions": 151,
+        "deletions": 0,
+        "kind": "new",
+        "planned": "新增",
+        "verdict": "planned"
+      },
+      {
+        "path": "sillyhub-daemon/tests/spec-sync-off-switch.test.ts",
+        "additions": 25,
+        "deletions": 5,
+        "kind": "modified",
+        "planned": "修改",
+        "verdict": "planned"
+      }
+    ],
+    "excluded": {
+      "foreignDeclared": []
+    },
+    "note": "flow done 时点冻结（本文件落盘时采集）",
+    "closedBy": "flow done"
+  },
+  "patchSha256": "4663086b0d942c72b504723e77435b9486f5abb7bc1428be83ef810293b4f3f5",
+  "patchStatus": "ok"
+}
