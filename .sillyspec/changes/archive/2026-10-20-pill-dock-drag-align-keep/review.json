@@ -1,0 +1,15 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-20-pill-dock-drag-align-keep",
+  "reviewer": "subagent",
+  "verdict": "PASS",
+  "reviewedAgainst": "4f77e50c12b353f42e8442aed1fcdfea34234511",
+  "findings": [],
+  "dimensionNotes": {
+    "乱序": "ok",
+    "并发": "ok",
+    "切换": "ok（边界已裁决:可接受——拖拽中把组拖过中线但未松手时对齐保持拖拽前吸附侧、松手 snapPos 才定侧:瞬态视觉取舍,避免过中线来回翻转抖动;持久化档 {x,y} 不受影响,松手重判由新用例尾段断言。维度作答『中断走 endDrag→snapPos 收敛、left 纯内存派生、重载 snapPos 重推导』经代码核实为真:onPointerCancel=endDrag(tsx:255)、persist 仅 endDrag 调用且只写 x/y(tsx:132,247)、恢复路径走 snapPos(tsx:169)）",
+    "作用域": "ok（边界已裁决:可接受——design 文件变更清单第三行 .gitignore 补声明(冻结面落后 HEAD)经 git show 4f77e50c1 核实:该提交即 HEAD 顶、仅 .gitignore +3 行与清单说明一致,三目标文件工作树干净=HEAD,属已披露过程事实,无代码影响。维度作答『无跨实例共享数据面』为真:clampPos 为模块内纯函数且无组件外调用方,dragRef 每实例独立,本变更未新增共享状态）"
+  },
+  "reviewedAt": "2026-10-20T09:23:40+08:00"
+}

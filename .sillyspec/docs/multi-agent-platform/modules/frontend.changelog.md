@@ -136,6 +136,8 @@
 | 2026-10-19 | 2026-10-19-change-assets-cross-repo-repos | 变更资产卡展示跨仓冻结面 |
 | 2026-10-19 | 2026-10-19-cross-repo-patch-slicing | 资产卡跨仓单文件 diff 切片 |
 | 2026-10-19 | 2026-10-19-preview-card-empty-turn-fix | 切换档案产生的静默轮（started_at 空、无日志、无 error_code 的终态轮）刷新后进… |
+| 2026-10-20 | 2026-10-20-pill-dock-left-align | 悬浮 pill 停靠组贴左吸附时内容改左对齐 |
+| 2026-10-20 | 2026-10-20-pill-dock-drag-align-keep | 悬浮 pill 停靠组拖拽过程中保持拖拽前对齐方向 |
 | 2026-10-20 | 2026-10-20-conflict-platform-archive | 冲突对比平台留档快照自足回退 |
 | 2026-10-20 | 2026-10-20-session-error-visibility | 会话页失败轮错误信息不可见修复 |
 | 2026-10-20 | 2026-10-20-codex-requires-openai-auth | 腾讯云平台 codex 会话选直连（anthropic 形态）供应商时稳定断流（stream dis… |

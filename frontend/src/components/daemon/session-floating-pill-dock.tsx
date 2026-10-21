@@ -10,8 +10,9 @@ import { cn } from "@/lib/utils";
  *
  * 待决策 / 变更文件两个 pill 的公共悬浮外壳（用户需求：合成一组竖排、
  * 点击展开、整组可拖动 + 吸附边界；贴边不超出聊天时间线容器范围）：
- * - 竖向排列成组（items-end 右对齐）portal 到 body，fixed 定位不受面板
- *   祖先 overflow / transform 裁剪影响；
+ * - 竖向排列成组 portal 到 body，fixed 定位不受面板祖先 overflow /
+ *   transform 裁剪影响；组内对齐跟随吸附侧（贴左 items-start / 贴右
+ *   items-end，与吸附 x 由同一判据产生，2026-10-20-pill-dock-left-align）；
  * - 按住整组在 boundsSelector 指定的边界容器（聊天时间线
  *   turn-timeline-scroll；缺省回落整个视口）范围内拖动——move/up 挂
  *   window 不依赖 pointer capture（jsdom 无实现，同款先例
@@ -35,8 +36,9 @@ const CLICK_SWALLOW_MS = 250;
 /** 位置持久化键（sillyhub: 前缀同悬浮球）。 */
 const DOCK_STORAGE_KEY = "sillyhub:session-pill-dock";
 
-/** 停靠组左上角视口坐标（px）。 */
-type DockPos = { x: number; y: number };
+/** 停靠组左上角视口坐标（px）；left = 吸附侧标记（true 贴左 → items-start，
+    false 贴右 → items-end），由 snapPos 与吸附 x 同判据产生，不入持久化档。 */
+type DockPos = { x: number; y: number; left?: boolean };
 
 /** 拖拽/吸附边界矩形（视口坐标）。 */
 interface DockBounds {
@@ -55,22 +57,26 @@ function viewportBounds(): DockBounds {
   };
 }
 
-/** 钳制组左上角使整组留在边界内（w/h 为组实际尺寸）。 */
+/** 钳制组左上角使整组留在边界内（w/h 为组实际尺寸）。透传 p.left——
+    拖拽中间态继承最近吸附态的侧别标记，渲染保持拖拽前对齐方向，松手
+    snapPos 重判覆盖。 */
 function clampPos(p: DockPos, w: number, h: number, b: DockBounds): DockPos {
   return {
     x: Math.min(Math.max(p.x, b.left), Math.max(b.left, b.right - w)),
     y: Math.min(Math.max(p.y, b.top), Math.max(b.top, b.bottom - h)),
+    left: p.left,
   };
 }
 
 /** 松手吸附：贴较近的边界左右边缘（留 EDGE_GAP），纵向只钳回边界内。幂等——
-    存档值本就是吸附态，重放不漂移。 */
+    存档值本就是吸附态，重放不漂移；left（吸附侧标记）与 x 由同一判据同时
+    产生，供渲染按侧切换对齐。 */
 function snapPos(p: DockPos, w: number, h: number, b: DockBounds): DockPos {
   const c = clampPos(p, w, h, b);
   const midX = (b.left + b.right) / 2;
-  const x =
-    c.x + w / 2 <= midX ? b.left + EDGE_GAP : Math.max(b.left, b.right - w - EDGE_GAP);
-  return { x, y: c.y };
+  const left = c.x + w / 2 <= midX;
+  const x = left ? b.left + EDGE_GAP : Math.max(b.left, b.right - w - EDGE_GAP);
+  return { x, y: c.y, left };
 }
 
 /** 悬浮 pill 停靠组：竖排 + 可拖拽 + 边界吸附 + 位置持久化。 */
@@ -95,6 +101,8 @@ export function SessionFloatingPillDock({
     startY: number;
     baseX: number;
     baseY: number;
+    /** 拖拽起点吸附侧标记——拖拽中间态继承它保持对齐方向，松手 snapPos 重判。 */
+    left?: boolean;
     moved: boolean;
   } | null>(null);
   /** 拖拽松手时刻（click 吞除时间窗）。 */
@@ -120,7 +128,8 @@ export function SessionFloatingPillDock({
   const persist = useCallback((p: DockPos) => {
     hadStoredPosRef.current = true;
     try {
-      window.localStorage.setItem(DOCK_STORAGE_KEY, JSON.stringify(p));
+      // 存档只写 x/y（left 由吸附判据从坐标幂等重推导，入档属冗余状态）
+      window.localStorage.setItem(DOCK_STORAGE_KEY, JSON.stringify({ x: p.x, y: p.y }));
     } catch {
       // 隐私模式写失败不影响功能
     }
@@ -155,7 +164,9 @@ export function SessionFloatingPillDock({
         const v = JSON.parse(raw) as Partial<DockPos>;
         if (typeof v.x === "number" && typeof v.y === "number") {
           hadStoredPosRef.current = true;
-          setPos(clampPos({ x: v.x, y: v.y }, 0, 0, getBounds()));
+          // 存档位走 snapPos（幂等，x/y 不变）当场补吸附侧标记，恢复首帧
+          // 对齐方向即正确，不依赖后续 settle 收敛补写。
+          setPos(snapPos({ x: v.x, y: v.y }, 0, 0, getBounds()));
           return;
         }
       }
@@ -163,16 +174,18 @@ export function SessionFloatingPillDock({
       // 损坏数据静默丢弃，回落默认右下角
     }
     const b = getBounds();
-    setPos({ x: b.right - EDGE_GAP, y: b.bottom - defaultBottomGap });
+    setPos({ x: b.right - EDGE_GAP, y: b.bottom - defaultBottomGap, left: false });
   }, [getBounds, defaultBottomGap]);
 
   // 首帧挂 ref 后按组实际尺寸收敛（初始/存档位按 0 尺寸计算会溢出右缘；
-  // snap 幂等，收敛一次即稳定，拖拽中不打架）。
+  // snap 幂等，收敛一次即稳定，拖拽中不打架）。比较含 left：旧档/中间态
+  // 缺标记时补写对齐侧。
   useEffect(() => {
     if (!pos || dragging) return;
     const { w, h } = dockSize();
     const settled = settle(pos, w, h);
-    if (settled.x !== pos.x || settled.y !== pos.y) setPos(settled);
+    if (settled.x !== pos.x || settled.y !== pos.y || settled.left !== pos.left)
+      setPos(settled);
   }, [pos, dragging, settle]);
 
   // 组尺寸与边界容器尺寸变化（pill 显隐 / 侧栏开合收窄聊天区）都重收敛，
@@ -214,7 +227,7 @@ export function SessionFloatingPillDock({
     d.moved = true;
     setDragging(true);
     const { w, h } = dockSize();
-    setPos(clampPos({ x: d.baseX + dx, y: d.baseY + dy }, w, h, getBounds()));
+    setPos(clampPos({ x: d.baseX + dx, y: d.baseY + dy, left: d.left }, w, h, getBounds()));
   }, [getBounds]);
 
   const endDrag = useCallback(
@@ -250,6 +263,7 @@ export function SessionFloatingPillDock({
         startY: e.clientY,
         baseX: pos.x,
         baseY: pos.y,
+        left: pos.left,
         moved: false,
       };
       window.addEventListener("pointermove", onPointerMove);
@@ -277,7 +291,8 @@ export function SessionFloatingPillDock({
       onPointerDown={onDockPointerDown}
       onClickCapture={onDockClickCapture}
       className={cn(
-        "fixed z-40 flex select-none flex-col items-end gap-2 print:hidden empty:hidden",
+        "fixed z-40 flex select-none flex-col gap-2 print:hidden empty:hidden",
+        pos.left ? "items-start" : "items-end",
         dragging ? "cursor-grabbing" : "cursor-grab",
         dragging ? "" : "transition-[left,top] duration-200 ease-out",
       )}

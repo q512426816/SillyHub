@@ -103,3 +103,5 @@ data/logs/
 /.tmp/
 backend/pytest-of-*/
 *.TMP
+# fastembed 模型运行时缓存（backend 容器挂载 deploy/models 生成，勿入库）
+deploy/models/fastembed_cache/

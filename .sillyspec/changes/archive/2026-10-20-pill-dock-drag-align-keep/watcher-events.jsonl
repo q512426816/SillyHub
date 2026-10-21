@@ -1,0 +1,18 @@
+{"ts":1792458805675,"kind":"file","stage":"tasks","detail":"tasks.md 出现","provisional":true}
+{"ts":1792458836523,"kind":"file-update","stage":"requirements","detail":"requirements.md 内容变更","provisional":true}
+{"ts":1792458853463,"kind":"file-update","stage":"design","detail":"design.md 内容变更","provisional":true}
+{"ts":1792458853660,"kind":"warning","stage":null,"rule":"scope-drift","severity":"warning","detail":"声明面之外的代码文件被改：deploy/models/——范围漂移嫌疑（并行会话改动/越界，人判）","provisional":true}
+{"ts":1792459050406,"kind":"warning","stage":null,"rule":"scope-drift","severity":"warning","detail":"声明面之外的代码文件被改：rontend/src/components/daemon/session-floating-pill-dock.tsx——范围漂移嫌疑（并行会话改动/越界，人判）","provisional":true}
+{"ts":1792459072335,"kind":"warning","stage":null,"rule":"scope-drift","severity":"warning","detail":"声明面之外的代码文件被改：rontend/src/components/daemon/__tests__/session-floating-pill-dock.test.tsx——范围漂移嫌疑（并行会话改动/越界，人判）","provisional":true}
+{"ts":1792459161365,"kind":"task-done","stage":"tasks","detail":"checked 0→1","provisional":true,"source":"task-tick"}
+{"ts":1792459162991,"kind":"task-done","stage":"tasks","detail":"checked 1→2","provisional":true,"source":"task-tick"}
+{"ts":1792459163199,"kind":"file-update","stage":"tasks","detail":"tasks.md 内容变更","provisional":true}
+{"ts":1792459163199,"kind":"task-done","stage":"tasks","detail":"checked 0→2","provisional":true}
+{"ts":1792459163668,"kind":"task-done","stage":"tasks","detail":"checked 2→3","provisional":true,"source":"task-tick"}
+{"ts":1792459166608,"kind":"file-update","stage":"tasks","detail":"tasks.md 内容变更","provisional":true}
+{"ts":1792459166608,"kind":"task-done","stage":"tasks","detail":"checked 2→3","provisional":true}
+{"ts":1792459176584,"kind":"commit","stage":null,"detail":"7b435cd56","provisional":true}
+{"ts":1792459180211,"kind":"warning","stage":null,"rule":"scope-drift","severity":"warning","detail":"声明面之外的代码文件被改：sillyspec/changes/2026-10-20-pill-dock-drag-align-keep/flow-state.yaml——范围漂移嫌疑（并行会话改动/越界，人判）","provisional":true}
+{"ts":1792459210790,"kind":"gate-run","stage":"verify","detail":"门实测 passed（3.8s） · 20261020012009","provisional":true}
+{"ts":1792459255799,"kind":"commit","stage":null,"detail":"4f77e50c1","provisional":true}
+{"ts":1792459272947,"kind":"file-update","stage":"design","detail":"design.md 内容变更","provisional":true}

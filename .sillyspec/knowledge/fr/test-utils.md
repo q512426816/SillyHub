@@ -262,6 +262,36 @@ created_at: 2026-10-16T01:30:35.950Z
 <!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
 - row: 2026-10-21-files-refresh-spinner:flow:测试绑定FR-01
   tests: frontend/src/components/__tests__/change-file-tree-autorefresh.test.tsx「点击刷新：同步进行中按钮禁用+转圈，返回后恢复」
+## FR-test-utils-015 拖拽吸附到边界容器左侧后,停靠组内容左对齐;吸附右侧后保持右对齐
+变更：2026-10-20-pill-dock-left-align
+状态：active
+摘要：主路径；右吸附不受影响
+全文：.sillyspec/changes/archive/2026-10-20-pill-dock-left-align/requirements.md#FR-01
+最近确认：a303e730226d05a93ba959773366a676cf54aa09
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-20-pill-dock-left-align:flow:测试绑定FR-01
+  tests: test/frontend/src/components/daemon/__tests__/session-floating-pill-dock.test.tsx「拖到右半屏松手吸附右缘(新增 items-end 断言)」 | test/frontend/src/components/daemon/__tests__/session-floating-pill-dock.test.tsx「按住拖动超过阈值：跟手且钳制窗内，松手吸附较近左缘并持久化(新增 items-start 断言)」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-20-pill-dock-left-align
+  status: active
+
+## FR-test-utils-016 持久化位置重载后对齐方向与吸附侧一致
+变更：2026-10-20-pill-dock-left-align
+状态：active
+摘要：主路径
+全文：.sillyspec/changes/archive/2026-10-20-pill-dock-left-align/requirements.md#FR-02
+最近确认：a303e730226d05a93ba959773366a676cf54aa09
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-20-pill-dock-left-align:flow:测试绑定FR-02
+  tests: test/frontend/src/components/daemon/__tests__/session-floating-pill-dock.test.tsx「持久化位置恢复按吸附侧呈现对齐方向(新增两侧存档恢复用例)」
   reason: spec
   state: candidate
   discovery: machine
@@ -281,6 +311,20 @@ created_at: 2026-10-16T01:30:35.950Z
 <!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
 - row: 2026-10-21-files-refresh-spinner:flow:测试绑定FR-02
   tests: frontend/src/components/__tests__/change-file-tree-autorefresh.test.tsx「纯读刷新（挂载/轮询）不触发转圈态」
+  source_change: 2026-10-20-pill-dock-left-align
+  status: active
+
+## FR-test-utils-017 现有 dock 测试与新增断言全绿
+变更：2026-10-20-pill-dock-left-align
+状态：active
+摘要：主路径
+全文：.sillyspec/changes/archive/2026-10-20-pill-dock-left-align/requirements.md#FR-03
+最近确认：a303e730226d05a93ba959773366a676cf54aa09
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-20-pill-dock-left-align:flow:测试绑定FR-03
+  tests: test/frontend/src/components/daemon/__tests__/session-floating-pill-dock.test.tsx「全量用例(含既有 11 例回归)」
   reason: spec
   state: candidate
   discovery: machine
@@ -300,6 +344,20 @@ created_at: 2026-10-16T01:30:35.950Z
 <!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
 - row: 2026-10-21-task-wakeup-restore:flow:测试绑定FR-01
   tests: sillyhub-daemon/tests/interactive/task-lifecycle.test.ts「task 终态注入唤醒——单任务汇总 prompt」
+  source_change: 2026-10-20-pill-dock-left-align
+  status: active
+
+## FR-test-utils-018 左停靠的组拖拽过程中内容保持左对齐,不再翻回右对齐;右停靠同理保持右对齐
+变更：2026-10-20-pill-dock-drag-align-keep
+状态：active
+摘要：主路径；右停靠拖拽不受影响
+全文：.sillyspec/changes/archive/2026-10-20-pill-dock-drag-align-keep/requirements.md#FR-01
+最近确认：4f77e50c12b353f42e8442aed1fcdfea34234511
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-20-pill-dock-drag-align-keep:flow:测试绑定FR-01
+  tests: frontend/src/components/daemon/__tests__/session-floating-pill-dock.test.tsx「左停靠拖拽过程中保持左对齐(新增:吸附左后二次拖拽中断言 items-start)」 | frontend/src/components/daemon/__tests__/session-floating-pill-dock.test.tsx「按住拖动超过阈值…(补拖拽中 items-end 断言)」
   reason: spec
   state: candidate
   discovery: machine
@@ -319,6 +377,20 @@ created_at: 2026-10-16T01:30:35.950Z
 <!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
 - row: 2026-10-21-task-wakeup-restore:flow:测试绑定FR-02
   tests: sillyhub-daemon/tests/interactive/task-lifecycle.test.ts「stopped 终态不注入」 | sillyhub-daemon/tests/interactive/task-lifecycle.test.ts「双缺失 fail-open 放行唤醒」 | sillyhub-daemon/tests/interactive/task-lifecycle.test.ts「短任务低于阈值不注入」
+  source_change: 2026-10-20-pill-dock-drag-align-keep
+  status: active
+
+## FR-test-utils-019 松手吸附后仍按吸附侧正确切换对齐(既有行为不变)
+变更：2026-10-20-pill-dock-drag-align-keep
+状态：active
+摘要：主路径
+全文：.sillyspec/changes/archive/2026-10-20-pill-dock-drag-align-keep/requirements.md#FR-02
+最近确认：4f77e50c12b353f42e8442aed1fcdfea34234511
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-20-pill-dock-drag-align-keep:flow:测试绑定FR-02
+  tests: frontend/src/components/daemon/__tests__/session-floating-pill-dock.test.tsx「左停靠拖拽过程中保持左对齐(用例尾段:拖回右半边松手吸附后切 items-end)」
   reason: spec
   state: candidate
   discovery: machine
@@ -338,6 +410,20 @@ created_at: 2026-10-16T01:30:35.950Z
 <!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
 - row: 2026-10-21-task-wakeup-restore:flow:测试绑定FR-03
   tests: sillyhub-daemon/tests/interactive/task-lifecycle.test.ts「阈值 env 可配与 0 关闭阀」
+  source_change: 2026-10-20-pill-dock-drag-align-keep
+  status: active
+
+## FR-test-utils-020 dock 测试全绿(新增拖拽中对齐保持断言)
+变更：2026-10-20-pill-dock-drag-align-keep
+状态：active
+摘要：主路径
+全文：.sillyspec/changes/archive/2026-10-20-pill-dock-drag-align-keep/requirements.md#FR-03
+最近确认：4f77e50c12b353f42e8442aed1fcdfea34234511
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-20-pill-dock-drag-align-keep:flow:测试绑定FR-03
+  tests: frontend/src/components/daemon/__tests__/session-floating-pill-dock.test.tsx「全量用例(含既有 12 例回归)」
   reason: spec
   state: candidate
   discovery: machine
@@ -389,4 +475,5 @@ created_at: 2026-10-16T01:30:35.950Z
   confirmed_by: null
   confirmed_at: null
   source_change: 2026-10-21-task-wakeup-restore
+  source_change: 2026-10-20-pill-dock-drag-align-keep
   status: active

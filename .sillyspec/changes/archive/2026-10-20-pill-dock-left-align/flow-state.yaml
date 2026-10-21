@@ -1,0 +1,39 @@
+tier: thin
+legacy_fallback: false
+substeps:
+  artifacts: done
+  ledger: done
+  patch: done
+  review: done
+  probes: done
+  distill: done
+  archive: done
+  events: done
+born_face: thin
+with_tasks: false
+review_force: null
+input: |-
+  悬浮 pill 停靠组贴左吸附时内容改左对齐
+
+  用户实测:session-pill-dock 拖拽吸附到左边缘后,组内 pill 内容仍是 items-end 右对齐,贴左贴右看起来一样。要求:贴左吸附时内容左对齐(items-start),贴右吸附保持右对齐不变。
+
+  成功标准:
+  - 拖拽吸附到边界容器左侧后,停靠组内容左对齐;吸附右侧后保持右对齐
+  - 持久化位置重载后对齐方向与吸附侧一致
+  - 现有 dock 测试与新增断言全绿
+autopilot: false
+prestage_ack: true
+baseline_commit: f8f7dab4e0fbb309ef93e2a152fc8b2f062d8765
+updatedAt: '2026-10-20T00:55:06.100Z'
+baseline_sha256: 3579f567897e50e26cfa548b6b89ece10795adefbe71943e9b897787ffda64d8
+spec_approved: true
+spec_approved_at: '2026-10-20T00:47:42.480Z'
+spec_approved_by: zcode-pill-dock-left-align
+spec_approved_channel: agent-self
+spec_attested_by: zcode-pill-dock-left-align
+batch_ticked: true
+gate_summary: >-
+  test: passed ← module[]+deps(jsx1)（4.8s）
+  结果：F:\WorkNew\SillyHub\.sillyspec\.runtime\verify-runs\20261020005232\test-result.json｜lint: skipped — 跳过原因：local.yaml
+  未配置 commands.lint（或标记 unavailable）。｜门文件 3 个
+

@@ -1,0 +1,52 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-20-pill-dock-left-align",
+  "rows": [
+    {
+      "anchor": "FR-01",
+      "row_id": "2026-10-20-pill-dock-left-align:flow:测试绑定FR-01",
+      "tests": [
+        "test/frontend/src/components/daemon/__tests__/session-floating-pill-dock.test.tsx「拖到右半屏松手吸附右缘(新增 items-end 断言)」",
+        "test/frontend/src/components/daemon/__tests__/session-floating-pill-dock.test.tsx「按住拖动超过阈值：跟手且钳制窗内，松手吸附较近左缘并持久化(新增 items-start 断言)」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-20-pill-dock-left-align"
+    },
+    {
+      "anchor": "FR-02",
+      "row_id": "2026-10-20-pill-dock-left-align:flow:测试绑定FR-02",
+      "tests": [
+        "test/frontend/src/components/daemon/__tests__/session-floating-pill-dock.test.tsx「持久化位置恢复按吸附侧呈现对齐方向(新增两侧存档恢复用例)」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-20-pill-dock-left-align"
+    },
+    {
+      "anchor": "FR-03",
+      "row_id": "2026-10-20-pill-dock-left-align:flow:测试绑定FR-03",
+      "tests": [
+        "test/frontend/src/components/daemon/__tests__/session-floating-pill-dock.test.tsx「全量用例(含既有 11 例回归)」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-20-pill-dock-left-align"
+    }
+  ]
+}
