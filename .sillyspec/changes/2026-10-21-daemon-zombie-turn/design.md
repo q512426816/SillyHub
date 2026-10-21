@@ -54,7 +54,7 @@ created_at: 2026-10-21T07:19:34.302Z
 **声明的设计边界与取舍（评审逐条裁决用）**：
 - B-1 假阳性下迟到 result 的归属：看门狗触发后保留 currentRunId，迟到 result 落到已 failed 的旧轮（幂等 no-op）；若用户在旧 result 到达前重发，旧轮 result 会按新 currentRunId 归属（既有「单会话单活跃轮」模型的固有面，排队 inject 同款）——触发需双窄条件，接受。
 - B-2 空/无关 envelope 撤防看门狗：onMessage 首行撤防，后台任务 system 事件等非本轮事件也会撤防（不做 run 归属精细判定的成本取舍）——误撤防形态由 FR-03（300s）与 FR-04（15s）兜底，接受。
-- B-3 interrupt()===false 的安全判定：仅在会话非 running 且 payload 带 run_id 时回报 noop；仍 running 时 false 视为驱动写失败/超时（codex 等实现），不回报（FR-01/FR-03 兜底），接受。
+- B-3 interrupt()===false 的安全判定：仅在会话非 running 且 payload 带 run_id 时回报 noop；仍 running 时 false 视为驱动写失败/超时（codex 等实现），不回报——该形态（query 已死但 status=running）已 started 的 run 不在 FR-03 覆盖面、FR-01 看门狗也被轮事件撤防，实际依赖 driver 的 onTurnError→fail 兜底收敛，接受为已知依赖面。
 - B-4 FR-03 清扫窗口 300s：与 daemon inject 停等窗硬顶（5min）同量级；超龄但仍合法的慢启动 inject 会被误扫，Settings 调大即解，接受。
 - B-5 忙轮 steering 注入（同 run_id 复用）被 abort 窗口吞没：无 pending run 可扫、看门狗不 arm（wasRunningBeforeInject）——遗留缺口，另档治理，接受为已知边界。
 

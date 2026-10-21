@@ -15,7 +15,7 @@ created_at: 2026-10-21T07:19:34.302Z
 
 - Given 会话上一轮被用户打断，SDK 正在 abort 收尾；backend 0.6s 后自动注入新消息并创建新 run
 - When daemon 收到 SESSION_INJECT，push 进引擎输入流并 ack，但引擎在 abort 收尾窗口把该输入吞掉（无新轮、无事件、无 result）
-- Then 90s 看门狗到点：会话态重置为 active、currentRunId 清空，该 run 经 notifyRunResult 收敛为 failed（可读原因说明「引擎未启动本轮，请重发」），前端经 SSE 显示该轮失败而非永久转圈
+- Then 90s 看门狗到点：会话态重置为 active（保留 currentRunId 作迟到结果归属锚，见 design B-1），该 run 经 notifyRunResult 收敛为 failed（可读原因说明「引擎未启动本轮，请重发」），前端经 SSE 显示该轮失败而非永久转圈
 
 #### 场景：正常启动的轮不误伤
 
@@ -26,7 +26,7 @@ created_at: 2026-10-21T07:19:34.302Z
 ### FR-02: interrupt 对非 running 的 no-op 结果回传后端；后端对 acked-but-ineffective 打断立即收敛 pending run 并通知前端
 
 - backend 下发 SESSION_INTERRUPT 的 payload 必须携带 run_id（interrupt 端点与 dispatch-now 忙时打断共用路径同改）。
-- daemon 处理 SESSION_INTERRUPT 时必须消费 `interrupt()` 的布尔结果：返回 false（会话存在但无 running 轮，含 query 已死）且 payload 带 run_id 时，必须经 notifyRunResult 把该 run 以 error_during_execution 收敛（is_error=true，可读原因「执行端无进行中的轮次，已按打断收敛」），让 backend 即刻收敛 pending run 并经既有 SSE 终态事件回报前端（前端按 interactive_interrupted 显示已中止）；会话不在 daemon 内存 store（无法判定）时禁止回报（防误杀 `_awaitSessionThenRoute` 等待窗内的合法 inject）。
+- daemon 处理 SESSION_INTERRUPT 时必须消费 `interrupt()` 的布尔结果：返回 false 且会话 status !== 'running'（无 running 轮）且 payload 带 run_id 时，必须经 notifyRunResult 把该 run 以 error_during_execution 收敛（is_error=true，可读原因「执行端无进行中的轮次，已按打断收敛」），让 backend 即刻收敛 pending run 并经既有 SSE 终态事件回报前端（前端按 interactive_interrupted 显示已中止）；会话不在 daemon 内存 store（无法判定）或仍处 running（false 仅可能是驱动写失败/超时，见 design B-3）时禁止回报。
 - 打断信号已送达且有效（返回 true）时行为保持现状：终态仍由 SDK result 驱动，不得提前改判。
 
 #### 场景：僵尸 run 上按打断（事故主场景）
