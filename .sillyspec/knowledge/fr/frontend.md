@@ -7167,3 +7167,55 @@ superseded_by：FR-app-workspace-pages-002
 摘要：主路径
 全文：.sillyspec/changes/archive/2026-10-21-precommit-cleanup/requirements.md#FR-03
 最近确认：68ae72e85d8261a4c49924cc6edaec5dc61d4f4c
+
+## FR-frontend-029 /proto/session-redesign/page.tsx 显式 export const dynamic = 'force-dynamic'（对齐 session-trajectory/page.tsx:24 同款），消除构建期静态预渲染读盘
+变更：2026-10-22-review-risk-fixes
+状态：active
+摘要：工作树构建不烘数据；dev 预览能力不回归（对齐知识 FR-frontend-018）
+全文：.sillyspec/changes/archive/2026-10-22-review-risk-fixes/requirements.md#FR-01
+最近确认：c975a003a577bfb5ce79a8445906f9f358939c82
+
+## FR-frontend-030 frontend/.dockerignore 追加 /.proto-staging/，工作树 docker build 不再拷入真实会话导出
+变更：2026-10-22-review-risk-fixes
+状态：active
+摘要：从含导出文件的工作树构建镜像
+全文：.sillyspec/changes/archive/2026-10-22-review-risk-fixes/requirements.md#FR-02
+最近确认：c975a003a577bfb5ce79a8445906f9f358939c82
+
+## FR-frontend-031 event-loop-watch 正常窗口走完后 AbortSignal 的 abort 监听器计数不随窗口数增长（新增测试以真实 defaultSleep 断言）
+变更：2026-10-22-review-risk-fixes
+状态：active
+摘要：连续多窗口后监听器计数归零；abort 路径行为不变
+全文：.sillyspec/changes/archive/2026-10-22-review-risk-fixes/requirements.md#FR-03
+最近确认：c975a003a577bfb5ce79a8445906f9f358939c82
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-22-review-risk-fixes:flow:测试绑定FR-03
+  tests: sillyhub-daemon/tests/event-loop-watch.test.ts「defaultSleep 正常到期路径摘除 abort 监听器（连续窗口后计数归零）+ abort 路径 reject 行为不变（真实 defaultSleep 走 runEventLoopWatch）」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-22-review-risk-fixes
+  status: active
+
+## FR-frontend-032 decodeGitCQuote 对含字面引号与非 ASCII 混合路径（如 中文"x.md）完整还原原文（新增单测，UTF-8 多字节按原字节组装）
+变更：2026-10-22-review-risk-fixes
+状态：active
+摘要：字面引号转义 + 原样非 ASCII 混合形态；增补平面字符（代理对）；既有形态回归
+全文：.sillyspec/changes/archive/2026-10-22-review-risk-fixes/requirements.md#FR-04
+最近确认：c975a003a577bfb5ce79a8445906f9f358939c82
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-22-review-risk-fixes:flow:测试绑定FR-04
+  tests: sillyhub-daemon/tests/host-fs-handler-git-log.test.ts「GL49: 混合路径（字面引号转义 + 原样非 ASCII/增补平面）解码逐字符还原原文」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-22-review-risk-fixes
+  status: active

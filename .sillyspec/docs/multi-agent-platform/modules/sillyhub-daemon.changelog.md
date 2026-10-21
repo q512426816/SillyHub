@@ -26,3 +26,4 @@
 - 2026-10-21-spec-conflict-autoheal | spec推送冲突自动自愈与日志修整
 - 2026-10-21-daemon-zombie-turn | 修复 daemon 会话僵尸轮与打断无效
 - 2026-10-21-session-git-branch | 会话组件底部动态显示当前所在 git 分支
+- 2026-10-22-review-risk-fixes | 审查修复：原型路由防线与监听泄漏

@@ -1054,7 +1054,6 @@
 最近确认：4f66ab1e2364cbdfeafb01bb48f3dec9c6d08b3a
 理由：最大风险：每 60s 轮询触发 daemon `git_status`（内含 `git fetch`，15s 超时）——remote 慢时轮询堆积。缓解：fetch 失败/超时在 daemon 内降级（fetch_error 字段），分支采集（本地 porcelain）不受阻；轮询仅前台可见时执行；多会话面板并开时按 sessionId 各自 queryKey 独立节流，最坏面=可见面板数×1 次/60s（与会话列表 10s 轮询同量级，可接受）。 试过放弃的方案：① 复用 `git_refs` RPC 推当前分支（head sha 与 refs/heads 匹配）——同 sha 多分支歧义 + detached 不可判，放弃；② daemon 新增轻量 `git_branch` RPC（免 fetch）——跨服务契约变更 + 旧 daemon method_not_found 兼容面，轻量变更不值得，放弃（若后续轮询负载实证过重再立项）；③ `git_gateway`（backend 本机 subprocess）查 worktree——worktree 物理位于 daemon 宿主时 backend 不可达，且 session cwd 语义就是 daemon 宿主路径，方向错，放弃。
 
-
 ## D-unmapped-103@v1 设计期风险与放弃方案（底稿）
 状态：implemented
 变更：2026-10-20-pill-dock-left-align
@@ -1070,3 +1069,11 @@
 锚点：未记录
 最近确认：4f77e50c12b353f42e8442aed1fcdfea34234511
 理由：最大风险(声明边界):拖拽中把组拖到对面半边但未松手时,视觉位置在左/右而对齐仍是拖拽前方向——这是设计意图(对齐切换只在松手吸附时发生,避免拖拽中过中线来回翻转抖动),非缺陷。 放弃的方案:拖拽中实时按位置中线切换对齐——过中线时两个 pill 的对齐侧来回翻转,组框跟手移动叠加对齐抖动视觉混乱,且拖拽中位置本就是临时态,实时切换无信息增益。
+
+## D-unmapped-143@v1 设计期风险与放弃方案（底稿）
+状态：implemented
+变更：2026-10-22-review-risk-fixes
+原编号：D-001@v1
+锚点：未记录
+最近确认：c975a003a577bfb5ce79a8445906f9f358939c82
+理由：最大风险：FR-04 用 codePoint 重组字面字符后，若输入字符串本身是坏 UTF-16（孤立代理项）产出坏字节——与修复前同样产生乱码但不会更差（防御性等价，且 git 输出不会给孤立代理）。放弃的方案：① 给 `/proto/**` 加 middleware 鉴权——D-010 故障面已登记为独立事项，本次不动鉴权语义（避免 proto 预览页依赖登录态改变 dev 评审工作流），以「数据不进产物/上下文」双层代替；② 把真实导出换成人造 fixture——违背 FR-frontend-018（dev 预览要真实会话观感），不做。
