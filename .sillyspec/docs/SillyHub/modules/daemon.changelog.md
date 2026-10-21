@@ -62,3 +62,4 @@ created_at: 2026-08-27 14:32:24
 - 2026-10-20-backfill-dryrun-log-scrub | 回填脚本改缺省dry-run并移除诊断日志
 - 2026-10-20-conflict-platform-archive | 冲突对比平台留档快照自足回退
 - 2026-10-21-provider-set-default-ui | 供应商页复活设为默认入口
+- 2026-10-21-agent-profile-slim-default | 档案瘦身重定位为人格加技能清单并支持用户默认档案

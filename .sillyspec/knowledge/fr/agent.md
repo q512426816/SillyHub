@@ -319,3 +319,86 @@ created_at: 2026-10-14T02:51:35.432Z
 - 场景：主路径 — Given 本变更交付完成；When 核对 git diff；Then 变更仅含 `backend/app/modules/agent/tests/test_agent_session_model.py` 一个文件（local.ya
 全文：.sillyspec/changes/archive/2026-10-16-agent-session-field-pin-sync/requirements.md#FR-03
 最近确认：cd5c6760fd82584b7b25b8e8d89947f6360a55b6
+
+## FR-agent-015 档案表单仅 名称/可见范围/系统提示词/技能勾选 四项，无工作区上下文/引擎/模型/供应商/工具策略/MCP 字段，右栏预览同步
+变更：2026-10-21-agent-profile-slim-default
+状态：active
+摘要：新建瘦身表单；编辑存量档案
+全文：.sillyspec/changes/archive/2026-10-21-agent-profile-slim-default/requirements.md#FR-01
+最近确认：9458a48db2d349cf18861d098796265ca018fe31
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-21-agent-profile-slim-default:flow:测试绑定FR-01
+  tests: frontend/src/components/__tests__/agent-profile-form.test.tsx「新建无需选工作区上下文」 | frontend/src/components/__tests__/agent-profile-form.test.tsx「编辑存量档案保存清空被删引用」 | frontend/src/components/__tests__/agent-profile-form.test.tsx「表单仅渲染四字段」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-21-agent-profile-slim-default
+  status: active
+
+## FR-agent-016 档案卡片有「设为默认」操作与默认标记，每用户至多一个默认档案
+变更：2026-10-21-agent-profile-slim-default
+状态：active
+摘要：设默认与互斥；默认档案被删
+全文：.sillyspec/changes/archive/2026-10-21-agent-profile-slim-default/requirements.md#FR-02
+最近确认：9458a48db2d349cf18861d098796265ca018fe31
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-21-agent-profile-slim-default:flow:测试绑定FR-02
+  tests: backend/app/modules/agent/tests/test_profile_router.py「set-default/unset-default 端点与互斥」 | frontend/src/components/agent-profile/__tests__/agent-profile-card.test.tsx「设为默认操作与默认标记」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-21-agent-profile-slim-default
+  status: active
+
+## FR-agent-017 创建会话与群聊成员未显式选档案时注入用户默认档案（人格+技能）；未设默认行为与现状逐字节一致
+变更：2026-10-21-agent-profile-slim-default
+状态：active
+摘要：会话默认注入；无默认零回归；群聊成员默认注入
+全文：.sillyspec/changes/archive/2026-10-21-agent-profile-slim-default/requirements.md#FR-03
+最近确认：9458a48db2d349cf18861d098796265ca018fe31
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-21-agent-profile-slim-default:flow:测试绑定FR-03
+  tests: backend/app/modules/daemon/tests/test_group_default_profile.py「影子会话群主默认注入/无默认保持 None」 | backend/app/modules/daemon/tests/test_session_default_profile.py「默认注入/无默认零回归/失可见回落」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-21-agent-profile-slim-default
+  status: active
+
+## FR-agent-018 选档案会话只挂档案技能子集，档案技能为空则不挂任何技能；未选档案且无默认时技能全量挂载（现状）
+变更：2026-10-21-agent-profile-slim-default
+状态：active
+摘要：空技能档案清空挂载；旧 lease 兼容
+全文：.sillyspec/changes/archive/2026-10-21-agent-profile-slim-default/requirements.md#FR-04
+最近确认：9458a48db2d349cf18861d098796265ca018fe31
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-21-agent-profile-slim-default:flow:测试绑定FR-04
+  tests: sillyhub-daemon/tests/task-runner.test.ts
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-21-agent-profile-slim-default
+  status: active
+
+## FR-agent-019 既有档案数据不迁移不删列，被删字段读侧忽略；后端 llm_provider/claim 注入链零触碰
+变更：2026-10-21-agent-profile-slim-default
+状态：active
+摘要：读侧忽略
+全文：.sillyspec/changes/archive/2026-10-21-agent-profile-slim-default/requirements.md#FR-05
+最近确认：9458a48db2d349cf18861d098796265ca018fe31
