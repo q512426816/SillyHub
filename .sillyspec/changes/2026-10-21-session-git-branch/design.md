@@ -60,7 +60,10 @@ created_at: "2026-10-21T14:35:37.254Z"
 | 新增 | backend/tests/modules/daemon/test_session_git_status.py | 端点测试：cwd 主路径/每请求现查/no_root/no_git/404/403/502 |
 | 修改 | backend/app/modules/daemon/schema.py | 新增 SessionGitStatusResponse |
 | 修改 | backend/app/modules/daemon/router/session_crud.py | 新增 GET /sessions/{session_id}/git-status 端点 |
+| 修改 | backend/app/modules/daemon/router/__init__.py | _ENDPOINT_ORDER 登记新端点（拆分不变量表同步） |
+| 再生成 | backend/openapi.json | 新端点入 openapi 契约（pnpm gen:types dump） |
 | 修改 | frontend/src/lib/daemon/sessions.ts | 新增 fetchSessionGitStatus + queryKey |
 | 再生成 | frontend/src/lib/api-types.ts | pnpm gen:types 重生成（新端点类型） |
+| 再生成 | sillyhub-daemon/src/api-types.ts | pnpm -C sillyhub-daemon gen:types 重生成（openapi 契约钉子配对，pre-commit 断言面闸门要求同提交） |
 | 修改 | frontend/src/components/sessions/session-config-bar.tsx | 档案控件后新增 git 分支指示项（含 mobile 收纳与空态隐藏） |
 | 修改 | frontend/src/components/sessions/__tests__/session-config-bar.test.tsx | 指示器用例：渲染/轮询/空态隐藏 |
