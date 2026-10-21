@@ -113,7 +113,17 @@ export async function runEventLoopWatch(
   histo.enable();
   try {
     while (!signal.aborted) {
-      await (deps.sleep ?? defaultSleep)(intervalMs, signal);
+      // FR-02（2026-10-21-spec-conflict-autoheal）：sleep 因 abort 被 reject（reason
+      // 形态不限——AbortError/通用 Error/signal.reason）→ 循环内捕获优雅退出，不再
+      // 向调用方抛出（此前通用 Error 会穿透到 _fire 被误记 loop_crashed，daemon 每次
+      // stop 多一条假崩溃日志）。非 abort 的真实异常同样收敛在此——监控循环自身
+      // 绝不炸宿主（对齐既有循环「异常 warn 不崩」哲学，此处静默 break 留 finally
+      // disable 收尾）。
+      try {
+        await (deps.sleep ?? defaultSleep)(intervalMs, signal);
+      } catch {
+        break;
+      }
       const { fields, shouldWarn } = summarizeLagHistogram(
         histo,
         thresholdMs,

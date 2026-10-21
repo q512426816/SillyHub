@@ -112,4 +112,31 @@ describe('runEventLoopWatch', () => {
     expect(logs.filter((l) => l.msg === 'event_loop_lag')).toHaveLength(0);
     expect(logs.filter((l) => l.msg === 'event_loop_lag_tick')).toHaveLength(2);
   });
+
+  it('FR-02：sleep 因 abort reject（reason 形态不限）时优雅 resolve，disable 恰一次', async () => {
+    const controller = new AbortController();
+    let disabled = 0;
+    let ticks = 0;
+    // reason 为非 AbortError 的通用 Error——旧行为会把循环炸出去被 _fire 记 loop_crashed。
+    const result = await runEventLoopWatch(controller.signal, {
+      log: () => undefined,
+      intervalMs: 60_000,
+      warnThresholdMs: 5_000,
+      histogramFactory: () => ({
+        ...fakeHisto({ maxNs: 1_000, meanNs: 1, p99Ns: 1 }),
+        disable: () => {
+          disabled++;
+        },
+      }),
+      sleep: async () => {
+        ticks++;
+        if (ticks >= 2) {
+          controller.abort();
+          throw new Error('aborted');
+        }
+      },
+    });
+    expect(result).toBeUndefined();
+    expect(disabled).toBe(1);
+  });
 });

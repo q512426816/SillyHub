@@ -70,17 +70,17 @@ describe('parseSpecSyncOffEnv', () => {
 });
 
 describe('isDaemonSpecSyncOff', () => {
-  it('env 与 flag 文件任一命中即关，双缺省不关', async () => {
-    expect(await isDaemonSpecSyncOff('ws-x')).toBe(false);
+  it("返回值细化：env 命中 'env'、flag 命中 'flag'、双缺省 null", async () => {
+    expect(await isDaemonSpecSyncOff('ws-x')).toBeNull();
 
     process.env[OFF_ENV] = '1';
-    expect(await isDaemonSpecSyncOff('ws-x')).toBe(true);
+    expect(await isDaemonSpecSyncOff('ws-x')).toBe('env');
     delete process.env[OFF_ENV];
 
     mkdirSync(join(tmpState, 'spec-sync-off'), { recursive: true });
     writeFileSync(specSyncOffFlagPath('ws-x'), 'off\n');
-    expect(await isDaemonSpecSyncOff('ws-x')).toBe(true);
-    expect(await isDaemonSpecSyncOff('ws-y')).toBe(false);
+    expect(await isDaemonSpecSyncOff('ws-x')).toBe('flag');
+    expect(await isDaemonSpecSyncOff('ws-y')).toBeNull();
   });
 });
 
@@ -91,6 +91,26 @@ describe('postSpecSync 关闭开关', () => {
     const result = await postSpecSync(client, 'ws-env', tmpSpec);
     expect(result).toBeNull();
     expect(client.postSpecSync).not.toHaveBeenCalled();
+  });
+
+  it('跳过日志标明命中来源（FR-03：来源=env / 来源=flag）', async () => {
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    try {
+      // env 命中。
+      process.env[OFF_ENV] = '1';
+      await postSpecSync(mockClient(), 'ws-src-env', tmpSpec);
+      const envHit = warnSpy.mock.calls.find((c) => String(c[0]).includes('ws-src-env'));
+      expect(String(envHit?.[0])).toContain('来源=env');
+      delete process.env[OFF_ENV];
+      // flag 命中。
+      mkdirSync(join(tmpState, 'spec-sync-off'), { recursive: true });
+      writeFileSync(specSyncOffFlagPath('ws-src-flag'), 'off\n');
+      await postSpecSync(mockClient(), 'ws-src-flag', tmpSpec);
+      const flagHit = warnSpy.mock.calls.find((c) => String(c[0]).includes('ws-src-flag'));
+      expect(String(flagHit?.[0])).toContain('来源=flag');
+    } finally {
+      warnSpy.mockRestore();
+    }
   });
 
   it('flag 按工作区关闭：该 ws 跳过，未设 flag 的 ws 照常走推送路径', async () => {
