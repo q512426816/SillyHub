@@ -1,0 +1,61 @@
+{
+  "change": "2026-10-21-precommit-sandbox-entries",
+  "baseline": "c1c128ae8e1da367480edc5d98bb878c16b9d070",
+  "head": "bbc224288e8daa873a122695fc50a3ad418d9ce7",
+  "files": [
+    "backend/.pre-commit-config.yaml"
+  ],
+  "totals": {
+    "files": 1,
+    "additions": 15,
+    "deletions": 6
+  },
+  "savedAt": "2026-10-21T01:29:05.340Z",
+  "note": "flow done 时点冻结（本变更可归属交付面：baseline..HEAD 提交面过滤 .sillyspec/ 只留 .sillyspec/docs/ 交付文档 + 独占树未提交交付；治理工件目录不入冻结——2026-10-12-close-trace-freeze-integrity FR-01）",
+  "modules": [
+    {
+      "id": "backend",
+      "files": 1,
+      "doc": "docs/multi-agent-platform/modules/backend.md",
+      "docTouched": false,
+      "docMissing": false
+    }
+  ],
+  "uncoveredDirs": [],
+  "moduleMaps": [
+    "docs/backend/modules/_module-map.yaml",
+    "docs/frontend/modules/_module-map.yaml",
+    "docs/multi-agent-platform/modules/_module-map.yaml",
+    "docs/SillyHub/modules/_module-map.yaml",
+    "docs/sillyhub-daemon/modules/_module-map.yaml"
+  ],
+  "acceptedDirtyGap": 35,
+  "scopeAudit": {
+    "mode": "full-flow",
+    "ok": true,
+    "degradedReason": null,
+    "baseAnchor": "c1c128ae8e1da367480edc5d98bb878c16b9d070",
+    "totals": {
+      "files": 1,
+      "additions": 15,
+      "deletions": 6
+    },
+    "rows": [
+      {
+        "path": "backend/.pre-commit-config.yaml",
+        "additions": 15,
+        "deletions": 6,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "planned"
+      }
+    ],
+    "excluded": {
+      "foreignDeclared": []
+    },
+    "note": "flow done 时点冻结（本文件落盘时采集）",
+    "closedBy": "flow done"
+  },
+  "patchSha256": "693b03fc969d865d6d67ebbe681788e0f223f220b15753d0efd3c866eb5bc0ca",
+  "patchStatus": "ok"
+}

@@ -1,0 +1,35 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-21-precommit-sandbox-entries",
+  "reviewer": "subagent",
+  "verdict": "PASS",
+  "reviewedAgainst": "bbc224288e8daa873a122695fc50a3ad418d9ce7",
+  "findings": [
+    {
+      "severity": "P3",
+      "title": "FR-03 正文引用幻影路径 scripts/test_check_assertion_surfaces.py（从未存在），实存单测为 backend/tests/test_check_assertion_surfaces.py",
+      "evidence": "requirements.md FR-03 写「其既有单测 scripts/test_check_assertion_surfaces.py 必须保持全绿」，但该路径在当前工作区与 git 全历史（git log --all -- 该路径零记录）中均不存在；测试绑定与复跑口径所写 backend/tests/test_check_assertion_surfaces.py 实存且恰为 14 个用例（grep def test_ 计数 14），复跑 14 passed。承诺实质（断言面闸门单测保持全绿）已达成、绑定面正确，仅 FR 正文路径失准（yaml 第 43 行注释同款引用属本变更前既有文本，非本次引入）。不影响交付正确性，留 P3 供后续勘误。",
+      "location": ".sillyspec/changes/2026-10-21-precommit-sandbox-entries/requirements.md:30"
+    }
+  ],
+  "dimensionNotes": {
+    "乱序": "ok",
+    "并发": "ok",
+    "切换": "ok",
+    "作用域": "ok"
+  },
+  "boundaryAdjudications": {
+    "风险① uv Low 子树下载依赖可能被拦（已知限制）": "可接受：缓存重定向后无 profile 写，.venv 已就绪（评审实跑未触发下载），残余风险有明确缓解路径（用户终端预热缓存），不阻塞主链路",
+    "风险② pre-push 两条保留 bash 包装、agent 会话手动 pre-push 仍崩（已知限制）": "可接受：推送属用户终端动作（流程纪律），披露显式、风险面收敛于非 agent 路径，不为其扩大改动面符合最小改动原则",
+    "死路① icacls 改 ~/.cache ACL 弃选": "可接受：探针实证拒绝在驱动白名单层而非 DACL，改 ACL 无效，弃选理由有实证支撑",
+    "死路② 削弱沙箱容器恢复 msys 嵌套 弃选": "可接受：动容器安全边界换取工具便利方向性错误",
+    "死路③ PRE_COMMIT_HOME 写用户级环境变量 弃选": "可接受：Low 子树只能写仓内路径且单值无法满足多仓，改按会话 export 的替代已验证"
+  },
+  "verificationRuns": {
+    "changeTestSurface": "cd backend && uv run --cache-dir ../.tmp/uv-cache pytest tests/test_check_assertion_surfaces.py -q → 14 passed, 9 warnings in 4.68s",
+    "validateConfig": "backend/.venv/Scripts/python.exe -m pre_commit validate-config backend/.pre-commit-config.yaml → exit 0 零错误",
+    "officialRunnerAssertionSurfaces": "PRE_COMMIT_HOME=<仓内 .tmp> pre_commit run --config backend/.pre-commit-config.yaml assertion-surfaces → Passed, exit 0",
+    "officialRunnerRuffCheck": "pre_commit run --config backend/.pre-commit-config.yaml ruff-check --files backend/app/main.py → Passed, exit 0"
+  },
+  "reviewedAt": "2026-10-21T09:31:32+08:00"
+}

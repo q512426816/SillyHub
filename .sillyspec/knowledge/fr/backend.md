@@ -7288,3 +7288,36 @@ superseded_by：FR-auth-003
   confirmed_at: null
   source_change: 2026-10-21-mobile-scan-birth-cleanup
   status: active
+
+## FR-backend-011 pre-commit 三条 entry（ruff-format/ruff-check/assertion-surfaces）去 bash -c 包装改直连命令，uv 加 --cache-dir 重定向进仓内 .tmp/（gitignored），pre-push 两条既有语义不动
+变更：2026-10-21-precommit-sandbox-entries
+状态：active
+摘要：主路径
+全文：.sillyspec/changes/archive/2026-10-21-precommit-sandbox-entries/requirements.md#FR-01
+最近确认：8fc3178d3d66af22d19c6eeee234a863746fd512
+
+## FR-backend-012 官方 runner 在 agent python 子树内实跑通过：PRE_COMMIT_HOME 指向仓内时 pre_commit run assertion-surfaces 与 ruff-check 均正常出结果（不再 msys 崩）
+变更：2026-10-21-precommit-sandbox-entries
+状态：active
+摘要：主路径
+全文：.sillyspec/changes/archive/2026-10-21-precommit-sandbox-entries/requirements.md#FR-02
+最近确认：8fc3178d3d66af22d19c6eeee234a863746fd512
+
+## FR-backend-013 hook 配置合法（pre-commit validate-config），scripts/ 断言面闸门语义不变
+变更：2026-10-21-precommit-sandbox-entries
+状态：active
+摘要：主路径
+全文：.sillyspec/changes/archive/2026-10-21-precommit-sandbox-entries/requirements.md#FR-03
+最近确认：8fc3178d3d66af22d19c6eeee234a863746fd512
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-21-precommit-sandbox-entries:flow:测试绑定FR-03
+  tests: backend/tests/test_check_assertion_surfaces.py「断言面闸门既有单测（14 用例）」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-21-precommit-sandbox-entries
+  status: active
