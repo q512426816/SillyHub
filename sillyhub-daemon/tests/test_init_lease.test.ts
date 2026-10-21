@@ -1161,8 +1161,18 @@ describe("TaskRunner.runLease mode='init' 分支 (task-07)", () => {
       vi.spyOn(console, 'warn').mockImplementation(() => undefined);
       localYamlWriterMock.mockImplementationOnce(async () => undefined);
       const { runner: runner2 } = setupRunner();
+      // win32 预存假败根因：fixture rootPath '/tmp/...' 在 Windows 非绝对形态 →
+      // repo-native junction 目标落相对路径，步骤链 abort，第 5 步 writeLocalYaml
+      // 不可达（Linux CI 绿、Windows 本机挂）。本段验 local_yaml 完整链，rootPath
+      // override 为真实存在的临时绝对目录（C:	mp 父目录不存在同样会 abort）；
+      // 其余用例不依赖走到第 5 步，保持原 fixture 零扰动。
+      const fullRoot =
+        process.platform === 'win32'
+          ? await mkdtemp(join(tmpdir(), 'init-lease-yaml-'))
+          : '/tmp/init-lease-rootpath';
       const leaseFull = makeInitLease({
         workspaceId: 'ws-init-1',
+        rootPath: fullRoot,
         platformConfig: {
           strategy: 'repo-native',
           local_yaml: { platform_token: 'shpsync_x', mcp_token: 'shmcp_y' },
