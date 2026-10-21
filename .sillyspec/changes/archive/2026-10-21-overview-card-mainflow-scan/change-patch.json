@@ -1,0 +1,163 @@
+{
+  "change": "2026-10-21-overview-card-mainflow-scan",
+  "baseline": "b69b46a9ec6ebf8cc29adf7d0377112f16c005aa",
+  "head": "23c936e92bf7871cd0ea0edba46cdf5387e49079",
+  "files": [
+    ".sillyspec/docs/SillyHub/modules/daemon.changelog.md",
+    ".sillyspec/docs/SillyHub/modules/frontend_components.changelog.md",
+    ".sillyspec/docs/multi-agent-platform/modules/frontend.changelog.md",
+    ".sillyspec/docs/multi-agent-platform/modules/sillyhub-daemon.changelog.md",
+    "frontend/src/components/git-log/__tests__/file-tree.test.tsx",
+    "frontend/src/components/workspace/__tests__/changes-overview-card.test.tsx",
+    "frontend/src/components/workspace/changes-overview-card.tsx",
+    "sillyhub-daemon/src/host-fs-handler.ts",
+    "sillyhub-daemon/tests/host-fs-handler-git-log-quotepath.test.ts",
+    "sillyhub-daemon/tests/host-fs-handler-git-log.test.ts"
+  ],
+  "totals": {
+    "files": 10,
+    "additions": 443,
+    "deletions": 26
+  },
+  "savedAt": "2026-10-21T01:09:00.057Z",
+  "note": "flow done 时点冻结（本变更可归属交付面：baseline..HEAD 提交面过滤 .sillyspec/ 只留 .sillyspec/docs/ 交付文档 + 独占树未提交交付；治理工件目录不入冻结——2026-10-12-close-trace-freeze-integrity FR-01）",
+  "modules": [
+    {
+      "id": "frontend",
+      "files": 3,
+      "doc": "docs/multi-agent-platform/modules/frontend.md",
+      "docTouched": false,
+      "docMissing": false
+    },
+    {
+      "id": "sillyhub-daemon",
+      "files": 3,
+      "doc": "docs/multi-agent-platform/modules/sillyhub-daemon.md",
+      "docTouched": false,
+      "docMissing": false
+    },
+    {
+      "id": "daemon",
+      "files": 3,
+      "doc": "docs/SillyHub/modules/daemon.md",
+      "docTouched": false,
+      "docMissing": false
+    },
+    {
+      "id": "frontend_components",
+      "files": 3,
+      "doc": "docs/SillyHub/modules/frontend_components.md",
+      "docTouched": false,
+      "docMissing": false
+    }
+  ],
+  "uncoveredDirs": [],
+  "moduleMaps": [
+    "docs/backend/modules/_module-map.yaml",
+    "docs/frontend/modules/_module-map.yaml",
+    "docs/multi-agent-platform/modules/_module-map.yaml",
+    "docs/SillyHub/modules/_module-map.yaml",
+    "docs/sillyhub-daemon/modules/_module-map.yaml"
+  ],
+  "acceptedDirtyGap": 32,
+  "scopeAudit": {
+    "mode": "full-flow",
+    "ok": true,
+    "degradedReason": null,
+    "baseAnchor": "b69b46a9ec6ebf8cc29adf7d0377112f16c005aa",
+    "totals": {
+      "files": 10,
+      "additions": 443,
+      "deletions": 26
+    },
+    "rows": [
+      {
+        "path": ".sillyspec/docs/SillyHub/modules/daemon.changelog.md",
+        "additions": 1,
+        "deletions": 0,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": ".sillyspec/docs/SillyHub/modules/frontend_components.changelog.md",
+        "additions": 1,
+        "deletions": 0,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": ".sillyspec/docs/multi-agent-platform/modules/frontend.changelog.md",
+        "additions": 1,
+        "deletions": 0,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": ".sillyspec/docs/multi-agent-platform/modules/sillyhub-daemon.changelog.md",
+        "additions": 1,
+        "deletions": 0,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": "frontend/src/components/git-log/__tests__/file-tree.test.tsx",
+        "additions": 59,
+        "deletions": 0,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": "frontend/src/components/workspace/__tests__/changes-overview-card.test.tsx",
+        "additions": 38,
+        "deletions": 2,
+        "kind": "modified",
+        "planned": "修改",
+        "verdict": "planned"
+      },
+      {
+        "path": "frontend/src/components/workspace/changes-overview-card.tsx",
+        "additions": 14,
+        "deletions": 8,
+        "kind": "modified",
+        "planned": "修改",
+        "verdict": "planned"
+      },
+      {
+        "path": "sillyhub-daemon/src/host-fs-handler.ts",
+        "additions": 78,
+        "deletions": 5,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": "sillyhub-daemon/tests/host-fs-handler-git-log-quotepath.test.ts",
+        "additions": 129,
+        "deletions": 0,
+        "kind": "new",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": "sillyhub-daemon/tests/host-fs-handler-git-log.test.ts",
+        "additions": 121,
+        "deletions": 11,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "unplanned"
+      }
+    ],
+    "excluded": {
+      "foreignDeclared": []
+    },
+    "note": "flow done 时点冻结（本文件落盘时采集）",
+    "closedBy": "flow done"
+  },
+  "patchSha256": "c44c5bb1da5ec94fc00920834eb313e47ccb992d324e70d89956138f93263462",
+  "patchStatus": "ok"
+}

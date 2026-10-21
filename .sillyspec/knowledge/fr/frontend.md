@@ -7082,3 +7082,67 @@ superseded_by：FR-app-workspace-pages-002
   confirmed_at: null
   source_change: 2026-10-21-gitlog-quotepath-fix
   status: active
+
+## FR-frontend-023 总览卡主管线为 brainstorm→plan→execute→verify→archive 五段，无 scan 点位；brainstorm 阶段变更不渲染「scan 已完成」
+变更：2026-10-21-overview-card-mainflow-scan
+状态：active
+摘要：brainstorm 阶段行；verify 阶段行
+场景正文：
+- 场景：brainstorm 阶段行 — Given envelope 变更行 current_stage='brainstorm'；When 渲染主管线；Then aria 语义含「brainstorm 进行中」与「plan 待办」，且不含任何 scan 点位（「scan 已完成/进行中/待办」均不出现）。
+- 场景：verify 阶段行 — Given envelope 变更行 current_stage='verify'；When 渲染主管线；Then 「brainstorm/plan/execute 已完成」各一、「verify 进行中」、「archive 待办」，无 scan 点位。
+全文：.sillyspec/changes/archive/2026-10-21-overview-card-mainflow-scan/requirements.md#FR-01
+最近确认：23c936e92bf7871cd0ea0edba46cdf5387e49079
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-21-overview-card-mainflow-scan:flow:测试绑定FR-01
+  tests: frontend/src/components/workspace/__tests__/changes-overview-card.test.tsx「渲染——健康条计数/管线两态/stage 徽标/steps 进度/相对时间/倒序（fixture 含 envelope readable/command 容忍字段）」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-21-overview-card-mainflow-scan
+  status: active
+
+## FR-frontend-024 current_stage='thin' 的变更行渲染「◈ thin」旁路徽标且不显示「步骤 0/0」文案（quick/explore 存量行为不动）
+变更：2026-10-21-overview-card-mainflow-scan
+状态：active
+摘要：thin 变更行
+场景正文：
+- 场景：thin 变更行 — Given envelope 变更行 current_stage='thin'、stage_label='◈ 轻量变更'、steps={0,0}；When 渲染活跃变更行；Then 出现「◈ thin」徽标与「◈ 轻量变更」标签，不出现主管线点位，不出现「步骤 0/0」。
+全文：.sillyspec/changes/archive/2026-10-21-overview-card-mainflow-scan/requirements.md#FR-02
+最近确认：23c936e92bf7871cd0ea0edba46cdf5387e49079
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-21-overview-card-mainflow-scan:flow:测试绑定FR-02
+  tests: frontend/src/components/workspace/__tests__/changes-overview-card.test.tsx「thin 变更行——◈ thin 旁路徽标 + 隐藏步骤 0/0（2026-10-21-overview-card-mainflow-scan）」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-21-overview-card-mainflow-scan
+  status: active
+
+## FR-frontend-025 changes-overview-card 既有测试更新后全绿
+变更：2026-10-21-overview-card-mainflow-scan
+状态：active
+摘要：测试面回归
+场景正文：
+- 场景：测试面回归 — Given 组件与测试改毕；When 运行该测试文件；Then 全部用例通过、零失败。
+全文：.sillyspec/changes/archive/2026-10-21-overview-card-mainflow-scan/requirements.md#FR-03
+最近确认：23c936e92bf7871cd0ea0edba46cdf5387e49079
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-21-overview-card-mainflow-scan:flow:测试绑定FR-03
+  tests: frontend/src/components/workspace/__tests__/changes-overview-card.test.tsx「渲染——健康条计数/管线两态/stage 徽标/steps 进度/相对时间/倒序（fixture 含 envelope readable/command 容忍字段）」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-21-overview-card-mainflow-scan
+  status: active

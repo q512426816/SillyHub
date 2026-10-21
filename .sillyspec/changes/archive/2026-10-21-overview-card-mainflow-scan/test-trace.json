@@ -1,0 +1,51 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-21-overview-card-mainflow-scan",
+  "rows": [
+    {
+      "anchor": "FR-01",
+      "row_id": "2026-10-21-overview-card-mainflow-scan:flow:测试绑定FR-01",
+      "tests": [
+        "frontend/src/components/workspace/__tests__/changes-overview-card.test.tsx「渲染——健康条计数/管线两态/stage 徽标/steps 进度/相对时间/倒序（fixture 含 envelope readable/command 容忍字段）」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-21-overview-card-mainflow-scan"
+    },
+    {
+      "anchor": "FR-02",
+      "row_id": "2026-10-21-overview-card-mainflow-scan:flow:测试绑定FR-02",
+      "tests": [
+        "frontend/src/components/workspace/__tests__/changes-overview-card.test.tsx「thin 变更行——◈ thin 旁路徽标 + 隐藏步骤 0/0（2026-10-21-overview-card-mainflow-scan）」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-21-overview-card-mainflow-scan"
+    },
+    {
+      "anchor": "FR-03",
+      "row_id": "2026-10-21-overview-card-mainflow-scan:flow:测试绑定FR-03",
+      "tests": [
+        "frontend/src/components/workspace/__tests__/changes-overview-card.test.tsx「渲染——健康条计数/管线两态/stage 徽标/steps 进度/相对时间/倒序（fixture 含 envelope readable/command 容忍字段）」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-21-overview-card-mainflow-scan"
+    }
+  ]
+}

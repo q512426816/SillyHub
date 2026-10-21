@@ -746,3 +746,11 @@
 锚点：未记录
 最近确认：5bbb1a830ca0bee507747635b639a3be0ac85947
 理由：答：死路①（已试已弃）：改用 `git show --numstat -z` 按 NUL 切分原文路径——`-z` 在 `git show`（log 族）语境同时是「提交分隔符」语义，与 `--pretty=format:` 混用行为含混，且需重写 numstat 两段式分区解析，相对 `-c core.quotepath=false` + 解码兜底无额外收益，弃。风险①：路径含非法 UTF-8 字节序列时 `Buffer.from(bytes).toString('utf8')` 产生 U+FFFD 替换符——防御性行为可接受（git 真实输出不会出现：路径字节即提交时的合法编码）。风险②：既有命令构造断言用例按 args 位置逐 token 断言（GL25/GL29/GL37/GL42/GL43/GL45），插入 `-c` 对后需同步更新索引——漏更即测试红，已列入 task-01 验证面。风险③：porcelain/diff 加 `quotepath=false` 后含换行的文件名仍被 git 强制引号包裹（控制字符恒转义），单行解析假设不破——decodeGitCQuote 同款规则保证。
+
+## D-unmapped-109@v1 设计期风险与放弃方案（底稿）
+状态：implemented
+变更：2026-10-21-overview-card-mainflow-scan
+原编号：D-001@v1
+锚点：未记录
+最近确认：23c936e92bf7871cd0ea0edba46cdf5387e49079
+理由：答：最大风险：既有测试与潜在快照对「六段管线」的隐含依赖——已定位唯一断言面（本组件测试 213-217 行 scan aria 断言）同步更新，全仓 grep 无其他组件消费本卡 MAIN_STAGES（组件内常量未导出）。次要风险：旧 daemon 采集值（CLI 未升级机器）下 thin 变更暂显 brainstorm 主管线——数据源升级自愈，非本变更面（依据：根因修复在 sillyspec 2026-10-21-overview-thin-stage，跨仓不在本冻结面）。放弃方案：①连带改移动端 stepper（mobile-change-detail STEPPER_STAGES 含 scan）与变更中心 `?? "scan"` 兜底——同根因但异仓异面，用户本轮只点名总览卡，扩面应由用户裁决，留后续候选；②改 CLI 侧让 envelope 附带阶段清单驱动前端渲染——过度设计，前端静态常量与 sillyspec MAIN_FLOW_ORDER 对齐即可，增契约无收益。

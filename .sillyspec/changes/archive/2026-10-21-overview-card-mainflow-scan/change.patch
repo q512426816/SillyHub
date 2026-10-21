@@ -1,0 +1,690 @@
+diff --git a/.sillyspec/docs/SillyHub/modules/daemon.changelog.md b/.sillyspec/docs/SillyHub/modules/daemon.changelog.md
+index f1bf0be24..7cc800561 100644
+--- a/.sillyspec/docs/SillyHub/modules/daemon.changelog.md
++++ b/.sillyspec/docs/SillyHub/modules/daemon.changelog.md
+@@ -63,3 +63,4 @@ created_at: 2026-08-27 14:32:24
+ - 2026-10-20-conflict-platform-archive | 冲突对比平台留档快照自足回退
+ - 2026-10-20-codex-requires-openai-auth | 腾讯云平台 codex 会话选直连（anthropic 形态）供应商时稳定断流（stream dis…
+ - 2026-10-20-session-status-live-sync | 左侧会话状态标签与右侧实时同步
++- 2026-10-21-gitlog-quotepath-fix | 修复git日志非ASCII路径展示与空diff
+diff --git a/.sillyspec/docs/SillyHub/modules/frontend_components.changelog.md b/.sillyspec/docs/SillyHub/modules/frontend_components.changelog.md
+index 60998379e..b539ae1fe 100644
+--- a/.sillyspec/docs/SillyHub/modules/frontend_components.changelog.md
++++ b/.sillyspec/docs/SillyHub/modules/frontend_components.changelog.md
+@@ -99,3 +99,4 @@ created_at: 2026-08-30 22:23:33
+ | 2026-10-20 | 2026-10-20-codex-requires-openai-auth | 腾讯云平台 codex 会话选直连（anthropic 形态）供应商时稳定断流（stream dis… |
+ | 2026-10-20 | 2026-10-20-preset-engine-endpoint | 新建供应商点「OpenCode Go」预设自动填 https://opencode.ai/zen/g… |
+ | 2026-10-20 | 2026-10-20-session-status-live-sync | 左侧会话状态标签与右侧实时同步 |
++| 2026-10-21 | 2026-10-21-gitlog-quotepath-fix | 修复git日志非ASCII路径展示与空diff |
+diff --git a/.sillyspec/docs/multi-agent-platform/modules/frontend.changelog.md b/.sillyspec/docs/multi-agent-platform/modules/frontend.changelog.md
+index 285d44f99..edc4c5536 100644
+--- a/.sillyspec/docs/multi-agent-platform/modules/frontend.changelog.md
++++ b/.sillyspec/docs/multi-agent-platform/modules/frontend.changelog.md
+@@ -142,3 +142,4 @@
+ | 2026-10-20 | 2026-10-20-preset-engine-endpoint | 新建供应商点「OpenCode Go」预设自动填 https://opencode.ai/zen/g… |
+ | 2026-10-20 | 2026-10-20-session-status-live-sync | 左侧会话状态标签与右侧实时同步 |
+ | 2026-10-20 | 2026-10-21-proto-data-exposure-guard | 预览真实会话数据移出静态目录并补 gitignore |
++| 2026-10-21 | 2026-10-21-gitlog-quotepath-fix | 修复git日志非ASCII路径展示与空diff |
+diff --git a/.sillyspec/docs/multi-agent-platform/modules/sillyhub-daemon.changelog.md b/.sillyspec/docs/multi-agent-platform/modules/sillyhub-daemon.changelog.md
+index c5e221e72..9089b7e34 100644
+--- a/.sillyspec/docs/multi-agent-platform/modules/sillyhub-daemon.changelog.md
++++ b/.sillyspec/docs/multi-agent-platform/modules/sillyhub-daemon.changelog.md
+@@ -18,3 +18,4 @@
+ - 2026-10-19-cross-repo-patch-slicing | 资产卡跨仓单文件 diff 切片
+ - 2026-10-20-backfill-dryrun-log-scrub | 回填脚本改缺省dry-run并移除诊断日志
+ - 2026-10-20-codex-requires-openai-auth | 腾讯云平台 codex 会话选直连（anthropic 形态）供应商时稳定断流（stream dis…
++- 2026-10-21-gitlog-quotepath-fix | 修复git日志非ASCII路径展示与空diff
+diff --git a/frontend/src/components/git-log/__tests__/file-tree.test.tsx b/frontend/src/components/git-log/__tests__/file-tree.test.tsx
+index 5f13a7814..7b16ad7b2 100644
+--- a/frontend/src/components/git-log/__tests__/file-tree.test.tsx
++++ b/frontend/src/components/git-log/__tests__/file-tree.test.tsx
+@@ -245,3 +245,62 @@ describe("GitLogFileTree 组件", () => {
+     expect(screen.getByTestId("git-log-file-src/b.ts")).toBeInTheDocument();
+   });
+ });
++
++// ── 中文路径聚合与点击（2026-10-21-gitlog-quotepath-fix）───────────────────
++//
++// 修复前 daemon 透传 git C 引号转义形态路径（"…\345\257\274…"），树按 / 拆分后
++// 目录名显示八进制转义、点击 diff pathspec 失配恒空；修复后 daemon 解码为中文
++// 原文——本组用例以真实形态（解码后）路径断言聚合、渲染与点击请求。
++
++const CN_FILES: GitLogFileStatItem[] = [
++  {
++    path: ".sillyspec/changes/2026-10-20-unitLedger导入模板框线/design.md",
++    add: 10,
++    del: 4,
++    binary: false,
++  },
++];
++
++describe("中文路径聚合与点击（2026-10-21-gitlog-quotepath-fix）", () => {
++  it("中文路径段按 / 正常聚合：目录中文名、叶子中文名、统计聚合到各层", () => {
++    const tree = buildFileTree(CN_FILES);
++    expect(tree.map((n) => n.name)).toEqual([".sillyspec"]);
++    const changes = tree[0]!.children[0]!;
++    expect(changes.name).toBe("changes");
++    const dir = changes.children[0]!;
++    expect(dir.name).toBe("2026-10-20-unitLedger导入模板框线");
++    expect(dir.path).toBe(".sillyspec/changes/2026-10-20-unitLedger导入模板框线");
++    expect(dir.add).toBe(10);
++    expect(dir.del).toBe(4);
++    const leaf = dir.children[0]!;
++    expect(leaf.name).toBe("design.md");
++    expect(leaf.path).toBe(CN_FILES[0]!.path);
++  });
++
++  it("渲染中文名目录与叶子（无八进制转义残留），点击叶子以完整中文路径请求 diff", async () => {
++    render(
++      <GitLogFileTree workspaceId="ws-cn" sha="sha-cn" files={CN_FILES} />,
++    );
++
++    expect(
++      screen.getByTestId(
++        "git-log-dir-.sillyspec/changes/2026-10-20-unitLedger导入模板框线",
++      ),
++    ).toHaveTextContent("2026-10-20-unitLedger导入模板框线");
++    expect(screen.queryByText(/\\345/)).not.toBeInTheDocument();
++
++    fireEvent.click(
++      screen.getByTestId(
++        "git-log-file-.sillyspec/changes/2026-10-20-unitLedger导入模板框线/design.md",
++      ),
++    );
++    await waitFor(() => {
++      expect(gitLogMock.useGitLogDiff).toHaveBeenCalledWith(
++        "ws-cn",
++        "sha-cn",
++        ".sillyspec/changes/2026-10-20-unitLedger导入模板框线/design.md",
++        true,
++      );
++    });
++  });
++});
+diff --git a/frontend/src/components/workspace/__tests__/changes-overview-card.test.tsx b/frontend/src/components/workspace/__tests__/changes-overview-card.test.tsx
+index 0b695facf..684789fdb 100644
+--- a/frontend/src/components/workspace/__tests__/changes-overview-card.test.tsx
++++ b/frontend/src/components/workspace/__tests__/changes-overview-card.test.tsx
+@@ -210,9 +210,12 @@ describe("ChangesOverviewCard（task-06 / 活跃变更总览）", () => {
+       screen.getByText("chg-newer").compareDocumentPosition(screen.getByText("chg-older")),
+     ).toBe(Node.DOCUMENT_POSITION_FOLLOWING);
+ 
+-    // 主管线两态（两行各一条管线，共享态用 getAllBy）
+-    expect(screen.getAllByLabelText("scan 已完成")).toHaveLength(2);
++    // 主管线两态（五段 brainstorm→archive——2026-10-21-overview-card-mainflow-scan
++    // 去 scan：出生阶段即 brainstorm，scan 是辅助阶段不进管线；共享态用 getAllBy）
++    expect(screen.queryByLabelText(/^scan /)).toBeNull();
+     expect(screen.getByLabelText("brainstorm 进行中")).toBeInTheDocument();
++    expect(screen.getAllByLabelText("brainstorm 已完成")).toHaveLength(1);
++    expect(screen.getAllByLabelText("execute 已完成")).toHaveLength(1);
+     expect(screen.getByLabelText("verify 进行中")).toBeInTheDocument();
+     expect(screen.getAllByLabelText("archive 待办")).toHaveLength(2);
+ 
+@@ -222,6 +225,39 @@ describe("ChangesOverviewCard（task-06 / 活跃变更总览）", () => {
+     ).toHaveAttribute("aria-valuenow", "50");
+   });
+ 
++  it("thin 变更行——◈ thin 旁路徽标 + 隐藏步骤 0/0（2026-10-21-overview-card-mainflow-scan）", async () => {
++    mockHappyPath(
++      makeStatus({
++        changes: [
++          makeChange({
++            name: "chg-thin",
++            current_stage: "thin",
++            stage_label: "◈ 轻量变更",
++            steps: { total: 0, completed: 0 },
++          }),
++        ],
++        active_changes: 1,
++        healthy_count: 1,
++        ghost_count: 0,
++        conflict_count: 0,
++        conflict_types: {},
++      }),
++    );
++
++    renderCard();
++
++    expect(await screen.findByText("chg-thin")).toBeInTheDocument();
++    // 旁路徽标（thin 键，2026-09-25-change-center-thin-flow 引入）+ stage 标签照显
++    expect(screen.getByText("◈ thin")).toBeInTheDocument();
++    expect(screen.getByText("◈ 轻量变更")).toBeInTheDocument();
++    // thin 不走阶段机：无主管线点位、无「步骤 0/0」文案、无进度条
++    expect(
++      screen.queryByLabelText(/^(brainstorm|plan|execute|verify|archive) /),
++    ).toBeNull();
++    expect(screen.queryByText("步骤 0/0")).toBeNull();
++    expect(screen.queryByRole("progressbar")).toBeNull();
++  });
++
+   it("ghost 折叠组——默认折一行（计数+跳变更中心入口），展开逐行，再点收起", async () => {
+     mockHappyPath(
+       makeStatus({
+diff --git a/frontend/src/components/workspace/changes-overview-card.tsx b/frontend/src/components/workspace/changes-overview-card.tsx
+index ae93e7394..4cb81f988 100644
+--- a/frontend/src/components/workspace/changes-overview-card.tsx
++++ b/frontend/src/components/workspace/changes-overview-card.tsx
+@@ -65,8 +65,9 @@ function describeStatusError(error: SillySpecStatusError): string {
+ /** changes[] 单项（宽松全 nullable，宁宽勿断）。 */
+ type SillySpecChange = components["schemas"]["DaemonHeartbeatSillySpecChange"];
+ 
+-/** 主管线 6 阶段（schema 另有 quick/explore 两键走旁路徽标，不进管线）。 */
+-const MAIN_STAGES = ["scan", "brainstorm", "plan", "execute", "verify", "archive"] as const;
++/** 主管线 5 阶段（对齐 sillyspec MAIN_FLOW_ORDER——2026-09-27 起出生阶段即 brainstorm，
++ *  scan 是按需显式跑的辅助阶段不进管线；schema 另有 quick/explore/thin 三键走旁路徽标）。 */
++const MAIN_STAGES = ["brainstorm", "plan", "execute", "verify", "archive"] as const;
+ 
+ /** thin/quick/explore 旁路徽标（原型 .badge.quick；violet 固定信息色，同 PROVIDER_TONES 先例）。
+  * 2026-09-25-change-center-thin-flow task-07：加 thin（◈ 轻量变更）与 quick 存量口径——
+@@ -150,9 +151,10 @@ function HealthDot({
+ }
+ 
+ /**
+- * 6 点主管线（scan→archive）。current_stage 命中主管线 → 前序 done / 自身 cur /
+- * 后续 todo；quick/explore/未知阶段不进管线（调用方改渲染旁路徽标，未知阶段全 todo）。
+- * 每个点带 aria-label（"scan 已完成"等）供读屏与测试断言真实可访问语义。
++ * 5 点主管线（brainstorm→archive，2026-10-21-overview-card-mainflow-scan 去 scan）。
++ * current_stage 命中主管线 → 前序 done / 自身 cur / 后续 todo；quick/explore/thin/
++ * 未知阶段不进管线（调用方改渲染旁路徽标，未知阶段全 todo）。
++ * 每个点带 aria-label（"brainstorm 已完成"等）供读屏与测试断言真实可访问语义。
+  */
+ function StagePipeline({ currentStage }: { currentStage: string | null }) {
+   const curIdx = (MAIN_STAGES as readonly string[]).indexOf(currentStage ?? "");
+@@ -245,9 +247,13 @@ function ActiveChangeRow({ change }: { change: SillySpecChange }) {
+           {stageLabel}
+         </Tag>
+         <span className="flex-1" />
+-        <span className="whitespace-nowrap text-xs text-muted-foreground">
+-          步骤 {stepsText(change)}
+-        </span>
++        {/* thin 不走阶段机、无步骤语义（CLI steps 口径维持 {0,0} 真实值，
++            2026-10-21-overview-thin-stage）——按阶段隐藏文案；quick/explore 存量渲染不动。 */}
++        {stage !== "thin" && (
++          <span className="whitespace-nowrap text-xs text-muted-foreground">
++            步骤 {stepsText(change)}
++          </span>
++        )}
+       </div>
+       <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-2">
+         {isBypass && stage ? (
+diff --git a/sillyhub-daemon/src/host-fs-handler.ts b/sillyhub-daemon/src/host-fs-handler.ts
+index 390685677..ced040717 100644
+--- a/sillyhub-daemon/src/host-fs-handler.ts
++++ b/sillyhub-daemon/src/host-fs-handler.ts
+@@ -244,7 +244,10 @@ export interface GitRefsResult {
+ 
+ /** git_show 单个变更文件（--numstat 行解析产物）。 */
+ export interface GitShowFileEntry {
+-  /** 仓库相对路径（numstat 原样保留，含空格；特殊字符保持 git C 引号形态）。 */
++  /**
++   * 仓库相对路径（解码后原文：gitShow 调用带 `-c core.quotepath=false` +
++   * decodeGitCQuote 兜底解码残余 C 引号，含空格与中文等非 ASCII 字符）。
++   */
+   path: string;
+   /** 新增行数；二进制为 null。 */
+   add: number | null;
+@@ -679,6 +682,16 @@ const GIT_LOG_MAX_COUNT = 5_000;
+ const GIT_LOG_PRETTY_FORMAT =
+   '%H%x00%h%x00%P%x00%an%x00%ae%x00%aI%x00%cI%x00%B%x1e';
+ 
++/**
++ * `-c core.quotepath=false`（2026-10-21-gitlog-quotepath-fix）：git 默认把含
++ * 非 ASCII 字节的路径按 C 引号形态（`"…\345\257\274…"`）输出——numstat 路径
++ * 原样透传会让前端目录树显示转义乱码、diff 回查 pathspec 失配恒空。per-invocation
++ * 覆盖不写宿主 config；仅加在**会显示路径**的调用上（gitShow/gitDiffFile 的
++ * show、gitStatus 的 status/diff；remote/fetch 不显示路径不加）。残余引号面
++ * （quotepath=false 下字面 `"`/`\`/控制字符仍被强制引号）由 decodeGitCQuote 兜底。
++ */
++const GIT_QUOTEPATH_OFF_ARGS: readonly string[] = ['-c', 'core.quotepath=false'];
++
+ /** git_diff_file 输出字节上限（64KB，design §5.2 CC-05 独立选定——diff 按行渲染的合理量级，非对齐 explorer 读文件 10MB）。 */
+ const GIT_DIFF_MAX_BYTES = 64 * 1024;
+ 
+@@ -755,6 +768,63 @@ function parseGitLogRecord(rec: string): GitLogCommit | null {
+   };
+ }
+ 
++/**
++ * 解码 git C 引号路径为原文（2026-10-21-gitlog-quotepath-fix，导出供单测）。
++ *
++ * git 对含字面 `"`、`\` 或控制字符的路径**即便 `-c core.quotepath=false` 也
++ * 强制** C 引号包裹（其余非 ASCII 在 quotepath=false 下已原样输出，不会进
++ * 本函数的解码分支）。规则对齐 git quote_c_style：
++ * - 非引号形态（绝大多数路径）原样返回；畸形（有头引号无尾引号等）原样返回；
++ * - `\NNN` 八进制（1..3 位，git 恒发 3 位）还原字节，字面字符取低字节，
++ *   末尾整体按 UTF-8 组装（git 路径字节即提交时编码，本仓语境为 UTF-8）；
++ * - `\"` `\\` `\a\b\f\n\r\t\v` 标准转义；
++ * - 未知转义（git 不会发）字面回写反斜杠与该字符，防御性保留。
++ */
++export function decodeGitCQuote(path: string): string {
++  if (path.length < 2 || !path.startsWith('"') || !path.endsWith('"')) {
++    return path;
++  }
++  const inner = path.slice(1, -1);
++  const bytes: number[] = [];
++  let i = 0;
++  while (i < inner.length) {
++    if (inner.charAt(i) !== '\\') {
++      bytes.push(inner.charCodeAt(i));
++      i += 1;
++      continue;
++    }
++    const esc = inner.charAt(i + 1);
++    i += 2;
++    if (esc >= '0' && esc <= '7') {
++      let val = esc.charCodeAt(0) - 0x30;
++      for (let d = 0; d < 2; d += 1) {
++        const digit = inner.charAt(i);
++        if (digit < '0' || digit > '7') break;
++        val = val * 8 + (digit.charCodeAt(0) - 0x30);
++        i += 1;
++      }
++      bytes.push(val & 0xff);
++      continue;
++    }
++    switch (esc) {
++      case '"': bytes.push(0x22); break;
++      case '\\': bytes.push(0x5c); break;
++      case 'a': bytes.push(0x07); break;
++      case 'b': bytes.push(0x08); break;
++      case 'f': bytes.push(0x0c); break;
++      case 'n': bytes.push(0x0a); break;
++      case 'r': bytes.push(0x0d); break;
++      case 't': bytes.push(0x09); break;
++      case 'v': bytes.push(0x0b); break;
++      default:
++        bytes.push(0x5c);
++        if (esc.length > 0) bytes.push(esc.charCodeAt(0));
++        break;
++    }
++  }
++  return Buffer.from(bytes).toString('utf8');
++}
++
+ // ── task-01（2026-08-26-workspace-git-status）git_status 常量 + fetch 局部 execFile ──
+ //
+ // design §5.2 / §7.2 十四字段契约 + D-001 fetch 降级语义（Grill CC-02 / CC-07）。
+@@ -1425,6 +1495,7 @@ export class HostFsHandler {
+       [
+         '-C',
+         root,
++        ...GIT_QUOTEPATH_OFF_ARGS,
+         'show',
+         params.sha,
+         '--numstat',
+@@ -1452,8 +1523,9 @@ export class HostFsHandler {
+       if (m === null) continue; // 空行 / 分隔噪声行
+       const binary = m[1] === '-' && m[2] === '-';
+       files.push({
+-        // 匹配成功时三捕获组必在（noUncheckedIndexedAccess 下 ?? '' 兜底类型）。
+-        path: m[3] ?? '',
++        // 匹配成功时三捕获组必在（noUncheckedIndexedAccess 下 ?? '' 兜底类型）；
++        // 路径经 decodeGitCQuote 解码（残余 C 引号 → 原文，见 GIT_QUOTEPATH_OFF_ARGS 注）。
++        path: decodeGitCQuote(m[3] ?? ''),
+         add: binary ? null : Number(m[1]),
+         del: binary ? null : Number(m[2]),
+         binary,
+@@ -1494,6 +1566,7 @@ export class HostFsHandler {
+       [
+         '-C',
+         root,
++        ...GIT_QUOTEPATH_OFF_ARGS,
+         'show',
+         params.sha,
+         '--pretty=format:',
+@@ -1583,7 +1656,7 @@ export class HostFsHandler {
+     // ── ② porcelain v2 解析（runCmd 只读采集；R-02 条目按前缀字节严格匹配）──
+     const status = await runCmd(
+       'git',
+-      ['-C', root, 'status', '--porcelain=v2', '--branch', '--no-show-stash'],
++      ['-C', root, ...GIT_QUOTEPATH_OFF_ARGS, 'status', '--porcelain=v2', '--branch', '--no-show-stash'],
+       { timeout: GIT_READ_TIMEOUT_MS },
+     );
+     if (!status.ok) {
+@@ -1642,7 +1715,7 @@ export class HostFsHandler {
+     // ── ③ numstat 汇总（git diff HEAD 覆盖 staged+unstaged；--no-renames 防计数破坏）──
+     const diff = await runCmd(
+       'git',
+-      ['-C', root, 'diff', 'HEAD', '--numstat', '--no-renames'],
++      ['-C', root, ...GIT_QUOTEPATH_OFF_ARGS, 'diff', 'HEAD', '--numstat', '--no-renames'],
+       { timeout: GIT_READ_TIMEOUT_MS },
+     );
+     let filesChanged: number | null = null;
+diff --git a/sillyhub-daemon/tests/host-fs-handler-git-log-quotepath.test.ts b/sillyhub-daemon/tests/host-fs-handler-git-log-quotepath.test.ts
+new file mode 100644
+index 000000000..710e7f734
+--- /dev/null
++++ b/sillyhub-daemon/tests/host-fs-handler-git-log-quotepath.test.ts
+@@ -0,0 +1,129 @@
++// tests/host-fs-handler-git-log-quotepath.test.ts
++// task-03（2026-10-21-gitlog-quotepath-fix / FR-01 FR-03）：真实 git 集成实测——
++// 不 mock execFile，在真实临时仓提交含中文目录的文件，验证全链路：
++//   ① gitShow 返回解码后中文原文路径（修复前为 C 引号八进制转义形态）；
++//   ② gitDiffFile 以该中文 pathspec 回查返回非空 unified diff
++//     （修复前转义串失配 → exit 0 空输出 → 前端「（无差异内容）」）；
++//   ③ 真实 git 强制 quotepath=true 的 C 引号输出经 decodeGitCQuote 解码后
++//     与真实路径逐字符相等（显式 -c true 不受宿主全局 config 影响，任意平台确定性）；
++//   ④ gitStatus 对中文 untracked 文件计数正确（porcelain/diff 调用 quotepath=false 全链路）。
++//
++// 与 host-fs-handler-git-log.test.ts（mock execFile 队列，断言命令构造逐 token）
++// 互补：本文件走真实 git 子进程，覆盖「命令构造 → 真实输出 → 解码回传」；
++// 需要宿主机装有 git（daemon 的宿主运行前提，同 explorer/worktree 面）。
++
++import { describe, it, expect, afterEach } from 'vitest';
++import { execFile } from 'node:child_process';
++import { mkdtemp, mkdir, rm, writeFile, realpath } from 'node:fs/promises';
++import { tmpdir } from 'node:os';
++import { join } from 'node:path';
++
++import { HostFsHandler, decodeGitCQuote } from '../src/host-fs-handler';
++
++/** 真实执行 git（utf8；失败 reject 且 err 上挂 stdout/stderr 便于排查）。 */
++function git(cwd: string, args: string[]): Promise<{ stdout: string; stderr: string }> {
++  return new Promise((resolve, reject) => {
++    execFile('git', ['-C', cwd, ...args], { encoding: 'utf8' }, (err, stdout, stderr) => {
++      if (err) {
++        (err as Error & { stdout: string; stderr: string }).stdout = String(stdout);
++        (err as Error & { stderr: string }).stderr = String(stderr);
++        reject(err);
++      } else {
++        resolve({ stdout: String(stdout), stderr: String(stderr) });
++      }
++    });
++  });
++}
++
++/** 真实形态的中文目录路径（对齐 2026-10-20 公司仓实证案例的形态）。 */
++const CN_DIR = '.sillyspec/changes/2026-10-20-unitLedger导入模板框线';
++const CN_FILE = `${CN_DIR}/design.md`;
++const FILE_BODY = '第一行新增内容\n第二行中文行\nthird ascii line\n';
++
++/** 搭真实临时仓：init → local identity → 中文目录文件真实提交。 */
++async function makeCnRepo(): Promise<string> {
++  // realpath 归一（macOS /var → /private/var）：rootsProvider 与 daemon 内部
++  // pathResolve 必须指向同一真实目录，否则 assertWithinAllowedRoots 误拒。
++  const root = await realpath(await mkdtemp(join(tmpdir(), 'sillyhub-cnquote-')));
++  await mkdir(join(root, CN_DIR), { recursive: true });
++  await writeFile(join(root, CN_FILE), FILE_BODY, 'utf8');
++  await git(root, ['init', '-q']);
++  await git(root, ['config', 'user.name', '琴忆']);
++  await git(root, ['config', 'user.email', 'qinyi@example.com']);
++  await git(root, ['add', '--', CN_FILE]);
++  await git(root, ['commit', '-q', '-m', 'feat: 中文目录真实提交']);
++  return root;
++}
++
++describe('真实 git 集成 —— 非 ASCII 路径（2026-10-21-gitlog-quotepath-fix，FR-01/FR-03）', () => {
++  const roots: string[] = [];
++  let handler: HostFsHandler;
++
++  const makeHandler = async (): Promise<string> => {
++    const root = await makeCnRepo();
++    roots.push(root);
++    handler = new HostFsHandler({ rootsProvider: () => [root] });
++    return root;
++  };
++
++  afterEach(async () => {
++    await Promise.all(roots.map((r) => rm(r, { recursive: true, force: true })));
++    roots.length = 0;
++  });
++
++  it('① gitShow 解码中文原文路径 + ② gitDiffFile 以中文 pathspec 回查非空 diff', async () => {
++    const root = await makeHandler();
++    const head = (await git(root, ['rev-parse', 'HEAD'])).stdout.trim();
++
++    const shown = await handler.gitShow({ root, sha: head });
++    expect(shown.error).toBeNull();
++    expect(shown.files).toHaveLength(1);
++    // 解码路径与真实路径逐字符相等（修复前：带引号 + \345 八进制转义形态）。
++    expect(shown.files[0].path).toBe(CN_FILE);
++    expect(shown.files[0].add).toBe(3);
++    expect(shown.files[0].del).toBe(0);
++    expect(shown.files[0].binary).toBe(false);
++
++    // 回查（前端点击叶子的等价链路）：中文 pathspec 命中真实文件。
++    const diff = await handler.gitDiffFile({ root, sha: head, path: CN_FILE });
++    expect(diff.error).toBeNull();
++    expect(diff.binary).toBe(false);
++    expect(diff.diff.length).toBeGreaterThan(0);
++    expect(diff.diff).toContain('+第一行新增内容');
++  });
++
++  it('③ 真实 git 强制 quotepath 的 C 引号输出经 decodeGitCQuote 与真实路径逐字符相等', async () => {
++    const root = await makeHandler();
++    const head = (await git(root, ['rev-parse', 'HEAD'])).stdout.trim();
++    // 显式 -c core.quotepath=true 强制 C 引号形态（覆盖宿主全局 config，确定性复现）。
++    const r = await git(root, [
++      '-c',
++      'core.quotepath=true',
++      'show',
++      '--numstat',
++      '--no-renames',
++      '--pretty=format:%x1e',
++      head,
++    ]);
++    const line = r.stdout.split('\n').find((l) => /^\d+\t\d+\t/.test(l));
++    expect(line).toBeDefined();
++    const rawPath = line!.split('\t')[2] ?? '';
++    // 前提自检：真实输出确为 C 引号 + 八进制转义形态（即修复前透传给前端的串）。
++    expect(rawPath.startsWith('"')).toBe(true);
++    expect(rawPath).toContain('\\345');
++    // 解码后与真实路径逐字符相等。
++    expect(decodeGitCQuote(rawPath)).toBe(CN_FILE);
++  });
++
++  it('④ gitStatus 对中文 untracked 文件计数正确（porcelain quotepath=false 全链路）', async () => {
++    const root = await makeHandler();
++    await writeFile(join(root, '中文未跟踪.md'), '未提交内容\n', 'utf8');
++    const st = await handler.gitStatus({ root });
++    expect(st.error).toBeNull();
++    expect(st.empty).toBe(false);
++    expect(st.untracked_count).toBe(1);
++    expect(st.files_changed).toBe(0);
++    expect(st.additions).toBe(0);
++    expect(st.deletions).toBe(0);
++  });
++});
+diff --git a/sillyhub-daemon/tests/host-fs-handler-git-log.test.ts b/sillyhub-daemon/tests/host-fs-handler-git-log.test.ts
+index fbd6ec3d7..c4f42d895 100644
+--- a/sillyhub-daemon/tests/host-fs-handler-git-log.test.ts
++++ b/sillyhub-daemon/tests/host-fs-handler-git-log.test.ts
+@@ -103,7 +103,7 @@ vi.mock('node:child_process', async (importOriginal) => {
+ });
+ 
+ // import 必须在 vi.mock 之后（vitest hoist 会处理顺序，但为可读性放在 mock 后）。
+-import { HostFsHandler } from '../src/host-fs-handler';
++import { HostFsHandler, decodeGitCQuote } from '../src/host-fs-handler';
+ import { Daemon } from '../src/daemon.js';
+ import { RpcError } from '../src/ws-client';
+ 
+@@ -658,8 +658,10 @@ describe('HostFsHandler — gitShow（task-01 GL21~GL25）', () => {
+     await handler.gitShow({ root, sha: 'a1b2c3d4e5f6' });
+     const args = glCalls[0].args;
+     expect(glCalls[0].cmd).toBe('git');
+-    expect(args[2]).toBe('show'); // 只读子命令
+-    expect(args[3]).toBe('a1b2c3d4e5f6'); // sha 独立 argv
++    // 2026-10-21-gitlog-quotepath-fix：显示路径的调用带 -c core.quotepath=false。
++    expect(args.slice(0, 4)).toEqual(['-C', root, '-c', 'core.quotepath=false']);
++    expect(args[4]).toBe('show'); // 只读子命令
++    expect(args[5]).toBe('a1b2c3d4e5f6'); // sha 独立 argv
+     expect(args).toContain('--numstat');
+     expect(args).toContain('--no-renames');
+     expect(args).toContain('--pretty=format:%H%x00%h%x00%P%x00%an%x00%ae%x00%aI%x00%cI%x00%B%x1e');
+@@ -733,8 +735,9 @@ describe('HostFsHandler — gitDiffFile（task-01 GL26~GL29，CC-05 / R-06）',
+     });
+     const args = glCalls[0].args;
+     expect(glCalls[0].cmd).toBe('git');
+-    expect(args[2]).toBe('show'); // 只读子命令
+-    expect(args[3]).toBe('a1b2c3d4e5f6'); // sha 独立 argv
++    expect(args.slice(0, 4)).toEqual(['-C', root, '-c', 'core.quotepath=false']); // quotepath 关闭
++    expect(args[4]).toBe('show'); // 只读子命令
++    expect(args[5]).toBe('a1b2c3d4e5f6'); // sha 独立 argv
+     expect(args).toContain('--pretty=format:'); // 空 pretty：去 commit 头（design §5.2 勘误）
+     expect(args).toContain('--unified=3');
+     expect(args).toContain('--no-color');
+@@ -872,7 +875,10 @@ describe('HostFsHandler — gitStatus porcelain v2 解析（task-01 GL34~GL39，
+       error: null, // 不走红通道
+     });
+     // diff 确已执行（exit 128 容错路径真实走到，而非提前跳过）。
+-    expect(glCalls.map((c) => c.args[2])).toEqual(['remote', 'fetch', 'status', 'diff']);
++    // status/diff 带 -c core.quotepath=false → 子命令在 args[4]（remote/fetch 仍在 [2]）。
++    expect(
++      glCalls.map((c) => (c.args[2] === '-c' ? c.args[4] : c.args[2])),
++    ).toEqual(['remote', 'fetch', 'status', 'diff']);
+   });
+ 
+   it('GL38: untracked 混合 —— "? " 计数、1/2/u 条目不参与 files_changed（CC-05 单源）', async () => {
+@@ -974,7 +980,10 @@ describe('HostFsHandler — gitStatus fetch 三分支降级（task-01 GL40~GL44
+     expect(r.branch).toBe('main'); // 失败不阻断
+     expect(r.error).toBeNull();
+     // 仅 remote/status/diff 三条命令，无 fetch（CC-07：静默 exit 0 探测不到）。
+-    expect(glCalls.map((c) => c.args[2])).toEqual(['remote', 'status', 'diff']);
++    // status/diff 带 -c core.quotepath=false → 子命令在 args[4]。
++    expect(
++      glCalls.map((c) => (c.args[2] === '-c' ? c.args[4] : c.args[2])),
++    ).toEqual(['remote', 'status', 'diff']);
+   });
+ 
+   it('GL43: 命令构造 —— remote/fetch/status/diff 只读子命令 + --no-show-stash + --no-renames 逐 token（FR-06）', async () => {
+@@ -983,11 +992,13 @@ describe('HostFsHandler — gitStatus fetch 三分支降级（task-01 GL40~GL44
+     expect(glCalls).toHaveLength(4);
+     expect(glCalls.every((c) => c.cmd === 'git')).toBe(true);
+     const [remote, fetch, status, diff] = glCalls.map((c) => c.args);
+-    expect(remote).toEqual(['-C', root, 'remote']); // 只读预检子命令
+-    expect(fetch).toEqual(['-C', root, 'fetch', '--quiet']); // fetch 独立 argv + --quiet
++    expect(remote).toEqual(['-C', root, 'remote']); // 只读预检子命令（不显示路径，不带 quotepath 参数）
++    expect(fetch).toEqual(['-C', root, 'fetch', '--quiet']); // fetch 独立 argv + --quiet（同上）
+     expect(status).toEqual([
+       '-C',
+       root,
++      '-c',
++      'core.quotepath=false', // 2026-10-21-gitlog-quotepath-fix：porcelain 输出路径
+       'status', // 只读子命令
+       '--porcelain=v2',
+       '--branch',
+@@ -996,6 +1007,8 @@ describe('HostFsHandler — gitStatus fetch 三分支降级（task-01 GL40~GL44
+     expect(diff).toEqual([
+       '-C',
+       root,
++      '-c',
++      'core.quotepath=false', // numstat 输出路径
+       'diff', // 只读子命令
+       'HEAD',
+       '--numstat',
+@@ -1147,7 +1160,8 @@ describe('daemon 注册器 — _registerGitLogRpcHandler（task-01 GL30~GL33，C
+     expect(r.error).toBeNull();
+     // 只读子命令 + path 独立 argv（经注册路径复验 R-01）。
+     expect(glCalls[0].cmd).toBe('git');
+-    expect(glCalls[0].args[2]).toBe('show');
++    expect(glCalls[0].args.slice(0, 4)).toEqual(['-C', root, '-c', 'core.quotepath=false']);
++    expect(glCalls[0].args[4]).toBe('show');
+     expect(glCalls[0].args[glCalls[0].args.indexOf('--') + 1]).toBe('a.txt');
+   });
+ 
+@@ -1168,8 +1182,104 @@ describe('daemon 注册器 — _registerGitLogRpcHandler（task-01 GL30~GL33，C
+     expect(r.files_changed).toBe(1);
+     expect(r.error).toBeNull();
+     // 经注册路径复验只读命令序列（remote/fetch/status/diff）。
+-    expect(glCalls.map((c) => c.args[2])).toEqual(['remote', 'fetch', 'status', 'diff']);
++    // status/diff 带 -c core.quotepath=false → 子命令在 args[4]。
++    expect(
++      glCalls.map((c) => (c.args[2] === '-c' ? c.args[4] : c.args[2])),
++    ).toEqual(['remote', 'fetch', 'status', 'diff']);
+     // root 非字符串归一空串 → assertWithinAllowedRoots 拒 forbidden（同 GL32 归一语义）。
+     await expectRpcError(h.call('git_status', { root: 123 }), 'forbidden');
+   });
+ });
++
++// ──────────────────────────────────────────────────────────────────────────────
++// 非 ASCII 路径 quotepath 修复（2026-10-21-gitlog-quotepath-fix GL46~GL48）：
++// 显示路径的 git 调用带 -c core.quotepath=false；numstat 残余 C 引号路径由
++// decodeGitCQuote 解码为原文（修复前前端目录树显示转义乱码、diff 回查恒空）。
++// ──────────────────────────────────────────────────────────────────────────────
++
++describe('HostFsHandler — quotepath 修复（2026-10-21-gitlog-quotepath-fix GL46~GL48）', () => {
++  let root: string;
++  let handler: HostFsHandler;
++
++  beforeEach(async () => {
++    root = await makeRoot();
++    handler = new HostFsHandler({ rootsProvider: () => [root] });
++  });
++
++  afterEach(async () => {
++    glExecQueue.length = 0;
++    glCalls.length = 0;
++    await rm(root, { recursive: true, force: true });
++  });
++
++  it('GL46: 命令构造 —— gitShow/gitDiffFile/gitStatus(status+diff) 带 -c core.quotepath=false，remote/fetch 不带', async () => {
++    // 执行序：gitShow(1 条) → gitDiffFile(1 条) → gitStatus(remote/fetch/status/diff 4 条)。
++    glExecQueue.push(
++      { ok: true, stdout: showStdout(commitRecord({ hash: 'a' + 'a'.repeat(39), short: 'aaaaaaa', message: 'm' }), []) },
++      { ok: true, stdout: '', stderr: '' },
++    );
++    await handler.gitShow({ root, sha: 'a1b2c3d4' });
++    await handler.gitDiffFile({ root, sha: 'a1b2c3d4', path: 'docs/中文目录/文件.md' });
++    gsQueue(porcelainV2(gsNormalHeaders()), '');
++    await handler.gitStatus({ root });
++
++    expect(glCalls).toHaveLength(6);
++    // glCalls 序：[0]gitShow [1]gitDiffFile [2]remote [3]fetch [4]status [5]diff。
++    // remote/fetch（[2][3]）不显示路径 → 不带参数（保持最小面）。
++    expect(glCalls[2].args.slice(0, 2)).toEqual(['-C', root]);
++    expect(glCalls[3].args.slice(0, 2)).toEqual(['-C', root]);
++    // 四条显示路径的调用（[0][1][4][5]）统一带 -c core.quotepath=false（-C <root> 之后、子命令之前）。
++    for (const i of [0, 1, 4, 5]) {
++      expect(glCalls[i].args.slice(0, 4)).toEqual(['-C', root, '-c', 'core.quotepath=false']);
++    }
++    expect(glCalls[0].args[4]).toBe('show'); // gitShow 子命令
++    expect(glCalls[1].args[4]).toBe('show'); // gitDiffFile 子命令
++    expect(glCalls[4].args[4]).toBe('status'); // gitStatus ② porcelain
++    expect(glCalls[5].args[4]).toBe('diff'); // gitStatus ③ numstat
++  });
++
++  it('GL47: decodeGitCQuote 纯函数 —— 中文八进制转义还原 / 非引号与畸形原样 / 残余强制引号', () => {
++    // 真实形态（2026-10-20 公司仓实证的同一字符串）：默认 quotepath 下的中文目录。
++    const quoted =
++      '".sillyspec/changes/2026-10-20-unitLedger\\345\\257\\274\\345\\205\\245\\346\\250\\241\\346\\235\\277\\346\\241\\206\\347\\272\\277/design.md"';
++    expect(decodeGitCQuote(quoted)).toBe(
++      '.sillyspec/changes/2026-10-20-unitLedger导入模板框线/design.md',
++    );
++    // 非引号形态原样（quotepath=false 后的常态；空串/ASCII/中文均透传）。
++    expect(decodeGitCQuote('docs/中文目录/文件.md')).toBe('docs/中文目录/文件.md');
++    expect(decodeGitCQuote('src/main.ts')).toBe('src/main.ts');
++    expect(decodeGitCQuote('')).toBe('');
++    // 畸形（有头引号无尾引号）原样返回，不猜。
++    expect(decodeGitCQuote('"unclosed-quoted')).toBe('"unclosed-quoted');
++    // 残余强制引号：quotepath=false 下含字面 " 与 \ 的路径仍被 C 引号 → 解码还原。
++    expect(decodeGitCQuote('"we\\"ird\\\\name.md"')).toBe('we"ird\\name.md');
++    // 控制字符恒转义：\t 还原为真实制表符。
++    expect(decodeGitCQuote('"a\\tb.md"')).toBe('a\tb.md');
++    // 尾部反斜杠：git 写成 \\（转义反斜杠）→ 还原单反斜杠。
++    expect(decodeGitCQuote('"abc\\\\"')).toBe('abc\\');
++  });
++
++  it('GL48: gitShow —— 中文 C 引号 numstat 行解码为原文，非引号行不受影响', async () => {
++    const quotedPath =
++      '".sillyspec/changes/2026-10-20-unitLedger\\345\\257\\274\\345\\205\\245\\346\\250\\241\\346\\235\\277\\346\\241\\206\\347\\272\\277/design.md"';
++    glExecQueue.push({
++      ok: true,
++      stdout: showStdout(
++        commitRecord({ hash: 'a' + 'a'.repeat(39), short: 'aaaaaaa', message: 'm' }),
++        [`10\t4\t${quotedPath}`, '2\t1\tdocs/my file.md'],
++      ),
++    });
++    const r = await handler.gitShow({ root, sha: 'a1b2c3d4' });
++    expect(r.error).toBeNull();
++    expect(r.files).toHaveLength(2);
++    // 引号形态解码为中文原文（前端树按此路径聚合、点击以此回查 diff）。
++    expect(r.files[0].path).toBe(
++      '.sillyspec/changes/2026-10-20-unitLedger导入模板框线/design.md',
++    );
++    expect(r.files[0].add).toBe(10);
++    expect(r.files[0].del).toBe(4);
++    expect(r.files[0].binary).toBe(false);
++    // 非引号形态（含空格路径）原样透传。
++    expect(r.files[1].path).toBe('docs/my file.md');
++  });
++});

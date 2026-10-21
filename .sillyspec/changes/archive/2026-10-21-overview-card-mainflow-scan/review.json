@@ -1,0 +1,36 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-21-overview-card-mainflow-scan",
+  "reviewer": "subagent",
+  "verdict": "PASS",
+  "reviewedAgainst": "23c936e92bf7871cd0ea0edba46cdf5387e49079",
+  "findings": [
+    {
+      "severity": "P3",
+      "title": "FR-01 场景的 plan 点位 aria 语义无测试断言锚定（brainstorm 行「plan 待办」/verify 行「plan 已完成」均未断言）",
+      "evidence": "requirements FR-01 场景明确要求 aria 含「plan 待办」/「plan 已完成」，但绑定测试断言集（scan-null + brainstorm/execute/verify/archive 六断言）在 plan 点位被整体误删时仍会全绿——五段之一的回归防护缺口；当前实现正确（StagePipeline 由 MAIN_STAGES 全量 map 生成），仅测试粒度不足",
+      "location": "frontend/src/components/workspace/__tests__/changes-overview-card.test.tsx:213-220"
+    }
+  ],
+  "dimensionNotes": {
+    "乱序": "ok——design「n/a」属实：react-query 30s 轮询全量重绘（machinesQ refetchInterval=30000，tsx:326-331），无事件序假设；披露的旧 daemon 降级形态与代码一致（stage='brainstorm' 时 isBypass=false 走主管线，tsx:236-263），非本变更面",
+    "并发": "ok——design「n/a」属实：组件可变态仅 filterTab/ghostExpanded 两个 useState（tsx:315-316），MAIN_STAGES/BYPASS_BADGES 为模块只读常量，无并发写面",
+    "切换": "ok——filterTab/ghostExpanded 状态机未触碰（与 patch diff 核对一致）；未知 stage 兜底既有不变：MAIN_STAGES.indexOf→-1→全 todo（tsx:160-164）",
+    "作用域": "ok——改动纯渲染常量与条件渲染，无取数面变化；workspaceId→statusMap 定位链（tsx:344-348）未触碰，既有「map 在场/缺席」两用例（test:480-526）继续锚定不串台"
+  },
+  "checklistNotes": {
+    "1_FR实现测试三方一致": "FR-01：MAIN_STAGES 五段无 scan（tsx:70），StagePipeline aria 仅由 MAIN_STAGES 生成（tsx:179）故 scan 语义不可达；绑定用例存在（test:157，名称与绑定逐字一致）且断言 scan 无（:215）/brainstorm 进行中（:216）/brainstorm 已完成×1（:217）/execute 已完成×1（:218）/verify 进行中（:219）/archive 待办×2（:220），fixture chg-newer=brainstorm + chg-older=verify 与 FR-01 两场景对齐。FR-02：thin 步骤文案 guard（tsx:252）、BYPASS_BADGES.thin=『◈ thin』（tsx:76）、isBypass 含 thin（tsx:236）；绑定用例存在且名称逐字匹配（test:228），断言 ◈ thin 徽标/◈ 轻量变更/无管线点位 aria/无步骤 0/0/无 progressbar（test:249-258）；quick/explore 存量不动（guard 仅排除 thin，活跃行非 thin 步骤文案由默认 execute fixture 断言「步骤 4/8」覆盖，test:207）。FR-03：复跑 14/14 全绿。唯一缝隙见 P3 finding（plan 点位断言缺失）",
+    "2_盲维四问真实性": "四问作答与代码逐条核实为真，详见 dimensionNotes；防护声明「MAIN_STAGES 未导出、无他处消费」核实属实（tsx:70 无 export，模块内私有）",
+    "3_披露边界裁决": "边界A（盲维1：旧 daemon 采集值下 thin 暂走 brainstorm 主管线、下一拍自愈）→ 可接受：数据源瞬态降级、纯展示、根因在 CLI 仓（跨仓不在冻结面）。边界B（风险披露：mobile-change-detail STEPPER_STAGES 含 scan 与变更中心 ?? \"scan\" 兜底不随迁）→ 可接受：披露属实且已实证（mobile-change-detail.tsx:145、changes/page.tsx:764、mobile-change-card.tsx:261），用户本轮只点名总览卡、异面纯展示无数据正确性风险、已列后续候选。边界C（放弃方案：不改 CLI envelope 附阶段清单）→ 可接受：静态常量对齐 MAIN_FLOW_ORDER 足够，避免过度设计。综合：边界已裁决，全部可接受",
+    "4_防护声明": "design 声称「已定位唯一断言面（本组件测试 scan aria 断言）同步更新，全仓无其他组件消费本卡 MAIN_STAGES」——核实：常量未导出属实；测试面更新属实（:213-220）；mobile stepper 与变更中心的 scan 残留已在边界B 如实披露为异面非消费",
+    "5_生成物同步": "不涉及——无类型/契约生成物改动，组件消费既有 api-types schema（DaemonHeartbeatSillySpecChange），测试 fixture 类型同源",
+    "冻结面归属抽查": "声明内 2 文件工作区实态与冻结 patch 一致且已提交于 HEAD（git status 对该 2 文件干净）；声明外 8 文件全部带 2026-10-21-gitlog-quotepath-fix 显式标记（changelog 行、测试注释、patch 注释三处一致），属并行变更混入，抽查归属清晰，他侧归因 0"
+  },
+  "probeNotes": {
+    "cli-copy-selfsufficient_命令flag路径": "n/a——变更面（声明内 2 文件）无 CLI 输出文案改动，仅 UI 渲染与代码注释；注释中的 MAIN_FLOW_ORDER/变更名引用为文档性，非用户可执行指引",
+    "cli-copy-selfsufficient_文案与门判定一致性": "n/a——同上，无门禁提示文案改动",
+    "config-absent-zero-regression": "n/a——未新增 local.yaml 消费键",
+    "crossrepo-path-compat": "n/a——未触及 worktree/deps/跨仓对账路径（声明外 daemon 文件属并行变更，不在本变更评审面）"
+  },
+  "reviewedAt": "2026-10-21T09:12:00+08:00"
+}
