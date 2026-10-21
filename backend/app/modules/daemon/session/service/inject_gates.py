@@ -26,6 +26,7 @@ from app.modules.auth.permissions import Permission
 # allowed_workspace_ids 绑定留在包 __init__（D-007——测试 patch 目标），经 _svc 取。
 from app.modules.daemon.model import DaemonRuntime
 from app.modules.daemon.schema import TeamMissionCreateBlock
+from app.core.errors import AppError
 from app.modules.ppm.common.session_binding import (
     PpmItemKind,
     load_ppm_item,
@@ -267,8 +268,18 @@ async def _resolve_create_inputs(
                 profile = await AgentProfileService(svc._session).get(
                     profile_id=_actor.default_agent_profile_id, actor=_actor
                 )
-            except Exception:
-                profile = None  # 软偏好：失可见静默跳过
+            except AppError:
+                # 预期面（404 已删竞态 / 403 失可见）：软偏好静默回落。
+                profile = None
+            except Exception as exc:
+                # 非预期面（DB 故障等）：仍软回落不阻断创建，但留痕可观测
+                # （评审 P3：裸 except 吞错无日志）。
+                profile = None
+                _svc.log.warning(
+                    "session_default_profile_resolve_failed",
+                    user_id=str(user_id),
+                    error=str(exc)[:200],
+                )
 
     # ── task-03：会话级供应商解析（归属 + agent_kind 匹配，FR-04/FR-06）──
     llm_provider_row = None

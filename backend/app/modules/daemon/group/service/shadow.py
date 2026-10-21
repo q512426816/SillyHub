@@ -24,6 +24,10 @@ from sqlalchemy.exc import DBAPIError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 import app.modules.daemon.group.service as _gsvc
+from app.core.errors import AppError
+from app.core.logging import get_logger as _get_logger
+
+_gsvc_log = _get_logger(__name__)
 from app.modules.agent.model import (
     ACTIVE_RUN_STATUSES,
     USER_INPUT_LOG_MAX_CHARS,
@@ -585,9 +589,17 @@ async def _ensure_shadow_session(
                 profile = await AgentProfileService(svc._session).get(
                     profile_id=owner.default_agent_profile_id, actor=owner
                 )
-            except Exception:
-                # 软偏好：默认档案失可见/已删（FK SET NULL 兜底外的竞态）静默跳过。
+            except AppError:
+                # 软偏好预期面（已删竞态/失可见）：静默跳过。
                 profile = None
+            except Exception as exc:
+                # 非预期面：仍回落不阻断影子懒建，留痕可观测（评审 P3）。
+                profile = None
+                _gsvc_log.warning(
+                    "group_shadow_default_profile_resolve_failed",
+                    group_id=str(group.id),
+                    error=str(exc)[:200],
+                )
             if profile is not None:
                 effective_profile_id = profile.id
 

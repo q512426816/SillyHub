@@ -1095,3 +1095,51 @@ describe('task-03: interactive skillsStep 档案技能裁剪', () => {
     }
   });
 });
+
+// ── 评审 P3 补齐：interactive 非空子集裁剪直接用例 ──────────────────────────
+describe('task-03(补): interactive skillsStep 非空子集', () => {
+  it('execPayload.skillRefs=["skill-a"] → 仅保留 skill-a，其余删除', async () => {
+    const sessionManager = createMockSessionManager();
+    const tmp = await mkdtemp(join(tmpdir(), 't03s-iskills-'));
+    const skillsDir = join(tmp, '.claude', 'skills');
+    await mkdir(join(skillsDir, 'skill-a'), { recursive: true });
+    await mkdir(join(skillsDir, 'skill-b'), { recursive: true });
+    const { daemon, client, wsClientMock } = buildDaemon({ sessionManager });
+    try {
+      await daemon.start();
+      client.claimLease.mockResolvedValueOnce({
+        claim_token: 'token-t03s',
+        payload: {
+          kind: 'interactive',
+          prompt: 'hi',
+          provider: 'claude',
+          agent_session_id: 'sess-t03s',
+          agent_run_id: 'run-t03s',
+          root_path: tmp,
+          skillRefs: ['skill-a'],
+        },
+      });
+      wsClientMock._injectMessage({
+        type: MSG.TASK_AVAILABLE,
+        payload: {
+          leaseId: 'lease-t03s',
+          kind: 'interactive',
+          prompt: 'hi',
+          agentSessionId: 'sess-t03s',
+          agentRunId: 'run-t03s',
+          rootPath: tmp,
+          skillRefs: ['skill-a'],
+        },
+      });
+      await waitForSpy(sessionManager.create as unknown as { mock: { calls: unknown[][] } });
+      await sleep(50);
+
+      const remaining = await readdir(skillsDir);
+      expect(remaining).toContain('skill-a');
+      expect(remaining).not.toContain('skill-b');
+    } finally {
+      await rm(tmp, { recursive: true, force: true }).catch(() => undefined);
+      await daemon.stop();
+    }
+  });
+});

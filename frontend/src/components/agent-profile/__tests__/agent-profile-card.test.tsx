@@ -256,3 +256,64 @@ describe("AgentProfileCard 系统预置只读态（design §12 验收 5）", () 
     expect(screen.queryByRole("button", { name: /^删除$/ })).not.toBeInTheDocument();
   });
 });
+
+// ── 2026-10-21-agent-profile-slim-default task-05：设为默认操作与默认标记 ─────
+
+describe("AgentProfileCard 设为默认 / 取消默认（task-05 / FR-02 前端面）", () => {
+  it("is_user_default=true → 显「默认」徽标 + 「取消默认」按钮，点按触发 onUnsetDefault 不冒泡", () => {
+    const onSetDefault = vi.fn();
+    const onUnsetDefault = vi.fn();
+    const onPreview = vi.fn();
+    renderCard(
+      <AgentProfileCard
+        profile={makeProfile({ is_user_default: true })}
+        onPreview={onPreview}
+        onEdit={vi.fn()}
+        onCopy={vi.fn()}
+        onDelete={vi.fn()}
+        onSetDefault={onSetDefault}
+        onUnsetDefault={onUnsetDefault}
+      />,
+    );
+    expect(screen.getByText("默认")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "取消默认" })).toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: "设为默认" }),
+    ).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "取消默认" }));
+    expect(onUnsetDefault).toHaveBeenCalledTimes(1);
+    expect(onPreview).not.toHaveBeenCalled(); // stopPropagation：不触发预览
+  });
+
+  it("is_user_default=false 且传 onSetDefault → 显「设为默认」按钮，点按触发回调", () => {
+    const onSetDefault = vi.fn();
+    renderCard(
+      <AgentProfileCard
+        profile={makeProfile({ is_user_default: false })}
+        onPreview={vi.fn()}
+        onEdit={vi.fn()}
+        onCopy={vi.fn()}
+        onDelete={vi.fn()}
+        onSetDefault={onSetDefault}
+        onUnsetDefault={vi.fn()}
+      />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "设为默认" }));
+    expect(onSetDefault).toHaveBeenCalledTimes(1);
+  });
+
+  it("未传默认回调 → 不渲染设为默认操作（向下兼容既有挂载点）", () => {
+    renderCard(
+      <AgentProfileCard
+        profile={makeProfile()}
+        onPreview={vi.fn()}
+        onEdit={vi.fn()}
+        onCopy={vi.fn()}
+        onDelete={vi.fn()}
+      />,
+    );
+    expect(
+      screen.queryByRole("button", { name: "设为默认" }),
+    ).toBeNull();
+  });
+});
