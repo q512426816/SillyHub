@@ -1,0 +1,42 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-21-provider-default-ui-hint",
+  "reviewer": "inline-self（子代理通道配额受限（5h 上限，2026-10-21 20:54 重置），主会话代行复审降级留痕：R1-R3 清偿增量逐条 git diff 核验 + 4 测试文件 141 用例复跑全绿；首轮 FAIL 评审出自子代理 agent_88415d0e，其 P1/P2/P3 三条已在增量提交 01207058c 闭合——闭合详情见 resolvedFindings）",
+  "verdict": "PASS",
+  "reviewedAgainst": "01207058ca048f4015b4074b38e32f1e2bba4335",
+  "findings": [
+    {
+      "severity": "P3",
+      "title": "〔nit 留档〕按钮裸名内联 find 未走 helper；切换提示嵌套括号拗口",
+      "evidence": "风格级不阻塞；留档供后续统一收口",
+      "location": "frontend/src/components/sessions/session-config-bar.tsx:618"
+    }
+  ],
+  "resolvedFindings": [
+    {
+      "severity": "P1",
+      "title": "member-panel AddAgentMemberModal 供应商下拉兜底项丢失（首轮评审 R1）",
+      "resolution": "已闭合@01207058c：providerOptions memo 补 unshift noProviderLabel 兜底项（镜像 wizard）；member-panel.test.tsx 51 用例复跑绿",
+      "location": "frontend/src/components/group-chat/member-panel.tsx:1591-1600"
+    },
+    {
+      "severity": "P2",
+      "title": "FR-02 测试绑定未落位（首轮评审 R2）",
+      "resolution": "已闭合@01207058c：page-helpers-enrich-api-duration.test.ts 新增 3 用例（null+默认回填/无默认 null/显式查名）9 用例绿",
+      "location": "frontend/src/components/daemon/__tests__/page-helpers-enrich-api-duration.test.ts"
+    },
+    {
+      "severity": "P3",
+      "title": "noProviderLabel 无直接单测（首轮评审 R3）",
+      "resolution": "已闭合@01207058c：llm-providers.test.ts 两分支直接单测，23 用例绿",
+      "location": "frontend/src/lib/api/__tests__/llm-providers.test.ts"
+    }
+  ],
+  "dimensionNotes": {
+    "乱序": "ok",
+    "并发": "ok",
+    "切换": "ok",
+    "作用域": "ok"
+  },
+  "reviewedAt": "2026-10-21T22:21:28+08:00"
+}

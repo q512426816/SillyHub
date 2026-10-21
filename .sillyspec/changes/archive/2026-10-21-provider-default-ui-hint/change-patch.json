@@ -1,0 +1,227 @@
+{
+  "change": "2026-10-21-provider-default-ui-hint",
+  "baseline": "ba581443d1bf43a738f80d7aff66a49b4d4b55d8",
+  "head": "01207058ca048f4015b4074b38e32f1e2bba4335",
+  "files": [
+    "frontend/src/components/agent-profile/__tests__/agent-profile-card.test.tsx",
+    "frontend/src/components/daemon/__tests__/page-helpers-enrich-api-duration.test.ts",
+    "frontend/src/components/daemon/session-panel/page-helpers.tsx",
+    "frontend/src/components/floating/floating-session-host.test.tsx",
+    "frontend/src/components/group-chat/__tests__/group-askuser-aggregate.test.tsx",
+    "frontend/src/components/group-chat/__tests__/group-chat-panel.test.tsx",
+    "frontend/src/components/group-chat/__tests__/member-panel.test.tsx",
+    "frontend/src/components/group-chat/create-group-wizard.tsx",
+    "frontend/src/components/group-chat/member-panel.tsx",
+    "frontend/src/components/knowledge/__tests__/precipitate-dialog.test.tsx",
+    "frontend/src/components/llm-providers/__tests__/llm-provider-list.test.tsx",
+    "frontend/src/components/llm-providers/__tests__/usage-footer.test.tsx",
+    "frontend/src/components/sessions/__tests__/create-group-wizard.test.tsx",
+    "frontend/src/components/sessions/__tests__/session-config-bar.test.tsx",
+    "frontend/src/components/sessions/__tests__/sessions-portal.test.tsx",
+    "frontend/src/components/sessions/session-config-bar.tsx",
+    "frontend/src/lib/api/__tests__/llm-providers.test.ts",
+    "frontend/src/lib/api/llm-providers.ts"
+  ],
+  "totals": {
+    "files": 18,
+    "additions": 240,
+    "deletions": 63
+  },
+  "savedAt": "2026-10-21T14:21:10.801Z",
+  "note": "flow done 时点冻结（本变更可归属交付面：baseline..HEAD 提交面过滤 .sillyspec/ 只留 .sillyspec/docs/ 交付文档 + 独占树未提交交付；治理工件目录不入冻结——2026-10-12-close-trace-freeze-integrity FR-01）",
+  "modules": [
+    {
+      "id": "frontend",
+      "files": 18,
+      "doc": "docs/multi-agent-platform/modules/frontend.md",
+      "docTouched": false,
+      "docMissing": false
+    },
+    {
+      "id": "frontend_components",
+      "files": 16,
+      "doc": "docs/SillyHub/modules/frontend_components.md",
+      "docTouched": false,
+      "docMissing": false
+    },
+    {
+      "id": "frontend_lib",
+      "files": 2,
+      "doc": "docs/SillyHub/modules/frontend_lib.md",
+      "docTouched": false,
+      "docMissing": false
+    }
+  ],
+  "uncoveredDirs": [],
+  "moduleMaps": [
+    "docs/backend/modules/_module-map.yaml",
+    "docs/frontend/modules/_module-map.yaml",
+    "docs/multi-agent-platform/modules/_module-map.yaml",
+    "docs/SillyHub/modules/_module-map.yaml",
+    "docs/sillyhub-daemon/modules/_module-map.yaml"
+  ],
+  "scopeAudit": {
+    "mode": "full-flow",
+    "ok": true,
+    "degradedReason": null,
+    "baseAnchor": "ba581443d1bf43a738f80d7aff66a49b4d4b55d8",
+    "totals": {
+      "files": 18,
+      "additions": 240,
+      "deletions": 63
+    },
+    "rows": [
+      {
+        "path": "frontend/src/components/agent-profile/__tests__/agent-profile-card.test.tsx",
+        "additions": 8,
+        "deletions": 3,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": "frontend/src/components/daemon/__tests__/page-helpers-enrich-api-duration.test.ts",
+        "additions": 38,
+        "deletions": 0,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": "frontend/src/components/daemon/session-panel/page-helpers.tsx",
+        "additions": 5,
+        "deletions": 3,
+        "kind": "modified",
+        "planned": "修改",
+        "verdict": "planned"
+      },
+      {
+        "path": "frontend/src/components/floating/floating-session-host.test.tsx",
+        "additions": 8,
+        "deletions": 3,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": "frontend/src/components/group-chat/__tests__/group-askuser-aggregate.test.tsx",
+        "additions": 8,
+        "deletions": 3,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": "frontend/src/components/group-chat/__tests__/group-chat-panel.test.tsx",
+        "additions": 8,
+        "deletions": 3,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": "frontend/src/components/group-chat/__tests__/member-panel.test.tsx",
+        "additions": 8,
+        "deletions": 3,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": "frontend/src/components/group-chat/create-group-wizard.tsx",
+        "additions": 12,
+        "deletions": 11,
+        "kind": "modified",
+        "planned": "修改",
+        "verdict": "planned"
+      },
+      {
+        "path": "frontend/src/components/group-chat/member-panel.tsx",
+        "additions": 15,
+        "deletions": 11,
+        "kind": "modified",
+        "planned": "修改",
+        "verdict": "planned"
+      },
+      {
+        "path": "frontend/src/components/knowledge/__tests__/precipitate-dialog.test.tsx",
+        "additions": 8,
+        "deletions": 3,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": "frontend/src/components/llm-providers/__tests__/llm-provider-list.test.tsx",
+        "additions": 8,
+        "deletions": 3,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": "frontend/src/components/llm-providers/__tests__/usage-footer.test.tsx",
+        "additions": 8,
+        "deletions": 3,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": "frontend/src/components/sessions/__tests__/create-group-wizard.test.tsx",
+        "additions": 8,
+        "deletions": 3,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": "frontend/src/components/sessions/__tests__/session-config-bar.test.tsx",
+        "additions": 41,
+        "deletions": 3,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": "frontend/src/components/sessions/__tests__/sessions-portal.test.tsx",
+        "additions": 8,
+        "deletions": 3,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": "frontend/src/components/sessions/session-config-bar.tsx",
+        "additions": 12,
+        "deletions": 5,
+        "kind": "modified",
+        "planned": "修改",
+        "verdict": "planned"
+      },
+      {
+        "path": "frontend/src/lib/api/__tests__/llm-providers.test.ts",
+        "additions": 22,
+        "deletions": 0,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": "frontend/src/lib/api/llm-providers.ts",
+        "additions": 15,
+        "deletions": 0,
+        "kind": "modified",
+        "planned": "修改",
+        "verdict": "planned"
+      }
+    ],
+    "excluded": {
+      "foreignDeclared": []
+    },
+    "note": "flow done 时点冻结（本文件落盘时采集）",
+    "closedBy": "flow done"
+  },
+  "patchSha256": "335f0cd9067ea9f910a781eb79d0c58dcaf33bd483a99f9fd0d05ea278c52cab",
+  "patchStatus": "ok"
+}

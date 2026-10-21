@@ -1,0 +1,19 @@
+{"ts":1792568149721,"kind":"file-update","stage":"requirements","detail":"requirements.md 内容变更","provisional":true}
+{"ts":1792568149721,"kind":"file-update","stage":"design","detail":"design.md 内容变更","provisional":true}
+{"ts":1792568149721,"kind":"file-update","stage":"tasks","detail":"tasks.md 内容变更","provisional":true}
+{"ts":1792568215776,"kind":"file-update","stage":"design","detail":"design.md 内容变更","provisional":true}
+{"ts":1792568269688,"kind":"warning","stage":null,"rule":"scope-drift","severity":"warning","detail":"声明面之外的代码文件被改：rontend/src/lib/api/llm-providers.ts——范围漂移嫌疑（并行会话改动/越界，人判）","provisional":true}
+{"ts":1792568294973,"kind":"warning","stage":null,"rule":"scope-drift","severity":"warning","detail":"声明面之外的代码文件被改：rontend/src/components/sessions/session-config-bar.tsx——范围漂移嫌疑（并行会话改动/越界，人判）","provisional":true}
+{"ts":1792568326694,"kind":"warning","stage":null,"rule":"scope-drift","severity":"warning","detail":"声明面之外的代码文件被改：rontend/src/components/daemon/session-panel/page-helpers.tsx——范围漂移嫌疑（并行会话改动/越界，人判）","provisional":true}
+{"ts":1792568612799,"kind":"warning","stage":null,"rule":"scope-drift","severity":"warning","detail":"声明面之外的代码文件被改：frontend/src/components/sessions/__tests__/session-config-bar.test.tsx——范围漂移嫌疑（并行会话改动/越界，人判）","provisional":true}
+{"ts":1792569196865,"kind":"warning","stage":null,"rule":"scope-drift","severity":"warning","detail":"声明面之外的代码文件被改：frontend/src/components/floating/floating-session-host.test.tsx、frontend/src/components/group-chat/__tests__/group-askuser-aggregate.test.tsx、frontend/src/components/group-chat/__tests__/group-chat-panel.test.tsx、frontend/src/components/group-chat/__tests__/member-panel.test.tsx、frontend/src/components/knowledge/__tests__/precipitate-dialog.test.tsx、frontend/src/components/llm-providers/__tests__/llm-provider-list.test.tsx、frontend/src/components/llm-providers/__tests__/usage-footer.test.tsx、frontend/src/components/sessions/__tests__/create-group-wizard.test.tsx、frontend/src/components/sessions/__tests__/sessions-portal.test.tsx、rontend/src/components/agent-profile/__tests__/agent-profile-card.test.tsx——范围漂移嫌疑（并行会话改动/越界，人判）","provisional":true}
+{"ts":1792569419177,"kind":"warning","stage":null,"rule":"stall","severity":"warning","detail":"brainstorm/plan 期已 20 分钟无事件——停滞嫌疑（区分在想/死了，人判）","provisional":true}
+{"ts":1792569691311,"kind":"file-update","stage":"tasks","detail":"tasks.md 内容变更","provisional":true}
+{"ts":1792569691311,"kind":"task-done","stage":"tasks","detail":"checked 0→2","provisional":true}
+{"ts":1792569696055,"kind":"commit","stage":null,"detail":"3131a2975","provisional":true}
+{"ts":1792569896882,"kind":"gate-run","stage":"verify","detail":"门实测 passed（152.2s） · 20261021080454","provisional":true}
+{"ts":1792570345398,"kind":"warning","stage":null,"rule":"scope-drift","severity":"warning","detail":"声明面之外的代码文件被改：rontend/src/components/group-chat/member-panel.tsx——范围漂移嫌疑（并行会话改动/越界，人判）","provisional":true}
+{"ts":1792570356825,"kind":"warning","stage":null,"rule":"scope-drift","severity":"warning","detail":"声明面之外的代码文件被改：frontend/src/lib/api/__tests__/llm-providers.test.ts——范围漂移嫌疑（并行会话改动/越界，人判）","provisional":true}
+{"ts":1792570470915,"kind":"warning","stage":null,"rule":"scope-drift","severity":"warning","detail":"声明面之外的代码文件被改：rontend/src/components/daemon/__tests__/page-helpers-enrich-api-duration.test.ts——范围漂移嫌疑（并行会话改动/越界，人判）","provisional":true}
+{"ts":1792570786721,"kind":"commit","stage":null,"detail":"01207058c","provisional":true}
+{"ts":1792571688156,"kind":"warning","stage":null,"rule":"stall","severity":"warning","detail":"execute 期已 15 分钟无提交无事件——停滞嫌疑（区分在想/死了，人判）","provisional":true}

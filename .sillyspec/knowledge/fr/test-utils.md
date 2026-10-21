@@ -364,3 +364,29 @@ created_at: 2026-10-16T01:30:35.950Z
   confirmed_at: null
   source_change: 2026-10-20-pill-dock-drag-align-keep
   status: active
+
+## FR-test-utils-021 已设默认供应商时，各「不指定」下拉项文案显示「不指定（默认：{默认供应商名}）」；未设默认保持「不指定（本机默认）」
+变更：2026-10-21-provider-default-ui-hint
+状态：active
+摘要：有默认；无默认零回归
+全文：.sillyspec/changes/archive/2026-10-21-provider-default-ui-hint/requirements.md#FR-01
+最近确认：01207058ca048f4015b4074b38e32f1e2bba4335
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-21-provider-default-ui-hint:flow:测试绑定FR-01
+  tests: frontend/src/components/sessions/__tests__/session-config-bar.test.tsx「兜底项文案动态化」 | frontend/src/lib/api/__tests__/llm-providers.test.ts「noProviderLabel 有默认/无默认分支」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-21-provider-default-ui-hint
+  status: active
+
+## FR-test-utils-022 会话轮 timeline 的未选供应商显示对齐（null 时显示默认供应商名，无默认保持本机默认）
+变更：2026-10-21-provider-default-ui-hint
+状态：active
+摘要：未选供应商轮显示默认名
+全文：.sillyspec/changes/archive/2026-10-21-provider-default-ui-hint/requirements.md#FR-02
+最近确认：01207058ca048f4015b4074b38e32f1e2bba4335
