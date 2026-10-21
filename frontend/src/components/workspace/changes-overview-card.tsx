@@ -65,8 +65,9 @@ function describeStatusError(error: SillySpecStatusError): string {
 /** changes[] 单项（宽松全 nullable，宁宽勿断）。 */
 type SillySpecChange = components["schemas"]["DaemonHeartbeatSillySpecChange"];
 
-/** 主管线 6 阶段（schema 另有 quick/explore 两键走旁路徽标，不进管线）。 */
-const MAIN_STAGES = ["scan", "brainstorm", "plan", "execute", "verify", "archive"] as const;
+/** 主管线 5 阶段（对齐 sillyspec MAIN_FLOW_ORDER——2026-09-27 起出生阶段即 brainstorm，
+ *  scan 是按需显式跑的辅助阶段不进管线；schema 另有 quick/explore/thin 三键走旁路徽标）。 */
+const MAIN_STAGES = ["brainstorm", "plan", "execute", "verify", "archive"] as const;
 
 /** thin/quick/explore 旁路徽标（原型 .badge.quick；violet 固定信息色，同 PROVIDER_TONES 先例）。
  * 2026-09-25-change-center-thin-flow task-07：加 thin（◈ 轻量变更）与 quick 存量口径——
@@ -150,9 +151,10 @@ function HealthDot({
 }
 
 /**
- * 6 点主管线（scan→archive）。current_stage 命中主管线 → 前序 done / 自身 cur /
- * 后续 todo；quick/explore/未知阶段不进管线（调用方改渲染旁路徽标，未知阶段全 todo）。
- * 每个点带 aria-label（"scan 已完成"等）供读屏与测试断言真实可访问语义。
+ * 5 点主管线（brainstorm→archive，2026-10-21-overview-card-mainflow-scan 去 scan）。
+ * current_stage 命中主管线 → 前序 done / 自身 cur / 后续 todo；quick/explore/thin/
+ * 未知阶段不进管线（调用方改渲染旁路徽标，未知阶段全 todo）。
+ * 每个点带 aria-label（"brainstorm 已完成"等）供读屏与测试断言真实可访问语义。
  */
 function StagePipeline({ currentStage }: { currentStage: string | null }) {
   const curIdx = (MAIN_STAGES as readonly string[]).indexOf(currentStage ?? "");
@@ -245,9 +247,13 @@ function ActiveChangeRow({ change }: { change: SillySpecChange }) {
           {stageLabel}
         </Tag>
         <span className="flex-1" />
-        <span className="whitespace-nowrap text-xs text-muted-foreground">
-          步骤 {stepsText(change)}
-        </span>
+        {/* thin 不走阶段机、无步骤语义（CLI steps 口径维持 {0,0} 真实值，
+            2026-10-21-overview-thin-stage）——按阶段隐藏文案；quick/explore 存量渲染不动。 */}
+        {stage !== "thin" && (
+          <span className="whitespace-nowrap text-xs text-muted-foreground">
+            步骤 {stepsText(change)}
+          </span>
+        )}
       </div>
       <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-2">
         {isBypass && stage ? (

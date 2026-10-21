@@ -210,9 +210,12 @@ describe("ChangesOverviewCard（task-06 / 活跃变更总览）", () => {
       screen.getByText("chg-newer").compareDocumentPosition(screen.getByText("chg-older")),
     ).toBe(Node.DOCUMENT_POSITION_FOLLOWING);
 
-    // 主管线两态（两行各一条管线，共享态用 getAllBy）
-    expect(screen.getAllByLabelText("scan 已完成")).toHaveLength(2);
+    // 主管线两态（五段 brainstorm→archive——2026-10-21-overview-card-mainflow-scan
+    // 去 scan：出生阶段即 brainstorm，scan 是辅助阶段不进管线；共享态用 getAllBy）
+    expect(screen.queryByLabelText(/^scan /)).toBeNull();
     expect(screen.getByLabelText("brainstorm 进行中")).toBeInTheDocument();
+    expect(screen.getAllByLabelText("brainstorm 已完成")).toHaveLength(1);
+    expect(screen.getAllByLabelText("execute 已完成")).toHaveLength(1);
     expect(screen.getByLabelText("verify 进行中")).toBeInTheDocument();
     expect(screen.getAllByLabelText("archive 待办")).toHaveLength(2);
 
@@ -220,6 +223,39 @@ describe("ChangesOverviewCard（task-06 / 活跃变更总览）", () => {
     expect(
       screen.getByRole("progressbar", { name: "步骤进度 chg-newer" }),
     ).toHaveAttribute("aria-valuenow", "50");
+  });
+
+  it("thin 变更行——◈ thin 旁路徽标 + 隐藏步骤 0/0（2026-10-21-overview-card-mainflow-scan）", async () => {
+    mockHappyPath(
+      makeStatus({
+        changes: [
+          makeChange({
+            name: "chg-thin",
+            current_stage: "thin",
+            stage_label: "◈ 轻量变更",
+            steps: { total: 0, completed: 0 },
+          }),
+        ],
+        active_changes: 1,
+        healthy_count: 1,
+        ghost_count: 0,
+        conflict_count: 0,
+        conflict_types: {},
+      }),
+    );
+
+    renderCard();
+
+    expect(await screen.findByText("chg-thin")).toBeInTheDocument();
+    // 旁路徽标（thin 键，2026-09-25-change-center-thin-flow 引入）+ stage 标签照显
+    expect(screen.getByText("◈ thin")).toBeInTheDocument();
+    expect(screen.getByText("◈ 轻量变更")).toBeInTheDocument();
+    // thin 不走阶段机：无主管线点位、无「步骤 0/0」文案、无进度条
+    expect(
+      screen.queryByLabelText(/^(brainstorm|plan|execute|verify|archive) /),
+    ).toBeNull();
+    expect(screen.queryByText("步骤 0/0")).toBeNull();
+    expect(screen.queryByRole("progressbar")).toBeNull();
   });
 
   it("ghost 折叠组——默认折一行（计数+跳变更中心入口），展开逐行，再点收起", async () => {
