@@ -5658,3 +5658,67 @@
   confirmed_at: null
   source_change: 2026-10-20-conflict-platform-archive
   status: active
+
+## FR-daemon-180 /settings/providers 供应商列表有「设为默认」操作，已设默认的行有明确默认标记，且有对称「取消默认」操作
+变更：2026-10-21-provider-set-default-ui
+状态：active
+摘要：设为默认主路径；取消默认；凭证探测失败
+全文：.sillyspec/changes/archive/2026-10-21-provider-set-default-ui/requirements.md#FR-01
+最近确认：59c6466d29feb3c10add4e51bb0c41d8c84ae007
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-21-provider-set-default-ui:flow:测试绑定FR-01
+  tests: frontend/src/components/llm-providers/__tests__/llm-provider-list.test.tsx「凭证探测失败 toast 错误且状态不变」 | frontend/src/components/llm-providers/__tests__/llm-provider-list.test.tsx「取消默认恢复设为默认」 | frontend/src/components/llm-providers/__tests__/llm-provider-list.test.tsx「设为默认成功显示徽标并刷新」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-21-provider-set-default-ui
+  status: active
+
+## FR-daemon-181 set/unset-default 收敛为仅置位——移除运行中会话热切换，只对新会话生效（用户 2026-10-21 拍板，否决原「保留热切换」倾向 D-001）
+变更：2026-10-21-provider-set-default-ui
+状态：active
+摘要：运行中会话不受影响；取消默认
+全文：.sillyspec/changes/archive/2026-10-21-provider-set-default-ui/requirements.md#FR-02
+最近确认：59c6466d29feb3c10add4e51bb0c41d8c84ae007
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-21-provider-set-default-ui:flow:测试绑定FR-02
+  tests: backend/app/modules/llm_provider/tests/test_llm_provider.py「set/unset 后 affected_sessions=0 且 notify_provider_switch 未被调用」 | backend/app/modules/llm_provider/tests/test_router.py「set-default/unset-default 端点返回 affected_sessions=0」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-21-provider-set-default-ui
+  status: active
+
+## FR-daemon-182 会话未显式选供应商时注入用户默认供应商凭证，未设默认回落本机（既有 claim 链路，UI 加回即通）
+变更：2026-10-21-provider-set-default-ui
+状态：active
+摘要：零回归
+全文：.sillyspec/changes/archive/2026-10-21-provider-set-default-ui/requirements.md#FR-03
+最近确认：59c6466d29feb3c10add4e51bb0c41d8c84ae007
+
+## FR-daemon-183 新增/更新前后端测试覆盖
+变更：2026-10-21-provider-set-default-ui
+状态：active
+摘要：默认行渲染
+全文：.sillyspec/changes/archive/2026-10-21-provider-set-default-ui/requirements.md#FR-04
+最近确认：59c6466d29feb3c10add4e51bb0c41d8c84ae007
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-21-provider-set-default-ui:flow:测试绑定FR-04
+  tests: frontend/src/lib/api/__tests__/llm-providers.test.ts「setDefaultProvider/unsetDefaultProvider 请求形态与返回解析」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-21-provider-set-default-ui
+  status: active
