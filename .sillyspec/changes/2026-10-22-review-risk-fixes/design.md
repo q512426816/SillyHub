@@ -20,7 +20,7 @@ created_at: 2026-10-21T23:14:12.277Z
 
 - `frontend/src/app/proto/session-redesign/page.tsx`：新增路由段导出 `export const dynamic = "force-dynamic"`。无 props/组件签名变化；对外可见行为差异仅构建期（不做静态预渲染），请求时 SSR 行为不变。
 - `frontend/.dockerignore`：新增两行排除项（`/.proto-staging/`、`/public/__proto*/`）。不改变其余排除面。
-- `sillyhub-daemon/src/event-loop-watch.ts`：`defaultSleep`（模块私有）行为变化——正常到期后监听器归零；`EventLoopWatchDeps.sleep` 注入面、`runEventLoopWatch` 循环语义、abort reject 形态均不变。
+- `sillyhub-daemon/src/event-loop-watch.ts`：`defaultSleep`（模块内定义，导出供直调单测——评审 P3 校正：原文误写「模块私有」）行为变化——正常到期后监听器归零；`EventLoopWatchDeps.sleep` 注入面、`runEventLoopWatch` 循环语义、abort reject 形态均不变。
 - `sillyhub-daemon/src/host-fs-handler.ts`：`decodeGitCQuote`（已导出）对字面非 ASCII/增补平面字符的解码正确性修复；ASCII-only 与转义序列输入输出逐字节不变。
 - 无端点/命令/文件格式变化。
 
