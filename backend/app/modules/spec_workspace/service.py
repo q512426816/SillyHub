@@ -702,7 +702,7 @@ class SpecWorkspaceService:
             stmt = stmt.where(SpecFileManifest.landing_version > since)
         stmt = stmt.order_by(SpecFileManifest.path)
         rows = (await self._session.execute(stmt)).scalars().all()
-        files = {
+        files: dict[str, dict[str, str | int | bool]] = {
             row.path: {
                 "hash": row.content_hash,
                 "version": row.version,
@@ -710,13 +710,14 @@ class SpecWorkspaceService:
             }
             for row in rows
         }
-        spec_version = (
+        current_version = (
             await self._session.execute(
                 select(SpecWorkspace.spec_version).where(
                     SpecWorkspace.workspace_id == workspace_id,
                 )
             )
-        ).scalar_one_or_none() or 0
+        ).scalar_one_or_none()
+        spec_version: int = int(current_version or 0)
         return files, spec_version
 
     async def ensure_spec_workspace(self, workspace_id: uuid.UUID) -> SpecWorkspace:
