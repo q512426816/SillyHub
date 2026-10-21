@@ -1,0 +1,36 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-21-files-refresh-spinner",
+  "rows": [
+    {
+      "anchor": "FR-01",
+      "row_id": "2026-10-21-files-refresh-spinner:flow:测试绑定FR-01",
+      "tests": [
+        "frontend/src/components/__tests__/change-file-tree-autorefresh.test.tsx「点击刷新：同步进行中按钮禁用+转圈，返回后恢复」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-21-files-refresh-spinner"
+    },
+    {
+      "anchor": "FR-02",
+      "row_id": "2026-10-21-files-refresh-spinner:flow:测试绑定FR-02",
+      "tests": [
+        "frontend/src/components/__tests__/change-file-tree-autorefresh.test.tsx「纯读刷新（挂载/轮询）不触发转圈态」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-21-files-refresh-spinner"
+    }
+  ]
+}

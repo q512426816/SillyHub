@@ -1,0 +1,44 @@
+tier: thin
+legacy_fallback: false
+substeps:
+  artifacts: done
+  ledger: done
+  patch: done
+  review: done
+  probes: done
+  distill: done
+  archive: done
+  events: done
+born_face: thin
+with_tasks: false
+review_force: null
+input: |-
+  变更文件刷新按钮点击转圈反馈
+
+  动机：变更详情「文件与对账」的变更文件刷新按钮点击后走 sync=1 同步（后端等待预算 15s），期间按钮外观毫无变化，用户不知道是否点上了。
+
+  成功标准：
+  - 点击刷新按钮后按钮立即转圈且禁用，同步请求返回后恢复可点
+  - 挂载与自动轮询的纯读刷新不触发转圈
+autopilot: false
+prestage_ack: false
+baseline_commit: c71b875a1b3efabf4ce042e065cdf3a9ddda0486
+updatedAt: '2026-10-21T03:45:09.686Z'
+cross_baselines:
+  sillyspec: 3fd7cf3b6c29958a54cee8c72b4b89bf628d9a70
+baseline_sha256: 2c7a7846a8d681fb687cd5a80e92852ccdadfbf21e6e5c18903ad4782d71cccf
+spec_approved: true
+spec_approved_at: '2026-10-21T03:21:57.498Z'
+spec_approved_by: zcode-files-refresh-spinner
+spec_approved_channel: user-confirmed
+spec_attested_by: zcode-files-refresh-spinner
+batch_ticked: true
+gate_summary: >-
+  test: skipped ← module[]+deps(py66+jsx64+jsx45+jsx-e2e-skip1)+fr(174)（451.8s）
+  结果：C:\Users\qinyi\IdeaProjects\multi-agent-platform\.sillyspec\.runtime\verify-runs\20261021033734\test-result.json —
+  跳过原因：模块子集含环境缺件跳过（已跑模块全绿）：deps(auto-jsx-e2e-skip)——补装依赖后恢复实测。｜lint: passed ← cd backend && uv run ruff check . && uv
+  run ruff format --check . && uv run mypy app && cd ../frontend && pnpm lint && cd ../sillyhub-daemon && pnpm
+  typecheck（58.1s）
+  结果：C:\Users\qinyi\IdeaProjects\multi-agent-platform\.sillyspec\.runtime\verify-runs\20261021033734\test-result.json｜门文件
+  65 个
+

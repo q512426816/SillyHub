@@ -250,3 +250,41 @@ created_at: 2026-10-16T01:30:35.950Z
 摘要：主路径
 全文：.sillyspec/changes/archive/2026-10-19-hide-shared-profile-in-session/requirements.md#FR-04
 最近确认：4d992afc3f615222da8f0017cd75303fd4777cf8
+
+## FR-test-utils-015 点击刷新按钮后按钮立即转圈且禁用，同步请求返回后恢复可点
+变更：2026-10-21-files-refresh-spinner
+状态：active
+摘要：主路径
+全文：.sillyspec/changes/archive/2026-10-21-files-refresh-spinner/requirements.md#FR-01
+最近确认：e88ffddb76486f445e8bdac23d437a22c39a8ebd
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-21-files-refresh-spinner:flow:测试绑定FR-01
+  tests: frontend/src/components/__tests__/change-file-tree-autorefresh.test.tsx「点击刷新：同步进行中按钮禁用+转圈，返回后恢复」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-21-files-refresh-spinner
+  status: active
+
+## FR-test-utils-016 挂载与自动轮询的纯读刷新不触发转圈
+变更：2026-10-21-files-refresh-spinner
+状态：active
+摘要：主路径
+全文：.sillyspec/changes/archive/2026-10-21-files-refresh-spinner/requirements.md#FR-02
+最近确认：e88ffddb76486f445e8bdac23d437a22c39a8ebd
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-21-files-refresh-spinner:flow:测试绑定FR-02
+  tests: frontend/src/components/__tests__/change-file-tree-autorefresh.test.tsx「纯读刷新（挂载/轮询）不触发转圈态」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-21-files-refresh-spinner
+  status: active

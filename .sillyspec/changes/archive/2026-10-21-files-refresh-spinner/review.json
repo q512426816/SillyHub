@@ -1,0 +1,37 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-21-files-refresh-spinner",
+  "reviewer": "subagent",
+  "verdict": "PASS",
+  "reviewedAgainst": "e88ffddb76486f445e8bdac23d437a22c39a8ebd",
+  "findings": [
+    {
+      "severity": "P3",
+      "title": "流程工件 change.patch 内容错位：不含本变更任何源码 hunk",
+      "evidence": "change.patch 仅 22 行，全是 2026-10-21-task-wakeup-restore 的文档 hunk（sillyhub-daemon.changelog.md / sillyhub-daemon.md），与本变更两个源码文件无关——疑为并行会话混跑时冻结面取错窗口；评审改以 git diff c71b875a1..HEAD 的入库内容为权威面（已核，diff 与文件变更清单逐项吻合）。",
+      "location": ".sillyspec/changes/2026-10-21-files-refresh-spinner/change.patch:1-22"
+    },
+    {
+      "severity": "P3",
+      "title": "新用例存在 act(...) 告警（测试卫生，不影响断言效力）",
+      "evidence": "手工 resolve 的 Promise 状态更新与 flushInitialLoad 的微任务排干未包 act，复跑输出可见 Warning: An update to ChangeFileTree was not wrapped in act(...)；断言均在 resolve 之前/之外完成，判定有效性不受影响，且 flushInitialLoad 模式系本文件既有惯例，非本变更新引入的方法论。",
+      "location": "frontend/src/components/__tests__/change-file-tree-autorefresh.test.tsx:190-193,219-220"
+    }
+  ],
+  "dimensionNotes": {
+    "乱序": "ok",
+    "并发": "ok",
+    "切换": "ok",
+    "作用域": "ok"
+  },
+  "notes": {
+    "checklist_1_fr_consistency": "FR-01：refreshTree sync=true 置位 syncing（change-file-tree.tsx:457）、finally 复位（:466-468）；按钮 disabled={syncing}+RefreshCw cn(\"h-3 w-3\", syncing && \"animate-spin\")（:629-638）。绑定测试「点击刷新：同步进行中按钮禁用+转圈，返回后恢复」（autorefresh.test.tsx:166-194）真实存在，断言在飞期 toBeDisabled()+.animate-spin 存在、resolve 后二者消失。FR-02：全部纯读调用点（挂载 :484、轮询 :500、保存后 :574）均无参调 refreshTree，flag 仅 if (sync) 触碰；绑定测试「纯读刷新（挂载/轮询）不触发转圈态」（:196-221）用挂起 Promise 断言轮询在飞时按钮可点且无转圈。两条绑定用例名与 requirements 测试绑定逐字一致。",
+    "checklist_2_blind_dims": "乱序：布尔 flag 下迟到旧 sync 响应实为「清掉共享 flag」而非精确收敛自己一轮，但该后果即 design Q2/风险与死路披露的「先返回者 finally 令转圈提前收敛」，披露覆盖，接受。并发：双显式并发唯一可达路径=错误横幅在显 + 按钮触发的 sync 在飞时点横幅重试（按钮自身 disabled 拦死按钮×按钮），与披露场景吻合。切换：卸载后 setState 在 React 18 为 no-op；workspaceId/changeId 切换时旧请求 finally 必达（15s 预算），flag 无卡死方向（只会提前 false 不会滞留 true）。作用域：syncing 为组件实例私有 state，详情页/悬浮弹窗/移动端多实例互不串台，diff 无跨实例/跨仓面。",
+    "checklist_3_boundary_verdict": "披露边界「双入口并发先返回者 finally 令转圈提前收敛，接受不改计数器」——裁决：可接受。理由：触发条件苛刻（需错误态横幅在场 + 在飞期点横幅重试，按钮侧已被 disabled 封死）；后果仅视觉反馈提前消失，零数据影响（各请求自带 setTree/setSyncWarning，last-write-wins 为本变更之前既有语义）；每条显式调用 finally 必达使 flag 只会提前收敛不会滞留，计数器方案复杂度不值当的成本判断成立。",
+    "checklist_4_guard_claims": "「finally 保证 flag 必复位」：setSyncing(true) 在 try 外（:457），finally 无条件 if (sync) setSyncing(false)（:466-468），成功/异常两路全覆盖，真实生效。「按钮禁用拦住重复点击」：disabled={syncing}（:634）落原生 button，同步在飞期点击被拦，真实生效（横幅重试入口不禁用属已披露边界，非漏防）。「纯读路径不碰 syncing flag」：两处 setSyncing 均 if (sync) 门控（:457/:467），三处纯读调用点均无参，真实生效且被 FR-02 用例钉住。",
+    "checklist_5_artifacts": "n/a——本变更无类型/契约生成物；核 jest-dom 已接线（src/test/setup.ts import @testing-library/jest-dom/vitest，vitest.config.ts setupFiles 指向之），toBeDisabled/类名断言与组件渲染行为对齐（复跑全绿佐证）。",
+    "rerun": "cd frontend && npx vitest run src/components/__tests__/change-file-tree-autorefresh.test.tsx src/components/__tests__/change-file-tree.test.tsx → 2 文件全过，31/31 passed（7+24），~5.8s；与收口回执（backend 1261P、frontend jsx 批 1475P/10 skipped、sillyhub-daemon 832P/1 skipped、e2e 批环境缺件跳过、lint passed 58.1s）口径一致。",
+    "worktree": "两源码文件 git diff HEAD 为空，工作树与被评 commit 一致。"
+  },
+  "reviewedAt": "2026-10-21T11:43:53+08:00"
+}
