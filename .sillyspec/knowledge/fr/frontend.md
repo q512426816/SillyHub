@@ -7038,10 +7038,10 @@ superseded_by：FR-app-workspace-pages-002
 - row: 2026-10-21-gitlog-quotepath-fix:flow:测试绑定FR-01
   tests: sillyhub-daemon/tests/host-fs-handler-git-log-quotepath.test.ts「真实仓中文路径 gitShow 解码 + gitDiffFile 回查非空 diff」 | sillyhub-daemon/tests/host-fs-handler-git-log.test.ts「GL46 命令构造——gitShow/gitDiffFile/gitStatus 带 -c core.quotepath=false」
   reason: spec
-  state: candidate
+  state: active
   discovery: machine
-  confirmed_by: null
-  confirmed_at: null
+  confirmed_by: agent
+  confirmed_at: 3da9e8d44310bfa5fe016e010780e4c9606a726e
   source_change: 2026-10-21-gitlog-quotepath-fix
   status: active
 
@@ -7057,10 +7057,10 @@ superseded_by：FR-app-workspace-pages-002
 - row: 2026-10-21-gitlog-quotepath-fix:flow:测试绑定FR-02
   tests: frontend/src/components/git-log/__tests__/file-tree.test.tsx「中文路径聚合与叶子点击发起中文 path 请求」 | sillyhub-daemon/tests/host-fs-handler-git-log.test.ts「GL47 decodeGitCQuote 纯函数五形态」 | sillyhub-daemon/tests/host-fs-handler-git-log.test.ts「GL48 中文引号路径 numstat 解码」
   reason: spec
-  state: candidate
+  state: active
   discovery: machine
-  confirmed_by: null
-  confirmed_at: null
+  confirmed_by: agent
+  confirmed_at: 3da9e8d44310bfa5fe016e010780e4c9606a726e
   source_change: 2026-10-21-gitlog-quotepath-fix
   status: active
 
