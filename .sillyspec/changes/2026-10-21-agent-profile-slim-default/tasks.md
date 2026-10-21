@@ -9,4 +9,4 @@ created_at: 2026-10-21T04:10:58.640Z
 - [x] task-03: daemon 技能严格挂载——pruneSkillsToSubset 导出共享、interactive skillsStep 尾部按 strict skillRefs 裁剪（键缺失=不裁剪、空数组=清空、非空=子集）、batch task-runner 读取点 strict 化（不动通用 pickStrList）——验证：daemon vitest 新用例（空清空/无键全量/子集）绿
 - [x] task-04: 前端表单瘦身——agent-profile-form.tsx 仅 名称/可见范围/系统提示词/技能勾选，删工作区上下文选择器与被删字段，右栏预览与 AgentProfileSelect label 同步简化——验证：表单测试（四字段/存量编辑清空引用/无 ws 选择器）绿 + tsc 零错
 - [x] task-05: 前端设为默认——lib set/unset-default API 与 is_user_default 类型、卡片设为默认/取消默认按钮+默认标记+空技能默认警示文案——验证：卡片与 lib 测试绿
-- [ ] task-06: 收口前全量对账——FR 五条逐条核对实现与测试绑定、daemon+backend+frontend 三端相关测试面全绿、diff 声明面与文件清单一致（llm_provider 零触碰）——验证：三端测试面全绿
+- [x] task-06: 收口前全量对账——FR 五条逐条核对实现与测试绑定、daemon+backend+frontend 三端相关测试面全绿、diff 声明面与文件清单一致（llm_provider 零触碰）——验证：三端测试面全绿
