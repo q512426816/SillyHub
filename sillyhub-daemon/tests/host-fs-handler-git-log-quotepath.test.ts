@@ -14,7 +14,7 @@
 
 import { describe, it, expect, afterEach } from 'vitest';
 import { execFile } from 'node:child_process';
-import { mkdtemp, mkdir, rm, writeFile, realpath } from 'node:fs/promises';
+import { mkdtemp, mkdir, rm, writeFile, readFile, realpath } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -125,5 +125,57 @@ describe('真实 git 集成 —— 非 ASCII 路径（2026-10-21-gitlog-quotepat
     expect(st.files_changed).toBe(0);
     expect(st.additions).toBe(0);
     expect(st.deletions).toBe(0);
+  });
+});
+
+describe('真实 git 集成 —— 中文文件名 merge 冲突（2026-10-21-gitlog-conflict-quotepath）', () => {
+  const roots: string[] = [];
+  let handler: HostFsHandler;
+
+  afterEach(async () => {
+    await Promise.all(roots.map((r) => rm(r, { recursive: true, force: true })));
+    roots.length = 0;
+  });
+
+  it('中文文件名 merge 冲突：conflicts[].file 为原文且 marker_lines 与文件内标记行数一致', async () => {
+    // 真实冲突仓：主干与 worker 分支对同一中文文件同区域分叉。
+    const root = await realpath(await mkdtemp(join(tmpdir(), 'sillyhub-cnmerge-')));
+    roots.push(root);
+    const cnFile = join('导入模板框线', '说明.md');
+    await mkdir(join(root, '导入模板框线'), { recursive: true });
+    await writeFile(join(root, cnFile), 'base-line-1\nbase-line-2\n', 'utf8');
+    await git(root, ['init', '-q']);
+    await git(root, ['config', 'core.autocrlf', 'false']);
+    await git(root, ['config', 'user.name', '琴忆']);
+    await git(root, ['config', 'user.email', 'qinyi@example.com']);
+    await git(root, ['add', '-A']);
+    await git(root, ['commit', '-q', '-m', 'base']);
+    const baseBranch = (await git(root, ['rev-parse', '--abbrev-ref', 'HEAD'])).stdout.trim();
+
+    // worker 分支：改第一行。
+    await git(root, ['checkout', '-q', '-b', 'worker']);
+    await writeFile(join(root, cnFile), 'worker-line-1\nbase-line-2\n', 'utf8');
+    await git(root, ['commit', '-q', '-a', '-m', 'worker edit']);
+
+    // 主干：同区域不同改动 → merge 必冲突。
+    await git(root, ['checkout', '-q', baseBranch]);
+    await writeFile(join(root, cnFile), 'main-line-1\nbase-line-2\n', 'utf8');
+    await git(root, ['commit', '-q', '-a', '-m', 'main edit']);
+
+    handler = new HostFsHandler({ rootsProvider: () => [root] });
+    const result = await handler.gitMerge({ workdir: root, worker_branch: 'worker' });
+    expect(result.ok).toBe(false);
+    expect(result.conflicts).toHaveLength(1);
+    // 冲突文件名为解码后中文原文（修复前为带引号八进制转义形态）。
+    expect(result.conflicts[0].file).toBe('导入模板框线/说明.md');
+    // marker 计数走真实 readFile 命中（修复前转义串失配 → catch 归 0）：
+    // 与文件内实际标记行数自洽比对（不依赖 merge.conflictStyle 全局配置）。
+    const content = await readFile(join(root, cnFile), 'utf8');
+    const expected = content
+      .split('\n')
+      .filter((l) => l.startsWith('<<<<<<<') || l === '=======' || l.startsWith('>>>>>>>'))
+      .length;
+    expect(expected).toBeGreaterThanOrEqual(2);
+    expect(result.conflicts[0].marker_lines).toBe(expected);
   });
 });

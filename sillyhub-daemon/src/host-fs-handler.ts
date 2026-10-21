@@ -108,7 +108,11 @@ export interface GitApplyResult {
  * 读冲突标记行数 `<<<<<<< / ======= / >>>>>>>`，喂主 agent LLM 解决）。
  */
 export interface MergeConflict {
-  /** 冲突文件相对路径（git diff --name-only 输出的相对路径，原样回传）。 */
+  /**
+   * 冲突文件相对路径（git diff --name-only 解码后原文：调用带
+   * `-c core.quotepath=false` + decodeGitCQuote 兜底残余 C 引号，2026-10-21-
+   * gitlog-conflict-quotepath——修复前转义串会让 readFile 失配、marker 计数归 0）。
+   */
   file: string;
   /** 文件内冲突标记行数（<<<<<<< / ======= / >>>>>>> 总行数，≥2 才算真冲突）。 */
   marker_lines: number;
@@ -1158,18 +1162,22 @@ export class HostFsHandler {
 
   /**
    * 跑 `git -C <workdir> diff --name-only --diff-filter=U` 拿冲突文件相对路径列表。
+   * 2026-10-21-gitlog-conflict-quotepath：调用带 `-c core.quotepath=false`（复用
+   * GIT_QUOTEPATH_OFF_ARGS，非 ASCII 冲突文件名原文输出）+ 每行 decodeGitCQuote
+   * 兜底解码残余 C 引号（字面 `"`/`\`/控制字符仍被强制引号），否则转义串会让
+   * caller 的 readFile 失配、marker 计数落 catch 归 0。
    * 失败 / 空输出 → 空数组（不让冲突列举失败阻塞 merge 错误回传）。
    */
   private async _listConflictFiles(workdir: string): Promise<string[]> {
     const r = await runCmd(
       'git',
-      ['-C', workdir, 'diff', '--name-only', '--diff-filter=U'],
+      ['-C', workdir, ...GIT_QUOTEPATH_OFF_ARGS, 'diff', '--name-only', '--diff-filter=U'],
       { timeout: GIT_WORKTREE_TIMEOUT_MS },
     );
     if (!r.ok) return [];
     return r.stdout
       .split('\n')
-      .map((l) => l.trim())
+      .map((l) => decodeGitCQuote(l.trim()))
       .filter((l) => l.length > 0);
   }
 
