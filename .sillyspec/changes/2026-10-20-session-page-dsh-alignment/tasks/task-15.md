@@ -14,8 +14,12 @@ allowed_paths:
   - .sillyspec/local.yaml
   - frontend/src/components/daemon/__tests__/turn-segment-views.test.tsx
   - backend/app/modules/daemon/tests/test_session_model_usage.py
+# 2026-10-21 verify 期校正：`.sillyspec/local.yaml` 是 gitignored 的机器本地配置（不进 git diff），
+# 列进 target_files 会让「声明未做」对账把它判成计划落空——移出 target_files，仅保留在 allowed_paths
+# （改动事实与验收证据见 tasks.md task-15 证据行 + local.yaml 现状：107→109 条、turn-segment-views 零命中）。
 target_files:
-  - .sillyspec/local.yaml
+  - frontend/src/components/daemon/__tests__/turn-segment-views.test.tsx
+  - backend/app/modules/daemon/tests/test_session_model_usage.py
 goal: >
   收口前必须拆掉两个「看起来绿」的遮蔽：①仓根 `.sillyspec/local.yaml` 的 `known_failures` 里为本变更在途 WIP 登记的
   `turn-segment-views.test.tsx` 临时豁免（R-12，2026-10-21 由并行的 mobile-scan-birth-cleanup 会话登记）；②FR-23 的
