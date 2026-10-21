@@ -1,0 +1,53 @@
+tier: thin
+legacy_fallback: false
+substeps:
+  artifacts: done
+  ledger: done
+  patch: done
+  review: done
+  probes: done
+  distill: done
+  archive: done
+  events: done
+born_face: thin
+with_tasks: false
+review_force: null
+input: >-
+  重建刷新按钮变更归档冻结件
+
+
+  动机：2026-10-21-files-refresh-spinner 归档时共享暂存区竞态致冻结件错位——change.patch 装入他侧文档 hunk、scopeAudit 误判源码文件 untouched（评审 P3-1
+  留痕），平台归档卡面与未来 FR 归属持续被误导。
+
+
+  成功标准：
+
+  - change.patch 内容等于 git diff c71b875a1..e88ffddb7 两源码文件
+
+  - change-patch.json files/totals/scopeAudit.rows 与 git 实况一致，verdict 不确定处注记兜底
+
+  - patchSha256 与新 patch 字节哈希一致且原错误锚值保留于 repair 注记字段
+
+  - patch-file 切片实跑返回两源码文件 diff，平台投影重新同步
+autopilot: false
+prestage_ack: true
+baseline_commit: d58f1314c07b62458b250a02f35f9c7f9364255e
+updatedAt: '2026-10-21T04:36:11.306Z'
+cross_baselines:
+  sillyspec: 3fd7cf3b6c29958a54cee8c72b4b89bf628d9a70
+baseline_sha256: c1bfdf740edf0478c3bdaa219fa1cf552dd9a40d2fa175062deb01bd7b0c24da
+spec_approved: true
+spec_approved_at: '2026-10-21T04:05:32.233Z'
+spec_approved_by: zcode-archive-patch-repair
+spec_approved_channel: user-confirmed
+spec_attested_by: zcode-archive-patch-repair
+batch_ticked: true
+gate_summary: >-
+  test: skipped ← module[]+deps(py60+jsx64+jsx29+jsx-e2e-skip1)+fr(152)（419.3s）
+  结果：C:\Users\qinyi\IdeaProjects\multi-agent-platform\.sillyspec\.runtime\verify-runs\20261021042058\test-result.json —
+  跳过原因：模块子集含环境缺件跳过（已跑模块全绿）：deps(auto-jsx-e2e-skip)——补装依赖后恢复实测。｜lint: passed ← cd backend && uv run ruff check . && uv
+  run ruff format --check . && uv run mypy app && cd ../frontend && pnpm lint && cd ../sillyhub-daemon && pnpm
+  typecheck（14.4s）
+  结果：C:\Users\qinyi\IdeaProjects\multi-agent-platform\.sillyspec\.runtime\verify-runs\20261021042058\test-result.json｜门文件
+  66 个
+

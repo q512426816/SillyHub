@@ -5847,3 +5847,31 @@
   confirmed_at: null
   source_change: 2026-10-21-daemon-sync-hardening
   status: active
+
+## FR-daemon-189 change.patch 内容等于 git diff c71b875a1..e88ffddb7 两源码文件
+变更：2026-10-21-archive-patch-repair
+状态：active
+摘要：主路径
+全文：.sillyspec/changes/archive/2026-10-21-archive-patch-repair/requirements.md#FR-01
+最近确认：5c97d62770d4dddf8fa3d9ea833b8905f3cbd098
+
+## FR-daemon-190 change-patch.json files/totals/scopeAudit.rows 与 git 实况一致，verdict 不确定处注记兜底
+变更：2026-10-21-archive-patch-repair
+状态：active
+摘要：主路径
+全文：.sillyspec/changes/archive/2026-10-21-archive-patch-repair/requirements.md#FR-02
+最近确认：5c97d62770d4dddf8fa3d9ea833b8905f3cbd098
+
+## FR-daemon-191 patchSha256 与新 patch 字节哈希一致且原错误锚值保留于 repair 注记字段
+变更：2026-10-21-archive-patch-repair
+状态：active
+摘要：主路径
+全文：.sillyspec/changes/archive/2026-10-21-archive-patch-repair/requirements.md#FR-03
+最近确认：5c97d62770d4dddf8fa3d9ea833b8905f3cbd098
+
+## FR-daemon-192 patch-file 切片实跑返回两源码文件 diff，平台投影重新同步
+变更：2026-10-21-archive-patch-repair
+状态：active
+摘要：主路径
+全文：.sillyspec/changes/archive/2026-10-21-archive-patch-repair/requirements.md#FR-04
+最近确认：5c97d62770d4dddf8fa3d9ea833b8905f3cbd098
