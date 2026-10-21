@@ -245,3 +245,62 @@ describe("GitLogFileTree 组件", () => {
     expect(screen.getByTestId("git-log-file-src/b.ts")).toBeInTheDocument();
   });
 });
+
+// ── 中文路径聚合与点击（2026-10-21-gitlog-quotepath-fix）───────────────────
+//
+// 修复前 daemon 透传 git C 引号转义形态路径（"…\345\257\274…"），树按 / 拆分后
+// 目录名显示八进制转义、点击 diff pathspec 失配恒空；修复后 daemon 解码为中文
+// 原文——本组用例以真实形态（解码后）路径断言聚合、渲染与点击请求。
+
+const CN_FILES: GitLogFileStatItem[] = [
+  {
+    path: ".sillyspec/changes/2026-10-20-unitLedger导入模板框线/design.md",
+    add: 10,
+    del: 4,
+    binary: false,
+  },
+];
+
+describe("中文路径聚合与点击（2026-10-21-gitlog-quotepath-fix）", () => {
+  it("中文路径段按 / 正常聚合：目录中文名、叶子中文名、统计聚合到各层", () => {
+    const tree = buildFileTree(CN_FILES);
+    expect(tree.map((n) => n.name)).toEqual([".sillyspec"]);
+    const changes = tree[0]!.children[0]!;
+    expect(changes.name).toBe("changes");
+    const dir = changes.children[0]!;
+    expect(dir.name).toBe("2026-10-20-unitLedger导入模板框线");
+    expect(dir.path).toBe(".sillyspec/changes/2026-10-20-unitLedger导入模板框线");
+    expect(dir.add).toBe(10);
+    expect(dir.del).toBe(4);
+    const leaf = dir.children[0]!;
+    expect(leaf.name).toBe("design.md");
+    expect(leaf.path).toBe(CN_FILES[0]!.path);
+  });
+
+  it("渲染中文名目录与叶子（无八进制转义残留），点击叶子以完整中文路径请求 diff", async () => {
+    render(
+      <GitLogFileTree workspaceId="ws-cn" sha="sha-cn" files={CN_FILES} />,
+    );
+
+    expect(
+      screen.getByTestId(
+        "git-log-dir-.sillyspec/changes/2026-10-20-unitLedger导入模板框线",
+      ),
+    ).toHaveTextContent("2026-10-20-unitLedger导入模板框线");
+    expect(screen.queryByText(/\\345/)).not.toBeInTheDocument();
+
+    fireEvent.click(
+      screen.getByTestId(
+        "git-log-file-.sillyspec/changes/2026-10-20-unitLedger导入模板框线/design.md",
+      ),
+    );
+    await waitFor(() => {
+      expect(gitLogMock.useGitLogDiff).toHaveBeenCalledWith(
+        "ws-cn",
+        "sha-cn",
+        ".sillyspec/changes/2026-10-20-unitLedger导入模板框线/design.md",
+        true,
+      );
+    });
+  });
+});

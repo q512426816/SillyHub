@@ -244,7 +244,10 @@ export interface GitRefsResult {
 
 /** git_show 单个变更文件（--numstat 行解析产物）。 */
 export interface GitShowFileEntry {
-  /** 仓库相对路径（numstat 原样保留，含空格；特殊字符保持 git C 引号形态）。 */
+  /**
+   * 仓库相对路径（解码后原文：gitShow 调用带 `-c core.quotepath=false` +
+   * decodeGitCQuote 兜底解码残余 C 引号，含空格与中文等非 ASCII 字符）。
+   */
   path: string;
   /** 新增行数；二进制为 null。 */
   add: number | null;
@@ -679,6 +682,16 @@ const GIT_LOG_MAX_COUNT = 5_000;
 const GIT_LOG_PRETTY_FORMAT =
   '%H%x00%h%x00%P%x00%an%x00%ae%x00%aI%x00%cI%x00%B%x1e';
 
+/**
+ * `-c core.quotepath=false`（2026-10-21-gitlog-quotepath-fix）：git 默认把含
+ * 非 ASCII 字节的路径按 C 引号形态（`"…\345\257\274…"`）输出——numstat 路径
+ * 原样透传会让前端目录树显示转义乱码、diff 回查 pathspec 失配恒空。per-invocation
+ * 覆盖不写宿主 config；仅加在**会显示路径**的调用上（gitShow/gitDiffFile 的
+ * show、gitStatus 的 status/diff；remote/fetch 不显示路径不加）。残余引号面
+ * （quotepath=false 下字面 `"`/`\`/控制字符仍被强制引号）由 decodeGitCQuote 兜底。
+ */
+const GIT_QUOTEPATH_OFF_ARGS: readonly string[] = ['-c', 'core.quotepath=false'];
+
 /** git_diff_file 输出字节上限（64KB，design §5.2 CC-05 独立选定——diff 按行渲染的合理量级，非对齐 explorer 读文件 10MB）。 */
 const GIT_DIFF_MAX_BYTES = 64 * 1024;
 
@@ -753,6 +766,63 @@ function parseGitLogRecord(rec: string): GitLogCommit | null {
     committer_date: fields[6] ?? '',
     message: (fields[7] ?? '').replace(/\n+$/, ''),
   };
+}
+
+/**
+ * 解码 git C 引号路径为原文（2026-10-21-gitlog-quotepath-fix，导出供单测）。
+ *
+ * git 对含字面 `"`、`\` 或控制字符的路径**即便 `-c core.quotepath=false` 也
+ * 强制** C 引号包裹（其余非 ASCII 在 quotepath=false 下已原样输出，不会进
+ * 本函数的解码分支）。规则对齐 git quote_c_style：
+ * - 非引号形态（绝大多数路径）原样返回；畸形（有头引号无尾引号等）原样返回；
+ * - `\NNN` 八进制（1..3 位，git 恒发 3 位）还原字节，字面字符取低字节，
+ *   末尾整体按 UTF-8 组装（git 路径字节即提交时编码，本仓语境为 UTF-8）；
+ * - `\"` `\\` `\a\b\f\n\r\t\v` 标准转义；
+ * - 未知转义（git 不会发）字面回写反斜杠与该字符，防御性保留。
+ */
+export function decodeGitCQuote(path: string): string {
+  if (path.length < 2 || !path.startsWith('"') || !path.endsWith('"')) {
+    return path;
+  }
+  const inner = path.slice(1, -1);
+  const bytes: number[] = [];
+  let i = 0;
+  while (i < inner.length) {
+    if (inner.charAt(i) !== '\\') {
+      bytes.push(inner.charCodeAt(i));
+      i += 1;
+      continue;
+    }
+    const esc = inner.charAt(i + 1);
+    i += 2;
+    if (esc >= '0' && esc <= '7') {
+      let val = esc.charCodeAt(0) - 0x30;
+      for (let d = 0; d < 2; d += 1) {
+        const digit = inner.charAt(i);
+        if (digit < '0' || digit > '7') break;
+        val = val * 8 + (digit.charCodeAt(0) - 0x30);
+        i += 1;
+      }
+      bytes.push(val & 0xff);
+      continue;
+    }
+    switch (esc) {
+      case '"': bytes.push(0x22); break;
+      case '\\': bytes.push(0x5c); break;
+      case 'a': bytes.push(0x07); break;
+      case 'b': bytes.push(0x08); break;
+      case 'f': bytes.push(0x0c); break;
+      case 'n': bytes.push(0x0a); break;
+      case 'r': bytes.push(0x0d); break;
+      case 't': bytes.push(0x09); break;
+      case 'v': bytes.push(0x0b); break;
+      default:
+        bytes.push(0x5c);
+        if (esc.length > 0) bytes.push(esc.charCodeAt(0));
+        break;
+    }
+  }
+  return Buffer.from(bytes).toString('utf8');
 }
 
 // ── task-01（2026-08-26-workspace-git-status）git_status 常量 + fetch 局部 execFile ──
@@ -1425,6 +1495,7 @@ export class HostFsHandler {
       [
         '-C',
         root,
+        ...GIT_QUOTEPATH_OFF_ARGS,
         'show',
         params.sha,
         '--numstat',
@@ -1452,8 +1523,9 @@ export class HostFsHandler {
       if (m === null) continue; // 空行 / 分隔噪声行
       const binary = m[1] === '-' && m[2] === '-';
       files.push({
-        // 匹配成功时三捕获组必在（noUncheckedIndexedAccess 下 ?? '' 兜底类型）。
-        path: m[3] ?? '',
+        // 匹配成功时三捕获组必在（noUncheckedIndexedAccess 下 ?? '' 兜底类型）；
+        // 路径经 decodeGitCQuote 解码（残余 C 引号 → 原文，见 GIT_QUOTEPATH_OFF_ARGS 注）。
+        path: decodeGitCQuote(m[3] ?? ''),
         add: binary ? null : Number(m[1]),
         del: binary ? null : Number(m[2]),
         binary,
@@ -1494,6 +1566,7 @@ export class HostFsHandler {
       [
         '-C',
         root,
+        ...GIT_QUOTEPATH_OFF_ARGS,
         'show',
         params.sha,
         '--pretty=format:',
@@ -1583,7 +1656,7 @@ export class HostFsHandler {
     // ── ② porcelain v2 解析（runCmd 只读采集；R-02 条目按前缀字节严格匹配）──
     const status = await runCmd(
       'git',
-      ['-C', root, 'status', '--porcelain=v2', '--branch', '--no-show-stash'],
+      ['-C', root, ...GIT_QUOTEPATH_OFF_ARGS, 'status', '--porcelain=v2', '--branch', '--no-show-stash'],
       { timeout: GIT_READ_TIMEOUT_MS },
     );
     if (!status.ok) {
@@ -1642,7 +1715,7 @@ export class HostFsHandler {
     // ── ③ numstat 汇总（git diff HEAD 覆盖 staged+unstaged；--no-renames 防计数破坏）──
     const diff = await runCmd(
       'git',
-      ['-C', root, 'diff', 'HEAD', '--numstat', '--no-renames'],
+      ['-C', root, ...GIT_QUOTEPATH_OFF_ARGS, 'diff', 'HEAD', '--numstat', '--no-renames'],
       { timeout: GIT_READ_TIMEOUT_MS },
     );
     let filesChanged: number | null = null;
