@@ -199,6 +199,8 @@ import {
   setBudgetTokensInternal,
 } from './session-manager/usage.js';
 import {
+  armTurnStartWatchdog,
+  disarmTurnStartWatchdog,
   downloadAttachmentWithTimeout,
   getPendingInjectCount,
   inject,
@@ -333,6 +335,18 @@ export class SessionManager {
    * Map 存「永不 reject 的链尾」+ 自愈摘除，同 `_reloadChains` 注释。
    */
   private readonly _notifyChains = new Map<string, Promise<void>>();
+
+  /**
+   * 2026-10-21-daemon-zombie-turn FR-01：轮启动看门狗（sessionId → timer + 布防轮
+   * runId）。inject 首轮启动路径布防；任意轮事件（onMessage/onResult）与终态
+   * （terminateSession）/stop() 撤防；到点仍零轮事件 = push 被 SDK 在打断 abort
+   * 收尾窗口吞没（生产会话 49d893ab 实证形态），重置会话态并经
+   * deps.onTurnStartTimeout 回报该 run 失败。方法体在 turn-control.ts 尾部簇。
+   */
+  private readonly _turnStartWatchdogs = new Map<
+    string,
+    { timer: ReturnType<typeof setTimeout>; runId: string }
+  >();
 
   /** 方法体已下沉 notify-chain.ts（task-02 拆包），见该文件头注释。 */
   private _runNotifyChain<T>(
@@ -1284,6 +1298,18 @@ export class SessionManager {
 
   async interrupt(sessionId: string): Promise<boolean> {
     return interrupt(this._core(), sessionId);
+  }
+
+  // ── 2026-10-21-daemon-zombie-turn FR-01：轮启动看门狗（方法体在 turn-control.ts）──
+
+  /** 布防看门狗（inject 首轮启动路径调用；子模块经 core 桥）。 */
+  private _armTurnStartWatchdog(sessionId: string, runId: string): void {
+    return armTurnStartWatchdog(this._core(), sessionId, runId);
+  }
+
+  /** 撤防看门狗（轮事件/会话终态/stop 调用；幂等）。 */
+  private _disarmTurnStartWatchdog(sessionId: string): void {
+    return disarmTurnStartWatchdog(this._core(), sessionId);
   }
 
   /**

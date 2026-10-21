@@ -553,11 +553,20 @@ export interface SessionManagerCore {
   readonly _resumeDirs: TranscriptDirs;
   readonly _credentialManager: SpawnCredentialManager | null;
   readonly _terminalCleanupTimers: Map<string, ReturnType<typeof setTimeout>>;
+  /** 2026-10-21-daemon-zombie-turn FR-01：轮启动看门狗（sessionId → timer + 布防轮 runId）。 */
+  readonly _turnStartWatchdogs: Map<
+    string,
+    { timer: ReturnType<typeof setTimeout>; runId: string }
+  >;
   _flushScheduled: Promise<void> | null;
 
   // ── 跨簇协作方法（facade 同名方法一行委托到对应子模块 / 类内保留实现）─────
   /** notify-chain.ts */
   _runNotifyChain<T>(sessionId: string, fn: () => T | Promise<T>): Promise<T>;
+  /** turn-control.ts（2026-10-21-daemon-zombie-turn FR-01：轮启动看门狗布防/撤防） */
+  _armTurnStartWatchdog(sessionId: string, runId: string): void;
+  /** turn-control.ts（同上，撤防） */
+  _disarmTurnStartWatchdog(sessionId: string): void;
   /** facade 类内保留（create/restore/reload 编排） */
   _runConsume(state: SessionState): Promise<void>;
   /** persistence.ts */

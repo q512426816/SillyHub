@@ -99,6 +99,18 @@ class Settings(BaseSettings):
     redis_url: str = Field("redis://localhost:6379/0")
     secret_key: str = Field(..., min_length=16)
     log_level: str = Field("INFO")
+    # 2026-10-21-daemon-zombie-turn FR-03：pending run 启动超时清扫窗口（秒）。
+    # run 创建后超过该时长仍 status='pending' 且无 started_at（daemon 从未上报
+    # 轮事件）且所属会话 runtime 在线 → 僵尸轮，sweep 收敛 failed。默认 300s
+    # 对齐 daemon inject 停等窗硬顶（5min）量级；现场慢启动误扫时调大免发版。
+    daemon_pending_run_start_timeout_sec: int = Field(
+        300,
+        ge=1,
+        description=(
+            "zombie pending-run start timeout in seconds "
+            "(env DAEMON_PENDING_RUN_START_TIMEOUT_SEC)."
+        ),
+    )
     # 2026-10-15-server-logs-panel：日志轮转文件目录（空=默认 <repo_root>/data/logs，
     # 经 paths.resolve_log_dir 解析；轮转大小/备份数为 logging.py 模块级常量）。
     log_dir: str = Field("")

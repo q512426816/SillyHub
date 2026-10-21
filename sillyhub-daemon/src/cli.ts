@@ -877,6 +877,11 @@ export async function startAction(opts: StartOptions): Promise<number> {
       onTaskWakeupInject: async (sessionId, prompt) => {
         await client.injectSessionPrompt(sessionId, prompt, 'task_wakeup');
       },
+      // 2026-10-21-daemon-zombie-turn FR-01：轮启动看门狗触发 → daemon 桥
+      // notifyRunResult 收敛该 run（session-manager 已重置会话态；回报失败仅
+      // 日志，backend 侧由 pending run 启动超时清扫兜底）。
+      onTurnStartTimeout: (sessionId, runId) =>
+        daemon.onTurnStartTimeout(sessionId, runId),
       onSessionEvent: (sessionId, runId, event: SessionEventForBackend) => {
         void (async () => {
           try {

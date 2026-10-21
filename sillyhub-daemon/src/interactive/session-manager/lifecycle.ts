@@ -71,6 +71,12 @@ export function stop(mgr: SessionManagerCore): void {
     clearTimeout(timer);
   }
   mgr._terminalCleanupTimers.clear();
+  // 2026-10-21-daemon-zombie-turn FR-01：清轮启动看门狗（同上：退出途中 fire
+  // 会访问已销毁状态；unref 已不阻塞退出，此处显式清保证确定性）。
+  for (const w of mgr._turnStartWatchdogs.values()) {
+    clearTimeout(w.timer);
+  }
+  mgr._turnStartWatchdogs.clear();
   // ql-20260621-partial（task-08 改造）：partial flush 定时器已随缓冲链下沉
   // 归一化器（driver.consume finally dispose），daemon 侧无 timer 需清；此处仅
   // 清会话级 usage 台账（纯内存 Map，防退出途中残留引用）。
@@ -208,6 +214,9 @@ export async function terminateSession(
     clearTimeout(_pf.timer);
     mgr._pendingFirstPrompt.delete(state.sessionId);
   }
+  // 0b. 2026-10-21-daemon-zombie-turn FR-01：撤防轮启动看门狗（会话终态，
+  //     布防轮不再有「启动后回报失败」的语义）。
+  mgr._disarmTurnStartWatchdog(state.sessionId);
 
   // 1. 设终态 status（原 end→'ended' / fail→'failed'）。
   state.status = isManual ? 'ended' : 'failed';

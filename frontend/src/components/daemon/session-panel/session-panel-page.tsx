@@ -135,6 +135,8 @@ import {
   parseTeamCommand, teamTriggerErrorText, useSessionTeamMissions,
 } from "./use-session-team-missions";
 import { useStreamConnectionGuard } from "./use-stream-connection-guard";
+// 2026-10-21-daemon-zombie-turn FR-04：打断 15s 超时回退定时器簿记。
+import { useInterruptFeedbackTimeout } from "./interrupt-timeout";
 import { StreamConnectionBanner, TurnStalledWatchdogBanner } from "./connection-banners";
 import { applyAgentTaskStatusEvent } from "../agent-task-store";
 // 2026-10-13-subagent-stub-reconcile：任务快照对账（时间线子代理容器头收敛）。
@@ -4017,6 +4019,23 @@ export function SessionPanelPage({
     void sendFromQueue(prompt, attachmentIds);
   }, [input, sessionId, session, ended, suspended, machineOnline, running, isQueueFull, pendingAttachments, attTokenMap, wsRefTokens, notify, sendToServerQueue, sendFromQueue, sessionEngine, openTeamPopover, handlePreSessionSend, teamMissions, isToolReportBody, handleTakeoverSend]);
 
+  // 2026-10-21-daemon-zombie-turn FR-04：打断 15s 超时回退（定时器簿记在
+  // interrupt-timeout.ts hook；到点回退 running + 提示，终态已到则自查 no-op）。
+  const handleInterruptFeedbackTimeout = useCallback((runId: string) => {
+    setTurnState((prev) => ({
+      ...prev,
+      turns: prev.turns.map((t) =>
+        t.runId === runId && t.status === "interrupting" ? { ...t, status: "running" } : t,
+      ),
+    }));
+    setErrorMsg(
+      "打断已发出 15 秒未生效，本轮可能已异常（执行端无响应）。可再次打断，或稍候由系统自动收敛。",
+    );
+  }, []);
+  const { arm: armInterruptFeedbackTimeout } = useInterruptFeedbackTimeout(
+    handleInterruptFeedbackTimeout,
+  );
+
   const handleInterrupt = useCallback(async () => {
     // task-03（R-01）：预会话态无可打断轮（按钮本就禁用，防御性短路）。
     if (!sessionId || !session || session.status !== "active" || !turnState.currentRunId) return;
@@ -4047,6 +4066,11 @@ export function SessionPanelPage({
     try {
       await interruptSession(sessionId);
       // turn 终态由 SSE turn_completed 决定；session 仍 active。
+      // 2026-10-21-daemon-zombie-turn FR-04：15s 超时回退——打断信号已送达但
+      // 终态迟迟不到（daemon 侧空转 / 僵尸轮）时回退 running + 提示，避免
+      // 永久停在「打断中」。到点时该轮已非 interrupting（终态已到/已处理）
+      // 则回调内自查 no-op，天然免除对终态到达的显式清定时器依赖。
+      armInterruptFeedbackTimeout(localRunId);
     } catch (err) {
       const apiErr = err as ApiError;
       const isNoCurrentRun =
@@ -4074,7 +4098,7 @@ export function SessionPanelPage({
         setErrorMsg(errMessage(apiErr, "打断失败"));
       }
     }
-  }, [session, turnState.currentRunId, sessionId]);
+  }, [session, turnState.currentRunId, sessionId, armInterruptFeedbackTimeout]);
 
   const handleReopen = useCallback(async () => {
     // task-03（R-01）：预会话态无会话可重开（入口本就不渲染，防御性短路）。

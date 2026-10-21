@@ -50,6 +50,8 @@ export async function onResult(
     // 迟到的 result，session 已收口：不重复发终态，避免双 onTurnResult。
     return;
   }
+  // 2026-10-21-daemon-zombie-turn FR-01：result 到达 = 轮确实启动过，撤防看门狗。
+  mgr._disarmTurnStartWatchdog(state.sessionId);
   // 先切换 status→active + 清空 currentRunId（turn 边界已落，spike D4），
   // 再 await onTurnResult。这样即便调用方同步触发 onResult（fire-and-forget），
   // 也能在 onTurnResult 回调内读到稳定的 active 状态；且避免 onTurnResult 抛错时
@@ -236,6 +238,11 @@ export async function onMessage(
   state: SessionState,
   envelope: TurnMessageEnvelope,
 ): Promise<void> {
+  // 2026-10-21-daemon-zombie-turn FR-01：任意轮事件到达即撤防看门狗（轮已启动，
+  // 慢启动/审批等待的长轮不受误伤）。粒度取舍：后台任务的 system 事件也走本
+  // 入口，偶发「无关事件误撤防」由 backend pending run 启动超时清扫兜底
+  // （300s），不在事件流里做 run 归属精细判定的成本权衡。
+  mgr._disarmTurnStartWatchdog(state.sessionId);
   const events = Array.isArray(envelope?.events) ? envelope.events : [];
   // 对账表 #4 前置判定：本 envelope 是否含 Task/Agent tool_use 事件——归一化器把
   // 同一 assistant message 的 tool_use 派生会话信号（agent_task_status running）

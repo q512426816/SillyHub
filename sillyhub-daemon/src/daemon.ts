@@ -4359,6 +4359,55 @@ export class Daemon {
   }
 
   /**
+   * 2026-10-21-daemon-zombie-turn FR-01：轮启动看门狗触发的失败回报。
+   *
+   * SessionManager 看门狗到点（inject push 后窗口内零轮事件——消息疑被引擎
+   * 在打断 abort 收尾窗口吞没，生产会话 49d893ab 实证形态）且已重置会话态后
+   * 经 deps.onTurnStartTimeout 到达本方法。用 state 的 leaseId/claimToken 经
+   * notifyRunResult 把该 run 收敛 failed（status='turn_start_timeout' +
+   * is_error=true → backend close_interactive_run 落 error_code=
+   * interactive_failed + result_summary 作可读原因，SSE 终态随之到达前端）。
+   *
+   * 边界：session-manager / state 缺失（终态清理后迟到触发）→ warn no-op；
+   * notifyRunResult 网络/HTTP 失败 → warn 不重试（backend pending run 启动
+   * 超时清扫 300s 兜底，与 _reportInjectDropped 同款收敛姿势）。
+   */
+  async onTurnStartTimeout(sessionId: string, runId: string): Promise<void> {
+    if (!this._sessionManager) {
+      this._logger.warn('on_turn_start_timeout_no_manager', { session_id: sessionId });
+      return;
+    }
+    const state = this._sessionManager.get(sessionId);
+    if (!state) {
+      this._logger.warn('on_turn_start_timeout_session_not_found', {
+        session_id: sessionId,
+      });
+      return;
+    }
+    try {
+      await this._client.notifyRunResult(state.leaseId, state.claimToken, runId, {
+        status: 'turn_start_timeout',
+        is_error: true,
+        result_summary:
+          '消息已送达，但引擎长时间未启动本轮（可能被上一轮打断的收尾竞态吞没）。' +
+          '本轮已自动收敛为失败，请重新发送消息即可继续',
+      });
+      this._logger.info('turn_start_timeout_reported', {
+        session_id: sessionId,
+        run_id: runId,
+        lease_id: state.leaseId,
+      });
+    } catch (e) {
+      this._logger.warn('turn_start_timeout_report_failed', {
+        session_id: sessionId,
+        run_id: runId,
+        lease_id: state.leaseId,
+        error: e,
+      });
+    }
+  }
+
+  /**
    * 桥接：增量上报 agent 执行消息（流式）。
    *
    * 查 SessionState，调 hubClient.submitMessages(leaseId, claimToken, runId, [msg])
@@ -8263,7 +8312,15 @@ export class Daemon {
         break;
       }
       case MSG.SESSION_INTERRUPT: {
-        await this._sessionManager.interrupt(sessionId);
+        // 2026-10-21-daemon-zombie-turn FR-02：消费 interrupt() 布尔结果——false =
+        // 会话在 store 但无 running 轮（含 query 已死）。payload 带 run_id 时回报
+        // noop（backend 即刻收敛该 pending run，前端打断秒级生效）；无 run_id
+        // （旧 backend）维持只 ack 现状。会话不在 store 的形态已在上方 not_found
+        // 分支 return，不会误报（无法判定「无轮」与「等会话建」的区别）。
+        const interrupted = await this._sessionManager.interrupt(sessionId);
+        if (!interrupted) {
+          await this._reportInterruptNoop(sessionId, raw, state);
+        }
         break;
       }
       case MSG.SESSION_END: {
@@ -8429,6 +8486,52 @@ export class Daemon {
         run_id: runId,
         lease_id: leaseId,
         reason,
+        error: e,
+      });
+    }
+  }
+
+  /**
+   * 2026-10-21-daemon-zombie-turn FR-02：打断 no-op 回报。
+   *
+   * SESSION_INTERRUPT 的 interrupt() 返回 false（会话在 store 但无 running 轮，
+   * 含 query 已死——backend 侧却存在活跃 pending run 的僵尸形态）时，用 payload
+   * 的 run_id + state 的 leaseId/claimToken 立即 notifyRunResult 收敛该 run
+   * （error_during_execution → backend 落 error_code=interactive_interrupted，
+   * 前端按既有映射显示「已中止」）。复用 _reportInjectDropped 同款手法与语义：
+   * 上报失败仅 warn（backend pending run 启动超时清扫兜底）；payload 无 run_id
+   * （旧 backend）仅记日志维持只 ack 现状。
+   */
+  private async _reportInterruptNoop(
+    sessionId: string,
+    raw: Record<string, unknown>,
+    state: { leaseId: string; claimToken: string },
+  ): Promise<void> {
+    const runId =
+      (raw.run_id as string | undefined) ?? (raw.runId as string | undefined) ?? '';
+    if (!runId) {
+      this._logger.info('interrupt_noop_no_run_id', {
+        session_id: sessionId,
+      });
+      return;
+    }
+    try {
+      await this._client.notifyRunResult(state.leaseId, state.claimToken, runId, {
+        status: 'error_during_execution',
+        is_error: true,
+        result_summary:
+          '执行端当前无进行中的轮次（本轮消息可能未被引擎启动），已按打断收敛',
+      });
+      this._logger.info('interrupt_noop_reported', {
+        session_id: sessionId,
+        run_id: runId,
+        lease_id: state.leaseId,
+      });
+    } catch (e) {
+      this._logger.warn('interrupt_noop_report_failed', {
+        session_id: sessionId,
+        run_id: runId,
+        lease_id: state.leaseId,
         error: e,
       });
     }

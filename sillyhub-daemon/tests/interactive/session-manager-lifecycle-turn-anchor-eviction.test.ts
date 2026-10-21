@@ -31,6 +31,7 @@ interface FakeMgrExtras {
   clearBackgroundTasks: ReturnType<typeof vi.fn>;
   destroyUsageLedger: ReturnType<typeof vi.fn>;
   onSessionEnd: ReturnType<typeof vi.fn>;
+  disarmTurnStartWatchdog: ReturnType<typeof vi.fn>;
 }
 
 /** 最小伪造 mgr：只提供 terminateSession 实际触及的成员（10 分钟延迟清理
@@ -42,12 +43,15 @@ function makeFakeMgr(): { mgr: SessionManagerCore; extras: FakeMgrExtras } {
     clearBackgroundTasks: vi.fn(),
     destroyUsageLedger: vi.fn(),
     onSessionEnd: vi.fn(async () => {}),
+    disarmTurnStartWatchdog: vi.fn(),
   };
   const mgr = {
     _pendingFirstPrompt: new Map(),
     _abortPermissionResolver: extras.abortPermissionResolver,
     _clearBorrowSandbox: extras.clearBorrowSandbox,
     _clearBackgroundTasks: extras.clearBackgroundTasks,
+    // 2026-10-21-daemon-zombie-turn FR-01：0b 步撤防轮启动看门狗（core 新成员）。
+    _disarmTurnStartWatchdog: extras.disarmTurnStartWatchdog,
     // 2026-10-21-task-wakeup-restore：4b-2 唤醒 debounce 清理触及的注册表。
     _taskWakeupPending: new Map(),
     _destroyUsageLedger: extras.destroyUsageLedger,
