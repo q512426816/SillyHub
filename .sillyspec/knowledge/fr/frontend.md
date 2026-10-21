@@ -7025,3 +7025,60 @@ superseded_by：FR-app-workspace-pages-002
 摘要：误提交面收敛
 全文：.sillyspec/changes/archive/2026-10-21-proto-data-exposure-guard/requirements.md#FR-03
 最近确认：c4eaa0643bc55e62fd2457cefbf504d4266a1522
+
+## FR-frontend-020 gitShow/gitDiffFile/gitStatus 的 git 调用统一带 -c core.quotepath=false，numstat 残余 C 引号路径在 daemon 侧解码为原文
+变更：2026-10-21-gitlog-quotepath-fix
+状态：active
+摘要：中文路径主路径；残余强制引号；diff pathspec 回查
+全文：.sillyspec/changes/archive/2026-10-21-gitlog-quotepath-fix/requirements.md#FR-01
+最近确认：5bbb1a830ca0bee507747635b639a3be0ac85947
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-21-gitlog-quotepath-fix:flow:测试绑定FR-01
+  tests: sillyhub-daemon/tests/host-fs-handler-git-log-quotepath.test.ts「真实仓中文路径 gitShow 解码 + gitDiffFile 回查非空 diff」 | sillyhub-daemon/tests/host-fs-handler-git-log.test.ts「GL46 命令构造——gitShow/gitDiffFile/gitStatus 带 -c core.quotepath=false」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-21-gitlog-quotepath-fix
+  status: active
+
+## FR-frontend-021 daemon 单测覆盖中文路径 numstat 解码与 diff pathspec 回查，前端 file-tree 覆盖中文路径聚合
+变更：2026-10-21-gitlog-quotepath-fix
+状态：active
+摘要：前端中文路径聚合
+全文：.sillyspec/changes/archive/2026-10-21-gitlog-quotepath-fix/requirements.md#FR-02
+最近确认：5bbb1a830ca0bee507747635b639a3be0ac85947
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-21-gitlog-quotepath-fix:flow:测试绑定FR-02
+  tests: frontend/src/components/git-log/__tests__/file-tree.test.tsx「中文路径聚合与叶子点击发起中文 path 请求」 | sillyhub-daemon/tests/host-fs-handler-git-log.test.ts「GL47 decodeGitCQuote 纯函数五形态」 | sillyhub-daemon/tests/host-fs-handler-git-log.test.ts「GL48 中文引号路径 numstat 解码」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-21-gitlog-quotepath-fix
+  status: active
+
+## FR-frontend-022 实测含中文目录提交：树展示正确中文、点击文件返回非空 diff
+变更：2026-10-21-gitlog-quotepath-fix
+状态：active
+摘要：真实仓端到端
+全文：.sillyspec/changes/archive/2026-10-21-gitlog-quotepath-fix/requirements.md#FR-03
+最近确认：5bbb1a830ca0bee507747635b639a3be0ac85947
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-21-gitlog-quotepath-fix:flow:测试绑定FR-03
+  tests: sillyhub-daemon/tests/host-fs-handler-git-log-quotepath.test.ts「真实临时仓端到端：含中文目录真实提交」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-21-gitlog-quotepath-fix
+  status: active

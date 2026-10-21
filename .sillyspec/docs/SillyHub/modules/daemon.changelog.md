@@ -63,3 +63,4 @@ created_at: 2026-08-27 14:32:24
 - 2026-10-20-conflict-platform-archive | 冲突对比平台留档快照自足回退
 - 2026-10-20-codex-requires-openai-auth | 腾讯云平台 codex 会话选直连（anthropic 形态）供应商时稳定断流（stream dis…
 - 2026-10-20-session-status-live-sync | 左侧会话状态标签与右侧实时同步
+- 2026-10-21-gitlog-quotepath-fix | 修复git日志非ASCII路径展示与空diff

@@ -1,0 +1,54 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-21-gitlog-quotepath-fix",
+  "rows": [
+    {
+      "anchor": "FR-01",
+      "row_id": "2026-10-21-gitlog-quotepath-fix:flow:测试绑定FR-01",
+      "tests": [
+        "sillyhub-daemon/tests/host-fs-handler-git-log-quotepath.test.ts「真实仓中文路径 gitShow 解码 + gitDiffFile 回查非空 diff」",
+        "sillyhub-daemon/tests/host-fs-handler-git-log.test.ts「GL46 命令构造——gitShow/gitDiffFile/gitStatus 带 -c core.quotepath=false」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-21-gitlog-quotepath-fix"
+    },
+    {
+      "anchor": "FR-02",
+      "row_id": "2026-10-21-gitlog-quotepath-fix:flow:测试绑定FR-02",
+      "tests": [
+        "frontend/src/components/git-log/__tests__/file-tree.test.tsx「中文路径聚合与叶子点击发起中文 path 请求」",
+        "sillyhub-daemon/tests/host-fs-handler-git-log.test.ts「GL47 decodeGitCQuote 纯函数五形态」",
+        "sillyhub-daemon/tests/host-fs-handler-git-log.test.ts「GL48 中文引号路径 numstat 解码」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-21-gitlog-quotepath-fix"
+    },
+    {
+      "anchor": "FR-03",
+      "row_id": "2026-10-21-gitlog-quotepath-fix:flow:测试绑定FR-03",
+      "tests": [
+        "sillyhub-daemon/tests/host-fs-handler-git-log-quotepath.test.ts「真实临时仓端到端：含中文目录真实提交」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-21-gitlog-quotepath-fix"
+    }
+  ]
+}

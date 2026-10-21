@@ -1,0 +1,44 @@
+tier: thin
+legacy_fallback: false
+substeps:
+  artifacts: done
+  ledger: done
+  patch: done
+  review: done
+  probes: done
+  distill: done
+  archive: done
+  events: done
+born_face: thin
+with_tasks: false
+review_force: null
+input: |-
+  修复git日志非ASCII路径展示与空diff
+
+  动机：daemon git 调用未关 core.quotepath，中文等非 ASCII 路径以 C 引号转义形态透传到前端，目录树显示转义乱码、点击文件 diff 因路径失配恒为空（已在临时仓逐字节实证）。
+
+  成功标准：
+  - gitShow/gitDiffFile/gitStatus 的 git 调用统一带 -c core.quotepath=false，numstat 残余 C 引号路径在 daemon 侧解码为原文
+  - daemon 单测覆盖中文路径 numstat 解码与 diff pathspec 回查，前端 file-tree 覆盖中文路径聚合
+  - 实测含中文目录提交：树展示正确中文、点击文件返回非空 diff
+autopilot: false
+prestage_ack: true
+baseline_commit: b69b46a9ec6ebf8cc29adf7d0377112f16c005aa
+updatedAt: '2026-10-21T01:07:27.973Z'
+cross_baselines:
+  sillyspec: 629055318b137fa001706ade11deef65c310e37e
+baseline_sha256: f71ec8d883677b9d7ad6beb2eeb03b35a98c7d02279f1fe372bfee8310fb9497
+spec_approved: true
+spec_approved_at: '2026-10-21T00:46:44.632Z'
+spec_approved_by: zcode-gitlog-quotepath-fix
+spec_approved_channel: user-confirmed
+spec_attested_by: zcode-gitlog-quotepath-fix
+batch_ticked: true
+gate_summary: >-
+  test: passed ← module[]+deps(py1+jsx38+jsx3)+fr(37)（81.8s）
+  结果：C:\Users\qinyi\IdeaProjects\multi-agent-platform\.sillyspec\.runtime\verify-runs\20261021010217\test-result.json｜lint:
+  passed ← cd backend && uv run ruff check . && uv run ruff format --check . && uv run mypy app && cd ../frontend &&
+  pnpm lint && cd ../sillyhub-daemon && pnpm typecheck（14.2s）
+  结果：C:\Users\qinyi\IdeaProjects\multi-agent-platform\.sillyspec\.runtime\verify-runs\20261021010217\test-result.json｜门文件
+  30 个
+

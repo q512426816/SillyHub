@@ -18,3 +18,4 @@
 - 2026-10-19-cross-repo-patch-slicing | 资产卡跨仓单文件 diff 切片
 - 2026-10-20-backfill-dryrun-log-scrub | 回填脚本改缺省dry-run并移除诊断日志
 - 2026-10-20-codex-requires-openai-auth | 腾讯云平台 codex 会话选直连（anthropic 形态）供应商时稳定断流（stream dis…
+- 2026-10-21-gitlog-quotepath-fix | 修复git日志非ASCII路径展示与空diff
