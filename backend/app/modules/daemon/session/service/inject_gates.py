@@ -254,6 +254,21 @@ async def _resolve_create_inputs(
         profile = await AgentProfileService(svc._session).get(
             profile_id=_profile_uuid, actor=_actor
         )
+    # ── 2026-10-21-agent-profile-slim-default task-02：未显式选档案 → 用户级默认
+    # 档案（软偏好）。与显式选择的契约差异：显式失效必须显式报错（上方不软回退）；
+    # 默认失效（失可见/竞态删除，FK SET NULL 兜底外）静默跳过 = 未设默认零注入。
+    if profile is None:
+        from app.modules.agent.profile.service import AgentProfileService
+        from app.modules.auth.model import User as _User
+
+        _actor = await svc._session.get(_User, user_id)
+        if _actor is not None and _actor.default_agent_profile_id is not None:
+            try:
+                profile = await AgentProfileService(svc._session).get(
+                    profile_id=_actor.default_agent_profile_id, actor=_actor
+                )
+            except Exception:
+                profile = None  # 软偏好：失可见静默跳过
 
     # ── task-03：会话级供应商解析（归属 + agent_kind 匹配，FR-04/FR-06）──
     llm_provider_row = None

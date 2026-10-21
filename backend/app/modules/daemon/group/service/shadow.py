@@ -565,11 +565,31 @@ async def _ensure_shadow_session(
             cwd = resolve_root_path_for_daemon(member_ws.root_path)
 
     # 档案行（快照 + lease 提示词维度下推用；缺省 None 零分支）。
+    # 2026-10-21-agent-profile-slim-default task-02：成员未显式选档案 → 回落
+    # **群主**（影子会话 user_id=group.created_by 同源）的用户级默认档案——软偏好，
+    # 失可见/未设静默跳过（显式选档案失效仍由既有链处理）。解析后 profile 统一
+    # 驱动 shadow/first_run 的 agent_profile_id 与 lease 下推。
     profile = None
+    effective_profile_id = member.agent_profile_id
     if member.agent_profile_id is not None:
         from app.modules.agent.profile.model import AgentProfile
 
         profile = await svc._session.get(AgentProfile, member.agent_profile_id)
+    else:
+        from app.modules.agent.profile.service import AgentProfileService
+        from app.modules.auth.model import User as _User
+
+        owner = await svc._session.get(_User, group.created_by)
+        if owner is not None and owner.default_agent_profile_id is not None:
+            try:
+                profile = await AgentProfileService(svc._session).get(
+                    profile_id=owner.default_agent_profile_id, actor=owner
+                )
+            except Exception:
+                # 软偏好：默认档案失可见/已删（FK SET NULL 兜底外的竞态）静默跳过。
+                profile = None
+            if profile is not None:
+                effective_profile_id = profile.id
 
     now = datetime.now(UTC)
     # ① 影子会话行（parent 恒 NULL——群↔影子唯一关联通道是成员表反向指针）。
@@ -595,7 +615,7 @@ async def _ensure_shadow_session(
         title=f"群「{group.title}」·{member.display_name}",
         session_kind="group_member",
         parent_session_id=None,  # D-007：恒 NULL（§5.1 硬约束）
-        agent_profile_id=member.agent_profile_id,
+        agent_profile_id=effective_profile_id,
         llm_provider_id=member.llm_provider_id,
     )
     svc._session.add(shadow)
@@ -614,7 +634,7 @@ async def _ensure_shadow_session(
         spec_strategy="interactive",
         agent_session_id=shadow.id,
         user_id=group.created_by,
-        agent_profile_id=member.agent_profile_id,
+        agent_profile_id=effective_profile_id,
         agent_profile_snapshot=(
             _build_agent_profile_snapshot(profile) if profile is not None else None
         ),
