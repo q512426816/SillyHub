@@ -206,6 +206,9 @@ import {
   resolveSpecDir,
   hasUnsyncedLocalChanges,
 } from './spec-sync.js';
+// 2026-10-21-daemon-sync-hardening task-06（FR-06）：事件循环 lag 监控循环——
+// 宿主冻结类事故的本端证据面（2026-10-21 实况：ws 假活回收迟 4.5 分钟却零观测）。
+import { runEventLoopWatch } from './event-loop-watch.js';
 import { RuntimeHandler, KnowledgeGovernanceHandler, normalizeRootPathParam } from './runtime-handler.js';
 // task-03（2026-09-14-session-thinking-level / FR-02）：平台七档词表校验单源
 //（session_set_thinking_level handler 层入参校验，照 backend 校验同词表镜像）。
@@ -2460,6 +2463,17 @@ export class Daemon {
     // progress 总览采集（间隔 config.sillyspec_status_interval_sec 默认 60s；
     // 0/非法值在 _sillyspecStatusLoop 内部判定为关闭，循环立即返回）。
     this._fire((signal) => this._sillyspecStatusLoop(signal));
+
+    // 2026-10-21-daemon-sync-hardening task-06（FR-06）：第六循环——事件循环 lag
+    // 周期监控。宿主冻结类事故的本端证据面：窗口最大 lag ≥5s 即 warn
+    // event_loop_lag（含 max/p99/mean/window），正常窗口仅 debug tick。
+    this._fire((signal) =>
+      runEventLoopWatch(signal, {
+        log: (level, msg, data) => {
+          this._logger[level](msg, data);
+        },
+      }),
+    );
 
     // task-07（FR-06 / D-004@v1）：启动 SessionManager 空闲扫描定时器。
     // sessionManager 为 null（task-04 边界 14：未注入）时 ?. 不调；空闲扫描不启动。

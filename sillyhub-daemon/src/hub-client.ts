@@ -2498,7 +2498,12 @@ export async function fetchMcpWhitelist(
   try {
     const headers: Record<string, string> = {};
     if (token) headers['Authorization'] = `Bearer ${token}`;
-    const resp = await fetch(url, { headers });
+    // FR-05（2026-10-21-daemon-sync-hardening）：全文件唯一一处无 signal 的 fetch
+    // 补齐显式超时——源码面断言测试钉住「新增无 signal 的 fetch 即红」。
+    const resp = await fetch(url, {
+      headers,
+      signal: AbortSignal.timeout(DEFAULT_TIMEOUT_MS),
+    });
     if (!resp.ok) {
       logger?.('warn', 'mcp_whitelist_fetch_failed', { url, status: resp.status });
       return null;

@@ -81,7 +81,7 @@ import {
 // 采集器用 execFile 数组形参直跑 node <sillyspec-bin>（无 shell 依赖，路径空格
 // 安全）；bin 解析用 existsSync 探测 npm 全局布局候选。
 import { execFile } from 'node:child_process';
-import { existsSync, mkdirSync, renameSync, statSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, renameSync, statSync } from 'node:fs';
 // 2026-09-07-conflict-diff-compare task-02：冲突快照逐路径 stat/realpath/readFile
 //（只读，不写任何文件——RPC 只读快照铁律）。
 import { readFile, realpath, stat } from 'node:fs/promises';
@@ -128,8 +128,43 @@ const SILLYSPEC_ERROR_MAX_CHARS = 200;
 /**
  * progress 采集子进程超时（30s）。仿 runtime-handler.ts SILLYSPEC_TIMEOUT_MS 先例
  * （design §5 三态矩阵 ③ / FR-03；backend 侧无 RPC 时限，纯本地采集上限）。
+ * 可被 env `SILLYHUB_DAEMON_STATUS_TIMEOUT_MS` 覆盖（FR-02，2026-10-21-daemon-sync-
+ * hardening）——/mnt/e 等 drvfs 慢盘上 CLI 冷启动扫描可超 30s，运维提阈值无需改码。
  */
 export const SILLYSPEC_STATUS_TIMEOUT_MS = 30_000;
+
+/**
+ * 采集退避参数（FR-03，2026-10-21-daemon-sync-hardening）：同一目标连续失败达
+ * {@link STATUS_COLLECT_BACKOFF_GRACE_FAILS} 次后进入退避——全局轮次每
+ * {@link STATUS_COLLECT_BACKOFF_EVERY_N} 轮只实采 1 轮（60s 间隔下即 10 分钟一次），
+ * 任一次实采成功即复位。既有心跳语义不变：③失败保留上次快照 + sillyspec_status_error
+ * 上报口径不动，退避只省 spawn 不改可见性。
+ */
+export const STATUS_COLLECT_BACKOFF_GRACE_FAILS = 3;
+export const STATUS_COLLECT_BACKOFF_EVERY_N = 10;
+
+/**
+ * FR-02：`SILLYHUB_DAEMON_STATUS_TIMEOUT_MS` 解析——正整数毫秒生效；缺席/空白/
+ * 非数字/≤0/非整数一律 null（由调用方回退 {@link SILLYSPEC_STATUS_TIMEOUT_MS}）。
+ */
+export function parseStatusTimeoutMsEnv(v: string | undefined): number | null {
+  if (v === undefined || v.trim() === '') return null;
+  const n = Number(v);
+  return Number.isInteger(n) && n > 0 ? n : null;
+}
+
+/**
+ * FR-03：退避跳过判定（纯函数）。连败达 graceFails 后，round（从 1 计）非
+ * everyN 整数倍的轮次跳过 spawn；任一次实采成功由调用方清零连败计数。
+ */
+export function shouldSkipStatusCollect(
+  consecutiveFailures: number,
+  round: number,
+  graceFails: number = STATUS_COLLECT_BACKOFF_GRACE_FAILS,
+  everyN: number = STATUS_COLLECT_BACKOFF_EVERY_N,
+): boolean {
+  return consecutiveFailures >= graceFails && round % everyN !== 0;
+}
 
 /** 心跳摘要 changes 列表截断上限（N=50，design §4 / Grill B2）。 */
 export const SILLYSPEC_STATUS_CHANGES_MAX = 50;
@@ -703,6 +738,17 @@ export class SillySpecManager {
    */
   private readonly _statusSummariesByWs = new Map<string, SillySpecStatusSummary>();
 
+  // ── FR-03/FR-04（2026-10-21-daemon-sync-hardening）：退避与跨仓跳过状态 ──────
+
+  /** 全局采集轮次（从 1 计；退避取模基准）。内存态，重启回零（宁可多采不可漏采）。 */
+  private _statusRound = 0;
+  /** per-target 连败计数（key：workspaceId；legacy 单槽位固定哨兵键）。实采成功即清零。 */
+  private readonly _statusFailStreak = new Map<string, number>();
+  /** 已 warn 过「进入退避」的 target key（复位后可再次进入再 warn）。 */
+  private readonly _statusBackoffWarned = new Set<string>();
+  /** 已 info 过 crossrepo 跳过指路的 cwd（进程生命周期内一次性）。 */
+  private readonly _crossrepoSkipLogged = new Set<string>();
+
   // ── 2026-09-04-conflict-resolve-entry task-06：平台命令执行器与结果槽 ──────────
 
   /** 平台命令执行超时毫秒（runResolve/runGhostCleanup 每步 execFile timeout）。 */
@@ -748,7 +794,11 @@ export class SillySpecManager {
     this._statusCwd = deps.statusCwd ?? (() => null);
     this._statusRootFor = deps.statusRootFor ?? (() => null);
     this._statusTargets = deps.statusTargets;
-    this._statusTimeoutMs = deps.statusTimeoutMs ?? SILLYSPEC_STATUS_TIMEOUT_MS;
+    // FR-02（2026-10-21-daemon-sync-hardening）：回退链 deps 显式注入 > env > 默认。
+    this._statusTimeoutMs =
+      deps.statusTimeoutMs ??
+      parseStatusTimeoutMsEnv(process.env.SILLYHUB_DAEMON_STATUS_TIMEOUT_MS) ??
+      SILLYSPEC_STATUS_TIMEOUT_MS;
     // task-06：超时无关闭口——undefined/null/非有限/<=0 一律回退默认。
     this._commandTimeoutMs =
       typeof deps.commandTimeoutMs === 'number' &&
@@ -885,8 +935,40 @@ export class SillySpecManager {
       // map 携带陈旧摘要）——改为轮内聚合：任一目标③失败即保留失败账，整轮
       // 全成功才清（恢复语义不变：失败目标下一轮成功即参与全成功清空）。
       let anyFailed = false;
+      // FR-03（2026-10-21-daemon-sync-hardening）：连败退避——达宽限次数后每
+      // EVERY_N 轮只实采 1 轮，其余轮次跳过 spawn（debug 一笔）。心跳可见性不变：
+      // ③失败保留旧快照 + _statusError 上报口径原样，退避只省 spawn 不改上报。
+      this._statusRound += 1;
       for (const t of targets) {
+        const key = t.workspaceId ?? '__legacy_status_cwd__';
+        const streak = this._statusFailStreak.get(key) ?? 0;
+        if (shouldSkipStatusCollect(streak, this._statusRound)) {
+          this._log('debug', 'sillyspec_status_backoff_skip', {
+            key,
+            streak,
+            round: this._statusRound,
+          });
+          continue;
+        }
         const ok = await this._collectOneTarget(t.workspaceId, t.rootPath);
+        if (ok) {
+          this._statusFailStreak.delete(key);
+          this._statusBackoffWarned.delete(key);
+        } else {
+          const next = streak + 1;
+          this._statusFailStreak.set(key, next);
+          if (
+            next === STATUS_COLLECT_BACKOFF_GRACE_FAILS &&
+            !this._statusBackoffWarned.has(key)
+          ) {
+            this._statusBackoffWarned.add(key);
+            this._log('warn', 'sillyspec_status_backoff_entered', {
+              key,
+              streak: next,
+              every_n_rounds: STATUS_COLLECT_BACKOFF_EVERY_N,
+            });
+          }
+        }
         anyFailed = anyFailed || !ok;
       }
       if (!anyFailed) {
@@ -927,6 +1009,34 @@ export class SillySpecManager {
     workspaceId: string | null,
     cwd: string,
   ): Promise<boolean> {
+    // FR-04（2026-10-21-daemon-sync-hardening）：跨仓子目录登记根——CLI uninit 门
+    // 必拒（exit 2 指路横幅），采集恒失败纯刷屏（2026-10-21 实况：/mnt/e/Java/crrc/
+    // qmdp/urgent 每分钟 exit_code=2）。跳过 + 一次性 info 指路（标记内 workspace 即
+    // 登记工作区根，格式实锤自 sillyspec CLI local-register.js tryWriteMarker）；
+    // 不记失败（非瞬态查询失败，anyFailed 聚合不置位、_statusError 不动）；
+    // 具名工作区滞留摘要槽移除（平台不再显示对该根的陈旧摘要）。
+    const crossrepoMarker = join(cwd, '.git', 'sillyspec-crossrepo.json');
+    if (existsSync(crossrepoMarker)) {
+      if (!this._crossrepoSkipLogged.has(cwd)) {
+        this._crossrepoSkipLogged.add(cwd);
+        let workspaceRoot = '';
+        try {
+          const raw = JSON.parse(readFileSync(crossrepoMarker, 'utf-8')) as {
+            workspace?: unknown;
+          };
+          workspaceRoot = typeof raw.workspace === 'string' ? raw.workspace : '';
+        } catch {
+          // 指路信息 best-effort：标记损坏时只报跳过不带指路。
+        }
+        this._log('info', 'sillyspec_status_skip_crossrepo', {
+          cwd,
+          workspace_root: workspaceRoot,
+          marker: crossrepoMarker,
+        });
+      }
+      if (workspaceId !== null) this._statusSummariesByWs.delete(workspaceId);
+      return true;
+    }
     const bin = this._resolveSillySpecBin();
     if (bin === null) {
       this._markStatusCapabilityMissing('bin_not_found', { cwd });

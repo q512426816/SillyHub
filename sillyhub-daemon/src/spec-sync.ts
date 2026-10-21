@@ -19,6 +19,7 @@
 // 蓝图 task-04.md / task-12.md / task-11.md。
 
 import { createHash } from 'node:crypto';
+import { existsSync } from 'node:fs';
 import { spawn as cpSpawn, type ChildProcess } from 'node:child_process';
 import { homedir } from 'node:os';
 import { join, relative, isAbsolute, dirname, resolve, basename, sep as pathSep } from 'node:path';
@@ -1061,6 +1062,38 @@ async function postSpecSyncImpl(
   }
 }
 
+// ── daemon 同步关闭开关（2026-10-21-daemon-sync-hardening FR-01）──────────────
+
+/**
+ * 单写者让位开关：机器级 env `SILLYHUB_DAEMON_SPEC_SYNC_OFF`（'1'/'true'，大小写
+ * 不敏感）关闭本机全部工作区的 daemon 自动推送；工作区级 flag 文件
+ * `~/.sillyhub/daemon/spec-sync-off/{wsId}.flag` 只关单个工作区。任一命中即关。
+ *
+ * 背景：runbook（docs/sillyspec/finished/spec-push-conflict-recovery-runbook.md）
+ * 钉死 SpecPushConflict 头号根因是双写者（daemon 自动同步与 CLI
+ * `sillyspec platform sync` 并存致 manifest base_version 漂移）。用户拍板单写者
+ * 优先 CLI——本开关给「CLI 优先」一个可执行的落地件。flag 置于 daemonStateDir 下
+ * specs/ 平级目录，pull 整树交换不触及，永不丢。
+ *
+ * @param v env 原始值（undefined = 未设）
+ */
+export function parseSpecSyncOffEnv(v: string | undefined | null): boolean {
+  if (!v) return false;
+  const s = v.trim().toLowerCase();
+  return s === '1' || s === 'true';
+}
+
+/** 工作区级关闭 flag 路径：~/.sillyhub/daemon/spec-sync-off/{wsId}.flag。 */
+export function specSyncOffFlagPath(wsId: string): string {
+  return join(daemonStateDir(), 'spec-sync-off', `${wsId}.flag`);
+}
+
+/** 关闭判定：env 整机 或 ws flag 文件在位，任一命中即关。纯读不写。 */
+export async function isDaemonSpecSyncOff(wsId: string): Promise<boolean> {
+  if (parseSpecSyncOffEnv(process.env.SILLYHUB_DAEMON_SPEC_SYNC_OFF)) return true;
+  return existsSync(specSyncOffFlagPath(wsId));
+}
+
 /**
  * pending_push 标记（ql-20260816-003）：postSpecSync 失败的防御兜底（hasUnsyncedLocalChanges 信号 1）。
  *
@@ -1090,6 +1123,23 @@ export async function postSpecSync(
   changeWriteId?: string,
   onProgress?: (p: { files_total?: number; files_processed?: number }) => void,
 ): Promise<{ ok: boolean; reparsed: number; filesTotal?: number } | null> {
+  // FR-01：单写者开关命中 → 等价 mock 语义（返回 null，调用方既有 null 分支天然
+  // no-op）：跳过推送、不动 pending_push（关闭是运维决策非传输失败）；
+  // knowledge hits 上行独立于 spec manifest，照常 best-effort——防复现 2026-09-25
+  // runbook 的「命中一行都上不去」连带面。
+  if (await isDaemonSpecSyncOff(wsId)) {
+    console.warn(
+      `spec_sync: skipped_by_off_switch ws=${wsId}（daemon 自动同步已关——单写者让位 ` +
+        `CLI \`sillyspec platform sync\`。恢复：删 env SILLYHUB_DAEMON_SPEC_SYNC_OFF ` +
+        `或删 ${specSyncOffFlagPath(wsId)}）`,
+    );
+    try {
+      await uploadKnowledgeHitsIfNeeded(client, wsId, specRoot);
+    } catch {
+      // R-05：上报失败绝不阻塞（uploadKnowledgeHitsIfNeeded 内部已全收敛，防御对称）。
+    }
+    return null;
+  }
   try {
     const result = await postSpecSyncImpl(client, wsId, specRoot, changeWriteId, onProgress);
     // 真实 push 成功（result 非 null）→ 清除 pending_push（本地已与服务器一致）。
