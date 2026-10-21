@@ -24,3 +24,4 @@
 - 2026-10-21-gitlog-conflict-quotepath | 合并冲突链路非ASCII路径quotepath修复
 - 2026-10-21-daemon-sync-hardening | 执行端同步加固与状态采集治理
 - 2026-10-21-spec-conflict-autoheal | spec推送冲突自动自愈与日志修整
+- 2026-10-21-daemon-zombie-turn | 修复 daemon 会话僵尸轮与打断无效

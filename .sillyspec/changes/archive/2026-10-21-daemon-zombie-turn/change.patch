@@ -1,0 +1,1945 @@
+diff --git a/backend/app/core/config.py b/backend/app/core/config.py
+index ae9e7a0bb..35a6b4305 100644
+--- a/backend/app/core/config.py
++++ b/backend/app/core/config.py
+@@ -99,6 +99,18 @@ class Settings(BaseSettings):
+     redis_url: str = Field("redis://localhost:6379/0")
+     secret_key: str = Field(..., min_length=16)
+     log_level: str = Field("INFO")
++    # 2026-10-21-daemon-zombie-turn FR-03：pending run 启动超时清扫窗口（秒）。
++    # run 创建后超过该时长仍 status='pending' 且无 started_at（daemon 从未上报
++    # 轮事件）且所属会话 runtime 在线 → 僵尸轮，sweep 收敛 failed。默认 300s
++    # 对齐 daemon inject 停等窗硬顶（5min）量级；现场慢启动误扫时调大免发版。
++    daemon_pending_run_start_timeout_sec: int = Field(
++        300,
++        ge=1,
++        description=(
++            "zombie pending-run start timeout in seconds "
++            "(env DAEMON_PENDING_RUN_START_TIMEOUT_SEC)."
++        ),
++    )
+     # 2026-10-15-server-logs-panel：日志轮转文件目录（空=默认 <repo_root>/data/logs，
+     # 经 paths.resolve_log_dir 解析；轮转大小/备份数为 logging.py 模块级常量）。
+     log_dir: str = Field("")
+diff --git a/backend/app/modules/daemon/session/service/control.py b/backend/app/modules/daemon/session/service/control.py
+index 7d4b889e5..389ce593b 100644
+--- a/backend/app/modules/daemon/session/service/control.py
++++ b/backend/app/modules/daemon/session/service/control.py
+@@ -331,15 +331,22 @@ async def _send_interrupt_control(
+         )
+     # task-04（design A2）：SESSION_INTERRUPT 走控制指令三段式——推送失败
+     # 落库 pending 待补拉；504 语义保持（下方 not control_ok 分支）。
++    # 2026-10-21-daemon-zombie-turn FR-02：payload 带 run_id——daemon 侧
++    # interrupt() no-op（会话在 store 但无 running 轮）时按它回报收敛该
++    # pending run（打断秒级生效，替代静默空转）；run_id 缺省（理论不可达，
++    # 防御）不写该键，daemon 维持只 ack 现状。
++    interrupt_payload = {
++        "session_id": str(session.id),
++        "lease_id": str(session.lease_id),
++        "runtime_id": str(runtime_id),  # design §5.3 provider discriminator
++    }
++    if run_id is not None:
++        interrupt_payload["run_id"] = str(run_id)
+     _row, control_ok = await ControlCommandService(svc._session).enqueue_and_push(
+         daemon_id=daemon_id,
+         runtime_id=runtime_id,
+         kind=KIND_SESSION_INTERRUPT,
+-        payload={
+-            "session_id": str(session.id),
+-            "lease_id": str(session.lease_id),
+-            "runtime_id": str(runtime_id),  # design §5.3 provider discriminator
+-        },
++        payload=interrupt_payload,
+     )
+     if not control_ok:
+         # ql-20260903-016：打断报 504「没停成」后不能留 pending——迟到补拉
+diff --git a/backend/app/modules/daemon/sweep.py b/backend/app/modules/daemon/sweep.py
+index db07c3ef4..795479786 100644
+--- a/backend/app/modules/daemon/sweep.py
++++ b/backend/app/modules/daemon/sweep.py
+@@ -773,6 +773,173 @@ async def session_auto_recover_sweep_once(session: AsyncSession) -> int:
+     return len(flipped_rows)
+ 
+ 
++# ── pending run 启动超时清扫（2026-10-21-daemon-zombie-turn FR-03）──────────────
++#
++# 僵尸轮兜底：inject 被 daemon ack 但引擎从未启动轮次（生产会话 49d893ab 实证：
++# 打断 abort 收尾窗口吞没注入消息）→ run 永停 pending（无 started_at）。daemon 侧
++# 轮启动看门狗（FR-01）与打断 no-op 回报（FR-02）是近端收敛，本清扫是最后兜底
++# （两者上报均丢失/未布防的形态）。与离线档正交：runtime 离线的归
++# session_offline_sweep_once，此处只管「daemon 在线但轮从未启动」。
++
++# 僵尸轮收敛错误码（新值）：前端 deriveTurnTerminalStatus 按未知 failed 码走
++# 「失败」展示，可读原因经 output_redacted → SessionRunRead.failure_summary 透出。
++INTERACTIVE_TURN_NOT_STARTED_ERROR_CODE = "interactive_turn_not_started"
++
++# 默认窗口（Settings daemon_pending_run_start_timeout_sec 缺省/非法时的回退值）。
++PENDING_RUN_START_TIMEOUT_DEFAULT_SEC = 300
++
++
++def pending_run_start_timeout_sec() -> int:
++    """读 Settings 窗口（非法/缺省回退模块默认，容错优先于启动期校验）。"""
++    from app.core.config import get_settings
++
++    v = getattr(
++        get_settings(),
++        "daemon_pending_run_start_timeout_sec",
++        PENDING_RUN_START_TIMEOUT_DEFAULT_SEC,
++    )
++    return v if isinstance(v, int) and v > 0 else PENDING_RUN_START_TIMEOUT_DEFAULT_SEC
++
++
++async def pending_run_start_sweep_once(session: AsyncSession) -> int:
++    """单拍：收敛「创建后 N 秒未被 daemon 启动」的在线 runtime 会话 pending run.
++
++    命中条件（全 AND）：``AgentRun.status='pending'`` 且 ``started_at IS NULL``
++    且 ``created_at < now-N``（N=Settings ``daemon_pending_run_start_timeout_sec``，
++    默认 300s）且所属会话绑定的 runtime 在线（online + 心跳新鲜，对齐离线档
++    ``online_runtime`` 判定）。正常链路 created→started ~2s；daemon inject 停等
++    窗（_awaitSessionThenRoute）硬顶 5min，300s 恰好覆盖。
++
++    收敛动作：run → ``failed`` + ``finished_at`` + ``error_code=
++    interactive_turn_not_started`` + 中文可读原因（output_redacted）。不动会话
++    （保持 active，用户可重发）与 lease（会话级 lease 跨轮复用，不随单轮收敛）。
++
++    跳过面：pending_approval 状态（审批等待非僵尸——轮已启动只是等用户）；
++    ``running`` 状态（sync_agent_run_status 置 running 必写 started_at，无
++    started_at 的 running 只可能是史前脏数据，不属本档语义）；runtime 离线
++    （既有 offline sweep 管辖）。
++
++    幂等：UPDATE 重挂全部命中条件（SELECT 与 UPDATE 之间被并发改态的行跳过），
++    commit 后按「实际收敛行」重查再广播 ``turn_completed``（close_run_steps 终态
++    发布契约：前端 onTurnCompleted 清 currentRunId、解锁输入框）+ ``agent_run``
++    频道 status_changed。广播 best-effort（Redis 抖动不影响已提交终态行）。
++    """
++    now = datetime.now(UTC)
++    grace = now - timedelta(seconds=RUNTIME_OFFLINE_GRACE_SEC)
++    cutoff = now - timedelta(seconds=pending_run_start_timeout_sec())
++
++    online_runtime = (
++        select(DaemonRuntime.id)
++        .where(
++            DaemonRuntime.id == AgentSession.runtime_id,
++            col(DaemonRuntime.status) == "online",
++            col(DaemonRuntime.last_heartbeat_at) >= grace,
++        )
++        .correlate(AgentSession)
++        .exists()
++    )
++    hit_rows = (
++        await session.execute(
++            select(AgentRun.id)
++            .join(AgentSession, AgentSession.id == AgentRun.agent_session_id)
++            .where(
++                AgentRun.status == "pending",
++                col(AgentRun.started_at).is_(None),
++                AgentRun.created_at < cutoff,
++                online_runtime,
++            )
++        )
++    ).all()
++    if not hit_rows:
++        return 0
++    hit_ids = [row.id for row in hit_rows]
++
++    await session.execute(
++        update(AgentRun)
++        .where(
++            AgentRun.id.in_(hit_ids),
++            AgentRun.status == "pending",
++            col(AgentRun.started_at).is_(None),
++            AgentRun.created_at < cutoff,
++        )
++        .values(
++            status="failed",
++            finished_at=now,
++            error_code=INTERACTIVE_TURN_NOT_STARTED_ERROR_CODE,
++            output_redacted=(
++                "消息已送达，但引擎长时间未启动本轮（可能被上一轮打断的收尾竞态吞没）。"
++                "本轮已自动收敛，请重新发送消息即可继续"
++            ),
++        )
++    )
++    await session.commit()
++
++    # 按「实际收敛行」重查（并发改态跳过的行此处非 failed/非本码，不广播），
++    # 字段面复刻 close_run_steps 的 turn_completed 契约（frontend SessionStream
++    # -Envelope：event/status/exit_code/error_code/input/output_tokens）。
++    final_rows = (
++        await session.execute(
++            select(  # type: ignore[misc]  # mypy overload 组合爆炸（多列 select 的 union 展开上限，同仓 redis stub 先例）
++                AgentRun.id,
++                AgentRun.agent_session_id,
++                AgentRun.lease_id,
++                AgentRun.exit_code,
++                AgentRun.input_tokens,
++                AgentRun.output_tokens,
++            ).where(
++                AgentRun.id.in_(hit_ids),
++                AgentRun.status == "failed",
++                AgentRun.error_code == INTERACTIVE_TURN_NOT_STARTED_ERROR_CODE,
++            )
++        )
++    ).all()
++    for row in final_rows:
++        try:
++            redis = get_redis()
++            await redis.publish(
++                f"agent_run:{row.id}",
++                json.dumps(
++                    {
++                        "event": "status_changed",
++                        "status": "failed",
++                        "lease_id": str(row.lease_id) if row.lease_id else None,
++                        "agent_run_id": str(row.id),
++                    },
++                    default=str,
++                ),
++            )
++        except Exception:
++            log.warning(
++                "pending_run_sweep_run_channel_publish_failed",
++                agent_run_id=str(row.id),
++            )
++        try:
++            redis = get_redis()
++            await redis.publish(
++                f"agent_session:{row.agent_session_id}",
++                json.dumps(
++                    {
++                        "event": "turn_completed",
++                        "session_id": str(row.agent_session_id),
++                        "run_id": str(row.id),
++                        "status": "failed",
++                        "exit_code": row.exit_code,
++                        "error_code": INTERACTIVE_TURN_NOT_STARTED_ERROR_CODE,
++                        "input_tokens": row.input_tokens,
++                        "output_tokens": row.output_tokens,
++                    },
++                    default=str,
++                ),
++            )
++        except Exception:
++            log.warning(
++                "pending_run_sweep_session_channel_publish_failed",
++                session_id=str(row.agent_session_id),
++                agent_run_id=str(row.id),
++            )
++    return len(final_rows)
++
++
+ async def session_reconnect_sweeper(interval: float = SWEEP_INTERVAL_SEC) -> None:
+     """常驻巡检循环（main.py lifespan ``create_task`` 消费）.
+ 
+@@ -794,6 +961,9 @@ async def session_reconnect_sweeper(interval: float = SWEEP_INTERVAL_SEC) -> Non
+                 # ql-20260831-006-6d67：同一轮补位——runtime 重新在线的 suspended
+                 # 主会话自动恢复（backend 重启场景 offline sweep 误挂起后无人捞）。
+                 auto_recovered = await session_auto_recover_sweep_once(db_session)
++                # 2026-10-21-daemon-zombie-turn FR-03：同一轮兜底——runtime 在线但
++                # pending run 超龄未启动（inject 被引擎吞没的僵尸轮）。
++                pending_runs_converged = await pending_run_start_sweep_once(db_session)
+             if converged:
+                 log.warning(
+                     "session_reconnect_sweep_converged",
+@@ -812,6 +982,12 @@ async def session_reconnect_sweeper(interval: float = SWEEP_INTERVAL_SEC) -> Non
+                     count=auto_recovered,
+                     min_age_seconds=AUTO_RECOVER_MIN_AGE_SEC,
+                 )
++            if pending_runs_converged:
++                log.warning(
++                    "pending_run_start_sweep_converged",
++                    count=pending_runs_converged,
++                    timeout_seconds=pending_run_start_timeout_sec(),
++                )
+         except Exception:
+             log.exception("session_reconnect_sweep_round_failed")
+         # cancel 透传：sleep 是循环唯一的常规挂起点，CancelledError 必须穿出
+diff --git a/backend/app/modules/daemon/tests/test_interrupt_payload_run_id.py b/backend/app/modules/daemon/tests/test_interrupt_payload_run_id.py
+new file mode 100644
+index 000000000..4736f052b
+--- /dev/null
++++ b/backend/app/modules/daemon/tests/test_interrupt_payload_run_id.py
+@@ -0,0 +1,103 @@
++"""2026-10-21-daemon-zombie-turn FR-02（backend 侧）：interrupt payload 携带 run_id.
++
++daemon 侧 interrupt() no-op（会话在 store 但无 running 轮）时按 payload 的
++run_id 回报收敛该 pending run（打断秒级生效）。本文件钉住发送侧契约：
++``interrupt_session`` / ``_send_interrupt_control`` 下发的 SESSION_INTERRUPT
++payload 必须含 ``run_id``（dispatch-now 忙时打断共用路径同享）。旧契约（无
++run_id）下 daemon 无法定位 run，只能 ack 了事——正是生产会话 49d893ab 十次
++打断全部空转的形态之一。
++"""
++
++from __future__ import annotations
++
++import uuid
++from datetime import UTC, datetime
++from unittest.mock import AsyncMock, MagicMock, patch
++
++import pytest
++from sqlalchemy.ext.asyncio import AsyncSession
++
++from app.modules.daemon.service import DaemonService
++
++
++async def _create_user(db: AsyncSession) -> uuid.UUID:
++    from app.modules.auth.model import User
++
++    user = User(
++        id=uuid.uuid4(),
++        email=f"zombie-ri-{uuid.uuid4()}@example.com",
++        password_hash="x",
++        display_name="zombie-ri",
++        status="active",
++    )
++    db.add(user)
++    await db.commit()
++    return user.id
++
++
++async def _create_runtime(db: AsyncSession, user_id: uuid.UUID) -> None:
++    from app.modules.daemon.model import DaemonInstance, DaemonRuntime
++
++    inst = DaemonInstance(
++        id=uuid.uuid4(),
++        user_id=user_id,
++        hostname="zombie-host",
++        server_url="https://platform.example.com",
++        status="online",
++        last_heartbeat_at=datetime.now(UTC),
++    )
++    db.add(inst)
++    rt = DaemonRuntime(
++        id=uuid.uuid4(),
++        user_id=user_id,
++        daemon_instance_id=inst.id,
++        name="daemon",
++        provider="claude",
++        status="online",
++        last_heartbeat_at=datetime.now(UTC),
++    )
++    db.add(rt)
++    await db.commit()
++
++
++def _mock_hub(connected: bool = True) -> MagicMock:
++    """MagicMock hub（test_session_service._mock_hub 同款——绕开真实 hub 内部态）。"""
++    hub = MagicMock()
++    hub.is_connected.return_value = connected
++    hub.connected_runtime_ids = []
++    hub.connected_daemon_ids = []
++    hub.send_wakeup = AsyncMock(return_value=True)
++    hub.send_session_control = AsyncMock(return_value=connected)
++    return hub
++
++
++class _FakeRedis:
++    async def publish(self, channel: str, payload: str) -> int:
++        return 1
++
++
++@pytest.mark.asyncio
++async def test_interrupt_payload_carries_run_id(
++    db_session: AsyncSession, monkeypatch: pytest.MonkeyPatch
++) -> None:
++    """主路径：interrupt_session 下发的 payload 带 run_id（= 当前活跃 run）。"""
++    import app.modules.daemon.session.service as svc_mod
++
++    monkeypatch.setattr(svc_mod, "get_redis", lambda: _FakeRedis())
++    hub = _mock_hub()
++    with patch("app.modules.daemon.ws_hub.get_daemon_ws_hub", return_value=hub):
++        uid = await _create_user(db_session)
++        await _create_runtime(db_session, uid)
++        svc = DaemonService(db_session)
++        created = await svc.create_session(uid, provider="claude", prompt="first")
++
++        hub.send_session_control.reset_mock()
++        result = await svc.interrupt_session(created.agent_session.id, uid)
++
++    assert result.current_run_id == created.agent_run.id
++    assert hub.send_session_control.await_count == 1
++    call = hub.send_session_control.await_args
++    payload = call.args[2]
++    assert payload["run_id"] == str(created.agent_run.id)
++    assert payload["session_id"] == str(created.agent_session.id)
++    assert payload["lease_id"] == str(created.agent_session.lease_id)
+diff --git a/backend/app/modules/daemon/tests/test_pending_run_start_sweep.py b/backend/app/modules/daemon/tests/test_pending_run_start_sweep.py
+new file mode 100644
+index 000000000..77a473acd
+--- /dev/null
++++ b/backend/app/modules/daemon/tests/test_pending_run_start_sweep.py
+@@ -0,0 +1,275 @@
++"""2026-10-21-daemon-zombie-turn FR-03：pending run 启动超时清扫.
++
++僵尸轮兜底链（FR-01 看门狗 / FR-02 打断 no-op 回报之后的最后防线）：
++inject 被 daemon ack 但引擎从未启动轮次（打断 abort 收尾竞态吞没）→
++run 永停 ``pending``（无 ``started_at``）。清扫收敛条件与跳过面：
++
++- 命中：``status='pending'`` + ``started_at IS NULL`` + ``created_at`` 距今超
++  ``daemon_pending_run_start_timeout_sec``（默认 300s）+ 所属会话 runtime 在线
++  → ``failed`` + ``error_code=interactive_turn_not_started`` + 中文可读原因
++  （output_redacted），commit 后广播 ``turn_completed``（session 频道）与
++  ``status_changed``（run 频道）；
++- 跳过：未超龄新 run / ``pending_approval``（审批等待非僵尸）/ runtime 离线
++  （既有 offline sweep 管辖）；
++- 不动会话（保持 active，用户可重发）与 lease。
++"""
++
++from __future__ import annotations
++
++import json
++import uuid
++from datetime import UTC, datetime, timedelta
++
++import pytest
++from sqlalchemy.ext.asyncio import AsyncSession
++
++from app.modules.agent.model import AgentRun, AgentSession
++from app.modules.auth.model import User
++from app.modules.daemon.model import DaemonRuntime
++from app.modules.daemon.sweep import (
++    INTERACTIVE_TURN_NOT_STARTED_ERROR_CODE,
++    RUNTIME_OFFLINE_GRACE_SEC,
++    pending_run_start_sweep_once,
++    pending_run_start_timeout_sec,
++)
++
++
++async def _make_user(db: AsyncSession, *, prefix: str) -> User:
++    user = User(
++        id=uuid.uuid4(),
++        email=f"{prefix}-{uuid.uuid4()}@example.com",
++        password_hash="x",
++        display_name=prefix,
++        status="active",
++    )
++    db.add(user)
++    await db.commit()
++    return user
++
++
++async def _make_runtime(
++    db: AsyncSession,
++    user_id: uuid.UUID,
++    *,
++    online: bool = True,
++) -> DaemonRuntime:
++    rt = DaemonRuntime(
++        id=uuid.uuid4(),
++        user_id=user_id,
++        name="daemon",
++        provider="claude",
++        status="online" if online else "offline",
++        last_heartbeat_at=(
++            datetime.now(UTC)
++            if online
++            else datetime.now(UTC) - timedelta(seconds=RUNTIME_OFFLINE_GRACE_SEC + 300)
++        ),
++    )
++    db.add(rt)
++    await db.commit()
++    return rt
++
++
++async def _make_session(
++    db: AsyncSession,
++    user_id: uuid.UUID,
++    runtime_id: uuid.UUID,
++) -> AgentSession:
++    now = datetime.now(UTC)
++    sess = AgentSession(
++        id=uuid.uuid4(),
++        user_id=user_id,
++        runtime_id=runtime_id,
++        provider="claude",
++        status="active",
++        agent_session_id=f"sdk-{uuid.uuid4().hex[:8]}",
++        turn_count=1,
++        cwd="/workspace/proj",
++        created_at=now,
++        last_active_at=now,
++    )
++    db.add(sess)
++    await db.commit()
++    return sess
++
++
++async def _make_run(
++    db: AsyncSession,
++    session_id: uuid.UUID,
++    *,
++    status: str = "pending",
++    started: bool = False,
++    created_at: datetime | None = None,
++) -> AgentRun:
++    run = AgentRun(
++        agent_type="claude_code",
++        status=status,
++        agent_session_id=session_id,
++        started_at=datetime.now(UTC) if started else None,
++        created_at=created_at or datetime.now(UTC),
++    )
++    db.add(run)
++    await db.commit()
++    return run
++
++
++def _capture_publish(monkeypatch: pytest.MonkeyPatch):
++    """FakeRedis：捕获 (channel, payload) 并返回；publish 永不抛。"""
++    from app.modules.daemon import sweep as sweep_mod
++
++    publishes: list[tuple[str, str]] = []
++
++    class _FakeRedis:
++        async def publish(self, channel: str, payload: str) -> int:
++            publishes.append((channel, payload))
++            return 1
++
++    monkeypatch.setattr(sweep_mod, "get_redis", lambda: _FakeRedis())
++    return publishes
++
++
++@pytest.mark.asyncio
++async def test_sweeps_stale_pending_run_of_online_runtime(
++    db_session: AsyncSession, monkeypatch: pytest.MonkeyPatch
++) -> None:
++    """主路径：在线 runtime 会话的 pending run 超龄无 started_at → 收敛 failed
++    + 新错误码 + 可读原因；会话保持 active；双频道广播终态。"""
++    publishes = _capture_publish(monkeypatch)
++
++    user = await _make_user(db_session, prefix="zombie-main")
++    rt = await _make_runtime(db_session, user.id, online=True)
++    sess = await _make_session(db_session, user.id, rt.id)
++    stale = datetime.now(UTC) - timedelta(seconds=pending_run_start_timeout_sec() + 60)
++    run = await _make_run(db_session, sess.id, status="pending", started=False, created_at=stale)
++
++    converged = await pending_run_start_sweep_once(db_session)
++
++    assert converged == 1
++    await db_session.refresh(run)
++    assert run.status == "failed"
++    assert run.error_code == INTERACTIVE_TURN_NOT_STARTED_ERROR_CODE
++    assert run.finished_at is not None
++    assert run.output_redacted is not None and "重新发送" in run.output_redacted
++    # 会话不动（active 保持，用户可重发）
++    await db_session.refresh(sess)
++    assert sess.status == "active"
++    # run 频道 status_changed + session 频道 turn_completed（close_run_steps 契约）
++    run_events = [json.loads(p) for ch, p in publishes if ch == f"agent_run:{run.id}"]
++    assert any(
++        e.get("event") == "status_changed" and e.get("status") == "failed" for e in run_events
++    )
++    sess_events = [json.loads(p) for ch, p in publishes if ch == f"agent_session:{sess.id}"]
++    assert any(
++        e.get("event") == "turn_completed"
++        and e.get("status") == "failed"
++        and e.get("error_code") == INTERACTIVE_TURN_NOT_STARTED_ERROR_CODE
++        and e.get("run_id") == str(run.id)
++        for e in sess_events
++    )
++
++
++@pytest.mark.asyncio
++async def test_skips_fresh_pending_run(
++    db_session: AsyncSession, monkeypatch: pytest.MonkeyPatch
++) -> None:
++    """未超龄的新 pending run 不扫（正常链路 created→started ~2s）。"""
++    _capture_publish(monkeypatch)
++
++    user = await _make_user(db_session, prefix="zombie-fresh")
++    rt = await _make_runtime(db_session, user.id, online=True)
++    sess = await _make_session(db_session, user.id, rt.id)
++    run = await _make_run(db_session, sess.id, status="pending", started=False)
++
++    converged = await pending_run_start_sweep_once(db_session)
++
++    assert converged == 0
++    await db_session.refresh(run)
++    assert run.status == "pending"
++
++
++@pytest.mark.asyncio
++async def test_skips_pending_approval_and_started_runs(
++    db_session: AsyncSession, monkeypatch: pytest.MonkeyPatch
++) -> None:
++    """pending_approval（审批等待非僵尸）与已启动（started_at 已写）的 run 不扫。"""
++    _capture_publish(monkeypatch)
++
++    user = await _make_user(db_session, prefix="zombie-approval")
++    rt = await _make_runtime(db_session, user.id, online=True)
++    sess = await _make_session(db_session, user.id, rt.id)
++    stale = datetime.now(UTC) - timedelta(seconds=pending_run_start_timeout_sec() + 60)
++    approval = await _make_run(
++        db_session, sess.id, status="pending_approval", started=False, created_at=stale
++    )
++    started = await _make_run(db_session, sess.id, status="running", started=True, created_at=stale)
++
++    converged = await pending_run_start_sweep_once(db_session)
++
++    assert converged == 0
++    await db_session.refresh(approval)
++    await db_session.refresh(started)
++    assert approval.status == "pending_approval"
++    assert started.status == "running"
++
++
++@pytest.mark.asyncio
++async def test_skips_offline_runtime_sessions(
++    db_session: AsyncSession, monkeypatch: pytest.MonkeyPatch
++) -> None:
++    """runtime 离线（心跳超窗）的超龄 pending run 不扫——既有 offline sweep 管辖。"""
++    _capture_publish(monkeypatch)
++
++    user = await _make_user(db_session, prefix="zombie-off")
++    rt = await _make_runtime(db_session, user.id, online=False)
++    sess = await _make_session(db_session, user.id, rt.id)
++    stale = datetime.now(UTC) - timedelta(seconds=pending_run_start_timeout_sec() + 60)
++    run = await _make_run(db_session, sess.id, status="pending", started=False, created_at=stale)
++
++    converged = await pending_run_start_sweep_once(db_session)
++
++    assert converged == 0
++    await db_session.refresh(run)
++    assert run.status == "pending"
++
++
++@pytest.mark.asyncio
++async def test_idempotent_rerun_keeps_converged(
++    db_session: AsyncSession, monkeypatch: pytest.MonkeyPatch
++) -> None:
++    """幂等：收敛后再跑一轮 0 命中（status 已 failed 不再匹配）。"""
++    publishes = _capture_publish(monkeypatch)
++
++    user = await _make_user(db_session, prefix="zombie-idem")
++    rt = await _make_runtime(db_session, user.id, online=True)
++    sess = await _make_session(db_session, user.id, rt.id)
++    stale = datetime.now(UTC) - timedelta(seconds=pending_run_start_timeout_sec() + 60)
++    await _make_run(db_session, sess.id, status="pending", started=False, created_at=stale)
++
++    assert await pending_run_start_sweep_once(db_session) == 1
++    publishes.clear()
++    assert await pending_run_start_sweep_once(db_session) == 0
++    assert publishes == []
++
++
++@pytest.mark.asyncio
++async def test_timeout_sec_reads_settings(
++    db_session: AsyncSession, monkeypatch: pytest.MonkeyPatch
++) -> None:
++    """窗口读 Settings（可配置）：非法值回退模块默认。"""
++    from app.core.config import get_settings
++    from app.modules.daemon.sweep import PENDING_RUN_START_TIMEOUT_DEFAULT_SEC
++
++    settings = get_settings()
++    monkeypatch.setattr(settings, "daemon_pending_run_start_timeout_sec", 42, raising=False)
++    assert pending_run_start_timeout_sec() == 42
++
++    monkeypatch.setattr(settings, "daemon_pending_run_start_timeout_sec", 0, raising=False)
++    assert pending_run_start_timeout_sec() == PENDING_RUN_START_TIMEOUT_DEFAULT_SEC
++
++    monkeypatch.setattr(
++        settings,
++        "daemon_pending_run_start_timeout_sec",
++        PENDING_RUN_START_TIMEOUT_DEFAULT_SEC,
++        raising=False,
++    )
++    assert pending_run_start_timeout_sec() == PENDING_RUN_START_TIMEOUT_DEFAULT_SEC
+diff --git a/frontend/src/components/daemon/session-panel/__tests__/interrupt-timeout.test.ts b/frontend/src/components/daemon/session-panel/__tests__/interrupt-timeout.test.ts
+new file mode 100644
+index 000000000..717b95580
+--- /dev/null
++++ b/frontend/src/components/daemon/session-panel/__tests__/interrupt-timeout.test.ts
+@@ -0,0 +1,159 @@
++/**
++ * 2026-10-21-daemon-zombie-turn FR-04：useInterruptFeedbackTimeout 单测。
++ *
++ * 依据：session-panel/interrupt-timeout.ts（打断 15s 超时回退定时器簿记）。
++ * 用例：到点触发回调 / fire 前清除不触发 / 重按换防旧 timer 作废 /
++ * 卸载清理 / 回调身份变更后取最新 / arm-clear 身份稳定。
++ */
++import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
++import { act, renderHook } from "@testing-library/react";
++import * as React from "react";
++
++import {
++  INTERRUPT_FEEDBACK_TIMEOUT_MS,
++  isTurnStillInterrupting,
++  useInterruptFeedbackTimeout,
++} from "@/components/daemon/session-panel/interrupt-timeout";
++
++describe("2026-10-21-daemon-zombie-turn FR-04：useInterruptFeedbackTimeout", () => {
++  beforeEach(() => {
++    vi.useFakeTimers();
++  });
++
++  afterEach(() => {
++    vi.useRealTimers();
++  });
++
++  it("arm 后到点（15s）触发回调并携带 runId", async () => {
++    const onTimeout = vi.fn();
++    const { result } = renderHook(() => useInterruptFeedbackTimeout(onTimeout));
++
++    act(() => {
++      result.current.arm("run-zombie");
++    });
++
++    await act(async () => {
++      await vi.advanceTimersByTimeAsync(INTERRUPT_FEEDBACK_TIMEOUT_MS - 1);
++    });
++    expect(onTimeout).not.toHaveBeenCalled();
++    await act(async () => {
++      await vi.advanceTimersByTimeAsync(1);
++    });
++    expect(onTimeout).toHaveBeenCalledTimes(1);
++    expect(onTimeout).toHaveBeenCalledWith("run-zombie");
++  });
++
++  it("fire 前 clear → 不触发", async () => {
++    const onTimeout = vi.fn();
++    const { result } = renderHook(() => useInterruptFeedbackTimeout(onTimeout));
++
++    act(() => {
++      result.current.arm("run-1");
++      result.current.clear();
++    });
++    await act(async () => {
++      await vi.advanceTimersByTimeAsync(INTERRUPT_FEEDBACK_TIMEOUT_MS * 2);
++    });
++    expect(onTimeout).not.toHaveBeenCalled();
++  });
++
++  it("重按换防：旧 timer 作废，新 runId 到点触发", async () => {
++    const onTimeout = vi.fn();
++    const { result } = renderHook(() => useInterruptFeedbackTimeout(onTimeout));
++
++    act(() => {
++      result.current.arm("run-old");
++    });
++    await act(async () => {
++      await vi.advanceTimersByTimeAsync(10_000);
++    });
++    act(() => {
++      result.current.arm("run-new");
++    });
++    // 旧 timer 的 15s 整点已过——换防后不触发
++    await act(async () => {
++      await vi.advanceTimersByTimeAsync(5_000);
++    });
++    expect(onTimeout).not.toHaveBeenCalled();
++    await act(async () => {
++      await vi.advanceTimersByTimeAsync(10_000);
++    });
++    expect(onTimeout).toHaveBeenCalledTimes(1);
++    expect(onTimeout).toHaveBeenCalledWith("run-new");
++  });
++
++  it("卸载清理：unmount 后到点不触发", async () => {
++    const onTimeout = vi.fn();
++    const { result, unmount } = renderHook(() => useInterruptFeedbackTimeout(onTimeout));
++
++    act(() => {
++      result.current.arm("run-1");
++    });
++    unmount();
++    await act(async () => {
++      await vi.advanceTimersByTimeAsync(INTERRUPT_FEEDBACK_TIMEOUT_MS * 2);
++    });
++    expect(onTimeout).not.toHaveBeenCalled();
++  });
++
++  it("回调身份变更后取最新（rerender 换回调）", async () => {
++    const first = vi.fn();
++    const second = vi.fn();
++    const { result, rerender } = renderHook(
++      ({ cb }: { cb: (_runId: string) => void }) => useInterruptFeedbackTimeout(cb),
++      { initialProps: { cb: first } },
++    );
++
++    act(() => {
++      result.current.arm("run-1");
++    });
++    rerender({ cb: second });
++    await act(async () => {
++      await vi.advanceTimersByTimeAsync(INTERRUPT_FEEDBACK_TIMEOUT_MS);
++    });
++    expect(first).not.toHaveBeenCalled();
++    expect(second).toHaveBeenCalledWith("run-1");
++  });
++
++  it("arm/clear 身份跨渲染稳定（依赖面不膨胀）", () => {
++    const onTimeout = vi.fn();
++    const { result, rerender } = renderHook(() => useInterruptFeedbackTimeout(onTimeout));
++
++    const armBefore = result.current.arm;
++    const clearBefore = result.current.clear;
++    rerender();
++    expect(result.current.arm).toBe(armBefore);
++    expect(result.current.clear).toBe(clearBefore);
++  });
++
++  it("React import 被消费（jsPragma 防 lint 误报的显式引用）", () => {
++    expect(React.version).toBeTruthy();
++  });
++});
++
++describe("2026-10-21-daemon-zombie-turn FR-04：到点裁决 isTurnStillInterrupting（P1 修复）", () => {
++  it("仍处 interrupting → true（回退+提示）", () => {
++    expect(
++      isTurnStillInterrupting(
++        [
++          { runId: "run-1", status: "interrupting" },
++          { runId: "run-2", status: "completed" },
++        ],
++        "run-1",
++      ),
++    ).toBe(true);
++  });
++
++  it.each(["completed", "failed", "killed", "running"])(
++    "终态已到（status=%s）→ false（静默，不误报「未生效」）",
++    (status) => {
++      expect(isTurnStillInterrupting([{ runId: "run-1", status }], "run-1")).toBe(false);
++    },
++  );
++
++  it("runId 不匹配（新轮已切换）→ false", () => {
++    expect(
++      isTurnStillInterrupting([{ runId: "run-2", status: "interrupting" }], "run-1"),
++    ).toBe(false);
++  });
++});
+diff --git a/frontend/src/components/daemon/session-panel/interrupt-timeout.ts b/frontend/src/components/daemon/session-panel/interrupt-timeout.ts
+new file mode 100644
+index 000000000..567ba98ce
+--- /dev/null
++++ b/frontend/src/components/daemon/session-panel/interrupt-timeout.ts
+@@ -0,0 +1,68 @@
++/**
++ * 2026-10-21-daemon-zombie-turn FR-04：打断 15s 超时回退定时器簿记。
++ *
++ * 背景（生产会话 49d893ab）：打断信号送达且 HTTP 200，但 daemon 侧对僵尸轮
++ * 空转——终态 SSE 永不到达，前端永久停在「打断中」。本 hook 只管定时器
++ * 簿记（arm/clear/换防/卸载清理），到点后的 UI 回退（interrupting→running
++ * + 提示）由调用方回调完成；回调里自查轮状态，终态已到则 no-op，天然免除
++ * 对终态事件的显式清定时器依赖。
++ */
++import { useCallback, useEffect, useRef } from "react";
++
++/** 超时窗口（ms）。 */
++export const INTERRUPT_FEEDBACK_TIMEOUT_MS = 15_000;
++
++/**
++ * 到点裁决（P1 修复，评审 2026-10-21）：该轮仍处 interrupting 才回退 + 提示。
++ * 终态已在 15s 内到达（打断正常生效）→ false，调用方必须静默（不回退、不弹
++ * 「未生效」错误）——timer 无需显式清除，到点自查即天然 no-op。
++ */
++export function isTurnStillInterrupting(
++  turns: ReadonlyArray<{ runId: string; status: string }>,
++  runId: string,
++): boolean {
++  return turns.some((t) => t.runId === runId && t.status === "interrupting");
++}
++
++/** hook 返回面：arm 单槽换防（同轮重按换新 timer），clear 幂等。 */
++export interface InterruptFeedbackTimeoutHandle {
++  arm: (_runId: string) => void;
++  clear: () => void;
++}
++
++export function useInterruptFeedbackTimeout(
++  onTimeout: (_runId: string) => void,
++): InterruptFeedbackTimeoutHandle {
++  // 最新回调经 ref 透传：arm/clear 身份稳定（空依赖 useCallback），调用方
++  // 的 useCallback 依赖面不因本 hook 膨胀。
++  const onTimeoutRef = useRef(onTimeout);
++  useEffect(() => {
++    onTimeoutRef.current = onTimeout;
++  }, [onTimeout]);
++
++  const entryRef = useRef<{ runId: string; timer: ReturnType<typeof setTimeout> } | null>(null);
++
++  const clear = useCallback(() => {
++    if (entryRef.current) {
++      clearTimeout(entryRef.current.timer);
++      entryRef.current = null;
++    }
++  }, []);
++
++  const arm = useCallback(
++    (runId: string) => {
++      clear();
++      const timer = setTimeout(() => {
++        entryRef.current = null;
++        onTimeoutRef.current(runId);
++      }, INTERRUPT_FEEDBACK_TIMEOUT_MS);
++      entryRef.current = { runId, timer };
++    },
++    [clear],
++  );
++
++  // 卸载清理：防定时器泄漏/卸载后触发状态更新。
++  useEffect(() => clear, [clear]);
++
++  return { arm, clear };
++}
+diff --git a/frontend/src/components/daemon/session-panel/session-panel-page.tsx b/frontend/src/components/daemon/session-panel/session-panel-page.tsx
+index 44f1956dd..da083c5ac 100644
+--- a/frontend/src/components/daemon/session-panel/session-panel-page.tsx
++++ b/frontend/src/components/daemon/session-panel/session-panel-page.tsx
+@@ -135,6 +135,8 @@ import {
+   parseTeamCommand, teamTriggerErrorText, useSessionTeamMissions,
+ } from "./use-session-team-missions";
+ import { useStreamConnectionGuard } from "./use-stream-connection-guard";
++// 2026-10-21-daemon-zombie-turn FR-04：打断 15s 超时回退定时器簿记 + 到点裁决。
++import { isTurnStillInterrupting, useInterruptFeedbackTimeout } from "./interrupt-timeout";
+ import { StreamConnectionBanner, TurnStalledWatchdogBanner } from "./connection-banners";
+ import { applyAgentTaskStatusEvent } from "../agent-task-store";
+ // 2026-10-13-subagent-stub-reconcile：任务快照对账（时间线子代理容器头收敛）。
+@@ -4017,6 +4019,37 @@ export function SessionPanelPage({
+     void sendFromQueue(prompt, attachmentIds);
+   }, [input, sessionId, session, ended, suspended, machineOnline, running, isQueueFull, pendingAttachments, attTokenMap, wsRefTokens, notify, sendToServerQueue, sendFromQueue, sessionEngine, openTeamPopover, handlePreSessionSend, teamMissions, isToolReportBody, handleTakeoverSend]);
+ 
++  // 2026-10-21-daemon-zombie-turn FR-04：打断 15s 超时回退（定时器簿记在
++  // interrupt-timeout.ts hook）。到点**先裁决**：该轮仍处 interrupting 才回退
++  // running + 提示；终态已到（打断正常生效）→ 静默 no-op，禁止误报「未生效」
++  // （评审 2026-10-21 P1 修复）。
++  const handleInterruptFeedbackTimeout = useCallback(
++    (runId: string) => {
++      if (!isTurnStillInterrupting(turnState.turns, runId)) return;
++      setTurnState((prev) => ({
++        ...prev,
++        turns: prev.turns.map((t) =>
++          t.runId === runId && t.status === "interrupting" ? { ...t, status: "running" } : t,
++        ),
++      }));
++      setErrorMsg(
++        "打断已发出 15 秒未生效，本轮可能已异常（执行端无响应）。可再次打断，或稍候由系统自动收敛。",
++      );
++    },
++    [turnState.turns],
++  );
++  const { arm: armInterruptFeedbackTimeout, clear: clearInterruptFeedbackTimeout } =
++    useInterruptFeedbackTimeout(handleInterruptFeedbackTimeout);
++  // FR-04 字面要求：该轮终态到达即清定时器（到点裁决兜底仍在，双保险不误报）。
++  const interruptArmedRunIdRef = useRef<string | null>(null);
++  useEffect(() => {
++    const armed = interruptArmedRunIdRef.current;
++    if (armed !== null && !isTurnStillInterrupting(turnState.turns, armed)) {
++      clearInterruptFeedbackTimeout();
++      interruptArmedRunIdRef.current = null;
++    }
++  }, [turnState.turns, clearInterruptFeedbackTimeout]);
++
+   const handleInterrupt = useCallback(async () => {
+     // task-03（R-01）：预会话态无可打断轮（按钮本就禁用，防御性短路）。
+     if (!sessionId || !session || session.status !== "active" || !turnState.currentRunId) return;
+@@ -4047,6 +4080,12 @@ export function SessionPanelPage({
+     try {
+       await interruptSession(sessionId);
+       // turn 终态由 SSE turn_completed 决定；session 仍 active。
++      // 2026-10-21-daemon-zombie-turn FR-04：15s 超时回退——打断信号已送达但
++      // 终态迟迟不到（daemon 侧空转 / 僵尸轮）时回退 running + 提示，避免
++      // 永久停在「打断中」。终态到达由上方 effect 清定时器（规格字面要求），
++      // 到点仍以 isTurnStillInterrupting 二次裁决（双保险不误报）。
++      interruptArmedRunIdRef.current = localRunId;
++      armInterruptFeedbackTimeout(localRunId);
+     } catch (err) {
+       const apiErr = err as ApiError;
+       const isNoCurrentRun =
+@@ -4074,7 +4113,7 @@ export function SessionPanelPage({
+         setErrorMsg(errMessage(apiErr, "打断失败"));
+       }
+     }
+-  }, [session, turnState.currentRunId, sessionId]);
++  }, [session, turnState.currentRunId, sessionId, armInterruptFeedbackTimeout]);
+ 
+   const handleReopen = useCallback(async () => {
+     // task-03（R-01）：预会话态无会话可重开（入口本就不渲染，防御性短路）。
+diff --git a/sillyhub-daemon/src/cli.ts b/sillyhub-daemon/src/cli.ts
+index a8100c62f..55b2a6797 100644
+--- a/sillyhub-daemon/src/cli.ts
++++ b/sillyhub-daemon/src/cli.ts
+@@ -877,6 +877,11 @@ export async function startAction(opts: StartOptions): Promise<number> {
+       onTaskWakeupInject: async (sessionId, prompt) => {
+         await client.injectSessionPrompt(sessionId, prompt, 'task_wakeup');
+       },
++      // 2026-10-21-daemon-zombie-turn FR-01：轮启动看门狗触发 → daemon 桥
++      // notifyRunResult 收敛该 run（session-manager 已重置会话态；回报失败仅
++      // 日志，backend 侧由 pending run 启动超时清扫兜底）。
++      onTurnStartTimeout: (sessionId, runId) =>
++        daemon.onTurnStartTimeout(sessionId, runId),
+       onSessionEvent: (sessionId, runId, event: SessionEventForBackend) => {
+         void (async () => {
+           try {
+diff --git a/sillyhub-daemon/src/daemon.ts b/sillyhub-daemon/src/daemon.ts
+index 4f21af00a..ecba35b8e 100644
+--- a/sillyhub-daemon/src/daemon.ts
++++ b/sillyhub-daemon/src/daemon.ts
+@@ -4358,6 +4358,55 @@ export class Daemon {
+     );
+   }
+ 
++  /**
++   * 2026-10-21-daemon-zombie-turn FR-01：轮启动看门狗触发的失败回报。
++   *
++   * SessionManager 看门狗到点（inject push 后窗口内零轮事件——消息疑被引擎
++   * 在打断 abort 收尾窗口吞没，生产会话 49d893ab 实证形态）且已重置会话态后
++   * 经 deps.onTurnStartTimeout 到达本方法。用 state 的 leaseId/claimToken 经
++   * notifyRunResult 把该 run 收敛 failed（status='turn_start_timeout' +
++   * is_error=true → backend close_interactive_run 落 error_code=
++   * interactive_failed + result_summary 作可读原因，SSE 终态随之到达前端）。
++   *
++   * 边界：session-manager / state 缺失（终态清理后迟到触发）→ warn no-op；
++   * notifyRunResult 网络/HTTP 失败 → warn 不重试（backend pending run 启动
++   * 超时清扫 300s 兜底，与 _reportInjectDropped 同款收敛姿势）。
++   */
++  async onTurnStartTimeout(sessionId: string, runId: string): Promise<void> {
++    if (!this._sessionManager) {
++      this._logger.warn('on_turn_start_timeout_no_manager', { session_id: sessionId });
++      return;
++    }
++    const state = this._sessionManager.get(sessionId);
++    if (!state) {
++      this._logger.warn('on_turn_start_timeout_session_not_found', {
++        session_id: sessionId,
++      });
++      return;
++    }
++    try {
++      await this._client.notifyRunResult(state.leaseId, state.claimToken, runId, {
++        status: 'turn_start_timeout',
++        is_error: true,
++        result_summary:
++          '消息已送达，但引擎长时间未启动本轮（可能被上一轮打断的收尾竞态吞没）。' +
++          '本轮已自动收敛为失败，请重新发送消息即可继续',
++      });
++      this._logger.info('turn_start_timeout_reported', {
++        session_id: sessionId,
++        run_id: runId,
++        lease_id: state.leaseId,
++      });
++    } catch (e) {
++      this._logger.warn('turn_start_timeout_report_failed', {
++        session_id: sessionId,
++        run_id: runId,
++        lease_id: state.leaseId,
++        error: e,
++      });
++    }
++  }
++
+   /**
+    * 桥接：增量上报 agent 执行消息（流式）。
+    *
+@@ -8263,7 +8312,15 @@ export class Daemon {
+         break;
+       }
+       case MSG.SESSION_INTERRUPT: {
+-        await this._sessionManager.interrupt(sessionId);
++        // 2026-10-21-daemon-zombie-turn FR-02：消费 interrupt() 布尔结果——false =
++        // 会话在 store 但无 running 轮（含 query 已死）。payload 带 run_id 时回报
++        // noop（backend 即刻收敛该 pending run，前端打断秒级生效）；无 run_id
++        // （旧 backend）维持只 ack 现状。会话不在 store 的形态已在上方 not_found
++        // 分支 return，不会误报（无法判定「无轮」与「等会话建」的区别）。
++        const interrupted = await this._sessionManager.interrupt(sessionId);
++        if (!interrupted) {
++          await this._reportInterruptNoop(sessionId, raw, state);
++        }
+         break;
+       }
+       case MSG.SESSION_END: {
+@@ -8434,6 +8491,65 @@ export class Daemon {
+     }
+   }
+ 
++  /**
++   * 2026-10-21-daemon-zombie-turn FR-02：打断 no-op 回报。
++   *
++   * SESSION_INTERRUPT 的 interrupt() 返回 false（会话在 store 但无 running 轮，
++   * 含 query 已死——backend 侧却存在活跃 pending run 的僵尸形态）时，用 payload
++   * 的 run_id + state 的 leaseId/claimToken 立即 notifyRunResult 收敛该 run
++   * （error_during_execution → backend 落 error_code=interactive_interrupted，
++   * 前端按既有映射显示「已中止」）。复用 _reportInjectDropped 同款手法与语义：
++   * 上报失败仅 warn（backend pending run 启动超时清扫兜底）；payload 无 run_id
++   * （旧 backend）仅记日志维持只 ack 现状。
++   *
++   * 守卫（评审 2026-10-21 P3）：interrupt()===false 只在「会话非 running」时
++   * 才能判定无轮——仍处 running 时 false 还可能是驱动写失败/超时（codex 等
++   * 非 claude 驱动的 interrupt 实现），此时回报会把仍在执行的轮提前收敛为
++   * interrupted。故 status==='running' 仅记日志不回报（该形态由 FR-01/FR-03
++   * 兜底）。
++   */
++  private async _reportInterruptNoop(
++    sessionId: string,
++    raw: Record<string, unknown>,
++    state: { leaseId: string; claimToken: string; status: string },
++  ): Promise<void> {
++    const runId =
++      (raw.run_id as string | undefined) ?? (raw.runId as string | undefined) ?? '';
++    if (!runId) {
++      this._logger.info('interrupt_noop_no_run_id', {
++        session_id: sessionId,
++      });
++      return;
++    }
++    if (state.status === 'running') {
++      this._logger.info('interrupt_noop_skipped_session_running', {
++        session_id: sessionId,
++        run_id: runId,
++      });
++      return;
++    }
++    try {
++      await this._client.notifyRunResult(state.leaseId, state.claimToken, runId, {
++        status: 'error_during_execution',
++        is_error: true,
++        result_summary:
++          '执行端当前无进行中的轮次（本轮消息可能未被引擎启动），已按打断收敛',
++      });
++      this._logger.info('interrupt_noop_reported', {
++        session_id: sessionId,
++        run_id: runId,
++        lease_id: state.leaseId,
++      });
++    } catch (e) {
++      this._logger.warn('interrupt_noop_report_failed', {
++        session_id: sessionId,
++        run_id: runId,
++        lease_id: state.leaseId,
++        error: e,
++      });
++    }
++  }
++
+   /**
+    * task-08（session-history-enhance / FR-2）：路由 backend SESSION_RESUME。
+    *
+diff --git a/sillyhub-daemon/src/interactive/session-manager.ts b/sillyhub-daemon/src/interactive/session-manager.ts
+index c4890cb00..8ec9f07a6 100644
+--- a/sillyhub-daemon/src/interactive/session-manager.ts
++++ b/sillyhub-daemon/src/interactive/session-manager.ts
+@@ -199,6 +199,8 @@ import {
+   setBudgetTokensInternal,
+ } from './session-manager/usage.js';
+ import {
++  armTurnStartWatchdog,
++  disarmTurnStartWatchdog,
+   downloadAttachmentWithTimeout,
+   getPendingInjectCount,
+   inject,
+@@ -334,6 +336,18 @@ export class SessionManager {
+    */
+   private readonly _notifyChains = new Map<string, Promise<void>>();
+ 
++  /**
++   * 2026-10-21-daemon-zombie-turn FR-01：轮启动看门狗（sessionId → timer + 布防轮
++   * runId）。inject 首轮启动路径布防；任意轮事件（onMessage/onResult）与终态
++   * （terminateSession）/stop() 撤防；到点仍零轮事件 = push 被 SDK 在打断 abort
++   * 收尾窗口吞没（生产会话 49d893ab 实证形态），重置会话态并经
++   * deps.onTurnStartTimeout 回报该 run 失败。方法体在 turn-control.ts 尾部簇。
++   */
++  private readonly _turnStartWatchdogs = new Map<
++    string,
++    { timer: ReturnType<typeof setTimeout>; runId: string }
++  >();
++
+   /** 方法体已下沉 notify-chain.ts（task-02 拆包），见该文件头注释。 */
+   private _runNotifyChain<T>(
+     sessionId: string,
+@@ -1286,6 +1300,18 @@ export class SessionManager {
+     return interrupt(this._core(), sessionId);
+   }
+ 
++  // ── 2026-10-21-daemon-zombie-turn FR-01：轮启动看门狗（方法体在 turn-control.ts）──
++
++  /** 布防看门狗（inject 首轮启动路径调用；子模块经 core 桥）。 */
++  private _armTurnStartWatchdog(sessionId: string, runId: string): void {
++    return armTurnStartWatchdog(this._core(), sessionId, runId);
++  }
++
++  /** 撤防看门狗（轮事件/会话终态/stop 调用；幂等）。 */
++  private _disarmTurnStartWatchdog(sessionId: string): void {
++    return disarmTurnStartWatchdog(this._core(), sessionId);
++  }
++
+   /**
+    * task-03（2026-09-14-session-ctx-compact / FR-02 / D-002@v3 单点接线）：
+    * 会话级上下文压缩入口——六守卫（不存在 / running / reconnecting / ended /
+diff --git a/sillyhub-daemon/src/interactive/session-manager/events.ts b/sillyhub-daemon/src/interactive/session-manager/events.ts
+index 5263b5f42..82656681a 100644
+--- a/sillyhub-daemon/src/interactive/session-manager/events.ts
++++ b/sillyhub-daemon/src/interactive/session-manager/events.ts
+@@ -50,6 +50,8 @@ export async function onResult(
+     // 迟到的 result，session 已收口：不重复发终态，避免双 onTurnResult。
+     return;
+   }
++  // 2026-10-21-daemon-zombie-turn FR-01：result 到达 = 轮确实启动过，撤防看门狗。
++  mgr._disarmTurnStartWatchdog(state.sessionId);
+   // 先切换 status→active + 清空 currentRunId（turn 边界已落，spike D4），
+   // 再 await onTurnResult。这样即便调用方同步触发 onResult（fire-and-forget），
+   // 也能在 onTurnResult 回调内读到稳定的 active 状态；且避免 onTurnResult 抛错时
+@@ -236,6 +238,11 @@ export async function onMessage(
+   state: SessionState,
+   envelope: TurnMessageEnvelope,
+ ): Promise<void> {
++  // 2026-10-21-daemon-zombie-turn FR-01：任意轮事件到达即撤防看门狗（轮已启动，
++  // 慢启动/审批等待的长轮不受误伤）。粒度取舍：后台任务的 system 事件也走本
++  // 入口，偶发「无关事件误撤防」由 backend pending run 启动超时清扫兜底
++  // （300s），不在事件流里做 run 归属精细判定的成本权衡。
++  mgr._disarmTurnStartWatchdog(state.sessionId);
+   const events = Array.isArray(envelope?.events) ? envelope.events : [];
+   // 对账表 #4 前置判定：本 envelope 是否含 Task/Agent tool_use 事件——归一化器把
+   // 同一 assistant message 的 tool_use 派生会话信号（agent_task_status running）
+diff --git a/sillyhub-daemon/src/interactive/session-manager/lifecycle.ts b/sillyhub-daemon/src/interactive/session-manager/lifecycle.ts
+index 87dd9a17e..aa7d8e2b1 100644
+--- a/sillyhub-daemon/src/interactive/session-manager/lifecycle.ts
++++ b/sillyhub-daemon/src/interactive/session-manager/lifecycle.ts
+@@ -71,6 +71,12 @@ export function stop(mgr: SessionManagerCore): void {
+     clearTimeout(timer);
+   }
+   mgr._terminalCleanupTimers.clear();
++  // 2026-10-21-daemon-zombie-turn FR-01：清轮启动看门狗（同上：退出途中 fire
++  // 会访问已销毁状态；unref 已不阻塞退出，此处显式清保证确定性）。
++  for (const w of mgr._turnStartWatchdogs.values()) {
++    clearTimeout(w.timer);
++  }
++  mgr._turnStartWatchdogs.clear();
+   // ql-20260621-partial（task-08 改造）：partial flush 定时器已随缓冲链下沉
+   // 归一化器（driver.consume finally dispose），daemon 侧无 timer 需清；此处仅
+   // 清会话级 usage 台账（纯内存 Map，防退出途中残留引用）。
+@@ -208,6 +214,9 @@ export async function terminateSession(
+     clearTimeout(_pf.timer);
+     mgr._pendingFirstPrompt.delete(state.sessionId);
+   }
++  // 0b. 2026-10-21-daemon-zombie-turn FR-01：撤防轮启动看门狗（会话终态，
++  //     布防轮不再有「启动后回报失败」的语义）。
++  mgr._disarmTurnStartWatchdog(state.sessionId);
+ 
+   // 1. 设终态 status（原 end→'ended' / fail→'failed'）。
+   state.status = isManual ? 'ended' : 'failed';
+diff --git a/sillyhub-daemon/src/interactive/session-manager/turn-control.ts b/sillyhub-daemon/src/interactive/session-manager/turn-control.ts
+index fdfc66d5d..37d83c861 100644
+--- a/sillyhub-daemon/src/interactive/session-manager/turn-control.ts
++++ b/sillyhub-daemon/src/interactive/session-manager/turn-control.ts
+@@ -355,6 +355,11 @@ export async function inject(
+     if (!mgr._pendingInjectCount.has(sessionId)) {
+       mgr._pendingInjectCount.set(sessionId, 0);
+     }
++    // 2026-10-21-daemon-zombie-turn FR-01：首轮启动路径布防看门狗——本条 inject
++    // 预期立即开新轮，窗口内零轮事件即判「push 被 SDK 吞掉」（打断 abort 收尾
++    // 竞态），到点重置会话态 + 回报该 run 失败。任意轮事件到达即撤防（events.ts
++    // onMessage/onResult），见 turn-control.ts 尾部看门狗簇注释。
++    mgr._armTurnStartWatchdog(sessionId, runId);
+   }
+ 
+   return { runId };
+@@ -508,3 +513,105 @@ export function getPendingInjectCount(
+ ): number {
+   return mgr._pendingInjectCount.get(sessionId) ?? 0;
+ }
++
++// ── 2026-10-21-daemon-zombie-turn FR-01：轮启动看门狗 ────────────────────────
++//
++// 根因（生产会话 49d893ab 实证）：用户打断 → SDK 进入 abort 收尾窗口 →
++// backend 亚秒级自动注入（后台任务通知唤醒链）→ daemon inject() 正常 push
++// 进 SDK 输入流并置 status=running + currentRunId → SDK 在 abort 收尾中把该
++// 输入吞掉（无新轮、无事件、无 result）→ daemon 永停 running、backend run
++// 永停 pending（无 started_at），用户后续打断对着 live query 空转。
++//
++// 看门狗只布防「首轮启动路径」（inject push 前非 running——本条 inject 预期
++// 立即开新轮）：到点仍零轮事件即判消息被吞，重置会话态并回报该 run 失败。
++// 排队路径（wasRunningBeforeInject）不布防——当前轮事件会持续到达，排队
++// 消息的吞没属遗留缺口（design 风险节，另档治理）。
++
++/** 看门狗默认窗口（ms）。正常链路 push→首事件 ~1-2s（含网络），90s 是
++ * 「零事件」的强信号；远小于 backend pending run 清扫的 300s 兜底。 */
++export const DEFAULT_TURN_START_WATCHDOG_MS = 90_000;
++
++/** 读取看门狗窗口（env SILLYHUB_TURN_START_WATCHDOG_MS，非法/≤0 回落默认；
++ * 逐次读取便于测试覆写，对齐 injectWaitSessionMs 先例）。 */
++export function turnStartWatchdogMs(): number {
++  const raw = process.env.SILLYHUB_TURN_START_WATCHDOG_MS;
++  if (raw === undefined || raw === '') return DEFAULT_TURN_START_WATCHDOG_MS;
++  const v = Number.parseInt(raw, 10);
++  return Number.isFinite(v) && v > 0 ? v : DEFAULT_TURN_START_WATCHDOG_MS;
++}
++
++/** 布防（同会话重布防 = 换防：清旧 timer 挂新 runId——inject 撤防后再注入的
++ * 常规序列天然走本路径）。timer unref 不阻塞 daemon 退出。 */
++export function armTurnStartWatchdog(
++  mgr: SessionManagerCore,
++  sessionId: string,
++  runId: string,
++): void {
++  disarmTurnStartWatchdog(mgr, sessionId);
++  const timer = setTimeout(() => {
++    mgr._turnStartWatchdogs.delete(sessionId);
++    void fireTurnStartWatchdog(mgr, sessionId, runId).catch((err) => {
++      // eslint-disable-next-line no-console
++      console.error(
++        '[session-manager] turn start watchdog fire failed',
++        sessionId,
++        runId,
++        err,
++      );
++    });
++  }, turnStartWatchdogMs());
++  if (typeof timer.unref === 'function') {
++    timer.unref();
++  }
++  mgr._turnStartWatchdogs.set(sessionId, { timer, runId });
++}
++
++/** 撤防（幂等）：任意轮事件 / 会话终态 / stop 时调用。 */
++export function disarmTurnStartWatchdog(
++  mgr: SessionManagerCore,
++  sessionId: string,
++): void {
++  const w = mgr._turnStartWatchdogs.get(sessionId);
++  if (w) {
++    clearTimeout(w.timer);
++    mgr._turnStartWatchdogs.delete(sessionId);
++  }
++}
++
++/**
++ * 看门狗触发：会话态仍停留在布防轮（status=running & currentRunId 未变）才
++ * 动作——期间发生过事件/结果/新 inject（currentRunId 已切）则视为误报静默跳过。
++ *
++ * 动作：status→active；pendingInjectCount 清零（本轮从未发生，无排队可消费）。
++ * **currentRunId 有意保留**（评审 2026-10-21 P2 缓解）：假阳性形态（轮其实起来
++ * 了只是慢）下迟到 result 会按 currentRunId 归属——保留旧 runId 让迟到结果落到
++ * 「已被本看门狗收敛为 failed」的旧轮上（close_interactive_run 终态幂等 no-op），
++ * 而不是被错误记到用户重发后的新轮；下一次 inject 会无条件覆盖 currentRunId。
++ * lastActiveAt 更新后，若保留 running 态的陈旧判定由 inject 的 60s stale-reset
++ * 自愈路径接管（status 已是 active，不触发）。
++ * 随后经 deps.onTurnStartTimeout（可选）由 daemon 桥 notifyRunResult 收敛该 run。
++ */
++async function fireTurnStartWatchdog(
++  mgr: SessionManagerCore,
++  sessionId: string,
++  runId: string,
++): Promise<void> {
++  const state = mgr._store.get(sessionId);
++  if (!state) return;
++  if (state.status !== 'running' || state.currentRunId !== runId) return;
++  state.status = 'active';
++  state.lastActiveAt = Date.now();
++  mgr._pendingInjectCount.delete(sessionId);
++  // eslint-disable-next-line no-console
++  console.warn(
++    '[session-manager] turn start watchdog fired: injected message was not ' +
++      'consumed by engine within window (likely swallowed by interrupt abort ' +
++      'teardown). Session state reset to active; run will be reported failed.',
++    { sessionId, runId, windowMs: turnStartWatchdogMs() },
++  );
++  mgr._scheduleFlush();
++  const cb = mgr.deps.onTurnStartTimeout;
++  if (typeof cb === 'function') {
++    await cb(sessionId, runId);
++  }
++}
+diff --git a/sillyhub-daemon/src/interactive/session-manager/types.ts b/sillyhub-daemon/src/interactive/session-manager/types.ts
+index be28f8109..26bca2222 100644
+--- a/sillyhub-daemon/src/interactive/session-manager/types.ts
++++ b/sillyhub-daemon/src/interactive/session-manager/types.ts
+@@ -553,11 +553,20 @@ export interface SessionManagerCore {
+   readonly _resumeDirs: TranscriptDirs;
+   readonly _credentialManager: SpawnCredentialManager | null;
+   readonly _terminalCleanupTimers: Map<string, ReturnType<typeof setTimeout>>;
++  /** 2026-10-21-daemon-zombie-turn FR-01：轮启动看门狗（sessionId → timer + 布防轮 runId）。 */
++  readonly _turnStartWatchdogs: Map<
++    string,
++    { timer: ReturnType<typeof setTimeout>; runId: string }
++  >;
+   _flushScheduled: Promise<void> | null;
+ 
+   // ── 跨簇协作方法（facade 同名方法一行委托到对应子模块 / 类内保留实现）─────
+   /** notify-chain.ts */
+   _runNotifyChain<T>(sessionId: string, fn: () => T | Promise<T>): Promise<T>;
++  /** turn-control.ts（2026-10-21-daemon-zombie-turn FR-01：轮启动看门狗布防/撤防） */
++  _armTurnStartWatchdog(sessionId: string, runId: string): void;
++  /** turn-control.ts（同上，撤防） */
++  _disarmTurnStartWatchdog(sessionId: string): void;
+   /** facade 类内保留（create/restore/reload 编排） */
+   _runConsume(state: SessionState): Promise<void>;
+   /** persistence.ts */
+diff --git a/sillyhub-daemon/src/interactive/types.ts b/sillyhub-daemon/src/interactive/types.ts
+index c3aa24d00..377e7f07d 100644
+--- a/sillyhub-daemon/src/interactive/types.ts
++++ b/sillyhub-daemon/src/interactive/types.ts
+@@ -601,6 +601,18 @@ export interface SessionManagerDeps {
+    * 任务事件/持久行行为不变（测试 mock 零影响）。
+    */
+   onTaskWakeupInject?: (sessionId: string, prompt: string) => void | Promise<void>;
++  /**
++   * 2026-10-21-daemon-zombie-turn FR-01：轮启动看门狗触发回调。
++   *
++   * inject 首轮启动路径（push 前非 running）布防的看门狗到点仍零轮事件
++   * （status=running & currentRunId 未变——消息疑被引擎在打断 abort 收尾
++   * 窗口吞没）时，session-manager 已重置会话态（active + 清 currentRunId），
++   * 经本回调由 daemon 桥 notifyRunResult 把该 run 收敛 failed（backend
++   * close_interactive_run 既有路径 + SSE 终态）。可选：未注入时仅重置本地
++   * 态、不上报（backend 侧由 pending run 启动超时清扫兜底），测试 mock
++   * 零影响（对齐 onTaskWakeupInject 的 additive-optional 先例）。
++   */
++  onTurnStartTimeout?: (sessionId: string, runId: string) => void | Promise<void>;
+   /**
+    * task-10（§4.3）：元数据持久化端口。
+    *
+diff --git a/sillyhub-daemon/tests/daemon-interrupt-noop-report.test.ts b/sillyhub-daemon/tests/daemon-interrupt-noop-report.test.ts
+new file mode 100644
+index 000000000..f0345e692
+--- /dev/null
++++ b/sillyhub-daemon/tests/daemon-interrupt-noop-report.test.ts
+@@ -0,0 +1,281 @@
++// tests/daemon-interrupt-noop-report.test.ts
++// 2026-10-21-daemon-zombie-turn FR-02：interrupt no-op 回传 + FR-01 daemon 桥
++// onTurnStartTimeout。
++//
++// 覆盖：
++//   - SESSION_INTERRUPT 且 interrupt() 返回 false（会话在 store 但无 running 轮）
++//     + payload 带 run_id → notifyRunResult(error_during_execution) 收敛该 run
++//   - interrupt() 返回 true → 维持现状（只 ack，不回报——终态归 SDK result）
++//   - payload 无 run_id（旧 backend）→ 仅日志不回报
++//   - notifyRunResult 抛错 → warn 不向上抛（backend pending 清扫兜底）
++//   - daemon.onTurnStartTimeout（FR-01 桥）：state 在 → notifyRunResult
++//     (turn_start_timeout)；state 缺失 → no-op
++
++import { describe, it, expect, afterEach, vi } from 'vitest';
++import { Daemon } from '../src/daemon.js';
++import { MSG } from '../src/protocol.js';
++import type { DaemonConfig } from '../src/config.js';
++import type { DetectedAgent } from '../src/agent-detector.js';
++import type { SessionManager } from '../src/interactive/session-manager.js';
++import type { SessionState } from '../src/interactive/types.js';
++
++const mockConfig: DaemonConfig = {
++  server_url: 'http://127.0.0.1:8000',
++  token: 'test-token',
++  runtime_id: 'runtime-uuid-123',
++  profile: 'default',
++  workspace_dir: '/tmp/ws',
++  poll_interval: 0.02,
++  heartbeat_interval: 0.02,
++  max_concurrent_tasks: 5,
++  log_level: 'debug',
++};
++
++function createMockClient() {
++  return {
++    register: vi.fn(async () => ({ id: 'srv-rid-1' })),
++    heartbeat: vi.fn(async () => ({})),
++    markOffline: vi.fn(async () => ({})),
++    claimLease: vi.fn(async () => ({ claim_token: 't', payload: {} })),
++    startLease: vi.fn(async () => ({})),
++    completeLease: vi.fn(async () => ({})),
++    getPendingLeases: vi.fn(async () => []),
++    getExecutionContext: vi.fn(async () => ({ agent_run_id: 'r' })),
++    close: vi.fn(),
++    notifyRunResult: vi.fn(async () => ({})),
++    submitMessages: vi.fn(async () => ({})),
++    notifySessionEnd: vi.fn(async () => ({})),
++  };
++}
++
++function createMockSessionManager(
++  state: Partial<SessionState> | undefined,
++  interruptResult: boolean,
++): SessionManager {
++  const fullState: SessionState | undefined = state
++    ? ({
++        sessionId: 'sess-1',
++        leaseId: 'lease-1',
++        claimToken: 'claim-token-1',
++        currentRunId: 'run-1',
++        status: 'running',
++        lastActiveAt: Date.now(),
++        cwd: '/tmp',
++        provider: 'claude',
++        pathToClaudeCodeExecutable: '/bin/claude',
++        inputQueue: { push() {}, close() {} } as never,
++        ...state,
++      } as SessionState)
++    : undefined;
++  return {
++    create: vi.fn(async () => {}),
++    inject: vi.fn(async () => ({ runId: '' })),
++    interrupt: vi.fn(async () => interruptResult),
++    end: vi.fn(async () => {}),
++    fail: vi.fn(async () => {}),
++    get: vi.fn((() => fullState) as never),
++    start: vi.fn(() => {}),
++    stop: vi.fn(() => {}),
++    manualApproval: false,
++    getPermissionResolver: vi.fn(() => undefined),
++    getPendingInjectCount: vi.fn(() => 0),
++    getIdleTimeoutSec: vi.fn(() => 1800),
++    restoreAndReconnect: vi.fn(async () => {}),
++    markReconnected: vi.fn(async () => {}),
++    flush: vi.fn(async () => {}),
++    snapshotPersistable: vi.fn(() => []),
++    scanOnce: vi.fn(async () => {}),
++  } as unknown as SessionManager;
++}
++
++function buildDaemon(sm: SessionManager | null) {
++  const client = createMockClient();
++  const taskRunner = {
++    runLease: vi.fn(async () => ({
++      success: true,
++      exitCode: 0,
++      status: 'completed',
++      patch: '',
++      filesChanged: 0,
++      insertions: 0,
++      deletions: 0,
++      output: 'ok',
++      error: '',
++      durationMs: 10,
++      sessionId: '',
++      metadata: {},
++    })),
++  };
++  const daemon = new Daemon(mockConfig, client as never, taskRunner as never, {
++    sessionManager: sm,
++    detector: { detectAgents: vi.fn(async () => [] as DetectedAgent[]) },
++  });
++  return { daemon, client };
++}
++
++/** 直调私有 _routeSessionControl（测试驱动口，bridge 测试同款 cast 模式）。 */
++function routeControl(
++  daemon: Daemon,
++  msgType: string,
++  raw: Record<string, unknown>,
++): Promise<void> {
++  return (
++    daemon as unknown as {
++      _routeSessionControl(t: string, r: Record<string, unknown>): Promise<void>;
++    }
++  )._routeSessionControl(msgType, raw);
++}
++
++describe('2026-10-21-daemon-zombie-turn FR-02：interrupt no-op 回传', () => {
++  let daemons: Daemon[] = [];
++
++  afterEach(async () => {
++    for (const d of daemons) {
++      await (d as unknown as { stop(): Promise<void> | void }).stop?.();
++    }
++    daemons = [];
++    vi.restoreAllMocks();
++  });
++
++  function track<T extends { daemon: Daemon }>(built: T): T {
++    daemons.push(built.daemon);
++    return built;
++  }
++
++  it('interrupt() false + payload 带 run_id → notifyRunResult 收敛该 run（主事故路径）', async () => {
++    const { daemon, client } = track(
++      buildDaemon(createMockSessionManager({ status: 'active', currentRunId: undefined }, false)),
++    );
++
++    await routeControl(daemon, MSG.SESSION_INTERRUPT, {
++      session_id: 'sess-1',
++      lease_id: 'lease-1',
++      runtime_id: 'runtime-uuid-123',
++      run_id: 'run-zombie',
++    });
++
++    expect(client.notifyRunResult).toHaveBeenCalledTimes(1);
++    const [leaseId, claimToken, runId, payload] = client.notifyRunResult.mock.calls[0] as [
++      string,
++      string,
++      string,
++      { status: string; is_error: boolean; result_summary: string },
++    ];
++    expect(leaseId).toBe('lease-1');
++    expect(claimToken).toBe('claim-token-1');
++    expect(runId).toBe('run-zombie');
++    expect(payload.status).toBe('error_during_execution');
++    expect(payload.is_error).toBe(true);
++    expect(payload.result_summary).toContain('无进行中的轮次');
++  });
++
++  it('interrupt() true → 维持现状不回报（终态归 SDK result 驱动）', async () => {
++    const { daemon, client } = track(
++      buildDaemon(createMockSessionManager({ status: 'running', currentRunId: 'run-1' }, true)),
++    );
++
++    await routeControl(daemon, MSG.SESSION_INTERRUPT, {
++      session_id: 'sess-1',
++      lease_id: 'lease-1',
++      runtime_id: 'runtime-uuid-123',
++      run_id: 'run-1',
++    });
++
++    expect(client.notifyRunResult).not.toHaveBeenCalled();
++  });
++
++  it('payload 无 run_id（旧 backend）→ 仅日志不回报', async () => {
++    const { daemon, client } = track(
++      buildDaemon(createMockSessionManager({ status: 'active', currentRunId: undefined }, false)),
++    );
++
++    await routeControl(daemon, MSG.SESSION_INTERRUPT, {
++      session_id: 'sess-1',
++      lease_id: 'lease-1',
++      runtime_id: 'runtime-uuid-123',
++    });
++
++    expect(client.notifyRunResult).not.toHaveBeenCalled();
++  });
++
++  it('interrupt() false 但会话仍 running → 不回报（P3 守卫：写失败/超时非无轮）', async () => {
++    const { daemon, client } = track(
++      buildDaemon(createMockSessionManager({ status: 'running', currentRunId: 'run-1' }, false)),
++    );
++
++    await routeControl(daemon, MSG.SESSION_INTERRUPT, {
++      session_id: 'sess-1',
++      lease_id: 'lease-1',
++      runtime_id: 'runtime-uuid-123',
++      run_id: 'run-1',
++    });
++
++    expect(client.notifyRunResult).not.toHaveBeenCalled();
++  });
++
++  it('notifyRunResult 抛错 → warn 不向上抛（backend pending 清扫兜底）', async () => {
++    const sm = createMockSessionManager({ status: 'active', currentRunId: undefined }, false);
++    const built = buildDaemon(sm);
++    built.client.notifyRunResult = vi.fn(async () => {
++      throw new Error('network down');
++    });
++    track(built);
++
++    await expect(
++      routeControl(built.daemon, MSG.SESSION_INTERRUPT, {
++        session_id: 'sess-1',
++        lease_id: 'lease-1',
++        runtime_id: 'runtime-uuid-123',
++        run_id: 'run-zombie',
++      }),
++    ).resolves.toBeUndefined();
++  });
++
++  it('camelCase runId 双读同效（协议字段名漂移防御）', async () => {
++    const { daemon, client } = track(
++      buildDaemon(createMockSessionManager({ status: 'active', currentRunId: undefined }, false)),
++    );
++
++    await routeControl(daemon, MSG.SESSION_INTERRUPT, {
++      session_id: 'sess-1',
++      lease_id: 'lease-1',
++      runtime_id: 'runtime-uuid-123',
++      runId: 'run-zombie',
++    });
++
++    expect(client.notifyRunResult).toHaveBeenCalledTimes(1);
++    expect((client.notifyRunResult.mock.calls[0] as unknown[])[2]).toBe('run-zombie');
++  });
++});
++
++describe('2026-10-21-daemon-zombie-turn FR-01 桥：daemon.onTurnStartTimeout', () => {
++  it('state 在 → notifyRunResult(turn_start_timeout) 收敛该 run', async () => {
++    const { daemon, client } = buildDaemon(
++      createMockSessionManager({ status: 'active', currentRunId: undefined }, false),
++    );
++
++    await daemon.onTurnStartTimeout('sess-1', 'run-zombie');
++
++    expect(client.notifyRunResult).toHaveBeenCalledTimes(1);
++    const [leaseId, claimToken, runId, payload] = client.notifyRunResult.mock.calls[0] as [
++      string,
++      string,
++      string,
++      { status: string; is_error: boolean; result_summary: string },
++    ];
++    expect(leaseId).toBe('lease-1');
++    expect(claimToken).toBe('claim-token-1');
++    expect(runId).toBe('run-zombie');
++    expect(payload.status).toBe('turn_start_timeout');
++    expect(payload.is_error).toBe(true);
++    expect(payload.result_summary).toContain('重新发送');
++  });
++
++  it('state 缺失（终态清理后迟到触发）→ no-op 不上报', async () => {
++    const { daemon, client } = buildDaemon(createMockSessionManager(undefined, false));
++
++    await daemon.onTurnStartTimeout('sess-gone', 'run-zombie');
++
++    expect(client.notifyRunResult).not.toHaveBeenCalled();
++  });
++});
+diff --git a/sillyhub-daemon/tests/interactive/session-manager-lifecycle-turn-anchor-eviction.test.ts b/sillyhub-daemon/tests/interactive/session-manager-lifecycle-turn-anchor-eviction.test.ts
+index a01aea427..06f3fa073 100644
+--- a/sillyhub-daemon/tests/interactive/session-manager-lifecycle-turn-anchor-eviction.test.ts
++++ b/sillyhub-daemon/tests/interactive/session-manager-lifecycle-turn-anchor-eviction.test.ts
+@@ -31,6 +31,7 @@ interface FakeMgrExtras {
+   clearBackgroundTasks: ReturnType<typeof vi.fn>;
+   destroyUsageLedger: ReturnType<typeof vi.fn>;
+   onSessionEnd: ReturnType<typeof vi.fn>;
++  disarmTurnStartWatchdog: ReturnType<typeof vi.fn>;
+ }
+ 
+ /** 最小伪造 mgr：只提供 terminateSession 实际触及的成员（10 分钟延迟清理
+@@ -42,12 +43,15 @@ function makeFakeMgr(): { mgr: SessionManagerCore; extras: FakeMgrExtras } {
+     clearBackgroundTasks: vi.fn(),
+     destroyUsageLedger: vi.fn(),
+     onSessionEnd: vi.fn(async () => {}),
++    disarmTurnStartWatchdog: vi.fn(),
+   };
+   const mgr = {
+     _pendingFirstPrompt: new Map(),
+     _abortPermissionResolver: extras.abortPermissionResolver,
+     _clearBorrowSandbox: extras.clearBorrowSandbox,
+     _clearBackgroundTasks: extras.clearBackgroundTasks,
++    // 2026-10-21-daemon-zombie-turn FR-01：0b 步撤防轮启动看门狗（core 新成员）。
++    _disarmTurnStartWatchdog: extras.disarmTurnStartWatchdog,
+     // 2026-10-21-task-wakeup-restore：4b-2 唤醒 debounce 清理触及的注册表。
+     _taskWakeupPending: new Map(),
+     _destroyUsageLedger: extras.destroyUsageLedger,
+diff --git a/sillyhub-daemon/tests/interactive/turn-start-watchdog.test.ts b/sillyhub-daemon/tests/interactive/turn-start-watchdog.test.ts
+new file mode 100644
+index 000000000..bbcd4ed8f
+--- /dev/null
++++ b/sillyhub-daemon/tests/interactive/turn-start-watchdog.test.ts
+@@ -0,0 +1,234 @@
++// tests/interactive/turn-start-watchdog.test.ts
++// 2026-10-21-daemon-zombie-turn FR-01：daemon 轮启动看门狗。
++//
++// 根因场景（生产会话 49d893ab）：打断 abort 收尾窗口吞没注入消息——inject
++// 正常 push + ack，但引擎零事件零 result → daemon 永停 running、backend run
++// 永停 pending。看门狗在首轮启动路径布防，到点重置会话态并回调
++// deps.onTurnStartTimeout（daemon 桥 notifyRunResult 收敛该 run）。
++//
++// 用例矩阵：
++//   - inject 首轮路径布防（active 会话注入 → 看门狗就位）
++//   - 到点触发：状态重置 active + currentRunId 清空 + onTurnStartTimeout 回调
++//   - 轮事件撤防：onMessage / onResult 到达 → 看门狗移除，到点不触发
++//   - 终态撤防：end() 后看门狗移除
++//   - stop() 清全部看门狗
++//   - 到点守卫：currentRunId 已切新轮（误报形态）→ 静默跳过不回调
++//   - env SILLYHUB_TURN_START_WATCHDOG_MS 窗口覆写生效
++
++import { describe, it, expect, afterEach, vi } from 'vitest';
++import { SessionManager } from '../../src/interactive/session-manager.js';
++import { InputQueue } from '../../src/interactive/input-queue.js';
++import type { SessionManagerDeps } from '../../src/interactive/types.js';
++import type {
++  InteractiveDriver,
++  InteractiveDriverHandle,
++  InteractiveDriverCallbacks,
++  SessionState,
++  SessionStatus,
++} from '../../src/interactive/types.js';
++import { onResult, onMessage } from '../../src/interactive/session-manager/events.js';
++
++/** 看门狗 Map 的测试取用口（私有成员 cast，busy-check 测试同款注入路径）。 */
++function watchdogMap(
++  sm: SessionManager,
++): Map<string, { timer: ReturnType<typeof setTimeout>; runId: string }> {
++  return (sm as unknown as { _turnStartWatchdogs: Map<string, never> })._turnStartWatchdogs as Map<
++    string,
++    { timer: ReturnType<typeof setTimeout>; runId: string }
++  >;
++}
++
++function createSessionManager(onTurnStartTimeout?: SessionManagerDeps['onTurnStartTimeout']) {
++  const fakeDriver: InteractiveDriver = {
++    provider: 'claude',
++    async start() {
++      return { provider: 'claude' } as unknown as InteractiveDriverHandle;
++    },
++    async consume(_handle, _callbacks: InteractiveDriverCallbacks) {
++      return new Promise<void>(() => {});
++    },
++    async interrupt() {
++      return false;
++    },
++  };
++  const deps: SessionManagerDeps = {
++    driver: fakeDriver as never,
++    drivers: { claude: fakeDriver },
++    onTurnResult: vi.fn(),
++    onTurnMessage: vi.fn(),
++    onSessionEnd: vi.fn(),
++    onSessionEvent: vi.fn(),
++    onTurnStartTimeout,
++  };
++  return new SessionManager(deps);
++}
++
++function makeState(sessionId: string, status: SessionStatus): SessionState {
++  return {
++    sessionId,
++    leaseId: `lease-${sessionId}`,
++    claimToken: `ct-${sessionId}`,
++    inputQueue: new InputQueue(),
++    status,
++    lastActiveAt: Date.now(),
++    cwd: '/tmp/test',
++    provider: 'claude',
++    pathToClaudeCodeExecutable: '/usr/bin/claude',
++    subagentDepth: new Map<string, number>(),
++  } as SessionState;
++}
++
++function seed(sm: SessionManager, state: SessionState): void {
++  (sm as unknown as { _store: Map<string, SessionState> })._store.set(state.sessionId, state);
++}
++
++/** mgr core 桥（onMessage/onResult 模块函数第一参数）。 */
++function core(sm: SessionManager): never {
++  return (sm as unknown as { _core(): never })._core();
++}
++
++describe('2026-10-21-daemon-zombie-turn FR-01：轮启动看门狗', () => {
++  afterEach(() => {
++    vi.useRealTimers();
++    delete process.env.SILLYHUB_TURN_START_WATCHDOG_MS;
++  });
++
++  it('inject 首轮路径布防：active 会话注入后看门狗就位（默认 90s 窗口）', async () => {
++    vi.useFakeTimers();
++    const sm = createSessionManager();
++    seed(sm, makeState('sess-1', 'active'));
++
++    await sm.inject('sess-1', 'hello', 'run-9');
++
++    const w = watchdogMap(sm).get('sess-1');
++    expect(w).toBeDefined();
++    expect(w!.runId).toBe('run-9');
++    // 布防不提前触发
++    await vi.advanceTimersByTimeAsync(89_999);
++    expect(sm.get('sess-1')!.status).toBe('running');
++  });
++
++  it('到点触发：重置 active + 保留 currentRunId 作迟到归属锚 + onTurnStartTimeout 回调（主事故路径）', async () => {
++    vi.useFakeTimers();
++    const onTurnStartTimeout = vi.fn(async () => {});
++    const sm = createSessionManager(onTurnStartTimeout);
++    seed(sm, makeState('sess-1', 'active'));
++
++    await sm.inject('sess-1', '[后台任务通知] …', 'run-zombie');
++    await vi.advanceTimersByTimeAsync(90_000);
++
++    const state = sm.get('sess-1')!;
++    expect(state.status).toBe('active');
++    // P2 缓解：保留旧 runId——迟到 result 归属到已收敛为 failed 的旧轮（幂等），
++    // 不被误记到用户重发后的新轮；下次 inject 无条件覆盖。
++    expect(state.currentRunId).toBe('run-zombie');
++    expect(onTurnStartTimeout).toHaveBeenCalledTimes(1);
++    expect(onTurnStartTimeout).toHaveBeenCalledWith('sess-1', 'run-zombie');
++    // 触发后看门狗条目已清
++    expect(watchdogMap(sm).has('sess-1')).toBe(false);
++  });
++
++  it('轮事件撤防：onMessage 到达（轮已启动）→ 到点不触发', async () => {
++    vi.useFakeTimers();
++    const onTurnStartTimeout = vi.fn(async () => {});
++    const sm = createSessionManager(onTurnStartTimeout);
++    const state = makeState('sess-1', 'active');
++    seed(sm, state);
++
++    await sm.inject('sess-1', 'hello', 'run-9');
++    await onMessage(core(sm), state, { events: [] });
++    expect(watchdogMap(sm).has('sess-1')).toBe(false);
++
++    await vi.advanceTimersByTimeAsync(90_000);
++    expect(onTurnStartTimeout).not.toHaveBeenCalled();
++    // 轮生命周期不受影响（仍 running，终态归 onResult）
++    expect(sm.get('sess-1')!.status).toBe('running');
++  });
++
++  it('轮事件撤防：onResult 到达 → 到点不触发', async () => {
++    vi.useFakeTimers();
++    const onTurnStartTimeout = vi.fn(async () => {});
++    const sm = createSessionManager(onTurnStartTimeout);
++    const state = makeState('sess-1', 'active');
++    seed(sm, state);
++
++    await sm.inject('sess-1', 'hello', 'run-9');
++    await onResult(core(sm), state, { subtype: 'success', is_error: false } as never);
++    expect(watchdogMap(sm).has('sess-1')).toBe(false);
++
++    await vi.advanceTimersByTimeAsync(90_000);
++    expect(onTurnStartTimeout).not.toHaveBeenCalled();
++  });
++
++  it('终态撤防：end() 后看门狗移除', async () => {
++    vi.useFakeTimers();
++    const onTurnStartTimeout = vi.fn(async () => {});
++    const sm = createSessionManager(onTurnStartTimeout);
++    seed(sm, makeState('sess-1', 'active'));
++
++    await sm.inject('sess-1', 'hello', 'run-9');
++    await sm.end('sess-1');
++    expect(watchdogMap(sm).has('sess-1')).toBe(false);
++
++    await vi.advanceTimersByTimeAsync(90_000);
++    expect(onTurnStartTimeout).not.toHaveBeenCalled();
++  });
++
++  it('stop() 清全部看门狗（退出途中不 fire）', async () => {
++    vi.useFakeTimers();
++    const onTurnStartTimeout = vi.fn(async () => {});
++    const sm = createSessionManager(onTurnStartTimeout);
++    seed(sm, makeState('sess-1', 'active'));
++
++    await sm.inject('sess-1', 'hello', 'run-9');
++    sm.stop();
++    expect(watchdogMap(sm).size).toBe(0);
++
++    await vi.advanceTimersByTimeAsync(90_000);
++    expect(onTurnStartTimeout).not.toHaveBeenCalled();
++  });
++
++  it('到点守卫：currentRunId 已切新轮 → 静默跳过不回调（误报保护）', async () => {
++    vi.useFakeTimers();
++    const onTurnStartTimeout = vi.fn(async () => {});
++    const sm = createSessionManager(onTurnStartTimeout);
++    const state = makeState('sess-1', 'active');
++    seed(sm, state);
++
++    await sm.inject('sess-1', 'hello', 'run-old');
++    // 模拟误报形态：布防轮已不是当前轮（新 inject 已切换 currentRunId）
++    state.currentRunId = 'run-new';
++    await vi.advanceTimersByTimeAsync(90_000);
++
++    expect(onTurnStartTimeout).not.toHaveBeenCalled();
++    // 状态不被误动（新轮语义保留）
++    expect(sm.get('sess-1')!.currentRunId).toBe('run-new');
++  });
++
++  it('env SILLYHUB_TURN_START_WATCHDOG_MS 覆写窗口生效', async () => {
++    vi.useFakeTimers();
++    process.env.SILLYHUB_TURN_START_WATCHDOG_MS = '1500';
++    const onTurnStartTimeout = vi.fn(async () => {});
++    const sm = createSessionManager(onTurnStartTimeout);
++    seed(sm, makeState('sess-1', 'active'));
++
++    await sm.inject('sess-1', 'hello', 'run-9');
++    await vi.advanceTimersByTimeAsync(1_499);
++    expect(onTurnStartTimeout).not.toHaveBeenCalled();
++    await vi.advanceTimersByTimeAsync(1);
++    expect(onTurnStartTimeout).toHaveBeenCalledTimes(1);
++  });
++
++  it('回调未注入（旧装配形态）：到点仍重置本地态、不抛错', async () => {
++    vi.useFakeTimers();
++    const sm = createSessionManager(undefined);
++    seed(sm, makeState('sess-1', 'active'));
++
++    await sm.inject('sess-1', 'hello', 'run-9');
++    await vi.advanceTimersByTimeAsync(90_000);
++
++    expect(sm.get('sess-1')!.status).toBe('active');
++    // P2 缓解：currentRunId 保留（迟到归属锚，见上）。
++    expect(sm.get('sess-1')!.currentRunId).toBe('run-9');
++  });
++});

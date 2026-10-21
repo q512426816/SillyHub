@@ -1,0 +1,28 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-21-daemon-zombie-turn",
+  "reviewer": "subagent",
+  "verdict": "PASS",
+  "reviewedAgainst": "2f5e3bcf95c06deec30f390c8abbf76461b28db3",
+  "findings": [
+    {
+      "severity": "P3",
+      "title": "FR-04 终态清除在 interrupt 请求 await 窗口存在窄时序缺口（行为已由到点裁决兜底）",
+      "evidence": "handleInterrupt 在 await interruptSession 成功后才写 interruptArmedRunIdRef 并 arm；若终态 SSE 在 await 窗口内先到，终态 effect 因 ref 仍为 null 不会 clear，随后 arm 仍会为已终态轮布防，且成功路径无 state 更新触发明细 effect 重跑。该 timer 会在 15s 到点由 isTurnStillInterrupting 二次裁决静默 no-op（不会误报，也不是重复泄漏），但规格字面「终态到达即清除」在该窄交错下未覆盖。建议 arm 前先写 ref 并在失败分支回滚，或 arm 后再用最新 turns 复核一次。",
+      "location": "frontend/src/components/daemon/session-panel/session-panel-page.tsx:4044-4051,4087-4088; frontend/src/components/daemon/session-panel/interrupt-timeout.ts:33-53"
+    },
+    {
+      "severity": "P3",
+      "title": "requirements FR-02「false 仅可能是驱动写失败/超时」与 design B-3 的 query 已死分支措辞不一致",
+      "evidence": "design B-3 已明确「query 已死但 status=running」也是 running 态 false 的来源（实际依赖 driver onTurnError→fail 收敛）；requirements FR-02 却写「false 仅可能是驱动写失败/超时」，把该分支排除在外。实现行为对两类 false 一致（running 时都不回报），仅文档措辞不一致；建议改为「可能是」或在括号内补 query 已死分支。",
+      "location": ".sillyspec/changes/2026-10-21-daemon-zombie-turn/requirements.md:29; .sillyspec/changes/2026-10-21-daemon-zombie-turn/design.md:57"
+    }
+  ],
+  "dimensionNotes": {
+    "乱序": "B-1 边界已裁决：可接受（看门狗保留 currentRunId，迟到 result 落已 failed 旧轮走 close_interactive_run 终态幂等；仅「90s 假阳性 + 用户在旧 result 前重发」双窄条件仍按新 currentRunId 归属，属既有单活跃轮模型固有面，requirements FR-01 已同步）。B-2 边界已裁决：可接受（空/无关 envelope 撤防已披露，FR-03 300s + FR-04 15s 兜底；Claude driver 仅在 events.length>0 时上报）。FR-02 noop 与真实 result 竞态仍由 close_run_steps 终态 FOR UPDATE 守卫保证幂等。",
+    "并发": "B-4 边界已裁决：可接受（300s 与 inject 停等窗硬顶同量级、Settings 可调；正常 created→started ~2s，pending_approval 与离线 runtime 已跳过）。P3② 并发清扫重复广播边界已裁决：可接受（design 声明单实例部署下不成立，重复 SSE 帧幂等；多实例部署时需改用 UPDATE rowcount/RETURNING 去重）。",
+    "切换": "B-5 边界已裁决：可接受（忙轮 steering 同 run_id 复用被 abort 吞没时无 pending run 可扫、watchdog 不 arm，作为已知遗留缺口另档治理）。daemon end/fail/stop 撤防仍在；前端新增终态 effect 显式 clear + 到点 isTurnStillInterrupting 二次裁决，P1 的行为面已闭环（正常时序终态即清，窄 await 交错见 P3 建议）。",
+    "作用域": "B-3 边界已裁决：可接受（running 态 interrupt false 不回报以免误杀活轮；design 已按复审建议写明 query 已死已 started run 依赖 driver onTurnError→fail，而非 FR-01/FR-03；requirements 残留「仅可能」措辞见 P3）。watchdog per-session + fire 时 runId 守卫、sweep 按 AgentRun→AgentSession→DaemonRuntime 关联、run_id/onTurnStartTimeout 可选契约跨版本降级均对齐。"
+  },
+  "reviewedAt": "2026-10-21T17:37:29+08:00"
+}

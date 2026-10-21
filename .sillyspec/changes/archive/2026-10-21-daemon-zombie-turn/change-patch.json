@@ -1,0 +1,272 @@
+{
+  "change": "2026-10-21-daemon-zombie-turn",
+  "baseline": "5ff6414b90b2ff4bea26ac08992c513b4e844a8c",
+  "head": "2f5e3bcf95c06deec30f390c8abbf76461b28db3",
+  "files": [
+    "backend/app/core/config.py",
+    "backend/app/modules/daemon/session/service/control.py",
+    "backend/app/modules/daemon/sweep.py",
+    "backend/app/modules/daemon/tests/test_interrupt_payload_run_id.py",
+    "backend/app/modules/daemon/tests/test_pending_run_start_sweep.py",
+    "frontend/src/components/daemon/session-panel/__tests__/interrupt-timeout.test.ts",
+    "frontend/src/components/daemon/session-panel/interrupt-timeout.ts",
+    "frontend/src/components/daemon/session-panel/session-panel-page.tsx",
+    "sillyhub-daemon/src/cli.ts",
+    "sillyhub-daemon/src/daemon.ts",
+    "sillyhub-daemon/src/interactive/session-manager.ts",
+    "sillyhub-daemon/src/interactive/session-manager/events.ts",
+    "sillyhub-daemon/src/interactive/session-manager/lifecycle.ts",
+    "sillyhub-daemon/src/interactive/session-manager/turn-control.ts",
+    "sillyhub-daemon/src/interactive/session-manager/types.ts",
+    "sillyhub-daemon/src/interactive/types.ts",
+    "sillyhub-daemon/tests/daemon-interrupt-noop-report.test.ts",
+    "sillyhub-daemon/tests/interactive/session-manager-lifecycle-turn-anchor-eviction.test.ts",
+    "sillyhub-daemon/tests/interactive/turn-start-watchdog.test.ts"
+  ],
+  "totals": {
+    "files": 19,
+    "additions": 1656,
+    "deletions": 7
+  },
+  "savedAt": "2026-10-21T09:34:51.859Z",
+  "note": "flow done 时点冻结（本变更可归属交付面：baseline..HEAD 提交面过滤 .sillyspec/ 只留 .sillyspec/docs/ 交付文档 + 独占树未提交交付；治理工件目录不入冻结——2026-10-12-close-trace-freeze-integrity FR-01）",
+  "modules": [
+    {
+      "id": "core",
+      "files": 1,
+      "doc": "docs/backend/modules/core.md",
+      "docTouched": false,
+      "docMissing": false
+    },
+    {
+      "id": "daemon",
+      "files": 4,
+      "doc": "docs/backend/modules/daemon.md",
+      "docTouched": false,
+      "docMissing": false
+    },
+    {
+      "id": "backend",
+      "files": 5,
+      "doc": "docs/multi-agent-platform/modules/backend.md",
+      "docTouched": false,
+      "docMissing": false
+    },
+    {
+      "id": "frontend",
+      "files": 3,
+      "doc": "docs/multi-agent-platform/modules/frontend.md",
+      "docTouched": false,
+      "docMissing": false
+    },
+    {
+      "id": "sillyhub-daemon",
+      "files": 11,
+      "doc": "docs/multi-agent-platform/modules/sillyhub-daemon.md",
+      "docTouched": false,
+      "docMissing": false
+    },
+    {
+      "id": "core",
+      "files": 1,
+      "doc": "docs/SillyHub/modules/core.md",
+      "docTouched": false,
+      "docMissing": false
+    },
+    {
+      "id": "daemon",
+      "files": 15,
+      "doc": "docs/SillyHub/modules/daemon.md",
+      "docTouched": false,
+      "docMissing": false
+    },
+    {
+      "id": "frontend_components",
+      "files": 3,
+      "doc": "docs/SillyHub/modules/frontend_components.md",
+      "docTouched": false,
+      "docMissing": false
+    }
+  ],
+  "uncoveredDirs": [],
+  "moduleMaps": [
+    "docs/backend/modules/_module-map.yaml",
+    "docs/frontend/modules/_module-map.yaml",
+    "docs/multi-agent-platform/modules/_module-map.yaml",
+    "docs/SillyHub/modules/_module-map.yaml",
+    "docs/sillyhub-daemon/modules/_module-map.yaml"
+  ],
+  "acceptedDirtyGap": 22,
+  "scopeAudit": {
+    "mode": "full-flow",
+    "ok": true,
+    "degradedReason": null,
+    "baseAnchor": "5ff6414b90b2ff4bea26ac08992c513b4e844a8c",
+    "totals": {
+      "files": 19,
+      "additions": 1656,
+      "deletions": 7
+    },
+    "rows": [
+      {
+        "path": "backend/app/core/config.py",
+        "additions": 12,
+        "deletions": 0,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "planned"
+      },
+      {
+        "path": "backend/app/modules/daemon/session/service/control.py",
+        "additions": 12,
+        "deletions": 5,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "planned"
+      },
+      {
+        "path": "backend/app/modules/daemon/sweep.py",
+        "additions": 176,
+        "deletions": 0,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "planned"
+      },
+      {
+        "path": "backend/app/modules/daemon/tests/test_interrupt_payload_run_id.py",
+        "additions": 103,
+        "deletions": 0,
+        "kind": "new",
+        "planned": null,
+        "verdict": "planned"
+      },
+      {
+        "path": "backend/app/modules/daemon/tests/test_pending_run_start_sweep.py",
+        "additions": 275,
+        "deletions": 0,
+        "kind": "new",
+        "planned": null,
+        "verdict": "planned"
+      },
+      {
+        "path": "frontend/src/components/daemon/session-panel/__tests__/interrupt-timeout.test.ts",
+        "additions": 159,
+        "deletions": 0,
+        "kind": "new",
+        "planned": null,
+        "verdict": "planned"
+      },
+      {
+        "path": "frontend/src/components/daemon/session-panel/interrupt-timeout.ts",
+        "additions": 68,
+        "deletions": 0,
+        "kind": "new",
+        "planned": null,
+        "verdict": "planned"
+      },
+      {
+        "path": "frontend/src/components/daemon/session-panel/session-panel-page.tsx",
+        "additions": 40,
+        "deletions": 1,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "planned"
+      },
+      {
+        "path": "sillyhub-daemon/src/cli.ts",
+        "additions": 5,
+        "deletions": 0,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "planned"
+      },
+      {
+        "path": "sillyhub-daemon/src/daemon.ts",
+        "additions": 117,
+        "deletions": 1,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "planned"
+      },
+      {
+        "path": "sillyhub-daemon/src/interactive/session-manager.ts",
+        "additions": 26,
+        "deletions": 0,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "planned"
+      },
+      {
+        "path": "sillyhub-daemon/src/interactive/session-manager/events.ts",
+        "additions": 7,
+        "deletions": 0,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "planned"
+      },
+      {
+        "path": "sillyhub-daemon/src/interactive/session-manager/lifecycle.ts",
+        "additions": 9,
+        "deletions": 0,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "planned"
+      },
+      {
+        "path": "sillyhub-daemon/src/interactive/session-manager/turn-control.ts",
+        "additions": 107,
+        "deletions": 0,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "planned"
+      },
+      {
+        "path": "sillyhub-daemon/src/interactive/session-manager/types.ts",
+        "additions": 9,
+        "deletions": 0,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "planned"
+      },
+      {
+        "path": "sillyhub-daemon/src/interactive/types.ts",
+        "additions": 12,
+        "deletions": 0,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "planned"
+      },
+      {
+        "path": "sillyhub-daemon/tests/daemon-interrupt-noop-report.test.ts",
+        "additions": 281,
+        "deletions": 0,
+        "kind": "new",
+        "planned": null,
+        "verdict": "planned"
+      },
+      {
+        "path": "sillyhub-daemon/tests/interactive/session-manager-lifecycle-turn-anchor-eviction.test.ts",
+        "additions": 4,
+        "deletions": 0,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "planned"
+      },
+      {
+        "path": "sillyhub-daemon/tests/interactive/turn-start-watchdog.test.ts",
+        "additions": 234,
+        "deletions": 0,
+        "kind": "new",
+        "planned": null,
+        "verdict": "planned"
+      }
+    ],
+    "excluded": {
+      "foreignDeclared": []
+    },
+    "note": "flow done 时点冻结（本文件落盘时采集）",
+    "closedBy": "flow done"
+  },
+  "patchSha256": "e56f2f41993bee8ff6da60100535e100297298de01bc1364d712675dfefb6323",
+  "patchStatus": "ok"
+}

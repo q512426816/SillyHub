@@ -473,3 +473,79 @@ created_at: 2026-10-15T11:57:05.061Z
   confirmed_at: null
   source_change: 2026-10-19-change-assets-cross-repo-repos
   status: active
+
+## FR-core-022 inject 在会话非 idle 时不再 ack 了事：排队补启或拒绝，不产生无 started_at 的悬挂 run
+变更：2026-10-21-daemon-zombie-turn
+状态：active
+摘要：打断收尾竞态吞没 inject（主事故路径）；正常启动的轮不误伤
+全文：.sillyspec/changes/archive/2026-10-21-daemon-zombie-turn/requirements.md#FR-01
+最近确认：2f5e3bcf95c06deec30f390c8abbf76461b28db3
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-21-daemon-zombie-turn:flow:测试绑定FR-01
+  tests: sillyhub-daemon/tests/interactive/turn-start-watchdog.test.ts「inject 布防/事件撤防/到点收敛上报/终态撤防」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-21-daemon-zombie-turn
+  status: active
+
+## FR-core-023 interrupt 对非 running 的 no-op 结果回传后端；后端对 acked-but-ineffective 打断立即收敛 pending run 并通知前端
+变更：2026-10-21-daemon-zombie-turn
+状态：active
+摘要：僵尸 run 上按打断（事故主场景）
+全文：.sillyspec/changes/archive/2026-10-21-daemon-zombie-turn/requirements.md#FR-02
+最近确认：2f5e3bcf95c06deec30f390c8abbf76461b28db3
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-21-daemon-zombie-turn:flow:测试绑定FR-02
+  tests: backend/app/modules/daemon/tests/test_interrupt_payload_run_id.py「interrupt payload 携带 run_id」 | sillyhub-daemon/tests/daemon-interrupt-noop-report.test.ts「interrupt false 回传 notifyRunResult / 会话缺失不回报」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-21-daemon-zombie-turn
+  status: active
+
+## FR-core-024 后端主动清扫「创建后 N 秒未被 daemon 启动」的 pending run（N 可配置）
+变更：2026-10-21-daemon-zombie-turn
+状态：active
+摘要：僵尸 pending run 兜底收敛
+全文：.sillyspec/changes/archive/2026-10-21-daemon-zombie-turn/requirements.md#FR-03
+最近确认：2f5e3bcf95c06deec30f390c8abbf76461b28db3
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-21-daemon-zombie-turn:flow:测试绑定FR-03
+  tests: backend/app/modules/daemon/tests/test_pending_run_start_sweep.py「超龄在线 pending run 收敛 / 新 run·审批等待·离线 runtime 不扫」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-21-daemon-zombie-turn
+  status: active
+
+## FR-core-025 前端打断 15s 超时回退提示，不再永久停在「打断中」
+变更：2026-10-21-daemon-zombie-turn
+状态：active
+摘要：打断无效不卡死
+全文：.sillyspec/changes/archive/2026-10-21-daemon-zombie-turn/requirements.md#FR-04
+最近确认：2f5e3bcf95c06deec30f390c8abbf76461b28db3
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-21-daemon-zombie-turn:flow:测试绑定FR-04
+  tests: frontend/src/components/daemon/session-panel/__tests__/interrupt-timeout.test.ts「15s 到点回退 running+提示 / 终态到达清定时器」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-21-daemon-zombie-turn
+  status: active

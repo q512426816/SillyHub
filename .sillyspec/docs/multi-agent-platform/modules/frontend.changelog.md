@@ -146,3 +146,4 @@
 | 2026-10-21 | 2026-10-21-overview-card-mainflow-scan | 总览卡主管线去scan并隐藏thin零步骤 |
 | 2026-10-21 | 2026-10-21-mobile-scan-birth-cleanup | 移动端与变更中心scan起步口径清零 |
 | 2026-10-21 | 2026-10-21-task-wakeup-restore | 恢复后台任务终态唤醒链并折叠系统行呈现 |
+| 2026-10-21 | 2026-10-21-daemon-zombie-turn | 修复 daemon 会话僵尸轮与打断无效 |
