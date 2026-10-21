@@ -3038,10 +3038,10 @@ export interface paths {
          * Set Default Provider
          * @description 置本行为默认供应商（cc-switch 式「启动」）。
          *
-         *     task-05（FR-07）：返回结构化 ``SetDefaultResult`` 三字段，供前端区分立即生效 /
-         *     等待 turn 边界 / 凭证失败三种状态。service 层 ``set_default`` 已在 task-03 改造为
-         *     返回 ``DefaultSwitchResult``（probe 凭证探测失败时 ``switched=False`` + ``error``
-         *     不置位、不推送，原供应商继续服务运行中会话，D-003）。
+         *     task-05（FR-07）：返回结构化 ``SetDefaultResult`` 三字段。service 层 ``set_default``
+         *     在 task-03 改造为返回 ``DefaultSwitchResult``（probe 凭证探测失败时 ``switched=False``
+         *     + ``error`` 不置位，D-003）。2026-10-21-provider-set-default-ui D-002：热切换推送
+         *     已移除——仅置位，**只对新会话生效**，运行中会话不受影响（``affected_sessions`` 恒 0）。
          */
         post: operations["set_default_provider_api_llm_providers__provider_id__set_default_post"];
         delete?: never;
@@ -3064,7 +3064,9 @@ export interface paths {
          * @description 取消默认（cc-switch 式「停止」）。
          *
          *     对称 ``set-default``（「启动」）：取消本行默认。若取消后该用户×agent_kind 无任何
-         *     默认供应商 → lease 不再下发 provider_config → daemon 回归本机凭证管理（D-007）。
+         *     默认供应商 → lease 不再下发 provider_config → daemon 回归本机凭证管理（D-007，
+         *     仅新会话生效；2026-10-21-provider-set-default-ui D-002 热切换推送已移除，运行中
+         *     会话不受影响）。
          *
          *     task-05（FR-07）：返回结构化 ``SetDefaultResult``（unset 不探测，恒
          *     ``switched=True`` + ``error=None``）。
@@ -4134,6 +4136,52 @@ export interface paths {
         get: operations["list_platform_profiles_api_agent_profiles_get"];
         put?: never;
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/agent-profiles/{profile_id}/set-default": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Set Default Profile
+         * @description 置本档案为**当前用户**的默认档案（task-01）。
+         *
+         *     每用户至多一个（users.default_agent_profile_id 单列，后写胜出互斥）；档案须对
+         *     actor 可见（service.get 同口径 404/403）。会话/群聊未显式选档案时注入其人格与
+         *     技能（task-02）。返回携带 ``is_user_default=True`` 的档案行。
+         */
+        post: operations["set_default_profile_api_agent_profiles__profile_id__set_default_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/agent-profiles/{profile_id}/unset-default": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Unset Default Profile
+         * @description 取消**当前用户**的默认档案（幂等；仅当默认恰为该档案时清列，否则 no-op）。
+         *
+         *     取消后未显式选档案的会话回归零注入（现状链）。
+         */
+        post: operations["unset_default_profile_api_agent_profiles__profile_id__unset_default_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -13027,6 +13075,11 @@ export interface components {
             /** Is System Default */
             is_system_default: boolean;
             /**
+             * Is User Default
+             * @default false
+             */
+            is_user_default: boolean;
+            /**
              * Created At
              * Format: date-time
              */
@@ -13059,14 +13112,19 @@ export interface components {
          * AgentProfileCreate
          * @description 建档请求。``visibility`` 决定 workspace_id 归属与建案权（service.create
          *     内校验）：private=owner 自用 / workspace=指定 ws 成员可建 / platform=仅 admin。
-         *     ``provider`` 必填（作 target_provider，D-014）。
+         *     ``provider`` 缺省 ``"claude"``（2026-10-21-agent-profile-slim-default：表单瘦
+         *     身后前端不再传，列 NOT NULL 保留、读侧已忽略——dispatch 链路的 D-014 消费
+         *     随 tasks 入口废弃而休眠）。
          */
         AgentProfileCreate: {
             /** Name */
             name: string;
             /** @default private */
             visibility: components["schemas"]["AgentProfileVisibility"];
-            /** Provider */
+            /**
+             * Provider
+             * @default claude
+             */
             provider: string;
             /** Model */
             model?: string | null;
@@ -13126,6 +13184,11 @@ export interface components {
             version: number;
             /** Is System Default */
             is_system_default: boolean;
+            /**
+             * Is User Default
+             * @default false
+             */
+            is_user_default: boolean;
             /**
              * Created At
              * Format: date-time
@@ -26117,18 +26180,16 @@ export interface components {
          * @description ``POST /api/llm-providers/{id}/set-default`` 与 ``unset-default`` 统一响应。
          *
          *     task-05（change 2026-08-06-provider-switch-live-session / FR-07）：把 task-03
-         *     service 层 ``DefaultSwitchResult``（dataclass）透传给前端的响应 DTO，供前端区分
-         *     立即生效（``switched=True`` + ``affected_sessions>0``）、等待 turn 边界
-         *     （``switched=True`` + ``affected_sessions=0``）与凭证失败（``switched=False`` +
-         *     ``error``）三种状态，对应不同 toast 文案（task-09）。
+         *     service 层 ``DefaultSwitchResult``（dataclass）透传给前端的响应 DTO。2026-10-21
+         *     provider-set-default-ui D-002 起热切换推送已移除——成功即置位（``switched=True``），
+         *     凭证探测失败不置位（``switched=False`` + ``error``），默认变更仅对新会话生效。
          *
          *     纯响应 DTO（无 ``from_attributes``）：router 显式按字段名从 ``DefaultSwitchResult``
          *     构造，不直接 ``model_validate`` dataclass（风格对齐 ``UsageResult``）。
          *
          *     - ``switched``：本次 set/unset 是否成功变更 ``is_default``（set 凭证探测失败回滚
          *       时为 ``False``；unset 恒为 ``True``）；
-         *     - ``affected_sessions``：``notify_provider_switch`` 成功投递的 active interactive
-         *       session 计数（D-001）；无 active session 或 notify 异常时为 ``0``；
+         *     - ``affected_sessions``：恒 ``0``（D-002 热切换移除；字段保留兼容旧客户端）；
          *     - ``error``：set 凭证探测失败原因（仅 ``switched=False`` 时有值）；成功 / unset 为 ``None``。
          */
         SetDefaultResult: {
@@ -36958,6 +37019,70 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["AgentProfileAggregatedListResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    set_default_profile_api_agent_profiles__profile_id__set_default_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                profile_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AgentProfileRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    unset_default_profile_api_agent_profiles__profile_id__unset_default_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                profile_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: boolean;
+                    };
                 };
             };
             /** @description Validation Error */

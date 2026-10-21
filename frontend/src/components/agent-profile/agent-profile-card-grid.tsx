@@ -70,6 +70,10 @@ export interface AgentProfileCardGridProps {
   onCopy?: AgentProfileHandler;
   /** 删除回调（系统预置卡不会触发）。缺省 no-op。 */
   onDelete?: AgentProfileHandler;
+  /** 设为当前用户默认档案（2026-10-21-agent-profile-slim-default task-05）。 */
+  onSetDefault?: AgentProfileHandler;
+  /** 取消当前用户默认档案。 */
+  onUnsetDefault?: AgentProfileHandler;
 }
 
 /**
@@ -84,6 +88,8 @@ export function AgentProfileCardGrid(props: AgentProfileCardGridProps) {
     onEdit: props.onEdit,
     onCopy: props.onCopy,
     onDelete: props.onDelete,
+    onSetDefault: props.onSetDefault,
+    onUnsetDefault: props.onUnsetDefault,
   };
   if (scoped && props.workspaceId) {
     return (
@@ -95,7 +101,10 @@ export function AgentProfileCardGrid(props: AgentProfileCardGridProps) {
 
 /* ────────────────────── 数据源 wrapper（各自调 hook，避免条件式 hook） ────────────────────── */
 
-type GridHandlers = Pick<AgentProfileCardGridProps, "onEdit" | "onCopy" | "onDelete">;
+type GridHandlers = Pick<
+  AgentProfileCardGridProps,
+  "onEdit" | "onCopy" | "onDelete" | "onSetDefault" | "onUnsetDefault"
+>;
 
 function MineGrid(handlers: GridHandlers) {
   const { profiles, isLoading, isError, error, refetch } =
@@ -151,6 +160,8 @@ function CardGridBody({
   onEdit,
   onCopy,
   onDelete,
+  onSetDefault,
+  onUnsetDefault,
 }: CardGridBodyProps) {
   // 文本搜索：live 输入 + 回车提交（FRONTEND_PAGE_STYLE §3：文本不每键查）。
   const [searchInput, setSearchInput] = useState("");
@@ -309,6 +320,8 @@ function CardGridBody({
               onEdit={onEdit ?? noop}
               onCopy={onCopy ?? noop}
               onDelete={onDelete ?? noop}
+              onSetDefault={onSetDefault}
+              onUnsetDefault={onUnsetDefault}
             />
           ))}
         </div>

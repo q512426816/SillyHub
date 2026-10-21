@@ -72,6 +72,13 @@ export interface AgentProfileCardProps {
   onCopy: (profile: AgentProfileAggregatedItem) => void;
   /** 删除（系统预置不渲染该按钮）。 */
   onDelete: (profile: AgentProfileAggregatedItem) => void;
+  /**
+   * 设为当前用户默认档案（2026-10-21-agent-profile-slim-default task-05）：
+   * 未传时不渲染该操作（向下兼容既有挂载点/测试）。
+   */
+  onSetDefault?: (profile: AgentProfileAggregatedItem) => void;
+  /** 取消默认（is_user_default 时渲染）。 */
+  onUnsetDefault?: (profile: AgentProfileAggregatedItem) => void;
 }
 
 /**
@@ -83,6 +90,8 @@ export function AgentProfileCard({
   onEdit,
   onCopy,
   onDelete,
+  onSetDefault,
+  onUnsetDefault,
 }: AgentProfileCardProps) {
   const isSystem = profile.is_system_default === true;
 
@@ -148,6 +157,7 @@ export function AgentProfileCard({
               {profile.name || "—"}
             </span>
             {isSystem && <Tag color="green">系统预置</Tag>}
+            {profile.is_user_default && <Tag color="blue">默认</Tag>}
           </div>
           <div className="truncate font-mono text-[11px] text-muted-foreground">
             {modelLine(profile.provider, profile.model)}
@@ -204,6 +214,31 @@ export function AgentProfileCard({
           <span className="text-[11px] italic text-muted-foreground">只读</span>
         ) : (
           <div className="flex shrink-0 gap-0.5">
+            {profile.is_user_default
+              ? onUnsetDefault && (
+                  <Button
+                    type="link"
+                    size="small"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      onUnsetDefault(profile);
+                    }}
+                  >
+                    取消默认
+                  </Button>
+                )
+              : onSetDefault && (
+                  <Button
+                    type="link"
+                    size="small"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      onSetDefault(profile);
+                    }}
+                  >
+                    设为默认
+                  </Button>
+                )}
             <Button
               type="link"
               size="small"

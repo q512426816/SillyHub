@@ -39,6 +39,8 @@ import {
   copyWorkspaceAgentProfile,
   deleteAgentProfile,
   deleteWorkspaceAgentProfile,
+  setDefaultAgentProfile,
+  unsetDefaultAgentProfile,
   type AgentProfileAggregatedItem,
   type AgentProfileRead,
 } from "@/lib/agent-profiles";
@@ -117,6 +119,32 @@ export default function AgentProfilesGlobalPage() {
     }
   };
 
+  // 2026-10-21-agent-profile-slim-default task-05：用户级默认档案（每用户一个）。
+  // 空技能档案设默认的警示（FR-04 反直觉防护）：技能为空时明确提示后果。
+  const handleSetDefault = async (p: AgentProfileAggregatedItem) => {
+    try {
+      await setDefaultAgentProfile(p.id);
+      notify.success(
+        (p.skill_refs ?? []).length === 0
+          ? `已设为默认（该档案未勾选技能，之后的新会话将不挂载技能）`
+          : `档案「${p.name}」已设为默认，新会话生效`,
+      );
+      invalidateMine();
+    } catch (err) {
+      notify.error(err, "设为默认失败");
+    }
+  };
+
+  const handleUnsetDefault = async (p: AgentProfileAggregatedItem) => {
+    try {
+      await unsetDefaultAgentProfile(p.id);
+      notify.success("已取消默认，之后的新会话不再注入该档案");
+      invalidateMine();
+    } catch (err) {
+      notify.error(err, "取消默认失败");
+    }
+  };
+
   return (
     <PageContainer size="full">
       <PageHeader
@@ -139,6 +167,8 @@ export default function AgentProfilesGlobalPage() {
         onEdit={handleEdit}
         onCopy={(p) => void handleCopy(p)}
         onDelete={setConfirmDelete}
+        onSetDefault={(p) => void handleSetDefault(p)}
+        onUnsetDefault={(p) => void handleUnsetDefault(p)}
       />
 
       {/* 新建/编辑表单（全局页不传 workspaceId → 表单渲染「工作区上下文」选择器） */}
