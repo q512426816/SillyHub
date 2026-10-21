@@ -12,6 +12,18 @@ import { useCallback, useEffect, useRef } from "react";
 /** 超时窗口（ms）。 */
 export const INTERRUPT_FEEDBACK_TIMEOUT_MS = 15_000;
 
+/**
+ * 到点裁决（P1 修复，评审 2026-10-21）：该轮仍处 interrupting 才回退 + 提示。
+ * 终态已在 15s 内到达（打断正常生效）→ false，调用方必须静默（不回退、不弹
+ * 「未生效」错误）——timer 无需显式清除，到点自查即天然 no-op。
+ */
+export function isTurnStillInterrupting(
+  turns: ReadonlyArray<{ runId: string; status: string }>,
+  runId: string,
+): boolean {
+  return turns.some((t) => t.runId === runId && t.status === "interrupting");
+}
+
 /** hook 返回面：arm 单槽换防（同轮重按换新 timer），clear 幂等。 */
 export interface InterruptFeedbackTimeoutHandle {
   arm: (_runId: string) => void;

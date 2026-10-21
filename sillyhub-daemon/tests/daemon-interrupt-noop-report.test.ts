@@ -198,6 +198,21 @@ describe('2026-10-21-daemon-zombie-turn FR-02：interrupt no-op 回传', () => {
     expect(client.notifyRunResult).not.toHaveBeenCalled();
   });
 
+  it('interrupt() false 但会话仍 running → 不回报（P3 守卫：写失败/超时非无轮）', async () => {
+    const { daemon, client } = track(
+      buildDaemon(createMockSessionManager({ status: 'running', currentRunId: 'run-1' }, false)),
+    );
+
+    await routeControl(daemon, MSG.SESSION_INTERRUPT, {
+      session_id: 'sess-1',
+      lease_id: 'lease-1',
+      runtime_id: 'runtime-uuid-123',
+      run_id: 'run-1',
+    });
+
+    expect(client.notifyRunResult).not.toHaveBeenCalled();
+  });
+
   it('notifyRunResult 抛错 → warn 不向上抛（backend pending 清扫兜底）', async () => {
     const sm = createMockSessionManager({ status: 'active', currentRunId: undefined }, false);
     const built = buildDaemon(sm);

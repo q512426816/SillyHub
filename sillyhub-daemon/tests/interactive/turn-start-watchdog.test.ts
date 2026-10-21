@@ -108,7 +108,7 @@ describe('2026-10-21-daemon-zombie-turn FR-01：轮启动看门狗', () => {
     expect(sm.get('sess-1')!.status).toBe('running');
   });
 
-  it('到点触发：重置 active + 清 currentRunId + onTurnStartTimeout 回调（主事故路径）', async () => {
+  it('到点触发：重置 active + 保留 currentRunId 作迟到归属锚 + onTurnStartTimeout 回调（主事故路径）', async () => {
     vi.useFakeTimers();
     const onTurnStartTimeout = vi.fn(async () => {});
     const sm = createSessionManager(onTurnStartTimeout);
@@ -119,7 +119,9 @@ describe('2026-10-21-daemon-zombie-turn FR-01：轮启动看门狗', () => {
 
     const state = sm.get('sess-1')!;
     expect(state.status).toBe('active');
-    expect(state.currentRunId).toBeUndefined();
+    // P2 缓解：保留旧 runId——迟到 result 归属到已收敛为 failed 的旧轮（幂等），
+    // 不被误记到用户重发后的新轮；下次 inject 无条件覆盖。
+    expect(state.currentRunId).toBe('run-zombie');
     expect(onTurnStartTimeout).toHaveBeenCalledTimes(1);
     expect(onTurnStartTimeout).toHaveBeenCalledWith('sess-1', 'run-zombie');
     // 触发后看门狗条目已清
@@ -226,6 +228,7 @@ describe('2026-10-21-daemon-zombie-turn FR-01：轮启动看门狗', () => {
     await vi.advanceTimersByTimeAsync(90_000);
 
     expect(sm.get('sess-1')!.status).toBe('active');
-    expect(sm.get('sess-1')!.currentRunId).toBeUndefined();
+    // P2 缓解：currentRunId 保留（迟到归属锚，见上）。
+    expect(sm.get('sess-1')!.currentRunId).toBe('run-9');
   });
 });

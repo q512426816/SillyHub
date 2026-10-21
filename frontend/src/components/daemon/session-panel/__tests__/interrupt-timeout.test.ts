@@ -11,6 +11,7 @@ import * as React from "react";
 
 import {
   INTERRUPT_FEEDBACK_TIMEOUT_MS,
+  isTurnStillInterrupting,
   useInterruptFeedbackTimeout,
 } from "@/components/daemon/session-panel/interrupt-timeout";
 
@@ -127,5 +128,32 @@ describe("2026-10-21-daemon-zombie-turn FR-04：useInterruptFeedbackTimeout", ()
 
   it("React import 被消费（jsPragma 防 lint 误报的显式引用）", () => {
     expect(React.version).toBeTruthy();
+  });
+});
+
+describe("2026-10-21-daemon-zombie-turn FR-04：到点裁决 isTurnStillInterrupting（P1 修复）", () => {
+  it("仍处 interrupting → true（回退+提示）", () => {
+    expect(
+      isTurnStillInterrupting(
+        [
+          { runId: "run-1", status: "interrupting" },
+          { runId: "run-2", status: "completed" },
+        ],
+        "run-1",
+      ),
+    ).toBe(true);
+  });
+
+  it.each(["completed", "failed", "killed", "running"])(
+    "终态已到（status=%s）→ false（静默，不误报「未生效」）",
+    (status) => {
+      expect(isTurnStillInterrupting([{ runId: "run-1", status }], "run-1")).toBe(false);
+    },
+  );
+
+  it("runId 不匹配（新轮已切换）→ false", () => {
+    expect(
+      isTurnStillInterrupting([{ runId: "run-2", status: "interrupting" }], "run-1"),
+    ).toBe(false);
   });
 });

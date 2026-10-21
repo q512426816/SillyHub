@@ -8501,17 +8501,30 @@ export class Daemon {
    * 前端按既有映射显示「已中止」）。复用 _reportInjectDropped 同款手法与语义：
    * 上报失败仅 warn（backend pending run 启动超时清扫兜底）；payload 无 run_id
    * （旧 backend）仅记日志维持只 ack 现状。
+   *
+   * 守卫（评审 2026-10-21 P3）：interrupt()===false 只在「会话非 running」时
+   * 才能判定无轮——仍处 running 时 false 还可能是驱动写失败/超时（codex 等
+   * 非 claude 驱动的 interrupt 实现），此时回报会把仍在执行的轮提前收敛为
+   * interrupted。故 status==='running' 仅记日志不回报（该形态由 FR-01/FR-03
+   * 兜底）。
    */
   private async _reportInterruptNoop(
     sessionId: string,
     raw: Record<string, unknown>,
-    state: { leaseId: string; claimToken: string },
+    state: { leaseId: string; claimToken: string; status: string },
   ): Promise<void> {
     const runId =
       (raw.run_id as string | undefined) ?? (raw.runId as string | undefined) ?? '';
     if (!runId) {
       this._logger.info('interrupt_noop_no_run_id', {
         session_id: sessionId,
+      });
+      return;
+    }
+    if (state.status === 'running') {
+      this._logger.info('interrupt_noop_skipped_session_running', {
+        session_id: sessionId,
+        run_id: runId,
       });
       return;
     }

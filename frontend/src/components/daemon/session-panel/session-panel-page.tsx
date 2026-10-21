@@ -135,8 +135,8 @@ import {
   parseTeamCommand, teamTriggerErrorText, useSessionTeamMissions,
 } from "./use-session-team-missions";
 import { useStreamConnectionGuard } from "./use-stream-connection-guard";
-// 2026-10-21-daemon-zombie-turn FR-04：打断 15s 超时回退定时器簿记。
-import { useInterruptFeedbackTimeout } from "./interrupt-timeout";
+// 2026-10-21-daemon-zombie-turn FR-04：打断 15s 超时回退定时器簿记 + 到点裁决。
+import { isTurnStillInterrupting, useInterruptFeedbackTimeout } from "./interrupt-timeout";
 import { StreamConnectionBanner, TurnStalledWatchdogBanner } from "./connection-banners";
 import { applyAgentTaskStatusEvent } from "../agent-task-store";
 // 2026-10-13-subagent-stub-reconcile：任务快照对账（时间线子代理容器头收敛）。
@@ -4020,18 +4020,24 @@ export function SessionPanelPage({
   }, [input, sessionId, session, ended, suspended, machineOnline, running, isQueueFull, pendingAttachments, attTokenMap, wsRefTokens, notify, sendToServerQueue, sendFromQueue, sessionEngine, openTeamPopover, handlePreSessionSend, teamMissions, isToolReportBody, handleTakeoverSend]);
 
   // 2026-10-21-daemon-zombie-turn FR-04：打断 15s 超时回退（定时器簿记在
-  // interrupt-timeout.ts hook；到点回退 running + 提示，终态已到则自查 no-op）。
-  const handleInterruptFeedbackTimeout = useCallback((runId: string) => {
-    setTurnState((prev) => ({
-      ...prev,
-      turns: prev.turns.map((t) =>
-        t.runId === runId && t.status === "interrupting" ? { ...t, status: "running" } : t,
-      ),
-    }));
-    setErrorMsg(
-      "打断已发出 15 秒未生效，本轮可能已异常（执行端无响应）。可再次打断，或稍候由系统自动收敛。",
-    );
-  }, []);
+  // interrupt-timeout.ts hook）。到点**先裁决**：该轮仍处 interrupting 才回退
+  // running + 提示；终态已到（打断正常生效）→ 静默 no-op，禁止误报「未生效」
+  // （评审 2026-10-21 P1 修复）。
+  const handleInterruptFeedbackTimeout = useCallback(
+    (runId: string) => {
+      if (!isTurnStillInterrupting(turnState.turns, runId)) return;
+      setTurnState((prev) => ({
+        ...prev,
+        turns: prev.turns.map((t) =>
+          t.runId === runId && t.status === "interrupting" ? { ...t, status: "running" } : t,
+        ),
+      }));
+      setErrorMsg(
+        "打断已发出 15 秒未生效，本轮可能已异常（执行端无响应）。可再次打断，或稍候由系统自动收敛。",
+      );
+    },
+    [turnState.turns],
+  );
   const { arm: armInterruptFeedbackTimeout } = useInterruptFeedbackTimeout(
     handleInterruptFeedbackTimeout,
   );

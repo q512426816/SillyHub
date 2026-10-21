@@ -582,10 +582,14 @@ export function disarmTurnStartWatchdog(
  * 看门狗触发：会话态仍停留在布防轮（status=running & currentRunId 未变）才
  * 动作——期间发生过事件/结果/新 inject（currentRunId 已切）则视为误报静默跳过。
  *
- * 动作对齐 onResult 的 turn 边界语义：status→active；currentRunId 仅在无存活
- * 后台任务时清空（有后台任务保留作写通道 grace 锚点，events.ts onResult 同款）；
- * pendingInjectCount 清零（本轮从未发生，无排队可消费）。随后经
- * deps.onTurnStartTimeout（可选）由 daemon 桥 notifyRunResult 收敛该 run。
+ * 动作：status→active；pendingInjectCount 清零（本轮从未发生，无排队可消费）。
+ * **currentRunId 有意保留**（评审 2026-10-21 P2 缓解）：假阳性形态（轮其实起来
+ * 了只是慢）下迟到 result 会按 currentRunId 归属——保留旧 runId 让迟到结果落到
+ * 「已被本看门狗收敛为 failed」的旧轮上（close_interactive_run 终态幂等 no-op），
+ * 而不是被错误记到用户重发后的新轮；下一次 inject 会无条件覆盖 currentRunId。
+ * lastActiveAt 更新后，若保留 running 态的陈旧判定由 inject 的 60s stale-reset
+ * 自愈路径接管（status 已是 active，不触发）。
+ * 随后经 deps.onTurnStartTimeout（可选）由 daemon 桥 notifyRunResult 收敛该 run。
  */
 async function fireTurnStartWatchdog(
   mgr: SessionManagerCore,
@@ -596,9 +600,6 @@ async function fireTurnStartWatchdog(
   if (!state) return;
   if (state.status !== 'running' || state.currentRunId !== runId) return;
   state.status = 'active';
-  if (!mgr._backgroundTasks.get(sessionId)?.size) {
-    state.currentRunId = undefined;
-  }
   state.lastActiveAt = Date.now();
   mgr._pendingInjectCount.delete(sessionId);
   // eslint-disable-next-line no-console
