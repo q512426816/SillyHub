@@ -448,3 +448,57 @@ async def test_no_scope_keeps_platform_list_behavior(client: AsyncClient, db_ses
     assert any(it["name"] == "平台档" for it in items)
     # C8：原 AgentProfileRead 结构，不含聚合专属字段 workspace_name
     assert all("workspace_name" not in it for it in items)
+
+
+# ── 用户级默认档案端点（2026-10-21-agent-profile-slim-default task-01）────────
+
+
+async def test_set_default_and_unset_default_lifecycle(
+    client: AsyncClient, db_session: AsyncSession
+):
+    """set-default → is_user_default=True 且互斥；unset-default → 回落。"""
+    user = await _create_user(db_session)
+    other = await _create_user(db_session)
+    ws = await _create_workspace(db_session, created_by=user.id)
+    await _grant_workspace_permission(db_session, user.id, ws.id, Permission.WORKSPACE_WRITE)
+    await _grant_workspace_permission(db_session, user.id, ws.id, Permission.WORKSPACE_READ)
+    h = _headers(_token_for(user))
+    base = _ws_profiles_path(ws.id)
+
+    ids = []
+    for name in ("档案A", "档案B"):
+        resp = await client.post(
+            base,
+            json={"name": name, "visibility": AgentProfileVisibility.WORKSPACE.value},
+            headers=h,
+        )
+        assert resp.status_code == 201, resp.text
+        ids.append(resp.json()["id"])
+
+    # set A → 默认标记
+    resp = await client.post(f"/api/agent-profiles/{ids[0]}/set-default", headers=h)
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["is_user_default"] is True
+
+    # set B → 单列互斥：B 默认（聚合列表验证 A 标记消失）
+    resp = await client.post(f"/api/agent-profiles/{ids[1]}/set-default", headers=h)
+    assert resp.status_code == 200, resp.text
+    resp = await client.get("/api/agent-profiles", params={"scope": "mine"}, headers=h)
+    assert resp.status_code == 200, resp.text
+    by_id = {item["id"]: item for item in resp.json()["items"]}
+    assert by_id[ids[1]]["is_user_default"] is True
+    assert by_id[ids[0]]["is_user_default"] is False
+
+    # unset B → 回落；幂等（再 unset no-op 200）
+    resp = await client.post(f"/api/agent-profiles/{ids[1]}/unset-default", headers=h)
+    assert resp.status_code == 200, resp.text
+    assert resp.json() == {"ok": True}
+    resp = await client.post(f"/api/agent-profiles/{ids[1]}/unset-default", headers=h)
+    assert resp.status_code == 200, resp.text
+
+    # 默认标记是用户级的：other 用户 set 同一档案不影响 user（各自 users 行）
+    resp = await client.post(
+        f"/api/agent-profiles/{ids[0]}/set-default",
+        headers=_headers(_token_for(other)),
+    )
+    assert resp.status_code == 403, resp.text  # other 非成员不可见 → 403

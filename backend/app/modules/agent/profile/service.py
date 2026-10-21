@@ -390,6 +390,28 @@ class AgentProfileService:
             )
         return profile
 
+    async def set_user_default(
+        self, *, profile_id: uuid.UUID, actor: User
+    ) -> AgentProfile:
+        """置 actor 的用户级默认档案（2026-10-21-agent-profile-slim-default task-01）。
+
+        读可见校验复用 :meth:`get`（不存在 404 / 不可见 403，与显式选档案同口径）；
+        写 ``users.default_agent_profile_id`` 单列——天然「每用户至多一个」互斥
+        （后写胜出，Last-Write-Wins 可接受）。与供应商 set-default 的差异：档案无
+        凭证可探测，无探测/推送步骤，仅置位。返回置位后的档案行。
+        """
+        profile = await self.get(profile_id=profile_id, actor=actor)
+        actor.default_agent_profile_id = profile.id
+        self._session.add(actor)
+        await self._session.commit()
+        return profile
+
+    async def unset_user_default(self, *, actor: User) -> None:
+        """取消 actor 的用户级默认档案（幂等：未设默认时同样成功）。"""
+        actor.default_agent_profile_id = None
+        self._session.add(actor)
+        await self._session.commit()
+
     async def update(
         self,
         *,
