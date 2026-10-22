@@ -7,6 +7,8 @@ substeps:
   review: done
   probes: done
   distill: done
+  archive: done
+  events: done
 born_face: thin
 with_tasks: false
 review_force: null
@@ -30,7 +32,7 @@ input: >-
 autopilot: false
 prestage_ack: false
 baseline_commit: 86337773ac7cf5a6edeac4e415cc9c2861ecd4b0
-updatedAt: '2026-10-22T02:51:16.697Z'
+updatedAt: '2026-10-22T02:51:17.463Z'
 cross_baselines:
   sillyspec: 8ff68ada697ec4d4af9ce0a90c4055091985e319
 baseline_sha256: 0e26333a9768cd336db7ac5f11518613fe9c40374f834d1d7d7bb9ee0db53712
