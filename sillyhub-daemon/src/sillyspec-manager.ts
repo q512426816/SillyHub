@@ -2729,15 +2729,9 @@ async function snapshotOneSpecPath(
 // ── 2026-09-02-changes-overview-card task-02：采集器默认实现与摘要构造 ──────────
 
 /**
- * 默认采集执行器：node child_process execFile（数组形参，无 shell 依赖，NFR-02；
- * Windows 路径空格安全）。错误映射：err=null → code=0；ExecApiError 的数字 code =
- * 退出码、字符串 code = spawn 错误码（ENOENT 等）；killed=true → 超时被杀。全收敛
- * 不 reject。
- *
- * ql-20260907-007：env 显式传「缺省值垫底 + process.env 覆盖」——daemon 自身跑的
- * sillyspec 命令（runResolve / ghostCleanup 会触发平台同步）同样获得
- * SILLYSPEC_SYNC_TIMEOUT_MS=20000 缺省（process.env 已预设时原值优先，展开顺序
- * 即语义）。导出供测试直测（对齐本文件 envelope → 心跳摘要纯函数导出先例）。
+ * 解析 `progress show --json` 失败时 stdout envelope 的 `codes` 数组
+ * （2026-10-22-sillyspec-probe-db-missing-evict）：CLI 契约保证失败时 stdout 恒为
+ * 合法 JSON envelope；解析失败/无 codes 返回 []（回退既有 nonzero_exit 记账）。
  */
 function parseProgressEnvelopeCodes(stdout: string): string[] {
   try {
@@ -2753,6 +2747,17 @@ function parseProgressEnvelopeCodes(stdout: string): string[] {
   }
 }
 
+/**
+ * 默认采集执行器：node child_process execFile（数组形参，无 shell 依赖，NFR-02；
+ * Windows 路径空格安全）。错误映射：err=null → code=0；ExecApiError 的数字 code =
+ * 退出码、字符串 code = spawn 错误码（ENOENT 等）；killed=true → 超时被杀。全收敛
+ * 不 reject。
+ *
+ * ql-20260907-007：env 显式传「缺省值垫底 + process.env 覆盖」——daemon 自身跑的
+ * sillyspec 命令（runResolve / ghostCleanup 会触发平台同步）同样获得
+ * SILLYSPEC_SYNC_TIMEOUT_MS=20000 缺省（process.env 已预设时原值优先，展开顺序
+ * 即语义）。导出供测试直测（对齐本文件 envelope → 心跳摘要纯函数导出先例）。
+ */
 export function runProgressJsonDefault(
   file: string,
   args: string[],
