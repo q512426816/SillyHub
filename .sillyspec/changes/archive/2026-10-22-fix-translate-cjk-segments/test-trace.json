@@ -1,0 +1,51 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-22-fix-translate-cjk-segments",
+  "rows": [
+    {
+      "anchor": "FR-01",
+      "row_id": "2026-10-22-fix-translate-cjk-segments:flow:测试绑定FR-01",
+      "tests": [
+        "backend/app/modules/translate/tests/test_chunking.py「should_translate_segment 段级判定（中文为主跳过 / 短英文段送翻）」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-22-fix-translate-cjk-segments"
+    },
+    {
+      "anchor": "FR-02",
+      "row_id": "2026-10-22-fix-translate-cjk-segments:flow:测试绑定FR-02",
+      "tests": [
+        "backend/app/modules/translate/tests/test_service.py「全部正文段被跳过 → translated=false」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-22-fix-translate-cjk-segments"
+    },
+    {
+      "anchor": "FR-03",
+      "row_id": "2026-10-22-fix-translate-cjk-segments:flow:测试绑定FR-03",
+      "tests": [
+        "backend/app/modules/translate/tests/test_service.py「中文正文+代码块返回原文；纯英文保护段回归」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-22-fix-translate-cjk-segments"
+    }
+  ]
+}

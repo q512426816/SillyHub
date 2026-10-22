@@ -1,0 +1,86 @@
+{
+  "change": "2026-10-22-fix-translate-cjk-segments",
+  "baseline": "86337773ac7cf5a6edeac4e415cc9c2861ecd4b0",
+  "head": "fe0c4cf0853ef6e3fad00bf9a47ac5fb45f5f3a9",
+  "files": [
+    "backend/app/modules/translate/README.md",
+    "backend/app/modules/translate/chunking.py",
+    "backend/app/modules/translate/service.py",
+    "backend/app/modules/translate/tests/test_chunking.py",
+    "backend/app/modules/translate/tests/test_service.py"
+  ],
+  "totals": {
+    "files": 5,
+    "additions": 117,
+    "deletions": 7
+  },
+  "savedAt": "2026-10-22T02:23:25.696Z",
+  "note": "flow done 时点冻结（本变更可归属交付面：baseline..HEAD 提交面过滤 .sillyspec/ 只留 .sillyspec/docs/ 交付文档 + 独占树未提交交付；治理工件目录不入冻结——2026-10-12-close-trace-freeze-integrity FR-01）",
+  "modules": [
+    {
+      "id": "backend",
+      "files": 5,
+      "doc": "docs/multi-agent-platform/modules/backend.md",
+      "docTouched": false,
+      "docMissing": false
+    }
+  ],
+  "uncoveredDirs": [],
+  "moduleMaps": [
+    "docs/backend/modules/_module-map.yaml",
+    "docs/frontend/modules/_module-map.yaml",
+    "docs/multi-agent-platform/modules/_module-map.yaml",
+    "docs/SillyHub/modules/_module-map.yaml",
+    "docs/sillyhub-daemon/modules/_module-map.yaml"
+  ],
+  "scopeAudit": {
+    "mode": "full-flow",
+    "ok": true,
+    "degradedReason": null,
+    "baseAnchor": "86337773ac7cf5a6edeac4e415cc9c2861ecd4b0",
+    "totals": {
+      "files": 5,
+      "additions": 117,
+      "deletions": 7
+    },
+    "rows": [
+      {
+        "path": "backend/app/modules/translate/README.md",
+        "additions": 6,
+        "deletions": 0,
+        "kind": "modified"
+      },
+      {
+        "path": "backend/app/modules/translate/chunking.py",
+        "additions": 39,
+        "deletions": 0,
+        "kind": "modified"
+      },
+      {
+        "path": "backend/app/modules/translate/service.py",
+        "additions": 14,
+        "deletions": 7,
+        "kind": "modified"
+      },
+      {
+        "path": "backend/app/modules/translate/tests/test_chunking.py",
+        "additions": 23,
+        "deletions": 0,
+        "kind": "modified"
+      },
+      {
+        "path": "backend/app/modules/translate/tests/test_service.py",
+        "additions": 35,
+        "deletions": 0,
+        "kind": "modified"
+      }
+    ],
+    "excluded": {
+      "foreignDeclared": []
+    },
+    "note": "flow done 时点冻结（本文件落盘时采集）",
+    "closedBy": "flow done"
+  },
+  "patchSha256": "2cca6e726955466b9afc74b3bda7635435368c76b4097803bb27bcac16b12fb3",
+  "patchStatus": "ok"
+}

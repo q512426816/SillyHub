@@ -7321,3 +7321,67 @@ superseded_by：FR-auth-003
   confirmed_at: null
   source_change: 2026-10-21-precommit-sandbox-entries
   status: active
+
+## FR-backend-014 送翻前必须对每个正文段做段级判定，中文为主的段禁止送模型
+变更：2026-10-22-fix-translate-cjk-segments
+状态：active
+摘要：中文正文 + 英文代码块；短英文段不被漏翻
+全文：.sillyspec/changes/archive/2026-10-22-fix-translate-cjk-segments/requirements.md#FR-01
+最近确认：779a0e3c8865c337e3c385d20482692a03e97199
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-22-fix-translate-cjk-segments:flow:测试绑定FR-01
+  tests: backend/app/modules/translate/tests/test_chunking.py「should_translate_segment 段级判定（中文为主跳过 / 短英文段送翻）」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-22-fix-translate-cjk-segments
+  status: active
+
+## FR-backend-015 translated 标记必须反映实际送翻动作
+变更：2026-10-22-fix-translate-cjk-segments
+状态：active
+摘要：全部段跳过
+全文：.sillyspec/changes/archive/2026-10-22-fix-translate-cjk-segments/requirements.md#FR-02
+最近确认：779a0e3c8865c337e3c385d20482692a03e97199
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-22-fix-translate-cjk-segments:flow:测试绑定FR-02
+  tests: backend/app/modules/translate/tests/test_service.py「全部正文段被跳过 → translated=false」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-22-fix-translate-cjk-segments
+  status: active
+
+## FR-backend-016 混合内容与纯英文内容行为正确
+变更：2026-10-22-fix-translate-cjk-segments
+状态：active
+摘要：纯英文回归
+全文：.sillyspec/changes/archive/2026-10-22-fix-translate-cjk-segments/requirements.md#FR-03
+最近确认：779a0e3c8865c337e3c385d20482692a03e97199
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-22-fix-translate-cjk-segments:flow:测试绑定FR-03
+  tests: backend/app/modules/translate/tests/test_service.py「中文正文+代码块返回原文；纯英文保护段回归」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-22-fix-translate-cjk-segments
+  status: active
+
+## FR-backend-017 相关测试必须通过
+变更：2026-10-22-fix-translate-cjk-segments
+状态：active
+摘要：主路径
+全文：.sillyspec/changes/archive/2026-10-22-fix-translate-cjk-segments/requirements.md#FR-04
+最近确认：779a0e3c8865c337e3c385d20482692a03e97199

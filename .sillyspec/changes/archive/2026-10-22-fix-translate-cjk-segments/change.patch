@@ -1,0 +1,227 @@
+diff --git a/backend/app/modules/translate/README.md b/backend/app/modules/translate/README.md
+index 1353a9413..a4b4144a4 100644
+--- a/backend/app/modules/translate/README.md
++++ b/backend/app/modules/translate/README.md
+@@ -59,6 +59,12 @@ opus-mt 是轻量模型（int8 量化），目标是「能看懂大意」而非
+ 代码 / URL 保护不送翻（`chunking.py`），前端每处展开视图可一键切回原文。质量不
+ 满意时换更大 ct2 模型（改 `TRANSLATE_MODEL_REPO` 指向即可，接口契约不变）。
+ 
++**段级判定（2026-10-22-fix-translate-cjk-segments）**：整条「值得翻」通过后，每个
++正文段（按自然段拆细）还要过一次语言判定——中文占比 ≥0.6 的段原样保留，不送
++en→zh 模型。原因：中文正文夹英文代码块时，代码的拉丁字符会把整条拉过阈值，
++不设段级兜底会把中文段翻成垃圾（生产实测 `命令：`→`发件人:`、整段中文消失）。
++`translated=true` 仅表示该条确有块实际送翻（含缓存命中），全部段被跳过时为 false。
++
+ ## 端点契约
+ 
+ `POST /api/translate/thinking`（`task:run_agent` 权限）：
+diff --git a/backend/app/modules/translate/chunking.py b/backend/app/modules/translate/chunking.py
+index ca96fb0af..9dcb19a33 100644
+--- a/backend/app/modules/translate/chunking.py
++++ b/backend/app/modules/translate/chunking.py
+@@ -92,6 +92,45 @@ def is_translation_worthy(text: str) -> bool:
+     return latin >= WORTHY_MIN_LATIN_CHARS
+ 
+ 
++def should_translate_segment(text: str) -> bool:
++    """段级判定（2026-10-22-fix-translate-cjk-segments）：该正文段是否送翻。
++
++    只判语言倾向、不套整条阈值——段级若复用"≥30 字符 / ≥8 拉丁字母"会把
++    短英文段漏翻。规则：有汉字或拉丁字母、且中文占比 <0.6 才送翻；纯数字/
++    符号段无文字可翻，跳过。
++
++    背景：整条 worthy 只看总量，中文正文夹英文代码块时整条会通过；代码段
++    被保护后中文正文仍会被送进 en→zh 模型，产出垃圾译文（生产实测）。
++    """
++    flat = re.sub(r"\s+", " ", text).strip()
++    cjk = len(_CJK_RE.findall(flat))
++    latin = len(_LATIN_RE.findall(flat))
++    denom = cjk + latin
++    if denom == 0:
++        return False
++    return cjk / denom < WORTHY_CJK_RATIO_MAX
++
++
++def split_paragraph_segments(segments: list[SourceSegment]) -> list[SourceSegment]:
++    """把可翻译段按自然段（``\\n\\n+``）再拆细，供段级语言判定。
++
++    保护段原样透传；分隔符归上一段尾部（拼接恒等于原文）。不拆细就无法
++    区分"中文段落 + 英文段落"的混合内容（split_protected 只在代码/URL
++    处分段）。
++    """
++    out: list[SourceSegment] = []
++    for seg in segments:
++        if not seg.translatable:
++            out.append(seg)
++            continue
++        parts = re.split(r"(\n\n+)", seg.text)
++        for i in range(0, len(parts), 2):
++            text = parts[i] + (parts[i + 1] if i + 1 < len(parts) else "")
++            if text:
++                out.append(SourceSegment(text=text, translatable=True))
++    return out
++
++
+ def split_translatable(text: str, max_chars: int = CHUNK_MAX_CHARS) -> list[str]:
+     """把一段送翻正文切为 ≤max_chars 的块，拼接恒等于原文。
+ 
+diff --git a/backend/app/modules/translate/service.py b/backend/app/modules/translate/service.py
+index f51d286f7..8080e0a12 100644
+--- a/backend/app/modules/translate/service.py
++++ b/backend/app/modules/translate/service.py
+@@ -22,6 +22,8 @@ from app.modules.translate.chunking import (
+     SourceSegment,
+     collect_chunks,
+     is_translation_worthy,
++    should_translate_segment,
++    split_paragraph_segments,
+     split_protected,
+ )
+ from app.modules.translate.schema import TranslateItemIn, TranslateItemOut
+@@ -129,6 +131,9 @@ async def translate_items(items: list[TranslateItemIn], target: str = "zh") -> d
+         }
+ 
+     results: dict[str, TranslateItemOut] = {}
++    # 实际送翻过（含缓存回填）的 item——translated 标记只认这个集合，不认
++    # 「整条 worthy 通过」（2026-10-22-fix-translate-cjk-segments）。
++    translated_ids: set[str] = set()
+     # 待推理项：item id → 保护切分后的段列表（送翻段占位 None 待填）
+     pending: dict[str, list[SourceSegment]] = {}
+     # 全局送翻块队列（跨 item 合批送模型）
+@@ -140,12 +145,17 @@ async def translate_items(items: list[TranslateItemIn], target: str = "zh") -> d
+         if not is_translation_worthy(item.text):
+             results[item.id] = TranslateItemOut(id=item.id, text=item.text, translated=False)
+             continue
+-        segments = split_protected(item.text)
++        # 保护切分 → 再按自然段拆细：段级判定需要能区分"中文段落 + 英文段落"
++        segments = split_paragraph_segments(split_protected(item.text))
+         pending[item.id] = segments
+         for seg_idx, seg in enumerate(segments):
+             # 纯空白正文段（如两代码块间的空行）按原样保留，不进翻译管线
+             if not seg.translatable or not seg.text.strip():
+                 continue
++            # 段级二次判定：整条 worthy 只看总量，中文正文夹英文代码块时会整条
++            # 通过；中文为主的段必须原样保留，禁止送进 en→zh 模型。
++            if not should_translate_segment(seg.text):
++                continue
+             seg_chunks = collect_chunks([seg])
+             if not seg_chunks:
+                 continue
+@@ -159,6 +169,7 @@ async def translate_items(items: list[TranslateItemIn], target: str = "zh") -> d
+                 if cached is not None:
+                     _lru_put(key, cached)  # Redis 命中回填 LRU
+                     _fill_chunk(pending, item.id, seg_idx, cached)
++                    translated_ids.add(item.id)
+                 else:
+                     chunk_owners.append((item.id, seg_idx))
+                     pending_chunks.append(chunk)
+@@ -192,6 +203,7 @@ async def translate_items(items: list[TranslateItemIn], target: str = "zh") -> d
+                         chunk_owners, pending_chunks, translations, strict=True
+                     ):
+                         _fill_chunk(pending, item_id, seg_idx, translated)
++                        translated_ids.add(item_id)
+                         cache_writes.append((_cache_key(chunk, target), translated))
+                     for key, value in cache_writes:
+                         _lru_put(key, value)
+@@ -215,7 +227,7 @@ async def translate_items(items: list[TranslateItemIn], target: str = "zh") -> d
+         results[item.id] = TranslateItemOut(
+             id=item.id,
+             text=rebuilt,
+-            translated=_has_translation(segments),
++            translated=item.id in translated_ids,
+         )
+     return {
+         "engine_ready": True,
+@@ -238,8 +250,3 @@ def _fill_chunk(
+     """
+     segs = pending[item_id]
+     segs[seg_idx] = SourceSegment(text=segs[seg_idx].text + translated, translatable=True)
+-
+-
+-def _has_translation(segments: list[SourceSegment]) -> bool:
+-    """该项是否真的发生了翻译（有送翻段且译文非空）。"""
+-    return any(seg.translatable and seg.text.strip() for seg in segments)
+diff --git a/backend/app/modules/translate/tests/test_chunking.py b/backend/app/modules/translate/tests/test_chunking.py
+index 28084f41c..08282655d 100644
+--- a/backend/app/modules/translate/tests/test_chunking.py
++++ b/backend/app/modules/translate/tests/test_chunking.py
+@@ -8,10 +8,33 @@ from app.modules.translate.chunking import (
+     SourceSegment,
+     collect_chunks,
+     is_translation_worthy,
++    should_translate_segment,
+     split_protected,
+     split_translatable,
+ )
+ 
++# -- should_translate_segment（段级判定，2026-10-22-fix-translate-cjk-segments）------
++
++
++def test_segment_cjk_dominant_skipped() -> None:
++    # 生产事故形态：中文正文段夹代码块后，整条 worthy 通过但该段必须跳过
++    assert should_translate_segment("运行下面命令后检查结果。") is False
++    assert should_translate_segment("落地后站点恢复正常可用，注意观察日志。") is False
++    # 中英混排但中文占比 <0.6 → 仍送翻（段级只判语言倾向）
++    assert should_translate_segment("这个 chunking 逻辑要再看一下。") is True
++
++
++def test_segment_short_english_still_translated() -> None:
++    # 段级不套整条的 30 字符/8 拉丁字母阈值——短英文段不能被漏翻
++    assert should_translate_segment("Run this first:\n") is True
++    assert should_translate_segment("done") is True
++
++
++def test_segment_symbols_only_skipped() -> None:
++    # 纯标点/数字：没有可翻文字，不送模型
++    assert should_translate_segment("12345 —— !!!\n") is False
++
++
+ # -- split_protected ---------------------------------------------------------------
+ 
+ 
+diff --git a/backend/app/modules/translate/tests/test_service.py b/backend/app/modules/translate/tests/test_service.py
+index 8a525befe..d80ca9bc3 100644
+--- a/backend/app/modules/translate/tests/test_service.py
++++ b/backend/app/modules/translate/tests/test_service.py
+@@ -143,6 +143,41 @@ async def test_redis_absence_is_silent(
+     assert out["items"][0].translated is True
+ 
+ 
++async def test_cjk_body_with_code_block_not_translated(
++    fake_translator: _FakeTranslator,
++) -> None:
++    """生产事故形态：中文正文 + 英文代码块整条 worthy 通过，但中文段必须原样保留。
++
++    修复前：代码块保护后中文正文仍送进 en→zh 模型 → "命令："变"发件人:"、
++    大段中文消失，且 translated=true（2026-10-22 生产实测）。
++    """
++    text = (
++        "命令：\n```\ndocker compose exec backend python -m app.modules.translate\n```\n"
++        "落地后站点恢复正常可用，注意观察日志。"
++    )
++    out = await translate_items([TranslateItemIn(id="a", text=text)])
++    item = out["items"][0]
++    assert item.text == text  # 原文无损
++    assert item.translated is False  # 未发生任何送翻
++    assert fake_translator.calls == 0  # 零推理
++
++
++async def test_mixed_cjk_and_english_paragraphs(fake_translator: _FakeTranslator) -> None:
++    """中文段落保留、英文段落正常送翻（自然段级拆分后的混合内容）。"""
++    cjk_para = "先排查配置文件。\n\n"
++    en_para = (
++        "The server returned an error because the cache directory was missing, "
++        "so the build failed before packaging."
++    )
++    text = cjk_para + en_para
++    out = await translate_items([TranslateItemIn(id="a", text=text)])
++    item = out["items"][0]
++    assert item.translated is True
++    assert item.text.startswith(cjk_para)  # 中文段原样
++    assert item.text != text  # 英文段已被翻译
++    assert fake_translator.calls == 1
++
++
+ async def test_pure_code_content_translated_false(fake_translator: _FakeTranslator) -> None:
+     text = "```\ngit status\ngit diff\n```"
+     out = await translate_items([TranslateItemIn(id="a", text=text)])

@@ -1,0 +1,34 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-22-fix-translate-cjk-segments",
+  "reviewer": "subagent",
+  "verdict": "PASS",
+  "reviewedAgainst": "fe0c4cf0853ef6e3fad00bf9a47ac5fb45f5f3a9",
+  "findings": [
+    {
+      "severity": "P2",
+      "title": "同段内缓存命中与推理结果混排会颠倒块序（既有缺陷，本变更未引入）",
+      "evidence": "缓存命中的块在扫描期立即 _fill_chunk 到段占位，未命中的块要等推理返回后才按 chunk_owners 回填，两类写入并非全局有序。实证：互异长英文段切成 5 块，仅预置第 2 块缓存（模拟更早的块已被 LRU/Redis 过期或淘汰的跨请求部分命中），重建结果以第 2 块译文开头（CACHED_SECOND + INFER[0]…），与原文块序相反。service.py:245-249 的 _fill_chunk docstring 与 design「乱序」节「重组仍按 chunk_owners 顺序回填」的声明均与实现不符。基线 86337773a 的循环结构完全相同，属既有缺陷；split_paragraph_segments 拆细段落只是降低单段多块的概率（通常每段 1 块），未消除该路径。",
+      "location": "backend/app/modules/translate/service.py:169"
+    },
+    {
+      "severity": "P3",
+      "title": "tasks.md / FR-04 声称「新增纯英文保护段回归用例」但未落盘",
+      "evidence": "本次 test_service.py 实际只新增 test_cjk_body_with_code_block_not_translated（146 行）与 test_mixed_cjk_and_english_paragraphs（165 行）；纯英文回归仍由既有 test_translation_reassembly_with_protected_segments（71 行，精确全等断言）承担，未新增任何纯英文用例。行为有覆盖且断言充分，但 task-02「新增…纯英文保护段回归用例」与 FR-04「新增用例覆盖…纯英文回归」的「新增」表述不实，与落盘文件不符。",
+      "location": "backend/app/modules/translate/tests/test_service.py:71"
+    },
+    {
+      "severity": "P3",
+      "title": "段落级独立送翻阻断跨自然段合并，块数与推理次数上升（未披露的效率取舍）",
+      "evidence": "service.py:159 对每个段落单独 collect_chunks([seg])，split_translatable 的「保序贪心合并填满预算」无法再跨自然段生效。以 1800 字符、9 个短段的英文正文为例：修复前整段切分约 2 块，修复后 9 块（每段一块），推理条目与缓存键随段数线性上升；前端 REQUEST_TIMEOUT_MS=20s 固定，段落密集的长文本延迟/超时（回退原文）风险上升。功能正确，但不属于 design「风险与死路」已披露项。",
+      "location": "backend/app/modules/translate/service.py:159"
+    }
+  ],
+  "dimensionNotes": {
+    "乱序": "finding",
+    "并发": "ok",
+    "切换": "ok",
+    "作用域": "ok"
+  },
+  "reviewedAt": "2026-10-22T10:27:24+08:00"
+}
