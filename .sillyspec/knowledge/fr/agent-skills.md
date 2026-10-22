@@ -114,3 +114,124 @@ created_at: 2026-10-19T02:55:25.079Z
   confirmed_at: null
   source_change: 2026-10-22-daemon-snapshot-report-log
   status: active
+
+## FR-agent-skills-007 页头对齐原型：品牌◆图标+标题+副标题，右侧统计胶囊（共 N 个档案·默认 M）+新建主按钮
+变更：2026-10-22-agent-profiles-page-restyle
+状态：active
+摘要：打开列表页
+全文：.sillyspec/changes/archive/2026-10-22-agent-profiles-page-restyle/requirements.md#FR-01
+最近确认：8150bbef44b91ab68ad9cabe1df4041dbe7a2626
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-22-agent-profiles-page-restyle:flow:测试绑定FR-01
+  tests: frontend/src/app/(dashboard)/agent-profiles/__tests__/page.test.tsx「页头统计胶囊（共 N 个档案·默认 M）」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-22-agent-profiles-page-restyle
+  status: active
+
+## FR-agent-skills-008 工具栏收拢成一张卡：搜索+工作区/可见范围/供应商三筛选+匹配计数同栏（文本仍回车触发、选择型即查，行为不变）
+变更：2026-10-22-agent-profiles-page-restyle
+状态：active
+摘要：工具栏行为回归
+全文：.sillyspec/changes/archive/2026-10-22-agent-profiles-page-restyle/requirements.md#FR-02
+最近确认：8150bbef44b91ab68ad9cabe1df4041dbe7a2626
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-22-agent-profiles-page-restyle:flow:测试绑定FR-02
+  tests: test/frontend/src/components/agent-profile/__tests__/agent-profile-card-grid.test.tsx「回车提交搜索：匹配 name 或 system_prompt，计数同步更新」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-22-agent-profiles-page-restyle
+  status: active
+
+## FR-agent-skills-009 卡片墙 2 列；用户默认档案品牌描边+光晕+★默认胶囊；系统预置紧凑整卡（虚线降调、提示词区显「未设置系统提示词，按引擎默认人设执行」、技能区显「按引擎默认能力执行」、只读，空白压至约 1/3）
+变更：2026-10-22-agent-profiles-page-restyle
+状态：active
+摘要：默认档案与系统预置
+全文：.sillyspec/changes/archive/2026-10-22-agent-profiles-page-restyle/requirements.md#FR-03
+最近确认：8150bbef44b91ab68ad9cabe1df4041dbe7a2626
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-22-agent-profiles-page-restyle:flow:测试绑定FR-03
+  tests: test/frontend/src/components/agent-profile/__tests__/agent-profile-card.test.tsx「默认档案品牌光晕类」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-22-agent-profiles-page-restyle
+  status: active
+
+## FR-agent-skills-010 提示词改左竖线引用式排版（去灰底块）；技能芯片等宽字体超 4 项收 +N；无技能自定义卡显「无技能（不挂载）」占位
+变更：2026-10-22-agent-profiles-page-restyle
+状态：active
+摘要：芯片截断与占位
+全文：.sillyspec/changes/archive/2026-10-22-agent-profiles-page-restyle/requirements.md#FR-04
+最近确认：8150bbef44b91ab68ad9cabe1df4041dbe7a2626
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-22-agent-profiles-page-restyle:flow:测试绑定FR-04
+  tests: test/frontend/src/components/agent-profile/__tests__/agent-profile-card.test.tsx「技能芯片超 4 项收敛 +N」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-22-agent-profiles-page-restyle
+  status: active
+
+## FR-agent-skills-011 卡脚操作降躁：常态灰色、悬停提亮（含设/取消默认、编辑、复制、删除），行为不变
+变更：2026-10-22-agent-profiles-page-restyle
+状态：active
+摘要：操作回归
+全文：.sillyspec/changes/archive/2026-10-22-agent-profiles-page-restyle/requirements.md#FR-05
+最近确认：8150bbef44b91ab68ad9cabe1df4041dbe7a2626
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-22-agent-profiles-page-restyle:flow:测试绑定FR-05
+  tests: test/frontend/src/components/agent-profile/__tests__/agent-profile-card.test.tsx「设为默认/取消默认/编辑/复制/删除 回调与不冒泡」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-22-agent-profiles-page-restyle
+  status: active
+
+## FR-agent-skills-012 无硬编码 hex，颜色走 brand/语义 token，三主题可切换
+变更：2026-10-22-agent-profiles-page-restyle
+状态：active
+摘要：三主题切换
+全文：.sillyspec/changes/archive/2026-10-22-agent-profiles-page-restyle/requirements.md#FR-06
+最近确认：8150bbef44b91ab68ad9cabe1df4041dbe7a2626
+
+## FR-agent-skills-013 既有行为回归：搜索/筛选逻辑、点击卡片预览、删除/复制/默认切换路径、空态不变
+变更：2026-10-22-agent-profiles-page-restyle
+状态：active
+摘要：既有用例回归
+全文：.sillyspec/changes/archive/2026-10-22-agent-profiles-page-restyle/requirements.md#FR-07
+最近确认：8150bbef44b91ab68ad9cabe1df4041dbe7a2626
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-22-agent-profiles-page-restyle:flow:测试绑定FR-07
+  tests: test/frontend/src/components/agent-profile/__tests__/agent-profile-card-grid.test.tsx「三筛选/数据源切换/系统预置透传」 | test/page.test.tsx「新建/编辑/复制/删除/空态」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-22-agent-profiles-page-restyle
+  status: active

@@ -32,3 +32,4 @@
 - 2026-10-22-merge-test-debt | 合并后测试债清偿：l10n文案与守卫钉子同步
 - 2026-10-22-file-changes-card-fix | 文件变更卡采集与展示修复
 - 2026-10-22-sillyspec-probe-db-missing-evict | 已删工作区探针自动淘汰与诊断增强
+- 2026-10-22-agent-profiles-page-restyle | 智能体档案列表页重设计

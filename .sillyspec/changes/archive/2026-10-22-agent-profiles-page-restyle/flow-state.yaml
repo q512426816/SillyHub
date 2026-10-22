@@ -1,0 +1,58 @@
+tier: thick
+legacy_fallback: false
+substeps:
+  artifacts: done
+  ledger: done
+  patch: done
+  review: done
+  probes: done
+  distill: done
+  archive: done
+  events: done
+born_face: thin
+with_tasks: false
+review_force: null
+input: >-
+  智能体档案列表页重设计
+
+
+  动机与背景：/agent-profiles 列表页观感陈旧（裸标题+散落筛选+卡片灰底块+链接按钮噪音）。用户经四轮反馈定稿原型
+  F:\WorkNew\SillyHub\.sillyspec\explore\prototype-agent-profiles-page-restyle.html（页头品牌图标+统计胶囊；工具栏收拢一张卡；2
+  列卡片墙；默认档案品牌光晕；系统预置紧凑整卡+提示文案；提示词引用式排版；技能芯片+N；操作降躁）。按原型落地实现。
+
+
+  成功标准：
+
+  - 页头对齐原型：品牌◆图标+标题+副标题，右侧统计胶囊（共 N 个档案·默认 M）+新建主按钮
+
+  - 工具栏收拢成一张卡：搜索+工作区/可见范围/供应商三筛选+匹配计数同栏（文本仍回车触发、选择型即查，行为不变）
+
+  - 卡片墙 2 列；用户默认档案品牌描边+光晕+★默认胶囊；系统预置紧凑整卡（虚线降调、提示词区显「未设置系统提示词，按引擎默认人设执行」、技能区显「按引擎默认能力执行」、只读，空白压至约 1/3）
+
+  - 提示词改左竖线引用式排版（去灰底块）；技能芯片等宽字体超 4 项收 +N；无技能自定义卡显「无技能（不挂载）」占位
+
+  - 卡脚操作降躁：常态灰色、悬停提亮（含设/取消默认、编辑、复制、删除），行为不变
+
+  - 无硬编码 hex，颜色走 brand/语义 token，三主题可切换
+
+  - 既有行为回归：搜索/筛选逻辑、点击卡片预览、删除/复制/默认切换路径、空态不变
+autopilot: false
+prestage_ack: true
+baseline_commit: 69276dca359506633ab4826d08f15d9afb0bc1aa
+updatedAt: '2026-10-22T17:19:01.470Z'
+baseline_sha256: 909e5e02cc5d53c4517dd515ef4d42ab85999636d48ede48862e0a3d65ed8c33
+spec_approved: true
+spec_approved_at: '2026-10-22T05:26:45.049Z'
+spec_approved_by: zcode-apimodal-restyle
+spec_approved_channel: user-confirmed
+spec_attested_by: zcode-apimodal-restyle
+batch_ticked: true
+upgrade_reason: verify 实测失败（实测失败：test（命令与输出尾部见上；修复后重跑 --done 不丢进度））——失败自动升厚
+gate_summary: >-
+  test: failed ← module[]+deps(py133+js1+nontest-skip7+jsx93+jsx56+jsx89+jsx-e2e-skip2)+fr(361)（774.9s）
+  结果：C:\Users\qinyi\IdeaProjects\multi-agent-platform\.sillyspec\.runtime\verify-runs\20261022164801\test-result.json｜lint:
+  passed ← cd backend && uv run ruff check . && uv run ruff format --check . && uv run mypy app && cd ../frontend &&
+  pnpm lint && cd ../sillyhub-daemon && pnpm typecheck（6.4s）
+  结果：C:\Users\qinyi\IdeaProjects\multi-agent-platform\.sillyspec\.runtime\verify-runs\20261022164801\test-result.json｜门文件
+  242 个
+

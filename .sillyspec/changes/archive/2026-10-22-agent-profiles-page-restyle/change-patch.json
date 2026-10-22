@@ -1,0 +1,2457 @@
+{
+  "change": "2026-10-22-agent-profiles-page-restyle",
+  "baseline": "69276dca359506633ab4826d08f15d9afb0bc1aa",
+  "head": "bb1f4e61d3c8ef1cc9b23f7d77c8193a7d4f406c",
+  "files": [
+    ".gitignore",
+    ".openclaw/skills/sillyspec-archive/SKILL.md",
+    ".openclaw/skills/sillyspec-auto/SKILL.md",
+    ".openclaw/skills/sillyspec-brainstorm/SKILL.md",
+    ".openclaw/skills/sillyspec-commit/SKILL.md",
+    ".openclaw/skills/sillyspec-continue/SKILL.md",
+    ".openclaw/skills/sillyspec-doctor/SKILL.md",
+    ".openclaw/skills/sillyspec-execute/SKILL.md",
+    ".openclaw/skills/sillyspec-explore/SKILL.md",
+    ".openclaw/skills/sillyspec-export/SKILL.md",
+    ".openclaw/skills/sillyspec-flow/SKILL.md",
+    ".openclaw/skills/sillyspec-init/SKILL.md",
+    ".openclaw/skills/sillyspec-knowledge/SKILL.md",
+    ".openclaw/skills/sillyspec-plan/SKILL.md",
+    ".openclaw/skills/sillyspec-propose/SKILL.md",
+    ".openclaw/skills/sillyspec-quick/SKILL.md",
+    ".openclaw/skills/sillyspec-resume/SKILL.md",
+    ".openclaw/skills/sillyspec-scan/SKILL.md",
+    ".openclaw/skills/sillyspec-state/SKILL.md",
+    ".openclaw/skills/sillyspec-status/SKILL.md",
+    ".openclaw/skills/sillyspec-verify/SKILL.md",
+    ".openclaw/skills/sillyspec-workspace/SKILL.md",
+    ".sillyspec/docs/SillyHub/modules/daemon.changelog.md",
+    ".sillyspec/docs/SillyHub/modules/frontend_app.changelog.md",
+    ".sillyspec/docs/SillyHub/modules/frontend_components.changelog.md",
+    ".sillyspec/docs/SillyHub/modules/frontend_lib.changelog.md",
+    ".sillyspec/docs/SillyHub/scan/PROTOTYPE.md",
+    ".sillyspec/docs/backend/modules/agent.md",
+    ".sillyspec/docs/backend/modules/change.changelog.md",
+    ".sillyspec/docs/backend/modules/change.md",
+    ".sillyspec/docs/backend/modules/daemon.changelog.md",
+    ".sillyspec/docs/backend/modules/daemon.md",
+    ".sillyspec/docs/backend/modules/knowledge.changelog.md",
+    ".sillyspec/docs/backend/modules/migrations.md",
+    ".sillyspec/docs/backend/modules/platform_sync.changelog.md",
+    ".sillyspec/docs/frontend/modules/components-daemon.md",
+    ".sillyspec/docs/frontend/modules/components-sessions.md",
+    ".sillyspec/docs/multi-agent-platform/modules/backend.changelog.md",
+    ".sillyspec/docs/multi-agent-platform/modules/deploy.md",
+    ".sillyspec/docs/multi-agent-platform/modules/docs.changelog.md",
+    ".sillyspec/docs/multi-agent-platform/modules/frontend.changelog.md",
+    ".sillyspec/docs/multi-agent-platform/modules/sillyhub-daemon.changelog.md",
+    ".sillyspec/docs/multi-agent-platform/modules/sillyhub-daemon.md",
+    ".sillyspec/docs/sillyhub-daemon/modules/interactive.md",
+    ".sillyspec/docs/sillyhub-daemon/modules/sillyspec-manager.md",
+    "backend/.pre-commit-config.yaml",
+    "backend/app/core/config.py",
+    "backend/app/modules/agent/coordinator.py",
+    "backend/app/modules/agent/profile/router.py",
+    "backend/app/modules/agent/profile/service.py",
+    "backend/app/modules/agent/tests/test_coordinator_approval_signal.py",
+    "backend/app/modules/daemon/lease/service.py",
+    "backend/app/modules/daemon/model.py",
+    "backend/app/modules/daemon/router/__init__.py",
+    "backend/app/modules/daemon/router/lease.py",
+    "backend/app/modules/daemon/router/session_crud.py",
+    "backend/app/modules/daemon/router/session_insights.py",
+    "backend/app/modules/daemon/run_sync/service/__init__.py",
+    "backend/app/modules/daemon/run_sync/service/close_run_steps.py",
+    "backend/app/modules/daemon/run_sync/service/publish.py",
+    "backend/app/modules/daemon/run_sync/service/submit_commit.py",
+    "backend/app/modules/daemon/run_sync/service/submit_steps.py",
+    "backend/app/modules/daemon/schema.py",
+    "backend/app/modules/daemon/service.py",
+    "backend/app/modules/daemon/session/service/control.py",
+    "backend/app/modules/daemon/session/service/git_status.py",
+    "backend/app/modules/daemon/session/service/inject.py",
+    "backend/app/modules/daemon/sweep.py",
+    "backend/app/modules/daemon/tests/test_close_interactive_run_session_status.py",
+    "backend/app/modules/daemon/tests/test_group_default_profile.py",
+    "backend/app/modules/daemon/tests/test_interrupt_payload_run_id.py",
+    "backend/app/modules/daemon/tests/test_pending_run_start_sweep.py",
+    "backend/app/modules/daemon/tests/test_session_default_profile.py",
+    "backend/app/modules/daemon/tests/test_session_events_cross.py",
+    "backend/app/modules/daemon/tests/test_session_file_changes.py",
+    "backend/app/modules/daemon/tests/test_session_list_live_signal.py",
+    "backend/app/modules/daemon/tests/test_session_model_usage.py",
+    "backend/app/modules/daemon/tests/test_sessions_list_pending_dialog.py",
+    "backend/app/modules/daemon/tests/test_submit_messages_no_overwrite_terminal.py",
+    "backend/app/modules/platform_sync/router.py",
+    "backend/app/modules/platform_sync/schema.py",
+    "backend/app/modules/platform_sync/service.py",
+    "backend/app/modules/platform_sync/tests/test_spec_sync.py",
+    "backend/app/modules/spec_workspace/model.py",
+    "backend/app/modules/spec_workspace/service.py",
+    "backend/app/modules/spec_workspace/tests/test_platform_deleted_guard.py",
+    "backend/app/modules/spec_workspace/tests/test_soft_delete_change_dir.py",
+    "backend/app/modules/spec_workspace/tests/test_spec_version_and_init_synced.py",
+    "backend/app/modules/spec_workspace/tests/test_sync_incremental.py",
+    "backend/app/modules/translate/README.md",
+    "backend/app/modules/translate/chunking.py",
+    "backend/app/modules/translate/engine.py",
+    "backend/app/modules/translate/service.py",
+    "backend/app/modules/translate/tests/test_chunking.py",
+    "backend/app/modules/translate/tests/test_engine.py",
+    "backend/app/modules/translate/tests/test_service.py",
+    "backend/migrations/versions/20261021120000_add_daemon_run_snapshots.py",
+    "backend/migrations/versions/20261021130000_spec_manifest_landing_version.py",
+    "backend/migrations/versions/a05c84259_merge_user_default_and_spec_manifest.py",
+    "backend/openapi.json",
+    "backend/tests/modules/daemon/test_session_git_status.py",
+    "backend/tests/test_align_platform_change_events_migration.py",
+    "deploy/docker-compose.yml",
+    "docs/releases/2026-10-20-003-50dfdf2.md",
+    "docs/releases/2026-10-22-001-ec0de7977.md",
+    "docs/releases/2026-10-22-002-a967fbb2f.md",
+    "docs/releases/2026-10-22-003-13eaed104.md",
+    "docs/releases/2026-10-22-004-dde0d4506.md",
+    "docs/releases/2026-10-22-005-c2832fd.md",
+    "docs/releases/2026-10-22-006-a5f35d37.md",
+    "docs/sillyspec/active-pitfalls.md",
+    "docs/sillyspec/finished/cli-cwd-coupling.md",
+    "docs/sillyspec/finished/conflict-compare-full-tree-label-mismatch.md",
+    "docs/sillyspec/finished/verify-gate-worktree-crossrepo-three-defects.md",
+    "frontend/.gitignore",
+    "frontend/.sillyspec/quicklog/QUICKLOG-WhaleFall.md",
+    "frontend/e2e/proto-file-card.spec.ts",
+    "frontend/prototype-dist/change-center.html",
+    "frontend/prototype-dist/change-detail-v2.html",
+    "frontend/prototype-dist/change-detail.html",
+    "frontend/prototype-dist/conflict-sync-states.html",
+    "frontend/prototype-dist/index.html",
+    "frontend/prototype-dist/session-fold.html",
+    "frontend/prototype-dist/session-portal.html",
+    "frontend/prototype-dist/sillyspec-flow.html",
+    "frontend/prototype-dist/workspace-list.html",
+    "frontend/prototype-dist/workspace-overview.html",
+    "frontend/scripts/export-hydrated.mjs",
+    "frontend/scripts/prototype-build.mjs",
+    "frontend/src/app/(dashboard)/agent-profiles/__tests__/page.test.tsx",
+    "frontend/src/app/(dashboard)/agent-profiles/page.tsx",
+    "frontend/src/app/(dashboard)/sessions/__tests__/page.test.tsx",
+    "frontend/src/app/globals.css",
+    "frontend/src/app/proto/session-file-changes/page.tsx",
+    "frontend/src/app/proto/session-live-marquee/page.tsx",
+    "frontend/src/app/proto/session-redesign/page.tsx",
+    "frontend/src/app/proto/session-redesign/proto-fixtures.ts",
+    "frontend/src/app/proto/session-redesign/session-redesign.module.css",
+    "frontend/src/app/proto/session-redesign/staged-session-export.ts",
+    "frontend/src/app/proto/session-redesign/types.ts",
+    "frontend/src/app/proto/session-redesign/view.tsx",
+    "frontend/src/app/proto/session-trajectory/page.tsx",
+    "frontend/src/app/proto/session-trajectory/trajectory-proto-view.tsx",
+    "frontend/src/components/agent-log/__tests__/run-error-item.test.tsx",
+    "frontend/src/components/agent-log/run-error-item.tsx",
+    "frontend/src/components/agent-profile/__tests__/agent-profile-card-grid.test.tsx",
+    "frontend/src/components/agent-profile/__tests__/agent-profile-card.test.tsx",
+    "frontend/src/components/agent-profile/agent-profile-card-grid.tsx",
+    "frontend/src/components/agent-profile/agent-profile-card.tsx",
+    "frontend/src/components/app-shell.tsx",
+    "frontend/src/components/chat/round-divider.tsx",
+    "frontend/src/components/daemon/__tests__/attachment-refs.test.ts",
+    "frontend/src/components/daemon/__tests__/message-queue-bar.test.tsx",
+    "frontend/src/components/daemon/__tests__/process-labels.test.ts",
+    "frontend/src/components/daemon/__tests__/session-history-scroll.test.tsx",
+    "frontend/src/components/daemon/__tests__/session-input-bar-plus-menu.test.tsx",
+    "frontend/src/components/daemon/__tests__/session-panel-approval-list-refresh.test.tsx",
+    "frontend/src/components/daemon/__tests__/session-panel-dialog.test.tsx",
+    "frontend/src/components/daemon/__tests__/turn-fold.test.ts",
+    "frontend/src/components/daemon/__tests__/turn-live-marquee.test.tsx",
+    "frontend/src/components/daemon/__tests__/turn-segment-views-thinking-translate.test.tsx",
+    "frontend/src/components/daemon/__tests__/turn-segment-views.test.tsx",
+    "frontend/src/components/daemon/__tests__/turn-time-display.test.tsx",
+    "frontend/src/components/daemon/__tests__/turn-timeline-conversation-file-card.test.tsx",
+    "frontend/src/components/daemon/__tests__/turn-timeline-session-input-bar.test.tsx",
+    "frontend/src/components/daemon/attachment-chips.tsx",
+    "frontend/src/components/daemon/file-changes/__tests__/file-changes-card.test.tsx",
+    "frontend/src/components/daemon/file-changes/__tests__/file-changes-summary.test.tsx",
+    "frontend/src/components/daemon/file-changes/__tests__/turn-file-changes.test.ts",
+    "frontend/src/components/daemon/file-changes/file-changes-card.tsx",
+    "frontend/src/components/daemon/file-changes/file-changes-summary.tsx",
+    "frontend/src/components/daemon/file-changes/turn-file-changes.ts",
+    "frontend/src/components/daemon/message-queue-bar.tsx",
+    "frontend/src/components/daemon/process-labels.ts",
+    "frontend/src/components/daemon/runtime-session-helpers.tsx",
+    "frontend/src/components/daemon/scheduled-messages-bar.tsx",
+    "frontend/src/components/daemon/session-input-bar.tsx",
+    "frontend/src/components/daemon/session-panel/__tests__/interrupt-timeout.test.ts",
+    "frontend/src/components/daemon/session-panel/interrupt-timeout.ts",
+    "frontend/src/components/daemon/session-panel/page-helpers.tsx",
+    "frontend/src/components/daemon/session-panel/session-panel-page.tsx",
+    "frontend/src/components/daemon/trajectory/__tests__/build-trajectory.test.ts",
+    "frontend/src/components/daemon/trajectory/__tests__/trajectory-timeline.test.tsx",
+    "frontend/src/components/daemon/trajectory/__tests__/zoom.test.ts",
+    "frontend/src/components/daemon/trajectory/build-trajectory.ts",
+    "frontend/src/components/daemon/trajectory/trajectory-timeline.tsx",
+    "frontend/src/components/daemon/trajectory/trajectory-view.tsx",
+    "frontend/src/components/daemon/trajectory/zoom.ts",
+    "frontend/src/components/daemon/turn-fold.ts",
+    "frontend/src/components/daemon/turn-live-marquee.tsx",
+    "frontend/src/components/daemon/turn-segment-views.tsx",
+    "frontend/src/components/daemon/turn-timeline.tsx",
+    "frontend/src/components/git-log/__tests__/file-tree.test.tsx",
+    "frontend/src/components/layout/__tests__/page-header.test.tsx",
+    "frontend/src/components/layout/page-header.tsx",
+    "frontend/src/components/prototype/session-fold-view.tsx",
+    "frontend/src/components/sessions/__tests__/ctx-usage-bar.test.tsx",
+    "frontend/src/components/sessions/__tests__/session-config-bar.test.tsx",
+    "frontend/src/components/sessions/__tests__/session-status-indicator.test.tsx",
+    "frontend/src/components/sessions/ctx-usage-bar.tsx",
+    "frontend/src/components/sessions/session-config-bar.tsx",
+    "frontend/src/components/sessions/session-list-panel.tsx",
+    "frontend/src/components/top-bar.tsx",
+    "frontend/src/components/workspace-switcher.tsx",
+    "frontend/src/lib/__tests__/thinking-translate.test.ts",
+    "frontend/src/lib/api-types.ts",
+    "frontend/src/lib/attachment-refs.ts",
+    "frontend/src/lib/daemon/sessions.ts",
+    "frontend/src/lib/thinking-translate.ts",
+    "sillyhub-daemon/package.json",
+    "sillyhub-daemon/src/api-types.ts",
+    "sillyhub-daemon/src/cli.ts",
+    "sillyhub-daemon/src/daemon.ts",
+    "sillyhub-daemon/src/event-loop-watch.ts",
+    "sillyhub-daemon/src/host-fs-handler.ts",
+    "sillyhub-daemon/src/hub-client.ts",
+    "sillyhub-daemon/src/interactive/session-manager.ts",
+    "sillyhub-daemon/src/interactive/session-manager/events.ts",
+    "sillyhub-daemon/src/interactive/session-manager/lifecycle.ts",
+    "sillyhub-daemon/src/interactive/session-manager/turn-control.ts",
+    "sillyhub-daemon/src/interactive/session-manager/types.ts",
+    "sillyhub-daemon/src/interactive/turn-file-changes-types.ts",
+    "sillyhub-daemon/src/interactive/turn-file-changes.ts",
+    "sillyhub-daemon/src/interactive/turn-timing.ts",
+    "sillyhub-daemon/src/interactive/types.ts",
+    "sillyhub-daemon/src/sillyspec-manager.ts",
+    "sillyhub-daemon/src/spec-sync.ts",
+    "sillyhub-daemon/tests/daemon-interrupt-noop-report.test.ts",
+    "sillyhub-daemon/tests/event-loop-watch.test.ts",
+    "sillyhub-daemon/tests/host-fs-handler-git-log-quotepath.test.ts",
+    "sillyhub-daemon/tests/host-fs-handler-git-log.test.ts",
+    "sillyhub-daemon/tests/host-fs-handler-worktree.test.ts",
+    "sillyhub-daemon/tests/hub-client-fetch-timeout-surface.test.ts",
+    "sillyhub-daemon/tests/interactive/session-manager-lifecycle-turn-anchor-eviction.test.ts",
+    "sillyhub-daemon/tests/interactive/session-manager-turn-file-changes.test.ts",
+    "sillyhub-daemon/tests/interactive/turn-file-changes-wire.test.ts",
+    "sillyhub-daemon/tests/interactive/turn-file-changes.test.ts",
+    "sillyhub-daemon/tests/interactive/turn-start-watchdog.test.ts",
+    "sillyhub-daemon/tests/interactive/turn-timing.test.ts",
+    "sillyhub-daemon/tests/sillyspec-status-collect-guards.test.ts",
+    "sillyhub-daemon/tests/spec-sync-conflict-autoheal.test.ts",
+    "sillyhub-daemon/tests/spec-sync-off-switch.test.ts",
+    "sillyhub-daemon/tests/version.test.ts"
+  ],
+  "totals": {
+    "files": 243,
+    "additions": 31094,
+    "deletions": 4904
+  },
+  "savedAt": "2026-10-22T17:15:55.269Z",
+  "note": "flow done 时点冻结（本变更可归属交付面：baseline..HEAD 提交面过滤 .sillyspec/ 只留 .sillyspec/docs/ 交付文档 + 独占树未提交交付；治理工件目录不入冻结——2026-10-12-close-trace-freeze-integrity FR-01）",
+  "modules": [
+    {
+      "id": "core",
+      "files": 1,
+      "doc": "docs/backend/modules/core.md",
+      "docTouched": false,
+      "docMissing": false
+    },
+    {
+      "id": "platform_sync",
+      "files": 4,
+      "doc": "docs/backend/modules/platform_sync.md",
+      "docTouched": false,
+      "docMissing": false
+    },
+    {
+      "id": "agent",
+      "files": 4,
+      "doc": "docs/backend/modules/agent.md",
+      "docTouched": true,
+      "docMissing": false
+    },
+    {
+      "id": "daemon",
+      "files": 28,
+      "doc": "docs/backend/modules/daemon.md",
+      "docTouched": true,
+      "docMissing": false
+    },
+    {
+      "id": "spec_workspace",
+      "files": 6,
+      "doc": "docs/backend/modules/spec_workspace.md",
+      "docTouched": false,
+      "docMissing": false
+    },
+    {
+      "id": "migrations",
+      "files": 3,
+      "doc": "docs/backend/modules/migrations.md",
+      "docTouched": true,
+      "docMissing": false
+    },
+    {
+      "id": "backend",
+      "files": 57,
+      "doc": "docs/multi-agent-platform/modules/backend.md",
+      "docTouched": false,
+      "docMissing": false
+    },
+    {
+      "id": "frontend",
+      "files": 95,
+      "doc": "docs/multi-agent-platform/modules/frontend.md",
+      "docTouched": false,
+      "docMissing": false
+    },
+    {
+      "id": "sillyhub-daemon",
+      "files": 34,
+      "doc": "docs/multi-agent-platform/modules/sillyhub-daemon.md",
+      "docTouched": true,
+      "docMissing": false
+    },
+    {
+      "id": "deploy",
+      "files": 1,
+      "doc": "docs/multi-agent-platform/modules/deploy.md",
+      "docTouched": true,
+      "docMissing": false
+    },
+    {
+      "id": "build",
+      "files": 2,
+      "doc": "docs/multi-agent-platform/modules/build.md",
+      "docTouched": false,
+      "docMissing": false
+    },
+    {
+      "id": "docs",
+      "files": 11,
+      "doc": "docs/multi-agent-platform/modules/docs.md",
+      "docTouched": false,
+      "docMissing": false
+    },
+    {
+      "id": "core",
+      "files": 1,
+      "doc": "docs/SillyHub/modules/core.md",
+      "docTouched": false,
+      "docMissing": false
+    },
+    {
+      "id": "agent",
+      "files": 4,
+      "doc": "docs/SillyHub/modules/agent.md",
+      "docTouched": false,
+      "docMissing": false
+    },
+    {
+      "id": "daemon",
+      "files": 62,
+      "doc": "docs/SillyHub/modules/daemon.md",
+      "docTouched": false,
+      "docMissing": false
+    },
+    {
+      "id": "spec_workspace",
+      "files": 6,
+      "doc": "docs/SillyHub/modules/spec_workspace.md",
+      "docTouched": false,
+      "docMissing": false
+    },
+    {
+      "id": "platform_sync",
+      "files": 4,
+      "doc": "docs/SillyHub/modules/platform_sync.md",
+      "docTouched": false,
+      "docMissing": false
+    },
+    {
+      "id": "frontend_app",
+      "files": 14,
+      "doc": "docs/SillyHub/modules/frontend_app.md",
+      "docTouched": false,
+      "docMissing": false
+    },
+    {
+      "id": "frontend_components",
+      "files": 61,
+      "doc": "docs/SillyHub/modules/frontend_components.md",
+      "docTouched": false,
+      "docMissing": false
+    },
+    {
+      "id": "frontend_lib",
+      "files": 5,
+      "doc": "docs/SillyHub/modules/frontend_lib.md",
+      "docTouched": false,
+      "docMissing": false
+    }
+  ],
+  "uncoveredDirs": [
+    {
+      "dir": ".openclaw/skills/sillyspec-archive",
+      "files": 1
+    },
+    {
+      "dir": ".openclaw/skills/sillyspec-auto",
+      "files": 1
+    },
+    {
+      "dir": ".openclaw/skills/sillyspec-brainstorm",
+      "files": 1
+    },
+    {
+      "dir": ".openclaw/skills/sillyspec-commit",
+      "files": 1
+    },
+    {
+      "dir": ".openclaw/skills/sillyspec-continue",
+      "files": 1
+    },
+    {
+      "dir": ".openclaw/skills/sillyspec-doctor",
+      "files": 1
+    },
+    {
+      "dir": ".openclaw/skills/sillyspec-execute",
+      "files": 1
+    },
+    {
+      "dir": ".openclaw/skills/sillyspec-explore",
+      "files": 1
+    },
+    {
+      "dir": ".openclaw/skills/sillyspec-export",
+      "files": 1
+    },
+    {
+      "dir": ".openclaw/skills/sillyspec-flow",
+      "files": 1
+    },
+    {
+      "dir": ".openclaw/skills/sillyspec-init",
+      "files": 1
+    },
+    {
+      "dir": ".openclaw/skills/sillyspec-knowledge",
+      "files": 1
+    },
+    {
+      "dir": ".openclaw/skills/sillyspec-plan",
+      "files": 1
+    },
+    {
+      "dir": ".openclaw/skills/sillyspec-propose",
+      "files": 1
+    },
+    {
+      "dir": ".openclaw/skills/sillyspec-quick",
+      "files": 1
+    },
+    {
+      "dir": ".openclaw/skills/sillyspec-resume",
+      "files": 1
+    },
+    {
+      "dir": ".openclaw/skills/sillyspec-scan",
+      "files": 1
+    },
+    {
+      "dir": ".openclaw/skills/sillyspec-state",
+      "files": 1
+    },
+    {
+      "dir": ".openclaw/skills/sillyspec-status",
+      "files": 1
+    },
+    {
+      "dir": ".openclaw/skills/sillyspec-verify",
+      "files": 1
+    },
+    {
+      "dir": ".openclaw/skills/sillyspec-workspace",
+      "files": 1
+    }
+  ],
+  "moduleMaps": [
+    "docs/backend/modules/_module-map.yaml",
+    "docs/frontend/modules/_module-map.yaml",
+    "docs/multi-agent-platform/modules/_module-map.yaml",
+    "docs/SillyHub/modules/_module-map.yaml",
+    "docs/sillyhub-daemon/modules/_module-map.yaml"
+  ],
+  "acceptedUnmappedDirs": 21,
+  "scopeAudit": {
+    "mode": "full-flow",
+    "ok": true,
+    "degradedReason": null,
+    "baseAnchor": "69276dca359506633ab4826d08f15d9afb0bc1aa",
+    "totals": {
+      "files": 243,
+      "additions": 31094,
+      "deletions": 4904
+    },
+    "rows": [
+      {
+        "path": ".gitignore",
+        "additions": 5,
+        "deletions": 0,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": ".openclaw/skills/sillyspec-archive/SKILL.md",
+        "additions": 0,
+        "deletions": 87,
+        "kind": "deleted",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": ".openclaw/skills/sillyspec-auto/SKILL.md",
+        "additions": 0,
+        "deletions": 54,
+        "kind": "deleted",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": ".openclaw/skills/sillyspec-brainstorm/SKILL.md",
+        "additions": 0,
+        "deletions": 114,
+        "kind": "deleted",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": ".openclaw/skills/sillyspec-commit/SKILL.md",
+        "additions": 0,
+        "deletions": 67,
+        "kind": "deleted",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": ".openclaw/skills/sillyspec-continue/SKILL.md",
+        "additions": 0,
+        "deletions": 17,
+        "kind": "deleted",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": ".openclaw/skills/sillyspec-doctor/SKILL.md",
+        "additions": 0,
+        "deletions": 76,
+        "kind": "deleted",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": ".openclaw/skills/sillyspec-execute/SKILL.md",
+        "additions": 0,
+        "deletions": 222,
+        "kind": "deleted",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": ".openclaw/skills/sillyspec-explore/SKILL.md",
+        "additions": 0,
+        "deletions": 107,
+        "kind": "deleted",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": ".openclaw/skills/sillyspec-export/SKILL.md",
+        "additions": 0,
+        "deletions": 57,
+        "kind": "deleted",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": ".openclaw/skills/sillyspec-flow/SKILL.md",
+        "additions": 0,
+        "deletions": 62,
+        "kind": "deleted",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": ".openclaw/skills/sillyspec-init/SKILL.md",
+        "additions": 0,
+        "deletions": 177,
+        "kind": "deleted",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": ".openclaw/skills/sillyspec-knowledge/SKILL.md",
+        "additions": 0,
+        "deletions": 40,
+        "kind": "deleted",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": ".openclaw/skills/sillyspec-plan/SKILL.md",
+        "additions": 0,
+        "deletions": 156,
+        "kind": "deleted",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": ".openclaw/skills/sillyspec-propose/SKILL.md",
+        "additions": 0,
+        "deletions": 16,
+        "kind": "deleted",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": ".openclaw/skills/sillyspec-quick/SKILL.md",
+        "additions": 0,
+        "deletions": 116,
+        "kind": "deleted",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": ".openclaw/skills/sillyspec-resume/SKILL.md",
+        "additions": 0,
+        "deletions": 21,
+        "kind": "deleted",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": ".openclaw/skills/sillyspec-scan/SKILL.md",
+        "additions": 0,
+        "deletions": 79,
+        "kind": "deleted",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": ".openclaw/skills/sillyspec-state/SKILL.md",
+        "additions": 0,
+        "deletions": 25,
+        "kind": "deleted",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": ".openclaw/skills/sillyspec-status/SKILL.md",
+        "additions": 0,
+        "deletions": 54,
+        "kind": "deleted",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": ".openclaw/skills/sillyspec-verify/SKILL.md",
+        "additions": 0,
+        "deletions": 87,
+        "kind": "deleted",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": ".openclaw/skills/sillyspec-workspace/SKILL.md",
+        "additions": 0,
+        "deletions": 33,
+        "kind": "deleted",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": ".sillyspec/docs/SillyHub/modules/daemon.changelog.md",
+        "additions": 19,
+        "deletions": 0,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": ".sillyspec/docs/SillyHub/modules/frontend_app.changelog.md",
+        "additions": 6,
+        "deletions": 0,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": ".sillyspec/docs/SillyHub/modules/frontend_components.changelog.md",
+        "additions": 22,
+        "deletions": 0,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": ".sillyspec/docs/SillyHub/modules/frontend_lib.changelog.md",
+        "additions": 8,
+        "deletions": 0,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": ".sillyspec/docs/SillyHub/scan/PROTOTYPE.md",
+        "additions": 36,
+        "deletions": 1,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": ".sillyspec/docs/backend/modules/agent.md",
+        "additions": 5,
+        "deletions": 0,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": ".sillyspec/docs/backend/modules/change.changelog.md",
+        "additions": 1,
+        "deletions": 0,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": ".sillyspec/docs/backend/modules/change.md",
+        "additions": 12,
+        "deletions": 4,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": ".sillyspec/docs/backend/modules/daemon.changelog.md",
+        "additions": 8,
+        "deletions": 0,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": ".sillyspec/docs/backend/modules/daemon.md",
+        "additions": 33,
+        "deletions": 0,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": ".sillyspec/docs/backend/modules/knowledge.changelog.md",
+        "additions": 1,
+        "deletions": 0,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": ".sillyspec/docs/backend/modules/migrations.md",
+        "additions": 17,
+        "deletions": 0,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": ".sillyspec/docs/backend/modules/platform_sync.changelog.md",
+        "additions": 1,
+        "deletions": 0,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": ".sillyspec/docs/frontend/modules/components-daemon.md",
+        "additions": 56,
+        "deletions": 0,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": ".sillyspec/docs/frontend/modules/components-sessions.md",
+        "additions": 2,
+        "deletions": 1,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": ".sillyspec/docs/multi-agent-platform/modules/backend.changelog.md",
+        "additions": 19,
+        "deletions": 0,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": ".sillyspec/docs/multi-agent-platform/modules/deploy.md",
+        "additions": 3,
+        "deletions": 0,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": ".sillyspec/docs/multi-agent-platform/modules/docs.changelog.md",
+        "additions": 6,
+        "deletions": 0,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": ".sillyspec/docs/multi-agent-platform/modules/frontend.changelog.md",
+        "additions": 26,
+        "deletions": 0,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": ".sillyspec/docs/multi-agent-platform/modules/sillyhub-daemon.changelog.md",
+        "additions": 14,
+        "deletions": 0,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": ".sillyspec/docs/multi-agent-platform/modules/sillyhub-daemon.md",
+        "additions": 1,
+        "deletions": 0,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": ".sillyspec/docs/sillyhub-daemon/modules/interactive.md",
+        "additions": 60,
+        "deletions": 0,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": ".sillyspec/docs/sillyhub-daemon/modules/sillyspec-manager.md",
+        "additions": 17,
+        "deletions": 0,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": "backend/.pre-commit-config.yaml",
+        "additions": 15,
+        "deletions": 6,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": "backend/app/core/config.py",
+        "additions": 19,
+        "deletions": 0,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": "backend/app/modules/agent/coordinator.py",
+        "additions": 24,
+        "deletions": 1,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": "backend/app/modules/agent/profile/router.py",
+        "additions": 1,
+        "deletions": 3,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": "backend/app/modules/agent/profile/service.py",
+        "additions": 1,
+        "deletions": 3,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": "backend/app/modules/agent/tests/test_coordinator_approval_signal.py",
+        "additions": 176,
+        "deletions": 0,
+        "kind": "new",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": "backend/app/modules/daemon/lease/service.py",
+        "additions": 73,
+        "deletions": 1,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": "backend/app/modules/daemon/model.py",
+        "additions": 71,
+        "deletions": 0,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": "backend/app/modules/daemon/router/__init__.py",
+        "additions": 8,
+        "deletions": 0,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": "backend/app/modules/daemon/router/lease.py",
+        "additions": 13,
+        "deletions": 0,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": "backend/app/modules/daemon/router/session_crud.py",
+        "additions": 63,
+        "deletions": 0,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": "backend/app/modules/daemon/router/session_insights.py",
+        "additions": 206,
+        "deletions": 2,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": "backend/app/modules/daemon/run_sync/service/__init__.py",
+        "additions": 14,
+        "deletions": 1,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": "backend/app/modules/daemon/run_sync/service/close_run_steps.py",
+        "additions": 77,
+        "deletions": 7,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": "backend/app/modules/daemon/run_sync/service/publish.py",
+        "additions": 18,
+        "deletions": 3,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": "backend/app/modules/daemon/run_sync/service/submit_commit.py",
+        "additions": 16,
+        "deletions": 0,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": "backend/app/modules/daemon/run_sync/service/submit_steps.py",
+        "additions": 5,
+        "deletions": 0,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": "backend/app/modules/daemon/schema.py",
+        "additions": 106,
+        "deletions": 1,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": "backend/app/modules/daemon/service.py",
+        "additions": 10,
+        "deletions": 0,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": "backend/app/modules/daemon/session/service/control.py",
+        "additions": 12,
+        "deletions": 5,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": "backend/app/modules/daemon/session/service/git_status.py",
+        "additions": 242,
+        "deletions": 0,
+        "kind": "new",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": "backend/app/modules/daemon/session/service/inject.py",
+        "additions": 57,
+        "deletions": 1,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": "backend/app/modules/daemon/sweep.py",
+        "additions": 176,
+        "deletions": 0,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": "backend/app/modules/daemon/tests/test_close_interactive_run_session_status.py",
+        "additions": 23,
+        "deletions": 3,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": "backend/app/modules/daemon/tests/test_group_default_profile.py",
+        "additions": 4,
+        "deletions": 8,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": "backend/app/modules/daemon/tests/test_interrupt_payload_run_id.py",
+        "additions": 103,
+        "deletions": 0,
+        "kind": "new",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": "backend/app/modules/daemon/tests/test_pending_run_start_sweep.py",
+        "additions": 275,
+        "deletions": 0,
+        "kind": "new",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": "backend/app/modules/daemon/tests/test_session_default_profile.py",
+        "additions": 1,
+        "deletions": 3,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": "backend/app/modules/daemon/tests/test_session_events_cross.py",
+        "additions": 9,
+        "deletions": 4,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": "backend/app/modules/daemon/tests/test_session_file_changes.py",
+        "additions": 643,
+        "deletions": 0,
+        "kind": "new",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": "backend/app/modules/daemon/tests/test_session_list_live_signal.py",
+        "additions": 131,
+        "deletions": 0,
+        "kind": "new",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": "backend/app/modules/daemon/tests/test_session_model_usage.py",
+        "additions": 260,
+        "deletions": 0,
+        "kind": "new",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": "backend/app/modules/daemon/tests/test_sessions_list_pending_dialog.py",
+        "additions": 261,
+        "deletions": 0,
+        "kind": "new",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": "backend/app/modules/daemon/tests/test_submit_messages_no_overwrite_terminal.py",
+        "additions": 108,
+        "deletions": 0,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": "backend/app/modules/platform_sync/router.py",
+        "additions": 17,
+        "deletions": 2,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": "backend/app/modules/platform_sync/schema.py",
+        "additions": 7,
+        "deletions": 1,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": "backend/app/modules/platform_sync/service.py",
+        "additions": 9,
+        "deletions": 4,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": "backend/app/modules/platform_sync/tests/test_spec_sync.py",
+        "additions": 155,
+        "deletions": 0,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": "backend/app/modules/spec_workspace/model.py",
+        "additions": 15,
+        "deletions": 0,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": "backend/app/modules/spec_workspace/service.py",
+        "additions": 103,
+        "deletions": 19,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": "backend/app/modules/spec_workspace/tests/test_platform_deleted_guard.py",
+        "additions": 18,
+        "deletions": 0,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": "backend/app/modules/spec_workspace/tests/test_soft_delete_change_dir.py",
+        "additions": 28,
+        "deletions": 0,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": "backend/app/modules/spec_workspace/tests/test_spec_version_and_init_synced.py",
+        "additions": 11,
+        "deletions": 4,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": "backend/app/modules/spec_workspace/tests/test_sync_incremental.py",
+        "additions": 14,
+        "deletions": 4,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": "backend/app/modules/translate/README.md",
+        "additions": 24,
+        "deletions": 0,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": "backend/app/modules/translate/chunking.py",
+        "additions": 54,
+        "deletions": 7,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": "backend/app/modules/translate/engine.py",
+        "additions": 43,
+        "deletions": 3,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": "backend/app/modules/translate/service.py",
+        "additions": 14,
+        "deletions": 7,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": "backend/app/modules/translate/tests/test_chunking.py",
+        "additions": 54,
+        "deletions": 0,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": "backend/app/modules/translate/tests/test_engine.py",
+        "additions": 94,
+        "deletions": 0,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": "backend/app/modules/translate/tests/test_service.py",
+        "additions": 66,
+        "deletions": 0,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": "backend/migrations/versions/20261021120000_add_daemon_run_snapshots.py",
+        "additions": 77,
+        "deletions": 0,
+        "kind": "new",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": "backend/migrations/versions/20261021130000_spec_manifest_landing_version.py",
+        "additions": 49,
+        "deletions": 0,
+        "kind": "new",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": "backend/migrations/versions/a05c84259_merge_user_default_and_spec_manifest.py",
+        "additions": 28,
+        "deletions": 0,
+        "kind": "new",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": "backend/openapi.json",
+        "additions": 595,
+        "deletions": 3,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": "backend/tests/modules/daemon/test_session_git_status.py",
+        "additions": 369,
+        "deletions": 0,
+        "kind": "new",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": "backend/tests/test_align_platform_change_events_migration.py",
+        "additions": 16,
+        "deletions": 2,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": "deploy/docker-compose.yml",
+        "additions": 9,
+        "deletions": 0,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": "docs/releases/2026-10-20-003-50dfdf2.md",
+        "additions": 62,
+        "deletions": 0,
+        "kind": "new",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": "docs/releases/2026-10-22-001-ec0de7977.md",
+        "additions": 67,
+        "deletions": 0,
+        "kind": "new",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": "docs/releases/2026-10-22-002-a967fbb2f.md",
+        "additions": 54,
+        "deletions": 0,
+        "kind": "new",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": "docs/releases/2026-10-22-003-13eaed104.md",
+        "additions": 35,
+        "deletions": 0,
+        "kind": "new",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": "docs/releases/2026-10-22-004-dde0d4506.md",
+        "additions": 23,
+        "deletions": 0,
+        "kind": "new",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": "docs/releases/2026-10-22-005-c2832fd.md",
+        "additions": 303,
+        "deletions": 0,
+        "kind": "new",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": "docs/releases/2026-10-22-006-a5f35d37.md",
+        "additions": 47,
+        "deletions": 0,
+        "kind": "new",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": "docs/sillyspec/active-pitfalls.md",
+        "additions": 3,
+        "deletions": 3,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": "docs/sillyspec/finished/cli-cwd-coupling.md",
+        "additions": 6,
+        "deletions": 0,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": "docs/sillyspec/finished/conflict-compare-full-tree-label-mismatch.md",
+        "additions": 6,
+        "deletions": 0,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": "docs/sillyspec/finished/verify-gate-worktree-crossrepo-three-defects.md",
+        "additions": 6,
+        "deletions": 0,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": "frontend/.gitignore",
+        "additions": 5,
+        "deletions": 0,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": "frontend/.sillyspec/quicklog/QUICKLOG-WhaleFall.md",
+        "additions": 0,
+        "deletions": 15,
+        "kind": "deleted",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": "frontend/e2e/proto-file-card.spec.ts",
+        "additions": 135,
+        "deletions": 0,
+        "kind": "new",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": "frontend/prototype-dist/change-center.html",
+        "additions": 1,
+        "deletions": 1,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": "frontend/prototype-dist/change-detail-v2.html",
+        "additions": 1,
+        "deletions": 1,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": "frontend/prototype-dist/change-detail.html",
+        "additions": 1,
+        "deletions": 1,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": "frontend/prototype-dist/conflict-sync-states.html",
+        "additions": 1,
+        "deletions": 1,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": "frontend/prototype-dist/index.html",
+        "additions": 9,
+        "deletions": 1,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": "frontend/prototype-dist/session-fold.html",
+        "additions": 86,
+        "deletions": 0,
+        "kind": "new",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": "frontend/prototype-dist/session-portal.html",
+        "additions": 1,
+        "deletions": 1,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": "frontend/prototype-dist/sillyspec-flow.html",
+        "additions": 1,
+        "deletions": 1,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": "frontend/prototype-dist/workspace-list.html",
+        "additions": 1,
+        "deletions": 1,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": "frontend/prototype-dist/workspace-overview.html",
+        "additions": 1,
+        "deletions": 1,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": "frontend/scripts/export-hydrated.mjs",
+        "additions": 1175,
+        "deletions": 0,
+        "kind": "new",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": "frontend/scripts/prototype-build.mjs",
+        "additions": 10,
+        "deletions": 0,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": "frontend/src/app/(dashboard)/agent-profiles/__tests__/page.test.tsx",
+        "additions": 16,
+        "deletions": 0,
+        "kind": "modified",
+        "planned": "修改",
+        "verdict": "planned"
+      },
+      {
+        "path": "frontend/src/app/(dashboard)/agent-profiles/page.tsx",
+        "additions": 41,
+        "deletions": 9,
+        "kind": "modified",
+        "planned": "修改",
+        "verdict": "planned"
+      },
+      {
+        "path": "frontend/src/app/(dashboard)/sessions/__tests__/page.test.tsx",
+        "additions": 4,
+        "deletions": 2,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": "frontend/src/app/globals.css",
+        "additions": 88,
+        "deletions": 0,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": "frontend/src/app/proto/session-file-changes/page.tsx",
+        "additions": 240,
+        "deletions": 0,
+        "kind": "new",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": "frontend/src/app/proto/session-live-marquee/page.tsx",
+        "additions": 374,
+        "deletions": 0,
+        "kind": "new",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": "frontend/src/app/proto/session-redesign/page.tsx",
+        "additions": 21,
+        "deletions": 0,
+        "kind": "new",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": "frontend/src/app/proto/session-redesign/proto-fixtures.ts",
+        "additions": 525,
+        "deletions": 0,
+        "kind": "new",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": "frontend/src/app/proto/session-redesign/session-redesign.module.css",
+        "additions": 185,
+        "deletions": 0,
+        "kind": "new",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": "frontend/src/app/proto/session-redesign/staged-session-export.ts",
+        "additions": 50,
+        "deletions": 0,
+        "kind": "new",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": "frontend/src/app/proto/session-redesign/types.ts",
+        "additions": 63,
+        "deletions": 0,
+        "kind": "new",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": "frontend/src/app/proto/session-redesign/view.tsx",
+        "additions": 376,
+        "deletions": 0,
+        "kind": "new",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": "frontend/src/app/proto/session-trajectory/page.tsx",
+        "additions": 28,
+        "deletions": 0,
+        "kind": "new",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": "frontend/src/app/proto/session-trajectory/trajectory-proto-view.tsx",
+        "additions": 120,
+        "deletions": 0,
+        "kind": "new",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": "frontend/src/components/agent-log/__tests__/run-error-item.test.tsx",
+        "additions": 61,
+        "deletions": 12,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": "frontend/src/components/agent-log/run-error-item.tsx",
+        "additions": 26,
+        "deletions": 2,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": "frontend/src/components/agent-profile/__tests__/agent-profile-card-grid.test.tsx",
+        "additions": 19,
+        "deletions": 0,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "planned"
+      },
+      {
+        "path": "frontend/src/components/agent-profile/__tests__/agent-profile-card.test.tsx",
+        "additions": 83,
+        "deletions": 2,
+        "kind": "modified",
+        "planned": "修改",
+        "verdict": "planned"
+      },
+      {
+        "path": "frontend/src/components/agent-profile/agent-profile-card-grid.tsx",
+        "additions": 42,
+        "deletions": 16,
+        "kind": "modified",
+        "planned": "修改",
+        "verdict": "planned"
+      },
+      {
+        "path": "frontend/src/components/agent-profile/agent-profile-card.tsx",
+        "additions": 66,
+        "deletions": 24,
+        "kind": "modified",
+        "planned": "修改",
+        "verdict": "planned"
+      },
+      {
+        "path": "frontend/src/components/app-shell.tsx",
+        "additions": 50,
+        "deletions": 5,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": "frontend/src/components/chat/round-divider.tsx",
+        "additions": 27,
+        "deletions": 4,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": "frontend/src/components/daemon/__tests__/attachment-refs.test.ts",
+        "additions": 46,
+        "deletions": 0,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": "frontend/src/components/daemon/__tests__/message-queue-bar.test.tsx",
+        "additions": 182,
+        "deletions": 0,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": "frontend/src/components/daemon/__tests__/process-labels.test.ts",
+        "additions": 113,
+        "deletions": 0,
+        "kind": "new",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": "frontend/src/components/daemon/__tests__/session-history-scroll.test.tsx",
+        "additions": 6,
+        "deletions": 6,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": "frontend/src/components/daemon/__tests__/session-input-bar-plus-menu.test.tsx",
+        "additions": 36,
+        "deletions": 0,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": "frontend/src/components/daemon/__tests__/session-panel-approval-list-refresh.test.tsx",
+        "additions": 286,
+        "deletions": 0,
+        "kind": "new",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": "frontend/src/components/daemon/__tests__/session-panel-dialog.test.tsx",
+        "additions": 9,
+        "deletions": 6,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": "frontend/src/components/daemon/__tests__/turn-fold.test.ts",
+        "additions": 113,
+        "deletions": 0,
+        "kind": "new",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": "frontend/src/components/daemon/__tests__/turn-live-marquee.test.tsx",
+        "additions": 278,
+        "deletions": 0,
+        "kind": "new",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": "frontend/src/components/daemon/__tests__/turn-segment-views-thinking-translate.test.tsx",
+        "additions": 2,
+        "deletions": 1,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": "frontend/src/components/daemon/__tests__/turn-segment-views.test.tsx",
+        "additions": 220,
+        "deletions": 9,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": "frontend/src/components/daemon/__tests__/turn-time-display.test.tsx",
+        "additions": 94,
+        "deletions": 17,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": "frontend/src/components/daemon/__tests__/turn-timeline-conversation-file-card.test.tsx",
+        "additions": 220,
+        "deletions": 3,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": "frontend/src/components/daemon/__tests__/turn-timeline-session-input-bar.test.tsx",
+        "additions": 5,
+        "deletions": 4,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": "frontend/src/components/daemon/attachment-chips.tsx",
+        "additions": 31,
+        "deletions": 3,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": "frontend/src/components/daemon/file-changes/__tests__/file-changes-card.test.tsx",
+        "additions": 301,
+        "deletions": 0,
+        "kind": "new",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": "frontend/src/components/daemon/file-changes/__tests__/file-changes-summary.test.tsx",
+        "additions": 265,
+        "deletions": 0,
+        "kind": "new",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": "frontend/src/components/daemon/file-changes/__tests__/turn-file-changes.test.ts",
+        "additions": 309,
+        "deletions": 0,
+        "kind": "new",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": "frontend/src/components/daemon/file-changes/file-changes-card.tsx",
+        "additions": 456,
+        "deletions": 0,
+        "kind": "new",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": "frontend/src/components/daemon/file-changes/file-changes-summary.tsx",
+        "additions": 250,
+        "deletions": 0,
+        "kind": "new",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": "frontend/src/components/daemon/file-changes/turn-file-changes.ts",
+        "additions": 233,
+        "deletions": 0,
+        "kind": "new",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": "frontend/src/components/daemon/message-queue-bar.tsx",
+        "additions": 119,
+        "deletions": 22,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": "frontend/src/components/daemon/process-labels.ts",
+        "additions": 121,
+        "deletions": 0,
+        "kind": "new",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": "frontend/src/components/daemon/runtime-session-helpers.tsx",
+        "additions": 90,
+        "deletions": 48,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": "frontend/src/components/daemon/scheduled-messages-bar.tsx",
+        "additions": 9,
+        "deletions": 2,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": "frontend/src/components/daemon/session-input-bar.tsx",
+        "additions": 58,
+        "deletions": 0,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": "frontend/src/components/daemon/session-panel/__tests__/interrupt-timeout.test.ts",
+        "additions": 159,
+        "deletions": 0,
+        "kind": "new",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": "frontend/src/components/daemon/session-panel/interrupt-timeout.ts",
+        "additions": 68,
+        "deletions": 0,
+        "kind": "new",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": "frontend/src/components/daemon/session-panel/page-helpers.tsx",
+        "additions": 31,
+        "deletions": 3,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": "frontend/src/components/daemon/session-panel/session-panel-page.tsx",
+        "additions": 173,
+        "deletions": 50,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": "frontend/src/components/daemon/trajectory/__tests__/build-trajectory.test.ts",
+        "additions": 809,
+        "deletions": 0,
+        "kind": "new",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": "frontend/src/components/daemon/trajectory/__tests__/trajectory-timeline.test.tsx",
+        "additions": 185,
+        "deletions": 0,
+        "kind": "new",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": "frontend/src/components/daemon/trajectory/__tests__/zoom.test.ts",
+        "additions": 206,
+        "deletions": 0,
+        "kind": "new",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": "frontend/src/components/daemon/trajectory/build-trajectory.ts",
+        "additions": 1191,
+        "deletions": 0,
+        "kind": "new",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": "frontend/src/components/daemon/trajectory/trajectory-timeline.tsx",
+        "additions": 809,
+        "deletions": 0,
+        "kind": "new",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": "frontend/src/components/daemon/trajectory/trajectory-view.tsx",
+        "additions": 177,
+        "deletions": 0,
+        "kind": "new",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": "frontend/src/components/daemon/trajectory/zoom.ts",
+        "additions": 272,
+        "deletions": 0,
+        "kind": "new",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": "frontend/src/components/daemon/turn-fold.ts",
+        "additions": 75,
+        "deletions": 0,
+        "kind": "new",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": "frontend/src/components/daemon/turn-live-marquee.tsx",
+        "additions": 493,
+        "deletions": 0,
+        "kind": "new",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": "frontend/src/components/daemon/turn-segment-views.tsx",
+        "additions": 154,
+        "deletions": 44,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": "frontend/src/components/daemon/turn-timeline.tsx",
+        "additions": 2730,
+        "deletions": 2434,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": "frontend/src/components/git-log/__tests__/file-tree.test.tsx",
+        "additions": 59,
+        "deletions": 0,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": "frontend/src/components/layout/__tests__/page-header.test.tsx",
+        "additions": 15,
+        "deletions": 9,
+        "kind": "modified",
+        "planned": "修改",
+        "verdict": "planned"
+      },
+      {
+        "path": "frontend/src/components/layout/page-header.tsx",
+        "additions": 12,
+        "deletions": 5,
+        "kind": "modified",
+        "planned": "修改",
+        "verdict": "planned"
+      },
+      {
+        "path": "frontend/src/components/prototype/session-fold-view.tsx",
+        "additions": 796,
+        "deletions": 0,
+        "kind": "new",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": "frontend/src/components/sessions/__tests__/ctx-usage-bar.test.tsx",
+        "additions": 63,
+        "deletions": 43,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": "frontend/src/components/sessions/__tests__/session-config-bar.test.tsx",
+        "additions": 141,
+        "deletions": 70,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": "frontend/src/components/sessions/__tests__/session-status-indicator.test.tsx",
+        "additions": 78,
+        "deletions": 0,
+        "kind": "new",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": "frontend/src/components/sessions/ctx-usage-bar.tsx",
+        "additions": 34,
+        "deletions": 41,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": "frontend/src/components/sessions/session-config-bar.tsx",
+        "additions": 85,
+        "deletions": 49,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": "frontend/src/components/sessions/session-list-panel.tsx",
+        "additions": 41,
+        "deletions": 6,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": "frontend/src/components/top-bar.tsx",
+        "additions": 9,
+        "deletions": 2,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": "frontend/src/components/workspace-switcher.tsx",
+        "additions": 47,
+        "deletions": 20,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": "frontend/src/lib/__tests__/thinking-translate.test.ts",
+        "additions": 20,
+        "deletions": 0,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": "frontend/src/lib/api-types.ts",
+        "additions": 338,
+        "deletions": 2,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": "frontend/src/lib/attachment-refs.ts",
+        "additions": 94,
+        "deletions": 0,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": "frontend/src/lib/daemon/sessions.ts",
+        "additions": 34,
+        "deletions": 0,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": "frontend/src/lib/thinking-translate.ts",
+        "additions": 8,
+        "deletions": 0,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": "sillyhub-daemon/package.json",
+        "additions": 1,
+        "deletions": 1,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": "sillyhub-daemon/src/api-types.ts",
+        "additions": 474,
+        "deletions": 15,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": "sillyhub-daemon/src/cli.ts",
+        "additions": 12,
+        "deletions": 2,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": "sillyhub-daemon/src/daemon.ts",
+        "additions": 459,
+        "deletions": 46,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": "sillyhub-daemon/src/event-loop-watch.ts",
+        "additions": 149,
+        "deletions": 0,
+        "kind": "new",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": "sillyhub-daemon/src/host-fs-handler.ts",
+        "additions": 94,
+        "deletions": 8,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": "sillyhub-daemon/src/hub-client.ts",
+        "additions": 37,
+        "deletions": 30,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": "sillyhub-daemon/src/interactive/session-manager.ts",
+        "additions": 404,
+        "deletions": 2,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": "sillyhub-daemon/src/interactive/session-manager/events.ts",
+        "additions": 7,
+        "deletions": 0,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": "sillyhub-daemon/src/interactive/session-manager/lifecycle.ts",
+        "additions": 17,
+        "deletions": 0,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": "sillyhub-daemon/src/interactive/session-manager/turn-control.ts",
+        "additions": 107,
+        "deletions": 0,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": "sillyhub-daemon/src/interactive/session-manager/types.ts",
+        "additions": 25,
+        "deletions": 0,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": "sillyhub-daemon/src/interactive/turn-file-changes-types.ts",
+        "additions": 226,
+        "deletions": 0,
+        "kind": "new",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": "sillyhub-daemon/src/interactive/turn-file-changes.ts",
+        "additions": 1236,
+        "deletions": 0,
+        "kind": "new",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": "sillyhub-daemon/src/interactive/turn-timing.ts",
+        "additions": 392,
+        "deletions": 0,
+        "kind": "new",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": "sillyhub-daemon/src/interactive/types.ts",
+        "additions": 22,
+        "deletions": 0,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": "sillyhub-daemon/src/sillyspec-manager.ts",
+        "additions": 195,
+        "deletions": 2,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": "sillyhub-daemon/src/spec-sync.ts",
+        "additions": 120,
+        "deletions": 4,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": "sillyhub-daemon/tests/daemon-interrupt-noop-report.test.ts",
+        "additions": 281,
+        "deletions": 0,
+        "kind": "new",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": "sillyhub-daemon/tests/event-loop-watch.test.ts",
+        "additions": 187,
+        "deletions": 0,
+        "kind": "new",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": "sillyhub-daemon/tests/host-fs-handler-git-log-quotepath.test.ts",
+        "additions": 181,
+        "deletions": 0,
+        "kind": "new",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": "sillyhub-daemon/tests/host-fs-handler-git-log.test.ts",
+        "additions": 136,
+        "deletions": 11,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": "sillyhub-daemon/tests/host-fs-handler-worktree.test.ts",
+        "additions": 38,
+        "deletions": 0,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": "sillyhub-daemon/tests/hub-client-fetch-timeout-surface.test.ts",
+        "additions": 65,
+        "deletions": 0,
+        "kind": "new",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": "sillyhub-daemon/tests/interactive/session-manager-lifecycle-turn-anchor-eviction.test.ts",
+        "additions": 6,
+        "deletions": 0,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": "sillyhub-daemon/tests/interactive/session-manager-turn-file-changes.test.ts",
+        "additions": 356,
+        "deletions": 0,
+        "kind": "new",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": "sillyhub-daemon/tests/interactive/turn-file-changes-wire.test.ts",
+        "additions": 173,
+        "deletions": 0,
+        "kind": "new",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": "sillyhub-daemon/tests/interactive/turn-file-changes.test.ts",
+        "additions": 937,
+        "deletions": 0,
+        "kind": "new",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": "sillyhub-daemon/tests/interactive/turn-start-watchdog.test.ts",
+        "additions": 234,
+        "deletions": 0,
+        "kind": "new",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": "sillyhub-daemon/tests/interactive/turn-timing.test.ts",
+        "additions": 677,
+        "deletions": 0,
+        "kind": "new",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": "sillyhub-daemon/tests/sillyspec-status-collect-guards.test.ts",
+        "additions": 253,
+        "deletions": 0,
+        "kind": "new",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": "sillyhub-daemon/tests/spec-sync-conflict-autoheal.test.ts",
+        "additions": 151,
+        "deletions": 0,
+        "kind": "new",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": "sillyhub-daemon/tests/spec-sync-off-switch.test.ts",
+        "additions": 140,
+        "deletions": 0,
+        "kind": "new",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": "sillyhub-daemon/tests/version.test.ts",
+        "additions": 31,
+        "deletions": 0,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "unplanned"
+      }
+    ],
+    "excluded": {
+      "foreignDeclared": []
+    },
+    "note": "flow done 时点冻结（本文件落盘时采集）",
+    "closedBy": "flow done"
+  },
+  "patchSha256": "e4ef47f9ffc31af09f3985985f4a54c4c2d74fe36379c397ee308f6aab1802b5",
+  "patchStatus": "ok"
+}

@@ -21,3 +21,4 @@ created_at: 2026-08-29 22:56:30
 - 2026-10-13-turn-live-visibility | 会话运行中用户感知不到 agent 真实状态：TaskOutput 阻塞等待后台任务时时间线只显示原始 JSON 且静默
 - 2026-10-16-change-title-condense-backfill | 变更中心标题提炼与存量回填
 - 2026-10-21-spec-manifest-incremental | spec-manifest 增量游标同步
+- 2026-10-22-agent-profiles-page-restyle | 智能体档案列表页重设计

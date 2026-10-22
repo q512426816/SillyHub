@@ -1,0 +1,40 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-22-agent-profiles-page-restyle",
+  "reviewer": "subagent",
+  "verdict": "FAIL",
+  "reviewedAgainst": "17034a733a22751aaabe50f65215430408550fd8",
+  "findings": [
+    {
+      "severity": "P1",
+      "title": "统计上报 effect 在数据未就绪时形成无限重渲染环（Maximum update depth）",
+      "evidence": "useMineAgentProfiles 返回 `profiles: q.data ?? []`（frontend/src/lib/agent-profiles.ts:295），data 未就绪（首屏 loading 或无数据的错误态）时每次渲染都生成新数组；CardGridBody 的 useEffect 依赖 [profiles, onStatsChange]，每次提交都用新对象调用 setStats，父页重渲染又生成新 profiles → 自激循环。用 React 18 同构最小复现（profiles 每渲染新 [] + setStats 新对象）实测触发 “Maximum update depth exceeded”；页面层单测因 mock 返回稳定数组、人工截图多在数据已缓存后操作而未暴露。另：注释「loading/error 早退分支不报」不成立——effect 位于早退 return 之前，加载期会用 0/0 覆盖胶囊。",
+      "location": "frontend/src/components/agent-profile/agent-profile-card-grid.tsx:235"
+    },
+    {
+      "severity": "P2",
+      "title": "FR-06 三主题验收证据仅覆盖暗夜+blue，缺 ai-native/浅色实页截图",
+      "evidence": "FR-06 绑定「三主题人工截图（visual-evidence.md）为准」，要求 ai-native / blue / dark 下页头、光晕、胶囊、卡片随主题换色；visual-evidence.md 只记录暗夜主题截图与「blue 主题抽查（登录默认态）」，未提供 ai-native/浅色下 /agent-profiles 的实页证据，指定验收物不完整。",
+      "location": ".sillyspec/changes/2026-10-22-agent-profiles-page-restyle/visual-evidence.md:8"
+    },
+    {
+      "severity": "P3",
+      "title": "视觉证据仍写「卡片墙 2 列（md:grid-cols-2）」，与 D-001@v2 及实现矛盾",
+      "evidence": "实现已改为 grid-cols-[repeat(auto-fill,minmax(380px,1fr))]（commit dde0d4506，D-001@v2 自适应列数），visual-evidence.md 第 14 行仍写固定 md:grid-cols-2，验收文档落后于代码/需求，属注释与实现不一致。",
+      "location": ".sillyspec/changes/2026-10-22-agent-profiles-page-restyle/visual-evidence.md:14"
+    },
+    {
+      "severity": "P3",
+      "title": "能力芯片合并后 key 前缀统一为 ref-，mcp 与 skill 同名时 key 冲突",
+      "evidence": "旧实现 mcp_refs / skill_refs 分别用 key=mcp-${ref} / skill-${ref}；新实现把两者合并进 shownRefs 后统一 key=`ref-${ref}`（agent-profile-card.tsx:222），同一名称同时出现在 mcp_refs 与 skill_refs 时产生重复 key（React 列表错配风险与控制台告警）。",
+      "location": "frontend/src/components/agent-profile/agent-profile-card.tsx:222"
+    }
+  ],
+  "dimensionNotes": {
+    "乱序": "ok（统计直接由当前数据源派生，无事件顺序依赖）",
+    "并发": "ok（纯呈现层，无写面；CRUD 后 invalidate 重拉）",
+    "切换": "finding（统计上报 effect 依赖不稳定的 profiles 引用，数据未就绪时形成重渲染环，见 P1）",
+    "作用域": "ok（mine 聚合 / 单 ws 数据源天然隔离；边界已裁决：可接受——胶囊固定显全量池而非筛选后数量，避免与工具栏计数语义重复）"
+  },
+  "reviewedAt": "2026-10-23T01:08:27+08:00"
+}

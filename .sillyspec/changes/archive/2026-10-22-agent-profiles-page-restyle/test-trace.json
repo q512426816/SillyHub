@@ -1,0 +1,97 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-22-agent-profiles-page-restyle",
+  "rows": [
+    {
+      "anchor": "FR-01",
+      "row_id": "2026-10-22-agent-profiles-page-restyle:flow:测试绑定FR-01",
+      "tests": [
+        "frontend/src/app/(dashboard)/agent-profiles/__tests__/page.test.tsx「页头统计胶囊（共 N 个档案·默认 M）」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-22-agent-profiles-page-restyle"
+    },
+    {
+      "anchor": "FR-02",
+      "row_id": "2026-10-22-agent-profiles-page-restyle:flow:测试绑定FR-02",
+      "tests": [
+        "test/frontend/src/components/agent-profile/__tests__/agent-profile-card-grid.test.tsx「回车提交搜索：匹配 name 或 system_prompt，计数同步更新」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-22-agent-profiles-page-restyle"
+    },
+    {
+      "anchor": "FR-03",
+      "row_id": "2026-10-22-agent-profiles-page-restyle:flow:测试绑定FR-03",
+      "tests": [
+        "test/frontend/src/components/agent-profile/__tests__/agent-profile-card.test.tsx「默认档案品牌光晕类」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-22-agent-profiles-page-restyle"
+    },
+    {
+      "anchor": "FR-04",
+      "row_id": "2026-10-22-agent-profiles-page-restyle:flow:测试绑定FR-04",
+      "tests": [
+        "test/frontend/src/components/agent-profile/__tests__/agent-profile-card.test.tsx「技能芯片超 4 项收敛 +N」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-22-agent-profiles-page-restyle"
+    },
+    {
+      "anchor": "FR-05",
+      "row_id": "2026-10-22-agent-profiles-page-restyle:flow:测试绑定FR-05",
+      "tests": [
+        "test/frontend/src/components/agent-profile/__tests__/agent-profile-card.test.tsx「设为默认/取消默认/编辑/复制/删除 回调与不冒泡」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-22-agent-profiles-page-restyle"
+    },
+    {
+      "anchor": "FR-07",
+      "row_id": "2026-10-22-agent-profiles-page-restyle:flow:测试绑定FR-07",
+      "tests": [
+        "test/frontend/src/components/agent-profile/__tests__/agent-profile-card-grid.test.tsx「三筛选/数据源切换/系统预置透传」",
+        "test/page.test.tsx「新建/编辑/复制/删除/空态」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-22-agent-profiles-page-restyle"
+    }
+  ]
+}
