@@ -427,7 +427,7 @@ describe("QuotaPill", () => {
     expect(screen.queryByTestId("quota-pill")).not.toBeInTheDocument();
   });
 
-  it("智谱 quota 正常 → 渲染模型名 + 各窗口剩余 + 重置时间", async () => {
+  it("智谱 quota 正常 → 图标只显会话供应商首窗口百分比；明细（模型名/各窗口/重置）在浮层", async () => {
     mockListProviders.mockResolvedValue([provider()]);
     mockGetProviderQuota.mockResolvedValue(
       quotaResp({
@@ -440,39 +440,53 @@ describe("QuotaPill", () => {
     );
     renderPill(<QuotaPill providerId="p-zhipu" />);
     const pill = await screen.findByTestId("quota-pill");
-    expect(pill).toHaveTextContent("glm-4.7");
-    expect(pill).toHaveTextContent("5小时窗剩");
+    // 2026-10-22-session-composer-slim FR-03 / D-001：面只留首窗口百分比。
     expect(pill).toHaveTextContent("80%");
-    expect(pill).toHaveTextContent("周限额剩");
-    expect(pill).toHaveTextContent("40%");
-    expect(pill.textContent).toMatch(/⏱ \d{2}-\d{2} \d{2}:\d{2} 重置/);
+    expect(pill.textContent).not.toContain("glm-4.7");
+    expect(pill.textContent).not.toContain("5小时窗");
+    expect(pill.textContent).not.toContain("40%");
+    expect(pill.textContent).not.toMatch(/重置/);
+    // 悬停 title 保留精简摘要（供应商 · 首窗口 · 重置）。
+    expect(pill.getAttribute("title")).toContain("glm-4.7");
+    expect(pill.getAttribute("title")).toContain("5小时窗剩 80%");
+    expect(pill.getAttribute("title")).toMatch(/\d{2}-\d{2} \d{2}:\d{2} 重置/);
+
+    // 点击浮层：完整明细照旧。
+    fireEvent.click(pill);
+    expect(await screen.findByText("模型剩余额度")).toBeInTheDocument();
+    expect(screen.getByText("5小时窗 剩余")).toBeInTheDocument();
+    expect(screen.getByText("周限额 剩余")).toBeInTheDocument();
   });
 
-  it("低剩余变色：≤20% 红 / ≤50% 黄 / 正常无色", async () => {
-    mockListProviders.mockResolvedValue([provider()]);
-    mockGetProviderQuota.mockResolvedValue(
-      quotaResp({
-        model: "glm-4.7",
-        windows: [
-          { label: "5小时窗", left: 80, reset: null },
-          { label: "低", left: 50, reset: null },
-          { label: "危", left: 20, reset: null },
-        ],
-      }),
-    );
-    renderPill(<QuotaPill providerId="p-zhipu" />);
-    await screen.findByTestId("quota-pill");
-    const spans = screen
-      .getByTestId("quota-pill")
-      .querySelectorAll("span[class]");
-    const byText = (t: string) =>
-      Array.from(spans).find((s) => s.textContent === t);
-    expect(byText("80%")?.className).toBe("");
-    expect(byText("50%")?.className).toContain("text-warning");
-    expect(byText("20%")?.className).toContain("text-error");
+  it("低剩余变色：首窗口 ≤20% 红 / ≤50% 黄 / 正常无色", async () => {
+    const cases: Array<{ left: number; cls: string | null }> = [
+      { left: 80, cls: null },
+      { left: 50, cls: "text-warning" },
+      { left: 20, cls: "text-error" },
+    ];
+    for (const c of cases) {
+      mockListProviders.mockResolvedValue([provider()]);
+      mockGetProviderQuota.mockResolvedValue(
+        quotaResp({
+          model: "glm-4.7",
+          windows: [{ label: "5小时窗", left: c.left, reset: null }],
+        }),
+      );
+      const { unmount } = renderPill(<QuotaPill providerId="p-zhipu" />);
+      const pill = await screen.findByTestId("quota-pill");
+      const pct = Array.from(pill.querySelectorAll("span[class]")).find(
+        (s) => s.textContent === `${c.left}%`,
+      );
+      if (c.cls == null) {
+        expect(pct?.className ?? "").toBe("");
+      } else {
+        expect(pct?.className).toContain(c.cls);
+      }
+      unmount();
+    }
   });
 
-  it("聚合全部可查供应商：智谱走 quota 端点、Kimi 走 usage 端点、不可查的不请求；会话供应商排胶囊第一位 + 等N家", async () => {
+  it("聚合全部可查供应商：智谱走 quota 端点、Kimi 走 usage 端点、不可查的不请求；会话供应商排图标第一位", async () => {
     mockListProviders.mockResolvedValue([
       provider(),
       provider({
@@ -508,11 +522,12 @@ describe("QuotaPill", () => {
     } satisfies UsageResult);
     renderPill(<QuotaPill providerId="p-kimi" />);
     const pill = await screen.findByTestId("quota-pill");
-    // 会话供应商（Kimi）排第一位：model 名 + 其套餐窗口。
-    expect(pill).toHaveTextContent("kimi-k2");
-    expect(pill).toHaveTextContent("Kimi·5小时窗剩");
+    // 会话供应商（Kimi）排第一位：面只显示其首窗口百分比；其余收进 title/浮层。
     expect(pill).toHaveTextContent("70%");
-    expect(pill).toHaveTextContent("等1家");
+    expect(pill.textContent).not.toContain("kimi-k2");
+    expect(pill.textContent).not.toContain("等1家");
+    expect(pill.getAttribute("title")).toContain("kimi-k2");
+    expect(pill.getAttribute("title")).toContain("另有 1 家可查");
     // 端点分流：智谱只查 quota、Kimi 只查 usage、Anthropic（不可查）不查。
     expect(mockGetProviderQuota).toHaveBeenCalledTimes(1);
     expect(mockGetProviderQuota).toHaveBeenCalledWith("p-zhipu");
@@ -542,12 +557,13 @@ describe("QuotaPill", () => {
     } satisfies UsageResult);
     renderPill(<QuotaPill providerId="p-ds" />);
     const pill = await screen.findByTestId("quota-pill");
-    // 余额类无百分比窗口 → 胶囊面只显示供应商名（明细在浮层）。
-    expect(pill).toHaveTextContent("DeepSeek");
+    // 余额类无百分比窗口 → 面只显示余额金额（供应商名/明细在 title 与浮层）。
+    expect(pill).toHaveTextContent("¥40");
     expect(pill).not.toHaveTextContent("剩");
     fireEvent.click(pill);
     expect(await screen.findByText("CNY 剩余")).toBeInTheDocument();
-    expect(screen.getByText("¥40 / 共 ¥100")).toBeInTheDocument();
+    // 图标面与浮层各一处（面显示余额金额，浮层为权威明细）。
+    expect(screen.getAllByText("¥40 / 共 ¥100").length).toBeGreaterThanOrEqual(1);
   });
 
   it("点击胶囊显示各窗口详情浮层（百分比低量红显 + 重置时间）", async () => {
@@ -853,7 +869,8 @@ describe("QuotaPill mobile compact（ql-20260915-013）", () => {
     renderPill(<QuotaPill providerId="p-zhipu" mobile />);
     const pill = await screen.findByTestId("quota-pill");
     expect(pill).toHaveTextContent("80%");
-    expect(pill).toHaveTextContent("40%");
+    // 第二窗口不进面（只留最重要的首窗口），明细点击查看。
+    expect(pill.textContent).not.toContain("40%");
     expect(pill.textContent).not.toContain("glm-4.7");
     expect(pill.textContent).not.toContain("5小时窗剩");
     expect(pill.textContent).not.toMatch(/重置/);
@@ -862,7 +879,7 @@ describe("QuotaPill mobile compact（ql-20260915-013）", () => {
     expect(await screen.findByText("模型剩余额度")).toBeInTheDocument();
   });
 
-  it("desktop（缺省 mobile=false）：完整胶囊照旧（零回归锚）", async () => {
+  it("desktop（缺省 mobile=false）：与 mobile 同形态（图标 + 首窗口百分比），明细点击浮层", async () => {
     mockListProviders.mockResolvedValue([provider()]);
     mockGetProviderQuota.mockResolvedValue(
       quotaResp({
@@ -872,8 +889,11 @@ describe("QuotaPill mobile compact（ql-20260915-013）", () => {
     );
     renderPill(<QuotaPill providerId="p-zhipu" />);
     const pill = await screen.findByTestId("quota-pill");
-    expect(pill).toHaveTextContent("glm-4.7");
-    expect(pill).toHaveTextContent("5小时窗剩");
-    expect(pill.textContent).toMatch(/重置/);
+    expect(pill).toHaveTextContent("80%");
+    expect(pill.textContent).not.toContain("glm-4.7");
+    expect(pill.textContent).not.toMatch(/重置/);
+    expect(pill.getAttribute("title")).toContain("5小时窗剩 80%");
+    fireEvent.click(pill);
+    expect(await screen.findByText("模型剩余额度")).toBeInTheDocument();
   });
 });

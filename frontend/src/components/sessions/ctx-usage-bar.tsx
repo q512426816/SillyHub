@@ -28,6 +28,7 @@
 import { Popover, InputNumber, Button } from "antd";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
+import { Gauge } from "lucide-react";
 
 import {
   detectUsageProvider,
@@ -503,9 +504,8 @@ export interface QuotaPillProps {
    */
   providerId: string | null | undefined;
   /**
-   * ql-20260915-013 手机端一行化：compact 只显剩余百分比数字（模型名/「X 剩」
-   * 标签/重置时间/「等 N 家」全收进点击浮层——浮层本来就是权威明细入口），
-   * 防 verbose 胶囊占满手机配置行；desktop 缺省零变化。
+   * 手机端紧凑尺寸（2026-10-22-session-composer-slim FR-03 起桌面与移动端
+   * 同为「图标 + 首窗口百分比」形态，mobile 仅控制像素尺寸）。
    */
   mobile?: boolean;
 }
@@ -626,9 +626,21 @@ export function QuotaPill({ providerId, mobile = false }: QuotaPillProps) {
 
   const face = sortedEntries[0]!;
   const restCount = sortedEntries.length - 1;
-  const faceReset = face.tiers.find((t) => t.reset)?.reset;
-  // 胶囊单行只带百分比窗口（同旧口径）；余额类 supplier 的明细见浮层。
+  // 2026-10-22-session-composer-slim FR-03 / D-001：图标面只显示当前会话
+  // 供应商的首个百分比窗口（排序已把会话供应商置顶）；纯余额类显示余额金额；
+  // 模型名/其余窗口/重置时间/「等 N 家」全部收进点击浮层与 title。
   const facePctTiers = face.tiers.filter((t) => t.leftPct != null);
+  const headTier = facePctTiers[0] ?? face.tiers[0] ?? null;
+  const headPct = headTier?.leftPct ?? null;
+  const faceReset = headTier?.reset ?? null;
+  const faceLabel = `${face.providerName}${face.model ? ` · ${face.model}` : ""}`;
+  const restHint = restCount > 0 ? `；另有 ${restCount} 家可查` : "";
+  const pillTitle =
+    headPct != null
+      ? `${faceLabel}｜${headTier?.label ?? "额度"}剩 ${headPct}%${
+          faceReset ? `｜${formatQuotaResetTime(faceReset)} 重置` : ""
+        }${restHint}（点击查看全部明细）`
+      : `${faceLabel}｜${formatQuotaBalance(headTier?.balance ?? null)}${restHint}（点击查看全部明细）`;
 
   const detail = (
     <div style={{ width: 264 }}>
@@ -676,46 +688,27 @@ export function QuotaPill({ providerId, mobile = false }: QuotaPillProps) {
 
   return (
     <Popover trigger="click" content={detail} placement="topLeft">
-      <span
+      <button
+        type="button"
         data-testid="quota-pill"
-        className="inline-flex shrink-0 cursor-pointer select-none items-center gap-[5px] whitespace-nowrap rounded-full bg-muted px-2.5 py-[3px] text-[11px] text-muted-foreground hover:text-foreground"
+        aria-label={`模型额度：${pillTitle}`}
+        title={pillTitle}
+        className={`inline-flex shrink-0 cursor-pointer select-none items-center gap-1 whitespace-nowrap rounded-md border border-border bg-card text-muted-foreground transition-colors hover:border-brand-300 hover:bg-brand-50 hover:text-foreground ${
+          mobile ? "px-1 py-[2px] text-[10px]" : "px-1.5 py-[3px] text-[11px]"
+        }`}
         onMouseEnter={handlePillMouseEnter}
         onMouseLeave={clearHoverTimer}
       >
-        {mobile ? (
-          // compact：仅百分比（多窗斜杠分隔），明细点击浮层看。
-          facePctTiers.map((t, i) => (
-            <span key={i} className={quotaLeftToneClass(t.leftPct!)}>
-              {i > 0 ? "/" : ""}
-              {t.leftPct}%
-            </span>
-          ))
-        ) : (
-          <>
-            {face.model ? (
-              <b className="font-semibold text-foreground">{face.model}</b>
-            ) : (
-              <b className="font-semibold text-foreground">{face.providerName}</b>
-            )}
-            {facePctTiers.map((t, i) => (
-              <span key={i}>
-                · {t.label}剩{" "}
-                <span className={quotaLeftToneClass(t.leftPct!)}>{t.leftPct}%</span>
-              </span>
-            ))}
-            {faceReset ? (
-              <span className="text-[10px] text-muted-foreground">
-                ⏱ {formatQuotaResetTime(faceReset)} 重置
-              </span>
-            ) : null}
-            {restCount > 0 ? (
-              <span className="text-[10px] text-muted-foreground">
-                等{restCount}家
-              </span>
-            ) : null}
-          </>
-        )}
-      </span>
+        <Gauge
+          aria-hidden
+          className={`shrink-0 text-brand-600 ${mobile ? "h-3 w-3" : "h-3.5 w-3.5"}`}
+        />
+        {headPct != null ? (
+          <span className={quotaLeftToneClass(headPct)}>{headPct}%</span>
+        ) : headTier?.balance ? (
+          <span>{formatQuotaBalance(headTier.balance)}</span>
+        ) : null}
+      </button>
     </Popover>
   );
 }
