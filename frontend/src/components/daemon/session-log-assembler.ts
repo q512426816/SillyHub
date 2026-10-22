@@ -2188,7 +2188,8 @@ export type TurnTriggerKind =
   | "task_wakeup"
   | "auto_resume"
   | "shadow_chat"
-  | "group_chat";
+  | "group_chat"
+  | "schedule";
 
 /**
  * 触发源呈现配置表（TurnTriggerView 单一渲染真相源）：
@@ -2205,14 +2206,30 @@ export const TURN_TRIGGER_META: Record<
   auto_resume: { glyph: "↻", label: "断线自动续跑", contentHidden: true },
   shadow_chat: { glyph: "💬", label: "来自影子直聊", contentHidden: false },
   group_chat: { glyph: "👥", label: "来自群聊", contentHidden: false },
+  // 2026-10-22-turn-trigger-metadata-p2：定时消息到点（服务端 metadata 戳驱动，
+  // 用户亲笔正文照常显示）。
+  schedule: { glyph: "⏰", label: "定时消息到点", contentHidden: false },
 };
 
 /**
  * 按内容分类轮触发源（task_wakeup/auto_resume 内容前缀族）；
  * 非触发内容返回 null。shadow_chat/group_chat 走 classifyPreambleTrigger
  * （前导头族），不入本函数。
+ *
+ * 2026-10-22-turn-trigger-metadata-p2：metadata 优先——日志行
+ * metadata_.turn_trigger（服务端派发链盖戳，浏览器不可伪造）为有效 kind 时
+ * 直接采信；缺失/无效回退内容前缀（存量行/未盖戳路径零回归，伪造误标面
+ * 仅剩存量行）。
  */
-export function classifyTurnTrigger(content: string): TurnTriggerKind | null {
+export function classifyTurnTrigger(
+  content: string,
+  metadata?: Record<string, unknown> | null,
+): TurnTriggerKind | null {
+  const stamped =
+    typeof metadata?.turn_trigger === "string" ? metadata.turn_trigger : null;
+  if (stamped && stamped in TURN_TRIGGER_META) {
+    return stamped as TurnTriggerKind;
+  }
   if (isTaskWakeupInjection(content)) return "task_wakeup";
   if (isAutoResumeInjection(content)) return "auto_resume";
   return null;

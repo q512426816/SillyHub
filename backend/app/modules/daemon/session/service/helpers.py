@@ -72,8 +72,30 @@ TASK_WAKEUP_PROMPT_PREFIX = "[后台任务通知]"
 # （X-API-Key + 请求 origin 字段，router/session_crud.py 门控）写入。
 # 与 origin 列既有值 'auto_resume:<uuid>' 前缀空间不相交（本字面量无冒号）。
 TASK_WAKEUP_QUEUE_ORIGIN = "task_wakeup"
+
+# 2026-10-22-turn-trigger-metadata-p2：定时消息派发的排队行 origin 标记——
+# 与 task_wakeup 同族服务身份标记（scheduled_send 服务身份写入，浏览器
+# Bearer 用户无 HTTP 入口可写），前端时间线「⏰ 定时消息到点」触发行溯源锚。
+SCHEDULE_QUEUE_ORIGIN = "schedule"
 _TASK_WAKEUP_HEADER_COUNT_RE = re.compile(r"以下 \d+ 个后台子代理任务已全部结束")
 _TASK_WAKEUP_TRAILER_COUNT_RE = re.compile(r"（共 \d+ 个）")
+
+
+def queue_origin_to_trigger(origin: str | None) -> str | None:
+    """排队行 origin → 轮触发溯源种类（2026-10-22-turn-trigger-metadata-p2）。
+
+    派发回放经本翻译把行 origin 盖为 user_input 日志 metadata_.turn_trigger：
+    task_wakeup/schedule 精确匹配、auto_resume 认 'auto_resume:<uuid>' 复合
+    前缀；NULL/未知值返回 None（用户消息不盖戳）。
+    """
+    if origin == TASK_WAKEUP_QUEUE_ORIGIN:
+        return "task_wakeup"
+    if origin == SCHEDULE_QUEUE_ORIGIN:
+        return "schedule"
+    if origin and origin.startswith("auto_resume:"):
+        return "auto_resume"
+    return None
+
 
 # ql-20260901-002：/team 平台 UI 指令前缀剥离（派发层）。前端改为发送原始
 # 输入（气泡/回放显示 "/team 目标"），agent 永不接收该字面前缀（Claude Code

@@ -34,6 +34,7 @@ from app.modules.daemon.session.service import (
     DaemonSessionQueueEntryNotFound,
     DaemonSessionQueueFull,
     DaemonSessionTurnConflict,
+    SessionService,
 )
 
 
@@ -1183,3 +1184,116 @@ class TestPureSwitchMerge:
         switch = next(row for row in rows if not row.attachment_ids)
         assert switch.llm_provider_id == "prov-a"
         assert switch.model == "glm-x"
+
+
+class TestTurnTriggerStamp:
+    """轮触发溯源盖戳（2026-10-22-turn-trigger-metadata-p2）。
+
+    user_input 日志 metadata_.turn_trigger：task_wakeup（router 标记直注 +
+    队列回放）/ schedule（服务路径 turn_trigger 参数直注 + 忙轮排队行
+    origin='schedule' 回放）/ auto_resume（auto_resume_of 参数）三源盖戳，
+    群聊 chain_metadata 合并不互吞；前端 classifyTurnTrigger metadata 优先
+    消费（内容前缀降兜底）。
+    """
+
+    @staticmethod
+    async def _user_input_rows(db_session, run_id):
+        return list(
+            (
+                await db_session.execute(
+                    select(AgentRunLog).where(
+                        AgentRunLog.run_id == run_id,
+                        AgentRunLog.channel == "user_input",
+                    )
+                )
+            )
+            .scalars()
+            .all()
+        )
+
+    @pytest.mark.asyncio
+    async def test_idle_inject_stamps_turn_trigger(
+        self, db_session, mocked_hub, mocked_redis
+    ) -> None:
+        uid = await _create_user(db_session)
+        await _create_runtime(db_session, uid)
+        svc = DaemonService(db_session)
+        created = await svc.create_session(uid, provider="claude", prompt="first")
+        session_id = created.agent_session.id
+        await _finish_run(db_session, created.agent_run)
+
+        # task_wakeup 参数（daemon 唤醒直注）。
+        r1 = await svc.inject_session(session_id, uid, prompt="[后台任务通知] x", task_wakeup=True)
+        await _finish_run(db_session, r1.agent_run)
+        # schedule 显式透传（scheduled_send 服务路径——SessionService 身份）。
+        session_svc = SessionService(db_session)
+        r2 = await session_svc.inject_session_as_service(
+            session_id, prompt="到点的定时消息", turn_trigger="schedule"
+        )
+        await _finish_run(db_session, r2.agent_run)
+        # auto_resume_of 参数（断线续跑直注）。
+        r3 = await session_svc.inject_session_as_service(
+            session_id,
+            prompt="[系统续跑] 从中断处继续",
+            auto_resume_of=created.agent_run.id,
+        )
+        await _finish_run(db_session, r3.agent_run)
+        # 普通用户消息：不盖戳。
+        r4 = await svc.inject_session(session_id, uid, prompt="普通消息")
+
+        stamps = {}
+        for run in (r1, r2, r3, r4):
+            rows = await self._user_input_rows(db_session, run.agent_run.id)
+            assert rows, "user_input 行必须落库"
+            stamps[run.agent_run.id] = (rows[-1].metadata_ or {}).get("turn_trigger")
+        assert stamps[r1.agent_run.id] == "task_wakeup"
+        assert stamps[r2.agent_run.id] == "schedule"
+        assert stamps[r3.agent_run.id] == "auto_resume"
+        assert stamps[r4.agent_run.id] is None
+
+    @pytest.mark.asyncio
+    async def test_schedule_busy_queue_row_origin_and_replay_stamp(
+        self, db_session, mocked_hub, mocked_redis
+    ) -> None:
+        svc, uid, session_id, busy_run = await _setup_busy_session(db_session)
+        # 定时消息忙轮入队（origin='schedule'）+ task_wakeup 唤醒入队。
+        await SessionService(db_session).inject_session_as_service(
+            session_id, prompt="到点的定时消息", queue_when_busy=True, turn_trigger="schedule"
+        )
+        await svc.inject_session(
+            session_id, uid, prompt="[后台任务通知] 汇总", queue_when_busy=True, task_wakeup=True
+        )
+        rows = await _queue_rows(db_session, session_id)
+        assert rows[0].origin == "schedule"
+        assert rows[1].origin == "task_wakeup"
+
+        # 逐轮完结派发回放：user_input 行按行 origin 盖对应戳。
+        await _finish_run(db_session, busy_run)
+        await svc.dispatch_queued_messages(session_id)
+        runs = list(
+            (
+                await db_session.execute(
+                    select(AgentRun).where(AgentRun.agent_session_id == session_id)
+                )
+            )
+            .scalars()
+            .all()
+        )
+        replayed = [r for r in runs if r.id != busy_run.id and r.status == "pending"]
+        assert len(replayed) == 1
+        stamped = await self._user_input_rows(db_session, replayed[0].id)
+        assert (stamped[-1].metadata_ or {}).get("turn_trigger") == "schedule"
+        await _finish_run(db_session, replayed[0])
+        await svc.dispatch_queued_messages(session_id)
+        runs2 = list(
+            (
+                await db_session.execute(
+                    select(AgentRun).where(AgentRun.agent_session_id == session_id)
+                )
+            )
+            .scalars()
+            .all()
+        )
+        replayed2 = [r for r in runs2 if r.status == "pending" and r.id != busy_run.id]
+        stamped2 = await self._user_input_rows(db_session, replayed2[0].id)
+        assert (stamped2[-1].metadata_ or {}).get("turn_trigger") == "task_wakeup"

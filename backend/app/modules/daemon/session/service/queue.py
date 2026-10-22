@@ -46,6 +46,7 @@ from .helpers import (
     _merge_task_wakeup_prompt,
     _prepend_group_chain_marker,
     _split_group_chain_marker,
+    queue_origin_to_trigger,
 )
 from .results import SessionDispatchResult
 
@@ -80,6 +81,10 @@ async def _handle_busy_turn(
     # （旧口径用户发「[后台任务通知]」前缀即可冒充豁免）。与 auto_resume_of
     # 调用方不相交（daemon 唤醒不带 auto_resume_of），同时携带时本标记优先。
     task_wakeup: bool = False,
+    # 2026-10-22-turn-trigger-metadata-p2：轮触发溯源种类（'schedule'）——
+    # 忙轮排队行 origin 落同族标记（派发回放经 queue_origin_to_trigger 盖
+    # user_input 日志 metadata_.turn_trigger）。
+    turn_trigger: str | None = None,
 ) -> SessionDispatchResult:
     """忙轮三分支收口（task-08 自 _inject_into_session:3499-3650 拆出，零改写）。
 
@@ -313,7 +318,11 @@ async def _handle_busy_turn(
         origin=(
             TASK_WAKEUP_QUEUE_ORIGIN
             if task_wakeup
-            else (make_auto_resume_origin(auto_resume_of) if auto_resume_of is not None else None)
+            else (
+                make_auto_resume_origin(auto_resume_of)
+                if auto_resume_of is not None
+                else turn_trigger
+            )
         ),
         status="pending",
         # task-05 缺陷 A 修正：or 兜底在 max==0 时回卷（0 or -1 = -1），
@@ -975,7 +984,20 @@ async def dispatch_queued_messages(svc, session_id: uuid.UUID) -> None:
                 attachment_ids=attachment_ids,
                 attachment_owner_user_id=attachment_owner_user_id,
                 page_context=page_context,
-                turn_metadata=chain_metadata,
+                # 2026-10-22-turn-trigger-metadata-p2：排队行 origin → 轮触发
+                # 溯源戳（task_wakeup/schedule 精确、auto_resume: 前缀），与群聊
+                # chain_metadata 合并（戳键覆盖，现状键空间不相交）；None 行不盖。
+                turn_metadata=(
+                    {
+                        **(chain_metadata or {}),
+                        **(
+                            {"turn_trigger": row_trigger}
+                            if (row_trigger := queue_origin_to_trigger(entry.origin))
+                            else {}
+                        ),
+                    }
+                    or None
+                ),
             )
         except AppError as exc:
             # 派发失败（daemon 离线 / 附件失效 / 配置失效等）：条目转 failed

@@ -537,6 +537,8 @@ class SessionService(BackgroundTaskMixin):
         # 2026-10-11-queue-wakeup-origin-guard：服务凭证通知标记透传（语义见
         # inject.py inject_session 同名参数）。
         task_wakeup: bool = False,
+        # 2026-10-22-turn-trigger-metadata-p2：轮触发溯源种类透传。
+        turn_trigger: str | None = None,
     ) -> SessionDispatchResult:
         return await _inject.inject_session(
             self,
@@ -555,6 +557,7 @@ class SessionService(BackgroundTaskMixin):
             queue_when_busy=queue_when_busy,
             busy_strategy=busy_strategy,
             task_wakeup=task_wakeup,
+            turn_trigger=turn_trigger,
         )
 
     async def inject_session_as_service(
@@ -571,6 +574,8 @@ class SessionService(BackgroundTaskMixin):
         attachment_ids: list[uuid.UUID] | None = None,
         attachment_owner_user_id: uuid.UUID | None = None,
         auto_resume_of: uuid.UUID | None = None,
+        # 2026-10-22-turn-trigger-metadata-p2：轮触发溯源种类（'schedule'）。
+        turn_trigger: str | None = None,
     ) -> SessionDispatchResult:
         return await _inject.inject_session_as_service(
             self,
@@ -585,6 +590,7 @@ class SessionService(BackgroundTaskMixin):
             attachment_ids=attachment_ids,
             attachment_owner_user_id=attachment_owner_user_id,
             auto_resume_of=auto_resume_of,
+            turn_trigger=turn_trigger,
         )
 
     async def _ensure_session_workspace_writable(
@@ -616,6 +622,8 @@ class SessionService(BackgroundTaskMixin):
         auto_resume_of: uuid.UUID | None = None,
         # 2026-10-11-queue-wakeup-origin-guard：服务凭证通知标记透传。
         task_wakeup: bool = False,
+        # 2026-10-22-turn-trigger-metadata-p2：轮触发溯源种类透传。
+        turn_trigger: str | None = None,
     ) -> SessionDispatchResult:
         return await _inject._inject_into_session(
             self,
@@ -635,6 +643,7 @@ class SessionService(BackgroundTaskMixin):
             queue_sender_user_id=queue_sender_user_id,
             turn_metadata=turn_metadata,
             task_wakeup=task_wakeup,
+            turn_trigger=turn_trigger,
         )
 
     async def _cancel_pending_control_command(

@@ -11,6 +11,7 @@ import { SessionPanel } from "@/components/daemon/session-panel";
 import type { SessionTurnView } from "@/components/daemon/turn-timeline";
 import { classifySessionLog } from "@/components/daemon/session-log-sanitize";
 import {
+  TURN_TRIGGER_META,
   classifyPreambleTrigger,
   classifyTurnTrigger,
   extractPreambleText,
@@ -457,10 +458,16 @@ export function logsToTurns(logs: AgentRunLogEntry[]): SessionTurnView[] {
       }
       // user_input 是用户消息（prompt）——turn 级胶水，不装配进段（Grill X-05）。
       if (entry.channel === "user_input") {
+        // 2026-10-22-turn-trigger-metadata-p2：服务端盖戳行（metadata.turn_trigger
+        // 有效）整体绕过内容前缀机制——extract/stripPreambleText 不参与（戳即
+        // 真相，伪造前缀不再影响剥离/分类），正文按戳的 contentHidden 语义处理。
+        const stampedTrigger = classifyTurnTrigger("", entry.metadata);
         // 2026-08-25-unified-floating-session task-11（FR-7）：daemon 回传的首条
         // user_input 含完整 dispatch_prompt——提取前导块为 preamble 段（对话视图
         // 不渲染，「全部」视图显示注入来源）；其余照原逻辑收 prompt。
-        const preambleText = extractPreambleText(seg.text);
+        const preambleText = stampedTrigger
+          ? null
+          : extractPreambleText(seg.text);
         // 2026-10-13-session-taskwakeup-hide：TASK_WAKEUP 注入是纯系统通知，
         // 不落 preamble 段（进度视图不再显示「上下文注入」卡）；开轮占位槽
         // 逻辑不受影响——promptSource 仍走 strip 剥空 → 占位空组照旧。
@@ -470,7 +477,9 @@ export function logsToTurns(logs: AgentRunLogEntry[]): SessionTurnView[] {
         const preambleTrigger = preambleText
           ? classifyPreambleTrigger(preambleText)
           : null;
-        const contentTrigger = classifyTurnTrigger(seg.text);
+        const contentTrigger =
+          stampedTrigger ??
+          classifyTurnTrigger(seg.text, entry.metadata);
         // 开轮身份先行捕获（下方分支会推进 openerSlotSeen）。
         const isOpenerUserInput = !openerSlotSeen;
         if (
@@ -493,9 +502,15 @@ export function logsToTurns(logs: AgentRunLogEntry[]): SessionTurnView[] {
         // 气泡、失败卡无重试按钮。常规路径（backend 前导条 + 干净条双写）中前导
         // 条剩余正文与干净条同主体，二阶段归并同组不双显。剩余为空（纯前导 /
         // [后台任务通知] 等系统注入）仍跳过。
-        const promptSource = preambleText
-          ? stripPreambleText(seg.text).trim()
-          : seg.text;
+        const promptSource = stampedTrigger
+          ? // 盖戳行按 META 语义：系统代笔（task_wakeup/auto_resume）正文折叠
+            // 进触发行（prompt 剥空占开轮槽），用户亲笔（schedule）正文照常。
+            TURN_TRIGGER_META[stampedTrigger].contentHidden
+            ? ""
+            : seg.text
+          : preambleText
+            ? stripPreambleText(seg.text).trim()
+            : seg.text;
         if (!promptSource.trim()) {
           // 2026-10-10-system-opened-turn-usermsg：首条 user_input 剥空（系统
           // 注入开轮）→ 占位空组占住开轮槽（仅首条；后到系统行静默跳过）。
@@ -511,7 +526,7 @@ export function logsToTurns(logs: AgentRunLogEntry[]): SessionTurnView[] {
             // 2026-10-22-turn-trigger-generalize：系统信封注入（task_wakeup/
             // auto_resume）不再整体隐藏——落 turn_trigger 触发行（折叠看全文），
             // 置于轮段序列首部。
-            const contentTrigger = classifyTurnTrigger(seg.text);
+            const contentTrigger = classifyTurnTrigger(seg.text, entry.metadata);
             if (contentTrigger) {
               triggerSegments.push({
                 kind: "turn_trigger",
@@ -534,6 +549,17 @@ export function logsToTurns(logs: AgentRunLogEntry[]): SessionTurnView[] {
             text: preambleText ?? "",
             ts: entry.timestamp ? Date.parse(entry.timestamp) : null,
             trigger: preambleTrigger,
+          });
+        }
+        // 2026-10-22-turn-trigger-metadata-p2：正文可见的盖戳源（schedule——
+        // metadata 优先判定，无内容前缀）开轮位同产来源标注行。
+        if (isOpenerUserInput && contentTrigger) {
+          triggerSegments.push({
+            kind: "turn_trigger",
+            id: `trigger:${entry.id ?? `idx${turnIndex}`}`,
+            text: seg.text,
+            ts: entry.timestamp ? Date.parse(entry.timestamp) : null,
+            trigger: contentTrigger,
           });
         }
         // ql-20260825-002：剥标记行得文本主体为归一键（附件行不影响主体判定）。

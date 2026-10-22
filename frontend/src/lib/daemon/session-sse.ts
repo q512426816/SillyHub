@@ -160,6 +160,12 @@ export interface SessionStreamEnvelope {
   timestamp: string | null;
   channel: string | null;
   content: string | null;
+  /**
+   * 2026-10-22-turn-trigger-metadata-p2：user_input 日志行 metadata_ 透传
+   * （inject 直落行的 log 事件携带；turn_trigger 溯源戳/群聊身份在用）。
+   * 其它事件/老 backend 为 undefined。
+   */
+  metadata?: Record<string, unknown> | null;
   status: string | null;
   exit_code: number | null;
   reason: string | null;

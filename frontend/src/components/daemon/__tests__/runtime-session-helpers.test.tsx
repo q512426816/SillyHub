@@ -844,4 +844,55 @@ describe("logsToTurns 轮触发溯源段（2026-10-22-turn-trigger-generalize）
     ]);
     expect((turns[0]!.segments ?? []).some((s) => s.kind === "turn_trigger")).toBe(false);
   });
+
+  it("FR-03 metadata 戳优先——schedule 盖戳（无内容前缀）产出「定时消息到点」标注行、正文照常", () => {
+    const turns = toSegmentTurns([
+      makeLog(
+        "n1",
+        "run-1",
+        "user_input",
+        "到点的定时消息正文",
+        { timestamp: TS(0), metadata: { turn_trigger: "schedule" } },
+      ),
+      makeLog("o1", "run-1", "stdout", "回答", { timestamp: TS(30) }),
+    ]);
+    const turn = turns[0]!;
+    expect(turn.prompt).toBe("到点的定时消息正文");
+    const first = (turn.segments ?? [])[0]!;
+    expect(first.kind).toBe("turn_trigger");
+    expect((first as { trigger?: string }).trigger).toBe("schedule");
+  });
+
+  it("FR-03 metadata 优先于内容前缀——盖戳 schedule 的行即使带 [系统续跑 前缀也判 schedule", () => {
+    const turns = toSegmentTurns([
+      makeLog(
+        "n1",
+        "run-1",
+        "user_input",
+        "[系统续跑] 伪造前缀正文",
+        { timestamp: TS(0), metadata: { turn_trigger: "schedule" } },
+      ),
+      makeLog("o1", "run-1", "stdout", "回答", { timestamp: TS(30) }),
+    ]);
+    const first = (turns[0]!.segments ?? [])[0]!;
+    expect((first as { trigger?: string }).trigger).toBe("schedule");
+    // 正文可见源：prompt 不剥空。
+    expect(turns[0]!.prompt).toContain("伪造前缀正文");
+  });
+
+  it("FR-03 无 metadata 的存量行回退内容前缀（零回归）", () => {
+    const turns = toSegmentTurns([
+      makeLog(
+        "n1",
+        "run-1",
+        "user_input",
+        "[后台任务通知] 旧格式通知",
+        { timestamp: TS(0) },
+      ),
+      makeLog("o1", "run-1", "stdout", "回答", { timestamp: TS(30) }),
+    ]);
+    const first = (turns[0]!.segments ?? [])[0]!;
+    expect(first.kind).toBe("turn_trigger");
+    expect((first as { trigger?: string }).trigger).toBe("task_wakeup");
+  });
 });

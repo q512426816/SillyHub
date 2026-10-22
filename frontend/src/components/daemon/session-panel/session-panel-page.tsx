@@ -1396,6 +1396,7 @@ export function SessionPanelPage({
                       : null;
                     const liveContentTrigger = classifyTurnTrigger(
                       env.content ?? "",
+                      env.metadata,
                     );
                     const freshTurn = !(next.segments ?? []).some(
                       (s) => s.kind !== "preamble" && s.kind !== "turn_trigger",

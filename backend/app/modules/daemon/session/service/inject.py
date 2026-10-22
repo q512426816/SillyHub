@@ -94,6 +94,8 @@ async def inject_session(
     # origin 标记（豁免/合并/编辑守卫判定锚，queue._handle_busy_turn）。缺省
     # False：群聊/审批代写等服务路径与普通用户路径零回归。
     task_wakeup: bool = False,
+    # 2026-10-22-turn-trigger-metadata-p2：轮触发溯源种类透传（schedule 服务路径）。
+    turn_trigger: str | None = None,
 ) -> SessionDispatchResult:
     """Append a new turn run to an active session (FR-02 / design §7.6 step 1).
 
@@ -249,6 +251,7 @@ async def inject_session(
         busy_strategy=busy_strategy,
         # 2026-10-11-queue-wakeup-origin-guard：服务凭证通知标记透传。
         task_wakeup=task_wakeup,
+        turn_trigger=turn_trigger,
     )
 
 
@@ -271,6 +274,10 @@ async def inject_session_as_service(
     queue_when_busy: bool = False,
     queue_sender_user_id: uuid.UUID | None = None,
     turn_metadata: dict | None = None,
+    # 2026-10-22-turn-trigger-metadata-p2：轮触发溯源种类（'schedule' 服务
+    # 路径）——盖 user_input 日志 metadata_.turn_trigger；忙轮排队行 origin
+    # 同步落同族标记（回放盖戳锚）。
+    turn_trigger: str | None = None,
     # quick（2026-09-02 群聊忙轮注入 steering）：忙轮策略新形态——
     # ``"inject"``=忙轮跳过排队直接注入当前活跃轮（run_id 沿用活跃 run，
     # 不建新 run，单会话单活跃 run 不变式保持；daemon 侧 running 时下发
@@ -369,7 +376,25 @@ async def inject_session_as_service(
         attachment_ids=list(attachment_ids) if attachment_ids else None,
         attachment_owner_user_id=attachment_owner_user_id,
         auto_resume_of=auto_resume_of,
+        turn_trigger=turn_trigger,
     )
+
+
+def _merged_turn_metadata(
+    turn_metadata: dict | None,
+    trigger: str | None,
+) -> dict | None:
+    """合并群聊 chain_metadata 与轮触发溯源戳（2026-10-22-metadata-p2）。
+
+    chain_metadata 打底、turn_trigger 键覆盖（现状键空间不相交：群聊链路
+    不产 trigger 键）；双 None → None（存量行 NULL 零回归）。
+    """
+    if turn_metadata is None and trigger is None:
+        return None
+    merged = dict(turn_metadata) if turn_metadata is not None else {}
+    if trigger is not None:
+        merged["turn_trigger"] = trigger
+    return merged
 
 
 async def _inject_into_session(
@@ -428,6 +453,10 @@ async def _inject_into_session(
     # inject_session 同名参数；inject_session_as_service 不接——群聊等服务
     # 路径的用户内容永不被标记）。
     task_wakeup: bool = False,
+    # 2026-10-22-turn-trigger-metadata-p2：轮触发溯源种类显式透传（'schedule'
+    # 等服务身份路径）——与 task_wakeup/auto_resume_of 派生戳同 purpose；合并
+    # 序 = 群聊 chain_metadata 打底、戳键覆盖（键空间现状不相交）。
+    turn_trigger: str | None = None,
 ) -> SessionDispatchResult:
     """Shared inject-turn core (used by :meth:`inject_session` +
     :meth:`inject_session_as_service`).
@@ -497,6 +526,7 @@ async def _inject_into_session(
                 turn_metadata=turn_metadata,
                 auto_resume_of=auto_resume_of,
                 task_wakeup=task_wakeup,
+                turn_trigger=turn_trigger,
             )
 
         # ── 2026-08-20 task-05：附件校验（D-6 引擎门控 / 归属 404 / 数量 422）──
@@ -746,7 +776,20 @@ async def _inject_into_session(
                 timestamp=now,
                 # task-03（群聊影子注入）：群链路 metadata（链 id/深度/发送者）
                 # 随本轮日志落库；缺省 None 列保持 NULL（存量零回归）。
-                metadata_=dict(turn_metadata) if turn_metadata is not None else None,
+                # 2026-10-22-turn-trigger-metadata-p2：轮触发溯源戳——
+                # task_wakeup 参数 → 'task_wakeup'、auto_resume_of →
+                # 'auto_resume'、显式 turn_trigger 直通（'schedule'）；前端
+                # classifyTurnTrigger metadata 优先消费，内容前缀降兜底。
+                metadata_=_merged_turn_metadata(
+                    turn_metadata,
+                    (
+                        "task_wakeup"
+                        if task_wakeup
+                        else "auto_resume"
+                        if auto_resume_of is not None
+                        else turn_trigger
+                    ),
+                ),
             )
             svc._session.add(user_input_log)
 
@@ -788,6 +831,10 @@ async def _inject_into_session(
                 "log_id": str(user_input_log.id),
                 "content": user_input_log.content_redacted,
                 "timestamp": user_input_log.timestamp.isoformat().replace("+00:00", "Z"),
+                # 2026-10-22-turn-trigger-metadata-p2：溯源戳随实时事件透传
+                # （前端 live 路径 classifyTurnTrigger metadata 优先消费——
+                # schedule 等无内容前缀的源实时可见，不等刷新）。
+                "metadata": user_input_log.metadata_,
             }
         )
 

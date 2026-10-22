@@ -196,6 +196,10 @@ async def _dispatch_scheduled_entry(db: AsyncSession, message_id: uuid.UUID) -> 
             agent_profile_id=agent_profile_id,
             llm_provider_id=llm_provider_id,
             auto_resume_of=auto_resume_of,
+            # 2026-10-22-turn-trigger-metadata-p2：定时消息溯源——空闲直注盖
+            # user_input 日志 metadata_.turn_trigger='schedule'；忙轮转排队行
+            # origin='schedule'（回放盖戳锚）。
+            turn_trigger=None if auto_resume_of is not None else "schedule",
         )
     except DaemonSessionQueueFull as exc:
         # D-003@v1：队列满员 → failed(queue_full)，不自动延后重试（重试风暴
