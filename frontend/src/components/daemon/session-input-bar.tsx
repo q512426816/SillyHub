@@ -40,6 +40,7 @@ import {
   AtSign,
   Clock,
   FileText,
+  Check,
   Image as ImageIcon,
   Paperclip,
   Plus,
@@ -186,6 +187,18 @@ export interface SessionInputBarProps {
   /** 工作区引用 token 映射受控回传（producer=输入区，组装位经父级
    *  substituteWsRefsForSend 消费，同 onAttTokenMapChange 模式）。 */
   onWsRefTokensChange?: (next: WsRefTokenMap) => void;
+  /**
+   * 2026-10-22-session-composer-slim FR-02：会话级「daemon 重启自动续跑」开关
+   * （原 SessionConfigBar 控件迁入 + 菜单）。enabled=当前生效态（缺省开由父层
+   * 归一——config.auto_resume_interrupted 仅显式 false 为关）；disabled=会话
+   * 结束/机器离线；onToggle 由父层接 PATCH 接口。不传不渲染该项（预会话/
+   * dialog 无会话级状态）。
+   */
+  autoResume?: {
+    enabled: boolean;
+    disabled?: boolean;
+    onToggle: (next: boolean) => void | Promise<void>;
+  };
 }
 
 function formatBytes(n: number): string {
@@ -271,6 +284,7 @@ export function SessionInputBar({
   pendingWsRefInsert,
   onPendingWsRefInsertHandled,
   onWsRefTokensChange,
+  autoResume,
 }: SessionInputBarProps) {
   const fileRef = useRef<HTMLInputElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -1056,6 +1070,50 @@ export function SessionInputBar({
                   </span>
                 </span>
               </button>
+              {/* 2026-10-22-session-composer-slim FR-02：中断自动续跑从配置条
+                  迁入 + 菜单（开关形态：menuitemcheckbox + 勾选态）。点击切换
+                  不关菜单（可连续观察状态）；终态/离线禁用并说明原因。 */}
+              {autoResume ? (
+                <>
+                  <div aria-hidden className="my-1 border-t border-border" />
+                  <button
+                    type="button"
+                    role="menuitemcheckbox"
+                    aria-checked={autoResume.enabled}
+                    aria-label={`中断自动续跑（${autoResume.enabled ? "已开启" : "已关闭"}）`}
+                    data-testid="plus-menu-auto-resume"
+                    disabled={autoResume.disabled}
+                    onClick={() => void autoResume.onToggle(!autoResume.enabled)}
+                    title={
+                      autoResume.disabled
+                        ? "会话已结束或机器离线，不可切换"
+                        : autoResume.enabled
+                          ? "已开启：daemon 重启恢复后，被中断的一轮自动继续执行（最多自动续跑 2 次）；点击关闭"
+                          : "已关闭：daemon 重启后不自动续跑，中断轮保留手动「重新发送」；点击开启"
+                    }
+                    className="flex w-full items-center gap-2.5 px-3 py-2 text-left transition-colors hover:bg-muted disabled:cursor-not-allowed disabled:opacity-60"
+                  >
+                    <RefreshCw
+                      aria-hidden
+                      className="h-4 w-4 shrink-0 text-muted-foreground"
+                    />
+                    <span className="min-w-0 flex-1">
+                      <span className="block text-[13px] leading-5">中断自动续跑</span>
+                      <span className="block text-[11px] leading-4 text-muted-foreground">
+                        {autoResume.enabled
+                          ? "已开启：重启后中断轮自动继续"
+                          : "已关闭：重启后需手动重新发送"}
+                      </span>
+                    </span>
+                    {autoResume.enabled ? (
+                      <Check
+                        aria-hidden
+                        className="h-4 w-4 shrink-0 text-brand-600"
+                      />
+                    ) : null}
+                  </button>
+                </>
+              ) : null}
             </div>
           )}
         </div>

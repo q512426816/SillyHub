@@ -5797,6 +5797,15 @@ export function SessionPanelPage({
           // task-08（FR-04）：⏰ 定时发送入口——真会话（已有 sessionId）注入；
           // 预会话渲染点（上方）不传即不渲染。
           onSchedule={openSchedModal}
+          // 2026-10-22-session-composer-slim FR-02：中断自动续跑开关从配置条迁入
+          // + 菜单（缺省开；config.auto_resume_interrupted 仅显式 false 为关）。
+          autoResume={{
+            enabled:
+              (session.config as Record<string, unknown> | null)
+                ?.auto_resume_interrupted !== false,
+            disabled: ended || !machineOnline,
+            onToggle: handleAutoResumeToggle,
+          }}
         />
         <div ref={configBarWrapRef} className="px-5 pb-3">
           <SessionConfigBar

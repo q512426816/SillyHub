@@ -74,6 +74,42 @@ describe("SessionInputBar ＋ 功能菜单（ql-20260827-020）", () => {
     expect(screen.queryByRole("menuitem", { name: /派团队/ })).not.toBeInTheDocument();
   });
 
+  /* ── 2026-10-22-session-composer-slim FR-02：续跑开关迁入 + 菜单 ───────── */
+
+  it("autoResume 传入 → 菜单渲染勾选项；点击切换并保持菜单打开", async () => {
+    const onToggle = vi.fn();
+    render(<Harness autoResume={{ enabled: true, onToggle }} />);
+    openMenu();
+    const item = screen.getByRole("menuitemcheckbox", {
+      name: /中断自动续跑（已开启）/,
+    });
+    expect(item).toHaveAttribute("aria-checked", "true");
+    fireEvent.click(item);
+    await waitFor(() => expect(onToggle).toHaveBeenCalledWith(false));
+    // 切换不关菜单（可连续观察状态）。
+    expect(screen.getByRole("menu", { name: "输入功能" })).toBeInTheDocument();
+  });
+
+  it("autoResume 缺省 → 菜单不渲染续跑项（预会话/dialog 无会话级状态）", () => {
+    render(<Harness />);
+    openMenu();
+    expect(
+      screen.queryByRole("menuitemcheckbox", { name: /中断自动续跑/ }),
+    ).not.toBeInTheDocument();
+  });
+
+  it("autoResume.disabled（会话结束/离线）→ 禁用且点击不触发", () => {
+    const onToggle = vi.fn();
+    render(
+      <Harness autoResume={{ enabled: true, disabled: true, onToggle }} />,
+    );
+    openMenu();
+    const item = screen.getByRole("menuitemcheckbox", { name: /中断自动续跑/ });
+    expect(item).toBeDisabled();
+    fireEvent.click(item);
+    expect(onToggle).not.toHaveBeenCalled();
+  });
+
   it("附件项 → 触发隐藏 file input 点击并关菜单", () => {
     const clickSpy = vi
       .spyOn(HTMLInputElement.prototype, "click")
