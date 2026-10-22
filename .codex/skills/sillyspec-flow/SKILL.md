@@ -1,7 +1,11 @@
 ---
 name: sillyspec:flow
-description: 轻量变更（默认快道）——需求明确的小/中改动两步收口。适合用户说"直接改、快速修、顺手调整、改个文案、修个小 bug、更新一个文件、需求很明确、开干吧、把这个改了"。2 次协议调用：flow start → 直接干活（改代码写测试）→ flow done（实测门+测试绑定+patch 留档）。
+description: 轻量变更（默认快道）——需求明确的小/中改动。适合用户说"直接改、快速修、顺手调整、改个文案、修个小 bug、更新一个文件、需求很明确、开干吧、把这个改了"。协议链：flow start → 补 spec 面（FR 绑定+design 四节）→ 批准（flow approve / 用户显式 --autopilot）→ 干活（改代码写测试）→ flow done（实测门+测试绑定+patch 留档）。顺序纪律：先答 spec 面、批准后才动码（读代码探究不算动码）。
 ---
+
+## 交互规范
+
+**当需要用户从多个选项中做出选择时，必须使用 Claude Code 内置的 AskUserQuestion 工具，将选项以参数传入。** 不要用编号列表让用户手动输入数字。
 
 ## 何时使用
 
@@ -11,7 +15,9 @@ description: 轻量变更（默认快道）——需求明确的小/中改动两
 - 需求不清晰 → CLI 会在 flow start 处拦下给两选一（头脑风暴预段 / 确认输入已含决策）；或直接先走 `/sillyspec:brainstorm`，完成后 `flow start` 收编续跑（design 以头脑风暴版为准）
 - 大改动（跨模块取舍 / 需要 Wave 计划编排 / 设计期人机对抗）→ 不走本 skill，走完整五阶段流程
 
-## 两步协议
+## 协议链与顺序纪律
+
+顺序正典：flow start 后**先答 spec 面 → 断点① 批准 → 才动码**（读代码探究不算动码）。批准是动码前置义务，不是收口补救动作。
 
 ### ① flow start（立项 + 锁基线）
 
@@ -35,16 +41,22 @@ sillyspec flow start --change <变更名> --input "<一句 10-30 字中文概括
 - 新增单测覆盖窗口翻转边界，npm test 全绿
 ```
 
-### ② 直接干活
+### ② 补 spec 面（动码前）
 
-改代码、写测试。治理工件（proposal/requirements/design）CLI 机器起草，你只需要：
-
-- 填 design.md 四节 AGENT 槽（做法概述/接口契约/边界并发四问/风险与死路）——每节至少一行，写「不适用：<理由>」也算答，空槽 flow done 拒收
+- requirements：每条 FR 行为句（带强度词 必须/禁止/SHOULD）+ 测试绑定行（无测试面写「不适用：理由」）
+- design.md 四节 AGENT 槽作答（做法概述/接口契约/边界并发四问/风险与死路）——**动码前完成**，每节至少一行，写「不适用：<理由>」也算答，空节 flow done 拒收；列改动文件用独立「## 文件变更清单」节
 - 变更目录若已有收割生成的 decisions.md（frontmatter `author: flow-machine-draft`），它是底稿不是终稿：槽4 作答含「放弃方案」的，收口前把每个放弃方案拆成独立 rejected 条目（问题=决策专属问句、否决理由=放弃理由、复潮条件=重提前提），风险与对策留在主条目——rejected 条目才走蒸馏防复潮通道，埋在散文里的否决理由进不了通道；无实质放弃方案则不动
-- 干活以 tasks.md 为进度源：做一件 → 勾一格（`- [ ]` → `- [x]`）→ 继续下一条，勿攒一把勾（勾选是收口哨兵的证据面——逐 task 核提交 token/review.json）；`flow status --change <名>` 为自愿查看/恢复面（②阶段给下一任务指针与进度，非协议必需——D-007）
-- 交付代码用显式 pathspec 提交（`git commit -m "..." -- 文件1 文件2`；patch 冻结面=baseline..HEAD 提交面，未提交的代码不进审计件）
+- tasks.md 改写为真实工作分解（机器种子按实现路径改写，保持 `- [ ] task-NN:` 行形态）
 
-### ③ flow done（收口）
+### ③ 断点①：批准后才动码
+
+把 FR 条目+design 四节摘要给用户看 → 用户运行 `sillyspec flow approve --change <名>`（agent 代跑如实声明通道 `--user-confirmed` / `--self-approved`，无 flag 按 unattested 留痕）；用户明确说「直接跑完/不用问我」→ 重跑 `flow start --autopilot` 声明豁免（用户显式授权，非 agent 自选补救）。未批准且未声明 --autopilot 时 flow done 拒收。
+
+### ④ 干活（已批准）
+
+写测试、改代码（按层适用——纯逻辑先写测试、行为契约断言用户可见行为、视觉样式与纯配置不写测试）。以 tasks.md 为进度源：做一件 → 勾一格（`- [ ]` → `- [x]`）→ 继续下一条，勿攒一把勾（勾选是收口哨兵的证据面——逐 task 核提交 token/review.json）；`flow status --change <名>` 为自愿查看/恢复面（②阶段给下一任务指针与进度，非协议必需——D-007）；交付代码用显式 pathspec 提交（`git commit -m "..." -- 文件1 文件2`；patch 冻结面=baseline..HEAD 提交面，未提交的代码不进审计件）
+
+### ⑤ flow done（收口）
 
 ```bash
 sillyspec flow done --change <变更名>
