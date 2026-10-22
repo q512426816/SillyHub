@@ -51,11 +51,11 @@ created_at: 2026-10-22T05:23:58.762Z
 | 操作 | 路径 | 说明 |
 | --- | --- | --- |
 | 修改 | frontend/src/components/layout/page-header.tsx | 新增可选 icon prop（图标块，向后兼容） |
-| 修改 | frontend/src/components/layout/__tests__/page-header.test.tsx（如有） | icon 缺省不渲染的兼容断言（无则并入本变更新建） |
+| 修改 | frontend/src/components/layout/__tests__/page-header.test.tsx | icon 层加入后的结构/截断链断言同步 |
 | 修改 | frontend/src/app/(dashboard)/agent-profiles/page.tsx | 页头 icon+统计胶囊（onStatsChange 收敛）；actions 组装 |
 | 修改 | frontend/src/components/agent-profile/agent-profile-card-grid.tsx | 筛选条收拢卡容器；网格按屏宽自适应（D-001@v2）；onStatsChange 上报 |
 | 修改 | frontend/src/components/agent-profile/agent-profile-card.tsx | 默认光晕/系统紧凑卡+占位文案/提示词引用式/芯片+N/操作降躁 |
 | 修改 | frontend/src/components/agent-profile/__tests__/agent-profile-card.test.tsx | 新增 FR-03/04 用例；既有用例查询适配 |
-| 修改 | frontend/src/components/agent-profile/__tests__/agent-profile-card-grid.test.tsx | 既有用例查询适配（行为断言不变） |
+| 无改动 | frontend/src/components/agent-profile/__tests__/agent-profile-card-grid.test.tsx | 既有查询与行为断言无需适配（实现后实测全绿）；本行仅记录范围核对结论 |
 | 修改 | frontend/src/app/(dashboard)/agent-profiles/__tests__/page.test.tsx | 新增统计胶囊用例 |
 | 新增 | .sillyspec/changes/2026-10-22-agent-profiles-page-restyle/visual-evidence.md | 实页三主题渲染对照原型证据 |
