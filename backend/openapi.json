@@ -39238,6 +39238,17 @@
             ],
             "title": "Current Run Status"
           },
+          "pending_dialog_kind": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Pending Dialog Kind"
+          },
           "terminating_at": {
             "anyOf": [
               {

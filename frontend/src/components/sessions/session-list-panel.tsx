@@ -589,6 +589,9 @@ function engineValueOf(s: AgentSessionRead): string | null {
  * 口径改轮次级）：
  *   - failed        → 红点（异常）
  *   - ended         → 绿点（执行完成——会话级终态）
+ *   - 等待回答      → 问号（agent 提问等用户回答：pending_dialog_kind 非空，
+ *                     压过 run running 转圈——交互停在用户身上，见 2026-10-20-
+ *                     session-awaiting-answer-status）
  *   - 活性 working  → 动态转圈（正在执行——本平台 active 只表示「会话开着」
  *                     哪怕空闲，故「进行中」以活性推导 working 为准）
  *   - 活性 blocked  → 琥珀点（在等你：等审批/等回答）
@@ -602,19 +605,25 @@ function engineValueOf(s: AgentSessionRead): string | null {
 type SessionStatusIndicator =
   | { kind: "dot"; cls: string; label: string }
   | { kind: "spinner"; label: string }
+  | { kind: "question"; label: string }
   | null;
 
 /** 行首状态标识单一源（status × 活性 state × 完成标记 → 形态；纯函数便于单测）。 */
-function sessionStatusIndicator(
+export function sessionStatusIndicator(
   status: AgentSessionStatus,
   livenessState?: AgentLogListItem["state"] | null,
   completedUnread?: boolean,
   currentRunStatus?: string | null,
+  pendingDialogKind?: string | null,
 ): SessionStatusIndicator {
   if (status === "failed")
     return { kind: "dot", cls: "bg-destructive", label: "异常失败" };
   if (status === "ended")
     return { kind: "dot", cls: "bg-success", label: "执行完成" };
+  // ── 2026-10-20-session-awaiting-answer-status：等待用户回答优先于 run 瞬态
+  // ——提问挂起期间 run 仍是 running，但交互已停在用户身上，转圈会误导；
+  // 终态（failed/ended）仍在更前面权威优先。 ──
+  if (pendingDialogKind) return { kind: "question", label: "等待你回答" };
   // ── 2026-10-16-session-run-status-realtime：run 状态第一优先信号（后端
   // 权威实时——发消息瞬间 running、等审批 pending_approval，不依赖 daemon
   // 日志活性上报链）；压过活性推导（run 等审批时日志可能还在写显示 working，
@@ -3323,6 +3332,18 @@ function SessionStatusSlot({
           className="h-3 w-3 shrink-0 animate-spin text-muted-foreground"
         />
       )}
+      {indicator?.kind === "question" && (
+        /* 2026-10-20-session-awaiting-answer-status：等待用户回答——问号字形
+           （描边圆 + ?，warning 语义色；与琥珀点同族但形态可区分，色阶只用
+           已定义的 DEFAULT token，避免 bg-warning-500 未生成类的既有隐患）。 */
+        <span
+          aria-label={indicator.label}
+          title={indicator.label}
+          className="flex h-3.5 w-3.5 shrink-0 items-center justify-center rounded-full border-[1.5px] border-warning text-[10px] font-bold leading-none text-warning"
+        >
+          ?
+        </span>
+      )}
       {completedUnread && (
         <span
           aria-label="此会话已执行完成"
@@ -3504,6 +3525,7 @@ function SessionRow({
               liveness?.state,
               completedUnreadVisible,
               session.current_run_status,
+              session.pending_dialog_kind,
             )}
             liveness={liveness}
             completedUnread={completedUnreadVisible}
