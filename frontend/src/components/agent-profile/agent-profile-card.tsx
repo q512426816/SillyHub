@@ -126,8 +126,12 @@ export function AgentProfileCard({
   // 能力 chip：mcp_refs + skill_refs 逐项（task-03 §implementation）。
   const mcpRefs = profile.mcp_refs ?? [];
   const skillRefs = profile.skill_refs ?? [];
-  /** 芯片截断阈值（2026-10-22 重设计）：超 4 项收敛 +N。 */
-  const allRefs = [...mcpRefs, ...skillRefs];
+  /** 芯片截断阈值（2026-10-22 重设计）：超 4 项收敛 +N。
+   *  key 带来源前缀——mcp 与 skill 同名 ref 并存时 React key 不冲突。 */
+  const allRefs = [
+    ...mcpRefs.map((ref) => ({ key: `mcp-${ref}`, label: ref })),
+    ...skillRefs.map((ref) => ({ key: `skill-${ref}`, label: ref })),
+  ];
   const shownRefs = allRefs.slice(0, 4);
   const hiddenCount = allRefs.length - shownRefs.length;
 
@@ -220,10 +224,10 @@ export function AgentProfileCard({
         <div className="flex flex-wrap items-center gap-1.5 px-3.5 pb-2.5">
           {shownRefs.map((ref) => (
             <span
-              key={`ref-${ref}`}
+              key={ref.key}
               className="rounded border border-border-soft bg-muted px-2 py-0.5 font-mono text-[11px] text-muted-foreground"
             >
-              {ref || "—"}
+              {ref.label || "—"}
             </span>
           ))}
           {hiddenCount > 0 && (

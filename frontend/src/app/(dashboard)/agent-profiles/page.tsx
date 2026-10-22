@@ -27,7 +27,7 @@
  * 设计依据：tasks/task-05.md §implementation / design §5 P5 / §6 / §10 R-02 /
  * FRONTEND_PAGE_STYLE.md §0（antd + tailwind token）/ §9（空值/错误展示）。
  */
-import { useState } from "react";
+import { useCallback, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { Button, Modal } from "antd";
 
@@ -64,6 +64,18 @@ export default function AgentProfilesGlobalPage() {
   const [deleting, setDeleting] = useState(false);
   /** 全量池统计（grid onStatsChange 上报；页头胶囊展示，2026-10-22 重设计）。 */
   const [stats, setStats] = useState({ total: 0, defaultCount: 0 });
+  // 等值短路：grid 的 profiles 数组每次渲染可能重建（hook 的 `q.data ?? []`），
+  // 若上报值未变必须保持同一 state 引用，避免「上报 → 父重渲染 → 再上报」自激环。
+  const handleStatsChange = useCallback(
+    (next: { total: number; defaultCount: number }) => {
+      setStats((prev) =>
+        prev.total === next.total && prev.defaultCount === next.defaultCount
+          ? prev
+          : next,
+      );
+    },
+    [],
+  );
 
   const invalidateMine = () => {
     void qc.invalidateQueries({
@@ -188,7 +200,7 @@ export default function AgentProfilesGlobalPage() {
         onDelete={setConfirmDelete}
         onSetDefault={(p) => void handleSetDefault(p)}
         onUnsetDefault={(p) => void handleUnsetDefault(p)}
-        onStatsChange={setStats}
+        onStatsChange={handleStatsChange}
       />
 
       {/* 新建/编辑表单（全局页不传 workspaceId → 表单渲染「工作区上下文」选择器） */}

@@ -231,14 +231,18 @@ function CardGridBody({
 
   const commitSearch = () => setSearchQuery(searchInput);
 
-  // 全量池统计上报（数据到达/变化时；loading/error 早退分支不报，页面保持旧值）。
+  // 全量池统计上报（数据到达/变化时；loading/error 分支不报，页面保持旧值）。
+  // 依赖集合用原始值而非 profiles 引用：hook 的 `q.data ?? []` 每次渲染会新建空数组，
+  // 若依赖数组引用会「上报 → 父重渲染 → 再上报」自激（评审 P1）。
+  const defaultCount = useMemo(
+    () => profiles.filter((p) => p.is_user_default).length,
+    [profiles],
+  );
   useEffect(() => {
-    onStatsChange?.({
-      total: profiles.length,
-      defaultCount: profiles.filter((p) => p.is_user_default).length,
-    });
+    if (loading || error) return;
+    onStatsChange?.({ total: profiles.length, defaultCount });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [profiles, onStatsChange]);
+  }, [loading, error, profiles.length, defaultCount, onStatsChange]);
 
   if (loading) {
     return (

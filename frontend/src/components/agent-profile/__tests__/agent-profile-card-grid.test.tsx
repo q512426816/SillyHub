@@ -394,4 +394,23 @@ describe("AgentProfileCardGrid 状态（加载/错误/空）", () => {
     expect(screen.getByText(/加载档案失败/)).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "重新加载" })).toBeInTheDocument();
   });
+
+  it("加载中不上报统计（loading 分支保持页面旧值；评审 P1）", () => {
+    setMine({ profiles: [], isLoading: true });
+    const onStatsChange = vi.fn();
+    renderGrid(<AgentProfileCardGrid onStatsChange={onStatsChange} />);
+    expect(onStatsChange).not.toHaveBeenCalled();
+  });
+
+  it("数据到达后上报全量池统计（total + defaultCount）", () => {
+    setMine({
+      profiles: [
+        makeProfile({ id: "a", is_user_default: true }),
+        makeProfile({ id: "b" }),
+      ],
+    });
+    const onStatsChange = vi.fn();
+    renderGrid(<AgentProfileCardGrid onStatsChange={onStatsChange} />);
+    expect(onStatsChange).toHaveBeenCalledWith({ total: 2, defaultCount: 1 });
+  });
 });
