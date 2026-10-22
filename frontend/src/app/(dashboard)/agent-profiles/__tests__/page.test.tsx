@@ -352,3 +352,19 @@ describe("删除档案（确认弹窗 + deleteWorkspaceAgentProfile）", () => {
     });
   });
 });
+
+// ── 2026-10-22-agent-profiles-page-restyle：页头统计胶囊 ──────────────────
+
+describe("页头统计胶囊（2026-10-22-agent-profiles-page-restyle）", () => {
+  it("grid 上报全量池 → 胶囊显 共 N 个档案·默认 M", async () => {
+    mineHook.profiles.mockReturnValue([
+      makeProfile(),
+      makeProfile({ id: "p-2", name: "默认档", is_user_default: true }),
+    ]);
+    renderPage(<AgentProfilesGlobalPage />);
+
+    expect(
+      await screen.findByTitle("共 2 个档案 · 默认 1"),
+    ).toBeInTheDocument();
+  });
+});

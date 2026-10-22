@@ -280,7 +280,8 @@ describe("AgentProfileCard 设为默认 / 取消默认（task-05 / FR-02 前端�
         onUnsetDefault={onUnsetDefault}
       />,
     );
-    expect(screen.getByText("默认")).toBeInTheDocument();
+    // 2026-10-22-agent-profiles-page-restyle：默认徽标改品牌胶囊「★ 默认」。
+    expect(screen.getByText("★ 默认")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "取消默认" })).toBeInTheDocument();
     expect(
       screen.queryByRole("button", { name: "设为默认" }),
@@ -320,5 +321,83 @@ describe("AgentProfileCard 设为默认 / 取消默认（task-05 / FR-02 前端�
     expect(
       screen.queryByRole("button", { name: "设为默认" }),
     ).toBeNull();
+  });
+});
+
+// ── 2026-10-22-agent-profiles-page-restyle：重设计新增断言 ────────────────
+
+describe("AgentProfileCard 重设计新增（2026-10-22-agent-profiles-page-restyle）", () => {
+  it("用户默认档案 → 品牌描边光环类 + 「★ 默认」品牌胶囊", () => {
+    renderCard(
+      <AgentProfileCard
+        profile={makeProfile({ is_user_default: true })}
+        onPreview={vi.fn()}
+        onEdit={vi.fn()}
+        onCopy={vi.fn()}
+        onDelete={vi.fn()}
+      />,
+    );
+    expect(screen.getByText("★ 默认")).toBeInTheDocument();
+    const card = screen.getByRole("button", { name: /代码审查助手/ });
+    expect(card.className).toContain("border-brand-300");
+    expect(card.className).toContain("ring-brand-300");
+  });
+
+  it("系统预置紧凑卡 → 引擎默认人设/能力两行提示 + 只读（无操作按钮）", () => {
+    renderCard(
+      <AgentProfileCard
+        profile={makeProfile({
+          is_system_default: true,
+          system_prompt: null,
+          mcp_refs: [],
+          skill_refs: [],
+        })}
+        onPreview={vi.fn()}
+        onEdit={vi.fn()}
+        onCopy={vi.fn()}
+        onDelete={vi.fn()}
+      />,
+    );
+    expect(
+      screen.getByText("（未设置系统提示词，按引擎默认人设执行）"),
+    ).toBeInTheDocument();
+    expect(screen.getByText("按引擎默认能力执行")).toBeInTheDocument();
+    expect(screen.getByText("只读")).toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: /^编辑$/ }),
+    ).not.toBeInTheDocument();
+  });
+
+  it("能力芯片超 4 项 → 收敛 4 项 + 「+N」，隐藏项不渲染", () => {
+    renderCard(
+      <AgentProfileCard
+        profile={makeProfile({
+          mcp_refs: [],
+          skill_refs: ["s1", "s2", "s3", "s4", "s5", "s6"],
+        })}
+        onPreview={vi.fn()}
+        onEdit={vi.fn()}
+        onCopy={vi.fn()}
+        onDelete={vi.fn()}
+      />,
+    );
+    for (const s of ["s1", "s2", "s3", "s4"]) {
+      expect(screen.getByText(s)).toBeInTheDocument();
+    }
+    expect(screen.getByText("+2")).toBeInTheDocument();
+    expect(screen.queryByText("s5")).not.toBeInTheDocument();
+  });
+
+  it("无能力自定义卡 → 「无技能（不挂载）」占位", () => {
+    renderCard(
+      <AgentProfileCard
+        profile={makeProfile({ mcp_refs: [], skill_refs: [] })}
+        onPreview={vi.fn()}
+        onEdit={vi.fn()}
+        onCopy={vi.fn()}
+        onDelete={vi.fn()}
+      />,
+    );
+    expect(screen.getByText("无技能（不挂载）")).toBeInTheDocument();
   });
 });

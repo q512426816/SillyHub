@@ -39,13 +39,17 @@ describe("PageHeader 渲染（2026-09-28-change-detail-header-overflow）", () =
 
   it("左侧内容列带 min-w-0——flex 项 min-width:auto 陷阱的组件级修复锚", () => {
     render(<PageHeader title="t" subtitle="s" />);
-    // 结构：header > div.min-w-0 > (h1 + p)；左列是 h1 的父级 div
+    // 结构（2026-10-22-agent-profiles-page-restyle 加 icon 层后）：
+    // header > div.min-w-0(icon 行容器) > [icon?, div.min-w-0(h1+p)]；
+    // 收缩链双 min-w-0 逐级传导到 header flex 子级，意图不变。
     const h1 = screen.getByRole("heading", { level: 1 });
-    const leftCol = h1.parentElement;
-    expect(leftCol?.tagName).toBe("DIV");
-    expect(leftCol?.className).toContain("min-w-0");
+    const titleCol = h1.parentElement;
+    expect(titleCol?.tagName).toBe("DIV");
+    expect(titleCol?.className).toContain("min-w-0");
+    const headerRow = titleCol?.parentElement;
+    expect(headerRow?.className).toContain("min-w-0");
     // 右侧 actions 槽与左列同层（header flex 行直接子级）
-    expect(leftCol?.parentElement?.tagName).toBe("HEADER");
+    expect(headerRow?.parentElement?.tagName).toBe("HEADER");
   });
 
   it("详情页同款长描述场景：truncate span 渲染在 min-w-0 列内（收缩链前置条件）", () => {
@@ -64,10 +68,12 @@ describe("PageHeader 渲染（2026-09-28-change-detail-header-overflow）", () =
       />,
     );
     const desc = screen.getByTitle(longDesc);
-    // 链路：desc span → … → 左列 div.min-w-0 → header（截断生效的宽度约束链）
-    const leftCol = screen.getByRole("heading", { level: 1 }).parentElement;
-    expect(desc.closest("header")).toBe(leftCol?.parentElement);
-    expect(leftCol?.className).toContain("min-w-0");
+    // 链路：desc span → … → 标题列 div.min-w-0 → icon 行容器 div.min-w-0 → header
+    // （截断生效的宽度约束链；2026-10-22 icon 层后双 min-w-0 逐级传导，意图不变）
+    const titleCol = screen.getByRole("heading", { level: 1 }).parentElement;
+    expect(desc.closest("header")).toBe(titleCol?.parentElement?.parentElement);
+    expect(titleCol?.className).toContain("min-w-0");
+    expect(titleCol?.parentElement?.className).toContain("min-w-0");
     expect(desc.className).toContain("truncate");
   });
 });
