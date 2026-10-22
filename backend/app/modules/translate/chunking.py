@@ -92,6 +92,45 @@ def is_translation_worthy(text: str) -> bool:
     return latin >= WORTHY_MIN_LATIN_CHARS
 
 
+def should_translate_segment(text: str) -> bool:
+    """段级判定（2026-10-22-fix-translate-cjk-segments）：该正文段是否送翻。
+
+    只判语言倾向、不套整条阈值——段级若复用"≥30 字符 / ≥8 拉丁字母"会把
+    短英文段漏翻。规则：有汉字或拉丁字母、且中文占比 <0.6 才送翻；纯数字/
+    符号段无文字可翻，跳过。
+
+    背景：整条 worthy 只看总量，中文正文夹英文代码块时整条会通过；代码段
+    被保护后中文正文仍会被送进 en→zh 模型，产出垃圾译文（生产实测）。
+    """
+    flat = re.sub(r"\s+", " ", text).strip()
+    cjk = len(_CJK_RE.findall(flat))
+    latin = len(_LATIN_RE.findall(flat))
+    denom = cjk + latin
+    if denom == 0:
+        return False
+    return cjk / denom < WORTHY_CJK_RATIO_MAX
+
+
+def split_paragraph_segments(segments: list[SourceSegment]) -> list[SourceSegment]:
+    """把可翻译段按自然段（``\\n\\n+``）再拆细，供段级语言判定。
+
+    保护段原样透传；分隔符归上一段尾部（拼接恒等于原文）。不拆细就无法
+    区分"中文段落 + 英文段落"的混合内容（split_protected 只在代码/URL
+    处分段）。
+    """
+    out: list[SourceSegment] = []
+    for seg in segments:
+        if not seg.translatable:
+            out.append(seg)
+            continue
+        parts = re.split(r"(\n\n+)", seg.text)
+        for i in range(0, len(parts), 2):
+            text = parts[i] + (parts[i + 1] if i + 1 < len(parts) else "")
+            if text:
+                out.append(SourceSegment(text=text, translatable=True))
+    return out
+
+
 def split_translatable(text: str, max_chars: int = CHUNK_MAX_CHARS) -> list[str]:
     """把一段送翻正文切为 ≤max_chars 的块，拼接恒等于原文。
 

@@ -22,6 +22,8 @@ from app.modules.translate.chunking import (
     SourceSegment,
     collect_chunks,
     is_translation_worthy,
+    should_translate_segment,
+    split_paragraph_segments,
     split_protected,
 )
 from app.modules.translate.schema import TranslateItemIn, TranslateItemOut
@@ -129,6 +131,9 @@ async def translate_items(items: list[TranslateItemIn], target: str = "zh") -> d
         }
 
     results: dict[str, TranslateItemOut] = {}
+    # 实际送翻过（含缓存回填）的 item——translated 标记只认这个集合，不认
+    # 「整条 worthy 通过」（2026-10-22-fix-translate-cjk-segments）。
+    translated_ids: set[str] = set()
     # 待推理项：item id → 保护切分后的段列表（送翻段占位 None 待填）
     pending: dict[str, list[SourceSegment]] = {}
     # 全局送翻块队列（跨 item 合批送模型）
@@ -140,11 +145,16 @@ async def translate_items(items: list[TranslateItemIn], target: str = "zh") -> d
         if not is_translation_worthy(item.text):
             results[item.id] = TranslateItemOut(id=item.id, text=item.text, translated=False)
             continue
-        segments = split_protected(item.text)
+        # 保护切分 → 再按自然段拆细：段级判定需要能区分"中文段落 + 英文段落"
+        segments = split_paragraph_segments(split_protected(item.text))
         pending[item.id] = segments
         for seg_idx, seg in enumerate(segments):
             # 纯空白正文段（如两代码块间的空行）按原样保留，不进翻译管线
             if not seg.translatable or not seg.text.strip():
+                continue
+            # 段级二次判定：整条 worthy 只看总量，中文正文夹英文代码块时会整条
+            # 通过；中文为主的段必须原样保留，禁止送进 en→zh 模型。
+            if not should_translate_segment(seg.text):
                 continue
             seg_chunks = collect_chunks([seg])
             if not seg_chunks:
@@ -159,6 +169,7 @@ async def translate_items(items: list[TranslateItemIn], target: str = "zh") -> d
                 if cached is not None:
                     _lru_put(key, cached)  # Redis 命中回填 LRU
                     _fill_chunk(pending, item.id, seg_idx, cached)
+                    translated_ids.add(item.id)
                 else:
                     chunk_owners.append((item.id, seg_idx))
                     pending_chunks.append(chunk)
@@ -192,6 +203,7 @@ async def translate_items(items: list[TranslateItemIn], target: str = "zh") -> d
                         chunk_owners, pending_chunks, translations, strict=True
                     ):
                         _fill_chunk(pending, item_id, seg_idx, translated)
+                        translated_ids.add(item_id)
                         cache_writes.append((_cache_key(chunk, target), translated))
                     for key, value in cache_writes:
                         _lru_put(key, value)
@@ -215,7 +227,7 @@ async def translate_items(items: list[TranslateItemIn], target: str = "zh") -> d
         results[item.id] = TranslateItemOut(
             id=item.id,
             text=rebuilt,
-            translated=_has_translation(segments),
+            translated=item.id in translated_ids,
         )
     return {
         "engine_ready": True,
@@ -238,8 +250,3 @@ def _fill_chunk(
     """
     segs = pending[item_id]
     segs[seg_idx] = SourceSegment(text=segs[seg_idx].text + translated, translatable=True)
-
-
-def _has_translation(segments: list[SourceSegment]) -> bool:
-    """该项是否真的发生了翻译（有送翻段且译文非空）。"""
-    return any(seg.translatable and seg.text.strip() for seg in segments)

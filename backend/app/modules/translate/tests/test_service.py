@@ -143,6 +143,41 @@ async def test_redis_absence_is_silent(
     assert out["items"][0].translated is True
 
 
+async def test_cjk_body_with_code_block_not_translated(
+    fake_translator: _FakeTranslator,
+) -> None:
+    """生产事故形态：中文正文 + 英文代码块整条 worthy 通过，但中文段必须原样保留。
+
+    修复前：代码块保护后中文正文仍送进 en→zh 模型 → "命令："变"发件人:"、
+    大段中文消失，且 translated=true（2026-10-22 生产实测）。
+    """
+    text = (
+        "命令：\n```\ndocker compose exec backend python -m app.modules.translate\n```\n"
+        "落地后站点恢复正常可用，注意观察日志。"
+    )
+    out = await translate_items([TranslateItemIn(id="a", text=text)])
+    item = out["items"][0]
+    assert item.text == text  # 原文无损
+    assert item.translated is False  # 未发生任何送翻
+    assert fake_translator.calls == 0  # 零推理
+
+
+async def test_mixed_cjk_and_english_paragraphs(fake_translator: _FakeTranslator) -> None:
+    """中文段落保留、英文段落正常送翻（自然段级拆分后的混合内容）。"""
+    cjk_para = "先排查配置文件。\n\n"
+    en_para = (
+        "The server returned an error because the cache directory was missing, "
+        "so the build failed before packaging."
+    )
+    text = cjk_para + en_para
+    out = await translate_items([TranslateItemIn(id="a", text=text)])
+    item = out["items"][0]
+    assert item.translated is True
+    assert item.text.startswith(cjk_para)  # 中文段原样
+    assert item.text != text  # 英文段已被翻译
+    assert fake_translator.calls == 1
+
+
 async def test_pure_code_content_translated_false(fake_translator: _FakeTranslator) -> None:
     text = "```\ngit status\ngit diff\n```"
     out = await translate_items([TranslateItemIn(id="a", text=text)])

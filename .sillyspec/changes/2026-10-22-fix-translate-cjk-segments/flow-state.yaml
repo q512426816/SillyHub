@@ -1,0 +1,33 @@
+tier: thin
+legacy_fallback: false
+substeps: {}
+born_face: thin
+with_tasks: false
+review_force: null
+input: >-
+  生产实测：中文正文+英文代码块的思考内容整条通过「值得翻」判定，代码块保护后剩余中文正文仍被送进 en→zh 模型，产出垃圾译文（"命令："→"发件人:"、大段中文消失）且标记
+  translated=true；根因是判定只在整条粒度、送翻按段进行，缺段级二次判定
+
+
+  成功标准：
+
+  - 送翻前必须对每个正文段做段级值得翻判定，中文为主的段原样保留、禁止送进模型
+
+  - 混合内容（中文正文+英文代码块）必须返回原文且 translated=false；纯英文内容必须仍正常翻译
+
+  - translated 标记必须反映「实际送翻过」而非「整条判定通过」
+
+  - 相关测试通过：后端 translate 模块测试（含新增混合内容用例）
+autopilot: false
+prestage_ack: true
+baseline_commit: 86337773ac7cf5a6edeac4e415cc9c2861ecd4b0
+updatedAt: '2026-10-22T02:17:22.868Z'
+cross_baselines:
+  sillyspec: 8ff68ada697ec4d4af9ce0a90c4055091985e319
+baseline_sha256: 2a6ffc15c942c8461cda1c380ef2b1bbc12bfac6c12a1174796fa9dc143287ae
+spec_approved: true
+spec_approved_at: '2026-10-22T02:17:22.867Z'
+spec_approved_by: anon@DESKTOP-HJ0AM09
+spec_approved_channel: user-confirmed
+spec_attested_by: anon@DESKTOP-HJ0AM09
+

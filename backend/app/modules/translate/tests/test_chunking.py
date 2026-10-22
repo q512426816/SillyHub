@@ -8,9 +8,32 @@ from app.modules.translate.chunking import (
     SourceSegment,
     collect_chunks,
     is_translation_worthy,
+    should_translate_segment,
     split_protected,
     split_translatable,
 )
+
+# -- should_translate_segment（段级判定，2026-10-22-fix-translate-cjk-segments）------
+
+
+def test_segment_cjk_dominant_skipped() -> None:
+    # 生产事故形态：中文正文段夹代码块后，整条 worthy 通过但该段必须跳过
+    assert should_translate_segment("运行下面命令后检查结果。") is False
+    assert should_translate_segment("落地后站点恢复正常可用，注意观察日志。") is False
+    # 中英混排但中文占比 <0.6 → 仍送翻（段级只判语言倾向）
+    assert should_translate_segment("这个 chunking 逻辑要再看一下。") is True
+
+
+def test_segment_short_english_still_translated() -> None:
+    # 段级不套整条的 30 字符/8 拉丁字母阈值——短英文段不能被漏翻
+    assert should_translate_segment("Run this first:\n") is True
+    assert should_translate_segment("done") is True
+
+
+def test_segment_symbols_only_skipped() -> None:
+    # 纯标点/数字：没有可翻文字，不送模型
+    assert should_translate_segment("12345 —— !!!\n") is False
+
 
 # -- split_protected ---------------------------------------------------------------
 
