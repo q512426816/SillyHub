@@ -65,3 +65,5 @@ daemon 采集器（`sillyhub-daemon/src/interactive/turn-file-changes.ts`）把�
 | 修改 | frontend/src/app/proto/session-file-changes/page.tsx | 真码原型补状态徽标/notice 卡 |
 | 修改 | frontend/e2e/proto-file-card.spec.ts | 状态徽标/删除不可点/未跟踪破折号/notice 断言 |
 | 修改 | frontend/src/components/daemon/__tests__/turn-timeline-conversation-file-card.test.tsx | 头部文案断言随「N 个文件变更」更新 |
+| 修改 | sillyhub-daemon/src/interactive/session-manager.ts | 工具调用路径累加保留重复项（编辑次数口径） |
+| 修改 | sillyhub-daemon/tests/interactive/session-manager-turn-file-changes.test.ts | 同文件同工具重复调用接线测试 |

@@ -7372,3 +7372,98 @@ superseded_by：FR-app-workspace-pages-002
   confirmed_at: null
   source_change: 2026-10-22-trajectory-view-redesign
   status: active
+
+## FR-frontend-040 轮内已提交（git commit）的文件必须出现在本轮文件变更卡中；文件清单来源为 git status ∪ git diff --name-status <baselineHead>，行数取 numstat
+变更：2026-10-22-file-changes-card-fix
+状态：active
+摘要：轮内 commit 后工作区干净；轮内新增/删除并提交；未跟踪文件仍在列
+全文：.sillyspec/changes/archive/2026-10-22-file-changes-card-fix/requirements.md#FR-01
+最近确认：c2a675686324f2ee56e0a3b2a7a5c5c27a1754b8
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-22-file-changes-card-fix:flow:测试绑定FR-01
+  tests: sillyhub-daemon/tests/interactive/turn-file-changes.test.ts「轮内 commit 的改动进入文件清单」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-22-file-changes-card-fix
+  status: active
+
+## FR-frontend-041 慢盘工作区（/mnt/ 等）不再固定超时：自适应/放大超时预算且可配置；numstat 超时仍保留已采集的 status/name-status 文件清单（行数显示破折号）
+变更：2026-10-22-file-changes-card-fix
+状态：active
+摘要：慢盘首轮超时后升级；numstat 超时保留清单
+全文：.sillyspec/changes/archive/2026-10-22-file-changes-card-fix/requirements.md#FR-02
+最近确认：c2a675686324f2ee56e0a3b2a7a5c5c27a1754b8
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-22-file-changes-card-fix:flow:测试绑定FR-02
+  tests: sillyhub-daemon/tests/interactive/turn-file-changes.test.ts「numstat 超时保留 status 清单」 | sillyhub-daemon/tests/interactive/turn-file-changes.test.ts「慢盘预算自适应」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-22-file-changes-card-fix
+  status: active
+
+## FR-frontend-042 未跟踪新文件、删除文件、mtime 探测行有明确状态展示；删除行不可点击；改N次=真实编辑调用次数
+变更：2026-10-22-file-changes-card-fix
+状态：active
+摘要：未跟踪新文件；删除文件；同一文件多次 Edit
+全文：.sillyspec/changes/archive/2026-10-22-file-changes-card-fix/requirements.md#FR-03
+最近确认：c2a675686324f2ee56e0a3b2a7a5c5c27a1754b8
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-22-file-changes-card-fix:flow:测试绑定FR-03
+  tests: frontend/src/components/daemon/file-changes/__tests__/file-changes-card.test.tsx「状态徽标/删除行不可点/未跟踪破折号」 | frontend/src/components/daemon/file-changes/__tests__/turn-file-changes.test.ts「status/untracked/编辑次数映射」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-22-file-changes-card-fix
+  status: active
+
+## FR-frontend-043 notice 按精确 reason（timeout/queue_overflow/无 reason）与采集耗时生成文案，notice 态也显示共享工作区提示
+变更：2026-10-22-file-changes-card-fix
+状态：active
+摘要：timeout 提示；queue_overflow 提示
+全文：.sillyspec/changes/archive/2026-10-22-file-changes-card-fix/requirements.md#FR-04
+最近确认：c2a675686324f2ee56e0a3b2a7a5c5c27a1754b8
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-22-file-changes-card-fix:flow:测试绑定FR-04
+  tests: frontend/src/components/daemon/file-changes/__tests__/file-changes-card.test.tsx「notice 态共享工作区提示」 | frontend/src/components/daemon/file-changes/__tests__/turn-file-changes.test.ts「notice 按 reason 与耗时生成」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-22-file-changes-card-fix
+  status: active
+
+## FR-frontend-044 daemon/前端定向测试全绿，既有卡片与快照契约零回归
+变更：2026-10-22-file-changes-card-fix
+状态：active
+摘要：回归
+全文：.sillyspec/changes/archive/2026-10-22-file-changes-card-fix/requirements.md#FR-05
+最近确认：c2a675686324f2ee56e0a3b2a7a5c5c27a1754b8
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-22-file-changes-card-fix:flow:测试绑定FR-05
+  tests: frontend/src/components/daemon/file-changes/__tests__/file-changes-card.test.tsx「既有卡片交互回归」 | sillyhub-daemon/tests/interactive/turn-file-changes.test.ts「既有六类夹具/降级路径回归」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-22-file-changes-card-fix
+  status: active

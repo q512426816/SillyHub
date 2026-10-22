@@ -30,3 +30,4 @@
 - 2026-10-22-review-risk-fixes | 审查修复：原型路由防线与监听泄漏
 - 2026-10-22-daemon-snapshot-report-log | daemon 快照上报补收口日志
 - 2026-10-22-merge-test-debt | 合并后测试债清偿：l10n文案与守卫钉子同步
+- 2026-10-22-file-changes-card-fix | 文件变更卡采集与展示修复

@@ -1,7 +1,7 @@
 {
   "change": "2026-10-22-file-changes-card-fix",
   "baseline": "decd05a7a8f6682d8b62fc70edf8e6bea3b2bbce",
-  "head": "4ce27a070250879e9b684af4fc072fbb6b3e47a0",
+  "head": "c2a675686324f2ee56e0a3b2a7a5c5c27a1754b8",
   "files": [
     ".sillyspec/docs/frontend/modules/components-daemon.md",
     ".sillyspec/docs/sillyhub-daemon/modules/interactive.md",
@@ -12,16 +12,18 @@
     "frontend/src/components/daemon/file-changes/__tests__/turn-file-changes.test.ts",
     "frontend/src/components/daemon/file-changes/file-changes-card.tsx",
     "frontend/src/components/daemon/file-changes/turn-file-changes.ts",
+    "sillyhub-daemon/src/interactive/session-manager.ts",
     "sillyhub-daemon/src/interactive/turn-file-changes-types.ts",
     "sillyhub-daemon/src/interactive/turn-file-changes.ts",
+    "sillyhub-daemon/tests/interactive/session-manager-turn-file-changes.test.ts",
     "sillyhub-daemon/tests/interactive/turn-file-changes.test.ts"
   ],
   "totals": {
-    "files": 12,
-    "additions": 809,
-    "deletions": 208
+    "files": 14,
+    "additions": 938,
+    "deletions": 239
   },
-  "savedAt": "2026-10-22T11:43:25.621Z",
+  "savedAt": "2026-10-22T12:10:54.130Z",
   "note": "flow done 时点冻结（本变更可归属交付面：baseline..HEAD 提交面过滤 .sillyspec/ 只留 .sillyspec/docs/ 交付文档 + 独占树未提交交付；治理工件目录不入冻结——2026-10-12-close-trace-freeze-integrity FR-01）",
   "modules": [
     {
@@ -33,14 +35,14 @@
     },
     {
       "id": "sillyhub-daemon",
-      "files": 3,
+      "files": 5,
       "doc": "docs/multi-agent-platform/modules/sillyhub-daemon.md",
       "docTouched": false,
       "docMissing": false
     },
     {
       "id": "daemon",
-      "files": 3,
+      "files": 5,
       "doc": "docs/SillyHub/modules/daemon.md",
       "docTouched": false,
       "docMissing": false
@@ -74,50 +76,50 @@
     "degradedReason": null,
     "baseAnchor": "decd05a7a8f6682d8b62fc70edf8e6bea3b2bbce",
     "totals": {
-      "files": 12,
-      "additions": 809,
-      "deletions": 208
+      "files": 14,
+      "additions": 938,
+      "deletions": 239
     },
     "rows": [
       {
         "path": ".sillyspec/docs/frontend/modules/components-daemon.md",
-        "additions": 8,
-        "deletions": 0,
+        "additions": 11,
+        "deletions": 3,
         "kind": "modified",
         "planned": "修改",
         "verdict": "planned"
       },
       {
         "path": ".sillyspec/docs/sillyhub-daemon/modules/interactive.md",
-        "additions": 8,
-        "deletions": 0,
+        "additions": 12,
+        "deletions": 4,
         "kind": "modified",
         "planned": "修改",
         "verdict": "planned"
       },
       {
         "path": "frontend/e2e/proto-file-card.spec.ts",
-        "additions": 19,
+        "additions": 31,
         "deletions": 11,
         "kind": "modified",
-        "planned": null,
-        "verdict": "unplanned"
+        "planned": "修改",
+        "verdict": "planned"
       },
       {
         "path": "frontend/src/app/proto/session-file-changes/page.tsx",
         "additions": 26,
         "deletions": 11,
         "kind": "modified",
-        "planned": null,
-        "verdict": "unplanned"
+        "planned": "修改",
+        "verdict": "planned"
       },
       {
         "path": "frontend/src/components/daemon/__tests__/turn-timeline-conversation-file-card.test.tsx",
         "additions": 3,
         "deletions": 3,
         "kind": "modified",
-        "planned": null,
-        "verdict": "unplanned"
+        "planned": "修改",
+        "verdict": "planned"
       },
       {
         "path": "frontend/src/components/daemon/file-changes/__tests__/file-changes-card.test.tsx",
@@ -137,39 +139,55 @@
       },
       {
         "path": "frontend/src/components/daemon/file-changes/file-changes-card.tsx",
-        "additions": 166,
-        "deletions": 76,
+        "additions": 170,
+        "deletions": 80,
         "kind": "modified",
         "planned": "修改",
         "verdict": "planned"
       },
       {
         "path": "frontend/src/components/daemon/file-changes/turn-file-changes.ts",
-        "additions": 31,
+        "additions": 34,
+        "deletions": 6,
+        "kind": "modified",
+        "planned": "修改",
+        "verdict": "planned"
+      },
+      {
+        "path": "sillyhub-daemon/src/interactive/session-manager.ts",
+        "additions": 12,
+        "deletions": 8,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": "sillyhub-daemon/src/interactive/turn-file-changes-types.ts",
+        "additions": 7,
         "deletions": 3,
         "kind": "modified",
         "planned": "修改",
         "verdict": "planned"
       },
       {
-        "path": "sillyhub-daemon/src/interactive/turn-file-changes-types.ts",
-        "additions": 5,
-        "deletions": 1,
+        "path": "sillyhub-daemon/src/interactive/turn-file-changes.ts",
+        "additions": 302,
+        "deletions": 96,
         "kind": "modified",
         "planned": "修改",
         "verdict": "planned"
       },
       {
-        "path": "sillyhub-daemon/src/interactive/turn-file-changes.ts",
-        "additions": 279,
-        "deletions": 89,
+        "path": "sillyhub-daemon/tests/interactive/session-manager-turn-file-changes.test.ts",
+        "additions": 24,
+        "deletions": 0,
         "kind": "modified",
-        "planned": "修改",
-        "verdict": "planned"
+        "planned": null,
+        "verdict": "unplanned"
       },
       {
         "path": "sillyhub-daemon/tests/interactive/turn-file-changes.test.ts",
-        "additions": 157,
+        "additions": 199,
         "deletions": 10,
         "kind": "modified",
         "planned": "修改",
@@ -182,6 +200,6 @@
     "note": "flow done 时点冻结（本文件落盘时采集）",
     "closedBy": "flow done"
   },
-  "patchSha256": "45166b071c0b0810bdbae7eac7a1d3af0b0873ee44c13d0a4a12dca9ac7b5e14",
+  "patchSha256": "95add05080ebe1ae17c9c458bd7377f0a6fecd7248eb8747334d9a3895e7eb40",
   "patchStatus": "ok"
 }

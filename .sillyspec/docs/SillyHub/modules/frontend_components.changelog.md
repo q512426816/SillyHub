@@ -120,3 +120,4 @@ created_at: 2026-08-30 22:23:33
 | 2026-10-22 | 2026-10-22-askuser-card-inline | 会话页 AskUser 提问卡悬浮改内嵌滚动 |
 | 2026-10-22 | 2026-10-22-turn-trigger-metadata-p2 | 轮触发溯源 Phase 2：定时消息接入与 metadata 戳驱动 |
 | 2026-10-22 | 2026-10-22-trajectory-view-redesign | 2026-10-22-trajectory-view-redesign |
+| 2026-10-22 | 2026-10-22-file-changes-card-fix | 文件变更卡采集与展示修复 |

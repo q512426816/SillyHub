@@ -1,0 +1,16 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-22-file-changes-card-fix",
+  "reviewer": "subagent",
+  "verdict": "PASS",
+  "reviewedAgainst": "c2a675686324f2ee56e0a3b2a7a5c5c27a1754b8",
+  "findings": [],
+  "dimensionNotes": {
+    "乱序": "ok",
+    "并发": "ok",
+    "切换": "ok",
+    "作用域": "ok"
+  },
+  "reviewedAt": "2026-10-22T20:10:13+08:00",
+  "notes": "【最终清理复核】HEAD=c2a675686324f2ee56e0a3b2a7a5c5c27a1754b8，提交仅改 3 个文件的注释/文档（diff 无逻辑改动）。三处核对全部通过：1) sillyhub-daemon/src/interactive/turn-file-changes.ts 模块头已写「生产恒 3：status + name-status + numstat；baseline 未解析兜底 4」，spike 段改为「单轮子进程恒 3」，readBaselineHead 改为「生产采集因此少一条 rev-parse（3 条/兜底 4 条）」；grep 无「实测 2 / 从 3 降到 2 / 单轮子进程恒 2」。2) .sillyspec/docs/sillyhub-daemon/modules/interactive.md:181 性能红线段已列 status + name-status + numstat，并注明兜底 4 条；:182 的注释引用同步为「生产采集因此少一条 rev-parse」。3) frontend/src/components/daemon/file-changes/turn-file-changes.ts 的 NOTICE_PARTIAL_NO_FILES JSDoc 已改为「只作 partial 但无 reason（行数退档）的通用兜底；timeout/queue_overflow 由 fileChangesNotice 按 reason + 采集耗时生成」。上轮唯一 P3 已关闭，无新问题。\n\n【上轮 P1/P2 修复复核（140adf4cf 已验证，c2a6756 未改逻辑）】P1：session-manager._noteTurnToolCallPaths 已删除 seenKeys 去重，按 toolCallPaths.length 上限直接 push；session-manager-turn-file-changes.test.ts 新增「同一文件同一工具重复调用保留重复项」断言采集器收到 2 条；采集器 buildEditAttribution 逐条 push，前端 edits 取 length，Edit×3 端到端为 3。P2：collectInner 新增 escalateIfTimeout，baseline/status/name-status/numstat 的 classified timeout 均调用 noteCollectTimeout；新增「子进程自身 timeout 也升级预算」用例通过；外层 CollectTimeout 分支仍升级，resetTurnFileChangesTelemetry 仍清空 _adaptiveTimeouts。\n\n【检查单 1：FR↔实现↔测试】FR-01 通过：status ∪ diff --name-status -z <baseline>，真实 git「轮内 commit 的改动进入文件清单」覆盖 M/A/D；FR-02 通过：分阶段保留清单、/mnt/ ≥8s、env 覆盖、翻倍封顶 15s、分类 timeout 升级均有实现与用例；FR-03 通过：status 透传、删除行不可点、untracked/mtime 破折号、上游去重删除后的真实编辑次数均有测试；FR-04 通过：timeout 带耗时、queue_overflow、无 reason 通用文案、notice 态共享提示均有用例；FR-05 通过：定向测试全绿、既有卡片/快照契约无回归。\n\n【检查单 2：盲维四问真实性】乱序：同一 baseline、path 键、status > name-status > numstat、mtime 以 seen 去重，与代码相符，记 ok；极小边界：numstat 未用 -z，含换行路径解析仍有 pre-existing 缺口。并发：单工作区队列/深度 1、queue_overflow、自适应 Map 单线程无竞态，记 ok。切换：轮尾 fire-and-forget、不抛穿、diff 失败保留清单并 partial、daemon 重启预算归零，记 ok。作用域：workspaceRoot/queueKey 分桶、仓根相对 posix、env 进程级，记 ok。四维均无 finding。\n\n【检查单 3：披露边界逐条裁决】1) 3 条 git 命令成本：可接受（8s 基础预算 + 超时升级 + 超时保留清单已落地，子进程预算 3/4 条测试通过；极慢盘 15s 上限仍可能不够属已披露风险）。2) 轮内 commit 口径扩大：可接受（本次修复目标，卡片数字变大需发布说明）。3) 未跟踪行数用破折号：可接受（诚实语义，避免 +0/−0，有单测）。4) 放弃方案 A/B/C/D：可接受（A 不能补 commit/清单；B 丢行数；C 读文件更慢且不诚实；D 需新 RPC/端点超出本次面）。以上均「边界已裁决：可接受」，对应并发/作用域维度。\n\n【检查单 4：防护声明真实性】status 失败才 files=[]、name-status/numstat 失败保留已采清单：成立；/mnt/ ≥8s、timeout 翻倍封顶 15s、env 覆盖：成立且 reset 清空自适应表；分类 timeout 升级：成立（P2 已修复）；编辑调用次数：端到端成立（P1 已修复）；确定性 notice：成立（三态单测通过）。\n\n【检查单 5：生成物同步】POST 契约零新增：TurnFileChange/TurnFileChangesSnapshot 字段未变，backend schema 未改，editToolNames 仍是 list[str]，generated api-types 未改；e2e/原型与组件 props 对齐；design 文件清单完整；visual-evidence 与 e2e 覆盖一致；模块文档与源码注释在 c2a6756 后无旧口径残留。\n\n【复跑结果】c2a6756 为注释/文档-only 提交，逻辑与 140adf4cf 相同，故上轮实测结果继续适用：daemon 两测试文件 43 passed、frontend file-changes + timeline 62 passed、e2e 1 passed。本轮在新 HEAD 复跑 sillyhub-daemon pnpm typecheck 与 frontend pnpm typecheck，均 clean。\n\n【结论】上轮 P1/P2 阻断项已修复，最后一条 P3 文档/注释残留已在 c2a6756 清理；无 findings，PASS。"
+}

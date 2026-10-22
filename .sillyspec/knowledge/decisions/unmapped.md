@@ -1381,3 +1381,11 @@
 锚点：未记录
 最近确认：a0af14684ac4433ef87f97e4f33906c9e5e9f6f4
 理由：最大风险：改为 SET NULL 后，被删 change 的执行 run 会保留但失去 change 归属；`_change_run_ids` 的无锚分支可能把这些 run 归到同会话其它 change，导致用量报表轻微漂移。缓解：仅在 change 物理删除（低概率）时发生，用量按 run 去重不重复计数；在 `agent.md`/`change.md` 文档登记该语义。 回灌格式风险：引擎 JSONL 与 daemon 线上上报格式存在细微差异，渲染可能不完全一致。缓解：严格对齐 `_persist_agent_event` 的 `[ASSISTANT]/[THINKING]/[TOOL_USE]/[TOOL_RESULT]` 前缀与 `metadata.agent_event` 形状；回灌行带 `restored_from` 标记，便于按 run id 回收；生产先 dry-run 再 apply。 迁移对账误伤：全局 `turn_count` 下调可能影响未知会话。缓解：只下调（`turn_count > expected`），expected 只统计有 user_input 日志的 run，`tool_report` 的 0 语义天然保留；迁移前备份 `agent_sessions`。 放弃方案 A：只把 reparse 里的 `session.delete` 改成逐条搬 run——路径多（reparse、占坑回滚、未来新增删除入口），漏一处就复发，不是根治。 放弃方案 B：把左栏轮数改为列表接口实时聚合 `count(runs)`——改动面大、每会话子查询性能风险，且会改变 `tool_report` 的 `turn_count=0` replay 语义；保留存储列 + 对账路径更稳。
+
+## D-unmapped-181@v1 设计期风险与放弃方案（底稿）
+状态：implemented
+变更：2026-10-22-file-changes-card-fix
+原编号：D-001@v1
+锚点：未记录
+最近确认：c2a675686324f2ee56e0a3b2a7a5c5c27a1754b8
+理由：最大风险：慢盘上从 2 条 git 命令增至 3 条，首轮仍可能超时；但 `/mnt/` 基础预算提升 + 超时后自动升级 + 超时保留清单，使「超时后整卡空白」不再发生。另一个风险是「本轮改动」口径扩大：轮内 commit 的文件现在会出现，卡片数字可能比以前大——这是修复目标（以前漏报），需在发布说明中明确。 放弃方案 A：只调大 timeout——不解决轮内 commit 漏报与 numstat 超时丢清单。 放弃方案 B：只用 `git diff --name-status` 不跑 numstat——行数全变破折号，信息退化。 放弃方案 C：忽略文件读到真实行数——`/mnt/e` 上读文件比 git 更慢，且 untracked 可能很大；保持诚实破折号。 放弃方案 D：给卡片加「重新采集」按钮——需要新增 daemon RPC 与平台端点，超出本次修复面，留作后续。

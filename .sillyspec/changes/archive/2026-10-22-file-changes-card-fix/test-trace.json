@@ -1,0 +1,85 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-22-file-changes-card-fix",
+  "rows": [
+    {
+      "anchor": "FR-01",
+      "row_id": "2026-10-22-file-changes-card-fix:flow:测试绑定FR-01",
+      "tests": [
+        "sillyhub-daemon/tests/interactive/turn-file-changes.test.ts「轮内 commit 的改动进入文件清单」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-22-file-changes-card-fix"
+    },
+    {
+      "anchor": "FR-02",
+      "row_id": "2026-10-22-file-changes-card-fix:flow:测试绑定FR-02",
+      "tests": [
+        "sillyhub-daemon/tests/interactive/turn-file-changes.test.ts「numstat 超时保留 status 清单」",
+        "sillyhub-daemon/tests/interactive/turn-file-changes.test.ts「慢盘预算自适应」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-22-file-changes-card-fix"
+    },
+    {
+      "anchor": "FR-03",
+      "row_id": "2026-10-22-file-changes-card-fix:flow:测试绑定FR-03",
+      "tests": [
+        "frontend/src/components/daemon/file-changes/__tests__/file-changes-card.test.tsx「状态徽标/删除行不可点/未跟踪破折号」",
+        "frontend/src/components/daemon/file-changes/__tests__/turn-file-changes.test.ts「status/untracked/编辑次数映射」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-22-file-changes-card-fix"
+    },
+    {
+      "anchor": "FR-04",
+      "row_id": "2026-10-22-file-changes-card-fix:flow:测试绑定FR-04",
+      "tests": [
+        "frontend/src/components/daemon/file-changes/__tests__/file-changes-card.test.tsx「notice 态共享工作区提示」",
+        "frontend/src/components/daemon/file-changes/__tests__/turn-file-changes.test.ts「notice 按 reason 与耗时生成」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-22-file-changes-card-fix"
+    },
+    {
+      "anchor": "FR-05",
+      "row_id": "2026-10-22-file-changes-card-fix:flow:测试绑定FR-05",
+      "tests": [
+        "frontend/src/components/daemon/file-changes/__tests__/file-changes-card.test.tsx「既有卡片交互回归」",
+        "sillyhub-daemon/tests/interactive/turn-file-changes.test.ts「既有六类夹具/降级路径回归」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-22-file-changes-card-fix"
+    }
+  ]
+}
