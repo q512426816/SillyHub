@@ -307,6 +307,8 @@ export const TurnLiveMarquee = memo(function TurnLiveMarquee({
   const offsetRef = useRef(0);
   const targetRef = useRef(0);
   const initializedRef = useRef(false);
+  /** 上一次渲染的首条 id：识别「达到上限后窗口滑动淘汰最旧」的瞬间。 */
+  const prevFirstIdRef = useRef<string | null>(null);
   const [visible, setVisible] = useState(true);
   const [ready, setReady] = useState(false);
 
@@ -315,12 +317,21 @@ export const TurnLiveMarquee = memo(function TurnLiveMarquee({
   /**
    * 计算目标位置：内容右端贴视口右缘（即显示最新条）；内容不满一屏时 0。
    * 首次测量直接定位（打开即看到最新），之后只向更负的方向推进，不回滚。
+   *
+   * @param slideByOne 达到条目上限后窗口滑动（淘汰最旧/追加最新）时为 true：
+   *   轨道宽度不变但内容整体左移了一条，需额外推进一条宽度，让新条目进入
+   *   视口——否则轨道会停在原处、最新事件永远看不见。
    */
-  const applyTarget = useCallback(() => {
+  const applyTarget = useCallback((slideByOne = false) => {
     const viewport = viewportRef.current;
     const track = trackRef.current;
     if (!viewport || !track) return;
-    const next = Math.min(0, viewport.clientWidth - track.scrollWidth);
+    let next = Math.min(0, viewport.clientWidth - track.scrollWidth);
+    if (slideByOne) {
+      const firstItem = track.firstElementChild as HTMLElement | null;
+      const gap = Number.parseFloat(getComputedStyle(track).columnGap || "0") || 0;
+      next -= (firstItem?.offsetWidth ?? 208) + gap;
+    }
     targetRef.current = next;
     if (!initializedRef.current) {
       initializedRef.current = true;
@@ -333,7 +344,15 @@ export const TurnLiveMarquee = memo(function TurnLiveMarquee({
   // entries 变化 / 挂载：重算目标（首帧直接定位到最新；ready 前隐藏防闪）。
   useEffect(() => {
     if (reduced) return;
-    applyTarget();
+    const firstId = entries.length > 0 ? entries[0]!.id : null;
+    const prevFirstId = prevFirstIdRef.current;
+    const slid =
+      prevFirstId != null &&
+      firstId != null &&
+      firstId !== prevFirstId &&
+      entries.length >= LIVE_MARQUEE_MAX_ENTRIES;
+    prevFirstIdRef.current = firstId;
+    applyTarget(slid);
   }, [entries, reduced, applyTarget]);
 
   // 视口尺寸变化（窗口缩放 / 侧栏开合）时重算目标。
