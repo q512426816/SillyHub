@@ -417,9 +417,9 @@ export interface SessionTurnView {
 
 /** 消息视图模式（ql-20260729-005）：对话=用户消息+答复正文+文件卡片（交付物，
  * agent-file-upload-mcp FR-01）；全部=追加思考/工具等过程项。
- * 2026-10-22-session-trajectory-view（D-035）：**两态不变**——轨迹是「进度」视图内的
- * 呈现方式（时间线 / 轨迹），不是第三种视图模式。 */
-export type SessionViewMode = "conversation" | "all";
+ * 2026-10-22-session-trajectory-third-view（D-001，覆盖 D-035）：三态——「轨迹」与
+ * 「对话 / 进度」同层并列，不再是进度视图内的第二层开关。 */
+export type SessionViewMode = "conversation" | "all" | "trajectory";
 
 export interface TurnTimelineProps {
   turns: SessionTurnView[];
@@ -1290,17 +1290,24 @@ export function autoRecoverHintForTurn(
 const BOTTOM_REASSERT_WINDOW_MS = 2500;
 
 /**
- * 「进度」视图的轨迹呈现（2026-10-22-session-trajectory-view / D-035）。
+ * 「轨迹」视图（2026-10-22-session-trajectory-third-view / D-001，原
+ * 2026-10-22-session-trajectory-view / D-035 的进度内呈现方式上移为第三视图）。
  *
  * 数据来源＝当前会话已加载的轮视图（`SessionTurnView[]`）：`trajectoryFromTurnViews`
  * 纯函数派生三泳道所需行/轮，再交给 dev 路由同款 `TrajectoryView` 渲染。**零网络请求**
  * （不调任何 API、不读 `.proto-staging`），因此产品页与 dev 预览的差别只在数据来源。
+ *
+ * 选中态（2026-10-22-fix-trajectory-row-select 并入）：`TrajectoryView` 的选中是受控
+ * 可选 props——不传则点击静默无反应（原缺陷）。此处自持 `selectedRowId` 并接线，
+ * 与 dev 预览页 `trajectory-proto-view.tsx` 同一接法：点账本行 / 时间轴条目选中、
+ * 右侧检查器出详情、↑↓ 切换、Esc 清除均由 TrajectoryView 内部逻辑承担。
  *
  * 空态：整段会话都没有可比对的时间戳（`rows` 为空）→ 出显式提示，**不白屏、不伪造条**
  * （伪造会让「没有数据」看起来像「这轮没有活动」）。
  */
 function TrajectoryPane({ turns }: { turns: SessionTurnView[] }) {
   const trajectory = useMemo(() => trajectoryFromTurnViews(turns), [turns]);
+  const [selectedRowId, setSelectedRowId] = useState<string | null>(null);
   if (trajectory.rows.length === 0) {
     return (
       <div
@@ -1315,7 +1322,11 @@ function TrajectoryPane({ turns }: { turns: SessionTurnView[] }) {
   }
   return (
     <div data-testid="trajectory-pane" className="min-w-0">
-      <TrajectoryView trajectory={trajectory} />
+      <TrajectoryView
+        trajectory={trajectory}
+        selectedRowId={selectedRowId}
+        onSelectRow={setSelectedRowId}
+      />
     </div>
   );
 }
@@ -1344,10 +1355,9 @@ export function TurnTimeline({
   fileChangesSummary = true,
 }: TurnTimelineProps) {
   const scrollRef = useRef<HTMLDivElement>(null);
-  // 2026-10-22-session-trajectory-view（D-035）：「进度」视图的呈现方式——时间线（现状）
-  // 或轨迹（三泳道）。仅 all 视图内生效；conversation 视图不出现该开关。
-  const [progressLens, setProgressLens] = useState<"timeline" | "trajectory">("timeline");
-  const showTrajectory = viewMode === "all" && progressLens === "trajectory";
+  // 2026-10-22-session-trajectory-third-view（D-001）：轨迹是第三个顶层视图，
+  // 不再有「进度」内的「时间线 / 轨迹」第二层开关。
+  const showTrajectory = viewMode === "trajectory";
 
   // ql-20260822-010：贴底跟随——原实现每次 turns 更新无条件 scrollTo 底部，
   // 用户上滚读历史时被流式更新反复拉回底部。改为：onScroll 维护「距底 <
@@ -1811,33 +1821,8 @@ export function TurnTimeline({
            2026-10-21 用户裁决「轮间 1px hairline 多余」：**只保留留白，不再画线**
            （原 `border-b border-border last:border-b-0` 已移除）；轮与轮靠白处分节。 */
         <div>
-          {/* 2026-10-22-session-trajectory-view（D-035）：轨迹是「进度」视图内的**呈现方式**
-              （时间线 / 轨迹），不是第三种视图模式——D-004 的两态约束不变。 */}
-          {viewMode === "all" && (
-            <div
-              role="tablist"
-              aria-label="进度视图呈现方式"
-              data-testid="progress-lens"
-              className="mb-3 inline-flex items-center rounded-full border bg-muted/50 p-0.5"
-            >
-              {(["timeline", "trajectory"] as const).map((lens) => (
-                <button
-                  key={lens}
-                  role="tab"
-                  aria-selected={progressLens === lens}
-                  onClick={() => setProgressLens(lens)}
-                  className={cn(
-                    "rounded-full px-2.5 py-1 text-[11px] leading-none transition-colors",
-                    progressLens === lens
-                      ? "bg-card font-medium text-foreground shadow-sm"
-                      : "text-muted-foreground hover:text-foreground",
-                  )}
-                >
-                  {lens === "timeline" ? "时间线" : "轨迹"}
-                </button>
-              ))}
-            </div>
-          )}
+          {/* 2026-10-22-session-trajectory-third-view（D-001）：轨迹已是顶层第三视图
+              （切换控件在会话面板头部），此处直接渲染，不再有第二层「时间线 / 轨迹」开关。 */}
           {showTrajectory ? (
             <TrajectoryPane turns={turns} />
           ) : (

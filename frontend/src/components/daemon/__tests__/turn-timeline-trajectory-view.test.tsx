@@ -1,16 +1,23 @@
-// 2026-10-22-session-trajectory-view（D-035）：会话页「进度」视图内的轨迹呈现。
+// 2026-10-22-session-trajectory-third-view（D-001，覆盖 D-035 两态约束）：
+// 会话视图三态中的「轨迹」——与「对话 / 进度」同层并列，不再是进度内的第二层开关。
 //
-// 锁定（按用户 2026-10-22 裁决改版）：
-//   1. 视图模式**仍是两态**（对话 / 进度）——轨迹是进度视图内的呈现方式，不是第三种视图；
-//   2. 进度视图出现「时间线 / 轨迹」开关（progress-lens），默认「时间线」不改变现状；
-//   3. 切「轨迹」→ 渲染三泳道面板（trajectory-pane），轮块列表让位（不双画）；
+// 锁定：
+//   1. 「进度」恢复纯时间线：轮块照常、不再有 progress-lens；
+//   2. 「轨迹」直接渲染三泳道面板，轮块让位（不双画）；
+//   3. 轨迹面板选中交互（并入 2026-10-22-fix-trajectory-row-select）：点击账本行 /
+//      时间轴条目选中，右侧检查器出详情，↑/↓ 切换、Esc 清除；
 //   4. 无可绘制时序 → 显式空态（trajectory-empty），不白屏、不伪造条；
-//   5. 对话视图不出现该开关（零回归）。
+//   5. 「对话」视图不出现轨迹面板（零回归）。
 import { describe, expect, it, vi } from "vitest";
 import { fireEvent, render, screen } from "@testing-library/react";
 
 import { TurnTimeline } from "../turn-timeline";
 import type { SessionTurnView, SessionViewMode } from "../turn-timeline";
+
+// jsdom 未实现 scrollIntoView（TrajectoryView 选中行「滚入视野」effect 会调用）。
+if (!Element.prototype.scrollIntoView) {
+  Element.prototype.scrollIntoView = () => {};
+}
 
 vi.mock("@/components/ui/markdown-text", () => ({
   MarkdownText: ({ content }: { content: string }) => (
@@ -69,33 +76,30 @@ function renderProps(turns: SessionTurnView[], viewMode: SessionViewMode) {
   };
 }
 
-describe("进度视图内的轨迹呈现（D-035，用户裁决：不做第三视图）", () => {
-  it('进度视图默认「时间线」：轮块照常渲染、不出轨迹面板（现状零变化）', () => {
+describe("会话视图三态中的「轨迹」（D-001）", () => {
+  it("进度视图纯时间线：轮块照常渲染、无「时间线 / 轨迹」第二层开关", () => {
     render(<TurnTimeline {...renderProps([makeTurn()], "all")} />);
 
-    const lens = screen.getByTestId("progress-lens");
-    expect(lens).toBeInTheDocument();
-    expect(screen.getByRole("tab", { name: "时间线" })).toHaveAttribute(
-      "aria-selected",
-      "true",
-    );
     expect(screen.getAllByTestId("turn-block").length).toBe(1);
+    expect(screen.queryByTestId("progress-lens")).toBeNull();
     expect(screen.queryByTestId("trajectory-pane")).toBeNull();
   });
 
-  it('点「轨迹」→ 三泳道面板在场、轮块列表让位', () => {
-    render(<TurnTimeline {...renderProps([makeTurn()], "all")} />);
-    fireEvent.click(screen.getByRole("tab", { name: "轨迹" }));
+  it("轨迹视图直接出三泳道面板、轮块让位", () => {
+    render(<TurnTimeline {...renderProps([makeTurn()], "trajectory")} />);
 
     expect(screen.getByTestId("trajectory-pane")).toBeInTheDocument();
     // 三泳道（输入 / 模型 / 工具）随 TrajectoryView 一起出现。
     expect(screen.getAllByTestId("trajectory-lane-label").length).toBe(3);
     expect(screen.queryByTestId("turn-block")).toBeNull();
+    // 不再有进度内的第二层开关。
+    expect(screen.queryByTestId("progress-lens")).toBeNull();
   });
 
   it("无 timing 采样 → 模型泳道标「近似」；有 timing → 标「真实占用」", () => {
-    const { unmount } = render(<TurnTimeline {...renderProps([makeTurn()], "all")} />);
-    fireEvent.click(screen.getByRole("tab", { name: "轨迹" }));
+    const { unmount } = render(
+      <TurnTimeline {...renderProps([makeTurn()], "trajectory")} />,
+    );
     expect(screen.getByTestId("trajectory-model-basis").textContent).toContain("近似");
     unmount();
 
@@ -125,24 +129,72 @@ describe("进度视图内的轨迹呈现（D-035，用户裁决：不做第三�
               } as SessionTurnView["timing"],
             }),
           ],
-          "all",
+          "trajectory",
         )}
       />,
     );
-    fireEvent.click(screen.getAllByRole("tab", { name: "轨迹" })[0]!);
     expect(screen.getByTestId("trajectory-model-basis").textContent).toContain("真实占用");
   });
 
-  it("无可绘制时序（无时间锚点）→ 显式空态，不白屏、不渲染轮块", () => {
+  it("点击账本行 → 选中态 + 右侧检查器显示行详情", () => {
+    render(<TurnTimeline {...renderProps([makeTurn()], "trajectory")} />);
+
+    const rows = screen.getAllByTestId("trajectory-row");
+    // 首行是用户输入行（prompt），检查器应显示其「输入」正文。
+    fireEvent.click(rows[0]!);
+
+    expect(rows[0]).toHaveAttribute("aria-selected", "true");
+    const inspector = screen.getByLabelText("行详情");
+    expect(inspector.textContent).toContain("输入");
+    expect(inspector.textContent).toContain("跑一下测试");
+    expect(inspector.textContent).not.toContain("选中一行查看输入 / 输出");
+  });
+
+  it("点击时间轴条目 → 对应账本行选中", () => {
+    render(<TurnTimeline {...renderProps([makeTurn()], "trajectory")} />);
+
+    const bar = screen.getAllByTestId("trajectory-bar")[0]!;
+    const rowId = bar.getAttribute("data-row-id");
+    expect(rowId).toBeTruthy();
+
+    fireEvent.click(bar);
+
+    const row = screen
+      .getAllByTestId("trajectory-row")
+      .find((item) => item.getAttribute("data-row-id") === rowId);
+    expect(row).toHaveAttribute("aria-selected", "true");
+  });
+
+  it("↑/↓ 切换选中、Esc 清除", () => {
+    render(<TurnTimeline {...renderProps([makeTurn()], "trajectory")} />);
+
+    const grid = screen.getByTestId("trajectory-grid");
+    const rows = screen.getAllByTestId("trajectory-row");
+
+    // 未选中时 ↓ 选首行，再 ↓ 选第二行。
+    fireEvent.keyDown(grid, { key: "ArrowDown" });
+    expect(rows[0]).toHaveAttribute("aria-selected", "true");
+    fireEvent.keyDown(grid, { key: "ArrowDown" });
+    expect(rows[1]).toHaveAttribute("aria-selected", "true");
+    expect(rows[0]).toHaveAttribute("aria-selected", "false");
+
+    // Esc 清除选中，检查器回落空提示。
+    fireEvent.keyDown(grid, { key: "Escape" });
+    expect(rows.every((row) => row.getAttribute("aria-selected") === "false")).toBe(true);
+    expect(screen.getByLabelText("行详情").textContent).toContain(
+      "选中一行查看输入 / 输出",
+    );
+  });
+
+  it("无可绘制时序（无时间锚点）→ 轨迹视图显式空态，不白屏、不渲染轮块", () => {
     render(
       <TurnTimeline
         {...renderProps(
           [makeTurn({ turnStartedAt: null, replyAt: null, segments: [] })],
-          "all",
+          "trajectory",
         )}
       />,
     );
-    fireEvent.click(screen.getByRole("tab", { name: "轨迹" }));
 
     expect(screen.getByTestId("trajectory-empty").textContent).toContain(
       "没有可绘制的时间数据",
@@ -151,9 +203,11 @@ describe("进度视图内的轨迹呈现（D-035，用户裁决：不做第三�
     expect(screen.queryByTestId("turn-block")).toBeNull();
   });
 
-  it("对话视图不出现「时间线 / 轨迹」开关（两态视图零回归）", () => {
+  it("对话视图不出现轨迹面板（零回归）", () => {
     render(<TurnTimeline {...renderProps([makeTurn()], "conversation")} />);
-    expect(screen.queryByTestId("progress-lens")).toBeNull();
+
     expect(screen.getAllByTestId("turn-block").length).toBe(1);
+    expect(screen.queryByTestId("trajectory-pane")).toBeNull();
+    expect(screen.queryByTestId("progress-lens")).toBeNull();
   });
 });
