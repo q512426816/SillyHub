@@ -1,0 +1,121 @@
+{
+  "change": "2026-10-22-merge-test-debt",
+  "baseline": "b36be20daa705aaba5371f69513f38a1a4f4c234",
+  "head": "457db3f86efa272c64aeacd06333aa538f3636ea",
+  "files": [
+    "backend/app/modules/agent/tests/test_mission_session_id.py",
+    "backend/app/modules/knowledge/vector_router.py",
+    "backend/app/modules/session_attachment/router.py",
+    "sillyhub-daemon/tests/adapters/json-rpc.test.ts"
+  ],
+  "totals": {
+    "files": 4,
+    "additions": 8,
+    "deletions": 3
+  },
+  "savedAt": "2026-10-22T07:52:43.964Z",
+  "note": "flow done 时点冻结（本变更可归属交付面：baseline..HEAD 提交面过滤 .sillyspec/ 只留 .sillyspec/docs/ 交付文档 + 独占树未提交交付；治理工件目录不入冻结——2026-10-12-close-trace-freeze-integrity FR-01）",
+  "modules": [
+    {
+      "id": "agent",
+      "files": 1,
+      "doc": "docs/backend/modules/agent.md",
+      "docTouched": false,
+      "docMissing": false
+    },
+    {
+      "id": "knowledge",
+      "files": 1,
+      "doc": "docs/backend/modules/knowledge.md",
+      "docTouched": false,
+      "docMissing": false
+    },
+    {
+      "id": "backend",
+      "files": 3,
+      "doc": "docs/multi-agent-platform/modules/backend.md",
+      "docTouched": false,
+      "docMissing": false
+    },
+    {
+      "id": "sillyhub-daemon",
+      "files": 1,
+      "doc": "docs/multi-agent-platform/modules/sillyhub-daemon.md",
+      "docTouched": false,
+      "docMissing": false
+    },
+    {
+      "id": "agent",
+      "files": 1,
+      "doc": "docs/SillyHub/modules/agent.md",
+      "docTouched": false,
+      "docMissing": false
+    },
+    {
+      "id": "daemon",
+      "files": 1,
+      "doc": "docs/SillyHub/modules/daemon.md",
+      "docTouched": false,
+      "docMissing": false
+    },
+    {
+      "id": "knowledge",
+      "files": 1,
+      "doc": "docs/SillyHub/modules/knowledge.md",
+      "docTouched": false,
+      "docMissing": false
+    }
+  ],
+  "uncoveredDirs": [],
+  "moduleMaps": [
+    "docs/backend/modules/_module-map.yaml",
+    "docs/frontend/modules/_module-map.yaml",
+    "docs/multi-agent-platform/modules/_module-map.yaml",
+    "docs/SillyHub/modules/_module-map.yaml",
+    "docs/sillyhub-daemon/modules/_module-map.yaml"
+  ],
+  "scopeAudit": {
+    "mode": "full-flow",
+    "ok": true,
+    "degradedReason": null,
+    "baseAnchor": "b36be20daa705aaba5371f69513f38a1a4f4c234",
+    "totals": {
+      "files": 4,
+      "additions": 8,
+      "deletions": 3
+    },
+    "rows": [
+      {
+        "path": "backend/app/modules/agent/tests/test_mission_session_id.py",
+        "additions": 3,
+        "deletions": 0,
+        "kind": "modified"
+      },
+      {
+        "path": "backend/app/modules/knowledge/vector_router.py",
+        "additions": 1,
+        "deletions": 1,
+        "kind": "modified"
+      },
+      {
+        "path": "backend/app/modules/session_attachment/router.py",
+        "additions": 1,
+        "deletions": 1,
+        "kind": "modified"
+      },
+      {
+        "path": "sillyhub-daemon/tests/adapters/json-rpc.test.ts",
+        "additions": 3,
+        "deletions": 1,
+        "kind": "modified"
+      }
+    ],
+    "excluded": {
+      "foreignDeclared": []
+    },
+    "note": "flow done 时点冻结（本文件落盘时采集）",
+    "closedBy": "flow done"
+  },
+  "patchSha256": "1be0c53cbfcb2d10b753f7b8baf01256d79047b59daa20811b3a6ed0fd3bffaa",
+  "patchStatus": "ok"
+}

@@ -1,0 +1,15 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-22-merge-test-debt",
+  "reviewer": "subagent",
+  "verdict": "PASS",
+  "reviewedAgainst": "457db3f86efa272c64aeacd06333aa538f3636ea",
+  "findings": [],
+  "dimensionNotes": {
+    "乱序": "n/a（边界已裁决：可接受——纯静态文案/守卫清单，无事件流；diff 逐 hunk 核验无逻辑行）",
+    "并发": "n/a（边界已裁决：可接受——无共享可变状态，报错文案与测试断言集均为静态常量）",
+    "切换": "n/a（边界已裁决：可接受——不涉及会话/请求生命周期，413/403 抛出路径与 details 结构未变）",
+    "作用域": "n/a（边界已裁决：可接受——单仓单模块改动，daemon 仅测试文件 import/断言，src/ 零改动）"
+  },
+  "reviewedAt": "2026-10-22T08:00:51Z"
+}

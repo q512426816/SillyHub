@@ -485,3 +485,75 @@ created_at: 2026-10-14T02:51:35.432Z
 摘要：读侧忽略
 全文：.sillyspec/changes/archive/2026-10-21-agent-profile-slim-default/requirements.md#FR-05
 最近确认：9458a48db2d349cf18861d098796265ca018fe31
+
+## FR-agent-025 tests/core/test_error_message_l10n.py 全参数化用例绿（vector_router/session_attachment 两 offender 清零）
+变更：2026-10-22-merge-test-debt
+状态：active
+摘要：主路径
+场景正文：
+- 场景：主路径 — 
+全文：.sillyspec/changes/archive/2026-10-22-merge-test-debt/requirements.md#FR-01
+最近确认：457db3f86efa272c64aeacd06333aa538f3636ea
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-22-merge-test-debt:flow:测试绑定FR-01
+  tests: backend/tests/core/test_error_message_l10n.py
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-22-merge-test-debt
+  status: active
+
+## FR-agent-026 test_mission_session_id::test_agent_sessions_model_fields_unchanged 绿（expected 补 title_fallback）
+变更：2026-10-22-merge-test-debt
+状态：active
+摘要：主路径
+场景正文：
+- 场景：主路径 — Given AgentSession 含 28 字段（含 title_fallback）/ When 跑字段钉子用例 / Then 集合相等断言通过。
+全文：.sillyspec/changes/archive/2026-10-22-merge-test-debt/requirements.md#FR-02
+最近确认：457db3f86efa272c64aeacd06333aa538f3636ea
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-22-merge-test-debt:flow:测试绑定FR-02
+  tests: backend/app/modules/agent/tests/test_mission_session_id.py「test_agent_sessions_model_fields_unchanged」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-22-merge-test-debt
+  status: active
+
+## FR-agent-027 sillyhub-daemon tests/adapters/json-rpc.test.ts 60/60 绿（clientInfo.version 改与 DAEMON_VERSION 同源断言）
+变更：2026-10-22-merge-test-debt
+状态：active
+摘要：主路径
+场景正文：
+- 场景：主路径 — Given package.json version=0.2.0 / When 跑 json-rpc.test.ts / Then 握手用例随 DAEMON_VERSION
+全文：.sillyspec/changes/archive/2026-10-22-merge-test-debt/requirements.md#FR-03
+最近确认：457db3f86efa272c64aeacd06333aa538f3636ea
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-22-merge-test-debt:flow:测试绑定FR-03
+  tests: sillyhub-daemon/tests/adapters/json-rpc.test.ts「buildHandshake - codex 协议握手序列（ql-20260617-008）> 返回 3 行 JSON-RPC 消息（initialize/initialized/thread.start）」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-22-merge-test-debt
+  status: active
+
+## FR-agent-028 四处修复均为守卫/文案同步，无业务逻辑变更
+变更：2026-10-22-merge-test-debt
+状态：active
+摘要：主路径
+场景正文：
+- 场景：主路径 — Given diff 面 = 2 个 backend 文案文件 + 2 个测试文件 / When 逐 hunk 核对 / Then 无逻辑行变更（仅文案字符串与断言/清单/
+全文：.sillyspec/changes/archive/2026-10-22-merge-test-debt/requirements.md#FR-04
+最近确认：457db3f86efa272c64aeacd06333aa538f3636ea

@@ -3,3 +3,4 @@
 - 2026-10-16-driver-audit-fixes | 24h 只读风险审查发现 zcode 驱动三处缺陷（轮次进行中 close 令 consume 永久…
 - 2026-10-19-knowledge-search-build-switch | 知识搜索禁建库开关：根治首搜建库地雷
 - 2026-10-19-thinking-zh-translate | 思考内容离线翻译为中文展示
+- 2026-10-22-merge-test-debt | 合并后测试债清偿：l10n文案与守卫钉子同步

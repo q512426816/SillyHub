@@ -1,0 +1,55 @@
+tier: thin
+legacy_fallback: false
+substeps:
+  artifacts: done
+  ledger: done
+  patch: done
+  review: done
+  probes: done
+  distill: done
+  archive: done
+  events: done
+born_face: thin
+with_tasks: false
+review_force: null
+input: >-
+  合并后测试债清偿：l10n文案与守卫钉子同步
+
+
+  动机与背景：合并 origin/main（b36be20da）后全量回归暴露 4 笔既有测试债（双侧分叉期间 scoped 跑法漏网，非合并引入）：
+
+  ① knowledge/vector_router.py 报错文案纯英文违 l10n 守卫；② session_attachment f-string 常量段拼接后无 CJK 判违；③ test_mission_session_id
+  模型字段钉子漏收 title_fallback（2026-10-16 列，姊妹守卫已收）；④ daemon json-rpc 握手用例硬编码版本 0.1.1，package.json 已 0.2.0（实现用 DAEMON_VERSION
+  单源，测试字面量随版本提升假败）。
+
+
+  成功标准：
+
+  - tests/core/test_error_message_l10n.py 全参数化用例绿（vector_router/session_attachment 两 offender 清零）
+
+  - test_mission_session_id::test_agent_sessions_model_fields_unchanged 绿（expected 补 title_fallback）
+
+  - sillyhub-daemon tests/adapters/json-rpc.test.ts 60/60 绿（clientInfo.version 改与 DAEMON_VERSION 同源断言）
+
+  - 四处修复均为守卫/文案同步，无业务逻辑变更
+autopilot: false
+prestage_ack: false
+baseline_commit: b36be20daa705aaba5371f69513f38a1a4f4c234
+updatedAt: '2026-10-22T08:01:20.701Z'
+cross_baselines:
+  sillyspec: 8ff68ada697ec4d4af9ce0a90c4055091985e319
+baseline_sha256: 470268ab945a47b704fd19e44683a98fcd44f64c93698fbbbf5210c0e920322b
+spec_approved: true
+spec_approved_at: '2026-10-22T07:50:53.055Z'
+spec_approved_by: zcode-merge-deploy-20261022
+spec_approved_channel: agent-self
+spec_attested_by: zcode-merge-deploy-20261022
+batch_ticked: true
+gate_summary: >-
+  test: passed ← module[]+deps(py7+jsx3)+fr(8)（45.0s）
+  结果：C:\Users\qinyi\IdeaProjects\multi-agent-platform\.sillyspec\.runtime\verify-runs\20261022075229\test-result.json｜lint:
+  failed ← cd backend && uv run ruff check . && uv run ruff format --check . && uv run mypy app && cd ../frontend &&
+  pnpm lint && cd ../sillyhub-daemon && pnpm typecheck（1.1s）
+  结果：C:\Users\qinyi\IdeaProjects\multi-agent-platform\.sillyspec\.runtime\verify-runs\20261022075229\test-result.json｜门文件
+  4 个
+

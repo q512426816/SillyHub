@@ -1,0 +1,66 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-22-merge-test-debt",
+  "rows": [
+    {
+      "anchor": "FR-01",
+      "row_id": "2026-10-22-merge-test-debt:flow:测试绑定FR-01",
+      "tests": [
+        "backend/tests/core/test_error_message_l10n.py"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-22-merge-test-debt"
+    },
+    {
+      "anchor": "FR-01",
+      "row_id": "2026-10-22-merge-test-debt:flow:测试绑定FR-01",
+      "tests": [
+        "backend/tests/core/test_error_message_l10n.py"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-22-merge-test-debt"
+    },
+    {
+      "anchor": "FR-02",
+      "row_id": "2026-10-22-merge-test-debt:flow:测试绑定FR-02",
+      "tests": [
+        "backend/app/modules/agent/tests/test_mission_session_id.py「test_agent_sessions_model_fields_unchanged」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-22-merge-test-debt"
+    },
+    {
+      "anchor": "FR-03",
+      "row_id": "2026-10-22-merge-test-debt:flow:测试绑定FR-03",
+      "tests": [
+        "sillyhub-daemon/tests/adapters/json-rpc.test.ts「buildHandshake - codex 协议握手序列（ql-20260617-008）> 返回 3 行 JSON-RPC 消息（initialize/initialized/thread.start）」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-22-merge-test-debt"
+    }
+  ]
+}
