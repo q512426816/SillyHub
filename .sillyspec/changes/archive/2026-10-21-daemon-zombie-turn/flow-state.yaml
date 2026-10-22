@@ -1,0 +1,54 @@
+tier: thick
+legacy_fallback: false
+substeps:
+  artifacts: done
+  ledger: done
+  patch: done
+  review: done
+  probes: done
+  distill: done
+  archive: done
+  events: done
+born_face: thin
+with_tasks: false
+review_force: null
+input: >-
+  修复 daemon 会话僵尸轮与打断无效
+
+
+  动机与背景：生产会话 49d893ab（腾讯云）打断后 0.6s 一条「后台任务通知」inject 竞态到达，daemon ack 了 inject 却从未启动轮次，产生无 started_at 的悬挂 run（生产样本
+  5f23cf5f/fa110c23，最终靠 daemon 掉线被 sweep 收敛为 daemon_interrupted）。用户连按 10 次打断全部 acked 但 daemon 侧 turn-control 对非 running
+  状态静默 return false 且不回传，后端不设防、前端无超时回退，表现为「打断不了」。
+
+
+  成功标准：
+
+  - inject 在会话非 idle 时不再 ack 了事：排队补启或拒绝，不产生无 started_at 的悬挂 run
+
+  - interrupt 对非 running 的 no-op 结果回传后端；后端对 acked-but-ineffective 打断立即收敛 pending run 并通知前端
+
+  - 后端主动清扫「创建后 N 秒未被 daemon 启动」的 pending run（N 可配置）
+
+  - 前端打断 15s 超时回退提示，不再永久停在「打断中」
+autopilot: false
+prestage_ack: true
+baseline_commit: 5ff6414b90b2ff4bea26ac08992c513b4e844a8c
+updatedAt: '2026-10-21T09:38:47.731Z'
+cross_baselines:
+  sillyspec: 948637184b8019d6ca6a7c9db3997ecc2437bb86
+baseline_sha256: f5f8c186fe9b6072f294ee7c5d50c245b1887f69bd04e10507c22de46b2e59a7
+spec_approved: true
+spec_approved_at: '2026-10-21T07:39:43.021Z'
+spec_approved_by: zcode-daemon-zombie-turn
+spec_approved_channel: user-confirmed
+spec_attested_by: zcode-daemon-zombie-turn
+batch_ticked: true
+upgrade_reason: verify 实测失败（实测失败：lint（命令与输出尾部见上；修复后重跑 --done 不丢进度））——失败自动升厚
+gate_summary: >-
+  test: passed ← module[]+deps(py32+jsx45+jsx50)+fr(121)（240.0s）
+  结果：C:\Users\qinyi\IdeaProjects\multi-agent-platform\.sillyspec\.runtime\verify-runs\20261021085553\test-result.json｜lint:
+  passed ← cd backend && uv run ruff check . && uv run ruff format --check . && uv run mypy app && cd ../frontend &&
+  pnpm lint && cd ../sillyhub-daemon && pnpm typecheck（11.4s）
+  结果：C:\Users\qinyi\IdeaProjects\multi-agent-platform\.sillyspec\.runtime\verify-runs\20261021085553\test-result.json｜门文件
+  66 个
+

@@ -1,0 +1,270 @@
+{
+  "change": "2026-10-21-task-wakeup-restore",
+  "baseline": "c71b875a1b3efabf4ce042e065cdf3a9ddda0486",
+  "head": "e88ffddb76486f445e8bdac23d437a22c39a8ebd",
+  "files": [
+    ".sillyspec/docs/multi-agent-platform/modules/sillyhub-daemon.changelog.md",
+    ".sillyspec/docs/multi-agent-platform/modules/sillyhub-daemon.md",
+    "frontend/src/components/__tests__/change-file-tree-autorefresh.test.tsx",
+    "frontend/src/components/change-file-tree.tsx",
+    "frontend/src/components/daemon/__tests__/runtime-session-helpers.test.tsx",
+    "frontend/src/components/daemon/__tests__/turn-segment-views.test.tsx",
+    "frontend/src/components/daemon/runtime-session-helpers.tsx",
+    "frontend/src/components/daemon/session-log-assembler.ts",
+    "frontend/src/components/daemon/session-panel/session-panel-page.tsx",
+    "frontend/src/components/daemon/turn-segment-views.tsx",
+    "frontend/src/components/daemon/turn-status-bar.tsx",
+    "frontend/src/components/daemon/turn-timeline.tsx",
+    "sillyhub-daemon/src/cli.ts",
+    "sillyhub-daemon/src/daemon.ts",
+    "sillyhub-daemon/src/interactive/session-manager.ts",
+    "sillyhub-daemon/src/interactive/session-manager/background-tasks.ts",
+    "sillyhub-daemon/src/interactive/session-manager/lifecycle.ts",
+    "sillyhub-daemon/src/interactive/session-manager/types.ts",
+    "sillyhub-daemon/src/interactive/types.ts",
+    "sillyhub-daemon/tests/interactive/session-manager-lifecycle-turn-anchor-eviction.test.ts",
+    "sillyhub-daemon/tests/interactive/task-lifecycle.test.ts"
+  ],
+  "totals": {
+    "files": 21,
+    "additions": 3265,
+    "deletions": 2491
+  },
+  "savedAt": "2026-10-21T03:40:00.167Z",
+  "note": "flow done 时点冻结（本变更可归属交付面：baseline..HEAD 提交面过滤 .sillyspec/ 只留 .sillyspec/docs/ 交付文档 + 独占树未提交交付；治理工件目录不入冻结——2026-10-12-close-trace-freeze-integrity FR-01）",
+  "modules": [
+    {
+      "id": "frontend",
+      "files": 10,
+      "doc": "docs/multi-agent-platform/modules/frontend.md",
+      "docTouched": false,
+      "docMissing": false
+    },
+    {
+      "id": "sillyhub-daemon",
+      "files": 9,
+      "doc": "docs/multi-agent-platform/modules/sillyhub-daemon.md",
+      "docTouched": true,
+      "docMissing": false
+    },
+    {
+      "id": "daemon",
+      "files": 9,
+      "doc": "docs/SillyHub/modules/daemon.md",
+      "docTouched": false,
+      "docMissing": false
+    },
+    {
+      "id": "frontend_components",
+      "files": 10,
+      "doc": "docs/SillyHub/modules/frontend_components.md",
+      "docTouched": false,
+      "docMissing": false
+    }
+  ],
+  "uncoveredDirs": [],
+  "moduleMaps": [
+    "docs/backend/modules/_module-map.yaml",
+    "docs/frontend/modules/_module-map.yaml",
+    "docs/multi-agent-platform/modules/_module-map.yaml",
+    "docs/SillyHub/modules/_module-map.yaml",
+    "docs/sillyhub-daemon/modules/_module-map.yaml"
+  ],
+  "acceptedDirtyGap": 48,
+  "scopeAudit": {
+    "mode": "full-flow",
+    "ok": true,
+    "degradedReason": null,
+    "baseAnchor": "c71b875a1b3efabf4ce042e065cdf3a9ddda0486",
+    "totals": {
+      "files": 22,
+      "additions": 3265,
+      "deletions": 2491
+    },
+    "rows": [
+      {
+        "path": ".sillyspec/docs/multi-agent-platform/modules/sillyhub-daemon.changelog.md",
+        "additions": 1,
+        "deletions": 0,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": ".sillyspec/docs/multi-agent-platform/modules/sillyhub-daemon.md",
+        "additions": 1,
+        "deletions": 0,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": "frontend/src/components/__tests__/change-file-tree-autorefresh.test.tsx",
+        "additions": 62,
+        "deletions": 0,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": "frontend/src/components/change-file-tree.tsx",
+        "additions": 19,
+        "deletions": 2,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": "frontend/src/components/daemon/__tests__/runtime-session-helpers.test.tsx",
+        "additions": 37,
+        "deletions": 0,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "planned"
+      },
+      {
+        "path": "frontend/src/components/daemon/__tests__/turn-segment-views.test.tsx",
+        "additions": 123,
+        "deletions": 2,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "planned"
+      },
+      {
+        "path": "frontend/src/components/daemon/runtime-session-helpers.tsx",
+        "additions": 14,
+        "deletions": 3,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "planned"
+      },
+      {
+        "path": "frontend/src/components/daemon/session-log-assembler.ts",
+        "additions": 15,
+        "deletions": 0,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "planned"
+      },
+      {
+        "path": "frontend/src/components/daemon/session-panel/session-panel-page.tsx",
+        "additions": 22,
+        "deletions": 0,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "planned"
+      },
+      {
+        "path": "frontend/src/components/daemon/turn-segment-views.tsx",
+        "additions": 83,
+        "deletions": 8,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "planned"
+      },
+      {
+        "path": "frontend/src/components/daemon/turn-status-bar.tsx",
+        "additions": 4,
+        "deletions": 0,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "planned"
+      },
+      {
+        "path": "frontend/src/components/daemon/turn-timeline.tsx",
+        "additions": 2549,
+        "deletions": 2434,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "planned"
+      },
+      {
+        "path": "sillyhub-daemon/src/cli.ts",
+        "additions": 7,
+        "deletions": 2,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "planned"
+      },
+      {
+        "path": "sillyhub-daemon/src/daemon.ts",
+        "additions": 15,
+        "deletions": 0,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "planned"
+      },
+      {
+        "path": "sillyhub-daemon/src/interactive/session-manager.ts",
+        "additions": 24,
+        "deletions": 0,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "planned"
+      },
+      {
+        "path": "sillyhub-daemon/src/interactive/session-manager/background-tasks.ts",
+        "additions": 101,
+        "deletions": 7,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "planned"
+      },
+      {
+        "path": "sillyhub-daemon/src/interactive/session-manager/lifecycle.ts",
+        "additions": 8,
+        "deletions": 0,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "planned"
+      },
+      {
+        "path": "sillyhub-daemon/src/interactive/session-manager/types.ts",
+        "additions": 16,
+        "deletions": 0,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "planned"
+      },
+      {
+        "path": "sillyhub-daemon/src/interactive/types.ts",
+        "additions": 10,
+        "deletions": 0,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "planned"
+      },
+      {
+        "path": "sillyhub-daemon/tests/interactive/session-manager-lifecycle-turn-anchor-eviction.test.ts",
+        "additions": 2,
+        "deletions": 0,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "planned"
+      },
+      {
+        "path": "sillyhub-daemon/tests/interactive/task-lifecycle.test.ts",
+        "additions": 152,
+        "deletions": 33,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "planned"
+      },
+      {
+        "path": "sillyspec/docs/multi-agent-platform/modules/sillyhub-daemon.md",
+        "planned": null,
+        "additions": 0,
+        "deletions": 0,
+        "kind": "modified",
+        "verdict": "untouched"
+      }
+    ],
+    "excluded": {
+      "foreignDeclared": []
+    },
+    "note": "flow done 时点冻结（本文件落盘时采集）",
+    "closedBy": "flow done"
+  },
+  "patchSha256": "29cbf2d1724ecf630e61f0e2390e8558352616d0f3ad91e11cc1d2e7ad370d88",
+  "patchStatus": "ok"
+}

@@ -870,8 +870,18 @@ export async function startAction(opts: StartOptions): Promise<number> {
       onSessionReloaded: (sessionId) => daemon.onSessionReloaded(sessionId),
       // task-04（FR-01~03）：session 反馈事件桥接 → HubClient 对应 notify 方法。
       // 失败仅日志不阻塞；字段从 camelCase event 映射为 snake_case body。
-      //（ql-20260827-007 的终态唤醒注入接线已随 2026-10-13-task-wakeup-remove
-      // 整体移除——后台任务终态不再自动唤醒主代理。）
+      // ql-20260827-007 / 2026-10-21-task-wakeup-restore：后台任务终态自动唤醒
+      // ——session-manager debounce 合并后经 hubClient 注入唤醒消息（失败仅
+      // 日志，session-manager 侧已 catch）。携带 origin='task_wakeup' 结构化
+      // 标记（X-API-Key 服务凭证路径）——backend 排队豁免/合并只认该标记。
+      onTaskWakeupInject: async (sessionId, prompt) => {
+        await client.injectSessionPrompt(sessionId, prompt, 'task_wakeup');
+      },
+      // 2026-10-21-daemon-zombie-turn FR-01：轮启动看门狗触发 → daemon 桥
+      // notifyRunResult 收敛该 run（session-manager 已重置会话态；回报失败仅
+      // 日志，backend 侧由 pending run 启动超时清扫兜底）。
+      onTurnStartTimeout: (sessionId, runId) =>
+        daemon.onTurnStartTimeout(sessionId, runId),
       onSessionEvent: (sessionId, runId, event: SessionEventForBackend) => {
         void (async () => {
           try {

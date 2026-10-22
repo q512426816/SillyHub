@@ -1,0 +1,55 @@
+tier: thin
+legacy_fallback: false
+substeps:
+  artifacts: done
+  ledger: done
+  patch: done
+  review: done
+  probes: done
+  distill: done
+  archive: done
+  events: done
+born_face: thin
+with_tasks: false
+review_force: null
+input: >-
+  会话页失败轮错误信息不可见修复
+
+
+  用户在腾讯云平台 codex 会话失败时（会话 71419980），页面只显示「第 1 轮 · ✕ 已中止」，真实错误（codex exited code=1 / stream disconnected
+  等）完全不可见，无法排查。根因：backend 把 SDK error_during_execution（含全部模型错误）统一落 error_code=interactive_interrupted，前端
+  runTerminalTurnStatus/deriveTurnTerminalStatus 据此归 killed（已中止）且不回填 errorDetail，错误卡（RunErrorItem）永不渲染；且错误卡 raw
+  藏在「查看详情」折叠里。修复：快照与实时两路径按 error_detail 非空区分「模型失败」与「真打断」——前者渲染错误卡（status failed + errorDetail），后者保持已中止；RunErrorItem 默认展示
+  raw 首行摘要。
+
+
+  成功标准：
+
+  - 失败轮（error_code=interactive_interrupted 且 error_detail 非空）在会话页面渲染错误卡，轮状态显示为失败而非已中止
+
+  - 错误卡默认直接可见原始错误文本首行（如 codex exited code=1），无需点击查看详情
+
+  - 真打断（error_detail 为空的 interactive_interrupted）仍显示已中止，不出现错误卡
+
+  - 相关前端测试更新并通过
+autopilot: false
+prestage_ack: true
+baseline_commit: 1e3c24ebfd960880eb85908c71f4532c1ef0c6c7
+updatedAt: '2026-10-20T04:26:40.290Z'
+cross_baselines:
+  sillyspec: 0ac7c4e6b5d95d595c09491be6d039589c1f642e
+baseline_sha256: 002ecaae232d6ba0f3bb73f0f9de36f3e52f3ab206b7b5dda7e79505f246b5a0
+spec_approved: true
+spec_approved_at: '2026-10-20T03:48:21.282Z'
+spec_approved_by: zcode-session-error-display
+spec_approved_channel: user-confirmed
+spec_attested_by: zcode-session-error-display
+batch_ticked: true
+gate_summary: >-
+  test: passed ← module[]+deps(py1+jsx36+jsx1)+fr(37)（75.0s）
+  结果：C:\Users\qinyi\IdeaProjects\multi-agent-platform\.sillyspec\.runtime\verify-runs\20261020041438\test-result.json｜lint:
+  passed ← cd backend && uv run ruff check . && uv run ruff format --check . && uv run mypy app && cd ../frontend &&
+  pnpm lint && cd ../sillyhub-daemon && pnpm typecheck（16.9s）
+  结果：C:\Users\qinyi\IdeaProjects\multi-agent-platform\.sillyspec\.runtime\verify-runs\20261020041438\test-result.json｜门文件
+  8 个
+

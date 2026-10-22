@@ -162,10 +162,25 @@ export function enrichDisplayTurns(
       // errorDetail，消除「聊天时红色错误卡、刷新后变已完成」的路径不一致。
       // 实时轮终态与 run 快照一致，覆盖为同值无害；errorDetail 只补缺（?? 链）。
       const terminal = runTerminalTurnStatus(meta.status, meta.error_code);
+      // 2026-10-20-session-error-visibility：backend 对 SDK error_during_execution
+      // （含全部模型错误：429/断流/spawn 失败）统一落 error_code=
+      // interactive_interrupted，runTerminalTurnStatus 据此归 killed 且不回填
+      // errorDetail → 错误卡永不渲染（生产实证会话 71419980 页面只剩
+      // 「已中止」零信息）。按 error_detail 可解析性区分：模型失败（daemon
+      // classifyModelError 产物，模型错误键存在）升级 failed 走错误卡；真打断
+      // （error_detail 空/无模型错误键）维持 killed（ql-20260918-003 打断≠失败
+      // 语义保留）。升级后走 failed 分支，errorDetail ?? 链对同输入 buildErrorLogItem
+      // 必然命中（不落到系统级兜底）。
+      const killedUpgradeDetail =
+        terminal === "killed" && meta.status === "failed"
+          ? buildErrorLogItem(meta.error_detail)
+          : null;
+      const effectiveTerminal =
+        terminal === "killed" && killedUpgradeDetail !== null ? "failed" : terminal;
       const terminalPatch =
-                terminal === null
+                effectiveTerminal === null
                   ? {}
-                  : terminal === "failed"
+                  : effectiveTerminal === "failed"
                     ? {
                         status: "failed" as const,
                         errorDetail:
@@ -233,6 +248,16 @@ export function enrichDisplayTurns(
           terminal === null && meta.status != null && ACTIVE_RUN_STATUSES.has(meta.status)
             ? (parseRunStartedAt(meta.started_at) ?? t.turnStartedAt ?? null)
             : (t.turnStartedAt ?? parseRunStartedAt(meta.started_at)),
+        // 2026-10-22-session-trajectory-view（D-035）：把 `/runs` 的 `timing`（daemon
+        // TTFT/attempt 采集）透传到轮视图——轨迹面板据此把模型条从「近似空档」切成
+        // 真实占用区间（`modelBasis="observed"`）。老 daemon / 无采样 → null，面板
+        // 保持单色近似并标「近似」，不伪造。
+        // 注：`frontend/src/lib/daemon/sessions.ts` 的手工镜像 `SessionRunRead` 尚未补
+        // 该列（R-17 已登记），这里按可选字段结构化读取，镜像补齐后可去掉断言。
+        timing:
+          t.timing ??
+          (meta as { timing?: SessionTurnView["timing"] }).timing ??
+          null,
       };
     };
     // ql-20260903-025：身份稳定守卫——补齐字段与原值全部一致时返回**原对象**：
@@ -253,7 +278,10 @@ export function enrichDisplayTurns(
         candidate.apiDurationMs !== t.apiDurationMs ||
         candidate.replyAt !== t.replyAt ||
         candidate.turnStartedAt !== t.turnStartedAt ||
-        candidate.errorDetail !== t.errorDetail;
+        candidate.errorDetail !== t.errorDetail ||
+        // 缺省归一（undefined ≡ null）：无 timing 的轮不得因多出一个 null 键
+        // 丢掉引用稳定性（守卫命中前提是逐字段值等价，不是键集合等价）。
+        (candidate.timing ?? null) !== (t.timing ?? null);
       return changed ? candidate : t;
     });
     // ql-20260818-011：runsMeta 中的静默切换 run 无 SSE 事件→不在 turns

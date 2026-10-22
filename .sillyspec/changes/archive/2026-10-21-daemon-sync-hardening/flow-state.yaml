@@ -1,0 +1,57 @@
+tier: thin
+legacy_fallback: false
+substeps:
+  artifacts: done
+  ledger: done
+  patch: done
+  review: done
+  probes: done
+  distill: done
+  archive: done
+  events: done
+born_face: thin
+with_tasks: false
+review_force: null
+input: >-
+  执行端同步加固与状态采集治理
+
+
+  动机：2026-10-21 实测 daemon 宿主冻结约 5 分钟致任务中断（daemon_interrupted）且无现场证据可查；另有工作区 sillyspec status 每分钟 exit 2 刷屏、/mnt/e 采集 30s
+  超时；daemon 自动同步与 CLI platform sync 双写者致 SpecPushConflict 反复（runbook 钉死根因）。用户已拍板：A 平台侧加固、C 由 agent 酌情处置、单写者优先 CLI。
+
+
+  成功标准：
+
+  - daemon spec 自动推送支持整机关闭（env）与按工作区关闭（flag 文件），关闭态为 no-op（返回 null、不动 pending_push），knowledge hits 上行不受影响
+
+  - status 采集超时支持 SILLYHUB_DAEMON_STATUS_TIMEOUT_MS env 覆盖
+
+  - status 采集对连续失败目标自动退避降频，成功即复位
+
+  - 登记根带 .git/sillyspec-crossrepo.json 的工作区采集自动跳过并一次性提示
+
+  - hub-client 全部 fetch 带显式 AbortSignal 超时
+
+  - daemon 具备事件循环 lag 周期监控，超阈值留 warn 证据
+autopilot: false
+prestage_ack: false
+baseline_commit: e88ffddb76486f445e8bdac23d437a22c39a8ebd
+updatedAt: '2026-10-21T04:15:29.170Z'
+cross_baselines:
+  sillyspec: 3fd7cf3b6c29958a54cee8c72b4b89bf628d9a70
+baseline_sha256: da5edd4bb27bef62dc6fd58dc713254efb974b355678772c69ec4ce35b209578
+spec_approved: true
+spec_approved_at: '2026-10-21T03:46:35.112Z'
+spec_approved_by: zcode-daemon-hardening-1021
+spec_approved_channel: user-confirmed
+spec_attested_by: zcode-daemon-hardening-1021
+batch_ticked: true
+gate_summary: >-
+  test: skipped ← module[]+deps(py66+nontest-skip1+jsx65+jsx55+jsx-e2e-skip1)+fr(182)（454.6s）
+  结果：C:\Users\qinyi\IdeaProjects\multi-agent-platform\.sillyspec\.runtime\verify-runs\20261021040415\test-result.json —
+  跳过原因：模块子集含环境缺件跳过（已跑模块全绿）：deps(auto-nontest-skip)、deps(auto-jsx-e2e-skip)——补装依赖后恢复实测。｜lint: passed ← cd backend && uv
+  run ruff check . && uv run ruff format --check . && uv run mypy app && cd ../frontend && pnpm lint && cd
+  ../sillyhub-daemon && pnpm typecheck（14.6s）
+  结果：C:\Users\qinyi\IdeaProjects\multi-agent-platform\.sillyspec\.runtime\verify-runs\20261021040415\test-result.json｜门文件
+  72 个
+

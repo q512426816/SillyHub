@@ -27,14 +27,17 @@ from sqlalchemy.ext.asyncio import AsyncSession
 import app.modules.daemon.router as _router
 from app.core.db import get_session_factory
 from app.modules.agent.schema import AgentRunLogEntry
-from app.modules.daemon.model import AgentSessionTask
+from app.modules.daemon.model import AgentSessionTask, DaemonRunSnapshot
 from app.modules.daemon.router import SessionDep, TaskRunAgentUser, router
 from app.modules.daemon.router.session_crud import _SESSION_SSE_HEADERS
 from app.modules.daemon.schema import (
     AgentSessionTaskRead,
+    FileChangesCapability,
     SessionTurnOutlineRead,
     SessionUsageRead,
+    TurnFileChangesSnapshot,
     TurnOutlineItemRead,
+    TurnTimingSnapshot,
 )
 from app.modules.daemon.service import DaemonService, DaemonSessionNotFound
 from app.modules.daemon.session.service import SessionService
@@ -62,6 +65,11 @@ class SessionRunRead(BaseModel):
         close 终态不覆盖），供前端上下文环历史回填取最新非 null 值；历史行 /
         老 daemon 无上报为 None（环未知态，design §9）。
     全部 nullable——老 run 行 / 未配置轮为 None，前端如实显示未指定/不累计。
+
+    1b（2026-10-20-session-page-dsh-alignment task-08 / D-023@v1）：追加
+    ``file_changes`` / ``file_changes_capability`` / ``timing`` 三字段——侧表
+    ``daemon_run_snapshots`` 一次 IN 批量投影（禁 N+1）；无行 → ``None`` +
+    ``"tool_only"``（显式降级，不伪造「本轮无改动」），既有字段与形状零变化。
     """
 
     id: uuid.UUID
@@ -118,7 +126,72 @@ class SessionRunRead(BaseModel):
     # 直映零查询改动。前端轮级「从此分叉」入口（TurnForkEntry）native 档门控
     # 数据源——锚缺失（存量轮 / 未回填链）该轮入口置灰；历史行 None 如实输出。
     engine_anchor: str | None = None
+    # ── 1b 轮次快照（2026-10-20-session-page-dsh-alignment task-08 / D-023@v1）──
+    # 侧表 daemon_run_snapshots 的只读投影（一次 IN 批量查，禁 N+1）。**只加字段**：
+    # 老 daemon 无行 / 无 file_changes → file_changes=None + capability="tool_only"
+    # （显式降级，禁止把「字段缺失」透成「本轮无改动」——E6/E8）；timing 无采样
+    # 为 None（而非空对象），前端保持单色近似（D-025@v1）。
+    file_changes: TurnFileChangesSnapshot | None = None
+    file_changes_capability: FileChangesCapability = "tool_only"
+    timing: TurnTimingSnapshot | None = None
     model_config = {"from_attributes": True}
+
+
+# ── 1b 轮次快照投影（task-08 / D-023@v1）─────────────────────────────────────
+# 侧表 daemon_run_snapshots → SessionRunRead 的三字段只读投影。**一次 IN 查询**
+# 覆盖整页 run（禁 N+1）；无行 / 无对应字段 → None + "tool_only"，绝不伪造
+# 「本轮无改动」占位值（E6 / E8 硬约束）。独立成段，不改本文件 model-usage 端点。
+
+
+def _snapshot_capability(snapshot: DaemonRunSnapshot | None) -> FileChangesCapability:
+    """capability 门控：只有「有行 + 行内 capability=full + 确有 file_changes」才 full。
+
+    侧表行存在但快照字段为 NULL（老 daemon 只上报 tool_only / 异常降级）与
+    无行等价——一律 ``"tool_only"``，前端据此走降级卡，不看字段是否存在。
+    """
+    if snapshot is None or snapshot.capability != "full" or snapshot.file_changes is None:
+        return "tool_only"
+    return "full"
+
+
+def _snapshot_file_changes(
+    snapshot: DaemonRunSnapshot | None,
+) -> TurnFileChangesSnapshot | None:
+    """侧表 JSON → pydantic 镜像；无行 / 空值 / 脏数据 → None（读路径不 500）。"""
+    raw = snapshot.file_changes if snapshot is not None else None
+    if not isinstance(raw, dict):
+        return None
+    try:
+        return TurnFileChangesSnapshot.model_validate(raw)
+    except Exception:
+        # 历史脏数据（手工写入 / 旧形状）不应让整页 runs 500：按「无快照」降级。
+        return None
+
+
+def _snapshot_timing(snapshot: DaemonRunSnapshot | None) -> TurnTimingSnapshot | None:
+    """侧表 JSON → pydantic 镜像；无采样 → None（而非空对象，D-025@v1）。"""
+    raw = snapshot.timing if snapshot is not None else None
+    if not isinstance(raw, dict):
+        return None
+    try:
+        return TurnTimingSnapshot.model_validate(raw)
+    except Exception:
+        return None
+
+
+async def _load_run_snapshots(
+    db: AsyncSession,
+    run_ids: list[uuid.UUID],
+) -> dict[uuid.UUID, DaemonRunSnapshot]:
+    """按 run 批量取侧表行（**单条 IN 查询**；空列表不发查询）。"""
+    if not run_ids:
+        return {}
+    rows = (
+        (await db.execute(select(DaemonRunSnapshot).where(DaemonRunSnapshot.run_id.in_(run_ids))))
+        .scalars()
+        .all()
+    )
+    return {row.run_id: row for row in rows}
 
 
 async def _inject_run_error_events(
@@ -339,15 +412,24 @@ async def list_session_runs(
         )
     ).all()
     payload: list[SessionRunRead] = []
+    # 1b 快照投影：整页 run 一次 IN 查询（禁 N+1；无快照行时返回空 dict）。
+    snapshots = await _load_run_snapshots(session, [run.id for run, _ in rows])
     for run, display_name in rows:
         # FR-03：snapshot 剥 system_prompt（浅拷贝去键，不改 ORM 实体——库数据
         # 原文照旧，审计 / 导出 / 续跑 get_execution_context 不受影响）。
         snapshot = dict(run.agent_profile_snapshot) if run.agent_profile_snapshot else None
         if snapshot is not None:
             snapshot.pop("system_prompt", None)
+        run_snapshot = snapshots.get(run.id)
         payload.append(
             SessionRunRead.model_validate(run).model_copy(
-                update={"sender_name": display_name, "agent_profile_snapshot": snapshot}
+                update={
+                    "sender_name": display_name,
+                    "agent_profile_snapshot": snapshot,
+                    "file_changes": _snapshot_file_changes(run_snapshot),
+                    "file_changes_capability": _snapshot_capability(run_snapshot),
+                    "timing": _snapshot_timing(run_snapshot),
+                }
             )
         )
     # gzip 路径与 /logs 同款（ql-20260827-018）：json.dumps / gzip.compress 纯 CPU
@@ -928,3 +1010,125 @@ async def get_session_usage(
     同抛 ``DaemonSessionNotFound``（不泄露存在性）。只读端点，无状态机交互。
     """
     return await SessionService(session).get_session_usage(session_id, user.id)
+
+
+# ── 会话 × 模型明细（model-usage 只读端点）────────────────────────────────────
+# 硬上限：单会话 run × 模型明细行数（会话面板可视历史 + 超长会话，2000 与
+# ``_SESSION_RUN_LOGS_MAX`` 同量级）；超出部分裁掉并置 ``truncated=true``，不做
+# 分页（调用方据标志决定是否提示「仅展示前 N 行」）。模块级常量便于测试
+# setattr 调小验证裁剪语义（对齐 ``_SESSION_RUN_LOGS_MAX`` 先例）。
+_SESSION_MODEL_USAGE_MAX = 2000
+
+
+class SessionModelUsageItemRead(BaseModel):
+    """会话 model-usage 明细项：``agent_run_model_usage`` 行 + 所属 run 起止时间。
+
+    只含真实存在的列（``AgentRunModelUsage``：run_id / model / input_tokens /
+    output_tokens / cache_read_tokens / cache_creation_tokens；两个 cache 维度
+    该表确有列故一并透出；**无** duration 列——run 级 ``duration_api_ms`` 是
+    轮粒度，与「每模型一次调用」不同义，不搬进本明细不编造。``api_requests``
+    同为该表列但不属本次契约字段，故不输出）。``started_at`` / ``finished_at``
+    直映所属 ``AgentRun`` 列（派发失败轮等为 None，如实透出）。不含任何日志
+    正文 / ``agent_profile_snapshot``（尤其 ``system_prompt``）——本端点只做
+    用量审计面。
+    """
+
+    run_id: uuid.UUID
+    model: str
+    started_at: datetime | None = None
+    finished_at: datetime | None = None
+    input_tokens: int
+    output_tokens: int
+    cache_read_tokens: int
+    cache_creation_tokens: int
+
+
+class SessionModelUsageRead(BaseModel):
+    """model-usage 响应体：``session_id`` + 明细项 + 是否被硬上限截断。"""
+
+    session_id: uuid.UUID
+    items: list[SessionModelUsageItemRead]
+    truncated: bool
+
+
+@router.get(
+    "/sessions/{session_id}/model-usage",
+    response_model=SessionModelUsageRead,
+)
+async def get_session_model_usage(
+    session_id: uuid.UUID,
+    session: SessionDep,
+    user: TaskRunAgentUser,
+) -> SessionModelUsageRead:
+    """Return per-run × per-model token usage of an owned session (read-only).
+
+    数据源 ``agent_run_model_usage``（run 终态由 daemon 上报的 modelUsage 明细
+    落库，UNIQUE(run_id, model) 同 run 同模型一行）JOIN ``agent_runs`` 取轮起止
+    时间；只投影真实存在的列（含 cache 两维，无 duration 列——见
+    :class:`SessionModelUsageItemRead`）。**不**输出日志正文 / ``system_prompt``
+    / ``agent_profile_snapshot``：本端点只服务用量审计视图。
+
+    排序：轮次序优先（``AgentRun.created_at`` asc + ``id`` asc，与 turn-outline
+    / runs 端点同源的「用户发话序」口径），轮内以 ``started_at`` 兜底、``model``
+    作最终稳定 tiebreaker（同 run 同模型受 UNIQUE 约束不重复）。
+
+    归属 / 存在性复用 ``get_agent_session``（missing / 跨用户 / 软删均 404，不
+    泄露存在性），与 runs / logs / usage 端点同一道闸门；查询内联在此（service.py
+    非本任务 allowed_path，对齐 list_session_runs 先例）。
+
+    硬上限 ``_SESSION_MODEL_USAGE_MAX``=2000 行：多取 1 行判断是否溢出，溢出则
+    裁剪并置 ``truncated=true``（多取而非 COUNT，省一次聚合查询）。
+    """
+    from app.modules.agent.model import AgentRun, AgentRunModelUsage
+
+    svc = DaemonService(session)
+    # 归属 / 存在性校验（404 on missing / cross-user / soft-deleted）。
+    await svc.get_agent_session(session_id, user.id)
+
+    limit = _SESSION_MODEL_USAGE_MAX
+    rows = (
+        await session.execute(
+            select(
+                AgentRunModelUsage.run_id,
+                AgentRunModelUsage.model,
+                AgentRun.started_at,
+                AgentRun.finished_at,
+                AgentRunModelUsage.input_tokens,
+                AgentRunModelUsage.output_tokens,
+                AgentRunModelUsage.cache_read_tokens,
+                AgentRunModelUsage.cache_creation_tokens,
+            )
+            .join(AgentRun, AgentRun.id == AgentRunModelUsage.run_id)
+            .where(AgentRun.agent_session_id == session_id)
+            .order_by(
+                AgentRun.created_at.asc(),
+                AgentRun.id.asc(),
+                AgentRun.started_at.asc(),
+                AgentRunModelUsage.model.asc(),
+            )
+            # 多取 1 行：len > limit 即溢出（省 COUNT 聚合）。
+            .limit(limit + 1)
+        )
+    ).all()
+    truncated = len(rows) > limit
+    if truncated:
+        rows = rows[:limit]
+
+    items = [
+        SessionModelUsageItemRead(
+            run_id=row.run_id,
+            model=row.model,
+            started_at=row.started_at,
+            finished_at=row.finished_at,
+            input_tokens=row.input_tokens,
+            output_tokens=row.output_tokens,
+            cache_read_tokens=row.cache_read_tokens,
+            cache_creation_tokens=row.cache_creation_tokens,
+        )
+        for row in rows
+    ]
+    return SessionModelUsageRead(
+        session_id=session_id,
+        items=items,
+        truncated=truncated,
+    )

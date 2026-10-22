@@ -1,0 +1,53 @@
+tier: thin
+legacy_fallback: false
+substeps:
+  artifacts: done
+  ledger: done
+  patch: done
+  review: done
+  probes: done
+  distill: done
+  archive: done
+  events: done
+born_face: thin
+with_tasks: false
+review_force: null
+input: >-
+  总览卡主管线去scan并隐藏thin零步骤
+
+
+  动机与背景：用户实证工作区「活跃变更总览」卡两处错显——①主管线含 scan 首段且把 brainstorm 阶段变更渲染成「scan 已完成」，而 sillyspec 自
+  2026-09-27-change-birth-stage-brainstorm 起出生阶段即 brainstorm、scan 是辅助阶段（MAIN_FLOW_ORDER 不含 scan），管线应五段
+  brainstorm→archive；②轻量（thin）变更行显「步骤 0/0」，thin 不走阶段机无步骤语义（CLI 侧 2026-10-21-overview-thin-stage 已把 current_stage 投影为
+  thin，前端旁路徽标已备，唯步骤文案残留）。
+
+
+  成功标准：
+
+  - 总览卡主管线为 brainstorm→plan→execute→verify→archive 五段，无 scan 点位；brainstorm 阶段变更不渲染「scan 已完成」
+
+  - current_stage='thin' 的变更行渲染「◈ thin」旁路徽标且不显示「步骤 0/0」文案（quick/explore 存量行为不动）
+
+  - changes-overview-card 既有测试更新后全绿
+autopilot: false
+prestage_ack: false
+baseline_commit: b69b46a9ec6ebf8cc29adf7d0377112f16c005aa
+updatedAt: '2026-10-21T01:11:52.206Z'
+cross_baselines:
+  sillyspec: 3fd7cf3b6c29958a54cee8c72b4b89bf628d9a70
+baseline_sha256: a9ee6a32fd468699479904323a9523eb903f16365e5e48be692b9c0c56ddf52b
+spec_approved: true
+spec_approved_at: '2026-10-21T01:00:02.850Z'
+spec_approved_by: zcode-overview-scan-pipeline
+spec_approved_channel: user-confirmed
+spec_attested_by: zcode-overview-scan-pipeline
+batch_ticked: true
+gate_summary: >-
+  test: skipped ← module[]+deps(py8+nontest-skip1+jsx47+jsx12+jsx-e2e-skip1)+fr(64)（106.5s）
+  结果：C:\Users\qinyi\IdeaProjects\multi-agent-platform\.sillyspec\.runtime\verify-runs\20261021010834\test-result.json —
+  跳过原因：模块子集含环境缺件跳过（已跑模块全绿）：deps(auto-nontest-skip)、deps(auto-jsx-e2e-skip)——补装依赖后恢复实测。｜lint: passed ← cd backend && uv
+  run ruff check . && uv run ruff format --check . && uv run mypy app && cd ../frontend && pnpm lint && cd
+  ../sillyhub-daemon && pnpm typecheck（8.6s）
+  结果：C:\Users\qinyi\IdeaProjects\multi-agent-platform\.sillyspec\.runtime\verify-runs\20261021010834\test-result.json｜门文件
+  32 个
+

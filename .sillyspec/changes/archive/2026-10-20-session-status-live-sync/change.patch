@@ -1,0 +1,1069 @@
+diff --git a/backend/app/modules/agent/coordinator.py b/backend/app/modules/agent/coordinator.py
+index 5a1bb8be1..3cfafaef3 100644
+--- a/backend/app/modules/agent/coordinator.py
++++ b/backend/app/modules/agent/coordinator.py
+@@ -22,7 +22,8 @@ from sqlmodel import col
+ from app.core.errors import AppError
+ from app.core.logging import get_logger
+ from app.modules.agent.base import AgentSpecBundle
+-from app.modules.agent.model import AgentRun
++from app.modules.agent.model import AgentRun, AgentSession
++from app.modules.daemon.session_events import publish_sessions_changed
+ 
+ log = get_logger(__name__)
+ 
+@@ -341,6 +342,21 @@ class ExecutionCoordinatorService:
+     # 6. Approval
+     # ------------------------------------------------------------------
+ 
++    async def _publish_run_status_signal(self, run: AgentRun) -> None:
++        """2026-10-20-session-status-live-sync：run 审批态迁移 → 列表变更信号。
++
++        广播 status_changed 哑信号——左侧徽标「正在执行」↔「在等你」秒级翻转，
++        不等 10s/30s 轮询 tick。属主取 session.user_id（列表 SSE 受众过滤口径）；
++        run 无绑定会话/会话行缺失静默跳过；publish 内部静默容错（Redis 抖动不
++        拖挂审批路径）。
++        """
++        if run.agent_session_id is None:
++            return
++        session = await self.session.get(AgentSession, run.agent_session_id)
++        if session is None:
++            return
++        await publish_sessions_changed("status_changed", session.id, session.user_id)
++
+     async def request_approval(self, run_id: uuid.UUID) -> str:
+         """Generate an approval_token and mark the run as pending_approval.
+ 
+@@ -369,6 +385,9 @@ class ExecutionCoordinatorService:
+         await self.session.commit()
+         await self.session.refresh(run)
+ 
++        # 2026-10-20-session-status-live-sync：→pending_approval 广播列表信号。
++        await self._publish_run_status_signal(run)
++
+         log.info("approval_requested", run_id=str(run_id))
+         return token
+ 
+@@ -417,5 +436,9 @@ class ExecutionCoordinatorService:
+         await self.session.commit()
+         await self.session.refresh(run)
+ 
++        # 2026-10-20-session-status-live-sync：审批通过翻回 pending（随后派发
++        # 链再激活）广播列表信号——左侧徽标翻回「正在执行」。
++        await self._publish_run_status_signal(run)
++
+         log.info("run_approved", run_id=str(run_id))
+         return run
+diff --git a/backend/app/modules/agent/tests/test_coordinator_approval_signal.py b/backend/app/modules/agent/tests/test_coordinator_approval_signal.py
+new file mode 100644
+index 000000000..c9267e947
+--- /dev/null
++++ b/backend/app/modules/agent/tests/test_coordinator_approval_signal.py
+@@ -0,0 +1,176 @@
++"""coordinator 审批态迁移的列表变更信号单测（2026-10-20-session-status-live-sync）。
++
++背景：run→pending_approval（request_approval）与审批通过翻回 pending（approve）
++是左侧徽标「正在执行」↔「在等你」的翻转边沿，此前不发布 agent_sessions:changed
++——用户在右侧看到审批弹框，左侧徽标最长 10~30s 不动。修复：两方法 commit 后
++补发 status_changed 哑信号。
++
++覆盖：
++
++- request_approval 成功 → 恰一条 ("status_changed", session_id, 会话属主)；
++- approve 成功 → 同款一条（徽标翻回「正在执行」）；
++- token 无效 / 状态不在 pending_approval → 异常路径零发布；
++- run 无绑定会话（agent_session_id=None）→ 静默跳过零发布。
++
++harness 对齐 test_close_interactive_run_session_status.py（最小 seed：user +
++session + run；本组不涉 lease/claim，直接落行）。
++"""
++
++from __future__ import annotations
++
++import uuid
++from datetime import UTC, datetime
++from typing import Any
++
++import pytest
++from sqlalchemy.ext.asyncio import AsyncSession
++
++from app.modules.agent.model import AgentRun, AgentSession
++
++SignalCalls = list[tuple[str, uuid.UUID, Any]]
++
++
++@pytest.fixture()
++def list_signal_spy(monkeypatch) -> SignalCalls:
++    calls: SignalCalls = []
++
++    async def spy_publish(event, session_id, user_id, **kwargs):
++        calls.append((event, session_id, user_id))
++
++    monkeypatch.setattr("app.modules.agent.coordinator.publish_sessions_changed", spy_publish)
++    return calls
++
++
++async def _seed(
++    db_session: AsyncSession,
++    *,
++    run_status: str = "running",
++    with_session: bool = True,
++) -> tuple[uuid.UUID, AgentRun]:
++    """建 user + session + run，返回 (属主 user_id, run)。"""
++    from app.modules.auth.model import User
++
++    uid = uuid.uuid4()
++    db_session.add(
++        User(
++            id=uid,
++            email=f"approval-{uid}@example.com",
++            password_hash="x",
++            display_name="T",
++            status="active",
++        )
++    )
++    now = datetime.now(UTC)
++    session_id = uuid.uuid4()
++    if with_session:
++        db_session.add(
++            AgentSession(
++                id=session_id,
++                user_id=uid,
++                provider="claude",
++                status="active",
++                config={},
++                turn_count=1,
++                created_at=now,
++                last_active_at=now,
++            )
++        )
++    run = AgentRun(
++        id=uuid.uuid4(),
++        agent_type="claude_code",
++        provider="claude",
++        status=run_status,
++        spec_strategy="interactive",
++        agent_session_id=session_id if with_session else None,
++    )
++    db_session.add(run)
++    await db_session.commit()
++    return uid, run
++
++
++class TestApprovalListSignal:
++    @pytest.mark.asyncio
++    async def test_request_approval_publishes_signal(
++        self, db_session: AsyncSession, list_signal_spy: SignalCalls
++    ) -> None:
++        """→pending_approval 成功 commit → 恰一条 status_changed（会话属主受众）。"""
++        from app.modules.agent.coordinator import ExecutionCoordinatorService
++
++        uid, run = await _seed(db_session, run_status="running")
++
++        svc = ExecutionCoordinatorService(db_session)
++        await svc.request_approval(run.id)
++
++        assert list_signal_spy == [("status_changed", run.agent_session_id, uid)]
++
++    @pytest.mark.asyncio
++    async def test_approve_publishes_signal(
++        self, db_session: AsyncSession, list_signal_spy: SignalCalls
++    ) -> None:
++        """审批通过翻回 pending → 同款一条（徽标翻回「正在执行」）。"""
++        from app.modules.agent.coordinator import ExecutionCoordinatorService
++
++        uid, run = await _seed(db_session, run_status="pending_approval")
++        token = "tok-abc"
++        run.approval_token = token
++        db_session.add(run)
++        await db_session.commit()
++
++        svc = ExecutionCoordinatorService(db_session)
++        approved = await svc.approve(run.id, token)
++
++        assert approved.status == "pending"
++        assert list_signal_spy == [("status_changed", run.agent_session_id, uid)]
++
++    @pytest.mark.asyncio
++    async def test_approve_invalid_token_no_publish(
++        self, db_session: AsyncSession, list_signal_spy: SignalCalls
++    ) -> None:
++        """token 无效 → 异常路径零发布（右侧保持原状态，列表无需翻转）。"""
++        from app.modules.agent.coordinator import (
++            ExecutionCoordinatorService,
++            InvalidTokenError,
++        )
++
++        _, run = await _seed(db_session, run_status="pending_approval")
++        run.approval_token = "tok-right"
++        db_session.add(run)
++        await db_session.commit()
++
++        svc = ExecutionCoordinatorService(db_session)
++        with pytest.raises(InvalidTokenError):
++            await svc.approve(run.id, "tok-wrong")
++
++        assert list_signal_spy == []
++
++    @pytest.mark.asyncio
++    async def test_approve_wrong_status_no_publish(
++        self, db_session: AsyncSession, list_signal_spy: SignalCalls
++    ) -> None:
++        """run 不在 pending_approval → AgentRunNotPendingApproval，零发布。"""
++        from app.modules.agent.coordinator import (
++            AgentRunNotPendingApproval,
++            ExecutionCoordinatorService,
++        )
++
++        _, run = await _seed(db_session, run_status="running")
++
++        svc = ExecutionCoordinatorService(db_session)
++        with pytest.raises(AgentRunNotPendingApproval):
++            await svc.approve(run.id, "any")
++
++        assert list_signal_spy == []
++
++    @pytest.mark.asyncio
++    async def test_run_without_session_no_publish(
++        self, db_session: AsyncSession, list_signal_spy: SignalCalls
++    ) -> None:
++        """run 无绑定会话（非交互 run）→ 静默跳过，零发布。"""
++        from app.modules.agent.coordinator import ExecutionCoordinatorService
++
++        _, run = await _seed(db_session, run_status="running", with_session=False)
++
++        svc = ExecutionCoordinatorService(db_session)
++        await svc.request_approval(run.id)
++
++        assert list_signal_spy == []
+diff --git a/backend/app/modules/daemon/run_sync/service/close_run_steps.py b/backend/app/modules/daemon/run_sync/service/close_run_steps.py
+index 309c4df95..e89ea3148 100644
+--- a/backend/app/modules/daemon/run_sync/service/close_run_steps.py
++++ b/backend/app/modules/daemon/run_sync/service/close_run_steps.py
+@@ -464,9 +464,12 @@ async def _close_flip_session(
+     # _apply_session_terminal_status 守卫（已 ended/failed 返 None）。
+     session_end_intent: tuple[uuid.UUID, uuid.UUID | None, uuid.UUID | None] | None = None
+     # task-03（2026-08-24-sessions-live-updates）：run 终态翻 session ended/failed
+-    # 时记下列表信号意图（session_id + user_id），commit 后广播 status_changed——
+-    # 多轮对话仅刷 last_active_at 的分支不置此意图（列表视图无状态变化，不发）。
+-    # user_id 同样须在 expire_on_commit 前取标量。
++    # 时记下列表信号意图（session_id + user_id），commit 后广播 status_changed。
++    # 2026-10-20-session-status-live-sync：多轮 keep-active 分支（仅刷
++    # last_active_at）同样置此意图——列表项的 current_run_status 随 run 终态
++    # 从 running 变 None，左侧徽标需秒级收敛（原「列表视图无状态变化，不发」
++    # 的假设已过时）。幂等守卫不变：new_status=None（会话已 ended/failed）
++    # 时整体跳过不发。user_id 同样须在 expire_on_commit 前取标量。
+     sessions_changed_intent: tuple[uuid.UUID, uuid.UUID | None] | None = None
+     if agent_run.agent_session_id is not None:
+         # AgentSession 走模块顶 import（与上方 task-03 model_usage 块共用）：
+@@ -489,9 +492,9 @@ async def _close_flip_session(
+                 new_status = "failed"
+             if new_status is not None:
+                 session.status = new_status
++                sessions_changed_intent = (session.id, session.user_id)
+                 if new_status in ("ended", "failed"):
+                     session.ended_at = now
+-                    sessions_changed_intent = (session.id, session.user_id)
+                     # ql-20260823-006：会话被 run 终态翻成 ended/failed 时记下
+                     # 发送意图，commit 后补发 SESSION_END 清理 daemon 内存副本——
+                     # 否则 daemon SessionStore 残留活条目（backend 终态 ≠ daemon
+@@ -555,8 +558,10 @@ async def _close_post_commit(
+ 
+     # task-03（design §3 生命周期契约表）：run 终态翻 session ended/failed →
+     # 广播列表变更信号（status_changed），打开的会话列表秒级收敛。publish 内部
+-    # 静默容错（Redis 抖动不拖垮已 commit 的终态）；仅刷 last_active_at 的多轮
+-    # 分支意图为 None，零发布。
++    # 静默容错（Redis 抖动不拖垮已 commit 的终态）。2026-10-20-session-status-
++    # live-sync：多轮 keep-active 分支同样置意图——列表 current_run_status 随
++    # run 终态变 None，左侧转圈徽标需秒级收敛；会话已终态（幂等守卫跳过）
++    # 意图为 None，零发布。
+     if sessions_changed_intent is not None:
+         changed_sid, changed_uid = sessions_changed_intent
+         await _rsvc.publish_sessions_changed("status_changed", changed_sid, changed_uid)
+diff --git a/backend/app/modules/daemon/run_sync/service/publish.py b/backend/app/modules/daemon/run_sync/service/publish.py
+index 2fbb4edd3..06a175e66 100644
+--- a/backend/app/modules/daemon/run_sync/service/publish.py
++++ b/backend/app/modules/daemon/run_sync/service/publish.py
+@@ -23,6 +23,7 @@ from pydantic import BaseModel
+ import app.modules.daemon.run_sync.service as _rsvc
+ from app.modules.daemon.event_publish import publish_json_event
+ from app.modules.daemon.schema import BashChunkEvent
++from app.modules.daemon.session_events import publish_sessions_changed
+ 
+ # ── QueuePool 修复 3：submit_messages 的发布意图 + 延迟 publish ────────────────
+ # Redis publish 从 RunSyncService.submit_messages 迁出到 router（DB session 已
+@@ -69,11 +70,17 @@ class PublishIntent:
+     projection_log_id: str | None = None
+     # ── quick 投影统一标记制（2026-09-02）：@轮与直聊轮同款 ──
+     # publish 群分支只发 group_projection_events 里的 [[GROUP]] 转发段事件：每段
+-    # 一项（{"log_id": 投影行 id, "content": 段文本, "timestamp": iso}），与投影
+-    # 行一一对应（partial 从未投影、override 令箭不发——无渲染可撤）。
+-    # shadow_direct 仅标记直聊轮（观测用；兜底行/互@链路按轮型区分）。
++    # 一项（{"log_id": 投影行 id, "content": "段文本, "timestamp": iso}），与投影
++    # 行一一对应（partial 从未投影、override 令箭不发——无渲染可撤）。shadow_direct
++    # 仅标记直聊轮（观测用；兜底行/互@链路按轮型区分）。
+     shadow_direct: bool = False
+     group_projection_events: list[dict] = field(default_factory=list)
++    # 2026-10-20-session-status-live-sync：run 激活（pending→running）列表信号
++    # 标量（session_id + 会话属主 user_id），激活块事务内提取（publish 阶段不
++    # 查库）。publish_submitted_messages 消费补发 publish_sessions_changed(
++    # "status_changed")——左侧徽标秒级亮「正在执行」，不等 10s/30s 轮询 tick。
++    # None = 本次上报未触发激活（条件 UPDATE rowcount=0）/ run 无绑定会话，零发布。
++    list_signal: tuple[uuid.UUID, uuid.UUID | None] | None = None
+ 
+ 
+ class SubmittedMessages(int):
+@@ -237,6 +244,14 @@ async def publish_submitted_messages(intent: PublishIntent) -> None:
+             agent_session_id=str(intent.agent_session_id),
+         )
+ 
++    # 2026-10-20-session-status-live-sync：run 激活 → 列表变更信号（哑信号，
++    # 前端收到即失效列表查询，左侧徽标秒级亮「正在执行」）。须在下方群分支
++    # 早退（group_id is None: return）之前消费——非群场景是主路径。
++    # publish_sessions_changed 内部静默容错，不拖垮本函数其余发布。
++    if intent.list_signal is not None:
++        signal_sid, signal_uid = intent.list_signal
++        await publish_sessions_changed("status_changed", signal_sid, signal_uid)
++
+     # task-05（2026-09-01-session-group-chat / design §5.2 改动点①的 publish 半段）
+     # + quick 投影统一标记制（2026-09-02）：群频道发布——@轮与直聊轮同款，只发
+     # ``agent_session:{群id}`` 上的 [[GROUP]] 转发段事件（每段一条 log 事件、
+diff --git a/backend/app/modules/daemon/run_sync/service/submit_commit.py b/backend/app/modules/daemon/run_sync/service/submit_commit.py
+index 0d84c6966..eb1c68e3c 100644
+--- a/backend/app/modules/daemon/run_sync/service/submit_commit.py
++++ b/backend/app/modules/daemon/run_sync/service/submit_commit.py
+@@ -219,6 +219,19 @@ async def _submit_finalize(svc, st: _SubmitState) -> SubmittedMessages:
+                     agent_run_id=str(st.agent_run_id),
+                     lease_id=str(st.lease_id),
+                 )
++                # 2026-10-20-session-status-live-sync：激活成功（rowcount>0）→
++                # 事务内提取列表信号标量（主键 get，publish 阶段不查库）。属主
++                # 取 session.user_id（列表 SSE 按属主过滤的受众口径）；查不到
++                # 会话（极端：会话行已删）不置，publish 阶段零发布。
++                if st.agent_run.agent_session_id is not None:
++                    activated_session = await svc._session.get(
++                        AgentSession, st.agent_run.agent_session_id
++                    )
++                    if activated_session is not None:
++                        st.list_signal = (
++                            activated_session.id,
++                            activated_session.user_id,
++                        )
+         # ql-20260616-004：实时 token 写回。仅在数值增大时覆盖（防御乱序），
+         # 让前端 5s 轮询拿到中间过程的累积 token，不必等 result 事件汇总。
+         if st.latest_input_tokens is not None and (
+@@ -426,6 +439,9 @@ async def _submit_finalize(svc, st: _SubmitState) -> SubmittedMessages:
+             duration_api_ms=publish_duration_api_ms,
+             agent_session_id=publish_session_id,
+             timestamp_iso=st.now.isoformat().replace("+00:00", "Z"),
++            # 2026-10-20-session-status-live-sync：run 激活标量（未激活/无会话
++            # 为 None，publish 阶段零发布）。
++            list_signal=st.list_signal,
+             # task-05：群桥接标量快照（事务内已解析的群上下文 + 最后投影行 id）。
+             # 非群场景 group_id=None → publish_submitted_messages 群分支零进入。
+             group_id=st.group_bridge.group_id if st.group_bridge is not None else None,
+diff --git a/backend/app/modules/daemon/run_sync/service/submit_steps.py b/backend/app/modules/daemon/run_sync/service/submit_steps.py
+index e15ad4580..c75b91a5d 100644
+--- a/backend/app/modules/daemon/run_sync/service/submit_steps.py
++++ b/backend/app/modules/daemon/run_sync/service/submit_steps.py
+@@ -72,6 +72,11 @@ class _SubmitState:
+     cold_lookup_misses: set[tuple[uuid.UUID, str]] = field(default_factory=set)
+     flat_messages: list[dict] = field(default_factory=list)
+     agent_run: AgentRun | None = None
++    # 2026-10-20-session-status-live-sync：run 激活（pending→running）时的列表
++    # 信号标量（session_id + 会话属主 user_id），激活块事务内提取（commit 前），
++    # _submit_finalize 带入 PublishIntent、publish_submitted_messages 消费补发。
++    # None = 未激活（rowcount=0）/ 无绑定会话。
++    list_signal: tuple[uuid.UUID, uuid.UUID | None] | None = None
+ 
+ 
+ # F2a（2026-10-12-session-defects task-01 / FR-02）：wire 事件时间戳钟差容忍带
+diff --git a/backend/app/modules/daemon/session/service/inject.py b/backend/app/modules/daemon/session/service/inject.py
+index 7dd6286c3..c18a99eea 100644
+--- a/backend/app/modules/daemon/session/service/inject.py
++++ b/backend/app/modules/daemon/session/service/inject.py
+@@ -828,6 +828,15 @@ async def _inject_into_session(
+             },
+         )
+ 
++    # 2026-10-20-session-status-live-sync：新轮 run 落库即广播列表变更信号——
++    # 左侧徽标的 current_run_status 随新 run（pending）点亮「正在执行」，不再
++    # 等 10s/30s 轮询 tick。纯切换轮 run 直接落 completed（非活跃态，列表无
++    # 可见状态变化）不发。publish 内部静默容错（Redis 抖动不拖挂注入路径）。
++    if not silent_config_switch:
++        from app.modules.daemon.session_events import publish_sessions_changed
++
++        await publish_sessions_changed("status_changed", session.id, session.user_id)
++
+     # task-08 拆分：commit 后派发段（ready 等待 + SESSION_SWITCH_CONFIG /
+     # SESSION_INJECT 下发 + 失败收敛）下沉 control._dispatch_inject_turn。
+     return await _dispatch_inject_turn(
+diff --git a/backend/app/modules/daemon/tests/test_close_interactive_run_session_status.py b/backend/app/modules/daemon/tests/test_close_interactive_run_session_status.py
+index 56f69df78..8ea4ebe94 100644
+--- a/backend/app/modules/daemon/tests/test_close_interactive_run_session_status.py
++++ b/backend/app/modules/daemon/tests/test_close_interactive_run_session_status.py
+@@ -207,10 +207,19 @@ async def test_single_turn_failed_marks_session_failed(
+ 
+ @pytest.mark.asyncio
+ async def test_multi_turn_completed_keeps_session_active(
+-    db_session: AsyncSession, mocked_redis
++    db_session: AsyncSession, mocked_redis, monkeypatch
+ ) -> None:
+     """多轮对话（spec_strategy=='interactive' AND change_id is None）run completed
+     → session 保持 active + last_active_at 刷新，ended_at 仍 None。"""
++    # 2026-10-20-session-status-live-sync：keep-active 分支也广播列表信号——
++    # 列表项 current_run_status 随 run 终态变 None，左侧「正在执行」转圈徽标
++    # 需秒级收敛（经 _rsvc 延迟解析，monkeypatch 拦截 publish 调用）。
++    publish_calls: list[tuple[str, uuid.UUID, object]] = []
++
++    async def spy_publish(event, sid, uid, **kwargs):
++        publish_calls.append((event, sid, uid))
++
++    monkeypatch.setattr("app.modules.daemon.run_sync.service.publish_sessions_changed", spy_publish)
+     lease_id, run_id, token, session_id = await _seed_session_and_run(
+         db_session,
+         spec_strategy="interactive",
+@@ -246,6 +255,8 @@ async def test_multi_turn_completed_keeps_session_active(
+         else refreshed.last_active_at
+     )
+     assert stored > datetime(2020, 1, 1)
++    # run 终态（多轮 keep-active）→ 恰一条 status_changed 列表信号
++    assert publish_calls == [("status_changed", session_id, refreshed.user_id)]
+ 
+ 
+ # ── 幂等：session 已 ended/failed 不覆盖 -----------------------------------
+@@ -253,10 +264,17 @@ async def test_multi_turn_completed_keeps_session_active(
+ 
+ @pytest.mark.asyncio
+ async def test_session_already_ended_not_overwritten(
+-    db_session: AsyncSession, mocked_redis
++    db_session: AsyncSession, mocked_redis, monkeypatch
+ ) -> None:
+     """session 已 ended → _apply_session_terminal_status 返 None，回写不覆盖
+-    既有 ended 终态（D-005）。"""
++    既有 ended 终态（D-005）。2026-10-20-session-status-live-sync：幂等守卫
++    跳过时零列表信号发布（迟到终态不刷列表）。"""
++    publish_calls: list[tuple[str, uuid.UUID, object]] = []
++
++    async def spy_publish(event, sid, uid, **kwargs):
++        publish_calls.append((event, sid, uid))
++
++    monkeypatch.setattr("app.modules.daemon.run_sync.service.publish_sessions_changed", spy_publish)
+     ended_at = datetime(2020, 1, 1, tzinfo=UTC)
+     lease_id, run_id, token, session_id = await _seed_session_and_run(
+         db_session,
+@@ -290,6 +308,8 @@ async def test_session_already_ended_not_overwritten(
+     )
+     expected = ended_at.replace(tzinfo=None)
+     assert stored == expected
++    # 幂等守卫跳过回写 → 不发布列表信号
++    assert publish_calls == []
+ 
+ 
+ # ── ql-20260823-006：run 终态翻会话终态 → 补发 SESSION_END 清理 daemon 内存 ──
+diff --git a/backend/app/modules/daemon/tests/test_session_events_cross.py b/backend/app/modules/daemon/tests/test_session_events_cross.py
+index 4408bec4a..03141c371 100644
+--- a/backend/app/modules/daemon/tests/test_session_events_cross.py
++++ b/backend/app/modules/daemon/tests/test_session_events_cross.py
+@@ -6,7 +6,9 @@ design §3 生命周期契约表的 6 个跨模块写入点各自发布 created
+ 容错语义已由 task-01 ``test_session_events.py`` 独立覆盖）：
+ 
+ - run_sync/service.py close_interactive_run：run 终态翻 session ended/failed →
+-  status_changed；多轮对话仅刷 last_active_at → 不发；
++  status_changed；多轮对话仅刷 last_active_at → 同样发 status_changed
++  （2026-10-20-session-status-live-sync 契约更新——列表 current_run_status 随
++  run 终态变 None，左侧转圈徽标需秒级收敛；幂等已终态仍零发布）；
+ - sweep.py 两档（reconnect / offline）：批量 UPDATE 后逐行 status_changed，
+   无命中零发布；offline 档 task-05 改挂起语义——active→suspended 非终态只发
+   status_changed（无 session_ended），超龄 24h GC 置 failed 才发终态
+@@ -192,7 +194,10 @@ async def test_close_interactive_run_terminal_flip_publishes_status_changed(
+ async def test_close_interactive_run_multi_turn_last_active_only_no_publish(
+     db_session: AsyncSession, mocked_redis, monkeypatch: pytest.MonkeyPatch
+ ) -> None:
+-    """多轮对话（interactive + change_id=None）仅刷 last_active_at：零发布。"""
++    """多轮对话（interactive + change_id=None）仅刷 last_active_at：照发一条
++    status_changed（2026-10-20-session-status-live-sync 契约更新——列表项的
++    current_run_status 随 run 终态变 None，左侧转圈徽标需秒级收敛；原「零发布」
++    契约已废）。"""
+     calls = _capture_publish(monkeypatch, "app.modules.daemon.run_sync.service")
+     user = await _make_user(db_session, prefix="runsync-mt")
+     rt = DaemonRuntime(
+@@ -205,7 +210,7 @@ async def test_close_interactive_run_multi_turn_last_active_only_no_publish(
+     )
+     db_session.add(rt)
+     await db_session.commit()
+-    lease_id, run_id, token, _session_id = await _seed_interactive_run(
++    lease_id, run_id, token, session_id = await _seed_interactive_run(
+         db_session, user, rt, spec_strategy="interactive", change_id=None
+     )
+ 
+@@ -213,7 +218,7 @@ async def test_close_interactive_run_multi_turn_last_active_only_no_publish(
+         lease_id, run_id, token, status="success", is_error=False
+     )
+ 
+-    assert calls == []
++    assert calls == [("status_changed", session_id, user.id)]
+ 
+ 
+ # ── 2. sweep.py 两档 ─────────────────────────────────────────────────────────
+diff --git a/backend/app/modules/daemon/tests/test_session_list_live_signal.py b/backend/app/modules/daemon/tests/test_session_list_live_signal.py
+new file mode 100644
+index 000000000..e92788bf8
+--- /dev/null
++++ b/backend/app/modules/daemon/tests/test_session_list_live_signal.py
+@@ -0,0 +1,131 @@
++"""inject 新轮落库的列表变更信号单测（2026-10-20-session-status-live-sync）。
++
++背景：左侧会话列表徽标的第一优先信号源 current_run_status 来自最新活跃
++run，但 run 级状态迁移此前不发布 agent_sessions:changed——发消息后左侧
++「正在执行」徽标最长等 10s/30s 轮询 tick 才亮。修复：_inject_into_session
++commit 后补发 status_changed 哑信号（前端 400ms 去抖失效列表查询，秒级收敛）。
++
++覆盖：
++
++- 普通追问轮（真 LLM 轮）：恰一条 ("status_changed", session_id, user_id)；
++- 带消息切换轮（prompt 非空 + 切换字段，真 LLM 轮）：照发；
++- 纯切换轮（空 prompt，run 直接落 completed 非活跃态，列表无可见状态变化）：
++  不发。
++
++harness 对齐 test_inject_silent_switch.py（_mock_hub + mocked_redis，service
++层不打对象存储）。信号 spy patch 在 session_events 模块属性——inject 侧函数
++内局部 import 每次调用重解析，monkeypatch 生效。
++"""
++
++from __future__ import annotations
++
++import uuid
++from typing import Any
++from unittest.mock import AsyncMock, patch
++
++import pytest
++from sqlalchemy.ext.asyncio import AsyncSession
++
++from .test_session_switch_config import (
++    _create_profile,
++    _create_runtime,
++    _create_user,
++    _finish_first_turn,
++    _mock_hub,
++)
++
++
++class TestInjectPublishesListSignal:
++    """inject 新轮 commit 后发布 status_changed 列表信号。"""
++
++    @pytest.fixture()
++    def mocked_hub(self):
++        hub = _mock_hub()
++        with patch("app.modules.daemon.ws_hub.get_daemon_ws_hub", return_value=hub):
++            yield hub
++
++    @pytest.fixture()
++    def mocked_redis(self):
++        redis = AsyncMock()
++        redis.publish = AsyncMock()
++        with patch("app.modules.daemon.session.service.get_redis", return_value=redis):
++            yield redis
++
++    @pytest.fixture()
++    def list_signal_spy(self, monkeypatch):
++        calls: list[tuple[str, uuid.UUID, object]] = []
++
++        async def spy_publish(event, session_id, user_id, **kwargs):
++            calls.append((event, session_id, user_id))
++
++        monkeypatch.setattr(
++            "app.modules.daemon.session_events.publish_sessions_changed", spy_publish
++        )
++        return calls
++
++    async def _seed_session(self, db_session: AsyncSession) -> tuple[uuid.UUID, Any]:
++        """建 user/runtime + 会话（首轮 completed，空闲轮 inject 场景）。"""
++        uid = await _create_user(db_session)
++        rt = await _create_runtime(db_session, uid)
++        from app.modules.daemon.service import DaemonService
++
++        svc = DaemonService(db_session)
++        created = await svc.create_session(
++            uid, provider="claude", prompt="first", runtime_id=str(rt.id)
++        )
++        await _finish_first_turn(db_session, created)
++        return uid, created
++
++    @pytest.mark.asyncio
++    async def test_plain_turn_publishes_list_signal(
++        self, db_session, mocked_hub, mocked_redis, list_signal_spy
++    ) -> None:
++        """普通追问轮：commit 后恰一条 status_changed（session_id + 会话属主）。"""
++        from app.modules.daemon.service import DaemonService
++
++        uid, created = await self._seed_session(db_session)
++
++        svc = DaemonService(db_session)
++        result = await svc.inject_session(created.agent_session.id, uid, prompt="追问")
++
++        assert result.agent_run.status != "completed"  # 真 LLM 轮（pending/running）
++        assert list_signal_spy == [("status_changed", created.agent_session.id, uid)]
++
++    @pytest.mark.asyncio
++    async def test_switch_with_message_publishes_list_signal(
++        self, db_session, mocked_hub, mocked_redis, list_signal_spy
++    ) -> None:
++        """带消息切换轮（真 LLM 轮）：照发。"""
++        from app.modules.daemon.service import DaemonService
++
++        uid, created = await self._seed_session(db_session)
++        profile_b = await _create_profile(db_session, uid, name="新人格", system_prompt="b")
++
++        svc = DaemonService(db_session)
++        result = await svc.inject_session(
++            created.agent_session.id,
++            uid,
++            prompt="带消息切换",
++            agent_profile_id=str(profile_b.id),
++        )
++
++        assert result.agent_run.status != "completed"
++        assert list_signal_spy == [("status_changed", created.agent_session.id, uid)]
++
++    @pytest.mark.asyncio
++    async def test_pure_switch_does_not_publish(
++        self, db_session, mocked_hub, mocked_redis, list_signal_spy
++    ) -> None:
++        """纯切换轮（空 prompt，run 直接落 completed 非活跃态）：零发布。"""
++        from app.modules.daemon.service import DaemonService
++
++        uid, created = await self._seed_session(db_session)
++        profile_b = await _create_profile(db_session, uid, name="新人格2", system_prompt="b")
++
++        svc = DaemonService(db_session)
++        result = await svc.inject_session(
++            created.agent_session.id, uid, prompt="", agent_profile_id=str(profile_b.id)
++        )
++
++        assert result.agent_run.status == "completed"
++        assert list_signal_spy == []
+diff --git a/backend/app/modules/daemon/tests/test_submit_messages_no_overwrite_terminal.py b/backend/app/modules/daemon/tests/test_submit_messages_no_overwrite_terminal.py
+index 6338fae36..f550ad67a 100644
+--- a/backend/app/modules/daemon/tests/test_submit_messages_no_overwrite_terminal.py
++++ b/backend/app/modules/daemon/tests/test_submit_messages_no_overwrite_terminal.py
+@@ -177,3 +177,111 @@ class TestSubmitMessagesLostUpdate:
+         assert fresh is not None
+         assert fresh.status == "running"
+         assert fresh.started_at is not None
++
++
++class TestActivationListSignal:
++    """2026-10-20-session-status-live-sync：run 激活经 PublishIntent.list_signal
++    补发列表信号（左侧徽标秒级亮「正在执行」）。
++
++    - 激活成功（rowcount>0）→ intent.list_signal=(session_id, 会话属主)；
++    - 迟到 submit（rowcount=0，run 已终态）→ list_signal=None 零发布；
++    - publish_submitted_messages 消费 list_signal → publish_sessions_changed
++      ("status_changed")，None 时零调用。
++    """
++
++    @staticmethod
++    async def _session_owner(
++        db_session: AsyncSession, run_id: uuid.UUID
++    ) -> tuple[uuid.UUID, uuid.UUID]:
++        run = await db_session.get(AgentRun, run_id)
++        assert run is not None and run.agent_session_id is not None
++        sess = await db_session.get(AgentSession, run.agent_session_id)
++        assert sess is not None
++        return sess.id, sess.user_id
++
++    @pytest.mark.asyncio
++    async def test_activated_submit_carries_list_signal(
++        self, db_session: AsyncSession, mocked_redis
++    ) -> None:
++        """正常激活：publish_intent.list_signal=(session_id, 会话属主)。"""
++        lease_id, run_id, token = await _seed_pending_interactive_run(db_session)
++
++        svc = DaemonService(db_session)
++        result = await svc.submit_messages(
++            lease_id, token, run_id, [{"event_type": "assistant", "content": "go"}]
++        )
++
++        sess_id, owner = await self._session_owner(db_session, run_id)
++        assert result.publish_intent is not None
++        assert result.publish_intent.list_signal == (sess_id, owner)
++
++    @pytest.mark.asyncio
++    async def test_late_submit_no_list_signal(
++        self, db_session: AsyncSession, db_engine, mocked_redis
++    ) -> None:
++        """迟到 submit（rowcount=0，run 已被 close 收口终态）：list_signal=None。"""
++        lease_id, run_id, token = await _seed_pending_interactive_run(db_session)
++        stale = await db_session.get(AgentRun, run_id)
++        assert stale is not None and stale.status == "pending"
++        other_factory = async_sessionmaker(
++            bind=db_engine, class_=AsyncSession, expire_on_commit=False
++        )
++        async with other_factory() as other:
++            await other.execute(
++                update(AgentRun)
++                .where(AgentRun.id == run_id)
++                .values(status="completed", finished_at=datetime.now(UTC))
++            )
++            await other.commit()
++
++        svc = DaemonService(db_session)
++        result = await svc.submit_messages(
++            lease_id, token, run_id, [{"event_type": "assistant", "content": "late"}]
++        )
++
++        assert result.publish_intent is not None
++        assert result.publish_intent.list_signal is None
++
++    @pytest.mark.asyncio
++    async def test_publish_consumes_signal_and_none_noop(self, mocked_redis, monkeypatch) -> None:
++        """纯消费段：构造 PublishIntent 直接验证 publish 调用面（不依赖 DB）。"""
++        from app.modules.daemon.run_sync.service.publish import (
++            PublishIntent,
++            publish_submitted_messages,
++        )
++
++        calls: list[tuple[str, uuid.UUID, object]] = []
++
++        async def spy_publish(event, sid, uid, **kwargs):
++            calls.append((event, sid, uid))
++
++        monkeypatch.setattr(
++            "app.modules.daemon.run_sync.service.publish.publish_sessions_changed",
++            spy_publish,
++        )
++
++        def _intent(list_signal):
++            return PublishIntent(
++                agent_run_id=uuid.uuid4(),
++                lease_id=uuid.uuid4(),
++                count=0,
++                published_logs=[],
++                agent_run_status="running",
++                input_tokens=None,
++                output_tokens=None,
++                cache_read_tokens=None,
++                cache_creation_tokens=None,
++                ctx_tokens=None,
++                duration_api_ms=None,
++                agent_session_id=uuid.uuid4(),
++                timestamp_iso="2026-10-20T00:00:00Z",
++                list_signal=list_signal,
++            )
++
++        sid, uid = uuid.uuid4(), uuid.uuid4()
++        await publish_submitted_messages(_intent((sid, uid)))
++        assert calls == [("status_changed", sid, uid)]
++
++        calls.clear()
++        await publish_submitted_messages(_intent(None))
++        assert calls == []
+diff --git a/frontend/src/components/daemon/__tests__/session-panel-approval-list-refresh.test.tsx b/frontend/src/components/daemon/__tests__/session-panel-approval-list-refresh.test.tsx
+new file mode 100644
+index 000000000..ae249320c
+--- /dev/null
++++ b/frontend/src/components/daemon/__tests__/session-panel-approval-list-refresh.test.tsx
+@@ -0,0 +1,286 @@
++// 2026-10-20-session-status-live-sync：permission_request 事件即时刷左栏列表
++// 单测——审批等待边沿（用户可操作状态、即时性最敏感）右侧弹审批交互的同时
++// 调 onSessionListRefresh（经 400ms 去抖触发列表失效），作为 Redis 列表信号
++// 丢失时的本地兜底；dialog 模式不传该回调天然不受影响。
++//
++// 覆盖：
++//   1. permission_request（带 dialog_kind）→ onSessionListRefresh 被调用；
++//   2. 同 request_id 重复事件 → 集合幂等去重，但刷新仍触发（哑信号多发无害，
++//      去抖层合并）；
++//   3. dialog_kind 为空的事件（守卫早退）→ 不入待审列表；刷新语义随事件本身
++//      仍触发（有 dialog_kind 才是「在等你」边沿——本用例钉死守卫分支零刷新）。
++//
++// mock 模板 = session-panel-ctx-tokens.test.tsx（page 模式网络层全 mock +
++// QueryClientProvider + stream factory 扩展 permission_request 路由）。
++
++import { describe, it, expect, beforeEach, vi } from "vitest";
++import { render, screen, waitFor, act } from "@testing-library/react";
++import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
++
++import { SessionPanel } from "../session-panel";
++import type {
++  SessionStreamConnection,
++  SessionStreamHandlers,
++} from "@/lib/daemon";
++
++vi.mock("@/components/ui/markdown-text", () => ({
++  MarkdownText: ({ content }: { content: string }) => (
++    <div data-testid="markdown-text">{content}</div>
++  ),
++}));
++
++/* ----- mock 网络层（session-panel-ctx-tokens.test.tsx 模板） ----- */
++
++const sessionApi = vi.hoisted(() => ({
++  getSessionUsage: vi.fn().mockResolvedValue(null),
++  createSession: vi.fn(),
++  injectSession: vi.fn(),
++  interruptSession: vi.fn(),
++  endSession: vi.fn(),
++  streamSession: vi.fn(),
++  getAgentSession: vi.fn(),
++  getAgentSessionLogs: vi.fn(),
++  fetchSessionTurnOutline: vi.fn(),
++  fetchPendingDialogs: vi.fn(),
++  fetchSessionDialogHistory: vi.fn(),
++  listSessionRuns: vi.fn(),
++  listSessionTasks: vi.fn().mockResolvedValue([]),
++  listSessionTeamMissions: vi.fn(),
++  triggerSessionTeamMission: vi.fn(),
++  fetchSessionQueue: vi.fn(),
++  deleteSessionQueueEntry: vi.fn(),
++  retrySessionQueueEntry: vi.fn(),
++}));
++
++vi.mock("@/lib/daemon", async () => {
++  const actual = await vi.importActual<typeof import("@/lib/daemon")>("@/lib/daemon");
++  return {
++    ...actual,
++    getSessionUsage: sessionApi.getSessionUsage,
++    createSession: sessionApi.createSession,
++    injectSession: sessionApi.injectSession,
++    interruptSession: sessionApi.interruptSession,
++    endSession: sessionApi.endSession,
++    streamSession: sessionApi.streamSession,
++    getAgentSession: sessionApi.getAgentSession,
++    getAgentSessionLogs: sessionApi.getAgentSessionLogs,
++    fetchSessionTurnOutline: sessionApi.fetchSessionTurnOutline,
++    fetchPendingDialogs: sessionApi.fetchPendingDialogs,
++    fetchSessionDialogHistory: sessionApi.fetchSessionDialogHistory,
++    listSessionRuns: sessionApi.listSessionRuns,
++    listSessionTasks: sessionApi.listSessionTasks,
++    listSessionTeamMissions: sessionApi.listSessionTeamMissions,
++    triggerSessionTeamMission: sessionApi.triggerSessionTeamMission,
++    fetchSessionQueue: sessionApi.fetchSessionQueue,
++    deleteSessionQueueEntry: sessionApi.deleteSessionQueueEntry,
++    retrySessionQueueEntry: sessionApi.retrySessionQueueEntry,
++  };
++});
++
++const workspaceApi = vi.hoisted(() => ({
++  listWorkspaces: vi.fn(),
++  listProjects: vi.fn(),
++  listProjectWorkspaces: vi.fn(),
++}));
++
++vi.mock("@/lib/workspaces", async () => {
++  const actual = await vi.importActual<typeof import("@/lib/workspaces")>(
++    "@/lib/workspaces",
++  );
++  return { ...actual, listWorkspaces: workspaceApi.listWorkspaces };
++});
++
++vi.mock("@/lib/ppm/project", async () => {
++  const actual = await vi.importActual<typeof import("@/lib/ppm/project")>(
++    "@/lib/ppm/project",
++  );
++  return { ...actual, listProjects: workspaceApi.listProjects };
++});
++
++vi.mock("@/lib/workspace", async () => {
++  const actual = await vi.importActual<typeof import("@/lib/workspace")>(
++    "@/lib/workspace",
++  );
++  return { ...actual, listProjectWorkspaces: workspaceApi.listProjectWorkspaces };
++});
++
++vi.mock("@/lib/use-daemon-machines", () => ({
++  useDaemonMachines: () => ({ items: [] }),
++}));
++vi.mock("@/lib/agent-profiles", async () => {
++  const actual = await vi.importActual<typeof import("@/lib/agent-profiles")>(
++    "@/lib/agent-profiles",
++  );
++  return { ...actual, useMineAgentProfiles: () => ({ profiles: [] }) };
++});
++vi.mock("@/lib/api/llm-providers", async () => {
++  const actual = await vi.importActual<typeof import("@/lib/api/llm-providers")>(
++    "@/lib/api/llm-providers",
++  );
++  return { ...actual, listProviders: vi.fn().mockResolvedValue([]) };
++});
++
++/* ----- fake SSE connection（模板 + permission_request 路由） ----- */
++
++interface FakeConnHandlers {
++  onPermissionRequest: (req: any) => void;
++}
++
++interface FakeConn extends SessionStreamConnection {
++  handlers: FakeConnHandlers;
++}
++
++function makeStreamMock(): { conn: FakeConn; factory: ReturnType<typeof vi.fn> } {
++  let captured: FakeConn | null = null;
++  const factory = vi.fn(
++    (_sessionId: string, handlers: SessionStreamHandlers): FakeConn => {
++      captured = {
++        close: vi.fn(),
++        getLastEventId: () => null,
++        handlers: {
++          onPermissionRequest: (req: any) => handlers.onPermissionRequest?.(req),
++        },
++      };
++      return captured;
++    },
++  );
++  return {
++    get conn() {
++      return captured!;
++    },
++    factory,
++  };
++}
++
++function makePermissionRequest(overrides: Record<string, any> = {}): any {
++  return {
++    request_id: "req-1",
++    run_id: "r-live",
++    dialog_kind: "confirm",
++    title: "需要你的确认",
++    options: [],
++    ...overrides,
++  };
++}
++
++function makeDetail() {
++  return {
++    id: "sess-appr",
++    runtime_id: null,
++    lease_id: null,
++    provider: "claude",
++    status: "active",
++    agent_session_id: "ag-1",
++    config: null,
++    turn_count: 1,
++    created_at: "t",
++    last_active_at: null,
++    ended_at: null,
++    current_run_id: null,
++    workspace_id: null,
++    llm_provider_id: null,
++    agent_profile_id: null,
++    title: "审批兜底会话",
++    config_snapshot: null,
++  };
++}
++
++function setupPage(onSessionListRefresh: ReturnType<typeof vi.fn>) {
++  const qc = new QueryClient({
++    defaultOptions: { queries: { retry: false } },
++  });
++  return render(
++    <QueryClientProvider client={qc}>
++      <SessionPanel
++        mode="page"
++        sessionId="sess-appr"
++        machines={[]}
++        llmProviders={[]}
++        onSessionListRefresh={onSessionListRefresh}
++      />
++    </QueryClientProvider>,
++  );
++}
++
++beforeEach(() => {
++  vi.clearAllMocks();
++  sessionApi.fetchSessionQueue.mockResolvedValue([]);
++  sessionApi.deleteSessionQueueEntry.mockResolvedValue(undefined);
++  sessionApi.retrySessionQueueEntry.mockResolvedValue({
++    id: "entry-1",
++    prompt: "",
++    attachment_ids: [],
++    agent_profile_id: null,
++    llm_provider_id: null,
++    status: "pending",
++    error_msg: null,
++    created_at: "2026-10-20T10:00:00Z",
++  });
++  sessionApi.getAgentSession.mockResolvedValue(makeDetail());
++  sessionApi.getAgentSessionLogs.mockResolvedValue([]);
++  sessionApi.fetchSessionTurnOutline.mockResolvedValue({
++    session_id: "s-1",
++    total_turns: 0,
++    items: [],
++  });
++  sessionApi.listSessionRuns.mockResolvedValue([]);
++  sessionApi.fetchPendingDialogs.mockResolvedValue([]);
++  sessionApi.fetchSessionDialogHistory.mockResolvedValue([]);
++  sessionApi.listSessionTeamMissions.mockResolvedValue([]);
++  workspaceApi.listWorkspaces.mockResolvedValue({ items: [] });
++  workspaceApi.listProjects.mockResolvedValue([]);
++  workspaceApi.listProjectWorkspaces.mockResolvedValue([]);
++});
++
++describe("permission_request → onSessionListRefresh 兜底（2026-10-20-session-status-live-sync）", () => {
++  it("带 dialog_kind 的审批请求 → 右侧弹审批的同时刷新左栏列表（徽标秒级翻「在等你」）", async () => {
++    const stream = makeStreamMock();
++    sessionApi.streamSession.mockImplementation(stream.factory);
++    const onSessionListRefresh = vi.fn();
++
++    setupPage(onSessionListRefresh);
++    await waitFor(() => expect(sessionApi.streamSession).toHaveBeenCalledTimes(1));
++
++    act(() => {
++      stream.conn.handlers.onPermissionRequest(makePermissionRequest());
++    });
++    await waitFor(() => {
++      expect(onSessionListRefresh).toHaveBeenCalled();
++    });
++  });
++
++  it("同 request_id 重复事件：待审集合幂等去重，刷新仍随事件触发（哑信号多发无害，400ms 去抖层合并）", async () => {
++    const stream = makeStreamMock();
++    sessionApi.streamSession.mockImplementation(stream.factory);
++    const onSessionListRefresh = vi.fn();
++
++    setupPage(onSessionListRefresh);
++    await waitFor(() => expect(sessionApi.streamSession).toHaveBeenCalledTimes(1));
++
++    act(() => {
++      stream.conn.handlers.onPermissionRequest(makePermissionRequest());
++      stream.conn.handlers.onPermissionRequest(makePermissionRequest());
++    });
++    expect(onSessionListRefresh).toHaveBeenCalledTimes(2);
++  });
++
++  it("dialog_kind 为空（守卫早退，非「在等你」边沿）→ 零刷新", async () => {
++    const stream = makeStreamMock();
++    sessionApi.streamSession.mockImplementation(stream.factory);
++    const onSessionListRefresh = vi.fn();
++
++    setupPage(onSessionListRefresh);
++    await waitFor(() => expect(sessionApi.streamSession).toHaveBeenCalledTimes(1));
++
++    act(() => {
++      stream.conn.handlers.onPermissionRequest(
++        makePermissionRequest({ request_id: "req-quiet", dialog_kind: null }),
++      );
++    });
++    // 挂载期各种查询刷新与审批刷新无关：等一拍微任务排空后仍零调用。
++    await act(async () => {
++      await new Promise((r) => setTimeout(r, 0));
++    });
++    expect(onSessionListRefresh).not.toHaveBeenCalled();
++  });
++});
+diff --git a/frontend/src/components/daemon/session-panel/session-panel-page.tsx b/frontend/src/components/daemon/session-panel/session-panel-page.tsx
+index 86d2493ec..1ef45ee9b 100644
+--- a/frontend/src/components/daemon/session-panel/session-panel-page.tsx
++++ b/frontend/src/components/daemon/session-panel/session-panel-page.tsx
+@@ -1612,6 +1612,11 @@ export function SessionPanelPage({
+                 ? prev
+                 : [...prev, req],
+             );
++            // 2026-10-20-session-status-live-sync：审批等待边沿即时刷左栏列表
++            //（徽标翻「在等你」，经 400ms 去抖）——Redis 列表信号丢失时的本地
++            // 兜底；与 turn_completed 新完成分支同款调用，dialog 模式不传
++            // onSessionListRefresh 天然不受影响。
++            onSessionListRefresh?.();
+           },
+           onPermissionResolved: (resolved) => {
+             setPendingRequests((prev) =>

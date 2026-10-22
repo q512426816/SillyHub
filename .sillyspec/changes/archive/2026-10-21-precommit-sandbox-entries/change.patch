@@ -1,0 +1,57 @@
+diff --git a/backend/.pre-commit-config.yaml b/backend/.pre-commit-config.yaml
+index f6328dede..ad05134dc 100644
+--- a/backend/.pre-commit-config.yaml
++++ b/backend/.pre-commit-config.yaml
+@@ -12,10 +12,17 @@ repos:
+ # 2026-09-23 ql（change-events-channel 执行会话反馈④）：hook 失败时直接打印对齐修复命令——
+ # 实证 hook 与项目同为 uv 环境解析（根/backend 两处 `uv run ruff --version` 均 0.15.14，
+ # uv.lock 同版本），被拦时先跑修复命令再 add，不要怀疑版本漂移而绕 hook。
++# 2026-10-21-precommit-sandbox-entries：三条 pre-commit entry 去 `bash -c` 包装改直连
++# （探针实锤：agent 沙箱把 python.exe 子树 IL 降为 Low，python→msys 嵌套必崩
++# NtCreateDirectoryObject 0xC0000022、uv 默认缓存写 profile AppData 被驱动白名单拦，
++# 详见 .sillyspec/changes/archive/2026-10-21-precommit-sandbox-entries/design.md）。
++# uv 统一 --cache-dir 重定向进仓内 gitignored .tmp/uv-cache（Low 子树可写）。
++# agent 会话内跑官方 runner 前设：export PRE_COMMIT_HOME="$PWD/.tmp/pre-commit-home"。
++# 被拦时修复命令（ruff 报错已含文件与规则）：
++#   cd backend && uv run ruff format <被拦文件>   /   cd backend && uv run ruff check --fix <被拦文件>
+       - id: ruff-format
+         name: ruff format --check
+-        entry: >-
+-          bash -c 'uv run ruff format --check "$@" || { echo "  ↩ 修复命令（与 hook 同源 uv 环境，勿用全局 ruff）：cd backend && uv run ruff format <被拦文件>"; exit 1; }' --
++        entry: uv run --cache-dir .tmp/uv-cache ruff format --check
+         language: system
+         types: [python]
+         pass_filenames: true
+@@ -23,8 +30,7 @@ repos:
+ 
+       - id: ruff-check
+         name: ruff check
+-        entry: >-
+-          bash -c 'uv run ruff check "$@" || { echo "  ↩ 修复命令（与 hook 同源 uv 环境，勿用全局 ruff）：cd backend && uv run ruff check --fix <被拦文件>"; exit 1; }' --
++        entry: uv run --cache-dir .tmp/uv-cache ruff check
+         language: system
+         types: [python]
+         pass_filenames: true
+@@ -35,10 +41,10 @@ repos:
+ # 清单权威：.sillyspec/knowledge/testing-gotchas.md「共享断言面」条目（与
+ # scripts/check-assertion-surfaces.py RULES 两处同步登记）。提醒性注释拦不住
+ #（本周 4 处漏跟实证），故上机制闸；单测 scripts/test_check_assertion_surfaces.py。
++# 被拦时：本闸 check-only 不改文件；按脚本输出指引同步钉子测试后重新 add（勿绕过——仓库规则 10）。
+       - id: assertion-surfaces
+         name: check assertion surfaces
+-        entry: >-
+-          bash -c 'python scripts/check-assertion-surfaces.py || { echo "  ↩ 本闸 check-only 不改文件；按上面指引同步钉子测试后重新 add（勿绕过——仓库规则 10）"; exit 1; }' --
++        entry: uv run --cache-dir .tmp/uv-cache python scripts/check-assertion-surfaces.py
+         language: system
+         pass_filenames: false
+         always_run: true
+@@ -49,6 +55,9 @@ repos:
+ # 拦截面——pre-push 快检把 CI 同源四命令前移到推送时（约 1 分钟），fail-closed。
+ # 需一次性安装：backend/.venv/Scripts/python.exe -m pre_commit install
+ # --hook-type pre-push --config backend/.pre-commit-config.yaml
++# 2026-10-21-precommit-sandbox-entries：以下两条 pre-push 保留 bash -c 包装不动——
++# 推送发生在用户终端（Medium 树，bash/uv/pnpm 全可用）；agent 会话不推送，
++# 不为其扩大改动面（agent 会话内手动触发 pre-push 仍会 msys 崩，属已知限制）。
+       - id: ci-fast-gate
+         name: pre-push CI 快检（typecheck×2 + api-types 漂移×2）
+         entry: >-

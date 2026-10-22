@@ -113,7 +113,14 @@ class TestSpecVersion:
         assert spec_ws.spec_version == 0
 
     async def test_bumps_on_apply_sync_landing(self, db_session, tmp_path) -> None:
-        """apply_sync landing increments spec_version by exactly 1 per call."""
+        """apply_sync landing 推进 spec_version（单调递增， freshness 信号）。
+
+        2026-10-21-spec-manifest-incremental：有行变化的落地现在 +2——落盘主事务
+        bump 一次 + 清单对齐块（盖章 landing_version）再 bump 一次。对齐块是
+        bump commit 之后的独立短事务，若沿用旧值盖章，两 commit 之间的增量
+        GET 会永久漏行（见 service.py 对齐块注释）；多 bump 一次无正确性影响
+        （版本是新鲜度信号非变更计数）。
+        """
         ws = await _make_workspace(db_session)
         spec_root = tmp_path / "spec-root"
         spec_root.mkdir()
@@ -126,14 +133,14 @@ class TestSpecVersion:
         with p_doc, p_change:  # type: ignore[has-type]
             await svc.apply_sync(ws.id, tar_bytes)
         refreshed = await svc.get(ws.id)
-        assert refreshed.spec_version == 1
+        assert refreshed.spec_version == 2  # 落盘 bump +1，对齐盖章 bump +1
 
-        # Second landing bumps again.
+        # Second landing bumps again（单调递增）。
         tar_bytes_2 = _build_tar({"docs/B.md": b"# B"})
         with p_doc, p_change:  # type: ignore[has-type]
             await svc.apply_sync(ws.id, tar_bytes_2)
         refreshed = await svc.get(ws.id)
-        assert refreshed.spec_version == 2
+        assert refreshed.spec_version == 4
 
     async def test_existing_rows_backfill_zero(self, db_session, tmp_path) -> None:
         """A row inserted without an explicit spec_version persists as 0."""

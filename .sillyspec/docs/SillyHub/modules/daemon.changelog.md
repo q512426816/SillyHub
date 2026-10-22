@@ -63,3 +63,14 @@ created_at: 2026-08-27 14:32:24
 - 2026-10-20-conflict-platform-archive | 冲突对比平台留档快照自足回退
 - 2026-10-21-provider-set-default-ui | 供应商页复活设为默认入口
 - 2026-10-21-agent-profile-slim-default | 档案瘦身重定位为人格加技能清单并支持用户默认档案
+- 2026-10-20-codex-requires-openai-auth | 腾讯云平台 codex 会话选直连（anthropic 形态）供应商时稳定断流（stream dis…
+- 2026-10-20-session-status-live-sync | 左侧会话状态标签与右侧实时同步
+- 2026-10-21-gitlog-quotepath-fix | 修复git日志非ASCII路径展示与空diff
+- 2026-10-21-overview-card-mainflow-scan | 总览卡主管线去scan并隐藏thin零步骤
+- 2026-10-21-gitlog-conflict-quotepath | 合并冲突链路非ASCII路径quotepath修复
+- 2026-10-21-task-wakeup-restore | 恢复后台任务终态唤醒链并折叠系统行呈现
+- 2026-10-21-daemon-sync-hardening | 执行端同步加固与状态采集治理
+- 2026-10-21-spec-conflict-autoheal | spec推送冲突自动自愈与日志修整
+- 2026-10-21-daemon-zombie-turn | 修复 daemon 会话僵尸轮与打断无效
+- 2026-10-21-session-git-branch | 会话组件底部动态显示当前所在 git 分支
+- 2026-10-22-review-risk-fixes | 审查修复：原型路由防线与监听泄漏

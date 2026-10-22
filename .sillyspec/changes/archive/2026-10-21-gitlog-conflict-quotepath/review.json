@@ -1,0 +1,15 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-21-gitlog-conflict-quotepath",
+  "reviewer": "subagent",
+  "verdict": "PASS",
+  "reviewedAgainst": "21e877fc467eca703395f8b9d60dccfa4f67326d",
+  "findings": [],
+  "dimensionNotes": {
+    "乱序": "ok",
+    "并发": "ok",
+    "切换": "ok",
+    "作用域": "ok"
+  },
+  "reviewedAt": "2026-10-21T09:20:00+08:00"
+}

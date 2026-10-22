@@ -1,0 +1,52 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-21-mobile-scan-birth-cleanup",
+  "rows": [
+    {
+      "anchor": "FR-01",
+      "row_id": "2026-10-21-mobile-scan-birth-cleanup:flow:测试绑定FR-01",
+      "tests": [
+        "frontend/src/components/mobile/mobile-change-detail.test.tsx「步骤条：横向滚动容器 + 六阶段标签 + 当前阶段高亮 + 非线性阶段降级不渲染」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-21-mobile-scan-birth-cleanup"
+    },
+    {
+      "anchor": "FR-02",
+      "row_id": "2026-10-21-mobile-scan-birth-cleanup:flow:测试绑定FR-02",
+      "tests": [
+        "frontend/src/components/mobile/mobile-change-card.test.tsx「current_stage 缺省 → 降级 scan 标签（与桌面列降级口径一致）」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-21-mobile-scan-birth-cleanup"
+    },
+    {
+      "anchor": "FR-03",
+      "row_id": "2026-10-21-mobile-scan-birth-cleanup:flow:测试绑定FR-03",
+      "tests": [
+        "frontend/src/components/mobile/mobile-change-card.test.tsx",
+        "frontend/src/components/mobile/mobile-change-detail.test.tsx「步骤条：横向滚动容器 + 六阶段标签 + 当前阶段高亮 + 非线性阶段降级不渲染」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-21-mobile-scan-birth-cleanup"
+    }
+  ]
+}

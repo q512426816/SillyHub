@@ -1,0 +1,67 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-21-daemon-zombie-turn",
+  "rows": [
+    {
+      "anchor": "FR-01",
+      "row_id": "2026-10-21-daemon-zombie-turn:flow:测试绑定FR-01",
+      "tests": [
+        "sillyhub-daemon/tests/interactive/turn-start-watchdog.test.ts「inject 布防/事件撤防/到点收敛上报/终态撤防」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-21-daemon-zombie-turn"
+    },
+    {
+      "anchor": "FR-02",
+      "row_id": "2026-10-21-daemon-zombie-turn:flow:测试绑定FR-02",
+      "tests": [
+        "backend/app/modules/daemon/tests/test_interrupt_payload_run_id.py「interrupt payload 携带 run_id」",
+        "sillyhub-daemon/tests/daemon-interrupt-noop-report.test.ts「interrupt false 回传 notifyRunResult / 会话缺失不回报」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-21-daemon-zombie-turn"
+    },
+    {
+      "anchor": "FR-03",
+      "row_id": "2026-10-21-daemon-zombie-turn:flow:测试绑定FR-03",
+      "tests": [
+        "backend/app/modules/daemon/tests/test_pending_run_start_sweep.py「超龄在线 pending run 收敛 / 新 run·审批等待·离线 runtime 不扫」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-21-daemon-zombie-turn"
+    },
+    {
+      "anchor": "FR-04",
+      "row_id": "2026-10-21-daemon-zombie-turn:flow:测试绑定FR-04",
+      "tests": [
+        "frontend/src/components/daemon/session-panel/__tests__/interrupt-timeout.test.ts「15s 到点回退 running+提示 / 终态到达清定时器」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-21-daemon-zombie-turn"
+    }
+  ]
+}

@@ -72,6 +72,11 @@ class _SubmitState:
     cold_lookup_misses: set[tuple[uuid.UUID, str]] = field(default_factory=set)
     flat_messages: list[dict] = field(default_factory=list)
     agent_run: AgentRun | None = None
+    # 2026-10-20-session-status-live-sync：run 激活（pending→running）时的列表
+    # 信号标量（session_id + 会话属主 user_id），激活块事务内提取（commit 前），
+    # _submit_finalize 带入 PublishIntent、publish_submitted_messages 消费补发。
+    # None = 未激活（rowcount=0）/ 无绑定会话。
+    list_signal: tuple[uuid.UUID, uuid.UUID | None] | None = None
 
 
 # F2a（2026-10-12-session-defects task-01 / FR-02）：wire 事件时间戳钟差容忍带

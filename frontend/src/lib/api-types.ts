@@ -6346,6 +6346,30 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/daemon/sessions/{session_id}/git-status": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Session Git Status
+         * @description 会话当前 git 分支实时状态（2026-10-21-session-git-branch / FR-01..03）。
+         *
+         *     每请求经 daemon ``git_status`` RPC 现场采集（非创建快照）——root 决策链
+         *     与错误映射见 ``session/service/git_status.py`` 模块 docstring。会话组件
+         *     分支指示项的取数端点（≤60s 轮询），与 workspace 维度 git-log/status 互不影响。
+         */
+        get: operations["get_session_git_status_api_daemon_sessions__session_id__git_status_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/daemon/sessions/{session_id}/fork": {
         parameters: {
             query?: never;
@@ -7143,6 +7167,43 @@ export interface paths {
          *     同抛 ``DaemonSessionNotFound``（不泄露存在性）。只读端点，无状态机交互。
          */
         get: operations["get_session_usage_api_daemon_sessions__session_id__usage_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/daemon/sessions/{session_id}/model-usage": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Session Model Usage
+         * @description Return per-run × per-model token usage of an owned session (read-only).
+         *
+         *     数据源 ``agent_run_model_usage``（run 终态由 daemon 上报的 modelUsage 明细
+         *     落库，UNIQUE(run_id, model) 同 run 同模型一行）JOIN ``agent_runs`` 取轮起止
+         *     时间；只投影真实存在的列（含 cache 两维，无 duration 列——见
+         *     :class:`SessionModelUsageItemRead`）。**不**输出日志正文 / ``system_prompt``
+         *     / ``agent_profile_snapshot``：本端点只服务用量审计视图。
+         *
+         *     排序：轮次序优先（``AgentRun.created_at`` asc + ``id`` asc，与 turn-outline
+         *     / runs 端点同源的「用户发话序」口径），轮内以 ``started_at`` 兜底、``model``
+         *     作最终稳定 tiebreaker（同 run 同模型受 UNIQUE 约束不重复）。
+         *
+         *     归属 / 存在性复用 ``get_agent_session``（missing / 跨用户 / 软删均 404，不
+         *     泄露存在性），与 runs / logs / usage 端点同一道闸门；查询内联在此（service.py
+         *     非本任务 allowed_path，对齐 list_session_runs 先例）。
+         *
+         *     硬上限 ``_SESSION_MODEL_USAGE_MAX``=2000 行：多取 1 行判断是否溢出，溢出则
+         *     裁剪并置 ``truncated=true``（多取而非 COUNT，省一次聚合查询）。
+         */
+        get: operations["get_session_model_usage_api_daemon_sessions__session_id__model_usage_get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -12067,6 +12128,12 @@ export interface paths {
          *
          *     CLI ``spec-sync.js`` 以此清单为锚 diff 本地 ``.sillyspec/``，算出增量 ops 后
          *     POST ``/changes/-/spec-sync``（D-004@v1：CLI 无本地缓存，服务器清单即基线）。
+         *
+         *     2026-10-21-spec-manifest-incremental task-03：``?since=<spec_version>`` 增量
+         *     形态——只返回 ``landing_version > since`` 的行（含软删墓碑行），响应顶层带
+         *     当前 ``spec_version`` 供客户端作下次游标；无 since 为全量（现状行为，响应
+         *     仅新增 spec_version 字段）。背景：全量清单随工作区历史无界增长（生产实测
+         *     13k 行/2.2MB/5.5s@受限带宽），增量稳态只传变化行。
          *
          *     读清单也收紧为写权限（``require_platform_sync_write``，仅 shpsync_ token，
          *     JWT/shk_live_ 403）——清单是增量写协议的一部分，避免非同步方探测文件布局。
@@ -19229,6 +19296,10 @@ export interface components {
             /** Api Requests */
             api_requests?: number | null;
             error?: components["schemas"]["ModelErrorDTO"] | null;
+            file_changes?: components["schemas"]["TurnFileChangesSnapshot"] | null;
+            timing?: components["schemas"]["TurnTimingSnapshot"] | null;
+            /** Daemon Version */
+            daemon_version?: string | null;
         };
         /** InteractiveRunResultResponse */
         InteractiveRunResultResponse: {
@@ -25649,6 +25720,31 @@ export interface components {
             tier: "native" | "seed";
             lineage: components["schemas"]["SessionForkLineage"];
         };
+        /** SessionGitStatusResponse */
+        SessionGitStatusResponse: {
+            /**
+             * Git Mode
+             * @enum {string}
+             */
+            git_mode: "git" | "no_git" | "no_root";
+            /** Root */
+            root?: string | null;
+            /** Branch */
+            branch?: string | null;
+            /**
+             * Detached
+             * @default false
+             */
+            detached: boolean;
+            /** Head Short */
+            head_short?: string | null;
+            /** Files Changed */
+            files_changed?: number | null;
+            /** Untracked Count */
+            untracked_count?: number | null;
+            /** Synced At */
+            synced_at: string;
+        };
         /**
          * SessionInjectRequest
          * @description POST /api/daemon/sessions/{id}/inject 请求体（FR-02 / design §5 Wave1）。
@@ -25732,6 +25828,55 @@ export interface components {
              * @default false
              */
             steered: boolean;
+        };
+        /**
+         * SessionModelUsageItemRead
+         * @description 会话 model-usage 明细项：``agent_run_model_usage`` 行 + 所属 run 起止时间。
+         *
+         *     只含真实存在的列（``AgentRunModelUsage``：run_id / model / input_tokens /
+         *     output_tokens / cache_read_tokens / cache_creation_tokens；两个 cache 维度
+         *     该表确有列故一并透出；**无** duration 列——run 级 ``duration_api_ms`` 是
+         *     轮粒度，与「每模型一次调用」不同义，不搬进本明细不编造。``api_requests``
+         *     同为该表列但不属本次契约字段，故不输出）。``started_at`` / ``finished_at``
+         *     直映所属 ``AgentRun`` 列（派发失败轮等为 None，如实透出）。不含任何日志
+         *     正文 / ``agent_profile_snapshot``（尤其 ``system_prompt``）——本端点只做
+         *     用量审计面。
+         */
+        SessionModelUsageItemRead: {
+            /**
+             * Run Id
+             * Format: uuid
+             */
+            run_id: string;
+            /** Model */
+            model: string;
+            /** Started At */
+            started_at?: string | null;
+            /** Finished At */
+            finished_at?: string | null;
+            /** Input Tokens */
+            input_tokens: number;
+            /** Output Tokens */
+            output_tokens: number;
+            /** Cache Read Tokens */
+            cache_read_tokens: number;
+            /** Cache Creation Tokens */
+            cache_creation_tokens: number;
+        };
+        /**
+         * SessionModelUsageRead
+         * @description model-usage 响应体：``session_id`` + 明细项 + 是否被硬上限截断。
+         */
+        SessionModelUsageRead: {
+            /**
+             * Session Id
+             * Format: uuid
+             */
+            session_id: string;
+            /** Items */
+            items: components["schemas"]["SessionModelUsageItemRead"][];
+            /** Truncated */
+            truncated: boolean;
         };
         /**
          * SessionQueueEntry
@@ -25891,6 +26036,11 @@ export interface components {
          *         close 终态不覆盖），供前端上下文环历史回填取最新非 null 值；历史行 /
          *         老 daemon 无上报为 None（环未知态，design §9）。
          *     全部 nullable——老 run 行 / 未配置轮为 None，前端如实显示未指定/不累计。
+         *
+         *     1b（2026-10-20-session-page-dsh-alignment task-08 / D-023@v1）：追加
+         *     ``file_changes`` / ``file_changes_capability`` / ``timing`` 三字段——侧表
+         *     ``daemon_run_snapshots`` 一次 IN 批量投影（禁 N+1）；无行 → ``None`` +
+         *     ``"tool_only"``（显式降级，不伪造「本轮无改动」），既有字段与形状零变化。
          */
         SessionRunRead: {
             /**
@@ -25949,6 +26099,14 @@ export interface components {
             failure_summary?: string | null;
             /** Engine Anchor */
             engine_anchor?: string | null;
+            file_changes?: components["schemas"]["TurnFileChangesSnapshot"] | null;
+            /**
+             * File Changes Capability
+             * @default tool_only
+             * @enum {string}
+             */
+            file_changes_capability: "full" | "tool_only";
+            timing?: components["schemas"]["TurnTimingSnapshot"] | null;
         };
         /**
          * SessionRuntimeRequest
@@ -26947,17 +27105,28 @@ export interface components {
         };
         /**
          * SpecManifestResponse
-         * @description GET /changes/-/spec-manifest 200 响应：服务器权威清单全量 map（design §5.2/§7）。
+         * @description GET /changes/-/spec-manifest 200 响应：服务器权威清单 map（design §5.2/§7）。
          *
          *     CLI ``spec-sync.js`` 以此为锚 diff 本地 ``.sillyspec/`` 算增量 ops
          *     （D-004@v1 CLI 无本地缓存，清单即基线）。无清单行（旧 tar 全量同步后失效 /
          *     全新 workspace）→ 空 ``files``，CLI 走 R-07 兜底全量重算。
+         *
+         *     2026-10-21-spec-manifest-incremental task-03：新增顶层 ``spec_version``（全量/
+         *     增量均带）——CLI 携带 ``?since=<spec_version>`` 时 ``files`` 只含该版本之后
+         *     落地的行（增量游标形态），并以响应 ``spec_version`` 作下次游标；无 since 为
+         *     全量（既有 CLI 忽略未知字段，向后兼容）。
          */
         SpecManifestResponse: {
             /** Files */
             files?: {
                 [key: string]: components["schemas"]["SpecManifestFileEntry"];
             };
+            /**
+             * Spec Version
+             * @description 工作区当前权威版本（下次增量的 since 游标）
+             * @default 0
+             */
+            spec_version: number;
         };
         /**
          * SpecSyncRequest
@@ -28485,6 +28654,68 @@ export interface components {
             items: components["schemas"]["TranslateItemOut"][];
         };
         /**
+         * TurnFileChange
+         * @description 单文件变更行（``TurnFileChangesSnapshot.files[]``）。
+         */
+        TurnFileChange: {
+            /** Path */
+            path: string;
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "added" | "modified" | "deleted" | "untracked";
+            /** Added */
+            added: number;
+            /** Deleted */
+            deleted: number;
+            /** Binary */
+            binary?: boolean | null;
+            /**
+             * Attribution
+             * @enum {string}
+             */
+            attribution: "edit_patch" | "command";
+            /** Edittoolnames */
+            editToolNames?: string[] | null;
+            /** Source */
+            source?: ("git" | "mtime") | null;
+        };
+        /**
+         * TurnFileChangesSnapshot
+         * @description 一轮工作区文件变更快照（``GET /sessions/{id}/runs`` 的 ``file_changes``）。
+         */
+        TurnFileChangesSnapshot: {
+            /** Runid */
+            runId: string;
+            /** Baselinehead */
+            baselineHead?: string | null;
+            /** Collectedat */
+            collectedAt: string;
+            /** Collectms */
+            collectMs: number;
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "ok" | "partial" | "failed" | "unavailable";
+            /** Reason */
+            reason?: ("timeout" | "not_a_repo" | "git_missing" | "queue_overflow") | null;
+            /** Truncated */
+            truncated?: boolean | null;
+            /**
+             * Files
+             * @default []
+             */
+            files: components["schemas"]["TurnFileChange"][];
+            /**
+             * Concurrentsessionshint
+             * @default true
+             * @constant
+             */
+            concurrentSessionsHint: true;
+        };
+        /**
          * TurnOutlineItemRead
          * @description turn-outline 单轮摘要项（FR-01）。
          *
@@ -28532,6 +28763,35 @@ export interface components {
             prompt_summary?: string | null;
             /** Answer Summary */
             answer_summary?: string | null;
+        };
+        /**
+         * TurnTimingSnapshot
+         * @description 一轮模型调用时序（``GET /sessions/{id}/runs`` 的 ``timing``）。
+         *
+         *     ``attempts[]`` 原样透传为 dict 列表（不新增第 5 个镜像类，字段集由 design
+         *     钉死：index / startedAt / firstTokenAt / endedAt / model / inputTokens /
+         *     outputTokens）。``ttftMs`` 只在取到首 token 时有值——**null 不得填 0 冒充**；
+         *     无采样时整个 timing 为 null（而非空对象），前端保持单色近似（D-025@v1）。
+         */
+        TurnTimingSnapshot: {
+            /** Runid */
+            runId: string;
+            /**
+             * Basis
+             * @enum {string}
+             */
+            basis: "observed" | "approx";
+            /** Ttftms */
+            ttftMs?: number | null;
+            /** Totalms */
+            totalMs: number;
+            /**
+             * Attempts
+             * @default []
+             */
+            attempts: {
+                [key: string]: unknown;
+            }[];
         };
         /**
          * UnreadCountResponse
@@ -40404,6 +40664,37 @@ export interface operations {
             };
         };
     };
+    get_session_git_status_api_daemon_sessions__session_id__git_status_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                session_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SessionGitStatusResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     fork_session_api_daemon_sessions__session_id__fork_post: {
         parameters: {
             query?: never;
@@ -41465,6 +41756,37 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["SessionUsageRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_session_model_usage_api_daemon_sessions__session_id__model_usage_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                session_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SessionModelUsageRead"];
                 };
             };
             /** @description Validation Error */
@@ -51364,7 +51686,10 @@ export interface operations {
     };
     get_spec_manifest_api_changes___spec_manifest_get: {
         parameters: {
-            query?: never;
+            query?: {
+                /** @description 增量游标（客户端已消费的工作区 spec_version）：只返回该版本之后落地的清单行 */
+                since?: number | null;
+            };
             header?: never;
             path?: never;
             cookie?: never;
@@ -51378,6 +51703,15 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["SpecManifestResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };

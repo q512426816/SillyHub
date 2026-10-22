@@ -1,0 +1,52 @@
+tier: thin
+legacy_fallback: false
+substeps:
+  artifacts: done
+  ledger: done
+  patch: done
+  review: done
+  probes: done
+  distill: done
+  archive: done
+  events: done
+born_face: thin
+with_tasks: false
+review_force: null
+input: >-
+  清理临时hook面并沉淀沙箱知识
+
+
+  动机：2026-10-21-precommit-sandbox-entries 已让官方 pre-commit 链在 agent 会话可用（默认 .git/hooks + 会话级 PRE_COMMIT_HOME），同会话早期自建的
+  .tmp/hooks 等价 hook 面完成使命应清理；本次排查实锤的「python 子树 Low IL 限制」与「WSL bash 误解析坑」尚未沉淀进知识库，后续会话会重复踩。
+
+
+  成功标准：
+
+  - .tmp/hooks 会话等价 hook 面删除，仓内无任何链路再引用它（配置注释与知识文档统一指向官方链 + export PRE_COMMIT_HOME 会话指引）
+
+  - .sillyspec/knowledge 新增「agent 沙箱 python 子树 Low IL 限制」条目：症状（python→msys 嵌套 0xC0000022 崩、profile 缓存写被拒）、根因（沙箱驱动降
+  IL、token 无 CodexSandboxUsers、DACL 修复无效）、WSL bash 误解析坑（python spawn bash 命中 System32 WSL 而非 Git Bash）、处置（去 msys 入口 +
+  PRE_COMMIT_HOME 会话指引），INDEX 可路由
+
+  - sillyspec knowledge search 关键词实证命中；交付提交走默认官方 hook 链留痕
+autopilot: false
+prestage_ack: true
+baseline_commit: 428878fbe64ad3c2b80824dbc8c25be4d5f426c0
+updatedAt: '2026-10-21T01:42:54.748Z'
+cross_baselines:
+  sillyspec: 3fd7cf3b6c29958a54cee8c72b4b89bf628d9a70
+baseline_sha256: 5cfe0ad182484a4bac8fb4d9f4ee45ada83625671629611b5743c33d70d7edaa
+spec_approved: true
+spec_approved_at: '2026-10-21T01:36:28.739Z'
+spec_approved_by: zcode-precommit-cleanup
+spec_approved_channel: user-confirmed
+spec_attested_by: zcode-precommit-cleanup
+batch_ticked: true
+gate_summary: >-
+  test: passed ← module[]+deps(jsx37)+fr(35)（48.4s）
+  结果：C:\Users\qinyi\IdeaProjects\multi-agent-platform\.sillyspec\.runtime\verify-runs\20261021013921\test-result.json｜lint:
+  passed ← cd backend && uv run ruff check . && uv run ruff format --check . && uv run mypy app && cd ../frontend &&
+  pnpm lint && cd ../sillyhub-daemon && pnpm typecheck（12.9s）
+  结果：C:\Users\qinyi\IdeaProjects\multi-agent-platform\.sillyspec\.runtime\verify-runs\20261021013921\test-result.json｜门文件
+  30 个
+

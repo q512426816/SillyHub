@@ -1,0 +1,27 @@
+diff --git a/.gitignore b/.gitignore
+index 19eee4ce3..947f3f64b 100644
+--- a/.gitignore
++++ b/.gitignore
+@@ -97,3 +97,9 @@ attachments/[0-9a-f]*
+ 
+ # 2026-10-15-server-logs-panel：后端轮转日志运行产物（data/logs/backend.log 等）
+ data/logs/
++
++# 2026-10-21-proto-data-exposure-guard：本地产物机制防线——多 agent 共享仓防误提交
++#（纪律防线=AGENTS.md 规则 11 禁目录级 add；此处补机制防线）
++/.tmp/
++backend/pytest-of-*/
++*.TMP
+diff --git a/frontend/.gitignore b/frontend/.gitignore
+index 226988a40..caadc33cc 100644
+--- a/frontend/.gitignore
++++ b/frontend/.gitignore
+@@ -5,3 +5,8 @@ playwright-report/
+ coverage/
+ e2e/.env.e2e
+ prototype-dist/.build/
++
++# 2026-10-21-proto-data-exposure-guard：真实会话数据只允许 staging 在免鉴权静态面
++#（public/）之外，且不进 git/构建；public/__proto* 防同名目录被重建后误提交。
++/.proto-staging/
++/public/__proto*/

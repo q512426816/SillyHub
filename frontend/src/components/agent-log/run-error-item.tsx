@@ -276,16 +276,29 @@ export function RunErrorItem({
   const { Icon } = meta;
   const hint = item.hint ?? fallbackHint ?? autoRecoverHint ?? meta.defaultHint;
   const hasRaw = item.raw != null && item.raw.trim().length > 0;
+  // 2026-10-20-session-error-visibility：raw 首行摘要默认可见——生产实证
+  // unknown 兜底卡只显示「运行失败 · 请查看下方详情」，真实原因（如
+  // "codex exited code=1"）藏在折叠里，用户排查必须多点一步。改为正文直接
+  // 展示首行（截 200 字符）；「查看详情」仅在摘要之外还有更多内容时出现
+  // （展开完整 raw）。
+  const rawFirstLine = (() => {
+    if (!hasRaw) return null;
+    const line = (item.raw ?? "").split(/\r?\n/, 1)[0]!.trim();
+    if (line.length === 0) return null;
+    return line.length > 200 ? `${line.slice(0, 200)}…` : line;
+  })();
+  const hasMoreRaw = rawFirstLine !== null && rawFirstLine !== item.raw;
   const [showDetail, setShowDetail] = useState(false);
 
   // actions 可见性：
   // - 重新发送：父组件传入 onResend（ql-20260904-010：所有失败卡都可重试，
   //   不再按 item.retryable 门控）。
   // - 切换供应商：父组件传入 onSwitchProvider（由父级按场景决定是否提供）。
-  // - 查看详情：有 raw 可展开，或父组件传入 onViewDetail。
+  // - 查看详情：raw 首行摘要之外还有更多内容可展开，或父组件传入 onViewDetail
+  //   （2026-10-20：单行短 raw 摘要即全文，不再给展开按钮）。
   const showResend = Boolean(onResend);
   const showSwitch = Boolean(onSwitchProvider);
-  const showDetailBtn = hasRaw || Boolean(onViewDetail);
+  const showDetailBtn = hasMoreRaw || Boolean(onViewDetail);
   const hasActions = showResend || showSwitch || showDetailBtn;
 
   // 主操作按钮（primary 蓝底）：首个可用「修复」动作——重发优先，其次切换供应商
@@ -345,6 +358,17 @@ export function RunErrorItem({
       <p className="mt-1.5 min-w-0 break-words text-sm text-zinc-800 [overflow-wrap:anywhere]">
         {item.message}
       </p>
+
+      {/* 原始错误首行摘要（2026-10-20-session-error-visibility：默认可见，排查免点击；
+          展开全文时隐藏防重复） */}
+      {rawFirstLine && !showDetail && (
+        <p
+          data-testid="run-error-raw-summary"
+          className="mt-1 min-w-0 break-words font-mono text-xs text-zinc-600 [overflow-wrap:anywhere]"
+        >
+          {rawFirstLine}
+        </p>
+      )}
 
       {/* 针对性建议 hint */}
       {hint && (

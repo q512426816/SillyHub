@@ -507,7 +507,14 @@ class LlmProviderService:
     # ── fetch-models（task-02 / D-001/D-006）──────────────────────────────
 
     _FETCH_TIMEOUT: float = 10.0  # NFR-03：上游 /v1/models 超时 10s
-    _STRIP_SUFFIXES: tuple[str, ...] = ("/anthropic", "/compatibility", "/api")
+    # 剥离候选后缀（cc-switch 范式）。"/openai/v1"（2026-10-20-codex-models-fetch-candidates）：
+    # OpenCode 网关范式 base=…/inference/go/openai/v1，真实 models 在网关根 /v1/models。
+    _STRIP_SUFFIXES: tuple[str, ...] = (
+        "/anthropic",
+        "/compatibility",
+        "/api",
+        "/openai/v1",
+    )
     _USAGE_TIMEOUT: float = 15.0  # 用量查询上游超时 15s（task-03）
 
     async def fetch_models(
@@ -572,7 +579,17 @@ class LlmProviderService:
                     details={"status": resp.status_code, "url": url},
                 )
             if resp.status_code == 200:
-                return self._parse_models_response(resp, url)
+                # 200 但响应非 models 结构（网关对未知路径 200 兜底，如实测智谱
+                # /api/v1/v1/models 返 200 错误 JSON）→ 视为本候选失败继续尝试
+                # （2026-10-20-codex-models-fetch-candidates），全候选耗尽再按
+                # 解析失败收口。
+                try:
+                    return self._parse_models_response(resp, url)
+                except LlmProviderModelsAllFailed:
+                    last_status = 200
+                    last_kind = "parse_failed"
+                    last_url = url
+                    continue
 
             # 404 / 405 / 5xx 等 → 记录并尝试下一候选
             last_status = resp.status_code
@@ -701,6 +718,12 @@ class LlmProviderService:
                 url = f"{stripped}/v1/models"
                 if url not in candidates:
                     candidates.append(url)
+        # 2026-10-20-codex-models-fetch-candidates：base 已含版本段的 OpenAI 风格
+        # 端点兜底（智谱 coding /api/v1 → /api/v1/models，实测 200）。置于最后，
+        # 既有候选尝试顺序零变化。
+        base_models_url = f"{base}/models"
+        if base_models_url not in candidates:
+            candidates.append(base_models_url)
         return candidates
 
     @staticmethod
@@ -708,10 +731,13 @@ class LlmProviderService:
         resp: httpx.Response,
         url: str,
     ) -> FetchModelsResponse:
-        """解析上游 /v1/models 响应（OpenAI 兼容 ``{data: [{id, owned_by, ...}]}``）。
+        """解析上游 models 响应（OpenAI 兼容 ``{data: [{id, owned_by, ...}]}``）。
 
         Anthropic 官方 /v1/models 不返 ``owned_by`` → 该字段缺失视为 None。
-        非 200 由调用方分类；200 但 body 不可解析 → ``LlmProviderModelsAllFailed``。
+        智谱 coding 端点（/api/v1/models）返回 ``{models: [{slug, ...}]}``（无
+        id 字段，slug 为模型名，实测 2026-10-20）→ 列表字段 ``models`` 兜底 +
+        id 缺失时取 ``slug``。非 200 由调用方分类；200 但 body 不可解析 →
+        ``LlmProviderModelsAllFailed``。
         """
         try:
             body = resp.json()
@@ -722,6 +748,9 @@ class LlmProviderService:
             ) from exc
         data = body.get("data") if isinstance(body, dict) else None
         if not isinstance(data, list):
+            alt = body.get("models") if isinstance(body, dict) else None
+            data = alt if isinstance(alt, list) else None
+        if not isinstance(data, list):
             raise LlmProviderModelsAllFailed(
                 "上游响应缺少模型列表字段，请稍后重试。",
                 details={"url": url},
@@ -731,6 +760,8 @@ class LlmProviderService:
             if not isinstance(item, dict):
                 continue
             item_id = item.get("id")
+            if not isinstance(item_id, str):
+                item_id = item.get("slug")
             if not isinstance(item_id, str):
                 continue
             owned = item.get("owned_by")

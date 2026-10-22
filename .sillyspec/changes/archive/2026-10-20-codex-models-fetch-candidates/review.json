@@ -1,0 +1,35 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-20-codex-models-fetch-candidates",
+  "reviewer": "subagent",
+  "verdict": "PASS",
+  "reviewedAgainst": "aa64d06245f0473307dc8ea88dfc9dd46c871e9a",
+  "findings": [
+    {
+      "severity": "P3",
+      "title": "上轮 P2 主体已清偿，残余：design 风险段「至多多 1 次 GET」量化仍不准且「缺 data 字段→AllFailed」仍是即抛语义描述",
+      "evidence": "本轮增量核验：git log c15380d65..aa64d062 仅 1 个 docs 提交、--name-only 仅 requirements.md/design.md 两规格文件，代码相对上轮 PASS 面（c15380d65）零改动，test_fetch_models.py 36/36 绿。上轮 P2 三要素均清偿：design.md:21 契约段已改为「200-坏-body 首候选场景从直接终报变为继续尝试；其余错误分类（401/403 鉴权、404/405 不支持、超时）不变」——与代码一致（service.py:641-648 401/403 立即 AuthFailed、:634-638 超时立即 Timeout、:683-693 终态按最后一次失败分类 404/405→Unsupported 其余 AllFailed）；FR-04/FR-05 行为句与代码一致（service.py:645-655 候选 200→_parse_models_response→except LlmProviderModelsAllFailed→记 last_status=200/last_kind=parse_failed→continue，全候选耗尽走 AllFailed 分支收口；service.py:806-833 data 优先→非列表回退 body[\"models\"]→条目 id 非字符串回退 slug）；FR-04/FR-05 绑定行用例名与实际函数名逐字一致，同一用例 test_zhipu_coding_base_models_fallback_succeeds（test_fetch_models.py:293）覆盖两行如实——候选1 mock 200 {\"code\":500,\"msg\":\"404 NOT_FOUND\",\"success\":False}（=FR-04 跳过路径）、候选2 mock 200 {\"models\":[{\"slug\":\"glm-5.3\",\"display_name\":\"glm-5.3\"}]}，断言 await_count==2、URL 序列 /api/v1/v1/models→/api/v1/models、id==[\"glm-5.3\"]（=FR-05 断言）。残余（降级 P3）：design.md:42「每条 models 拉取至多多 1 次 GET」仍不准——/openai/v1 形态（如 opencode.ai/inference/go/openai/v1）旧 1 候选、新 3 候选（base+/v1/models、剥 /openai/v1 后 +/v1/models、尾 base+/models，互异无去重消减），全失败场景多 2 次 GET；同段「_parse_models_response 已有『body 不可解析/缺 data 字段 → AllFailed』兜底」仍是 continue 语义落地前的即抛描述，且「缺 data 字段→AllFailed」在 FR-05 后不具一般性（body 有 models 列表即命中）——但该句所处为风险叙事段，其结论「不会误报成功」仍成立（恒定坏 body 终态仍 AllFailed、last_status=200 非 404/405）。",
+      "location": ".sillyspec/changes/2026-10-20-codex-models-fetch-candidates/design.md:42"
+    },
+    {
+      "severity": "P3",
+      "title": "fetch_models / _candidate_urls 函数级 docstring 与行为脱节、「逐字不变（NFR-02）」声明失真（上轮 P3 原样存在）",
+      "evidence": "代码零改动故原样存在：service.py:594-595 fetch_models docstring 候选描述仍只列 base+/v1/models 与剥 /anthropic|/compatibility|/api；service.py:766 _candidate_urls docstring 仍称候选「逐字不变（NFR-02）」且未列 /openai/v1（实际 _STRIP_SUFFIXES 已含，:573-580）与尾部 base+/models 兜底候选（:784-789）。新增代码处有行内注释、_parse_models_response docstring（:793-805）已同步，仅这两处函数级契约文案陈旧。",
+      "location": "backend/app/modules/llm_provider/service.py:766"
+    },
+    {
+      "severity": "P3",
+      "title": "200-坏-body 终态报错丢失 parse_error 细节（观测面小损，语义仍正确；上轮 P3 原样存在）",
+      "evidence": "代码零改动故原样存在：service.py:651-655 捕获 LlmProviderModelsAllFailed 后仅记 last_status=200/last_kind=\"parse_failed\"，_parse_models_response 抛出时携带的 parse_error 字符串（:806-810 非 JSON body 场景）在终态 details 中丢失；恒定坏 mock 下终态仍 AllFailed、错误类与对外语义正确，既有 test_non_json_body_raises_all_failed / test_missing_data_list_raises_all_failed 经此路径仍绿（本轮 36/36 通过）。混序终态（前候选 parse_failed、末候选 404）按既有「按最后一次失败类型分类」规则报 Unsupported，与改动前混状态规则一致，非新缺陷。",
+      "location": "backend/app/modules/llm_provider/service.py:651"
+    }
+  ],
+  "dimensionNotes": {
+    "乱序": "ok",
+    "并发": "ok",
+    "切换": "ok",
+    "作用域": "ok",
+    "边界": "边界已裁决：可接受（维持上轮四条裁决——(a) 限流面请求增量：手动触发低频、NFR-03 顺序不并发、SSRF 逐候选生效，可接受（量化表述失准已记 P3）；(b) 200-非-models-JSON 兜底：终态仍 AllFailed 不误报成功，continue 语义更强，可接受；(c) 放弃 vendor 特判：候选序列通用容错免 per-vendor 分支，可接受；(d) 放弃前端隐藏拉取按钮：不解决根因，可接受）"
+  },
+  "reviewedAt": "2026-10-20T13:31:54+08:00"
+}

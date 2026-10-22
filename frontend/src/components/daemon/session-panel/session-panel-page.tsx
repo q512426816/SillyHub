@@ -135,6 +135,8 @@ import {
   parseTeamCommand, teamTriggerErrorText, useSessionTeamMissions,
 } from "./use-session-team-missions";
 import { useStreamConnectionGuard } from "./use-stream-connection-guard";
+// 2026-10-21-daemon-zombie-turn FR-04：打断 15s 超时回退定时器簿记 + 到点裁决。
+import { isTurnStillInterrupting, useInterruptFeedbackTimeout } from "./interrupt-timeout";
 import { StreamConnectionBanner, TurnStalledWatchdogBanner } from "./connection-banners";
 import { applyAgentTaskStatusEvent } from "../agent-task-store";
 // 2026-10-13-subagent-stub-reconcile：任务快照对账（时间线子代理容器头收敛）。
@@ -156,6 +158,10 @@ import {
   ACTIVE_RUN_STATUSES, deriveTakeoverChrome,
 } from "./page-helpers";
 import { listAgentLogs } from "@/lib/agent-logs";
+// task-11（2026-10-20-session-page-dsh-alignment / FR-14 / D-023@v1）：`/runs` 读模型的
+// `file_changes` / `file_changes_capability` → 轮视图 camelCase 字段的**纯透传**
+// （snake→camel 投影；取数/分页/SSE 零参与，FR-22）。
+import { attachRunFileChanges } from "@/components/daemon/file-changes/turn-file-changes";
 import { TakeoverBridgeNote } from "./takeover-bridge-note";
 import { copyTextToClipboard } from "@/lib/clipboard";
 
@@ -1396,6 +1402,28 @@ export function SessionPanelPage({
                         ],
                       };
                     }
+                    // 2026-10-21-task-wakeup-restore：唤醒注入改落 task_wakeup
+                    // 留痕段（「收到任务消息」折叠行，与回放路径同口径）——不再
+                    // 整体隐藏（隐藏导致唤醒轮「无人说话 agent 凭空接话」不可溯源）。
+                    if (
+                      isTaskWakeupInjection(env.content ?? "") &&
+                      !next.segments?.some((s) => s.kind === "task_wakeup")
+                    ) {
+                      next = {
+                        ...next,
+                        segments: [
+                          {
+                            kind: "task_wakeup",
+                            id: `wakeup:${env.run_id}`,
+                            text: env.content ?? "",
+                            ts: env.timestamp
+                              ? Date.parse(env.timestamp)
+                              : Date.now(),
+                          },
+                          ...(next.segments ?? []),
+                        ],
+                      };
+                    }
                     if (!next.prompt.trim()) {
                       // 2026-10-10-system-opened-turn-usermsg：仅新鲜轮（无输出段）
                       // 把首条正文写为 prompt——系统注入开轮（[后台任务通知]，
@@ -1508,8 +1536,19 @@ export function SessionPanelPage({
             }
 
             // 失败轮拉取结构化错误详情（同 run 只拉一次，供 RunErrorItem 渲染）。
+            // 2026-10-20-session-error-visibility：backend 对 SDK
+            // error_during_execution（含全部模型错误）统一落 error_code=
+            // interactive_interrupted，deriveTurnTerminalStatus 归 killed 后本拉取
+            // 被跳过 → 实时失败轮错误卡永不渲染（仅快照路径能修正）。条件扩展：
+            // killed 且 env.status=failed 且 interrupted 也拉——error_detail 可解析
+            // （模型错误）升级 failed + 错误卡；真打断（error_detail 空）保持 killed
+            // 无卡（不落 system 兜底，防打断被误报为失败）。
+            const killedByInterrupted =
+              terminal === "killed" &&
+              env.status === "failed" &&
+              env.error_code === "interactive_interrupted";
             if (
-              terminal === "failed" &&
+              (terminal === "failed" || killedByInterrupted) &&
               env.run_id &&
               !fetchedErrorRunIdsRef.current.has(env.run_id)
             ) {
@@ -1519,10 +1558,25 @@ export function SessionPanelPage({
                 try {
                   const runs = await fetchRunsForErrorDetail();
                   const matched = runs.find((r) => r.id === failedRunId);
+                  const modelItem = buildErrorLogItem(matched?.error_detail ?? null);
+                  if (killedByInterrupted) {
+                    // killed 升级分支：仅模型错误（error_detail 可解析）升级
+                    // failed + 错误卡；真打断零触碰（保持 killed、无 errorDetail）。
+                    if (!modelItem) return;
+                    setTurnState((prev) => ({
+                      ...prev,
+                      turns: prev.turns.map((t) =>
+                        t.runId === failedRunId && !t.errorDetail
+                          ? { ...t, errorDetail: modelItem, status: "failed" as const }
+                          : t,
+                      ),
+                    }));
+                    return;
+                  }
                   // ql-20260831-004：error_detail（模型层）为空的系统级失败（撞闸/
                   // inject 过期）兜 failure_summary + error_code 映射（normalize）。
                   const item =
-                    buildErrorLogItem(matched?.error_detail ?? null) ??
+                    modelItem ??
                     buildSystemFailureItem(
                       matched?.error_code ?? null,
                       matched?.failure_summary ?? null,
@@ -1586,6 +1640,11 @@ export function SessionPanelPage({
                 ? prev
                 : [...prev, req],
             );
+            // 2026-10-20-session-status-live-sync：审批等待边沿即时刷左栏列表
+            //（徽标翻「在等你」，经 400ms 去抖）——Redis 列表信号丢失时的本地
+            // 兜底；与 turn_completed 新完成分支同款调用，dialog 模式不传
+            // onSessionListRefresh 天然不受影响。
+            onSessionListRefresh?.();
           },
           onPermissionResolved: (resolved) => {
             setPendingRequests((prev) =>
@@ -2919,15 +2978,23 @@ export function SessionPanelPage({
   // 重派生成本可接受）。
   const displayTurns = useMemo(
     () =>
-      mergePreviewIntoDisplayTurns(
-        turnOutline,
-        enrichDisplayTurns(
-          turnState.turns,
-          runsMeta,
-          llmProviders,
-          agentDisplayName,
-          session?.user_id,
+      // task-11（FR-14 / D-023@v1）：`runsMeta` 里已持有的 `file_changes` /
+      // `file_changes_capability` 投影成轮视图的 `fileChanges` / `fileChangesCapability`
+      // （纯 props 透传层：snake→camel + capability 缺省按 tool_only 降级；不取数、
+      // 不改分页、不碰 SSE 编排，FR-22 边界）。投影带对象身份缓存——未变化的轮保持
+      // 原引用，流式 delta 不击穿 TurnRow memo（ql-20260903-025 同款约束）。
+      attachRunFileChanges(
+        mergePreviewIntoDisplayTurns(
+          turnOutline,
+          enrichDisplayTurns(
+            turnState.turns,
+            runsMeta,
+            llmProviders,
+            agentDisplayName,
+            session?.user_id,
+          ),
         ),
+        runsMeta,
       ),
     [turnState.turns, runsMeta, llmProviders, agentDisplayName, session?.user_id, turnOutline],
   );
@@ -3964,6 +4031,37 @@ export function SessionPanelPage({
     void sendFromQueue(prompt, attachmentIds);
   }, [input, sessionId, session, ended, suspended, machineOnline, running, isQueueFull, pendingAttachments, attTokenMap, wsRefTokens, notify, sendToServerQueue, sendFromQueue, sessionEngine, openTeamPopover, handlePreSessionSend, teamMissions, isToolReportBody, handleTakeoverSend]);
 
+  // 2026-10-21-daemon-zombie-turn FR-04：打断 15s 超时回退（定时器簿记在
+  // interrupt-timeout.ts hook）。到点**先裁决**：该轮仍处 interrupting 才回退
+  // running + 提示；终态已到（打断正常生效）→ 静默 no-op，禁止误报「未生效」
+  // （评审 2026-10-21 P1 修复）。
+  const handleInterruptFeedbackTimeout = useCallback(
+    (runId: string) => {
+      if (!isTurnStillInterrupting(turnState.turns, runId)) return;
+      setTurnState((prev) => ({
+        ...prev,
+        turns: prev.turns.map((t) =>
+          t.runId === runId && t.status === "interrupting" ? { ...t, status: "running" } : t,
+        ),
+      }));
+      setErrorMsg(
+        "打断已发出 15 秒未生效，本轮可能已异常（执行端无响应）。可再次打断，或稍候由系统自动收敛。",
+      );
+    },
+    [turnState.turns],
+  );
+  const { arm: armInterruptFeedbackTimeout, clear: clearInterruptFeedbackTimeout } =
+    useInterruptFeedbackTimeout(handleInterruptFeedbackTimeout);
+  // FR-04 字面要求：该轮终态到达即清定时器（到点裁决兜底仍在，双保险不误报）。
+  const interruptArmedRunIdRef = useRef<string | null>(null);
+  useEffect(() => {
+    const armed = interruptArmedRunIdRef.current;
+    if (armed !== null && !isTurnStillInterrupting(turnState.turns, armed)) {
+      clearInterruptFeedbackTimeout();
+      interruptArmedRunIdRef.current = null;
+    }
+  }, [turnState.turns, clearInterruptFeedbackTimeout]);
+
   const handleInterrupt = useCallback(async () => {
     // task-03（R-01）：预会话态无可打断轮（按钮本就禁用，防御性短路）。
     if (!sessionId || !session || session.status !== "active" || !turnState.currentRunId) return;
@@ -3994,6 +4092,12 @@ export function SessionPanelPage({
     try {
       await interruptSession(sessionId);
       // turn 终态由 SSE turn_completed 决定；session 仍 active。
+      // 2026-10-21-daemon-zombie-turn FR-04：15s 超时回退——打断信号已送达但
+      // 终态迟迟不到（daemon 侧空转 / 僵尸轮）时回退 running + 提示，避免
+      // 永久停在「打断中」。终态到达由上方 effect 清定时器（规格字面要求），
+      // 到点仍以 isTurnStillInterrupting 二次裁决（双保险不误报）。
+      interruptArmedRunIdRef.current = localRunId;
+      armInterruptFeedbackTimeout(localRunId);
     } catch (err) {
       const apiErr = err as ApiError;
       const isNoCurrentRun =
@@ -4021,7 +4125,7 @@ export function SessionPanelPage({
         setErrorMsg(errMessage(apiErr, "打断失败"));
       }
     }
-  }, [session, turnState.currentRunId, sessionId]);
+  }, [session, turnState.currentRunId, sessionId, armInterruptFeedbackTimeout]);
 
   const handleReopen = useCallback(async () => {
     // task-03（R-01）：预会话态无会话可重开（入口本就不渲染，防御性短路）。

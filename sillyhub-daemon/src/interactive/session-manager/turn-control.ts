@@ -355,6 +355,11 @@ export async function inject(
     if (!mgr._pendingInjectCount.has(sessionId)) {
       mgr._pendingInjectCount.set(sessionId, 0);
     }
+    // 2026-10-21-daemon-zombie-turn FR-01：首轮启动路径布防看门狗——本条 inject
+    // 预期立即开新轮，窗口内零轮事件即判「push 被 SDK 吞掉」（打断 abort 收尾
+    // 竞态），到点重置会话态 + 回报该 run 失败。任意轮事件到达即撤防（events.ts
+    // onMessage/onResult），见 turn-control.ts 尾部看门狗簇注释。
+    mgr._armTurnStartWatchdog(sessionId, runId);
   }
 
   return { runId };
@@ -507,4 +512,106 @@ export function getPendingInjectCount(
   sessionId: string,
 ): number {
   return mgr._pendingInjectCount.get(sessionId) ?? 0;
+}
+
+// ── 2026-10-21-daemon-zombie-turn FR-01：轮启动看门狗 ────────────────────────
+//
+// 根因（生产会话 49d893ab 实证）：用户打断 → SDK 进入 abort 收尾窗口 →
+// backend 亚秒级自动注入（后台任务通知唤醒链）→ daemon inject() 正常 push
+// 进 SDK 输入流并置 status=running + currentRunId → SDK 在 abort 收尾中把该
+// 输入吞掉（无新轮、无事件、无 result）→ daemon 永停 running、backend run
+// 永停 pending（无 started_at），用户后续打断对着 live query 空转。
+//
+// 看门狗只布防「首轮启动路径」（inject push 前非 running——本条 inject 预期
+// 立即开新轮）：到点仍零轮事件即判消息被吞，重置会话态并回报该 run 失败。
+// 排队路径（wasRunningBeforeInject）不布防——当前轮事件会持续到达，排队
+// 消息的吞没属遗留缺口（design 风险节，另档治理）。
+
+/** 看门狗默认窗口（ms）。正常链路 push→首事件 ~1-2s（含网络），90s 是
+ * 「零事件」的强信号；远小于 backend pending run 清扫的 300s 兜底。 */
+export const DEFAULT_TURN_START_WATCHDOG_MS = 90_000;
+
+/** 读取看门狗窗口（env SILLYHUB_TURN_START_WATCHDOG_MS，非法/≤0 回落默认；
+ * 逐次读取便于测试覆写，对齐 injectWaitSessionMs 先例）。 */
+export function turnStartWatchdogMs(): number {
+  const raw = process.env.SILLYHUB_TURN_START_WATCHDOG_MS;
+  if (raw === undefined || raw === '') return DEFAULT_TURN_START_WATCHDOG_MS;
+  const v = Number.parseInt(raw, 10);
+  return Number.isFinite(v) && v > 0 ? v : DEFAULT_TURN_START_WATCHDOG_MS;
+}
+
+/** 布防（同会话重布防 = 换防：清旧 timer 挂新 runId——inject 撤防后再注入的
+ * 常规序列天然走本路径）。timer unref 不阻塞 daemon 退出。 */
+export function armTurnStartWatchdog(
+  mgr: SessionManagerCore,
+  sessionId: string,
+  runId: string,
+): void {
+  disarmTurnStartWatchdog(mgr, sessionId);
+  const timer = setTimeout(() => {
+    mgr._turnStartWatchdogs.delete(sessionId);
+    void fireTurnStartWatchdog(mgr, sessionId, runId).catch((err) => {
+      // eslint-disable-next-line no-console
+      console.error(
+        '[session-manager] turn start watchdog fire failed',
+        sessionId,
+        runId,
+        err,
+      );
+    });
+  }, turnStartWatchdogMs());
+  if (typeof timer.unref === 'function') {
+    timer.unref();
+  }
+  mgr._turnStartWatchdogs.set(sessionId, { timer, runId });
+}
+
+/** 撤防（幂等）：任意轮事件 / 会话终态 / stop 时调用。 */
+export function disarmTurnStartWatchdog(
+  mgr: SessionManagerCore,
+  sessionId: string,
+): void {
+  const w = mgr._turnStartWatchdogs.get(sessionId);
+  if (w) {
+    clearTimeout(w.timer);
+    mgr._turnStartWatchdogs.delete(sessionId);
+  }
+}
+
+/**
+ * 看门狗触发：会话态仍停留在布防轮（status=running & currentRunId 未变）才
+ * 动作——期间发生过事件/结果/新 inject（currentRunId 已切）则视为误报静默跳过。
+ *
+ * 动作：status→active；pendingInjectCount 清零（本轮从未发生，无排队可消费）。
+ * **currentRunId 有意保留**（评审 2026-10-21 P2 缓解）：假阳性形态（轮其实起来
+ * 了只是慢）下迟到 result 会按 currentRunId 归属——保留旧 runId 让迟到结果落到
+ * 「已被本看门狗收敛为 failed」的旧轮上（close_interactive_run 终态幂等 no-op），
+ * 而不是被错误记到用户重发后的新轮；下一次 inject 会无条件覆盖 currentRunId。
+ * lastActiveAt 更新后，若保留 running 态的陈旧判定由 inject 的 60s stale-reset
+ * 自愈路径接管（status 已是 active，不触发）。
+ * 随后经 deps.onTurnStartTimeout（可选）由 daemon 桥 notifyRunResult 收敛该 run。
+ */
+async function fireTurnStartWatchdog(
+  mgr: SessionManagerCore,
+  sessionId: string,
+  runId: string,
+): Promise<void> {
+  const state = mgr._store.get(sessionId);
+  if (!state) return;
+  if (state.status !== 'running' || state.currentRunId !== runId) return;
+  state.status = 'active';
+  state.lastActiveAt = Date.now();
+  mgr._pendingInjectCount.delete(sessionId);
+  // eslint-disable-next-line no-console
+  console.warn(
+    '[session-manager] turn start watchdog fired: injected message was not ' +
+      'consumed by engine within window (likely swallowed by interrupt abort ' +
+      'teardown). Session state reset to active; run will be reported failed.',
+    { sessionId, runId, windowMs: turnStartWatchdogMs() },
+  );
+  mgr._scheduleFlush();
+  const cb = mgr.deps.onTurnStartTimeout;
+  if (typeof cb === 'function') {
+    await cb(sessionId, runId);
+  }
 }

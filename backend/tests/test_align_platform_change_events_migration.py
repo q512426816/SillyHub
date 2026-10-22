@@ -113,8 +113,11 @@ class TestMigrationStructure:
         # 20261016010000（drop uq_kssc_workspace_path_anchor_title——生产语料
         # 重号条目撞约束实证，2026-10-15-knowledge-search-pgvector）。
         # 20261016100000（agent_sessions 加 title_fallback 列+回填——2026-10-16-backend-mem-polling task-08）→
-        # c3f8a1d6e2b4（sessions 加 family_id 列——2026-10-16-fix-auth-random-logout task-01）。
-        assert heads[0] == "c3f8a1d6e2b4"  # family_id 迁移成为新 head（注释链续写）
+        # c3f8a1d6e2b4（sessions 加 family_id 列——2026-10-16-fix-auth-random-logout task-01）→
+        # 20261021120000（daemon_run_snapshots 侧表——2026-10-20-session-page-dsh-alignment task-08）→
+        # 20261021130000（spec_file_manifest.landing_version 印章列+索引——
+        # 2026-10-21-spec-manifest-incremental task-01 增量清单游标）。
+        assert heads[0] == "20261021130000"  # 增量清单印章迁移成为新 head（注释链续写）
 
     def test_revision_chain(self) -> None:
         mod = _load_migration_module()

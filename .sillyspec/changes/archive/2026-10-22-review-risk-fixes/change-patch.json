@@ -1,0 +1,127 @@
+{
+  "change": "2026-10-22-review-risk-fixes",
+  "baseline": "3da9e8d44310bfa5fe016e010780e4c9606a726e",
+  "head": "c975a003a577bfb5ce79a8445906f9f358939c82",
+  "files": [
+    "frontend/.dockerignore",
+    "frontend/src/app/proto/session-redesign/page.tsx",
+    "sillyhub-daemon/src/event-loop-watch.ts",
+    "sillyhub-daemon/src/host-fs-handler.ts",
+    "sillyhub-daemon/tests/event-loop-watch.test.ts",
+    "sillyhub-daemon/tests/host-fs-handler-git-log.test.ts"
+  ],
+  "totals": {
+    "files": 6,
+    "additions": 101,
+    "deletions": 17
+  },
+  "savedAt": "2026-10-21T23:46:34.874Z",
+  "note": "flow done 时点冻结（本变更可归属交付面：baseline..HEAD 提交面过滤 .sillyspec/ 只留 .sillyspec/docs/ 交付文档 + 独占树未提交交付；治理工件目录不入冻结——2026-10-12-close-trace-freeze-integrity FR-01）",
+  "modules": [
+    {
+      "id": "frontend",
+      "files": 2,
+      "doc": "docs/multi-agent-platform/modules/frontend.md",
+      "docTouched": false,
+      "docMissing": false
+    },
+    {
+      "id": "sillyhub-daemon",
+      "files": 4,
+      "doc": "docs/multi-agent-platform/modules/sillyhub-daemon.md",
+      "docTouched": false,
+      "docMissing": false
+    },
+    {
+      "id": "daemon",
+      "files": 4,
+      "doc": "docs/SillyHub/modules/daemon.md",
+      "docTouched": false,
+      "docMissing": false
+    },
+    {
+      "id": "frontend_app",
+      "files": 1,
+      "doc": "docs/SillyHub/modules/frontend_app.md",
+      "docTouched": false,
+      "docMissing": false
+    }
+  ],
+  "uncoveredDirs": [],
+  "moduleMaps": [
+    "docs/backend/modules/_module-map.yaml",
+    "docs/frontend/modules/_module-map.yaml",
+    "docs/multi-agent-platform/modules/_module-map.yaml",
+    "docs/SillyHub/modules/_module-map.yaml",
+    "docs/sillyhub-daemon/modules/_module-map.yaml"
+  ],
+  "acceptedDirtyGap": 22,
+  "scopeAudit": {
+    "mode": "full-flow",
+    "ok": true,
+    "degradedReason": null,
+    "baseAnchor": "3da9e8d44310bfa5fe016e010780e4c9606a726e",
+    "totals": {
+      "files": 6,
+      "additions": 101,
+      "deletions": 17
+    },
+    "rows": [
+      {
+        "path": "frontend/.dockerignore",
+        "additions": 6,
+        "deletions": 0,
+        "kind": "modified",
+        "planned": "修改",
+        "verdict": "planned"
+      },
+      {
+        "path": "frontend/src/app/proto/session-redesign/page.tsx",
+        "additions": 6,
+        "deletions": 0,
+        "kind": "modified",
+        "planned": "修改",
+        "verdict": "planned"
+      },
+      {
+        "path": "sillyhub-daemon/src/event-loop-watch.ts",
+        "additions": 18,
+        "deletions": 11,
+        "kind": "modified",
+        "planned": "修改",
+        "verdict": "planned"
+      },
+      {
+        "path": "sillyhub-daemon/src/host-fs-handler.ts",
+        "additions": 11,
+        "deletions": 6,
+        "kind": "modified",
+        "planned": "修改",
+        "verdict": "planned"
+      },
+      {
+        "path": "sillyhub-daemon/tests/event-loop-watch.test.ts",
+        "additions": 45,
+        "deletions": 0,
+        "kind": "modified",
+        "planned": "修改",
+        "verdict": "planned"
+      },
+      {
+        "path": "sillyhub-daemon/tests/host-fs-handler-git-log.test.ts",
+        "additions": 15,
+        "deletions": 0,
+        "kind": "modified",
+        "planned": "修改",
+        "verdict": "planned"
+      }
+    ],
+    "excluded": {
+      "foreignDeclared": []
+    },
+    "note": "flow done 时点冻结（本文件落盘时采集）",
+    "closedBy": "flow done"
+  },
+  "patchSha256": "d81d00b12217e00527ff07affa3d7189f5485f0e31815d0e1971ca1feb3d85ce",
+  "patchStatus": "ok"
+}

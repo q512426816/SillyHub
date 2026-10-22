@@ -73,3 +73,9 @@
 - 2026-10-20-conflict-platform-archive | 冲突对比平台留档快照自足回退
 - 2026-10-21-provider-set-default-ui | 供应商页复活设为默认入口
 - 2026-10-21-agent-profile-slim-default | 档案瘦身重定位为人格加技能清单并支持用户默认档案
+- 2026-10-20-codex-models-fetch-candidates | 平台「获取模型列表」对新建的 codex 直连条目（智谱 GLM Codex base=https:…
+- 2026-10-20-session-status-live-sync | 左侧会话状态标签与右侧实时同步
+- 2026-10-21-precommit-sandbox-entries | pre-commit钩子入口沙箱会话适配
+- 2026-10-21-daemon-zombie-turn | 修复 daemon 会话僵尸轮与打断无效
+- 2026-10-21-spec-manifest-incremental | spec-manifest 增量游标同步
+- 2026-10-21-session-git-branch | 会话组件底部动态显示当前所在 git 分支

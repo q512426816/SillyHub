@@ -1,0 +1,42 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-20-preset-engine-endpoint",
+  "reviewer": "subagent",
+  "verdict": "PASS",
+  "reviewedAgainst": "bc88187dcee54e94289c2fcc742a802ffef45c00",
+  "findings": [
+    {
+      "severity": "P3",
+      "title": "测试绑定行用例名与实际用例名仍不一致，且 FR-02 绑定后半句保留的是修正前措辞（与已修正场景形成规格内部不一致）",
+      "evidence": "FR-01 绑定名与实际逐字一致（llmProviderPresets.test.ts:106）。FR-02 绑定名「勾选 Codex 联动切换 codex 端点并取消 Claude 勾选；取消 Codex 恢复 claude 形态」（requirements.md:48）在测试文件中不存在——实际拆为两条用例：『OpenCode Go 预设勾 Codex → 切 codex 端点并自动取消 Claude 勾选 + notice』（form.test.tsx:798）与『codex 形态勾回 Claude → 恢复 claude 端点并取消 Codex（对称互斥）』（:813）；且绑定后半句『取消 Codex 恢复 claude 形态』沿用的正是本轮场景修正所废弃的旧路径表述（修正后场景明确恢复路径=勾回 Claude 对称分支、直接取消末位 Codex 被守卫拦），场景已如实化而绑定行未同步。FR-03 绑定名「自定义表单勾选 Codex 零联动（base_url/模型不变）」与实际「自定义表单勾 Codex 零联动（base_url 不变、无切换 notice）」（form.test.tsx:829）措辞不一致（勾选/勾、括号内容不同）。绑定行→用例的机械追溯仍断链。上轮 P3 原样存续，代码零改动无恶化。",
+      "location": ".sillyspec/changes/2026-10-20-preset-engine-endpoint/requirements.md:48-49"
+    },
+    {
+      "severity": "P3",
+      "title": "FR-02 场景1/场景2 Then 的「模型行」「env」子句仍无断言（断言面缺口覆盖两个场景）",
+      "evidence": "场景1 用例（form.test.tsx:798-811）仅断言 base_url/Codex 勾上/Claude 取消/notice 四项；applyPresetForm codex 分支的 setModelRows(codex.default_model)（form.tsx:646-650）与 setSettingsConfigJson(\"{}\")（:651-652）零直接断言——『模型行变 gpt-6-luna、env 清空』（requirements.md:26）全测试面无覆盖。本轮新如实化的场景2 Then『模型行恢复 claude 默认模型、env 恢复预设模板』（requirements.md:32）同样只被 :813-827 断言了 base_url/勾选/notice 三面（恢复分支 applyPresetForm claude 的模型行 :645-650 与 env 模板 :653-661 无断言）。场景描述与实现一致（描述如实），缺的仅是断言面；回归时模型行/env 联动损坏不会被捕获。上轮 P3 原样存续。",
+      "location": "frontend/src/components/llm-providers/__tests__/llm-provider-form.test.tsx:798-827"
+    },
+    {
+      "severity": "P3",
+      "title": "上轮 P2 存量半项降级存续：取消 Codex 恢复分支（!codex && claude）仍零直接断言——唯一可达实例为幂等重放+notice，风险仅限提示面",
+      "evidence": "上轮 P2 的双因素中『场景2 按字面不可达』已由规格修正清偿（新场景=对称勾回分支，可达且有 :813 用例覆盖）；存续半项是该取消分支（form.tsx:875-881，条件 !next.includes(\"codex\") && next.includes(\"claude\")）的零直接测试。本轮复核其可达性全枚举：覆盖预设选中态下勾选联动两分支（:869-871 勾 Codex 取消 Claude、:882-890 勾 Claude 取消 Codex）保证勾选集合永不同时含 claude+codex，故该分支要求 applyPreset 时不归一 kinds（:673-684 确不归一）——唯一可达实例是自定义表单先双勾 [claude,codex] 再点覆盖预设（codexForm 判定 :680-683 因含 claude 为 false → 应用 claude 形态，kinds 保留 [claude,codex]）→ 再取消 Codex → next=[claude] 命中 :875-881。此时表单已是 claude 形态，分支为幂等重放（applyPresetForm claude 重设同值）+ 恢复 notice——回归风险仅限 notice 文案/有无，不影响表单状态正确性。FR-02 主体句（requirements.md:20『取消 Codex 勾选（回到仅 Claude）时必须恢复』）仍承载该分支且实现与之一致；场景注（:33）以『（本场景）』限定表述范围，与主体句不冲突。降级 P3 存续。",
+      "location": "frontend/src/components/llm-providers/llm-provider-form.tsx:875-881"
+    }
+  ],
+  "dimensionNotes": {
+    "乱序": "ok",
+    "并发": "ok",
+    "切换": "ok",
+    "作用域": "ok",
+    "增量纯度": "已核：git diff e61c85df..bc88187d --stat 仅 1 docs 提交（bc88187dc）触及 2 文件——requirements.md（9 行）与 review.json（48 行新增，即上轮评审入库）；frontend/ 与全部 src/test 零变化，工作区亦无代码改动。冻结面=规格修正+评审入库，代码与上轮评审对象逐字节一致，上轮全部代码面结论（联动正确性/四维度/测试 5157 绿）无需重跑即维持。",
+    "场景如实化核验": "已核：修正后场景2 与代码可达路径一致——Given（kinds=[codex]，Claude 已被 :869-871 互斥取消）→ When 勾回 Claude（v=claude 且 next 含 codex）命中对称分支 :882-893：finalKinds 滤除 codex（:890）、applyPresetForm claude 恢复 base_url/模型行/env 模板（:644-661）、恢复 notice（:892），Then 五子句与实现逐条对上且由 form.test.tsx:813-827 覆盖（base_url/勾选/notice 三面实测）；『直接取消末位 Codex 被 next.length===0 return 拦（:856）』属实；『取消分支需 !codex && claude（:875-881）』属实。",
+    "上轮P2清偿": "已清偿（主项）：P2 双因素中『requirements 场景2 按字面时序不可达』（规格失真，P2 定级主因）经场景如实化消除——新场景描述的路径可达、实现一致、有测试覆盖。存续半项（取消恢复分支 :875-881 零直接断言）经可达性全枚举后降级 P3 另记（见 findings[2]）：唯一可达实例中表单已是 claude 形态，分支为幂等重放+notice，无表单状态回归面。",
+    "上轮P3现状": "P3-绑定行用例名：原样存续（且 FR-02 绑定后半句为修正前措辞，见 findings[0]）；P3-场景1 断言面：原样存续并扩展至场景2（见 findings[1]）；P3-pi 留白：已规格显式化清偿——requirements.md:33 注明『仅剩 [codex, pi] 时取消 Codex 的恢复分支为规格留白（评审 P3 留白接受）』，与代码行为（next=[pi] 无 claude，:875-881/:882-893 均不命中，base_url 停 codex 端点无 notice）核实一致，不再列为 finding。",
+    "披露边界裁决-1-自动取消Claude": "已裁决：可接受（维持上轮）。代码零改动、证据面不变：被修 bug 正是该组合必产坏配置（claude 端点无 responses 路径，codex 必 404，两账号三次实证）；表单单 base_url 字段下两引擎同勾数学上必有一侧拿错端点；notice 明示原因与出路，且留有逃生门（＋自定义清 selectedPresetKey 后联动失效、base_url 可手改）。",
+    "披露边界裁决-2-applyPreset按勾选分派": "已裁决：可接受（维持上轮）。代码零改动：codex 形态勾回 Claude 触发对称互斥恢复（:882-893）；从 [codex] 直接取消被『至少保留一个』拦（:856）不产生空集；每条出路收敛到勾选↔形态一致态，无卡死。本轮场景如实化后该自愈链路与规格表述已对齐。",
+    "披露边界裁决-3-放弃预设拆两条": "已裁决：可接受（维持上轮）。拆条使选择器条目翻倍且把『同一家两引擎端点不同』的判断负担转嫁给用户；联动方案在选择器零扩容前提下以 notice 显性化约束，以更小实现达成同一收敛。取舍维持成立。",
+    "披露边界裁决-4-放弃后端保存时校验": "已裁决：可接受（维持上轮）。后端无法静态判定任意 base_url 是否支持 responses 协议，动态探测需真实请求且时序不适配；缺陷入口是 UI 建流程，前置表单收敛已覆盖。残余暴露（直连 API 写入坏组合）属声明的非目标，边界声明诚实。"
+  },
+  "reviewedAt": "2026-10-20T14:05:36+08:00"
+}

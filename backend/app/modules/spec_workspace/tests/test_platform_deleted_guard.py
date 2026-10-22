@@ -860,6 +860,24 @@ class TestManifestHeal:
         assert rows["changes/a1/x.md"].version == 2  # version 不动
         assert rows["changes/a1/y.md"].platform_deleted is True  # 未列不动
 
+        # 2026-10-21-spec-manifest-incremental（评审 P2-1 修复断言）：healed 行
+        # 盖章 + spec_version bump 同 commit——增量游标消费方经 since 可见 heal
+        spec_ws_row = (
+            (
+                await db_session.execute(
+                    select(SpecWorkspace).where(SpecWorkspace.workspace_id == ws.id)
+                )
+            )
+            .scalars()
+            .first()
+        )
+        assert rows["changes/a1/x.md"].landing_version == spec_ws_row.spec_version
+        assert spec_ws_row.spec_version == 1  # 建区默认 0 → heal bump 1
+        files, v = await svc.get_manifest(ws.id, since=0)
+        assert set(files) == {"changes/a1/x.md"}
+        assert files["changes/a1/x.md"]["exists"] is True
+        assert v == 1
+
         open_conflicts = (
             (
                 await db_session.execute(

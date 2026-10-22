@@ -1,0 +1,55 @@
+tier: thin
+legacy_fallback: false
+substeps:
+  artifacts: done
+  ledger: done
+  patch: done
+  review: done
+  probes: done
+  distill: done
+  archive: done
+  events: done
+born_face: thin
+with_tasks: false
+review_force: null
+input: >-
+  spec推送冲突自动自愈与日志修整
+
+
+  动机：用户拍板「以本地为准」且要求部署即生效、零手工动作——现行 SpecPushConflict 升级人工裁决（删 manifest/resolve --keep-local）违反此诉求；另收口评审遗留两条 P3（event-loop
+  abort 误报 loop_crashed、关闭日志未标来源）随本次一并修，凑一次 bundle 重打部署全量生效。
+
+
+  成功标准：
+
+  - 同一工作区连续 2 次推送冲突（rebase 重试仍败）时 daemon 自动备份并删本地 manifest、立即走全量 tar 重推（本地为准），全程零人工
+
+  - 自愈可 env 关闭（SILLYHUB_DAEMON_CONFLICT_AUTOHEAL=0），默认开启
+
+  - 推送成功清自愈计数；全量重推仍失败按既有传输失败语义落 pending_push
+
+  - event-loop 循环 abort 退出不再被 _fire 误记 loop_crashed
+
+  - off 开关命中日志标明来源（env 或 flag）
+autopilot: false
+prestage_ack: false
+baseline_commit: 5c97d62770d4dddf8fa3d9ea833b8905f3cbd098
+updatedAt: '2026-10-21T04:59:44.878Z'
+cross_baselines:
+  sillyspec: 9e2e70bfe2cb03dd5ff5dbe99241cd563fc8b65c
+baseline_sha256: af370730486b9024450e01d4474c31f2ee71797afdeb8c44394dc190c4054024
+spec_approved: true
+spec_approved_at: '2026-10-21T04:38:30.562Z'
+spec_approved_by: zcode-daemon-hardening-1021
+spec_approved_channel: user-confirmed
+spec_attested_by: zcode-daemon-hardening-1021
+batch_ticked: true
+gate_summary: >-
+  test: skipped ← module[]+deps(py61+nontest-skip1+jsx65+jsx42+jsx-e2e-skip1)+fr(167)（421.6s）
+  结果：C:\Users\qinyi\IdeaProjects\multi-agent-platform\.sillyspec\.runtime\verify-runs\20261021045334\test-result.json —
+  跳过原因：模块子集含环境缺件跳过（已跑模块全绿）：deps(auto-nontest-skip)、deps(auto-jsx-e2e-skip)——补装依赖后恢复实测。｜lint: passed ← cd backend && uv
+  run ruff check . && uv run ruff format --check . && uv run mypy app && cd ../frontend && pnpm lint && cd
+  ../sillyhub-daemon && pnpm typecheck（13.5s）
+  结果：C:\Users\qinyi\IdeaProjects\multi-agent-platform\.sillyspec\.runtime\verify-runs\20261021045334\test-result.json｜门文件
+  68 个
+

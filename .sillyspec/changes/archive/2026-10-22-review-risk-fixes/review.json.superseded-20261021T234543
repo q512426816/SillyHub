@@ -1,0 +1,22 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-22-review-risk-fixes",
+  "reviewer": "subagent",
+  "verdict": "PASS",
+  "reviewedAgainst": "c4976d205eb9bd8ab22c1289926609b25c28fe8c",
+  "findings": [
+    {
+      "severity": "P3",
+      "title": "design.md 接口契约称 defaultSleep「模块私有」，交付实际将其导出（为 FR-03 直调测试所需），文档措辞与代码漂移",
+      "evidence": "design.md 接口契约节写「defaultSleep（模块私有）行为变化」，而 1cb0742d4 将其改为 export function（src/event-loop-watch.ts:87）供 tests/event-loop-watch.test.ts:13 直接导入断言监听器计数；导出为增量面、无其他生产引用（grep 全仓仅本模块与该测试），无功能影响，纯文档准确性问题",
+      "location": "sillyhub-daemon/src/event-loop-watch.ts:87 / .sillyspec/changes/2026-10-22-review-risk-fixes/design.md:23"
+    }
+  ],
+  "dimensionNotes": {
+    "乱序": "ok",
+    "并发": "ok",
+    "切换": "ok",
+    "作用域": "ok"
+  },
+  "reviewedAt": "2026-10-22T07:44:27+08:00"
+}

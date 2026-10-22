@@ -96,6 +96,23 @@ function statusBadgeLabel(entry: Pick<SwitcherEntry, "bound" | "online">): {
 }
 
 /**
+ * dev-only 预览入参（2026-10-20-session-page-dsh-alignment / D-010 / D-017）。
+ *
+ * `/proto/*` 预览路由未登录、也无 URL 工作区段，`workspaceId` 与 store `current`
+ * 都是空——顶栏会恒显「选择工作区」引导态，与预览稿里「已选工作区」的会话页
+ * 不符。给了本入参时按钮文案/徽标改用预览值（下拉列表仍走真实查询与真实组件），
+ * 不给时逐字段回落原有派生逻辑——生产调用方（top-bar）不传，行为零变化。
+ */
+export interface WorkspaceSwitcherPreview {
+  /** 预览工作区显示名（顶栏按钮文案）。 */
+  name: string;
+  /** 是否已绑定 daemon（徽标三态第一判据）。 */
+  bound: boolean;
+  /** 绑定 daemon 是否在线。 */
+  online: boolean;
+}
+
+/**
  * WorkspaceSwitcher —— 顶栏工作区切换器。
  *
  * 三态：
@@ -108,7 +125,11 @@ function statusBadgeLabel(entry: Pick<SwitcherEntry, "bound" | "online">): {
  * （task-04 重写 URL，D-002 切同模块），不再按绑定状态分流。daemon 绑定降级为概览页
  * 可选配置；徽标仅展示三态，不阻断切换。
  */
-export function WorkspaceSwitcher(): JSX.Element {
+export function WorkspaceSwitcher({
+  preview,
+}: {
+  preview?: WorkspaceSwitcherPreview;
+} = {}): JSX.Element {
   const router = useRouter();
   const { workspaceId, current, switchWorkspace } = useWorkspaceContext();
   const { statusMap } = useDaemonStatusMap();
@@ -180,29 +201,35 @@ export function WorkspaceSwitcher(): JSX.Element {
     });
   }, [listQuery.data, statusMap]);
 
-  // 当前工作区名（按钮显示）：优先 store current.name（fillCurrentName 已写 alias ?? name）；
-  // 空则从列表查（优先别名）；仍空则退化用 id（保证按钮始终有可读文本）。
-  const currentName = (() => {
-    if (current?.name) return current.name;
-    if (workspaceId ?? current?.id) {
-      const ws = workspaceById.get(workspaceId ?? current!.id);
-      if (ws) return ws.display_alias ?? ws.name;
-    }
-    return workspaceId ?? current?.id ?? "";
-  })();
+  // 当前工作区名（按钮显示）：预览值优先；否则优先 store current.name
+  // （fillCurrentName 已写 alias ?? name）；空则从列表查（优先别名）；仍空则退化用
+  // id（保证按钮始终有可读文本）。
+  const currentName = preview
+    ? preview.name || "未命名工作区"
+    : (() => {
+        if (current?.name) return current.name;
+        if (workspaceId ?? current?.id) {
+          const ws = workspaceById.get(workspaceId ?? current!.id);
+          if (ws) return ws.display_alias ?? ws.name;
+        }
+        return workspaceId ?? current?.id ?? "";
+      })();
 
-  // daemon 当前状态徽标（按钮态）：优先 workspaceId（工作区页），平台页退化用
-  // current.id（保留显示选中 ws 的 daemon 状态，不因跳平台页丢失）。
-  const currentBadge = (() => {
-    const effectiveId = workspaceId ?? current?.id ?? null;
-    const status = effectiveId ? statusMap[effectiveId] : null;
-    const bound = (status?.daemon_id ?? null) != null;
-    return statusBadgeLabel({ bound, online: status?.online ?? false });
-  })();
+  // daemon 当前状态徽标（按钮态）：预览值优先；否则优先 workspaceId（工作区页），
+  // 平台页退化用 current.id（保留显示选中 ws 的 daemon 状态，不因跳平台页丢失）。
+  const currentBadge = preview
+    ? statusBadgeLabel(preview)
+    : (() => {
+        const effectiveId = workspaceId ?? current?.id ?? null;
+        const status = effectiveId ? statusMap[effectiveId] : null;
+        const bound = (status?.daemon_id ?? null) != null;
+        return statusBadgeLabel({ bound, online: status?.online ?? false });
+      })();
 
   // ── 平台页引导态（workspaceId === null 且无 current：从未选过工作区） ──
   // 若 current 有值（跳平台页前选过 ws），保留显示 current，不因跳平台页清空。
-  if (!workspaceId && !current) {
+  // 预览入参（dev-only）给定时跳过引导态——预览稿要的是「已选工作区」形态。
+  if (!preview && !workspaceId && !current) {
     return (
       <button
         type="button"

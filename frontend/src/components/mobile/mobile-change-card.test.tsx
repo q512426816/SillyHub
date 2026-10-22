@@ -305,14 +305,15 @@ describe("MobileChangeCard 阶段徽标（ChangeStepBadge 复用）", () => {
     expect(screen.getByText("step 2/5")).toBeInTheDocument();
   });
 
-  it("current_stage 缺省 → 降级 scan 标签（与桌面列降级口径一致）", () => {
+  it("current_stage 缺省 → 降级 brainstorm 标签（与桌面列降级口径一致；2026-10-21-mobile-scan-birth-cleanup 起不再兜底 scan）", () => {
     render(
       <MobileChangeCard
         change={makeChange({ current_stage: null })}
         onClick={vi.fn()}
       />,
     );
-    expect(screen.getByText("扫描")).toBeInTheDocument();
+    expect(screen.getByText("需求分析")).toBeInTheDocument();
+    expect(screen.queryByText("扫描")).toBeNull();
   });
 });
 

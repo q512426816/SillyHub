@@ -1,0 +1,775 @@
+diff --git a/backend/app/modules/platform_sync/router.py b/backend/app/modules/platform_sync/router.py
+index 8acf0efdf..611647e43 100644
+--- a/backend/app/modules/platform_sync/router.py
++++ b/backend/app/modules/platform_sync/router.py
+@@ -210,12 +210,25 @@ async def list_changes(
+ async def get_spec_manifest(
+     session: Annotated[AsyncSession, Depends(get_session)],
+     auth: _write_auth,
++    since: Annotated[
++        int | None,
++        Query(
++            ge=0,
++            description="增量游标（客户端已消费的工作区 spec_version）：只返回该版本之后落地的清单行",
++        ),
++    ] = None,
+ ) -> SpecManifestResponse:
+     """GET 服务器 spec 文件权威清单（CLI 直跑增量同步锚点，design §5.2/§7）。
+ 
+     CLI ``spec-sync.js`` 以此清单为锚 diff 本地 ``.sillyspec/``，算出增量 ops 后
+     POST ``/changes/-/spec-sync``（D-004@v1：CLI 无本地缓存，服务器清单即基线）。
+ 
++    2026-10-21-spec-manifest-incremental task-03：``?since=<spec_version>`` 增量
++    形态——只返回 ``landing_version > since`` 的行（含软删墓碑行），响应顶层带
++    当前 ``spec_version`` 供客户端作下次游标；无 since 为全量（现状行为，响应
++    仅新增 spec_version 字段）。背景：全量清单随工作区历史无界增长（生产实测
++    13k 行/2.2MB/5.5s@受限带宽），增量稳态只传变化行。
++
+     读清单也收紧为写权限（``require_platform_sync_write``，仅 shpsync_ token，
+     JWT/shk_live_ 403）——清单是增量写协议的一部分，避免非同步方探测文件布局。
+     workspace_id 从 shpsync_ token 派生；无 workspace 归属 → 403 fail-closed
+@@ -226,8 +239,10 @@ async def get_spec_manifest(
+         # 防御：require_platform_sync_write 的 shpsync_ 通道恒派生 workspace；到达此
+         # 分支即凭据形态异常，403 关闭通道（fail-closed）。
+         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="缺少工作区归属")
+-    files = await PlatformSyncService(session).get_spec_manifest(scope.workspace_id)
+-    return SpecManifestResponse(files=files)
++    files, spec_version = await PlatformSyncService(session).get_spec_manifest(
++        scope.workspace_id, since=since
++    )
++    return SpecManifestResponse(files=files, spec_version=spec_version)
+ 
+ 
+ @router.post("/changes/-/spec-sync", response_model=SpecSyncResponse)
+diff --git a/backend/app/modules/platform_sync/schema.py b/backend/app/modules/platform_sync/schema.py
+index d8880a25e..99f2d9b4f 100644
+--- a/backend/app/modules/platform_sync/schema.py
++++ b/backend/app/modules/platform_sync/schema.py
+@@ -208,14 +208,20 @@ class SpecManifestFileEntry(BaseModel):
+ 
+ 
+ class SpecManifestResponse(BaseModel):
+-    """GET /changes/-/spec-manifest 200 响应：服务器权威清单全量 map（design §5.2/§7）。
++    """GET /changes/-/spec-manifest 200 响应：服务器权威清单 map（design §5.2/§7）。
+ 
+     CLI ``spec-sync.js`` 以此为锚 diff 本地 ``.sillyspec/`` 算增量 ops
+     （D-004@v1 CLI 无本地缓存，清单即基线）。无清单行（旧 tar 全量同步后失效 /
+     全新 workspace）→ 空 ``files``，CLI 走 R-07 兜底全量重算。
++
++    2026-10-21-spec-manifest-incremental task-03：新增顶层 ``spec_version``（全量/
++    增量均带）——CLI 携带 ``?since=<spec_version>`` 时 ``files`` 只含该版本之后
++    落地的行（增量游标形态），并以响应 ``spec_version`` 作下次游标；无 since 为
++    全量（既有 CLI 忽略未知字段，向后兼容）。
+     """
+ 
+     files: dict[str, SpecManifestFileEntry] = Field(default_factory=dict)
++    spec_version: int = Field(default=0, description="工作区当前权威版本（下次增量的 since 游标）")
+ 
+ 
+ # ── Change 2026-08-17-spec-file-incremental-sync task-02（design §5.2/§7）──
+diff --git a/backend/app/modules/platform_sync/service.py b/backend/app/modules/platform_sync/service.py
+index ddac30ea1..21939daa4 100644
+--- a/backend/app/modules/platform_sync/service.py
++++ b/backend/app/modules/platform_sync/service.py
+@@ -1572,18 +1572,23 @@ class PlatformSyncService:
+     # ── Change 2026-08-17-spec-file-incremental-sync task-01（design §5.2/§5.3）──
+ 
+     async def get_spec_manifest(
+-        self, workspace_id: uuid.UUID
+-    ) -> dict[str, dict[str, str | int | bool]]:
++        self, workspace_id: uuid.UUID, since: int | None = None
++    ) -> tuple[dict[str, dict[str, str | int | bool]], int]:
+         """GET /changes/-/spec-manifest：透调 ``SpecWorkspaceService.get_manifest``。
+ 
+         workspace 级鉴权与归属校验在 router 层完成（``require_platform_sync_write``
+         从 shpsync_ token 派生 workspace_id 后才进来）；本层不重复校验，直接实例化
+-        ``SpecWorkspaceService``（共享同一 session）读服务器权威清单全量行
++        ``SpecWorkspaceService``（共享同一 session）读服务器权威清单
+         （含 ``exists=False`` 软删行，design §5.3）。
++
++        2026-10-21-spec-manifest-incremental task-03：``since`` 透传——CLI 携带
++        已消费的工作区 spec_version 游标时，返回 ``(增量行, 当前 spec_version)``
++        （只含 ``landing_version > since`` 的行）；无 since 为全量（向后兼容，
++        响应仅新增顶层 spec_version 字段）。
+         """
+         from app.modules.spec_workspace.service import SpecWorkspaceService
+ 
+-        return await SpecWorkspaceService(self._session).get_manifest(workspace_id)
++        return await SpecWorkspaceService(self._session).get_manifest(workspace_id, since=since)
+ 
+     async def apply_spec_ops(self, workspace_id: uuid.UUID, ops: list[FileOp]) -> dict[str, object]:
+         """POST /changes/-/spec-sync：透调 ``SpecWorkspaceService.apply_ops``（design §5.2/§7）。
+diff --git a/backend/app/modules/platform_sync/tests/test_spec_sync.py b/backend/app/modules/platform_sync/tests/test_spec_sync.py
+index 42373a182..13bc3f078 100644
+--- a/backend/app/modules/platform_sync/tests/test_spec_sync.py
++++ b/backend/app/modules/platform_sync/tests/test_spec_sync.py
+@@ -85,6 +85,7 @@ async def spec_env(
+         "headers": headers,
+         "workspace_id": workspace_id,
+         "spec_root": spec_root,
++        "db_session": db_session,
+     }
+ 
+ 
+@@ -335,3 +336,157 @@ class TestEdgeCases:
+             },
+         )
+         assert resp.status_code == 422, resp.text
++
++
++class TestIncrementalManifest:
++    """2026-10-21-spec-manifest-incremental：?since=<spec_version> 增量游标。
++
++    背景：全量清单随工作区历史无界增长（生产实测 13k 行/2.2MB/5.5s@受限带宽），
++    CLI 每条命令拉全量吃掉 sillyspec 同步 8s 总预算。增量稳态只传变化行。
++    """
++
++    async def _sync(self, spec_env: dict[str, Any], ops: list[dict[str, Any]]) -> dict[str, Any]:
++        client: AsyncClient = spec_env["client"]
++        resp = await client.post(
++            "/api/changes/-/spec-sync", headers=spec_env["headers"], json={"ops": ops}
++        )
++        assert resp.status_code == 200, resp.text
++        return resp.json()
++
++    async def _get_manifest(
++        self, spec_env: dict[str, Any], since: int | None = None
++    ) -> tuple[dict[str, Any], int]:
++        client: AsyncClient = spec_env["client"]
++        url = "/api/changes/-/spec-manifest"
++        if since is not None:
++            url = f"{url}?since={since}"
++        resp = await client.get(url, headers=spec_env["headers"])
++        assert resp.status_code == 200, resp.text
++        body = resp.json()
++        return body["files"], body["spec_version"]
++
++    async def test_incremental_main_path(self, spec_env: dict[str, Any]) -> None:
++        """增量主路径：首批落地后 since=0 恰见首批；二批落地后 since=1 恰见二批。"""
++        self_body = await self._sync(
++            spec_env,
++            [
++                _op("add", "docs/A.md", base_version=0, content=_b64("# A"), hash=_h("# A")),
++                _op("add", "docs/B.md", base_version=0, content=_b64("# B"), hash=_h("# B")),
++            ],
++        )
++        assert self_body["new_versions"] == {"docs/A.md": 1, "docs/B.md": 1}
++
++        files, v1 = await self._get_manifest(spec_env, since=0)
++        assert set(files) == {"docs/A.md", "docs/B.md"}
++        assert v1 == 1
++
++        await self._sync(
++            spec_env,
++            [
++                _op("update", "docs/A.md", base_version=1, content=_b64("# A2"), hash=_h("# A2")),
++                _op("add", "docs/C.md", base_version=0, content=_b64("# C"), hash=_h("# C")),
++            ],
++        )
++        files, v2 = await self._get_manifest(spec_env, since=v1)
++        assert set(files) == {"docs/A.md", "docs/C.md"}
++        assert files["docs/A.md"]["version"] == 2
++        assert v2 == 2
++
++        # 全量形态仍含 B（未被第二批触碰）
++        files_full, _ = await self._get_manifest(spec_env)
++        assert set(files_full) == {"docs/A.md", "docs/B.md", "docs/C.md"}
++
++    async def test_no_change_returns_empty_files(self, spec_env: dict[str, Any]) -> None:
++        """无变化重复拉取：since=当前 spec_version → files 空对象。"""
++        await self._sync(
++            spec_env,
++            [_op("add", "docs/S.md", base_version=0, content=_b64("s"), hash=_h("s"))],
++        )
++        _files, v = await self._get_manifest(spec_env)
++        files, v_again = await self._get_manifest(spec_env, since=v)
++        assert files == {}
++        assert v_again == v
++
++    async def test_null_landing_rows_excluded_from_incremental(
++        self, spec_env: dict[str, Any]
++    ) -> None:
++        """迁移前存量行（landing_version=NULL）不进增量流，全量仍可见。"""
++        import uuid as _uuid
++
++        db_session = spec_env["db_session"]
++        db_session.add(
++            SpecFileManifest(
++                id=_uuid.uuid4(),
++                workspace_id=spec_env["workspace_id"],
++                path="docs/legacy.md",
++                content_hash="0" * 64,
++                version=7,
++                exists=True,
++            )
++        )
++        await db_session.commit()
++
++        files, _ = await self._get_manifest(spec_env, since=0)
++        assert "docs/legacy.md" not in files
++
++        files_full, _ = await self._get_manifest(spec_env)
++        assert "docs/legacy.md" in files_full
++
++    async def test_rename_old_path_tombstone_visible_in_incremental(
++        self, spec_env: dict[str, Any]
++    ) -> None:
++        """rename 旧行墓碑化（原硬删）后：增量消费方经 since 可见旧路径消亡。"""
++        await self._sync(
++            spec_env,
++            [_op("add", "docs/Old.md", base_version=0, content=_b64("x"), hash=_h("x"))],
++        )
++        _files, v = await self._get_manifest(spec_env)
++
++        body = await self._sync(
++            spec_env,
++            [_op("rename", "docs/Old.md", new_path="docs/New.md", base_version=1)],
++        )
++        assert body["new_versions"] == {"docs/New.md": 2}
++
++        files, _ = await self._get_manifest(spec_env, since=v)
++        assert set(files) == {"docs/Old.md", "docs/New.md"}
++        assert files["docs/Old.md"]["exists"] is False
++        assert files["docs/Old.md"]["version"] == 2
++        assert files["docs/New.md"]["exists"] is True
++
++    async def test_delete_tombstone_visible_in_incremental(self, spec_env: dict[str, Any]) -> None:
++        """delete op 墓碑行同样经增量流可见。"""
++        await self._sync(
++            spec_env,
++            [_op("add", "docs/D.md", base_version=0, content=_b64("d"), hash=_h("d"))],
++        )
++        _files, v = await self._get_manifest(spec_env)
++        await self._sync(spec_env, [_op("delete", "docs/D.md", base_version=1)])
++
++        files, _ = await self._get_manifest(spec_env, since=v)
++        assert set(files) == {"docs/D.md"}
++        assert files["docs/D.md"]["exists"] is False
++
++    async def test_since_invalid_422(self, spec_env: dict[str, Any]) -> None:
++        """since 非整数/负数 → 422（Query 校验）。"""
++        client: AsyncClient = spec_env["client"]
++        headers = spec_env["headers"]
++        resp = await client.get("/api/changes/-/spec-manifest?since=-1", headers=headers)
++        assert resp.status_code == 422
++        resp = await client.get("/api/changes/-/spec-manifest?since=abc", headers=headers)
++        assert resp.status_code == 422
++
++    async def test_full_manifest_carries_spec_version(self, spec_env: dict[str, Any]) -> None:
++        """全量回归：无 since 行为不变，响应新增顶层 spec_version。"""
++        await self._sync(
++            spec_env,
++            [_op("add", "docs/F.md", base_version=0, content=_b64("f"), hash=_h("f"))],
++        )
++        files, v = await self._get_manifest(spec_env)
++        assert set(files) == {"docs/F.md"}
++        assert files["docs/F.md"] == {
++            "hash": _h("f"),
++            "version": 1,
++            "exists": True,
++        }
++        assert v == 1
+diff --git a/backend/app/modules/spec_workspace/model.py b/backend/app/modules/spec_workspace/model.py
+index 2fd8a7a5b..c6da2935c 100644
+--- a/backend/app/modules/spec_workspace/model.py
++++ b/backend/app/modules/spec_workspace/model.py
+@@ -142,6 +142,9 @@ class SpecFileManifest(BaseModel, table=True):
+             unique=True,
+         ),
+         Index("ix_spec_manifest_version", "version"),
++        # 2026-10-21-spec-manifest-incremental task-01：增量清单过滤
++        # （landing_version > since 且带 workspace_id）的支撑索引。
++        Index("ix_spec_manifest_ws_landing", "workspace_id", "landing_version"),
+     )
+ 
+     id: uuid.UUID = Field(
+@@ -169,6 +172,18 @@ class SpecFileManifest(BaseModel, table=True):
+         default=True,
+         sa_column=Column(Boolean, nullable=False),
+     )
++    # 2026-10-21-spec-manifest-incremental task-01：行最后写入时的工作区
++    # spec_version 印章——GET /api/changes/-/spec-manifest?since=<v> 按
++    # landing_version > since 过滤增量行。与行级 ``version``（每行独立 +1 的
++    # 乐观锁谱系，跨行不可比）语义不同：本列跨行单调可比。NULL=迁移前存量行，
++    # 永不进增量流（只经全量清单出场），语义自洽无需回填。全部清单写点
++    # （apply_ops / _write_spec_root 后逐行对齐 / soft_delete_change_dir）
++    # 必须在与 bump spec_version 同一事务内盖章——新增清单写点必须盖章，
++    # 否则增量消费方永远看不到该写点的行变化。
++    landing_version: int | None = Field(
++        default=None,
++        sa_column=Column(Integer, nullable=True),
++    )
+     # Change 2026-08-29-change-delete-closure-and-spec-pull task-01（design §5.4）：
+     # 平台删除墓碑。变更中心删除入口（task-06）把 changes/{name}/ 下行置 TRUE 后，
+     # apply_ops add/rename 复活拦截与 _write_spec_root 落盘排除（task-02）、
+diff --git a/backend/app/modules/spec_workspace/service.py b/backend/app/modules/spec_workspace/service.py
+index e09ddb3cd..bbabbd60a 100644
+--- a/backend/app/modules/spec_workspace/service.py
++++ b/backend/app/modules/spec_workspace/service.py
+@@ -673,22 +673,36 @@ class SpecWorkspaceService:
+             )
+         return result
+ 
+-    async def get_manifest(self, workspace_id: uuid.UUID) -> dict[str, dict[str, str | int | bool]]:
++    async def get_manifest(
++        self,
++        workspace_id: uuid.UUID,
++        since: int | None = None,
++    ) -> tuple[dict[str, dict[str, str | int | bool]], int]:
+         """读服务器权威 per-file 清单（Change 2026-08-17-spec-file-incremental-sync task-01，design §5.3）。
+ 
+         查询该 workspace 的 ``SpecFileManifest`` 全部行（**含 ``exists=False`` 的软删
+         行**——CLI diff 据此识别服务器侧已删文件并下发 delete 对齐），返回
+-        ``{path: {"hash": content_hash, "version": version, "exists": exists}}``。
+-        按 path 排序保证响应确定性（便于 CLI diff / 人工核对）。纯读方法，不触碰
+-        清单行——唯一写者仍是 ``apply_ops``（D-011 单写者语义不变）。
++        ``(files, spec_version)``：files 为 ``{path: {"hash": content_hash,
++        "version": version, "exists": exists}}``（按 path 排序保证响应确定性，
++        便于 CLI diff / 人工核对），spec_version 为工作区当前权威版本
++        （无 spec_workspaces 行时 0，保持既有「空清单」行为不 404）。
++        纯读方法，不触碰清单行——唯一写者仍是 ``apply_ops``（D-011 单写者
++        语义不变；2026-10-21 后另有 _write_spec_root 对齐块/soft_delete_change_dir
++        两写点，均盖章 landing_version）。
++
++        2026-10-21-spec-manifest-incremental task-03：``since``（工作区
++        spec_version 游标）非空时走**增量过滤**——只返回 ``landing_version >
++        since`` 的行（SQL NULL 比较语义天然排除迁移前存量行，见 model 列注释）。
++        增量与全量同构返回，调用方以 since 是否传参选择形态。
+         """
+-        stmt = (
+-            select(SpecFileManifest)
+-            .where(SpecFileManifest.workspace_id == workspace_id)
+-            .order_by(SpecFileManifest.path)
++        stmt = select(SpecFileManifest).where(
++            SpecFileManifest.workspace_id == workspace_id,
+         )
++        if since is not None:
++            stmt = stmt.where(SpecFileManifest.landing_version > since)
++        stmt = stmt.order_by(SpecFileManifest.path)
+         rows = (await self._session.execute(stmt)).scalars().all()
+-        return {
++        files: dict[str, dict[str, str | int | bool]] = {
+             row.path: {
+                 "hash": row.content_hash,
+                 "version": row.version,
+@@ -696,6 +710,15 @@ class SpecWorkspaceService:
+             }
+             for row in rows
+         }
++        current_version = (
++            await self._session.execute(
++                select(SpecWorkspace.spec_version).where(
++                    SpecWorkspace.workspace_id == workspace_id,
++                )
++            )
++        ).scalar_one_or_none()
++        spec_version: int = int(current_version or 0)
++        return files, spec_version
+ 
+     async def ensure_spec_workspace(self, workspace_id: uuid.UUID) -> SpecWorkspace:
+         """Ensure a SpecWorkspace exists for the given workspace_id (D-009).
+@@ -1774,6 +1797,14 @@ class SpecWorkspaceService:
+             .all()
+         )
+         manifest_by_path = {r.path: r for r in manifest_rows}
++        # 2026-10-21-spec-manifest-incremental task-02：本对齐块在上方 spec_version
++        # bump 的 commit **之后**执行（独立短事务）——若沿用已 bump 的旧值盖章，
++        # GET 在两 commit 之间取到新 spec_version 而行未盖章，since 消费方会永久
++        # 漏掉本批对齐行。对齐块有行变化时自 bump 一次（新值 = 当前值 +1）并以其
++        # 盖章；版本是新鲜度信号非变更计数，多 bump 一次至多触发一次冗余 pull
++        # （对齐 soft_delete_change_dir 幂等路径同款注释）。
++        align_landing = (spec_ws.spec_version or 0) + 1
++        aligned_any = False
+         for rel, ch in landed_hashes.items():
+             row = manifest_by_path.get(rel)
+             if row is None:
+@@ -1784,20 +1815,28 @@ class SpecWorkspaceService:
+                         content_hash=ch,
+                         version=1,
+                         exists=True,
++                        landing_version=align_landing,
+                         updated_at=now,
+                     )
+                 )
++                aligned_any = True
+             else:
+                 row.content_hash = ch
+                 row.version = row.version + 1
+                 row.exists = True
++                row.landing_version = align_landing
+                 row.updated_at = now
++                aligned_any = True
+         for rel in converged_paths:
+             row = manifest_by_path.get(rel)
+             if row is not None:
+                 row.exists = False
+                 row.version = row.version + 1
++                row.landing_version = align_landing
+                 row.updated_at = now
++                aligned_any = True
++        if aligned_any:
++            spec_ws.spec_version = align_landing
+         await self._session.commit()
+         if skipped_files > 0:
+             log.warning(
+@@ -2219,6 +2258,10 @@ class SpecWorkspaceService:
+         # （见 apply_ops 同注释）；行改写是纯属性赋值，集中在最终 commit 单事务落库。
+         await self._session.commit()
+ 
++        # 2026-10-21-spec-manifest-incremental task-02：软删印章 = 递增后的工作区
++        # spec_version（终段 bump 复用同值，与行改写同 commit）。
++        landing_version = (spec_ws.spec_version or 0) + 1
++
+         settings = get_settings()
+         backup_root = self._backup_root(settings, workspace_id)
+         ts = datetime.now(UTC).strftime(BACKUP_TS_FORMAT)
+@@ -2239,6 +2282,7 @@ class SpecWorkspaceService:
+                     pass
+                 row.exists = False
+                 row.version = row.version + 1
++                row.landing_version = landing_version
+                 row.updated_at = now
+                 file_count += 1
+                 parent = str(PurePosixPath(row.path).parent)
+@@ -2253,8 +2297,10 @@ class SpecWorkspaceService:
+         # ql-20260905-001：镜像树已变（文件移出 + 墓碑）→ bump spec_version（保鲜
+         # + gzip 缓存键联动，理由同 apply_ops 注释）。幂等路径（file_count=0 且全部
+         # 行已是墓碑）树未变也 bump——版本是新鲜度信号非变更计数，多 bump 一次
+-        # 至多触发一次冗余 pull，无正确性影响。
+-        spec_ws.spec_version = (spec_ws.spec_version or 0) + 1
++        # 至多触发一次冗余 pull，无正确性影响。2026-10-21-spec-manifest-incremental：
++        # 复用上方预计算 landing_version（platform_deleted-only 翻转不改清单响应面
++        # {hash,version,exists}，不盖章避免无信息增量行）。
++        spec_ws.spec_version = landing_version
+         spec_ws.updated_at = now
+         await self._session.commit()
+         log.info(
+@@ -2382,8 +2428,11 @@ class SpecWorkspaceService:
+         # prefetch 读事务；循环内新行/删除改为收集 pending，循环后统一入
+         # session + 最终 commit——写仍单事务，原子性不变。
+         await self._session.commit()
++        # 2026-10-21-spec-manifest-incremental task-02：本批落地印章 = 递增后的
++        # 工作区 spec_version（终段 bump 复用同值，行盖章与 bump 同 commit——
++        # GET spec-manifest?since=<v> 按 landing_version > v 过滤增量行）。
++        landing_version = (spec_ws.spec_version or 0) + 1
+         pending_adds: list[SpecFileManifest] = []
+-        pending_deletes: list[SpecFileManifest] = []
+         # 2026-09-26-spec-sync-receipt-visibility：回执计数（冲突跳过 / 墓碑跳过；
+         # applied 在返回处由总数减得）——「ok:true 却静默丢成员」的绿灯谎言收口。
+         skipped_conflict = 0
+@@ -2477,6 +2526,7 @@ class SpecWorkspaceService:
+                     row.content_hash = ch
+                     row.version = row.version + 1
+                     row.exists = True
++                    row.landing_version = landing_version
+                     row.updated_at = now
+                     new_versions[op.path] = row.version
+                     await progress.bump()
+@@ -2533,6 +2583,7 @@ class SpecWorkspaceService:
+                             content_hash=ch,
+                             version=1,
+                             exists=True,
++                            landing_version=landing_version,
+                             updated_at=now,
+                         )
+                         # ql-20260817-005：收集，循环外统一 add（见上方释放点注释）。
+@@ -2544,6 +2595,7 @@ class SpecWorkspaceService:
+                         row.content_hash = ch
+                         row.version = new_version
+                         row.exists = True
++                        row.landing_version = landing_version
+                         row.updated_at = now
+                         new_versions[op.path] = new_version
+ 
+@@ -2561,6 +2613,7 @@ class SpecWorkspaceService:
+                             pass
+                         row.version = row.version + 1
+                         row.exists = False
++                        row.landing_version = landing_version
+                         row.updated_at = now
+                         new_versions[op.path] = row.version
+                         # ql-20260924：修剪移出 op 循环，循环后至多一次（扫描风暴修复）
+@@ -2634,6 +2687,7 @@ class SpecWorkspaceService:
+                             target_row.content_hash = ch
+                             target_row.version = target_row.version + 1
+                             target_row.exists = True
++                            target_row.landing_version = landing_version
+                             target_row.updated_at = now
+                             new_versions[op.new_path] = target_row.version
+                         else:
+@@ -2643,6 +2697,7 @@ class SpecWorkspaceService:
+                                 content_hash=ch,
+                                 version=1,
+                                 exists=True,
++                                landing_version=landing_version,
+                                 updated_at=now,
+                             )
+                             pending_adds.append(added_row)  # ql-20260817-005：循环外统一 add
+@@ -2670,8 +2725,14 @@ class SpecWorkspaceService:
+                         # ql-20260813-008：rename 后 dest 用宿主真实 mtime（move 沿用源 mtime，
+                         # 此处按 op.mtime 覆盖为最新宿主态，保持与 add/update 一致）。
+                         await asyncio.to_thread(self._apply_file_mtime, dest, op.mtime)
+-                    # ql-20260817-005：delete 同样会 autobegin——收集循环外统一删。
+-                    pending_deletes.append(row)
++                    # 2026-10-21-spec-manifest-incremental task-02：旧路径行由硬删改
++                    # 软删墓碑（与 delete op 分支同语义）——增量游标协议要求「清单行
++                    # 只墓碑不消失」：硬删行对 since 消费方是不可见盲区（旧行无任何
++                    # delta 行，缓存方永远看不到它消亡，幻影行反复生成 no-op delete）。
++                    row.exists = False
++                    row.version = row.version + 1
++                    row.landing_version = landing_version
++                    row.updated_at = now
+                     # ql-20260819-004：目标有软删墓碑 → 原地复活（version 沿目标路径
+                     # 自身谱系 +1），不 INSERT 新行（flush 先 INSERT 后 DELETE，同
+                     # path 撞唯一约束）；无墓碑 → 照旧插迁移行（旧路径行 version+1）。
+@@ -2679,6 +2740,7 @@ class SpecWorkspaceService:
+                         target_row.content_hash = new_hash
+                         target_row.version = target_row.version + 1
+                         target_row.exists = True
++                        target_row.landing_version = landing_version
+                         target_row.updated_at = now
+                         renamed_row = target_row
+                     else:
+@@ -2688,6 +2750,7 @@ class SpecWorkspaceService:
+                             content_hash=new_hash,
+                             version=new_version,
+                             exists=True,
++                            landing_version=landing_version,
+                             updated_at=now,
+                         )
+                         pending_adds.append(renamed_row)
+@@ -2700,10 +2763,10 @@ class SpecWorkspaceService:
+                 # 已 continue 跳过）——批量回写器内存计数，不再逐 op UPDATE。
+                 await progress.bump()
+ 
+-            # ql-20260817-005：循环外统一入 session（add/delete 的 autobegin 事务
++            # ql-20260817-005：循环外统一入 session（add 的 autobegin 事务
+             # 此刻才打开，紧接 commit，事务窗口毫秒级）——全部写仍是单事务。
+-            for stale in pending_deletes:
+-                await self._session.delete(stale)
++            # （2026-10-21-spec-manifest-incremental：原 pending_deletes 硬删循环
++            # 已随 rename 旧行墓碑化移除——清单行不再有硬删路径。）
+             # ql-20260904-014（P1）：pending_adds 原走 ORM session.add 裸 INSERT——
+             # 归档移动等场景下 daemon/CLI 双端基线偏斜会推 add/rename 指向服务器
+             # 已存在的 path（in-memory manifest_by_path 未含并发已插入的行），
+@@ -2732,6 +2795,7 @@ class SpecWorkspaceService:
+                                 "version": r.version,
+                                 "exists": r.exists,
+                                 "platform_deleted": r.platform_deleted,
++                                "landing_version": r.landing_version,
+                                 "updated_at": r.updated_at,
+                             }
+                             for r in chunk
+@@ -2749,6 +2813,9 @@ class SpecWorkspaceService:
+                                 else_=SpecFileManifest.version,
+                             ),
+                             "exists": True,
++                            # 印章无条件取本批值（spec_version 单调递增 → 本批
++                            # landing_version ≥ 行上任何旧印章，不会回退）。
++                            "landing_version": add_stmt.excluded.landing_version,
+                             "updated_at": add_stmt.excluded.updated_at,
+                         },
+                     )
+@@ -2758,7 +2825,9 @@ class SpecWorkspaceService:
+             # ②gzip 整包缓存键联动：不 bump 则 (ws, spec_version) 同键恒吐增量
+             # 落盘前的旧树（e7bef3cc0 缓存引入后的陈旧命中缺口）。conflict 跳过
+             # 的 op 不落盘，但同请求其余 op 已 apply，树已变即 bump。
+-            spec_ws.spec_version = (spec_ws.spec_version or 0) + 1
++            # 2026-10-21-spec-manifest-incremental：复用循环前预计算的
++            # landing_version（与行印章同 commit 落库，值同源）。
++            spec_ws.spec_version = landing_version
+             spec_ws.updated_at = now
+             await self._session.commit()
+         finally:
+diff --git a/backend/app/modules/spec_workspace/tests/test_soft_delete_change_dir.py b/backend/app/modules/spec_workspace/tests/test_soft_delete_change_dir.py
+index 58b59b708..ae06cd9a2 100644
+--- a/backend/app/modules/spec_workspace/tests/test_soft_delete_change_dir.py
++++ b/backend/app/modules/spec_workspace/tests/test_soft_delete_change_dir.py
+@@ -178,6 +178,34 @@ class TestSoftDeleteActiveChange:
+         await db_session.refresh(spec_ws)
+         assert int(spec_ws.spec_version or 0) == base_version + 1
+ 
++    async def test_soft_delete_stamps_landing_version(self, db_session, tmp_path) -> None:
++        """2026-10-21-spec-manifest-incremental task-02：软删行盖章 landing_version
++        = 递增后的 spec_version（与 bump 同 commit）——GET spec-manifest?since=
++        <软删前版本> 消费方经增量流取到墓碑行。platform_deleted-only 翻转
++        （无 version+1）不盖章（不改清单响应面，避免无信息增量行）。
++        """
++        ws = await _make_workspace(db_session)
++        spec_root = tmp_path / "spec-root"
++        spec_ws = await _make_spec_workspace(db_session, ws, spec_root)
++        svc = SpecWorkspaceService(db_session)
++        await svc.apply_ops(ws.id, [_op("add", "changes/stamp/proposal.md", content=_b64("p"))])
++        before = int(spec_ws.spec_version or 0)
++
++        await svc.soft_delete_change_dir(ws.id, "stamp")
++
++        await db_session.refresh(spec_ws)
++        after = int(spec_ws.spec_version or 0)
++        assert after == before + 1
++        rows = await _manifest_rows(db_session, ws.id)
++        row = rows["changes/stamp/proposal.md"]
++        assert row.landing_version == after
++
++        # 增量游标消费面：软删前的客户端经 since=before 恰取到墓碑行
++        files, spec_version = await svc.get_manifest(ws.id, since=before)
++        assert set(files) == {"changes/stamp/proposal.md"}
++        assert files["changes/stamp/proposal.md"]["exists"] is False
++        assert spec_version == after
++
+     async def test_pre_existing_soft_deleted_row_only_strengthened(
+         self, db_session, tmp_path
+     ) -> None:
+diff --git a/backend/app/modules/spec_workspace/tests/test_spec_version_and_init_synced.py b/backend/app/modules/spec_workspace/tests/test_spec_version_and_init_synced.py
+index 4738d6c5b..00eb7d88d 100644
+--- a/backend/app/modules/spec_workspace/tests/test_spec_version_and_init_synced.py
++++ b/backend/app/modules/spec_workspace/tests/test_spec_version_and_init_synced.py
+@@ -113,7 +113,14 @@ class TestSpecVersion:
+         assert spec_ws.spec_version == 0
+ 
+     async def test_bumps_on_apply_sync_landing(self, db_session, tmp_path) -> None:
+-        """apply_sync landing increments spec_version by exactly 1 per call."""
++        """apply_sync landing 推进 spec_version（单调递增， freshness 信号）。
++
++        2026-10-21-spec-manifest-incremental：有行变化的落地现在 +2——落盘主事务
++        bump 一次 + 清单对齐块（盖章 landing_version）再 bump 一次。对齐块是
++        bump commit 之后的独立短事务，若沿用旧值盖章，两 commit 之间的增量
++        GET 会永久漏行（见 service.py 对齐块注释）；多 bump 一次无正确性影响
++        （版本是新鲜度信号非变更计数）。
++        """
+         ws = await _make_workspace(db_session)
+         spec_root = tmp_path / "spec-root"
+         spec_root.mkdir()
+@@ -126,14 +133,14 @@ class TestSpecVersion:
+         with p_doc, p_change:  # type: ignore[has-type]
+             await svc.apply_sync(ws.id, tar_bytes)
+         refreshed = await svc.get(ws.id)
+-        assert refreshed.spec_version == 1
++        assert refreshed.spec_version == 2  # 落盘 bump +1，对齐盖章 bump +1
+ 
+-        # Second landing bumps again.
++        # Second landing bumps again（单调递增）。
+         tar_bytes_2 = _build_tar({"docs/B.md": b"# B"})
+         with p_doc, p_change:  # type: ignore[has-type]
+             await svc.apply_sync(ws.id, tar_bytes_2)
+         refreshed = await svc.get(ws.id)
+-        assert refreshed.spec_version == 2
++        assert refreshed.spec_version == 4
+ 
+     async def test_existing_rows_backfill_zero(self, db_session, tmp_path) -> None:
+         """A row inserted without an explicit spec_version persists as 0."""
+diff --git a/backend/app/modules/spec_workspace/tests/test_sync_incremental.py b/backend/app/modules/spec_workspace/tests/test_sync_incremental.py
+index 72bf5cd22..e4191223a 100644
+--- a/backend/app/modules/spec_workspace/tests/test_sync_incremental.py
++++ b/backend/app/modules/spec_workspace/tests/test_sync_incremental.py
+@@ -335,7 +335,11 @@ class TestRename:
+             .scalars()
+             .first()
+         )
+-        assert old_row is None
++        # 2026-10-21-spec-manifest-incremental：旧路径行由硬删改软删墓碑
++        # （增量游标协议要求清单行只墓碑不消失——旧行消亡对 since 消费方可见）
++        assert old_row is not None
++        assert old_row.exists is False
++        assert old_row.version == 2
+         new_row = (
+             (
+                 await db_session.execute(
+@@ -1196,7 +1200,11 @@ class TestSoftDeleteRevival:
+         assert active_row.version == 3
+         assert active_row.content_hash == hashlib.sha256(b"tasks").hexdigest()
+         archive_row = await self._get_row(db_session, ws.id, "changes/archive/x/tasks.md")
+-        assert archive_row is None  # 旧路径行照常迁移删除
++        # 2026-10-21-spec-manifest-incremental：旧路径行硬删改软删墓碑（增量
++        # 游标可见性），行留存为 exists=False、version 沿自身谱系 +1（1 → 2）
++        assert archive_row is not None
++        assert archive_row.exists is False
++        assert archive_row.version == 2
+ 
+         assert (spec_root / "changes" / "x" / "tasks.md").read_text(encoding="utf-8") == "tasks"
+         assert not (spec_root / "changes" / "archive" / "x" / "tasks.md").exists()
+@@ -1353,8 +1361,10 @@ class TestSoftDeleteRevival:
+             "quicklog/Q.md": 2,
+         }
+ 
+-        # rename 落盘：清单迁移 + 磁盘文件移动
+-        assert await self._get_row(db_session, ws.id, "changes/x/decisions.md") is None
++        # rename 落盘：清单迁移 + 磁盘文件移动。2026-10-21-spec-manifest-incremental：
++        # 旧路径行硬删改软删墓碑（增量游标可见），断言 exists=False 而非行消失
++        old_dec = await self._get_row(db_session, ws.id, "changes/x/decisions.md")
++        assert old_dec is not None and old_dec.exists is False and old_dec.version == 2
+         archive_dec = await self._get_row(db_session, ws.id, "changes/archive/x/decisions.md")
+         assert archive_dec is not None and archive_dec.exists is True
+         assert (spec_root / "changes" / "archive" / "x" / "decisions.md").read_text(
+diff --git a/backend/migrations/versions/20261021130000_spec_manifest_landing_version.py b/backend/migrations/versions/20261021130000_spec_manifest_landing_version.py
+new file mode 100644
+index 000000000..4170bcf35
+--- /dev/null
++++ b/backend/migrations/versions/20261021130000_spec_manifest_landing_version.py
+@@ -0,0 +1,49 @@
++"""spec_file_manifest.landing_version 印章列 + 增量过滤索引
++
++Revision ID: 20261021130000
++Revises: 20261021120000
++Create Date: 2026-10-21 13:00:00
++
++Change 2026-10-21-spec-manifest-incremental task-01（FR-03 / FR-05）：
++GET /api/changes/-/spec-manifest?since=<spec_version> 增量游标的存储面——
++
++- 加列 ``landing_version INTEGER NULL``：行最后写入时的工作区 spec_version
++  印章，写点盖章逻辑见 spec_workspace/service.py 三处（apply_ops /
++  _write_spec_root 对齐 / soft_delete_change_dir）。
++- **存量行不回填**：NULL 语义即正确（NULL 行永不进增量流，只经全量清单
++  出场；首次落地触碰后自然进入增量流）——省去 1.3 万行 UPDATE 且无正确性
++  损失。
++- 加复合索引 ``ix_spec_manifest_ws_landing (workspace_id, landing_version)``
++  支撑增量过滤查询；单 worker 线上小表（万级行）普通 CREATE INDEX 秒级，
++  不需要 CONCURRENTLY（deploy 通道 alembic upgrade 串行执行）。
++- downgrade 对称：删索引 + 删列。
++
++author: qinyi
++created_at: 2026-10-21 13:00:00
++"""
++
++from __future__ import annotations
++
++from typing import Sequence
++
++import sqlalchemy as sa
++from alembic import op
++
++revision: str = "20261021130000"
++down_revision: str | None = "20261021120000"
++branch_labels: str | Sequence[str] | None = None
++depends_on: str | Sequence[str] | None = None
++
++_TABLE = "spec_file_manifest"
++_COLUMN = "landing_version"
++_INDEX = "ix_spec_manifest_ws_landing"
++
++
++def upgrade() -> None:
++    op.add_column(_TABLE, sa.Column(_COLUMN, sa.Integer(), nullable=True))
++    op.create_index(_INDEX, _TABLE, ["workspace_id", _COLUMN])
++
++
++def downgrade() -> None:
++    op.drop_index(_INDEX, table_name=_TABLE)
++    op.drop_column(_TABLE, _COLUMN)
+diff --git a/backend/tests/test_align_platform_change_events_migration.py b/backend/tests/test_align_platform_change_events_migration.py
+index 43b52bb5d..8a5c03a87 100644
+--- a/backend/tests/test_align_platform_change_events_migration.py
++++ b/backend/tests/test_align_platform_change_events_migration.py
+@@ -114,8 +114,10 @@ class TestMigrationStructure:
+         # 重号条目撞约束实证，2026-10-15-knowledge-search-pgvector）。
+         # 20261016100000（agent_sessions 加 title_fallback 列+回填——2026-10-16-backend-mem-polling task-08）→
+         # c3f8a1d6e2b4（sessions 加 family_id 列——2026-10-16-fix-auth-random-logout task-01）→
+-        # 20261021120000（daemon_run_snapshots 侧表——2026-10-20-session-page-dsh-alignment task-08）。
+-        assert heads[0] == "20261021120000"  # 1b 快照侧表迁移成为新 head（注释链续写）
++        # 20261021120000（daemon_run_snapshots 侧表——2026-10-20-session-page-dsh-alignment task-08）→
++        # 20261021130000（spec_file_manifest.landing_version 印章列+索引——
++        # 2026-10-21-spec-manifest-incremental task-01 增量清单游标）。
++        assert heads[0] == "20261021130000"  # 增量清单印章迁移成为新 head（注释链续写）
+ 
+     def test_revision_chain(self) -> None:
+         mod = _load_migration_module()

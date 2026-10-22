@@ -1,0 +1,15 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-22-review-risk-fixes",
+  "reviewer": "subagent",
+  "verdict": "PASS",
+  "reviewedAgainst": "c975a003a577bfb5ce79a8445906f9f358939c82",
+  "findings": [],
+  "dimensionNotes": {
+    "乱序": "ok",
+    "并发": "ok",
+    "切换": "ok",
+    "作用域": "ok"
+  },
+  "reviewedAt": "2026-10-21T23:48:23Z"
+}

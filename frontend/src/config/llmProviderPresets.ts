@@ -52,6 +52,17 @@ export interface LlmProviderPreset {
    * 真实 key（ql-20260823-007）。
    */
   settings_config_partial?: Record<string, unknown>;
+  /**
+   * codex 引擎专用端点覆盖（2026-10-20-preset-engine-endpoint）。预设 base_url 是
+   * claude 形态；同一家对 codex 需要不同协议端点（codex 只支持 OpenAI Responses，
+   * wire_api="responses" 是 CLI 唯一合法值）时在此声明，表单勾选 Codex 联动切换。
+   * 只填实测跑通的（R-05 不臆造）：智谱官方 codex 文档端点 /api/v1、OpenCode
+   * docs/go 的 Responses 端点（注意其 Responses 系模型与 claude 侧模型集不同）。
+   */
+  codex?: {
+    base_url: string;
+    default_model?: string;
+  };
 }
 
 export const LLM_PROVIDER_PRESETS: LlmProviderPreset[] = [
@@ -122,6 +133,13 @@ export const LLM_PROVIDER_PRESETS: LlmProviderPreset[] = [
     api_key_url: "https://www.bigmodel.cn/claude-code",
     usage: { type: "token_plan" },
     icon_color: "#0F62FE",
+    // codex 官方接入端点（docs.bigmodel.cn/cn/coding-plan/tool/codex）：OpenAI
+    // Responses 协议走 /api/v1，与 claude 的 /api/anthropic 不同（2026-10-20 实测
+    // codex 直连跑通；glm-5-turbo/glm-5.3-flash 亦可用，见 models.json 目录）。
+    codex: {
+      base_url: "https://open.bigmodel.cn/api/v1",
+      default_model: "glm-5.3",
+    },
     settings_config_partial: {
       env: {
         ANTHROPIC_BASE_URL: "https://open.bigmodel.cn/api/anthropic",
@@ -215,6 +233,15 @@ export const LLM_PROVIDER_PRESETS: LlmProviderPreset[] = [
     website_url: "https://opencode.ai/go",
     api_key_url: "https://opencode.ai/go",
     icon_color: "#211E1E",
+    // codex 专用 Responses 端点（opencode.ai/docs/go：/inference/go/openai/v1，
+    // 2026-10-20 实测跑通）。注意模型集不同：Responses 仅 gpt-luna/grok/muse-spark
+    // 系——glm/kimi/deepseek 系在该端点仅 chat completions，codex 用会
+    // ModelProtocolUnsupported，故默认模型取 gpt-6-luna 而非 claude 侧的
+    // deepseek-v4.1-flash。
+    codex: {
+      base_url: "https://opencode.ai/inference/go/openai/v1",
+      default_model: "gpt-6-luna",
+    },
     settings_config_partial: {
       env: {
         ANTHROPIC_BASE_URL: "https://opencode.ai/zen/go",

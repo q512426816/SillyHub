@@ -158,3 +158,65 @@ describe("ChangeFileTree sync 触发面（2026-10-14-files-refresh-explicit-sync
     expect(mockedList.mock.calls[0]?.[2]).toMatchObject({ sync: true });
   });
 });
+
+// 2026-10-21-files-refresh-spinner：显式刷新转圈反馈——sync 同步后端等待预算 15s，
+// 点击期间按钮必须自证「已点上」（禁用+图标转圈），返回后恢复；纯读刷新（挂载/轮询）
+// 不碰转圈态（转圈面仅由用户显式点击驱动）。
+describe("ChangeFileTree 刷新按钮转圈反馈（2026-10-21-files-refresh-spinner）", () => {
+  it("点击刷新：同步进行中按钮禁用+转圈，返回后恢复", async () => {
+    vi.useFakeTimers();
+    mockedList.mockResolvedValue(fileResp());
+    mockedPending.mockResolvedValue({ items: [] });
+
+    const { getByRole } = renderTree(
+      <ChangeFileTree workspaceId="ws-1" changeId="chg-1" />,
+    );
+    await flushInitialLoad();
+    mockedList.mockClear();
+
+    // 手工控速：sync 请求挂起不返回，断言转圈中间态
+    let resolveSync!: (_v: ReturnType<typeof fileResp>) => void;
+    mockedList.mockImplementationOnce(
+      () => new Promise((res) => { resolveSync = res; }),
+    );
+
+    fireEvent.click(getByRole("button", { name: /刷新/ }));
+    await vi.advanceTimersByTimeAsync(0);
+
+    const btn = getByRole("button", { name: /刷新/ });
+    expect(btn).toBeDisabled();
+    expect(btn.querySelector(".animate-spin")).not.toBeNull();
+
+    resolveSync(fileResp());
+    await vi.advanceTimersByTimeAsync(0);
+    expect(btn).not.toBeDisabled();
+    expect(btn.querySelector(".animate-spin")).toBeNull();
+  });
+
+  it("纯读刷新（挂载/轮询）不触发转圈态", async () => {
+    vi.useFakeTimers();
+    mockedList.mockResolvedValue(fileResp());
+    mockedPending.mockResolvedValue({ items: [] });
+
+    const { getByRole } = renderTree(
+      <ChangeFileTree workspaceId="ws-1" changeId="chg-1" autoRefreshMs={15000} />,
+    );
+    await flushInitialLoad();
+
+    const btn = getByRole("button", { name: /刷新/ });
+    expect(btn).not.toBeDisabled();
+
+    // 轮询请求挂起在飞时按钮仍可点、无转圈（纯读不驱动同步反馈面）
+    let resolvePoll!: (_v: ReturnType<typeof fileResp>) => void;
+    mockedList.mockImplementationOnce(
+      () => new Promise((res) => { resolvePoll = res; }),
+    );
+    await vi.advanceTimersByTimeAsync(15_000);
+    expect(mockedList).toHaveBeenCalledTimes(2);
+    expect(btn).not.toBeDisabled();
+    expect(btn.querySelector(".animate-spin")).toBeNull();
+
+    resolvePoll(fileResp());
+    await vi.advanceTimersByTimeAsync(0);
+  });
+});

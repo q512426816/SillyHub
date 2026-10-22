@@ -691,8 +691,17 @@ export function SessionPanelDialog(props: SessionPanelProps) {
               // GET /sessions/{id}/runs），buildErrorLogItem 安全映射写入对应 turn 供
               // RunErrorItem 渲染。同 run_id 只拉一次（fetchedErrorRunIdsRef 去重）；
               // 拉取失败 / error_detail 缺失 → 静默不崩，失败 turn 仍有状态徽标。
+              // 2026-10-20-session-error-visibility：与 session-panel-page 同款条件
+              // 扩展——killed 且 env.status=failed 且 interactive_interrupted 也拉
+              // （backend 对 SDK error_during_execution 统一落该码，模型错误会被
+              // deriveTurnTerminalStatus 归 killed 跳过拉取）；error_detail 可解析
+              // 升级 failed + 错误卡，真打断保持 killed 零触碰。
+              const dialogKilledByInterrupted =
+                terminal === "killed" &&
+                env.status === "failed" &&
+                env.error_code === "interactive_interrupted";
               if (
-                terminal === "failed" &&
+                (terminal === "failed" || dialogKilledByInterrupted) &&
                 env.run_id &&
                 !fetchedErrorRunIdsRef.current.has(env.run_id)
               ) {
@@ -702,9 +711,23 @@ export function SessionPanelDialog(props: SessionPanelProps) {
                   try {
                     const runs = await fetchRunsForErrorDetail();
                     const matched = runs.find((r) => r.id === failedRunId);
+                    const modelItem = buildErrorLogItem(matched?.error_detail ?? null);
+                    if (dialogKilledByInterrupted) {
+                      // killed 升级分支：仅模型错误升级 failed；真打断零触碰。
+                      if (!modelItem) return;
+                      setView((prev) => ({
+                        ...prev,
+                        turns: prev.turns.map((t) =>
+                          t.runId === failedRunId && !t.errorDetail
+                            ? { ...t, errorDetail: modelItem, status: "failed" as const }
+                            : t,
+                        ),
+                      }));
+                      return;
+                    }
                     // ql-20260831-004：同上——系统级失败兜 failure_summary 映射。
                     const item =
-                      buildErrorLogItem(matched?.error_detail ?? null) ??
+                      modelItem ??
                       buildSystemFailureItem(
                         matched?.error_code ?? null,
                         matched?.failure_summary ?? null,

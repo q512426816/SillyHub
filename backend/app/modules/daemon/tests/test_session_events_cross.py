@@ -6,7 +6,9 @@ design §3 生命周期契约表的 6 个跨模块写入点各自发布 created 
 容错语义已由 task-01 ``test_session_events.py`` 独立覆盖）：
 
 - run_sync/service.py close_interactive_run：run 终态翻 session ended/failed →
-  status_changed；多轮对话仅刷 last_active_at → 不发；
+  status_changed；多轮对话仅刷 last_active_at → 同样发 status_changed
+  （2026-10-20-session-status-live-sync 契约更新——列表 current_run_status 随
+  run 终态变 None，左侧转圈徽标需秒级收敛；幂等已终态仍零发布）；
 - sweep.py 两档（reconnect / offline）：批量 UPDATE 后逐行 status_changed，
   无命中零发布；offline 档 task-05 改挂起语义——active→suspended 非终态只发
   status_changed（无 session_ended），超龄 24h GC 置 failed 才发终态
@@ -192,7 +194,10 @@ async def test_close_interactive_run_terminal_flip_publishes_status_changed(
 async def test_close_interactive_run_multi_turn_last_active_only_no_publish(
     db_session: AsyncSession, mocked_redis, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """多轮对话（interactive + change_id=None）仅刷 last_active_at：零发布。"""
+    """多轮对话（interactive + change_id=None）仅刷 last_active_at：照发一条
+    status_changed（2026-10-20-session-status-live-sync 契约更新——列表项的
+    current_run_status 随 run 终态变 None，左侧转圈徽标需秒级收敛；原「零发布」
+    契约已废）。"""
     calls = _capture_publish(monkeypatch, "app.modules.daemon.run_sync.service")
     user = await _make_user(db_session, prefix="runsync-mt")
     rt = DaemonRuntime(
@@ -205,7 +210,7 @@ async def test_close_interactive_run_multi_turn_last_active_only_no_publish(
     )
     db_session.add(rt)
     await db_session.commit()
-    lease_id, run_id, token, _session_id = await _seed_interactive_run(
+    lease_id, run_id, token, session_id = await _seed_interactive_run(
         db_session, user, rt, spec_strategy="interactive", change_id=None
     )
 
@@ -213,7 +218,7 @@ async def test_close_interactive_run_multi_turn_last_active_only_no_publish(
         lease_id, run_id, token, status="success", is_error=False
     )
 
-    assert calls == []
+    assert calls == [("status_changed", session_id, user.id)]
 
 
 # ── 2. sweep.py 两档 ─────────────────────────────────────────────────────────

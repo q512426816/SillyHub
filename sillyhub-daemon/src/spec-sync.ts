@@ -19,6 +19,7 @@
 // 蓝图 task-04.md / task-12.md / task-11.md。
 
 import { createHash } from 'node:crypto';
+import { existsSync } from 'node:fs';
 import { spawn as cpSpawn, type ChildProcess } from 'node:child_process';
 import { homedir } from 'node:os';
 import { join, relative, isAbsolute, dirname, resolve, basename, sep as pathSep } from 'node:path';
@@ -1061,6 +1062,81 @@ async function postSpecSyncImpl(
   }
 }
 
+// ── daemon 同步关闭开关（2026-10-21-daemon-sync-hardening FR-01）──────────────
+
+/**
+ * 单写者让位开关：机器级 env `SILLYHUB_DAEMON_SPEC_SYNC_OFF`（'1'/'true'，大小写
+ * 不敏感）关闭本机全部工作区的 daemon 自动推送；工作区级 flag 文件
+ * `~/.sillyhub/daemon/spec-sync-off/{wsId}.flag` 只关单个工作区。任一命中即关。
+ *
+ * 背景：runbook（docs/sillyspec/finished/spec-push-conflict-recovery-runbook.md）
+ * 钉死 SpecPushConflict 头号根因是双写者（daemon 自动同步与 CLI
+ * `sillyspec platform sync` 并存致 manifest base_version 漂移）。用户拍板单写者
+ * 优先 CLI——本开关给「CLI 优先」一个可执行的落地件。flag 置于 daemonStateDir 下
+ * specs/ 平级目录，pull 整树交换不触及，永不丢。
+ *
+ * @param v env 原始值（undefined = 未设）
+ */
+export function parseSpecSyncOffEnv(v: string | undefined | null): boolean {
+  if (!v) return false;
+  const s = v.trim().toLowerCase();
+  return s === '1' || s === 'true';
+}
+
+/** 工作区级关闭 flag 路径：~/.sillyhub/daemon/spec-sync-off/{wsId}.flag。 */
+export function specSyncOffFlagPath(wsId: string): string {
+  return join(daemonStateDir(), 'spec-sync-off', `${wsId}.flag`);
+}
+
+/** 关闭判定：env 整机优先、ws flag 次之。返回命中来源；null=未关。 */
+export async function isDaemonSpecSyncOff(wsId: string): Promise<'env' | 'flag' | null> {
+  if (parseSpecSyncOffEnv(process.env.SILLYHUB_DAEMON_SPEC_SYNC_OFF)) return 'env';
+  return existsSync(specSyncOffFlagPath(wsId)) ? 'flag' : null;
+}
+
+// ── 推送冲突自动自愈（2026-10-21-spec-conflict-autoheal FR-01）────────────────
+
+/**
+ * 同一工作区连续冲突达该次数即自愈（本地为准重建基线）。impl 内 rebase 恰好一次
+ * 重试已吸收「他端先推」型浅冲突，能连续 2 次抛 SpecPushConflict 的只剩持久真
+ * 分叉——正是需要重建基线的形态。env SILLYHUB_DAEMON_CONFLICT_AUTOHEAL=0 关闭。
+ */
+export const SPEC_SYNC_CONFLICT_AUTOHEAL_THRESHOLD = 2;
+
+/**
+ * 自愈禁用判定：'0'/'false'（大小写不敏感）禁用；缺席/其他值默认开启。
+ * 与 parseSpecSyncOffEnv 方向相反（一个是默认关、一个是默认开），勿混用。
+ */
+export function parseAutohealDisabledEnv(v: string | undefined | null): boolean {
+  if (!v) return false;
+  const s = v.trim().toLowerCase();
+  return s === '0' || s === 'false';
+}
+
+/** per-ws 连续冲突计数（内存态，进程重启回零——最多晚一轮自愈，可接受）。 */
+const conflictStreakByWs = new Map<string, number>();
+
+/**
+ * 自愈动作：备份 manifest 缓存到 `~/.sillyhub/daemon/manifests-backup/{ws}-{ts}.json`
+ * （best-effort，失败仅告警不阻断）后删除缓存——下次推送自动走全量 tar（无乐观锁，
+ * 本地为准覆盖服务端，裁决依据用户 2026-10-21 拍板 D-001）。
+ */
+async function backupAndClearManifest(wsId: string): Promise<void> {
+  try {
+    const p = resolveManifestCachePath(wsId);
+    const raw = await readFile(p, 'utf-8').catch(() => null);
+    if (raw !== null) {
+      const backupDir = join(dirname(dirname(p)), 'manifests-backup');
+      await mkdir(backupDir, { recursive: true });
+      const stamp = new Date().toISOString().replace(/[:.]/g, '-');
+      await writeFile(join(backupDir, `${wsId}-${stamp}.json`), raw, 'utf-8');
+    }
+    await rm(p, { force: true });
+  } catch (e) {
+    console.warn('spec_sync: conflict_autoheal_backup_failed', wsId, e);
+  }
+}
+
 /**
  * pending_push 标记（ql-20260816-003）：postSpecSync 失败的防御兜底（hasUnsyncedLocalChanges 信号 1）。
  *
@@ -1090,10 +1166,30 @@ export async function postSpecSync(
   changeWriteId?: string,
   onProgress?: (p: { files_total?: number; files_processed?: number }) => void,
 ): Promise<{ ok: boolean; reparsed: number; filesTotal?: number } | null> {
+  // FR-01：单写者开关命中 → 等价 mock 语义（返回 null，调用方既有 null 分支天然
+  // no-op）：跳过推送、不动 pending_push（关闭是运维决策非传输失败）；
+  // knowledge hits 上行独立于 spec manifest，照常 best-effort——防复现 2026-09-25
+  // runbook 的「命中一行都上不去」连带面。
+  const offSource = await isDaemonSpecSyncOff(wsId);
+  if (offSource !== null) {
+    console.warn(
+      `spec_sync: skipped_by_off_switch ws=${wsId} 来源=${offSource}` +
+        `（daemon 自动同步已关——单写者让位 CLI \`sillyspec platform sync\`。` +
+        `恢复：删 env SILLYHUB_DAEMON_SPEC_SYNC_OFF 或删 ${specSyncOffFlagPath(wsId)}）`,
+    );
+    try {
+      await uploadKnowledgeHitsIfNeeded(client, wsId, specRoot);
+    } catch {
+      // R-05：上报失败绝不阻塞（uploadKnowledgeHitsIfNeeded 内部已全收敛，防御对称）。
+    }
+    return null;
+  }
   try {
     const result = await postSpecSyncImpl(client, wsId, specRoot, changeWriteId, onProgress);
-    // 真实 push 成功（result 非 null）→ 清除 pending_push（本地已与服务器一致）。
+    // 真实 push 成功（result 非 null）→ 清除 pending_push（本地已与服务器一致），
+    // 并清零自愈连败计数（FR-01：成功即复位，下次冲突重新起算）。
     if (result !== null) {
+      conflictStreakByWs.delete(wsId);
       await rmPendingPushMarker(specRoot);
       // task-02（2026-09-20-knowledge-effect-panel）：成功汇聚点挂 hits 增量上报
       // best-effort 钩子——首同步 tar / 增量 / 回退 tar / 无变化四条成功路径都汇到
@@ -1108,10 +1204,30 @@ export async function postSpecSync(
     }
     return result;
   } catch (e) {
-    // 传输失败（网络 / 服务端不可用 / 5xx）→ 写标记；conflict 除外（人工拍板，见上方语义）。
-    if (!(e instanceof SpecPushConflict)) {
-      await writePendingPushMarker(specRoot);
+    if (e instanceof SpecPushConflict) {
+      // FR-01（2026-10-21-spec-conflict-autoheal）：连续冲突达阈值 → 自愈（本地为
+      // 准重建基线）——备份并删 manifest，递归重入（无缓存自动走全量 tar，无乐观锁）。
+      // 递归前清零计数：重入若再抛（防御性，tar 路径无冲突面）只重新起算，不无限递归。
+      // env SILLYHUB_DAEMON_CONFLICT_AUTOHEAL=0 可关（回退旧人工拍板语义）。
+      const streak = (conflictStreakByWs.get(wsId) ?? 0) + 1;
+      conflictStreakByWs.set(wsId, streak);
+      if (
+        streak >= SPEC_SYNC_CONFLICT_AUTOHEAL_THRESHOLD &&
+        !parseAutohealDisabledEnv(process.env.SILLYHUB_DAEMON_CONFLICT_AUTOHEAL)
+      ) {
+        conflictStreakByWs.set(wsId, 0);
+        await backupAndClearManifest(wsId);
+        console.warn(
+          `spec_sync: conflict_autoheal_local_wins ws=${wsId} round=${streak}` +
+            `（连续冲突达阈值——按 D-001 本地为准自动重建基线：manifest 已备份到 ` +
+            `manifests-backup/ 并清除，立即全量重推；关闭自愈设 SILLYHUB_DAEMON_CONFLICT_AUTOHEAL=0）`,
+        );
+        return postSpecSync(client, wsId, specRoot, changeWriteId, onProgress);
+      }
+      throw e;
     }
+    // 传输失败（网络 / 服务端不可用 / 5xx）→ 写标记（conflict 由上方自愈/上抛分支处理）。
+    await writePendingPushMarker(specRoot);
     throw e;
   }
 }

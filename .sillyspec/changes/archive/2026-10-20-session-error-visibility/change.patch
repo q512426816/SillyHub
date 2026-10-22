@@ -1,0 +1,529 @@
+diff --git a/docs/releases/2026-10-20-003-50dfdf2.md b/docs/releases/2026-10-20-003-50dfdf2.md
+new file mode 100644
+index 000000000..1dd0d2229
+--- /dev/null
++++ b/docs/releases/2026-10-20-003-50dfdf2.md
+@@ -0,0 +1,62 @@
++---
++seq: 26
++deployed_at: "2026-10-20 12:10:00"
++status: success
++commit_from: ffab0aa2e
++commit_to: 50dfdf231
++summary: 腾讯云生产部署——codex 直连供应商 requires_openai_auth 认证修复上线（agent_kinds 合并后 codex 挂 claude 端点供应商断流的代码层根治）；随版会话失败原因可见性（2026-10-20-session-error-visibility）
++agent: zcode-agent
++commits:
++  - sha: 50dfdf231
++    message: "chore(sillyspec): codex 认证修复变更档案（spec 三件套+task-01/02 勾选）入库 (2026-10-20-codex-requires-openai-auth)"
++    author: qinyi
++  - sha: ae7233cbf
++    message: "fix(daemon): codex 直连供应商写盘补 requires_openai_auth 认证——codex CLI 对自定义 provider 默认不发 Authorization（mock 抓包+公网 A/B 实证），anthropic 形态有 key 时写 requires_openai_auth=true；keyless/openai_chat 零回归；全量 4899 绿 (2026-10-20-codex-requires-openai-auth)"
++    author: qinyi
++  - sha: a7581a819
++    message: "fix(session-panel): 实时终态 interactive_interrupted 轮拉取错误详情并按模型错误升级 failed（真打断保持 killed）；RunErrorItem raw 首行摘要默认可见 (2026-10-20-session-error-visibility) (task-03/04)"
++    author: qinyi
++  - sha: 6afbc5b46
++    message: "fix(session-panel): enrichOne 对 interactive_interrupted+error_detail 可解析轮升级 failed 并回填错误卡（快照路径），真打断保持 killed (2026-10-20-session-error-visibility) (task-02)"
++    author: qinyi
++  - sha: e3aa14dc8
++    message: "test(session-panel): interactive_interrupted 错误可见性判定用例（先红）+ spec 工件 (2026-10-20-session-error-visibility) (task-01)"
++    author: qinyi
++  - sha: 1e3c24ebf
++    message: "docs(sillyspec): 三坑源侧目录注销（随归档搬移续 1e056ebd9）"
++    author: qinyi
++  - sha: 1e056ebd9
++    message: "docs(sillyspec): 三坑关闭转 finished——conflict-compare / cli-cwd-coupling / verify-gate 三缺陷收口留痕"
++    author: qinyi
++---
++
++## 本次部署
++
++**腾讯云生产机（124.222.127.242）更新部署**：本地打包（main @ 50dfdf231）→ scp →
++load 直接起；旧镜像备份 `backup-20261020-1209` 留存可回滚。
++
++主交付：**codex 直连供应商认证修复（daemon bundle 0.1.1 / BUILD_ID
++50dfdf23-20261020120249）**。排障链：平台 codex 会话稳定 `stream disconnected` →
++本机 codex CLI 缺平台二进制（已先行重装修复）→ 供应商 agent_kinds 合并后 codex
++复用 claude 的 `/api/anthropic` 端点（协议错位）→ **根治层：daemon 写 per-session
++config.toml 从不写 `requires_openai_auth`，codex CLI 对自定义 provider 默认不发
++Authorization，auth.json 的 key 从不随请求带出**（localhost mock 抓包 + 公网 A/B
++双实证）。修复：anthropic 直连形态且有 key 时写 `requires_openai_auth = true`；
++keyless / openai_chat 形态产物零回归。
++
++- 🔧 daemon codex-settings 写盘补 `requires_openai_auth = true`（带 key 直连形态）
++- 🔧 golden/保守合并/smoke 期望同步 + 新增 3 用例（有 key 写出 / keyless 逐字不变 /
++  openai_chat 零回归），daemon 全量 4899 绿
++- 🔧 随版：会话失败原因可见性（interactive_interrupted 轮错误详情拉取与展示，
++  2026-10-20-session-error-visibility）
++
++配套配置侧动作（平台数据，不随镜像）：新建 codex 专用供应商「智谱 GLM Codex (wp)」
++（base_url=`/api/v1`，OpenAI Responses 协议端点）；旧 GLM/OpenCode 供应商的 codex
++勾选移除（防再选到协议错位路径）。
++
++## 📝 部署验证
++
++- 打包源 `main @ 50dfdf231`，部署后 health `commit_sha=50dfdf231` **完全一致**（互覆检查通过）
++- 五容器 healthy；`/api/health` ok（db/redis ok）；`SPEC_MIRROR_WRITE_OK`
++- daemon 分发一致性：服务器本机 `latest.json` = `50dfdf23-20261020120249`（新 bundle，
++  含 requires_openai_auth 修复），各机器 daemon 600s 轮询自更新触达
+diff --git a/frontend/src/components/agent-log/__tests__/run-error-item.test.tsx b/frontend/src/components/agent-log/__tests__/run-error-item.test.tsx
+index 06600cab4..ffba4f484 100644
+--- a/frontend/src/components/agent-log/__tests__/run-error-item.test.tsx
++++ b/frontend/src/components/agent-log/__tests__/run-error-item.test.tsx
+@@ -400,34 +400,77 @@ describe("task-09: actions 触发回调（重发 / 切换供应商 / 查看详
+ /* ------------------------------------------------------------------ */
+ 
+ describe("task-09: 查看详情（展开 raw + onViewDetail 回调）", () => {
+-  const raw =
++  const rawFirstLine =
+     "[ASSISTANT] API Error: Request rejected (429) · [1310][已达每周/每月上限]";
++  const raw = `${rawFirstLine}\nstream disconnected before completion`;
+ 
+-  it("默认折叠 raw；点击「查看详情」展开 raw 文本并切换为「收起详情」", () => {
++  it("多行 raw：首行摘要默认可见，完整 raw 点击「查看详情」展开", () => {
+     render(<RunErrorItem item={makeItem({ type: "quota_exceeded", raw })} />);
+-    expect(screen.queryByText(raw)).not.toBeInTheDocument();
++    // 2026-10-20-session-error-visibility：首行摘要默认可见（排查免点击）。
++    expect(screen.getByTestId("run-error-raw-summary")).toHaveTextContent(
++      rawFirstLine,
++    );
++    // 第二行仅存在于完整 raw（展开前不可见）。
++    expect(
++      screen.queryByText(/stream disconnected before completion/),
++    ).not.toBeInTheDocument();
+     fireEvent.click(screen.getByRole("button", { name: /查看详情/ }));
+-    expect(screen.getByText(raw)).toBeInTheDocument();
++    expect(
++      screen.getByText(/stream disconnected before completion/),
++    ).toBeInTheDocument();
+     expect(screen.getByRole("button", { name: /收起详情/ })).toBeInTheDocument();
+   });
+ 
+-  it("再次点击 → 收起 raw", () => {
++  it("再次点击 → 收起 raw（回到首行摘要）", () => {
+     render(<RunErrorItem item={makeItem({ type: "quota_exceeded", raw })} />);
+     fireEvent.click(screen.getByRole("button", { name: /查看详情/ }));
+-    expect(screen.getByText(raw)).toBeInTheDocument();
++    expect(
++      screen.getByText(/stream disconnected before completion/),
++    ).toBeInTheDocument();
+     fireEvent.click(screen.getByRole("button", { name: /收起详情/ }));
+-    expect(screen.queryByText(raw)).not.toBeInTheDocument();
++    expect(
++      screen.queryByText(/stream disconnected before completion/),
++    ).not.toBeInTheDocument();
++    expect(screen.getByTestId("run-error-raw-summary")).toBeInTheDocument();
+   });
+ 
+-  it("raw=null 且无 onViewDetail → 不显示「查看详情」", () => {
++  it("单行短 raw（摘要即全文）→ 摘要默认可见且无「查看详情」按钮", () => {
++    render(
++      <RunErrorItem item={makeItem({ type: "unknown", raw: rawFirstLine })} />,
++    );
++    expect(screen.getByTestId("run-error-raw-summary")).toHaveTextContent(
++      rawFirstLine,
++    );
++    expect(
++      screen.queryByRole("button", { name: /查看详情/ }),
++    ).not.toBeInTheDocument();
++  });
++
++  it("超长单行 raw → 摘要截断 200 字符 + 省略号，展开可见全文", () => {
++    const longRaw = "x".repeat(500);
++    render(<RunErrorItem item={makeItem({ type: "unknown", raw: longRaw })} />);
++    const summary = screen.getByTestId("run-error-raw-summary");
++    expect(summary).toHaveTextContent("…");
++    expect(summary.textContent).toHaveLength(201);
++    fireEvent.click(screen.getByRole("button", { name: /查看详情/ }));
++    expect(screen.getByText(longRaw)).toBeInTheDocument();
++  });
++
++  it("raw=null 且无 onViewDetail → 不显示「查看详情」与摘要", () => {
+     render(<RunErrorItem item={makeItem({ type: "unknown", raw: null })} />);
++    expect(
++      screen.queryByTestId("run-error-raw-summary"),
++    ).not.toBeInTheDocument();
+     expect(
+       screen.queryByRole("button", { name: /查看详情/ }),
+     ).not.toBeInTheDocument();
+   });
+ 
+-  it("raw 为纯空白 → 不显示「查看详情」（无内容可展开）", () => {
++  it("raw 为纯空白 → 不显示「查看详情」与摘要（无内容可展开）", () => {
+     render(<RunErrorItem item={makeItem({ type: "unknown", raw: "   " })} />);
++    expect(
++      screen.queryByTestId("run-error-raw-summary"),
++    ).not.toBeInTheDocument();
+     expect(
+       screen.queryByRole("button", { name: /查看详情/ }),
+     ).not.toBeInTheDocument();
+@@ -465,10 +508,14 @@ describe("task-09: 无 actions 时不渲染操作区", () => {
+ /* ------------------------------------------------------------------ */
+ 
+ describe("task-11 回归补强：actions 组合 / a11y / 边界", () => {
+-  it("retryable=true + onResend + onSwitchProvider + raw → 三按钮同现，重发为 primary（其余 default）", () => {
++  it("retryable=true + onResend + onSwitchProvider + 多行 raw → 三按钮同现，重发为 primary（其余 default）", () => {
+     render(
+       <RunErrorItem
+-        item={makeItem({ type: "rate_limited", retryable: true, raw: "限流原始文本" })}
++        item={makeItem({
++          type: "rate_limited",
++          retryable: true,
++          raw: "限流原始文本首行\n第二行上下文",
++        })}
+         onResend={() => {}}
+         onSwitchProvider={() => {}}
+       />,
+@@ -483,7 +530,9 @@ describe("task-11 回归补强：actions 组合 / a11y / 边界", () => {
+   });
+ 
+   it("查看详情 aria-expanded 随折叠状态切换（a11y 契约）", () => {
+-    render(<RunErrorItem item={makeItem({ type: "timeout", raw: "raw text" })} />);
++    render(
++      <RunErrorItem item={makeItem({ type: "timeout", raw: "raw text\nmore" })} />,
++    );
+     const btn = screen.getByRole("button", { name: /查看详情/ });
+     expect(btn.getAttribute("aria-expanded")).toBe("false");
+     fireEvent.click(btn);
+diff --git a/frontend/src/components/agent-log/run-error-item.tsx b/frontend/src/components/agent-log/run-error-item.tsx
+index f7f5d604c..6b6c375b8 100644
+--- a/frontend/src/components/agent-log/run-error-item.tsx
++++ b/frontend/src/components/agent-log/run-error-item.tsx
+@@ -276,16 +276,29 @@ export function RunErrorItem({
+   const { Icon } = meta;
+   const hint = item.hint ?? fallbackHint ?? autoRecoverHint ?? meta.defaultHint;
+   const hasRaw = item.raw != null && item.raw.trim().length > 0;
++  // 2026-10-20-session-error-visibility：raw 首行摘要默认可见——生产实证
++  // unknown 兜底卡只显示「运行失败 · 请查看下方详情」，真实原因（如
++  // "codex exited code=1"）藏在折叠里，用户排查必须多点一步。改为正文直接
++  // 展示首行（截 200 字符）；「查看详情」仅在摘要之外还有更多内容时出现
++  // （展开完整 raw）。
++  const rawFirstLine = (() => {
++    if (!hasRaw) return null;
++    const line = (item.raw ?? "").split(/\r?\n/, 1)[0]!.trim();
++    if (line.length === 0) return null;
++    return line.length > 200 ? `${line.slice(0, 200)}…` : line;
++  })();
++  const hasMoreRaw = rawFirstLine !== null && rawFirstLine !== item.raw;
+   const [showDetail, setShowDetail] = useState(false);
+ 
+   // actions 可见性：
+   // - 重新发送：父组件传入 onResend（ql-20260904-010：所有失败卡都可重试，
+   //   不再按 item.retryable 门控）。
+   // - 切换供应商：父组件传入 onSwitchProvider（由父级按场景决定是否提供）。
+-  // - 查看详情：有 raw 可展开，或父组件传入 onViewDetail。
++  // - 查看详情：raw 首行摘要之外还有更多内容可展开，或父组件传入 onViewDetail
++  //   （2026-10-20：单行短 raw 摘要即全文，不再给展开按钮）。
+   const showResend = Boolean(onResend);
+   const showSwitch = Boolean(onSwitchProvider);
+-  const showDetailBtn = hasRaw || Boolean(onViewDetail);
++  const showDetailBtn = hasMoreRaw || Boolean(onViewDetail);
+   const hasActions = showResend || showSwitch || showDetailBtn;
+ 
+   // 主操作按钮（primary 蓝底）：首个可用「修复」动作——重发优先，其次切换供应商
+@@ -346,6 +359,17 @@ export function RunErrorItem({
+         {item.message}
+       </p>
+ 
++      {/* 原始错误首行摘要（2026-10-20-session-error-visibility：默认可见，排查免点击；
++          展开全文时隐藏防重复） */}
++      {rawFirstLine && !showDetail && (
++        <p
++          data-testid="run-error-raw-summary"
++          className="mt-1 min-w-0 break-words font-mono text-xs text-zinc-600 [overflow-wrap:anywhere]"
++        >
++          {rawFirstLine}
++        </p>
++      )}
++
+       {/* 针对性建议 hint */}
+       {hint && (
+         <p className="mt-1 min-w-0 break-words text-xs text-zinc-600 [overflow-wrap:anywhere]">
+diff --git a/frontend/src/components/daemon/__tests__/page-helpers-error-visibility.test.ts b/frontend/src/components/daemon/__tests__/page-helpers-error-visibility.test.ts
+new file mode 100644
+index 000000000..84080ed26
+--- /dev/null
++++ b/frontend/src/components/daemon/__tests__/page-helpers-error-visibility.test.ts
+@@ -0,0 +1,150 @@
++/**
++ * 2026-10-20-session-error-visibility（FR-01/FR-03）：enrichDisplayTurns 对
++ * interactive_interrupted 失败轮的错误可见性判定锁定。生产实证（会话 71419980）：
++ * backend 对 SDK error_during_execution（含全部模型错误）统一落
++ * error_code=interactive_interrupted，前端 runTerminalTurnStatus 归 killed
++ * 「已中止」不回填 errorDetail → 错误卡永不渲染。本变更精化：killed 且
++ * meta.status=failed 且 error_detail 可解析出模型错误 → 升级 failed +
++ * errorDetail；真打断（error_detail 空/无模型错误键）保持 killed 零回归。
++ */
++import { describe, it, expect } from "vitest";
++
++import {
++  enrichDisplayTurns,
++} from "@/components/daemon/session-panel/page-helpers";
++import type { SessionTurnView } from "@/components/daemon/turn-timeline";
++import type { SessionRunRead } from "@/lib/daemon/sessions";
++
++const MODEL_ERROR_DETAIL = {
++  type: "unknown",
++  code: null,
++  message: "运行失败",
++  retryable: false,
++  hint: null,
++  raw: "codex exited code=1",
++  reset_at: null,
++};
++
++function makeTurn(over: Partial<SessionTurnView> = {}): SessionTurnView {
++  return {
++    runId: "run-1",
++    turn: 1,
++    prompt: "你好",
++    output: "",
++    status: "completed",
++    seenLogIds: new Set<string>(),
++    inputTokens: null,
++    outputTokens: null,
++    ctxTokens: null,
++    autoResumeOf: null,
++    errorDetail: null,
++    segments: [],
++    turnStartedAt: 12345,
++    whoLine: { profileName: null, agentName: "codex", providerName: null },
++    replyAt: null,
++    ...over,
++  };
++}
++
++function makeRun(over: Partial<SessionRunRead> = {}): SessionRunRead {
++  return {
++    id: "run-1",
++    created_at: "2026-10-20T03:00:17Z",
++    status: "failed",
++    user_id: null,
++    sender_name: null,
++    error_code: "interactive_interrupted",
++    failure_summary: "codex exited code=1",
++    error_detail: MODEL_ERROR_DETAIL,
++    started_at: null,
++    finished_at: "2026-10-20T03:00:17.95Z",
++    exit_code: 1,
++    agent_profile_snapshot: null,
++    llm_provider_id: null,
++    input_tokens: null,
++    output_tokens: null,
++    ...over,
++  };
++}
++
++function enrich(turns: SessionTurnView[], runs: SessionRunRead[]) {
++  return enrichDisplayTurns(turns, new Map(runs.map((r) => [r.id, r])), [], "codex", null);
++}
++
++describe("enrichDisplayTurns — interactive_interrupted 错误可见性（FR-01）", () => {
++  it("模型失败（failed+interrupted+error_detail 非空）→ 升级 failed 并回填 errorDetail", () => {
++    const [enriched] = enrich([makeTurn()], [makeRun()]);
++    expect(enriched!.status).toBe("failed");
++    expect(enriched!.errorDetail).not.toBeNull();
++    expect(enriched!.errorDetail!.raw).toBe("codex exited code=1");
++  });
++
++  it("实时先落 killed 的轮，快照到达后同样升级 failed（两步收敛）", () => {
++    const [enriched] = enrich(
++      [makeTurn({ status: "killed" })],
++      [makeRun()],
++    );
++    expect(enriched!.status).toBe("failed");
++    expect(enriched!.errorDetail!.raw).toBe("codex exited code=1");
++  });
++
++  it("turn 已有 errorDetail 时不覆盖（?? 链只补缺）", () => {
++    const [enriched] = enrich(
++      [
++        makeTurn({
++          errorDetail: {
++            type: "network",
++            code: "ETIMEDOUT",
++            message: "网络连接失败",
++            retryable: true,
++            hint: null,
++            raw: "ETIMEDOUT",
++          },
++        }),
++      ],
++      [makeRun()],
++    );
++    expect(enriched!.errorDetail!.type).toBe("network");
++  });
++
++  it("非 interrupted 的 failed（interactive_failed）→ failed + errorDetail（既有行为锁定）", () => {
++    const [enriched] = enrich(
++      [makeTurn()],
++      [makeRun({ error_code: "interactive_failed", error_detail: MODEL_ERROR_DETAIL })],
++    );
++    expect(enriched!.status).toBe("failed");
++    expect(enriched!.errorDetail!.raw).toBe("codex exited code=1");
++  });
++});
++
++describe("enrichDisplayTurns — 真打断零回归（FR-03）", () => {
++  it("error_detail 为空（真打断）→ 保持 killed 且不出现错误卡", () => {
++    const [enriched] = enrich(
++      [makeTurn()],
++      [makeRun({ error_detail: null })],
++    );
++    expect(enriched!.status).toBe("killed");
++    expect(enriched!.errorDetail).toBeNull();
++  });
++
++  it("error_detail 无模型错误键（系统级 dict）→ 保持 killed", () => {
++    const [enriched] = enrich(
++      [makeTurn()],
++      [
++        makeRun({
++          error_detail: { reason: "startup_cleanup", finished_by: "reaper" },
++        }),
++      ],
++    );
++    expect(enriched!.status).toBe("killed");
++    expect(enriched!.errorDetail).toBeNull();
++  });
++
++  it("interrupted/cancelled 状态（非 failed）→ 保持 killed（现状语义不触碰）", () => {
++    const [enriched] = enrich(
++      [makeTurn()],
++      [makeRun({ status: "interrupted", error_code: null, error_detail: null })],
++    );
++    expect(enriched!.status).toBe("killed");
++  });
++});
+diff --git a/frontend/src/components/daemon/session-panel/page-helpers.tsx b/frontend/src/components/daemon/session-panel/page-helpers.tsx
+index 63b9c844c..2a0988b34 100644
+--- a/frontend/src/components/daemon/session-panel/page-helpers.tsx
++++ b/frontend/src/components/daemon/session-panel/page-helpers.tsx
+@@ -162,10 +162,25 @@ export function enrichDisplayTurns(
+       // errorDetail，消除「聊天时红色错误卡、刷新后变已完成」的路径不一致。
+       // 实时轮终态与 run 快照一致，覆盖为同值无害；errorDetail 只补缺（?? 链）。
+       const terminal = runTerminalTurnStatus(meta.status, meta.error_code);
++      // 2026-10-20-session-error-visibility：backend 对 SDK error_during_execution
++      // （含全部模型错误：429/断流/spawn 失败）统一落 error_code=
++      // interactive_interrupted，runTerminalTurnStatus 据此归 killed 且不回填
++      // errorDetail → 错误卡永不渲染（生产实证会话 71419980 页面只剩
++      // 「已中止」零信息）。按 error_detail 可解析性区分：模型失败（daemon
++      // classifyModelError 产物，模型错误键存在）升级 failed 走错误卡；真打断
++      // （error_detail 空/无模型错误键）维持 killed（ql-20260918-003 打断≠失败
++      // 语义保留）。升级后走 failed 分支，errorDetail ?? 链对同输入 buildErrorLogItem
++      // 必然命中（不落到系统级兜底）。
++      const killedUpgradeDetail =
++        terminal === "killed" && meta.status === "failed"
++          ? buildErrorLogItem(meta.error_detail)
++          : null;
++      const effectiveTerminal =
++        terminal === "killed" && killedUpgradeDetail !== null ? "failed" : terminal;
+       const terminalPatch =
+-                terminal === null
++                effectiveTerminal === null
+                   ? {}
+-                  : terminal === "failed"
++                  : effectiveTerminal === "failed"
+                     ? {
+                         status: "failed" as const,
+                         errorDetail:
+diff --git a/frontend/src/components/daemon/session-panel/session-panel-dialog.tsx b/frontend/src/components/daemon/session-panel/session-panel-dialog.tsx
+index 178d37388..904d9e02c 100644
+--- a/frontend/src/components/daemon/session-panel/session-panel-dialog.tsx
++++ b/frontend/src/components/daemon/session-panel/session-panel-dialog.tsx
+@@ -691,8 +691,17 @@ export function SessionPanelDialog(props: SessionPanelProps) {
+               // GET /sessions/{id}/runs），buildErrorLogItem 安全映射写入对应 turn 供
+               // RunErrorItem 渲染。同 run_id 只拉一次（fetchedErrorRunIdsRef 去重）；
+               // 拉取失败 / error_detail 缺失 → 静默不崩，失败 turn 仍有状态徽标。
++              // 2026-10-20-session-error-visibility：与 session-panel-page 同款条件
++              // 扩展——killed 且 env.status=failed 且 interactive_interrupted 也拉
++              // （backend 对 SDK error_during_execution 统一落该码，模型错误会被
++              // deriveTurnTerminalStatus 归 killed 跳过拉取）；error_detail 可解析
++              // 升级 failed + 错误卡，真打断保持 killed 零触碰。
++              const dialogKilledByInterrupted =
++                terminal === "killed" &&
++                env.status === "failed" &&
++                env.error_code === "interactive_interrupted";
+               if (
+-                terminal === "failed" &&
++                (terminal === "failed" || dialogKilledByInterrupted) &&
+                 env.run_id &&
+                 !fetchedErrorRunIdsRef.current.has(env.run_id)
+               ) {
+@@ -702,9 +711,23 @@ export function SessionPanelDialog(props: SessionPanelProps) {
+                   try {
+                     const runs = await fetchRunsForErrorDetail();
+                     const matched = runs.find((r) => r.id === failedRunId);
++                    const modelItem = buildErrorLogItem(matched?.error_detail ?? null);
++                    if (dialogKilledByInterrupted) {
++                      // killed 升级分支：仅模型错误升级 failed；真打断零触碰。
++                      if (!modelItem) return;
++                      setView((prev) => ({
++                        ...prev,
++                        turns: prev.turns.map((t) =>
++                          t.runId === failedRunId && !t.errorDetail
++                            ? { ...t, errorDetail: modelItem, status: "failed" as const }
++                            : t,
++                        ),
++                      }));
++                      return;
++                    }
+                     // ql-20260831-004：同上——系统级失败兜 failure_summary 映射。
+                     const item =
+-                      buildErrorLogItem(matched?.error_detail ?? null) ??
++                      modelItem ??
+                       buildSystemFailureItem(
+                         matched?.error_code ?? null,
+                         matched?.failure_summary ?? null,
+diff --git a/frontend/src/components/daemon/session-panel/session-panel-page.tsx b/frontend/src/components/daemon/session-panel/session-panel-page.tsx
+index 54a0f0018..86d2493ec 100644
+--- a/frontend/src/components/daemon/session-panel/session-panel-page.tsx
++++ b/frontend/src/components/daemon/session-panel/session-panel-page.tsx
+@@ -1508,8 +1508,19 @@ export function SessionPanelPage({
+             }
+ 
+             // 失败轮拉取结构化错误详情（同 run 只拉一次，供 RunErrorItem 渲染）。
++            // 2026-10-20-session-error-visibility：backend 对 SDK
++            // error_during_execution（含全部模型错误）统一落 error_code=
++            // interactive_interrupted，deriveTurnTerminalStatus 归 killed 后本拉取
++            // 被跳过 → 实时失败轮错误卡永不渲染（仅快照路径能修正）。条件扩展：
++            // killed 且 env.status=failed 且 interrupted 也拉——error_detail 可解析
++            // （模型错误）升级 failed + 错误卡；真打断（error_detail 空）保持 killed
++            // 无卡（不落 system 兜底，防打断被误报为失败）。
++            const killedByInterrupted =
++              terminal === "killed" &&
++              env.status === "failed" &&
++              env.error_code === "interactive_interrupted";
+             if (
+-              terminal === "failed" &&
++              (terminal === "failed" || killedByInterrupted) &&
+               env.run_id &&
+               !fetchedErrorRunIdsRef.current.has(env.run_id)
+             ) {
+@@ -1519,10 +1530,25 @@ export function SessionPanelPage({
+                 try {
+                   const runs = await fetchRunsForErrorDetail();
+                   const matched = runs.find((r) => r.id === failedRunId);
++                  const modelItem = buildErrorLogItem(matched?.error_detail ?? null);
++                  if (killedByInterrupted) {
++                    // killed 升级分支：仅模型错误（error_detail 可解析）升级
++                    // failed + 错误卡；真打断零触碰（保持 killed、无 errorDetail）。
++                    if (!modelItem) return;
++                    setTurnState((prev) => ({
++                      ...prev,
++                      turns: prev.turns.map((t) =>
++                        t.runId === failedRunId && !t.errorDetail
++                          ? { ...t, errorDetail: modelItem, status: "failed" as const }
++                          : t,
++                      ),
++                    }));
++                    return;
++                  }
+                   // ql-20260831-004：error_detail（模型层）为空的系统级失败（撞闸/
+                   // inject 过期）兜 failure_summary + error_code 映射（normalize）。
+                   const item =
+-                    buildErrorLogItem(matched?.error_detail ?? null) ??
++                    modelItem ??
+                     buildSystemFailureItem(
+                       matched?.error_code ?? null,
+                       matched?.failure_summary ?? null,

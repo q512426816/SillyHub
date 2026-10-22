@@ -1,0 +1,42 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-21-mobile-scan-birth-cleanup",
+  "reviewer": "subagent",
+  "verdict": "PASS",
+  "reviewedAgainst": "c1c128ae8e1da367480edc5d98bb878c16b9d070",
+  "findings": [
+    {
+      "severity": "P3",
+      "title": "FR-02/design 承诺文本称 STAGE_LABELS/STAGE_KIND 两处 scan 映射保留，实态 STAGE_KIND 从未有 scan 键",
+      "evidence": "STAGE_LABELS.scan=\"扫描\" 确认保留（badge:54），但 STAGE_KIND（badge:34-46）仅含 quick/brainstorm/plan/execute/verify/archive/thin/archived；git log -p --follow 全历史证实 scan 键从未存在于 STAGE_KIND。badge 文件未被本变更触及（patch 7 文件无此文件），「不动」行为承诺兑现、legacy scan 行标签走中文「扫描」不裸显英文，行为无损——属承诺文本对前置状态的描述失真，非行为缺陷",
+      "location": "frontend/src/components/changes/change-step-badge.tsx:34"
+    }
+  ],
+  "dimensionNotes": {
+    "乱序": "ok",
+    "并发": "ok",
+    "切换": "ok",
+    "作用域": "ok"
+  },
+  "reviewedAt": "2026-10-21T09:29:08+08:00",
+  "checklistNotes": {
+    "1_FR实现测试三方一致": "FR-01 兑现：STEPPER_STAGES 全文件无残留（grep 零命中），WORKFLOW_STAGES 直用于 indexOf(detail.tsx:222)/map(:230)/length-1(:291)，单一源 change-stage-header.tsx:20-22 确为 brainstorm→archive 五段。FR-02 兑现：两处兜底 brainstorm（changes/page.tsx:764、mobile-change-card.tsx:262），全前端 '?? \"scan\"' 零残留，STAGE_LABELS.scan 保留。FR-03 兑现：绑定用例真存在且断言该行为——detail.test 五段标签循环断言+queryByText(\"扫描\")为Null、card.test getByText(\"需求分析\")+queryByText(\"扫描\")为Null；requirements 绑定行保留旧标题（六阶段/scan）作 CLI 解析锚与预消化包披露相符。工作区核对：5 声明文件 git diff HEAD 零差异=冻结面=HEAD。",
+    "2_盲维四问真实性": "四维作答与 diff 相符：全部改动为渲染常量/兜底字面量/注释/测试断言，无事件序假设、无共享可变态与写入面、无取数面（乱序/并发/作用域 n/a 成立）；切换维声称的 legacy scan 行 indexOf<0 降级分支真实存在（detail.tsx:222-223 return null），与桌面 change-stage-header.tsx:70 同款分支交叉印证，收敛而非回归。",
+    "3_披露边界裁决": "①legacy scan 行移动端步骤条消失（降级收敛）——可接受：与桌面 [cid] 既有降级形态一致且注释留痕（detail.tsx:200-201）；②current_stage=null 兜底显「需求分析」可能被误读为进行中——可接受：null 属平台镜像异常态，FR-02 场景明确要求该行为且测试同断言；③badge 层 scan 值域映射不动——可接受：行为完全兑现（STAGE_KIND 措辞失真已记 P3，不影响「防 legacy 裸显英文」目标）；④放弃方案（保留别名仅删元素/连 badge 映射一并删）理由成立。全部边界已裁决：可接受。",
+    "4_防护声明": "隐含防护实证：legacy scan 行降级分支存在且生效（indexOf<0 → return null 不渲染步骤条）；STAGE_LABELS.scan 实证保留（badge:54），legacy scan 行显中文「扫描」非裸显英文。",
+    "5_生成物同步": "n/a：本变更无类型/契约生成物，api-types 未触及。",
+    "冻结面归属抽查": "2 个声明外 changelog 文件内容为他变更 2026-10-21-gitlog-conflict-quotepath 的自动回写行（本变更自身行不在冻结面，CLI 回写时序噪声），与预消化包「声明外/模块索引自动回写/他侧归因 0」披露相符，无代码影响。"
+  },
+  "probeNotes": {
+    "cli-copy-selfsufficient_文案触及": "n/a——纯前端组件常量/文案变更，未触及 CLI 输出文案",
+    "cli-copy-selfsufficient_门判定一致": "n/a——同上，无 CLI 文案改动面",
+    "config-absent-zero-regression": "n/a——未新增 local.yaml 消费键",
+    "crossrepo-path-compat": "n/a——未触及 worktree/deps/跨仓对账"
+  },
+  "rerun": {
+    "command": "npx vitest run src/components/mobile/mobile-change-detail.test.tsx src/components/mobile/mobile-change-card.test.tsx",
+    "cwd": "frontend/",
+    "result": "Test Files 2 passed (2), Tests 46 passed (46), 0 failed, 18.21s",
+    "at": "2026-10-21T09:27:38+08:00"
+  }
+}

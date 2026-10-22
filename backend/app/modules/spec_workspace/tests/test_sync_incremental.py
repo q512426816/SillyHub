@@ -335,7 +335,11 @@ class TestRename:
             .scalars()
             .first()
         )
-        assert old_row is None
+        # 2026-10-21-spec-manifest-incremental：旧路径行由硬删改软删墓碑
+        # （增量游标协议要求清单行只墓碑不消失——旧行消亡对 since 消费方可见）
+        assert old_row is not None
+        assert old_row.exists is False
+        assert old_row.version == 2
         new_row = (
             (
                 await db_session.execute(
@@ -1196,7 +1200,11 @@ class TestSoftDeleteRevival:
         assert active_row.version == 3
         assert active_row.content_hash == hashlib.sha256(b"tasks").hexdigest()
         archive_row = await self._get_row(db_session, ws.id, "changes/archive/x/tasks.md")
-        assert archive_row is None  # 旧路径行照常迁移删除
+        # 2026-10-21-spec-manifest-incremental：旧路径行硬删改软删墓碑（增量
+        # 游标可见性），行留存为 exists=False、version 沿自身谱系 +1（1 → 2）
+        assert archive_row is not None
+        assert archive_row.exists is False
+        assert archive_row.version == 2
 
         assert (spec_root / "changes" / "x" / "tasks.md").read_text(encoding="utf-8") == "tasks"
         assert not (spec_root / "changes" / "archive" / "x" / "tasks.md").exists()
@@ -1353,8 +1361,10 @@ class TestSoftDeleteRevival:
             "quicklog/Q.md": 2,
         }
 
-        # rename 落盘：清单迁移 + 磁盘文件移动
-        assert await self._get_row(db_session, ws.id, "changes/x/decisions.md") is None
+        # rename 落盘：清单迁移 + 磁盘文件移动。2026-10-21-spec-manifest-incremental：
+        # 旧路径行硬删改软删墓碑（增量游标可见），断言 exists=False 而非行消失
+        old_dec = await self._get_row(db_session, ws.id, "changes/x/decisions.md")
+        assert old_dec is not None and old_dec.exists is False and old_dec.version == 2
         archive_dec = await self._get_row(db_session, ws.id, "changes/archive/x/decisions.md")
         assert archive_dec is not None and archive_dec.exists is True
         assert (spec_root / "changes" / "archive" / "x" / "decisions.md").read_text(

@@ -674,6 +674,21 @@ export type TurnSegment =
       ts: number | null;
       /** 本地展示三态（见上）；回放（历史留痕）恒 delivered。 */
       phase: "steering" | "delivered" | "ended";
+    }
+  // 2026-10-21-task-wakeup-restore：后台任务终态唤醒注入的留痕段——daemon 注入
+  // 的「[后台任务通知]」user_input（唤醒链恢复后重新出现）。此前 2026-10-13-
+  // session-taskwakeup-hide 的口径是整体隐藏（对话视图无气泡、进度视图无卡）；
+  // 恢复唤醒后用户要求可见的轻量留痕（dsh「收到任务消息」同款形态）：折叠行
+  // 默认收起、可展开看通知全文。装配器内不主动构造（user_input 通道在
+  // applyLogToSegments 入口即返回），仅作类型成员由 runtime-session-helpers
+  // 回放装配 / session-panel 实时 upsert 显式构建；不进 output / processItems
+  // 兼容投影（segmentsToLegacy 无 case 自动跳过）。
+  | {
+      kind: "task_wakeup";
+      id: string;
+      /** 通知全文（「[后台任务通知]」开头，含任务行与核对指引）。 */
+      text: string;
+      ts: number | null;
     };
 
 export type ToolTurnSegment = Extract<TurnSegment, { kind: "tool" }>;

@@ -18,7 +18,7 @@
 // ssr:false 在 jsdom 同步渲染为 null）与 FileMessageCard（卡片本体两形态由
 // file-message-card.test.tsx 专项覆盖，本文件只锁视图归属）。
 import { afterEach, describe, it, expect, vi } from "vitest";
-import { cleanup, render, screen } from "@testing-library/react";
+import { cleanup, render, screen, within } from "@testing-library/react";
 
 import { TurnTimeline } from "../turn-timeline";
 import type { SessionTurnView, SessionViewMode } from "../turn-timeline";
@@ -237,7 +237,7 @@ describe("「对话」视图渲染文件卡片（quick-d12af6dd / FR-01）", () 
     );
     // v2 全部视图：thinking 折叠头 + 文件卡片
     expect(screen.getByTestId("file-message-card")).toBeInTheDocument();
-    expect(screen.getByText("💭 思考过程")).toBeInTheDocument();
+    expect(screen.getByText("思考")).toBeInTheDocument(); // D-025 语义标签
 
     rerender(
       <TurnTimeline
@@ -335,9 +335,226 @@ describe("对话视图子代理容器段（2026-09-15-subagent-three-pane task-0
         )}
       />,
     );
-    expect(screen.getByText("💭 思考过程")).toBeInTheDocument(); // thinking 折叠头
+    expect(screen.getByText("思考")).toBeInTheDocument(); // thinking 折叠头（D-025 语义标签）
     expect(screen.getByText("报告已生成并上传")).toBeInTheDocument(); // text 段
     expect(screen.getByText("代码审查员")).toBeInTheDocument(); // 子代理块头
     expect(screen.getByText("分身「资料调研员」")).toBeInTheDocument(); // 团队分身块头
+  });
+});
+
+/* task-11（2026-10-20-session-page-dsh-alignment / FR-14 / FR-16 / D-023@v1）：
+ * 轮级文件变更卡的挂载面——轮尾状态行之后挂卡；无快照不占位。
+ * 2026-10-22-file-card-hide-empty：tool_only / 采集失败也不再出「仅工具编辑」卡，
+ * 整轮零渲染；会话级汇总挂会话流顶部且受 props 开关控制。
+ * 数据全部来自 SessionTurnView.fileChanges / fileChangesCapability（挂载方从
+ * /runs 读模型透传），TurnTimeline 自身零取数。 */
+describe("轮级文件变更卡与会话级汇总挂载（task-11 / 线 C 1b）", () => {
+  function makeSnapshot(
+    overrides: Partial<NonNullable<SessionTurnView["fileChanges"]>> = {},
+  ): NonNullable<SessionTurnView["fileChanges"]> {
+    return {
+      runId: "run-1",
+      baselineHead: "abc1234",
+      collectedAt: "2026-10-21T08:00:00Z",
+      collectMs: 30,
+      status: "ok",
+      files: [],
+      concurrentSessionsHint: true,
+      ...overrides,
+    };
+  }
+
+  it("有快照：轮尾状态行之后挂出逐文件卡（折叠态「已编辑 N 个文件」+ 共享工作区提示）", () => {
+    render(
+      <TurnTimeline
+        {...renderProps([
+          makeTurn({
+            fileChanges: makeSnapshot({
+              files: [
+                {
+                  path: "src/app.tsx",
+                  status: "modified",
+                  added: 12,
+                  deleted: 3,
+                  attribution: "edit_patch",
+                  editToolNames: ["Edit"],
+                },
+                {
+                  path: "package.json",
+                  status: "modified",
+                  added: 0,
+                  deleted: 1,
+                  attribution: "command",
+                },
+              ],
+            }),
+            fileChangesCapability: "full",
+          }),
+        ])}
+      />,
+    );
+
+    const card = screen.getByTestId("turn-file-changes");
+    expect(screen.getByText("已编辑 2 个文件")).toBeInTheDocument();
+    expect(card).toBeInTheDocument();
+    // 挂在轮尾状态行（RoundDivider「第 N 轮」）之后，不是轮首；卡片头也带「第 N 轮」，
+    // 取 DOM 序第一个（分隔行在前）。
+    const [divider] = screen.getAllByText("第 1 轮");
+    expect(
+      divider!.compareDocumentPosition(card) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+    // 折叠态即显共享工作区提示（concurrentSessionsHint=true）。汇总卡也有一份同款
+    // 横幅（R-08 恒标），这里限定在本轮卡片内断言。
+    expect(within(card).getByText("共享工作区，可能含并行会话改动")).toBeInTheDocument();
+  });
+
+  it('capability="tool_only"（无快照）：整轮不出卡，全树无「仅工具编辑」也无「无改动」', () => {
+    // 2026-10-22-file-card-hide-empty（用户裁决「没有信息就隐藏卡片」）：历史轮
+    // （daemon 0.2.0 / 部署之前）不再挂零信息降级卡。
+    render(
+      <TurnTimeline
+        {...renderProps([
+          makeTurn({ fileChanges: null, fileChangesCapability: "tool_only" }),
+        ])}
+      />,
+    );
+
+    expect(screen.queryByTestId("turn-file-changes")).toBeNull();
+    expect(screen.queryByTestId("file-changes-card")).toBeNull();
+    expect(screen.queryByText("仅工具编辑")).toBeNull();
+    expect(screen.queryByText(/daemon 未上报工作区快照/)).toBeNull();
+    expect(screen.queryByText(/无改动/)).toBeNull();
+  });
+
+  it("status=unavailable（采集失败）：同样不出卡、不出占位", () => {
+    render(
+      <TurnTimeline
+        {...renderProps([
+          makeTurn({
+            fileChanges: makeSnapshot({ status: "unavailable", reason: "not_a_repo", files: [] }),
+            fileChangesCapability: "full",
+          }),
+        ])}
+      />,
+    );
+
+    expect(screen.queryByTestId("turn-file-changes")).toBeNull();
+    expect(screen.queryByText("仅工具编辑")).toBeNull();
+    expect(screen.queryByText(/无改动/)).toBeNull();
+  });
+
+  it("无 fileChanges / capability 字段（旧消费方未接线）：不出卡、不出任何占位", () => {
+    render(<TurnTimeline {...renderProps([makeTurn({ output: "答复正文" })])} />);
+
+    expect(screen.queryByTestId("turn-file-changes")).toBeNull();
+    expect(screen.queryByTestId("file-changes-card")).toBeNull();
+    expect(screen.queryByTestId("file-changes-summary")).toBeNull();
+    expect(screen.getByText("答复正文")).toBeInTheDocument();
+  });
+
+  it("status=partial：卡片照出 + 「（部分）」（超时/截断不是错误态）", () => {
+    render(
+      <TurnTimeline
+        {...renderProps([
+          makeTurn({
+            fileChanges: makeSnapshot({
+              status: "partial",
+              reason: "timeout",
+              files: [
+                {
+                  path: "src/app.tsx",
+                  status: "modified",
+                  added: 4,
+                  deleted: 0,
+                  attribution: "edit_patch",
+                },
+              ],
+            }),
+            fileChangesCapability: "full",
+          }),
+        ])}
+      />,
+    );
+
+    expect(screen.getByText("已编辑 1 个文件")).toBeInTheDocument();
+    expect(screen.getByText("（部分）")).toBeInTheDocument();
+  });
+
+  it("会话级汇总：挂会话流顶部（首轮之前），同一 path 跨轮去重", () => {
+    const { container } = render(
+      <TurnTimeline
+        {...renderProps([
+          makeTurn({
+            turn: 1,
+            fileChanges: makeSnapshot({
+              files: [
+                {
+                  path: "src/shared.ts",
+                  status: "modified",
+                  added: 10,
+                  deleted: 1,
+                  attribution: "edit_patch",
+                },
+              ],
+            }),
+            fileChangesCapability: "full",
+          }),
+          makeTurn({
+            runId: "run-2",
+            turn: 2,
+            fileChanges: makeSnapshot({
+              files: [
+                {
+                  path: "src/shared.ts",
+                  status: "modified",
+                  added: 5,
+                  deleted: 2,
+                  attribution: "edit_patch",
+                },
+              ],
+            }),
+            fileChangesCapability: "full",
+          }),
+        ])}
+      />,
+    );
+
+    const summary = screen.getByTestId("file-changes-summary");
+    expect(summary).toHaveAttribute("data-total-files", "1");
+    expect(screen.getByText("共 1 个文件")).toBeInTheDocument();
+    expect(screen.getByText("+15")).toBeInTheDocument();
+    // 会话流顶部 = 第一轮之前（DOM 序）。
+    const firstTurn = container.querySelector('[data-testid="turn-block"]');
+    expect(firstTurn).not.toBeNull();
+    expect(
+      summary.compareDocumentPosition(firstTurn!) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+  });
+
+  it("fileChangesSummary={false} 关闭会话级汇总（轮级卡仍在）", () => {
+    render(
+      <TurnTimeline
+        {...renderProps([
+          makeTurn({
+            fileChanges: makeSnapshot({
+              files: [
+                {
+                  path: "src/app.tsx",
+                  status: "modified",
+                  added: 2,
+                  deleted: 0,
+                  attribution: "edit_patch",
+                },
+              ],
+            }),
+            fileChangesCapability: "full",
+          }),
+        ])}
+        fileChangesSummary={false}
+      />,
+    );
+
+    expect(screen.queryByTestId("file-changes-summary")).toBeNull();
+    expect(screen.getByTestId("turn-file-changes")).toBeInTheDocument();
   });
 });

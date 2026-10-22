@@ -1,0 +1,36 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-22-review-risk-fixes",
+  "rows": [
+    {
+      "anchor": "FR-03",
+      "row_id": "2026-10-22-review-risk-fixes:flow:测试绑定FR-03",
+      "tests": [
+        "sillyhub-daemon/tests/event-loop-watch.test.ts「defaultSleep 正常到期路径摘除 abort 监听器（连续窗口后计数归零）+ abort 路径 reject 行为不变（真实 defaultSleep 走 runEventLoopWatch）」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-22-review-risk-fixes"
+    },
+    {
+      "anchor": "FR-04",
+      "row_id": "2026-10-22-review-risk-fixes:flow:测试绑定FR-04",
+      "tests": [
+        "sillyhub-daemon/tests/host-fs-handler-git-log.test.ts「GL49: 混合路径（字面引号转义 + 原样非 ASCII/增补平面）解码逐字符还原原文」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-22-review-risk-fixes"
+    }
+  ]
+}

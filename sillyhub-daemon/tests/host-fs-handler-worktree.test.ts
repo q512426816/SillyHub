@@ -319,6 +319,44 @@ describe('HostFsHandler — git_merge（task-02 WT3~WT4，冲突解析）', () =
       expect((e as RpcError).code).toBe('forbidden');
     }
   });
+
+  it('WT4d: 冲突列举带 -c core.quotepath=false + C 引号中文路径解码进 conflicts[].file（2026-10-21-gitlog-conflict-quotepath）', async () => {
+    // merge 失败 + 冲突列举输出 C 引号中文路径（宿主 git 默认 quotepath 形态，
+    // 与 2026-10-20 公司仓实证案例同构）。
+    wtExecQueue.push(
+      { ok: false, stdout: '', stderr: 'Automatic merge failed; fix conflicts' },
+      {
+        ok: true,
+        stdout:
+          '".sillyspec/changes/2026-10-20-unitLedger\\345\\257\\274\\345\\205\\245\\346\\250\\241\\346\\235\\277\\346\\241\\206\\347\\272\\277/design.md"\n',
+        stderr: '',
+      },
+    );
+    // 真实文件以解码后中文路径落盘——marker 计数走真实 readFile，
+    // 修复前转义串 readFile 失配 → catch 归 0（本用例的回归锚）。
+    const cnDir = join(root, '.sillyspec', 'changes', '2026-10-20-unitLedger导入模板框线');
+    await mkdir(cnDir, { recursive: true });
+    await writeFile(
+      join(cnDir, 'design.md'),
+      ['<<<<<<< HEAD', 'a', '=======', 'b', '>>>>>>> worker'].join('\n') + '\n',
+    );
+
+    const result = await handler.gitMerge({ workdir: root, worker_branch: 'worker' });
+    expect(result.ok).toBe(false);
+    expect(result.conflicts).toHaveLength(1);
+    expect(result.conflicts[0].file).toBe(
+      '.sillyspec/changes/2026-10-20-unitLedger导入模板框线/design.md',
+    );
+    expect(result.conflicts[0].marker_lines).toBe(3);
+    // 命令构造：merge 调用不带 quotepath 参数（stdout 不解析路径，最小面）；
+    // 冲突列举 diff 调用带 -c core.quotepath=false。
+    expect(wtCalls[0].args).toContain('merge');
+    expect(wtCalls[0].args).not.toContain('core.quotepath=false');
+    expect(wtCalls[1].args.slice(0, 4)).toEqual(['-C', root, '-c', 'core.quotepath=false']);
+    expect(wtCalls[1].args[4]).toBe('diff');
+    expect(wtCalls[1].args).toContain('--name-only');
+    expect(wtCalls[1].args).toContain('--diff-filter=U');
+  });
 });
 
 describe('HostFsHandler — git_worktree_remove（task-02 WT5~WT6）', () => {

@@ -1,0 +1,43 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-21-archive-patch-repair",
+  "reviewer": "subagent",
+  "verdict": "PASS",
+  "reviewedAgainst": "5c97d6277",
+  "findings": [
+    {
+      "severity": "P3",
+      "title": "design 盲维 Q1「修复提交先于 sync 执行，顺序钉死」与账面时间戳矛盾（约 24 秒）",
+      "evidence": "task-ticks.jsonl task-03（含 platform sync 完成）tick 时间 2026-10-21T12:12:42.758+08:00 早于提交 28656ff43 的 12:13:06+08:00——sync 实际先于提交完成。实质无损：sync 为本地→服务器单向推、归档目录提交后至 HEAD 零改动（git diff 该目录为空），镜像内容与冻结面一致；但 design 字面陈述与账面不符。非阻断项，不影响 PASS。",
+      "location": ".sillyspec/changes/2026-10-21-archive-patch-repair/design.md:23（Q1 答）对质 task-ticks.jsonl:3 与 git log 28656ff43"
+    }
+  ],
+  "dimensionNotes": {
+    "乱序": "ok",
+    "并发": "ok",
+    "切换": "ok",
+    "作用域": "ok"
+  },
+  "notes": {
+    "resolved_p2": "首评 28656ff43 P2（repair.originalFiles/originalScopeAuditRows 装修准后新值、原值未留痕，method 不实陈述）——修复提交 5c97d6277 以 git 父 blob 28656ff43^ 权威回填后闭环，RESOLVED。复验证据见 rerun_re_1..5；method 字段声明「剔除的他侧 doc 行原文保留于 originalScopeAuditRows」修复后为真（字节级相等实核）。根因自述为脚本对象别名 bug，与交付态吻合（新值复制即别名引用序列化的典型形态），reviewLoop 字段诚实留痕评审回环。",
+    "rerun_a_sha": "a1 归档 change.patch sha256 = e366be368e3ec02e9fa39a29559fd6fac12c9f37add6a5c3b0794b7da51bcadb == change-patch.json patchSha256（逐字一致）；a4 原错误锚 7f14be0a70284b77edabc2f06e671666c6043659093b185f93b330a274655395 完整存在于 repair.originalPatchSha256（复评复验仍 True，且独立复算父提交 change.patch 哈希确为该值）。",
+    "rerun_b_byte_compare": "git diff c71b875a1b3..e88ffddb7648 -- 两源码文件输出 6248 字节 == 归档 change.patch 6248 字节，python 字节级比对 True（首评已核；修复提交对本文件零改动，复评以 rerun_re_5 再次钉死）。",
+    "rerun_c_slice": "uv run 直调 app.modules.change.assets.slice_patch_for_file（签名收 str）：组件路径命中 len=2674 含 'syncing' 与 'animate-spin'；测试路径命中 len=2660 含 '刷新按钮转圈反馈'；两 doc 路径均返回 None。命中/未命中双断言全过（首评已核，patch 未变仍然成立）。",
+    "rerun_d_json": "复评全过：files 恰两源码路径；totals 与 scopeAudit.totals 均 {files:2,additions:81,deletions:2}；rows=(19,2,'planned')/(62,0,'planned') 与 numstat 一致；verdict 三态权威源 schema.py:740-745 注释吻合。",
+    "rerun_e_ledger": ".sillyspec/.runtime/verify-runs/20261021042058/test-result.json 存在且 change=2026-10-21-archive-patch-repair：module[] 空（非 src 变更自动跳过）；status=skipped 系 e2e 环境缺件（已跑面 589 passed | 1 skipped 全绿；lint passed exitCode=0；exit_code=1 系跳过所致非测试失败）。",
+    "rerun_re_1": "repair.originalFiles == 父 blob 28656ff43^ 的 files：True（恰两 doc 路径 sillyhub-daemon.changelog.md / sillyhub-daemon.md）。",
+    "rerun_re_2": "repair.originalScopeAuditRows == 父 blob scopeAudit.rows：True，4 行，JSON 字节级（sort_keys 序列化）相等；verdict/行数 = unplanned 1/0、unplanned 1/0、untouched 0/0、untouched 0/0，与期望完全吻合。",
+    "rerun_re_3": "sha256(change.patch@5c97d6277) == patchSha256：True（e366be36…，6248 字节，锚未动）。",
+    "rerun_re_4": "scopeAudit.rows（修准后 2 行 planned）!= repair.originalScopeAuditRows（原 4 行）：True，两面向内容确非同一。",
+    "rerun_re_5": "git diff 28656ff43..5c97d6277 -- change.patch = 0 字节（零改动）；git show 5c97d6277 --stat 确认修复提交仅动 change-patch.json 单文件（+25/-8）；5c97d6277 即当前 HEAD，其后归档目录零改动。",
+    "extra_scope_check": "修复提交面干净：仅目标 change-patch.json 一文件；相对 28656ff43 的区间内其余文件变动（daemon-sync-hardening 归档、docs、knowledge）均属并行会话交付，不在本变更作用域。",
+    "checklist_1_fr_consistency": "FR-01 兑现（逐字节一致）；FR-02 现已完整兑现——数值面修准 + 「他侧两行 doc 条目改记入 repair 注记字段」经 5c97d6277 回填后成立；FR-03 兑现（双 sha 验证）；FR-04 兑现（切片双路径断言过；platform sync 以提交消息 MATCH 留痕 + 平台请求时读盘架构接受）。测试绑定四条「不适用」理由成立（零 src/test 面）。",
+    "checklist_2_blind_dims": "乱序 ok：修复写盘先于 sync 完成，评审口径「修复先于 sync」成立；design 字面「修复提交先于 sync」被账面否（P3 留痕），保护实质（sync 后盘面未再变）成立。并发 ok：提交实况恰等于声明面、零他侧夹带，显式 pathspec 与规则 11 一致。切换 ok：交付态 patch/JSON 自洽。作用域 ok：改动面锁死单归档目录（修复提交实况再次钉死：单文件）。",
+    "checklist_3_boundary_verdict": "披露边界「键集不变只修值 + repair 纯新增字段，后端投影对未知键 fail-open」——裁决：可接受。理由：后端读 change-patch.json 走 _read_json_dict + .get() 容错取已知键，repair/reviewLoop 为纯增量注记、无消费者枚举严格键集；修复提交实测新增键仅 repair 内三键（originalFiles/originalScopeAuditRows/reviewLoop），顶层键集零增减。",
+    "checklist_4_guard_claims": "「repair 注记保留原错误锚」真实（复评复验 True）。「他侧 doc 行原文保留于 originalScopeAuditRows」修复后真实（rerun_re_2 字节级相等）。「校验不通过即停手不提交」过程性声明以交付态自洽接受。",
+    "checklist_5_artifacts": "patch↔JSON 内部一致性全对齐：锚、files 清单、totals/scopeAudit.totals、rows、repair.original* 语义五面对账全过（首评唯一不对齐面已闭环）。",
+    "review_history": "首评 28656ff43 → FAIL（P2 + P3）；复审 5c97d6277 → PASS（P2 resolved，P3 非阻断保留）。",
+    "first_review_archive": "首评（28656ff43 基）完整复验数字与 P2/P3 证据已收录于首版 review.json 并由本版替代存档；P2 证据链：父 blob 423872906（原四行与原错误 files 清单）→ 28656ff43（错装新值）→ 5c97d6277（权威回填）。"
+  },
+  "reviewedAt": "2026-10-21T12:35:07+08:00"
+}

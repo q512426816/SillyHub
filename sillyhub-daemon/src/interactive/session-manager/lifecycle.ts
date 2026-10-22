@@ -71,6 +71,12 @@ export function stop(mgr: SessionManagerCore): void {
     clearTimeout(timer);
   }
   mgr._terminalCleanupTimers.clear();
+  // 2026-10-21-daemon-zombie-turn FR-01：清轮启动看门狗（同上：退出途中 fire
+  // 会访问已销毁状态；unref 已不阻塞退出，此处显式清保证确定性）。
+  for (const w of mgr._turnStartWatchdogs.values()) {
+    clearTimeout(w.timer);
+  }
+  mgr._turnStartWatchdogs.clear();
   // ql-20260621-partial（task-08 改造）：partial flush 定时器已随缓冲链下沉
   // 归一化器（driver.consume finally dispose），daemon 侧无 timer 需清；此处仅
   // 清会话级 usage 台账（纯内存 Map，防退出途中残留引用）。
@@ -208,6 +214,9 @@ export async function terminateSession(
     clearTimeout(_pf.timer);
     mgr._pendingFirstPrompt.delete(state.sessionId);
   }
+  // 0b. 2026-10-21-daemon-zombie-turn FR-01：撤防轮启动看门狗（会话终态，
+  //     布防轮不再有「启动后回报失败」的语义）。
+  mgr._disarmTurnStartWatchdog(state.sessionId);
 
   // 1. 设终态 status（原 end→'ended' / fail→'failed'）。
   state.status = isManual ? 'ended' : 'failed';
@@ -229,6 +238,14 @@ export async function terminateSession(
   //     Task/Agent tool_use 元数据（session 终态 SDK 进程已 kill，后台任务随之
   //     消亡，task_* 不会再到达；防 Map 泄漏）。
   mgr._clearBackgroundTasks(state.sessionId);
+
+  // 4b-2. 2026-10-21-task-wakeup-restore（ql-20260827-007 原型恢复）：取消未
+  //      fire 的唤醒 debounce（会话已终态，注入无处可去）。
+  const pendingWakeup = mgr._taskWakeupPending.get(state.sessionId);
+  if (pendingWakeup) {
+    clearTimeout(pendingWakeup.timer);
+    mgr._taskWakeupPending.delete(state.sessionId);
+  }
 
   // 4c. 2026-10-14-turn-anchor-cache-eviction：清轮锚 prev 内存缓存（会话终态
   //     不再有新轮，条目滞留 = Map 慢性增长；JSONL 落盘不动，同会话重启续锚走

@@ -533,6 +533,11 @@ export interface SessionManagerCore {
     | undefined;
   readonly _borrowSandboxRoots: Map<string, string>;
   readonly _backgroundTasks: Map<string, Map<string, BackgroundTaskInfo>>;
+  /** 2026-10-21-task-wakeup-restore：终态唤醒 debounce 窗口（同会话单 timer 合并） */
+  readonly _taskWakeupPending: Map<
+    string,
+    { timer: NodeJS.Timeout; lines: string[] }
+  >;
   readonly _agentToolUseMeta: Map<
     string,
     { sessionId: string; taskName: string; subagentType?: string }
@@ -548,11 +553,20 @@ export interface SessionManagerCore {
   readonly _resumeDirs: TranscriptDirs;
   readonly _credentialManager: SpawnCredentialManager | null;
   readonly _terminalCleanupTimers: Map<string, ReturnType<typeof setTimeout>>;
+  /** 2026-10-21-daemon-zombie-turn FR-01：轮启动看门狗（sessionId → timer + 布防轮 runId）。 */
+  readonly _turnStartWatchdogs: Map<
+    string,
+    { timer: ReturnType<typeof setTimeout>; runId: string }
+  >;
   _flushScheduled: Promise<void> | null;
 
   // ── 跨簇协作方法（facade 同名方法一行委托到对应子模块 / 类内保留实现）─────
   /** notify-chain.ts */
   _runNotifyChain<T>(sessionId: string, fn: () => T | Promise<T>): Promise<T>;
+  /** turn-control.ts（2026-10-21-daemon-zombie-turn FR-01：轮启动看门狗布防/撤防） */
+  _armTurnStartWatchdog(sessionId: string, runId: string): void;
+  /** turn-control.ts（同上，撤防） */
+  _disarmTurnStartWatchdog(sessionId: string): void;
   /** facade 类内保留（create/restore/reload 编排） */
   _runConsume(state: SessionState): Promise<void>;
   /** persistence.ts */
@@ -741,6 +755,17 @@ export interface SessionManagerCore {
   _handleAgentTaskStatusEvent(state: SessionState, ev: AgentEvent): Promise<void>;
   /** background-tasks.ts */
   _handleTaskNotificationEvent(state: SessionState, ev: AgentEvent): Promise<void>;
+  /** background-tasks.ts（2026-10-21-task-wakeup-restore：终态唤醒 debounce 调度） */
+  _scheduleTaskWakeup(
+    sessionId: string,
+    info: {
+      taskId: string;
+      taskName: string;
+      status: string;
+      elapsedMs?: number;
+      summary?: string;
+    },
+  ): void;
   /** background-tasks.ts */
   _registerAsyncReceiptTask(
     state: SessionState,

@@ -21,3 +21,4 @@ created_at: 2026-10-16 16:40:00
 - 2026-10-21-provider-default-ui-hint | 供应商未选态显示对齐用户默认供应商
 - 2026-10-22-agent-profile-modal-restyle | 智能体档案弹窗重构与技能全选
 - 2026-10-22-agent-profile-edit-refresh | 档案编辑后全局页列表自动刷新修复
+- 2026-10-21-session-git-branch | 会话组件底部动态显示当前所在 git 分支

@@ -331,15 +331,22 @@ async def _send_interrupt_control(
         )
     # task-04（design A2）：SESSION_INTERRUPT 走控制指令三段式——推送失败
     # 落库 pending 待补拉；504 语义保持（下方 not control_ok 分支）。
+    # 2026-10-21-daemon-zombie-turn FR-02：payload 带 run_id——daemon 侧
+    # interrupt() no-op（会话在 store 但无 running 轮）时按它回报收敛该
+    # pending run（打断秒级生效，替代静默空转）；run_id 缺省（理论不可达，
+    # 防御）不写该键，daemon 维持只 ack 现状。
+    interrupt_payload = {
+        "session_id": str(session.id),
+        "lease_id": str(session.lease_id),
+        "runtime_id": str(runtime_id),  # design §5.3 provider discriminator
+    }
+    if run_id is not None:
+        interrupt_payload["run_id"] = str(run_id)
     _row, control_ok = await ControlCommandService(svc._session).enqueue_and_push(
         daemon_id=daemon_id,
         runtime_id=runtime_id,
         kind=KIND_SESSION_INTERRUPT,
-        payload={
-            "session_id": str(session.id),
-            "lease_id": str(session.lease_id),
-            "runtime_id": str(runtime_id),  # design §5.3 provider discriminator
-        },
+        payload=interrupt_payload,
     )
     if not control_ok:
         # ql-20260903-016：打断报 504「没停成」后不能留 pending——迟到补拉

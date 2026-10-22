@@ -1,0 +1,55 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-22-file-card-hide-empty",
+  "reviewer": "subagent",
+  "verdict": "PASS",
+  "reviewedAgainst": "a9232edf123799304e3f47172a4fc3499c754b65",
+  "findings": [
+    {
+      "severity": "P3",
+      "title": "本轮修复后 file-changes-summary 的 failed/unavailable 展示分支转为不可达（死代码 + 头注释滞后）",
+      "evidence": "aggregateTurnFileChanges 已在 :110 跳过 status=failed/unavailable，statuses 只会收到通过过滤的 ok/partial 快照（:106-112），故 :119 得到的 status 只可能 ok|partial；但 FileChangesSummary 仍保留 `agg.status === \"unavailable\"` / `\"failed\"` 的 statusLabel 分支（:189-196）、Σ+/− 整体「—」分支（:219-223，title「快照不可用：无汇总统计」）与 fileChangesSummaryNote 的两条注记（:166-169），这四处现已无任何可达输入且无用例覆盖；文件头注释 :18 仍宣称「status 取最差值（unavailable > failed > partial > ok）」。属本轮收窄引入的清理项（此前由 failed 轮触发可达），无行为风险，建议删除或在注释标注「保留给 proto/检查器」。",
+      "location": "frontend/src/components/daemon/file-changes/file-changes-summary.tsx:189"
+    },
+    {
+      "severity": "P3",
+      "title": "requirements.md FR-03 正文的「参与汇总集合」定义未随本轮收窄同步（追溯文字滞后，非行为缺陷）",
+      "evidence": "FR-03 正文（requirements.md:39）仍把参与汇总的轮定义为「snapshot != null 且 capability != \"tool_only\"」，未排除 status=failed/unavailable；而本轮实现（file-changes-summary.tsx:110）与绑定（requirements.md:62「failed / unavailable 轮整轮跳过…」）已排除这两态。照 FR 括注字面实现会把 failed 轮计入并把状态压成「采集失败」——正是上轮 P2 指出的行为，文字与实现/绑定的口径互斥。「只聚合有可信快照的轮」的总量承诺被更严子集满足，故只报 P3 追溯项，建议在括注补「且 status 不属于 failed/unavailable」。",
+      "location": ".sillyspec/changes/2026-10-22-file-card-hide-empty/requirements.md:39"
+    }
+  ],
+  "dimensionNotes": {
+    "乱序": "ok（边界已裁决：可接受）——判定为逐轮纯函数（turn-file-changes.ts:103-146）+ 汇总逐条过滤（file-changes-summary.tsx:102-117），无跨轮状态；快照迟到由 attachRunFileChanges 以 (snapshot, capability) 校验 WeakMap 后重投影（:189-203），无「先隐藏后不显示」粘滞态。",
+    "并发": "n/a（边界已裁决：可接受，与 design「不适用」一致）——本轮修复仍只在渲染层加一个纯函数级 continue（file-changes-summary.tsx:110），无写入/共享可变态；FILE_CHANGES_PROJECTION_CACHE 为模块级 WeakMap、键为轮对象、值不可变投影。",
+    "切换": "ok（边界已裁决：可接受）——隐藏是无状态判定（FileChangesSummary 仅 useMemo，无 useState/useEffect），会话切换按新 props 重算；被移除的 28px 占位不参与贴底锚点（贴底读 scrollHeight + 轮身份签名，turn-timeline.tsx:1289/1351-1363）。",
+    "作用域": "ok（边界已裁决：可接受）——投影键 realRunId ?? runId（turn-file-changes.ts:182），汇总只吃本会话 turns（turn-timeline.tsx:1393-1400）；本轮修复未引入任何跨会话/跨工作区取数面。"
+  },
+  "boundaryAdjudications": [
+    {
+      "boundary": "采集失败轮整轮不入汇总（连其文件行一起丢弃），Σ+/− 只统计可信轮",
+      "ruling": "可接受",
+      "reason": "与 design.md:284-286 契约及用户「不留缺口提示」裁决一致；代价（failed 轮改动不可见）已由 design 风险段披露（排障信号仍在 /runs 的 status/reason 与 daemon 日志），前轮已裁可接受。"
+    },
+    {
+      "boundary": "status=partial 且 files=[] 仍保留一行提示卡（NOTICE_PARTIAL_NO_FILES）",
+      "ruling": "可接受",
+      "reason": "携带「采集未完成、本轮改动未知」的真实信息，不属零信息占位；turn-file-changes.ts:123-133 与 turn-file-changes.test.ts:146-166 一致，文案经断言不含「无改动」。"
+    },
+    {
+      "boundary": "FileChangesCard 的 degraded 形态保留在组件层，产品页已无生产者",
+      "ruling": "可接受",
+      "reason": "组件能力保留且有 14 例组件级用例保护，file-changes-card.tsx:89-91 已标注「产品页无生产者」；全树 grep 无 degraded 生产者。（汇总侧的同类保留分支已单独计入 findings，避免两处口径混淆。）"
+    },
+    {
+      "boundary": "无后端 / 无 daemon / 无 DTO / 无新端点（design 接口契约「无」）",
+      "ruling": "可接受",
+      "reason": "本轮修复提交实测 4 文件（requirements.md + 3 个 frontend 文件，+28/−9），无声明外代码面；change.patch 已随提交重冻结（含 :338 新跳过分支与 :95 新用例名），冻结面与 HEAD 一致。"
+    },
+    {
+      "boundary": "移除 28px 零信息占位不影响滚动锚点（design 盲维 3 声明）",
+      "ruling": "可接受",
+      "reason": "贴底/锚点逻辑读 scrollHeight 与轮身份签名（turn-timeline.tsx:1289/1351-1363），不依赖该占位高度；高度只减不增。"
+    }
+  ],
+  "reviewedAt": "2026-10-22T00:34:27Z"
+}

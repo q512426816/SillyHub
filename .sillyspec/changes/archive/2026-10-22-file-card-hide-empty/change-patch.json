@@ -1,0 +1,122 @@
+{
+  "change": "2026-10-22-file-card-hide-empty",
+  "baseline": "4a7c1008fc077de06221c8f292e24fc535ed684a",
+  "head": "a9232edf123799304e3f47172a4fc3499c754b65",
+  "files": [
+    "frontend/src/components/daemon/__tests__/turn-timeline-conversation-file-card.test.tsx",
+    "frontend/src/components/daemon/file-changes/__tests__/file-changes-summary.test.tsx",
+    "frontend/src/components/daemon/file-changes/__tests__/turn-file-changes.test.ts",
+    "frontend/src/components/daemon/file-changes/file-changes-card.tsx",
+    "frontend/src/components/daemon/file-changes/file-changes-summary.tsx",
+    "frontend/src/components/daemon/file-changes/turn-file-changes.ts",
+    "frontend/src/components/daemon/turn-timeline.tsx"
+  ],
+  "totals": {
+    "files": 7,
+    "additions": 130,
+    "deletions": 128
+  },
+  "savedAt": "2026-10-22T00:32:08.031Z",
+  "note": "flow done 时点冻结（本变更可归属交付面：baseline..HEAD 提交面过滤 .sillyspec/ 只留 .sillyspec/docs/ 交付文档 + 独占树未提交交付；治理工件目录不入冻结——2026-10-12-close-trace-freeze-integrity FR-01）",
+  "modules": [
+    {
+      "id": "frontend",
+      "files": 7,
+      "doc": "docs/multi-agent-platform/modules/frontend.md",
+      "docTouched": false,
+      "docMissing": false
+    },
+    {
+      "id": "frontend_components",
+      "files": 7,
+      "doc": "docs/SillyHub/modules/frontend_components.md",
+      "docTouched": false,
+      "docMissing": false
+    }
+  ],
+  "uncoveredDirs": [],
+  "moduleMaps": [
+    "docs/backend/modules/_module-map.yaml",
+    "docs/frontend/modules/_module-map.yaml",
+    "docs/multi-agent-platform/modules/_module-map.yaml",
+    "docs/SillyHub/modules/_module-map.yaml",
+    "docs/sillyhub-daemon/modules/_module-map.yaml"
+  ],
+  "acceptedDirtyGap": 22,
+  "scopeAudit": {
+    "mode": "full-flow",
+    "ok": true,
+    "degradedReason": null,
+    "baseAnchor": "4a7c1008fc077de06221c8f292e24fc535ed684a",
+    "totals": {
+      "files": 7,
+      "additions": 130,
+      "deletions": 128
+    },
+    "rows": [
+      {
+        "path": "frontend/src/components/daemon/__tests__/turn-timeline-conversation-file-card.test.tsx",
+        "additions": 27,
+        "deletions": 9,
+        "kind": "modified",
+        "planned": "修改",
+        "verdict": "planned"
+      },
+      {
+        "path": "frontend/src/components/daemon/file-changes/__tests__/file-changes-summary.test.tsx",
+        "additions": 44,
+        "deletions": 17,
+        "kind": "modified",
+        "planned": "修改",
+        "verdict": "planned"
+      },
+      {
+        "path": "frontend/src/components/daemon/file-changes/__tests__/turn-file-changes.test.ts",
+        "additions": 14,
+        "deletions": 35,
+        "kind": "modified",
+        "planned": "修改",
+        "verdict": "planned"
+      },
+      {
+        "path": "frontend/src/components/daemon/file-changes/file-changes-card.tsx",
+        "additions": 3,
+        "deletions": 0,
+        "kind": "modified",
+        "planned": "修改",
+        "verdict": "planned"
+      },
+      {
+        "path": "frontend/src/components/daemon/file-changes/file-changes-summary.tsx",
+        "additions": 20,
+        "deletions": 32,
+        "kind": "modified",
+        "planned": "修改",
+        "verdict": "planned"
+      },
+      {
+        "path": "frontend/src/components/daemon/file-changes/turn-file-changes.ts",
+        "additions": 15,
+        "deletions": 30,
+        "kind": "modified",
+        "planned": "修改",
+        "verdict": "planned"
+      },
+      {
+        "path": "frontend/src/components/daemon/turn-timeline.tsx",
+        "additions": 7,
+        "deletions": 5,
+        "kind": "modified",
+        "planned": "修改",
+        "verdict": "planned"
+      }
+    ],
+    "excluded": {
+      "foreignDeclared": []
+    },
+    "note": "flow done 时点冻结（本文件落盘时采集）",
+    "closedBy": "flow done"
+  },
+  "patchSha256": "6d812c66b070f3d139a3a609ede3d70ca13e62b4eb8b41f3f04097825b4c0060",
+  "patchStatus": "ok"
+}

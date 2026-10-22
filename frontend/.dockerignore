@@ -6,3 +6,9 @@ node_modules/
 !.env.example
 **/*.md
 coverage/
+# 2026-10-22-review-risk-fixes：真实会话导出禁止进 docker 构建上下文——gitignore 不覆盖
+# docker build（gitignore≠dockerignore），builder 的 COPY . . 会带入该目录，next build
+# 静态预渲染（FR-01 修复前）或运行时 SSR 读盘均有数据外泄面；public/__proto* 是
+# gitignore 同款历史落位防线（public/ 直拷进 runtime 镜像）。
+/.proto-staging/
+/public/__proto*/

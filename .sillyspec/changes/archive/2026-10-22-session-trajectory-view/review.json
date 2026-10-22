@@ -1,0 +1,61 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-22-session-trajectory-view",
+  "reviewer": "subagent",
+  "verdict": "PASS",
+  "reviewedAgainst": "6d4dd386fb166f2b49402dd206ae98881b260ea1",
+  "findings": [
+    {
+      "severity": "P2",
+      "title": "FR-03 的「/runs timing 经 enrichDisplayTurns 透传」无任何测试断言，且读取靠未入镜像类型的结构断言——字段漂移时会静默退化为「近似」而无红灯",
+      "evidence": "page-helpers.tsx:255 以 `(meta as { timing?: SessionTurnView[\"timing\"] }).timing` 读 /runs 原始 JSON（listSessionRuns→apiFetch 原样返回，后端确有该列：backend/app/modules/daemon/router/session_insights.py:431）；但 FR-03 绑定的 page-helpers-enrich-api-duration.test.ts（6 例）与 runtime-session-helpers.test.tsx（41 例）全文无 timing 断言（实测 0 命中），turn-timeline 与 from-turn-views 两处新用例都是直接往 SessionTurnView 注 timing，绕过了透传链路。frontend/src/lib/daemon/sessions.ts 的手工镜像 SessionRunRead 亦无 timing 列（设计已登记 R-17，但没有任何用例兜住镜像漂移）。",
+      "location": "frontend/src/components/daemon/session-panel/page-helpers.tsx:255"
+    },
+    {
+      "severity": "P3",
+      "title": "无锚点轮被跳过后轨迹轮号重排（T01…），与真实会话轮号错位",
+      "evidence": "from-turn-views.ts:132 `turnIndex = outTurns.length + 1`：第 1 轮无锚点被跳过时，第 2 轮在面板上显示为 T01，trajectory-view.tsx:352 直接以 turnIndex 渲染 T##；FR-04 只要求「跳过而非补值」，未要求重编号，属标注失真（数据本身未伪造）。",
+      "location": "frontend/src/components/daemon/trajectory/from-turn-views.ts:132"
+    },
+    {
+      "severity": "P3",
+      "title": "design 盲维三声称「切视图/重进回到「时间线」」与实现不符：同一会话内切「对话/进度」会保留上次 lens",
+      "evidence": "progressLens 是 TurnTimeline 本地 state（turn-timeline.tsx:1347），只在组件重挂载时重置；TurnTimeline 仅以 key={sessionId ?? \"pre\"} 键化（session-panel-page.tsx:4805，换会话才重挂载），viewMode 只是 prop——同一会话内 进度(轨迹)→对话→进度 回来仍停在「轨迹」，与 design.md「边界与并发·切换/生命周期」段的「切视图/重进回到「时间线」」声明不符（无数据风险，取舍本身可接受）。",
+      "location": "frontend/src/components/daemon/turn-timeline.tsx:1347"
+    }
+  ],
+  "dimensionNotes": {
+    "乱序": "ok｜边界已裁决：可接受（无任何时间锚点的轮与预览条目直接跳过，不补 now/不补 0；轮内行按 startedAt+id 稳定排序；迟到段/迟到 timing 随 turns 引用变化重算自愈）",
+    "并发": "n/a｜边界已裁决：可接受（纯函数派生 + 组件本地 state，不写数据/文件、无共享写面）",
+    "切换": "finding｜边界裁决：progressLens 不持久化这一取舍可接受；但「切视图/重进回到「时间线」」的声明与实现不符（P3，见 findings#3）",
+    "作用域": "ok｜边界已裁决：可接受（timingByRunId 以 realRunId 为键、只吃当前会话 turns 与 runsMeta；跨会话/工作区不串台）"
+  },
+  "boundaryAdjudications": [
+    {
+      "boundary": "D-035：不新增第三视图，轨迹作为「进度」视图内的呈现方式；SessionViewMode 保持 \"conversation\" | \"all\" 两态",
+      "verdict": "可接受",
+      "reason": "用户显式裁决且实现与 FR-01 逐条对应：开关仅 viewMode===\"all\" 渲染（turn-timeline.tsx:1814）、conversation 无 tablist（用例已锁）；两态枚举未改，无第三种持久化值。"
+    },
+    {
+      "boundary": "无 timing / attempts 不可解析 → 模型泳道走「近似」；部分轮有采样、部分轮回退近似时整条泳道降级为 approx 并显式标注",
+      "verdict": "可接受",
+      "reason": "保守口径：deriveModelBasis（build-trajectory.ts:1043-1060）只要有一轮回退近似并产出条就标 approx，绝不把近似条说成「真实占用」；单轮可解析时 FR-03 的 observed 断言成立。"
+    },
+    {
+      "boundary": "整轮没有任何可用时间锚点 → 跳过该轮；预览条目（未加载轮）不参与轨迹；空态显式提示，不白屏不伪造条",
+      "verdict": "可接受",
+      "reason": "FR-04 显式要求；TrajectoryPane 以 rows.length===0 渲染 trajectory-empty，空态与三泳道互斥，用例已锁。"
+    },
+    {
+      "boundary": "progressLens 只存组件本地 state（不写 localStorage），且 design 声称「切视图/重进回到「时间线」」",
+      "verdict": "不可接受",
+      "reason": "不持久化的取舍本身可接受；但声明行为只对「换会话重挂载」成立，同会话内切 viewMode 会保留上次选择，声明与实现不符——按 P3 入 findings（见 #3）。"
+    },
+    {
+      "boundary": "frontend/src/lib/daemon/sessions.ts 的手工镜像 SessionRunRead 暂未补 timing 列（R-17 已登记），前端以结构化断言读取",
+      "verdict": "不可接受",
+      "reason": "运行时今天可用（后端 session_insights.py:431 已透传），但该读取面无类型约束也无任何测试断言（FR-03 绑定的两个 page-helpers 用例无 timing），字段改名/镜像漂移将静默退回「近似」——按 P2 入 findings（见 #1）。"
+    }
+  ],
+  "reviewedAt": "2026-10-21T23:52:35Z"
+}

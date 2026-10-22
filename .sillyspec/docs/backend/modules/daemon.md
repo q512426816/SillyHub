@@ -325,3 +325,36 @@ stage 完成(形态A 留痕): gate task 只落 gate_result + gate_status=decided
 ## 增量（2026-10-15-zcode-engine-appserver：InteractiveProviderLiteral 加 zcode）
 
 - `daemon/schema.py` 的 `InteractiveProviderLiteral` 加 `"zcode"`（第 5 交互引擎，单聊阶段 1；前注 Literal["claude","codex","pi"] 已随 cursor/zcode 两轮接入演进为五值）。gen:types 双义务（frontend + sillyhub-daemon api-types 同提交，openapi 544 paths/751 schemas）；`agent/provider_caps.py` 镜像含 zcode 十六键（daemon 单源 providers.ts PROVIDER_CAPS 经 gen-provider-caps.mjs 刷新，ENGINES 表同步加 zcode）；守护测试 test_provider_caps_alignment.py EXPECTED_PROVIDERS 同步五引擎。
+
+## 2026-10-20-session-page-dsh-alignment 增量（run 快照读模型）
+
+> 落地范围：task-08（侧表 + 三字段读模型）+ execute 期两处校正（D-027 落库点、D-030 后到补写）。
+> 契约形状见 `.sillyspec/changes/2026-10-20-session-page-dsh-alignment/design.md`
+> 「### 1b 承载面与读模型字段」「### 文件变更卡 DTO」。本段只写已落盘实现，不写计划项。
+
+**侧表 `daemon_run_snapshots`（侧表而非 `agent_runs` 加列）**
+
+- `DaemonRunSnapshot`（`backend/app/modules/daemon/model.py:479`）：一行 = 一轮。`run_id` FK `agent_runs.id` + `ondelete CASCADE`（轮删即回收），唯一索引 `uq_daemon_run_snapshots_run_id`（`backend/app/modules/daemon/model.py:492`）——该唯一索引就是读模型 IN 批查的唯一命中面，**不建其它索引**。
+- 列：`file_changes` JSON（整份 `TurnFileChangesSnapshot` 原样落，线名 camelCase）、`timing` JSON（`TurnTimingSnapshot`）、`collect_ms` / `status` / `reason` / `truncated`（快照头提升为列，供审计/排查直接 SQL 过滤而不解析 JSON）、`capability`（NOT NULL，`server_default 'tool_only'`）、`daemon_version`（发版门控读侧，超 50 字符截断）。
+- 增量迁移：`backend/migrations/versions/20261021120000_add_daemon_run_snapshots.py`（`upgrade()` 建表 + 唯一索引）。**不改 `agent_runs` 既有列**——快照是可选观测面，老 daemon 不写、绝大多数轮只有几百字节 JSON，侧表避免宽表膨胀与历史行回填成本。
+
+**幂等 upsert（`(run_id)` 键覆盖写）**
+
+- `LeaseService._upsert_run_snapshot`（`backend/app/modules/daemon/lease/service.py:1213`）：payload 形状 `{file_changes, timing, daemon_version}`；两段快照各 `model_validate`（校验失败即抛、由调用方吞）；`session.begin_nested()` savepoint 内**先 DELETE 再 INSERT** 单行 → `flush`（提交由调用方负责）。重复上报（outbox 补发 / retryTerminal / daemon 重试）等价于最后一次，**禁追加**。
+- `capability` 由 payload 是否带 `file_changes` 决定：带 → `"full"`，缺 → `"tool_only"`（`backend/app/modules/daemon/lease/service.py:1264`）——与快照字段独立成列，老 daemon 显式降级。
+- best-effort：savepoint 隔离半写，失败即抛、只回滚本块，调用方 catch 后 warn——快照落库失败绝不拖垮轮终态（对齐 `_upsert_batch_model_usage` 的容错语义）。
+
+**三处落库点（interactive 走 close、不走 `complete_lease`——D-027）**
+
+1. **interactive 正常收口**：`_close_apply_terminal`（`backend/app/modules/daemon/run_sync/service/close_run_steps.py:285`）内、`agent_run_model_usage` upsert 段**之后**调同一 helper `_upsert_run_snapshot`（`backend/app/modules/daemon/run_sync/service/close_run_steps.py:472`）。`ok` / `partial` / `unavailable` 一律原样落库（`partial` 不是错误态）；缺 `file_changes` → helper 写 `capability="tool_only"`；异常仅 warn `run_snapshot_persist_failed`。
+2. **interactive 终态 no-op 分支补写（D-030，必读）**：daemon 采集在轮终态落库**之后**异步跑（E2 时序，见 `sillyhub-daemon/modules/interactive.md`「每轮工作区快照（1b）」），因此带 `file_changes` / `timing` 的上报几乎总是一次「run 已终态」的二次上报——旧实现该分支整条 no-op，侧表就永远写不进去、1b 对 interactive 全废。故在终态 no-op 分支（`TERMINAL_TURN_STATUSES` 判定，`backend/app/modules/daemon/run_sync/service/close_run_steps.py:107`）补写：`rollback` 释放行锁后 `refresh`（rollback 会把 ORM 属性置 expired，不先取回 `id` 会在异步上下文触发同步懒加载 `MissingGreenlet`）→ `_upsert_run_snapshot`（`backend/app/modules/daemon/run_sync/service/close_run_steps.py:153`）→ **显式 `commit`**（本分支随后直接 return，没有外层收口替它提交）；条件为 payload 带 `file_changes` 或 `timing`（`backend/app/modules/daemon/run_sync/service/close_run_steps.py:147`）。异常仅 `warn run_snapshot_late_persist_failed` + `rollback`——**只动侧表、不改 run 任何终态字段**，不改 close 的幂等语义与响应。
+3. **batch 轮**：`complete_lease` 内 `await self._upsert_run_snapshot(agent_run, result)`（`backend/app/modules/daemon/lease/service.py:474`，payload 直接是 run-result DTO 里的可选键）；失败仅 warn `complete_lease_run_snapshot_failed`。两处共用同一 helper，故 `(run_id)` 覆盖写语义单一。
+
+**读模型：`GET /sessions/{id}/runs` 追加三字段（D-029）**
+
+- `SessionRunRead`（`backend/app/modules/daemon/router/session_insights.py:134`）新增：`file_changes`（`TurnFileChangesSnapshot | None`）、`file_changes_capability`（`FileChangesCapability`，缺省 `"tool_only"`）、`timing`（`TurnTimingSnapshot | None`）——即 `backend/app/modules/daemon/router/session_insights.py:134-136` 三行；既有字段与响应形状零变化。`TurnOutlineItemRead` **不加**字段（读模型落点只有轮次投影）。
+- **一次 IN、禁 N+1**：行查询（`AgentRun.created_at desc`，limit `_SESSION_RUNS_MAX`）之后，`_load_run_snapshots()`（`backend/app/modules/daemon/router/session_insights.py:182`）对整页 `run_id` 发**单条** `WHERE run_id IN (...)` 查询（空列表不发查询），投影点 `backend/app/modules/daemon/router/session_insights.py:416`；每 run 用 `model_copy(update=...)` 注入三字段（`_snapshot_capability` 为 capability 注入行，`backend/app/modules/daemon/router/session_insights.py:430`）。测试以 SQL 计数守住「多 run 只发 1 条侧表查询」。
+- capability 口径 `_snapshot_capability()`（`backend/app/modules/daemon/router/session_insights.py:146`）：只有「有侧表行 + 行内 `capability == "full"` + `file_changes` 非 NULL」才 `"full"`，其余一律 `"tool_only"`——行存在但 JSON 为 NULL（老 daemon 只上报 tool_only / 异常降级）与无行等价。前端**只看该字段、不看快照字段是否存在**（E6/E8）。
+- 脏数据兜底：`_snapshot_file_changes()`（`backend/app/modules/daemon/router/session_insights.py:157`）与 `_snapshot_timing()`（`backend/app/modules/daemon/router/session_insights.py:171`）对非 dict / `model_validate` 失败一律返回 `None`（历史脏数据不让整页 runs 500）；无采样 `timing` 为 `None` 而非空对象（D-025）。
+- pydantic 镜像：`TurnFileChange` / `TurnFileChangesSnapshot` / `TurnTimingSnapshot`（`backend/app/modules/daemon/schema.py:1392` / `backend/app/modules/daemon/schema.py:1417` / `backend/app/modules/daemon/schema.py:1436`，`FileChangesCapability` 在 `backend/app/modules/daemon/schema.py:1389`）——Python 属性 snake_case + 线上字段名 camelCase alias（`serialize_by_alias=True`），库里存的 JSON 就是设计契约线名，读模型可直接 `model_validate`。
+- 边界：**不新增 HTTP 端点**（D-029，快照随轮次读模型透传）；runs 响应仍走 gzip 与 `agent_profile_snapshot` 剥 `system_prompt`（ql-20260927-session-fast-replay 口径不变）；侧表查询只此一处，其余读路径零改动。

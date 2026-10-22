@@ -58,6 +58,8 @@ const mocks = vi.hoisted(() => ({
   // POST 切换）——照 injectSession 局部 mock 形态。
   getSessionThinkingLevels: vi.fn(),
   setSessionThinkingLevel: vi.fn(),
+  // 2026-10-21-session-git-branch：分支指示项 GET。
+  fetchSessionGitStatus: vi.fn(),
   messageSuccess: vi.fn(),
   messageError: vi.fn(),
   // task-10：useActiveSharedAgents 直取 /api/daemon/shared-agents/active（apiFetch）。
@@ -102,6 +104,9 @@ vi.mock("@/lib/daemon", async (importOriginal) => {
       mocks.getSessionThinkingLevels(...args),
     setSessionThinkingLevel: (...args: unknown[]) =>
       mocks.setSessionThinkingLevel(...args),
+    // 2026-10-21-session-git-branch：分支指示项取数（照 injectSession 局部 mock）。
+    fetchSessionGitStatus: (...args: unknown[]) =>
+      mocks.fetchSessionGitStatus(...args),
   };
 });
 
@@ -161,11 +166,16 @@ function renderBar(overrides: Record<string, unknown> = {}) {
       mutations: { retry: false },
     },
   });
-  return render(
-    <QueryClientProvider client={client}>
-      <SessionConfigBar {...({ ...BASE_PROPS, ...overrides } as any)} />
-    </QueryClientProvider>,
-  );
+  // 2026-10-21-session-git-branch：返回 client 供轮询配置断言（query options
+  // 的 refetchInterval 直读，替代 fake timers 推进 60s 的脆弱写法）。
+  return {
+    client,
+    ...render(
+      <QueryClientProvider client={client}>
+        <SessionConfigBar {...({ ...BASE_PROPS, ...overrides } as any)} />
+      </QueryClientProvider>,
+    ),
+  };
 }
 
 function openCtrl(labelPart: string) {
@@ -198,6 +208,18 @@ beforeEach(() => {
     current: "medium",
   });
   mocks.setSessionThinkingLevel.mockReset().mockResolvedValue({ ok: true });
+  // 2026-10-21-session-git-branch：默认正常 git 态（feature-x 分支）——既有
+  // 用例不感知指示项；空态/失败态由本变更新增用例覆盖。
+  mocks.fetchSessionGitStatus.mockReset().mockResolvedValue({
+    git_mode: "git",
+    root: "C:\\repo",
+    branch: "feature-x",
+    detached: false,
+    head_short: "1a2b3c4d",
+    files_changed: 2,
+    untracked_count: 1,
+    synced_at: "2026-10-21T12:00:00Z",
+  });
   // task-10：active 共享智能体默认空列表（用例内按需覆盖）。
   mocks.apiFetch.mockReset().mockResolvedValue([]);
   mocks.messageSuccess.mockReset();
@@ -1526,5 +1548,91 @@ describe("SessionConfigBar 档案默认预示（profile-default-prehint）", () 
     expect(
       await screen.findByRole("button", { name: "配置-档案 未指定" }),
     ).toBeInTheDocument();
+  });
+});
+// ── 14. 会话 git 分支指示项（2026-10-21-session-git-branch / FR-01..03）─────
+
+describe("SessionConfigBar git 分支指示项（2026-10-21-session-git-branch）", () => {
+  const GIT_OK = {
+    git_mode: "git",
+    root: "C:\wt\feature-x",
+    branch: "feature-x",
+    detached: false,
+    head_short: "1a2b3c4d",
+    files_changed: 2,
+    untracked_count: 1,
+    synced_at: "2026-10-21T12:00:00Z",
+  };
+
+  it("renders git branch indicator after profile control（FR-01：档案控件后显示当前分支）", async () => {
+    renderBar();
+    const badge = await screen.findByTestId("session-git-branch");
+    expect(badge).toHaveTextContent("feature-x");
+    // DOM 顺序：档案按钮在前、指示项紧随其后（用户指定位置）。
+    const profile = screen.getByRole("button", { name: /配置-档案/ });
+    expect(
+      profile.compareDocumentPosition(badge) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+  });
+
+  it("detached HEAD 显示 head 短 sha（FR-01 场景）", async () => {
+    mocks.fetchSessionGitStatus.mockResolvedValue({
+      ...GIT_OK,
+      branch: null,
+      detached: true,
+    });
+    renderBar();
+    expect(await screen.findByTestId("session-git-branch")).toHaveTextContent(
+      "1a2b3c4d",
+    );
+  });
+
+  it("git branch indicator polls with refetchInterval（FR-02：60s 轮询动态刷新）", async () => {
+    // 轮询配置直读 query options（fake timers 推进 60s 在 jsdom + react-query
+    // 组合下不稳，用例间污染实证）；动态性用 refetch 驱动验证——数据更新展示
+    // 随之变化（非创建快照）。
+    const { client } = renderBar();
+    await screen.findByTestId("session-git-branch");
+    const query = client
+      .getQueryCache()
+      .find({ queryKey: ["sessionGitStatus", "sess-1"] });
+    // Query.options 的公开类型是收窄子集（不含 refetchInterval），运行时携带
+    // 完整 useQuery options——断言收窄读取。
+    const opts = query?.options as { refetchInterval?: number | false } | undefined;
+    expect(opts?.refetchInterval).toBe(60_000);
+
+    mocks.fetchSessionGitStatus.mockResolvedValue({ ...GIT_OK, branch: "main" });
+    await client.refetchQueries({ queryKey: ["sessionGitStatus", "sess-1"] });
+    expect(await screen.findByTestId("session-git-branch")).toHaveTextContent(
+      "main",
+    );
+  });
+
+  it("hides git branch indicator on no_git / no_root（FR-03 空态静默隐藏）", async () => {
+    mocks.fetchSessionGitStatus.mockResolvedValue({ ...GIT_OK, git_mode: "no_git" });
+    renderBar();
+    await waitFor(() => expect(mocks.fetchSessionGitStatus).toHaveBeenCalledTimes(1));
+    expect(screen.queryByTestId("session-git-branch")).not.toBeInTheDocument();
+
+    mocks.fetchSessionGitStatus.mockResolvedValue({ ...GIT_OK, git_mode: "no_root" });
+    renderBar();
+    await waitFor(() => expect(mocks.fetchSessionGitStatus).toHaveBeenCalledTimes(2));
+    expect(screen.queryByTestId("session-git-branch")).not.toBeInTheDocument();
+  });
+
+  it("查询失败降级占位 ⎇ — 不阻塞其余控件（FR-03 故障形态）", async () => {
+    mocks.fetchSessionGitStatus.mockRejectedValue(new Error("offline"));
+    renderBar();
+    const badge = await screen.findByTestId("session-git-branch");
+    expect(badge).toHaveTextContent("—");
+    // 档案/供应商控件照常渲染。
+    expect(screen.getByRole("button", { name: /配置-档案/ })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /配置-供应商/ })).toBeInTheDocument();
+  });
+
+  it("预会话（sessionId 空串）不渲染指示项", () => {
+    renderBar({ sessionId: "" });
+    expect(screen.queryByTestId("session-git-branch")).not.toBeInTheDocument();
+    expect(mocks.fetchSessionGitStatus).not.toHaveBeenCalled();
   });
 });

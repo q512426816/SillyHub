@@ -1,0 +1,34 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-21-spec-manifest-incremental",
+  "reviewer": "subagent",
+  "verdict": "PASS",
+  "reviewedAgainst": "f9d7657613835078a50e23edf0740b2e799633bf",
+  "findings": [
+    {
+      "severity": "P2",
+      "title": "第四清单写点 heal_manifest_tombstones 未盖章未 bump——heal 后的 exists 翻转对增量消费方永久不可见",
+      "evidence": "FR-03/design 断言「全部清单写点」= apply_ops + _write_spec_root 对齐 + soft_delete_change_dir 三处，但 service.py:1376-1379 的 heal_manifest_tombstones（live 端点 POST /spec-workspace/manifest-heal，router.py:378）把行 platform_deleted=False、exists=False→True 且不改 version、不盖章 landing_version、不 bump spec_version——正是 model.py 列注释与 design 风险段自述的「漏盖章 → 增量流漏行」失效模式：未来增量客户端对 healed 行永远持墓碑缓存，仅靠尚不存在的 CLI 侧全量对账兜底。heal 是罕见人工运维通道且增量消费方（CLI 缓存）属另一仓后续变更，爆炸半径有界，故 P2 非 P1；修法=heal 分支盖章+bump 同事务。",
+      "location": "backend/app/modules/spec_workspace/service.py:1376-1379"
+    },
+    {
+      "severity": "P2",
+      "title": "get_manifest 先读行后读 spec_version，READ COMMITTED 双快照竞态可致增量游标永久跳行",
+      "evidence": "design 盲维并发答「GET 只见已提交状态，要么旧基线要么新基线」在 PG READ COMMITTED（asyncpg，config.py/.env.example 实证）下不严格成立：service.py:701-710 先 SELECT 行、711-716 再 SELECT spec_version，同事务两条语句各自取快照——若 apply commit 恰落在两语句之间，响应=旧行集+新 spec_version，客户端游标前移越过从未见过的印章行且 design 所述「CLI 以 spec_version 单调性吸收」检测不到（单调成立），仅全量对账可恢复；窗口毫秒级、消费方未落地，故 P2；修法=先读 spec_version 后读行（失败方向变为冗余行，安全）。",
+      "location": "backend/app/modules/spec_workspace/service.py:701-716"
+    },
+    {
+      "severity": "P3",
+      "title": "design 风险段声称盖章「收敛为单一辅助函数（_stamp 风格）」——代码中不存在该辅助函数",
+      "evidence": "盖章实为 15 处内联属性赋值（service.py:1818/1827/1835/2285/2529/2586/2598/2616/2690/2700/2734/2743/2753/2818 等），无 _stamp 辅助；声称的防护机制一半属实（模型 docstring 与三写点注释确实存在且注明「新写点必须盖章」），一半未实现——集中化防护是纸面声明，heal 漏盖章（finding 1）恰是该声明的反例。",
+      "location": "backend/app/modules/spec_workspace/service.py:2818"
+    }
+  ],
+  "dimensionNotes": {
+    "乱序": "ok",
+    "并发": "finding",
+    "切换": "ok",
+    "作用域": "ok"
+  },
+  "reviewedAt": "2026-10-21T22:04:36+08:00"
+}

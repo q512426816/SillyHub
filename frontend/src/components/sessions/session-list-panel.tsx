@@ -3457,7 +3457,9 @@ function SessionRow({
           : undefined
       }
       className={cn(
-        "group flex cursor-pointer flex-col justify-center gap-1 overflow-hidden px-2.5 py-1.5 transition-colors",
+        // 2026-10-20-session-page-dsh-alignment（FR-06 / D-016⑤）：行纵向内边距微收
+        // （py-1.5→py-1），给两行结构让出更紧的扫描节奏；两行结构本身不变。
+        "group flex cursor-pointer flex-col justify-center gap-1 overflow-hidden px-2.5 py-1 transition-colors",
         variant === "tree"
           ? // 树形态（原型 .s-row）：圆角行卡。
           //   2026-09-09-sessions-visual-refresh task-08（FR-05/D-009@v1）：选中态
@@ -3589,7 +3591,9 @@ function SessionRow({
             </span>
           )}
         </span>
-        <span className="shrink-0 text-[10.5px] text-muted-foreground/85 tabular-nums">
+        {/* 2026-10-20-session-page-dsh-alignment（FR-06 / D-016⑤）：行时间 10.5px→9.5px
+            ——与第二行 chip 同一小微档，行尾不再与标题争视觉重量。 */}
+        <span className="shrink-0 text-[9.5px] text-muted-foreground/85 tabular-nums">
           {formatRelativeTime(session.last_active_at ?? session.created_at)}
         </span>
         {/* 2026-10-15-session-status-dot-semantics：原行尾活性小灯块已删除——
@@ -3762,7 +3766,11 @@ function SessionRow({
              维持既有语义档着色）。 */
           <span
             className={cn(
-              "inline-flex h-4 shrink-0 items-center gap-1 rounded px-1.5 text-[11px] font-semibold leading-none",
+              // 2026-10-20-session-page-dsh-alignment（FR-06 / D-016⑤）：chip 尺度统一——
+              // 引擎 chip 与第二行 meta / 轮数 chip 收敛到同一小微档（9px / 行高 14px），
+              // 原 11px 与标题 13px 只差一档、三枚 chip 各自为政导致左栏扫描困难。
+              // h-4→h-[14px] 与 leading-[14px] 对齐，色点 5px 不变（PROVIDER_META 单一源）。
+              "inline-flex h-[14px] shrink-0 items-center gap-1 rounded px-1.5 text-[9px] font-semibold leading-[14px]",
               isToolReport
                 ? "bg-info/10 text-info"
                 : engineValue === "codex"
@@ -3788,7 +3796,7 @@ function SessionRow({
              点分隔纯文本——原三组 12px 图标（User/BookUser/Cloud）在 320px 左栏
              内拥挤；全量信息仍在 title 悬浮。 */
           <span
-            className="flex min-w-0 items-center gap-1 overflow-hidden whitespace-nowrap text-[11px] leading-4 text-muted-foreground/80"
+            className="flex min-w-0 flex-1 items-center gap-1 overflow-hidden whitespace-nowrap text-[9.5px] leading-[14px] text-muted-foreground/80"
             title={[
               `${session.owner_name ?? "—"}`,
               snapshot?.profile_name ?? null,
@@ -3807,7 +3815,12 @@ function SessionRow({
                 .filter(Boolean)
                 .join(" · ")}
             </span>
-            <span className="shrink-0">{session.turn_count} 轮</span>
+            {/* 2026-10-20-session-page-dsh-alignment（FR-06 / D-016⑤）：轮数 chip 右贴
+                ——同档字号 9px / 行高 14px，`ml-auto` 推到第二行行尾，与「创建人 · 档案 ·
+                供应商」文本形成一左一右的稳定两栏。 */}
+            <span className="ml-auto shrink-0 pl-1 text-[9px] leading-[14px] tabular-nums">
+              {session.turn_count} 轮
+            </span>
           </span>
         ) : (
           <>

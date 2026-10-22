@@ -482,7 +482,178 @@ created_at: 2026-10-15T16:16:15.707Z
 全文：.sillyspec/changes/archive/2026-10-20-sillyspec-gotchas-session/requirements.md#FR-03
 最近确认：06e0a0cc5908aa37fbbc2e79ab0b741fb1b6381a
 
-## FR-docs-030 弹窗观感对齐已确认原型：品牌图标头+副标题、页脚左侧红线注脚（单行省略）、品牌竖条小节头
+## FR-docs-030 失败轮（error_code=interactive_interrupted 且 error_detail 非空）在会话页面渲染错误卡，轮状态显示为失败而非已中止
+变更：2026-10-20-session-error-visibility
+状态：active
+摘要：快照回看（刷新页面）；实时 SSE 终态回补
+全文：.sillyspec/changes/archive/2026-10-20-session-error-visibility/requirements.md#FR-01
+最近确认：6f2fe0baf5d63d5a078e96a39670a5543a7c9bfe
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-20-session-error-visibility:flow:测试绑定FR-01
+  tests: frontend/src/components/daemon/__tests__/page-helpers-error-visibility.test.ts「实时终态条件扩展由快照升级同源判定覆盖（enrichDisplayTurns 与终态回补共用 buildErrorLogItem，快照用例即契约锚）」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-20-session-error-visibility
+  status: active
+
+## FR-docs-031 错误卡默认直接可见原始错误文本首行（如 codex exited code=1），无需点击查看详情
+变更：2026-10-20-session-error-visibility
+状态：active
+摘要：unknown 兜底错误
+全文：.sillyspec/changes/archive/2026-10-20-session-error-visibility/requirements.md#FR-02
+最近确认：6f2fe0baf5d63d5a078e96a39670a5543a7c9bfe
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-20-session-error-visibility:flow:测试绑定FR-02
+  tests: frontend/src/components/agent-log/__tests__/run-error-item.test.tsx「raw 首行摘要默认可见无需点击」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-20-session-error-visibility
+  status: active
+
+## FR-docs-032 真打断（error_detail 为空的 interactive_interrupted）仍显示已中止，不出现错误卡
+变更：2026-10-20-session-error-visibility
+状态：active
+摘要：用户手动打断
+全文：.sillyspec/changes/archive/2026-10-20-session-error-visibility/requirements.md#FR-03
+最近确认：6f2fe0baf5d63d5a078e96a39670a5543a7c9bfe
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-20-session-error-visibility:flow:测试绑定FR-03
+  tests: frontend/src/components/daemon/__tests__/page-helpers-error-visibility.test.ts「真打断 error_detail 为空保持已中止零回归」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-20-session-error-visibility
+  status: active
+
+## FR-docs-033 相关前端测试更新并通过
+变更：2026-10-20-session-error-visibility
+状态：active
+摘要：测试运行
+全文：.sillyspec/changes/archive/2026-10-20-session-error-visibility/requirements.md#FR-04
+最近确认：6f2fe0baf5d63d5a078e96a39670a5543a7c9bfe
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-20-session-error-visibility:flow:测试绑定FR-04
+  tests: frontend/src/components/agent-log/__tests__/run-error-item.test.tsx「长 raw 首行截断展示」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-20-session-error-visibility
+  status: active
+
+## FR-docs-034 daemon 对有 api_key 的 anthropic 直连形态 codex 供应商，写出的 config.toml [model_providers.sillyhub] 段含 requires_openai_auth = true；端到端：平台 codex 会话选直连供应商真实对话跑通（不再 stream disconnected）
+变更：2026-10-20-codex-requires-openai-auth
+状态：active
+摘要：有 key 直连供应商
+全文：.sillyspec/changes/archive/2026-10-20-codex-requires-openai-auth/requirements.md#FR-01
+最近确认：409315def4b848f950771392b7be388068c7304f
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-20-codex-requires-openai-auth:flow:测试绑定FR-01
+  tests: sillyhub-daemon/tests/codex-settings.test.ts「requires_openai_auth：anthropic 形态有 key 时写出该行（wire_api 行后）」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-20-codex-requires-openai-auth
+  status: active
+
+## FR-docs-035 keyless 供应商（api_key 缺省）行为不变：不写该键，产物与现状逐字一致（spike A3a keyless 语义零回归）
+变更：2026-10-20-codex-requires-openai-auth
+状态：active
+摘要：keyless 直连供应商；openai_chat 形态零回归
+全文：.sillyspec/changes/archive/2026-10-20-codex-requires-openai-auth/requirements.md#FR-02
+最近确认：409315def4b848f950771392b7be388068c7304f
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-20-codex-requires-openai-auth:flow:测试绑定FR-02
+  tests: sillyhub-daemon/tests/codex-settings.test.ts「key=daemonApiKey / base_url=litellm_base_url / model=litellm_model_name」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-20-codex-requires-openai-auth
+  status: active
+
+## FR-docs-036 智谱 GLM / OpenCode Go 两个预设声明 codex 专用端点覆盖（base_url+默认模型，模型均为实测可用）
+变更：2026-10-20-preset-engine-endpoint
+状态：active
+摘要：预设常量
+全文：.sillyspec/changes/archive/2026-10-20-preset-engine-endpoint/requirements.md#FR-01
+最近确认：bc88187dcee54e94289c2fcc742a802ffef45c00
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-20-preset-engine-endpoint:flow:测试绑定FR-01
+  tests: frontend/src/components/llm-providers/__tests__/llmProviderPresets.test.ts「zhipu_glm/opencode_go 声明 codex 覆盖且端点/模型正确；其余预设无覆盖」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-20-preset-engine-endpoint
+  status: active
+
+## FR-docs-037 表单勾选 Codex 时：选中带覆盖的预设 → base_url/默认模型联动切到 codex 端点，并自动取消 Claude 勾选（一条凭证一个端点的平台约束），notice 提示为 Claude 另建一条；取消 Codex → 回 claude 形态
+变更：2026-10-20-preset-engine-endpoint
+状态：active
+摘要：勾 Codex 联动；恢复 claude 形态（经对称勾回分支）
+全文：.sillyspec/changes/archive/2026-10-20-preset-engine-endpoint/requirements.md#FR-02
+最近确认：bc88187dcee54e94289c2fcc742a802ffef45c00
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-20-preset-engine-endpoint:flow:测试绑定FR-02
+  tests: frontend/src/components/llm-providers/__tests__/llm-provider-form.test.tsx「勾选 Codex 联动切换 codex 端点并取消 Claude 勾选；取消 Codex 恢复 claude 形态」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-20-preset-engine-endpoint
+  status: active
+
+## FR-docs-038 未选中预设或预设无覆盖时勾选行为与现状零回归（自定义/其它预设不受影响）
+变更：2026-10-20-preset-engine-endpoint
+状态：active
+摘要：自定义零回归
+全文：.sillyspec/changes/archive/2026-10-20-preset-engine-endpoint/requirements.md#FR-03
+最近确认：bc88187dcee54e94289c2fcc742a802ffef45c00
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-20-preset-engine-endpoint:flow:测试绑定FR-03
+  tests: frontend/src/components/llm-providers/__tests__/llm-provider-form.test.tsx「自定义表单勾选 Codex 零联动（base_url/模型不变）」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-20-preset-engine-endpoint
+  status: active
+
+## FR-docs-039 弹窗观感对齐已确认原型：品牌图标头+副标题、页脚左侧红线注脚（单行省略）、品牌竖条小节头
 变更：2026-10-22-agent-profile-modal-restyle
 状态：active
 摘要：打开新建弹窗
@@ -501,7 +672,7 @@ created_at: 2026-10-15T16:16:15.707Z
   source_change: 2026-10-22-agent-profile-modal-restyle
   status: active
 
-## FR-docs-031 技能区：全选复选（半选态、仅作用于当前筛选结果）+ 按名称与简介搜索 + 已选 N/总数计数 + 清空按钮 + 两行芯片网格（名称+一行简介，限高内滚）
+## FR-docs-040 技能区：全选复选（半选态、仅作用于当前筛选结果）+ 按名称与简介搜索 + 已选 N/总数计数 + 清空按钮 + 两行芯片网格（名称+一行简介，限高内滚）
 变更：2026-10-22-agent-profile-modal-restyle
 状态：active
 摘要：全选与半选；搜索下全选仅作用于筛选结果
@@ -520,7 +691,7 @@ created_at: 2026-10-15T16:16:15.707Z
   source_change: 2026-10-22-agent-profile-modal-restyle
   status: active
 
-## FR-docs-032 技能简介来自真实数据（manifest SKILL.md frontmatter description / 自定义技能 description），非硬编码
+## FR-docs-041 技能简介来自真实数据（manifest SKILL.md frontmatter description / 自定义技能 description），非硬编码
 变更：2026-10-22-agent-profile-modal-restyle
 状态：active
 摘要：并集与简介渲染
@@ -539,21 +710,21 @@ created_at: 2026-10-15T16:16:15.707Z
   source_change: 2026-10-22-agent-profile-modal-restyle
   status: active
 
-## FR-docs-033 技能区滚动条三主题下细样式半透明，暗夜不刺眼（作用域限本弹窗技能区）
+## FR-docs-042 技能区滚动条三主题下细样式半透明，暗夜不刺眼（作用域限本弹窗技能区）
 变更：2026-10-22-agent-profile-modal-restyle
 状态：active
 摘要：暗夜主题滚动
 全文：.sillyspec/changes/archive/2026-10-22-agent-profile-modal-restyle/requirements.md#FR-04
 最近确认：2fef11f807db97a27cdbd0f4fb036d7030bf821c
 
-## FR-docs-034 无硬编码 hex，颜色走 brand/语义 token，三主题（blue/ai-native/dark）可切换
+## FR-docs-043 无硬编码 hex，颜色走 brand/语义 token，三主题（blue/ai-native/dark）可切换
 变更：2026-10-22-agent-profile-modal-restyle
 状态：active
 摘要：三主题切换
 全文：.sillyspec/changes/archive/2026-10-22-agent-profile-modal-restyle/requirements.md#FR-05
 最近确认：2fef11f807db97a27cdbd0f4fb036d7030bf821c
 
-## FR-docs-035 既有行为回归不变：可见范围=工作区时出现归属工作区选择器、右栏预览实时联动、名称必填、红线文案不变
+## FR-docs-044 既有行为回归不变：可见范围=工作区时出现归属工作区选择器、右栏预览实时联动、名称必填、红线文案不变
 变更：2026-10-22-agent-profile-modal-restyle
 状态：active
 摘要：既有用例回归
@@ -572,7 +743,7 @@ created_at: 2026-10-15T16:16:15.707Z
   source_change: 2026-10-22-agent-profile-modal-restyle
   status: active
 
-## FR-docs-036 useCreateAgentProfile/useUpdateAgentProfile 成功后必须同时 invalidate workspaceList(wid) 与 mineList 两桶（全局页编辑/新建保存后卡片墙立即刷新）
+## FR-docs-045 useCreateAgentProfile/useUpdateAgentProfile 成功后必须同时 invalidate workspaceList(wid) 与 mineList 两桶（全局页编辑/新建保存后卡片墙立即刷新）
 变更：2026-10-22-agent-profile-edit-refresh
 状态：active
 摘要：全局页编辑保存；全局页新建保存
@@ -591,7 +762,7 @@ created_at: 2026-10-15T16:16:15.707Z
   source_change: 2026-10-22-agent-profile-edit-refresh
   status: active
 
-## FR-docs-037 工作区内页（workspaceList 桶）刷新行为不回归
+## FR-docs-046 工作区内页（workspaceList 桶）刷新行为不回归
 变更：2026-10-22-agent-profile-edit-refresh
 状态：active
 摘要：工作区内页编辑
@@ -610,7 +781,7 @@ created_at: 2026-10-15T16:16:15.707Z
   source_change: 2026-10-22-agent-profile-edit-refresh
   status: active
 
-## FR-docs-038 lib 层新增 hook 失效行为单测（断言两桶 key 均被失效）
+## FR-docs-047 lib 层新增 hook 失效行为单测（断言两桶 key 均被失效）
 变更：2026-10-22-agent-profile-edit-refresh
 状态：active
 摘要：单测覆盖

@@ -531,7 +531,7 @@
 最近确认：857d8af461ea4aa3705016087c3d9124105a3180
 理由：最大风险：筛选值集与展示映射漂移（feat↔feature 口径在后端 aliases、前端 COMMIT_TYPE_DISPLAY 两处维护）。缓解：两端各有测试钉（后端 feat 等价命中用例 / 前端 feature→feat 显示用例），且值集注释互指对方为权威。残余面：TYPE_OPTIONS 未 列 ci/revert/quick（防下拉过长），后端白名单仍可筛——深链手输 URL 可用，下拉不可 选，属有意取舍。 试过放弃：A. 类型筛选复用 lineage 的「全局集合→SQL IN」两阶段——类型是列值非 投影字段，直接 where 即可，无需两阶段；B. 前端本地过滤——total/分页会错 （pending_review_only gap② 前车之鉴），必须服务端筛。
 
-## D-unmapped-105@v1 设计期风险与放弃方案（底稿）
+## D-unmapped-149@v1 设计期风险与放弃方案（底稿）
 状态：implemented
 变更：2026-10-16-session-pill-dock-drag
 原编号：D-001@v1
@@ -539,7 +539,7 @@
 最近确认：f0ba3f3fb30b7b0743ad3265a86578205a46ed43
 理由：最大风险：拖拽与点击手势冲突（按住 pill 移动一点算点击还是拖拽）。口径=位移阈值 6px（小于阈值放行 click）+ 松手后 250ms 吞 click 时间窗（比布尔位稳：拖出元素外松手 click 不触发，布尔位会误吞下一次真点击）——两者均沿用悬浮球实测过的先例。 试过但放弃：a) pointer capture 实现拖拽——jsdom 无实现（测试不可达）且 capture 会劫持 click 目标破坏 pill 点击；b) 拖动过程每次 setPos 都持久化——localStorage 高频写（悬浮球现状），改为松手单点写；c) 保留 hover 双触发——用户明确要求纯点击防误触；d) 沿用挂载点 absolute 容器改竖排——拖不出面板且受祖先裁剪，改 portal body fixed。
 
-## D-unmapped-106@v1 设计期风险与放弃方案（底稿）
+## D-unmapped-150@v1 设计期风险与放弃方案（底稿）
 状态：implemented
 变更：2026-10-16-provider-switch-transcript-sanitize
 原编号：D-001@v1
@@ -547,7 +547,7 @@
 最近确认：030eceeece1388442415e8cd66c3cd3cc443083d
 理由：- **最大风险**：把「工具块」降级成 text 块会改变历史的结构语义（模型看到的是一次纯文本陈述而非工具调用）。 影响面评估：本次实证的私有块 `input` 为空、价值全在结果文本里，文本形态保留了全部信息，且优于 「换供应商后该会话永久 400」。 - **死路 1（放弃）**：请求期代理改写——需要 daemon 代理全部 anthropic 流量，性能/安全/越权面不可控。 - **死路 2（放弃）**：直接删除脏块所在记录——会打断 `uuid`/`parentUuid` 链，CLI resume 可能失配； 改为「替换成 text、记录条数不变」。 - **死路 3（放弃）**：直接删私有块、结果文本丢弃——丢上下文且无必要，文本化成本更低。 - **遗留（明确不在本变更范围）**：本机默认会话 + 用户手改宿主机 `~/.claude/settings.json` 换档的路径， 平台无任何变更信号可挂钩，自动化清洗不覆盖；本变更以「分类器可读提示 + 一次性修复实证（task-02）」 兜底，后续如需自动覆盖需单独立项（涉及平台是否代管宿主配置的取舍）。
 
-## D-unmapped-107@v1 设计期风险与放弃方案（底稿）
+## D-unmapped-151@v1 设计期风险与放弃方案（底稿）
 状态：implemented
 变更：2026-10-19-host-settings-live-reload
 原编号：D-001@v1
@@ -555,7 +555,7 @@
 最近确认：e5a2c7ee31881d2d20c3f831c729ca01c07a81e5
 理由：- **最大风险**：换档瞬间的批量重载会让所有本机默认会话引擎各重启一次（每个约 1-3s、各会话独立 并行）；正在等用户输入的会话无感（下一轮才用新引擎），运行中会话延迟到轮边界。可接受——比 「模型烙死 + 跨供应商 400」轻得多；且有关闭阀。 - **风险 2**：若用户以非 cc-switch 方式频繁改 settings.json 的 env 块（如脚本），会周期性触发重载。 去抖（两拍一致）+ 3s 节拍已把频率压到「真实变化」粒度；重载本身幂等无害。 - **死路 1（放弃）**：daemon 注入 env 覆盖模型/网关——平台不知道宿主档位语义，且实验实证 settings 的 base_url 本来就每轮热生效，注入反而制造新的钉。 - **死路 2（放弃）**：fs.watch（事件式）——Windows 下 cc-switch 若走替换写会掉 watch/漏事件， 还需目录级 watch 兜底；轮询+指纹在 2-6KB 文件上成本可忽略且行为确定（跨平台一致性优先， CLAUDE.md 规则 13）。 - **死路 3（放弃）**：只做 UI 提示不改行为——用户已明确要免手动处理。 - **遗留（明确不在本变更范围）**：宿主机档位变化对「运行中那一轮」仍不生效（轮边界语义，与平台内 切供应商一致）；`/model` 钉在重载后清零属预期副作用（正是解钉手段）。
 
-## D-unmapped-108@v1 设计期风险与放弃方案（底稿）
+## D-unmapped-152@v1 设计期风险与放弃方案（底稿）
 状态：implemented
 变更：2026-10-19-host-settings-reload-latency
 原编号：D-001@v1
@@ -701,13 +701,368 @@
 
 ## D-unmapped-103@v1 设计期风险与放弃方案（底稿）
 状态：implemented
+变更：2026-10-20-session-error-visibility
+原编号：D-001@v1
+锚点：未记录
+最近确认：6f2fe0baf5d63d5a078e96a39670a5543a7c9bfe
+理由：最大风险：把真打断误报为失败（ql-20260918-003 曾专门修过反方向——打断被渲染成「轮次失败」的误导）。对策：升级条件严格限定 buildErrorLogItem 返回非 null（模型错误键存在才非 null），error_detail 空的真打断零触碰；FR-03 零回归用例钉住。 试过放弃的方案：① 后端拆新 error_code（如 interactive_model_failed）——需 backend+daemon+前端三方发版且存量 run 无法重写，放弃；② RunErrorItem 默认展开完整 raw——raw 可达数千字符（实测 404 HTML 全文），撑爆消息流，改为首行截断摘要 + 折叠全文。
+
+## D-unmapped-104@v1 设计期风险与放弃方案（底稿）
+状态：implemented
+变更：2026-10-20-codex-requires-openai-auth
+原编号：D-001@v1
+锚点：未记录
+最近确认：409315def4b848f950771392b7be388068c7304f
+理由：最大风险：`requires_openai_auth` 是 codex CLI 的非 stability-guaranteed 配置键（cc-switch 生产配置与官方智谱接入文档均在用，当前 CLI 0.162.0 实测有效），未来 codex 大版本若更名/移除该键，症状回归为「不发认证 → 断流」——与 wire_api="chat" 被移除的先例同类。缓解：daemon 已有版本基线注记惯例（R-03），本变更在常量注释处注明 CLI 基线与实测依据；升级 codex 基线时冒烟面覆盖。 试过但放弃的方案： - 改走 openai_chat/litellm 代理通道（零代码）：模型选择退化为 usr-<uid>-<pid> 路由键、链路多 hub+LiteLLM 两跳，且该通道对 codex 从未被真实验证过（30 天零成功 run）；放弃。 - base_url 层面绕过（如要求用户把 key 拼进 URL）：bigmodel 不支持 URL 内嵌 key，且 key 进 URL 有日志泄漏面；放弃。 - 供应商配置面透传任意 provider 表键（settings_config 加 codex 专属段）：配置面扩大、需要 backend+daemon 双端改动，超出本次最小修复面；如未来需要 per-provider 差异键再立变更。
+
+## D-unmapped-105@v1 设计期风险与放弃方案（底稿）
+状态：implemented
+变更：2026-10-20-codex-models-fetch-candidates
+原编号：D-001@v1
+锚点：未记录
+最近确认：aa64d06245f0473307dc8ea88dfc9dd46c871e9a
+理由：最大风险：追加候选使「全候选 404」场景多一次上游请求（每条 models 拉取至多多 1 次 GET），对中转站限流面略增——量级可忽略（手动触发的低频操作）。次风险：`base+"/models"` 对某些会把 `/models` 当模型名路由的网关返回 200 非 models JSON——`_parse_models_response` 已有「body 不可解析/缺 data 字段 → AllFailed」兜底，不会误报成功。 试过但放弃的方案： - 按 provider 名/域名特判端点（如 bigmodel → /api/paas/v4/models）：vendor 分支进 service，维护面差、新供应商每次都要改代码；放弃。 - 前端对 codex 条目隐藏拉取按钮：不解决根因，且智谱/OpenCode 端点本就支持拉取；放弃。
+
+## D-unmapped-106@v1 设计期风险与放弃方案（底稿）
+状态：implemented
+变更：2026-10-20-preset-engine-endpoint
+原编号：D-001@v1
+锚点：未记录
+最近确认：bc88187dcee54e94289c2fcc742a802ffef45c00
+理由：最大风险：自动取消 Claude 勾选对「我就想同一条都勾上」的用户是强制收敛——但该组合保存后 Claude 与 Codex 必有一侧拿到错端点（今日三次实证），表单放行等于制造坏配置；notice 明示原因与出路（另建一条），属正确性优先。次风险：applyPreset 按当前勾选分派，用户先点预设后改勾选时形态可能与其预期不符——勾选联动会把形态拉回与勾选一致的状态，自愈。 试过但放弃的方案： - 预设拆成两条（OpenCode Go Codex 单列）：选择器条目翻倍且用户需自己判断选哪条，约束仍不可见；放弃。 - 保存时后端校验拦截坏组合（base_url 对勾选引擎不可达）：后端无法静态判定端点协议支持（需真实请求），动态探测成本高且时序不适配；放弃（表单联动前置收敛更便宜）。
+
+## D-unmapped-107@v1 设计期风险与放弃方案（底稿）
+状态：implemented
+变更：2026-10-20-session-status-live-sync
+原编号：D-001@v1
+锚点：未记录
+最近确认：59007127f0d130be7ea5e131f4f61154806d37a0
+理由：最大风险：信号频率放大列表查询负载——每个 run 生命周期新增约 3~5 个信号（创建/激活/审批对/终态），每个信号触发一次列表 refetch（limit=500 窗口函数查询）。评估：10s 轮询本来就执行同款查询，事件驱动只是把「定时查」变「变化时查」，稳态总频率不升反降；且 400ms 去抖把轮内密集信号合并。若极端高频会话（自动化连续注入）仍显负载，后续可加信号侧节流（不在本变更范围）。 试过但放弃的方案： - 前端 turn_started/全事件扇出 onSessionListRefresh——只覆盖当前打开的会话，其他会话（列表里未打开的）状态变化仍瞎；且每轮多次 invalidate 无谓压力。放弃，改为后端信号根治（覆盖全部会话）+ 仅审批边沿本地兜底。 - 列表轮询间隔调小（10s→2s）——治标：全静默 30s 退化和「变化时查」语义都没解决，纯增加空转查询。放弃。 - 把 current_run_status 塞进 per-session SSE 频道让前端本地合成列表状态——前端需要为未打开会话维持订阅/状态机，复杂度大增；哑信号+refetch 复用既有链路，改动面最小。放弃。
+
+## D-unmapped-108@v1 设计期风险与放弃方案（底稿）
+状态：implemented
+变更：2026-10-21-gitlog-quotepath-fix
+原编号：D-001@v1
+锚点：未记录
+最近确认：5bbb1a830ca0bee507747635b639a3be0ac85947
+理由：答：死路①（已试已弃）：改用 `git show --numstat -z` 按 NUL 切分原文路径——`-z` 在 `git show`（log 族）语境同时是「提交分隔符」语义，与 `--pretty=format:` 混用行为含混，且需重写 numstat 两段式分区解析，相对 `-c core.quotepath=false` + 解码兜底无额外收益，弃。风险①：路径含非法 UTF-8 字节序列时 `Buffer.from(bytes).toString('utf8')` 产生 U+FFFD 替换符——防御性行为可接受（git 真实输出不会出现：路径字节即提交时的合法编码）。风险②：既有命令构造断言用例按 args 位置逐 token 断言（GL25/GL29/GL37/GL42/GL43/GL45），插入 `-c` 对后需同步更新索引——漏更即测试红，已列入 task-01 验证面。风险③：porcelain/diff 加 `quotepath=false` 后含换行的文件名仍被 git 强制引号包裹（控制字符恒转义），单行解析假设不破——decodeGitCQuote 同款规则保证。
+
+## D-unmapped-109@v1 设计期风险与放弃方案（底稿）
+状态：implemented
+变更：2026-10-21-overview-card-mainflow-scan
+原编号：D-001@v1
+锚点：未记录
+最近确认：23c936e92bf7871cd0ea0edba46cdf5387e49079
+理由：答：最大风险：既有测试与潜在快照对「六段管线」的隐含依赖——已定位唯一断言面（本组件测试 213-217 行 scan aria 断言）同步更新，全仓 grep 无其他组件消费本卡 MAIN_STAGES（组件内常量未导出）。次要风险：旧 daemon 采集值（CLI 未升级机器）下 thin 变更暂显 brainstorm 主管线——数据源升级自愈，非本变更面（依据：根因修复在 sillyspec 2026-10-21-overview-thin-stage，跨仓不在本冻结面）。放弃方案：①连带改移动端 stepper（mobile-change-detail STEPPER_STAGES 含 scan）与变更中心 `?? "scan"` 兜底——同根因但异仓异面，用户本轮只点名总览卡，扩面应由用户裁决，留后续候选；②改 CLI 侧让 envelope 附带阶段清单驱动前端渲染——过度设计，前端静态常量与 sillyspec MAIN_FLOW_ORDER 对齐即可，增契约无收益。
+
+## D-unmapped-110@v1 设计期风险与放弃方案（底稿）
+状态：implemented
+变更：2026-10-21-gitlog-conflict-quotepath
+原编号：D-001@v1
+锚点：未记录
+最近确认：21e877fc467eca703395f8b9d60dccfa4f67326d
+理由：答：风险①：`git diff --name-only` 输出按行切，文件名含字面换行仍会断行——但含控制字符的路径 git 恒强制 C 引号包裹（`\n` 被转义为字面 `\n` 两字符），单行假设不破，decodeGitCQuote 同款规则兜底（上变更风险③同机理，GL47 已实证）。风险②：`conflicts[].file` 语义变化对 backend converge_mission 的下游消费是修复性变化（原文路径才能 readFile），若存在依赖「转义形态」的下游断言需同步——检索 backend 侧对 conflicts 的消费为透传给 LLM 提示词，无形态依赖。死路①：不改 `_listConflictFiles` 改为 `git status --porcelain` 解析 U 态——porcelain 输出对特殊字符的引号规则随 `-z` 才关、解析面更大，弃。死路②：沿用上变更已弃的 `--numstat -z` 思路改 `-z`——name-only 的 `-z` 需改 NUL 切分且与既有行式解析不兼容，无收益，弃。
+
+## D-unmapped-111@v1 设计期风险与放弃方案（底稿）
+状态：implemented
+变更：2026-10-21-mobile-scan-birth-cleanup
+原编号：D-001@v1
+锚点：未记录
+最近确认：bbc224288e8daa873a122695fc50a3ad418d9ce7
+理由：答：最大风险：legacy scan 阶段值（2026-09-27 前创建且未推进的行）在移动端详情失去步骤条——实为与桌面一致的既有降级形态（收敛），且此类行本就停滞在出生阶段无步骤可看，风险可忽略。次要风险：兜底改 brainstorm 后 `current_stage=null` 行显「需求分析」可能被误读为「正在头脑风暴」——null 属平台镜像异常态（正常行恒有阶段），兜底只是防裸显，可接受。放弃方案：①保留 STEPPER_STAGES 别名仅删 scan 元素——留无谓别名不如直用 WORKFLOW_STAGES 单一源，防第三份副本再漂移；②连 ChangeStepBadge 的 scan 标签/色映射一并删——那是 legacy 值域映射，删了会让存量 scan 行裸显英文 'scan'，越界，弃。
+
+## D-unmapped-112@v1 设计期风险与放弃方案（底稿）
+状态：implemented
+变更：2026-10-21-precommit-sandbox-entries
+原编号：D-001@v1
+锚点：未记录
+最近确认：8fc3178d3d66af22d19c6eeee234a863746fd512
+理由：答：风险①：uv 在 Low 子树若需下载依赖（根 .venv 缺失时）可能被沙箱网络策略拦——当前根环境已就绪（ql-20260923-006 实证根/backend uv env 同源可用），`.tmp/uv-cache` 重定向后无 profile 写，残余风险记为已知限制；真遇到时用户终端跑一次 hook 预热缓存即可。风险②：pre-push 两条保留 bash 包装，agent 会话内若手动触发 pre-push 仍会崩——推送属用户终端动作（流程纪律），不为其扩大改动面。死路①：icacls 改 `~/.cache` ACL——嵌套 token 根本不在 CodexSandboxUsers 组、写入拒绝在驱动白名单层而非 DACL，改了无效（探针实证），弃。死路②：削弱沙箱容器（改内核对象目录 ACL/降标签）恢复 msys 嵌套——动容器安全边界换取工具便利，方向性错误，弃。死路③：PRE_COMMIT_HOME 写入用户级环境变量——Low 子树只能写仓内路径，单值无法同时满足多仓，弃（按会话 `export PRE_COMMIT_HOME=$PWD/.tmp/pre-commit-home` 使用，已验证）。
+
+## D-unmapped-113@v1 设计期风险与放弃方案（底稿）
+状态：implemented
+变更：2026-10-21-precommit-cleanup
+原编号：D-001@v1
+锚点：未记录
+最近确认：68ae72e85d8261a4c49924cc6edaec5dc61d4f4c
+理由：答：风险①：knowledge search 的索引对新增条目可能非即时（懒建/同步节奏）——FR-03 以 search 实证命中为验收，未命中则重跑 search 触发同步，验收门兜底。风险②：INDEX 锚点 slug 与 GitHub 风格推导不一致导致点击 404——对照既有 🟡 条目锚点格式（emoji 剥除、空格转连字符）书写，search 路由不依赖锚点（按关键词行），影响仅限手工点击面。死路①：把沙箱限制写进 AGENTS.md 横幅——环境事实混入流程规则面，全局注入噪音大于收益，弃（知识库按需路由）。死路②：保留 `.tmp/hooks` 作双通道备份——非官方通道留存即诱导复用，与「统一官方链」目标相悖，弃。
+
+## D-unmapped-114@v1 设计期风险与放弃方案（底稿）
+状态：implemented
+变更：2026-10-21-files-refresh-spinner
+原编号：D-001@v1
+锚点：未记录
+最近确认：e88ffddb76486f445e8bdac23d437a22c39a8ebd
+理由：答：最大风险是双入口（按钮+错误重试）并发时转圈提前消失的反馈时机问题——影响仅视觉反馈、不涉数据，触发条件苛刻（错误态下双击两入口），接受不改计数器（复杂度不值）。放弃方案：① 给全局 `Button` 组件加通用 loading prop——影响全部消费面，远超本诉求；② 新增独立 POST 同步端点+按钮联动——已被 2026-10-13-change-files-refresh-sync D-007@v1 否决（GET 纯读语义 + 用户诉求是刷新动作本身带同步），不复潮。
+
+## D-unmapped-115@v1 设计期风险与放弃方案（底稿）
+状态：implemented
+变更：2026-10-21-task-wakeup-restore
+原编号：D-001@v1
+锚点：未记录
+最近确认：440f3fd244d4810e1f4fb0a30c875767cab088e3
+理由：答：最大风险是产品语义回退复发——本次恢复与 10-13 删除是同一取舍的正反对翻，为防「短任务噪音」复发，阈值门槛 + 0 关闭阀 + stopped 不唤醒三重降噪全部保留；若未来 claude 引擎在流式模式原生自续跑，会出现双轮，届时设 SILLYHUB_TASK_WAKEUP_QUIET_MS=0 一键关闭（[TASK_NOTIFICATION]/注入行可观测，当天可发现）。次要风险：未知帧降级桶（codex/cursor 未知事件映射 subtype='task_notification'）理论上可携带 task_id 进入唤醒判定——旧链六周共存无误触发记录（降级桶帧通常无 task_id，strOf 早退），恢复时保持原样不加新防线，避免为理论面扩表。死路：①「daemon 私推引擎流绕过 backend」——已否决，幽灵轮无审计无权限路由（$46 事故先例）；②「前端折叠系统行升级」——原裁定本变更不做，执行期用户改判（dsh「收到任务消息」形态实证后明确要求可见留痕），已并入 FR-06；③「local.yaml 阈值载体」——放弃改 env，理由见做法概述。
+
+## D-unmapped-116@v1 设计期风险与放弃方案（底稿）
+状态：implemented
+变更：2026-10-21-archive-patch-repair
+原编号：D-001@v1
+锚点：未记录
+最近确认：5c97d62770d4dddf8fa3d9ea833b8905f3cbd098
+理由：答：最大风险是手工修准与 CLI 未来版本的 schema 演进漂移——缓解：键集不变只修值、repair 为纯新增字段（后端投影对未知键 fail-open，schema.py 侧 assets 读取面已核），且 verdict 枚举已从后端权威源查证（`planned/unplanned/untouched`，schema.py:745），无需凭空造值。放弃方案：① 接受现状不动——平台卡面持续误导 + 未来 FR 归属按错误清单污染，且 review.json 的 git-diff 权威面在历史压扁后成孤儿引用，评估已否；② 只追加 repair-note 文件不动冻结件本体——半吊子修复，卡面照旧错，不解决用户可见面；③ CLI 官方通道重建——`flow` 子命令无重建能力（已归档注销）、`--reopen` 属厚流程阶段机、知识库无先例，通道不存在。仓内已有 `patch-reanchor` 命令（归档后锚点修复）先例，佐证归档后修复在该流程文化下是被认可的形态（本变更为其内容面扩展，手工执行）。
+
+## D-unmapped-117@v1 设计期风险与放弃方案（底稿）
+状态：implemented
+变更：2026-10-21-spec-manifest-incremental
+原编号：D-001@v1
+锚点：未记录
+最近确认：5115487c570daf7efdcedd873932b50372333d36
+理由：最大风险：**未来新增清单写点漏盖章 → 增量流漏行**。缓解：四个写点（apply_ops / _write_spec_root 对齐 / soft_delete_change_dir / heal_manifest_tombstones）逐点内联盖章并带「2026-10-21」锚注释，模型列注释与各写点 docstring 均注明「新写点必须盖章」；增量端点语义上把 NULL 行排除（未盖章行不进增量流）反而是显式失败面——漏盖章表现为客户端漏看到该行，靠全量兜底可发现（CLI 侧将带定期全量对账，sillyspec 仓消费变更内做）。评审补强两处：heal 写点盖章（P2-1，原实现漏）与 get_manifest 先读版本后读行（P2-2，封 READ COMMITTED 双快照跳行窗口——多读行是幂等超集无害）。次风险：rename 软删使墓碑行累积增速略升（原来硬删的行现在留存）——与既有 delete op 墓碑同量级（月千级），且有 `landing_version` 后未来可做墓碑 GC，可接受。 放弃的方案：① 按 `version`（行级谱系）直接过滤——不同行计数不可比，语义错误。② `updated_at` 时间戳游标——时钟回拨/同秒多事务不可判定，且 DB 与应用时钟双源。③ ETag/If-None-Match 整体未变短路（无增量行）——只能省「无变化」场景，任何单行变化仍全量 2.2MB，治标不治本。④ 服务端缓存全量序列化按 spec_version 键控——省的是 0.9s 生成段，5s 传输段不动（带宽受限），收益不足。⑤ 只做响应瘦身（裁墓碑/字段）——上限 ~15%，不解决无界增长。
+
+## D-unmapped-118@v1 参考粒度＝交互模型与数据口径，不移植 DSH 插件化客户端架构
+状态：implemented
+变更：2026-10-20-session-page-dsh-alignment
+原编号：D-001@v1
+锚点：未记录
+最近确认：328788cbe
+理由：沿用既有裁决，不重新论证（我的判断：继承）。2026-08-19-session-stream-ux 在 A 渐进增强 / B 全量移植 deepseek-harness 架构 / C 共享装配器 三条路线中选定 C——「参考 deepseek-harness 设计思想但不移植其插件化架构」。本仓客户端是 Next.js 14 + React 18 + TanStack Query + antd 的单一应用；DSH 客户端是 Cordis 插件图 + 58 个 `packages/client/*` 包 + slot 注册表。移植成本与回归面远超收益，且本仓已用「单一装配器 + 段模型」达到同一目标（事件 → 结构化轮次模型 → 对话/进度多视图消费）。
+故障面：若后续出现「按工具/按视图独立演化」的强需求，集中式渲染（frontend/src/components/agent-log/tool-renderers.tsx，731 行 switch）会先成为瓶颈——届时按需抽轻量注册表，而不是回退到插件化架构。
+退役判据：出现 ≥3 个需要独立加载、独立版本的客户端扩展方（第三方插件生态）时重议本边界。
+
+## D-unmapped-119@v1 动机＝日常主力工作台 + 对外演示可用 + 与 DSH 直接对标（非「会话规模爆炸」驱动）
+状态：implemented
+变更：2026-10-20-session-page-dsh-alignment
+原编号：D-003@v1
+锚点：未记录
+最近确认：328788cbe
+理由：用户多选三项动机：①与手边在用的 DSH 直接对比，差距刺眼；②想把它当主力工作台，日常别扭感累积到临界；③要给别人用/演示，观感与可读性要能打。**未选**「会话规模变了（几十轮 + 子代理/团队会话撑不住）」——即本次不是为极端长会话/多并发现场做容量设计。
+故障面：「主力工作台」与「演示可用」对同一处有相反要求——前者要高密度、后者要留白与呼吸感；若不分场景一刀切排版，会牺牲其中一侧。
+退役判据：若后续出现真实的规模压力证据（单会话轮次/日志量级或并发会话数成为瓶颈实测），重新评估容量线是否入范围。
+
+## D-unmapped-120@v1 视图模型不在对话里拍板——先出 HTML 原型看效果再定（用户选 C）
+状态：implemented
+变更：2026-10-20-session-page-dsh-alignment
+原编号：D-004@v1
+锚点：未记录
+最近确认：328788cbe
+理由：用户选 C——先出 HTML 原型看效果再定视图模型；本轮**不**承诺 A（允许重构）也不承诺 B（保守增强）。
+故障面：原型先行把"设计定稿"推迟到原型确认之后；若原型用理想化假数据（无超长轮/大 diff/失败轮），确认结论会落空——原型语料必须覆盖真实形态。
+退役判据：用户看过原型并明确选定形态后，本条目由对应的视图模型决策条目取代。
+
+## D-unmapped-121@v1 原型出「A/B 双形态对比」单页（我的判断）
+状态：implemented
+变更：2026-10-20-session-page-dsh-alignment
+原编号：D-005@v1
+锚点：未记录
+最近确认：328788cbe
+理由：我的判断：一份单文件 HTML，可切换地并排呈现 A（单视图可伸缩：整轮折叠 → 过程分组 → 单条 disclosure）与 B（两视图保留 + 细节档位），共用同一份真实形态语料（超长轮、连续工具调用、失败轮、子代理轮），并把 D-003 登记的「高密度 vs 呼吸感」张力做成两套排版参数同页对比。依据：仓内既有 AI-Native 视觉方向与既有原型留档形态。
+故障面：两形态同页使状态维度上升（形态 × 展开层 × 档位），需以静态语料 + 少量本地交互实现，避免体积与状态管理失控。
+退役判据：用户选定形态后原型仅作留档，不再迭代。
+
+## D-unmapped-122@v1 成功标准延后到原型确认后定稿（草案 SC-01..SC-05 随原型呈现）
+状态：implemented
+变更：2026-10-20-session-page-dsh-alignment
+原编号：D-008@v1
+锚点：未记录
+最近确认：328788cbe
+理由：用户选「先看原型再定」——成功标准（尤其 SC-01/SC-02/SC-04 的尺度）在看过原型后一并定稿。
+故障面：若原型轮只确认形态而漏确认 SC，后续 tasks 与 verify 探针会缺少判据锚点。
+退役判据：SC 定稿写入 requirements.md 后本条目仅作过程留档。
+
+## D-unmapped-123@v1 方案定稿推迟到原型确认轮；原型出 A/C 双形态（修订 D-005 的 A/B 组合）
+状态：implemented
+变更：2026-10-20-session-page-dsh-alignment
+原编号：D-009@v1
+锚点：未记录
+最近确认：328788cbe
+理由：用户选「先出双形态原型，看完再定」——本轮不承诺 A 或 C；原型按 **A/C 双形态**出（C ＝ A 的全部呈现 + 旧「进度」视图保留为可切回的入口），看完效果再定稿。Step 4 的三方案对比表与推荐（推荐 A）已被接受为讨论基础，但不构成选择。
+故障面：若把 A/C 做成两页独立实现，对比成本上升且会掩盖真实差异（C 多出的只有回退入口）；须同页可切换、共用同一份语料与同一套排版参数。
+退役判据：方案定稿后本条目由对应的视图模型决策条目取代。
+
+## D-unmapped-124@v1 原型形态升级为 dev 预览路由（直接渲染真实会话组件）
+状态：implemented
+变更：2026-10-20-session-page-dsh-alignment
+原编号：D-010@v1
+锚点：frontend/src/app/proto/session-fold/page.tsx
+最近确认：328788cbe
+理由：用户选 ①「dev 预览路由」+ 改动边界「允许改生产链路」。已落地：新增 dev-only 路由 `frontend/src/app/proto/session-fold/page.tsx`，直接 `import` 真实 `TurnTimeline`，喂 fixture 轮次（`segments` 含 thinking / Grep / Read / Edit(structuredPatch) / Bash）。验证：`tsc --noEmit` 0 错；`next dev` 实测 `GET /proto/session-fold 200`，HTML 98KB 内命中真实组件标记（「思考过程」×2、`Grep` ×2、`turn-timeline.tsx` ×10）——即为真实组件树渲染，非复刻。
+故障面：dev 路由需起 `next dev`（本机 spawn 受限，需完整权限跑），且因不受 middleware 守卫而存在未授权访问面——必须保持 dev-only 且不进导航，否则等于新开一个匿名入口。
+退役判据：折叠模型正式落到生产组件后，本路由降级为回归对照页或删除。
+
+## D-unmapped-125@v1 「继续用静态 prototype:build 复刻会话页」被否决
+状态：rejected
+变更：2026-10-20-session-page-dsh-alignment
+原编号：D-011@v1
+锚点：未记录
+最近确认：328788cbe
+理由：否决（用户选择 dev 预览路由）。静态管线是 `tsc + react-dom/server`，无浏览器运行时，无法承载 `turn-timeline` 的 antd / zustand `useSession` / `thinking-translate` 依赖；复刻只能逼近观感，功能面永远补不完（用户实测判断「缺很多功能」）。
+否决理由：静态产物只能「像」，无法证明真实组件在折叠模型下的行为，且复刻成本无上限。
+复潮条件：需要完全无运行时的离线观感稿（对外文档配图）时可临时用静态管线生成素材，但不得作为定稿原型。
+
+## D-unmapped-126@v1 静态交付形态＝真实组件树的 SSR 快照 + 内联 CSS（交互仍走 dev 路由）
+状态：implemented
+变更：2026-10-20-session-page-dsh-alignment
+原编号：D-014@v1
+锚点：未记录
+最近确认：328788cbe
+理由：采用「dev server 的 SSR 输出 → 内联 CSS → 剥 &lt;script&gt;」导出：`export-proto.ps1` 抓 `/proto/session-redesign`（v2）与 `/proto/session-current`（现状）两份快照，产出 `prototype-session-v2.html` / `prototype-session-current.html`（各 ~295KB，零依赖双击可看）。它是**真实组件树的静态投影**，不是手绘复刻。
+故障面：快照剥掉了 `<script>`（无 hydrate），任何依赖 JS 的交互或懒渲染内容不会出现——拿静态稿当"功能完整性"证据会误判；CSS 已内联但字体等 url() 资源离线可能缺失（回落系统字体）。
+退役判据：若 Next 侧启用 `output: 'export'` 能直接产出静态站，本脚本由官方导出替代。
+
+## D-unmapped-127@v2 视觉基线＝真实页面的**结构**（三主题并存，不把深色当基线）〔取代 D-015@v1〕
+状态：implemented
+变更：2026-10-20-session-page-dsh-alignment
+原编号：D-015@v2
+锚点：未记录
+最近确认：328788cbe
+理由：用户更正（原话）：「不是颜色问题 平台就是有三套主题，我给你de截图是深色而已」。故 @v1 的「浅色稿作废、以深色为基线」判断错误，本版取代：**基线是真实页面的结构与信息组织**（布局、信息项、行式、chip、轮头/轮尾、工具卡形态）；**主题是三个并存维度**（ai-native / blue / dark），三套都必须成立。
+故障面：三主题共用一套语义 token 时，某些混色（如 brand 边框 + card 底）在浅色主题下对比度不足——每套主题需各自校验对比度（正文与 muted 至少 4.5:1 / 3:1）。
+退役判据：平台若收敛到单主题，则本条的"三主题"要求降为单主题规范。
+
+## D-unmapped-128@v1 视觉稿必须由真实组件产出（手绘 HTML 只作参考，不作定稿）
+状态：implemented
+变更：2026-10-20-session-page-dsh-alignment
+原编号：D-017@v1
+锚点：未记录
+最近确认：328788cbe
+理由：不可以。用户指出（原话）：「这个是不是 直接改的 html 而不是 转换的？ 你这样直接改 html 后面代码实现会有偏差的呀」。该判断与仓规一致——`PROTOTYPE.md` 铁律：手绘定稿后每条意见都要反向翻译回真实代码。故 `prototype-session-v3.html` 降级为**视觉参考稿**，不定稿；定稿原型必须是对真实组件（Tailwind + token + 现有 `.sh-*` 类）改造后、由 dev 路由渲染、再由导出脚本固化的 HTML。
+故障面：真实组件改动面大（`turn-timeline` / `turn-segment-views` / `globals.css` / `session-list-panel`），且会话页无 E2E——落地时须逐条配单测断言用户可见行为，否则"稿=实现"只能靠肉眼保证。
+
+## D-unmapped-129@v1 静态原型导出必须「浏览器水合后序列化 DOM」，禁止抓 SSR HTML
+状态：implemented
+变更：2026-10-20-session-page-dsh-alignment
+原编号：D-018@v1
+锚点：frontend/scripts/export-hydrated.mjs
+最近确认：328788cbe
+理由：实测证明 SSR HTML 不可用：`prototype-session-fullpage.html` 含 **138 处 CSR bailout `<template>` 占位、0 个 `.wmde-markdown`**（助手答复正文全缺）。改为 `frontend/scripts/export-hydrated.mjs`：playwright 打开路由 → `networkidle` → `waitForFunction(.wmde-markdown ≥ 50, 120s)` → 逐片收集 `cssRules` → `outerHTML` → 剥 `<script>/<link>/原 style` → 合并单 `<style>` → 落盘，并机械校验各闭合标签恰好一次。
+故障面：导出耗时上升（需起浏览器 + 等水合），且依赖 dev server 在跑。
+退役判据：Next 启用 `output:'export'` 且能正确产出 CSR 子树时，可改用官方导出。
+
+## D-unmapped-130@v1 此前三次「效果不咋地 / 看不出区别」的判定，基于缺正文的残缺稿，需在修复稿上重判
+状态：implemented
+变更：2026-10-20-session-page-dsh-alignment
+原编号：D-019@v1
+锚点：未记录
+最近确认：328788cbe
+理由：部分不成立。三次判定所看的静态稿缺全部答复正文（见 D-018），等于在"没有回答文字的页面"上评判。修复稿（`prototype-session-final.html`）已含 138 个正文块，需在该稿上重判。
+故障面：若重判仍不满意，说明问题不在正文缺失，须回到 D-016 的层次问题继续定位。
+
+## D-unmapped-131@v1 删除轮间 1px hairline，仅以留白分隔轮次（用户方向）
+状态：implemented
+变更：2026-10-20-session-page-dsh-alignment
+原编号：D-020@v1
+锚点：未记录
+最近确认：328788cbe
+理由：用户原话「轮间 1px hairline 多余」→ 删除。`turn-block` 容器 `border-b border-border pb-7 last:border-b-0` → 仅 `pb-7`（28px 留白保留）；`globals.css` 全文核对无其它轮间画线规则（已用测试锁死）。
+故障面：长会话滚动时"分轮感"完全依赖留白，若留白被压缩会失去分段感。
+
+## D-unmapped-132@v1 对比加强（答案压过过程）——四组参数定稿
+状态：implemented
+变更：2026-10-20-session-page-dsh-alignment
+原编号：D-021@v1
+锚点：未记录
+最近确认：328788cbe
+理由：用户原话「对比加强」→ 落地为四组：①正文 14.5px/1.78/段距 0.6em → **15px/1.8/0.65em**（标题 16.5/15.5、行内 code 13）②过程行（思考+工具）12px → **11.5px + `text-muted-foreground/80`**，并去掉思考摘要额外 `opacity-75`（叠乘后浅色主题 <3:1 不可读）③工具行左规线静息 `border-border` → **`border-border/60`**（hover 仍 brand）④过程块与答复块间距 6px → **14px**（列 gap 7px + 答复块 mt-7px，过程行彼此仍 7px）。
+故障面：11.5px + 80% 墨色在部分浅色主题下接近可读下限，再降即失效。
+
+## D-unmapped-133@v1 轨迹视图形态＝泳道时间轴（共享绝对时间轴 × 输入/模型/工具），账本降为「调用」档
+状态：implemented
+变更：2026-10-20-session-page-dsh-alignment
+原编号：D-024@v1
+锚点：未记录
+最近确认：328788cbe
+理由：用户提供 DSH 轨迹截图作为目标：**三条泳道（输入/模型/工具）+ 一条共享绝对时间轴 + 顶部三档视图（时长/轮次/调用）+ 搜索 + 选中区间高亮**，主视图不是表格。此前实现的「每轮一行小刻度 + 856 行账本」判定为形态错误。
+故障面：共享绝对时间轴在 577 分钟窗口下短轮会挤成一小撮，必须有缩放/窗口，否则退化回"看不出哪步慢"。
+
+## D-unmapped-134@v1 过程行采用 DSH 式语义标签（思考 / 运行命令 / 收到任务消息…），daemon 采集缓发
+状态：implemented
+变更：2026-10-20-session-page-dsh-alignment
+原编号：D-025@v1
+锚点：未记录
+最近确认：328788cbe
+理由：用户提供 DSH 截图：每一步是**紧凑单行**——图标 + 语义标签 + 「 · 」+ 一行摘要（如「思考 · The backend model-usage agent finished…」「运行命令 · Regenerate OpenAPI and generated types」），并有独立的 **「收到任务消息」卡片**（带时间、可展开）。**更正**：截图中那张「收到任务消息」实际是变更 `2026-10-21-task-wakeup-restore` 的任务消息**误投到本会话**；用户从未说「daemon 采集缓发」，D-023 的 TTFT/attempt 采集**仍在范围内、不缓**。
+故障面：标签是**展示层映射**，不得改写日志原文；未知 event_type 必须回退「其它」而不是丢弃（否则新工具上线即隐身）。
+
+## D-unmapped-135@v1 1b 快照落库点修正——interactive 轮走 `close_run_steps`，不走 `lease/service.complete_lease`〔2026-10-21 execute 期实证〕
+状态：implemented
+变更：2026-10-20-session-page-dsh-alignment
+原编号：D-027@v1
+锚点：未记录
+最近确认：328788cbe
+理由：不成立。实证：`_upsert_batch_model_usage` 唯一调用点是 `lease/service.py:457`（batch `complete_lease` 路径）；interactive 轮的终态是 `daemon/hub-client.notifyRunResult` → `POST /leases/{id}/runs/{run_id}/result` → `router/lease.py:233 close_interactive_run` → `run_sync/service/__init__.py:386-449` → `run_sync/service/close_run_steps.py:_close_apply_terminal`，`agent_run_model_usage` 的 upsert 在 `close_run_steps.py:379-417`。若按原写作落点实现，1b 快照对真实产品路径**永不落库**。
+故障面：若未来新增第三条 run 终态写入路径（如离线补报），同样必须在 `_close_apply_terminal` 或新增的共用 helper 处调用，否则快照再次断链；design 的「落库点」表述应改为「`close_run_steps._close_apply_terminal`（interactive）/ `complete_lease`（batch）」两条。
+
+## D-unmapped-136@v1 1b 读模型落点＝`GET /sessions/{id}/runs`（SessionRunRead），`TurnOutlineItemRead` 不加字段〔2026-10-21 execute 期裁决〕
+状态：implemented
+变更：2026-10-20-session-page-dsh-alignment
+原编号：D-029@v1
+锚点：未记录
+最近确认：328788cbe
+理由：放 `SessionRunRead`（`GET /sessions/{id}/runs`）——前端 `runsMeta`（`session-panel-page.tsx:805` 的 `Map<string, SessionRunRead>`）就是消费面，task-11 的轮级卡片与 task-12 的模型泳道都从它取；`TurnOutlineItemRead` 走进程内 LRU 指纹，指纹不含 `daemon_run_snapshots`，快照晚到时会产生**陈旧读**（读到旧快照却不自知），且当前无消费方。
+故障面：前端若直接吃 turn-outline 缓存而非 `/runs`，会拿不到快照；task-11 必须以 `runsMeta` 为准（设计已如此要求）。
+
+## D-unmapped-137@v1 后到快照必须在「run 已终态」的二次上报里补写侧表（否则 1b 对 interactive 全废）〔2026-10-21 execute 期实证〕
+状态：implemented
+变更：2026-10-20-session-page-dsh-alignment
+原编号：D-030@v1
+锚点：未记录
+最近确认：328788cbe
+理由：会丢。实测：`close_run_steps.close_interactive_run` 的 terminal 分支（`agent_run.status in TERMINAL_TURN_STATUSES`）先 `rollback()` 再 `return`，**整条不写侧表**；而 daemon 侧 `_onResult` 是「`await onResult(...)`（含首报 close）→ 之后才 fire-and-forget 采集 → 二次上报 file_changes/timing」，因此带快照的那次上报**永远命中 no-op 分支**。若不修，interactive 会话的轮级卡一律退 `tool_only`，1b 数据链路等于没通（只有 batch 路径能出卡）。
+故障面：后到快照是一次**额外**的 result 上报（携带首报终态三字段复述）；若未来把 `notifyRunResult` 的幂等改成 409/抛错，这条补写路径会静默失效。批量补发（outbox）同理需保证只写侧表。
+
+## D-unmapped-138@v1 前端降级判据以 capability 为准；`snapshot=null` 且 `capability` 也缺＝「未接线」，不出卡〔2026-10-21 execute 期裁决〕
+状态：implemented
+变更：2026-10-20-session-page-dsh-alignment
+原编号：D-031@v1
+锚点：未记录
+最近确认：328788cbe
+理由：三分法（对齐 design E6/E8）：①`capability="tool_only"`（含 snapshot=null）→ 出「仅工具编辑」降级卡 + 说明行；②`status="failed"|"unavailable"` → 同样降级卡（快照不可信）；③`snapshot=null` **且** `capability` 为 `null/undefined` → **不出卡、不出占位**——这是「挂载方没接线」（dialog / 旧消费方），把它显示成「daemon 老版本」是另一种误导；④`status="ok"` 且 `files=[]` → 不出卡（快照确认零改动，且全树禁止出现「本轮无改动」字样）。
+故障面：老 daemon 会话里「每轮一张仅工具编辑卡」会显得吵（20 轮 → 20 张）；这是 E8「显式提示不静默」的代价，收窄需另立设计条目（建议后续：仅末轮/首轮出卡 + 汇总卡统一提示）。
+
+## D-unmapped-139@v1 TTFT/attempt 实际只能 `basis="approx"`（三引擎均无「模型请求起点」事件）；attempt 沿用近似起点而非只记终点〔2026-10-21 execute 期实证〕
+状态：implemented
+变更：2026-10-20-session-page-dsh-alignment
+原编号：D-032@v1
+锚点：未记录
+最近确认：328788cbe
+理由：**不能**，三引擎在 daemon 事件边界都没有稳定的请求起点：①claude 的 SDK `message_start` 被归一化器吃掉（只用于算 `api_duration_ms`，不产 AgentEvent，`:973-1031`）；②codex 的 `turn/started` 只是**轮**起点，工具结果后无通知；③pi 的 `message_start` 当纯生命周期丢弃（`pi-events.ts:36`），`turn_start` 只产 status。故按 plan 降级口径：attempt 起点＝轮首（首段）/「本批工具全部 result 返回」之后；首 token＝首个 text/thinking delta；终点＝下一个 `tool_use` 或轮终态；`basis` 恒 `"approx"`。
+故障面：前端会**长期**显示「近似（无 TTFT 采样）」而非「真实占用」——UI 的 observed 分支目前只有单测覆盖、生产不可达；若产品要求「真实占用」必须先在 driver 层补 `request_start` 事件（跨 daemon 驱动改造，不在本变更）。
+
+## D-unmapped-140@v1 迁移链尾锚测试随新迁移一并前移（提交 hook 强制连带）〔2026-10-21 execute 期登记〕
+状态：implemented
+变更：2026-10-20-session-page-dsh-alignment
+原编号：D-033@v1
+锚点：backend/tests/test_align_platform_change_events_migration.py
+最近确认：328788cbe
+理由：仓内 pre-commit hook 的「迁移」钉子会校验迁移链尾锚测试——新增迁移后 `heads[0]` 不再是旧 head，hook **直接拒签**（实测：首次提交被拦，提示「迁移链尾锚测试 heads[0] 前移到新 head（注释链续写）」）。故把 `heads[0]` 由 `c3f8a1d6e2b4` 前移为 `20261021120000` 并在注释链续写一行是本变更的强制连带改动，不是新交付面。
+故障面：该锚点测试是「迁移双头」的守护，若把它改成不校验（例如 `assert len(heads) == 1` 以外全放行），未来并行迁移再出双头就无人拦。
+
+## D-unmapped-141@v1 `partial` 且无文件清单时出「一行提示卡」——不得静默成「本轮无改动」〔2026-10-21 execute 期独立审查阻断项修复〕
+状态：implemented
+变更：2026-10-20-session-page-dsh-alignment
+原编号：D-034@v1
+锚点：未记录
+最近确认：328788cbe
+理由：**该出**。独立审查（execute stage review）实测：daemon 超时与队列溢出都返回 `files: []`（`turn-file-changes.ts:813-824`、`tests/interactive/turn-file-changes.test.ts:433-435`），而前端 `toFileChangesCardProps` 先把 partial→`truncated`，随后 `if (files.length === 0) return null` 整卡不渲染 → 用户看到「没有卡」，无法区分「采集没完成」与「本轮真的没改文件」，与 design「partial 卡片照出」相悖（E6/E8 立意）。修法取 A（实现意图，而非改口径）：partial 且无文件清单 → 渲染 28px 单行提示卡（`data-testid="file-changes-notice"`），文案「工作区快照未完成（超时或队列溢出），本轮改动未知」。
+故障面：提示卡与「仅工具编辑」降级卡是**两种**话术（前者「没拿到清单」、后者「没有这项能力」），未来若合并会再次丢语义；`reason` 细分（timeout vs queue_overflow）在快照里保留，但 UI 合并表述——若要区分需在 `notice` 上带 reason。
+
+## D-unmapped-142@v1 设计期风险与放弃方案（底稿）
+状态：implemented
+变更：2026-10-21-session-git-branch
+原编号：D-001@v1
+锚点：未记录
+最近确认：4f66ab1e2364cbdfeafb01bb48f3dec9c6d08b3a
+理由：最大风险：每 60s 轮询触发 daemon `git_status`（内含 `git fetch`，15s 超时）——remote 慢时轮询堆积。缓解：fetch 失败/超时在 daemon 内降级（fetch_error 字段），分支采集（本地 porcelain）不受阻；轮询仅前台可见时执行；多会话面板并开时按 sessionId 各自 queryKey 独立节流，最坏面=可见面板数×1 次/60s（与会话列表 10s 轮询同量级，可接受）。 试过放弃的方案：① 复用 `git_refs` RPC 推当前分支（head sha 与 refs/heads 匹配）——同 sha 多分支歧义 + detached 不可判，放弃；② daemon 新增轻量 `git_branch` RPC（免 fetch）——跨服务契约变更 + 旧 daemon method_not_found 兼容面，轻量变更不值得，放弃（若后续轮询负载实证过重再立项）；③ `git_gateway`（backend 本机 subprocess）查 worktree——worktree 物理位于 daemon 宿主时 backend 不可达，且 session cwd 语义就是 daemon 宿主路径，方向错，放弃。
+
+## D-unmapped-153@v1 设计期风险与放弃方案（底稿）
+状态：implemented
 变更：2026-10-20-pill-dock-left-align
 原编号：D-001@v1
 锚点：未记录
 最近确认：a303e730226d05a93ba959773366a676cf54aa09
 理由：最大风险:存档恢复首帧对齐闪动(恢复帧 items-end、下一帧切 items-start)。已消除——恢复路径改走 `snapPos`,首帧即携带正确 left。 试过但放弃的方案:① render 期读 `dockRef.getBoundingClientRect()` + bounds 现算对齐——render 读 DOM 不纯(ref 首帧为 null),且每次 render 强制布局;② 持久化存档带 left 字段——存档格式变化,既有 toEqual 断言与旧档兼容都要跟着动,left 可从坐标幂等重推导,入档属冗余状态。两案均弃,采用吸附判据单源派生。
 
-## D-unmapped-104@v1 设计期风险与放弃方案（底稿）
+## D-unmapped-154@v1 设计期风险与放弃方案（底稿）
 状态：implemented
 变更：2026-10-20-pill-dock-drag-align-keep
 原编号：D-001@v1
@@ -715,7 +1070,15 @@
 最近确认：4f77e50c12b353f42e8442aed1fcdfea34234511
 理由：最大风险(声明边界):拖拽中把组拖到对面半边但未松手时,视觉位置在左/右而对齐仍是拖拽前方向——这是设计意图(对齐切换只在松手吸附时发生,避免拖拽中过中线来回翻转抖动),非缺陷。 放弃的方案:拖拽中实时按位置中线切换对齐——过中线时两个 pill 的对齐侧来回翻转,组框跟手移动叠加对齐抖动视觉混乱,且拖拽中位置本就是临时态,实时切换无信息增益。
 
-## D-unmapped-109@v1 设计期风险与放弃方案（底稿）
+## D-unmapped-143@v1 设计期风险与放弃方案（底稿）
+状态：implemented
+变更：2026-10-22-review-risk-fixes
+原编号：D-001@v1
+锚点：未记录
+最近确认：c975a003a577bfb5ce79a8445906f9f358939c82
+理由：最大风险：FR-04 用 codePoint 重组字面字符后，若输入字符串本身是坏 UTF-16（孤立代理项）产出坏字节——与修复前同样产生乱码但不会更差（防御性等价，且 git 输出不会给孤立代理）。放弃的方案：① 给 `/proto/**` 加 middleware 鉴权——D-010 故障面已登记为独立事项，本次不动鉴权语义（避免 proto 预览页依赖登录态改变 dev 评审工作流），以「数据不进产物/上下文」双层代替；② 把真实导出换成人造 fixture——违背 FR-frontend-018（dev 预览要真实会话观感），不做。
+
+## D-unmapped-144@v1 设计期风险与放弃方案（底稿）
 状态：implemented
 变更：2026-10-21-agent-profile-slim-default
 原编号：D-001@v1
@@ -723,7 +1086,7 @@
 最近确认：9458a48db2d349cf18861d098796265ca018fe31
 理由：最大风险：daemon prune 是删目录操作，误删会话工作区文件——缓解：复用既有 pruneSkillsToSubset（限定 `<workDir>/.claude/skills/` 基目录、跳过隐藏项与非目录、单条失败仅 warn），且仅 spawn 前置链执行一次；实测门覆盖 daemon 测试。次风险：空=清空语义对存量用户反直觉（选了空技能档案的默认档案会让会话没技能）——缓解：设默认交互处提示「该档案未勾选技能，设为默认后你的会话将不挂载技能」（前端文案警示）。 死路：①档案行级 is_default 列（仿供应商）——放弃：档案跨用户共享（workspace/platform 可见），行级标记会让甲的默认影响乙，必须用户级存储；②改通用 pickStrList 空数组语义——放弃：effectiveAllowedRoots 等多调用方依赖「空=不过滤」既有契约，新 strict 变体隔离影响面；③热切换会话技能重挂载——v1 不做：需 daemon 会话存活期重跑 link/prune 链，收益低复杂度高，记边界。
 
-## D-unmapped-110@v1 设计期风险与放弃方案（底稿）
+## D-unmapped-145@v1 设计期风险与放弃方案（底稿）
 状态：implemented
 变更：2026-10-21-provider-default-ui-hint
 原编号：D-001@v1
@@ -731,7 +1094,7 @@
 最近确认：01207058ca048f4015b4074b38e32f1e2bba4335
 理由：最大风险：历史轮 timeline 用当前默认名标注的轻微失真（默认改名后历史轮名跟着变）——已声明可接受（FR-02），优于现状「本机默认」的反向误导。死路：把默认名写进会话/轮快照（config_snapshot）——放弃：属后端改动且引入快照一致性维护，显示问题不值当。
 
-## D-unmapped-111@v1 设计期风险与放弃方案（底稿）
+## D-unmapped-146@v1 设计期风险与放弃方案（底稿）
 状态：implemented
 变更：2026-10-21-profile-default-prehint
 原编号：D-001@v1
@@ -739,7 +1102,7 @@
 最近确认：9711e7721de76c3f71b59ac13d1bb63815c7ed53
 理由：最大风险：provisional 兜底项文案「不指定（默认：名）」与运行中「不指定（无人格）」语义并存，用户切换会话形态时文案变化——有依据（两态实际语义确实不同），非漂移。死路：把默认名显示进非 provisional 会话——放弃：该会话不会注入默认，显示即撒谎。
 
-## D-unmapped-112@v1 设计期风险与放弃方案（底稿）
+## D-unmapped-147@v1 设计期风险与放弃方案（底稿）
 状态：implemented
 变更：2026-10-22-agent-profile-modal-restyle
 原编号：D-001@v1
@@ -747,7 +1110,7 @@
 最近确认：2fef11f807db97a27cdbd0f4fb036d7030bf821c
 理由：最大风险：既有单测查询方式依赖旧 DOM（antd Checkbox.Group 的 label 结构），重构后需按新 DOM（芯片以 role=checkbox/aria-checked 暴露）调整查询手段——行为断言不变、只改查询方式，逐用例核对防止「改测试凑通过」。次风险：antd Modal title 传 ReactNode 后高度变化在不同视口的表现，靠实页三主题截图对照兜底。已放弃方案：①继续用 antd Checkbox.Group + options render 定制两行芯片（Group 布局受限、工具栏与三态联动要绕过 Group 自身 state，别扭且难测，放弃）；②全局滚动条主题化（影响面全站，超出本变更范围，收窄为作用域工具类，全局化留给后续独立变更）。
 
-## D-unmapped-113@v1 设计期风险与放弃方案（底稿）
+## D-unmapped-148@v1 设计期风险与放弃方案（底稿）
 状态：implemented
 变更：2026-10-22-agent-profile-edit-refresh
 原编号：D-001@v1

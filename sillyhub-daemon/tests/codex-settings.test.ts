@@ -110,6 +110,8 @@ describe('writeCodexHome anthropic 形态（golden=spike a2b-config.toml/a2-auth
     const config = readFileSync(join(home, 'config.toml'), 'utf-8');
     // 逐字段对齐 golden a2b-config.toml 形状：顶层 model + model_provider 指向
     // provider 表键名 + 表内 base_url + wire_api="responses"（0.147.0 唯一合法值）。
+    // requires_openai_auth=true（2026-10-20-codex-requires-openai-auth）：有 key 的
+    // 直连形态必须声明，否则 codex 不发 Authorization、上游掐流。
     expect(config).toBe(
       [
         'model = "glm-4.7"',
@@ -119,8 +121,22 @@ describe('writeCodexHome anthropic 形态（golden=spike a2b-config.toml/a2-auth
         'name = "SillyHub"',
         'base_url = "https://anthropic.example.com"',
         'wire_api = "responses"',
+        'requires_openai_auth = true',
         '',
       ].join('\n'),
+    );
+  });
+
+  it('requires_openai_auth：anthropic 形态有 key 时写出该行（wire_api 行后）', async () => {
+    const home = newCodexHome();
+    await writeCodexHome({
+      codexHome: home,
+      provider: anthropicProvider(),
+      daemonApiKey: null,
+    });
+    const config = readFileSync(join(home, 'config.toml'), 'utf-8');
+    expect(config).toContain(
+      'wire_api = "responses"\nrequires_openai_auth = true',
     );
   });
 
@@ -177,7 +193,7 @@ describe('writeCodexHome anthropic 形态（golden=spike a2b-config.toml/a2-auth
     expect(config).toContain('base_url = "https://anthropic.example.com"');
   });
 
-  it('key 缺省（仅 base_url）→ auth.json 不写（spike A3a keyless provider 合法），config.toml 照写且无 model 行（model 缺省）', async () => {
+  it('key 缺省（仅 base_url）→ auth.json 不写（spike A3a keyless provider 合法），config.toml 照写且无 model 行（model 缺省）；keyless 不写 requires_openai_auth（产物与现状逐字一致，零回归）', async () => {
     const home = newCodexHome();
     await writeCodexHome({
       codexHome: home,
@@ -188,6 +204,7 @@ describe('writeCodexHome anthropic 形态（golden=spike a2b-config.toml/a2-auth
       daemonApiKey: null,
     });
     expect(existsSync(join(home, 'auth.json'))).toBe(false);
+    // 逐字 toBe = keyless 零回归守卫：不得混入 requires_openai_auth 行。
     expect(readFileSync(join(home, 'config.toml'), 'utf-8')).toBe(
       [
         'model_provider = "sillyhub"',
@@ -219,6 +236,8 @@ describe('writeCodexHome openai_chat 形态（litellm_proxy 通道，D-006）', 
     expect(auth.OPENAI_API_KEY).toBe('sk-daemon-master-1');
 
     const config = readFileSync(join(home, 'config.toml'), 'utf-8');
+    // 逐字 toBe = openai_chat 零回归守卫：不得混入 requires_openai_auth 行
+    // （本形态走 hub 代理通道，本键语义属直连认证，产物与现状一致）。
     expect(config).toBe(
       [
         'model = "usr-42-7"',
@@ -322,6 +341,7 @@ describe('writeCodexHome 保守合并（config.toml 差量替换）', () => {
         'name = "SillyHub"',
         'base_url = "https://new.example.com"',
         'wire_api = "responses"',
+        'requires_openai_auth = true',
         '',
         '[model_providers.oldprov]',
         'name = "Old"',

@@ -1,0 +1,129 @@
+{
+  "change": "2026-10-21-mobile-scan-birth-cleanup",
+  "baseline": "21e877fc467eca703395f8b9d60dccfa4f67326d",
+  "head": "c1c128ae8e1da367480edc5d98bb878c16b9d070",
+  "files": [
+    ".sillyspec/docs/SillyHub/modules/daemon.changelog.md",
+    ".sillyspec/docs/multi-agent-platform/modules/sillyhub-daemon.changelog.md",
+    "frontend/src/app/(dashboard)/workspaces/[id]/changes/page.tsx",
+    "frontend/src/components/mobile/mobile-change-card.test.tsx",
+    "frontend/src/components/mobile/mobile-change-card.tsx",
+    "frontend/src/components/mobile/mobile-change-detail.test.tsx",
+    "frontend/src/components/mobile/mobile-change-detail.tsx"
+  ],
+  "totals": {
+    "files": 7,
+    "additions": 24,
+    "deletions": 18
+  },
+  "savedAt": "2026-10-21T01:26:22.867Z",
+  "note": "flow done 时点冻结（本变更可归属交付面：baseline..HEAD 提交面过滤 .sillyspec/ 只留 .sillyspec/docs/ 交付文档 + 独占树未提交交付；治理工件目录不入冻结——2026-10-12-close-trace-freeze-integrity FR-01）",
+  "modules": [
+    {
+      "id": "frontend",
+      "files": 5,
+      "doc": "docs/multi-agent-platform/modules/frontend.md",
+      "docTouched": false,
+      "docMissing": false
+    },
+    {
+      "id": "frontend_app",
+      "files": 1,
+      "doc": "docs/SillyHub/modules/frontend_app.md",
+      "docTouched": false,
+      "docMissing": false
+    },
+    {
+      "id": "frontend_components",
+      "files": 4,
+      "doc": "docs/SillyHub/modules/frontend_components.md",
+      "docTouched": false,
+      "docMissing": false
+    }
+  ],
+  "uncoveredDirs": [],
+  "moduleMaps": [
+    "docs/backend/modules/_module-map.yaml",
+    "docs/frontend/modules/_module-map.yaml",
+    "docs/multi-agent-platform/modules/_module-map.yaml",
+    "docs/SillyHub/modules/_module-map.yaml",
+    "docs/sillyhub-daemon/modules/_module-map.yaml"
+  ],
+  "acceptedDirtyGap": 33,
+  "scopeAudit": {
+    "mode": "full-flow",
+    "ok": true,
+    "degradedReason": null,
+    "baseAnchor": "21e877fc467eca703395f8b9d60dccfa4f67326d",
+    "totals": {
+      "files": 7,
+      "additions": 24,
+      "deletions": 18
+    },
+    "rows": [
+      {
+        "path": ".sillyspec/docs/SillyHub/modules/daemon.changelog.md",
+        "additions": 1,
+        "deletions": 0,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": ".sillyspec/docs/multi-agent-platform/modules/sillyhub-daemon.changelog.md",
+        "additions": 1,
+        "deletions": 0,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": "frontend/src/app/(dashboard)/workspaces/[id]/changes/page.tsx",
+        "additions": 1,
+        "deletions": 1,
+        "kind": "modified",
+        "planned": "修改",
+        "verdict": "planned"
+      },
+      {
+        "path": "frontend/src/components/mobile/mobile-change-card.test.tsx",
+        "additions": 3,
+        "deletions": 2,
+        "kind": "modified",
+        "planned": "修改",
+        "verdict": "planned"
+      },
+      {
+        "path": "frontend/src/components/mobile/mobile-change-card.tsx",
+        "additions": 3,
+        "deletions": 2,
+        "kind": "modified",
+        "planned": "修改",
+        "verdict": "planned"
+      },
+      {
+        "path": "frontend/src/components/mobile/mobile-change-detail.test.tsx",
+        "additions": 7,
+        "deletions": 5,
+        "kind": "modified",
+        "planned": "修改",
+        "verdict": "planned"
+      },
+      {
+        "path": "frontend/src/components/mobile/mobile-change-detail.tsx",
+        "additions": 8,
+        "deletions": 8,
+        "kind": "modified",
+        "planned": "修改",
+        "verdict": "planned"
+      }
+    ],
+    "excluded": {
+      "foreignDeclared": []
+    },
+    "note": "flow done 时点冻结（本文件落盘时采集）",
+    "closedBy": "flow done"
+  },
+  "patchSha256": "3608309243ec12de5b6c0ae66a24c68fdf4aac430c93107060b6707b7650b302",
+  "patchStatus": "ok"
+}

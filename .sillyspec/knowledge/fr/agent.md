@@ -320,7 +320,90 @@ created_at: 2026-10-14T02:51:35.432Z
 全文：.sillyspec/changes/archive/2026-10-16-agent-session-field-pin-sync/requirements.md#FR-03
 最近确认：cd5c6760fd82584b7b25b8e8d89947f6360a55b6
 
-## FR-agent-015 档案表单仅 名称/可见范围/系统提示词/技能勾选 四项，无工作区上下文/引擎/模型/供应商/工具策略/MCP 字段，右栏预览同步
+## FR-agent-015 后端在上述 run 状态迁移点补发 publish_sessions_changed（复用既有哑信号链路，Redis 抖动静默容错不拖挂业务写路径）
+变更：2026-10-20-session-status-live-sync
+状态：active
+摘要：发消息后左侧立即转圈；等待审批即时可见；审批通过恢复执行；run 激活不发假信号
+全文：.sillyspec/changes/archive/2026-10-20-session-status-live-sync/requirements.md#FR-01
+最近确认：59007127f0d130be7ea5e131f4f61154806d37a0
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-20-session-status-live-sync:flow:测试绑定FR-01
+  tests: backend/app/modules/agent/tests/test_coordinator_approval_signal.py「request_approval/approve 成功发布、拒绝路径不发布」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-20-session-status-live-sync
+  status: active
+
+## FR-agent-016 前端收到信号后经既有 400ms 去抖失效列表查询，左侧状态标签在 run 状态迁移后秒级（≤2s）更新，与右侧会话状态一致，不再依赖轮询 tick
+变更：2026-10-20-session-status-live-sync
+状态：active
+摘要：审批弹框与左侧徽标同步
+全文：.sillyspec/changes/archive/2026-10-20-session-status-live-sync/requirements.md#FR-02
+最近确认：59007127f0d130be7ea5e131f4f61154806d37a0
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-20-session-status-live-sync:flow:测试绑定FR-02
+  tests: frontend/src/components/daemon/__tests__/session-panel-approval-list-refresh.test.tsx「permission_request 触发 onSessionListRefresh」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-20-session-status-live-sync
+  status: active
+
+## FR-agent-017 多轮会话 run 完成（会话保持 active）时左侧转圈徽标同样秒级收敛
+变更：2026-10-20-session-status-live-sync
+状态：active
+摘要：多轮完成转圈收敛
+全文：.sillyspec/changes/archive/2026-10-20-session-status-live-sync/requirements.md#FR-03
+最近确认：59007127f0d130be7ea5e131f4f61154806d37a0
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-20-session-status-live-sync:flow:测试绑定FR-03
+  tests: backend/app/modules/daemon/tests/test_close_interactive_run_session_status.py「多轮 keep-active 终态发布列表信号（扩展既有用例断言）」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-20-session-status-live-sync
+  status: active
+
+## FR-agent-018 既有信号点（会话创建/终态/删除/群聊 audience）行为零回归
+变更：2026-10-20-session-status-live-sync
+状态：active
+摘要：既有回归面
+全文：.sillyspec/changes/archive/2026-10-20-session-status-live-sync/requirements.md#FR-04
+最近确认：59007127f0d130be7ea5e131f4f61154806d37a0
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-20-session-status-live-sync:flow:测试绑定FR-04
+  tests: backend/app/modules/daemon/tests/test_close_interactive_run_session_status.py「既有终态翻转发布用例回归全绿」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-20-session-status-live-sync
+  status: active
+
+## FR-agent-019 新增信号点有单测覆盖；触及的前后端测试全绿
+变更：2026-10-20-session-status-live-sync
+状态：active
+摘要：守卫路径不发布
+全文：.sillyspec/changes/archive/2026-10-20-session-status-live-sync/requirements.md#FR-05
+最近确认：59007127f0d130be7ea5e131f4f61154806d37a0
+
+## FR-agent-020 档案表单仅 名称/可见范围/系统提示词/技能勾选 四项，无工作区上下文/引擎/模型/供应商/工具策略/MCP 字段，右栏预览同步
 变更：2026-10-21-agent-profile-slim-default
 状态：active
 摘要：新建瘦身表单；编辑存量档案
@@ -339,7 +422,7 @@ created_at: 2026-10-14T02:51:35.432Z
   source_change: 2026-10-21-agent-profile-slim-default
   status: active
 
-## FR-agent-016 档案卡片有「设为默认」操作与默认标记，每用户至多一个默认档案
+## FR-agent-021 档案卡片有「设为默认」操作与默认标记，每用户至多一个默认档案
 变更：2026-10-21-agent-profile-slim-default
 状态：active
 摘要：设默认与互斥；默认档案被删
@@ -358,7 +441,7 @@ created_at: 2026-10-14T02:51:35.432Z
   source_change: 2026-10-21-agent-profile-slim-default
   status: active
 
-## FR-agent-017 创建会话与群聊成员未显式选档案时注入用户默认档案（人格+技能）；未设默认行为与现状逐字节一致
+## FR-agent-022 创建会话与群聊成员未显式选档案时注入用户默认档案（人格+技能）；未设默认行为与现状逐字节一致
 变更：2026-10-21-agent-profile-slim-default
 状态：active
 摘要：会话默认注入；无默认零回归；群聊成员默认注入
@@ -377,7 +460,7 @@ created_at: 2026-10-14T02:51:35.432Z
   source_change: 2026-10-21-agent-profile-slim-default
   status: active
 
-## FR-agent-018 选档案会话只挂档案技能子集，档案技能为空则不挂任何技能；未选档案且无默认时技能全量挂载（现状）
+## FR-agent-023 选档案会话只挂档案技能子集，档案技能为空则不挂任何技能；未选档案且无默认时技能全量挂载（现状）
 变更：2026-10-21-agent-profile-slim-default
 状态：active
 摘要：空技能档案清空挂载；旧 lease 兼容
@@ -396,7 +479,7 @@ created_at: 2026-10-14T02:51:35.432Z
   source_change: 2026-10-21-agent-profile-slim-default
   status: active
 
-## FR-agent-019 既有档案数据不迁移不删列，被删字段读侧忽略；后端 llm_provider/claim 注入链零触碰
+## FR-agent-024 既有档案数据不迁移不删列，被删字段读侧忽略；后端 llm_provider/claim 注入链零触碰
 变更：2026-10-21-agent-profile-slim-default
 状态：active
 摘要：读侧忽略

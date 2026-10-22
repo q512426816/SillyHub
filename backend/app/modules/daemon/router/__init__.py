@@ -220,6 +220,10 @@ _ENDPOINT_ORDER: tuple[str, ...] = (
     "stream_sessions_events",
     "export_sessions",
     "get_session_detail",
+    # 2026-10-21-session-git-branch：会话当前 git 分支实时查询（详情的姊妹
+    # 只读 GET；{session_id}/git-status 双段路径与单段 {session_id} 不同形状，
+    # 无匹配冲突）。
+    "get_session_git_status",
     "create_session",
     # 2026-09-22-session-fork-continuation task-05：会话任意点分叉端点（紧跟
     # create，同为 session_crud 的会话创建类端点；{session_id}/fork 与下方
@@ -280,6 +284,10 @@ _ENDPOINT_ORDER: tuple[str, ...] = (
     # slim 截断条目的按需展开数据源；{log_id} 段多于 /logs 路由，不抢匹配）。
     "get_session_log_entry",
     "get_session_usage",
+    # 会话 × 模型用量明细（紧跟 usage，同为 session_insights 的会话观测类
+    # 只读 GET；/model-usage 固定字面量后缀与 /sessions/{session_id} 单段路由
+    # 不同形状，无匹配冲突）。
+    "get_session_model_usage",
     # session_team（拆前 #72-73：team-mission trigger/list）
     "trigger_session_team_mission",
     "list_session_team_missions",

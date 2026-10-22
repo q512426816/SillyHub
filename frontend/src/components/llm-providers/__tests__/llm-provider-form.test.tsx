@@ -785,3 +785,57 @@ describe("LlmProviderForm — 引擎自动压缩区（claude 条件渲染）", (
     expect(screen.queryByText("引擎自动压缩（claude）")).toBeNull();
   });
 });
+
+// ── 预设 codex 端点联动（2026-10-20-preset-engine-endpoint）──────────────────
+// 同一供应商 claude/codex 端点不同（codex 只支持 Responses 协议），带 codex 覆盖的
+// 预设勾 Codex 联动切换端点并与 Claude 互斥；无预设/无覆盖零联动。
+describe("LlmProviderForm — 预设 codex 端点联动（2026-10-20-preset-engine-endpoint）", () => {
+  const baseUrlInput = () =>
+    screen.getByPlaceholderText(/https:\/\/api\.anthropic\.com/) as HTMLInputElement;
+  const kindCheckbox = (label: string) =>
+    screen.getByRole("checkbox", { name: new RegExp(label) }) as HTMLInputElement;
+
+  it("OpenCode Go 预设勾 Codex → 切 codex 端点并自动取消 Claude 勾选 + notice", () => {
+    render(<LlmProviderForm mode="create" onSubmit={vi.fn()} onCancel={vi.fn()} />);
+    fireEvent.click(screen.getByRole("button", { name: /^OpenCode Go$/ }));
+    expect(baseUrlInput().value).toBe("https://opencode.ai/zen/go");
+
+    fireEvent.click(kindCheckbox("Codex"));
+
+    expect(baseUrlInput().value).toBe(
+      "https://opencode.ai/inference/go/openai/v1",
+    );
+    expect(kindCheckbox("Codex").checked).toBe(true);
+    expect(kindCheckbox("Claude Code").checked).toBe(false);
+    expect(screen.getByText(/Codex 专用端点/)).toBeInTheDocument();
+  });
+
+  it("codex 形态勾回 Claude → 恢复 claude 端点并取消 Codex（对称互斥）", () => {
+    render(<LlmProviderForm mode="create" onSubmit={vi.fn()} onCancel={vi.fn()} />);
+    fireEvent.click(screen.getByRole("button", { name: /^OpenCode Go$/ }));
+    fireEvent.click(kindCheckbox("Codex"));
+    expect(baseUrlInput().value).toBe(
+      "https://opencode.ai/inference/go/openai/v1",
+    );
+
+    fireEvent.click(kindCheckbox("Claude Code"));
+
+    expect(baseUrlInput().value).toBe("https://opencode.ai/zen/go");
+    expect(kindCheckbox("Claude Code").checked).toBe(true);
+    expect(kindCheckbox("Codex").checked).toBe(false);
+    expect(screen.getByText(/已恢复 Claude 端点/)).toBeInTheDocument();
+  });
+
+  it("自定义表单勾 Codex 零联动（base_url 不变、无切换 notice）", () => {
+    render(<LlmProviderForm mode="create" onSubmit={vi.fn()} onCancel={vi.fn()} />);
+    fireEvent.change(baseUrlInput(), {
+      target: { value: "https://my-relay.example.com" },
+    });
+
+    fireEvent.click(kindCheckbox("Codex"));
+
+    expect(baseUrlInput().value).toBe("https://my-relay.example.com");
+    expect(kindCheckbox("Claude Code").checked).toBe(true); // 不强制互斥
+    expect(screen.queryByText(/专用端点/)).toBeNull();
+  });
+});

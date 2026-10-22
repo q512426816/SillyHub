@@ -63,7 +63,11 @@ from app.modules.daemon._background_tasks import BackgroundTaskMixin
 from app.modules.daemon.lease.service import DaemonAgentRunNotFound
 from app.modules.daemon.model import DaemonTaskLease
 from app.modules.daemon.model_error import ModelErrorDTO
-from app.modules.daemon.schema import ModelUsageItemRead
+from app.modules.daemon.schema import (
+    ModelUsageItemRead,
+    TurnFileChangesSnapshot,
+    TurnTimingSnapshot,
+)
 from app.modules.daemon.session.service import TERMINAL_TURN_STATUSES
 
 # D-007 setattr 绑定（test_session_events_cross._capture_publish 经
@@ -393,6 +397,12 @@ class RunSyncService(BackgroundTaskMixin):
         # task-06 / FR-02：daemon classifyModelError 回传的模型层错误。None=daemon
         # 未传（旧 daemon / 成功 run），AgentRun.error_detail 保持 None（design §9）。
         error: ModelErrorDTO | None = None,
+        # 1b 轮次快照（2026-10-20-session-page-dsh-alignment task-08 / D-023@v1）：
+        # daemon 轮尾采集结果（可选），落库在 _close_apply_terminal 的 model_usage
+        # 段之后；缺 file_changes → capability="tool_only"，缺 timing → null。
+        file_changes: TurnFileChangesSnapshot | None = None,
+        timing: TurnTimingSnapshot | None = None,
+        daemon_version: str | None = None,
     ) -> AgentRun:
         """Close an interactive AgentRun from daemon SDK result (gap-3 / design §4).
 
@@ -449,6 +459,9 @@ class RunSyncService(BackgroundTaskMixin):
             model_usage=model_usage,
             api_requests=api_requests,
             error=error,
+            file_changes=file_changes,
+            timing=timing,
+            daemon_version=daemon_version,
         )
 
     async def _gate_applicable(self, agent_run: AgentRun) -> bool:

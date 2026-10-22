@@ -1,0 +1,167 @@
+{
+  "change": "2026-10-21-daemon-sync-hardening",
+  "baseline": "e88ffddb76486f445e8bdac23d437a22c39a8ebd",
+  "head": "d58f1314c07b62458b250a02f35f9c7f9364255e",
+  "files": [
+    ".sillyspec/docs/SillyHub/modules/daemon.changelog.md",
+    ".sillyspec/docs/SillyHub/modules/frontend_components.changelog.md",
+    ".sillyspec/docs/multi-agent-platform/modules/frontend.changelog.md",
+    "sillyhub-daemon/src/daemon.ts",
+    "sillyhub-daemon/src/event-loop-watch.ts",
+    "sillyhub-daemon/src/hub-client.ts",
+    "sillyhub-daemon/src/sillyspec-manager.ts",
+    "sillyhub-daemon/src/spec-sync.ts",
+    "sillyhub-daemon/tests/event-loop-watch.test.ts",
+    "sillyhub-daemon/tests/hub-client-fetch-timeout-surface.test.ts",
+    "sillyhub-daemon/tests/sillyspec-status-collect-guards.test.ts",
+    "sillyhub-daemon/tests/spec-sync-off-switch.test.ts"
+  ],
+  "totals": {
+    "files": 12,
+    "additions": 870,
+    "deletions": 3
+  },
+  "savedAt": "2026-10-21T04:05:33.278Z",
+  "note": "flow done 时点冻结（本变更可归属交付面：baseline..HEAD 提交面过滤 .sillyspec/ 只留 .sillyspec/docs/ 交付文档 + 独占树未提交交付；治理工件目录不入冻结——2026-10-12-close-trace-freeze-integrity FR-01）",
+  "modules": [
+    {
+      "id": "sillyhub-daemon",
+      "files": 9,
+      "doc": "docs/multi-agent-platform/modules/sillyhub-daemon.md",
+      "docTouched": false,
+      "docMissing": false
+    },
+    {
+      "id": "daemon",
+      "files": 9,
+      "doc": "docs/SillyHub/modules/daemon.md",
+      "docTouched": false,
+      "docMissing": false
+    }
+  ],
+  "uncoveredDirs": [],
+  "moduleMaps": [
+    "docs/backend/modules/_module-map.yaml",
+    "docs/frontend/modules/_module-map.yaml",
+    "docs/multi-agent-platform/modules/_module-map.yaml",
+    "docs/SillyHub/modules/_module-map.yaml",
+    "docs/sillyhub-daemon/modules/_module-map.yaml"
+  ],
+  "acceptedDirtyGap": 45,
+  "scopeAudit": {
+    "mode": "full-flow",
+    "ok": true,
+    "degradedReason": null,
+    "baseAnchor": "e88ffddb76486f445e8bdac23d437a22c39a8ebd",
+    "totals": {
+      "files": 12,
+      "additions": 870,
+      "deletions": 3
+    },
+    "rows": [
+      {
+        "path": ".sillyspec/docs/SillyHub/modules/daemon.changelog.md",
+        "additions": 1,
+        "deletions": 0,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": ".sillyspec/docs/SillyHub/modules/frontend_components.changelog.md",
+        "additions": 1,
+        "deletions": 0,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": ".sillyspec/docs/multi-agent-platform/modules/frontend.changelog.md",
+        "additions": 1,
+        "deletions": 0,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": "sillyhub-daemon/src/daemon.ts",
+        "additions": 14,
+        "deletions": 0,
+        "kind": "modified",
+        "planned": "修改",
+        "verdict": "planned"
+      },
+      {
+        "path": "sillyhub-daemon/src/event-loop-watch.ts",
+        "additions": 132,
+        "deletions": 0,
+        "kind": "new",
+        "planned": "新增",
+        "verdict": "planned"
+      },
+      {
+        "path": "sillyhub-daemon/src/hub-client.ts",
+        "additions": 6,
+        "deletions": 1,
+        "kind": "modified",
+        "planned": "修改",
+        "verdict": "planned"
+      },
+      {
+        "path": "sillyhub-daemon/src/sillyspec-manager.ts",
+        "additions": 112,
+        "deletions": 2,
+        "kind": "modified",
+        "planned": "修改",
+        "verdict": "planned"
+      },
+      {
+        "path": "sillyhub-daemon/src/spec-sync.ts",
+        "additions": 50,
+        "deletions": 0,
+        "kind": "modified",
+        "planned": "修改",
+        "verdict": "planned"
+      },
+      {
+        "path": "sillyhub-daemon/tests/event-loop-watch.test.ts",
+        "additions": 115,
+        "deletions": 0,
+        "kind": "new",
+        "planned": "新增",
+        "verdict": "planned"
+      },
+      {
+        "path": "sillyhub-daemon/tests/hub-client-fetch-timeout-surface.test.ts",
+        "additions": 65,
+        "deletions": 0,
+        "kind": "new",
+        "planned": "新增",
+        "verdict": "planned"
+      },
+      {
+        "path": "sillyhub-daemon/tests/sillyspec-status-collect-guards.test.ts",
+        "additions": 253,
+        "deletions": 0,
+        "kind": "new",
+        "planned": "新增",
+        "verdict": "planned"
+      },
+      {
+        "path": "sillyhub-daemon/tests/spec-sync-off-switch.test.ts",
+        "additions": 120,
+        "deletions": 0,
+        "kind": "new",
+        "planned": "新增",
+        "verdict": "planned"
+      }
+    ],
+    "excluded": {
+      "foreignDeclared": []
+    },
+    "note": "flow done 时点冻结（本文件落盘时采集）",
+    "closedBy": "flow done"
+  },
+  "patchSha256": "ec732e103ff7f27264b11c7eca2ef88793c382af44c4a8a2c70e20db872b3b45",
+  "patchStatus": "ok"
+}

@@ -822,6 +822,48 @@
   background-image: linear-gradient(to bottom right, #0e7490, #155e75, #020617);
 }
 
+/* ---- 会话正文与过程字阶分离(2026-10-20-session-page-dsh-alignment /
+   FR-02 / D-013@v1 / D-016②) ----
+   问题:答复正文与工具/思考过程同为 12–13px 量级,主角(正文)在信息密度上不突出。
+   修法:正文容器 `.seg-text-body`(段模型 turn-segment-views 的 TextSegmentView +
+   旧回退路径 turn-timeline 的同名容器)内把 .wmde-markdown 提到 15px / 1.8,
+   段距 0.65em;过程行(思考/工具)留在组件内 11.5px / 1.55 档(muted/80 墨色)。
+   2026-10-21 用户裁决「对比加强」:正文 14.5px/1.78/0.6em → 15px/1.8/0.65em,
+   过程行 12px → 11.5px 且墨色退到 muted/80——两级字阶差 2.5px 拉到 3.5px,
+   正文在一轮里明确压过过程。
+   为何要写 !important:MarkdownText compact 档的 `[&_.wmde-markdown]:!text-xs`
+   等 arbitrary variant 是 `!important`,特异度 (0,2,0)+元素;本规则 (0,3,1) 且
+   同样 !important,才压得住(先例=上方手机端 data-variant 规则,同款做法)。
+   颜色一仍其旧(全部走 token),三主题零硬编码。本块必须排在手机端覆盖块之前
+   ——mobile 那条 (0,3,0) 与本块 (0,3,0) 同特异度,靠源码顺序让 mobile 赢
+   (手机端保持 ql-20260915-013 的 14px / 24px 档不变)。 */
+.seg-text-body .markdown-text .wmde-markdown {
+  font-size: 15px !important;
+  line-height: 1.8 !important;
+}
+.seg-text-body .markdown-text .wmde-markdown p {
+  margin: 0.65em 0 !important;
+}
+.seg-text-body .markdown-text .wmde-markdown p:first-child {
+  margin-top: 0 !important;
+}
+.seg-text-body .markdown-text .wmde-markdown p:last-child {
+  margin-bottom: 0 !important;
+}
+/* 标题/行内代码随正文字阶上浮一档——否则 h1/h2 的 14px 会小于 15px 正文、
+  行内 code 的 11px 在正文里显得塌陷(仅最小值,不改变既有颜色与间距语义)。 */
+.seg-text-body .markdown-text .wmde-markdown h1,
+.seg-text-body .markdown-text .wmde-markdown h2 {
+  font-size: 16.5px !important;
+}
+.seg-text-body .markdown-text .wmde-markdown h3,
+.seg-text-body .markdown-text .wmde-markdown h4 {
+  font-size: 15.5px !important;
+}
+.seg-text-body .markdown-text .wmde-markdown code {
+  font-size: 13px !important;
+}
+
 /* ---- 手机端会话正文排版(ql-20260915-009 初版放大,ql-20260915-013 用户反馈
    16px 过大回调 14px——桌面同字号,仅保住「不低于 12px 紧凑档」与宽度放宽) ----
    用户反馈手机会话页重点内容太小:气泡正文实际字号由 MarkdownText compact 的

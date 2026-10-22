@@ -1,0 +1,57 @@
+tier: thin
+legacy_fallback: false
+substeps:
+  artifacts: done
+  ledger: done
+  patch: done
+  review: done
+  probes: done
+  distill: done
+  archive: done
+  events: done
+born_face: thin
+with_tasks: false
+review_force: null
+input: >-
+  恢复后台任务终态唤醒链并折叠系统行呈现
+
+  动机与背景：2026-10-13-task-wakeup-remove（f889832d1）删除终态唤醒链后，主代理派发子代理并结束回合的会话在任务完成时停摆（腾讯云会话 49d893ab 实证：任务 02:16:42
+  完成、通知落日志后无新轮）。backend inject 端点/task_wakeup 门控/queue_when_busy 排队/hubClient.injectSessionPrompt 均存活零改动；本变更从 f889832d1^
+  恢复 daemon 侧四处（background-tasks.ts 阈值常量+触发块+scheduleTaskWakeup、types.ts _taskWakeupPending 与 onTaskWakeupInject
+  dep、cli.ts 接线、lifecycle.ts debounce 清理），60s 安静阈值改 local.yaml 配置（wakeup.quiet_threshold_ms，缺省
+  60000，0=关闭）；测试翻回唤醒断言并新增跨引擎防回归（pi 影子任务零注入防死循环、忙轮排队、阈值边界）。
+
+
+  成功标准：
+
+  - 空闲会话任务完成且时长≥阈值 → scheduleTaskWakeup 触发 onTaskWakeupInject（2s debounce 合并多任务、汇总 prompt 模板还原）
+
+  - 忙轮/短任务/stopped 不注入：忙轮走 backend queue_when_busy 语义由注入文案自带（daemon 侧仅验证 onTaskWakeupInject
+  调用面）；时长<阈值不注入，elapsed_ms/startedAt 双缺失 fail-open 放行
+
+  - 阈值从 daemon 配置读取，缺省 60000，配置 0 时 completed/failed 一律不注入
+
+  - pi 会话轮次聚合（kind=agent_task_status 路由）不触发注入（回归断言防死循环）
+
+  - daemon task-lifecycle 整组绿 + pnpm typecheck 零错
+autopilot: false
+prestage_ack: false
+baseline_commit: c71b875a1b3efabf4ce042e065cdf3a9ddda0486
+updatedAt: '2026-10-21T03:53:36.024Z'
+cross_baselines:
+  sillyspec: 3fd7cf3b6c29958a54cee8c72b4b89bf628d9a70
+baseline_sha256: 24935e2c62afead34e18180231529e61a8a91247028c0db0871cb3d425975a3a
+spec_approved: true
+spec_approved_at: '2026-10-21T02:52:41.387Z'
+spec_approved_by: zcode-task-wakeup-restore
+spec_approved_channel: user-confirmed
+spec_attested_by: zcode-task-wakeup-restore
+gate_summary: >-
+  test: skipped ← module[]+deps(py67+jsx91+jsx59+jsx-e2e-skip1)+fr(215)（482.7s）
+  结果：C:\Users\qinyi\IdeaProjects\multi-agent-platform\.sillyspec\.runtime\verify-runs\20261021033902\test-result.json —
+  跳过原因：模块子集含环境缺件跳过（已跑模块全绿）：deps(auto-jsx-e2e-skip)——补装依赖后恢复实测。｜lint: passed ← cd backend && uv run ruff check . && uv
+  run ruff format --check . && uv run mypy app && cd ../frontend && pnpm lint && cd ../sillyhub-daemon && pnpm
+  typecheck（8.2s）
+  结果：C:\Users\qinyi\IdeaProjects\multi-agent-platform\.sillyspec\.runtime\verify-runs\20261021033902\test-result.json｜门文件
+  82 个
+

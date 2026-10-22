@@ -1,0 +1,1032 @@
+diff --git a/.sillyspec/docs/SillyHub/modules/daemon.changelog.md b/.sillyspec/docs/SillyHub/modules/daemon.changelog.md
+index 9cf35d350..a003f288a 100644
+--- a/.sillyspec/docs/SillyHub/modules/daemon.changelog.md
++++ b/.sillyspec/docs/SillyHub/modules/daemon.changelog.md
+@@ -66,3 +66,4 @@ created_at: 2026-08-27 14:32:24
+ - 2026-10-21-gitlog-quotepath-fix | 修复git日志非ASCII路径展示与空diff
+ - 2026-10-21-overview-card-mainflow-scan | 总览卡主管线去scan并隐藏thin零步骤
+ - 2026-10-21-gitlog-conflict-quotepath | 合并冲突链路非ASCII路径quotepath修复
++- 2026-10-21-task-wakeup-restore | 恢复后台任务终态唤醒链并折叠系统行呈现
+diff --git a/.sillyspec/docs/SillyHub/modules/frontend_components.changelog.md b/.sillyspec/docs/SillyHub/modules/frontend_components.changelog.md
+index 930c3ea29..9716719c0 100644
+--- a/.sillyspec/docs/SillyHub/modules/frontend_components.changelog.md
++++ b/.sillyspec/docs/SillyHub/modules/frontend_components.changelog.md
+@@ -102,3 +102,4 @@ created_at: 2026-08-30 22:23:33
+ | 2026-10-21 | 2026-10-21-gitlog-quotepath-fix | 修复git日志非ASCII路径展示与空diff |
+ | 2026-10-21 | 2026-10-21-overview-card-mainflow-scan | 总览卡主管线去scan并隐藏thin零步骤 |
+ | 2026-10-21 | 2026-10-21-mobile-scan-birth-cleanup | 移动端与变更中心scan起步口径清零 |
++| 2026-10-21 | 2026-10-21-task-wakeup-restore | 恢复后台任务终态唤醒链并折叠系统行呈现 |
+diff --git a/.sillyspec/docs/multi-agent-platform/modules/frontend.changelog.md b/.sillyspec/docs/multi-agent-platform/modules/frontend.changelog.md
+index 5bc36e090..3f91df4ce 100644
+--- a/.sillyspec/docs/multi-agent-platform/modules/frontend.changelog.md
++++ b/.sillyspec/docs/multi-agent-platform/modules/frontend.changelog.md
+@@ -145,3 +145,4 @@
+ | 2026-10-21 | 2026-10-21-gitlog-quotepath-fix | 修复git日志非ASCII路径展示与空diff |
+ | 2026-10-21 | 2026-10-21-overview-card-mainflow-scan | 总览卡主管线去scan并隐藏thin零步骤 |
+ | 2026-10-21 | 2026-10-21-mobile-scan-birth-cleanup | 移动端与变更中心scan起步口径清零 |
++| 2026-10-21 | 2026-10-21-task-wakeup-restore | 恢复后台任务终态唤醒链并折叠系统行呈现 |
+diff --git a/sillyhub-daemon/src/daemon.ts b/sillyhub-daemon/src/daemon.ts
+index 4a9919d1c..4f21af00a 100644
+--- a/sillyhub-daemon/src/daemon.ts
++++ b/sillyhub-daemon/src/daemon.ts
+@@ -206,6 +206,9 @@ import {
+   resolveSpecDir,
+   hasUnsyncedLocalChanges,
+ } from './spec-sync.js';
++// 2026-10-21-daemon-sync-hardening task-06（FR-06）：事件循环 lag 监控循环——
++// 宿主冻结类事故的本端证据面（2026-10-21 实况：ws 假活回收迟 4.5 分钟却零观测）。
++import { runEventLoopWatch } from './event-loop-watch.js';
+ import { RuntimeHandler, KnowledgeGovernanceHandler, normalizeRootPathParam } from './runtime-handler.js';
+ // task-03（2026-09-14-session-thinking-level / FR-02）：平台七档词表校验单源
+ //（session_set_thinking_level handler 层入参校验，照 backend 校验同词表镜像）。
+@@ -2461,6 +2464,17 @@ export class Daemon {
+     // 0/非法值在 _sillyspecStatusLoop 内部判定为关闭，循环立即返回）。
+     this._fire((signal) => this._sillyspecStatusLoop(signal));
+ 
++    // 2026-10-21-daemon-sync-hardening task-06（FR-06）：第六循环——事件循环 lag
++    // 周期监控。宿主冻结类事故的本端证据面：窗口最大 lag ≥5s 即 warn
++    // event_loop_lag（含 max/p99/mean/window），正常窗口仅 debug tick。
++    this._fire((signal) =>
++      runEventLoopWatch(signal, {
++        log: (level, msg, data) => {
++          this._logger[level](msg, data);
++        },
++      }),
++    );
++
+     // task-07（FR-06 / D-004@v1）：启动 SessionManager 空闲扫描定时器。
+     // sessionManager 为 null（task-04 边界 14：未注入）时 ?. 不调；空闲扫描不启动。
+     // batch 路径完全不受影响。
+diff --git a/sillyhub-daemon/src/event-loop-watch.ts b/sillyhub-daemon/src/event-loop-watch.ts
+new file mode 100644
+index 000000000..3d08d36c0
+--- /dev/null
++++ b/sillyhub-daemon/src/event-loop-watch.ts
+@@ -0,0 +1,132 @@
++// event-loop-watch.ts —— 事件循环卡顿监控（2026-10-21-daemon-sync-hardening FR-06）。
++//
++// 背景：2026-10-21 腾讯云会话实测 daemon 宿主冻结约 5 分钟——每秒 `_wsLoop` 与
++// 60s status 循环同时停摆（假活回收迟至 stale 388s、日志 6 分钟零输出），事件循环
++// 整体冻结却无任何本端观测面，事后只能靠时间戳反推。本模块以
++// perf_hooks.monitorEventLoopDelay 周期采样留证：窗口最大 lag 超阈值即 warn
++// event_loop_lag（含 max/p99/mean/window 统计），宿主冻结类事故自此有 dump 点。
++//
++// 接线：daemon `_startInternal` 以 `_fire` 挂第六循环，abort 生命周期与其余循环
++// 一致；log/intervalMs/warnThresholdMs/histogramFactory/sleep 全部可注入，测试零
++// 真实定时器、零真实直方图。
++
++import { monitorEventLoopDelay, type IntervalHistogram } from 'node:perf_hooks';
++
++/** 采样窗口默认间隔（对齐 status 采集循环 60s 节拍）。 */
++export const EVENT_LOOP_WATCH_INTERVAL_MS = 60_000;
++
++/** warn 阈值：窗口最大 lag 达 5s 即判「宿主冻结级停顿」留证。 */
++export const EVENT_LOOP_WATCH_WARN_THRESHOLD_MS = 5_000;
++
++/** 一拍采样的统计字段（心跳/日志结构化面）。 */
++export interface EventLoopLagFields extends Record<string, unknown> {
++  window_ms: number;
++  threshold_ms: number;
++  max_ms: number;
++  mean_ms: number;
++  p99_ms: number;
++}
++
++/** summarizeLagHistogram 接受的最小直方形状（IntervalHistogram 子集）。 */
++export interface LagHistogramLike {
++  mean: number;
++  max: number;
++  percentile: (p: number) => number;
++}
++
++const nsToMs = (ns: number): number => Math.round((ns / 1e6) * 10) / 10;
++
++/**
++ * 纯函数：直方图 → 统计字段 + 是否超阈值（max_ms ≥ thresholdMs 判 warn）。
++ * IntervalHistogram 的 mean/max/percentile 单位为纳秒，此处归一到毫秒（一位小数）。
++ */
++export function summarizeLagHistogram(
++  histo: LagHistogramLike,
++  thresholdMs: number,
++  windowMs: number,
++): { fields: EventLoopLagFields; shouldWarn: boolean } {
++  const fields: EventLoopLagFields = {
++    window_ms: windowMs,
++    threshold_ms: thresholdMs,
++    max_ms: nsToMs(histo.max),
++    mean_ms: nsToMs(histo.mean),
++    p99_ms: nsToMs(histo.percentile(99)),
++  };
++  return { fields, shouldWarn: fields.max_ms >= thresholdMs };
++}
++
++export interface EventLoopWatchDeps {
++  /** 日志出口（daemon 接线为 logger[level]；测试收集断言）。 */
++  log: (
++    level: 'debug' | 'info' | 'warn' | 'error',
++    msg: string,
++    data?: Record<string, unknown>,
++  ) => void;
++  /** 采样窗口毫秒，默认 {@link EVENT_LOOP_WATCH_INTERVAL_MS}。 */
++  intervalMs?: number;
++  /** warn 阈值毫秒，默认 {@link EVENT_LOOP_WATCH_WARN_THRESHOLD_MS}。 */
++  warnThresholdMs?: number;
++  /** 直方图工厂（测试注入假直方图；缺省 monitorEventLoopDelay 分辨率 20）。 */
++  histogramFactory?: () => LagHistogramLike & {
++    enable: () => void;
++    disable: () => void;
++    reset: () => void;
++  };
++  /** 可中断睡眠（测试注入即时 tick；缺省本模块 abortable 实现）。 */
++  sleep?: (ms: number, signal: AbortSignal) => Promise<void>;
++}
++
++/** 缺省 abortable sleep：signal 中止即 reject，循环顶部 while 条件收尾。 */
++function defaultSleep(ms: number, signal: AbortSignal): Promise<void> {
++  return new Promise((resolve, reject) => {
++    if (signal.aborted) {
++      reject(new Error('aborted'));
++      return;
++    }
++    const timer = setTimeout(resolve, ms);
++    signal.addEventListener(
++      'abort',
++      () => {
++        clearTimeout(timer);
++        reject(new Error('aborted'));
++      },
++      { once: true },
++    );
++  });
++}
++
++/**
++ * 监控循环体：enable 直方图 → 每窗口采样一拍（超阈值 warn / 正常 debug）→
++ * reset 开新窗；signal 中止或 sleep reject 时退出并在 finally disable 直方图。
++ * 全路径不抛（sleep 的 abort reject 已被 while 结构吸收，其余异常交由 _fire
++ * 的防御性 catch——对齐既有循环写法）。
++ */
++export async function runEventLoopWatch(
++  signal: AbortSignal,
++  deps: EventLoopWatchDeps,
++): Promise<void> {
++  const intervalMs = deps.intervalMs ?? EVENT_LOOP_WATCH_INTERVAL_MS;
++  const thresholdMs = deps.warnThresholdMs ?? EVENT_LOOP_WATCH_WARN_THRESHOLD_MS;
++  const histo =
++    deps.histogramFactory?.() ??
++    monitorEventLoopDelay({ resolution: 20 });
++  histo.enable();
++  try {
++    while (!signal.aborted) {
++      await (deps.sleep ?? defaultSleep)(intervalMs, signal);
++      const { fields, shouldWarn } = summarizeLagHistogram(
++        histo,
++        thresholdMs,
++        intervalMs,
++      );
++      histo.reset();
++      if (shouldWarn) {
++        deps.log('warn', 'event_loop_lag', fields);
++      } else {
++        deps.log('debug', 'event_loop_lag_tick', fields);
++      }
++    }
++  } finally {
++    histo.disable();
++  }
++}
+diff --git a/sillyhub-daemon/src/hub-client.ts b/sillyhub-daemon/src/hub-client.ts
+index 3c8af57d9..2c9e37009 100644
+--- a/sillyhub-daemon/src/hub-client.ts
++++ b/sillyhub-daemon/src/hub-client.ts
+@@ -2498,7 +2498,12 @@ export async function fetchMcpWhitelist(
+   try {
+     const headers: Record<string, string> = {};
+     if (token) headers['Authorization'] = `Bearer ${token}`;
+-    const resp = await fetch(url, { headers });
++    // FR-05（2026-10-21-daemon-sync-hardening）：全文件唯一一处无 signal 的 fetch
++    // 补齐显式超时——源码面断言测试钉住「新增无 signal 的 fetch 即红」。
++    const resp = await fetch(url, {
++      headers,
++      signal: AbortSignal.timeout(DEFAULT_TIMEOUT_MS),
++    });
+     if (!resp.ok) {
+       logger?.('warn', 'mcp_whitelist_fetch_failed', { url, status: resp.status });
+       return null;
+diff --git a/sillyhub-daemon/src/sillyspec-manager.ts b/sillyhub-daemon/src/sillyspec-manager.ts
+index 23b991032..ab867a8bc 100644
+--- a/sillyhub-daemon/src/sillyspec-manager.ts
++++ b/sillyhub-daemon/src/sillyspec-manager.ts
+@@ -81,7 +81,7 @@ import {
+ // 采集器用 execFile 数组形参直跑 node <sillyspec-bin>（无 shell 依赖，路径空格
+ // 安全）；bin 解析用 existsSync 探测 npm 全局布局候选。
+ import { execFile } from 'node:child_process';
+-import { existsSync, mkdirSync, renameSync, statSync } from 'node:fs';
++import { existsSync, mkdirSync, readFileSync, renameSync, statSync } from 'node:fs';
+ // 2026-09-07-conflict-diff-compare task-02：冲突快照逐路径 stat/realpath/readFile
+ //（只读，不写任何文件——RPC 只读快照铁律）。
+ import { readFile, realpath, stat } from 'node:fs/promises';
+@@ -128,9 +128,44 @@ const SILLYSPEC_ERROR_MAX_CHARS = 200;
+ /**
+  * progress 采集子进程超时（30s）。仿 runtime-handler.ts SILLYSPEC_TIMEOUT_MS 先例
+  * （design §5 三态矩阵 ③ / FR-03；backend 侧无 RPC 时限，纯本地采集上限）。
++ * 可被 env `SILLYHUB_DAEMON_STATUS_TIMEOUT_MS` 覆盖（FR-02，2026-10-21-daemon-sync-
++ * hardening）——/mnt/e 等 drvfs 慢盘上 CLI 冷启动扫描可超 30s，运维提阈值无需改码。
+  */
+ export const SILLYSPEC_STATUS_TIMEOUT_MS = 30_000;
+ 
++/**
++ * 采集退避参数（FR-03，2026-10-21-daemon-sync-hardening）：同一目标连续失败达
++ * {@link STATUS_COLLECT_BACKOFF_GRACE_FAILS} 次后进入退避——全局轮次每
++ * {@link STATUS_COLLECT_BACKOFF_EVERY_N} 轮只实采 1 轮（60s 间隔下即 10 分钟一次），
++ * 任一次实采成功即复位。既有心跳语义不变：③失败保留上次快照 + sillyspec_status_error
++ * 上报口径不动，退避只省 spawn 不改可见性。
++ */
++export const STATUS_COLLECT_BACKOFF_GRACE_FAILS = 3;
++export const STATUS_COLLECT_BACKOFF_EVERY_N = 10;
++
++/**
++ * FR-02：`SILLYHUB_DAEMON_STATUS_TIMEOUT_MS` 解析——正整数毫秒生效；缺席/空白/
++ * 非数字/≤0/非整数一律 null（由调用方回退 {@link SILLYSPEC_STATUS_TIMEOUT_MS}）。
++ */
++export function parseStatusTimeoutMsEnv(v: string | undefined): number | null {
++  if (v === undefined || v.trim() === '') return null;
++  const n = Number(v);
++  return Number.isInteger(n) && n > 0 ? n : null;
++}
++
++/**
++ * FR-03：退避跳过判定（纯函数）。连败达 graceFails 后，round（从 1 计）非
++ * everyN 整数倍的轮次跳过 spawn；任一次实采成功由调用方清零连败计数。
++ */
++export function shouldSkipStatusCollect(
++  consecutiveFailures: number,
++  round: number,
++  graceFails: number = STATUS_COLLECT_BACKOFF_GRACE_FAILS,
++  everyN: number = STATUS_COLLECT_BACKOFF_EVERY_N,
++): boolean {
++  return consecutiveFailures >= graceFails && round % everyN !== 0;
++}
++
+ /** 心跳摘要 changes 列表截断上限（N=50，design §4 / Grill B2）。 */
+ export const SILLYSPEC_STATUS_CHANGES_MAX = 50;
+ 
+@@ -703,6 +738,17 @@ export class SillySpecManager {
+    */
+   private readonly _statusSummariesByWs = new Map<string, SillySpecStatusSummary>();
+ 
++  // ── FR-03/FR-04（2026-10-21-daemon-sync-hardening）：退避与跨仓跳过状态 ──────
++
++  /** 全局采集轮次（从 1 计；退避取模基准）。内存态，重启回零（宁可多采不可漏采）。 */
++  private _statusRound = 0;
++  /** per-target 连败计数（key：workspaceId；legacy 单槽位固定哨兵键）。实采成功即清零。 */
++  private readonly _statusFailStreak = new Map<string, number>();
++  /** 已 warn 过「进入退避」的 target key（复位后可再次进入再 warn）。 */
++  private readonly _statusBackoffWarned = new Set<string>();
++  /** 已 info 过 crossrepo 跳过指路的 cwd（进程生命周期内一次性）。 */
++  private readonly _crossrepoSkipLogged = new Set<string>();
++
+   // ── 2026-09-04-conflict-resolve-entry task-06：平台命令执行器与结果槽 ──────────
+ 
+   /** 平台命令执行超时毫秒（runResolve/runGhostCleanup 每步 execFile timeout）。 */
+@@ -748,7 +794,11 @@ export class SillySpecManager {
+     this._statusCwd = deps.statusCwd ?? (() => null);
+     this._statusRootFor = deps.statusRootFor ?? (() => null);
+     this._statusTargets = deps.statusTargets;
+-    this._statusTimeoutMs = deps.statusTimeoutMs ?? SILLYSPEC_STATUS_TIMEOUT_MS;
++    // FR-02（2026-10-21-daemon-sync-hardening）：回退链 deps 显式注入 > env > 默认。
++    this._statusTimeoutMs =
++      deps.statusTimeoutMs ??
++      parseStatusTimeoutMsEnv(process.env.SILLYHUB_DAEMON_STATUS_TIMEOUT_MS) ??
++      SILLYSPEC_STATUS_TIMEOUT_MS;
+     // task-06：超时无关闭口——undefined/null/非有限/<=0 一律回退默认。
+     this._commandTimeoutMs =
+       typeof deps.commandTimeoutMs === 'number' &&
+@@ -885,8 +935,40 @@ export class SillySpecManager {
+       // map 携带陈旧摘要）——改为轮内聚合：任一目标③失败即保留失败账，整轮
+       // 全成功才清（恢复语义不变：失败目标下一轮成功即参与全成功清空）。
+       let anyFailed = false;
++      // FR-03（2026-10-21-daemon-sync-hardening）：连败退避——达宽限次数后每
++      // EVERY_N 轮只实采 1 轮，其余轮次跳过 spawn（debug 一笔）。心跳可见性不变：
++      // ③失败保留旧快照 + _statusError 上报口径原样，退避只省 spawn 不改上报。
++      this._statusRound += 1;
+       for (const t of targets) {
++        const key = t.workspaceId ?? '__legacy_status_cwd__';
++        const streak = this._statusFailStreak.get(key) ?? 0;
++        if (shouldSkipStatusCollect(streak, this._statusRound)) {
++          this._log('debug', 'sillyspec_status_backoff_skip', {
++            key,
++            streak,
++            round: this._statusRound,
++          });
++          continue;
++        }
+         const ok = await this._collectOneTarget(t.workspaceId, t.rootPath);
++        if (ok) {
++          this._statusFailStreak.delete(key);
++          this._statusBackoffWarned.delete(key);
++        } else {
++          const next = streak + 1;
++          this._statusFailStreak.set(key, next);
++          if (
++            next === STATUS_COLLECT_BACKOFF_GRACE_FAILS &&
++            !this._statusBackoffWarned.has(key)
++          ) {
++            this._statusBackoffWarned.add(key);
++            this._log('warn', 'sillyspec_status_backoff_entered', {
++              key,
++              streak: next,
++              every_n_rounds: STATUS_COLLECT_BACKOFF_EVERY_N,
++            });
++          }
++        }
+         anyFailed = anyFailed || !ok;
+       }
+       if (!anyFailed) {
+@@ -927,6 +1009,34 @@ export class SillySpecManager {
+     workspaceId: string | null,
+     cwd: string,
+   ): Promise<boolean> {
++    // FR-04（2026-10-21-daemon-sync-hardening）：跨仓子目录登记根——CLI uninit 门
++    // 必拒（exit 2 指路横幅），采集恒失败纯刷屏（2026-10-21 实况：/mnt/e/Java/crrc/
++    // qmdp/urgent 每分钟 exit_code=2）。跳过 + 一次性 info 指路（标记内 workspace 即
++    // 登记工作区根，格式实锤自 sillyspec CLI local-register.js tryWriteMarker）；
++    // 不记失败（非瞬态查询失败，anyFailed 聚合不置位、_statusError 不动）；
++    // 具名工作区滞留摘要槽移除（平台不再显示对该根的陈旧摘要）。
++    const crossrepoMarker = join(cwd, '.git', 'sillyspec-crossrepo.json');
++    if (existsSync(crossrepoMarker)) {
++      if (!this._crossrepoSkipLogged.has(cwd)) {
++        this._crossrepoSkipLogged.add(cwd);
++        let workspaceRoot = '';
++        try {
++          const raw = JSON.parse(readFileSync(crossrepoMarker, 'utf-8')) as {
++            workspace?: unknown;
++          };
++          workspaceRoot = typeof raw.workspace === 'string' ? raw.workspace : '';
++        } catch {
++          // 指路信息 best-effort：标记损坏时只报跳过不带指路。
++        }
++        this._log('info', 'sillyspec_status_skip_crossrepo', {
++          cwd,
++          workspace_root: workspaceRoot,
++          marker: crossrepoMarker,
++        });
++      }
++      if (workspaceId !== null) this._statusSummariesByWs.delete(workspaceId);
++      return true;
++    }
+     const bin = this._resolveSillySpecBin();
+     if (bin === null) {
+       this._markStatusCapabilityMissing('bin_not_found', { cwd });
+diff --git a/sillyhub-daemon/src/spec-sync.ts b/sillyhub-daemon/src/spec-sync.ts
+index 58c899a84..a712355f7 100644
+--- a/sillyhub-daemon/src/spec-sync.ts
++++ b/sillyhub-daemon/src/spec-sync.ts
+@@ -19,6 +19,7 @@
+ // 蓝图 task-04.md / task-12.md / task-11.md。
+ 
+ import { createHash } from 'node:crypto';
++import { existsSync } from 'node:fs';
+ import { spawn as cpSpawn, type ChildProcess } from 'node:child_process';
+ import { homedir } from 'node:os';
+ import { join, relative, isAbsolute, dirname, resolve, basename, sep as pathSep } from 'node:path';
+@@ -1061,6 +1062,38 @@ async function postSpecSyncImpl(
+   }
+ }
+ 
++// ── daemon 同步关闭开关（2026-10-21-daemon-sync-hardening FR-01）──────────────
++
++/**
++ * 单写者让位开关：机器级 env `SILLYHUB_DAEMON_SPEC_SYNC_OFF`（'1'/'true'，大小写
++ * 不敏感）关闭本机全部工作区的 daemon 自动推送；工作区级 flag 文件
++ * `~/.sillyhub/daemon/spec-sync-off/{wsId}.flag` 只关单个工作区。任一命中即关。
++ *
++ * 背景：runbook（docs/sillyspec/finished/spec-push-conflict-recovery-runbook.md）
++ * 钉死 SpecPushConflict 头号根因是双写者（daemon 自动同步与 CLI
++ * `sillyspec platform sync` 并存致 manifest base_version 漂移）。用户拍板单写者
++ * 优先 CLI——本开关给「CLI 优先」一个可执行的落地件。flag 置于 daemonStateDir 下
++ * specs/ 平级目录，pull 整树交换不触及，永不丢。
++ *
++ * @param v env 原始值（undefined = 未设）
++ */
++export function parseSpecSyncOffEnv(v: string | undefined | null): boolean {
++  if (!v) return false;
++  const s = v.trim().toLowerCase();
++  return s === '1' || s === 'true';
++}
++
++/** 工作区级关闭 flag 路径：~/.sillyhub/daemon/spec-sync-off/{wsId}.flag。 */
++export function specSyncOffFlagPath(wsId: string): string {
++  return join(daemonStateDir(), 'spec-sync-off', `${wsId}.flag`);
++}
++
++/** 关闭判定：env 整机 或 ws flag 文件在位，任一命中即关。纯读不写。 */
++export async function isDaemonSpecSyncOff(wsId: string): Promise<boolean> {
++  if (parseSpecSyncOffEnv(process.env.SILLYHUB_DAEMON_SPEC_SYNC_OFF)) return true;
++  return existsSync(specSyncOffFlagPath(wsId));
++}
++
+ /**
+  * pending_push 标记（ql-20260816-003）：postSpecSync 失败的防御兜底（hasUnsyncedLocalChanges 信号 1）。
+  *
+@@ -1090,6 +1123,23 @@ export async function postSpecSync(
+   changeWriteId?: string,
+   onProgress?: (p: { files_total?: number; files_processed?: number }) => void,
+ ): Promise<{ ok: boolean; reparsed: number; filesTotal?: number } | null> {
++  // FR-01：单写者开关命中 → 等价 mock 语义（返回 null，调用方既有 null 分支天然
++  // no-op）：跳过推送、不动 pending_push（关闭是运维决策非传输失败）；
++  // knowledge hits 上行独立于 spec manifest，照常 best-effort——防复现 2026-09-25
++  // runbook 的「命中一行都上不去」连带面。
++  if (await isDaemonSpecSyncOff(wsId)) {
++    console.warn(
++      `spec_sync: skipped_by_off_switch ws=${wsId}（daemon 自动同步已关——单写者让位 ` +
++        `CLI \`sillyspec platform sync\`。恢复：删 env SILLYHUB_DAEMON_SPEC_SYNC_OFF ` +
++        `或删 ${specSyncOffFlagPath(wsId)}）`,
++    );
++    try {
++      await uploadKnowledgeHitsIfNeeded(client, wsId, specRoot);
++    } catch {
++      // R-05：上报失败绝不阻塞（uploadKnowledgeHitsIfNeeded 内部已全收敛，防御对称）。
++    }
++    return null;
++  }
+   try {
+     const result = await postSpecSyncImpl(client, wsId, specRoot, changeWriteId, onProgress);
+     // 真实 push 成功（result 非 null）→ 清除 pending_push（本地已与服务器一致）。
+diff --git a/sillyhub-daemon/tests/event-loop-watch.test.ts b/sillyhub-daemon/tests/event-loop-watch.test.ts
+new file mode 100644
+index 000000000..aafa22df8
+--- /dev/null
++++ b/sillyhub-daemon/tests/event-loop-watch.test.ts
+@@ -0,0 +1,115 @@
++// FR-06（2026-10-21-daemon-sync-hardening）：事件循环 lag 监控测试。
++//
++// 覆盖：
++//   - summarizeLagHistogram 纯函数：ns → ms 归一（一位小数）、超阈值判定。
++//   - runEventLoopWatch 循环体：假直方图 + 假 sleep 注入——超阈值窗口 warn
++//     event_loop_lag 且统计字段齐全、正常窗口仅 debug、退出时 disable 直方图。
++//
++// 零真实定时器、零真实 monitorEventLoopDelay（factory 注入假直方图）。
++
++import { describe, it, expect } from 'vitest';
++import {
++  summarizeLagHistogram,
++  runEventLoopWatch,
++} from '../src/event-loop-watch.js';
++
++/** 假直方图（IntervalHistogram 形的极小子集）。 */
++function fakeHisto(opts: { maxNs: number; meanNs: number; p99Ns: number }) {
++  return {
++    enable: () => undefined,
++    disable: () => undefined,
++    reset: () => undefined,
++    mean: opts.meanNs,
++    max: opts.maxNs,
++    percentile: (p: number) => (p === 99 ? opts.p99Ns : opts.maxNs),
++  };
++}
++
++describe('summarizeLagHistogram', () => {
++  it('ns → ms 归一并超阈值判 warn', () => {
++    const { fields, shouldWarn } = summarizeLagHistogram(
++      fakeHisto({ maxNs: 6_000_000_000, meanNs: 1_000_000, p99Ns: 900_000_000 }),
++      5_000,
++      60_000,
++    );
++    expect(fields).toEqual({
++      window_ms: 60_000,
++      threshold_ms: 5_000,
++      max_ms: 6_000,
++      mean_ms: 1,
++      p99_ms: 900,
++    });
++    expect(shouldWarn).toBe(true);
++  });
++
++  it('低于阈值不 warn', () => {
++    const { shouldWarn } = summarizeLagHistogram(
++      fakeHisto({ maxNs: 100_000_000, meanNs: 1_000, p99Ns: 90_000_000 }),
++      5_000,
++      60_000,
++    );
++    expect(shouldWarn).toBe(false);
++  });
++});
++
++describe('runEventLoopWatch', () => {
++  it('超阈值窗口 warn event_loop_lag、正常窗口静默、退出 disable', async () => {
++    const controller = new AbortController();
++    const logs: Array<{ level: string; msg: string; data?: Record<string, unknown> }> = [];
++    let ticks = 0;
++    let resets = 0;
++    let disabled = 0;
++    let enabled = 0;
++    const histo = {
++      ...fakeHisto({ maxNs: 6_000_000_000, meanNs: 1_000_000, p99Ns: 900_000_000 }),
++      enable: () => {
++        enabled++;
++      },
++      disable: () => {
++        disabled++;
++      },
++      reset: () => {
++        resets++;
++      },
++    };
++    await runEventLoopWatch(controller.signal, {
++      log: (level, msg, data) => logs.push({ level, msg, data }),
++      intervalMs: 60_000,
++      warnThresholdMs: 5_000,
++      histogramFactory: () => histo,
++      sleep: async () => {
++        ticks++;
++        if (ticks >= 3) controller.abort();
++      },
++    });
++    expect(enabled).toBe(1);
++    expect(disabled).toBe(1);
++    expect(resets).toBe(3);
++    const warns = logs.filter((l) => l.msg === 'event_loop_lag');
++    expect(warns).toHaveLength(3);
++    expect(warns[0]?.level).toBe('warn');
++    expect(warns[0]?.data?.['max_ms']).toBe(6_000);
++    expect(warns[0]?.data?.['threshold_ms']).toBe(5_000);
++    expect(warns[0]?.data?.['window_ms']).toBe(60_000);
++    expect(warns[0]?.data?.['p99_ms']).toBe(900);
++  });
++
++  it('正常窗口不 warn（仅 debug tick）', async () => {
++    const controller = new AbortController();
++    const logs: Array<{ level: string; msg: string }> = [];
++    let ticks = 0;
++    await runEventLoopWatch(controller.signal, {
++      log: (level, msg) => logs.push({ level, msg }),
++      intervalMs: 60_000,
++      warnThresholdMs: 5_000,
++      histogramFactory: () =>
++        fakeHisto({ maxNs: 100_000_000, meanNs: 1_000, p99Ns: 90_000_000 }),
++      sleep: async () => {
++        ticks++;
++        if (ticks >= 2) controller.abort();
++      },
++    });
++    expect(logs.filter((l) => l.msg === 'event_loop_lag')).toHaveLength(0);
++    expect(logs.filter((l) => l.msg === 'event_loop_lag_tick')).toHaveLength(2);
++  });
++});
+diff --git a/sillyhub-daemon/tests/hub-client-fetch-timeout-surface.test.ts b/sillyhub-daemon/tests/hub-client-fetch-timeout-surface.test.ts
+new file mode 100644
+index 000000000..1c8d8a388
+--- /dev/null
++++ b/sillyhub-daemon/tests/hub-client-fetch-timeout-surface.test.ts
+@@ -0,0 +1,65 @@
++// FR-05（2026-10-21-daemon-sync-hardening）：hub-client fetch 超时源码面断言。
++//
++// 背景：2026-10-21 daemon 宿主冻结事故里，唯一一处无 signal 的 fetch
++// （fetchMcpWhitelist）与 spec-sync 长超时共同遮蔽了故障定位——「全部 fetch
++// 必须带显式 AbortSignal.timeout」钉成源码面硬门禁，新增无 signal 的 fetch 即红。
++//
++// 扫描方式：纯 fs 读取 + 括号深度匹配截取每个 fetch( 调用的实参块（源码为
++// 受控 TypeScript，实参块内无括号内嵌字符串字面量的病态形态；若未来出现，
++// 该用例会以「块内无 signal」失败而暴露，届时改用 TS Scanner 与
++// d004-no-taskkill-source-gate.test.ts 同款词法方案）。
++
++import { describe, it, expect } from 'vitest';
++import { readFileSync } from 'node:fs';
++import { dirname, join } from 'node:path';
++import { fileURLToPath } from 'node:url';
++
++const __filename = fileURLToPath(import.meta.url);
++const __dirname = dirname(__filename);
++const HUB_CLIENT = join(__dirname, '..', 'src', 'hub-client.ts');
++
++interface FetchCallSite {
++  line: number;
++  argsBlock: string;
++}
++
++/** 找出全部 fetch( 调用点并按括号深度截取实参块。 */
++function scanFetchCallSites(source: string): FetchCallSite[] {
++  const sites: FetchCallSite[] = [];
++  const pattern = /\bfetch\s*\(/g;
++  for (let m = pattern.exec(source); m !== null; m = pattern.exec(source)) {
++    const openIdx = m.index + m[0].length - 1;
++    let depth = 0;
++    let closeIdx = -1;
++    for (let i = openIdx; i < source.length; i++) {
++      if (source[i] === '(') depth++;
++      else if (source[i] === ')') {
++        depth--;
++        if (depth === 0) {
++          closeIdx = i;
++          break;
++        }
++      }
++    }
++    if (closeIdx < 0) continue; // 截断异常交由其他 lint 面，不在此误报
++    const before = source.slice(0, m.index);
++    sites.push({
++      line: before.split('\n').length,
++      argsBlock: source.slice(openIdx + 1, closeIdx),
++    });
++  }
++  return sites;
++}
++
++describe('FR-05 hub-client 全部 fetch 带显式 AbortSignal 超时', () => {
++  it('每个 fetch( 调用点的实参块内均含 signal:', () => {
++    const source = readFileSync(HUB_CLIENT, 'utf-8');
++    const sites = scanFetchCallSites(source);
++    // 防扫描器失效（fetch 被全部移除时测试空转）。
++    expect(sites.length).toBeGreaterThanOrEqual(9);
++    const naked = sites.filter((s) => !/\bsignal\s*:/.test(s.argsBlock));
++    expect(
++      naked.map((s) => `hub-client.ts:${s.line} fetch(...) 缺 signal`),
++    ).toEqual([]);
++  });
++});
+diff --git a/sillyhub-daemon/tests/sillyspec-status-collect-guards.test.ts b/sillyhub-daemon/tests/sillyspec-status-collect-guards.test.ts
+new file mode 100644
+index 000000000..d71f1229f
+--- /dev/null
++++ b/sillyhub-daemon/tests/sillyspec-status-collect-guards.test.ts
+@@ -0,0 +1,253 @@
++// FR-02/03/04（2026-10-21-daemon-sync-hardening）：status 采集治理测试。
++//
++//   - FR-02：SILLYHUB_DAEMON_STATUS_TIMEOUT_MS env 覆盖采集超时（合法生效 /
++//     非法回退默认 30s / deps 注入优先于 env）。
++//   - FR-03：连败退避——同一目标连败 3 次后每 10 轮只实采 1 轮，成功复位，
++//     首次进入退避 warn 恰一次。
++//   - FR-04：crossrepo 标记（.git/sillyspec-crossrepo.json）目标跳过 spawn、
++//     一次性 info 指路、不记失败、标记删除后恢复采集。
++//
++// 策略：纯函数直测 + manager 全依赖注入（resolveSillySpecBin / runProgressJson /
++// statusTargets / logger 假实现，零真实 spawn），对齐 sillyspec-manager.test.ts 惯例。
++
++import { describe, it, expect, beforeEach, afterEach } from 'vitest';
++import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
++import { tmpdir } from 'node:os';
++import { join } from 'node:path';
++import {
++  SillySpecManager,
++  SILLYSPEC_STATUS_TIMEOUT_MS,
++  parseStatusTimeoutMsEnv,
++  shouldSkipStatusCollect,
++  STATUS_COLLECT_BACKOFF_GRACE_FAILS,
++  STATUS_COLLECT_BACKOFF_EVERY_N,
++} from '../src/sillyspec-manager.js';
++import type {
++  SillySpecProgressOutcome,
++  SillySpecStatusTarget,
++} from '../src/sillyspec-manager.js';
++
++const TIMEOUT_ENV = 'SILLYHUB_DAEMON_STATUS_TIMEOUT_MS';
++
++// ── FR-02：env 覆盖解析（纯函数） ─────────────────────────────────────────────
++
++describe('parseStatusTimeoutMsEnv', () => {
++  it('正整数毫秒生效', () => {
++    expect(parseStatusTimeoutMsEnv('120000')).toBe(120000);
++    expect(parseStatusTimeoutMsEnv(' 3000 ')).toBe(3000);
++  });
++  it('缺席/空白/非数字/非正/非整数回退 null（由调用方落默认）', () => {
++    expect(parseStatusTimeoutMsEnv(undefined)).toBeNull();
++    expect(parseStatusTimeoutMsEnv('')).toBeNull();
++    expect(parseStatusTimeoutMsEnv('   ')).toBeNull();
++    expect(parseStatusTimeoutMsEnv('abc')).toBeNull();
++    expect(parseStatusTimeoutMsEnv('-1')).toBeNull();
++    expect(parseStatusTimeoutMsEnv('0')).toBeNull();
++    expect(parseStatusTimeoutMsEnv('12.5')).toBeNull();
++  });
++});
++
++// ── FR-03：退避判定（纯函数） ────────────────────────────────────────────────
++
++describe('shouldSkipStatusCollect', () => {
++  it('连败未达宽限不跳过', () => {
++    expect(shouldSkipStatusCollect(0, 1)).toBe(false);
++    expect(shouldSkipStatusCollect(STATUS_COLLECT_BACKOFF_GRACE_FAILS - 1, 4)).toBe(false);
++  });
++  it('达宽限后非取模轮跳过、取模轮实采', () => {
++    expect(shouldSkipStatusCollect(3, 4)).toBe(true);
++    expect(shouldSkipStatusCollect(3, 9)).toBe(true);
++    expect(shouldSkipStatusCollect(3, STATUS_COLLECT_BACKOFF_EVERY_N)).toBe(false);
++    expect(shouldSkipStatusCollect(5, 20)).toBe(false);
++  });
++});
++
++// ── harness（全依赖注入，零真实 spawn） ───────────────────────────────────────
++
++let tmpRoot = '';
++const savedTimeoutEnv: string | undefined = process.env[TIMEOUT_ENV];
++
++beforeEach(() => {
++  delete process.env[TIMEOUT_ENV];
++  tmpRoot = mkdtempSync(join(tmpdir(), 'status-guards-'));
++});
++
++afterEach(() => {
++  if (savedTimeoutEnv === undefined) delete process.env[TIMEOUT_ENV];
++  else process.env[TIMEOUT_ENV] = savedTimeoutEnv;
++  rmSync(tmpRoot, { recursive: true, force: true });
++});
++
++interface LogEntry {
++  level: string;
++  msg: string;
++  data?: Record<string, unknown>;
++}
++
++/** 构造 manager：假 runner 按 calls[] 顺序产出 outcome，记录每次实参。 */
++function makeManager(opts: {
++  outcomes: SillySpecProgressOutcome[];
++  runnerOptions: Array<{ cwd: string; timeoutMs: number }>;
++  logs: LogEntry[];
++  targets: () => SillySpecStatusTarget[];
++  statusTimeoutMs?: number;
++}): SillySpecManager {
++  return new SillySpecManager({
++    isBusy: () => false,
++    resolveSillySpecBin: () => 'fake-sillyspec-bin',
++    statusTargets: opts.targets,
++    ...(opts.statusTimeoutMs !== undefined ? { statusTimeoutMs: opts.statusTimeoutMs } : {}),
++    logger: (level, msg, data) => {
++      opts.logs.push({ level, msg, data });
++    },
++    runProgressJson: async (file, args, options) => {
++      opts.runnerOptions.push({ cwd: options.cwd, timeoutMs: options.timeoutMs });
++      const next = opts.outcomes.shift();
++      if (next === undefined) throw new Error('runner exhausted');
++      return next;
++    },
++  });
++}
++
++const failOutcome = (): SillySpecProgressOutcome => ({
++  code: 2,
++  stdout: '',
++  timedOut: false,
++  stderr: 'boom',
++});
++const okOutcome = (): SillySpecProgressOutcome => ({
++  code: 0,
++  stdout: '{}',
++  timedOut: false,
++});
++
++// ── FR-02：manager 级 env 覆盖 ───────────────────────────────────────────────
++
++describe('FR-02 status 采集超时 env 覆盖', () => {
++  it('env 合法生效 / 非法回退默认 / deps 注入优先于 env', async () => {
++    const runnerOptions: Array<{ cwd: string; timeoutMs: number }> = [];
++    const logs: LogEntry[] = [];
++    const targets = () => [{ workspaceId: 'ws-t', rootPath: tmpRoot }];
++
++    // env 合法：timeoutMs = 120000。
++    process.env[TIMEOUT_ENV] = '120000';
++    let outcomes = [okOutcome()];
++    let mgr = makeManager({ outcomes, runnerOptions, logs, targets });
++    await mgr.collectStatusOnce();
++    expect(runnerOptions[0]?.timeoutMs).toBe(120000);
++
++    // env 非法：回退默认 30_000。
++    runnerOptions.length = 0;
++    process.env[TIMEOUT_ENV] = 'abc';
++    outcomes = [okOutcome()];
++    mgr = makeManager({ outcomes, runnerOptions, logs, targets });
++    await mgr.collectStatusOnce();
++    expect(runnerOptions[0]?.timeoutMs).toBe(SILLYSPEC_STATUS_TIMEOUT_MS);
++    expect(SILLYSPEC_STATUS_TIMEOUT_MS).toBe(30_000);
++
++    // deps 注入优先于 env。
++    runnerOptions.length = 0;
++    process.env[TIMEOUT_ENV] = '120000';
++    outcomes = [okOutcome()];
++    mgr = makeManager({ outcomes, runnerOptions, logs, targets, statusTimeoutMs: 5_000 });
++    await mgr.collectStatusOnce();
++    expect(runnerOptions[0]?.timeoutMs).toBe(5_000);
++  });
++});
++
++// ── FR-03：连败退避 ──────────────────────────────────────────────────────────
++
++describe('FR-03 status 采集连败退避', () => {
++  it('连败 3 次进入退避：第 4~9 轮跳过、第 10 轮实采，warn 恰一次', async () => {
++    const runnerOptions: Array<{ cwd: string; timeoutMs: number }> = [];
++    const logs: LogEntry[] = [];
++    // 4 次实采机会（轮 1/2/3/10）全失败——runner 只会被取 4 次。
++    const outcomes = [failOutcome(), failOutcome(), failOutcome(), failOutcome()];
++    const mgr = makeManager({
++      outcomes,
++      runnerOptions,
++      logs,
++      targets: () => [{ workspaceId: 'ws-b', rootPath: tmpRoot }],
++    });
++    for (let round = 1; round <= 10; round++) {
++      await mgr.collectStatusOnce();
++    }
++    expect(runnerOptions).toHaveLength(4);
++    const entered = logs.filter((l) => l.msg === 'sillyspec_status_backoff_entered');
++    expect(entered).toHaveLength(1);
++    expect(entered[0]?.data?.['streak']).toBe(STATUS_COLLECT_BACKOFF_GRACE_FAILS);
++  });
++
++  it('实采成功复位：复位后每轮都实采，重新失败不立即退避', async () => {
++    const runnerOptions: Array<{ cwd: string; timeoutMs: number }> = [];
++    const logs: LogEntry[] = [];
++    // 轮 1/2/3 失败 → 轮 4~9 跳过 → 轮 10 成功（复位）→ 轮 11/12 实采失败。
++    const outcomes = [
++      failOutcome(),
++      failOutcome(),
++      failOutcome(),
++      okOutcome(),
++      failOutcome(),
++      failOutcome(),
++    ];
++    const mgr = makeManager({
++      outcomes,
++      runnerOptions,
++      logs,
++      targets: () => [{ workspaceId: 'ws-r', rootPath: tmpRoot }],
++    });
++    for (let round = 1; round <= 12; round++) {
++      await mgr.collectStatusOnce();
++    }
++    // 实采轮：1/2/3/10/11/12 = 6 次（轮 4~9 退避跳过）。
++    expect(runnerOptions).toHaveLength(6);
++    // 复位后重败 2 次未再触发退避（streak 从 1 重计）。
++    expect(logs.filter((l) => l.msg === 'sillyspec_status_backoff_entered')).toHaveLength(1);
++  });
++});
++
++// ── FR-04：crossrepo 标记跳过 ────────────────────────────────────────────────
++
++describe('FR-04 crossrepo 登记根跳过', () => {
++  it('跳过 spawn、一次性 info 指路、不记失败；标记删除后恢复采集', async () => {
++    const crRoot = mkdtempSync(join(tmpdir(), 'status-crossrepo-'));
++    try {
++      mkdirSync(join(crRoot, '.git'), { recursive: true });
++      writeFileSync(
++        join(crRoot, '.git', 'sillyspec-crossrepo.json'),
++        JSON.stringify({ workspace: '/real/ws-root', key: 'sub', registeredAt: '2026-10-21T00:00:00Z' }) + '\n',
++      );
++      const runnerOptions: Array<{ cwd: string; timeoutMs: number }> = [];
++      const logs: LogEntry[] = [];
++      const mgr = makeManager({
++        outcomes: [okOutcome()],
++        runnerOptions,
++        logs,
++        targets: () => [{ workspaceId: 'ws-cr', rootPath: crRoot }],
++      });
++
++      // 轮 1：跳过（不 spawn、info 一次性、无失败账、摘要槽移除）。
++      await mgr.collectStatusOnce();
++      expect(runnerOptions).toHaveLength(0);
++      expect(mgr.getStatusError()).toBeNull();
++      expect(mgr.getStatusMapSnapshot()).toEqual({});
++      const skips = logs.filter((l) => l.msg === 'sillyspec_status_skip_crossrepo');
++      expect(skips).toHaveLength(1);
++      expect(skips[0]?.level).toBe('info');
++      expect(skips[0]?.data?.['workspace_root']).toBe('/real/ws-root');
++
++      // 轮 2：仍跳过且不重复输出。
++      await mgr.collectStatusOnce();
++      expect(runnerOptions).toHaveLength(0);
++      expect(logs.filter((l) => l.msg === 'sillyspec_status_skip_crossrepo')).toHaveLength(1);
++
++      // 标记删除 → 恢复正常采集。
++      rmSync(join(crRoot, '.git', 'sillyspec-crossrepo.json'));
++      await mgr.collectStatusOnce();
++      expect(runnerOptions).toHaveLength(1);
++      expect(runnerOptions[0]?.cwd).toBe(crRoot);
++    } finally {
++      rmSync(crRoot, { recursive: true, force: true });
++    }
++  });
++});
+diff --git a/sillyhub-daemon/tests/spec-sync-off-switch.test.ts b/sillyhub-daemon/tests/spec-sync-off-switch.test.ts
+new file mode 100644
+index 000000000..505a2d96a
+--- /dev/null
++++ b/sillyhub-daemon/tests/spec-sync-off-switch.test.ts
+@@ -0,0 +1,120 @@
++// FR-01（2026-10-21-daemon-sync-hardening）：daemon spec 自动推送关闭开关测试。
++//
++// 覆盖：
++//   - parseSpecSyncOffEnv 真值表（'1'/'true' 大小写不敏感；'0'/脏值/缺席=false）。
++//   - postSpecSync 关闭态 = mock 等价语义：env 整机关闭返回 null 且零请求；
++//     per-ws flag 关闭只影响该 ws，未设 flag 的 ws 照常走推送路径（以传输失败
++//     落 pending_push 标记为「推送路径已走」的行为证据）。
++//   - 关闭态 pending_push 标记不写不清（关闭是运维决策非传输失败）。
++//
++// 隔离：SILLYHUB_DAEMON_DIR 重定向 daemonStateDir 到临时目录（flag 落点与
++// manifests/ 读写全部隔离，零真实用户态污染）。
++
++import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
++import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
++import { tmpdir } from 'node:os';
++import { join } from 'node:path';
++import {
++  postSpecSync,
++  parseSpecSyncOffEnv,
++  specSyncOffFlagPath,
++  isDaemonSpecSyncOff,
++} from '../src/spec-sync.js';
++import type { HubClient } from '../src/hub-client.js';
++
++const OFF_ENV = 'SILLYHUB_DAEMON_SPEC_SYNC_OFF';
++const DIR_ENV = 'SILLYHUB_DAEMON_DIR';
++
++let tmpState = '';
++let tmpSpec = '';
++let savedOff: string | undefined;
++let savedDir: string | undefined;
++
++beforeEach(() => {
++  savedOff = process.env[OFF_ENV];
++  savedDir = process.env[DIR_ENV];
++  tmpState = mkdtempSync(join(tmpdir(), 'sync-off-state-'));
++  tmpSpec = mkdtempSync(join(tmpdir(), 'sync-off-spec-'));
++  process.env[DIR_ENV] = tmpState;
++  delete process.env[OFF_ENV];
++});
++
++afterEach(() => {
++  if (savedOff === undefined) delete process.env[OFF_ENV];
++  else process.env[OFF_ENV] = savedOff;
++  if (savedDir === undefined) delete process.env[DIR_ENV];
++  else process.env[DIR_ENV] = savedDir;
++  rmSync(tmpState, { recursive: true, force: true });
++  rmSync(tmpSpec, { recursive: true, force: true });
++});
++
++/** 最小 mock client：postSpecSync spy（off 分支不应触达）。 */
++function mockClient() {
++  return { postSpecSync: vi.fn() } as unknown as HubClient & {
++    postSpecSync: ReturnType<typeof vi.fn>;
++  };
++}
++
++describe('parseSpecSyncOffEnv', () => {
++  it("'1'/'true' 大小写不敏感视为关，'0'/脏值/缺席视为开", () => {
++    expect(parseSpecSyncOffEnv('1')).toBe(true);
++    expect(parseSpecSyncOffEnv('true')).toBe(true);
++    expect(parseSpecSyncOffEnv('TRUE')).toBe(true);
++    expect(parseSpecSyncOffEnv('True')).toBe(true);
++    expect(parseSpecSyncOffEnv('0')).toBe(false);
++    expect(parseSpecSyncOffEnv('false')).toBe(false);
++    expect(parseSpecSyncOffEnv('yes')).toBe(false);
++    expect(parseSpecSyncOffEnv('')).toBe(false);
++    expect(parseSpecSyncOffEnv(undefined)).toBe(false);
++  });
++});
++
++describe('isDaemonSpecSyncOff', () => {
++  it('env 与 flag 文件任一命中即关，双缺省不关', async () => {
++    expect(await isDaemonSpecSyncOff('ws-x')).toBe(false);
++
++    process.env[OFF_ENV] = '1';
++    expect(await isDaemonSpecSyncOff('ws-x')).toBe(true);
++    delete process.env[OFF_ENV];
++
++    mkdirSync(join(tmpState, 'spec-sync-off'), { recursive: true });
++    writeFileSync(specSyncOffFlagPath('ws-x'), 'off\n');
++    expect(await isDaemonSpecSyncOff('ws-x')).toBe(true);
++    expect(await isDaemonSpecSyncOff('ws-y')).toBe(false);
++  });
++});
++
++describe('postSpecSync 关闭开关', () => {
++  it('env 整机关闭：返回 null 且零请求', async () => {
++    process.env[OFF_ENV] = '1';
++    const client = mockClient();
++    const result = await postSpecSync(client, 'ws-env', tmpSpec);
++    expect(result).toBeNull();
++    expect(client.postSpecSync).not.toHaveBeenCalled();
++  });
++
++  it('flag 按工作区关闭：该 ws 跳过，未设 flag 的 ws 照常走推送路径', async () => {
++    mkdirSync(join(tmpState, 'spec-sync-off'), { recursive: true });
++    writeFileSync(specSyncOffFlagPath('ws-a'), 'off\n');
++    const client = mockClient();
++    // ws-a：flag 命中 → null 且零请求。
++    expect(await postSpecSync(client, 'ws-a', tmpSpec)).toBeNull();
++    expect(client.postSpecSync).not.toHaveBeenCalled();
++    // ws-b：无 flag → 走推送路径；传输失败时包装器落 pending_push 标记（行为证据）。
++    client.postSpecSync.mockRejectedValue(new Error('net down'));
++    await expect(postSpecSync(client, 'ws-b', tmpSpec)).rejects.toThrow('net down');
++    expect(client.postSpecSync).toHaveBeenCalledTimes(1);
++    expect(existsSync(join(tmpSpec, '.runtime', 'pending_push'))).toBe(true);
++  });
++
++  it('关闭态 pending_push 不写不清', async () => {
++    mkdirSync(join(tmpSpec, '.runtime'), { recursive: true });
++    const marker = join(tmpSpec, '.runtime', 'pending_push');
++    writeFileSync(marker, '2026-10-21T00:00:00.000Z\n');
++    process.env[OFF_ENV] = '1';
++    const client = mockClient();
++    expect(await postSpecSync(client, 'ws-marker', tmpSpec)).toBeNull();
++    expect(client.postSpecSync).not.toHaveBeenCalled();
++    expect(existsSync(marker)).toBe(true);
++  });
++});

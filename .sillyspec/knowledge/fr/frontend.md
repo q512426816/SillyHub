@@ -7004,3 +7004,218 @@ superseded_by：FR-app-workspace-pages-002
   confirmed_at: null
   source_change: 2026-10-16-session-decision-pill
   status: active
+
+## FR-frontend-017 会话导出数据移出免鉴权静态服务面
+变更：2026-10-21-proto-data-exposure-guard
+状态：active
+摘要：静态暴露通道关闭；staging 数据仍可被服务端读取
+全文：.sillyspec/changes/archive/2026-10-21-proto-data-exposure-guard/requirements.md#FR-01
+最近确认：c4eaa0643bc55e62fd2457cefbf504d4266a1522
+
+## FR-frontend-018 proto 预览读取路径随迁，dev 预览能力不回归
+变更：2026-10-21-proto-data-exposure-guard
+状态：active
+摘要：SSR 预览主路径不回归；容错路径行为保持
+全文：.sillyspec/changes/archive/2026-10-21-proto-data-exposure-guard/requirements.md#FR-02
+最近确认：c4eaa0643bc55e62fd2457cefbf504d4266a1522
+
+## FR-frontend-019 .gitignore 机制防线覆盖全部残留产物
+变更：2026-10-21-proto-data-exposure-guard
+状态：active
+摘要：误提交面收敛
+全文：.sillyspec/changes/archive/2026-10-21-proto-data-exposure-guard/requirements.md#FR-03
+最近确认：c4eaa0643bc55e62fd2457cefbf504d4266a1522
+
+## FR-frontend-020 gitShow/gitDiffFile/gitStatus 的 git 调用统一带 -c core.quotepath=false，numstat 残余 C 引号路径在 daemon 侧解码为原文
+变更：2026-10-21-gitlog-quotepath-fix
+状态：active
+摘要：中文路径主路径；残余强制引号；diff pathspec 回查
+全文：.sillyspec/changes/archive/2026-10-21-gitlog-quotepath-fix/requirements.md#FR-01
+最近确认：5bbb1a830ca0bee507747635b639a3be0ac85947
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-21-gitlog-quotepath-fix:flow:测试绑定FR-01
+  tests: sillyhub-daemon/tests/host-fs-handler-git-log-quotepath.test.ts「真实仓中文路径 gitShow 解码 + gitDiffFile 回查非空 diff」 | sillyhub-daemon/tests/host-fs-handler-git-log.test.ts「GL46 命令构造——gitShow/gitDiffFile/gitStatus 带 -c core.quotepath=false」
+  reason: spec
+  state: active
+  discovery: machine
+  confirmed_by: agent
+  confirmed_at: 3da9e8d44310bfa5fe016e010780e4c9606a726e
+  source_change: 2026-10-21-gitlog-quotepath-fix
+  status: active
+
+## FR-frontend-021 daemon 单测覆盖中文路径 numstat 解码与 diff pathspec 回查，前端 file-tree 覆盖中文路径聚合
+变更：2026-10-21-gitlog-quotepath-fix
+状态：active
+摘要：前端中文路径聚合
+全文：.sillyspec/changes/archive/2026-10-21-gitlog-quotepath-fix/requirements.md#FR-02
+最近确认：5bbb1a830ca0bee507747635b639a3be0ac85947
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-21-gitlog-quotepath-fix:flow:测试绑定FR-02
+  tests: frontend/src/components/git-log/__tests__/file-tree.test.tsx「中文路径聚合与叶子点击发起中文 path 请求」 | sillyhub-daemon/tests/host-fs-handler-git-log.test.ts「GL47 decodeGitCQuote 纯函数五形态」 | sillyhub-daemon/tests/host-fs-handler-git-log.test.ts「GL48 中文引号路径 numstat 解码」
+  reason: spec
+  state: active
+  discovery: machine
+  confirmed_by: agent
+  confirmed_at: 3da9e8d44310bfa5fe016e010780e4c9606a726e
+  source_change: 2026-10-21-gitlog-quotepath-fix
+  status: active
+
+## FR-frontend-022 实测含中文目录提交：树展示正确中文、点击文件返回非空 diff
+变更：2026-10-21-gitlog-quotepath-fix
+状态：active
+摘要：真实仓端到端
+全文：.sillyspec/changes/archive/2026-10-21-gitlog-quotepath-fix/requirements.md#FR-03
+最近确认：5bbb1a830ca0bee507747635b639a3be0ac85947
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-21-gitlog-quotepath-fix:flow:测试绑定FR-03
+  tests: sillyhub-daemon/tests/host-fs-handler-git-log-quotepath.test.ts「真实临时仓端到端：含中文目录真实提交」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-21-gitlog-quotepath-fix
+  status: active
+
+## FR-frontend-023 总览卡主管线为 brainstorm→plan→execute→verify→archive 五段，无 scan 点位；brainstorm 阶段变更不渲染「scan 已完成」
+变更：2026-10-21-overview-card-mainflow-scan
+状态：active
+摘要：brainstorm 阶段行；verify 阶段行
+场景正文：
+- 场景：brainstorm 阶段行 — Given envelope 变更行 current_stage='brainstorm'；When 渲染主管线；Then aria 语义含「brainstorm 进行中」与「plan 待办」，且不含任何 scan 点位（「scan 已完成/进行中/待办」均不出现）。
+- 场景：verify 阶段行 — Given envelope 变更行 current_stage='verify'；When 渲染主管线；Then 「brainstorm/plan/execute 已完成」各一、「verify 进行中」、「archive 待办」，无 scan 点位。
+全文：.sillyspec/changes/archive/2026-10-21-overview-card-mainflow-scan/requirements.md#FR-01
+最近确认：23c936e92bf7871cd0ea0edba46cdf5387e49079
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-21-overview-card-mainflow-scan:flow:测试绑定FR-01
+  tests: frontend/src/components/workspace/__tests__/changes-overview-card.test.tsx「渲染——健康条计数/管线两态/stage 徽标/steps 进度/相对时间/倒序（fixture 含 envelope readable/command 容忍字段）」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-21-overview-card-mainflow-scan
+  status: active
+
+## FR-frontend-024 current_stage='thin' 的变更行渲染「◈ thin」旁路徽标且不显示「步骤 0/0」文案（quick/explore 存量行为不动）
+变更：2026-10-21-overview-card-mainflow-scan
+状态：active
+摘要：thin 变更行
+场景正文：
+- 场景：thin 变更行 — Given envelope 变更行 current_stage='thin'、stage_label='◈ 轻量变更'、steps={0,0}；When 渲染活跃变更行；Then 出现「◈ thin」徽标与「◈ 轻量变更」标签，不出现主管线点位，不出现「步骤 0/0」。
+全文：.sillyspec/changes/archive/2026-10-21-overview-card-mainflow-scan/requirements.md#FR-02
+最近确认：23c936e92bf7871cd0ea0edba46cdf5387e49079
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-21-overview-card-mainflow-scan:flow:测试绑定FR-02
+  tests: frontend/src/components/workspace/__tests__/changes-overview-card.test.tsx「thin 变更行——◈ thin 旁路徽标 + 隐藏步骤 0/0（2026-10-21-overview-card-mainflow-scan）」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-21-overview-card-mainflow-scan
+  status: active
+
+## FR-frontend-025 changes-overview-card 既有测试更新后全绿
+变更：2026-10-21-overview-card-mainflow-scan
+状态：active
+摘要：测试面回归
+场景正文：
+- 场景：测试面回归 — Given 组件与测试改毕；When 运行该测试文件；Then 全部用例通过、零失败。
+全文：.sillyspec/changes/archive/2026-10-21-overview-card-mainflow-scan/requirements.md#FR-03
+最近确认：23c936e92bf7871cd0ea0edba46cdf5387e49079
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-21-overview-card-mainflow-scan:flow:测试绑定FR-03
+  tests: frontend/src/components/workspace/__tests__/changes-overview-card.test.tsx「渲染——健康条计数/管线两态/stage 徽标/steps 进度/相对时间/倒序（fixture 含 envelope readable/command 容忍字段）」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-21-overview-card-mainflow-scan
+  status: active
+
+## FR-frontend-026 .tmp/hooks 会话等价 hook 面删除，仓内无任何链路再引用它（配置注释与知识文档统一指向官方链 + export PRE_COMMIT_HOME 会话指引）
+变更：2026-10-21-precommit-cleanup
+状态：active
+摘要：主路径
+全文：.sillyspec/changes/archive/2026-10-21-precommit-cleanup/requirements.md#FR-01
+最近确认：68ae72e85d8261a4c49924cc6edaec5dc61d4f4c
+
+## FR-frontend-027 .sillyspec/knowledge 新增「agent 沙箱 python 子树 Low IL 限制」条目：症状（python→msys 嵌套 0xC0000022 崩、profile 缓存写被拒）、根因（沙箱驱动降 IL、token 无 CodexSandboxUsers、DACL 修复无效）、WSL bash 误解析坑（python spawn bash 命中 System32 WSL 而非 Git Bash）、处置（去 msys 入口 + PRE_COMMIT_HOME 会话指引），INDEX 可路由
+变更：2026-10-21-precommit-cleanup
+状态：active
+摘要：主路径
+全文：.sillyspec/changes/archive/2026-10-21-precommit-cleanup/requirements.md#FR-02
+最近确认：68ae72e85d8261a4c49924cc6edaec5dc61d4f4c
+
+## FR-frontend-028 sillyspec knowledge search 关键词实证命中；交付提交走默认官方 hook 链留痕
+变更：2026-10-21-precommit-cleanup
+状态：active
+摘要：主路径
+全文：.sillyspec/changes/archive/2026-10-21-precommit-cleanup/requirements.md#FR-03
+最近确认：68ae72e85d8261a4c49924cc6edaec5dc61d4f4c
+
+## FR-frontend-029 /proto/session-redesign/page.tsx 显式 export const dynamic = 'force-dynamic'（对齐 session-trajectory/page.tsx:24 同款），消除构建期静态预渲染读盘
+变更：2026-10-22-review-risk-fixes
+状态：active
+摘要：工作树构建不烘数据；dev 预览能力不回归（对齐知识 FR-frontend-018）
+全文：.sillyspec/changes/archive/2026-10-22-review-risk-fixes/requirements.md#FR-01
+最近确认：c975a003a577bfb5ce79a8445906f9f358939c82
+
+## FR-frontend-030 frontend/.dockerignore 追加 /.proto-staging/，工作树 docker build 不再拷入真实会话导出
+变更：2026-10-22-review-risk-fixes
+状态：active
+摘要：从含导出文件的工作树构建镜像
+全文：.sillyspec/changes/archive/2026-10-22-review-risk-fixes/requirements.md#FR-02
+最近确认：c975a003a577bfb5ce79a8445906f9f358939c82
+
+## FR-frontend-031 event-loop-watch 正常窗口走完后 AbortSignal 的 abort 监听器计数不随窗口数增长（新增测试以真实 defaultSleep 断言）
+变更：2026-10-22-review-risk-fixes
+状态：active
+摘要：连续多窗口后监听器计数归零；abort 路径行为不变
+全文：.sillyspec/changes/archive/2026-10-22-review-risk-fixes/requirements.md#FR-03
+最近确认：c975a003a577bfb5ce79a8445906f9f358939c82
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-22-review-risk-fixes:flow:测试绑定FR-03
+  tests: sillyhub-daemon/tests/event-loop-watch.test.ts「defaultSleep 正常到期路径摘除 abort 监听器（连续窗口后计数归零）+ abort 路径 reject 行为不变（真实 defaultSleep 走 runEventLoopWatch）」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-22-review-risk-fixes
+  status: active
+
+## FR-frontend-032 decodeGitCQuote 对含字面引号与非 ASCII 混合路径（如 中文"x.md）完整还原原文（新增单测，UTF-8 多字节按原字节组装）
+变更：2026-10-22-review-risk-fixes
+状态：active
+摘要：字面引号转义 + 原样非 ASCII 混合形态；增补平面字符（代理对）；既有形态回归
+全文：.sillyspec/changes/archive/2026-10-22-review-risk-fixes/requirements.md#FR-04
+最近确认：c975a003a577bfb5ce79a8445906f9f358939c82
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-22-review-risk-fixes:flow:测试绑定FR-04
+  tests: sillyhub-daemon/tests/host-fs-handler-git-log.test.ts「GL49: 混合路径（字面引号转义 + 原样非 ASCII/增补平面）解码逐字符还原原文」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-22-review-risk-fixes
+  status: active

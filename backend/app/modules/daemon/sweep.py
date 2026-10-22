@@ -773,6 +773,173 @@ async def session_auto_recover_sweep_once(session: AsyncSession) -> int:
     return len(flipped_rows)
 
 
+# ── pending run 启动超时清扫（2026-10-21-daemon-zombie-turn FR-03）──────────────
+#
+# 僵尸轮兜底：inject 被 daemon ack 但引擎从未启动轮次（生产会话 49d893ab 实证：
+# 打断 abort 收尾窗口吞没注入消息）→ run 永停 pending（无 started_at）。daemon 侧
+# 轮启动看门狗（FR-01）与打断 no-op 回报（FR-02）是近端收敛，本清扫是最后兜底
+# （两者上报均丢失/未布防的形态）。与离线档正交：runtime 离线的归
+# session_offline_sweep_once，此处只管「daemon 在线但轮从未启动」。
+
+# 僵尸轮收敛错误码（新值）：前端 deriveTurnTerminalStatus 按未知 failed 码走
+# 「失败」展示，可读原因经 output_redacted → SessionRunRead.failure_summary 透出。
+INTERACTIVE_TURN_NOT_STARTED_ERROR_CODE = "interactive_turn_not_started"
+
+# 默认窗口（Settings daemon_pending_run_start_timeout_sec 缺省/非法时的回退值）。
+PENDING_RUN_START_TIMEOUT_DEFAULT_SEC = 300
+
+
+def pending_run_start_timeout_sec() -> int:
+    """读 Settings 窗口（非法/缺省回退模块默认，容错优先于启动期校验）。"""
+    from app.core.config import get_settings
+
+    v = getattr(
+        get_settings(),
+        "daemon_pending_run_start_timeout_sec",
+        PENDING_RUN_START_TIMEOUT_DEFAULT_SEC,
+    )
+    return v if isinstance(v, int) and v > 0 else PENDING_RUN_START_TIMEOUT_DEFAULT_SEC
+
+
+async def pending_run_start_sweep_once(session: AsyncSession) -> int:
+    """单拍：收敛「创建后 N 秒未被 daemon 启动」的在线 runtime 会话 pending run.
+
+    命中条件（全 AND）：``AgentRun.status='pending'`` 且 ``started_at IS NULL``
+    且 ``created_at < now-N``（N=Settings ``daemon_pending_run_start_timeout_sec``，
+    默认 300s）且所属会话绑定的 runtime 在线（online + 心跳新鲜，对齐离线档
+    ``online_runtime`` 判定）。正常链路 created→started ~2s；daemon inject 停等
+    窗（_awaitSessionThenRoute）硬顶 5min，300s 恰好覆盖。
+
+    收敛动作：run → ``failed`` + ``finished_at`` + ``error_code=
+    interactive_turn_not_started`` + 中文可读原因（output_redacted）。不动会话
+    （保持 active，用户可重发）与 lease（会话级 lease 跨轮复用，不随单轮收敛）。
+
+    跳过面：pending_approval 状态（审批等待非僵尸——轮已启动只是等用户）；
+    ``running`` 状态（sync_agent_run_status 置 running 必写 started_at，无
+    started_at 的 running 只可能是史前脏数据，不属本档语义）；runtime 离线
+    （既有 offline sweep 管辖）。
+
+    幂等：UPDATE 重挂全部命中条件（SELECT 与 UPDATE 之间被并发改态的行跳过），
+    commit 后按「实际收敛行」重查再广播 ``turn_completed``（close_run_steps 终态
+    发布契约：前端 onTurnCompleted 清 currentRunId、解锁输入框）+ ``agent_run``
+    频道 status_changed。广播 best-effort（Redis 抖动不影响已提交终态行）。
+    """
+    now = datetime.now(UTC)
+    grace = now - timedelta(seconds=RUNTIME_OFFLINE_GRACE_SEC)
+    cutoff = now - timedelta(seconds=pending_run_start_timeout_sec())
+
+    online_runtime = (
+        select(DaemonRuntime.id)
+        .where(
+            DaemonRuntime.id == AgentSession.runtime_id,
+            col(DaemonRuntime.status) == "online",
+            col(DaemonRuntime.last_heartbeat_at) >= grace,
+        )
+        .correlate(AgentSession)
+        .exists()
+    )
+    hit_rows = (
+        await session.execute(
+            select(AgentRun.id)
+            .join(AgentSession, AgentSession.id == AgentRun.agent_session_id)
+            .where(
+                AgentRun.status == "pending",
+                col(AgentRun.started_at).is_(None),
+                AgentRun.created_at < cutoff,
+                online_runtime,
+            )
+        )
+    ).all()
+    if not hit_rows:
+        return 0
+    hit_ids = [row.id for row in hit_rows]
+
+    await session.execute(
+        update(AgentRun)
+        .where(
+            AgentRun.id.in_(hit_ids),
+            AgentRun.status == "pending",
+            col(AgentRun.started_at).is_(None),
+            AgentRun.created_at < cutoff,
+        )
+        .values(
+            status="failed",
+            finished_at=now,
+            error_code=INTERACTIVE_TURN_NOT_STARTED_ERROR_CODE,
+            output_redacted=(
+                "消息已送达，但引擎长时间未启动本轮（可能被上一轮打断的收尾竞态吞没）。"
+                "本轮已自动收敛，请重新发送消息即可继续"
+            ),
+        )
+    )
+    await session.commit()
+
+    # 按「实际收敛行」重查（并发改态跳过的行此处非 failed/非本码，不广播），
+    # 字段面复刻 close_run_steps 的 turn_completed 契约（frontend SessionStream
+    # -Envelope：event/status/exit_code/error_code/input/output_tokens）。
+    final_rows = (
+        await session.execute(
+            select(  # type: ignore[misc]  # mypy overload 组合爆炸（多列 select 的 union 展开上限，同仓 redis stub 先例）
+                AgentRun.id,
+                AgentRun.agent_session_id,
+                AgentRun.lease_id,
+                AgentRun.exit_code,
+                AgentRun.input_tokens,
+                AgentRun.output_tokens,
+            ).where(
+                AgentRun.id.in_(hit_ids),
+                AgentRun.status == "failed",
+                AgentRun.error_code == INTERACTIVE_TURN_NOT_STARTED_ERROR_CODE,
+            )
+        )
+    ).all()
+    for row in final_rows:
+        try:
+            redis = get_redis()
+            await redis.publish(
+                f"agent_run:{row.id}",
+                json.dumps(
+                    {
+                        "event": "status_changed",
+                        "status": "failed",
+                        "lease_id": str(row.lease_id) if row.lease_id else None,
+                        "agent_run_id": str(row.id),
+                    },
+                    default=str,
+                ),
+            )
+        except Exception:
+            log.warning(
+                "pending_run_sweep_run_channel_publish_failed",
+                agent_run_id=str(row.id),
+            )
+        try:
+            redis = get_redis()
+            await redis.publish(
+                f"agent_session:{row.agent_session_id}",
+                json.dumps(
+                    {
+                        "event": "turn_completed",
+                        "session_id": str(row.agent_session_id),
+                        "run_id": str(row.id),
+                        "status": "failed",
+                        "exit_code": row.exit_code,
+                        "error_code": INTERACTIVE_TURN_NOT_STARTED_ERROR_CODE,
+                        "input_tokens": row.input_tokens,
+                        "output_tokens": row.output_tokens,
+                    },
+                    default=str,
+                ),
+            )
+        except Exception:
+            log.warning(
+                "pending_run_sweep_session_channel_publish_failed",
+                session_id=str(row.agent_session_id),
+                agent_run_id=str(row.id),
+            )
+    return len(final_rows)
+
+
 async def session_reconnect_sweeper(interval: float = SWEEP_INTERVAL_SEC) -> None:
     """常驻巡检循环（main.py lifespan ``create_task`` 消费）.
 
@@ -794,6 +961,9 @@ async def session_reconnect_sweeper(interval: float = SWEEP_INTERVAL_SEC) -> Non
                 # ql-20260831-006-6d67：同一轮补位——runtime 重新在线的 suspended
                 # 主会话自动恢复（backend 重启场景 offline sweep 误挂起后无人捞）。
                 auto_recovered = await session_auto_recover_sweep_once(db_session)
+                # 2026-10-21-daemon-zombie-turn FR-03：同一轮兜底——runtime 在线但
+                # pending run 超龄未启动（inject 被引擎吞没的僵尸轮）。
+                pending_runs_converged = await pending_run_start_sweep_once(db_session)
             if converged:
                 log.warning(
                     "session_reconnect_sweep_converged",
@@ -811,6 +981,12 @@ async def session_reconnect_sweeper(interval: float = SWEEP_INTERVAL_SEC) -> Non
                     "session_auto_recover_sweep_recovered",
                     count=auto_recovered,
                     min_age_seconds=AUTO_RECOVER_MIN_AGE_SEC,
+                )
+            if pending_runs_converged:
+                log.warning(
+                    "pending_run_start_sweep_converged",
+                    count=pending_runs_converged,
+                    timeout_seconds=pending_run_start_timeout_sec(),
                 )
         except Exception:
             log.exception("session_reconnect_sweep_round_failed")

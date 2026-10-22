@@ -1,0 +1,40 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-20-session-status-live-sync",
+  "reviewer": "subagent",
+  "verdict": "PASS",
+  "reviewedAgainst": "59007127f0d130be7ea5e131f4f61154806d37a0",
+  "findings": [
+    {
+      "severity": "P3",
+      "title": "契约已翻转为照发但仍沿用 _no_publish 用例名，易误导后续维护",
+      "evidence": "FR-03 要求多轮 keep-active 也发 status_changed，断言已严格改为恰一条 (event/session_id/user_id)；断言本身未弱化，但函数名与历史语义相悖，后续读者可能误判为回归。",
+      "location": "backend/app/modules/daemon/tests/test_session_events_cross.py:194"
+    },
+    {
+      "severity": "P3",
+      "title": "审批/注入两个新信号点在事务仍打开时 await Redis，未套用 QueuePool 修复 3 的连接归还纪律",
+      "evidence": "request_approval/approve 在 commit 后 refresh(run) 重新开启事务，_publish_run_status_signal 先 get(AgentSession) 再 await publish_sessions_changed；inject 亦在 refresh(session)/refresh(run) 后 publish。Redis 故障时 DB 连接最多被 socket_timeout=3s 拖住；PublishIntent 激活路径本身已按纪律在连接归还后消费，不受影响。",
+      "location": "backend/app/modules/agent/coordinator.py:358"
+    },
+    {
+      "severity": "P3",
+      "title": "FR-01 第 3 点 request_approval 在仓库内无生产调用方，pending_approval 信号可能不可达",
+      "evidence": "全局仅 coordinator.py 定义与新测试引用，无路由/服务调用；pending_approval 的唯一写入点就是 request_approval（approve 端点的 token 也只能由它生成）。若审批流已退役，需求口径应同步说明。",
+      "location": "backend/app/modules/agent/coordinator.py:360"
+    },
+    {
+      "severity": "P3",
+      "title": "inject 信号点用函数内直接 import，绕过本包 _svc.publish_sessions_changed 延迟解析/打桩缝",
+      "evidence": "同包其余会话信号调用点统一走 _svc.publish_sessions_changed（D-007）；直接 from session_events import 使既有 patch('app.modules.daemon.session.service.publish_sessions_changed') 风格的测试无法拦截该新信号，需改用另一条 patch 缝。",
+      "location": "backend/app/modules/daemon/session/service/inject.py:836"
+    }
+  ],
+  "dimensionNotes": {
+    "乱序": "ok",
+    "并发": "ok",
+    "切换": "ok",
+    "作用域": "ok"
+  },
+  "reviewedAt": "2026-10-20T08:14:37Z"
+}

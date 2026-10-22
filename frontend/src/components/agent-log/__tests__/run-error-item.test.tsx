@@ -400,34 +400,77 @@ describe("task-09: actions 触发回调（重发 / 切换供应商 / 查看详�
 /* ------------------------------------------------------------------ */
 
 describe("task-09: 查看详情（展开 raw + onViewDetail 回调）", () => {
-  const raw =
+  const rawFirstLine =
     "[ASSISTANT] API Error: Request rejected (429) · [1310][已达每周/每月上限]";
+  const raw = `${rawFirstLine}\nstream disconnected before completion`;
 
-  it("默认折叠 raw；点击「查看详情」展开 raw 文本并切换为「收起详情」", () => {
+  it("多行 raw：首行摘要默认可见，完整 raw 点击「查看详情」展开", () => {
     render(<RunErrorItem item={makeItem({ type: "quota_exceeded", raw })} />);
-    expect(screen.queryByText(raw)).not.toBeInTheDocument();
+    // 2026-10-20-session-error-visibility：首行摘要默认可见（排查免点击）。
+    expect(screen.getByTestId("run-error-raw-summary")).toHaveTextContent(
+      rawFirstLine,
+    );
+    // 第二行仅存在于完整 raw（展开前不可见）。
+    expect(
+      screen.queryByText(/stream disconnected before completion/),
+    ).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: /查看详情/ }));
-    expect(screen.getByText(raw)).toBeInTheDocument();
+    expect(
+      screen.getByText(/stream disconnected before completion/),
+    ).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /收起详情/ })).toBeInTheDocument();
   });
 
-  it("再次点击 → 收起 raw", () => {
+  it("再次点击 → 收起 raw（回到首行摘要）", () => {
     render(<RunErrorItem item={makeItem({ type: "quota_exceeded", raw })} />);
     fireEvent.click(screen.getByRole("button", { name: /查看详情/ }));
-    expect(screen.getByText(raw)).toBeInTheDocument();
+    expect(
+      screen.getByText(/stream disconnected before completion/),
+    ).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: /收起详情/ }));
-    expect(screen.queryByText(raw)).not.toBeInTheDocument();
+    expect(
+      screen.queryByText(/stream disconnected before completion/),
+    ).not.toBeInTheDocument();
+    expect(screen.getByTestId("run-error-raw-summary")).toBeInTheDocument();
   });
 
-  it("raw=null 且无 onViewDetail → 不显示「查看详情」", () => {
-    render(<RunErrorItem item={makeItem({ type: "unknown", raw: null })} />);
+  it("单行短 raw（摘要即全文）→ 摘要默认可见且无「查看详情」按钮", () => {
+    render(
+      <RunErrorItem item={makeItem({ type: "unknown", raw: rawFirstLine })} />,
+    );
+    expect(screen.getByTestId("run-error-raw-summary")).toHaveTextContent(
+      rawFirstLine,
+    );
     expect(
       screen.queryByRole("button", { name: /查看详情/ }),
     ).not.toBeInTheDocument();
   });
 
-  it("raw 为纯空白 → 不显示「查看详情」（无内容可展开）", () => {
+  it("超长单行 raw → 摘要截断 200 字符 + 省略号，展开可见全文", () => {
+    const longRaw = "x".repeat(500);
+    render(<RunErrorItem item={makeItem({ type: "unknown", raw: longRaw })} />);
+    const summary = screen.getByTestId("run-error-raw-summary");
+    expect(summary).toHaveTextContent("…");
+    expect(summary.textContent).toHaveLength(201);
+    fireEvent.click(screen.getByRole("button", { name: /查看详情/ }));
+    expect(screen.getByText(longRaw)).toBeInTheDocument();
+  });
+
+  it("raw=null 且无 onViewDetail → 不显示「查看详情」与摘要", () => {
+    render(<RunErrorItem item={makeItem({ type: "unknown", raw: null })} />);
+    expect(
+      screen.queryByTestId("run-error-raw-summary"),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: /查看详情/ }),
+    ).not.toBeInTheDocument();
+  });
+
+  it("raw 为纯空白 → 不显示「查看详情」与摘要（无内容可展开）", () => {
     render(<RunErrorItem item={makeItem({ type: "unknown", raw: "   " })} />);
+    expect(
+      screen.queryByTestId("run-error-raw-summary"),
+    ).not.toBeInTheDocument();
     expect(
       screen.queryByRole("button", { name: /查看详情/ }),
     ).not.toBeInTheDocument();
@@ -465,10 +508,14 @@ describe("task-09: 无 actions 时不渲染操作区", () => {
 /* ------------------------------------------------------------------ */
 
 describe("task-11 回归补强：actions 组合 / a11y / 边界", () => {
-  it("retryable=true + onResend + onSwitchProvider + raw → 三按钮同现，重发为 primary（其余 default）", () => {
+  it("retryable=true + onResend + onSwitchProvider + 多行 raw → 三按钮同现，重发为 primary（其余 default）", () => {
     render(
       <RunErrorItem
-        item={makeItem({ type: "rate_limited", retryable: true, raw: "限流原始文本" })}
+        item={makeItem({
+          type: "rate_limited",
+          retryable: true,
+          raw: "限流原始文本首行\n第二行上下文",
+        })}
         onResend={() => {}}
         onSwitchProvider={() => {}}
       />,
@@ -483,7 +530,9 @@ describe("task-11 回归补强：actions 组合 / a11y / 边界", () => {
   });
 
   it("查看详情 aria-expanded 随折叠状态切换（a11y 契约）", () => {
-    render(<RunErrorItem item={makeItem({ type: "timeout", raw: "raw text" })} />);
+    render(
+      <RunErrorItem item={makeItem({ type: "timeout", raw: "raw text\nmore" })} />,
+    );
     const btn = screen.getByRole("button", { name: /查看详情/ });
     expect(btn.getAttribute("aria-expanded")).toBe("false");
     fireEvent.click(btn);

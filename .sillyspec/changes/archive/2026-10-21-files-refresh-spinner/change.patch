@@ -1,0 +1,131 @@
+diff --git a/frontend/src/components/__tests__/change-file-tree-autorefresh.test.tsx b/frontend/src/components/__tests__/change-file-tree-autorefresh.test.tsx
+index f8bc9c8ca..fbef0fcbc 100644
+--- a/frontend/src/components/__tests__/change-file-tree-autorefresh.test.tsx
++++ b/frontend/src/components/__tests__/change-file-tree-autorefresh.test.tsx
+@@ -158,3 +158,65 @@ describe("ChangeFileTree sync 触发面（2026-10-14-files-refresh-explicit-sync
+     expect(mockedList.mock.calls[0]?.[2]).toMatchObject({ sync: true });
+   });
+ });
++
++// 2026-10-21-files-refresh-spinner：显式刷新转圈反馈——sync 同步后端等待预算 15s，
++// 点击期间按钮必须自证「已点上」（禁用+图标转圈），返回后恢复；纯读刷新（挂载/轮询）
++// 不碰转圈态（转圈面仅由用户显式点击驱动）。
++describe("ChangeFileTree 刷新按钮转圈反馈（2026-10-21-files-refresh-spinner）", () => {
++  it("点击刷新：同步进行中按钮禁用+转圈，返回后恢复", async () => {
++    vi.useFakeTimers();
++    mockedList.mockResolvedValue(fileResp());
++    mockedPending.mockResolvedValue({ items: [] });
++
++    const { getByRole } = renderTree(
++      <ChangeFileTree workspaceId="ws-1" changeId="chg-1" />,
++    );
++    await flushInitialLoad();
++    mockedList.mockClear();
++
++    // 手工控速：sync 请求挂起不返回，断言转圈中间态
++    let resolveSync!: (_v: ReturnType<typeof fileResp>) => void;
++    mockedList.mockImplementationOnce(
++      () => new Promise((res) => { resolveSync = res; }),
++    );
++
++    fireEvent.click(getByRole("button", { name: /刷新/ }));
++    await vi.advanceTimersByTimeAsync(0);
++
++    const btn = getByRole("button", { name: /刷新/ });
++    expect(btn).toBeDisabled();
++    expect(btn.querySelector(".animate-spin")).not.toBeNull();
++
++    resolveSync(fileResp());
++    await vi.advanceTimersByTimeAsync(0);
++    expect(btn).not.toBeDisabled();
++    expect(btn.querySelector(".animate-spin")).toBeNull();
++  });
++
++  it("纯读刷新（挂载/轮询）不触发转圈态", async () => {
++    vi.useFakeTimers();
++    mockedList.mockResolvedValue(fileResp());
++    mockedPending.mockResolvedValue({ items: [] });
++
++    const { getByRole } = renderTree(
++      <ChangeFileTree workspaceId="ws-1" changeId="chg-1" autoRefreshMs={15000} />,
++    );
++    await flushInitialLoad();
++
++    const btn = getByRole("button", { name: /刷新/ });
++    expect(btn).not.toBeDisabled();
++
++    // 轮询请求挂起在飞时按钮仍可点、无转圈（纯读不驱动同步反馈面）
++    let resolvePoll!: (_v: ReturnType<typeof fileResp>) => void;
++    mockedList.mockImplementationOnce(
++      () => new Promise((res) => { resolvePoll = res; }),
++    );
++    await vi.advanceTimersByTimeAsync(15_000);
++    expect(mockedList).toHaveBeenCalledTimes(2);
++    expect(btn).not.toBeDisabled();
++    expect(btn.querySelector(".animate-spin")).toBeNull();
++
++    resolvePoll(fileResp());
++    await vi.advanceTimersByTimeAsync(0);
++  });
++});
+diff --git a/frontend/src/components/change-file-tree.tsx b/frontend/src/components/change-file-tree.tsx
+index 1eb69b9ba..a0cf39b22 100644
+--- a/frontend/src/components/change-file-tree.tsx
++++ b/frontend/src/components/change-file-tree.tsx
+@@ -3,8 +3,9 @@
+ import { useCallback, useEffect, useMemo, useRef, useState, type ComponentProps, type ReactNode } from "react";
+ 
+ import { Image } from "antd";
+-import { ChevronRight, FileText, Folder, FolderOpen } from "lucide-react";
++import { ChevronRight, FileText, Folder, FolderOpen, RefreshCw } from "lucide-react";
+ 
++import { cn } from "@/lib/utils";
+ import { Badge } from "@/components/ui/badge";
+ import { ErrorBanner } from "@/components/ui/error-banner";
+ import { EmptyState } from "@/components/ui/empty-state";
+@@ -428,6 +429,9 @@ export function ChangeFileTree({
+   // 显式刷新（sync=1）同步未完成时的提示条文案（2026-10-16-change-files-sync-result）：
+   // 仅刷新点击回执驱动；成功/防抖跳过置 null（清除），纯读刷新不动它。
+   const [syncWarning, setSyncWarning] = useState<string | null>(null);
++  // 显式刷新（sync=1）在飞反馈（2026-10-21-files-refresh-spinner）：后端同步等待
++  // 预算 15s，期间按钮转圈+禁用自证「已点上」；仅 sync=true 调用驱动，纯读不碰。
++  const [syncing, setSyncing] = useState(false);
+ 
+   // 变更名自动链接（2026-08-31 变更关联审计 P3）：名单为空（查询未就绪/无变更）
+   // 时不挂插件，渲染行为与改造前逐字节一致
+@@ -450,6 +454,7 @@ export function ChangeFileTree({
+   // （纯读，直接秒回平台镜像数据）。同步回执翻成提示条文案：未完成/未执行时展示
+   // 原因（不再无声），成功/防抖跳过/纯读清空或保持 null。
+   const refreshTree = useCallback(async (sync?: boolean) => {
++    if (sync) setSyncing(true);
+     try {
+       const resp = await listChangeFiles(workspaceId, changeId, { sync });
+       setTree(buildChangeFileTree(resp.items));
+@@ -458,6 +463,8 @@ export function ChangeFileTree({
+       }
+     } catch (err) {
+       setError(err instanceof ApiError ? err.message : "加载文件树失败");
++    } finally {
++      if (sync) setSyncing(false);
+     }
+   }, [workspaceId, changeId]);
+ 
+@@ -616,7 +623,17 @@ export function ChangeFileTree({
+               镜像同步：{new Date(lastSyncedAt).toLocaleString("zh-CN")}
+             </span>
+           )}
+-          <Button variant="ghost" size="sm" className="h-6 px-1.5 text-[11px]" onClick={() => void refreshTree(true)}>
++          {/* 2026-10-21-files-refresh-spinner：sync 同步在飞时转圈+禁用（用户可见
++              「已点上」；纯读轮询不触发）。错误横幅重试同走 refreshTree(true)，
++              共享同一 syncing 态。 */}
++          <Button
++            variant="ghost"
++            size="sm"
++            className="h-6 gap-1 px-1.5 text-[11px]"
++            onClick={() => void refreshTree(true)}
++            disabled={syncing}
++          >
++            <RefreshCw className={cn("h-3 w-3", syncing && "animate-spin")} aria-hidden />
+             刷新
+           </Button>
+         </div>

@@ -1,0 +1,118 @@
+{
+  "change": "2026-10-21-proto-data-exposure-guard",
+  "baseline": "e625198b56c7b972450c3dbff4a2550a1f0c5c0f",
+  "head": "c4eaa0643bc55e62fd2457cefbf504d4266a1522",
+  "files": [
+    ".gitignore",
+    "frontend/.gitignore"
+  ],
+  "totals": {
+    "files": 2,
+    "additions": 11,
+    "deletions": 0
+  },
+  "savedAt": "2026-10-20T23:51:32.033Z",
+  "note": "flow done 时点冻结（本变更可归属交付面：baseline..HEAD 提交面过滤 .sillyspec/ 只留 .sillyspec/docs/ 交付文档 + 独占树未提交交付；治理工件目录不入冻结——2026-10-12-close-trace-freeze-integrity FR-01）",
+  "modules": [
+    {
+      "id": "frontend",
+      "files": 1,
+      "doc": "docs/multi-agent-platform/modules/frontend.md",
+      "docTouched": false,
+      "docMissing": false
+    }
+  ],
+  "uncoveredDirs": [],
+  "moduleMaps": [
+    "docs/backend/modules/_module-map.yaml",
+    "docs/frontend/modules/_module-map.yaml",
+    "docs/multi-agent-platform/modules/_module-map.yaml",
+    "docs/SillyHub/modules/_module-map.yaml",
+    "docs/sillyhub-daemon/modules/_module-map.yaml"
+  ],
+  "acceptedDirtyGap": 32,
+  "scopeAudit": {
+    "mode": "full-flow",
+    "ok": true,
+    "degradedReason": null,
+    "baseAnchor": "e625198b56c7b972450c3dbff4a2550a1f0c5c0f",
+    "totals": {
+      "files": 8,
+      "additions": 11,
+      "deletions": 0
+    },
+    "rows": [
+      {
+        "path": ".gitignore",
+        "additions": 6,
+        "deletions": 0,
+        "kind": "modified",
+        "planned": "修改",
+        "verdict": "planned"
+      },
+      {
+        "path": "frontend/.gitignore",
+        "additions": 5,
+        "deletions": 0,
+        "kind": "modified",
+        "planned": "修改",
+        "verdict": "planned"
+      },
+      {
+        "path": "frontend/public/__proto__/session-export.json → frontend/.proto-staging/session-export.json",
+        "planned": null,
+        "additions": 0,
+        "deletions": 0,
+        "kind": "modified",
+        "verdict": "untouched"
+      },
+      {
+        "path": "frontend/src/app/proto/session-redesign/staged-session-export.ts",
+        "planned": "修改",
+        "additions": 0,
+        "deletions": 0,
+        "kind": "modified",
+        "verdict": "untouched"
+      },
+      {
+        "path": "frontend/src/app/proto/session-redesign/view.tsx",
+        "planned": "修改",
+        "additions": 0,
+        "deletions": 0,
+        "kind": "modified",
+        "verdict": "untouched"
+      },
+      {
+        "path": "frontend/src/app/proto/session-redesign/types.ts",
+        "planned": "修改",
+        "additions": 0,
+        "deletions": 0,
+        "kind": "modified",
+        "verdict": "untouched"
+      },
+      {
+        "path": "frontend/src/app/proto/session-redesign/proto-fixtures.ts",
+        "planned": "修改",
+        "additions": 0,
+        "deletions": 0,
+        "kind": "modified",
+        "verdict": "untouched"
+      },
+      {
+        "path": "frontend/public/__proto__",
+        "planned": "删除",
+        "additions": 0,
+        "deletions": 0,
+        "kind": "modified",
+        "verdict": "untouched"
+      }
+    ],
+    "excluded": {
+      "foreignDeclared": []
+    },
+    "note": "flow done 时点冻结（本文件落盘时采集）",
+    "closedBy": "flow done"
+  },
+  "patchSha256": "ed9136c14690d688a2dfac5f95f2b9c4d075e0af86a67389d9d538e6d6f4a101",
+  "patchStatus": "ok"
+}

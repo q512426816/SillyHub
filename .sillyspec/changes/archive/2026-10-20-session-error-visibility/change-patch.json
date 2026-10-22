@@ -1,0 +1,129 @@
+{
+  "change": "2026-10-20-session-error-visibility",
+  "baseline": "1e3c24ebfd960880eb85908c71f4532c1ef0c6c7",
+  "head": "6f2fe0baf5d63d5a078e96a39670a5543a7c9bfe",
+  "files": [
+    "docs/releases/2026-10-20-003-50dfdf2.md",
+    "frontend/src/components/agent-log/__tests__/run-error-item.test.tsx",
+    "frontend/src/components/agent-log/run-error-item.tsx",
+    "frontend/src/components/daemon/__tests__/page-helpers-error-visibility.test.ts",
+    "frontend/src/components/daemon/session-panel/page-helpers.tsx",
+    "frontend/src/components/daemon/session-panel/session-panel-dialog.tsx",
+    "frontend/src/components/daemon/session-panel/session-panel-page.tsx"
+  ],
+  "totals": {
+    "files": 7,
+    "additions": 369,
+    "deletions": 20
+  },
+  "savedAt": "2026-10-20T04:26:37.954Z",
+  "note": "flow done 时点冻结（本变更可归属交付面：baseline..HEAD 提交面过滤 .sillyspec/ 只留 .sillyspec/docs/ 交付文档 + 独占树未提交交付；治理工件目录不入冻结——2026-10-12-close-trace-freeze-integrity FR-01）",
+  "modules": [
+    {
+      "id": "frontend",
+      "files": 6,
+      "doc": "docs/multi-agent-platform/modules/frontend.md",
+      "docTouched": false,
+      "docMissing": false
+    },
+    {
+      "id": "docs",
+      "files": 1,
+      "doc": "docs/multi-agent-platform/modules/docs.md",
+      "docTouched": false,
+      "docMissing": false
+    },
+    {
+      "id": "frontend_components",
+      "files": 6,
+      "doc": "docs/SillyHub/modules/frontend_components.md",
+      "docTouched": false,
+      "docMissing": false
+    }
+  ],
+  "uncoveredDirs": [],
+  "moduleMaps": [
+    "docs/backend/modules/_module-map.yaml",
+    "docs/frontend/modules/_module-map.yaml",
+    "docs/multi-agent-platform/modules/_module-map.yaml",
+    "docs/SillyHub/modules/_module-map.yaml",
+    "docs/sillyhub-daemon/modules/_module-map.yaml"
+  ],
+  "acceptedDirtyGap": 12,
+  "scopeAudit": {
+    "mode": "full-flow",
+    "ok": true,
+    "degradedReason": null,
+    "baseAnchor": "1e3c24ebfd960880eb85908c71f4532c1ef0c6c7",
+    "totals": {
+      "files": 7,
+      "additions": 369,
+      "deletions": 20
+    },
+    "rows": [
+      {
+        "path": "docs/releases/2026-10-20-003-50dfdf2.md",
+        "additions": 62,
+        "deletions": 0,
+        "kind": "new",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": "frontend/src/components/agent-log/__tests__/run-error-item.test.tsx",
+        "additions": 61,
+        "deletions": 12,
+        "kind": "modified",
+        "planned": "修改",
+        "verdict": "planned"
+      },
+      {
+        "path": "frontend/src/components/agent-log/run-error-item.tsx",
+        "additions": 26,
+        "deletions": 2,
+        "kind": "modified",
+        "planned": "修改",
+        "verdict": "planned"
+      },
+      {
+        "path": "frontend/src/components/daemon/__tests__/page-helpers-error-visibility.test.ts",
+        "additions": 150,
+        "deletions": 0,
+        "kind": "new",
+        "planned": "新增",
+        "verdict": "planned"
+      },
+      {
+        "path": "frontend/src/components/daemon/session-panel/page-helpers.tsx",
+        "additions": 17,
+        "deletions": 2,
+        "kind": "modified",
+        "planned": "修改",
+        "verdict": "planned"
+      },
+      {
+        "path": "frontend/src/components/daemon/session-panel/session-panel-dialog.tsx",
+        "additions": 25,
+        "deletions": 2,
+        "kind": "modified",
+        "planned": "修改",
+        "verdict": "planned"
+      },
+      {
+        "path": "frontend/src/components/daemon/session-panel/session-panel-page.tsx",
+        "additions": 28,
+        "deletions": 2,
+        "kind": "modified",
+        "planned": "修改",
+        "verdict": "planned"
+      }
+    ],
+    "excluded": {
+      "foreignDeclared": []
+    },
+    "note": "flow done 时点冻结（本文件落盘时采集）",
+    "closedBy": "flow done"
+  },
+  "patchSha256": "511aed759911a35088805115f4daf15d1d8c01a07586c43b1bcbc223ef692cd3",
+  "patchStatus": "ok"
+}

@@ -20,9 +20,10 @@
 //     落行，终态行不受节流（fake timers）；
 //   - 跨 turn：result 收尾（currentRunId 清空）后到达的 task_notification 用注册时
 //     捕获的派发 runId 落行/emit；
-//   - 2026-10-10-task-wakeup-quiet-threshold FR-01：唤醒最短时长门槛 60s
-//     （elapsed_ms 优先/注册表 startedAt 兜底/双缺失 fail-open），仅拦唤醒注入，
-//     终态 emit/落行/注销不受影响。
+//   - 2026-10-21-task-wakeup-restore：终态唤醒链恢复（ql-20260827-007 原型）——
+//     completed/failed 2s debounce 合并注入、静默阈值 env 可配（SILLYHUB_TASK_
+//     WAKEUP_QUIET_MS 缺省 60000/0 关闭阀/非法回落）、stopped 不注入、双缺失
+//     fail-open、pi 影子任务 agent_task_status 路由零注入（防反馈环）。
 //
 // 不起真 CLI：fake driver 捕获 SessionManager._runConsume 注入的 onTurnMessage/
 // onTurnResult 回调，直接调用即驱动 _onMessage / _onResult 全链路。
@@ -122,8 +123,11 @@ async function createHarness(
   };
 }
 
-/** ql-20260827-007：注入唤醒回调的便捷包装。（2026-10-13-task-wakeup-remove：
- * 唤醒链整体移除，onTaskWakeupInject dep 已删除——本助手随之退役。） */
+/** ql-20260827-007（2026-10-21-task-wakeup-restore 恢复）：注入唤醒回调便捷包装。 */
+function withWakeupDeps(): { depsExtra: Partial<SessionManagerDeps>; wakeup: ReturnType<typeof vi.fn> } {
+  const wakeup = vi.fn(async () => {});
+  return { depsExtra: { onTaskWakeupInject: wakeup } as Partial<SessionManagerDeps>, wakeup };
+}
 
 // ── 事件信封构造（task-08：mock 形态从 raw system 帧改为归一化器等价事件）────
 // 每个构造器产出 TurnMessageEnvelope{events}，事件形态与 ClaudeEventNormalizer
@@ -695,59 +699,174 @@ describe('task-lifecycle FR-01/FR-03 — result 收尾后到达的 task_notifica
   });
 });
 
-// ── 2026-10-13-task-wakeup-remove：终态唤醒链已移除（原 ql-20260827-007 ──────
-//    的 debounce 合并注入 + 2026-10-10 的 60s 安静阈值一并退役） ─────────────
+// ── 2026-10-21-task-wakeup-restore：终态唤醒链恢复（ql-20260827-007 原型 ─────
+//    + 2026-10-10 静默阈值改 env 可配 SILLYHUB_TASK_WAKEUP_QUIET_MS） ─────────
 
-describe('task 终态不注入唤醒（2026-10-13-task-wakeup-remove）', () => {
-  it('终态一律不注入唤醒——completed/failed/stopped 全形态零「[后台任务通知]」注入（含 2s debounce 推进与孤儿终态）', async () => {
+describe('task 终态注入唤醒（2026-10-21-task-wakeup-restore）', () => {
+  it('FR-01：61s completed 注入恰一次——prompt 头部/任务行/用时/摘要/核对指引齐备', async () => {
     vi.useFakeTimers();
     try {
-      const h = await createHarness('sess-w', 'run-w');
-      await h.emitMessage(msgTaskStarted({ taskId: 'task-a', toolUseId: 'call-a', description: '子代理A: 数数' }));
-      await h.emitMessage(msgTaskStarted({ taskId: 'task-s', toolUseId: 'call-s', description: '停我' }));
-      // completed/failed 用 61s——旧口径（≥60s 门槛）必唤醒的形态；
-      // stopped 旧口径本就不唤醒，此处一并守卫。
-      await h.emitMessage(msgTaskNotification({ taskId: 'task-a', status: 'completed', summary: 'A 数完了', durationMs: 61000 }));
-      await h.emitMessage(msgTaskNotification({ taskId: 'task-s', status: 'stopped', durationMs: 61000 }));
-      // 原 2s debounce 窗口推进——窗口内外均不得出现任何「[后台任务通知]」。
+      const { depsExtra, wakeup } = withWakeupDeps();
+      const h = await createHarness('sess-wu1', 'run-wu1', depsExtra);
+      await h.emitMessage(msgTaskStarted({ taskId: 'task-a', toolUseId: 'call-a', description: '调研 sgm 隐患排查任务生成' }));
+      await h.emitMessage(msgTaskNotification({ taskId: 'task-a', status: 'completed', summary: '调研完成。核心是周期性自定义检查模块', durationMs: 386176 }));
       await vi.advanceTimersByTimeAsync(3000);
+      expect(wakeup).toHaveBeenCalledTimes(1);
+      const prompt = String(wakeup.mock.calls[0]![1] as string);
+      expect(prompt.startsWith('[后台任务通知]')).toBe(true);
+      expect(prompt).toContain('以下 1 个后台子代理任务已全部结束');
+      expect(prompt).toContain('任务「调研 sgm 隐患排查任务生成」已完成');
+      expect(prompt).toContain('（用时 06:26）');
+      expect(prompt).toContain('结果摘要：调研完成。核心是周期性自定义检查模块');
+      expect(prompt).toContain('task_id: task-a');
+      expect(prompt).toContain('逐条核对');
+      expect(prompt).toContain('禁止声称仍在等待任何任务');
+      // 唤醒不入 onTurnMessage 日志轨（注入走 backend inject 通道）。
       const allLines = h.deps.onTurnMessage.mock.calls
         .map((c) => String((c[2] as { content?: string })?.content ?? ''));
       expect(allLines.some((s) => s.includes('[后台任务通知]'))).toBe(false);
-      // 终态侧信道不因移除唤醒而丢：completed 的 [TASK_NOTIFICATION] 行照常落。
-      const notifLine = allLines.find((s) => s.startsWith('[TASK_NOTIFICATION]'));
-      expect(notifLine).toBeDefined();
-      expect(notifLine).toContain('"task_id":"task-a"');
-      expect(notifLine).toContain('"status":"completed"');
-
-      // 孤儿终态（task_started 丢失、无注册条目——旧 fail-open 必唤醒形态）：
-      // 同样零注入。
-      const h2 = await createHarness('sess-w2', 'run-w2');
-      await h2.emitMessage(msgTaskNotification({ taskId: 'task-q5', toolUseId: 'call-q5', status: 'failed', summary: '孤儿终态', durationMs: 61000 }));
-      await vi.advanceTimersByTimeAsync(3000);
-      const orphanLines = h2.deps.onTurnMessage.mock.calls
-        .map((c) => String((c[2] as { content?: string })?.content ?? ''));
-      expect(orphanLines.some((s) => s.includes('[后台任务通知]'))).toBe(false);
     } finally {
       vi.useRealTimers();
     }
   });
 
-  it('终态侧信道照常——emit/[TASK_NOTIFICATION] 落行/注销不因移除唤醒而变', async () => {
+  it('FR-01：2s 窗口内两任务合并一条注入，头部总数=2、两行齐备', async () => {
     vi.useFakeTimers();
     try {
-      const h = await createHarness('sess-q1', 'run-q1');
+      const { depsExtra, wakeup } = withWakeupDeps();
+      const h = await createHarness('sess-wu2', 'run-wu2', depsExtra);
+      await h.emitMessage(msgTaskStarted({ taskId: 'task-a', toolUseId: 'call-a', description: '子代理A' }));
+      await h.emitMessage(msgTaskStarted({ taskId: 'task-b', toolUseId: 'call-b', description: '子代理B' }));
+      await h.emitMessage(msgTaskNotification({ taskId: 'task-a', status: 'completed', summary: 'A 完成', durationMs: 61000 }));
+      await h.emitMessage(msgTaskNotification({ taskId: 'task-b', status: 'completed', summary: 'B 完成', durationMs: 62000 }));
+      await vi.advanceTimersByTimeAsync(3000);
+      expect(wakeup).toHaveBeenCalledTimes(1);
+      const prompt = String(wakeup.mock.calls[0]![1] as string);
+      expect(prompt).toContain('以下 2 个后台子代理任务已全部结束');
+      expect(prompt).toContain('任务「子代理A」已完成');
+      expect(prompt).toContain('任务「子代理B」已完成');
+      expect(prompt).toContain('共 2 个');
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('FR-02：短任务（5s < 60s 阈值）不注入，终态 emit/[TASK_NOTIFICATION] 落行照常', async () => {
+    vi.useFakeTimers();
+    try {
+      const { depsExtra, wakeup } = withWakeupDeps();
+      const h = await createHarness('sess-wu3', 'run-wu3', depsExtra);
       await h.emitMessage(msgTaskStarted({ taskId: 'task-q1', toolUseId: 'call-q1', description: '秒级搜索' }));
       await h.emitMessage(msgTaskNotification({ taskId: 'task-q1', status: 'completed', summary: '查完了', durationMs: 2000 }));
       await vi.advanceTimersByTimeAsync(3000);
-      // 终态 emit 与 [TASK_NOTIFICATION] 行照常（含 elapsed_ms 服务端权威值）。
+      expect(wakeup).not.toHaveBeenCalled();
       expect(taskEventCalls(h).some(([, , e]) => (e as { status?: string }).status === 'completed')).toBe(true);
       const notifLine = h.deps.onTurnMessage.mock.calls
         .map((c) => String((c[2] as { content?: string })?.content ?? ''))
         .find((s) => s.startsWith('[TASK_NOTIFICATION]'));
       expect(notifLine).toBeDefined();
-      expect(notifLine).toContain('"task_id":"task-q1"');
       expect(notifLine).toContain('"elapsed_ms":2000');
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('FR-02：stopped 终态不注入（主动停止无需汇报）', async () => {
+    vi.useFakeTimers();
+    try {
+      const { depsExtra, wakeup } = withWakeupDeps();
+      const h = await createHarness('sess-wu4', 'run-wu4', depsExtra);
+      await h.emitMessage(msgTaskStarted({ taskId: 'task-s', toolUseId: 'call-s', description: '停我' }));
+      await h.emitMessage(msgTaskNotification({ taskId: 'task-s', status: 'stopped', durationMs: 61000 }));
+      await vi.advanceTimersByTimeAsync(3000);
+      expect(wakeup).not.toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('FR-02：双缺失 fail-open——孤儿终态（无 elapsed_ms、无注册条目）照常注入', async () => {
+    vi.useFakeTimers();
+    try {
+      const { depsExtra, wakeup } = withWakeupDeps();
+      const h = await createHarness('sess-wu5', 'run-wu5', depsExtra);
+      // task_started 丢失 + 无 durationMs → elapsedMs/startedAt 双缺失。
+      await h.emitMessage(msgTaskNotification({ taskId: 'task-q5', toolUseId: 'call-q5', status: 'failed', summary: '孤儿终态' }));
+      await vi.advanceTimersByTimeAsync(3000);
+      expect(wakeup).toHaveBeenCalledTimes(1);
+      const prompt = String(wakeup.mock.calls[0]![1] as string);
+      expect(prompt).toContain('任务「后台任务」已失败');
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('FR-03：阈值 env 可配——120000 拦 90s、0 关闭阀拦 61s、非法值回落默认', async () => {
+    vi.useFakeTimers();
+    try {
+      const prev = process.env.SILLYHUB_TASK_WAKEUP_QUIET_MS;
+      try {
+        // 120000 > 90000 → 拦。
+        process.env.SILLYHUB_TASK_WAKEUP_QUIET_MS = '120000';
+        const t1 = withWakeupDeps();
+        const h1 = await createHarness('sess-wu6', 'run-wu6', t1.depsExtra);
+        await h1.emitMessage(msgTaskNotification({ taskId: 'task-90s', status: 'completed', summary: '九十秒', durationMs: 90000 }));
+        await vi.advanceTimersByTimeAsync(3000);
+        expect(t1.wakeup).not.toHaveBeenCalled();
+
+        // 0 = 总关闭阀：61s（默认阈值必唤醒形态）也不注入。
+        process.env.SILLYHUB_TASK_WAKEUP_QUIET_MS = '0';
+        const t2 = withWakeupDeps();
+        const h2 = await createHarness('sess-wu7', 'run-wu7', t2.depsExtra);
+        await h2.emitMessage(msgTaskNotification({ taskId: 'task-61s', status: 'completed', summary: '六十一秒', durationMs: 61000 }));
+        await vi.advanceTimersByTimeAsync(3000);
+        expect(t2.wakeup).not.toHaveBeenCalled();
+
+        // 非法值（负数）回落默认 60000 → 61s 注入放行。
+        process.env.SILLYHUB_TASK_WAKEUP_QUIET_MS = '-5';
+        const t3 = withWakeupDeps();
+        const h3 = await createHarness('sess-wu8', 'run-wu8', t3.depsExtra);
+        await h3.emitMessage(msgTaskNotification({ taskId: 'task-61b', status: 'completed', summary: '六十一秒B', durationMs: 61000 }));
+        await vi.advanceTimersByTimeAsync(3000);
+        expect(t3.wakeup).toHaveBeenCalledTimes(1);
+      } finally {
+        if (prev === undefined) delete process.env.SILLYHUB_TASK_WAKEUP_QUIET_MS;
+        else process.env.SILLYHUB_TASK_WAKEUP_QUIET_MS = prev;
+      }
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('FR-04：影子任务 agent_task_status 路由（pi 轮次聚合）不触发唤醒——防「轮结束→注入」反馈环', async () => {
+    vi.useFakeTimers();
+    try {
+      const { depsExtra, wakeup } = withWakeupDeps();
+      const h = await createHarness('sess-wu9', 'run-wu9', depsExtra);
+      // pi 影子任务全走 agent_task_status：turn_start 注册 running、turn_end completed。
+      await h.emitMessage(msgTaskStarted({ taskId: 'pi-t1', description: '执行任务' }));
+      await h.emitMessage(msgTaskUpdated({ taskId: 'pi-t1', patch: { status: 'completed' } }));
+      await vi.advanceTimersByTimeAsync(3000);
+      expect(wakeup).not.toHaveBeenCalled();
+      // 终态 emit 照常（agent_task_status 语义不受唤醒链影响）。
+      expect(taskEventCalls(h).some(([, , e]) => (e as { status?: string }).status === 'completed')).toBe(true);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('FR-01：未接线 onTaskWakeupInject（缺省 deps）时唤醒静默跳过，终态侧信道不变', async () => {
+    vi.useFakeTimers();
+    try {
+      const h = await createHarness('sess-wu10', 'run-wu10');
+      await h.emitMessage(msgTaskNotification({ taskId: 'task-x9', toolUseId: 'call-x9', status: 'completed', summary: '后台完成', durationMs: 61000 }));
+      await vi.advanceTimersByTimeAsync(3000);
+      const notifLine = h.deps.onTurnMessage.mock.calls
+        .map((c) => String((c[2] as { content?: string })?.content ?? ''))
+        .find((s) => s.startsWith('[TASK_NOTIFICATION]'));
+      expect(notifLine).toBeDefined();
+      expect(notifLine).toContain('"task_id":"task-x9"');
+      expect(notifLine).toContain('"status":"completed"');
     } finally {
       vi.useRealTimers();
     }

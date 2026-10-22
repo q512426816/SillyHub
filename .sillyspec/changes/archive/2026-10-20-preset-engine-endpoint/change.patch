@@ -1,0 +1,349 @@
+diff --git a/docs/releases/2026-10-20-005-6fa3a31.md b/docs/releases/2026-10-20-005-6fa3a31.md
+new file mode 100644
+index 000000000..2a125705c
+--- /dev/null
++++ b/docs/releases/2026-10-20-005-6fa3a31.md
+@@ -0,0 +1,36 @@
++---
++seq: 28
++deployed_at: "2026-10-20 13:48:00"
++status: success
++commit_from: c15380d65
++commit_to: 6fa3a3137
++summary: 腾讯云生产部署——供应商预设按引擎默认端点（智谱/OpenCode 预设 codex 专用端点覆盖 + 表单勾 Codex 联动切端点与 Claude 互斥），杜绝"预设填 claude 端点 + 勾 Codex"坏配置再生；随版 fetch-models 规格补录
++agent: zcode-agent
++commits:
++  - sha: 6fa3a3137
++    message: "feat(llm-providers): 供应商预设按引擎默认端点——智谱/OpenCode 预设 codex 覆盖 + 表单联动互斥，前端 5157 绿 (task-01/02/03) (2026-10-20-preset-engine-endpoint)"
++    author: qinyi
++  - sha: aa64d0624
++    message: "docs(sillyspec): fetch-models 评审 P2 清偿——FR-04/05 补录 (2026-10-20-codex-models-fetch-candidates)"
++    author: qinyi
++---
++
++## 本次部署
++
++**腾讯云生产机更新部署**（main @ 6fa3a3137，旧镜像备份 backup-20261020-1348）。
++
++- 🆕 预设 codex 端点覆盖：智谱 GLM（`/api/v1`，官方 codex 文档）与 OpenCode Go
++  （`/inference/go/openai/v1`，官方 docs/go Responses 端点）声明 codex 专用
++  base_url+默认模型（均 2026-10-20 实测 codex 跑通；OpenCode 注意 Responses 系
++  模型 gpt-6-luna 等，与 claude 侧模型集不同）
++- 🆕 表单引擎联动：勾 Codex 自动切 codex 端点并与 Claude 互斥（一条凭证一个
++  端点的平台约束显性化 + notice 引导另建）；取消/勾回对称恢复；自定义与无覆盖
++  预设零联动
++- 背景：今日两账号三次实证「预设填 claude 端点 + 勾 Codex」保存即坏配置
++  （/zen/go/responses 与 /api/anthropic 无 responses 路径必 404/断流）
++
++## 📝 部署验证
++
++- health `commit_sha=6fa3a3137` 与打包源一致；公网前端 200
++- 组件测试 3 联动用例（勾 Codex 切换/对称恢复/自定义零联动）+ 预设常量 2 用例；
++  前端全量 5157 绿
+diff --git a/frontend/src/components/llm-providers/__tests__/llm-provider-form.test.tsx b/frontend/src/components/llm-providers/__tests__/llm-provider-form.test.tsx
+index 4a12900fc..ea5529789 100644
+--- a/frontend/src/components/llm-providers/__tests__/llm-provider-form.test.tsx
++++ b/frontend/src/components/llm-providers/__tests__/llm-provider-form.test.tsx
+@@ -785,3 +785,57 @@ describe("LlmProviderForm — 引擎自动压缩区（claude 条件渲染）", (
+     expect(screen.queryByText("引擎自动压缩（claude）")).toBeNull();
+   });
+ });
++
++// ── 预设 codex 端点联动（2026-10-20-preset-engine-endpoint）──────────────────
++// 同一供应商 claude/codex 端点不同（codex 只支持 Responses 协议），带 codex 覆盖的
++// 预设勾 Codex 联动切换端点并与 Claude 互斥；无预设/无覆盖零联动。
++describe("LlmProviderForm — 预设 codex 端点联动（2026-10-20-preset-engine-endpoint）", () => {
++  const baseUrlInput = () =>
++    screen.getByPlaceholderText(/https:\/\/api\.anthropic\.com/) as HTMLInputElement;
++  const kindCheckbox = (label: string) =>
++    screen.getByRole("checkbox", { name: new RegExp(label) }) as HTMLInputElement;
++
++  it("OpenCode Go 预设勾 Codex → 切 codex 端点并自动取消 Claude 勾选 + notice", () => {
++    render(<LlmProviderForm mode="create" onSubmit={vi.fn()} onCancel={vi.fn()} />);
++    fireEvent.click(screen.getByRole("button", { name: /^OpenCode Go$/ }));
++    expect(baseUrlInput().value).toBe("https://opencode.ai/zen/go");
++
++    fireEvent.click(kindCheckbox("Codex"));
++
++    expect(baseUrlInput().value).toBe(
++      "https://opencode.ai/inference/go/openai/v1",
++    );
++    expect(kindCheckbox("Codex").checked).toBe(true);
++    expect(kindCheckbox("Claude Code").checked).toBe(false);
++    expect(screen.getByText(/Codex 专用端点/)).toBeInTheDocument();
++  });
++
++  it("codex 形态勾回 Claude → 恢复 claude 端点并取消 Codex（对称互斥）", () => {
++    render(<LlmProviderForm mode="create" onSubmit={vi.fn()} onCancel={vi.fn()} />);
++    fireEvent.click(screen.getByRole("button", { name: /^OpenCode Go$/ }));
++    fireEvent.click(kindCheckbox("Codex"));
++    expect(baseUrlInput().value).toBe(
++      "https://opencode.ai/inference/go/openai/v1",
++    );
++
++    fireEvent.click(kindCheckbox("Claude Code"));
++
++    expect(baseUrlInput().value).toBe("https://opencode.ai/zen/go");
++    expect(kindCheckbox("Claude Code").checked).toBe(true);
++    expect(kindCheckbox("Codex").checked).toBe(false);
++    expect(screen.getByText(/已恢复 Claude 端点/)).toBeInTheDocument();
++  });
++
++  it("自定义表单勾 Codex 零联动（base_url 不变、无切换 notice）", () => {
++    render(<LlmProviderForm mode="create" onSubmit={vi.fn()} onCancel={vi.fn()} />);
++    fireEvent.change(baseUrlInput(), {
++      target: { value: "https://my-relay.example.com" },
++    });
++
++    fireEvent.click(kindCheckbox("Codex"));
++
++    expect(baseUrlInput().value).toBe("https://my-relay.example.com");
++    expect(kindCheckbox("Claude Code").checked).toBe(true); // 不强制互斥
++    expect(screen.queryByText(/专用端点/)).toBeNull();
++  });
++});
+diff --git a/frontend/src/components/llm-providers/__tests__/llmProviderPresets.test.ts b/frontend/src/components/llm-providers/__tests__/llmProviderPresets.test.ts
+index e1e75589e..939b189f3 100644
+--- a/frontend/src/components/llm-providers/__tests__/llmProviderPresets.test.ts
++++ b/frontend/src/components/llm-providers/__tests__/llmProviderPresets.test.ts
+@@ -99,3 +99,29 @@ describe("LLM_PROVIDER_PRESETS — 不预填认证键（ql-20260823-007）", ()
+     }
+   });
+ });
++
++// 2026-10-20-preset-engine-endpoint：codex 引擎端点覆盖常量断言——只允许实测
++// 跑通的两家声明覆盖（R-05 不臆造），端点/模型与官方文档及 2026-10-20 实测一致。
++describe("LLM_PROVIDER_PRESETS — codex 引擎端点覆盖（2026-10-20-preset-engine-endpoint）", () => {
++  it("zhipu_glm/opencode_go 声明 codex 覆盖且端点/模型正确；其余预设无覆盖", () => {
++    expect(PRESET_BY_KEY["zhipu_glm"]!.codex).toEqual({
++      base_url: "https://open.bigmodel.cn/api/v1",
++      default_model: "glm-5.3",
++    });
++    expect(PRESET_BY_KEY["opencode_go"]!.codex).toEqual({
++      base_url: "https://opencode.ai/inference/go/openai/v1",
++      default_model: "gpt-6-luna",
++    });
++    const withCodex = LLM_PROVIDER_PRESETS.filter((p) => p.codex).map(
++      (p) => p.key,
++    );
++    expect(withCodex).toEqual(["zhipu_glm", "opencode_go"]);
++  });
++
++  it("codex 覆盖端点与各自 claude base_url 不同（同端点无需覆盖）", () => {
++    for (const p of LLM_PROVIDER_PRESETS) {
++      if (!p.codex) continue;
++      expect(p.codex.base_url, `预设 ${p.key}`).not.toBe(p.base_url);
++    }
++  });
++});
+diff --git a/frontend/src/components/llm-providers/llm-provider-form.tsx b/frontend/src/components/llm-providers/llm-provider-form.tsx
+index ff261d68f..74916ef18 100644
+--- a/frontend/src/components/llm-providers/llm-provider-form.tsx
++++ b/frontend/src/components/llm-providers/llm-provider-form.tsx
+@@ -18,7 +18,11 @@ import {
+   type LlmProviderRoleMapping,
+ } from "@/lib/api/llm-providers";
+ import { errMessage } from "@/lib/errors";
+-import { PRESETS_BY_CATEGORY, type LlmProviderPreset } from "@/config/llmProviderPresets";
++import {
++  PRESETS_BY_CATEGORY,
++  PRESET_BY_KEY,
++  type LlmProviderPreset,
++} from "@/config/llmProviderPresets";
+ import { cn } from "@/lib/utils";
+ import { ModelInputWithFetch, type FetchedModel } from "./model-input-with-fetch";
+ 
+@@ -622,38 +626,71 @@ export function LlmProviderForm({
+     setSettingsConfigJson(JSON.stringify(cfg, null, 2));
+   };
+ 
++  /**
++   * 按引擎应用预设表单形态（2026-10-20-preset-engine-endpoint）。
++   *
++   * claude 形态 = 既有行为（base_url/默认模型/env 模板）；codex 形态 = 预设
++   * codex 覆盖（同一家供应商 codex 走不同协议端点，仅实测过的预设声明）——
++   * base_url/默认模型取覆盖值，settings_config 不预填（ANTHROPIC_* env 是
++   * claude 注入模板，对 codex 直连无意义）。name/auth_field/api_format/
++   * website_url 引擎无关，归 applyPreset 统一设置。
++   */
++  const applyPresetForm = (
++    preset: LlmProviderPreset,
++    engine: "claude" | "codex",
++  ): void => {
++    const codex = engine === "codex" ? preset.codex : undefined;
++    if (!codex && engine === "codex") return; // 无覆盖预设不进 codex 形态（调用方保证）
++    setBaseUrl(codex?.base_url ?? preset.base_url);
++    const model = codex?.default_model ?? preset.default_model ?? "";
++    setModelRows(
++      model
++        ? [{ name: model, multimodal: "auto", roles: ["sonnet"], one_m: false }]
++        : [],
++    );
++    if (codex) {
++      setSettingsConfigJson("{}");
++    } else {
++      try {
++        setSettingsConfigJson(
++          JSON.stringify(preset.settings_config_partial ?? {}, null, 2),
++        );
++      } catch {
++        setSettingsConfigJson("{}");
++      }
++    }
++  };
++
+   /**
+    * 套用预设（task-07 / D-001）：一键预填 name / base_url / auth_field /
+    * default_fallback_model / website_url / settings_config（settings_config_partial
+    * 序列化为美化 JSON，复用既有单一真相）+ 角色映射（default_model 套用到全部 4 角色，
+    * 照 handleAutoFill 范式）；**api_key 始终留空**给用户填（永不预填明文 token）。
+    * 仅新建模式调用（编辑模式不渲染选择器，避免覆盖既有配置）。
++   * 2026-10-20-preset-engine-endpoint：当前勾选仅 codex（无 claude）且预设带
++   * codex 覆盖 → 直接应用 codex 形态；否则 claude 形态（既有行为）。
+    */
+   const applyPreset = (preset: LlmProviderPreset): void => {
+     setSelectedPresetKey(preset.key);
+     setName(preset.name);
+-    setBaseUrl(preset.base_url);
+     setAuthField(preset.auth_field);
+     setApiFormat(preset.api_format);
+     setWebsiteUrl(preset.website_url);
+     setApiKey("");
+-    try {
+-      setSettingsConfigJson(
+-        JSON.stringify(preset.settings_config_partial ?? {}, null, 2),
+-      );
+-    } catch {
+-      setSettingsConfigJson("{}");
+-    }
+-    // D-001：预设 default_model → 首行模型条目（带 sonnet 主标记；无则清空列表）。
+-    const model = preset.default_model ?? "";
+-    setModelRows(
+-      model
+-        ? [{ name: model, multimodal: "auto", roles: ["sonnet"], one_m: false }]
+-        : [],
+-    );
++    const codexForm =
++      Boolean(preset.codex) &&
++      !agentKinds.includes("claude") &&
++      agentKinds.includes("codex");
++    applyPresetForm(preset, codexForm ? "codex" : "claude");
+     setNotice({
+       kind: "ok",
+-      msg: `✓ 已套用「${preset.name}」预设，请填写 API Key 后保存。`,
++      msg: codexForm
++        ? `✓ 已套用「${preset.name}」预设（Codex 专用端点 ${preset.codex?.base_url}），请填写 API Key 后保存。`
++        : `✓ 已套用「${preset.name}」预设，请填写 API Key 后保存。${
++            preset.codex
++              ? "勾选 Codex 会自动切换到 Codex 专用端点（与 Claude 端点不同，一条凭证只能服务一个引擎）。"
++              : ""
++          }`,
+     });
+   };
+ 
+@@ -817,11 +854,51 @@ export function LlmProviderForm({
+                         ? [...agentKinds, v]
+                         : agentKinds.filter((k) => k !== v);
+                       if (next.length === 0) return; // 至少保留一个（UI 层不产生空集）
+-                      setAgentKinds(next);
++                      // 2026-10-20-preset-engine-endpoint：选中带 codex 覆盖的预设时，
++                      // 勾 Codex → 切 codex 端点形态并自动取消 Claude（一条凭证一个
++                      // 端点，两引擎同勾必有一侧拿到错端点）；取消 Codex（回落仅
++                      // Claude）→ 恢复 claude 形态。无预设/无覆盖零联动（FR-03）。
++                      const activePreset = selectedPresetKey
++                        ? PRESET_BY_KEY[selectedPresetKey]
++                        : null;
++                      let finalKinds = next;
++                      let switchNotice: string | null = null;
++                      if (activePreset?.codex && v === "codex") {
++                        if (e.target.checked) {
++                          applyPresetForm(activePreset, "codex");
++                          if (next.includes("claude")) {
++                            finalKinds = next.filter((k) => k !== "claude");
++                            switchNotice = `已切换到 Codex 专用端点（${activePreset.codex.base_url}）并取消 Claude 勾选——同一供应商两引擎端点不同，一条凭证只能服务一个引擎，Claude 请用同预设另建一条。`;
++                          } else {
++                            switchNotice = `已切换到 Codex 专用端点（${activePreset.codex.base_url}）。`;
++                          }
++                        } else if (
++                          !next.includes("codex") &&
++                          next.includes("claude")
++                        ) {
++                          applyPresetForm(activePreset, "claude");
++                          switchNotice = `已恢复 ${activePreset.name} 的 Claude 端点形态（${activePreset.base_url}）。`;
++                        }
++                      } else if (
++                        activePreset?.codex &&
++                        v === "claude" &&
++                        e.target.checked &&
++                        next.includes("codex")
++                      ) {
++                        // 对称互斥：codex 形态下勾回 Claude → 保持 claude 形态并
++                        // 取消 codex（勾选集合永不同时含两引擎，见 FR-02 约束）。
++                        finalKinds = next.filter((k) => k !== "codex");
++                        applyPresetForm(activePreset, "claude");
++                        switchNotice = `已恢复 Claude 端点（${activePreset.base_url}）并取消 Codex 勾选——Codex 请用同预设另建一条（专用端点 ${activePreset.codex.base_url}）。`;
++                      }
++                      setAgentKinds(finalKinds);
++                      if (switchNotice) {
++                        setNotice({ kind: "ok", msg: switchNotice });
++                      }
+                       // 取消 pi 勾选后若 auth_field 是 pi 自由输入 env 名（不在两
+                       // 选项内）→ 归一回缺省，避免下拉空值（单选时代同款归一）。
+                       if (
+-                        !next.includes("pi") &&
++                        !finalKinds.includes("pi") &&
+                         !AUTH_FIELD_OPTIONS.some((opt) => opt.value === authField)
+                       ) {
+                         setAuthField("ANTHROPIC_AUTH_TOKEN");
+diff --git a/frontend/src/config/llmProviderPresets.ts b/frontend/src/config/llmProviderPresets.ts
+index c11f837dc..525ac0c06 100644
+--- a/frontend/src/config/llmProviderPresets.ts
++++ b/frontend/src/config/llmProviderPresets.ts
+@@ -52,6 +52,17 @@ export interface LlmProviderPreset {
+    * 真实 key（ql-20260823-007）。
+    */
+   settings_config_partial?: Record<string, unknown>;
++  /**
++   * codex 引擎专用端点覆盖（2026-10-20-preset-engine-endpoint）。预设 base_url 是
++   * claude 形态；同一家对 codex 需要不同协议端点（codex 只支持 OpenAI Responses，
++   * wire_api="responses" 是 CLI 唯一合法值）时在此声明，表单勾选 Codex 联动切换。
++   * 只填实测跑通的（R-05 不臆造）：智谱官方 codex 文档端点 /api/v1、OpenCode
++   * docs/go 的 Responses 端点（注意其 Responses 系模型与 claude 侧模型集不同）。
++   */
++  codex?: {
++    base_url: string;
++    default_model?: string;
++  };
+ }
+ 
+ export const LLM_PROVIDER_PRESETS: LlmProviderPreset[] = [
+@@ -122,6 +133,13 @@ export const LLM_PROVIDER_PRESETS: LlmProviderPreset[] = [
+     api_key_url: "https://www.bigmodel.cn/claude-code",
+     usage: { type: "token_plan" },
+     icon_color: "#0F62FE",
++    // codex 官方接入端点（docs.bigmodel.cn/cn/coding-plan/tool/codex）：OpenAI
++    // Responses 协议走 /api/v1，与 claude 的 /api/anthropic 不同（2026-10-20 实测
++    // codex 直连跑通；glm-5-turbo/glm-5.3-flash 亦可用，见 models.json 目录）。
++    codex: {
++      base_url: "https://open.bigmodel.cn/api/v1",
++      default_model: "glm-5.3",
++    },
+     settings_config_partial: {
+       env: {
+         ANTHROPIC_BASE_URL: "https://open.bigmodel.cn/api/anthropic",
+@@ -215,6 +233,15 @@ export const LLM_PROVIDER_PRESETS: LlmProviderPreset[] = [
+     website_url: "https://opencode.ai/go",
+     api_key_url: "https://opencode.ai/go",
+     icon_color: "#211E1E",
++    // codex 专用 Responses 端点（opencode.ai/docs/go：/inference/go/openai/v1，
++    // 2026-10-20 实测跑通）。注意模型集不同：Responses 仅 gpt-luna/grok/muse-spark
++    // 系——glm/kimi/deepseek 系在该端点仅 chat completions，codex 用会
++    // ModelProtocolUnsupported，故默认模型取 gpt-6-luna 而非 claude 侧的
++    // deepseek-v4.1-flash。
++    codex: {
++      base_url: "https://opencode.ai/inference/go/openai/v1",
++      default_model: "gpt-6-luna",
++    },
+     settings_config_partial: {
+       env: {
+         ANTHROPIC_BASE_URL: "https://opencode.ai/zen/go",

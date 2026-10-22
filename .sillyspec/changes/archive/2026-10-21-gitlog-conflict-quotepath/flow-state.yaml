@@ -1,0 +1,50 @@
+tier: thin
+legacy_fallback: false
+substeps:
+  artifacts: done
+  ledger: done
+  patch: done
+  review: done
+  probes: done
+  distill: done
+  archive: done
+  events: done
+born_face: thin
+with_tasks: false
+review_force: null
+input: >-
+  合并冲突链路非ASCII路径quotepath修复
+
+
+  动机：上变更评审 P3-2 指出 gitMerge 冲突链路同根因遗留——_listConflictFiles 的 git diff --name-only 未关 quotepath，中文冲突文件名以 C 引号转义形态进入
+  conflicts[].file 且后续 readFile 失配致 marker 计数落 catch 归 0，与 2026-10-21-gitlog-quotepath-fix 同款修法收编。
+
+
+  成功标准：
+
+  - _listConflictFiles 的 git diff --name-only 调用统一带 -c core.quotepath=false，残余 C 引号形态经 decodeGitCQuote 解码为原文
+
+  - daemon 单测覆盖中文冲突文件名解析，真实 git 集成实测中文文件名 merge 冲突：conflicts[].file 为原文且 marker_lines 正确计数
+
+  - 跑 git merge 相关既有测试全绿，daemon tsc 零错
+autopilot: false
+prestage_ack: true
+baseline_commit: 23c936e92bf7871cd0ea0edba46cdf5387e49079
+updatedAt: '2026-10-21T01:17:42.958Z'
+cross_baselines:
+  sillyspec: 3fd7cf3b6c29958a54cee8c72b4b89bf628d9a70
+baseline_sha256: 0511732ce93297dffc80162990b6b7af1c5bfe71362235d28f620401c8bb557e
+spec_approved: true
+spec_approved_at: '2026-10-21T01:11:27.686Z'
+spec_approved_by: zcode-gitlog-conflict-quotepath
+spec_approved_channel: user-confirmed
+spec_attested_by: zcode-gitlog-conflict-quotepath
+batch_ticked: true
+gate_summary: >-
+  test: passed ← module[]+deps(py1+jsx39+jsx4)+fr(41)（85.8s）
+  结果：C:\Users\qinyi\IdeaProjects\multi-agent-platform\.sillyspec\.runtime\verify-runs\20261021011457\test-result.json｜lint:
+  passed ← cd backend && uv run ruff check . && uv run ruff format --check . && uv run mypy app && cd ../frontend &&
+  pnpm lint && cd ../sillyhub-daemon && pnpm typecheck（12.8s）
+  结果：C:\Users\qinyi\IdeaProjects\multi-agent-platform\.sillyspec\.runtime\verify-runs\20261021011457\test-result.json｜门文件
+  29 个
+

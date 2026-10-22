@@ -19,9 +19,16 @@ import type { ParsedAttachmentMarker } from "@/components/daemon/runtime-session
 function AttachmentImageChip({
   att,
   onPreview,
+  tone,
 }: {
   att: ParsedAttachmentMarker;
   onPreview: () => void;
+  /**
+   * 2026-10-20-session-page-dsh-alignment（FR-05）：气泡底色档——onPrimary＝
+   * brand 实色主气泡（旧形态，白色半透明 chip）；brand＝低饱和 brand 浅底气泡
+   * （会话页新形态，chip 走品牌浅底 + 语义描边）。缺省 onPrimary ＝ 旧行为。
+   */
+  tone: "onPrimary" | "brand";
 }) {
   const [url, setUrl] = useState<string | null>(null);
   useEffect(() => {
@@ -47,7 +54,12 @@ function AttachmentImageChip({
 
   if (!url) {
     return (
-      <span className="flex items-center gap-1.5 rounded-lg bg-primary-foreground/10 px-2 py-1.5 text-[11px]">
+      <span
+        className={cn(
+          "flex items-center gap-1.5 rounded-lg px-2 py-1.5 text-[11px]",
+          tone === "onPrimary" ? "bg-primary-foreground/10" : "bg-brand-500/15",
+        )}
+      >
         <ImageIcon className="h-3.5 w-3.5" aria-hidden />
         <span className="max-w-[180px] truncate">{att.name}</span>
       </span>
@@ -65,7 +77,10 @@ function AttachmentImageChip({
       <img
         src={url}
         alt={att.name}
-        className="max-h-40 max-w-[220px] rounded-lg border border-primary-foreground/20 object-cover transition-all hover:border-brand-300"
+        className={cn(
+          "max-h-40 max-w-[220px] rounded-lg border object-cover transition-all hover:border-brand-300",
+          tone === "onPrimary" ? "border-primary-foreground/20" : "border-border",
+        )}
       />
     </button>
   );
@@ -74,10 +89,17 @@ function AttachmentImageChip({
 export function AttachmentChips({
   attachments,
   align = "end",
+  tone = "onPrimary",
 }: {
   attachments: ParsedAttachmentMarker[];
   /** chips 行主轴对齐（单聊用户气泡右对齐缺省；群聊非 self 气泡传 start）。 */
   align?: "start" | "end";
+  /**
+   * 2026-10-20-session-page-dsh-alignment（FR-05 / D-016④）：气泡底色档。
+   * 缺省 "onPrimary" ＝ 既有 brand 实色气泡内的白色半透明 chip（群聊等旧消费方
+   * 零变化）；会话页用户气泡改低饱和 brand 浅底后传 "brand"，chip 换品牌浅底。
+   */
+  tone?: "onPrimary" | "brand";
 }) {
   const [previewTarget, setPreviewTarget] = useState<FilePreviewTarget | null>(null);
   const [previewOpen, setPreviewOpen] = useState(false);
@@ -106,6 +128,7 @@ export function AttachmentChips({
             <AttachmentImageChip
               key={att.id}
               att={att}
+              tone={tone}
               onPreview={() => openPreview(att)}
             />
           ) : (
@@ -114,7 +137,12 @@ export function AttachmentChips({
               type="button"
               onClick={() => openPreview(att)}
               title={`${att.name}（点击在线预览）`}
-              className="flex items-center gap-1.5 rounded-lg bg-primary-foreground/10 px-2 py-1.5 text-[11px] transition-colors hover:bg-primary-foreground/20 hover:text-brand-700"
+              className={cn(
+                "flex items-center gap-1.5 rounded-lg px-2 py-1.5 text-[11px] transition-colors hover:text-brand-700",
+                tone === "onPrimary"
+                  ? "bg-primary-foreground/10 hover:bg-primary-foreground/20"
+                  : "bg-brand-500/15 hover:bg-brand-500/25",
+              )}
             >
               <FileText className="h-3.5 w-3.5" aria-hidden />
               <span className="max-w-[180px] truncate">{att.name}</span>

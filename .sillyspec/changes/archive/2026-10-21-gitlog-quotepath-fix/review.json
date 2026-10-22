@@ -1,0 +1,28 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-21-gitlog-quotepath-fix",
+  "reviewer": "subagent",
+  "verdict": "PASS",
+  "reviewedAgainst": "071d87d869fa6f819a2488262b67c731786788d7",
+  "findings": [
+    {
+      "severity": "P3",
+      "title": "design 盲维「并发」答句「五个 git 方法全只读」与事实不符（gitStatus 含既有 fetch 写面）",
+      "evidence": "gitStatus 内 runGitFetch 执行 `git fetch --quiet` 会写远端跟踪引用/FETCH_HEAD，非只读；但该写面属 2026-08-26 变更既有 D-001 降级设计（三态代号+静默丢弃输出），本变更增量仅插入 -c argv、零写面，并发争用由 git 引用锁+降级路径兜底——属设计文档措辞精度问题，非代码风险",
+      "location": ".sillyspec/changes/2026-10-21-gitlog-quotepath-fix/design.md:27（代码锚点 sillyhub-daemon/src/host-fs-handler.ts:856 runGitFetch）"
+    },
+    {
+      "severity": "P3",
+      "title": "同类显示路径调用面 _listConflictFiles 未关 quotepath（本变更声明范围外的既有遗留，建议后续变更收编）",
+      "evidence": "worktree merge 冲突列举跑 `git diff --name-only --diff-filter=U` 无 -c core.quotepath=false：非 ASCII 冲突文件名会以 C 引号形态进入 conflicts[].file 展示面，且 pathResolve(quoted 形态) 失配使 _countConflictMarkers 落 catch 归 0；只读、有 catch 兜底、不损数据，且 requirements/design 显式把本变更范围限定在 git-log 显示链，不构成本变更缺陷——登记为同根因遗留面",
+      "location": "sillyhub-daemon/src/host-fs-handler.ts:1163-1173（_listConflictFiles 内 runCmd :1166）"
+    }
+  ],
+  "dimensionNotes": {
+    "乱序": "ok（每条 RPC 独立 await 单条 git 命令并同步解析 stdout，无跨命令流水与乱序面；diff 未引入任何流式/共享解析状态——design 答句属实）",
+    "并发": "finding（P3-1：增量面零写风险成立，唯「五个 git 方法全只读」措辞失准——既有 fetch 写面见 findings）；本变更增量边界已裁决：可接受",
+    "切换": "ok（decodeGitCQuote 为无状态纯函数、git 子进程随调用生灭、daemon 不携带新增状态——代码核实属实）",
+    "作用域": "边界已裁决：可接受（per-invocation -c 仅作用于当次子进程、不写宿主 config，diff 内无任何 git config 写入；remote/fetch 不加参最小面经 GL43 精确数组断言钉死；声明边界逐条裁决——风险① 非法 UTF-8 产生 U+FFFD 属只读显示面防御性行为，可接受；风险③ 控制字符即便 quotepath=false 仍强制 C 引号、单行/制表符分隔解析假设不破，机理与 git quote_c_style 一致且经真实 git 集成用例③实证，可接受；死路① 弃 --numstat -z 因 log 族 -z 兼作记录分隔符需重写两段式解析且无额外收益，可接受）"
+  },
+  "reviewedAt": "2026-10-21T09:07:00+08:00"
+}

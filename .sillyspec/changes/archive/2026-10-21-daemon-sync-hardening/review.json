@@ -1,0 +1,34 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-21-daemon-sync-hardening",
+  "reviewer": "subagent",
+  "verdict": "PASS",
+  "reviewedAgainst": "d58f1314c07b62458b250a02f35f9c7f9364255e",
+  "findings": [
+    {
+      "severity": "P3",
+      "title": "FR-01 关闭 warn 日志未标识命中来源（env 还是 flag）",
+      "evidence": "需求文本要求日志「含 workspaceId、开关来源与恢复方法」；实装消息含 ws 与双恢复方法（删 env / 删 flag 路径）但未区分本次命中的具体来源，且无测试钉住该日志内容。",
+      "location": "sillyhub-daemon/src/spec-sync.ts:1130-1136"
+    },
+    {
+      "severity": "P3",
+      "title": "runEventLoopWatch 的 abort 退出被 _fire 误记为 loop_crashed",
+      "evidence": "defaultSleep 以通用 Error('aborted') reject（非 AbortError），_fire 的 catch（daemon.ts:5169）只豁免 AbortError → daemon 每次 stop 会多记一条误导性 loop_crashed error；无重启风险（stop 时 _running=false 短路；竞态窗口 abortableSleep 立即 reject 亦不重启），但模块注释「abort reject 已被 while 结构吸收」与实况不符——证据面变更反留假崩溃证据。",
+      "location": "sillyhub-daemon/src/event-loop-watch.ts:83"
+    },
+    {
+      "severity": "P3",
+      "title": "关闭态在 change-write 路径表现为 pushOk=false（TaskResult.ok=false）",
+      "evidence": "postSpecSync 关闭返回 null 时 task-runner 的 pushOk = resp !== null 判 false 并回传 TaskResult.ok=false——这是设计声明的「mock 等价语义」既有 null 分支行为，但运维侧可能把「单写者让位关闭」误读为推送失败，回执文案未区分。",
+      "location": "sillyhub-daemon/src/task-runner.ts:1650"
+    }
+  ],
+  "dimensionNotes": {
+    "乱序": "ok（开关每次推送现读 env+existsSync 无缓存陈旧态 spec-sync.ts:1130；退避连败计数在 collectStatusOnce 单 for 串行累加、实采成功即清零——边界已裁决：可接受：退避窗口最大陈旧 10 分钟、一次性指路日志进程级去重）",
+    "并发": "ok（flag 文件 daemon 只读 existsSync；连败 Map/去重 Set 均在事件循环单线程内读写；flag 目录 daemonStateDir()/spec-sync-off/ 在 pull 整树交换面之外——swapExtractedDir 及 in-place 兜底只触及 specs/{wsId} 与 specs/ 下 .trash-* 兄弟目录，spec-sync.ts:343-424 实证——边界已裁决：可接受）",
+    "切换": "finding（P3：abort 退出误记 loop_crashed，event-loop-watch.ts:83 / daemon.ts:5169；_fire 挂第六循环与 finally disable 直方图均实证在位且有测试钉住——边界已裁决：可接受：仅 stop 时一条噪音日志，无重启、无泄漏）",
+    "作用域": "ok（per-ws flag 按 wsId 文件名隔离；env 显式整机语义；退避 key=workspaceId 带 __legacy_status_cwd__ 哨兵；crossrepo 守卫 return true 不置位 anyFailed、不动 _statusError、具名摘要槽移除；daemonStateDir 随 SILLYHUB_DAEMON_DIR 重定向按实例隔离——边界已裁决：可接受：关闭态 knowledge hits 仍走 daemon 通道上行，属 D-001 单写者决策面之外的有意保留）"
+  },
+  "reviewedAt": "2026-10-21T04:13:21Z"
+}

@@ -54,8 +54,8 @@
  */
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { Dropdown, Switch, Tag, type MenuProps } from "antd";
-import { Brain, ChevronDown, Cloud, Settings2, Timer, User } from "lucide-react";
+import { Dropdown, Switch, Tag, Tooltip, type MenuProps } from "antd";
+import { Brain, ChevronDown, Cloud, GitBranch, Settings2, Timer, User } from "lucide-react";
 
 import { ApiError } from "@/lib/api";
 import type { components } from "@/lib/api-types";
@@ -63,6 +63,7 @@ import { useMineAgentProfiles } from "@/lib/agent-profiles";
 import { listProviders, noProviderLabel } from "@/lib/api/llm-providers";
 import { useNotify } from "@/lib/errors";
 import {
+  fetchSessionGitStatus,
   fetchSharedAgentsActive,
   getSessionThinkingLevels,
   injectSession,
@@ -70,6 +71,7 @@ import {
 } from "@/lib/daemon";
 import type {
   AgentSessionConfigSnapshot,
+  SessionGitStatus,
   SessionInjectOptions,
   SessionInjectResponse,
 } from "@/lib/daemon";
@@ -297,6 +299,72 @@ export function buildDefaultSwitchPrompt(p: PendingSwitch): string {
 }
 
 /* ────────────────────── 组件 ────────────────────── */
+
+/**
+ * 会话当前 git 分支指示项（2026-10-21-session-git-branch / FR-01..03）。
+ *
+ * 「智能体档案」控件后的只读展示：会话工作目录（cwd，缺省回退工作区绑定根）
+ * 的**当前**分支——GET /api/daemon/sessions/{id}/git-status 每请求经 daemon
+ * RPC 现场采集（FR-02 非快照），60s 前台轮询动态刷新（refetchIntervalInBackground
+ * 默认 false，后台标签页暂停）。detached HEAD 显示 head 短 sha；no_git /
+ * no_root 空态静默隐藏（FR-03，不报错不 toast）；查询失败渲染「⎇ —」占位不阻塞其余
+ * 控件（retry=false——失败由下一轮轮询自然重取，不与轮询叠加堆积）。
+ */
+function SessionGitBranchBadge({
+  sessionId,
+  mobile,
+}: {
+  sessionId: string;
+  mobile: boolean;
+}) {
+  const gitQuery = useQuery<SessionGitStatus, ApiError>({
+    queryKey: ["sessionGitStatus", sessionId],
+    queryFn: () => fetchSessionGitStatus(sessionId),
+    refetchInterval: 60_000,
+    retry: false,
+  });
+  const data = gitQuery.data;
+
+  // FR-03 空态：no_git（目录非 git 仓库）/ no_root（无 cwd 且无绑定）不渲染。
+  if (data && data.git_mode !== "git") return null;
+  const label =
+    data == null
+      ? null
+      : (data.branch ?? (data.detached ? (data.head_short ?? "HEAD") : null));
+  // 首帧 loading 与 git 模式无可显值（空仓库 branch null 且非 detached）都不渲染
+  //（不闪骨架，数据到了再出现）；仅失败态走占位。
+  if (!gitQuery.isError && label == null) return null;
+
+  const tooltip = (
+    <div className="max-w-[280px] space-y-0.5 text-xs">
+      <p>会话工作目录当前分支（60s 自动刷新）</p>
+      {data?.root ? <p className="break-all">目录：{data.root}</p> : null}
+      {data && (data.files_changed != null || data.untracked_count != null) ? (
+        <p>
+          改动 {data.files_changed ?? 0} 个文件 · 未跟踪 {data.untracked_count ?? 0} 个
+        </p>
+      ) : null}
+      {gitQuery.isError ? (
+        <p>查询失败（守护进程离线或目录不在允许范围），稍后自动重试</p>
+      ) : null}
+    </div>
+  );
+
+  return (
+    <Tooltip title={tooltip}>
+      <span
+        data-testid="session-git-branch"
+        title={gitQuery.isError ? "会话 Git 状态查询失败" : "会话当前 Git 分支"}
+        className="inline-flex cursor-default items-center gap-1.5 rounded-md px-2 py-1 text-xs text-muted-foreground/80"
+      >
+        <GitBranch aria-hidden className="h-3.5 w-3.5 shrink-0 text-brand-600" />
+        <span className={cn("max-w-[140px] truncate", mobile && "max-w-[100px]")}>
+          {gitQuery.isError ? "—" : label}
+        </span>
+      </span>
+    </Tooltip>
+  );
+}
 
 export function SessionConfigBar({
   sessionId,
@@ -992,6 +1060,12 @@ export function SessionConfigBar({
               </p>
             )}
           </ConfigDropdown>,
+        )}
+        {/* 2026-10-21-session-git-branch / FR-01..03：会话当前 git 分支指示项
+            （档案控件后）——组件内自取数（思考级别控件先例），mobile 与档案
+            同收纳（mobileReveal 门控）；预会话（sessionId 空串）不渲染。 */}
+        {mobileReveal && sessionId !== "" && (
+          <SessionGitBranchBadge sessionId={sessionId} mobile={mobile} />
         )}
         {/* ql-20260915-009：mobile 不渲染弹性占位（次要开关同收，flex-wrap 行内
             留它只会把行尾插槽顶到下一行）。 */}

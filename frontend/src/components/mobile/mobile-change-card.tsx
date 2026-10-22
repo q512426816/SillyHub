@@ -32,7 +32,8 @@
  *   changes/page.tsx import（task-01 导出，D-005 复用挂载路线），卡片内自绘移动
  *   用量行——不复制桌面 UsageExecCell 为独立组件。
  * - 阶段徽标复用 ChangeStepBadge（自带 STAGE_KIND/STAGE_LABELS 与 stepProgress 副行）；
- *   stage 缺省 "scan"、stepProgress 缺省 null 的降级口径与桌面列表阶段列一致。
+ *   stage 缺省 "brainstorm"、stepProgress 缺省 null 的降级口径与桌面列表阶段列一致
+ *   （2026-10-21-mobile-scan-birth-cleanup：出生阶段即 brainstorm，缺省不再兜底 scan）。
  * - 相对时间复用 formatRelativeTime（runtime-card-helpers）。
  *
  * 移动约束（design §5.5）：整卡为 button（触摸热区 ≥44px，min-h-[44px]）；
@@ -258,7 +259,7 @@ export function MobileChangeCard({
             待办徽标 + 活动徽标 */}
         <span className="flex flex-wrap items-center gap-2">
           <ChangeStepBadge
-            stage={change.current_stage ?? "scan"}
+            stage={change.current_stage ?? "brainstorm"}
             stepProgress={change.step_progress ?? null}
           />
           {/* 出身徽标（2026-10-14-change-center-lineage-tag-and-filter）：完整/轻量 */}

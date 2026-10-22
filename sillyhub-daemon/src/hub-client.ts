@@ -33,7 +33,7 @@ import type { components } from './api-types.js';
 import { DAEMON_VERSION } from './daemon-version.js';
 import { BUILD_ID } from './build-id.js';
 import type { ExecutionContextPayload } from './types.js';
-import type { ModelUsageRow, SessionRecoverStatus } from './daemon.js';
+import type { ModelUsageRow, RunResultPayload, SessionRecoverStatus } from './daemon.js';
 // task-04（FR-01 / D-005@v1）：notifyRunResult payload 的 error 字段类型。
 // 与 backend ModelErrorDTO、daemon/src/model-error/types.ts ModelError 三端同构。
 import type { ModelError } from './model-error/types.js';
@@ -1199,34 +1199,10 @@ export class HubClient {
     leaseId: string,
     claimToken: string,
     runId: string,
-    payload: {
-      status: string;
-      is_error: boolean;
-      subtype?: string;
-      result_summary?: string;
-      // SDKResultSuccess 透传字段（interactive usage/cost/duration 修复）。
-      total_cost_usd?: number;
-      num_turns?: number;
-      duration_ms?: number;
-      duration_api_ms?: number;
-      input_tokens?: number;
-      output_tokens?: number;
-      // task-16 (2026-06-24-runtime-usage-stats)：cache 两维（短名，对齐 backend
-      // _METADATA_FIELDS）。codex/老 Claude CLI 不透传时 undefined → 守卫不 set →
-      // backend 收不到该字段 → NULL（D-001@v1）。
-      cache_read_tokens?: number;
-      cache_creation_tokens?: number;
-      // task-06（2026-08-29-usage-by-provider-model / FR-01-3/FR-02-1）：
-      // modelUsage 逐模型明细行（daemon._modelUsageRows 拆行）+ run 级 assistant
-      // 计数。modelUsage 缺失/空时 daemon 不 set 两字段（老 CLI 兼容，backend
-      // None → 明细无行，N-01）。ModelUsageRow wire 形状归 daemon.ts 拥有。
-      model_usage?: ModelUsageRow[];
-      api_requests?: number;
-      // task-04（FR-01 / D-005@v1）：模型层结构化错误。仅 is_error=true 且归类器产出
-      // 非空 ModelError 时 set（session-manager turn 收尾归类 + 挂到 result.modelError，
-      // daemon 桥接读取注入）；成功路径 / 非模型错误不 set → backend error_detail=NULL（D-008）。
-      error?: ModelError;
-    },
+    // 2026-10-20-session-page-dsh-alignment task-09（1b）：payload 形状与
+    // daemon.ts `RunResultPayload` **同源**（单一类型，禁两处漂移）；本任务只加
+    // 可选 `file_changes` / `timing` / `daemon_version`，既有字段与必填性零改动。
+    payload: RunResultPayload,
   ): Promise<Record<string, unknown>> {
     const path = `${REST_PREFIX}/leases/${encodeURIComponent(
       leaseId,
@@ -1289,6 +1265,25 @@ export class HubClient {
     // backend ModelErrorDTO 同构：{type,code,message,retryable,hint,raw}）。
     if (payload.error !== undefined) {
       body.error = payload.error;
+    }
+    // ── 2026-10-20-session-page-dsh-alignment task-09（1b / D-023@v1）──────────
+    // 每轮工作区快照透传（snake_case 键名对齐 backend `InteractiveRunResultRequest`
+    // 新增字段 `file_changes`；**内部结构保持 camelCase**，与 model_usage 行内
+    // camelCase 同惯例）。undefined（老 daemon / 本轮未采）→ 不写 → backend
+    // capability="tool_only"，前端走「仅工具编辑」降级卡（禁显示「本轮无改动」）。
+    //
+    // 时序：首报（终止 run）不携带快照；快照在轮终态之后采集完成，由 daemon
+    // `_onTurnSnapshot` 用同一端点**补报**（backend `(run_id)` 侧表幂等覆盖写）。
+    if (payload.file_changes !== undefined) {
+      body.file_changes = payload.file_changes;
+    }
+    // task-10 预留：TTFT/attempt 快照（undefined → 键不出现）。
+    if (payload.timing !== undefined) {
+      body.timing = payload.timing;
+    }
+    // 发版门控：daemon 版本（task-13 读侧 / 侧表 daemon_version 列）。
+    if (payload.daemon_version !== undefined) {
+      body.daemon_version = payload.daemon_version;
     }
     const resp = await fetch(url, {
       method: 'POST',
@@ -2498,7 +2493,12 @@ export async function fetchMcpWhitelist(
   try {
     const headers: Record<string, string> = {};
     if (token) headers['Authorization'] = `Bearer ${token}`;
-    const resp = await fetch(url, { headers });
+    // FR-05（2026-10-21-daemon-sync-hardening）：全文件唯一一处无 signal 的 fetch
+    // 补齐显式超时——源码面断言测试钉住「新增无 signal 的 fetch 即红」。
+    const resp = await fetch(url, {
+      headers,
+      signal: AbortSignal.timeout(DEFAULT_TIMEOUT_MS),
+    });
     if (!resp.ok) {
       logger?.('warn', 'mcp_whitelist_fetch_failed', { url, status: resp.status });
       return null;

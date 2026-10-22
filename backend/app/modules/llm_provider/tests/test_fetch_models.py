@@ -290,6 +290,89 @@ class TestFetchModelsHttpxMocked:
         assert [m.id for m in resp.models] == ["claude-sonnet-4", "claude-opus-4"]
 
     @pytest.mark.asyncio
+    async def test_zhipu_coding_base_models_fallback_succeeds(
+        self, db_session: AsyncSession
+    ) -> None:
+        """智谱 coding 范式：base 已含版本段 → base+/models 兜底候选命中。
+
+        base_url=``https://open.bigmodel.cn/api/v1``（2026-10-20-codex-models-fetch-candidates）：
+        - 候选1 ``/api/v1/v1/models`` → 200 但错误 JSON（智谱网关对未知路径 200
+          兜底，实测 2026-10-20）→ 视为本候选失败继续
+        - 候选2 ``/api/v1/models``（base+/models 兜底）→ 200 ``{models:[{slug}]}``
+          （智谱 coding 端点真实形态：列表字段 models、id 缺失取 slug）→ 命中
+        """
+        with (
+            patch("app.modules.tool_gateway.tool_policy.socket.getaddrinfo") as mock_gai,
+            patch("app.modules.llm_provider.service.httpx.AsyncClient") as mock_cls,
+        ):
+            mock_gai.return_value = _PUBLIC_GAI
+            client = _wire_async_client(
+                mock_cls,
+                get_side_effect=[
+                    _make_response(200, {"code": 500, "msg": "404 NOT_FOUND", "success": False}),
+                    _make_response(
+                        200,
+                        {"models": [{"slug": "glm-5.3", "display_name": "glm-5.3"}]},
+                    ),
+                ],
+            )
+
+            svc = LlmProviderService(db_session)
+            resp = await svc.fetch_models(
+                uuid.uuid4(),
+                FetchModelsRequest(
+                    base_url="https://open.bigmodel.cn/api/v1",
+                    api_key="sk-zhipu-coding-key-01",
+                ),
+            )
+
+        assert client.get.await_count == 2
+        first_url = client.get.await_args_list[0].args[0]
+        second_url = client.get.await_args_list[1].args[0]
+        assert first_url == "https://open.bigmodel.cn/api/v1/v1/models"
+        assert second_url == "https://open.bigmodel.cn/api/v1/models"
+        assert [m.id for m in resp.models] == ["glm-5.3"]
+
+    @pytest.mark.asyncio
+    async def test_opencode_openai_v1_strip_fallback_succeeds(
+        self, db_session: AsyncSession
+    ) -> None:
+        """OpenCode 范式：base 尾缀 /openai/v1 → 剥离候选命中网关根 models。
+
+        base_url=``https://opencode.ai/inference/go/openai/v1``：
+        - 候选1 ``/openai/v1/v1/models`` → 404
+        - 候选2 ``/inference/go/v1/models``（剥 /openai/v1，实测上游 200）→ 命中
+        """
+        with (
+            patch("app.modules.tool_gateway.tool_policy.socket.getaddrinfo") as mock_gai,
+            patch("app.modules.llm_provider.service.httpx.AsyncClient") as mock_cls,
+        ):
+            mock_gai.return_value = _PUBLIC_GAI
+            client = _wire_async_client(
+                mock_cls,
+                get_side_effect=[
+                    _make_response(404),
+                    _make_response(200, _FETCH_MODELS_BODY),
+                ],
+            )
+
+            svc = LlmProviderService(db_session)
+            resp = await svc.fetch_models(
+                uuid.uuid4(),
+                FetchModelsRequest(
+                    base_url="https://opencode.ai/inference/go/openai/v1",
+                    api_key="sk-opencode-go-key-01",
+                ),
+            )
+
+        assert client.get.await_count == 2
+        first_url = client.get.await_args_list[0].args[0]
+        second_url = client.get.await_args_list[1].args[0]
+        assert first_url == "https://opencode.ai/inference/go/openai/v1/v1/models"
+        assert second_url == "https://opencode.ai/inference/go/v1/models"
+        assert [m.id for m in resp.models] == ["claude-sonnet-4", "claude-opus-4"]
+
+    @pytest.mark.asyncio
     async def test_all_candidates_404_raises_unsupported(self, db_session: AsyncSession) -> None:
         """全部候选终态 404/405 → LlmProviderModelsUnsupported（中转站未开放）。"""
         with (

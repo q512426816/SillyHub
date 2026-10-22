@@ -1,0 +1,49 @@
+tier: thin
+legacy_fallback: false
+substeps:
+  artifacts: done
+  ledger: done
+  patch: done
+  review: done
+  probes: done
+  distill: done
+  archive: done
+  events: done
+born_face: thin
+with_tasks: false
+review_force: null
+input: >-
+  动机与背景：平台「获取模型列表」对新建的 codex 直连条目（智谱 GLM Codex base=https://open.bigmodel.cn/api/v1、OpenCode Go Codex
+  base=https://opencode.ai/inference/go/openai/v1）恒报「该供应商不支持拉取模型列表」。实测根因：fetch_models 的 anthropic 分支候选只有 base+/v1/models
+  与剥 /anthropic|/compatibility|/api 后缀两形态，两家真实 models 路径均不在候选——智谱真实路径 /api/v1/models（base+/models，base 已含版本段）；OpenCode
+  真实路径 /inference/go/v1/models（需剥 /openai/v1）。两路径均实测 200。
+
+
+  成功标准：
+
+  - api_format=anthropic 且 base_url 以版本段结尾（如 /api/v1）的供应商，「获取模型列表」能拉到模型列表（候选含 base+/models）
+
+  - base_url 尾部含 /openai/v1 的 OpenCode 范式供应商能拉到（候选含剥 /openai/v1 后拼 /v1/models）
+
+  - 既有候选行为零回归（claude 条目 /api/anthropic 等既有命中路径不变）
+autopilot: false
+prestage_ack: true
+baseline_commit: e32b3f44a0e22e07be992072ff7b1ce1e34cb817
+updatedAt: '2026-10-20T05:33:14.852Z'
+cross_baselines:
+  sillyspec: 0ac7c4e6b5d95d595c09491be6d039589c1f642e
+baseline_sha256: 17d5e065b901cf6fe649bb546d991acec14e04db506f164db064724774faecb8
+spec_approved: true
+spec_approved_at: '2026-10-20T04:51:41.674Z'
+spec_approved_by: zcode-codex-models-fetch
+spec_approved_channel: user-confirmed
+spec_attested_by: zcode-codex-models-fetch
+batch_ticked: true
+gate_summary: >-
+  test: passed ← module[]+deps(py10)（49.8s）
+  结果：C:\Users\qinyi\IdeaProjects\multi-agent-platform\.sillyspec\.runtime\verify-runs\20261020052040\test-result.json｜lint:
+  passed ← cd backend && uv run ruff check . && uv run ruff format --check . && uv run mypy app && cd ../frontend &&
+  pnpm lint && cd ../sillyhub-daemon && pnpm typecheck（17.3s）
+  结果：C:\Users\qinyi\IdeaProjects\multi-agent-platform\.sillyspec\.runtime\verify-runs\20261020052040\test-result.json｜门文件
+  6 个
+

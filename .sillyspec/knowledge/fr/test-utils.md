@@ -251,7 +251,19 @@ created_at: 2026-10-16T01:30:35.950Z
 全文：.sillyspec/changes/archive/2026-10-19-hide-shared-profile-in-session/requirements.md#FR-04
 最近确认：4d992afc3f615222da8f0017cd75303fd4777cf8
 
-## FR-test-utils-015 拖拽吸附到边界容器左侧后,停靠组内容左对齐;吸附右侧后保持右对齐
+## FR-test-utils-015 点击刷新按钮后按钮立即转圈且禁用，同步请求返回后恢复可点
+变更：2026-10-21-files-refresh-spinner
+状态：active
+摘要：主路径
+全文：.sillyspec/changes/archive/2026-10-21-files-refresh-spinner/requirements.md#FR-01
+最近确认：e88ffddb76486f445e8bdac23d437a22c39a8ebd
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-21-files-refresh-spinner:flow:测试绑定FR-01
+  tests: frontend/src/components/__tests__/change-file-tree-autorefresh.test.tsx「点击刷新：同步进行中按钮禁用+转圈，返回后恢复」
+
+## FR-test-utils-036 拖拽吸附到边界容器左侧后,停靠组内容左对齐;吸附右侧后保持右对齐
 变更：2026-10-20-pill-dock-left-align
 状态：active
 摘要：主路径；右吸附不受影响
@@ -270,7 +282,7 @@ created_at: 2026-10-16T01:30:35.950Z
   source_change: 2026-10-20-pill-dock-left-align
   status: active
 
-## FR-test-utils-016 持久化位置重载后对齐方向与吸附侧一致
+## FR-test-utils-037 持久化位置重载后对齐方向与吸附侧一致
 变更：2026-10-20-pill-dock-left-align
 状态：active
 摘要：主路径
@@ -286,10 +298,24 @@ created_at: 2026-10-16T01:30:35.950Z
   discovery: machine
   confirmed_by: null
   confirmed_at: null
+  source_change: 2026-10-21-files-refresh-spinner
+  status: active
+
+## FR-test-utils-016 挂载与自动轮询的纯读刷新不触发转圈
+变更：2026-10-21-files-refresh-spinner
+状态：active
+摘要：主路径
+全文：.sillyspec/changes/archive/2026-10-21-files-refresh-spinner/requirements.md#FR-02
+最近确认：e88ffddb76486f445e8bdac23d437a22c39a8ebd
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-21-files-refresh-spinner:flow:测试绑定FR-02
+  tests: frontend/src/components/__tests__/change-file-tree-autorefresh.test.tsx「纯读刷新（挂载/轮询）不触发转圈态」
   source_change: 2026-10-20-pill-dock-left-align
   status: active
 
-## FR-test-utils-017 现有 dock 测试与新增断言全绿
+## FR-test-utils-038 现有 dock 测试与新增断言全绿
 变更：2026-10-20-pill-dock-left-align
 状态：active
 摘要：主路径
@@ -305,10 +331,24 @@ created_at: 2026-10-16T01:30:35.950Z
   discovery: machine
   confirmed_by: null
   confirmed_at: null
+  source_change: 2026-10-21-files-refresh-spinner
+  status: active
+
+## FR-test-utils-017 终态唤醒主路径（completed/failed → debounce 合并注入）
+变更：2026-10-21-task-wakeup-restore
+状态：active
+摘要：空闲会话单任务完成；多任务并发终态合并
+全文：.sillyspec/changes/archive/2026-10-21-task-wakeup-restore/requirements.md#FR-01
+最近确认：440f3fd244d4810e1f4fb0a30c875767cab088e3
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-21-task-wakeup-restore:flow:测试绑定FR-01
+  tests: sillyhub-daemon/tests/interactive/task-lifecycle.test.ts「task 终态注入唤醒——单任务汇总 prompt」
   source_change: 2026-10-20-pill-dock-left-align
   status: active
 
-## FR-test-utils-018 左停靠的组拖拽过程中内容保持左对齐,不再翻回右对齐;右停靠同理保持右对齐
+## FR-test-utils-039 左停靠的组拖拽过程中内容保持左对齐,不再翻回右对齐;右停靠同理保持右对齐
 变更：2026-10-20-pill-dock-drag-align-keep
 状态：active
 摘要：主路径；右停靠拖拽不受影响
@@ -324,10 +364,24 @@ created_at: 2026-10-16T01:30:35.950Z
   discovery: machine
   confirmed_by: null
   confirmed_at: null
+  source_change: 2026-10-21-task-wakeup-restore
+  status: active
+
+## FR-test-utils-018 不注入面（短任务/stopped/非法终态；双缺失 fail-open）
+变更：2026-10-21-task-wakeup-restore
+状态：active
+摘要：短任务不唤醒；stopped 不唤醒；双缺失 fail-open
+全文：.sillyspec/changes/archive/2026-10-21-task-wakeup-restore/requirements.md#FR-02
+最近确认：440f3fd244d4810e1f4fb0a30c875767cab088e3
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-21-task-wakeup-restore:flow:测试绑定FR-02
+  tests: sillyhub-daemon/tests/interactive/task-lifecycle.test.ts「stopped 终态不注入」 | sillyhub-daemon/tests/interactive/task-lifecycle.test.ts「双缺失 fail-open 放行唤醒」 | sillyhub-daemon/tests/interactive/task-lifecycle.test.ts「短任务低于阈值不注入」
   source_change: 2026-10-20-pill-dock-drag-align-keep
   status: active
 
-## FR-test-utils-019 松手吸附后仍按吸附侧正确切换对齐(既有行为不变)
+## FR-test-utils-040 松手吸附后仍按吸附侧正确切换对齐(既有行为不变)
 变更：2026-10-20-pill-dock-drag-align-keep
 状态：active
 摘要：主路径
@@ -343,10 +397,24 @@ created_at: 2026-10-16T01:30:35.950Z
   discovery: machine
   confirmed_by: null
   confirmed_at: null
+  source_change: 2026-10-21-task-wakeup-restore
+  status: active
+
+## FR-test-utils-019 阈值进程级可配（env，缺省 60000，0=关闭）
+变更：2026-10-21-task-wakeup-restore
+状态：active
+摘要：阈值配置生效；0 关闭阀
+全文：.sillyspec/changes/archive/2026-10-21-task-wakeup-restore/requirements.md#FR-03
+最近确认：440f3fd244d4810e1f4fb0a30c875767cab088e3
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-21-task-wakeup-restore:flow:测试绑定FR-03
+  tests: sillyhub-daemon/tests/interactive/task-lifecycle.test.ts「阈值 env 可配与 0 关闭阀」
   source_change: 2026-10-20-pill-dock-drag-align-keep
   status: active
 
-## FR-test-utils-020 dock 测试全绿(新增拖拽中对齐保持断言)
+## FR-test-utils-041 dock 测试全绿(新增拖拽中对齐保持断言)
 变更：2026-10-20-pill-dock-drag-align-keep
 状态：active
 摘要：主路径
@@ -362,10 +430,249 @@ created_at: 2026-10-16T01:30:35.950Z
   discovery: machine
   confirmed_by: null
   confirmed_at: null
+  source_change: 2026-10-21-task-wakeup-restore
+  status: active
+
+## FR-test-utils-020 影子任务路由隔离（pi 轮次聚合不触发唤醒）
+变更：2026-10-21-task-wakeup-restore
+状态：active
+摘要：pi 轮次聚合零注入
+全文：.sillyspec/changes/archive/2026-10-21-task-wakeup-restore/requirements.md#FR-04
+最近确认：440f3fd244d4810e1f4fb0a30c875767cab088e3
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-21-task-wakeup-restore:flow:测试绑定FR-04
+  tests: sillyhub-daemon/tests/interactive/task-lifecycle.test.ts「影子任务 agent_task_status 路由不触发唤醒」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-21-task-wakeup-restore
+  status: active
+
+## FR-test-utils-021 回归与类型门
+变更：2026-10-21-task-wakeup-restore
+状态：active
+摘要：全量回归
+全文：.sillyspec/changes/archive/2026-10-21-task-wakeup-restore/requirements.md#FR-05
+最近确认：440f3fd244d4810e1f4fb0a30c875767cab088e3
+
+## FR-test-utils-022 唤醒轮前端留痕（「收到任务消息」折叠行，执行期用户追加——dsh 同款形态）
+变更：2026-10-21-task-wakeup-restore
+状态：active
+摘要：回放路径；渲染形态
+全文：.sillyspec/changes/archive/2026-10-21-task-wakeup-restore/requirements.md#FR-06
+最近确认：440f3fd244d4810e1f4fb0a30c875767cab088e3
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-21-task-wakeup-restore:flow:测试绑定FR-06
+  tests: frontend/src/components/daemon/__tests__/runtime-session-helpers.test.tsx「唤醒注入开轮 → task_wakeup 段置于段序列首部」 | frontend/src/components/daemon/__tests__/turn-segment-views.test.tsx「默认收起：显示「收到任务消息」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-21-task-wakeup-restore
   source_change: 2026-10-20-pill-dock-drag-align-keep
   status: active
 
-## FR-test-utils-021 已设默认供应商时，各「不指定」下拉项文案显示「不指定（默认：{默认供应商名}）」；未设默认保持「不指定（本机默认）」
+## FR-test-utils-023 「进度」视图内提供「时间线 / 轨迹」呈现方式开关；默认「时间线」＝现状零变化，「对话」视图不出现该开关
+变更：2026-10-22-session-trajectory-view
+状态：active
+摘要：主路径；默认与零回归
+场景正文：
+- 场景：主路径 — Given 一个有历史轮的会话；When 切到「进度」并点「轨迹」；Then 出现 `data-testid="trajectory-pane"`（含恰 3 个 `traj
+- 场景：默认与零回归 — Given 同一会话；When 切到「进度」（默认「时间线」）；Then `turn-block` 照常渲染且不出现轨迹面板。And When 处于「对话」；Then 页面
+全文：.sillyspec/changes/archive/2026-10-22-session-trajectory-view/requirements.md#FR-01
+最近确认：4553d4410c53ba2798b50ef66c742190e10f5289
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-22-session-trajectory-view:flow:测试绑定FR-01
+  tests: frontend/src/components/daemon/__tests__/turn-timeline-trajectory-view.test.tsx
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-22-session-trajectory-view
+  status: active
+
+## FR-test-utils-024 轨迹数据由当前会话已加载的 SessionTurnView[] 派生（零新增网络请求、零后端改动、零 API 变更）
+变更：2026-10-22-session-trajectory-view
+状态：active
+摘要：主路径
+场景正文：
+- 场景：主路径 — 
+全文：.sillyspec/changes/archive/2026-10-22-session-trajectory-view/requirements.md#FR-02
+最近确认：4553d4410c53ba2798b50ef66c742190e10f5289
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-22-session-trajectory-view:flow:测试绑定FR-02
+  tests: frontend/src/components/daemon/trajectory/__tests__/build-trajectory.test.ts | frontend/src/components/daemon/trajectory/__tests__/from-turn-views.test.ts
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-22-session-trajectory-view
+  status: active
+
+## FR-test-utils-025 `/runs` 的 `timing` 透传到轮视图：有 TTFT/attempt 采样时模型泳道标「真实占用」，无采样标「近似」，不伪造
+变更：2026-10-22-session-trajectory-view
+状态：active
+摘要：主路径
+场景正文：
+- 场景：主路径 — 
+全文：.sillyspec/changes/archive/2026-10-22-session-trajectory-view/requirements.md#FR-03
+最近确认：4553d4410c53ba2798b50ef66c742190e10f5289
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-22-session-trajectory-view:flow:测试绑定FR-03
+  tests: frontend/src/components/daemon/__tests__/page-helpers-enrich-api-duration.test.ts | frontend/src/components/daemon/__tests__/runtime-session-helpers.test.tsx | frontend/src/components/daemon/__tests__/turn-timeline-trajectory-view.test.tsx | frontend/src/components/daemon/trajectory/__tests__/from-turn-views.test.ts
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-22-session-trajectory-view
+  status: active
+
+## FR-test-utils-026 无可用时序数据时显示显式空态提示，不白屏、不伪造条
+变更：2026-10-22-session-trajectory-view
+状态：active
+摘要：主路径
+场景正文：
+- 场景：主路径 — Given 轮视图缺 `turnStartedAt`、缺 `replyAt` 且无段；When 打开「轨迹」；Then 出现空态提示且不出现三泳道面板、不出现轮块。
+全文：.sillyspec/changes/archive/2026-10-22-session-trajectory-view/requirements.md#FR-04
+最近确认：4553d4410c53ba2798b50ef66c742190e10f5289
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-22-session-trajectory-view:flow:测试绑定FR-04
+  tests: frontend/src/components/daemon/__tests__/turn-timeline-trajectory-view.test.tsx | frontend/src/components/daemon/trajectory/__tests__/from-turn-views.test.ts
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-22-session-trajectory-view
+  status: active
+
+## FR-test-utils-027 tsc 退出 0；既有 trajectory 61 / turn-segment-views / turn-time-display / session-list-panel 用例不回归，新增适配器与呈现开关用例全绿
+变更：2026-10-22-session-trajectory-view
+状态：active
+摘要：主路径
+场景正文：
+- 场景：主路径 — Given 变更落盘；When 跑 `tsc --noEmit` 与 `src/components/daemon` + `src/pages/sessions` + `s
+全文：.sillyspec/changes/archive/2026-10-22-session-trajectory-view/requirements.md#FR-05
+最近确认：4553d4410c53ba2798b50ef66c742190e10f5289
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-22-session-trajectory-view:flow:测试绑定FR-05
+  tests: frontend/src/components/daemon/__tests__/turn-timeline-trajectory-view.test.tsx | frontend/src/components/daemon/trajectory/__tests__/from-turn-views.test.ts
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-22-session-trajectory-view
+  status: active
+
+## FR-test-utils-028 capability=tool_only、快照缺失、status=failed|unavailable 的轮一律不出卡、不出占位（全树不再出现「仅工具编辑」卡）
+变更：2026-10-22-file-card-hide-empty
+状态：active
+摘要：历史轮（无快照能力）；采集失败（有快照但不可信）
+场景正文：
+- 场景：历史轮（无快照能力） — Given 一轮的读模型为 `file_changes=null` + `file_changes_capability="tool_only"`；When 会话页渲染该轮
+- 场景：采集失败（有快照但不可信） — Given 一轮的快照 `status="unavailable"`（git 缺失 / 非 git 仓）或 `status="failed"`；When 渲染该轮；Then
+全文：.sillyspec/changes/archive/2026-10-22-file-card-hide-empty/requirements.md#FR-01
+最近确认：a9232edf123799304e3f47172a4fc3499c754b65
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-22-file-card-hide-empty:flow:测试绑定FR-01
+  tests: frontend/src/components/daemon/__tests__/turn-timeline-conversation-file-card.test.tsx | frontend/src/components/daemon/file-changes/__tests__/turn-file-changes.test.ts
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-22-file-card-hide-empty
+  status: active
+
+## FR-test-utils-029 有真实文件清单的轮照常出卡：逐文件 +/−、归因、并行会话横幅零变化
+变更：2026-10-22-file-card-hide-empty
+状态：active
+摘要：主路径；partial 且无文件清单（保留）
+场景正文：
+- 场景：主路径 — Given 一轮快照 `status="ok"` 且 `files` 含 2 条（1 条 `edit_patch`、1 条 `command`）；When 渲染该轮；The
+- 场景：partial 且无文件清单（保留） — Given 快照 `status="partial"` 且 `files=[]`（1500ms 超时 / 队列溢出）；When 渲染该轮；Then 仍渲染一行提示卡（`da
+全文：.sillyspec/changes/archive/2026-10-22-file-card-hide-empty/requirements.md#FR-02
+最近确认：a9232edf123799304e3f47172a4fc3499c754b65
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-22-file-card-hide-empty:flow:测试绑定FR-02
+  tests: frontend/src/components/daemon/__tests__/turn-timeline-conversation-file-card.test.tsx | frontend/src/components/daemon/file-changes/__tests__/file-changes-card.test.tsx | frontend/src/components/daemon/file-changes/__tests__/turn-file-changes.test.ts
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-22-file-card-hide-empty
+  status: active
+
+## FR-test-utils-030 会话级汇总只汇总真实有改动的轮，不再输出「N 轮无工作区快照」缺口提示；零文件时整卡零渲染
+变更：2026-10-22-file-card-hide-empty
+状态：active
+摘要：全历史轮（零文件）；真实轮 + 历史轮混合
+场景正文：
+- 场景：全历史轮（零文件） — Given 58 轮全部 `file_changes_capability="tool_only"`；When 渲染会话级汇总；Then 汇总卡不渲染（`data-test
+- 场景：真实轮 + 历史轮混合 — Given 3 轮有可信快照（共 5 个文件）且 55 轮无快照；When 渲染汇总；Then 卡片在场且「共 5 个文件」按真实轮统计，不出现「N 轮无工作区快照」字样。
+全文：.sillyspec/changes/archive/2026-10-22-file-card-hide-empty/requirements.md#FR-03
+最近确认：a9232edf123799304e3f47172a4fc3499c754b65
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-22-file-card-hide-empty:flow:测试绑定FR-03
+  tests: frontend/src/components/daemon/file-changes/__tests__/file-changes-summary.test.tsx
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-22-file-card-hide-empty
+  status: active
+
+## FR-test-utils-031 全树仍不出现「本轮无改动」字样；file-changes 相关用例按新口径更新后全绿，tsc --noEmit 退出 0
+变更：2026-10-22-file-card-hide-empty
+状态：active
+摘要：主路径
+场景正文：
+- 场景：主路径 — Given 变更落盘；When 跑 `tsc --noEmit` 与 `src/components/daemon/file-changes/__tests__/` + `
+全文：.sillyspec/changes/archive/2026-10-22-file-card-hide-empty/requirements.md#FR-04
+最近确认：a9232edf123799304e3f47172a4fc3499c754b65
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-22-file-card-hide-empty:flow:测试绑定FR-04
+  tests: frontend/src/components/daemon/__tests__/turn-timeline-conversation-file-card.test.tsx
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-22-file-card-hide-empty
+  status: active
+
+## FR-test-utils-032 已设默认供应商时，各「不指定」下拉项文案显示「不指定（默认：{默认供应商名}）」；未设默认保持「不指定（本机默认）」
 变更：2026-10-21-provider-default-ui-hint
 状态：active
 摘要：有默认；无默认零回归
@@ -384,14 +691,14 @@ created_at: 2026-10-16T01:30:35.950Z
   source_change: 2026-10-21-provider-default-ui-hint
   status: active
 
-## FR-test-utils-022 会话轮 timeline 的未选供应商显示对齐（null 时显示默认供应商名，无默认保持本机默认）
+## FR-test-utils-033 会话轮 timeline 的未选供应商显示对齐（null 时显示默认供应商名，无默认保持本机默认）
 变更：2026-10-21-provider-default-ui-hint
 状态：active
 摘要：未选供应商轮显示默认名
 全文：.sillyspec/changes/archive/2026-10-21-provider-default-ui-hint/requirements.md#FR-02
 最近确认：01207058ca048f4015b4074b38e32f1e2bba4335
 
-## FR-test-utils-023 provisional 态未选档案时，档案按钮显示用户默认档案名（无默认保持「未指定」）
+## FR-test-utils-034 provisional 态未选档案时，档案按钮显示用户默认档案名（无默认保持「未指定」）
 变更：2026-10-21-profile-default-prehint
 状态：active
 摘要：预会话显示默认
@@ -410,7 +717,7 @@ created_at: 2026-10-16T01:30:35.950Z
   source_change: 2026-10-21-profile-default-prehint
   status: active
 
-## FR-test-utils-024 运行中/已结束会话未选档案保持「未指定」；下拉「不指定」项 provisional 且有默认时显示「不指定（默认：{名}）」
+## FR-test-utils-035 运行中/已结束会话未选档案保持「未指定」；下拉「不指定」项 provisional 且有默认时显示「不指定（默认：{名}）」
 变更：2026-10-21-profile-default-prehint
 状态：active
 摘要：运行中会话真值

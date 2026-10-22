@@ -286,7 +286,7 @@ describe("TurnTimeline v2 段模型渲染（task-06 / 2026-08-19-session-stream-
     const { unmount } = setupTimeline({ turns: [turn], viewMode: "all" });
     expect(screen.getByText("第一段答复")).toBeInTheDocument();
     expect(screen.getByText("第二段答复")).toBeInTheDocument();
-    expect(screen.getByText(/💭 思考过程/)).toBeInTheDocument();
+    expect(screen.getByText("思考")).toBeInTheDocument();
     expect(screen.getByText("Read")).toBeInTheDocument();
     expect(screen.getByText("src/a.ts")).toBeInTheDocument();
     // 流式光标（streaming text 段）
@@ -297,7 +297,7 @@ describe("TurnTimeline v2 段模型渲染（task-06 / 2026-08-19-session-stream-
     setupTimeline({ turns: [turn], viewMode: "conversation" });
     expect(screen.getByText("第一段答复")).toBeInTheDocument();
     expect(screen.getByText("第二段答复")).toBeInTheDocument();
-    expect(screen.queryByText(/💭 思考过程/)).not.toBeInTheDocument();
+    expect(screen.queryByText("思考")).not.toBeInTheDocument();
     expect(screen.queryByText("Read")).not.toBeInTheDocument();
     // 终态轮不渲染状态条 / 思考占位
     expect(screen.queryByText("执行中")).not.toBeInTheDocument();

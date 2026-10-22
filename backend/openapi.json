@@ -16650,6 +16650,50 @@
         }
       }
     },
+    "/api/daemon/sessions/{session_id}/git-status": {
+      "get": {
+        "tags": [
+          "daemon"
+        ],
+        "summary": "Get Session Git Status",
+        "description": "会话当前 git 分支实时状态（2026-10-21-session-git-branch / FR-01..03）。\n\n每请求经 daemon ``git_status`` RPC 现场采集（非创建快照）——root 决策链\n与错误映射见 ``session/service/git_status.py`` 模块 docstring。会话组件\n分支指示项的取数端点（≤60s 轮询），与 workspace 维度 git-log/status 互不影响。",
+        "operationId": "get_session_git_status_api_daemon_sessions__session_id__git_status_get",
+        "parameters": [
+          {
+            "name": "session_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Session Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SessionGitStatusResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/daemon/sessions/{session_id}/fork": {
       "post": {
         "tags": [
@@ -18347,6 +18391,50 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/SessionUsageRead"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/daemon/sessions/{session_id}/model-usage": {
+      "get": {
+        "tags": [
+          "daemon"
+        ],
+        "summary": "Get Session Model Usage",
+        "description": "Return per-run × per-model token usage of an owned session (read-only).\n\n数据源 ``agent_run_model_usage``（run 终态由 daemon 上报的 modelUsage 明细\n落库，UNIQUE(run_id, model) 同 run 同模型一行）JOIN ``agent_runs`` 取轮起止\n时间；只投影真实存在的列（含 cache 两维，无 duration 列——见\n:class:`SessionModelUsageItemRead`）。**不**输出日志正文 / ``system_prompt``\n/ ``agent_profile_snapshot``：本端点只服务用量审计视图。\n\n排序：轮次序优先（``AgentRun.created_at`` asc + ``id`` asc，与 turn-outline\n/ runs 端点同源的「用户发话序」口径），轮内以 ``started_at`` 兜底、``model``\n作最终稳定 tiebreaker（同 run 同模型受 UNIQUE 约束不重复）。\n\n归属 / 存在性复用 ``get_agent_session``（missing / 跨用户 / 软删均 404，不\n泄露存在性），与 runs / logs / usage 端点同一道闸门；查询内联在此（service.py\n非本任务 allowed_path，对齐 list_session_runs 先例）。\n\n硬上限 ``_SESSION_MODEL_USAGE_MAX``=2000 行：多取 1 行判断是否溢出，溢出则\n裁剪并置 ``truncated=true``（多取而非 COUNT，省一次聚合查询）。",
+        "operationId": "get_session_model_usage_api_daemon_sessions__session_id__model_usage_get",
+        "parameters": [
+          {
+            "name": "session_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Session Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SessionModelUsageRead"
                 }
               }
             }
@@ -35456,8 +35544,29 @@
           "platform-sync"
         ],
         "summary": "Get Spec Manifest",
-        "description": "GET 服务器 spec 文件权威清单（CLI 直跑增量同步锚点，design §5.2/§7）。\n\nCLI ``spec-sync.js`` 以此清单为锚 diff 本地 ``.sillyspec/``，算出增量 ops 后\nPOST ``/changes/-/spec-sync``（D-004@v1：CLI 无本地缓存，服务器清单即基线）。\n\n读清单也收紧为写权限（``require_platform_sync_write``，仅 shpsync_ token，\nJWT/shk_live_ 403）——清单是增量写协议的一部分，避免非同步方探测文件布局。\nworkspace_id 从 shpsync_ token 派生；无 workspace 归属 → 403 fail-closed\n（对齐 quicklog-entries 范式）。",
+        "description": "GET 服务器 spec 文件权威清单（CLI 直跑增量同步锚点，design §5.2/§7）。\n\nCLI ``spec-sync.js`` 以此清单为锚 diff 本地 ``.sillyspec/``，算出增量 ops 后\nPOST ``/changes/-/spec-sync``（D-004@v1：CLI 无本地缓存，服务器清单即基线）。\n\n2026-10-21-spec-manifest-incremental task-03：``?since=<spec_version>`` 增量\n形态——只返回 ``landing_version > since`` 的行（含软删墓碑行），响应顶层带\n当前 ``spec_version`` 供客户端作下次游标；无 since 为全量（现状行为，响应\n仅新增 spec_version 字段）。背景：全量清单随工作区历史无界增长（生产实测\n13k 行/2.2MB/5.5s@受限带宽），增量稳态只传变化行。\n\n读清单也收紧为写权限（``require_platform_sync_write``，仅 shpsync_ token，\nJWT/shk_live_ 403）——清单是增量写协议的一部分，避免非同步方探测文件布局。\nworkspace_id 从 shpsync_ token 派生；无 workspace 归属 → 403 fail-closed\n（对齐 quicklog-entries 范式）。",
         "operationId": "get_spec_manifest_api_changes___spec_manifest_get",
+        "parameters": [
+          {
+            "name": "since",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "增量游标（客户端已消费的工作区 spec_version）：只返回该版本之后落地的清单行",
+              "title": "Since"
+            },
+            "description": "增量游标（客户端已消费的工作区 spec_version）：只返回该版本之后落地的清单行"
+          }
+        ],
         "responses": {
           "200": {
             "description": "Successful Response",
@@ -35465,6 +35574,16 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/SpecManifestResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
                 }
               }
             }
@@ -52539,6 +52658,38 @@
                 "type": "null"
               }
             ]
+          },
+          "file_changes": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/TurnFileChangesSnapshot"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "timing": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/TurnTimingSnapshot"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "daemon_version": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 50
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Daemon Version"
           }
         },
         "type": "object",
@@ -70619,6 +70770,89 @@
         "title": "SessionForkResponse",
         "description": "POST /api/daemon/sessions/{id}/fork 响应（design §接口定义）。\n\n``tier``：'native'（引擎真截断：claude resume_at / pi rpc_fork / pi clone）\n| 'seed'（codex 前情转述，有损）。错误语义：404 会话/run 不存在或不属于\n该会话；409 run 进行中；422 caps sessionFork=none 或 native 档锚点缺失。"
       },
+      "SessionGitStatusResponse": {
+        "properties": {
+          "git_mode": {
+            "type": "string",
+            "enum": [
+              "git",
+              "no_git",
+              "no_root"
+            ],
+            "title": "Git Mode"
+          },
+          "root": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Root"
+          },
+          "branch": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Branch"
+          },
+          "detached": {
+            "type": "boolean",
+            "title": "Detached",
+            "default": false
+          },
+          "head_short": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Head Short"
+          },
+          "files_changed": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Files Changed"
+          },
+          "untracked_count": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Untracked Count"
+          },
+          "synced_at": {
+            "type": "string",
+            "title": "Synced At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "git_mode",
+          "synced_at"
+        ],
+        "title": "SessionGitStatusResponse"
+      },
       "SessionInjectRequest": {
         "properties": {
           "prompt": {
@@ -70802,6 +71036,98 @@
         ],
         "title": "SessionInjectResponse",
         "description": "ql-20260825-011：``queued=True`` 时消息进服务端排队（run_id 为 None），\nrun 终态后自动派发；``queued=False`` 为既有即时派发语义。\n\ntask-05（2026-09-18-single-chat-steering / FR-01）：``steered=True`` 表示\n忙轮消息经 busy_strategy=\"inject\" 中途注入了**当前活跃轮**（steering）——\n映射 service 层 ``SessionDispatchResult.mid_turn``（``_inject_mid_turn_into_\nrun`` 置 True，不新建平行字段），此时 run_id 为活跃 run（非新建）、\nqueued=False；排队/降级（provider 不支持）/空闲新建轮恒 False。前端\n「引导中」态消费（task-07）。"
+      },
+      "SessionModelUsageItemRead": {
+        "properties": {
+          "run_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Run Id"
+          },
+          "model": {
+            "type": "string",
+            "title": "Model"
+          },
+          "started_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Started At"
+          },
+          "finished_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Finished At"
+          },
+          "input_tokens": {
+            "type": "integer",
+            "title": "Input Tokens"
+          },
+          "output_tokens": {
+            "type": "integer",
+            "title": "Output Tokens"
+          },
+          "cache_read_tokens": {
+            "type": "integer",
+            "title": "Cache Read Tokens"
+          },
+          "cache_creation_tokens": {
+            "type": "integer",
+            "title": "Cache Creation Tokens"
+          }
+        },
+        "type": "object",
+        "required": [
+          "run_id",
+          "model",
+          "input_tokens",
+          "output_tokens",
+          "cache_read_tokens",
+          "cache_creation_tokens"
+        ],
+        "title": "SessionModelUsageItemRead",
+        "description": "会话 model-usage 明细项：``agent_run_model_usage`` 行 + 所属 run 起止时间。\n\n只含真实存在的列（``AgentRunModelUsage``：run_id / model / input_tokens /\noutput_tokens / cache_read_tokens / cache_creation_tokens；两个 cache 维度\n该表确有列故一并透出；**无** duration 列——run 级 ``duration_api_ms`` 是\n轮粒度，与「每模型一次调用」不同义，不搬进本明细不编造。``api_requests``\n同为该表列但不属本次契约字段，故不输出）。``started_at`` / ``finished_at``\n直映所属 ``AgentRun`` 列（派发失败轮等为 None，如实透出）。不含任何日志\n正文 / ``agent_profile_snapshot``（尤其 ``system_prompt``）——本端点只做\n用量审计面。"
+      },
+      "SessionModelUsageRead": {
+        "properties": {
+          "session_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Session Id"
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/SessionModelUsageItemRead"
+            },
+            "type": "array",
+            "title": "Items"
+          },
+          "truncated": {
+            "type": "boolean",
+            "title": "Truncated"
+          }
+        },
+        "type": "object",
+        "required": [
+          "session_id",
+          "items",
+          "truncated"
+        ],
+        "title": "SessionModelUsageRead",
+        "description": "model-usage 响应体：``session_id`` + 明细项 + 是否被硬上限截断。"
       },
       "SessionQueueEntry": {
         "properties": {
@@ -71290,6 +71616,35 @@
               }
             ],
             "title": "Engine Anchor"
+          },
+          "file_changes": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/TurnFileChangesSnapshot"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "file_changes_capability": {
+            "type": "string",
+            "enum": [
+              "full",
+              "tool_only"
+            ],
+            "title": "File Changes Capability",
+            "default": "tool_only"
+          },
+          "timing": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/TurnTimingSnapshot"
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         },
         "type": "object",
@@ -71299,7 +71654,7 @@
           "status"
         ],
         "title": "SessionRunRead",
-        "description": "GET /sessions/{id}/runs 单个 run 项（task-07 / FR-02 / design §7.4）。\n\n透传 ``AgentRun.error_detail``（模型层 ModelError 序列化值；成功 / 无错误 run\n为 None），供前端拉历史与当前 run 错误。``error_code``（调度层 / 系统错误）\n与 ``error_detail`` 正交共存（D-009），前端可分别用作系统错误兜底与模型错误\n渲染。DTO 内联在此避免触碰 schema.py（非本任务 allowed_path）。\n\ngap-fix（FR-07 whoLine / FR-08 历史 usage）：追加轮次配置快照与 usage 三组\n字段，均直映 AgentRun 既有列（查询本就 select 整实体，零查询改动）——\n  - ``agent_profile_snapshot`` / ``llm_provider_id``：D-008@v1 轮次快照，供前端\n    渲染每轮 whoLine（历史不跟随会话当前配置）；\n  - ``input_tokens`` / ``output_tokens``：daemon 关单经 close_interactive_run\n    写入（gap-3 result 透传），供前端历史回看累计 ctx usage（R-06）；\n  - ``cache_read_tokens`` / ``cache_creation_tokens``（quick ql-20260912-003-4506）\n    ：daemon 关单同批写入的 prompt cache 两维，供前端轮次历史行独立展示\n    四维用量；无缓存引擎（codex / pi）/ 老 run 行为 None；\n  - ``ctx_tokens``（2026-08-27-session-token-usage-fix task-05 / FR-01）：该\n    run 期间最近一次 API 调用的提示词大小（daemon 经 usage 管线实时写入，\n    close 终态不覆盖），供前端上下文环历史回填取最新非 null 值；历史行 /\n    老 daemon 无上报为 None（环未知态，design §9）。\n全部 nullable——老 run 行 / 未配置轮为 None，前端如实显示未指定/不累计。"
+        "description": "GET /sessions/{id}/runs 单个 run 项（task-07 / FR-02 / design §7.4）。\n\n透传 ``AgentRun.error_detail``（模型层 ModelError 序列化值；成功 / 无错误 run\n为 None），供前端拉历史与当前 run 错误。``error_code``（调度层 / 系统错误）\n与 ``error_detail`` 正交共存（D-009），前端可分别用作系统错误兜底与模型错误\n渲染。DTO 内联在此避免触碰 schema.py（非本任务 allowed_path）。\n\ngap-fix（FR-07 whoLine / FR-08 历史 usage）：追加轮次配置快照与 usage 三组\n字段，均直映 AgentRun 既有列（查询本就 select 整实体，零查询改动）——\n  - ``agent_profile_snapshot`` / ``llm_provider_id``：D-008@v1 轮次快照，供前端\n    渲染每轮 whoLine（历史不跟随会话当前配置）；\n  - ``input_tokens`` / ``output_tokens``：daemon 关单经 close_interactive_run\n    写入（gap-3 result 透传），供前端历史回看累计 ctx usage（R-06）；\n  - ``cache_read_tokens`` / ``cache_creation_tokens``（quick ql-20260912-003-4506）\n    ：daemon 关单同批写入的 prompt cache 两维，供前端轮次历史行独立展示\n    四维用量；无缓存引擎（codex / pi）/ 老 run 行为 None；\n  - ``ctx_tokens``（2026-08-27-session-token-usage-fix task-05 / FR-01）：该\n    run 期间最近一次 API 调用的提示词大小（daemon 经 usage 管线实时写入，\n    close 终态不覆盖），供前端上下文环历史回填取最新非 null 值；历史行 /\n    老 daemon 无上报为 None（环未知态，design §9）。\n全部 nullable——老 run 行 / 未配置轮为 None，前端如实显示未指定/不累计。\n\n1b（2026-10-20-session-page-dsh-alignment task-08 / D-023@v1）：追加\n``file_changes`` / ``file_changes_capability`` / ``timing`` 三字段——侧表\n``daemon_run_snapshots`` 一次 IN 批量投影（禁 N+1）；无行 → ``None`` +\n``\"tool_only\"``（显式降级，不伪造「本轮无改动」），既有字段与形状零变化。"
       },
       "SessionRuntimeRequest": {
         "properties": {
@@ -73127,11 +73482,17 @@
             },
             "type": "object",
             "title": "Files"
+          },
+          "spec_version": {
+            "type": "integer",
+            "title": "Spec Version",
+            "description": "工作区当前权威版本（下次增量的 since 游标）",
+            "default": 0
           }
         },
         "type": "object",
         "title": "SpecManifestResponse",
-        "description": "GET /changes/-/spec-manifest 200 响应：服务器权威清单全量 map（design §5.2/§7）。\n\nCLI ``spec-sync.js`` 以此为锚 diff 本地 ``.sillyspec/`` 算增量 ops\n（D-004@v1 CLI 无本地缓存，清单即基线）。无清单行（旧 tar 全量同步后失效 /\n全新 workspace）→ 空 ``files``，CLI 走 R-07 兜底全量重算。"
+        "description": "GET /changes/-/spec-manifest 200 响应：服务器权威清单 map（design §5.2/§7）。\n\nCLI ``spec-sync.js`` 以此为锚 diff 本地 ``.sillyspec/`` 算增量 ops\n（D-004@v1 CLI 无本地缓存，清单即基线）。无清单行（旧 tar 全量同步后失效 /\n全新 workspace）→ 空 ``files``，CLI 走 R-07 兜底全量重算。\n\n2026-10-21-spec-manifest-incremental task-03：新增顶层 ``spec_version``（全量/\n增量均带）——CLI 携带 ``?since=<spec_version>`` 时 ``files`` 只含该版本之后\n落地的行（增量游标形态），并以响应 ``spec_version`` 作下次游标；无 since 为\n全量（既有 CLI 忽略未知字段，向后兼容）。"
       },
       "SpecSyncRequest": {
         "properties": {
@@ -76911,6 +77272,178 @@
         "title": "TranslateResponse",
         "description": "fail-soft 契约：engine_ready=false 时 items 原文透传，HTTP 仍 200。"
       },
+      "TurnFileChange": {
+        "properties": {
+          "path": {
+            "type": "string",
+            "title": "Path"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "added",
+              "modified",
+              "deleted",
+              "untracked"
+            ],
+            "title": "Status"
+          },
+          "added": {
+            "type": "integer",
+            "title": "Added"
+          },
+          "deleted": {
+            "type": "integer",
+            "title": "Deleted"
+          },
+          "binary": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Binary"
+          },
+          "attribution": {
+            "type": "string",
+            "enum": [
+              "edit_patch",
+              "command"
+            ],
+            "title": "Attribution"
+          },
+          "editToolNames": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Edittoolnames"
+          },
+          "source": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "git",
+                  "mtime"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source"
+          }
+        },
+        "type": "object",
+        "required": [
+          "path",
+          "status",
+          "added",
+          "deleted",
+          "attribution"
+        ],
+        "title": "TurnFileChange",
+        "description": "单文件变更行（``TurnFileChangesSnapshot.files[]``）。"
+      },
+      "TurnFileChangesSnapshot": {
+        "properties": {
+          "runId": {
+            "type": "string",
+            "title": "Runid"
+          },
+          "baselineHead": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Baselinehead"
+          },
+          "collectedAt": {
+            "type": "string",
+            "title": "Collectedat"
+          },
+          "collectMs": {
+            "type": "integer",
+            "title": "Collectms"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "ok",
+              "partial",
+              "failed",
+              "unavailable"
+            ],
+            "title": "Status"
+          },
+          "reason": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "timeout",
+                  "not_a_repo",
+                  "git_missing",
+                  "queue_overflow"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reason"
+          },
+          "truncated": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Truncated"
+          },
+          "files": {
+            "items": {
+              "$ref": "#/components/schemas/TurnFileChange"
+            },
+            "type": "array",
+            "title": "Files",
+            "default": []
+          },
+          "concurrentSessionsHint": {
+            "type": "boolean",
+            "const": true,
+            "title": "Concurrentsessionshint",
+            "default": true
+          }
+        },
+        "type": "object",
+        "required": [
+          "runId",
+          "collectedAt",
+          "collectMs",
+          "status"
+        ],
+        "title": "TurnFileChangesSnapshot",
+        "description": "一轮工作区文件变更快照（``GET /sessions/{id}/runs`` 的 ``file_changes``）。"
+      },
       "TurnOutlineItemRead": {
         "properties": {
           "run_id": {
@@ -77053,6 +77586,54 @@
         ],
         "title": "TurnOutlineItemRead",
         "description": "turn-outline 单轮摘要项（FR-01）。\n\n轻列字段直映 ``AgentRun`` 既有列（**不含** agent_profile_snapshot /\nerror_detail 大 JSON，design 做法概述①「轻列」）；``auto_resume_of`` 从\n``AgentRun.metadata_`` 的 ``{\"auto_resume_of\": \"<源 run id>\"}` 抽出（续跑轮\n徽标数据源，普通轮 None）；``prompt_summary`` / ``answer_summary`` 为窗口\n函数抽出的每 run 首条 channel=user_input / 首条非空 channel=stdout 日志的\n截断文本（后端日志通道实际枚举 user_input/stdout/tool_call/stderr，无\n\"reply\" 通道——assistant 文本即 stdout，见 sdk_pipeline._channel_from_event_type），\n无对应日志的行为 None（不伪造）。"
+      },
+      "TurnTimingSnapshot": {
+        "properties": {
+          "runId": {
+            "type": "string",
+            "title": "Runid"
+          },
+          "basis": {
+            "type": "string",
+            "enum": [
+              "observed",
+              "approx"
+            ],
+            "title": "Basis"
+          },
+          "ttftMs": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ttftms"
+          },
+          "totalMs": {
+            "type": "integer",
+            "title": "Totalms"
+          },
+          "attempts": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "type": "array",
+            "title": "Attempts",
+            "default": []
+          }
+        },
+        "type": "object",
+        "required": [
+          "runId",
+          "basis",
+          "totalMs"
+        ],
+        "title": "TurnTimingSnapshot",
+        "description": "一轮模型调用时序（``GET /sessions/{id}/runs`` 的 ``timing``）。\n\n``attempts[]`` 原样透传为 dict 列表（不新增第 5 个镜像类，字段集由 design\n钉死：index / startedAt / firstTokenAt / endedAt / model / inputTokens /\noutputTokens）。``ttftMs`` 只在取到首 token 时有值——**null 不得填 0 冒充**；\n无采样时整个 timing 为 null（而非空对象），前端保持单色近似（D-025@v1）。"
       },
       "UnreadCountResponse": {
         "properties": {

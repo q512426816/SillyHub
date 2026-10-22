@@ -103,7 +103,7 @@ vi.mock('node:child_process', async (importOriginal) => {
 });
 
 // import 必须在 vi.mock 之后（vitest hoist 会处理顺序，但为可读性放在 mock 后）。
-import { HostFsHandler } from '../src/host-fs-handler';
+import { HostFsHandler, decodeGitCQuote } from '../src/host-fs-handler';
 import { Daemon } from '../src/daemon.js';
 import { RpcError } from '../src/ws-client';
 
@@ -658,8 +658,10 @@ describe('HostFsHandler — gitShow（task-01 GL21~GL25）', () => {
     await handler.gitShow({ root, sha: 'a1b2c3d4e5f6' });
     const args = glCalls[0].args;
     expect(glCalls[0].cmd).toBe('git');
-    expect(args[2]).toBe('show'); // 只读子命令
-    expect(args[3]).toBe('a1b2c3d4e5f6'); // sha 独立 argv
+    // 2026-10-21-gitlog-quotepath-fix：显示路径的调用带 -c core.quotepath=false。
+    expect(args.slice(0, 4)).toEqual(['-C', root, '-c', 'core.quotepath=false']);
+    expect(args[4]).toBe('show'); // 只读子命令
+    expect(args[5]).toBe('a1b2c3d4e5f6'); // sha 独立 argv
     expect(args).toContain('--numstat');
     expect(args).toContain('--no-renames');
     expect(args).toContain('--pretty=format:%H%x00%h%x00%P%x00%an%x00%ae%x00%aI%x00%cI%x00%B%x1e');
@@ -733,8 +735,9 @@ describe('HostFsHandler — gitDiffFile（task-01 GL26~GL29，CC-05 / R-06）', 
     });
     const args = glCalls[0].args;
     expect(glCalls[0].cmd).toBe('git');
-    expect(args[2]).toBe('show'); // 只读子命令
-    expect(args[3]).toBe('a1b2c3d4e5f6'); // sha 独立 argv
+    expect(args.slice(0, 4)).toEqual(['-C', root, '-c', 'core.quotepath=false']); // quotepath 关闭
+    expect(args[4]).toBe('show'); // 只读子命令
+    expect(args[5]).toBe('a1b2c3d4e5f6'); // sha 独立 argv
     expect(args).toContain('--pretty=format:'); // 空 pretty：去 commit 头（design §5.2 勘误）
     expect(args).toContain('--unified=3');
     expect(args).toContain('--no-color');
@@ -872,7 +875,10 @@ describe('HostFsHandler — gitStatus porcelain v2 解析（task-01 GL34~GL39，
       error: null, // 不走红通道
     });
     // diff 确已执行（exit 128 容错路径真实走到，而非提前跳过）。
-    expect(glCalls.map((c) => c.args[2])).toEqual(['remote', 'fetch', 'status', 'diff']);
+    // status/diff 带 -c core.quotepath=false → 子命令在 args[4]（remote/fetch 仍在 [2]）。
+    expect(
+      glCalls.map((c) => (c.args[2] === '-c' ? c.args[4] : c.args[2])),
+    ).toEqual(['remote', 'fetch', 'status', 'diff']);
   });
 
   it('GL38: untracked 混合 —— "? " 计数、1/2/u 条目不参与 files_changed（CC-05 单源）', async () => {
@@ -974,7 +980,10 @@ describe('HostFsHandler — gitStatus fetch 三分支降级（task-01 GL40~GL44�
     expect(r.branch).toBe('main'); // 失败不阻断
     expect(r.error).toBeNull();
     // 仅 remote/status/diff 三条命令，无 fetch（CC-07：静默 exit 0 探测不到）。
-    expect(glCalls.map((c) => c.args[2])).toEqual(['remote', 'status', 'diff']);
+    // status/diff 带 -c core.quotepath=false → 子命令在 args[4]。
+    expect(
+      glCalls.map((c) => (c.args[2] === '-c' ? c.args[4] : c.args[2])),
+    ).toEqual(['remote', 'status', 'diff']);
   });
 
   it('GL43: 命令构造 —— remote/fetch/status/diff 只读子命令 + --no-show-stash + --no-renames 逐 token（FR-06）', async () => {
@@ -983,11 +992,13 @@ describe('HostFsHandler — gitStatus fetch 三分支降级（task-01 GL40~GL44�
     expect(glCalls).toHaveLength(4);
     expect(glCalls.every((c) => c.cmd === 'git')).toBe(true);
     const [remote, fetch, status, diff] = glCalls.map((c) => c.args);
-    expect(remote).toEqual(['-C', root, 'remote']); // 只读预检子命令
-    expect(fetch).toEqual(['-C', root, 'fetch', '--quiet']); // fetch 独立 argv + --quiet
+    expect(remote).toEqual(['-C', root, 'remote']); // 只读预检子命令（不显示路径，不带 quotepath 参数）
+    expect(fetch).toEqual(['-C', root, 'fetch', '--quiet']); // fetch 独立 argv + --quiet（同上）
     expect(status).toEqual([
       '-C',
       root,
+      '-c',
+      'core.quotepath=false', // 2026-10-21-gitlog-quotepath-fix：porcelain 输出路径
       'status', // 只读子命令
       '--porcelain=v2',
       '--branch',
@@ -996,6 +1007,8 @@ describe('HostFsHandler — gitStatus fetch 三分支降级（task-01 GL40~GL44�
     expect(diff).toEqual([
       '-C',
       root,
+      '-c',
+      'core.quotepath=false', // numstat 输出路径
       'diff', // 只读子命令
       'HEAD',
       '--numstat',
@@ -1147,7 +1160,8 @@ describe('daemon 注册器 — _registerGitLogRpcHandler（task-01 GL30~GL33，C
     expect(r.error).toBeNull();
     // 只读子命令 + path 独立 argv（经注册路径复验 R-01）。
     expect(glCalls[0].cmd).toBe('git');
-    expect(glCalls[0].args[2]).toBe('show');
+    expect(glCalls[0].args.slice(0, 4)).toEqual(['-C', root, '-c', 'core.quotepath=false']);
+    expect(glCalls[0].args[4]).toBe('show');
     expect(glCalls[0].args[glCalls[0].args.indexOf('--') + 1]).toBe('a.txt');
   });
 
@@ -1168,8 +1182,119 @@ describe('daemon 注册器 — _registerGitLogRpcHandler（task-01 GL30~GL33，C
     expect(r.files_changed).toBe(1);
     expect(r.error).toBeNull();
     // 经注册路径复验只读命令序列（remote/fetch/status/diff）。
-    expect(glCalls.map((c) => c.args[2])).toEqual(['remote', 'fetch', 'status', 'diff']);
+    // status/diff 带 -c core.quotepath=false → 子命令在 args[4]。
+    expect(
+      glCalls.map((c) => (c.args[2] === '-c' ? c.args[4] : c.args[2])),
+    ).toEqual(['remote', 'fetch', 'status', 'diff']);
     // root 非字符串归一空串 → assertWithinAllowedRoots 拒 forbidden（同 GL32 归一语义）。
     await expectRpcError(h.call('git_status', { root: 123 }), 'forbidden');
+  });
+});
+
+// ──────────────────────────────────────────────────────────────────────────────
+// 非 ASCII 路径 quotepath 修复（2026-10-21-gitlog-quotepath-fix GL46~GL48）：
+// 显示路径的 git 调用带 -c core.quotepath=false；numstat 残余 C 引号路径由
+// decodeGitCQuote 解码为原文（修复前前端目录树显示转义乱码、diff 回查恒空）。
+// ──────────────────────────────────────────────────────────────────────────────
+
+describe('HostFsHandler — quotepath 修复（2026-10-21-gitlog-quotepath-fix GL46~GL48）', () => {
+  let root: string;
+  let handler: HostFsHandler;
+
+  beforeEach(async () => {
+    root = await makeRoot();
+    handler = new HostFsHandler({ rootsProvider: () => [root] });
+  });
+
+  afterEach(async () => {
+    glExecQueue.length = 0;
+    glCalls.length = 0;
+    await rm(root, { recursive: true, force: true });
+  });
+
+  it('GL46: 命令构造 —— gitShow/gitDiffFile/gitStatus(status+diff) 带 -c core.quotepath=false，remote/fetch 不带', async () => {
+    // 执行序：gitShow(1 条) → gitDiffFile(1 条) → gitStatus(remote/fetch/status/diff 4 条)。
+    glExecQueue.push(
+      { ok: true, stdout: showStdout(commitRecord({ hash: 'a' + 'a'.repeat(39), short: 'aaaaaaa', message: 'm' }), []) },
+      { ok: true, stdout: '', stderr: '' },
+    );
+    await handler.gitShow({ root, sha: 'a1b2c3d4' });
+    await handler.gitDiffFile({ root, sha: 'a1b2c3d4', path: 'docs/中文目录/文件.md' });
+    gsQueue(porcelainV2(gsNormalHeaders()), '');
+    await handler.gitStatus({ root });
+
+    expect(glCalls).toHaveLength(6);
+    // glCalls 序：[0]gitShow [1]gitDiffFile [2]remote [3]fetch [4]status [5]diff。
+    // remote/fetch（[2][3]）不显示路径 → 不带参数（保持最小面）。
+    expect(glCalls[2].args.slice(0, 2)).toEqual(['-C', root]);
+    expect(glCalls[3].args.slice(0, 2)).toEqual(['-C', root]);
+    // 四条显示路径的调用（[0][1][4][5]）统一带 -c core.quotepath=false（-C <root> 之后、子命令之前）。
+    for (const i of [0, 1, 4, 5]) {
+      expect(glCalls[i].args.slice(0, 4)).toEqual(['-C', root, '-c', 'core.quotepath=false']);
+    }
+    expect(glCalls[0].args[4]).toBe('show'); // gitShow 子命令
+    expect(glCalls[1].args[4]).toBe('show'); // gitDiffFile 子命令
+    expect(glCalls[4].args[4]).toBe('status'); // gitStatus ② porcelain
+    expect(glCalls[5].args[4]).toBe('diff'); // gitStatus ③ numstat
+  });
+
+  it('GL47: decodeGitCQuote 纯函数 —— 中文八进制转义还原 / 非引号与畸形原样 / 残余强制引号', () => {
+    // 真实形态（2026-10-20 公司仓实证的同一字符串）：默认 quotepath 下的中文目录。
+    const quoted =
+      '".sillyspec/changes/2026-10-20-unitLedger\\345\\257\\274\\345\\205\\245\\346\\250\\241\\346\\235\\277\\346\\241\\206\\347\\272\\277/design.md"';
+    expect(decodeGitCQuote(quoted)).toBe(
+      '.sillyspec/changes/2026-10-20-unitLedger导入模板框线/design.md',
+    );
+    // 非引号形态原样（quotepath=false 后的常态；空串/ASCII/中文均透传）。
+    expect(decodeGitCQuote('docs/中文目录/文件.md')).toBe('docs/中文目录/文件.md');
+    expect(decodeGitCQuote('src/main.ts')).toBe('src/main.ts');
+    expect(decodeGitCQuote('')).toBe('');
+    // 畸形（有头引号无尾引号）原样返回，不猜。
+    expect(decodeGitCQuote('"unclosed-quoted')).toBe('"unclosed-quoted');
+    // 残余强制引号：quotepath=false 下含字面 " 与 \ 的路径仍被 C 引号 → 解码还原。
+    expect(decodeGitCQuote('"we\\"ird\\\\name.md"')).toBe('we"ird\\name.md');
+    // 控制字符恒转义：\t 还原为真实制表符。
+    expect(decodeGitCQuote('"a\\tb.md"')).toBe('a\tb.md');
+    // 尾部反斜杠：git 写成 \\（转义反斜杠）→ 还原单反斜杠。
+    expect(decodeGitCQuote('"abc\\\\"')).toBe('abc\\');
+  });
+
+  it('GL49（2026-10-22-review-risk-fixes）: 混合路径——字面引号转义 + 原样非 ASCII / 增补平面，逐字符还原原文', () => {
+    // quotepath=false 下 git 只对含字面 " 的路径强制 C 引号，其余非 ASCII 原样输出：
+    // 形态 = 引号内「中文原样 + \" 转义」。修复前字面中文按 charCodeAt 入字节数组，
+    // 0x4E2D 被 Buffer.from 截断为 0x2D 产出乱码（本仓 2026-10-22 审查实测机制）。
+    expect(decodeGitCQuote('"中文\\"x中.md"')).toBe('中文"x中.md');
+    // 增补平面（代理对两个 code unit）：按完整 codePoint 的 UTF-8 原字节组装，不拆对。
+    expect(decodeGitCQuote('"🙂\\"a.md"')).toBe('🙂"a.md');
+    // 字面非 ASCII 与八进制转义同串共存：两条字节来源混合后仍按 UTF-8 整体组装。
+    expect(decodeGitCQuote('"中文\\345\\257\\274\\"x.md"')).toBe('中文导"x.md');
+    // 修复只动字面分支：转义/畸形形态行为与 GL47 逐字一致（抽查两条不重复断言面）。
+    expect(decodeGitCQuote('"we\\"ird\\\\name.md"')).toBe('we"ird\\name.md');
+    expect(decodeGitCQuote('"unclosed-quoted')).toBe('"unclosed-quoted');
+    // 注：真实 git 集成（③号用例）不覆盖本形态——Windows 文件名禁字面 "，无法落盘造仓。
+  });
+
+  it('GL48: gitShow —— 中文 C 引号 numstat 行解码为原文，非引号行不受影响', async () => {
+    const quotedPath =
+      '".sillyspec/changes/2026-10-20-unitLedger\\345\\257\\274\\345\\205\\245\\346\\250\\241\\346\\235\\277\\346\\241\\206\\347\\272\\277/design.md"';
+    glExecQueue.push({
+      ok: true,
+      stdout: showStdout(
+        commitRecord({ hash: 'a' + 'a'.repeat(39), short: 'aaaaaaa', message: 'm' }),
+        [`10\t4\t${quotedPath}`, '2\t1\tdocs/my file.md'],
+      ),
+    });
+    const r = await handler.gitShow({ root, sha: 'a1b2c3d4' });
+    expect(r.error).toBeNull();
+    expect(r.files).toHaveLength(2);
+    // 引号形态解码为中文原文（前端树按此路径聚合、点击以此回查 diff）。
+    expect(r.files[0].path).toBe(
+      '.sillyspec/changes/2026-10-20-unitLedger导入模板框线/design.md',
+    );
+    expect(r.files[0].add).toBe(10);
+    expect(r.files[0].del).toBe(4);
+    expect(r.files[0].binary).toBe(false);
+    // 非引号形态（含空格路径）原样透传。
+    expect(r.files[1].path).toBe('docs/my file.md');
   });
 });

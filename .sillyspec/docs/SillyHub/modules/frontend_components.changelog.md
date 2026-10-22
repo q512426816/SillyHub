@@ -102,3 +102,15 @@ created_at: 2026-08-30 22:23:33
 | 2026-10-21 | 2026-10-21-provider-default-ui-hint | 供应商未选态显示对齐用户默认供应商 |
 | 2026-10-21 | 2026-10-21-profile-default-prehint | 预会话态档案显示对齐用户默认档案 |
 | 2026-10-22 | 2026-10-22-agent-profile-modal-restyle | 智能体档案弹窗重构与技能全选 |
+| 2026-10-20 | 2026-10-20-session-error-visibility | 会话页失败轮错误信息不可见修复 |
+| 2026-10-20 | 2026-10-20-codex-requires-openai-auth | 腾讯云平台 codex 会话选直连（anthropic 形态）供应商时稳定断流（stream dis… |
+| 2026-10-20 | 2026-10-20-preset-engine-endpoint | 新建供应商点「OpenCode Go」预设自动填 https://opencode.ai/zen/g… |
+| 2026-10-20 | 2026-10-20-session-status-live-sync | 左侧会话状态标签与右侧实时同步 |
+| 2026-10-21 | 2026-10-21-gitlog-quotepath-fix | 修复git日志非ASCII路径展示与空diff |
+| 2026-10-21 | 2026-10-21-overview-card-mainflow-scan | 总览卡主管线去scan并隐藏thin零步骤 |
+| 2026-10-21 | 2026-10-21-mobile-scan-birth-cleanup | 移动端与变更中心scan起步口径清零 |
+| 2026-10-21 | 2026-10-21-task-wakeup-restore | 恢复后台任务终态唤醒链并折叠系统行呈现 |
+| 2026-10-21 | 2026-10-21-daemon-zombie-turn | 修复 daemon 会话僵尸轮与打断无效 |
+| 2026-10-21 | 2026-10-21-session-git-branch | 会话组件底部动态显示当前所在 git 分支 |
+| 2026-10-21 | 2026-10-22-session-trajectory-view | 会话页接入轨迹第三视图 |
+| 2026-10-22 | 2026-10-22-file-card-hide-empty | 文件变更卡无数据时整轮不再出卡 |

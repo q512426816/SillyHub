@@ -1,0 +1,175 @@
+diff --git a/.sillyspec/docs/SillyHub/modules/daemon.changelog.md b/.sillyspec/docs/SillyHub/modules/daemon.changelog.md
+index 3132a20da..9cf35d350 100644
+--- a/.sillyspec/docs/SillyHub/modules/daemon.changelog.md
++++ b/.sillyspec/docs/SillyHub/modules/daemon.changelog.md
+@@ -65,3 +65,4 @@ created_at: 2026-08-27 14:32:24
+ - 2026-10-20-session-status-live-sync | 左侧会话状态标签与右侧实时同步
+ - 2026-10-21-gitlog-quotepath-fix | 修复git日志非ASCII路径展示与空diff
+ - 2026-10-21-overview-card-mainflow-scan | 总览卡主管线去scan并隐藏thin零步骤
++- 2026-10-21-gitlog-conflict-quotepath | 合并冲突链路非ASCII路径quotepath修复
+diff --git a/.sillyspec/docs/multi-agent-platform/modules/sillyhub-daemon.changelog.md b/.sillyspec/docs/multi-agent-platform/modules/sillyhub-daemon.changelog.md
+index 31914631a..e07e8560f 100644
+--- a/.sillyspec/docs/multi-agent-platform/modules/sillyhub-daemon.changelog.md
++++ b/.sillyspec/docs/multi-agent-platform/modules/sillyhub-daemon.changelog.md
+@@ -20,3 +20,4 @@
+ - 2026-10-20-codex-requires-openai-auth | 腾讯云平台 codex 会话选直连（anthropic 形态）供应商时稳定断流（stream dis…
+ - 2026-10-21-gitlog-quotepath-fix | 修复git日志非ASCII路径展示与空diff
+ - 2026-10-21-overview-card-mainflow-scan | 总览卡主管线去scan并隐藏thin零步骤
++- 2026-10-21-gitlog-conflict-quotepath | 合并冲突链路非ASCII路径quotepath修复
+diff --git a/frontend/src/app/(dashboard)/workspaces/[id]/changes/page.tsx b/frontend/src/app/(dashboard)/workspaces/[id]/changes/page.tsx
+index 5807853cf..cec54e124 100644
+--- a/frontend/src/app/(dashboard)/workspaces/[id]/changes/page.tsx
++++ b/frontend/src/app/(dashboard)/workspaces/[id]/changes/page.tsx
+@@ -761,7 +761,7 @@ export default function ChangesPage({ params }: Props) {
+       right={
+         <>
+           <ChangeStepBadge
+-            stage={c.current_stage ?? "scan"}
++            stage={c.current_stage ?? "brainstorm"}
+             stepProgress={c.step_progress ?? null}
+           />
+           {renderOwner(c)}
+diff --git a/frontend/src/components/mobile/mobile-change-card.test.tsx b/frontend/src/components/mobile/mobile-change-card.test.tsx
+index bdc814931..315cd3d1b 100644
+--- a/frontend/src/components/mobile/mobile-change-card.test.tsx
++++ b/frontend/src/components/mobile/mobile-change-card.test.tsx
+@@ -305,14 +305,15 @@ describe("MobileChangeCard 阶段徽标（ChangeStepBadge 复用）", () => {
+     expect(screen.getByText("step 2/5")).toBeInTheDocument();
+   });
+ 
+-  it("current_stage 缺省 → 降级 scan 标签（与桌面列降级口径一致）", () => {
++  it("current_stage 缺省 → 降级 brainstorm 标签（与桌面列降级口径一致；2026-10-21-mobile-scan-birth-cleanup 起不再兜底 scan）", () => {
+     render(
+       <MobileChangeCard
+         change={makeChange({ current_stage: null })}
+         onClick={vi.fn()}
+       />,
+     );
+-    expect(screen.getByText("扫描")).toBeInTheDocument();
++    expect(screen.getByText("需求分析")).toBeInTheDocument();
++    expect(screen.queryByText("扫描")).toBeNull();
+   });
+ });
+ 
+diff --git a/frontend/src/components/mobile/mobile-change-card.tsx b/frontend/src/components/mobile/mobile-change-card.tsx
+index 756afe1df..708c4a4da 100644
+--- a/frontend/src/components/mobile/mobile-change-card.tsx
++++ b/frontend/src/components/mobile/mobile-change-card.tsx
+@@ -32,7 +32,8 @@
+  *   changes/page.tsx import（task-01 导出，D-005 复用挂载路线），卡片内自绘移动
+  *   用量行——不复制桌面 UsageExecCell 为独立组件。
+  * - 阶段徽标复用 ChangeStepBadge（自带 STAGE_KIND/STAGE_LABELS 与 stepProgress 副行）；
+- *   stage 缺省 "scan"、stepProgress 缺省 null 的降级口径与桌面列表阶段列一致。
++ *   stage 缺省 "brainstorm"、stepProgress 缺省 null 的降级口径与桌面列表阶段列一致
++ *   （2026-10-21-mobile-scan-birth-cleanup：出生阶段即 brainstorm，缺省不再兜底 scan）。
+  * - 相对时间复用 formatRelativeTime（runtime-card-helpers）。
+  *
+  * 移动约束（design §5.5）：整卡为 button（触摸热区 ≥44px，min-h-[44px]）；
+@@ -258,7 +259,7 @@ export function MobileChangeCard({
+             待办徽标 + 活动徽标 */}
+         <span className="flex flex-wrap items-center gap-2">
+           <ChangeStepBadge
+-            stage={change.current_stage ?? "scan"}
++            stage={change.current_stage ?? "brainstorm"}
+             stepProgress={change.step_progress ?? null}
+           />
+           {/* 出身徽标（2026-10-14-change-center-lineage-tag-and-filter）：完整/轻量 */}
+diff --git a/frontend/src/components/mobile/mobile-change-detail.test.tsx b/frontend/src/components/mobile/mobile-change-detail.test.tsx
+index ff6e70008..edd4713f2 100644
+--- a/frontend/src/components/mobile/mobile-change-detail.test.tsx
++++ b/frontend/src/components/mobile/mobile-change-detail.test.tsx
+@@ -466,16 +466,18 @@ describe("MobileChangeDetail 文档卡 / 引导条 / 步骤条 / 会话 / 时间
+     expect(guide.textContent).toContain("任务看板与任务执行页请到电脑端操作");
+   });
+ 
+-  it("步骤条：横向滚动容器 + 六阶段标签 + 当前阶段高亮 + 非线性阶段降级不渲染", async () => {
++  it("步骤条：横向滚动容器 + 五阶段标签 + 当前阶段高亮 + 非线性阶段降级不渲染", async () => {
+     const { container } = renderDetail();
+     const stepper = await screen.findByTestId("m-change-stage-steps");
+     // 横向滚动容器（自绘紧凑版核心约束，C-15）
+     expect(stepper.className).toContain("overflow-x-auto");
+-    // 六阶段标签（scan + 主线五阶段，STAGE_LABELS 复用；within 限定步骤条内，
++    // 五阶段标签（2026-10-21-mobile-scan-birth-cleanup 去 scan：出生阶段即
++    // brainstorm，scan 是辅助阶段不进步骤条；within 限定步骤条内，
+     // 避免与时间线 stage 组头同名标签（需求分析）冲突）
+-    for (const label of ["扫描", "需求分析", "规划", "执行", "验证", "归档"]) {
++    for (const label of ["需求分析", "规划", "执行", "验证", "归档"]) {
+       expect(within(stepper).getByText(label)).toBeInTheDocument();
+     }
++    expect(within(stepper).queryByText("扫描")).toBeNull();
+     // 当前阶段（current_stage=plan）节点高亮，标签为「规划」
+     const current = container.querySelector(
+       '[data-testid="m-change-stage-steps"] [data-status="current"]',
+@@ -786,8 +788,8 @@ describe("MobileChangeDetail 三卡挂载 + 阶段联动（task-06 / FR-05 / FR-
+       within(stepper).getByRole("button", { name: "规划" }),
+     ).toBeInTheDocument();
+     expect(within(stepper).getAllByRole("button")).toHaveLength(2);
+-    // 无条目阶段（扫描/执行/验证/归档，含当前阶段「执行」）保持纯展示不可点
+-    for (const label of ["扫描", "执行", "验证", "归档"]) {
++    // 无条目阶段（执行/验证/归档，含当前阶段「执行」）保持纯展示不可点
++    for (const label of ["执行", "验证", "归档"]) {
+       expect(
+         within(stepper).queryByRole("button", { name: label }),
+       ).not.toBeInTheDocument();
+diff --git a/frontend/src/components/mobile/mobile-change-detail.tsx b/frontend/src/components/mobile/mobile-change-detail.tsx
+index c775f44ad..5740854f0 100644
+--- a/frontend/src/components/mobile/mobile-change-detail.tsx
++++ b/frontend/src/components/mobile/mobile-change-detail.tsx
+@@ -141,9 +141,6 @@ const QL_STATUS_META: Record<
+   stale: { label: "疑似中断", kind: "error" },
+ };
+ 
+-/** 步骤条阶段序列：scan + 主线五阶段（design §5.3「六阶段」；WORKFLOW_STAGES 复用）。 */
+-const STEPPER_STAGES: readonly string[] = ["scan", ...WORKFLOW_STAGES];
+-
+ // ── 自绘基础壳 ───────────────────────────────────────────────────────────────
+ 
+ /** 折叠卡壳（sec-card 模式，design §5.3）：头部折叠按钮（触摸 ≥44px）+ 右侧
+@@ -200,7 +197,8 @@ function SecCard({
+  * focus 态 brand ring + 标签 brand 高亮，样式范式对齐桌面 change-stage-header），
+  * 点击由父组件 toggle focusStage 筛选下方时间线；无步骤数据阶段保持纯展示 div
+  * 不可点（无 title 提示与筛选效果）。stepStages 含 quick 等非线性值时仅参与
+- * includes 可点判定（步骤条只渲染 STEPPER_STAGES 节点）。
++ * includes 可点判定（步骤条只渲染 WORKFLOW_STAGES 节点——2026-10-21-mobile-scan-birth-cleanup
++ * 起 scan 不进步骤条：出生阶段即 brainstorm，scan 是按需辅助阶段，对齐桌面单一源）。
+  */
+ function StageStepper({
+   currentStage,
+@@ -219,7 +217,9 @@ function StageStepper({
+   if (!currentStage) return null;
+   // 终态别名兼容：CLI 归档会把 current_stage 写成 'archived'（对齐桌面 :56）
+   const displayStage = currentStage === "archived" ? "archive" : currentStage;
+-  const currentIndex = STEPPER_STAGES.indexOf(displayStage);
++  // WORKFLOW_STAGES 是 as const 字面量元组，indexOf 的 string 实参放宽只读数组
++  // （对齐桌面 changes-overview-card MAIN_STAGES 同款写法）
++  const currentIndex = (WORKFLOW_STAGES as readonly string[]).indexOf(displayStage);
+   if (currentIndex < 0) return null;
+   return (
+     <div
+@@ -227,7 +227,7 @@ function StageStepper({
+       aria-label="变更阶段进度"
+       className="flex items-center gap-1 overflow-x-auto rounded-[var(--radius-lg)] border border-border bg-card p-2 shadow-[var(--shadow-sm)]"
+     >
+-      {STEPPER_STAGES.map((stage, i) => {
++      {WORKFLOW_STAGES.map((stage, i) => {
+         const isCompleted = currentIndex > i;
+         const isCurrent = currentIndex === i;
+         const hasSteps = stepStages.includes(stage);
+@@ -288,7 +288,7 @@ function StageStepper({
+               /* 无步骤数据的阶段：纯展示不可点（无筛选效果），保持 div 语义 */
+               <div className="flex items-center gap-1 px-1">{nodeInner}</div>
+             )}
+-            {i < STEPPER_STAGES.length - 1 && (
++            {i < WORKFLOW_STAGES.length - 1 && (
+               <span aria-hidden className="mx-1 h-px w-3 shrink-0 bg-border" />
+             )}
+           </div>
+@@ -464,7 +464,7 @@ export function MobileChangeDetail({
+   const quicklogItems = quicklogQuery.data?.items ?? [];
+ 
+   // 阶段-步骤联动派生：steps 条目出现的阶段去重（含 quick 等非线性 stage，但
+-  // 步骤条只渲染 STEPPER_STAGES 节点，非线性值仅参与 includes 可点判定）——
++  // 步骤条只渲染 WORKFLOW_STAGES 节点，非线性值仅参与 includes 可点判定）——
+   // 口径逐字对齐桌面 [cid]/page.tsx:249-252
+   const stepStages =
+     change.steps && change.steps.length > 0

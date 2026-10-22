@@ -30,7 +30,11 @@ from app.modules.agent.model import (
 )
 from app.modules.daemon.lease.service import DaemonAgentRunNotFound
 from app.modules.daemon.model_error import ModelErrorDTO
-from app.modules.daemon.schema import ModelUsageItemRead
+from app.modules.daemon.schema import (
+    ModelUsageItemRead,
+    TurnFileChangesSnapshot,
+    TurnTimingSnapshot,
+)
 from app.modules.daemon.session.service import (
     TERMINAL_TURN_STATUSES,
     _apply_session_terminal_status,
@@ -88,6 +92,9 @@ async def close_interactive_run(
     model_usage: list[ModelUsageItemRead] | None = None,
     api_requests: int | None = None,
     error: ModelErrorDTO | None = None,
+    file_changes: TurnFileChangesSnapshot | None = None,
+    timing: TurnTimingSnapshot | None = None,
+    daemon_version: str | None = None,
 ) -> AgentRun:
     """close_interactive_run 分步编排（task-10 拆分；公共签名与 docstring 见
 
@@ -130,6 +137,37 @@ async def close_interactive_run(
             # 已持 FOR UPDATE 行锁：rollback 释放（无写入可回滚），refresh 重取
             # 属性供响应序列化读取（rollback 会过期 ORM 实例属性）。
             await svc._session.rollback()
+            # ── 1b 后到快照（2026-10-20-session-page-dsh-alignment / D-030）─────
+            # daemon 的采集是在轮终态落库**之后**异步跑的（E2 时序），因此带
+            # file_changes / timing 的上报几乎总是一次「run 已终态」的二次上报。
+            # 若这里整条 no-op，侧表永远写不进去 → 卡片一律退 tool_only，1b 白做。
+            # 故只在**终态 no-op 分支**补写侧表：幂等覆盖写（(run_id) 键），只动
+            # daemon_run_snapshots，不改 run 的任何终态字段；失败仅 warn +
+            # rollback，绝不影响 close 的幂等语义与响应。
+            if file_changes is not None or timing is not None:
+                try:
+                    # rollback 会把 ORM 实例属性置为 expired：先 refresh 拿回 id
+                    # （helper 要用 agent_run.id），否则后续属性访问会在 async
+                    # 上下文里触发同步懒加载 → sqlalchemy MissingGreenlet。
+                    await svc._session.refresh(agent_run)
+                    await svc._facade._lease._upsert_run_snapshot(
+                        agent_run,
+                        {
+                            "file_changes": file_changes,
+                            "timing": timing,
+                            "daemon_version": daemon_version,
+                        },
+                    )
+                    # helper 只 flush（savepoint），这里必须显式提交：本分支随后
+                    # 直接 return，没有外层收口路径替它提交。
+                    await svc._session.commit()
+                except Exception as exc:
+                    _rsvc.log.warning(
+                        "run_snapshot_late_persist_failed",
+                        run_id=str(run_id),
+                        error=str(exc),
+                    )
+                    await svc._session.rollback()
             await svc._session.refresh(agent_run)
             return agent_run
     now = datetime.now(UTC)
@@ -150,6 +188,9 @@ async def close_interactive_run(
         cache_creation_tokens=cache_creation_tokens,
         model_usage=model_usage,
         result_summary=result_summary,
+        file_changes=file_changes,
+        timing=timing,
+        daemon_version=daemon_version,
     )
     session_end_intent, sessions_changed_intent = await _close_flip_session(svc, agent_run, now)
     # 2026-10-11-task-sweep-daemon-truth：run 收口瞬间不判任务死活（后台任务
@@ -259,6 +300,9 @@ async def _close_apply_terminal(
     cache_creation_tokens: int | None,
     model_usage: list[ModelUsageItemRead] | None,
     result_summary: str | None,
+    file_changes: TurnFileChangesSnapshot | None = None,
+    timing: TurnTimingSnapshot | None = None,
+    daemon_version: str | None = None,
 ) -> None:
     """终态字段映射：status 映射 + error_detail + stage 回写 + gate_status
 
@@ -418,6 +462,27 @@ async def _close_apply_terminal(
                 run_id=str(agent_run.id),
                 error=str(exc),
             )
+    # ── 1b 轮次文件变更 / 时序快照（2026-10-20-session-page-dsh-alignment task-08 /
+    # D-023@v1，design「1b 承载面」修正后的真实落库点）：与 model_usage 同段、在其
+    # 后调 lease 域同一 helper（`(run_id)` 幂等覆盖写，batch complete_lease 复用）。
+    # ok / partial / unavailable 一律原样落库（partial 不是错误态）；缺 file_changes
+    # → helper 写 capability="tool_only"（老 daemon 显式降级，禁止伪造「无改动」）。
+    # best-effort：helper 内 savepoint 已隔离半写，这里只 warn，绝不拖垮轮终态。
+    try:
+        await svc._facade._lease._upsert_run_snapshot(
+            agent_run,
+            {
+                "file_changes": file_changes,
+                "timing": timing,
+                "daemon_version": daemon_version,
+            },
+        )
+    except Exception as exc:
+        _rsvc.log.warning(
+            "run_snapshot_persist_failed",
+            run_id=str(agent_run.id),
+            error=str(exc),
+        )
     if result_summary:
         # Redact via git_gateway redact_output to avoid leaking secrets in
         # the stored summary (mirrors batch completeLease path).
@@ -464,9 +529,12 @@ async def _close_flip_session(
     # _apply_session_terminal_status 守卫（已 ended/failed 返 None）。
     session_end_intent: tuple[uuid.UUID, uuid.UUID | None, uuid.UUID | None] | None = None
     # task-03（2026-08-24-sessions-live-updates）：run 终态翻 session ended/failed
-    # 时记下列表信号意图（session_id + user_id），commit 后广播 status_changed——
-    # 多轮对话仅刷 last_active_at 的分支不置此意图（列表视图无状态变化，不发）。
-    # user_id 同样须在 expire_on_commit 前取标量。
+    # 时记下列表信号意图（session_id + user_id），commit 后广播 status_changed。
+    # 2026-10-20-session-status-live-sync：多轮 keep-active 分支（仅刷
+    # last_active_at）同样置此意图——列表项的 current_run_status 随 run 终态
+    # 从 running 变 None，左侧徽标需秒级收敛（原「列表视图无状态变化，不发」
+    # 的假设已过时）。幂等守卫不变：new_status=None（会话已 ended/failed）
+    # 时整体跳过不发。user_id 同样须在 expire_on_commit 前取标量。
     sessions_changed_intent: tuple[uuid.UUID, uuid.UUID | None] | None = None
     if agent_run.agent_session_id is not None:
         # AgentSession 走模块顶 import（与上方 task-03 model_usage 块共用）：
@@ -489,9 +557,9 @@ async def _close_flip_session(
                 new_status = "failed"
             if new_status is not None:
                 session.status = new_status
+                sessions_changed_intent = (session.id, session.user_id)
                 if new_status in ("ended", "failed"):
                     session.ended_at = now
-                    sessions_changed_intent = (session.id, session.user_id)
                     # ql-20260823-006：会话被 run 终态翻成 ended/failed 时记下
                     # 发送意图，commit 后补发 SESSION_END 清理 daemon 内存副本——
                     # 否则 daemon SessionStore 残留活条目（backend 终态 ≠ daemon
@@ -555,8 +623,10 @@ async def _close_post_commit(
 
     # task-03（design §3 生命周期契约表）：run 终态翻 session ended/failed →
     # 广播列表变更信号（status_changed），打开的会话列表秒级收敛。publish 内部
-    # 静默容错（Redis 抖动不拖垮已 commit 的终态）；仅刷 last_active_at 的多轮
-    # 分支意图为 None，零发布。
+    # 静默容错（Redis 抖动不拖垮已 commit 的终态）。2026-10-20-session-status-
+    # live-sync：多轮 keep-active 分支同样置意图——列表 current_run_status 随
+    # run 终态变 None，左侧转圈徽标需秒级收敛；会话已终态（幂等守卫跳过）
+    # 意图为 None，零发布。
     if sessions_changed_intent is not None:
         changed_sid, changed_uid = sessions_changed_intent
         await _rsvc.publish_sessions_changed("status_changed", changed_sid, changed_uid)

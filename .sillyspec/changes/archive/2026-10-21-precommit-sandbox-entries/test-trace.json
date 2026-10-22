@@ -1,0 +1,21 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-21-precommit-sandbox-entries",
+  "rows": [
+    {
+      "anchor": "FR-03",
+      "row_id": "2026-10-21-precommit-sandbox-entries:flow:测试绑定FR-03",
+      "tests": [
+        "backend/tests/test_check_assertion_surfaces.py「断言面闸门既有单测（14 用例）」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-21-precommit-sandbox-entries"
+    }
+  ]
+}

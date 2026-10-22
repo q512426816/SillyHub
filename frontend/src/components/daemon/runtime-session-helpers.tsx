@@ -425,6 +425,8 @@ export function logsToTurns(logs: AgentRunLogEntry[]): SessionTurnView[] {
     // user_input 的前导块（dispatch_prompt 注入段）提取为 preamble 段（对话
     // 视图不渲染，「全部」视图显示注入来源）。
     const preambleSegments: TurnSegment[] = [];
+    // 2026-10-21-task-wakeup-restore：唤醒注入留痕段（开轮槽分支收集，轮首渲染）。
+    const wakeupSegments: Extract<TurnSegment, { kind: "task_wakeup" }>[] = [];
     const seenText = new Set<string>();
     const assemblerInputs: AssemblerLogInput[] = [];
     // 2026-10-10-system-opened-turn-usermsg：开轮槽占用标记——本 run 首条
@@ -487,6 +489,16 @@ export function logsToTurns(logs: AgentRunLogEntry[]): SessionTurnView[] {
               firstId: entry.id ?? null,
               ts: entry.timestamp ? Date.parse(entry.timestamp) : null,
             });
+            // 2026-10-21-task-wakeup-restore：唤醒注入不再整体隐藏——落
+            // task_wakeup 留痕段（「收到任务消息」折叠行），置于轮段序列首部。
+            if (isTaskWakeupInjection(seg.text)) {
+              wakeupSegments.push({
+                kind: "task_wakeup",
+                id: `wakeup:${entry.id ?? `idx${turnIndex}`}`,
+                text: seg.text,
+                ts: entry.timestamp ? Date.parse(entry.timestamp) : null,
+              });
+            }
           }
           continue;
         }
@@ -532,8 +544,7 @@ export function logsToTurns(logs: AgentRunLogEntry[]): SessionTurnView[] {
     // （user_input / reply 防御性去重）单层。装配器默认开启的第二层 kind:text
     // 去重会误删同轮内合法的重复内容（两次相同工具输出等），而实时 SSE 路径
     // 只按 log_id 去重，形成「聊天时可见、刷新后消失」的路径不一致。
-    const segments = logsToSegments(assemblerInputs, { seenTextDedup: false });
-    // ql-20260920-006（2026-09-18-single-chat-steering 修订）：轮 prompt 仅取
+    const segments = logsToSegments(assemblerInputs, { seenTextDedup: false });    // ql-20260920-006（2026-09-18-single-chat-steering 修订）：轮 prompt 仅取
     // 首个主体组；第二个及以后的互异主体（mid-turn 引导注入的 user_input 留痕，
     // ⚡「转为引导」/ dispatch_now 唯一入口）转 user_msg 段——按时间戳插入轮内
     // 装配段之间（真实时间位置渲染），不再 join 进 prompt 前移到轮次开头。组内
@@ -562,7 +573,7 @@ export function logsToTurns(logs: AgentRunLogEntry[]): SessionTurnView[] {
       status: "completed",
       seenLogIds: new Set(entries.map((e) => e.id)),
       processItems: legacy.processItems,
-      segments: [...preambleSegments, ...segmentsWithUserMsg],
+      segments: [...wakeupSegments, ...preambleSegments, ...segmentsWithUserMsg],
       turnStartedAt: firstLogTimestampMs(entries),
       // ql-20260621：历史回看无实时 token（logs 接口不含 token），置 null。
       // 若后续 logs 接口补 token 字段可在此填充。

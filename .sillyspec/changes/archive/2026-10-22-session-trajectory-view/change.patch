@@ -1,0 +1,773 @@
+diff --git a/frontend/src/components/daemon/__tests__/turn-timeline-trajectory-view.test.tsx b/frontend/src/components/daemon/__tests__/turn-timeline-trajectory-view.test.tsx
+new file mode 100644
+index 000000000..091a3eaf3
+--- /dev/null
++++ b/frontend/src/components/daemon/__tests__/turn-timeline-trajectory-view.test.tsx
+@@ -0,0 +1,159 @@
++// 2026-10-22-session-trajectory-view（D-035）：会话页「进度」视图内的轨迹呈现。
++//
++// 锁定（按用户 2026-10-22 裁决改版）：
++//   1. 视图模式**仍是两态**（对话 / 进度）——轨迹是进度视图内的呈现方式，不是第三种视图；
++//   2. 进度视图出现「时间线 / 轨迹」开关（progress-lens），默认「时间线」不改变现状；
++//   3. 切「轨迹」→ 渲染三泳道面板（trajectory-pane），轮块列表让位（不双画）；
++//   4. 无可绘制时序 → 显式空态（trajectory-empty），不白屏、不伪造条；
++//   5. 对话视图不出现该开关（零回归）。
++import { describe, expect, it, vi } from "vitest";
++import { fireEvent, render, screen } from "@testing-library/react";
++
++import { TurnTimeline } from "../turn-timeline";
++import type { SessionTurnView, SessionViewMode } from "../turn-timeline";
++
++vi.mock("@/components/ui/markdown-text", () => ({
++  MarkdownText: ({ content }: { content: string }) => (
++    <div data-testid="markdown-text">{content}</div>
++  ),
++}));
++
++const START = Date.parse("2026-10-21T10:00:00.000Z");
++const END_ISO = new Date(START + 60_000).toISOString();
++
++function makeTurn(overrides: Partial<SessionTurnView> = {}): SessionTurnView {
++  return {
++    runId: "run-1",
++    turn: 1,
++    prompt: "跑一下测试",
++    output: "好了",
++    status: "completed",
++    seenLogIds: new Set<string>(),
++    inputTokens: 10,
++    outputTokens: 20,
++    turnStartedAt: START,
++    replyAt: END_ISO,
++    segments: [
++      { kind: "thinking", id: "th-1", text: "想一下", streaming: false, ts: START + 1_000 },
++      {
++        kind: "tool",
++        id: "tool-1",
++        raw: "{}",
++        status: "ok",
++        toolName: "Bash",
++        primary: "pnpm test",
++        startedAt: START + 5_000,
++        endedAt: START + 20_000,
++        children: [],
++        subagentType: null,
++      },
++      { kind: "text", id: "tx-1", text: "好了", streaming: false, startedAt: START + 30_000 },
++    ],
++    ...overrides,
++  };
++}
++
++function renderProps(turns: SessionTurnView[], viewMode: SessionViewMode) {
++  return {
++    turns,
++    viewMode,
++    errorMsg: null,
++    sessionStatus: "active" as const,
++    pendingRequests: [],
++    dialogHistory: [],
++    onDialogResolved: () => {},
++    onResend: () => {},
++    onSwitchProvider: () => {},
++    hasOnlineProvider: true,
++    emptyProviderLabel: "Claude Code",
++  };
++}
++
++describe("进度视图内的轨迹呈现（D-035，用户裁决：不做第三视图）", () => {
++  it('进度视图默认「时间线」：轮块照常渲染、不出轨迹面板（现状零变化）', () => {
++    render(<TurnTimeline {...renderProps([makeTurn()], "all")} />);
++
++    const lens = screen.getByTestId("progress-lens");
++    expect(lens).toBeInTheDocument();
++    expect(screen.getByRole("tab", { name: "时间线" })).toHaveAttribute(
++      "aria-selected",
++      "true",
++    );
++    expect(screen.getAllByTestId("turn-block").length).toBe(1);
++    expect(screen.queryByTestId("trajectory-pane")).toBeNull();
++  });
++
++  it('点「轨迹」→ 三泳道面板在场、轮块列表让位', () => {
++    render(<TurnTimeline {...renderProps([makeTurn()], "all")} />);
++    fireEvent.click(screen.getByRole("tab", { name: "轨迹" }));
++
++    expect(screen.getByTestId("trajectory-pane")).toBeInTheDocument();
++    // 三泳道（输入 / 模型 / 工具）随 TrajectoryView 一起出现。
++    expect(screen.getAllByTestId("trajectory-lane-label").length).toBe(3);
++    expect(screen.queryByTestId("turn-block")).toBeNull();
++  });
++
++  it("无 timing 采样 → 模型泳道标「近似」；有 timing → 标「真实占用」", () => {
++    const { unmount } = render(<TurnTimeline {...renderProps([makeTurn()], "all")} />);
++    fireEvent.click(screen.getByRole("tab", { name: "轨迹" }));
++    expect(screen.getByTestId("trajectory-model-basis").textContent).toContain("近似");
++    unmount();
++
++    // 带真实 attempts 的轮：observed（模型条取 attempt 区间）。attempt 时间戳是
++    // ISO 字符串（与 `/runs` 的 `TurnTimingSnapshot` 同形）。
++    render(
++      <TurnTimeline
++        {...renderProps(
++          [
++            makeTurn({
++              timing: {
++                runId: "run-1",
++                basis: "observed",
++                ttftMs: 800,
++                totalMs: 60_000,
++                attempts: [
++                  {
++                    index: 1,
++                    startedAt: new Date(START).toISOString(),
++                    firstTokenAt: new Date(START + 800).toISOString(),
++                    endedAt: new Date(START + 4_000).toISOString(),
++                    model: "claude-x",
++                    inputTokens: 10,
++                    outputTokens: 20,
++                  },
++                ],
++              } as SessionTurnView["timing"],
++            }),
++          ],
++          "all",
++        )}
++      />,
++    );
++    fireEvent.click(screen.getAllByRole("tab", { name: "轨迹" })[0]!);
++    expect(screen.getByTestId("trajectory-model-basis").textContent).toContain("真实占用");
++  });
++
++  it("无可绘制时序（无时间锚点）→ 显式空态，不白屏、不渲染轮块", () => {
++    render(
++      <TurnTimeline
++        {...renderProps(
++          [makeTurn({ turnStartedAt: null, replyAt: null, segments: [] })],
++          "all",
++        )}
++      />,
++    );
++    fireEvent.click(screen.getByRole("tab", { name: "轨迹" }));
++
++    expect(screen.getByTestId("trajectory-empty").textContent).toContain(
++      "没有可绘制的时间数据",
++    );
++    expect(screen.queryByTestId("trajectory-pane")).toBeNull();
++    expect(screen.queryByTestId("turn-block")).toBeNull();
++  });
++
++  it("对话视图不出现「时间线 / 轨迹」开关（两态视图零回归）", () => {
++    render(<TurnTimeline {...renderProps([makeTurn()], "conversation")} />);
++    expect(screen.queryByTestId("progress-lens")).toBeNull();
++    expect(screen.getAllByTestId("turn-block").length).toBe(1);
++  });
++});
+diff --git a/frontend/src/components/daemon/session-panel/page-helpers.tsx b/frontend/src/components/daemon/session-panel/page-helpers.tsx
+index 2a0988b34..f90bd021b 100644
+--- a/frontend/src/components/daemon/session-panel/page-helpers.tsx
++++ b/frontend/src/components/daemon/session-panel/page-helpers.tsx
+@@ -246,6 +246,16 @@ export function enrichDisplayTurns(
+           terminal === null && meta.status != null && ACTIVE_RUN_STATUSES.has(meta.status)
+             ? (parseRunStartedAt(meta.started_at) ?? t.turnStartedAt ?? null)
+             : (t.turnStartedAt ?? parseRunStartedAt(meta.started_at)),
++        // 2026-10-22-session-trajectory-view（D-035）：把 `/runs` 的 `timing`（daemon
++        // TTFT/attempt 采集）透传到轮视图——轨迹面板据此把模型条从「近似空档」切成
++        // 真实占用区间（`modelBasis="observed"`）。老 daemon / 无采样 → null，面板
++        // 保持单色近似并标「近似」，不伪造。
++        // 注：`frontend/src/lib/daemon/sessions.ts` 的手工镜像 `SessionRunRead` 尚未补
++        // 该列（R-17 已登记），这里按可选字段结构化读取，镜像补齐后可去掉断言。
++        timing:
++          t.timing ??
++          (meta as { timing?: SessionTurnView["timing"] }).timing ??
++          null,
+       };
+     };
+     // ql-20260903-025：身份稳定守卫——补齐字段与原值全部一致时返回**原对象**：
+@@ -266,7 +276,10 @@ export function enrichDisplayTurns(
+         candidate.apiDurationMs !== t.apiDurationMs ||
+         candidate.replyAt !== t.replyAt ||
+         candidate.turnStartedAt !== t.turnStartedAt ||
+-        candidate.errorDetail !== t.errorDetail;
++        candidate.errorDetail !== t.errorDetail ||
++        // 缺省归一（undefined ≡ null）：无 timing 的轮不得因多出一个 null 键
++        // 丢掉引用稳定性（守卫命中前提是逐字段值等价，不是键集合等价）。
++        (candidate.timing ?? null) !== (t.timing ?? null);
+       return changed ? candidate : t;
+     });
+     // ql-20260818-011：runsMeta 中的静默切换 run 无 SSE 事件→不在 turns
+diff --git a/frontend/src/components/daemon/trajectory/__tests__/from-turn-views.test.ts b/frontend/src/components/daemon/trajectory/__tests__/from-turn-views.test.ts
+new file mode 100644
+index 000000000..cdcb5e86e
+--- /dev/null
++++ b/frontend/src/components/daemon/trajectory/__tests__/from-turn-views.test.ts
+@@ -0,0 +1,177 @@
++// 2026-10-22-session-trajectory-view（D-035）适配器单测：
++//   SessionTurnView[] → Trajectory（rows/turns/lanes/coverage/modelBasis）
++//
++// 锁定契约（design「轨迹装配器」+ D-024/D-026 口径）：
++//   1. 段映射：text→assistant / thinking→thinking / tool→tool（toolName 保留）；
++//   2. 轮边界：turnStartedAt 起、replyAt 止；无任何锚点的轮**跳过**（不伪造 now）；
++//   3. 预览条目（turn.preview）不参与轨迹；
++//   4. 泳道齐备 + coverage.modelMs + toolMs ≤ windowMs + 无 timing → approx；
++//      带 timing attempts → observed（真实占用，D-035②）；
++//   5. 同一输入恒同输出（纯函数，无 Date.now）。
++import { describe, expect, it } from "vitest";
++
++import { trajectoryFromTurnViews } from "../from-turn-views";
++import type { SessionTurnView } from "@/components/daemon/turn-timeline";
++import type { TurnSegment } from "@/components/daemon/session-log-assembler";
++
++const START = Date.parse("2026-10-21T10:00:00.000Z");
++const START_ISO = new Date(START).toISOString();
++const END_ISO = new Date(START + 60_000).toISOString();
++
++function seg(...items: TurnSegment[]): TurnSegment[] {
++  return items;
++}
++
++function makeTurn(overrides: Partial<SessionTurnView> = {}): SessionTurnView {
++  return {
++    runId: "run-1",
++    turn: 1,
++    prompt: "跑一下测试",
++    output: "好了",
++    status: "completed",
++    seenLogIds: new Set<string>(),
++    inputTokens: 10,
++    outputTokens: 20,
++    turnStartedAt: START,
++    replyAt: END_ISO,
++    segments: seg(
++      { kind: "thinking", id: "th-1", text: "想一下", streaming: false, ts: START + 1_000 },
++      {
++        kind: "tool",
++        id: "tool-1",
++        raw: "{}",
++        status: "ok",
++        toolName: "Bash",
++        primary: "pnpm test",
++        startedAt: START + 5_000,
++        endedAt: START + 20_000,
++        children: [],
++        subagentType: null,
++      },
++      { kind: "text", id: "tx-1", text: "好了", streaming: false, startedAt: START + 30_000 },
++    ),
++    ...overrides,
++  };
++}
++
++describe("trajectoryFromTurnViews：轮视图 → 三泳道轨迹", () => {
++  it("段映射：thinking/tool/text 各成一行，toolName 与 tool 状态保留", () => {
++    const traj = trajectoryFromTurnViews([makeTurn()]);
++
++    const kinds = traj.rows.map((r) => r.kind);
++    expect(kinds).toContain("user");
++    expect(kinds).toContain("thinking");
++    expect(kinds).toContain("tool");
++    expect(kinds).toContain("assistant");
++
++    const tool = traj.rows.find((r) => r.kind === "tool")!;
++    expect(tool.toolName).toBe("Bash");
++    expect(tool.startedAt).toBe(START + 5_000);
++    expect(tool.endedAt).toBe(START + 20_000);
++    expect(tool.status).toBe("ok");
++  });
++
++  it("轮边界取 turnStartedAt → replyAt；tokens 透传", () => {
++    const traj = trajectoryFromTurnViews([makeTurn()]);
++
++    expect(traj.turns).toHaveLength(1);
++    const turn = traj.turns[0]!;
++    expect(turn.runId).toBe("run-1");
++    expect(turn.startedAt).toBe(START);
++    expect(turn.endedAt).toBe(Date.parse(END_ISO));
++    expect(turn.durationMs).toBe(60_000);
++    expect(turn.inputTokens).toBe(10);
++    expect(turn.outputTokens).toBe(20);
++  });
++
++  it("三泳道齐备，且 coverage.modelMs + toolMs ≤ windowMs（不越窗）", () => {
++    const traj = trajectoryFromTurnViews([makeTurn()]);
++
++    expect(traj.lanes.input.length).toBeGreaterThan(0);
++    expect(traj.lanes.tool.length).toBeGreaterThan(0);
++    expect(traj.lanes.model.length).toBeGreaterThan(0);
++    const windowMs = traj.windowEnd - traj.windowStart;
++    expect(traj.coverage.modelMs + traj.coverage.toolMs).toBeLessThanOrEqual(windowMs);
++  });
++
++  it("轮视图无 timing → modelBasis 恒 approx（不冒充真实占用）", () => {
++    const traj = trajectoryFromTurnViews([makeTurn()]);
++    expect(traj.modelBasis).toBe("approx");
++  });
++
++  it("轮视图带 /runs timing（attempts 可解析）→ modelBasis=observed（真实占用）", () => {
++    // D-035②：page-helpers 把 `/runs` 的 timing 透传到轮视图，适配器必须把它当
++    // 真实采样交给装配器——模型泳道切 observed，且 attempt 区间进入窗口。
++    const traj = trajectoryFromTurnViews([
++      makeTurn({
++        timing: {
++          runId: "run-1",
++          basis: "observed",
++          totalMs: 60_000,
++          ttftMs: 800,
++          attempts: [
++            {
++              index: 0,
++              model: "claude-sonnet",
++              startedAt: START_ISO,
++              endedAt: new Date(START + 4_000).toISOString(),
++              firstTokenAt: new Date(START + 800).toISOString(),
++            },
++          ],
++        },
++      }),
++    ]);
++
++    expect(traj.modelBasis).toBe("observed");
++    const model = traj.lanes.model;
++    expect(model.length).toBeGreaterThan(0);
++    expect(model.every((s) => s.start >= START && s.end <= START + 4_000)).toBe(true);
++  });
++
++  it("无任何时间锚点的轮被跳过（不伪造 now / 不补 0）", () => {
++    const traj = trajectoryFromTurnViews([
++      makeTurn({ turnStartedAt: null, replyAt: null, segments: [] }),
++    ]);
++    expect(traj.rows).toEqual([]);
++    expect(traj.turns).toEqual([]);
++    expect(traj.windowStart).toBe(0);
++    expect(traj.windowEnd).toBe(0);
++  });
++
++  it("预览条目（未加载轮）不参与轨迹", () => {
++    const preview = makeTurn({
++      runId: "run-preview",
++      preview: { promptSummary: "摘要", startedAt: START_ISO },
++    });
++    const traj = trajectoryFromTurnViews([preview, makeTurn()]);
++    expect(traj.turns).toHaveLength(1);
++    expect(traj.rows.some((r) => r.id.startsWith("run-preview"))).toBe(false);
++  });
++
++  it("纯函数：同输入两次调用结果一致（无时间源/无全局态）", () => {
++    const first = trajectoryFromTurnViews([makeTurn()]);
++    const second = trajectoryFromTurnViews([makeTurn()]);
++    expect(second.rows.map((r) => r.id)).toEqual(first.rows.map((r) => r.id));
++    expect(second.windowStart).toBe(first.windowStart);
++    expect(second.coverage).toEqual(first.coverage);
++  });
++
++  it("多轮：轮号按出现顺序 1..N，行 stepIndex 轮内从 1 递增", () => {
++    const traj = trajectoryFromTurnViews([
++      makeTurn(),
++      makeTurn({
++        runId: "run-2",
++        turn: 2,
++        turnStartedAt: START + 120_000,
++        replyAt: new Date(START + 180_000).toISOString(),
++      }),
++    ]);
++    expect(traj.turns.map((t) => t.index)).toEqual([1, 2]);
++    for (const turn of traj.turns) {
++      const steps = traj.rows
++        .filter((r) => r.turnIndex === turn.index)
++        .map((r) => r.stepIndex);
++      expect(steps).toEqual(steps.map((_, i) => i + 1));
++    }
++  });
++});
+diff --git a/frontend/src/components/daemon/trajectory/build-trajectory.ts b/frontend/src/components/daemon/trajectory/build-trajectory.ts
+index 0da7e1a3c..dce10e698 100644
+--- a/frontend/src/components/daemon/trajectory/build-trajectory.ts
++++ b/frontend/src/components/daemon/trajectory/build-trajectory.ts
+@@ -648,6 +648,22 @@ export function buildTrajectory(
+     rows.push(...turnRows);
+   }
+ 
++  return assembleTrajectory(rows, turns, timingByRunId);
++}
++
++/**
++ * 装配收口（2026-10-22-session-trajectory-view 抽出的公共尾段）：
++ * 行/轮 + 可选 timing → 窗口、泳道、覆盖率、口径。
++ *
++ * 抽出的唯一目的：让「日志驱动」（`buildTrajectory`）与「轮视图驱动」
++ * （`from-turn-views.ts` 的产品会话页路径）共用同一套窗口/覆盖率/口径数学，
++ * 避免第二套实现漂移。行为与原内联尾段逐行等价。
++ */
++export function assembleTrajectory(
++  rows: TrajectoryRow[],
++  turns: TrajectoryTurn[],
++  timingByRunId: Map<string, TurnTimingSnapshot> = new Map(),
++): Trajectory {
+   let windowStart = Number.POSITIVE_INFINITY;
+   let windowEnd = Number.NEGATIVE_INFINITY;
+   for (const turn of turns) {
+diff --git a/frontend/src/components/daemon/trajectory/from-turn-views.ts b/frontend/src/components/daemon/trajectory/from-turn-views.ts
+new file mode 100644
+index 000000000..3e98572e6
+--- /dev/null
++++ b/frontend/src/components/daemon/trajectory/from-turn-views.ts
+@@ -0,0 +1,222 @@
++/**
++ * 产品会话页的轨迹数据源（2026-10-22-session-trajectory-view / D-035）。
++ *
++ * 背景：轨迹档 1 原先只由 `buildTrajectory(logs, runs)` 驱动，唯一调用方是 dev 路由
++ * `/proto/session-trajectory`（读盘的真实导出）。产品会话页拿不到原始 `AgentRunLogEntry[]`，
++ * 但它手里已经有装配好的 `SessionTurnView[]`（含段级时间戳），足够派生三泳道所需的
++ * 行/轮模型——因此这里做一层**纯函数适配器**：
++ *
++ *   SessionTurnView[] → TrajectoryRow[] / TrajectoryTurn[] → `assembleTrajectory`
++ *
++ * 关键约束（design 契约）：
++ * - **零网络请求 / 零后端改动**：只吃页面已加载的数据（含 page-helpers 从 `/runs` 透传的
++ *   `timing`——它是同一次会话加载的一部分，不是本面板新增的请求）；
++ * - **不伪造时序**：段与轮都取真实锚点（`turnStartedAt` / 段 `startedAt|ts` / `replyAt`），
++ *   整轮没有任何可用锚点 → **跳过该轮**（不塞 now()、不补 0），由调用方渲染空态；
++ * - 口径沿用 `assembleTrajectory`：轮带 `timing` 且 attempts 非空 → 模型泳道真实占用
++ *   （`observed`）；否则恒 `approx`（泳道头显示「近似（无 TTFT 采样）」）。
++ */
++import {
++  assembleTrajectory,
++  type Trajectory,
++  type TrajectoryRow,
++  type TrajectoryRowKind,
++  type TrajectoryRowStatus,
++  type TrajectoryTurn,
++  type TurnTimingSnapshot,
++} from "./build-trajectory";
++import type { SessionTurnView } from "@/components/daemon/turn-timeline";
++import type { TurnSegment } from "@/components/daemon/session-log-assembler";
++
++/** 文本截断默认值与日志驱动路径一致（800 字）。 */
++const DEFAULT_MAX_TEXT_LEN = 800;
++
++export interface TurnViewTrajectoryOptions {
++  /** 单行文本截断长度（默认 800；测试可传小值）。 */
++  maxTextLen?: number;
++}
++
++function clip(
++  text: string | null | undefined,
++  max: number,
++): { value?: string; truncated?: boolean } {
++  if (!text) return {};
++  if (text.length <= max) return { value: text };
++  return { value: text.slice(0, max), truncated: true };
++}
++
++function parseIso(value: string | null | undefined): number | null {
++  if (!value) return null;
++  const ts = Date.parse(value);
++  return Number.isFinite(ts) ? ts : null;
++}
++
++/** 轮 UI 态 → 轨迹行态（`interrupting`/`pending` 视为 running，不提前判死）。 */
++function rowStatusOf(status: SessionTurnView["status"]): TrajectoryRowStatus {
++  if (status === "failed") return "error";
++  if (status === "killed") return "interrupted";
++  if (status === "completed") return "ok";
++  return "running";
++}
++
++/** 段类别 → 轨迹行类别（未识别段一律 system，不丢、不冒充正文）。 */
++function rowKindOf(segment: TurnSegment): TrajectoryRowKind {
++  switch (segment.kind) {
++    case "text":
++      return "assistant";
++    case "thinking":
++      return "thinking";
++    case "tool":
++      return "tool";
++    case "compact":
++    case "compact_status":
++      return "compaction";
++    case "user_msg":
++    case "task_wakeup":
++      return "user";
++    case "file":
++    case "stderr":
++    case "preamble":
++    case "subagent_stub":
++      return "system";
++    default:
++      return "system";
++  }
++}
++
++/** 段的起始锚点（text 用 startedAt，thinking 用 ts，tool 用 startedAt）。 */
++function segmentStart(segment: TurnSegment): number | null {
++  if (segment.kind === "thinking") return segment.ts ?? null;
++  const start = (segment as { startedAt?: number | null }).startedAt;
++  return typeof start === "number" ? start : null;
++}
++
++/** 段的结束锚点（仅工具段有真实 end；其余零宽）。 */
++function segmentEnd(segment: TurnSegment, start: number): number {
++  const end = (segment as { endedAt?: number | null }).endedAt;
++  return typeof end === "number" && end >= start ? end : start;
++}
++
++/**
++ * 轮视图 → 轨迹（三泳道 + 账本 + 检查器共用的 `Trajectory`）。
++ *
++ * @param turns 会话页已加载的轮（预览条目与无锚点轮会被跳过）
++ * @returns 至少 `rows`/`turns` 为数组；两者皆空表示「无可绘制时序数据」
++ */
++export function trajectoryFromTurnViews(
++  turns: readonly SessionTurnView[],
++  options: TurnViewTrajectoryOptions = {},
++): Trajectory {
++  const maxTextLen = options.maxTextLen ?? DEFAULT_MAX_TEXT_LEN;
++  const rows: TrajectoryRow[] = [];
++  const outTurns: TrajectoryTurn[] = [];
++  // 2026-10-22-session-trajectory-view（D-035②）：轮视图携带的 `/runs` timing
++  // （daemon TTFT/attempt 采样）按 runId 收集——有 attempts 时模型泳道走真实占用
++  // 区间（modelBasis="observed"），缺省/空 attempts 恒 approx，不伪造。
++  const timingByRunId = new Map<string, TurnTimingSnapshot>();
++
++  for (const turn of turns) {
++    // 预览条目（未加载轮摘要）没有真实段时序——不参与轨迹。
++    if (turn.preview) continue;
++
++    const runId = turn.realRunId ?? turn.runId;
++    const segs = turn.segments ?? [];
++    const turnStartHint = typeof turn.turnStartedAt === "number" ? turn.turnStartedAt : null;
++    const firstSegStart = segs.map(segmentStart).find((ts): ts is number => ts != null) ?? null;
++    const replyAt = parseIso(turn.replyAt);
++
++    const turnStart = turnStartHint ?? firstSegStart;
++    // 整轮无任何时序锚点 → 跳过（不伪造 now()）。
++    if (turnStart == null) continue;
++
++    const turnIndex = outTurns.length + 1;
++    const turnRows: TrajectoryRow[] = [];
++
++    // 1) 用户输入行（零宽 tick；prompt 空也不丢——泳道需要知道「这轮由谁触发」）。
++    turnRows.push({
++      id: `${runId}:user`,
++      kind: "user",
++      turnIndex,
++      stepIndex: 0,
++      depth: 0,
++      status: rowStatusOf(turn.status),
++      startedAt: turnStart,
++      endedAt: turnStart,
++      durationMs: 0,
++      inputText: clip(turn.prompt, maxTextLen).value,
++    });
++
++    // 2) 段行（思考 / 工具 / 正文 / 其它）。
++    segs.forEach((segment, i) => {
++      const start = segmentStart(segment);
++      // 段缺锚点：用轮首兜底（真实轮首锚点，不是伪造值）。
++      const startedAt = start ?? turnStart;
++      const endedAt = segmentEnd(segment, startedAt);
++      const kind = rowKindOf(segment);
++      const clipped = clip(
++        kind === "tool"
++          ? (segment as { primary?: string | null }).primary ?? undefined
++          : (segment as { text?: string }).text,
++        maxTextLen,
++      );
++      const status: TrajectoryRowStatus =
++        kind === "tool"
++          ? (segment as { status?: "running" | "ok" | "deny" }).status === "deny"
++            ? "error"
++            : (segment as { status?: "running" | "ok" | "deny" }).status === "running"
++              ? "running"
++              : "ok"
++          : rowStatusOf(turn.status);
++
++      turnRows.push({
++        id: `${runId}:${kind}:${segment.id || i}`,
++        kind,
++        turnIndex,
++        stepIndex: 0,
++        depth: 0,
++        status,
++        startedAt,
++        endedAt,
++        durationMs: Math.max(0, endedAt - startedAt),
++        ...(kind === "tool"
++          ? { toolName: (segment as { toolName?: string | null }).toolName ?? undefined }
++          : {}),
++        ...(clipped.truncated ? { truncated: true } : {}),
++        ...(clipped.value
++          ? kind === "user"
++            ? { inputText: clipped.value }
++            : { outputText: clipped.value }
++          : {}),
++        ...(kind === "assistant" || kind === "thinking"
++          ? {}
++          : { meta: { seq: i } as { seq?: number } }),
++      });
++    });
++
++    // 3) 轮尾（replyAt 可能是唯一可靠的「这轮什么时候完」锚点）。
++    let turnEnd = turnStart;
++    for (const row of turnRows) turnEnd = Math.max(turnEnd, row.endedAt);
++    if (replyAt != null) turnEnd = Math.max(turnEnd, replyAt);
++
++    turnRows.sort((a, b) => a.startedAt - b.startedAt || a.id.localeCompare(b.id));
++    turnRows.forEach((row, i) => {
++      row.stepIndex = i + 1;
++    });
++
++    rows.push(...turnRows);
++    if (turn.timing) timingByRunId.set(runId, turn.timing);
++    outTurns.push({
++      index: turnIndex,
++      runId,
++      startedAt: turnStart,
++      endedAt: turnEnd,
++      durationMs: Math.max(0, turnEnd - turnStart),
++      status: turn.status,
++      ...(typeof turn.inputTokens === "number" ? { inputTokens: turn.inputTokens } : {}),
++      ...(typeof turn.outputTokens === "number" ? { outputTokens: turn.outputTokens } : {}),
++    });
++  }
++
++  // 有 timing 的轮 → observed（真实占用区间）；全无 → approx（泳道头标「近似」）。
++  return assembleTrajectory(rows, outTurns, timingByRunId);
++}
+diff --git a/frontend/src/components/daemon/turn-timeline.tsx b/frontend/src/components/daemon/turn-timeline.tsx
+index 02d4d6f01..1d56a485a 100644
+--- a/frontend/src/components/daemon/turn-timeline.tsx
++++ b/frontend/src/components/daemon/turn-timeline.tsx
+@@ -58,6 +58,11 @@ import { RunErrorItem } from "@/components/agent-log/run-error-item";
+ import { formatScheduledTime } from "@/components/daemon/scheduled-messages-bar";
+ import type { ErrorLogItem } from "@/components/agent-log/normalize";
+ import type { TurnSegment } from "@/components/daemon/session-log-assembler";
++// 2026-10-22-session-trajectory-view（D-035）：第三视图「轨迹」——三泳道时间轴由当前
++// 轮视图派生（零网络请求、零后端改动），复用 dev 路由同一套 TrajectoryView。
++import { trajectoryFromTurnViews } from "@/components/daemon/trajectory/from-turn-views";
++import { TrajectoryView } from "@/components/daemon/trajectory/trajectory-view";
++import type { TurnTimingSnapshot } from "@/components/daemon/trajectory/build-trajectory";
+ import {
+   CompactNoticeChip,
+   CompactStatusRowView,
+@@ -308,6 +313,13 @@ export interface SessionTurnView {
+    * 速度段，不伪造。可选：外部构造的历史 turn（logsToTurns 等旧形状）不带。
+    */
+   apiDurationMs?: number | null;
++  /**
++   * 2026-10-22-session-trajectory-view（D-035）：该轮 daemon TTFT/attempt 采样
++   * （`GET /sessions/{id}/runs` 的 `timing`，由 page-helpers 从 run 快照透传）。
++   * 有 attempts → 轨迹「模型」泳道按真实占用区间出条（`modelBasis="observed"`）；
++   * null/缺省（老 daemon / 无采样 / 运行中）→ 保持近似空档并标「近似」。
++   */
++  timing?: TurnTimingSnapshot | null;
+   /**
+    * 2026-07-29-model-error-visibility / FR-04：turn 终态=failed 时拉取的结构化错误
+    * 详情（GET /sessions/{id}/runs 的 error_detail 经 buildErrorLogItem 映射）。
+@@ -403,7 +415,9 @@ export interface SessionTurnView {
+ }
+ 
+ /** 消息视图模式（ql-20260729-005）：对话=用户消息+答复正文+文件卡片（交付物，
+- * agent-file-upload-mcp FR-01）；全部=追加思考/工具等过程项。 */
++ * agent-file-upload-mcp FR-01）；全部=追加思考/工具等过程项。
++ * 2026-10-22-session-trajectory-view（D-035）：**两态不变**——轨迹是「进度」视图内的
++ * 呈现方式（时间线 / 轨迹），不是第三种视图模式。 */
+ export type SessionViewMode = "conversation" | "all";
+ 
+ export interface TurnTimelineProps {
+@@ -1273,6 +1287,37 @@ export function autoRecoverHintForTurn(
+  *  窗口期内每帧核对高度并重申贴底。 */
+ const BOTTOM_REASSERT_WINDOW_MS = 2500;
+ 
++/**
++ * 「进度」视图的轨迹呈现（2026-10-22-session-trajectory-view / D-035）。
++ *
++ * 数据来源＝当前会话已加载的轮视图（`SessionTurnView[]`）：`trajectoryFromTurnViews`
++ * 纯函数派生三泳道所需行/轮，再交给 dev 路由同款 `TrajectoryView` 渲染。**零网络请求**
++ * （不调任何 API、不读 `.proto-staging`），因此产品页与 dev 预览的差别只在数据来源。
++ *
++ * 空态：整段会话都没有可比对的时间戳（`rows` 为空）→ 出显式提示，**不白屏、不伪造条**
++ * （伪造会让「没有数据」看起来像「这轮没有活动」）。
++ */
++function TrajectoryPane({ turns }: { turns: SessionTurnView[] }) {
++  const trajectory = useMemo(() => trajectoryFromTurnViews(turns), [turns]);
++  if (trajectory.rows.length === 0) {
++    return (
++      <div
++        data-testid="trajectory-empty"
++        className="rounded-md border border-dashed border-border px-4 py-6 text-center text-[12px] text-muted-foreground"
++      >
++        本轮会话没有可绘制的时间数据（历史轮缺少时间戳）。
++        <br />
++        产生新的对话轮后，这里会显示输入 / 模型 / 工具三泳道时间轴。
++      </div>
++    );
++  }
++  return (
++    <div data-testid="trajectory-pane" className="min-w-0">
++      <TrajectoryView trajectory={trajectory} />
++    </div>
++  );
++}
++
+ export function TurnTimeline({
+   turns,
+   viewMode,
+@@ -1297,6 +1342,10 @@ export function TurnTimeline({
+   fileChangesSummary = true,
+ }: TurnTimelineProps) {
+   const scrollRef = useRef<HTMLDivElement>(null);
++  // 2026-10-22-session-trajectory-view（D-035）：「进度」视图的呈现方式——时间线（现状）
++  // 或轨迹（三泳道）。仅 all 视图内生效；conversation 视图不出现该开关。
++  const [progressLens, setProgressLens] = useState<"timeline" | "trajectory">("timeline");
++  const showTrajectory = viewMode === "all" && progressLens === "trajectory";
+ 
+   // ql-20260822-010：贴底跟随——原实现每次 turns 更新无条件 scrollTo 底部，
+   // 用户上滚读历史时被流式更新反复拉回底部。改为：onScroll 维护「距底 <
+@@ -1760,6 +1809,37 @@ export function TurnTimeline({
+            2026-10-21 用户裁决「轮间 1px hairline 多余」：**只保留留白，不再画线**
+            （原 `border-b border-border last:border-b-0` 已移除）；轮与轮靠白处分节。 */
+         <div>
++          {/* 2026-10-22-session-trajectory-view（D-035）：轨迹是「进度」视图内的**呈现方式**
++              （时间线 / 轨迹），不是第三种视图模式——D-004 的两态约束不变。 */}
++          {viewMode === "all" && (
++            <div
++              role="tablist"
++              aria-label="进度视图呈现方式"
++              data-testid="progress-lens"
++              className="mb-3 inline-flex items-center rounded-full border bg-muted/50 p-0.5"
++            >
++              {(["timeline", "trajectory"] as const).map((lens) => (
++                <button
++                  key={lens}
++                  role="tab"
++                  aria-selected={progressLens === lens}
++                  onClick={() => setProgressLens(lens)}
++                  className={cn(
++                    "rounded-full px-2.5 py-1 text-[11px] leading-none transition-colors",
++                    progressLens === lens
++                      ? "bg-card font-medium text-foreground shadow-sm"
++                      : "text-muted-foreground hover:text-foreground",
++                  )}
++                >
++                  {lens === "timeline" ? "时间线" : "轨迹"}
++                </button>
++              ))}
++            </div>
++          )}
++          {showTrajectory ? (
++            <TrajectoryPane turns={turns} />
++          ) : (
++            <>
+           {/* task-11（FR-16 / design E7）：会话级文件改动汇总——会话流顶部（首轮之前）。
+               无数据时组件自身返回 null（零占位）；`fileChangesSummary={false}` 可关闭。 */}
+           {fileChangesSummary && (
+@@ -1812,6 +1892,8 @@ export function TurnTimeline({
+               2026-10-20-session-page-dsh-alignment：流容器由 space-y-5 改逐轮
+               padding+hairline 后，末尾注入位自身的上间距由末轮 pb-7 提供。 */}
+           {streamFooter}
++            </>
++          )}
+         </div>
+       )}
+     </div>

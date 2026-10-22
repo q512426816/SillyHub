@@ -178,6 +178,34 @@ class TestSoftDeleteActiveChange:
         await db_session.refresh(spec_ws)
         assert int(spec_ws.spec_version or 0) == base_version + 1
 
+    async def test_soft_delete_stamps_landing_version(self, db_session, tmp_path) -> None:
+        """2026-10-21-spec-manifest-incremental task-02：软删行盖章 landing_version
+        = 递增后的 spec_version（与 bump 同 commit）——GET spec-manifest?since=
+        <软删前版本> 消费方经增量流取到墓碑行。platform_deleted-only 翻转
+        （无 version+1）不盖章（不改清单响应面，避免无信息增量行）。
+        """
+        ws = await _make_workspace(db_session)
+        spec_root = tmp_path / "spec-root"
+        spec_ws = await _make_spec_workspace(db_session, ws, spec_root)
+        svc = SpecWorkspaceService(db_session)
+        await svc.apply_ops(ws.id, [_op("add", "changes/stamp/proposal.md", content=_b64("p"))])
+        before = int(spec_ws.spec_version or 0)
+
+        await svc.soft_delete_change_dir(ws.id, "stamp")
+
+        await db_session.refresh(spec_ws)
+        after = int(spec_ws.spec_version or 0)
+        assert after == before + 1
+        rows = await _manifest_rows(db_session, ws.id)
+        row = rows["changes/stamp/proposal.md"]
+        assert row.landing_version == after
+
+        # 增量游标消费面：软删前的客户端经 since=before 恰取到墓碑行
+        files, spec_version = await svc.get_manifest(ws.id, since=before)
+        assert set(files) == {"changes/stamp/proposal.md"}
+        assert files["changes/stamp/proposal.md"]["exists"] is False
+        assert spec_version == after
+
     async def test_pre_existing_soft_deleted_row_only_strengthened(
         self, db_session, tmp_path
     ) -> None:

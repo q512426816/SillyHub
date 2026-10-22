@@ -36,12 +36,13 @@ from app.core.logging import get_logger
 from app.core.redis import get_redis
 from app.modules.agent.model import AgentRun, AgentRunModelUsage
 from app.modules.daemon.lease.context import build_claim_payload
-from app.modules.daemon.model import DaemonRuntime, DaemonTaskLease
+from app.modules.daemon.model import DaemonRunSnapshot, DaemonRuntime, DaemonTaskLease
 
 # task-07：异常类按归属子域定义。lease 域 6 个本包定义；runtime 域/patch 域
 # 子包直引（B6，避免反向 import facade 造成循环）。
 from app.modules.daemon.patch.service import PatchApplyError, PatchConflictError
 from app.modules.daemon.runtime.service import DaemonRuntimeNotFound
+from app.modules.daemon.schema import TurnFileChangesSnapshot, TurnTimingSnapshot
 from app.modules.git_gateway.service import redact_output
 
 if TYPE_CHECKING:
@@ -464,6 +465,20 @@ class LeaseService:
                             model=str(_stats_model),
                             error=str(exc),
                         )
+
+                # 1b（task-08 / D-023@v1）：轮终态快照幂等落库。batch 路径在此；
+                # interactive 路径由 run_sync/service/close_run_steps.py 的终态段
+                # 调同一 helper（本卡统一 `(run_id)` 覆盖写语义）。payload 缺快照
+                # 字段 → capability="tool_only"；异常 best-effort 捕获，不拖垮终态。
+                try:
+                    await self._upsert_run_snapshot(agent_run, result)
+                except Exception as exc:
+                    log.warning(
+                        "complete_lease_run_snapshot_failed",
+                        lease_id=str(lease_id),
+                        agent_run_id=str(agent_run.id),
+                        error=str(exc),
+                    )
 
                 # ql-20260706-009：兜底——run failed 时把 output_redacted 写一条
                 # stderr AgentRunLog + SSE 推送，让前端日志流可见失败原因（防 daemon
@@ -1194,6 +1209,63 @@ class LeaseService:
                 api_requests=int(stats.get("api_requests") or 1),
             )
         )
+
+    async def _upsert_run_snapshot(
+        self,
+        agent_run: AgentRun,
+        payload: dict,
+    ) -> None:
+        """1b 轮次快照幂等落库（task-08 / D-023@v1 / design「1b 承载面」）。
+
+        ``(run_id)`` 键覆盖写：同 run 先 DELETE 再 INSERT 单行——重复上报
+        （outbox 补发 / retryTerminal / daemon 重试）等价于最后一次，禁追加。
+        capability 由 payload 是否带 ``file_changes`` 决定（带 → ``"full"``，
+        缺 → ``"tool_only"``），与快照字段独立成列；``daemon_version`` 一并存。
+
+        payload 形状：``{"file_changes": TurnFileChangesSnapshot | dict | None,
+        "timing": TurnTimingSnapshot | dict | None, "daemon_version": str | None}``
+        （batch complete_lease 直接传 result；interactive close 传路由 DTO 字段）。
+
+        best-effort：savepoint 隔离 + flush（失败即抛、只回滚本块），由调用方
+        try/except 捕获后 warn——快照落库失败绝不拖垮轮终态（对齐
+        ``_upsert_batch_model_usage`` 调用方的容错语义）。
+        """
+        raw_file_changes = payload.get("file_changes")
+        raw_timing = payload.get("timing")
+        file_changes = (
+            TurnFileChangesSnapshot.model_validate(raw_file_changes)
+            if raw_file_changes is not None
+            else None
+        )
+        timing = TurnTimingSnapshot.model_validate(raw_timing) if raw_timing is not None else None
+        daemon_version_raw = payload.get("daemon_version")
+        daemon_version = str(daemon_version_raw)[:50] if daemon_version_raw else None
+        # model_dump(mode="json") 经镜像类的 serialize_by_alias 输出设计字段名
+        # （camelCase）——库里存的就是契约 JSON，读模型可直接 model_validate。
+        async with self._session.begin_nested():
+            await self._session.execute(
+                delete(DaemonRunSnapshot).where(DaemonRunSnapshot.run_id == agent_run.id)
+            )
+            self._session.add(
+                DaemonRunSnapshot(
+                    run_id=agent_run.id,
+                    file_changes=(
+                        file_changes.model_dump(mode="json") if file_changes is not None else None
+                    ),
+                    timing=(timing.model_dump(mode="json") if timing is not None else None),
+                    collect_ms=(file_changes.collect_ms if file_changes is not None else None),
+                    status=file_changes.status if file_changes is not None else None,
+                    reason=file_changes.reason if file_changes is not None else None,
+                    truncated=bool(
+                        file_changes.truncated
+                        if file_changes is not None and file_changes.truncated is not None
+                        else False
+                    ),
+                    capability="full" if file_changes is not None else "tool_only",
+                    daemon_version=daemon_version,
+                )
+            )
+            await self._session.flush()
 
     async def _fill_run_llm_provider_id(
         self,

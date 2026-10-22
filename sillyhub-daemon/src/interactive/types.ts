@@ -592,6 +592,28 @@ export interface SessionManagerDeps {
     event: SessionEventForBackend,
   ) => void | Promise<void>;
   /**
+   * 2026-10-21-task-wakeup-restore（ql-20260827-007 原型恢复）：后台任务终态
+   * 自动唤醒主代理端口。
+   *
+   * task_notification（completed/failed）到达且 debounce 合并后，把唤醒
+   * prompt（含任务名/用时/摘要/汇报指引）注入同会话（backend inject 创建
+   * 新 turn，queue_when_busy 处理忙态排队）。可选：未注入时仅不做唤醒，
+   * 任务事件/持久行行为不变（测试 mock 零影响）。
+   */
+  onTaskWakeupInject?: (sessionId: string, prompt: string) => void | Promise<void>;
+  /**
+   * 2026-10-21-daemon-zombie-turn FR-01：轮启动看门狗触发回调。
+   *
+   * inject 首轮启动路径（push 前非 running）布防的看门狗到点仍零轮事件
+   * （status=running & currentRunId 未变——消息疑被引擎在打断 abort 收尾
+   * 窗口吞没）时，session-manager 已重置会话态（active + 清 currentRunId），
+   * 经本回调由 daemon 桥 notifyRunResult 把该 run 收敛 failed（backend
+   * close_interactive_run 既有路径 + SSE 终态）。可选：未注入时仅重置本地
+   * 态、不上报（backend 侧由 pending run 启动超时清扫兜底），测试 mock
+   * 零影响（对齐 onTaskWakeupInject 的 additive-optional 先例）。
+   */
+  onTurnStartTimeout?: (sessionId: string, runId: string) => void | Promise<void>;
+  /**
    * task-10（§4.3）：元数据持久化端口。
    *
    * 可选（未注入时 SessionManager 不落盘，保持 task-04 内存态行为向后兼容；
