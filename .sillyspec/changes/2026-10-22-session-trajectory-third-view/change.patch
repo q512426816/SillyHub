@@ -1,0 +1,1352 @@
+diff --git a/.sillyspec/docs/SillyHub/modules/daemon.changelog.md b/.sillyspec/docs/SillyHub/modules/daemon.changelog.md
+index 8b1301b4a..30ad5899d 100644
+--- a/.sillyspec/docs/SillyHub/modules/daemon.changelog.md
++++ b/.sillyspec/docs/SillyHub/modules/daemon.changelog.md
+@@ -72,3 +72,4 @@ created_at: 2026-08-27 14:32:24
+ - 2026-10-21-daemon-zombie-turn | 修复 daemon 会话僵尸轮与打断无效
+ - 2026-10-21-session-git-branch | 会话组件底部动态显示当前所在 git 分支
+ - 2026-10-22-review-risk-fixes | 审查修复：原型路由防线与监听泄漏
++- 2026-10-22-daemon-snapshot-report-log | daemon 快照上报补收口日志
+diff --git a/.sillyspec/docs/SillyHub/modules/frontend_lib.changelog.md b/.sillyspec/docs/SillyHub/modules/frontend_lib.changelog.md
+index 35caef79f..89d92aa57 100644
+--- a/.sillyspec/docs/SillyHub/modules/frontend_lib.changelog.md
++++ b/.sillyspec/docs/SillyHub/modules/frontend_lib.changelog.md
+@@ -17,3 +17,5 @@ created_at: 2026-10-16 16:40:00
+ - 2026-10-19-change-assets-cross-repo-repos | 变更资产卡展示跨仓冻结面
+ - 2026-10-19-cross-repo-patch-slicing | 资产卡跨仓单文件 diff 切片
+ - 2026-10-21-session-git-branch | 会话组件底部动态显示当前所在 git 分支
++- 2026-10-22-daemon-snapshot-report-log | daemon 快照上报补收口日志
++- 2026-10-22-fix-translate-pending | 生产 /api/translate/thinking 请求长时间 pending：容器未配置 TRA…
+diff --git a/.sillyspec/docs/multi-agent-platform/modules/backend.changelog.md b/.sillyspec/docs/multi-agent-platform/modules/backend.changelog.md
+index 90ae0e6eb..b10f0d10c 100644
+--- a/.sillyspec/docs/multi-agent-platform/modules/backend.changelog.md
++++ b/.sillyspec/docs/multi-agent-platform/modules/backend.changelog.md
+@@ -77,3 +77,6 @@
+ - 2026-10-21-daemon-zombie-turn | 修复 daemon 会话僵尸轮与打断无效
+ - 2026-10-21-spec-manifest-incremental | spec-manifest 增量游标同步
+ - 2026-10-21-session-git-branch | 会话组件底部动态显示当前所在 git 分支
++- 2026-10-22-daemon-snapshot-report-log | daemon 快照上报补收口日志
++- 2026-10-22-fix-translate-pending | 生产 /api/translate/thinking 请求长时间 pending：容器未配置 TRA…
++- 2026-10-22-fix-translate-cjk-segments | 生产实测：中文正文+英文代码块的思考内容整条通过「值得翻」判定，代码块保护后剩余中文正文仍被送进 e…
+diff --git a/.sillyspec/docs/multi-agent-platform/modules/deploy.md b/.sillyspec/docs/multi-agent-platform/modules/deploy.md
+index fb8962566..ecc9d5d9c 100644
+--- a/.sillyspec/docs/multi-agent-platform/modules/deploy.md
++++ b/.sillyspec/docs/multi-agent-platform/modules/deploy.md
+@@ -58,3 +58,5 @@ multi-agent-platform 的一体化部署编排组件，用 Docker Compose 把 bac
+ - 2026-10-16-deploy-convergence-guard | 2026-10-16 生产互覆事故——另一会话从分叉分支打包部署，静默回退 main 上已修复的 /…
+ - 2026-10-19-knowledge-build-switch-rollout | 禁建库开关本地部署落地与首搜实测
+ - 2026-10-19-change-assets-cross-repo-repos | 变更资产卡展示跨仓冻结面
++- 2026-10-22-daemon-snapshot-report-log | daemon 快照上报补收口日志
++- 2026-10-22-fix-translate-pending | 生产 /api/translate/thinking 请求长时间 pending：容器未配置 TRA…
+diff --git a/.sillyspec/docs/multi-agent-platform/modules/docs.changelog.md b/.sillyspec/docs/multi-agent-platform/modules/docs.changelog.md
+index 030a0bb23..3d55e8c8d 100644
+--- a/.sillyspec/docs/multi-agent-platform/modules/docs.changelog.md
++++ b/.sillyspec/docs/multi-agent-platform/modules/docs.changelog.md
+@@ -17,3 +17,4 @@
+ - 2026-10-20-codex-requires-openai-auth | 腾讯云平台 codex 会话选直连（anthropic 形态）供应商时稳定断流（stream dis…
+ - 2026-10-20-codex-models-fetch-candidates | 平台「获取模型列表」对新建的 codex 直连条目（智谱 GLM Codex base=https:…
+ - 2026-10-20-preset-engine-endpoint | 新建供应商点「OpenCode Go」预设自动填 https://opencode.ai/zen/g…
++- 2026-10-22-daemon-snapshot-report-log | daemon 快照上报补收口日志
+diff --git a/.sillyspec/docs/multi-agent-platform/modules/frontend.changelog.md b/.sillyspec/docs/multi-agent-platform/modules/frontend.changelog.md
+index d9d9af363..6a28137bc 100644
+--- a/.sillyspec/docs/multi-agent-platform/modules/frontend.changelog.md
++++ b/.sillyspec/docs/multi-agent-platform/modules/frontend.changelog.md
+@@ -153,3 +153,5 @@
+ | 2026-10-21 | 2026-10-22-review-risk-fixes | 审查修复：原型路由防线与监听泄漏 |
+ | 2026-10-21 | 2026-10-22-session-trajectory-view | 会话页接入轨迹第三视图 |
+ | 2026-10-22 | 2026-10-22-file-card-hide-empty | 文件变更卡无数据时整轮不再出卡 |
++| 2026-10-22 | 2026-10-22-daemon-snapshot-report-log | daemon 快照上报补收口日志 |
++| 2026-10-22 | 2026-10-22-fix-translate-pending | 生产 /api/translate/thinking 请求长时间 pending：容器未配置 TRA… |
+diff --git a/.sillyspec/docs/multi-agent-platform/modules/sillyhub-daemon.changelog.md b/.sillyspec/docs/multi-agent-platform/modules/sillyhub-daemon.changelog.md
+index 8f69806a5..b091d63c2 100644
+--- a/.sillyspec/docs/multi-agent-platform/modules/sillyhub-daemon.changelog.md
++++ b/.sillyspec/docs/multi-agent-platform/modules/sillyhub-daemon.changelog.md
+@@ -27,3 +27,4 @@
+ - 2026-10-21-daemon-zombie-turn | 修复 daemon 会话僵尸轮与打断无效
+ - 2026-10-21-session-git-branch | 会话组件底部动态显示当前所在 git 分支
+ - 2026-10-22-review-risk-fixes | 审查修复：原型路由防线与监听泄漏
++- 2026-10-22-daemon-snapshot-report-log | daemon 快照上报补收口日志
+diff --git a/backend/app/core/config.py b/backend/app/core/config.py
+index 35a6b4305..c493bc711 100644
+--- a/backend/app/core/config.py
++++ b/backend/app/core/config.py
+@@ -190,6 +190,13 @@ class Settings(BaseSettings):
+         2048,
+         description="in-process translated-chunk LRU entries cap (env TRANSLATE_CACHE_MAX_ENTRIES).",
+     )
++    # 2026-10-22-fix-translate-pending：单次子进程翻译请求的等待上限（秒）。原为
++    # 引擎内固定 300s——模型未预置时 worker 卡在 HF 下载，接口挂 5 分钟且前端无超时，
++    # 界面恒「翻译中」。收紧到 20s + 配置化：任何慢路径快速 fail-soft 返回原文。
++    translate_request_timeout_sec: float = Field(
++        20.0,
++        description="per-request timeout waiting for the translate subprocess (env TRANSLATE_REQUEST_TIMEOUT_SEC).",
++    )
+ 
+     # 2026-07-07-daemon-skill-execution task-06：sillyspec skills 打包源目录。
+     # 镜像内路径由 Dockerfile COPY → /app/sillyspec-skills/（task-07）。
+diff --git a/backend/app/modules/translate/README.md b/backend/app/modules/translate/README.md
+index 5186112c3..a4b4144a4 100644
+--- a/backend/app/modules/translate/README.md
++++ b/backend/app/modules/translate/README.md
+@@ -12,12 +12,23 @@ API——推理在本地 CTranslate2 子进程完成（opus-mt-en-zh int8 量化
+ | `TRANSLATE_MODEL_REPO` | `jiangzhuo9357/opus-mt-en-zh-ct2` | ct2 格式模型 repo id（换更大模型只改这里） |
+ | `TRANSLATE_MODEL_DIR` | 空 | 本地模型目录（含 `config.json` 的 ct2 目录）；非空时零下载 |
+ | `TRANSLATE_WORKER_IDLE_EXIT_SEC` | `600` | 翻译子进程闲置自灭秒数 |
++| `TRANSLATE_REQUEST_TIMEOUT_SEC` | `20` | 单次子进程请求等待上限的**基准值**；超时 fail-soft 返回原文。实际预算按批大小线性放宽（每条 +2.5s，满批 16 条约 57.5s——实测 16×1000 字符满批 21.5s，单一定值会误杀）。2026-10-22 前为固定 300s，模型未预置时界面会挂 5 分钟 |
+ | `TRANSLATE_CACHE_MAX_ENTRIES` | `2048` | 进程内译文 LRU 条目上限 |
+ 
+ 模型首用从 HuggingFace 自动下载（~100-150MB，尊重 `HF_ENDPOINT` 镜像与 `HF_HOME`
+ 缓存变量）。**下载/加载失败一律 fail-soft**：端点返回 `engine_ready=false` + 原文
+ 透传，应用启动零阻塞；前端显示原文 + 「离线翻译未就绪」轻提示并 60s 退避。
+ 
++子进程 stderr 由后台线程逐行转发到主进程日志（logger `app.modules.translate.engine`，
++WARNING 级），模型下载/加载失败原因可在后端日志中直接查到（此前丢进 DEVNULL，故障
++不可见——2026-10-22 生产事故教训）。
++
++**生产必须预置模型目录**：服务器访问 `huggingface.co` 不通（2026-10-22 实测 TCP
++unreachable），靠首用在线下载会让每次请求卡到超时。`deploy/docker-compose.yml` 已把
++宿主机 `./models/opus-mt-en-zh` 挂到容器 `/opt/models/opus-mt-en-zh`；服务器 `.env`
++设置 `TRANSLATE_MODEL_DIR=/opt/models/opus-mt-en-zh` 即零下载。下载可在服务器上用
++可达镜像 `HF_ENDPOINT=https://hf-mirror.com` 完成（实测可达）。
++
+ ## 离线部署（预置模型，零下载）
+ 
+ ```bash
+@@ -48,6 +59,12 @@ opus-mt 是轻量模型（int8 量化），目标是「能看懂大意」而非
+ 代码 / URL 保护不送翻（`chunking.py`），前端每处展开视图可一键切回原文。质量不
+ 满意时换更大 ct2 模型（改 `TRANSLATE_MODEL_REPO` 指向即可，接口契约不变）。
+ 
++**段级判定（2026-10-22-fix-translate-cjk-segments）**：整条「值得翻」通过后，每个
++正文段（按自然段拆细）还要过一次语言判定——中文占比 ≥0.6 的段原样保留，不送
++en→zh 模型。原因：中文正文夹英文代码块时，代码的拉丁字符会把整条拉过阈值，
++不设段级兜底会把中文段翻成垃圾（生产实测 `命令：`→`发件人:`、整段中文消失）。
++`translated=true` 仅表示该条确有块实际送翻（含缓存命中），全部段被跳过时为 false。
++
+ ## 端点契约
+ 
+ `POST /api/translate/thinking`（`task:run_agent` 权限）：
+diff --git a/backend/app/modules/translate/chunking.py b/backend/app/modules/translate/chunking.py
+index ca96fb0af..9dcb19a33 100644
+--- a/backend/app/modules/translate/chunking.py
++++ b/backend/app/modules/translate/chunking.py
+@@ -92,6 +92,45 @@ def is_translation_worthy(text: str) -> bool:
+     return latin >= WORTHY_MIN_LATIN_CHARS
+ 
+ 
++def should_translate_segment(text: str) -> bool:
++    """段级判定（2026-10-22-fix-translate-cjk-segments）：该正文段是否送翻。
++
++    只判语言倾向、不套整条阈值——段级若复用"≥30 字符 / ≥8 拉丁字母"会把
++    短英文段漏翻。规则：有汉字或拉丁字母、且中文占比 <0.6 才送翻；纯数字/
++    符号段无文字可翻，跳过。
++
++    背景：整条 worthy 只看总量，中文正文夹英文代码块时整条会通过；代码段
++    被保护后中文正文仍会被送进 en→zh 模型，产出垃圾译文（生产实测）。
++    """
++    flat = re.sub(r"\s+", " ", text).strip()
++    cjk = len(_CJK_RE.findall(flat))
++    latin = len(_LATIN_RE.findall(flat))
++    denom = cjk + latin
++    if denom == 0:
++        return False
++    return cjk / denom < WORTHY_CJK_RATIO_MAX
++
++
++def split_paragraph_segments(segments: list[SourceSegment]) -> list[SourceSegment]:
++    """把可翻译段按自然段（``\\n\\n+``）再拆细，供段级语言判定。
++
++    保护段原样透传；分隔符归上一段尾部（拼接恒等于原文）。不拆细就无法
++    区分"中文段落 + 英文段落"的混合内容（split_protected 只在代码/URL
++    处分段）。
++    """
++    out: list[SourceSegment] = []
++    for seg in segments:
++        if not seg.translatable:
++            out.append(seg)
++            continue
++        parts = re.split(r"(\n\n+)", seg.text)
++        for i in range(0, len(parts), 2):
++            text = parts[i] + (parts[i + 1] if i + 1 < len(parts) else "")
++            if text:
++                out.append(SourceSegment(text=text, translatable=True))
++    return out
++
++
+ def split_translatable(text: str, max_chars: int = CHUNK_MAX_CHARS) -> list[str]:
+     """把一段送翻正文切为 ≤max_chars 的块，拼接恒等于原文。
+ 
+diff --git a/backend/app/modules/translate/engine.py b/backend/app/modules/translate/engine.py
+index 2fb561ac9..b423c1f31 100644
+--- a/backend/app/modules/translate/engine.py
++++ b/backend/app/modules/translate/engine.py
+@@ -15,11 +15,14 @@ worker 侧模型解析（本地目录优先 / HF 自动下载）见 translate_wo
+ from __future__ import annotations
+ 
+ import json
++import logging
+ import queue
+ import sys
+ import threading
+ import time
+ 
++logger = logging.getLogger(__name__)
++
+ _engine_lock = threading.Lock()
+ _engine_instance: object | None = None
+ _engine_model: str | None = None
+@@ -29,6 +32,13 @@ _engine_error: str | None = None
+ _ENGINE_CRASH_BACKOFF_SEC = 600.0
+ 
+ 
++def _settings_request_timeout() -> float:
++    """单请求等待上限（settings 懒读，避免模块导入期就绑定配置单例）。"""
++    from app.core.config import get_settings
++
++    return float(get_settings().translate_request_timeout_sec)
++
++
+ class TranslateSubprocessError(RuntimeError):
+     """翻译子进程失败（崩溃/超时/协议错误），调用方按 fail-soft 降级处理。"""
+ 
+@@ -40,7 +50,6 @@ class TranslateSubprocessProxy:
+     - 响应读取用常驻读线程 + 队列（Windows 管道无 select）。
+     """
+ 
+-    REQUEST_TIMEOUT_SEC = 300.0
+     MAX_CONSECUTIVE_CRASHES = 3
+ 
+     def __init__(
+@@ -48,6 +57,7 @@ class TranslateSubprocessProxy:
+         model_spec: str,
+         idle_exit_sec: int = 600,
+         worker_cmd: list[str] | None = None,
++        request_timeout_sec: float | None = None,
+     ) -> None:
+         import subprocess
+ 
+@@ -55,6 +65,12 @@ class TranslateSubprocessProxy:
+         self._model_spec = model_spec
+         self._idle_exit_sec = idle_exit_sec
+         self._worker_cmd = worker_cmd
++        # 2026-10-22-fix-translate-pending：原固定 300s——模型未预置时 UI 挂 5 分钟。
++        self.request_timeout_sec = (
++            float(request_timeout_sec)
++            if request_timeout_sec is not None
++            else _settings_request_timeout()
++        )
+         self._proc: object | None = None
+         self._responses: queue.Queue = queue.Queue()
+         self._lock = threading.Lock()
+@@ -95,12 +111,17 @@ class TranslateSubprocessProxy:
+             cmd,
+             stdin=self._subprocess.PIPE,
+             stdout=self._subprocess.PIPE,
+-            stderr=self._subprocess.DEVNULL,
++            # 2026-10-22-fix-translate-pending：stderr 不再丢进 DEVNULL——模型下载/
++            # 加载失败原因要能在后端日志里查到（生产事故时完全不可见）。
++            stderr=self._subprocess.PIPE,
+             text=True,
+             encoding="utf-8",
+             bufsize=1,
+         )
+         _threading.Thread(target=self._reader, args=(self._proc.stdout,), daemon=True).start()
++        _threading.Thread(
++            target=self._stderr_reader, args=(self._proc.stderr,), daemon=True
++        ).start()
+ 
+     def _reader(self, stdout: object) -> None:
+         """读线程：响应行入队；EOF/断裂入哨兵。"""
+@@ -113,8 +134,27 @@ class TranslateSubprocessProxy:
+         finally:
+             self._responses.put(eof_resp)
+ 
++    def _stderr_reader(self, stderr: object) -> None:
++        """stderr 读线程：逐行转发到主进程日志（WARNING）；异常静默不影响请求。"""
++        try:
++            for line in stderr:
++                text = line.strip()
++                if text:
++                    logger.warning("translate worker stderr: %s", text)
++        except Exception:
++            pass
++
+     # -- 对外接口 -----------------------------------------------------------
+ 
++    def _timeout_for(self, batch_size: int) -> float:
++        """按批大小放宽等待预算：基准 20s + 每多一条 2.5s。
++
++        2026-10-22 评审 P2：16×1000 字符满批在 2 核生产机实测 21.5s，单一 20s
++        预算会误杀正常推理并累计崩溃计数（3 次即 600s 退避，翻译永久不可用）；
++        满批 16 条约 57.5s，仍远低于改造前的固定 300s。
++        """
++        return self.request_timeout_sec + max(0, batch_size - 1) * 2.5
++
+     @property
+     def available(self) -> bool:
+         """未进入崩溃退避期（True 时可继续 translate）。"""
+@@ -132,7 +172,7 @@ class TranslateSubprocessProxy:
+             raise TranslateSubprocessError(
+                 f"translate subprocess in crash backoff until {self.retry_at:.0f}"
+             )
+-        deadline = time.monotonic() + self.REQUEST_TIMEOUT_SEC
++        deadline = time.monotonic() + self._timeout_for(len(texts))
+         with self._lock:
+             attempts = 0
+             while True:
+diff --git a/backend/app/modules/translate/service.py b/backend/app/modules/translate/service.py
+index f51d286f7..8080e0a12 100644
+--- a/backend/app/modules/translate/service.py
++++ b/backend/app/modules/translate/service.py
+@@ -22,6 +22,8 @@ from app.modules.translate.chunking import (
+     SourceSegment,
+     collect_chunks,
+     is_translation_worthy,
++    should_translate_segment,
++    split_paragraph_segments,
+     split_protected,
+ )
+ from app.modules.translate.schema import TranslateItemIn, TranslateItemOut
+@@ -129,6 +131,9 @@ async def translate_items(items: list[TranslateItemIn], target: str = "zh") -> d
+         }
+ 
+     results: dict[str, TranslateItemOut] = {}
++    # 实际送翻过（含缓存回填）的 item——translated 标记只认这个集合，不认
++    # 「整条 worthy 通过」（2026-10-22-fix-translate-cjk-segments）。
++    translated_ids: set[str] = set()
+     # 待推理项：item id → 保护切分后的段列表（送翻段占位 None 待填）
+     pending: dict[str, list[SourceSegment]] = {}
+     # 全局送翻块队列（跨 item 合批送模型）
+@@ -140,12 +145,17 @@ async def translate_items(items: list[TranslateItemIn], target: str = "zh") -> d
+         if not is_translation_worthy(item.text):
+             results[item.id] = TranslateItemOut(id=item.id, text=item.text, translated=False)
+             continue
+-        segments = split_protected(item.text)
++        # 保护切分 → 再按自然段拆细：段级判定需要能区分"中文段落 + 英文段落"
++        segments = split_paragraph_segments(split_protected(item.text))
+         pending[item.id] = segments
+         for seg_idx, seg in enumerate(segments):
+             # 纯空白正文段（如两代码块间的空行）按原样保留，不进翻译管线
+             if not seg.translatable or not seg.text.strip():
+                 continue
++            # 段级二次判定：整条 worthy 只看总量，中文正文夹英文代码块时会整条
++            # 通过；中文为主的段必须原样保留，禁止送进 en→zh 模型。
++            if not should_translate_segment(seg.text):
++                continue
+             seg_chunks = collect_chunks([seg])
+             if not seg_chunks:
+                 continue
+@@ -159,6 +169,7 @@ async def translate_items(items: list[TranslateItemIn], target: str = "zh") -> d
+                 if cached is not None:
+                     _lru_put(key, cached)  # Redis 命中回填 LRU
+                     _fill_chunk(pending, item.id, seg_idx, cached)
++                    translated_ids.add(item.id)
+                 else:
+                     chunk_owners.append((item.id, seg_idx))
+                     pending_chunks.append(chunk)
+@@ -192,6 +203,7 @@ async def translate_items(items: list[TranslateItemIn], target: str = "zh") -> d
+                         chunk_owners, pending_chunks, translations, strict=True
+                     ):
+                         _fill_chunk(pending, item_id, seg_idx, translated)
++                        translated_ids.add(item_id)
+                         cache_writes.append((_cache_key(chunk, target), translated))
+                     for key, value in cache_writes:
+                         _lru_put(key, value)
+@@ -215,7 +227,7 @@ async def translate_items(items: list[TranslateItemIn], target: str = "zh") -> d
+         results[item.id] = TranslateItemOut(
+             id=item.id,
+             text=rebuilt,
+-            translated=_has_translation(segments),
++            translated=item.id in translated_ids,
+         )
+     return {
+         "engine_ready": True,
+@@ -238,8 +250,3 @@ def _fill_chunk(
+     """
+     segs = pending[item_id]
+     segs[seg_idx] = SourceSegment(text=segs[seg_idx].text + translated, translatable=True)
+-
+-
+-def _has_translation(segments: list[SourceSegment]) -> bool:
+-    """该项是否真的发生了翻译（有送翻段且译文非空）。"""
+-    return any(seg.translatable and seg.text.strip() for seg in segments)
+diff --git a/backend/app/modules/translate/tests/test_chunking.py b/backend/app/modules/translate/tests/test_chunking.py
+index 28084f41c..08282655d 100644
+--- a/backend/app/modules/translate/tests/test_chunking.py
++++ b/backend/app/modules/translate/tests/test_chunking.py
+@@ -8,10 +8,33 @@ from app.modules.translate.chunking import (
+     SourceSegment,
+     collect_chunks,
+     is_translation_worthy,
++    should_translate_segment,
+     split_protected,
+     split_translatable,
+ )
+ 
++# -- should_translate_segment（段级判定，2026-10-22-fix-translate-cjk-segments）------
++
++
++def test_segment_cjk_dominant_skipped() -> None:
++    # 生产事故形态：中文正文段夹代码块后，整条 worthy 通过但该段必须跳过
++    assert should_translate_segment("运行下面命令后检查结果。") is False
++    assert should_translate_segment("落地后站点恢复正常可用，注意观察日志。") is False
++    # 中英混排但中文占比 <0.6 → 仍送翻（段级只判语言倾向）
++    assert should_translate_segment("这个 chunking 逻辑要再看一下。") is True
++
++
++def test_segment_short_english_still_translated() -> None:
++    # 段级不套整条的 30 字符/8 拉丁字母阈值——短英文段不能被漏翻
++    assert should_translate_segment("Run this first:\n") is True
++    assert should_translate_segment("done") is True
++
++
++def test_segment_symbols_only_skipped() -> None:
++    # 纯标点/数字：没有可翻文字，不送模型
++    assert should_translate_segment("12345 —— !!!\n") is False
++
++
+ # -- split_protected ---------------------------------------------------------------
+ 
+ 
+diff --git a/backend/app/modules/translate/tests/test_engine.py b/backend/app/modules/translate/tests/test_engine.py
+index 8cf71cc65..5604bb087 100644
+--- a/backend/app/modules/translate/tests/test_engine.py
++++ b/backend/app/modules/translate/tests/test_engine.py
+@@ -9,6 +9,7 @@
+ 
+ from __future__ import annotations
+ 
++import logging
+ import time
+ from pathlib import Path
+ 
+@@ -59,6 +60,32 @@ sys.stdout.flush()
+ sys.exit(3)
+ """
+ 
++# 沉默 worker：吃掉请求但永不响应（模拟子进程卡在模型下载/加载，2026-10-22
++# 生产事故形态——主进程必须有超时兜底，不能无限等）。
++_SILENT_WORKER = """
++import sys
++while True:
++    line = sys.stdin.readline()
++    if not line:
++        break
++"""
++
++# stderr 留痕 worker：启动先往 stderr 写一行错误，再正常处理请求（验证 stderr
++# 不再进 DEVNULL，而是转发到主进程 logger）。
++_STDERR_WORKER = """
++import json, sys
++sys.stderr.write("model-download-stderr-marker: connect failed\\n")
++sys.stderr.flush()
++while True:
++    line = sys.stdin.readline()
++    if not line:
++        break
++    req = json.loads(line)
++    resp = {"id": req.get("id"), "ok": True, "translations": ["T:" + t for t in req["texts"]]}
++    sys.stdout.write(json.dumps(resp, ensure_ascii=False) + "\\n")
++    sys.stdout.flush()
++"""
++
+ 
+ @pytest.fixture()
+ def fake_worker_path(tmp_path: Path) -> Path:
+@@ -74,6 +101,20 @@ def crash_worker_path(tmp_path: Path) -> Path:
+     return p
+ 
+ 
++@pytest.fixture()
++def silent_worker_path(tmp_path: Path) -> Path:
++    p = tmp_path / "silent_worker.py"
++    p.write_text(_SILENT_WORKER, encoding="utf-8")
++    return p
++
++
++@pytest.fixture()
++def stderr_worker_path(tmp_path: Path) -> Path:
++    p = tmp_path / "stderr_worker.py"
++    p.write_text(_STDERR_WORKER, encoding="utf-8")
++    return p
++
++
+ @pytest.fixture(autouse=True)
+ def _reset_engine():
+     reset_translator_for_tests()
+@@ -132,6 +173,59 @@ def test_crash_backoff_and_recovery(fake_worker_path: Path, crash_worker_path: P
+     proxy2.close()
+ 
+ 
++def test_request_timeout_sec_override_fails_fast(silent_worker_path: Path) -> None:
++    """卡死的子进程 != 无限等待：构造参数收紧超时后快速抛错（fail-soft 由上层做）。"""
++    proxy = TranslateSubprocessProxy(
++        "unused", request_timeout_sec=0.3, worker_cmd=_cmd(silent_worker_path)
++    )
++    try:
++        started = time.monotonic()
++        with pytest.raises(TranslateSubprocessError):
++            proxy.translate(["x"])
++        assert time.monotonic() - started < 5.0
++    finally:
++        proxy.close()
++
++
++def test_request_timeout_scales_with_batch_size() -> None:
++    """评审 P2：满批 16×1000 字符实测 21.5s，单一 20s 预算会误杀——按批线性放宽。"""
++    proxy = TranslateSubprocessProxy("unused")
++    try:
++        assert proxy._timeout_for(1) == 20.0
++        assert proxy._timeout_for(2) == 22.5
++        assert proxy._timeout_for(16) == 57.5
++    finally:
++        proxy.close()
++
++
++def test_request_timeout_default_from_settings() -> None:
++    """缺省值来自 settings（默认 20s——2026-10-22 生产事故前是固定 300s）。"""
++    from app.core.config import get_settings
++
++    assert get_settings().translate_request_timeout_sec == 20.0
++    proxy = TranslateSubprocessProxy("unused")
++    try:
++        assert proxy.request_timeout_sec == 20.0
++    finally:
++        proxy.close()
++
++
++def test_worker_stderr_forwarded_to_logger(
++    stderr_worker_path: Path, caplog: pytest.LogCaptureFixture
++) -> None:
++    """子进程 stderr 不进 DEVNULL：后台线程转发到主进程 logger（失败原因可查）。"""
++    with caplog.at_level(logging.WARNING, logger="app.modules.translate.engine"):
++        proxy = TranslateSubprocessProxy("unused", worker_cmd=_cmd(stderr_worker_path))
++        try:
++            assert proxy.translate(["hi"]) == ["T:hi"]
++            deadline = time.monotonic() + 3.0
++            while "model-download-stderr-marker" not in caplog.text and time.monotonic() < deadline:
++                time.sleep(0.05)
++        finally:
++            proxy.close()
++    assert "model-download-stderr-marker" in caplog.text
++
++
+ def test_get_translator_fail_soft_on_construction_error(
+     monkeypatch: pytest.MonkeyPatch,
+ ) -> None:
+diff --git a/backend/app/modules/translate/tests/test_service.py b/backend/app/modules/translate/tests/test_service.py
+index 8a525befe..d80ca9bc3 100644
+--- a/backend/app/modules/translate/tests/test_service.py
++++ b/backend/app/modules/translate/tests/test_service.py
+@@ -143,6 +143,41 @@ async def test_redis_absence_is_silent(
+     assert out["items"][0].translated is True
+ 
+ 
++async def test_cjk_body_with_code_block_not_translated(
++    fake_translator: _FakeTranslator,
++) -> None:
++    """生产事故形态：中文正文 + 英文代码块整条 worthy 通过，但中文段必须原样保留。
++
++    修复前：代码块保护后中文正文仍送进 en→zh 模型 → "命令："变"发件人:"、
++    大段中文消失，且 translated=true（2026-10-22 生产实测）。
++    """
++    text = (
++        "命令：\n```\ndocker compose exec backend python -m app.modules.translate\n```\n"
++        "落地后站点恢复正常可用，注意观察日志。"
++    )
++    out = await translate_items([TranslateItemIn(id="a", text=text)])
++    item = out["items"][0]
++    assert item.text == text  # 原文无损
++    assert item.translated is False  # 未发生任何送翻
++    assert fake_translator.calls == 0  # 零推理
++
++
++async def test_mixed_cjk_and_english_paragraphs(fake_translator: _FakeTranslator) -> None:
++    """中文段落保留、英文段落正常送翻（自然段级拆分后的混合内容）。"""
++    cjk_para = "先排查配置文件。\n\n"
++    en_para = (
++        "The server returned an error because the cache directory was missing, "
++        "so the build failed before packaging."
++    )
++    text = cjk_para + en_para
++    out = await translate_items([TranslateItemIn(id="a", text=text)])
++    item = out["items"][0]
++    assert item.translated is True
++    assert item.text.startswith(cjk_para)  # 中文段原样
++    assert item.text != text  # 英文段已被翻译
++    assert fake_translator.calls == 1
++
++
+ async def test_pure_code_content_translated_false(fake_translator: _FakeTranslator) -> None:
+     text = "```\ngit status\ngit diff\n```"
+     out = await translate_items([TranslateItemIn(id="a", text=text)])
+diff --git a/deploy/docker-compose.yml b/deploy/docker-compose.yml
+index 9ef7dfa31..5d88e18ec 100644
+--- a/deploy/docker-compose.yml
++++ b/deploy/docker-compose.yml
+@@ -109,6 +109,11 @@ services:
+       # 预放模型目录挂入容器默认缓存路径，免下载直载；目录缺失时容器内自下载（本地开发无害）。
+       # 预置：scp 本地 fastembed_cache（bge-small-zh-v1.5 ~91MB）→ deploy/models/fastembed_cache。
+       - "./models/fastembed_cache:/tmp/fastembed_cache"
++      # 思考翻译模型（2026-10-22-fix-translate-pending）：服务器到 huggingface.co
++      # 不可达（实测 TCP unreachable，DNS 亦被污染），worker 子进程若走 HF 下载会
++      # 卡住直至超时。宿主机预置 opus-mt-en-zh ct2 模型目录挂入容器，配
++      # TRANSLATE_MODEL_DIR 实现零下载加载；目录缺失时回退 HF 路径（fail-soft）。
++      - "./models/opus-mt-en-zh:/opt/models/opus-mt-en-zh"
+       # 2026-10-08-backend-image-slim-no-claude：claude-data 卷挂载退役——容器内已无
+       # claude（server-local 遗物，agent 执行在宿主 daemon）；named volume 数据仍在
+       # 宿主磁盘，仅不再挂入。
+@@ -148,6 +153,10 @@ services:
+       WORKTREE_BASE_DIR: /data/sillyspec-workspaces
+       SPEC_DATA_ROOT: /data/spec-workspaces
+       HOME: /app
++      # 2026-10-22-fix-translate-pending：本地模型目录（对应上方挂载）。
++      # 生产 .env 设 TRANSLATE_MODEL_DIR=/opt/models/opus-mt-en-zh；留空则回退
++      # TRANSLATE_MODEL_REPO 的 HF 下载路径（本地开发有网时可用）。
++      TRANSLATE_MODEL_DIR: ${TRANSLATE_MODEL_DIR:-}
+       # 2026-10-08-backend-image-slim-no-claude：NPM_CONFIG_CACHE 退役（容器内已无 npm）。
+       # 容器内已无 claude，deploy/.env 的 ANTHROPIC_*/CLAUDE_* 行对容器为惰性变量
+       # （daemon 侧凭据不受影响，走 daemon install 自身配置）。
+diff --git a/frontend/src/components/daemon/__tests__/session-panel-variant.test.tsx b/frontend/src/components/daemon/__tests__/session-panel-variant.test.tsx
+index 3ecbcca7c..011d75d28 100644
+--- a/frontend/src/components/daemon/__tests__/session-panel-variant.test.tsx
++++ b/frontend/src/components/daemon/__tests__/session-panel-variant.test.tsx
+@@ -390,6 +390,23 @@ describe("SessionPanel variant='mobile' 布局类与收纳", () => {
+     ).toBeInTheDocument();
+   });
+ 
++  it("移动 variant：视图切换为三态（对话 / 进度 / 轨迹）", async () => {
++    // 2026-10-22-session-trajectory-third-view（D-001）：移动端与桌面共用同一
++    // SessionViewTabs——轨迹与另外两态同层，不再有进度内的第二层开关。
++    setupPage("mobile");
++
++    const panel = (await screen.findByLabelText("会话面板")) as HTMLElement;
++    const header = panel.querySelector("header") as HTMLElement;
++    const tablist = within(header).getByRole("tablist", { name: "消息显示范围" });
++    const tabs = within(tablist).getAllByRole("tab");
++
++    expect(tabs.map((tab) => tab.textContent)).toEqual(["对话", "进度", "轨迹"]);
++    expect(within(tablist).getByRole("tab", { name: "轨迹" })).toHaveAttribute(
++      "aria-selected",
++      "false",
++    );
++  });
++
+   it("逻辑零分叉：SSE 建流入参与 variant 无关，发消息（injectSession）mobile 下照常可用", async () => {
+     setupPage("mobile");
+ 
+diff --git a/frontend/src/components/daemon/__tests__/turn-timeline-trajectory-view.test.tsx b/frontend/src/components/daemon/__tests__/turn-timeline-trajectory-view.test.tsx
+index 091a3eaf3..666cec850 100644
+--- a/frontend/src/components/daemon/__tests__/turn-timeline-trajectory-view.test.tsx
++++ b/frontend/src/components/daemon/__tests__/turn-timeline-trajectory-view.test.tsx
+@@ -1,17 +1,24 @@
+-// 2026-10-22-session-trajectory-view（D-035）：会话页「进度」视图内的轨迹呈现。
++// 2026-10-22-session-trajectory-third-view（D-001，覆盖 D-035 两态约束）：
++// 会话视图三态中的「轨迹」——与「对话 / 进度」同层并列，不再是进度内的第二层开关。
+ //
+-// 锁定（按用户 2026-10-22 裁决改版）：
+-//   1. 视图模式**仍是两态**（对话 / 进度）——轨迹是进度视图内的呈现方式，不是第三种视图；
+-//   2. 进度视图出现「时间线 / 轨迹」开关（progress-lens），默认「时间线」不改变现状；
+-//   3. 切「轨迹」→ 渲染三泳道面板（trajectory-pane），轮块列表让位（不双画）；
++// 锁定：
++//   1. 「进度」恢复纯时间线：轮块照常、不再有 progress-lens；
++//   2. 「轨迹」直接渲染三泳道面板，轮块让位（不双画）；
++//   3. 轨迹面板选中交互（并入 2026-10-22-fix-trajectory-row-select）：点击账本行 /
++//      时间轴条目选中，右侧检查器出详情，↑/↓ 切换、Esc 清除；
+ //   4. 无可绘制时序 → 显式空态（trajectory-empty），不白屏、不伪造条；
+-//   5. 对话视图不出现该开关（零回归）。
++//   5. 「对话」视图不出现轨迹面板（零回归）。
+ import { describe, expect, it, vi } from "vitest";
+ import { fireEvent, render, screen } from "@testing-library/react";
+ 
+ import { TurnTimeline } from "../turn-timeline";
+ import type { SessionTurnView, SessionViewMode } from "../turn-timeline";
+ 
++// jsdom 未实现 scrollIntoView（TrajectoryView 选中行「滚入视野」effect 会调用）。
++if (!Element.prototype.scrollIntoView) {
++  Element.prototype.scrollIntoView = () => {};
++}
++
+ vi.mock("@/components/ui/markdown-text", () => ({
+   MarkdownText: ({ content }: { content: string }) => (
+     <div data-testid="markdown-text">{content}</div>
+@@ -69,33 +76,30 @@ function renderProps(turns: SessionTurnView[], viewMode: SessionViewMode) {
+   };
+ }
+ 
+-describe("进度视图内的轨迹呈现（D-035，用户裁决：不做第三视图）", () => {
+-  it('进度视图默认「时间线」：轮块照常渲染、不出轨迹面板（现状零变化）', () => {
++describe("会话视图三态中的「轨迹」（D-001）", () => {
++  it("进度视图纯时间线：轮块照常渲染、无「时间线 / 轨迹」第二层开关", () => {
+     render(<TurnTimeline {...renderProps([makeTurn()], "all")} />);
+ 
+-    const lens = screen.getByTestId("progress-lens");
+-    expect(lens).toBeInTheDocument();
+-    expect(screen.getByRole("tab", { name: "时间线" })).toHaveAttribute(
+-      "aria-selected",
+-      "true",
+-    );
+     expect(screen.getAllByTestId("turn-block").length).toBe(1);
++    expect(screen.queryByTestId("progress-lens")).toBeNull();
+     expect(screen.queryByTestId("trajectory-pane")).toBeNull();
+   });
+ 
+-  it('点「轨迹」→ 三泳道面板在场、轮块列表让位', () => {
+-    render(<TurnTimeline {...renderProps([makeTurn()], "all")} />);
+-    fireEvent.click(screen.getByRole("tab", { name: "轨迹" }));
++  it("轨迹视图直接出三泳道面板、轮块让位", () => {
++    render(<TurnTimeline {...renderProps([makeTurn()], "trajectory")} />);
+ 
+     expect(screen.getByTestId("trajectory-pane")).toBeInTheDocument();
+     // 三泳道（输入 / 模型 / 工具）随 TrajectoryView 一起出现。
+     expect(screen.getAllByTestId("trajectory-lane-label").length).toBe(3);
+     expect(screen.queryByTestId("turn-block")).toBeNull();
++    // 不再有进度内的第二层开关。
++    expect(screen.queryByTestId("progress-lens")).toBeNull();
+   });
+ 
+   it("无 timing 采样 → 模型泳道标「近似」；有 timing → 标「真实占用」", () => {
+-    const { unmount } = render(<TurnTimeline {...renderProps([makeTurn()], "all")} />);
+-    fireEvent.click(screen.getByRole("tab", { name: "轨迹" }));
++    const { unmount } = render(
++      <TurnTimeline {...renderProps([makeTurn()], "trajectory")} />,
++    );
+     expect(screen.getByTestId("trajectory-model-basis").textContent).toContain("近似");
+     unmount();
+ 
+@@ -125,24 +129,72 @@ describe("进度视图内的轨迹呈现（D-035，用户裁决：不做第三
+               } as SessionTurnView["timing"],
+             }),
+           ],
+-          "all",
++          "trajectory",
+         )}
+       />,
+     );
+-    fireEvent.click(screen.getAllByRole("tab", { name: "轨迹" })[0]!);
+     expect(screen.getByTestId("trajectory-model-basis").textContent).toContain("真实占用");
+   });
+ 
+-  it("无可绘制时序（无时间锚点）→ 显式空态，不白屏、不渲染轮块", () => {
++  it("点击账本行 → 选中态 + 右侧检查器显示行详情", () => {
++    render(<TurnTimeline {...renderProps([makeTurn()], "trajectory")} />);
++
++    const rows = screen.getAllByTestId("trajectory-row");
++    // 首行是用户输入行（prompt），检查器应显示其「输入」正文。
++    fireEvent.click(rows[0]!);
++
++    expect(rows[0]).toHaveAttribute("aria-selected", "true");
++    const inspector = screen.getByLabelText("行详情");
++    expect(inspector.textContent).toContain("输入");
++    expect(inspector.textContent).toContain("跑一下测试");
++    expect(inspector.textContent).not.toContain("选中一行查看输入 / 输出");
++  });
++
++  it("点击时间轴条目 → 对应账本行选中", () => {
++    render(<TurnTimeline {...renderProps([makeTurn()], "trajectory")} />);
++
++    const bar = screen.getAllByTestId("trajectory-bar")[0]!;
++    const rowId = bar.getAttribute("data-row-id");
++    expect(rowId).toBeTruthy();
++
++    fireEvent.click(bar);
++
++    const row = screen
++      .getAllByTestId("trajectory-row")
++      .find((item) => item.getAttribute("data-row-id") === rowId);
++    expect(row).toHaveAttribute("aria-selected", "true");
++  });
++
++  it("↑/↓ 切换选中、Esc 清除", () => {
++    render(<TurnTimeline {...renderProps([makeTurn()], "trajectory")} />);
++
++    const grid = screen.getByTestId("trajectory-grid");
++    const rows = screen.getAllByTestId("trajectory-row");
++
++    // 未选中时 ↓ 选首行，再 ↓ 选第二行。
++    fireEvent.keyDown(grid, { key: "ArrowDown" });
++    expect(rows[0]).toHaveAttribute("aria-selected", "true");
++    fireEvent.keyDown(grid, { key: "ArrowDown" });
++    expect(rows[1]).toHaveAttribute("aria-selected", "true");
++    expect(rows[0]).toHaveAttribute("aria-selected", "false");
++
++    // Esc 清除选中，检查器回落空提示。
++    fireEvent.keyDown(grid, { key: "Escape" });
++    expect(rows.every((row) => row.getAttribute("aria-selected") === "false")).toBe(true);
++    expect(screen.getByLabelText("行详情").textContent).toContain(
++      "选中一行查看输入 / 输出",
++    );
++  });
++
++  it("无可绘制时序（无时间锚点）→ 轨迹视图显式空态，不白屏、不渲染轮块", () => {
+     render(
+       <TurnTimeline
+         {...renderProps(
+           [makeTurn({ turnStartedAt: null, replyAt: null, segments: [] })],
+-          "all",
++          "trajectory",
+         )}
+       />,
+     );
+-    fireEvent.click(screen.getByRole("tab", { name: "轨迹" }));
+ 
+     expect(screen.getByTestId("trajectory-empty").textContent).toContain(
+       "没有可绘制的时间数据",
+@@ -151,9 +203,11 @@ describe("进度视图内的轨迹呈现（D-035，用户裁决：不做第三
+     expect(screen.queryByTestId("turn-block")).toBeNull();
+   });
+ 
+-  it("对话视图不出现「时间线 / 轨迹」开关（两态视图零回归）", () => {
++  it("对话视图不出现轨迹面板（零回归）", () => {
+     render(<TurnTimeline {...renderProps([makeTurn()], "conversation")} />);
+-    expect(screen.queryByTestId("progress-lens")).toBeNull();
++
+     expect(screen.getAllByTestId("turn-block").length).toBe(1);
++    expect(screen.queryByTestId("trajectory-pane")).toBeNull();
++    expect(screen.queryByTestId("progress-lens")).toBeNull();
+   });
+ });
+diff --git a/frontend/src/components/daemon/session-panel/__tests__/session-view-tabs.test.tsx b/frontend/src/components/daemon/session-panel/__tests__/session-view-tabs.test.tsx
+new file mode 100644
+index 000000000..d260b2b42
+--- /dev/null
++++ b/frontend/src/components/daemon/session-panel/__tests__/session-view-tabs.test.tsx
+@@ -0,0 +1,36 @@
++// 2026-10-22-session-trajectory-third-view（D-001）：会话视图三态共享控件。
++//
++// 锁定：弹窗版 / 整页版 / 移动 variant 复用同一个「对话 / 进度 / 轨迹」切换——
++// 轨迹与另外两态同层并列（不再有「进度」内的第二层开关）。
++import { describe, expect, it, vi } from "vitest";
++import { fireEvent, render, screen } from "@testing-library/react";
++
++import { SessionViewTabs } from "../session-view-tabs";
++
++describe("会话视图三态切换（D-001）", () => {
++  it("三态并列：对话 / 进度 / 轨迹，点击回调当前值", () => {
++    const onChange = vi.fn();
++    render(<SessionViewTabs value="conversation" onChange={onChange} />);
++
++    const tabs = screen.getAllByRole("tab");
++    expect(tabs.map((tab) => tab.textContent)).toEqual(["对话", "进度", "轨迹"]);
++
++    fireEvent.click(screen.getByRole("tab", { name: "轨迹" }));
++    expect(onChange).toHaveBeenCalledWith("trajectory");
++  });
++
++  it("默认选中对话：value=conversation 时仅「对话」aria-selected", () => {
++    render(<SessionViewTabs value="conversation" onChange={() => {}} />);
++
++    expect(screen.getByRole("tab", { name: "对话" })).toHaveAttribute("aria-selected", "true");
++    expect(screen.getByRole("tab", { name: "进度" })).toHaveAttribute("aria-selected", "false");
++    expect(screen.getByRole("tab", { name: "轨迹" })).toHaveAttribute("aria-selected", "false");
++  });
++
++  it("受控回显：value=trajectory 时「轨迹」选中", () => {
++    render(<SessionViewTabs value="trajectory" onChange={() => {}} />);
++
++    expect(screen.getByRole("tab", { name: "轨迹" })).toHaveAttribute("aria-selected", "true");
++    expect(screen.getByRole("tab", { name: "进度" })).toHaveAttribute("aria-selected", "false");
++  });
++});
+diff --git a/frontend/src/components/daemon/session-panel/__tests__/view-mode-persist.test.ts b/frontend/src/components/daemon/session-panel/__tests__/view-mode-persist.test.ts
+new file mode 100644
+index 000000000..e922f5c23
+--- /dev/null
++++ b/frontend/src/components/daemon/session-panel/__tests__/view-mode-persist.test.ts
+@@ -0,0 +1,45 @@
++// 2026-10-22-session-trajectory-third-view（D-001）：视图模式按会话持久化三态。
++//
++// 锁定：写入 "trajectory" 后回读仍为 trajectory；旧值 all / conversation 原义；
++// 非法值 / 缺失回落 conversation（刷新不把用户扔到错误的视图）。
++import { beforeEach, describe, expect, it } from "vitest";
++
++import { readPersistedViewMode, writePersistedViewMode } from "../turn-state";
++
++const KEY = "sillyhub.sessions.viewMode.s-1";
++
++describe("会话视图模式持久化（三态）", () => {
++  beforeEach(() => {
++    window.localStorage.clear();
++  });
++
++  it("写入轨迹后回读为 trajectory", () => {
++    writePersistedViewMode("s-1", "trajectory");
++
++    expect(window.localStorage.getItem(KEY)).toBe("trajectory");
++    expect(readPersistedViewMode("s-1")).toBe("trajectory");
++  });
++
++  it("all / conversation 旧值原义", () => {
++    window.localStorage.setItem(KEY, "all");
++    expect(readPersistedViewMode("s-1")).toBe("all");
++
++    window.localStorage.setItem(KEY, "conversation");
++    expect(readPersistedViewMode("s-1")).toBe("conversation");
++  });
++
++  it("非法值 / 缺失回落 conversation", () => {
++    expect(readPersistedViewMode("s-1")).toBe("conversation");
++
++    window.localStorage.setItem(KEY, "unknown-mode");
++    expect(readPersistedViewMode("s-1")).toBe("conversation");
++  });
++
++  it("按会话隔离：不同 sessionId 互不影响", () => {
++    writePersistedViewMode("s-1", "trajectory");
++    writePersistedViewMode("s-2", "all");
++
++    expect(readPersistedViewMode("s-1")).toBe("trajectory");
++    expect(readPersistedViewMode("s-2")).toBe("all");
++  });
++});
+diff --git a/frontend/src/components/daemon/session-panel/index.tsx b/frontend/src/components/daemon/session-panel/index.tsx
+index f072ea8c0..647594675 100644
+--- a/frontend/src/components/daemon/session-panel/index.tsx
++++ b/frontend/src/components/daemon/session-panel/index.tsx
+@@ -90,7 +90,7 @@
+ // 共享状态机/纯 helper 在 ./turn-state 等子模块。零行为变化。
+ 
+ import { SessionPanelPage } from "./session-panel-page";
+-import type { SessionTurnView } from "@/components/daemon/turn-timeline";
++import type { SessionTurnView, SessionViewMode } from "@/components/daemon/turn-timeline";
+ import type { LlmProviderRead } from "@/lib/api/llm-providers";
+ import type {
+   DaemonMachineRead,
+@@ -253,10 +253,10 @@ export interface SessionPanelProps {
+   // ── 视图控制（两模式共用；不传则组件内部自持）──────────────────────
+   /** 可选受控：消息视图模式。〔prop〕dialog 模式适配层不传（内部 useState 同款）。
+    *  受控-可选模式：传入 onViewModeChange 即受控。 */
+-  viewMode?: "conversation" | "all";
++  viewMode?: SessionViewMode;
+   /** 配套变更回调（与 viewMode 成对传或成对不传）。〔prop〕 */
+   // eslint-disable-next-line no-unused-vars -- 接口回调签名形参（同 subagent-panel-context.ts 惯例）
+-  onViewModeChange?: (mode: "conversation" | "all") => void;
++  onViewModeChange?: (mode: SessionViewMode) => void;
+ 
+   // ── page 模式子代理右栏（task-03 / 2026-09-15-subagent-three-pane-display /
+   //    design §5.B——仅门户 page 装配传入）──────────────────────────────
+diff --git a/frontend/src/components/daemon/session-panel/session-panel-dialog.tsx b/frontend/src/components/daemon/session-panel/session-panel-dialog.tsx
+index 904d9e02c..bcdb8e069 100644
+--- a/frontend/src/components/daemon/session-panel/session-panel-dialog.tsx
++++ b/frontend/src/components/daemon/session-panel/session-panel-dialog.tsx
+@@ -16,7 +16,12 @@ import { AgentModelInput } from "@/components/AgentModelInput";
+ import { buildErrorLogItem, buildSystemFailureItem } from "@/components/agent-log/normalize";
+ import { applyLogToSegments, extractPreambleText, finishTurn, stripPreambleText } from "@/components/daemon/session-log-assembler";
+ import { TurnTimeline } from "@/components/daemon/turn-timeline";
+-import type { AutoResumeEntry, TurnForkEntryWiring } from "@/components/daemon/turn-timeline";
++import type {
++  AutoResumeEntry,
++  SessionViewMode,
++  TurnForkEntryWiring,
++} from "@/components/daemon/turn-timeline";
++import { SessionViewTabs } from "./session-view-tabs";
+ // task-08（2026-09-22-session-fork-continuation / FR-01 / FR-05）：谱系溯源块 +
+ // 分叉确认弹层（dialog 模式与 page 双挂载点同步惯例）。
+ import { LineageBlock } from "@/components/daemon/session-fork/lineage-block";
+@@ -64,7 +69,6 @@ import {
+   type TeamMissionTriggerRequest,
+ } from "@/lib/daemon";
+ import { getProviderCaps } from "@/lib/provider-caps";
+-import { cn } from "@/lib/utils";
+ 
+ import { type SessionPanelProps } from "./index";
+ import {
+@@ -165,9 +169,10 @@ export function SessionPanelDialog(props: SessionPanelProps) {
+   // 即移除、failed/ended 会话不渲染卡片，历史靠 GET /dialogs/history 恢复展示。
+   const [dialogHistory, setDialogHistory] = useState<SessionDialogRead[]>([]);
+   // 消息视图模式：「对话」（默认）只显用户消息 + agent 答复正文；「进度」追加
+-  // thinking/工具调用/stderr 过程项（v2 段模型下为完整段时间线）。dialog 适配层
++  // thinking/工具调用/stderr 过程项（v2 段模型下为完整段时间线）；「轨迹」直接显示
++  // 三泳道时间轴（2026-10-22-session-trajectory-third-view / D-001）。dialog 适配层
+   // 不传 viewMode 受控对（diff-analysis §5.1），内部自持。
+-  const [viewMode, setViewMode] = useState<"conversation" | "all">("conversation");
++  const [viewMode, setViewMode] = useState<SessionViewMode>("conversation");
+   const streamConnRef = useRef<SessionStreamConnection | null>(null);
+   // P0 竞态修复（2026-08-25）：unmount cleanup 先置 disposed 再 close 当前连接——
+   // establishStream 的 prefetch await 窗口内卸载时（cleanup 已跑、streamConnRef 仍
+@@ -1905,30 +1910,9 @@ export function SessionPanelDialog(props: SessionPanelProps) {
+                 setWorkerSessionId(subSessionId);
+               }}
+             />
+-            {/* 对话/进度二态切换（仅在有消息时出现；page 模式同款 JSX）。 */}
++            {/* 三态视图切换（仅在有消息时出现；page 模式复用同一组件）。 */}
+             {view.turns.length > 0 && (
+-              <div
+-                role="tablist"
+-                aria-label="消息显示范围"
+-                className="inline-flex items-center rounded-full border bg-muted/50 p-0.5"
+-              >
+-                {(["conversation", "all"] as const).map((m) => (
+-                  <button
+-                    key={m}
+-                    role="tab"
+-                    aria-selected={viewMode === m}
+-                    onClick={() => setViewMode(m)}
+-                    className={cn(
+-                      "rounded-full px-2.5 py-1 text-[11px] leading-none transition-colors",
+-                      viewMode === m
+-                        ? "bg-card font-medium text-foreground shadow-sm"
+-                        : "text-muted-foreground hover:text-foreground",
+-                    )}
+-                  >
+-                    {m === "conversation" ? "对话" : "进度"}
+-                  </button>
+-                ))}
+-              </div>
++              <SessionViewTabs value={viewMode} onChange={setViewMode} />
+             )}
+             {workspaceId && (
+               <Button
+diff --git a/frontend/src/components/daemon/session-panel/session-panel-page.tsx b/frontend/src/components/daemon/session-panel/session-panel-page.tsx
+index 052b1f1f2..b0ffb03ec 100644
+--- a/frontend/src/components/daemon/session-panel/session-panel-page.tsx
++++ b/frontend/src/components/daemon/session-panel/session-panel-page.tsx
+@@ -14,8 +14,13 @@ import { buildErrorLogItem, buildSystemFailureItem } from "@/components/agent-lo
+ import {
+   extractPreambleText, finishTurn, isTaskWakeupInjection, stripPreambleText, type UserMsgTurnSegment,
+ } from "@/components/daemon/session-log-assembler";
+-import { TurnTimeline, type SessionTurnView } from "@/components/daemon/turn-timeline";
++import {
++  TurnTimeline,
++  type SessionTurnView,
++  type SessionViewMode,
++} from "@/components/daemon/turn-timeline";
+ import type { AutoResumeEntry, TurnForkEntryWiring } from "@/components/daemon/turn-timeline";
++import { SessionViewTabs } from "./session-view-tabs";
+ // task-08（2026-09-22-session-fork-continuation / FR-01 / FR-05）：谱系溯源块 +
+ // 分叉确认弹层（溯源块常驻 B 顶部、弹层由轮级分叉入口打开）。
+ import { LineageBlock } from "@/components/daemon/session-fork/lineage-block";
+@@ -826,7 +831,8 @@ export function SessionPanelPage({
+   // ref 而非 state 理由——回调 deps 刻意不含 turnState 防每帧重建，ref 读取不受
+   // 闭包陈旧影响）。
+   const previewInflightRef = useRef<Set<string>>(new Set());
+-  const [viewMode, setViewMode] = useState<"conversation" | "all">("conversation");
++  // 2026-10-22-session-trajectory-third-view（D-001）：视图三态（对话 / 进度 / 轨迹）。
++  const [viewMode, setViewMode] = useState<SessionViewMode>("conversation");
+   // 2026-08-29-session-usage-stats task-04（R-04）：用量条重取信号——
+   // onTurnCompleted 轮终态递增，驱动头部下方 SessionUsageBar 重拉
+   //（用量数据轮次终态才落库，非实时精确可接受，design R-04）。
+@@ -857,7 +863,7 @@ export function SessionPanelPage({
+     setViewMode(readPersistedViewMode(sessionId));
+   }, [sessionId]);
+   const changeViewMode = useCallback(
+-    (m: "conversation" | "all") => {
++    (m: SessionViewMode) => {
+       setViewMode(m);
+       if (sessionId) writePersistedViewMode(sessionId, m);
+     },
+@@ -5110,29 +5116,9 @@ export function SessionPanelPage({
+             </>
+           )}
+           {turnState.turns.length > 0 && (
+-            <div
+-              role="tablist"
+-              aria-label="消息显示范围"
+-              className="inline-flex items-center rounded-full border bg-muted/50 p-0.5"
+-            >
+-              {(["conversation", "all"] as const).map((m) => (
+-                <button
+-                  key={m}
+-                  role="tab"
+-                  aria-selected={viewMode === m}
+-                  onClick={() => changeViewMode(m)}
+-                  className={cn(
+-                    "rounded-full px-2.5 py-1 text-[11px] leading-none transition-colors",
+-                    viewMode === m
+-                      ? "bg-card font-medium text-foreground shadow-sm"
+-                      : "text-muted-foreground hover:text-foreground",
+-                  )}
+-                >
+-                  {/* task-09：「全部」改「进度」（段模型语义：完整段时间线）。 */}
+-                  {m === "conversation" ? "对话" : "进度"}
+-                </button>
+-              ))}
+-            </div>
++            /* task-09：「全部」改「进度」（段模型语义：完整段时间线）。
++               2026-10-22-session-trajectory-third-view（D-001）：三态并列入共享组件。 */
++            <SessionViewTabs value={viewMode} onChange={changeViewMode} />
+           )}
+           {/* quick（2026-09-02）：会话内搜索——icon 展开输入浮层，回车 q 查询
+               （limit=100）结果列表展示（点击条目关闭；清空/再点 icon 收起恢复）。 */}
+diff --git a/frontend/src/components/daemon/session-panel/session-view-tabs.tsx b/frontend/src/components/daemon/session-panel/session-view-tabs.tsx
+new file mode 100644
+index 000000000..a2c02432e
+--- /dev/null
++++ b/frontend/src/components/daemon/session-panel/session-view-tabs.tsx
+@@ -0,0 +1,60 @@
++"use client";
++
++/**
++ * 会话视图切换（2026-10-22-session-trajectory-third-view / D-001）：
++ * 「对话 / 进度 / 轨迹」三态共享控件。
++ *
++ * 弹窗版（session-panel-dialog）与整页版（session-panel-page，含移动 variant）
++ * 复用同一份 JSX——原两处各写一份「对话 / 进度」按钮，轨迹上移成第三视图时
++ * 再各改一遍容易漂移，故抽此组件。纯展示：状态由消费方持有（两模式各自
++ * `useState` + 整页版按会话持久化）。
++ */
++
++import { cn } from "@/lib/utils";
++
++import type { SessionViewMode } from "../turn-timeline";
++
++const VIEW_TABS: ReadonlyArray<{ value: SessionViewMode; label: string }> = [
++  { value: "conversation", label: "对话" },
++  { value: "all", label: "进度" },
++  { value: "trajectory", label: "轨迹" },
++];
++
++export interface SessionViewTabsProps {
++  value: SessionViewMode;
++  // eslint-disable-next-line no-unused-vars -- 接口回调签名形参（同 session-panel 惯例）
++  onChange: (mode: SessionViewMode) => void;
++  className?: string;
++}
++
++export function SessionViewTabs({ value, onChange, className }: SessionViewTabsProps) {
++  return (
++    <div
++      role="tablist"
++      aria-label="消息显示范围"
++      className={cn(
++        "inline-flex items-center rounded-full border bg-muted/50 p-0.5",
++        className,
++      )}
++    >
++      {VIEW_TABS.map((tab) => (
++        <button
++          key={tab.value}
++          type="button"
++          role="tab"
++          aria-selected={value === tab.value}
++          data-testid={`session-view-tab-${tab.value}`}
++          onClick={() => onChange(tab.value)}
++          className={cn(
++            "rounded-full px-2.5 py-1 text-[11px] leading-none transition-colors",
++            value === tab.value
++              ? "bg-card font-medium text-foreground shadow-sm"
++              : "text-muted-foreground hover:text-foreground",
++          )}
++        >
++          {tab.label}
++        </button>
++      ))}
++    </div>
++  );
++}
+diff --git a/frontend/src/components/daemon/session-panel/turn-state.ts b/frontend/src/components/daemon/session-panel/turn-state.ts
+index 9d9ae3d61..9d21b192d 100644
+--- a/frontend/src/components/daemon/session-panel/turn-state.ts
++++ b/frontend/src/components/daemon/session-panel/turn-state.ts
+@@ -11,7 +11,11 @@ import {
+   applyLogToSegments, createEmptyAssembledTurn, transferAssemblerInternals, type AssembledTurn,
+   type AssemblerLogInput, type TurnSegment,
+ } from "@/components/daemon/session-log-assembler";
+-import { type SessionTurnView, type TurnUiStatus } from "@/components/daemon/turn-timeline";
++import {
++  type SessionTurnView,
++  type SessionViewMode,
++  type TurnUiStatus,
++} from "@/components/daemon/turn-timeline";
+ import { type SessionInputMentions } from "@/components/daemon/session-input-bar";
+ import { type BashChunkItem } from "@/components/daemon/bash-progress-card";
+ import { type BashStatusEvent } from "@/lib/daemon";
+@@ -337,20 +341,21 @@ export function deriveTurnTerminalStatus(env: SessionStreamEnvelope): TurnUiStat
+   return "completed";
+ }
+ 
+-/* ── ql-20260822-010：会话视图模式（对话/进度）按会话持久化 ──────────────── */
++/* ── ql-20260822-010：会话视图模式（对话/进度）按会话持久化 ────────────────
++ * 2026-10-22-session-trajectory-third-view（D-001）：视图扩为三态
++ * （对话 / 进度 / 轨迹），key 不变、旧值语义不变。 */
+ 
+ /** localStorage key（先例 NEW_SESSION_MACHINE_LS_KEY 同 sillyhub.sessions 前缀）。 */
+ function viewModeLsKey(sessionId: string): string {
+   return `sillyhub.sessions.viewMode.${sessionId}`;
+ }
+ 
+-/** 挂载回读：仅识别 "all"，其余/缺失/SSR 无 window 一律默认 "conversation"。 */
+-export function readPersistedViewMode(sessionId: string): "conversation" | "all" {
++/** 挂载回读：识别 "all" / "trajectory"，其余/缺失/SSR 无 window 一律默认 "conversation"。 */
++export function readPersistedViewMode(sessionId: string): SessionViewMode {
+   if (typeof window === "undefined") return "conversation";
+   try {
+-    return window.localStorage.getItem(viewModeLsKey(sessionId)) === "all"
+-      ? "all"
+-      : "conversation";
++    const raw = window.localStorage.getItem(viewModeLsKey(sessionId));
++    return raw === "all" || raw === "trajectory" ? raw : "conversation";
+   } catch {
+     return "conversation";
+   }
+@@ -359,7 +364,7 @@ export function readPersistedViewMode(sessionId: string): "conversation" | "all"
+ /** 切换时写入（隐私模式等写入失败静默，不阻断切换本身）。 */
+ export function writePersistedViewMode(
+   sessionId: string,
+-  m: "conversation" | "all",
++  m: SessionViewMode,
+ ): void {
+   try {
+     window.localStorage.setItem(viewModeLsKey(sessionId), m);
+diff --git a/frontend/src/components/daemon/turn-timeline.tsx b/frontend/src/components/daemon/turn-timeline.tsx
+index 4b235a6e8..d3e1effb2 100644
+--- a/frontend/src/components/daemon/turn-timeline.tsx
++++ b/frontend/src/components/daemon/turn-timeline.tsx
+@@ -417,9 +417,9 @@ export interface SessionTurnView {
+ 
+ /** 消息视图模式（ql-20260729-005）：对话=用户消息+答复正文+文件卡片（交付物，
+  * agent-file-upload-mcp FR-01）；全部=追加思考/工具等过程项。
+- * 2026-10-22-session-trajectory-view（D-035）：**两态不变**——轨迹是「进度」视图内的
+- * 呈现方式（时间线 / 轨迹），不是第三种视图模式。 */
+-export type SessionViewMode = "conversation" | "all";
++ * 2026-10-22-session-trajectory-third-view（D-001，覆盖 D-035）：三态——「轨迹」与
++ * 「对话 / 进度」同层并列，不再是进度视图内的第二层开关。 */
++export type SessionViewMode = "conversation" | "all" | "trajectory";
+ 
+ export interface TurnTimelineProps {
+   turns: SessionTurnView[];
+@@ -1290,17 +1290,24 @@ export function autoRecoverHintForTurn(
+ const BOTTOM_REASSERT_WINDOW_MS = 2500;
+ 
+ /**
+- * 「进度」视图的轨迹呈现（2026-10-22-session-trajectory-view / D-035）。
++ * 「轨迹」视图（2026-10-22-session-trajectory-third-view / D-001，原
++ * 2026-10-22-session-trajectory-view / D-035 的进度内呈现方式上移为第三视图）。
+  *
+  * 数据来源＝当前会话已加载的轮视图（`SessionTurnView[]`）：`trajectoryFromTurnViews`
+  * 纯函数派生三泳道所需行/轮，再交给 dev 路由同款 `TrajectoryView` 渲染。**零网络请求**
+  * （不调任何 API、不读 `.proto-staging`），因此产品页与 dev 预览的差别只在数据来源。
+  *
++ * 选中态（2026-10-22-fix-trajectory-row-select 并入）：`TrajectoryView` 的选中是受控
++ * 可选 props——不传则点击静默无反应（原缺陷）。此处自持 `selectedRowId` 并接线，
++ * 与 dev 预览页 `trajectory-proto-view.tsx` 同一接法：点账本行 / 时间轴条目选中、
++ * 右侧检查器出详情、↑↓ 切换、Esc 清除均由 TrajectoryView 内部逻辑承担。
++ *
+  * 空态：整段会话都没有可比对的时间戳（`rows` 为空）→ 出显式提示，**不白屏、不伪造条**
+  * （伪造会让「没有数据」看起来像「这轮没有活动」）。
+  */
+ function TrajectoryPane({ turns }: { turns: SessionTurnView[] }) {
+   const trajectory = useMemo(() => trajectoryFromTurnViews(turns), [turns]);
++  const [selectedRowId, setSelectedRowId] = useState<string | null>(null);
+   if (trajectory.rows.length === 0) {
+     return (
+       <div
+@@ -1315,7 +1322,11 @@ function TrajectoryPane({ turns }: { turns: SessionTurnView[] }) {
+   }
+   return (
+     <div data-testid="trajectory-pane" className="min-w-0">
+-      <TrajectoryView trajectory={trajectory} />
++      <TrajectoryView
++        trajectory={trajectory}
++        selectedRowId={selectedRowId}
++        onSelectRow={setSelectedRowId}
++      />
+     </div>
+   );
+ }
+@@ -1344,10 +1355,9 @@ export function TurnTimeline({
+   fileChangesSummary = true,
+ }: TurnTimelineProps) {
+   const scrollRef = useRef<HTMLDivElement>(null);
+-  // 2026-10-22-session-trajectory-view（D-035）：「进度」视图的呈现方式——时间线（现状）
+-  // 或轨迹（三泳道）。仅 all 视图内生效；conversation 视图不出现该开关。
+-  const [progressLens, setProgressLens] = useState<"timeline" | "trajectory">("timeline");
+-  const showTrajectory = viewMode === "all" && progressLens === "trajectory";
++  // 2026-10-22-session-trajectory-third-view（D-001）：轨迹是第三个顶层视图，
++  // 不再有「进度」内的「时间线 / 轨迹」第二层开关。
++  const showTrajectory = viewMode === "trajectory";
+ 
+   // ql-20260822-010：贴底跟随——原实现每次 turns 更新无条件 scrollTo 底部，
+   // 用户上滚读历史时被流式更新反复拉回底部。改为：onScroll 维护「距底 <
+@@ -1811,33 +1821,8 @@ export function TurnTimeline({
+            2026-10-21 用户裁决「轮间 1px hairline 多余」：**只保留留白，不再画线**
+            （原 `border-b border-border last:border-b-0` 已移除）；轮与轮靠白处分节。 */
+         <div>
+-          {/* 2026-10-22-session-trajectory-view（D-035）：轨迹是「进度」视图内的**呈现方式**
+-              （时间线 / 轨迹），不是第三种视图模式——D-004 的两态约束不变。 */}
+-          {viewMode === "all" && (
+-            <div
+-              role="tablist"
+-              aria-label="进度视图呈现方式"
+-              data-testid="progress-lens"
+-              className="mb-3 inline-flex items-center rounded-full border bg-muted/50 p-0.5"
+-            >
+-              {(["timeline", "trajectory"] as const).map((lens) => (
+-                <button
+-                  key={lens}
+-                  role="tab"
+-                  aria-selected={progressLens === lens}
+-                  onClick={() => setProgressLens(lens)}
+-                  className={cn(
+-                    "rounded-full px-2.5 py-1 text-[11px] leading-none transition-colors",
+-                    progressLens === lens
+-                      ? "bg-card font-medium text-foreground shadow-sm"
+-                      : "text-muted-foreground hover:text-foreground",
+-                  )}
+-                >
+-                  {lens === "timeline" ? "时间线" : "轨迹"}
+-                </button>
+-              ))}
+-            </div>
+-          )}
++          {/* 2026-10-22-session-trajectory-third-view（D-001）：轨迹已是顶层第三视图
++              （切换控件在会话面板头部），此处直接渲染，不再有第二层「时间线 / 轨迹」开关。 */}
+           {showTrajectory ? (
+             <TrajectoryPane turns={turns} />
+           ) : (
+diff --git a/frontend/src/lib/__tests__/thinking-translate.test.ts b/frontend/src/lib/__tests__/thinking-translate.test.ts
+index 7a2b3cf0a..4a78d9402 100644
+--- a/frontend/src/lib/__tests__/thinking-translate.test.ts
++++ b/frontend/src/lib/__tests__/thinking-translate.test.ts
+@@ -131,6 +131,26 @@ describe("translateText 合批/缓存/降级", () => {
+     await expect(p2).resolves.toBe("恢复了");
+   });
+ 
++  it("请求显式带 20s 超时（后端卡住时由 apiFetch 中止，不退化为无限等待）", async () => {
++    apiFetchMock.mockResolvedValue(okResponse([{ id: "0", text: "译超时", translated: true }]));
++    const p = translateText("timeout option english thinking text check.");
++    await vi.advanceTimersByTimeAsync(250);
++    await expect(p).resolves.toBe("译超时");
++    const options = apiFetchMock.mock.calls[0]![1] as { timeoutMs?: number };
++    expect(options.timeoutMs).toBe(20_000);
++  });
++
++  it("超时（apiFetch reject timeout）→ null + 60s 退避", async () => {
++    const timeoutErr = Object.assign(new Error("请求超时"), { code: "timeout" });
++    apiFetchMock.mockRejectedValue(timeoutErr);
++    const p = translateText("timed out english thinking text for backoff window.");
++    await vi.advanceTimersByTimeAsync(250);
++    await expect(p).resolves.toBeNull();
++    // 退避期内新文本直接回退原文，不再发请求
++    await expect(translateText("another text inside timeout backoff window.")).resolves.toBeNull();
++    expect(apiFetchMock).toHaveBeenCalledTimes(1);
++  });
++
+   it("网络失败（apiFetch reject）→ null + 退避", async () => {
+     apiFetchMock.mockRejectedValue(new Error("network down"));
+     const p = translateText("network failure path english text check.");
+diff --git a/frontend/src/lib/thinking-translate.ts b/frontend/src/lib/thinking-translate.ts
+index d67aa190e..12df2f5fb 100644
+--- a/frontend/src/lib/thinking-translate.ts
++++ b/frontend/src/lib/thinking-translate.ts
+@@ -22,6 +22,12 @@ const BATCH_MAX_ITEMS = 16;
+ const BATCH_WINDOW_MS = 250;
+ /** 引擎不可用退避时长。 */
+ const UNAVAILABLE_BACKOFF_MS = 60_000;
++/**
++ * 单次请求超时（2026-10-22-fix-translate-pending）：POST 默认无超时，后端子进程
++ * 卡在模型下载时请求会永久挂起（界面恒「翻译中」）。20s 后 abort 走网络失败同款
++ * 降级链（回退原文 + 60s 退避）；后端同类超时已同窗收紧（TRANSLATE_REQUEST_TIMEOUT_SEC）。
++ */
++const REQUEST_TIMEOUT_MS = 20_000;
+ /** 内存缓存条目上限（FIFO 淘汰——译文纯函数结果，先入者先淘汰足够）。 */
+ const CACHE_MAX_ENTRIES = 500;
+ 
+@@ -156,6 +162,8 @@ async function requestBatch(entries: QueueEntry[]): Promise<void> {
+     resp = await apiFetch<TranslateApiResponse>("/api/translate/thinking", {
+       method: "POST",
+       json: { items, target: "zh" },
++      timeoutMs: REQUEST_TIMEOUT_MS,
++      timeoutMessage: "翻译请求超时，已回退原文",
+     });
+   } catch {
+     // 网络失败与引擎不可用同语义：本批回退原文 + 退避（防风暴）

@@ -1,6 +1,9 @@
-tier: thin
+tier: thick
 legacy_fallback: false
-substeps: {}
+substeps:
+  artifacts: done
+  ledger: done
+  patch: done
 born_face: thin
 with_tasks: false
 review_force: null
@@ -29,7 +32,7 @@ input: >-
 autopilot: false
 prestage_ack: false
 baseline_commit: b13d0631c3dce0a93c2d44f7a60f15ebb6755806
-updatedAt: '2026-10-22T01:26:52.729Z'
+updatedAt: '2026-10-22T02:33:24.852Z'
 cross_baselines:
   sillyspec: 8ff68ada697ec4d4af9ce0a90c4055091985e319
 baseline_sha256: e29adf86640ce67d08f7272f5b7b71e3278ca90facd3700df9eb238d20bf378f
@@ -38,4 +41,13 @@ spec_approved_at: '2026-10-22T01:26:52.729Z'
 spec_approved_by: anon@DESKTOP-HJ0AM09
 spec_approved_channel: user-confirmed
 spec_attested_by: anon@DESKTOP-HJ0AM09
+upgrade_reason: verify 实测失败（实测失败：test（命令与输出尾部见上；修复后重跑 --done 不丢进度））——失败自动升厚
+gate_summary: >-
+  test: skipped ← module[]+deps(py80+nontest-skip5+jsx28+jsx44+jsx-e2e-skip2)+fr(150)（601.2s）
+  结果：C:\Users\qinyi\IdeaProjects\multi-agent-platform\.sillyspec\.runtime\verify-runs\20261022023238\test-result.json —
+  跳过原因：模块子集含环境缺件跳过（已跑模块全绿）：deps(auto-nontest-skip)、deps(auto-jsx-e2e-skip)——补装依赖后恢复实测（增量重跑：增量重跑面 28 文件（前轮失败批 23 ∪ 基线以来变更
+  18；基线实测测试集 77 文件，未触碰绿面复用不重跑））。｜lint: passed ← cd backend && uv run ruff check . && uv run ruff format --check . && uv
+  run mypy app && cd ../frontend && pnpm lint && cd ../sillyhub-daemon && pnpm typecheck（11.9s）
+  结果：C:\Users\qinyi\IdeaProjects\multi-agent-platform\.sillyspec\.runtime\verify-runs\20261022023238\test-result.json｜门文件
+  22 个
 
