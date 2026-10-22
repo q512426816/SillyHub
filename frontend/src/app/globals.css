@@ -114,6 +114,9 @@
     /* 2026-09-09-sessions-visual-refresh D-009@v1:shadow-primary 全站降重——
        原单层 4px 14px 32% 在浅色下"糊一片紫",改双层弥散(近细影+远柔影) */
     --shadow-primary: 0 1px 3px rgba(124, 58, 237, 0.16), 0 8px 20px -10px rgba(124, 58, 237, 0.28);
+    /* 2026-10-22-agent-profile-modal-restyle:作用域细滚动条 thumb(violet-800 调低透明) */
+    --scroll-thumb: rgba(76, 29, 149, 0.22);
+    --scroll-thumb-hover: rgba(76, 29, 149, 0.38);
     --font-sans: Inter, -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif;
     --spacing-base: 4px;
 
@@ -218,6 +221,9 @@
     --shadow-lg: 0 8px 24px -4px rgba(15, 23, 42, 0.10), 0 4px 8px -2px rgba(15, 23, 42, 0.05);
     /* 2026-09-09-sessions-visual-refresh D-009@v1:shadow-primary 降重(双层弥散) */
     --shadow-primary: 0 1px 3px rgba(37, 99, 235, 0.16), 0 8px 20px -10px rgba(37, 99, 235, 0.28);
+    /* 2026-10-22-agent-profile-modal-restyle:作用域细滚动条 thumb(blue-900 调低透明) */
+    --scroll-thumb: rgba(30, 58, 138, 0.20);
+    --scroll-thumb-hover: rgba(30, 58, 138, 0.36);
     /* 氛围/玻璃 token(D-002@v2 blue 蓝系分值——零紫成分,取值=品牌蓝 #2563eb 系) */
     --row-active: linear-gradient(90deg, rgba(37, 99, 235, 0.14), rgba(6, 182, 212, 0.08));
     --row-active-ring: rgba(37, 99, 235, 0.22);
@@ -321,6 +327,10 @@
     --shadow-md: 0 4px 14px rgba(0, 0, 0, 0.45);
     --shadow-lg: 0 16px 40px rgba(0, 0, 0, 0.6);
     --shadow-primary: 0 1px 3px rgba(8, 145, 178, 0.20), 0 8px 20px -10px rgba(34, 211, 238, 0.30);
+    /* 2026-10-22-agent-profile-modal-restyle:作用域细滚动条 thumb(暗夜低透明白,
+       治浏览器默认亮白滚动条刺眼——用户反馈) */
+    --scroll-thumb: rgba(255, 255, 255, 0.14);
+    --scroll-thumb-hover: rgba(255, 255, 255, 0.28);
     /* 氛围/玻璃 token(D-002@v2 dark 青系分值;极光加浓治死黑——D-009@v1 v4 自审) */
     --row-active: linear-gradient(90deg, rgba(34, 211, 238, 0.18), rgba(14, 116, 144, 0.10));
     --row-active-ring: rgba(34, 211, 238, 0.30);
@@ -918,6 +928,31 @@
 .ant-btn-primary:not(:disabled):hover,
 .ant-btn-primary:not(:disabled):focus-visible {
   box-shadow: var(--shadow-primary);
+}
+
+/* ── 2026-10-22-agent-profile-modal-restyle 主题化细滚动条（作用域工具类）──
+   消费方：智能体档案弹窗技能芯片滚动区。暗夜下浏览器默认亮白滚动条刺眼
+   （用户反馈），按主题配半透明低对比 thumb（取值在各主题块的
+   --scroll-thumb/--scroll-thumb-hover）；仅本类内生效，不动全局滚动条。 */
+.thin-scroll {
+  scrollbar-width: thin;
+  scrollbar-color: var(--scroll-thumb) transparent;
+}
+.thin-scroll::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+.thin-scroll::-webkit-scrollbar-track {
+  background: transparent;
+}
+.thin-scroll::-webkit-scrollbar-thumb {
+  background: var(--scroll-thumb);
+  border-radius: 8px;
+  border: 2px solid transparent;
+  background-clip: content-box;
+}
+.thin-scroll::-webkit-scrollbar-thumb:hover {
+  background-color: var(--scroll-thumb-hover);
 }
 
 /* 分页器:胶囊圆角 6(原型 .pg);当前页配色走 antd colorPrimary 不覆盖 */

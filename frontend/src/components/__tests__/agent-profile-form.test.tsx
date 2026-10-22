@@ -1,12 +1,15 @@
 /**
- * agent-profile-form 单测（2026-10-21-agent-profile-slim-default 瘦身版）。
+ * agent-profile-form 单测（2026-10-22-agent-profile-modal-restyle 重构版）。
  *
- * 覆盖（FR-01 / FR-04 前端面）：
+ * 覆盖（FR-01 / FR-02 / FR-03 / FR-06 前端面）：
  *   1. toCreateBody/toUpdateBody：四字段形态；Update 显式携带被删字段空值清空存量。
  *   2. 表单仅渲染 名称/可见范围/系统提示词/技能 四字段——引擎/模型/供应商/工具
  *      策略/MCP/工作区上下文（private 缺省）不出现。
  *   3. visibility=workspace 且全局页 → 归属工作区选择器出现；private → 不出现。
- *   4. 技能选项 = 自定义 ∪ 平台 manifest；提交走 useCreate/useUpdate hooks。
+ *   4. 技能选项 = 自定义 ∪ 平台 manifest（同名自定义优先）；提交走 useCreate/useUpdate hooks。
+ *   5.（新）弹窗观感：品牌图标头副标题 + 页脚红线注脚 + 小节头文案。
+ *   6.（新）SkillPickerGroup：全选三态/清空/计数；搜索按名称∪简介、全选仅作用筛选集。
+ *   7.（新）技能简介来自数据源 description；右栏预览联动。
  *
  * 历史：三组 8 字段版断言已随瘦身移除（git 历史可溯）。
  */
@@ -239,5 +242,161 @@ describe("AgentProfileForm 创建提交", () => {
     await waitFor(() =>
       expect(notifyMock.success).toHaveBeenCalledWith(expect.stringContaining("测试档")),
     );
+  });
+});
+
+// ── 5. 弹窗观感（FR-01） ──────────────────────────────────────────────────
+
+describe("弹窗观感重构（FR-01）", () => {
+  it("品牌图标头副标题 + 页脚红线注脚（单行省略/title 全文）+ 小节头", async () => {
+    renderForm(<AgentProfileForm mode="create" onClose={() => {}} />);
+    await screen.findByLabelText(/名称/);
+
+    // 头部：标题 + 副标题。
+    expect(screen.getByText("新建智能体档案")).toBeInTheDocument();
+    expect(screen.getByText("一份人格 + 一份技能清单，跨会话复用")).toBeInTheDocument();
+    // 页脚：红线注脚移入页脚左侧，单行省略 + title 全文。
+    const note = screen.getByTitle(/档案不存任何 API Key \/ 凭证/);
+    expect(note).toHaveAttribute(
+      "title",
+      expect.stringContaining("本档案只承载人格与技能清单"),
+    );
+    // 小节头：身份/技能 + 说明文案逐字不变。
+    expect(screen.getByText("身份")).toBeInTheDocument();
+    expect(screen.getByText("给这个智能体起个名字，并决定谁能看到它。")).toBeInTheDocument();
+    expect(screen.getByText(/勾选该档案可用的技能/)).toBeInTheDocument();
+  });
+});
+
+// ── 6. SkillPickerGroup 交互（FR-02） ─────────────────────────────────────
+
+/**
+ * 已选计数断言：小节头右侧「已选 N / 总数」（title 精确匹配）。
+ * Form.useWatch 消费侧更新晚于 fireEvent 一拍（表单 store 异步 flush 通知），
+ * 故 waitFor 轮询而非同步断言。
+ */
+async function expectCounter(n: number, total: number) {
+  await waitFor(() =>
+    expect(screen.getByTitle(`已选 ${n} / ${total}`)).toBeInTheDocument(),
+  );
+}
+
+describe("SkillPickerGroup：全选/半选/清空/计数（FR-02）", () => {
+  beforeEach(() => {
+    skillsMock.custom.mockReturnValue([
+      { name: "s-a", description: "甲技能" },
+      { name: "s-b", description: "乙技能" },
+      { name: "s-c", description: "丙技能" },
+    ]);
+  });
+
+  it("全选 → 3/3 全选中；取消一项 → 半选态；清空 → 归零且清空按钮消失", async () => {
+    renderForm(<AgentProfileForm mode="create" onClose={() => {}} />);
+    await screen.findByRole("checkbox", { name: "s-a" });
+    await expectCounter(0, 3);
+
+    // 全选：三芯片全选 + 计数 3/3。
+    fireEvent.click(screen.getByRole("checkbox", { name: "全选" }));
+    for (const n of ["s-a", "s-b", "s-c"]) {
+      expect(screen.getByRole("checkbox", { name: n })).toHaveAttribute(
+        "aria-checked",
+        "true",
+      );
+    }
+    await expectCounter(3, 3);
+
+    // 取消一项：全选复选呈半选态（antd indeterminate 落在 input 属性）。
+    fireEvent.click(screen.getByRole("checkbox", { name: "s-b" }));
+    await expectCounter(2, 3);
+    const master = screen.getByRole("checkbox", { name: "全选" }) as HTMLInputElement;
+    expect(master.indeterminate).toBe(true);
+    expect(master.checked).toBe(false);
+
+    // 清空：全部归零，清空按钮随空选中集消失。
+    fireEvent.click(screen.getByRole("button", { name: "清空" }));
+    for (const n of ["s-a", "s-c"]) {
+      expect(screen.getByRole("checkbox", { name: n })).toHaveAttribute(
+        "aria-checked",
+        "false",
+      );
+    }
+    await expectCounter(0, 3);
+    expect(screen.queryByRole("button", { name: "清空" })).toBeNull();
+  });
+
+  it("搜索按名称∪简介命中，全选仅作用于筛选结果", async () => {
+    renderForm(<AgentProfileForm mode="create" onClose={() => {}} />);
+    const search = await screen.findByPlaceholderText("搜索技能…");
+
+    // 按简介关键词命中（简介来自数据源，非名称子串）。
+    fireEvent.change(search, { target: { value: "甲技能" } });
+    expect(screen.getByText("筛选出 1 项")).toBeInTheDocument();
+    expect(screen.getByRole("checkbox", { name: "s-a" })).toBeInTheDocument();
+    expect(screen.queryByRole("checkbox", { name: "s-b" })).toBeNull();
+
+    // 筛选下全选 → 只选中可见的 1 项，分母仍为全集 3。
+    fireEvent.click(screen.getByRole("checkbox", { name: "全选" }));
+    await expectCounter(1, 3);
+
+    // 清空搜索 → 其余项未被波及。
+    fireEvent.change(search, { target: { value: "" } });
+    expect(
+      screen.getByRole("checkbox", { name: "s-b" }),
+    ).toHaveAttribute("aria-checked", "false");
+    await expectCounter(1, 3);
+
+    // 按名称命中（名称路径）。
+    fireEvent.change(search, { target: { value: "s-c" } });
+    expect(screen.getByText("筛选出 1 项")).toBeInTheDocument();
+    expect(screen.queryByRole("checkbox", { name: "s-a" })).toBeNull();
+  });
+});
+
+// ── 7. 技能简介数据源 + 预览联动（FR-03 / FR-06） ────────────────────────
+
+describe("技能简介数据源与预览联动（FR-03）", () => {
+  it("简介 = 自定义 ∪ manifest 的 description，同名自定义优先；空简介占位", async () => {
+    skillsMock.custom.mockReturnValue([
+      { name: "my-skill", description: "自定义描述A" },
+      { name: "bare-skill" },
+    ]);
+    skillsMock.manifest.mockReturnValue({
+      skills: [
+        { name: "sillyspec-auto", description: "自动模式描述" },
+        { name: "my-skill", description: "平台版描述（应被自定义覆盖）" },
+      ],
+    });
+    renderForm(<AgentProfileForm mode="create" onClose={() => {}} />);
+
+    expect(await screen.findByText("my-skill")).toBeInTheDocument();
+    expect(screen.getByText("自定义描述A")).toBeInTheDocument();
+    expect(screen.getByText("自动模式描述")).toBeInTheDocument();
+    // 同名并集：自定义技能的描述占据（平台同名描述不出现）。
+    expect(screen.queryByText("平台版描述（应被自定义覆盖）")).toBeNull();
+    // 无简介 → 占位文案。
+    expect(screen.getByText("（暂无简介）")).toBeInTheDocument();
+  });
+
+  it("右栏预览联动：名称/技能选中实时反映，预览 chip 悬停简介", async () => {
+    skillsMock.custom.mockReturnValue([{ name: "s-a", description: "甲技能" }]);
+    renderForm(<AgentProfileForm mode="create" onClose={() => {}} />);
+
+    fireEvent.change(await screen.findByLabelText(/名称/), {
+      target: { value: "预览档" },
+    });
+    // 预览卡名称与头像首字更新（输入框 value 不进文本节点，命中即预览侧）。
+    expect(await screen.findByText("预览档")).toBeInTheDocument();
+    expect(screen.getByText("预")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("checkbox", { name: "s-a" }));
+    // 选中后：选择器芯片 + 预览 chip 各一处，且预览 chip title=简介。
+    await waitFor(() =>
+      expect(screen.getAllByText("s-a").length).toBe(2),
+    );
+    const previewChip = screen
+      .getAllByText("s-a")
+      .map((el) => el.closest("span[title]"))
+      .find((el) => el?.getAttribute("title") === "甲技能");
+    expect(previewChip).toBeTruthy();
   });
 });
