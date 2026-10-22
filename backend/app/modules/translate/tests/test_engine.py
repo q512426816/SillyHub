@@ -265,8 +265,8 @@ def test_reader_writes_only_to_captured_queue() -> None:
 
     proxy = TranslateSubprocessProxy("unused")
     try:
-        captured = _queue.Queue()  # 旧线程启动时捕获的队列
-        new_queue = _queue.Queue()  # 重启后的新队列（self._responses 已换）
+        captured: _queue.Queue = _queue.Queue()  # 旧线程启动时捕获的队列
+        new_queue: _queue.Queue = _queue.Queue()  # 重启后的新队列（self._responses 已换）
         proxy._responses = new_queue
         thread = _threading.Thread(
             target=proxy._reader, args=(iter(["resp-a\n"]), captured), daemon=True
