@@ -9,21 +9,18 @@
  * 前置：本机 dev server 已在 :3000（配置不配 webServer，D-001@v1）。
  */
 
+import { mkdirSync } from "node:fs";
 import path from "node:path";
 
 import { expect, test } from "@playwright/test";
 
 // 截图落变更目录（从 frontend/ 上跳一级；npx playwright test 的 cwd = frontend）。
-const SCREENSHOT = path.resolve(
-  process.cwd(),
-  "..",
-  ".sillyspec/changes/2026-10-20-session-page-dsh-alignment/proto-file-card-2026-10-21.png",
-);
+const SCREENSHOT = path.resolve(process.cwd(), "test-results/proto-file-card-2026-10-22.png");
 const LONG_LIST_SCREENSHOT = path.resolve(
   process.cwd(),
-  "..",
-  ".sillyspec/changes/2026-10-20-session-page-dsh-alignment/proto-file-card-100files-2026-10-21.png",
+  "test-results/proto-file-card-100files-2026-10-22.png",
 );
+mkdirSync(path.dirname(SCREENSHOT), { recursive: true });
 
 test.use({ viewport: { width: 1400, height: 900 } });
 
@@ -41,8 +38,8 @@ test("文件变更卡：折叠 / 展开 / 降级三态与 100 文件内滚", asy
   // ── 三张卡 + 折叠态读数 ──
   await expect(page.getByTestId("file-changes-card")).toHaveCount(3);
   const first = page.getByTestId("file-changes-card").nth(0);
-  await expect(first.getByText("已编辑 8 个文件")).toBeVisible();
-  await expect(first.getByText("+230")).toBeVisible();
+  await expect(first.getByText("8 个文件变更")).toBeVisible();
+  await expect(first.getByText("+226")).toBeVisible();
   await expect(first.getByText("−8")).toBeVisible();
   await expect(first).toHaveAttribute("data-expanded", "false");
   await expect(first.getByTestId("file-changes-row")).toHaveCount(0);
@@ -52,9 +49,15 @@ test("文件变更卡：折叠 / 展开 / 降级三态与 100 文件内滚", asy
   expect(Math.round(headerBox!.height)).toBe(28);
 
   // ── 降级态的静态标记（此时第 1 张卡仍折叠，全页「命令行」只在展开后出现）──
-  await expect(page.getByText("共享工作区，可能含并行会话改动")).toHaveCount(1);
+  await expect(page.getByText("共享工作区，可能含并行会话改动")).toHaveCount(2);
   await expect(page.getByText("（部分）")).toHaveCount(1);
-  await expect(page.getByText("已编辑 12 个文件")).toBeVisible();
+  // notice 卡（无文件清单）：精确原因 + 采集耗时 + 共享工作区提示。
+  const notice = page.getByTestId("file-changes-notice");
+  await expect(notice).toBeVisible();
+  await expect(notice).toContainText("1.5s");
+  await expect(notice).toContainText("共享工作区");
+
+  await expect(page.getByText("12 个文件变更")).toBeVisible();
   // 超时快照的行级统计不可信：第 3 张卡头部不出现 +/− 数字。
   const thirdHeaderText = await page
     .getByTestId("file-changes-card")
@@ -72,6 +75,11 @@ test("文件变更卡：折叠 / 展开 / 降级三态与 100 文件内滚", asy
   expect(rowBox).not.toBeNull();
   expect(Math.round(rowBox!.height)).toBe(24);
   await expect(page.getByText("命令行", { exact: true })).toHaveCount(1);
+  // 状态徽标：新增/删除/新文件各一次（未跟踪行行级统计为破折号）。
+  await expect(first.getByText("新增", { exact: true })).toHaveCount(1);
+  await expect(first.getByText("删除", { exact: true })).toHaveCount(1);
+  await expect(first.getByText("新文件", { exact: true })).toHaveCount(1);
+
 
   // ── 点行 → onOpenFile 生效（可见 state + console.log 双证据）──
   await first

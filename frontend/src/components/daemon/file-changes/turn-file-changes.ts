@@ -55,7 +55,27 @@ export interface TurnFileChangesCardOptions {
  * 禁止的伪值。超时与队列溢出在快照层面同为 `status="partial"`（daemon 端不区分
  * files 内容），故文案合并表述；精确 `reason` 仍保留在快照里供检查器读取。
  */
-export const NOTICE_PARTIAL_NO_FILES = "工作区快照未完成（超时或队列溢出），本轮改动未知";
+export const NOTICE_PARTIAL_NO_FILES = "工作区快照未完成，本轮改动未知";
+
+/**
+ * partial 且无文件列表时的提示文案（2026-10-22-file-changes-card-fix）。
+ *
+ * 按快照精确 `reason` + 采集耗时生成——timeout 与 queue_overflow 不再混成一句
+ * 「超时或队列溢出」；无 reason 的 partial（行数退档）用通用文案。
+ */
+export function fileChangesNotice(snapshot: TurnFileChangesSnapshot): string {
+  if (snapshot.reason === "timeout") {
+    const duration =
+      snapshot.collectMs >= 1000
+        ? `${(snapshot.collectMs / 1000).toFixed(1).replace(/\.0$/, "")}s`
+        : `${snapshot.collectMs}ms`;
+    return `工作区快照采集超时（${duration}），本轮改动未知`;
+  }
+  if (snapshot.reason === "queue_overflow") {
+    return "快照采集排队溢出，本轮改动未知";
+  }
+  return NOTICE_PARTIAL_NO_FILES;
+}
 
 /**
  * 读模型里与文件变更相关的两字段（后端 `SessionRunRead` 已透传）。
@@ -77,10 +97,16 @@ export interface FileChangesTurnFields {
   fileChangesCapability?: FileChangesCapability | null;
 }
 
-/** 单文件行映射：归因 → 来源；`edits` 取 `editToolNames` 条数（无工具名按 1 条计）。 */
+/** 单文件行映射：归因 → 来源；`edits` 取编辑调用次数（`editToolNames` 长度）。 */
 export function toChangedFile(file: TurnFileChange): ChangedFile {
   const toolEdited = file.attribution === "edit_patch";
   const toolNames = toolEdited ? (file.editToolNames ?? undefined) : undefined;
+  // untracked（numstat 不覆盖）/ mtime 探测（无行级采集）行级 +/− 不可信；
+  // 二进制同理（numstat 恒 0/0）。卡片据此显示破折号而不是假精确的 +0 −0。
+  const hasLineStats =
+    file.binary !== true &&
+    file.status !== "untracked" &&
+    file.source !== "mtime";
   return {
     path: file.path,
     adds: file.added,
@@ -88,6 +114,8 @@ export function toChangedFile(file: TurnFileChange): ChangedFile {
     // command 归因的行没有「本轮编辑次数」概念——填 0，卡片对 edits<=0 不出「改N次」。
     edits: toolEdited ? (toolNames?.length ?? 1) : 0,
     source: toolEdited ? "tool" : "shell",
+    status: file.status,
+    hasLineStats,
     ...(file.binary === true ? { binary: true } : {}),
     ...(toolNames != null && toolNames.length > 0 ? { editToolNames: toolNames } : {}),
   };
@@ -126,7 +154,7 @@ export function toFileChangesCardProps(
       capability: "full",
       turnNo: options.turnNo,
       truncated: true,
-      notice: NOTICE_PARTIAL_NO_FILES,
+      notice: fileChangesNotice(snapshot),
       sharedWorkspace: snapshot.concurrentSessionsHint === true,
       className: options.className,
     };

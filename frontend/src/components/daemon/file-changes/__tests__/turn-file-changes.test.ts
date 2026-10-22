@@ -117,6 +117,30 @@ describe("toFileChangesCardProps：归因映射", () => {
     // binary 缺省/false 不进对象（不制造 undefined 键，保持既有形状）。
     expect("binary" in toChangedFile(makeFile())).toBe(false);
   });
+
+  it("status/hasLineStats 透传：untracked 与 mtime 行行级不可信", () => {
+    expect(
+      toChangedFile(makeFile({ status: "untracked", added: 0, deleted: 0 })),
+    ).toMatchObject({ status: "untracked", hasLineStats: false });
+    expect(toChangedFile(makeFile({ status: "deleted" }))).toMatchObject({
+      status: "deleted",
+      hasLineStats: true,
+    });
+    expect(
+      toChangedFile(makeFile({ source: "mtime", attribution: "command" })),
+    ).toMatchObject({ hasLineStats: false });
+    expect(toChangedFile(makeFile({ status: "added" }))).toMatchObject({
+      status: "added",
+      hasLineStats: true,
+    });
+  });
+
+  it("edits 取编辑调用次数（editToolNames 保留重复项）", () => {
+    const file = toChangedFile(
+      makeFile({ editToolNames: ["Edit", "Edit", "Write"] }),
+    );
+    expect(file.edits).toBe(3);
+  });
 });
 
 describe("toFileChangesCardProps：partial / truncated 采样降级", () => {
@@ -150,9 +174,11 @@ describe("toFileChangesCardProps：partial / truncated 采样降级", () => {
     );
     expect(props).not.toBeNull();
     expect(props!.files).toEqual([]);
-    expect(props!.notice).toBe(NOTICE_PARTIAL_NO_FILES);
+    expect(props!.notice).toContain("超时");
+    expect(props!.notice).toContain("本轮改动未知");
     expect(props!.truncated).toBe(true);
     // 文案说的是「没拿到清单」，不是「没改文件」。
+    expect(props!.notice).not.toContain("无改动");
     expect(NOTICE_PARTIAL_NO_FILES).toContain("未知");
     expect(NOTICE_PARTIAL_NO_FILES).not.toContain("无改动");
   });
@@ -163,6 +189,28 @@ describe("toFileChangesCardProps：partial / truncated 采样降级", () => {
       "full",
     );
     expect(props!.sharedWorkspace).toBe(true);
+  });
+
+  it("notice 按 reason 生成：timeout 带耗时、queue_overflow 明确排队溢出、无 reason 用通用文案", () => {
+    const timeout = toFileChangesCardProps(
+      makeSnapshot({ status: "partial", reason: "timeout", collectMs: 1500, files: [] }),
+      "full",
+    );
+    expect(timeout!.notice).toContain("1.5s");
+    expect(timeout!.notice).not.toContain("排队溢出");
+
+    const queue = toFileChangesCardProps(
+      makeSnapshot({ status: "partial", reason: "queue_overflow", files: [] }),
+      "full",
+    );
+    expect(queue!.notice).toContain("排队溢出");
+    expect(queue!.notice).not.toContain("超时");
+
+    const generic = toFileChangesCardProps(
+      makeSnapshot({ status: "partial", files: [] }),
+      "full",
+    );
+    expect(generic!.notice).toBe(NOTICE_PARTIAL_NO_FILES);
   });
 });
 

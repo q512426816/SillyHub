@@ -50,7 +50,7 @@ describe("FileChangesCard", () => {
     const header = screen.getByTestId("file-changes-header");
     expect(header.className).toContain("h-7");
     expect(screen.getByTestId("file-changes-card")).toHaveAttribute("data-expanded", "false");
-    expect(screen.getByText("已编辑 8 个文件")).toBeInTheDocument();
+    expect(screen.getByText("8 个文件变更")).toBeInTheDocument();
     expect(screen.getByText("+230")).toBeInTheDocument();
     expect(screen.getByText("−8")).toBeInTheDocument();
     expect(screen.getByText("第 16 轮")).toBeInTheDocument();
@@ -93,7 +93,7 @@ describe("FileChangesCard", () => {
     expect(screen.getByTestId("file-changes-header").textContent).not.toContain("−");
     expect(screen.getAllByTestId("file-changes-row")[0]!.textContent).toContain("—");
     // 计数仍可靠：文件数与编辑次数照常。
-    expect(screen.getByText("已编辑 3 个文件")).toBeInTheDocument();
+    expect(screen.getByText("3 个文件变更")).toBeInTheDocument();
     expect(screen.getAllByTestId("file-changes-row")[0]!.textContent).toContain("改3次");
   });
 
@@ -191,7 +191,7 @@ describe("FileChangesCard：降级形态与真实快照细节（task-11）", () 
     expect(notice.textContent).toContain("本轮改动未知");
     expect(notice.textContent).toContain("第 7 轮");
     // 28px 单行（与折叠头同高），无文件行、无 +/− 数字。
-    expect(notice.className).toContain("h-7");
+    expect(notice.querySelector(".h-7")).not.toBeNull();
     expect(screen.queryByTestId("file-changes-row")).toBeNull();
     expect(screen.queryByTestId("file-changes-card")).toBeNull();
     expect(container.textContent).not.toContain("无改动");
@@ -242,5 +242,60 @@ describe("FileChangesCard：降级形态与真实快照细节（task-11）", () 
     expect(edits).not.toBeNull();
     expect(edits!.textContent).toContain("改2次");
     expect(edits!.getAttribute("title")).toBe("编辑工具：Edit、Write");
+  });
+
+  it("状态徽标与交互：新增/删除/新文件；删除行不可点击、untracked 行破折号", () => {
+    const onOpenFile = vi.fn();
+    render(
+      <FileChangesCard
+        files={[
+          { path: "a.ts", adds: 1, dels: 0, edits: 1, source: "tool", status: "added" },
+          { path: "b.ts", adds: 0, dels: 2, edits: 0, source: "shell", status: "deleted" },
+          {
+            path: "c.ts",
+            adds: 0,
+            dels: 0,
+            edits: 1,
+            source: "tool",
+            status: "untracked",
+            hasLineStats: false,
+          },
+        ]}
+        startExpanded
+        onOpenFile={onOpenFile}
+      />,
+    );
+
+    const badges = screen
+      .getAllByTestId("file-changes-status")
+      .map((el) => el.textContent);
+    expect(badges).toEqual(["新增", "删除", "新文件"]);
+
+    const rows = screen.getAllByTestId("file-changes-row");
+    expect(rows[1]).toHaveAttribute("data-clickable", "false");
+    fireEvent.click(rows[1]!);
+    expect(onOpenFile).not.toHaveBeenCalled();
+    fireEvent.click(rows[0]!);
+    expect(onOpenFile).toHaveBeenCalledWith("a.ts");
+
+    expect(
+      rows[2]!.querySelector('[title="新文件：无行级统计"]'),
+    ).not.toBeNull();
+  });
+
+  it("notice 态也显示共享工作区提示", () => {
+    render(
+      <FileChangesCard
+        files={[]}
+        capability="full"
+        truncated
+        notice="工作区快照采集超时（1.5s），本轮改动未知"
+        sharedWorkspace
+        turnNo={7}
+      />,
+    );
+    const notice = screen.getByTestId("file-changes-notice");
+    expect(notice.textContent).toContain("共享工作区");
+    expect(notice.textContent).toContain("1.5s");
   });
 });

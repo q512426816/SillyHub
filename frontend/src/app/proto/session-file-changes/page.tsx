@@ -22,14 +22,14 @@ import { FileChangesCard, type ChangedFile } from "@/components/daemon/file-chan
 
 /** 第 16 轮：折叠态，8 文件 / +230 −8，其中一个文件来自命令行（git 快照归因）。 */
 const TURN_16_FILES: ChangedFile[] = [
-  { path: "frontend/src/components/daemon/turn-timeline.tsx", adds: 128, dels: 4, edits: 3, source: "tool" },
-  { path: "frontend/src/components/daemon/turn-segment-views.tsx", adds: 46, dels: 2, edits: 2, source: "tool" },
-  { path: "frontend/src/app/globals.css", adds: 18, dels: 0, edits: 1, source: "tool" },
-  { path: "frontend/src/components/daemon/file-changes/file-changes-card.tsx", adds: 24, dels: 0, edits: 1, source: "tool" },
-  { path: "frontend/src/app/proto/session-file-changes/page.tsx", adds: 10, dels: 0, edits: 1, source: "tool" },
-  { path: "frontend/e2e/proto-file-card.spec.ts", adds: 4, dels: 0, edits: 1, source: "tool" },
-  { path: "scripts/prototype-build.mjs", adds: 0, dels: 1, edits: 1, source: "tool" },
-  { path: "frontend/package.json", adds: 0, dels: 1, edits: 1, source: "shell" },
+  { path: "frontend/src/components/daemon/turn-timeline.tsx", adds: 128, dels: 4, edits: 3, source: "tool", status: "modified" },
+  { path: "frontend/src/components/daemon/turn-segment-views.tsx", adds: 46, dels: 2, edits: 2, source: "tool", status: "modified" },
+  { path: "frontend/src/app/globals.css", adds: 18, dels: 0, edits: 1, source: "tool", status: "modified" },
+  { path: "frontend/src/components/daemon/file-changes/file-changes-card.tsx", adds: 24, dels: 0, edits: 1, source: "tool", status: "modified" },
+  { path: "frontend/src/app/proto/session-file-changes/page.tsx", adds: 10, dels: 0, edits: 1, source: "tool", status: "added" },
+  { path: "frontend/e2e/proto-file-card.spec.ts", adds: 0, dels: 0, edits: 2, source: "tool", status: "untracked", hasLineStats: false },
+  { path: "scripts/prototype-build.mjs", adds: 0, dels: 1, edits: 0, source: "tool", status: "deleted" },
+  { path: "frontend/package.json", adds: 0, dels: 1, edits: 1, source: "shell", status: "modified" },
 ];
 
 /** 第 17 轮：展开态，3 文件 / +12 −3。 */
@@ -132,8 +132,8 @@ export default function SessionFileChangesProtoPage() {
             </div>
           </div>
           <p className="mt-1.5 text-[11.5px] leading-[1.7] text-muted-foreground">
-            为什么这样：改动按轮归属，一轮一张卡，卡外不再重复列文件；逐文件 +/− 以 git
-            快照（numstat）为准，Edit/Write 的补丁只用于把文件归因到工具，shell/脚本改动由快照补全。快照超时降级为只报文件数、行级统计显示破折号；工作区由多会话共享时恒提示可能含并行改动。
+            为什么这样：改动按轮归属，一轮一张卡，卡外不再重复列文件；文件清单含轮内已提交的改动
+            （status ∪ baseline diff），逐文件 +/− 以 git 快照（numstat）为准，Edit/Write 的补丁只用于把文件归因到工具，shell/脚本改动由快照补全；状态徽标区分新增/修改/删除/未跟踪。快照超时降级为只报文件数、行级统计显示破折号；工作区由多会话共享时恒提示可能含并行改动。
           </p>
           <p className="mt-1.5 flex flex-wrap items-center gap-1 text-[11px] text-muted-foreground">
             <span className="shrink-0">onOpenFile →</span>
@@ -155,7 +155,6 @@ export default function SessionFileChangesProtoPage() {
           <FileChangesCard
             files={TURN_16_FILES}
             turnNo={16}
-            startExpanded
             onOpenFile={handleOpenFile}
           />
         </TurnBlock>
@@ -186,6 +185,22 @@ export default function SessionFileChangesProtoPage() {
             truncated
             sharedWorkspace
             onOpenFile={handleOpenFile}
+          />
+        </TurnBlock>
+
+        <TurnBlock
+          lines={[
+            "真到连文件清单都拿不到时（硬超时/排队溢出），卡片只报一句实话，绝不写成「本轮无改动」。",
+            "文案带上精确原因与采集耗时；共享工作区提示在这种情况下也照常显示。",
+          ]}
+        >
+          <FileChangesCard
+            files={[]}
+            turnNo={20}
+            truncated
+            capability="full"
+            notice="工作区快照采集超时（1.5s），本轮改动未知"
+            sharedWorkspace
           />
         </TurnBlock>
 

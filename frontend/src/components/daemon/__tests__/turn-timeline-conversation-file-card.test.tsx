@@ -364,7 +364,7 @@ describe("轮级文件变更卡与会话级汇总挂载（task-11 / 线 C 1b）"
     };
   }
 
-  it("有快照：轮尾状态行之后挂出逐文件卡（折叠态「已编辑 N 个文件」+ 共享工作区提示）", () => {
+  it("有快照：轮尾状态行之后挂出逐文件卡（折叠态「N 个文件变更」+ 共享工作区提示）", () => {
     render(
       <TurnTimeline
         {...renderProps([
@@ -395,7 +395,7 @@ describe("轮级文件变更卡与会话级汇总挂载（task-11 / 线 C 1b）"
     );
 
     const card = screen.getByTestId("turn-file-changes");
-    expect(screen.getByText("已编辑 2 个文件")).toBeInTheDocument();
+    expect(screen.getByText("2 个文件变更")).toBeInTheDocument();
     expect(card).toBeInTheDocument();
     // 挂在轮尾状态行（RoundDivider「第 N 轮」）之后，不是轮首；卡片头也带「第 N 轮」，
     // 取 DOM 序第一个（分隔行在前）。
@@ -476,7 +476,7 @@ describe("轮级文件变更卡与会话级汇总挂载（task-11 / 线 C 1b）"
       />,
     );
 
-    expect(screen.getByText("已编辑 1 个文件")).toBeInTheDocument();
+    expect(screen.getByText("1 个文件变更")).toBeInTheDocument();
     expect(screen.getByText("（部分）")).toBeInTheDocument();
   });
 
