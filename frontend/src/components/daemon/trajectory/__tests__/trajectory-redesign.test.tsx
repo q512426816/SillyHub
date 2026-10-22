@@ -43,6 +43,8 @@ function makeTrajectory(): Trajectory {
         stepIndex: 4,
         toolName: "Read",
         inputText: '{"file_path":"a.ts"}',
+        outputText: "a.ts",
+        meta: { resultFromPrimary: true },
       }),
     ],
     turns: [
@@ -129,7 +131,18 @@ describe("轨迹视图集成（D-002/D-003/D-004/D-005）", () => {
     expect(screen.getByTestId("trajectory-no-match").textContent).toContain("没有匹配的记录");
   });
 
-  it("详情：工具行四标签（无 Schema），参数/结果分区展示", () => {
+  it("工具栏：等宽模式不拦截滚轮、时间轴不渲染", () => {
+    render(<TrajectoryView trajectory={makeTrajectory()} />);
+
+    const timeline = screen.getByTestId("trajectory-timeline");
+    const before = timeline.getAttribute("data-view-start");
+    fireEvent.click(screen.getByRole("button", { name: /时长/ }));
+    expect(screen.queryByTestId("trajectory-axis")).toBeNull();
+    fireEvent.wheel(timeline, { deltaY: 300, clientX: 10 });
+    expect(timeline.getAttribute("data-view-start")).toBe(before);
+  });
+
+  it("详情：工具行四标签（无 Schema），参数取 raw、结果取 result、缺失标注未捕获", () => {
     render(<TrajectoryView trajectory={makeTrajectory()} />);
 
     fireEvent.click(screen.getAllByTestId("trajectory-row")[2]!);
@@ -142,6 +155,40 @@ describe("轨迹视图集成（D-002/D-003/D-004/D-005）", () => {
 
     fireEvent.click(screen.getByRole("tab", { name: "参数" }));
     expect(panel.textContent).toContain("pnpm test");
+
+    fireEvent.click(screen.getByRole("tab", { name: "结果" }));
+    expect(panel.textContent).toContain("ok");
+    expect(panel.textContent).not.toContain("仅摘要，未捕获结果");
+
+    // 无配对 result 的工具行：退回 primary 并显式标注（D-015 / FR-05）。
+    fireEvent.click(screen.getAllByTestId("trajectory-row")[3]!);
+    fireEvent.click(screen.getByRole("tab", { name: "结果" }));
+    expect(panel.textContent).toContain("仅摘要，未捕获结果");
+  });
+
+  it("详情：计时按轮级 attempt 采样计算 TTFT/生成/吞吐", () => {
+    const trajectory = makeTrajectory();
+    trajectory.turns[0] = {
+      ...trajectory.turns[0]!,
+      timing: {
+        attempts: [
+          {
+            startedAt: new Date(START).toISOString(),
+            firstTokenAt: new Date(START + 800).toISOString(),
+            endedAt: new Date(START + 4_000).toISOString(),
+            outputTokens: 100,
+          },
+        ],
+      } as never,
+    };
+    render(<TrajectoryView trajectory={trajectory} />);
+
+    fireEvent.click(screen.getAllByTestId("trajectory-row")[2]!);
+    fireEvent.click(screen.getByRole("tab", { name: "计时" }));
+    const panel = screen.getByTestId("trajectory-detail-panel");
+    expect(panel.textContent).toContain("800ms");
+    expect(panel.textContent).toContain("3.2s");
+    expect(panel.textContent).toContain("31.3 tok/s");
   });
 
   it("折叠隐藏选中行后清空选中并关闭详情（D-014）", () => {

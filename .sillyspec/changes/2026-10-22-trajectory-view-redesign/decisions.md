@@ -140,6 +140,17 @@ change: 2026-10-22-trajectory-view-redesign
 - 否决理由: 依赖与数据模型不兼容，移植成本高于重写且会把两套 token 体系混在一起。
 - 复潮条件: 仅在 dsh 改为输出可复用、无框架绑定组件库时重新评估。
 
+## D-021@v1: 总览缩略条随 D-017 一并裁剪，实际时长保留缩放/平移/双击重置
+- type: boundary
+- priority: P2
+- status: confirmed
+- source: design-grill
+- question: 时间线固定约 50px 时，总览刷子（overview brush）如何处置？
+- answer: 50px 高度预算下无法容纳总览条（原 14px）与三泳道+轴；裁决随说明区一并视觉裁剪。实际时长模式仍保留滚轮缩放、拖拽平移、双击重置；等宽模式保持 D-016 的只读概览。D-016 尾句「保持现有全部交互」中的总览刷子部分由本条修订。
+- normalized_requirement: duration 模式渲染轴与三泳道，总览条不占高度（DOM 保留供既有测试）；equal 模式不渲染轴、不注册手势。
+- impacts: [FR-01, FR-02, task-05]
+- evidence: frontend/src/components/daemon/trajectory/trajectory-timeline.tsx；D-016/D-017
+
 ## D-012@v1: 设计方案与真码原型定稿
 - type: architecture
 - priority: P0

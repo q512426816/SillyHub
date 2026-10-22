@@ -79,7 +79,11 @@ export function collectCollapsibleCallGroups(
     current = null;
   };
 
+  let currentTurn: number | null = null;
   for (const row of trajectory.rows) {
+    // 跨轮不合并：调用组只在本轮内连续工具行之间成立（P3 修复）。
+    if (currentTurn !== null && row.turnIndex !== currentTurn) flush();
+    currentTurn = row.turnIndex;
     if (row.kind === "tool" || row.kind === "tool_result") {
       if (!current) {
         current = { key: row.id, rowIds: [row.id], names: [] };

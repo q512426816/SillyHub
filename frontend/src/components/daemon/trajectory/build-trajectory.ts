@@ -60,7 +60,14 @@ export interface TrajectoryRow {
   /** inputText / outputText 任一被 maxTextLen 截断。 */
   truncated?: boolean;
   inlineTokens?: { in?: number; out?: number };
-  meta?: { toolKind?: string; subagentType?: string; seq?: number };
+  meta?: {
+    toolKind?: string;
+    subagentType?: string;
+    seq?: number;
+    /** 2026-10-22-trajectory-view-redesign：工具结果缺配对时退回 primary 摘要
+     *  （详情「结果」页据此标注「未捕获结果」）。 */
+    resultFromPrimary?: boolean;
+  };
 }
 
 export interface TrajectoryTurn {
@@ -72,6 +79,9 @@ export interface TrajectoryTurn {
   status: string;
   inputTokens?: number;
   outputTokens?: number;
+  /** 2026-10-22-trajectory-view-redesign：该轮 `/runs` 的 attempt 采样（详情「计时」用）。
+   *  缺省 = 无采样；推导逻辑不变，仅随轮透传给展示层。 */
+  timing?: TurnTimingSnapshot;
 }
 
 export type TrajectoryLaneKind = "input" | "model" | "tool";
@@ -689,9 +699,14 @@ export function assembleTrajectory(
   if (windowEnd < windowStart) windowEnd = windowStart;
 
   const lanes = buildTrajectoryLanes(rows, turns, timingByRunId);
+  // 2026-10-22-trajectory-view-redesign：轮级 timing 随轮透传给详情面板（只读附加）。
+  const turnsWithTiming = turns.map((turn) => {
+    const timing = timingByRunId.get(turn.runId);
+    return timing ? { ...turn, timing } : turn;
+  });
   return {
     rows,
-    turns,
+    turns: turnsWithTiming,
     lanes,
     coverage: computeCoverage(lanes, windowStart, windowEnd),
     modelBasis: deriveModelBasis(turns, timingByRunId, lanes),

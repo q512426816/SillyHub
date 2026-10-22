@@ -175,3 +175,64 @@ describe("trajectoryFromTurnViews：轮视图 → 三泳道轨迹", () => {
     }
   });
 });
+
+describe("产品路径数据边界与工具行映射（2026-10-22-trajectory-view-redesign）", () => {
+  it("产品路径只派发六类行型（无 tool_result / error 行）", () => {
+    const traj = trajectoryFromTurnViews([makeTurn()]);
+    const allowed = new Set(["user", "assistant", "thinking", "tool", "system", "compaction"]);
+
+    for (const row of traj.rows) {
+      expect(allowed.has(row.kind)).toBe(true);
+    }
+    expect(traj.rows.some((row) => row.kind === "tool_result")).toBe(false);
+    expect(traj.rows.some((row) => row.kind === "error")).toBe(false);
+  });
+
+  it("工具行：raw → inputText、result → outputText", () => {
+    const traj = trajectoryFromTurnViews([
+      makeTurn({
+        segments: seg({
+          kind: "tool",
+          id: "tool-r",
+          raw: '{"command":"pnpm test"}',
+          result: "all green",
+          status: "ok",
+          toolName: "Bash",
+          primary: "pnpm test",
+          startedAt: START + 5_000,
+          endedAt: START + 20_000,
+          children: [],
+          subagentType: null,
+        }),
+      }),
+    ]);
+
+    const tool = traj.rows.find((row) => row.kind === "tool")!;
+    expect(tool.inputText).toContain("pnpm test");
+    expect(tool.outputText).toBe("all green");
+    expect(tool.meta?.resultFromPrimary).toBeUndefined();
+  });
+
+  it("结果缺失时退回 primary 并标记 resultFromPrimary（详情标注未捕获结果）", () => {
+    const traj = trajectoryFromTurnViews([
+      makeTurn({
+        segments: seg({
+          kind: "tool",
+          id: "tool-nr",
+          raw: '{"command":"pnpm lint"}',
+          status: "ok",
+          toolName: "Bash",
+          primary: "pnpm lint",
+          startedAt: START + 5_000,
+          endedAt: START + 20_000,
+          children: [],
+          subagentType: null,
+        }),
+      }),
+    ]);
+
+    const tool = traj.rows.find((row) => row.kind === "tool")!;
+    expect(tool.outputText).toBe("pnpm lint");
+    expect(tool.meta?.resultFromPrimary).toBe(true);
+  });
+});

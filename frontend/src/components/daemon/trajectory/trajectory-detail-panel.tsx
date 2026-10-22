@@ -84,6 +84,7 @@ export function TrajectoryDetailPanel({
   const [width, setWidth] = useState<number | null>(null);
   const [copied, setCopied] = useState(false);
   const [showPretty, setShowPretty] = useState(true);
+  const [showPrettyResult, setShowPrettyResult] = useState(true);
   const panelRef = useRef<HTMLElement | null>(null);
   const dragRef = useRef<{ startX: number; startWidth: number } | null>(null);
 
@@ -111,19 +112,21 @@ export function TrajectoryDetailPanel({
     dragRef.current = null;
   }, []);
 
-  const handleCopy = useCallback(async () => {
-    if (!selectedRow) return;
-    const text = [selectedRow.inputText, selectedRow.outputText]
-      .filter((part): part is string => Boolean(part))
-      .join("\n\n");
-    try {
-      await navigator.clipboard.writeText(text);
-      setCopied(true);
-      setTimeout(() => setCopied(false), 1500);
-    } catch {
-      /* 剪贴板被拒：保持原状 */
-    }
-  }, [selectedRow]);
+  const handleCopy = useCallback(
+    async (kind: "payload" | "result") => {
+      if (!selectedRow) return;
+      const text = kind === "payload" ? selectedRow.inputText : selectedRow.outputText;
+      if (!text) return;
+      try {
+        await navigator.clipboard.writeText(text);
+        setCopied(true);
+        setTimeout(() => setCopied(false), 1500);
+      } catch {
+        /* 剪贴板被拒：保持原状 */
+      }
+    },
+    [selectedRow],
+  );
 
   if (!selectedRow) return null;
 
@@ -142,17 +145,47 @@ export function TrajectoryDetailPanel({
 
   const parsedInput = parseJsonObject(selectedRow.inputText);
   const prettyInput = parsedInput ? JSON.stringify(parsedInput, null, 2) : null;
+  const parsedResult = parseJsonObject(selectedRow.outputText);
+  const prettyResult = parsedResult ? JSON.stringify(parsedResult, null, 2) : null;
   const turn = trajectory.turns.find((item) => item.index === selectedRow.turnIndex) ?? null;
+
+  // 计时指标（D-005 / design 字段表）：按轮级 attempt 采样计算，缺失显示固定文案。
+  const attempt = (
+    turn?.timing as
+      | {
+          attempts?: Array<{
+            startedAt?: string | null;
+            firstTokenAt?: string | null;
+            endedAt?: string | null;
+            outputTokens?: number | null;
+          }>;
+        }
+      | undefined
+  )?.attempts?.[0];
+  const stepStart = attempt?.startedAt ? Date.parse(attempt.startedAt) : Number.NaN;
+  const firstToken = attempt?.firstTokenAt ? Date.parse(attempt.firstTokenAt) : Number.NaN;
+  const attemptEnd = attempt?.endedAt ? Date.parse(attempt.endedAt) : Number.NaN;
+  const ttftMs =
+    Number.isFinite(stepStart) && Number.isFinite(firstToken) ? firstToken - stepStart : null;
+  const generationMs =
+    Number.isFinite(firstToken) && Number.isFinite(attemptEnd) ? attemptEnd - firstToken : null;
+  const outputTokens = attempt?.outputTokens ?? turn?.outputTokens ?? null;
+  const throughput =
+    generationMs != null && generationMs > 0 && outputTokens != null
+      ? outputTokens / (generationMs / 1000)
+      : null;
 
   return (
     <aside
       ref={panelRef}
       aria-label="行详情"
       data-testid="trajectory-detail-panel"
-      style={width ? { width } : { width: "clamp(320px, 38%, 440px)" }}
+      style={width ? { width } : undefined}
       className={cn(
-        "absolute inset-y-0 right-0 z-20 flex min-h-0 max-w-[calc(100%-280px)] shrink-0 flex-col border-l border-border bg-card shadow-lg",
-        "@[760px]:static @[760px]:z-auto @[760px]:shadow-none",
+        // 窄容器（<760px）为抽屉：宽度 min(92%,420px)，不受 280px 留白限制；
+        // 宽容器为固定列：默认 clamp(320px,38%,440px)，拖拽上限受容器宽-280 约束。
+        "absolute inset-y-0 right-0 z-20 flex min-h-0 w-[min(92%,420px)] shrink-0 flex-col border-l border-border bg-card shadow-lg",
+        "@[760px]:static @[760px]:z-auto @[760px]:w-[clamp(320px,38%,440px)] @[760px]:max-w-[calc(100%-280px)] @[760px]:shadow-none",
         className,
       )}
     >
@@ -260,7 +293,7 @@ export function TrajectoryDetailPanel({
               {selectedRow.truncated ? <span className="text-warning">已截断</span> : null}
               <button
                 type="button"
-                onClick={() => void handleCopy()}
+                onClick={() => void handleCopy("payload")}
                 className="ml-auto rounded border border-border px-1 text-[10px] hover:bg-muted"
               >
                 {copied ? "已复制" : "复制"}
@@ -280,13 +313,34 @@ export function TrajectoryDetailPanel({
           <section>
             <div className="mb-1 flex items-center gap-2 text-[10.5px] text-muted-foreground">
               <span className="font-medium text-foreground">结果</span>
-              {selectedRow.toolName && !selectedRow.outputText ? (
-                <span>（仅摘要，未捕获结果）</span>
+              {selectedRow.meta?.resultFromPrimary ? (
+                <span data-testid="trajectory-result-fallback">（仅摘要，未捕获结果）</span>
+              ) : null}
+              {prettyResult ? (
+                <button
+                  type="button"
+                  aria-pressed={showPrettyResult}
+                  onClick={() => setShowPrettyResult((value) => !value)}
+                  className="rounded border border-border px-1 font-mono text-[10px] hover:bg-muted"
+                  title="JSON 美化 / 原文"
+                >
+                  {"{}"}
+                </button>
+              ) : null}
+              {selectedRow.truncated ? <span className="text-warning">已截断</span> : null}
+              {selectedRow.outputText ? (
+                <button
+                  type="button"
+                  onClick={() => void handleCopy("result")}
+                  className="ml-auto rounded border border-border px-1 text-[10px] hover:bg-muted"
+                >
+                  {copied ? "已复制" : "复制"}
+                </button>
               ) : null}
             </div>
             {selectedRow.outputText ? (
               <pre className="max-h-[50vh] overflow-auto whitespace-pre-wrap break-words rounded border border-border bg-muted/40 p-2 font-mono text-[10.5px] leading-[1.55]">
-                {selectedRow.outputText}
+                {showPrettyResult && prettyResult ? prettyResult : selectedRow.outputText}
               </pre>
             ) : (
               <div className="text-[11px] text-muted-foreground">未捕获结果</div>
@@ -303,11 +357,29 @@ export function TrajectoryDetailPanel({
             <dt className="text-muted-foreground">总时长</dt>
             <dd className="font-mono tabular-nums">{formatDuration(selectedRow.durationMs)}</dd>
             <dt className="text-muted-foreground">首 token 延迟</dt>
-            <dd className="text-muted-foreground">未记录</dd>
+            <dd className="font-mono tabular-nums">
+              {ttftMs == null ? (
+                <span className="text-muted-foreground">未记录</span>
+              ) : (
+                formatDuration(ttftMs)
+              )}
+            </dd>
             <dt className="text-muted-foreground">生成</dt>
-            <dd className="text-muted-foreground">未记录</dd>
+            <dd className="font-mono tabular-nums">
+              {generationMs == null ? (
+                <span className="text-muted-foreground">未记录</span>
+              ) : (
+                formatDuration(generationMs)
+              )}
+            </dd>
             <dt className="text-muted-foreground">吞吐</dt>
-            <dd className="text-muted-foreground">不可用</dd>
+            <dd className="font-mono tabular-nums">
+              {throughput == null ? (
+                <span className="text-muted-foreground">不可用</span>
+              ) : (
+                `${throughput.toFixed(1)} tok/s`
+              )}
+            </dd>
             <dt className="text-muted-foreground">计时来源</dt>
             <dd className="text-muted-foreground">会话时间戳</dd>
           </dl>

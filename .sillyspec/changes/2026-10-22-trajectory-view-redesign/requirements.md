@@ -52,7 +52,7 @@ Given 某轮有 5 条记录；When 点击「轮次 → 收起」；Then 该轮�
 
 ### FR-05: 多标签详情
 
-- 轨迹视图 **必须** 在右侧渲染详情面板（默认宽度 `clamp(320px, 38%, 440px)`，可拖拽范围 320–720px；≤760px 改抽屉）；无选中行时 **禁止** 渲染面板。工具行 **必须** 提供四标签：概述 / 参数 / 结果 / 计时；参数取工具段 `raw`、结果取配对的 `result`（缺失时退回 `primary` 并注明「未捕获结果」，D-015）；计时的 TTFT / 生成 / 吞吐按设计字段表取值，缺失时显示「未记录 / 不可用」固定文案，**禁止** 估算伪造。其它行 **必须** 提供概述 + 原始内容两档；工具行 **禁止** 出现 Schema 标签。折叠或搜索导致选中行不可见时 **必须** 清空选中并关闭详情（D-014）。
+- 轨迹视图 **必须** 在右侧渲染详情面板（默认宽度 `clamp(320px, 38%, 440px)`，可拖拽范围 320px–min(720px, 容器宽−280px)；≤760px 改抽屉，宽度 `min(92%, 420px)`）；无选中行时 **禁止** 渲染面板。工具行 **必须** 提供四标签：概述 / 参数 / 结果 / 计时；参数取工具段 `raw`、结果取配对的 `result`（缺失时退回 `primary` 并注明「未捕获结果」，D-015）；计时的 TTFT / 生成 / 吞吐按设计字段表取值，缺失时显示「未记录 / 不可用」固定文案，**禁止** 估算伪造。其它行 **必须** 提供概述 + 原始内容两档；工具行 **禁止** 出现 Schema 标签。折叠或搜索导致选中行不可见时 **必须** 清空选中并关闭详情（D-014）。
 
 #### 场景：主路径
 
@@ -107,10 +107,10 @@ Given 变更落盘；When 跑轨迹、会话面板相关测试与 tsc；Then 全
 
 ## 测试绑定（每条 FR 至少一行：`FR-NN: test/路径「用例名」`；不适用要写理由；flow done 空行拒收）
 
-FR-01: `frontend/src/components/daemon/trajectory/__tests__/trajectory-redesign.test.tsx`「轨迹视图独立占满高度：工具栏与时间线在账本滚动容器之外」
-FR-02: `frontend/src/components/daemon/trajectory/__tests__/trajectory-view-model.test.ts`「搜索 AND 分词过滤，命中时忽略折叠」+ `frontend/src/components/daemon/trajectory/__tests__/trajectory-redesign.test.tsx`「工具栏四项：时长切换/轮次收起/调用收起/搜索」+「等宽模式禁用缩放手势」
-FR-03: `frontend/src/components/daemon/trajectory/__tests__/trajectory-redesign.test.tsx`「两列账本：轮次标签与竖线、类型标签与摘要、无请求边界点、行内无耗时/token」
-FR-04: `frontend/src/components/daemon/trajectory/__tests__/trajectory-view-model.test.ts`「轮次/调用折叠摘要统计」+ `frontend/src/components/daemon/trajectory/__tests__/trajectory-redesign.test.tsx`「折叠摘要行点击展开恢复」
-FR-05: `frontend/src/components/daemon/trajectory/__tests__/trajectory-redesign.test.tsx`「工具行四标签（无 Schema）/参数取 raw/结果取 result/缺失空态」+「折叠隐藏选中行后清空选中并关闭详情」
-FR-06: `frontend/src/components/daemon/trajectory/__tests__/trajectory-view-model.test.ts`「产品路径只派发六类行型」+ `frontend/src/components/daemon/__tests__/turn-timeline-trajectory-view.test.tsx`「无时间锚点 → 轨迹视图显式空态」
+FR-01: `frontend/src/components/daemon/trajectory/__tests__/trajectory-redesign.test.tsx`「顶部固定结构：工具栏与时间线在账本滚动容器之外」
+FR-02: `frontend/src/components/daemon/trajectory/__tests__/trajectory-view-model.test.ts`「搜索 AND 分词过滤，命中时忽略折叠」+ `frontend/src/components/daemon/trajectory/__tests__/trajectory-redesign.test.tsx`「工具栏：时长切换隐藏时间轴，再切回恢复」+「等宽模式不拦截滚轮、时间轴不渲染」
+FR-03: `frontend/src/components/daemon/trajectory/__tests__/trajectory-redesign.test.tsx`「两列账本：类型标签 + 摘要，行内无耗时、无请求边界点」
+FR-04: `frontend/src/components/daemon/trajectory/__tests__/trajectory-view-model.test.ts`「轮次折叠：保留首行 + 一条摘要行」+「调用折叠：连续工具行合并为一条摘要行」+ `frontend/src/components/daemon/trajectory/__tests__/trajectory-redesign.test.tsx`「工具栏：轮次收起出现摘要行，点击摘要行展开恢复」
+FR-05: `frontend/src/components/daemon/trajectory/__tests__/trajectory-redesign.test.tsx`「详情：工具行四标签（无 Schema），参数取 raw、结果取 result、缺失标注未捕获」+「详情：计时按轮级 attempt 采样计算 TTFT/生成/吞吐」+「折叠隐藏选中行后清空选中并关闭详情」+ `frontend/src/components/daemon/trajectory/__tests__/from-turn-views.test.ts`「工具行：raw → inputText、result → outputText」+「结果缺失时退回 primary 并标记 resultFromPrimary」
+FR-06: `frontend/src/components/daemon/trajectory/__tests__/from-turn-views.test.ts`「产品路径只派发六类行型（无 tool_result / error 行）」+ `frontend/src/components/daemon/__tests__/turn-timeline-trajectory-view.test.tsx`「无可绘制时序（无时间锚点）→ 轨迹视图显式空态」
 FR-07: `frontend/src/components/daemon/trajectory/__tests__` + `frontend/src/components/daemon/__tests__/turn-timeline-trajectory-view.test.tsx`（零回归）+ 不适用类型检查无测试面，`pnpm exec tsc --noEmit` 直接验证退出码

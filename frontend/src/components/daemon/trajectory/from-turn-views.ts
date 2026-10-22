@@ -198,7 +198,14 @@ export function trajectoryFromTurnViews(
           : {}),
         ...(kind === "assistant" || kind === "thinking"
           ? {}
-          : { meta: { seq: i } as { seq?: number } }),
+          : {
+              meta: {
+                seq: i,
+                ...(isTool && !toolSeg.result && toolSeg.primary
+                  ? { resultFromPrimary: true }
+                  : {}),
+              },
+            }),
       });
     });
 
