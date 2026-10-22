@@ -43,7 +43,6 @@ const STATUS_TONE: Record<TrajectoryRow["status"], string> = {
 
 const MIN_WIDTH = 320;
 const MAX_WIDTH = 720;
-const DEFAULT_WIDTH = 360;
 
 function formatTime(ms: number): string {
   return new Date(ms).toLocaleTimeString("zh-CN", { hour12: false });
