@@ -710,7 +710,7 @@ describe("MessageQueueBar 唤醒条目事件行（2026-10-21-task-wakeup-event-q
     expect(screen.queryByText("收到任务消息")).toBeNull();
   });
 
-  it("FR-04 auto_resume 条目 → 「断线自动续跑」事件行，计入排队计数（对齐后端配额口径）", () => {
+  it("FR-04 auto_resume 条目 → 「断线自动续跑」事件行，不计入排队显示计数（触发源显示豁免；配额差异由后端兜底）", () => {
     render(
       <MessageQueueBar
         entries={[

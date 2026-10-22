@@ -45,7 +45,7 @@ created_at: 2026-10-22T03:14:44.733Z
 
 ### FR-04: 排队栏触发源事件行泛化
 
-- MessageQueueBar 的事件行分流必须从 origin==='task_wakeup' 泛化为触发源集合（origin==='task_wakeup' 或以 'auto_resume:' 开头），按 trigger 渲染对应标签（收到任务消息（N 个后台任务已结束 · 本轮结束后自动继续）/ 断线自动续跑（本轮结束后自动继续））；计数口径必须与后端对齐（后端 pending 配额仅豁免 task_wakeup，auto_resume 条目计入 N）；auto_resume 条目的 ✎ 编辑抑制必须与 task_wakeup 同口径。
+- MessageQueueBar 的事件行分流必须从 origin==='task_wakeup' 泛化为触发源集合（origin==='task_wakeup' 或以 'auto_resume:' 开头），按 trigger 渲染对应标签（收到任务消息（N 个后台任务已结束 · 本轮结束后自动继续）/ 断线自动续跑（本轮结束后自动继续））；显示计数与满员判定对触发源条目一律豁免（排队栏只呈现用户消息口径；后端 pending 配额实际计入 auto_resume，queue_full 由后端兜底——显示与配额的分叉为已知取舍）；auto_resume 条目的 ✎ 编辑抑制必须与 task_wakeup 同口径。
 
 #### 场景：续跑条目事件行
 

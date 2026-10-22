@@ -21,7 +21,7 @@ created_at: 2026-10-22T03:14:44.733Z
 - turn-segment-views.tsx：`TaskWakeupNoticeView` 更名 `TurnTriggerView`（props 随段型），SegmentView 分发 case 同步；两视图（对话/进度）渲染语义不变。
 - runtime-session-helpers.tsx / session-panel-page.tsx：唤醒留痕段收集泛化为触发段收集（回放开轮槽 + live upsert 幂等插段同构扩展 shadow/group/auto_resume）。
 - turn-timeline.tsx / turn-status-bar.tsx：穷尽 switch 与对话过滤谓词的 kind 改名补点（task_wakeup → turn_trigger）。
-- message-queue-bar.tsx：事件行分流谓词泛化（origin==='task_wakeup' || origin.startsWith('auto_resume:')），事件行标签按 trigger 区分；计数保持只豁免 task_wakeup（对齐后端 SESSION_QUEUE_MAX_PENDING 仅豁免 TASK_WAKEUP_QUEUE_ORIGIN 的口径）；✎ 抑制扩展到 auto_resume。
+- message-queue-bar.tsx：事件行分流谓词泛化（origin==='task_wakeup' || origin.startsWith('auto_resume:')），事件行标签按 trigger 区分；显示计数对触发源条目一律豁免（后端配额实际计入 auto_resume，queue_full 后端兜底——显示/配额分叉为已知取舍，评审 P3-1 收敛）；✎ 抑制扩展到 auto_resume。
 - backend / daemon / API 契约：零改动。
 
 ## 边界与并发（盲维四问——每问必答，答不了即设计缺口）

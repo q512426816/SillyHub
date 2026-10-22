@@ -1438,7 +1438,11 @@ export function SessionPanelPage({
                         segments: [
                           {
                             kind: "turn_trigger",
-                            id: `trigger:${env.run_id}`,
+                            // 评审 P3-3：id 带 trigger 值——同轮异源触发段（理论面）
+                            // 不撞 React key（幂等守卫按 trigger 判定，异源放行）。
+                            id: `trigger:${env.run_id}:${
+                              liveContentTrigger ?? livePreambleTrigger
+                            }`,
                             text:
                               env.content ??
                               preambleText ??
