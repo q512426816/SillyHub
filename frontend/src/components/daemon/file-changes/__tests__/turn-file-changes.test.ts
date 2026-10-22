@@ -5,10 +5,10 @@
 //      command → source=shell（edits=0，无「编辑次数」概念）；
 //   2. status=partial（或 truncated）→ truncated=true，卡片照出（不是错误态）；
 //   3. binary 透传到 ChangedFile（行级破折号由卡片承担）；
-//   4. capability=tool_only → **降级态**（不是 null）：files 恒空、不伪造行级数据；
-//   5. 两字段全缺（未接线）→ null（不出卡、不出占位）；snapshot=null 但 capability
-//      已给 → 降级态（E8：不许静默成「本轮无改动」）；
-//   6. status=failed/unavailable → 降级态；
+//   4. capability=tool_only → **null**（2026-10-22-file-card-hide-empty：没有信息就
+//      不出卡，历史轮不再挂「仅工具编辑」占位）；
+//   5. 两字段全缺（未接线）→ null；snapshot=null 但 capability 已给 → 同样 null；
+//   6. status=failed/unavailable → null（采集失败也不占位）；
 //   7. sharedWorkspace = snapshot.concurrentSessionsHint（共享工作区恒提示）；
 //   8. ok 且 files 为空 → null（快照确认零改动 → 空态零渲染，不写「无改动」文案）；
 //   9. attachRunFileChanges：snake_case 读模型 → camelCase 轮字段，capability 缺省
@@ -166,33 +166,18 @@ describe("toFileChangesCardProps：partial / truncated 采样降级", () => {
   });
 });
 
-describe("toFileChangesCardProps：三态降级（E6/E8）", () => {
-  it('capability="tool_only" → 降级态（不是 null）：files 恒空，快照里的 files 也不采信', () => {
-    const props = toFileChangesCardProps(
-      makeSnapshot({ files: [makeFile()] }),
-      "tool_only",
-    );
-    expect(props).not.toBeNull();
-    expect(props!.degraded).toBe(true);
-    expect(props!.capability).toBe("tool_only");
-    expect(props!.files).toEqual([]);
-    // 降级态不出「（部分）」——它压根没有行级数据，不是截断。
-    expect(props!.truncated).toBeUndefined();
+describe("toFileChangesCardProps：无信息一律不出卡（2026-10-22-file-card-hide-empty）", () => {
+  it('capability="tool_only" → null：不出「仅工具编辑」卡，也不采信快照里的 files', () => {
+    // 历史轮（daemon 0.2.0 / 部署之前）就是这一态；用户裁决「没有信息就隐藏卡片」。
+    expect(toFileChangesCardProps(makeSnapshot({ files: [makeFile()] }), "tool_only")).toBeNull();
   });
 
-  it('snapshot=null + capability="full" → 降级态（backend 声称有快照却没数据：显式降级）', () => {
-    const props = toFileChangesCardProps(null, "full");
-    expect(props).not.toBeNull();
-    expect(props!.degraded).toBe(true);
-    expect(props!.files).toEqual([]);
+  it('snapshot=null + capability="full" → null（backend 声称有快照却没数据：同样零信息）', () => {
+    expect(toFileChangesCardProps(null, "full")).toBeNull();
   });
 
-  it("snapshot=null + capability=tool_only → 降级态", () => {
-    expect(toFileChangesCardProps(null, "tool_only")).toMatchObject({
-      degraded: true,
-      capability: "tool_only",
-      files: [],
-    });
+  it("snapshot=null + capability=tool_only → null", () => {
+    expect(toFileChangesCardProps(null, "tool_only")).toBeNull();
   });
 
   it("两字段全缺（挂载方未接线）→ null：不出卡、不出占位", () => {
@@ -200,15 +185,9 @@ describe("toFileChangesCardProps：三态降级（E6/E8）", () => {
     expect(toFileChangesCardProps(null, null)).toBeNull();
   });
 
-  it("status=failed / unavailable → 降级态，且不把不可信 files 渲染出来", () => {
+  it("status=failed / unavailable → null（采集失败也不占位，不把不可信 files 渲染出来）", () => {
     for (const status of ["failed", "unavailable"] as const) {
-      const props = toFileChangesCardProps(
-        makeSnapshot({ status, files: [makeFile()] }),
-        "full",
-      );
-      expect(props).not.toBeNull();
-      expect(props!.degraded).toBe(true);
-      expect(props!.files).toEqual([]);
+      expect(toFileChangesCardProps(makeSnapshot({ status, files: [makeFile()] }), "full")).toBeNull();
     }
   });
 

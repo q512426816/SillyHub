@@ -85,6 +85,9 @@ export interface FileChangesCardProps {
   /**
    * 降级形态（`capability="tool_only"` / 无快照 / 采集失败）：折叠头「仅工具编辑」+
    * 一行说明，无文件行。**不显示任何「无改动」字样**（E6/E8：没快照 ≠ 没改动）。
+   *
+   * 注意（2026-10-22-file-card-hide-empty）：产品页**已无生产者**——无数据的轮按
+   * 用户裁决直接不出卡。本形态保留给检查器 / proto 等仍要「显式降级」的消费方。
    */
   degraded?: boolean;
   /**

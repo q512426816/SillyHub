@@ -15,10 +15,11 @@
  * 约束（与轮级卡同源）：
  * - **props only**：零 fetch / 零 store / 零 context，聚合纯函数现算；
  * - 只用语义 token，零字面色值；文案中文；
- * - `status` 取最差值（`unavailable > failed > partial > ok`）；任一参与轮缺快照
- *   （`capability="tool_only"` / 无快照）时汇总**至少降为 partial** 并显式标注
- *   「N 轮无工作区快照」——「统计不完整」绝不能被读成「没有改动」（E6/E8）；
- * - 无数据（无文件且无降级轮）不渲染，不出空壳。
+ * - `status` 取最差值（`unavailable > failed > partial > ok`）；**无可信快照的轮
+ *   （`capability="tool_only"` / 无快照）不参与汇总**——2026-10-22-file-card-hide-empty
+ *   用户裁决「没有信息就隐藏卡片，汇总也不要留缺口提示」：这些轮既不出卡、也不把
+ *   汇总压成「不完整」；
+ * - 无数据（零文件）整卡零渲染，不出空壳。
  */
 
 import { useMemo } from "react";
@@ -77,9 +78,7 @@ export interface AggregatedFileChanges {
   totalDels: number;
   /** 汇总状态（无任何可信快照 → null）。 */
   status: FileChangesSummaryStatus | null;
-  /** 无工作区快照的轮数（capability=tool_only / 快照缺失）——汇总不完整的量。 */
-  degradedTurns: number;
-  /** 参与汇总的轮数（有快照的轮 + 降级轮）。 */
+  /** 参与汇总的轮数（**只计有可信快照的轮**；无快照轮被跳过）。 */
   consideredTurns: number;
   /** 任一轮快照被截断/超时（行级统计为下限）。 */
   truncated: boolean;
@@ -88,28 +87,24 @@ export interface AggregatedFileChanges {
 /**
  * 多轮快照聚合（纯函数）：按 `path` 去重、+/− 求和、状态取最差值。
  *
- * 降级轮（`snapshot == null` 或 `capability="tool_only"`）不伪造文件行，只计入
- * `degradedTurns` 并把汇总状态压到至少 `partial`——覆盖不完整必须显式可见。
+ * 无可信快照的轮（`snapshot == null` / `capability="tool_only"` / `failed` /
+ * `unavailable`）**直接跳过**——既不贡献文件行，也不把汇总压成「不完整」
+ * （2026-10-22-file-card-hide-empty：缺口提示按用户裁决整体移除）。
  */
 export function aggregateTurnFileChanges(
   entries: ReadonlyArray<FileChangesSummaryEntry>,
 ): AggregatedFileChanges {
   const byPath = new Map<string, AggregatedFileChange>();
   const statuses: FileChangesSummaryStatus[] = [];
-  let degradedTurns = 0;
   let truncated = false;
   let consideredTurns = 0;
 
   for (const entry of entries) {
     const snapshot = entry.snapshot ?? null;
     const capability = entry.capability ?? null;
-    // 完全未接线（两字段都缺）的轮不参与汇总——既不贡献数据也不算降级。
-    if (snapshot == null && capability == null) continue;
+    // 无快照能力 / 快照缺失：零信息，跳过（不出卡也不计入汇总）。
+    if (snapshot == null || capability === "tool_only") continue;
     consideredTurns += 1;
-    if (snapshot == null || capability === "tool_only") {
-      degradedTurns += 1;
-      continue;
-    }
     statuses.push(snapshot.status);
     if (snapshot.status === "partial" || snapshot.truncated === true) truncated = true;
     if (snapshot.status !== "ok" && snapshot.status !== "partial") continue;
@@ -118,7 +113,6 @@ export function aggregateTurnFileChanges(
     }
   }
 
-  if (degradedTurns > 0) statuses.push("partial");
   const status = worstFileChangesStatus(statuses);
 
   const files = [...byPath.values()].sort((a, b) => a.path.localeCompare(b.path));
@@ -128,7 +122,6 @@ export function aggregateTurnFileChanges(
     totalAdds: files.reduce((sum, file) => sum + file.adds, 0),
     totalDels: files.reduce((sum, file) => sum + file.dels, 0),
     status,
-    degradedTurns,
     consideredTurns,
     truncated,
   };
@@ -185,8 +178,9 @@ export interface FileChangesSummaryProps {
 export function FileChangesSummary({ turns, className }: FileChangesSummaryProps) {
   const agg = useMemo(() => aggregateTurnFileChanges(turns), [turns]);
 
-  // 无数据不渲染：没有文件、也没有「某轮缺快照」要说的事。
-  if (agg.totalFiles === 0 && agg.degradedTurns === 0) return null;
+  // 无数据不渲染：没有可信快照产出的文件 → 整卡零渲染（不出「共 0 个文件」空壳，
+  // 也不提「N 轮无工作区快照」——2026-10-22-file-card-hide-empty 用户裁决）。
+  if (agg.totalFiles === 0) return null;
 
   const note = fileChangesSummaryNote(agg.status);
   const statusLabel =
@@ -203,7 +197,7 @@ export function FileChangesSummary({ turns, className }: FileChangesSummaryProps
       data-testid="file-changes-summary"
       data-status={agg.status ?? "unknown"}
       data-total-files={agg.totalFiles}
-      data-degraded-turns={agg.degradedTurns}
+      data-considered-turns={agg.consideredTurns}
       className={cn(
         "rounded-md border border-border bg-card px-2 py-1.5 text-[12px]",
         className,
@@ -245,16 +239,7 @@ export function FileChangesSummary({ turns, className }: FileChangesSummaryProps
         共享工作区，可能含并行会话改动
       </p>
 
-      {agg.degradedTurns > 0 && (
-        <p
-          data-testid="file-changes-summary-degraded"
-          className="text-[11px] leading-[1.4] text-muted-foreground/80"
-        >
-          其中 {agg.degradedTurns} 轮无工作区快照（仅工具编辑），汇总不完整
-        </p>
-      )}
-
-      {note != null && agg.degradedTurns === 0 && (
+      {note != null && (
         <p className="text-[11px] leading-[1.4] text-muted-foreground/80">{note}</p>
       )}
     </div>

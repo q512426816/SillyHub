@@ -343,8 +343,9 @@ describe("对话视图子代理容器段（2026-09-15-subagent-three-pane task-0
 });
 
 /* task-11（2026-10-20-session-page-dsh-alignment / FR-14 / FR-16 / D-023@v1）：
- * 轮级文件变更卡的挂载面——轮尾状态行之后挂卡；无快照不占位；tool_only 走
- * 「仅工具编辑」降级卡；会话级汇总挂会话流顶部且受 props 开关控制。
+ * 轮级文件变更卡的挂载面——轮尾状态行之后挂卡；无快照不占位。
+ * 2026-10-22-file-card-hide-empty：tool_only / 采集失败也不再出「仅工具编辑」卡，
+ * 整轮零渲染；会话级汇总挂会话流顶部且受 props 开关控制。
  * 数据全部来自 SessionTurnView.fileChanges / fileChangesCapability（挂载方从
  * /runs 读模型透传），TurnTimeline 自身零取数。 */
 describe("轮级文件变更卡与会话级汇总挂载（task-11 / 线 C 1b）", () => {
@@ -407,7 +408,9 @@ describe("轮级文件变更卡与会话级汇总挂载（task-11 / 线 C 1b）"
     expect(within(card).getByText("共享工作区，可能含并行会话改动")).toBeInTheDocument();
   });
 
-  it('capability="tool_only"（无快照）：降级为「仅工具编辑」，全树不出现「无改动」', () => {
+  it('capability="tool_only"（无快照）：整轮不出卡，全树无「仅工具编辑」也无「无改动」', () => {
+    // 2026-10-22-file-card-hide-empty（用户裁决「没有信息就隐藏卡片」）：历史轮
+    // （daemon 0.2.0 / 部署之前）不再挂零信息降级卡。
     render(
       <TurnTimeline
         {...renderProps([
@@ -416,12 +419,27 @@ describe("轮级文件变更卡与会话级汇总挂载（task-11 / 线 C 1b）"
       />,
     );
 
-    expect(screen.getByText("仅工具编辑")).toBeInTheDocument();
-    expect(
-      screen.getByText("daemon 未上报工作区快照，本卡只含 Edit/Write 工具编辑"),
-    ).toBeInTheDocument();
-    expect(screen.queryAllByTestId("file-changes-row")).toHaveLength(0);
-    // 硬约束：没有快照 ≠ 本轮无改动。
+    expect(screen.queryByTestId("turn-file-changes")).toBeNull();
+    expect(screen.queryByTestId("file-changes-card")).toBeNull();
+    expect(screen.queryByText("仅工具编辑")).toBeNull();
+    expect(screen.queryByText(/daemon 未上报工作区快照/)).toBeNull();
+    expect(screen.queryByText(/无改动/)).toBeNull();
+  });
+
+  it("status=unavailable（采集失败）：同样不出卡、不出占位", () => {
+    render(
+      <TurnTimeline
+        {...renderProps([
+          makeTurn({
+            fileChanges: makeSnapshot({ status: "unavailable", reason: "not_a_repo", files: [] }),
+            fileChangesCapability: "full",
+          }),
+        ])}
+      />,
+    );
+
+    expect(screen.queryByTestId("turn-file-changes")).toBeNull();
+    expect(screen.queryByText("仅工具编辑")).toBeNull();
     expect(screen.queryByText(/无改动/)).toBeNull();
   });
 

@@ -1221,9 +1221,10 @@ const TurnRow = memo(function TurnRow({
               )}
               {/* task-11（2026-10-20-session-page-dsh-alignment / FR-14 / D-023@v1）：
                   轮级文件变更卡——挂在轮尾状态行**之后**（两视图同位置）。
-                  `toFileChangesCardProps` 返回 null（该轮无快照 / 快照确认零改动 /
-                  挂载方未接线）时**不渲染任何占位**；capability="tool_only" 或快照
-                  不可用 → 「仅工具编辑」降级卡（design E6/E8：绝不显示「本轮无改动」）。 */}
+                  `toFileChangesCardProps` 返回 null 时**不渲染任何占位**；该 null 现在
+                  覆盖「无快照 / tool_only / 采集失败 / 快照确认零改动」（2026-10-22
+                  file-card-hide-empty 用户裁决：没有信息就隐藏卡片，不再出「仅工具
+                  编辑」降级卡；design E6/E8 的「绝不显示本轮无改动」仍成立）。 */}
               {(() => {
                 const cardProps = toFileChangesCardProps(
                   turn.fileChanges,

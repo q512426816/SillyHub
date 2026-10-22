@@ -13,14 +13,15 @@
  * - 「### 1b 承载面与读模型字段」：读模型用顶层 snake_case
  *   `file_changes` / `file_changes_capability`，嵌套快照体是 camelCase。
  *
- * 三态降级（本模块的裁决口径，逐条对应 design E6/E8）：
+ * 三态降级（本模块的裁决口径，逐条对应 design E6/E8；2026-10-22-file-card-hide-empty
+ * 起「无信息」一律**不出卡**，不再渲染「仅工具编辑」占位）：
  * | 输入 | 输出 |
  * |---|---|
  * | `capability` 与 `snapshot` 双双缺省 | `null`——读模型没接线/该轮无 run 快照，**不出卡、不出占位** |
- * | `capability="tool_only"` | 降级态 `{ degraded: true, files: [] }` → 「仅工具编辑」卡 |
- * | `snapshot=null`（capability 已给） | 同上（显式降级，不静默） |
- * | `status="failed" \| "unavailable"` | 同上（git 不可用 / 非 git 仓：行级数据不可信，不伪造 files） |
- * | `status="partial"` 或 `truncated=true` | 正常卡 + `truncated: true`（行级破折号） |
+ * | `capability="tool_only"` | `null`——daemon 无快照能力（老 daemon / 部署前的历史轮）：零信息，不出卡 |
+ * | `snapshot=null`（capability 已给） | `null`——同上（显式缺失不静默成「无改动」，也不出占位） |
+ * | `status="failed" \| "unavailable"` | `null`——git 不可用 / 非 git 仓：行级数据不可信，且无信息可呈现 |
+ * | `status="partial"` 或 `truncated=true` | 正常卡 + `truncated: true`（行级破折号）；`files` 为空时出一行提示卡 |
  * | `status="ok"` 且 `files` 为空 | `null`（确认无改动的快照 → 零渲染空态，不写「本轮无改动」文案） |
  */
 
@@ -92,27 +93,12 @@ export function toChangedFile(file: TurnFileChange): ChangedFile {
   };
 }
 
-/** 降级态 props：「仅工具编辑」卡（零 files，禁伪造行级数据）。 */
-function degradedProps(
-  snapshot: TurnFileChangesSnapshot | null,
-  options: TurnFileChangesCardOptions,
-): FileChangesCardProps {
-  return {
-    files: [],
-    degraded: true,
-    capability: "tool_only",
-    turnNo: options.turnNo,
-    // 快照可能是 failed/unavailable（存在但不可信）：共享工作区提示仍如实透传。
-    sharedWorkspace: snapshot?.concurrentSessionsHint === true,
-    onOpenFile: options.onOpenFile,
-    className: options.className,
-  };
-}
-
 /**
  * 轮快照 + capability → 卡片 props（`null` = 不出卡、不出占位）。
  *
  * 判定顺序即上表：先看「有没有这项能力」，再看「快照可信不可信」，最后才谈行级数据。
+ * 2026-10-22-file-card-hide-empty：前三条「无信息」分支（tool_only / 无快照 /
+ * failed|unavailable）一律返回 `null`——不再渲染「仅工具编辑」占位卡。
  */
 export function toFileChangesCardProps(
   snapshot: TurnFileChangesSnapshot | null | undefined,
@@ -121,14 +107,13 @@ export function toFileChangesCardProps(
 ): FileChangesCardProps | null {
   // 未接线：两个字段都缺（旧消费方 / 该轮无 run 快照来源）——不出卡也不出占位。
   if (snapshot == null && capability == null) return null;
-  // E8：capability 明确为 tool_only＝daemon 不提供工作区快照能力 → 显式降级。
-  if (capability === "tool_only") return degradedProps(snapshot ?? null, options);
-  // 有 capability 却无快照（backend 声称 full 但没数据）：按 E6/E8 降级，不静默。
-  if (snapshot == null) return degradedProps(null, options);
-  // 采集失败 / git 不可用：行级统计不可信（不伪造 files）。
-  if (snapshot.status === "failed" || snapshot.status === "unavailable") {
-    return degradedProps(snapshot, options);
-  }
+  // E8：capability 明确为 tool_only＝daemon 不提供工作区快照能力（老 daemon /
+  // 部署前的历史轮）——零信息，不出卡（用户裁决：没有信息就隐藏卡片）。
+  if (capability === "tool_only") return null;
+  // 有 capability 却无快照（backend 声称 full 但没数据）：同样零信息，不出卡。
+  if (snapshot == null) return null;
+  // 采集失败 / git 不可用：行级统计不可信（不伪造 files），且没有可呈现的信息。
+  if (snapshot.status === "failed" || snapshot.status === "unavailable") return null;
 
   const truncated = snapshot.status === "partial" || snapshot.truncated === true;
   const files = (snapshot.files ?? []).map(toChangedFile);

@@ -1,0 +1,38 @@
+tier: thin
+legacy_fallback: false
+substeps: {}
+born_face: thin
+with_tasks: false
+review_force: null
+input: >-
+  文件变更卡无数据时整轮不再出卡
+
+
+  用户实测 58 轮历史会话每轮都挂一张「仅工具编辑」卡（文案「daemon 未上报工作区快照，本卡只含 Edit/Write 工具编辑」），零信息且误导，明确裁决：没有信息就隐藏卡片，顶部汇总也不要留缺口提示。
+
+  根因：这些轮跑在 daemon 0.2.0 / 平台 10-22 00:43 部署之前，backend 无 daemon_run_snapshots 行 → capability 按设计退 tool_only；前端把「无能力 / 无快照
+  / 采集失败」一律渲染成一张降级卡。daemon 侧实测无故障（0.2.0 采集器 status=ok / 46 files / 165ms；清单来自 git status，子代理与 Write 改动均计入）。
+
+
+  成功标准：
+
+  - capability=tool_only、快照缺失、status=failed|unavailable 的轮一律不出卡、不出占位（全树不再出现「仅工具编辑」卡）
+
+  - 有真实文件清单的轮照常出卡：逐文件 +/−、归因、并行会话横幅零变化
+
+  - 会话级汇总只汇总真实有改动的轮，不再输出「N 轮无工作区快照」缺口提示；零文件时整卡零渲染
+
+  - 全树仍不出现「本轮无改动」字样；file-changes 相关用例按新口径更新后全绿，tsc --noEmit 退出 0
+autopilot: false
+prestage_ack: true
+baseline_commit: 4a7c1008fc077de06221c8f292e24fc535ed684a
+updatedAt: '2026-10-22T00:11:27.980Z'
+cross_baselines:
+  sillyspec: 8ff68ada697ec4d4af9ce0a90c4055091985e319
+baseline_sha256: 249b4b6fcdc32d7140d160aa6c55a8e9860579c64f46c8a5f2dbca0253af1891
+spec_approved: true
+spec_approved_at: '2026-10-22T00:11:27.980Z'
+spec_approved_by: dsh-handoff-session-page
+spec_approved_channel: user-confirmed
+spec_attested_by: dsh-handoff-session-page
+

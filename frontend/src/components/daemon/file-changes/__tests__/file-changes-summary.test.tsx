@@ -109,7 +109,7 @@ describe("worstFileChangesStatus / aggregateTurnFileChanges（纯函数）", () 
     expect(agg.status).toBe("ok");
   });
 
-  it("降级轮（tool_only / 无快照）不伪造文件，但把汇总压到至少 partial 并计数", () => {
+  it("无快照轮被跳过：不伪造文件、不计缺口、不把汇总压成 partial", () => {
     const agg = aggregateTurnFileChanges([
       { snapshot: makeSnapshot({ files: [makeFile()] }), capability: "full" },
       { snapshot: null, capability: "tool_only" },
@@ -118,10 +118,10 @@ describe("worstFileChangesStatus / aggregateTurnFileChanges（纯函数）", () 
     ]);
 
     expect(agg.totalFiles).toBe(1);
-    expect(agg.degradedTurns).toBe(2);
-    // 两字段全缺的轮不参与（未接线，不算降级）。
-    expect(agg.consideredTurns).toBe(3);
-    expect(agg.status).toBe("partial");
+    // 2026-10-22-file-card-hide-empty：无快照轮不参与汇总（原 degradedTurns 已删）。
+    expect(agg).not.toHaveProperty("degradedTurns");
+    expect(agg.consideredTurns).toBe(1);
+    expect(agg.status).toBe("ok");
   });
 
   it("truncated / partial 快照计入 truncated（行级统计为下限）", () => {
@@ -148,7 +148,7 @@ describe("worstFileChangesStatus / aggregateTurnFileChanges（纯函数）", () 
 });
 
 describe("FileChangesSummary（渲染）", () => {
-  it("多轮汇总卡：文件总数 + Σ+/− + 状态 + 横幅 + 降级计数", () => {
+  it("多轮汇总卡：文件总数 + Σ+/− + 状态 + 横幅（无快照轮不贡献、不提示）", () => {
     render(
       <FileChangesSummary
         turns={[
@@ -175,20 +175,21 @@ describe("FileChangesSummary（渲染）", () => {
     const card = screen.getByTestId("file-changes-summary");
     // 3 个不同 path？不：a.ts 出现两轮（去重），b.ts 一次 → 共 2 个文件。
     expect(card).toHaveAttribute("data-total-files", "2");
-    expect(card).toHaveAttribute("data-degraded-turns", "1");
-    expect(card).toHaveAttribute("data-status", "partial");
+    // 无快照轮被跳过：参与汇总的只有 2 个有可信快照的轮。
+    expect(card).toHaveAttribute("data-considered-turns", "2");
+    expect(card).toHaveAttribute("data-status", "ok");
     expect(screen.getByText("会话文件改动")).toBeInTheDocument();
     expect(screen.getByText("共 2 个文件")).toBeInTheDocument();
     expect(screen.getByText("+14")).toBeInTheDocument();
     expect(screen.getByText("−4")).toBeInTheDocument();
-    expect(screen.getByTestId("file-changes-summary-status")).toHaveTextContent("统计不完整");
+    expect(screen.getByTestId("file-changes-summary-status")).toHaveTextContent("完整");
     // R-08 横幅恒在场（含并行会话改动）。
     expect(screen.getByTestId("file-changes-summary-banner")).toHaveTextContent(
       /可能含并行会话改动/,
     );
-    expect(screen.getByTestId("file-changes-summary-degraded")).toHaveTextContent(
-      "其中 1 轮无工作区快照（仅工具编辑），汇总不完整",
-    );
+    // 用户裁决：不再有「N 轮无工作区快照」缺口提示。
+    expect(screen.queryByTestId("file-changes-summary-degraded")).toBeNull();
+    expect(screen.queryByText(/无工作区快照/)).toBeNull();
     // 硬约束：全树不出现「无改动」——没有快照 ≠ 没有改动。
     expect(screen.queryByText(/无改动/)).toBeNull();
   });
@@ -210,11 +211,22 @@ describe("FileChangesSummary（渲染）", () => {
     expect(screen.queryByTestId("file-changes-summary-degraded")).toBeNull();
   });
 
-  it("无数据不渲染（零文件且无降级轮 → 不出空壳）", () => {
-    const { container } = render(
+  it("零文件整卡不渲染（含「全部轮都无快照」的历史会话）", () => {
+    const noSnapshot = render(
+      <FileChangesSummary
+        turns={[
+          { snapshot: null, capability: "tool_only" },
+          { snapshot: null, capability: "tool_only" },
+        ]}
+      />,
+    );
+    expect(noSnapshot.container.firstChild).toBeNull();
+    expect(screen.queryByTestId("file-changes-summary")).toBeNull();
+
+    const emptySnapshot = render(
       <FileChangesSummary turns={[{ snapshot: makeSnapshot({ files: [] }), capability: "full" }]} />,
     );
-    expect(container.firstChild).toBeNull();
+    expect(emptySnapshot.container.firstChild).toBeNull();
     expect(screen.queryByTestId("file-changes-summary")).toBeNull();
   });
 
