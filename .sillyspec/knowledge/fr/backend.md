@@ -7385,3 +7385,112 @@ superseded_by：FR-auth-003
 摘要：主路径
 全文：.sillyspec/changes/archive/2026-10-22-fix-translate-cjk-segments/requirements.md#FR-04
 最近确认：779a0e3c8865c337e3c385d20482692a03e97199
+
+## FR-backend-018 源端中文片段必须作为保护段原样保留
+变更：2026-10-22-protect-cjk-source
+状态：active
+摘要：英文句子夹中文引用；纯英文内容不变
+全文：.sillyspec/changes/archive/2026-10-22-protect-cjk-source/requirements.md#FR-01
+最近确认：e5dce012e35a102b4c8d37a364e2519df32483df
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-22-protect-cjk-source:flow:测试绑定FR-01
+  tests: backend/app/modules/translate/tests/test_chunking.py「中文片段切为保护段且正文英译不变」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-22-protect-cjk-source
+  status: active
+
+## FR-backend-019 含中文引用的内容禁止出现反斜杠乱码
+变更：2026-10-22-protect-cjk-source
+状态：active
+摘要：生产复现文本
+全文：.sillyspec/changes/archive/2026-10-22-protect-cjk-source/requirements.md#FR-02
+最近确认：e5dce012e35a102b4c8d37a364e2519df32483df
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-22-protect-cjk-source:flow:测试绑定FR-02
+  tests: backend/app/modules/translate/tests/test_service.py「中文引用原样保留且输出无反斜杠乱码」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-22-protect-cjk-source
+  status: active
+
+## FR-backend-020 纯英文翻译行为不回退
+变更：2026-10-22-protect-cjk-source
+状态：active
+摘要：纯英文回归
+全文：.sillyspec/changes/archive/2026-10-22-protect-cjk-source/requirements.md#FR-03
+最近确认：e5dce012e35a102b4c8d37a364e2519df32483df
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-22-protect-cjk-source:flow:测试绑定FR-03
+  tests: backend/app/modules/translate/tests/test_service.py「纯英文保护段回归（既有用例）」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-22-protect-cjk-source
+  status: active
+
+## FR-backend-021 相关测试必须通过
+变更：2026-10-22-protect-cjk-source
+状态：active
+摘要：主路径
+全文：.sillyspec/changes/archive/2026-10-22-protect-cjk-source/requirements.md#FR-04
+最近确认：e5dce012e35a102b4c8d37a364e2519df32483df
+
+## FR-backend-022 唤醒条目移出「排队消息」用户消息列表
+变更：2026-10-21-task-wakeup-event-queue
+状态：active
+摘要：混列分流；用户伪造前缀不误判
+全文：.sillyspec/changes/archive/2026-10-21-task-wakeup-event-queue/requirements.md#FR-01
+最近确认：e5dce012e35a102b4c8d37a364e2519df32483df
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-21-task-wakeup-event-queue:flow:测试绑定FR-01
+  tests: frontend/src/components/daemon/__tests__/message-queue-bar.test.tsx「唤醒条目移出排队列表——计数与 chip 分流」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-21-task-wakeup-event-queue
+  status: active
+
+## FR-backend-023 唤醒条目事件行呈现（dsh turn-trigger 同款）
+变更：2026-10-21-task-wakeup-event-queue
+状态：active
+摘要：事件行折叠与展开；纯唤醒队列
+全文：.sillyspec/changes/archive/2026-10-21-task-wakeup-event-queue/requirements.md#FR-02
+最近确认：e5dce012e35a102b4c8d37a364e2519df32483df
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-21-task-wakeup-event-queue:flow:测试绑定FR-02
+  tests: frontend/src/components/daemon/__tests__/message-queue-bar.test.tsx「事件行折叠展开与无操作按钮」 | frontend/src/components/daemon/__tests__/message-queue-bar.test.tsx「纯唤醒队列不渲染排队消息标签」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-21-task-wakeup-event-queue
+  status: active
+
+## FR-backend-024 回归与类型门
+变更：2026-10-21-task-wakeup-event-queue
+状态：active
+摘要：回归
+全文：.sillyspec/changes/archive/2026-10-21-task-wakeup-event-queue/requirements.md#FR-03
+最近确认：e5dce012e35a102b4c8d37a364e2519df32483df

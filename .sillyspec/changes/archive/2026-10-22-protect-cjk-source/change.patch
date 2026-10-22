@@ -1,0 +1,132 @@
+diff --git a/backend/app/modules/translate/README.md b/backend/app/modules/translate/README.md
+index a4b4144a4..f1298ff09 100644
+--- a/backend/app/modules/translate/README.md
++++ b/backend/app/modules/translate/README.md
+@@ -65,6 +65,11 @@ en→zh 模型。原因：中文正文夹英文代码块时，代码的拉丁字
+ 不设段级兜底会把中文段翻成垃圾（生产实测 `命令：`→`发件人:`、整段中文消失）。
+ `translated=true` 仅表示该条确有块实际送翻（含缓存命中），全部段被跳过时为 false。
+ 
++**源端中文保护（2026-10-22-protect-cjk-source）**：源文本里的中文片段（汉字 +
++中文/全角标点）与代码/URL 同级保护、禁止送翻。opus-mt 源端只有英文词表，中文
++token 会被切成 `<unk>` 使束搜索陷入重复——生产实测中文引用被译成 `^\ `、整段
++变连续反斜杠；保护后译文为「英文机翻 + 中文引用原样」，不再出现解码乱码。
++
+ ## 端点契约
+ 
+ `POST /api/translate/thinking`（`task:run_agent` 权限）：
+diff --git a/backend/app/modules/translate/chunking.py b/backend/app/modules/translate/chunking.py
+index 9dcb19a33..71d9ce5a0 100644
+--- a/backend/app/modules/translate/chunking.py
++++ b/backend/app/modules/translate/chunking.py
+@@ -20,9 +20,15 @@ from __future__ import annotations
+ import re
+ from dataclasses import dataclass
+ 
+-# 保护模式：围栏代码（多行）| 行内代码（不跨行）| URL。交替单遍扫描。
++# 保护模式：中文片段 | 围栏代码（多行）| 行内代码（不跨行）| URL。交替单遍扫描。
++#
++# 中文片段必须最先匹配（2026-10-22-protect-cjk-source）：opus-mt-en-zh 源端只有
++# 英文词表，源文本出现中文 token 时 tokenizer 产出 <unk>、束搜索陷入重复——
++# 生产实测中文引用被译成 "^\\ "、整段变连续反斜杠。汉字与中文/全角标点一并
++# 保护，保证送进模型的源文本零中文 token。
+ _PROTECT_RE = re.compile(
+-    r"```.*?```"  # fenced code block（DOTALL 跨行，懒惰配对）
++    r"[　-〿＀-￯㐀-䶿一-鿿]+"  # 中文片段（含全角标点）
++    r"|```.*?```"  # fenced code block（DOTALL 跨行，懒惰配对）
+     r"|`[^`\n]+`"  # inline code
+     r"|https?://[^\s`]+"  # http(s) URL（止于空白/反引号）
+     r"|www\.[^\s`]+",  # 裸 www
+diff --git a/backend/app/modules/translate/tests/test_chunking.py b/backend/app/modules/translate/tests/test_chunking.py
+index 08282655d..c273f4263 100644
+--- a/backend/app/modules/translate/tests/test_chunking.py
++++ b/backend/app/modules/translate/tests/test_chunking.py
+@@ -13,6 +13,37 @@ from app.modules.translate.chunking import (
+     split_translatable,
+ )
+ 
++# -- 源端中文保护（2026-10-22-protect-cjk-source）-----------------------------------
++
++
++def test_cjk_run_is_protected_segment() -> None:
++    """英文句子里夹的中文引用必须整段保护，不进入送翻文本。"""
++    text = 'The user said: "合并键应该是工区不是厂房" then continued.'
++    segs = split_protected(text)
++    assert "".join(s.text for s in segs) == text  # 拼接保真
++    protected = [s.text for s in segs if not s.translatable]
++    assert "合并键应该是工区不是厂房" in protected
++    assert any(s.translatable and "The user said" in s.text for s in segs)
++
++
++def test_cjk_with_fullwidth_punct_protected() -> None:
++    """中文标点（全角）随汉字一起保护——源端不得残留任何中文 token。"""
++    text = "报错信息：连接超时。请重试。 Retry the request after a while."
++    segs = split_protected(text)
++    protected = "".join(s.text for s in segs if not s.translatable)
++    assert protected == "报错信息：连接超时。请重试。"
++    body = [s.text for s in segs if s.translatable]
++    assert all("报错" not in t and "超时" not in t for t in body)
++    assert any("Retry the request" in t for t in body)
++
++
++def test_pure_english_split_unchanged_by_cjk_branch() -> None:
++    """纯英文文本的正文/保护划分不因中文分支改变。"""
++    text = "I will read `src/app.py` and docs at https://example.com/a?b=1 then continue."
++    kinds = [s.translatable for s in split_protected(text)]
++    assert kinds == [True, False, True, False, True]
++
++
+ # -- should_translate_segment（段级判定，2026-10-22-fix-translate-cjk-segments）------
+ 
+ 
+diff --git a/backend/app/modules/translate/tests/test_service.py b/backend/app/modules/translate/tests/test_service.py
+index d80ca9bc3..98ada52c7 100644
+--- a/backend/app/modules/translate/tests/test_service.py
++++ b/backend/app/modules/translate/tests/test_service.py
+@@ -13,9 +13,11 @@ class _FakeTranslator:
+ 
+     def __init__(self) -> None:
+         self.calls = 0
++        self.batches: list[list[str]] = []
+ 
+     def translate(self, texts: list[str]) -> list[str]:
+         self.calls += 1
++        self.batches.append(list(texts))
+         return [f"译[{i}]:{t}" for i, t in enumerate(texts)]
+ 
+ 
+@@ -178,6 +180,35 @@ async def test_mixed_cjk_and_english_paragraphs(fake_translator: _FakeTranslator
+     assert fake_translator.calls == 1
+ 
+ 
++async def test_cjk_quotes_preserved_and_no_backslash_garbage(
++    fake_translator: _FakeTranslator,
++) -> None:
++    """生产复现（2026-10-22）：源端中文引用必须原样保留，送翻块零中文 token。
++
++    修复前 opus-mt 收到中文 token 时解码崩溃，中文引用被译成 "^\\ "、整段变
++    连续反斜杠；修复后中文片段作为保护段不送模型。
++    """
++    text = (
++        'The user gave a decision: "合并键应该是工区不是厂房" (bug report) — '
++        'record D-001 with title "单位级明细表合并键=工区（用户实测反馈）" now.'
++    )
++    out = await translate_items([TranslateItemIn(id="a", text=text)])
++    item = out["items"][0]
++    # 中文引用逐字保留
++    assert "合并键应该是工区不是厂房" in item.text
++    assert "单位级明细表合并键" in item.text
++    assert "工区（用户实测反馈）" in item.text
++    # 无连续反斜杠乱码（≥3 个 \\ 视为解码崩溃指纹）
++    assert "\\\\\\" not in item.text
++    # 送进模型的块里不得有任何中文 token
++    import re as _re
++
++    cjk_re = _re.compile(r"[　-〿＀-￯㐀-䶿一-鿿]")
++    for batch in fake_translator.batches:
++        for chunk in batch:
++            assert not cjk_re.search(chunk), f"中文 token 泄漏进送翻块: {chunk!r}"
++
++
+ async def test_pure_code_content_translated_false(fake_translator: _FakeTranslator) -> None:
+     text = "```\ngit status\ngit diff\n```"
+     out = await translate_items([TranslateItemIn(id="a", text=text)])
