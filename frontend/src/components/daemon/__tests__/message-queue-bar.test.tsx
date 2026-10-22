@@ -659,6 +659,39 @@ describe("MessageQueueBar 唤醒条目事件行（2026-10-21-task-wakeup-event-q
     expect(container.textContent).not.toContain("排队消息");
   });
 
+  it("FR-01 混列拖拽——原位松手不误回调；换位松手上抛全量载荷（唤醒条目保持队尾并入）", () => {
+    const onReorder = vi.fn();
+    render(
+      <MessageQueueBar
+        entries={[
+          makeEntry({ id: "mq-u1", prompt: "用户一", displayPrompt: "用户一" }),
+          makeEntry({ id: "mq-u2", prompt: "用户二", displayPrompt: "用户二" }),
+          makeWakeupEntry(),
+        ]}
+        onRemove={vi.fn()}
+        onRetry={vi.fn()}
+        onReorder={onReorder}
+      />,
+    );
+    const chips = () =>
+      Array.from(document.querySelectorAll('[draggable="true"]')) as HTMLElement[];
+    expect(chips()).toHaveLength(2); // 唤醒条目不可拖，chip 仅用户消息两条
+    mockChipRect(chips()[1]!);
+    const dt = makeDataTransfer();
+    // 原位松手（拖 u1 放回 u2 前半区 = 原序）：不误回调。
+    fireEvent.dragStart(chips()[0]!, { dataTransfer: dt });
+    fireDragOver(chips()[1]!, 5, dt);
+    fireEvent.drop(chips()[1]!, { dataTransfer: dt });
+    expect(onReorder).not.toHaveBeenCalled();
+    // 真换位（u1 移到 u2 之后）：上抛全量 ids——用户序换位 + 唤醒条目保持队尾。
+    fireEvent.dragStart(chips()[0]!, { dataTransfer: dt });
+    fireDragOver(chips()[1]!, 9999, dt);
+    fireEvent.drop(chips()[1]!, { dataTransfer: dt });
+    expect(onReorder).toHaveBeenCalledTimes(1);
+    expect(onReorder).toHaveBeenCalledWith(["mq-u2", "mq-u1", "mq-wu"]);
+    fireEvent.dragEnd(chips()[0]!);
+  });
+
   it("FR-01 用户伪造前缀不误判——origin 为空的前缀消息仍按用户消息计数渲染", () => {
     render(
       <MessageQueueBar

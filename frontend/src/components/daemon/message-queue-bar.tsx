@@ -29,7 +29,10 @@
  *     + 取消/保存；trim 非空才可保存，后端 422 双保险）；failed 条目浮层说明
  *     「保存后转为等待中并尝试派发」；TASK_WAKEUP 前缀（[后台任务通知]）系统通知
  *     条目不渲染 ✎（D-009，后端 409 双保险），chip 摘要与展开正文不显示前缀
- *     原文（2026-10-13-session-taskwakeup-hide）；展开查看态与编辑态互斥（开编辑收起展开）；
+ *     原文（2026-10-13-session-taskwakeup-hide）；origin='task_wakeup' 的唤醒
+ *     通知条目已整体移出 chip 路径（2026-10-21-task-wakeup-event-queue：渲染为
+ *     「收到任务消息」事件行，仅伪造前缀的存量用户条目走上述兜底分支）；
+ *     展开查看态与编辑态互斥（开编辑收起展开）；
  *   - failed 条目红色语义边框（border/text-destructive）+ ↻ 重试/✕ 删除按钮
  *     （D-003 失败留队头，不自动重试，重试仅由用户点击触发）；
  *   - pending 条目提供 ✕ 删除；sending 条目转 spinner 不提供操作；
@@ -207,8 +210,14 @@ export function MessageQueueBar({
     e: ReactDragEvent<HTMLDivElement>,
     overEntry: QueueEntry,
   ) => {
-    // sending 不可作为落点（不可操作既有不变式）；无拖拽/拖过自身不处理。
-    if (!dragId || overEntry.id === dragId || overEntry.status === "sending") {
+    // sending 不可作为落点（不可操作既有不变式）；唤醒通知条目非 chip（事件行
+    // 在 chips 行外）不可作为落点；无拖拽/拖过自身不处理。
+    if (
+      !dragId ||
+      overEntry.id === dragId ||
+      overEntry.status === "sending" ||
+      isWakeupEntry(overEntry)
+    ) {
       return;
     }
     e.preventDefault(); // 允许 drop
@@ -217,7 +226,7 @@ export function MessageQueueBar({
     const rect = e.currentTarget.getBoundingClientRect();
     const after = e.clientX > rect.left + rect.width / 2;
     setOrderIds((prev) => {
-      const base = prev ?? entries.map((entry) => entry.id);
+      const base = prev ?? userEntries.map((entry) => entry.id);
       const next = base.filter((id) => id !== dragId);
       const overIdx = next.indexOf(overEntry.id);
       if (overIdx < 0) return prev; // 目标不在当前序（防御，理论上不达）
@@ -229,14 +238,17 @@ export function MessageQueueBar({
   /**
    * drop（挂 chips 行容器，chip 的 drop 冒泡至此）：落定上抛全量有序 ids——
    * 仅顺序较原序有变才回调（原位松手/无效落点不触发，D-003）；态复位统一在 dragend。
+   * 2026-10-21-task-wakeup-event-queue：比较域与展示域同为用户消息组（唤醒条目
+   * 不在拖拽域，混列时原位松手不得误回调）；上抛载荷仍按 hook 契约整表全量
+   * （唤醒条目保持队尾原相对序并入——后端 reorder 全量集合校验，部分序 422）。
    */
   const handleRowDrop = (e: ReactDragEvent<HTMLDivElement>) => {
     e.preventDefault();
     if (!onReorder || !dragId || !orderIds) return;
-    const currentIds = displayEntries.map((entry) => entry.id);
-    const originalIds = entries.map((entry) => entry.id);
-    if (currentIds.join("\n") !== originalIds.join("\n")) {
-      onReorder(currentIds);
+    const currentUserIds = displayEntries.map((entry) => entry.id);
+    const originalUserIds = userEntries.map((entry) => entry.id);
+    if (currentUserIds.join("\n") !== originalUserIds.join("\n")) {
+      onReorder([...currentUserIds, ...wakeupEntries.map((entry) => entry.id)]);
     }
   };
 
