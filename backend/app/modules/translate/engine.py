@@ -15,10 +15,13 @@ worker 侧模型解析（本地目录优先 / HF 自动下载）见 translate_wo
 from __future__ import annotations
 
 import json
+import logging
 import queue
 import sys
 import threading
 import time
+
+logger = logging.getLogger(__name__)
 
 _engine_lock = threading.Lock()
 _engine_instance: object | None = None
@@ -27,6 +30,13 @@ _engine_error: str | None = None
 
 # 子进程连续崩溃达到阈值后的退避时长（防崩溃循环烧 CPU）
 _ENGINE_CRASH_BACKOFF_SEC = 600.0
+
+
+def _settings_request_timeout() -> float:
+    """单请求等待上限（settings 懒读，避免模块导入期就绑定配置单例）。"""
+    from app.core.config import get_settings
+
+    return float(get_settings().translate_request_timeout_sec)
 
 
 class TranslateSubprocessError(RuntimeError):
@@ -40,7 +50,6 @@ class TranslateSubprocessProxy:
     - 响应读取用常驻读线程 + 队列（Windows 管道无 select）。
     """
 
-    REQUEST_TIMEOUT_SEC = 300.0
     MAX_CONSECUTIVE_CRASHES = 3
 
     def __init__(
@@ -48,6 +57,7 @@ class TranslateSubprocessProxy:
         model_spec: str,
         idle_exit_sec: int = 600,
         worker_cmd: list[str] | None = None,
+        request_timeout_sec: float | None = None,
     ) -> None:
         import subprocess
 
@@ -55,6 +65,12 @@ class TranslateSubprocessProxy:
         self._model_spec = model_spec
         self._idle_exit_sec = idle_exit_sec
         self._worker_cmd = worker_cmd
+        # 2026-10-22-fix-translate-pending：原固定 300s——模型未预置时 UI 挂 5 分钟。
+        self.request_timeout_sec = (
+            float(request_timeout_sec)
+            if request_timeout_sec is not None
+            else _settings_request_timeout()
+        )
         self._proc: object | None = None
         self._responses: queue.Queue = queue.Queue()
         self._lock = threading.Lock()
@@ -95,12 +111,17 @@ class TranslateSubprocessProxy:
             cmd,
             stdin=self._subprocess.PIPE,
             stdout=self._subprocess.PIPE,
-            stderr=self._subprocess.DEVNULL,
+            # 2026-10-22-fix-translate-pending：stderr 不再丢进 DEVNULL——模型下载/
+            # 加载失败原因要能在后端日志里查到（生产事故时完全不可见）。
+            stderr=self._subprocess.PIPE,
             text=True,
             encoding="utf-8",
             bufsize=1,
         )
         _threading.Thread(target=self._reader, args=(self._proc.stdout,), daemon=True).start()
+        _threading.Thread(
+            target=self._stderr_reader, args=(self._proc.stderr,), daemon=True
+        ).start()
 
     def _reader(self, stdout: object) -> None:
         """读线程：响应行入队；EOF/断裂入哨兵。"""
@@ -112,6 +133,16 @@ class TranslateSubprocessProxy:
             pass
         finally:
             self._responses.put(eof_resp)
+
+    def _stderr_reader(self, stderr: object) -> None:
+        """stderr 读线程：逐行转发到主进程日志（WARNING）；异常静默不影响请求。"""
+        try:
+            for line in stderr:
+                text = line.strip()
+                if text:
+                    logger.warning("translate worker stderr: %s", text)
+        except Exception:
+            pass
 
     # -- 对外接口 -----------------------------------------------------------
 
@@ -132,7 +163,7 @@ class TranslateSubprocessProxy:
             raise TranslateSubprocessError(
                 f"translate subprocess in crash backoff until {self.retry_at:.0f}"
             )
-        deadline = time.monotonic() + self.REQUEST_TIMEOUT_SEC
+        deadline = time.monotonic() + self.request_timeout_sec
         with self._lock:
             attempts = 0
             while True:

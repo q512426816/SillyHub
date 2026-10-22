@@ -1,0 +1,35 @@
+tier: thin
+legacy_fallback: false
+substeps: {}
+born_face: thin
+with_tasks: false
+review_force: null
+input: >-
+  生产 /api/translate/thinking 请求长时间 pending：容器未配置 TRANSLATE_MODEL_DIR 且 huggingface.co 不可达，worker 子进程卡在模型下载，主进程要等 300
+  秒；前端 POST 请求无超时，界面一直「翻译中」不收敛
+
+
+  成功标准：
+
+  - 前端该 POST 请求带显式超时（20s），超时按引擎不可用处理并进入退避，界面不再无限等待
+
+  - 后端子进程请求超时改为可配置且默认收紧到 20s（现 300s），超时 fail-soft 返回原文
+
+  - worker 子进程 stderr 落盘可查（含模型下载/加载失败原因），不再丢进 DEVNULL
+
+  - 生产服务器预置 opus-mt-en-zh 模型目录并配置 TRANSLATE_MODEL_DIR，接口返回 engine_ready=true 且英文思考文本译文含中文
+
+  - 相关测试通过：后端 translate 模块测试、前端 thinking-translate 测试
+autopilot: true
+prestage_ack: false
+baseline_commit: b13d0631c3dce0a93c2d44f7a60f15ebb6755806
+updatedAt: '2026-10-22T01:26:47.505Z'
+cross_baselines:
+  sillyspec: 8ff68ada697ec4d4af9ce0a90c4055091985e319
+baseline_sha256: cffd64eab72b51360c02e5c1e90b6e5cd9e013344958cbff88c0f68344c4134e
+spec_approved: true
+spec_approved_at: '2026-10-22T01:26:47.505Z'
+spec_approved_by: anon@DESKTOP-HJ0AM09
+spec_approved_channel: user-confirmed
+spec_attested_by: anon@DESKTOP-HJ0AM09
+

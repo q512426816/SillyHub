@@ -190,6 +190,13 @@ class Settings(BaseSettings):
         2048,
         description="in-process translated-chunk LRU entries cap (env TRANSLATE_CACHE_MAX_ENTRIES).",
     )
+    # 2026-10-22-fix-translate-pending：单次子进程翻译请求的等待上限（秒）。原为
+    # 引擎内固定 300s——模型未预置时 worker 卡在 HF 下载，接口挂 5 分钟且前端无超时，
+    # 界面恒「翻译中」。收紧到 20s + 配置化：任何慢路径快速 fail-soft 返回原文。
+    translate_request_timeout_sec: float = Field(
+        20.0,
+        description="per-request timeout waiting for the translate subprocess (env TRANSLATE_REQUEST_TIMEOUT_SEC).",
+    )
 
     # 2026-07-07-daemon-skill-execution task-06：sillyspec skills 打包源目录。
     # 镜像内路径由 Dockerfile COPY → /app/sillyspec-skills/（task-07）。

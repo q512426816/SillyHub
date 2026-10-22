@@ -131,6 +131,26 @@ describe("translateText 合批/缓存/降级", () => {
     await expect(p2).resolves.toBe("恢复了");
   });
 
+  it("请求显式带 20s 超时（后端卡住时由 apiFetch 中止，不退化为无限等待）", async () => {
+    apiFetchMock.mockResolvedValue(okResponse([{ id: "0", text: "译超时", translated: true }]));
+    const p = translateText("timeout option english thinking text check.");
+    await vi.advanceTimersByTimeAsync(250);
+    await expect(p).resolves.toBe("译超时");
+    const options = apiFetchMock.mock.calls[0]![1] as { timeoutMs?: number };
+    expect(options.timeoutMs).toBe(20_000);
+  });
+
+  it("超时（apiFetch reject timeout）→ null + 60s 退避", async () => {
+    const timeoutErr = Object.assign(new Error("请求超时"), { code: "timeout" });
+    apiFetchMock.mockRejectedValue(timeoutErr);
+    const p = translateText("timed out english thinking text for backoff window.");
+    await vi.advanceTimersByTimeAsync(250);
+    await expect(p).resolves.toBeNull();
+    // 退避期内新文本直接回退原文，不再发请求
+    await expect(translateText("another text inside timeout backoff window.")).resolves.toBeNull();
+    expect(apiFetchMock).toHaveBeenCalledTimes(1);
+  });
+
   it("网络失败（apiFetch reject）→ null + 退避", async () => {
     apiFetchMock.mockRejectedValue(new Error("network down"));
     const p = translateText("network failure path english text check.");

@@ -9,6 +9,7 @@
 
 from __future__ import annotations
 
+import logging
 import time
 from pathlib import Path
 
@@ -59,6 +60,32 @@ sys.stdout.flush()
 sys.exit(3)
 """
 
+# 沉默 worker：吃掉请求但永不响应（模拟子进程卡在模型下载/加载，2026-10-22
+# 生产事故形态——主进程必须有超时兜底，不能无限等）。
+_SILENT_WORKER = """
+import sys
+while True:
+    line = sys.stdin.readline()
+    if not line:
+        break
+"""
+
+# stderr 留痕 worker：启动先往 stderr 写一行错误，再正常处理请求（验证 stderr
+# 不再进 DEVNULL，而是转发到主进程 logger）。
+_STDERR_WORKER = """
+import json, sys
+sys.stderr.write("model-download-stderr-marker: connect failed\\n")
+sys.stderr.flush()
+while True:
+    line = sys.stdin.readline()
+    if not line:
+        break
+    req = json.loads(line)
+    resp = {"id": req.get("id"), "ok": True, "translations": ["T:" + t for t in req["texts"]]}
+    sys.stdout.write(json.dumps(resp, ensure_ascii=False) + "\\n")
+    sys.stdout.flush()
+"""
+
 
 @pytest.fixture()
 def fake_worker_path(tmp_path: Path) -> Path:
@@ -71,6 +98,20 @@ def fake_worker_path(tmp_path: Path) -> Path:
 def crash_worker_path(tmp_path: Path) -> Path:
     p = tmp_path / "crash_worker.py"
     p.write_text(_CRASH_WORKER, encoding="utf-8")
+    return p
+
+
+@pytest.fixture()
+def silent_worker_path(tmp_path: Path) -> Path:
+    p = tmp_path / "silent_worker.py"
+    p.write_text(_SILENT_WORKER, encoding="utf-8")
+    return p
+
+
+@pytest.fixture()
+def stderr_worker_path(tmp_path: Path) -> Path:
+    p = tmp_path / "stderr_worker.py"
+    p.write_text(_STDERR_WORKER, encoding="utf-8")
     return p
 
 
@@ -130,6 +171,48 @@ def test_crash_backoff_and_recovery(fake_worker_path: Path, crash_worker_path: P
     proxy2.retry_at = time.monotonic() - 1  # 已过退避点
     assert proxy2.available
     proxy2.close()
+
+
+def test_request_timeout_sec_override_fails_fast(silent_worker_path: Path) -> None:
+    """卡死的子进程 != 无限等待：构造参数收紧超时后快速抛错（fail-soft 由上层做）。"""
+    proxy = TranslateSubprocessProxy(
+        "unused", request_timeout_sec=0.3, worker_cmd=_cmd(silent_worker_path)
+    )
+    try:
+        started = time.monotonic()
+        with pytest.raises(TranslateSubprocessError):
+            proxy.translate(["x"])
+        assert time.monotonic() - started < 5.0
+    finally:
+        proxy.close()
+
+
+def test_request_timeout_default_from_settings() -> None:
+    """缺省值来自 settings（默认 20s——2026-10-22 生产事故前是固定 300s）。"""
+    from app.core.config import get_settings
+
+    assert get_settings().translate_request_timeout_sec == 20.0
+    proxy = TranslateSubprocessProxy("unused")
+    try:
+        assert proxy.request_timeout_sec == 20.0
+    finally:
+        proxy.close()
+
+
+def test_worker_stderr_forwarded_to_logger(
+    stderr_worker_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    """子进程 stderr 不进 DEVNULL：后台线程转发到主进程 logger（失败原因可查）。"""
+    with caplog.at_level(logging.WARNING, logger="app.modules.translate.engine"):
+        proxy = TranslateSubprocessProxy("unused", worker_cmd=_cmd(stderr_worker_path))
+        try:
+            assert proxy.translate(["hi"]) == ["T:hi"]
+            deadline = time.monotonic() + 3.0
+            while "model-download-stderr-marker" not in caplog.text and time.monotonic() < deadline:
+                time.sleep(0.05)
+        finally:
+            proxy.close()
+    assert "model-download-stderr-marker" in caplog.text
 
 
 def test_get_translator_fail_soft_on_construction_error(

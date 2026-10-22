@@ -22,6 +22,12 @@ const BATCH_MAX_ITEMS = 16;
 const BATCH_WINDOW_MS = 250;
 /** 引擎不可用退避时长。 */
 const UNAVAILABLE_BACKOFF_MS = 60_000;
+/**
+ * 单次请求超时（2026-10-22-fix-translate-pending）：POST 默认无超时，后端子进程
+ * 卡在模型下载时请求会永久挂起（界面恒「翻译中」）。20s 后 abort 走网络失败同款
+ * 降级链（回退原文 + 60s 退避）；后端同类超时已同窗收紧（TRANSLATE_REQUEST_TIMEOUT_SEC）。
+ */
+const REQUEST_TIMEOUT_MS = 20_000;
 /** 内存缓存条目上限（FIFO 淘汰——译文纯函数结果，先入者先淘汰足够）。 */
 const CACHE_MAX_ENTRIES = 500;
 
@@ -156,6 +162,8 @@ async function requestBatch(entries: QueueEntry[]): Promise<void> {
     resp = await apiFetch<TranslateApiResponse>("/api/translate/thinking", {
       method: "POST",
       json: { items, target: "zh" },
+      timeoutMs: REQUEST_TIMEOUT_MS,
+      timeoutMessage: "翻译请求超时，已回退原文",
     });
   } catch {
     // 网络失败与引擎不可用同语义：本批回退原文 + 退避（防风暴）

@@ -109,6 +109,11 @@ services:
       # 预放模型目录挂入容器默认缓存路径，免下载直载；目录缺失时容器内自下载（本地开发无害）。
       # 预置：scp 本地 fastembed_cache（bge-small-zh-v1.5 ~91MB）→ deploy/models/fastembed_cache。
       - "./models/fastembed_cache:/tmp/fastembed_cache"
+      # 思考翻译模型（2026-10-22-fix-translate-pending）：服务器到 huggingface.co
+      # 不可达（实测 TCP unreachable，DNS 亦被污染），worker 子进程若走 HF 下载会
+      # 卡住直至超时。宿主机预置 opus-mt-en-zh ct2 模型目录挂入容器，配
+      # TRANSLATE_MODEL_DIR 实现零下载加载；目录缺失时回退 HF 路径（fail-soft）。
+      - "./models/opus-mt-en-zh:/opt/models/opus-mt-en-zh"
       # 2026-10-08-backend-image-slim-no-claude：claude-data 卷挂载退役——容器内已无
       # claude（server-local 遗物，agent 执行在宿主 daemon）；named volume 数据仍在
       # 宿主磁盘，仅不再挂入。
@@ -148,6 +153,10 @@ services:
       WORKTREE_BASE_DIR: /data/sillyspec-workspaces
       SPEC_DATA_ROOT: /data/spec-workspaces
       HOME: /app
+      # 2026-10-22-fix-translate-pending：本地模型目录（对应上方挂载）。
+      # 生产 .env 设 TRANSLATE_MODEL_DIR=/opt/models/opus-mt-en-zh；留空则回退
+      # TRANSLATE_MODEL_REPO 的 HF 下载路径（本地开发有网时可用）。
+      TRANSLATE_MODEL_DIR: ${TRANSLATE_MODEL_DIR:-}
       # 2026-10-08-backend-image-slim-no-claude：NPM_CONFIG_CACHE 退役（容器内已无 npm）。
       # 容器内已无 claude，deploy/.env 的 ANTHROPIC_*/CLAUDE_* 行对容器为惰性变量
       # （daemon 侧凭据不受影响，走 daemon install 自身配置）。

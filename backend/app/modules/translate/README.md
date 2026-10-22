@@ -12,11 +12,22 @@ API——推理在本地 CTranslate2 子进程完成（opus-mt-en-zh int8 量化
 | `TRANSLATE_MODEL_REPO` | `jiangzhuo9357/opus-mt-en-zh-ct2` | ct2 格式模型 repo id（换更大模型只改这里） |
 | `TRANSLATE_MODEL_DIR` | 空 | 本地模型目录（含 `config.json` 的 ct2 目录）；非空时零下载 |
 | `TRANSLATE_WORKER_IDLE_EXIT_SEC` | `600` | 翻译子进程闲置自灭秒数 |
+| `TRANSLATE_REQUEST_TIMEOUT_SEC` | `20` | 单次子进程请求等待上限；超时 fail-soft 返回原文（2026-10-22 前为固定 300s，模型未预置时界面会挂 5 分钟） |
 | `TRANSLATE_CACHE_MAX_ENTRIES` | `2048` | 进程内译文 LRU 条目上限 |
 
 模型首用从 HuggingFace 自动下载（~100-150MB，尊重 `HF_ENDPOINT` 镜像与 `HF_HOME`
 缓存变量）。**下载/加载失败一律 fail-soft**：端点返回 `engine_ready=false` + 原文
 透传，应用启动零阻塞；前端显示原文 + 「离线翻译未就绪」轻提示并 60s 退避。
+
+子进程 stderr 由后台线程逐行转发到主进程日志（logger `app.modules.translate.engine`，
+WARNING 级），模型下载/加载失败原因可在后端日志中直接查到（此前丢进 DEVNULL，故障
+不可见——2026-10-22 生产事故教训）。
+
+**生产必须预置模型目录**：服务器访问 `huggingface.co` 不通（2026-10-22 实测 TCP
+unreachable），靠首用在线下载会让每次请求卡到超时。`deploy/docker-compose.yml` 已把
+宿主机 `./models/opus-mt-en-zh` 挂到容器 `/opt/models/opus-mt-en-zh`；服务器 `.env`
+设置 `TRANSLATE_MODEL_DIR=/opt/models/opus-mt-en-zh` 即零下载。下载可在服务器上用
+可达镜像 `HF_ENDPOINT=https://hf-mirror.com` 完成（实测可达）。
 
 ## 离线部署（预置模型，零下载）
 
