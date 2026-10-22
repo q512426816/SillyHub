@@ -26,8 +26,13 @@ input: >-
 autopilot: false
 prestage_ack: false
 baseline_commit: f0940f221f3a2729cfa2645db6b2fb9d1cbf3f85
-updatedAt: '2026-10-22T00:44:48.406Z'
+updatedAt: '2026-10-22T01:08:45.636Z'
 cross_baselines:
   sillyspec: 8ff68ada697ec4d4af9ce0a90c4055091985e319
 baseline_sha256: c80ff4f25452c9320f5572dfbadc4f6858df901010595d7e132709b179dfe621
+spec_approved: true
+spec_approved_at: '2026-10-22T01:08:45.636Z'
+spec_approved_by: dsh-handoff-session-page
+spec_approved_channel: agent-self
+spec_attested_by: dsh-handoff-session-page
 

@@ -25,7 +25,8 @@
  *     绝不与用户操作并发跑 git。
  *
  * 降级语义（design 契约要点 3）：**partial 不是错误态**——卡片照出，行级 +/− 显示
- * 破折号；`unavailable` / `failed` 由前端按 capability="tool_only" 走降级卡。任何
+ * 破折号；`unavailable` / `failed` 由 backend 记为 `capability="tool_only"`，前端自
+ * 2026-10-22-file-card-hide-empty 起对该档**不出卡**（没有信息就不占位）。任何
  * 情况下都不把「没有快照」伪装成「本轮无改动」（本模块只报告诚实的 status）。
  *
  * spike-01 实测（2026-10-21，本机安静窗口 35% CPU，node 24 / Windows，用**本模块

@@ -1270,7 +1270,13 @@ export class HubClient {
     // 每轮工作区快照透传（snake_case 键名对齐 backend `InteractiveRunResultRequest`
     // 新增字段 `file_changes`；**内部结构保持 camelCase**，与 model_usage 行内
     // camelCase 同惯例）。undefined（老 daemon / 本轮未采）→ 不写 → backend
-    // capability="tool_only"，前端走「仅工具编辑」降级卡（禁显示「本轮无改动」）。
+    // `capability="tool_only"`。
+    //
+    // 消费侧口径（2026-10-22-file-card-hide-empty 起）：`capability="tool_only"` /
+    // 快照缺失 / 采集失败一律**不出卡**——前端「仅工具编辑」降级卡已下线（没有信息
+    // 就不占位）；`capability` 字段仍是版本门控真相源，禁把「没快照」显示成「本轮
+    // 无改动」。需要判「没采到 / 采到但没落库」看 daemon 日志
+    // `turn_file_changes_collected` 与 `turn_file_changes_reported` 的 runId 配对。
     //
     // 时序：首报（终止 run）不携带快照；快照在轮终态之后采集完成，由 daemon
     // `_onTurnSnapshot` 用同一端点**补报**（backend `(run_id)` 侧表幂等覆盖写）。

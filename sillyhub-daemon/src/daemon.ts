@@ -4486,17 +4486,27 @@ export class Daemon {
   /**
    * 快照上报（SessionManager reporter 回调入口，fire-and-forget）。
    *
-   * 边界（全部 best-effort，绝不抛）：session 已收口 → warn 丢弃；claimToken 空窗
+   * 边界（全部 best-effort，绝不抛）：session 已收口 → 丢弃；claimToken 空窗
    * → 有 resilience 时入箱等 token 刷新后重放（对齐 onTurnResult 的 A5 语义），
-   * 否则 warn 丢弃（该 run 的快照缺失 → backend capability="tool_only"，前端走
-   * 「仅工具编辑」降级卡，**不会被显示成「本轮无改动」**）。
+   * 否则丢弃（该 run 的快照缺失 → backend `capability="tool_only"`，前端按
+   * 2026-10-22-file-card-hide-empty 的口径**无数据不出卡**；`capability` 仍是
+   * 版本门控真相源，**绝不显示成「本轮无改动」**）。
+   *
+   * 可观测（2026-10-22-daemon-snapshot-report-log）：四条出口各打一条
+   * `turn_file_changes_reported`，与采集器的 `turn_file_changes_collected` 按
+   * `runId` 配对——有 collected 无 reported ＝ 采到但没落库，两条都无 ＝ 没采到。
    */
   private _onTurnSnapshot(report: TurnSnapshotReport): void {
+    const startedAt = Date.now();
     const state = this._sessionManager?.get(report.sessionId);
     if (!state) {
       this._logger.warn('on_turn_snapshot_session_not_found', {
         session_id: report.sessionId,
         run_id: report.runId,
+      });
+      this._logTurnSnapshotReport('dropped', report, {
+        dropReason: 'session_not_found',
+        startedAt,
       });
       return;
     }
@@ -4518,9 +4528,19 @@ export class Daemon {
           void this._resilience
             .enqueueRunResult(state.leaseId, '', report.runId, payload)
             .catch(() => undefined);
+          this._logTurnSnapshotReport('enqueued', report, { startedAt });
         } catch {
-          // 入箱失败不抛（观测面 best-effort）。
+          // 入箱失败不抛（观测面 best-effort）——按丢弃记账。
+          this._logTurnSnapshotReport('dropped', report, {
+            dropReason: 'enqueue_failed',
+            startedAt,
+          });
         }
+      } else {
+        this._logTurnSnapshotReport('dropped', report, {
+          dropReason: 'no_claim_token',
+          startedAt,
+        });
       }
       return;
     }
@@ -4530,10 +4550,17 @@ export class Daemon {
         session_id: report.sessionId,
         run_id: report.runId,
       });
+      this._logTurnSnapshotReport('dropped', report, {
+        dropReason: 'notify_unavailable',
+        startedAt,
+      });
       return;
     }
     void this._client
       .notifyRunResult(state.leaseId, state.claimToken, report.runId, payload)
+      .then(() => {
+        this._logTurnSnapshotReport('delivered', report, { startedAt });
+      })
       .catch((error: unknown) => {
         // backend 4xx/5xx / 网络错误：只 warn，不重试（下一轮不受影响）。
         this._logger.warn('on_turn_snapshot_notify_failed', {
@@ -4543,7 +4570,41 @@ export class Daemon {
           status: report.fileChanges.status,
           error: String(error),
         });
+        this._logTurnSnapshotReport('failed', report, { error, startedAt });
       });
+  }
+
+  /**
+   * 快照上报收口日志（与采集器 `turn_file_changes_collected` 配对，2026-10-22）。
+   *
+   * 单点组装：`outcome` 四态 + 快照头字段 + 耗时。级别——`delivered` / `enqueued`
+   * info，`failed` / `dropped` warn（丢数据必须进异常面）。绝不抛。
+   */
+  private _logTurnSnapshotReport(
+    outcome: 'delivered' | 'failed' | 'enqueued' | 'dropped',
+    report: TurnSnapshotReport,
+    extra: { dropReason?: string; error?: unknown; startedAt?: number } = {},
+  ): void {
+    const snapshot = report.fileChanges;
+    const fields: Record<string, unknown> = {
+      session_id: report.sessionId,
+      run_id: report.runId,
+      outcome,
+      status: snapshot.status,
+      file_count: snapshot.files.length,
+      collect_ms: snapshot.collectMs,
+      elapsed_ms: extra.startedAt !== undefined ? Date.now() - extra.startedAt : 0,
+      daemon_version: DAEMON_VERSION,
+    };
+    if (extra.dropReason !== undefined) fields.drop_reason = extra.dropReason;
+    if (snapshot.reason !== undefined) fields.reason = snapshot.reason;
+    if (snapshot.truncated === true) fields.truncated = true;
+    if (extra.error !== undefined) fields.error = String(extra.error);
+    if (outcome === 'delivered' || outcome === 'enqueued') {
+      this._logger.info('turn_file_changes_reported', fields);
+    } else {
+      this._logger.warn('turn_file_changes_reported', fields);
+    }
   }
 
   /**
