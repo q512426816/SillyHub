@@ -41,6 +41,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
+from structlog.testing import capture_logs
 
 from app.modules.daemon.lease.context import build_claim_payload
 from app.modules.daemon.model import DaemonTaskLease
@@ -310,13 +311,13 @@ class TestInitClaimDefensiveDegrade:
 
     @pytest.mark.asyncio
     async def test_no_token_issued_when_actor_user_id_missing(
-        self, db_session: AsyncSession, capsys: pytest.CaptureFixture[str]
+        self, db_session: AsyncSession
     ) -> None:
         """actor_user_id 缺失 → 两 service 不被调，payload.platform_config 无 local_yaml。"""
         _u, rt_id, ws, _actor = await _setup(db_session)
         lease = await _create_init_lease(db_session, rt_id, workspace_id=ws.id, actor_user_id=None)
 
-        with _patch_token_services() as (plat_mock, mcp_mock):
+        with _patch_token_services() as (plat_mock, mcp_mock), capture_logs() as logs:
             payload = await build_claim_payload(db_session, lease)
 
         assert plat_mock.call_count == 0
@@ -327,32 +328,29 @@ class TestInitClaimDefensiveDegrade:
         assert set(pc.keys()) == {"server_origin", "strategy"}
         # 降级不再静默（docs/sillyspec/init-lease-silent-no-local-yaml.md）：warning
         # 带原因枚举，供平台侧排查「init 成功但 local.yaml platform 段缺失」。
-        # get_logger 是 structlog 控制台渲染（不进 stdlib caplog），按文本断言；
-        # 渲染流取决于全局日志配置就绪时机（全量套件下为 stderr、隔离跑为 stdout，
-        # 2026-10-22 合并后全量实证），故双流合并判定。
-        captured = capsys.readouterr()
-        out = captured.out + captured.err
-        assert "init_claim_local_yaml_skipped" in out
-        assert "actor_user_id" in out
+        # 按 structlog 事件结构化断言（capture_logs 在处理器层截获，不依赖渲染流：
+        # 全量套件下渲染器可能绑定真实 fd、capsys 截不到，2026-10-22 合并后实证）。
+        skipped = [e for e in logs if e.get("event") == "init_claim_local_yaml_skipped"]
+        assert skipped, logs
+        assert "actor_user_id" in skipped[0].get("reason", "")
 
     @pytest.mark.asyncio
     async def test_no_token_issued_when_workspace_id_missing(
-        self, db_session: AsyncSession, capsys: pytest.CaptureFixture[str]
+        self, db_session: AsyncSession
     ) -> None:
         """workspace_id 缺失 → 两 service 不被调（workspace 是 token 绑定键 + 隔离键）。"""
         _u, rt_id, _ws, actor = await _setup(db_session)
         lease = await _create_init_lease(db_session, rt_id, workspace_id=None, actor_user_id=actor)
 
-        with _patch_token_services() as (plat_mock, mcp_mock):
+        with _patch_token_services() as (plat_mock, mcp_mock), capture_logs() as logs:
             payload = await build_claim_payload(db_session, lease)
 
         assert plat_mock.call_count == 0
         assert mcp_mock.call_count == 0
         assert "local_yaml" not in payload.get("platform_config", {})
-        captured = capsys.readouterr()
-        out = captured.out + captured.err
-        assert "init_claim_local_yaml_skipped" in out
-        assert "workspace_id" in out
+        skipped = [e for e in logs if e.get("event") == "init_claim_local_yaml_skipped"]
+        assert skipped, logs
+        assert "workspace_id" in skipped[0].get("reason", "")
 
 
 # ---------------------------------------------------------------------------
