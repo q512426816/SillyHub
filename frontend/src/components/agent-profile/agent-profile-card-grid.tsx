@@ -19,8 +19,8 @@
  *  - 可见范围 Select：private/workspace/platform
  *  - 供应商 Select：选项从 profiles 的 provider 去重派生
  *
- * 网格：tailwind grid-cols-3 gap-4 对齐原型画面① repeat(3,1fr)（design §3 非目标：
- * 不做响应式移动端，固定 3 列）。
+ * 网格：按屏宽自适应列数（repeat(auto-fill, minmax(380px, 1fr))，D-001@v2——
+ * 宽屏 ≥3 列 / 常规 2 列 / 窄屏 1 列）。
  * 空态：antd Empty。加载失败：红条 + 重新加载（FRONTEND_PAGE_STYLE §9）。
  *
  * 设计依据：tasks/task-03.md §implementation / design §7.2 / §10 R-02 /
