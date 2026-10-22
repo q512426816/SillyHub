@@ -16,7 +16,12 @@ import { AgentModelInput } from "@/components/AgentModelInput";
 import { buildErrorLogItem, buildSystemFailureItem } from "@/components/agent-log/normalize";
 import { applyLogToSegments, extractPreambleText, finishTurn, stripPreambleText } from "@/components/daemon/session-log-assembler";
 import { TurnTimeline } from "@/components/daemon/turn-timeline";
-import type { AutoResumeEntry, TurnForkEntryWiring } from "@/components/daemon/turn-timeline";
+import type {
+  AutoResumeEntry,
+  SessionViewMode,
+  TurnForkEntryWiring,
+} from "@/components/daemon/turn-timeline";
+import { SessionViewTabs } from "./session-view-tabs";
 // task-08（2026-09-22-session-fork-continuation / FR-01 / FR-05）：谱系溯源块 +
 // 分叉确认弹层（dialog 模式与 page 双挂载点同步惯例）。
 import { LineageBlock } from "@/components/daemon/session-fork/lineage-block";
@@ -64,7 +69,6 @@ import {
   type TeamMissionTriggerRequest,
 } from "@/lib/daemon";
 import { getProviderCaps } from "@/lib/provider-caps";
-import { cn } from "@/lib/utils";
 
 import { type SessionPanelProps } from "./index";
 import {
@@ -165,9 +169,10 @@ export function SessionPanelDialog(props: SessionPanelProps) {
   // 即移除、failed/ended 会话不渲染卡片，历史靠 GET /dialogs/history 恢复展示。
   const [dialogHistory, setDialogHistory] = useState<SessionDialogRead[]>([]);
   // 消息视图模式：「对话」（默认）只显用户消息 + agent 答复正文；「进度」追加
-  // thinking/工具调用/stderr 过程项（v2 段模型下为完整段时间线）。dialog 适配层
+  // thinking/工具调用/stderr 过程项（v2 段模型下为完整段时间线）；「轨迹」直接显示
+  // 三泳道时间轴（2026-10-22-session-trajectory-third-view / D-001）。dialog 适配层
   // 不传 viewMode 受控对（diff-analysis §5.1），内部自持。
-  const [viewMode, setViewMode] = useState<"conversation" | "all">("conversation");
+  const [viewMode, setViewMode] = useState<SessionViewMode>("conversation");
   const streamConnRef = useRef<SessionStreamConnection | null>(null);
   // P0 竞态修复（2026-08-25）：unmount cleanup 先置 disposed 再 close 当前连接——
   // establishStream 的 prefetch await 窗口内卸载时（cleanup 已跑、streamConnRef 仍
@@ -1905,30 +1910,9 @@ export function SessionPanelDialog(props: SessionPanelProps) {
                 setWorkerSessionId(subSessionId);
               }}
             />
-            {/* 对话/进度二态切换（仅在有消息时出现；page 模式同款 JSX）。 */}
+            {/* 三态视图切换（仅在有消息时出现；page 模式复用同一组件）。 */}
             {view.turns.length > 0 && (
-              <div
-                role="tablist"
-                aria-label="消息显示范围"
-                className="inline-flex items-center rounded-full border bg-muted/50 p-0.5"
-              >
-                {(["conversation", "all"] as const).map((m) => (
-                  <button
-                    key={m}
-                    role="tab"
-                    aria-selected={viewMode === m}
-                    onClick={() => setViewMode(m)}
-                    className={cn(
-                      "rounded-full px-2.5 py-1 text-[11px] leading-none transition-colors",
-                      viewMode === m
-                        ? "bg-card font-medium text-foreground shadow-sm"
-                        : "text-muted-foreground hover:text-foreground",
-                    )}
-                  >
-                    {m === "conversation" ? "对话" : "进度"}
-                  </button>
-                ))}
-              </div>
+              <SessionViewTabs value={viewMode} onChange={setViewMode} />
             )}
             {workspaceId && (
               <Button

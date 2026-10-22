@@ -390,6 +390,23 @@ describe("SessionPanel variant='mobile' 布局类与收纳", () => {
     ).toBeInTheDocument();
   });
 
+  it("移动 variant：视图切换为三态（对话 / 进度 / 轨迹）", async () => {
+    // 2026-10-22-session-trajectory-third-view（D-001）：移动端与桌面共用同一
+    // SessionViewTabs——轨迹与另外两态同层，不再有进度内的第二层开关。
+    setupPage("mobile");
+
+    const panel = (await screen.findByLabelText("会话面板")) as HTMLElement;
+    const header = panel.querySelector("header") as HTMLElement;
+    const tablist = within(header).getByRole("tablist", { name: "消息显示范围" });
+    const tabs = within(tablist).getAllByRole("tab");
+
+    expect(tabs.map((tab) => tab.textContent)).toEqual(["对话", "进度", "轨迹"]);
+    expect(within(tablist).getByRole("tab", { name: "轨迹" })).toHaveAttribute(
+      "aria-selected",
+      "false",
+    );
+  });
+
   it("逻辑零分叉：SSE 建流入参与 variant 无关，发消息（injectSession）mobile 下照常可用", async () => {
     setupPage("mobile");
 

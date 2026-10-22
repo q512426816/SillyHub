@@ -14,8 +14,13 @@ import { buildErrorLogItem, buildSystemFailureItem } from "@/components/agent-lo
 import {
   extractPreambleText, finishTurn, isTaskWakeupInjection, stripPreambleText, type UserMsgTurnSegment,
 } from "@/components/daemon/session-log-assembler";
-import { TurnTimeline, type SessionTurnView } from "@/components/daemon/turn-timeline";
+import {
+  TurnTimeline,
+  type SessionTurnView,
+  type SessionViewMode,
+} from "@/components/daemon/turn-timeline";
 import type { AutoResumeEntry, TurnForkEntryWiring } from "@/components/daemon/turn-timeline";
+import { SessionViewTabs } from "./session-view-tabs";
 // task-08（2026-09-22-session-fork-continuation / FR-01 / FR-05）：谱系溯源块 +
 // 分叉确认弹层（溯源块常驻 B 顶部、弹层由轮级分叉入口打开）。
 import { LineageBlock } from "@/components/daemon/session-fork/lineage-block";
@@ -826,7 +831,8 @@ export function SessionPanelPage({
   // ref 而非 state 理由——回调 deps 刻意不含 turnState 防每帧重建，ref 读取不受
   // 闭包陈旧影响）。
   const previewInflightRef = useRef<Set<string>>(new Set());
-  const [viewMode, setViewMode] = useState<"conversation" | "all">("conversation");
+  // 2026-10-22-session-trajectory-third-view（D-001）：视图三态（对话 / 进度 / 轨迹）。
+  const [viewMode, setViewMode] = useState<SessionViewMode>("conversation");
   // 2026-08-29-session-usage-stats task-04（R-04）：用量条重取信号——
   // onTurnCompleted 轮终态递增，驱动头部下方 SessionUsageBar 重拉
   //（用量数据轮次终态才落库，非实时精确可接受，design R-04）。
@@ -857,7 +863,7 @@ export function SessionPanelPage({
     setViewMode(readPersistedViewMode(sessionId));
   }, [sessionId]);
   const changeViewMode = useCallback(
-    (m: "conversation" | "all") => {
+    (m: SessionViewMode) => {
       setViewMode(m);
       if (sessionId) writePersistedViewMode(sessionId, m);
     },
@@ -5110,29 +5116,9 @@ export function SessionPanelPage({
             </>
           )}
           {turnState.turns.length > 0 && (
-            <div
-              role="tablist"
-              aria-label="消息显示范围"
-              className="inline-flex items-center rounded-full border bg-muted/50 p-0.5"
-            >
-              {(["conversation", "all"] as const).map((m) => (
-                <button
-                  key={m}
-                  role="tab"
-                  aria-selected={viewMode === m}
-                  onClick={() => changeViewMode(m)}
-                  className={cn(
-                    "rounded-full px-2.5 py-1 text-[11px] leading-none transition-colors",
-                    viewMode === m
-                      ? "bg-card font-medium text-foreground shadow-sm"
-                      : "text-muted-foreground hover:text-foreground",
-                  )}
-                >
-                  {/* task-09：「全部」改「进度」（段模型语义：完整段时间线）。 */}
-                  {m === "conversation" ? "对话" : "进度"}
-                </button>
-              ))}
-            </div>
+            /* task-09：「全部」改「进度」（段模型语义：完整段时间线）。
+               2026-10-22-session-trajectory-third-view（D-001）：三态并列入共享组件。 */
+            <SessionViewTabs value={viewMode} onChange={changeViewMode} />
           )}
           {/* quick（2026-09-02）：会话内搜索——icon 展开输入浮层，回车 q 查询
               （limit=100）结果列表展示（点击条目关闭；清空/再点 icon 收起恢复）。 */}
