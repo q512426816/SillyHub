@@ -45,10 +45,10 @@ scale: "small"
 
 | 操作 | 文件路径 | 说明 |
 |---|---|---|
-| 新增 | NEW:frontend/src/components/daemon/trajectory/trajectory-view-model.ts | 分组/折叠/搜索纯函数与类型（LedgerGroupView / LedgerRowView） |
-| 新增 | NEW:frontend/src/components/daemon/trajectory/trajectory-toolbar.tsx | 工具栏：时长 toggle + 轮次/调用菜单 + 搜索输入（受控 props） |
-| 新增 | NEW:frontend/src/components/daemon/trajectory/trajectory-ledger.tsx | 两列账本：轮次标签/竖线、类型标签、摘要、结果摘要、折叠行、子工具缩进 |
-| 新增 | NEW:frontend/src/components/daemon/trajectory/trajectory-detail-panel.tsx | 详情：工具行四标签（概述/参数/结果/计时）、其它行概述+原始内容、可调宽、窄屏抽屉 |
+| 新增 | frontend/src/components/daemon/trajectory/trajectory-view-model.ts | 分组/折叠/搜索纯函数与类型（LedgerGroupView / LedgerRowView） |
+| 新增 | frontend/src/components/daemon/trajectory/trajectory-toolbar.tsx | 工具栏：时长 toggle + 轮次/调用菜单 + 搜索输入（受控 props） |
+| 新增 | frontend/src/components/daemon/trajectory/trajectory-ledger.tsx | 两列账本：轮次标签/竖线、类型标签、摘要、结果摘要、折叠行、子工具缩进 |
+| 新增 | frontend/src/components/daemon/trajectory/trajectory-detail-panel.tsx | 详情：工具行四标签（概述/参数/结果/计时）、其它行概述+原始内容、可调宽、窄屏抽屉 |
 | 修改 | frontend/src/components/daemon/trajectory/trajectory-view.tsx | 重写为装配层：持有 selectedRowId / 折叠集合 / 搜索词 / 时长模式，组合工具栏、时间线、账本、详情 |
 | 修改 | frontend/src/components/daemon/trajectory/trajectory-timeline.tsx | 新增 `scaleMode?: "duration" \| "equal"`（默认 duration）；equal 为只读概览（禁缩放/平移/刷子/轴刻度，不拦截滚轮，见 D-016）；裁剪说明行/图例/覆盖率/重置，高度固定约 50px（D-017） |
 | 修改 | frontend/src/components/daemon/trajectory/from-turn-views.ts | 工具行映射：inputText=segment.raw、outputText=segment.result ?? segment.primary；行 id 优先 segment.id、缺失时用 startedAt 组合（D-015） |
