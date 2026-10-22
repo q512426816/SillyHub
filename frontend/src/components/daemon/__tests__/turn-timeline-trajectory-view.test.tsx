@@ -144,10 +144,12 @@ describe("会话视图三态中的「轨迹」（D-001）", () => {
     fireEvent.click(rows[0]!);
 
     expect(rows[0]).toHaveAttribute("aria-selected", "true");
+    // 2026-10-22-trajectory-view-redesign：详情按行类型分档——用户行是
+    // 「概述 / 原始内容」两档，正文在原始内容标签下。
     const inspector = screen.getByLabelText("行详情");
-    expect(inspector.textContent).toContain("输入");
+    expect(inspector.textContent).toContain("概述");
+    fireEvent.click(screen.getByRole("tab", { name: "原始内容" }));
     expect(inspector.textContent).toContain("跑一下测试");
-    expect(inspector.textContent).not.toContain("选中一行查看输入 / 输出");
   });
 
   it("点击时间轴条目 → 对应账本行选中", () => {
@@ -181,9 +183,8 @@ describe("会话视图三态中的「轨迹」（D-001）", () => {
     // Esc 清除选中，检查器回落空提示。
     fireEvent.keyDown(grid, { key: "Escape" });
     expect(rows.every((row) => row.getAttribute("aria-selected") === "false")).toBe(true);
-    expect(screen.getByLabelText("行详情").textContent).toContain(
-      "选中一行查看输入 / 输出",
-    );
+    // 新设计：无选中行时整个详情面板不渲染（D-005）。
+    expect(screen.queryByTestId("trajectory-detail-panel")).toBeNull();
   });
 
   it("无可绘制时序（无时间锚点）→ 轨迹视图显式空态，不白屏、不渲染轮块", () => {

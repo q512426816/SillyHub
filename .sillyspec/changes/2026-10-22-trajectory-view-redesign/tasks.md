@@ -14,6 +14,6 @@ generated_by: sillyspec-fourpiece-init
 - [x] task-05: `trajectory-timeline.tsx` 增加 `scaleMode` prop（duration/equal）；按 D-017 裁剪说明行/图例/覆盖率/重置并固定约 50px；按 D-016 在 equal 下禁用缩放/平移/刷子/轴刻度且不拦截滚轮；验证：两种模式布局与手势用例、`trajectory-timeline.test.tsx` 适配
 - [x] task-06: 重写 `trajectory-view.tsx` 为装配层（组合工具栏/时间线/账本/详情，持有折叠/搜索/选中状态）；验证：集成用例
 - [x] task-07: `turn-timeline.tsx` 宿主接线——`showTrajectory` 分支移出 `turn-timeline-scroll` 与滚动容器并列、`TrajectoryPane` 补 `h-full min-h-0`；轨迹下 pending AskUser 卡置于轨迹顶部固定层，回底按钮/贴底跟随/滚动监听不生效；验证：在会话面板内滚动账本时工具栏/时间线不动，pending 卡可见可作答
-- [ ] task-08: 迁移 `turn-timeline-trajectory-view.test.tsx` 既有断言到新结构，补充折叠/搜索/详情交互用例；验证：相关测试全绿、既有断言不放宽
-- [ ] task-09: 重编译原型（`pnpm prototype:build`）并登记 `prototype-trajectory-redesign.html`，核对与实现一致；验证：产物与源码对账
-- [ ] task-10: `frontend` 跑 `pnpm exec tsc --noEmit` 与相关 vitest；验证：退出 0、零失败
+- [x] task-08: 迁移 `turn-timeline-trajectory-view.test.tsx` 既有断言到新结构，补充折叠/搜索/详情交互用例；验证：相关测试全绿、既有断言不放宽
+- [x] task-09: 重编译原型（`pnpm prototype:build`）并登记 `prototype-trajectory-redesign.html`，核对与实现一致；验证：产物与源码对账
+- [x] task-10: `frontend` 跑 `pnpm exec tsc --noEmit` 与相关 vitest；验证：退出 0、零失败

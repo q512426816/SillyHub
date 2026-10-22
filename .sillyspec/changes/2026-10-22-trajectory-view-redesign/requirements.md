@@ -104,3 +104,13 @@ Given 变更落盘；When 跑轨迹、会话面板相关测试与 tsc；Then 全
 | D-018@v1 | FR-05 | D-007 覆盖 D-005 的 Schema 子项 |
 | D-019@v1 | FR-03 | 账本不渲染请求边界点 |
 | D-020@v1 | FR-02 | 时长偏好为全局偏好 |
+
+## 测试绑定（每条 FR 至少一行：`FR-NN: test/路径「用例名」`；不适用要写理由；flow done 空行拒收）
+
+FR-01: `frontend/src/components/daemon/trajectory/__tests__/trajectory-redesign.test.tsx`「轨迹视图独立占满高度：工具栏与时间线在账本滚动容器之外」
+FR-02: `frontend/src/components/daemon/trajectory/__tests__/trajectory-view-model.test.ts`「搜索 AND 分词过滤，命中时忽略折叠」+ `frontend/src/components/daemon/trajectory/__tests__/trajectory-redesign.test.tsx`「工具栏四项：时长切换/轮次收起/调用收起/搜索」+「等宽模式禁用缩放手势」
+FR-03: `frontend/src/components/daemon/trajectory/__tests__/trajectory-redesign.test.tsx`「两列账本：轮次标签与竖线、类型标签与摘要、无请求边界点、行内无耗时/token」
+FR-04: `frontend/src/components/daemon/trajectory/__tests__/trajectory-view-model.test.ts`「轮次/调用折叠摘要统计」+ `frontend/src/components/daemon/trajectory/__tests__/trajectory-redesign.test.tsx`「折叠摘要行点击展开恢复」
+FR-05: `frontend/src/components/daemon/trajectory/__tests__/trajectory-redesign.test.tsx`「工具行四标签（无 Schema）/参数取 raw/结果取 result/缺失空态」+「折叠隐藏选中行后清空选中并关闭详情」
+FR-06: `frontend/src/components/daemon/trajectory/__tests__/trajectory-view-model.test.ts`「产品路径只派发六类行型」+ `frontend/src/components/daemon/__tests__/turn-timeline-trajectory-view.test.tsx`「无时间锚点 → 轨迹视图显式空态」
+FR-07: `frontend/src/components/daemon/trajectory/__tests__` + `frontend/src/components/daemon/__tests__/turn-timeline-trajectory-view.test.tsx`（零回归）+ 不适用类型检查无测试面，`pnpm exec tsc --noEmit` 直接验证退出码

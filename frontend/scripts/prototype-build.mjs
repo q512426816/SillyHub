@@ -32,6 +32,11 @@ const VIEWS = [
   },
   { file: "sillyspec-flow-view", title: "SillySpec 变更流程", desc: "流程类原型：轻量道/完整道双泳道状态机（FlowDiagram）" },
   { file: "conflict-sync-states-view", title: "同步冲突状态", desc: "冲突行「标记已处理」入口/失败卡按 daemon_code 三分支/full-tree 兜底来源提示" },
+  {
+    file: "trajectory-redesign-view",
+    title: "轨迹面板重设计",
+    desc: "对齐 dsh：固定工具栏（时长/轮次/调用+搜索）+ 三泳道时间线 + 两列账本 + 多标签详情",
+  },
 ];
 
 function run(cmd, args) {
