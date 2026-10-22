@@ -1,0 +1,51 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-22-agent-profile-edit-refresh",
+  "rows": [
+    {
+      "anchor": "FR-01",
+      "row_id": "2026-10-22-agent-profile-edit-refresh:flow:测试绑定FR-01",
+      "tests": [
+        "test/frontend/src/lib/__tests__/agent-profiles.test.tsx「create/update 成功后失效 workspaceList 与 mineList 两桶」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-22-agent-profile-edit-refresh"
+    },
+    {
+      "anchor": "FR-02",
+      "row_id": "2026-10-22-agent-profile-edit-refresh:flow:测试绑定FR-02",
+      "tests": [
+        "test/frontend/src/lib/__tests__/agent-profiles.test.tsx「既有 workspaceList 失效不回归（同一用例内并断言）」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-22-agent-profile-edit-refresh"
+    },
+    {
+      "anchor": "FR-03",
+      "row_id": "2026-10-22-agent-profile-edit-refresh:flow:测试绑定FR-03",
+      "tests": [
+        "test/frontend/src/lib/__tests__/agent-profiles.test.tsx「mutation 失败不触发失效」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-22-agent-profile-edit-refresh"
+    }
+  ]
+}

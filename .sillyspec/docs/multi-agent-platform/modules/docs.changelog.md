@@ -14,3 +14,4 @@
 - 2026-10-19-preview-card-empty-turn-fix | 切换档案产生的静默轮（started_at 空、无日志、无 error_code 的终态轮）刷新后进…
 - 2026-10-20-conflict-platform-archive | 冲突对比平台留档快照自足回退
 - 2026-10-22-agent-profile-modal-restyle | 智能体档案弹窗重构与技能全选
+- 2026-10-22-agent-profile-edit-refresh | 档案编辑后全局页列表自动刷新修复

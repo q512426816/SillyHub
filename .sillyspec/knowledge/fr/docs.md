@@ -571,3 +571,60 @@ created_at: 2026-10-15T16:16:15.707Z
   confirmed_at: null
   source_change: 2026-10-22-agent-profile-modal-restyle
   status: active
+
+## FR-docs-036 useCreateAgentProfile/useUpdateAgentProfile 成功后必须同时 invalidate workspaceList(wid) 与 mineList 两桶（全局页编辑/新建保存后卡片墙立即刷新）
+变更：2026-10-22-agent-profile-edit-refresh
+状态：active
+摘要：全局页编辑保存；全局页新建保存
+全文：.sillyspec/changes/archive/2026-10-22-agent-profile-edit-refresh/requirements.md#FR-01
+最近确认：302ebb786c739b33837b2fda22f89141637412bb
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-22-agent-profile-edit-refresh:flow:测试绑定FR-01
+  tests: test/frontend/src/lib/__tests__/agent-profiles.test.tsx「create/update 成功后失效 workspaceList 与 mineList 两桶」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-22-agent-profile-edit-refresh
+  status: active
+
+## FR-docs-037 工作区内页（workspaceList 桶）刷新行为不回归
+变更：2026-10-22-agent-profile-edit-refresh
+状态：active
+摘要：工作区内页编辑
+全文：.sillyspec/changes/archive/2026-10-22-agent-profile-edit-refresh/requirements.md#FR-02
+最近确认：302ebb786c739b33837b2fda22f89141637412bb
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-22-agent-profile-edit-refresh:flow:测试绑定FR-02
+  tests: test/frontend/src/lib/__tests__/agent-profiles.test.tsx「既有 workspaceList 失效不回归（同一用例内并断言）」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-22-agent-profile-edit-refresh
+  status: active
+
+## FR-docs-038 lib 层新增 hook 失效行为单测（断言两桶 key 均被失效）
+变更：2026-10-22-agent-profile-edit-refresh
+状态：active
+摘要：单测覆盖
+全文：.sillyspec/changes/archive/2026-10-22-agent-profile-edit-refresh/requirements.md#FR-03
+最近确认：302ebb786c739b33837b2fda22f89141637412bb
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-22-agent-profile-edit-refresh:flow:测试绑定FR-03
+  tests: test/frontend/src/lib/__tests__/agent-profiles.test.tsx「mutation 失败不触发失效」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-22-agent-profile-edit-refresh
+  status: active
