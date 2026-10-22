@@ -319,7 +319,10 @@ export function useWorkspaceToolPolicies(workspaceId: string) {
   };
 }
 
-/** 新建档案。成功后 invalidate workspace 列表。 */
+/** 新建档案。成功后 invalidate workspace 列表 + mineList（全局卡片墙聚合全集，
+ * 2026-10-22-agent-profile-edit-refresh：此前只失效 workspaceList 桶，全局页
+ * /agent-profiles 编辑/新建保存后卡片墙不刷新——复制/删除当年已在页面层手动
+ * 失效绕过（page.tsx 头注释），新建/编辑走本 hook 修复于源头）。 */
 export function useCreateAgentProfile(workspaceId: string) {
   const qc = useQueryClient();
   return useMutation<
@@ -332,11 +335,15 @@ export function useCreateAgentProfile(workspaceId: string) {
       void qc.invalidateQueries({
         queryKey: agentProfileQueryKeys.workspaceList(workspaceId),
       });
+      void qc.invalidateQueries({
+        queryKey: agentProfileQueryKeys.mineList,
+      });
     },
   });
 }
 
-/** 更新档案。成功后 invalidate workspace 列表。 */
+/** 更新档案。成功后 invalidate workspace 列表 + mineList（同 create，2026-10-22
+ * agent-profile-edit-refresh 补全局页刷新）。 */
 export function useUpdateAgentProfile(workspaceId: string) {
   const qc = useQueryClient();
   return useMutation<
@@ -349,6 +356,9 @@ export function useUpdateAgentProfile(workspaceId: string) {
     onSuccess: () => {
       void qc.invalidateQueries({
         queryKey: agentProfileQueryKeys.workspaceList(workspaceId),
+      });
+      void qc.invalidateQueries({
+        queryKey: agentProfileQueryKeys.mineList,
       });
     },
   });
