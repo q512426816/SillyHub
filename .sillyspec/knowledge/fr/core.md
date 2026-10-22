@@ -620,3 +620,161 @@ created_at: 2026-10-15T11:57:05.061Z
 摘要：主路径
 全文：.sillyspec/changes/archive/2026-10-22-fix-translate-pending/requirements.md#FR-05
 最近确认：e7ce2a10150c7e18627369ed72fd5400c1e4e5a9
+
+## FR-core-031 会话面板视图切换为三态：对话 / 进度 / 轨迹，轨迹与另外两态同层并列
+变更：2026-10-22-session-trajectory-third-view
+状态：active
+摘要：主路径；旧会话默认值
+场景正文：
+- 场景：主路径 — Given 一个有历史轮的会话；When 查看顶部视图切换；Then 三枚 tab「对话 / 进度 / 轨迹」同层并列、默认选中「对话」；When 点「轨迹」；Then `
+- 场景：旧会话默认值 — Given localStorage 无本会话的视图记录；When 打开会话；Then 默认「对话」，与现状一致。
+全文：.sillyspec/changes/archive/2026-10-22-session-trajectory-third-view/requirements.md#FR-01
+最近确认：28c19e2677fae0639cda0a7ba96aec3ba484749e
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-22-session-trajectory-third-view:flow:测试绑定FR-01
+  tests: frontend/src/components/daemon/session-panel/__tests__/session-view-tabs.test.tsx
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-22-session-trajectory-third-view
+  status: active
+
+## FR-core-032 「进度」视图恢复纯时间线，不再出现「时间线 / 轨迹」第二层开关
+变更：2026-10-22-session-trajectory-third-view
+状态：active
+摘要：主路径
+场景正文：
+- 场景：主路径 — Given 有历史轮的会话；When 切到「进度」；Then 轮块（`data-testid="turn-block"`）照常渲染，页面中不存在 `progress-len
+全文：.sillyspec/changes/archive/2026-10-22-session-trajectory-third-view/requirements.md#FR-02
+最近确认：28c19e2677fae0639cda0a7ba96aec3ba484749e
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-22-session-trajectory-third-view:flow:测试绑定FR-02
+  tests: frontend/src/components/daemon/__tests__/turn-timeline-trajectory-view.test.tsx
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-22-session-trajectory-third-view
+  status: active
+
+## FR-core-033 选择「轨迹」直接渲染三泳道面板，点击账本行或时间轴条目可选中并在右侧检查器看输入/输出，↑/↓ 切换、Esc 清除
+变更：2026-10-22-session-trajectory-third-view
+状态：active
+摘要：主路径
+场景正文：
+- 场景：主路径 — 
+全文：.sillyspec/changes/archive/2026-10-22-session-trajectory-third-view/requirements.md#FR-03
+最近确认：28c19e2677fae0639cda0a7ba96aec3ba484749e
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-22-session-trajectory-third-view:flow:测试绑定FR-03
+  tests: frontend/src/components/daemon/__tests__/turn-timeline-trajectory-view.test.tsx
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-22-session-trajectory-third-view
+  status: active
+
+## FR-core-034 无可绘制时序时轨迹视图仍显示显式空态提示，不白屏不伪造
+变更：2026-10-22-session-trajectory-third-view
+状态：active
+摘要：主路径
+场景正文：
+- 场景：主路径 — Given 轮视图缺时间戳且无段；When 切到「轨迹」；Then 出现「没有可绘制的时间数据」提示，且不出现三泳道面板与轮块。
+全文：.sillyspec/changes/archive/2026-10-22-session-trajectory-third-view/requirements.md#FR-04
+最近确认：28c19e2677fae0639cda0a7ba96aec3ba484749e
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-22-session-trajectory-third-view:flow:测试绑定FR-04
+  tests: frontend/src/components/daemon/__tests__/turn-timeline-trajectory-view.test.tsx
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-22-session-trajectory-third-view
+  status: active
+
+## FR-core-035 视图选择按会话持久化，「轨迹」刷新后仍保持
+变更：2026-10-22-session-trajectory-third-view
+状态：active
+摘要：主路径；旧值兼容
+场景正文：
+- 场景：主路径 — Given 某会话当前为「轨迹」；When 刷新页面；Then 视图仍为「轨迹」。
+- 场景：旧值兼容 — Given localStorage 存的是 `"all"`；When 打开会话；Then 视图为「进度」；存的是无法识别的值时回落「对话」。
+全文：.sillyspec/changes/archive/2026-10-22-session-trajectory-third-view/requirements.md#FR-05
+最近确认：28c19e2677fae0639cda0a7ba96aec3ba484749e
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-22-session-trajectory-third-view:flow:测试绑定FR-05
+  tests: frontend/src/components/daemon/session-panel/__tests__/view-mode-persist.test.ts
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-22-session-trajectory-third-view
+  status: active
+
+## FR-core-036 弹窗版、整页版、移动版三处会话面板行为一致
+变更：2026-10-22-session-trajectory-third-view
+状态：active
+摘要：主路径
+场景正文：
+- 场景：主路径 — Given 移动端打开会话；When 查看视图切换；Then 同样出现三枚 tab；When 点「轨迹」；Then 与桌面一致直接渲染轨迹面板。
+全文：.sillyspec/changes/archive/2026-10-22-session-trajectory-third-view/requirements.md#FR-06
+最近确认：28c19e2677fae0639cda0a7ba96aec3ba484749e
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-22-session-trajectory-third-view:flow:测试绑定FR-06
+  tests: frontend/src/components/daemon/__tests__/session-panel-variant.test.tsx | frontend/src/components/daemon/session-panel/__tests__/session-view-tabs.test.tsx
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-22-session-trajectory-third-view
+  status: active
+
+## FR-core-037 新增/更新用例全绿，既有会话面板、轨迹、回放相关用例零回归且不改既有断言
+变更：2026-10-22-session-trajectory-third-view
+状态：active
+摘要：主路径
+场景正文：
+- 场景：主路径 — Given 变更落盘；When 跑会话面板、轨迹、回放相关测试；Then 全部通过且无跳过的既有断言。
+全文：.sillyspec/changes/archive/2026-10-22-session-trajectory-third-view/requirements.md#FR-07
+最近确认：28c19e2677fae0639cda0a7ba96aec3ba484749e
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-22-session-trajectory-third-view:flow:测试绑定FR-07
+  tests: frontend/src/components/daemon/__tests__/turn-timeline-trajectory-view.test.tsx
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-22-session-trajectory-third-view
+  status: active
+
+## FR-core-038 frontend tsc --noEmit 退出 0
+变更：2026-10-22-session-trajectory-third-view
+状态：active
+摘要：主路径
+场景正文：
+- 场景：主路径 — Given 变更落盘；When 在 `frontend` 跑 `pnpm exec tsc --noEmit`；Then 退出码为 0。
+全文：.sillyspec/changes/archive/2026-10-22-session-trajectory-third-view/requirements.md#FR-08
+最近确认：28c19e2677fae0639cda0a7ba96aec3ba484749e

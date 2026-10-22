@@ -1,0 +1,22 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-22-session-trajectory-third-view",
+  "reviewer": "subagent",
+  "verdict": "PASS",
+  "reviewedAgainst": "734a914927a9477a140062e6ac1ccd246edfdc9c",
+  "findings": [
+    {
+      "severity": "P3",
+      "title": "两处注释仍称视图为「二态（对话/全部）」，与三态实现不一致",
+      "evidence": "turn-timeline.tsx:11 模块头写「「对话/全部」二态视图由 viewMode 控制」，同文件 422 行 SessionViewMode 已是 conversation|all|trajectory；session-panel-page.tsx:857 持久化注释仍写「视图模式（对话/进度）」。属注释滞后、无运行时影响，但违反项目规则「注释与实现不一致须及时修正」。",
+      "location": "frontend/src/components/daemon/turn-timeline.tsx:11（另 frontend/src/components/daemon/session-panel/session-panel-page.tsx:857）"
+    }
+  ],
+  "dimensionNotes": {
+    "乱序": "ok｜边界已裁决：可接受（选中只持 rowId；轮视图更新后 id 消失时 rows.find 返回 null、检查器回落「选中一行查看输入 / 输出」，不崩溃不指错行——trajectory-view.tsx:180-183/524-534，已实测空态用例）",
+    "并发": "ok｜边界已裁决：可接受（无服务端写面；localStorage 按会话单 key，多标签页并发切换后写生效、刷新取最后写入值，属既有显式语义）",
+    "切换": "ok｜边界已裁决：可接受（TrajectoryPane 随 showTrajectory 条件渲染，离开轨迹视图即卸载、选中态丢弃；会话切换由 sessionId effect 重置 viewMode 并回读持久化。窄面板 7 列账本 + 320px 检查器、检查器在 md 以下隐藏为既有 TrajectoryView 布局形态（design 风险节已披露），非本次新增且无数据正确性风险）",
+    "作用域": "ok｜边界已裁决：可接受（localStorage key=sillyhub.sessions.viewMode.<sessionId> 按会话隔离；轨迹数据只取当前面板已加载轮视图、零网络，不跨会话/工作区共享；放弃独立路由以保留会话上下文，取舍成立）"
+  },
+  "reviewedAt": "2026-10-22T10:37:14+08:00"
+}
