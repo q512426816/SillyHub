@@ -1,5 +1,24 @@
 import type { Config } from "tailwindcss";
 
+/**
+ * 语义色数字阶派生（2026-10-23-semantic-color-scale-fix）。
+ *
+ * 背景：warning/info/destructive 此前只有 DEFAULT+foreground，而 liveness-badge
+ * 五态与左栏「在等你」琥珀点使用 -50/-200/-500/-700 数字阶类名——Tailwind 对
+ * 未定义键静默不生成 CSS，导致状态点透明、徽章软底/描边/深字全丢。
+ *
+ * 取值全部由主题块既有基色变量派生（无硬编码 hex，随 data-theme 自动换肤）：
+ * - 500 = 基色本体；
+ * - 50/200 向 background 混出软底（浅色淡彩 / 深色暗彩）；
+ * - 700 向 foreground 混出前景字色（浅色加深 / 深色提亮）。
+ */
+const semanticScale = (cssVar: string) => ({
+  50: `color-mix(in srgb, hsl(var(${cssVar})) 10%, hsl(var(--background)))`,
+  200: `color-mix(in srgb, hsl(var(${cssVar})) 35%, hsl(var(--background)))`,
+  500: `hsl(var(${cssVar}))`,
+  700: `color-mix(in srgb, hsl(var(${cssVar})) 75%, hsl(var(--foreground)))`,
+});
+
 const config: Config = {
   darkMode: ["class"],
   content: [
@@ -36,6 +55,7 @@ const config: Config = {
         destructive: {
           DEFAULT: "hsl(var(--destructive))",
           foreground: "hsl(var(--destructive-foreground))",
+          ...semanticScale("--destructive"),
         },
 
         // ---- 状态语义(与 tokens.semantic 对齐,DEFAULT 走 hsl var,
@@ -47,6 +67,7 @@ const config: Config = {
         warning: {
           DEFAULT: "hsl(var(--warning))",
           foreground: "hsl(var(--warning-foreground))",
+          ...semanticScale("--warning"),
         },
         error: {
           DEFAULT: "hsl(var(--error))",
@@ -55,6 +76,7 @@ const config: Config = {
         info: {
           DEFAULT: "hsl(var(--info))",
           foreground: "hsl(var(--info-foreground))",
+          ...semanticScale("--info"),
         },
 
         // ---- brand 语义色阶(主题感知:50-950 十一档纯 CSS 变量名映射,无硬编码 hex;
@@ -94,7 +116,7 @@ const config: Config = {
               return `color-mix(in srgb, var(--color-brand-${step}) ${pct}, transparent)`;
             },
           ])
-        ),
+        ) as unknown as Record<string, string>,
 
         // ---- 基础调色板·真实信息色(直接 hex,与 tokens.color.palette 对齐,
         //      不走 CSS 变量;blue 阶仅限真信息蓝/外部标识色场景;
@@ -172,7 +194,7 @@ const config: Config = {
               return `color-mix(in srgb, var(--color-slate-${step}) ${pct}, transparent)`;
             },
           ])
-        ),
+        ) as unknown as Record<string, string>,
       },
       fontFamily: {
         // 通过 var(--font-inter) 接入 task-02 next/font 注入的 Inter,
