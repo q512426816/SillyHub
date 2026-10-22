@@ -738,3 +738,11 @@
 锚点：未记录
 最近确认：9711e7721de76c3f71b59ac13d1bb63815c7ed53
 理由：最大风险：provisional 兜底项文案「不指定（默认：名）」与运行中「不指定（无人格）」语义并存，用户切换会话形态时文案变化——有依据（两态实际语义确实不同），非漂移。死路：把默认名显示进非 provisional 会话——放弃：该会话不会注入默认，显示即撒谎。
+
+## D-unmapped-112@v1 设计期风险与放弃方案（底稿）
+状态：implemented
+变更：2026-10-22-agent-profile-modal-restyle
+原编号：D-001@v1
+锚点：未记录
+最近确认：2fef11f807db97a27cdbd0f4fb036d7030bf821c
+理由：最大风险：既有单测查询方式依赖旧 DOM（antd Checkbox.Group 的 label 结构），重构后需按新 DOM（芯片以 role=checkbox/aria-checked 暴露）调整查询手段——行为断言不变、只改查询方式，逐用例核对防止「改测试凑通过」。次风险：antd Modal title 传 ReactNode 后高度变化在不同视口的表现，靠实页三主题截图对照兜底。已放弃方案：①继续用 antd Checkbox.Group + options render 定制两行芯片（Group 布局受限、工具栏与三态联动要绕过 Group 自身 state，别扭且难测，放弃）；②全局滚动条主题化（影响面全站，超出本变更范围，收窄为作用域工具类，全局化留给后续独立变更）。

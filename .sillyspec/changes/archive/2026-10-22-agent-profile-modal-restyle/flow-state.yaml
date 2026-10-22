@@ -1,0 +1,51 @@
+tier: thin
+legacy_fallback: false
+substeps:
+  artifacts: done
+  ledger: done
+  patch: done
+  review: done
+  probes: done
+  distill: done
+  archive: done
+  events: done
+born_face: thin
+with_tasks: false
+review_force: null
+input: >-
+  智能体档案弹窗重构与技能全选
+
+
+  动机与背景：/agent-profiles 新建（编辑）智能体档案弹窗观感陈旧：21 项技能平铺复选列表撑高左栏、无全选无搜索；用户已确认一比一原型
+  F:\WorkNew\SillyHub\.sillyspec\explore\prototype-agent-profile-modal-restyle.html（两轮反馈后定稿：暗夜滚动条主题化、技能芯片带简介）。本次按原型落地实现。
+
+
+  成功标准：
+
+  - 弹窗观感对齐已确认原型：品牌图标头+副标题、页脚左侧红线注脚（单行省略）、品牌竖条小节头
+
+  - 技能区：全选复选（半选态、仅作用于当前筛选结果）+ 按名称与简介搜索 + 已选 N/总数计数 + 清空按钮 + 两行芯片网格（名称+一行简介，限高内滚）
+
+  - 技能简介来自真实数据（manifest SKILL.md frontmatter description / 自定义技能 description），非硬编码
+
+  - 技能区滚动条三主题下细样式半透明，暗夜不刺眼（作用域限本弹窗技能区）
+
+  - 无硬编码 hex，颜色走 brand/语义 token，三主题（blue/ai-native/dark）可切换
+
+  - 既有行为回归不变：可见范围=工作区时出现归属工作区选择器、右栏预览实时联动、名称必填、红线文案不变
+autopilot: false
+prestage_ack: true
+baseline_commit: be9060a8db3bce33f98af31602fcb1f60667bc45
+updatedAt: '2026-10-22T03:12:19.211Z'
+baseline_sha256: baba9750ac6889c62724aff4c74b06cbddc6aa9c0d9e60a7c7c98119bc022c26
+spec_approved: true
+spec_approved_at: '2026-10-22T01:34:11.622Z'
+spec_approved_by: zcode-apimodal-restyle
+spec_approved_channel: user-confirmed
+spec_attested_by: zcode-apimodal-restyle
+batch_ticked: true
+gate_summary: >-
+  test: passed ← module[]+deps(jsx6)+fr(4)（217.6s）
+  结果：F:\WorkNew\SillyHub\.sillyspec\.runtime\verify-runs\20261022030531\test-result.json｜lint: skipped — 跳过原因：local.yaml
+  未配置 commands.lint（或标记 unavailable）。｜门文件 7 个
+

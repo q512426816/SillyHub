@@ -143,3 +143,4 @@
 | 2026-10-21 | 2026-10-21-agent-profile-slim-default | 档案瘦身重定位为人格加技能清单并支持用户默认档案 |
 | 2026-10-21 | 2026-10-21-provider-default-ui-hint | 供应商未选态显示对齐用户默认供应商 |
 | 2026-10-21 | 2026-10-21-profile-default-prehint | 预会话态档案显示对齐用户默认档案 |
+| 2026-10-22 | 2026-10-22-agent-profile-modal-restyle | 智能体档案弹窗重构与技能全选 |

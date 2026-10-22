@@ -1,0 +1,142 @@
+{
+  "change": "2026-10-22-agent-profile-modal-restyle",
+  "baseline": "be9060a8db3bce33f98af31602fcb1f60667bc45",
+  "head": "2fef11f807db97a27cdbd0f4fb036d7030bf821c",
+  "files": [
+    "docs/releases/2026-10-22-001-c68b0d4bc.md",
+    "docs/releases/2026-10-22-002-43f2423a8.md",
+    "frontend/src/app/globals.css",
+    "frontend/src/components/__tests__/agent-profile-form.test.tsx",
+    "frontend/src/components/agent-profile-form.tsx",
+    "frontend/src/lib/__tests__/agent-profiles.test.tsx",
+    "frontend/src/lib/agent-profiles.ts"
+  ],
+  "totals": {
+    "files": 7,
+    "additions": 712,
+    "deletions": 34
+  },
+  "savedAt": "2026-10-22T03:06:01.714Z",
+  "note": "flow done 时点冻结（本变更可归属交付面：baseline..HEAD 提交面过滤 .sillyspec/ 只留 .sillyspec/docs/ 交付文档 + 独占树未提交交付；治理工件目录不入冻结——2026-10-12-close-trace-freeze-integrity FR-01）",
+  "modules": [
+    {
+      "id": "frontend",
+      "files": 5,
+      "doc": "docs/multi-agent-platform/modules/frontend.md",
+      "docTouched": false,
+      "docMissing": false
+    },
+    {
+      "id": "docs",
+      "files": 2,
+      "doc": "docs/multi-agent-platform/modules/docs.md",
+      "docTouched": false,
+      "docMissing": false
+    },
+    {
+      "id": "frontend_app",
+      "files": 1,
+      "doc": "docs/SillyHub/modules/frontend_app.md",
+      "docTouched": false,
+      "docMissing": false
+    },
+    {
+      "id": "frontend_components",
+      "files": 2,
+      "doc": "docs/SillyHub/modules/frontend_components.md",
+      "docTouched": false,
+      "docMissing": false
+    },
+    {
+      "id": "frontend_lib",
+      "files": 2,
+      "doc": "docs/SillyHub/modules/frontend_lib.md",
+      "docTouched": false,
+      "docMissing": false
+    }
+  ],
+  "uncoveredDirs": [],
+  "moduleMaps": [
+    "docs/backend/modules/_module-map.yaml",
+    "docs/frontend/modules/_module-map.yaml",
+    "docs/multi-agent-platform/modules/_module-map.yaml",
+    "docs/SillyHub/modules/_module-map.yaml",
+    "docs/sillyhub-daemon/modules/_module-map.yaml"
+  ],
+  "scopeAudit": {
+    "mode": "full-flow",
+    "ok": true,
+    "degradedReason": null,
+    "baseAnchor": "be9060a8db3bce33f98af31602fcb1f60667bc45",
+    "totals": {
+      "files": 7,
+      "additions": 712,
+      "deletions": 34
+    },
+    "rows": [
+      {
+        "path": "docs/releases/2026-10-22-001-c68b0d4bc.md",
+        "additions": 59,
+        "deletions": 0,
+        "kind": "new",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": "docs/releases/2026-10-22-002-43f2423a8.md",
+        "additions": 24,
+        "deletions": 0,
+        "kind": "new",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": "frontend/src/app/globals.css",
+        "additions": 35,
+        "deletions": 0,
+        "kind": "modified",
+        "planned": "修改",
+        "verdict": "planned"
+      },
+      {
+        "path": "frontend/src/components/__tests__/agent-profile-form.test.tsx",
+        "additions": 162,
+        "deletions": 3,
+        "kind": "modified",
+        "planned": "修改",
+        "verdict": "planned"
+      },
+      {
+        "path": "frontend/src/components/agent-profile-form.tsx",
+        "additions": 274,
+        "deletions": 29,
+        "kind": "modified",
+        "planned": "修改",
+        "verdict": "planned"
+      },
+      {
+        "path": "frontend/src/lib/__tests__/agent-profiles.test.tsx",
+        "additions": 146,
+        "deletions": 0,
+        "kind": "new",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": "frontend/src/lib/agent-profiles.ts",
+        "additions": 12,
+        "deletions": 2,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "unplanned"
+      }
+    ],
+    "excluded": {
+      "foreignDeclared": []
+    },
+    "note": "flow done 时点冻结（本文件落盘时采集）",
+    "closedBy": "flow done"
+  },
+  "patchSha256": "6becb88c0fab0c44cc55b8e049568b159b6c4ef82f534efeaa24798c103235b8",
+  "patchStatus": "ok"
+}
