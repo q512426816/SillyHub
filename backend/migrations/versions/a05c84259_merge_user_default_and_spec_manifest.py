@@ -12,8 +12,6 @@ alembic merge 收拢，无 schema 变更。
 
 from __future__ import annotations
 
-from alembic import op
-
 # revision identifiers, used by Alembic.
 revision = "a05c84259_merge"
 down_revision = ("20261021_user_default", "20261021130000")

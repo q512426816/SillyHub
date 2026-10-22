@@ -397,9 +397,7 @@ async def set_default_profile(
     actor 可见（service.get 同口径 404/403）。会话/群聊未显式选档案时注入其人格与
     技能（task-02）。返回携带 ``is_user_default=True`` 的档案行。
     """
-    profile = await _service(session).set_user_default(
-        profile_id=profile_id, actor=user
-    )
+    profile = await _service(session).set_user_default(profile_id=profile_id, actor=user)
     return _to_read(profile, user)
 
 

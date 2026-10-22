@@ -64,9 +64,7 @@ async def _lease_metadata(db_session: AsyncSession, lease_id: uuid.UUID) -> dict
 
 class TestSessionDefaultProfileInjection:
     @pytest.mark.asyncio
-    async def test_default_profile_injected(
-        self, db_session, mocked_hub, mocked_redis
-    ):
+    async def test_default_profile_injected(self, db_session, mocked_hub, mocked_redis):
         """用户默认档案 → 未显式选档案的会话注入人格 + 技能引用。"""
         from app.modules.auth.model import User
         from app.modules.daemon.service import DaemonService

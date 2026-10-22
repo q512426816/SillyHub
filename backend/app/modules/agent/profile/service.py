@@ -390,9 +390,7 @@ class AgentProfileService:
             )
         return profile
 
-    async def set_user_default(
-        self, *, profile_id: uuid.UUID, actor: User
-    ) -> AgentProfile:
+    async def set_user_default(self, *, profile_id: uuid.UUID, actor: User) -> AgentProfile:
         """置 actor 的用户级默认档案（2026-10-21-agent-profile-slim-default task-01）。
 
         读可见校验复用 :meth:`get`（不存在 404 / 不可见 403，与显式选档案同口径）；

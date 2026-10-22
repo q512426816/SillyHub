@@ -134,6 +134,13 @@ class TestMigrationStructure:
         assert "20260926063000" not in names, "重复建表迁移 063000 仍在链上"
         assert "3931ff71bd32" not in names, "merge 3931ff71bd32 仍在链上"
 
+    def test_merge_revision_has_no_ddl_import(self) -> None:
+        """a05c84259_merge 为纯收拢无 DDL——不得依赖 alembic.op（ruff F401 钉子）。"""
+        source = (VERSIONS_DIR / "a05c84259_merge_user_default_and_spec_manifest.py").read_text(
+            encoding="utf-8"
+        )
+        assert "from alembic import op" not in source
+
     def test_083000_reattached_to_mainline(self) -> None:
         source = (VERSIONS_DIR / "20260926083000_spec_workspace_last_writer.py").read_text(
             encoding="utf-8"

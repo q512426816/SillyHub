@@ -115,9 +115,7 @@ async def test_shadow_without_member_profile_uses_owner_default(db_session):
     )
     db_session.add(profile)
     owner.default_agent_profile_id = profile.id
-    group, member = await _mk_group_and_member(
-        db_session, owner, ws, with_profile=False
-    )
+    group, member = await _mk_group_and_member(db_session, owner, ws, with_profile=False)
     await db_session.commit()
 
     fake_placement = SimpleNamespace(
@@ -128,7 +126,7 @@ async def test_shadow_without_member_profile_uses_owner_default(db_session):
                 runtime_id=member.runtime_id,
                 claim_token="tok",
             )
-        )
+        ),
     )
     fake_svc = SimpleNamespace(
         _session=db_session,
@@ -165,9 +163,7 @@ async def test_shadow_no_default_keeps_none(db_session):
     """成员未选档案 + 群主未设默认 → 影子归属 None（现状零回归）。"""
     owner = await _mk_user(db_session, "owner2")
     ws = await _mk_ws(db_session, owner)
-    group, member = await _mk_group_and_member(
-        db_session, owner, ws, with_profile=False
-    )
+    group, member = await _mk_group_and_member(db_session, owner, ws, with_profile=False)
     await db_session.commit()
 
     fake_placement = SimpleNamespace(
@@ -178,7 +174,7 @@ async def test_shadow_no_default_keeps_none(db_session):
                 runtime_id=member.runtime_id,
                 claim_token="tok",
             )
-        )
+        ),
     )
     fake_svc = SimpleNamespace(
         _session=db_session,
