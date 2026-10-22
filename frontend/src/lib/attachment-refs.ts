@@ -367,10 +367,11 @@ function linesSuffix(name: string, lines: [number, number]): string {
 
 /**
  * 纯文本展示格式化（2026-10-22-session-composer-slim FR-01）——排队消息摘要、
- * 定时消息摘要、复制结果等不做富标签渲染的场合使用：剥离头部附件标记行，
- * 并把四类行内引用标记替换为人读简写（📎 文件名 / 📄 路径末段 / 📁 目录名 /
- * 🧾 名称:起-止）。发送协议不变（仍是正式标记）；UUID/结构非法片段原样保留
- * （与 parseInlineRefs 容错同口径，不吞用户手写文本）。
+ * 定时消息摘要、复制结果等不做富标签渲染的场合使用：把头部附件标记行转为
+ * 人读「📎 文件名」清单（不丢附件名），并把四类行内引用标记替换为人读简写
+ * （📎 文件名 / 📄 路径末段 / 📁 目录名 / 🧾 名称:起-止）。发送协议不变
+ * （仍是正式标记）；UUID/结构非法片段原样保留（与 parseInlineRefs 容错同口径，
+ * 不吞用户手写文本）。
  */
 export function formatRefsForPlainText(text: string): string {
   const { attachments, text: body } = parseAttachmentMarkers(text);

@@ -10,7 +10,7 @@ created_at: 2026-10-22T15:08:49.335Z
 
 三处展示层降噪，发送协议与后端零改动：
 
-1. **引用纯文本化**：在 `lib/attachment-refs.ts` 新增纯函数 `formatRefsForPlainText()`——先剥离 `[附件:uuid|kind|name]` 标记行（复用 `parseAttachmentMarkers`），再把 `[附件引用:uuid|name]`、`[文件引用:…]`、`[目录引用:…]`、`[代码引用:…|Lx-Ly]` 替换为「📎 文件名」「📄/📁 名称」「🧾 名称:起-止」。消费点：`MessageQueueBar` 的折叠摘要与展开正文、`ScheduledMessagesBar` 摘要、用户气泡的复制文本（`CopyButton.getText`）。气泡内的可点击标签（`InlineAttRefText`）不动。
+1. **引用纯文本化**：在 `lib/attachment-refs.ts` 新增纯函数 `formatRefsForPlainText()`——先把 `[附件:uuid|kind|name]` 标记行转为一行「📎 文件名」清单（复用 `parseAttachmentMarkers`，纯附件无正文也保留附件名），再把 `[附件引用:uuid|name]`、`[文件引用:…]`、`[目录引用:…]`、`[代码引用:…|Lx-Ly]` 替换为「📎 文件名」「📄/📁 名称」「🧾 名称:起-止」。消费点：`MessageQueueBar` 的折叠摘要与展开正文、`ScheduledMessagesBar` 摘要、用户气泡的复制文本（`CopyButton.getText`）。气泡内的可点击标签（`InlineAttRefText`）不动。
 2. **续跑入口迁移**：`SessionConfigBar` 删除 `autoResume` 渲染块与 running 提示行，并移除该 prop；`SessionInputBar` 新增可选 `autoResume` prop，在 + 菜单追加带状态勾选的「中断自动续跑」项，点击调用既有 `handleAutoResumeToggle`。父层 `session-panel-page.tsx` 把原传给配置条的对象改传输入区；dialog/预会话不传即不渲染。
 3. **额度图标化**：`QuotaPill` 桌面与移动端统一改为紧凑图标按钮（`Gauge` 图标 + 当前会话供应商首窗口百分比，D-001；当前会话供应商不可查/无百分比时回退排序第一家），百分比按既有 `quotaLeftToneClass` 阈值着色；完整明细继续走既有 `Popover`（供应商/模型/各窗口/重置时间）。数据查询、keep-last-good、5 分钟轮询、悬浮 2 秒刷新全部保留。
 
