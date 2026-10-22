@@ -2,10 +2,12 @@
 
 三件事：
 
-1. **保护切分** ``split_protected``：围栏代码块（```…```）、行内代码（`…`）、
-   URL 不送翻原样保留——agent 思考里全是代码与路径，送翻必破坏。未闭合
-   围栏（流式截断形态）不匹配保护、内容按正文送翻（fail-open，半截代码
-   翻坏不致命；闭合后自然恢复保护）。
+1. **保护切分** ``split_protected``：中文片段（汉字 + 中文/全角标点）、围栏
+   代码块（```…```）、行内代码（`…`）、URL 不送翻原样保留——agent 思考里
+   全是代码与路径，送翻必破坏；中文片段送进 en→zh 模型会因源端缺词表触发
+   解码崩溃（2026-10-22 生产实测反斜杠乱码）。未闭合围栏（流式截断形态）
+   不匹配保护、内容按正文送翻（fail-open，半截代码翻坏不致命；闭合后自然
+   恢复保护）。
 2. **值得翻判定** ``is_translation_worthy``：中文为主（CJK 占比 ≥0.6）或过短
    （压平 <30 字符）或拉丁字母太少（<8 个）跳过——与前端
    ``lib/thinking-translate.ts needsTranslation`` 同规则双判定（前端跳过
@@ -52,7 +54,7 @@ _SENTENCE_SPLIT_RE = re.compile(r"(?<=[.!?])\s+")
 
 @dataclass(frozen=True, slots=True)
 class SourceSegment:
-    """一段原文切片：translatable=True 送翻，False 原样保留（代码/URL）。"""
+    """一段原文切片：translatable=True 送翻，False 原样保留（代码/URL/中文片段）。"""
 
     text: str
     translatable: bool
