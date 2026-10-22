@@ -93,8 +93,10 @@ function makeHarness(opts: HarnessOptions = {}) {
   const busyFlag = { busy: opts.busy ?? false };
   let clockNow = 1_700_000_000_000;
   const events: string[] = [];
-  const logger: PreflightLogger = (_level, msg) => {
+  const logFields: Record<string, unknown>[] = [];
+  const logger: PreflightLogger = (_level, msg, data) => {
     events.push(msg);
+    logFields.push(data ?? {});
   };
   const runCommand = vi.fn(async (cmd: string): Promise<string | null> => {
     if (cmd === 'sillyspec --version') return state.local;
@@ -873,11 +875,15 @@ function makeStatusHarness(
     targets?: Array<{ workspaceId: string | null; rootPath: string }>;
     /** 按 cwd 区分的 outcome（多目标下「一失败一成功」场景编程）。 */
     outcomeByCwd?: Record<string, SillySpecProgressOutcome>;
+    /** db_missing 连败淘汰回调（2026-10-22-sillyspec-probe-db-missing-evict）。 */
+    statusRootEvict?: (workspaceId: string, rootPath: string) => void;
   } = {},
 ) {
   const events: string[] = [];
-  const logger: PreflightLogger = (_level, msg) => {
+  const logFields: Record<string, unknown>[] = [];
+  const logger: PreflightLogger = (_level, msg, data) => {
     events.push(msg);
+    logFields.push(data ?? {});
   };
   const bin = opts.bin === undefined ? STATUS_BIN : opts.bin;
   const cwd = opts.cwd === undefined ? STATUS_CWD : opts.cwd;
@@ -910,10 +916,12 @@ function makeStatusHarness(
     statusCwd: () => cwd,
     statusTimeoutMs: opts.timeoutMs ?? 5,
     statusTargets: opts.targets ? () => opts.targets! : undefined,
+    statusRootEvict: opts.statusRootEvict,
   });
   return {
     manager,
     events,
+    logFields,
     calls,
     runProgressJson,
     /** 翻转下一拍 outcome（三态流转 ①→③ 序列用）。 */
@@ -1392,5 +1400,91 @@ describe('2026-09-08 工作区级 map：多目标采集与快照', () => {
     targets = [TARGETS[0]!];
     await manager.collectStatusOnce();
     expect(Object.keys(manager.getStatusMapSnapshot()!)).toEqual(['ws-alpha']);
+  });
+});
+
+
+describe('2026-10-22-sillyspec-probe-db-missing-evict：db_missing 连败淘汰', () => {
+  const WS = 'ws-urgent';
+  const ROOT = '/mnt/e/Java/crrc/qmdp/urgent';
+  const TARGETS = [{ workspaceId: WS, rootPath: ROOT }];
+  const DB_MISSING: SillySpecProgressOutcome = {
+    code: 2,
+    stdout: JSON.stringify({
+      schema_version: 1,
+      ok: false,
+      errors: ['无法核验：进度库不存在——项目尚未初始化进度，只读总览不会为其建库'],
+      codes: ['db_missing'],
+      command: 'progress show --json',
+    }),
+    timedOut: false,
+  };
+
+  it('db_missing 连续 3 次 → 第 3 次淘汰（evict 回调/心跳槽位清除/日志），第 4 轮不再探测', async () => {
+    const evictions: Array<{ workspaceId: string; rootPath: string }> = [];
+    const h = makeStatusHarness({
+      targets: TARGETS,
+      outcomeByCwd: {},
+      statusRootEvict: (workspaceId, rootPath) =>
+        evictions.push({ workspaceId, rootPath }),
+    });
+    // 先成功一拍让心跳 map 有该工作区槽位（对应生产：历史曾有数据）。
+    await h.manager.collectStatusOnce();
+    expect(h.manager.getStatusMapSnapshot()?.[WS]).toBeDefined();
+    // 转入永久缺库：连败不计瞬态失败（无噪音），第 3 次淘汰。
+    h.setOutcomeByCwd({ [ROOT]: DB_MISSING });
+    await h.manager.collectStatusOnce();
+    await h.manager.collectStatusOnce();
+    expect(evictions).toHaveLength(0);
+    expect(h.manager.getStatusError()).toBeNull();
+    expect(h.events.filter((e) => e === 'sillyspec_status_db_missing')).toHaveLength(2);
+    await h.manager.collectStatusOnce();
+    expect(evictions).toEqual([{ workspaceId: WS, rootPath: ROOT }]);
+    expect(h.manager.getStatusMapSnapshot()?.[WS]).toBeUndefined();
+    expect(h.events).toContain('sillyspec_status_root_evicted');
+    // 第 4 轮：skip 表拦截，不再对该根发起 CLI（1 拍成功 + 3 拍 db_missing 后恒为 4）。
+    await h.manager.collectStatusOnce();
+    const urgentCalls = h.calls.filter((c) => c.options.cwd === ROOT);
+    expect(urgentCalls).toHaveLength(4);
+  });
+
+  it('非 db_missing 非零退出：保持 nonzero_exit 记账、日志带 stdout_head、不淘汰', async () => {
+    const evictions: Array<{ workspaceId: string; rootPath: string }> = [];
+    const h = makeStatusHarness({
+      targets: TARGETS,
+      outcomeByCwd: {
+        [ROOT]: { code: 3, stdout: 'boom line', timedOut: false },
+      },
+      statusRootEvict: (workspaceId, rootPath) =>
+        evictions.push({ workspaceId, rootPath }),
+    });
+    // 3 拍（宽限次数内；backoff 跳过轮会按既有语义清账，与本用例无关）。
+    for (let i = 0; i < 3; i += 1) await h.manager.collectStatusOnce();
+    expect(h.manager.getStatusError()).toMatchObject({
+      reason: 'nonzero_exit',
+      detail: 'exit_code=3',
+    });
+    expect(evictions).toHaveLength(0);
+    expect(
+      h.logFields.some((f) => 'stdout_head' in (f as Record<string, unknown>)),
+    ).toBe(true);
+  });
+
+  it('采集成功重置连败计数：2 次失败 → 成功 → 再 2 次失败不淘汰', async () => {
+    const evictions: Array<{ workspaceId: string; rootPath: string }> = [];
+    const h = makeStatusHarness({
+      targets: TARGETS,
+      outcomeByCwd: { [ROOT]: DB_MISSING },
+      statusRootEvict: (workspaceId, rootPath) =>
+        evictions.push({ workspaceId, rootPath }),
+    });
+    await h.manager.collectStatusOnce();
+    await h.manager.collectStatusOnce();
+    h.setOutcomeByCwd({});
+    await h.manager.collectStatusOnce();
+    h.setOutcomeByCwd({ [ROOT]: DB_MISSING });
+    await h.manager.collectStatusOnce();
+    await h.manager.collectStatusOnce();
+    expect(evictions).toHaveLength(0);
   });
 });

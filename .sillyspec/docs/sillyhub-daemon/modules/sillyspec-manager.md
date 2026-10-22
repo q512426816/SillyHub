@@ -56,3 +56,20 @@ _runUpgrade: 置 running(同步先于任何 await，in-flight 门依赖) → ins
   跑的 sillyspec 命令（ghostCleanup 含平台同步收敛）同样获得熔断预算放宽，
   process.env 预设时原值优先。该函数已导出供测试真实 spawn 直测（`node -e`
   打印环境变量断言），属 harness 零 spawn 策略的例外块。
+
+## 2026-10-22-sillyspec-probe-db-missing-evict 增量（db_missing 连败淘汰 + 诊断增强）
+
+- 背景：平台已删除的工作区根仍持久化在 `sillyspec-status-roots.json` 被反复探测；
+  项目未初始化进度库时 `progress show --json` 恒 exit 2（envelope `codes=['db_missing']`，
+  EXIT_UNKNOWN=「无法核验」），daemon 记瞬态失败进 backoff——纯噪音。
+- `_collectOneTarget` 非零退出时解析 stdout envelope 的 `codes`（`parseProgressEnvelopeCodes`，
+  CLI 契约保证失败时 stdout 恒为合法 JSON）：含 `db_missing` 视为项目侧永久缺库——
+  按 cwd 计连败（`sillyspec_status_db_missing` warn），连续 3 次（`STATUS_DB_MISSING_EVICT_AFTER`）
+  淘汰：cwd 进进程内 skip 表、清 `sillyspec_status_map` 槽位、经新依赖回调
+  `statusRootEvict(workspaceId, rootPath)` 通知 daemon 删 `_sillyspecStatusRoots` 条目并
+  持久化 roots 文件（重启不复活；工作区重新 claim 时 `_noteSillySpecStatusRoot` 重新注册即恢复采集）。
+  淘汰路径**不计瞬态失败**（对齐跨仓子目录跳过语义）；非 db_missing 的非零退出保持既有
+  `nonzero_exit` 记账，日志新增 `stdout_head`（首行 ≤200 字符）便于诊断。
+- 采集成功清 db_missing 连败计数；workspaceId=null（legacy 单槽位）只做 cwd 级跳过。
+- 测试面：`tests/sillyspec-manager.test.ts`「db_missing 连败淘汰」describe（淘汰时序/
+  未知退出记账/成功重置计数）。

@@ -185,6 +185,14 @@ export const SILLYSPEC_STATUS_BUDGET_BYTES = 32 * 1024;
 const SILLYSPEC_STATUS_MAX_BUFFER = 8 * 1024 * 1024;
 
 /**
+ * db_missing 连败淘汰阈值（2026-10-22-sillyspec-probe-db-missing-evict）：
+ * `progress show --json` 连续 N 次返回 envelope codes=['db_missing']（项目侧
+ * 永久缺库）→ 该工作区根从采集目标淘汰（skip 表 + evict 回调删 LRU 条目并
+ * 持久化），不再每轮空跑刷日志。
+ */
+const STATUS_DB_MISSING_EVICT_AFTER = 3;
+
+/**
  * 平台命令（resolve / ghost cleanup 各步）单进程执行超时默认（120s）。design
  * §5 Phase2 第2条 Grill 裁决：keep-local 内置自动重推 sync 有网络往返，比 30s
  * 采集宽，单变更粒度 120s 够用。config 键 sillyspec_command_timeout_sec（默认
@@ -641,6 +649,14 @@ export interface SillySpecManagerDeps {
    *（兼容：映射未建立时 legacy 字段仍出数）。缺省 undefined 同样回退。
    */
   statusTargets?: () => SillySpecStatusTarget[];
+  /**
+   * db_missing 连败淘汰回调（2026-10-22-sillyspec-probe-db-missing-evict）：
+   * 同一根连续 STATUS_DB_MISSING_EVICT_AFTER 次缺库时调用——daemon 侧从
+   * `_sillyspecStatusRoots` 删除条目并持久化 roots 文件（重启不复活）；
+   * 工作区重新 claim 时 `_noteSillySpecStatusRoot` 会重新注册，采集恢复。
+   * 缺省不注入 = 无淘汰行为（测试/旧调用零回归）。
+   */
+  statusRootEvict?: (workspaceId: string, rootPath: string) => void;
   /** 采集超时（毫秒），默认 SILLYSPEC_STATUS_TIMEOUT_MS；测试注入调小。 */
   statusTimeoutMs?: number;
   /**
@@ -712,6 +728,14 @@ export class SillySpecManager {
   private readonly _statusRootFor: (workspaceId: string) => string | null;
   /** 工作区级目标提供者（undefined=单槽位旧形态）。 */
   private readonly _statusTargets: (() => SillySpecStatusTarget[]) | undefined;
+  /** db_missing 连败淘汰回调（缺省 undefined=无淘汰行为）。 */
+  private readonly _statusRootEvict:
+    | ((workspaceId: string, rootPath: string) => void)
+    | undefined;
+  /** db_missing 连败计数（cwd 键控；成功清零）。 */
+  private readonly _dbMissingStreaks = new Map<string, number>();
+  /** 已淘汰 cwd（进程内 skip 表：淘汰后不再对该根发起 CLI）。 */
+  private readonly _evictedCwds = new Set<string>();
   /** 采集超时毫秒。 */
   private readonly _statusTimeoutMs: number;
   /**
@@ -794,6 +818,7 @@ export class SillySpecManager {
     this._statusCwd = deps.statusCwd ?? (() => null);
     this._statusRootFor = deps.statusRootFor ?? (() => null);
     this._statusTargets = deps.statusTargets;
+    this._statusRootEvict = deps.statusRootEvict;
     // FR-02（2026-10-21-daemon-sync-hardening）：回退链 deps 显式注入 > env > 默认。
     this._statusTimeoutMs =
       deps.statusTimeoutMs ??
@@ -1015,6 +1040,8 @@ export class SillySpecManager {
     // 登记工作区根，格式实锤自 sillyspec CLI local-register.js tryWriteMarker）；
     // 不记失败（非瞬态查询失败，anyFailed 聚合不置位、_statusError 不动）；
     // 具名工作区滞留摘要槽移除（平台不再显示对该根的陈旧摘要）。
+    // db_missing 淘汰表命中：项目侧永久缺库已被淘汰，不再对该根发起 CLI。
+    if (this._evictedCwds.has(cwd)) return true;
     const crossrepoMarker = join(cwd, '.git', 'sillyspec-crossrepo.json');
     if (existsSync(crossrepoMarker)) {
       if (!this._crossrepoSkipLogged.has(cwd)) {
@@ -1089,9 +1116,34 @@ export class SillySpecManager {
       return false;
     }
     if (outcome.code !== 0) {
+      // 2026-10-22-sillyspec-probe-db-missing-evict：CLI 失败时 stdout 恒为合法
+      // JSON envelope（runStatusOverview 契约），解析 codes 精确归因。
+      const codes = parseProgressEnvelopeCodes(outcome.stdout);
+      if (codes.includes('db_missing')) {
+        // 项目侧永久缺库（从未 progress init）——非瞬态，不计 _recordStatusError；
+        // 连败 3 次淘汰目标（skip 表 + evict 回调删 LRU 条目并持久化）。
+        const streak = (this._dbMissingStreaks.get(cwd) ?? 0) + 1;
+        this._dbMissingStreaks.set(cwd, streak);
+        this._log('warn', 'sillyspec_status_db_missing', { cwd, consecutive: streak });
+        if (streak >= STATUS_DB_MISSING_EVICT_AFTER) {
+          this._dbMissingStreaks.delete(cwd);
+          this._evictedCwds.add(cwd);
+          this._log('info', 'sillyspec_status_root_evicted', {
+            cwd,
+            workspace_id: workspaceId ?? undefined,
+            consecutive: streak,
+          });
+          if (workspaceId !== null) {
+            this._statusSummariesByWs.delete(workspaceId);
+            this._statusRootEvict?.(workspaceId, cwd);
+          }
+        }
+        return true;
+      }
       this._log('warn', 'sillyspec_status_nonzero_exit', {
         cwd,
         exit_code: outcome.code,
+        stdout_head: outcome.stdout.split('\n', 1)[0]?.slice(0, 200) ?? '',
       });
       this._recordStatusError('nonzero_exit', `exit_code=${outcome.code}`);
       return false;
@@ -1106,6 +1158,8 @@ export class SillySpecManager {
       this._markStatusCapabilityMissing('bad_json', { cwd });
       return true;
     }
+    // 采集成功清 db_missing 连败计数（FR-03：成功即复位，重新计满才淘汰）。
+    this._dbMissingStreaks.delete(cwd);
     const summary = buildSillySpecStatusSummary(parsed);
     // 2026-09-07-conflict-diff-compare task-02：心跳补报——buildSillySpecStatusSummary
     // 是纯函数不落 fs，ql_id 在此处后处理填充（quick-* 名读 guard.json，单条失败仅
@@ -2675,6 +2729,25 @@ async function snapshotOneSpecPath(
  * SILLYSPEC_SYNC_TIMEOUT_MS=20000 缺省（process.env 已预设时原值优先，展开顺序
  * 即语义）。导出供测试直测（对齐本文件 envelope → 心跳摘要纯函数导出先例）。
  */
+/**
+ * 解析 `progress show --json` 失败时 stdout envelope 的 `codes` 数组
+ * （2026-10-22-sillyspec-probe-db-missing-evict）：CLI 契约保证失败时 stdout 恒为
+ * 合法 JSON envelope；解析失败/无 codes 返回 []（回退既有 nonzero_exit 记账）。
+ */
+function parseProgressEnvelopeCodes(stdout: string): string[] {
+  try {
+    const parsed = JSON.parse(
+      stdout.charCodeAt(0) === 0xfeff ? stdout.slice(1) : stdout,
+    ) as { codes?: unknown };
+    const codes = parsed.codes;
+    return Array.isArray(codes)
+      ? codes.filter((c): c is string => typeof c === 'string')
+      : [];
+  } catch {
+    return [];
+  }
+}
+
 export function runProgressJsonDefault(
   file: string,
   args: string[],

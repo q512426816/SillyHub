@@ -2347,6 +2347,17 @@ export class Daemon {
               rootPath: v.rootPath,
             }),
           ),
+        // 2026-10-22-sillyspec-probe-db-missing-evict：db_missing 连败淘汰——
+        // 删 LRU 条目并持久化 roots 文件（重启不复活）；工作区重新 claim 时
+        // _noteSillySpecStatusRoot 重新注册，采集恢复。
+        statusRootEvict: (workspaceId, rootPath) => {
+          this._sillyspecStatusRoots.delete(workspaceId);
+          void this._persistSillySpecStatusRoots();
+          this._logger.info('sillyspec_status_root_evict_persisted', {
+            workspace_id: workspaceId,
+            root_path: rootPath,
+          });
+        },
         // 2026-09-04-conflict-resolve-entry task-06：平台命令执行超时（config 键
         // sillyspec_command_timeout_sec 默认 120s）。归一口径仿
         // _sillyspecStatusIntervalSec（Number() 容忍字符串/null 脏值），但超时无
