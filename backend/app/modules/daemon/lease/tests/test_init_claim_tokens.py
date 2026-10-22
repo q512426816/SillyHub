@@ -327,8 +327,11 @@ class TestInitClaimDefensiveDegrade:
         assert set(pc.keys()) == {"server_origin", "strategy"}
         # 降级不再静默（docs/sillyspec/init-lease-silent-no-local-yaml.md）：warning
         # 带原因枚举，供平台侧排查「init 成功但 local.yaml platform 段缺失」。
-        # get_logger 是 structlog 控制台渲染（不进 stdlib caplog），按 stdout 文本断言。
-        out = capsys.readouterr().out
+        # get_logger 是 structlog 控制台渲染（不进 stdlib caplog），按文本断言；
+        # 渲染流取决于全局日志配置就绪时机（全量套件下为 stderr、隔离跑为 stdout，
+        # 2026-10-22 合并后全量实证），故双流合并判定。
+        captured = capsys.readouterr()
+        out = captured.out + captured.err
         assert "init_claim_local_yaml_skipped" in out
         assert "actor_user_id" in out
 
@@ -346,7 +349,8 @@ class TestInitClaimDefensiveDegrade:
         assert plat_mock.call_count == 0
         assert mcp_mock.call_count == 0
         assert "local_yaml" not in payload.get("platform_config", {})
-        out = capsys.readouterr().out
+        captured = capsys.readouterr()
+        out = captured.out + captured.err
         assert "init_claim_local_yaml_skipped" in out
         assert "workspace_id" in out
 

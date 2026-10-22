@@ -18,19 +18,37 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_asyn
 from app.models.base import BaseModel
 
 # Import to ensure registration (order-independent; tables are idempotent).
+from app.modules.agent.profile import model as _agent_profile  # noqa: F401
 from app.modules.auth import model as _auth  # noqa: F401
 from app.modules.daemon import model as _daemon  # noqa: F401
 from app.modules.daemon.grants import model as _grants  # noqa: F401
+from app.modules.llm_provider import model as _llm_provider  # noqa: F401
+from app.modules.tool_gateway.tool_policy import ToolPolicy  # noqa: F401
+from app.modules.workspace import model as _ws  # noqa: F401
 
 
 def _selected_metadata() -> MetaData:
     """Build a metadata containing only the tables grants tests need.
 
     FK 闭包：daemon_runtime_grants → daemon_instances / users；
-    daemon_instances → users。users 表自身无外键，闭包到此为止。
+    daemon_instances → users。
+    2026-10-21-agent-profile-slim-default task-01：users 新增
+    default_agent_profile_id FK→agent_profiles.id——users「无外键」假设失效，
+    闭包须纳入 agent_profiles 及其 FK 目标（workspaces / llm_providers /
+    tool_policies，范式同 workspace/member_runtimes/tests/conftest.py），
+    否则 to_metadata + create_all 抛 NoReferencedTableError('agent_profiles')。
     """
     full = BaseModel.metadata
-    needed = ("users", "daemon_instances", "daemon_runtime_grants")
+    needed = (
+        "users",
+        "daemon_instances",
+        "daemon_runtime_grants",
+        # users.default_agent_profile_id → agent_profiles → workspaces / llm_providers / tool_policies。
+        "agent_profiles",
+        "workspaces",
+        "llm_providers",
+        "tool_policies",
+    )
     meta = MetaData()
     for name in needed:
         if name in full.tables:
