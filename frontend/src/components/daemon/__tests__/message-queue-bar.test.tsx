@@ -583,3 +583,97 @@ describe("MessageQueueBar 队列三操作（task-10 / FR-04 FR-05 FR-06）", () 
     expect(container.querySelector('[draggable="true"]')).toBeNull();
   });
 });
+
+// ── 2026-10-21-task-wakeup-event-queue：唤醒通知排队呈现改事件形式 ───────────
+
+describe("MessageQueueBar 唤醒条目事件行（2026-10-21-task-wakeup-event-queue）", () => {
+  afterEach(() => {
+    cleanup();
+  });
+
+  const WAKEUP_PROMPT =
+    "[后台任务通知] 以下 4 个后台子代理任务已全部结束（列表中的每一个都已终止，没有仍在运行的任务）：\n- 任务「下载翻译模型」已失败（用时 00:00）\n- 任务「生产检查告警」已完成（用时 00:00）\n- 任务「宿主机与公网健康检查」已完成（用时 00:00）\n- 任务「宿主机与公网健康检查」已完成（用时 00:00）\n请逐条核对上述每个任务";
+
+  function makeWakeupEntry(overrides: Partial<QueueEntry> = {}): QueueEntry {
+    return makeEntry({
+      id: "mq-wu",
+      prompt: WAKEUP_PROMPT,
+      displayPrompt: WAKEUP_PROMPT,
+      origin: "task_wakeup",
+      ...overrides,
+    });
+  }
+
+  it("FR-01 唤醒条目移出排队列表——计数只计用户消息、chip 列表无唤醒条目", () => {
+    render(
+      <MessageQueueBar
+        entries={[
+          makeEntry({ id: "mq-u1", prompt: "用户消息一", displayPrompt: "用户消息一" }),
+          makeEntry({ id: "mq-u2", prompt: "用户消息二", displayPrompt: "用户消息二" }),
+          makeWakeupEntry(),
+        ]}
+        onRemove={vi.fn()}
+        onRetry={vi.fn()}
+      />,
+    );
+    expect(screen.getByText("排队消息（2）")).toBeTruthy();
+    // 用户消息 chip 照常渲染（含操作按钮）。
+    expect(screen.getAllByLabelText("从队列移除该消息")).toHaveLength(2);
+    // 唤醒条目以事件行呈现，不在「排队消息」chip 列表中。
+    expect(screen.getByText("收到任务消息")).toBeTruthy();
+    expect(screen.getByText(/4 个后台任务已结束 · 本轮结束后自动继续/)).toBeTruthy();
+  });
+
+  it("FR-02 事件行折叠展开——默认折叠、点击展开通知全文（剥前缀）", () => {
+    render(
+      <MessageQueueBar
+        entries={[makeWakeupEntry()]}
+        onRemove={vi.fn()}
+        onRetry={vi.fn()}
+      />,
+    );
+    expect(screen.queryByText(/以下 4 个后台子代理任务已全部结束/)).toBeNull();
+    fireEvent.click(screen.getByText("收到任务消息"));
+    const wakeupBody = WAKEUP_PROMPT.replace(/^\[后台任务通知\]\s*/, "");
+    expect(
+      screen.getByText((_c, node) => node?.textContent === wakeupBody),
+    ).toBeTruthy();
+    // 事件行零操作按钮：无删除/重试/编辑/立即发送。
+    expect(screen.queryByLabelText("从队列移除该消息")).toBeNull();
+    expect(screen.queryByLabelText("重新编辑该消息")).toBeNull();
+    expect(screen.queryByLabelText(/立即发送/)).toBeNull();
+    expect(document.querySelector('[draggable="true"]')).toBeNull();
+  });
+
+  it("FR-02 纯唤醒队列——不渲染「排队消息」标签与满员提示", () => {
+    const { container } = render(
+      <MessageQueueBar
+        entries={[makeWakeupEntry()]}
+        onRemove={vi.fn()}
+        onRetry={vi.fn()}
+      />,
+    );
+    expect(screen.queryByText(/排队消息（/)).toBeNull();
+    expect(screen.queryByText(/队列已满/)).toBeNull();
+    expect(screen.getByText("收到任务消息")).toBeTruthy();
+    expect(container.textContent).not.toContain("排队消息");
+  });
+
+  it("FR-01 用户伪造前缀不误判——origin 为空的前缀消息仍按用户消息计数渲染", () => {
+    render(
+      <MessageQueueBar
+        entries={[
+          makeEntry({
+            id: "mq-forged",
+            prompt: "[后台任务通知] 用户手打前缀",
+            displayPrompt: "[后台任务通知] 用户手打前缀",
+          }),
+        ]}
+        onRemove={vi.fn()}
+        onRetry={vi.fn()}
+      />,
+    );
+    expect(screen.getByText("排队消息（1）")).toBeTruthy();
+    expect(screen.queryByText("收到任务消息")).toBeNull();
+  });
+});

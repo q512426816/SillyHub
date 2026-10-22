@@ -33,7 +33,8 @@
  *   - failed 条目红色语义边框（border/text-destructive）+ ↻ 重试/✕ 删除按钮
  *     （D-003 失败留队头，不自动重试，重试仅由用户点击触发）；
  *   - pending 条目提供 ✕ 删除；sending 条目转 spinner 不提供操作；
- *   - 队列满（entries.length >= max，D-002 默认 5）显示「队列已满（N/N）」；
+ *   - 队列满（用户消息条目 >= max，D-002 默认 5）显示「队列已满（N/N）」
+ *     （2026-10-21-task-wakeup-event-queue：计数/满员只计用户消息条目）；
  *   - 点击条目展开查看完整 displayPrompt（带附件标记行）与失败原因。
  *
  * 纯展示组件：不 fetch、不持队列真相、不引状态库；满员判断由父级传入的
@@ -153,21 +154,40 @@ export function MessageQueueBar({
   if (entries.length === 0) return null;
 
   const byId = new Map(entries.map((entry) => [entry.id, entry] as const));
+  // 2026-10-21-task-wakeup-event-queue：唤醒通知条目（结构化标记 origin=
+  // 'task_wakeup'，服务端凭证写入、Bearer 不可伪造——对齐 2026-10-11 守卫
+  // 的「不看内容前缀」口径）移出「排队消息」用户消息语义：不占计数/满员/
+  // 拖拽，单独渲染为「收到任务消息 · 待本轮结束自动继续」事件行（dsh
+  // turn-trigger 同款；派发后时间线 task_wakeup 折叠行接管呈现）。
+  const isWakeupEntry = (entry: QueueEntry) => entry.origin === "task_wakeup";
+  const wakeupEntries = entries.filter(isWakeupEntry);
+  const userEntries = entries.filter((entry) => !isWakeupEntry(entry));
   // 拖拽即时预览只改本地展示序 override：orderIds 非空时按其排（entries 真相不动），
   // 中途新增/删除的条目按服务端相对位置兜底（新增追加尾部、已删自动过滤）。
+  // override 只作用于用户消息组（唤醒条目不可拖、永不入 orderIds）。
+  const userById = new Map(userEntries.map((entry) => [entry.id, entry] as const));
   const displayEntries: QueueEntry[] = orderIds
     ? [
         ...orderIds
-          .filter((id) => byId.has(id))
-          .map((id) => byId.get(id) as QueueEntry),
-        ...entries.filter((entry) => !orderIds.includes(entry.id)),
+          .filter((id) => userById.has(id))
+          .map((id) => userById.get(id) as QueueEntry),
+        ...userEntries.filter((entry) => !orderIds.includes(entry.id)),
       ]
-    : entries;
+    : userEntries;
   // 正在编辑的条目（若编辑中被父级移除，浮层随之消失）。
   const editingEntry =
     editingId != null && byId.has(editingId) ? byId.get(editingId) : undefined;
 
-  const isFull = entries.length >= max;
+  const isFull = userEntries.length >= max;
+
+  // 2026-10-21-task-wakeup-event-queue：事件行任务数——按通知正文「- 任务「」
+  // 行计数（防漏报模板每任务一行；解析失败兜底 1，与折叠行同口径）。
+  const wakeupTaskCount = (entry: QueueEntry) => {
+    const body = entry.prompt.startsWith(TASK_WAKEUP_PROMPT_PREFIX)
+      ? entry.prompt.slice(TASK_WAKEUP_PROMPT_PREFIX.length)
+      : entry.prompt;
+    return (body.match(/^- 任务「/gm) ?? []).length || 1;
+  };
 
   // FR-05 降级标注：仅当父层传入 provider 且 steering=false（生成镜像唯一
   // 能力源 provider-caps.ts，未知 provider 查询默认 false）才标注；未传
@@ -251,19 +271,66 @@ export function MessageQueueBar({
 
   return (
     <div className="shrink-0 border-t bg-card px-5 py-2">
+      {/* 唤醒通知事件行（2026-10-21-task-wakeup-event-queue）：dsh turn-trigger
+          同款事件反馈形式——「收到任务消息 · 待本轮结束自动继续」，折叠/展开
+          全文，零操作按钮（通知不可操作，派发由本轮结束自动触发；中断本轮
+          即立即派发）。派发后时间线 task_wakeup 折叠行接管呈现。 */}
+      {wakeupEntries.map((entry) => {
+        const expanded = expandedId === entry.id;
+        const wakeupBody = entry.prompt.startsWith(TASK_WAKEUP_PROMPT_PREFIX)
+          ? entry.prompt.slice(TASK_WAKEUP_PROMPT_PREFIX.length).trim() ||
+            "系统通知"
+          : entry.prompt;
+        return (
+          <div key={entry.id} className="flex w-full flex-col gap-1 pb-1.5">
+            <button
+              type="button"
+              onClick={() => setExpandedId(expanded ? null : entry.id)}
+              aria-expanded={expanded}
+              className="flex w-fit cursor-pointer select-text items-center gap-[7px] rounded-md px-1.5 py-[3px] text-left text-[11px] text-muted-foreground hover:bg-muted"
+            >
+              <span aria-hidden className="shrink-0">
+                ✈
+              </span>
+              <span className="shrink-0 font-medium">收到任务消息</span>
+              <span className="shrink-0 opacity-75">{`（${wakeupTaskCount(entry)} 个后台任务已结束 · 本轮结束后自动继续）`}</span>
+              <span
+                aria-hidden
+                className={cn(
+                  "shrink-0 text-[9px] transition-transform duration-150",
+                  expanded && "rotate-90",
+                )}
+              >
+                ▶
+              </span>
+            </button>
+            {expanded && (
+              <div className="select-text whitespace-pre-wrap rounded-lg border border-dashed border-brand-300 bg-brand-50/50 px-3 py-2 text-xs leading-5 text-muted-foreground">
+                {wakeupBody}
+              </div>
+            )}
+          </div>
+        );
+      })}
+
+      {/* 用户消息排队 chips 行：仅存在用户消息条目时渲染（纯唤醒队列不出现
+          「排队消息」标签——事件行独立承担呈现）。 */}
+      {userEntries.length > 0 && (
       <div
         className="flex items-center gap-1.5 overflow-x-auto pb-0.5"
         onDrop={handleRowDrop}
       >
-        {/* 队列计数标签（说明本行 chips 为排队消息）。 */}
+        {/* 队列计数标签（说明本行 chips 为排队消息；仅统计用户消息条目——
+            唤醒通知已上移事件行，计数口径对齐后端 SESSION_QUEUE_MAX_PENDING
+            的唤醒豁免）。 */}
         <span className="shrink-0 text-[11px] font-medium text-muted-foreground">
-          排队消息（{entries.length}）
+          排队消息（{userEntries.length}）
         </span>
 
         {/* D-002：满员提示（antd Tag 预设 warning，经主题 token 取色）。 */}
         {isFull && (
           <Tag color="warning" className="!m-0 shrink-0 !text-[11px]">
-            队列已满（{entries.length}/{max}）
+            队列已满（{userEntries.length}/{max}）
           </Tag>
         )}
 
@@ -458,6 +525,7 @@ export function MessageQueueBar({
           );
         })}
       </div>
+      )}
 
       {/* ✎ 编辑浮层（FR-06 / 原型 .edit-pop）：队列行下方单条展开，取消/保存右对齐。
           说明行含 failed 转等待中提示（对 pending 条目该句为一般性说明，不误导）。 */}
