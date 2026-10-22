@@ -35,6 +35,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import importlib
 import json
 import sys
 import uuid
@@ -53,6 +54,54 @@ from sqlmodel import col
 
 from app.modules.agent.model import AgentRun, AgentRunLog, AgentSession
 from app.modules.agent.tool_kind import classify_tool_kind
+
+# 独立进程只 import agent 模块时，AgentRun/AgentSession 外键指向的目标表
+# （tasks / worktree_leases / changes / daemon_runtimes / daemon_task_leases /
+# agent_profiles / tool_policies 等）不在 SQLAlchemy metadata，flush 排序会抛
+# NoReferencedTableError（生产实测缺一个报一个，逐个补不可维护）。对齐
+# migrations/env.py 的 eager import 清单全量注册——env.py 新增模型模块时此处
+# 同步追加。SQLAlchemy 在 flush 时才解析 FK 目标表，故循环置于 import 之后即可。
+_MODEL_MODULES: tuple[str, ...] = (
+    "app.modules.admin.model",
+    "app.modules.agent.model",
+    "app.modules.agent.profile.model",
+    "app.modules.auth.model",
+    "app.modules.change.model",
+    "app.modules.daemon.model",
+    "app.modules.daemon.audit.model",
+    "app.modules.daemon.grants.model",
+    "app.modules.file.model",
+    "app.modules.git_gateway.model",
+    "app.modules.git_identity.model",
+    "app.modules.incident.model",
+    "app.modules.llm_provider.model",
+    "app.modules.mcp_gateway.model",
+    "app.modules.mcp_registry.model",
+    "app.modules.notification.model",
+    "app.modules.platform_sync.model",
+    "app.modules.ppm.kanban.model",
+    "app.modules.ppm.plan.model",
+    "app.modules.ppm.problem.model",
+    "app.modules.ppm.project.model",
+    "app.modules.ppm.task.model",
+    "app.modules.release.model",
+    "app.modules.scan_docs.conflict_model",
+    "app.modules.scan_docs.model",
+    "app.modules.settings.model",
+    "app.modules.skill_source.model",
+    "app.modules.skills.model",
+    "app.modules.spec_profile.model",
+    "app.modules.spec_workspace.model",
+    "app.modules.task.model",
+    "app.modules.tool_gateway.model",
+    "app.modules.tool_gateway.tool_policy",
+    "app.modules.workflow.model",
+    "app.modules.workspace.member_runtimes.model",
+    "app.modules.workspace.model",
+    "app.modules.worktree.model",
+)
+for _module_name in _MODEL_MODULES:
+    importlib.import_module(_module_name)
 
 RESTORE_MARKER = "agent-log-jsonl"
 RESTORE_NAMESPACE = uuid.UUID("7f0b2f4e-5c1d-4a8e-9f3c-2b6a1d8e4c70")
