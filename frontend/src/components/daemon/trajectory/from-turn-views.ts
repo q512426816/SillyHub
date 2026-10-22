@@ -153,12 +153,16 @@ export function trajectoryFromTurnViews(
       const startedAt = start ?? turnStart;
       const endedAt = segmentEnd(segment, startedAt);
       const kind = rowKindOf(segment);
-      const clipped = clip(
-        kind === "tool"
-          ? (segment as { primary?: string | null }).primary ?? undefined
-          : (segment as { text?: string }).text,
-        maxTextLen,
-      );
+      // 2026-10-22-trajectory-view-redesign（D-015）：工具行拆出参数与结果——
+      // raw = tool_use JSON 原文（详情「参数」），result = 配对的 tool_result
+      // （详情「结果」，缺失时退回 primary 摘要并标「未捕获结果」归渲染端）。
+      const isTool = kind === "tool";
+      const toolSeg = segment as { raw?: string; result?: string; primary?: string | null };
+      const inputClip = isTool ? clip(toolSeg.raw, maxTextLen) : null;
+      const outputClip = isTool
+        ? clip(toolSeg.result ?? toolSeg.primary ?? undefined, maxTextLen)
+        : null;
+      const textClip = isTool ? null : clip((segment as { text?: string }).text, maxTextLen);
       const status: TrajectoryRowStatus =
         kind === "tool"
           ? (segment as { status?: "running" | "ok" | "deny" }).status === "deny"
@@ -169,7 +173,8 @@ export function trajectoryFromTurnViews(
           : rowStatusOf(turn.status);
 
       turnRows.push({
-        id: `${runId}:${kind}:${segment.id || i}`,
+        // R-08：段 id 缺失时用「起点 + 位置」组合，避免纯下标在流式追加中漂移。
+        id: `${runId}:${kind}:${segment.id || `${startedAt}:${i}`}`,
         kind,
         turnIndex,
         stepIndex: 0,
@@ -181,11 +186,15 @@ export function trajectoryFromTurnViews(
         ...(kind === "tool"
           ? { toolName: (segment as { toolName?: string | null }).toolName ?? undefined }
           : {}),
-        ...(clipped.truncated ? { truncated: true } : {}),
-        ...(clipped.value
+        ...(inputClip?.truncated || outputClip?.truncated || textClip?.truncated
+          ? { truncated: true }
+          : {}),
+        ...(inputClip?.value ? { inputText: inputClip.value } : {}),
+        ...(outputClip?.value ? { outputText: outputClip.value } : {}),
+        ...(textClip?.value
           ? kind === "user"
-            ? { inputText: clipped.value }
-            : { outputText: clipped.value }
+            ? { inputText: textClip.value }
+            : { outputText: textClip.value }
           : {}),
         ...(kind === "assistant" || kind === "thinking"
           ? {}
