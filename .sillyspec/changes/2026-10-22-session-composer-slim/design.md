@@ -57,7 +57,8 @@ UI 证据：本仓前端为真码 React 管线，改动直接用项目现有 Vit
 
 | 操作 | 路径 | 说明 |
 | --- | --- | --- |
-| 修改 | frontend/src/lib/attachment-refs.ts | 新增 `formatRefsForPlainText` 纯函数 |
+| 修改 | frontend/src/lib/attachment-refs.ts | 新增 `formatRefsForPlainText` 纯函数；迁入 `parseAttachmentMarkers` |
+| 修改 | frontend/src/components/daemon/runtime-session-helpers.tsx | `parseAttachmentMarkers` 改为从 lib re-export，导出面不变 |
 | 修改 | frontend/src/components/daemon/message-queue-bar.tsx | 摘要/展开正文剥离标记行并简化引用 |
 | 修改 | frontend/src/components/daemon/scheduled-messages-bar.tsx | 定时消息摘要简化引用 |
 | 修改 | frontend/src/components/daemon/turn-timeline.tsx | 复制文本使用简化后的正文 |
@@ -70,4 +71,6 @@ UI 证据：本仓前端为真码 React 管线，改动直接用项目现有 Vit
 | 修改 | frontend/src/components/daemon/__tests__/session-input-bar-plus-menu.test.tsx | 新增续跑菜单项用例 |
 | 修改 | frontend/src/components/sessions/__tests__/session-config-bar.test.tsx | 更新移除开关断言 |
 | 修改 | frontend/src/components/sessions/__tests__/ctx-usage-bar.test.tsx | 更新额度图标断言 |
+| 修改 | frontend/src/components/daemon/__tests__/session-history-scroll.test.tsx | 并发下等待窗口稳定化（固定 50ms → waitFor 轮询，语义不变） |
+| 修改 | frontend/src/app/(dashboard)/sessions/__tests__/page.test.tsx | 50 页跳转用例等待窗口放宽（全量并发下的时序抖动，语义不变） |
 | 新增 | .sillyspec/changes/2026-10-22-session-composer-slim/visual-evidence.md | UI 对照证据记录 |

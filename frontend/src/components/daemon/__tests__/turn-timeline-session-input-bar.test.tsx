@@ -424,7 +424,7 @@ describe("TurnTimeline 用户气泡复制按钮（task-11 / 2026-08-31-session-q
     expect(writeText).toHaveBeenCalledWith("用户提问");
   });
 
-  it("带附件标记 prompt：复制剥离标记后的正文（writeText 参数不含 [附件: 行）", async () => {
+  it("带附件标记 prompt：复制为人读正文（附件转 📎 清单，不含 [附件: 协议行）", async () => {
     const writeText = vi.fn().mockResolvedValue(undefined);
     Object.defineProperty(navigator, "clipboard", { value: { writeText }, configurable: true });
     setupTimeline({
@@ -440,7 +440,8 @@ describe("TurnTimeline 用户气泡复制按钮（task-11 / 2026-08-31-session-q
       fireEvent.click(screen.getByRole("button", { name: "复制" }));
     });
     expect(writeText).toHaveBeenCalledTimes(1);
-    expect(writeText).toHaveBeenCalledWith("帮我看下这个报错");
+    // 2026-10-22-session-composer-slim FR-01：附件名保留为「📎 文件名」清单。
+    expect(writeText).toHaveBeenCalledWith("📎 截图.png\n帮我看下这个报错");
     expect(writeText.mock.calls[0]?.[0]).not.toContain("[附件:");
   });
 

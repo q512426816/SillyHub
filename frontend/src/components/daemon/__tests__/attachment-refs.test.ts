@@ -320,9 +320,16 @@ describe("formatRefsForPlainText（展示层引用简化）", () => {
     expect(formatRefsForPlainText(text)).toBe("📄 a.md📁 docs🧾 b.py:3-9");
   });
 
-  it("头部附件标记行剥离，正文引用同步简化", () => {
+  it("头部附件标记行转为人读附件清单（不丢附件名），正文引用同步简化", () => {
     const prompt = `[附件:${UUID_A}|image|a.png]\n[附件:${UUID_B}|file|b.txt]\n\n看[附件引用:${UUID_A}|a.png]`;
-    expect(formatRefsForPlainText(prompt)).toBe("看📎 a.png");
+    expect(formatRefsForPlainText(prompt)).toBe(
+      "📎 a.png 📎 b.txt\n看📎 a.png",
+    );
+  });
+
+  it("仅附件、无正文：输出附件清单而不是空串（排队/定时摘要不丢附件名）", () => {
+    const prompt = `[附件:${UUID_A}|file|日志.txt]`;
+    expect(formatRefsForPlainText(prompt)).toBe("📎 日志.txt");
   });
 
   it("非法 uuid / 用户手写方括号原样保留（容错不吞字）", () => {

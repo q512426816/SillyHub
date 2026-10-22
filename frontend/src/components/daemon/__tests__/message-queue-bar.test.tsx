@@ -246,8 +246,9 @@ describe("MessageQueueBar（task-09 / D-002 D-003 D-004）", () => {
     expect(container.textContent).not.toContain(uuid);
     expect(container.textContent).not.toContain("[附件引用:");
 
-    // 展开：附件标记行被剥离，正文引用仍是简洁标签。
+    // 展开：标记行转为附件清单（附件名可见），正文引用仍是简洁标签。
     fireEvent.click(screen.getByRole("button", { name: /^等待中，/ }));
+    expect(container.textContent).toContain("📎 截图.png");
     expect(container.textContent).toContain("看📎 截图.png谢谢");
     expect(container.textContent).not.toContain("[附件:");
     expect(container.textContent).not.toContain("[附件引用:");

@@ -38,7 +38,7 @@
  *   - pending 条目提供 ✕ 删除；sending 条目转 spinner 不提供操作；
  *   - 队列满（用户消息条目 >= max，D-002 默认 5）显示「队列已满（N/N）」
  *     （2026-10-21-task-wakeup-event-queue：计数/满员只计用户消息条目）；
- *   - 点击条目展开查看完整 displayPrompt（带附件标记行）与失败原因。
+ *   - 点击条目展开查看完整 displayPrompt（附件标记行已转为人读「📎 文件名」清单）与失败原因。
  *
  * 纯展示组件：不 fetch、不持队列真相、不引状态库；满员判断由父级传入的
  * entries/max 得出。三个新回调 onReorder / onEdit / onDispatchNow 均可选——
@@ -464,7 +464,7 @@ export function MessageQueueBar({
                       ? formatRefsForPlainText(wakeupBody ?? entry.displayPrompt)
                       : summary}
                   </span>
-                  {/* 附件数（D-004：折叠态显示；展开态 displayPrompt 已含附件标记行）。 */}
+                  {/* 附件数（D-004：折叠态显示；展开态已转为人读「📎 文件名」清单）。 */}
                   {!expanded && entry.attachmentIds.length > 0 && (
                     <Tooltip title={`含 ${entry.attachmentIds.length} 个附件`}>
                       <span className="mt-0.5 shrink-0 opacity-80">

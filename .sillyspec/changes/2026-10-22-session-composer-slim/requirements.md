@@ -84,8 +84,8 @@ created_at: 2026-10-22T15:08:49.335Z
 
 ## 测试绑定（每条 FR 至少一行——`FR-NN: test/路径「用例名」`；空行/待填在 flow done 拒收）
 
-FR-01: frontend/src/components/daemon/__tests__/message-queue-bar.test.tsx「引用标记在摘要与展开正文中简化为文件名」；frontend/src/components/daemon/__tests__/attachment-refs.test.ts「formatRefsForPlainText 统一替换附件/工作区标记」
-FR-02: frontend/src/components/daemon/__tests__/session-input-bar-plus-menu.test.tsx「+ 菜单渲染中断自动续跑项并可切换」；frontend/src/components/sessions/__tests__/session-config-bar.test.tsx「配置条不再渲染中断自动续跑开关」
-FR-03: frontend/src/components/sessions/__tests__/ctx-usage-bar.test.tsx「额度图标只显最低剩余百分比，点击弹明细」
-FR-04: frontend/src/components/daemon/__tests__/session-input-bar-plus-menu.test.tsx「续跑项禁用态（会话结束/离线）」；frontend/src/components/sessions/__tests__/ctx-usage-bar.test.tsx「mobile 紧凑形态点击明细照旧」
+FR-01: frontend/src/components/daemon/__tests__/message-queue-bar.test.tsx「引用标记在摘要与展开正文中简化为文件名」；frontend/src/components/daemon/__tests__/attachment-refs.test.ts「formatRefsForPlainText（展示层引用简化）」
+FR-02: frontend/src/components/daemon/__tests__/session-input-bar-plus-menu.test.tsx「autoResume 传入 → 菜单渲染勾选项；点击切换并保持菜单打开」；frontend/src/components/sessions/__tests__/session-config-bar.test.tsx「配置条无续跑开关与运行中提示（即使旧调用方残留传参也不渲染）」
+FR-03: frontend/src/components/sessions/__tests__/ctx-usage-bar.test.tsx「智谱 quota 正常 → 图标只显会话供应商首窗口百分比；明细（模型名/各窗口/重置）在浮层」
+FR-04: frontend/src/components/daemon/__tests__/session-input-bar-plus-menu.test.tsx「autoResume.disabled（会话结束/离线）→ 禁用且点击不触发」；frontend/src/components/sessions/__tests__/ctx-usage-bar.test.tsx「desktop（缺省 mobile=false）：与 mobile 同形态（图标 + 首窗口百分比），明细点击浮层」
 FR-05: 相关测试文件全量运行 + `pnpm lint`（交付时记录实际命令与结果）

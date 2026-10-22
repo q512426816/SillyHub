@@ -373,10 +373,23 @@ function linesSuffix(name: string, lines: [number, number]): string {
  * （与 parseInlineRefs 容错同口径，不吞用户手写文本）。
  */
 export function formatRefsForPlainText(text: string): string {
-  const body = parseAttachmentMarkers(text).text;
-  // 快速路径：不含引用标记时零替换开销。
-  if (!body.includes("[附件引用:") && !body.includes("引用:")) return body;
-  const withAtt = body.replace(
+  const { attachments, text: body } = parseAttachmentMarkers(text);
+  // 附件标记行（backend 写入的元数据行）不可原样露出，也不能直接丢弃——
+  // 附件本身不会自动插入正文 token（仅右击 chip 才插行内引用），丢弃会让
+  // 未引用附件在排队/定时/复制结果里彻底不可见。转为一行人读清单并保留正文。
+  const attachmentLine = attachments
+    .map((a) => `${ATT_REF_EMOJI} ${a.name}`)
+    .join(" ");
+  const withAttachments = attachmentLine
+    ? body
+      ? `${attachmentLine}\n${body}`
+      : attachmentLine
+    : body;
+  // 快速路径：不含行内引用标记时零替换开销。
+  if (!withAttachments.includes("[附件引用:") && !withAttachments.includes("引用:")) {
+    return withAttachments;
+  }
+  const withAtt = withAttachments.replace(
     INLINE_ATT_REF_RE,
     (_m, _id: string, name: string) => `${ATT_REF_EMOJI} ${name}`,
   );
