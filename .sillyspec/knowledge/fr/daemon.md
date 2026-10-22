@@ -6661,3 +6661,67 @@
 摘要：零回归
 全文：.sillyspec/changes/archive/2026-10-21-session-git-branch/requirements.md#FR-04
 最近确认：4f66ab1e2364cbdfeafb01bb48f3dec9c6d08b3a
+
+## FR-daemon-223 派发溯源盖戳（user_input 日志 metadata_.turn_trigger）
+变更：2026-10-22-turn-trigger-metadata-p2
+状态：active
+摘要：三源盖戳；群聊合并
+全文：.sillyspec/changes/archive/2026-10-22-turn-trigger-metadata-p2/requirements.md#FR-01
+最近确认：125f15809bfcba92270420feb915fffc88a8cec2
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-22-turn-trigger-metadata-p2:flow:测试绑定FR-01
+  tests: backend/app/modules/daemon/tests/test_session_queue.py::TestTurnTriggerStamp「test_idle_inject_stamps_turn_trigger（三源盖戳）」+「test_schedule_busy_queue_row_origin_and_replay_stamp（队列回放
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-22-turn-trigger-metadata-p2
+  status: active
+
+## FR-daemon-224 定时消息全链溯源
+变更：2026-10-22-turn-trigger-metadata-p2
+状态：active
+摘要：忙轮定时消息
+全文：.sillyspec/changes/archive/2026-10-22-turn-trigger-metadata-p2/requirements.md#FR-02
+最近确认：125f15809bfcba92270420feb915fffc88a8cec2
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-22-turn-trigger-metadata-p2:flow:测试绑定FR-02
+  tests: backend/app/modules/daemon/tests/test_session_queue.py「scheduled 忙轮排队行 origin='schedule' 与回放盖戳」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-22-turn-trigger-metadata-p2
+  status: active
+
+## FR-daemon-225 前端 metadata 优先分类 + schedule 触发行
+变更：2026-10-22-turn-trigger-metadata-p2
+状态：active
+摘要：metadata 优先
+全文：.sillyspec/changes/archive/2026-10-22-turn-trigger-metadata-p2/requirements.md#FR-03
+最近确认：125f15809bfcba92270420feb915fffc88a8cec2
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-22-turn-trigger-metadata-p2:flow:测试绑定FR-03
+  tests: frontend/src/components/daemon/__tests__/runtime-session-helpers.test.tsx「metadata 优先分类与 schedule 触发行」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-22-turn-trigger-metadata-p2
+  status: active
+
+## FR-daemon-226 回归与类型门
+变更：2026-10-22-turn-trigger-metadata-p2
+状态：active
+摘要：全量回归
+全文：.sillyspec/changes/archive/2026-10-22-turn-trigger-metadata-p2/requirements.md#FR-04
+最近确认：125f15809bfcba92270420feb915fffc88a8cec2

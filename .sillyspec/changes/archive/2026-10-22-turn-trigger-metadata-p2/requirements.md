@@ -53,7 +53,7 @@ created_at: 2026-10-22T04:34:10.397Z
 
 ## 测试绑定（每条 FR 至少一行——`FR-NN: test/路径「用例名」`；空行/待填在 flow done 拒收）
 
-FR-01: backend/app/modules/daemon/tests/test_inject_origin_guard.py「turn_trigger 盖戳三源」+ backend/app/modules/daemon/tests/test_session_queue.py「队列回放 turn_metadata 盖戳」
+FR-01: backend/app/modules/daemon/tests/test_session_queue.py::TestTurnTriggerStamp「test_idle_inject_stamps_turn_trigger（三源盖戳）」+「test_schedule_busy_queue_row_origin_and_replay_stamp（队列回放 turn_metadata 盖戳）」（评审 P3-1 更正：test_inject_origin_guard.py 未覆盖本面）
 FR-02: backend/app/modules/daemon/tests/test_session_queue.py「scheduled 忙轮排队行 origin='schedule' 与回放盖戳」
 FR-03: frontend/src/components/daemon/__tests__/runtime-session-helpers.test.tsx「metadata 优先分类与 schedule 触发行」
 FR-04: backend pytest+ruff+mypy 与 frontend vitest+tsc（套件级门，无单用例）

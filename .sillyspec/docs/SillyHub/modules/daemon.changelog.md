@@ -73,3 +73,4 @@ created_at: 2026-08-27 14:32:24
 - 2026-10-21-session-git-branch | 会话组件底部动态显示当前所在 git 分支
 - 2026-10-22-review-risk-fixes | 审查修复：原型路由防线与监听泄漏
 - 2026-10-22-daemon-snapshot-report-log | daemon 快照上报补收口日志
+- 2026-10-22-turn-trigger-metadata-p2 | 轮触发溯源 Phase 2：定时消息接入与 metadata 戳驱动

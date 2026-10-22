@@ -1,0 +1,28 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-22-turn-trigger-metadata-p2",
+  "reviewer": "subagent",
+  "verdict": "PASS",
+  "reviewedAgainst": "125f15809bfcba92270420feb915fffc88a8cec2",
+  "findings": [
+    {
+      "severity": "P3",
+      "title": "design 文件清单与 FR-01 测试绑定指向 test_inject_origin_guard.py「turn_trigger 盖戳三源」，但该文件未被本提交修改且不含任何 turn_trigger 用例",
+      "evidence": "git log -3 -- test_inject_origin_guard.py 仅 b49e33fd2（上一变更）；该文件 grep turn_trigger 零命中。三源盖戳（task_wakeup/schedule/auto_resume + 普通消息不盖）实际覆盖为 test_session_queue.py::TestTurnTriggerStamp::test_idle_inject_stamps_turn_trigger，复跑全绿。功能覆盖存在，属文档/绑定口径与交付不同步。",
+      "location": ".sillyspec/changes/2026-10-22-turn-trigger-metadata-p2/design.md 文件变更清单 + requirements.md FR-01 测试绑定"
+    },
+    {
+      "severity": "P3",
+      "title": "FR-01「群聊合并」场景（chain_metadata 与 turn_trigger 戳并存）无直接测试",
+      "evidence": "TestTurnTriggerStamp 两用例未覆盖 turn_metadata 与 turn_trigger 并存落库断言；经代码审阅确认键空间现状不相交（helpers.py _split_group_chain_marker 仅产 source_carrier_run_id/chain_depth/source/sender_user_id，无 turn_trigger 键）且 _merged_turn_metadata 合并序（chain 打底、trigger 键覆盖、双 None→None）正确，群聊消费方 mentions.py:402 按 chain_depth 单键读取对新键免疫，风险低。",
+      "location": "backend/app/modules/daemon/session/service/inject.py:384-397 (_merged_turn_metadata)"
+    }
+  ],
+  "dimensionNotes": {
+    "乱序": "ok",
+    "并发": "ok",
+    "切换": "ok",
+    "作用域": "ok"
+  },
+  "reviewedAt": "2026-10-22T13:15:33+08:00"
+}

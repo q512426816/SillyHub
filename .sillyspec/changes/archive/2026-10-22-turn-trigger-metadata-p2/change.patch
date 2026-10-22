@@ -1,0 +1,627 @@
+diff --git a/backend/app/modules/daemon/scheduled_send.py b/backend/app/modules/daemon/scheduled_send.py
+index 728d0fa47..de4650c4c 100644
+--- a/backend/app/modules/daemon/scheduled_send.py
++++ b/backend/app/modules/daemon/scheduled_send.py
+@@ -196,6 +196,10 @@ async def _dispatch_scheduled_entry(db: AsyncSession, message_id: uuid.UUID) ->
+             agent_profile_id=agent_profile_id,
+             llm_provider_id=llm_provider_id,
+             auto_resume_of=auto_resume_of,
++            # 2026-10-22-turn-trigger-metadata-p2：定时消息溯源——空闲直注盖
++            # user_input 日志 metadata_.turn_trigger='schedule'；忙轮转排队行
++            # origin='schedule'（回放盖戳锚）。
++            turn_trigger=None if auto_resume_of is not None else "schedule",
+         )
+     except DaemonSessionQueueFull as exc:
+         # D-003@v1：队列满员 → failed(queue_full)，不自动延后重试（重试风暴
+diff --git a/backend/app/modules/daemon/session/service/__init__.py b/backend/app/modules/daemon/session/service/__init__.py
+index ad89ffadb..f1851423c 100644
+--- a/backend/app/modules/daemon/session/service/__init__.py
++++ b/backend/app/modules/daemon/session/service/__init__.py
+@@ -537,6 +537,8 @@ class SessionService(BackgroundTaskMixin):
+         # 2026-10-11-queue-wakeup-origin-guard：服务凭证通知标记透传（语义见
+         # inject.py inject_session 同名参数）。
+         task_wakeup: bool = False,
++        # 2026-10-22-turn-trigger-metadata-p2：轮触发溯源种类透传。
++        turn_trigger: str | None = None,
+     ) -> SessionDispatchResult:
+         return await _inject.inject_session(
+             self,
+@@ -555,6 +557,7 @@ class SessionService(BackgroundTaskMixin):
+             queue_when_busy=queue_when_busy,
+             busy_strategy=busy_strategy,
+             task_wakeup=task_wakeup,
++            turn_trigger=turn_trigger,
+         )
+ 
+     async def inject_session_as_service(
+@@ -571,6 +574,8 @@ class SessionService(BackgroundTaskMixin):
+         attachment_ids: list[uuid.UUID] | None = None,
+         attachment_owner_user_id: uuid.UUID | None = None,
+         auto_resume_of: uuid.UUID | None = None,
++        # 2026-10-22-turn-trigger-metadata-p2：轮触发溯源种类（'schedule'）。
++        turn_trigger: str | None = None,
+     ) -> SessionDispatchResult:
+         return await _inject.inject_session_as_service(
+             self,
+@@ -585,6 +590,7 @@ class SessionService(BackgroundTaskMixin):
+             attachment_ids=attachment_ids,
+             attachment_owner_user_id=attachment_owner_user_id,
+             auto_resume_of=auto_resume_of,
++            turn_trigger=turn_trigger,
+         )
+ 
+     async def _ensure_session_workspace_writable(
+@@ -616,6 +622,8 @@ class SessionService(BackgroundTaskMixin):
+         auto_resume_of: uuid.UUID | None = None,
+         # 2026-10-11-queue-wakeup-origin-guard：服务凭证通知标记透传。
+         task_wakeup: bool = False,
++        # 2026-10-22-turn-trigger-metadata-p2：轮触发溯源种类透传。
++        turn_trigger: str | None = None,
+     ) -> SessionDispatchResult:
+         return await _inject._inject_into_session(
+             self,
+@@ -635,6 +643,7 @@ class SessionService(BackgroundTaskMixin):
+             queue_sender_user_id=queue_sender_user_id,
+             turn_metadata=turn_metadata,
+             task_wakeup=task_wakeup,
++            turn_trigger=turn_trigger,
+         )
+ 
+     async def _cancel_pending_control_command(
+diff --git a/backend/app/modules/daemon/session/service/helpers.py b/backend/app/modules/daemon/session/service/helpers.py
+index a904f6dc3..b870c3c36 100644
+--- a/backend/app/modules/daemon/session/service/helpers.py
++++ b/backend/app/modules/daemon/session/service/helpers.py
+@@ -72,9 +72,31 @@ TASK_WAKEUP_PROMPT_PREFIX = "[后台任务通知]"
+ # （X-API-Key + 请求 origin 字段，router/session_crud.py 门控）写入。
+ # 与 origin 列既有值 'auto_resume:<uuid>' 前缀空间不相交（本字面量无冒号）。
+ TASK_WAKEUP_QUEUE_ORIGIN = "task_wakeup"
++
++# 2026-10-22-turn-trigger-metadata-p2：定时消息派发的排队行 origin 标记——
++# 与 task_wakeup 同族服务身份标记（scheduled_send 服务身份写入，浏览器
++# Bearer 用户无 HTTP 入口可写），前端时间线「⏰ 定时消息到点」触发行溯源锚。
++SCHEDULE_QUEUE_ORIGIN = "schedule"
+ _TASK_WAKEUP_HEADER_COUNT_RE = re.compile(r"以下 \d+ 个后台子代理任务已全部结束")
+ _TASK_WAKEUP_TRAILER_COUNT_RE = re.compile(r"（共 \d+ 个）")
+ 
++
++def queue_origin_to_trigger(origin: str | None) -> str | None:
++    """排队行 origin → 轮触发溯源种类（2026-10-22-turn-trigger-metadata-p2）。
++
++    派发回放经本翻译把行 origin 盖为 user_input 日志 metadata_.turn_trigger：
++    task_wakeup/schedule 精确匹配、auto_resume 认 'auto_resume:<uuid>' 复合
++    前缀；NULL/未知值返回 None（用户消息不盖戳）。
++    """
++    if origin == TASK_WAKEUP_QUEUE_ORIGIN:
++        return "task_wakeup"
++    if origin == SCHEDULE_QUEUE_ORIGIN:
++        return "schedule"
++    if origin and origin.startswith("auto_resume:"):
++        return "auto_resume"
++    return None
++
++
+ # ql-20260901-002：/team 平台 UI 指令前缀剥离（派发层）。前端改为发送原始
+ # 输入（气泡/回放显示 "/team 目标"），agent 永不接收该字面前缀（Claude Code
+ # 会当 slash command 报 Unknown command: /team，会话 2eac7c91 实证）——剥离
+diff --git a/backend/app/modules/daemon/session/service/inject.py b/backend/app/modules/daemon/session/service/inject.py
+index c18a99eea..db170145f 100644
+--- a/backend/app/modules/daemon/session/service/inject.py
++++ b/backend/app/modules/daemon/session/service/inject.py
+@@ -94,6 +94,8 @@ async def inject_session(
+     # origin 标记（豁免/合并/编辑守卫判定锚，queue._handle_busy_turn）。缺省
+     # False：群聊/审批代写等服务路径与普通用户路径零回归。
+     task_wakeup: bool = False,
++    # 2026-10-22-turn-trigger-metadata-p2：轮触发溯源种类透传（schedule 服务路径）。
++    turn_trigger: str | None = None,
+ ) -> SessionDispatchResult:
+     """Append a new turn run to an active session (FR-02 / design §7.6 step 1).
+ 
+@@ -249,6 +251,7 @@ async def inject_session(
+         busy_strategy=busy_strategy,
+         # 2026-10-11-queue-wakeup-origin-guard：服务凭证通知标记透传。
+         task_wakeup=task_wakeup,
++        turn_trigger=turn_trigger,
+     )
+ 
+ 
+@@ -271,6 +274,10 @@ async def inject_session_as_service(
+     queue_when_busy: bool = False,
+     queue_sender_user_id: uuid.UUID | None = None,
+     turn_metadata: dict | None = None,
++    # 2026-10-22-turn-trigger-metadata-p2：轮触发溯源种类（'schedule' 服务
++    # 路径）——盖 user_input 日志 metadata_.turn_trigger；忙轮排队行 origin
++    # 同步落同族标记（回放盖戳锚）。
++    turn_trigger: str | None = None,
+     # quick（2026-09-02 群聊忙轮注入 steering）：忙轮策略新形态——
+     # ``"inject"``=忙轮跳过排队直接注入当前活跃轮（run_id 沿用活跃 run，
+     # 不建新 run，单会话单活跃 run 不变式保持；daemon 侧 running 时下发
+@@ -369,9 +376,27 @@ async def inject_session_as_service(
+         attachment_ids=list(attachment_ids) if attachment_ids else None,
+         attachment_owner_user_id=attachment_owner_user_id,
+         auto_resume_of=auto_resume_of,
++        turn_trigger=turn_trigger,
+     )
+ 
+ 
++def _merged_turn_metadata(
++    turn_metadata: dict | None,
++    trigger: str | None,
++) -> dict | None:
++    """合并群聊 chain_metadata 与轮触发溯源戳（2026-10-22-metadata-p2）。
++
++    chain_metadata 打底、turn_trigger 键覆盖（现状键空间不相交：群聊链路
++    不产 trigger 键）；双 None → None（存量行 NULL 零回归）。
++    """
++    if turn_metadata is None and trigger is None:
++        return None
++    merged = dict(turn_metadata) if turn_metadata is not None else {}
++    if trigger is not None:
++        merged["turn_trigger"] = trigger
++    return merged
++
++
+ async def _inject_into_session(
+     svc,
+     session: AgentSession,
+@@ -428,6 +453,10 @@ async def _inject_into_session(
+     # inject_session 同名参数；inject_session_as_service 不接——群聊等服务
+     # 路径的用户内容永不被标记）。
+     task_wakeup: bool = False,
++    # 2026-10-22-turn-trigger-metadata-p2：轮触发溯源种类显式透传（'schedule'
++    # 等服务身份路径）——与 task_wakeup/auto_resume_of 派生戳同 purpose；合并
++    # 序 = 群聊 chain_metadata 打底、戳键覆盖（键空间现状不相交）。
++    turn_trigger: str | None = None,
+ ) -> SessionDispatchResult:
+     """Shared inject-turn core (used by :meth:`inject_session` +
+     :meth:`inject_session_as_service`).
+@@ -497,6 +526,7 @@ async def _inject_into_session(
+                 turn_metadata=turn_metadata,
+                 auto_resume_of=auto_resume_of,
+                 task_wakeup=task_wakeup,
++                turn_trigger=turn_trigger,
+             )
+ 
+         # ── 2026-08-20 task-05：附件校验（D-6 引擎门控 / 归属 404 / 数量 422）──
+@@ -746,7 +776,20 @@ async def _inject_into_session(
+                 timestamp=now,
+                 # task-03（群聊影子注入）：群链路 metadata（链 id/深度/发送者）
+                 # 随本轮日志落库；缺省 None 列保持 NULL（存量零回归）。
+-                metadata_=dict(turn_metadata) if turn_metadata is not None else None,
++                # 2026-10-22-turn-trigger-metadata-p2：轮触发溯源戳——
++                # task_wakeup 参数 → 'task_wakeup'、auto_resume_of →
++                # 'auto_resume'、显式 turn_trigger 直通（'schedule'）；前端
++                # classifyTurnTrigger metadata 优先消费，内容前缀降兜底。
++                metadata_=_merged_turn_metadata(
++                    turn_metadata,
++                    (
++                        "task_wakeup"
++                        if task_wakeup
++                        else "auto_resume"
++                        if auto_resume_of is not None
++                        else turn_trigger
++                    ),
++                ),
+             )
+             svc._session.add(user_input_log)
+ 
+@@ -788,6 +831,10 @@ async def _inject_into_session(
+                 "log_id": str(user_input_log.id),
+                 "content": user_input_log.content_redacted,
+                 "timestamp": user_input_log.timestamp.isoformat().replace("+00:00", "Z"),
++                # 2026-10-22-turn-trigger-metadata-p2：溯源戳随实时事件透传
++                # （前端 live 路径 classifyTurnTrigger metadata 优先消费——
++                # schedule 等无内容前缀的源实时可见，不等刷新）。
++                "metadata": user_input_log.metadata_,
+             }
+         )
+ 
+diff --git a/backend/app/modules/daemon/session/service/queue.py b/backend/app/modules/daemon/session/service/queue.py
+index aaf19eace..051ae4ad3 100644
+--- a/backend/app/modules/daemon/session/service/queue.py
++++ b/backend/app/modules/daemon/session/service/queue.py
+@@ -46,6 +46,7 @@ from .helpers import (
+     _merge_task_wakeup_prompt,
+     _prepend_group_chain_marker,
+     _split_group_chain_marker,
++    queue_origin_to_trigger,
+ )
+ from .results import SessionDispatchResult
+ 
+@@ -80,6 +81,10 @@ async def _handle_busy_turn(
+     # （旧口径用户发「[后台任务通知]」前缀即可冒充豁免）。与 auto_resume_of
+     # 调用方不相交（daemon 唤醒不带 auto_resume_of），同时携带时本标记优先。
+     task_wakeup: bool = False,
++    # 2026-10-22-turn-trigger-metadata-p2：轮触发溯源种类（'schedule'）——
++    # 忙轮排队行 origin 落同族标记（派发回放经 queue_origin_to_trigger 盖
++    # user_input 日志 metadata_.turn_trigger）。
++    turn_trigger: str | None = None,
+ ) -> SessionDispatchResult:
+     """忙轮三分支收口（task-08 自 _inject_into_session:3499-3650 拆出，零改写）。
+ 
+@@ -313,7 +318,11 @@ async def _handle_busy_turn(
+         origin=(
+             TASK_WAKEUP_QUEUE_ORIGIN
+             if task_wakeup
+-            else (make_auto_resume_origin(auto_resume_of) if auto_resume_of is not None else None)
++            else (
++                make_auto_resume_origin(auto_resume_of)
++                if auto_resume_of is not None
++                else turn_trigger
++            )
+         ),
+         status="pending",
+         # task-05 缺陷 A 修正：or 兜底在 max==0 时回卷（0 or -1 = -1），
+@@ -975,7 +984,20 @@ async def dispatch_queued_messages(svc, session_id: uuid.UUID) -> None:
+                 attachment_ids=attachment_ids,
+                 attachment_owner_user_id=attachment_owner_user_id,
+                 page_context=page_context,
+-                turn_metadata=chain_metadata,
++                # 2026-10-22-turn-trigger-metadata-p2：排队行 origin → 轮触发
++                # 溯源戳（task_wakeup/schedule 精确、auto_resume: 前缀），与群聊
++                # chain_metadata 合并（戳键覆盖，现状键空间不相交）；None 行不盖。
++                turn_metadata=(
++                    {
++                        **(chain_metadata or {}),
++                        **(
++                            {"turn_trigger": row_trigger}
++                            if (row_trigger := queue_origin_to_trigger(entry.origin))
++                            else {}
++                        ),
++                    }
++                    or None
++                ),
+             )
+         except AppError as exc:
+             # 派发失败（daemon 离线 / 附件失效 / 配置失效等）：条目转 failed
+diff --git a/backend/app/modules/daemon/tests/test_session_queue.py b/backend/app/modules/daemon/tests/test_session_queue.py
+index a270f2576..803301528 100644
+--- a/backend/app/modules/daemon/tests/test_session_queue.py
++++ b/backend/app/modules/daemon/tests/test_session_queue.py
+@@ -34,6 +34,7 @@ from app.modules.daemon.session.service import (
+     DaemonSessionQueueEntryNotFound,
+     DaemonSessionQueueFull,
+     DaemonSessionTurnConflict,
++    SessionService,
+ )
+ 
+ 
+@@ -1183,3 +1184,116 @@ class TestPureSwitchMerge:
+         switch = next(row for row in rows if not row.attachment_ids)
+         assert switch.llm_provider_id == "prov-a"
+         assert switch.model == "glm-x"
++
++
++class TestTurnTriggerStamp:
++    """轮触发溯源盖戳（2026-10-22-turn-trigger-metadata-p2）。
++
++    user_input 日志 metadata_.turn_trigger：task_wakeup（router 标记直注 +
++    队列回放）/ schedule（服务路径 turn_trigger 参数直注 + 忙轮排队行
++    origin='schedule' 回放）/ auto_resume（auto_resume_of 参数）三源盖戳，
++    群聊 chain_metadata 合并不互吞；前端 classifyTurnTrigger metadata 优先
++    消费（内容前缀降兜底）。
++    """
++
++    @staticmethod
++    async def _user_input_rows(db_session, run_id):
++        return list(
++            (
++                await db_session.execute(
++                    select(AgentRunLog).where(
++                        AgentRunLog.run_id == run_id,
++                        AgentRunLog.channel == "user_input",
++                    )
++                )
++            )
++            .scalars()
++            .all()
++        )
++
++    @pytest.mark.asyncio
++    async def test_idle_inject_stamps_turn_trigger(
++        self, db_session, mocked_hub, mocked_redis
++    ) -> None:
++        uid = await _create_user(db_session)
++        await _create_runtime(db_session, uid)
++        svc = DaemonService(db_session)
++        created = await svc.create_session(uid, provider="claude", prompt="first")
++        session_id = created.agent_session.id
++        await _finish_run(db_session, created.agent_run)
++
++        # task_wakeup 参数（daemon 唤醒直注）。
++        r1 = await svc.inject_session(session_id, uid, prompt="[后台任务通知] x", task_wakeup=True)
++        await _finish_run(db_session, r1.agent_run)
++        # schedule 显式透传（scheduled_send 服务路径——SessionService 身份）。
++        session_svc = SessionService(db_session)
++        r2 = await session_svc.inject_session_as_service(
++            session_id, prompt="到点的定时消息", turn_trigger="schedule"
++        )
++        await _finish_run(db_session, r2.agent_run)
++        # auto_resume_of 参数（断线续跑直注）。
++        r3 = await session_svc.inject_session_as_service(
++            session_id,
++            prompt="[系统续跑] 从中断处继续",
++            auto_resume_of=created.agent_run.id,
++        )
++        await _finish_run(db_session, r3.agent_run)
++        # 普通用户消息：不盖戳。
++        r4 = await svc.inject_session(session_id, uid, prompt="普通消息")
++
++        stamps = {}
++        for run in (r1, r2, r3, r4):
++            rows = await self._user_input_rows(db_session, run.agent_run.id)
++            assert rows, "user_input 行必须落库"
++            stamps[run.agent_run.id] = (rows[-1].metadata_ or {}).get("turn_trigger")
++        assert stamps[r1.agent_run.id] == "task_wakeup"
++        assert stamps[r2.agent_run.id] == "schedule"
++        assert stamps[r3.agent_run.id] == "auto_resume"
++        assert stamps[r4.agent_run.id] is None
++
++    @pytest.mark.asyncio
++    async def test_schedule_busy_queue_row_origin_and_replay_stamp(
++        self, db_session, mocked_hub, mocked_redis
++    ) -> None:
++        svc, uid, session_id, busy_run = await _setup_busy_session(db_session)
++        # 定时消息忙轮入队（origin='schedule'）+ task_wakeup 唤醒入队。
++        await SessionService(db_session).inject_session_as_service(
++            session_id, prompt="到点的定时消息", queue_when_busy=True, turn_trigger="schedule"
++        )
++        await svc.inject_session(
++            session_id, uid, prompt="[后台任务通知] 汇总", queue_when_busy=True, task_wakeup=True
++        )
++        rows = await _queue_rows(db_session, session_id)
++        assert rows[0].origin == "schedule"
++        assert rows[1].origin == "task_wakeup"
++
++        # 逐轮完结派发回放：user_input 行按行 origin 盖对应戳。
++        await _finish_run(db_session, busy_run)
++        await svc.dispatch_queued_messages(session_id)
++        runs = list(
++            (
++                await db_session.execute(
++                    select(AgentRun).where(AgentRun.agent_session_id == session_id)
++                )
++            )
++            .scalars()
++            .all()
++        )
++        replayed = [r for r in runs if r.id != busy_run.id and r.status == "pending"]
++        assert len(replayed) == 1
++        stamped = await self._user_input_rows(db_session, replayed[0].id)
++        assert (stamped[-1].metadata_ or {}).get("turn_trigger") == "schedule"
++        await _finish_run(db_session, replayed[0])
++        await svc.dispatch_queued_messages(session_id)
++        runs2 = list(
++            (
++                await db_session.execute(
++                    select(AgentRun).where(AgentRun.agent_session_id == session_id)
++                )
++            )
++            .scalars()
++            .all()
++        )
++        replayed2 = [r for r in runs2 if r.status == "pending" and r.id != busy_run.id]
++        stamped2 = await self._user_input_rows(db_session, replayed2[0].id)
++        assert (stamped2[-1].metadata_ or {}).get("turn_trigger") == "task_wakeup"
+diff --git a/frontend/src/components/daemon/__tests__/runtime-session-helpers.test.tsx b/frontend/src/components/daemon/__tests__/runtime-session-helpers.test.tsx
+index 827f764d6..da251b4f1 100644
+--- a/frontend/src/components/daemon/__tests__/runtime-session-helpers.test.tsx
++++ b/frontend/src/components/daemon/__tests__/runtime-session-helpers.test.tsx
+@@ -844,4 +844,55 @@ describe("logsToTurns 轮触发溯源段（2026-10-22-turn-trigger-generalize）
+     ]);
+     expect((turns[0]!.segments ?? []).some((s) => s.kind === "turn_trigger")).toBe(false);
+   });
++
++  it("FR-03 metadata 戳优先——schedule 盖戳（无内容前缀）产出「定时消息到点」标注行、正文照常", () => {
++    const turns = toSegmentTurns([
++      makeLog(
++        "n1",
++        "run-1",
++        "user_input",
++        "到点的定时消息正文",
++        { timestamp: TS(0), metadata: { turn_trigger: "schedule" } },
++      ),
++      makeLog("o1", "run-1", "stdout", "回答", { timestamp: TS(30) }),
++    ]);
++    const turn = turns[0]!;
++    expect(turn.prompt).toBe("到点的定时消息正文");
++    const first = (turn.segments ?? [])[0]!;
++    expect(first.kind).toBe("turn_trigger");
++    expect((first as { trigger?: string }).trigger).toBe("schedule");
++  });
++
++  it("FR-03 metadata 优先于内容前缀——盖戳 schedule 的行即使带 [系统续跑 前缀也判 schedule", () => {
++    const turns = toSegmentTurns([
++      makeLog(
++        "n1",
++        "run-1",
++        "user_input",
++        "[系统续跑] 伪造前缀正文",
++        { timestamp: TS(0), metadata: { turn_trigger: "schedule" } },
++      ),
++      makeLog("o1", "run-1", "stdout", "回答", { timestamp: TS(30) }),
++    ]);
++    const first = (turns[0]!.segments ?? [])[0]!;
++    expect((first as { trigger?: string }).trigger).toBe("schedule");
++    // 正文可见源：prompt 不剥空。
++    expect(turns[0]!.prompt).toContain("伪造前缀正文");
++  });
++
++  it("FR-03 无 metadata 的存量行回退内容前缀（零回归）", () => {
++    const turns = toSegmentTurns([
++      makeLog(
++        "n1",
++        "run-1",
++        "user_input",
++        "[后台任务通知] 旧格式通知",
++        { timestamp: TS(0) },
++      ),
++      makeLog("o1", "run-1", "stdout", "回答", { timestamp: TS(30) }),
++    ]);
++    const first = (turns[0]!.segments ?? [])[0]!;
++    expect(first.kind).toBe("turn_trigger");
++    expect((first as { trigger?: string }).trigger).toBe("task_wakeup");
++  });
+ });
+diff --git a/frontend/src/components/daemon/runtime-session-helpers.tsx b/frontend/src/components/daemon/runtime-session-helpers.tsx
+index 980eb2f15..8ba0f504a 100644
+--- a/frontend/src/components/daemon/runtime-session-helpers.tsx
++++ b/frontend/src/components/daemon/runtime-session-helpers.tsx
+@@ -11,6 +11,7 @@ import { SessionPanel } from "@/components/daemon/session-panel";
+ import type { SessionTurnView } from "@/components/daemon/turn-timeline";
+ import { classifySessionLog } from "@/components/daemon/session-log-sanitize";
+ import {
++  TURN_TRIGGER_META,
+   classifyPreambleTrigger,
+   classifyTurnTrigger,
+   extractPreambleText,
+@@ -457,10 +458,16 @@ export function logsToTurns(logs: AgentRunLogEntry[]): SessionTurnView[] {
+       }
+       // user_input 是用户消息（prompt）——turn 级胶水，不装配进段（Grill X-05）。
+       if (entry.channel === "user_input") {
++        // 2026-10-22-turn-trigger-metadata-p2：服务端盖戳行（metadata.turn_trigger
++        // 有效）整体绕过内容前缀机制——extract/stripPreambleText 不参与（戳即
++        // 真相，伪造前缀不再影响剥离/分类），正文按戳的 contentHidden 语义处理。
++        const stampedTrigger = classifyTurnTrigger("", entry.metadata);
+         // 2026-08-25-unified-floating-session task-11（FR-7）：daemon 回传的首条
+         // user_input 含完整 dispatch_prompt——提取前导块为 preamble 段（对话视图
+         // 不渲染，「全部」视图显示注入来源）；其余照原逻辑收 prompt。
+-        const preambleText = extractPreambleText(seg.text);
++        const preambleText = stampedTrigger
++          ? null
++          : extractPreambleText(seg.text);
+         // 2026-10-13-session-taskwakeup-hide：TASK_WAKEUP 注入是纯系统通知，
+         // 不落 preamble 段（进度视图不再显示「上下文注入」卡）；开轮占位槽
+         // 逻辑不受影响——promptSource 仍走 strip 剥空 → 占位空组照旧。
+@@ -470,7 +477,9 @@ export function logsToTurns(logs: AgentRunLogEntry[]): SessionTurnView[] {
+         const preambleTrigger = preambleText
+           ? classifyPreambleTrigger(preambleText)
+           : null;
+-        const contentTrigger = classifyTurnTrigger(seg.text);
++        const contentTrigger =
++          stampedTrigger ??
++          classifyTurnTrigger(seg.text, entry.metadata);
+         // 开轮身份先行捕获（下方分支会推进 openerSlotSeen）。
+         const isOpenerUserInput = !openerSlotSeen;
+         if (
+@@ -493,9 +502,15 @@ export function logsToTurns(logs: AgentRunLogEntry[]): SessionTurnView[] {
+         // 气泡、失败卡无重试按钮。常规路径（backend 前导条 + 干净条双写）中前导
+         // 条剩余正文与干净条同主体，二阶段归并同组不双显。剩余为空（纯前导 /
+         // [后台任务通知] 等系统注入）仍跳过。
+-        const promptSource = preambleText
+-          ? stripPreambleText(seg.text).trim()
+-          : seg.text;
++        const promptSource = stampedTrigger
++          ? // 盖戳行按 META 语义：系统代笔（task_wakeup/auto_resume）正文折叠
++            // 进触发行（prompt 剥空占开轮槽），用户亲笔（schedule）正文照常。
++            TURN_TRIGGER_META[stampedTrigger].contentHidden
++            ? ""
++            : seg.text
++          : preambleText
++            ? stripPreambleText(seg.text).trim()
++            : seg.text;
+         if (!promptSource.trim()) {
+           // 2026-10-10-system-opened-turn-usermsg：首条 user_input 剥空（系统
+           // 注入开轮）→ 占位空组占住开轮槽（仅首条；后到系统行静默跳过）。
+@@ -511,7 +526,7 @@ export function logsToTurns(logs: AgentRunLogEntry[]): SessionTurnView[] {
+             // 2026-10-22-turn-trigger-generalize：系统信封注入（task_wakeup/
+             // auto_resume）不再整体隐藏——落 turn_trigger 触发行（折叠看全文），
+             // 置于轮段序列首部。
+-            const contentTrigger = classifyTurnTrigger(seg.text);
++            const contentTrigger = classifyTurnTrigger(seg.text, entry.metadata);
+             if (contentTrigger) {
+               triggerSegments.push({
+                 kind: "turn_trigger",
+@@ -536,6 +551,17 @@ export function logsToTurns(logs: AgentRunLogEntry[]): SessionTurnView[] {
+             trigger: preambleTrigger,
+           });
+         }
++        // 2026-10-22-turn-trigger-metadata-p2：正文可见的盖戳源（schedule——
++        // metadata 优先判定，无内容前缀）开轮位同产来源标注行。
++        if (isOpenerUserInput && contentTrigger) {
++          triggerSegments.push({
++            kind: "turn_trigger",
++            id: `trigger:${entry.id ?? `idx${turnIndex}`}`,
++            text: seg.text,
++            ts: entry.timestamp ? Date.parse(entry.timestamp) : null,
++            trigger: contentTrigger,
++          });
++        }
+         // ql-20260825-002：剥标记行得文本主体为归一键（附件行不影响主体判定）。
+         const lines = promptSource.split("\n");
+         const markerLines: string[] = [];
+diff --git a/frontend/src/components/daemon/session-log-assembler.ts b/frontend/src/components/daemon/session-log-assembler.ts
+index e77fd4dc9..cd0bf878b 100644
+--- a/frontend/src/components/daemon/session-log-assembler.ts
++++ b/frontend/src/components/daemon/session-log-assembler.ts
+@@ -2188,7 +2188,8 @@ export type TurnTriggerKind =
+   | "task_wakeup"
+   | "auto_resume"
+   | "shadow_chat"
+-  | "group_chat";
++  | "group_chat"
++  | "schedule";
+ 
+ /**
+  * 触发源呈现配置表（TurnTriggerView 单一渲染真相源）：
+@@ -2205,14 +2206,30 @@ export const TURN_TRIGGER_META: Record<
+   auto_resume: { glyph: "↻", label: "断线自动续跑", contentHidden: true },
+   shadow_chat: { glyph: "💬", label: "来自影子直聊", contentHidden: false },
+   group_chat: { glyph: "👥", label: "来自群聊", contentHidden: false },
++  // 2026-10-22-turn-trigger-metadata-p2：定时消息到点（服务端 metadata 戳驱动，
++  // 用户亲笔正文照常显示）。
++  schedule: { glyph: "⏰", label: "定时消息到点", contentHidden: false },
+ };
+ 
+ /**
+  * 按内容分类轮触发源（task_wakeup/auto_resume 内容前缀族）；
+  * 非触发内容返回 null。shadow_chat/group_chat 走 classifyPreambleTrigger
+  * （前导头族），不入本函数。
++ *
++ * 2026-10-22-turn-trigger-metadata-p2：metadata 优先——日志行
++ * metadata_.turn_trigger（服务端派发链盖戳，浏览器不可伪造）为有效 kind 时
++ * 直接采信；缺失/无效回退内容前缀（存量行/未盖戳路径零回归，伪造误标面
++ * 仅剩存量行）。
+  */
+-export function classifyTurnTrigger(content: string): TurnTriggerKind | null {
++export function classifyTurnTrigger(
++  content: string,
++  metadata?: Record<string, unknown> | null,
++): TurnTriggerKind | null {
++  const stamped =
++    typeof metadata?.turn_trigger === "string" ? metadata.turn_trigger : null;
++  if (stamped && stamped in TURN_TRIGGER_META) {
++    return stamped as TurnTriggerKind;
++  }
+   if (isTaskWakeupInjection(content)) return "task_wakeup";
+   if (isAutoResumeInjection(content)) return "auto_resume";
+   return null;
+diff --git a/frontend/src/components/daemon/session-panel/session-panel-page.tsx b/frontend/src/components/daemon/session-panel/session-panel-page.tsx
+index 47d96048c..6fec788f3 100644
+--- a/frontend/src/components/daemon/session-panel/session-panel-page.tsx
++++ b/frontend/src/components/daemon/session-panel/session-panel-page.tsx
+@@ -1396,6 +1396,7 @@ export function SessionPanelPage({
+                       : null;
+                     const liveContentTrigger = classifyTurnTrigger(
+                       env.content ?? "",
++                      env.metadata,
+                     );
+                     const freshTurn = !(next.segments ?? []).some(
+                       (s) => s.kind !== "preamble" && s.kind !== "turn_trigger",
+diff --git a/frontend/src/lib/daemon/session-sse.ts b/frontend/src/lib/daemon/session-sse.ts
+index a79011143..322ea663d 100644
+--- a/frontend/src/lib/daemon/session-sse.ts
++++ b/frontend/src/lib/daemon/session-sse.ts
+@@ -160,6 +160,12 @@ export interface SessionStreamEnvelope {
+   timestamp: string | null;
+   channel: string | null;
+   content: string | null;
++  /**
++   * 2026-10-22-turn-trigger-metadata-p2：user_input 日志行 metadata_ 透传
++   * （inject 直落行的 log 事件携带；turn_trigger 溯源戳/群聊身份在用）。
++   * 其它事件/老 backend 为 undefined。
++   */
++  metadata?: Record<string, unknown> | null;
+   status: string | null;
+   exit_code: number | null;
+   reason: string | null;

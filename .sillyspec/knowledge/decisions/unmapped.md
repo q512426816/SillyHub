@@ -1125,3 +1125,11 @@
 锚点：未记录
 最近确认：05c42dea444bb413efd0c2d6b0a7a9f53e8e0f9d
 理由：最大风险：内嵌后用户滚动到长日志深处时新提问卡不可见、错过提问。兜底不缺：①待决策 pill 定位还原保留（点击滚顶+ring 闪烁直达卡片）；②卡片仍在内容流最顶部，回到顶部即见；③输入栏输入轮由后端 permission 队列门控，不答则挂起不丢。 放弃的方案：a) 保留 sticky 但滚动时折叠成细条——复杂度与状态面增加，用户明确不要悬浮形态；b) 新卡到达时自动滚动定位到卡——会打断用户阅读长日志的当前位置，侵略性强，弃。
+
+## D-unmapped-150@v1 设计期风险与放弃方案（底稿）
+状态：implemented
+变更：2026-10-22-turn-trigger-metadata-p2
+原编号：D-001@v1
+锚点：未记录
+最近确认：125f15809bfcba92270420feb915fffc88a8cec2
+理由：答：最大风险是盖戳覆盖群聊键的理论冲突——群聊链路未来若也需 turn_trigger 语义（群聊来源标注），合并序（trigger 覆盖 chain）会吞掉；现状群聊 turn_metadata 不含 turn_trigger 键（键空间不相交），风险登记不设防。次要风险：'schedule' 排队行 origin 若被用户伪造——busy 路径入队的 origin 由 _handle_busy_turn 参数派生（HTTP 注入端点不透传 turn_trigger），浏览器不可达，伪造面不存在。死路：①「run metadata 盖戳」（metadata_.auto_resume_of 同族）——放弃，前端时间线装配以日志行为输入、run metadata 需跨 API 关联穿透装配签名（Phase 1 已评估放弃）；②「前端按内容前缀识别 schedule」——定时消息派发是裸 user prompt 无标记，前缀方案要求派发侧改 prompt 内容（污染正文），metadata 盖戳零污染；③「排队行加新列」——origin 列同族语义复用即可，零迁移。
