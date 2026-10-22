@@ -56,8 +56,8 @@ scale: "small"
 | 修改 | frontend/src/components/daemon/__tests__/turn-timeline-trajectory-view.test.tsx | 按新账本结构适配既有断言（轮块让位/空态/选中语义不变） |
 | 修改 | frontend/src/components/daemon/trajectory/__tests__/trajectory-timeline.test.tsx | 按 D-017 裁剪说明区后的节点结构适配（保留缩放/命中/等宽模式语义断言，不放宽既有行为） |
 | 修改 | frontend/src/components/daemon/trajectory/__tests__/zoom.test.ts | 等宽模式禁用手势的分支核对（纯函数层面保持既有缩放计算断言） |
-| 新增 | NEW:frontend/src/components/daemon/trajectory/__tests__/trajectory-view-model.test.ts | 分组、轮次/调用折叠、搜索过滤、摘要统计用例 |
-| 新增 | NEW:frontend/src/components/daemon/trajectory/__tests__/trajectory-redesign.test.tsx | 工具栏交互、账本行选中、折叠、详情标签渲染用例 |
+| 新增 | frontend/src/components/daemon/trajectory/__tests__/trajectory-view-model.test.ts | 分组、轮次/调用折叠、搜索过滤、摘要统计用例 |
+| 新增 | frontend/src/components/daemon/trajectory/__tests__/trajectory-redesign.test.tsx | 工具栏交互、账本行选中、折叠、详情标签渲染用例 |
 | 修改 | frontend/src/components/prototype/trajectory-redesign-view.tsx | 真码原型源（已落盘，按定稿维护） |
 | 修改 | frontend/scripts/prototype-build.mjs | 注册 trajectory-redesign-view 到原型构建列表 |
 
