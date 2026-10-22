@@ -73,7 +73,7 @@ async def upload_attachment(
         if size > limit:
             label = "图片超过单张上限" if kind == "image" else "文件超过单份上限"
             raise SessionAttachmentTooLarge(
-                f"{label} {limit // (1024 * 1024)}MB。",
+                f"{label}，上限 {limit // (1024 * 1024)}MB。",
                 details={"bytes": size, "limit": limit},
             )
     data = await file.read()

@@ -87,6 +87,6 @@ async def vector_search_endpoint(
     _user, scope = principal
     if scope.workspace_id is None:
         raise PermissionDenied(
-            "Knowledge vector-search requires a workspace sync token (shpsync_).",
+            "知识库向量检索需要工作区同步令牌（shpsync_）。",
         )
     return await _search_payload(session, scope.workspace_id, body, settings)

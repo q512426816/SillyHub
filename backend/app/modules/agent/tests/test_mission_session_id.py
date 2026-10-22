@@ -249,6 +249,9 @@ def test_agent_sessions_model_fields_unchanged() -> None:
         # 列（run_sync 命令解析回写、inject 建轮打锚；与 change_id 派发绑定分列）。
         # 口径同 test_agent_session_model（11c4a5d51 已同步，本守卫补齐漏更）。
         "current_change_id",
+        # 2026-10-16-backend-mem-polling task-08：会话标题回退列（title 生成失败/
+        # 未落时的稳定回退源；test_agent_session_model 已收录，本守卫漏更至此）。
+        "title_fallback",
     }
     assert set(AgentSession.model_fields.keys()) == expected
 

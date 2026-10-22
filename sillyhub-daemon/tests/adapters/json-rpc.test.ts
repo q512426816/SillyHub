@@ -6,6 +6,7 @@
 import { describe, it, expect, expectTypeOf, vi } from 'vitest';
 import { loadFixture } from '../helpers';
 import { JsonRpcAdapter } from '../../src/adapters/json-rpc';
+import { DAEMON_VERSION } from '../../src/daemon-version';
 import type { ProtocolAdapter, PendingServerRequest } from '../../src/adapters/json-rpc';
 import type { AgentEvent } from '../../src/types';
 
@@ -602,7 +603,8 @@ describe('buildHandshake - codex 协议握手序列（ql-20260617-008）', () =>
     expect(init.id).toBe(1);
     expect(init.params.clientInfo).toEqual({
       name: 'sillyhub-daemon',
-      version: '0.1.1',
+      // 与实现同源断言（DAEMON_VERSION 随 package.json 版本走，硬编码字面量会随版本提升假败）
+      version: DAEMON_VERSION,
     });
 
     const notif = JSON.parse(lines[1]!);
