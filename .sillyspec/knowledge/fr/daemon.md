@@ -6725,6 +6725,7 @@
 摘要：全量回归
 全文：.sillyspec/changes/archive/2026-10-22-turn-trigger-metadata-p2/requirements.md#FR-04
 最近确认：125f15809bfcba92270420feb915fffc88a8cec2
+
 ## FR-daemon-227 /settings/providers 供应商列表有「设为默认」操作，已设默认的行有明确默认标记，且有对称「取消默认」操作
 变更：2026-10-21-provider-set-default-ui
 状态：active
@@ -6788,3 +6789,42 @@
   confirmed_at: null
   source_change: 2026-10-21-provider-set-default-ui
   status: active
+
+## FR-daemon-231 app/modules/daemon/grants/tests/ 62 passed 零 errors（原 48 passed + 14 errors）
+变更：2026-10-22-merge-regression-fixes
+状态：active
+摘要：主路径
+场景正文：
+- 场景：主路径 — Given grants 目录测试 / When 隔离或全量运行 / Then 62 用例全绿且零 errors（fixture 建表成功）。
+全文：.sillyspec/changes/archive/2026-10-22-merge-regression-fixes/requirements.md#FR-01
+最近确认：c4a82ff0be9d18ad4cdaa333e43ff178b0007e8b
+
+## FR-daemon-232 test_init_claim_tokens.py 两降级用例在任意渲染流下稳定通过（13 passed），全量套件复跑零 failed 零 errors
+变更：2026-10-22-merge-regression-fixes
+状态：active
+摘要：主路径
+场景正文：
+- 场景：主路径 — 
+全文：.sillyspec/changes/archive/2026-10-22-merge-regression-fixes/requirements.md#FR-02
+最近确认：c4a82ff0be9d18ad4cdaa333e43ff178b0007e8b
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-22-merge-regression-fixes:flow:测试绑定FR-02
+  tests: backend/app/modules/daemon/lease/tests/test_init_claim_tokens.py「TestInitClaimDefensiveDegrade::test_no_token_issued_when_workspace_id_missing」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-22-merge-regression-fixes
+  status: active
+
+## FR-daemon-233 仅测试面改动（conftest + 断言载体），零生产源码变更，无需重新部署
+变更：2026-10-22-merge-regression-fixes
+状态：active
+摘要：主路径
+场景正文：
+- 场景：主路径 — Given diff 面 = grants conftest + lease 测试文件 / When 逐 hunk 核对 / Then 无生产文件变更。
+全文：.sillyspec/changes/archive/2026-10-22-merge-regression-fixes/requirements.md#FR-03
+最近确认：c4a82ff0be9d18ad4cdaa333e43ff178b0007e8b

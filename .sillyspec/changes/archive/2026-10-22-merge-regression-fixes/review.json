@@ -1,0 +1,15 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-22-merge-regression-fixes",
+  "reviewer": "subagent",
+  "verdict": "PASS",
+  "reviewedAgainst": "c4a82ff0be9d18ad4cdaa333e43ff178b0007e8b",
+  "findings": [],
+  "dimensionNotes": {
+    "乱序": "n/a",
+    "并发": "n/a",
+    "切换": "ok",
+    "作用域": "n/a"
+  },
+  "reviewedAt": "2026-10-22T08:51:31Z"
+}

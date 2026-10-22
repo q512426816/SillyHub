@@ -1,0 +1,57 @@
+tier: thin
+legacy_fallback: false
+substeps:
+  artifacts: done
+  ledger: done
+  patch: done
+  review: done
+  probes: done
+  distill: done
+  archive: done
+  events: done
+born_face: thin
+with_tasks: false
+review_force: null
+input: >-
+  合并回归债收口：grants 闭包与 lease 双流断言
+
+
+  动机与背景：合并部署后的第三轮验证暴露两类残留（前者为合并引入，后者为全量套件才现形的既有隔离脆性）：
+
+  ① origin 侧 2026-10-21-agent-profile-slim-default 给 users 新增 default_agent_profile_id FK→agent_profiles，daemon/grants
+  测试的 selected-metadata 闭包注释明写「users 表自身无外键」假设失效——全量跑 14
+  errors（NoReferencedTableError('agent_profiles')），隔离跑同样复现；须按姊妹范式（workspace/member_runtimes/tests/conftest.py）把
+  agent_profiles→workspaces/llm_providers/tool_policies 纳入闭包并补模型 import。
+
+  ② daemon/lease test_init_claim_tokens 两降级用例断言 structlog 警告在 stdout，全量套件下渲染流为 stderr（Captured stderr 内事件完整）→
+  间歇假败（隔离必绿）；断言改 captured.out+err 双流合并，意图（事件+原因枚举在场）不变。
+
+
+  成功标准：
+
+  - app/modules/daemon/grants/tests/ 62 passed 零 errors（原 48 passed + 14 errors）
+
+  - test_init_claim_tokens.py 两降级用例在任意渲染流下稳定通过（13 passed），全量套件复跑零 failed 零 errors
+
+  - 仅测试面改动（conftest + 断言载体），零生产源码变更，无需重新部署
+autopilot: false
+prestage_ack: false
+baseline_commit: 6855b17919ce73aca8df79585a2efc7d9279068c
+updatedAt: '2026-10-22T08:52:00.535Z'
+cross_baselines:
+  sillyspec: 8ff68ada697ec4d4af9ce0a90c4055091985e319
+baseline_sha256: 413b8749fb529df3ccec5ba4e0b3b7e6736385f768db71e2ae4a26b5063cfece
+spec_approved: true
+spec_approved_at: '2026-10-22T08:44:11.134Z'
+spec_approved_by: zcode-merge-deploy-20261022
+spec_approved_channel: agent-self
+spec_attested_by: zcode-merge-deploy-20261022
+batch_ticked: true
+gate_summary: >-
+  test: passed ← module[]+deps(py20+jsx8+jsx26)+fr(54)（139.7s）
+  结果：C:\Users\qinyi\IdeaProjects\multi-agent-platform\.sillyspec\.runtime\verify-runs\20261022084645\test-result.json｜lint:
+  failed ← cd backend && uv run ruff check . && uv run ruff format --check . && uv run mypy app && cd ../frontend &&
+  pnpm lint && cd ../sillyhub-daemon && pnpm typecheck（0.2s）
+  结果：C:\Users\qinyi\IdeaProjects\multi-agent-platform\.sillyspec\.runtime\verify-runs\20261022084645\test-result.json｜门文件
+  2 个
+

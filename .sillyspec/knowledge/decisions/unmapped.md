@@ -1365,3 +1365,11 @@
 锚点：未记录
 最近确认：457db3f86efa272c64aeacd06333aa538f3636ea
 理由：最大风险：文案中文化对依赖英文 message 做断言的下游测试造成破坏。已核查：全量 backend 套件除本变更修复的 3 红外无其它红（9058 绿），无测试 pin 这两句英文原文。放弃方案：把英文文案登记进 l10n 守卫的 `ALLOWED_ENGLISH` 白名单——放弃理由：这两条是面向用户的报错（403/413），项目惯例（守卫文档自述）是用户可见文案中文化，白名单是给机器码/专有名词的，走白名单会把该守卫的立规意图绕空。
+
+## D-unmapped-179@v1 设计期风险与放弃方案（底稿）
+状态：implemented
+变更：2026-10-22-merge-regression-fixes
+原编号：D-001@v1
+锚点：未记录
+最近确认：c4a82ff0be9d18ad4cdaa333e43ff178b0007e8b
+理由：最大风险：扩容 metadata 闭包引入 users↔agent_profiles、workspaces↔agent_profiles 环——姊妹 conftest 已实证同形态可建表（SQLite 内存库 + to_metadata + create_all），本变更照抄该范式并在隔离复跑中验证 62 passed。放弃方案：给 agent_profiles 建仅含 id 列的 stub 表——放弃理由：stub 与真实表结构漂移会掩盖后续 FK 问题，纳入真实表闭包与姊妹模块一致、可维护。

@@ -1,0 +1,36 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-22-merge-regression-fixes",
+  "rows": [
+    {
+      "anchor": "FR-02",
+      "row_id": "2026-10-22-merge-regression-fixes:flow:测试绑定FR-02",
+      "tests": [
+        "backend/app/modules/daemon/lease/tests/test_init_claim_tokens.py「TestInitClaimDefensiveDegrade::test_no_token_issued_when_actor_user_id_missing」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-22-merge-regression-fixes"
+    },
+    {
+      "anchor": "FR-02",
+      "row_id": "2026-10-22-merge-regression-fixes:flow:测试绑定FR-02",
+      "tests": [
+        "backend/app/modules/daemon/lease/tests/test_init_claim_tokens.py「TestInitClaimDefensiveDegrade::test_no_token_issued_when_workspace_id_missing」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-22-merge-regression-fixes"
+    }
+  ]
+}
