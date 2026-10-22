@@ -11,7 +11,11 @@ import {
   applyLogToSegments, createEmptyAssembledTurn, transferAssemblerInternals, type AssembledTurn,
   type AssemblerLogInput, type TurnSegment,
 } from "@/components/daemon/session-log-assembler";
-import { type SessionTurnView, type TurnUiStatus } from "@/components/daemon/turn-timeline";
+import {
+  type SessionTurnView,
+  type SessionViewMode,
+  type TurnUiStatus,
+} from "@/components/daemon/turn-timeline";
 import { type SessionInputMentions } from "@/components/daemon/session-input-bar";
 import { type BashChunkItem } from "@/components/daemon/bash-progress-card";
 import { type BashStatusEvent } from "@/lib/daemon";
@@ -337,20 +341,21 @@ export function deriveTurnTerminalStatus(env: SessionStreamEnvelope): TurnUiStat
   return "completed";
 }
 
-/* ── ql-20260822-010：会话视图模式（对话/进度）按会话持久化 ──────────────── */
+/* ── ql-20260822-010：会话视图模式（对话/进度）按会话持久化 ────────────────
+ * 2026-10-22-session-trajectory-third-view（D-001）：视图扩为三态
+ * （对话 / 进度 / 轨迹），key 不变、旧值语义不变。 */
 
 /** localStorage key（先例 NEW_SESSION_MACHINE_LS_KEY 同 sillyhub.sessions 前缀）。 */
 function viewModeLsKey(sessionId: string): string {
   return `sillyhub.sessions.viewMode.${sessionId}`;
 }
 
-/** 挂载回读：仅识别 "all"，其余/缺失/SSR 无 window 一律默认 "conversation"。 */
-export function readPersistedViewMode(sessionId: string): "conversation" | "all" {
+/** 挂载回读：识别 "all" / "trajectory"，其余/缺失/SSR 无 window 一律默认 "conversation"。 */
+export function readPersistedViewMode(sessionId: string): SessionViewMode {
   if (typeof window === "undefined") return "conversation";
   try {
-    return window.localStorage.getItem(viewModeLsKey(sessionId)) === "all"
-      ? "all"
-      : "conversation";
+    const raw = window.localStorage.getItem(viewModeLsKey(sessionId));
+    return raw === "all" || raw === "trajectory" ? raw : "conversation";
   } catch {
     return "conversation";
   }
@@ -359,7 +364,7 @@ export function readPersistedViewMode(sessionId: string): "conversation" | "all"
 /** 切换时写入（隐私模式等写入失败静默，不阻断切换本身）。 */
 export function writePersistedViewMode(
   sessionId: string,
-  m: "conversation" | "all",
+  m: SessionViewMode,
 ): void {
   try {
     window.localStorage.setItem(viewModeLsKey(sessionId), m);

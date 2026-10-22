@@ -90,7 +90,7 @@
 // 共享状态机/纯 helper 在 ./turn-state 等子模块。零行为变化。
 
 import { SessionPanelPage } from "./session-panel-page";
-import type { SessionTurnView } from "@/components/daemon/turn-timeline";
+import type { SessionTurnView, SessionViewMode } from "@/components/daemon/turn-timeline";
 import type { LlmProviderRead } from "@/lib/api/llm-providers";
 import type {
   DaemonMachineRead,
@@ -253,10 +253,10 @@ export interface SessionPanelProps {
   // ── 视图控制（两模式共用；不传则组件内部自持）──────────────────────
   /** 可选受控：消息视图模式。〔prop〕dialog 模式适配层不传（内部 useState 同款）。
    *  受控-可选模式：传入 onViewModeChange 即受控。 */
-  viewMode?: "conversation" | "all";
+  viewMode?: SessionViewMode;
   /** 配套变更回调（与 viewMode 成对传或成对不传）。〔prop〕 */
   // eslint-disable-next-line no-unused-vars -- 接口回调签名形参（同 subagent-panel-context.ts 惯例）
-  onViewModeChange?: (mode: "conversation" | "all") => void;
+  onViewModeChange?: (mode: SessionViewMode) => void;
 
   // ── page 模式子代理右栏（task-03 / 2026-09-15-subagent-three-pane-display /
   //    design §5.B——仅门户 page 装配传入）──────────────────────────────
