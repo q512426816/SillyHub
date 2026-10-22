@@ -7,7 +7,9 @@
 //   1. 默认展开：卡头有最小化按钮、无胶囊（改动后新增能力，不传则无按钮的
 //      向后兼容由 ask-user-dialog-card 组件级测试覆盖）；
 //   2. 最小化：卡片渲染 null（组件级 minimized 契约）、胶囊出现 + 角标 1、
-//      全部最小化时 sticky 视觉框消失（容器仅作挂载占位保 state）；
+//      全部最小化时容器视觉框消失（容器仅作挂载占位保 state）；
+//   7. 2026-10-22-askuser-card-inline：容器内嵌文档流——展开态类名不含
+//      sticky（不再钉顶悬浮，随日志滚动；用例 1 内联断言）；
 //   3. 还原保留已填内容：选项 + 手动输入在最小化/还原后原样恢复；
 //   4. 多卡累计：角标 2、展开明细列表定点还原指定卡 → 角标 1；
 //   5. 父级移除卡（提交 / permission_resolved 后 pendingRequests 过滤）→
@@ -85,9 +87,15 @@ describe("TurnTimeline pending 提问卡最小化（ql-20260825-006）", () => {
     expect(
       screen.queryByRole("group", { name: "最小化的待决策卡片" }),
     ).not.toBeInTheDocument();
+    // 2026-10-22-askuser-card-inline：容器内嵌文档流——无 sticky 钉顶类，
+    // 卡片随日志内容滚动（用户裁决：不要悬浮，直接嵌入可上下滚动）。
+    const inlineBox = document.querySelector('[data-testid="turn-timeline-scroll"] > div');
+    expect(inlineBox).not.toBeNull();
+    expect(inlineBox!.className).not.toContain("sticky");
+    expect(inlineBox!.className).toContain("space-y-2");
   });
 
-  it("最小化：卡片消失、胶囊出现角标 1、sticky 视觉框移除", () => {
+  it("最小化：卡片消失、胶囊出现角标 1、容器视觉框移除", () => {
     setupTimeline();
     fireEvent.click(screen.getByRole("button", { name: "最小化提问卡片" }));
 
@@ -103,10 +111,10 @@ describe("TurnTimeline pending 提问卡最小化（ql-20260825-006）", () => {
       screen.getByRole("group", { name: "最小化的待决策卡片" }),
     ).toBeInTheDocument();
     expect(screen.getByText("1")).toBeInTheDocument();
-    // 全部最小化：sticky 容器仅作挂载占位（无 indigo 视觉类）
-    const stickyBox = document.querySelector('[data-testid="turn-timeline-scroll"] > div');
-    expect(stickyBox).not.toBeNull();
-    expect(stickyBox!.className).not.toContain("bg-indigo-50");
+    // 全部最小化：容器仅作挂载占位（无视觉类）
+    const inlineBox = document.querySelector('[data-testid="turn-timeline-scroll"] > div');
+    expect(inlineBox).not.toBeNull();
+    expect(inlineBox!.className).not.toContain("bg-indigo-50");
   });
 
   it("还原保留已填内容：选项 + 手动输入原样恢复", () => {

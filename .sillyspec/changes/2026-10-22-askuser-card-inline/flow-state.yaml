@@ -1,0 +1,36 @@
+tier: thin
+legacy_fallback: false
+substeps: {}
+born_face: thin
+with_tasks: false
+review_force: null
+input: >-
+  会话页 AskUser 提问卡悬浮改内嵌滚动
+
+
+  动机：pending AskUser 询问卡当前为 sticky 钉顶悬浮（turn-timeline.tsx sticky top-0 + indigo
+  半透明背景条），长日志滚动时始终悬浮占据顶部；用户反馈应直接嵌入当前内容流、可随内容上下滚动。
+
+
+  成功标准：
+
+  - 会话页 pending AskUser 提问卡嵌入内容流渲染（非 sticky 钉顶悬浮），随日志上下滚动
+
+  - 全部最小化时容器仍仅作挂载占位（无视觉框），右下角胶囊行为不变
+
+  - 待决策 pill 定位还原（滚顶+ring 闪烁）功能不回退
+
+  - 受影响测试通过，tsc 零错
+autopilot: false
+prestage_ack: false
+baseline_commit: b09314fd604c27f64e410e801bada39c127def7b
+updatedAt: '2026-10-22T04:06:51.531Z'
+cross_baselines:
+  sillyspec: 8ff68ada697ec4d4af9ce0a90c4055091985e319
+baseline_sha256: 6dac3c9a019894a21a72e7da1e3580d3d55fa19319fb97479d38d21c863f867c
+spec_approved: true
+spec_approved_at: '2026-10-22T04:06:51.530Z'
+spec_approved_by: anon@DESKTOP-HJ0AM09
+spec_approved_channel: user-confirmed
+spec_attested_by: anon@DESKTOP-HJ0AM09
+

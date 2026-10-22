@@ -1623,20 +1623,21 @@ export function TurnTimeline({
     sessionStatus !== "failed";
 
   // ── 2026-10-16-session-decision-pill / FR-03：待决策 pill 定位还原 ──────────
-  // sticky 提问卡容器 ref（高亮闪烁落点）；effect 由 nonce 触发（同 requestId
+  // 内嵌提问卡容器 ref（高亮闪烁落点；2026-10-22-askuser-card-inline 卡片
+  // 由 sticky 钉顶改内嵌文档流，ref 更名同步）；effect 由 nonce 触发（同 requestId
   // 重复点击也生效）。还原→滚顶→闪烁三步：还原最小化卡无条件删集合（不在
   // 集合内为 no-op）；闪烁 class 1.2s 自清（对齐父层 highlightTurnKey ~2.2s
   // 节奏缩短版——pill 定位是轻提示）。挂载首帧 nonce 变化（初始 null → 值）
   // 也会触发一次——无害（滚顶+无卡可闪，pending 为空时 showPending 门控本就
   // 不渲染卡片层）。
-  const stickyCardsRef = useRef<HTMLDivElement>(null);
+  const inlineCardsRef = useRef<HTMLDivElement>(null);
   const focusNonceRef = useRef<number>(-1);
   useEffect(() => {
     if (!focusDialogRequest || focusDialogRequest.nonce === focusNonceRef.current) return;
     focusNonceRef.current = focusDialogRequest.nonce;
     handleRestore(focusDialogRequest.requestId);
     scrollRef.current?.scrollTo({ top: 0, behavior: "smooth" });
-    const el = stickyCardsRef.current;
+    const el = inlineCardsRef.current;
     if (!el) return;
     el.classList.add("ring-2", "ring-brand-500");
     const t = window.setTimeout(() => {
@@ -1766,20 +1767,18 @@ export function TurnTimeline({
         </div>
       )}
       {/* ql-20260621：AskUserQuestion 对话卡（permission_request.dialog_kind）。
-          sticky top-0 让用户在长日志滚动时仍可见、可作答；提交 / SSE resolved
-          后自动移除。普通工具审批（无 dialog_kind）不在本面板展示。
+          2026-10-22-askuser-card-inline：容器由 sticky 钉顶悬浮改为内嵌文档流
+         （mb-3 space-y-2，无背景条），卡片随日志内容上下滚动；深滚不可见时由
+          待决策 pill 定位还原（滚顶+ring 闪烁）兜底。提交 / SSE resolved 后自动
+          移除。普通工具审批（无 dialog_kind）不在本面板展示。
           ql-20260623（改动三）：ended/failed 会话不回显 pending dialog 卡片
          （session 已终止，残留 pending 行为死卡；onSessionEnded 也会清空）。
           ql-20260825-006：卡头最小化按钮 → 收缩为右下角浮动胶囊（下方渲染），
           已填内容随挂载保留；全部最小化时本容器仅作挂载占位（去视觉框）。 */}
       {showPending && (
         <div
-          ref={stickyCardsRef}
-          className={
-            visiblePendingCount > 0
-              ? "sticky top-0 z-10 mb-3 space-y-2 border-b border-indigo-300 bg-indigo-50/95 px-3 py-2 shadow-sm backdrop-blur-sm"
-              : undefined
-          }
+          ref={inlineCardsRef}
+          className={visiblePendingCount > 0 ? "mb-3 space-y-2" : undefined}
         >
           {pendingRequests.map((req) => (
             <ErrorBoundary

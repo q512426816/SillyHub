@@ -4328,7 +4328,7 @@ export function SessionPanelPage({
   }, []);
 
   // 2026-10-16-session-decision-pill task-04 / FR-03：待决策 pill 定位路由——
-  // dialog 项 → TurnTimeline focusDialogRequest（还原最小化 + 滚顶 + sticky 卡
+  // dialog 项 → TurnTimeline focusDialogRequest（还原最小化 + 滚顶 + 内嵌提问卡
   // 闪烁）；"plan" 哨兵 → 输入区上方 Plan 审批卡高亮闪烁（恒可见仅提示）。
   const handleFocusPending = useCallback((requestId: string) => {
     if (requestId === "plan") {
