@@ -104,10 +104,13 @@ export function aggregateTurnFileChanges(
     const capability = entry.capability ?? null;
     // 无快照能力 / 快照缺失：零信息，跳过（不出卡也不计入汇总）。
     if (snapshot == null || capability === "tool_only") continue;
+    // 采集失败 / git 不可用：数据不可信 → 与「无快照」同口径跳过。若仍计入，
+    // Σ+/− 会被整体打成「—」并冒出「部分轮次快照采集失败，汇总不完整」——
+    // 正是本变更要消除的顶部缺口提示（2026-10-22-file-card-hide-empty）。
+    if (snapshot.status === "failed" || snapshot.status === "unavailable") continue;
     consideredTurns += 1;
     statuses.push(snapshot.status);
     if (snapshot.status === "partial" || snapshot.truncated === true) truncated = true;
-    if (snapshot.status !== "ok" && snapshot.status !== "partial") continue;
     for (const file of snapshot.files ?? []) {
       mergeFile(byPath, file);
     }

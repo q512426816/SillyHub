@@ -133,7 +133,7 @@ describe("worstFileChangesStatus / aggregateTurnFileChanges（纯函数）", () 
     expect(agg.totalFiles).toBe(1);
   });
 
-  it("failed / unavailable 轮不贡献文件行（数据不可信）", () => {
+  it("failed / unavailable 轮整轮跳过（不计入、不压状态、不出「采集失败」提示）", () => {
     const agg = aggregateTurnFileChanges([
       {
         snapshot: makeSnapshot({ status: "unavailable", files: [makeFile()] }),
@@ -141,9 +141,24 @@ describe("worstFileChangesStatus / aggregateTurnFileChanges（纯函数）", () 
       },
       { snapshot: makeSnapshot({ status: "ok", files: [makeFile({ path: "b.ts" })] }), capability: "full" },
     ]);
-    expect(agg.status).toBe("unavailable");
+    // 不可信快照既不贡献文件行，也不把汇总状态压成不可用。
+    expect(agg.status).toBe("ok");
+    expect(agg.consideredTurns).toBe(1);
     expect(agg.totalFiles).toBe(1);
     expect(agg.files[0]!.path).toBe("b.ts");
+    // 渲染层同样不出现「SC 采集失败」类缺口提示。
+    render(
+      <FileChangesSummary
+        turns={[
+          { snapshot: makeSnapshot({ status: "failed", files: [makeFile()] }), capability: "full" },
+          { snapshot: makeSnapshot({ status: "ok", files: [makeFile({ path: "b.ts" })] }), capability: "full" },
+        ]}
+      />,
+    );
+    expect(screen.getByTestId("file-changes-summary")).toHaveAttribute("data-status", "ok");
+    expect(screen.getByText("共 1 个文件")).toBeInTheDocument();
+    expect(screen.queryByText(/采集失败/)).toBeNull();
+    expect(screen.queryByText(/汇总不完整/)).toBeNull();
   });
 });
 

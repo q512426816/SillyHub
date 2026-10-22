@@ -408,8 +408,9 @@ export interface SessionTurnView {
   fileChanges?: TurnFileChangesSnapshot | null;
   /**
    * task-11 / FR-16：该轮快照能力档（`full` = daemon 上报了工作区快照；
-   * `tool_only` = 老 daemon 无快照能力）。`undefined` = 挂载方未接线（不出卡、
-   * 不出占位）；`tool_only` → 「仅工具编辑」降级卡（E8 版本门控面）。
+   * `tool_only` = 老 daemon / 部署前的历史轮，无快照能力）。`undefined` = 挂载方
+   * 未接线（不出卡、不出占位）；`tool_only` 与「无快照 / 采集失败」同口径——**不出卡**
+   * （2026-10-22-file-card-hide-empty：没有信息就隐藏卡片，原「仅工具编辑」降级卡已下线）。
    */
   fileChangesCapability?: FileChangesCapability | null;
 }
