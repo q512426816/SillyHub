@@ -1,0 +1,22 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-22-askuser-card-inline",
+  "reviewer": "subagent",
+  "verdict": "PASS",
+  "reviewedAgainst": "bb4b8f53d74adc29adab205ec1ea7d89b5d8010a",
+  "findings": [
+    {
+      "severity": "P3",
+      "title": "focusDialogRequest prop JSDoc 残留旧「sticky」措辞——前轮 P3 同类残留的第二处，修复提交未覆盖",
+      "evidence": "turn-timeline.tsx:511-512 仍述「②滚动容器到顶（pending 卡 sticky 常驻顶部）；③sticky 容器高亮闪烁 ~1.2s 自清」，而容器已改内嵌文档流（1781 行 className 为 mb-3 space-y-2、ref=inlineCardsRef，全仓该组件无 sticky 类），注释与实现不一致（CLAUDE.md 规则 18）；纯注释措辞、零行为风险，与前轮已修复的 1749 行残留同类。",
+      "location": "frontend/src/components/daemon/turn-timeline.tsx:511"
+    }
+  ],
+  "dimensionNotes": {
+    "乱序": "ok——pending 卡容器渲染在 JSX 固定点（错误横幅 1764-1768 之后、轮次列表之前），渲染位置与 SSE/REST 到达顺序无关，代码核实成立",
+    "并发": "ok——diff 仅改容器 className 与 ref 命名，纯组件局部 state/ref，无共享数据写面，作答成立",
+    "切换": "ok——最小化占位保 state / permission_resolved 移卡 / ended/failed 不回显门控路径零改动（patch hunk 核实）；声明边界①「深滚时新提问卡不可见」已裁决：可接受——用户显式要求内嵌形态（用户裁决），兜底已核实生效（pill 定位还原：handleRestore + scrollRef.scrollTo top + ring-2 ring-brand-500 1.2s 自清，~1630-1640 区）；声明边界②「滚顶+闪烁 effect 无独立用例」已裁决：可接受——该 effect 本次仅 ref 名两行变化、行为零变化（patch 核实），还原路径由「还原保留已填内容」用例间接覆盖",
+    "作用域": "ok——改动仅 TurnTimeline 渲染层三文件（patch 清单=design 声明清单，零声明外文件），群聊面板 AskUserDialogCard 内嵌渲染独立未触碰；声明边界③「禁止跑全量测试」已裁决：可接受——与复跑口径（2026-10-21-review-rerun-scope）同源，ledger 回执 passed exit=0 已覆变更面"
+  },
+  "reviewedAt": "2026-10-22T04:24:04.000Z"
+}

@@ -754,3 +754,79 @@ created_at: 2026-10-16T01:30:35.950Z
 摘要：回归
 全文：.sillyspec/changes/archive/2026-10-22-turn-trigger-generalize/requirements.md#FR-05
 最近确认：7338a61c878a5f33c1d1a0647cf900f2b71c14d1
+
+## FR-test-utils-037 会话页 pending AskUser 提问卡嵌入内容流渲染（非 sticky 钉顶悬浮），随日志上下滚动
+变更：2026-10-22-askuser-card-inline
+状态：active
+摘要：长日志滚动；卡片位置
+全文：.sillyspec/changes/archive/2026-10-22-askuser-card-inline/requirements.md#FR-01
+最近确认：05c42dea444bb413efd0c2d6b0a7a9f53e8e0f9d
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-22-askuser-card-inline:flow:测试绑定FR-01
+  tests: frontend/src/components/daemon/__tests__/turn-timeline-dialog-minimize.test.tsx「默认展开：卡头有最小化按钮，无胶囊」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-22-askuser-card-inline
+  status: active
+
+## FR-test-utils-038 全部最小化时容器仍仅作挂载占位（无视觉框），右下角胶囊行为不变
+变更：2026-10-22-askuser-card-inline
+状态：active
+摘要：全部最小化
+全文：.sillyspec/changes/archive/2026-10-22-askuser-card-inline/requirements.md#FR-02
+最近确认：05c42dea444bb413efd0c2d6b0a7a9f53e8e0f9d
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-22-askuser-card-inline:flow:测试绑定FR-02
+  tests: frontend/src/components/daemon/__tests__/turn-timeline-dialog-minimize.test.tsx「最小化：卡片消失、胶囊出现角标 1、视觉框移除」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-22-askuser-card-inline
+  status: active
+
+## FR-test-utils-039 待决策 pill 定位还原（滚顶+ring 闪烁）功能不回退
+变更：2026-10-22-askuser-card-inline
+状态：active
+摘要：pill 定位还原
+全文：.sillyspec/changes/archive/2026-10-22-askuser-card-inline/requirements.md#FR-03
+最近确认：05c42dea444bb413efd0c2d6b0a7a9f53e8e0f9d
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-22-askuser-card-inline:flow:测试绑定FR-03
+  tests: frontend/src/components/daemon/__tests__/turn-timeline-dialog-minimize.test.tsx「还原保留已填内容：选项 + 手动输入原样恢复」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-22-askuser-card-inline
+  status: active
+
+## FR-test-utils-040 受影响测试通过，tsc 零错
+变更：2026-10-22-askuser-card-inline
+状态：active
+摘要：验证
+全文：.sillyspec/changes/archive/2026-10-22-askuser-card-inline/requirements.md#FR-04
+最近确认：05c42dea444bb413efd0c2d6b0a7a9f53e8e0f9d
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-22-askuser-card-inline:flow:测试绑定FR-04
+  tests: frontend/src/components/daemon/__tests__/turn-timeline-dialog-minimize.test.tsx
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-22-askuser-card-inline
+  status: active

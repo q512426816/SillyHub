@@ -1,0 +1,27 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-22-askuser-card-inline",
+  "reviewer": "subagent",
+  "verdict": "PASS",
+  "reviewedAgainst": "42b716e67578629ba574f3981017461d4fc49790",
+  "findings": [
+    {
+      "severity": "P3",
+      "title": "注释残留过时「sticky」措辞——design 承诺的注释同步漏了一处",
+      "evidence": "design 做法概述承诺「相关注释（容器注释块、决策 pill effect 注释、session-panel-page.tsx 注释）同步更新」，patch 两处 hunk 更新了容器注释块与 effect 注释，但 visiblePendingCount 声明上方的注释行仍写「全部最小化时 sticky 容器只剩挂载占位」——容器已改内嵌文档流，措辞名不副实（项目规则：注释与实现不一致是万恶之源）；纯注释、无行为影响。",
+      "location": "frontend/src/components/daemon/turn-timeline.tsx:1749"
+    }
+  ],
+  "dimensionNotes": {
+    "乱序": "ok",
+    "并发": "ok",
+    "切换": "ok",
+    "作用域": "ok",
+    "边界裁决": "design 风险节披露的边界「内嵌后深滚日志时新提问卡不可见、可能错过提问」裁决为可接受：①该形态即 FR-01 用户裁决（不要悬浮）；②声称的三层兜底真实存在——pill 定位还原 effect（turn-timeline.tsx:1635-1647，还原+滚顶+ring-2 ring-brand-500 1.2s 自清）本次零行为变化仅 ref 改名，卡片仍在内容流最顶部（错误横幅后、轮次前，实态 1778-1782），后端 permission 队列门控不答则挂起。放弃方案（sticky 折叠细条/自动滚动定位）为方案取舍记录非交付边界。无其他声明边界。",
+    "FR三方一致": "FR-01/02/03/04 全兑现：容器实态 className={visiblePendingCount > 0 ? \"mb-3 space-y-2\" : undefined}（turn-timeline.tsx:1781，无 sticky/z-10/indigo/backdrop-blur），位于错误横幅后轮次列表前；测试「默认展开」用例新增断言（scroll 容器首子 div 类名不含 sticky 且含 space-y-2）、「最小化」用例保留 bg-indigo-50 不存在断言、「还原保留已填内容」用例均在实态测试文件中且复跑 6P；tsc --noEmit exit 0 亲测。",
+    "生成物同步": "n/a——接口契约声明「无对外接口变化」属实：patch 不含 props/协议/类型文件改动，api-types.ts 与后端零触及。",
+    "冻结面归属": "3 文件全在 design 变更清单内，声明外 0 文件；HEAD 42b716e67 提交信息与 patch 内容一致，daemon 面工作区干净无并行混入。",
+    "盲维第4问文件名核验": "design 引用 group-chat-panel.tsx 实存（frontend/src/components/group-chat/group-chat-panel.tsx，全仓 glob 确认）；AskUserDialogCard 组件本体与 props 零改动（patch 不含 ask-user-dialog-card.tsx），其余使用面（session-permission-panel/agent-log-viewer）不受影响。"
+  },
+  "reviewedAt": "2026-10-22T04:19:00.000Z"
+}

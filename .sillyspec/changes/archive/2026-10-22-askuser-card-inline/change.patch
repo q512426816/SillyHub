@@ -1,0 +1,137 @@
+diff --git a/frontend/src/components/daemon/__tests__/turn-timeline-dialog-minimize.test.tsx b/frontend/src/components/daemon/__tests__/turn-timeline-dialog-minimize.test.tsx
+index 57f4b518e..df453ab45 100644
+--- a/frontend/src/components/daemon/__tests__/turn-timeline-dialog-minimize.test.tsx
++++ b/frontend/src/components/daemon/__tests__/turn-timeline-dialog-minimize.test.tsx
+@@ -7,7 +7,9 @@
+ //   1. 默认展开：卡头有最小化按钮、无胶囊（改动后新增能力，不传则无按钮的
+ //      向后兼容由 ask-user-dialog-card 组件级测试覆盖）；
+ //   2. 最小化：卡片渲染 null（组件级 minimized 契约）、胶囊出现 + 角标 1、
+-//      全部最小化时 sticky 视觉框消失（容器仅作挂载占位保 state）；
++//      全部最小化时容器视觉框消失（容器仅作挂载占位保 state）；
++//   7. 2026-10-22-askuser-card-inline：容器内嵌文档流——展开态类名不含
++//      sticky（不再钉顶悬浮，随日志滚动；用例 1 内联断言）；
+ //   3. 还原保留已填内容：选项 + 手动输入在最小化/还原后原样恢复；
+ //   4. 多卡累计：角标 2、展开明细列表定点还原指定卡 → 角标 1；
+ //   5. 父级移除卡（提交 / permission_resolved 后 pendingRequests 过滤）→
+@@ -85,9 +87,15 @@ describe("TurnTimeline pending 提问卡最小化（ql-20260825-006）", () => {
+     expect(
+       screen.queryByRole("group", { name: "最小化的待决策卡片" }),
+     ).not.toBeInTheDocument();
++    // 2026-10-22-askuser-card-inline：容器内嵌文档流——无 sticky 钉顶类，
++    // 卡片随日志内容滚动（用户裁决：不要悬浮，直接嵌入可上下滚动）。
++    const inlineBox = document.querySelector('[data-testid="turn-timeline-scroll"] > div');
++    expect(inlineBox).not.toBeNull();
++    expect(inlineBox!.className).not.toContain("sticky");
++    expect(inlineBox!.className).toContain("space-y-2");
+   });
+ 
+-  it("最小化：卡片消失、胶囊出现角标 1、sticky 视觉框移除", () => {
++  it("最小化：卡片消失、胶囊出现角标 1、容器视觉框移除", () => {
+     setupTimeline();
+     fireEvent.click(screen.getByRole("button", { name: "最小化提问卡片" }));
+ 
+@@ -103,10 +111,10 @@ describe("TurnTimeline pending 提问卡最小化（ql-20260825-006）", () => {
+       screen.getByRole("group", { name: "最小化的待决策卡片" }),
+     ).toBeInTheDocument();
+     expect(screen.getByText("1")).toBeInTheDocument();
+-    // 全部最小化：sticky 容器仅作挂载占位（无 indigo 视觉类）
+-    const stickyBox = document.querySelector('[data-testid="turn-timeline-scroll"] > div');
+-    expect(stickyBox).not.toBeNull();
+-    expect(stickyBox!.className).not.toContain("bg-indigo-50");
++    // 全部最小化：容器仅作挂载占位（无视觉类）
++    const inlineBox = document.querySelector('[data-testid="turn-timeline-scroll"] > div');
++    expect(inlineBox).not.toBeNull();
++    expect(inlineBox!.className).not.toContain("bg-indigo-50");
+   });
+ 
+   it("还原保留已填内容：选项 + 手动输入原样恢复", () => {
+diff --git a/frontend/src/components/daemon/session-panel/session-panel-page.tsx b/frontend/src/components/daemon/session-panel/session-panel-page.tsx
+index 67498fea4..47d96048c 100644
+--- a/frontend/src/components/daemon/session-panel/session-panel-page.tsx
++++ b/frontend/src/components/daemon/session-panel/session-panel-page.tsx
+@@ -4328,7 +4328,7 @@ export function SessionPanelPage({
+   }, []);
+ 
+   // 2026-10-16-session-decision-pill task-04 / FR-03：待决策 pill 定位路由——
+-  // dialog 项 → TurnTimeline focusDialogRequest（还原最小化 + 滚顶 + sticky 卡
++  // dialog 项 → TurnTimeline focusDialogRequest（还原最小化 + 滚顶 + 内嵌提问卡
+   // 闪烁）；"plan" 哨兵 → 输入区上方 Plan 审批卡高亮闪烁（恒可见仅提示）。
+   const handleFocusPending = useCallback((requestId: string) => {
+     if (requestId === "plan") {
+diff --git a/frontend/src/components/daemon/turn-timeline.tsx b/frontend/src/components/daemon/turn-timeline.tsx
+index d4f50b64e..13cdf37fa 100644
+--- a/frontend/src/components/daemon/turn-timeline.tsx
++++ b/frontend/src/components/daemon/turn-timeline.tsx
+@@ -508,8 +508,9 @@ export interface TurnTimelineProps {
+   /**
+    * 2026-10-16-session-decision-pill / FR-03：待决策 pill 定位还原请求（受控
+    * 触发式——nonce 递增驱动 effect，requestId 不变重复点击也生效）。effect：
+-   * ①若该卡在 minimizedIds 中先还原；②滚动容器到顶（pending 卡 sticky 常驻
+-   * 顶部）；③sticky 容器高亮闪烁 ~1.2s 自清。缺省 / null 零行为（旧消费方
++   * ①若该卡在 minimizedIds 中先还原；②滚动容器到顶（pending 卡内嵌在内容流
++   * 顶部，2026-10-22-askuser-card-inline 由 sticky 钉顶改内嵌）；③容器高亮
++   * 闪烁 ~1.2s 自清。缺省 / null 零行为（旧消费方
+    * 零回归，同 highlightTurnKey 先例的自清节奏约定——清除归本组件定时器）。
+    */
+   focusDialogRequest?: { requestId: string; nonce: number } | null;
+@@ -1623,20 +1624,21 @@ export function TurnTimeline({
+     sessionStatus !== "failed";
+ 
+   // ── 2026-10-16-session-decision-pill / FR-03：待决策 pill 定位还原 ──────────
+-  // sticky 提问卡容器 ref（高亮闪烁落点）；effect 由 nonce 触发（同 requestId
++  // 内嵌提问卡容器 ref（高亮闪烁落点；2026-10-22-askuser-card-inline 卡片
++  // 由 sticky 钉顶改内嵌文档流，ref 更名同步）；effect 由 nonce 触发（同 requestId
+   // 重复点击也生效）。还原→滚顶→闪烁三步：还原最小化卡无条件删集合（不在
+   // 集合内为 no-op）；闪烁 class 1.2s 自清（对齐父层 highlightTurnKey ~2.2s
+   // 节奏缩短版——pill 定位是轻提示）。挂载首帧 nonce 变化（初始 null → 值）
+   // 也会触发一次——无害（滚顶+无卡可闪，pending 为空时 showPending 门控本就
+   // 不渲染卡片层）。
+-  const stickyCardsRef = useRef<HTMLDivElement>(null);
++  const inlineCardsRef = useRef<HTMLDivElement>(null);
+   const focusNonceRef = useRef<number>(-1);
+   useEffect(() => {
+     if (!focusDialogRequest || focusDialogRequest.nonce === focusNonceRef.current) return;
+     focusNonceRef.current = focusDialogRequest.nonce;
+     handleRestore(focusDialogRequest.requestId);
+     scrollRef.current?.scrollTo({ top: 0, behavior: "smooth" });
+-    const el = stickyCardsRef.current;
++    const el = inlineCardsRef.current;
+     if (!el) return;
+     el.classList.add("ring-2", "ring-brand-500");
+     const t = window.setTimeout(() => {
+@@ -1745,7 +1747,7 @@ export function TurnTimeline({
+   const minimizedPending = showPending
+     ? pendingRequests.filter((r) => minimizedIds.has(r.request_id))
+     : [];
+-  // 全部最小化时 sticky 容器只剩挂载占位（保卡片 state），去掉视觉框。
++  // 全部最小化时容器只剩挂载占位（保卡片 state），去掉间距类。
+   const visiblePendingCount = pendingRequests.length - minimizedPending.length;
+ 
+   return (
+@@ -1766,20 +1768,18 @@ export function TurnTimeline({
+         </div>
+       )}
+       {/* ql-20260621：AskUserQuestion 对话卡（permission_request.dialog_kind）。
+-          sticky top-0 让用户在长日志滚动时仍可见、可作答；提交 / SSE resolved
+-          后自动移除。普通工具审批（无 dialog_kind）不在本面板展示。
++          2026-10-22-askuser-card-inline：容器由 sticky 钉顶悬浮改为内嵌文档流
++         （mb-3 space-y-2，无背景条），卡片随日志内容上下滚动；深滚不可见时由
++          待决策 pill 定位还原（滚顶+ring 闪烁）兜底。提交 / SSE resolved 后自动
++          移除。普通工具审批（无 dialog_kind）不在本面板展示。
+           ql-20260623（改动三）：ended/failed 会话不回显 pending dialog 卡片
+          （session 已终止，残留 pending 行为死卡；onSessionEnded 也会清空）。
+           ql-20260825-006：卡头最小化按钮 → 收缩为右下角浮动胶囊（下方渲染），
+           已填内容随挂载保留；全部最小化时本容器仅作挂载占位（去视觉框）。 */}
+       {showPending && (
+         <div
+-          ref={stickyCardsRef}
+-          className={
+-            visiblePendingCount > 0
+-              ? "sticky top-0 z-10 mb-3 space-y-2 border-b border-indigo-300 bg-indigo-50/95 px-3 py-2 shadow-sm backdrop-blur-sm"
+-              : undefined
+-          }
++          ref={inlineCardsRef}
++          className={visiblePendingCount > 0 ? "mb-3 space-y-2" : undefined}
+         >
+           {pendingRequests.map((req) => (
+             <ErrorBoundary

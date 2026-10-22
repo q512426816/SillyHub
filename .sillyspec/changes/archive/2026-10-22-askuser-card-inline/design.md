@@ -49,4 +49,5 @@ turn-timeline.tsx 中 pending AskUser 提问卡容器（`stickyCardsRef` div，�
 | 操作 | 路径 | 说明 |
 | --- | --- | --- |
 | 修改 | frontend/src/components/daemon/turn-timeline.tsx | pending 卡容器类名 sticky 钉顶→内嵌文档流；ref stickyCardsRef→inlineCardsRef；注释同步 |
+| 修改 | frontend/src/components/daemon/session-panel/session-panel-page.tsx | 纯注释同步：待决策 pill 定位路由注释中「sticky 卡闪烁」措辞改「内嵌提问卡闪烁」（无代码变化） |
 | 修改 | frontend/src/components/daemon/__tests__/turn-timeline-dialog-minimize.test.tsx | 新增非 sticky 容器类名断言；注释/用例名措辞同步（视觉框→挂载占位语义） |
