@@ -10,4 +10,4 @@ created_at: 2026-10-22T11:17:23.094Z
 - [x] task-04: 前端视图模型补 status/行级可信标记、notice 按 reason+耗时、编辑次数取真实调用数——验证：turn-file-changes 用例绿
 - [x] task-05: 卡片渲染状态徽标、删除行不可点、未跟踪/mtime 破折号、notice 态共享工作区提示、头部文案——验证：file-changes-card 用例绿
 - [x] task-06: 跑 daemon 与前端定向测试面，修正既有断言/回归——验证：两条测试命令全绿
-- [ ] task-07: 同步 daemon/frontend 模块文档——验证：文档与实现一致
+- [x] task-07: 同步 daemon/frontend 模块文档——验证：文档与实现一致

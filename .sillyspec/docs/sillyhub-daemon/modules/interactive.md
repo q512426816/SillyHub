@@ -216,3 +216,11 @@ restoreAndReconnect: 同上按位置判定 + 迁移 + record.providerConfig 快�
 
 - `getTurnFileChangesTelemetry()`（`sillyhub-daemon/src/interactive/turn-file-changes.ts:715`）读 50 样本滑窗（`TURN_FILE_CHANGES_TELEMETRY_WINDOW`）出 `samples` / `p50` / `p95` / `degradeRate` / `subprocessCountMax`；红线 p50 > 300ms 或降级率 > 5% 报警。spike-01 安静窗口实测：worktree 语料（21 改动）245ms / 480ms、主仓（111 改动）318ms / 379ms——重脏仓超线已登记 R-07，退档开关 `limits.includeLineCounts=false` 已实现并单测。
 - `partial` **不是错误态**：卡片照出、行级 +/− 显示破折号，不伪造数字；`unavailable`（`not_a_repo` / `git_missing`）与 `failed`（未知 git 错误）由前端按 `capability="tool_only"` 走降级卡。任何情况下都不把「没有快照」写成「本轮无改动」（E6/E8 硬约束）。
+
+## 2026-10-22-file-changes-card-fix 增量（采集口径与慢盘预算）
+
+- 文件清单来源改为 `git status --porcelain -z` ∪ `git diff --name-status -z <baselineHead>`：status 覆盖未提交/未跟踪，name-status 覆盖**轮内已提交**改动；`git diff --numstat <baselineHead>` 只补行数/二进制。合并优先级 status > name-status > numstat（numstat-only 路径状态保守归 modified）。子进程：baseline 已知 ≤3（status/name-status/numstat），未解析基线的兜底路径 4（+rev-parse）。
+- 分阶段收口：只有 status 失败才 `files=[]`；name-status/numstat 失败只降级状态精度/行数，保留已采清单（`status=partial` + `reason=timeout`）。外层硬超时同样按 `CollectProgress` 已完成阶段组装清单，不再丢掉 status 面。
+- 预算：`resolveTurnFileChangesLimits()`——显式 limits > env `SILLYHUB_FILE_CHANGES_TIMEOUT_MS` > 默认 1500ms；`/mnt/<drive>/` 基础 ≥8000ms；该工作区 timeout 后翻倍升级（+2s 起步，封顶 15000ms，进程内记忆，`resetTurnFileChangesTelemetry()` 清空）。
+- `editToolNames` 不再按工具名去重：数组长度 = 本轮编辑调用次数（前端「改N次」口径），工具名提示由前端去重展示。
+- 测试面：`tests/interactive/turn-file-changes.test.ts` 新增轮内 commit 入列、numstat 超时保留清单、name-status 超时 numstat 兜底、慢盘预算、自适应升级、编辑调用计数 6 类用例；子进程预算断言随 3/4 条更新。

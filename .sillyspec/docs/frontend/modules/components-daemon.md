@@ -347,3 +347,11 @@ runtime-session-helpers 纯函数）。2026-07-11-unify-runtime-session-dialog �
 - 已知缺口（只登记）：手工镜像 `frontend/src/lib/daemon/sessions.ts` 的 `SessionRunRead` 尚未补这三列，故透传层用结构化可选字段 `RunFileChangesFields`（`frontend/src/components/daemon/file-changes/turn-file-changes.ts:57`）读取——镜像补齐后可原地收窄类型，调用面不变。
 - 测试面：`frontend/src/components/daemon/file-changes/__tests__/`（归因映射 / `partial`+`truncated` 破折号 / `tool_only` 降级且不出现「无改动」/ 空快照不出卡 / 汇总去重与 Σ+/− / 最差状态 / 横幅在场）、`frontend/src/components/daemon/__tests__/turn-timeline-conversation-file-card.test.tsx`（轮级挂载 + 汇总开关）、`trajectory/__tests__/build-trajectory.test.ts` 与 `trajectory-timeline.test.tsx`（`modelBasis` 两态判定与文案互斥）。
 
+## 2026-10-22-file-changes-card-fix 增量（状态展示与提示）
+
+- 文件行新增状态徽标（新增/修改/删除/新文件）；untracked / mtime 探测行 `hasLineStats=false` 显示破折号（不再 +0 −0）；删除行 `data-clickable="false"` 不可点击、路径加删除线。
+- 「改N次」= 真实编辑调用次数（daemon `editToolNames` 保留重复项），工具名提示按名去重展示。
+- notice 按 `reason` 生成：`timeout` 带 `collectMs`（≥1s 显示 s、否则 ms）、`queue_overflow` 明确排队溢出、无 reason 用通用「工作区快照未完成」；notice 态同样显示「共享工作区，可能含并行会话改动」。
+- 头部文案由「已编辑 N 个文件」改为「N 个文件变更」——快照是工作区口径，不宣称全部由本轮编辑产生。
+- 测试面：`__tests__/turn-file-changes.test.ts`（status/hasLineStats/edits 取调用次数/notice 三态）、`__tests__/file-changes-card.test.tsx`（状态徽标/删除不可点/untracked 破折号/notice 共享提示）。
+
