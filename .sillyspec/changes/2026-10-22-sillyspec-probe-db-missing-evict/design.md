@@ -17,7 +17,8 @@ created_at: 2026-10-22T15:16:34.258Z
 动了哪些函数/端点/命令/文件格式？对外可见的签名或行为变化是什么（含「无」的说明）？
 
 - HTTP / DB：无变更。
-- `SillySpecManagerDeps` 新增可选回调 `statusRootEvict?: (workspaceId: string, rootPath: string) => void`——缺省不注入=无淘汰行为（测试/旧调用零回归）。daemon.ts 接线：从 `_sillyspecStatusRoots` 删除条目 + `void _persistSillySpecStatusRoots()` 持久化。
+- `SillySpecManagerDeps` 新增可选回调 `statusRootEvict?: (workspaceId: string, rootPath: string) => void`——缺省不注入=无淘汰行为（测试/旧调用零回归）。daemon.ts 接线：仅当映射内该 ws 仍指向被淘汰 rootPath 才删条目（防采集 await 窗口内重 claim 新根被误删），并挂 `_statusRootPersistChain` 串行持久化（评审 P3 两条）。
+- manager 新增公开方法 `clearStatusProbeEviction(rootPath)`：daemon `_noteSillySpecStatusRoot` 在根（重）注册时调用，清 skip 表与连败计数——重新 claim 即恢复采集（评审 P2 修复；FR-01 场景2）。
 - manager 内部新增：`_dbMissingStreaks`（cwd→连败数）、`_evictedCwds`（skip 表）、常量 `STATUS_DB_MISSING_EVICT_AFTER = 3`。
 - 日志：新增 `sillyspec_status_db_missing`（warn，连败计数）、`sillyspec_status_root_evicted`（info）；`sillyspec_status_nonzero_exit` 增加 `stdout_head` 字段（首行 ≤200 字符）。
 - `includeLineCounts=false` 退档、超时、跨仓跳过、能力缺失等既有语义不变。
@@ -55,5 +56,5 @@ created_at: 2026-10-22T15:16:34.258Z
 |---|---|---|
 | 修改 | sillyhub-daemon/src/sillyspec-manager.ts | db_missing 连败淘汰 + evict 依赖 + nonzero_exit 日志带 stdout 首行 |
 | 修改 | sillyhub-daemon/src/daemon.ts | 接线 statusRootEvict（删 LRU 条目 + 持久化 roots 文件） |
-| 修改 | sillyhub-daemon/tests/sillyspec-manager.test.ts | 淘汰/记账/重置/跳过用例 |
+| 修改 | sillyhub-daemon/tests/sillyspec-manager.test.ts | 淘汰/记账/重置/跳过/恢复采集用例 |
 | 修改 | .sillyspec/docs/sillyhub-daemon/modules/sillyspec-manager.md | 淘汰语义与诊断增强说明 |

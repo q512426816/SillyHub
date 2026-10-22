@@ -49,7 +49,7 @@ created_at: 2026-10-22T15:16:34.258Z
 
 ## 测试绑定（每条 FR 至少一行——`FR-NN: test/路径「用例名」`；空行/待填在 flow done 拒收）
 
-FR-01: sillyhub-daemon/tests/sillyspec-manager.test.ts「db_missing 连续 3 次淘汰目标并回调 evict」
-FR-02: sillyhub-daemon/tests/sillyspec-manager.test.ts「非 db_missing 非零退出保持记账并带 stdout 首行」
-FR-03: sillyhub-daemon/tests/sillyspec-manager.test.ts「采集成功重置连败计数」
-FR-04: sillyhub-daemon/tests/sillyspec-manager.test.ts「既有采集语义回归」
+FR-01: sillyhub-daemon/tests/sillyspec-manager.test.ts「db_missing 连续 3 次 → 第 3 次淘汰（evict 回调/心跳槽位清除/日志），第 4 轮不再探测」
+FR-02: sillyhub-daemon/tests/sillyspec-manager.test.ts「非 db_missing 非零退出：保持 nonzero_exit 记账、日志带 stdout_head、不淘汰」
+FR-03: sillyhub-daemon/tests/sillyspec-manager.test.ts「采集成功重置连败计数：2 次失败 → 成功 → 再 2 次失败不淘汰」
+FR-04: sillyhub-daemon/tests/sillyspec-manager.test.ts「db_missing 连续 3 次 → 第 3 次淘汰（evict 回调/心跳槽位清除/日志），第 4 轮不再探测」

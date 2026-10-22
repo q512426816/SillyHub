@@ -1446,6 +1446,12 @@ describe('2026-10-22-sillyspec-probe-db-missing-evict：db_missing 连败淘汰'
     await h.manager.collectStatusOnce();
     const urgentCalls = h.calls.filter((c) => c.options.cwd === ROOT);
     expect(urgentCalls).toHaveLength(4);
+
+    // 重新 claim 同名根 → daemon 调 clearStatusProbeEviction → 采集恢复（FR-01 场景2）。
+    h.manager.clearStatusProbeEviction(ROOT);
+    await h.manager.collectStatusOnce();
+    const urgentCallsAfter = h.calls.filter((c) => c.options.cwd === ROOT);
+    expect(urgentCallsAfter).toHaveLength(5);
   });
 
   it('非 db_missing 非零退出：保持 nonzero_exit 记账、日志带 stdout_head、不淘汰', async () => {

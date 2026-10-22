@@ -1,0 +1,326 @@
+{
+  "change": "2026-10-22-sillyspec-probe-db-missing-evict",
+  "baseline": "58cc4d8f1c0c5a99b0b1a710a031f824c1d7b970",
+  "head": "f44694e1fa4879d799846bac4d67a38da0c84c52",
+  "files": [
+    ".sillyspec/docs/sillyhub-daemon/modules/sillyspec-manager.md",
+    "backend/app/modules/daemon/router/session_crud.py",
+    "backend/app/modules/daemon/schema.py",
+    "backend/app/modules/daemon/tests/test_sessions_list_pending_dialog.py",
+    "backend/openapi.json",
+    "frontend/src/app/(dashboard)/sessions/__tests__/page.test.tsx",
+    "frontend/src/components/daemon/__tests__/attachment-refs.test.ts",
+    "frontend/src/components/daemon/__tests__/message-queue-bar.test.tsx",
+    "frontend/src/components/daemon/__tests__/session-history-scroll.test.tsx",
+    "frontend/src/components/daemon/__tests__/session-input-bar-plus-menu.test.tsx",
+    "frontend/src/components/daemon/message-queue-bar.tsx",
+    "frontend/src/components/daemon/runtime-session-helpers.tsx",
+    "frontend/src/components/daemon/scheduled-messages-bar.tsx",
+    "frontend/src/components/daemon/session-input-bar.tsx",
+    "frontend/src/components/daemon/session-panel/session-panel-page.tsx",
+    "frontend/src/components/daemon/turn-timeline.tsx",
+    "frontend/src/components/sessions/__tests__/session-config-bar.test.tsx",
+    "frontend/src/components/sessions/__tests__/session-status-indicator.test.tsx",
+    "frontend/src/components/sessions/session-config-bar.tsx",
+    "frontend/src/components/sessions/session-list-panel.tsx",
+    "frontend/src/lib/api-types.ts",
+    "frontend/src/lib/attachment-refs.ts",
+    "sillyhub-daemon/src/daemon.ts",
+    "sillyhub-daemon/src/sillyspec-manager.ts",
+    "sillyhub-daemon/tests/sillyspec-manager.test.ts"
+  ],
+  "totals": {
+    "files": 25,
+    "additions": 919,
+    "deletions": 177
+  },
+  "savedAt": "2026-10-22T16:23:16.631Z",
+  "note": "flow done 时点冻结（本变更可归属交付面：baseline..HEAD 提交面过滤 .sillyspec/ 只留 .sillyspec/docs/ 交付文档 + 独占树未提交交付；治理工件目录不入冻结——2026-10-12-close-trace-freeze-integrity FR-01）",
+  "modules": [
+    {
+      "id": "daemon",
+      "files": 3,
+      "doc": "docs/backend/modules/daemon.md",
+      "docTouched": false,
+      "docMissing": false
+    },
+    {
+      "id": "backend",
+      "files": 4,
+      "doc": "docs/multi-agent-platform/modules/backend.md",
+      "docTouched": false,
+      "docMissing": false
+    },
+    {
+      "id": "frontend",
+      "files": 17,
+      "doc": "docs/multi-agent-platform/modules/frontend.md",
+      "docTouched": false,
+      "docMissing": false
+    },
+    {
+      "id": "sillyhub-daemon",
+      "files": 3,
+      "doc": "docs/multi-agent-platform/modules/sillyhub-daemon.md",
+      "docTouched": false,
+      "docMissing": false
+    },
+    {
+      "id": "daemon",
+      "files": 6,
+      "doc": "docs/SillyHub/modules/daemon.md",
+      "docTouched": false,
+      "docMissing": false
+    },
+    {
+      "id": "frontend_app",
+      "files": 1,
+      "doc": "docs/SillyHub/modules/frontend_app.md",
+      "docTouched": false,
+      "docMissing": false
+    },
+    {
+      "id": "frontend_components",
+      "files": 14,
+      "doc": "docs/SillyHub/modules/frontend_components.md",
+      "docTouched": false,
+      "docMissing": false
+    },
+    {
+      "id": "frontend_lib",
+      "files": 2,
+      "doc": "docs/SillyHub/modules/frontend_lib.md",
+      "docTouched": false,
+      "docMissing": false
+    }
+  ],
+  "uncoveredDirs": [],
+  "moduleMaps": [
+    "docs/backend/modules/_module-map.yaml",
+    "docs/frontend/modules/_module-map.yaml",
+    "docs/multi-agent-platform/modules/_module-map.yaml",
+    "docs/SillyHub/modules/_module-map.yaml",
+    "docs/sillyhub-daemon/modules/_module-map.yaml"
+  ],
+  "acceptedDirtyGap": 6,
+  "scopeAudit": {
+    "mode": "full-flow",
+    "ok": true,
+    "degradedReason": null,
+    "baseAnchor": "58cc4d8f1c0c5a99b0b1a710a031f824c1d7b970",
+    "totals": {
+      "files": 25,
+      "additions": 919,
+      "deletions": 177
+    },
+    "rows": [
+      {
+        "path": ".sillyspec/docs/sillyhub-daemon/modules/sillyspec-manager.md",
+        "additions": 17,
+        "deletions": 0,
+        "kind": "modified",
+        "planned": "修改",
+        "verdict": "planned"
+      },
+      {
+        "path": "backend/app/modules/daemon/router/session_crud.py",
+        "additions": 40,
+        "deletions": 0,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": "backend/app/modules/daemon/schema.py",
+        "additions": 7,
+        "deletions": 0,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": "backend/app/modules/daemon/tests/test_sessions_list_pending_dialog.py",
+        "additions": 227,
+        "deletions": 0,
+        "kind": "new",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": "backend/openapi.json",
+        "additions": 11,
+        "deletions": 0,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": "frontend/src/app/(dashboard)/sessions/__tests__/page.test.tsx",
+        "additions": 4,
+        "deletions": 2,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": "frontend/src/components/daemon/__tests__/attachment-refs.test.ts",
+        "additions": 39,
+        "deletions": 0,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": "frontend/src/components/daemon/__tests__/message-queue-bar.test.tsx",
+        "additions": 30,
+        "deletions": 0,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": "frontend/src/components/daemon/__tests__/session-history-scroll.test.tsx",
+        "additions": 6,
+        "deletions": 6,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": "frontend/src/components/daemon/__tests__/session-input-bar-plus-menu.test.tsx",
+        "additions": 36,
+        "deletions": 0,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": "frontend/src/components/daemon/message-queue-bar.tsx",
+        "additions": 7,
+        "deletions": 2,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": "frontend/src/components/daemon/runtime-session-helpers.tsx",
+        "additions": 11,
+        "deletions": 39,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": "frontend/src/components/daemon/scheduled-messages-bar.tsx",
+        "additions": 9,
+        "deletions": 2,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": "frontend/src/components/daemon/session-input-bar.tsx",
+        "additions": 58,
+        "deletions": 0,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": "frontend/src/components/daemon/session-panel/session-panel-page.tsx",
+        "additions": 11,
+        "deletions": 8,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": "frontend/src/components/daemon/turn-timeline.tsx",
+        "additions": 4,
+        "deletions": 1,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": "frontend/src/components/sessions/__tests__/session-config-bar.test.tsx",
+        "additions": 28,
+        "deletions": 65,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": "frontend/src/components/sessions/__tests__/session-status-indicator.test.tsx",
+        "additions": 78,
+        "deletions": 0,
+        "kind": "new",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": "frontend/src/components/sessions/session-config-bar.tsx",
+        "additions": 11,
+        "deletions": 49,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": "frontend/src/components/sessions/session-list-panel.tsx",
+        "additions": 23,
+        "deletions": 1,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": "frontend/src/lib/api-types.ts",
+        "additions": 2,
+        "deletions": 0,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": "frontend/src/lib/attachment-refs.ts",
+        "additions": 80,
+        "deletions": 0,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": "sillyhub-daemon/src/daemon.ts",
+        "additions": 11,
+        "deletions": 0,
+        "kind": "modified",
+        "planned": "修改",
+        "verdict": "planned"
+      },
+      {
+        "path": "sillyhub-daemon/src/sillyspec-manager.ts",
+        "additions": 73,
+        "deletions": 0,
+        "kind": "modified",
+        "planned": "修改",
+        "verdict": "planned"
+      },
+      {
+        "path": "sillyhub-daemon/tests/sillyspec-manager.test.ts",
+        "additions": 96,
+        "deletions": 2,
+        "kind": "modified",
+        "planned": "修改",
+        "verdict": "planned"
+      }
+    ],
+    "excluded": {
+      "foreignDeclared": []
+    },
+    "note": "flow done 时点冻结（本文件落盘时采集）",
+    "closedBy": "flow done"
+  },
+  "patchSha256": "3f8675cc8139a583ac13d11740ba922e1f49de83953ea827aa1913466f48299c",
+  "patchStatus": "ok"
+}

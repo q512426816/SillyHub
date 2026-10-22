@@ -2351,8 +2351,15 @@ export class Daemon {
         // 删 LRU 条目并持久化 roots 文件（重启不复活）；工作区重新 claim 时
         // _noteSillySpecStatusRoot 重新注册，采集恢复。
         statusRootEvict: (workspaceId, rootPath) => {
+          // 评审 P3：仅当映射内该 ws 仍指向被淘汰的 rootPath 才删——采集 await
+          // 窗口内同 ws 重新 claim 到新根的窄竞态不得误删新条目。
+          const known = this._sillyspecStatusRoots.get(workspaceId);
+          if (known && known.rootPath !== rootPath) return;
           this._sillyspecStatusRoots.delete(workspaceId);
-          void this._persistSillySpecStatusRoots();
+          // 评审 P3：走串行链落盘，防与 claim 写入同文件竞态旧值后写。
+          this._statusRootPersistChain = this._statusRootPersistChain
+            .then(() => this._persistSillySpecStatusRoots())
+            .catch(() => {});
           this._logger.info('sillyspec_status_root_evict_persisted', {
             workspace_id: workspaceId,
             root_path: rootPath,
@@ -5697,6 +5704,9 @@ export class Daemon {
           root_path: rootPath,
         });
       }
+      // 2026-10-22-sillyspec-probe-db-missing-evict（FR-01 场景2）：重新 claim 同名
+      // 根即清除 db_missing 淘汰标记——skip 表与连败计数一并清空，采集恢复。
+      this._sillyspecManager.clearStatusProbeEviction(rootPath);
       // 串行链落盘（2026-10-09 竞态修复）：映射槽位与单槽位同理，防旧值后写。
       this._statusRootPersistChain = this._statusRootPersistChain
         .then(() => this._persistSillySpecStatusRoots())

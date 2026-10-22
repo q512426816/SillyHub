@@ -1237,6 +1237,16 @@ export class SillySpecManager {
     return this._statusTargets ? Object.fromEntries(this._statusSummariesByWs) : undefined;
   }
 
+  /**
+   * 清除 db_missing 淘汰标记（2026-10-22-sillyspec-probe-db-missing-evict /
+   * FR-01 场景2）：工作区重新 claim 同名根时由 daemon 调用——skip 表与连败计数
+   * 一并清空，该根恢复采集（若项目仍缺库则重新计满 3 次再淘汰）。
+   */
+  clearStatusProbeEviction(rootPath: string): void {
+    this._evictedCwds.delete(rootPath);
+    this._dbMissingStreaks.delete(rootPath);
+  }
+
   /** 三态②：置能力缺失（快照 null）+ warn 一次同类静默。 */
   private _markStatusCapabilityMissing(
     reason: 'bin_not_found' | 'spawn_enoent' | 'bad_json',
@@ -2728,11 +2738,6 @@ async function snapshotOneSpecPath(
  * sillyspec 命令（runResolve / ghostCleanup 会触发平台同步）同样获得
  * SILLYSPEC_SYNC_TIMEOUT_MS=20000 缺省（process.env 已预设时原值优先，展开顺序
  * 即语义）。导出供测试直测（对齐本文件 envelope → 心跳摘要纯函数导出先例）。
- */
-/**
- * 解析 `progress show --json` 失败时 stdout envelope 的 `codes` 数组
- * （2026-10-22-sillyspec-probe-db-missing-evict）：CLI 契约保证失败时 stdout 恒为
- * 合法 JSON envelope；解析失败/无 codes 返回 []（回退既有 nonzero_exit 记账）。
  */
 function parseProgressEnvelopeCodes(stdout: string): string[] {
   try {
