@@ -549,3 +549,74 @@ created_at: 2026-10-15T11:57:05.061Z
   confirmed_at: null
   source_change: 2026-10-21-daemon-zombie-turn
   status: active
+
+## FR-core-026 前端该 POST 请求带显式超时（20s），超时按引擎不可用处理并进入退避，界面不再无限等待
+变更：2026-10-22-fix-translate-pending
+状态：active
+摘要：超时降级；正常返回不受影响
+全文：.sillyspec/changes/archive/2026-10-22-fix-translate-pending/requirements.md#FR-01
+最近确认：e7ce2a10150c7e18627369ed72fd5400c1e4e5a9
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-22-fix-translate-pending:flow:测试绑定FR-01
+  tests: frontend/src/lib/__tests__/thinking-translate.test.ts「translateText 请求带 20s 超时并可被超时降级」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-22-fix-translate-pending
+  status: active
+
+## FR-core-027 后端子进程请求超时改为可配置且默认收紧到 20s（现 300s），超时 fail-soft 返回原文
+变更：2026-10-22-fix-translate-pending
+状态：active
+摘要：慢子进程触发 fail-soft；正常推理不误杀
+全文：.sillyspec/changes/archive/2026-10-22-fix-translate-pending/requirements.md#FR-02
+最近确认：e7ce2a10150c7e18627369ed72fd5400c1e4e5a9
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-22-fix-translate-pending:flow:测试绑定FR-02
+  tests: backend/app/modules/translate/tests/test_engine.py「request_timeout_sec 可配置且超时 fail-soft」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-22-fix-translate-pending
+  status: active
+
+## FR-core-028 worker 子进程 stderr 落盘可查（含模型下载/加载失败原因），不再丢进 DEVNULL
+变更：2026-10-22-fix-translate-pending
+状态：active
+摘要：模型下载失败留痕
+全文：.sillyspec/changes/archive/2026-10-22-fix-translate-pending/requirements.md#FR-03
+最近确认：e7ce2a10150c7e18627369ed72fd5400c1e4e5a9
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-22-fix-translate-pending:flow:测试绑定FR-03
+  tests: backend/app/modules/translate/tests/test_engine.py「worker stderr 进入主进程日志」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-22-fix-translate-pending
+  status: active
+
+## FR-core-029 生产服务器预置 opus-mt-en-zh 模型目录并配置 TRANSLATE_MODEL_DIR，接口返回 engine_ready=true 且英文思考文本译文含中文
+变更：2026-10-22-fix-translate-pending
+状态：active
+摘要：生产零下载加载；目录缺失时保持 fail-soft
+全文：.sillyspec/changes/archive/2026-10-22-fix-translate-pending/requirements.md#FR-04
+最近确认：e7ce2a10150c7e18627369ed72fd5400c1e4e5a9
+
+## FR-core-030 相关测试通过：后端 translate 模块测试、前端 thinking-translate 测试
+变更：2026-10-22-fix-translate-pending
+状态：active
+摘要：主路径
+全文：.sillyspec/changes/archive/2026-10-22-fix-translate-pending/requirements.md#FR-05
+最近确认：e7ce2a10150c7e18627369ed72fd5400c1e4e5a9

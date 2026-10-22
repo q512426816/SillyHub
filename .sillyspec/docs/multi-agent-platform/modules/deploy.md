@@ -59,3 +59,4 @@ multi-agent-platform 的一体化部署编排组件，用 Docker Compose 把 bac
 - 2026-10-19-knowledge-build-switch-rollout | 禁建库开关本地部署落地与首搜实测
 - 2026-10-19-change-assets-cross-repo-repos | 变更资产卡展示跨仓冻结面
 - 2026-10-22-daemon-snapshot-report-log | daemon 快照上报补收口日志
+- 2026-10-22-fix-translate-pending | 生产 /api/translate/thinking 请求长时间 pending：容器未配置 TRA…

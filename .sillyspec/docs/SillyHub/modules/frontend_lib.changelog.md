@@ -18,3 +18,4 @@ created_at: 2026-10-16 16:40:00
 - 2026-10-19-cross-repo-patch-slicing | 资产卡跨仓单文件 diff 切片
 - 2026-10-21-session-git-branch | 会话组件底部动态显示当前所在 git 分支
 - 2026-10-22-daemon-snapshot-report-log | daemon 快照上报补收口日志
+- 2026-10-22-fix-translate-pending | 生产 /api/translate/thinking 请求长时间 pending：容器未配置 TRA…

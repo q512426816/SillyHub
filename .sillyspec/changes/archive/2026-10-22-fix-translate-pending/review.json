@@ -1,0 +1,74 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-22-fix-translate-pending",
+  "reviewer": "subagent",
+  "verdict": "PASS",
+  "reviewedAgainst": "2453b40981a3823cd1f3df3b2506e8655f121857",
+  "findings": [
+    {
+      "severity": "P2",
+      "title": "20s 是整批预算：满批长思考文本的正常推理可能被误判超时，并累计触发 600s 引擎退避",
+      "evidence": "deadline 在 engine.py:166 按整次 translate() 计，engine.py:180 的 queue.get 等的是整批响应；单批可达 16 × 1000 字符（schema.py:32 ITEMS_MAX_COUNT=16、chunking.py:41 CHUNK_MAX_CHARS=1000），worker 以 beam_size=4、max_decoding_length=512 推理（translate_worker.py:124-126）。在 1100m CPU 的容器上满批解码耗时没有实测数据锚定 20s，一旦超过即走崩溃路径（engine.py:195-197）：该批全部回退原文，consecutive_crashes 累加，3 次后整引擎进 600s 退避；design 风险节只论证了「模型加载 1~3 秒」，未覆盖整批推理耗时。",
+      "location": "backend/app/modules/translate/engine.py:180"
+    },
+    {
+      "severity": "P3",
+      "title": "超时重启后旧读线程的 EOF 哨兵可能落进新队列，误杀下一条请求（design 称「本变更不扩大」不严谨）",
+      "evidence": "engine.py:109 重启时把 self._responses 换成新 Queue，而旧 _reader 在 finally 中按属性查表 put；若旧线程的 EOF 在新队列换入后才落盘（engine.py:135），下一条请求读到非 str 会抛「translate worker exited」（engine.py:181-182）。id 校验能挡住迟到响应行、挡不住哨兵；后果是 fail-soft 原文而非错配数据，但超时阈值由 300s 降到 20s 显著提高了该路径触发频次，「不扩大」表述与事实有张力。",
+      "location": "backend/app/modules/translate/engine.py:109"
+    },
+    {
+      "severity": "P3",
+      "title": "FR-02 测试绑定为组合标签，新增用例未断言「超时 → engine_ready=false + 原文透传」的端到端 fail-soft",
+      "evidence": "test_engine.py:176 只断言超时抛 TranslateSubprocessError，test_engine.py:190 只断言配置默认值；「fail-soft 返回原文」由既有 test_service.py:100 的通用异常用例覆盖，requirements.md:80 声称的单一用例名并不存在。语义上可拼合成立，绑定口径偏宽。",
+      "location": "backend/app/modules/translate/tests/test_engine.py:176"
+    },
+    {
+      "severity": "P3",
+      "title": "deploy/.env.example 未收录 TRANSLATE_MODEL_DIR / TRANSLATE_REQUEST_TIMEOUT_SEC，部署防复发缺一道入口",
+      "evidence": "compose 已透传 TRANSLATE_MODEL_DIR（deploy/docker-compose.yml:159），但模板文件（deploy/.env.example，全文无 TRANSLATE_* 行）未列入；design 风险节把「生产 .env 漏设 TRANSLATE_MODEL_DIR」列为主要运维风险，模板是防复发最直接的位置。",
+      "location": "deploy/.env.example:1"
+    },
+    {
+      "severity": "P3",
+      "title": "change.patch 冻结面混入无关变更的 changelog 行",
+      "evidence": "change.patch:1-63 的 7 个 .sillyspec/docs/**/changelog 变更均属 2026-10-22-daemon-snapshot-report-log，scopeAudit 全标 unplanned；属归档追溯噪音，非行为缺陷。",
+      "location": ".sillyspec/changes/2026-10-22-fix-translate-pending/change.patch:1"
+    },
+    {
+      "severity": "P3",
+      "title": "前后端超时同为 20s，客户端必然先 abort，后端「engine_ready=false + 原文」的 200 响应基本收不到",
+      "evidence": "前端 REQUEST_TIMEOUT_MS=20_000（thinking-translate.ts:30），后端 request_timeout_sec 默认 20.0（config.py:192-196），而后端计时起点晚于客户端发请求；超时场景下 fetch 先被 abort 走 catch 分支（thinking-translate.ts:168-172）。最终效果等价（原文 + 60s 退避），但后端的 reason/engine_ready 语义在超时路径上形同虚设，建议后端略低于前端（如 15~18s）。",
+      "location": "frontend/src/lib/thinking-translate.ts:30"
+    }
+  ],
+  "dimensionNotes": {
+    "乱序": "finding",
+    "并发": "ok",
+    "切换": "ok",
+    "作用域": "ok"
+  },
+  "disclosureVerdicts": [
+    {
+      "statement": "风险：20 秒对超大模型冷加载偏紧（opus-mt int8 加载 1~3 秒，余量充足；换更大模型上调 TRANSLATE_REQUEST_TIMEOUT_SEC）",
+      "verdict": "可接受",
+      "reason": "加载耗时有实测锚且已配置化；但该边界只覆盖冷加载，未覆盖整批推理耗时，另见 P2 finding。"
+    },
+    {
+      "statement": "风险：生产 .env 漏设 TRANSLATE_MODEL_DIR → 回退 HF 下载并在 20 秒内 fail-soft（界面可接受，功能不可用），部署验证须显式核对",
+      "verdict": "可接受",
+      "reason": "有 20s 兜底 + 前端 60s 退避保证不挂死，task-05 已在服务器实测 engine_ready=true；模板未收录该变量提高复发概率（P3）。"
+    },
+    {
+      "statement": "放弃方案：仅配 HF_ENDPOINT 靠首次请求在线下载",
+      "verdict": "可接受",
+      "reason": "100~150MB 下载远超 20s 窗口且容器重建丢缓存，预置挂载是正确取舍。"
+    },
+    {
+      "statement": "放弃方案：沿用 300 秒超时只在生产预置模型",
+      "verdict": "可接受",
+      "reason": "缺少任何慢路径兜底会让界面再挂 5 分钟，收紧 + 配置化方向正确。"
+    }
+  ],
+  "reviewedAt": "2026-10-22T09:55:31+08:00"
+}

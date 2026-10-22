@@ -1,0 +1,51 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-22-fix-translate-pending",
+  "rows": [
+    {
+      "anchor": "FR-01",
+      "row_id": "2026-10-22-fix-translate-pending:flow:测试绑定FR-01",
+      "tests": [
+        "frontend/src/lib/__tests__/thinking-translate.test.ts「translateText 请求带 20s 超时并可被超时降级」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-22-fix-translate-pending"
+    },
+    {
+      "anchor": "FR-02",
+      "row_id": "2026-10-22-fix-translate-pending:flow:测试绑定FR-02",
+      "tests": [
+        "backend/app/modules/translate/tests/test_engine.py「request_timeout_sec 可配置且超时 fail-soft」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-22-fix-translate-pending"
+    },
+    {
+      "anchor": "FR-03",
+      "row_id": "2026-10-22-fix-translate-pending:flow:测试绑定FR-03",
+      "tests": [
+        "backend/app/modules/translate/tests/test_engine.py「worker stderr 进入主进程日志」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-22-fix-translate-pending"
+    }
+  ]
+}

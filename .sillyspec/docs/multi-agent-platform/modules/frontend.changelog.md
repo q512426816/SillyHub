@@ -154,3 +154,4 @@
 | 2026-10-21 | 2026-10-22-session-trajectory-view | 会话页接入轨迹第三视图 |
 | 2026-10-22 | 2026-10-22-file-card-hide-empty | 文件变更卡无数据时整轮不再出卡 |
 | 2026-10-22 | 2026-10-22-daemon-snapshot-report-log | daemon 快照上报补收口日志 |
+| 2026-10-22 | 2026-10-22-fix-translate-pending | 生产 /api/translate/thinking 请求长时间 pending：容器未配置 TRA… |

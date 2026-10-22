@@ -1,0 +1,415 @@
+diff --git a/.sillyspec/docs/SillyHub/modules/daemon.changelog.md b/.sillyspec/docs/SillyHub/modules/daemon.changelog.md
+index 8b1301b4a..30ad5899d 100644
+--- a/.sillyspec/docs/SillyHub/modules/daemon.changelog.md
++++ b/.sillyspec/docs/SillyHub/modules/daemon.changelog.md
+@@ -72,3 +72,4 @@ created_at: 2026-08-27 14:32:24
+ - 2026-10-21-daemon-zombie-turn | 修复 daemon 会话僵尸轮与打断无效
+ - 2026-10-21-session-git-branch | 会话组件底部动态显示当前所在 git 分支
+ - 2026-10-22-review-risk-fixes | 审查修复：原型路由防线与监听泄漏
++- 2026-10-22-daemon-snapshot-report-log | daemon 快照上报补收口日志
+diff --git a/.sillyspec/docs/SillyHub/modules/frontend_lib.changelog.md b/.sillyspec/docs/SillyHub/modules/frontend_lib.changelog.md
+index 35caef79f..7046b8733 100644
+--- a/.sillyspec/docs/SillyHub/modules/frontend_lib.changelog.md
++++ b/.sillyspec/docs/SillyHub/modules/frontend_lib.changelog.md
+@@ -17,3 +17,4 @@ created_at: 2026-10-16 16:40:00
+ - 2026-10-19-change-assets-cross-repo-repos | 变更资产卡展示跨仓冻结面
+ - 2026-10-19-cross-repo-patch-slicing | 资产卡跨仓单文件 diff 切片
+ - 2026-10-21-session-git-branch | 会话组件底部动态显示当前所在 git 分支
++- 2026-10-22-daemon-snapshot-report-log | daemon 快照上报补收口日志
+diff --git a/.sillyspec/docs/multi-agent-platform/modules/backend.changelog.md b/.sillyspec/docs/multi-agent-platform/modules/backend.changelog.md
+index 90ae0e6eb..68521ef83 100644
+--- a/.sillyspec/docs/multi-agent-platform/modules/backend.changelog.md
++++ b/.sillyspec/docs/multi-agent-platform/modules/backend.changelog.md
+@@ -77,3 +77,4 @@
+ - 2026-10-21-daemon-zombie-turn | 修复 daemon 会话僵尸轮与打断无效
+ - 2026-10-21-spec-manifest-incremental | spec-manifest 增量游标同步
+ - 2026-10-21-session-git-branch | 会话组件底部动态显示当前所在 git 分支
++- 2026-10-22-daemon-snapshot-report-log | daemon 快照上报补收口日志
+diff --git a/.sillyspec/docs/multi-agent-platform/modules/deploy.md b/.sillyspec/docs/multi-agent-platform/modules/deploy.md
+index fb8962566..d2447a7c9 100644
+--- a/.sillyspec/docs/multi-agent-platform/modules/deploy.md
++++ b/.sillyspec/docs/multi-agent-platform/modules/deploy.md
+@@ -58,3 +58,4 @@ multi-agent-platform 的一体化部署编排组件，用 Docker Compose 把 bac
+ - 2026-10-16-deploy-convergence-guard | 2026-10-16 生产互覆事故——另一会话从分叉分支打包部署，静默回退 main 上已修复的 /…
+ - 2026-10-19-knowledge-build-switch-rollout | 禁建库开关本地部署落地与首搜实测
+ - 2026-10-19-change-assets-cross-repo-repos | 变更资产卡展示跨仓冻结面
++- 2026-10-22-daemon-snapshot-report-log | daemon 快照上报补收口日志
+diff --git a/.sillyspec/docs/multi-agent-platform/modules/docs.changelog.md b/.sillyspec/docs/multi-agent-platform/modules/docs.changelog.md
+index 030a0bb23..3d55e8c8d 100644
+--- a/.sillyspec/docs/multi-agent-platform/modules/docs.changelog.md
++++ b/.sillyspec/docs/multi-agent-platform/modules/docs.changelog.md
+@@ -17,3 +17,4 @@
+ - 2026-10-20-codex-requires-openai-auth | 腾讯云平台 codex 会话选直连（anthropic 形态）供应商时稳定断流（stream dis…
+ - 2026-10-20-codex-models-fetch-candidates | 平台「获取模型列表」对新建的 codex 直连条目（智谱 GLM Codex base=https:…
+ - 2026-10-20-preset-engine-endpoint | 新建供应商点「OpenCode Go」预设自动填 https://opencode.ai/zen/g…
++- 2026-10-22-daemon-snapshot-report-log | daemon 快照上报补收口日志
+diff --git a/.sillyspec/docs/multi-agent-platform/modules/frontend.changelog.md b/.sillyspec/docs/multi-agent-platform/modules/frontend.changelog.md
+index d9d9af363..049ec2736 100644
+--- a/.sillyspec/docs/multi-agent-platform/modules/frontend.changelog.md
++++ b/.sillyspec/docs/multi-agent-platform/modules/frontend.changelog.md
+@@ -153,3 +153,4 @@
+ | 2026-10-21 | 2026-10-22-review-risk-fixes | 审查修复：原型路由防线与监听泄漏 |
+ | 2026-10-21 | 2026-10-22-session-trajectory-view | 会话页接入轨迹第三视图 |
+ | 2026-10-22 | 2026-10-22-file-card-hide-empty | 文件变更卡无数据时整轮不再出卡 |
++| 2026-10-22 | 2026-10-22-daemon-snapshot-report-log | daemon 快照上报补收口日志 |
+diff --git a/.sillyspec/docs/multi-agent-platform/modules/sillyhub-daemon.changelog.md b/.sillyspec/docs/multi-agent-platform/modules/sillyhub-daemon.changelog.md
+index 8f69806a5..b091d63c2 100644
+--- a/.sillyspec/docs/multi-agent-platform/modules/sillyhub-daemon.changelog.md
++++ b/.sillyspec/docs/multi-agent-platform/modules/sillyhub-daemon.changelog.md
+@@ -27,3 +27,4 @@
+ - 2026-10-21-daemon-zombie-turn | 修复 daemon 会话僵尸轮与打断无效
+ - 2026-10-21-session-git-branch | 会话组件底部动态显示当前所在 git 分支
+ - 2026-10-22-review-risk-fixes | 审查修复：原型路由防线与监听泄漏
++- 2026-10-22-daemon-snapshot-report-log | daemon 快照上报补收口日志
+diff --git a/backend/app/core/config.py b/backend/app/core/config.py
+index 35a6b4305..c493bc711 100644
+--- a/backend/app/core/config.py
++++ b/backend/app/core/config.py
+@@ -190,6 +190,13 @@ class Settings(BaseSettings):
+         2048,
+         description="in-process translated-chunk LRU entries cap (env TRANSLATE_CACHE_MAX_ENTRIES).",
+     )
++    # 2026-10-22-fix-translate-pending：单次子进程翻译请求的等待上限（秒）。原为
++    # 引擎内固定 300s——模型未预置时 worker 卡在 HF 下载，接口挂 5 分钟且前端无超时，
++    # 界面恒「翻译中」。收紧到 20s + 配置化：任何慢路径快速 fail-soft 返回原文。
++    translate_request_timeout_sec: float = Field(
++        20.0,
++        description="per-request timeout waiting for the translate subprocess (env TRANSLATE_REQUEST_TIMEOUT_SEC).",
++    )
+ 
+     # 2026-07-07-daemon-skill-execution task-06：sillyspec skills 打包源目录。
+     # 镜像内路径由 Dockerfile COPY → /app/sillyspec-skills/（task-07）。
+diff --git a/backend/app/modules/translate/README.md b/backend/app/modules/translate/README.md
+index 5186112c3..1b9dfe15f 100644
+--- a/backend/app/modules/translate/README.md
++++ b/backend/app/modules/translate/README.md
+@@ -12,12 +12,23 @@ API——推理在本地 CTranslate2 子进程完成（opus-mt-en-zh int8 量化
+ | `TRANSLATE_MODEL_REPO` | `jiangzhuo9357/opus-mt-en-zh-ct2` | ct2 格式模型 repo id（换更大模型只改这里） |
+ | `TRANSLATE_MODEL_DIR` | 空 | 本地模型目录（含 `config.json` 的 ct2 目录）；非空时零下载 |
+ | `TRANSLATE_WORKER_IDLE_EXIT_SEC` | `600` | 翻译子进程闲置自灭秒数 |
++| `TRANSLATE_REQUEST_TIMEOUT_SEC` | `20` | 单次子进程请求等待上限；超时 fail-soft 返回原文（2026-10-22 前为固定 300s，模型未预置时界面会挂 5 分钟） |
+ | `TRANSLATE_CACHE_MAX_ENTRIES` | `2048` | 进程内译文 LRU 条目上限 |
+ 
+ 模型首用从 HuggingFace 自动下载（~100-150MB，尊重 `HF_ENDPOINT` 镜像与 `HF_HOME`
+ 缓存变量）。**下载/加载失败一律 fail-soft**：端点返回 `engine_ready=false` + 原文
+ 透传，应用启动零阻塞；前端显示原文 + 「离线翻译未就绪」轻提示并 60s 退避。
+ 
++子进程 stderr 由后台线程逐行转发到主进程日志（logger `app.modules.translate.engine`，
++WARNING 级），模型下载/加载失败原因可在后端日志中直接查到（此前丢进 DEVNULL，故障
++不可见——2026-10-22 生产事故教训）。
++
++**生产必须预置模型目录**：服务器访问 `huggingface.co` 不通（2026-10-22 实测 TCP
++unreachable），靠首用在线下载会让每次请求卡到超时。`deploy/docker-compose.yml` 已把
++宿主机 `./models/opus-mt-en-zh` 挂到容器 `/opt/models/opus-mt-en-zh`；服务器 `.env`
++设置 `TRANSLATE_MODEL_DIR=/opt/models/opus-mt-en-zh` 即零下载。下载可在服务器上用
++可达镜像 `HF_ENDPOINT=https://hf-mirror.com` 完成（实测可达）。
++
+ ## 离线部署（预置模型，零下载）
+ 
+ ```bash
+diff --git a/backend/app/modules/translate/engine.py b/backend/app/modules/translate/engine.py
+index 2fb561ac9..e48242b38 100644
+--- a/backend/app/modules/translate/engine.py
++++ b/backend/app/modules/translate/engine.py
+@@ -15,11 +15,14 @@ worker 侧模型解析（本地目录优先 / HF 自动下载）见 translate_wo
+ from __future__ import annotations
+ 
+ import json
++import logging
+ import queue
+ import sys
+ import threading
+ import time
+ 
++logger = logging.getLogger(__name__)
++
+ _engine_lock = threading.Lock()
+ _engine_instance: object | None = None
+ _engine_model: str | None = None
+@@ -29,6 +32,13 @@ _engine_error: str | None = None
+ _ENGINE_CRASH_BACKOFF_SEC = 600.0
+ 
+ 
++def _settings_request_timeout() -> float:
++    """单请求等待上限（settings 懒读，避免模块导入期就绑定配置单例）。"""
++    from app.core.config import get_settings
++
++    return float(get_settings().translate_request_timeout_sec)
++
++
+ class TranslateSubprocessError(RuntimeError):
+     """翻译子进程失败（崩溃/超时/协议错误），调用方按 fail-soft 降级处理。"""
+ 
+@@ -40,7 +50,6 @@ class TranslateSubprocessProxy:
+     - 响应读取用常驻读线程 + 队列（Windows 管道无 select）。
+     """
+ 
+-    REQUEST_TIMEOUT_SEC = 300.0
+     MAX_CONSECUTIVE_CRASHES = 3
+ 
+     def __init__(
+@@ -48,6 +57,7 @@ class TranslateSubprocessProxy:
+         model_spec: str,
+         idle_exit_sec: int = 600,
+         worker_cmd: list[str] | None = None,
++        request_timeout_sec: float | None = None,
+     ) -> None:
+         import subprocess
+ 
+@@ -55,6 +65,12 @@ class TranslateSubprocessProxy:
+         self._model_spec = model_spec
+         self._idle_exit_sec = idle_exit_sec
+         self._worker_cmd = worker_cmd
++        # 2026-10-22-fix-translate-pending：原固定 300s——模型未预置时 UI 挂 5 分钟。
++        self.request_timeout_sec = (
++            float(request_timeout_sec)
++            if request_timeout_sec is not None
++            else _settings_request_timeout()
++        )
+         self._proc: object | None = None
+         self._responses: queue.Queue = queue.Queue()
+         self._lock = threading.Lock()
+@@ -95,12 +111,17 @@ class TranslateSubprocessProxy:
+             cmd,
+             stdin=self._subprocess.PIPE,
+             stdout=self._subprocess.PIPE,
+-            stderr=self._subprocess.DEVNULL,
++            # 2026-10-22-fix-translate-pending：stderr 不再丢进 DEVNULL——模型下载/
++            # 加载失败原因要能在后端日志里查到（生产事故时完全不可见）。
++            stderr=self._subprocess.PIPE,
+             text=True,
+             encoding="utf-8",
+             bufsize=1,
+         )
+         _threading.Thread(target=self._reader, args=(self._proc.stdout,), daemon=True).start()
++        _threading.Thread(
++            target=self._stderr_reader, args=(self._proc.stderr,), daemon=True
++        ).start()
+ 
+     def _reader(self, stdout: object) -> None:
+         """读线程：响应行入队；EOF/断裂入哨兵。"""
+@@ -113,6 +134,16 @@ class TranslateSubprocessProxy:
+         finally:
+             self._responses.put(eof_resp)
+ 
++    def _stderr_reader(self, stderr: object) -> None:
++        """stderr 读线程：逐行转发到主进程日志（WARNING）；异常静默不影响请求。"""
++        try:
++            for line in stderr:
++                text = line.strip()
++                if text:
++                    logger.warning("translate worker stderr: %s", text)
++        except Exception:
++            pass
++
+     # -- 对外接口 -----------------------------------------------------------
+ 
+     @property
+@@ -132,7 +163,7 @@ class TranslateSubprocessProxy:
+             raise TranslateSubprocessError(
+                 f"translate subprocess in crash backoff until {self.retry_at:.0f}"
+             )
+-        deadline = time.monotonic() + self.REQUEST_TIMEOUT_SEC
++        deadline = time.monotonic() + self.request_timeout_sec
+         with self._lock:
+             attempts = 0
+             while True:
+diff --git a/backend/app/modules/translate/tests/test_engine.py b/backend/app/modules/translate/tests/test_engine.py
+index 8cf71cc65..c98907600 100644
+--- a/backend/app/modules/translate/tests/test_engine.py
++++ b/backend/app/modules/translate/tests/test_engine.py
+@@ -9,6 +9,7 @@
+ 
+ from __future__ import annotations
+ 
++import logging
+ import time
+ from pathlib import Path
+ 
+@@ -59,6 +60,32 @@ sys.stdout.flush()
+ sys.exit(3)
+ """
+ 
++# 沉默 worker：吃掉请求但永不响应（模拟子进程卡在模型下载/加载，2026-10-22
++# 生产事故形态——主进程必须有超时兜底，不能无限等）。
++_SILENT_WORKER = """
++import sys
++while True:
++    line = sys.stdin.readline()
++    if not line:
++        break
++"""
++
++# stderr 留痕 worker：启动先往 stderr 写一行错误，再正常处理请求（验证 stderr
++# 不再进 DEVNULL，而是转发到主进程 logger）。
++_STDERR_WORKER = """
++import json, sys
++sys.stderr.write("model-download-stderr-marker: connect failed\\n")
++sys.stderr.flush()
++while True:
++    line = sys.stdin.readline()
++    if not line:
++        break
++    req = json.loads(line)
++    resp = {"id": req.get("id"), "ok": True, "translations": ["T:" + t for t in req["texts"]]}
++    sys.stdout.write(json.dumps(resp, ensure_ascii=False) + "\\n")
++    sys.stdout.flush()
++"""
++
+ 
+ @pytest.fixture()
+ def fake_worker_path(tmp_path: Path) -> Path:
+@@ -74,6 +101,20 @@ def crash_worker_path(tmp_path: Path) -> Path:
+     return p
+ 
+ 
++@pytest.fixture()
++def silent_worker_path(tmp_path: Path) -> Path:
++    p = tmp_path / "silent_worker.py"
++    p.write_text(_SILENT_WORKER, encoding="utf-8")
++    return p
++
++
++@pytest.fixture()
++def stderr_worker_path(tmp_path: Path) -> Path:
++    p = tmp_path / "stderr_worker.py"
++    p.write_text(_STDERR_WORKER, encoding="utf-8")
++    return p
++
++
+ @pytest.fixture(autouse=True)
+ def _reset_engine():
+     reset_translator_for_tests()
+@@ -132,6 +173,48 @@ def test_crash_backoff_and_recovery(fake_worker_path: Path, crash_worker_path: P
+     proxy2.close()
+ 
+ 
++def test_request_timeout_sec_override_fails_fast(silent_worker_path: Path) -> None:
++    """卡死的子进程 != 无限等待：构造参数收紧超时后快速抛错（fail-soft 由上层做）。"""
++    proxy = TranslateSubprocessProxy(
++        "unused", request_timeout_sec=0.3, worker_cmd=_cmd(silent_worker_path)
++    )
++    try:
++        started = time.monotonic()
++        with pytest.raises(TranslateSubprocessError):
++            proxy.translate(["x"])
++        assert time.monotonic() - started < 5.0
++    finally:
++        proxy.close()
++
++
++def test_request_timeout_default_from_settings() -> None:
++    """缺省值来自 settings（默认 20s——2026-10-22 生产事故前是固定 300s）。"""
++    from app.core.config import get_settings
++
++    assert get_settings().translate_request_timeout_sec == 20.0
++    proxy = TranslateSubprocessProxy("unused")
++    try:
++        assert proxy.request_timeout_sec == 20.0
++    finally:
++        proxy.close()
++
++
++def test_worker_stderr_forwarded_to_logger(
++    stderr_worker_path: Path, caplog: pytest.LogCaptureFixture
++) -> None:
++    """子进程 stderr 不进 DEVNULL：后台线程转发到主进程 logger（失败原因可查）。"""
++    with caplog.at_level(logging.WARNING, logger="app.modules.translate.engine"):
++        proxy = TranslateSubprocessProxy("unused", worker_cmd=_cmd(stderr_worker_path))
++        try:
++            assert proxy.translate(["hi"]) == ["T:hi"]
++            deadline = time.monotonic() + 3.0
++            while "model-download-stderr-marker" not in caplog.text and time.monotonic() < deadline:
++                time.sleep(0.05)
++        finally:
++            proxy.close()
++    assert "model-download-stderr-marker" in caplog.text
++
++
+ def test_get_translator_fail_soft_on_construction_error(
+     monkeypatch: pytest.MonkeyPatch,
+ ) -> None:
+diff --git a/deploy/docker-compose.yml b/deploy/docker-compose.yml
+index 9ef7dfa31..5d88e18ec 100644
+--- a/deploy/docker-compose.yml
++++ b/deploy/docker-compose.yml
+@@ -109,6 +109,11 @@ services:
+       # 预放模型目录挂入容器默认缓存路径，免下载直载；目录缺失时容器内自下载（本地开发无害）。
+       # 预置：scp 本地 fastembed_cache（bge-small-zh-v1.5 ~91MB）→ deploy/models/fastembed_cache。
+       - "./models/fastembed_cache:/tmp/fastembed_cache"
++      # 思考翻译模型（2026-10-22-fix-translate-pending）：服务器到 huggingface.co
++      # 不可达（实测 TCP unreachable，DNS 亦被污染），worker 子进程若走 HF 下载会
++      # 卡住直至超时。宿主机预置 opus-mt-en-zh ct2 模型目录挂入容器，配
++      # TRANSLATE_MODEL_DIR 实现零下载加载；目录缺失时回退 HF 路径（fail-soft）。
++      - "./models/opus-mt-en-zh:/opt/models/opus-mt-en-zh"
+       # 2026-10-08-backend-image-slim-no-claude：claude-data 卷挂载退役——容器内已无
+       # claude（server-local 遗物，agent 执行在宿主 daemon）；named volume 数据仍在
+       # 宿主磁盘，仅不再挂入。
+@@ -148,6 +153,10 @@ services:
+       WORKTREE_BASE_DIR: /data/sillyspec-workspaces
+       SPEC_DATA_ROOT: /data/spec-workspaces
+       HOME: /app
++      # 2026-10-22-fix-translate-pending：本地模型目录（对应上方挂载）。
++      # 生产 .env 设 TRANSLATE_MODEL_DIR=/opt/models/opus-mt-en-zh；留空则回退
++      # TRANSLATE_MODEL_REPO 的 HF 下载路径（本地开发有网时可用）。
++      TRANSLATE_MODEL_DIR: ${TRANSLATE_MODEL_DIR:-}
+       # 2026-10-08-backend-image-slim-no-claude：NPM_CONFIG_CACHE 退役（容器内已无 npm）。
+       # 容器内已无 claude，deploy/.env 的 ANTHROPIC_*/CLAUDE_* 行对容器为惰性变量
+       # （daemon 侧凭据不受影响，走 daemon install 自身配置）。
+diff --git a/frontend/src/lib/__tests__/thinking-translate.test.ts b/frontend/src/lib/__tests__/thinking-translate.test.ts
+index 7a2b3cf0a..4a78d9402 100644
+--- a/frontend/src/lib/__tests__/thinking-translate.test.ts
++++ b/frontend/src/lib/__tests__/thinking-translate.test.ts
+@@ -131,6 +131,26 @@ describe("translateText 合批/缓存/降级", () => {
+     await expect(p2).resolves.toBe("恢复了");
+   });
+ 
++  it("请求显式带 20s 超时（后端卡住时由 apiFetch 中止，不退化为无限等待）", async () => {
++    apiFetchMock.mockResolvedValue(okResponse([{ id: "0", text: "译超时", translated: true }]));
++    const p = translateText("timeout option english thinking text check.");
++    await vi.advanceTimersByTimeAsync(250);
++    await expect(p).resolves.toBe("译超时");
++    const options = apiFetchMock.mock.calls[0]![1] as { timeoutMs?: number };
++    expect(options.timeoutMs).toBe(20_000);
++  });
++
++  it("超时（apiFetch reject timeout）→ null + 60s 退避", async () => {
++    const timeoutErr = Object.assign(new Error("请求超时"), { code: "timeout" });
++    apiFetchMock.mockRejectedValue(timeoutErr);
++    const p = translateText("timed out english thinking text for backoff window.");
++    await vi.advanceTimersByTimeAsync(250);
++    await expect(p).resolves.toBeNull();
++    // 退避期内新文本直接回退原文，不再发请求
++    await expect(translateText("another text inside timeout backoff window.")).resolves.toBeNull();
++    expect(apiFetchMock).toHaveBeenCalledTimes(1);
++  });
++
+   it("网络失败（apiFetch reject）→ null + 退避", async () => {
+     apiFetchMock.mockRejectedValue(new Error("network down"));
+     const p = translateText("network failure path english text check.");
+diff --git a/frontend/src/lib/thinking-translate.ts b/frontend/src/lib/thinking-translate.ts
+index d67aa190e..12df2f5fb 100644
+--- a/frontend/src/lib/thinking-translate.ts
++++ b/frontend/src/lib/thinking-translate.ts
+@@ -22,6 +22,12 @@ const BATCH_MAX_ITEMS = 16;
+ const BATCH_WINDOW_MS = 250;
+ /** 引擎不可用退避时长。 */
+ const UNAVAILABLE_BACKOFF_MS = 60_000;
++/**
++ * 单次请求超时（2026-10-22-fix-translate-pending）：POST 默认无超时，后端子进程
++ * 卡在模型下载时请求会永久挂起（界面恒「翻译中」）。20s 后 abort 走网络失败同款
++ * 降级链（回退原文 + 60s 退避）；后端同类超时已同窗收紧（TRANSLATE_REQUEST_TIMEOUT_SEC）。
++ */
++const REQUEST_TIMEOUT_MS = 20_000;
+ /** 内存缓存条目上限（FIFO 淘汰——译文纯函数结果，先入者先淘汰足够）。 */
+ const CACHE_MAX_ENTRIES = 500;
+ 
+@@ -156,6 +162,8 @@ async function requestBatch(entries: QueueEntry[]): Promise<void> {
+     resp = await apiFetch<TranslateApiResponse>("/api/translate/thinking", {
+       method: "POST",
+       json: { items, target: "zh" },
++      timeoutMs: REQUEST_TIMEOUT_MS,
++      timeoutMessage: "翻译请求超时，已回退原文",
+     });
+   } catch {
+     // 网络失败与引擎不可用同语义：本批回退原文 + 退避（防风暴）
