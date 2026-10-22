@@ -26,6 +26,13 @@
 - 100 文件列表 `clientHeight ≤ 240`、可滚到底且头部不滚出；
 - console error / pageerror 均为 0。
 
+## 评审修复轮（P1/P2/P3）
+
+- P1：`session-manager` 工具路径累加不再按 `toolName+path` 去重——同一文件 Edit 3 次在采集器收到 3 条（新增接线测试断言重复项保留）。
+- P2：status/name-status/numstat 子进程自身 timeout 也调用 `noteCollectTimeout` 升级该工作区预算（新增子进程 timeout 升级测试）。
+- e2e 补「未跟踪行破折号」「删除行点击不触发 onOpenFile」断言——上表自动化断言全部由 Playwright 覆盖。
+- 文档/源码注释/design 文件清单按评审指出的漂移同步；复跑：daemon 43 passed、frontend 62 passed、e2e 1 passed、双端 tsc 零错。
+
 ## 视觉降级裁决
 
 无视觉降级：所有新增状态均为既有卡片内的文本/徽标增量，未改布局、未缩范围。无需用户裁决。

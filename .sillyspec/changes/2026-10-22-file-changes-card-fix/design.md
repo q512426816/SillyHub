@@ -62,3 +62,6 @@ daemon 采集器（`sillyhub-daemon/src/interactive/turn-file-changes.ts`）把�
 | 修改 | frontend/src/components/daemon/file-changes/__tests__/file-changes-card.test.tsx | 徽标/不可点/破折号/notice 提示用例 |
 | 修改 | .sillyspec/docs/sillyhub-daemon/modules/interactive.md | 采集口径与预算自适应说明 |
 | 修改 | .sillyspec/docs/frontend/modules/components-daemon.md | 文件变更卡状态/提示/交互说明 |
+| 修改 | frontend/src/app/proto/session-file-changes/page.tsx | 真码原型补状态徽标/notice 卡 |
+| 修改 | frontend/e2e/proto-file-card.spec.ts | 状态徽标/删除不可点/未跟踪破折号/notice 断言 |
+| 修改 | frontend/src/components/daemon/__tests__/turn-timeline-conversation-file-card.test.tsx | 头部文案断言随「N 个文件变更」更新 |

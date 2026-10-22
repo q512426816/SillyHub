@@ -145,7 +145,7 @@ export function toFileChangesCardProps(
 
   const truncated = snapshot.status === "partial" || snapshot.truncated === true;
   const files = (snapshot.files ?? []).map(toChangedFile);
-  // partial 但 daemon 没拿到文件列表（1500ms 超时 / 队列溢出，见 daemon
+  // partial 但 daemon 没拿到文件列表（采集超时 / 队列溢出，见 daemon
   // `collectTurnFileChanges` 的 partial 收口）：D-034 —— 卡片照出但只有一行提示，
   // 否则「采集没完成」会被读成「本轮没改文件」（E6/E8 立意）。
   if (files.length === 0 && truncated) {

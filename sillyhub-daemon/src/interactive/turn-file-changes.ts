@@ -22,7 +22,8 @@
  *   - 复杂度 O(改动数 + 工具调用数)：无全仓扫描、禁 rename 检测（`--no-renames`）；
  *   - `--no-optional-locks` + `-c core.preloadIndex=true` 恒在参数里（防与用户操作
  *     争 index.lock、复用 index 统计缓存）；
- *   - 1500ms 硬超时（Promise.race + AbortController kill 子进程）→ partial/timeout；
+ *   - 自适应硬超时（默认 1500ms；`/mnt/` 慢盘 ≥8s；timeout 后翻倍封顶 15s）
+ *     （Promise.race + AbortController kill 子进程）→ partial/timeout，保留已采清单；
  *   - 单工作区串行队列（`Map<workspaceRoot, tail>`）：队列满 → partial/queue_overflow，
  *     绝不与用户操作并发跑 git。
  *
@@ -69,7 +70,8 @@ import type {
 
 /* ── 常量 ───────────────────────────────────────────────────────────────── */
 
-/** 默认阈值（spike-01 实测定档：1500ms 硬超时 / 500 文件上限 / 队列深度 1）。 */
+/** 默认阈值（spike-01 实测定档：基础 1500ms / 500 文件上限 / 队列深度 1；
+ * 慢盘与历史 timeout 的预算升级见 `resolveTurnFileChangesLimits`）。 */
 export const DEFAULT_TURN_FILE_CHANGES_LIMITS: TurnFileChangesLimits = {
   timeoutMs: 1500,
   maxFiles: 500,
@@ -221,7 +223,7 @@ async function enterQueue(
 
 /**
  * 默认执行器：`execFile('git', args)`——**禁 shell**（防注入），`signal` abort 时
- * node 直接杀掉子进程（1500ms 硬超时的 kill 面），`timeout` 作单次兜底。
+ * node 直接杀掉子进程（硬超时的 kill 面），`timeout` 作单次兜底。
  */
 const defaultExecFile: TurnFileChangesExecFile = (args, opts) =>
   new Promise((resolvePromise, rejectPromise) => {
@@ -609,6 +611,14 @@ async function collectInner(
   progress: CollectProgress,
 ): Promise<CollectOutcome> {
   const { limits, exec, signal, ctx } = args;
+  const escalateIfTimeout = (error: unknown): void => {
+    // 2026-10-22-file-changes-card-fix（评审 P2）：子进程自身 timeout（被
+    // classifyGitError 归为 partial/timeout）也要升级该工作区自适应预算，
+    // 不能只在外层硬超时分支升级。
+    if (classifyGitError(error)?.reason === 'timeout') {
+      noteCollectTimeout(args.workspaceRoot, limits.timeoutMs);
+    }
+  };
   const runGit = async (gitArgs: string[]): Promise<string> => {
     ctx.subprocessCount += 1;
     const remaining = Math.max(
@@ -634,6 +644,7 @@ async function collectInner(
       progress.baselineHead = head === '' ? null : head;
     } catch (error) {
       const classified = classifyGitError(error);
+      escalateIfTimeout(error);
       if (classified) {
         // 非 git 仓 / git 缺失：直接 unavailable（不跑 status，省一条子进程）。
         throw new CollectAbort(classified.status, classified.reason, null);
@@ -658,6 +669,7 @@ async function collectInner(
     ]);
   } catch (error) {
     const classified = classifyGitError(error);
+    escalateIfTimeout(error);
     throw new CollectAbort(
       classified?.status ?? 'failed',
       classified?.reason,
@@ -680,6 +692,7 @@ async function collectInner(
       ]);
     } catch (error) {
       if (classifyGitError(error)?.reason === 'timeout') {
+        escalateIfTimeout(error);
         progress.degradedReason = 'timeout';
       }
     }
@@ -693,6 +706,7 @@ async function collectInner(
       progress.lineCounts = true;
     } catch (error) {
       if (classifyGitError(error)?.reason === 'timeout') {
+        escalateIfTimeout(error);
         progress.degradedReason = 'timeout';
       }
       progress.lineCounts = false;

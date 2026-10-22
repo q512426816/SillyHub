@@ -516,6 +516,48 @@ describe('collectTurnFileChanges × 子进程预算（≤3）与 git 参数红�
       }
     }
   }, 20_000);
+
+  it('子进程自身 timeout 也升级预算（不依赖外层硬超时）', async () => {
+    const dir = await plainDir();
+    const prev = process.env.SILLYHUB_FILE_CHANGES_TIMEOUT_MS;
+    process.env.SILLYHUB_FILE_CHANGES_TIMEOUT_MS = '50';
+    let phase: 'first' | 'second' = 'first';
+    const exec: TurnFileChangesExecFile = async (args) => {
+      if (phase === 'first') {
+        // 第一轮 status 直接被 kill（classifyGitError → partial/timeout 路径）
+        throw Object.assign(new Error('git killed by timeout'), { killed: true });
+      }
+      if (args.includes('status')) {
+        // 200ms > 原 50ms、< 升级后的 2050ms：只有升级生效才会成功
+        await new Promise((resolve) => setTimeout(resolve, 200));
+      }
+      return { stdout: '', stderr: '' };
+    };
+    try {
+      const first = await collectTurnFileChanges({
+        runId: 'run-subproc-timeout-1',
+        workspaceRoot: dir,
+        baselineHead: 'deadbeefdeadbeefdeadbeefdeadbeefdeadbeef',
+        execFile: exec,
+      });
+      expect(first.status).toBe('partial');
+      expect(first.reason).toBe('timeout');
+      phase = 'second';
+      const second = await collectTurnFileChanges({
+        runId: 'run-subproc-timeout-2',
+        workspaceRoot: dir,
+        baselineHead: 'deadbeefdeadbeefdeadbeefdeadbeefdeadbeef',
+        execFile: exec,
+      });
+      expect(second.status).toBe('ok');
+    } finally {
+      if (prev === undefined) {
+        delete process.env.SILLYHUB_FILE_CHANGES_TIMEOUT_MS;
+      } else {
+        process.env.SILLYHUB_FILE_CHANGES_TIMEOUT_MS = prev;
+      }
+    }
+  }, 20_000);
 });
 
 /* ── ③ 降级路径（timeout / git_missing / 截断）───────────────────────────── */

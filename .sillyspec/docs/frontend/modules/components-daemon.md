@@ -326,11 +326,11 @@ runtime-session-helpers 纯函数）。2026-07-11-unify-runtime-session-dialog �
 **轮级文件变更卡（task-11）：映射三分法**
 
 - 唯一映射入口 `toFileChangesCardProps()`（`frontend/src/components/daemon/file-changes/turn-file-changes.ts:117`），判定顺序即「有没有这项能力 → 快照可信不可信 → 才谈行级数据」；单文件行映射 `toChangedFile()`（`frontend/src/components/daemon/file-changes/turn-file-changes.ts:71`）：`attribution="edit_patch"` → `source="tool"`（`edits` = `editToolNames` 条数，无工具名按 1 计），其余 → `source="shell"`（`edits=0`，卡片对 `edits<=0` 不出「改 0 次」）。
-- **full 卡**：`capability="full"` 且快照可信 → 折叠头「已编辑 N 个文件 +adds −dels」+ 展开逐文件行（`frontend/src/components/daemon/file-changes/file-changes-card.tsx:108`）。`status="ok"` 且 `files` 为空 → 返回 `null`（确认零改动 → 零渲染，**不写「本轮无改动」文案**）。
-- **`tool_only` 降级卡**：`capability="tool_only"`、或 `capability="full"` 却无快照、或快照 `status` 为 `failed` / `unavailable` → 折叠头「仅工具编辑」（`degraded` 分支，`frontend/src/components/daemon/file-changes/file-changes-card.tsx:158`）+ 一行说明「daemon 未上报工作区快照，本卡只含 Edit/Write 工具编辑」（`frontend/src/components/daemon/file-changes/file-changes-card.tsx:232`）；**不渲染任何文件行**、行级统计显示破折号（`noLineStats`，`frontend/src/components/daemon/file-changes/file-changes-card.tsx:136`），绝不出现「本轮无改动」字样（E6/E8）。
+- **full 卡**：`capability="full"` 且快照可信 → 折叠头「N 个文件变更 +adds −dels」+ 展开逐文件行（`frontend/src/components/daemon/file-changes/file-changes-card.tsx:108`）。`status="ok"` 且 `files` 为空 → 返回 `null`（确认零改动 → 零渲染，**不写「本轮无改动」文案**）。
+- **`tool_only` / 无快照 / `failed`|`unavailable`**：2026-10-22-file-card-hide-empty 起产品页**一律不出卡、不出占位**（`toFileChangesCardProps` 返回 `null`）；`degraded`「仅工具编辑」形态仅保留给检查器 / proto 等显式降级消费方，不渲染任何文件行、绝不出现「本轮无改动」字样（E6/E8）。
 - **null 不出卡**：`fileChanges` 与 `fileChangesCapability` 双双缺省（旧消费方未接线 / 该轮无 run 快照来源）→ `null`，不出卡也不出占位（D-031；输入 `undefined, undefined` 与 `null, null` 同路径）。
 - **`partial` 行级破折号**：`status="partial"` 或 `truncated=true` → 正常卡 + 头部「（部分）」，行级 +/− 显示破折号（`truncated` / `file.binary` 分支，`frontend/src/components/daemon/file-changes/file-changes-card.tsx:318`），不拿残缺累加冒充总数；头部文件数仍给（文件数可靠，行数不可靠）。
-- **`partial` 且无文件清单 → 一行提示卡（D-034）**：超时（`reason="timeout"`）与队列溢出（`reason="queue_overflow"`）在 daemon 侧返回 `files=[]`，前端映射 `notice`（`NOTICE_PARTIAL_NO_FILES`），渲染 `data-testid="file-changes-notice"` 的 28px 单行卡「工作区快照未完成（超时或队列溢出），本轮改动未知」——**不静默**（否则「采集没完成」会被读成「本轮没改文件」，违反 E6/E8）；只有 `status="ok"` 且 `files=[]` 才是真空态（零渲染）。
+- **`partial` 且无文件清单 → 一行提示卡（D-034 / 2026-10-22-file-changes-card-fix）**：前端按快照 `reason` + `collectMs` 生成文案——`timeout` 显示「工作区快照采集超时（1.5s/1500ms），本轮改动未知」、`queue_overflow` 显示「快照采集排队溢出，本轮改动未知」、无 reason 用通用「工作区快照未完成，本轮改动未知」；`data-testid="file-changes-notice"` 内层 28px 单行卡，notice 态同样显示共享工作区提示——**不静默**（否则「采集没完成」会被读成「本轮没改文件」，违反 E6/E8）；只有 `status="ok"` 且 `files=[]` 才是真空态（零渲染）。
 - **binary 行破折号**：`binary=true` 同一分支（`frontend/src/components/daemon/file-changes/file-changes-card.tsx:318` 的 `file.binary` 判据），title 写「二进制文件：无行级行数统计」——numstat 对二进制恒 `0/0`，不显示成「+0 −0」。
 
 **会话级汇总（E7，去重 + Σ+/− + 最差 status + 并行横幅）**

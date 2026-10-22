@@ -1,0 +1,1567 @@
+diff --git a/.sillyspec/docs/frontend/modules/components-daemon.md b/.sillyspec/docs/frontend/modules/components-daemon.md
+index dc7e432cd..81f1352d0 100644
+--- a/.sillyspec/docs/frontend/modules/components-daemon.md
++++ b/.sillyspec/docs/frontend/modules/components-daemon.md
+@@ -347,3 +347,11 @@ runtime-session-helpers 纯函数）。2026-07-11-unify-runtime-session-dialog 
+ - 已知缺口（只登记）：手工镜像 `frontend/src/lib/daemon/sessions.ts` 的 `SessionRunRead` 尚未补这三列，故透传层用结构化可选字段 `RunFileChangesFields`（`frontend/src/components/daemon/file-changes/turn-file-changes.ts:57`）读取——镜像补齐后可原地收窄类型，调用面不变。
+ - 测试面：`frontend/src/components/daemon/file-changes/__tests__/`（归因映射 / `partial`+`truncated` 破折号 / `tool_only` 降级且不出现「无改动」/ 空快照不出卡 / 汇总去重与 Σ+/− / 最差状态 / 横幅在场）、`frontend/src/components/daemon/__tests__/turn-timeline-conversation-file-card.test.tsx`（轮级挂载 + 汇总开关）、`trajectory/__tests__/build-trajectory.test.ts` 与 `trajectory-timeline.test.tsx`（`modelBasis` 两态判定与文案互斥）。
+ 
++## 2026-10-22-file-changes-card-fix 增量（状态展示与提示）
++
++- 文件行新增状态徽标（新增/修改/删除/新文件）；untracked / mtime 探测行 `hasLineStats=false` 显示破折号（不再 +0 −0）；删除行 `data-clickable="false"` 不可点击、路径加删除线。
++- 「改N次」= 真实编辑调用次数（daemon `editToolNames` 保留重复项），工具名提示按名去重展示。
++- notice 按 `reason` 生成：`timeout` 带 `collectMs`（≥1s 显示 s、否则 ms）、`queue_overflow` 明确排队溢出、无 reason 用通用「工作区快照未完成」；notice 态同样显示「共享工作区，可能含并行会话改动」。
++- 头部文案由「已编辑 N 个文件」改为「N 个文件变更」——快照是工作区口径，不宣称全部由本轮编辑产生。
++- 测试面：`__tests__/turn-file-changes.test.ts`（status/hasLineStats/edits 取调用次数/notice 三态）、`__tests__/file-changes-card.test.tsx`（状态徽标/删除不可点/untracked 破折号/notice 共享提示）。
++
+diff --git a/.sillyspec/docs/sillyhub-daemon/modules/interactive.md b/.sillyspec/docs/sillyhub-daemon/modules/interactive.md
+index 6a78e1679..78809a9a0 100644
+--- a/.sillyspec/docs/sillyhub-daemon/modules/interactive.md
++++ b/.sillyspec/docs/sillyhub-daemon/modules/interactive.md
+@@ -216,3 +216,11 @@ restoreAndReconnect: 同上按位置判定 + 迁移 + record.providerConfig 快
+ 
+ - `getTurnFileChangesTelemetry()`（`sillyhub-daemon/src/interactive/turn-file-changes.ts:715`）读 50 样本滑窗（`TURN_FILE_CHANGES_TELEMETRY_WINDOW`）出 `samples` / `p50` / `p95` / `degradeRate` / `subprocessCountMax`；红线 p50 > 300ms 或降级率 > 5% 报警。spike-01 安静窗口实测：worktree 语料（21 改动）245ms / 480ms、主仓（111 改动）318ms / 379ms——重脏仓超线已登记 R-07，退档开关 `limits.includeLineCounts=false` 已实现并单测。
+ - `partial` **不是错误态**：卡片照出、行级 +/− 显示破折号，不伪造数字；`unavailable`（`not_a_repo` / `git_missing`）与 `failed`（未知 git 错误）由前端按 `capability="tool_only"` 走降级卡。任何情况下都不把「没有快照」写成「本轮无改动」（E6/E8 硬约束）。
++
++## 2026-10-22-file-changes-card-fix 增量（采集口径与慢盘预算）
++
++- 文件清单来源改为 `git status --porcelain -z` ∪ `git diff --name-status -z <baselineHead>`：status 覆盖未提交/未跟踪，name-status 覆盖**轮内已提交**改动；`git diff --numstat <baselineHead>` 只补行数/二进制。合并优先级 status > name-status > numstat（numstat-only 路径状态保守归 modified）。子进程：baseline 已知 ≤3（status/name-status/numstat），未解析基线的兜底路径 4（+rev-parse）。
++- 分阶段收口：只有 status 失败才 `files=[]`；name-status/numstat 失败只降级状态精度/行数，保留已采清单（`status=partial` + `reason=timeout`）。外层硬超时同样按 `CollectProgress` 已完成阶段组装清单，不再丢掉 status 面。
++- 预算：`resolveTurnFileChangesLimits()`——显式 limits > env `SILLYHUB_FILE_CHANGES_TIMEOUT_MS` > 默认 1500ms；`/mnt/<drive>/` 基础 ≥8000ms；该工作区 timeout 后翻倍升级（+2s 起步，封顶 15000ms，进程内记忆，`resetTurnFileChangesTelemetry()` 清空）。
++- `editToolNames` 不再按工具名去重：数组长度 = 本轮编辑调用次数（前端「改N次」口径），工具名提示由前端去重展示。
++- 测试面：`tests/interactive/turn-file-changes.test.ts` 新增轮内 commit 入列、numstat 超时保留清单、name-status 超时 numstat 兜底、慢盘预算、自适应升级、编辑调用计数 6 类用例；子进程预算断言随 3/4 条更新。
+diff --git a/frontend/e2e/proto-file-card.spec.ts b/frontend/e2e/proto-file-card.spec.ts
+index de2f276b0..7b30e7dde 100644
+--- a/frontend/e2e/proto-file-card.spec.ts
++++ b/frontend/e2e/proto-file-card.spec.ts
+@@ -9,21 +9,18 @@
+  * 前置：本机 dev server 已在 :3000（配置不配 webServer，D-001@v1）。
+  */
+ 
++import { mkdirSync } from "node:fs";
+ import path from "node:path";
+ 
+ import { expect, test } from "@playwright/test";
+ 
+ // 截图落变更目录（从 frontend/ 上跳一级；npx playwright test 的 cwd = frontend）。
+-const SCREENSHOT = path.resolve(
+-  process.cwd(),
+-  "..",
+-  ".sillyspec/changes/2026-10-20-session-page-dsh-alignment/proto-file-card-2026-10-21.png",
+-);
++const SCREENSHOT = path.resolve(process.cwd(), "test-results/proto-file-card-2026-10-22.png");
+ const LONG_LIST_SCREENSHOT = path.resolve(
+   process.cwd(),
+-  "..",
+-  ".sillyspec/changes/2026-10-20-session-page-dsh-alignment/proto-file-card-100files-2026-10-21.png",
++  "test-results/proto-file-card-100files-2026-10-22.png",
+ );
++mkdirSync(path.dirname(SCREENSHOT), { recursive: true });
+ 
+ test.use({ viewport: { width: 1400, height: 900 } });
+ 
+@@ -41,8 +38,8 @@ test("文件变更卡：折叠 / 展开 / 降级三态与 100 文件内滚", asy
+   // ── 三张卡 + 折叠态读数 ──
+   await expect(page.getByTestId("file-changes-card")).toHaveCount(3);
+   const first = page.getByTestId("file-changes-card").nth(0);
+-  await expect(first.getByText("已编辑 8 个文件")).toBeVisible();
+-  await expect(first.getByText("+230")).toBeVisible();
++  await expect(first.getByText("8 个文件变更")).toBeVisible();
++  await expect(first.getByText("+226")).toBeVisible();
+   await expect(first.getByText("−8")).toBeVisible();
+   await expect(first).toHaveAttribute("data-expanded", "false");
+   await expect(first.getByTestId("file-changes-row")).toHaveCount(0);
+@@ -52,9 +49,15 @@ test("文件变更卡：折叠 / 展开 / 降级三态与 100 文件内滚", asy
+   expect(Math.round(headerBox!.height)).toBe(28);
+ 
+   // ── 降级态的静态标记（此时第 1 张卡仍折叠，全页「命令行」只在展开后出现）──
+-  await expect(page.getByText("共享工作区，可能含并行会话改动")).toHaveCount(1);
++  await expect(page.getByText("共享工作区，可能含并行会话改动")).toHaveCount(2);
+   await expect(page.getByText("（部分）")).toHaveCount(1);
+-  await expect(page.getByText("已编辑 12 个文件")).toBeVisible();
++  // notice 卡（无文件清单）：精确原因 + 采集耗时 + 共享工作区提示。
++  const notice = page.getByTestId("file-changes-notice");
++  await expect(notice).toBeVisible();
++  await expect(notice).toContainText("1.5s");
++  await expect(notice).toContainText("共享工作区");
++
++  await expect(page.getByText("12 个文件变更")).toBeVisible();
+   // 超时快照的行级统计不可信：第 3 张卡头部不出现 +/− 数字。
+   const thirdHeaderText = await page
+     .getByTestId("file-changes-card")
+@@ -72,6 +75,11 @@ test("文件变更卡：折叠 / 展开 / 降级三态与 100 文件内滚", asy
+   expect(rowBox).not.toBeNull();
+   expect(Math.round(rowBox!.height)).toBe(24);
+   await expect(page.getByText("命令行", { exact: true })).toHaveCount(1);
++  // 状态徽标：新增/删除/新文件各一次（未跟踪行行级统计为破折号）。
++  await expect(first.getByText("新增", { exact: true })).toHaveCount(1);
++  await expect(first.getByText("删除", { exact: true })).toHaveCount(1);
++  await expect(first.getByText("新文件", { exact: true })).toHaveCount(1);
++
+ 
+   // ── 点行 → onOpenFile 生效（可见 state + console.log 双证据）──
+   await first
+diff --git a/frontend/src/app/proto/session-file-changes/page.tsx b/frontend/src/app/proto/session-file-changes/page.tsx
+index f5048b01e..6ac1b9ea6 100644
+--- a/frontend/src/app/proto/session-file-changes/page.tsx
++++ b/frontend/src/app/proto/session-file-changes/page.tsx
+@@ -22,14 +22,14 @@ import { FileChangesCard, type ChangedFile } from "@/components/daemon/file-chan
+ 
+ /** 第 16 轮：折叠态，8 文件 / +230 −8，其中一个文件来自命令行（git 快照归因）。 */
+ const TURN_16_FILES: ChangedFile[] = [
+-  { path: "frontend/src/components/daemon/turn-timeline.tsx", adds: 128, dels: 4, edits: 3, source: "tool" },
+-  { path: "frontend/src/components/daemon/turn-segment-views.tsx", adds: 46, dels: 2, edits: 2, source: "tool" },
+-  { path: "frontend/src/app/globals.css", adds: 18, dels: 0, edits: 1, source: "tool" },
+-  { path: "frontend/src/components/daemon/file-changes/file-changes-card.tsx", adds: 24, dels: 0, edits: 1, source: "tool" },
+-  { path: "frontend/src/app/proto/session-file-changes/page.tsx", adds: 10, dels: 0, edits: 1, source: "tool" },
+-  { path: "frontend/e2e/proto-file-card.spec.ts", adds: 4, dels: 0, edits: 1, source: "tool" },
+-  { path: "scripts/prototype-build.mjs", adds: 0, dels: 1, edits: 1, source: "tool" },
+-  { path: "frontend/package.json", adds: 0, dels: 1, edits: 1, source: "shell" },
++  { path: "frontend/src/components/daemon/turn-timeline.tsx", adds: 128, dels: 4, edits: 3, source: "tool", status: "modified" },
++  { path: "frontend/src/components/daemon/turn-segment-views.tsx", adds: 46, dels: 2, edits: 2, source: "tool", status: "modified" },
++  { path: "frontend/src/app/globals.css", adds: 18, dels: 0, edits: 1, source: "tool", status: "modified" },
++  { path: "frontend/src/components/daemon/file-changes/file-changes-card.tsx", adds: 24, dels: 0, edits: 1, source: "tool", status: "modified" },
++  { path: "frontend/src/app/proto/session-file-changes/page.tsx", adds: 10, dels: 0, edits: 1, source: "tool", status: "added" },
++  { path: "frontend/e2e/proto-file-card.spec.ts", adds: 0, dels: 0, edits: 2, source: "tool", status: "untracked", hasLineStats: false },
++  { path: "scripts/prototype-build.mjs", adds: 0, dels: 1, edits: 0, source: "tool", status: "deleted" },
++  { path: "frontend/package.json", adds: 0, dels: 1, edits: 1, source: "shell", status: "modified" },
+ ];
+ 
+ /** 第 17 轮：展开态，3 文件 / +12 −3。 */
+@@ -132,8 +132,8 @@ export default function SessionFileChangesProtoPage() {
+             </div>
+           </div>
+           <p className="mt-1.5 text-[11.5px] leading-[1.7] text-muted-foreground">
+-            为什么这样：改动按轮归属，一轮一张卡，卡外不再重复列文件；逐文件 +/− 以 git
+-            快照（numstat）为准，Edit/Write 的补丁只用于把文件归因到工具，shell/脚本改动由快照补全。快照超时降级为只报文件数、行级统计显示破折号；工作区由多会话共享时恒提示可能含并行改动。
++            为什么这样：改动按轮归属，一轮一张卡，卡外不再重复列文件；文件清单含轮内已提交的改动
++            （status ∪ baseline diff），逐文件 +/− 以 git 快照（numstat）为准，Edit/Write 的补丁只用于把文件归因到工具，shell/脚本改动由快照补全；状态徽标区分新增/修改/删除/未跟踪。快照超时降级为只报文件数、行级统计显示破折号；工作区由多会话共享时恒提示可能含并行改动。
+           </p>
+           <p className="mt-1.5 flex flex-wrap items-center gap-1 text-[11px] text-muted-foreground">
+             <span className="shrink-0">onOpenFile →</span>
+@@ -155,7 +155,6 @@ export default function SessionFileChangesProtoPage() {
+           <FileChangesCard
+             files={TURN_16_FILES}
+             turnNo={16}
+-            startExpanded
+             onOpenFile={handleOpenFile}
+           />
+         </TurnBlock>
+@@ -189,6 +188,22 @@ export default function SessionFileChangesProtoPage() {
+           />
+         </TurnBlock>
+ 
++        <TurnBlock
++          lines={[
++            "真到连文件清单都拿不到时（硬超时/排队溢出），卡片只报一句实话，绝不写成「本轮无改动」。",
++            "文案带上精确原因与采集耗时；共享工作区提示在这种情况下也照常显示。",
++          ]}
++        >
++          <FileChangesCard
++            files={[]}
++            turnNo={20}
++            truncated
++            capability="full"
++            notice="工作区快照采集超时（1.5s），本轮改动未知"
++            sharedWorkspace
++          />
++        </TurnBlock>
++
+         {/* 100 文件长列表：按钮后才出现，专门看限高内滚与溢出。 */}
+         <div className="mt-8 rounded-md border border-dashed border-border px-3 py-2.5">
+           <div className="flex flex-wrap items-center justify-between gap-2">
+diff --git a/frontend/src/components/daemon/__tests__/turn-timeline-conversation-file-card.test.tsx b/frontend/src/components/daemon/__tests__/turn-timeline-conversation-file-card.test.tsx
+index 069b78e25..e5788aead 100644
+--- a/frontend/src/components/daemon/__tests__/turn-timeline-conversation-file-card.test.tsx
++++ b/frontend/src/components/daemon/__tests__/turn-timeline-conversation-file-card.test.tsx
+@@ -364,7 +364,7 @@ describe("轮级文件变更卡与会话级汇总挂载（task-11 / 线 C 1b）"
+     };
+   }
+ 
+-  it("有快照：轮尾状态行之后挂出逐文件卡（折叠态「已编辑 N 个文件」+ 共享工作区提示）", () => {
++  it("有快照：轮尾状态行之后挂出逐文件卡（折叠态「N 个文件变更」+ 共享工作区提示）", () => {
+     render(
+       <TurnTimeline
+         {...renderProps([
+@@ -395,7 +395,7 @@ describe("轮级文件变更卡与会话级汇总挂载（task-11 / 线 C 1b）"
+     );
+ 
+     const card = screen.getByTestId("turn-file-changes");
+-    expect(screen.getByText("已编辑 2 个文件")).toBeInTheDocument();
++    expect(screen.getByText("2 个文件变更")).toBeInTheDocument();
+     expect(card).toBeInTheDocument();
+     // 挂在轮尾状态行（RoundDivider「第 N 轮」）之后，不是轮首；卡片头也带「第 N 轮」，
+     // 取 DOM 序第一个（分隔行在前）。
+@@ -476,7 +476,7 @@ describe("轮级文件变更卡与会话级汇总挂载（task-11 / 线 C 1b）"
+       />,
+     );
+ 
+-    expect(screen.getByText("已编辑 1 个文件")).toBeInTheDocument();
++    expect(screen.getByText("1 个文件变更")).toBeInTheDocument();
+     expect(screen.getByText("（部分）")).toBeInTheDocument();
+   });
+ 
+diff --git a/frontend/src/components/daemon/file-changes/__tests__/file-changes-card.test.tsx b/frontend/src/components/daemon/file-changes/__tests__/file-changes-card.test.tsx
+index f6047172f..7f0fdb676 100644
+--- a/frontend/src/components/daemon/file-changes/__tests__/file-changes-card.test.tsx
++++ b/frontend/src/components/daemon/file-changes/__tests__/file-changes-card.test.tsx
+@@ -50,7 +50,7 @@ describe("FileChangesCard", () => {
+     const header = screen.getByTestId("file-changes-header");
+     expect(header.className).toContain("h-7");
+     expect(screen.getByTestId("file-changes-card")).toHaveAttribute("data-expanded", "false");
+-    expect(screen.getByText("已编辑 8 个文件")).toBeInTheDocument();
++    expect(screen.getByText("8 个文件变更")).toBeInTheDocument();
+     expect(screen.getByText("+230")).toBeInTheDocument();
+     expect(screen.getByText("−8")).toBeInTheDocument();
+     expect(screen.getByText("第 16 轮")).toBeInTheDocument();
+@@ -93,7 +93,7 @@ describe("FileChangesCard", () => {
+     expect(screen.getByTestId("file-changes-header").textContent).not.toContain("−");
+     expect(screen.getAllByTestId("file-changes-row")[0]!.textContent).toContain("—");
+     // 计数仍可靠：文件数与编辑次数照常。
+-    expect(screen.getByText("已编辑 3 个文件")).toBeInTheDocument();
++    expect(screen.getByText("3 个文件变更")).toBeInTheDocument();
+     expect(screen.getAllByTestId("file-changes-row")[0]!.textContent).toContain("改3次");
+   });
+ 
+@@ -191,7 +191,7 @@ describe("FileChangesCard：降级形态与真实快照细节（task-11）", ()
+     expect(notice.textContent).toContain("本轮改动未知");
+     expect(notice.textContent).toContain("第 7 轮");
+     // 28px 单行（与折叠头同高），无文件行、无 +/− 数字。
+-    expect(notice.className).toContain("h-7");
++    expect(notice.querySelector(".h-7")).not.toBeNull();
+     expect(screen.queryByTestId("file-changes-row")).toBeNull();
+     expect(screen.queryByTestId("file-changes-card")).toBeNull();
+     expect(container.textContent).not.toContain("无改动");
+@@ -243,4 +243,59 @@ describe("FileChangesCard：降级形态与真实快照细节（task-11）", ()
+     expect(edits!.textContent).toContain("改2次");
+     expect(edits!.getAttribute("title")).toBe("编辑工具：Edit、Write");
+   });
++
++  it("状态徽标与交互：新增/删除/新文件；删除行不可点击、untracked 行破折号", () => {
++    const onOpenFile = vi.fn();
++    render(
++      <FileChangesCard
++        files={[
++          { path: "a.ts", adds: 1, dels: 0, edits: 1, source: "tool", status: "added" },
++          { path: "b.ts", adds: 0, dels: 2, edits: 0, source: "shell", status: "deleted" },
++          {
++            path: "c.ts",
++            adds: 0,
++            dels: 0,
++            edits: 1,
++            source: "tool",
++            status: "untracked",
++            hasLineStats: false,
++          },
++        ]}
++        startExpanded
++        onOpenFile={onOpenFile}
++      />,
++    );
++
++    const badges = screen
++      .getAllByTestId("file-changes-status")
++      .map((el) => el.textContent);
++    expect(badges).toEqual(["新增", "删除", "新文件"]);
++
++    const rows = screen.getAllByTestId("file-changes-row");
++    expect(rows[1]).toHaveAttribute("data-clickable", "false");
++    fireEvent.click(rows[1]!);
++    expect(onOpenFile).not.toHaveBeenCalled();
++    fireEvent.click(rows[0]!);
++    expect(onOpenFile).toHaveBeenCalledWith("a.ts");
++
++    expect(
++      rows[2]!.querySelector('[title="新文件：无行级统计"]'),
++    ).not.toBeNull();
++  });
++
++  it("notice 态也显示共享工作区提示", () => {
++    render(
++      <FileChangesCard
++        files={[]}
++        capability="full"
++        truncated
++        notice="工作区快照采集超时（1.5s），本轮改动未知"
++        sharedWorkspace
++        turnNo={7}
++      />,
++    );
++    const notice = screen.getByTestId("file-changes-notice");
++    expect(notice.textContent).toContain("共享工作区");
++    expect(notice.textContent).toContain("1.5s");
++  });
+ });
+diff --git a/frontend/src/components/daemon/file-changes/__tests__/turn-file-changes.test.ts b/frontend/src/components/daemon/file-changes/__tests__/turn-file-changes.test.ts
+index b4beb3bb5..64ef2e8c1 100644
+--- a/frontend/src/components/daemon/file-changes/__tests__/turn-file-changes.test.ts
++++ b/frontend/src/components/daemon/file-changes/__tests__/turn-file-changes.test.ts
+@@ -117,6 +117,30 @@ describe("toFileChangesCardProps：归因映射", () => {
+     // binary 缺省/false 不进对象（不制造 undefined 键，保持既有形状）。
+     expect("binary" in toChangedFile(makeFile())).toBe(false);
+   });
++
++  it("status/hasLineStats 透传：untracked 与 mtime 行行级不可信", () => {
++    expect(
++      toChangedFile(makeFile({ status: "untracked", added: 0, deleted: 0 })),
++    ).toMatchObject({ status: "untracked", hasLineStats: false });
++    expect(toChangedFile(makeFile({ status: "deleted" }))).toMatchObject({
++      status: "deleted",
++      hasLineStats: true,
++    });
++    expect(
++      toChangedFile(makeFile({ source: "mtime", attribution: "command" })),
++    ).toMatchObject({ hasLineStats: false });
++    expect(toChangedFile(makeFile({ status: "added" }))).toMatchObject({
++      status: "added",
++      hasLineStats: true,
++    });
++  });
++
++  it("edits 取编辑调用次数（editToolNames 保留重复项）", () => {
++    const file = toChangedFile(
++      makeFile({ editToolNames: ["Edit", "Edit", "Write"] }),
++    );
++    expect(file.edits).toBe(3);
++  });
+ });
+ 
+ describe("toFileChangesCardProps：partial / truncated 采样降级", () => {
+@@ -150,9 +174,11 @@ describe("toFileChangesCardProps：partial / truncated 采样降级", () => {
+     );
+     expect(props).not.toBeNull();
+     expect(props!.files).toEqual([]);
+-    expect(props!.notice).toBe(NOTICE_PARTIAL_NO_FILES);
++    expect(props!.notice).toContain("超时");
++    expect(props!.notice).toContain("本轮改动未知");
+     expect(props!.truncated).toBe(true);
+     // 文案说的是「没拿到清单」，不是「没改文件」。
++    expect(props!.notice).not.toContain("无改动");
+     expect(NOTICE_PARTIAL_NO_FILES).toContain("未知");
+     expect(NOTICE_PARTIAL_NO_FILES).not.toContain("无改动");
+   });
+@@ -164,6 +190,28 @@ describe("toFileChangesCardProps：partial / truncated 采样降级", () => {
+     );
+     expect(props!.sharedWorkspace).toBe(true);
+   });
++
++  it("notice 按 reason 生成：timeout 带耗时、queue_overflow 明确排队溢出、无 reason 用通用文案", () => {
++    const timeout = toFileChangesCardProps(
++      makeSnapshot({ status: "partial", reason: "timeout", collectMs: 1500, files: [] }),
++      "full",
++    );
++    expect(timeout!.notice).toContain("1.5s");
++    expect(timeout!.notice).not.toContain("排队溢出");
++
++    const queue = toFileChangesCardProps(
++      makeSnapshot({ status: "partial", reason: "queue_overflow", files: [] }),
++      "full",
++    );
++    expect(queue!.notice).toContain("排队溢出");
++    expect(queue!.notice).not.toContain("超时");
++
++    const generic = toFileChangesCardProps(
++      makeSnapshot({ status: "partial", files: [] }),
++      "full",
++    );
++    expect(generic!.notice).toBe(NOTICE_PARTIAL_NO_FILES);
++  });
+ });
+ 
+ describe("toFileChangesCardProps：无信息一律不出卡（2026-10-22-file-card-hide-empty）", () => {
+diff --git a/frontend/src/components/daemon/file-changes/file-changes-card.tsx b/frontend/src/components/daemon/file-changes/file-changes-card.tsx
+index bf4310da1..80bb3d753 100644
+--- a/frontend/src/components/daemon/file-changes/file-changes-card.tsx
++++ b/frontend/src/components/daemon/file-changes/file-changes-card.tsx
+@@ -48,6 +48,9 @@ import { cn } from "@/lib/utils";
+  */
+ export type FileChangesCapability = "full" | "tool_only";
+ 
++/** 文件状态（2026-10-22-file-changes-card-fix）：A/M/D/? 徽标来源。 */
++export type FileChangeStatus = "added" | "modified" | "deleted" | "untracked";
++
+ export interface ChangedFile {
+   path: string;
+   adds: number;
+@@ -55,6 +58,10 @@ export interface ChangedFile {
+   edits: number;
+   /** tool = Edit/Write 补丁归因；shell = 命令行/脚本改动（来自 git 快照）。 */
+   source: "tool" | "shell";
++  /** 文件状态；旧调用方缺省时不渲染徽标（零回归）。 */
++  status?: FileChangeStatus;
++  /** 行级 +/− 是否可信（untracked / mtime 探测 / 二进制为 false）；缺省 true。 */
++  hasLineStats?: boolean;
+   /**
+    * 二进制文件（`git diff --numstat` 报 0/0 且 `binary:true`）——行级 +/− 显示破折号。
+    * 缺省/false = 文本文件，按 adds/dels 正常展示。
+@@ -114,6 +121,29 @@ function isActivationKey(event: KeyboardEvent<HTMLElement>): boolean {
+   return event.key === "Enter" || event.key === " " || event.key === "Spacebar";
+ }
+ 
++/** 文件状态徽标（2026-10-22-file-changes-card-fix）：文案 + 语义 token 配色。 */
++const FILE_STATUS_META: Record<
++  FileChangeStatus,
++  { label: string; className: string }
++> = {
++  added: {
++    label: "新增",
++    className: "border-success/30 bg-success/10 text-success",
++  },
++  modified: {
++    label: "修改",
++    className: "border-border bg-muted/50 text-muted-foreground",
++  },
++  deleted: {
++    label: "删除",
++    className: "border-error/30 bg-error/10 text-error",
++  },
++  untracked: {
++    label: "新文件",
++    className: "border-primary/30 bg-primary/10 text-primary",
++  },
++};
++
+ export function FileChangesCard({
+   files,
+   turnNo,
+@@ -140,24 +170,31 @@ export function FileChangesCard({
+   if (files.length === 0 && !degraded && !isNotice) return null;
+ 
+   // 无文件行但有话说（partial 超时/队列溢出）：28px 单行提示，与折叠头同高
+-  // （绝不写成「无改动」——那是 E6/E8 明令禁止的伪值）。
++  // （绝不写成「无改动」——那是 E6/E8 明令禁止的伪值）。共享工作区提示在
++  // notice 态同样要显示（2026-10-22-file-changes-card-fix）。
+   if (isNotice) {
+     return (
+       <div
+         data-testid="file-changes-notice"
+         data-truncated="true"
+         className={cn(
+-          "flex h-7 items-center gap-1.5 rounded-md border border-border bg-card px-2 text-[12px]",
+-          "text-muted-foreground",
++          "overflow-hidden rounded-md border border-border bg-card text-[12px]",
+           className,
+         )}
+       >
+-        <FileDiff className="h-3.5 w-3.5 shrink-0" aria-hidden />
+-        <span className="min-w-0 truncate">{notice}</span>
+-        {turnNo != null && (
+-          <span className="ml-auto shrink-0 font-mono text-[11px] tabular-nums text-muted-foreground/80">
+-            第 {turnNo} 轮
+-          </span>
++        <div className="flex h-7 items-center gap-1.5 px-2 text-muted-foreground">
++          <FileDiff className="h-3.5 w-3.5 shrink-0" aria-hidden />
++          <span className="min-w-0 truncate">{notice}</span>
++          {turnNo != null && (
++            <span className="ml-auto shrink-0 font-mono text-[11px] tabular-nums text-muted-foreground/80">
++              第 {turnNo} 轮
++            </span>
++          )}
++        </div>
++        {sharedWorkspace && (
++          <p className="px-2 pb-1 text-[11px] leading-[1.4] text-muted-foreground/80">
++            共享工作区，可能含并行会话改动
++          </p>
+         )}
+       </div>
+     );
+@@ -191,7 +228,7 @@ export function FileChangesCard({
+             <FileDiff className="h-3.5 w-3.5 shrink-0 text-muted-foreground" aria-hidden />
+             <span className="flex min-w-0 items-center gap-1">
+               <span className="shrink-0 font-medium text-foreground">
+-                {degraded ? "仅工具编辑" : `已编辑 ${files.length} 个文件`}
++                {degraded ? "仅工具编辑" : `${files.length} 个文件变更`}
+               </span>
+               {truncated && (
+                 <span className="shrink-0 text-[11px] text-muted-foreground">（部分）</span>
+@@ -283,82 +320,135 @@ export function FileChangesCard({
+           data-testid="file-changes-list"
+           className="max-h-[240px] overflow-y-auto border-t border-border/60 py-0.5"
+         >
+-          {files.map((file, index) => (
+-            <div
+-              key={`${file.path}#${index}`}
+-              role="button"
+-              tabIndex={0}
+-              data-testid="file-changes-row"
+-              data-path={file.path}
+-              data-source={file.source}
+-              aria-label={`打开 ${file.path}`}
+-              title={file.path}
+-              onClick={() => openFile(file.path)}
+-              onKeyDown={(event) => {
+-                if (!isActivationKey(event)) return;
+-                event.preventDefault();
+-                openFile(file.path);
+-              }}
+-              className={cn(
+-                "group flex h-6 cursor-pointer items-center gap-2 px-2",
+-                "hover:bg-muted/60 focus-visible:bg-muted/60 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring",
+-              )}
+-            >
+-              {/* 路径不吃 flex-1：短路径时归因徽标紧跟文件名，而不是被甩到数字列旁边。 */}
+-              <span className="min-w-0 shrink truncate font-mono text-[11.5px] text-muted-foreground group-hover:text-foreground group-hover:underline">
+-                {file.path}
+-              </span>
+-              {file.source === "shell" && (
++          {files.map((file, index) => {
++            const clickable = file.status !== "deleted";
++            const rowNoStats =
++              truncated || file.binary === true || file.hasLineStats === false;
++            const noStatsTitle =
++              file.binary === true
++                ? "二进制文件：无行级行数统计"
++                : file.status === "untracked"
++                  ? "新文件：无行级统计"
++                  : file.hasLineStats === false
++                    ? "mtime 探测：无行级统计"
++                    : "快照超时：无行级统计";
++            const statusMeta = file.status
++              ? FILE_STATUS_META[file.status]
++              : null;
++            return (
++              <div
++                key={`${file.path}#${index}`}
++                role={clickable ? "button" : undefined}
++                tabIndex={clickable ? 0 : undefined}
++                data-testid="file-changes-row"
++                data-path={file.path}
++                data-source={file.source}
++                data-status={file.status}
++                data-clickable={clickable ? "true" : "false"}
++                aria-label={clickable ? `打开 ${file.path}` : undefined}
++                title={file.path}
++                onClick={clickable ? () => openFile(file.path) : undefined}
++                onKeyDown={
++                  clickable
++                    ? (event) => {
++                        if (!isActivationKey(event)) return;
++                        event.preventDefault();
++                        openFile(file.path);
++                      }
++                    : undefined
++                }
++                className={cn(
++                  "group flex h-6 items-center gap-2 px-2",
++                  clickable
++                    ? "cursor-pointer hover:bg-muted/60 focus-visible:bg-muted/60 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
++                    : "cursor-default",
++                )}
++              >
++                {/* 路径不吃 flex-1：短路径时状态/归因徽标紧跟文件名，而不是被甩到数字列旁边。 */}
+                 <span
+-                  className="shrink-0 rounded border border-border bg-muted/60 px-1 py-px text-[10px] leading-none text-muted-foreground"
+-                  title="命令行/脚本改动（git 快照归因）"
++                  className={cn(
++                    "min-w-0 shrink truncate font-mono text-[11.5px] text-muted-foreground",
++                    clickable &&
++                      "group-hover:text-foreground group-hover:underline",
++                    file.status === "deleted" && "line-through",
++                  )}
+                 >
+-                  命令行
++                  {file.path}
+                 </span>
+-              )}
+-              <span className="ml-auto flex shrink-0 items-center gap-2">
+-                <span className="w-[68px] shrink-0 text-right font-mono text-[11.5px] tabular-nums">
+-                  {truncated || file.binary ? (
+-                    // 快照超时/截断，或二进制文件（numstat 恒 0/0）——「+0 −0」是假精确。
++                {statusMeta && (
++                  <span
++                    data-testid="file-changes-status"
++                    className={cn(
++                      "shrink-0 rounded border px-1 py-px text-[10px] leading-none",
++                      statusMeta.className,
++                    )}
++                  >
++                    {statusMeta.label}
++                  </span>
++                )}
++                {file.source === "shell" && (
++                  <span
++                    className="shrink-0 rounded border border-border bg-muted/60 px-1 py-px text-[10px] leading-none text-muted-foreground"
++                    title="命令行/脚本改动（git 快照归因）"
++                  >
++                    命令行
++                  </span>
++                )}
++                <span className="ml-auto flex shrink-0 items-center gap-2">
++                  <span className="w-[68px] shrink-0 text-right font-mono text-[11.5px] tabular-nums">
++                    {rowNoStats ? (
++                      // 快照超时/截断、二进制、未跟踪新文件、mtime 探测行——「+0 −0」是假精确。
++                      <span
++                        className="text-muted-foreground"
++                        title={noStatsTitle}
++                      >
++                        —
++                      </span>
++                    ) : (
++                      <>
++                        <span
++                          className={
++                            file.adds > 0
++                              ? "text-success"
++                              : "text-muted-foreground/50"
++                          }
++                        >
++                          +{file.adds}
++                        </span>{" "}
++                        <span
++                          className={
++                            file.dels > 0
++                              ? "text-error"
++                              : "text-muted-foreground/50"
++                          }
++                        >
++                          −{file.dels}
++                        </span>
++                      </>
++                    )}
++                  </span>
++                  {/* edits<=0（命令行归因的行没有「编辑次数」概念）不出「改0次」——
++                      0 会被读成「没改过」，而行本身就在改动清单里。 */}
++                  {file.edits > 0 && (
+                     <span
+-                      className="text-muted-foreground"
++                      data-testid="file-changes-edits"
++                      className="w-12 shrink-0 text-right font-mono text-[11px] tabular-nums text-muted-foreground"
+                       title={
+-                        file.binary
+-                          ? "二进制文件：无行级行数统计"
+-                          : "快照超时：无行级统计"
++                        file.editToolNames != null &&
++                        file.editToolNames.length > 0
++                          ? `编辑工具：${Array.from(
++                              new Set(file.editToolNames),
++                            ).join("、")}`
++                          : undefined
+                       }
+                     >
+-                      —
++                      改{file.edits}次
+                     </span>
+-                  ) : (
+-                    <>
+-                      <span className={file.adds > 0 ? "text-success" : "text-muted-foreground/50"}>
+-                        +{file.adds}
+-                      </span>{" "}
+-                      <span className={file.dels > 0 ? "text-error" : "text-muted-foreground/50"}>
+-                        −{file.dels}
+-                      </span>
+-                    </>
+                   )}
+                 </span>
+-                {/* edits<=0（命令行归因的行没有「编辑次数」概念）不出「改0次」——
+-                    0 会被读成「没改过」，而行本身就在改动清单里。 */}
+-                {file.edits > 0 && (
+-                  <span
+-                    data-testid="file-changes-edits"
+-                    className="w-12 shrink-0 text-right font-mono text-[11px] tabular-nums text-muted-foreground"
+-                    title={
+-                      file.editToolNames != null && file.editToolNames.length > 0
+-                        ? `编辑工具：${file.editToolNames.join("、")}`
+-                        : undefined
+-                    }
+-                  >
+-                    改{file.edits}次
+-                  </span>
+-                )}
+-              </span>
+-            </div>
+-          ))}
++              </div>
++            );
++          })}
+         </div>
+       )}
+     </div>
+diff --git a/frontend/src/components/daemon/file-changes/turn-file-changes.ts b/frontend/src/components/daemon/file-changes/turn-file-changes.ts
+index 98fba5559..e281e2470 100644
+--- a/frontend/src/components/daemon/file-changes/turn-file-changes.ts
++++ b/frontend/src/components/daemon/file-changes/turn-file-changes.ts
+@@ -55,7 +55,27 @@ export interface TurnFileChangesCardOptions {
+  * 禁止的伪值。超时与队列溢出在快照层面同为 `status="partial"`（daemon 端不区分
+  * files 内容），故文案合并表述；精确 `reason` 仍保留在快照里供检查器读取。
+  */
+-export const NOTICE_PARTIAL_NO_FILES = "工作区快照未完成（超时或队列溢出），本轮改动未知";
++export const NOTICE_PARTIAL_NO_FILES = "工作区快照未完成，本轮改动未知";
++
++/**
++ * partial 且无文件列表时的提示文案（2026-10-22-file-changes-card-fix）。
++ *
++ * 按快照精确 `reason` + 采集耗时生成——timeout 与 queue_overflow 不再混成一句
++ * 「超时或队列溢出」；无 reason 的 partial（行数退档）用通用文案。
++ */
++export function fileChangesNotice(snapshot: TurnFileChangesSnapshot): string {
++  if (snapshot.reason === "timeout") {
++    const duration =
++      snapshot.collectMs >= 1000
++        ? `${(snapshot.collectMs / 1000).toFixed(1).replace(/\.0$/, "")}s`
++        : `${snapshot.collectMs}ms`;
++    return `工作区快照采集超时（${duration}），本轮改动未知`;
++  }
++  if (snapshot.reason === "queue_overflow") {
++    return "快照采集排队溢出，本轮改动未知";
++  }
++  return NOTICE_PARTIAL_NO_FILES;
++}
+ 
+ /**
+  * 读模型里与文件变更相关的两字段（后端 `SessionRunRead` 已透传）。
+@@ -77,10 +97,16 @@ export interface FileChangesTurnFields {
+   fileChangesCapability?: FileChangesCapability | null;
+ }
+ 
+-/** 单文件行映射：归因 → 来源；`edits` 取 `editToolNames` 条数（无工具名按 1 条计）。 */
++/** 单文件行映射：归因 → 来源；`edits` 取编辑调用次数（`editToolNames` 长度）。 */
+ export function toChangedFile(file: TurnFileChange): ChangedFile {
+   const toolEdited = file.attribution === "edit_patch";
+   const toolNames = toolEdited ? (file.editToolNames ?? undefined) : undefined;
++  // untracked（numstat 不覆盖）/ mtime 探测（无行级采集）行级 +/− 不可信；
++  // 二进制同理（numstat 恒 0/0）。卡片据此显示破折号而不是假精确的 +0 −0。
++  const hasLineStats =
++    file.binary !== true &&
++    file.status !== "untracked" &&
++    file.source !== "mtime";
+   return {
+     path: file.path,
+     adds: file.added,
+@@ -88,6 +114,8 @@ export function toChangedFile(file: TurnFileChange): ChangedFile {
+     // command 归因的行没有「本轮编辑次数」概念——填 0，卡片对 edits<=0 不出「改N次」。
+     edits: toolEdited ? (toolNames?.length ?? 1) : 0,
+     source: toolEdited ? "tool" : "shell",
++    status: file.status,
++    hasLineStats,
+     ...(file.binary === true ? { binary: true } : {}),
+     ...(toolNames != null && toolNames.length > 0 ? { editToolNames: toolNames } : {}),
+   };
+@@ -126,7 +154,7 @@ export function toFileChangesCardProps(
+       capability: "full",
+       turnNo: options.turnNo,
+       truncated: true,
+-      notice: NOTICE_PARTIAL_NO_FILES,
++      notice: fileChangesNotice(snapshot),
+       sharedWorkspace: snapshot.concurrentSessionsHint === true,
+       className: options.className,
+     };
+diff --git a/sillyhub-daemon/src/interactive/turn-file-changes-types.ts b/sillyhub-daemon/src/interactive/turn-file-changes-types.ts
+index 6a8e0e7a8..b327ed565 100644
+--- a/sillyhub-daemon/src/interactive/turn-file-changes-types.ts
++++ b/sillyhub-daemon/src/interactive/turn-file-changes-types.ts
+@@ -43,7 +43,11 @@ export interface TurnFileChange {
+   /** 二进制文件（numstat 的 `-` 列）：行数不伪造，恒 0/0。 */
+   binary?: boolean;
+   attribution: TurnFileChangeAttribution;
+-  /** attribution=edit_patch 时的来源工具名（Edit / Write / MultiEdit / NotebookEdit）。 */
++  /**
++   * attribution=edit_patch 时的来源工具名（Edit / Write / MultiEdit / NotebookEdit）。
++   * 2026-10-22-file-changes-card-fix：**按调用顺序保留重复项**——数组长度 = 本轮
++   * 该文件的编辑调用次数（前端「改N次」计数；工具名提示去重展示）。
++   */
+   editToolNames?: string[];
+   /** ignored 目录经 mtime 探测命中时必须标 mtime。 */
+   source?: TurnFileChangeSource;
+diff --git a/sillyhub-daemon/src/interactive/turn-file-changes.ts b/sillyhub-daemon/src/interactive/turn-file-changes.ts
+index 865e8c3af..92d9048a7 100644
+--- a/sillyhub-daemon/src/interactive/turn-file-changes.ts
++++ b/sillyhub-daemon/src/interactive/turn-file-changes.ts
+@@ -9,8 +9,10 @@
+  * 数据链路（design 生命周期契约 E1-E4）：
+  *   E1 轮首 `resolveBaselineHead()` 记 HEAD 基线（由 session-manager 在 inject 时
+  *       fire-and-forget 调；不计入轮尾预算时为 1 条）；
+- *   E2 轮尾 `collectTurnFileChanges()`：status --porcelain -z（1 条）+ diff
+- *       --numstat（1 条），合计 ≤3；
++ *   E2 轮尾 `collectTurnFileChanges()`：status --porcelain -z（1 条）+
++ *       diff --name-status（1 条）+ diff --numstat（1 条），合计 ≤3（baseline
++ *       已知时；未解析基线的兜底 +rev-parse = 4）。name-status 覆盖轮内已提交
++ *       改动，numstat 只补行数；status 覆盖未提交/未跟踪。
+  *   E3 完成 → 快照（超时/超限/队列溢出 → partial；git 不可用 → unavailable）；
+  *   E4 上报由调用方（session-manager → daemon → hub）落地，本模块只做采集 + 遥测。
+  *
+@@ -78,6 +80,22 @@ export const DEFAULT_TURN_FILE_CHANGES_LIMITS: TurnFileChangesLimits = {
+ /** 遥测滑窗容量（只保留最近 N 轮：p50/p95/降级率供 task-13 验收读取）。 */
+ export const TURN_FILE_CHANGES_TELEMETRY_WINDOW = 50;
+ 
++/**
++ * 慢盘挂载的基础预算（2026-10-22-file-changes-card-fix）：WSL `/mnt/<drive>`
++ * 的 DrvFs/9p 上 `git status` + 两条 diff 稳定超过 1500ms（生产 27/27 条
++ * partial/timeout 实证），基础预算抬到 8s 起步。
++ */
++const SLOW_MOUNT_TIMEOUT_MS = 8_000;
++/** 自适应预算上限：timeout 后翻倍升级，封顶 15s（不让单轮采集无限拖）。 */
++const MAX_ADAPTIVE_TIMEOUT_MS = 15_000;
++/** 基础预算覆盖（毫秒，正整数；非法值忽略）。 */
++const TIMEOUT_ENV_KEY = 'SILLYHUB_FILE_CHANGES_TIMEOUT_MS';
++/**
++ * 每工作区自适应预算（timeout 后升级、进程内记忆；daemon 重启归零）。
++ * 键 = `workspaceQueueKey`（绝对路径归一），不跨工作区复用。
++ */
++const _adaptiveTimeouts = new Map<string, number>();
++
+ /**
+  * git 全局参数前缀（**恒在参数数组里**，不依赖用户 git config）：
+  *   - `-c core.preloadIndex=true`：复用 index 统计缓存（status 的主要成本面）；
+@@ -371,6 +389,8 @@ function statusFromXY(xy: string): TurnFileChangeStatus {
+ }
+ 
+ interface NumstatEntry {
++  /** 仓根相对 posix 路径（name-status 超时时作为文件清单兜底来源）。 */
++  path: string;
+   added: number;
+   deleted: number;
+   binary: boolean;
+@@ -392,6 +412,7 @@ function parseNumstat(stdout: string): Map<string, NumstatEntry> {
+     if (path === '') continue;
+     const binary = addedCol === '-' || deletedCol === '-';
+     out.set(pathMatchKey(path), {
++      path,
+       added: binary ? 0 : Number.parseInt(addedCol, 10) || 0,
+       deleted: binary ? 0 : Number.parseInt(deletedCol, 10) || 0,
+       binary,
+@@ -415,7 +436,10 @@ function buildEditAttribution(
+     if (relPath === null) continue;
+     const key = pathMatchKey(relPath);
+     const names = map.get(key) ?? [];
+-    if (!names.includes(toolName)) names.push(toolName);
++    // 2026-10-22-file-changes-card-fix：**不按工具名去重**——数组长度即本轮
++    // 编辑调用次数（同一文件 Edit 3 次 = 3 项），前端「改N次」据此计数；
++    // 工具名提示由前端去重展示。
++    names.push(toolName);
+     map.set(key, names);
+   }
+   return map;
+@@ -546,22 +570,44 @@ interface CollectOutcome {
+   lineCounts: boolean;
+ }
+ 
++/**
++ * 采集进度（2026-10-22-file-changes-card-fix）：各阶段完成即写入。外层硬超时
++ * 或 diff 阶段降级时按已完成阶段收口——status 成功后不再因为 numstat 慢而
++ * 丢掉整份文件清单。
++ */
++interface CollectProgress {
++  baselineHead: string | null;
++  stage: 'baseline' | 'status' | 'diff' | 'probe';
++  statusOut?: string;
++  nameStatusOut?: string;
++  numstatOut?: string;
++  lineCounts: boolean;
++  /** diff 阶段超时留下的降级原因（只可能是 timeout）。 */
++  degradedReason?: TurnFileChangesReason;
++}
++
+ /**
+  * 采集主体（在队列闸门内、超时 race 内执行）：
+- *   ①（基线缺省时）rev-parse HEAD ②status --porcelain -z ③diff --numstat。
+- * 致命错误经 `CollectAbort` 上抛，由 `collectTurnFileChanges` 收口成快照。
++ *   ①（基线缺省时）rev-parse HEAD ②status --porcelain -z
++ *   ③diff --name-status / --numstat <baseline>（`includeLineCounts=false` 时跳过）
++ *
++ * 只有基线/status 不可用才抛 `CollectAbort`；两条 diff 失败一律降级（保留
++ * status 清单、行数不可信），进度写入 `progress` 供外层超时收口。
+  */
+-async function collectInner(args: {
+-  workspaceRoot: string;
+-  baselineHead: string | null | undefined;
+-  toolCallPaths: readonly TurnToolCallPath[];
+-  turnStartedAtMs: number | undefined;
+-  limits: TurnFileChangesLimits;
+-  exec: TurnFileChangesExecFile;
+-  signal: AbortSignal;
+-  taskStartMs: number;
+-  ctx: CollectContext;
+-}): Promise<CollectOutcome> {
++async function collectInner(
++  args: {
++    workspaceRoot: string;
++    baselineHead: string | null | undefined;
++    toolCallPaths: readonly TurnToolCallPath[];
++    turnStartedAtMs: number | undefined;
++    limits: TurnFileChangesLimits;
++    exec: TurnFileChangesExecFile;
++    signal: AbortSignal;
++    taskStartMs: number;
++    ctx: CollectContext;
++  },
++  progress: CollectProgress,
++): Promise<CollectOutcome> {
+   const { limits, exec, signal, ctx } = args;
+   const runGit = async (gitArgs: string[]): Promise<string> => {
+     ctx.subprocessCount += 1;
+@@ -581,11 +627,11 @@ async function collectInner(args: {
+   };
+ 
+   // ① 基线：E1 已解析（string / null）则不再花子进程；缺省则自取。
+-  let baselineHead: string | null;
++  progress.stage = 'baseline';
+   if (args.baselineHead === undefined) {
+     try {
+       const head = (await runGit(['rev-parse', 'HEAD'])).trim();
+-      baselineHead = head === '' ? null : head;
++      progress.baselineHead = head === '' ? null : head;
+     } catch (error) {
+       const classified = classifyGitError(error);
+       if (classified) {
+@@ -593,16 +639,17 @@ async function collectInner(args: {
+         throw new CollectAbort(classified.status, classified.reason, null);
+       }
+       // 空仓（无任何提交）等：基线留 null，status 仍可产出 untracked 清单。
+-      baselineHead = null;
++      progress.baselineHead = null;
+     }
+   } else {
+-    baselineHead = args.baselineHead;
++    progress.baselineHead = args.baselineHead;
+   }
++  const baselineHead = progress.baselineHead;
+ 
+-  // ② status（本轮改动的唯一真相源；失败即降级）。
+-  let statusOut: string;
++  // ② status（未提交/未跟踪的当前真相源；失败即降级）。
++  progress.stage = 'status';
+   try {
+-    statusOut = await runGit([
++    progress.statusOut = await runGit([
+       'status',
+       '--porcelain',
+       '-z',
+@@ -618,78 +665,146 @@ async function collectInner(args: {
+     );
+   }
+ 
+-  // ③ numstat（行级 +/−；退档口径 includeLineCounts=false 时不跑）。
+-  //    无基线（空仓 / 非仓库已降级）时跳过：diff 无从比较。
+-  let numstat: Map<string, NumstatEntry> = new Map();
+-  let lineCounts = false;
++  // ③ diff：name-status 补「轮内已提交」的文件与状态，numstat 补行数。
++  //    两阶段都可独立降级：任一失败只影响状态精度/行数，不丢 status 清单。
++  //    `includeLineCounts=false` 退档时跳过两条 diff（只跑 status，零回归）。
+   if (limits.includeLineCounts && baselineHead !== null) {
++    progress.stage = 'diff';
++    try {
++      progress.nameStatusOut = await runGit([
++        'diff',
++        '--name-status',
++        '-z',
++        '--no-renames',
++        baselineHead,
++      ]);
++    } catch (error) {
++      if (classifyGitError(error)?.reason === 'timeout') {
++        progress.degradedReason = 'timeout';
++      }
++    }
+     try {
+-      const numstatOut = await runGit([
++      progress.numstatOut = await runGit([
+         'diff',
+         '--numstat',
+         '--no-renames',
+         baselineHead,
+       ]);
+-      numstat = parseNumstat(numstatOut);
+-      lineCounts = true;
++      progress.lineCounts = true;
+     } catch (error) {
+-      const classified = classifyGitError(error);
+-      if (classified) {
+-        // 超时 / git 消失：整轮降级（files 仍可照出 status 面）。
+-        throw new CollectAbort(classified.status, classified.reason, baselineHead);
++      if (classifyGitError(error)?.reason === 'timeout') {
++        progress.degradedReason = 'timeout';
+       }
+-      // 未知 numstat 错误：保住 status 面，行数留 0（partial 由调用方标记）。
+-      lineCounts = false;
++      progress.lineCounts = false;
+     }
+   }
+ 
+-  const editAttribution = buildEditAttribution(
++  const gitPart = buildGitFiles(
+     args.workspaceRoot,
++    progress,
++    limits.maxFiles,
+     args.toolCallPaths,
+   );
+-  const seen = new Set<string>();
+-  const files: TurnFileChange[] = [];
+-  for (const entry of parsePorcelainZ(statusOut)) {
+-    const relPath = toRepoRelativePath(args.workspaceRoot, entry.path) ?? entry.path;
+-    const key = pathMatchKey(relPath);
+-    if (seen.has(key)) continue;
+-    seen.add(key);
+-    const line = numstat.get(key);
+-    files.push({
+-      path: relPath,
+-      status: entry.status,
+-      added: line?.added ?? 0,
+-      deleted: line?.deleted ?? 0,
+-      ...(line?.binary ? { binary: true } : {}),
+-      ...attributeFor(relPath, editAttribution),
+-      source: 'git',
+-    });
+-  }
+ 
+-  // ignored 目录：本轮工具调用路径前缀 + mtime（R-09 的唯一补偿面）。
++  // ④ ignored 目录：本轮工具调用路径前缀 + mtime（R-09 的唯一补偿面）。
++  progress.stage = 'probe';
++  const seen = new Set(gitPart.files.map((file) => pathMatchKey(file.path)));
+   const mtimeFiles = await probeIgnoredByMtime({
+     workspaceRoot: args.workspaceRoot,
+     toolCallPaths: args.toolCallPaths,
+     seen,
+     sinceMs: args.turnStartedAtMs,
+-    editAttribution,
++    editAttribution: buildEditAttribution(args.workspaceRoot, args.toolCallPaths),
+   });
+-  files.push(...mtimeFiles);
+-
++  const files = [...gitPart.files, ...mtimeFiles];
+   files.sort((a, b) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0));
+-
+-  // 上限截断：改动数超上限 → truncated + partial（卡片照出，行级 +/− 破折号）。
+-  const truncated = files.length > limits.maxFiles;
++  const truncated = gitPart.truncated || files.length > limits.maxFiles;
+   const cappedFiles = truncated ? files.slice(0, limits.maxFiles) : files;
+ 
+   return {
+     files: cappedFiles,
+     baselineHead,
+     truncated,
+-    lineCounts,
++    lineCounts: progress.lineCounts,
+   };
+ }
+ 
++/**
++ * `git diff --name-status -z` 解析（`--no-renames`：rename 呈 delete+add 两条）。
++ * 输出形态：`<status>\0<path>\0...`，status 首字符 A/D 归类，其余归 modified。
++ */
++function parseDiffNameStatus(
++  stdout: string,
++): Array<{ path: string; status: TurnFileChangeStatus }> {
++  const tokens = stdout.split('\0');
++  const out: Array<{ path: string; status: TurnFileChangeStatus }> = [];
++  for (let i = 0; i + 1 < tokens.length; i += 2) {
++    const code = tokens[i] ?? '';
++    const path = tokens[i + 1] ?? '';
++    if (code === '' || path === '') continue;
++    const kind = code.slice(0, 1);
++    out.push({
++      path,
++      status: kind === 'A' ? 'added' : kind === 'D' ? 'deleted' : 'modified',
++    });
++  }
++  return out;
++}
++
++/**
++ * 按已完成阶段组装 git 面文件清单（无 I/O）：status ∪ name-status ∪ numstat。
++ *
++ * 合并优先级：status（当前工作区最准确）> name-status（已提交状态）> numstat
++ * （只有路径/行数、状态未知时保守归 modified）。numstat 只补 added/deleted/
++ * binary，不覆盖状态。
++ */
++function buildGitFiles(
++  workspaceRoot: string,
++  progress: CollectProgress,
++  maxFiles: number,
++  toolCallPaths: readonly TurnToolCallPath[],
++): { files: TurnFileChange[]; truncated: boolean } {
++  const numstat = progress.numstatOut
++    ? parseNumstat(progress.numstatOut)
++    : new Map<string, NumstatEntry>();
++  const entries = new Map<
++    string,
++    { path: string; status: TurnFileChangeStatus }
++  >();
++  const add = (rawPath: string, status: TurnFileChangeStatus): void => {
++    const relPath = toRepoRelativePath(workspaceRoot, rawPath) ?? rawPath;
++    const key = pathMatchKey(relPath);
++    if (!entries.has(key)) entries.set(key, { path: relPath, status });
++  };
++  for (const entry of parsePorcelainZ(progress.statusOut ?? '')) {
++    add(entry.path, entry.status);
++  }
++  for (const entry of parseDiffNameStatus(progress.nameStatusOut ?? '')) {
++    add(entry.path, entry.status);
++  }
++  for (const [key, line] of numstat) {
++    if (!entries.has(key)) add(line.path, 'modified');
++  }
++
++  const editAttribution = buildEditAttribution(workspaceRoot, toolCallPaths);
++  const files: TurnFileChange[] = [];
++  for (const [key, entry] of entries) {
++    const line = numstat.get(key);
++    files.push({
++      path: entry.path,
++      status: entry.status,
++      added: line?.added ?? 0,
++      deleted: line?.deleted ?? 0,
++      ...(line?.binary ? { binary: true } : {}),
++      ...attributeFor(entry.path, editAttribution),
++      source: 'git',
++    });
++  }
++  files.sort((a, b) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0));
++  const truncated = files.length > maxFiles;
++  return { files: truncated ? files.slice(0, maxFiles) : files, truncated };
++}
++
+ /* ── 遥测 ───────────────────────────────────────────────────────────────── */
+ 
+ /** 样本入滑窗（FIFO，容量 TURN_FILE_CHANGES_TELEMETRY_WINDOW）。 */
+@@ -731,10 +846,11 @@ export function getTurnFileChangesTelemetry(): TurnFileChangesTelemetrySummary {
+   };
+ }
+ 
+-/** 清空遥测滑窗 + 串行队列（单测隔离用；生产不调）。 */
++/** 清空遥测滑窗 + 串行队列 + 自适应预算（单测隔离用；生产不调）。 */
+ export function resetTurnFileChangesTelemetry(): void {
+   _telemetry.length = 0;
+   _queues.clear();
++  _adaptiveTimeouts.clear();
+ }
+ 
+ /** 结构化日志（一行/轮；字段名与 telemetry sample 同形，便于日志侧聚合）。 */
+@@ -782,21 +898,70 @@ function finalizeSnapshot(args: {
+ 
+ /* ── 公开入口 ───────────────────────────────────────────────────────────── */
+ 
+-function resolveLimits(
++/**
++ * 解析本轮生效阈值（2026-10-22-file-changes-card-fix）。
++ *
++ * 优先级：显式 `limits.timeoutMs`（测试/调用方注入）> env 覆盖 > 默认 1500ms；
++ * 慢盘（`/mnt/<drive>/`）基础预算抬到 8s；该工作区历史 timeout 过的自适应预算
++ * 再取最大。显式注入时完全尊重注入值（测试确定性），不叠慢盘/自适应。
++ */
++export function resolveTurnFileChangesLimits(
++  workspaceRoot: string,
+   limits: Partial<TurnFileChangesLimits> | undefined,
+ ): TurnFileChangesLimits {
+-  return { ...DEFAULT_TURN_FILE_CHANGES_LIMITS, ...(limits ?? {}) };
++  if (limits?.timeoutMs !== undefined) {
++    return { ...DEFAULT_TURN_FILE_CHANGES_LIMITS, ...limits };
++  }
++  const rawEnv = process.env[TIMEOUT_ENV_KEY];
++  const envTimeout =
++    rawEnv !== undefined && /^\d+$/.test(rawEnv.trim())
++      ? Number(rawEnv.trim())
++      : 0;
++  let timeoutMs =
++    envTimeout > 0 ? envTimeout : DEFAULT_TURN_FILE_CHANGES_LIMITS.timeoutMs;
++  if (/^\/mnt\/[a-z]\//i.test(workspaceRoot)) {
++    timeoutMs = Math.max(timeoutMs, SLOW_MOUNT_TIMEOUT_MS);
++  }
++  const adaptive = _adaptiveTimeouts.get(workspaceQueueKey(workspaceRoot));
++  if (adaptive !== undefined) {
++    timeoutMs = Math.max(timeoutMs, adaptive);
++  }
++  return { ...DEFAULT_TURN_FILE_CHANGES_LIMITS, ...(limits ?? {}), timeoutMs };
++}
++
++/** 本轮 timeout 后升级该工作区预算（翻倍，+2s 起步，封顶 15s）。 */
++function noteCollectTimeout(
++  workspaceRoot: string,
++  currentTimeoutMs: number,
++): void {
++  const key = workspaceQueueKey(workspaceRoot);
++  const next = Math.min(
++    Math.max(currentTimeoutMs * 2, currentTimeoutMs + 2_000),
++    MAX_ADAPTIVE_TIMEOUT_MS,
++  );
++  if (next > (_adaptiveTimeouts.get(key) ?? 0)) {
++    _adaptiveTimeouts.set(key, next);
++    // eslint-disable-next-line no-console
++    console.info('[turn-file-changes] timeout_budget_escalated', {
++      workspaceRoot,
++      from: currentTimeoutMs,
++      to: next,
++    });
++  }
+ }
+ 
+ /**
+  * 每轮工作区快照采集（纯采集：不写库、不上报、永不抛错）。
+  *
+  * 顺序：E2 入口 → 抢单工作区队列位（满 → partial/queue_overflow，立即返回）→
+- * 串行等前序 → 1500ms 硬超时 race 内跑 ≤3 条 git → 收口快照。
++ * 串行等前序 → 自适应硬超时 race 内跑 status + 两条 diff（baseline 已知 ≤3 条；
++ * 未解析基线兜底 4 条）→ 收口快照。
+  *
+  * 降级路径（全部有测试覆盖）：
+  *   - `ok`               ：全量采集成功；
+- *   - `partial/timeout`  ：硬超时（AbortController kill 子进程）；
++ *   - `partial/timeout`  ：硬超时（AbortController kill 子进程）——**保留已完成的
++ *                          status/name-status 清单**，行数不可信；同时升级该工作区
++ *                          自适应预算；
+  *   - `partial/queue_overflow`：同工作区等待队列超上限；
+  *   - `partial` + truncated   ：改动数超 maxFiles；
+  *   - `partial`（无 reason）   ：`includeLineCounts=false` 退档口径（行级 +/− 不采）；
+@@ -807,9 +972,9 @@ export async function collectTurnFileChanges(
+   input: CollectTurnFileChangesInput,
+ ): Promise<TurnFileChangesSnapshot> {
+   const callStartMs = Date.now();
+-  const limits = resolveLimits(input.limits);
+   const exec = input.execFile ?? defaultExecFile;
+   const workspaceRoot = input.workspaceRoot;
++  const limits = resolveTurnFileChangesLimits(workspaceRoot, input.limits);
+   const queueKey = workspaceQueueKey(workspaceRoot);
+ 
+   const queue = reserveQueueSlot(queueKey, limits.maxQueueDepth);
+@@ -830,6 +995,11 @@ export async function collectTurnFileChanges(
+   const leaveQueue = await enterQueue(queueKey, queue);
+   const taskStartMs = Date.now();
+   const ctx: CollectContext = { subprocessCount: 0 };
++  const progress: CollectProgress = {
++    baselineHead: input.baselineHead ?? null,
++    stage: 'baseline',
++    lineCounts: false,
++  };
+   const controller = new AbortController();
+   let timer: ReturnType<typeof setTimeout> | undefined;
+   try {
+@@ -841,29 +1011,38 @@ export async function collectTurnFileChanges(
+       }, limits.timeoutMs);
+     });
+     const outcome = await Promise.race([
+-      collectInner({
+-        workspaceRoot,
+-        baselineHead: input.baselineHead,
+-        toolCallPaths: input.toolCallPaths ?? [],
+-        turnStartedAtMs: input.turnStartedAtMs,
+-        limits,
+-        exec,
+-        signal: controller.signal,
+-        taskStartMs,
+-        ctx,
+-      }),
++      collectInner(
++        {
++          workspaceRoot,
++          baselineHead: input.baselineHead,
++          toolCallPaths: input.toolCallPaths ?? [],
++          turnStartedAtMs: input.turnStartedAtMs,
++          limits,
++          exec,
++          signal: controller.signal,
++          taskStartMs,
++          ctx,
++        },
++        progress,
++      ),
+       deadline,
+     ]);
+-    // 行级口径未采（退档 includeLineCounts=false / numstat 未知错误 / 空仓无基线）
+-    // → partial：卡片照出 files，行级 +/− 显示破折号。reason 枚举里没有「行数未采」
+-    // 值，故不带 reason——完整性面（files 清单）仍可信，只有行数不可信；遥测
+-    // sample 的 lineCounts 标明本轮口径。
+-    const status: TurnFileChangesStatus =
+-      outcome.truncated || !outcome.lineCounts ? 'partial' : 'ok';
++    // 行级口径未采（退档 includeLineCounts=false / numstat 超时或未知错误 /
++    // 空仓无基线）→ partial：卡片照出 files，行级 +/− 显示破折号。name-status
++    // 超时（degradedReason=timeout）时文件清单仍在、部分状态精度降级，同样
++    // partial 并带 reason。reason 枚举里没有「行数未采」值，故退档不带 reason。
++    const degraded =
++      outcome.truncated ||
++      !outcome.lineCounts ||
++      progress.degradedReason !== undefined;
++    const status: TurnFileChangesStatus = degraded ? 'partial' : 'ok';
+     return finalizeSnapshot({
+       runId: input.runId,
+       baselineHead: outcome.baselineHead,
+       status,
++      ...(progress.degradedReason !== undefined
++        ? { reason: progress.degradedReason }
++        : {}),
+       ...(outcome.truncated ? { truncated: true } : {}),
+       files: outcome.files,
+       collectMs: Date.now() - taskStartMs,
+@@ -873,15 +1052,26 @@ export async function collectTurnFileChanges(
+   } catch (error) {
+     const collectMs = Date.now() - taskStartMs;
+     if (error instanceof CollectTimeout) {
++      // 2026-10-22-file-changes-card-fix：硬超时不丢已完成阶段——status 成功后
++      // 即便 diff 未跑完，也把已采集的清单交回（行数不可信），并升级该工作区
++      // 下轮预算。
++      noteCollectTimeout(workspaceRoot, limits.timeoutMs);
++      const gitPart = buildGitFiles(
++        workspaceRoot,
++        progress,
++        limits.maxFiles,
++        input.toolCallPaths ?? [],
++      );
+       return finalizeSnapshot({
+         runId: input.runId,
+-        baselineHead: input.baselineHead ?? null,
++        baselineHead: progress.baselineHead ?? input.baselineHead ?? null,
+         status: 'partial',
+         reason: 'timeout',
+-        files: [],
++        ...(gitPart.truncated ? { truncated: true } : {}),
++        files: gitPart.files,
+         collectMs,
+         subprocessCount: ctx.subprocessCount,
+-        lineCounts: false,
++        lineCounts: progress.lineCounts,
+       });
+     }
+     if (error instanceof CollectAbort) {
+diff --git a/sillyhub-daemon/tests/interactive/turn-file-changes.test.ts b/sillyhub-daemon/tests/interactive/turn-file-changes.test.ts
+index 6a53c994c..eb6f2881b 100644
+--- a/sillyhub-daemon/tests/interactive/turn-file-changes.test.ts
++++ b/sillyhub-daemon/tests/interactive/turn-file-changes.test.ts
+@@ -30,6 +30,7 @@ import {
+   readBaselineHead,
+   resetTurnFileChangesTelemetry,
+   resolveBaselineHead,
++  resolveTurnFileChangesLimits,
+   toolCallPathsFromEvent,
+ } from '../../src/interactive/turn-file-changes.js';
+ import type {
+@@ -283,6 +284,44 @@ describe('collectTurnFileChanges × 六类夹具（真实 git 仓）', () => {
+     expect(entry?.binary).toBeUndefined();
+   });
+ 
++  it('轮内 commit 的改动进入文件清单（status 干净也能看到 M/A/D）', async () => {
++    const dir = await repo({ 'a.ts': 'line1\n', 'old.ts': 'bye\n' });
++    const baseline = (await resolveBaselineHead(dir)) ?? undefined;
++    await writeRepoFile(dir, 'a.ts', 'line1\nline2\n');
++    await writeRepoFile(dir, 'new.ts', 'hello\n');
++    await rm(join(dir, 'old.ts'));
++    await git(dir, ['add', '-A']);
++    await git(dir, ['commit', '-m', 'turn commit']);
++
++    const snap = await collectTurnFileChanges({
++      runId: 'run-committed',
++      workspaceRoot: dir,
++      baselineHead: baseline,
++      limits: FIXTURE_LIMITS,
++    });
++    expect(snap.status).toBe('ok');
++    expect(fileAt(snap, 'a.ts')).toMatchObject({ status: 'modified', added: 1, deleted: 0 });
++    expect(fileAt(snap, 'new.ts')).toMatchObject({ status: 'added', added: 1, deleted: 0 });
++    expect(fileAt(snap, 'old.ts')).toMatchObject({ status: 'deleted', added: 0, deleted: 1 });
++  });
++
++  it('同一文件多次 Edit：editToolNames 保留重复，长度=编辑调用次数', async () => {
++    const dir = await repo({ 'base.txt': 'a\n' });
++    await writeRepoFile(dir, 'base.txt', 'a\nb\n');
++    const snap = await collectTurnFileChanges({
++      runId: 'run-edit-count',
++      workspaceRoot: dir,
++      baselineHead: (await resolveBaselineHead(dir)) ?? undefined,
++      toolCallPaths: [
++        { path: 'base.txt', toolName: 'Edit' },
++        { path: 'base.txt', toolName: 'Edit' },
++        { path: 'base.txt', toolName: 'Write' },
++      ],
++      limits: FIXTURE_LIMITS,
++    });
++    expect(fileAt(snap, 'base.txt')?.editToolNames).toEqual(['Edit', 'Edit', 'Write']);
++  });
++
+   it('binary：numstat 的 -/- → added=0/deleted=0 + binary=true', async () => {
+     const dir = await repo({ 'base.txt': 'line1\n' });
+     const binary = Uint8Array.from([0, 1, 2, 3, 255, 0, 7]);
+@@ -348,10 +387,11 @@ describe('collectTurnFileChanges × 六类夹具（真实 git 仓）', () => {
+ /* ── ② 子进程预算 + 参数红线 ──────────────────────────────────────────────── */
+ 
+ describe('collectTurnFileChanges × 子进程预算（≤3）与 git 参数红线', () => {
+-  it('E1 已给基线：status + numstat 恰 2 条，参数含 --no-optional-locks 与 core.preloadIndex', async () => {
++  it('E1 已给基线：status + name-status + numstat 恰 3 条，参数含 --no-optional-locks 与 core.preloadIndex', async () => {
+     const dir = await plainDir();
+     const fake = makeFakeExec((args) => {
+       if (args.includes('status')) return 'M  src/a.ts\0';
++      if (args.includes('--name-status')) return 'M\0src/a.ts\0';
+       return '1\t0\tsrc/a.ts\n';
+     });
+     const snap = await collectTurnFileChanges({
+@@ -361,7 +401,7 @@ describe('collectTurnFileChanges × 子进程预算（≤3）与 git 参数红
+       execFile: fake.exec,
+     });
+     expect(snap.status).toBe('ok');
+-    expect(fake.calls).toHaveLength(2);
++    expect(fake.calls).toHaveLength(3);
+     expect(fake.calls[0]?.slice(-5)).toEqual([
+       'status',
+       '--porcelain',
+@@ -369,17 +409,23 @@ describe('collectTurnFileChanges × 子进程预算（≤3）与 git 参数红
+       '--untracked-files=normal',
+       '--no-renames',
+     ]);
+-    expect(fake.calls[1]).toEqual(expect.arrayContaining(['diff', '--numstat', '--no-renames']));
++    expect(fake.calls[1]).toEqual(
++      expect.arrayContaining(['diff', '--name-status', '--no-renames']),
++    );
++    expect(fake.calls[2]).toEqual(
++      expect.arrayContaining(['diff', '--numstat', '--no-renames']),
++    );
+     for (const args of fake.calls) expectGitBaseArgs(args);
+     expect(fileAt(snap, 'src/a.ts')).toMatchObject({ status: 'modified', added: 1, deleted: 0 });
+-    expect(getTurnFileChangesTelemetry().subprocessCountMax).toBe(2);
++    expect(getTurnFileChangesTelemetry().subprocessCountMax).toBe(3);
+   });
+ 
+-  it('E1 未给基线：rev-parse + status + numstat 恰 3 条（不超红线）', async () => {
++  it('E1 未给基线：rev-parse + status + name-status + numstat 恰 4 条（兜底路径登记例外）', async () => {
+     const dir = await plainDir();
+     const fake = makeFakeExec((args) => {
+       if (args.includes('rev-parse')) return 'cafebabecafebabecafebabecafebabecafebabe\n';
+       if (args.includes('status')) return ' M a.txt\0';
++      if (args.includes('--name-status')) return 'M\0a.txt\0';
+       return '3\t1\ta.txt\n';
+     });
+     const snap = await collectTurnFileChanges({
+@@ -388,11 +434,11 @@ describe('collectTurnFileChanges × 子进程预算（≤3）与 git 参数红
+       execFile: fake.exec,
+     });
+     expect(snap.status).toBe('ok');
+-    expect(fake.calls).toHaveLength(3);
++    expect(fake.calls).toHaveLength(4);
+     expect(snap.baselineHead).toBe('cafebabecafebabecafebabecafebabecafebabe');
+     expect(fileAt(snap, 'a.txt')).toMatchObject({ added: 3, deleted: 1 });
+     for (const args of fake.calls) expectGitBaseArgs(args);
+-    expect(getTurnFileChangesTelemetry().subprocessCountMax).toBe(3);
++    expect(getTurnFileChangesTelemetry().subprocessCountMax).toBe(4);
+   });
+ 
+   it('退档口径（includeLineCounts=false）：只跑 status，+/− 留 0 且快照标 partial', async () => {
+@@ -411,6 +457,65 @@ describe('collectTurnFileChanges × 子进程预算（≤3）与 git 参数红
+     expect(snap.reason).toBeUndefined(); // 枚举无「行数未采」，不造值
+     expect(fileAt(snap, 'a.txt')).toMatchObject({ added: 0, deleted: 0 });
+   });
++
++  it('/mnt/ 慢盘基础预算 ≥8s；显式 limits 优先；普通路径保持 1500ms', () => {
++    const prev = process.env.SILLYHUB_FILE_CHANGES_TIMEOUT_MS;
++    delete process.env.SILLYHUB_FILE_CHANGES_TIMEOUT_MS;
++    try {
++      expect(
++        resolveTurnFileChangesLimits('/mnt/e/proj', undefined).timeoutMs,
++      ).toBeGreaterThanOrEqual(8_000);
++      expect(resolveTurnFileChangesLimits('/tmp/proj', undefined).timeoutMs).toBe(1_500);
++      expect(
++        resolveTurnFileChangesLimits('/mnt/e/proj', { timeoutMs: 1_234 }).timeoutMs,
++      ).toBe(1_234);
++    } finally {
++      if (prev !== undefined) process.env.SILLYHUB_FILE_CHANGES_TIMEOUT_MS = prev;
++    }
++  });
++
++  it('环境变量覆盖基础预算；timeout 后该工作区自适应升级，下一轮成功', async () => {
++    const dir = await plainDir();
++    const prev = process.env.SILLYHUB_FILE_CHANGES_TIMEOUT_MS;
++    process.env.SILLYHUB_FILE_CHANGES_TIMEOUT_MS = '50';
++    let call = 0;
++    const exec: TurnFileChangesExecFile = async (args) => {
++      call += 1;
++      if (call === 1) {
++        // 首轮 rev-parse 慢（忽略 signal），触发硬超时并升级预算
++        await new Promise((resolve) => setTimeout(resolve, 300));
++        return { stdout: '', stderr: '' };
++      }
++      if (args.includes('rev-parse')) {
++        return {
++          stdout: 'deadbeefdeadbeefdeadbeefdeadbeefdeadbeef\n',
++          stderr: '',
++        };
++      }
++      return { stdout: '', stderr: '' };
++    };
++    try {
++      const first = await collectTurnFileChanges({
++        runId: 'run-adaptive-1',
++        workspaceRoot: dir,
++        execFile: exec,
++      });
++      expect(first.status).toBe('partial');
++      expect(first.reason).toBe('timeout');
++      const second = await collectTurnFileChanges({
++        runId: 'run-adaptive-2',
++        workspaceRoot: dir,
++        execFile: exec,
++      });
++      expect(second.status).toBe('ok');
++    } finally {
++      if (prev === undefined) {
++        delete process.env.SILLYHUB_FILE_CHANGES_TIMEOUT_MS;
++      } else {
++        process.env.SILLYHUB_FILE_CHANGES_TIMEOUT_MS = prev;
++      }
++    }
++  }, 20_000);
+ });
+ 
+ /* ── ③ 降级路径（timeout / git_missing / 截断）───────────────────────────── */
+@@ -437,6 +542,48 @@ describe('collectTurnFileChanges × 降级路径', () => {
+     expect(snap.collectMs).toBeLessThan(1_900);
+   }, 20_000);
+ 
++  it('numstat 超时：保留 status/name-status 清单（partial/timeout，行数不可信）', async () => {
++    const dir = await plainDir();
++    const fake = makeFakeExec((args) => {
++      if (args.includes('status')) return 'M  src/a.ts\0';
++      if (args.includes('--name-status')) return 'M\0src/a.ts\0';
++      return Object.assign(new Error('git killed by timeout'), { killed: true });
++    });
++    const snap = await collectTurnFileChanges({
++      runId: 'run-numstat-timeout',
++      workspaceRoot: dir,
++      baselineHead: 'deadbeefdeadbeefdeadbeefdeadbeefdeadbeef',
++      execFile: fake.exec,
++    });
++    expect(snap.status).toBe('partial');
++    expect(snap.reason).toBe('timeout');
++    expect(fileAt(snap, 'src/a.ts')).toMatchObject({
++      status: 'modified',
++      added: 0,
++      deleted: 0,
++    });
++  });
++
++  it('name-status 超时但 numstat 成功：numstat 路径兜底入列，仍标 partial/timeout', async () => {
++    const dir = await plainDir();
++    const fake = makeFakeExec((args) => {
++      if (args.includes('status')) return 'M  a.ts\0';
++      if (args.includes('--name-status')) {
++        return Object.assign(new Error('git killed by timeout'), { killed: true });
++      }
++      return '2\t0\ta.ts\n';
++    });
++    const snap = await collectTurnFileChanges({
++      runId: 'run-name-status-timeout',
++      workspaceRoot: dir,
++      baselineHead: 'deadbeefdeadbeefdeadbeefdeadbeefdeadbeef',
++      execFile: fake.exec,
++    });
++    expect(snap.status).toBe('partial');
++    expect(snap.reason).toBe('timeout');
++    expect(fileAt(snap, 'a.ts')).toMatchObject({ status: 'modified', added: 2, deleted: 0 });
++  });
++
+   it('git 缺失：执行器 ENOENT → unavailable + reason=git_missing（不抛错）', async () => {
+     const dir = await plainDir();
+     const fake = makeFakeExec(() => {
+@@ -549,8 +696,8 @@ describe('collectTurnFileChanges × 单工作区串行队列', () => {
+     const [first, second] = await Promise.all([collect('run-serial-1', dir), collect('run-serial-2', dir)]);
+     expect(first.status).toBe('ok');
+     expect(second.status).toBe('ok');
+-    // 两次采集各 2 条 git 调用；串行 → 任何时刻最多 1 条在飞。
+-    expect(fake.calls).toHaveLength(4);
++    // 两次采集各 3 条 git 调用；串行 → 任何时刻最多 1 条在飞。
++    expect(fake.calls).toHaveLength(6);
+     expect(fake.maxInFlight()).toBe(1);
+   });
+ 
+@@ -621,7 +768,7 @@ describe('collectTurnFileChanges × 遥测', () => {
+       expect(payload).toMatchObject({
+         runId: 'run-log',
+         fileCount: 1,
+-        subprocessCount: 2,
++        subprocessCount: 3,
+         status: 'ok',
+         truncated: false,
+         lineCounts: true,

@@ -1,0 +1,53 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-22-file-changes-card-fix",
+  "reviewer": "subagent",
+  "verdict": "FAIL",
+  "reviewedAgainst": "4ce27a070250879e9b684af4fc072fbb6b3e47a0",
+  "findings": [
+    {
+      "severity": "P1",
+      "title": "「改N次」生产端到端仍是工具种数：session-manager 上游按 toolName+path 去重",
+      "evidence": "session-manager 的 _noteTurnToolCallPaths 以 toolName+path 为 key 先查 seenKeys 再 push，同一文件同一工具的第 2/3 次调用在进入采集器前就被丢弃；采集器 buildEditAttribution 的「不去重」只对测试直接注入的 toolCallPaths 生效，生产 Edit×3 仍只产出 1 项、前端显示「改1次」。采集器测试（turn-file-changes.test.ts:308-323）与前端测试均直接注入重复数组，未覆盖累加器，故 FR-03 的「同一工具多次调用重复计数」未被端到端兑现。",
+      "location": "sillyhub-daemon/src/interactive/session-manager.ts:1857-1861（对照 sillyhub-daemon/src/interactive/turn-file-changes.ts:439-443、sillyhub-daemon/tests/interactive/turn-file-changes.test.ts:308-323）"
+    },
+    {
+      "severity": "P2",
+      "title": "自适应预算只在硬超时 race 分支升级；子进程自身 timeout 被分类后不升级",
+      "evidence": "noteCollectTimeout 仅在 catch (CollectTimeout) 中调用；status/diff 的 catch 走 classifyGitError 后分别 throw CollectAbort（status）或只设置 degradedReason/lineCounts（diff），两条分类 timeout 路径都不写 _adaptiveTimeouts。慢盘上 execFile 的 timeout=remaining 与外层 deadline 是同一截止时间，计时器先后顺序存在竞争；若分类路径先落，下一轮仍用原预算，不满足 FR-02「任一次 timeout 后该工作区预算必须自动升级」。单测「numstat 超时」注入 killed 错误正好走该分支，却未断言升级。",
+      "location": "sillyhub-daemon/src/interactive/turn-file-changes.ts:659-666,681-699,1052-1076"
+    },
+    {
+      "severity": "P3",
+      "title": "前端模块文档仍保留与本次实现相矛盾的旧口径",
+      "evidence": "components-daemon.md:333 仍写 timeout 与 queue_overflow 共用「工作区快照未完成（超时或队列溢出）」并映射 NOTICE_PARTIAL_NO_FILES；:329 仍写 tool_only 渲染「仅工具编辑」降级卡（实现已返回 null）且头部仍写「已编辑 N 个文件」。同文件 :353-355 的新增段又给出与旧段相反的 reason 分流/新头部口径，task-07「文档与实现一致」未达成。",
+      "location": ".sillyspec/docs/frontend/modules/components-daemon.md:329,333"
+    },
+    {
+      "severity": "P3",
+      "title": "源码/类型/JSDoc 注释仍描述旧的 2 条命令与固定 1500ms 超时",
+      "evidence": "turn-file-changes.ts 模块头仍写「实测 2：固定 status/numstat 两条命令」「1500ms 硬超时」，与现在 status+name-status+numstat（兜底 4 条）及 /mnt 8s/自适应 15s 上限不符；turn-file-changes-types.ts:59 仍写 partial=1500ms 超时；前端 turn-file-changes.ts:51-57 仍解释「超时与队列溢出文案合并表述」，与新增的 fileChangesNotice 分流相反；file-changes-card.tsx:7,280 仍以「已编辑 N 个文件」描述头部。",
+      "location": "sillyhub-daemon/src/interactive/turn-file-changes.ts:19-27; sillyhub-daemon/src/interactive/turn-file-changes-types.ts:59-61; frontend/src/components/daemon/file-changes/turn-file-changes.ts:51-57; frontend/src/components/daemon/file-changes/file-changes-card.tsx:7,280"
+    },
+    {
+      "severity": "P3",
+      "title": "design 文件变更清单漏记 3 个实际改动文件",
+      "evidence": "design 表只列 9 个文件；change.patch/HEAD 实际还改了 frontend/e2e/proto-file-card.spec.ts、frontend/src/app/proto/session-file-changes/page.tsx、frontend/src/components/daemon/__tests__/turn-timeline-conversation-file-card.test.tsx。",
+      "location": ".sillyspec/changes/2026-10-22-file-changes-card-fix/design.md:52-64"
+    },
+    {
+      "severity": "P3",
+      "title": "visual-evidence 把单元测试断言误记为 Playwright 断言",
+      "evidence": "visual-evidence.md:23-25 的「自动化断言（Playwright，1 passed）」列表声称未跟踪行显示破折号、删除行不触发 onOpenFile；e2e/proto-file-card.spec.ts 只断言徽标、可点击行触发与滚动，未断言这两项（由 file-changes-card.test.tsx 覆盖）。",
+      "location": ".sillyspec/changes/2026-10-22-file-changes-card-fix/visual-evidence.md:20-25"
+    }
+  ],
+  "dimensionNotes": {
+    "乱序": "ok",
+    "并发": "ok",
+    "切换": "ok",
+    "作用域": "ok"
+  },
+  "reviewedAt": "2026-10-22T19:55:32+08:00",
+  "notes": "【检查单 1：FR↔实现↔测试】\nFR-01 基本兑现：collectInner 先 status，再 diff --name-status -z <baseline>，buildGitFiles 按 status > name-status > numstat 合并；真实 git 用例「轮内 commit 的改动进入文件清单（status 干净也能看到 M/A/D）」通过。残留（非本次新增）：baselineHead 未解析时兜底在轮尾 rev-parse HEAD，复杂 git 形态/读盘失败下轮内 commit 仍可能漏，建议后续登记并补测。\nFR-02 主要兑现：CollectProgress 分阶段保存 status/name-status/numstat，两条 diff 独立 catch 后仍走 buildGitFiles；/mnt/ 基础 8000ms、env 覆盖、自适应翻倍封顶 15000ms、resetTurnFileChangesTelemetry 清空 _adaptiveTimeouts 均在代码中；「numstat 超时保留 status 清单」「/mnt/ 基础预算」「env + 自适应升级」用例通过。缺口见 findings 中 P2（分类 timeout 不升级）。\nFR-03 部分兑现：status 透传、untracked/mtime 的 hasLineStats=false、删除行 data-clickable=false 且无 role/tabIndex/onClick/handler，均有单测；但「改N次=真实编辑调用次数」端到端不成立，见 P1。\nFR-04 兑现：fileChangesNotice 按 timeout（带 collectMs 格式化）/queue_overflow/无 reason 三态生成文案；notice 分支渲染 sharedWorkspace；timeout 1.5s、排队溢出、通用文案、notice 共享提示测试均通过。\nFR-05：本次实测 daemon 34 passed、frontend 62 passed、两侧 typecheck 零错；额外 wire 5 + session-manager 7 passed。ledger 的 skipped exit=1 未复现；e2e 未跑（只读纪律；本机 :3000 返回 200）。\n\n【检查单 2：盲维四问真实性】\n乱序：合并以同一 baseline、path 键、status>name-status>numstat，mtime 以 seen 去重，与代码相符。记 ok；极小边界：numstat 未用 -z，含换行路径的解析仍有缺口（pre-existing，未在本变更引入）。\n并发：单工作区队列/深度 1、queue_overflow、自适应 Map 单线程无竞态，与代码相符；严格说「后到者 partial」只在超过深度 1 时发生，措辞不精确但不影响实现。记 ok。\n切换：轮尾 fire-and-forget、不抛穿、diff 失败保留清单并 partial、daemon 重启预算归零，与代码相符。记 ok。\n作用域：workspaceRoot/queueKey 分桶、仓根相对 posix、env 为进程级覆盖，与代码相符。记 ok。\n四维均无 finding；披露边界均裁决为可接受（见检查单 3）。\n\n【检查单 3：披露边界逐条裁决】\n1) 3 条 git 命令成本：可接受。8s 基础预算 + 超时升级 + 超时保留清单已落地，子进程预算测试 3/4 条通过；极慢盘 15s 上限仍可能不够属于已披露风险。\n2) 轮内 commit 口径扩大：可接受。这是本次修复目标（此前漏报），卡片数字变大需在发布说明中明确。\n3) 未跟踪行数用破折号：可接受。诚实语义，避免 +0/−0，前端有单测。\n4) 放弃方案 A/B/C/D：可接受。A 只调大超时不能补 commit/清单；B 丢行数；C 读文件更慢且不诚实；D 需新 daemon RPC/平台端点，超出本次修复面。\n以上均登记为「边界已裁决：可接受」；对应维度为并发（命令成本）与作用域（口径/数据诚实性）。\n\n【检查单 4：防护声明真实性】\n- status 失败才 files=[]：name-status/numstat 失败均保留已采清单（catch 后继续 buildGitFiles），成立；基线失败或硬超时尚未完成 status 时 files=[] 属更早阶段，可接受。\n- /mnt/ ≥8s + timeout 翻倍封顶 15s + env 覆盖：resolveTurnFileChangesLimits 实现且测试通过；自适应表 reset 清空成立。\n- 分类 timeout 升级：不完整，见 P2。\n- 编辑调用次数：采集器不去重成立，但上游去重使端到端不成立，见 P1。\n- 确定性 notice：成立（三态单测通过）。\n\n【检查单 5：生成物同步】\n- POST 契约：TurnFileChange/TurnFileChangesSnapshot 未新增字段；backend schema 未改，editToolNames 仍是 list[str]，可容纳重复；两侧 generated api-types 未改。通过。\n- 模块文档：daemon interactive.md 增量与实现基本一致；frontend components-daemon.md 旧段落与新实现矛盾（P3），源码注释亦有漂移（P3）。\n- e2e/原型：proto page 已使用 status/hasLineStats/notice，与组件 props 对齐；e2e 期望 +226、三枚徽标、notice 文案与桩数据一致；但 visual-evidence 对 Playwright 覆盖有误记（P3）。\n- design 文件清单漏 3 个实际改动文件（P3）。\n\n【复跑结果】\n1) cd sillyhub-daemon && pnpm test -- tests/interactive/turn-file-changes.test.ts：1 file / 34 tests passed。\n2) cd frontend && pnpm test -- src/components/daemon/file-changes src/components/daemon/__tests__/turn-timeline-conversation-file-card.test.tsx：4 files / 62 tests passed。\n3) daemon pnpm typecheck：clean；frontend pnpm typecheck：clean。\n4) 额外定向回归：turn-file-changes-wire.test.ts（5）+ session-manager-turn-file-changes.test.ts（7）passed。\n5) e2e 未执行（只读纪律，避免写 test-results 截图）；:3000 dev server 返回 200。\n\n【结论】核心采集口径与前端展示大体正确，但 FR-03 的「改N次」在真实事件链路上未修复（P1），FR-02 的「任一次 timeout 升级」只覆盖外层硬超时（P2）；其余为文档/证据一致性问题。建议修复 P1/P2 后复跑同一测试面。"
+}

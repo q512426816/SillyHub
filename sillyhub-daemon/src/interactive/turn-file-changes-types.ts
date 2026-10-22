@@ -56,7 +56,7 @@ export interface TurnFileChange {
 /**
  * 快照状态（design 契约要点 3）：
  *   - `ok`         全量可信；
- *   - `partial`    ＝ 1500ms 超时（reason=timeout）/ 改动数超上限（truncated=true）/
+ *   - `partial`    ＝ 采集超时（reason=timeout，默认 1500ms/慢盘自适应；保留已采清单）/ 改动数超上限（truncated=true）/
  *                    队列溢出（reason=queue_overflow）/ 行数口径未采集（spike-01 退档）
  *                    —— 卡片照出，行级 +/− 显示破折号（partial 不是错误态，E3）；
  *   - `failed`     git 异常但非「不可用」形态（未知错误）；
@@ -145,7 +145,7 @@ export interface TurnFileChangesLimits {
  * git 子进程执行器（禁 shell，参数数组；可注入以便单测计数/造错）。
  *
  * 默认实现走 `node:child_process.execFile`，`opts.signal` 被 abort 时杀掉子进程
- * （1500ms 硬超时的 kill 面），`opts.timeoutMs` 同时作为单次调用的兜底超时。
+ * （硬超时的 kill 面），`opts.timeoutMs` 同时作为单次调用的兜底超时。
  */
 export type TurnFileChangesExecFile = (
   args: string[],

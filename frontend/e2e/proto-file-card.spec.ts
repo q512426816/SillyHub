@@ -79,6 +79,18 @@ test("文件变更卡：折叠 / 展开 / 降级三态与 100 文件内滚", asy
   await expect(first.getByText("新增", { exact: true })).toHaveCount(1);
   await expect(first.getByText("删除", { exact: true })).toHaveCount(1);
   await expect(first.getByText("新文件", { exact: true })).toHaveCount(1);
+  // 未跟踪行行级统计破折号；删除行不可点击（点击不触发 onOpenFile）。
+  const untrackedRow = first
+    .getByTestId("file-changes-row")
+    .filter({ hasText: "proto-file-card.spec.ts" });
+  await expect(untrackedRow.locator('[title="新文件：无行级统计"]')).toHaveCount(1);
+  const deletedRow = first
+    .getByTestId("file-changes-row")
+    .filter({ hasText: "scripts/prototype-build.mjs" });
+  await deletedRow.click();
+  await expect(page.getByTestId("open-file-log")).not.toContainText(
+    "scripts/prototype-build.mjs",
+  );
 
 
   // ── 点行 → onOpenFile 生效（可见 state + console.log 双证据）──

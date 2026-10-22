@@ -3,8 +3,8 @@
 /**
  * 轮级「文件变更卡」（File changes card）—— 纯展示组件（形态原型，桩数据）。
  *
- * 形态对标 deepseek-harness 会话页的 「已编辑 8 个文件 +230 −8」 折叠卡：
- *   折叠 = 一行（28px）——文件图标 + 「已编辑 N 个文件」 + 右对齐 +adds/−dels + 箭头；
+ * 形态对标 deepseek-harness 会话页的 「N 个文件变更 +adds −dels」 折叠卡：
+ *   折叠 = 一行（28px）——文件图标 + 「N 个文件变更」 + 右对齐 +adds/−dels + 箭头；
  *   展开 = 文件行表（每行 24px）——路径（截断/可点/键盘可达）+ 命令行徽标 +
  *   +X −Y（等宽 tabular-nums）+ 「改N次」。
  *
@@ -99,7 +99,7 @@ export interface FileChangesCardProps {
   degraded?: boolean;
   /**
    * 「有话说但无文件行」的提示形态（D-034）：partial 且 daemon 没拿到文件列表
-   * （1500ms 超时 / 单工作区队列溢出）时，卡片照出但只有一行提示——
+   * （采集超时 / 单工作区队列溢出）时，卡片照出但只有一行提示——
    * 否则用户无法区分「采集没完成」与「本轮真的没改文件」（E6/E8 立意）。
    */
   notice?: string;
@@ -277,7 +277,7 @@ export function FileChangesCard({
             aria-expanded={expanded}
             aria-controls={listId}
             onClick={() => {
-              if (hasActiveTextSelection()) return; // 选中「已编辑 8 个文件」复制时不折叠
+              if (hasActiveTextSelection()) return; // 选中头部文案复制时不折叠
               setExpanded((value) => !value);
             }}
             className={cn(

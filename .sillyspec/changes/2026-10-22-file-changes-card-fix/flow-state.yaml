@@ -1,6 +1,9 @@
 tier: thin
 legacy_fallback: false
-substeps: {}
+substeps:
+  artifacts: done
+  ledger: done
+  patch: done
 born_face: thin
 with_tasks: false
 review_force: null
@@ -27,7 +30,7 @@ input: >-
 autopilot: false
 prestage_ack: true
 baseline_commit: decd05a7a8f6682d8b62fc70edf8e6bea3b2bbce
-updatedAt: '2026-10-22T11:20:18.997Z'
+updatedAt: '2026-10-22T11:43:25.623Z'
 cross_baselines:
   sillyspec: 8ff68ada697ec4d4af9ce0a90c4055091985e319
 baseline_sha256: d0f23a03e204fe43479f409e6116c627dcc2baa843ece7ad3e226b5851fe1e9b
@@ -36,4 +39,13 @@ spec_approved_at: '2026-10-22T11:20:18.997Z'
 spec_approved_by: zcode-file-card-fix
 spec_approved_channel: user-confirmed
 spec_attested_by: zcode-file-card-fix
+batch_ticked: true
+gate_summary: >-
+  test: skipped ← module[]+deps(py21+nontest-skip4+jsx5+jsx2+jsx-e2e-skip1)+fr(32)（124.9s）
+  结果：C:\Users\qinyi\IdeaProjects\multi-agent-platform\.sillyspec\.runtime\verify-runs\20261022114311\test-result.json —
+  跳过原因：模块子集含环境缺件跳过（已跑模块全绿）：deps(auto-nontest-skip)、deps(auto-jsx-e2e-skip)——补装依赖后恢复实测。｜lint: failed ← cd backend && uv
+  run ruff check . && uv run ruff format --check . && uv run mypy app && cd ../frontend && pnpm lint && cd
+  ../sillyhub-daemon && pnpm typecheck（0.2s）
+  结果：C:\Users\qinyi\IdeaProjects\multi-agent-platform\.sillyspec\.runtime\verify-runs\20261022114311\test-result.json｜门文件
+  11 个
 

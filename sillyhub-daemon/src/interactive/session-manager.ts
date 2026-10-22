@@ -320,10 +320,11 @@ interface TurnFileChangesTurn {
   baselineHead: string | null | undefined;
   /** 轮首墙钟（ms）：ignored 目录 mtime 探测的「本轮」下界。 */
   startedAtMs: number;
-  /** 本轮工具调用路径（去重后；归因 + ignored 目录探测输入）。 */
+  /**
+   * 本轮工具调用路径（**按调用顺序保留重复项**：同一文件同一工具多次调用各占
+   * 一条，供采集器算「编辑调用次数」；ignored 目录 mtime 探测内部自行去重）。
+   */
   toolCallPaths: TurnToolCallPath[];
-  /** 去重键（toolName + 原始路径），防同一工具反复调用同一文件膨胀。 */
-  seenKeys: Set<string>;
   /**
    * task-10：本轮事件时序旁路（text / thinking / tool_use / tool_result 的观察
    * 时刻）。**只存内存**——不改事件协议、不落盘；与 file-changes 共用同一轮
@@ -1800,7 +1801,6 @@ export class SessionManager {
       baselineHead: undefined,
       startedAtMs: Date.now(),
       toolCallPaths: [],
-      seenKeys: new Set(),
       // task-10：本轮时序旁路（首 token 锚点 / attempt 切分的唯一数据源）。
       timingEvents: [],
       ...(state.model !== undefined ? { model: state.model } : {}),
@@ -1854,10 +1854,14 @@ export class SessionManager {
     for (const ev of events) {
       if (ev.type !== 'tool_use') continue;
       for (const call of toolCallPathsFromEvent(ev)) {
-        if (turn.seenKeys.size >= TURN_FILE_CHANGES_MAX_TOOL_PATHS) break;
-        const key = `${call.toolName}\u0000${call.path}`;
-        if (turn.seenKeys.has(key)) continue;
-        turn.seenKeys.add(key);
+        // 2026-10-22-file-changes-card-fix（评审 P1）：**不再按 toolName+path 去重**
+        // ——同一文件 Edit 3 次必须保留 3 条，采集器据此算真实编辑调用次数；
+        // 上限按调用条数收口（mtime 探测侧自行 probed 去重，重复无害）。
+        if (
+          turn.toolCallPaths.length >= TURN_FILE_CHANGES_MAX_TOOL_PATHS
+        ) {
+          break;
+        }
         turn.toolCallPaths.push(call);
       }
     }

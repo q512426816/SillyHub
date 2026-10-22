@@ -236,6 +236,30 @@ describe('session-manager × turn-file-changes：E1 基线与工具调用路径�
     expect(typeof hoisted.calls[0]!['turnStartedAtMs']).toBe('number');
   });
 
+  it('同一文件同一工具重复调用保留重复项（编辑次数口径，2026-10-22-file-changes-card-fix）', async () => {
+    const { driver, emitResult, emitMessage } = makeMockDriver();
+    const sm = new SessionManager({ driver, ...makeDeps() });
+    await sm.create(BASE_INPUT);
+    await flush();
+
+    await emitMessage({
+      events: [
+        { type: 'tool_use', tool_name: 'Edit', content: JSON.stringify({ file_path: 'src/a.ts' }) },
+        { type: 'tool_use', tool_name: 'Edit', content: JSON.stringify({ file_path: 'src/a.ts' }) },
+      ],
+    });
+    await (emitResult(resultSuccess('turn-1')) as Promise<void>);
+    await flush();
+
+    expect(hoisted.calls).toHaveLength(1);
+    expect(hoisted.calls[0]).toMatchObject({
+      toolCallPaths: [
+        { path: 'src/a.ts', toolName: 'Edit' },
+        { path: 'src/a.ts', toolName: 'Edit' },
+      ],
+    });
+  });
+
   it('inject 的后续轮重新记基线（runId 不同 → 各自一次采集）', async () => {
     const { driver, emitResult } = makeMockDriver();
     const sm = new SessionManager({ driver, ...makeDeps() });
