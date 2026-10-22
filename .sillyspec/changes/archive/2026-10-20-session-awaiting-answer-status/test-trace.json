@@ -1,0 +1,51 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-20-session-awaiting-answer-status",
+  "rows": [
+    {
+      "anchor": "FR-01",
+      "row_id": "2026-10-20-session-awaiting-answer-status:flow:测试绑定FR-01",
+      "tests": [
+        "backend/app/modules/daemon/tests/test_sessions_list_pending_dialog.py「pending 对话注入 pending_dialog_kind；answered 不注入；无对话 None；IN 批查」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-20-session-awaiting-answer-status"
+    },
+    {
+      "anchor": "FR-02",
+      "row_id": "2026-10-20-session-awaiting-answer-status:flow:测试绑定FR-02",
+      "tests": [
+        "frontend/src/components/sessions/__tests__/session-status-indicator.test.tsx「问号形态：pending_dialog_kind 压过 running 转圈、让位 failed/ended、回答后回归转圈」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-20-session-awaiting-answer-status"
+    },
+    {
+      "anchor": "FR-03",
+      "row_id": "2026-10-20-session-awaiting-answer-status:flow:测试绑定FR-03",
+      "tests": [
+        "frontend/src/components/sessions/__tests__/session-status-indicator.test.tsx「None 时既有五分类零回归」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-20-session-awaiting-answer-status"
+    }
+  ]
+}

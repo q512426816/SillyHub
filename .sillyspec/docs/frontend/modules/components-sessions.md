@@ -21,6 +21,7 @@ updated_at: 2026-09-16 09:45:00
 组件自治约定：只收 props / 只调本域接口，不做 SSE 订阅与页面路由——组装归 `app-sessions-pages` 的 SessionPanel 页面（task-10）。
 
 ## 契约摘要
+- 会话底部信息降噪（2026-10-22-session-composer-slim）：中断自动续跑开关从 `SessionConfigBar` 移除（连同「运行中切换将于本轮结束后生效」提示行），入口迁入 `SessionInputBar.autoResume` 的 + 菜单项（`menuitemcheckbox`，点击切换不关菜单）；排队消息、定时消息与复制结果等纯文本展示统一经 `lib/attachment-refs.formatRefsForPlainText` 简化为 📎/📄/📁/🧾 + 名称，发送正文协议不变。`parseAttachmentMarkers` 同步迁入 `lib/attachment-refs.ts`（`runtime-session-helpers` re-export 保持兼容）。
 - session-config-bar（2026-08-28-daemon-agent-share）：机器候选切融合列表（共享条目
   「共享·共享人」Tag）、档案下拉共享智能体「共享」标识；useActiveSharedAgents 复用
   lib/daemon.ts fetchSharedAgentsActive。
@@ -51,7 +52,7 @@ updated_at: 2026-09-16 09:45:00
   - 导出 `buildDefaultSwitchPrompt(p)`（默认切换轮提示文案）、`SWITCH_NO_PROVIDER_VALUE`、类型 `SessionConfigCtrlKind`（machine/agent/provider/profile）/ `SessionConfigSwitchField`（agent_profile_id/llm_provider_id）。
 - `ctx-usage-bar.tsx`（FR-08 / D-009 / D-014，输入框上方一行组件）：
   - `CtxUsageRing`：环形上下文用量（props 含 usedTokens——父层 SSE turn usage + attach 历史 logs 累计后传入，本组件不累计）。
-  - `QuotaPill({ providerId })`：供应商额度胶囊，自调 `getProviderQuota` 显示额度+重置时间（`formatQuotaResetTime` 导出）。
+  - `QuotaPill({ providerId, mobile? })`：额度紧凑图标（2026-10-22-session-composer-slim FR-03 / D-001）——面上只显示「Gauge 图标 + 当前会话供应商首窗口百分比」（纯余额类显示金额），低量按 ≤50% 黄 / ≤20% 红着色；模型名、各窗口、重置时间、「等 N 家」收进点击 Popover 明细与 title。自调 `getProviderQuota`，5 分钟轮询 / 悬浮 2 秒刷新 / keep-last-good 语义不变（`formatQuotaResetTime` 导出）。
   - `CtxUsageBar`：Ring+Pill 组合条。
   - 分母三级降级链 `resolveCtxWindowTokens(roleMapping, fallbackModel)`（D-014）：
     - 供应商 role mapping 勾选 1M（one_m=true，injector 模型名后缀 [1m]）→ 1_000_000。

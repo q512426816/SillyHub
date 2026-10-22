@@ -169,3 +169,4 @@
 | 2026-10-22 | 2026-10-22-trajectory-view-redesign | 2026-10-22-trajectory-view-redesign |
 | 2026-10-22 | 2026-10-22-file-changes-card-fix | 文件变更卡采集与展示修复 |
 | 2026-10-22 | 2026-10-22-sillyspec-probe-db-missing-evict | 已删工作区探针自动淘汰与诊断增强 |
+| 2026-10-22 | 2026-10-20-session-awaiting-answer-status | 左侧会话状态补充等待回答问号 |

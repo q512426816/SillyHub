@@ -38,3 +38,4 @@ created_at: 2026-09-03 14:49:48
 - 2026-10-22-review-risk-fixes | 审查修复：原型路由防线与监听泄漏
 - 2026-10-22-file-changes-card-fix | 文件变更卡采集与展示修复
 - 2026-10-22-sillyspec-probe-db-missing-evict | 已删工作区探针自动淘汰与诊断增强
+- 2026-10-20-session-awaiting-answer-status | 左侧会话状态补充等待回答问号

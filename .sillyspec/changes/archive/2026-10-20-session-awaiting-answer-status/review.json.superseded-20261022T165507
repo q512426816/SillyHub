@@ -1,0 +1,34 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-20-session-awaiting-answer-status",
+  "reviewer": "subagent",
+  "verdict": "PASS",
+  "reviewedAgainst": "e532e9a4a115322e443f214ca9bc5bd565c1a422",
+  "findings": [
+    {
+      "severity": "P2",
+      "title": "FR-04/测试绑定声称的「IN 批查零 N+1」用例不存在",
+      "evidence": "test_sessions_list_pending_dialog.py 仅含 5 个字段注入/窗口/作用域断言与 1 个 OpenAPI 字段断言，没有任何 SQL 语句计数或 SQLAlchemy 事件监听；把注入改成逐会话查询（N+1）现有用例照样全绿，而 requirements.md 绑实行与 FR-04 明列「IN 批查」。",
+      "location": "backend/app/modules/daemon/tests/test_sessions_list_pending_dialog.py:108"
+    },
+    {
+      "severity": "P3",
+      "title": "设计/任务清单声称修改 session-lists.ts，实际无该文件 diff",
+      "evidence": "design.md:66 与 tasks.md task-02 都写「session-lists.ts 类型加可选字段」，但本变更两个代码提交（623ff762a/8ac6a6cce）均未触碰该文件；字段经 api-types.ts 生成版随 `Omit<components[\"schemas\"][\"AgentSessionRead\"]>` 自动进入 AgentSessionRead，功能无误，属文档漂移。",
+      "location": ".sillyspec/changes/2026-10-20-session-awaiting-answer-status/design.md:66"
+    },
+    {
+      "severity": "P3",
+      "title": "问号改用 DEFAULT warning token 的取舍可接受；既有 bg-warning-500 无效类仍残留（非本变更引入）",
+      "evidence": "tailwind.config.ts 只定义 warning.DEFAULT/foreground，无数字阶；新问号用 border-warning/text-warning 可正常生成，避免复制既有隐患；但同一指示器的 pending_approval/blocked 分支仍返回未被 Tailwind 生成的 bg-warning-500（8px 圆点实际无底色），零回归用例继续固化该字符串，建议另立变更清理。",
+      "location": "frontend/src/components/sessions/session-list-panel.tsx:632"
+    }
+  ],
+  "dimensionNotes": {
+    "乱序": "ok",
+    "并发": "ok",
+    "切换": "ok",
+    "作用域": "ok"
+  },
+  "reviewedAt": "2026-10-23T00:50:36+08:00"
+}

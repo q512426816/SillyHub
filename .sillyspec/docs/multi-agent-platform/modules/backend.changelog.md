@@ -90,3 +90,4 @@
 - 2026-10-22-merge-regression-fixes | 合并回归债收口：grants 闭包与 lease 双流断言
 - 2026-10-22-change-delete-session-history-fix | 变更删除不再级联删会话轮次并恢复丢失轮次
 - 2026-10-22-sillyspec-probe-db-missing-evict | 已删工作区探针自动淘汰与诊断增强
+- 2026-10-20-session-awaiting-answer-status | 左侧会话状态补充等待回答问号

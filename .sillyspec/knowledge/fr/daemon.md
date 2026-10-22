@@ -6904,3 +6904,67 @@
   confirmed_at: null
   source_change: 2026-10-22-sillyspec-probe-db-missing-evict
   status: active
+
+## FR-daemon-238 列表端点批量注入等待回答标记（照 current_run_status 的 IN 批查先例，零 N+1），存在 pending 对话请求的会话下发该标记
+变更：2026-10-20-session-awaiting-answer-status
+状态：active
+摘要：等待回答的会话带标记；回答后标记消失；零 N+1
+全文：.sillyspec/changes/archive/2026-10-20-session-awaiting-answer-status/requirements.md#FR-01
+最近确认：c0dbab0121e933d6bbfec711f0839bec0c580290
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-20-session-awaiting-answer-status:flow:测试绑定FR-01
+  tests: backend/app/modules/daemon/tests/test_sessions_list_pending_dialog.py「pending 对话注入 pending_dialog_kind；answered 不注入；无对话 None；IN 批查」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-20-session-awaiting-answer-status
+  status: active
+
+## FR-daemon-239 左侧状态指示器新增「问号」形态（等待回答），压过 run running 的转圈；终端态 failed/ended 仍权威优先
+变更：2026-10-20-session-awaiting-answer-status
+状态：active
+摘要：等回答压过转圈；终态仍优先；回答后回归转圈
+全文：.sillyspec/changes/archive/2026-10-20-session-awaiting-answer-status/requirements.md#FR-02
+最近确认：c0dbab0121e933d6bbfec711f0839bec0c580290
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-20-session-awaiting-answer-status:flow:测试绑定FR-02
+  tests: frontend/src/components/sessions/__tests__/session-status-indicator.test.tsx「问号形态：pending_dialog_kind 压过 running 转圈、让位 failed/ended、回答后回归转圈」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-20-session-awaiting-answer-status
+  status: active
+
+## FR-daemon-240 无 pending 对话的会话展示零回归（既有五分类不变）
+变更：2026-10-20-session-awaiting-answer-status
+状态：active
+摘要：既有分类回归
+全文：.sillyspec/changes/archive/2026-10-20-session-awaiting-answer-status/requirements.md#FR-03
+最近确认：c0dbab0121e933d6bbfec711f0839bec0c580290
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-20-session-awaiting-answer-status:flow:测试绑定FR-03
+  tests: frontend/src/components/sessions/__tests__/session-status-indicator.test.tsx「None 时既有五分类零回归」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-20-session-awaiting-answer-status
+  status: active
+
+## FR-daemon-241 后端注入与前端指示器有单测覆盖，触及面测试全绿
+变更：2026-10-20-session-awaiting-answer-status
+状态：active
+摘要：守卫路径
+全文：.sillyspec/changes/archive/2026-10-20-session-awaiting-answer-status/requirements.md#FR-04
+最近确认：c0dbab0121e933d6bbfec711f0839bec0c580290

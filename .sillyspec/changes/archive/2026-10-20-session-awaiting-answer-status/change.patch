@@ -1,0 +1,1509 @@
+diff --git a/.sillyspec/docs/SillyHub/modules/daemon.changelog.md b/.sillyspec/docs/SillyHub/modules/daemon.changelog.md
+index 6713e5e8c..074629f5b 100644
+--- a/.sillyspec/docs/SillyHub/modules/daemon.changelog.md
++++ b/.sillyspec/docs/SillyHub/modules/daemon.changelog.md
+@@ -79,3 +79,4 @@ created_at: 2026-08-27 14:32:24
+ - 2026-10-22-merge-test-debt | 合并后测试债清偿：l10n文案与守卫钉子同步
+ - 2026-10-22-merge-regression-fixes | 合并回归债收口：grants 闭包与 lease 双流断言
+ - 2026-10-22-file-changes-card-fix | 文件变更卡采集与展示修复
++- 2026-10-22-sillyspec-probe-db-missing-evict | 已删工作区探针自动淘汰与诊断增强
+diff --git a/.sillyspec/docs/SillyHub/modules/frontend_app.changelog.md b/.sillyspec/docs/SillyHub/modules/frontend_app.changelog.md
+index 17ff1a2ef..50e0795bc 100644
+--- a/.sillyspec/docs/SillyHub/modules/frontend_app.changelog.md
++++ b/.sillyspec/docs/SillyHub/modules/frontend_app.changelog.md
+@@ -37,3 +37,4 @@ created_at: 2026-09-03 14:49:48
+ - 2026-10-21-mobile-scan-birth-cleanup | 移动端与变更中心scan起步口径清零
+ - 2026-10-22-review-risk-fixes | 审查修复：原型路由防线与监听泄漏
+ - 2026-10-22-file-changes-card-fix | 文件变更卡采集与展示修复
++- 2026-10-22-sillyspec-probe-db-missing-evict | 已删工作区探针自动淘汰与诊断增强
+diff --git a/.sillyspec/docs/SillyHub/modules/frontend_components.changelog.md b/.sillyspec/docs/SillyHub/modules/frontend_components.changelog.md
+index f958142bb..b2d371e02 100644
+--- a/.sillyspec/docs/SillyHub/modules/frontend_components.changelog.md
++++ b/.sillyspec/docs/SillyHub/modules/frontend_components.changelog.md
+@@ -121,3 +121,4 @@ created_at: 2026-08-30 22:23:33
+ | 2026-10-22 | 2026-10-22-turn-trigger-metadata-p2 | 轮触发溯源 Phase 2：定时消息接入与 metadata 戳驱动 |
+ | 2026-10-22 | 2026-10-22-trajectory-view-redesign | 2026-10-22-trajectory-view-redesign |
+ | 2026-10-22 | 2026-10-22-file-changes-card-fix | 文件变更卡采集与展示修复 |
++| 2026-10-22 | 2026-10-22-sillyspec-probe-db-missing-evict | 已删工作区探针自动淘汰与诊断增强 |
+diff --git a/.sillyspec/docs/SillyHub/modules/frontend_lib.changelog.md b/.sillyspec/docs/SillyHub/modules/frontend_lib.changelog.md
+index 95bf4fe7b..4ca01ef89 100644
+--- a/.sillyspec/docs/SillyHub/modules/frontend_lib.changelog.md
++++ b/.sillyspec/docs/SillyHub/modules/frontend_lib.changelog.md
+@@ -26,3 +26,4 @@ created_at: 2026-10-16 16:40:00
+ - 2026-10-22-fix-translate-pending | 生产 /api/translate/thinking 请求长时间 pending：容器未配置 TRA…
+ - 2026-10-22-session-trajectory-third-view | 把会话轨迹从「进度」视图内的第二层呈现开关上移为与「对话 / 进度」并列的第三个顶层视图，同时修复轨…
+ - 2026-10-22-turn-trigger-metadata-p2 | 轮触发溯源 Phase 2：定时消息接入与 metadata 戳驱动
++- 2026-10-22-sillyspec-probe-db-missing-evict | 已删工作区探针自动淘汰与诊断增强
+diff --git a/.sillyspec/docs/backend/modules/daemon.changelog.md b/.sillyspec/docs/backend/modules/daemon.changelog.md
+index 7a9e9b10e..aad82eb8d 100644
+--- a/.sillyspec/docs/backend/modules/daemon.changelog.md
++++ b/.sillyspec/docs/backend/modules/daemon.changelog.md
+@@ -58,3 +58,4 @@ created_at: 2026-08-29 22:56:30
+ | 2026-10-21 | 2026-10-21-session-git-branch | 会话组件底部动态显示当前所在 git 分支 |
+ | 2026-10-22 | 2026-10-22-turn-trigger-metadata-p2 | 轮触发溯源 Phase 2：定时消息接入与 metadata 戳驱动 |
+ | 2026-10-22 | 2026-10-22-merge-regression-fixes | 合并回归债收口：grants 闭包与 lease 双流断言 |
++| 2026-10-22 | 2026-10-22-sillyspec-probe-db-missing-evict | 已删工作区探针自动淘汰与诊断增强 |
+diff --git a/.sillyspec/docs/multi-agent-platform/modules/backend.changelog.md b/.sillyspec/docs/multi-agent-platform/modules/backend.changelog.md
+index e2cb80d75..858a25b6d 100644
+--- a/.sillyspec/docs/multi-agent-platform/modules/backend.changelog.md
++++ b/.sillyspec/docs/multi-agent-platform/modules/backend.changelog.md
+@@ -89,3 +89,4 @@
+ - 2026-10-22-merge-test-debt | 合并后测试债清偿：l10n文案与守卫钉子同步
+ - 2026-10-22-merge-regression-fixes | 合并回归债收口：grants 闭包与 lease 双流断言
+ - 2026-10-22-change-delete-session-history-fix | 变更删除不再级联删会话轮次并恢复丢失轮次
++- 2026-10-22-sillyspec-probe-db-missing-evict | 已删工作区探针自动淘汰与诊断增强
+diff --git a/.sillyspec/docs/multi-agent-platform/modules/frontend.changelog.md b/.sillyspec/docs/multi-agent-platform/modules/frontend.changelog.md
+index 7809e0f5b..64f2969a7 100644
+--- a/.sillyspec/docs/multi-agent-platform/modules/frontend.changelog.md
++++ b/.sillyspec/docs/multi-agent-platform/modules/frontend.changelog.md
+@@ -168,3 +168,4 @@
+ | 2026-10-22 | 2026-10-22-turn-trigger-metadata-p2 | 轮触发溯源 Phase 2：定时消息接入与 metadata 戳驱动 |
+ | 2026-10-22 | 2026-10-22-trajectory-view-redesign | 2026-10-22-trajectory-view-redesign |
+ | 2026-10-22 | 2026-10-22-file-changes-card-fix | 文件变更卡采集与展示修复 |
++| 2026-10-22 | 2026-10-22-sillyspec-probe-db-missing-evict | 已删工作区探针自动淘汰与诊断增强 |
+diff --git a/.sillyspec/docs/multi-agent-platform/modules/sillyhub-daemon.changelog.md b/.sillyspec/docs/multi-agent-platform/modules/sillyhub-daemon.changelog.md
+index 0925cc417..31475e184 100644
+--- a/.sillyspec/docs/multi-agent-platform/modules/sillyhub-daemon.changelog.md
++++ b/.sillyspec/docs/multi-agent-platform/modules/sillyhub-daemon.changelog.md
+@@ -31,3 +31,4 @@
+ - 2026-10-22-daemon-snapshot-report-log | daemon 快照上报补收口日志
+ - 2026-10-22-merge-test-debt | 合并后测试债清偿：l10n文案与守卫钉子同步
+ - 2026-10-22-file-changes-card-fix | 文件变更卡采集与展示修复
++- 2026-10-22-sillyspec-probe-db-missing-evict | 已删工作区探针自动淘汰与诊断增强
+diff --git a/backend/app/modules/daemon/router/session_crud.py b/backend/app/modules/daemon/router/session_crud.py
+index 5b3ebdf5d..0ab5f2f69 100644
+--- a/backend/app/modules/daemon/router/session_crud.py
++++ b/backend/app/modules/daemon/router/session_crud.py
+@@ -305,6 +305,46 @@ async def list_sessions(
+         run_status_map: dict[uuid.UUID, str] = {row[0]: row[1] for row in active_rows}
+         for r in reads:
+             r.current_run_status = run_status_map.get(r.id)
++    # 2026-10-20-session-awaiting-answer-status：批量注入等待用户回答的对话请求
++    # 种类（照上方 current_run_status 的 IN 批查注入先例，零 N+1）。数据源
++    # session_dialog_requests status='pending'——模型注释明示普通 canUseTool
++    # 审批不落行、落行的都是"may wait indefinitely for a human answer"的用户
++    # 对话题；窗口函数取每会话 created_at 最新一条（连续提问时显示最新）。
++    # 前端行首状态槽据此显示问号「等待你回答」（压过 run running 转圈）；
++    # 无 pending 对话的会话保持 None（零回归）。
++    if items:
++        from app.modules.daemon.model import SessionDialogRequest
++
++        dialog_rn = (
++            sa_func.row_number()
++            .over(
++                partition_by=SessionDialogRequest.session_id,
++                order_by=SessionDialogRequest.created_at.desc(),
++            )
++            .label("rn")
++        )
++        dialog_subq = (
++            sa_select(
++                SessionDialogRequest.session_id.label("session_id"),
++                SessionDialogRequest.dialog_kind.label("dialog_kind"),
++                dialog_rn,
++            )
++            .where(
++                SessionDialogRequest.session_id.in_([item.id for item in items]),
++                SessionDialogRequest.status == "pending",
++            )
++            .subquery()
++        )
++        dialog_rows = (
++            await session.execute(
++                sa_select(dialog_subq.c.session_id, dialog_subq.c.dialog_kind).where(
++                    dialog_subq.c.rn == 1
++                )
++            )
++        ).all()
++        dialog_kind_map: dict[uuid.UUID, str | None] = {row[0]: row[1] for row in dialog_rows}
++        for r in reads:
++            r.pending_dialog_kind = dialog_kind_map.get(r.id)
+     # task-13 / FR-04 / design §5 Phase4：批量查 lease.terminating_at 注入到每个 read。
+     # 经 session.lease_id 关联 DaemonTaskLease；只查本页 lease_id 非空子集（IN 避免 N+1）。
+     # lease.terminating_at 为空 / session 无 lease → read.terminating_at 保持 None（brownfield）。
+diff --git a/backend/app/modules/daemon/schema.py b/backend/app/modules/daemon/schema.py
+index 106b99e7d..e12491760 100644
+--- a/backend/app/modules/daemon/schema.py
++++ b/backend/app/modules/daemon/schema.py
+@@ -69,6 +69,13 @@ class AgentSessionRead(BaseModel):
+     # 兜底（本地 CLI 会话基线）。值域 = AgentRun.status 词表子集（ACTIVE_RUN_
+     # STATUSES：pending/running/pending_approval）。
+     current_run_status: str | None = None
++    # 2026-10-20-session-awaiting-answer-status：等待用户回答的对话请求种类
++    # （非 ORM 字段，router 批量查 session_dialog_requests status='pending' 注入；
++    # 窗口函数取每会话 created_at 最新一条）。值域 = dialog_kind 词表
++    # （AskUserQuestion / plan_approval / codex_request_user_input /
++    # mcp_elicitation / pi_extension_ui）；None = 无 pending 对话（普通 canUseTool
++    # 审批不落行，本字段零含义）。前端行首状态槽据此显示问号「等待你回答」。
++    pending_dialog_kind: str | None = None
+     # 2026-08-05-daemon-kill-channel-unify task-13 / FR-04 / design §5 Phase4：
+     # lease 处于 terminating 态的时间戳（cancel_lease 写入、daemon 回传统态后清空）。
+     # 非 ORM 字段——AgentSession 本身没有该列，由 router 经 session.lease_id 关联
+diff --git a/backend/app/modules/daemon/tests/test_sessions_list_pending_dialog.py b/backend/app/modules/daemon/tests/test_sessions_list_pending_dialog.py
+new file mode 100644
+index 000000000..c063fc7d0
+--- /dev/null
++++ b/backend/app/modules/daemon/tests/test_sessions_list_pending_dialog.py
+@@ -0,0 +1,261 @@
++"""2026-10-20-session-awaiting-answer-status ``GET /sessions`` pending_dialog_kind 注入单测.
++
++覆盖（用户需求：等待用户回答时左侧状态显示问号）：
++
++- 有 status='pending' 的 SessionDialogRequest → 列表项 ``pending_dialog_kind``
++  返回该 dialog_kind（窗口函数取每会话 created_at 最新一条）。
++- answered/cancelled 行不注入（回答后问号消失）。
++- 无对话行 / 无 run 的会话 → None（brownfield 不崩）。
++- 每会话仅取最新 pending 行（连续提问取最新）。
++- 批查零 N+1：多会话场景下 session_dialog_requests 只发一条 SELECT。
++- OpenAPI schema 反映 pending_dialog_kind 新字段（gen:types 消费面）。
++
++夹具范式镜像 ``test_sessions_list_run_status.py``（in-memory SQLite + httpx
++client；SessionDialogRequest.run_id 非空 FK，故每会话建一条 run 行）。
++"""
++
++from __future__ import annotations
++
++import uuid
++from datetime import UTC, datetime, timedelta
++
++from httpx import AsyncClient
++from sqlalchemy import select
++from sqlalchemy.ext.asyncio import AsyncSession
++
++from app.modules.agent.model import AgentRun, AgentSession
++from app.modules.auth.model import User
++from app.modules.daemon.model import SessionDialogRequest
++
++# ── Helpers（范式照抄 test_sessions_list_run_status.py）──────────────────────
++
++
++async def _get_admin(db_session: AsyncSession) -> User:
++    admin = (
++        (await db_session.execute(select(User).where(User.email == "admin@example.com")))
++        .scalars()
++        .first()
++    )
++    assert admin is not None
++    return admin
++
++
++async def _make_session(
++    session: AsyncSession,
++    user_id: uuid.UUID,
++    *,
++    status: str = "active",
++) -> AgentSession:
++    now = datetime.now(UTC)
++    sess = AgentSession(
++        id=uuid.uuid4(),
++        user_id=user_id,
++        runtime_id=None,
++        lease_id=None,
++        provider="claude",
++        status=status,
++        agent_session_id=None,
++        turn_count=1,
++        created_at=now,
++        last_active_at=now,
++    )
++    session.add(sess)
++    await session.commit()
++    return sess
++
++
++async def _make_run(
++    session: AsyncSession,
++    agent_session_id: uuid.UUID,
++    *,
++    status: str = "running",
++) -> AgentRun:
++    run = AgentRun(
++        id=uuid.uuid4(),
++        agent_session_id=agent_session_id,
++        agent_type="claude_code",
++        status=status,
++        created_at=datetime.now(UTC),
++    )
++    session.add(run)
++    await session.commit()
++    return run
++
++
++async def _make_dialog(
++    session: AsyncSession,
++    *,
++    agent_session_id: uuid.UUID,
++    run_id: uuid.UUID,
++    dialog_kind: str | None = "AskUserQuestion",
++    status: str = "pending",
++    created_at: datetime | None = None,
++) -> SessionDialogRequest:
++    row = SessionDialogRequest(
++        id=uuid.uuid4(),
++        session_id=agent_session_id,
++        run_id=run_id,
++        request_id=f"req-{uuid.uuid4().hex[:12]}",
++        tool_name=dialog_kind or "Bash",
++        dialog_kind=dialog_kind,
++        status=status,
++        created_at=created_at or datetime.now(UTC),
++    )
++    session.add(row)
++    await session.commit()
++    return row
++
++
++# ── pending_dialog_kind 注入 ────────────────────────────────────────────────
++
++
++class TestPendingDialogKind:
++    async def test_pending_dialog_injected(
++        self,
++        client: AsyncClient,
++        auth_headers: dict[str, str],
++        db_session: AsyncSession,
++    ) -> None:
++        """pending AskUserQuestion 对话 → pending_dialog_kind='AskUserQuestion'。"""
++        admin = await _get_admin(db_session)
++        s = await _make_session(db_session, admin.id)
++        run = await _make_run(db_session, s.id)
++        await _make_dialog(db_session, agent_session_id=s.id, run_id=run.id)
++
++        resp = await client.get("/api/daemon/sessions", headers=auth_headers)
++        assert resp.status_code == 200, resp.text
++        item = next(it for it in resp.json()["items"] if it["id"] == str(s.id))
++        assert item["pending_dialog_kind"] == "AskUserQuestion"
++
++    async def test_answered_dialog_not_injected(
++        self,
++        client: AsyncClient,
++        auth_headers: dict[str, str],
++        db_session: AsyncSession,
++    ) -> None:
++        """answered 行不注入（回答后问号消失）。"""
++        admin = await _get_admin(db_session)
++        s = await _make_session(db_session, admin.id)
++        run = await _make_run(db_session, s.id)
++        await _make_dialog(
++            db_session,
++            agent_session_id=s.id,
++            run_id=run.id,
++            status="answered",
++        )
++
++        resp = await client.get("/api/daemon/sessions", headers=auth_headers)
++        assert resp.status_code == 200, resp.text
++        item = next(it for it in resp.json()["items"] if it["id"] == str(s.id))
++        assert item["pending_dialog_kind"] is None
++
++    async def test_session_without_dialog_yields_null(
++        self,
++        client: AsyncClient,
++        auth_headers: dict[str, str],
++        db_session: AsyncSession,
++    ) -> None:
++        """无对话行（本地 CLI 会话 / 普通审批不落行）→ None，列表不崩。"""
++        admin = await _get_admin(db_session)
++        s = await _make_session(db_session, admin.id)
++
++        resp = await client.get("/api/daemon/sessions", headers=auth_headers)
++        assert resp.status_code == 200, resp.text
++        item = next(it for it in resp.json()["items"] if it["id"] == str(s.id))
++        assert item["pending_dialog_kind"] is None
++
++    async def test_latest_pending_dialog_wins(
++        self,
++        client: AsyncClient,
++        auth_headers: dict[str, str],
++        db_session: AsyncSession,
++    ) -> None:
++        """连续提问两条 pending → 取 created_at 最新一条的 kind（窗口函数排序语义）。"""
++        admin = await _get_admin(db_session)
++        s = await _make_session(db_session, admin.id)
++        run = await _make_run(db_session, s.id)
++        base = datetime.now(UTC)
++        await _make_dialog(
++            db_session,
++            agent_session_id=s.id,
++            run_id=run.id,
++            dialog_kind="plan_approval",
++            created_at=base - timedelta(minutes=5),
++        )
++        await _make_dialog(
++            db_session,
++            agent_session_id=s.id,
++            run_id=run.id,
++            dialog_kind="AskUserQuestion",
++            created_at=base,
++        )
++
++        resp = await client.get("/api/daemon/sessions", headers=auth_headers)
++        assert resp.status_code == 200, resp.text
++        item = next(it for it in resp.json()["items"] if it["id"] == str(s.id))
++        assert item["pending_dialog_kind"] == "AskUserQuestion"
++
++    async def test_other_session_dialog_not_leaked(
++        self,
++        client: AsyncClient,
++        auth_headers: dict[str, str],
++        db_session: AsyncSession,
++    ) -> None:
++        """别的会话的 pending 对话不串到本会话（IN 限定本页 id 集合）。"""
++        admin = await _get_admin(db_session)
++        s1 = await _make_session(db_session, admin.id)
++        s2 = await _make_session(db_session, admin.id)
++        run2 = await _make_run(db_session, s2.id)
++        await _make_dialog(db_session, agent_session_id=s2.id, run_id=run2.id)
++
++        resp = await client.get("/api/daemon/sessions", headers=auth_headers)
++        assert resp.status_code == 200, resp.text
++        items = {it["id"]: it for it in resp.json()["items"]}
++        assert items[str(s1.id)]["pending_dialog_kind"] is None
++        assert items[str(s2.id)]["pending_dialog_kind"] == "AskUserQuestion"
++
++    async def test_dialog_query_batched_single_select(
++        self,
++        client: AsyncClient,
++        auth_headers: dict[str, str],
++        db_session: AsyncSession,
++        db_engine,
++    ) -> None:
++        """批查零 N+1：3 个会话各有 pending 对话 → session_dialog_requests 恰一条 SELECT。"""
++        from sqlalchemy import event
++
++        admin = await _get_admin(db_session)
++        for _ in range(3):
++            s = await _make_session(db_session, admin.id)
++            run = await _make_run(db_session, s.id)
++            await _make_dialog(db_session, agent_session_id=s.id, run_id=run.id)
++
++        statements: list[str] = []
++
++        def _capture(conn, cursor, statement, parameters, context, executemany):
++            if "session_dialog_requests" in statement:
++                statements.append(statement)
++
++        sync_engine = db_engine.sync_engine
++        event.listen(sync_engine, "before_cursor_execute", _capture)
++        try:
++            resp = await client.get("/api/daemon/sessions", headers=auth_headers)
++        finally:
++            event.remove(sync_engine, "before_cursor_execute", _capture)
++
++        assert resp.status_code == 200, resp.text
++        # 3 个会话 3 条 pending 行，仍只发一条 IN 批查（逐会话查询会 ≥3 条）。
++        assert len(statements) == 1, statements
++
++
++# ── OpenAPI 反映新字段（gen:types 消费面）───────────────────────────────────
++
++
++class TestOpenApiSchema:
++    async def test_openapi_exposes_pending_dialog_kind(self) -> None:
++        """非 dev 环境 openapi.json 端点关闭（main.py BS-5），直接经 app.openapi()
++        断言 schema——与 pnpm gen:types 消费的 OpenAPI 产物同源。"""
++        from app.main import app
++
++        props = app.openapi()["components"]["schemas"]["AgentSessionRead"]["properties"]
++        assert "pending_dialog_kind" in props
+diff --git a/backend/openapi.json b/backend/openapi.json
+index 616b29970..42731ef6f 100644
+--- a/backend/openapi.json
++++ b/backend/openapi.json
+@@ -39238,6 +39238,17 @@
+             ],
+             "title": "Current Run Status"
+           },
++          "pending_dialog_kind": {
++            "anyOf": [
++              {
++                "type": "string"
++              },
++              {
++                "type": "null"
++              }
++            ],
++            "title": "Pending Dialog Kind"
++          },
+           "terminating_at": {
+             "anyOf": [
+               {
+diff --git a/frontend/src/app/(dashboard)/sessions/__tests__/page.test.tsx b/frontend/src/app/(dashboard)/sessions/__tests__/page.test.tsx
+index 08a474ec7..78c77dfae 100644
+--- a/frontend/src/app/(dashboard)/sessions/__tests__/page.test.tsx
++++ b/frontend/src/app/(dashboard)/sessions/__tests__/page.test.tsx
+@@ -2608,10 +2608,12 @@ describe("SessionPanel 轮次导航集成（task-06：跳转链路 + mobile Draw
+         expect(mocks.notifyWarning).toHaveBeenCalledWith(
+           "已连续加载 50 页仍未到达，可再次点击继续加载",
+         ),
+-      { timeout: 8000 },
++      // 全量并发下 50 页 × 满页渲染会明显排队（2026-10-22 实证 8s 窗口假失败）；
++      // 放宽等待与用例上限，语义不变（仍断言 50 页上限与 warning）。
++      { timeout: 15000 },
+     );
+     expect(beforeCallCount()).toBe(50);
+-  }, 20000);
++  }, 35000);
+ 
+   it("desktop 跳转翻页期 suppress 触顶：循环进行中 scroll 不触发自动加载，跳完恢复", async () => {
+     let resolvePage1!: (v: unknown) => void;
+diff --git a/frontend/src/components/daemon/__tests__/message-queue-bar.test.tsx b/frontend/src/components/daemon/__tests__/message-queue-bar.test.tsx
+index 8c71978a1..498b9c7a9 100644
+--- a/frontend/src/components/daemon/__tests__/message-queue-bar.test.tsx
++++ b/frontend/src/components/daemon/__tests__/message-queue-bar.test.tsx
+@@ -223,6 +223,36 @@ describe("MessageQueueBar（task-09 / D-002 D-003 D-004）", () => {
+     expect(container.textContent).not.toContain(tailMark);
+   });
+ 
++  it("引用标记在摘要与展开正文中简化为文件名（2026-10-22-session-composer-slim FR-01）", () => {
++    const uuid = "aaaaaaaa-1111-2222-3333-444444444444";
++    const prompt = `看[附件引用:${uuid}|截图.png]谢谢`;
++    const { container } = render(
++      <MessageQueueBar
++        entries={[
++          makeEntry({
++            id: "mq-ref",
++            prompt,
++            displayPrompt: `[附件:${uuid}|image|截图.png]\n\n${prompt}`,
++            attachmentIds: [uuid],
++          }),
++        ]}
++        onRemove={vi.fn()}
++        onRetry={vi.fn()}
++      />,
++    );
++
++    // 折叠摘要：人读标签，无 uuid / 协议字面。
++    expect(container.textContent).toContain("看📎 截图.png谢谢");
++    expect(container.textContent).not.toContain(uuid);
++    expect(container.textContent).not.toContain("[附件引用:");
++
++    // 展开：附件标记行被剥离，正文引用仍是简洁标签。
++    fireEvent.click(screen.getByRole("button", { name: /^等待中，/ }));
++    expect(container.textContent).toContain("看📎 截图.png谢谢");
++    expect(container.textContent).not.toContain("[附件:");
++    expect(container.textContent).not.toContain("[附件引用:");
++  });
++
+   it("附件数显示（D-004）：有附件显示「📎 N」，无附件不显示", () => {
+     render(
+       <MessageQueueBar
+diff --git a/frontend/src/components/daemon/__tests__/session-history-scroll.test.tsx b/frontend/src/components/daemon/__tests__/session-history-scroll.test.tsx
+index 0bebecdde..fd2c3c0c5 100644
+--- a/frontend/src/components/daemon/__tests__/session-history-scroll.test.tsx
++++ b/frontend/src/components/daemon/__tests__/session-history-scroll.test.tsx
+@@ -424,12 +424,12 @@ describe("scroll-up history integration", () => {
+       // 修复核心语义：scroll 事件处理器内零同步钉回（同步 apply 读 offsetTop
+       // 写 scrollTop = 强制布局，修复前风暴源）。
+       expect(writes).toBe(before);
+-      // 真实 rAF 下一帧（jsdom 原生 16ms tick）：钉回执行（50ms 窗口 <
+-      // watch interval 300ms 与锚 2.5s 存活窗，写入只可能来自钉回链路）。
+-      await act(async () => {
+-        await new Promise((r) => setTimeout(r, 50));
+-      });
+-      expect(writes).toBeGreaterThan(before);
++      // 真实 rAF 下一帧（jsdom 原生 16ms tick）：钉回执行。改用 waitFor 轮询
++      // 而非固定 50ms 窗口——全量测试并发下 jsdom rAF/定时器会明显滞后，
++      // 固定窗口会假失败（2026-10-22 实证）；语义仍是「事件内零同步写，
++      // 异步帧后才写」。watch interval 300ms 与锚 2.5s 存活窗远大于默认
++      // waitFor 轮询间隔，写入来源仍是钉回链路。
++      await waitFor(() => expect(writes).toBeGreaterThan(before));
+     } finally {
+       delete (el as { scrollTop?: number }).scrollTop;
+     }
+diff --git a/frontend/src/components/daemon/__tests__/session-input-bar-plus-menu.test.tsx b/frontend/src/components/daemon/__tests__/session-input-bar-plus-menu.test.tsx
+index 8a9d9108b..3cd817785 100644
+--- a/frontend/src/components/daemon/__tests__/session-input-bar-plus-menu.test.tsx
++++ b/frontend/src/components/daemon/__tests__/session-input-bar-plus-menu.test.tsx
+@@ -74,6 +74,42 @@ describe("SessionInputBar ＋ 功能菜单（ql-20260827-020）", () => {
+     expect(screen.queryByRole("menuitem", { name: /派团队/ })).not.toBeInTheDocument();
+   });
+ 
++  /* ── 2026-10-22-session-composer-slim FR-02：续跑开关迁入 + 菜单 ───────── */
++
++  it("autoResume 传入 → 菜单渲染勾选项；点击切换并保持菜单打开", async () => {
++    const onToggle = vi.fn();
++    render(<Harness autoResume={{ enabled: true, onToggle }} />);
++    openMenu();
++    const item = screen.getByRole("menuitemcheckbox", {
++      name: /中断自动续跑（已开启）/,
++    });
++    expect(item).toHaveAttribute("aria-checked", "true");
++    fireEvent.click(item);
++    await waitFor(() => expect(onToggle).toHaveBeenCalledWith(false));
++    // 切换不关菜单（可连续观察状态）。
++    expect(screen.getByRole("menu", { name: "输入功能" })).toBeInTheDocument();
++  });
++
++  it("autoResume 缺省 → 菜单不渲染续跑项（预会话/dialog 无会话级状态）", () => {
++    render(<Harness />);
++    openMenu();
++    expect(
++      screen.queryByRole("menuitemcheckbox", { name: /中断自动续跑/ }),
++    ).not.toBeInTheDocument();
++  });
++
++  it("autoResume.disabled（会话结束/离线）→ 禁用且点击不触发", () => {
++    const onToggle = vi.fn();
++    render(
++      <Harness autoResume={{ enabled: true, disabled: true, onToggle }} />,
++    );
++    openMenu();
++    const item = screen.getByRole("menuitemcheckbox", { name: /中断自动续跑/ });
++    expect(item).toBeDisabled();
++    fireEvent.click(item);
++    expect(onToggle).not.toHaveBeenCalled();
++  });
++
+   it("附件项 → 触发隐藏 file input 点击并关菜单", () => {
+     const clickSpy = vi
+       .spyOn(HTMLInputElement.prototype, "click")
+diff --git a/frontend/src/components/daemon/message-queue-bar.tsx b/frontend/src/components/daemon/message-queue-bar.tsx
+index 379876f09..2b421553c 100644
+--- a/frontend/src/components/daemon/message-queue-bar.tsx
++++ b/frontend/src/components/daemon/message-queue-bar.tsx
+@@ -63,6 +63,7 @@ import {
+ import { Button, Input, Tag, Tooltip } from "antd";
+ 
+ import { cn } from "@/lib/utils";
++import { formatRefsForPlainText } from "@/lib/attachment-refs";
+ import type { QueueEntry } from "@/hooks/use-message-queue";
+ import { getProviderCaps } from "@/lib/provider-caps";
+ import {
+@@ -380,7 +381,9 @@ export function MessageQueueBar({
+             ? entry.prompt.slice(TASK_WAKEUP_PROMPT_PREFIX.length).trim() ||
+               "系统通知"
+             : null;
+-          const summarySource = wakeupBody ?? entry.prompt;
++          // 2026-10-22-session-composer-slim FR-01：摘要与展开正文只展示人读引用
++          //（📎 文件名），不露出 [附件引用:uuid|…] 等协议长串；发送协议不变。
++          const summarySource = formatRefsForPlainText(wakeupBody ?? entry.prompt);
+           const summary =
+             summarySource.length > SUMMARY_LIMIT
+               ? `${summarySource.slice(0, SUMMARY_LIMIT)}…`
+@@ -457,7 +460,9 @@ export function MessageQueueBar({
+                         : "max-w-[280px] truncate",
+                     )}
+                   >
+-                    {expanded ? (wakeupBody ?? entry.displayPrompt) : summary}
++                    {expanded
++                      ? formatRefsForPlainText(wakeupBody ?? entry.displayPrompt)
++                      : summary}
+                   </span>
+                   {/* 附件数（D-004：折叠态显示；展开态 displayPrompt 已含附件标记行）。 */}
+                   {!expanded && entry.attachmentIds.length > 0 && (
+diff --git a/frontend/src/components/daemon/scheduled-messages-bar.tsx b/frontend/src/components/daemon/scheduled-messages-bar.tsx
+index 8cbf407b5..141696915 100644
+--- a/frontend/src/components/daemon/scheduled-messages-bar.tsx
++++ b/frontend/src/components/daemon/scheduled-messages-bar.tsx
+@@ -30,6 +30,7 @@ import { Clock, X } from "lucide-react";
+ import { Button, Modal, Tag, Tooltip } from "antd";
+ 
+ import { cn } from "@/lib/utils";
++import { formatRefsForPlainText } from "@/lib/attachment-refs";
+ import { ApiError } from "@/lib/api";
+ import { deleteScheduledMessage, type ScheduledMessageRead } from "@/lib/daemon";
+ import { useNotify } from "@/lib/errors";
+@@ -43,9 +44,12 @@ const SUMMARY_LIMIT = 40;
+ 
+ /**
+  * prompt 摘要（bar chip 与 panel 系统提示行「发送「{摘要}」」共用同一截断口径）。
++ * 2026-10-22-session-composer-slim FR-01：先做引用纯文本化（📎 文件名），
++ * 展示层不露出 [附件引用:uuid|…] 长串。
+  */
+ export function summarizeScheduledPrompt(prompt: string): string {
+-  return prompt.length > SUMMARY_LIMIT ? `${prompt.slice(0, SUMMARY_LIMIT)}…` : prompt;
++  const text = formatRefsForPlainText(prompt);
++  return text.length > SUMMARY_LIMIT ? `${text.slice(0, SUMMARY_LIMIT)}…` : text;
+ }
+ 
+ /**
+@@ -252,7 +256,10 @@ function ScheduledMessagesList({
+                 <span className="shrink-0 font-medium tabular-nums">
+                   {formatScheduledTime(msg.dispatch_at)}
+                 </span>
+-                <span className="max-w-[240px] truncate" title={msg.prompt}>
++                <span
++                  className="max-w-[240px] truncate"
++                  title={formatRefsForPlainText(msg.prompt)}
++                >
+                   {summarizeScheduledPrompt(msg.prompt)}
+                 </span>
+                 {/* 2026-09-12：系统自动排期徽标（origin=auto_resume:*；与状态
+diff --git a/frontend/src/components/daemon/session-input-bar.tsx b/frontend/src/components/daemon/session-input-bar.tsx
+index 2eba38461..af16a6669 100644
+--- a/frontend/src/components/daemon/session-input-bar.tsx
++++ b/frontend/src/components/daemon/session-input-bar.tsx
+@@ -40,6 +40,7 @@ import {
+   AtSign,
+   Clock,
+   FileText,
++  Check,
+   Image as ImageIcon,
+   Paperclip,
+   Plus,
+@@ -186,6 +187,18 @@ export interface SessionInputBarProps {
+   /** 工作区引用 token 映射受控回传（producer=输入区，组装位经父级
+    *  substituteWsRefsForSend 消费，同 onAttTokenMapChange 模式）。 */
+   onWsRefTokensChange?: (next: WsRefTokenMap) => void;
++  /**
++   * 2026-10-22-session-composer-slim FR-02：会话级「daemon 重启自动续跑」开关
++   * （原 SessionConfigBar 控件迁入 + 菜单）。enabled=当前生效态（缺省开由父层
++   * 归一——config.auto_resume_interrupted 仅显式 false 为关）；disabled=会话
++   * 结束/机器离线；onToggle 由父层接 PATCH 接口。不传不渲染该项（预会话/
++   * dialog 无会话级状态）。
++   */
++  autoResume?: {
++    enabled: boolean;
++    disabled?: boolean;
++    onToggle: (next: boolean) => void | Promise<void>;
++  };
+ }
+ 
+ function formatBytes(n: number): string {
+@@ -271,6 +284,7 @@ export function SessionInputBar({
+   pendingWsRefInsert,
+   onPendingWsRefInsertHandled,
+   onWsRefTokensChange,
++  autoResume,
+ }: SessionInputBarProps) {
+   const fileRef = useRef<HTMLInputElement>(null);
+   const textareaRef = useRef<HTMLTextAreaElement>(null);
+@@ -1056,6 +1070,50 @@ export function SessionInputBar({
+                   </span>
+                 </span>
+               </button>
++              {/* 2026-10-22-session-composer-slim FR-02：中断自动续跑从配置条
++                  迁入 + 菜单（开关形态：menuitemcheckbox + 勾选态）。点击切换
++                  不关菜单（可连续观察状态）；终态/离线禁用并说明原因。 */}
++              {autoResume ? (
++                <>
++                  <div aria-hidden className="my-1 border-t border-border" />
++                  <button
++                    type="button"
++                    role="menuitemcheckbox"
++                    aria-checked={autoResume.enabled}
++                    aria-label={`中断自动续跑（${autoResume.enabled ? "已开启" : "已关闭"}）`}
++                    data-testid="plus-menu-auto-resume"
++                    disabled={autoResume.disabled}
++                    onClick={() => void autoResume.onToggle(!autoResume.enabled)}
++                    title={
++                      autoResume.disabled
++                        ? "会话已结束或机器离线，不可切换"
++                        : autoResume.enabled
++                          ? "已开启：daemon 重启恢复后，被中断的一轮自动继续执行（最多自动续跑 2 次）；点击关闭"
++                          : "已关闭：daemon 重启后不自动续跑，中断轮保留手动「重新发送」；点击开启"
++                    }
++                    className="flex w-full items-center gap-2.5 px-3 py-2 text-left transition-colors hover:bg-muted disabled:cursor-not-allowed disabled:opacity-60"
++                  >
++                    <RefreshCw
++                      aria-hidden
++                      className="h-4 w-4 shrink-0 text-muted-foreground"
++                    />
++                    <span className="min-w-0 flex-1">
++                      <span className="block text-[13px] leading-5">中断自动续跑</span>
++                      <span className="block text-[11px] leading-4 text-muted-foreground">
++                        {autoResume.enabled
++                          ? "已开启：重启后中断轮自动继续"
++                          : "已关闭：重启后需手动重新发送"}
++                      </span>
++                    </span>
++                    {autoResume.enabled ? (
++                      <Check
++                        aria-hidden
++                        className="h-4 w-4 shrink-0 text-brand-600"
++                      />
++                    ) : null}
++                  </button>
++                </>
++              ) : null}
+             </div>
+           )}
+         </div>
+diff --git a/frontend/src/components/daemon/session-panel/session-panel-page.tsx b/frontend/src/components/daemon/session-panel/session-panel-page.tsx
+index 6fec788f3..a468ec05b 100644
+--- a/frontend/src/components/daemon/session-panel/session-panel-page.tsx
++++ b/frontend/src/components/daemon/session-panel/session-panel-page.tsx
+@@ -5797,6 +5797,15 @@ export function SessionPanelPage({
+           // task-08（FR-04）：⏰ 定时发送入口——真会话（已有 sessionId）注入；
+           // 预会话渲染点（上方）不传即不渲染。
+           onSchedule={openSchedModal}
++          // 2026-10-22-session-composer-slim FR-02：中断自动续跑开关从配置条迁入
++          // + 菜单（缺省开；config.auto_resume_interrupted 仅显式 false 为关）。
++          autoResume={{
++            enabled:
++              (session.config as Record<string, unknown> | null)
++                ?.auto_resume_interrupted !== false,
++            disabled: ended || !machineOnline,
++            onToggle: handleAutoResumeToggle,
++          }}
+         />
+         <div ref={configBarWrapRef} className="px-5 pb-3">
+           <SessionConfigBar
+@@ -5808,14 +5817,8 @@ export function SessionPanelPage({
+             configSnapshot={session.config_snapshot ?? null}
+             engine={session.provider ?? null}
+             variant={variant}
+-            // 2026-09-10-auto-resume-interrupted-turn / FR-06：中断自动续跑开关
+-            //（缺省开；config.auto_resume_interrupted 仅显式 false 为关）。
+-            autoResume={{
+-              enabled: (session.config as Record<string, unknown> | null)
+-                ?.auto_resume_interrupted !== false,
+-              disabled: ended || !machineOnline,
+-              onToggle: handleAutoResumeToggle,
+-            }}
++            // 2026-10-22-session-composer-slim FR-02：中断自动续跑入口已迁至
++            // 输入区 + 菜单（见上方 SessionInputBar.autoResume），配置条不再渲染。
+             // ql-20260904-010：错误卡「切换供应商」定位到本配置条（打开供应商下拉）。
+             providerOpenSignal={configProviderSignal}
+             // 2026-09-14-session-thinking-level task-06（FR-06 / R-04）：会话态
+diff --git a/frontend/src/components/daemon/turn-timeline.tsx b/frontend/src/components/daemon/turn-timeline.tsx
+index f3888025d..17b657778 100644
+--- a/frontend/src/components/daemon/turn-timeline.tsx
++++ b/frontend/src/components/daemon/turn-timeline.tsx
+@@ -80,6 +80,7 @@ import { FileMessageCard } from "@/components/daemon/file-message-card";
+ // 2026-08-20-session-multimodal-attachments task-13（D-3）：历史附件标记行解析
+ // + 图片缩略图/文件 chip 渲染。
+ import { parseAttachmentMarkers } from "@/components/daemon/runtime-session-helpers";
++import { formatRefsForPlainText } from "@/lib/attachment-refs";
+ import { turnTokenSpeedText } from "@/components/daemon/turn-speed";
+ import {
+   foldHeaderText,
+@@ -881,7 +882,9 @@ const TurnRow = memo(function TurnRow({
+                               定位 right:0 / bottom:-24px，经 className 覆盖默认右下偏移。 */}
+                           {parsed.text && (
+                             <CopyButton
+-                              getText={() => parseAttachmentMarkers(turn.prompt).text}
++                              // 2026-10-22-session-composer-slim FR-01：复制结果为
++                              // 人读文本（📎 文件名），不含协议标记。
++                              getText={() => formatRefsForPlainText(turn.prompt)}
+                               className="-bottom-6 right-0"
+                             />
+                           )}
+diff --git a/frontend/src/components/sessions/__tests__/ctx-usage-bar.test.tsx b/frontend/src/components/sessions/__tests__/ctx-usage-bar.test.tsx
+index 74ca75ee1..cf458eabd 100644
+--- a/frontend/src/components/sessions/__tests__/ctx-usage-bar.test.tsx
++++ b/frontend/src/components/sessions/__tests__/ctx-usage-bar.test.tsx
+@@ -427,7 +427,7 @@ describe("QuotaPill", () => {
+     expect(screen.queryByTestId("quota-pill")).not.toBeInTheDocument();
+   });
+ 
+-  it("智谱 quota 正常 → 渲染模型名 + 各窗口剩余 + 重置时间", async () => {
++  it("智谱 quota 正常 → 图标只显会话供应商首窗口百分比；明细（模型名/各窗口/重置）在浮层", async () => {
+     mockListProviders.mockResolvedValue([provider()]);
+     mockGetProviderQuota.mockResolvedValue(
+       quotaResp({
+@@ -440,39 +440,53 @@ describe("QuotaPill", () => {
+     );
+     renderPill(<QuotaPill providerId="p-zhipu" />);
+     const pill = await screen.findByTestId("quota-pill");
+-    expect(pill).toHaveTextContent("glm-4.7");
+-    expect(pill).toHaveTextContent("5小时窗剩");
++    // 2026-10-22-session-composer-slim FR-03 / D-001：面只留首窗口百分比。
+     expect(pill).toHaveTextContent("80%");
+-    expect(pill).toHaveTextContent("周限额剩");
+-    expect(pill).toHaveTextContent("40%");
+-    expect(pill.textContent).toMatch(/⏱ \d{2}-\d{2} \d{2}:\d{2} 重置/);
++    expect(pill.textContent).not.toContain("glm-4.7");
++    expect(pill.textContent).not.toContain("5小时窗");
++    expect(pill.textContent).not.toContain("40%");
++    expect(pill.textContent).not.toMatch(/重置/);
++    // 悬停 title 保留精简摘要（供应商 · 首窗口 · 重置）。
++    expect(pill.getAttribute("title")).toContain("glm-4.7");
++    expect(pill.getAttribute("title")).toContain("5小时窗剩 80%");
++    expect(pill.getAttribute("title")).toMatch(/\d{2}-\d{2} \d{2}:\d{2} 重置/);
++
++    // 点击浮层：完整明细照旧。
++    fireEvent.click(pill);
++    expect(await screen.findByText("模型剩余额度")).toBeInTheDocument();
++    expect(screen.getByText("5小时窗 剩余")).toBeInTheDocument();
++    expect(screen.getByText("周限额 剩余")).toBeInTheDocument();
++  });
++
++  it("低剩余变色：首窗口 ≤20% 红 / ≤50% 黄 / 正常无色", async () => {
++    const cases: Array<{ left: number; cls: string | null }> = [
++      { left: 80, cls: null },
++      { left: 50, cls: "text-warning" },
++      { left: 20, cls: "text-error" },
++    ];
++    for (const c of cases) {
++      mockListProviders.mockResolvedValue([provider()]);
++      mockGetProviderQuota.mockResolvedValue(
++        quotaResp({
++          model: "glm-4.7",
++          windows: [{ label: "5小时窗", left: c.left, reset: null }],
++        }),
++      );
++      const { unmount } = renderPill(<QuotaPill providerId="p-zhipu" />);
++      const pill = await screen.findByTestId("quota-pill");
++      const pct = Array.from(pill.querySelectorAll("span[class]")).find(
++        (s) => s.textContent === `${c.left}%`,
++      );
++      if (c.cls == null) {
++        expect(pct?.className ?? "").toBe("");
++      } else {
++        expect(pct?.className).toContain(c.cls);
++      }
++      unmount();
++    }
+   });
+ 
+-  it("低剩余变色：≤20% 红 / ≤50% 黄 / 正常无色", async () => {
+-    mockListProviders.mockResolvedValue([provider()]);
+-    mockGetProviderQuota.mockResolvedValue(
+-      quotaResp({
+-        model: "glm-4.7",
+-        windows: [
+-          { label: "5小时窗", left: 80, reset: null },
+-          { label: "低", left: 50, reset: null },
+-          { label: "危", left: 20, reset: null },
+-        ],
+-      }),
+-    );
+-    renderPill(<QuotaPill providerId="p-zhipu" />);
+-    await screen.findByTestId("quota-pill");
+-    const spans = screen
+-      .getByTestId("quota-pill")
+-      .querySelectorAll("span[class]");
+-    const byText = (t: string) =>
+-      Array.from(spans).find((s) => s.textContent === t);
+-    expect(byText("80%")?.className).toBe("");
+-    expect(byText("50%")?.className).toContain("text-warning");
+-    expect(byText("20%")?.className).toContain("text-error");
+-  });
+-
+-  it("聚合全部可查供应商：智谱走 quota 端点、Kimi 走 usage 端点、不可查的不请求；会话供应商排胶囊第一位 + 等N家", async () => {
++  it("聚合全部可查供应商：智谱走 quota 端点、Kimi 走 usage 端点、不可查的不请求；会话供应商排图标第一位", async () => {
+     mockListProviders.mockResolvedValue([
+       provider(),
+       provider({
+@@ -508,11 +522,12 @@ describe("QuotaPill", () => {
+     } satisfies UsageResult);
+     renderPill(<QuotaPill providerId="p-kimi" />);
+     const pill = await screen.findByTestId("quota-pill");
+-    // 会话供应商（Kimi）排第一位：model 名 + 其套餐窗口。
+-    expect(pill).toHaveTextContent("kimi-k2");
+-    expect(pill).toHaveTextContent("Kimi·5小时窗剩");
++    // 会话供应商（Kimi）排第一位：面只显示其首窗口百分比；其余收进 title/浮层。
+     expect(pill).toHaveTextContent("70%");
+-    expect(pill).toHaveTextContent("等1家");
++    expect(pill.textContent).not.toContain("kimi-k2");
++    expect(pill.textContent).not.toContain("等1家");
++    expect(pill.getAttribute("title")).toContain("kimi-k2");
++    expect(pill.getAttribute("title")).toContain("另有 1 家可查");
+     // 端点分流：智谱只查 quota、Kimi 只查 usage、Anthropic（不可查）不查。
+     expect(mockGetProviderQuota).toHaveBeenCalledTimes(1);
+     expect(mockGetProviderQuota).toHaveBeenCalledWith("p-zhipu");
+@@ -542,12 +557,13 @@ describe("QuotaPill", () => {
+     } satisfies UsageResult);
+     renderPill(<QuotaPill providerId="p-ds" />);
+     const pill = await screen.findByTestId("quota-pill");
+-    // 余额类无百分比窗口 → 胶囊面只显示供应商名（明细在浮层）。
+-    expect(pill).toHaveTextContent("DeepSeek");
++    // 余额类无百分比窗口 → 面只显示余额金额（供应商名/明细在 title 与浮层）。
++    expect(pill).toHaveTextContent("¥40");
+     expect(pill).not.toHaveTextContent("剩");
+     fireEvent.click(pill);
+     expect(await screen.findByText("CNY 剩余")).toBeInTheDocument();
+-    expect(screen.getByText("¥40 / 共 ¥100")).toBeInTheDocument();
++    // 图标面与浮层各一处（面显示余额金额，浮层为权威明细）。
++    expect(screen.getAllByText("¥40 / 共 ¥100").length).toBeGreaterThanOrEqual(1);
+   });
+ 
+   it("点击胶囊显示各窗口详情浮层（百分比低量红显 + 重置时间）", async () => {
+@@ -853,7 +869,8 @@ describe("QuotaPill mobile compact（ql-20260915-013）", () => {
+     renderPill(<QuotaPill providerId="p-zhipu" mobile />);
+     const pill = await screen.findByTestId("quota-pill");
+     expect(pill).toHaveTextContent("80%");
+-    expect(pill).toHaveTextContent("40%");
++    // 第二窗口不进面（只留最重要的首窗口），明细点击查看。
++    expect(pill.textContent).not.toContain("40%");
+     expect(pill.textContent).not.toContain("glm-4.7");
+     expect(pill.textContent).not.toContain("5小时窗剩");
+     expect(pill.textContent).not.toMatch(/重置/);
+@@ -862,7 +879,7 @@ describe("QuotaPill mobile compact（ql-20260915-013）", () => {
+     expect(await screen.findByText("模型剩余额度")).toBeInTheDocument();
+   });
+ 
+-  it("desktop（缺省 mobile=false）：完整胶囊照旧（零回归锚）", async () => {
++  it("desktop（缺省 mobile=false）：与 mobile 同形态（图标 + 首窗口百分比），明细点击浮层", async () => {
+     mockListProviders.mockResolvedValue([provider()]);
+     mockGetProviderQuota.mockResolvedValue(
+       quotaResp({
+@@ -872,8 +889,11 @@ describe("QuotaPill mobile compact（ql-20260915-013）", () => {
+     );
+     renderPill(<QuotaPill providerId="p-zhipu" />);
+     const pill = await screen.findByTestId("quota-pill");
+-    expect(pill).toHaveTextContent("glm-4.7");
+-    expect(pill).toHaveTextContent("5小时窗剩");
+-    expect(pill.textContent).toMatch(/重置/);
++    expect(pill).toHaveTextContent("80%");
++    expect(pill.textContent).not.toContain("glm-4.7");
++    expect(pill.textContent).not.toMatch(/重置/);
++    expect(pill.getAttribute("title")).toContain("5小时窗剩 80%");
++    fireEvent.click(pill);
++    expect(await screen.findByText("模型剩余额度")).toBeInTheDocument();
+   });
+ });
+diff --git a/frontend/src/components/sessions/__tests__/session-config-bar.test.tsx b/frontend/src/components/sessions/__tests__/session-config-bar.test.tsx
+index 3d96e7584..7d24a9e23 100644
+--- a/frontend/src/components/sessions/__tests__/session-config-bar.test.tsx
++++ b/frontend/src/components/sessions/__tests__/session-config-bar.test.tsx
+@@ -265,7 +265,7 @@ describe("SessionConfigBar 两控件渲染", () => {
+ // ── 2. running / ended 置灰（FR-05；ql-20260917-008 起 running 放开） ──────
+ 
+ describe("SessionConfigBar 状态置灰", () => {
+-  it("running：两控件可点（受理即排队，本轮结束后生效）+ Timer 提示，下拉可开", () => {
++  it("running：两控件可点（受理即排队，本轮结束后生效），下拉可开", () => {
+     renderBar({ running: true });
+     for (const name of [
+       "配置-供应商 本机默认",
+@@ -275,7 +275,9 @@ describe("SessionConfigBar 状态置灰", () => {
+         (screen.getByRole("button", { name }) as HTMLButtonElement).disabled,
+       ).toBe(false);
+     }
+-    expect(screen.getByText("运行中切换将于本轮结束后生效")).toBeInTheDocument();
++    // 2026-10-22-session-composer-slim FR-02：运行中提示行移出配置条
++    //（生效时机保留在各控件 title），释放行宽。
++    expect(screen.queryByText("运行中切换将于本轮结束后生效")).not.toBeInTheDocument();
+     // ql-20260917-008：运行中点开下拉可正常选择（请求落忙轮排队）
+     fireEvent.click(screen.getByRole("button", { name: "配置-供应商 本机默认" }));
+     expect(screen.getByTestId("config-dd-provider")).toBeInTheDocument();
+@@ -317,19 +319,17 @@ describe("SessionConfigBar 状态置灰", () => {
+   });
+   // ql-20260909-006：trailing 行尾插槽（会话面板挂 ctx 用量圆环）——
+   // 传入渲染在配置条行最右；不传零占位。
+-  it("trailing 插槽：传入内容渲染在行尾（running 提示之右），不传零占位", () => {
++  it("trailing 插槽：传入内容渲染在配置条行尾，不传零占位", () => {
+     renderBar({
+       running: true,
+       trailing: <span data-testid="trailing-slot-content">用量 12%</span>,
+     });
+     const slot = screen.getByTestId("trailing-slot-content");
+     expect(slot).toBeInTheDocument();
+-    // 与 running 提示同行——共享同一行容器（flex 行）。
++    // 与配置控件同行——共享同一行容器（flex 行）。
+     expect(
+-      slot.closest("div")?.contains(
+-        screen.getByText("运行中切换将于本轮结束后生效"),
+-      ),
+-    ).toBe(true);
++      slot.closest('[aria-label="会话配置控件条"]'),
++    ).not.toBeNull();
+ 
+     cleanup();
+     renderBar();
+@@ -1073,52 +1073,18 @@ describe("TurnTimeline whoLine 轮次快照渲染（D-008）", () => {
+ });
+ 
+ 
+-// ── 2026-09-10-auto-resume-interrupted-turn / FR-06：中断自动续跑开关 ──────────
++// ── 2026-10-22-session-composer-slim FR-02：续跑开关迁出配置条 ────────────────
+ 
+-describe("SessionConfigBar 中断自动续跑开关（autoResume 可选控件）", () => {
+-  it("不传 autoResume 不渲染（存量调用方零回归）", () => {
+-    renderBar();
+-    expect(screen.queryByTestId("config-auto-resume-switch")).toBeNull();
+-  });
+-
+-  it("传入渲染开关：默认开 + 点击触发 onToggle(false) + 禁用态不可点", async () => {
+-    const onToggle = vi.fn();
+-    const { rerender } = renderBar({ autoResume: { enabled: true, onToggle } });
+-    const sw = screen.getByTestId("config-auto-resume-switch");
+-    expect(sw.getAttribute("aria-checked")).toBe("true");
+-    fireEvent.click(sw);
+-    await waitFor(() => {
+-      expect(onToggle).toHaveBeenCalledWith(false);
++describe("SessionConfigBar 不再渲染中断自动续跑开关（入口迁至 + 菜单）", () => {
++  it("配置条无续跑开关与运行中提示（即使旧调用方残留传参也不渲染）", () => {
++    renderBar({
++      running: true,
++      // 旧调用方兼容探针：prop 已移除，运行时传参不应产生任何渲染。
++      ...({ autoResume: { enabled: true, onToggle: vi.fn() } } as any),
+     });
+-
+-    // 关态回显。
+-    rerender(
+-      <QueryClientProvider client={new QueryClient()}>
+-        <SessionConfigBar
+-          {...({ ...BASE_PROPS, autoResume: { enabled: false, onToggle } } as any)}
+-        />
+-      </QueryClientProvider>,
+-    );
+-    expect(screen.getByTestId("config-auto-resume-switch").getAttribute("aria-checked")).toBe(
+-      "false",
+-    );
+-
+-    // 禁用态：点击不触发。
+-    const onToggle2 = vi.fn();
+-    rerender(
+-      <QueryClientProvider client={new QueryClient()}>
+-        <SessionConfigBar
+-          {...({
+-            ...BASE_PROPS,
+-            autoResume: { enabled: true, disabled: true, onToggle: onToggle2 },
+-          } as any)}
+-        />
+-      </QueryClientProvider>,
+-    );
+-    const disabledSw = screen.getByTestId("config-auto-resume-switch");
+-    expect(disabledSw.classList.contains("ant-switch-disabled")).toBe(true);
+-    fireEvent.click(disabledSw);
+-    expect(onToggle2).not.toHaveBeenCalled();
++    expect(screen.queryByTestId("config-auto-resume-switch")).toBeNull();
++    expect(screen.queryByText("中断自动续跑")).toBeNull();
++    expect(screen.queryByText("运行中切换将于本轮结束后生效")).toBeNull();
+   });
+ });
+ 
+@@ -1397,13 +1363,12 @@ describe("SessionConfigBar 会话态档位切换控件（task-06 / FR-06 / R-04
+ // ── 9. ql-20260915-009 手机端降噪：variant="mobile" 收低频控件 ────────────────
+ 
+ describe("SessionConfigBar 手机端降噪（ql-20260915-009 variant=mobile）", () => {
+-  it("mobile：思考档位/档案/中断自动续跑不渲染，供应商控件保留（供应商+模型+额度形态）", async () => {
++  it("mobile：思考档位/档案不渲染，供应商控件保留（供应商+模型+额度形态）", async () => {
+     renderBar({
+       variant: "mobile",
+       llmProviderId: "prov-kimi",
+       agentProfileId: "prof-1",
+       thinkingLevel: {},
+-      autoResume: { enabled: true, onToggle: vi.fn() },
+     });
+     // 低频设置项收走。
+     expect(
+@@ -1425,7 +1390,6 @@ describe("SessionConfigBar 手机端降噪（ql-20260915-009 variant=mobile）",
+       llmProviderId: "prov-kimi",
+       agentProfileId: "prof-1",
+       thinkingLevel: {},
+-      autoResume: { enabled: true, onToggle: vi.fn() },
+     });
+     expect(
+       await screen.findByRole("button", { name: "配置-供应商 Kimi 中转" }),
+@@ -1434,18 +1398,18 @@ describe("SessionConfigBar 手机端降噪（ql-20260915-009 variant=mobile）",
+       screen.getByRole("button", { name: "配置-档案 知识经理" }),
+     ).toBeInTheDocument();
+     expect(screen.getByTestId("config-thinking-select")).toBeInTheDocument();
+-    expect(screen.getByTestId("config-auto-resume-switch")).toBeInTheDocument();
++    // 续跑入口已迁出配置条（2026-10-22-session-composer-slim FR-02）。
++    expect(screen.queryByTestId("config-auto-resume-switch")).toBeNull();
+     // 「设置」展开钮仅 mobile 渲染。
+     expect(screen.queryByTestId("config-mobile-more")).toBeNull();
+   });
+ 
+-  it("mobile：点「设置」展开思考档位/档案/自动续跑，再点收起隐藏（ql-20260915-011 收入口不砍功能）", async () => {
++  it("mobile：点「设置」展开思考档位/档案，再点收起隐藏（ql-20260915-011 收入口不砍功能）", async () => {
+     renderBar({
+       variant: "mobile",
+       llmProviderId: "prov-kimi",
+       agentProfileId: "prof-1",
+       thinkingLevel: {},
+-      autoResume: { enabled: true, onToggle: vi.fn() },
+     });
+     // 默认收起：三控件不可见，展开钮存在。
+     expect(screen.getByTestId("config-mobile-more")).toHaveAttribute(
+@@ -1465,7 +1429,6 @@ describe("SessionConfigBar 手机端降噪（ql-20260915-009 variant=mobile）",
+       screen.getByRole("button", { name: "配置-档案 知识经理" }),
+     ).toBeInTheDocument();
+     expect(screen.getByTestId("config-thinking-select")).toBeInTheDocument();
+-    expect(screen.getByTestId("config-auto-resume-switch")).toBeInTheDocument();
+     // 收起：回到紧凑态。
+     fireEvent.click(screen.getByTestId("config-mobile-more"));
+     expect(
+@@ -1474,17 +1437,17 @@ describe("SessionConfigBar 手机端降噪（ql-20260915-009 variant=mobile）",
+     expect(screen.queryByTestId("config-thinking-select")).not.toBeInTheDocument();
+   });
+ 
+-  it("mobile：running 不渲染「运行中切换将于本轮结束后生效」文字提示（ql-20260915-013 一行化，控件 title 已表意）", () => {
++  it("desktop/mobile 均不渲染「运行中切换将于本轮结束后生效」提示（2026-10-22-session-composer-slim FR-02）", () => {
++    renderBar({ running: true });
++    expect(
++      screen.queryByText("运行中切换将于本轮结束后生效"),
++    ).not.toBeInTheDocument();
++    cleanup();
+     renderBar({ variant: "mobile", running: true });
+     expect(
+       screen.queryByText("运行中切换将于本轮结束后生效"),
+     ).not.toBeInTheDocument();
+   });
+-
+-  it("desktop：running 提示照旧（零回归锚；ql-20260917-008 文案改排队说明）", () => {
+-    renderBar({ running: true });
+-    expect(screen.getByText("运行中切换将于本轮结束后生效")).toBeInTheDocument();
+-  });
+ });
+ 
+ // ── 2026-10-21-provider-default-ui-hint：兜底项文案动态化 ────────────────────
+diff --git a/frontend/src/components/sessions/__tests__/session-status-indicator.test.tsx b/frontend/src/components/sessions/__tests__/session-status-indicator.test.tsx
+new file mode 100644
+index 000000000..5308f14a0
+--- /dev/null
++++ b/frontend/src/components/sessions/__tests__/session-status-indicator.test.tsx
+@@ -0,0 +1,78 @@
++// 2026-10-20-session-awaiting-answer-status：行首状态指示器「等待你回答」问号
++// 形态单测——agent 提问（SessionDialogRequest pending）期间 run 仍 running，
++// 左栏必须显示问号而非转圈，让用户看出交互停在自己身上。
++//
++// 覆盖：
++//   1. pending_dialog_kind 非空 + run running → question（压过转圈）；
++//   2. 终态权威优先：ended/failed 即使残留 pending_dialog_kind 也走绿点/红点；
++//   3. 回答后（kind=None）run 仍 running → 回归转圈；
++//   4. None 时既有五分类零回归（pending_approval 琥珀 / running 转圈 /
++//      working 转圈 / blocked 琥珀 / reconnecting 转圈 / idle+unread 绿点 /
++//      全无信号留白）。
++import { describe, it, expect } from "vitest";
++
++import { sessionStatusIndicator } from "../session-list-panel";
++
++describe("sessionStatusIndicator 等待回答问号（2026-10-20-session-awaiting-answer-status）", () => {
++  it("pending_dialog_kind 非空 + run running → 问号「等待你回答」（压过转圈）", () => {
++    const ind = sessionStatusIndicator(
++      "active",
++      "working",
++      false,
++      "running",
++      "AskUserQuestion",
++    );
++    expect(ind).toEqual({ kind: "question", label: "等待你回答" });
++  });
++
++  it("终态 ended 权威优先：残留 pending_dialog_kind 仍显示绿点", () => {
++    const ind = sessionStatusIndicator("ended", "idle", false, null, "AskUserQuestion");
++    expect(ind).toEqual({ kind: "dot", cls: "bg-success", label: "执行完成" });
++  });
++
++  it("终态 failed 权威优先：残留 pending_dialog_kind 仍显示红点", () => {
++    const ind = sessionStatusIndicator("failed", "blocked", false, null, "AskUserQuestion");
++    expect(ind).toEqual({ kind: "dot", cls: "bg-destructive", label: "异常失败" });
++  });
++
++  it("回答后 kind=None + run 仍 running → 回归转圈「正在执行」", () => {
++    const ind = sessionStatusIndicator("active", "working", false, "running", null);
++    expect(ind).toEqual({ kind: "spinner", label: "正在执行" });
++  });
++
++  it("零回归：None 时既有分类逐一不变", () => {
++    // run 等审批 → 琥珀
++    expect(sessionStatusIndicator("active", "working", false, "pending_approval", null)).toEqual(
++      { kind: "dot", cls: "bg-warning-500", label: "在等你" },
++    );
++    // run pending/running → 转圈
++    expect(sessionStatusIndicator("active", null, false, "pending", null)).toEqual({
++      kind: "spinner",
++      label: "正在执行",
++    });
++    // 活性兜底 working → 转圈
++    expect(sessionStatusIndicator("active", "working", false, null, undefined)).toEqual({
++      kind: "spinner",
++      label: "正在执行",
++    });
++    // 活性 blocked → 琥珀
++    expect(sessionStatusIndicator("active", "blocked", false, null, undefined)).toEqual({
++      kind: "dot",
++      cls: "bg-warning-500",
++      label: "在等你",
++    });
++    // reconnecting → 转圈
++    expect(sessionStatusIndicator("reconnecting", null, false, null, null)).toEqual({
++      kind: "spinner",
++      label: "恢复中",
++    });
++    // idle + 完成未读 → 绿点
++    expect(sessionStatusIndicator("active", "idle", true, null, null)).toEqual({
++      kind: "dot",
++      cls: "bg-success",
++      label: "执行完成",
++    });
++    // 全无信号 → 留白
++    expect(sessionStatusIndicator("active", "idle", false, null, null)).toBeNull();
++  });
++});
+diff --git a/frontend/src/components/sessions/ctx-usage-bar.tsx b/frontend/src/components/sessions/ctx-usage-bar.tsx
+index 50973c9f8..e7802602b 100644
+--- a/frontend/src/components/sessions/ctx-usage-bar.tsx
++++ b/frontend/src/components/sessions/ctx-usage-bar.tsx
+@@ -28,6 +28,7 @@
+ import { Popover, InputNumber, Button } from "antd";
+ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+ import { useQuery } from "@tanstack/react-query";
++import { Gauge } from "lucide-react";
+ 
+ import {
+   detectUsageProvider,
+@@ -503,9 +504,8 @@ export interface QuotaPillProps {
+    */
+   providerId: string | null | undefined;
+   /**
+-   * ql-20260915-013 手机端一行化：compact 只显剩余百分比数字（模型名/「X 剩」
+-   * 标签/重置时间/「等 N 家」全收进点击浮层——浮层本来就是权威明细入口），
+-   * 防 verbose 胶囊占满手机配置行；desktop 缺省零变化。
++   * 手机端紧凑尺寸（2026-10-22-session-composer-slim FR-03 起桌面与移动端
++   * 同为「图标 + 首窗口百分比」形态，mobile 仅控制像素尺寸）。
+    */
+   mobile?: boolean;
+ }
+@@ -626,9 +626,21 @@ export function QuotaPill({ providerId, mobile = false }: QuotaPillProps) {
+ 
+   const face = sortedEntries[0]!;
+   const restCount = sortedEntries.length - 1;
+-  const faceReset = face.tiers.find((t) => t.reset)?.reset;
+-  // 胶囊单行只带百分比窗口（同旧口径）；余额类 supplier 的明细见浮层。
++  // 2026-10-22-session-composer-slim FR-03 / D-001：图标面只显示当前会话
++  // 供应商的首个百分比窗口（排序已把会话供应商置顶）；纯余额类显示余额金额；
++  // 模型名/其余窗口/重置时间/「等 N 家」全部收进点击浮层与 title。
+   const facePctTiers = face.tiers.filter((t) => t.leftPct != null);
++  const headTier = facePctTiers[0] ?? face.tiers[0] ?? null;
++  const headPct = headTier?.leftPct ?? null;
++  const faceReset = headTier?.reset ?? null;
++  const faceLabel = `${face.providerName}${face.model ? ` · ${face.model}` : ""}`;
++  const restHint = restCount > 0 ? `；另有 ${restCount} 家可查` : "";
++  const pillTitle =
++    headPct != null
++      ? `${faceLabel}｜${headTier?.label ?? "额度"}剩 ${headPct}%${
++          faceReset ? `｜${formatQuotaResetTime(faceReset)} 重置` : ""
++        }${restHint}（点击查看全部明细）`
++      : `${faceLabel}｜${formatQuotaBalance(headTier?.balance ?? null)}${restHint}（点击查看全部明细）`;
+ 
+   const detail = (
+     <div style={{ width: 264 }}>
+@@ -676,46 +688,27 @@ export function QuotaPill({ providerId, mobile = false }: QuotaPillProps) {
+ 
+   return (
+     <Popover trigger="click" content={detail} placement="topLeft">
+-      <span
++      <button
++        type="button"
+         data-testid="quota-pill"
+-        className="inline-flex shrink-0 cursor-pointer select-none items-center gap-[5px] whitespace-nowrap rounded-full bg-muted px-2.5 py-[3px] text-[11px] text-muted-foreground hover:text-foreground"
++        aria-label={`模型额度：${pillTitle}`}
++        title={pillTitle}
++        className={`inline-flex shrink-0 cursor-pointer select-none items-center gap-1 whitespace-nowrap rounded-md border border-border bg-card text-muted-foreground transition-colors hover:border-brand-300 hover:bg-brand-50 hover:text-foreground ${
++          mobile ? "px-1 py-[2px] text-[10px]" : "px-1.5 py-[3px] text-[11px]"
++        }`}
+         onMouseEnter={handlePillMouseEnter}
+         onMouseLeave={clearHoverTimer}
+       >
+-        {mobile ? (
+-          // compact：仅百分比（多窗斜杠分隔），明细点击浮层看。
+-          facePctTiers.map((t, i) => (
+-            <span key={i} className={quotaLeftToneClass(t.leftPct!)}>
+-              {i > 0 ? "/" : ""}
+-              {t.leftPct}%
+-            </span>
+-          ))
+-        ) : (
+-          <>
+-            {face.model ? (
+-              <b className="font-semibold text-foreground">{face.model}</b>
+-            ) : (
+-              <b className="font-semibold text-foreground">{face.providerName}</b>
+-            )}
+-            {facePctTiers.map((t, i) => (
+-              <span key={i}>
+-                · {t.label}剩{" "}
+-                <span className={quotaLeftToneClass(t.leftPct!)}>{t.leftPct}%</span>
+-              </span>
+-            ))}
+-            {faceReset ? (
+-              <span className="text-[10px] text-muted-foreground">
+-                ⏱ {formatQuotaResetTime(faceReset)} 重置
+-              </span>
+-            ) : null}
+-            {restCount > 0 ? (
+-              <span className="text-[10px] text-muted-foreground">
+-                等{restCount}家
+-              </span>
+-            ) : null}
+-          </>
+-        )}
+-      </span>
++        <Gauge
++          aria-hidden
++          className={`shrink-0 text-brand-600 ${mobile ? "h-3 w-3" : "h-3.5 w-3.5"}`}
++        />
++        {headPct != null ? (
++          <span className={quotaLeftToneClass(headPct)}>{headPct}%</span>
++        ) : headTier?.balance ? (
++          <span>{formatQuotaBalance(headTier.balance)}</span>
++        ) : null}
++      </button>
+     </Popover>
+   );
+ }
+diff --git a/frontend/src/components/sessions/session-config-bar.tsx b/frontend/src/components/sessions/session-config-bar.tsx
+index 264f2b3e2..4e2d475e2 100644
+--- a/frontend/src/components/sessions/session-config-bar.tsx
++++ b/frontend/src/components/sessions/session-config-bar.tsx
+@@ -54,8 +54,8 @@
+  */
+ import { useEffect, useMemo, useRef, useState } from "react";
+ import { useQuery, useQueryClient } from "@tanstack/react-query";
+-import { Dropdown, Switch, Tag, Tooltip, type MenuProps } from "antd";
+-import { Brain, ChevronDown, Cloud, GitBranch, Settings2, Timer, User } from "lucide-react";
++import { Dropdown, Tag, Tooltip, type MenuProps } from "antd";
++import { Brain, ChevronDown, Cloud, GitBranch, Settings2, User } from "lucide-react";
+ 
+ import { ApiError } from "@/lib/api";
+ import type { components } from "@/lib/api-types";
+@@ -210,17 +210,8 @@ export interface SessionConfigBarProps {
+    * injectSession（会话尚未创建），父层经 onProvisionalSwitch 收值并入首句
+    * createSession（llm_provider_id/agent_profile_id）。running/ended 传 false 即可。
+    */
+-  /**
+-   * 2026-09-10-auto-resume-interrupted-turn / FR-06：会话级「daemon 重启自动
+-   * 续跑」开关控件（不传不渲染，存量调用方零回归）。enabled=当前生效态
+-   * （缺省开由父层归一——config.auto_resume_interrupted 仅显式 false 为关）；
+-   * onToggle 由父层接 PATCH /sessions/{id}/auto-resume + 会话态刷新。
+-   */
+-  autoResume?: {
+-    enabled: boolean;
+-    disabled?: boolean;
+-    onToggle: (next: boolean) => void | Promise<void>;
+-  };
++  // 2026-10-22-session-composer-slim FR-02：原 autoResume 开关从配置条移除，
++  // 入口迁至输入区 + 菜单（SessionInputBar.autoResume）。
+   provisional?: boolean;
+   onProvisionalSwitch?: (
+     field: Exclude<SessionConfigSwitchField, "model">,
+@@ -382,7 +373,6 @@ export function SessionConfigBar({
+   onProvisionalThinkingLevelSwitch,
+   thinkingLevel,
+   trailing,
+-  autoResume,
+   providerOpenSignal = 0,
+   variant = "desktop",
+ }: SessionConfigBarProps) {
+@@ -1070,46 +1060,18 @@ export function SessionConfigBar({
+         {/* ql-20260915-009：mobile 不渲染弹性占位（次要开关同收，flex-wrap 行内
+             留它只会把行尾插槽顶到下一行）。 */}
+         {!mobile && <span className="flex-1" />}
+-        {/* 2026-09-10-auto-resume-interrupted-turn / FR-06：中断自动续跑开关——
+-            daemon 重启恢复后被中断轮自动续跑（默认开）；ql-20260915-009 mobile
+-            默认收进「设置」展开态（ql-20260915-011：收入口不砍功能）。 */}
+-        {autoResume != null && mobileReveal && (
+-          <label
+-            className="inline-flex shrink-0 items-center gap-1.5 text-[11px] text-muted-foreground"
+-            title={
+-              autoResume.enabled
+-                ? "已开启：daemon 重启恢复后，被中断的一轮自动继续执行（续跑提示词包装，最多自动续跑 2 次）"
+-                : "已关闭：daemon 重启后不自动续跑，中断轮保留手动「重新发送」"
+-            }
+-          >
+-            <Switch
+-              size="small"
+-              checked={autoResume.enabled}
+-              disabled={autoResume.disabled}
+-              onChange={(next) => void autoResume.onToggle(next)}
+-              aria-label="中断自动续跑"
+-              data-testid="config-auto-resume-switch"
+-            />
+-            中断自动续跑
+-          </label>
+-        )}
+-        {/* ql-20260917-008：running 不再是锁——四控件运行中可点（受理即排队/
+-            暂存，本轮结束后生效），提示行改信息性说明；desktop 文字，mobile 收
+-            （ql-20260915-013 一行化——控件 title 已带说明，不占行）。 */}
+-        {running && !mobile && (
+-          <span className="inline-flex items-center gap-1 text-[10.5px] text-muted-foreground">
+-            <Timer aria-hidden className="h-3 w-3" />
+-            运行中切换将于本轮结束后生效
+-          </span>
+-        )}
+-        {/* ql-20260915-011：mobile「设置」展开钮——默认收起的思考档位/档案/
+-            自动续跑经此可达（收入口不砍功能）；仅 mobile 渲染，desktop 零变化。 */}
++        {/* 2026-10-22-session-composer-slim FR-02：中断自动续跑开关与「运行中
++            切换将于本轮结束后生效」提示行移出配置条——续跑入口统一收进输入区
++            + 菜单（SessionInputBar），运行中生效说明保留在各控件 title 中，
++            释放行宽降低视觉噪音。 */}
++        {/* ql-20260915-011：mobile「设置」展开钮——默认收起的思考档位/档案
++            经此可达（收入口不砍功能）；仅 mobile 渲染，desktop 零变化。 */}
+         {mobile && (
+           <button
+             type="button"
+             aria-expanded={mobileMoreOpen}
+             aria-label={mobileMoreOpen ? "收起会话设置" : "更多会话设置"}
+-            title={mobileMoreOpen ? "收起会话设置" : "思考档位 / 智能体档案 / 中断自动续跑"}
++            title={mobileMoreOpen ? "收起会话设置" : "思考档位 / 智能体档案"}
+             data-testid="config-mobile-more"
+             onClick={() => setMobileMoreOpen((v) => !v)}
+             className={cn(
+diff --git a/frontend/src/components/sessions/session-list-panel.tsx b/frontend/src/components/sessions/session-list-panel.tsx
+index 1915dbe34..1ed71d1cc 100644
+--- a/frontend/src/components/sessions/session-list-panel.tsx
++++ b/frontend/src/components/sessions/session-list-panel.tsx
+@@ -589,6 +589,9 @@ function engineValueOf(s: AgentSessionRead): string | null {
+  * 口径改轮次级）：
+  *   - failed        → 红点（异常）
+  *   - ended         → 绿点（执行完成——会话级终态）
++ *   - 等待回答      → 问号（agent 提问等用户回答：pending_dialog_kind 非空，
++ *                     压过 run running 转圈——交互停在用户身上，见 2026-10-20-
++ *                     session-awaiting-answer-status）
+  *   - 活性 working  → 动态转圈（正在执行——本平台 active 只表示「会话开着」
+  *                     哪怕空闲，故「进行中」以活性推导 working 为准）
+  *   - 活性 blocked  → 琥珀点（在等你：等审批/等回答）
+@@ -602,19 +605,25 @@ function engineValueOf(s: AgentSessionRead): string | null {
+ type SessionStatusIndicator =
+   | { kind: "dot"; cls: string; label: string }
+   | { kind: "spinner"; label: string }
++  | { kind: "question"; label: string }
+   | null;
+ 
+ /** 行首状态标识单一源（status × 活性 state × 完成标记 → 形态；纯函数便于单测）。 */
+-function sessionStatusIndicator(
++export function sessionStatusIndicator(
+   status: AgentSessionStatus,
+   livenessState?: AgentLogListItem["state"] | null,
+   completedUnread?: boolean,
+   currentRunStatus?: string | null,
++  pendingDialogKind?: string | null,
+ ): SessionStatusIndicator {
+   if (status === "failed")
+     return { kind: "dot", cls: "bg-destructive", label: "异常失败" };
+   if (status === "ended")
+     return { kind: "dot", cls: "bg-success", label: "执行完成" };
++  // ── 2026-10-20-session-awaiting-answer-status：等待用户回答优先于 run 瞬态
++  // ——提问挂起期间 run 仍是 running，但交互已停在用户身上，转圈会误导；
++  // 终态（failed/ended）仍在更前面权威优先。 ──
++  if (pendingDialogKind) return { kind: "question", label: "等待你回答" };
+   // ── 2026-10-16-session-run-status-realtime：run 状态第一优先信号（后端
+   // 权威实时——发消息瞬间 running、等审批 pending_approval，不依赖 daemon
+   // 日志活性上报链）；压过活性推导（run 等审批时日志可能还在写显示 working，
+@@ -3323,6 +3332,18 @@ function SessionStatusSlot({
+           className="h-3 w-3 shrink-0 animate-spin text-muted-foreground"
+         />
+       )}
++      {indicator?.kind === "question" && (
++        /* 2026-10-20-session-awaiting-answer-status：等待用户回答——问号字形
++           （描边圆 + ?，warning 语义色；与琥珀点同族但形态可区分，色阶只用
++           已定义的 DEFAULT token，避免 bg-warning-500 未生成类的既有隐患）。 */
++        <span
++          aria-label={indicator.label}
++          title={indicator.label}
++          className="flex h-3.5 w-3.5 shrink-0 items-center justify-center rounded-full border-[1.5px] border-warning text-[10px] font-bold leading-none text-warning"
++        >
++          ?
++        </span>
++      )}
+       {completedUnread && (
+         <span
+           aria-label="此会话已执行完成"
+@@ -3504,6 +3525,7 @@ function SessionRow({
+               liveness?.state,
+               completedUnreadVisible,
+               session.current_run_status,
++              session.pending_dialog_kind,
+             )}
+             liveness={liveness}
+             completedUnread={completedUnreadVisible}
+diff --git a/frontend/src/lib/api-types.ts b/frontend/src/lib/api-types.ts
+index c1d3c6c1f..fe485c8f3 100644
+--- a/frontend/src/lib/api-types.ts
++++ b/frontend/src/lib/api-types.ts
+@@ -13565,6 +13565,8 @@ export interface components {
+             current_run_id?: string | null;
+             /** Current Run Status */
+             current_run_status?: string | null;
++            /** Pending Dialog Kind */
++            pending_dialog_kind?: string | null;
+             /** Terminating At */
+             terminating_at?: string | null;
+             /** Agent Profile Id */

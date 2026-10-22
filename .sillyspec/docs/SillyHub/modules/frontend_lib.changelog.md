@@ -27,3 +27,4 @@ created_at: 2026-10-16 16:40:00
 - 2026-10-22-session-trajectory-third-view | 把会话轨迹从「进度」视图内的第二层呈现开关上移为与「对话 / 进度」并列的第三个顶层视图，同时修复轨…
 - 2026-10-22-turn-trigger-metadata-p2 | 轮触发溯源 Phase 2：定时消息接入与 metadata 戳驱动
 - 2026-10-22-sillyspec-probe-db-missing-evict | 已删工作区探针自动淘汰与诊断增强
+- 2026-10-20-session-awaiting-answer-status | 左侧会话状态补充等待回答问号

@@ -1,0 +1,55 @@
+tier: thin
+legacy_fallback: false
+substeps:
+  artifacts: done
+  ledger: done
+  patch: done
+  review: done
+  probes: done
+  distill: done
+  archive: done
+  events: done
+born_face: thin
+with_tasks: false
+review_force: null
+input: >-
+  左侧会话状态补充等待回答问号
+
+
+  用户要求：会话页左侧列表的状态补充一个类型——会话中若 agent 调用 AskUserQuestion 等用户回答问题（等待回答），状态要显示问号。现状：左侧 sessionStatusIndicator 只有
+  failed/ended/run 状态（pending_approval 琥珀「在等你」/running 转圈）与活性 blocked 琥珀点；等待用户回答时 run 仍是
+  running，列表显示转圈「正在执行」，用户看不出在等自己。数据面已查明：SessionDialogRequest 表按 status='pending'
+  持久化所有用户对话题（dialog_kind=AskUserQuestion/plan_approval/codex_request_user_input/mcp_elicitation/pi_extension_ui），左栏当前未消费。
+
+
+  成功标准：
+
+  - 列表端点批量注入等待回答标记（照 current_run_status 的 IN 批查先例，零 N+1），存在 pending 对话请求的会话下发该标记
+
+  - 左侧状态指示器新增「问号」形态（等待回答），压过 run running 的转圈；终端态 failed/ended 仍权威优先
+
+  - 无 pending 对话的会话展示零回归（既有五分类不变）
+
+  - 后端注入与前端指示器有单测覆盖，触及面测试全绿
+autopilot: false
+prestage_ack: true
+baseline_commit: 0770c110a5f9d3a4e6f254a3bd4ad559645efceb
+updatedAt: '2026-10-22T16:57:28.961Z'
+cross_baselines:
+  sillyspec: 8ff68ada697ec4d4af9ce0a90c4055091985e319
+baseline_sha256: c1d6e6946023f9b9ec9f5e8fe7445b8ae563273ecda8e26504efb63ce92c63c1
+spec_approved: true
+spec_approved_at: '2026-10-22T16:01:03.027Z'
+spec_approved_by: zcode-awaiting-answer-status
+spec_approved_channel: agent-self
+spec_attested_by: zcode-awaiting-answer-status
+batch_ticked: true
+gate_summary: >-
+  test: skipped ← module[]+deps(py76+nontest-skip4+jsx96+jsx3+jsx30+jsx-e2e-skip1)+fr(207)（507.3s）
+  结果：C:\Users\qinyi\IdeaProjects\multi-agent-platform\.sillyspec\.runtime\verify-runs\20261022164149\test-result.json —
+  跳过原因：模块子集含环境缺件跳过（已跑模块全绿）：deps(auto-nontest-skip)、deps(auto-jsx-e2e-skip)——补装依赖后恢复实测。｜lint: passed ← cd backend && uv
+  run ruff check . && uv run ruff format --check . && uv run mypy app && cd ../frontend && pnpm lint && cd
+  ../sillyhub-daemon && pnpm typecheck（7.1s）
+  结果：C:\Users\qinyi\IdeaProjects\multi-agent-platform\.sillyspec\.runtime\verify-runs\20261022164149\test-result.json｜门文件
+  24 个
+
