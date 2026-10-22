@@ -1,0 +1,16 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-22-sillyspec-probe-db-missing-evict",
+  "reviewer": "subagent",
+  "verdict": "PASS",
+  "reviewedAgainst": "b01334c76b3644cff83b081c3942d73823c95f46",
+  "findings": [],
+  "dimensionNotes": {
+    "乱序": "ok",
+    "并发": "ok",
+    "切换": "ok",
+    "作用域": "ok"
+  },
+  "reviewedAt": "2026-10-23T00:38:52+08:00",
+  "notes": "复审历史：\n- 第 1 轮（HEAD f44694e1）：FAIL，5 findings（1×P2 + 4×P3）——P2 重新 claim 恢复采集未实现；P3 evict 持久化绕过串行链；P3 仅按 wsId 删；P3 JSDoc 错位；P3 绑定名失配。\n- 第 2 轮（HEAD c5522d04bdb3b7669313a2eec2b9555c2a69f193，任务给定完整哈希 c5522d04b3356fd63… 在仓中 bad object，按实际 HEAD 复审）：PASS，4/5 清偿（clearStatusProbeEviction + daemon:5709 接线 + 恢复测试断言 / 串行链 / rootPath 守卫 / 绑定名对齐），遗留 P3 JSDoc 未真正归位。\n- 第 3 轮（HEAD a9dc61627f8ff4c384e68e79c85b7e32cc0cc316）：遗留 P3 清偿——纯注释移动（runProgressJsonDefault JSDoc 归位、parseProgressEnvelopeCodes 换自有简短 JSDoc），72 passed + tsc 零错。findings 清零。\n- 第 4 轮（HEAD b01334c76b3644cff83b081c3942d73823c95f46，并行会话 docs 提交）：git show 核实该提交仅触及另一变更（2026-10-22-session-composer-slim）的 3 个文档/勾选件（task-ticks.jsonl、tasks.md、visual-evidence.md，+38/-4）；对 name-only 清单 grep 本变更交付面三文件（sillyhub-daemon/src/sillyspec-manager.ts、daemon.ts、tests/sillyspec-manager.test.ts）零命中——确不触及本变更交付面，工作区交付面零漂移，无新问题引入。verdict 维持 PASS，findings 维持空。\n\n检查单终态（第 2/3 轮逐条核实结论在本轮不受 docs 提交影响，全部维持）：\n1. FR↔实现↔测试：4 条 FR 全兑现——FR-01 主行为（3 次淘汰/evict 回调/心跳槽位清除/第 4 轮 skip 拦截）+ 场景2（重新 claim 清标记恢复采集，测试断言第 5 轮 CLI 重新被调）；FR-02（nonzero_exit 记账 + stdout_head + db_missing warn 不计瞬态）；FR-03（成功清计数）；FR-04（定向 72 全绿）。requirements 四条绑定名与实际用例标题字面一致。\n2. 盲维四问与 diff 相符：问1 串行轮询/cwd 键控；问2 evict 持久化挂 _statusRootPersistChain 与 claim 串行；问3 重新 claim 即恢复（clearStatusProbeEviction）+ 重启不复活主路径；问4 rootPath 守卫实现 wsId+cwd 精确删除。null-wsId/非 UUID claim 提前 return 不触发清除，与 design 问4「legacy 只做 cwd 级跳过」披露一致。\n3. 边界裁决：误淘汰可恢复——可接受（恢复路径已实现且测试断言，恢复后仍缺库重新计满 3 次，噪音有界）；CLI envelope 契约降级——可接受（parseProgressEnvelopeCodes 失败回退 nonzero_exit 记账）；放弃方案 A/B——可接受（CLI 零改动贯穿各轮）。\n4. 防护声明全部属实：db_missing return true 不经 _recordStatusError；skip 表拦截后续轮；statusRootEvict 可选 ?. 缺省零回归；成功清计数；clearStatusProbeEviction 同时清 skip 表与连败计数。\n5. 生成物同步：design 接口契约（clearStatusProbeEviction + evict 守卫/串行链）、文件清单、模块文档、deps JSDoc 与实现一致。\n\n其他观察（不计 finding）：守卫抑制分支无 daemon 侧日志（极窄竞态路径可观测性小缺口）；daemon 侧 _noteSillySpecStatusRoot→clearStatusProbeEviction 接线无 daemon 级测试（与 statusRootEvict 接线同深度，manager 级语义已覆盖）；change.patch 冻结面含并行变更 hunks（共享工作区冻结工件）。\n\n复跑摘要：最近一次代码态复跑在第 3 轮（a9dc61627，本变更交付面在其后零代码变化）：72 passed / 0 failed（147ms，无时序类失败）+ tsc --noEmit 零错；第 4 轮仅核验提交范围与工作区漂移（交付面零漂移），无需重跑。\n\n结论：PASS，findings 清零。"
+}

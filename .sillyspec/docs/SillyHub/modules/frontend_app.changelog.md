@@ -37,3 +37,4 @@ created_at: 2026-09-03 14:49:48
 - 2026-10-21-mobile-scan-birth-cleanup | 移动端与变更中心scan起步口径清零
 - 2026-10-22-review-risk-fixes | 审查修复：原型路由防线与监听泄漏
 - 2026-10-22-file-changes-card-fix | 文件变更卡采集与展示修复
+- 2026-10-22-sillyspec-probe-db-missing-evict | 已删工作区探针自动淘汰与诊断增强

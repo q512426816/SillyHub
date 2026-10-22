@@ -168,3 +168,4 @@
 | 2026-10-22 | 2026-10-22-turn-trigger-metadata-p2 | 轮触发溯源 Phase 2：定时消息接入与 metadata 戳驱动 |
 | 2026-10-22 | 2026-10-22-trajectory-view-redesign | 2026-10-22-trajectory-view-redesign |
 | 2026-10-22 | 2026-10-22-file-changes-card-fix | 文件变更卡采集与展示修复 |
+| 2026-10-22 | 2026-10-22-sillyspec-probe-db-missing-evict | 已删工作区探针自动淘汰与诊断增强 |

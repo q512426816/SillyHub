@@ -1,7 +1,7 @@
 {
   "change": "2026-10-22-sillyspec-probe-db-missing-evict",
   "baseline": "58cc4d8f1c0c5a99b0b1a710a031f824c1d7b970",
-  "head": "f44694e1fa4879d799846bac4d67a38da0c84c52",
+  "head": "b01334c76b3644cff83b081c3942d73823c95f46",
   "files": [
     ".sillyspec/docs/sillyhub-daemon/modules/sillyspec-manager.md",
     "backend/app/modules/daemon/router/session_crud.py",
@@ -19,8 +19,10 @@
     "frontend/src/components/daemon/session-input-bar.tsx",
     "frontend/src/components/daemon/session-panel/session-panel-page.tsx",
     "frontend/src/components/daemon/turn-timeline.tsx",
+    "frontend/src/components/sessions/__tests__/ctx-usage-bar.test.tsx",
     "frontend/src/components/sessions/__tests__/session-config-bar.test.tsx",
     "frontend/src/components/sessions/__tests__/session-status-indicator.test.tsx",
+    "frontend/src/components/sessions/ctx-usage-bar.tsx",
     "frontend/src/components/sessions/session-config-bar.tsx",
     "frontend/src/components/sessions/session-list-panel.tsx",
     "frontend/src/lib/api-types.ts",
@@ -30,11 +32,11 @@
     "sillyhub-daemon/tests/sillyspec-manager.test.ts"
   ],
   "totals": {
-    "files": 25,
-    "additions": 919,
-    "deletions": 177
+    "files": 27,
+    "additions": 1060,
+    "deletions": 261
   },
-  "savedAt": "2026-10-22T16:23:16.631Z",
+  "savedAt": "2026-10-22T16:38:09.073Z",
   "note": "flow done 时点冻结（本变更可归属交付面：baseline..HEAD 提交面过滤 .sillyspec/ 只留 .sillyspec/docs/ 交付文档 + 独占树未提交交付；治理工件目录不入冻结——2026-10-12-close-trace-freeze-integrity FR-01）",
   "modules": [
     {
@@ -53,7 +55,7 @@
     },
     {
       "id": "frontend",
-      "files": 17,
+      "files": 19,
       "doc": "docs/multi-agent-platform/modules/frontend.md",
       "docTouched": false,
       "docMissing": false
@@ -81,7 +83,7 @@
     },
     {
       "id": "frontend_components",
-      "files": 14,
+      "files": 16,
       "doc": "docs/SillyHub/modules/frontend_components.md",
       "docTouched": false,
       "docMissing": false
@@ -109,9 +111,9 @@
     "degradedReason": null,
     "baseAnchor": "58cc4d8f1c0c5a99b0b1a710a031f824c1d7b970",
     "totals": {
-      "files": 25,
-      "additions": 919,
-      "deletions": 177
+      "files": 27,
+      "additions": 1060,
+      "deletions": 261
     },
     "rows": [
       {
@@ -236,8 +238,16 @@
       },
       {
         "path": "frontend/src/components/daemon/turn-timeline.tsx",
-        "additions": 4,
+        "additions": 22,
         "deletions": 1,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": "frontend/src/components/sessions/__tests__/ctx-usage-bar.test.tsx",
+        "additions": 63,
+        "deletions": 43,
         "kind": "modified",
         "planned": null,
         "verdict": "unplanned"
@@ -255,6 +265,14 @@
         "additions": 78,
         "deletions": 0,
         "kind": "new",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": "frontend/src/components/sessions/ctx-usage-bar.tsx",
+        "additions": 34,
+        "deletions": 41,
+        "kind": "modified",
         "planned": null,
         "verdict": "unplanned"
       },
@@ -292,7 +310,7 @@
       },
       {
         "path": "sillyhub-daemon/src/daemon.ts",
-        "additions": 11,
+        "additions": 21,
         "deletions": 0,
         "kind": "modified",
         "planned": "修改",
@@ -300,7 +318,7 @@
       },
       {
         "path": "sillyhub-daemon/src/sillyspec-manager.ts",
-        "additions": 73,
+        "additions": 83,
         "deletions": 0,
         "kind": "modified",
         "planned": "修改",
@@ -308,7 +326,7 @@
       },
       {
         "path": "sillyhub-daemon/tests/sillyspec-manager.test.ts",
-        "additions": 96,
+        "additions": 102,
         "deletions": 2,
         "kind": "modified",
         "planned": "修改",
@@ -321,6 +339,6 @@
     "note": "flow done 时点冻结（本文件落盘时采集）",
     "closedBy": "flow done"
   },
-  "patchSha256": "3f8675cc8139a583ac13d11740ba922e1f49de83953ea827aa1913466f48299c",
+  "patchSha256": "b1a02b54d405b371fc52f908dc168c858ff1fb6fbc9bfc7680d62278e5a49c27",
   "patchStatus": "ok"
 }

@@ -6828,3 +6828,79 @@
 - 场景：主路径 — Given diff 面 = grants conftest + lease 测试文件 / When 逐 hunk 核对 / Then 无生产文件变更。
 全文：.sillyspec/changes/archive/2026-10-22-merge-regression-fixes/requirements.md#FR-03
 最近确认：c4a82ff0be9d18ad4cdaa333e43ff178b0007e8b
+
+## FR-daemon-234 progress show 失败且 stdout envelope codes 含 db_missing 时，连续 3 次后该工作区根从采集目标淘汰（回调通知 daemon 删 _sillyspecStatusRoots 并持久化），不再探测、心跳 map 清除该槽位，日志留 evicted 记录
+变更：2026-10-22-sillyspec-probe-db-missing-evict
+状态：active
+摘要：连续 db_missing 后淘汰；淘汰后重新 claim 恢复采集
+全文：.sillyspec/changes/archive/2026-10-22-sillyspec-probe-db-missing-evict/requirements.md#FR-01
+最近确认：b01334c76b3644cff83b081c3942d73823c95f46
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-22-sillyspec-probe-db-missing-evict:flow:测试绑定FR-01
+  tests: sillyhub-daemon/tests/sillyspec-manager.test.ts「db_missing 连续 3 次 → 第 3 次淘汰（evict 回调/心跳槽位清除/日志），第 4 轮不再探测」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-22-sillyspec-probe-db-missing-evict
+  status: active
+
+## FR-daemon-235 非 db_missing 的非零退出保持既有 nonzero_exit 记账不变，且日志附带 stdout 首行便于诊断
+变更：2026-10-22-sillyspec-probe-db-missing-evict
+状态：active
+摘要：未知非零退出
+全文：.sillyspec/changes/archive/2026-10-22-sillyspec-probe-db-missing-evict/requirements.md#FR-02
+最近确认：b01334c76b3644cff83b081c3942d73823c95f46
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-22-sillyspec-probe-db-missing-evict:flow:测试绑定FR-02
+  tests: sillyhub-daemon/tests/sillyspec-manager.test.ts「非 db_missing 非零退出：保持 nonzero_exit 记账、日志带 stdout_head、不淘汰」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-22-sillyspec-probe-db-missing-evict
+  status: active
+
+## FR-daemon-236 采集成功重置连败计数；淘汰后若根被重新 claim 注册则恢复采集
+变更：2026-10-22-sillyspec-probe-db-missing-evict
+状态：active
+摘要：成功重置
+全文：.sillyspec/changes/archive/2026-10-22-sillyspec-probe-db-missing-evict/requirements.md#FR-03
+最近确认：b01334c76b3644cff83b081c3942d73823c95f46
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-22-sillyspec-probe-db-missing-evict:flow:测试绑定FR-03
+  tests: sillyhub-daemon/tests/sillyspec-manager.test.ts「采集成功重置连败计数：2 次失败 → 成功 → 再 2 次失败不淘汰」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-22-sillyspec-probe-db-missing-evict
+  status: active
+
+## FR-daemon-237 daemon 定向测试全绿，既有采集/降级语义零回归
+变更：2026-10-22-sillyspec-probe-db-missing-evict
+状态：active
+摘要：回归
+全文：.sillyspec/changes/archive/2026-10-22-sillyspec-probe-db-missing-evict/requirements.md#FR-04
+最近确认：b01334c76b3644cff83b081c3942d73823c95f46
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-22-sillyspec-probe-db-missing-evict:flow:测试绑定FR-04
+  tests: sillyhub-daemon/tests/sillyspec-manager.test.ts「db_missing 连续 3 次 → 第 3 次淘汰（evict 回调/心跳槽位清除/日志），第 4 轮不再探测」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-22-sillyspec-probe-db-missing-evict
+  status: active

@@ -821,6 +821,171 @@ index f3888025d..17b657778 100644
                                className="-bottom-6 right-0"
                              />
                            )}
+diff --git a/frontend/src/components/sessions/__tests__/ctx-usage-bar.test.tsx b/frontend/src/components/sessions/__tests__/ctx-usage-bar.test.tsx
+index 74ca75ee1..cf458eabd 100644
+--- a/frontend/src/components/sessions/__tests__/ctx-usage-bar.test.tsx
++++ b/frontend/src/components/sessions/__tests__/ctx-usage-bar.test.tsx
+@@ -427,7 +427,7 @@ describe("QuotaPill", () => {
+     expect(screen.queryByTestId("quota-pill")).not.toBeInTheDocument();
+   });
+ 
+-  it("智谱 quota 正常 → 渲染模型名 + 各窗口剩余 + 重置时间", async () => {
++  it("智谱 quota 正常 → 图标只显会话供应商首窗口百分比；明细（模型名/各窗口/重置）在浮层", async () => {
+     mockListProviders.mockResolvedValue([provider()]);
+     mockGetProviderQuota.mockResolvedValue(
+       quotaResp({
+@@ -440,39 +440,53 @@ describe("QuotaPill", () => {
+     );
+     renderPill(<QuotaPill providerId="p-zhipu" />);
+     const pill = await screen.findByTestId("quota-pill");
+-    expect(pill).toHaveTextContent("glm-4.7");
+-    expect(pill).toHaveTextContent("5小时窗剩");
++    // 2026-10-22-session-composer-slim FR-03 / D-001：面只留首窗口百分比。
+     expect(pill).toHaveTextContent("80%");
+-    expect(pill).toHaveTextContent("周限额剩");
+-    expect(pill).toHaveTextContent("40%");
+-    expect(pill.textContent).toMatch(/⏱ \d{2}-\d{2} \d{2}:\d{2} 重置/);
++    expect(pill.textContent).not.toContain("glm-4.7");
++    expect(pill.textContent).not.toContain("5小时窗");
++    expect(pill.textContent).not.toContain("40%");
++    expect(pill.textContent).not.toMatch(/重置/);
++    // 悬停 title 保留精简摘要（供应商 · 首窗口 · 重置）。
++    expect(pill.getAttribute("title")).toContain("glm-4.7");
++    expect(pill.getAttribute("title")).toContain("5小时窗剩 80%");
++    expect(pill.getAttribute("title")).toMatch(/\d{2}-\d{2} \d{2}:\d{2} 重置/);
++
++    // 点击浮层：完整明细照旧。
++    fireEvent.click(pill);
++    expect(await screen.findByText("模型剩余额度")).toBeInTheDocument();
++    expect(screen.getByText("5小时窗 剩余")).toBeInTheDocument();
++    expect(screen.getByText("周限额 剩余")).toBeInTheDocument();
++  });
++
++  it("低剩余变色：首窗口 ≤20% 红 / ≤50% 黄 / 正常无色", async () => {
++    const cases: Array<{ left: number; cls: string | null }> = [
++      { left: 80, cls: null },
++      { left: 50, cls: "text-warning" },
++      { left: 20, cls: "text-error" },
++    ];
++    for (const c of cases) {
++      mockListProviders.mockResolvedValue([provider()]);
++      mockGetProviderQuota.mockResolvedValue(
++        quotaResp({
++          model: "glm-4.7",
++          windows: [{ label: "5小时窗", left: c.left, reset: null }],
++        }),
++      );
++      const { unmount } = renderPill(<QuotaPill providerId="p-zhipu" />);
++      const pill = await screen.findByTestId("quota-pill");
++      const pct = Array.from(pill.querySelectorAll("span[class]")).find(
++        (s) => s.textContent === `${c.left}%`,
++      );
++      if (c.cls == null) {
++        expect(pct?.className ?? "").toBe("");
++      } else {
++        expect(pct?.className).toContain(c.cls);
++      }
++      unmount();
++    }
+   });
+ 
+-  it("低剩余变色：≤20% 红 / ≤50% 黄 / 正常无色", async () => {
+-    mockListProviders.mockResolvedValue([provider()]);
+-    mockGetProviderQuota.mockResolvedValue(
+-      quotaResp({
+-        model: "glm-4.7",
+-        windows: [
+-          { label: "5小时窗", left: 80, reset: null },
+-          { label: "低", left: 50, reset: null },
+-          { label: "危", left: 20, reset: null },
+-        ],
+-      }),
+-    );
+-    renderPill(<QuotaPill providerId="p-zhipu" />);
+-    await screen.findByTestId("quota-pill");
+-    const spans = screen
+-      .getByTestId("quota-pill")
+-      .querySelectorAll("span[class]");
+-    const byText = (t: string) =>
+-      Array.from(spans).find((s) => s.textContent === t);
+-    expect(byText("80%")?.className).toBe("");
+-    expect(byText("50%")?.className).toContain("text-warning");
+-    expect(byText("20%")?.className).toContain("text-error");
+-  });
+-
+-  it("聚合全部可查供应商：智谱走 quota 端点、Kimi 走 usage 端点、不可查的不请求；会话供应商排胶囊第一位 + 等N家", async () => {
++  it("聚合全部可查供应商：智谱走 quota 端点、Kimi 走 usage 端点、不可查的不请求；会话供应商排图标第一位", async () => {
+     mockListProviders.mockResolvedValue([
+       provider(),
+       provider({
+@@ -508,11 +522,12 @@ describe("QuotaPill", () => {
+     } satisfies UsageResult);
+     renderPill(<QuotaPill providerId="p-kimi" />);
+     const pill = await screen.findByTestId("quota-pill");
+-    // 会话供应商（Kimi）排第一位：model 名 + 其套餐窗口。
+-    expect(pill).toHaveTextContent("kimi-k2");
+-    expect(pill).toHaveTextContent("Kimi·5小时窗剩");
++    // 会话供应商（Kimi）排第一位：面只显示其首窗口百分比；其余收进 title/浮层。
+     expect(pill).toHaveTextContent("70%");
+-    expect(pill).toHaveTextContent("等1家");
++    expect(pill.textContent).not.toContain("kimi-k2");
++    expect(pill.textContent).not.toContain("等1家");
++    expect(pill.getAttribute("title")).toContain("kimi-k2");
++    expect(pill.getAttribute("title")).toContain("另有 1 家可查");
+     // 端点分流：智谱只查 quota、Kimi 只查 usage、Anthropic（不可查）不查。
+     expect(mockGetProviderQuota).toHaveBeenCalledTimes(1);
+     expect(mockGetProviderQuota).toHaveBeenCalledWith("p-zhipu");
+@@ -542,12 +557,13 @@ describe("QuotaPill", () => {
+     } satisfies UsageResult);
+     renderPill(<QuotaPill providerId="p-ds" />);
+     const pill = await screen.findByTestId("quota-pill");
+-    // 余额类无百分比窗口 → 胶囊面只显示供应商名（明细在浮层）。
+-    expect(pill).toHaveTextContent("DeepSeek");
++    // 余额类无百分比窗口 → 面只显示余额金额（供应商名/明细在 title 与浮层）。
++    expect(pill).toHaveTextContent("¥40");
+     expect(pill).not.toHaveTextContent("剩");
+     fireEvent.click(pill);
+     expect(await screen.findByText("CNY 剩余")).toBeInTheDocument();
+-    expect(screen.getByText("¥40 / 共 ¥100")).toBeInTheDocument();
++    // 图标面与浮层各一处（面显示余额金额，浮层为权威明细）。
++    expect(screen.getAllByText("¥40 / 共 ¥100").length).toBeGreaterThanOrEqual(1);
+   });
+ 
+   it("点击胶囊显示各窗口详情浮层（百分比低量红显 + 重置时间）", async () => {
+@@ -853,7 +869,8 @@ describe("QuotaPill mobile compact（ql-20260915-013）", () => {
+     renderPill(<QuotaPill providerId="p-zhipu" mobile />);
+     const pill = await screen.findByTestId("quota-pill");
+     expect(pill).toHaveTextContent("80%");
+-    expect(pill).toHaveTextContent("40%");
++    // 第二窗口不进面（只留最重要的首窗口），明细点击查看。
++    expect(pill.textContent).not.toContain("40%");
+     expect(pill.textContent).not.toContain("glm-4.7");
+     expect(pill.textContent).not.toContain("5小时窗剩");
+     expect(pill.textContent).not.toMatch(/重置/);
+@@ -862,7 +879,7 @@ describe("QuotaPill mobile compact（ql-20260915-013）", () => {
+     expect(await screen.findByText("模型剩余额度")).toBeInTheDocument();
+   });
+ 
+-  it("desktop（缺省 mobile=false）：完整胶囊照旧（零回归锚）", async () => {
++  it("desktop（缺省 mobile=false）：与 mobile 同形态（图标 + 首窗口百分比），明细点击浮层", async () => {
+     mockListProviders.mockResolvedValue([provider()]);
+     mockGetProviderQuota.mockResolvedValue(
+       quotaResp({
+@@ -872,8 +889,11 @@ describe("QuotaPill mobile compact（ql-20260915-013）", () => {
+     );
+     renderPill(<QuotaPill providerId="p-zhipu" />);
+     const pill = await screen.findByTestId("quota-pill");
+-    expect(pill).toHaveTextContent("glm-4.7");
+-    expect(pill).toHaveTextContent("5小时窗剩");
+-    expect(pill.textContent).toMatch(/重置/);
++    expect(pill).toHaveTextContent("80%");
++    expect(pill.textContent).not.toContain("glm-4.7");
++    expect(pill.textContent).not.toMatch(/重置/);
++    expect(pill.getAttribute("title")).toContain("5小时窗剩 80%");
++    fireEvent.click(pill);
++    expect(await screen.findByText("模型剩余额度")).toBeInTheDocument();
+   });
+ });
 diff --git a/frontend/src/components/sessions/__tests__/session-config-bar.test.tsx b/frontend/src/components/sessions/__tests__/session-config-bar.test.tsx
 index 3d96e7584..7d24a9e23 100644
 --- a/frontend/src/components/sessions/__tests__/session-config-bar.test.tsx
@@ -1093,6 +1258,118 @@ index 000000000..5308f14a0
 +    expect(sessionStatusIndicator("active", "idle", false, null, null)).toBeNull();
 +  });
 +});
+diff --git a/frontend/src/components/sessions/ctx-usage-bar.tsx b/frontend/src/components/sessions/ctx-usage-bar.tsx
+index 50973c9f8..e7802602b 100644
+--- a/frontend/src/components/sessions/ctx-usage-bar.tsx
++++ b/frontend/src/components/sessions/ctx-usage-bar.tsx
+@@ -28,6 +28,7 @@
+ import { Popover, InputNumber, Button } from "antd";
+ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+ import { useQuery } from "@tanstack/react-query";
++import { Gauge } from "lucide-react";
+ 
+ import {
+   detectUsageProvider,
+@@ -503,9 +504,8 @@ export interface QuotaPillProps {
+    */
+   providerId: string | null | undefined;
+   /**
+-   * ql-20260915-013 手机端一行化：compact 只显剩余百分比数字（模型名/「X 剩」
+-   * 标签/重置时间/「等 N 家」全收进点击浮层——浮层本来就是权威明细入口），
+-   * 防 verbose 胶囊占满手机配置行；desktop 缺省零变化。
++   * 手机端紧凑尺寸（2026-10-22-session-composer-slim FR-03 起桌面与移动端
++   * 同为「图标 + 首窗口百分比」形态，mobile 仅控制像素尺寸）。
+    */
+   mobile?: boolean;
+ }
+@@ -626,9 +626,21 @@ export function QuotaPill({ providerId, mobile = false }: QuotaPillProps) {
+ 
+   const face = sortedEntries[0]!;
+   const restCount = sortedEntries.length - 1;
+-  const faceReset = face.tiers.find((t) => t.reset)?.reset;
+-  // 胶囊单行只带百分比窗口（同旧口径）；余额类 supplier 的明细见浮层。
++  // 2026-10-22-session-composer-slim FR-03 / D-001：图标面只显示当前会话
++  // 供应商的首个百分比窗口（排序已把会话供应商置顶）；纯余额类显示余额金额；
++  // 模型名/其余窗口/重置时间/「等 N 家」全部收进点击浮层与 title。
+   const facePctTiers = face.tiers.filter((t) => t.leftPct != null);
++  const headTier = facePctTiers[0] ?? face.tiers[0] ?? null;
++  const headPct = headTier?.leftPct ?? null;
++  const faceReset = headTier?.reset ?? null;
++  const faceLabel = `${face.providerName}${face.model ? ` · ${face.model}` : ""}`;
++  const restHint = restCount > 0 ? `；另有 ${restCount} 家可查` : "";
++  const pillTitle =
++    headPct != null
++      ? `${faceLabel}｜${headTier?.label ?? "额度"}剩 ${headPct}%${
++          faceReset ? `｜${formatQuotaResetTime(faceReset)} 重置` : ""
++        }${restHint}（点击查看全部明细）`
++      : `${faceLabel}｜${formatQuotaBalance(headTier?.balance ?? null)}${restHint}（点击查看全部明细）`;
+ 
+   const detail = (
+     <div style={{ width: 264 }}>
+@@ -676,46 +688,27 @@ export function QuotaPill({ providerId, mobile = false }: QuotaPillProps) {
+ 
+   return (
+     <Popover trigger="click" content={detail} placement="topLeft">
+-      <span
++      <button
++        type="button"
+         data-testid="quota-pill"
+-        className="inline-flex shrink-0 cursor-pointer select-none items-center gap-[5px] whitespace-nowrap rounded-full bg-muted px-2.5 py-[3px] text-[11px] text-muted-foreground hover:text-foreground"
++        aria-label={`模型额度：${pillTitle}`}
++        title={pillTitle}
++        className={`inline-flex shrink-0 cursor-pointer select-none items-center gap-1 whitespace-nowrap rounded-md border border-border bg-card text-muted-foreground transition-colors hover:border-brand-300 hover:bg-brand-50 hover:text-foreground ${
++          mobile ? "px-1 py-[2px] text-[10px]" : "px-1.5 py-[3px] text-[11px]"
++        }`}
+         onMouseEnter={handlePillMouseEnter}
+         onMouseLeave={clearHoverTimer}
+       >
+-        {mobile ? (
+-          // compact：仅百分比（多窗斜杠分隔），明细点击浮层看。
+-          facePctTiers.map((t, i) => (
+-            <span key={i} className={quotaLeftToneClass(t.leftPct!)}>
+-              {i > 0 ? "/" : ""}
+-              {t.leftPct}%
+-            </span>
+-          ))
+-        ) : (
+-          <>
+-            {face.model ? (
+-              <b className="font-semibold text-foreground">{face.model}</b>
+-            ) : (
+-              <b className="font-semibold text-foreground">{face.providerName}</b>
+-            )}
+-            {facePctTiers.map((t, i) => (
+-              <span key={i}>
+-                · {t.label}剩{" "}
+-                <span className={quotaLeftToneClass(t.leftPct!)}>{t.leftPct}%</span>
+-              </span>
+-            ))}
+-            {faceReset ? (
+-              <span className="text-[10px] text-muted-foreground">
+-                ⏱ {formatQuotaResetTime(faceReset)} 重置
+-              </span>
+-            ) : null}
+-            {restCount > 0 ? (
+-              <span className="text-[10px] text-muted-foreground">
+-                等{restCount}家
+-              </span>
+-            ) : null}
+-          </>
+-        )}
+-      </span>
++        <Gauge
++          aria-hidden
++          className={`shrink-0 text-brand-600 ${mobile ? "h-3 w-3" : "h-3.5 w-3.5"}`}
++        />
++        {headPct != null ? (
++          <span className={quotaLeftToneClass(headPct)}>{headPct}%</span>
++        ) : headTier?.balance ? (
++          <span>{formatQuotaBalance(headTier.balance)}</span>
++        ) : null}
++      </button>
+     </Popover>
+   );
+ }
 diff --git a/frontend/src/components/sessions/session-config-bar.tsx b/frontend/src/components/sessions/session-config-bar.tsx
 index 264f2b3e2..4e2d475e2 100644
 --- a/frontend/src/components/sessions/session-config-bar.tsx
@@ -1367,10 +1644,10 @@ index 53949a37a..216d3a3d5 100644
 +  );
 +}
 diff --git a/sillyhub-daemon/src/daemon.ts b/sillyhub-daemon/src/daemon.ts
-index 336398dc5..a3bc7e4ae 100644
+index 336398dc5..72e21e063 100644
 --- a/sillyhub-daemon/src/daemon.ts
 +++ b/sillyhub-daemon/src/daemon.ts
-@@ -2347,6 +2347,17 @@ export class Daemon {
+@@ -2347,6 +2347,24 @@ export class Daemon {
                rootPath: v.rootPath,
              }),
            ),
@@ -1378,8 +1655,15 @@ index 336398dc5..a3bc7e4ae 100644
 +        // 删 LRU 条目并持久化 roots 文件（重启不复活）；工作区重新 claim 时
 +        // _noteSillySpecStatusRoot 重新注册，采集恢复。
 +        statusRootEvict: (workspaceId, rootPath) => {
++          // 评审 P3：仅当映射内该 ws 仍指向被淘汰的 rootPath 才删——采集 await
++          // 窗口内同 ws 重新 claim 到新根的窄竞态不得误删新条目。
++          const known = this._sillyspecStatusRoots.get(workspaceId);
++          if (known && known.rootPath !== rootPath) return;
 +          this._sillyspecStatusRoots.delete(workspaceId);
-+          void this._persistSillySpecStatusRoots();
++          // 评审 P3：走串行链落盘，防与 claim 写入同文件竞态旧值后写。
++          this._statusRootPersistChain = this._statusRootPersistChain
++            .then(() => this._persistSillySpecStatusRoots())
++            .catch(() => {});
 +          this._logger.info('sillyspec_status_root_evict_persisted', {
 +            workspace_id: workspaceId,
 +            root_path: rootPath,
@@ -1388,8 +1672,18 @@ index 336398dc5..a3bc7e4ae 100644
          // 2026-09-04-conflict-resolve-entry task-06：平台命令执行超时（config 键
          // sillyspec_command_timeout_sec 默认 120s）。归一口径仿
          // _sillyspecStatusIntervalSec（Number() 容忍字符串/null 脏值），但超时无
+@@ -5686,6 +5704,9 @@ export class Daemon {
+           root_path: rootPath,
+         });
+       }
++      // 2026-10-22-sillyspec-probe-db-missing-evict（FR-01 场景2）：重新 claim 同名
++      // 根即清除 db_missing 淘汰标记——skip 表与连败计数一并清空，采集恢复。
++      this._sillyspecManager.clearStatusProbeEviction(rootPath);
+       // 串行链落盘（2026-10-09 竞态修复）：映射槽位与单槽位同理，防旧值后写。
+       this._statusRootPersistChain = this._statusRootPersistChain
+         .then(() => this._persistSillySpecStatusRoots())
 diff --git a/sillyhub-daemon/src/sillyspec-manager.ts b/sillyhub-daemon/src/sillyspec-manager.ts
-index ab867a8bc..b78494dd9 100644
+index ab867a8bc..41422b5df 100644
 --- a/sillyhub-daemon/src/sillyspec-manager.ts
 +++ b/sillyhub-daemon/src/sillyspec-manager.ts
 @@ -184,6 +184,14 @@ export const SILLYSPEC_STATUS_BUDGET_BYTES = 32 * 1024;
@@ -1498,10 +1792,27 @@ index ab867a8bc..b78494dd9 100644
      const summary = buildSillySpecStatusSummary(parsed);
      // 2026-09-07-conflict-diff-compare task-02：心跳补报——buildSillySpecStatusSummary
      // 是纯函数不落 fs，ql_id 在此处后处理填充（quick-* 名读 guard.json，单条失败仅
-@@ -2675,6 +2729,25 @@ async function snapshotOneSpecPath(
-  * SILLYSPEC_SYNC_TIMEOUT_MS=20000 缺省（process.env 已预设时原值优先，展开顺序
-  * 即语义）。导出供测试直测（对齐本文件 envelope → 心跳摘要纯函数导出先例）。
-  */
+@@ -1183,6 +1237,16 @@ export class SillySpecManager {
+     return this._statusTargets ? Object.fromEntries(this._statusSummariesByWs) : undefined;
+   }
+ 
++  /**
++   * 清除 db_missing 淘汰标记（2026-10-22-sillyspec-probe-db-missing-evict /
++   * FR-01 场景2）：工作区重新 claim 同名根时由 daemon 调用——skip 表与连败计数
++   * 一并清空，该根恢复采集（若项目仍缺库则重新计满 3 次再淘汰）。
++   */
++  clearStatusProbeEviction(rootPath: string): void {
++    this._evictedCwds.delete(rootPath);
++    this._dbMissingStreaks.delete(rootPath);
++  }
++
+   /** 三态②：置能力缺失（快照 null）+ warn 一次同类静默。 */
+   private _markStatusCapabilityMissing(
+     reason: 'bin_not_found' | 'spawn_enoent' | 'bad_json',
+@@ -2664,6 +2728,25 @@ async function snapshotOneSpecPath(
+ 
+ // ── 2026-09-02-changes-overview-card task-02：采集器默认实现与摘要构造 ──────────
+ 
 +/**
 + * 解析 `progress show --json` 失败时 stdout envelope 的 `codes` 数组
 + * （2026-10-22-sillyspec-probe-db-missing-evict）：CLI 契约保证失败时 stdout 恒为
@@ -1521,11 +1832,11 @@ index ab867a8bc..b78494dd9 100644
 +  }
 +}
 +
- export function runProgressJsonDefault(
-   file: string,
-   args: string[],
+ /**
+  * 默认采集执行器：node child_process execFile（数组形参，无 shell 依赖，NFR-02；
+  * Windows 路径空格安全）。错误映射：err=null → code=0；ExecApiError 的数字 code =
 diff --git a/sillyhub-daemon/tests/sillyspec-manager.test.ts b/sillyhub-daemon/tests/sillyspec-manager.test.ts
-index 22c8258b8..1040adbd8 100644
+index 22c8258b8..086470370 100644
 --- a/sillyhub-daemon/tests/sillyspec-manager.test.ts
 +++ b/sillyhub-daemon/tests/sillyspec-manager.test.ts
 @@ -93,8 +93,10 @@ function makeHarness(opts: HarnessOptions = {}) {
@@ -1570,7 +1881,7 @@ index 22c8258b8..1040adbd8 100644
      calls,
      runProgressJson,
      /** 翻转下一拍 outcome（三态流转 ①→③ 序列用）。 */
-@@ -1394,3 +1402,89 @@ describe('2026-09-08 工作区级 map：多目标采集与快照', () => {
+@@ -1394,3 +1402,95 @@ describe('2026-09-08 工作区级 map：多目标采集与快照', () => {
      expect(Object.keys(manager.getStatusMapSnapshot()!)).toEqual(['ws-alpha']);
    });
  });
@@ -1618,6 +1929,12 @@ index 22c8258b8..1040adbd8 100644
 +    await h.manager.collectStatusOnce();
 +    const urgentCalls = h.calls.filter((c) => c.options.cwd === ROOT);
 +    expect(urgentCalls).toHaveLength(4);
++
++    // 重新 claim 同名根 → daemon 调 clearStatusProbeEviction → 采集恢复（FR-01 场景2）。
++    h.manager.clearStatusProbeEviction(ROOT);
++    await h.manager.collectStatusOnce();
++    const urgentCallsAfter = h.calls.filter((c) => c.options.cwd === ROOT);
++    expect(urgentCallsAfter).toHaveLength(5);
 +  });
 +
 +  it('非 db_missing 非零退出：保持 nonzero_exit 记账、日志带 stdout_head、不淘汰', async () => {

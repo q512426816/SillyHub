@@ -89,3 +89,4 @@
 - 2026-10-22-merge-test-debt | 合并后测试债清偿：l10n文案与守卫钉子同步
 - 2026-10-22-merge-regression-fixes | 合并回归债收口：grants 闭包与 lease 双流断言
 - 2026-10-22-change-delete-session-history-fix | 变更删除不再级联删会话轮次并恢复丢失轮次
+- 2026-10-22-sillyspec-probe-db-missing-evict | 已删工作区探针自动淘汰与诊断增强
