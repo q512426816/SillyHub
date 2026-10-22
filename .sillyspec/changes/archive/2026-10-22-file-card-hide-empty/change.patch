@@ -1,0 +1,509 @@
+diff --git a/frontend/src/components/daemon/__tests__/turn-timeline-conversation-file-card.test.tsx b/frontend/src/components/daemon/__tests__/turn-timeline-conversation-file-card.test.tsx
+index 0ff7fee9b..069b78e25 100644
+--- a/frontend/src/components/daemon/__tests__/turn-timeline-conversation-file-card.test.tsx
++++ b/frontend/src/components/daemon/__tests__/turn-timeline-conversation-file-card.test.tsx
+@@ -343,8 +343,9 @@ describe("对话视图子代理容器段（2026-09-15-subagent-three-pane task-0
+ });
+ 
+ /* task-11（2026-10-20-session-page-dsh-alignment / FR-14 / FR-16 / D-023@v1）：
+- * 轮级文件变更卡的挂载面——轮尾状态行之后挂卡；无快照不占位；tool_only 走
+- * 「仅工具编辑」降级卡；会话级汇总挂会话流顶部且受 props 开关控制。
++ * 轮级文件变更卡的挂载面——轮尾状态行之后挂卡；无快照不占位。
++ * 2026-10-22-file-card-hide-empty：tool_only / 采集失败也不再出「仅工具编辑」卡，
++ * 整轮零渲染；会话级汇总挂会话流顶部且受 props 开关控制。
+  * 数据全部来自 SessionTurnView.fileChanges / fileChangesCapability（挂载方从
+  * /runs 读模型透传），TurnTimeline 自身零取数。 */
+ describe("轮级文件变更卡与会话级汇总挂载（task-11 / 线 C 1b）", () => {
+@@ -407,7 +408,9 @@ describe("轮级文件变更卡与会话级汇总挂载（task-11 / 线 C 1b）"
+     expect(within(card).getByText("共享工作区，可能含并行会话改动")).toBeInTheDocument();
+   });
+ 
+-  it('capability="tool_only"（无快照）：降级为「仅工具编辑」，全树不出现「无改动」', () => {
++  it('capability="tool_only"（无快照）：整轮不出卡，全树无「仅工具编辑」也无「无改动」', () => {
++    // 2026-10-22-file-card-hide-empty（用户裁决「没有信息就隐藏卡片」）：历史轮
++    // （daemon 0.2.0 / 部署之前）不再挂零信息降级卡。
+     render(
+       <TurnTimeline
+         {...renderProps([
+@@ -416,12 +419,27 @@ describe("轮级文件变更卡与会话级汇总挂载（task-11 / 线 C 1b）"
+       />,
+     );
+ 
+-    expect(screen.getByText("仅工具编辑")).toBeInTheDocument();
+-    expect(
+-      screen.getByText("daemon 未上报工作区快照，本卡只含 Edit/Write 工具编辑"),
+-    ).toBeInTheDocument();
+-    expect(screen.queryAllByTestId("file-changes-row")).toHaveLength(0);
+-    // 硬约束：没有快照 ≠ 本轮无改动。
++    expect(screen.queryByTestId("turn-file-changes")).toBeNull();
++    expect(screen.queryByTestId("file-changes-card")).toBeNull();
++    expect(screen.queryByText("仅工具编辑")).toBeNull();
++    expect(screen.queryByText(/daemon 未上报工作区快照/)).toBeNull();
++    expect(screen.queryByText(/无改动/)).toBeNull();
++  });
++
++  it("status=unavailable（采集失败）：同样不出卡、不出占位", () => {
++    render(
++      <TurnTimeline
++        {...renderProps([
++          makeTurn({
++            fileChanges: makeSnapshot({ status: "unavailable", reason: "not_a_repo", files: [] }),
++            fileChangesCapability: "full",
++          }),
++        ])}
++      />,
++    );
++
++    expect(screen.queryByTestId("turn-file-changes")).toBeNull();
++    expect(screen.queryByText("仅工具编辑")).toBeNull();
+     expect(screen.queryByText(/无改动/)).toBeNull();
+   });
+ 
+diff --git a/frontend/src/components/daemon/file-changes/__tests__/file-changes-summary.test.tsx b/frontend/src/components/daemon/file-changes/__tests__/file-changes-summary.test.tsx
+index c469c4125..012677c4a 100644
+--- a/frontend/src/components/daemon/file-changes/__tests__/file-changes-summary.test.tsx
++++ b/frontend/src/components/daemon/file-changes/__tests__/file-changes-summary.test.tsx
+@@ -109,7 +109,7 @@ describe("worstFileChangesStatus / aggregateTurnFileChanges（纯函数）", ()
+     expect(agg.status).toBe("ok");
+   });
+ 
+-  it("降级轮（tool_only / 无快照）不伪造文件，但把汇总压到至少 partial 并计数", () => {
++  it("无快照轮被跳过：不伪造文件、不计缺口、不把汇总压成 partial", () => {
+     const agg = aggregateTurnFileChanges([
+       { snapshot: makeSnapshot({ files: [makeFile()] }), capability: "full" },
+       { snapshot: null, capability: "tool_only" },
+@@ -118,10 +118,10 @@ describe("worstFileChangesStatus / aggregateTurnFileChanges（纯函数）", ()
+     ]);
+ 
+     expect(agg.totalFiles).toBe(1);
+-    expect(agg.degradedTurns).toBe(2);
+-    // 两字段全缺的轮不参与（未接线，不算降级）。
+-    expect(agg.consideredTurns).toBe(3);
+-    expect(agg.status).toBe("partial");
++    // 2026-10-22-file-card-hide-empty：无快照轮不参与汇总（原 degradedTurns 已删）。
++    expect(agg).not.toHaveProperty("degradedTurns");
++    expect(agg.consideredTurns).toBe(1);
++    expect(agg.status).toBe("ok");
+   });
+ 
+   it("truncated / partial 快照计入 truncated（行级统计为下限）", () => {
+@@ -133,7 +133,7 @@ describe("worstFileChangesStatus / aggregateTurnFileChanges（纯函数）", ()
+     expect(agg.totalFiles).toBe(1);
+   });
+ 
+-  it("failed / unavailable 轮不贡献文件行（数据不可信）", () => {
++  it("failed / unavailable 轮整轮跳过（不计入、不压状态、不出「采集失败」提示）", () => {
+     const agg = aggregateTurnFileChanges([
+       {
+         snapshot: makeSnapshot({ status: "unavailable", files: [makeFile()] }),
+@@ -141,14 +141,29 @@ describe("worstFileChangesStatus / aggregateTurnFileChanges（纯函数）", ()
+       },
+       { snapshot: makeSnapshot({ status: "ok", files: [makeFile({ path: "b.ts" })] }), capability: "full" },
+     ]);
+-    expect(agg.status).toBe("unavailable");
++    // 不可信快照既不贡献文件行，也不把汇总状态压成不可用。
++    expect(agg.status).toBe("ok");
++    expect(agg.consideredTurns).toBe(1);
+     expect(agg.totalFiles).toBe(1);
+     expect(agg.files[0]!.path).toBe("b.ts");
++    // 渲染层同样不出现「SC 采集失败」类缺口提示。
++    render(
++      <FileChangesSummary
++        turns={[
++          { snapshot: makeSnapshot({ status: "failed", files: [makeFile()] }), capability: "full" },
++          { snapshot: makeSnapshot({ status: "ok", files: [makeFile({ path: "b.ts" })] }), capability: "full" },
++        ]}
++      />,
++    );
++    expect(screen.getByTestId("file-changes-summary")).toHaveAttribute("data-status", "ok");
++    expect(screen.getByText("共 1 个文件")).toBeInTheDocument();
++    expect(screen.queryByText(/采集失败/)).toBeNull();
++    expect(screen.queryByText(/汇总不完整/)).toBeNull();
+   });
+ });
+ 
+ describe("FileChangesSummary（渲染）", () => {
+-  it("多轮汇总卡：文件总数 + Σ+/− + 状态 + 横幅 + 降级计数", () => {
++  it("多轮汇总卡：文件总数 + Σ+/− + 状态 + 横幅（无快照轮不贡献、不提示）", () => {
+     render(
+       <FileChangesSummary
+         turns={[
+@@ -175,20 +190,21 @@ describe("FileChangesSummary（渲染）", () => {
+     const card = screen.getByTestId("file-changes-summary");
+     // 3 个不同 path？不：a.ts 出现两轮（去重），b.ts 一次 → 共 2 个文件。
+     expect(card).toHaveAttribute("data-total-files", "2");
+-    expect(card).toHaveAttribute("data-degraded-turns", "1");
+-    expect(card).toHaveAttribute("data-status", "partial");
++    // 无快照轮被跳过：参与汇总的只有 2 个有可信快照的轮。
++    expect(card).toHaveAttribute("data-considered-turns", "2");
++    expect(card).toHaveAttribute("data-status", "ok");
+     expect(screen.getByText("会话文件改动")).toBeInTheDocument();
+     expect(screen.getByText("共 2 个文件")).toBeInTheDocument();
+     expect(screen.getByText("+14")).toBeInTheDocument();
+     expect(screen.getByText("−4")).toBeInTheDocument();
+-    expect(screen.getByTestId("file-changes-summary-status")).toHaveTextContent("统计不完整");
++    expect(screen.getByTestId("file-changes-summary-status")).toHaveTextContent("完整");
+     // R-08 横幅恒在场（含并行会话改动）。
+     expect(screen.getByTestId("file-changes-summary-banner")).toHaveTextContent(
+       /可能含并行会话改动/,
+     );
+-    expect(screen.getByTestId("file-changes-summary-degraded")).toHaveTextContent(
+-      "其中 1 轮无工作区快照（仅工具编辑），汇总不完整",
+-    );
++    // 用户裁决：不再有「N 轮无工作区快照」缺口提示。
++    expect(screen.queryByTestId("file-changes-summary-degraded")).toBeNull();
++    expect(screen.queryByText(/无工作区快照/)).toBeNull();
+     // 硬约束：全树不出现「无改动」——没有快照 ≠ 没有改动。
+     expect(screen.queryByText(/无改动/)).toBeNull();
+   });
+@@ -210,11 +226,22 @@ describe("FileChangesSummary（渲染）", () => {
+     expect(screen.queryByTestId("file-changes-summary-degraded")).toBeNull();
+   });
+ 
+-  it("无数据不渲染（零文件且无降级轮 → 不出空壳）", () => {
+-    const { container } = render(
++  it("零文件整卡不渲染（含「全部轮都无快照」的历史会话）", () => {
++    const noSnapshot = render(
++      <FileChangesSummary
++        turns={[
++          { snapshot: null, capability: "tool_only" },
++          { snapshot: null, capability: "tool_only" },
++        ]}
++      />,
++    );
++    expect(noSnapshot.container.firstChild).toBeNull();
++    expect(screen.queryByTestId("file-changes-summary")).toBeNull();
++
++    const emptySnapshot = render(
+       <FileChangesSummary turns={[{ snapshot: makeSnapshot({ files: [] }), capability: "full" }]} />,
+     );
+-    expect(container.firstChild).toBeNull();
++    expect(emptySnapshot.container.firstChild).toBeNull();
+     expect(screen.queryByTestId("file-changes-summary")).toBeNull();
+   });
+ 
+diff --git a/frontend/src/components/daemon/file-changes/__tests__/turn-file-changes.test.ts b/frontend/src/components/daemon/file-changes/__tests__/turn-file-changes.test.ts
+index afa75fa86..b4beb3bb5 100644
+--- a/frontend/src/components/daemon/file-changes/__tests__/turn-file-changes.test.ts
++++ b/frontend/src/components/daemon/file-changes/__tests__/turn-file-changes.test.ts
+@@ -5,10 +5,10 @@
+ //      command → source=shell（edits=0，无「编辑次数」概念）；
+ //   2. status=partial（或 truncated）→ truncated=true，卡片照出（不是错误态）；
+ //   3. binary 透传到 ChangedFile（行级破折号由卡片承担）；
+-//   4. capability=tool_only → **降级态**（不是 null）：files 恒空、不伪造行级数据；
+-//   5. 两字段全缺（未接线）→ null（不出卡、不出占位）；snapshot=null 但 capability
+-//      已给 → 降级态（E8：不许静默成「本轮无改动」）；
+-//   6. status=failed/unavailable → 降级态；
++//   4. capability=tool_only → **null**（2026-10-22-file-card-hide-empty：没有信息就
++//      不出卡，历史轮不再挂「仅工具编辑」占位）；
++//   5. 两字段全缺（未接线）→ null；snapshot=null 但 capability 已给 → 同样 null；
++//   6. status=failed/unavailable → null（采集失败也不占位）；
+ //   7. sharedWorkspace = snapshot.concurrentSessionsHint（共享工作区恒提示）；
+ //   8. ok 且 files 为空 → null（快照确认零改动 → 空态零渲染，不写「无改动」文案）；
+ //   9. attachRunFileChanges：snake_case 读模型 → camelCase 轮字段，capability 缺省
+@@ -166,33 +166,18 @@ describe("toFileChangesCardProps：partial / truncated 采样降级", () => {
+   });
+ });
+ 
+-describe("toFileChangesCardProps：三态降级（E6/E8）", () => {
+-  it('capability="tool_only" → 降级态（不是 null）：files 恒空，快照里的 files 也不采信', () => {
+-    const props = toFileChangesCardProps(
+-      makeSnapshot({ files: [makeFile()] }),
+-      "tool_only",
+-    );
+-    expect(props).not.toBeNull();
+-    expect(props!.degraded).toBe(true);
+-    expect(props!.capability).toBe("tool_only");
+-    expect(props!.files).toEqual([]);
+-    // 降级态不出「（部分）」——它压根没有行级数据，不是截断。
+-    expect(props!.truncated).toBeUndefined();
++describe("toFileChangesCardProps：无信息一律不出卡（2026-10-22-file-card-hide-empty）", () => {
++  it('capability="tool_only" → null：不出「仅工具编辑」卡，也不采信快照里的 files', () => {
++    // 历史轮（daemon 0.2.0 / 部署之前）就是这一态；用户裁决「没有信息就隐藏卡片」。
++    expect(toFileChangesCardProps(makeSnapshot({ files: [makeFile()] }), "tool_only")).toBeNull();
+   });
+ 
+-  it('snapshot=null + capability="full" → 降级态（backend 声称有快照却没数据：显式降级）', () => {
+-    const props = toFileChangesCardProps(null, "full");
+-    expect(props).not.toBeNull();
+-    expect(props!.degraded).toBe(true);
+-    expect(props!.files).toEqual([]);
++  it('snapshot=null + capability="full" → null（backend 声称有快照却没数据：同样零信息）', () => {
++    expect(toFileChangesCardProps(null, "full")).toBeNull();
+   });
+ 
+-  it("snapshot=null + capability=tool_only → 降级态", () => {
+-    expect(toFileChangesCardProps(null, "tool_only")).toMatchObject({
+-      degraded: true,
+-      capability: "tool_only",
+-      files: [],
+-    });
++  it("snapshot=null + capability=tool_only → null", () => {
++    expect(toFileChangesCardProps(null, "tool_only")).toBeNull();
+   });
+ 
+   it("两字段全缺（挂载方未接线）→ null：不出卡、不出占位", () => {
+@@ -200,15 +185,9 @@ describe("toFileChangesCardProps：三态降级（E6/E8）", () => {
+     expect(toFileChangesCardProps(null, null)).toBeNull();
+   });
+ 
+-  it("status=failed / unavailable → 降级态，且不把不可信 files 渲染出来", () => {
++  it("status=failed / unavailable → null（采集失败也不占位，不把不可信 files 渲染出来）", () => {
+     for (const status of ["failed", "unavailable"] as const) {
+-      const props = toFileChangesCardProps(
+-        makeSnapshot({ status, files: [makeFile()] }),
+-        "full",
+-      );
+-      expect(props).not.toBeNull();
+-      expect(props!.degraded).toBe(true);
+-      expect(props!.files).toEqual([]);
++      expect(toFileChangesCardProps(makeSnapshot({ status, files: [makeFile()] }), "full")).toBeNull();
+     }
+   });
+ 
+diff --git a/frontend/src/components/daemon/file-changes/file-changes-card.tsx b/frontend/src/components/daemon/file-changes/file-changes-card.tsx
+index 9748bd01e..bf4310da1 100644
+--- a/frontend/src/components/daemon/file-changes/file-changes-card.tsx
++++ b/frontend/src/components/daemon/file-changes/file-changes-card.tsx
+@@ -85,6 +85,9 @@ export interface FileChangesCardProps {
+   /**
+    * 降级形态（`capability="tool_only"` / 无快照 / 采集失败）：折叠头「仅工具编辑」+
+    * 一行说明，无文件行。**不显示任何「无改动」字样**（E6/E8：没快照 ≠ 没改动）。
++   *
++   * 注意（2026-10-22-file-card-hide-empty）：产品页**已无生产者**——无数据的轮按
++   * 用户裁决直接不出卡。本形态保留给检查器 / proto 等仍要「显式降级」的消费方。
+    */
+   degraded?: boolean;
+   /**
+diff --git a/frontend/src/components/daemon/file-changes/file-changes-summary.tsx b/frontend/src/components/daemon/file-changes/file-changes-summary.tsx
+index 3bfbee4f0..ffdc6c8b0 100644
+--- a/frontend/src/components/daemon/file-changes/file-changes-summary.tsx
++++ b/frontend/src/components/daemon/file-changes/file-changes-summary.tsx
+@@ -15,10 +15,11 @@
+  * 约束（与轮级卡同源）：
+  * - **props only**：零 fetch / 零 store / 零 context，聚合纯函数现算；
+  * - 只用语义 token，零字面色值；文案中文；
+- * - `status` 取最差值（`unavailable > failed > partial > ok`）；任一参与轮缺快照
+- *   （`capability="tool_only"` / 无快照）时汇总**至少降为 partial** 并显式标注
+- *   「N 轮无工作区快照」——「统计不完整」绝不能被读成「没有改动」（E6/E8）；
+- * - 无数据（无文件且无降级轮）不渲染，不出空壳。
++ * - `status` 取最差值（`unavailable > failed > partial > ok`）；**无可信快照的轮
++ *   （`capability="tool_only"` / 无快照）不参与汇总**——2026-10-22-file-card-hide-empty
++ *   用户裁决「没有信息就隐藏卡片，汇总也不要留缺口提示」：这些轮既不出卡、也不把
++ *   汇总压成「不完整」；
++ * - 无数据（零文件）整卡零渲染，不出空壳。
+  */
+ 
+ import { useMemo } from "react";
+@@ -77,9 +78,7 @@ export interface AggregatedFileChanges {
+   totalDels: number;
+   /** 汇总状态（无任何可信快照 → null）。 */
+   status: FileChangesSummaryStatus | null;
+-  /** 无工作区快照的轮数（capability=tool_only / 快照缺失）——汇总不完整的量。 */
+-  degradedTurns: number;
+-  /** 参与汇总的轮数（有快照的轮 + 降级轮）。 */
++  /** 参与汇总的轮数（**只计有可信快照的轮**；无快照轮被跳过）。 */
+   consideredTurns: number;
+   /** 任一轮快照被截断/超时（行级统计为下限）。 */
+   truncated: boolean;
+@@ -88,37 +87,35 @@ export interface AggregatedFileChanges {
+ /**
+  * 多轮快照聚合（纯函数）：按 `path` 去重、+/− 求和、状态取最差值。
+  *
+- * 降级轮（`snapshot == null` 或 `capability="tool_only"`）不伪造文件行，只计入
+- * `degradedTurns` 并把汇总状态压到至少 `partial`——覆盖不完整必须显式可见。
++ * 无可信快照的轮（`snapshot == null` / `capability="tool_only"` / `failed` /
++ * `unavailable`）**直接跳过**——既不贡献文件行，也不把汇总压成「不完整」
++ * （2026-10-22-file-card-hide-empty：缺口提示按用户裁决整体移除）。
+  */
+ export function aggregateTurnFileChanges(
+   entries: ReadonlyArray<FileChangesSummaryEntry>,
+ ): AggregatedFileChanges {
+   const byPath = new Map<string, AggregatedFileChange>();
+   const statuses: FileChangesSummaryStatus[] = [];
+-  let degradedTurns = 0;
+   let truncated = false;
+   let consideredTurns = 0;
+ 
+   for (const entry of entries) {
+     const snapshot = entry.snapshot ?? null;
+     const capability = entry.capability ?? null;
+-    // 完全未接线（两字段都缺）的轮不参与汇总——既不贡献数据也不算降级。
+-    if (snapshot == null && capability == null) continue;
++    // 无快照能力 / 快照缺失：零信息，跳过（不出卡也不计入汇总）。
++    if (snapshot == null || capability === "tool_only") continue;
++    // 采集失败 / git 不可用：数据不可信 → 与「无快照」同口径跳过。若仍计入，
++    // Σ+/− 会被整体打成「—」并冒出「部分轮次快照采集失败，汇总不完整」——
++    // 正是本变更要消除的顶部缺口提示（2026-10-22-file-card-hide-empty）。
++    if (snapshot.status === "failed" || snapshot.status === "unavailable") continue;
+     consideredTurns += 1;
+-    if (snapshot == null || capability === "tool_only") {
+-      degradedTurns += 1;
+-      continue;
+-    }
+     statuses.push(snapshot.status);
+     if (snapshot.status === "partial" || snapshot.truncated === true) truncated = true;
+-    if (snapshot.status !== "ok" && snapshot.status !== "partial") continue;
+     for (const file of snapshot.files ?? []) {
+       mergeFile(byPath, file);
+     }
+   }
+ 
+-  if (degradedTurns > 0) statuses.push("partial");
+   const status = worstFileChangesStatus(statuses);
+ 
+   const files = [...byPath.values()].sort((a, b) => a.path.localeCompare(b.path));
+@@ -128,7 +125,6 @@ export function aggregateTurnFileChanges(
+     totalAdds: files.reduce((sum, file) => sum + file.adds, 0),
+     totalDels: files.reduce((sum, file) => sum + file.dels, 0),
+     status,
+-    degradedTurns,
+     consideredTurns,
+     truncated,
+   };
+@@ -185,8 +181,9 @@ export interface FileChangesSummaryProps {
+ export function FileChangesSummary({ turns, className }: FileChangesSummaryProps) {
+   const agg = useMemo(() => aggregateTurnFileChanges(turns), [turns]);
+ 
+-  // 无数据不渲染：没有文件、也没有「某轮缺快照」要说的事。
+-  if (agg.totalFiles === 0 && agg.degradedTurns === 0) return null;
++  // 无数据不渲染：没有可信快照产出的文件 → 整卡零渲染（不出「共 0 个文件」空壳，
++  // 也不提「N 轮无工作区快照」——2026-10-22-file-card-hide-empty 用户裁决）。
++  if (agg.totalFiles === 0) return null;
+ 
+   const note = fileChangesSummaryNote(agg.status);
+   const statusLabel =
+@@ -203,7 +200,7 @@ export function FileChangesSummary({ turns, className }: FileChangesSummaryProps
+       data-testid="file-changes-summary"
+       data-status={agg.status ?? "unknown"}
+       data-total-files={agg.totalFiles}
+-      data-degraded-turns={agg.degradedTurns}
++      data-considered-turns={agg.consideredTurns}
+       className={cn(
+         "rounded-md border border-border bg-card px-2 py-1.5 text-[12px]",
+         className,
+@@ -245,16 +242,7 @@ export function FileChangesSummary({ turns, className }: FileChangesSummaryProps
+         共享工作区，可能含并行会话改动
+       </p>
+ 
+-      {agg.degradedTurns > 0 && (
+-        <p
+-          data-testid="file-changes-summary-degraded"
+-          className="text-[11px] leading-[1.4] text-muted-foreground/80"
+-        >
+-          其中 {agg.degradedTurns} 轮无工作区快照（仅工具编辑），汇总不完整
+-        </p>
+-      )}
+-
+-      {note != null && agg.degradedTurns === 0 && (
++      {note != null && (
+         <p className="text-[11px] leading-[1.4] text-muted-foreground/80">{note}</p>
+       )}
+     </div>
+diff --git a/frontend/src/components/daemon/file-changes/turn-file-changes.ts b/frontend/src/components/daemon/file-changes/turn-file-changes.ts
+index 6350c9e92..98fba5559 100644
+--- a/frontend/src/components/daemon/file-changes/turn-file-changes.ts
++++ b/frontend/src/components/daemon/file-changes/turn-file-changes.ts
+@@ -13,14 +13,15 @@
+  * - 「### 1b 承载面与读模型字段」：读模型用顶层 snake_case
+  *   `file_changes` / `file_changes_capability`，嵌套快照体是 camelCase。
+  *
+- * 三态降级（本模块的裁决口径，逐条对应 design E6/E8）：
++ * 三态降级（本模块的裁决口径，逐条对应 design E6/E8；2026-10-22-file-card-hide-empty
++ * 起「无信息」一律**不出卡**，不再渲染「仅工具编辑」占位）：
+  * | 输入 | 输出 |
+  * |---|---|
+  * | `capability` 与 `snapshot` 双双缺省 | `null`——读模型没接线/该轮无 run 快照，**不出卡、不出占位** |
+- * | `capability="tool_only"` | 降级态 `{ degraded: true, files: [] }` → 「仅工具编辑」卡 |
+- * | `snapshot=null`（capability 已给） | 同上（显式降级，不静默） |
+- * | `status="failed" \| "unavailable"` | 同上（git 不可用 / 非 git 仓：行级数据不可信，不伪造 files） |
+- * | `status="partial"` 或 `truncated=true` | 正常卡 + `truncated: true`（行级破折号） |
++ * | `capability="tool_only"` | `null`——daemon 无快照能力（老 daemon / 部署前的历史轮）：零信息，不出卡 |
++ * | `snapshot=null`（capability 已给） | `null`——同上（显式缺失不静默成「无改动」，也不出占位） |
++ * | `status="failed" \| "unavailable"` | `null`——git 不可用 / 非 git 仓：行级数据不可信，且无信息可呈现 |
++ * | `status="partial"` 或 `truncated=true` | 正常卡 + `truncated: true`（行级破折号）；`files` 为空时出一行提示卡 |
+  * | `status="ok"` 且 `files` 为空 | `null`（确认无改动的快照 → 零渲染空态，不写「本轮无改动」文案） |
+  */
+ 
+@@ -92,27 +93,12 @@ export function toChangedFile(file: TurnFileChange): ChangedFile {
+   };
+ }
+ 
+-/** 降级态 props：「仅工具编辑」卡（零 files，禁伪造行级数据）。 */
+-function degradedProps(
+-  snapshot: TurnFileChangesSnapshot | null,
+-  options: TurnFileChangesCardOptions,
+-): FileChangesCardProps {
+-  return {
+-    files: [],
+-    degraded: true,
+-    capability: "tool_only",
+-    turnNo: options.turnNo,
+-    // 快照可能是 failed/unavailable（存在但不可信）：共享工作区提示仍如实透传。
+-    sharedWorkspace: snapshot?.concurrentSessionsHint === true,
+-    onOpenFile: options.onOpenFile,
+-    className: options.className,
+-  };
+-}
+-
+ /**
+  * 轮快照 + capability → 卡片 props（`null` = 不出卡、不出占位）。
+  *
+  * 判定顺序即上表：先看「有没有这项能力」，再看「快照可信不可信」，最后才谈行级数据。
++ * 2026-10-22-file-card-hide-empty：前三条「无信息」分支（tool_only / 无快照 /
++ * failed|unavailable）一律返回 `null`——不再渲染「仅工具编辑」占位卡。
+  */
+ export function toFileChangesCardProps(
+   snapshot: TurnFileChangesSnapshot | null | undefined,
+@@ -121,14 +107,13 @@ export function toFileChangesCardProps(
+ ): FileChangesCardProps | null {
+   // 未接线：两个字段都缺（旧消费方 / 该轮无 run 快照来源）——不出卡也不出占位。
+   if (snapshot == null && capability == null) return null;
+-  // E8：capability 明确为 tool_only＝daemon 不提供工作区快照能力 → 显式降级。
+-  if (capability === "tool_only") return degradedProps(snapshot ?? null, options);
+-  // 有 capability 却无快照（backend 声称 full 但没数据）：按 E6/E8 降级，不静默。
+-  if (snapshot == null) return degradedProps(null, options);
+-  // 采集失败 / git 不可用：行级统计不可信（不伪造 files）。
+-  if (snapshot.status === "failed" || snapshot.status === "unavailable") {
+-    return degradedProps(snapshot, options);
+-  }
++  // E8：capability 明确为 tool_only＝daemon 不提供工作区快照能力（老 daemon /
++  // 部署前的历史轮）——零信息，不出卡（用户裁决：没有信息就隐藏卡片）。
++  if (capability === "tool_only") return null;
++  // 有 capability 却无快照（backend 声称 full 但没数据）：同样零信息，不出卡。
++  if (snapshot == null) return null;
++  // 采集失败 / git 不可用：行级统计不可信（不伪造 files），且没有可呈现的信息。
++  if (snapshot.status === "failed" || snapshot.status === "unavailable") return null;
+ 
+   const truncated = snapshot.status === "partial" || snapshot.truncated === true;
+   const files = (snapshot.files ?? []).map(toChangedFile);
+diff --git a/frontend/src/components/daemon/turn-timeline.tsx b/frontend/src/components/daemon/turn-timeline.tsx
+index 1d56a485a..4b235a6e8 100644
+--- a/frontend/src/components/daemon/turn-timeline.tsx
++++ b/frontend/src/components/daemon/turn-timeline.tsx
+@@ -408,8 +408,9 @@ export interface SessionTurnView {
+   fileChanges?: TurnFileChangesSnapshot | null;
+   /**
+    * task-11 / FR-16：该轮快照能力档（`full` = daemon 上报了工作区快照；
+-   * `tool_only` = 老 daemon 无快照能力）。`undefined` = 挂载方未接线（不出卡、
+-   * 不出占位）；`tool_only` → 「仅工具编辑」降级卡（E8 版本门控面）。
++   * `tool_only` = 老 daemon / 部署前的历史轮，无快照能力）。`undefined` = 挂载方
++   * 未接线（不出卡、不出占位）；`tool_only` 与「无快照 / 采集失败」同口径——**不出卡**
++   * （2026-10-22-file-card-hide-empty：没有信息就隐藏卡片，原「仅工具编辑」降级卡已下线）。
+    */
+   fileChangesCapability?: FileChangesCapability | null;
+ }
+@@ -1221,9 +1222,10 @@ const TurnRow = memo(function TurnRow({
+               )}
+               {/* task-11（2026-10-20-session-page-dsh-alignment / FR-14 / D-023@v1）：
+                   轮级文件变更卡——挂在轮尾状态行**之后**（两视图同位置）。
+-                  `toFileChangesCardProps` 返回 null（该轮无快照 / 快照确认零改动 /
+-                  挂载方未接线）时**不渲染任何占位**；capability="tool_only" 或快照
+-                  不可用 → 「仅工具编辑」降级卡（design E6/E8：绝不显示「本轮无改动」）。 */}
++                  `toFileChangesCardProps` 返回 null 时**不渲染任何占位**；该 null 现在
++                  覆盖「无快照 / tool_only / 采集失败 / 快照确认零改动」（2026-10-22
++                  file-card-hide-empty 用户裁决：没有信息就隐藏卡片，不再出「仅工具
++                  编辑」降级卡；design E6/E8 的「绝不显示本轮无改动」仍成立）。 */}
+               {(() => {
+                 const cardProps = toFileChangesCardProps(
+                   turn.fileChanges,

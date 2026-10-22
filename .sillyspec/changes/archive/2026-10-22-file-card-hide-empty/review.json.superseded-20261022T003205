@@ -1,0 +1,61 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-22-file-card-hide-empty",
+  "reviewer": "subagent",
+  "verdict": "PASS",
+  "reviewedAgainst": "4a2573261600fa252ae9b2fc997655f67564fe19",
+  "findings": [
+    {
+      "severity": "P2",
+      "title": "会话级汇总未跳过 failed/unavailable 快照：design 契约与代码/测试三方不一致，混合会话残留「汇总不完整」类缺口提示",
+      "evidence": "aggregateTurnFileChanges 的跳过条件只有 `snapshot == null || capability === \"tool_only\"`（file-changes-summary.tsx:106）；status=failed/unavailable 的快照仍 `consideredTurns += 1` 并把 statuses 压到最差值（:107-110）。渲染层因此照常出卡、把 Σ+/− 整体替换为「—」（:213-223）并显示「部分轮次快照采集失败，汇总不完整」/「无法采集工作区快照」注记（:242-244 + fileChangesSummaryNote:163-166）——即使同会话存在可信轮。design.md:284-286 明写「无可信快照的轮（snapshot == null / capability=tool_only / failed / unavailable）直接跳过」，该函数自身 JSDoc:90-92 同写「直接跳过」，而 file-changes-summary.test.tsx:136-147 又把现行口径（status→unavailable、计入 consideredTurns）钉死，声明与实现/测试互斥。FR-03 的括注定义（snapshot != null 且 capability != \"tool_only\"）字面被满足，故不定 P1；但「可信快照」措辞与 design 接口契约未兑现，且该注记属于本变更要消除的顶部缺口提示同类文案，建议二选一收口（按 design 跳过 failed/unavailable，或改 design/注释与 FR-03 措辞）。",
+      "location": "frontend/src/components/daemon/file-changes/file-changes-summary.tsx:106"
+    },
+    {
+      "severity": "P3",
+      "title": "turn-timeline.tsx 的 fileChangesCapability 字段注释未随新口径更新（design 声称该文件注释已同步）",
+      "evidence": ":409-413 仍写「`tool_only` → 『仅工具编辑』降级卡（E8 版本门控面）」，但实现已对 capability=tool_only（turn-file-changes.ts:112）与 status=failed/unavailable（:116）一律返回 null，挂载层已无该卡生产者；design.md:32 将本文件列为「仅注释：『tool_only → 降级卡』改为『无数据 → 不出卡』」，实际只改了挂载处 :1222-1227，类型字段注释滞后（同文件 :405-406「是否降级由 fileChangesCapability 裁决」亦已无『降级』实体）。注释不产生行为面，报 P3。",
+      "location": "frontend/src/components/daemon/turn-timeline.tsx:412"
+    },
+    {
+      "severity": "P3",
+      "title": "requirements.md 测试绑定与用例计数与实态不符（追溯性小疵，行为覆盖实质完整）",
+      "evidence": "FR-02 绑定「ok + 两条文件（edit_patch / command）→ 卡片 props 逐字段不变」在仓内无对应用例：turn-file-changes.test.ts:60-88 的两文件快照全为 edit_patch，command 归因只有 :90-108 的单文件用例，且无「逐字段」等价断言；FR-02 另称 file-changes-card.test.tsx 为「13 例」，实跑 14 例；FR-04 绑定称 file-changes/__tests__（4 文件全绿），实际该目录只有 3 个测试文件（19+9+14=42 例，本机合并实跑全绿）。FR-01/02/03/04 的行为本身由挂载用例（turn-timeline-conversation-file-card.test.tsx:367 有快照出卡 + 横幅）与组件 14 例覆盖，故不影响终裁，仅需更正绑定文字。",
+      "location": ".sillyspec/changes/2026-10-22-file-card-hide-empty/requirements.md:59-62"
+    }
+  ],
+  "dimensionNotes": {
+    "乱序": "ok（边界已裁决：可接受）——判定是逐轮纯函数（turn-file-changes.ts:103-146），无跨轮状态；快照迟到时 attachRunFileChanges 以 (snapshot, capability) 校验 WeakMap 后重投影（:189-203），到位即出卡，不存在「先隐藏后不显示」的粘滞态；汇总 useMemo 只依赖 turns 引用（file-changes-summary.tsx:179）。",
+    "并发": "n/a（边界已裁决：可接受，与 design「不适用」一致）——diff 只在渲染层做纯函数判定，无写入路径；FILE_CHANGES_PROJECTION_CACHE 为模块级 WeakMap、键为轮对象、值不可变投影，无共享可变态；多标签页各持自有 React 树。",
+    "切换": "ok（边界已裁决：可接受）——隐藏是无状态判定（FileChangesSummary 仅 useMemo，无 useState/useEffect）；被移除的 28px 占位不参与贴底锚点（贴底读 scrollHeight + 轮身份签名重启重申窗口，turn-timeline.tsx:1289/1351-1363），会话切换后按新 props 重算，无残留态。",
+    "作用域": "ok（边界已裁决：可接受）——投影键 realRunId ?? runId（turn-file-changes.ts:182），汇总只吃本会话 turns（turn-timeline.tsx:1393-1400），无跨会话/跨工作区/跨实例取数面。"
+  },
+  "boundaryAdjudications": [
+    {
+      "boundary": "把「采集失败」（status=failed/unavailable）轮级卡一并隐藏 → 排障信号在 UI 面丢失（design「风险与死路」披露）",
+      "ruling": "可接受",
+      "reason": "用户显式裁决「没有信息就隐藏卡片」；失败原因仍留在数据面（/runs 的 file_changes.status/reason、daemon 结构化日志），隐藏的只是呈现，未销毁证据，且方向保守（不伪造 0 文件）。"
+    },
+    {
+      "boundary": "status=partial 且 files=[] 仍保留一行提示卡（NOTICE_PARTIAL_NO_FILES），不属本次隐藏范围",
+      "ruling": "可接受",
+      "reason": "该卡携带「采集未完成、本轮改动未知」的真实信息，不是零信息占位；turn-file-changes.ts:123-133 与 turn-file-changes.test.ts:146-166 一致，且文案经断言不含「无改动」。"
+    },
+    {
+      "boundary": "FileChangesCard 的 degraded 形态保留在组件层，产品页已无生产者",
+      "ruling": "可接受",
+      "reason": "组件能力保留且有 14 例组件级用例保护，file-changes-card.tsx:89-91 已显式标注「产品页无生产者」；全树 grep 无 degraded 生产者，不存在误挂面。"
+    },
+    {
+      "boundary": "无后端 / 无 daemon / 无 DTO / 无新端点（design 接口契约「无」）",
+      "ruling": "可接受",
+      "reason": "实测提交面仅 7 个 frontend/src/components/daemon 文件（106+/123-），与 design 变更清单逐一对齐、无声明外文件；tsc --noEmit exit 0 说明删字段 degradedTurns 无残留消费者。"
+    },
+    {
+      "boundary": "移除 28px 零信息占位不影响滚动锚点（design 盲维 3 声明）",
+      "ruling": "可接受",
+      "reason": "贴底/锚点逻辑读 scrollHeight 与轮身份签名（turn-timeline.tsx:1289/1351-1363），不依赖该占位高度；高度只减不增，只会减少内容长度。"
+    }
+  ],
+  "reviewedAt": "2026-10-22T00:25:35Z"
+}

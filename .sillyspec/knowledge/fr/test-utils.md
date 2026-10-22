@@ -584,3 +584,90 @@ created_at: 2026-10-16T01:30:35.950Z
   confirmed_at: null
   source_change: 2026-10-22-session-trajectory-view
   status: active
+
+## FR-test-utils-028 capability=tool_only、快照缺失、status=failed|unavailable 的轮一律不出卡、不出占位（全树不再出现「仅工具编辑」卡）
+变更：2026-10-22-file-card-hide-empty
+状态：active
+摘要：历史轮（无快照能力）；采集失败（有快照但不可信）
+场景正文：
+- 场景：历史轮（无快照能力） — Given 一轮的读模型为 `file_changes=null` + `file_changes_capability="tool_only"`；When 会话页渲染该轮
+- 场景：采集失败（有快照但不可信） — Given 一轮的快照 `status="unavailable"`（git 缺失 / 非 git 仓）或 `status="failed"`；When 渲染该轮；Then
+全文：.sillyspec/changes/archive/2026-10-22-file-card-hide-empty/requirements.md#FR-01
+最近确认：a9232edf123799304e3f47172a4fc3499c754b65
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-22-file-card-hide-empty:flow:测试绑定FR-01
+  tests: frontend/src/components/daemon/__tests__/turn-timeline-conversation-file-card.test.tsx | frontend/src/components/daemon/file-changes/__tests__/turn-file-changes.test.ts
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-22-file-card-hide-empty
+  status: active
+
+## FR-test-utils-029 有真实文件清单的轮照常出卡：逐文件 +/−、归因、并行会话横幅零变化
+变更：2026-10-22-file-card-hide-empty
+状态：active
+摘要：主路径；partial 且无文件清单（保留）
+场景正文：
+- 场景：主路径 — Given 一轮快照 `status="ok"` 且 `files` 含 2 条（1 条 `edit_patch`、1 条 `command`）；When 渲染该轮；The
+- 场景：partial 且无文件清单（保留） — Given 快照 `status="partial"` 且 `files=[]`（1500ms 超时 / 队列溢出）；When 渲染该轮；Then 仍渲染一行提示卡（`da
+全文：.sillyspec/changes/archive/2026-10-22-file-card-hide-empty/requirements.md#FR-02
+最近确认：a9232edf123799304e3f47172a4fc3499c754b65
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-22-file-card-hide-empty:flow:测试绑定FR-02
+  tests: frontend/src/components/daemon/__tests__/turn-timeline-conversation-file-card.test.tsx | frontend/src/components/daemon/file-changes/__tests__/file-changes-card.test.tsx | frontend/src/components/daemon/file-changes/__tests__/turn-file-changes.test.ts
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-22-file-card-hide-empty
+  status: active
+
+## FR-test-utils-030 会话级汇总只汇总真实有改动的轮，不再输出「N 轮无工作区快照」缺口提示；零文件时整卡零渲染
+变更：2026-10-22-file-card-hide-empty
+状态：active
+摘要：全历史轮（零文件）；真实轮 + 历史轮混合
+场景正文：
+- 场景：全历史轮（零文件） — Given 58 轮全部 `file_changes_capability="tool_only"`；When 渲染会话级汇总；Then 汇总卡不渲染（`data-test
+- 场景：真实轮 + 历史轮混合 — Given 3 轮有可信快照（共 5 个文件）且 55 轮无快照；When 渲染汇总；Then 卡片在场且「共 5 个文件」按真实轮统计，不出现「N 轮无工作区快照」字样。
+全文：.sillyspec/changes/archive/2026-10-22-file-card-hide-empty/requirements.md#FR-03
+最近确认：a9232edf123799304e3f47172a4fc3499c754b65
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-22-file-card-hide-empty:flow:测试绑定FR-03
+  tests: frontend/src/components/daemon/file-changes/__tests__/file-changes-summary.test.tsx
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-22-file-card-hide-empty
+  status: active
+
+## FR-test-utils-031 全树仍不出现「本轮无改动」字样；file-changes 相关用例按新口径更新后全绿，tsc --noEmit 退出 0
+变更：2026-10-22-file-card-hide-empty
+状态：active
+摘要：主路径
+场景正文：
+- 场景：主路径 — Given 变更落盘；When 跑 `tsc --noEmit` 与 `src/components/daemon/file-changes/__tests__/` + `
+全文：.sillyspec/changes/archive/2026-10-22-file-card-hide-empty/requirements.md#FR-04
+最近确认：a9232edf123799304e3f47172a4fc3499c754b65
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-22-file-card-hide-empty:flow:测试绑定FR-04
+  tests: frontend/src/components/daemon/__tests__/turn-timeline-conversation-file-card.test.tsx
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-22-file-card-hide-empty
+  status: active
