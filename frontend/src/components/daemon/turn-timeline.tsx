@@ -8,9 +8,10 @@
  *   - 错误横幅 + AskUserQuestion 待答卡 + 空态
  *   - 自动滚动到底部
  *
- * 「对话/全部」二态视图由 viewMode 控制（ql-20260729-005）；AskUser 提问记录按
- * run_id 穿插到对应 turn（ql-20260802-001/003）。本组件无弹窗上下文依赖，
- * /runtimes 弹窗与 /sessions 新页面均可独立 import 组装。
+ * 「对话/进度/轨迹」三态视图由 viewMode 控制（ql-20260729-005 建两态；
+ * 2026-10-22-session-trajectory-third-view / D-001 上移轨迹为第三视图）；
+ * AskUser 提问记录按 run_id 穿插到对应 turn（ql-20260802-001/003）。本组件无
+ * 弹窗上下文依赖，/runtimes 弹窗与 /sessions 新页面均可独立 import 组装。
  *
  * task-06（2026-08-19-session-stream-ux / FR-01 / FR-02 / FR-06 / design §5 Phase2
  * + §9.3）：渲染层 v2 段模型双路径——

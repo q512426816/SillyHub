@@ -854,7 +854,7 @@ export function SessionPanelPage({
     () => buildSubagentTaskLookup(subagentReconcileSource.tasks),
     [subagentReconcileSource.tasks],
   );
-  // ql-20260822-010：视图模式（对话/进度）按会话持久化——原实现刷新后回默认
+  // ql-20260822-010：视图模式（对话/进度/轨迹，2026-10-22 D-001）按会话持久化——原实现刷新后回默认
   // 「对话」，与聊天中切到的视图不一致。挂载后回读（effect 内 set，避免 SSR
   // hydration mismatch）；切换时写入。dialog 适配层无刷新恢复场景，不持久化。
   // task-03（R-01）：预会话态无会话级持久化键，跳过（转真会话时随依赖重跑）。
