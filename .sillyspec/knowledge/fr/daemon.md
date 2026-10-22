@@ -6968,3 +6968,136 @@
 摘要：守卫路径
 全文：.sillyspec/changes/archive/2026-10-20-session-awaiting-answer-status/requirements.md#FR-04
 最近确认：c0dbab0121e933d6bbfec711f0839bec0c580290
+
+## FR-daemon-242 对话视图运行中轮次（pending/running/interrupting）末尾渲染单行横向跑马灯，展示思考/工具/子代理/文件/系统事件等过程信息，终态轮不渲染
+变更：2026-10-22-conversation-live-marquee
+状态：active
+摘要：运行中展示；终态消失
+全文：.sillyspec/changes/archive/2026-10-22-conversation-live-marquee/requirements.md#FR-01
+最近确认：0bc8e38f727cf2fe343cea748bf7cc493aa8c50e
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-22-conversation-live-marquee:flow:测试绑定FR-01
+  tests: frontend/src/components/daemon/__tests__/turn-live-marquee.test.tsx「按段文档序产出条目，跳过 text 答复段」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-22-conversation-live-marquee
+  status: active
+
+## FR-daemon-243 事件按发生顺序逐条横向滑过；新事件实时入队，无新事件时循环播放最近事件，保持持续流动感
+变更：2026-10-22-conversation-live-marquee
+状态：active
+摘要：事件密集；短暂空闲；打开时已有历史
+全文：.sillyspec/changes/archive/2026-10-22-conversation-live-marquee/requirements.md#FR-02
+最近确认：0bc8e38f727cf2fe343cea748bf7cc493aa8c50e
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-22-conversation-live-marquee:flow:测试绑定FR-02
+  tests: frontend/src/components/daemon/__tests__/turn-live-marquee.test.tsx「轨道按顺序完整渲染全部条目，不复制内容循环」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-22-conversation-live-marquee
+  status: active
+
+## FR-daemon-244 同一段的流式文本更新不重复刷屏：按段 id 去重，每段只入队一次（工具状态变化就地更新不新增）
+变更：2026-10-22-conversation-live-marquee
+状态：active
+摘要：思考流式增长
+全文：.sillyspec/changes/archive/2026-10-22-conversation-live-marquee/requirements.md#FR-03
+最近确认：0bc8e38f727cf2fe343cea748bf7cc493aa8c50e
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-22-conversation-live-marquee:flow:测试绑定FR-03
+  tests: frontend/src/components/daemon/__tests__/turn-live-marquee.test.tsx「同一段 id 的流式更新就地覆盖文本，不重复入队（FR-03）」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-22-conversation-live-marquee
+  status: active
+
+## FR-daemon-245 「进度」「轨迹」视图与历史轮次渲染行为零变化；旧回退轮（segments undefined）不接入
+变更：2026-10-22-conversation-live-marquee
+状态：active
+摘要：切换视图
+全文：.sillyspec/changes/archive/2026-10-22-conversation-live-marquee/requirements.md#FR-04
+最近确认：0bc8e38f727cf2fe343cea748bf7cc493aa8c50e
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-22-conversation-live-marquee:flow:测试绑定FR-04
+  tests: frontend/src/components/daemon/__tests__/turn-live-marquee.test.tsx「对话视图 + 终态轮次 → 不渲染」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-22-conversation-live-marquee
+  status: active
+
+## FR-daemon-246 现有主题下视觉协调，移动端不溢出，prefers-reduced-motion 下降级为静态展示最新一条
+变更：2026-10-22-conversation-live-marquee
+状态：active
+摘要：减少动态效果
+全文：.sillyspec/changes/archive/2026-10-22-conversation-live-marquee/requirements.md#FR-05
+最近确认：0bc8e38f727cf2fe343cea748bf7cc493aa8c50e
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-22-conversation-live-marquee:flow:测试绑定FR-05
+  tests: frontend/src/components/daemon/__tests__/turn-live-marquee.test.tsx「reduced-motion 下静态展示最新一条，不渲染滚动轨道（FR-05）」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-22-conversation-live-marquee
+  status: active
+
+## FR-daemon-247 用户上滚离开底部或组件不可见时暂停轮播，回到底部恢复
+变更：2026-10-22-conversation-live-marquee
+状态：active
+摘要：上滚离开
+全文：.sillyspec/changes/archive/2026-10-22-conversation-live-marquee/requirements.md#FR-06
+最近确认：0bc8e38f727cf2fe343cea748bf7cc493aa8c50e
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-22-conversation-live-marquee:flow:测试绑定FR-06
+  tests: frontend/src/components/daemon/__tests__/turn-live-marquee.test.tsx「组件不可见时暂停滚动，恢复可见后继续（FR-06）」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-22-conversation-live-marquee
+  status: active
+
+## FR-daemon-248 新增纯函数与组件测试，相关测试通过；lint / typecheck 通过
+变更：2026-10-22-conversation-live-marquee
+状态：active
+摘要：交付核验
+全文：.sillyspec/changes/archive/2026-10-22-conversation-live-marquee/requirements.md#FR-07
+最近确认：0bc8e38f727cf2fe343cea748bf7cc493aa8c50e
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-22-conversation-live-marquee:flow:测试绑定FR-07
+  tests: frontend/src/components/daemon/__tests__/turn-live-marquee.test.tsx「条目超过上限时只保留最近 200 条」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-22-conversation-live-marquee
+  status: active

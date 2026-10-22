@@ -1,0 +1,111 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-22-conversation-live-marquee",
+  "rows": [
+    {
+      "anchor": "FR-01",
+      "row_id": "2026-10-22-conversation-live-marquee:flow:测试绑定FR-01",
+      "tests": [
+        "frontend/src/components/daemon/__tests__/turn-live-marquee.test.tsx「按段文档序产出条目，跳过 text 答复段」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-22-conversation-live-marquee"
+    },
+    {
+      "anchor": "FR-02",
+      "row_id": "2026-10-22-conversation-live-marquee:flow:测试绑定FR-02",
+      "tests": [
+        "frontend/src/components/daemon/__tests__/turn-live-marquee.test.tsx「轨道按顺序完整渲染全部条目，不复制内容循环」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-22-conversation-live-marquee"
+    },
+    {
+      "anchor": "FR-03",
+      "row_id": "2026-10-22-conversation-live-marquee:flow:测试绑定FR-03",
+      "tests": [
+        "frontend/src/components/daemon/__tests__/turn-live-marquee.test.tsx「同一段 id 的流式更新就地覆盖文本，不重复入队（FR-03）」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-22-conversation-live-marquee"
+    },
+    {
+      "anchor": "FR-04",
+      "row_id": "2026-10-22-conversation-live-marquee:flow:测试绑定FR-04",
+      "tests": [
+        "frontend/src/components/daemon/__tests__/turn-live-marquee.test.tsx「对话视图 + 终态轮次 → 不渲染」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-22-conversation-live-marquee"
+    },
+    {
+      "anchor": "FR-05",
+      "row_id": "2026-10-22-conversation-live-marquee:flow:测试绑定FR-05",
+      "tests": [
+        "frontend/src/components/daemon/__tests__/turn-live-marquee.test.tsx「reduced-motion 下静态展示最新一条，不渲染滚动轨道（FR-05）」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-22-conversation-live-marquee"
+    },
+    {
+      "anchor": "FR-06",
+      "row_id": "2026-10-22-conversation-live-marquee:flow:测试绑定FR-06",
+      "tests": [
+        "frontend/src/components/daemon/__tests__/turn-live-marquee.test.tsx「组件不可见时暂停滚动，恢复可见后继续（FR-06）」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-22-conversation-live-marquee"
+    },
+    {
+      "anchor": "FR-07",
+      "row_id": "2026-10-22-conversation-live-marquee:flow:测试绑定FR-07",
+      "tests": [
+        "frontend/src/components/daemon/__tests__/turn-live-marquee.test.tsx「条目超过上限时只保留最近 200 条」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-22-conversation-live-marquee"
+    }
+  ]
+}

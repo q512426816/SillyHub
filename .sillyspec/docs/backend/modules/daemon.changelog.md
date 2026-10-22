@@ -60,3 +60,4 @@ created_at: 2026-08-29 22:56:30
 | 2026-10-22 | 2026-10-22-merge-regression-fixes | 合并回归债收口：grants 闭包与 lease 双流断言 |
 | 2026-10-22 | 2026-10-22-sillyspec-probe-db-missing-evict | 已删工作区探针自动淘汰与诊断增强 |
 | 2026-10-22 | 2026-10-20-session-awaiting-answer-status | 左侧会话状态补充等待回答问号 |
+| 2026-10-22 | 2026-10-22-conversation-live-marquee | 会话页「对话」tab 运行中时只有一行状态条，用户感知不到 agent 正在真实执行；希望在该轮末尾… |

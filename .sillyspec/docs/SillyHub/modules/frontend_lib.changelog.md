@@ -28,3 +28,4 @@ created_at: 2026-10-16 16:40:00
 - 2026-10-22-turn-trigger-metadata-p2 | 轮触发溯源 Phase 2：定时消息接入与 metadata 戳驱动
 - 2026-10-22-sillyspec-probe-db-missing-evict | 已删工作区探针自动淘汰与诊断增强
 - 2026-10-20-session-awaiting-answer-status | 左侧会话状态补充等待回答问号
+- 2026-10-22-conversation-live-marquee | 会话页「对话」tab 运行中时只有一行状态条，用户感知不到 agent 正在真实执行；希望在该轮末尾…

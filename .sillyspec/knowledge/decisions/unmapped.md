@@ -1405,3 +1405,11 @@
 锚点：未记录
 最近确认：c0dbab0121e933d6bbfec711f0839bec0c580290
 理由：最大风险：列表刷新频率下新增一次 IN 查询的负载。评估：与既有 owner_name/current_run_status/terminating_at 注入同构（同一查询函数内多次 IN 批查），单表 `idx_session_dialog_requests_status` + session_id 索引齐备；10s/30s 轮询与事件驱动共用的仍是同一次列表查询，增量成本可忽略。 另一风险：`dialog_kind` 语义扩容（如未来出现非「等用户回答」的持久化对话类型）会误显示问号——以「所有持久化 pending 对话即等用户回答」为当前契约（模型注释明示：普通 canUseTool 审批不落行，落行的都是 may wait indefinitely for a human answer）。若未来出现例外，在该注入点按 kind 白名单收窄即可，改动局部。 试过但放弃的方案： - 前端用 `fetchPendingDialogs`（workspace 聚合端点）在 portal 侧合并——portal 有 workspace/change/quicklog 三 scope，要各自请求+合并+多一轮轮询，且未打开会话也在左栏，聚合端点按 workspace 粒度不匹配行级展示。放弃。 - 复用活性 `blocked` 区分——blocked 是 tailer 10s 推导的通用「停住」态，无法区分等审批/等回答/其它阻塞，且本地 CLI 会话 30s 轮询下最坏 ~40s 才可见。放弃。 - 在 run 表加列——写路径多、语义错位（等待是对话请求状态而非 run 状态）。放弃。
+
+## D-unmapped-184@v1 设计期风险与放弃方案（底稿）
+状态：implemented
+变更：2026-10-22-conversation-live-marquee
+原编号：D-001@v1
+锚点：未记录
+最近确认：0bc8e38f727cf2fe343cea748bf7cc493aa8c50e
+理由：- 最大风险：流式高频更新导致派生/重渲染成本。缓解：派生 `useMemo` 只依赖 `segments` 引用，条目上限 200；滚动由单条 rAF 直接写 `transform`，不触发 React 每帧 state 更新；组件 `memo` 隔离。 - 交互风险：跑马灯持续动效可能干扰阅读。缓解：单行低矮、低调配色、`aria-live="off"` 不打扰读屏；终态立即消失；用户上滚使轮尾离开视口时 IntersectionObserver 自动停表。 - 视觉风险：窄屏下超长工具参数撑破。缓解：条目等宽 13rem + `truncate` + `min-w-0`，轨道容器 `overflow-hidden`，整行不产生横向滚动。 - 动画正确性风险：轨道内容变化（新增条目）时目标位置需重算，否则最新条可能停不进视口。缓解：`entries` 变化即重算 target，只向更负方向推进、不回滚；首次挂载直接定位到最新。 - 放弃方案：① 吸底悬浮（用户明确选择"运行中轮末尾"）；② 多行信息牌 / 竖向事件流（用户选择单行横向跑马灯）；③ 每条思考 delta 都入队（会刷屏，改为按段 id 就地去重）；④ 复用「进度」视图的完整时间线（信息密度过高，违背"不必看清"的目标）；⑤ 固定节奏逐条停留 + 循环回放（用户裁决改为连续流动、不循环、只流到最新）。
