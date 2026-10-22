@@ -54,8 +54,8 @@
  */
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { Dropdown, Switch, Tag, Tooltip, type MenuProps } from "antd";
-import { Brain, ChevronDown, Cloud, GitBranch, Settings2, Timer, User } from "lucide-react";
+import { Dropdown, Tag, Tooltip, type MenuProps } from "antd";
+import { Brain, ChevronDown, Cloud, GitBranch, Settings2, User } from "lucide-react";
 
 import { ApiError } from "@/lib/api";
 import type { components } from "@/lib/api-types";
@@ -210,17 +210,8 @@ export interface SessionConfigBarProps {
    * injectSession（会话尚未创建），父层经 onProvisionalSwitch 收值并入首句
    * createSession（llm_provider_id/agent_profile_id）。running/ended 传 false 即可。
    */
-  /**
-   * 2026-09-10-auto-resume-interrupted-turn / FR-06：会话级「daemon 重启自动
-   * 续跑」开关控件（不传不渲染，存量调用方零回归）。enabled=当前生效态
-   * （缺省开由父层归一——config.auto_resume_interrupted 仅显式 false 为关）；
-   * onToggle 由父层接 PATCH /sessions/{id}/auto-resume + 会话态刷新。
-   */
-  autoResume?: {
-    enabled: boolean;
-    disabled?: boolean;
-    onToggle: (next: boolean) => void | Promise<void>;
-  };
+  // 2026-10-22-session-composer-slim FR-02：原 autoResume 开关从配置条移除，
+  // 入口迁至输入区 + 菜单（SessionInputBar.autoResume）。
   provisional?: boolean;
   onProvisionalSwitch?: (
     field: Exclude<SessionConfigSwitchField, "model">,
@@ -382,7 +373,6 @@ export function SessionConfigBar({
   onProvisionalThinkingLevelSwitch,
   thinkingLevel,
   trailing,
-  autoResume,
   providerOpenSignal = 0,
   variant = "desktop",
 }: SessionConfigBarProps) {
@@ -1070,46 +1060,18 @@ export function SessionConfigBar({
         {/* ql-20260915-009：mobile 不渲染弹性占位（次要开关同收，flex-wrap 行内
             留它只会把行尾插槽顶到下一行）。 */}
         {!mobile && <span className="flex-1" />}
-        {/* 2026-09-10-auto-resume-interrupted-turn / FR-06：中断自动续跑开关——
-            daemon 重启恢复后被中断轮自动续跑（默认开）；ql-20260915-009 mobile
-            默认收进「设置」展开态（ql-20260915-011：收入口不砍功能）。 */}
-        {autoResume != null && mobileReveal && (
-          <label
-            className="inline-flex shrink-0 items-center gap-1.5 text-[11px] text-muted-foreground"
-            title={
-              autoResume.enabled
-                ? "已开启：daemon 重启恢复后，被中断的一轮自动继续执行（续跑提示词包装，最多自动续跑 2 次）"
-                : "已关闭：daemon 重启后不自动续跑，中断轮保留手动「重新发送」"
-            }
-          >
-            <Switch
-              size="small"
-              checked={autoResume.enabled}
-              disabled={autoResume.disabled}
-              onChange={(next) => void autoResume.onToggle(next)}
-              aria-label="中断自动续跑"
-              data-testid="config-auto-resume-switch"
-            />
-            中断自动续跑
-          </label>
-        )}
-        {/* ql-20260917-008：running 不再是锁——四控件运行中可点（受理即排队/
-            暂存，本轮结束后生效），提示行改信息性说明；desktop 文字，mobile 收
-            （ql-20260915-013 一行化——控件 title 已带说明，不占行）。 */}
-        {running && !mobile && (
-          <span className="inline-flex items-center gap-1 text-[10.5px] text-muted-foreground">
-            <Timer aria-hidden className="h-3 w-3" />
-            运行中切换将于本轮结束后生效
-          </span>
-        )}
-        {/* ql-20260915-011：mobile「设置」展开钮——默认收起的思考档位/档案/
-            自动续跑经此可达（收入口不砍功能）；仅 mobile 渲染，desktop 零变化。 */}
+        {/* 2026-10-22-session-composer-slim FR-02：中断自动续跑开关与「运行中
+            切换将于本轮结束后生效」提示行移出配置条——续跑入口统一收进输入区
+            + 菜单（SessionInputBar），运行中生效说明保留在各控件 title 中，
+            释放行宽降低视觉噪音。 */}
+        {/* ql-20260915-011：mobile「设置」展开钮——默认收起的思考档位/档案
+            经此可达（收入口不砍功能）；仅 mobile 渲染，desktop 零变化。 */}
         {mobile && (
           <button
             type="button"
             aria-expanded={mobileMoreOpen}
             aria-label={mobileMoreOpen ? "收起会话设置" : "更多会话设置"}
-            title={mobileMoreOpen ? "收起会话设置" : "思考档位 / 智能体档案 / 中断自动续跑"}
+            title={mobileMoreOpen ? "收起会话设置" : "思考档位 / 智能体档案"}
             data-testid="config-mobile-more"
             onClick={() => setMobileMoreOpen((v) => !v)}
             className={cn(

@@ -265,7 +265,7 @@ describe("SessionConfigBar 两控件渲染", () => {
 // ── 2. running / ended 置灰（FR-05；ql-20260917-008 起 running 放开） ──────
 
 describe("SessionConfigBar 状态置灰", () => {
-  it("running：两控件可点（受理即排队，本轮结束后生效）+ Timer 提示，下拉可开", () => {
+  it("running：两控件可点（受理即排队，本轮结束后生效），下拉可开", () => {
     renderBar({ running: true });
     for (const name of [
       "配置-供应商 本机默认",
@@ -275,7 +275,9 @@ describe("SessionConfigBar 状态置灰", () => {
         (screen.getByRole("button", { name }) as HTMLButtonElement).disabled,
       ).toBe(false);
     }
-    expect(screen.getByText("运行中切换将于本轮结束后生效")).toBeInTheDocument();
+    // 2026-10-22-session-composer-slim FR-02：运行中提示行移出配置条
+    //（生效时机保留在各控件 title），释放行宽。
+    expect(screen.queryByText("运行中切换将于本轮结束后生效")).not.toBeInTheDocument();
     // ql-20260917-008：运行中点开下拉可正常选择（请求落忙轮排队）
     fireEvent.click(screen.getByRole("button", { name: "配置-供应商 本机默认" }));
     expect(screen.getByTestId("config-dd-provider")).toBeInTheDocument();
@@ -317,19 +319,17 @@ describe("SessionConfigBar 状态置灰", () => {
   });
   // ql-20260909-006：trailing 行尾插槽（会话面板挂 ctx 用量圆环）——
   // 传入渲染在配置条行最右；不传零占位。
-  it("trailing 插槽：传入内容渲染在行尾（running 提示之右），不传零占位", () => {
+  it("trailing 插槽：传入内容渲染在配置条行尾，不传零占位", () => {
     renderBar({
       running: true,
       trailing: <span data-testid="trailing-slot-content">用量 12%</span>,
     });
     const slot = screen.getByTestId("trailing-slot-content");
     expect(slot).toBeInTheDocument();
-    // 与 running 提示同行——共享同一行容器（flex 行）。
+    // 与配置控件同行——共享同一行容器（flex 行）。
     expect(
-      slot.closest("div")?.contains(
-        screen.getByText("运行中切换将于本轮结束后生效"),
-      ),
-    ).toBe(true);
+      slot.closest('[aria-label="会话配置控件条"]'),
+    ).not.toBeNull();
 
     cleanup();
     renderBar();
@@ -1073,52 +1073,18 @@ describe("TurnTimeline whoLine 轮次快照渲染（D-008）", () => {
 });
 
 
-// ── 2026-09-10-auto-resume-interrupted-turn / FR-06：中断自动续跑开关 ──────────
+// ── 2026-10-22-session-composer-slim FR-02：续跑开关迁出配置条 ────────────────
 
-describe("SessionConfigBar 中断自动续跑开关（autoResume 可选控件）", () => {
-  it("不传 autoResume 不渲染（存量调用方零回归）", () => {
-    renderBar();
-    expect(screen.queryByTestId("config-auto-resume-switch")).toBeNull();
-  });
-
-  it("传入渲染开关：默认开 + 点击触发 onToggle(false) + 禁用态不可点", async () => {
-    const onToggle = vi.fn();
-    const { rerender } = renderBar({ autoResume: { enabled: true, onToggle } });
-    const sw = screen.getByTestId("config-auto-resume-switch");
-    expect(sw.getAttribute("aria-checked")).toBe("true");
-    fireEvent.click(sw);
-    await waitFor(() => {
-      expect(onToggle).toHaveBeenCalledWith(false);
+describe("SessionConfigBar 不再渲染中断自动续跑开关（入口迁至 + 菜单）", () => {
+  it("配置条无续跑开关与运行中提示（即使旧调用方残留传参也不渲染）", () => {
+    renderBar({
+      running: true,
+      // 旧调用方兼容探针：prop 已移除，运行时传参不应产生任何渲染。
+      ...({ autoResume: { enabled: true, onToggle: vi.fn() } } as any),
     });
-
-    // 关态回显。
-    rerender(
-      <QueryClientProvider client={new QueryClient()}>
-        <SessionConfigBar
-          {...({ ...BASE_PROPS, autoResume: { enabled: false, onToggle } } as any)}
-        />
-      </QueryClientProvider>,
-    );
-    expect(screen.getByTestId("config-auto-resume-switch").getAttribute("aria-checked")).toBe(
-      "false",
-    );
-
-    // 禁用态：点击不触发。
-    const onToggle2 = vi.fn();
-    rerender(
-      <QueryClientProvider client={new QueryClient()}>
-        <SessionConfigBar
-          {...({
-            ...BASE_PROPS,
-            autoResume: { enabled: true, disabled: true, onToggle: onToggle2 },
-          } as any)}
-        />
-      </QueryClientProvider>,
-    );
-    const disabledSw = screen.getByTestId("config-auto-resume-switch");
-    expect(disabledSw.classList.contains("ant-switch-disabled")).toBe(true);
-    fireEvent.click(disabledSw);
-    expect(onToggle2).not.toHaveBeenCalled();
+    expect(screen.queryByTestId("config-auto-resume-switch")).toBeNull();
+    expect(screen.queryByText("中断自动续跑")).toBeNull();
+    expect(screen.queryByText("运行中切换将于本轮结束后生效")).toBeNull();
   });
 });
 
@@ -1397,13 +1363,12 @@ describe("SessionConfigBar 会话态档位切换控件（task-06 / FR-06 / R-04�
 // ── 9. ql-20260915-009 手机端降噪：variant="mobile" 收低频控件 ────────────────
 
 describe("SessionConfigBar 手机端降噪（ql-20260915-009 variant=mobile）", () => {
-  it("mobile：思考档位/档案/中断自动续跑不渲染，供应商控件保留（供应商+模型+额度形态）", async () => {
+  it("mobile：思考档位/档案不渲染，供应商控件保留（供应商+模型+额度形态）", async () => {
     renderBar({
       variant: "mobile",
       llmProviderId: "prov-kimi",
       agentProfileId: "prof-1",
       thinkingLevel: {},
-      autoResume: { enabled: true, onToggle: vi.fn() },
     });
     // 低频设置项收走。
     expect(
@@ -1425,7 +1390,6 @@ describe("SessionConfigBar 手机端降噪（ql-20260915-009 variant=mobile）",
       llmProviderId: "prov-kimi",
       agentProfileId: "prof-1",
       thinkingLevel: {},
-      autoResume: { enabled: true, onToggle: vi.fn() },
     });
     expect(
       await screen.findByRole("button", { name: "配置-供应商 Kimi 中转" }),
@@ -1434,18 +1398,18 @@ describe("SessionConfigBar 手机端降噪（ql-20260915-009 variant=mobile）",
       screen.getByRole("button", { name: "配置-档案 知识经理" }),
     ).toBeInTheDocument();
     expect(screen.getByTestId("config-thinking-select")).toBeInTheDocument();
-    expect(screen.getByTestId("config-auto-resume-switch")).toBeInTheDocument();
+    // 续跑入口已迁出配置条（2026-10-22-session-composer-slim FR-02）。
+    expect(screen.queryByTestId("config-auto-resume-switch")).toBeNull();
     // 「设置」展开钮仅 mobile 渲染。
     expect(screen.queryByTestId("config-mobile-more")).toBeNull();
   });
 
-  it("mobile：点「设置」展开思考档位/档案/自动续跑，再点收起隐藏（ql-20260915-011 收入口不砍功能）", async () => {
+  it("mobile：点「设置」展开思考档位/档案，再点收起隐藏（ql-20260915-011 收入口不砍功能）", async () => {
     renderBar({
       variant: "mobile",
       llmProviderId: "prov-kimi",
       agentProfileId: "prof-1",
       thinkingLevel: {},
-      autoResume: { enabled: true, onToggle: vi.fn() },
     });
     // 默认收起：三控件不可见，展开钮存在。
     expect(screen.getByTestId("config-mobile-more")).toHaveAttribute(
@@ -1465,7 +1429,6 @@ describe("SessionConfigBar 手机端降噪（ql-20260915-009 variant=mobile）",
       screen.getByRole("button", { name: "配置-档案 知识经理" }),
     ).toBeInTheDocument();
     expect(screen.getByTestId("config-thinking-select")).toBeInTheDocument();
-    expect(screen.getByTestId("config-auto-resume-switch")).toBeInTheDocument();
     // 收起：回到紧凑态。
     fireEvent.click(screen.getByTestId("config-mobile-more"));
     expect(
@@ -1474,16 +1437,16 @@ describe("SessionConfigBar 手机端降噪（ql-20260915-009 variant=mobile）",
     expect(screen.queryByTestId("config-thinking-select")).not.toBeInTheDocument();
   });
 
-  it("mobile：running 不渲染「运行中切换将于本轮结束后生效」文字提示（ql-20260915-013 一行化，控件 title 已表意）", () => {
+  it("desktop/mobile 均不渲染「运行中切换将于本轮结束后生效」提示（2026-10-22-session-composer-slim FR-02）", () => {
+    renderBar({ running: true });
+    expect(
+      screen.queryByText("运行中切换将于本轮结束后生效"),
+    ).not.toBeInTheDocument();
+    cleanup();
     renderBar({ variant: "mobile", running: true });
     expect(
       screen.queryByText("运行中切换将于本轮结束后生效"),
     ).not.toBeInTheDocument();
-  });
-
-  it("desktop：running 提示照旧（零回归锚；ql-20260917-008 文案改排队说明）", () => {
-    renderBar({ running: true });
-    expect(screen.getByText("运行中切换将于本轮结束后生效")).toBeInTheDocument();
   });
 });
 

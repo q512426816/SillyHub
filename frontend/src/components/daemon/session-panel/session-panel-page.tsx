@@ -5808,14 +5808,8 @@ export function SessionPanelPage({
             configSnapshot={session.config_snapshot ?? null}
             engine={session.provider ?? null}
             variant={variant}
-            // 2026-09-10-auto-resume-interrupted-turn / FR-06：中断自动续跑开关
-            //（缺省开；config.auto_resume_interrupted 仅显式 false 为关）。
-            autoResume={{
-              enabled: (session.config as Record<string, unknown> | null)
-                ?.auto_resume_interrupted !== false,
-              disabled: ended || !machineOnline,
-              onToggle: handleAutoResumeToggle,
-            }}
+            // 2026-10-22-session-composer-slim FR-02：中断自动续跑入口已迁至
+            // 输入区 + 菜单（见上方 SessionInputBar.autoResume），配置条不再渲染。
             // ql-20260904-010：错误卡「切换供应商」定位到本配置条（打开供应商下拉）。
             providerOpenSignal={configProviderSignal}
             // 2026-09-14-session-thinking-level task-06（FR-06 / R-04）：会话态
