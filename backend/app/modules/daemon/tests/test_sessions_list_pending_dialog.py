@@ -7,6 +7,7 @@
 - answered/cancelled 行不注入（回答后问号消失）。
 - 无对话行 / 无 run 的会话 → None（brownfield 不崩）。
 - 每会话仅取最新 pending 行（连续提问取最新）。
+- 批查零 N+1：多会话场景下 session_dialog_requests 只发一条 SELECT。
 - OpenAPI schema 反映 pending_dialog_kind 新字段（gen:types 消费面）。
 
 夹具范式镜像 ``test_sessions_list_run_status.py``（in-memory SQLite + httpx
@@ -212,6 +213,39 @@ class TestPendingDialogKind:
         items = {it["id"]: it for it in resp.json()["items"]}
         assert items[str(s1.id)]["pending_dialog_kind"] is None
         assert items[str(s2.id)]["pending_dialog_kind"] == "AskUserQuestion"
+
+    async def test_dialog_query_batched_single_select(
+        self,
+        client: AsyncClient,
+        auth_headers: dict[str, str],
+        db_session: AsyncSession,
+        db_engine,
+    ) -> None:
+        """批查零 N+1：3 个会话各有 pending 对话 → session_dialog_requests 恰一条 SELECT。"""
+        from sqlalchemy import event
+
+        admin = await _get_admin(db_session)
+        for _ in range(3):
+            s = await _make_session(db_session, admin.id)
+            run = await _make_run(db_session, s.id)
+            await _make_dialog(db_session, agent_session_id=s.id, run_id=run.id)
+
+        statements: list[str] = []
+
+        def _capture(conn, cursor, statement, parameters, context, executemany):
+            if "session_dialog_requests" in statement:
+                statements.append(statement)
+
+        sync_engine = db_engine.sync_engine
+        event.listen(sync_engine, "before_cursor_execute", _capture)
+        try:
+            resp = await client.get("/api/daemon/sessions", headers=auth_headers)
+        finally:
+            event.remove(sync_engine, "before_cursor_execute", _capture)
+
+        assert resp.status_code == 200, resp.text
+        # 3 个会话 3 条 pending 行，仍只发一条 IN 批查（逐会话查询会 ≥3 条）。
+        assert len(statements) == 1, statements
 
 
 # ── OpenAPI 反映新字段（gen:types 消费面）───────────────────────────────────
