@@ -1,0 +1,40 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-22-turn-trigger-generalize",
+  "reviewer": "subagent",
+  "verdict": "PASS",
+  "reviewedAgainst": "7338a61c878a5f33c1d1a0647cf900f2b71c14d1",
+  "findings": [
+    {
+      "severity": "P3",
+      "title": "FR-04 计数口径文档自相矛盾：实现与场景一致（auto_resume 不计入「排队消息（N）」显示），与 FR 正文/design.md/提交信息/测试用例名的「计入 N」表述相反，且与后端配额口径分叉",
+      "evidence": "requirements FR-04 正文「auto_resume 条目计入 N」、design.md「计数保持只豁免 task_wakeup」、测试用例名「计入排队计数（对齐后端配额口径）」均称计入；但实现把 auto_resume:* 归入 isWakeupEntry → userEntries 不含它，排队消息（N）/满员提示（isFull=userEntries.length>=max）均不计 auto_resume；测试断言「排队消息（1）」（1 用户+1 auto_resume）与 FR-04 场景一致、与用例名相反。后端 queue.py:151 配额仅豁 TASK_WAKEUP_QUEUE_ORIGIN（auto_resume 计入 5 条上限）→ 显示计数与真实配额分叉（auto_resume 占配额不占显示，满员提示可能低估，queue_full 由后端兜底）。已修复于 7338a61c8：requirements FR-04 正文/design.md/测试用例名统一改为「显示计数对触发源一律豁免（配额差异后端兜底）」，与实现及 FR-04 场景对齐，最终口径为显示豁免",
+      "location": "frontend/src/components/daemon/message-queue-bar.tsx:166-171; backend/app/modules/daemon/session/service/queue.py:151"
+    },
+    {
+      "severity": "P3",
+      "title": "live 路径 freshTurn 窄窗口误判：轮已开（prompt 已写或仅 trigger 段）但尚无输出段时，中途 shadow/group 注入被误判为开轮——误产来源标注行并抑制 preamble 卡，违背 FR-03 中途注入条款",
+      "evidence": "freshTurn=!(segments.some(s=>s.kind!=='preamble'&&s.kind!=='turn_trigger')) 只看段不看 prompt/opener 占用；用户直发轮 SSE 建 turn 后 segments=[]（prompt 不入段）、task_wakeup 开轮 trigger-only 轮均报 freshTurn=true，此窗口内到达的【群聊上下文】/【影子直聊】中途注入走 (livePreambleTrigger&&freshTurn) 分支：插 trigger 行、跳过 preamble。回放路径按 openerSlotSeen（首条 user_input）精确判定产 preamble（测试「中途群聊引导注入不产触发行」锁的是回放侧），live/replay 不一致，刷新后自愈。窗口窄（注入需落在首条输出段前），display-only。评审裁定：留档接受",
+      "location": "frontend/src/components/daemon/session-panel/session-panel-page.tsx:1400-1408,1427-1428"
+    },
+    {
+      "severity": "P3",
+      "title": "live 多源触发段 id 碰撞：同轮插入第二个不同 trigger 时 id 固定 trigger:${env.run_id} 与首条重复 → React key 冲突",
+      "evidence": "live 插段 id=`trigger:${env.run_id}`，幂等守卫仅按 s.trigger 同值判定（不同 trigger 放行）；shadow/group 开轮 + 窄窗口内另一前导源中途注入（freshTurn=true）时同轮两条 turn_trigger 同 id，SegmentedTurnBody 以 s.id 为 key 报重复 key。回放路径 id=trigger:${entry.id} 无此问题；design.md 声称「轮内多源触发各自一行不互吞」在 live 侧不完整。已修复于 7338a61c8：id 改为 trigger:${env.run_id}:${trigger}，同轮异源段 id 不再碰撞（外层插入条件保证 trigger 操作数非空）",
+      "location": "frontend/src/components/daemon/session-panel/session-panel-page.tsx:1441"
+    },
+    {
+      "severity": "P3",
+      "title": "回放开轮 shadow/group 前导空正文角例：前导段与触发行双双不产，来源留痕消失（改前产 preamble 段）",
+      "evidence": "开轮【影子直聊】…\\n\\n---\\n\\n（分隔符后正文为空白）：preamble 被 (preambleTrigger&&isOpenerUserInput) 抑制，promptSource 剥空走 OPENER_RESERVED_KEY 分支且仅 contentTrigger（task_wakeup/auto_resume）才插 trigger 段 → 该轮无任何来源留痕；改前该前导落 preamble 段在「全部」视图可见。角例极退化（daemon 构造的前导必带正文）， FR-03 场景含正文不受影响。评审裁定：留档接受",
+      "location": "frontend/src/components/daemon/runtime-session-helpers.tsx:476-489,499-526"
+    }
+  ],
+  "dimensionNotes": {
+    "乱序": "finding",
+    "并发": "ok",
+    "切换": "ok",
+    "作用域": "ok"
+  },
+  "reviewedAt": "2026-10-22T12:01:04+08:00"
+}

@@ -1,0 +1,827 @@
+diff --git a/.sillyspec/docs/SillyHub/modules/frontend_lib.changelog.md b/.sillyspec/docs/SillyHub/modules/frontend_lib.changelog.md
+index 89d92aa57..b308f8b1e 100644
+--- a/.sillyspec/docs/SillyHub/modules/frontend_lib.changelog.md
++++ b/.sillyspec/docs/SillyHub/modules/frontend_lib.changelog.md
+@@ -19,3 +19,4 @@ created_at: 2026-10-16 16:40:00
+ - 2026-10-21-session-git-branch | 会话组件底部动态显示当前所在 git 分支
+ - 2026-10-22-daemon-snapshot-report-log | daemon 快照上报补收口日志
+ - 2026-10-22-fix-translate-pending | 生产 /api/translate/thinking 请求长时间 pending：容器未配置 TRA…
++- 2026-10-22-session-trajectory-third-view | 把会话轨迹从「进度」视图内的第二层呈现开关上移为与「对话 / 进度」并列的第三个顶层视图，同时修复轨…
+diff --git a/.sillyspec/docs/multi-agent-platform/modules/deploy.md b/.sillyspec/docs/multi-agent-platform/modules/deploy.md
+index ecc9d5d9c..29e17b224 100644
+--- a/.sillyspec/docs/multi-agent-platform/modules/deploy.md
++++ b/.sillyspec/docs/multi-agent-platform/modules/deploy.md
+@@ -60,3 +60,4 @@ multi-agent-platform 的一体化部署编排组件，用 Docker Compose 把 bac
+ - 2026-10-19-change-assets-cross-repo-repos | 变更资产卡展示跨仓冻结面
+ - 2026-10-22-daemon-snapshot-report-log | daemon 快照上报补收口日志
+ - 2026-10-22-fix-translate-pending | 生产 /api/translate/thinking 请求长时间 pending：容器未配置 TRA…
++- 2026-10-22-session-trajectory-third-view | 把会话轨迹从「进度」视图内的第二层呈现开关上移为与「对话 / 进度」并列的第三个顶层视图，同时修复轨…
+diff --git a/frontend/src/components/daemon/__tests__/message-queue-bar.test.tsx b/frontend/src/components/daemon/__tests__/message-queue-bar.test.tsx
+index 599e97274..8c71978a1 100644
+--- a/frontend/src/components/daemon/__tests__/message-queue-bar.test.tsx
++++ b/frontend/src/components/daemon/__tests__/message-queue-bar.test.tsx
+@@ -709,4 +709,28 @@ describe("MessageQueueBar 唤醒条目事件行（2026-10-21-task-wakeup-event-q
+     expect(screen.getByText("排队消息（1）")).toBeTruthy();
+     expect(screen.queryByText("收到任务消息")).toBeNull();
+   });
++
++  it("FR-04 auto_resume 条目 → 「断线自动续跑」事件行，不计入排队显示计数（触发源显示豁免；配额差异由后端兜底）", () => {
++    render(
++      <MessageQueueBar
++        entries={[
++          makeEntry({ id: "mq-u1", prompt: "用户一", displayPrompt: "用户一" }),
++          makeEntry({
++            id: "mq-ar",
++            prompt: "[系统续跑] 上一轮执行因上游输出流中断未完成，会话上下文完整。",
++            displayPrompt: "[系统续跑] 上一轮执行因上游输出流中断未完成，会话上下文完整。",
++            origin: "auto_resume:0b7e0f2e-1111-4222-8333-444455556666",
++          }),
++        ]}
++        onRemove={vi.fn()}
++        onRetry={vi.fn()}
++      />,
++    );
++    // 后端 pending 配额仅豁免 task_wakeup，auto_resume 计入 N。
++    expect(screen.getByText("排队消息（1）")).toBeTruthy();
++    expect(screen.getByText("断线自动续跑")).toBeTruthy();
++    expect(screen.getByText(/本轮结束后自动继续/)).toBeTruthy();
++    // 事件行零操作按钮。
++    expect(screen.getAllByLabelText("从队列移除该消息")).toHaveLength(1);
++  });
+ });
+diff --git a/frontend/src/components/daemon/__tests__/runtime-session-helpers.test.tsx b/frontend/src/components/daemon/__tests__/runtime-session-helpers.test.tsx
+index 234033933..827f764d6 100644
+--- a/frontend/src/components/daemon/__tests__/runtime-session-helpers.test.tsx
++++ b/frontend/src/components/daemon/__tests__/runtime-session-helpers.test.tsx
+@@ -114,10 +114,14 @@ describe("logsToTurns 对话/过程分流（ql-20260730-003 processItems 有序
+     const turn = turns[0]!;
+     // 剩余正文（群聊上下文）成为 prompt——用户气泡可渲染、失败卡可重发
+     expect(turn.prompt).toBe("【群聊上下文】\n你是群聊中的 Agent 成员。\n\n[群聊记录]\n系统管理员(用户): @agent 继续干吧");
+-    // 前导块仍进 preamble 段（对话视图不渲染，「全部」视图显示注入来源）
++    // 2026-10-22-turn-trigger-generalize：开轮影子直聊前导改由 turn_trigger
++    // 来源标注行承担（对话/进度两视图），不再落 preamble 段（避免双卡）。
+     const preambles = (turn.segments ?? []).filter((s) => s.kind === "preamble");
+-    expect(preambles).toHaveLength(1);
+-    expect((preambles[0] as { text?: string }).text).toContain("【影子直聊】");
++    expect(preambles).toHaveLength(0);
++    const triggers = (turn.segments ?? []).filter((s) => s.kind === "turn_trigger");
++    expect(triggers).toHaveLength(1);
++    expect((triggers[0] as { trigger?: string }).trigger).toBe("shadow_chat");
++    expect((triggers[0] as { text?: string }).text).toContain("【影子直聊】");
+     // CLI 鉴权错误行不再进 output（ql-20260904-013 分类丢弃）
+     expect(turn.output).toBe("");
+   });
+@@ -724,13 +728,13 @@ describe("logsToTurns 系统通知开轮占位槽（2026-10-10-system-opened-tur
+   });
+ });
+ 
+-// ── 2026-10-21-task-wakeup-restore：唤醒通知落 task_wakeup 留痕段 ────────────
++// ── 2026-10-22-turn-trigger-generalize：轮触发溯源段（原唤醒留痕段泛化） ─────
+ 
+-describe("logsToTurns 唤醒通知折叠行段（2026-10-21-task-wakeup-restore）", () => {
++describe("logsToTurns 轮触发溯源段（2026-10-22-turn-trigger-generalize）", () => {
+   const TS = (sec: number) =>
+     `2026-10-21T03:${String(10 + Math.floor(sec / 60)).padStart(2, "0")}:${String(sec % 60).padStart(2, "0")}.000Z`;
+ 
+-  it("唤醒注入开轮 → task_wakeup 段置于段序列首部（全文留痕），prompt 仍空、无 preamble", () => {
++  it("FR-01 唤醒注入开轮 → turn_trigger(task_wakeup) 段置于段序列首部（全文留痕），prompt 仍空、无 preamble", () => {
+     const turns = toSegmentTurns([
+       makeLog(
+         "n1",
+@@ -745,18 +749,99 @@ describe("logsToTurns 唤醒通知折叠行段（2026-10-21-task-wakeup-restore
+     expect(turn.prompt).toBe("");
+     const segs = turn.segments ?? [];
+     const first = segs[0]!;
+-    expect(first.kind).toBe("task_wakeup");
++    expect(first.kind).toBe("turn_trigger");
++    expect((first as { trigger?: string }).trigger).toBe("task_wakeup");
+     expect((first as { text: string }).text).toContain("[后台任务通知]");
+     expect((first as { text: string }).text).toContain("任务「调研 sgm」已完成");
+     expect(segs.some((s) => s.kind === "preamble")).toBe(false);
+     expect(segs.some((s) => s.kind === "text" && s.text === "汇报正文")).toBe(true);
+   });
+ 
+-  it("无唤醒注入的普通轮不产出 task_wakeup 段", () => {
++  it("FR-02 auto_resume 注入开轮 → turn_trigger(auto_resume) 折叠行、prompt 空", () => {
++    const turns = toSegmentTurns([
++      makeLog(
++        "n1",
++        "run-1",
++        "user_input",
++        "[系统续跑提示] 平台服务重启中断了上一轮执行，会话上下文已完整恢复。\n请先检查上一轮已完成的操作（已修改的文件、已执行的命令），确认无误后从断点\n继续完成下面的任务；已完成的步骤不要重复执行。\n\n原任务正文",
++        { timestamp: TS(0) },
++      ),
++      makeLog("o1", "run-1", "stdout", "续跑输出", { timestamp: TS(30) }),
++    ]);
++    const turn = turns[0]!;
++    expect(turn.prompt).toBe("");
++    const segs = turn.segments ?? [];
++    const first = segs[0]!;
++    expect(first.kind).toBe("turn_trigger");
++    expect((first as { trigger?: string }).trigger).toBe("auto_resume");
++    expect((first as { text: string }).text).toContain("[系统续跑提示]");
++    expect(segs.some((s) => s.kind === "preamble")).toBe(false);
++  });
++
++  it("FR-03 影子直聊开轮 → turn_trigger(shadow_chat) 标注行 + 正文照常为 prompt、无 preamble 段", () => {
++    const turns = toSegmentTurns([
++      makeLog(
++        "n1",
++        "run-1",
++        "user_input",
++        "【影子直聊】来源：群聊「安全群」\n\n---\n\n帮我看下台账",
++        { timestamp: TS(0) },
++      ),
++      makeLog("o1", "run-1", "stdout", "回答", { timestamp: TS(30) }),
++    ]);
++    const turn = turns[0]!;
++    expect(turn.prompt).toBe("帮我看下台账");
++    const segs = turn.segments ?? [];
++    const first = segs[0]!;
++    expect(first.kind).toBe("turn_trigger");
++    expect((first as { trigger?: string }).trigger).toBe("shadow_chat");
++    expect(segs.some((s) => s.kind === "preamble")).toBe(false);
++    expect(segs.some((s) => s.kind === "text" && s.text === "回答")).toBe(true);
++  });
++
++  it("FR-03 群聊开轮 → turn_trigger(group_chat) 标注行、正文照常", () => {
++    const turns = toSegmentTurns([
++      makeLog(
++        "n1",
++        "run-1",
++        "user_input",
++        "【群聊上下文】群「运维群」@助手\n\n---\n\n查一下服务器状态",
++        { timestamp: TS(0) },
++      ),
++      makeLog("o1", "run-1", "stdout", "状态正常", { timestamp: TS(30) }),
++    ]);
++    const turn = turns[0]!;
++    expect(turn.prompt).toBe("查一下服务器状态");
++    const first = (turn.segments ?? [])[0]!;
++    expect(first.kind).toBe("turn_trigger");
++    expect((first as { trigger?: string }).trigger).toBe("group_chat");
++  });
++
++  it("FR-03 中途群聊引导注入（非开轮槽）不产触发行、维持既有 preamble 行为", () => {
++    const turns = toSegmentTurns([
++      makeLog("u1", "run-1", "user_input", "第一句", { timestamp: TS(0) }),
++      makeLog("o1", "run-1", "stdout", "输出", { timestamp: TS(30) }),
++      makeLog(
++        "n1",
++        "run-1",
++        "user_input",
++        "【群聊上下文】群「运维群」\n\n---\n\n中途追问",
++        { timestamp: TS(60) },
++      ),
++      makeLog("u2", "run-1", "user_input", "第二句", { timestamp: TS(90) }),
++    ]);
++    const turn = turns[0]!;
++    expect(turn.prompt).toBe("第一句");
++    const segs = turn.segments ?? [];
++    expect(segs.some((s) => s.kind === "turn_trigger")).toBe(false);
++    expect(segs.some((s) => s.kind === "preamble")).toBe(true);
++  });
++
++  it("无唤醒注入的普通轮不产出 turn_trigger 段", () => {
+     const turns = toSegmentTurns([
+       makeLog("u1", "run-1", "user_input", "普通问题", { timestamp: TS(0) }),
+       makeLog("o1", "run-1", "stdout", "普通回答", { timestamp: TS(30) }),
+     ]);
+-    expect((turns[0]!.segments ?? []).some((s) => s.kind === "task_wakeup")).toBe(false);
++    expect((turns[0]!.segments ?? []).some((s) => s.kind === "turn_trigger")).toBe(false);
+   });
+ });
+diff --git a/frontend/src/components/daemon/__tests__/turn-segment-views.test.tsx b/frontend/src/components/daemon/__tests__/turn-segment-views.test.tsx
+index caf118b14..dab1dcd90 100644
+--- a/frontend/src/components/daemon/__tests__/turn-segment-views.test.tsx
++++ b/frontend/src/components/daemon/__tests__/turn-segment-views.test.tsx
+@@ -1685,16 +1685,17 @@ describe("CompactSegmentView / CompactStatusRowView / CompactNoticeChip（ql-202
+ 
+ /* ── 2026-10-13-turn-live-visibility FR-01：TaskOutput 等待行 ─────────────── */
+ 
+-// 2026-10-21-task-wakeup-restore：后台任务唤醒通知折叠行（「收到任务消息」）。
+-describe("TaskWakeupNoticeView（2026-10-21-task-wakeup-restore）", () => {
++// 2026-10-22-turn-trigger-generalize：轮触发溯源行（原 TaskWakeupNoticeView 泛化）。
++describe("TurnTriggerView（2026-10-22-turn-trigger-generalize）", () => {
+   const WAKEUP_TEXT =
+     "[后台任务通知] 以下 1 个后台子代理任务已全部结束（列表中的每一个都已终止，没有仍在运行的任务）：\n- 任务「调研 sgm」已完成（用时 06:26）。结果摘要：调研完成（task_id: t1，如需完整输出可调用 TaskOutput 查询，block=false）";
+ 
+-  const wakeupSeg: Extract<TurnSegment, { kind: "task_wakeup" }> = {
+-    kind: "task_wakeup",
++  const wakeupSeg: Extract<TurnSegment, { kind: "turn_trigger" }> = {
++    kind: "turn_trigger",
+     id: "seg:wu1",
+     text: WAKEUP_TEXT,
+     ts: 1_000,
++    trigger: "task_wakeup",
+   };
+ 
+   it("默认收起：显示「收到任务消息」+ 任务数；点击展开显示通知全文", () => {
+@@ -1707,6 +1708,55 @@ describe("TaskWakeupNoticeView（2026-10-21-task-wakeup-restore）", () => {
+     expect(screen.getByText((_c, node) => node?.textContent === WAKEUP_TEXT)).toBeInTheDocument();
+   });
+ 
++  it("auto_resume 源：折叠行标签「断线自动续跑」+ 系统恢复提示，展开显全文", () => {
++    const resumeText =
++      "[系统续跑提示] 平台服务重启中断了上一轮执行，会话上下文已完整恢复。\n原任务正文";
++    render(
++      <SegmentView
++        segment={{
++          kind: "turn_trigger",
++          id: "seg:ar1",
++          text: resumeText,
++          ts: 1_100,
++          trigger: "auto_resume",
++        }}
++      />,
++    );
++    expect(screen.getByText("断线自动续跑")).toBeInTheDocument();
++    expect(screen.getByText(/系统已恢复会话上下文/)).toBeInTheDocument();
++    fireEvent.click(screen.getByText("断线自动续跑"));
++    expect(screen.getByText((_c, node) => node?.textContent === resumeText)).toBeInTheDocument();
++  });
++
++  it("shadow_chat/group_chat 来源标注源：纯标注行不可展开（正文在 prompt 气泡）", () => {
++    const { rerender } = render(
++      <SegmentView
++        segment={{
++          kind: "turn_trigger",
++          id: "seg:sc1",
++          text: "【影子直聊】来源：群聊「安全群」",
++          ts: 1_200,
++          trigger: "shadow_chat",
++        }}
++      />,
++    );
++    expect(screen.getByText("来自影子直聊")).toBeInTheDocument();
++    expect(screen.queryByRole("button")).not.toBeInTheDocument();
++
++    rerender(
++      <SegmentView
++        segment={{
++          kind: "turn_trigger",
++          id: "seg:gc1",
++          text: "【群聊上下文】群「运维群」",
++          ts: 1_300,
++          trigger: "group_chat",
++        }}
++      />,
++    );
++    expect(screen.getByText("来自群聊")).toBeInTheDocument();
++  });
++
+   it("多任务通知：计数按任务行数（- 任务「）统计", () => {
+     render(
+       <SegmentView
+diff --git a/frontend/src/components/daemon/message-queue-bar.tsx b/frontend/src/components/daemon/message-queue-bar.tsx
+index d71aa3324..379876f09 100644
+--- a/frontend/src/components/daemon/message-queue-bar.tsx
++++ b/frontend/src/components/daemon/message-queue-bar.tsx
+@@ -66,6 +66,7 @@ import { cn } from "@/lib/utils";
+ import type { QueueEntry } from "@/hooks/use-message-queue";
+ import { getProviderCaps } from "@/lib/provider-caps";
+ import {
++  isAutoResumeInjection,
+   isTaskWakeupInjection,
+   TASK_WAKEUP_PROMPT_PREFIX,
+ } from "@/components/daemon/session-log-assembler";
+@@ -162,7 +163,10 @@ export function MessageQueueBar({
+   // 的「不看内容前缀」口径）移出「排队消息」用户消息语义：不占计数/满员/
+   // 拖拽，单独渲染为「收到任务消息 · 待本轮结束自动继续」事件行（dsh
+   // turn-trigger 同款；派发后时间线 task_wakeup 折叠行接管呈现）。
+-  const isWakeupEntry = (entry: QueueEntry) => entry.origin === "task_wakeup";
++  const isWakeupEntry = (entry: QueueEntry) =>
++    entry.origin === "task_wakeup" || entry.origin?.startsWith("auto_resume:") === true;
++  const triggerKindOf = (entry: QueueEntry): "task_wakeup" | "auto_resume" =>
++    entry.origin?.startsWith("auto_resume:") ? "auto_resume" : "task_wakeup";
+   const wakeupEntries = entries.filter(isWakeupEntry);
+   const userEntries = entries.filter((entry) => !isWakeupEntry(entry));
+   // 拖拽即时预览只改本地展示序 override：orderIds 非空时按其排（entries 真相不动），
+@@ -289,6 +293,7 @@ export function MessageQueueBar({
+           即立即派发）。派发后时间线 task_wakeup 折叠行接管呈现。 */}
+       {wakeupEntries.map((entry) => {
+         const expanded = expandedId === entry.id;
++        const isAutoResume = triggerKindOf(entry) === "auto_resume";
+         const wakeupBody = entry.prompt.startsWith(TASK_WAKEUP_PROMPT_PREFIX)
+           ? entry.prompt.slice(TASK_WAKEUP_PROMPT_PREFIX.length).trim() ||
+             "系统通知"
+@@ -302,10 +307,16 @@ export function MessageQueueBar({
+               className="flex w-fit cursor-pointer select-text items-center gap-[7px] rounded-md px-1.5 py-[3px] text-left text-[11px] text-muted-foreground hover:bg-muted"
+             >
+               <span aria-hidden className="shrink-0">
+-                ✈
++                {isAutoResume ? "↻" : "✈"}
++              </span>
++              <span className="shrink-0 font-medium">
++                {isAutoResume ? "断线自动续跑" : "收到任务消息"}
++              </span>
++              <span className="shrink-0 opacity-75">
++                {isAutoResume
++                  ? "（本轮结束后自动继续）"
++                  : `（${wakeupTaskCount(entry)} 个后台任务已结束 · 本轮结束后自动继续）`}
+               </span>
+-              <span className="shrink-0 font-medium">收到任务消息</span>
+-              <span className="shrink-0 opacity-75">{`（${wakeupTaskCount(entry)} 个后台任务已结束 · 本轮结束后自动继续）`}</span>
+               <span
+                 aria-hidden
+                 className={cn(
+@@ -383,7 +394,8 @@ export function MessageQueueBar({
+           const canEdit =
+             Boolean(onEdit) &&
+             entry.status !== "sending" &&
+-            !isTaskWakeupInjection(entry.prompt);
++            !isTaskWakeupInjection(entry.prompt) &&
++            !isAutoResumeInjection(entry.prompt);
+ 
+           return (
+             <div
+diff --git a/frontend/src/components/daemon/runtime-session-helpers.tsx b/frontend/src/components/daemon/runtime-session-helpers.tsx
+index 7425f3257..980eb2f15 100644
+--- a/frontend/src/components/daemon/runtime-session-helpers.tsx
++++ b/frontend/src/components/daemon/runtime-session-helpers.tsx
+@@ -11,13 +11,15 @@ import { SessionPanel } from "@/components/daemon/session-panel";
+ import type { SessionTurnView } from "@/components/daemon/turn-timeline";
+ import { classifySessionLog } from "@/components/daemon/session-log-sanitize";
+ import {
++  classifyPreambleTrigger,
++  classifyTurnTrigger,
+   extractPreambleText,
+-  isTaskWakeupInjection,
+   logsToSegments,
+   segmentsToLegacy,
+   stripPreambleText,
+   type AssemblerLogInput,
+   type TurnSegment,
++  type TurnTriggerKind,
+   type UserMsgTurnSegment,
+ } from "@/components/daemon/session-log-assembler";
+ import { type AgentRunLogEntry } from "@/lib/agent";
+@@ -425,8 +427,10 @@ export function logsToTurns(logs: AgentRunLogEntry[]): SessionTurnView[] {
+     // user_input 的前导块（dispatch_prompt 注入段）提取为 preamble 段（对话
+     // 视图不渲染，「全部」视图显示注入来源）。
+     const preambleSegments: TurnSegment[] = [];
+-    // 2026-10-21-task-wakeup-restore：唤醒注入留痕段（开轮槽分支收集，轮首渲染）。
+-    const wakeupSegments: Extract<TurnSegment, { kind: "task_wakeup" }>[] = [];
++    // 2026-10-22-turn-trigger-generalize：轮触发溯源段（开轮槽/开轮前导分支收集，
++    // 轮首渲染）——task_wakeup/auto_resume 系统信封 + shadow_chat/group_chat
++    // 来源标注。
++    const triggerSegments: Extract<TurnSegment, { kind: "turn_trigger" }>[] = [];
+     const seenText = new Set<string>();
+     const assemblerInputs: AssemblerLogInput[] = [];
+     // 2026-10-10-system-opened-turn-usermsg：开轮槽占用标记——本 run 首条
+@@ -460,7 +464,22 @@ export function logsToTurns(logs: AgentRunLogEntry[]): SessionTurnView[] {
+         // 2026-10-13-session-taskwakeup-hide：TASK_WAKEUP 注入是纯系统通知，
+         // 不落 preamble 段（进度视图不再显示「上下文注入」卡）；开轮占位槽
+         // 逻辑不受影响——promptSource 仍走 strip 剥空 → 占位空组照旧。
+-        if (preambleText && !isTaskWakeupInjection(seg.text)) {
++        // 2026-10-22-turn-trigger-generalize：auto_resume 注入同构剥除；
++        // 影子直聊/群聊开轮前导改由 turn_trigger 来源标注行承担（本条不落
++        // preamble 段，避免进度视图双卡）。
++        const preambleTrigger = preambleText
++          ? classifyPreambleTrigger(preambleText)
++          : null;
++        const contentTrigger = classifyTurnTrigger(seg.text);
++        // 开轮身份先行捕获（下方分支会推进 openerSlotSeen）。
++        const isOpenerUserInput = !openerSlotSeen;
++        if (
++          preambleText &&
++          !contentTrigger &&
++          !(preambleTrigger && isOpenerUserInput)
++        ) {
++          // 影子直聊/群聊前导仅在开轮位改由 turn_trigger 来源标注行承担
++          // （避免进度视图双卡）；中途到达的同前导维持既有 preamble 行为。
+           preambleSegments.push({
+             kind: "preamble",
+             id: `preamble:${entry.id ?? `idx${turnIndex}`}`,
+@@ -489,20 +508,34 @@ export function logsToTurns(logs: AgentRunLogEntry[]): SessionTurnView[] {
+               firstId: entry.id ?? null,
+               ts: entry.timestamp ? Date.parse(entry.timestamp) : null,
+             });
+-            // 2026-10-21-task-wakeup-restore：唤醒注入不再整体隐藏——落
+-            // task_wakeup 留痕段（「收到任务消息」折叠行），置于轮段序列首部。
+-            if (isTaskWakeupInjection(seg.text)) {
+-              wakeupSegments.push({
+-                kind: "task_wakeup",
+-                id: `wakeup:${entry.id ?? `idx${turnIndex}`}`,
++            // 2026-10-22-turn-trigger-generalize：系统信封注入（task_wakeup/
++            // auto_resume）不再整体隐藏——落 turn_trigger 触发行（折叠看全文），
++            // 置于轮段序列首部。
++            const contentTrigger = classifyTurnTrigger(seg.text);
++            if (contentTrigger) {
++              triggerSegments.push({
++                kind: "turn_trigger",
++                id: `trigger:${entry.id ?? `idx${turnIndex}`}`,
+                 text: seg.text,
+                 ts: entry.timestamp ? Date.parse(entry.timestamp) : null,
++                trigger: contentTrigger,
+               });
+             }
+           }
+           continue;
+         }
+         openerSlotSeen = true;
++        // 2026-10-22-turn-trigger-generalize：影子直聊/群聊开轮——正文照常显示，
++        // 来源标注行置于轮段序列首部（仅开轮位；中途注入不标）。
++        if (isOpenerUserInput && preambleTrigger) {
++          triggerSegments.push({
++            kind: "turn_trigger",
++            id: `trigger:${entry.id ?? `idx${turnIndex}`}`,
++            text: preambleText ?? "",
++            ts: entry.timestamp ? Date.parse(entry.timestamp) : null,
++            trigger: preambleTrigger,
++          });
++        }
+         // ql-20260825-002：剥标记行得文本主体为归一键（附件行不影响主体判定）。
+         const lines = promptSource.split("\n");
+         const markerLines: string[] = [];
+@@ -573,7 +606,7 @@ export function logsToTurns(logs: AgentRunLogEntry[]): SessionTurnView[] {
+       status: "completed",
+       seenLogIds: new Set(entries.map((e) => e.id)),
+       processItems: legacy.processItems,
+-      segments: [...wakeupSegments, ...preambleSegments, ...segmentsWithUserMsg],
++      segments: [...triggerSegments, ...preambleSegments, ...segmentsWithUserMsg],
+       turnStartedAt: firstLogTimestampMs(entries),
+       // ql-20260621：历史回看无实时 token（logs 接口不含 token），置 null。
+       // 若后续 logs 接口补 token 字段可在此填充。
+diff --git a/frontend/src/components/daemon/session-log-assembler.ts b/frontend/src/components/daemon/session-log-assembler.ts
+index 32b1bcdab..e77fd4dc9 100644
+--- a/frontend/src/components/daemon/session-log-assembler.ts
++++ b/frontend/src/components/daemon/session-log-assembler.ts
+@@ -679,16 +679,19 @@ export type TurnSegment =
+   // 的「[后台任务通知]」user_input（唤醒链恢复后重新出现）。此前 2026-10-13-
+   // session-taskwakeup-hide 的口径是整体隐藏（对话视图无气泡、进度视图无卡）；
+   // 恢复唤醒后用户要求可见的轻量留痕（dsh「收到任务消息」同款形态）：折叠行
+-  // 默认收起、可展开看通知全文。装配器内不主动构造（user_input 通道在
+-  // applyLogToSegments 入口即返回），仅作类型成员由 runtime-session-helpers
+-  // 回放装配 / session-panel 实时 upsert 显式构建；不进 output / processItems
+-  // 兼容投影（segmentsToLegacy 无 case 自动跳过）。
++  // 默认收起、可展开看通知全文。2026-10-22-turn-trigger-generalize：泛化为通用
++  // 轮触发溯源段（dsh turn-trigger.ts 同构）——单一 kind 携带 trigger 字段，
++  // 新源接入 = TURN_TRIGGER_META 配置表加一行。装配器内不主动构造（user_input
++  // 通道在 applyLogToSegments 入口即返回），仅作类型成员由 runtime-session-
++  // helpers 回放装配 / session-panel 实时 upsert 显式构建；不进 output /
++  // processItems 兼容投影（segmentsToLegacy 无 case 自动跳过）。
+   | {
+-      kind: "task_wakeup";
++      kind: "turn_trigger";
+       id: string;
+-      /** 通知全文（「[后台任务通知]」开头，含任务行与核对指引）。 */
++      /** 触发源关联文本（系统代笔源=通知全文，可展开；来源标注源=前导头，不可展开）。 */
+       text: string;
+       ts: number | null;
++      trigger: TurnTriggerKind;
+     };
+ 
+ export type ToolTurnSegment = Extract<TurnSegment, { kind: "tool" }>;
+@@ -2162,6 +2165,73 @@ export function isTaskWakeupInjection(content: string): boolean {
+   return content.trim().startsWith(TASK_WAKEUP_PROMPT_PREFIX);
+ }
+ 
++/**
++ * 2026-10-22-turn-trigger-generalize：daemon 断线自动续跑注入判定——auto_resume.py
++ * 四模板（RESUME_PROMPT_TEMPLATE「[系统续跑提示]」/ RESUME_NUDGE_PROMPT /
++ * QUOTA_NUDGE_PROMPT / CONTEXT_OVERFLOW_REPLAY_HEADER 共用「[系统续跑]」）的
++ * 共同稳定前缀。⚠ 跨语言常量同步义务：前缀为 daemon 单一源常量（auto_resume.py
++ * 注释「单一源导出供测试锁定」），daemon 文案改动需同步此处（沿
++ * TASK_WAKEUP_PROMPT_PREFIX 先例）；metadata 驱动（auto_resume_of）留 Phase 2。
++ */
++export const AUTO_RESUME_PROMPT_PREFIX = "[系统续跑";
++
++/** 判定 user_input 是否为 auto_resume 系统注入（纯系统通知信封，原文可能内嵌）。 */
++export function isAutoResumeInjection(content: string): boolean {
++  return content.trim().startsWith(AUTO_RESUME_PROMPT_PREFIX);
++}
++
++/**
++ * 轮触发溯源种类（dsh turn-trigger.ts 同构；Phase 1 四源，schedule/webhook 等
++ * 新源留后续配置表加行）。
++ */
++export type TurnTriggerKind =
++  | "task_wakeup"
++  | "auto_resume"
++  | "shadow_chat"
++  | "group_chat";
++
++/**
++ * 触发源呈现配置表（TurnTriggerView 单一渲染真相源）：
++ *   - glyph/label：触发行图标字形与标签（平台措辞）；
++ *   - contentHidden：true = 系统代笔，正文折叠进触发行可展开（prompt 槽剥空）；
++ *     false = 用户亲笔（时间/渠道触发），正文照常显示为 prompt，触发行仅标来源
++ *     （不可展开）。
++ */
++export const TURN_TRIGGER_META: Record<
++  TurnTriggerKind,
++  { glyph: string; label: string; contentHidden: boolean }
++> = {
++  task_wakeup: { glyph: "✈", label: "收到任务消息", contentHidden: true },
++  auto_resume: { glyph: "↻", label: "断线自动续跑", contentHidden: true },
++  shadow_chat: { glyph: "💬", label: "来自影子直聊", contentHidden: false },
++  group_chat: { glyph: "👥", label: "来自群聊", contentHidden: false },
++};
++
++/**
++ * 按内容分类轮触发源（task_wakeup/auto_resume 内容前缀族）；
++ * 非触发内容返回 null。shadow_chat/group_chat 走 classifyPreambleTrigger
++ * （前导头族），不入本函数。
++ */
++export function classifyTurnTrigger(content: string): TurnTriggerKind | null {
++  if (isTaskWakeupInjection(content)) return "task_wakeup";
++  if (isAutoResumeInjection(content)) return "auto_resume";
++  return null;
++}
++
++/**
++ * 按前导头分类轮触发源（shadow_chat/group_chat 前导族；head 为
++ * extractPreambleText 剥出的前导首标记）。其余前导（【变更上下文】等
++ * dispatch 注入）非轮触发源，返回 null。
++ */
++export function classifyPreambleTrigger(
++  preambleText: string,
++): "shadow_chat" | "group_chat" | null {
++  const trimmed = preambleText.trim();
++  if (trimmed.startsWith("【影子直聊】")) return "shadow_chat";
++  if (trimmed.startsWith("【群聊上下文】")) return "group_chat";
++  return null;
++}
++
+ export function extractPreambleText(content: string): string | null {
+   const trimmed = content.trim();
+   // quick（2026-09-03 系统注入刷屏修复）：[GROUP_CHAIN ...] 首行标记是排队
+@@ -2175,6 +2245,8 @@ export function extractPreambleText(content: string): string | null {
+   // [后台任务通知] 类注入：整条都是系统通知（无用户正文），整体进 preamble
+   // 折叠——对话视图不再被任务唤醒通知刷屏（无分隔符，特判整条）。
+   if (isTaskWakeupInjection(trimmed)) return trimmed;
++  // [系统续跑] 类注入（auto_resume）：同构系统通知信封，整体进 preamble。
++  if (isAutoResumeInjection(trimmed)) return trimmed;
+   if (!PREAMBLE_HEADS.some((h) => trimmed.startsWith(h))) return null;
+   const sep = trimmed.indexOf("\n\n---\n\n");
+   if (sep <= 0) return null;
+@@ -2198,6 +2270,8 @@ export function stripPreambleText(content: string): string {
+     return stripPreambleText(trimmed.slice(nl + 1));
+   }
+   if (isTaskWakeupInjection(trimmed)) return "";
++  // [系统续跑] 类注入（auto_resume）：同构剥空（系统信封无用户正文可显示）。
++  if (isAutoResumeInjection(trimmed)) return "";
+   if (!PREAMBLE_HEADS.some((h) => trimmed.startsWith(h))) return content;
+   const sep = trimmed.indexOf("\n\n---\n\n");
+   if (sep <= 0) return content;
+diff --git a/frontend/src/components/daemon/session-panel/session-panel-page.tsx b/frontend/src/components/daemon/session-panel/session-panel-page.tsx
+index 9abff8fdd..67498fea4 100644
+--- a/frontend/src/components/daemon/session-panel/session-panel-page.tsx
++++ b/frontend/src/components/daemon/session-panel/session-panel-page.tsx
+@@ -12,7 +12,7 @@ import {
+ import { Badge, Button, Drawer, Input, Spin } from "antd";
+ import { buildErrorLogItem, buildSystemFailureItem } from "@/components/agent-log/normalize";
+ import {
+-  extractPreambleText, finishTurn, isTaskWakeupInjection, stripPreambleText, type UserMsgTurnSegment,
++  classifyPreambleTrigger, classifyTurnTrigger, extractPreambleText, finishTurn, isTaskWakeupInjection, stripPreambleText, type UserMsgTurnSegment,
+ } from "@/components/daemon/session-log-assembler";
+ import {
+   TurnTimeline,
+@@ -1388,9 +1388,22 @@ export function SessionPanelPage({
+                     // 2026-10-13-session-taskwakeup-hide：TASK_WAKEUP 注入是纯系统
+                     // 通知，不落 preamble 段（与回放路径同口径——进度视图无「上下文
+                     // 注入」卡）；prompt 补写仍走 strip 剥空不写，开轮槽语义不变。
++                    // 2026-10-22-turn-trigger-generalize：影子直聊/群聊开轮前导
++                    // 改落 turn_trigger 来源标注行（新鲜轮判定：无输出段——中途
++                    // 群聊引导注入维持既有 preamble 行为）。
++                    const livePreambleTrigger = preambleText
++                      ? classifyPreambleTrigger(preambleText)
++                      : null;
++                    const liveContentTrigger = classifyTurnTrigger(
++                      env.content ?? "",
++                    );
++                    const freshTurn = !(next.segments ?? []).some(
++                      (s) => s.kind !== "preamble" && s.kind !== "turn_trigger",
++                    );
+                     if (
+                       preambleText &&
+-                      !isTaskWakeupInjection(env.content ?? "") &&
++                      !liveContentTrigger &&
++                      !(livePreambleTrigger && freshTurn) &&
+                       !next.segments?.some((s) => s.kind === "preamble")
+                     ) {
+                       next = {
+@@ -1408,23 +1421,37 @@ export function SessionPanelPage({
+                         ],
+                       };
+                     }
+-                    // 2026-10-21-task-wakeup-restore：唤醒注入改落 task_wakeup
+-                    // 留痕段（「收到任务消息」折叠行，与回放路径同口径）——不再
+-                    // 整体隐藏（隐藏导致唤醒轮「无人说话 agent 凭空接话」不可溯源）。
++                    // 2026-10-22-turn-trigger-generalize：轮触发扬景行（原
++                    // task_wakeup 留痕段泛化）——系统信封（task_wakeup/auto_resume）
++                    // 折叠行 + 来源标注（shadow/group 开轮），与回放路径同口径。
+                     if (
+-                      isTaskWakeupInjection(env.content ?? "") &&
+-                      !next.segments?.some((s) => s.kind === "task_wakeup")
++                      (liveContentTrigger || (livePreambleTrigger && freshTurn)) &&
++                      !next.segments?.some(
++                        (s) =>
++                          s.kind === "turn_trigger" &&
++                          s.trigger ===
++                            (liveContentTrigger ?? livePreambleTrigger),
++                      )
+                     ) {
+                       next = {
+                         ...next,
+                         segments: [
+                           {
+-                            kind: "task_wakeup",
+-                            id: `wakeup:${env.run_id}`,
+-                            text: env.content ?? "",
++                            kind: "turn_trigger",
++                            // 评审 P3-3：id 带 trigger 值——同轮异源触发段（理论面）
++                            // 不撞 React key（幂等守卫按 trigger 判定，异源放行）。
++                            id: `trigger:${env.run_id}:${
++                              liveContentTrigger ?? livePreambleTrigger
++                            }`,
++                            text:
++                              env.content ??
++                              preambleText ??
++                              "",
+                             ts: env.timestamp
+                               ? Date.parse(env.timestamp)
+                               : Date.now(),
++                            trigger: (liveContentTrigger ??
++                              livePreambleTrigger)!,
+                           },
+                           ...(next.segments ?? []),
+                         ],
+@@ -1435,8 +1462,10 @@ export function SessionPanelPage({
+                       // 把首条正文写为 prompt——系统注入开轮（[后台任务通知]，
+                       // prompt 空 + 已有输出段）的中途消息已由上方
+                       // appendDeliveredUserMsgIfAbsent 转 user_msg 段，不再前移轮首。
++                      // 2026-10-22-turn-trigger-generalize：turn_trigger 来源行
++                      // 不算输出段（影子直聊/群聊开轮正文照常写为 prompt）。
+                       const hasOutputSegs = (next.segments ?? []).some(
+-                        (s) => s.kind !== "preamble",
++                        (s) => s.kind !== "preamble" && s.kind !== "turn_trigger",
+                       );
+                       if (!hasOutputSegs) {
+                         const promptSource = preambleText
+diff --git a/frontend/src/components/daemon/trajectory/from-turn-views.ts b/frontend/src/components/daemon/trajectory/from-turn-views.ts
+index 3e98572e6..4dce60c4f 100644
+--- a/frontend/src/components/daemon/trajectory/from-turn-views.ts
++++ b/frontend/src/components/daemon/trajectory/from-turn-views.ts
+@@ -72,7 +72,7 @@ function rowKindOf(segment: TurnSegment): TrajectoryRowKind {
+     case "compact_status":
+       return "compaction";
+     case "user_msg":
+-    case "task_wakeup":
++    case "turn_trigger":
+       return "user";
+     case "file":
+     case "stderr":
+diff --git a/frontend/src/components/daemon/turn-segment-views.tsx b/frontend/src/components/daemon/turn-segment-views.tsx
+index 83d70891e..d6d07ed29 100644
+--- a/frontend/src/components/daemon/turn-segment-views.tsx
++++ b/frontend/src/components/daemon/turn-segment-views.tsx
+@@ -86,6 +86,7 @@ import type {
+   ToolTurnSegment,
+   TurnSegment,
+ } from "@/components/daemon/session-log-assembler";
++import { TURN_TRIGGER_META } from "@/components/daemon/session-log-assembler";
+ import { getProviderCaps } from "@/lib/provider-caps";
+ import type { ProviderCaps } from "@/lib/provider-caps";
+ import { workspaceTypeBadge } from "@/lib/workspace-types";
+@@ -1254,21 +1255,41 @@ export function CompactNoticeChip() {
+ }
+ 
+ /**
+- * 后台任务唤醒通知折叠行（2026-10-21-task-wakeup-restore）：daemon 注入的
+- * 「[后台任务通知]」轮在时间线的原位留痕——dsh「收到任务消息」同款形态：
+- * 一行弱化折叠行（✈ + 标题 + 用时数），默认收起、点击展开通知全文（展示
+- * 语义平移 PreambleSegmentView：拖选不触发收起守卫）。对话与进度两视图共用
+- * 本组件（通知本身轻量，无需 compact 式双形态）。取代 2026-10-13-
+- * session-taskwakeup-hide 的整体隐藏口径（隐藏导致唤醒轮「无人说话 agent
+- * 凭空接话」不可溯源）。
++ * 轮触发溯源行（2026-10-22-turn-trigger-generalize：TaskWakeupNoticeView 泛化，
++ * dsh turn-trigger.ts 同构）——非人类消息开启的轮在时间线头部的来源留痕。
++ * 按 TURN_TRIGGER_META 配置渲染：系统代笔源（task_wakeup/auto_resume）折叠行
++ * 默认收起、点击展开全文（展示语义平移 PreambleSegmentView：拖选不触发收起
++ * 守卫）；来源标注源（shadow_chat/group_chat）为纯标注行（正文照常显示为
++ * prompt 气泡，不可展开）。对话与进度两视图共用本组件。
+  */
+-export const TaskWakeupNoticeView = memo(function TaskWakeupNoticeView({
++export const TurnTriggerView = memo(function TurnTriggerView({
+   segment,
+ }: {
+-  segment: Extract<TurnSegment, { kind: "task_wakeup" }>;
++  segment: Extract<TurnSegment, { kind: "turn_trigger" }>;
+ }) {
++  const meta = TURN_TRIGGER_META[segment.trigger];
+   const [open, setOpen] = useState(false);
+-  const taskCount = (segment.text.match(/^- 任务「/gm) ?? []).length || 1;
++  // 任务数仅 task_wakeup 有意义（防漏报模板每任务一行）；解析失败兜底 1。
++  const taskCount =
++    segment.trigger === "task_wakeup"
++      ? (segment.text.match(/^- 任务「/gm) ?? []).length || 1
++      : null;
++  if (!meta.contentHidden) {
++    // 来源标注源：纯行，无展开（正文在 prompt 气泡照常可见）。
++    return (
++      <div className="flex w-full max-w-[86%] flex-col gap-1 self-start">
++        <span
++          aria-label={`${meta.label}（来源标注）`}
++          className="flex w-fit select-text items-center gap-[7px] rounded-md px-1.5 py-[3px] text-[11px] text-muted-foreground"
++        >
++          <span aria-hidden className="shrink-0">
++            {meta.glyph}
++          </span>
++          <span className="shrink-0 font-medium">{meta.label}</span>
++        </span>
++      </div>
++    );
++  }
+   return (
+     <div className="flex w-full max-w-[86%] flex-col gap-1 self-start">
+       <button
+@@ -1281,10 +1302,14 @@ export const TaskWakeupNoticeView = memo(function TaskWakeupNoticeView({
+         className="flex w-fit cursor-pointer select-text items-center gap-[7px] rounded-md px-1.5 py-[3px] text-left text-[11px] text-muted-foreground hover:bg-muted"
+       >
+         <span aria-hidden className="shrink-0">
+-          ✈
++          {meta.glyph}
++        </span>
++        <span className="shrink-0 font-medium">{meta.label}</span>
++        <span className="shrink-0 opacity-75">
++          {segment.trigger === "task_wakeup"
++            ? `（${taskCount} 个后台任务已结束）`
++            : `（系统已恢复会话上下文）`}
+         </span>
+-        <span className="shrink-0 font-medium">收到任务消息</span>
+-        <span className="shrink-0 opacity-75">{`（${taskCount} 个后台任务已结束）`}</span>
+         <span
+           aria-hidden
+           className={cn(
+@@ -1761,10 +1786,10 @@ export const SegmentView = memo(function SegmentView({ segment }: SegmentViewPro
+       // 供测试断言；自旧 SteeredMessagesFooter 迁移，正文经 parseAttachmentMarkers
+       // 剥附件标记行（同 prompt 气泡展示口径）。
+       return <UserMsgSegmentView segment={segment} />;
+-    case "task_wakeup":
+-      // 2026-10-21-task-wakeup-restore：后台任务唤醒通知折叠行——对话/进度两
+-      // 视图共用（通知轻量无需双形态）。
+-      return <TaskWakeupNoticeView segment={segment} />;
++    case "turn_trigger":
++      // 2026-10-22-turn-trigger-generalize：轮触发溯源行（按 trigger 配置渲染
++      // ——系统代笔折叠/来源标注两形态），对话/进度两视图共用。
++      return <TurnTriggerView segment={segment} />;
+     default: {
+       // 穷尽防御：TurnSegment 新增 kind 时此处编译期报错（never 不兼容）。
+       const exhaustive: never = segment;
+diff --git a/frontend/src/components/daemon/turn-status-bar.tsx b/frontend/src/components/daemon/turn-status-bar.tsx
+index 0dc21b6a6..a0be7cdaa 100644
+--- a/frontend/src/components/daemon/turn-status-bar.tsx
++++ b/frontend/src/components/daemon/turn-status-bar.tsx
+@@ -112,7 +112,7 @@ function segmentTs(seg: TurnSegment): number {
+       return seg.ts ?? Number.NEGATIVE_INFINITY;
+     // 2026-10-21-task-wakeup-restore：唤醒通知折叠行非 running 候选，取捕获 ts
+     //（本行是 TurnSegment 新增 kind 的 switch 详尽性编译补点，无行为变化）。
+-    case "task_wakeup":
++    case "turn_trigger":
+       return seg.ts ?? Number.NEGATIVE_INFINITY;
+   }
+ }
+diff --git a/frontend/src/components/daemon/turn-timeline.tsx b/frontend/src/components/daemon/turn-timeline.tsx
+index 15d11fc0d..d4f50b64e 100644
+--- a/frontend/src/components/daemon/turn-timeline.tsx
++++ b/frontend/src/components/daemon/turn-timeline.tsx
+@@ -68,7 +68,7 @@ import {
+   CompactNoticeChip,
+   CompactStatusRowView,
+   SegmentView,
+-  TaskWakeupNoticeView,
++  TurnTriggerView,
+   TextSegmentView,
+   TurnForkEntry,
+ } from "@/components/daemon/turn-segment-views";
+@@ -1986,7 +1986,7 @@ function segmentTsOf(seg: TurnSegment): number | null {
+     case "user_msg":
+       return seg.ts;
+   // 2026-10-21-task-wakeup-restore：唤醒通知折叠行取捕获时刻（同 preamble 语义）。
+-    case "task_wakeup":
++    case "turn_trigger":
+       return seg.ts;
+   }
+ }
+@@ -2021,7 +2021,7 @@ function isConversationSegment(seg: TurnSegment): boolean {
+   if (seg.kind === "compact") return true;
+   // 2026-10-21-task-wakeup-restore：唤醒通知折叠行进对话视图（TaskWakeupNoticeView
+   // 两视图共用——唤醒轮不再「无人说话 agent 凭空接话」不可溯源）。
+-  if (seg.kind === "task_wakeup") return true;
++  if (seg.kind === "turn_trigger") return true;
+   return (
+     seg.kind === "tool" &&
+     seg.children.length > 0 &&
+@@ -2233,8 +2233,8 @@ function SegmentedTurnBody({
+               }
+               // 2026-10-21-task-wakeup-restore：唤醒通知折叠行（对话视图原位渲染，
+               // 两视图共用组件）。
+-              if (s.kind === "task_wakeup") {
+-                return <TaskWakeupNoticeView key={s.id} segment={s} />;
++              if (s.kind === "turn_trigger") {
++                return <TurnTriggerView key={s.id} segment={s} />;
+               }
+               if (s.kind === "compact_status") {
+                 return <CompactStatusRowView key={s.id} segment={s} />;

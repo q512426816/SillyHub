@@ -671,3 +671,86 @@ created_at: 2026-10-16T01:30:35.950Z
   confirmed_at: null
   source_change: 2026-10-22-file-card-hide-empty
   status: active
+
+## FR-test-utils-032 turn_trigger 段泛化（task_wakeup 行为零变化）
+变更：2026-10-22-turn-trigger-generalize
+状态：active
+摘要：task_wakeup 等价回归
+全文：.sillyspec/changes/archive/2026-10-22-turn-trigger-generalize/requirements.md#FR-01
+最近确认：7338a61c878a5f33c1d1a0647cf900f2b71c14d1
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-22-turn-trigger-generalize:flow:测试绑定FR-01
+  tests: frontend/src/components/daemon/__tests__/runtime-session-helpers.test.tsx | frontend/src/components/daemon/__tests__/turn-segment-views.test.tsx「TurnTriggerView 按 kind 渲染——task_wakeup 与现状等价」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-22-turn-trigger-generalize
+  status: active
+
+## FR-test-utils-033 auto_resume 轮触发（断线自动续跑）
+变更：2026-10-22-turn-trigger-generalize
+状态：active
+摘要：续跑轮触发行
+全文：.sillyspec/changes/archive/2026-10-22-turn-trigger-generalize/requirements.md#FR-02
+最近确认：7338a61c878a5f33c1d1a0647cf900f2b71c14d1
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-22-turn-trigger-generalize:flow:测试绑定FR-02
+  tests: frontend/src/components/daemon/__tests__/runtime-session-helpers.test.tsx「auto_resume 注入开轮 → 断线自动续跑触发行」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-22-turn-trigger-generalize
+  status: active
+
+## FR-test-utils-034 影子直聊/群聊开轮来源标注（正文可见）
+变更：2026-10-22-turn-trigger-generalize
+状态：active
+摘要：影子直聊开轮；中途群聊注入不产触发行
+全文：.sillyspec/changes/archive/2026-10-22-turn-trigger-generalize/requirements.md#FR-03
+最近确认：7338a61c878a5f33c1d1a0647cf900f2b71c14d1
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-22-turn-trigger-generalize:flow:测试绑定FR-03
+  tests: frontend/src/components/daemon/__tests__/runtime-session-helpers.test.tsx「中途群聊注入不产触发行」 | frontend/src/components/daemon/__tests__/runtime-session-helpers.test.tsx「影子直聊/群聊开轮来源标注且正文可见」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-22-turn-trigger-generalize
+  status: active
+
+## FR-test-utils-035 排队栏触发源事件行泛化
+变更：2026-10-22-turn-trigger-generalize
+状态：active
+摘要：续跑条目事件行
+全文：.sillyspec/changes/archive/2026-10-22-turn-trigger-generalize/requirements.md#FR-04
+最近确认：7338a61c878a5f33c1d1a0647cf900f2b71c14d1
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-22-turn-trigger-generalize:flow:测试绑定FR-04
+  tests: frontend/src/components/daemon/__tests__/message-queue-bar.test.tsx「auto_resume 条目事件行与计数口径」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-22-turn-trigger-generalize
+  status: active
+
+## FR-test-utils-036 回归与类型门
+变更：2026-10-22-turn-trigger-generalize
+状态：active
+摘要：回归
+全文：.sillyspec/changes/archive/2026-10-22-turn-trigger-generalize/requirements.md#FR-05
+最近确认：7338a61c878a5f33c1d1a0647cf900f2b71c14d1

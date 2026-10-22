@@ -1,0 +1,68 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-22-turn-trigger-generalize",
+  "rows": [
+    {
+      "anchor": "FR-01",
+      "row_id": "2026-10-22-turn-trigger-generalize:flow:测试绑定FR-01",
+      "tests": [
+        "frontend/src/components/daemon/__tests__/runtime-session-helpers.test.tsx",
+        "frontend/src/components/daemon/__tests__/turn-segment-views.test.tsx「TurnTriggerView 按 kind 渲染——task_wakeup 与现状等价」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-22-turn-trigger-generalize"
+    },
+    {
+      "anchor": "FR-02",
+      "row_id": "2026-10-22-turn-trigger-generalize:flow:测试绑定FR-02",
+      "tests": [
+        "frontend/src/components/daemon/__tests__/runtime-session-helpers.test.tsx「auto_resume 注入开轮 → 断线自动续跑触发行」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-22-turn-trigger-generalize"
+    },
+    {
+      "anchor": "FR-03",
+      "row_id": "2026-10-22-turn-trigger-generalize:flow:测试绑定FR-03",
+      "tests": [
+        "frontend/src/components/daemon/__tests__/runtime-session-helpers.test.tsx「中途群聊注入不产触发行」",
+        "frontend/src/components/daemon/__tests__/runtime-session-helpers.test.tsx「影子直聊/群聊开轮来源标注且正文可见」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-22-turn-trigger-generalize"
+    },
+    {
+      "anchor": "FR-04",
+      "row_id": "2026-10-22-turn-trigger-generalize:flow:测试绑定FR-04",
+      "tests": [
+        "frontend/src/components/daemon/__tests__/message-queue-bar.test.tsx「auto_resume 条目事件行与计数口径」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-22-turn-trigger-generalize"
+    }
+  ]
+}
