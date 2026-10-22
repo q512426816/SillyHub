@@ -1,0 +1,33 @@
+tier: thin
+legacy_fallback: false
+substeps: {}
+born_face: thin
+with_tasks: false
+review_force: null
+input: >-
+  生产复现：英文思考内容里夹中文引用（如 "合并键应该是工区不是厂房"），opus-mt en→zh 模型收到源端中文 token 时 tokenizer 产出 <unk>、束搜索陷入重复，译文出现大量反斜杠乱码并丢失语义；复现脚本输出
+  has_backslash_runs=True
+
+
+  成功标准：
+
+  - 源端口语中文片段（汉字与中文/全角标点）必须作为保护段原样保留，禁止进入送翻文本
+
+  - 含中文引用的英文思考内容翻译后禁止出现反斜杠连续乱码，中文引用必须原样保留
+
+  - 纯英文内容翻译行为不变（保护段/URL 既有语义不回退）
+
+  - 相关测试通过：后端 translate 模块测试（含新增中文片段保护用例）
+autopilot: false
+prestage_ack: true
+baseline_commit: 7b3fa4deaf5e15d71ffc062b54f4174a45dcaa76
+updatedAt: '2026-10-22T02:40:48.352Z'
+cross_baselines:
+  sillyspec: 8ff68ada697ec4d4af9ce0a90c4055091985e319
+baseline_sha256: 9d9ab8486bb1618704a57d005c710463999b63fc5af863e42d3151fafbc19b96
+spec_approved: true
+spec_approved_at: '2026-10-22T02:40:48.352Z'
+spec_approved_by: anon@DESKTOP-HJ0AM09
+spec_approved_channel: user-confirmed
+spec_attested_by: anon@DESKTOP-HJ0AM09
+

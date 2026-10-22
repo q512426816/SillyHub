@@ -13,9 +13,11 @@ class _FakeTranslator:
 
     def __init__(self) -> None:
         self.calls = 0
+        self.batches: list[list[str]] = []
 
     def translate(self, texts: list[str]) -> list[str]:
         self.calls += 1
+        self.batches.append(list(texts))
         return [f"译[{i}]:{t}" for i, t in enumerate(texts)]
 
 
@@ -176,6 +178,35 @@ async def test_mixed_cjk_and_english_paragraphs(fake_translator: _FakeTranslator
     assert item.text.startswith(cjk_para)  # 中文段原样
     assert item.text != text  # 英文段已被翻译
     assert fake_translator.calls == 1
+
+
+async def test_cjk_quotes_preserved_and_no_backslash_garbage(
+    fake_translator: _FakeTranslator,
+) -> None:
+    """生产复现（2026-10-22）：源端中文引用必须原样保留，送翻块零中文 token。
+
+    修复前 opus-mt 收到中文 token 时解码崩溃，中文引用被译成 "^\\ "、整段变
+    连续反斜杠；修复后中文片段作为保护段不送模型。
+    """
+    text = (
+        'The user gave a decision: "合并键应该是工区不是厂房" (bug report) — '
+        'record D-001 with title "单位级明细表合并键=工区（用户实测反馈）" now.'
+    )
+    out = await translate_items([TranslateItemIn(id="a", text=text)])
+    item = out["items"][0]
+    # 中文引用逐字保留
+    assert "合并键应该是工区不是厂房" in item.text
+    assert "单位级明细表合并键" in item.text
+    assert "工区（用户实测反馈）" in item.text
+    # 无连续反斜杠乱码（≥3 个 \\ 视为解码崩溃指纹）
+    assert "\\\\\\" not in item.text
+    # 送进模型的块里不得有任何中文 token
+    import re as _re
+
+    cjk_re = _re.compile(r"[　-〿＀-￯㐀-䶿一-鿿]")
+    for batch in fake_translator.batches:
+        for chunk in batch:
+            assert not cjk_re.search(chunk), f"中文 token 泄漏进送翻块: {chunk!r}"
 
 
 async def test_pure_code_content_translated_false(fake_translator: _FakeTranslator) -> None:

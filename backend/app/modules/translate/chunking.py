@@ -20,9 +20,15 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass
 
-# 保护模式：围栏代码（多行）| 行内代码（不跨行）| URL。交替单遍扫描。
+# 保护模式：中文片段 | 围栏代码（多行）| 行内代码（不跨行）| URL。交替单遍扫描。
+#
+# 中文片段必须最先匹配（2026-10-22-protect-cjk-source）：opus-mt-en-zh 源端只有
+# 英文词表，源文本出现中文 token 时 tokenizer 产出 <unk>、束搜索陷入重复——
+# 生产实测中文引用被译成 "^\\ "、整段变连续反斜杠。汉字与中文/全角标点一并
+# 保护，保证送进模型的源文本零中文 token。
 _PROTECT_RE = re.compile(
-    r"```.*?```"  # fenced code block（DOTALL 跨行，懒惰配对）
+    r"[　-〿＀-￯㐀-䶿一-鿿]+"  # 中文片段（含全角标点）
+    r"|```.*?```"  # fenced code block（DOTALL 跨行，懒惰配对）
     r"|`[^`\n]+`"  # inline code
     r"|https?://[^\s`]+"  # http(s) URL（止于空白/反引号）
     r"|www\.[^\s`]+",  # 裸 www

@@ -13,6 +13,37 @@ from app.modules.translate.chunking import (
     split_translatable,
 )
 
+# -- 源端中文保护（2026-10-22-protect-cjk-source）-----------------------------------
+
+
+def test_cjk_run_is_protected_segment() -> None:
+    """英文句子里夹的中文引用必须整段保护，不进入送翻文本。"""
+    text = 'The user said: "合并键应该是工区不是厂房" then continued.'
+    segs = split_protected(text)
+    assert "".join(s.text for s in segs) == text  # 拼接保真
+    protected = [s.text for s in segs if not s.translatable]
+    assert "合并键应该是工区不是厂房" in protected
+    assert any(s.translatable and "The user said" in s.text for s in segs)
+
+
+def test_cjk_with_fullwidth_punct_protected() -> None:
+    """中文标点（全角）随汉字一起保护——源端不得残留任何中文 token。"""
+    text = "报错信息：连接超时。请重试。 Retry the request after a while."
+    segs = split_protected(text)
+    protected = "".join(s.text for s in segs if not s.translatable)
+    assert protected == "报错信息：连接超时。请重试。"
+    body = [s.text for s in segs if s.translatable]
+    assert all("报错" not in t and "超时" not in t for t in body)
+    assert any("Retry the request" in t for t in body)
+
+
+def test_pure_english_split_unchanged_by_cjk_branch() -> None:
+    """纯英文文本的正文/保护划分不因中文分支改变。"""
+    text = "I will read `src/app.py` and docs at https://example.com/a?b=1 then continue."
+    kinds = [s.translatable for s in split_protected(text)]
+    assert kinds == [True, False, True, False, True]
+
+
 # -- should_translate_segment（段级判定，2026-10-22-fix-translate-cjk-segments）------
 
 
