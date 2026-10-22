@@ -1,0 +1,596 @@
+diff --git a/frontend/src/components/agent-profile/__tests__/agent-profile-card.test.tsx b/frontend/src/components/agent-profile/__tests__/agent-profile-card.test.tsx
+index f450ff87b..06a80b5e0 100644
+--- a/frontend/src/components/agent-profile/__tests__/agent-profile-card.test.tsx
++++ b/frontend/src/components/agent-profile/__tests__/agent-profile-card.test.tsx
+@@ -25,9 +25,14 @@ import type { AgentProfileAggregatedItem } from "@/lib/agent-profiles";
+ 
+ // task-08：card 现用 useQuery(listProviders) 做绑定供应商名映射；测试需 QueryClient +
+ // mock listProviders（避免真 apiFetch）。默认返回空 → boundProviderName=null → 不渲染。
+-vi.mock("@/lib/api/llm-providers", () => ({
+-  listProviders: vi.fn().mockResolvedValue([]),
+-}));
++vi.mock("@/lib/api/llm-providers", async (importOriginal) => {
++  // provider-default-ui-hint：passthrough 真实导出（noProviderLabel 等），原覆盖保留。
++  const actual = await importOriginal<typeof import("@/lib/api/llm-providers")>();
++  return {
++    ...actual,
++    listProviders: vi.fn().mockResolvedValue([]),
++  };
++});
+ 
+ /** 包 QueryClientProvider 渲染（card 用 useQuery，task-08）。 */
+ function renderCard(ui: ReactElement) {
+diff --git a/frontend/src/components/daemon/__tests__/page-helpers-enrich-api-duration.test.ts b/frontend/src/components/daemon/__tests__/page-helpers-enrich-api-duration.test.ts
+index 77c3165e6..6376d9b36 100644
+--- a/frontend/src/components/daemon/__tests__/page-helpers-enrich-api-duration.test.ts
++++ b/frontend/src/components/daemon/__tests__/page-helpers-enrich-api-duration.test.ts
+@@ -108,3 +108,41 @@ describe("enrichDisplayTurns — apiDurationMs 回填（FR-01）", () => {
+     expect(result[0]!.whoLine).toBe(turn.whoLine);
+   });
+ });
++
++// ── 2026-10-21-provider-default-ui-hint：whoLine 未选供应商回填默认名 ─────────
++
++describe("enrichDisplayTurns — providerName 未选回填用户默认（FR-02）", () => {
++  it("llm_provider_id=null + 用户默认供应商 → whoLine.providerName=默认名", () => {
++    // makeTurn 预置 whoLine（?? 链不补）——去预置让快照派生。
++    const [enriched] = enrichDisplayTurns(
++      [makeTurn({ whoLine: undefined })],
++      new Map([["run-1", makeRun({ llm_provider_id: null })]]),
++      [{ id: "p1", name: "GLM 平台", is_default: true } as never],
++      "claude",
++      null,
++    );
++    expect(enriched!.whoLine?.providerName).toBe("GLM 平台");
++  });
++
++  it("llm_provider_id=null + 无默认 → 保持 null（TurnTimeline 显「本机默认」）", () => {
++    const [enriched] = enrichDisplayTurns(
++      [makeTurn({ whoLine: undefined })],
++      new Map([["run-1", makeRun({ llm_provider_id: null })]]),
++      [{ id: "p1", name: "Kimi", is_default: false } as never],
++      "claude",
++      null,
++    );
++    expect(enriched!.whoLine?.providerName).toBeNull();
++  });
++
++  it("llm_provider_id 显式 → 按 id 查名（既有行为零回归）", () => {
++    const [enriched] = enrichDisplayTurns(
++      [makeTurn({ whoLine: undefined })],
++      new Map([["run-1", makeRun({ llm_provider_id: "p1" })]]),
++      [{ id: "p1", name: "Kimi", is_default: false } as never],
++      "claude",
++      null,
++    );
++    expect(enriched!.whoLine?.providerName).toBe("Kimi");
++  });
++});
+diff --git a/frontend/src/components/daemon/session-panel/page-helpers.tsx b/frontend/src/components/daemon/session-panel/page-helpers.tsx
+index 63b9c844c..d0098f8a5 100644
+--- a/frontend/src/components/daemon/session-panel/page-helpers.tsx
++++ b/frontend/src/components/daemon/session-panel/page-helpers.tsx
+@@ -204,11 +204,13 @@ export function enrichDisplayTurns(
+           // 快照缺 name / 无快照 = 该轮未指定档案 → null（TurnTimeline 显「未指定」）
+           profileName: meta.agent_profile_snapshot?.name ?? null,
+           agentName: agentDisplayName,
+-          // llm_provider_id null（未选/已删 SET NULL）= 本机默认；有 id 但列表
+-          // 未命中（列表未加载完）暂 null，memo 随 llmProviders 到位自愈。
++          // llm_provider_id null（未选/已删 SET NULL）→ 回填用户默认供应商名
++          //（2026-10-21-provider-default-ui-hint：claim 链实际注入的是默认，
++          // 恒显「本机默认」反向误导；无默认保持 null → TurnTimeline 显本机默认）。
++          // 有 id 但列表未命中（列表未加载完）暂 null，memo 随 llmProviders 到位自愈。
+           providerName: meta.llm_provider_id
+             ? (llmProviders.find((p) => p.id === meta.llm_provider_id)?.name ?? null)
+-            : null,
++            : (llmProviders.find((p) => p.is_default)?.name ?? null),
+         },
+         inputTokens: t.inputTokens ?? meta.input_tokens ?? null,
+         outputTokens: t.outputTokens ?? meta.output_tokens ?? null,
+diff --git a/frontend/src/components/floating/floating-session-host.test.tsx b/frontend/src/components/floating/floating-session-host.test.tsx
+index 88aee5fb7..b0c00a732 100644
+--- a/frontend/src/components/floating/floating-session-host.test.tsx
++++ b/frontend/src/components/floating/floating-session-host.test.tsx
+@@ -304,9 +304,14 @@ vi.mock("@/lib/workspace-binding", () => ({
+   fetchMyBindings: (...args: unknown[]) => bindingApi.fetchMyBindings(...args),
+ }));
+ 
+-vi.mock("@/lib/api/llm-providers", () => ({
+-  listProviders: vi.fn().mockResolvedValue([]),
+-}));
++vi.mock("@/lib/api/llm-providers", async (importOriginal) => {
++  // provider-default-ui-hint：passthrough 真实导出（noProviderLabel 等），原覆盖保留。
++  const actual = await importOriginal<typeof import("@/lib/api/llm-providers")>();
++  return {
++    ...actual,
++    listProviders: vi.fn().mockResolvedValue([]),
++  };
++});
+ 
+ // task-05（2026-08-28-session-ppm-task-binding / FR-04 / D-004@v2）：PPM 条目
+ // 入口的工作区解析数据源（listProjectWorkspaces 按 workspace_id 升序取第一）。
+diff --git a/frontend/src/components/group-chat/__tests__/group-askuser-aggregate.test.tsx b/frontend/src/components/group-chat/__tests__/group-askuser-aggregate.test.tsx
+index 9e2a66270..f091263ee 100644
+--- a/frontend/src/components/group-chat/__tests__/group-askuser-aggregate.test.tsx
++++ b/frontend/src/components/group-chat/__tests__/group-askuser-aggregate.test.tsx
+@@ -106,9 +106,14 @@ vi.mock("@/lib/use-daemon-machines", () => ({
+   useDaemonMachines: () => mocks.machinesHook(),
+ }));
+ 
+-vi.mock("@/lib/api/llm-providers", () => ({
+-  listProviders: (...args: unknown[]) => mocks.listProviders(...args),
+-}));
++vi.mock("@/lib/api/llm-providers", async (importOriginal) => {
++  // provider-default-ui-hint：passthrough 真实导出（noProviderLabel 等），原覆盖保留。
++  const actual = await importOriginal<typeof import("@/lib/api/llm-providers")>();
++  return {
++    ...actual,
++    listProviders: (...args: unknown[]) => mocks.listProviders(...args),
++  };
++});
+ 
+ vi.mock("@/lib/agent-profiles", () => ({
+   useMineAgentProfiles: () => mocks.profilesHook(),
+diff --git a/frontend/src/components/group-chat/__tests__/group-chat-panel.test.tsx b/frontend/src/components/group-chat/__tests__/group-chat-panel.test.tsx
+index 63bbb5558..176d7e630 100644
+--- a/frontend/src/components/group-chat/__tests__/group-chat-panel.test.tsx
++++ b/frontend/src/components/group-chat/__tests__/group-chat-panel.test.tsx
+@@ -160,9 +160,14 @@ vi.mock("@/lib/use-daemon-machines", () => ({
+   useDaemonMachines: () => mocks.machinesHook(),
+ }));
+ 
+-vi.mock("@/lib/api/llm-providers", () => ({
+-  listProviders: (...args: unknown[]) => mocks.listProviders(...args),
+-}));
++vi.mock("@/lib/api/llm-providers", async (importOriginal) => {
++  // provider-default-ui-hint：passthrough 真实导出（noProviderLabel 等），原覆盖保留。
++  const actual = await importOriginal<typeof import("@/lib/api/llm-providers")>();
++  return {
++    ...actual,
++    listProviders: (...args: unknown[]) => mocks.listProviders(...args),
++  };
++});
+ 
+ vi.mock("@/lib/agent-profiles", () => ({
+   useMineAgentProfiles: () => mocks.profilesHook(),
+diff --git a/frontend/src/components/group-chat/__tests__/member-panel.test.tsx b/frontend/src/components/group-chat/__tests__/member-panel.test.tsx
+index 76ad6594d..efd38bcfe 100644
+--- a/frontend/src/components/group-chat/__tests__/member-panel.test.tsx
++++ b/frontend/src/components/group-chat/__tests__/member-panel.test.tsx
+@@ -108,9 +108,14 @@ vi.mock("@/lib/use-daemon-machines", () => ({
+   useDaemonMachines: () => mocks.machinesHook(),
+ }));
+ 
+-vi.mock("@/lib/api/llm-providers", () => ({
+-  listProviders: (...args: unknown[]) => mocks.listProviders(...args),
+-}));
++vi.mock("@/lib/api/llm-providers", async (importOriginal) => {
++  // provider-default-ui-hint：passthrough 真实导出（noProviderLabel 等），原覆盖保留。
++  const actual = await importOriginal<typeof import("@/lib/api/llm-providers")>();
++  return {
++    ...actual,
++    listProviders: (...args: unknown[]) => mocks.listProviders(...args),
++  };
++});
+ 
+ vi.mock("@/lib/agent-profiles", () => ({
+   useMineAgentProfiles: () => mocks.profilesHook(),
+diff --git a/frontend/src/components/group-chat/create-group-wizard.tsx b/frontend/src/components/group-chat/create-group-wizard.tsx
+index 9ef7acc45..dd2bd19ac 100644
+--- a/frontend/src/components/group-chat/create-group-wizard.tsx
++++ b/frontend/src/components/group-chat/create-group-wizard.tsx
+@@ -52,7 +52,7 @@ import { Button, Input, InputNumber, Modal, Select, Switch, Tooltip } from "antd
+ import { Bot, Plus, Trash2 } from "lucide-react";
+ 
+ import { useMineAgentProfiles } from "@/lib/agent-profiles";
+-import { listProviders } from "@/lib/api/llm-providers";
++import { listProviders, noProviderLabel } from "@/lib/api/llm-providers";
+ import { errMessage, useNotify } from "@/lib/errors";
+ import { listSimpleProjects, listProjectMembers } from "@/lib/ppm/project";
+ import type { ProjectMember } from "@/lib/ppm/types";
+@@ -309,11 +309,15 @@ export function CreateGroupWizard({
+     staleTime: 30_000,
+     enabled: open,
+   });
+-  const providerOptions = useMemo(
+-    () =>
+-      (providersQ.data ?? []).map((p) => ({ value: p.id, label: p.name })),
+-    [providersQ.data],
+-  );
++  const providerOptions = useMemo(() => {
++    const base = (providersQ.data ?? []).map((p) => ({
++      value: p.id,
++      label: p.name,
++    }));
++    // 2026-10-21-provider-default-ui-hint：兜底项文案按用户默认供应商动态化。
++    base.unshift({ value: "", label: noProviderLabel(providersQ.data) });
++    return base;
++  }, [providersQ.data]);
+ 
+   // 智能体方案（AgentProfile 下拉）：useMineAgentProfiles（跨工作区可见，
+   // session-config-bar 档案下拉同源）。
+@@ -928,17 +932,14 @@ export function CreateGroupWizard({
+                         id={`cgw-model-${idx}`}
+                         aria-label={`Agent 成员 ${idx + 1} 模型`}
+                         className="w-full"
+-                        placeholder="不指定（本机默认）"
++                        placeholder={providerOptions[0]?.label ?? "不指定（本机默认）"}
+                         allowClear
+                         value={card.llmProviderId || undefined}
+                         onChange={(v) =>
+                           updateCard(card.id, { llmProviderId: v ?? "" })
+                         }
+                         disabled={card.provider !== "claude"}
+-                        options={[
+-                          { value: "", label: "不指定（本机默认）" },
+-                          ...providerOptions,
+-                        ]}
++                        options={providerOptions}
+                       />
+                       {card.provider !== "claude" && (
+                         <span className="text-[11px] text-muted-foreground">
+diff --git a/frontend/src/components/group-chat/member-panel.tsx b/frontend/src/components/group-chat/member-panel.tsx
+index 5cc045391..52025cd15 100644
+--- a/frontend/src/components/group-chat/member-panel.tsx
++++ b/frontend/src/components/group-chat/member-panel.tsx
+@@ -55,7 +55,7 @@ import { SessionPanel } from "@/components/daemon/session-panel";
+ import { validateMemberDisplayName } from "@/components/group-chat/create-group-wizard";
+ import { useMineAgentProfiles } from "@/lib/agent-profiles";
+ import { ApiError } from "@/lib/api";
+-import { listProviders } from "@/lib/api/llm-providers";
++import { listProviders, noProviderLabel } from "@/lib/api/llm-providers";
+ import { errMessage, useNotify } from "@/lib/errors";
+ import { listProjectMembers } from "@/lib/ppm/project";
+ import { listProjectWorkspaces } from "@/lib/workspace";
+@@ -1160,7 +1160,8 @@ function AgentConfigSwitchModal({
+       });
+     }
+     if (!member.llm_provider_id) {
+-      opts.unshift({ value: "", label: "不指定（本机默认）" });
++      // 2026-10-21-provider-default-ui-hint：兜底文案按用户默认供应商动态化。
++      opts.unshift({ value: "", label: noProviderLabel(providersQ.data) });
+     }
+     return opts;
+   }, [providersQ.data, member]);
+@@ -1587,10 +1588,16 @@ function AddAgentMemberModal({
+       })),
+     [projectWorkspacesQ.data],
+   );
+-  const providerOptions = useMemo(
+-    () => (providersQ.data ?? []).map((p) => ({ value: p.id, label: p.name })),
+-    [providersQ.data],
+-  );
++  const providerOptions = useMemo(() => {
++    const base = (providersQ.data ?? []).map((p) => ({
++      value: p.id,
++      label: p.name,
++    }));
++    // 2026-10-21-provider-default-ui-hint：兜底项文案按用户默认供应商动态化
++    //（评审 R1：与 wizard 同款，防「不指定」显式项丢失）。
++    base.unshift({ value: "", label: noProviderLabel(providersQ.data) });
++    return base;
++  }, [providersQ.data]);
+   const profileOptions = useMemo(
+     () => profiles.map((p) => ({ value: p.id, label: p.name })),
+     [profiles],
+@@ -1726,15 +1733,12 @@ function AddAgentMemberModal({
+               id="mp-add-agent-model"
+               aria-label="Agent 成员模型"
+               className="w-full"
+-              placeholder="不指定（本机默认）"
++              placeholder={providerOptions[0]?.label ?? "不指定（本机默认）"}
+               allowClear
+               value={llmProviderId || undefined}
+               onChange={(v) => setLlmProviderId(v ?? "")}
+               disabled={provider !== "claude"}
+-              options={[
+-                { value: "", label: "不指定（本机默认）" },
+-                ...providerOptions,
+-              ]}
++              options={providerOptions}
+             />
+             {provider !== "claude" && (
+               <span className="text-[11px] text-muted-foreground">
+diff --git a/frontend/src/components/knowledge/__tests__/precipitate-dialog.test.tsx b/frontend/src/components/knowledge/__tests__/precipitate-dialog.test.tsx
+index 8d0a9736d..1183da7c6 100644
+--- a/frontend/src/components/knowledge/__tests__/precipitate-dialog.test.tsx
++++ b/frontend/src/components/knowledge/__tests__/precipitate-dialog.test.tsx
+@@ -53,10 +53,15 @@ const llmProviderApi = vi.hoisted(() => ({
+   listProviders: vi.fn(),
+   fetchProviderModels: vi.fn(),
+ }));
+-vi.mock("@/lib/api/llm-providers", () => ({
+-  listProviders: llmProviderApi.listProviders,
++vi.mock("@/lib/api/llm-providers", async (importOriginal) => {
++  // provider-default-ui-hint：passthrough 真实导出（noProviderLabel 等），原覆盖保留。
++  const actual = await importOriginal<typeof import("@/lib/api/llm-providers")>();
++  return {
++    ...actual,
++    listProviders: llmProviderApi.listProviders,
+   fetchProviderModels: llmProviderApi.fetchProviderModels,
+-}));
++  };
++});
+ 
+ const sessionApi = vi.hoisted(() => ({ listAgentSessions: vi.fn() }));
+ vi.mock("@/lib/daemon/session-lists", () => ({
+diff --git a/frontend/src/components/llm-providers/__tests__/llm-provider-list.test.tsx b/frontend/src/components/llm-providers/__tests__/llm-provider-list.test.tsx
+index 366a6c489..e3ffd4990 100644
+--- a/frontend/src/components/llm-providers/__tests__/llm-provider-list.test.tsx
++++ b/frontend/src/components/llm-providers/__tests__/llm-provider-list.test.tsx
+@@ -20,8 +20,12 @@ import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+ import { AntdProviders } from "@/components/antd-providers";
+ import { LlmProviderSection } from "@/components/llm-providers/llm-provider-list";
+ 
+-vi.mock("@/lib/api/llm-providers", () => ({
+-  listProviders: vi.fn(),
++vi.mock("@/lib/api/llm-providers", async (importOriginal) => {
++  // provider-default-ui-hint：passthrough 真实导出（noProviderLabel 等），原覆盖保留。
++  const actual = await importOriginal<typeof import("@/lib/api/llm-providers")>();
++  return {
++    ...actual,
++    listProviders: vi.fn(),
+   queryUsage: vi.fn(),
+   detectUsageProvider: vi.fn(),
+   createProvider: vi.fn(),
+@@ -31,7 +35,8 @@ vi.mock("@/lib/api/llm-providers", () => ({
+   unsetDefaultProvider: vi.fn(),
+   formToCreate: vi.fn(),
+   formToUpdate: vi.fn(),
+-}));
++  };
++});
+ 
+ import {
+   listProviders,
+diff --git a/frontend/src/components/llm-providers/__tests__/usage-footer.test.tsx b/frontend/src/components/llm-providers/__tests__/usage-footer.test.tsx
+index 1b6117db5..cc8fcd2b3 100644
+--- a/frontend/src/components/llm-providers/__tests__/usage-footer.test.tsx
++++ b/frontend/src/components/llm-providers/__tests__/usage-footer.test.tsx
+@@ -16,10 +16,15 @@ import { render, screen, fireEvent, waitFor } from "@testing-library/react";
+ 
+ import { UsageFooter } from "@/components/llm-providers/usage-footer";
+ 
+-vi.mock("@/lib/api/llm-providers", () => ({
+-  detectUsageProvider: vi.fn(),
++vi.mock("@/lib/api/llm-providers", async (importOriginal) => {
++  // provider-default-ui-hint：passthrough 真实导出（noProviderLabel 等），原覆盖保留。
++  const actual = await importOriginal<typeof import("@/lib/api/llm-providers")>();
++  return {
++    ...actual,
++    detectUsageProvider: vi.fn(),
+   queryUsage: vi.fn(),
+-}));
++  };
++});
+ 
+ // mock 后再 import（拿 mock 引用，便于 per-test 配置）。
+ import { detectUsageProvider, queryUsage } from "@/lib/api/llm-providers";
+diff --git a/frontend/src/components/sessions/__tests__/create-group-wizard.test.tsx b/frontend/src/components/sessions/__tests__/create-group-wizard.test.tsx
+index adf6ae485..1306bdaf9 100644
+--- a/frontend/src/components/sessions/__tests__/create-group-wizard.test.tsx
++++ b/frontend/src/components/sessions/__tests__/create-group-wizard.test.tsx
+@@ -110,9 +110,14 @@ vi.mock("@/lib/use-daemon-machines", () => ({
+   useDaemonMachines: () => mocks.machinesHook(),
+ }));
+ 
+-vi.mock("@/lib/api/llm-providers", () => ({
+-  listProviders: (...args: unknown[]) => mocks.listProviders(...args),
+-}));
++vi.mock("@/lib/api/llm-providers", async (importOriginal) => {
++  // provider-default-ui-hint：passthrough 真实导出（noProviderLabel 等），原覆盖保留。
++  const actual = await importOriginal<typeof import("@/lib/api/llm-providers")>();
++  return {
++    ...actual,
++    listProviders: (...args: unknown[]) => mocks.listProviders(...args),
++  };
++});
+ 
+ vi.mock("@/lib/agent-profiles", () => ({
+   useMineAgentProfiles: () => mocks.profilesHook(),
+diff --git a/frontend/src/components/sessions/__tests__/session-config-bar.test.tsx b/frontend/src/components/sessions/__tests__/session-config-bar.test.tsx
+index 88e08f87f..f06bf70ba 100644
+--- a/frontend/src/components/sessions/__tests__/session-config-bar.test.tsx
++++ b/frontend/src/components/sessions/__tests__/session-config-bar.test.tsx
+@@ -79,9 +79,16 @@ vi.mock("@/lib/agent-profiles", () => ({
+   useMineAgentProfiles: () => mocks.profilesHook(),
+ }));
+ 
+-vi.mock("@/lib/api/llm-providers", () => ({
+-  listProviders: (...args: unknown[]) => mocks.listProviders(...args),
+-}));
++vi.mock("@/lib/api/llm-providers", async (importOriginal) => {
++  // 2026-10-21-provider-default-ui-hint：noProviderLabel 走真实实现（纯函数），
++  // listProviders 维持可控 mock。
++  const actual =
++    await importOriginal<typeof import("@/lib/api/llm-providers")>();
++  return {
++    ...actual,
++    listProviders: (...args: unknown[]) => mocks.listProviders(...args),
++  };
++});
+ 
+ // 组件运行时只消费 injectSession（类型导入编译期擦除），局部 mock 不加载真实 daemon.ts。
+ // task-06（thinking-level）：组件新增消费 getSessionThinkingLevels /
+@@ -1457,3 +1464,34 @@ describe("SessionConfigBar 手机端降噪（ql-20260915-009 variant=mobile）",
+     expect(screen.getByText("运行中切换将于本轮结束后生效")).toBeInTheDocument();
+   });
+ });
++
++// ── 2026-10-21-provider-default-ui-hint：兜底项文案动态化 ────────────────────
++
++describe("SessionConfigBar 不指定兜底文案（provider-default-ui-hint）", () => {
++  it("用户有默认供应商 → 兜底项显示「不指定（默认：{name}）」", async () => {
++    mocks.listProviders.mockReset().mockResolvedValue([
++      { id: "prov-kimi", name: "Kimi 中转", models: [], agent_kinds: ["claude"] },
++      { id: "prov-glm", name: "GLM 平台", models: [], agent_kinds: ["claude"], is_default: true },
++    ]);
++    renderBar();
++    // 未选态按钮显示默认供应商名（claim 实际注入它）；下拉兜底项为动态文案。
++    const btn = await screen.findByRole("button", {
++      name: "配置-供应商 GLM 平台",
++    });
++    fireEvent.click(btn);
++    expect(screen.getByTestId("config-dd-provider")).toBeInTheDocument();
++    expect(screen.getByText("不指定（默认：GLM 平台）")).toBeInTheDocument();
++  });
++
++  it("未设默认供应商 → 保持「不指定（本机默认）」（零回归）", async () => {
++    mocks.listProviders.mockReset().mockResolvedValue([
++      { id: "prov-kimi", name: "Kimi 中转", models: [], agent_kinds: ["claude"] },
++    ]);
++    renderBar();
++    const btn = await screen.findByRole("button", {
++      name: "配置-供应商 本机默认",
++    });
++    fireEvent.click(btn);
++    expect(screen.getByText("不指定（本机默认）")).toBeInTheDocument();
++  });
++});
+diff --git a/frontend/src/components/sessions/__tests__/sessions-portal.test.tsx b/frontend/src/components/sessions/__tests__/sessions-portal.test.tsx
+index 4457b5683..8f49628ee 100644
+--- a/frontend/src/components/sessions/__tests__/sessions-portal.test.tsx
++++ b/frontend/src/components/sessions/__tests__/sessions-portal.test.tsx
+@@ -305,10 +305,15 @@ vi.mock("@/lib/agent-profiles", async () => {
+   };
+ });
+ 
+-vi.mock("@/lib/api/llm-providers", () => ({
+-  listProviders: (...args: unknown[]) => mocks.listProviders(...args),
++vi.mock("@/lib/api/llm-providers", async (importOriginal) => {
++  // provider-default-ui-hint：passthrough 真实导出（noProviderLabel 等），原覆盖保留。
++  const actual = await importOriginal<typeof import("@/lib/api/llm-providers")>();
++  return {
++    ...actual,
++    listProviders: (...args: unknown[]) => mocks.listProviders(...args),
+   getProviderQuota: (...args: unknown[]) => mocks.getProviderQuota(...args),
+-}));
++  };
++});
+ 
+ // SessionListPanel chips 工作区名解析 + WorkspaceSessionPicker 数据源。
+ vi.mock("@/lib/workspaces", () => ({
+diff --git a/frontend/src/components/sessions/session-config-bar.tsx b/frontend/src/components/sessions/session-config-bar.tsx
+index 74ef4b117..928c1c05c 100644
+--- a/frontend/src/components/sessions/session-config-bar.tsx
++++ b/frontend/src/components/sessions/session-config-bar.tsx
+@@ -60,7 +60,7 @@ import { Brain, ChevronDown, Cloud, Settings2, Timer, User } from "lucide-react"
+ import { ApiError } from "@/lib/api";
+ import type { components } from "@/lib/api-types";
+ import { useMineAgentProfiles } from "@/lib/agent-profiles";
+-import { listProviders } from "@/lib/api/llm-providers";
++import { listProviders, noProviderLabel } from "@/lib/api/llm-providers";
+ import { useNotify } from "@/lib/errors";
+ import {
+   fetchSharedAgentsActive,
+@@ -289,7 +289,7 @@ export function buildDefaultSwitchPrompt(p: PendingSwitch): string {
+   const what = p.field === "llm_provider_id" ? "供应商" : switchFieldWhat(p.field);
+   const name =
+     p.field === "llm_provider_id" && p.value === SWITCH_NO_PROVIDER_VALUE
+-      ? "本机默认"
++      ? (p.label || "本机默认") // 不指定项 label 已动态化（provider-default-ui-hint）
+       : p.field === "model" && p.value === SWITCH_MODEL_DEFAULT_VALUE
+         ? "默认"
+         : p.label;
+@@ -355,6 +355,11 @@ export function SessionConfigBar({
+     staleTime: 30_000,
+   });
+   const providers = useMemo(() => providersQ.data ?? [], [providersQ.data]);
++  // 2026-10-21-provider-default-ui-hint：兜底项文案按用户默认供应商动态化。
++  const noProviderFallbackLabel = useMemo(
++    () => noProviderLabel(providers),
++    [providers],
++  );
+ 
+   const [openKind, setOpenKind] = useState<SessionConfigCtrlKind | null>(null);
+   const [submitting, setSubmitting] = useState(false);
+@@ -612,7 +617,9 @@ export function SessionConfigBar({
+     ? providers.find((p) => p.id === llmProviderId)?.name ??
+       configSnapshot?.provider_name ??
+       llmProviderId
+-    : "本机默认";
++    : // 未显式选 → 用户默认供应商名（claim 链实际注入它）；无默认回落本机默认
++      //（2026-10-21-provider-default-ui-hint，与下拉兜底项同源）。
++      providers.find((p) => p.is_default)?.name ?? "本机默认";
+ 
+   /** ql-20260817-010：点选即**静默**切换——prompt 发空串（后端静默切换契约：
+    * 有切换字段允许空 prompt；daemon 收到空 prompt 只 reload 配置不喂消息，
+@@ -767,13 +774,13 @@ export function SessionConfigBar({
+             >
+               <SwitchItem
+                 icon={<Cloud aria-hidden className="h-3 w-3" />}
+-                label="不指定（本机默认）"
++                label={noProviderFallbackLabel}
+                 current={llmProviderId == null}
+                 onClick={() =>
+                   executeSwitch({
+                     field: "llm_provider_id",
+                     value: SWITCH_NO_PROVIDER_VALUE,
+-                    label: "不指定（本机默认）",
++                    label: noProviderFallbackLabel,
+                   })
+                 }
+               />
+diff --git a/frontend/src/lib/api/__tests__/llm-providers.test.ts b/frontend/src/lib/api/__tests__/llm-providers.test.ts
+index 75d3e2798..6a02b8668 100644
+--- a/frontend/src/lib/api/__tests__/llm-providers.test.ts
++++ b/frontend/src/lib/api/__tests__/llm-providers.test.ts
+@@ -17,6 +17,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
+ 
+ import {
+   cleanExtraEnv,
++  noProviderLabel,
+   cleanRoleMappings,
+   cleanSettingsConfig,
+   createProvider,
+@@ -316,3 +317,24 @@ describe("cleanSettingsConfig — env 空串占位剔除（ql-20260823-007）",
+     expect(created.settings_config).toBeNull();
+   });
+ });
++
++
++// ── noProviderLabel（2026-10-21-provider-default-ui-hint）───────────────────
++
++describe("noProviderLabel — 兜底文案按用户默认供应商动态化", () => {
++  it("有默认供应商 → 「不指定（默认：{name}）」", () => {
++    expect(
++      noProviderLabel([
++        { id: "a", name: "Kimi", is_default: false },
++        { id: "b", name: "GLM 平台", is_default: true },
++      ] as unknown as Parameters<typeof noProviderLabel>[0]),
++    ).toBe("不指定（默认：GLM 平台）");
++  });
++
++  it("无默认 / 空列表 / null → 「不指定（本机默认）」（零回归）", () => {
++    const none = [{ id: "a", name: "Kimi", is_default: false }] as unknown as Parameters<typeof noProviderLabel>[0];
++    expect(noProviderLabel(none)).toBe("不指定（本机默认）");
++    expect(noProviderLabel([])).toBe("不指定（本机默认）");
++    expect(noProviderLabel(null)).toBe("不指定（本机默认）");
++  });
++});
+diff --git a/frontend/src/lib/api/llm-providers.ts b/frontend/src/lib/api/llm-providers.ts
+index 32f67b8fa..b73aa63dd 100644
+--- a/frontend/src/lib/api/llm-providers.ts
++++ b/frontend/src/lib/api/llm-providers.ts
+@@ -195,6 +195,21 @@ export async function updateProvider(
+   );
+ }
+ 
++/** 兜底项固定文案（无默认用户）。 */
++export const NO_PROVIDER_FALLBACK_LABEL = "不指定（本机默认）";
++
++/**
++ * 供应商下拉「不指定」兜底项文案（2026-10-21-provider-default-ui-hint）：
++ * 用户设了默认供应商 → 「不指定（默认：{name}）」（claim 链会注入它）；
++ * 未设 / 列表未到位 → 现状「不指定（本机默认）」。单源收敛防四处文案漂移。
++ */
++export function noProviderLabel(
++  providers: LlmProviderRead[] | null | undefined,
++): string {
++  const def = (providers ?? []).find((p) => p.is_default);
++  return def ? `不指定（默认：${def.name}）` : NO_PROVIDER_FALLBACK_LABEL;
++}
++
+ /** 删除供应商（204）。 */
+ export async function deleteProvider(id: string): Promise<void> {
+   await apiFetch<void>(`/api/llm-providers/${encodeURIComponent(id)}`, {

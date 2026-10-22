@@ -11,7 +11,15 @@
 // 测试策略：复用 task-11-change-write.test 的 mock 范式（vi.mock spec-sync.js）。
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-vi.mock('../src/skill-manager.js', () => ({ linkSkillsToWorkdir: vi.fn(async () => ({ linked: 0, skipped: true })) }));
+vi.mock('../src/skill-manager.js', async (importOriginal) => {
+  // 2026-10-21-agent-profile-slim-default task-03：pruneSkillsToSubset 迁入本模块——
+  // passthrough 真实实现，网络面（link/sync）保持 mock。
+  const actual = await importOriginal<typeof import('../src/skill-manager.js')>();
+  return {
+    ...actual,
+    linkSkillsToWorkdir: vi.fn(async () => ({ linked: 0, skipped: true })),
+  };
+});
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';

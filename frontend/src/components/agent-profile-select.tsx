@@ -48,11 +48,11 @@ interface AgentProfileSelectProps {
   className?: string;
 }
 
-/** 构造 option label：「名 (供应商/模型) · 系统预置/可见范围」。 */
+/** 构造 option label：「名 · 系统预置/可见范围」。
+ * 2026-10-21-agent-profile-slim-default：档案瘦身后引擎/模型不再消费，label
+ * 随之去掉 (provider/model) 展示（避免暗示档案决定引擎）。 */
 const buildOptionLabel = (p: AgentProfileRead) => {
   const parts: string[] = [p.name];
-  // 供应商/模型提示（参考 prototype 画面②：「代码审查助手 (claude/sonnet · 只读)」）。
-  if (p.provider) parts.push(`(${p.provider}${p.model ? `/${p.model}` : ""})`);
   if (p.is_system_default) parts.push("· 系统预置");
   else parts.push(`· ${VISIBILITY_LABEL[p.visibility]}`);
   return parts.join(" ");

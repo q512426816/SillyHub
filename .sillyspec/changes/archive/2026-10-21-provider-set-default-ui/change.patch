@@ -1,0 +1,950 @@
+diff --git a/backend/app/modules/daemon/lease/provider_switch.py b/backend/app/modules/daemon/lease/provider_switch.py
+index f4959588a..25de53e3f 100644
+--- a/backend/app/modules/daemon/lease/provider_switch.py
++++ b/backend/app/modules/daemon/lease/provider_switch.py
+@@ -2,6 +2,12 @@
+ 
+ change 2026-08-06-provider-switch-live-session / task-04 / FR-06 / D-005@v1 / D-006@v1。
+ 
++⚠️ 2026-10-21-provider-set-default-ui D-002 起**无生产调用方**：原调用方
++``LlmProviderService.set_default`` / ``unset_default`` 的热切换推送按用户拍板移除
++（默认变更仅对新会话生效，运行中会话独立）。本模块与 WS daemon 消费链
++（``PROVIDER_CONFIG_CHANGED``）保留为既有基础设施（test_control_command_dispatch.py
++直测锚定），供后续会话级供应商热切换特性复用。
++
+ 落点选择（allowed_paths 两选一）：新建本模块级函数,而非并入 lease_service.py。
+ 理由：
+   - ``notify_provider_switch`` 是无状态的模块级 helper（``session`` 由调用方注入,
+diff --git a/backend/app/modules/daemon/tests/test_provider_switch_integration.py b/backend/app/modules/daemon/tests/test_provider_switch_integration.py
+index fdecb8d5b..ef1286c81 100644
+--- a/backend/app/modules/daemon/tests/test_provider_switch_integration.py
++++ b/backend/app/modules/daemon/tests/test_provider_switch_integration.py
+@@ -1,16 +1,17 @@
+ """task-11（2026-08-06-provider-switch-live-session）：端到端集成测试 4 场景。
+ 
+-照 design §5 + 蓝图 acceptance 验「运行中会话热切换」全链路（service → probe →
+-resolve_default_provider_config → notify_provider_switch → ws_hub.send_session_control）。
+-
+-四场景（蓝图 task-11.md）：
+-  1. **启动切换生效**：set_default(新供应商) → probe 通过 → 推 PROVIDER_CONFIG_CHANGED(新 config)
+-     → send_session_control 被调（新 config）；老默认互斥清成 False。
+-  2. **停止回退本机**：unset_default → 推 provider_config=None → daemon 据此回退本机 claude 凭证
+-     （D-004）。
+-  3. **生成中等待 turn 边界**：set_default 时 active + reconnecting session 均被推，
+-     affected_sessions 计数含生成中会话（前端文案区分）。daemon 侧 turn 边界已由 task-07
+-     单测覆盖，本场景后端侧只验推送 + 计数。
++2026-10-21-provider-set-default-ui D-002 起：set/unset-default 的热切换推送已移除
++（默认变更仅对新会话生效，运行中会话独立保持原供应商）。本文件场景一/二/三随之
++改写为「置位成功 + **零推送**（hub 无调用、affected_sessions=0）」的新契约锚定；
++notify_provider_switch / WS 消费链本身仍由 test_provider_switch.py /
++test_control_command_dispatch.py 直测锚定（基础设施保留）。
++
++四场景（改写后）：
++  1. **启动置位不推送**：set_default(新供应商) → probe 通过 → 互斥清老置新，
++     但**不推** PROVIDER_CONFIG_CHANGED（运行中会话不受影响）。
++  2. **停止置位不推送**：unset_default → 仅置本行 False，不推 null config；
++     新会话经 claim 回落本机（D-007）。
++  3. **多活跃会话在场同样零推送**：active + reconnecting session 均不被动。
+   4. **凭证失败保留原供应商**：set_default probe 失败 → is_default 不变 + 不推送 + 返回
+      switched=False+error（D-003 回滚，原供应商继续服务运行中会话）。
+ 
+@@ -18,9 +19,7 @@ mock 策略（不真实 WS / 不真实网络）：
+   - ``app.modules.llm_provider.probe.probe_provider`` → ``ProviderProbeResult(ok=True/False)``
+     （spike-01：探测形态未实测，网络全 mock）。
+   - ``app.modules.daemon.ws_hub.get_daemon_ws_hub`` → 录制型 FakeHub（capture
+-    send_session_control 入参 + 可控返回值）。
+-  - ``notify_provider_switch`` / ``resolve_default_provider_config`` **走真实路径**（含真实
+-    DB JOIN agent_sessions × daemon_task_leases、真实 cipher 解密 api_key），守护全链路联通。
++    send_session_control 入参 + 可控返回值）——断言零调用（D-002）。
+   - 用真实 ``CredentialCipher``（conftest 已注 ``SILLYSPEC_MASTER_KEY``）落 ``LlmProvider``
+     加密行，set_default 走完整加解密链路（不 mock cipher）。
+ 
+@@ -41,7 +40,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
+ from app.core.crypto import get_cipher
+ from app.modules.agent.model import AgentSession
+ from app.modules.daemon.model import DaemonRuntime, DaemonTaskLease
+-from app.modules.daemon.protocol import DAEMON_MSG_PROVIDER_CONFIG_CHANGED
+ from app.modules.llm_provider.model import LlmProvider
+ from app.modules.llm_provider.probe import ProviderProbeResult
+ from app.modules.llm_provider.service import LlmProviderService
+@@ -221,25 +219,24 @@ def _patch_probe(
+     monkeypatch.setattr("app.modules.llm_provider.probe.probe_provider", _fake_probe)
+ 
+ 
+-# ── 场景一：启动切换生效 ─────────────────────────────────────────────────────
++# ── 场景一：启动置位不推送（D-002）──────────────────────────────────────────
+ 
+ 
+ class TestProviderSwitchStartSwitchesActiveSession:
+-    """set_default(新供应商) → probe 通过 → 推 PROVIDER_CONFIG_CHANGED(新 config)。
++    """set_default(新供应商) → probe 通过 → 互斥置位成功，但**不推送**（D-002）。
+ 
+-    守护 design §5 Wave1 step 1-4 全链路联通：
+-      service.set_default → probe → _clear_sibling_defaults + is_default=True →
+-      resolve_default_provider_config（D-006 单一真相源，解密 api_key）→
+-      notify_provider_switch → ws_hub.send_session_control。
++    2026-10-21-provider-set-default-ui 前：本场景守护「set → notify → ws_hub 推送」
++    全链路；D-002 移除热切换后改写为锚定新契约——置位成功 + hub 零调用 +
++    affected_sessions=0（运行中会话独立保持原供应商，新会话经 claim 生效）。
+     """
+ 
+     @pytest.mark.asyncio
+-    async def test_start_pushes_new_config_and_clears_old_default(
++    async def test_start_sets_default_without_push_and_clears_old_default(
+         self, db_session: AsyncSession, monkeypatch: pytest.MonkeyPatch
+     ) -> None:
+         user_id = await _create_user(db_session, label="start")
+         rt = await _create_runtime(db_session, user_id, name_suffix="start")
+-        sess_id = await _create_interactive_session(db_session, runtime_id=rt.id, user_id=user_id)
++        await _create_interactive_session(db_session, runtime_id=rt.id, user_id=user_id)
+ 
+         # 老默认（将被互斥清成 False）+ 新候选（将被置成 True）
+         old_row = await _seed_provider_row(
+@@ -265,9 +262,9 @@ class TestProviderSwitchStartSwitchesActiveSession:
+         svc = LlmProviderService(db_session)
+         result = await svc.set_default(new_row.id, user_id)
+ 
+-        # 蓝图 acceptance：set_default 成功变更 + 推送计数 = active session 数
++        # D-002 新契约：置位成功但零推送（affected_sessions 恒 0）
+         assert result.switched is True
+-        assert result.affected_sessions == 1
++        assert result.affected_sessions == 0
+         assert result.error is None
+ 
+         # R-05 互斥：老默认被清，新候选置位
+@@ -276,39 +273,27 @@ class TestProviderSwitchStartSwitchesActiveSession:
+         assert old_row.is_default is False
+         assert new_row.is_default is True
+ 
+-        # 推送契约：msg_type + payload 内容
+-        assert len(hub.calls) == 1
+-        _daemon_id, msg_type, payload = hub.calls[0]
+-        assert msg_type == DAEMON_MSG_PROVIDER_CONFIG_CHANGED
+-        assert payload["session_id"] == str(sess_id)
+-
+-        # provider_config 含新供应商字段（D-006 单一真相源：base_url + 解密后明文 api_key）
+-        config = payload["provider_config"]
+-        assert config is not None
+-        assert config["base_url"] == "https://new.example.com"
+-        assert config["api_key"] == "sk-new-secret-5678"  # 解密后明文
+-        assert config["agent_kind"] == "claude"
+-        assert config["auth_field"] == "ANTHROPIC_AUTH_TOKEN"
+-        assert config["model"] == "claude-sonnet-4"
++        # D-002：不推送——运行中会话不受影响（hub 零调用）
++        assert hub.calls == []
+ 
+ 
+ # ── 场景二：停止回退本机 ──────────────────────────────────────────────────────
+ 
+ 
+ class TestProviderSwitchStopFallsBackToLocal:
+-    """unset_default → 推 provider_config=None → daemon 据此回退本机 claude 凭证。
++    """unset_default → 仅置本行 False，**不推送** null config（D-002）。
+ 
+-    守护 D-004@v1：unset_default 不探测、不清兄弟，仅置本行 False + 推 null config
+-    让 daemon reloadWithProvider(null) 回退宿主机本机 ~/.claude 路径。
++    新会话经 claim 链路回落本机（D-007）；运行中会话独立不变。原「推 null →
++    daemon reloadWithProvider(null) 回退本机」链路随热切换移除（2026-10-21）。
+     """
+ 
+     @pytest.mark.asyncio
+-    async def test_stop_pushes_null_config(
++    async def test_stop_clears_default_without_push(
+         self, db_session: AsyncSession, monkeypatch: pytest.MonkeyPatch
+     ) -> None:
+         user_id = await _create_user(db_session, label="stop")
+         rt = await _create_runtime(db_session, user_id, name_suffix="stop")
+-        sess_id = await _create_interactive_session(db_session, runtime_id=rt.id, user_id=user_id)
++        await _create_interactive_session(db_session, runtime_id=rt.id, user_id=user_id)
+ 
+         row = await _seed_provider_row(
+             db_session,
+@@ -325,52 +310,42 @@ class TestProviderSwitchStopFallsBackToLocal:
+         svc = LlmProviderService(db_session)
+         result = await svc.unset_default(row.id, user_id)
+ 
+-        # 蓝图 acceptance：switched 恒 True（unset 不探测、不会失败）
++        # D-002 新契约：置位成功但零推送
+         assert result.switched is True
+-        assert result.affected_sessions == 1
++        assert result.affected_sessions == 0
+         assert result.error is None
+ 
+         await db_session.refresh(row)
+         assert row.is_default is False
+ 
+-        # 推送契约：provider_config=None（daemon 回退本机）
+-        assert len(hub.calls) == 1
+-        _daemon_id, msg_type, payload = hub.calls[0]
+-        assert msg_type == DAEMON_MSG_PROVIDER_CONFIG_CHANGED
+-        assert payload["session_id"] == str(sess_id)
+-        assert payload["provider_config"] is None
++        # D-002：不推送 null config——运行中会话不变，新会话 claim 回落本机
++        assert hub.calls == []
+ 
+ 
+ # ── 场景三：生成中等待 turn 边界（后端侧验证） ────────────────────────────────
+ 
+ 
+ class TestProviderSwitchGeneratingSessionsPendingSwitch:
+-    """set_default 时 active + reconnecting session 均被推（affected_sessions 计数含生成中）。
+-
+-    蓝图 task-11 场景三说明：daemon 侧 turn 边界（pendingSwitch → _onResult reload）已由
+-    task-07 单测覆盖；本场景后端侧只验：
+-      1. active + reconnecting session 均命中 notify_provider_switch 查询；
+-      2. 每个 session 各推一条（payload.session_id 不同）；
+-      3. affected_sessions = 在线投递计数 = 2。
++    """多活跃会话在场时 set_default 同样**零推送**（D-002 改写）。
+ 
+-    「生成中」语义在 daemon 侧：daemon 收到 PROVIDER_CONFIG_CHANGED 后会 markPendingSwitch
+-    等当前 turn 收尾再 reload；后端不感知 turn 状态，统一以 session.status='active'
+-    表示「与 daemon 有握手、正在使用」。
++    原场景（2026-08-06 task-11）：active + reconnecting session 均被推送且计数=2。
++    热切换移除后改写为：多活跃会话存在也不被动——hub 零调用、affected_sessions=0，
++    运行中会话（含 reconnecting）独立保持原供应商。
+     """
+ 
+     @pytest.mark.asyncio
+-    async def test_multiple_active_sessions_all_pushed(
++    async def test_multiple_active_sessions_not_pushed(
+         self, db_session: AsyncSession, monkeypatch: pytest.MonkeyPatch
+     ) -> None:
+         user_id = await _create_user(db_session, label="gen")
+         rt = await _create_runtime(db_session, user_id, name_suffix="gen")
+ 
+         # 2 个 session 挂同一 runtime（同 daemon_id，按 (daemon_id, session_id) 各推一次）
+-        sess1 = await _create_interactive_session(
++        await _create_interactive_session(
+             db_session, runtime_id=rt.id, user_id=user_id, session_status="active"
+         )
+         # reconnecting 与 active 同等处理（daemon 仍持有 SessionState）
+-        sess2 = await _create_interactive_session(
++        await _create_interactive_session(
+             db_session, runtime_id=rt.id, user_id=user_id, session_status="reconnecting"
+         )
+ 
+@@ -389,21 +364,10 @@ class TestProviderSwitchGeneratingSessionsPendingSwitch:
+         svc = LlmProviderService(db_session)
+         result = await svc.set_default(new_row.id, user_id)
+ 
+-        # affected_sessions = 2（两个 session 各推一次，全部在线）
++        # D-002：多活跃会话在场同样零推送
+         assert result.switched is True
+-        assert result.affected_sessions == 2
+-
+-        # 推送契约：每个 session 各收到一条带自身 session_id 的推送
+-        assert len(hub.calls) == 2
+-        pushed_session_ids = {call[2]["session_id"] for call in hub.calls}
+-        assert pushed_session_ids == {str(sess1), str(sess2)}
+-
+-        for _did, msg_type, payload in hub.calls:
+-            assert msg_type == DAEMON_MSG_PROVIDER_CONFIG_CHANGED
+-            # 新 config 内容一致（同一 daemon_id 的两个 session 共用一份 provider_config）
+-            config = payload["provider_config"]
+-            assert config is not None
+-            assert config["base_url"] == "https://gen.example.com"
++        assert result.affected_sessions == 0
++        assert hub.calls == []
+ 
+ 
+ # ── 场景四：凭证失败保留原供应商 ──────────────────────────────────────────────
+diff --git a/backend/app/modules/llm_provider/router.py b/backend/app/modules/llm_provider/router.py
+index 5c4460b61..0aa6139bb 100644
+--- a/backend/app/modules/llm_provider/router.py
++++ b/backend/app/modules/llm_provider/router.py
+@@ -195,10 +195,10 @@ async def set_default_provider(
+ ) -> SetDefaultResult:
+     """置本行为默认供应商（cc-switch 式「启动」）。
+ 
+-    task-05（FR-07）：返回结构化 ``SetDefaultResult`` 三字段，供前端区分立即生效 /
+-    等待 turn 边界 / 凭证失败三种状态。service 层 ``set_default`` 已在 task-03 改造为
+-    返回 ``DefaultSwitchResult``（probe 凭证探测失败时 ``switched=False`` + ``error``
+-    不置位、不推送，原供应商继续服务运行中会话，D-003）。
++    task-05（FR-07）：返回结构化 ``SetDefaultResult`` 三字段。service 层 ``set_default``
++    在 task-03 改造为返回 ``DefaultSwitchResult``（probe 凭证探测失败时 ``switched=False``
++    + ``error`` 不置位，D-003）。2026-10-21-provider-set-default-ui D-002：热切换推送
++    已移除——仅置位，**只对新会话生效**，运行中会话不受影响（``affected_sessions`` 恒 0）。
+     """
+     service = LlmProviderService(session)
+     result = await service.set_default(_parse_id(provider_id), user.id)
+@@ -219,7 +219,9 @@ async def unset_default_provider(
+     """取消默认（cc-switch 式「停止」）。
+ 
+     对称 ``set-default``（「启动」）：取消本行默认。若取消后该用户×agent_kind 无任何
+-    默认供应商 → lease 不再下发 provider_config → daemon 回归本机凭证管理（D-007）。
++    默认供应商 → lease 不再下发 provider_config → daemon 回归本机凭证管理（D-007，
++    仅新会话生效；2026-10-21-provider-set-default-ui D-002 热切换推送已移除，运行中
++    会话不受影响）。
+ 
+     task-05（FR-07）：返回结构化 ``SetDefaultResult``（unset 不探测，恒
+     ``switched=True`` + ``error=None``）。
+diff --git a/backend/app/modules/llm_provider/schema.py b/backend/app/modules/llm_provider/schema.py
+index f40cbef0b..51956ce4f 100644
+--- a/backend/app/modules/llm_provider/schema.py
++++ b/backend/app/modules/llm_provider/schema.py
+@@ -292,18 +292,16 @@ class SetDefaultResult(BaseModel):
+     """``POST /api/llm-providers/{id}/set-default`` 与 ``unset-default`` 统一响应。
+ 
+     task-05（change 2026-08-06-provider-switch-live-session / FR-07）：把 task-03
+-    service 层 ``DefaultSwitchResult``（dataclass）透传给前端的响应 DTO，供前端区分
+-    立即生效（``switched=True`` + ``affected_sessions>0``）、等待 turn 边界
+-    （``switched=True`` + ``affected_sessions=0``）与凭证失败（``switched=False`` +
+-    ``error``）三种状态，对应不同 toast 文案（task-09）。
++    service 层 ``DefaultSwitchResult``（dataclass）透传给前端的响应 DTO。2026-10-21
++    provider-set-default-ui D-002 起热切换推送已移除——成功即置位（``switched=True``），
++    凭证探测失败不置位（``switched=False`` + ``error``），默认变更仅对新会话生效。
+ 
+     纯响应 DTO（无 ``from_attributes``）：router 显式按字段名从 ``DefaultSwitchResult``
+     构造，不直接 ``model_validate`` dataclass（风格对齐 ``UsageResult``）。
+ 
+     - ``switched``：本次 set/unset 是否成功变更 ``is_default``（set 凭证探测失败回滚
+       时为 ``False``；unset 恒为 ``True``）；
+-    - ``affected_sessions``：``notify_provider_switch`` 成功投递的 active interactive
+-      session 计数（D-001）；无 active session 或 notify 异常时为 ``0``；
++    - ``affected_sessions``：恒 ``0``（D-002 热切换移除；字段保留兼容旧客户端）；
+     - ``error``：set 凭证探测失败原因（仅 ``switched=False`` 时有值）；成功 / unset 为 ``None``。
+     """
+ 
+diff --git a/backend/app/modules/llm_provider/service.py b/backend/app/modules/llm_provider/service.py
+index 1ac603ef7..420e7352c 100644
+--- a/backend/app/modules/llm_provider/service.py
++++ b/backend/app/modules/llm_provider/service.py
+@@ -149,8 +149,8 @@ class DefaultSwitchResult:
+     字段：
+     - ``switched``：本次 set/unset 是否成功变更 ``is_default``。set 凭证探测失败
+       回滚时为 ``False``（D-003）；unset 恒为 ``True``（不探测，置 False 不会失败）。
+-    - ``affected_sessions``：``notify_provider_switch`` 成功投递的 active interactive
+-      session 计数（D-001）；无 active session 或 notify 异常时为 ``0``。
++    - ``affected_sessions``：恒 ``0``（2026-10-21-provider-set-default-ui D-002 热切换
++      推送移除；字段保留兼容）。
+     - ``error``：set 凭证探测失败原因（D-003）；成功 / unset 场景为 ``None``。
+     """
+ 
+@@ -317,20 +317,18 @@ class LlmProviderService:
+         task-03 改造（change 2026-08-06-provider-switch-live-session / D-001 / D-003）：
+ 
+         1. **凭证探测**：先 ``probe_provider``（task-01）轻量请求验 base_url + 解密
+-           api_key + auth_field + model；**失败**（``ok=False``）→ **不改 is_default、
+-           不推送**，返回结构化 ``error``（D-003 回滚：原供应商继续服务运行中会话，
+-           不破坏 G4）。事务内此时仅有 SELECT（``self.get``）无任何 write，回滚 = 不写入。
++           api_key + auth_field + model；**失败**（``ok=False``）→ **不改 is_default**，
++           返回结构化 ``error``（D-003 回滚：原默认继续服务）。事务内此时仅有
++           SELECT（``self.get``）无任何 write，回滚 = 不写入。
+         2. **互斥置位**：探测成功后事务内 ``_clear_sibling_defaults`` 清同
+            (user_id, 引擎∈集合) 兄弟行 + 置本行 True（R-05 并发互斥，原子 commit；D-003 全引擎生效）。
+-        3. **触发热切换**：调 ``resolve_default_provider_config``（task-02 D-006 单一
+-           真相源）构造新 config → ``notify_provider_switch``（task-04）向 active
+-           interactive session 推 ``PROVIDER_CONFIG_CHANGED``（D-001 WS 触发）。
+-           notify best-effort（D-001 / design §9）：失败仅日志告警、不阻塞 set 成功
+-           （DB 已 commit，is_default 已变更；热切换即时性降级，新会话仍走 claim 正常
+-           注入新默认）。
++
++        2026-10-21-provider-set-default-ui D-002：原 step-3 热切换推送（WS
++        ``PROVIDER_CONFIG_CHANGED``）已移除——set 仅置位，**只对新会话生效**，运行中
++        会话独立保持原供应商；``affected_sessions`` 恒 ``0``（字段保留兼容）。
+ 
+         返回 ``DefaultSwitchResult``（task-05 router 包装为 ``SetDefaultResult`` 响应）：
+-        - 成功：``switched=True``、``affected_sessions=notify 投递计数``、``error=None``；
++        - 成功：``switched=True``、``affected_sessions=0``、``error=None``；
+         - 凭证失败：``switched=False``、``affected_sessions=0``、``error=探测失败原因``。
+         """
+         row = await self.get(provider_id, user_id)
+@@ -399,14 +397,12 @@ class LlmProviderService:
+                 row, user_id=row.user_id, cipher=self._cipher
+             )
+ 
+-        # ── step 3: 触发热切换推送（D-001 / D-006 单一真相源 helper；按首个引擎
+-        # resolve 主 config，其余引擎的扇出归 notify 内部按会话引擎分配）──
+-        affected = await self._dispatch_provider_switch(
+-            row.user_id, row.agent_kinds[0], unset=False
+-        )
++        # ── step 3: 热切换推送已移除（2026-10-21-provider-set-default-ui D-002：
++        # 用户拍板 set/unset 仅置位、只对新会话生效，运行中会话独立保持原供应商）。
++        # notify_provider_switch / WS 消费链保留为无生产调用方的基础设施。──
+         return DefaultSwitchResult(
+             switched=True,
+-            affected_sessions=affected,
++            affected_sessions=0,
+             litellm_registered=litellm_registered,
+         )
+ 
+@@ -424,15 +420,13 @@ class LlmProviderService:
+         （``_clear_sibling_defaults`` 仅在置 True 时触发）。幂等：对本就 False 的行
+         取消是 no-op（不抛错）。
+ 
+-        置 False 后调 ``notify_provider_switch``（task-04）推 ``provider_config=None``，
+-        daemon 据此回退宿主机本机凭证管理（D-004 / design §5 Wave1 / spawn-env.ts 第 0
+-        层跳过）。notify best-effort（D-001）：失败仅日志告警、不阻塞 unset 成功。
+-
+-        若取消后该 (user_id, 引擎) 无任何默认 → lease 不再注入 provider_config
+-        → 新会话也回归本机（D-007 兼容策略）。
++        2026-10-21-provider-set-default-ui D-002：原尾部热切换推送（WS
++        ``PROVIDER_CONFIG_CHANGED`` 广播 None）已移除——unset 仅置位，运行中会话
++        独立保持原供应商；若取消后该 (user_id, 引擎) 无任何默认 → lease 不再注入
++        provider_config → 新会话回归本机（D-007 兼容策略）。
+ 
+         返回 ``DefaultSwitchResult``：``switched`` 恒 ``True``（unset 不探测、不会失败）、
+-        ``affected_sessions`` 投递计数、``error`` 恒 ``None``。
++        ``affected_sessions`` 恒 ``0``（字段保留兼容）、``error`` 恒 ``None``。
+         """
+         row = await self.get(provider_id, user_id)
+         row.is_default = False
+@@ -447,66 +441,9 @@ class LlmProviderService:
+ 
+             await litellm_client.unregister(litellm_client.litellm_model_name(row.user_id, row.id))
+ 
+-        # task-03 / D-004：触发热切换推送（provider_config=None → daemon 回退本机；
+-        # 停止场景 notify 对全部活跃会话广播 None（D-006：扇出只影响 set 场景）。
+-        affected = await self._dispatch_provider_switch(row.user_id, row.agent_kinds[0], unset=True)
+-        return DefaultSwitchResult(switched=True, affected_sessions=affected)
+-
+-    async def _dispatch_provider_switch(
+-        self,
+-        user_id: uuid.UUID,
+-        agent_kind: str,
+-        *,
+-        unset: bool,
+-    ) -> int:
+-        """构造 provider_config 并调 ``notify_provider_switch``（best-effort / D-001）。
+-
+-        task-03 / D-001 / D-006：set/unset_default 成功变更 ``is_default`` 后调用。
+-
+-        - ``unset=False``（set 场景）：经 ``resolve_default_provider_config``（task-02）
+-          查刚置位的默认 provider 并解密构造 9 字段中性 config dict（D-006 单一真相源，
+-          与 claim 路径共用，避免两处各写一份）。
+-        - ``unset=True``（unset 场景）：直接传 ``None``，daemon 据此回退本机（D-004）。
+-
+-        best-effort（D-001 / design §9）：``notify_provider_switch`` 内部已对单 session
+-        推送异常做 try/except（仅告警）；此处再包一层防御 resolve/notify 整体异常
+-        （如 DB 连接瞬断、context lazy import 失败）——任何异常均返回 ``0``，不阻塞
+-        set/unset 成功。set 已 commit、is_default 已持久化，notify 失败只影响热切换
+-        即时性（运行中会话仍用旧 env 直到自然 turn 边界后下次 claim / 重启）。
+-
+-        Args:
+-            user_id: LlmProvider.user_id（owner 级，D-008）。
+-            agent_kind: 引擎值（多引擎行由调用方逐引擎循环扇出，D-006；单值时代即本行种类）。
+-            unset: True = unset_default 推 None；False = set_default 推 resolve 出的新 config。
+-
+-        Returns:
+-            ``notify_provider_switch`` 成功投递的 active interactive session 计数；
+-            异常或无 active session 时返回 ``0``。
+-        """
+-        # lazy import：context.py / provider_switch.py 顶层导入较重（agent / daemon /
+-        # workspace 多模块），且与 service 无互循环；仍函数内导入延迟首次加载并隔离
+-        # 测试（patch ``provider_switch.notify_provider_switch`` 源模块生效）。
+-        from app.modules.daemon.lease.context import resolve_default_provider_config
+-        from app.modules.daemon.lease.provider_switch import notify_provider_switch
+-
+-        try:
+-            provider_config: dict | None = (
+-                None
+-                if unset
+-                else await resolve_default_provider_config(self._session, user_id, agent_kind)
+-            )
+-            return await notify_provider_switch(self._session, user_id, provider_config)
+-        except Exception as exc:
+-            # best-effort（D-001 / design §9）：notify 整体异常不阻塞 set/unset 成功。
+-            # 明文 api_key / provider_config 内容不进日志（R-02 / NFR-02，仅记 error 类型）。
+-            log.warning(
+-                "llm_provider.provider_switch_notify_failed",
+-                user_id=str(user_id),
+-                agent_kind=agent_kind,
+-                unset=unset,
+-                error=str(exc),
+-            )
+-            return 0
++        # 热切换推送已移除（2026-10-21-provider-set-default-ui D-002，对称 set_default）：
++        # 取消默认仅置位，运行中会话不变，新会话经 claim 回落本机。
++        return DefaultSwitchResult(switched=True, affected_sessions=0)
+ 
+     # ── Helpers ───────────────────────────────────────────────────────
+ 
+diff --git a/backend/app/modules/llm_provider/tests/test_llm_provider.py b/backend/app/modules/llm_provider/tests/test_llm_provider.py
+index 51820be4e..a333bb66d 100644
+--- a/backend/app/modules/llm_provider/tests/test_llm_provider.py
++++ b/backend/app/modules/llm_provider/tests/test_llm_provider.py
+@@ -110,13 +110,14 @@ async def _seed_provider_row(
+ @pytest.fixture
+ def mock_probe_notify(monkeypatch: pytest.MonkeyPatch) -> None:
+     """task-03（change 2026-08-06-provider-switch-live-session）：``set_default`` /
+-    ``unset_default`` 现调用真实 ``probe_provider``（HTTP 网络）+ ``notify_provider_switch``
+-    （DB JOIN ``agent_sessions`` / ``daemon_task_leases`` + WS 推送）。
++    ``unset_default`` 调用真实 ``probe_provider``（HTTP 网络）；notify 推送已在
++    2026-10-21-provider-set-default-ui D-002 移除（notify patch 保留为过渡保险，真实
++    防回归锚定在 test_set_default_success_does_not_dispatch_notify 的 spy 断言与
++    test_provider_switch_integration.py 的 hub 零调用断言）。
+ 
+     现有 ``is_default`` 互斥测试只断言 DB 行状态（``is_default`` 是否正确互斥清/置），
+-    与热切换副作用解耦 —— 真实网络会 timeout/fail（probe 返 ``ok=False`` → set_default
+-    回滚不置位 → 互斥断言失败），且 SQLite 测试库无 ``agent_sessions`` 表（notify JOIN
+-    报 ``no such table``）。本夹具 patch 源模块替换为 no-op AsyncMock，仅作用于显式声明
++    与探测副作用解耦 —— 真实网络会 timeout/fail（probe 返 ``ok=False`` → set_default
++    回滚不置位 → 互斥断言失败）。本夹具 patch 源模块替换为 no-op AsyncMock，仅作用于显式声明
+     该夹具的测试（其它测试不受影响）。
+ 
+     patch 目标是**源模块**而非 ``service.probe_provider``：因 probe.py 顶层
+@@ -616,8 +617,10 @@ class TestIsDefaultMutex:
+         b = await svc.create(user_id, _create_payload(name="b"))  # default=False
+ 
+         result = await svc.unset_default(a.id, user_id)
+-        # task-03：返回 DefaultSwitchResult（unset 不探测，恒 switched=True）
++        # task-03：返回 DefaultSwitchResult（unset 不探测，恒 switched=True）；
++        # D-002：热切换推送已移除，affected_sessions 恒 0。
+         assert result.switched is True
++        assert result.affected_sessions == 0
+         assert result.error is None
+ 
+         await db_session.refresh(a)
+@@ -964,14 +967,14 @@ class TestSetDefaultCredentialsRollback:
+         assert notify_calls == []
+ 
+     @pytest.mark.asyncio
+-    async def test_set_default_success_dispatches_notify(
++    async def test_set_default_success_does_not_dispatch_notify(
+         self, db_session: AsyncSession, monkeypatch: pytest.MonkeyPatch
+     ) -> None:
+-        """对照：probe ok=True → notify 被调一次（正向链路,锁定 rollback 测试组的行为基线）。
++        """2026-10-21-provider-set-default-ui D-002：set 成功**不**推送热切换。
+ 
+-        与上面 rollback 测试对照：探测成功时 service 必经 step2 → step3,notify 必被调,
+-        参数为 (session, user_id, provider_config dict)。这把「未调 notify」断言锁死
+-        为「rollback 真未调」而非「mock 装错」。
++        probe ok=True → 置位成功（switched=True）但 notify_provider_switch 不被调、
++        ``affected_sessions == 0``——默认变更仅对新会话生效，运行中会话不受影响。
++        （原 test_set_default_success_dispatches_notify 断言相反旧行为，随 D-002 改写。）
+         """
+         user_id = await _create_user(db_session, label="a")
+         svc = LlmProviderService(db_session)
+@@ -987,7 +990,7 @@ class TestSetDefaultCredentialsRollback:
+ 
+         async def _notify_spy(*args: object, **kwargs: object) -> int:
+             notify_calls.append((args, kwargs))
+-            return 2  # 模拟 2 条 active session 投递成功
++            return 2  # 若被误调，返回非 0 让 affected 断言也失败
+ 
+         monkeypatch.setattr("app.modules.llm_provider.probe.probe_provider", _probe_ok)
+         monkeypatch.setattr(
+@@ -997,18 +1000,16 @@ class TestSetDefaultCredentialsRollback:
+ 
+         result = await svc.set_default(a.id, user_id)
+ 
+-        # 成功：switched=True,affected_sessions 透传 notify 返回值。
+         assert result.switched is True
+-        assert result.affected_sessions == 2
++        assert result.affected_sessions == 0
+         assert result.error is None
+-        # notify 被调一次,参数含 user_id + provider_config dict（非 None）。
+-        assert len(notify_calls) == 1
+-        args, _kwargs = notify_calls[0]
+-        # (session, user_id, provider_config) 位置参数。
+-        provider_config = args[2]
+-        assert isinstance(provider_config, dict)
+-        assert "api_key" in provider_config
+-        assert provider_config["agent_kind"] == "claude"
++        assert notify_calls == []  # 热切换推送已移除（D-002）
++
++        # unset 对称：取消默认同样不推送。
++        result_unset = await svc.unset_default(a.id, user_id)
++        assert result_unset.switched is True
++        assert result_unset.affected_sessions == 0
++        assert notify_calls == []
+ 
+ 
+ # ── task-09 openai 联动 LiteLLM（D-003 / R-09 best-effort / R-03 model_name）──────────
+diff --git a/frontend/src/components/llm-providers/__tests__/llm-provider-list.test.tsx b/frontend/src/components/llm-providers/__tests__/llm-provider-list.test.tsx
+index e04ed7a56..366a6c489 100644
+--- a/frontend/src/components/llm-providers/__tests__/llm-provider-list.test.tsx
++++ b/frontend/src/components/llm-providers/__tests__/llm-provider-list.test.tsx
+@@ -5,7 +5,8 @@
+  *   1. 进页面自动对可查用量的供应商查一次（UsageFooter 挂载即查），不可查的不查；
+  *   2. 💰 可查用量徽标仅出现在可查供应商行；
+  *   3. 不可查供应商行展示中性文案「该供应商暂不支持余额查询」；
+- *   4. ql-20260820-006：启动/停止（set-default）入口已移除，列表只做纯 CRUD。
++ *   4. 2026-10-21-provider-set-default-ui：恢复「设为默认/取消默认」入口（默认行
++ *      徽标 + 对称操作 + 探测失败不刷新）；旧「启动/停止」文案不再出现。
+  *
+  * vi.mock 整个 api 模块（listProviders / queryUsage / detectUsageProvider 等），不打真实
+  * 网络。LlmProviderSection 用 useNotify → 需在 <AntdProviders>（含 antd <App>）内渲染。
+@@ -14,7 +15,7 @@
+  * 自动查使独立按钮冗余）—— 见 usage-footer.test.tsx 的 keep-last-good 用例覆盖手动刷新。
+  */
+ import { beforeEach, describe, it, expect, vi } from "vitest";
+-import { render, screen, waitFor } from "@testing-library/react";
++import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+ 
+ import { AntdProviders } from "@/components/antd-providers";
+ import { LlmProviderSection } from "@/components/llm-providers/llm-provider-list";
+@@ -26,6 +27,8 @@ vi.mock("@/lib/api/llm-providers", () => ({
+   createProvider: vi.fn(),
+   deleteProvider: vi.fn(),
+   updateProvider: vi.fn(),
++  setDefaultProvider: vi.fn(),
++  unsetDefaultProvider: vi.fn(),
+   formToCreate: vi.fn(),
+   formToUpdate: vi.fn(),
+ }));
+@@ -34,12 +37,16 @@ import {
+   listProviders,
+   queryUsage,
+   detectUsageProvider,
++  setDefaultProvider,
++  unsetDefaultProvider,
+   type LlmProviderRead,
+ } from "@/lib/api/llm-providers";
+ 
+ const mockedList = listProviders as ReturnType<typeof vi.fn>;
+ const mockedQueryUsage = queryUsage as ReturnType<typeof vi.fn>;
+ const mockedDetect = detectUsageProvider as ReturnType<typeof vi.fn>;
++const mockedSetDefault = setDefaultProvider as ReturnType<typeof vi.fn>;
++const mockedUnsetDefault = unsetDefaultProvider as ReturnType<typeof vi.fn>;
+ 
+ const baseProvider = (over: Partial<LlmProviderRead>): LlmProviderRead => ({
+   id: "p-x",
+@@ -125,7 +132,7 @@ describe("LlmProviderSection — 用量挂载 + 自动查（task-09 / D-006）",
+     ).toBeInTheDocument();
+   });
+ 
+-  it("列表行不再渲染启动/停止按钮（ql-20260820-006，供应商生效改 /sessions 会话级选择）", async () => {
++  it("列表行不再渲染启动/停止按钮（2026-10-21 恢复的入口统一叫「设为默认/取消默认」）", async () => {
+     render(
+       <AntdProviders>
+         <LlmProviderSection />
+@@ -135,6 +142,107 @@ describe("LlmProviderSection — 用量挂载 + 自动查（task-09 / D-006）",
+     await screen.findByText("DeepSeek 测试");
+     expect(screen.queryByRole("button", { name: /启动/ })).toBeNull();
+     expect(screen.queryByRole("button", { name: /停止/ })).toBeNull();
++    // 新入口（FR-01）：非默认行渲染「设为默认」。
++    expect(screen.getAllByRole("button", { name: "设为默认" })).toHaveLength(2);
++  });
++});
++
++// 2026-10-21-provider-set-default-ui：设为默认/取消默认交互（FR-01/02）。
++describe("LlmProviderSection — 设为默认 / 取消默认（2026-10-21-provider-set-default-ui）", () => {
++  const DEFAULTED = baseProvider({
++    id: "p-default",
++    name: "默认供应商",
++    base_url: "https://api.deepseek.com/anthropic",
++    is_default: true,
++  });
++  const PLAIN = baseProvider({
++    id: "p-plain",
++    name: "普通供应商",
++    base_url: "https://api.kimi.com/anthropic",
++    is_default: false,
++  });
++
++  beforeEach(() => {
++    vi.clearAllMocks();
++    mockedList.mockResolvedValue([DEFAULTED, PLAIN]);
++    mockedDetect.mockReturnValue(null);
++    mockedQueryUsage.mockResolvedValue({ success: true, data: [] });
++  });
++
++  it("默认行显示「默认」徽标与「取消默认」，非默认行显示「设为默认」（FR-01 场景）", async () => {
++    render(
++      <AntdProviders>
++        <LlmProviderSection />
++      </AntdProviders>,
++    );
++
++    await screen.findByText("默认供应商");
++    expect(screen.getByText("默认")).toBeInTheDocument();
++    expect(screen.getAllByRole("button", { name: "取消默认" })).toHaveLength(1);
++    expect(screen.getAllByRole("button", { name: "设为默认" })).toHaveLength(1);
++  });
++
++  it("设为默认成功 → 调 API + toast「已设为默认，新会话生效」+ 刷新列表（FR-01 主路径）", async () => {
++    mockedSetDefault.mockResolvedValue({
++      switched: true,
++      affected_sessions: 0,
++      error: null,
++    });
++    render(
++      <AntdProviders>
++        <LlmProviderSection />
++      </AntdProviders>,
++    );
++
++    await screen.findByText("普通供应商");
++    fireEvent.click(screen.getByRole("button", { name: "设为默认" }));
++
++    await waitFor(() => expect(mockedSetDefault).toHaveBeenCalledWith("p-plain"));
++    expect(await screen.findByText("已设为默认，新会话生效")).toBeInTheDocument();
++    // 操作后 reload 列表（初始 load + 操作后共 ≥2 次）。
++    await waitFor(() => expect(mockedList.mock.calls.length).toBeGreaterThanOrEqual(2));
++  });
++
++  it("凭证探测失败（switched=false）→ toast 后端 error 且不刷新（FR-01 探测失败场景）", async () => {
++    mockedSetDefault.mockResolvedValue({
++      switched: false,
++      affected_sessions: 0,
++      error: "凭证无效：401",
++    });
++    render(
++      <AntdProviders>
++        <LlmProviderSection />
++      </AntdProviders>,
++    );
++
++    await screen.findByText("普通供应商");
++    const callsBefore = mockedList.mock.calls.length;
++    fireEvent.click(screen.getByRole("button", { name: "设为默认" }));
++
++    expect(await screen.findByText(/凭证无效：401/)).toBeInTheDocument();
++    // 状态不变：不 reload（探测失败未置位）。
++    expect(mockedList.mock.calls.length).toBe(callsBefore);
++    expect(screen.queryByText("已设为默认，新会话生效")).toBeNull();
++  });
++
++  it("取消默认成功 → 调 API + toast + 刷新（FR-01 取消场景）", async () => {
++    mockedUnsetDefault.mockResolvedValue({
++      switched: true,
++      affected_sessions: 0,
++      error: null,
++    });
++    render(
++      <AntdProviders>
++        <LlmProviderSection />
++      </AntdProviders>,
++    );
++
++    await screen.findByText("默认供应商");
++    fireEvent.click(screen.getByRole("button", { name: "取消默认" }));
++
++    await waitFor(() => expect(mockedUnsetDefault).toHaveBeenCalledWith("p-default"));
++    expect(await screen.findByText(/已取消默认/)).toBeInTheDocument();
++    await waitFor(() => expect(mockedList.mock.calls.length).toBeGreaterThanOrEqual(2));
+   });
+ });
+ 
+diff --git a/frontend/src/components/llm-providers/llm-provider-list.tsx b/frontend/src/components/llm-providers/llm-provider-list.tsx
+index e045f180b..03866417f 100644
+--- a/frontend/src/components/llm-providers/llm-provider-list.tsx
++++ b/frontend/src/components/llm-providers/llm-provider-list.tsx
+@@ -15,6 +15,8 @@ import {
+   formToCreate,
+   formToUpdate,
+   listProviders,
++  setDefaultProvider,
++  unsetDefaultProvider,
+   updateProvider,
+   type LlmProviderFormValues,
+   type LlmProviderRead,
+@@ -27,11 +29,14 @@ import { UsageFooter } from "./usage-footer";
+  * 「我的供应商」区块（task-11）。
+  *
+  * 列表 + 新建/编辑表单 + 删除，配置跟随账号、所有工作空间通用（D-002）。
+- * 供应商生效方式为 /sessions 会话级选择（session_llm_provider_id），本页只做
+- * 纯 CRUD 管理，不再有全局启动/停止（set-default）概念（ql-20260820-006）。
++ * 供应商生效方式：/sessions 会话级显式选择（session_llm_provider_id）优先；
++ * 未显式选择时经 claim 链路注入本页设置的默认供应商（2026-10-21-provider-set-default-ui
++ * 恢复「设为默认」入口——2026-08-20 ql-20260820-006 删除后 is_default 长期无 UI 可设，
++ * 会话默认恒落本机凭证）。默认变更仅对新会话生效（D-002：后端热切换已移除，
++ * 运行中会话独立）。
+  *
+  * 状态机：list ↔ form（create/edit）。form 打开时只渲染表单，取消回列表。
+- * 操作后即时 reload 列表（删除/新建/编辑均刷新）。
++ * 操作后即时 reload 列表（删除/新建/编辑/设默认均刷新；探测失败不刷新）。
+  */
+ 
+ /** 角色显示顺序，用于模型摘要。 */
+@@ -68,6 +73,7 @@ export function LlmProviderSection() {
+   const [error, setError] = useState<string | null>(null);
+   const [formMode, setFormMode] = useState<FormMode>(null);
+   const [submitting, setSubmitting] = useState(false);
++  const [switchingId, setSwitchingId] = useState<string | null>(null);
+ 
+   const load = useCallback(async () => {
+     setLoading(true);
+@@ -104,6 +110,42 @@ export function LlmProviderSection() {
+     }
+   };
+ 
++  const handleSetDefault = async (p: LlmProviderRead) => {
++    setSwitchingId(p.id);
++    try {
++      const result = await setDefaultProvider(p.id);
++      if (!result.switched) {
++        // 后端凭证探测失败：未置位，列表状态不变（FR-01 场景）。
++        // errMessage 只认 Error 实例，包一层让后端中文 error 原样透出。
++        notify.error(new Error(result.error ?? "凭证探测失败，未设为默认"));
++        return;
++      }
++      if (result.litellm_registered === false) {
++        // openai 格式 LiteLLM 网关注册失败（后端 task-09 既有降级契约）。
++        notify.error("网关注册失败，Claude Code 暂不可用，请重试或联系管理员");
++      }
++      notify.success("已设为默认，新会话生效");
++      await load();
++    } catch (err) {
++      notify.error(err, "设为默认失败");
++    } finally {
++      setSwitchingId(null);
++    }
++  };
++
++  const handleUnsetDefault = async (p: LlmProviderRead) => {
++    setSwitchingId(p.id);
++    try {
++      await unsetDefaultProvider(p.id);
++      notify.success("已取消默认，新会话起回落默认链");
++      await load();
++    } catch (err) {
++      notify.error(err, "取消默认失败");
++    } finally {
++      setSwitchingId(null);
++    }
++  };
++
+   const handleDelete = async (p: LlmProviderRead) => {
+     if (!confirm(`确定删除供应商「${p.name}」？此操作不可恢复。`)) return;
+     try {
+@@ -182,7 +224,8 @@ export function LlmProviderSection() {
+     >
+       <p className="mb-3 text-[11px] text-muted-foreground">
+         管理你用于 Claude Code 的 LLM 供应商。配置跟随你的账号，<b>所有工作空间通用</b>；
+-        在 <b>/sessions 新建会话时选择</b>哪个供应商生效。
++        在 <b>/sessions 新建会话时选择</b>哪个供应商生效，未选择时用你在此
++        <b>设为默认</b>的供应商（未设默认走本机凭证）。设默认只对新会话生效，运行中的会话不变。
+         填好 API Key 和请求地址就能用；模型映射等高级项默认折叠，用中转站时再展开。
+       </p>
+ 
+@@ -223,6 +266,9 @@ export function LlmProviderSection() {
+               >
+                 <div className="flex flex-wrap items-center gap-2">
+                   <span className="text-sm font-medium">{p.name}</span>
++                  {p.is_default && (
++                    <Badge title="未显式选供应商的会话默认使用它（仅新会话生效）">默认</Badge>
++                  )}
+                   {(p.agent_kinds ?? []).map((k) => (
+                     <Badge key={k} variant="warning">
+                       {k}
+@@ -239,6 +285,27 @@ export function LlmProviderSection() {
+                     </Badge>
+                   )}
+                   <div className="ml-auto flex items-center gap-1.5">
++                    {p.is_default ? (
++                      <Button
++                        variant="outline"
++                        size="sm"
++                        className="h-7 text-[11px]"
++                        disabled={switchingId === p.id}
++                        onClick={() => void handleUnsetDefault(p)}
++                      >
++                        取消默认
++                      </Button>
++                    ) : (
++                      <Button
++                        variant="outline"
++                        size="sm"
++                        className="h-7 text-[11px]"
++                        disabled={switchingId === p.id}
++                        onClick={() => void handleSetDefault(p)}
++                      >
++                        设为默认
++                      </Button>
++                    )}
+                     <Button
+                       variant="outline"
+                       size="sm"
+diff --git a/frontend/src/lib/api/__tests__/llm-providers.test.ts b/frontend/src/lib/api/__tests__/llm-providers.test.ts
+index 2652bddf6..75d3e2798 100644
+--- a/frontend/src/lib/api/__tests__/llm-providers.test.ts
++++ b/frontend/src/lib/api/__tests__/llm-providers.test.ts
+@@ -2,8 +2,8 @@
+  * task-12：lib/api/llm-providers 单测。
+  *
+  * 覆盖：
+- *   1. 四个 API 方法签名（method + path）与后端 router 一一对应
+- *      （set/unset-default 已随 ql-20260820-006 移除）。
++ *   1. API 方法签名（method + path）与后端 router 一一对应
++ *      （set/unset-default 2026-10-21-provider-set-default-ui 恢复）。
+  *   2. formToCreate：表单值 → POST body 映射（角色映射嵌套 / extra_env 键值对）。
+  *   3. formToUpdate：api_key 留空 → **不出现在 PATCH body**（铁律）；有值则携带。
+  *   4. cleanRoleMappings：丢弃空行、one_m 仅随 model 携带。
+@@ -24,6 +24,8 @@ import {
+   formToCreate,
+   formToUpdate,
+   listProviders,
++  setDefaultProvider,
++  unsetDefaultProvider,
+   updateProvider,
+   type LlmProviderFormValues,
+ } from "@/lib/api/llm-providers";
+@@ -145,10 +147,28 @@ describe("llm-providers API — method + path", () => {
+     expect(h.lastUrl()).toContain("/api/llm-providers/p-1");
+   });
+ 
+-  it("id 含特殊字符走 encodeURIComponent（不破坏路径）", async () => {
+-    const h = mockFetch({ status: 204, body: null });
+-    await deleteProvider("p 1/2");
+-    expect(h.lastUrl()).toContain("/api/llm-providers/p%201%2F2");
++  // 2026-10-21-provider-set-default-ui：set/unset-default 封装恢复（后端端点健在）。
++  it("setDefaultProvider → POST /api/llm-providers/{id}/set-default，解析 SetDefaultResult", async () => {
++    const h = mockFetch({
++      status: 200,
++      body: { switched: true, affected_sessions: 0, error: null, litellm_registered: null },
++    });
++    const result = await setDefaultProvider("p-1");
++    expect(h.lastMethod()).toBe("POST");
++    expect(h.lastUrl()).toContain("/api/llm-providers/p-1/set-default");
++    expect(result).toEqual({ switched: true, affected_sessions: 0, error: null, litellm_registered: null });
++  });
++
++  it("unsetDefaultProvider → POST /api/llm-providers/{id}/unset-default，解析探测失败态", async () => {
++    const h = mockFetch({
++      status: 200,
++      body: { switched: false, affected_sessions: 0, error: "凭证无效" },
++    });
++    const result = await unsetDefaultProvider("p-2");
++    expect(h.lastMethod()).toBe("POST");
++    expect(h.lastUrl()).toContain("/api/llm-providers/p-2/unset-default");
++    expect(result.switched).toBe(false);
++    expect(result.error).toBe("凭证无效");
+   });
+ });
+ 
+diff --git a/frontend/src/lib/api/llm-providers.ts b/frontend/src/lib/api/llm-providers.ts
+index a1d40b477..32f67b8fa 100644
+--- a/frontend/src/lib/api/llm-providers.ts
++++ b/frontend/src/lib/api/llm-providers.ts
+@@ -202,6 +202,39 @@ export async function deleteProvider(id: string): Promise<void> {
+   });
+ }
+ 
++// ── set-default / unset-default（2026-10-21-provider-set-default-ui 加回）────
++// 2026-08-20（ql-20260820-006）随「启动/停止」UI 一度移除；后端端点与 claim 默认
++// 注入链始终健在，本组恢复入口供列表「设为默认/取消默认」操作。D-002：后端已收敛
++// 为仅置位（热切换推送移除）——默认变更只对新会话生效，affected_sessions 恒 0。
++
++/** set-default / unset-default 统一响应（对齐后端 schema.py `SetDefaultResult`）。 */
++export interface SetDefaultResult {
++  /** 本次 set/unset 是否成功变更 is_default（set 凭证探测失败为 false）。 */
++  switched: boolean;
++  /** 恒 0（D-002 热切换移除；字段保留兼容）。 */
++  affected_sessions: number;
++  /** 凭证探测失败原因（仅 switched=false 时有值）。 */
++  error: string | null;
++  /** openai 格式联动 LiteLLM 注册结果；anthropic / 失败 / unset 场景为 null。 */
++  litellm_registered?: boolean | null;
++}
++
++/** 置本行为默认供应商（探测凭证失败时后端不置位，switched=false + error）。 */
++export async function setDefaultProvider(id: string): Promise<SetDefaultResult> {
++  return apiFetch<SetDefaultResult>(
++    `/api/llm-providers/${encodeURIComponent(id)}/set-default`,
++    { method: "POST" },
++  );
++}
++
++/** 取消本行默认（不探测，恒 switched=true）。 */
++export async function unsetDefaultProvider(id: string): Promise<SetDefaultResult> {
++  return apiFetch<SetDefaultResult>(
++    `/api/llm-providers/${encodeURIComponent(id)}/unset-default`,
++    { method: "POST" },
++  );
++}
++
+ // ── fetch-models（task-11 / D-001/D-006）──────────────────────────────────
+ 
+ /**

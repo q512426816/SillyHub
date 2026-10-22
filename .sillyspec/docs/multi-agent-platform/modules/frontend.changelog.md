@@ -139,6 +139,12 @@
 | 2026-10-20 | 2026-10-20-pill-dock-left-align | 悬浮 pill 停靠组贴左吸附时内容改左对齐 |
 | 2026-10-20 | 2026-10-20-pill-dock-drag-align-keep | 悬浮 pill 停靠组拖拽过程中保持拖拽前对齐方向 |
 | 2026-10-20 | 2026-10-20-conflict-platform-archive | 冲突对比平台留档快照自足回退 |
+| 2026-10-21 | 2026-10-21-provider-set-default-ui | 供应商页复活设为默认入口 |
+| 2026-10-21 | 2026-10-21-agent-profile-slim-default | 档案瘦身重定位为人格加技能清单并支持用户默认档案 |
+| 2026-10-21 | 2026-10-21-provider-default-ui-hint | 供应商未选态显示对齐用户默认供应商 |
+| 2026-10-21 | 2026-10-21-profile-default-prehint | 预会话态档案显示对齐用户默认档案 |
+| 2026-10-22 | 2026-10-22-agent-profile-modal-restyle | 智能体档案弹窗重构与技能全选 |
+| 2026-10-22 | 2026-10-22-agent-profile-edit-refresh | 档案编辑后全局页列表自动刷新修复 |
 | 2026-10-20 | 2026-10-20-session-error-visibility | 会话页失败轮错误信息不可见修复 |
 | 2026-10-20 | 2026-10-20-codex-requires-openai-auth | 腾讯云平台 codex 会话选直连（anthropic 形态）供应商时稳定断流（stream dis… |
 | 2026-10-20 | 2026-10-20-preset-engine-endpoint | 新建供应商点「OpenCode Go」预设自动填 https://opencode.ai/zen/g… |

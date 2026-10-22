@@ -13,3 +13,4 @@ created_at: 2026-08-29 22:56:30
 - `AuthService._revoke_session_family(user_id, family)`：超 grace 复用旧 token 只吊销命中族（含其后代），同用户异族不牵连；内部 commit（D-008 执行期裁决——异常路径 rollback 语义必需）。`revoke_all_user_sessions` 用途收窄（复用检测不再调用）。
 - `auth_refresh_grace_seconds` 默认 60→300（`backend/app/core/config.py`；D-003@v1）。
 - 用例：tests/modules/auth/test_refresh_family_revocation.py（新，4 用例：族隔离/grace 继承/legacy NULL 兜底/新族）+ test_refresh_grace_window.py 用例 2 改族断言、用例 3 过期 xfail 清偿。
+- 2026-10-21-agent-profile-slim-default | 档案瘦身重定位为人格加技能清单并支持用户默认档案

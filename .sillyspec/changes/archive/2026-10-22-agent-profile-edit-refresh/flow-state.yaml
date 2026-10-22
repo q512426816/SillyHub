@@ -1,0 +1,46 @@
+tier: thin
+legacy_fallback: false
+substeps:
+  artifacts: done
+  ledger: done
+  patch: done
+  review: done
+  probes: done
+  distill: done
+  archive: done
+  events: done
+born_face: thin
+with_tasks: false
+review_force: null
+input: >-
+  档案编辑后全局页列表自动刷新修复
+
+
+  动机与背景：用户实测 /agent-profiles（全局卡片墙）编辑档案保存后列表不刷新。根因：全局页数据在 mineList 桶（agentProfileQueryKeys.mineList），而表单使用的
+  useCreateAgentProfile/useUpdateAgentProfile 成功后只 invalidate workspaceList(wid) 桶——复制/删除当年已在页面层用裸 fetch+手动失效绕过（page.tsx
+  头注释明载），新建/编辑漏掉。既有缺口，非弹窗重构引入。
+
+
+  成功标准：
+
+  - useCreateAgentProfile/useUpdateAgentProfile 成功后必须同时 invalidate workspaceList(wid) 与 mineList 两桶（全局页编辑/新建保存后卡片墙立即刷新）
+
+  - 工作区内页（workspaceList 桶）刷新行为不回归
+
+  - lib 层新增 hook 失效行为单测（断言两桶 key 均被失效）
+autopilot: false
+prestage_ack: false
+baseline_commit: 6e0db90610c832454613fc442b1f5e2cfba25eee
+updatedAt: '2026-10-22T03:21:01.237Z'
+baseline_sha256: 35166c09afbb17a736cd191f920aa9a6330a3abddafcbd5cbc1fe9f5925e6366
+spec_approved: true
+spec_approved_at: '2026-10-22T02:37:14.562Z'
+spec_approved_by: zcode-apimodal-restyle
+spec_approved_channel: user-confirmed
+spec_attested_by: zcode-apimodal-restyle
+batch_ticked: true
+gate_summary: >-
+  test: passed ← module[]+deps(jsx2)+fr(1)（9.4s）
+  结果：F:\WorkNew\SillyHub\.sillyspec\.runtime\verify-runs\20261022031553\test-result.json｜lint: skipped — 跳过原因：local.yaml
+  未配置 commands.lint（或标记 unavailable）。｜门文件 3 个
+

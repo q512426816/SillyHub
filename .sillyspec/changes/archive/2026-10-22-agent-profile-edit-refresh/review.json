@@ -1,0 +1,28 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-22-agent-profile-edit-refresh",
+  "reviewer": "subagent",
+  "verdict": "PASS",
+  "reviewedAgainst": "2fef11f807db97a27cdbd0f4fb036d7030bf821c",
+  "findings": [
+    {
+      "severity": "P3",
+      "title": "create/update 失效面不含 platformList 桶，选档案下拉兜底数据存在最长 60s stale 窗口",
+      "evidence": "onSuccess 只失效 workspaceList(wid)+mineList 两桶；admin 新建/改 visibility=platform 档案后，agent-profile-select.tsx:70 消费的 usePlatformAgentProfiles（platformList 桶，staleTime 60s）不失效，靠 staleTime+refetchOnMount/Focus 兜底。既有模式的延续（delete/copy 历来也不失效该桶），非本变更承诺面，故仅建议。",
+      "location": "frontend/src/lib/agent-profiles.ts:334"
+    },
+    {
+      "severity": "P3",
+      "title": "工作区内页 delete/copy 只失效 workspaceList(wid)，内页删档后全局页 mineList 卡片墙最长 30s 显示已删档案",
+      "evidence": "useDeleteAgentProfile/useCopyAgentProfile onSuccess 仍只失效 workspaceList(wid)；内页删除成功后若 30s staleTime 未过即切到全局页，mineList 桶缓存仍含已删档。design 已显式裁决不动（消费页列表桶正确+全局页由页面层手动失效覆盖），且全局页自身的复制/删除走裸 fetch+invalidateMine（page.tsx:88/114/132/142）不受影响，属可接受取舍，建议后续统一到 hook 层。",
+      "location": "frontend/src/lib/agent-profiles.ts:367"
+    }
+  ],
+  "dimensionNotes": {
+    "乱序": "ok——invalidateQueries 为声明式失效（标 stale+活跃查询重拉），幂等无顺序依赖；create/update 各自独立两次调用，测试断言两键均在调用记录中，与 design 第 1 问声明一致。",
+    "并发": "ok——纯前端缓存层操作，单标签页 react-query 串行处理 mutation 回调；多标签页各自持缓存、各自 mutation 各自失效最终一致，与 design 第 2 问声明一致。",
+    "切换": "ok——onSuccess 仅在 mutation 成功后执行，失败/中断零失效；4 用例中 2 个失败用例断言 invalidateSpy 零调用（test.tsx:86/144），复跑全绿，与 design 第 3 问声明一致。",
+    "作用域": "ok——mineList 为不带 wid 的 actor 全集单桶（agent-profiles.ts:104，key=[\"agentProfiles\",\"mine\"]），任何 ws 的档案增改失效它语义正确；workspaceList 仍按 wid 精确分桶，无串台，与 design 第 4 问声明一致。"
+  },
+  "reviewedAt": "2026-10-22T11:18:25+08:00"
+}

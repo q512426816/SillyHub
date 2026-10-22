@@ -141,7 +141,7 @@ import {
 } from './preflight.js';
 import { installConsoleTimestamps } from './console-timestamp.js';
 // 2026-07-07-daemon-skill-execution task-03：skill-manager，启动同步平台 sillyspec skills。
-import { syncSkills, linkSkillsToWorkdir, syncWorkspaceGitSkills } from './skill-manager.js';
+import { syncSkills, linkSkillsToWorkdir, syncWorkspaceGitSkills, pruneSkillsToSubset } from './skill-manager.js';
 // 2026-08-31-machine-sillyspec-version task-05：sillyspec 运行期版本管理与升级状态机
 //（task-04 核心模块）。daemon 侧接线三处：_sillyspecLoop 第四自动循环（auto 触发）、
 // 心跳/注册快照透传、WS SILLYSPEC_UPDATE 指令入口（server_command 触发）。
@@ -9738,6 +9738,24 @@ export class Daemon {
               this._logger[level](msg, data);
             },
           );
+        }
+        // 2026-10-21-agent-profile-slim-default task-03：档案技能严格挂载——
+        // execPayload.skillRefs **键在场**（含空数组）即严格裁剪：非空=只保留勾选
+        // 子集、空=清空全部技能；键缺失（旧 lease / 未选档案且无默认）→ 不裁剪
+        // （全量，现状）。直读键区分缺失与空数组（pickStrList 归一化会吞空数组，
+        // 与 batch 路径 task-runner.ts 同口径）。复用 task-09 迁出的
+        // pruneSkillsToSubset（skill-manager.ts），限定 <cwd>/.claude/skills/。
+        const rawSkillRefs = (execPayload as { skillRefs?: unknown }).skillRefs ??
+          (execPayload as { skill_refs?: unknown }).skill_refs;
+        if (Array.isArray(rawSkillRefs)) {
+          const skillRefs = rawSkillRefs.filter(
+            (v): v is string => typeof v === 'string' && v.length > 0,
+          );
+          await pruneSkillsToSubset(cwd, skillRefs, leaseId);
+          this._logger.info('interactive_skills_pruned', {
+            lease_id: leaseId,
+            keep: skillRefs.length,
+          });
         }
       } catch (e) {
         this._logger.warn('interactive_link_skills_failed', { lease_id: leaseId, error: String(e) });

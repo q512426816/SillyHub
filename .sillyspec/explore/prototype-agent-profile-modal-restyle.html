@@ -1,0 +1,689 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-theme="dark">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>原型 · 新建智能体档案弹窗样式重构（技能全选）</title>
+<style>
+/* ═══════════════════════════════════════════════════════════════
+   原型说明（探索模式讨论工具，非交付实现）
+   - 对齐 SillyHub 三主题（themes.ts 单一源）：暗夜 / AI 紫 / 明亮蓝
+   - 控件观感对齐 antd（Input 32px / radius 8 / Checkbox 16px），实现时仍用 antd 组件
+   - 改造点：①弹窗头尾重构（图标头 + 副标题 + 红线注脚入页脚）
+             ②技能区：搜索 + 全选（半选态）+ 计数 + 清空 + 芯片网格（替代长复选列表）
+             ③右栏实时预览保留并收紧
+             ④技能芯片带一行简介（数据源：manifest SKILL.md frontmatter
+               description / 自定义技能 description 字段，悬停见全文）
+             ⑤滚动条主题化细样式（暗夜下不再刺眼）
+   ═══════════════════════════════════════════════════════════════ */
+
+/* ── 主题变量（取值严格来自 frontend/src/styles/themes.ts，禁止自调） ── */
+:root[data-theme="dark"] {
+  --bg: #09090b;            /* zinc-950 页面底 */
+  --card: #27272a;          /* zinc-800 弹窗底 */
+  --panel: #18181b;         /* zinc-900 输入底/预览栏底 */
+  --input: #18181b;
+  --border: #3f3f46;        /* zinc-700 */
+  --border-soft: #2e2e33;
+  --text: #f4f4f5;          /* zinc-100 */
+  --text-2: #a1a1aa;        /* zinc-400 */
+  --text-3: #71717a;        /* zinc-500 */
+  --primary: #0891b2;       /* cyan-600 */
+  --primary-hover: #06b6d4; /* cyan-500 */
+  --accent: #22d3ee;        /* cyan-400 */
+  --brand-soft: rgba(34, 211, 238, 0.10);   /* 深底浅晕（soft 口径） */
+  --chip-on-bg: rgba(6, 182, 212, 0.12);
+  --chip-on-border: #0e7490;                /* brand-300 深青档 */
+  --chip-on-text: #a5f3fc;                  /* brand-800 亮青档 */
+  --overlay: rgba(0, 0, 0, 0.55);
+  --shadow-modal: 0 24px 64px -16px rgba(0, 0, 0, 0.7);
+  --shadow-card: 0 4px 16px -6px rgba(0, 0, 0, 0.5);
+  --warn-bg: rgba(245, 158, 11, 0.12);
+  --warn-border: rgba(245, 158, 11, 0.35);
+  --warn-text: #fbbf24;
+  --tag-default-bg: rgba(255, 255, 255, 0.08);
+  --tag-default-border: #52525b;
+  --tag-default-text: #d4d4d8;
+  --tag-blue-bg: rgba(22, 119, 255, 0.22);
+  --tag-blue-border: rgba(91, 163, 255, 0.45);
+  --tag-blue-text: #91caff;
+  --tag-purple-bg: rgba(114, 46, 209, 0.28);
+  --tag-purple-border: rgba(179, 127, 235, 0.45);
+  --tag-purple-text: #b37feb;
+  --ghost-hover: rgba(255, 255, 255, 0.06);
+  --scroll-thumb: rgba(255, 255, 255, 0.14);
+  --scroll-thumb-hover: rgba(255, 255, 255, 0.28);
+}
+:root[data-theme="ai-native"] {
+  --bg: #FAF5FF;            /* 淡紫页面底 */
+  --card: #FFFFFF;
+  --panel: #f5f3ff;         /* brand-50 */
+  --input: #FFFFFF;
+  --border: #DDD6FE;        /* violet-200 */
+  --border-soft: #ede9fe;
+  --text: #1e1b2e;
+  --text-2: #64748b;        /* slate-500 */
+  --text-3: #94a3b8;        /* slate-400 */
+  --primary: #7C3AED;       /* violet-600 AI 紫 */
+  --primary-hover: #6D28D9; /* violet-700 */
+  --accent: #0891B2;        /* 交互青 */
+  --brand-soft: #f5f3ff;                        /* brand-50 */
+  --chip-on-bg: #ede9fe;                        /* brand-100 */
+  --chip-on-border: #c4b5fd;                    /* brand-300 */
+  --chip-on-text: #5b21b6;                      /* brand-800 */
+  --overlay: rgba(46, 16, 101, 0.30);
+  --shadow-modal: 0 24px 64px -16px rgba(124, 58, 237, 0.25);
+  --shadow-card: 0 4px 16px -6px rgba(124, 58, 237, 0.18);
+  --warn-bg: #fffbeb;
+  --warn-border: #fde68a;
+  --warn-text: #b45309;
+  --tag-default-bg: #fafafa;
+  --tag-default-border: #d9d9d9;
+  --tag-default-text: rgba(0, 0, 0, 0.65);
+  --tag-blue-bg: #e6f4ff;
+  --tag-blue-border: #91caff;
+  --tag-blue-text: #1677ff;
+  --tag-purple-bg: #f9f0ff;
+  --tag-purple-border: #d3adf7;
+  --tag-purple-text: #722ed1;
+  --ghost-hover: rgba(124, 58, 237, 0.06);
+  --scroll-thumb: rgba(76, 29, 149, 0.22);
+  --scroll-thumb-hover: rgba(76, 29, 149, 0.38);
+}
+:root[data-theme="blue"] {
+  --bg: #f8fafc;
+  --card: #FFFFFF;
+  --panel: #f8fafc;
+  --input: #FFFFFF;
+  --border: #e2e8f0;
+  --border-soft: #f1f5f9;
+  --text: #0f172a;
+  --text-2: #64748b;
+  --text-3: #94a3b8;
+  --primary: #2563EB;
+  --primary-hover: #1d4ed8;
+  --accent: #06b6d4;
+  --brand-soft: #eff6ff;
+  --chip-on-bg: #dbeafe;
+  --chip-on-border: #93c5fd;
+  --chip-on-text: #1e40af;
+  --overlay: rgba(15, 23, 42, 0.35);
+  --shadow-modal: 0 24px 64px -16px rgba(37, 99, 235, 0.22);
+  --shadow-card: 0 4px 16px -6px rgba(37, 99, 235, 0.14);
+  --warn-bg: #fffbeb;
+  --warn-border: #fde68a;
+  --warn-text: #b45309;
+  --tag-default-bg: #fafafa;
+  --tag-default-border: #d9d9d9;
+  --tag-default-text: rgba(0, 0, 0, 0.65);
+  --tag-blue-bg: #e6f4ff;
+  --tag-blue-border: #91caff;
+  --tag-blue-text: #1677ff;
+  --tag-purple-bg: #f9f0ff;
+  --tag-purple-border: #d3adf7;
+  --tag-purple-text: #722ed1;
+  --ghost-hover: rgba(37, 99, 235, 0.06);
+  --scroll-thumb: rgba(30, 58, 138, 0.20);
+  --scroll-thumb-hover: rgba(30, 58, 138, 0.36);
+}
+
+* { box-sizing: border-box; margin: 0; padding: 0; }
+
+/* ── 滚动条主题化（Chromium + Firefox）：细、半透明、随主题取色 ── */
+::-webkit-scrollbar { width: 8px; height: 8px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb {
+  background: var(--scroll-thumb);
+  border-radius: 8px;
+  border: 2px solid transparent;
+  background-clip: content-box;
+}
+::-webkit-scrollbar-thumb:hover { background-color: var(--scroll-thumb-hover); }
+* { scrollbar-width: thin; scrollbar-color: var(--scroll-thumb) transparent; }
+
+html, body { height: 100%; }
+body {
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
+    "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
+  background: var(--bg);
+  color: var(--text);
+  font-size: 14px;
+  line-height: 1.5;
+  overflow: hidden;
+}
+
+/* ── 背景假页面（营造现场感：模糊的智能体档案列表页剪影） ── */
+.fake-page { position: fixed; inset: 0; display: flex; filter: blur(5px); opacity: 0.9; }
+.fake-side { width: 232px; background: var(--panel); border-right: 1px solid var(--border-soft); padding: 18px 14px; display: flex; flex-direction: column; gap: 10px; }
+.fake-logo { height: 26px; width: 130px; border-radius: 6px; background: var(--brand-soft); margin-bottom: 10px; }
+.fake-nav { height: 13px; border-radius: 4px; background: var(--border-soft); width: 78%; }
+.fake-nav.active { background: var(--chip-on-border); width: 62%; opacity: 0.6; }
+.fake-main { flex: 1; padding: 20px 26px; display: flex; flex-direction: column; gap: 14px; }
+.fake-top { height: 34px; border-radius: 8px; background: var(--card); border: 1px solid var(--border-soft); }
+.fake-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 14px; }
+.fake-card { height: 92px; border-radius: 10px; background: var(--card); border: 1px solid var(--border-soft); }
+.overlay { position: fixed; inset: 0; background: var(--overlay); backdrop-filter: blur(1.5px); }
+
+/* ── 主题切换器（原型工具，非弹窗一部分） ── */
+.theme-switch {
+  position: fixed; top: 14px; right: 16px; z-index: 300;
+  display: flex; gap: 4px; padding: 4px;
+  background: var(--card); border: 1px solid var(--border);
+  border-radius: 999px; box-shadow: var(--shadow-card);
+}
+.theme-switch button {
+  border: none; background: transparent; cursor: pointer;
+  font-size: 12px; color: var(--text-2);
+  padding: 3px 12px; border-radius: 999px; font-family: inherit;
+}
+.theme-switch button.on { background: var(--primary); color: #fff; }
+
+/* ── 弹窗骨架 ── */
+.modal-wrap { position: fixed; inset: 0; display: grid; place-items: center; z-index: 100; padding: 24px; }
+.modal {
+  width: min(900px, 94vw); display: flex; flex-direction: column;
+  max-height: calc(100vh - 48px);
+  background: var(--card); border: 1px solid var(--border);
+  border-radius: 12px; box-shadow: var(--shadow-modal);
+  animation: pop 0.18s ease-out;
+}
+@keyframes pop { from { transform: scale(0.97) translateY(6px); opacity: 0; } to { transform: none; opacity: 1; } }
+
+/* 头部：图标 + 标题 + 副标题 */
+.modal-head {
+  display: flex; align-items: center; gap: 12px;
+  padding: 16px 20px; border-bottom: 1px solid var(--border-soft);
+}
+.head-icon {
+  width: 38px; height: 38px; border-radius: 10px; flex-shrink: 0;
+  background: var(--chip-on-bg); border: 1px solid var(--chip-on-border);
+  display: grid; place-items: center; font-size: 18px; color: var(--chip-on-text);
+}
+.head-title { font-size: 16px; font-weight: 600; letter-spacing: 0.02em; }
+.head-sub { font-size: 12px; color: var(--text-3); margin-top: 1px; }
+.head-close {
+  margin-left: auto; width: 30px; height: 30px; border-radius: 8px;
+  border: none; background: transparent; cursor: pointer; color: var(--text-3);
+  font-size: 16px; line-height: 1; display: grid; place-items: center;
+}
+.head-close:hover { background: var(--ghost-hover); color: var(--text); }
+
+/* 主体双栏 */
+.modal-body { display: grid; grid-template-columns: 1.15fr 1fr; min-height: 0; flex: 1; }
+.col-form { padding: 16px 20px 12px 20px; display: flex; flex-direction: column; gap: 12px; min-height: 0; overflow-y: auto; }
+.col-preview { background: var(--panel); border-left: 1px solid var(--border-soft); padding: 16px 18px; overflow-y: auto; }
+
+/* 小节头：品牌竖条 + 标题 + 说明 */
+.sec { display: flex; align-items: baseline; gap: 8px; }
+.sec-bar { width: 3px; height: 13px; border-radius: 2px; background: var(--primary); align-self: center; }
+.sec-title { font-size: 13px; font-weight: 600; }
+.sec-desc { font-size: 11px; color: var(--text-3); flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.sec-extra { font-size: 11px; color: var(--text-3); white-space: nowrap; }
+.sec-extra b { color: var(--primary); font-weight: 600; }
+
+/* 表单基元（antd 观感） */
+.f-row { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+.field { display: flex; flex-direction: column; gap: 5px; min-width: 0; }
+.field-label { font-size: 12px; color: var(--text-2); display: flex; align-items: center; gap: 4px; }
+.field-label .req { color: var(--primary); }
+.field-label .q { cursor: help; color: var(--text-3); font-size: 11px; border-radius: 50%; }
+.field-label .cnt { margin-left: auto; font-size: 10px; color: var(--text-3); }
+.ipt, textarea.ipt, select.ipt {
+  width: 100%; height: 32px; padding: 0 11px;
+  background: var(--input); border: 1px solid var(--border); border-radius: 8px;
+  color: var(--text); font-size: 13px; font-family: inherit; outline: none;
+  transition: border-color 0.15s, box-shadow 0.15s;
+}
+textarea.ipt { height: 108px; padding: 7px 11px; resize: none; line-height: 1.6; }
+.ipt::placeholder { color: var(--text-3); }
+.ipt:hover { border-color: var(--chip-on-border); }
+.ipt:focus { border-color: var(--primary); box-shadow: 0 0 0 2px var(--brand-soft); }
+.sel-wrap { position: relative; }
+.sel-wrap::after {
+  content: ""; position: absolute; right: 11px; top: 50%; width: 8px; height: 8px;
+  border-right: 1.5px solid var(--text-3); border-bottom: 1.5px solid var(--text-3);
+  transform: translateY(-70%) rotate(45deg); pointer-events: none;
+}
+select.ipt { appearance: none; cursor: pointer; padding-right: 28px; }
+select.ipt option { background: var(--card); color: var(--text); }
+
+/* ── 技能区（本次改造核心） ── */
+.skill-toolbar { display: flex; align-items: center; gap: 10px; }
+.skill-search { position: relative; flex: 1; min-width: 0; }
+.skill-search .mag {
+  position: absolute; left: 9px; top: 50%; transform: translateY(-50%);
+  color: var(--text-3); font-size: 12px; pointer-events: none;
+}
+.skill-search input {
+  width: 100%; height: 30px; padding: 0 10px 0 26px;
+  background: var(--input); border: 1px solid var(--border); border-radius: 8px;
+  color: var(--text); font-size: 12px; font-family: inherit; outline: none;
+}
+.skill-search input:focus { border-color: var(--primary); box-shadow: 0 0 0 2px var(--brand-soft); }
+.filter-hint { font-size: 11px; color: var(--text-3); white-space: nowrap; }
+.link-btn {
+  border: none; background: transparent; cursor: pointer; font-family: inherit;
+  font-size: 12px; color: var(--primary); padding: 2px 4px; border-radius: 4px;
+}
+.link-btn:hover { text-decoration: underline; }
+
+/* 复选基元（antd 观感：16px 方框） */
+.cb { display: inline-flex; align-items: center; gap: 6px; cursor: pointer; user-select: none; font-size: 12px; color: var(--text-2); }
+.cb input { display: none; }
+.cb .box {
+  width: 16px; height: 16px; border-radius: 4px; flex-shrink: 0;
+  border: 1.5px solid var(--border); background: var(--input);
+  display: grid; place-items: center; transition: all 0.12s;
+}
+.cb .box::after {
+  content: ""; width: 9px; height: 5px;
+  border-left: 2px solid #fff; border-bottom: 2px solid #fff;
+  transform: rotate(-45deg) translate(0.5px, -0.5px); opacity: 0;
+}
+.cb input:checked + .box { background: var(--primary); border-color: var(--primary); }
+.cb input:checked + .box::after { opacity: 1; }
+.cb.indeterminate .box { background: var(--primary); border-color: var(--primary); }
+.cb.indeterminate .box::after {
+  opacity: 1; width: 8px; height: 0; border: none;
+  border-top: 2px solid #fff; transform: none;
+}
+
+/* 技能芯片网格：替代长复选列表；两行结构（名称 + 一行简介） */
+.skill-box {
+  border: 1px solid var(--border); border-radius: 10px;
+  background: var(--input); padding: 10px;
+  display: grid; grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px; overflow-y: auto; min-height: 168px; max-height: 236px;
+}
+.skill-chip {
+  display: flex; flex-direction: column; gap: 2px;
+  padding: 6px 9px; border-radius: 8px;
+  border: 1px solid var(--border-soft); background: var(--card);
+  cursor: pointer; user-select: none; transition: all 0.12s; min-width: 0;
+}
+.skill-chip:hover { border-color: var(--chip-on-border); }
+.skill-chip .row1 { display: flex; align-items: center; gap: 7px; min-width: 0; }
+.skill-chip .name {
+  font-size: 12px; color: var(--text); flex: 1; min-width: 0;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  font-family: ui-monospace, "Cascadia Mono", Consolas, monospace;
+}
+.skill-chip .desc {
+  font-size: 11px; color: var(--text-3); line-height: 1.45;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  padding-left: 23px; /* 与名称首字对齐（16px 复选框 + 7px 间距） */
+}
+.skill-chip.on { background: var(--chip-on-bg); border-color: var(--chip-on-border); }
+.skill-chip.on .name { color: var(--chip-on-text); font-weight: 600; }
+.skill-chip.on .desc { color: var(--text-2); }
+/* 芯片内迷你复选框（纯展示态，整片芯片为点击目标） */
+.mini-box {
+  width: 16px; height: 16px; border-radius: 4px; flex-shrink: 0;
+  border: 1.5px solid var(--border); background: var(--input);
+  display: grid; place-items: center; transition: all 0.12s;
+}
+.mini-box::after {
+  content: ""; width: 9px; height: 5px;
+  border-left: 2px solid #fff; border-bottom: 2px solid #fff;
+  transform: rotate(-45deg) translate(0.5px, -0.5px); opacity: 0;
+}
+.skill-chip.on .mini-box { background: var(--primary); border-color: var(--primary); }
+.skill-chip.on .mini-box::after { opacity: 1; }
+.skill-empty { grid-column: 1 / -1; display: grid; place-items: center; color: var(--text-3); font-size: 12px; min-height: 120px; }
+
+/* 页脚：红线注脚（左） + 按钮（右） */
+.modal-foot {
+  display: flex; align-items: center; gap: 12px;
+  padding: 12px 20px; border-top: 1px solid var(--border-soft);
+}
+.foot-note {
+  flex: 1; min-width: 0; font-size: 11px; color: var(--text-3);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.foot-note .warn-dot { color: var(--warn-text); margin-right: 4px; }
+.btn {
+  height: 32px; padding: 0 16px; border-radius: 8px; font-size: 13px;
+  font-family: inherit; cursor: pointer; border: 1px solid var(--border);
+  background: var(--card); color: var(--text); transition: all 0.15s;
+}
+.btn:hover { border-color: var(--primary); color: var(--primary); }
+.btn.primary {
+  background: var(--primary); border-color: var(--primary); color: #fff; min-width: 74px;
+}
+.btn.primary:hover:not(:disabled) { background: var(--primary-hover); border-color: var(--primary-hover); }
+.btn.primary:disabled { opacity: 0.45; cursor: not-allowed; }
+
+/* ── 右栏实时预览 ── */
+.pv-label { text-align: center; font-size: 11px; letter-spacing: 0.14em; color: var(--text-3); margin-bottom: 14px; }
+.pv-card {
+  max-width: 300px; margin: 0 auto; background: var(--card);
+  border: 1px solid var(--border); border-radius: 12px; padding: 16px;
+  box-shadow: var(--shadow-card); position: sticky; top: 0;
+}
+.pv-head { display: flex; align-items: center; gap: 10px; margin-bottom: 12px; }
+.pv-avatar {
+  width: 36px; height: 36px; border-radius: 10px; flex-shrink: 0;
+  background: var(--chip-on-bg); color: var(--chip-on-text);
+  display: grid; place-items: center; font-size: 15px; font-weight: 700;
+}
+.pv-name-row { display: flex; align-items: center; gap: 6px; min-width: 0; }
+.pv-name { font-size: 14px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.tag { font-size: 11px; line-height: 1; padding: 3px 7px; border-radius: 4px; border: 1px solid; white-space: nowrap; flex-shrink: 0; }
+.tag.default { background: var(--tag-default-bg); border-color: var(--tag-default-border); color: var(--tag-default-text); }
+.tag.blue { background: var(--tag-blue-bg); border-color: var(--tag-blue-border); color: var(--tag-blue-text); }
+.tag.purple { background: var(--tag-purple-bg); border-color: var(--tag-purple-border); color: var(--tag-purple-text); }
+.pv-prompt {
+  background: var(--brand-soft); border-radius: 8px; padding: 9px 11px;
+  font-size: 12px; line-height: 1.6; color: var(--text-2); margin-bottom: 12px;
+  display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden;
+}
+.pv-chips { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 12px; min-height: 22px; }
+.pv-chip {
+  font-size: 11px; padding: 2px 8px; border-radius: 4px;
+  background: var(--brand-soft); color: var(--text-2);
+  font-family: ui-monospace, "Cascadia Mono", Consolas, monospace;
+}
+.pv-chip.none { background: transparent; color: var(--text-3); padding: 2px 0; }
+.pv-foot {
+  border-top: 1px dashed var(--border); padding-top: 9px;
+  font-size: 11px; color: var(--text-3); display: flex; justify-content: space-between;
+}
+
+/* 原型角标 */
+.proto-badge {
+  position: fixed; left: 16px; bottom: 12px; z-index: 300;
+  font-size: 11px; color: var(--text-3); opacity: 0.85;
+}
+</style>
+</head>
+<body>
+
+<!-- 背景假页面剪影 -->
+<div class="fake-page" aria-hidden="true">
+  <div class="fake-side">
+    <div class="fake-logo"></div>
+    <div class="fake-nav"></div><div class="fake-nav"></div><div class="fake-nav active"></div>
+    <div class="fake-nav"></div><div class="fake-nav"></div><div class="fake-nav"></div>
+    <div class="fake-nav"></div>
+  </div>
+  <div class="fake-main">
+    <div class="fake-top"></div>
+    <div class="fake-grid"><div class="fake-card"></div><div class="fake-card"></div><div class="fake-card"></div><div class="fake-card"></div></div>
+  </div>
+</div>
+<div class="overlay" aria-hidden="true"></div>
+
+<!-- 主题切换（原型工具） -->
+<div class="theme-switch" role="group" aria-label="主题切换">
+  <button data-t="dark" class="on">暗夜</button>
+  <button data-t="ai-native">AI 紫</button>
+  <button data-t="blue">明亮蓝</button>
+</div>
+<div class="proto-badge">原型演示 · 可交互（输入 / 搜索 / 全选 / 主题切换均为真实逻辑）</div>
+
+<div class="modal-wrap">
+  <div class="modal" role="dialog" aria-modal="true" aria-label="新建智能体档案">
+
+    <!-- 头部 -->
+    <div class="modal-head">
+      <div class="head-icon">◆</div>
+      <div>
+        <div class="head-title">新建智能体档案</div>
+        <div class="head-sub">一份人格 + 一份技能清单，跨会话复用</div>
+      </div>
+      <button class="head-close" title="关闭" aria-label="关闭">✕</button>
+    </div>
+
+    <!-- 主体 -->
+    <div class="modal-body">
+      <!-- 左栏：表单 -->
+      <div class="col-form">
+        <!-- 归属工作区（可见范围=工作区 时出现） -->
+        <div class="field" id="ws-field" style="display:none">
+          <span class="field-label"><span class="req">*</span> 归属工作区</span>
+          <div class="sel-wrap">
+            <select class="ipt" id="ws-select">
+              <option value="" selected disabled>请选择归属工作区</option>
+              <option>SillyHub</option><option>workflow</option><option>pmp-web-ui</option>
+              <option>QM小程序</option><option>sub-grid-security</option><option>spdemo</option>
+            </select>
+          </div>
+        </div>
+
+        <!-- 身份 -->
+        <div class="sec">
+          <span class="sec-bar"></span>
+          <span class="sec-title">身份</span>
+          <span class="sec-desc">给这个智能体起个名字，并决定谁能看到它。</span>
+        </div>
+        <div class="f-row">
+          <div class="field">
+            <span class="field-label"><span class="req">*</span> 名称 <span class="cnt" id="name-cnt">0 / 64</span></span>
+            <input class="ipt" id="f-name" maxlength="64" placeholder="例如 代码审查助手" />
+          </div>
+          <div class="field">
+            <span class="field-label"><span class="req">*</span> 可见范围</span>
+            <div class="sel-wrap">
+              <select class="ipt" id="f-visibility">
+                <option value="private" selected>个人（仅创建者可用）</option>
+                <option value="workspace">工作区（本工作区成员可用）</option>
+                <option value="platform">平台（全平台共享，需 admin）</option>
+              </select>
+            </div>
+          </div>
+        </div>
+        <div class="field">
+          <span class="field-label">
+            系统提示词（agent 人格，与 spec 任务上下文叠加）
+            <span class="q" title="这段会注入下发 daemon 的会话 system prompt（保留引擎默认能力并追加）。留空则不影响。">ⓘ</span>
+          </span>
+          <textarea class="ipt" id="f-prompt" placeholder="例如：你是资深代码审查员，只读不改，关注安全/性能/可维护性…"></textarea>
+        </div>
+
+        <!-- 技能（改造核心） -->
+        <div class="sec">
+          <span class="sec-bar"></span>
+          <span class="sec-title">技能</span>
+          <span class="sec-desc">勾选该档案可用的技能（只存引用；未勾选 = 该档案的会话不挂载任何技能）。</span>
+          <span class="sec-extra">已选 <b id="sel-count">0</b> / <span id="total-count">21</span></span>
+        </div>
+        <div class="skill-toolbar">
+          <div class="skill-search">
+            <span class="mag">🔍</span>
+            <input id="skill-filter" placeholder="搜索技能…" />
+          </div>
+          <span class="filter-hint" id="filter-hint" style="display:none"></span>
+          <label class="cb" id="master-cb">
+            <input type="checkbox" id="master-input" />
+            <span class="box"></span>全选
+          </label>
+          <button class="link-btn" id="clear-btn" style="visibility:hidden">清空</button>
+        </div>
+        <div class="skill-box" id="skill-box"></div>
+      </div>
+
+      <!-- 右栏：实时预览 -->
+      <div class="col-preview">
+        <div class="pv-label">▼ 实时预览 · 这就是别人会看到的角色卡</div>
+        <div class="pv-card">
+          <div class="pv-head">
+            <div class="pv-avatar" id="pv-avatar">?</div>
+            <div class="pv-name-row">
+              <span class="pv-name" id="pv-name">未命名档案</span>
+              <span class="tag default" id="pv-tag">个人</span>
+            </div>
+          </div>
+          <div class="pv-prompt" id="pv-prompt">（未填写系统提示词，按引擎默认人设执行）</div>
+          <div class="pv-chips" id="pv-chips">
+            <span class="pv-chip none">无技能（不挂载）</span>
+          </div>
+          <div class="pv-foot"><span>新建 · v1</span><span>仅存引用 · 不含凭证</span></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 页脚 -->
+    <div class="modal-foot">
+      <span class="foot-note" title="档案不存任何 API Key / 凭证——引擎、模型、供应商、MCP 均在会话与群成员配置里各自指定；本档案只承载人格与技能清单。">
+        <span class="warn-dot">⚠</span>档案不存任何 API Key / 凭证——引擎/模型/供应商/MCP 在会话与群成员配置里各自指定
+      </span>
+      <button class="btn" id="btn-cancel">取 消</button>
+      <button class="btn primary" id="btn-save" disabled>保 存</button>
+    </div>
+  </div>
+</div>
+
+<script>
+/* ── 数据：现场真实技能清单（21 项，desc 为 SKILL.md frontmatter 真实描述） ── */
+const SKILLS = [
+  { name: "sillyspec-archive",   desc: "归档已验证完成的变更：影响分析、同步模块文档、更新 ROADMAP" },
+  { name: "sillyspec-auto",      desc: "自动模式——全流程自动推进（通用版）" },
+  { name: "sillyspec-brainstorm",desc: "开发前需求澄清与技术方案设计，产出 design 四件套" },
+  { name: "sillyspec-commit",    desc: "智能提交——自动收集变更信息，生成 commit message" },
+  { name: "sillyspec-continue",  desc: "自动判断并执行下一步" },
+  { name: "sillyspec-doctor",    desc: "SillySpec 自检与状态修复，全量扫描进度一致性" },
+  { name: "sillyspec-execute",   desc: "按 plan 执行代码实现，遵循 design 与模块文档" },
+  { name: "sillyspec-explore",   desc: "自由讨论、代码库调研、方案比较、画原型（只读不实现）" },
+  { name: "sillyspec-export",    desc: "导出成功方案为可复用模板" },
+  { name: "sillyspec-flow",      desc: "轻量变更快道——需求明确的小/中改动两步收口" },
+  { name: "sillyspec-init",      desc: "绿地项目初始化——深度提问、调研、需求文档、路线图" },
+  { name: "sillyspec-knowledge", desc: "知识库检索/校验/刷新/沉淀（Agent-safe 命令集）" },
+  { name: "sillyspec-plan",      desc: "把 design 拆解为可执行的实现计划（Wave 分组 + 任务清单）" },
+  { name: "sillyspec-propose",   desc: "已废弃——生成规范四件套请改走 brainstorm" },
+  { name: "sillyspec-quick",     desc: "明确、低风险、范围很小的直接任务快道" },
+  { name: "sillyspec-resume",    desc: "恢复工作——从中断处继续" },
+  { name: "sillyspec-scan",      desc: "扫描项目代码库，生成架构文档、代码约定等扫描产物" },
+  { name: "sillyspec-state",     desc: "查看当前工作状态——显示 SillySpec 进度" },
+  { name: "sillyspec-status",    desc: "查看 SillySpec 当前进度与活跃变更一览" },
+  { name: "sillyspec-verify",    desc: "验证实现是否符合 design 与模块文档，跑测试" },
+  { name: "sillyspec-workspace", desc: "工作区管理——初始化、管理多项目工作区、查看子项目状态" },
+];
+const VIS = {
+  private:   { label: "个人",   tag: "default" },
+  workspace: { label: "工作区", tag: "blue" },
+  platform:  { label: "平台",   tag: "purple" },
+};
+
+const selected = new Set();
+let filterText = "";
+
+const $ = (id) => document.getElementById(id);
+const box = $("skill-box");
+
+/* ── 技能渲染 ── */
+function visibleSkills() {
+  const t = filterText.trim().toLowerCase();
+  if (!t) return SKILLS;
+  return SKILLS.filter((s) => s.name.includes(t) || s.desc.toLowerCase().includes(t));
+}
+function renderSkills() {
+  const vis = visibleSkills();
+  box.innerHTML = "";
+  if (vis.length === 0) {
+    const d = document.createElement("div");
+    d.className = "skill-empty";
+    d.textContent = "没有匹配的技能";
+    box.appendChild(d);
+  } else {
+    for (const s of vis) {
+      const chip = document.createElement("div");
+      chip.className = "skill-chip" + (selected.has(s.name) ? " on" : "");
+      chip.title = `${s.name} — ${s.desc}`;
+      const row1 = document.createElement("div");
+      row1.className = "row1";
+      const boxEl = document.createElement("span");
+      boxEl.className = "mini-box";
+      const nameEl = document.createElement("span");
+      nameEl.className = "name";
+      nameEl.textContent = s.name;
+      row1.append(boxEl, nameEl);
+      const descEl = document.createElement("div");
+      descEl.className = "desc";
+      descEl.textContent = s.desc;
+      chip.append(row1, descEl);
+      chip.addEventListener("click", () => {
+        selected.has(s.name) ? selected.delete(s.name) : selected.add(s.name);
+        syncAll();
+      });
+      box.appendChild(chip);
+    }
+  }
+  /* 主复选：三态（全选/半选/未选），只作用于当前筛选结果 */
+  const master = $("master-cb"), mi = $("master-input");
+  const allOn = vis.length > 0 && vis.every((s) => selected.has(s.name));
+  const someOn = vis.some((s) => selected.has(s.name));
+  master.classList.toggle("indeterminate", someOn && !allOn);
+  mi.checked = allOn;
+  mi.indeterminate = someOn && !allOn;
+  mi.disabled = vis.length === 0;
+}
+$("master-input").addEventListener("change", (e) => {
+  const vis = visibleSkills();
+  if (e.target.checked) vis.forEach((s) => selected.add(s.name));
+  else vis.forEach((s) => selected.delete(s.name));
+  syncAll();
+});
+$("clear-btn").addEventListener("click", () => { selected.clear(); syncAll(); });
+$("skill-filter").addEventListener("input", (e) => {
+  filterText = e.target.value;
+  const hint = $("filter-hint");
+  if (filterText.trim()) {
+    hint.style.display = "";
+    hint.textContent = `筛选出 ${visibleSkills().length} 项`;
+  } else hint.style.display = "none";
+  renderSkills();
+});
+
+/* ── 预览与联动 ── */
+function syncAll() {
+  renderSkills();
+  $("sel-count").textContent = selected.size;
+  $("total-count").textContent = SKILLS.length;
+  $("clear-btn").style.visibility = selected.size ? "visible" : "hidden";
+
+  const name = $("f-name").value;
+  $("pv-avatar").textContent = (name.trim()[0] ?? "?").toUpperCase();
+  $("pv-name").textContent = name.trim() || "未命名档案";
+  $("name-cnt").textContent = `${name.length} / 64`;
+  $("btn-save").disabled = !name.trim();
+
+  const prompt = $("f-prompt").value.trim();
+  $("pv-prompt").textContent = prompt || "（未填写系统提示词，按引擎默认人设执行）";
+
+  const chips = $("pv-chips");
+  chips.innerHTML = "";
+  if (selected.size === 0) {
+    chips.innerHTML = '<span class="pv-chip none">无技能（不挂载）</span>';
+  } else {
+    for (const s of SKILLS) {
+      if (!selected.has(s.name)) continue;
+      const c = document.createElement("span");
+      c.className = "pv-chip";
+      c.textContent = s.name;
+      c.title = s.desc;
+      chips.appendChild(c);
+    }
+  }
+}
+$("f-name").addEventListener("input", syncAll);
+$("f-prompt").addEventListener("input", syncAll);
+$("f-visibility").addEventListener("change", (e) => {
+  const v = VIS[e.target.value];
+  const tag = $("pv-tag");
+  tag.textContent = v.label;
+  tag.className = "tag " + v.tag;
+  $("ws-field").style.display = e.target.value === "workspace" ? "" : "none";
+});
+
+/* ── 主题切换 ── */
+document.querySelectorAll(".theme-switch button").forEach((b) => {
+  b.addEventListener("click", () => {
+    document.documentElement.dataset.theme = b.dataset.t;
+    document.querySelectorAll(".theme-switch button").forEach((x) => x.classList.toggle("on", x === b));
+  });
+});
+
+syncAll();
+</script>
+</body>
+</html>

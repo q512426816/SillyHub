@@ -81,9 +81,16 @@ vi.mock("@/lib/agent-profiles", () => ({
   useMineAgentProfiles: () => mocks.profilesHook(),
 }));
 
-vi.mock("@/lib/api/llm-providers", () => ({
-  listProviders: (...args: unknown[]) => mocks.listProviders(...args),
-}));
+vi.mock("@/lib/api/llm-providers", async (importOriginal) => {
+  // 2026-10-21-provider-default-ui-hint：noProviderLabel 走真实实现（纯函数），
+  // listProviders 维持可控 mock。
+  const actual =
+    await importOriginal<typeof import("@/lib/api/llm-providers")>();
+  return {
+    ...actual,
+    listProviders: (...args: unknown[]) => mocks.listProviders(...args),
+  };
+});
 
 // 组件运行时只消费 injectSession（类型导入编译期擦除），局部 mock 不加载真实 daemon.ts。
 // task-06（thinking-level）：组件新增消费 getSessionThinkingLevels /
@@ -1480,6 +1487,69 @@ describe("SessionConfigBar 手机端降噪（ql-20260915-009 variant=mobile）",
   });
 });
 
+// ── 2026-10-21-provider-default-ui-hint：兜底项文案动态化 ────────────────────
+
+describe("SessionConfigBar 不指定兜底文案（provider-default-ui-hint）", () => {
+  it("用户有默认供应商 → 兜底项显示「不指定（默认：{name}）」", async () => {
+    mocks.listProviders.mockReset().mockResolvedValue([
+      { id: "prov-kimi", name: "Kimi 中转", models: [], agent_kinds: ["claude"] },
+      { id: "prov-glm", name: "GLM 平台", models: [], agent_kinds: ["claude"], is_default: true },
+    ]);
+    renderBar();
+    // 未选态按钮显示默认供应商名（claim 实际注入它）；下拉兜底项为动态文案。
+    const btn = await screen.findByRole("button", {
+      name: "配置-供应商 GLM 平台",
+    });
+    fireEvent.click(btn);
+    expect(screen.getByTestId("config-dd-provider")).toBeInTheDocument();
+    expect(screen.getByText("不指定（默认：GLM 平台）")).toBeInTheDocument();
+  });
+
+  it("未设默认供应商 → 保持「不指定（本机默认）」（零回归）", async () => {
+    mocks.listProviders.mockReset().mockResolvedValue([
+      { id: "prov-kimi", name: "Kimi 中转", models: [], agent_kinds: ["claude"] },
+    ]);
+    renderBar();
+    const btn = await screen.findByRole("button", {
+      name: "配置-供应商 本机默认",
+    });
+    fireEvent.click(btn);
+    expect(screen.getByText("不指定（本机默认）")).toBeInTheDocument();
+  });
+});
+
+// ── 2026-10-21-profile-default-prehint：预会话档案显示对齐默认 ───────────────
+
+describe("SessionConfigBar 档案默认预示（profile-default-prehint）", () => {
+  it("provisional 未选档案 + 用户默认档案 → 按钮显示默认档案名；下拉兜底项动态文案", async () => {
+    mocks.profilesHook.mockReset().mockReturnValue({
+      profiles: [
+        { id: "prof-1", name: "SillySpec 极速变更", is_user_default: true },
+        { id: "prof-2", name: "普通档案" },
+      ],
+    });
+    renderBar({ provisional: true });
+    const btn = await screen.findByRole("button", {
+      name: "配置-档案 SillySpec 极速变更",
+    });
+    fireEvent.click(btn);
+    expect(screen.getByTestId("config-dd-profile")).toBeInTheDocument();
+    expect(screen.getByText("不指定（默认：SillySpec 极速变更）")).toBeInTheDocument();
+  });
+
+  it("非 provisional 未选档案 → 保持「未指定」真值（存量会话不追溯注入）", async () => {
+    mocks.profilesHook.mockReset().mockReturnValue({
+      profiles: [
+        { id: "prof-1", name: "SillySpec 极速变更", is_user_default: true },
+      ],
+    });
+    renderBar();
+    // 非 provisional：agentProfileId null（BASE_PROPS 缺省）→ 未指定
+    expect(
+      await screen.findByRole("button", { name: "配置-档案 未指定" }),
+    ).toBeInTheDocument();
+  });
+});
 // ── 14. 会话 git 分支指示项（2026-10-21-session-git-branch / FR-01..03）─────
 
 describe("SessionConfigBar git 分支指示项（2026-10-21-session-git-branch）", () => {

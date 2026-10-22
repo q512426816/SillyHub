@@ -55,7 +55,7 @@ import { SessionPanel } from "@/components/daemon/session-panel";
 import { validateMemberDisplayName } from "@/components/group-chat/create-group-wizard";
 import { useMineAgentProfiles } from "@/lib/agent-profiles";
 import { ApiError } from "@/lib/api";
-import { listProviders } from "@/lib/api/llm-providers";
+import { listProviders, noProviderLabel } from "@/lib/api/llm-providers";
 import { errMessage, useNotify } from "@/lib/errors";
 import { listProjectMembers } from "@/lib/ppm/project";
 import { listProjectWorkspaces } from "@/lib/workspace";
@@ -1160,7 +1160,8 @@ function AgentConfigSwitchModal({
       });
     }
     if (!member.llm_provider_id) {
-      opts.unshift({ value: "", label: "不指定（本机默认）" });
+      // 2026-10-21-provider-default-ui-hint：兜底文案按用户默认供应商动态化。
+      opts.unshift({ value: "", label: noProviderLabel(providersQ.data) });
     }
     return opts;
   }, [providersQ.data, member]);
@@ -1587,10 +1588,16 @@ function AddAgentMemberModal({
       })),
     [projectWorkspacesQ.data],
   );
-  const providerOptions = useMemo(
-    () => (providersQ.data ?? []).map((p) => ({ value: p.id, label: p.name })),
-    [providersQ.data],
-  );
+  const providerOptions = useMemo(() => {
+    const base = (providersQ.data ?? []).map((p) => ({
+      value: p.id,
+      label: p.name,
+    }));
+    // 2026-10-21-provider-default-ui-hint：兜底项文案按用户默认供应商动态化
+    //（评审 R1：与 wizard 同款，防「不指定」显式项丢失）。
+    base.unshift({ value: "", label: noProviderLabel(providersQ.data) });
+    return base;
+  }, [providersQ.data]);
   const profileOptions = useMemo(
     () => profiles.map((p) => ({ value: p.id, label: p.name })),
     [profiles],
@@ -1726,15 +1733,12 @@ function AddAgentMemberModal({
               id="mp-add-agent-model"
               aria-label="Agent 成员模型"
               className="w-full"
-              placeholder="不指定（本机默认）"
+              placeholder={providerOptions[0]?.label ?? "不指定（本机默认）"}
               allowClear
               value={llmProviderId || undefined}
               onChange={(v) => setLlmProviderId(v ?? "")}
               disabled={provider !== "claude"}
-              options={[
-                { value: "", label: "不指定（本机默认）" },
-                ...providerOptions,
-              ]}
+              options={providerOptions}
             />
             {provider !== "claude" && (
               <span className="text-[11px] text-muted-foreground">

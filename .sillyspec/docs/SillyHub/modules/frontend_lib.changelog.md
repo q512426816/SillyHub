@@ -16,6 +16,11 @@ created_at: 2026-10-16 16:40:00
 - 2026-10-19-thinking-zh-translate | 思考内容离线翻译为中文展示
 - 2026-10-19-change-assets-cross-repo-repos | 变更资产卡展示跨仓冻结面
 - 2026-10-19-cross-repo-patch-slicing | 资产卡跨仓单文件 diff 切片
+- 2026-10-21-provider-set-default-ui | 供应商页复活设为默认入口
+- 2026-10-21-agent-profile-slim-default | 档案瘦身重定位为人格加技能清单并支持用户默认档案
+- 2026-10-21-provider-default-ui-hint | 供应商未选态显示对齐用户默认供应商
+- 2026-10-22-agent-profile-modal-restyle | 智能体档案弹窗重构与技能全选
+- 2026-10-22-agent-profile-edit-refresh | 档案编辑后全局页列表自动刷新修复
 - 2026-10-21-session-git-branch | 会话组件底部动态显示当前所在 git 分支
 - 2026-10-22-daemon-snapshot-report-log | daemon 快照上报补收口日志
 - 2026-10-22-fix-translate-pending | 生产 /api/translate/thinking 请求长时间 pending：容器未配置 TRA…

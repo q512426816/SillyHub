@@ -39,6 +39,8 @@ import {
   copyWorkspaceAgentProfile,
   deleteAgentProfile,
   deleteWorkspaceAgentProfile,
+  setDefaultAgentProfile,
+  unsetDefaultAgentProfile,
   type AgentProfileAggregatedItem,
   type AgentProfileRead,
 } from "@/lib/agent-profiles";
@@ -60,6 +62,8 @@ export default function AgentProfilesGlobalPage() {
   const [confirmDelete, setConfirmDelete] =
     useState<AgentProfileAggregatedItem | null>(null);
   const [deleting, setDeleting] = useState(false);
+  /** 全量池统计（grid onStatsChange 上报；页头胶囊展示，2026-10-22 重设计）。 */
+  const [stats, setStats] = useState({ total: 0, defaultCount: 0 });
 
   const invalidateMine = () => {
     void qc.invalidateQueries({
@@ -117,20 +121,63 @@ export default function AgentProfilesGlobalPage() {
     }
   };
 
+  // 2026-10-21-agent-profile-slim-default task-05：用户级默认档案（每用户一个）。
+  // 空技能档案设默认的警示（FR-04 反直觉防护）：技能为空时明确提示后果。
+  const handleSetDefault = async (p: AgentProfileAggregatedItem) => {
+    try {
+      await setDefaultAgentProfile(p.id);
+      notify.success(
+        (p.skill_refs ?? []).length === 0
+          ? `已设为默认（该档案未勾选技能，之后的新会话将不挂载技能）`
+          : `档案「${p.name}」已设为默认，新会话生效`,
+      );
+      invalidateMine();
+    } catch (err) {
+      notify.error(err, "设为默认失败");
+    }
+  };
+
+  const handleUnsetDefault = async (p: AgentProfileAggregatedItem) => {
+    try {
+      await unsetDefaultAgentProfile(p.id);
+      notify.success("已取消默认，之后的新会话不再注入该档案");
+      invalidateMine();
+    } catch (err) {
+      notify.error(err, "取消默认失败");
+    }
+  };
+
   return (
     <PageContainer size="full">
       <PageHeader
+        icon={
+          <div
+            aria-hidden
+            className="grid size-[42px] shrink-0 place-items-center rounded-xl border border-brand-300 bg-brand-100 text-xl text-brand-700"
+          >
+            ◆
+          </div>
+        }
         title="智能体档案"
         subtitle="管理可复用的智能体人设：跨工作区查看全部可见档案，可按工作区/可见范围/供应商筛选。"
         actions={
-          <Button
-            type="primary"
-            onClick={() =>
-              setFormState({ open: true, mode: "create", profile: null })
-            }
-          >
-            + 新建档案
-          </Button>
+          <div className="flex items-center gap-2.5">
+            <span
+              title={`共 ${stats.total} 个档案 · 默认 ${stats.defaultCount}`}
+              className="inline-flex h-8 items-center gap-1.5 rounded-full border border-border bg-muted/40 px-3 text-xs text-muted-foreground"
+            >
+              共 <b className="font-semibold text-primary">{stats.total}</b> 个档案
+              · 默认 <b className="font-semibold text-primary">{stats.defaultCount}</b>
+            </span>
+            <Button
+              type="primary"
+              onClick={() =>
+                setFormState({ open: true, mode: "create", profile: null })
+              }
+            >
+              + 新建档案
+            </Button>
+          </div>
         }
       />
 
@@ -139,6 +186,9 @@ export default function AgentProfilesGlobalPage() {
         onEdit={handleEdit}
         onCopy={(p) => void handleCopy(p)}
         onDelete={setConfirmDelete}
+        onSetDefault={(p) => void handleSetDefault(p)}
+        onUnsetDefault={(p) => void handleUnsetDefault(p)}
+        onStatsChange={setStats}
       />
 
       {/* 新建/编辑表单（全局页不传 workspaceId → 表单渲染「工作区上下文」选择器） */}

@@ -1,0 +1,49 @@
+tier: thick
+legacy_fallback: false
+substeps:
+  artifacts: done
+  ledger: done
+  patch: done
+  review: done
+  probes: done
+  distill: done
+  archive: done
+  events: done
+born_face: thin
+with_tasks: false
+review_force: null
+input: >-
+  供应商页复活设为默认入口
+
+
+  动机与背景：会话未显式选供应商时默认落本机凭证，根因是 2026-08-20（ql-20260820-006）删除了 /settings/providers 的启动/停止（set-default）UI，而后端
+  set-default/unset-default 端点与 claim 注入链（用户默认供应商优先于本机）仍存活，仅缺 UI
+  入口。本变更把「设为默认」操作加回供应商列表，文案与档案侧统一（设为默认/取消默认）；设默认只影响新会话，不主动切换运行中会话。
+
+
+  成功标准：
+
+  - /settings/providers 供应商列表有「设为默认」操作，已设默认的行有明确默认标记，且有对称「取消默认」操作
+
+  - 调用既有后端 set-default/unset-default API，后端链路零改动（若核实后端 set_default 存在运行中会话即时下发行为，则一并收敛为仅影响新会话并在 tasks 记录）
+
+  - 会话未显式选供应商时注入用户默认供应商凭证，未设默认回落本机（既有 claim 链路，UI 加回即通）
+
+  - 新增/更新前端测试覆盖设默认交互与 API 封装
+autopilot: false
+prestage_ack: false
+baseline_commit: 6e0ca1bf41f127ef2b38fa76394f149ce485b162
+updatedAt: '2026-10-21T04:09:46.221Z'
+baseline_sha256: 0d5bf9a45275b1304f0ccd8e1e827649b1931465c26132d21e7ab2a401297ae0
+spec_approved: true
+spec_approved_at: '2026-10-21T03:28:07.143Z'
+spec_approved_by: zcode-provider-set-default
+spec_approved_channel: user-confirmed
+spec_attested_by: zcode-provider-set-default
+batch_ticked: true
+upgrade_reason: verify 实测失败（实测失败：test（命令与输出尾部见上；修复后重跑 --done 不丢进度））——失败自动升厚
+gate_summary: >-
+  test: passed ← module[]+deps(py12)（102.1s）
+  结果：F:\WorkNew\SillyHub\.sillyspec\.runtime\verify-runs\20261021040014\test-result.json｜lint: skipped — 跳过原因：local.yaml
+  未配置 commands.lint（或标记 unavailable）。｜门文件 9 个
+

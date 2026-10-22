@@ -72,6 +72,13 @@ export interface AgentProfileCardProps {
   onCopy: (profile: AgentProfileAggregatedItem) => void;
   /** 删除（系统预置不渲染该按钮）。 */
   onDelete: (profile: AgentProfileAggregatedItem) => void;
+  /**
+   * 设为当前用户默认档案（2026-10-21-agent-profile-slim-default task-05）：
+   * 未传时不渲染该操作（向下兼容既有挂载点/测试）。
+   */
+  onSetDefault?: (profile: AgentProfileAggregatedItem) => void;
+  /** 取消默认（is_user_default 时渲染）。 */
+  onUnsetDefault?: (profile: AgentProfileAggregatedItem) => void;
 }
 
 /**
@@ -83,6 +90,8 @@ export function AgentProfileCard({
   onEdit,
   onCopy,
   onDelete,
+  onSetDefault,
+  onUnsetDefault,
 }: AgentProfileCardProps) {
   const isSystem = profile.is_system_default === true;
 
@@ -103,14 +112,24 @@ export function AgentProfileCard({
   const avatarGradient =
     AVATAR_GRADIENT_BY_PROVIDER[profile.provider] ?? DEFAULT_AVATAR_GRADIENT;
 
+  /**
+   * 提示词占位分档（2026-10-22-agent-profiles-page-restyle）：系统预置无提示词
+   * 时显引擎默认行为说明（填实紧凑卡），自定义档保持原占位文案（既有断言锚）。
+   */
   const promptText =
     profile.system_prompt && profile.system_prompt.trim()
       ? profile.system_prompt.trim()
-      : "（未设置系统提示词）";
+      : isSystem
+        ? "（未设置系统提示词，按引擎默认人设执行）"
+        : "（未设置系统提示词）";
 
   // 能力 chip：mcp_refs + skill_refs 逐项（task-03 §implementation）。
   const mcpRefs = profile.mcp_refs ?? [];
   const skillRefs = profile.skill_refs ?? [];
+  /** 芯片截断阈值（2026-10-22 重设计）：超 4 项收敛 +N。 */
+  const allRefs = [...mcpRefs, ...skillRefs];
+  const shownRefs = allRefs.slice(0, 4);
+  const hiddenCount = allRefs.length - shownRefs.length;
 
   const footMeta = `v${profile.version}${
     profile.workspace_name ? ` · ${profile.workspace_name}` : ""
@@ -122,7 +141,13 @@ export function AgentProfileCard({
       bodyPadding="p-0"
       role="button"
       tabIndex={0}
-      className="cursor-pointer"
+      className={cn(
+        "cursor-pointer",
+        /* 用户默认档案：品牌描边 + 光环（2026-10-22-agent-profiles-page-restyle） */
+        profile.is_user_default && "border-brand-300 ring-1 ring-brand-300/50",
+        /* 系统预置：虚线降调紧凑卡 */
+        isSystem && "border-dashed",
+      )}
       onClick={() => onPreview(profile)}
       onKeyDown={(e) => {
         if (e.key === "Enter" || e.key === " ") {
@@ -131,14 +156,20 @@ export function AgentProfileCard({
         }
       }}
     >
-      {/* card-top：头像 + 名称/模型 + 可见范围 */}
-      <div className="flex items-center gap-2.5 px-3.5 pt-3.5 pb-2.5">
+      {/* card-top：头像 + 名称/模型 + 可见范围（系统卡紧凑：更小头像/内边距） */}
+      <div
+        className={cn(
+          "flex items-center gap-2.5 px-3.5 pb-2.5",
+          isSystem ? "pt-2.5" : "pt-3.5",
+        )}
+      >
         <div
+          aria-hidden
           className={cn(
-            "grid size-10 shrink-0 place-items-center rounded-[10px] text-sm font-bold text-white",
+            "grid shrink-0 place-items-center rounded-[10px] text-sm font-bold text-white",
+            isSystem ? "size-[34px] text-[13px]" : "size-10",
             avatarGradient,
           )}
-          aria-hidden
         >
           {isSystem ? "★" : avatarGlyph(profile.name)}
         </div>
@@ -148,6 +179,11 @@ export function AgentProfileCard({
               {profile.name || "—"}
             </span>
             {isSystem && <Tag color="green">系统预置</Tag>}
+            {profile.is_user_default && (
+              <span className="inline-flex items-center gap-1 rounded border border-brand-300 bg-brand-100 px-1.5 py-px text-[11px] font-semibold leading-4 text-brand-700">
+                ★ 默认
+              </span>
+            )}
           </div>
           <div className="truncate font-mono text-[11px] text-muted-foreground">
             {modelLine(profile.provider, profile.model)}
@@ -168,34 +204,41 @@ export function AgentProfileCard({
         )}
       </div>
 
-      {/* prompt 摘要（line-clamp-2） */}
-      <div className="mx-3.5 mb-2.5 line-clamp-2 rounded-lg bg-muted/50 px-2.5 py-2 text-xs leading-relaxed text-slate-600">
+      {/* prompt 摘要：左竖线引用式（去灰底块）；系统卡不留两行储备（空白压 1/3） */}
+      <div
+        className={cn(
+          "mx-3.5 mb-2.5 line-clamp-2 border-l-2 border-brand-300 pl-2.5 text-xs leading-relaxed text-foreground/75",
+          isSystem ? "min-h-0 py-0.5" : "min-h-[40px] py-1",
+          !profile.system_prompt?.trim() && "italic text-muted-foreground",
+        )}
+      >
         {promptText}
       </div>
 
-      {/* abilities chips（mcp + skill refs） */}
-      {mcpRefs.length + skillRefs.length > 0 && (
-        <div className="flex flex-wrap gap-1.5 px-3.5 pb-2.5">
-          {mcpRefs.map((ref) => (
+      {/* abilities：芯片超 4 项收敛 +N；空态占位（系统=引擎默认能力，自定义=不挂载） */}
+      {allRefs.length > 0 ? (
+        <div className="flex flex-wrap items-center gap-1.5 px-3.5 pb-2.5">
+          {shownRefs.map((ref) => (
             <span
-              key={`mcp-${ref}`}
-              className="rounded bg-muted px-2 py-0.5 text-[11px] text-slate-600"
+              key={`ref-${ref}`}
+              className="rounded border border-border-soft bg-muted px-2 py-0.5 font-mono text-[11px] text-muted-foreground"
             >
               {ref || "—"}
             </span>
           ))}
-          {skillRefs.map((ref) => (
-            <span
-              key={`skill-${ref}`}
-              className="rounded bg-muted px-2 py-0.5 text-[11px] text-slate-600"
-            >
-              {ref || "—"}
+          {hiddenCount > 0 && (
+            <span className="text-[11px] text-muted-foreground">
+              +{hiddenCount}
             </span>
-          ))}
+          )}
+        </div>
+      ) : (
+        <div className={cn("px-3.5 text-[11px] text-muted-foreground", isSystem ? "pb-2" : "pb-2.5")}>
+          {isSystem ? "按引擎默认能力执行" : "无技能（不挂载）"}
         </div>
       )}
 
-      {/* card-foot：版本 + workspace_name + 操作 / 只读 */}
+      {/* card-foot：版本 + workspace_name + 操作（降躁：常态 muted 悬停提亮）/ 只读 */}
       <div className="flex items-center justify-between border-t border-dashed border-border px-3.5 py-2">
         <span className="truncate text-[11px] text-muted-foreground">
           {footMeta}
@@ -204,9 +247,37 @@ export function AgentProfileCard({
           <span className="text-[11px] italic text-muted-foreground">只读</span>
         ) : (
           <div className="flex shrink-0 gap-0.5">
+            {profile.is_user_default
+              ? onUnsetDefault && (
+                  <Button
+                    type="link"
+                    size="small"
+                    className="!text-muted-foreground hover:!text-primary"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      onUnsetDefault(profile);
+                    }}
+                  >
+                    取消默认
+                  </Button>
+                )
+              : onSetDefault && (
+                  <Button
+                    type="link"
+                    size="small"
+                    className="!text-muted-foreground hover:!text-primary"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      onSetDefault(profile);
+                    }}
+                  >
+                    设为默认
+                  </Button>
+                )}
             <Button
               type="link"
               size="small"
+              className="!text-muted-foreground hover:!text-primary"
               onClick={(e) => {
                 e.stopPropagation();
                 onEdit(profile);
@@ -217,6 +288,7 @@ export function AgentProfileCard({
             <Button
               type="link"
               size="small"
+              className="!text-muted-foreground hover:!text-primary"
               onClick={(e) => {
                 e.stopPropagation();
                 onCopy(profile);
@@ -228,6 +300,7 @@ export function AgentProfileCard({
               type="link"
               size="small"
               danger
+              className="!text-muted-foreground hover:!text-destructive"
               onClick={(e) => {
                 e.stopPropagation();
                 onDelete(profile);

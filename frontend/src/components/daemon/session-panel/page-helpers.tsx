@@ -219,11 +219,13 @@ export function enrichDisplayTurns(
           // 快照缺 name / 无快照 = 该轮未指定档案 → null（TurnTimeline 显「未指定」）
           profileName: meta.agent_profile_snapshot?.name ?? null,
           agentName: agentDisplayName,
-          // llm_provider_id null（未选/已删 SET NULL）= 本机默认；有 id 但列表
-          // 未命中（列表未加载完）暂 null，memo 随 llmProviders 到位自愈。
+          // llm_provider_id null（未选/已删 SET NULL）→ 回填用户默认供应商名
+          //（2026-10-21-provider-default-ui-hint：claim 链实际注入的是默认，
+          // 恒显「本机默认」反向误导；无默认保持 null → TurnTimeline 显本机默认）。
+          // 有 id 但列表未命中（列表未加载完）暂 null，memo 随 llmProviders 到位自愈。
           providerName: meta.llm_provider_id
             ? (llmProviders.find((p) => p.id === meta.llm_provider_id)?.name ?? null)
-            : null,
+            : (llmProviders.find((p) => p.is_default)?.name ?? null),
         },
         inputTokens: t.inputTokens ?? meta.input_tokens ?? null,
         outputTokens: t.outputTokens ?? meta.output_tokens ?? null,

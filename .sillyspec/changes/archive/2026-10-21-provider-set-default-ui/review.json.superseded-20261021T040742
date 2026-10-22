@@ -1,0 +1,46 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-21-provider-set-default-ui",
+  "reviewer": "subagent",
+  "verdict": "PASS",
+  "reviewedAgainst": "1afffe37494e8a8df94a9df38e3308fd4825444a",
+  "findings": [
+    {
+      "severity": "P3",
+      "title": "后端两处 docstring 残留已移除的 D-001 热切换语义（affected_sessions 描述失真）",
+      "evidence": "schema.py SetDefaultResult docstring 仍写「区分立即生效(affected_sessions>0)/等待 turn 边界(=0)」「notify_provider_switch 成功投递计数」，service.py DefaultSwitchResult dataclass docstring 同样残留；D-002 后 affected_sessions 恒 0 且 notify 永不被调。纯文档陈旧误导后来读者，无行为影响（两处均不在冻结面、schema 三/四字段未动）。",
+      "location": "backend/app/modules/llm_provider/schema.py:294-305（并 backend/app/modules/llm_provider/service.py:152-153）"
+    },
+    {
+      "severity": "P3",
+      "title": "FR-03 零回归场景措辞自相矛盾（「llm_provider 零文件改动」与 FR-02 冲突）",
+      "evidence": "requirements.md FR-03 场景 Then 写「backend/app/modules/llm_provider 零文件改动」，但同文档 FR-02 本身要求修改该模块 service.py/router.py/测试，实际 diff 改了该模块 4 文件；真实意图（claim 注入链 _inject_provider_config / daemon/lease/context.py 零触碰）经全量 diff 核对成立（context.py 等不在 diff 中）。规格措辞缺陷，非实现缺陷。",
+      "location": ".sillyspec/changes/2026-10-21-provider-set-default-ui/requirements.md:55"
+    },
+    {
+      "severity": "P3",
+      "title": "task-02 声称 test_router.py 断言收紧，实际该文件零改动",
+      "evidence": "tasks.md task-02 写「test_llm_provider.py / test_router.py 断言收紧」，但 git diff 6e0ca1bf..HEAD 中 test_router.py 无任何改动——其 affected_sessions==0 断言为基线已存在（notify mock 返 0 恰与新恒 0 行为吻合）。FR-02 测试绑定仍满足（该测试真实存在且断言端点返回 affected_sessions=0），仅任务描述与 diff 不符（过 claim）。",
+      "location": ".sillyspec/changes/2026-10-21-provider-set-default-ui/tasks.md:8"
+    },
+    {
+      "severity": "P3",
+      "title": "集成测试场景三尾部死循环（改写残留）",
+      "evidence": "assert hub.calls == [] 之后的 for 循环遍历必然为空的列表，循环体断言永不评估，属旧推送断言改写后的残留死代码；无行为影响但降低可读性。",
+      "location": "backend/app/modules/daemon/tests/test_provider_switch_integration.py:373"
+    },
+    {
+      "severity": "P3",
+      "title": "mock_probe_notify 夹具注释「防回归保险」因果归因不成立",
+      "evidence": "注释称「若未来误恢复推送，SQLite 无 agent_sessions 表会让误调用立刻炸出」，但该夹具把 notify_provider_switch patch 成 no-op AsyncMock——误恢复的调用会被静默吞掉而非炸出；真实防护来自 test_set_default_success_does_not_dispatch_notify 的 notify_calls==[] spy 断言与集成测试 hub.calls==[]（两者均真实存在）。防护实际存在，注释归因错误。",
+      "location": "backend/app/modules/llm_provider/tests/test_llm_provider.py:114"
+    }
+  ],
+  "dimensionNotes": {
+    "乱序": "ok",
+    "并发": "ok",
+    "切换": "ok",
+    "作用域": "ok"
+  },
+  "reviewedAt": "2026-10-21T12:05:14+08:00"
+}

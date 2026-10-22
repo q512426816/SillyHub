@@ -71,6 +71,8 @@
 - 2026-10-19-change-assets-cross-repo-repos | 变更资产卡展示跨仓冻结面
 - 2026-10-19-cross-repo-patch-slicing | 资产卡跨仓单文件 diff 切片
 - 2026-10-20-conflict-platform-archive | 冲突对比平台留档快照自足回退
+- 2026-10-21-provider-set-default-ui | 供应商页复活设为默认入口
+- 2026-10-21-agent-profile-slim-default | 档案瘦身重定位为人格加技能清单并支持用户默认档案
 - 2026-10-20-codex-models-fetch-candidates | 平台「获取模型列表」对新建的 codex 直连条目（智谱 GLM Codex base=https:…
 - 2026-10-20-session-status-live-sync | 左侧会话状态标签与右侧实时同步
 - 2026-10-21-precommit-sandbox-entries | pre-commit钩子入口沙箱会话适配

@@ -1,0 +1,47 @@
+tier: thin
+legacy_fallback: false
+substeps:
+  artifacts: done
+  ledger: done
+  patch: done
+  review: done
+  probes: done
+  distill: done
+  archive: done
+  events: done
+born_face: thin
+with_tasks: false
+review_force: null
+input: >-
+  预会话态档案显示对齐用户默认档案
+
+
+  动机与背景：变更 2026-10-21-agent-profile-slim-default
+  落地用户默认档案（创建会话未显式选档案时注入，实测注入与技能严格挂载均生效）。但预会话（provisional，悬浮面板/发首句前）配置栏档案按钮仍恒显「未指定」，发送首句创建会话后 config_snapshot
+  回显默认档案名才显示——与供应商显示滞后（已修）同款病，用户实测报告。
+
+
+  成功标准：
+
+  - provisional 态未选档案时，档案按钮显示用户默认档案名（无默认保持「未指定」）
+
+  - 运行中/已结束会话未选档案保持「未指定」（该会话不会追溯注入默认，显示真值）
+
+  - 下拉「不指定」项在 provisional 且有默认时显示「不指定（默认：{名}）」，否则保持「不指定（无人格）」
+
+  - 前端测试覆盖 provisional 与非 provisional 两分支
+autopilot: false
+prestage_ack: true
+baseline_commit: 6248c8ffe2da16ebe392c2a60812b9fec5571137
+updatedAt: '2026-10-21T14:57:52.257Z'
+baseline_sha256: bc7dddeb218f70c4f11ac56fab0caee1594328856e8d27fc00b71782ae722752
+spec_approved: true
+spec_approved_at: '2026-10-21T14:49:05.418Z'
+spec_approved_by: zcode-provider-set-default
+spec_approved_channel: user-confirmed
+spec_attested_by: zcode-provider-set-default
+gate_summary: >-
+  test: passed ← module[]+deps(jsx2)+fr(2)（12.1s）
+  结果：F:\WorkNew\SillyHub\.sillyspec\.runtime\verify-runs\20261021145238\test-result.json｜lint: skipped — 跳过原因：local.yaml
+  未配置 commands.lint（或标记 unavailable）。｜门文件 2 个
+

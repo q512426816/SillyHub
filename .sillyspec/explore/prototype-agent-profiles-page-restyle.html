@@ -1,0 +1,481 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-theme="dark">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>原型 · 智能体档案列表页重设计</title>
+<style>
+/* ═══════════════════════════════════════════════════════════════
+   原型说明（探索模式讨论工具，非交付实现）
+   - 对齐 SillyHub 三主题（themes.ts 单一源）：暗夜 / AI 紫 / 明亮蓝
+   - 与已上线弹窗重构（2026-10-22-agent-profile-modal-restyle）同一设计语言：
+     品牌图标头 / 竖条 / 芯片 / 主题化滚动条
+   - 改造点：①页头重构（品牌图标 + 统计胶囊 + 主操作）
+             ②工具栏收拢成一张卡（搜索 + 三筛选 + 计数同栏）
+             ③卡片重设计：默认态品牌描边光晕 / 系统预置虚线降调 /
+               提示词引用式排版 / 技能芯片截断 +N / 操作降躁
+   ═══════════════════════════════════════════════════════════════ */
+
+:root[data-theme="dark"] {
+  --bg: #09090b; --card: #27272a; --panel: #18181b; --input: #18181b;
+  --border: #3f3f46; --border-soft: #2e2e33;
+  --text: #f4f4f5; --text-2: #a1a1aa; --text-3: #71717a;
+  --primary: #0891b2; --primary-hover: #06b6d4; --accent: #22d3ee;
+  --brand-soft: rgba(34, 211, 238, 0.10);
+  --chip-on-bg: rgba(6, 182, 212, 0.12);
+  --chip-on-border: #0e7490; --chip-on-text: #a5f3fc;
+  --overlay: rgba(0, 0, 0, 0.55);
+  --shadow-card: 0 2px 10px -4px rgba(0, 0, 0, 0.5);
+  --shadow-lift: 0 10px 28px -10px rgba(0, 0, 0, 0.6);
+  --tag-default-bg: rgba(255,255,255,0.08); --tag-default-border: #52525b; --tag-default-text: #d4d4d8;
+  --tag-blue-bg: rgba(22,119,255,0.22); --tag-blue-border: rgba(91,163,255,0.45); --tag-blue-text: #91caff;
+  --tag-purple-bg: rgba(114,46,209,0.28); --tag-purple-border: rgba(179,127,235,0.45); --tag-purple-text: #b37feb;
+  --tag-green-bg: rgba(16,185,129,0.16); --tag-green-border: rgba(52,211,153,0.4); --tag-green-text: #6ee7b7;
+  --danger: #f87171;
+  --scroll-thumb: rgba(255,255,255,0.14);
+}
+:root[data-theme="ai-native"] {
+  --bg: #FAF5FF; --card: #FFFFFF; --panel: #f5f3ff; --input: #FFFFFF;
+  --border: #DDD6FE; --border-soft: #ede9fe;
+  --text: #1e1b2e; --text-2: #64748b; --text-3: #94a3b8;
+  --primary: #7C3AED; --primary-hover: #6D28D9; --accent: #0891B2;
+  --brand-soft: #f5f3ff;
+  --chip-on-bg: #ede9fe; --chip-on-border: #c4b5fd; --chip-on-text: #5b21b6;
+  --overlay: rgba(46, 16, 101, 0.30);
+  --shadow-card: 0 2px 10px -4px rgba(124, 58, 237, 0.12);
+  --shadow-lift: 0 12px 28px -10px rgba(124, 58, 237, 0.22);
+  --tag-default-bg: #fafafa; --tag-default-border: #d9d9d9; --tag-default-text: rgba(0,0,0,0.65);
+  --tag-blue-bg: #e6f4ff; --tag-blue-border: #91caff; --tag-blue-text: #1677ff;
+  --tag-purple-bg: #f9f0ff; --tag-purple-border: #d3adf7; --tag-purple-text: #722ed1;
+  --tag-green-bg: #ecfdf5; --tag-green-border: #a7f3d0; --tag-green-text: #047857;
+  --danger: #dc2626;
+  --scroll-thumb: rgba(76, 29, 149, 0.22);
+}
+:root[data-theme="blue"] {
+  --bg: #f8fafc; --card: #FFFFFF; --panel: #f8fafc; --input: #FFFFFF;
+  --border: #e2e8f0; --border-soft: #f1f5f9;
+  --text: #0f172a; --text-2: #64748b; --text-3: #94a3b8;
+  --primary: #2563EB; --primary-hover: #1d4ed8; --accent: #06b6d4;
+  --brand-soft: #eff6ff;
+  --chip-on-bg: #dbeafe; --chip-on-border: #93c5fd; --chip-on-text: #1e40af;
+  --overlay: rgba(15, 23, 42, 0.35);
+  --shadow-card: 0 2px 10px -4px rgba(37, 99, 235, 0.10);
+  --shadow-lift: 0 12px 28px -10px rgba(37, 99, 235, 0.18);
+  --tag-default-bg: #fafafa; --tag-default-border: #d9d9d9; --tag-default-text: rgba(0,0,0,0.65);
+  --tag-blue-bg: #e6f4ff; --tag-blue-border: #91caff; --tag-blue-text: #1677ff;
+  --tag-purple-bg: #f9f0ff; --tag-purple-border: #d3adf7; --tag-purple-text: #722ed1;
+  --tag-green-bg: #ecfdf5; --tag-green-border: #a7f3d0; --tag-green-text: #047857;
+  --danger: #dc2626;
+  --scroll-thumb: rgba(30, 58, 138, 0.20);
+}
+
+* { box-sizing: border-box; margin: 0; padding: 0; }
+::-webkit-scrollbar { width: 8px; height: 8px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: var(--scroll-thumb); border-radius: 8px; border: 2px solid transparent; background-clip: content-box; }
+* { scrollbar-width: thin; scrollbar-color: var(--scroll-thumb) transparent; }
+
+body {
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
+    "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
+  background: var(--bg); color: var(--text); font-size: 14px; line-height: 1.5;
+  min-height: 100vh;
+}
+
+/* ── 主题切换器（原型工具） ── */
+.theme-switch {
+  position: fixed; top: 14px; right: 16px; z-index: 300;
+  display: flex; gap: 4px; padding: 4px;
+  background: var(--card); border: 1px solid var(--border);
+  border-radius: 999px; box-shadow: var(--shadow-card);
+}
+.theme-switch button {
+  border: none; background: transparent; cursor: pointer;
+  font-size: 12px; color: var(--text-2); padding: 3px 12px;
+  border-radius: 999px; font-family: inherit;
+}
+.theme-switch button.on { background: var(--primary); color: #fff; }
+.proto-badge { position: fixed; left: 16px; bottom: 12px; z-index: 300; font-size: 11px; color: var(--text-3); }
+
+/* ── 页面骨架 ── */
+.page { max-width: 1400px; margin: 0 auto; padding: 28px 28px 48px; }
+
+/* 页头：品牌图标 + 标题 + 统计 + 主操作 */
+.page-head { display: flex; align-items: center; gap: 14px; margin-bottom: 18px; }
+.head-icon {
+  width: 42px; height: 42px; border-radius: 12px; flex-shrink: 0;
+  background: var(--chip-on-bg); border: 1px solid var(--chip-on-border);
+  display: grid; place-items: center; font-size: 20px; color: var(--chip-on-text);
+}
+.head-title { font-size: 20px; font-weight: 700; letter-spacing: 0.01em; }
+.head-sub { font-size: 12px; color: var(--text-3); margin-top: 2px; }
+.head-right { margin-left: auto; display: flex; align-items: center; gap: 10px; }
+.stat-pill {
+  display: inline-flex; align-items: center; gap: 6px;
+  height: 32px; padding: 0 12px; border-radius: 999px;
+  background: var(--panel); border: 1px solid var(--border);
+  font-size: 12px; color: var(--text-2);
+}
+.stat-pill b { color: var(--primary); font-weight: 600; }
+.btn {
+  height: 34px; padding: 0 16px; border-radius: 8px; font-size: 13px;
+  font-family: inherit; cursor: pointer; border: 1px solid var(--border);
+  background: var(--card); color: var(--text); transition: all 0.15s;
+  display: inline-flex; align-items: center; gap: 6px;
+}
+.btn:hover { border-color: var(--primary); color: var(--primary); }
+.btn.primary { background: var(--primary); border-color: var(--primary); color: #fff; }
+.btn.primary:hover { background: var(--primary-hover); border-color: var(--primary-hover); }
+
+/* ── 工具栏：一张卡收拢 搜索+三筛选+计数 ── */
+.toolbar {
+  display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+  background: var(--card); border: 1px solid var(--border);
+  border-radius: 12px; padding: 10px 12px; margin-bottom: 18px;
+  box-shadow: var(--shadow-card);
+}
+.search { position: relative; flex: 1 1 260px; min-width: 220px; }
+.search .mag {
+  position: absolute; left: 10px; top: 50%; transform: translateY(-50%);
+  color: var(--text-3); font-size: 13px; pointer-events: none;
+}
+.search input {
+  width: 100%; height: 32px; padding: 0 10px 0 30px;
+  background: var(--input); border: 1px solid var(--border); border-radius: 8px;
+  color: var(--text); font-size: 13px; font-family: inherit; outline: none;
+  transition: border-color 0.15s, box-shadow 0.15s;
+}
+.search input:focus { border-color: var(--primary); box-shadow: 0 0 0 2px var(--brand-soft); }
+.sel-wrap { position: relative; }
+.sel-wrap::after {
+  content: ""; position: absolute; right: 10px; top: 50%; width: 7px; height: 7px;
+  border-right: 1.5px solid var(--text-3); border-bottom: 1.5px solid var(--text-3);
+  transform: translateY(-70%) rotate(45deg); pointer-events: none;
+}
+.sel-wrap select {
+  height: 32px; padding: 0 26px 0 10px; min-width: 118px;
+  appearance: none; cursor: pointer;
+  background: var(--input); border: 1px solid var(--border); border-radius: 8px;
+  color: var(--text); font-size: 12.5px; font-family: inherit; outline: none;
+}
+.sel-wrap select:focus { border-color: var(--primary); box-shadow: 0 0 0 2px var(--brand-soft); }
+.sel-wrap select option { background: var(--card); color: var(--text); }
+.tb-count { font-size: 12px; color: var(--text-3); white-space: nowrap; margin-left: auto; padding-right: 4px; }
+.tb-count b { color: var(--primary); }
+
+/* ── 卡片网格：2×2 整齐排布（4 档场景无孤卡；实现态可 repeat(auto-fill,minmax(420px,1fr))） ── */
+.grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; }
+@media (max-width: 720px) { .grid { grid-template-columns: 1fr; } }
+
+.card {
+  position: relative; display: flex; flex-direction: column;
+  background: var(--card); border: 1px solid var(--border); border-radius: 12px;
+  padding: 16px 16px 12px; cursor: pointer; user-select: none;
+  transition: transform 0.15s ease, border-color 0.15s, box-shadow 0.15s;
+}
+.card:hover { transform: translateY(-2px); border-color: var(--chip-on-border); box-shadow: var(--shadow-lift); }
+/* 用户默认档案：品牌描边 + 光晕 */
+.card.is-default { border-color: var(--chip-on-border); box-shadow: 0 0 0 3px var(--brand-soft); }
+.card.is-default:hover { box-shadow: 0 0 0 3px var(--brand-soft), var(--shadow-lift); }
+/* 系统预置：虚线降调整卡（提示词区显示未设置说明，不空壳） */
+.card.is-system {
+  border-style: dashed; padding: 13px 16px 10px;
+  background: color-mix(in srgb, var(--card) 92%, var(--panel));
+}
+.card.is-system:hover { border-style: solid; }
+/* 系统卡空白压缩至 1/3：占位 1 行即可，不留两行储备 */
+.card.is-system .prompt { min-height: 12px; margin: 1px 0 8px; }
+.card.is-system .skills { margin-bottom: 7px; }
+.card.is-system .avatar { width: 34px; height: 34px; border-radius: 9px; font-size: 14px; }
+
+/* 卡头：头像 + 名称/元信息 + 可见范围 */
+.card-top { display: flex; align-items: flex-start; gap: 11px; margin-bottom: 10px; }
+.avatar {
+  width: 40px; height: 40px; border-radius: 10px; flex-shrink: 0;
+  display: grid; place-items: center; color: #fff; font-size: 15px; font-weight: 700;
+}
+.av-claude { background: linear-gradient(135deg, #3b82f6, #22d3ee); }
+.av-codex { background: linear-gradient(135deg, #10b981, #059669); }
+.av-default { background: linear-gradient(135deg, #f59e0b, #d97706); }
+.name-row { display: flex; align-items: center; gap: 6px; min-width: 0; flex-wrap: wrap; }
+.name { font-size: 15px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100%; }
+.tag { font-size: 11px; line-height: 1; padding: 3px 7px; border-radius: 4px; border: 1px solid; white-space: nowrap; flex-shrink: 0; }
+.tag.green { background: var(--tag-green-bg); border-color: var(--tag-green-border); color: var(--tag-green-text); }
+.tag.blue { background: var(--tag-blue-bg); border-color: var(--tag-blue-border); color: var(--tag-blue-text); }
+.tag.purple { background: var(--tag-purple-bg); border-color: var(--tag-purple-border); color: var(--tag-purple-text); }
+.tag.default { background: var(--tag-default-bg); border-color: var(--tag-default-border); color: var(--tag-default-text); }
+.tag.brand {
+  background: var(--chip-on-bg); border-color: var(--chip-on-border); color: var(--chip-on-text);
+  display: inline-flex; align-items: center; gap: 3px; font-weight: 600;
+}
+.meta { font-size: 11px; color: var(--text-3); margin-top: 3px; font-family: ui-monospace, "Cascadia Mono", Consolas, monospace; }
+.vis { margin-left: auto; }
+
+/* 提示词：引用式（左竖线），去掉灰底块 */
+.prompt {
+  border-left: 2px solid var(--chip-on-border);
+  padding: 2px 0 2px 10px; margin: 2px 0 10px;
+  font-size: 12px; line-height: 1.65; color: var(--text-2);
+  display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
+  min-height: 36px;
+}
+.prompt.empty { color: var(--text-3); font-style: italic; }
+
+/* 技能芯片 */
+.skills { display: flex; flex-wrap: wrap; gap: 5px; margin-bottom: 10px; min-height: 0; align-items: center; }
+.skill-chip {
+  font-size: 11px; padding: 2px 8px; border-radius: 4px;
+  background: var(--brand-soft); color: var(--text-2);
+  font-family: ui-monospace, "Cascadia Mono", Consolas, monospace;
+  border: 1px solid var(--border-soft);
+}
+.skill-more { font-size: 11px; color: var(--text-3); align-self: center; padding: 0 2px; }
+.skill-none { font-size: 11px; color: var(--text-3); }
+
+/* 卡脚：元信息 + 操作（降躁：muted 态，悬停卡时提亮） */
+.card-foot {
+  margin-top: auto; display: flex; align-items: center; gap: 8px;
+  border-top: 1px dashed var(--border); padding-top: 9px;
+}
+.foot-meta { font-size: 11px; color: var(--text-3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ops { margin-left: auto; display: flex; gap: 2px; }
+.op {
+  border: none; background: transparent; cursor: pointer; font-family: inherit;
+  font-size: 12px; color: var(--text-3); padding: 3px 7px; border-radius: 6px;
+  transition: all 0.12s;
+}
+.op:hover { color: var(--primary); background: var(--brand-soft); }
+.op.danger:hover { color: var(--danger); background: var(--brand-soft); }
+.op.star { color: var(--text-3); }
+.op.star.on { color: var(--chip-on-text); }
+.readonly { margin-left: auto; font-size: 11px; font-style: italic; color: var(--text-3); }
+
+/* 空态 */
+.empty {
+  grid-column: 1 / -1; display: grid; place-items: center; gap: 8px;
+  min-height: 260px; color: var(--text-3);
+  border: 1px dashed var(--border); border-radius: 12px;
+}
+.empty .big { font-size: 30px; opacity: 0.6; }
+</style>
+</head>
+<body>
+
+<div class="theme-switch" role="group" aria-label="主题切换">
+  <button data-t="dark" class="on">暗夜</button>
+  <button data-t="ai-native">AI 紫</button>
+  <button data-t="blue">明亮蓝</button>
+</div>
+<div class="proto-badge">原型演示 · 可交互（搜索 / 筛选 / 设默认 / 主题切换为真实逻辑；数据为现场真实档案）</div>
+
+<div class="page">
+  <!-- 页头 -->
+  <div class="page-head">
+    <div class="head-icon">◆</div>
+    <div>
+      <div class="head-title">智能体档案</div>
+      <div class="head-sub">管理可复用的智能体人设：跨工作区查看全部可见档案，可按工作区/可见范围/供应商筛选。</div>
+    </div>
+    <div class="head-right">
+      <span class="stat-pill">共 <b id="stat-total">4</b> 个档案 · 默认 <b id="stat-default">1</b></span>
+      <button class="btn primary" id="btn-create">＋ 新建档案</button>
+    </div>
+  </div>
+
+  <!-- 工具栏 -->
+  <div class="toolbar">
+    <div class="search">
+      <span class="mag">🔍</span>
+      <input id="f-search" placeholder="搜索档案名或系统提示词…（回车搜索）" />
+    </div>
+    <div class="sel-wrap"><select id="f-ws">
+      <option value="">工作区：全部</option><option>SillyHub</option>
+    </select></div>
+    <div class="sel-wrap"><select id="f-vis">
+      <option value="">可见范围：全部</option>
+      <option value="private">个人</option><option value="workspace">工作区</option><option value="platform">平台</option>
+    </select></div>
+    <div class="sel-wrap"><select id="f-provider">
+      <option value="">供应商：全部</option>
+      <option value="claude">claude</option><option value="codex">codex</option>
+    </select></div>
+    <span class="tb-count">匹配 <b id="tb-count">4</b> / 4</span>
+  </div>
+
+  <!-- 卡片墙 -->
+  <div class="grid" id="grid"></div>
+</div>
+
+<script>
+/* ── 数据：现场真实档案（/agent-profiles 实测快照；极速变更的技能 chip 为示意） ── */
+const PROFILES = [
+  {
+    id: "p1", name: "SillySpec 极速变更", provider: "claude", model: null,
+    visibility: "platform", isSystem: false, isDefault: true, version: 1, ws: null,
+    prompt: "你是 SillyHub 平台的「SillySpec 极速变更」执行档案：一个通用执行者，纪律是所有代码修改必须走目标仓库的 SillySpec 轻量变更（极速）通道——先立项、再动手、完成即收口，绝不裸改代码。",
+    skills: ["sillyspec-flow", "sillyspec-quick", "sillyspec-commit", "sillyspec-status", "sillyspec-doctor", "sillyspec-knowledge"],
+  },
+  {
+    id: "p2", name: "智能体档案设计师GLM", provider: "claude", model: null,
+    visibility: "private", isSystem: false, isDefault: false, version: 1, ws: null,
+    prompt: "你是智能体档案设计师，核心职责是帮用户创建和维护智能体档案。需求澄清：用户要建新档案时，先弄清三点——这个智能体解决什么问题、典型使用场景、对输出有什么要求。信息足够就直接出方案，不为了问而问。",
+    skills: [],
+  },
+  {
+    id: "p3", name: "Claude Code 默认", provider: "claude", model: null,
+    visibility: "platform", isSystem: true, isDefault: false, version: 1, ws: null,
+    prompt: "", skills: [],
+  },
+  {
+    id: "p4", name: "Codex 默认", provider: "codex", model: null,
+    visibility: "platform", isSystem: true, isDefault: false, version: 1, ws: null,
+    prompt: "", skills: [],
+  },
+];
+const VIS = { private: ["个人", "default"], workspace: ["工作区", "blue"], platform: ["平台", "purple"] };
+const AV = { claude: "av-claude", codex: "av-codex" };
+const $ = (id) => document.getElementById(id);
+let defaultId = "p1";
+let searchPending = "", searchCommitted = "";
+
+const visible = () => {
+  const q = searchCommitted.trim().toLowerCase();
+  const vis = $("f-vis").value, pv = $("f-provider").value;
+  return PROFILES.filter((p) => {
+    if (vis && p.visibility !== vis) return false;
+    if (pv && p.provider !== pv) return false;
+    if (q && !(p.name.toLowerCase().includes(q) || (p.prompt || "").toLowerCase().includes(q))) return false;
+    return true;
+  });
+};
+
+function render() {
+  const list = visible();
+  const grid = $("grid");
+  grid.innerHTML = "";
+  if (list.length === 0) {
+    grid.innerHTML = '<div class="empty"><span class="big">🗂</span><span>没有匹配的档案</span><span style="font-size:12px">换个关键词或清除筛选试试</span></div>';
+  } else {
+    for (const p of list) {
+      const isDefault = p.id === defaultId;
+      const card = document.createElement("div");
+      card.className = "card" + (p.isSystem ? " is-system" : "") + (isDefault ? " is-default" : "");
+      card.title = "点击查看人设预览";
+
+      const top = document.createElement("div");
+      top.className = "card-top";
+      const av = document.createElement("div");
+      av.className = "avatar " + (AV[p.provider] ?? "av-default");
+      av.textContent = p.isSystem ? "★" : (p.name.trim()[0] ?? "?").toUpperCase();
+      const mid = document.createElement("div");
+      mid.style.minWidth = "0"; mid.style.flex = "1";
+      const nameRow = document.createElement("div");
+      nameRow.className = "name-row";
+      const nm = document.createElement("span");
+      nm.className = "name"; nm.textContent = p.name;
+      nameRow.appendChild(nm);
+      if (p.isSystem) { const t = mkTag("green", "系统预置"); nameRow.appendChild(t); }
+      if (isDefault) { const t = mkTag("brand", "★ 默认"); nameRow.appendChild(t); }
+      const meta = document.createElement("div");
+      meta.className = "meta"; meta.textContent = p.model ? `${p.provider} / ${p.model}` : p.provider;
+      mid.append(nameRow, meta);
+      top.append(av, mid);
+      if (!p.isSystem) {
+        const [label, cls] = VIS[p.visibility];
+        top.appendChild(Object.assign(mkTag(cls, label), { className: "tag vis " + cls }));
+      }
+      card.appendChild(top);
+
+      const pr = document.createElement("div");
+      pr.className = "prompt" + (p.prompt ? "" : " empty");
+      pr.textContent = p.prompt
+        || (p.isSystem ? "（未设置系统提示词，按引擎默认人设执行）" : "（未设置系统提示词）");
+      card.appendChild(pr);
+
+      if (p.skills.length > 0) {
+        const sk = document.createElement("div");
+        sk.className = "skills";
+        for (const s of p.skills.slice(0, 4)) {
+          const c = document.createElement("span");
+          c.className = "skill-chip"; c.textContent = s;
+          sk.appendChild(c);
+        }
+        if (p.skills.length > 4) {
+          const m = document.createElement("span");
+          m.className = "skill-more"; m.textContent = `+${p.skills.length - 4}`;
+          sk.appendChild(m);
+        }
+        card.appendChild(sk);
+      } else {
+        /* 空技能占位：填掉卡中留白，语义与弹窗预览一致 */
+        const sk = document.createElement("div");
+        sk.className = "skills";
+        const n = document.createElement("span");
+        n.className = "skill-none";
+        n.textContent = p.isSystem ? "按引擎默认能力执行" : "无技能（不挂载）";
+        sk.appendChild(n);
+        card.appendChild(sk);
+      }
+
+      const foot = document.createElement("div");
+      foot.className = "card-foot";
+      const fm = document.createElement("span");
+      fm.className = "foot-meta";
+      fm.textContent = `v${p.version}` + (p.ws ? ` · ${p.ws}` : "");
+      foot.appendChild(fm);
+      if (p.isSystem) {
+        const ro = document.createElement("span");
+        ro.className = "readonly"; ro.textContent = "只读";
+        foot.appendChild(ro);
+      } else {
+        const ops = document.createElement("div");
+        ops.className = "ops";
+        const star = document.createElement("button");
+        star.className = "op star" + (isDefault ? " on" : "");
+        star.textContent = isDefault ? "★ 取消默认" : "☆ 设为默认";
+        star.title = isDefault ? "取消当前用户默认" : "设为当前用户默认（新会话生效）";
+        star.onclick = (e) => { e.stopPropagation(); defaultId = isDefault ? "" : p.id; render(); };
+        const ed = mkOp("编辑"), cp = mkOp("复制"), dl = mkOp("删除", true);
+        ops.append(star, ed, cp, dl);
+        foot.appendChild(ops);
+      }
+      card.appendChild(foot);
+      grid.appendChild(card);
+    }
+  }
+  $("tb-count").textContent = list.length;
+  $("stat-total").textContent = PROFILES.length;
+  $("stat-default").textContent = defaultId ? 1 : 0;
+}
+function mkTag(cls, text) {
+  const t = document.createElement("span");
+  t.className = "tag " + cls; t.textContent = text;
+  return t;
+}
+function mkOp(text, danger) {
+  const b = document.createElement("button");
+  b.className = "op" + (danger ? " danger" : "");
+  b.textContent = text;
+  b.onclick = (e) => e.stopPropagation();
+  return b;
+}
+
+$("f-search").addEventListener("keydown", (e) => {
+  if (e.key === "Enter") { searchCommitted = e.target.value; render(); }
+});
+$("f-search").addEventListener("input", (e) => { searchPending = e.target.value; });
+$("f-search").addEventListener("blur", (e) => { if (e.target.value !== searchCommitted) { searchCommitted = e.target.value; render(); } });
+$("f-vis").addEventListener("change", render);
+$("f-provider").addEventListener("change", render);
+$("f-ws").addEventListener("change", render);
+$("btn-create").onclick = () => {};
+document.querySelectorAll(".theme-switch button").forEach((b) => {
+  b.addEventListener("click", () => {
+    document.documentElement.dataset.theme = b.dataset.t;
+    document.querySelectorAll(".theme-switch button").forEach((x) => x.classList.toggle("on", x === b));
+  });
+});
+render();
+</script>
+</body>
+</html>

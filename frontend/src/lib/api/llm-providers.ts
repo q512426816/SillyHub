@@ -195,11 +195,59 @@ export async function updateProvider(
   );
 }
 
+/** 兜底项固定文案（无默认用户）。 */
+export const NO_PROVIDER_FALLBACK_LABEL = "不指定（本机默认）";
+
+/**
+ * 供应商下拉「不指定」兜底项文案（2026-10-21-provider-default-ui-hint）：
+ * 用户设了默认供应商 → 「不指定（默认：{name}）」（claim 链会注入它）；
+ * 未设 / 列表未到位 → 现状「不指定（本机默认）」。单源收敛防四处文案漂移。
+ */
+export function noProviderLabel(
+  providers: LlmProviderRead[] | null | undefined,
+): string {
+  const def = (providers ?? []).find((p) => p.is_default);
+  return def ? `不指定（默认：${def.name}）` : NO_PROVIDER_FALLBACK_LABEL;
+}
+
 /** 删除供应商（204）。 */
 export async function deleteProvider(id: string): Promise<void> {
   await apiFetch<void>(`/api/llm-providers/${encodeURIComponent(id)}`, {
     method: "DELETE",
   });
+}
+
+// ── set-default / unset-default（2026-10-21-provider-set-default-ui 加回）────
+// 2026-08-20（ql-20260820-006）随「启动/停止」UI 一度移除；后端端点与 claim 默认
+// 注入链始终健在，本组恢复入口供列表「设为默认/取消默认」操作。D-002：后端已收敛
+// 为仅置位（热切换推送移除）——默认变更只对新会话生效，affected_sessions 恒 0。
+
+/** set-default / unset-default 统一响应（对齐后端 schema.py `SetDefaultResult`）。 */
+export interface SetDefaultResult {
+  /** 本次 set/unset 是否成功变更 is_default（set 凭证探测失败为 false）。 */
+  switched: boolean;
+  /** 恒 0（D-002 热切换移除；字段保留兼容）。 */
+  affected_sessions: number;
+  /** 凭证探测失败原因（仅 switched=false 时有值）。 */
+  error: string | null;
+  /** openai 格式联动 LiteLLM 注册结果；anthropic / 失败 / unset 场景为 null。 */
+  litellm_registered?: boolean | null;
+}
+
+/** 置本行为默认供应商（探测凭证失败时后端不置位，switched=false + error）。 */
+export async function setDefaultProvider(id: string): Promise<SetDefaultResult> {
+  return apiFetch<SetDefaultResult>(
+    `/api/llm-providers/${encodeURIComponent(id)}/set-default`,
+    { method: "POST" },
+  );
+}
+
+/** 取消本行默认（不探测，恒 switched=true）。 */
+export async function unsetDefaultProvider(id: string): Promise<SetDefaultResult> {
+  return apiFetch<SetDefaultResult>(
+    `/api/llm-providers/${encodeURIComponent(id)}/unset-default`,
+    { method: "POST" },
+  );
 }
 
 // ── fetch-models（task-11 / D-001/D-006）──────────────────────────────────

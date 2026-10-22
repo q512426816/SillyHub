@@ -1,36 +1,37 @@
 "use client";
 
 /**
- * AgentProfileForm — 智能体档案新建/编辑表单（双栏预览版）。
+ * AgentProfileForm — 智能体档案新建/编辑表单（人格 + 技能清单版）。
  *
- * 变更 2026-08-04-agent-profile-ui-redesign task-04（重做）：
- *  - 宽弹窗(~900px) 双栏：左栏填字段、右栏实时预览角色卡（Form.useWatch 订阅，
- *    无后端往返）。右栏预览为内联简化卡，不依赖 task-03 的 AgentProfileCard。
- *  - 全局页（workspaceId 缺省）首字段「工作区上下文」选择器（D-006）：
- *    数据源 listWorkspaces()；visibility=workspace→该 ws 即归属，visibility=
- *    private/platform→仅作 sourcing，workspace_id 由后端按 visibility 决定
- *    （service.create PRIVATE/PLATFORM→ws_id=None，已核实）。
- *  - 字段三组与 8 字段完全不变（身份/大脑/能力），toCreateBody/toUpdateBody 行为
- *    兼容（不引入 workspace_id 进 body，归属由 URL wid + visibility 决定）。
+ * 2026-10-22-agent-profile-modal-restyle：弹窗观感按定稿原型重构——品牌图标头
+ * + 副标题、红线注脚移页脚左侧（单行省略）、品牌竖条小节头；技能选择从裸
+ * Checkbox.Group 换为受控 SkillPickerGroup（全选三态只作用于筛选集 + 名称∪简介
+ * 搜索 + 已选计数 + 清空 + 两行芯片），skillOptions 扩为 {name, desc} 并集
+ * （自定义技能同名优先），滚动条走 globals.css .thin-scroll 主题化工具类。
+ * 业务流（hooks/校验/提交/工作区归属判定/字段瘦身语义）本轮零变化。
  *
- * 原始实现：task-12 / 变更 2026-08-02-agent-profile-layer（D-011 三组）。
+ * 2026-10-21-agent-profile-slim-default task-04：按消费现实瘦身——会话/群聊两条
+ * 活跃链路只消费 system_prompt + skill_refs（D-013 裁剪变体），引擎/模型/供应商/
+ * 工具策略/MCP 勾选全部移出表单（DB 列留守，读侧忽略；编辑保存显式落空值清空
+ * 存量引用，不迁移）。工作区上下文选择器仅在 visibility=workspace（归属必需）
+ * 时出现；private/platform 由后端按 visibility 定归属（ws_id=None），URL 载体
+ * 自动取首个可见工作区，不再强制用户选择。
  *
- * 红线（design §10）：不存任何 API Key / MCP 凭证——只存「用哪些」的引用。MCP 引用
- *所选工作区 .mcp.json 的 server 名（env 已脱敏），技能引用当前用户技能池。
+ * 历史：双栏预览版 2026-08-04-agent-profile-ui-redesign task-04；三组 8 字段
+ * 原始实现 2026-08-02-agent-profile-layer task-12（D-011）。
  *
- * 遵循 FRONTEND_PAGE_STYLE.md §6：antd Modal（不用 Drawer）+ Form layout="vertical"
- * + maskClosable=false + destroyOnClose；保存 primary+loading，取消 default；校验内联。
- * 双栏布局为本页显式特例（design §10 R-02 / D-003）。
+ * 红线（design §10）：不存任何 API Key / MCP 凭证——技能引用当前用户技能池。
  *
- * 类型从 api-types.ts（规则 20）：Create/Update body 用 lib/agent-profiles 透传的
- * AgentProfileCreate / AgentProfileUpdate。
+ * 遵循 FRONTEND_PAGE_STYLE.md §6：antd Modal + Form layout="vertical" +
+ * maskClosable=false + destroyOnClose。双栏布局为本页显式特例。
  */
-import { useEffect, useMemo, useState } from "react";
+
+import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { useQuery } from "@tanstack/react-query";
+import { CheckOutlined, SearchOutlined } from "@ant-design/icons";
 import {
   Button,
   Checkbox,
-  Divider,
   Form,
   Input,
   Modal,
@@ -39,11 +40,9 @@ import {
   type FormInstance,
 } from "antd";
 
-import { PROVIDER_META } from "@/lib/daemon";
 import {
   useCreateAgentProfile,
   useUpdateAgentProfile,
-  useWorkspaceToolPolicies,
   VISIBILITY_LABEL,
   VISIBILITY_TAG_COLOR,
   type AgentProfileCreate,
@@ -51,21 +50,19 @@ import {
   type AgentProfileUpdate,
   type AgentProfileVisibility,
 } from "@/lib/agent-profiles";
-import { useWorkspaceMcpConfig } from "@/lib/workspace-skills-view";
 import {
   useCustomSkills,
   usePlatformSkillsManifest,
 } from "@/lib/custom-skills";
 import { listWorkspaces, type Workspace } from "@/lib/workspaces";
-import { listProviders, type LlmProviderRead } from "@/lib/api/llm-providers";
 import { useNotify } from "@/lib/errors";
 
 interface AgentProfileFormProps {
   /** create=新建空白表单；edit=编辑既有档案（需传 profile）。 */
   mode: "create" | "edit";
   /**
-   * 工作区内页路由携带的 workspaceId。全局页（/agent-profiles）不传——此时表单
-   * 顶部渲染「工作区上下文」选择器，由用户选定的 ws 决定 sourcing 与归属（D-006）。
+   * 工作区内页路由携带的 workspaceId（visibility=workspace 时即归属）。
+   * 全局页（/agent-profiles）不传。
    */
   workspaceId?: string;
   /** edit 模式必传（被编辑的档案）；create 模式忽略。 */
@@ -74,24 +71,20 @@ interface AgentProfileFormProps {
 }
 
 /**
- * 表单内部扁平状态（antd Form 字段值）。各字段与 DTO 对齐：
- *  - tool_policy_id：空串=不引用（null）。
- *  - mcp_refs / skill_refs：字符串数组。
- *
- * 注意：contextWorkspaceId 不入表单值（避免污染 toCreateBody/toUpdateBody 与
- * ProfileFormValues 类型），作为 React state 单独管理。
+ * 表单内部扁平状态（antd Form 字段值）。2026-10-21 瘦身后仅四项：
+ * name / visibility / system_prompt / skill_refs。
  */
 interface ProfileFormValues {
   name: string;
   visibility: AgentProfileVisibility;
-  provider: string;
-  /** 绑定的 /settings/providers 供应商 id；null=不绑定（用默认）。 */
-  llm_provider_id?: string | null;
-  model?: string;
   system_prompt?: string;
-  tool_policy_id?: string;
-  mcp_refs?: string[];
   skill_refs?: string[];
+}
+
+/** 技能选项（2026-10-22-modal-restyle 起 name+desc 两元，desc 取数据源字段）。 */
+interface SkillOption {
+  name: string;
+  desc: string;
 }
 
 const VISIBILITY_OPTIONS: {
@@ -103,78 +96,52 @@ const VISIBILITY_OPTIONS: {
   { value: "platform", label: "平台（全平台共享，需 admin）" },
 ];
 
-/** provider 下拉选项：取 PROVIDER_META 已知键 + 编辑态遇到未知 provider 时追加。 */
-function buildProviderOptions(current?: string | null) {
-  const known = Object.keys(PROVIDER_META).map((k) => ({
-    value: k,
-    label: PROVIDER_META[k]?.label ?? k,
-  }));
-  if (current && !PROVIDER_META[current]) {
-    known.push({ value: current, label: current });
-  }
-  return known;
-}
+/** 红线注脚（文案逐字沿用瘦身版渲染结果，仅展示位从表单底移到页脚左侧）。 */
+const REDLINE_NOTE =
+  "档案不存任何 API Key / 凭证——引擎、模型、供应商、MCP 均在会话与 群成员配置里各自指定；本档案只承载人格与技能清单。";
 
-/** 把表单扁平值组装成 Create body（必填字段补齐）。导出供单测。 */
+/**
+ * 把表单扁平值组装成 Create body。被删字段显式落空值（新建本就空；
+ * 后端 provider 缺省 'claude'，前端不传）。
+ */
 export function toCreateBody(v: ProfileFormValues): AgentProfileCreate {
   return {
     name: v.name.trim(),
     visibility: v.visibility,
-    provider: v.provider,
-    llm_provider_id: v.llm_provider_id ?? null,
-    model: v.model?.trim() ? v.model.trim() : null,
     system_prompt: v.system_prompt?.trim() ? v.system_prompt.trim() : null,
-    tool_policy_id: v.tool_policy_id ? v.tool_policy_id : null,
-    mcp_refs: v.mcp_refs ?? [],
     skill_refs: v.skill_refs ?? [],
   };
 }
 
-/** 把表单扁平值组装成 Update body（全字段可选；显式 null=清空）。导出供单测。 */
+/**
+ * 把表单扁平值组装成 Update body。**显式**携带被删字段的空值（null/[]）清空
+ * 存量引用——Update 语义 exclude_unset：不传=不动，传空值=清空（存量档案的
+ * mcp_refs/tool_policy_id/llm_provider_id/model 随首次编辑保存自然清空）。
+ */
 export function toUpdateBody(v: ProfileFormValues): AgentProfileUpdate {
   return {
     name: v.name.trim(),
     visibility: v.visibility,
-    provider: v.provider,
-    llm_provider_id: v.llm_provider_id ?? null,
-    model: v.model?.trim() ? v.model.trim() : null,
     system_prompt: v.system_prompt?.trim() ? v.system_prompt.trim() : null,
-    tool_policy_id: v.tool_policy_id ? v.tool_policy_id : null,
-    mcp_refs: v.mcp_refs ?? [],
     skill_refs: v.skill_refs ?? [],
+    model: null,
+    llm_provider_id: null,
+    tool_policy_id: null,
+    mcp_refs: [],
   };
 }
 
-/** 编辑态从 profile 读初值。 */
+/** 编辑态从 profile 读初值（被删字段不进表单，保存时经 toUpdateBody 清空）。 */
 function profileToInitial(
   p: AgentProfileRead | null | undefined,
 ): Partial<ProfileFormValues> {
-  if (!p) return { visibility: "private", provider: "claude", mcp_refs: [], skill_refs: [] };
+  if (!p) return { visibility: "private", skill_refs: [] };
   return {
     name: p.name,
     visibility: p.visibility,
-    provider: p.provider,
-    llm_provider_id: p.llm_provider_id ?? null,
-    model: p.model ?? "",
     system_prompt: p.system_prompt ?? "",
-    tool_policy_id: p.tool_policy_id ?? "",
-    mcp_refs: p.mcp_refs ?? [],
     skill_refs: p.skill_refs ?? [],
   };
-}
-
-/** 头像背景渐变（按 provider 取色，未知 provider 走默认琥珀）。 */
-function avatarGradient(provider?: string): string {
-  switch (provider) {
-    case "claude":
-      return "linear-gradient(135deg,#2563EB,#06b6d4)";
-    case "codex":
-      return "linear-gradient(135deg,#10b981,#059669)";
-    case "gemini":
-      return "linear-gradient(135deg,#06b6d4,#3b82f6)";
-    default:
-      return "linear-gradient(135deg,#f59e0b,#d97706)";
-  }
 }
 
 export function AgentProfileForm({
@@ -185,25 +152,21 @@ export function AgentProfileForm({
 }: AgentProfileFormProps) {
   const isEdit = mode === "edit" && profile != null;
   const notify = useNotify();
+  // form 实例上提：外层 Form.useWatch("visibility") 驱动 effectiveWsId（hooks
+  // 参数），Modal 内复用同一实例——antd 跨组件传 form 支持范式。
+  const [formInst] = Form.useForm<ProfileFormValues>();
+  const visibility =
+    Form.useWatch("visibility", formInst) ?? ("private" as AgentProfileVisibility);
 
-  // ── 工作区上下文（D-006）──
-  // routeWorkspaceId：工作区内页路由携带（有则不显示选择器）。
-  // contextWorkspaceId：全局页用户选择的 ws（state，不入表单值）。
+  // ── 工作区上下文 ──
+  // routeWorkspaceId：工作区内页路由携带。全局页 visibility=workspace 时需用户
+  // 选归属；private/platform 由后端按 visibility 定归属，URL 载体自动取首个可见 ws。
   const routeWorkspaceId = workspaceId;
-  const isGlobalPage = !routeWorkspaceId;
-  const isEditNoWs = isEdit && !profile?.workspace_id; // private/platform 档案无归属 ws
-  const showContextSelector =
-    isGlobalPage && (mode === "create" || isEditNoWs);
-  const selectorRequired = showContextSelector && mode === "create";
+  const [chosenWorkspaceId, setChosenWorkspaceId] = useState<string>("");
 
-  const [contextWorkspaceId, setContextWorkspaceId] = useState<string>("");
-
-  // 工作区列表（仅在选择器可见时拉取，workspace-switcher 同源 listWorkspaces）。
   const wsListQuery = useQuery<Workspace[], Error>({
     queryKey: ["workspaces", "list", "agent-profile-form"],
-    // ql-20260829-009：选择器只列活跃工作区——归档区不再作为新档案的归属候选。
     queryFn: async () => (await listWorkspaces({ status: "active" })).items ?? [],
-    enabled: showContextSelector,
     staleTime: 60_000,
   });
   const workspaceOptions = useMemo(
@@ -214,84 +177,73 @@ export function AgentProfileForm({
       })),
     [wsListQuery.data],
   );
+  const firstWsId = (wsListQuery.data ?? [])[0]?.id ?? "";
 
-  // 编辑态 private/platform（无归属 ws）→ sourcing 用「参考工作区」，默认首个可见 ws。
-  useEffect(() => {
-    if (!showContextSelector || selectorRequired) return;
-    if (contextWorkspaceId) return;
-    const firstId = (wsListQuery.data ?? [])[0]?.id;
-    if (firstId) setContextWorkspaceId(firstId);
-  }, [
-    showContextSelector,
-    selectorRequired,
-    contextWorkspaceId,
-    wsListQuery.data,
-  ]);
-
-  // 有效 sourcing/归属 ws：路由 ws > 编辑态 profile.workspace_id > 用户所选上下文 ws。
+  const systemDefaultReadonly = profile?.is_system_default === true;
   const effectiveWsId =
-    routeWorkspaceId ?? profile?.workspace_id ?? contextWorkspaceId ?? "";
+    routeWorkspaceId ??
+    (visibility === "workspace" ? chosenWorkspaceId : firstWsId) ??
+    profile?.workspace_id ??
+    "";
 
   const createProfile = useCreateAgentProfile(effectiveWsId);
   const updateProfile = useUpdateAgentProfile(effectiveWsId);
   const submitting = createProfile.isPending || updateProfile.isPending;
 
-  // ③ 工具能力 · user-scoped 部分（技能池，与 ws 无关）。
+  const handleSave = async (values: ProfileFormValues) => {
+    if (!effectiveWsId) {
+      notify.error(new Error("未找到可用工作区，无法保存档案"));
+      return;
+    }
+    try {
+      if (isEdit && profile) {
+        const updated = await updateProfile.mutateAsync({
+          profileId: profile.id,
+          body: toUpdateBody(values),
+        });
+        notify.success(`档案「${updated.name}」已更新`);
+      } else {
+        const created = await createProfile.mutateAsync(toCreateBody(values));
+        notify.success(`档案「${created.name}」已创建`);
+      }
+      onClose();
+    } catch (err) {
+      notify.error(err, isEdit ? "更新档案失败" : "创建档案失败");
+    }
+  };
+
   const { skills: customSkills } = useCustomSkills();
   const { manifest } = usePlatformSkillsManifest();
-
-  const skillOptions = useMemo(() => {
-    const set = new Set<string>();
-    for (const s of customSkills) set.add(s.name);
-    for (const s of manifest?.skills ?? []) set.add(s.name);
-    return Array.from(set).sort((a, b) => a.localeCompare(b));
+  /**
+   * 技能选项 = 自定义 ∪ 平台 manifest（Map 去重，同名自定义先入优先）；
+   * desc 取各自数据源 description（manifest 无 frontmatter 时为空串 → 芯片
+   * 显「（暂无简介）」占位）。仅前端展示层扩展，skill_refs 提交仍 string[]。
+   */
+  const skillOptions = useMemo<SkillOption[]>(() => {
+    const map = new Map<string, SkillOption>();
+    for (const s of customSkills)
+      map.set(s.name, { name: s.name, desc: s.description ?? "" });
+    for (const s of manifest?.skills ?? [])
+      if (!map.has(s.name))
+        map.set(s.name, { name: s.name, desc: s.description ?? "" });
+    return Array.from(map.values()).sort((a, b) => a.name.localeCompare(b.name));
   }, [customSkills, manifest]);
-
-  const providerOptions = useMemo(
-    () => buildProviderOptions(profile?.provider),
-    [profile?.provider],
-  );
-
-  const systemDefaultReadonly = profile?.is_system_default === true;
-  // 全局页新建未选工作区上下文 → 禁用保存（acceptance：未选时禁用保存）。
-  const contextMissing = selectorRequired && !effectiveWsId;
 
   return (
     <AgentProfileModal
+      form={formInst}
       isEdit={isEdit}
       submitting={submitting}
       initial={profileToInitial(profile)}
-      providerOptions={providerOptions}
       skillOptions={skillOptions}
-      effectiveWsId={effectiveWsId}
-      showContextSelector={showContextSelector}
-      selectorRequired={selectorRequired}
-      isEditNoWsRef={isEditNoWs && isGlobalPage}
+      routeWorkspaceId={routeWorkspaceId ?? ""}
       workspaceOptions={workspaceOptions}
       wsListLoading={wsListQuery.isLoading}
-      contextWorkspaceId={contextWorkspaceId}
-      onContextWorkspaceIdChange={setContextWorkspaceId}
+      chosenWorkspaceId={chosenWorkspaceId}
+      onChosenWorkspaceIdChange={setChosenWorkspaceId}
       systemDefaultReadonly={systemDefaultReadonly}
-      saveDisabled={contextMissing}
-      profileVersion={profile?.version}
       onCancel={onClose}
-      onSubmit={async (v) => {
-        try {
-          if (isEdit && profile) {
-            const updated = await updateProfile.mutateAsync({
-              profileId: profile.id,
-              body: toUpdateBody(v),
-            });
-            notify.success(`档案「${updated.name}」已更新`);
-          } else {
-            const created = await createProfile.mutateAsync(toCreateBody(v));
-            notify.success(`档案「${created.name}」已创建`);
-          }
-          onClose();
-        } catch (err) {
-          notify.error(err, isEdit ? "更新档案失败" : "创建档案失败");
-        }
-      }}
+      onSubmit={handleSave}
     />
   );
 }
@@ -299,73 +251,55 @@ export function AgentProfileForm({
 /* ────────────────────── 纯展示 Modal（便于单测，业务 hooks 在外层） ────────────────────── */
 
 interface AgentProfileModalProps {
+  form: FormInstance<ProfileFormValues>;
   isEdit: boolean;
   submitting: boolean;
   initial: Partial<ProfileFormValues>;
-  providerOptions: { value: string; label: string }[];
-  skillOptions: string[];
-  /** 当前生效的 sourcing/归属 ws（空串=全局页新建尚未选上下文）。 */
-  effectiveWsId: string;
-  showContextSelector: boolean;
-  selectorRequired: boolean;
-  /** 编辑态 private/platform 档案，选择器作「参考工作区」用途。 */
-  isEditNoWsRef: boolean;
+  skillOptions: SkillOption[];
+  routeWorkspaceId: string;
   workspaceOptions: { value: string; label: string }[];
   wsListLoading: boolean;
-  contextWorkspaceId: string;
-  onContextWorkspaceIdChange: (id: string) => void;
+  chosenWorkspaceId: string;
+  onChosenWorkspaceIdChange: (id: string) => void;
   /** 系统预置档案：编辑态只读（后端拒改，前端禁用关键字段）。 */
   systemDefaultReadonly: boolean;
-  saveDisabled: boolean;
-  profileVersion?: number;
   onCancel: () => void;
   onSubmit: (v: ProfileFormValues) => Promise<void>;
 }
 
 function AgentProfileModal({
+  form: formInst,
   isEdit,
   submitting,
   initial,
-  providerOptions,
   skillOptions,
-  effectiveWsId,
-  showContextSelector,
-  selectorRequired,
-  isEditNoWsRef,
+  routeWorkspaceId,
   workspaceOptions,
   wsListLoading,
-  contextWorkspaceId,
-  onContextWorkspaceIdChange,
+  chosenWorkspaceId,
+  onChosenWorkspaceIdChange,
   systemDefaultReadonly,
-  saveDisabled,
-  profileVersion,
   onCancel,
   onSubmit,
 }: AgentProfileModalProps) {
-  const [formInst] = Form.useForm<ProfileFormValues>();
-  // 大脑区第二层「供应商配置」联动：按第一层引擎过滤 LlmProvider.agent_kind。
-  const engineProvider = Form.useWatch("provider", formInst) ?? "claude";
+  const visibility = Form.useWatch("visibility", formInst) ?? "private";
+  const skillRefs = Form.useWatch("skill_refs", formInst) ?? [];
 
-  // Modal 由父组件条件渲染打开，每次打开新 mount，Form 干净，setFieldsValue 填初值。
   useEffect(() => {
     formInst.setFieldsValue({
       visibility: "private",
-      provider: "claude",
-      mcp_refs: [],
       skill_refs: [],
-      tool_policy_id: "",
       ...initial,
     } as ProfileFormValues);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [JSON.stringify(initial)]);
 
   const handleSave = async (form: FormInstance<ProfileFormValues>) => {
-    if (submitting) return;
     try {
       const values = (await form.validateFields()) as ProfileFormValues;
       await onSubmit(values);
     } catch (err) {
-      // antd Form 校验失败（errorFields）已由 Form.Item 内联提示；其它错误上抛。
+      // antd Form 校验失败已内联提示；其它错误上抛给 onSubmit 的 notify。
       if (err && typeof err === "object" && "errorFields" in err) return;
       throw err;
     }
@@ -373,24 +307,52 @@ function AgentProfileModal({
 
   const visibilityLocked =
     systemDefaultReadonly || (isEdit && initial.visibility === "platform");
+  // 归属选择器仅 visibility=workspace 且无路由 ws 时出现（归属必需）。
+  const showWsSelector = visibility === "workspace" && !routeWorkspaceId;
 
   return (
     <Modal
       open
       onCancel={onCancel}
-      title={isEdit ? "编辑智能体档案" : "新建智能体档案"}
+      title={
+        <div className="flex items-center gap-3">
+          <div
+            aria-hidden
+            className="grid h-[38px] w-[38px] shrink-0 place-items-center rounded-[10px] border border-brand-300 bg-brand-100 text-[18px] text-brand-700"
+          >
+            ◆
+          </div>
+          <div className="min-w-0">
+            <div className="text-[16px] font-semibold tracking-tight">
+              {isEdit ? "编辑智能体档案" : "新建智能体档案"}
+            </div>
+            <div className="mt-px text-xs text-muted-foreground">
+              一份人格 + 一份技能清单，跨会话复用
+            </div>
+          </div>
+        </div>
+      }
       width={900}
       maskClosable={false}
       destroyOnClose
       footer={
-        <div className="flex items-center justify-end gap-2">
+        <div className="flex items-center gap-3">
+          <span
+            className="min-w-0 flex-1 truncate text-[11px] text-muted-foreground"
+            title={REDLINE_NOTE}
+          >
+            <span className="mr-1 text-amber-500" aria-hidden>
+              ⚠
+            </span>
+            {REDLINE_NOTE}
+          </span>
           <Button onClick={onCancel} disabled={submitting}>
             取消
           </Button>
           <Button
             type="primary"
             loading={submitting}
-            disabled={(systemDefaultReadonly && !isEdit) || saveDisabled}
+            disabled={systemDefaultReadonly && !isEdit}
             onClick={() => void handleSave(formInst)}
           >
             保存
@@ -407,28 +369,18 @@ function AgentProfileModal({
             preserve={false}
             disabled={systemDefaultReadonly}
           >
-            {/* 工作区上下文（仅全局页显示，D-006） */}
-            {showContextSelector && (
+            {/* 归属工作区（仅 visibility=workspace 且全局页时显示） */}
+            {showWsSelector && (
               <Form.Item
-                label={
-                  isEditNoWsRef
-                    ? "参考工作区（MCP / 工具策略 sourcing）"
-                    : "工作区上下文"
-                }
-                required={selectorRequired}
-                tooltip={
-                  isEditNoWsRef
-                    ? "该档案无归属工作区（个人/平台级），此处仅用于拉取 MCP server 与工具策略选项。"
-                    : "visibility=工作区 时此工作区即档案归属；visibility=个人/平台 时仅用于 MCP/工具策略 sourcing，workspace_id 由后端按 visibility 决定（个人/平台→null）。"
-                }
+                label="归属工作区"
+                required
+                tooltip="可见范围为「工作区」的档案将归属于该工作区（成员可用）。"
               >
                 <Select
-                  value={contextWorkspaceId || undefined}
-                  placeholder={
-                    selectorRequired ? "请选择工作区上下文" : "选择工作区…"
-                  }
+                  value={chosenWorkspaceId || undefined}
+                  placeholder="请选择归属工作区"
                   options={workspaceOptions}
-                  onChange={onContextWorkspaceIdChange}
+                  onChange={onChosenWorkspaceIdChange}
                   showSearch
                   optionFilterProp="label"
                   notFoundContent={
@@ -438,9 +390,7 @@ function AgentProfileModal({
               </Form.Item>
             )}
 
-            {/* ① 身份 */}
             <FormSectionHeader
-              index="①"
               title="身份"
               desc="给这个智能体起个名字，并决定谁能看到它。"
             />
@@ -450,7 +400,7 @@ function AgentProfileModal({
                 label="名称"
                 rules={[{ required: true, message: "档案名称为必填项" }]}
               >
-                <Input placeholder="例如 代码审查助手" maxLength={64} />
+                <Input placeholder="例如 代码审查助手" maxLength={64} showCount />
               </Form.Item>
               <Form.Item
                 name="visibility"
@@ -466,79 +416,36 @@ function AgentProfileModal({
                 />
               </Form.Item>
             </div>
-
-            {/* ② 大脑 */}
-            <FormSectionHeader
-              index="②"
-              title="大脑"
-              desc="选哪台 daemon 执行、用什么模型、注入什么人设。"
-            />
-            <div className="grid grid-cols-2 gap-3">
-              <Form.Item
-                name="provider"
-                label="智能体引擎"
-                tooltip="决定在所选机器上用哪个 agent 程序跑（Claude Code / Codex）。"
-                rules={[{ required: true, message: "请选择智能体引擎" }]}
-              >
-                <Select
-                  showSearch
-                  optionFilterProp="label"
-                  options={providerOptions}
-                  placeholder="选择智能体引擎"
-                />
-              </Form.Item>
-              <Form.Item name="model" label="模型">
-                <Input placeholder="例如 claude-sonnet-4（留空用供应商默认）" />
-              </Form.Item>
-            </div>
-            <Form.Item
-              name="llm_provider_id"
-              label="供应商配置（可选，不绑定用默认）"
-              tooltip="绑定 /settings/providers 里配置的供应商，任务启动优先用它的凭证；不绑定则用你的默认供应商。codex 暂未开放。"
-            >
-              <LlmProviderSelect engineProvider={engineProvider} />
-            </Form.Item>
             <Form.Item
               name="system_prompt"
               label="系统提示词（agent 人格，与 spec 任务上下文叠加）"
-              tooltip="这段会 prepend 到下发 daemon 的 CLAUDE.md 顶部（design §7）。留空则不影响。"
+              tooltip="这段会注入下发 daemon 的会话 system prompt（保留引擎默认能力并追加）。留空则不影响。"
             >
               <Input.TextArea
-                rows={3}
+                rows={6}
                 placeholder="例如：你是资深代码审查员，只读不改，关注安全/性能/可维护性…"
               />
             </Form.Item>
 
-            {/* ③ 工具能力 */}
             <FormSectionHeader
-              index="③"
-              title="工具能力"
-              desc="引用哪些工具策略、MCP server 与技能（只存引用，不存凭证）。"
+              title="技能"
+              desc="勾选该档案可用的技能（只存引用；未勾选 = 该档案的会话不挂载任何技能）。"
+              extra={
+                <span
+                  className="whitespace-nowrap text-[11px] text-muted-foreground"
+                  title={`已选 ${skillRefs.length} / ${skillOptions.length}`}
+                >
+                  已选{" "}
+                  <b className="font-semibold text-primary">
+                    {skillRefs.length}
+                  </b>{" "}
+                  / {skillOptions.length}
+                </span>
+              }
             />
-            {effectiveWsId ? (
-              <WorkspaceAbilityOptions workspaceId={effectiveWsId} />
-            ) : (
-              <p className="rounded border border-dashed border-border bg-muted/30 px-3 py-3 text-[11px] text-muted-foreground">
-                请先选择上方「工作区上下文」，工具策略与 MCP 选项将按该工作区加载。
-              </p>
-            )}
-            <Form.Item
-              name="skill_refs"
-              label="勾选技能（引用当前用户的技能池）"
-              tooltip="自定义技能 + 平台 sillyspec 技能。daemon 只 link 选中的子集（design §9）。"
-            >
-              <Checkbox.Group options={skillOptions} />
+            <Form.Item name="skill_refs" className="!mb-3">
+              <SkillPickerGroup options={skillOptions} />
             </Form.Item>
-            {skillOptions.length === 0 && (
-              <p className="-mt-2 mb-2 text-[11px] text-muted-foreground">
-                暂无可选技能（自定义技能或平台 sillyspec 技能为空）。
-              </p>
-            )}
-
-            <div className="rounded border border-amber-200 bg-amber-50 px-3 py-2 text-[11px] text-amber-800">
-              ⚠️ 档案不存任何 API Key / MCP 凭证——只存「用哪些」的引用。凭证留在用户级
-              LlmProvider 与 daemon 本地。
-            </div>
           </Form>
         </div>
 
@@ -547,7 +454,7 @@ function AgentProfileModal({
           <ProfilePreview
             form={formInst}
             isEdit={isEdit}
-            profileVersion={profileVersion}
+            skillOptions={skillOptions}
           />
         </div>
       </div>
@@ -555,87 +462,198 @@ function AgentProfileModal({
   );
 }
 
-/**
- * 工作区级能力选项（工具策略 + MCP server）。
- *
- * 独立子组件：仅当 effectiveWsId 有值时挂载，避免全局页未选上下文时对空 wsId
- * 触发 `/api/workspaces//...` 的无效请求；父级 Form 通过 context 共享，Form.Item
- * 仍归属同一表单实例。
- */
-function WorkspaceAbilityOptions({ workspaceId }: { workspaceId: string }) {
-  const { policies } = useWorkspaceToolPolicies(workspaceId);
-  const { mcpServers } = useWorkspaceMcpConfig(workspaceId);
+/* ────────────────────── 技能选择器（受控自定义控件） ────────────────────── */
 
-  const mcpServerNames = useMemo(
-    () => Object.keys(mcpServers).sort((a, b) => a.localeCompare(b)),
-    [mcpServers],
-  );
-  const toolPolicyOptions = useMemo(
-    () => [
-      { value: "", label: "不指定（用默认）" },
-      ...policies.map((p) => ({ value: p.id, label: p.name })),
-    ],
-    [policies],
-  );
+/**
+ * SkillPickerGroup — Form.Item 注入 value/onChange 的技能选择控件
+ * （2026-10-22-agent-profile-modal-restyle 起）。
+ *
+ * - 全选三态（checked/indeterminate/空）只作用于**当前搜索筛选后的可见集**；
+ * - 搜索按 名称 ∪ 简介 匹配（简介来自数据源 description，非硬编码）；
+ * - 芯片两行（名称 + 一行简介截断，悬停 title 全文），键盘可达
+ *   （Tab 聚焦、空格/回车切换）；选中集变化按 options 排序输出稳定值。
+ */
+function SkillPickerGroup({
+  value,
+  onChange,
+  options,
+}: {
+  value?: string[];
+  onChange?: (_v: string[]) => void;
+  options: SkillOption[];
+}) {
+  const [search, setSearch] = useState("");
+  const selectedSet = useMemo(() => new Set(value ?? []), [value]);
+
+  const trimmed = search.trim().toLowerCase();
+  const filtered = useMemo(() => {
+    if (!trimmed) return options;
+    return options.filter(
+      (o) =>
+        o.name.toLowerCase().includes(trimmed) ||
+        o.desc.toLowerCase().includes(trimmed),
+    );
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [options, trimmed]);
+
+  const allFilteredOn =
+    filtered.length > 0 && filtered.every((o) => selectedSet.has(o.name));
+  const someFilteredOn = filtered.some((o) => selectedSet.has(o.name));
+
+  /** 变更出口：始终按 options 原始顺序输出（提交值稳定，不随筛选/点击序抖动）。 */
+  const emit = (next: Set<string>) =>
+    onChange?.(options.filter((o) => next.has(o.name)).map((o) => o.name));
+  const toggle = (name: string) => {
+    const next = new Set(selectedSet);
+    if (next.has(name)) next.delete(name);
+    else next.add(name);
+    emit(next);
+  };
+  const setFilteredAll = (on: boolean) => {
+    const next = new Set(selectedSet);
+    for (const o of filtered) {
+      if (on) next.add(o.name);
+      else next.delete(o.name);
+    }
+    emit(next);
+  };
+
+  if (options.length === 0) {
+    return (
+      <p className="text-[11px] text-muted-foreground">
+        暂无可选技能（自定义技能或平台 sillyspec 技能为空）。
+      </p>
+    );
+  }
 
   return (
-    <>
-      <Form.Item name="tool_policy_id" label="工具策略（引用现有 ToolPolicy）">
-        <Select options={toolPolicyOptions} placeholder="不指定（用默认）" allowClear />
-      </Form.Item>
-      <Form.Item
-        name="mcp_refs"
-        label="勾选 MCP（引用该工作区 .mcp.json 的 server，不存凭证）"
-        tooltip="仅 stdio 类型，须过平台白名单（design §9）。凭证留在 daemon 本地，档案只存「用哪些」。"
-      >
-        <Checkbox.Group options={mcpServerNames} />
-      </Form.Item>
-      {mcpServerNames.length === 0 && (
-        <p className="-mt-2 mb-2 text-[11px] text-muted-foreground">
-          该工作区 .mcp.json 未配置 MCP 服务器。
-        </p>
-      )}
-    </>
+    <div className="flex flex-col gap-2">
+      {/* 工具栏：搜索 ∪ 全选 ∪ 筛选计数 ∪ 清空 */}
+      <div className="flex items-center gap-2.5">
+        <Input
+          className="!w-[220px]"
+          allowClear
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+          placeholder="搜索技能…"
+          prefix={<SearchOutlined className="text-muted-foreground" />}
+        />
+        {trimmed && (
+          <span className="whitespace-nowrap text-[11px] text-muted-foreground">
+            筛选出 {filtered.length} 项
+          </span>
+        )}
+        <Checkbox
+          checked={allFilteredOn}
+          indeterminate={someFilteredOn && !allFilteredOn}
+          disabled={filtered.length === 0}
+          onChange={(e) => setFilteredAll(e.target.checked)}
+        >
+          全选
+        </Checkbox>
+        {selectedSet.size > 0 && (
+          <Button
+            type="link"
+            size="small"
+            className="!px-1"
+            onClick={() => emit(new Set())}
+          >
+            清空
+          </Button>
+        )}
+      </div>
+
+      {/* 芯片网格：两行结构（名称+简介），限高内滚（.thin-scroll 主题化滚动条） */}
+      <div className="thin-scroll grid max-h-[236px] min-h-[168px] grid-cols-2 gap-2 overflow-y-auto rounded-[10px] border border-border bg-card p-2.5">
+        {filtered.length === 0 ? (
+          <div className="col-span-2 grid min-h-[120px] place-items-center text-xs text-muted-foreground">
+            没有匹配的技能
+          </div>
+        ) : (
+          filtered.map((o) => {
+            const on = selectedSet.has(o.name);
+            return (
+              <div
+                key={o.name}
+                role="checkbox"
+                aria-checked={on}
+                aria-label={o.name}
+                tabIndex={0}
+                title={`${o.name} — ${o.desc}`}
+                onClick={() => toggle(o.name)}
+                onKeyDown={(e) => {
+                  if (e.key === " " || e.key === "Enter") {
+                    e.preventDefault();
+                    toggle(o.name);
+                  }
+                }}
+                className={[
+                  "flex cursor-pointer select-none flex-col gap-0.5 rounded-lg border px-2.5 py-1.5 transition-colors",
+                  on
+                    ? "border-brand-300 bg-brand-100"
+                    : "border-border bg-card hover:border-brand-300",
+                ].join(" ")}
+              >
+                <div className="flex min-w-0 items-center gap-[7px]">
+                  <span
+                    aria-hidden
+                    className={[
+                      "grid h-4 w-4 shrink-0 place-items-center rounded border",
+                      on ? "border-primary bg-primary text-white" : "border-border bg-card",
+                    ].join(" ")}
+                  >
+                    {on && <CheckOutlined className="text-[10px]" />}
+                  </span>
+                  <span
+                    className={[
+                      "min-w-0 flex-1 truncate font-mono text-xs",
+                      on ? "font-semibold text-brand-700" : "text-foreground",
+                    ].join(" ")}
+                  >
+                    {o.name}
+                  </span>
+                </div>
+                <div
+                  className={[
+                    "truncate pl-[23px] text-[11px] leading-relaxed",
+                    on ? "text-foreground/70" : "text-muted-foreground",
+                  ].join(" ")}
+                >
+                  {o.desc.trim() || "（暂无简介）"}
+                </div>
+              </div>
+            );
+          })
+        )}
+      </div>
+    </div>
   );
 }
 
 /**
- * 右栏实时预览（内联简化角色卡，不依赖 task-03 的 AgentProfileCard）。
- * 通过 Form.useWatch 订阅当前表单值，左栏任一字段变化即同步刷新。
+ * 右栏实时预览（人格卡：名称/可见范围/提示词摘要/技能 chips）。
  */
 function ProfilePreview({
   form,
   isEdit,
-  profileVersion,
+  skillOptions,
 }: {
   form: FormInstance<ProfileFormValues>;
   isEdit: boolean;
-  profileVersion?: number;
+  skillOptions: SkillOption[];
 }) {
   const name = Form.useWatch("name", form) ?? "";
   const visibility =
     Form.useWatch("visibility", form) ?? ("private" as AgentProfileVisibility);
-  const provider = Form.useWatch("provider", form) ?? "claude";
-  const llmProviderId = Form.useWatch("llm_provider_id", form) ?? null;
-  const model = Form.useWatch("model", form) ?? "";
   const systemPrompt = Form.useWatch("system_prompt", form) ?? "";
-  const toolPolicyId = Form.useWatch("tool_policy_id", form) ?? "";
-  // 绑定供应商名映射（task-08）：用本人 /llm-providers 列表按 id 查名；非本人 → 提示。
-  const { data: llmProviders } = useQuery<LlmProviderRead[]>({
-    queryKey: ["llm-providers", "list", "agent-profile-form"],
-    queryFn: listProviders,
-    staleTime: 60_000,
-  });
-  const boundProviderName = useMemo(() => {
-    if (!llmProviderId) return null;
-    const hit = (llmProviders ?? []).find((p) => p.id === llmProviderId);
-    return hit ? hit.name : "（非本人供应商，将回退默认）";
-  }, [llmProviderId, llmProviders]);
-  const mcpRefs = Form.useWatch("mcp_refs", form) ?? [];
   const skillRefs = Form.useWatch("skill_refs", form) ?? [];
 
-  const avatarText = (name || provider || "?").trim().charAt(0).toUpperCase();
-  const promptSnippet = systemPrompt?.trim() || "（未填写系统提示词，按供应商默认人设执行）";
+  const descBySkill = useMemo(
+    () => new Map(skillOptions.map((o) => [o.name, o.desc])),
+    [skillOptions],
+  );
+  const avatarText = (name || "?").trim().charAt(0).toUpperCase();
+  const promptSnippet = systemPrompt?.trim() || "（未填写系统提示词，按引擎默认人设执行）";
 
   return (
     <div className="sticky top-0">
@@ -643,12 +661,8 @@ function ProfilePreview({
         ▼ 实时预览 · 这就是别人会看到的角色卡
       </div>
       <div className="mx-auto max-w-[300px] rounded-lg border border-border bg-card p-4 shadow-md">
-        {/* 头部：头像 + 名 + 可见标签 */}
         <div className="mb-3 flex items-center gap-2.5">
-          <div
-            className="grid h-9 w-9 shrink-0 place-items-center rounded-[10px] text-[15px] font-bold text-white"
-            style={{ background: avatarGradient(provider) }}
-          >
+          <div className="grid h-9 w-9 shrink-0 place-items-center rounded-[10px] bg-primary/15 text-[15px] font-bold text-primary">
             {avatarText}
           </div>
           <div className="min-w-0 flex-1">
@@ -660,137 +674,61 @@ function ProfilePreview({
                 {VISIBILITY_LABEL[visibility]}
               </Tag>
             </div>
-            <div className="font-mono text-[11px] text-muted-foreground">
-              {provider}
-              {model ? ` / ${model}` : ""}
-            </div>
-            {boundProviderName ? (
-              <div className="mt-0.5 text-[10px] text-foreground/60">
-                供应商：{boundProviderName}
-              </div>
-            ) : null}
           </div>
         </div>
-        {/* 系统提示词摘要 */}
-        <div className="mb-3 line-clamp-2 rounded-lg bg-muted/50 px-3 py-2 text-[12px] leading-snug text-foreground/80">
+        <div className="mb-3 line-clamp-3 rounded-lg bg-muted/50 px-3 py-2 text-[12px] leading-snug text-foreground/80">
           {promptSnippet}
         </div>
-        {/* 能力 chip */}
         <div className="mb-3 flex flex-wrap gap-1.5">
-          {toolPolicyId ? (
-            <span className="rounded bg-primary/10 px-2 py-0.5 text-[11px] text-primary">
-              工具策略
-            </span>
-          ) : null}
-          {mcpRefs.map((m) => (
-            <span
-              key={`mcp-${m}`}
-              className="rounded bg-muted px-2 py-0.5 text-[11px] text-foreground/70"
-            >
-              {m}
-            </span>
-          ))}
           {skillRefs.map((s) => (
             <span
               key={`skill-${s}`}
+              title={descBySkill.get(s) ?? ""}
               className="rounded bg-muted px-2 py-0.5 text-[11px] text-foreground/70"
             >
               {s}
             </span>
           ))}
-          {!toolPolicyId && mcpRefs.length === 0 && skillRefs.length === 0 ? (
-            <span className="text-[11px] text-muted-foreground">未引用额外能力</span>
+          {skillRefs.length === 0 ? (
+            <span className="text-[11px] text-muted-foreground">无技能（不挂载）</span>
           ) : null}
         </div>
-        {/* 底栏：版本 */}
-        <div className="flex items-center justify-between border-t border-dashed border-border pt-2 text-[11px] text-muted-foreground">
-          <span>
-            {isEdit && typeof profileVersion === "number"
-              ? `v${profileVersion}`
-              : isEdit
-                ? "编辑中"
-                : "新建 · v1"}
-          </span>
+        <div className="border-t border-dashed border-border pt-2 text-[11px] text-muted-foreground">
+          {isEdit ? "编辑中" : "新建 · v1"}
         </div>
       </div>
-      {/* 红线提示统一在左栏 ③能力区底部展示（仅一处，与单测断言一致） */}
     </div>
   );
 }
 
-/** 三组表单的小标题（左竖条 + 序号 + 标题 + 一句说明）。 */
+/**
+ * 表单小节头（品牌竖条 + 标题 + 一句说明 + 可选右侧附加元素）。
+ * 2026-10-22-modal-restyle：由 antd Divider 换品牌竖条形态（定稿原型）。
+ */
 function FormSectionHeader({
-  index,
   title,
   desc,
+  extra,
 }: {
-  index: string;
   title: string;
   desc?: string;
+  extra?: ReactNode;
 }) {
   return (
-    <Divider titlePlacement="left" plain className="!my-3">
-      <span className="text-xs font-semibold text-brand-700">
-        <span className="mr-1">{index}</span>
+    <div className="mb-2 mt-4 flex items-center gap-2 first:mt-1">
+      <span
+        aria-hidden
+        className="h-[13px] w-[3px] shrink-0 self-center rounded-sm bg-primary"
+      />
+      <span className="whitespace-nowrap text-[13px] font-semibold text-foreground">
         {title}
       </span>
       {desc ? (
-        <span className="ml-2 text-[11px] font-normal text-muted-foreground">
+        <span className="min-w-0 flex-1 truncate text-[11px] text-muted-foreground">
           {desc}
         </span>
       ) : null}
-    </Divider>
-  );
-}
-
-/**
- * 供应商配置下拉（大脑区第二层，task-07）：绑定 /settings/providers 的供应商，可选。
- *
- * 数据源 listProviders（GET /api/llm-providers，已按 owner 过滤），按第一层引擎
- * （engineProvider）过滤 agent_kind（当前仅 claude 类）。codex 等引擎下禁用 + 提示。
- * 编辑态：当前值不在本人列表（共享档案 owner 绑定）→ 加占位 option「无权限访问」，
- * form value 不转 null，依赖后端 Update exclude_unset（不传=不动）避免误解绑。
- */
-function LlmProviderSelect({
-  value,
-  onChange,
-  engineProvider,
-}: {
-  value?: string | null;
-  onChange?: (v: string | null) => void;
-  engineProvider?: string;
-}) {
-  const { data, isLoading } = useQuery<LlmProviderRead[]>({
-    queryKey: ["llm-providers", "list", "agent-profile-form"],
-    queryFn: listProviders,
-    staleTime: 60_000,
-  });
-  const providers = data ?? [];
-  const options = useMemo(() => {
-    const filtered = providers.filter((p) => engineProvider != null && p.agent_kinds.includes(engineProvider));
-    const opts = filtered.map((p) => ({ value: p.id, label: p.name }));
-    // 编辑态回显：非本人供应商（id 不在列表）→ 占位，不误解绑。
-    if (value && !opts.some((o) => o.value === value)) {
-      opts.push({ value, label: "（无权限访问该供应商，提交时不动）" });
-    }
-    return opts;
-  }, [providers, engineProvider, value]);
-  const engineUnsupported = !!engineProvider && engineProvider !== "claude";
-  return (
-    <Select
-      value={value ?? undefined}
-      onChange={(v) => onChange?.(v ?? null)}
-      options={options}
-      allowClear
-      disabled={engineUnsupported}
-      placeholder={engineUnsupported ? "该引擎暂未开放供应商配置" : "不绑定（用默认）"}
-      notFoundContent={
-        engineUnsupported
-          ? "该引擎暂未开放供应商配置"
-          : isLoading
-            ? "加载中…"
-            : "暂无可绑定供应商（先在 /settings/providers 配置）"
-      }
-    />
+      {extra}
+    </div>
   );
 }

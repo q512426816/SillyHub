@@ -1,0 +1,54 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-21-provider-set-default-ui",
+  "rows": [
+    {
+      "anchor": "FR-01",
+      "row_id": "2026-10-21-provider-set-default-ui:flow:测试绑定FR-01",
+      "tests": [
+        "frontend/src/components/llm-providers/__tests__/llm-provider-list.test.tsx「凭证探测失败 toast 错误且状态不变」",
+        "frontend/src/components/llm-providers/__tests__/llm-provider-list.test.tsx「取消默认恢复设为默认」",
+        "frontend/src/components/llm-providers/__tests__/llm-provider-list.test.tsx「设为默认成功显示徽标并刷新」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-21-provider-set-default-ui"
+    },
+    {
+      "anchor": "FR-02",
+      "row_id": "2026-10-21-provider-set-default-ui:flow:测试绑定FR-02",
+      "tests": [
+        "backend/app/modules/llm_provider/tests/test_llm_provider.py「set/unset 后 affected_sessions=0 且 notify_provider_switch 未被调用」",
+        "backend/app/modules/llm_provider/tests/test_router.py「set-default/unset-default 端点返回 affected_sessions=0」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-21-provider-set-default-ui"
+    },
+    {
+      "anchor": "FR-04",
+      "row_id": "2026-10-21-provider-set-default-ui:flow:测试绑定FR-04",
+      "tests": [
+        "frontend/src/lib/api/__tests__/llm-providers.test.ts「setDefaultProvider/unsetDefaultProvider 请求形态与返回解析」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-21-provider-set-default-ui"
+    }
+  ]
+}

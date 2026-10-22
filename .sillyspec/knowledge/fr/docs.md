@@ -652,3 +652,150 @@ created_at: 2026-10-15T16:16:15.707Z
   confirmed_at: null
   source_change: 2026-10-20-preset-engine-endpoint
   status: active
+
+## FR-docs-039 弹窗观感对齐已确认原型：品牌图标头+副标题、页脚左侧红线注脚（单行省略）、品牌竖条小节头
+变更：2026-10-22-agent-profile-modal-restyle
+状态：active
+摘要：打开新建弹窗
+全文：.sillyspec/changes/archive/2026-10-22-agent-profile-modal-restyle/requirements.md#FR-01
+最近确认：2fef11f807db97a27cdbd0f4fb036d7030bf821c
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-22-agent-profile-modal-restyle:flow:测试绑定FR-01
+  tests: test/frontend/src/components/__tests__/agent-profile-form.test.tsx「弹窗观感：品牌图标头副标题 + 页脚红线注脚 + 品牌竖条小节头」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-22-agent-profile-modal-restyle
+  status: active
+
+## FR-docs-040 技能区：全选复选（半选态、仅作用于当前筛选结果）+ 按名称与简介搜索 + 已选 N/总数计数 + 清空按钮 + 两行芯片网格（名称+一行简介，限高内滚）
+变更：2026-10-22-agent-profile-modal-restyle
+状态：active
+摘要：全选与半选；搜索下全选仅作用于筛选结果
+全文：.sillyspec/changes/archive/2026-10-22-agent-profile-modal-restyle/requirements.md#FR-02
+最近确认：2fef11f807db97a27cdbd0f4fb036d7030bf821c
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-22-agent-profile-modal-restyle:flow:测试绑定FR-02
+  tests: test/frontend/src/components/__tests__/agent-profile-form.test.tsx「技能全选/半选/清空/计数」 | test/frontend/src/components/__tests__/agent-profile-form.test.tsx「搜索按名称与简介命中且全选仅作用于筛选结果」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-22-agent-profile-modal-restyle
+  status: active
+
+## FR-docs-041 技能简介来自真实数据（manifest SKILL.md frontmatter description / 自定义技能 description），非硬编码
+变更：2026-10-22-agent-profile-modal-restyle
+状态：active
+摘要：并集与简介渲染
+全文：.sillyspec/changes/archive/2026-10-22-agent-profile-modal-restyle/requirements.md#FR-03
+最近确认：2fef11f807db97a27cdbd0f4fb036d7030bf821c
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-22-agent-profile-modal-restyle:flow:测试绑定FR-03
+  tests: test/frontend/src/components/__tests__/agent-profile-form.test.tsx「技能简介来自数据源并集渲染（自定义优先）」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-22-agent-profile-modal-restyle
+  status: active
+
+## FR-docs-042 技能区滚动条三主题下细样式半透明，暗夜不刺眼（作用域限本弹窗技能区）
+变更：2026-10-22-agent-profile-modal-restyle
+状态：active
+摘要：暗夜主题滚动
+全文：.sillyspec/changes/archive/2026-10-22-agent-profile-modal-restyle/requirements.md#FR-04
+最近确认：2fef11f807db97a27cdbd0f4fb036d7030bf821c
+
+## FR-docs-043 无硬编码 hex，颜色走 brand/语义 token，三主题（blue/ai-native/dark）可切换
+变更：2026-10-22-agent-profile-modal-restyle
+状态：active
+摘要：三主题切换
+全文：.sillyspec/changes/archive/2026-10-22-agent-profile-modal-restyle/requirements.md#FR-05
+最近确认：2fef11f807db97a27cdbd0f4fb036d7030bf821c
+
+## FR-docs-044 既有行为回归不变：可见范围=工作区时出现归属工作区选择器、右栏预览实时联动、名称必填、红线文案不变
+变更：2026-10-22-agent-profile-modal-restyle
+状态：active
+摘要：既有用例回归
+全文：.sillyspec/changes/archive/2026-10-22-agent-profile-modal-restyle/requirements.md#FR-06
+最近确认：2fef11f807db97a27cdbd0f4fb036d7030bf821c
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-22-agent-profile-modal-restyle:flow:测试绑定FR-06
+  tests: test/frontend/src/components/__tests__/agent-profile-form.test.tsx「既有用例回归（body 组装/归属选择器/预览联动/提交路径）」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-22-agent-profile-modal-restyle
+  status: active
+
+## FR-docs-045 useCreateAgentProfile/useUpdateAgentProfile 成功后必须同时 invalidate workspaceList(wid) 与 mineList 两桶（全局页编辑/新建保存后卡片墙立即刷新）
+变更：2026-10-22-agent-profile-edit-refresh
+状态：active
+摘要：全局页编辑保存；全局页新建保存
+全文：.sillyspec/changes/archive/2026-10-22-agent-profile-edit-refresh/requirements.md#FR-01
+最近确认：302ebb786c739b33837b2fda22f89141637412bb
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-22-agent-profile-edit-refresh:flow:测试绑定FR-01
+  tests: test/frontend/src/lib/__tests__/agent-profiles.test.tsx「create/update 成功后失效 workspaceList 与 mineList 两桶」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-22-agent-profile-edit-refresh
+  status: active
+
+## FR-docs-046 工作区内页（workspaceList 桶）刷新行为不回归
+变更：2026-10-22-agent-profile-edit-refresh
+状态：active
+摘要：工作区内页编辑
+全文：.sillyspec/changes/archive/2026-10-22-agent-profile-edit-refresh/requirements.md#FR-02
+最近确认：302ebb786c739b33837b2fda22f89141637412bb
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-22-agent-profile-edit-refresh:flow:测试绑定FR-02
+  tests: test/frontend/src/lib/__tests__/agent-profiles.test.tsx「既有 workspaceList 失效不回归（同一用例内并断言）」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-22-agent-profile-edit-refresh
+  status: active
+
+## FR-docs-047 lib 层新增 hook 失效行为单测（断言两桶 key 均被失效）
+变更：2026-10-22-agent-profile-edit-refresh
+状态：active
+摘要：单测覆盖
+全文：.sillyspec/changes/archive/2026-10-22-agent-profile-edit-refresh/requirements.md#FR-03
+最近确认：302ebb786c739b33837b2fda22f89141637412bb
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-22-agent-profile-edit-refresh:flow:测试绑定FR-03
+  tests: test/frontend/src/lib/__tests__/agent-profiles.test.tsx「mutation 失败不触发失效」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-22-agent-profile-edit-refresh
+  status: active

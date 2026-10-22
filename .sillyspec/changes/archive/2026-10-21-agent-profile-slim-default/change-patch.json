@@ -1,0 +1,387 @@
+{
+  "change": "2026-10-21-agent-profile-slim-default",
+  "baseline": "a964c2ab84f0fb329cb659ab40751e66a2739b81",
+  "head": "9458a48db2d349cf18861d098796265ca018fe31",
+  "files": [
+    "backend/app/modules/agent/profile/router.py",
+    "backend/app/modules/agent/profile/service.py",
+    "backend/app/modules/agent/tests/test_profile_router.py",
+    "backend/app/modules/auth/model.py",
+    "backend/app/modules/daemon/group/service/shadow.py",
+    "backend/app/modules/daemon/session/service/inject_gates.py",
+    "backend/app/modules/daemon/tests/test_group_default_profile.py",
+    "backend/app/modules/daemon/tests/test_session_default_profile.py",
+    "backend/migrations/versions/20261021_user_default_agent_profile.py",
+    "backend/openapi.json",
+    "frontend/src/app/(dashboard)/agent-profiles/page.tsx",
+    "frontend/src/components/__tests__/agent-profile-form.test.tsx",
+    "frontend/src/components/agent-profile-form.tsx",
+    "frontend/src/components/agent-profile-select.tsx",
+    "frontend/src/components/agent-profile/__tests__/agent-profile-card.test.tsx",
+    "frontend/src/components/agent-profile/agent-profile-card-grid.tsx",
+    "frontend/src/components/agent-profile/agent-profile-card.tsx",
+    "frontend/src/lib/agent-profiles.ts",
+    "frontend/src/lib/api-types.ts",
+    "sillyhub-daemon/src/daemon.ts",
+    "sillyhub-daemon/src/skill-manager.ts",
+    "sillyhub-daemon/src/task-runner.ts",
+    "sillyhub-daemon/tests/daemon-kind-dispatch.test.ts",
+    "sillyhub-daemon/tests/daemon-parity.test.ts",
+    "sillyhub-daemon/tests/execution-context.test.ts",
+    "sillyhub-daemon/tests/task-13-spec-sync.test.ts",
+    "sillyhub-daemon/tests/task-runner.test.ts",
+    "sillyhub-daemon/tests/test_init_lease.test.ts"
+  ],
+  "totals": {
+    "files": 28,
+    "additions": 1536,
+    "deletions": 916
+  },
+  "savedAt": "2026-10-21T07:07:42.238Z",
+  "note": "flow done 时点冻结（本变更可归属交付面：baseline..HEAD 提交面过滤 .sillyspec/ 只留 .sillyspec/docs/ 交付文档 + 独占树未提交交付；治理工件目录不入冻结——2026-10-12-close-trace-freeze-integrity FR-01）",
+  "modules": [
+    {
+      "id": "auth",
+      "files": 1,
+      "doc": "docs/backend/modules/auth.md",
+      "docTouched": false,
+      "docMissing": false
+    },
+    {
+      "id": "agent",
+      "files": 3,
+      "doc": "docs/backend/modules/agent.md",
+      "docTouched": false,
+      "docMissing": false
+    },
+    {
+      "id": "daemon",
+      "files": 4,
+      "doc": "docs/backend/modules/daemon.md",
+      "docTouched": false,
+      "docMissing": false
+    },
+    {
+      "id": "migrations",
+      "files": 1,
+      "doc": "docs/backend/modules/migrations.md",
+      "docTouched": false,
+      "docMissing": false
+    },
+    {
+      "id": "backend",
+      "files": 10,
+      "doc": "docs/multi-agent-platform/modules/backend.md",
+      "docTouched": false,
+      "docMissing": false
+    },
+    {
+      "id": "frontend",
+      "files": 9,
+      "doc": "docs/multi-agent-platform/modules/frontend.md",
+      "docTouched": false,
+      "docMissing": false
+    },
+    {
+      "id": "sillyhub-daemon",
+      "files": 9,
+      "doc": "docs/multi-agent-platform/modules/sillyhub-daemon.md",
+      "docTouched": false,
+      "docMissing": false
+    },
+    {
+      "id": "agent",
+      "files": 3,
+      "doc": "docs/SillyHub/modules/agent.md",
+      "docTouched": false,
+      "docMissing": false
+    },
+    {
+      "id": "auth",
+      "files": 1,
+      "doc": "docs/SillyHub/modules/auth.md",
+      "docTouched": false,
+      "docMissing": false
+    },
+    {
+      "id": "daemon",
+      "files": 13,
+      "doc": "docs/SillyHub/modules/daemon.md",
+      "docTouched": false,
+      "docMissing": false
+    },
+    {
+      "id": "frontend_app",
+      "files": 1,
+      "doc": "docs/SillyHub/modules/frontend_app.md",
+      "docTouched": false,
+      "docMissing": false
+    },
+    {
+      "id": "frontend_components",
+      "files": 6,
+      "doc": "docs/SillyHub/modules/frontend_components.md",
+      "docTouched": false,
+      "docMissing": false
+    },
+    {
+      "id": "frontend_lib",
+      "files": 2,
+      "doc": "docs/SillyHub/modules/frontend_lib.md",
+      "docTouched": false,
+      "docMissing": false
+    }
+  ],
+  "uncoveredDirs": [],
+  "moduleMaps": [
+    "docs/backend/modules/_module-map.yaml",
+    "docs/frontend/modules/_module-map.yaml",
+    "docs/multi-agent-platform/modules/_module-map.yaml",
+    "docs/SillyHub/modules/_module-map.yaml",
+    "docs/sillyhub-daemon/modules/_module-map.yaml"
+  ],
+  "scopeAudit": {
+    "mode": "full-flow",
+    "ok": true,
+    "degradedReason": null,
+    "baseAnchor": "a964c2ab84f0fb329cb659ab40751e66a2739b81",
+    "totals": {
+      "files": 28,
+      "additions": 1536,
+      "deletions": 916
+    },
+    "rows": [
+      {
+        "path": "backend/app/modules/agent/profile/router.py",
+        "additions": 67,
+        "deletions": 10,
+        "kind": "modified",
+        "planned": "修改",
+        "verdict": "planned"
+      },
+      {
+        "path": "backend/app/modules/agent/profile/service.py",
+        "additions": 22,
+        "deletions": 0,
+        "kind": "modified",
+        "planned": "修改",
+        "verdict": "planned"
+      },
+      {
+        "path": "backend/app/modules/agent/tests/test_profile_router.py",
+        "additions": 54,
+        "deletions": 0,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": "backend/app/modules/auth/model.py",
+        "additions": 12,
+        "deletions": 0,
+        "kind": "modified",
+        "planned": "修改",
+        "verdict": "planned"
+      },
+      {
+        "path": "backend/app/modules/daemon/group/service/shadow.py",
+        "additions": 34,
+        "deletions": 2,
+        "kind": "modified",
+        "planned": "修改",
+        "verdict": "planned"
+      },
+      {
+        "path": "backend/app/modules/daemon/session/service/inject_gates.py",
+        "additions": 26,
+        "deletions": 0,
+        "kind": "modified",
+        "planned": "修改",
+        "verdict": "planned"
+      },
+      {
+        "path": "backend/app/modules/daemon/tests/test_group_default_profile.py",
+        "additions": 205,
+        "deletions": 0,
+        "kind": "new",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": "backend/app/modules/daemon/tests/test_session_default_profile.py",
+        "additions": 141,
+        "deletions": 0,
+        "kind": "new",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": "backend/migrations/versions/20261021_user_default_agent_profile.py",
+        "additions": 50,
+        "deletions": 0,
+        "kind": "new",
+        "planned": "新增",
+        "verdict": "planned"
+      },
+      {
+        "path": "backend/openapi.json",
+        "additions": 109,
+        "deletions": 7,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": "frontend/src/app/(dashboard)/agent-profiles/page.tsx",
+        "additions": 30,
+        "deletions": 0,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": "frontend/src/components/__tests__/agent-profile-form.test.tsx",
+        "additions": 95,
+        "deletions": 406,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": "frontend/src/components/agent-profile-form.tsx",
+        "additions": 114,
+        "deletions": 421,
+        "kind": "modified",
+        "planned": "修改",
+        "verdict": "planned"
+      },
+      {
+        "path": "frontend/src/components/agent-profile-select.tsx",
+        "additions": 3,
+        "deletions": 3,
+        "kind": "modified",
+        "planned": "修改",
+        "verdict": "planned"
+      },
+      {
+        "path": "frontend/src/components/agent-profile/__tests__/agent-profile-card.test.tsx",
+        "additions": 61,
+        "deletions": 0,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": "frontend/src/components/agent-profile/agent-profile-card-grid.tsx",
+        "additions": 14,
+        "deletions": 1,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": "frontend/src/components/agent-profile/agent-profile-card.tsx",
+        "additions": 35,
+        "deletions": 0,
+        "kind": "modified",
+        "planned": "修改",
+        "verdict": "planned"
+      },
+      {
+        "path": "frontend/src/lib/agent-profiles.ts",
+        "additions": 28,
+        "deletions": 1,
+        "kind": "modified",
+        "planned": "修改",
+        "verdict": "planned"
+      },
+      {
+        "path": "frontend/src/lib/api-types.ts",
+        "additions": 138,
+        "deletions": 13,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": "sillyhub-daemon/src/daemon.ts",
+        "additions": 19,
+        "deletions": 1,
+        "kind": "modified",
+        "planned": "修改",
+        "verdict": "planned"
+      },
+      {
+        "path": "sillyhub-daemon/src/skill-manager.ts",
+        "additions": 40,
+        "deletions": 0,
+        "kind": "modified",
+        "planned": "修改",
+        "verdict": "planned"
+      },
+      {
+        "path": "sillyhub-daemon/src/task-runner.ts",
+        "additions": 13,
+        "deletions": 44,
+        "kind": "modified",
+        "planned": "修改",
+        "verdict": "planned"
+      },
+      {
+        "path": "sillyhub-daemon/tests/daemon-kind-dispatch.test.ts",
+        "additions": 147,
+        "deletions": 0,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": "sillyhub-daemon/tests/daemon-parity.test.ts",
+        "additions": 9,
+        "deletions": 1,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": "sillyhub-daemon/tests/execution-context.test.ts",
+        "additions": 9,
+        "deletions": 1,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": "sillyhub-daemon/tests/task-13-spec-sync.test.ts",
+        "additions": 9,
+        "deletions": 1,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": "sillyhub-daemon/tests/task-runner.test.ts",
+        "additions": 42,
+        "deletions": 4,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": "sillyhub-daemon/tests/test_init_lease.test.ts",
+        "additions": 10,
+        "deletions": 0,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "unplanned"
+      }
+    ],
+    "excluded": {
+      "foreignDeclared": []
+    },
+    "note": "flow done 时点冻结（本文件落盘时采集）",
+    "closedBy": "flow done"
+  },
+  "patchSha256": "76b46d2a28a351214c017897d193434084a6600cb9d42c4e2c2719b8980bfc72",
+  "patchStatus": "ok"
+}

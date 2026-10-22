@@ -1,0 +1,67 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-22-agent-profile-modal-restyle",
+  "rows": [
+    {
+      "anchor": "FR-01",
+      "row_id": "2026-10-22-agent-profile-modal-restyle:flow:测试绑定FR-01",
+      "tests": [
+        "test/frontend/src/components/__tests__/agent-profile-form.test.tsx「弹窗观感：品牌图标头副标题 + 页脚红线注脚 + 品牌竖条小节头」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-22-agent-profile-modal-restyle"
+    },
+    {
+      "anchor": "FR-02",
+      "row_id": "2026-10-22-agent-profile-modal-restyle:flow:测试绑定FR-02",
+      "tests": [
+        "test/frontend/src/components/__tests__/agent-profile-form.test.tsx「技能全选/半选/清空/计数」",
+        "test/frontend/src/components/__tests__/agent-profile-form.test.tsx「搜索按名称与简介命中且全选仅作用于筛选结果」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-22-agent-profile-modal-restyle"
+    },
+    {
+      "anchor": "FR-03",
+      "row_id": "2026-10-22-agent-profile-modal-restyle:flow:测试绑定FR-03",
+      "tests": [
+        "test/frontend/src/components/__tests__/agent-profile-form.test.tsx「技能简介来自数据源并集渲染（自定义优先）」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-22-agent-profile-modal-restyle"
+    },
+    {
+      "anchor": "FR-06",
+      "row_id": "2026-10-22-agent-profile-modal-restyle:flow:测试绑定FR-06",
+      "tests": [
+        "test/frontend/src/components/__tests__/agent-profile-form.test.tsx「既有用例回归（body 组装/归属选择器/预览联动/提交路径）」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-22-agent-profile-modal-restyle"
+    }
+  ]
+}

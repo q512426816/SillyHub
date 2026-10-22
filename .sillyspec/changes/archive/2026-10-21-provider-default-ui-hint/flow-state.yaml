@@ -1,0 +1,45 @@
+tier: thin
+legacy_fallback: false
+substeps:
+  artifacts: done
+  ledger: done
+  patch: done
+  review: done
+  probes: done
+  distill: done
+  archive: done
+  events: done
+born_face: thin
+with_tasks: false
+review_force: null
+input: >-
+  供应商未选态显示对齐用户默认供应商
+
+
+  动机与背景：变更 2026-10-21-provider-set-default-ui 恢复了用户默认供应商（claim
+  注入链已验证生效），但前端「未显式选供应商」的显示面仍固定文案「不指定（本机默认）」（预会话/会话配置栏/群聊成员卡/轮 timeline），用户设了默认后看到「本机默认」误以为没生效（实测已确认注入生效、纯显示滞后）。
+
+
+  成功标准：
+
+  - 已设默认供应商时，各「不指定」下拉项文案显示「不指定（默认：{默认供应商名}）」；未设默认保持「不指定（本机默认）」
+
+  - 会话轮 timeline 的未选供应商显示同样对齐（null 时显示默认供应商名，无默认保持本机默认）
+
+  - 无新增后端改动；前端测试覆盖文案分支
+autopilot: false
+prestage_ack: true
+baseline_commit: ba581443d1bf43a738f80d7aff66a49b4d4b55d8
+updatedAt: '2026-10-21T14:21:35.778Z'
+baseline_sha256: 80af4101d1c34af364796e80dac0b90794622de75ffb7390c690e41aa21bf53e
+spec_approved: true
+spec_approved_at: '2026-10-21T07:36:53.464Z'
+spec_approved_by: zcode-provider-set-default
+spec_approved_channel: user-confirmed
+spec_attested_by: zcode-provider-set-default
+batch_ticked: true
+gate_summary: >-
+  test: passed ← module[]+deps(py2+jsx31)+fr(26)（152.2s）
+  结果：F:\WorkNew\SillyHub\.sillyspec\.runtime\verify-runs\20261021080454\test-result.json｜lint: skipped — 跳过原因：local.yaml
+  未配置 commands.lint（或标记 unavailable）。｜门文件 16 个
+

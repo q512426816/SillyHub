@@ -1,0 +1,22 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-21-provider-default-ui-hint",
+  "rows": [
+    {
+      "anchor": "FR-01",
+      "row_id": "2026-10-21-provider-default-ui-hint:flow:测试绑定FR-01",
+      "tests": [
+        "frontend/src/components/sessions/__tests__/session-config-bar.test.tsx「兜底项文案动态化」",
+        "frontend/src/lib/api/__tests__/llm-providers.test.ts「noProviderLabel 有默认/无默认分支」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-21-provider-default-ui-hint"
+    }
+  ]
+}

@@ -2,6 +2,12 @@
 
 change 2026-08-06-provider-switch-live-session / task-04 / FR-06 / D-005@v1 / D-006@v1。
 
+⚠️ 2026-10-21-provider-set-default-ui D-002 起**无生产调用方**：原调用方
+``LlmProviderService.set_default`` / ``unset_default`` 的热切换推送按用户拍板移除
+（默认变更仅对新会话生效，运行中会话独立）。本模块与 WS daemon 消费链
+（``PROVIDER_CONFIG_CHANGED``）保留为既有基础设施（test_control_command_dispatch.py
+直测锚定），供后续会话级供应商热切换特性复用。
+
 落点选择（allowed_paths 两选一）：新建本模块级函数,而非并入 lease_service.py。
 理由：
   - ``notify_provider_switch`` 是无状态的模块级 helper（``session`` 由调用方注入,

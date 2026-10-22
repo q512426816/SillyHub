@@ -292,18 +292,16 @@ class SetDefaultResult(BaseModel):
     """``POST /api/llm-providers/{id}/set-default`` 与 ``unset-default`` 统一响应。
 
     task-05（change 2026-08-06-provider-switch-live-session / FR-07）：把 task-03
-    service 层 ``DefaultSwitchResult``（dataclass）透传给前端的响应 DTO，供前端区分
-    立即生效（``switched=True`` + ``affected_sessions>0``）、等待 turn 边界
-    （``switched=True`` + ``affected_sessions=0``）与凭证失败（``switched=False`` +
-    ``error``）三种状态，对应不同 toast 文案（task-09）。
+    service 层 ``DefaultSwitchResult``（dataclass）透传给前端的响应 DTO。2026-10-21
+    provider-set-default-ui D-002 起热切换推送已移除——成功即置位（``switched=True``），
+    凭证探测失败不置位（``switched=False`` + ``error``），默认变更仅对新会话生效。
 
     纯响应 DTO（无 ``from_attributes``）：router 显式按字段名从 ``DefaultSwitchResult``
     构造，不直接 ``model_validate`` dataclass（风格对齐 ``UsageResult``）。
 
     - ``switched``：本次 set/unset 是否成功变更 ``is_default``（set 凭证探测失败回滚
       时为 ``False``；unset 恒为 ``True``）；
-    - ``affected_sessions``：``notify_provider_switch`` 成功投递的 active interactive
-      session 计数（D-001）；无 active session 或 notify 异常时为 ``0``；
+    - ``affected_sessions``：恒 ``0``（D-002 热切换移除；字段保留兼容旧客户端）；
     - ``error``：set 凭证探测失败原因（仅 ``switched=False`` 时有值）；成功 / unset 为 ``None``。
     """
 

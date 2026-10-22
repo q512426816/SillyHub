@@ -1,0 +1,46 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-21-provider-set-default-ui",
+  "reviewer": "subagent",
+  "verdict": "PASS",
+  "reviewedAgainst": "59c6466d29feb3c10add4e51bb0c41d8c84ae007",
+  "findings": [
+    {
+      "severity": "P3",
+      "title": "[已闭合@59c6466] 后端两处 docstring 残留已移除的 D-001 热切换语义（affected_sessions 描述失真）",
+      "evidence": "原报 schema.py:294-305 与 service.py:152-153 仍描述「notify 投递计数/三态区分」；增量 diff 两处均已改为「恒 0（D-002 热切换移除；字段保留兼容）」，复核确认闭合，无行为改动。",
+      "location": "backend/app/modules/llm_provider/schema.py:294-305（并 backend/app/modules/llm_provider/service.py:152-153）"
+    },
+    {
+      "severity": "P3",
+      "title": "[已闭合@59c6466] FR-03 零回归场景措辞自相矛盾（「llm_provider 零文件改动」与 FR-02 冲突）",
+      "evidence": "原报 requirements.md:55 写「backend/app/modules/llm_provider 零文件改动」；增量已改为「claim 注入链零触碰（后端改动仅限 set/unset 端点行为收敛，见 FR-02）」且 Given 对应改为 claim 注入链——与 diff 实况一致。注意：requirements.md 系增量提交中新纳入 git 跟踪（旧 HEAD 盘上存在但未跟踪），全文其余部分与首轮评审读到的盘上版本一致，仅 FR-03 场景措辞修正。",
+      "location": ".sillyspec/changes/2026-10-21-provider-set-default-ui/requirements.md:53-55"
+    },
+    {
+      "severity": "P3",
+      "title": "[已闭合@59c6466] task-02 声称 test_router.py 断言收紧，实际该文件零改动",
+      "evidence": "原报 tasks.md:8 措辞与 diff 不符；增量已改写为「test_llm_provider.py 断言收紧（test_router.py 既有 affected=0 断言已满足绑定，零改动）」，与事实一致。",
+      "location": ".sillyspec/changes/2026-10-21-provider-set-default-ui/tasks.md:8"
+    },
+    {
+      "severity": "P3",
+      "title": "[已闭合@59c6466] 集成测试场景三尾部死循环（改写残留）",
+      "evidence": "原报 assert hub.calls==[] 后的 for 死循环；增量已删除循环体并同步移除随之未用的 DAEMON_MSG_PROVIDER_CONFIG_CHANGED import，grep 确认该符号在文件中零残留引用，45 passed 复核通过。",
+      "location": "backend/app/modules/daemon/tests/test_provider_switch_integration.py:369-371"
+    },
+    {
+      "severity": "P3",
+      "title": "[已闭合@59c6466] mock_probe_notify 夹具注释「防回归保险」因果归因不成立",
+      "evidence": "原报注释声称误恢复推送会「立刻炸出」（实际 no-op mock 会吞掉）；增量已改为如实归因——真实防回归锚定在 test_set_default_success_does_not_dispatch_notify 的 spy 断言与集成测试 hub 零调用断言，与代码事实相符。",
+      "location": "backend/app/modules/llm_provider/tests/test_llm_provider.py:113-115"
+    }
+  ],
+  "dimensionNotes": {
+    "乱序": "ok",
+    "并发": "ok",
+    "切换": "ok",
+    "作用域": "ok"
+  },
+  "reviewedAt": "2026-10-21T12:09:20+08:00"
+}

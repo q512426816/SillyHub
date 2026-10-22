@@ -32,5 +32,7 @@ created_at: 2026-09-03 14:49:48
 - 2026-10-18-change-list-type-filter | 变更列表加类型标签与类型筛选
 - 2026-10-19-change-list-created-sort | 变更中心列表默认按创建时间倒序
 - 2026-10-19-preview-card-empty-turn-fix | 切换档案产生的静默轮（started_at 空、无日志、无 error_code 的终态轮）刷新后进…
+- 2026-10-21-agent-profile-slim-default | 档案瘦身重定位为人格加技能清单并支持用户默认档案
+- 2026-10-22-agent-profile-modal-restyle | 智能体档案弹窗重构与技能全选
 - 2026-10-21-mobile-scan-birth-cleanup | 移动端与变更中心scan起步口径清零
 - 2026-10-22-review-risk-fixes | 审查修复：原型路由防线与监听泄漏

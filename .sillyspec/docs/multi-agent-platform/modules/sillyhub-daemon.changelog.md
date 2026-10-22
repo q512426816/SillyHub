@@ -18,6 +18,7 @@
 - 2026-10-19-change-assets-cross-repo-repos | 变更资产卡展示跨仓冻结面
 - 2026-10-19-cross-repo-patch-slicing | 资产卡跨仓单文件 diff 切片
 - 2026-10-20-backfill-dryrun-log-scrub | 回填脚本改缺省dry-run并移除诊断日志
+- 2026-10-21-agent-profile-slim-default | 档案瘦身重定位为人格加技能清单并支持用户默认档案
 - 2026-10-20-codex-requires-openai-auth | 腾讯云平台 codex 会话选直连（anthropic 形态）供应商时稳定断流（stream dis…
 - 2026-10-21-gitlog-quotepath-fix | 修复git日志非ASCII路径展示与空diff
 - 2026-10-21-overview-card-mainflow-scan | 总览卡主管线去scan并隐藏thin零步骤

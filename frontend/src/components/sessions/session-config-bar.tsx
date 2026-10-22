@@ -60,7 +60,7 @@ import { Brain, ChevronDown, Cloud, GitBranch, Settings2, Timer, User } from "lu
 import { ApiError } from "@/lib/api";
 import type { components } from "@/lib/api-types";
 import { useMineAgentProfiles } from "@/lib/agent-profiles";
-import { listProviders } from "@/lib/api/llm-providers";
+import { listProviders, noProviderLabel } from "@/lib/api/llm-providers";
 import { useNotify } from "@/lib/errors";
 import {
   fetchSessionGitStatus,
@@ -291,7 +291,7 @@ export function buildDefaultSwitchPrompt(p: PendingSwitch): string {
   const what = p.field === "llm_provider_id" ? "供应商" : switchFieldWhat(p.field);
   const name =
     p.field === "llm_provider_id" && p.value === SWITCH_NO_PROVIDER_VALUE
-      ? "本机默认"
+      ? (p.label || "本机默认") // 不指定项 label 已动态化（provider-default-ui-hint）
       : p.field === "model" && p.value === SWITCH_MODEL_DEFAULT_VALUE
         ? "默认"
         : p.label;
@@ -423,6 +423,20 @@ export function SessionConfigBar({
     staleTime: 30_000,
   });
   const providers = useMemo(() => providersQ.data ?? [], [providersQ.data]);
+  // 2026-10-21-provider-default-ui-hint：兜底项文案按用户默认供应商动态化。
+  const noProviderFallbackLabel = useMemo(
+    () => noProviderLabel(providers),
+    [providers],
+  );
+  // 2026-10-21-profile-default-prehint：档案兜底项——provisional 且有默认时
+  // 实际效果是「创建时用默认档案」；运行中切不指定=本会话无人格（保持原文案）。
+  const noProfileFallbackLabel = useMemo(() => {
+    if (provisional) {
+      const def = profiles.find((p) => p.is_user_default);
+      if (def) return `不指定（默认：${def.name}）`;
+    }
+    return "不指定（无人格）";
+  }, [provisional, profiles]);
 
   const [openKind, setOpenKind] = useState<SessionConfigCtrlKind | null>(null);
   const [submitting, setSubmitting] = useState(false);
@@ -675,12 +689,19 @@ export function SessionConfigBar({
     ? profiles.find((p) => p.id === agentProfileId)?.name ??
       configSnapshot?.profile_name ??
       agentProfileId
-    : "未指定";
+    : // provisional（将创建）未选 → 预示用户默认档案（创建时注入）；非
+      // provisional 保持「未指定」真值——默认只在创建时注入，存量会话不追溯
+      //（2026-10-21-profile-default-prehint）。
+      provisional
+      ? (profiles.find((p) => p.is_user_default)?.name ?? "未指定")
+      : "未指定";
   const providerLabel = llmProviderId
     ? providers.find((p) => p.id === llmProviderId)?.name ??
       configSnapshot?.provider_name ??
       llmProviderId
-    : "本机默认";
+    : // 未显式选 → 用户默认供应商名（claim 链实际注入它）；无默认回落本机默认
+      //（2026-10-21-provider-default-ui-hint，与下拉兜底项同源）。
+      providers.find((p) => p.is_default)?.name ?? "本机默认";
 
   /** ql-20260817-010：点选即**静默**切换——prompt 发空串（后端静默切换契约：
    * 有切换字段允许空 prompt；daemon 收到空 prompt 只 reload 配置不喂消息，
@@ -835,13 +856,13 @@ export function SessionConfigBar({
             >
               <SwitchItem
                 icon={<Cloud aria-hidden className="h-3 w-3" />}
-                label="不指定（本机默认）"
+                label={noProviderFallbackLabel}
                 current={llmProviderId == null}
                 onClick={() =>
                   executeSwitch({
                     field: "llm_provider_id",
                     value: SWITCH_NO_PROVIDER_VALUE,
-                    label: "不指定（本机默认）",
+                    label: noProviderFallbackLabel,
                   })
                 }
               />
@@ -997,7 +1018,7 @@ export function SessionConfigBar({
             {/* ql-20260818-004：取消档案与供应商「不指定」对称——空串语义回无人格。 */}
             <SwitchItem
               icon={<User aria-hidden className="h-3 w-3" />}
-              label="不指定（无人格）"
+              label={noProfileFallbackLabel}
               current={agentProfileId == null}
               onClick={() =>
                 executeSwitch({

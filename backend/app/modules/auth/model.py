@@ -70,6 +70,18 @@ class User(BaseModel, table=True):
         default=False,
         sa_column=Column(Boolean, nullable=False, default=False),
     )
+    # 用户级默认智能体档案（2026-10-21-agent-profile-slim-default task-01）：每用户
+    # 至多一个（单列天然互斥）。会话/群聊未显式选档案时注入其人格与技能（软偏好：
+    # 档案删 FK SET NULL 回落无默认，失可见注入点静默跳过）。与
+    # workspaces.default_agent_profile_id（dispatch 兜底档）区分——本列是用户级。
+    default_agent_profile_id: uuid.UUID | None = Field(
+        default=None,
+        sa_column=Column(
+            Uuid(as_uuid=True),
+            ForeignKey("agent_profiles.id", ondelete="SET NULL"),
+            nullable=True,
+        ),
+    )
     created_at: datetime = Field(
         default_factory=lambda: datetime.now(UTC),
         sa_column=Column(DateTime(timezone=True), nullable=False),

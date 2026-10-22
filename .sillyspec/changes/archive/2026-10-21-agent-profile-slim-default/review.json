@@ -1,0 +1,52 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-21-agent-profile-slim-default",
+  "reviewer": "subagent",
+  "verdict": "PASS",
+  "reviewedAgainst": "9458a48db2d349cf18861d098796265ca018fe31",
+  "findings": [
+    {
+      "severity": "P2",
+      "title": "〔已闭合〕FR-02 声称的前端测试绑定「设为默认操作与默认标记」不存在",
+      "evidence": "原发现：agent-profile-card.test.tsx 零改动、无任何设默认用例。增量闭合（8f3665482）：新增 describe「AgentProfileCard 设为默认 / 取消默认」3 用例——is_user_default=true 显默认徽标+取消默认按钮且 stopPropagation 不触发预览 / false+传回调显设为默认并触发 / 未传回调不渲染（向下兼容），断言真实（getByRole/queryByRole+回调计数），复跑 13 passed",
+      "location": "frontend/src/components/agent-profile/__tests__/agent-profile-card.test.tsx:260-319"
+    },
+    {
+      "severity": "P2",
+      "title": "〔已闭合〕FR-03 群聊「影子会话群主默认注入」场景无任何自动化测试",
+      "evidence": "原发现：shadow.py 群主默认回落分支零覆盖。增量闭合（8f3665482）：新增 test_group_default_profile.py 直测 _ensure_shadow_session 2 用例——群主默认注入（shadow.agent_profile_id=默认档 id、真实 AgentRun 落库断言 agent_profile_id 与 agent_profile_snapshot.system_prompt）/ 无默认保持 None。伪造面核对：fake_svc._session=真实 db_session，默认解析走真实 User 查询与真实 AgentProfileService.get 可见性校验，不遮蔽被测分支；RunPlacementService 为函数内延迟 import（shadow.py:550-553），patch 定义处生效；placement/WS 隔离仅裁掉副作用，lease 下推由会话侧 _lease_metadata 断言锚定。复跑 5 passed（group 2 + session 3）",
+      "location": "backend/app/modules/daemon/tests/test_group_default_profile.py:101-205；backend/app/modules/daemon/group/service/shadow.py:550-553"
+    },
+    {
+      "severity": "P3",
+      "title": "〔已闭合〕requirements FR-01 绑定的测试路径写错（用例本身真实存在）",
+      "evidence": "原发现：绑定声称 agent-profile/__tests__/agent-profile-form.test.tsx，实际在 components/__tests__/。增量闭合：requirements.md 随首次入库（a43028000..8f3665482 为 new file）修正为实际路径 frontend/src/components/__tests__/agent-profile-form.test.tsx；FR-03 绑定同步落位 test_group_default_profile.py 实际路径",
+      "location": "F:\\WorkNew\\SillyHub\\.sillyspec\\changes\\2026-10-21-agent-profile-slim-default\\requirements.md:91,93"
+    },
+    {
+      "severity": "P3",
+      "title": "〔已闭合〕软偏好回落 except Exception 过宽，吞掉设计声明面之外的故障",
+      "evidence": "原发现：裸 except Exception 把 DB 故障也静默为零注入且无日志。增量闭合（8f3665482）：inject_gates.py 与 shadow.py 均改为 except AppError（预期面：AgentProfileNotFound/AgentProfilePermissionDenied 均直接继承 AppError，恰为 service.get 的 404/403 抛出类型）静默回落 + except Exception 非预期面仍软回落但 structlog warning 留痕（event=session_default_profile_resolve_failed / group_shadow_default_profile_resolve_failed，error 截断 200 字符）。调用正确性核对：inject_gates 用 _svc.log（模块级 import as _svc 延迟解析，与既有范式一致）；shadow 用模块级 _gsvc_log，structlog BoundLogger kwargs 风格正确",
+      "location": "backend/app/modules/daemon/session/service/inject_gates.py:271-280；backend/app/modules/daemon/group/service/shadow.py:589-600"
+    },
+    {
+      "severity": "P3",
+      "title": "〔已闭合〕interactive 路径「非空子集」裁剪无直接用例",
+      "evidence": "原发现：daemon-kind-dispatch 仅空数组/无键两态。增量闭合（8f3665482）：新增用例 execPayload.skillRefs=[\"skill-a\"] → 断言 skills 目录 remaining 含 skill-a 且不含 skill-b，interactive 三态（子集/空清空/无键全量）齐；复跑 23 passed",
+      "location": "sillyhub-daemon/tests/daemon-kind-dispatch.test.ts:1100-1146"
+    },
+    {
+      "severity": "P3",
+      "title": "〔已闭合〕增量清偿引入 6 条 ruff lint 回归（E402×5 + I001×1，baseline 全绿）",
+      "evidence": "原发现：shadow.py 模块级赋值 _gsvc_log 插在 import 块中间引发其后 5 个 import E402；inject_gates.py AppError import 位置 I001。增量闭合（9458a48db）：git diff 8f3665482..HEAD 仅两文件 3 行纯挪位——_gsvc_log 赋值挪到 import 块结束后（模块级名字不变，运行时等价）、AppError import 挪到排序正确位置，零行为变化；复审亲验 ruff 两文件 All checks passed，test_group_default_profile + test_session_default_profile 复跑 5 passed",
+      "location": "backend/app/modules/daemon/group/service/shadow.py:28-50；backend/app/modules/daemon/session/service/inject_gates.py:23"
+    }
+  ],
+  "dimensionNotes": {
+    "乱序": "ok",
+    "并发": "ok",
+    "切换": "ok",
+    "作用域": "ok"
+  },
+  "reviewedAt": "2026-10-21T15:09:00+08:00"
+}

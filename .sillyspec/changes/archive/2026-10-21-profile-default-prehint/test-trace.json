@@ -1,0 +1,37 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-21-profile-default-prehint",
+  "rows": [
+    {
+      "anchor": "FR-01",
+      "row_id": "2026-10-21-profile-default-prehint:flow:测试绑定FR-01",
+      "tests": [
+        "frontend/src/components/sessions/__tests__/session-config-bar.test.tsx「provisional 未选档案显示默认档案名」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-21-profile-default-prehint"
+    },
+    {
+      "anchor": "FR-02",
+      "row_id": "2026-10-21-profile-default-prehint:flow:测试绑定FR-02",
+      "tests": [
+        "frontend/src/components/sessions/__tests__/session-config-bar.test.tsx「下拉兜底项 provisional 动态文案」",
+        "frontend/src/components/sessions/__tests__/session-config-bar.test.tsx「非 provisional 未选保持未指定」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-21-profile-default-prehint"
+    }
+  ]
+}

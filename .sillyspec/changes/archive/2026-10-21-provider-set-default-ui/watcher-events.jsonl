@@ -1,0 +1,38 @@
+{"ts":1792552575008,"kind":"file","stage":"requirements","detail":"requirements.md 出现","provisional":true}
+{"ts":1792552575008,"kind":"file","stage":"design","detail":"design.md 出现","provisional":true}
+{"ts":1792552575008,"kind":"file","stage":"tasks","detail":"tasks.md 出现","provisional":true}
+{"ts":1792552745105,"kind":"file-update","stage":"requirements","detail":"requirements.md 内容变更","provisional":true}
+{"ts":1792552775976,"kind":"file-update","stage":"design","detail":"design.md 内容变更","provisional":true}
+{"ts":1792552783865,"kind":"file-update","stage":"tasks","detail":"tasks.md 内容变更","provisional":true}
+{"ts":1792552783865,"kind":"file","stage":"proposal","detail":"decisions.md 出现","provisional":true}
+{"ts":1792553116364,"kind":"file-update","stage":"proposal","detail":"decisions.md 内容变更","provisional":true}
+{"ts":1792553126360,"kind":"file-update","stage":"requirements","detail":"requirements.md 内容变更","provisional":true}
+{"ts":1792553139755,"kind":"file-update","stage":"requirements","detail":"requirements.md 内容变更","provisional":true}
+{"ts":1792553146606,"kind":"file-update","stage":"requirements","detail":"requirements.md 内容变更","provisional":true}
+{"ts":1792553180924,"kind":"file-update","stage":"design","detail":"design.md 内容变更","provisional":true}
+{"ts":1792553187704,"kind":"file-update","stage":"tasks","detail":"tasks.md 内容变更","provisional":true}
+{"ts":1792553220445,"kind":"file-update","stage":"design","detail":"design.md 内容变更","provisional":true}
+{"ts":1792553282683,"kind":"file-update","stage":"design","detail":"design.md 内容变更","provisional":true}
+{"ts":1792553343212,"kind":"warning","stage":null,"rule":"scope-drift","severity":"warning","detail":"声明面之外的代码文件被改：ackend/app/modules/llm_provider/service.py——范围漂移嫌疑（并行会话改动/越界，人判）","provisional":true}
+{"ts":1792553424012,"kind":"warning","stage":null,"rule":"scope-drift","severity":"warning","detail":"声明面之外的代码文件被改：ackend/app/modules/llm_provider/router.py——范围漂移嫌疑（并行会话改动/越界，人判）","provisional":true}
+{"ts":1792553450151,"kind":"warning","stage":null,"rule":"scope-drift","severity":"warning","detail":"声明面之外的代码文件被改：ackend/app/modules/daemon/lease/provider_switch.py——范围漂移嫌疑（并行会话改动/越界，人判）","provisional":true}
+{"ts":1792553570709,"kind":"warning","stage":null,"rule":"scope-drift","severity":"warning","detail":"声明面之外的代码文件被改：backend/app/modules/llm_provider/tests/test_llm_provider.py.tmp.22016.367eeba9a8ca——范围漂移嫌疑（并行会话改动/越界，人判）","provisional":true}
+{"ts":1792553749129,"kind":"file-update","stage":"tasks","detail":"tasks.md 内容变更","provisional":true}
+{"ts":1792553749129,"kind":"task-done","stage":"tasks","detail":"checked 0→2","provisional":true}
+{"ts":1792553759370,"kind":"commit","stage":null,"detail":"23c1472fe","provisional":true}
+{"ts":1792553779149,"kind":"warning","stage":null,"rule":"scope-drift","severity":"warning","detail":"声明面之外的代码文件被改：rontend/src/lib/api/llm-providers.ts——范围漂移嫌疑（并行会话改动/越界，人判）","provisional":true}
+{"ts":1792553807214,"kind":"warning","stage":null,"rule":"scope-drift","severity":"warning","detail":"声明面之外的代码文件被改：rontend/src/components/llm-providers/llm-provider-list.tsx——范围漂移嫌疑（并行会话改动/越界，人判）","provisional":true}
+{"ts":1792553943944,"kind":"warning","stage":null,"rule":"scope-drift","severity":"warning","detail":"声明面之外的代码文件被改：rontend/src/components/llm-providers/__tests__/llm-provider-list.test.tsx——范围漂移嫌疑（并行会话改动/越界，人判）","provisional":true}
+{"ts":1792554352848,"kind":"file-update","stage":"tasks","detail":"tasks.md 内容变更","provisional":true}
+{"ts":1792554352848,"kind":"task-done","stage":"tasks","detail":"checked 2→5","provisional":true}
+{"ts":1792554363352,"kind":"commit","stage":null,"detail":"6962b2332","provisional":true}
+{"ts":1792554861397,"kind":"gate-run","stage":"verify","detail":"门实测 failed（97.8s） · 20261021035421","provisional":true}
+{"ts":1792554900516,"kind":"warning","stage":null,"rule":"scope-drift","severity":"warning","detail":"声明面之外的代码文件被改：ackend/app/modules/daemon/tests/test_provider_switch_integration.py——范围漂移嫌疑（并行会话改动/越界，人判）","provisional":true}
+{"ts":1792555078207,"kind":"commit","stage":null,"detail":"1afffe374","provisional":true}
+{"ts":1792555214249,"kind":"gate-run","stage":"verify","detail":"门实测 passed（102.1s） · 20261021040014","provisional":true}
+{"ts":1792555592752,"kind":"warning","stage":null,"rule":"scope-drift","severity":"warning","detail":"声明面之外的代码文件被改：ackend/app/modules/llm_provider/schema.py——范围漂移嫌疑（并行会话改动/越界，人判）","provisional":true}
+{"ts":1792555601578,"kind":"file-update","stage":"requirements","detail":"requirements.md 内容变更","provisional":true}
+{"ts":1792555618839,"kind":"warning","stage":null,"rule":"scope-drift","severity":"warning","detail":"声明面之外的代码文件被改：ackend/app/modules/daemon/tests/test_provider_switch_integration.py、backend/app/modules/llm_provider/schema.py——范围漂移嫌疑（并行会话改动/越界，人判）","provisional":true}
+{"ts":1792555626049,"kind":"file-update","stage":"tasks","detail":"tasks.md 内容变更","provisional":true}
+{"ts":1792555626443,"kind":"warning","stage":null,"rule":"scope-drift","severity":"warning","detail":"声明面之外的代码文件被改：backend/app/modules/daemon/tests/test_provider_switch_integration.py——范围漂移嫌疑（并行会话改动/越界，人判）","provisional":true}
+{"ts":1792555658202,"kind":"commit","stage":null,"detail":"59c6466d2","provisional":true}

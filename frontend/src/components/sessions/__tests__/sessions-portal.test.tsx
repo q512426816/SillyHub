@@ -305,10 +305,15 @@ vi.mock("@/lib/agent-profiles", async () => {
   };
 });
 
-vi.mock("@/lib/api/llm-providers", () => ({
-  listProviders: (...args: unknown[]) => mocks.listProviders(...args),
+vi.mock("@/lib/api/llm-providers", async (importOriginal) => {
+  // provider-default-ui-hint：passthrough 真实导出（noProviderLabel 等），原覆盖保留。
+  const actual = await importOriginal<typeof import("@/lib/api/llm-providers")>();
+  return {
+    ...actual,
+    listProviders: (...args: unknown[]) => mocks.listProviders(...args),
   getProviderQuota: (...args: unknown[]) => mocks.getProviderQuota(...args),
-}));
+  };
+});
 
 // SessionListPanel chips 工作区名解析 + WorkspaceSessionPicker 数据源。
 vi.mock("@/lib/workspaces", () => ({

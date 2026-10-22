@@ -806,3 +806,43 @@ export async function linkSkillsToWorkdir(
   return { linked, skipped: linked === 0 };
 }
 
+// ── 档案技能子集裁剪（2026-10-21-agent-profile-slim-default task-03）──────────
+
+/**
+ * 按 profile.skillRefs 严格裁剪 <workDir>/.claude/skills/（task-09 原创于
+ * task-runner.ts，task-03 迁出共享——interactive 会话路径同样消费）。
+ *
+ * 语义（2026-10-21 严格化）：非空 = 只保留勾选子集；**空数组 = 清空全部技能**
+ * （档案生效即严格按档案，未勾=不挂）。调用方负责区分「键缺失=不裁剪（全量，
+ * 旧 lease/未选档案）」与「键在场（含空数组）=裁剪」——本函数不判 undefined。
+ * 隐藏项（. 开头）与非目录跳过；单条 rm 失败仅 warn（不阻塞 spawn）。
+ * 目录不存在（linkSkillsToWorkdir 未建 / mock no-op）→ 静默返回。
+ */
+export async function pruneSkillsToSubset(
+  workDir: string,
+  skillRefs: string[],
+  leaseId: string,
+): Promise<void> {
+  const skillsBase = join(workDir, '.claude', 'skills');
+  let entries: import('node:fs').Dirent[];
+  try {
+    entries = await readdir(skillsBase, { withFileTypes: true });
+  } catch {
+    return; // 目录不存在（linkSkillsToWorkdir 未建 / mock no-op）→ 无可裁剪
+  }
+  const keep = new Set(skillRefs);
+  for (const entry of entries) {
+    if (!entry.isDirectory()) continue;
+    if (entry.name.startsWith('.')) continue;
+    if (!keep.has(entry.name)) {
+      await rm(join(skillsBase, entry.name), { recursive: true, force: true }).catch(
+        (e: unknown) => {
+          console.warn('skill_manager: prune_skill_failed', leaseId, {
+            skill: entry.name,
+            error: e,
+          });
+        },
+      );
+    }
+  }
+}

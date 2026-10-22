@@ -304,9 +304,14 @@ vi.mock("@/lib/workspace-binding", () => ({
   fetchMyBindings: (...args: unknown[]) => bindingApi.fetchMyBindings(...args),
 }));
 
-vi.mock("@/lib/api/llm-providers", () => ({
-  listProviders: vi.fn().mockResolvedValue([]),
-}));
+vi.mock("@/lib/api/llm-providers", async (importOriginal) => {
+  // provider-default-ui-hint：passthrough 真实导出（noProviderLabel 等），原覆盖保留。
+  const actual = await importOriginal<typeof import("@/lib/api/llm-providers")>();
+  return {
+    ...actual,
+    listProviders: vi.fn().mockResolvedValue([]),
+  };
+});
 
 // task-05（2026-08-28-session-ppm-task-binding / FR-04 / D-004@v2）：PPM 条目
 // 入口的工作区解析数据源（listProjectWorkspaces 按 workspace_id 升序取第一）。

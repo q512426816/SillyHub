@@ -1,0 +1,70 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-21-agent-profile-slim-default",
+  "rows": [
+    {
+      "anchor": "FR-01",
+      "row_id": "2026-10-21-agent-profile-slim-default:flow:测试绑定FR-01",
+      "tests": [
+        "frontend/src/components/__tests__/agent-profile-form.test.tsx「新建无需选工作区上下文」",
+        "frontend/src/components/__tests__/agent-profile-form.test.tsx「编辑存量档案保存清空被删引用」",
+        "frontend/src/components/__tests__/agent-profile-form.test.tsx「表单仅渲染四字段」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-21-agent-profile-slim-default"
+    },
+    {
+      "anchor": "FR-02",
+      "row_id": "2026-10-21-agent-profile-slim-default:flow:测试绑定FR-02",
+      "tests": [
+        "backend/app/modules/agent/tests/test_profile_router.py「set-default/unset-default 端点与互斥」",
+        "frontend/src/components/agent-profile/__tests__/agent-profile-card.test.tsx「设为默认操作与默认标记」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-21-agent-profile-slim-default"
+    },
+    {
+      "anchor": "FR-03",
+      "row_id": "2026-10-21-agent-profile-slim-default:flow:测试绑定FR-03",
+      "tests": [
+        "backend/app/modules/daemon/tests/test_group_default_profile.py「影子会话群主默认注入/无默认保持 None」",
+        "backend/app/modules/daemon/tests/test_session_default_profile.py「默认注入/无默认零回归/失可见回落」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-21-agent-profile-slim-default"
+    },
+    {
+      "anchor": "FR-04",
+      "row_id": "2026-10-21-agent-profile-slim-default:flow:测试绑定FR-04",
+      "tests": [
+        "sillyhub-daemon/tests/task-runner.test.ts"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-21-agent-profile-slim-default"
+    }
+  ]
+}

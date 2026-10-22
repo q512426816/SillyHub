@@ -43,7 +43,7 @@ from app.core.auth_deps import (
 )
 from app.core.db import get_session
 from app.core.errors import WorkspaceNotFound
-from app.modules.agent.profile.model import AgentProfileVisibility
+from app.modules.agent.profile.model import AgentProfile, AgentProfileVisibility
 from app.modules.agent.profile.service import AgentProfileService
 from app.modules.auth.model import User
 from app.modules.auth.permissions import Permission
@@ -80,6 +80,10 @@ class AgentProfileRead(BaseModel):
     allowed_roots_overlay: list[str] | None
     version: int
     is_system_default: bool
+    # 用户级默认标记（2026-10-21-agent-profile-slim-default task-01）：按请求者的
+    # users.default_agent_profile_id 计算赋值（from_attributes 读不到，恒经
+    # ``_to_read`` 组装；直接 model_validate 时缺省 False）。
+    is_user_default: bool = False
     created_at: datetime
     updated_at: datetime
 
@@ -107,11 +111,13 @@ class AgentProfileAggregatedListResponse(BaseModel):
 class AgentProfileCreate(BaseModel):
     """建档请求。``visibility`` 决定 workspace_id 归属与建案权（service.create
     内校验）：private=owner 自用 / workspace=指定 ws 成员可建 / platform=仅 admin。
-    ``provider`` 必填（作 target_provider，D-014）。"""
+    ``provider`` 缺省 ``"claude"``（2026-10-21-agent-profile-slim-default：表单瘦
+    身后前端不再传，列 NOT NULL 保留、读侧已忽略——dispatch 链路的 D-014 消费
+    随 tasks 入口废弃而休眠）。"""
 
     name: str = Field(min_length=1, max_length=200)
     visibility: AgentProfileVisibility = AgentProfileVisibility.PRIVATE
-    provider: str = Field(min_length=1, max_length=64)
+    provider: str = Field(default="claude", min_length=1, max_length=64)
     model: str | None = Field(default=None, max_length=128)
     system_prompt: str | None = Field(default=None)
     tool_policy_id: uuid.UUID | None = None
@@ -172,6 +178,16 @@ def _service(session: AsyncSession) -> AgentProfileService:
     return AgentProfileService(session)
 
 
+def _to_read(p: AgentProfile, actor: User) -> AgentProfileRead:
+    """ORM 行 → Read DTO，按请求者计算 ``is_user_default``（task-01）。
+
+    聚合项复用本 helper 后再 model_copy 补 workspace_name（继承字段含标记）。
+    """
+    read = AgentProfileRead.model_validate(p)
+    read.is_user_default = actor.default_agent_profile_id == p.id
+    return read
+
+
 # ════════════════════════════════════════════════════════════════════════════
 # workspace 级端点：/workspaces/{workspace_id}/agent-profiles
 # require_permission 自动从路径取 {workspace_id} 注入 RBAC 闭包（members_router 同模式）。
@@ -192,7 +208,7 @@ async def list_workspace_profiles(
     workspace = await _load_workspace(session, workspace_id)
     actor = _user
     profiles = await _service(session).list(actor=actor, workspace=workspace)
-    return AgentProfileListResponse(items=[AgentProfileRead.model_validate(p) for p in profiles])
+    return AgentProfileListResponse(items=[_to_read(p, actor) for p in profiles])
 
 
 @router.post(
@@ -224,7 +240,7 @@ async def create_workspace_profile(
         skill_refs=payload.skill_refs,
         allowed_roots_overlay=payload.allowed_roots_overlay,
     )
-    return AgentProfileRead.model_validate(profile)
+    return _to_read(profile, user)
 
 
 @router.get(
@@ -240,7 +256,7 @@ async def get_workspace_profile(
     """取单档。service.get 自带三级 visibility 读校验：不存在→404，不可见→403。"""
     actor = _user
     profile = await _service(session).get(profile_id=profile_id, actor=actor)
-    return AgentProfileRead.model_validate(profile)
+    return _to_read(profile, actor)
 
 
 @router.patch(
@@ -260,7 +276,7 @@ async def update_workspace_profile(
     # 保留为 AgentProfileVisibility 枚举成员（service 用 `is` 比较需枚举成员）。
     fields = payload.model_dump(exclude_unset=True)
     profile = await _service(session).update(profile_id=profile_id, actor=user, fields=fields)
-    return AgentProfileRead.model_validate(profile)
+    return _to_read(profile, user)
 
 
 @router.delete(
@@ -306,7 +322,7 @@ async def copy_workspace_profile(
         visibility=payload.visibility,
         workspace=target_ws,
     )
-    return AgentProfileRead.model_validate(profile)
+    return _to_read(profile, user)
 
 
 # ════════════════════════════════════════════════════════════════════════════
@@ -354,13 +370,54 @@ async def list_platform_profiles(
         return AgentProfileAggregatedListResponse(
             items=[
                 AgentProfileAggregatedItem.model_validate(e.profile).model_copy(
-                    update={"workspace_name": e.workspace_name}
+                    update={
+                        "workspace_name": e.workspace_name,
+                        "is_user_default": user.default_agent_profile_id == e.profile.id,
+                    }
                 )
                 for e in entries
             ]
         )
     profiles = await _service(session).list(actor=user, workspace=None)
-    return AgentProfileListResponse(items=[AgentProfileRead.model_validate(p) for p in profiles])
+    return AgentProfileListResponse(items=[_to_read(p, user) for p in profiles])
+
+
+@router.post(
+    "/agent-profiles/{profile_id}/set-default",
+    response_model=AgentProfileRead,
+)
+async def set_default_profile(
+    profile_id: Annotated[uuid.UUID, Path(...)],
+    session: SessionDep,
+    user: Annotated[User, Depends(get_current_user)],
+) -> AgentProfileRead:
+    """置本档案为**当前用户**的默认档案（task-01）。
+
+    每用户至多一个（users.default_agent_profile_id 单列，后写胜出互斥）；档案须对
+    actor 可见（service.get 同口径 404/403）。会话/群聊未显式选档案时注入其人格与
+    技能（task-02）。返回携带 ``is_user_default=True`` 的档案行。
+    """
+    profile = await _service(session).set_user_default(
+        profile_id=profile_id, actor=user
+    )
+    return _to_read(profile, user)
+
+
+@router.post(
+    "/agent-profiles/{profile_id}/unset-default",
+)
+async def unset_default_profile(
+    profile_id: Annotated[uuid.UUID, Path(...)],
+    session: SessionDep,
+    user: Annotated[User, Depends(get_current_user)],
+) -> dict[str, bool]:
+    """取消**当前用户**的默认档案（幂等；仅当默认恰为该档案时清列，否则 no-op）。
+
+    取消后未显式选档案的会话回归零注入（现状链）。
+    """
+    if user.default_agent_profile_id == profile_id:
+        await _service(session).unset_user_default(actor=user)
+    return {"ok": True}
 
 
 @router.get(

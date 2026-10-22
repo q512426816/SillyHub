@@ -25,9 +25,14 @@ import type { AgentProfileAggregatedItem } from "@/lib/agent-profiles";
 
 // task-08：card 现用 useQuery(listProviders) 做绑定供应商名映射；测试需 QueryClient +
 // mock listProviders（避免真 apiFetch）。默认返回空 → boundProviderName=null → 不渲染。
-vi.mock("@/lib/api/llm-providers", () => ({
-  listProviders: vi.fn().mockResolvedValue([]),
-}));
+vi.mock("@/lib/api/llm-providers", async (importOriginal) => {
+  // provider-default-ui-hint：passthrough 真实导出（noProviderLabel 等），原覆盖保留。
+  const actual = await importOriginal<typeof import("@/lib/api/llm-providers")>();
+  return {
+    ...actual,
+    listProviders: vi.fn().mockResolvedValue([]),
+  };
+});
 
 /** 包 QueryClientProvider 渲染（card 用 useQuery，task-08）。 */
 function renderCard(ui: ReactElement) {
@@ -254,5 +259,145 @@ describe("AgentProfileCard 系统预置只读态（design §12 验收 5）", () 
     expect(screen.queryByRole("button", { name: /^编辑$/ })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /^复制$/ })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /^删除$/ })).not.toBeInTheDocument();
+  });
+});
+
+// ── 2026-10-21-agent-profile-slim-default task-05：设为默认操作与默认标记 ─────
+
+describe("AgentProfileCard 设为默认 / 取消默认（task-05 / FR-02 前端面）", () => {
+  it("is_user_default=true → 显「默认」徽标 + 「取消默认」按钮，点按触发 onUnsetDefault 不冒泡", () => {
+    const onSetDefault = vi.fn();
+    const onUnsetDefault = vi.fn();
+    const onPreview = vi.fn();
+    renderCard(
+      <AgentProfileCard
+        profile={makeProfile({ is_user_default: true })}
+        onPreview={onPreview}
+        onEdit={vi.fn()}
+        onCopy={vi.fn()}
+        onDelete={vi.fn()}
+        onSetDefault={onSetDefault}
+        onUnsetDefault={onUnsetDefault}
+      />,
+    );
+    // 2026-10-22-agent-profiles-page-restyle：默认徽标改品牌胶囊「★ 默认」。
+    expect(screen.getByText("★ 默认")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "取消默认" })).toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: "设为默认" }),
+    ).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "取消默认" }));
+    expect(onUnsetDefault).toHaveBeenCalledTimes(1);
+    expect(onPreview).not.toHaveBeenCalled(); // stopPropagation：不触发预览
+  });
+
+  it("is_user_default=false 且传 onSetDefault → 显「设为默认」按钮，点按触发回调", () => {
+    const onSetDefault = vi.fn();
+    renderCard(
+      <AgentProfileCard
+        profile={makeProfile({ is_user_default: false })}
+        onPreview={vi.fn()}
+        onEdit={vi.fn()}
+        onCopy={vi.fn()}
+        onDelete={vi.fn()}
+        onSetDefault={onSetDefault}
+        onUnsetDefault={vi.fn()}
+      />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "设为默认" }));
+    expect(onSetDefault).toHaveBeenCalledTimes(1);
+  });
+
+  it("未传默认回调 → 不渲染设为默认操作（向下兼容既有挂载点）", () => {
+    renderCard(
+      <AgentProfileCard
+        profile={makeProfile()}
+        onPreview={vi.fn()}
+        onEdit={vi.fn()}
+        onCopy={vi.fn()}
+        onDelete={vi.fn()}
+      />,
+    );
+    expect(
+      screen.queryByRole("button", { name: "设为默认" }),
+    ).toBeNull();
+  });
+});
+
+// ── 2026-10-22-agent-profiles-page-restyle：重设计新增断言 ────────────────
+
+describe("AgentProfileCard 重设计新增（2026-10-22-agent-profiles-page-restyle）", () => {
+  it("用户默认档案 → 品牌描边光环类 + 「★ 默认」品牌胶囊", () => {
+    renderCard(
+      <AgentProfileCard
+        profile={makeProfile({ is_user_default: true })}
+        onPreview={vi.fn()}
+        onEdit={vi.fn()}
+        onCopy={vi.fn()}
+        onDelete={vi.fn()}
+      />,
+    );
+    expect(screen.getByText("★ 默认")).toBeInTheDocument();
+    const card = screen.getByRole("button", { name: /代码审查助手/ });
+    expect(card.className).toContain("border-brand-300");
+    expect(card.className).toContain("ring-brand-300");
+  });
+
+  it("系统预置紧凑卡 → 引擎默认人设/能力两行提示 + 只读（无操作按钮）", () => {
+    renderCard(
+      <AgentProfileCard
+        profile={makeProfile({
+          is_system_default: true,
+          system_prompt: null,
+          mcp_refs: [],
+          skill_refs: [],
+        })}
+        onPreview={vi.fn()}
+        onEdit={vi.fn()}
+        onCopy={vi.fn()}
+        onDelete={vi.fn()}
+      />,
+    );
+    expect(
+      screen.getByText("（未设置系统提示词，按引擎默认人设执行）"),
+    ).toBeInTheDocument();
+    expect(screen.getByText("按引擎默认能力执行")).toBeInTheDocument();
+    expect(screen.getByText("只读")).toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: /^编辑$/ }),
+    ).not.toBeInTheDocument();
+  });
+
+  it("能力芯片超 4 项 → 收敛 4 项 + 「+N」，隐藏项不渲染", () => {
+    renderCard(
+      <AgentProfileCard
+        profile={makeProfile({
+          mcp_refs: [],
+          skill_refs: ["s1", "s2", "s3", "s4", "s5", "s6"],
+        })}
+        onPreview={vi.fn()}
+        onEdit={vi.fn()}
+        onCopy={vi.fn()}
+        onDelete={vi.fn()}
+      />,
+    );
+    for (const s of ["s1", "s2", "s3", "s4"]) {
+      expect(screen.getByText(s)).toBeInTheDocument();
+    }
+    expect(screen.getByText("+2")).toBeInTheDocument();
+    expect(screen.queryByText("s5")).not.toBeInTheDocument();
+  });
+
+  it("无能力自定义卡 → 「无技能（不挂载）」占位", () => {
+    renderCard(
+      <AgentProfileCard
+        profile={makeProfile({ mcp_refs: [], skill_refs: [] })}
+        onPreview={vi.fn()}
+        onEdit={vi.fn()}
+        onCopy={vi.fn()}
+        onDelete={vi.fn()}
+      />,
+    );
+    expect(screen.getByText("无技能（不挂载）")).toBeInTheDocument();
   });
 });

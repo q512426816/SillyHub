@@ -26,7 +26,7 @@
  * 设计依据：tasks/task-03.md §implementation / design §7.2 / §10 R-02 /
  * FRONTEND_PAGE_STYLE.md §0/§3/§9。
  */
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Empty, Input, Select, Spin } from "antd";
 import { SearchOutlined } from "@ant-design/icons";
 
@@ -70,6 +70,16 @@ export interface AgentProfileCardGridProps {
   onCopy?: AgentProfileHandler;
   /** 删除回调（系统预置卡不会触发）。缺省 no-op。 */
   onDelete?: AgentProfileHandler;
+  /** 设为当前用户默认档案（2026-10-21-agent-profile-slim-default task-05）。 */
+  onSetDefault?: AgentProfileHandler;
+  /** 取消当前用户默认档案。 */
+  onUnsetDefault?: AgentProfileHandler;
+  /**
+   * 全量池统计上报（2026-10-22-agent-profiles-page-restyle）：数据到达/变化时
+   * 上报 { total, defaultCount }（口径=当前数据源全池，非筛选后）；页面层收敛
+   * 进页头统计胶囊。缺省不上报。
+   */
+  onStatsChange?: (_stats: { total: number; defaultCount: number }) => void;
 }
 
 /**
@@ -84,6 +94,9 @@ export function AgentProfileCardGrid(props: AgentProfileCardGridProps) {
     onEdit: props.onEdit,
     onCopy: props.onCopy,
     onDelete: props.onDelete,
+    onSetDefault: props.onSetDefault,
+    onUnsetDefault: props.onUnsetDefault,
+    onStatsChange: props.onStatsChange,
   };
   if (scoped && props.workspaceId) {
     return (
@@ -95,7 +108,15 @@ export function AgentProfileCardGrid(props: AgentProfileCardGridProps) {
 
 /* ────────────────────── 数据源 wrapper（各自调 hook，避免条件式 hook） ────────────────────── */
 
-type GridHandlers = Pick<AgentProfileCardGridProps, "onEdit" | "onCopy" | "onDelete">;
+type GridHandlers = Pick<
+  AgentProfileCardGridProps,
+  | "onEdit"
+  | "onCopy"
+  | "onDelete"
+  | "onSetDefault"
+  | "onUnsetDefault"
+  | "onStatsChange"
+>;
 
 function MineGrid(handlers: GridHandlers) {
   const { profiles, isLoading, isError, error, refetch } =
@@ -148,9 +169,12 @@ function CardGridBody({
   error,
   scopedToWorkspace,
   onRetry,
+  onStatsChange,
   onEdit,
   onCopy,
   onDelete,
+  onSetDefault,
+  onUnsetDefault,
 }: CardGridBodyProps) {
   // 文本搜索：live 输入 + 回车提交（FRONTEND_PAGE_STYLE §3：文本不每键查）。
   const [searchInput, setSearchInput] = useState("");
@@ -207,6 +231,15 @@ function CardGridBody({
 
   const commitSearch = () => setSearchQuery(searchInput);
 
+  // 全量池统计上报（数据到达/变化时；loading/error 早退分支不报，页面保持旧值）。
+  useEffect(() => {
+    onStatsChange?.({
+      total: profiles.length,
+      defaultCount: profiles.filter((p) => p.is_user_default).length,
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [profiles, onStatsChange]);
+
   if (loading) {
     return (
       <div className="flex justify-center py-16">
@@ -232,8 +265,8 @@ function CardGridBody({
 
   return (
     <div className="flex flex-col gap-4">
-      {/* 筛选条（搜索 + 三下拉） */}
-      <div className="flex flex-wrap items-center gap-2.5 rounded-[10px] border border-border bg-muted/40 p-2.5">
+      {/* 工具栏卡（搜索 + 三下拉 + 计数同栏；2026-10-22-agent-profiles-page-restyle 收拢） */}
+      <div className="flex flex-wrap items-center gap-2.5 rounded-[12px] border border-border bg-card p-2.5 shadow-sm">
         <Input
           className="min-w-[200px] flex-1"
           size="middle"
@@ -281,17 +314,17 @@ function CardGridBody({
           options={providerOptions}
           notFoundContent="无匹配供应商"
         />
+        {/* 结果计数（右端随栏；文案与既有断言逐字兼容） */}
+        <span className="ml-auto whitespace-nowrap pr-1 text-xs text-muted-foreground">
+          共 {filtered.length} 个档案
+          {filtered.length !== profiles.length
+            ? `（已从 ${profiles.length} 个筛选）`
+            : ""}
+        </span>
       </div>
 
-      {/* 结果计数 */}
-      <div className="text-xs text-muted-foreground">
-        共 {filtered.length} 个档案
-        {filtered.length !== profiles.length
-          ? `（已从 ${profiles.length} 个筛选）`
-          : ""}
-      </div>
-
-      {/* 卡片网格 */}
+      {/* 卡片网格：按屏宽自适应列数（D-001@v2——2K 屏固定 2 列过宽；
+          auto-fill minmax 宽屏 ≥3 列 / 常规 2 列 / 窄屏 1 列） */}
       {filtered.length === 0 ? (
         <Empty
           description={
@@ -300,7 +333,7 @@ function CardGridBody({
           className="py-16"
         />
       ) : (
-        <div className="grid grid-cols-3 gap-4">
+        <div className="grid gap-4 grid-cols-[repeat(auto-fill,minmax(380px,1fr))]">
           {filtered.map((p) => (
             <AgentProfileCard
               key={p.id}
@@ -309,6 +342,8 @@ function CardGridBody({
               onEdit={onEdit ?? noop}
               onCopy={onCopy ?? noop}
               onDelete={onDelete ?? noop}
+              onSetDefault={onSetDefault}
+              onUnsetDefault={onUnsetDefault}
             />
           ))}
         </div>

@@ -1,0 +1,28 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-22-agent-profile-modal-restyle",
+  "reviewer": "subagent",
+  "verdict": "PASS",
+  "reviewedAgainst": "2fef11f807db97a27cdbd0f4fb036d7030bf821c",
+  "findings": [
+    {
+      "severity": "P3",
+      "title": "FR-02 键盘可达路径实现存在但无测试断言",
+      "evidence": "芯片已实现 role=checkbox/tabIndex=0/空格与回车切换（agent-profile-form.tsx:576-589），但 12 个用例全部走 fireEvent.click，无任何 keyDown/键盘切换断言；FR-02 文本含键盘要求，建议补一例 keyDown 用例固化该行为",
+      "location": "frontend/src/components/__tests__/agent-profile-form.test.tsx:284-353"
+    },
+    {
+      "severity": "P3",
+      "title": "FR-01 测试绑定用例名与实际用例名非逐字一致",
+      "evidence": "requirements.md 绑定名「弹窗观感：品牌图标头副标题 + 页脚红线注脚 + 品牌竖条小节头」，实际用例名为「品牌图标头副标题 + 页脚红线注脚（单行省略/title 全文）+ 小节头」（describe 弹窗观感重构（FR-01）内）；用例存在且断言了副标题/红线 title 全文/小节头文案，实质覆盖 FR-01，「品牌竖条」为纯样式 span 无法 jsdom 断言、由 visual-evidence.md 三主题截图覆盖，仅绑定名可追溯性小瑕疵",
+      "location": ".sillyspec/changes/2026-10-22-agent-profile-modal-restyle/requirements.md:81"
+    }
+  ],
+  "dimensionNotes": {
+    "乱序": "ok",
+    "并发": "n/a",
+    "切换": "ok",
+    "作用域": "ok"
+  },
+  "reviewedAt": "2026-10-22T11:11:40+08:00"
+}

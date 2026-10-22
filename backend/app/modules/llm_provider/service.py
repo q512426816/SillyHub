@@ -149,8 +149,8 @@ class DefaultSwitchResult:
     字段：
     - ``switched``：本次 set/unset 是否成功变更 ``is_default``。set 凭证探测失败
       回滚时为 ``False``（D-003）；unset 恒为 ``True``（不探测，置 False 不会失败）。
-    - ``affected_sessions``：``notify_provider_switch`` 成功投递的 active interactive
-      session 计数（D-001）；无 active session 或 notify 异常时为 ``0``。
+    - ``affected_sessions``：恒 ``0``（2026-10-21-provider-set-default-ui D-002 热切换
+      推送移除；字段保留兼容）。
     - ``error``：set 凭证探测失败原因（D-003）；成功 / unset 场景为 ``None``。
     """
 
@@ -317,20 +317,18 @@ class LlmProviderService:
         task-03 改造（change 2026-08-06-provider-switch-live-session / D-001 / D-003）：
 
         1. **凭证探测**：先 ``probe_provider``（task-01）轻量请求验 base_url + 解密
-           api_key + auth_field + model；**失败**（``ok=False``）→ **不改 is_default、
-           不推送**，返回结构化 ``error``（D-003 回滚：原供应商继续服务运行中会话，
-           不破坏 G4）。事务内此时仅有 SELECT（``self.get``）无任何 write，回滚 = 不写入。
+           api_key + auth_field + model；**失败**（``ok=False``）→ **不改 is_default**，
+           返回结构化 ``error``（D-003 回滚：原默认继续服务）。事务内此时仅有
+           SELECT（``self.get``）无任何 write，回滚 = 不写入。
         2. **互斥置位**：探测成功后事务内 ``_clear_sibling_defaults`` 清同
            (user_id, 引擎∈集合) 兄弟行 + 置本行 True（R-05 并发互斥，原子 commit；D-003 全引擎生效）。
-        3. **触发热切换**：调 ``resolve_default_provider_config``（task-02 D-006 单一
-           真相源）构造新 config → ``notify_provider_switch``（task-04）向 active
-           interactive session 推 ``PROVIDER_CONFIG_CHANGED``（D-001 WS 触发）。
-           notify best-effort（D-001 / design §9）：失败仅日志告警、不阻塞 set 成功
-           （DB 已 commit，is_default 已变更；热切换即时性降级，新会话仍走 claim 正常
-           注入新默认）。
+
+        2026-10-21-provider-set-default-ui D-002：原 step-3 热切换推送（WS
+        ``PROVIDER_CONFIG_CHANGED``）已移除——set 仅置位，**只对新会话生效**，运行中
+        会话独立保持原供应商；``affected_sessions`` 恒 ``0``（字段保留兼容）。
 
         返回 ``DefaultSwitchResult``（task-05 router 包装为 ``SetDefaultResult`` 响应）：
-        - 成功：``switched=True``、``affected_sessions=notify 投递计数``、``error=None``；
+        - 成功：``switched=True``、``affected_sessions=0``、``error=None``；
         - 凭证失败：``switched=False``、``affected_sessions=0``、``error=探测失败原因``。
         """
         row = await self.get(provider_id, user_id)
@@ -399,14 +397,12 @@ class LlmProviderService:
                 row, user_id=row.user_id, cipher=self._cipher
             )
 
-        # ── step 3: 触发热切换推送（D-001 / D-006 单一真相源 helper；按首个引擎
-        # resolve 主 config，其余引擎的扇出归 notify 内部按会话引擎分配）──
-        affected = await self._dispatch_provider_switch(
-            row.user_id, row.agent_kinds[0], unset=False
-        )
+        # ── step 3: 热切换推送已移除（2026-10-21-provider-set-default-ui D-002：
+        # 用户拍板 set/unset 仅置位、只对新会话生效，运行中会话独立保持原供应商）。
+        # notify_provider_switch / WS 消费链保留为无生产调用方的基础设施。──
         return DefaultSwitchResult(
             switched=True,
-            affected_sessions=affected,
+            affected_sessions=0,
             litellm_registered=litellm_registered,
         )
 
@@ -424,15 +420,13 @@ class LlmProviderService:
         （``_clear_sibling_defaults`` 仅在置 True 时触发）。幂等：对本就 False 的行
         取消是 no-op（不抛错）。
 
-        置 False 后调 ``notify_provider_switch``（task-04）推 ``provider_config=None``，
-        daemon 据此回退宿主机本机凭证管理（D-004 / design §5 Wave1 / spawn-env.ts 第 0
-        层跳过）。notify best-effort（D-001）：失败仅日志告警、不阻塞 unset 成功。
-
-        若取消后该 (user_id, 引擎) 无任何默认 → lease 不再注入 provider_config
-        → 新会话也回归本机（D-007 兼容策略）。
+        2026-10-21-provider-set-default-ui D-002：原尾部热切换推送（WS
+        ``PROVIDER_CONFIG_CHANGED`` 广播 None）已移除——unset 仅置位，运行中会话
+        独立保持原供应商；若取消后该 (user_id, 引擎) 无任何默认 → lease 不再注入
+        provider_config → 新会话回归本机（D-007 兼容策略）。
 
         返回 ``DefaultSwitchResult``：``switched`` 恒 ``True``（unset 不探测、不会失败）、
-        ``affected_sessions`` 投递计数、``error`` 恒 ``None``。
+        ``affected_sessions`` 恒 ``0``（字段保留兼容）、``error`` 恒 ``None``。
         """
         row = await self.get(provider_id, user_id)
         row.is_default = False
@@ -447,66 +441,9 @@ class LlmProviderService:
 
             await litellm_client.unregister(litellm_client.litellm_model_name(row.user_id, row.id))
 
-        # task-03 / D-004：触发热切换推送（provider_config=None → daemon 回退本机；
-        # 停止场景 notify 对全部活跃会话广播 None（D-006：扇出只影响 set 场景）。
-        affected = await self._dispatch_provider_switch(row.user_id, row.agent_kinds[0], unset=True)
-        return DefaultSwitchResult(switched=True, affected_sessions=affected)
-
-    async def _dispatch_provider_switch(
-        self,
-        user_id: uuid.UUID,
-        agent_kind: str,
-        *,
-        unset: bool,
-    ) -> int:
-        """构造 provider_config 并调 ``notify_provider_switch``（best-effort / D-001）。
-
-        task-03 / D-001 / D-006：set/unset_default 成功变更 ``is_default`` 后调用。
-
-        - ``unset=False``（set 场景）：经 ``resolve_default_provider_config``（task-02）
-          查刚置位的默认 provider 并解密构造 9 字段中性 config dict（D-006 单一真相源，
-          与 claim 路径共用，避免两处各写一份）。
-        - ``unset=True``（unset 场景）：直接传 ``None``，daemon 据此回退本机（D-004）。
-
-        best-effort（D-001 / design §9）：``notify_provider_switch`` 内部已对单 session
-        推送异常做 try/except（仅告警）；此处再包一层防御 resolve/notify 整体异常
-        （如 DB 连接瞬断、context lazy import 失败）——任何异常均返回 ``0``，不阻塞
-        set/unset 成功。set 已 commit、is_default 已持久化，notify 失败只影响热切换
-        即时性（运行中会话仍用旧 env 直到自然 turn 边界后下次 claim / 重启）。
-
-        Args:
-            user_id: LlmProvider.user_id（owner 级，D-008）。
-            agent_kind: 引擎值（多引擎行由调用方逐引擎循环扇出，D-006；单值时代即本行种类）。
-            unset: True = unset_default 推 None；False = set_default 推 resolve 出的新 config。
-
-        Returns:
-            ``notify_provider_switch`` 成功投递的 active interactive session 计数；
-            异常或无 active session 时返回 ``0``。
-        """
-        # lazy import：context.py / provider_switch.py 顶层导入较重（agent / daemon /
-        # workspace 多模块），且与 service 无互循环；仍函数内导入延迟首次加载并隔离
-        # 测试（patch ``provider_switch.notify_provider_switch`` 源模块生效）。
-        from app.modules.daemon.lease.context import resolve_default_provider_config
-        from app.modules.daemon.lease.provider_switch import notify_provider_switch
-
-        try:
-            provider_config: dict | None = (
-                None
-                if unset
-                else await resolve_default_provider_config(self._session, user_id, agent_kind)
-            )
-            return await notify_provider_switch(self._session, user_id, provider_config)
-        except Exception as exc:
-            # best-effort（D-001 / design §9）：notify 整体异常不阻塞 set/unset 成功。
-            # 明文 api_key / provider_config 内容不进日志（R-02 / NFR-02，仅记 error 类型）。
-            log.warning(
-                "llm_provider.provider_switch_notify_failed",
-                user_id=str(user_id),
-                agent_kind=agent_kind,
-                unset=unset,
-                error=str(exc),
-            )
-            return 0
+        # 热切换推送已移除（2026-10-21-provider-set-default-ui D-002，对称 set_default）：
+        # 取消默认仅置位，运行中会话不变，新会话经 claim 回落本机。
+        return DefaultSwitchResult(switched=True, affected_sessions=0)
 
     # ── Helpers ───────────────────────────────────────────────────────
 

@@ -1,0 +1,270 @@
+diff --git a/.sillyspec/docs/SillyHub/modules/frontend_app.changelog.md b/.sillyspec/docs/SillyHub/modules/frontend_app.changelog.md
+index df3426e85..a4fb6ce73 100644
+--- a/.sillyspec/docs/SillyHub/modules/frontend_app.changelog.md
++++ b/.sillyspec/docs/SillyHub/modules/frontend_app.changelog.md
+@@ -33,3 +33,4 @@ created_at: 2026-09-03 14:49:48
+ - 2026-10-19-change-list-created-sort | 变更中心列表默认按创建时间倒序
+ - 2026-10-19-preview-card-empty-turn-fix | 切换档案产生的静默轮（started_at 空、无日志、无 error_code 的终态轮）刷新后进…
+ - 2026-10-21-agent-profile-slim-default | 档案瘦身重定位为人格加技能清单并支持用户默认档案
++- 2026-10-22-agent-profile-modal-restyle | 智能体档案弹窗重构与技能全选
+diff --git a/.sillyspec/docs/SillyHub/modules/frontend_components.changelog.md b/.sillyspec/docs/SillyHub/modules/frontend_components.changelog.md
+index 0451bf79a..16dd2e3f1 100644
+--- a/.sillyspec/docs/SillyHub/modules/frontend_components.changelog.md
++++ b/.sillyspec/docs/SillyHub/modules/frontend_components.changelog.md
+@@ -101,3 +101,4 @@ created_at: 2026-08-30 22:23:33
+ | 2026-10-21 | 2026-10-21-agent-profile-slim-default | 档案瘦身重定位为人格加技能清单并支持用户默认档案 |
+ | 2026-10-21 | 2026-10-21-provider-default-ui-hint | 供应商未选态显示对齐用户默认供应商 |
+ | 2026-10-21 | 2026-10-21-profile-default-prehint | 预会话态档案显示对齐用户默认档案 |
++| 2026-10-22 | 2026-10-22-agent-profile-modal-restyle | 智能体档案弹窗重构与技能全选 |
+diff --git a/.sillyspec/docs/SillyHub/modules/frontend_lib.changelog.md b/.sillyspec/docs/SillyHub/modules/frontend_lib.changelog.md
+index f680d0496..b98772f2d 100644
+--- a/.sillyspec/docs/SillyHub/modules/frontend_lib.changelog.md
++++ b/.sillyspec/docs/SillyHub/modules/frontend_lib.changelog.md
+@@ -19,3 +19,4 @@ created_at: 2026-10-16 16:40:00
+ - 2026-10-21-provider-set-default-ui | 供应商页复活设为默认入口
+ - 2026-10-21-agent-profile-slim-default | 档案瘦身重定位为人格加技能清单并支持用户默认档案
+ - 2026-10-21-provider-default-ui-hint | 供应商未选态显示对齐用户默认供应商
++- 2026-10-22-agent-profile-modal-restyle | 智能体档案弹窗重构与技能全选
+diff --git a/.sillyspec/docs/multi-agent-platform/modules/docs.changelog.md b/.sillyspec/docs/multi-agent-platform/modules/docs.changelog.md
+index 2ae462540..68c3e7ff4 100644
+--- a/.sillyspec/docs/multi-agent-platform/modules/docs.changelog.md
++++ b/.sillyspec/docs/multi-agent-platform/modules/docs.changelog.md
+@@ -13,3 +13,4 @@
+ - 2026-10-19-change-assets-cross-repo-repos | 变更资产卡展示跨仓冻结面
+ - 2026-10-19-preview-card-empty-turn-fix | 切换档案产生的静默轮（started_at 空、无日志、无 error_code 的终态轮）刷新后进…
+ - 2026-10-20-conflict-platform-archive | 冲突对比平台留档快照自足回退
++- 2026-10-22-agent-profile-modal-restyle | 智能体档案弹窗重构与技能全选
+diff --git a/.sillyspec/docs/multi-agent-platform/modules/frontend.changelog.md b/.sillyspec/docs/multi-agent-platform/modules/frontend.changelog.md
+index 6e8cd6eae..c79709b02 100644
+--- a/.sillyspec/docs/multi-agent-platform/modules/frontend.changelog.md
++++ b/.sillyspec/docs/multi-agent-platform/modules/frontend.changelog.md
+@@ -143,3 +143,4 @@
+ | 2026-10-21 | 2026-10-21-agent-profile-slim-default | 档案瘦身重定位为人格加技能清单并支持用户默认档案 |
+ | 2026-10-21 | 2026-10-21-provider-default-ui-hint | 供应商未选态显示对齐用户默认供应商 |
+ | 2026-10-21 | 2026-10-21-profile-default-prehint | 预会话态档案显示对齐用户默认档案 |
++| 2026-10-22 | 2026-10-22-agent-profile-modal-restyle | 智能体档案弹窗重构与技能全选 |
+diff --git a/docs/releases/2026-10-22-002-43f2423a8.md b/docs/releases/2026-10-22-002-43f2423a8.md
+new file mode 100644
+index 000000000..498e234c8
+--- /dev/null
++++ b/docs/releases/2026-10-22-002-43f2423a8.md
+@@ -0,0 +1,24 @@
++---
++seq: 28
++deployed_at: "2026-10-22 10:50:00"
++status: success
++commit_from: c68b0d4bc
++commit_to: 43f2423a8
++summary: 档案编辑/新建后全局卡片墙自动刷新修复
++agent: zcode-agent
++commits:
++  - sha: 43f2423a8
++    message: "fix(frontend): 档案编辑/新建后全局卡片墙自动刷新——create/update mutation 补 mineList 桶失效"
++    author: WhaleFall
++---
++
++## 🔧 修复
++
++- 智能体档案全局页（/agent-profiles）编辑/新建保存后卡片墙不自动刷新：根因是列表数据在 mineList 缓存桶而 mutation 只失效 workspaceList 桶（复制/删除当年已在页面层手动失效绕过，新建/编辑漏掉）；现 create/update hook 成功后同时失效两桶
++- lib 层新增 hook 失效行为单测 4 用例（成功两桶/失败零失效，先红后绿）
++
++## 📝 部署验证
++
++- frontend 镜像重建 + --force-recreate，容器 healthy，`/api/health` ok
++- 3000 实页全闭环实测：新建→卡片墙立即出现；编辑改名→立即更新；删除→立即消失（临时档验证后已清理，用户数据零触碰）
++- 回归 25/25 绿（lib 新用例 + 表单 + 页面）；tsc/lint 0 error
+diff --git a/frontend/src/lib/__tests__/agent-profiles.test.tsx b/frontend/src/lib/__tests__/agent-profiles.test.tsx
+new file mode 100644
+index 000000000..df7f5fa0c
+--- /dev/null
++++ b/frontend/src/lib/__tests__/agent-profiles.test.tsx
+@@ -0,0 +1,146 @@
++/**
++ * agent-profiles lib hooks 缓存失效行为单测
++ * （2026-10-22-agent-profile-edit-refresh：全局页编辑后不刷新的根因修复）。
++ *
++ * 覆盖（FR-01 / FR-02 / FR-03）：
++ *   1. useCreateAgentProfile / useUpdateAgentProfile 成功后必须同时失效
++ *      workspaceList(wid) 与 mineList 两桶（全局卡片墙数据在 mineList 桶）。
++ *   2. mutation 失败不触发失效（缓存保持旧值不闪错数据）。
++ *
++ * 根因背景：全局页（/agent-profiles）列表走 mineList 桶；此前 mutation 只失效
++ * workspaceList(wid) 桶 → 编辑/新建保存后卡片墙不刷新（复制/删除当年已在
++ * 页面层手动失效绕过，新建/编辑漏掉——page.tsx 头注释明载）。
++ */
++import { describe, expect, it, vi, beforeEach } from "vitest";
++import { renderHook, waitFor } from "@testing-library/react";
++import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
++import type { ReactNode } from "react";
++
++import {
++  agentProfileQueryKeys,
++  useCreateAgentProfile,
++  useUpdateAgentProfile,
++} from "@/lib/agent-profiles";
++
++const apiMock = vi.hoisted(() => ({ fetch: vi.fn() }));
++vi.mock("@/lib/api", () => ({
++  ApiError: class extends Error {},
++  apiFetch: (...args: unknown[]) => apiMock.fetch(...args),
++}));
++
++function setup() {
++  const client = new QueryClient({
++    defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
++  });
++  const invalidateSpy = vi.spyOn(client, "invalidateQueries");
++  const wrapper = ({ children }: { children: ReactNode }) => (
++    <QueryClientProvider client={client}>{children}</QueryClientProvider>
++  );
++  return { client, invalidateSpy, wrapper };
++}
++
++beforeEach(() => {
++  apiMock.fetch.mockReset();
++});
++
++describe("useCreateAgentProfile 失效面（FR-01/FR-02）", () => {
++  it("成功后失效 workspaceList(wid) 与 mineList 两桶", async () => {
++    apiMock.fetch.mockResolvedValue({ id: "p-1", name: "新档" });
++    const { invalidateSpy, wrapper } = setup();
++    const { result } = renderHook(() => useCreateAgentProfile("ws-1"), {
++      wrapper,
++    });
++
++    await result.current.mutateAsync({
++      name: "新档",
++      visibility: "private",
++      system_prompt: null,
++      skill_refs: [],
++    });
++
++    await waitFor(() => expect(invalidateSpy).toHaveBeenCalled());
++    expect(invalidateSpy).toHaveBeenCalledWith({
++      queryKey: agentProfileQueryKeys.workspaceList("ws-1"),
++    });
++    expect(invalidateSpy).toHaveBeenCalledWith({
++      queryKey: agentProfileQueryKeys.mineList,
++    });
++  });
++
++  it("失败不触发失效（FR-03）", async () => {
++    apiMock.fetch.mockRejectedValue(new Error("boom"));
++    const { invalidateSpy, wrapper } = setup();
++    const { result } = renderHook(() => useCreateAgentProfile("ws-1"), {
++      wrapper,
++    });
++
++    await expect(
++      result.current.mutateAsync({
++        name: "x",
++        visibility: "private",
++        system_prompt: null,
++        skill_refs: [],
++      }),
++    ).rejects.toThrow("boom");
++
++    expect(invalidateSpy).not.toHaveBeenCalled();
++  });
++});
++
++describe("useUpdateAgentProfile 失效面（FR-01/FR-02）", () => {
++  it("成功后失效 workspaceList(wid) 与 mineList 两桶", async () => {
++    apiMock.fetch.mockResolvedValue({ id: "p-1", name: "改后" });
++    const { invalidateSpy, wrapper } = setup();
++    const { result } = renderHook(() => useUpdateAgentProfile("ws-1"), {
++      wrapper,
++    });
++
++    await result.current.mutateAsync({
++      profileId: "p-1",
++      body: {
++        name: "改后",
++        visibility: "private",
++        system_prompt: null,
++        skill_refs: [],
++        model: null,
++        llm_provider_id: null,
++        tool_policy_id: null,
++        mcp_refs: [],
++      },
++    });
++
++    await waitFor(() => expect(invalidateSpy).toHaveBeenCalled());
++    expect(invalidateSpy).toHaveBeenCalledWith({
++      queryKey: agentProfileQueryKeys.workspaceList("ws-1"),
++    });
++    expect(invalidateSpy).toHaveBeenCalledWith({
++      queryKey: agentProfileQueryKeys.mineList,
++    });
++  });
++
++  it("失败不触发失效（FR-03）", async () => {
++    apiMock.fetch.mockRejectedValue(new Error("boom"));
++    const { invalidateSpy, wrapper } = setup();
++    const { result } = renderHook(() => useUpdateAgentProfile("ws-1"), {
++      wrapper,
++    });
++
++    await expect(
++      result.current.mutateAsync({
++        profileId: "p-1",
++        body: {
++          name: "x",
++          visibility: "private",
++          system_prompt: null,
++          skill_refs: [],
++          model: null,
++          llm_provider_id: null,
++          tool_policy_id: null,
++          mcp_refs: [],
++        },
++      }),
++    ).rejects.toThrow("boom");
++
++    expect(invalidateSpy).not.toHaveBeenCalled();
++  });
++});
+diff --git a/frontend/src/lib/agent-profiles.ts b/frontend/src/lib/agent-profiles.ts
+index 2940228ac..5400343fd 100644
+--- a/frontend/src/lib/agent-profiles.ts
++++ b/frontend/src/lib/agent-profiles.ts
+@@ -319,7 +319,10 @@ export function useWorkspaceToolPolicies(workspaceId: string) {
+   };
+ }
+ 
+-/** 新建档案。成功后 invalidate workspace 列表。 */
++/** 新建档案。成功后 invalidate workspace 列表 + mineList（全局卡片墙聚合全集，
++ * 2026-10-22-agent-profile-edit-refresh：此前只失效 workspaceList 桶，全局页
++ * /agent-profiles 编辑/新建保存后卡片墙不刷新——复制/删除当年已在页面层手动
++ * 失效绕过（page.tsx 头注释），新建/编辑走本 hook 修复于源头）。 */
+ export function useCreateAgentProfile(workspaceId: string) {
+   const qc = useQueryClient();
+   return useMutation<
+@@ -332,11 +335,15 @@ export function useCreateAgentProfile(workspaceId: string) {
+       void qc.invalidateQueries({
+         queryKey: agentProfileQueryKeys.workspaceList(workspaceId),
+       });
++      void qc.invalidateQueries({
++        queryKey: agentProfileQueryKeys.mineList,
++      });
+     },
+   });
+ }
+ 
+-/** 更新档案。成功后 invalidate workspace 列表。 */
++/** 更新档案。成功后 invalidate workspace 列表 + mineList（同 create，2026-10-22
++ * agent-profile-edit-refresh 补全局页刷新）。 */
+ export function useUpdateAgentProfile(workspaceId: string) {
+   const qc = useQueryClient();
+   return useMutation<
+@@ -350,6 +357,9 @@ export function useUpdateAgentProfile(workspaceId: string) {
+       void qc.invalidateQueries({
+         queryKey: agentProfileQueryKeys.workspaceList(workspaceId),
+       });
++      void qc.invalidateQueries({
++        queryKey: agentProfileQueryKeys.mineList,
++      });
+     },
+   });
+ }

@@ -1,0 +1,979 @@
+diff --git a/docs/releases/2026-10-22-001-c68b0d4bc.md b/docs/releases/2026-10-22-001-c68b0d4bc.md
+new file mode 100644
+index 000000000..1fb28504f
+--- /dev/null
++++ b/docs/releases/2026-10-22-001-c68b0d4bc.md
+@@ -0,0 +1,59 @@
++---
++seq: 27
++deployed_at: "2026-10-22 10:10:00"
++status: success
++commit_from: 769baf611
++commit_to: c68b0d4bc
++summary: 智能体档案弹窗重构与技能全选+供应商/预会话默认显示收尾
++agent: zcode-agent
++commits:
++  - sha: c68b0d4bc
++    message: "docs(change): 实页三主题视觉对照证据落档+ui_prototype 登记 task-06"
++    author: WhaleFall
++  - sha: 449723bce
++    message: "feat(frontend): 智能体档案弹窗重构与技能全选 task-01/02/03/04/05"
++    author: WhaleFall
++  - sha: be9060a8d
++    message: "chore(archive): 2026-10-21-profile-default-prehint 源目录 tasks 删除半边随归档入库"
++    author: WhaleFall
++  - sha: 435b64e42
++    message: "chore(archive): 2026-10-21-profile-default-prehint 归档留档"
++    author: WhaleFall
++  - sha: 9711e7721
++    message: "feat(frontend): 预会话档案显示对齐用户默认 (task-01)"
++    author: WhaleFall
++  - sha: 6248c8ffe
++    message: "chore(archive): 2026-10-21-provider-default-ui-hint 归档半边入库"
++    author: WhaleFall
++  - sha: 3b051a240
++    message: "chore(archive): 2026-10-21-provider-default-ui-hint 归档留档"
++    author: WhaleFall
++  - sha: 01207058c
++    message: "fix+test: 供应商默认 UI 评审 P1/P2/P3 清偿"
++    author: WhaleFall
++  - sha: 3131a2975
++    message: "feat(frontend): 供应商未选态显示对齐用户默认 (task-01/02)"
++    author: WhaleFall
++  - sha: ba581443d
++    message: "docs(release): 2026-10-21-001 发布记录"
++    author: WhaleFall
++---
++
++## ⚡ 智能体档案弹窗重构与技能全选（本批主打）
++
++- 新建/编辑弹窗观感重构：品牌图标头+副标题、红线注脚移页脚、品牌竖条小节头
++- 技能选择器全新：全选（半选态、仅作用于筛选结果）、按名称∪简介搜索、已选计数、清空、两行芯片（名称+真实简介，来自技能 SKILL.md 描述）
++- 暗夜主题下技能区滚动条改半透明深色细样式（治刺眼，三主题适配，作用域仅本弹窗）
++
++## 🔧 上批收尾随车发布
++
++- 供应商未选态显示对齐用户默认（含评审 P1/P2/P3 清偿）
++- 预会话档案显示对齐用户默认
++
++## 📝 部署验证
++
++- `docker compose up --build --force-recreate` frontend/backend 重建，全部容器 healthy
++- `/api/health` 返回 ok（commit_sha=unknown 为 Windows 本机免 COMMIT_SHA 的预期稳定性权衡）
++- 容器内 grep 确认新代码标识（thin-scroll / 暂无简介）在构建产物中
++- 浏览器实测 3000 端口暗夜主题弹窗为新版布局（图标头/搜索/全选/计数/两行芯片/页脚注脚齐全）
++- 前端单测 12/12、关联回归 53/53、tsc/lint 基线通过
+diff --git a/docs/releases/2026-10-22-002-43f2423a8.md b/docs/releases/2026-10-22-002-43f2423a8.md
+new file mode 100644
+index 000000000..498e234c8
+--- /dev/null
++++ b/docs/releases/2026-10-22-002-43f2423a8.md
+@@ -0,0 +1,24 @@
++---
++seq: 28
++deployed_at: "2026-10-22 10:50:00"
++status: success
++commit_from: c68b0d4bc
++commit_to: 43f2423a8
++summary: 档案编辑/新建后全局卡片墙自动刷新修复
++agent: zcode-agent
++commits:
++  - sha: 43f2423a8
++    message: "fix(frontend): 档案编辑/新建后全局卡片墙自动刷新——create/update mutation 补 mineList 桶失效"
++    author: WhaleFall
++---
++
++## 🔧 修复
++
++- 智能体档案全局页（/agent-profiles）编辑/新建保存后卡片墙不自动刷新：根因是列表数据在 mineList 缓存桶而 mutation 只失效 workspaceList 桶（复制/删除当年已在页面层手动失效绕过，新建/编辑漏掉）；现 create/update hook 成功后同时失效两桶
++- lib 层新增 hook 失效行为单测 4 用例（成功两桶/失败零失效，先红后绿）
++
++## 📝 部署验证
++
++- frontend 镜像重建 + --force-recreate，容器 healthy，`/api/health` ok
++- 3000 实页全闭环实测：新建→卡片墙立即出现；编辑改名→立即更新；删除→立即消失（临时档验证后已清理，用户数据零触碰）
++- 回归 25/25 绿（lib 新用例 + 表单 + 页面）；tsc/lint 0 error
+diff --git a/frontend/src/app/globals.css b/frontend/src/app/globals.css
+index f6ac88401..15755a4aa 100644
+--- a/frontend/src/app/globals.css
++++ b/frontend/src/app/globals.css
+@@ -114,6 +114,9 @@
+     /* 2026-09-09-sessions-visual-refresh D-009@v1:shadow-primary 全站降重——
+        原单层 4px 14px 32% 在浅色下"糊一片紫",改双层弥散(近细影+远柔影) */
+     --shadow-primary: 0 1px 3px rgba(124, 58, 237, 0.16), 0 8px 20px -10px rgba(124, 58, 237, 0.28);
++    /* 2026-10-22-agent-profile-modal-restyle:作用域细滚动条 thumb(violet-800 调低透明) */
++    --scroll-thumb: rgba(76, 29, 149, 0.22);
++    --scroll-thumb-hover: rgba(76, 29, 149, 0.38);
+     --font-sans: Inter, -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif;
+     --spacing-base: 4px;
+ 
+@@ -218,6 +221,9 @@
+     --shadow-lg: 0 8px 24px -4px rgba(15, 23, 42, 0.10), 0 4px 8px -2px rgba(15, 23, 42, 0.05);
+     /* 2026-09-09-sessions-visual-refresh D-009@v1:shadow-primary 降重(双层弥散) */
+     --shadow-primary: 0 1px 3px rgba(37, 99, 235, 0.16), 0 8px 20px -10px rgba(37, 99, 235, 0.28);
++    /* 2026-10-22-agent-profile-modal-restyle:作用域细滚动条 thumb(blue-900 调低透明) */
++    --scroll-thumb: rgba(30, 58, 138, 0.20);
++    --scroll-thumb-hover: rgba(30, 58, 138, 0.36);
+     /* 氛围/玻璃 token(D-002@v2 blue 蓝系分值——零紫成分,取值=品牌蓝 #2563eb 系) */
+     --row-active: linear-gradient(90deg, rgba(37, 99, 235, 0.14), rgba(6, 182, 212, 0.08));
+     --row-active-ring: rgba(37, 99, 235, 0.22);
+@@ -321,6 +327,10 @@
+     --shadow-md: 0 4px 14px rgba(0, 0, 0, 0.45);
+     --shadow-lg: 0 16px 40px rgba(0, 0, 0, 0.6);
+     --shadow-primary: 0 1px 3px rgba(8, 145, 178, 0.20), 0 8px 20px -10px rgba(34, 211, 238, 0.30);
++    /* 2026-10-22-agent-profile-modal-restyle:作用域细滚动条 thumb(暗夜低透明白,
++       治浏览器默认亮白滚动条刺眼——用户反馈) */
++    --scroll-thumb: rgba(255, 255, 255, 0.14);
++    --scroll-thumb-hover: rgba(255, 255, 255, 0.28);
+     /* 氛围/玻璃 token(D-002@v2 dark 青系分值;极光加浓治死黑——D-009@v1 v4 自审) */
+     --row-active: linear-gradient(90deg, rgba(34, 211, 238, 0.18), rgba(14, 116, 144, 0.10));
+     --row-active-ring: rgba(34, 211, 238, 0.30);
+@@ -920,6 +930,31 @@
+   box-shadow: var(--shadow-primary);
+ }
+ 
++/* ── 2026-10-22-agent-profile-modal-restyle 主题化细滚动条（作用域工具类）──
++   消费方：智能体档案弹窗技能芯片滚动区。暗夜下浏览器默认亮白滚动条刺眼
++   （用户反馈），按主题配半透明低对比 thumb（取值在各主题块的
++   --scroll-thumb/--scroll-thumb-hover）；仅本类内生效，不动全局滚动条。 */
++.thin-scroll {
++  scrollbar-width: thin;
++  scrollbar-color: var(--scroll-thumb) transparent;
++}
++.thin-scroll::-webkit-scrollbar {
++  width: 8px;
++  height: 8px;
++}
++.thin-scroll::-webkit-scrollbar-track {
++  background: transparent;
++}
++.thin-scroll::-webkit-scrollbar-thumb {
++  background: var(--scroll-thumb);
++  border-radius: 8px;
++  border: 2px solid transparent;
++  background-clip: content-box;
++}
++.thin-scroll::-webkit-scrollbar-thumb:hover {
++  background-color: var(--scroll-thumb-hover);
++}
++
+ /* 分页器:胶囊圆角 6(原型 .pg);当前页配色走 antd colorPrimary 不覆盖 */
+ .ant-pagination .ant-pagination-item {
+   border-radius: 6px;
+diff --git a/frontend/src/components/__tests__/agent-profile-form.test.tsx b/frontend/src/components/__tests__/agent-profile-form.test.tsx
+index 0506df648..7476ee4ce 100644
+--- a/frontend/src/components/__tests__/agent-profile-form.test.tsx
++++ b/frontend/src/components/__tests__/agent-profile-form.test.tsx
+@@ -1,12 +1,15 @@
+ /**
+- * agent-profile-form 单测（2026-10-21-agent-profile-slim-default 瘦身版）。
++ * agent-profile-form 单测（2026-10-22-agent-profile-modal-restyle 重构版）。
+  *
+- * 覆盖（FR-01 / FR-04 前端面）：
++ * 覆盖（FR-01 / FR-02 / FR-03 / FR-06 前端面）：
+  *   1. toCreateBody/toUpdateBody：四字段形态；Update 显式携带被删字段空值清空存量。
+  *   2. 表单仅渲染 名称/可见范围/系统提示词/技能 四字段——引擎/模型/供应商/工具
+  *      策略/MCP/工作区上下文（private 缺省）不出现。
+  *   3. visibility=workspace 且全局页 → 归属工作区选择器出现；private → 不出现。
+- *   4. 技能选项 = 自定义 ∪ 平台 manifest；提交走 useCreate/useUpdate hooks。
++ *   4. 技能选项 = 自定义 ∪ 平台 manifest（同名自定义优先）；提交走 useCreate/useUpdate hooks。
++ *   5.（新）弹窗观感：品牌图标头副标题 + 页脚红线注脚 + 小节头文案。
++ *   6.（新）SkillPickerGroup：全选三态/清空/计数；搜索按名称∪简介、全选仅作用筛选集。
++ *   7.（新）技能简介来自数据源 description；右栏预览联动。
+  *
+  * 历史：三组 8 字段版断言已随瘦身移除（git 历史可溯）。
+  */
+@@ -241,3 +244,159 @@ describe("AgentProfileForm 创建提交", () => {
+     );
+   });
+ });
++
++// ── 5. 弹窗观感（FR-01） ──────────────────────────────────────────────────
++
++describe("弹窗观感重构（FR-01）", () => {
++  it("品牌图标头副标题 + 页脚红线注脚（单行省略/title 全文）+ 小节头", async () => {
++    renderForm(<AgentProfileForm mode="create" onClose={() => {}} />);
++    await screen.findByLabelText(/名称/);
++
++    // 头部：标题 + 副标题。
++    expect(screen.getByText("新建智能体档案")).toBeInTheDocument();
++    expect(screen.getByText("一份人格 + 一份技能清单，跨会话复用")).toBeInTheDocument();
++    // 页脚：红线注脚移入页脚左侧，单行省略 + title 全文。
++    const note = screen.getByTitle(/档案不存任何 API Key \/ 凭证/);
++    expect(note).toHaveAttribute(
++      "title",
++      expect.stringContaining("本档案只承载人格与技能清单"),
++    );
++    // 小节头：身份/技能 + 说明文案逐字不变。
++    expect(screen.getByText("身份")).toBeInTheDocument();
++    expect(screen.getByText("给这个智能体起个名字，并决定谁能看到它。")).toBeInTheDocument();
++    expect(screen.getByText(/勾选该档案可用的技能/)).toBeInTheDocument();
++  });
++});
++
++// ── 6. SkillPickerGroup 交互（FR-02） ─────────────────────────────────────
++
++/**
++ * 已选计数断言：小节头右侧「已选 N / 总数」（title 精确匹配）。
++ * Form.useWatch 消费侧更新晚于 fireEvent 一拍（表单 store 异步 flush 通知），
++ * 故 waitFor 轮询而非同步断言。
++ */
++async function expectCounter(n: number, total: number) {
++  await waitFor(() =>
++    expect(screen.getByTitle(`已选 ${n} / ${total}`)).toBeInTheDocument(),
++  );
++}
++
++describe("SkillPickerGroup：全选/半选/清空/计数（FR-02）", () => {
++  beforeEach(() => {
++    skillsMock.custom.mockReturnValue([
++      { name: "s-a", description: "甲技能" },
++      { name: "s-b", description: "乙技能" },
++      { name: "s-c", description: "丙技能" },
++    ]);
++  });
++
++  it("全选 → 3/3 全选中；取消一项 → 半选态；清空 → 归零且清空按钮消失", async () => {
++    renderForm(<AgentProfileForm mode="create" onClose={() => {}} />);
++    await screen.findByRole("checkbox", { name: "s-a" });
++    await expectCounter(0, 3);
++
++    // 全选：三芯片全选 + 计数 3/3。
++    fireEvent.click(screen.getByRole("checkbox", { name: "全选" }));
++    for (const n of ["s-a", "s-b", "s-c"]) {
++      expect(screen.getByRole("checkbox", { name: n })).toHaveAttribute(
++        "aria-checked",
++        "true",
++      );
++    }
++    await expectCounter(3, 3);
++
++    // 取消一项：全选复选呈半选态（antd indeterminate 落在 input 属性）。
++    fireEvent.click(screen.getByRole("checkbox", { name: "s-b" }));
++    await expectCounter(2, 3);
++    const master = screen.getByRole("checkbox", { name: "全选" }) as HTMLInputElement;
++    expect(master.indeterminate).toBe(true);
++    expect(master.checked).toBe(false);
++
++    // 清空：全部归零，清空按钮随空选中集消失。
++    fireEvent.click(screen.getByRole("button", { name: "清空" }));
++    for (const n of ["s-a", "s-c"]) {
++      expect(screen.getByRole("checkbox", { name: n })).toHaveAttribute(
++        "aria-checked",
++        "false",
++      );
++    }
++    await expectCounter(0, 3);
++    expect(screen.queryByRole("button", { name: "清空" })).toBeNull();
++  });
++
++  it("搜索按名称∪简介命中，全选仅作用于筛选结果", async () => {
++    renderForm(<AgentProfileForm mode="create" onClose={() => {}} />);
++    const search = await screen.findByPlaceholderText("搜索技能…");
++
++    // 按简介关键词命中（简介来自数据源，非名称子串）。
++    fireEvent.change(search, { target: { value: "甲技能" } });
++    expect(screen.getByText("筛选出 1 项")).toBeInTheDocument();
++    expect(screen.getByRole("checkbox", { name: "s-a" })).toBeInTheDocument();
++    expect(screen.queryByRole("checkbox", { name: "s-b" })).toBeNull();
++
++    // 筛选下全选 → 只选中可见的 1 项，分母仍为全集 3。
++    fireEvent.click(screen.getByRole("checkbox", { name: "全选" }));
++    await expectCounter(1, 3);
++
++    // 清空搜索 → 其余项未被波及。
++    fireEvent.change(search, { target: { value: "" } });
++    expect(
++      screen.getByRole("checkbox", { name: "s-b" }),
++    ).toHaveAttribute("aria-checked", "false");
++    await expectCounter(1, 3);
++
++    // 按名称命中（名称路径）。
++    fireEvent.change(search, { target: { value: "s-c" } });
++    expect(screen.getByText("筛选出 1 项")).toBeInTheDocument();
++    expect(screen.queryByRole("checkbox", { name: "s-a" })).toBeNull();
++  });
++});
++
++// ── 7. 技能简介数据源 + 预览联动（FR-03 / FR-06） ────────────────────────
++
++describe("技能简介数据源与预览联动（FR-03）", () => {
++  it("简介 = 自定义 ∪ manifest 的 description，同名自定义优先；空简介占位", async () => {
++    skillsMock.custom.mockReturnValue([
++      { name: "my-skill", description: "自定义描述A" },
++      { name: "bare-skill" },
++    ]);
++    skillsMock.manifest.mockReturnValue({
++      skills: [
++        { name: "sillyspec-auto", description: "自动模式描述" },
++        { name: "my-skill", description: "平台版描述（应被自定义覆盖）" },
++      ],
++    });
++    renderForm(<AgentProfileForm mode="create" onClose={() => {}} />);
++
++    expect(await screen.findByText("my-skill")).toBeInTheDocument();
++    expect(screen.getByText("自定义描述A")).toBeInTheDocument();
++    expect(screen.getByText("自动模式描述")).toBeInTheDocument();
++    // 同名并集：自定义技能的描述占据（平台同名描述不出现）。
++    expect(screen.queryByText("平台版描述（应被自定义覆盖）")).toBeNull();
++    // 无简介 → 占位文案。
++    expect(screen.getByText("（暂无简介）")).toBeInTheDocument();
++  });
++
++  it("右栏预览联动：名称/技能选中实时反映，预览 chip 悬停简介", async () => {
++    skillsMock.custom.mockReturnValue([{ name: "s-a", description: "甲技能" }]);
++    renderForm(<AgentProfileForm mode="create" onClose={() => {}} />);
++
++    fireEvent.change(await screen.findByLabelText(/名称/), {
++      target: { value: "预览档" },
++    });
++    // 预览卡名称与头像首字更新（输入框 value 不进文本节点，命中即预览侧）。
++    expect(await screen.findByText("预览档")).toBeInTheDocument();
++    expect(screen.getByText("预")).toBeInTheDocument();
++
++    fireEvent.click(screen.getByRole("checkbox", { name: "s-a" }));
++    // 选中后：选择器芯片 + 预览 chip 各一处，且预览 chip title=简介。
++    await waitFor(() =>
++      expect(screen.getAllByText("s-a").length).toBe(2),
++    );
++    const previewChip = screen
++      .getAllByText("s-a")
++      .map((el) => el.closest("span[title]"))
++      .find((el) => el?.getAttribute("title") === "甲技能");
++    expect(previewChip).toBeTruthy();
++  });
++});
+diff --git a/frontend/src/components/agent-profile-form.tsx b/frontend/src/components/agent-profile-form.tsx
+index 51380cb1b..26c94a4cd 100644
+--- a/frontend/src/components/agent-profile-form.tsx
++++ b/frontend/src/components/agent-profile-form.tsx
+@@ -3,6 +3,13 @@
+ /**
+  * AgentProfileForm — 智能体档案新建/编辑表单（人格 + 技能清单版）。
+  *
++ * 2026-10-22-agent-profile-modal-restyle：弹窗观感按定稿原型重构——品牌图标头
++ * + 副标题、红线注脚移页脚左侧（单行省略）、品牌竖条小节头；技能选择从裸
++ * Checkbox.Group 换为受控 SkillPickerGroup（全选三态只作用于筛选集 + 名称∪简介
++ * 搜索 + 已选计数 + 清空 + 两行芯片），skillOptions 扩为 {name, desc} 并集
++ * （自定义技能同名优先），滚动条走 globals.css .thin-scroll 主题化工具类。
++ * 业务流（hooks/校验/提交/工作区归属判定/字段瘦身语义）本轮零变化。
++ *
+  * 2026-10-21-agent-profile-slim-default task-04：按消费现实瘦身——会话/群聊两条
+  * 活跃链路只消费 system_prompt + skill_refs（D-013 裁剪变体），引擎/模型/供应商/
+  * 工具策略/MCP 勾选全部移出表单（DB 列留守，读侧忽略；编辑保存显式落空值清空
+@@ -19,12 +26,12 @@
+  * maskClosable=false + destroyOnClose。双栏布局为本页显式特例。
+  */
+ 
+-import { useEffect, useMemo, useState } from "react";
++import { useEffect, useMemo, useState, type ReactNode } from "react";
+ import { useQuery } from "@tanstack/react-query";
++import { CheckOutlined, SearchOutlined } from "@ant-design/icons";
+ import {
+   Button,
+   Checkbox,
+-  Divider,
+   Form,
+   Input,
+   Modal,
+@@ -74,6 +81,12 @@ interface ProfileFormValues {
+   skill_refs?: string[];
+ }
+ 
++/** 技能选项（2026-10-22-modal-restyle 起 name+desc 两元，desc 取数据源字段）。 */
++interface SkillOption {
++  name: string;
++  desc: string;
++}
++
+ const VISIBILITY_OPTIONS: {
+   value: AgentProfileVisibility;
+   label: string;
+@@ -83,6 +96,10 @@ const VISIBILITY_OPTIONS: {
+   { value: "platform", label: "平台（全平台共享，需 admin）" },
+ ];
+ 
++/** 红线注脚（文案逐字沿用瘦身版渲染结果，仅展示位从表单底移到页脚左侧）。 */
++const REDLINE_NOTE =
++  "档案不存任何 API Key / 凭证——引擎、模型、供应商、MCP 均在会话与 群成员配置里各自指定；本档案只承载人格与技能清单。";
++
+ /**
+  * 把表单扁平值组装成 Create body。被删字段显式落空值（新建本就空；
+  * 后端 provider 缺省 'claude'，前端不传）。
+@@ -197,11 +214,19 @@ export function AgentProfileForm({
+ 
+   const { skills: customSkills } = useCustomSkills();
+   const { manifest } = usePlatformSkillsManifest();
+-  const skillOptions = useMemo(() => {
+-    const set = new Set<string>();
+-    for (const s of customSkills) set.add(s.name);
+-    for (const s of manifest?.skills ?? []) set.add(s.name);
+-    return Array.from(set).sort((a, b) => a.localeCompare(b));
++  /**
++   * 技能选项 = 自定义 ∪ 平台 manifest（Map 去重，同名自定义先入优先）；
++   * desc 取各自数据源 description（manifest 无 frontmatter 时为空串 → 芯片
++   * 显「（暂无简介）」占位）。仅前端展示层扩展，skill_refs 提交仍 string[]。
++   */
++  const skillOptions = useMemo<SkillOption[]>(() => {
++    const map = new Map<string, SkillOption>();
++    for (const s of customSkills)
++      map.set(s.name, { name: s.name, desc: s.description ?? "" });
++    for (const s of manifest?.skills ?? [])
++      if (!map.has(s.name))
++        map.set(s.name, { name: s.name, desc: s.description ?? "" });
++    return Array.from(map.values()).sort((a, b) => a.name.localeCompare(b.name));
+   }, [customSkills, manifest]);
+ 
+   return (
+@@ -230,7 +255,7 @@ interface AgentProfileModalProps {
+   isEdit: boolean;
+   submitting: boolean;
+   initial: Partial<ProfileFormValues>;
+-  skillOptions: string[];
++  skillOptions: SkillOption[];
+   routeWorkspaceId: string;
+   workspaceOptions: { value: string; label: string }[];
+   wsListLoading: boolean;
+@@ -258,6 +283,7 @@ function AgentProfileModal({
+   onSubmit,
+ }: AgentProfileModalProps) {
+   const visibility = Form.useWatch("visibility", formInst) ?? "private";
++  const skillRefs = Form.useWatch("skill_refs", formInst) ?? [];
+ 
+   useEffect(() => {
+     formInst.setFieldsValue({
+@@ -288,12 +314,38 @@ function AgentProfileModal({
+     <Modal
+       open
+       onCancel={onCancel}
+-      title={isEdit ? "编辑智能体档案" : "新建智能体档案"}
++      title={
++        <div className="flex items-center gap-3">
++          <div
++            aria-hidden
++            className="grid h-[38px] w-[38px] shrink-0 place-items-center rounded-[10px] border border-brand-300 bg-brand-100 text-[18px] text-brand-700"
++          >
++            ◆
++          </div>
++          <div className="min-w-0">
++            <div className="text-[16px] font-semibold tracking-tight">
++              {isEdit ? "编辑智能体档案" : "新建智能体档案"}
++            </div>
++            <div className="mt-px text-xs text-muted-foreground">
++              一份人格 + 一份技能清单，跨会话复用
++            </div>
++          </div>
++        </div>
++      }
+       width={900}
+       maskClosable={false}
+       destroyOnClose
+       footer={
+-        <div className="flex items-center justify-end gap-2">
++        <div className="flex items-center gap-3">
++          <span
++            className="min-w-0 flex-1 truncate text-[11px] text-muted-foreground"
++            title={REDLINE_NOTE}
++          >
++            <span className="mr-1 text-amber-500" aria-hidden>
++              ⚠
++            </span>
++            {REDLINE_NOTE}
++          </span>
+           <Button onClick={onCancel} disabled={submitting}>
+             取消
+           </Button>
+@@ -348,7 +400,7 @@ function AgentProfileModal({
+                 label="名称"
+                 rules={[{ required: true, message: "档案名称为必填项" }]}
+               >
+-                <Input placeholder="例如 代码审查助手" maxLength={64} />
++                <Input placeholder="例如 代码审查助手" maxLength={64} showCount />
+               </Form.Item>
+               <Form.Item
+                 name="visibility"
+@@ -378,41 +430,217 @@ function AgentProfileModal({
+             <FormSectionHeader
+               title="技能"
+               desc="勾选该档案可用的技能（只存引用；未勾选 = 该档案的会话不挂载任何技能）。"
++              extra={
++                <span
++                  className="whitespace-nowrap text-[11px] text-muted-foreground"
++                  title={`已选 ${skillRefs.length} / ${skillOptions.length}`}
++                >
++                  已选{" "}
++                  <b className="font-semibold text-primary">
++                    {skillRefs.length}
++                  </b>{" "}
++                  / {skillOptions.length}
++                </span>
++              }
+             />
+-            <Form.Item name="skill_refs">
+-              <Checkbox.Group options={skillOptions} />
++            <Form.Item name="skill_refs" className="!mb-3">
++              <SkillPickerGroup options={skillOptions} />
+             </Form.Item>
+-            {skillOptions.length === 0 && (
+-              <p className="-mt-2 mb-2 text-[11px] text-muted-foreground">
+-                暂无可选技能（自定义技能或平台 sillyspec 技能为空）。
+-              </p>
+-            )}
+-
+-            <div className="rounded border border-amber-200 bg-amber-50 px-3 py-2 text-[11px] text-amber-800">
+-              ⚠️ 档案不存任何 API Key / 凭证——引擎、模型、供应商、MCP 均在会话与
+-              群成员配置里各自指定；本档案只承载人格与技能清单。
+-            </div>
+           </Form>
+         </div>
+ 
+         {/* 右栏：实时预览 ─────────────────────────── */}
+         <div className="bg-muted/30 px-5 py-4">
+-          <ProfilePreview form={formInst} isEdit={isEdit} />
++          <ProfilePreview
++            form={formInst}
++            isEdit={isEdit}
++            skillOptions={skillOptions}
++          />
+         </div>
+       </div>
+     </Modal>
+   );
+ }
+ 
++/* ────────────────────── 技能选择器（受控自定义控件） ────────────────────── */
++
++/**
++ * SkillPickerGroup — Form.Item 注入 value/onChange 的技能选择控件
++ * （2026-10-22-agent-profile-modal-restyle 起）。
++ *
++ * - 全选三态（checked/indeterminate/空）只作用于**当前搜索筛选后的可见集**；
++ * - 搜索按 名称 ∪ 简介 匹配（简介来自数据源 description，非硬编码）；
++ * - 芯片两行（名称 + 一行简介截断，悬停 title 全文），键盘可达
++ *   （Tab 聚焦、空格/回车切换）；选中集变化按 options 排序输出稳定值。
++ */
++function SkillPickerGroup({
++  value,
++  onChange,
++  options,
++}: {
++  value?: string[];
++  onChange?: (_v: string[]) => void;
++  options: SkillOption[];
++}) {
++  const [search, setSearch] = useState("");
++  const selectedSet = useMemo(() => new Set(value ?? []), [value]);
++
++  const trimmed = search.trim().toLowerCase();
++  const filtered = useMemo(() => {
++    if (!trimmed) return options;
++    return options.filter(
++      (o) =>
++        o.name.toLowerCase().includes(trimmed) ||
++        o.desc.toLowerCase().includes(trimmed),
++    );
++    // eslint-disable-next-line react-hooks/exhaustive-deps
++  }, [options, trimmed]);
++
++  const allFilteredOn =
++    filtered.length > 0 && filtered.every((o) => selectedSet.has(o.name));
++  const someFilteredOn = filtered.some((o) => selectedSet.has(o.name));
++
++  /** 变更出口：始终按 options 原始顺序输出（提交值稳定，不随筛选/点击序抖动）。 */
++  const emit = (next: Set<string>) =>
++    onChange?.(options.filter((o) => next.has(o.name)).map((o) => o.name));
++  const toggle = (name: string) => {
++    const next = new Set(selectedSet);
++    if (next.has(name)) next.delete(name);
++    else next.add(name);
++    emit(next);
++  };
++  const setFilteredAll = (on: boolean) => {
++    const next = new Set(selectedSet);
++    for (const o of filtered) {
++      if (on) next.add(o.name);
++      else next.delete(o.name);
++    }
++    emit(next);
++  };
++
++  if (options.length === 0) {
++    return (
++      <p className="text-[11px] text-muted-foreground">
++        暂无可选技能（自定义技能或平台 sillyspec 技能为空）。
++      </p>
++    );
++  }
++
++  return (
++    <div className="flex flex-col gap-2">
++      {/* 工具栏：搜索 ∪ 全选 ∪ 筛选计数 ∪ 清空 */}
++      <div className="flex items-center gap-2.5">
++        <Input
++          className="!w-[220px]"
++          allowClear
++          value={search}
++          onChange={(e) => setSearch(e.target.value)}
++          placeholder="搜索技能…"
++          prefix={<SearchOutlined className="text-muted-foreground" />}
++        />
++        {trimmed && (
++          <span className="whitespace-nowrap text-[11px] text-muted-foreground">
++            筛选出 {filtered.length} 项
++          </span>
++        )}
++        <Checkbox
++          checked={allFilteredOn}
++          indeterminate={someFilteredOn && !allFilteredOn}
++          disabled={filtered.length === 0}
++          onChange={(e) => setFilteredAll(e.target.checked)}
++        >
++          全选
++        </Checkbox>
++        {selectedSet.size > 0 && (
++          <Button
++            type="link"
++            size="small"
++            className="!px-1"
++            onClick={() => emit(new Set())}
++          >
++            清空
++          </Button>
++        )}
++      </div>
++
++      {/* 芯片网格：两行结构（名称+简介），限高内滚（.thin-scroll 主题化滚动条） */}
++      <div className="thin-scroll grid max-h-[236px] min-h-[168px] grid-cols-2 gap-2 overflow-y-auto rounded-[10px] border border-border bg-card p-2.5">
++        {filtered.length === 0 ? (
++          <div className="col-span-2 grid min-h-[120px] place-items-center text-xs text-muted-foreground">
++            没有匹配的技能
++          </div>
++        ) : (
++          filtered.map((o) => {
++            const on = selectedSet.has(o.name);
++            return (
++              <div
++                key={o.name}
++                role="checkbox"
++                aria-checked={on}
++                aria-label={o.name}
++                tabIndex={0}
++                title={`${o.name} — ${o.desc}`}
++                onClick={() => toggle(o.name)}
++                onKeyDown={(e) => {
++                  if (e.key === " " || e.key === "Enter") {
++                    e.preventDefault();
++                    toggle(o.name);
++                  }
++                }}
++                className={[
++                  "flex cursor-pointer select-none flex-col gap-0.5 rounded-lg border px-2.5 py-1.5 transition-colors",
++                  on
++                    ? "border-brand-300 bg-brand-100"
++                    : "border-border bg-card hover:border-brand-300",
++                ].join(" ")}
++              >
++                <div className="flex min-w-0 items-center gap-[7px]">
++                  <span
++                    aria-hidden
++                    className={[
++                      "grid h-4 w-4 shrink-0 place-items-center rounded border",
++                      on ? "border-primary bg-primary text-white" : "border-border bg-card",
++                    ].join(" ")}
++                  >
++                    {on && <CheckOutlined className="text-[10px]" />}
++                  </span>
++                  <span
++                    className={[
++                      "min-w-0 flex-1 truncate font-mono text-xs",
++                      on ? "font-semibold text-brand-700" : "text-foreground",
++                    ].join(" ")}
++                  >
++                    {o.name}
++                  </span>
++                </div>
++                <div
++                  className={[
++                    "truncate pl-[23px] text-[11px] leading-relaxed",
++                    on ? "text-foreground/70" : "text-muted-foreground",
++                  ].join(" ")}
++                >
++                  {o.desc.trim() || "（暂无简介）"}
++                </div>
++              </div>
++            );
++          })
++        )}
++      </div>
++    </div>
++  );
++}
++
+ /**
+  * 右栏实时预览（人格卡：名称/可见范围/提示词摘要/技能 chips）。
+  */
+ function ProfilePreview({
+   form,
+   isEdit,
++  skillOptions,
+ }: {
+   form: FormInstance<ProfileFormValues>;
+   isEdit: boolean;
++  skillOptions: SkillOption[];
+ }) {
+   const name = Form.useWatch("name", form) ?? "";
+   const visibility =
+@@ -420,6 +648,10 @@ function ProfilePreview({
+   const systemPrompt = Form.useWatch("system_prompt", form) ?? "";
+   const skillRefs = Form.useWatch("skill_refs", form) ?? [];
+ 
++  const descBySkill = useMemo(
++    () => new Map(skillOptions.map((o) => [o.name, o.desc])),
++    [skillOptions],
++  );
+   const avatarText = (name || "?").trim().charAt(0).toUpperCase();
+   const promptSnippet = systemPrompt?.trim() || "（未填写系统提示词，按引擎默认人设执行）";
+ 
+@@ -451,6 +683,7 @@ function ProfilePreview({
+           {skillRefs.map((s) => (
+             <span
+               key={`skill-${s}`}
++              title={descBySkill.get(s) ?? ""}
+               className="rounded bg-muted px-2 py-0.5 text-[11px] text-foreground/70"
+             >
+               {s}
+@@ -468,22 +701,34 @@ function ProfilePreview({
+   );
+ }
+ 
+-/** 表单小节标题（左竖条 + 标题 + 一句说明）。 */
++/**
++ * 表单小节头（品牌竖条 + 标题 + 一句说明 + 可选右侧附加元素）。
++ * 2026-10-22-modal-restyle：由 antd Divider 换品牌竖条形态（定稿原型）。
++ */
+ function FormSectionHeader({
+   title,
+   desc,
++  extra,
+ }: {
+   title: string;
+   desc?: string;
++  extra?: ReactNode;
+ }) {
+   return (
+-    <Divider titlePlacement="left" plain className="!my-3">
+-      <span className="text-xs font-semibold text-brand-700">{title}</span>
++    <div className="mb-2 mt-4 flex items-center gap-2 first:mt-1">
++      <span
++        aria-hidden
++        className="h-[13px] w-[3px] shrink-0 self-center rounded-sm bg-primary"
++      />
++      <span className="whitespace-nowrap text-[13px] font-semibold text-foreground">
++        {title}
++      </span>
+       {desc ? (
+-        <span className="ml-2 text-[11px] font-normal text-muted-foreground">
++        <span className="min-w-0 flex-1 truncate text-[11px] text-muted-foreground">
+           {desc}
+         </span>
+       ) : null}
+-    </Divider>
++      {extra}
++    </div>
+   );
+ }
+diff --git a/frontend/src/lib/__tests__/agent-profiles.test.tsx b/frontend/src/lib/__tests__/agent-profiles.test.tsx
+new file mode 100644
+index 000000000..df7f5fa0c
+--- /dev/null
++++ b/frontend/src/lib/__tests__/agent-profiles.test.tsx
+@@ -0,0 +1,146 @@
++/**
++ * agent-profiles lib hooks 缓存失效行为单测
++ * （2026-10-22-agent-profile-edit-refresh：全局页编辑后不刷新的根因修复）。
++ *
++ * 覆盖（FR-01 / FR-02 / FR-03）：
++ *   1. useCreateAgentProfile / useUpdateAgentProfile 成功后必须同时失效
++ *      workspaceList(wid) 与 mineList 两桶（全局卡片墙数据在 mineList 桶）。
++ *   2. mutation 失败不触发失效（缓存保持旧值不闪错数据）。
++ *
++ * 根因背景：全局页（/agent-profiles）列表走 mineList 桶；此前 mutation 只失效
++ * workspaceList(wid) 桶 → 编辑/新建保存后卡片墙不刷新（复制/删除当年已在
++ * 页面层手动失效绕过，新建/编辑漏掉——page.tsx 头注释明载）。
++ */
++import { describe, expect, it, vi, beforeEach } from "vitest";
++import { renderHook, waitFor } from "@testing-library/react";
++import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
++import type { ReactNode } from "react";
++
++import {
++  agentProfileQueryKeys,
++  useCreateAgentProfile,
++  useUpdateAgentProfile,
++} from "@/lib/agent-profiles";
++
++const apiMock = vi.hoisted(() => ({ fetch: vi.fn() }));
++vi.mock("@/lib/api", () => ({
++  ApiError: class extends Error {},
++  apiFetch: (...args: unknown[]) => apiMock.fetch(...args),
++}));
++
++function setup() {
++  const client = new QueryClient({
++    defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
++  });
++  const invalidateSpy = vi.spyOn(client, "invalidateQueries");
++  const wrapper = ({ children }: { children: ReactNode }) => (
++    <QueryClientProvider client={client}>{children}</QueryClientProvider>
++  );
++  return { client, invalidateSpy, wrapper };
++}
++
++beforeEach(() => {
++  apiMock.fetch.mockReset();
++});
++
++describe("useCreateAgentProfile 失效面（FR-01/FR-02）", () => {
++  it("成功后失效 workspaceList(wid) 与 mineList 两桶", async () => {
++    apiMock.fetch.mockResolvedValue({ id: "p-1", name: "新档" });
++    const { invalidateSpy, wrapper } = setup();
++    const { result } = renderHook(() => useCreateAgentProfile("ws-1"), {
++      wrapper,
++    });
++
++    await result.current.mutateAsync({
++      name: "新档",
++      visibility: "private",
++      system_prompt: null,
++      skill_refs: [],
++    });
++
++    await waitFor(() => expect(invalidateSpy).toHaveBeenCalled());
++    expect(invalidateSpy).toHaveBeenCalledWith({
++      queryKey: agentProfileQueryKeys.workspaceList("ws-1"),
++    });
++    expect(invalidateSpy).toHaveBeenCalledWith({
++      queryKey: agentProfileQueryKeys.mineList,
++    });
++  });
++
++  it("失败不触发失效（FR-03）", async () => {
++    apiMock.fetch.mockRejectedValue(new Error("boom"));
++    const { invalidateSpy, wrapper } = setup();
++    const { result } = renderHook(() => useCreateAgentProfile("ws-1"), {
++      wrapper,
++    });
++
++    await expect(
++      result.current.mutateAsync({
++        name: "x",
++        visibility: "private",
++        system_prompt: null,
++        skill_refs: [],
++      }),
++    ).rejects.toThrow("boom");
++
++    expect(invalidateSpy).not.toHaveBeenCalled();
++  });
++});
++
++describe("useUpdateAgentProfile 失效面（FR-01/FR-02）", () => {
++  it("成功后失效 workspaceList(wid) 与 mineList 两桶", async () => {
++    apiMock.fetch.mockResolvedValue({ id: "p-1", name: "改后" });
++    const { invalidateSpy, wrapper } = setup();
++    const { result } = renderHook(() => useUpdateAgentProfile("ws-1"), {
++      wrapper,
++    });
++
++    await result.current.mutateAsync({
++      profileId: "p-1",
++      body: {
++        name: "改后",
++        visibility: "private",
++        system_prompt: null,
++        skill_refs: [],
++        model: null,
++        llm_provider_id: null,
++        tool_policy_id: null,
++        mcp_refs: [],
++      },
++    });
++
++    await waitFor(() => expect(invalidateSpy).toHaveBeenCalled());
++    expect(invalidateSpy).toHaveBeenCalledWith({
++      queryKey: agentProfileQueryKeys.workspaceList("ws-1"),
++    });
++    expect(invalidateSpy).toHaveBeenCalledWith({
++      queryKey: agentProfileQueryKeys.mineList,
++    });
++  });
++
++  it("失败不触发失效（FR-03）", async () => {
++    apiMock.fetch.mockRejectedValue(new Error("boom"));
++    const { invalidateSpy, wrapper } = setup();
++    const { result } = renderHook(() => useUpdateAgentProfile("ws-1"), {
++      wrapper,
++    });
++
++    await expect(
++      result.current.mutateAsync({
++        profileId: "p-1",
++        body: {
++          name: "x",
++          visibility: "private",
++          system_prompt: null,
++          skill_refs: [],
++          model: null,
++          llm_provider_id: null,
++          tool_policy_id: null,
++          mcp_refs: [],
++        },
++      }),
++    ).rejects.toThrow("boom");
++
++    expect(invalidateSpy).not.toHaveBeenCalled();
++  });
++});
+diff --git a/frontend/src/lib/agent-profiles.ts b/frontend/src/lib/agent-profiles.ts
+index 2940228ac..5400343fd 100644
+--- a/frontend/src/lib/agent-profiles.ts
++++ b/frontend/src/lib/agent-profiles.ts
+@@ -319,7 +319,10 @@ export function useWorkspaceToolPolicies(workspaceId: string) {
+   };
+ }
+ 
+-/** 新建档案。成功后 invalidate workspace 列表。 */
++/** 新建档案。成功后 invalidate workspace 列表 + mineList（全局卡片墙聚合全集，
++ * 2026-10-22-agent-profile-edit-refresh：此前只失效 workspaceList 桶，全局页
++ * /agent-profiles 编辑/新建保存后卡片墙不刷新——复制/删除当年已在页面层手动
++ * 失效绕过（page.tsx 头注释），新建/编辑走本 hook 修复于源头）。 */
+ export function useCreateAgentProfile(workspaceId: string) {
+   const qc = useQueryClient();
+   return useMutation<
+@@ -332,11 +335,15 @@ export function useCreateAgentProfile(workspaceId: string) {
+       void qc.invalidateQueries({
+         queryKey: agentProfileQueryKeys.workspaceList(workspaceId),
+       });
++      void qc.invalidateQueries({
++        queryKey: agentProfileQueryKeys.mineList,
++      });
+     },
+   });
+ }
+ 
+-/** 更新档案。成功后 invalidate workspace 列表。 */
++/** 更新档案。成功后 invalidate workspace 列表 + mineList（同 create，2026-10-22
++ * agent-profile-edit-refresh 补全局页刷新）。 */
+ export function useUpdateAgentProfile(workspaceId: string) {
+   const qc = useQueryClient();
+   return useMutation<
+@@ -350,6 +357,9 @@ export function useUpdateAgentProfile(workspaceId: string) {
+       void qc.invalidateQueries({
+         queryKey: agentProfileQueryKeys.workspaceList(workspaceId),
+       });
++      void qc.invalidateQueries({
++        queryKey: agentProfileQueryKeys.mineList,
++      });
+     },
+   });
+ }

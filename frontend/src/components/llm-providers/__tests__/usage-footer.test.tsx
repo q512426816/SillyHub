@@ -16,10 +16,15 @@ import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 
 import { UsageFooter } from "@/components/llm-providers/usage-footer";
 
-vi.mock("@/lib/api/llm-providers", () => ({
-  detectUsageProvider: vi.fn(),
+vi.mock("@/lib/api/llm-providers", async (importOriginal) => {
+  // provider-default-ui-hint：passthrough 真实导出（noProviderLabel 等），原覆盖保留。
+  const actual = await importOriginal<typeof import("@/lib/api/llm-providers")>();
+  return {
+    ...actual,
+    detectUsageProvider: vi.fn(),
   queryUsage: vi.fn(),
-}));
+  };
+});
 
 // mock 后再 import（拿 mock 引用，便于 per-test 配置）。
 import { detectUsageProvider, queryUsage } from "@/lib/api/llm-providers";

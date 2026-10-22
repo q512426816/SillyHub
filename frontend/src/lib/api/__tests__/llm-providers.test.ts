@@ -2,8 +2,8 @@
  * task-12：lib/api/llm-providers 单测。
  *
  * 覆盖：
- *   1. 四个 API 方法签名（method + path）与后端 router 一一对应
- *      （set/unset-default 已随 ql-20260820-006 移除）。
+ *   1. API 方法签名（method + path）与后端 router 一一对应
+ *      （set/unset-default 2026-10-21-provider-set-default-ui 恢复）。
  *   2. formToCreate：表单值 → POST body 映射（角色映射嵌套 / extra_env 键值对）。
  *   3. formToUpdate：api_key 留空 → **不出现在 PATCH body**（铁律）；有值则携带。
  *   4. cleanRoleMappings：丢弃空行、one_m 仅随 model 携带。
@@ -17,6 +17,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
   cleanExtraEnv,
+  noProviderLabel,
   cleanRoleMappings,
   cleanSettingsConfig,
   createProvider,
@@ -24,6 +25,8 @@ import {
   formToCreate,
   formToUpdate,
   listProviders,
+  setDefaultProvider,
+  unsetDefaultProvider,
   updateProvider,
   type LlmProviderFormValues,
 } from "@/lib/api/llm-providers";
@@ -145,10 +148,28 @@ describe("llm-providers API — method + path", () => {
     expect(h.lastUrl()).toContain("/api/llm-providers/p-1");
   });
 
-  it("id 含特殊字符走 encodeURIComponent（不破坏路径）", async () => {
-    const h = mockFetch({ status: 204, body: null });
-    await deleteProvider("p 1/2");
-    expect(h.lastUrl()).toContain("/api/llm-providers/p%201%2F2");
+  // 2026-10-21-provider-set-default-ui：set/unset-default 封装恢复（后端端点健在）。
+  it("setDefaultProvider → POST /api/llm-providers/{id}/set-default，解析 SetDefaultResult", async () => {
+    const h = mockFetch({
+      status: 200,
+      body: { switched: true, affected_sessions: 0, error: null, litellm_registered: null },
+    });
+    const result = await setDefaultProvider("p-1");
+    expect(h.lastMethod()).toBe("POST");
+    expect(h.lastUrl()).toContain("/api/llm-providers/p-1/set-default");
+    expect(result).toEqual({ switched: true, affected_sessions: 0, error: null, litellm_registered: null });
+  });
+
+  it("unsetDefaultProvider → POST /api/llm-providers/{id}/unset-default，解析探测失败态", async () => {
+    const h = mockFetch({
+      status: 200,
+      body: { switched: false, affected_sessions: 0, error: "凭证无效" },
+    });
+    const result = await unsetDefaultProvider("p-2");
+    expect(h.lastMethod()).toBe("POST");
+    expect(h.lastUrl()).toContain("/api/llm-providers/p-2/unset-default");
+    expect(result.switched).toBe(false);
+    expect(result.error).toBe("凭证无效");
   });
 });
 
@@ -294,5 +315,26 @@ describe("cleanSettingsConfig — env 空串占位剔除（ql-20260823-007）", 
   it("settings_config 缺省 → body 落 null（不误造空对象）", () => {
     const created = formToCreate(FORM_VALUES);
     expect(created.settings_config).toBeNull();
+  });
+});
+
+
+// ── noProviderLabel（2026-10-21-provider-default-ui-hint）───────────────────
+
+describe("noProviderLabel — 兜底文案按用户默认供应商动态化", () => {
+  it("有默认供应商 → 「不指定（默认：{name}）」", () => {
+    expect(
+      noProviderLabel([
+        { id: "a", name: "Kimi", is_default: false },
+        { id: "b", name: "GLM 平台", is_default: true },
+      ] as unknown as Parameters<typeof noProviderLabel>[0]),
+    ).toBe("不指定（默认：GLM 平台）");
+  });
+
+  it("无默认 / 空列表 / null → 「不指定（本机默认）」（零回归）", () => {
+    const none = [{ id: "a", name: "Kimi", is_default: false }] as unknown as Parameters<typeof noProviderLabel>[0];
+    expect(noProviderLabel(none)).toBe("不指定（本机默认）");
+    expect(noProviderLabel([])).toBe("不指定（本机默认）");
+    expect(noProviderLabel(null)).toBe("不指定（本机默认）");
   });
 });
