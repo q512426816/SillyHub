@@ -9,8 +9,10 @@
  * 数据链路（design 生命周期契约 E1-E4）：
  *   E1 轮首 `resolveBaselineHead()` 记 HEAD 基线（由 session-manager 在 inject 时
  *       fire-and-forget 调；不计入轮尾预算时为 1 条）；
- *   E2 轮尾 `collectTurnFileChanges()`：status --porcelain -z（1 条）+ diff
- *       --numstat（1 条），合计 ≤3；
+ *   E2 轮尾 `collectTurnFileChanges()`：status --porcelain -z（1 条）+
+ *       diff --name-status（1 条）+ diff --numstat（1 条），合计 ≤3（baseline
+ *       已知时；未解析基线的兜底 +rev-parse = 4）。name-status 覆盖轮内已提交
+ *       改动，numstat 只补行数；status 覆盖未提交/未跟踪。
  *   E3 完成 → 快照（超时/超限/队列溢出 → partial；git 不可用 → unavailable）；
  *   E4 上报由调用方（session-manager → daemon → hub）落地，本模块只做采集 + 遥测。
  *
@@ -77,6 +79,22 @@ export const DEFAULT_TURN_FILE_CHANGES_LIMITS: TurnFileChangesLimits = {
 
 /** 遥测滑窗容量（只保留最近 N 轮：p50/p95/降级率供 task-13 验收读取）。 */
 export const TURN_FILE_CHANGES_TELEMETRY_WINDOW = 50;
+
+/**
+ * 慢盘挂载的基础预算（2026-10-22-file-changes-card-fix）：WSL `/mnt/<drive>`
+ * 的 DrvFs/9p 上 `git status` + 两条 diff 稳定超过 1500ms（生产 27/27 条
+ * partial/timeout 实证），基础预算抬到 8s 起步。
+ */
+const SLOW_MOUNT_TIMEOUT_MS = 8_000;
+/** 自适应预算上限：timeout 后翻倍升级，封顶 15s（不让单轮采集无限拖）。 */
+const MAX_ADAPTIVE_TIMEOUT_MS = 15_000;
+/** 基础预算覆盖（毫秒，正整数；非法值忽略）。 */
+const TIMEOUT_ENV_KEY = 'SILLYHUB_FILE_CHANGES_TIMEOUT_MS';
+/**
+ * 每工作区自适应预算（timeout 后升级、进程内记忆；daemon 重启归零）。
+ * 键 = `workspaceQueueKey`（绝对路径归一），不跨工作区复用。
+ */
+const _adaptiveTimeouts = new Map<string, number>();
 
 /**
  * git 全局参数前缀（**恒在参数数组里**，不依赖用户 git config）：
@@ -371,6 +389,8 @@ function statusFromXY(xy: string): TurnFileChangeStatus {
 }
 
 interface NumstatEntry {
+  /** 仓根相对 posix 路径（name-status 超时时作为文件清单兜底来源）。 */
+  path: string;
   added: number;
   deleted: number;
   binary: boolean;
@@ -392,6 +412,7 @@ function parseNumstat(stdout: string): Map<string, NumstatEntry> {
     if (path === '') continue;
     const binary = addedCol === '-' || deletedCol === '-';
     out.set(pathMatchKey(path), {
+      path,
       added: binary ? 0 : Number.parseInt(addedCol, 10) || 0,
       deleted: binary ? 0 : Number.parseInt(deletedCol, 10) || 0,
       binary,
@@ -415,7 +436,10 @@ function buildEditAttribution(
     if (relPath === null) continue;
     const key = pathMatchKey(relPath);
     const names = map.get(key) ?? [];
-    if (!names.includes(toolName)) names.push(toolName);
+    // 2026-10-22-file-changes-card-fix：**不按工具名去重**——数组长度即本轮
+    // 编辑调用次数（同一文件 Edit 3 次 = 3 项），前端「改N次」据此计数；
+    // 工具名提示由前端去重展示。
+    names.push(toolName);
     map.set(key, names);
   }
   return map;
@@ -547,21 +571,43 @@ interface CollectOutcome {
 }
 
 /**
- * 采集主体（在队列闸门内、超时 race 内执行）：
- *   ①（基线缺省时）rev-parse HEAD ②status --porcelain -z ③diff --numstat。
- * 致命错误经 `CollectAbort` 上抛，由 `collectTurnFileChanges` 收口成快照。
+ * 采集进度（2026-10-22-file-changes-card-fix）：各阶段完成即写入。外层硬超时
+ * 或 diff 阶段降级时按已完成阶段收口——status 成功后不再因为 numstat 慢而
+ * 丢掉整份文件清单。
  */
-async function collectInner(args: {
-  workspaceRoot: string;
-  baselineHead: string | null | undefined;
-  toolCallPaths: readonly TurnToolCallPath[];
-  turnStartedAtMs: number | undefined;
-  limits: TurnFileChangesLimits;
-  exec: TurnFileChangesExecFile;
-  signal: AbortSignal;
-  taskStartMs: number;
-  ctx: CollectContext;
-}): Promise<CollectOutcome> {
+interface CollectProgress {
+  baselineHead: string | null;
+  stage: 'baseline' | 'status' | 'diff' | 'probe';
+  statusOut?: string;
+  nameStatusOut?: string;
+  numstatOut?: string;
+  lineCounts: boolean;
+  /** diff 阶段超时留下的降级原因（只可能是 timeout）。 */
+  degradedReason?: TurnFileChangesReason;
+}
+
+/**
+ * 采集主体（在队列闸门内、超时 race 内执行）：
+ *   ①（基线缺省时）rev-parse HEAD ②status --porcelain -z
+ *   ③diff --name-status / --numstat <baseline>（`includeLineCounts=false` 时跳过）
+ *
+ * 只有基线/status 不可用才抛 `CollectAbort`；两条 diff 失败一律降级（保留
+ * status 清单、行数不可信），进度写入 `progress` 供外层超时收口。
+ */
+async function collectInner(
+  args: {
+    workspaceRoot: string;
+    baselineHead: string | null | undefined;
+    toolCallPaths: readonly TurnToolCallPath[];
+    turnStartedAtMs: number | undefined;
+    limits: TurnFileChangesLimits;
+    exec: TurnFileChangesExecFile;
+    signal: AbortSignal;
+    taskStartMs: number;
+    ctx: CollectContext;
+  },
+  progress: CollectProgress,
+): Promise<CollectOutcome> {
   const { limits, exec, signal, ctx } = args;
   const runGit = async (gitArgs: string[]): Promise<string> => {
     ctx.subprocessCount += 1;
@@ -581,11 +627,11 @@ async function collectInner(args: {
   };
 
   // ① 基线：E1 已解析（string / null）则不再花子进程；缺省则自取。
-  let baselineHead: string | null;
+  progress.stage = 'baseline';
   if (args.baselineHead === undefined) {
     try {
       const head = (await runGit(['rev-parse', 'HEAD'])).trim();
-      baselineHead = head === '' ? null : head;
+      progress.baselineHead = head === '' ? null : head;
     } catch (error) {
       const classified = classifyGitError(error);
       if (classified) {
@@ -593,16 +639,17 @@ async function collectInner(args: {
         throw new CollectAbort(classified.status, classified.reason, null);
       }
       // 空仓（无任何提交）等：基线留 null，status 仍可产出 untracked 清单。
-      baselineHead = null;
+      progress.baselineHead = null;
     }
   } else {
-    baselineHead = args.baselineHead;
+    progress.baselineHead = args.baselineHead;
   }
+  const baselineHead = progress.baselineHead;
 
-  // ② status（本轮改动的唯一真相源；失败即降级）。
-  let statusOut: string;
+  // ② status（未提交/未跟踪的当前真相源；失败即降级）。
+  progress.stage = 'status';
   try {
-    statusOut = await runGit([
+    progress.statusOut = await runGit([
       'status',
       '--porcelain',
       '-z',
@@ -618,76 +665,144 @@ async function collectInner(args: {
     );
   }
 
-  // ③ numstat（行级 +/−；退档口径 includeLineCounts=false 时不跑）。
-  //    无基线（空仓 / 非仓库已降级）时跳过：diff 无从比较。
-  let numstat: Map<string, NumstatEntry> = new Map();
-  let lineCounts = false;
+  // ③ diff：name-status 补「轮内已提交」的文件与状态，numstat 补行数。
+  //    两阶段都可独立降级：任一失败只影响状态精度/行数，不丢 status 清单。
+  //    `includeLineCounts=false` 退档时跳过两条 diff（只跑 status，零回归）。
   if (limits.includeLineCounts && baselineHead !== null) {
+    progress.stage = 'diff';
     try {
-      const numstatOut = await runGit([
+      progress.nameStatusOut = await runGit([
+        'diff',
+        '--name-status',
+        '-z',
+        '--no-renames',
+        baselineHead,
+      ]);
+    } catch (error) {
+      if (classifyGitError(error)?.reason === 'timeout') {
+        progress.degradedReason = 'timeout';
+      }
+    }
+    try {
+      progress.numstatOut = await runGit([
         'diff',
         '--numstat',
         '--no-renames',
         baselineHead,
       ]);
-      numstat = parseNumstat(numstatOut);
-      lineCounts = true;
+      progress.lineCounts = true;
     } catch (error) {
-      const classified = classifyGitError(error);
-      if (classified) {
-        // 超时 / git 消失：整轮降级（files 仍可照出 status 面）。
-        throw new CollectAbort(classified.status, classified.reason, baselineHead);
+      if (classifyGitError(error)?.reason === 'timeout') {
+        progress.degradedReason = 'timeout';
       }
-      // 未知 numstat 错误：保住 status 面，行数留 0（partial 由调用方标记）。
-      lineCounts = false;
+      progress.lineCounts = false;
     }
   }
 
-  const editAttribution = buildEditAttribution(
+  const gitPart = buildGitFiles(
     args.workspaceRoot,
+    progress,
+    limits.maxFiles,
     args.toolCallPaths,
   );
-  const seen = new Set<string>();
-  const files: TurnFileChange[] = [];
-  for (const entry of parsePorcelainZ(statusOut)) {
-    const relPath = toRepoRelativePath(args.workspaceRoot, entry.path) ?? entry.path;
-    const key = pathMatchKey(relPath);
-    if (seen.has(key)) continue;
-    seen.add(key);
-    const line = numstat.get(key);
-    files.push({
-      path: relPath,
-      status: entry.status,
-      added: line?.added ?? 0,
-      deleted: line?.deleted ?? 0,
-      ...(line?.binary ? { binary: true } : {}),
-      ...attributeFor(relPath, editAttribution),
-      source: 'git',
-    });
-  }
 
-  // ignored 目录：本轮工具调用路径前缀 + mtime（R-09 的唯一补偿面）。
+  // ④ ignored 目录：本轮工具调用路径前缀 + mtime（R-09 的唯一补偿面）。
+  progress.stage = 'probe';
+  const seen = new Set(gitPart.files.map((file) => pathMatchKey(file.path)));
   const mtimeFiles = await probeIgnoredByMtime({
     workspaceRoot: args.workspaceRoot,
     toolCallPaths: args.toolCallPaths,
     seen,
     sinceMs: args.turnStartedAtMs,
-    editAttribution,
+    editAttribution: buildEditAttribution(args.workspaceRoot, args.toolCallPaths),
   });
-  files.push(...mtimeFiles);
-
+  const files = [...gitPart.files, ...mtimeFiles];
   files.sort((a, b) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0));
-
-  // 上限截断：改动数超上限 → truncated + partial（卡片照出，行级 +/− 破折号）。
-  const truncated = files.length > limits.maxFiles;
+  const truncated = gitPart.truncated || files.length > limits.maxFiles;
   const cappedFiles = truncated ? files.slice(0, limits.maxFiles) : files;
 
   return {
     files: cappedFiles,
     baselineHead,
     truncated,
-    lineCounts,
+    lineCounts: progress.lineCounts,
   };
+}
+
+/**
+ * `git diff --name-status -z` 解析（`--no-renames`：rename 呈 delete+add 两条）。
+ * 输出形态：`<status>\0<path>\0...`，status 首字符 A/D 归类，其余归 modified。
+ */
+function parseDiffNameStatus(
+  stdout: string,
+): Array<{ path: string; status: TurnFileChangeStatus }> {
+  const tokens = stdout.split('\0');
+  const out: Array<{ path: string; status: TurnFileChangeStatus }> = [];
+  for (let i = 0; i + 1 < tokens.length; i += 2) {
+    const code = tokens[i] ?? '';
+    const path = tokens[i + 1] ?? '';
+    if (code === '' || path === '') continue;
+    const kind = code.slice(0, 1);
+    out.push({
+      path,
+      status: kind === 'A' ? 'added' : kind === 'D' ? 'deleted' : 'modified',
+    });
+  }
+  return out;
+}
+
+/**
+ * 按已完成阶段组装 git 面文件清单（无 I/O）：status ∪ name-status ∪ numstat。
+ *
+ * 合并优先级：status（当前工作区最准确）> name-status（已提交状态）> numstat
+ * （只有路径/行数、状态未知时保守归 modified）。numstat 只补 added/deleted/
+ * binary，不覆盖状态。
+ */
+function buildGitFiles(
+  workspaceRoot: string,
+  progress: CollectProgress,
+  maxFiles: number,
+  toolCallPaths: readonly TurnToolCallPath[],
+): { files: TurnFileChange[]; truncated: boolean } {
+  const numstat = progress.numstatOut
+    ? parseNumstat(progress.numstatOut)
+    : new Map<string, NumstatEntry>();
+  const entries = new Map<
+    string,
+    { path: string; status: TurnFileChangeStatus }
+  >();
+  const add = (rawPath: string, status: TurnFileChangeStatus): void => {
+    const relPath = toRepoRelativePath(workspaceRoot, rawPath) ?? rawPath;
+    const key = pathMatchKey(relPath);
+    if (!entries.has(key)) entries.set(key, { path: relPath, status });
+  };
+  for (const entry of parsePorcelainZ(progress.statusOut ?? '')) {
+    add(entry.path, entry.status);
+  }
+  for (const entry of parseDiffNameStatus(progress.nameStatusOut ?? '')) {
+    add(entry.path, entry.status);
+  }
+  for (const [key, line] of numstat) {
+    if (!entries.has(key)) add(line.path, 'modified');
+  }
+
+  const editAttribution = buildEditAttribution(workspaceRoot, toolCallPaths);
+  const files: TurnFileChange[] = [];
+  for (const [key, entry] of entries) {
+    const line = numstat.get(key);
+    files.push({
+      path: entry.path,
+      status: entry.status,
+      added: line?.added ?? 0,
+      deleted: line?.deleted ?? 0,
+      ...(line?.binary ? { binary: true } : {}),
+      ...attributeFor(entry.path, editAttribution),
+      source: 'git',
+    });
+  }
+  files.sort((a, b) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0));
+  const truncated = files.length > maxFiles;
+  return { files: truncated ? files.slice(0, maxFiles) : files, truncated };
 }
 
 /* ── 遥测 ───────────────────────────────────────────────────────────────── */
@@ -731,10 +846,11 @@ export function getTurnFileChangesTelemetry(): TurnFileChangesTelemetrySummary {
   };
 }
 
-/** 清空遥测滑窗 + 串行队列（单测隔离用；生产不调）。 */
+/** 清空遥测滑窗 + 串行队列 + 自适应预算（单测隔离用；生产不调）。 */
 export function resetTurnFileChangesTelemetry(): void {
   _telemetry.length = 0;
   _queues.clear();
+  _adaptiveTimeouts.clear();
 }
 
 /** 结构化日志（一行/轮；字段名与 telemetry sample 同形，便于日志侧聚合）。 */
@@ -782,21 +898,70 @@ function finalizeSnapshot(args: {
 
 /* ── 公开入口 ───────────────────────────────────────────────────────────── */
 
-function resolveLimits(
+/**
+ * 解析本轮生效阈值（2026-10-22-file-changes-card-fix）。
+ *
+ * 优先级：显式 `limits.timeoutMs`（测试/调用方注入）> env 覆盖 > 默认 1500ms；
+ * 慢盘（`/mnt/<drive>/`）基础预算抬到 8s；该工作区历史 timeout 过的自适应预算
+ * 再取最大。显式注入时完全尊重注入值（测试确定性），不叠慢盘/自适应。
+ */
+export function resolveTurnFileChangesLimits(
+  workspaceRoot: string,
   limits: Partial<TurnFileChangesLimits> | undefined,
 ): TurnFileChangesLimits {
-  return { ...DEFAULT_TURN_FILE_CHANGES_LIMITS, ...(limits ?? {}) };
+  if (limits?.timeoutMs !== undefined) {
+    return { ...DEFAULT_TURN_FILE_CHANGES_LIMITS, ...limits };
+  }
+  const rawEnv = process.env[TIMEOUT_ENV_KEY];
+  const envTimeout =
+    rawEnv !== undefined && /^\d+$/.test(rawEnv.trim())
+      ? Number(rawEnv.trim())
+      : 0;
+  let timeoutMs =
+    envTimeout > 0 ? envTimeout : DEFAULT_TURN_FILE_CHANGES_LIMITS.timeoutMs;
+  if (/^\/mnt\/[a-z]\//i.test(workspaceRoot)) {
+    timeoutMs = Math.max(timeoutMs, SLOW_MOUNT_TIMEOUT_MS);
+  }
+  const adaptive = _adaptiveTimeouts.get(workspaceQueueKey(workspaceRoot));
+  if (adaptive !== undefined) {
+    timeoutMs = Math.max(timeoutMs, adaptive);
+  }
+  return { ...DEFAULT_TURN_FILE_CHANGES_LIMITS, ...(limits ?? {}), timeoutMs };
+}
+
+/** 本轮 timeout 后升级该工作区预算（翻倍，+2s 起步，封顶 15s）。 */
+function noteCollectTimeout(
+  workspaceRoot: string,
+  currentTimeoutMs: number,
+): void {
+  const key = workspaceQueueKey(workspaceRoot);
+  const next = Math.min(
+    Math.max(currentTimeoutMs * 2, currentTimeoutMs + 2_000),
+    MAX_ADAPTIVE_TIMEOUT_MS,
+  );
+  if (next > (_adaptiveTimeouts.get(key) ?? 0)) {
+    _adaptiveTimeouts.set(key, next);
+    // eslint-disable-next-line no-console
+    console.info('[turn-file-changes] timeout_budget_escalated', {
+      workspaceRoot,
+      from: currentTimeoutMs,
+      to: next,
+    });
+  }
 }
 
 /**
  * 每轮工作区快照采集（纯采集：不写库、不上报、永不抛错）。
  *
  * 顺序：E2 入口 → 抢单工作区队列位（满 → partial/queue_overflow，立即返回）→
- * 串行等前序 → 1500ms 硬超时 race 内跑 ≤3 条 git → 收口快照。
+ * 串行等前序 → 自适应硬超时 race 内跑 status + 两条 diff（baseline 已知 ≤3 条；
+ * 未解析基线兜底 4 条）→ 收口快照。
  *
  * 降级路径（全部有测试覆盖）：
  *   - `ok`               ：全量采集成功；
- *   - `partial/timeout`  ：硬超时（AbortController kill 子进程）；
+ *   - `partial/timeout`  ：硬超时（AbortController kill 子进程）——**保留已完成的
+ *                          status/name-status 清单**，行数不可信；同时升级该工作区
+ *                          自适应预算；
  *   - `partial/queue_overflow`：同工作区等待队列超上限；
  *   - `partial` + truncated   ：改动数超 maxFiles；
  *   - `partial`（无 reason）   ：`includeLineCounts=false` 退档口径（行级 +/− 不采）；
@@ -807,9 +972,9 @@ export async function collectTurnFileChanges(
   input: CollectTurnFileChangesInput,
 ): Promise<TurnFileChangesSnapshot> {
   const callStartMs = Date.now();
-  const limits = resolveLimits(input.limits);
   const exec = input.execFile ?? defaultExecFile;
   const workspaceRoot = input.workspaceRoot;
+  const limits = resolveTurnFileChangesLimits(workspaceRoot, input.limits);
   const queueKey = workspaceQueueKey(workspaceRoot);
 
   const queue = reserveQueueSlot(queueKey, limits.maxQueueDepth);
@@ -830,6 +995,11 @@ export async function collectTurnFileChanges(
   const leaveQueue = await enterQueue(queueKey, queue);
   const taskStartMs = Date.now();
   const ctx: CollectContext = { subprocessCount: 0 };
+  const progress: CollectProgress = {
+    baselineHead: input.baselineHead ?? null,
+    stage: 'baseline',
+    lineCounts: false,
+  };
   const controller = new AbortController();
   let timer: ReturnType<typeof setTimeout> | undefined;
   try {
@@ -841,29 +1011,38 @@ export async function collectTurnFileChanges(
       }, limits.timeoutMs);
     });
     const outcome = await Promise.race([
-      collectInner({
-        workspaceRoot,
-        baselineHead: input.baselineHead,
-        toolCallPaths: input.toolCallPaths ?? [],
-        turnStartedAtMs: input.turnStartedAtMs,
-        limits,
-        exec,
-        signal: controller.signal,
-        taskStartMs,
-        ctx,
-      }),
+      collectInner(
+        {
+          workspaceRoot,
+          baselineHead: input.baselineHead,
+          toolCallPaths: input.toolCallPaths ?? [],
+          turnStartedAtMs: input.turnStartedAtMs,
+          limits,
+          exec,
+          signal: controller.signal,
+          taskStartMs,
+          ctx,
+        },
+        progress,
+      ),
       deadline,
     ]);
-    // 行级口径未采（退档 includeLineCounts=false / numstat 未知错误 / 空仓无基线）
-    // → partial：卡片照出 files，行级 +/− 显示破折号。reason 枚举里没有「行数未采」
-    // 值，故不带 reason——完整性面（files 清单）仍可信，只有行数不可信；遥测
-    // sample 的 lineCounts 标明本轮口径。
-    const status: TurnFileChangesStatus =
-      outcome.truncated || !outcome.lineCounts ? 'partial' : 'ok';
+    // 行级口径未采（退档 includeLineCounts=false / numstat 超时或未知错误 /
+    // 空仓无基线）→ partial：卡片照出 files，行级 +/− 显示破折号。name-status
+    // 超时（degradedReason=timeout）时文件清单仍在、部分状态精度降级，同样
+    // partial 并带 reason。reason 枚举里没有「行数未采」值，故退档不带 reason。
+    const degraded =
+      outcome.truncated ||
+      !outcome.lineCounts ||
+      progress.degradedReason !== undefined;
+    const status: TurnFileChangesStatus = degraded ? 'partial' : 'ok';
     return finalizeSnapshot({
       runId: input.runId,
       baselineHead: outcome.baselineHead,
       status,
+      ...(progress.degradedReason !== undefined
+        ? { reason: progress.degradedReason }
+        : {}),
       ...(outcome.truncated ? { truncated: true } : {}),
       files: outcome.files,
       collectMs: Date.now() - taskStartMs,
@@ -873,15 +1052,26 @@ export async function collectTurnFileChanges(
   } catch (error) {
     const collectMs = Date.now() - taskStartMs;
     if (error instanceof CollectTimeout) {
+      // 2026-10-22-file-changes-card-fix：硬超时不丢已完成阶段——status 成功后
+      // 即便 diff 未跑完，也把已采集的清单交回（行数不可信），并升级该工作区
+      // 下轮预算。
+      noteCollectTimeout(workspaceRoot, limits.timeoutMs);
+      const gitPart = buildGitFiles(
+        workspaceRoot,
+        progress,
+        limits.maxFiles,
+        input.toolCallPaths ?? [],
+      );
       return finalizeSnapshot({
         runId: input.runId,
-        baselineHead: input.baselineHead ?? null,
+        baselineHead: progress.baselineHead ?? input.baselineHead ?? null,
         status: 'partial',
         reason: 'timeout',
-        files: [],
+        ...(gitPart.truncated ? { truncated: true } : {}),
+        files: gitPart.files,
         collectMs,
         subprocessCount: ctx.subprocessCount,
-        lineCounts: false,
+        lineCounts: progress.lineCounts,
       });
     }
     if (error instanceof CollectAbort) {

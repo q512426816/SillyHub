@@ -30,6 +30,7 @@ import {
   readBaselineHead,
   resetTurnFileChangesTelemetry,
   resolveBaselineHead,
+  resolveTurnFileChangesLimits,
   toolCallPathsFromEvent,
 } from '../../src/interactive/turn-file-changes.js';
 import type {
@@ -283,6 +284,44 @@ describe('collectTurnFileChanges × 六类夹具（真实 git 仓）', () => {
     expect(entry?.binary).toBeUndefined();
   });
 
+  it('轮内 commit 的改动进入文件清单（status 干净也能看到 M/A/D）', async () => {
+    const dir = await repo({ 'a.ts': 'line1\n', 'old.ts': 'bye\n' });
+    const baseline = (await resolveBaselineHead(dir)) ?? undefined;
+    await writeRepoFile(dir, 'a.ts', 'line1\nline2\n');
+    await writeRepoFile(dir, 'new.ts', 'hello\n');
+    await rm(join(dir, 'old.ts'));
+    await git(dir, ['add', '-A']);
+    await git(dir, ['commit', '-m', 'turn commit']);
+
+    const snap = await collectTurnFileChanges({
+      runId: 'run-committed',
+      workspaceRoot: dir,
+      baselineHead: baseline,
+      limits: FIXTURE_LIMITS,
+    });
+    expect(snap.status).toBe('ok');
+    expect(fileAt(snap, 'a.ts')).toMatchObject({ status: 'modified', added: 1, deleted: 0 });
+    expect(fileAt(snap, 'new.ts')).toMatchObject({ status: 'added', added: 1, deleted: 0 });
+    expect(fileAt(snap, 'old.ts')).toMatchObject({ status: 'deleted', added: 0, deleted: 1 });
+  });
+
+  it('同一文件多次 Edit：editToolNames 保留重复，长度=编辑调用次数', async () => {
+    const dir = await repo({ 'base.txt': 'a\n' });
+    await writeRepoFile(dir, 'base.txt', 'a\nb\n');
+    const snap = await collectTurnFileChanges({
+      runId: 'run-edit-count',
+      workspaceRoot: dir,
+      baselineHead: (await resolveBaselineHead(dir)) ?? undefined,
+      toolCallPaths: [
+        { path: 'base.txt', toolName: 'Edit' },
+        { path: 'base.txt', toolName: 'Edit' },
+        { path: 'base.txt', toolName: 'Write' },
+      ],
+      limits: FIXTURE_LIMITS,
+    });
+    expect(fileAt(snap, 'base.txt')?.editToolNames).toEqual(['Edit', 'Edit', 'Write']);
+  });
+
   it('binary：numstat 的 -/- → added=0/deleted=0 + binary=true', async () => {
     const dir = await repo({ 'base.txt': 'line1\n' });
     const binary = Uint8Array.from([0, 1, 2, 3, 255, 0, 7]);
@@ -348,10 +387,11 @@ describe('collectTurnFileChanges × 六类夹具（真实 git 仓）', () => {
 /* ── ② 子进程预算 + 参数红线 ──────────────────────────────────────────────── */
 
 describe('collectTurnFileChanges × 子进程预算（≤3）与 git 参数红线', () => {
-  it('E1 已给基线：status + numstat 恰 2 条，参数含 --no-optional-locks 与 core.preloadIndex', async () => {
+  it('E1 已给基线：status + name-status + numstat 恰 3 条，参数含 --no-optional-locks 与 core.preloadIndex', async () => {
     const dir = await plainDir();
     const fake = makeFakeExec((args) => {
       if (args.includes('status')) return 'M  src/a.ts\0';
+      if (args.includes('--name-status')) return 'M\0src/a.ts\0';
       return '1\t0\tsrc/a.ts\n';
     });
     const snap = await collectTurnFileChanges({
@@ -361,7 +401,7 @@ describe('collectTurnFileChanges × 子进程预算（≤3）与 git 参数红�
       execFile: fake.exec,
     });
     expect(snap.status).toBe('ok');
-    expect(fake.calls).toHaveLength(2);
+    expect(fake.calls).toHaveLength(3);
     expect(fake.calls[0]?.slice(-5)).toEqual([
       'status',
       '--porcelain',
@@ -369,17 +409,23 @@ describe('collectTurnFileChanges × 子进程预算（≤3）与 git 参数红�
       '--untracked-files=normal',
       '--no-renames',
     ]);
-    expect(fake.calls[1]).toEqual(expect.arrayContaining(['diff', '--numstat', '--no-renames']));
+    expect(fake.calls[1]).toEqual(
+      expect.arrayContaining(['diff', '--name-status', '--no-renames']),
+    );
+    expect(fake.calls[2]).toEqual(
+      expect.arrayContaining(['diff', '--numstat', '--no-renames']),
+    );
     for (const args of fake.calls) expectGitBaseArgs(args);
     expect(fileAt(snap, 'src/a.ts')).toMatchObject({ status: 'modified', added: 1, deleted: 0 });
-    expect(getTurnFileChangesTelemetry().subprocessCountMax).toBe(2);
+    expect(getTurnFileChangesTelemetry().subprocessCountMax).toBe(3);
   });
 
-  it('E1 未给基线：rev-parse + status + numstat 恰 3 条（不超红线）', async () => {
+  it('E1 未给基线：rev-parse + status + name-status + numstat 恰 4 条（兜底路径登记例外）', async () => {
     const dir = await plainDir();
     const fake = makeFakeExec((args) => {
       if (args.includes('rev-parse')) return 'cafebabecafebabecafebabecafebabecafebabe\n';
       if (args.includes('status')) return ' M a.txt\0';
+      if (args.includes('--name-status')) return 'M\0a.txt\0';
       return '3\t1\ta.txt\n';
     });
     const snap = await collectTurnFileChanges({
@@ -388,11 +434,11 @@ describe('collectTurnFileChanges × 子进程预算（≤3）与 git 参数红�
       execFile: fake.exec,
     });
     expect(snap.status).toBe('ok');
-    expect(fake.calls).toHaveLength(3);
+    expect(fake.calls).toHaveLength(4);
     expect(snap.baselineHead).toBe('cafebabecafebabecafebabecafebabecafebabe');
     expect(fileAt(snap, 'a.txt')).toMatchObject({ added: 3, deleted: 1 });
     for (const args of fake.calls) expectGitBaseArgs(args);
-    expect(getTurnFileChangesTelemetry().subprocessCountMax).toBe(3);
+    expect(getTurnFileChangesTelemetry().subprocessCountMax).toBe(4);
   });
 
   it('退档口径（includeLineCounts=false）：只跑 status，+/− 留 0 且快照标 partial', async () => {
@@ -411,6 +457,65 @@ describe('collectTurnFileChanges × 子进程预算（≤3）与 git 参数红�
     expect(snap.reason).toBeUndefined(); // 枚举无「行数未采」，不造值
     expect(fileAt(snap, 'a.txt')).toMatchObject({ added: 0, deleted: 0 });
   });
+
+  it('/mnt/ 慢盘基础预算 ≥8s；显式 limits 优先；普通路径保持 1500ms', () => {
+    const prev = process.env.SILLYHUB_FILE_CHANGES_TIMEOUT_MS;
+    delete process.env.SILLYHUB_FILE_CHANGES_TIMEOUT_MS;
+    try {
+      expect(
+        resolveTurnFileChangesLimits('/mnt/e/proj', undefined).timeoutMs,
+      ).toBeGreaterThanOrEqual(8_000);
+      expect(resolveTurnFileChangesLimits('/tmp/proj', undefined).timeoutMs).toBe(1_500);
+      expect(
+        resolveTurnFileChangesLimits('/mnt/e/proj', { timeoutMs: 1_234 }).timeoutMs,
+      ).toBe(1_234);
+    } finally {
+      if (prev !== undefined) process.env.SILLYHUB_FILE_CHANGES_TIMEOUT_MS = prev;
+    }
+  });
+
+  it('环境变量覆盖基础预算；timeout 后该工作区自适应升级，下一轮成功', async () => {
+    const dir = await plainDir();
+    const prev = process.env.SILLYHUB_FILE_CHANGES_TIMEOUT_MS;
+    process.env.SILLYHUB_FILE_CHANGES_TIMEOUT_MS = '50';
+    let call = 0;
+    const exec: TurnFileChangesExecFile = async (args) => {
+      call += 1;
+      if (call === 1) {
+        // 首轮 rev-parse 慢（忽略 signal），触发硬超时并升级预算
+        await new Promise((resolve) => setTimeout(resolve, 300));
+        return { stdout: '', stderr: '' };
+      }
+      if (args.includes('rev-parse')) {
+        return {
+          stdout: 'deadbeefdeadbeefdeadbeefdeadbeefdeadbeef\n',
+          stderr: '',
+        };
+      }
+      return { stdout: '', stderr: '' };
+    };
+    try {
+      const first = await collectTurnFileChanges({
+        runId: 'run-adaptive-1',
+        workspaceRoot: dir,
+        execFile: exec,
+      });
+      expect(first.status).toBe('partial');
+      expect(first.reason).toBe('timeout');
+      const second = await collectTurnFileChanges({
+        runId: 'run-adaptive-2',
+        workspaceRoot: dir,
+        execFile: exec,
+      });
+      expect(second.status).toBe('ok');
+    } finally {
+      if (prev === undefined) {
+        delete process.env.SILLYHUB_FILE_CHANGES_TIMEOUT_MS;
+      } else {
+        process.env.SILLYHUB_FILE_CHANGES_TIMEOUT_MS = prev;
+      }
+    }
+  }, 20_000);
 });
 
 /* ── ③ 降级路径（timeout / git_missing / 截断）───────────────────────────── */
@@ -436,6 +541,48 @@ describe('collectTurnFileChanges × 降级路径', () => {
     expect(elapsed).toBeLessThan(1_900); // 远早于假 git 的 2s
     expect(snap.collectMs).toBeLessThan(1_900);
   }, 20_000);
+
+  it('numstat 超时：保留 status/name-status 清单（partial/timeout，行数不可信）', async () => {
+    const dir = await plainDir();
+    const fake = makeFakeExec((args) => {
+      if (args.includes('status')) return 'M  src/a.ts\0';
+      if (args.includes('--name-status')) return 'M\0src/a.ts\0';
+      return Object.assign(new Error('git killed by timeout'), { killed: true });
+    });
+    const snap = await collectTurnFileChanges({
+      runId: 'run-numstat-timeout',
+      workspaceRoot: dir,
+      baselineHead: 'deadbeefdeadbeefdeadbeefdeadbeefdeadbeef',
+      execFile: fake.exec,
+    });
+    expect(snap.status).toBe('partial');
+    expect(snap.reason).toBe('timeout');
+    expect(fileAt(snap, 'src/a.ts')).toMatchObject({
+      status: 'modified',
+      added: 0,
+      deleted: 0,
+    });
+  });
+
+  it('name-status 超时但 numstat 成功：numstat 路径兜底入列，仍标 partial/timeout', async () => {
+    const dir = await plainDir();
+    const fake = makeFakeExec((args) => {
+      if (args.includes('status')) return 'M  a.ts\0';
+      if (args.includes('--name-status')) {
+        return Object.assign(new Error('git killed by timeout'), { killed: true });
+      }
+      return '2\t0\ta.ts\n';
+    });
+    const snap = await collectTurnFileChanges({
+      runId: 'run-name-status-timeout',
+      workspaceRoot: dir,
+      baselineHead: 'deadbeefdeadbeefdeadbeefdeadbeefdeadbeef',
+      execFile: fake.exec,
+    });
+    expect(snap.status).toBe('partial');
+    expect(snap.reason).toBe('timeout');
+    expect(fileAt(snap, 'a.ts')).toMatchObject({ status: 'modified', added: 2, deleted: 0 });
+  });
 
   it('git 缺失：执行器 ENOENT → unavailable + reason=git_missing（不抛错）', async () => {
     const dir = await plainDir();
@@ -549,8 +696,8 @@ describe('collectTurnFileChanges × 单工作区串行队列', () => {
     const [first, second] = await Promise.all([collect('run-serial-1', dir), collect('run-serial-2', dir)]);
     expect(first.status).toBe('ok');
     expect(second.status).toBe('ok');
-    // 两次采集各 2 条 git 调用；串行 → 任何时刻最多 1 条在飞。
-    expect(fake.calls).toHaveLength(4);
+    // 两次采集各 3 条 git 调用；串行 → 任何时刻最多 1 条在飞。
+    expect(fake.calls).toHaveLength(6);
     expect(fake.maxInFlight()).toBe(1);
   });
 
@@ -621,7 +768,7 @@ describe('collectTurnFileChanges × 遥测', () => {
       expect(payload).toMatchObject({
         runId: 'run-log',
         fileCount: 1,
-        subprocessCount: 2,
+        subprocessCount: 3,
         status: 'ok',
         truncated: false,
         lineCounts: true,

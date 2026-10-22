@@ -43,7 +43,11 @@ export interface TurnFileChange {
   /** 二进制文件（numstat 的 `-` 列）：行数不伪造，恒 0/0。 */
   binary?: boolean;
   attribution: TurnFileChangeAttribution;
-  /** attribution=edit_patch 时的来源工具名（Edit / Write / MultiEdit / NotebookEdit）。 */
+  /**
+   * attribution=edit_patch 时的来源工具名（Edit / Write / MultiEdit / NotebookEdit）。
+   * 2026-10-22-file-changes-card-fix：**按调用顺序保留重复项**——数组长度 = 本轮
+   * 该文件的编辑调用次数（前端「改N次」计数；工具名提示去重展示）。
+   */
   editToolNames?: string[];
   /** ignored 目录经 mtime 探测命中时必须标 mtime。 */
   source?: TurnFileChangeSource;
