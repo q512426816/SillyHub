@@ -1746,7 +1746,7 @@ export function TurnTimeline({
   const minimizedPending = showPending
     ? pendingRequests.filter((r) => minimizedIds.has(r.request_id))
     : [];
-  // 全部最小化时 sticky 容器只剩挂载占位（保卡片 state），去掉视觉框。
+  // 全部最小化时容器只剩挂载占位（保卡片 state），去掉间距类。
   const visiblePendingCount = pendingRequests.length - minimizedPending.length;
 
   return (
