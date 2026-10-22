@@ -10,4 +10,4 @@ created_at: 2026-10-22T05:23:58.762Z
 - [x] task-04: 提示词左竖线引用式排版（去灰底块）；技能芯片等宽+超 4 项 +N；无技能自定义卡「无技能（不挂载）」占位；新用例绿
 - [x] task-05: 卡脚操作降躁（常态 muted 悬停提亮），设/取消默认/编辑/复制/删除回调与不冒泡回归全绿；grep 无新增硬编码 hex（FR-06）
 - [x] task-06: 全量回归：card/card-grid/page 三测试文件 + tsc + lint 全绿
-- [ ] task-07: 实页视觉对照：dev server 三主题截图对比原型（默认光晕/系统紧凑卡/2 列/工具栏卡）落 visual-evidence.md；Docker frontend 重建部署 + 发布记录
+- [x] task-07: 实页视觉对照：dev server 三主题截图对比原型（默认光晕/系统紧凑卡/2 列/工具栏卡）落 visual-evidence.md；Docker frontend 重建部署 + 发布记录
