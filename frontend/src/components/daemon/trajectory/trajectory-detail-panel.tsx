@@ -104,7 +104,17 @@ export function TrajectoryDetailPanel({
   const handlePointerMove = useCallback((event: React.PointerEvent<HTMLDivElement>) => {
     const drag = dragRef.current;
     if (!drag) return;
-    const next = Math.min(MAX_WIDTH, Math.max(MIN_WIDTH, drag.startWidth + (drag.startX - event.clientX)));
+    // 拖拽上限按宿主容器算（评审 P2）：窄态抽屉最多占容器 92%，宽态给账本留 280px。
+    const parentWidth =
+      panelRef.current?.parentElement?.getBoundingClientRect().width ?? 0;
+    const maxWidth =
+      parentWidth > 0 && parentWidth < 760
+        ? Math.max(MIN_WIDTH, parentWidth * 0.92)
+        : Math.min(MAX_WIDTH, parentWidth > 0 ? parentWidth - 280 : MAX_WIDTH);
+    const next = Math.min(
+      Math.max(MIN_WIDTH, maxWidth),
+      Math.max(MIN_WIDTH, drag.startWidth + (drag.startX - event.clientX)),
+    );
     setWidth(next);
   }, []);
 
