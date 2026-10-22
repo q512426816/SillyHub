@@ -323,7 +323,8 @@ function CardGridBody({
         </span>
       </div>
 
-      {/* 卡片网格（2 列；窄屏退化 1 列） */}
+      {/* 卡片网格：按屏宽自适应列数（D-001@v2——2K 屏固定 2 列过宽；
+          auto-fill minmax 宽屏 ≥3 列 / 常规 2 列 / 窄屏 1 列） */}
       {filtered.length === 0 ? (
         <Empty
           description={
@@ -332,7 +333,7 @@ function CardGridBody({
           className="py-16"
         />
       ) : (
-        <div className="grid gap-4 md:grid-cols-2">
+        <div className="grid gap-4 grid-cols-[repeat(auto-fill,minmax(380px,1fr))]">
           {filtered.map((p) => (
             <AgentProfileCard
               key={p.id}

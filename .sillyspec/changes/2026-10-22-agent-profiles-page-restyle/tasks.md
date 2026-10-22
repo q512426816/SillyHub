@@ -11,3 +11,4 @@ created_at: 2026-10-22T05:23:58.762Z
 - [x] task-05: 卡脚操作降躁（常态 muted 悬停提亮），设/取消默认/编辑/复制/删除回调与不冒泡回归全绿；grep 无新增硬编码 hex（FR-06）
 - [x] task-06: 全量回归：card/card-grid/page 三测试文件 + tsc + lint 全绿
 - [x] task-07: 实页视觉对照：dev server 三主题截图对比原型（默认光晕/系统紧凑卡/2 列/工具栏卡）落 visual-evidence.md；Docker frontend 重建部署 + 发布记录
+- [x] task-08: 卡片墙改按屏宽自适应列数（D-001@v2：auto-fill minmax(380px,1fr)，2K 屏 ≥3 列）——多视口截图验证 + Docker 重建 + 发布记录
