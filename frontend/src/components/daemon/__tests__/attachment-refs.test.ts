@@ -8,6 +8,8 @@ import {
   allocateWsRefToken,
   buildAttRefToken,
   buildWsRefToken,
+  formatRefsForPlainText,
+  parseAttachmentMarkers,
   parseInlineAttRefs,
   parseInlineRefs,
   stripAttRefTokens,
@@ -298,5 +300,42 @@ describe("parseInlineAttRefs 兼容薄封装（D-009 既有消费零改动）", 
       { type: "ref", value: "x.png", ref: { id: UUID_A, name: "x.png" } },
       { type: "text", value: "b" },
     ]);
+  });
+});
+
+/* ── 2026-10-22-session-composer-slim FR-01：纯文本展示格式化 ───────────── */
+
+describe("formatRefsForPlainText（展示层引用简化）", () => {
+  it("附件引用标记 → 📎 文件名，不露出 uuid", () => {
+    expect(formatRefsForPlainText(`看这个[附件引用:${UUID_A}|截图.png]谢谢`)).toBe(
+      "看这个📎 截图.png谢谢",
+    );
+  });
+
+  it("四类工作区引用 → 图标 + 路径末段（代码带行号），不露出 workspace id", () => {
+    const text =
+      `[文件引用:${WID}|src/a.md]` +
+      `[目录引用:${WID}|docs]` +
+      `[代码引用:${WID}|src/b.py|L3-L9]`;
+    expect(formatRefsForPlainText(text)).toBe("📄 a.md📁 docs🧾 b.py:3-9");
+  });
+
+  it("头部附件标记行剥离，正文引用同步简化", () => {
+    const prompt = `[附件:${UUID_A}|image|a.png]\n[附件:${UUID_B}|file|b.txt]\n\n看[附件引用:${UUID_A}|a.png]`;
+    expect(formatRefsForPlainText(prompt)).toBe("看📎 a.png");
+  });
+
+  it("非法 uuid / 用户手写方括号原样保留（容错不吞字）", () => {
+    const bad = "普通[附件引用:not-a-uuid|x.png]文本";
+    expect(formatRefsForPlainText(bad)).toBe(bad);
+    expect(formatRefsForPlainText("只有普通文本")).toBe("只有普通文本");
+  });
+
+  it("parseAttachmentMarkers 迁入纯函数库后契约不变", () => {
+    const parsed = parseAttachmentMarkers(`[附件:${UUID_A}|file|日志.txt]\n正文`);
+    expect(parsed.attachments).toEqual([
+      { id: UUID_A, kind: "file", name: "日志.txt" },
+    ]);
+    expect(parsed.text).toBe("正文");
   });
 });

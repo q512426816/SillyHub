@@ -19,6 +19,47 @@
 /** 附件 id → 编辑态 token 文本（【📎 name】/【📎 name·2】）映射（组件持有并回传父级）。 */
 export type AttRefTokenMap = Record<string, string>;
 
+// ── 附件标记行解析（原 runtime-session-helpers.tsx，2026-10-22 迁入纯函数库）──
+
+/** 附件标记行解析产物：附件清单 + 剥离标记后的纯文本。 */
+export interface ParsedAttachmentMarker {
+  id: string;
+  kind: "image" | "file";
+  name: string;
+}
+
+/**
+ * 解析 prompt 头部的附件标记行（backend inject 写入，D-3）：
+ * `[附件:<uuid>|<kind>|<name>]` 逐行一条；UUID 锚定（防用户伪标记文本误报）。
+ * 解析失败的行按原文本保留（容错）；标记行后的正文原样返回。
+ */
+export function parseAttachmentMarkers(prompt: string): {
+  attachments: ParsedAttachmentMarker[];
+  text: string;
+} {
+  const uuidRe =
+    /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/;
+  const markerRe =
+    /^\[附件:([0-9a-fA-F-]{36})\|(image|file)\|(.+)\]$/;
+  const attachments: ParsedAttachmentMarker[] = [];
+  const lines = prompt.split("\n");
+  let i = 0;
+  while (i < lines.length) {
+    const m = markerRe.exec(lines[i]!.trim());
+    if (!m || !uuidRe.test(m[1]!)) break;
+    attachments.push({
+      id: m[1]!,
+      kind: m[2] as "image" | "file",
+      name: m[3]!,
+    });
+    i += 1;
+  }
+  if (i === 0) return { attachments, text: prompt };
+  // 标记行后的空行（backend 以 \n 接正文）剥一层。
+  const rest = lines.slice(i).join("\n").replace(/^\n/, "");
+  return { attachments, text: rest };
+}
+
 /**
  * 引用类型内嵌图标（emoji 文本字符）。2026-10-12-ws-ref-emoji-inline：用户反馈
  * 类型图标从左上角角标改为内嵌标签文字最前——emoji 是唯一能进文本流的图标形态
@@ -322,4 +363,43 @@ export function parseInlineRefs(text: string): InlineRefPart[] {
 /** 代码引用显示名（末段 + 行号段，无 L 前缀，与编辑态 token 基名一致）。 */
 function linesSuffix(name: string, lines: [number, number]): string {
   return `${name}:${lines[0]}-${lines[1]}`;
+}
+
+/**
+ * 纯文本展示格式化（2026-10-22-session-composer-slim FR-01）——排队消息摘要、
+ * 定时消息摘要、复制结果等不做富标签渲染的场合使用：剥离头部附件标记行，
+ * 并把四类行内引用标记替换为人读简写（📎 文件名 / 📄 路径末段 / 📁 目录名 /
+ * 🧾 名称:起-止）。发送协议不变（仍是正式标记）；UUID/结构非法片段原样保留
+ * （与 parseInlineRefs 容错同口径，不吞用户手写文本）。
+ */
+export function formatRefsForPlainText(text: string): string {
+  const body = parseAttachmentMarkers(text).text;
+  // 快速路径：不含引用标记时零替换开销。
+  if (!body.includes("[附件引用:") && !body.includes("引用:")) return body;
+  const withAtt = body.replace(
+    INLINE_ATT_REF_RE,
+    (_m, _id: string, name: string) => `${ATT_REF_EMOJI} ${name}`,
+  );
+  return withAtt.replace(
+    INLINE_WS_REF_RE,
+    (
+      _m,
+      label: string,
+      _workspaceId: string,
+      path: string,
+      l0?: string,
+      l1?: string,
+    ) => {
+      const name = wsRefDisplayName(path);
+      if (label === "代码引用") {
+        const emoji = WS_REF_EMOJI.code;
+        return l0 !== undefined && l1 !== undefined
+          ? `${emoji} ${name}:${l0}-${l1}`
+          : `${emoji} ${name}`;
+      }
+      return label === "目录引用"
+        ? `${WS_REF_EMOJI.dir} ${name}`
+        : `${WS_REF_EMOJI.file} ${name}`;
+    },
+  );
 }

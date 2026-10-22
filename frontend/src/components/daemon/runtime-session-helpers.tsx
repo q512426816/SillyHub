@@ -24,6 +24,15 @@ import {
   type UserMsgTurnSegment,
 } from "@/components/daemon/session-log-assembler";
 import { type AgentRunLogEntry } from "@/lib/agent";
+// 2026-10-22-session-composer-slim：标记行解析迁入纯函数库（展示层格式化共用同一实现），
+// 本模块保持既有导出面，调用方零改动。
+import {
+  parseAttachmentMarkers,
+  type ParsedAttachmentMarker,
+} from "@/lib/attachment-refs";
+
+export { parseAttachmentMarkers };
+export type { ParsedAttachmentMarker };
 import {
   SESSION_SUPPORTED_PROVIDERS,
   type AgentSessionRead,
@@ -759,45 +768,8 @@ export function SessionHistoryView({
 }
 
 // ── 2026-08-20-session-multimodal-attachments task-13（D-3）：附件标记行解析 ──
-
-/** 附件标记行解析产物：附件清单 + 剥离标记后的纯文本。 */
-export interface ParsedAttachmentMarker {
-  id: string;
-  kind: "image" | "file";
-  name: string;
-}
-
-/**
- * 解析 prompt 头部的附件标记行（backend inject 写入，D-3）：
- * `[附件:<uuid>|<kind>|<name>]` 逐行一条；UUID 锚定（防用户伪标记文本误报）。
- * 解析失败的行按原文本保留（容错）；标记行后的正文原样返回。
- */
-export function parseAttachmentMarkers(prompt: string): {
-  attachments: ParsedAttachmentMarker[];
-  text: string;
-} {
-  const uuidRe =
-    /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/;
-  const markerRe =
-    /^\[附件:([0-9a-fA-F-]{36})\|(image|file)\|(.+)\]$/;
-  const attachments: ParsedAttachmentMarker[] = [];
-  const lines = prompt.split("\n");
-  let i = 0;
-  while (i < lines.length) {
-    const m = markerRe.exec(lines[i]!.trim());
-    if (!m || !uuidRe.test(m[1]!)) break;
-    attachments.push({
-      id: m[1]!,
-      kind: m[2] as "image" | "file",
-      name: m[3]!,
-    });
-    i += 1;
-  }
-  if (i === 0) return { attachments, text: prompt };
-  // 标记行后的空行（backend 以 \n 接正文）剥一层。
-  const rest = lines.slice(i).join("\n").replace(/^\n/, "");
-  return { attachments, text: rest };
-}
+// parseAttachmentMarkers 已于 2026-10-22 迁入 lib/attachment-refs.ts（纯函数库），
+// 本文件顶部 re-export 保持既有导出面。
 
 /**
  * 拼接附件标记行与正文（parseAttachmentMarkers 的逆操作，语义对齐 backend
