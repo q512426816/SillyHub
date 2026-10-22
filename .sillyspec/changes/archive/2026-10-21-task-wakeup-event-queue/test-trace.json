@@ -1,0 +1,37 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-21-task-wakeup-event-queue",
+  "rows": [
+    {
+      "anchor": "FR-01",
+      "row_id": "2026-10-21-task-wakeup-event-queue:flow:测试绑定FR-01",
+      "tests": [
+        "frontend/src/components/daemon/__tests__/message-queue-bar.test.tsx「唤醒条目移出排队列表——计数与 chip 分流」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-21-task-wakeup-event-queue"
+    },
+    {
+      "anchor": "FR-02",
+      "row_id": "2026-10-21-task-wakeup-event-queue:flow:测试绑定FR-02",
+      "tests": [
+        "frontend/src/components/daemon/__tests__/message-queue-bar.test.tsx「事件行折叠展开与无操作按钮」",
+        "frontend/src/components/daemon/__tests__/message-queue-bar.test.tsx「纯唤醒队列不渲染排队消息标签」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-21-task-wakeup-event-queue"
+    }
+  ]
+}

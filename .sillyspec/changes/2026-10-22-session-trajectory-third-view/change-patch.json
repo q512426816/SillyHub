@@ -1,7 +1,7 @@
 {
   "change": "2026-10-22-session-trajectory-third-view",
   "baseline": "b13d0631c3dce0a93c2d44f7a60f15ebb6755806",
-  "head": "734a914927a9477a140062e6ac1ccd246edfdc9c",
+  "head": "7b3fa4deaf5e15d71ffc062b54f4174a45dcaa76",
   "files": [
     ".sillyspec/docs/SillyHub/modules/daemon.changelog.md",
     ".sillyspec/docs/SillyHub/modules/frontend_lib.changelog.md",
@@ -34,10 +34,10 @@
   ],
   "totals": {
     "files": 28,
-    "additions": 619,
-    "deletions": 136
+    "additions": 624,
+    "deletions": 140
   },
-  "savedAt": "2026-10-22T02:33:24.850Z",
+  "savedAt": "2026-10-22T02:38:54.734Z",
   "note": "flow done 时点冻结（本变更可归属交付面：baseline..HEAD 提交面过滤 .sillyspec/ 只留 .sillyspec/docs/ 交付文档 + 独占树未提交交付；治理工件目录不入冻结——2026-10-12-close-trace-freeze-integrity FR-01）",
   "modules": [
     {
@@ -112,8 +112,8 @@
     "baseAnchor": "b13d0631c3dce0a93c2d44f7a60f15ebb6755806",
     "totals": {
       "files": 28,
-      "additions": 619,
-      "deletions": 136
+      "additions": 624,
+      "deletions": 140
     },
     "rows": [
       {
@@ -294,8 +294,8 @@
       },
       {
         "path": "frontend/src/components/daemon/session-panel/session-panel-page.tsx",
-        "additions": 12,
-        "deletions": 26,
+        "additions": 13,
+        "deletions": 27,
         "kind": "modified",
         "planned": "修改",
         "verdict": "planned"
@@ -318,8 +318,8 @@
       },
       {
         "path": "frontend/src/components/daemon/turn-timeline.tsx",
-        "additions": 21,
-        "deletions": 36,
+        "additions": 25,
+        "deletions": 39,
         "kind": "modified",
         "planned": "修改",
         "verdict": "planned"
@@ -347,6 +347,6 @@
     "note": "flow done 时点冻结（本文件落盘时采集）",
     "closedBy": "flow done"
   },
-  "patchSha256": "8c57b8ab7941a89ff3d5ebf52184c3b52330b43639b2ae3eea61c01cf0e93f96",
+  "patchSha256": "3f6a60e6c233febaa432cf78800b8476a2395296260df512426dfcd7449870e7",
   "patchStatus": "ok"
 }

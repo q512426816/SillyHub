@@ -1,0 +1,27 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-21-task-wakeup-event-queue",
+  "reviewer": "subagent",
+  "verdict": "PASS",
+  "reviewedAgainst": "27a0d233161553c32a2db9cadf73c2afc0f6beeb",
+  "findings": [
+    {
+      "severity": "P3",
+      "title": "评审锚点跨 HEAD 更新",
+      "evidence": "9d196ae6e→27a0d233 对本变更交付文件零差异（git diff 实证），PASS 结论随锚点平移",
+      "location": "git diff 9d196ae6e..27a0d233"
+    }
+  ],
+  "dimensionNotes": {
+    "乱序": "ok",
+    "并发": "ok",
+    "切换": "ok",
+    "作用域": "ok"
+  },
+  "recheck": {
+    "tests": "vitest run message-queue-bar.test.tsx + use-message-queue.test.ts → 39/39 passed（25+14）",
+    "typecheck": "tsc --noEmit 零错误",
+    "newFindings": "无"
+  },
+  "reviewedAt": "2026-10-22T10:48:19+08:00"
+}

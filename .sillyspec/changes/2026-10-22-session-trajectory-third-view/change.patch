@@ -997,7 +997,7 @@ index 904d9e02c..bcdb8e069 100644
              {workspaceId && (
                <Button
 diff --git a/frontend/src/components/daemon/session-panel/session-panel-page.tsx b/frontend/src/components/daemon/session-panel/session-panel-page.tsx
-index 052b1f1f2..b0ffb03ec 100644
+index 052b1f1f2..9abff8fdd 100644
 --- a/frontend/src/components/daemon/session-panel/session-panel-page.tsx
 +++ b/frontend/src/components/daemon/session-panel/session-panel-page.tsx
 @@ -14,8 +14,13 @@ import { buildErrorLogItem, buildSystemFailureItem } from "@/components/agent-lo
@@ -1025,6 +1025,15 @@ index 052b1f1f2..b0ffb03ec 100644
    // 2026-08-29-session-usage-stats task-04（R-04）：用量条重取信号——
    // onTurnCompleted 轮终态递增，驱动头部下方 SessionUsageBar 重拉
    //（用量数据轮次终态才落库，非实时精确可接受，design R-04）。
+@@ -848,7 +854,7 @@ export function SessionPanelPage({
+     () => buildSubagentTaskLookup(subagentReconcileSource.tasks),
+     [subagentReconcileSource.tasks],
+   );
+-  // ql-20260822-010：视图模式（对话/进度）按会话持久化——原实现刷新后回默认
++  // ql-20260822-010：视图模式（对话/进度/轨迹，2026-10-22 D-001）按会话持久化——原实现刷新后回默认
+   // 「对话」，与聊天中切到的视图不一致。挂载后回读（effect 内 set，避免 SSR
+   // hydration mismatch）；切换时写入。dialog 适配层无刷新恢复场景，不持久化。
+   // task-03（R-01）：预会话态无会话级持久化键，跳过（转真会话时随依赖重跑）。
 @@ -857,7 +863,7 @@ export function SessionPanelPage({
      setViewMode(readPersistedViewMode(sessionId));
    }, [sessionId]);
@@ -1188,10 +1197,24 @@ index 9d9ae3d61..9d21b192d 100644
    try {
      window.localStorage.setItem(viewModeLsKey(sessionId), m);
 diff --git a/frontend/src/components/daemon/turn-timeline.tsx b/frontend/src/components/daemon/turn-timeline.tsx
-index 4b235a6e8..d3e1effb2 100644
+index 4b235a6e8..15d11fc0d 100644
 --- a/frontend/src/components/daemon/turn-timeline.tsx
 +++ b/frontend/src/components/daemon/turn-timeline.tsx
-@@ -417,9 +417,9 @@ export interface SessionTurnView {
+@@ -8,9 +8,10 @@
+  *   - 错误横幅 + AskUserQuestion 待答卡 + 空态
+  *   - 自动滚动到底部
+  *
+- * 「对话/全部」二态视图由 viewMode 控制（ql-20260729-005）；AskUser 提问记录按
+- * run_id 穿插到对应 turn（ql-20260802-001/003）。本组件无弹窗上下文依赖，
+- * /runtimes 弹窗与 /sessions 新页面均可独立 import 组装。
++ * 「对话/进度/轨迹」三态视图由 viewMode 控制（ql-20260729-005 建两态；
++ * 2026-10-22-session-trajectory-third-view / D-001 上移轨迹为第三视图）；
++ * AskUser 提问记录按 run_id 穿插到对应 turn（ql-20260802-001/003）。本组件无
++ * 弹窗上下文依赖，/runtimes 弹窗与 /sessions 新页面均可独立 import 组装。
+  *
+  * task-06（2026-08-19-session-stream-ux / FR-01 / FR-02 / FR-06 / design §5 Phase2
+  * + §9.3）：渲染层 v2 段模型双路径——
+@@ -417,9 +418,9 @@ export interface SessionTurnView {
  
  /** 消息视图模式（ql-20260729-005）：对话=用户消息+答复正文+文件卡片（交付物，
   * agent-file-upload-mcp FR-01）；全部=追加思考/工具等过程项。
@@ -1204,7 +1227,7 @@ index 4b235a6e8..d3e1effb2 100644
  
  export interface TurnTimelineProps {
    turns: SessionTurnView[];
-@@ -1290,17 +1290,24 @@ export function autoRecoverHintForTurn(
+@@ -1290,17 +1291,24 @@ export function autoRecoverHintForTurn(
  const BOTTOM_REASSERT_WINDOW_MS = 2500;
  
  /**
@@ -1230,7 +1253,7 @@ index 4b235a6e8..d3e1effb2 100644
    if (trajectory.rows.length === 0) {
      return (
        <div
-@@ -1315,7 +1322,11 @@ function TrajectoryPane({ turns }: { turns: SessionTurnView[] }) {
+@@ -1315,7 +1323,11 @@ function TrajectoryPane({ turns }: { turns: SessionTurnView[] }) {
    }
    return (
      <div data-testid="trajectory-pane" className="min-w-0">
@@ -1243,7 +1266,7 @@ index 4b235a6e8..d3e1effb2 100644
      </div>
    );
  }
-@@ -1344,10 +1355,9 @@ export function TurnTimeline({
+@@ -1344,10 +1356,9 @@ export function TurnTimeline({
    fileChangesSummary = true,
  }: TurnTimelineProps) {
    const scrollRef = useRef<HTMLDivElement>(null);
@@ -1257,7 +1280,7 @@ index 4b235a6e8..d3e1effb2 100644
  
    // ql-20260822-010：贴底跟随——原实现每次 turns 更新无条件 scrollTo 底部，
    // 用户上滚读历史时被流式更新反复拉回底部。改为：onScroll 维护「距底 <
-@@ -1811,33 +1821,8 @@ export function TurnTimeline({
+@@ -1811,33 +1822,8 @@ export function TurnTimeline({
             2026-10-21 用户裁决「轮间 1px hairline 多余」：**只保留留白，不再画线**
             （原 `border-b border-border last:border-b-0` 已移除）；轮与轮靠白处分节。 */
          <div>
