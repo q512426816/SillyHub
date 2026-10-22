@@ -75,6 +75,10 @@ import {
 // 2026-09-09-sessions-visual-refresh task-05/06（D-003@v1）：消息角色化共享构件
 import { ChatMessageAvatar, RoundDivider } from "@/components/chat";
 import { TurnStatusBar } from "@/components/daemon/turn-status-bar";
+import {
+  TurnLiveMarquee,
+  deriveLiveMarqueeEntries,
+} from "@/components/daemon/turn-live-marquee";
 // agent-file-upload-mcp：历史回放过程项渲染 agent 上传文件卡片（TurnDetailsList）
 import { FileMessageCard } from "@/components/daemon/file-message-card";
 // 2026-08-20-session-multimodal-attachments task-13（D-3）：历史附件标记行解析
@@ -2144,6 +2148,16 @@ function SegmentedTurnBody({
           ),
     [viewMode, segments, turnStatus],
   );
+  // 2026-10-22-conversation-live-marquee（FR-01~FR-06）：对话视图 + 运行中轮次
+  // 才派生跑马灯条目——进度/轨迹视图、终态轮、旧回退路径均不消费（渲染门控
+  // 与派生门控同源，避免无谓递归）。条目上限与去重由纯函数承担。
+  const liveEntries = useMemo(
+    () =>
+      viewMode === "conversation" && isLiveTurn(turnStatus)
+        ? deriveLiveMarqueeEntries(segments)
+        : [],
+    [viewMode, turnStatus, segments],
+  );
   const timeline = useMemo(() => {
     if (viewMode !== "all") return null;
     const items: SegmentTimelineItem[] = [
@@ -2289,6 +2303,10 @@ function SegmentedTurnBody({
       {isLiveTurn(turnStatus) && !segments.some((s) => s.kind === "text") && (
         <ThinkingPlaceholder viewMode={viewMode} />
       )}
+      {/* 2026-10-22-conversation-live-marquee（FR-01 / FR-04）：对话视图运行中
+          轮次末尾的实时活动跑马灯——纯感知、不交互；进度/轨迹视图与终态轮
+          liveEntries 为空不挂载。位置=本轮最新处（思考占位之后）。 */}
+      {liveEntries.length > 0 && <TurnLiveMarquee entries={liveEntries} />}
       {/* 2026-10-20-session-page-dsh-alignment（FR-01 / D-016①）：原 quick-3c85b05e
           的「开始 · 结束 · 历时」独立行已删除——它与轮尾状态行重复，时间细节改由
           TurnRow 派生 metaDetail 折进那条唯一元信息行（RoundDivider.detail / all 视图

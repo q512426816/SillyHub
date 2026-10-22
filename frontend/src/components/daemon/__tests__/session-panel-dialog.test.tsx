@@ -14,7 +14,7 @@
 //   输入校验 / turn 级串行禁用 / unmount close
 
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
-import { render, screen, fireEvent, waitFor, act } from "@testing-library/react";
+import { render, screen, fireEvent, waitFor, act, within } from "@testing-library/react";
 
 import { SessionPanel } from "../session-panel";
 import { useMentionSources } from "@/lib/session-mention-sources";
@@ -2130,7 +2130,10 @@ describe("SessionPanel（dialog）对话/进度视图切换（ql-20260729-005）
     // 与工具行 desc（恰为 raw 原文）用精确匹配区分）
     await waitFor(() => expect(screen.getByText(/文件内容如下/)).toBeInTheDocument());
     expect(screen.queryByText("Read src/a.ts")).not.toBeInTheDocument();
-    expect(screen.queryByText(/先想想怎么读/)).not.toBeInTheDocument();
+    // 2026-10-22-conversation-live-marquee：对话视图运行中轮尾新增实时活动跑马灯，
+    // thinking 摘要作为跑马灯条目可见（纯感知）；但过程行/思考折叠块仍不在对话视图展示。
+    const marquee = screen.getByTestId("turn-live-marquee");
+    expect(within(marquee).getByText(/先想想怎么读/)).toBeInTheDocument();
     expect(screen.queryByText("思考")).not.toBeInTheDocument();
 
     // 切「进度」：过程项出现（thinking 折叠块标题 + 摘要，tool 行）
