@@ -52,8 +52,8 @@ export interface TurnFileChangesCardOptions {
  * partial 且无文件列表时的提示文案（D-034）。
  *
  * 语义边界：说的是「没拿到改动清单」，**不是**「本轮没改文件」——后者是 E6/E8 明令
- * 禁止的伪值。超时与队列溢出在快照层面同为 `status="partial"`（daemon 端不区分
- * files 内容），故文案合并表述；精确 `reason` 仍保留在快照里供检查器读取。
+ * 禁止的伪值。本常量只作「partial 但无 reason（行数退档）」的通用兜底；
+ * timeout / queue_overflow 的精确文案由 `fileChangesNotice` 按 reason + 采集耗时生成。
  */
 export const NOTICE_PARTIAL_NO_FILES = "工作区快照未完成，本轮改动未知";
 

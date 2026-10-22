@@ -17,8 +17,9 @@
  *   E4 上报由调用方（session-manager → daemon → hub）落地，本模块只做采集 + 遥测。
  *
  * 性能红线（D-023③，验收项不是建议）：
- *   - 每轮 git 子进程 ≤3（**实测 2**：工作区串行队列 + 固定 status/numstat 两条命令，
- *     不按文件数扩子进程；E1 轮首基线走零子进程的 `readBaselineHead`）；
+ *   - 每轮 git 子进程 ≤3（生产恒 3：status + name-status + numstat；baseline 未解析的
+ *     兜底路径 +rev-parse = 4；不按文件数扩子进程；E1 轮首基线走零子进程的
+ *     `readBaselineHead`）；
  *   - 复杂度 O(改动数 + 工具调用数)：无全仓扫描、禁 rename 检测（`--no-renames`）；
  *   - `--no-optional-locks` + `-c core.preloadIndex=true` 恒在参数里（防与用户操作
  *     争 index.lock、复用 index 统计缓存）；
@@ -40,7 +41,7 @@
  *   |---|---|---|---|
  *   | worktree（在途 21 改动） | 1,082 B / 21 条 | **245ms / 480ms** | 75ms / 93ms |
  *   | 主仓（111 改动） | 5,627 B / 111 条 | **318ms / 379ms** | 72ms / 89ms |
- *   - 单轮子进程恒 2（`Plan` 上限 3）；降级率 0。
+ *   - 单轮子进程恒 3（`Plan` 上限 3；后续版本加入 name-status）；降级率 0。
  *   - 裁决：**保留全量口径**（designated corpus p50 245ms ≤ 300ms 红线）；重脏仓
  *     318ms 超线已登记 R-07 风险。退档开关 `limits.includeLineCounts=false` 已实现
  *     并单测（只跑 status，行级 +/− 破折号、快照 partial），如需按字面退档一行改
@@ -1123,7 +1124,8 @@ export async function collectTurnFileChanges(
  * 为什么不用 `git rev-parse HEAD`：轮首在 `inject` 成功路径上，任何以工作区为
  * cwd 的子进程都会在 Windows 上短暂占住该目录（实证：临时 cwd 的测试/用户侧
  * 目录清理会撞 EBUSY），而 HEAD 解析是纯读盘、毫秒级、跨平台一致的——不值得
- * 为它开子进程。**子进程预算因此从 3 降到 2**（status + numstat，见上方 spike-01）。
+ * 为它开子进程。**生产采集因此少一条 rev-parse**（3 条：status + name-status +
+ * numstat；baseline 未解析的兜底路径为 4 条）。
  *
  * 返回值三态（喂给 `CollectTurnFileChangesInput.baselineHead`）：
  *   - `string`    解析成功 → 直接作 diff 基线；
