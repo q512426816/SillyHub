@@ -63,6 +63,7 @@ import {
 import { Button, Input, Tag, Tooltip } from "antd";
 
 import { cn } from "@/lib/utils";
+import { formatRefsForPlainText } from "@/lib/attachment-refs";
 import type { QueueEntry } from "@/hooks/use-message-queue";
 import { getProviderCaps } from "@/lib/provider-caps";
 import {
@@ -380,7 +381,9 @@ export function MessageQueueBar({
             ? entry.prompt.slice(TASK_WAKEUP_PROMPT_PREFIX.length).trim() ||
               "系统通知"
             : null;
-          const summarySource = wakeupBody ?? entry.prompt;
+          // 2026-10-22-session-composer-slim FR-01：摘要与展开正文只展示人读引用
+          //（📎 文件名），不露出 [附件引用:uuid|…] 等协议长串；发送协议不变。
+          const summarySource = formatRefsForPlainText(wakeupBody ?? entry.prompt);
           const summary =
             summarySource.length > SUMMARY_LIMIT
               ? `${summarySource.slice(0, SUMMARY_LIMIT)}…`
@@ -457,7 +460,9 @@ export function MessageQueueBar({
                         : "max-w-[280px] truncate",
                     )}
                   >
-                    {expanded ? (wakeupBody ?? entry.displayPrompt) : summary}
+                    {expanded
+                      ? formatRefsForPlainText(wakeupBody ?? entry.displayPrompt)
+                      : summary}
                   </span>
                   {/* 附件数（D-004：折叠态显示；展开态 displayPrompt 已含附件标记行）。 */}
                   {!expanded && entry.attachmentIds.length > 0 && (

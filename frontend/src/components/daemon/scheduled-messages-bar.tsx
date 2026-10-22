@@ -30,6 +30,7 @@ import { Clock, X } from "lucide-react";
 import { Button, Modal, Tag, Tooltip } from "antd";
 
 import { cn } from "@/lib/utils";
+import { formatRefsForPlainText } from "@/lib/attachment-refs";
 import { ApiError } from "@/lib/api";
 import { deleteScheduledMessage, type ScheduledMessageRead } from "@/lib/daemon";
 import { useNotify } from "@/lib/errors";
@@ -43,9 +44,12 @@ const SUMMARY_LIMIT = 40;
 
 /**
  * prompt 摘要（bar chip 与 panel 系统提示行「发送「{摘要}」」共用同一截断口径）。
+ * 2026-10-22-session-composer-slim FR-01：先做引用纯文本化（📎 文件名），
+ * 展示层不露出 [附件引用:uuid|…] 长串。
  */
 export function summarizeScheduledPrompt(prompt: string): string {
-  return prompt.length > SUMMARY_LIMIT ? `${prompt.slice(0, SUMMARY_LIMIT)}…` : prompt;
+  const text = formatRefsForPlainText(prompt);
+  return text.length > SUMMARY_LIMIT ? `${text.slice(0, SUMMARY_LIMIT)}…` : text;
 }
 
 /**
@@ -252,7 +256,10 @@ function ScheduledMessagesList({
                 <span className="shrink-0 font-medium tabular-nums">
                   {formatScheduledTime(msg.dispatch_at)}
                 </span>
-                <span className="max-w-[240px] truncate" title={msg.prompt}>
+                <span
+                  className="max-w-[240px] truncate"
+                  title={formatRefsForPlainText(msg.prompt)}
+                >
                   {summarizeScheduledPrompt(msg.prompt)}
                 </span>
                 {/* 2026-09-12：系统自动排期徽标（origin=auto_resume:*；与状态

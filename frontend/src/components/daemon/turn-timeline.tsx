@@ -80,6 +80,7 @@ import { FileMessageCard } from "@/components/daemon/file-message-card";
 // 2026-08-20-session-multimodal-attachments task-13（D-3）：历史附件标记行解析
 // + 图片缩略图/文件 chip 渲染。
 import { parseAttachmentMarkers } from "@/components/daemon/runtime-session-helpers";
+import { formatRefsForPlainText } from "@/lib/attachment-refs";
 import { turnTokenSpeedText } from "@/components/daemon/turn-speed";
 import {
   foldHeaderText,
@@ -881,7 +882,9 @@ const TurnRow = memo(function TurnRow({
                               定位 right:0 / bottom:-24px，经 className 覆盖默认右下偏移。 */}
                           {parsed.text && (
                             <CopyButton
-                              getText={() => parseAttachmentMarkers(turn.prompt).text}
+                              // 2026-10-22-session-composer-slim FR-01：复制结果为
+                              // 人读文本（📎 文件名），不含协议标记。
+                              getText={() => formatRefsForPlainText(turn.prompt)}
                               className="-bottom-6 right-0"
                             />
                           )}

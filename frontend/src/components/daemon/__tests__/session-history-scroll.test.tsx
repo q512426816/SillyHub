@@ -424,12 +424,12 @@ describe("scroll-up history integration", () => {
       // 修复核心语义：scroll 事件处理器内零同步钉回（同步 apply 读 offsetTop
       // 写 scrollTop = 强制布局，修复前风暴源）。
       expect(writes).toBe(before);
-      // 真实 rAF 下一帧（jsdom 原生 16ms tick）：钉回执行（50ms 窗口 <
-      // watch interval 300ms 与锚 2.5s 存活窗，写入只可能来自钉回链路）。
-      await act(async () => {
-        await new Promise((r) => setTimeout(r, 50));
-      });
-      expect(writes).toBeGreaterThan(before);
+      // 真实 rAF 下一帧（jsdom 原生 16ms tick）：钉回执行。改用 waitFor 轮询
+      // 而非固定 50ms 窗口——全量测试并发下 jsdom rAF/定时器会明显滞后，
+      // 固定窗口会假失败（2026-10-22 实证）；语义仍是「事件内零同步写，
+      // 异步帧后才写」。watch interval 300ms 与锚 2.5s 存活窗远大于默认
+      // waitFor 轮询间隔，写入来源仍是钉回链路。
+      await waitFor(() => expect(writes).toBeGreaterThan(before));
     } finally {
       delete (el as { scrollTop?: number }).scrollTop;
     }

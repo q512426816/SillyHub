@@ -2608,10 +2608,12 @@ describe("SessionPanel 轮次导航集成（task-06：跳转链路 + mobile Draw
         expect(mocks.notifyWarning).toHaveBeenCalledWith(
           "已连续加载 50 页仍未到达，可再次点击继续加载",
         ),
-      { timeout: 8000 },
+      // 全量并发下 50 页 × 满页渲染会明显排队（2026-10-22 实证 8s 窗口假失败）；
+      // 放宽等待与用例上限，语义不变（仍断言 50 页上限与 warning）。
+      { timeout: 15000 },
     );
     expect(beforeCallCount()).toBe(50);
-  }, 20000);
+  }, 35000);
 
   it("desktop 跳转翻页期 suppress 触顶：循环进行中 scroll 不触发自动加载，跳完恢复", async () => {
     let resolvePage1!: (v: unknown) => void;

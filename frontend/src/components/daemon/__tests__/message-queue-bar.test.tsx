@@ -223,6 +223,36 @@ describe("MessageQueueBar（task-09 / D-002 D-003 D-004）", () => {
     expect(container.textContent).not.toContain(tailMark);
   });
 
+  it("引用标记在摘要与展开正文中简化为文件名（2026-10-22-session-composer-slim FR-01）", () => {
+    const uuid = "aaaaaaaa-1111-2222-3333-444444444444";
+    const prompt = `看[附件引用:${uuid}|截图.png]谢谢`;
+    const { container } = render(
+      <MessageQueueBar
+        entries={[
+          makeEntry({
+            id: "mq-ref",
+            prompt,
+            displayPrompt: `[附件:${uuid}|image|截图.png]\n\n${prompt}`,
+            attachmentIds: [uuid],
+          }),
+        ]}
+        onRemove={vi.fn()}
+        onRetry={vi.fn()}
+      />,
+    );
+
+    // 折叠摘要：人读标签，无 uuid / 协议字面。
+    expect(container.textContent).toContain("看📎 截图.png谢谢");
+    expect(container.textContent).not.toContain(uuid);
+    expect(container.textContent).not.toContain("[附件引用:");
+
+    // 展开：附件标记行被剥离，正文引用仍是简洁标签。
+    fireEvent.click(screen.getByRole("button", { name: /^等待中，/ }));
+    expect(container.textContent).toContain("看📎 截图.png谢谢");
+    expect(container.textContent).not.toContain("[附件:");
+    expect(container.textContent).not.toContain("[附件引用:");
+  });
+
   it("附件数显示（D-004）：有附件显示「📎 N」，无附件不显示", () => {
     render(
       <MessageQueueBar
