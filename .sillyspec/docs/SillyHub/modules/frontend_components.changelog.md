@@ -114,3 +114,4 @@ created_at: 2026-08-30 22:23:33
 | 2026-10-22 | 2026-10-22-turn-trigger-generalize | 轮触发溯源泛化为统一事件呈现 |
 | 2026-10-22 | 2026-10-22-askuser-card-inline | 会话页 AskUser 提问卡悬浮改内嵌滚动 |
 | 2026-10-22 | 2026-10-22-turn-trigger-metadata-p2 | 轮触发溯源 Phase 2：定时消息接入与 metadata 戳驱动 |
+| 2026-10-22 | 2026-10-22-trajectory-view-redesign | 2026-10-22-trajectory-view-redesign |

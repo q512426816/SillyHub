@@ -7219,3 +7219,156 @@ superseded_by：FR-app-workspace-pages-002
   confirmed_at: null
   source_change: 2026-10-22-review-risk-fixes
   status: active
+
+## FR-frontend-033 顶部固定布局
+变更：2026-10-22-trajectory-view-redesign
+状态：active
+摘要：主路径
+依据决策：D-002@v1、D-017@v1
+场景正文：
+- 场景：主路径 — Given 轨迹视图有足够多的账本行；When 向下滚动到底部；Then 工具栏与三泳道时间线仍在原位，仅账本内容滚动。
+全文：.sillyspec/changes/archive/2026-10-22-trajectory-view-redesign/requirements.md#FR-01
+最近确认：49fb620463233b8293784c64a08693bbabdfc6a4
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-22-trajectory-view-redesign:flow:测试绑定FR-01
+  tests: frontend/src/components/daemon/trajectory/__tests__/trajectory-redesign.test.tsx
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-22-trajectory-view-redesign
+  status: active
+
+## FR-frontend-034 工具栏四项
+变更：2026-10-22-trajectory-view-redesign
+状态：active
+摘要：主路径；时长切换
+依据决策：D-003@v1、D-013@v1、D-016@v1、D-020@v1
+场景正文：
+- 场景：主路径 — Given 轨迹视图已打开；When 输入搜索词；Then 账本只显示命中行且折叠被绕过；When 清空搜索；Then 恢复原折叠状态。
+- 场景：时长切换 — Given 默认实际时长；When 切到等宽；Then 时间线条块按等宽排列，账本结构不变；刷新后仍为等宽。
+全文：.sillyspec/changes/archive/2026-10-22-trajectory-view-redesign/requirements.md#FR-02
+最近确认：49fb620463233b8293784c64a08693bbabdfc6a4
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-22-trajectory-view-redesign:flow:测试绑定FR-02
+  tests: frontend/src/components/daemon/trajectory/__tests__/trajectory-redesign.test.tsx | frontend/src/components/daemon/trajectory/__tests__/trajectory-view-model.test.ts
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-22-trajectory-view-redesign
+  status: active
+
+## FR-frontend-035 两列账本
+变更：2026-10-22-trajectory-view-redesign
+状态：active
+摘要：主路径
+依据决策：D-004@v1、D-019@v1
+场景正文：
+- 场景：主路径 — Given 一轮包含助手、工具、子工具记录；When 查看账本；Then 首行显示该轮起始标签，后续行共用竖线，子工具缩进，行内只有类型与摘要。
+全文：.sillyspec/changes/archive/2026-10-22-trajectory-view-redesign/requirements.md#FR-03
+最近确认：49fb620463233b8293784c64a08693bbabdfc6a4
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-22-trajectory-view-redesign:flow:测试绑定FR-03
+  tests: frontend/src/components/daemon/trajectory/__tests__/trajectory-redesign.test.tsx
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-22-trajectory-view-redesign
+  status: active
+
+## FR-frontend-036 折叠摘要行
+变更：2026-10-22-trajectory-view-redesign
+状态：active
+摘要：主路径
+场景正文：
+- 场景：主路径 — Given 某轮有 5 条记录；When 点击「轮次 → 收起」；Then 该轮只剩 1 条内容行 + 1 条摘要行；再次展开恢复 5 条。
+全文：.sillyspec/changes/archive/2026-10-22-trajectory-view-redesign/requirements.md#FR-04
+最近确认：49fb620463233b8293784c64a08693bbabdfc6a4
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-22-trajectory-view-redesign:flow:测试绑定FR-04
+  tests: frontend/src/components/daemon/trajectory/__tests__/trajectory-redesign.test.tsx | frontend/src/components/daemon/trajectory/__tests__/trajectory-view-model.test.ts
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-22-trajectory-view-redesign
+  status: active
+
+## FR-frontend-037 多标签详情
+变更：2026-10-22-trajectory-view-redesign
+状态：active
+摘要：主路径
+依据决策：D-005@v1、D-007@v1、D-008@v1、D-018@v1
+场景正文：
+- 场景：主路径 — Given 选中一条工具行；When 查看详情；Then 出现四个标签，参数/结果可 JSON 美化与复制，计时显示开始/总时长；When 选中一条助手行；Then 只有概
+全文：.sillyspec/changes/archive/2026-10-22-trajectory-view-redesign/requirements.md#FR-05
+最近确认：49fb620463233b8293784c64a08693bbabdfc6a4
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-22-trajectory-view-redesign:flow:测试绑定FR-05
+  tests: frontend/src/components/daemon/trajectory/__tests__/from-turn-views.test.ts | frontend/src/components/daemon/trajectory/__tests__/trajectory-redesign.test.tsx
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-22-trajectory-view-redesign
+  status: active
+
+## FR-frontend-038 数据边界与空态
+变更：2026-10-22-trajectory-view-redesign
+状态：active
+摘要：主路径
+依据决策：D-006@v1
+场景正文：
+- 场景：主路径 — Given 会话没有时间锚点；When 打开轨迹；Then 显示「没有可绘制的时间数据」提示，不渲染账本与时间线。
+全文：.sillyspec/changes/archive/2026-10-22-trajectory-view-redesign/requirements.md#FR-06
+最近确认：49fb620463233b8293784c64a08693bbabdfc6a4
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-22-trajectory-view-redesign:flow:测试绑定FR-06
+  tests: frontend/src/components/daemon/__tests__/turn-timeline-trajectory-view.test.tsx | frontend/src/components/daemon/trajectory/__tests__/from-turn-views.test.ts
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-22-trajectory-view-redesign
+  status: active
+
+## FR-frontend-039 主题、入口与回归
+变更：2026-10-22-trajectory-view-redesign
+状态：active
+摘要：主路径
+场景正文：
+- 场景：主路径 — Given 变更落盘；When 跑轨迹、会话面板相关测试与 tsc；Then 全部通过，三态切换行为不变。
+全文：.sillyspec/changes/archive/2026-10-22-trajectory-view-redesign/requirements.md#FR-07
+最近确认：49fb620463233b8293784c64a08693bbabdfc6a4
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-22-trajectory-view-redesign:flow:测试绑定FR-07
+  tests: frontend/src/components/daemon/__tests__/turn-timeline-trajectory-view.test.tsx
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-22-trajectory-view-redesign
+  status: active

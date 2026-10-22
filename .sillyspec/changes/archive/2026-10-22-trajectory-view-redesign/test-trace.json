@@ -1,0 +1,115 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-22-trajectory-view-redesign",
+  "rows": [
+    {
+      "anchor": "FR-01",
+      "row_id": "2026-10-22-trajectory-view-redesign:flow:测试绑定FR-01",
+      "tests": [
+        "frontend/src/components/daemon/trajectory/__tests__/trajectory-redesign.test.tsx"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-22-trajectory-view-redesign"
+    },
+    {
+      "anchor": "FR-02",
+      "row_id": "2026-10-22-trajectory-view-redesign:flow:测试绑定FR-02",
+      "tests": [
+        "frontend/src/components/daemon/trajectory/__tests__/trajectory-redesign.test.tsx",
+        "frontend/src/components/daemon/trajectory/__tests__/trajectory-view-model.test.ts"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-22-trajectory-view-redesign"
+    },
+    {
+      "anchor": "FR-03",
+      "row_id": "2026-10-22-trajectory-view-redesign:flow:测试绑定FR-03",
+      "tests": [
+        "frontend/src/components/daemon/trajectory/__tests__/trajectory-redesign.test.tsx"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-22-trajectory-view-redesign"
+    },
+    {
+      "anchor": "FR-04",
+      "row_id": "2026-10-22-trajectory-view-redesign:flow:测试绑定FR-04",
+      "tests": [
+        "frontend/src/components/daemon/trajectory/__tests__/trajectory-redesign.test.tsx",
+        "frontend/src/components/daemon/trajectory/__tests__/trajectory-view-model.test.ts"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-22-trajectory-view-redesign"
+    },
+    {
+      "anchor": "FR-05",
+      "row_id": "2026-10-22-trajectory-view-redesign:flow:测试绑定FR-05",
+      "tests": [
+        "frontend/src/components/daemon/trajectory/__tests__/from-turn-views.test.ts",
+        "frontend/src/components/daemon/trajectory/__tests__/trajectory-redesign.test.tsx"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-22-trajectory-view-redesign"
+    },
+    {
+      "anchor": "FR-06",
+      "row_id": "2026-10-22-trajectory-view-redesign:flow:测试绑定FR-06",
+      "tests": [
+        "frontend/src/components/daemon/__tests__/turn-timeline-trajectory-view.test.tsx",
+        "frontend/src/components/daemon/trajectory/__tests__/from-turn-views.test.ts"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-22-trajectory-view-redesign"
+    },
+    {
+      "anchor": "FR-07",
+      "row_id": "2026-10-22-trajectory-view-redesign:flow:测试绑定FR-07",
+      "tests": [
+        "frontend/src/components/daemon/__tests__/turn-timeline-trajectory-view.test.tsx"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-22-trajectory-view-redesign"
+    }
+  ]
+}

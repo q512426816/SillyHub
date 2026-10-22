@@ -1133,3 +1133,139 @@
 锚点：未记录
 最近确认：125f15809bfcba92270420feb915fffc88a8cec2
 理由：答：最大风险是盖戳覆盖群聊键的理论冲突——群聊链路未来若也需 turn_trigger 语义（群聊来源标注），合并序（trigger 覆盖 chain）会吞掉；现状群聊 turn_metadata 不含 turn_trigger 键（键空间不相交），风险登记不设防。次要风险：'schedule' 排队行 origin 若被用户伪造——busy 路径入队的 origin 由 _handle_busy_turn 参数派生（HTTP 注入端点不透传 turn_trigger），浏览器不可达，伪造面不存在。死路：①「run metadata 盖戳」（metadata_.auto_resume_of 同族）——放弃，前端时间线装配以日志行为输入、run metadata 需跨 API 关联穿透装配签名（Phase 1 已评估放弃）；②「前端按内容前缀识别 schedule」——定时消息派发是裸 user prompt 无标记，前缀方案要求派发侧改 prompt 内容（污染正文），metadata 盖戳零污染；③「排队行加新列」——origin 列同族语义复用即可，零迁移。
+
+## D-unmapped-151@v1 轨迹面板以 dsh（deepseek-harness）ui-trajectory 为视觉与交互基准
+状态：implemented
+变更：2026-10-22-trajectory-view-redesign
+原编号：D-001@v1
+锚点：未记录
+最近确认：49fb620463233b8293784c64a08693bbabdfc6a4
+理由：用户提供的截图来自 dsh 的轨迹视图，并明确要求「看 dsh 源码」；参考实现为 deepseek-harness/packages/client/ui-trajectory（CSS Modules + DSH token），本项目需用 Tailwind + themes.ts token 等价实现。
+故障面：直接照搬 CSS Modules 类名/API 会引错依赖；必须翻译为 Tailwind + 本地数据模型。
+退役判据：本项目轨迹视图形成独立设计体系且不再需要对标 dsh 时。
+
+## D-unmapped-152@v1 顶部固定布局——工具栏与时间线不随账本滚动
+状态：implemented
+变更：2026-10-22-trajectory-view-redesign
+原编号：D-002@v1
+锚点：未记录
+最近确认：49fb620463233b8293784c64a08693bbabdfc6a4
+理由：用户明确「顶部是固定位置的」。dsh 根容器为纵向 flex + overflow:hidden，工具栏 sticky 32px、时间线固定 50px，唯一滚动容器是账本 pane。
+故障面：若仍挂在 turn-timeline-scroll 内，整页滚动会把顶部带走（当前缺陷根因）。
+
+## D-unmapped-153@v1 工具栏四项语义与行为
+状态：implemented
+变更：2026-10-22-trajectory-view-redesign
+原编号：D-003@v1
+锚点：未记录
+最近确认：49fb620463233b8293784c64a08693bbabdfc6a4
+理由：时长＝时间线比例开关（实际时长 vs 等宽操作，偏好持久化）；轮次＝展开/收起所有轮次（折叠为“… + 摘要”行）；调用＝展开/收起所有工具调用（合并为“N 个工具调用”摘要行）；搜索＝按文本 AND 过滤账本行并绕过折叠，时间线非命中条降透明。
+
+## D-unmapped-154@v1 账本形态——无表头两列紧凑表格
+状态：implemented
+变更：2026-10-22-trajectory-view-redesign
+原编号：D-004@v1
+锚点：未记录
+最近确认：49fb620463233b8293784c64a08693bbabdfc6a4
+理由：dsh 为无表头两列（事件列 122px + 内容列自适应），行高 30px、下边框；内容列＝类型标签（19px，图标+文字）+ 摘要，有结果时右侧“→ 结果摘要”；耗时/token/状态文字不进行内而进详情；按 turn 分组用竖线与 Turn 标签表达，子工具通过缩进 +26px，无嵌套 DOM。
+退役判据：账本信息密度与可读性在其他形态下经实测更优时。
+
+## D-unmapped-155@v1 详情面板——多标签 + 可调宽
+状态：implemented
+变更：2026-10-22-trajectory-view-redesign
+原编号：D-005@v1
+锚点：未记录
+最近确认：49fb620463233b8293784c64a08693bbabdfc6a4
+理由：工具行五标签（概述/参数/结果/Schema/计时），消息类/系统类各有自己的标签集；面板宽默认 clamp(320px,38%,440px)、可拖拽 320–720、双击复位；≤760px 改为抽屉；无选中时不渲染。
+
+## D-unmapped-156@v1 采用组件族拆分方案（B）
+状态：implemented
+变更：2026-10-22-trajectory-view-redesign
+原编号：D-009@v1
+锚点：未记录
+最近确认：49fb620463233b8293784c64a08693bbabdfc6a4
+理由：用户选择方案 B——TrajectoryView 只做装配，新增 trajectory-toolbar / trajectory-ledger / trajectory-detail-panel 三个组件，复用现有 trajectory-timeline 与数据层；数据层（build-trajectory / from-turn-views）不动。
+
+## D-unmapped-157@v1 否决「原地重构 trajectory-view.tsx」（方案 A）
+状态：rejected
+变更：2026-10-22-trajectory-view-redesign
+原编号：D-010@v1
+锚点：未记录
+最近确认：49fb620463233b8293784c64a08693bbabdfc6a4
+理由：用户未选方案 A。
+否决理由：单文件将膨胀到 1000+ 行，职责混杂、测试耦合，与项目大文件拆分既有方向相反。
+复潮条件：若组件族拆分导致回归面显著超出预期（改动文件数或测试返工翻倍），可退回局部原地重构。
+
+## D-unmapped-158@v1 否决「直接移植 dsh 组件」（方案 C）
+状态：rejected
+变更：2026-10-22-trajectory-view-redesign
+原编号：D-011@v1
+锚点：未记录
+最近确认：49fb620463233b8293784c64a08693bbabdfc6a4
+理由：不可行——dsh 使用 CSS Modules + 自有设计 token 与数据模型，本项目为 Tailwind + themes.ts + SessionTurnView，无法直接复制。
+否决理由：依赖与数据模型不兼容，移植成本高于重写且会把两套 token 体系混在一起。
+复潮条件：仅在 dsh 改为输出可复用、无框架绑定组件库时重新评估。
+
+## D-unmapped-159@v1 总览缩略条随 D-017 一并裁剪，实际时长保留缩放/平移/双击重置
+状态：implemented
+变更：2026-10-22-trajectory-view-redesign
+原编号：D-021@v1
+锚点：未记录
+最近确认：49fb620463233b8293784c64a08693bbabdfc6a4
+理由：50px 高度预算下无法容纳总览条（原 14px）与三泳道+轴；裁决随说明区一并视觉裁剪。实际时长模式仍保留滚轮缩放、拖拽平移、双击重置；等宽模式保持 D-016 的只读概览。D-016 尾句「保持现有全部交互」中的总览刷子部分由本条修订。
+
+## D-unmapped-160@v1 设计方案与真码原型定稿
+状态：implemented
+变更：2026-10-22-trajectory-view-redesign
+原编号：D-012@v1
+锚点：未记录
+最近确认：49fb620463233b8293784c64a08693bbabdfc6a4
+理由：用户确认按该设计实施；原型经 prototype-as-code 管线编译并登记为变更目录 prototype-trajectory-redesign.html。
+
+## D-unmapped-161@v1 搜索时折叠整体失效，时间线不做降透明
+状态：implemented
+变更：2026-10-22-trajectory-view-redesign
+原编号：D-013@v1
+锚点：未记录
+最近确认：49fb620463233b8293784c64a08693bbabdfc6a4
+理由：有搜索词时所有折叠失效、直接显示全部命中行（含其父轮次与调用组）；零命中显示「没有匹配的记录」空态；时间线条块不随搜索变化（不实现 dsh 的非命中降透明，减少无数据支撑的视觉分支）。我的判断：降透明属纯装饰，本平台先不做。
+
+## D-unmapped-162@v1 折叠/搜索隐藏选中行时清空选中，键盘只遍历可见行
+状态：implemented
+变更：2026-10-22-trajectory-view-redesign
+原编号：D-014@v1
+锚点：未记录
+最近确认：49fb620463233b8293784c64a08693bbabdfc6a4
+理由：折叠状态或搜索词变化后，若当前选中行不再可见，立即清空选中并关闭详情；↑/↓ 只在可见行之间移动；scrollIntoView 只对可见行调用。我的判断：保留不可见行的选中会让用户「看不到却占着详情」。
+
+## D-unmapped-163@v1 工具行参数/结果字段来源（允许 from-turn-views 小改）
+状态：implemented
+变更：2026-10-22-trajectory-view-redesign
+原编号：D-015@v1
+锚点：未记录
+最近确认：49fb620463233b8293784c64a08693bbabdfc6a4
+理由：产品路径工具段已有 `raw`（tool_use JSON 原文）与 `result`（配对的 tool_result 文本）、`primary`（主参数摘要）。映射为 inputText=raw、outputText=result ?? primary；from-turn-views.ts 允许本次小改（仅工具行字段映射与行 id 稳定性），build-trajectory.ts 仍零改动。
+
+## D-unmapped-164@v1 等宽模式为只读概览
+状态：implemented
+变更：2026-10-22-trajectory-view-redesign
+原编号：D-016@v1
+锚点：未记录
+最近确认：49fb620463233b8293784c64a08693bbabdfc6a4
+理由：等宽模式只做条块等宽排列的概览——禁用滚轮缩放、拖拽平移、总览刷子与双击重置，不拦截滚轮默认行为（页面正常滚动）；隐藏时间刻度与轮边界竖线；点击条块仍按等宽几何命中并选中对应行。实际时长模式保持现有全部交互。
+
+## D-unmapped-165@v1 D-007 覆盖 D-005 的 Schema 子项
+状态：implemented
+变更：2026-10-22-trajectory-view-redesign
+原编号：D-018@v1
+锚点：未记录
+最近确认：49fb620463233b8293784c64a08693bbabdfc6a4
+理由：D-007 覆盖 D-005 的 Schema 子项；D-005 的其余内容（标签结构、可调宽、抽屉）继续有效。
+
+## D-unmapped-166@v1 时长偏好为全局偏好
+状态：implemented
+变更：2026-10-22-trajectory-view-redesign
+原编号：D-020@v1
+锚点：未记录
+最近确认：49fb620463233b8293784c64a08693bbabdfc6a4
+理由：采用全局偏好（对齐 dsh 的 `dsh.trajectory.duration`），localStorage key `sillyhub.trajectory.scaleMode`，不按会话区分。

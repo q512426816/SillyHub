@@ -1,0 +1,29 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-22-trajectory-view-redesign",
+  "reviewer": "subagent",
+  "verdict": "PASS",
+  "reviewedAgainst": "49fb620463233b8293784c64a08693bbabdfc6a4",
+  "reviewerNotes": "增量复审·第 3 轮（基于 49fb62046，只验上一轮 P2 与 P3）。P2 窄容器拖拽越界：已解决——handlePointerMove 现按宿主容器宽取上限，<760px 上限 = 容器宽×92%、宽态 = min(720, 容器宽−280)，内联 width 受 Math.min 夹住，窄态抽屉不再超出容器/把手不再被裁出可视区；320px 级容器下上限收敛到 MIN_WIDTH=320，等于容器宽，不产生新的横向溢出。P3 冻结面：已解决（按评审口径）——change.patch 已重算为 32 文件，源码面仅含 trajectory/、turn-timeline.tsx、prototype 源与 prototype-build.mjs，全部在设计文件清单内，未混入其它变更的源码；仅并行变更的 docs changelog/prototype-dist 仍出现在声明外归因清单，按任务书不作为本变更缺陷。复跑 7 个测试文件 100 用例全绿、tsc --noEmit 退出 0；本轮改动（仅拖拽上限 12 行）未引入新 P0/P1。观察（不阻塞）：窄态拖拽上限用了 92% 而未再夹 420px，700px 容器下拖拽可超过 FR-05 文案中的 420px（默认宽度仍为 420px 且不越容器），收口时可按『420 为默认宽』理解或补 Math.min(...,420)。",
+  "findings": [],
+  "dimensionNotes": {
+    "乱序": "ok：轮内按 startedAt 排序；调用折叠组按 turnIndex 切分，无跨轮并组。",
+    "并发": "ok：无异步数据写入；拖拽只写本地 state，容器宽实时读取，无共享可变全局态。",
+    "切换": "ok：可见行集合变化后清空不可见选中；timing 随 turns 透传，切轮取值正确。",
+    "作用域": "ok：折叠/搜索/宽度为实例内状态；scaleMode 全局偏好按 D-020；窄/宽上限按宿主容器实时判定。"
+  },
+  "boundaryAdjudications": [
+    "可接受：D-007/D-018 隐藏 Schema 标签——无工具定义数据支撑。",
+    "可接受：D-016 等宽模式只读——手势短路与条件渲染一致，并有 wheel 用例覆盖。",
+    "可接受：D-016 尾句由 D-021 显式修订——总览刷子随 50px 预算裁剪已披露，实际时长保留缩放/平移/双击重置。",
+    "可接受：D-017 时间线约 50px、说明区/总览条视觉裁剪（DOM 保留）。",
+    "可接受：D-019 不渲染 request 圆点——无数据支撑，测试断言不存在。",
+    "可接受：D-020 时长偏好全局——localStorage key 与读写实现一致。",
+    "可接受：R-08 段缺 id 用起点+下标兜底，并结合不可见即清空。",
+    "可接受：R-09 pending AskUser 卡置顶 shrink-0，账本 min-h-0 flex-1 自适应。",
+    "可接受：FR-05 详情宽度——默认出列 clamp(320px,38%,440px)、宽容器拖拽上限 min(720px, 容器宽−280px)、窄容器抽屉默认 min(92%,420px)；拖拽上限按容器宽计算，不再越界。",
+    "可接受：计时字段表——TrajectoryTurn.timing 透传，attempts[0] 计算 TTFT/生成/吞吐，缺失固定文案不估算。",
+    "可接受：非目标不引入虚拟化——content-visibility + contain-intrinsic-size，按 R-02 留待实测。"
+  ],
+  "reviewedAt": "2026-10-22T06:17:00Z"
+}
