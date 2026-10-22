@@ -140,6 +140,11 @@ patrol 职责⑦②僵尸等待形态(回叫漏叫兜底): active+未done+无活
 - delegation 走真实 LLM（GLMConfig.from_env），测试必须 monkeypatch 防烧 token
   （本机 shell 网关变量会泄进 pytest）。
 - 用户可见错误文案中文（error-message-l10n）；守护测试防回退。
+- `AgentRun.change_id` 是**轮级用量归属锚点**（`changes.id` 外键
+  `ON DELETE SET NULL`，2026-10-22-change-delete-session-history-fix）：change
+  物理删除只清锚点，禁止级联删除会话 run/日志（历史事故：13 轮会话内容被 CASCADE
+  抹掉、turn_count 虚高）。无锚 run 在用量侧经 `change_session_links` 兜底归属；
+  守护测试 `test_agent_run_change_fk.py` + `test_reparse_delete_preserves_runs.py`。
 
 - 分身子会话（2026-08-25-team-subsession-governance）：dispatch_worker 派的是子会话三元组
   （AgentSession.parent_session_id 挂主控 + owner=mission.created_by + interactive lease

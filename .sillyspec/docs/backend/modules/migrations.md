@@ -51,3 +51,20 @@ alembic upgrade head                       # head = 20260817100000（单 head）
 
 - 2026-09-11-agent-log-attribution-refactor task-05 纯数据清库迁移（清归属列 + tool_report 聚合键会话软删 + 两张 links 表全清，DG-04 用户裁决）。**2026-09-13 部署裁决改 no-op**：compose 启动命令 `alembic upgrade head` 自动前滚会把破坏性 DML 在 CLI 升级前自动执行（DG-03 时序为 backend 发布→CLI 升级→手动清库），清空白做；且 downgrade→upgrade 重放会把已重建的正确数据再清一遍。白名单/stop-revision 不可行（与 20260911220000 是兄弟分叉），env 门控有"stamp 后跳过的 DML 永不重跑"死结——DML 抽出到一次性运维脚本 `backend/scripts/reset_agent_log_attribution.py`（dry-run 默认 + `--apply` 单事务 + 前后计数回报）。revision id 保留占位维持图完整（已 stamp 环境不受影响）；downgrade 维持 no-op（D-004@v2）。
 - 同日早间修订已被本裁决吸收：软删时间戳 SQL `now()`（PG-only）改 Python 侧 bindparams——现落在脚本 `apply_reset` 内，方言无关语义不变。
+
+## 20261022100000_agent_run_change_set_null（2026-10-22）
+
+- 2026-10-22-change-delete-session-history-fix FR-02/FR-04：`agent_runs.change_id`
+  外键 `ON DELETE CASCADE` → `ON DELETE SET NULL`（与 `agent_sessions.change_id`
+  既有语义对齐）。轮级打锚是用量归属，不是生命周期从属；reparse/占坑回滚物理删
+  change 只清锚点，不再级联删除会话 run 与日志。历史事故：会话 bbdbecc9 的 13 轮
+  内容被 CASCADE 抹掉、`turn_count` 虚高。
+- 同迁移做一次**保守** `turn_count` 对账：`expected` = 存在 `channel='user_input'`
+  日志的 run 数（按 run 去重；纯切换轮不落 user_input 不计数，steering 多条挂同一
+  run 只计一次），仅 `turn_count > expected` 时下调；`turn_count <= expected` 一律
+  不动（保留 `origin='tool_report'` 的 0 语义）。downgrade 恢复 CASCADE，对账不回滚。
+- 应用侧兜底：`ChangeService.reparse` 删除环改为两遍式（先收集待删行 → 统一
+  `UPDATE agent_runs SET change_id=NULL` → 再逐行 delete），行为与部署顺序无关，
+  并输出 `change.reparse_detached_runs` 日志（detached_runs 计数）。
+- 数据恢复：`backend/scripts/restore_lost_session_turns.py`（默认 dry-run，`--apply`
+  单事务；确定性 run id + `(run_id, dedup_key)` 幂等；`change_id=NULL`）。

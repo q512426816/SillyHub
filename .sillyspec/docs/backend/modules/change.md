@@ -117,9 +117,11 @@ advance-stage → transition_with_dispatch → dispatch:
 
 reparse(scope):
   scope=None 全量(delete + _detect_renames 重命名检测)
-  scope=[keys] 零 delete: 只对命中 key create/update, 范围内磁盘消失也不删
+  scope=[keys] 定向删除: key ∈ scope 且 key ∉ seen_keys 才删; scope 外零动作
   created 新变更不产生会话绑定(D-007 自动绑定已移除; 绑定唯一自动来源=
     命令解析通道 change/binding.py, 会话内实际执行 sillyspec run/flow --change)
+  物理删 Change 前先 UPDATE agent_runs SET change_id=NULL(2026-10-22 事故根治;
+    DB 侧 FK 同步改 SET NULL 兜底) —— 会话 run/日志/turn_count 不受 change 删除影响
 
 review 四方法(通过/打回):
   通过 → transition(不派发) + _upsert_projection_progress(upsert
@@ -140,9 +142,15 @@ review 四方法(通过/打回):
 - 审批不派发（会话驱动化 D-004）：通过只 transition + 投影收敛，打回只
   `_record_stage_rework`；`rerun_stage`/`transition_with_dispatch` 保留给 MCP/HTTP
   显式调用方。
-- scoped reparse 零 delete 是会话驱动化的命门（增量同步不触发整树 reparse）：删除守卫
-  scope 模式硬关，delete 仅全量 reparse；rename 检测仅全量（scoped 部分视图会把范围外
-  变更误判 orphaned）。
+- scoped reparse 自 2026-08-29 R-08 修订起是**定向删除**（key ∈ scope 且磁盘确认
+  消失才删；scope 外零动作），不再是零 delete；rename 检测两模式都跑，scoped 下
+  orphaned 候选仅取 scope 集内行（防范围外误判）。
+- **删除 change 不得删会话历史（2026-10-22 事故根治）**：物理删 Change 行前必须先把
+  锚定 `agent_runs.change_id` 置 NULL（两遍式：先收集待删行→统一 UPDATE→再逐行
+  delete，防 autoflush 先 flush DELETE）；DB 外键同步为 `ON DELETE SET NULL` 作第二
+  道保险。历史事故：reparse 删 4 个 change 级联抹掉会话 bbdbecc9 的 13 轮 run/日志，
+  `turn_count` 仍虚高。丢失数据可用 `backend/scripts/restore_lost_session_turns.py`
+  从引擎原始 JSONL 幂等回灌（dry-run 默认）。
 - `Change.stages` 是普通 JSON Column 非 MutableDict：所有原地改必须
   `dict(change.stages or {})` 浅拷贝再回赋，否则 SQLAlchemy set 事件见 `new is old`
   不标 dirty、flush 静默丢更新（历史 8 处已标准化；`test_stages_persistence.py`
