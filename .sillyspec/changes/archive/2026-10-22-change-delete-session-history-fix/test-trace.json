@@ -1,0 +1,66 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-22-change-delete-session-history-fix",
+  "rows": [
+    {
+      "anchor": "FR-01",
+      "row_id": "2026-10-22-change-delete-session-history-fix:flow:测试绑定FR-01",
+      "tests": [
+        "backend/app/modules/change/tests/test_reparse_delete_preserves_runs.py「reparse 物理删 change 时保留锚定 run 与日志」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-22-change-delete-session-history-fix"
+    },
+    {
+      "anchor": "FR-02",
+      "row_id": "2026-10-22-change-delete-session-history-fix:flow:测试绑定FR-02",
+      "tests": [
+        "backend/app/modules/agent/tests/test_agent_run_change_fk.py「AgentRun.change_id 外键为 SET NULL」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-22-change-delete-session-history-fix"
+    },
+    {
+      "anchor": "FR-03",
+      "row_id": "2026-10-22-change-delete-session-history-fix:flow:测试绑定FR-03",
+      "tests": [
+        "backend/tests/test_restore_lost_session_turns.py「JSONL 按 turn_id 映射为 run/log 且重复执行幂等」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-22-change-delete-session-history-fix"
+    },
+    {
+      "anchor": "FR-04",
+      "row_id": "2026-10-22-change-delete-session-history-fix:flow:测试绑定FR-04",
+      "tests": [
+        "backend/tests/test_restore_lost_session_turns.py「turn_count 对账仅下调虚高、保留 tool_report 零语义」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-22-change-delete-session-history-fix"
+    }
+  ]
+}

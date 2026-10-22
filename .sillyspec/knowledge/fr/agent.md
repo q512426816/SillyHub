@@ -557,3 +557,79 @@ created_at: 2026-10-14T02:51:35.432Z
 - 场景：主路径 — Given diff 面 = 2 个 backend 文案文件 + 2 个测试文件 / When 逐 hunk 核对 / Then 无逻辑行变更（仅文案字符串与断言/清单/
 全文：.sillyspec/changes/archive/2026-10-22-merge-test-debt/requirements.md#FR-04
 最近确认：457db3f86efa272c64aeacd06333aa538f3636ea
+
+## FR-agent-029 删除 change（含 reparse 物理删行）不再删除任何 agent_runs/agent_run_logs，run.change_id 变为 NULL
+变更：2026-10-22-change-delete-session-history-fix
+状态：active
+摘要：reparse 删除磁盘消失的 change；墓碑行与非候选行零动作；change-writer 占坑回滚
+全文：.sillyspec/changes/archive/2026-10-22-change-delete-session-history-fix/requirements.md#FR-01
+最近确认：a0af14684ac4433ef87f97e4f33906c9e5e9f6f4
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-22-change-delete-session-history-fix:flow:测试绑定FR-01
+  tests: backend/app/modules/change/tests/test_reparse_delete_preserves_runs.py「reparse 物理删 change 时保留锚定 run 与日志」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-22-change-delete-session-history-fix
+  status: active
+
+## FR-agent-030 模型与外键迁移一致（SET NULL），并有删除 change 后 run/日志保留的回归测试
+变更：2026-10-22-change-delete-session-history-fix
+状态：active
+摘要：模型与库一致；数据库级删除不带走 run
+全文：.sillyspec/changes/archive/2026-10-22-change-delete-session-history-fix/requirements.md#FR-02
+最近确认：a0af14684ac4433ef87f97e4f33906c9e5e9f6f4
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-22-change-delete-session-history-fix:flow:测试绑定FR-02
+  tests: backend/app/modules/agent/tests/test_agent_run_change_fk.py「AgentRun.change_id 外键为 SET NULL」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-22-change-delete-session-history-fix
+  status: active
+
+## FR-agent-031 bbdbecc9 会话从导出的 JSONL 回灌 13 轮后，时间线与左栏 turn_count（59）一致
+变更：2026-10-22-change-delete-session-history-fix
+状态：active
+摘要：dry-run 零写入；apply 后会话完整；重复执行幂等
+全文：.sillyspec/changes/archive/2026-10-22-change-delete-session-history-fix/requirements.md#FR-03
+最近确认：a0af14684ac4433ef87f97e4f33906c9e5e9f6f4
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-22-change-delete-session-history-fix:flow:测试绑定FR-03
+  tests: backend/tests/test_restore_lost_session_turns.py「JSONL 按 turn_id 映射为 run/log 且重复执行幂等」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-22-change-delete-session-history-fix
+  status: active
+
+## FR-agent-032 turn_count 与实际 run 数的漂移有对账/修复路径，不再出现计数虚高
+变更：2026-10-22-change-delete-session-history-fix
+状态：active
+摘要：虚高下调；tool_report 零语义保留
+全文：.sillyspec/changes/archive/2026-10-22-change-delete-session-history-fix/requirements.md#FR-04
+最近确认：a0af14684ac4433ef87f97e4f33906c9e5e9f6f4
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-22-change-delete-session-history-fix:flow:测试绑定FR-04
+  tests: backend/tests/test_restore_lost_session_turns.py「turn_count 对账仅下调虚高、保留 tool_report 零语义」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-22-change-delete-session-history-fix
+  status: active

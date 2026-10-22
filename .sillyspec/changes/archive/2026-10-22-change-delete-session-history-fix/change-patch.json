@@ -1,0 +1,236 @@
+{
+  "change": "2026-10-22-change-delete-session-history-fix",
+  "baseline": "6855b17919ce73aca8df79585a2efc7d9279068c",
+  "head": "a0af14684ac4433ef87f97e4f33906c9e5e9f6f4",
+  "files": [
+    ".sillyspec/docs/SillyHub/modules/daemon.changelog.md",
+    ".sillyspec/docs/backend/modules/agent.md",
+    ".sillyspec/docs/backend/modules/change.md",
+    ".sillyspec/docs/backend/modules/daemon.changelog.md",
+    ".sillyspec/docs/backend/modules/migrations.md",
+    ".sillyspec/docs/multi-agent-platform/modules/backend.changelog.md",
+    "backend/app/modules/agent/model.py",
+    "backend/app/modules/agent/tests/test_agent_run_change_fk.py",
+    "backend/app/modules/change/service.py",
+    "backend/app/modules/change/tests/test_reparse_delete_preserves_runs.py",
+    "backend/migrations/versions/20261022100000_agent_run_change_set_null.py",
+    "backend/scripts/restore_lost_session_turns.py",
+    "backend/tests/test_align_platform_change_events_migration.py",
+    "backend/tests/test_restore_lost_session_turns.py",
+    "docs/releases/2026-10-22-005-c2832fd.md"
+  ],
+  "totals": {
+    "files": 15,
+    "additions": 1154,
+    "deletions": 9
+  },
+  "savedAt": "2026-10-22T10:16:31.066Z",
+  "note": "flow done 时点冻结（本变更可归属交付面：baseline..HEAD 提交面过滤 .sillyspec/ 只留 .sillyspec/docs/ 交付文档 + 独占树未提交交付；治理工件目录不入冻结——2026-10-12-close-trace-freeze-integrity FR-01）",
+  "modules": [
+    {
+      "id": "change",
+      "files": 2,
+      "doc": "docs/backend/modules/change.md",
+      "docTouched": true,
+      "docMissing": false
+    },
+    {
+      "id": "agent",
+      "files": 2,
+      "doc": "docs/backend/modules/agent.md",
+      "docTouched": true,
+      "docMissing": false
+    },
+    {
+      "id": "migrations",
+      "files": 1,
+      "doc": "docs/backend/modules/migrations.md",
+      "docTouched": true,
+      "docMissing": false
+    },
+    {
+      "id": "backend",
+      "files": 8,
+      "doc": "docs/multi-agent-platform/modules/backend.md",
+      "docTouched": false,
+      "docMissing": false
+    },
+    {
+      "id": "docs",
+      "files": 1,
+      "doc": "docs/multi-agent-platform/modules/docs.md",
+      "docTouched": false,
+      "docMissing": false
+    },
+    {
+      "id": "agent",
+      "files": 2,
+      "doc": "docs/SillyHub/modules/agent.md",
+      "docTouched": false,
+      "docMissing": false
+    },
+    {
+      "id": "change",
+      "files": 2,
+      "doc": "docs/SillyHub/modules/change.md",
+      "docTouched": false,
+      "docMissing": false
+    }
+  ],
+  "uncoveredDirs": [],
+  "moduleMaps": [
+    "docs/backend/modules/_module-map.yaml",
+    "docs/frontend/modules/_module-map.yaml",
+    "docs/multi-agent-platform/modules/_module-map.yaml",
+    "docs/SillyHub/modules/_module-map.yaml",
+    "docs/sillyhub-daemon/modules/_module-map.yaml"
+  ],
+  "scopeAudit": {
+    "mode": "full-flow",
+    "ok": true,
+    "degradedReason": null,
+    "baseAnchor": "6855b17919ce73aca8df79585a2efc7d9279068c",
+    "totals": {
+      "files": 16,
+      "additions": 1154,
+      "deletions": 9
+    },
+    "rows": [
+      {
+        "path": ".sillyspec/docs/SillyHub/modules/daemon.changelog.md",
+        "additions": 1,
+        "deletions": 0,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": ".sillyspec/docs/backend/modules/agent.md",
+        "additions": 5,
+        "deletions": 0,
+        "kind": "modified",
+        "planned": "修改",
+        "verdict": "planned"
+      },
+      {
+        "path": ".sillyspec/docs/backend/modules/change.md",
+        "additions": 12,
+        "deletions": 4,
+        "kind": "modified",
+        "planned": "修改",
+        "verdict": "planned"
+      },
+      {
+        "path": ".sillyspec/docs/backend/modules/daemon.changelog.md",
+        "additions": 1,
+        "deletions": 0,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": ".sillyspec/docs/backend/modules/migrations.md",
+        "additions": 17,
+        "deletions": 0,
+        "kind": "modified",
+        "planned": "修改",
+        "verdict": "planned"
+      },
+      {
+        "path": ".sillyspec/docs/multi-agent-platform/modules/backend.changelog.md",
+        "additions": 1,
+        "deletions": 0,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": "backend/app/modules/agent/model.py",
+        "additions": 6,
+        "deletions": 1,
+        "kind": "modified",
+        "planned": "修改",
+        "verdict": "planned"
+      },
+      {
+        "path": "backend/app/modules/agent/tests/test_agent_run_change_fk.py",
+        "additions": 28,
+        "deletions": 0,
+        "kind": "new",
+        "planned": "新增",
+        "verdict": "planned"
+      },
+      {
+        "path": "backend/app/modules/change/service.py",
+        "additions": 28,
+        "deletions": 1,
+        "kind": "modified",
+        "planned": "修改",
+        "verdict": "planned"
+      },
+      {
+        "path": "backend/app/modules/change/tests/test_reparse_delete_preserves_runs.py",
+        "additions": 142,
+        "deletions": 0,
+        "kind": "new",
+        "planned": "新增",
+        "verdict": "planned"
+      },
+      {
+        "path": "backend/migrations/versions/20261022100000_agent_run_change_set_null.py",
+        "additions": 88,
+        "deletions": 0,
+        "kind": "new",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": "backend/scripts/restore_lost_session_turns.py",
+        "additions": 599,
+        "deletions": 0,
+        "kind": "new",
+        "planned": "新增",
+        "verdict": "planned"
+      },
+      {
+        "path": "backend/tests/test_align_platform_change_events_migration.py",
+        "additions": 4,
+        "deletions": 2,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": "backend/tests/test_restore_lost_session_turns.py",
+        "additions": 221,
+        "deletions": 0,
+        "kind": "new",
+        "planned": "新增",
+        "verdict": "planned"
+      },
+      {
+        "path": "docs/releases/2026-10-22-005-c2832fd.md",
+        "additions": 1,
+        "deletions": 1,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": "backend/migrations/versions/20261022_agent_runs_change_id_set_null.py",
+        "planned": "新增",
+        "additions": 0,
+        "deletions": 0,
+        "kind": "modified",
+        "verdict": "untouched"
+      }
+    ],
+    "excluded": {
+      "foreignDeclared": []
+    },
+    "note": "flow done 时点冻结（本文件落盘时采集）",
+    "closedBy": "flow done"
+  },
+  "patchSha256": "309906ef9075f21638d6cb0a1a753fa5b713a94ed8108dd6316e389af86739c0",
+  "patchStatus": "ok"
+}

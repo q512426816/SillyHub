@@ -1,0 +1,1317 @@
+diff --git a/.sillyspec/docs/SillyHub/modules/daemon.changelog.md b/.sillyspec/docs/SillyHub/modules/daemon.changelog.md
+index 39571d693..3350a16a8 100644
+--- a/.sillyspec/docs/SillyHub/modules/daemon.changelog.md
++++ b/.sillyspec/docs/SillyHub/modules/daemon.changelog.md
+@@ -77,3 +77,4 @@ created_at: 2026-08-27 14:32:24
+ - 2026-10-22-daemon-snapshot-report-log | daemon 快照上报补收口日志
+ - 2026-10-22-turn-trigger-metadata-p2 | 轮触发溯源 Phase 2：定时消息接入与 metadata 戳驱动
+ - 2026-10-22-merge-test-debt | 合并后测试债清偿：l10n文案与守卫钉子同步
++- 2026-10-22-merge-regression-fixes | 合并回归债收口：grants 闭包与 lease 双流断言
+diff --git a/.sillyspec/docs/backend/modules/agent.md b/.sillyspec/docs/backend/modules/agent.md
+index 2b1318b1c..81e09f8a7 100644
+--- a/.sillyspec/docs/backend/modules/agent.md
++++ b/.sillyspec/docs/backend/modules/agent.md
+@@ -140,6 +140,11 @@ patrol 职责⑦②僵尸等待形态(回叫漏叫兜底): active+未done+无活
+ - delegation 走真实 LLM（GLMConfig.from_env），测试必须 monkeypatch 防烧 token
+   （本机 shell 网关变量会泄进 pytest）。
+ - 用户可见错误文案中文（error-message-l10n）；守护测试防回退。
++- `AgentRun.change_id` 是**轮级用量归属锚点**（`changes.id` 外键
++  `ON DELETE SET NULL`，2026-10-22-change-delete-session-history-fix）：change
++  物理删除只清锚点，禁止级联删除会话 run/日志（历史事故：13 轮会话内容被 CASCADE
++  抹掉、turn_count 虚高）。无锚 run 在用量侧经 `change_session_links` 兜底归属；
++  守护测试 `test_agent_run_change_fk.py` + `test_reparse_delete_preserves_runs.py`。
+ 
+ - 分身子会话（2026-08-25-team-subsession-governance）：dispatch_worker 派的是子会话三元组
+   （AgentSession.parent_session_id 挂主控 + owner=mission.created_by + interactive lease
+diff --git a/.sillyspec/docs/backend/modules/change.md b/.sillyspec/docs/backend/modules/change.md
+index f7ebc7f70..b29ba1312 100644
+--- a/.sillyspec/docs/backend/modules/change.md
++++ b/.sillyspec/docs/backend/modules/change.md
+@@ -117,9 +117,11 @@ advance-stage → transition_with_dispatch → dispatch:
+ 
+ reparse(scope):
+   scope=None 全量(delete + _detect_renames 重命名检测)
+-  scope=[keys] 零 delete: 只对命中 key create/update, 范围内磁盘消失也不删
++  scope=[keys] 定向删除: key ∈ scope 且 key ∉ seen_keys 才删; scope 外零动作
+   created 新变更不产生会话绑定(D-007 自动绑定已移除; 绑定唯一自动来源=
+     命令解析通道 change/binding.py, 会话内实际执行 sillyspec run/flow --change)
++  物理删 Change 前先 UPDATE agent_runs SET change_id=NULL(2026-10-22 事故根治;
++    DB 侧 FK 同步改 SET NULL 兜底) —— 会话 run/日志/turn_count 不受 change 删除影响
+ 
+ review 四方法(通过/打回):
+   通过 → transition(不派发) + _upsert_projection_progress(upsert
+@@ -140,9 +142,15 @@ review 四方法(通过/打回):
+ - 审批不派发（会话驱动化 D-004）：通过只 transition + 投影收敛，打回只
+   `_record_stage_rework`；`rerun_stage`/`transition_with_dispatch` 保留给 MCP/HTTP
+   显式调用方。
+-- scoped reparse 零 delete 是会话驱动化的命门（增量同步不触发整树 reparse）：删除守卫
+-  scope 模式硬关，delete 仅全量 reparse；rename 检测仅全量（scoped 部分视图会把范围外
+-  变更误判 orphaned）。
++- scoped reparse 自 2026-08-29 R-08 修订起是**定向删除**（key ∈ scope 且磁盘确认
++  消失才删；scope 外零动作），不再是零 delete；rename 检测两模式都跑，scoped 下
++  orphaned 候选仅取 scope 集内行（防范围外误判）。
++- **删除 change 不得删会话历史（2026-10-22 事故根治）**：物理删 Change 行前必须先把
++  锚定 `agent_runs.change_id` 置 NULL（两遍式：先收集待删行→统一 UPDATE→再逐行
++  delete，防 autoflush 先 flush DELETE）；DB 外键同步为 `ON DELETE SET NULL` 作第二
++  道保险。历史事故：reparse 删 4 个 change 级联抹掉会话 bbdbecc9 的 13 轮 run/日志，
++  `turn_count` 仍虚高。丢失数据可用 `backend/scripts/restore_lost_session_turns.py`
++  从引擎原始 JSONL 幂等回灌（dry-run 默认）。
+ - `Change.stages` 是普通 JSON Column 非 MutableDict：所有原地改必须
+   `dict(change.stages or {})` 浅拷贝再回赋，否则 SQLAlchemy set 事件见 `new is old`
+   不标 dirty、flush 静默丢更新（历史 8 处已标准化；`test_stages_persistence.py`
+diff --git a/.sillyspec/docs/backend/modules/daemon.changelog.md b/.sillyspec/docs/backend/modules/daemon.changelog.md
+index d4d2d54bd..7a9e9b10e 100644
+--- a/.sillyspec/docs/backend/modules/daemon.changelog.md
++++ b/.sillyspec/docs/backend/modules/daemon.changelog.md
+@@ -57,3 +57,4 @@ created_at: 2026-08-29 22:56:30
+ | 2026-10-21 | 2026-10-21-daemon-zombie-turn | 修复 daemon 会话僵尸轮与打断无效 |
+ | 2026-10-21 | 2026-10-21-session-git-branch | 会话组件底部动态显示当前所在 git 分支 |
+ | 2026-10-22 | 2026-10-22-turn-trigger-metadata-p2 | 轮触发溯源 Phase 2：定时消息接入与 metadata 戳驱动 |
++| 2026-10-22 | 2026-10-22-merge-regression-fixes | 合并回归债收口：grants 闭包与 lease 双流断言 |
+diff --git a/.sillyspec/docs/backend/modules/migrations.md b/.sillyspec/docs/backend/modules/migrations.md
+index 43925f614..ee1cfa39c 100644
+--- a/.sillyspec/docs/backend/modules/migrations.md
++++ b/.sillyspec/docs/backend/modules/migrations.md
+@@ -51,3 +51,20 @@ alembic upgrade head                       # head = 20260817100000（单 head）
+ 
+ - 2026-09-11-agent-log-attribution-refactor task-05 纯数据清库迁移（清归属列 + tool_report 聚合键会话软删 + 两张 links 表全清，DG-04 用户裁决）。**2026-09-13 部署裁决改 no-op**：compose 启动命令 `alembic upgrade head` 自动前滚会把破坏性 DML 在 CLI 升级前自动执行（DG-03 时序为 backend 发布→CLI 升级→手动清库），清空白做；且 downgrade→upgrade 重放会把已重建的正确数据再清一遍。白名单/stop-revision 不可行（与 20260911220000 是兄弟分叉），env 门控有"stamp 后跳过的 DML 永不重跑"死结——DML 抽出到一次性运维脚本 `backend/scripts/reset_agent_log_attribution.py`（dry-run 默认 + `--apply` 单事务 + 前后计数回报）。revision id 保留占位维持图完整（已 stamp 环境不受影响）；downgrade 维持 no-op（D-004@v2）。
+ - 同日早间修订已被本裁决吸收：软删时间戳 SQL `now()`（PG-only）改 Python 侧 bindparams——现落在脚本 `apply_reset` 内，方言无关语义不变。
++
++## 20261022100000_agent_run_change_set_null（2026-10-22）
++
++- 2026-10-22-change-delete-session-history-fix FR-02/FR-04：`agent_runs.change_id`
++  外键 `ON DELETE CASCADE` → `ON DELETE SET NULL`（与 `agent_sessions.change_id`
++  既有语义对齐）。轮级打锚是用量归属，不是生命周期从属；reparse/占坑回滚物理删
++  change 只清锚点，不再级联删除会话 run 与日志。历史事故：会话 bbdbecc9 的 13 轮
++  内容被 CASCADE 抹掉、`turn_count` 虚高。
++- 同迁移做一次**保守** `turn_count` 对账：`expected` = 存在 `channel='user_input'`
++  日志的 run 数（按 run 去重；纯切换轮不落 user_input 不计数，steering 多条挂同一
++  run 只计一次），仅 `turn_count > expected` 时下调；`turn_count <= expected` 一律
++  不动（保留 `origin='tool_report'` 的 0 语义）。downgrade 恢复 CASCADE，对账不回滚。
++- 应用侧兜底：`ChangeService.reparse` 删除环改为两遍式（先收集待删行 → 统一
++  `UPDATE agent_runs SET change_id=NULL` → 再逐行 delete），行为与部署顺序无关，
++  并输出 `change.reparse_detached_runs` 日志（detached_runs 计数）。
++- 数据恢复：`backend/scripts/restore_lost_session_turns.py`（默认 dry-run，`--apply`
++  单事务；确定性 run id + `(run_id, dedup_key)` 幂等；`change_id=NULL`）。
+diff --git a/.sillyspec/docs/multi-agent-platform/modules/backend.changelog.md b/.sillyspec/docs/multi-agent-platform/modules/backend.changelog.md
+index a0a384093..d50429bae 100644
+--- a/.sillyspec/docs/multi-agent-platform/modules/backend.changelog.md
++++ b/.sillyspec/docs/multi-agent-platform/modules/backend.changelog.md
+@@ -87,3 +87,4 @@
+ - 2026-10-22-session-trajectory-third-view | 把会话轨迹从「进度」视图内的第二层呈现开关上移为与「对话 / 进度」并列的第三个顶层视图，同时修复轨…
+ - 2026-10-22-turn-trigger-metadata-p2 | 轮触发溯源 Phase 2：定时消息接入与 metadata 戳驱动
+ - 2026-10-22-merge-test-debt | 合并后测试债清偿：l10n文案与守卫钉子同步
++- 2026-10-22-merge-regression-fixes | 合并回归债收口：grants 闭包与 lease 双流断言
+diff --git a/backend/app/modules/agent/model.py b/backend/app/modules/agent/model.py
+index 9905032c1..0c7bd2cbf 100644
+--- a/backend/app/modules/agent/model.py
++++ b/backend/app/modules/agent/model.py
+@@ -236,11 +236,16 @@ class AgentRun(BaseModel, table=True):
+             nullable=True,
+         ),
+     )
++    # 2026-10-22-change-delete-session-history-fix / FR-02：轮级打锚是**归属**
++    # 语义，不是生命周期从属——change 被物理删除（reparse 磁盘消失 / 占坑回滚）
++    # 只应清空锚点，禁止级联删除会话 run 与日志（历史事故：15:18 删 4 个 change
++    # 级联抹掉 13 轮会话内容，turn_count 仍虚高）。对齐 AgentSession.change_id
++    # 的既有 SET NULL 语义。
+     change_id: uuid.UUID | None = Field(
+         default=None,
+         sa_column=Column(
+             Uuid(as_uuid=True),
+-            ForeignKey("changes.id", ondelete="CASCADE"),
++            ForeignKey("changes.id", ondelete="SET NULL"),
+             nullable=True,
+         ),
+     )
+diff --git a/backend/app/modules/agent/tests/test_agent_run_change_fk.py b/backend/app/modules/agent/tests/test_agent_run_change_fk.py
+new file mode 100644
+index 000000000..00a47970d
+--- /dev/null
++++ b/backend/app/modules/agent/tests/test_agent_run_change_fk.py
+@@ -0,0 +1,28 @@
++"""AgentRun.change_id 外键语义回归（2026-10-22-change-delete-session-history-fix / FR-02）。
++
++历史事故：change 物理删除把锚定 run 与日志级联抹掉。本测试锁死：
++- AgentRun.change_id → changes.id 必须 ON DELETE SET NULL（归属锚点，非生命周期从属）；
++- AgentSession.change_id 的既有 SET NULL 语义保持不变。
++"""
++
++from __future__ import annotations
++
++from app.modules.agent.model import AgentRun, AgentSession
++
++
++def _fk_for(model, column_name: str):
++    fks = list(model.__table__.c[column_name].foreign_keys)
++    assert len(fks) == 1, f"{model.__name__}.{column_name} 应恰有一个外键"
++    return fks[0]
++
++
++def test_agent_run_change_id_fk_is_set_null() -> None:
++    fk = _fk_for(AgentRun, "change_id")
++    assert fk.target_fullname == "changes.id"
++    assert fk.ondelete == "SET NULL"
++
++
++def test_agent_session_change_id_fk_is_set_null() -> None:
++    fk = _fk_for(AgentSession, "change_id")
++    assert fk.target_fullname == "changes.id"
++    assert fk.ondelete == "SET NULL"
+diff --git a/backend/app/modules/change/service.py b/backend/app/modules/change/service.py
+index fca365397..bed9e4db3 100644
+--- a/backend/app/modules/change/service.py
++++ b/backend/app/modules/change/service.py
+@@ -18,7 +18,7 @@ from datetime import UTC, datetime, timedelta
+ from pathlib import Path
+ 
+ from fastapi import HTTPException
+-from sqlalchemy import and_, func, or_, select, tuple_
++from sqlalchemy import and_, func, or_, select, tuple_, update
+ from sqlalchemy.exc import IntegrityError
+ from sqlalchemy.ext.asyncio import AsyncSession
+ from sqlmodel import col
+@@ -1750,7 +1750,16 @@ class ChangeService:
+                     tombstone_anchor_keys.add(key)
+         # FR-03a / 审计 A5：删除环收集被删 key，主 commit 后独立短事务批量联动删
+         # progress 收件箱行（见循环后调用点注释）。
++        # 2026-10-22-change-delete-session-history-fix / FR-01：物理删 Change 前
++        # **先显式解绑**锚定 run 的 change_id——轮级打锚是「用量归属」语义，不是
++        # 生命周期从属。历史事故：2026-10-22 会话 bbdbecc9 因 reparse 删 4 个
++        # change，agent_runs.change_id 的 ON DELETE CASCADE 级联抹掉 13 轮 run 与
++        # 全部日志，turn_count 仍虚高。两遍式：先按全部跳过条件收集真正要物理删
++        # 的行，再统一 UPDATE 解绑，最后逐行 delete——避免 autoflush 在任何 UPDATE
++        # 之前先 flush 掉已挂起的 DELETE（那样解绑来不及执行）。DB 侧 FK 同时改为
++        # SET NULL 作第二道保险；本段让行为与部署顺序无关且可观测（detached_runs）。
+         deleted_keys: list[str] = []
++        rows_to_delete: list[tuple[str, Change]] = []
+         for key, row in existing_by_key.items():
+             if key in seen_keys:
+                 continue
+@@ -1783,6 +1792,24 @@ class ChangeService:
+                     change_key=key,
+                 )
+                 continue
++            rows_to_delete.append((key, row))
++
++        if rows_to_delete:
++            from app.modules.agent.model import AgentRun
++
++            detached = await self._session.execute(
++                update(AgentRun)
++                .where(col(AgentRun.change_id).in_([row.id for _, row in rows_to_delete]))
++                .values(change_id=None)
++            )
++            log.info(
++                "change.reparse_detached_runs",
++                workspace_id=str(workspace_id),
++                change_keys=[key for key, _ in rows_to_delete],
++                detached_runs=int(detached.rowcount or 0),
++            )
++
++        for key, row in rows_to_delete:
+             await self._session.delete(row)
+             stats["deleted"] += 1
+             # FR-03a：收集被删 key——Change 行删除的主事务 commit 后，独立短事务
+diff --git a/backend/app/modules/change/tests/test_reparse_delete_preserves_runs.py b/backend/app/modules/change/tests/test_reparse_delete_preserves_runs.py
+new file mode 100644
+index 000000000..c864b8b5e
+--- /dev/null
++++ b/backend/app/modules/change/tests/test_reparse_delete_preserves_runs.py
+@@ -0,0 +1,142 @@
++"""reparse 物理删 change 时保留锚定 run / 日志 / turn_count（FR-01 回归）。
++
++历史事故（2026-10-22 会话 bbdbecc9）：reparse 判定 change 目录消失后物理删除
++``changes`` 行，``agent_runs.change_id`` 的 ``ON DELETE CASCADE`` 级联删除 13 轮
++会话 run 与日志；``turn_count`` 未回退。本测试锁死两遍式删除环的行为：
++删 change 前先把锚定 run 的 ``change_id`` 置 NULL，删行后 run/日志/计数原样保留。
++"""
++
++from __future__ import annotations
++
++import shutil
++import uuid
++from datetime import UTC, datetime
++from pathlib import Path
++
++from sqlalchemy import select
++
++from app.modules.agent.model import AgentRun, AgentRunLog, AgentSession
++from app.modules.change.model import Change
++from app.modules.change.service import ChangeService
++from app.modules.spec_workspace.model import SpecWorkspace
++from app.modules.workspace.model import Workspace
++
++
++async def _make_ws(db_session) -> Workspace:
++    ws = Workspace(
++        id=uuid.uuid4(),
++        name="cascade-protection ws",
++        slug=f"cascade-{uuid.uuid4().hex[:8]}",
++        root_path=f"/tmp/cascade-protection-{uuid.uuid4().hex[:12]}",
++        status="active",
++        component_key="comp",
++    )
++    db_session.add(ws)
++    await db_session.commit()
++    await db_session.refresh(ws)
++    return ws
++
++
++async def _make_spec_ws(db_session, ws: Workspace, spec_root: Path) -> SpecWorkspace:
++    spec_ws = SpecWorkspace(
++        id=uuid.uuid4(),
++        workspace_id=ws.id,
++        spec_root=str(spec_root),
++        strategy="platform-managed",
++        sync_status="clean",
++    )
++    db_session.add(spec_ws)
++    await db_session.commit()
++    await db_session.refresh(spec_ws)
++    return spec_ws
++
++
++def _seed_change(spec_root: Path, key: str, title: str) -> None:
++    d = spec_root / "changes" / key
++    d.mkdir(parents=True, exist_ok=True)
++    (d / "proposal.md").write_text(f"# {title}\n", encoding="utf-8")
++
++
++async def _fetch_change(db_session, ws_id: uuid.UUID, key: str) -> Change | None:
++    return (
++        (
++            await db_session.execute(
++                select(Change).where(
++                    Change.workspace_id == ws_id,
++                    Change.change_key == key,
++                )
++            )
++        )
++        .scalars()
++        .first()
++    )
++
++
++async def test_reparse_physical_delete_keeps_anchored_runs(db_session, tmp_path):
++    """删除磁盘消失的 change：run/日志保留，change_id 置 NULL，turn_count 不变。"""
++    ws = await _make_ws(db_session)
++    spec_root = tmp_path / "spec-root"
++    await _make_spec_ws(db_session, ws, spec_root)
++    key = "2026-10-22-cascade-gone"
++    _seed_change(spec_root, key, "Gone")
++
++    service = ChangeService(db_session)
++    stats, _ = await service.reparse(ws.id)
++    assert stats["created"] == 1
++    change = await _fetch_change(db_session, ws.id, key)
++    assert change is not None
++
++    session = AgentSession(
++        id=uuid.uuid4(),
++        user_id=uuid.uuid4(),
++        provider="claude",
++        status="active",
++        origin="chat",
++        turn_count=2,
++    )
++    db_session.add(session)
++    run_ids = [uuid.uuid4(), uuid.uuid4()]
++    for run_id in run_ids:
++        db_session.add(
++            AgentRun(
++                id=run_id,
++                agent_type="claude_code",
++                provider="claude",
++                status="completed",
++                agent_session_id=session.id,
++                change_id=change.id,
++            )
++        )
++        db_session.add(
++            AgentRunLog(
++                id=uuid.uuid4(),
++                run_id=run_id,
++                timestamp=datetime.now(UTC),
++                channel="user_input",
++                content_redacted="历史用户消息",
++            )
++        )
++    await db_session.commit()
++
++    # 磁盘目录消失 → scoped reparse 物理删除该 change 行
++    shutil.rmtree(spec_root / "changes" / key)
++    stats, _ = await service.reparse(ws.id, scope=[key])
++    assert stats["deleted"] == 1
++    assert await _fetch_change(db_session, ws.id, key) is None
++
++    # run 与日志必须保留；change_id 解绑为 NULL
++    runs = (
++        (await db_session.execute(select(AgentRun).where(AgentRun.id.in_(run_ids)))).scalars().all()
++    )
++    assert len(runs) == 2
++    assert all(run.change_id is None for run in runs)
++    logs = (
++        (await db_session.execute(select(AgentRunLog).where(AgentRunLog.run_id.in_(run_ids))))
++        .scalars()
++        .all()
++    )
++    assert len(logs) == 2
++
++    refreshed = await db_session.get(AgentSession, session.id)
++    assert refreshed is not None
++    assert refreshed.turn_count == 2
+diff --git a/backend/migrations/versions/20261022100000_agent_run_change_set_null.py b/backend/migrations/versions/20261022100000_agent_run_change_set_null.py
+new file mode 100644
+index 000000000..c15df1439
+--- /dev/null
++++ b/backend/migrations/versions/20261022100000_agent_run_change_set_null.py
+@@ -0,0 +1,88 @@
++"""agent_runs.change_id 外键 SET NULL + turn_count 保守对账
++
++Revision ID: 20261022100000
++Revises: a05c84259_merge
++Create Date: 2026-10-22 10:00:00
++
++Change 2026-10-22-change-delete-session-history-fix（FR-02 / FR-04）。
++
++历史事故（2026-10-22 生产会话 bbdbecc9）：reparse 判定 change 目录消失后物理
++删除 ``changes`` 行，``agent_runs.change_id`` 的 ``ON DELETE CASCADE`` 把锚定在
++这些变更上的 13 轮会话 run 及其 ``agent_run_logs`` 级联物理删除；``turn_count``
++只在 inject 时自增、不回退，左栏显示 59 轮与会话内 46 轮不一致。
++
++本迁移做两件事：
++
++1. 把 ``agent_runs.change_id`` 外键从 ``CASCADE`` 改为 ``SET NULL``——轮级打锚
++   是「用量归属」语义，不是生命周期从属；change 物理删除只清锚点，不动会话
++   历史（与 ``AgentSession.change_id`` 既有 SET NULL 语义对齐）。
++2. 保守对账 ``agent_sessions.turn_count``：只在**虚高**时下调，且 expected 只
++   统计存在 ``channel='user_input'`` 日志的 run（纯配置切换轮不落 user_input、
++   不计数；中途 steering 多条 user_input 挂同一 run，按 run 去重）。``turn_count
++   <= expected`` 的行一律不动——保留 ``origin='tool_report'`` 会话的
++   ``turn_count=0`` replay/未续聊语义。
++
++downgrade 恢复 CASCADE；对账为单向数据修复，不回滚（需要历史值时从迁移前备份
++恢复）。
++
++author: zcode-agent
++created_at: 2026-10-22 10:00:00
++"""
++
++from __future__ import annotations
++
++from typing import Sequence
++
++from alembic import op
++
++revision: str = "20261022100000"
++down_revision: str | None = "a05c84259_merge"
++branch_labels: str | Sequence[str] | None = None
++depends_on: str | Sequence[str] | None = None
++
++_FK_NAME = "agent_runs_change_id_fkey"
++
++# 保守对账：仅下调虚高；expected = 有 user_input 日志的 run 数（按 run 去重）。
++_RECONCILE_TURN_COUNT_SQL = """
++UPDATE agent_sessions AS s
++SET turn_count = sub.expected
++FROM (
++    SELECT r.agent_session_id AS sid, count(*) AS expected
++    FROM agent_runs AS r
++    WHERE r.agent_session_id IS NOT NULL
++      AND EXISTS (
++          SELECT 1
++          FROM agent_run_logs AS l
++          WHERE l.run_id = r.id
++            AND l.channel = 'user_input'
++      )
++    GROUP BY r.agent_session_id
++) AS sub
++WHERE s.id = sub.sid
++  AND s.turn_count > sub.expected
++"""
++
++
++def upgrade() -> None:
++    op.drop_constraint(_FK_NAME, "agent_runs", type_="foreignkey")
++    op.create_foreign_key(
++        _FK_NAME,
++        "agent_runs",
++        "changes",
++        ["change_id"],
++        ["id"],
++        ondelete="SET NULL",
++    )
++    op.execute(_RECONCILE_TURN_COUNT_SQL)
++
++
++def downgrade() -> None:
++    op.drop_constraint(_FK_NAME, "agent_runs", type_="foreignkey")
++    op.create_foreign_key(
++        _FK_NAME,
++        "agent_runs",
++        "changes",
++        ["change_id"],
++        ["id"],
++        ondelete="CASCADE",
++    )
+diff --git a/backend/scripts/restore_lost_session_turns.py b/backend/scripts/restore_lost_session_turns.py
+new file mode 100644
+index 000000000..fd33677fe
+--- /dev/null
++++ b/backend/scripts/restore_lost_session_turns.py
+@@ -0,0 +1,599 @@
++"""一次性运维脚本：从引擎原始会话 JSONL 回灌丢失的会话轮次。
++
++背景（2026-10-22 生产事故）：会话 ``bbdbecc9-abea-46a3-b0d9-81c22a582675``
++因 reparse 物理删除 4 个 change 行，``agent_runs.change_id`` 的
++``ON DELETE CASCADE`` 把锚定在这些变更上的 13 轮 run 与日志级联物理删除；
++``agent_sessions.turn_count`` 未回退，左栏显示 59 轮而时间线只剩 46 轮。
++
++根因修复见 ``2026-10-22-change-delete-session-history-fix``（FK 改 SET NULL +
++reparse 删前解绑）。本脚本负责**数据恢复**：从 daemon 机器上的 Claude Code
++原始会话 JSONL（经 ``/api/agent-logs/{id}/messages`` 归一化导出）按 ``turn_id``
++重建 ``agent_runs`` + ``agent_run_logs``。
++
++用法（在 backend/ 目录，或容器内 /app）：
++
++    uv run python scripts/restore_lost_session_turns.py \
++        --session bbdbecc9-abea-46a3-b0d9-81c22a582675 \
++        --jsonl /tmp/recovered_turns_10_22.jsonl \
++        --turn-ids 10-22
++
++    # 确认计划无误后加 --apply 真正写库
++    uv run python scripts/restore_lost_session_turns.py ... --turn-ids 10-22 --apply
++
++幂等：run id = uuid5(session_id, turn_id)，日志 dedup_key =
++``restore:{turn}:{idx}:{seq}:{channel}``，重复执行只补缺不重复插入。
++
++映射与线上 daemon 上报格式对齐（``_persist_agent_event``）：
++``user_input``→``user_input``；``reply``→``stdout`` ``[ASSISTANT] …``；
++``thinking``→``stdout`` ``[THINKING] …``；``tool_use``→``stdout``
++``[TOOL_USE] …`` + ``tool_call`` JSON；``tool_result``→``stdout``
++``[TOOL_RESULT] …``。回灌 run 的 ``change_id`` 恒为 NULL（历史轮不再被任何
++change 删除波及），``metadata.restored_from`` 标记来源便于回收。
++"""
++
++from __future__ import annotations
++
++import argparse
++import asyncio
++import importlib
++import json
++import sys
++import uuid
++from collections import defaultdict
++from datetime import UTC, datetime
++from pathlib import Path
++from typing import Any
++
++# scripts/ 不是包：直接执行时 sys.path[0] 是 scripts 目录，`import app` 不可达
++# （对齐 reset_agent_log_attribution.py 先例）。
++sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
++
++from sqlalchemy import distinct, func, select
++from sqlalchemy.ext.asyncio import AsyncSession
++from sqlmodel import col
++
++from app.modules.agent.model import AgentRun, AgentRunLog, AgentSession
++from app.modules.agent.tool_kind import classify_tool_kind
++
++# 独立进程只 import agent 模块时，AgentRun/AgentSession 外键指向的目标表
++# （tasks / worktree_leases / changes / daemon_runtimes / daemon_task_leases /
++# agent_profiles / tool_policies 等）不在 SQLAlchemy metadata，flush 排序会抛
++# NoReferencedTableError（生产实测缺一个报一个，逐个补不可维护）。对齐
++# migrations/env.py 的 eager import 清单全量注册——env.py 新增模型模块时此处
++# 同步追加。SQLAlchemy 在 flush 时才解析 FK 目标表，故循环置于 import 之后即可。
++_MODEL_MODULES: tuple[str, ...] = (
++    "app.modules.admin.model",
++    "app.modules.agent.model",
++    "app.modules.agent.profile.model",
++    "app.modules.auth.model",
++    "app.modules.change.model",
++    "app.modules.daemon.model",
++    "app.modules.daemon.audit.model",
++    "app.modules.daemon.grants.model",
++    "app.modules.file.model",
++    "app.modules.git_gateway.model",
++    "app.modules.git_identity.model",
++    "app.modules.incident.model",
++    "app.modules.llm_provider.model",
++    "app.modules.mcp_gateway.model",
++    "app.modules.mcp_registry.model",
++    "app.modules.notification.model",
++    "app.modules.platform_sync.model",
++    "app.modules.ppm.kanban.model",
++    "app.modules.ppm.plan.model",
++    "app.modules.ppm.problem.model",
++    "app.modules.ppm.project.model",
++    "app.modules.ppm.task.model",
++    "app.modules.release.model",
++    "app.modules.scan_docs.conflict_model",
++    "app.modules.scan_docs.model",
++    "app.modules.settings.model",
++    "app.modules.skill_source.model",
++    "app.modules.skills.model",
++    "app.modules.spec_profile.model",
++    "app.modules.spec_workspace.model",
++    "app.modules.task.model",
++    "app.modules.tool_gateway.model",
++    "app.modules.tool_gateway.tool_policy",
++    "app.modules.workflow.model",
++    "app.modules.workspace.member_runtimes.model",
++    "app.modules.workspace.model",
++    "app.modules.worktree.model",
++)
++for _module_name in _MODEL_MODULES:
++    importlib.import_module(_module_name)
++
++RESTORE_MARKER = "agent-log-jsonl"
++RESTORE_NAMESPACE = uuid.UUID("7f0b2f4e-5c1d-4a8e-9f3c-2b6a1d8e4c70")
++CONTENT_MAX = 50_000
++THINKING_MAX = 20_000
++
++
++def parse_turn_ids(spec: str) -> set[int]:
++    """解析 ``10-22`` / ``10,12,15`` / ``10-12,15`` 形态的轮次集合。"""
++    turn_ids: set[int] = set()
++    for part in spec.split(","):
++        part = part.strip()
++        if not part:
++            continue
++        if "-" in part:
++            start, end = part.split("-", 1)
++            first, last = int(start), int(end)
++            if last < first:
++                raise ValueError(f"轮次区间非法：{part}")
++            turn_ids.update(range(first, last + 1))
++        else:
++            turn_ids.add(int(part))
++    if not turn_ids:
++        raise ValueError("--turn-ids 不能为空")
++    return turn_ids
++
++
++def load_messages(path: Path) -> list[dict[str, Any]]:
++    """读取归一化 agent-log JSONL（每行一条消息），保持文件内既有顺序。"""
++    messages: list[dict[str, Any]] = []
++    with path.open(encoding="utf-8") as fh:
++        for line_no, raw in enumerate(fh, 1):
++            raw = raw.strip()
++            if not raw:
++                continue
++            try:
++                item = json.loads(raw)
++            except json.JSONDecodeError as exc:
++                raise ValueError(f"{path}:{line_no} JSON 解析失败：{exc}") from exc
++            if isinstance(item, dict):
++                messages.append(item)
++    if not messages:
++        raise ValueError(f"{path} 没有可用消息")
++    return messages
++
++
++def group_turns(
++    messages: list[dict[str, Any]], turn_ids: set[int]
++) -> dict[int, list[dict[str, Any]]]:
++    """按 ``turn_id`` 分组并只保留目标轮次；文件顺序即轮内顺序。"""
++    grouped: dict[int, list[dict[str, Any]]] = defaultdict(list)
++    for message in messages:
++        try:
++            turn_id = int(message.get("turn_id"))
++        except (TypeError, ValueError):
++            continue
++        if turn_id in turn_ids:
++            grouped[turn_id].append(message)
++    missing = sorted(turn_ids - grouped.keys())
++    if missing:
++        raise ValueError(f"JSONL 中缺少轮次：{missing}")
++    return dict(grouped)
++
++
++def _parse_ts(value: Any) -> datetime:
++    if isinstance(value, str) and value:
++        try:
++            return datetime.fromisoformat(value.replace("Z", "+00:00")).astimezone(UTC)
++        except ValueError:
++            pass
++    return datetime.now(UTC)
++
++
++def _json_args(raw: Any) -> dict[str, Any] | None:
++    if isinstance(raw, dict):
++        return raw
++    if isinstance(raw, str):
++        try:
++            parsed = json.loads(raw)
++        except (json.JSONDecodeError, TypeError):
++            return None
++        return parsed if isinstance(parsed, dict) else None
++    return None
++
++
++def _run_id_for(session_id: uuid.UUID, turn_id: int) -> uuid.UUID:
++    return uuid.uuid5(RESTORE_NAMESPACE, f"{session_id}:restore:{turn_id}")
++
++
++def _agent_event(
++    *,
++    event_type: str,
++    content: str,
++    seq: Any,
++    ts: datetime,
++    engine_session_id: str | None,
++    tool_name: str | None = None,
++    call_id: str | None = None,
++) -> dict[str, Any]:
++    event: dict[str, Any] = {
++        "event_type": event_type,
++        "type": event_type,
++        "content": content,
++        "seq": seq if isinstance(seq, int) else None,
++        "timestamp": ts.isoformat().replace("+00:00", "Z"),
++        "session_id": engine_session_id,
++        "depth": 0,
++        "override": True,
++        "metadata": {"restored": True},
++    }
++    if tool_name:
++        event["tool_name"] = tool_name
++    if call_id:
++        event["call_id"] = call_id
++    return event
++
++
++def build_turn_rows(
++    *,
++    session_id: uuid.UUID,
++    engine_session_id: str | None,
++    turn_id: int,
++    messages: list[dict[str, Any]],
++) -> tuple[dict[str, Any], list[dict[str, Any]]]:
++    """纯函数：把一轮归一化消息映射为 run kwargs 与 log kwargs 列表。"""
++    run_id = _run_id_for(session_id, turn_id)
++    log_rows: list[dict[str, Any]] = []
++    tool_kinds: dict[str, str] = {}
++    timestamps: list[datetime] = []
++    reply_count = 0
++
++    for idx, message in enumerate(messages):
++        kind = message.get("kind")
++        ts = _parse_ts(message.get("ts"))
++        timestamps.append(ts)
++        seq = message.get("seq")
++        text = message.get("text")
++        text = text if isinstance(text, str) else ""
++        tool_use_id = message.get("tool_use_id")
++        tool_use_id = tool_use_id if isinstance(tool_use_id, str) else None
++        dedup = f"restore:{turn_id}:{idx}:{seq}:{kind}"
++        base = {
++            "run_id": run_id,
++            "timestamp": ts,
++            "parent_tool_use_id": None,
++            "subagent_type": None,
++            "depth": 0,
++            "segment_id": None,
++        }
++
++        if kind == "user_input":
++            log_rows.append(
++                {
++                    **base,
++                    "channel": "user_input",
++                    "content_redacted": text[:CONTENT_MAX],
++                    "dedup_key": dedup,
++                    "tool_kind": None,
++                    "edit_patch": None,
++                    "metadata_": None,
++                }
++            )
++            continue
++
++        if kind == "reply":
++            reply_count += 1
++            log_rows.append(
++                {
++                    **base,
++                    "channel": "stdout",
++                    "content_redacted": ("[ASSISTANT] " + text)[:CONTENT_MAX],
++                    "dedup_key": dedup,
++                    "tool_kind": None,
++                    "edit_patch": None,
++                    "metadata_": {
++                        "agent_event": _agent_event(
++                            event_type="text",
++                            content=text,
++                            seq=seq,
++                            ts=ts,
++                            engine_session_id=engine_session_id,
++                        )
++                    },
++                }
++            )
++            continue
++
++        if kind == "thinking":
++            log_rows.append(
++                {
++                    **base,
++                    "channel": "stdout",
++                    "content_redacted": ("[THINKING] " + text[:THINKING_MAX])[:CONTENT_MAX],
++                    "dedup_key": dedup,
++                    "tool_kind": None,
++                    "edit_patch": None,
++                    "metadata_": {
++                        "agent_event": _agent_event(
++                            event_type="thinking",
++                            content=text[:THINKING_MAX],
++                            seq=seq,
++                            ts=ts,
++                            engine_session_id=engine_session_id,
++                        )
++                    },
++                }
++            )
++            continue
++
++        if kind == "tool_use":
++            name = message.get("tool_name")
++            name = name if isinstance(name, str) and name else "tool"
++            raw_input = message.get("tool_input")
++            input_text = (
++                raw_input
++                if isinstance(raw_input, str)
++                else json.dumps(raw_input, ensure_ascii=False)
++            )
++            args = _json_args(raw_input)
++            tool_kind = classify_tool_kind(name, args)
++            if tool_use_id and tool_kind:
++                tool_kinds[tool_use_id] = tool_kind
++            call_payload = {
++                "tool": name,
++                "args": args if args is not None else {"raw": input_text},
++                "tool_use_id": tool_use_id,
++            }
++            # 1) 旧轨文本行（stdout [TOOL_USE] …）
++            log_rows.append(
++                {
++                    **base,
++                    "channel": "stdout",
++                    "content_redacted": (f"[TOOL_USE] {name}: {input_text}")[:CONTENT_MAX],
++                    "dedup_key": dedup + ":stdout",
++                    "tool_kind": None,
++                    "edit_patch": None,
++                    "metadata_": {
++                        "agent_event": _agent_event(
++                            event_type="tool_use",
++                            content=json.dumps(call_payload, ensure_ascii=False),
++                            seq=seq,
++                            ts=ts,
++                            engine_session_id=engine_session_id,
++                            tool_name=name,
++                            call_id=tool_use_id,
++                        )
++                    },
++                }
++            )
++            # 2) tool_call 结构化卡（前端工具卡/筛选消费）
++            log_rows.append(
++                {
++                    **base,
++                    "channel": "tool_call",
++                    "content_redacted": json.dumps(call_payload, ensure_ascii=False)[:CONTENT_MAX],
++                    "dedup_key": dedup + ":tool_call",
++                    "tool_kind": tool_kind,
++                    "edit_patch": None,
++                    "metadata_": {
++                        "agent_event": _agent_event(
++                            event_type="tool_use",
++                            content=json.dumps(call_payload, ensure_ascii=False),
++                            seq=seq,
++                            ts=ts,
++                            engine_session_id=engine_session_id,
++                            tool_name=name,
++                            call_id=tool_use_id,
++                        )
++                    },
++                }
++            )
++            continue
++
++        if kind == "tool_result":
++            result_text = message.get("tool_result")
++            result_text = result_text if isinstance(result_text, str) else text
++            log_rows.append(
++                {
++                    **base,
++                    "channel": "stdout",
++                    "content_redacted": ("[TOOL_RESULT] " + result_text)[:CONTENT_MAX],
++                    "dedup_key": dedup,
++                    "tool_kind": tool_kinds.get(tool_use_id or ""),
++                    "edit_patch": message.get("edit_patch"),
++                    "metadata_": {
++                        "agent_event": _agent_event(
++                            event_type="tool_result",
++                            content=result_text,
++                            seq=seq,
++                            ts=ts,
++                            engine_session_id=engine_session_id,
++                            call_id=tool_use_id,
++                        )
++                    },
++                }
++            )
++            continue
++
++    first_ts = min(timestamps) if timestamps else datetime.now(UTC)
++    last_ts = max(timestamps) if timestamps else first_ts
++    model = next(
++        (m.get("model") for m in messages if isinstance(m.get("model"), str) and m.get("model")),
++        None,
++    )
++    run_kwargs: dict[str, Any] = {
++        "id": run_id,
++        "agent_type": "claude_code",
++        "provider": None,  # 调用方用会话 provider 覆盖
++        "model": model,
++        "status": "completed",
++        "spec_strategy": "interactive",
++        "agent_session_id": session_id,
++        "change_id": None,
++        "created_at": first_ts,
++        "started_at": first_ts,
++        "finished_at": last_ts,
++        "num_turns": reply_count,
++        "metadata_": {"restored_from": RESTORE_MARKER, "restored_turn_id": turn_id},
++    }
++    return run_kwargs, log_rows
++
++
++async def expected_turn_count(db: AsyncSession, session_id: uuid.UUID) -> int:
++    """expected = 存在 user_input 日志的 run 数（按 run 去重）。"""
++    stmt = (
++        select(func.count(distinct(AgentRun.id)))
++        .select_from(AgentRun)
++        .where(
++            AgentRun.agent_session_id == session_id,
++            select(AgentRunLog.id)
++            .where(
++                AgentRunLog.run_id == AgentRun.id,
++                AgentRunLog.channel == "user_input",
++            )
++            .exists(),
++        )
++    )
++    return int((await db.execute(stmt)).scalar_one() or 0)
++
++
++async def reconcile_turn_count(
++    db: AsyncSession, session: AgentSession, *, exact: bool = False
++) -> tuple[int, int]:
++    """返回 (before, after)。exact=False 只下调虚高；exact=True 对齐为 expected。"""
++    before = int(session.turn_count or 0)
++    expected = await expected_turn_count(db, session.id)
++    after = expected if exact else min(before, expected)
++    session.turn_count = after
++    db.add(session)
++    return before, after
++
++
++async def restore_turns(
++    db: AsyncSession,
++    session: AgentSession,
++    grouped: dict[int, list[dict[str, Any]]],
++    *,
++    apply: bool,
++    exact_turn_count: bool = True,
++) -> dict[str, int]:
++    """把分组后的轮次写入 DB。dry-run 只统计；apply 时单事务提交。
++
++    ``session.info["audit_context"]`` 显式登记 actor/workspace，让审计钩子把
++    回灌行记入 ``audit_logs``（可追溯）。
++    """
++    db.info["audit_context"] = {
++        "actor_id": session.user_id,
++        "workspace_id": session.workspace_id,
++    }
++    stats = {
++        "turns": len(grouped),
++        "runs_new": 0,
++        "runs_existing": 0,
++        "logs_new": 0,
++        "logs_existing": 0,
++    }
++    prepared: list[tuple[dict[str, Any], list[dict[str, Any]]]] = []
++    for turn_id in sorted(grouped):
++        run_kwargs, log_rows = build_turn_rows(
++            session_id=session.id,
++            engine_session_id=session.agent_session_id,
++            turn_id=turn_id,
++            messages=grouped[turn_id],
++        )
++        run_kwargs["provider"] = session.provider
++        prepared.append((run_kwargs, log_rows))
++        existing_run = await db.get(AgentRun, run_kwargs["id"])
++        if existing_run is None:
++            stats["runs_new"] += 1
++            if apply:
++                db.add(AgentRun(**run_kwargs))
++        else:
++            stats["runs_existing"] += 1
++
++    if apply and stats["runs_new"]:
++        await db.flush()
++
++    for run_kwargs, log_rows in prepared:
++        run_id = run_kwargs["id"]
++        existing_keys = set(
++            (
++                await db.execute(
++                    select(AgentRunLog.dedup_key).where(
++                        AgentRunLog.run_id == run_id,
++                        col(AgentRunLog.dedup_key).is_not(None),
++                    )
++                )
++            )
++            .scalars()
++            .all()
++        )
++        for log_kwargs in log_rows:
++            if log_kwargs["dedup_key"] in existing_keys:
++                stats["logs_existing"] += 1
++                continue
++            stats["logs_new"] += 1
++            if apply:
++                log_kwargs["id"] = uuid.uuid4()
++                db.add(AgentRunLog(**log_kwargs))
++
++    if apply:
++        await db.flush()
++        _before, after = await reconcile_turn_count(db, session, exact=exact_turn_count)
++        await db.commit()
++        stats["turn_count_after"] = after
++    else:
++        stats["turn_count_after"] = int(session.turn_count or 0)
++    return stats
++
++
++def _print_stats(title: str, stats: dict[str, int]) -> None:
++    print(title)
++    for key in (
++        "turns",
++        "runs_new",
++        "runs_existing",
++        "logs_new",
++        "logs_existing",
++        "turn_count_after",
++    ):
++        if key in stats:
++            print(f"  {key}: {stats[key]}")
++
++
++async def main() -> int:
++    parser = argparse.ArgumentParser(
++        description="从引擎原始会话 JSONL 回灌丢失的会话轮次（默认 dry-run）"
++    )
++    parser.add_argument("--session", required=True, help="目标平台会话 UUID")
++    parser.add_argument("--jsonl", required=True, help="归一化 agent-log JSONL 路径")
++    parser.add_argument("--turn-ids", required=True, help="轮次集合，如 10-22 或 10,12,15")
++    parser.add_argument("--apply", action="store_true", help="实际写库（缺省只打印计划）")
++    parser.add_argument(
++        "--no-sync-turn-count",
++        action="store_true",
++        help="apply 后不把目标会话 turn_count 对齐为实际值（默认对齐）",
++    )
++    args = parser.parse_args()
++
++    try:
++        session_id = uuid.UUID(args.session)
++        turn_ids = parse_turn_ids(args.turn_ids)
++        messages = load_messages(Path(args.jsonl))
++        grouped = group_turns(messages, turn_ids)
++    except (ValueError, OSError) as exc:
++        print(f"参数/数据错误：{exc}", file=sys.stderr)
++        return 2
++
++    from app.core.db import get_session_factory
++
++    factory = get_session_factory()
++    async with factory() as db:
++        session = await db.get(AgentSession, session_id)
++        if session is None or session.deleted_at is not None:
++            print(f"目标会话不存在或已软删：{session_id}", file=sys.stderr)
++            return 2
++        stats = await restore_turns(
++            db,
++            session,
++            grouped,
++            apply=args.apply,
++            exact_turn_count=not args.no_sync_turn_count,
++        )
++
++    _print_stats(
++        "dry-run 计划（未改动任何数据）" if not args.apply else "已执行回灌",
++        stats,
++    )
++    if not args.apply:
++        print("\n确认无误后加 --apply 执行（单事务）。")
++    return 0
++
++
++if __name__ == "__main__":
++    raise SystemExit(asyncio.run(main()))
+diff --git a/backend/tests/test_align_platform_change_events_migration.py b/backend/tests/test_align_platform_change_events_migration.py
+index 3fc438a9a..f7e49d3c1 100644
+--- a/backend/tests/test_align_platform_change_events_migration.py
++++ b/backend/tests/test_align_platform_change_events_migration.py
+@@ -118,8 +118,10 @@ class TestMigrationStructure:
+         # 20261021130000（spec_file_manifest.landing_version 印章列+索引——
+         # 2026-10-21-spec-manifest-incremental task-01 增量清单游标）→
+         # a05c84259_merge（alembic merge 收拢 20261021_user_default ×
+-        # 20261021130000 双头，无 DDL——origin 侧 agent-profile-slim-default 并行迁移分叉收拢）。
+-        assert heads[0] == "a05c84259_merge"  # 双头收拢 merge 成为新 head（注释链续写）
++        # 20261021130000 双头，无 DDL——origin 侧 agent-profile-slim-default 并行迁移分叉收拢）→
++        # 20261022100000（agent_runs.change_id FK CASCADE→SET NULL + turn_count
++        # 保守对账——2026-10-22-change-delete-session-history-fix FR-02/FR-04）。
++        assert heads[0] == "20261022100000"  # 链尾锚随主线新迁移前移（注释链续写）
+ 
+     def test_revision_chain(self) -> None:
+         mod = _load_migration_module()
+diff --git a/backend/tests/test_restore_lost_session_turns.py b/backend/tests/test_restore_lost_session_turns.py
+new file mode 100644
+index 000000000..7e180d440
+--- /dev/null
++++ b/backend/tests/test_restore_lost_session_turns.py
+@@ -0,0 +1,221 @@
++"""回灌脚本纯函数与幂等/对账语义测试（FR-03 / FR-04）。
++
++覆盖：
++- ``--turn-ids`` 区间/列表解析；
++- 归一化消息 → run/log 映射（channel、文本前缀、tool_call JSON、tool_kind 继承、
++  change_id=NULL、确定性 run id）；
++- ``restore_turns`` 重复执行不重复插入；
++- ``turn_count`` 对账：保守模式仅下调虚高，exact 模式对齐实际值。
++"""
++
++from __future__ import annotations
++
++import importlib.util
++import uuid
++from pathlib import Path
++
++import pytest
++from sqlalchemy import func, select
++
++from app.modules.agent.model import AgentRun, AgentRunLog, AgentSession
++
++_SCRIPT_PATH = Path(__file__).resolve().parents[1] / "scripts" / "restore_lost_session_turns.py"
++_spec = importlib.util.spec_from_file_location("restore_lost_session_turns", _SCRIPT_PATH)
++assert _spec is not None and _spec.loader is not None
++restore_script = importlib.util.module_from_spec(_spec)
++_spec.loader.exec_module(restore_script)
++
++pytestmark = pytest.mark.anyio
++
++
++@pytest.fixture
++def anyio_backend() -> str:
++    return "asyncio"
++
++
++def _messages(turn_id: int = 1) -> list[dict]:
++    return [
++        {
++            "turn_id": turn_id,
++            "seq": 1,
++            "kind": "user_input",
++            "text": "帮我看看",
++            "ts": "2026-10-22T05:12:33.000Z",
++        },
++        {
++            "turn_id": turn_id,
++            "seq": 2,
++            "kind": "thinking",
++            "text": "先看目录",
++            "ts": "2026-10-22T05:12:34.000Z",
++        },
++        {
++            "turn_id": turn_id,
++            "seq": 3,
++            "kind": "tool_use",
++            "tool_name": "Bash",
++            "tool_input": '{"command":"ls"}',
++            "tool_use_id": "call_1",
++            "ts": "2026-10-22T05:12:35.000Z",
++        },
++        {
++            "turn_id": turn_id,
++            "seq": 4,
++            "kind": "tool_result",
++            "tool_result": "a.txt",
++            "tool_use_id": "call_1",
++            "ts": "2026-10-22T05:12:36.000Z",
++        },
++        {
++            "turn_id": turn_id,
++            "seq": 5,
++            "kind": "reply",
++            "text": "看完了",
++            "ts": "2026-10-22T05:12:37.000Z",
++        },
++    ]
++
++
++def _session(turn_count: int = 0) -> AgentSession:
++    return AgentSession(
++        id=uuid.uuid4(),
++        user_id=uuid.uuid4(),
++        provider="claude",
++        status="active",
++        origin="chat",
++        agent_session_id="engine-session-x",
++        turn_count=turn_count,
++    )
++
++
++def test_parse_turn_ids_range_and_list() -> None:
++    assert restore_script.parse_turn_ids("10-12,15") == {10, 11, 12, 15}
++    with pytest.raises(ValueError):
++        restore_script.parse_turn_ids("12-10")
++
++
++def test_build_turn_rows_maps_all_kinds() -> None:
++    session_id = uuid.uuid4()
++    run_kwargs, logs = restore_script.build_turn_rows(
++        session_id=session_id,
++        engine_session_id="engine-session-x",
++        turn_id=1,
++        messages=_messages(),
++    )
++    assert run_kwargs["change_id"] is None
++    assert run_kwargs["status"] == "completed"
++    assert run_kwargs["metadata_"]["restored_from"] == restore_script.RESTORE_MARKER
++    assert run_kwargs["num_turns"] == 1
++    # 确定性 run id
++    again, _ = restore_script.build_turn_rows(
++        session_id=session_id,
++        engine_session_id="engine-session-x",
++        turn_id=1,
++        messages=_messages(),
++    )
++    assert again["id"] == run_kwargs["id"]
++
++    channels = [row["channel"] for row in logs]
++    assert channels.count("user_input") == 1
++    assert channels.count("tool_call") == 1
++    assert channels.count("stdout") == 4
++
++    by_channel: dict[str, list[dict]] = {}
++    for row in logs:
++        by_channel.setdefault(row["channel"], []).append(row)
++    assert by_channel["user_input"][0]["content_redacted"] == "帮我看看"
++    assert by_channel["stdout"][0]["content_redacted"].startswith("[THINKING]")
++    tool_use_stdout = next(
++        row for row in by_channel["stdout"] if row["content_redacted"].startswith("[TOOL_USE]")
++    )
++    assert tool_use_stdout["tool_kind"] is None
++    tool_call = by_channel["tool_call"][0]
++    assert tool_call["tool_kind"] == "bash"
++    assert '"tool": "Bash"' in tool_call["content_redacted"]
++    result_row = next(
++        row for row in by_channel["stdout"] if row["content_redacted"].startswith("[TOOL_RESULT]")
++    )
++    assert result_row["tool_kind"] == "bash"  # 从配对 tool_use 继承
++    reply_row = next(
++        row for row in by_channel["stdout"] if row["content_redacted"].startswith("[ASSISTANT]")
++    )
++    assert reply_row["metadata_"]["agent_event"]["event_type"] == "text"
++
++
++async def test_restore_is_idempotent(db_session) -> None:
++    session = _session()
++    db_session.add(session)
++    await db_session.commit()
++
++    grouped = {1: _messages()}
++    first = await restore_script.restore_turns(db_session, session, grouped, apply=True)
++    assert first["runs_new"] == 1
++    assert first["logs_new"] == 6
++    assert first["turn_count_after"] == 1
++
++    second = await restore_script.restore_turns(db_session, session, grouped, apply=True)
++    assert second["runs_new"] == 0
++    assert second["runs_existing"] == 1
++    assert second["logs_new"] == 0
++    assert second["logs_existing"] == 6
++
++    run_count = (
++        await db_session.execute(
++            select(func.count(AgentRun.id)).where(AgentRun.agent_session_id == session.id)
++        )
++    ).scalar_one()
++    log_count = (
++        await db_session.execute(
++            select(func.count(AgentRunLog.id)).where(
++                AgentRunLog.run_id.in_(
++                    select(AgentRun.id).where(AgentRun.agent_session_id == session.id)
++                )
++            )
++        )
++    ).scalar_one()
++    assert run_count == 1
++    assert log_count == 6
++
++    run = (
++        (await db_session.execute(select(AgentRun).where(AgentRun.agent_session_id == session.id)))
++        .scalars()
++        .one()
++    )
++    assert run.change_id is None
++    assert run.metadata_["restored_turn_id"] == 1
++
++
++async def test_reconcile_turn_count_only_lowers_and_exact_mode(db_session) -> None:
++    session = _session(turn_count=5)
++    db_session.add(session)
++    run = AgentRun(
++        id=uuid.uuid4(),
++        agent_type="claude_code",
++        provider="claude",
++        status="completed",
++        agent_session_id=session.id,
++    )
++    db_session.add(run)
++    db_session.add(
++        AgentRunLog(
++            id=uuid.uuid4(),
++            run_id=run.id,
++            timestamp=restore_script._parse_ts("2026-10-22T05:12:33Z"),
++            channel="user_input",
++            content_redacted="hi",
++        )
++    )
++    await db_session.commit()
++
++    before, after = await restore_script.reconcile_turn_count(db_session, session)
++    assert (before, after) == (5, 1)
++    assert session.turn_count == 1
++
++    # 已经低于 expected：保守模式不动（tool_report 0 语义）
++    session.turn_count = 0
++    before, after = await restore_script.reconcile_turn_count(db_session, session)
++    assert (before, after) == (0, 0)
++
++    # exact 模式对齐实际值
++    before, after = await restore_script.reconcile_turn_count(db_session, session, exact=True)
++    assert (before, after) == (0, 1)
+diff --git a/docs/releases/2026-10-22-005-c2832fd.md b/docs/releases/2026-10-22-005-c2832fd.md
+index 6aa9b3526..5c1194276 100644
+--- a/docs/releases/2026-10-22-005-c2832fd.md
++++ b/docs/releases/2026-10-22-005-c2832fd.md
+@@ -299,5 +299,5 @@ commits:
+ - alembic 启动迁移成功：`c3f8a1d6e2b4 → 20261021_user_default → a05c84259_merge`，`Application startup complete`
+ - `SPEC_MIRROR_WRITE_OK`（spec 镜像目录对容器用户可写）
+ - daemon 分发三面一致：后端直出与公网 nginx 的 `latest.json` 均为 `c2832fdf-20261022160329`（bundle 0.2.0 随镜像分发）
+-- 本地质量门：frontend tsc 0 错 + 5438 用例绿；daemon 5030 用例绿（含握手同源断言修复）；backend 合并态首轮全量 9058 通过（3 稳定红为既有测试债、已清偿并定向复验 149P 绿；2 笔 lease 用例为间歇假败、隔离复跑 13/13 绿），清偿后全量复跑零失败进行中
++- 本地质量门：frontend tsc 0 错 + 5438 用例绿；daemon 5030 用例绿；backend 全量收敛绿——9084 passed / 0 failed / 0 errors（修复账：l10n 两文案中文化、AgentSession 字段钉子补 title_fallback、daemon 握手版本断言同源、grants 建表 FK 闭包补 users→agent_profiles 新外键、lease 降级警告改 structlog capture_logs 语义断言）
+ - 本次为双线合并部署：本地 45 提交 × origin 38 提交，87 提交一次上线

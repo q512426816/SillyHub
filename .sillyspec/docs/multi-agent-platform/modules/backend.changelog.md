@@ -88,3 +88,4 @@
 - 2026-10-22-turn-trigger-metadata-p2 | 轮触发溯源 Phase 2：定时消息接入与 metadata 戳驱动
 - 2026-10-22-merge-test-debt | 合并后测试债清偿：l10n文案与守卫钉子同步
 - 2026-10-22-merge-regression-fixes | 合并回归债收口：grants 闭包与 lease 双流断言
+- 2026-10-22-change-delete-session-history-fix | 变更删除不再级联删会话轮次并恢复丢失轮次

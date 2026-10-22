@@ -1,0 +1,41 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-22-change-delete-session-history-fix",
+  "reviewer": "subagent",
+  "verdict": "PASS",
+  "reviewedAgainst": "a0af14684ac4433ef87f97e4f33906c9e5e9f6f4",
+  "findings": [
+    {
+      "severity": "P3",
+      "title": "盲维问4「作用域」作答与迁移对账代码不符：迁移的 turn_count 对账是全库 UPDATE，非 workspace 限定",
+      "evidence": "design.md 盲维问4 答「解绑与对账均限定在候选 change id 集/单 workspace」，但 _RECONCILE_TURN_COUNT_SQL 无 workspace 过滤、对全库 agent_sessions 执行（生产回执 UPDATE 3 行印证）；同文档「风险与死路」已如实披露全局性并以备份+保守下调缓解，行为本身经裁决可接受，仅盲维表述失准。",
+      "location": "backend/migrations/versions/20261022100000_agent_run_change_set_null.py:54-74（对照 design.md:45 与 design.md:53）"
+    },
+    {
+      "severity": "P3",
+      "title": "盲维问1称回灌「按 turn_id + seq/ts 稳定排序」，实现实为保留文件既有顺序（无显式排序）",
+      "evidence": "group_turns docstring 明言「文件顺序即轮内顺序」，代码不做 seq/ts 排序，稳定性依赖导出端点（/api/agent-logs/{id}/messages）顺序可靠；生产实测 13 轮/770 日志顺序正确且幂等复跑零新增，数据正确性未受影响，仅设计表述强于代码保证。",
+      "location": "backend/scripts/restore_lost_session_turns.py:151-166（对照 design.md:33）"
+    },
+    {
+      "severity": "P3",
+      "title": "盲维问2称并发回灌时唯一索引使败方「冲突跳过」，实际败方收 IntegrityError 整事务回滚而非优雅跳过",
+      "evidence": "脚本用 SELECT 既有 dedup_key 预检后普通 INSERT（无 ON CONFLICT DO NOTHING），并发下败方在 flush/commit 抛 IntegrityError、单事务原子回滚——无重复行、复跑幂等成功，数据正确性保持；design 同段已声明生产单实例+dry-run 先行，仅措辞美化。",
+      "location": "backend/scripts/restore_lost_session_turns.py:491-532（对照 design.md:37）"
+    },
+    {
+      "severity": "P3",
+      "title": "requirements FR-03 场景「写入 13 个 run 与 571 条日志」与实际 770 条不一致（需求场景数字未随 tool_use 双写口径同步）",
+      "evidence": "映射条款本身要求 tool_use 双写（stdout [TOOL_USE] + tool_call JSON），故 apply 实写 770 条（571 源段 + 199 双写）；prod-recovery-receipt 已显式解释口径差并实证 turn_count=59，属需求文本内部数字陈旧，非实现偏差。",
+      "location": ".sillyspec/changes/2026-10-22-change-delete-session-history-fix/requirements.md:55（对照 prod-recovery-receipt.md:21-23）"
+    }
+  ],
+  "dimensionNotes": {
+    "乱序": "finding",
+    "并发": "finding",
+    "切换": "ok",
+    "作用域": "finding"
+  },
+  "notes": "复跑口径（HEAD=a0af14684，cd backend + .venv）：指定 8 文件测试面 41 passed / 0 failed（8.71s，仅既知 DeprecationWarning），未整体重跑全量（收口已亲测 127s 全绿）。\n\n【检查单1 FR↔实现↔测试三方一致】FR-01：reparse 删除环两遍式显式解绑（service.py:1761-1818：先收集 rows_to_delete → 统一 UPDATE agent_runs SET change_id=NULL → 逐行 delete → 同事务 commit）+ 占坑回滚路径由 DB FK SET NULL 兜底（proxy.py:256-277 裸 DELETE Change）；绑定测试 test_reparse_delete_preserves_runs.py::test_reparse_physical_delete_keeps_anchored_runs 真实存在，断言删后 run=2 保留、change_id 全 NULL、日志=2、turn_count=2 不变、墓碑/scope 外零动作由 test_reparse_guard.py/test_reparse_scoped_zero_delete.py 回归锁定。FR-02：model.py:244-251 ondelete=\"SET NULL\" + 迁移 drop/create（downgrade 回 CASCADE）；test_agent_run_change_fk.py 断言 AgentRun.change_id 与 AgentSession.change_id 双 SET NULL。注：测试库 aiosqlite PRAGMA foreign_keys 关闭（proxy.py 注释自证），DB 级 FK 行为无法在自动化测试内点火——应用层解绑被 change_id IS NULL 断言真实覆盖，FK 元数据由模型测试锁定，生产 DB 级行为由回执 pg_constraint 实证，三层拼图完整、可接受。FR-03：脚本 dry-run 默认/--apply 单事务/uuid5 确定性 run id/dedup_key 预检跳过/change_id 恒 NULL/五类 kind 映射+tool_use 双写+metadata.agent_event+原始时间戳全部落地；test_restore_lost_session_turns.py 断言映射（前缀/channel/tool_kind 继承/确定性 id）与二次 apply 0 新增。生产回执：dry-run 13/770 → apply → 幂等复跑 0/0 → 终态 turn_count=runs=expected=59。FR-04：迁移保守对账 SQL（仅 turn_count>expected 下调，expected=有 user_input 日志的 run 数）+脚本 reconcile_turn_count(min 语义)+exact 模式；测试覆盖 59→5→1 下调、0 语义保留 (0,0)、exact 对齐。\n\n【检查单2 盲维四问】乱序=finding（P3，见 findings）；并发=finding（P3，见 findings），两遍式 reparse 确实避免 autoflush 先 flush DELETE——UPDATE 在任何 session.delete() 之前执行，代码顺序无懈可击；切换=ok（回灌只插 completed run 不产活跃轮、单事务原子、迁移 DDL 低峰+备份、生产实测原子失败无残留）；作用域=finding（P3，解绑与回灌限定属实、迁移对账全局与问4表述不符但风险节已披露）。\n\n【检查单3 披露边界裁决】(a) SET NULL 后用量归属漂移：可接受——已核实 usage_service._change_run_ids 的 linked 分支带 change_id IS NULL 谓词，无锚 run 经 change_session_links 兜底归属，按 run 去重不重复计数，且 change 物理删除低频，语义已在 agent.md/change.md 登记；(b) 回灌格式差异渲染不一致：可接受——严格对齐 platform_sync AgentLogMessageItem 契约（kind 五值/ts/seq/turn_id/tool_input/tool_result/edit_patch 均核对）与 [ASSISTANT]/[THINKING]/[TOOL_USE]/[TOOL_RESULT] 前缀惯例，restored_from 标记可回收，生产 dry-run→apply→时间线 59 轮实证；(c) 迁移对账误伤：可接受——只下调、user_input 口径保 tool_report 0 语义（测试锁定）、迁移前备份 agent_sessions、生产 UPDATE 3 与全库排查一致（仅 bbdbecc9 显著虚高 13）；(d) 放弃方案 A（逐条搬 run）：裁决正确——删除入口多（reparse/占坑回滚/未来新增），DB 语义层根治优于路径枚举；(e) 放弃方案 B（列表接口实时聚合）：裁决正确——每会话子查询性能风险+tool_report turn_count=0 replay 语义被破坏，保留存储列+对账更稳。\n\n【检查单4 防护声明真实性】(1) DB FK SET NULL：真实——model.py:244-251 + 迁移 upgrade + 回执 pg_constraint 实证（生产手工先行，后续 alembic upgrade head 重放为同名同语义 no-op）；(2) 显式解绑 UPDATE：真实——service.py:1800-1804，detached_runs 结构化日志在位；(3) dedup_key 幂等：真实——脚本 SELECT 预检跳过 + ux_agent_run_logs_dedup (run_id, dedup_key) 部分唯一索引（model.py:569-574，PG 兜底）；(4) change_id=NULL：真实——脚本 run_kwargs change_id=None + 测试断言 + 回执 restored_runs=13/with_change=0；(5) 审计 context：真实——db.info[\"audit_context\"]={actor_id, workspace_id} 在 restore_turns 开头登记，audit_hooks._get_audit_context 有 session.info 回退消费链。另核实 _rollback_preempted_change 物理删 Change 行存在（proxy.py:256-277），FR-01 对该路径的承诺由 FK 兜底成立；迁移 FK 命名 agent_runs_change_id_fkey 与 202606180900 原生 sa.ForeignKey 的 PG 默认命名一致且回执实证。\n\n【检查单5 生成物同步】agent.md（+5 行：轮级用量归属锚点语义+守护测试指引）、change.md（scoped reparse 语义勘误为定向删除+两遍式解绑+恢复脚本指引）、migrations.md（20261022100000 迁移记录含保守对账口径）三处与实现逐条相符（5e5906381）；迁移链尾锚测试已前移至 20261022100000（test_align_platform_change_events_migration.py:124），单头/闭环图测试为结构性动态断言不受 head id 硬编码影响。tasks.md 8/8 已勾。评审过程中除本 review.json 外未修改任何文件、无 git 写操作。",
+  "reviewedAt": "2026-10-22T18:22:11+08:00"
+}
