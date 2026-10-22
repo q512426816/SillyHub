@@ -508,8 +508,9 @@ export interface TurnTimelineProps {
   /**
    * 2026-10-16-session-decision-pill / FR-03：待决策 pill 定位还原请求（受控
    * 触发式——nonce 递增驱动 effect，requestId 不变重复点击也生效）。effect：
-   * ①若该卡在 minimizedIds 中先还原；②滚动容器到顶（pending 卡 sticky 常驻
-   * 顶部）；③sticky 容器高亮闪烁 ~1.2s 自清。缺省 / null 零行为（旧消费方
+   * ①若该卡在 minimizedIds 中先还原；②滚动容器到顶（pending 卡内嵌在内容流
+   * 顶部，2026-10-22-askuser-card-inline 由 sticky 钉顶改内嵌）；③容器高亮
+   * 闪烁 ~1.2s 自清。缺省 / null 零行为（旧消费方
    * 零回归，同 highlightTurnKey 先例的自清节奏约定——清除归本组件定时器）。
    */
   focusDialogRequest?: { requestId: string; nonce: number } | null;
