@@ -69,7 +69,7 @@ import {
 const GUTTER_PX = 44;
 
 /** 每行泳道高（px）与条高（px）：条 7px 居中在 16px 行里，留 4.5px 呼吸。 */
-const LANE_HEIGHT_PX = 16;
+const LANE_HEIGHT_PX = 12;
 const BAR_HEIGHT_PX = 7;
 
 /** 总览缩略条高度（px）——刻意压在 10px，视线仍以三条泳道为主。 */
@@ -123,10 +123,18 @@ function formatDuration(ms: number): string {
   return `${minutes}m${pad2(seconds)}s`;
 }
 
+export type TrajectoryScaleMode = "duration" | "equal";
+
 export interface TrajectoryTimelineProps {
   trajectory: Trajectory;
   selectedRowId?: string | null;
   onSelectRow?: (_rowId: string) => void;
+  /**
+   * 时间线投影模式（2026-10-22-trajectory-view-redesign / D-016）：
+   * `duration` = 现有真实时间轴（缩放/平移/刷子可用）；`equal` = 只读概览，
+   * 条块按出现顺序等宽排列，禁用手势、隐藏时间刻度与轮边界竖线。
+   */
+  scaleMode?: TrajectoryScaleMode;
   className?: string;
 }
 
@@ -142,8 +150,10 @@ export function TrajectoryTimeline({
   trajectory,
   selectedRowId,
   onSelectRow,
+  scaleMode = "duration",
   className,
 }: TrajectoryTimelineProps) {
+  const equalMode = scaleMode === "equal";
   const { turns, lanes, windowStart, windowEnd, coverage, modelBasis } = trajectory;
 
   const limits = useMemo<ViewLimits>(
@@ -258,6 +268,8 @@ export function TrajectoryTimeline({
 
   /** 滚轮：非 passive 监听（React 的 onWheel 是 passive，preventDefault 会失效）。 */
   useEffect(() => {
+    // 等宽模式为只读概览：不注册滚轮监听，让页面正常滚动（D-016）。
+    if (equalMode) return;
     const element = sectionRef.current;
     if (!element || typeof element.addEventListener !== "function") return;
     const onWheel = (event: WheelEvent) => {
@@ -275,7 +287,7 @@ export function TrajectoryTimeline({
     };
     element.addEventListener("wheel", onWheel, { passive: false });
     return () => element.removeEventListener("wheel", onWheel);
-  }, [scheduleFrame]);
+  }, [scheduleFrame, equalMode]);
 
   /* ───────────────────────── 位置换算（依赖 view） ───────────────────────── */
 
@@ -285,6 +297,24 @@ export function TrajectoryTimeline({
   const isFullView = view.start <= windowStart + 0.5 && view.end >= windowEnd - 0.5;
 
   const placed = useMemo(() => {
+    // 等宽模式（D-016）：每条泳道内按出现顺序均分槽位，不参与时间换算。
+    if (equalMode) {
+      const placeLane = (items: TrajectorySpan[]): PlacedSpan[] => {
+        const count = Math.max(1, items.length);
+        const slot = 100 / count;
+        return items.map((item, index) => ({
+          span: item,
+          left: index * slot + slot * 0.08,
+          width: slot * 0.84,
+        }));
+      };
+      return {
+        span: 0,
+        input: placeLane(lanes.input),
+        model: placeLane(lanes.model),
+        tool: placeLane(lanes.tool),
+      };
+    }
     const span = Math.max(1, viewSpan(view));
     const pct = (at: number) => ((at - view.start) / span) * 100;
     const place = (item: TrajectorySpan): PlacedSpan => {
@@ -298,16 +328,23 @@ export function TrajectoryTimeline({
       model: lanes.model.map(place),
       tool: lanes.tool.map(place),
     };
-  }, [lanes, view]);
+  }, [lanes, view, equalMode]);
 
-  /** 轮边界竖线（每轮 start 一条，画在条下面）。 */
+  /** 轮边界竖线（每轮 start 一条，画在条下面；等宽模式隐藏，D-016）。 */
   const guides = useMemo(
-    () => turns.map((turn) => ({ key: turn.runId, left: ratioAtTime(view, turn.startedAt) * 100 })),
-    [turns, view],
+    () =>
+      equalMode
+        ? []
+        : turns.map((turn) => ({
+            key: turn.runId,
+            left: ratioAtTime(view, turn.startedAt) * 100,
+          })),
+    [turns, view, equalMode],
   );
 
   /** 轴刻度：按当前视野等距 7 档，两端落在视野边界；文案随视野重算（见 zoom.ts）。 */
   const axisTicks = useMemo(() => {
+    if (equalMode) return [];
     const span = viewSpan(view);
     const total = Math.max(1, span);
     return tickTimes(view.start, view.end, AXIS_TICK_COUNT).map((at, index) => ({
@@ -315,7 +352,7 @@ export function TrajectoryTimeline({
       left: ((at - view.start) / total) * 100,
       label: formatTickLabel(at, view, fullSpan),
     }));
-  }, [view, fullSpan]);
+  }, [view, fullSpan, equalMode]);
 
   /** 总览刷子：整窗上的视野矩形（百分比）。 */
   const brush = useMemo(() => {
@@ -379,6 +416,8 @@ export function TrajectoryTimeline({
 
   const handlePointerDown = useCallback(
     (event: ReactPointerEvent<HTMLDivElement>) => {
+      // 等宽模式只读：不进入拖拽平移（D-016）。
+      if (equalMode) return;
       if (event.button !== 0) return;
       const target = event.target as HTMLElement | null;
       // 条上按下 = 选中（不平移），把拖拽让给 click。
@@ -398,7 +437,7 @@ export function TrajectoryTimeline({
         captured: false,
       };
     },
-    [],
+    [equalMode],
   );
 
   const handlePointerMove = useCallback(
@@ -517,11 +556,11 @@ export function TrajectoryTimeline({
       data-full-span-ms={Math.round(fullSpan)}
       data-window-start={Math.round(windowStart)}
       data-window-end={Math.round(windowEnd)}
-      onDoubleClick={resetView}
-      className={cn("shrink-0 border-b border-border bg-card pb-1 pt-1", className)}
+      onDoubleClick={equalMode ? undefined : resetView}
+      className={cn("shrink-0 border-b border-border bg-card pb-0.5 pt-0.5", className)}
     >
-      {/* ── 说明行：视野范围 + 图例 + 覆盖率 + 重置（明示 model 条不是真实算力） ── */}
-      <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5 px-3 text-[10.5px] leading-4">
+      {/* ── 说明行（D-017 裁剪：保留 DOM 供既有测试与无障碍文本，视觉隐藏） ── */}
+      <div className="hidden flex-wrap items-center gap-x-2 gap-y-0.5 px-3 text-[10.5px] leading-4">
         <span className="font-semibold tracking-wide text-foreground">泳道时间轴</span>
         <span
           data-testid="trajectory-view-range"
@@ -589,10 +628,11 @@ export function TrajectoryTimeline({
         </span>
       </div>
 
-      {/* ── 轴 ──────────────────────────────────────────────────────────── */}
+      {/* ── 轴（等宽模式不渲染，D-016） ───────────────────────────────────── */}
+      {!equalMode && (
       <div className="flex items-end pl-3">
         <span aria-hidden className="shrink-0" style={{ width: GUTTER_PX }} />
-        <div className="relative h-[14px] min-w-0 flex-1" data-testid="trajectory-axis">
+        <div className="relative h-[12px] min-w-0 flex-1" data-testid="trajectory-axis">
           {axisTicks.map((tick, index) => (
             <span
               key={tick.key}
@@ -613,6 +653,7 @@ export function TrajectoryTimeline({
           ))}
         </div>
       </div>
+      )}
 
       {/* ── 三条泳道（共享同一根轴；拖拽平移 / 点击选行） ────────────────── */}
       <div
@@ -721,8 +762,8 @@ export function TrajectoryTimeline({
         })}
       </div>
 
-      {/* ── 总览缩略条：整窗 + 视野刷子（拖动平移） ──────────────────────── */}
-      <div className="flex items-center pl-3 pt-0.5" style={{ height: 14 }}>
+      {/* ── 总览缩略条（D-017 裁剪：保留 DOM 与刷子逻辑，视觉隐藏） ──────── */}
+      <div className="hidden items-center pl-3 pt-0.5" style={{ height: 14 }}>
         <span
           aria-hidden
           className="shrink-0 select-none pr-1 text-right font-mono text-[9px] leading-none text-muted-foreground/70"

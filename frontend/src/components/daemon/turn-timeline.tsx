@@ -1323,7 +1323,7 @@ function TrajectoryPane({ turns }: { turns: SessionTurnView[] }) {
     );
   }
   return (
-    <div data-testid="trajectory-pane" className="min-w-0">
+    <div data-testid="trajectory-pane" className="h-full min-h-0 min-w-0">
       <TrajectoryView
         trajectory={trajectory}
         selectedRowId={selectedRowId}
@@ -1750,11 +1750,68 @@ export function TurnTimeline({
   // 全部最小化时容器只剩挂载占位（保卡片 state），去掉间距类。
   const visiblePendingCount = pendingRequests.length - minimizedPending.length;
 
+  // 2026-10-22-trajectory-view-redesign（D-002）：pending 提问卡在两个分支复用——
+  // 对话/进度分支在滚动容器内 sticky 置顶；轨迹分支挂在轨迹区域顶部固定层
+  // （不参与账本滚动，保证可作答）。
+  const pendingCardsNode = showPending ? (
+    <div
+      ref={inlineCardsRef}
+      className={visiblePendingCount > 0 ? "mb-3 space-y-2" : undefined}
+    >
+      {pendingRequests.map((req) => (
+        <ErrorBoundary
+          key={req.request_id}
+          label="ask-user-dialog-card"
+          fallback={() => (
+            <div className="text-[11px] text-red-600/70">提问卡片渲染失败</div>
+          )}
+        >
+          <AskUserDialogCard
+            request={req}
+            minimized={minimizedIds.has(req.request_id)}
+            onMinimize={handleMinimize}
+            onResolved={onDialogResolved}
+          />
+        </ErrorBoundary>
+      ))}
+    </div>
+  ) : null;
+
   return (
     <>
     {/* ql-20260903-023：relative 包装容器承载「回到底部」悬浮按钮的定位
         （原 fragment 根无定位上下文）；flex 布局角色与原滚动容器等价。 */}
     <div className="relative flex min-h-0 flex-1 flex-col">
+    {/* 2026-10-22-trajectory-view-redesign（D-002）：轨迹视图独立占满面板高度，
+        与 turn-timeline-scroll 并列（不在滚动流内）——工具栏/时间线才能固定。 */}
+    {showTrajectory ? (
+      <div className="flex min-h-0 flex-1 flex-col bg-background">
+        {errorMsg && (
+          <div className="mb-2 shrink-0 rounded border border-destructive/30 bg-red-50 px-3 py-2 text-xs text-destructive">
+            {errorMsg}
+          </div>
+        )}
+        {showPending && visiblePendingCount > 0 ? (
+          <div className="shrink-0 px-3 pt-2">{pendingCardsNode}</div>
+        ) : null}
+        {turns.length === 0 ? (
+          <div className="flex h-full min-h-[260px] flex-col items-center justify-center text-center">
+            <p className="text-xs font-medium text-foreground">
+              {hasOnlineProvider ? `${emptyProviderLabel} 已就绪` : "没有在线守护进程"}
+            </p>
+            <p className="mt-1 max-w-[260px] text-[11px] text-muted-foreground">
+              {hasOnlineProvider
+                ? "首条消息将创建会话；单条 SSE 贯穿整段对话，可中途追问、打断本轮或结束会话。"
+                : "启动守护进程后即可发送。"}
+            </p>
+          </div>
+        ) : (
+          <div className="min-h-0 flex-1 px-3 py-2">
+            <TrajectoryPane turns={turns} />
+          </div>
+        )}
+      </div>
+    ) : (
     <div
       ref={scrollRef}
       onScroll={handleScroll}
@@ -1767,40 +1824,9 @@ export function TurnTimeline({
           {errorMsg}
         </div>
       )}
-      {/* ql-20260621：AskUserQuestion 对话卡（permission_request.dialog_kind）。
-          2026-10-22-askuser-card-inline：容器由 sticky 钉顶悬浮改为内嵌文档流
-         （mb-3 space-y-2，无背景条），卡片随日志内容上下滚动；深滚不可见时由
-          待决策 pill 定位还原（滚顶+ring 闪烁）兜底。提交 / SSE resolved 后自动
-          移除。普通工具审批（无 dialog_kind）不在本面板展示。
-          ql-20260623（改动三）：ended/failed 会话不回显 pending dialog 卡片
-         （session 已终止，残留 pending 行为死卡；onSessionEnded 也会清空）。
-          ql-20260825-006：卡头最小化按钮 → 收缩为右下角浮动胶囊（下方渲染），
-          已填内容随挂载保留；全部最小化时本容器仅作挂载占位（去视觉框）。 */}
-      {showPending && (
-        <div
-          ref={inlineCardsRef}
-          className={visiblePendingCount > 0 ? "mb-3 space-y-2" : undefined}
-        >
-          {pendingRequests.map((req) => (
-            <ErrorBoundary
-              key={req.request_id}
-              label="ask-user-dialog-card"
-              fallback={() => (
-                <div className="text-[11px] text-red-600/70">
-                  提问卡片渲染失败
-                </div>
-              )}
-            >
-              <AskUserDialogCard
-                request={req}
-                minimized={minimizedIds.has(req.request_id)}
-                onMinimize={handleMinimize}
-                onResolved={onDialogResolved}
-              />
-            </ErrorBoundary>
-          ))}
-        </div>
-      )}
+      {/* ql-20260621：AskUserQuestion 对话卡——节点由 pendingCardsNode 复用
+          （轨迹分支挂在轨迹区域顶部固定层，不随账本滚动）。 */}
+      {pendingCardsNode}
       {/* ql-20260802-001：AskUser 提问记录已改为按 run_id 穿插到对应 turn 内（跟会话
           顺序），不再在此处堆顶展示。顶部仅保留 pending 实时交互卡片（上方 pendingRequests）。 */}
       {turns.length === 0 ? (
@@ -1822,12 +1848,8 @@ export function TurnTimeline({
            2026-10-21 用户裁决「轮间 1px hairline 多余」：**只保留留白，不再画线**
            （原 `border-b border-border last:border-b-0` 已移除）；轮与轮靠白处分节。 */
         <div>
-          {/* 2026-10-22-session-trajectory-third-view（D-001）：轨迹已是顶层第三视图
-              （切换控件在会话面板头部），此处直接渲染，不再有第二层「时间线 / 轨迹」开关。 */}
-          {showTrajectory ? (
-            <TrajectoryPane turns={turns} />
-          ) : (
-            <>
+          {/* 轨迹分支已移出滚动容器（D-002），此处只渲染对话/进度轮块。 */}
+          <>
           {/* task-11（FR-16 / design E7）：会话级文件改动汇总——会话流顶部（首轮之前）。
               无数据时组件自身返回 null（零占位）；`fileChangesSummary={false}` 可关闭。 */}
           {fileChangesSummary && (
@@ -1881,14 +1903,14 @@ export function TurnTimeline({
               padding+hairline 后，末尾注入位自身的上间距由末轮 pb-7 提供。 */}
           {streamFooter}
             </>
-          )}
         </div>
       )}
     </div>
+    )}
     {/* 回到底部悬浮按钮（ql-20260903-023，照群聊同款）：离开底部出现；
         离开期间新增轮数显示「N 条新消息」（仅触顶翻页 prepend 不计入），
-        点击平滑回底。 */}
-    {!nearBottom && (
+        点击平滑回底。轨迹分支没有滚动流，不渲染（D-002）。 */}
+    {!showTrajectory && !nearBottom && (
       <button
         type="button"
         data-testid="turn-jump-bottom"
