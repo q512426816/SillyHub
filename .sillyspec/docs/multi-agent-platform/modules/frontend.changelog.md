@@ -153,3 +153,4 @@
 | 2026-10-21 | 2026-10-22-review-risk-fixes | 审查修复：原型路由防线与监听泄漏 |
 | 2026-10-21 | 2026-10-22-session-trajectory-view | 会话页接入轨迹第三视图 |
 | 2026-10-22 | 2026-10-22-file-card-hide-empty | 文件变更卡无数据时整轮不再出卡 |
+| 2026-10-22 | 2026-10-22-daemon-snapshot-report-log | daemon 快照上报补收口日志 |

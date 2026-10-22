@@ -1077,3 +1077,11 @@
 锚点：未记录
 最近确认：c975a003a577bfb5ce79a8445906f9f358939c82
 理由：最大风险：FR-04 用 codePoint 重组字面字符后，若输入字符串本身是坏 UTF-16（孤立代理项）产出坏字节——与修复前同样产生乱码但不会更差（防御性等价，且 git 输出不会给孤立代理）。放弃的方案：① 给 `/proto/**` 加 middleware 鉴权——D-010 故障面已登记为独立事项，本次不动鉴权语义（避免 proto 预览页依赖登录态改变 dev 评审工作流），以「数据不进产物/上下文」双层代替；② 把真实导出换成人造 fixture——违背 FR-frontend-018（dev 预览要真实会话观感），不做。
+
+## D-unmapped-144@v1 设计期风险与放弃方案（底稿）
+状态：implemented
+变更：2026-10-22-daemon-snapshot-report-log
+原编号：D-001@v1
+锚点：未记录
+最近确认：e135cab86ae8863568b5e46d1957f661b38fa068
+理由：- **最大风险**：日志量。每轮上报 +1 行（一轮通常也就 1 行 `collected` + 1 行 `reported`），长会话是线性增长；`delivered` 走 info 级、`failed`/`dropped` 走 warn 级，`config.log_level` 调到 warn 时只留异常（正常轮静默），可观测性与噪声可按部署调。另一个风险是**日志不能证明后端落库**——`delivered` 只代表 HTTP 2xx，后端若在事务里 best-effort 吞掉写入仍会丢；故「reported=delivered 但页面无卡」这条仍要靠后端侧查 —— 本变更只把「采到没发」这一半的盲区补上，文档里写明这条边界。 - **试过但放弃**：①继续保留四个零散 `on_turn_snapshot_*` tag 并各自补字段——grep 时要记四个名字，且成功路径仍无 tag，配对不了；②把日志塞进采集器（`turn_file_changes_collected` 里带上报结果）——采集与上报分属两层（SessionManager vs Daemon），采集器拿不到上报结果，硬塞会把上报结果回灌进采集器接口（接口膨胀 + 循环依赖风险）；③用 `console.info` 直接打而不走 `_logger`——绕过 `log_level` 过滤，warn 级部署下也会刷屏。

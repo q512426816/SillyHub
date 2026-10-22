@@ -1,0 +1,515 @@
+{
+  "change": "2026-10-22-daemon-snapshot-report-log",
+  "baseline": "f0940f221f3a2729cfa2645db6b2fb9d1cbf3f85",
+  "head": "941e9fbb619f38a33d6389cf5971c6ffbbe88d54",
+  "files": [
+    ".openclaw/skills/sillyspec-archive/SKILL.md",
+    ".openclaw/skills/sillyspec-auto/SKILL.md",
+    ".openclaw/skills/sillyspec-brainstorm/SKILL.md",
+    ".openclaw/skills/sillyspec-commit/SKILL.md",
+    ".openclaw/skills/sillyspec-continue/SKILL.md",
+    ".openclaw/skills/sillyspec-doctor/SKILL.md",
+    ".openclaw/skills/sillyspec-execute/SKILL.md",
+    ".openclaw/skills/sillyspec-explore/SKILL.md",
+    ".openclaw/skills/sillyspec-export/SKILL.md",
+    ".openclaw/skills/sillyspec-flow/SKILL.md",
+    ".openclaw/skills/sillyspec-init/SKILL.md",
+    ".openclaw/skills/sillyspec-knowledge/SKILL.md",
+    ".openclaw/skills/sillyspec-plan/SKILL.md",
+    ".openclaw/skills/sillyspec-propose/SKILL.md",
+    ".openclaw/skills/sillyspec-quick/SKILL.md",
+    ".openclaw/skills/sillyspec-resume/SKILL.md",
+    ".openclaw/skills/sillyspec-scan/SKILL.md",
+    ".openclaw/skills/sillyspec-state/SKILL.md",
+    ".openclaw/skills/sillyspec-status/SKILL.md",
+    ".openclaw/skills/sillyspec-verify/SKILL.md",
+    ".openclaw/skills/sillyspec-workspace/SKILL.md",
+    "backend/app/core/config.py",
+    "backend/app/modules/translate/README.md",
+    "backend/app/modules/translate/engine.py",
+    "backend/app/modules/translate/tests/test_engine.py",
+    "deploy/docker-compose.yml",
+    "docs/releases/2026-10-22-002-a967fbb2f.md",
+    "frontend/.sillyspec/quicklog/QUICKLOG-WhaleFall.md",
+    "frontend/src/lib/__tests__/thinking-translate.test.ts",
+    "frontend/src/lib/thinking-translate.ts",
+    "sillyhub-daemon/src/daemon.ts",
+    "sillyhub-daemon/src/hub-client.ts",
+    "sillyhub-daemon/src/interactive/turn-file-changes-types.ts",
+    "sillyhub-daemon/src/interactive/turn-file-changes.ts",
+    "sillyhub-daemon/tests/daemon-turn-snapshot-report-log.test.ts"
+  ],
+  "totals": {
+    "files": 35,
+    "additions": 638,
+    "deletions": 1716
+  },
+  "savedAt": "2026-10-22T01:31:20.430Z",
+  "note": "flow done 时点冻结（本变更可归属交付面：baseline..HEAD 提交面过滤 .sillyspec/ 只留 .sillyspec/docs/ 交付文档 + 独占树未提交交付；治理工件目录不入冻结——2026-10-12-close-trace-freeze-integrity FR-01）",
+  "modules": [
+    {
+      "id": "core",
+      "files": 1,
+      "doc": "docs/backend/modules/core.md",
+      "docTouched": false,
+      "docMissing": false
+    },
+    {
+      "id": "backend",
+      "files": 4,
+      "doc": "docs/multi-agent-platform/modules/backend.md",
+      "docTouched": false,
+      "docMissing": false
+    },
+    {
+      "id": "frontend",
+      "files": 3,
+      "doc": "docs/multi-agent-platform/modules/frontend.md",
+      "docTouched": false,
+      "docMissing": false
+    },
+    {
+      "id": "sillyhub-daemon",
+      "files": 5,
+      "doc": "docs/multi-agent-platform/modules/sillyhub-daemon.md",
+      "docTouched": false,
+      "docMissing": false
+    },
+    {
+      "id": "deploy",
+      "files": 1,
+      "doc": "docs/multi-agent-platform/modules/deploy.md",
+      "docTouched": false,
+      "docMissing": false
+    },
+    {
+      "id": "build",
+      "files": 1,
+      "doc": "docs/multi-agent-platform/modules/build.md",
+      "docTouched": false,
+      "docMissing": false
+    },
+    {
+      "id": "docs",
+      "files": 1,
+      "doc": "docs/multi-agent-platform/modules/docs.md",
+      "docTouched": false,
+      "docMissing": false
+    },
+    {
+      "id": "core",
+      "files": 1,
+      "doc": "docs/SillyHub/modules/core.md",
+      "docTouched": false,
+      "docMissing": false
+    },
+    {
+      "id": "daemon",
+      "files": 5,
+      "doc": "docs/SillyHub/modules/daemon.md",
+      "docTouched": false,
+      "docMissing": false
+    },
+    {
+      "id": "frontend_lib",
+      "files": 2,
+      "doc": "docs/SillyHub/modules/frontend_lib.md",
+      "docTouched": false,
+      "docMissing": false
+    }
+  ],
+  "uncoveredDirs": [
+    {
+      "dir": ".openclaw/skills/sillyspec-archive",
+      "files": 1
+    },
+    {
+      "dir": ".openclaw/skills/sillyspec-auto",
+      "files": 1
+    },
+    {
+      "dir": ".openclaw/skills/sillyspec-brainstorm",
+      "files": 1
+    },
+    {
+      "dir": ".openclaw/skills/sillyspec-commit",
+      "files": 1
+    },
+    {
+      "dir": ".openclaw/skills/sillyspec-continue",
+      "files": 1
+    },
+    {
+      "dir": ".openclaw/skills/sillyspec-doctor",
+      "files": 1
+    },
+    {
+      "dir": ".openclaw/skills/sillyspec-execute",
+      "files": 1
+    },
+    {
+      "dir": ".openclaw/skills/sillyspec-explore",
+      "files": 1
+    },
+    {
+      "dir": ".openclaw/skills/sillyspec-export",
+      "files": 1
+    },
+    {
+      "dir": ".openclaw/skills/sillyspec-flow",
+      "files": 1
+    },
+    {
+      "dir": ".openclaw/skills/sillyspec-init",
+      "files": 1
+    },
+    {
+      "dir": ".openclaw/skills/sillyspec-knowledge",
+      "files": 1
+    },
+    {
+      "dir": ".openclaw/skills/sillyspec-plan",
+      "files": 1
+    },
+    {
+      "dir": ".openclaw/skills/sillyspec-propose",
+      "files": 1
+    },
+    {
+      "dir": ".openclaw/skills/sillyspec-quick",
+      "files": 1
+    },
+    {
+      "dir": ".openclaw/skills/sillyspec-resume",
+      "files": 1
+    },
+    {
+      "dir": ".openclaw/skills/sillyspec-scan",
+      "files": 1
+    },
+    {
+      "dir": ".openclaw/skills/sillyspec-state",
+      "files": 1
+    },
+    {
+      "dir": ".openclaw/skills/sillyspec-status",
+      "files": 1
+    },
+    {
+      "dir": ".openclaw/skills/sillyspec-verify",
+      "files": 1
+    },
+    {
+      "dir": ".openclaw/skills/sillyspec-workspace",
+      "files": 1
+    }
+  ],
+  "moduleMaps": [
+    "docs/backend/modules/_module-map.yaml",
+    "docs/frontend/modules/_module-map.yaml",
+    "docs/multi-agent-platform/modules/_module-map.yaml",
+    "docs/SillyHub/modules/_module-map.yaml",
+    "docs/sillyhub-daemon/modules/_module-map.yaml"
+  ],
+  "acceptedUnmappedDirs": 21,
+  "scopeAudit": {
+    "mode": "full-flow",
+    "ok": true,
+    "degradedReason": null,
+    "baseAnchor": "f0940f221f3a2729cfa2645db6b2fb9d1cbf3f85",
+    "totals": {
+      "files": 35,
+      "additions": 638,
+      "deletions": 1716
+    },
+    "rows": [
+      {
+        "path": ".openclaw/skills/sillyspec-archive/SKILL.md",
+        "additions": 0,
+        "deletions": 87,
+        "kind": "deleted",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": ".openclaw/skills/sillyspec-auto/SKILL.md",
+        "additions": 0,
+        "deletions": 54,
+        "kind": "deleted",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": ".openclaw/skills/sillyspec-brainstorm/SKILL.md",
+        "additions": 0,
+        "deletions": 114,
+        "kind": "deleted",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": ".openclaw/skills/sillyspec-commit/SKILL.md",
+        "additions": 0,
+        "deletions": 67,
+        "kind": "deleted",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": ".openclaw/skills/sillyspec-continue/SKILL.md",
+        "additions": 0,
+        "deletions": 17,
+        "kind": "deleted",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": ".openclaw/skills/sillyspec-doctor/SKILL.md",
+        "additions": 0,
+        "deletions": 76,
+        "kind": "deleted",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": ".openclaw/skills/sillyspec-execute/SKILL.md",
+        "additions": 0,
+        "deletions": 222,
+        "kind": "deleted",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": ".openclaw/skills/sillyspec-explore/SKILL.md",
+        "additions": 0,
+        "deletions": 107,
+        "kind": "deleted",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": ".openclaw/skills/sillyspec-export/SKILL.md",
+        "additions": 0,
+        "deletions": 57,
+        "kind": "deleted",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": ".openclaw/skills/sillyspec-flow/SKILL.md",
+        "additions": 0,
+        "deletions": 62,
+        "kind": "deleted",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": ".openclaw/skills/sillyspec-init/SKILL.md",
+        "additions": 0,
+        "deletions": 177,
+        "kind": "deleted",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": ".openclaw/skills/sillyspec-knowledge/SKILL.md",
+        "additions": 0,
+        "deletions": 40,
+        "kind": "deleted",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": ".openclaw/skills/sillyspec-plan/SKILL.md",
+        "additions": 0,
+        "deletions": 156,
+        "kind": "deleted",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": ".openclaw/skills/sillyspec-propose/SKILL.md",
+        "additions": 0,
+        "deletions": 16,
+        "kind": "deleted",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": ".openclaw/skills/sillyspec-quick/SKILL.md",
+        "additions": 0,
+        "deletions": 116,
+        "kind": "deleted",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": ".openclaw/skills/sillyspec-resume/SKILL.md",
+        "additions": 0,
+        "deletions": 21,
+        "kind": "deleted",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": ".openclaw/skills/sillyspec-scan/SKILL.md",
+        "additions": 0,
+        "deletions": 79,
+        "kind": "deleted",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": ".openclaw/skills/sillyspec-state/SKILL.md",
+        "additions": 0,
+        "deletions": 25,
+        "kind": "deleted",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": ".openclaw/skills/sillyspec-status/SKILL.md",
+        "additions": 0,
+        "deletions": 54,
+        "kind": "deleted",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": ".openclaw/skills/sillyspec-verify/SKILL.md",
+        "additions": 0,
+        "deletions": 87,
+        "kind": "deleted",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": ".openclaw/skills/sillyspec-workspace/SKILL.md",
+        "additions": 0,
+        "deletions": 33,
+        "kind": "deleted",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": "backend/app/core/config.py",
+        "additions": 7,
+        "deletions": 0,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": "backend/app/modules/translate/README.md",
+        "additions": 11,
+        "deletions": 0,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": "backend/app/modules/translate/engine.py",
+        "additions": 34,
+        "deletions": 3,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": "backend/app/modules/translate/tests/test_engine.py",
+        "additions": 83,
+        "deletions": 0,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": "deploy/docker-compose.yml",
+        "additions": 9,
+        "deletions": 0,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": "docs/releases/2026-10-22-002-a967fbb2f.md",
+        "additions": 54,
+        "deletions": 0,
+        "kind": "new",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": "frontend/.sillyspec/quicklog/QUICKLOG-WhaleFall.md",
+        "additions": 0,
+        "deletions": 15,
+        "kind": "deleted",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": "frontend/src/lib/__tests__/thinking-translate.test.ts",
+        "additions": 20,
+        "deletions": 0,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": "frontend/src/lib/thinking-translate.ts",
+        "additions": 8,
+        "deletions": 0,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": "sillyhub-daemon/src/daemon.ts",
+        "additions": 85,
+        "deletions": 27,
+        "kind": "modified",
+        "planned": "修改",
+        "verdict": "planned"
+      },
+      {
+        "path": "sillyhub-daemon/src/hub-client.ts",
+        "additions": 8,
+        "deletions": 1,
+        "kind": "modified",
+        "planned": "修改",
+        "verdict": "planned"
+      },
+      {
+        "path": "sillyhub-daemon/src/interactive/turn-file-changes-types.ts",
+        "additions": 10,
+        "deletions": 2,
+        "kind": "modified",
+        "planned": "修改",
+        "verdict": "planned"
+      },
+      {
+        "path": "sillyhub-daemon/src/interactive/turn-file-changes.ts",
+        "additions": 4,
+        "deletions": 1,
+        "kind": "modified",
+        "planned": "修改",
+        "verdict": "planned"
+      },
+      {
+        "path": "sillyhub-daemon/tests/daemon-turn-snapshot-report-log.test.ts",
+        "additions": 305,
+        "deletions": 0,
+        "kind": "new",
+        "planned": "新增",
+        "verdict": "planned"
+      }
+    ],
+    "excluded": {
+      "foreignDeclared": []
+    },
+    "note": "flow done 时点冻结（本文件落盘时采集）",
+    "closedBy": "flow done"
+  },
+  "patchSha256": "e79e6089fa1912aa79d2ea68285a154dac933e24d1aca30ea728d600a141ed25",
+  "patchStatus": "ok"
+}

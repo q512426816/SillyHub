@@ -58,3 +58,4 @@ multi-agent-platform 的一体化部署编排组件，用 Docker Compose 把 bac
 - 2026-10-16-deploy-convergence-guard | 2026-10-16 生产互覆事故——另一会话从分叉分支打包部署，静默回退 main 上已修复的 /…
 - 2026-10-19-knowledge-build-switch-rollout | 禁建库开关本地部署落地与首搜实测
 - 2026-10-19-change-assets-cross-repo-repos | 变更资产卡展示跨仓冻结面
+- 2026-10-22-daemon-snapshot-report-log | daemon 快照上报补收口日志

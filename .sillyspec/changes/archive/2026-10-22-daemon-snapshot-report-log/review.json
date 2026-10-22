@@ -1,0 +1,15 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-22-daemon-snapshot-report-log",
+  "reviewer": "subagent",
+  "verdict": "PASS",
+  "reviewedAgainst": "941e9fbb619f38a33d6389cf5971c6ffbbe88d54",
+  "findings": [],
+  "dimensionNotes": {
+    "乱序": "ok｜边界已裁决：可接受——collected/reported 按 runId 配对而非时序；enqueued 改为 Promise 落定后记录，迟到只影响 grep 相邻性，不影响配对判定。",
+    "并发": "ok｜边界已裁决：可接受——同 runId 重复上报允许多条 reported（覆盖写语义，判定仍成立）；日志无共享可变状态；P2-2 已复核：落定前零日志，异步 reject 只记 dropped/enqueue_failed，不存在「先 enqueued 后 dropped」双日志窗口；日志量由 log_level=warn 过滤。",
+    "切换": "ok｜边界已裁决：可接受——采集期会话收口走 dropped/session_not_found；入箱失败（异步 reject/同步抛）走 dropped/enqueue_failed；上报 fire-and-forget 不回灌轮终态；入箱后的 drain 重放另算，不在本变更承诺面。",
+    "作用域": "ok｜边界已裁决：可接受——日志只含 session_id/run_id/status/file_count/collect_ms 等快照头字段，不含路径；多实例各写自己的 daemon.log；delivered 仅代表 HTTP 2xx、后端是否落库仍需后端侧排查（design 风险段已显式披露）；无端点/DTO/wire/backend 变更。"
+  },
+  "reviewedAt": "2026-10-22T09:37:33+08:00"
+}

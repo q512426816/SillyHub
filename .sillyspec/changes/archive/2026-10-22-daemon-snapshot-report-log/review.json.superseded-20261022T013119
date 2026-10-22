@@ -1,0 +1,46 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-22-daemon-snapshot-report-log",
+  "reviewer": "subagent",
+  "verdict": "PASS",
+  "reviewedAgainst": "b13d0631c3dce0a93c2d44f7a60f15ebb6755806",
+  "findings": [
+    {
+      "severity": "P2",
+      "title": "design 承诺「四条原有 on_turn_snapshot_* tag 合并为统一事件」未兑现，新旧日志并行双打",
+      "evidence": "design.md:20 明写四条旧 tag 合并为 turn_file_changes_reported；实现保留 daemon.ts:4503/4521/4549/4566 四处旧 tag，并在同一出口追加统一事件（4507/4531/4540/4553/4562/4573），dropped/failed 每次会打两条日志；全 tests grep 无旧 tag 引用，保留无兼容必要，属已声明的接口契约与实现不符（无数据正确性风险，但保留了设计明确要消除的零散 tag）。",
+      "location": "sillyhub-daemon/src/daemon.ts:4503-4573"
+    },
+    {
+      "severity": "P2",
+      "title": "enqueued 日志在入箱 Promise 落定前打印；异步入箱失败仍记 enqueued，enqueue_failed 分支实际不可达",
+      "evidence": "daemon.ts:4528-4531 先 `void enqueueRunResult(...).catch(() => undefined)` 再无条件 `_logTurnSnapshotReport('enqueued')`；enqueueRunResult 是 async（resilience/service.ts:339），内部 `await _outbox.enqueue`（outbox.ts:126-134 的 mkdir/appendFile）可 reject，rejection 被 catch 吞掉，日志仍称「已入箱」，与新增注释「入箱失败——按丢弃记账」相反；且生产实现里 async 函数不会同步抛出，外层 try/catch 的 enqueue_failed 分支不可达（仅测试替身同步抛时可达）。后果是重建空窗/磁盘写失败时丢失的快照被误标成可重放，直接削弱本变更的判障价值。",
+      "location": "sillyhub-daemon/src/daemon.ts:4527-4537"
+    },
+    {
+      "severity": "P2",
+      "title": "turn-file-changes.ts 新注释称 unavailable/failed 由 backend 记 capability=tool_only，与后端「只要带 file_changes 就 full」的判据相反",
+      "evidence": "turn-file-changes.ts:27-29 改为「`unavailable` / `failed` 由 backend 记为 `capability=\"tool_only\"`」；但 collector 的 failed/unavailable 最终快照均带 files: []（turn-file-changes.ts:885-906；272-280 的 git 错误归类经 CollectAbort 汇入同一 finalizeSnapshot），daemon 无条件把它放进 payload（daemon.ts:944-946、4514-4519），而 backend 判据是 `capability=\"full\" if file_changes is not None else \"tool_only\"`（backend/app/modules/daemon/lease/service.py:1222-1223、1264）。只有缺 file_changes 才是 tool_only，status 不参与判据；该注释会把排障者引向错误的 capability 判断。",
+      "location": "sillyhub-daemon/src/interactive/turn-file-changes.ts:27-29"
+    },
+    {
+      "severity": "P3",
+      "title": "FR-01 自带验收「grep 仅工具编辑 在 sillyhub-daemon/src 0 命中」未达成（1 命中）",
+      "evidence": "FR-01 场景（requirements.md:15）要求 src 下 0 命中；hub-client.ts:1276 新增注释仍写「前端『仅工具编辑』降级卡已下线」，字面命中。语义已是新口径（旧卡已下线），但验收 grep 口径被自己的文案打破，建议改为「旧降级占位卡已下线」或同步放宽验收词。",
+      "location": "sillyhub-daemon/src/hub-client.ts:1276"
+    },
+    {
+      "severity": "P3",
+      "title": "FR-03 声称的「按 run_id 配对」用例是同义反复，未真正验证 collected/reported 配对",
+      "evidence": "tests/daemon-turn-snapshot-report-log.test.ts:247-262 用例名声称「collected 与 reported 各一条、runId 一致」，但 258-261 两处断言分别是 `expect(REPORT_TAG).toBe('[daemon.turn_file_changes_reported]')` 与 `expect('[turn-file-changes] turn_file_changes_collected').toContain('turn_file_changes_collected')`，均不可能失败；collected 行从未被捕获或断言，实际只验证了 reported 的 run_id。FR-03 绑定（requirements.md:57）写「新用例里按 run_id 配对的断言」，覆盖声明超标。",
+      "location": "sillyhub-daemon/tests/daemon-turn-snapshot-report-log.test.ts:247-262"
+    }
+  ],
+  "dimensionNotes": {
+    "乱序": "ok｜边界已裁决：可接受——collected/reported 按 runId 配对而非时序，日志迟到只影响 grep 相邻性，不影响配对判定。",
+    "并发": "ok｜边界已裁决：可接受——同 runId 重复上报允许多条 reported（覆盖写语义，判定仍成立）；日志无共享可变状态；日志量随轮数线性增长由 log_level=warn 过滤。",
+    "切换": "ok｜边界已裁决：可接受——采集期会话收口走 dropped/session_not_found（正是要暴露的丢数据形态）；上报 fire-and-forget 不回灌轮终态；入箱后的 drain 重放另算，不在本变更承诺面。",
+    "作用域": "ok｜边界已裁决：可接受——日志只含 session_id/run_id/status/file_count/collect_ms 等快照头字段，不含路径；多实例各写自己的 daemon.log；delivered 仅代表 HTTP 2xx、后端是否落库仍需后端侧排查（design 风险段已显式披露）；无端点/DTO/wire/backend 变更。"
+  },
+  "reviewedAt": "2026-10-22T09:25:41+08:00"
+}

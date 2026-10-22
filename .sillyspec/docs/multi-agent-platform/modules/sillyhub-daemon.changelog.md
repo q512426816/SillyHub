@@ -27,3 +27,4 @@
 - 2026-10-21-daemon-zombie-turn | 修复 daemon 会话僵尸轮与打断无效
 - 2026-10-21-session-git-branch | 会话组件底部动态显示当前所在 git 分支
 - 2026-10-22-review-risk-fixes | 审查修复：原型路由防线与监听泄漏
+- 2026-10-22-daemon-snapshot-report-log | daemon 快照上报补收口日志
