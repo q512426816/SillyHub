@@ -1,0 +1,22 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-23-translate-budget-align",
+  "reviewer": "subagent",
+  "verdict": "PASS",
+  "reviewedAgainst": "9f4c43781eb1ee9cae4a96c1c9c2ec980f87e681",
+  "findings": [
+    {
+      "severity": "P2",
+      "title": "design「风险与死路」对块数低估情形的后果断言方向颠倒——「无误杀路径」不成立",
+      "evidence": "前端死线=20s+(估算块数−1)×2.5s+5s，后端预算=20s+(实际块数−1)×2.5s；当实际后端块数超出估算 >2 块时（保护段碎裂：collect_chunks 对每个可译 run 至少产 1 块（chunking.py:202-208），如 16×1800 满批内嵌行内代码可膨胀至数十/上百 run；或句界装箱：split_translatable 对 >500 字符句子贪心装箱，1800 字符 3×~600 句 → 3 块 > 估算 2 块），后端预算反超前端死线 → 前端先 abort，重现 FR-01 要消除的误杀形态（回退原文 + 60s 前端退避），与 design「后果只是前端等更久才 abort／后端自身预算仍会先到期／无误杀路径」的断言相反。缓解使其维持 P2 而非 P1：机制本身已在 design 披露（「保护段切分理论上可产生多于 ceil(len/1000) 的块」）、前端 abort 不累计后端崩溃计数、后端推理照常完成并写缓存（后续请求命中恢复）、FR-01 规范文本（动态公式+5s 余量+禁固定 20s）已兑现且有绑定测试",
+      "location": "frontend/src/lib/thinking-translate.ts:41-51 (估估算式) + .sillyspec/changes/2026-10-23-translate-budget-align/design.md:48 (后果断言)"
+    }
+  ],
+  "dimensionNotes": {
+    "乱序": "ok",
+    "并发": "ok",
+    "切换": "ok",
+    "作用域": "ok"
+  },
+  "reviewedAt": "2026-10-23T07:51:23+08:00"
+}

@@ -1,0 +1,51 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-23-translate-budget-align",
+  "rows": [
+    {
+      "anchor": "FR-01",
+      "row_id": "2026-10-23-translate-budget-align:flow:测试绑定FR-01",
+      "tests": [
+        "frontend/src/lib/__tests__/thinking-translate.test.ts「请求超时按批动态计算——短块基准+余量、满批最坏 ≥ 后端公式（97.5s）且含 5s 余量」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-23-translate-budget-align"
+    },
+    {
+      "anchor": "FR-02",
+      "row_id": "2026-10-23-translate-budget-align:flow:测试绑定FR-02",
+      "tests": [
+        "backend/app/modules/translate/tests/test_service.py「test_partial_cache_hit_keeps_chunk_order」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-23-translate-budget-align"
+    },
+    {
+      "anchor": "FR-03",
+      "row_id": "2026-10-23-translate-budget-align:flow:测试绑定FR-03",
+      "tests": [
+        "backend/app/modules/translate/tests/test_engine.py「test_reader_writes_only_to_captured_queue」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-23-translate-budget-align"
+    }
+  ]
+}

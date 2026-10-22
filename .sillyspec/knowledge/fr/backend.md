@@ -7494,3 +7494,60 @@ superseded_by：FR-auth-003
 摘要：回归
 全文：.sillyspec/changes/archive/2026-10-21-task-wakeup-event-queue/requirements.md#FR-03
 最近确认：e5dce012e35a102b4c8d37a364e2519df32483df
+
+## FR-backend-025 前端超时按批大小动态计算（覆盖后端公式并留余量），满批 16 条慢推理不再被前端 abort
+变更：2026-10-23-translate-budget-align
+状态：active
+摘要：主路径
+全文：.sillyspec/changes/archive/2026-10-23-translate-budget-align/requirements.md#FR-01
+最近确认：3cdca075ab2d93060e02b6ef663af8d05165bde6
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-23-translate-budget-align:flow:测试绑定FR-01
+  tests: frontend/src/lib/__tests__/thinking-translate.test.ts「请求超时按批动态计算——短块基准+余量、满批最坏 ≥ 后端公式（97.5s）且含 5s 余量」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-23-translate-budget-align
+  status: active
+
+## FR-backend-026 段被切多块且部分命中缓存时，译文块序与原文块序一致（回归测试钉住）
+变更：2026-10-23-translate-budget-align
+状态：active
+摘要：主路径
+全文：.sillyspec/changes/archive/2026-10-23-translate-budget-align/requirements.md#FR-02
+最近确认：3cdca075ab2d93060e02b6ef663af8d05165bde6
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-23-translate-budget-align:flow:测试绑定FR-02
+  tests: backend/app/modules/translate/tests/test_service.py「test_partial_cache_hit_keeps_chunk_order」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-23-translate-budget-align
+  status: active
+
+## FR-backend-027 引擎重启后旧读线程只写构造时捕获的旧队列，不污染新队列，不产生假崩溃计数
+变更：2026-10-23-translate-budget-align
+状态：active
+摘要：主路径
+全文：.sillyspec/changes/archive/2026-10-23-translate-budget-align/requirements.md#FR-03
+最近确认：3cdca075ab2d93060e02b6ef663af8d05165bde6
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-23-translate-budget-align:flow:测试绑定FR-03
+  tests: backend/app/modules/translate/tests/test_engine.py「test_reader_writes_only_to_captured_queue」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-23-translate-budget-align
+  status: active

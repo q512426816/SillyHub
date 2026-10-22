@@ -1,0 +1,327 @@
+diff --git a/backend/app/modules/translate/engine.py b/backend/app/modules/translate/engine.py
+index b423c1f31..06f5955cb 100644
+--- a/backend/app/modules/translate/engine.py
++++ b/backend/app/modules/translate/engine.py
+@@ -118,21 +118,29 @@ class TranslateSubprocessProxy:
+             encoding="utf-8",
+             bufsize=1,
+         )
+-        _threading.Thread(target=self._reader, args=(self._proc.stdout,), daemon=True).start()
++        _threading.Thread(
++            target=self._reader, args=(self._proc.stdout, self._responses), daemon=True
++        ).start()
+         _threading.Thread(
+             target=self._stderr_reader, args=(self._proc.stderr,), daemon=True
+         ).start()
+ 
+-    def _reader(self, stdout: object) -> None:
+-        """读线程：响应行入队；EOF/断裂入哨兵。"""
++    def _reader(self, stdout: object, responses: queue.Queue) -> None:
++        """读线程：响应行入队；EOF/断裂入哨兵。
++
++        队列经参数捕获（2026-10-23-translate-budget-align / FR-03）：崩溃重启
++        _ensure_started 换新队列后，旧读线程的 EOF 哨兵/迟到响应只落入已废弃
++        的旧队列（无人读，自然作废），不会污染新队列触发 "translate worker
++        exited"/"protocol mismatch" 假崩溃计数（3 次即 600s 退避）。
++        """
+         eof_resp = object()
+         try:
+             for line in stdout:
+-                self._responses.put(line)
++                responses.put(line)
+         except Exception:
+             pass
+         finally:
+-            self._responses.put(eof_resp)
++            responses.put(eof_resp)
+ 
+     def _stderr_reader(self, stderr: object) -> None:
+         """stderr 读线程：逐行转发到主进程日志（WARNING）；异常静默不影响请求。"""
+diff --git a/backend/app/modules/translate/service.py b/backend/app/modules/translate/service.py
+index 8080e0a12..f83a8f2db 100644
+--- a/backend/app/modules/translate/service.py
++++ b/backend/app/modules/translate/service.py
+@@ -138,8 +138,13 @@ async def translate_items(items: list[TranslateItemIn], target: str = "zh") -> d
+     pending: dict[str, list[SourceSegment]] = {}
+     # 全局送翻块队列（跨 item 合批送模型）
+     pending_chunks: list[str] = []
+-    # chunk 在 pending_chunks 中的归属填充游标：按 (item_id, seg_idx) 顺序消费
++    # 块序总账（含缓存命中块）：按块产生顺序记 (item_id, seg_idx)——回填按本序
++    # 一次成型，缓存块与推理块同序混排（2026-10-23-translate-budget-align FR-02）
+     chunk_owners: list[tuple[str, int]] = []
++    # 已解析译文（缓存命中块即时可定）：owner 序号 → 译文
++    resolved: dict[int, str] = {}
++    # pending_chunks[i] 对应的 chunk_owners 序号（推理返回后按位对账）
++    pending_owner_positions: list[int] = []
+ 
+     for item in items:
+         if not is_translation_worthy(item.text):
+@@ -166,12 +171,14 @@ async def translate_items(items: list[TranslateItemIn], target: str = "zh") -> d
+                 cached = _lru_get(key)
+                 if cached is None:
+                     cached = await _redis_get(key)
++                owner_idx = len(chunk_owners)
++                chunk_owners.append((item.id, seg_idx))
+                 if cached is not None:
+                     _lru_put(key, cached)  # Redis 命中回填 LRU
+-                    _fill_chunk(pending, item.id, seg_idx, cached)
++                    resolved[owner_idx] = cached
+                     translated_ids.add(item.id)
+                 else:
+-                    chunk_owners.append((item.id, seg_idx))
++                    pending_owner_positions.append(owner_idx)
+                     pending_chunks.append(chunk)
+ 
+     engine_ready = True
+@@ -199,12 +206,11 @@ async def translate_items(items: list[TranslateItemIn], target: str = "zh") -> d
+                     reason = "translation count mismatch"
+                 else:
+                     cache_writes: list[tuple[str, str]] = []
+-                    for (item_id, seg_idx), chunk, translated in zip(
+-                        chunk_owners, pending_chunks, translations, strict=True
+-                    ):
+-                        _fill_chunk(pending, item_id, seg_idx, translated)
+-                        translated_ids.add(item_id)
+-                        cache_writes.append((_cache_key(chunk, target), translated))
++                    for pos, translated in enumerate(translations):
++                        owner_idx = pending_owner_positions[pos]
++                        resolved[owner_idx] = translated
++                        translated_ids.add(chunk_owners[owner_idx][0])
++                        cache_writes.append((_cache_key(pending_chunks[pos], target), translated))
+                     for key, value in cache_writes:
+                         _lru_put(key, value)
+                         await _redis_put(key, value)
+@@ -218,6 +224,14 @@ async def translate_items(items: list[TranslateItemIn], target: str = "zh") -> d
+             "items": [TranslateItemOut(id=i.id, text=i.text, translated=False) for i in items],
+         }
+ 
++    # 回填：按 chunk_owners 全序一次成型——缓存块与推理块按原文块序混排。
++    # 此前缓存命中即时回填 + 推理块推理后追加，部分命中的多块段译文块序颠倒
++    # （归档 review P2；2026-10-23-translate-budget-align / FR-02）。引擎失败
++    # 路径上方已提前原文透传返回，走到这里的 owner 必有 resolved 译文——缺失
++    # 即编排缺陷，严格 KeyError 当场暴露（禁止静默拼空）。
++    for owner_idx, (item_id, seg_idx) in enumerate(chunk_owners):
++        _fill_chunk(pending, item_id, seg_idx, resolved[owner_idx])
++
+     # 重组：送翻段的占位填充后逐段拼接（保护段原样）
+     for item in items:
+         if item.id in results:
+@@ -245,8 +259,8 @@ def _fill_chunk(
+     """把单块译文按序填回所属送翻段（段内块顺序拼接）。
+ 
+     送翻段在 pending 中临时以 ``SourceSegment(text=已译拼接, translatable=True)``
+-    累积；块按产生顺序到达（缓存命中乱序于请求流内不会发生——同请求内先查
+-    缓存后推理，两类写入按 chunk_owners 顺序执行）。
++    累积；调用方保证按块产生顺序（chunk_owners 全序）逐块调用——缓存命中块
++    与推理块同序混排，段内块序与原文一致（2026-10-23-translate-budget-align）。
+     """
+     segs = pending[item_id]
+     segs[seg_idx] = SourceSegment(text=segs[seg_idx].text + translated, translatable=True)
+diff --git a/backend/app/modules/translate/tests/test_engine.py b/backend/app/modules/translate/tests/test_engine.py
+index 5604bb087..9102797cb 100644
+--- a/backend/app/modules/translate/tests/test_engine.py
++++ b/backend/app/modules/translate/tests/test_engine.py
+@@ -250,3 +250,34 @@ def test_get_translator_returns_proxy_and_backoff_reason(fake_worker_path: Path)
+     translator.retry_at = time.monotonic() + 999
+     translator2, reason2 = get_translator("unused")
+     assert translator2 is None and reason2 and "unavailable" in reason2
++
++
++def test_reader_writes_only_to_captured_queue() -> None:
++    """2026-10-23-translate-budget-align / FR-03：读线程只写构造时捕获的队列。
++
++    修复前 _reader 经 self._responses 属性写入：崩溃重启 _ensure_started 整体
++    换队列后，旧读线程的 EOF 哨兵/迟到响应落入新队列 → 下次请求读到哨兵即
++    "translate worker exited" 假崩溃，3 次即 600s 退避。修复后队列经参数捕获，
++    旧线程只写旧队列（无人读，自然作废）。
++    """
++    import queue as _queue
++    import threading as _threading
++
++    proxy = TranslateSubprocessProxy("unused")
++    try:
++        captured: _queue.Queue = _queue.Queue()  # 旧线程启动时捕获的队列
++        new_queue: _queue.Queue = _queue.Queue()  # 重启后的新队列（self._responses 已换）
++        proxy._responses = new_queue
++        thread = _threading.Thread(
++            target=proxy._reader, args=(iter(["resp-a\n"]), captured), daemon=True
++        )
++        thread.start()
++        thread.join(timeout=5.0)
++        assert not thread.is_alive()
++        # 响应行与 EOF 哨兵都只进 captured；new_queue 保持为空（无污染）
++        assert captured.get(timeout=1.0) == "resp-a\n"
++        sentinel = captured.get(timeout=1.0)
++        assert not isinstance(sentinel, str)
++        assert new_queue.empty()
++    finally:
++        proxy.close()
+diff --git a/backend/app/modules/translate/tests/test_service.py b/backend/app/modules/translate/tests/test_service.py
+index 98ada52c7..a544fd947 100644
+--- a/backend/app/modules/translate/tests/test_service.py
++++ b/backend/app/modules/translate/tests/test_service.py
+@@ -4,8 +4,14 @@ from __future__ import annotations
+ 
+ import pytest
+ 
++from app.modules.translate.chunking import collect_chunks, split_protected
+ from app.modules.translate.schema import TranslateItemIn
+-from app.modules.translate.service import reset_cache_for_tests, translate_items
++from app.modules.translate.service import (
++    _cache_key,
++    _lru_put,
++    reset_cache_for_tests,
++    translate_items,
++)
+ 
+ 
+ class _FakeTranslator:
+@@ -215,3 +221,30 @@ async def test_pure_code_content_translated_false(fake_translator: _FakeTranslat
+     assert out["items"][0].translated is False
+     assert out["items"][0].text == text
+     assert fake_translator.calls == 0
++
++
++async def test_partial_cache_hit_keeps_chunk_order(fake_translator: _FakeTranslator) -> None:
++    """2026-10-23-translate-budget-align / FR-02：部分命中缓存的多块段块序不乱。
++
++    修复前：缓存命中块扫描期立即回填、推理块推理后追加——中间块命中时译文
++    变成 [块2译文, 块1译文, 块3译文]（缓存块全部前置，归档 review P2）。
++    修复后按块产生顺序全序回填，任何部分命中组合都与原文块序逐块对齐。
++    """
++    # 每句内容唯一（重复同句会让相邻块内容相同 → 同一缓存 key 连带命中，
++    # 构不出「部分命中」形态）
++    text = "".join(
++        f"Unique english sentence number {i} for chunk ordering regression. " for i in range(40)
++    )  # ~2600 字符单段（无段界/无保护标记）→ 3 块
++    chunks = collect_chunks(split_protected(text))
++    assert len(chunks) == 3
++    assert len(set(chunks)) == 3  # 块内容互异，缓存 key 互不相同
++    # 预填中间块缓存（模拟部分命中：LRU 淘汰/Redis TTL 过期后的跨请求残缺形态）
++    _lru_put(_cache_key(chunks[1], "zh"), "CACHED[1]")
++
++    out = await translate_items([TranslateItemIn(id="a", text=text)])
++    item = out["items"][0]
++    assert item.translated is True
++    # 只有未命中的块1/块3进引擎（fake 按批内序号回显 "译[i]:<chunk>"）
++    assert fake_translator.batches == [[chunks[0], chunks[2]]]
++    # 全序拼装：块1译文 + 缓存中间块 + 块3译文（修复前 CACHED[1] 打头）
++    assert item.text == f"译[0]:{chunks[0]}CACHED[1]译[1]:{chunks[2]}"
+diff --git a/frontend/src/lib/__tests__/thinking-translate.test.ts b/frontend/src/lib/__tests__/thinking-translate.test.ts
+index 4a78d9402..249ac112b 100644
+--- a/frontend/src/lib/__tests__/thinking-translate.test.ts
++++ b/frontend/src/lib/__tests__/thinking-translate.test.ts
+@@ -17,6 +17,7 @@ vi.mock("@/lib/api", () => ({ apiFetch: (...args: unknown[]) => apiFetchMock(...
+ 
+ import {
+   needsTranslation,
++  requestTimeoutMsFor,
+   resetThinkingTranslateForTests,
+   splitIntoChunks,
+   translateText,
+@@ -70,6 +71,18 @@ describe("splitIntoChunks 分块", () => {
+   });
+ });
+ 
++describe("requestTimeoutMsFor 超时预算（与后端 engine._timeout_for 公式同源）", () => {
++  it("单块 = 基准 + 余量；按最坏后端块数（每 1000 字符一块）线性放宽", () => {
++    expect(requestTimeoutMsFor([{ chunk: "x".repeat(40) }])).toBe(25_000);
++    expect(requestTimeoutMsFor([{ chunk: "y".repeat(1800) }])).toBe(27_500); // 2 后端块
++    expect(requestTimeoutMsFor([{ chunk: "z".repeat(1000) }])).toBe(25_000); // 恰 1000 → 1 块
++  });
++  it("满批 16×1800 最坏 32 后端块 = 后端公式 97.5s + 5s 余量（有界兜底）", () => {
++    const worst = Array.from({ length: 16 }, () => ({ chunk: "w".repeat(1800) }));
++    expect(requestTimeoutMsFor(worst)).toBe(102_500);
++  });
++});
++
+ describe("translateText 合批/缓存/降级", () => {
+   it("不值得翻 → 立即 null 零请求", async () => {
+     const out = await translateText("这段中文思考不需要翻译。");
+@@ -131,13 +144,34 @@ describe("translateText 合批/缓存/降级", () => {
+     await expect(p2).resolves.toBe("恢复了");
+   });
+ 
+-  it("请求显式带 20s 超时（后端卡住时由 apiFetch 中止，不退化为无限等待）", async () => {
++  it("请求超时按批动态——单块=基准+余量（后端卡住时仍由 apiFetch 中止兜底）", async () => {
+     apiFetchMock.mockResolvedValue(okResponse([{ id: "0", text: "译超时", translated: true }]));
+     const p = translateText("timeout option english thinking text check.");
+     await vi.advanceTimersByTimeAsync(250);
+     await expect(p).resolves.toBe("译超时");
+     const options = apiFetchMock.mock.calls[0]![1] as { timeoutMs?: number };
+-    expect(options.timeoutMs).toBe(20_000);
++    expect(options.timeoutMs).toBe(25_000); // 1 个后端块：20s 基准 + 5s 余量
++  });
++
++  it("满批 16×1800 的 timeoutMs ≥ 后端公式 97.5s——不再被固定 20s 误杀（2026-10-23 FR-01）", async () => {
++    apiFetchMock.mockImplementation(
++      async (_path: string, options: { json: { items: Array<{ id: string }> } }) =>
++        okResponse(options.json.items.map((it, idx) => ({ id: it.id, text: `[${idx}]`, translated: true }))),
++    );
++    // 单段无段界长文 → 恰按 1800 硬切成 16 块满批（15×1800 + 1560）
++    const sentence = "Full batch budget english thinking sentence check. ";
++    const text = sentence.repeat(560); // ~28560 字符 → 16 块单批
++    const p = translateText(text);
++    await vi.advanceTimersByTimeAsync(250);
++    await p;
++    const options = apiFetchMock.mock.calls[0]![1] as {
++      timeoutMs?: number;
++      json: { items: Array<{ text: string }> };
++    };
++    expect(options.json.items).toHaveLength(16);
++    // 最坏 32 个后端块（1800 → 2×1000）：20s + 31×2.5s = 97.5s，前端再 +5s 余量
++    expect(options.timeoutMs).toBeGreaterThanOrEqual(20_000 + 31 * 2_500);
++    expect(options.timeoutMs).toBe(102_500);
+   });
+ 
+   it("超时（apiFetch reject timeout）→ null + 60s 退避", async () => {
+diff --git a/frontend/src/lib/thinking-translate.ts b/frontend/src/lib/thinking-translate.ts
+index 12df2f5fb..71cfc2d85 100644
+--- a/frontend/src/lib/thinking-translate.ts
++++ b/frontend/src/lib/thinking-translate.ts
+@@ -23,11 +23,32 @@ const BATCH_WINDOW_MS = 250;
+ /** 引擎不可用退避时长。 */
+ const UNAVAILABLE_BACKOFF_MS = 60_000;
+ /**
+- * 单次请求超时（2026-10-22-fix-translate-pending）：POST 默认无超时，后端子进程
+- * 卡在模型下载时请求会永久挂起（界面恒「翻译中」）。20s 后 abort 走网络失败同款
+- * 降级链（回退原文 + 60s 退避）；后端同类超时已同窗收紧（TRANSLATE_REQUEST_TIMEOUT_SEC）。
++ * 单次请求超时（2026-10-22-fix-translate-pending 起 POST 必带超时防挂起；
++ * 2026-10-23-translate-budget-align 改按批动态）：镜像后端等待预算公式
++ * （engine.py `_timeout_for`：基准 20s + 每多一块 2.5s，改动须双侧同步），
++ * 按本批**最坏后端块数**估算——前端块 ≤1800 字符，后端 CHUNK_MAX_CHARS=1000
++ * 二次细切，每条前端块最多膨胀为 2 块。外加 5s HTTP/线程池余量；前端超时是
++ * 兜底而非首道防线（后端预算先到期会 fail-soft 正常返回），满批 16×1800 最坏
++ * 32 块 = 102.5s，仍有界防挂起。旧固定 20s 会被 e7ce2a101 实测 21.5s 的正常
++ * 满批推理误杀并累计后端崩溃计数（3 次即 600s 退避）。
+  */
+-const REQUEST_TIMEOUT_MS = 20_000;
++const BACKEND_TIMEOUT_BASE_MS = 20_000;
++const BACKEND_TIMEOUT_PER_CHUNK_MS = 2_500;
++const BACKEND_CHUNK_MAX_CHARS = 1_000;
++const REQUEST_TIMEOUT_MARGIN_MS = 5_000;
++
++/** 按批动态请求超时：后端公式（最坏块数）+ 余量。 */
++export function requestTimeoutMsFor(entries: ReadonlyArray<{ chunk: string }>): number {
++  const backendChunks = entries.reduce(
++    (sum, entry) => sum + Math.max(1, Math.ceil(entry.chunk.length / BACKEND_CHUNK_MAX_CHARS)),
++    0,
++  );
++  return (
++    BACKEND_TIMEOUT_BASE_MS +
++    Math.max(0, backendChunks - 1) * BACKEND_TIMEOUT_PER_CHUNK_MS +
++    REQUEST_TIMEOUT_MARGIN_MS
++  );
++}
+ /** 内存缓存条目上限（FIFO 淘汰——译文纯函数结果，先入者先淘汰足够）。 */
+ const CACHE_MAX_ENTRIES = 500;
+ 
+@@ -162,7 +183,7 @@ async function requestBatch(entries: QueueEntry[]): Promise<void> {
+     resp = await apiFetch<TranslateApiResponse>("/api/translate/thinking", {
+       method: "POST",
+       json: { items, target: "zh" },
+-      timeoutMs: REQUEST_TIMEOUT_MS,
++      timeoutMs: requestTimeoutMsFor(entries),
+       timeoutMessage: "翻译请求超时，已回退原文",
+     });
+   } catch {
