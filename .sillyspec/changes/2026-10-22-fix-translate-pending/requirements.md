@@ -24,7 +24,7 @@ created_at: 2026-10-22T01:21:32.514Z
 
 ### FR-02: 后端子进程请求超时改为可配置且默认收紧到 20s（现 300s），超时 fail-soft 返回原文
 
-- `TranslateSubprocessProxy` 必须支持构造参数 `request_timeout_sec`（缺省读取 `settings.translate_request_timeout_sec`，环境变量 `TRANSLATE_REQUEST_TIMEOUT_SEC`，默认 `20.0`）；等待子进程响应超过该值必须按崩溃处理并 fail-soft 返回原文，禁止沿用固定的 300 秒。
+- `TranslateSubprocessProxy` 必须支持构造参数 `request_timeout_sec`（缺省读取 `settings.translate_request_timeout_sec`，环境变量 `TRANSLATE_REQUEST_TIMEOUT_SEC`，默认 `20.0`）；等待子进程响应超过该值必须按崩溃处理并 fail-soft 返回原文，禁止沿用固定的 300 秒。实际等待预算必须按批大小线性放宽（每条 +2.5s，满批 16 条约 57.5s）——16×1000 字符满批在 2 核生产机实测 21.5s，单一 20s 定值会误杀正常推理并累计崩溃计数。
 
 #### 场景：慢子进程触发 fail-soft
 

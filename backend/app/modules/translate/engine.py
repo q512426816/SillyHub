@@ -146,6 +146,15 @@ class TranslateSubprocessProxy:
 
     # -- 对外接口 -----------------------------------------------------------
 
+    def _timeout_for(self, batch_size: int) -> float:
+        """按批大小放宽等待预算：基准 20s + 每多一条 2.5s。
+
+        2026-10-22 评审 P2：16×1000 字符满批在 2 核生产机实测 21.5s，单一 20s
+        预算会误杀正常推理并累计崩溃计数（3 次即 600s 退避，翻译永久不可用）；
+        满批 16 条约 57.5s，仍远低于改造前的固定 300s。
+        """
+        return self.request_timeout_sec + max(0, batch_size - 1) * 2.5
+
     @property
     def available(self) -> bool:
         """未进入崩溃退避期（True 时可继续 translate）。"""
@@ -163,7 +172,7 @@ class TranslateSubprocessProxy:
             raise TranslateSubprocessError(
                 f"translate subprocess in crash backoff until {self.retry_at:.0f}"
             )
-        deadline = time.monotonic() + self.request_timeout_sec
+        deadline = time.monotonic() + self._timeout_for(len(texts))
         with self._lock:
             attempts = 0
             while True:

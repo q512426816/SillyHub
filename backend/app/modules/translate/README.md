@@ -12,7 +12,7 @@ API——推理在本地 CTranslate2 子进程完成（opus-mt-en-zh int8 量化
 | `TRANSLATE_MODEL_REPO` | `jiangzhuo9357/opus-mt-en-zh-ct2` | ct2 格式模型 repo id（换更大模型只改这里） |
 | `TRANSLATE_MODEL_DIR` | 空 | 本地模型目录（含 `config.json` 的 ct2 目录）；非空时零下载 |
 | `TRANSLATE_WORKER_IDLE_EXIT_SEC` | `600` | 翻译子进程闲置自灭秒数 |
-| `TRANSLATE_REQUEST_TIMEOUT_SEC` | `20` | 单次子进程请求等待上限；超时 fail-soft 返回原文（2026-10-22 前为固定 300s，模型未预置时界面会挂 5 分钟） |
+| `TRANSLATE_REQUEST_TIMEOUT_SEC` | `20` | 单次子进程请求等待上限的**基准值**；超时 fail-soft 返回原文。实际预算按批大小线性放宽（每条 +2.5s，满批 16 条约 57.5s——实测 16×1000 字符满批 21.5s，单一定值会误杀）。2026-10-22 前为固定 300s，模型未预置时界面会挂 5 分钟 |
 | `TRANSLATE_CACHE_MAX_ENTRIES` | `2048` | 进程内译文 LRU 条目上限 |
 
 模型首用从 HuggingFace 自动下载（~100-150MB，尊重 `HF_ENDPOINT` 镜像与 `HF_HOME`

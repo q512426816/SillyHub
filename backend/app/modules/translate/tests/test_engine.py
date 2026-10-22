@@ -187,6 +187,17 @@ def test_request_timeout_sec_override_fails_fast(silent_worker_path: Path) -> No
         proxy.close()
 
 
+def test_request_timeout_scales_with_batch_size() -> None:
+    """评审 P2：满批 16×1000 字符实测 21.5s，单一 20s 预算会误杀——按批线性放宽。"""
+    proxy = TranslateSubprocessProxy("unused")
+    try:
+        assert proxy._timeout_for(1) == 20.0
+        assert proxy._timeout_for(2) == 22.5
+        assert proxy._timeout_for(16) == 57.5
+    finally:
+        proxy.close()
+
+
 def test_request_timeout_default_from_settings() -> None:
     """缺省值来自 settings（默认 20s——2026-10-22 生产事故前是固定 300s）。"""
     from app.core.config import get_settings
