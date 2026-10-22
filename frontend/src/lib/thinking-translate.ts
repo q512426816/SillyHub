@@ -23,11 +23,32 @@ const BATCH_WINDOW_MS = 250;
 /** 引擎不可用退避时长。 */
 const UNAVAILABLE_BACKOFF_MS = 60_000;
 /**
- * 单次请求超时（2026-10-22-fix-translate-pending）：POST 默认无超时，后端子进程
- * 卡在模型下载时请求会永久挂起（界面恒「翻译中」）。20s 后 abort 走网络失败同款
- * 降级链（回退原文 + 60s 退避）；后端同类超时已同窗收紧（TRANSLATE_REQUEST_TIMEOUT_SEC）。
+ * 单次请求超时（2026-10-22-fix-translate-pending 起 POST 必带超时防挂起；
+ * 2026-10-23-translate-budget-align 改按批动态）：镜像后端等待预算公式
+ * （engine.py `_timeout_for`：基准 20s + 每多一块 2.5s，改动须双侧同步），
+ * 按本批**最坏后端块数**估算——前端块 ≤1800 字符，后端 CHUNK_MAX_CHARS=1000
+ * 二次细切，每条前端块最多膨胀为 2 块。外加 5s HTTP/线程池余量；前端超时是
+ * 兜底而非首道防线（后端预算先到期会 fail-soft 正常返回），满批 16×1800 最坏
+ * 32 块 = 102.5s，仍有界防挂起。旧固定 20s 会被 e7ce2a101 实测 21.5s 的正常
+ * 满批推理误杀并累计后端崩溃计数（3 次即 600s 退避）。
  */
-const REQUEST_TIMEOUT_MS = 20_000;
+const BACKEND_TIMEOUT_BASE_MS = 20_000;
+const BACKEND_TIMEOUT_PER_CHUNK_MS = 2_500;
+const BACKEND_CHUNK_MAX_CHARS = 1_000;
+const REQUEST_TIMEOUT_MARGIN_MS = 5_000;
+
+/** 按批动态请求超时：后端公式（最坏块数）+ 余量。 */
+export function requestTimeoutMsFor(entries: ReadonlyArray<{ chunk: string }>): number {
+  const backendChunks = entries.reduce(
+    (sum, entry) => sum + Math.max(1, Math.ceil(entry.chunk.length / BACKEND_CHUNK_MAX_CHARS)),
+    0,
+  );
+  return (
+    BACKEND_TIMEOUT_BASE_MS +
+    Math.max(0, backendChunks - 1) * BACKEND_TIMEOUT_PER_CHUNK_MS +
+    REQUEST_TIMEOUT_MARGIN_MS
+  );
+}
 /** 内存缓存条目上限（FIFO 淘汰——译文纯函数结果，先入者先淘汰足够）。 */
 const CACHE_MAX_ENTRIES = 500;
 
@@ -162,7 +183,7 @@ async function requestBatch(entries: QueueEntry[]): Promise<void> {
     resp = await apiFetch<TranslateApiResponse>("/api/translate/thinking", {
       method: "POST",
       json: { items, target: "zh" },
-      timeoutMs: REQUEST_TIMEOUT_MS,
+      timeoutMs: requestTimeoutMsFor(entries),
       timeoutMessage: "翻译请求超时，已回退原文",
     });
   } catch {

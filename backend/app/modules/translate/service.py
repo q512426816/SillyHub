@@ -138,8 +138,13 @@ async def translate_items(items: list[TranslateItemIn], target: str = "zh") -> d
     pending: dict[str, list[SourceSegment]] = {}
     # 全局送翻块队列（跨 item 合批送模型）
     pending_chunks: list[str] = []
-    # chunk 在 pending_chunks 中的归属填充游标：按 (item_id, seg_idx) 顺序消费
+    # 块序总账（含缓存命中块）：按块产生顺序记 (item_id, seg_idx)——回填按本序
+    # 一次成型，缓存块与推理块同序混排（2026-10-23-translate-budget-align FR-02）
     chunk_owners: list[tuple[str, int]] = []
+    # 已解析译文（缓存命中块即时可定）：owner 序号 → 译文
+    resolved: dict[int, str] = {}
+    # pending_chunks[i] 对应的 chunk_owners 序号（推理返回后按位对账）
+    pending_owner_positions: list[int] = []
 
     for item in items:
         if not is_translation_worthy(item.text):
@@ -166,12 +171,14 @@ async def translate_items(items: list[TranslateItemIn], target: str = "zh") -> d
                 cached = _lru_get(key)
                 if cached is None:
                     cached = await _redis_get(key)
+                owner_idx = len(chunk_owners)
+                chunk_owners.append((item.id, seg_idx))
                 if cached is not None:
                     _lru_put(key, cached)  # Redis 命中回填 LRU
-                    _fill_chunk(pending, item.id, seg_idx, cached)
+                    resolved[owner_idx] = cached
                     translated_ids.add(item.id)
                 else:
-                    chunk_owners.append((item.id, seg_idx))
+                    pending_owner_positions.append(owner_idx)
                     pending_chunks.append(chunk)
 
     engine_ready = True
@@ -199,12 +206,11 @@ async def translate_items(items: list[TranslateItemIn], target: str = "zh") -> d
                     reason = "translation count mismatch"
                 else:
                     cache_writes: list[tuple[str, str]] = []
-                    for (item_id, seg_idx), chunk, translated in zip(
-                        chunk_owners, pending_chunks, translations, strict=True
-                    ):
-                        _fill_chunk(pending, item_id, seg_idx, translated)
-                        translated_ids.add(item_id)
-                        cache_writes.append((_cache_key(chunk, target), translated))
+                    for pos, translated in enumerate(translations):
+                        owner_idx = pending_owner_positions[pos]
+                        resolved[owner_idx] = translated
+                        translated_ids.add(chunk_owners[owner_idx][0])
+                        cache_writes.append((_cache_key(pending_chunks[pos], target), translated))
                     for key, value in cache_writes:
                         _lru_put(key, value)
                         await _redis_put(key, value)
@@ -217,6 +223,14 @@ async def translate_items(items: list[TranslateItemIn], target: str = "zh") -> d
             "reason": reason,
             "items": [TranslateItemOut(id=i.id, text=i.text, translated=False) for i in items],
         }
+
+    # 回填：按 chunk_owners 全序一次成型——缓存块与推理块按原文块序混排。
+    # 此前缓存命中即时回填 + 推理块推理后追加，部分命中的多块段译文块序颠倒
+    # （归档 review P2；2026-10-23-translate-budget-align / FR-02）。引擎失败
+    # 路径上方已提前原文透传返回，走到这里的 owner 必有 resolved 译文——缺失
+    # 即编排缺陷，严格 KeyError 当场暴露（禁止静默拼空）。
+    for owner_idx, (item_id, seg_idx) in enumerate(chunk_owners):
+        _fill_chunk(pending, item_id, seg_idx, resolved[owner_idx])
 
     # 重组：送翻段的占位填充后逐段拼接（保护段原样）
     for item in items:
@@ -245,8 +259,8 @@ def _fill_chunk(
     """把单块译文按序填回所属送翻段（段内块顺序拼接）。
 
     送翻段在 pending 中临时以 ``SourceSegment(text=已译拼接, translatable=True)``
-    累积；块按产生顺序到达（缓存命中乱序于请求流内不会发生——同请求内先查
-    缓存后推理，两类写入按 chunk_owners 顺序执行）。
+    累积；调用方保证按块产生顺序（chunk_owners 全序）逐块调用——缓存命中块
+    与推理块同序混排，段内块序与原文一致（2026-10-23-translate-budget-align）。
     """
     segs = pending[item_id]
     segs[seg_idx] = SourceSegment(text=segs[seg_idx].text + translated, translatable=True)

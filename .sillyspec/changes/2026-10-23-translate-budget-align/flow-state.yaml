@@ -1,0 +1,36 @@
+tier: thin
+legacy_fallback: false
+substeps:
+  artifacts: done
+born_face: thin
+with_tasks: false
+review_force: null
+input: >-
+  修复翻译超时预算矛盾与缓存回填乱序
+
+
+  动机：只读审查发现三处缺陷——①前端 thinking-translate REQUEST_TIMEOUT_MS 固定 20s，而后端 engine._timeout_for 按批放宽（20s+2.5×(n-1)，16 条预算
+  57.5s，e7ce2a101 生产实测满批 21.5s>20s），满批必被前端误杀、后端线程持锁空转并累计崩溃计数；②service.py 缓存命中块扫描期立即回填、推理块事后追加，段被切多块且部分命中缓存时译文块序颠倒（归档
+  review P2 未修）；③engine 崩溃重启换新队列但旧读线程未 join、经 self._responses 属性引用写入新队列，EOF 哨兵/迟到响应污染致假崩溃计数虚增。
+
+
+  成功标准：
+
+  - 前端超时按批大小动态计算（覆盖后端公式并留余量），满批 16 条慢推理不再被前端 abort
+
+  - 段被切多块且部分命中缓存时，译文块序与原文块序一致（回归测试钉住）
+
+  - 引擎重启后旧读线程只写构造时捕获的旧队列，不污染新队列，不产生假崩溃计数
+autopilot: false
+prestage_ack: true
+baseline_commit: 8d8463d29b19a15840445b3007ee6c292ee77903
+updatedAt: '2026-10-22T23:43:18.583Z'
+cross_baselines:
+  sillyspec: d4ea05622de445ffc79eff8d4fc6a213f63ea5bf
+baseline_sha256: 0a2280c05c9f0b6da003eda81cbefda439f7988493d4186186803e1121e0ff1b
+spec_approved: true
+spec_approved_at: '2026-10-22T23:37:58.702Z'
+spec_approved_by: zcode-translate-fix
+spec_approved_channel: user-confirmed
+spec_attested_by: zcode-translate-fix
+

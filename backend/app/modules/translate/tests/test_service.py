@@ -4,8 +4,14 @@ from __future__ import annotations
 
 import pytest
 
+from app.modules.translate.chunking import collect_chunks, split_protected
 from app.modules.translate.schema import TranslateItemIn
-from app.modules.translate.service import reset_cache_for_tests, translate_items
+from app.modules.translate.service import (
+    _cache_key,
+    _lru_put,
+    reset_cache_for_tests,
+    translate_items,
+)
 
 
 class _FakeTranslator:
@@ -215,3 +221,30 @@ async def test_pure_code_content_translated_false(fake_translator: _FakeTranslat
     assert out["items"][0].translated is False
     assert out["items"][0].text == text
     assert fake_translator.calls == 0
+
+
+async def test_partial_cache_hit_keeps_chunk_order(fake_translator: _FakeTranslator) -> None:
+    """2026-10-23-translate-budget-align / FR-02：部分命中缓存的多块段块序不乱。
+
+    修复前：缓存命中块扫描期立即回填、推理块推理后追加——中间块命中时译文
+    变成 [块2译文, 块1译文, 块3译文]（缓存块全部前置，归档 review P2）。
+    修复后按块产生顺序全序回填，任何部分命中组合都与原文块序逐块对齐。
+    """
+    # 每句内容唯一（重复同句会让相邻块内容相同 → 同一缓存 key 连带命中，
+    # 构不出「部分命中」形态）
+    text = "".join(
+        f"Unique english sentence number {i} for chunk ordering regression. " for i in range(40)
+    )  # ~2600 字符单段（无段界/无保护标记）→ 3 块
+    chunks = collect_chunks(split_protected(text))
+    assert len(chunks) == 3
+    assert len(set(chunks)) == 3  # 块内容互异，缓存 key 互不相同
+    # 预填中间块缓存（模拟部分命中：LRU 淘汰/Redis TTL 过期后的跨请求残缺形态）
+    _lru_put(_cache_key(chunks[1], "zh"), "CACHED[1]")
+
+    out = await translate_items([TranslateItemIn(id="a", text=text)])
+    item = out["items"][0]
+    assert item.translated is True
+    # 只有未命中的块1/块3进引擎（fake 按批内序号回显 "译[i]:<chunk>"）
+    assert fake_translator.batches == [[chunks[0], chunks[2]]]
+    # 全序拼装：块1译文 + 缓存中间块 + 块3译文（修复前 CACHED[1] 打头）
+    assert item.text == f"译[0]:{chunks[0]}CACHED[1]译[1]:{chunks[2]}"

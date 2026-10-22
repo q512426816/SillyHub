@@ -17,6 +17,7 @@ vi.mock("@/lib/api", () => ({ apiFetch: (...args: unknown[]) => apiFetchMock(...
 
 import {
   needsTranslation,
+  requestTimeoutMsFor,
   resetThinkingTranslateForTests,
   splitIntoChunks,
   translateText,
@@ -67,6 +68,18 @@ describe("splitIntoChunks 分块", () => {
     expect(chunks.length).toBeGreaterThan(1);
     expect(chunks.every((c) => c.length <= 1800)).toBe(true);
     expect(chunks.join("")).toBe(text);
+  });
+});
+
+describe("requestTimeoutMsFor 超时预算（与后端 engine._timeout_for 公式同源）", () => {
+  it("单块 = 基准 + 余量；按最坏后端块数（每 1000 字符一块）线性放宽", () => {
+    expect(requestTimeoutMsFor([{ chunk: "x".repeat(40) }])).toBe(25_000);
+    expect(requestTimeoutMsFor([{ chunk: "y".repeat(1800) }])).toBe(27_500); // 2 后端块
+    expect(requestTimeoutMsFor([{ chunk: "z".repeat(1000) }])).toBe(25_000); // 恰 1000 → 1 块
+  });
+  it("满批 16×1800 最坏 32 后端块 = 后端公式 97.5s + 5s 余量（有界兜底）", () => {
+    const worst = Array.from({ length: 16 }, () => ({ chunk: "w".repeat(1800) }));
+    expect(requestTimeoutMsFor(worst)).toBe(102_500);
   });
 });
 
@@ -131,13 +144,34 @@ describe("translateText 合批/缓存/降级", () => {
     await expect(p2).resolves.toBe("恢复了");
   });
 
-  it("请求显式带 20s 超时（后端卡住时由 apiFetch 中止，不退化为无限等待）", async () => {
+  it("请求超时按批动态——单块=基准+余量（后端卡住时仍由 apiFetch 中止兜底）", async () => {
     apiFetchMock.mockResolvedValue(okResponse([{ id: "0", text: "译超时", translated: true }]));
     const p = translateText("timeout option english thinking text check.");
     await vi.advanceTimersByTimeAsync(250);
     await expect(p).resolves.toBe("译超时");
     const options = apiFetchMock.mock.calls[0]![1] as { timeoutMs?: number };
-    expect(options.timeoutMs).toBe(20_000);
+    expect(options.timeoutMs).toBe(25_000); // 1 个后端块：20s 基准 + 5s 余量
+  });
+
+  it("满批 16×1800 的 timeoutMs ≥ 后端公式 97.5s——不再被固定 20s 误杀（2026-10-23 FR-01）", async () => {
+    apiFetchMock.mockImplementation(
+      async (_path: string, options: { json: { items: Array<{ id: string }> } }) =>
+        okResponse(options.json.items.map((it, idx) => ({ id: it.id, text: `[${idx}]`, translated: true }))),
+    );
+    // 单段无段界长文 → 恰按 1800 硬切成 16 块满批（15×1800 + 1560）
+    const sentence = "Full batch budget english thinking sentence check. ";
+    const text = sentence.repeat(560); // ~28560 字符 → 16 块单批
+    const p = translateText(text);
+    await vi.advanceTimersByTimeAsync(250);
+    await p;
+    const options = apiFetchMock.mock.calls[0]![1] as {
+      timeoutMs?: number;
+      json: { items: Array<{ text: string }> };
+    };
+    expect(options.json.items).toHaveLength(16);
+    // 最坏 32 个后端块（1800 → 2×1000）：20s + 31×2.5s = 97.5s，前端再 +5s 余量
+    expect(options.timeoutMs).toBeGreaterThanOrEqual(20_000 + 31 * 2_500);
+    expect(options.timeoutMs).toBe(102_500);
   });
 
   it("超时（apiFetch reject timeout）→ null + 60s 退避", async () => {

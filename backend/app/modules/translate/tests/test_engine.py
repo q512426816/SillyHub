@@ -250,3 +250,34 @@ def test_get_translator_returns_proxy_and_backoff_reason(fake_worker_path: Path)
     translator.retry_at = time.monotonic() + 999
     translator2, reason2 = get_translator("unused")
     assert translator2 is None and reason2 and "unavailable" in reason2
+
+
+def test_reader_writes_only_to_captured_queue() -> None:
+    """2026-10-23-translate-budget-align / FR-03：读线程只写构造时捕获的队列。
+
+    修复前 _reader 经 self._responses 属性写入：崩溃重启 _ensure_started 整体
+    换队列后，旧读线程的 EOF 哨兵/迟到响应落入新队列 → 下次请求读到哨兵即
+    "translate worker exited" 假崩溃，3 次即 600s 退避。修复后队列经参数捕获，
+    旧线程只写旧队列（无人读，自然作废）。
+    """
+    import queue as _queue
+    import threading as _threading
+
+    proxy = TranslateSubprocessProxy("unused")
+    try:
+        captured = _queue.Queue()  # 旧线程启动时捕获的队列
+        new_queue = _queue.Queue()  # 重启后的新队列（self._responses 已换）
+        proxy._responses = new_queue
+        thread = _threading.Thread(
+            target=proxy._reader, args=(iter(["resp-a\n"]), captured), daemon=True
+        )
+        thread.start()
+        thread.join(timeout=5.0)
+        assert not thread.is_alive()
+        # 响应行与 EOF 哨兵都只进 captured；new_queue 保持为空（无污染）
+        assert captured.get(timeout=1.0) == "resp-a\n"
+        sentinel = captured.get(timeout=1.0)
+        assert not isinstance(sentinel, str)
+        assert new_queue.empty()
+    finally:
+        proxy.close()

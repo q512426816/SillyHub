@@ -118,21 +118,29 @@ class TranslateSubprocessProxy:
             encoding="utf-8",
             bufsize=1,
         )
-        _threading.Thread(target=self._reader, args=(self._proc.stdout,), daemon=True).start()
+        _threading.Thread(
+            target=self._reader, args=(self._proc.stdout, self._responses), daemon=True
+        ).start()
         _threading.Thread(
             target=self._stderr_reader, args=(self._proc.stderr,), daemon=True
         ).start()
 
-    def _reader(self, stdout: object) -> None:
-        """读线程：响应行入队；EOF/断裂入哨兵。"""
+    def _reader(self, stdout: object, responses: queue.Queue) -> None:
+        """读线程：响应行入队；EOF/断裂入哨兵。
+
+        队列经参数捕获（2026-10-23-translate-budget-align / FR-03）：崩溃重启
+        _ensure_started 换新队列后，旧读线程的 EOF 哨兵/迟到响应只落入已废弃
+        的旧队列（无人读，自然作废），不会污染新队列触发 "translate worker
+        exited"/"protocol mismatch" 假崩溃计数（3 次即 600s 退避）。
+        """
         eof_resp = object()
         try:
             for line in stdout:
-                self._responses.put(line)
+                responses.put(line)
         except Exception:
             pass
         finally:
-            self._responses.put(eof_resp)
+            responses.put(eof_resp)
 
     def _stderr_reader(self, stderr: object) -> None:
         """stderr 读线程：逐行转发到主进程日志（WARNING）；异常静默不影响请求。"""
