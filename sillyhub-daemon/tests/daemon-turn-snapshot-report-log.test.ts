@@ -230,12 +230,14 @@ describe('2026-10-22-daemon-snapshot-report-log：快照上报收口日志', () 
     expect(lines[0]).toContain('run_id=run-2');
   });
 
-  it('无 claimToken 但有 resilience → info 级 outcome=enqueued（等重放，不算丢）', async () => {
+  it('无 claimToken 但有 resilience → 入箱落定后 info 级 outcome=enqueued（等重放，不算丢）', async () => {
     const infoSpy = vi.spyOn(console, 'info').mockImplementation(() => {});
     const { daemon } = track(buildDaemon(createMockSessionManager({ claimToken: '' })));
     injectResilience(daemon, async () => {});
 
     reportSnapshot(daemon, makeReport({ runId: 'run-3' }));
+    // 入箱是异步的：落定前不应有日志（评审 P2-2：先记 enqueued 会把入箱失败吞成成功）。
+    expect(captureReportLogs(infoSpy)).toHaveLength(0);
     await flush();
 
     const lines = captureReportLogs(infoSpy);
@@ -244,20 +246,60 @@ describe('2026-10-22-daemon-snapshot-report-log：快照上报收口日志', () 
     expect(lines[0]).toContain('run_id=run-3');
   });
 
-  it('与采集器日志按 runId 配对：collected 与 reported 各一条、runId 一致', async () => {
+  it('异步入箱 reject → warn 级 outcome=dropped + drop_reason=enqueue_failed，绝不误记 enqueued', async () => {
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const infoSpy = vi.spyOn(console, 'info').mockImplementation(() => {});
+    const { daemon } = track(buildDaemon(createMockSessionManager({ claimToken: '' })));
+    injectResilience(daemon, async () => {
+      throw new Error('outbox full');
+    });
+
+    reportSnapshot(daemon, makeReport({ runId: 'run-4' }));
+    await flush();
+
+    const lines = captureReportLogs(warnSpy);
+    expect(lines).toHaveLength(1);
+    expect(lines[0]).toContain('outcome=dropped');
+    expect(lines[0]).toContain('drop_reason=enqueue_failed');
+    expect(lines[0]).toContain('outbox full');
+    // 同一轮不得再出现 enqueued（两条日志会误导成「已入箱待重放」）。
+    expect(captureReportLogs(infoSpy)).toHaveLength(0);
+  });
+
+  it('同步抛的入箱（旧实现/替身）→ 同样计 dropped/enqueue_failed', async () => {
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const { daemon } = track(buildDaemon(createMockSessionManager({ claimToken: '' })));
+    (daemon as unknown as { _resilience: unknown })._resilience = {
+      enqueueRunResult: vi.fn(() => {
+        throw new Error('sync boom');
+      }),
+    };
+
+    reportSnapshot(daemon, makeReport({ runId: 'run-5' }));
+    await flush();
+
+    const lines = captureReportLogs(warnSpy);
+    expect(lines).toHaveLength(1);
+    expect(lines[0]).toContain('outcome=dropped');
+    expect(lines[0]).toContain('drop_reason=enqueue_failed');
+  });
+
+  it('一轮一条可配对的 reported 行：不同 runId 各自成行，可按 run_id 与 collected 对齐', async () => {
     const infoSpy = vi.spyOn(console, 'info').mockImplementation(() => {});
     const { daemon } = track(buildDaemon(createMockSessionManager({})));
 
-    reportSnapshot(daemon, makeReport({ runId: 'run-pair' }));
+    reportSnapshot(daemon, makeReport({ runId: 'run-a' }));
+    reportSnapshot(daemon, makeReport({ runId: 'run-b' }));
     await flush();
 
     const lines = captureReportLogs(infoSpy);
-    expect(lines).toHaveLength(1);
-    // 采集器那条由 SessionManager 打（tag 见下），字段名是 runId；本层是 run_id。
-    expect(lines[0]).toContain('run_id=run-pair');
-    expect(REPORT_TAG).toBe('[daemon.turn_file_changes_reported]');
-    expect('[turn-file-changes] turn_file_changes_collected').toContain(
-      'turn_file_changes_collected',
+    expect(lines).toHaveLength(2);
+    // 配对键：daemon 侧 run_id= <RunId>，与采集器 sample 里的 runId 同值（camelCase
+    // 只差命名风格，值一致即可 grep 对齐）；两条各自只带自己的 runId。
+    const byRun = new Map(
+      lines.map((line) => [/run_id=(\S+)/.exec(line)?.[1] ?? '', line] as const),
     );
+    expect([...byRun.keys()].sort()).toEqual(['run-a', 'run-b']);
+    expect(byRun.get('run-a')).not.toContain('run-b');
   });
 });

@@ -4500,10 +4500,6 @@ export class Daemon {
     const startedAt = Date.now();
     const state = this._sessionManager?.get(report.sessionId);
     if (!state) {
-      this._logger.warn('on_turn_snapshot_session_not_found', {
-        session_id: report.sessionId,
-        run_id: report.runId,
-      });
       this._logTurnSnapshotReport('dropped', report, {
         dropReason: 'session_not_found',
         startedAt,
@@ -4518,21 +4514,33 @@ export class Daemon {
       daemonVersion: DAEMON_VERSION,
     });
     if (!state.claimToken) {
-      this._logger.warn('on_turn_snapshot_no_claim_token', {
-        session_id: report.sessionId,
-        lease_id: state.leaseId,
-        run_id: report.runId,
-      });
       if (this._resilience) {
+        // 入箱是异步的（resilience → outbox 可能 reject）：**按落定结果记账**，
+        // 不能先记 enqueued——否则「入箱失败被吞」会被误报成「可重放」。
         try {
-          void this._resilience
-            .enqueueRunResult(state.leaseId, '', report.runId, payload)
-            .catch(() => undefined);
-          this._logTurnSnapshotReport('enqueued', report, { startedAt });
-        } catch {
-          // 入箱失败不抛（观测面 best-effort）——按丢弃记账。
+          const enqueued = this._resilience.enqueueRunResult(
+            state.leaseId,
+            '',
+            report.runId,
+            payload,
+          );
+          void Promise.resolve(enqueued).then(
+            () => {
+              this._logTurnSnapshotReport('enqueued', report, { startedAt });
+            },
+            (error: unknown) => {
+              this._logTurnSnapshotReport('dropped', report, {
+                dropReason: 'enqueue_failed',
+                error,
+                startedAt,
+              });
+            },
+          );
+        } catch (error) {
+          // 同步抛错（旧实现/替身）同样按丢弃记账，绝不回灌轮终态链路。
           this._logTurnSnapshotReport('dropped', report, {
             dropReason: 'enqueue_failed',
+            error,
             startedAt,
           });
         }
@@ -4546,10 +4554,6 @@ export class Daemon {
     }
     // 防御旧测试替身缺方法（ClientLike 声明为必填，实际 mock 可能省略）。
     if (typeof this._client.notifyRunResult !== 'function') {
-      this._logger.debug('on_turn_snapshot_notify_unavailable', {
-        session_id: report.sessionId,
-        run_id: report.runId,
-      });
       this._logTurnSnapshotReport('dropped', report, {
         dropReason: 'notify_unavailable',
         startedAt,
@@ -4562,14 +4566,7 @@ export class Daemon {
         this._logTurnSnapshotReport('delivered', report, { startedAt });
       })
       .catch((error: unknown) => {
-        // backend 4xx/5xx / 网络错误：只 warn，不重试（下一轮不受影响）。
-        this._logger.warn('on_turn_snapshot_notify_failed', {
-          session_id: report.sessionId,
-          lease_id: state.leaseId,
-          run_id: report.runId,
-          status: report.fileChanges.status,
-          error: String(error),
-        });
+        // backend 4xx/5xx / 网络错误：只 warn 级记一条（不重试，下一轮不受影响）。
         this._logTurnSnapshotReport('failed', report, { error, startedAt });
       });
   }

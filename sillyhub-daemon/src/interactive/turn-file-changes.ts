@@ -25,8 +25,10 @@
  *     绝不与用户操作并发跑 git。
  *
  * 降级语义（design 契约要点 3）：**partial 不是错误态**——卡片照出，行级 +/− 显示
- * 破折号；`unavailable` / `failed` 由 backend 记为 `capability="tool_only"`，前端自
- * 2026-10-22-file-card-hide-empty 起对该档**不出卡**（没有信息就不占位）。任何
+ * 破折号。`failed` / `unavailable` 仍会产出一份**完整快照**（`files=[]` + 对应
+ * status），backend 据「是否带 `file_changes`」判 `capability="full"`，前端再按
+ * status 判不出卡（2026-10-22-file-card-hide-empty：没有信息就不占位）；只有
+ * 「压根没上报」（老 daemon / 本轮未采）才是 `capability="tool_only"`。任何
  * 情况下都不把「没有快照」伪装成「本轮无改动」（本模块只报告诚实的 status）。
  *
  * spike-01 实测（2026-10-21，本机安静窗口 35% CPU，node 24 / Windows，用**本模块

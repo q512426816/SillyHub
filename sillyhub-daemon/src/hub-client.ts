@@ -1272,10 +1272,11 @@ export class HubClient {
     // camelCase 同惯例）。undefined（老 daemon / 本轮未采）→ 不写 → backend
     // `capability="tool_only"`。
     //
-    // 消费侧口径（2026-10-22-file-card-hide-empty 起）：`capability="tool_only"` /
-    // 快照缺失 / 采集失败一律**不出卡**——前端「仅工具编辑」降级卡已下线（没有信息
-    // 就不占位）；`capability` 字段仍是版本门控真相源，禁把「没快照」显示成「本轮
-    // 无改动」。需要判「没采到 / 采到但没落库」看 daemon 日志
+    // 消费侧口径（2026-10-22-file-card-hide-empty 起）：无可用数据的轮一律**不出卡**
+    // ——capability 为 `tool_only`（压根没上报）、或上报了但 status 是
+    // `failed` / `unavailable`，前端都不占位（没有信息就不显示）；`capability` /
+    // status 仍是版本门控真相源，禁把「没快照」显示成「本轮无改动」。需要判
+    // 「没采到 / 采到但没落库」看 daemon 日志
     // `turn_file_changes_collected` 与 `turn_file_changes_reported` 的 runId 配对。
     //
     // 时序：首报（终止 run）不携带快照；快照在轮终态之后采集完成，由 daemon

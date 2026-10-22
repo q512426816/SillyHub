@@ -56,8 +56,9 @@ export interface TurnFileChange {
  *                    队列溢出（reason=queue_overflow）/ 行数口径未采集（spike-01 退档）
  *                    —— 卡片照出，行级 +/− 显示破折号（partial 不是错误态，E3）；
  *   - `failed`     git 异常但非「不可用」形态（未知错误）；
- *   - `unavailable` 非 git 仓 / git 缺失 —— 前端**无数据不出卡**（2026-10-22-file-card-hide-empty
- *                    起旧的降级占位卡已下线；`capability` 仍是版本门控真相源）。
+ *   - `unavailable` 非 git 仓 / git 缺失 —— 仍产出完整快照（`files=[]`），backend
+ *                    落 `capability="full"`，前端按 status 不出卡（2026-10-22-file-card-hide-empty
+ *                    起旧的降级占位卡已下线）；只有「没上报」才是 `tool_only`。
  */
 export type TurnFileChangesStatus = 'ok' | 'partial' | 'failed' | 'unavailable';
 
@@ -94,9 +95,13 @@ export interface TurnFileChangesSnapshot {
 }
 
 /**
- * capability 标记：daemon 未上报快照时 backend 落 `tool_only`。
- * 前端自 2026-10-22-file-card-hide-empty 起对该档**不出卡**（没有信息就不占位）；
- * `capability` 本身仍是版本门控真相源（禁把「没快照」显示成「本轮无改动」）。
+ * capability 标记：backend 按「本轮上报里有没有 `file_changes`」判定——带了（含
+ * `failed` / `unavailable` 的完整快照）→ `full`；压根没上报（老 daemon / 未采）
+ * → `tool_only`。
+ *
+ * 前端自 2026-10-22-file-card-hide-empty 起对「无可用数据」一律**不出卡**（含
+ * `tool_only`、`full` 但 `failed/unavailable`、`partial` 且无文件清单之外的零信息
+ * 形态）；`capability` 本身仍是版本门控真相源（禁把「没快照」显示成「本轮无改动」）。
  * daemon 侧只做类型占位（本文件不产出 capability——由 backend 读模型决定）。
  */
 export type FileChangesCapability = 'full' | 'tool_only';
