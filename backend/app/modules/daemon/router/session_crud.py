@@ -305,6 +305,46 @@ async def list_sessions(
         run_status_map: dict[uuid.UUID, str] = {row[0]: row[1] for row in active_rows}
         for r in reads:
             r.current_run_status = run_status_map.get(r.id)
+    # 2026-10-20-session-awaiting-answer-status：批量注入等待用户回答的对话请求
+    # 种类（照上方 current_run_status 的 IN 批查注入先例，零 N+1）。数据源
+    # session_dialog_requests status='pending'——模型注释明示普通 canUseTool
+    # 审批不落行、落行的都是"may wait indefinitely for a human answer"的用户
+    # 对话题；窗口函数取每会话 created_at 最新一条（连续提问时显示最新）。
+    # 前端行首状态槽据此显示问号「等待你回答」（压过 run running 转圈）；
+    # 无 pending 对话的会话保持 None（零回归）。
+    if items:
+        from app.modules.daemon.model import SessionDialogRequest
+
+        dialog_rn = (
+            sa_func.row_number()
+            .over(
+                partition_by=SessionDialogRequest.session_id,
+                order_by=SessionDialogRequest.created_at.desc(),
+            )
+            .label("rn")
+        )
+        dialog_subq = (
+            sa_select(
+                SessionDialogRequest.session_id.label("session_id"),
+                SessionDialogRequest.dialog_kind.label("dialog_kind"),
+                dialog_rn,
+            )
+            .where(
+                SessionDialogRequest.session_id.in_([item.id for item in items]),
+                SessionDialogRequest.status == "pending",
+            )
+            .subquery()
+        )
+        dialog_rows = (
+            await session.execute(
+                sa_select(dialog_subq.c.session_id, dialog_subq.c.dialog_kind).where(
+                    dialog_subq.c.rn == 1
+                )
+            )
+        ).all()
+        dialog_kind_map: dict[uuid.UUID, str | None] = {row[0]: row[1] for row in dialog_rows}
+        for r in reads:
+            r.pending_dialog_kind = dialog_kind_map.get(r.id)
     # task-13 / FR-04 / design §5 Phase4：批量查 lease.terminating_at 注入到每个 read。
     # 经 session.lease_id 关联 DaemonTaskLease；只查本页 lease_id 非空子集（IN 避免 N+1）。
     # lease.terminating_at 为空 / session 无 lease → read.terminating_at 保持 None（brownfield）。

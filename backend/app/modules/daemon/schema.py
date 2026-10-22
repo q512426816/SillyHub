@@ -69,6 +69,13 @@ class AgentSessionRead(BaseModel):
     # 兜底（本地 CLI 会话基线）。值域 = AgentRun.status 词表子集（ACTIVE_RUN_
     # STATUSES：pending/running/pending_approval）。
     current_run_status: str | None = None
+    # 2026-10-20-session-awaiting-answer-status：等待用户回答的对话请求种类
+    # （非 ORM 字段，router 批量查 session_dialog_requests status='pending' 注入；
+    # 窗口函数取每会话 created_at 最新一条）。值域 = dialog_kind 词表
+    # （AskUserQuestion / plan_approval / codex_request_user_input /
+    # mcp_elicitation / pi_extension_ui）；None = 无 pending 对话（普通 canUseTool
+    # 审批不落行，本字段零含义）。前端行首状态槽据此显示问号「等待你回答」。
+    pending_dialog_kind: str | None = None
     # 2026-08-05-daemon-kill-channel-unify task-13 / FR-04 / design §5 Phase4：
     # lease 处于 terminating 态的时间戳（cancel_lease 写入、daemon 回传统态后清空）。
     # 非 ORM 字段——AgentSession 本身没有该列，由 router 经 session.lease_id 关联
