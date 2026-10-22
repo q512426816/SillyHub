@@ -225,7 +225,7 @@ export function AgentProfileCard({
           {shownRefs.map((ref) => (
             <span
               key={ref.key}
-              className="rounded border border-border-soft bg-muted px-2 py-0.5 font-mono text-[11px] text-muted-foreground"
+              className="rounded border border-border bg-muted px-2 py-0.5 font-mono text-[11px] text-muted-foreground"
             >
               {ref.label || "—"}
             </span>

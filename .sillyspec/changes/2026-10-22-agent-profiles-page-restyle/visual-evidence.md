@@ -32,6 +32,12 @@
 - 新增 2 个回归用例（grid 测试）：loading 不上报、数据到达后上报 {total, defaultCount}。
   修复后 4 文件 45 用例全绿、tsc 0、eslint 0 error。
 
+## 复审 P3 修复（2026-10-23）
+
+- 芯片边框 `border-border-soft` 改为已定义的 `border-border`（前者无 token 定义，回退
+  currentColor；全仓仅此一处使用）。
+- 「设为默认」用例补 `onPreview` 未调用断言，与其余四项操作的不冒泡口径一致（FR-05）。
+
 ## 三主题证据边界（FR-06）
 
 - 实页截图覆盖：暗夜主题（完整核验）+ blue 主题（登录默认态抽查）；

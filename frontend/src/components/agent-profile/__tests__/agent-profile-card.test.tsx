@@ -293,10 +293,11 @@ describe("AgentProfileCard 设为默认 / 取消默认（task-05 / FR-02 前端�
 
   it("is_user_default=false 且传 onSetDefault → 显「设为默认」按钮，点按触发回调", () => {
     const onSetDefault = vi.fn();
+    const onPreview = vi.fn();
     renderCard(
       <AgentProfileCard
         profile={makeProfile({ is_user_default: false })}
-        onPreview={vi.fn()}
+        onPreview={onPreview}
         onEdit={vi.fn()}
         onCopy={vi.fn()}
         onDelete={vi.fn()}
@@ -306,6 +307,7 @@ describe("AgentProfileCard 设为默认 / 取消默认（task-05 / FR-02 前端�
     );
     fireEvent.click(screen.getByRole("button", { name: "设为默认" }));
     expect(onSetDefault).toHaveBeenCalledTimes(1);
+    expect(onPreview).not.toHaveBeenCalled(); // stopPropagation：不触发预览（FR-05）
   });
 
   it("未传默认回调 → 不渲染设为默认操作（向下兼容既有挂载点）", () => {
