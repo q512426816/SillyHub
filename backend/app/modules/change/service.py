@@ -18,7 +18,7 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 from fastapi import HTTPException
-from sqlalchemy import and_, func, or_, select, tuple_
+from sqlalchemy import and_, func, or_, select, tuple_, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlmodel import col
@@ -1750,7 +1750,16 @@ class ChangeService:
                     tombstone_anchor_keys.add(key)
         # FR-03a / 审计 A5：删除环收集被删 key，主 commit 后独立短事务批量联动删
         # progress 收件箱行（见循环后调用点注释）。
+        # 2026-10-22-change-delete-session-history-fix / FR-01：物理删 Change 前
+        # **先显式解绑**锚定 run 的 change_id——轮级打锚是「用量归属」语义，不是
+        # 生命周期从属。历史事故：2026-10-22 会话 bbdbecc9 因 reparse 删 4 个
+        # change，agent_runs.change_id 的 ON DELETE CASCADE 级联抹掉 13 轮 run 与
+        # 全部日志，turn_count 仍虚高。两遍式：先按全部跳过条件收集真正要物理删
+        # 的行，再统一 UPDATE 解绑，最后逐行 delete——避免 autoflush 在任何 UPDATE
+        # 之前先 flush 掉已挂起的 DELETE（那样解绑来不及执行）。DB 侧 FK 同时改为
+        # SET NULL 作第二道保险；本段让行为与部署顺序无关且可观测（detached_runs）。
         deleted_keys: list[str] = []
+        rows_to_delete: list[tuple[str, Change]] = []
         for key, row in existing_by_key.items():
             if key in seen_keys:
                 continue
@@ -1783,6 +1792,24 @@ class ChangeService:
                     change_key=key,
                 )
                 continue
+            rows_to_delete.append((key, row))
+
+        if rows_to_delete:
+            from app.modules.agent.model import AgentRun
+
+            detached = await self._session.execute(
+                update(AgentRun)
+                .where(col(AgentRun.change_id).in_([row.id for _, row in rows_to_delete]))
+                .values(change_id=None)
+            )
+            log.info(
+                "change.reparse_detached_runs",
+                workspace_id=str(workspace_id),
+                change_keys=[key for key, _ in rows_to_delete],
+                detached_runs=int(detached.rowcount or 0),
+            )
+
+        for key, row in rows_to_delete:
             await self._session.delete(row)
             stats["deleted"] += 1
             # FR-03a：收集被删 key——Change 行删除的主事务 commit 后，独立短事务

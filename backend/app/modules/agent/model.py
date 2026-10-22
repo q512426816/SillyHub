@@ -236,11 +236,16 @@ class AgentRun(BaseModel, table=True):
             nullable=True,
         ),
     )
+    # 2026-10-22-change-delete-session-history-fix / FR-02：轮级打锚是**归属**
+    # 语义，不是生命周期从属——change 被物理删除（reparse 磁盘消失 / 占坑回滚）
+    # 只应清空锚点，禁止级联删除会话 run 与日志（历史事故：15:18 删 4 个 change
+    # 级联抹掉 13 轮会话内容，turn_count 仍虚高）。对齐 AgentSession.change_id
+    # 的既有 SET NULL 语义。
     change_id: uuid.UUID | None = Field(
         default=None,
         sa_column=Column(
             Uuid(as_uuid=True),
-            ForeignKey("changes.id", ondelete="CASCADE"),
+            ForeignKey("changes.id", ondelete="SET NULL"),
             nullable=True,
         ),
     )

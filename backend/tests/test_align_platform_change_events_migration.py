@@ -118,8 +118,10 @@ class TestMigrationStructure:
         # 20261021130000（spec_file_manifest.landing_version 印章列+索引——
         # 2026-10-21-spec-manifest-incremental task-01 增量清单游标）→
         # a05c84259_merge（alembic merge 收拢 20261021_user_default ×
-        # 20261021130000 双头，无 DDL——origin 侧 agent-profile-slim-default 并行迁移分叉收拢）。
-        assert heads[0] == "a05c84259_merge"  # 双头收拢 merge 成为新 head（注释链续写）
+        # 20261021130000 双头，无 DDL——origin 侧 agent-profile-slim-default 并行迁移分叉收拢）→
+        # 20261022100000（agent_runs.change_id FK CASCADE→SET NULL + turn_count
+        # 保守对账——2026-10-22-change-delete-session-history-fix FR-02/FR-04）。
+        assert heads[0] == "20261022100000"  # 链尾锚随主线新迁移前移（注释链续写）
 
     def test_revision_chain(self) -> None:
         mod = _load_migration_module()
