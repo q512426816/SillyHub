@@ -326,7 +326,10 @@ export const TurnLiveMarquee = memo(function TurnLiveMarquee({
     const viewport = viewportRef.current;
     const track = trackRef.current;
     if (!viewport || !track) return;
-    let next = Math.min(0, viewport.clientWidth - track.scrollWidth);
+    const base = Math.min(0, viewport.clientWidth - track.scrollWidth);
+    // 目标单调不增：内容文本更新不该把已滚过的位置拉回来；窗口滑动时在
+    // 上一次目标基础上再推进一条（不能回到 base，否则新条目会瞬间跳入）。
+    let next = Math.min(targetRef.current, base);
     if (slideByOne) {
       const firstItem = track.firstElementChild as HTMLElement | null;
       const gap = Number.parseFloat(getComputedStyle(track).columnGap || "0") || 0;
