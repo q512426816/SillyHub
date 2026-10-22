@@ -112,7 +112,7 @@ function segmentTs(seg: TurnSegment): number {
       return seg.ts ?? Number.NEGATIVE_INFINITY;
     // 2026-10-21-task-wakeup-restore：唤醒通知折叠行非 running 候选，取捕获 ts
     //（本行是 TurnSegment 新增 kind 的 switch 详尽性编译补点，无行为变化）。
-    case "task_wakeup":
+    case "turn_trigger":
       return seg.ts ?? Number.NEGATIVE_INFINITY;
   }
 }

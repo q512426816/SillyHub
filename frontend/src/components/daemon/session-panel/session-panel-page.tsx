@@ -12,7 +12,7 @@ import {
 import { Badge, Button, Drawer, Input, Spin } from "antd";
 import { buildErrorLogItem, buildSystemFailureItem } from "@/components/agent-log/normalize";
 import {
-  extractPreambleText, finishTurn, isTaskWakeupInjection, stripPreambleText, type UserMsgTurnSegment,
+  classifyPreambleTrigger, classifyTurnTrigger, extractPreambleText, finishTurn, isTaskWakeupInjection, stripPreambleText, type UserMsgTurnSegment,
 } from "@/components/daemon/session-log-assembler";
 import {
   TurnTimeline,
@@ -1388,9 +1388,22 @@ export function SessionPanelPage({
                     // 2026-10-13-session-taskwakeup-hide：TASK_WAKEUP 注入是纯系统
                     // 通知，不落 preamble 段（与回放路径同口径——进度视图无「上下文
                     // 注入」卡）；prompt 补写仍走 strip 剥空不写，开轮槽语义不变。
+                    // 2026-10-22-turn-trigger-generalize：影子直聊/群聊开轮前导
+                    // 改落 turn_trigger 来源标注行（新鲜轮判定：无输出段——中途
+                    // 群聊引导注入维持既有 preamble 行为）。
+                    const livePreambleTrigger = preambleText
+                      ? classifyPreambleTrigger(preambleText)
+                      : null;
+                    const liveContentTrigger = classifyTurnTrigger(
+                      env.content ?? "",
+                    );
+                    const freshTurn = !(next.segments ?? []).some(
+                      (s) => s.kind !== "preamble" && s.kind !== "turn_trigger",
+                    );
                     if (
                       preambleText &&
-                      !isTaskWakeupInjection(env.content ?? "") &&
+                      !liveContentTrigger &&
+                      !(livePreambleTrigger && freshTurn) &&
                       !next.segments?.some((s) => s.kind === "preamble")
                     ) {
                       next = {
@@ -1408,23 +1421,33 @@ export function SessionPanelPage({
                         ],
                       };
                     }
-                    // 2026-10-21-task-wakeup-restore：唤醒注入改落 task_wakeup
-                    // 留痕段（「收到任务消息」折叠行，与回放路径同口径）——不再
-                    // 整体隐藏（隐藏导致唤醒轮「无人说话 agent 凭空接话」不可溯源）。
+                    // 2026-10-22-turn-trigger-generalize：轮触发扬景行（原
+                    // task_wakeup 留痕段泛化）——系统信封（task_wakeup/auto_resume）
+                    // 折叠行 + 来源标注（shadow/group 开轮），与回放路径同口径。
                     if (
-                      isTaskWakeupInjection(env.content ?? "") &&
-                      !next.segments?.some((s) => s.kind === "task_wakeup")
+                      (liveContentTrigger || (livePreambleTrigger && freshTurn)) &&
+                      !next.segments?.some(
+                        (s) =>
+                          s.kind === "turn_trigger" &&
+                          s.trigger ===
+                            (liveContentTrigger ?? livePreambleTrigger),
+                      )
                     ) {
                       next = {
                         ...next,
                         segments: [
                           {
-                            kind: "task_wakeup",
-                            id: `wakeup:${env.run_id}`,
-                            text: env.content ?? "",
+                            kind: "turn_trigger",
+                            id: `trigger:${env.run_id}`,
+                            text:
+                              env.content ??
+                              preambleText ??
+                              "",
                             ts: env.timestamp
                               ? Date.parse(env.timestamp)
                               : Date.now(),
+                            trigger: (liveContentTrigger ??
+                              livePreambleTrigger)!,
                           },
                           ...(next.segments ?? []),
                         ],
@@ -1435,8 +1458,10 @@ export function SessionPanelPage({
                       // 把首条正文写为 prompt——系统注入开轮（[后台任务通知]，
                       // prompt 空 + 已有输出段）的中途消息已由上方
                       // appendDeliveredUserMsgIfAbsent 转 user_msg 段，不再前移轮首。
+                      // 2026-10-22-turn-trigger-generalize：turn_trigger 来源行
+                      // 不算输出段（影子直聊/群聊开轮正文照常写为 prompt）。
                       const hasOutputSegs = (next.segments ?? []).some(
-                        (s) => s.kind !== "preamble",
+                        (s) => s.kind !== "preamble" && s.kind !== "turn_trigger",
                       );
                       if (!hasOutputSegs) {
                         const promptSource = preambleText

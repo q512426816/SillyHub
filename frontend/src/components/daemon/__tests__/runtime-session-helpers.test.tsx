@@ -114,10 +114,14 @@ describe("logsToTurns 对话/过程分流（ql-20260730-003 processItems 有序�
     const turn = turns[0]!;
     // 剩余正文（群聊上下文）成为 prompt——用户气泡可渲染、失败卡可重发
     expect(turn.prompt).toBe("【群聊上下文】\n你是群聊中的 Agent 成员。\n\n[群聊记录]\n系统管理员(用户): @agent 继续干吧");
-    // 前导块仍进 preamble 段（对话视图不渲染，「全部」视图显示注入来源）
+    // 2026-10-22-turn-trigger-generalize：开轮影子直聊前导改由 turn_trigger
+    // 来源标注行承担（对话/进度两视图），不再落 preamble 段（避免双卡）。
     const preambles = (turn.segments ?? []).filter((s) => s.kind === "preamble");
-    expect(preambles).toHaveLength(1);
-    expect((preambles[0] as { text?: string }).text).toContain("【影子直聊】");
+    expect(preambles).toHaveLength(0);
+    const triggers = (turn.segments ?? []).filter((s) => s.kind === "turn_trigger");
+    expect(triggers).toHaveLength(1);
+    expect((triggers[0] as { trigger?: string }).trigger).toBe("shadow_chat");
+    expect((triggers[0] as { text?: string }).text).toContain("【影子直聊】");
     // CLI 鉴权错误行不再进 output（ql-20260904-013 分类丢弃）
     expect(turn.output).toBe("");
   });
@@ -724,13 +728,13 @@ describe("logsToTurns 系统通知开轮占位槽（2026-10-10-system-opened-tur
   });
 });
 
-// ── 2026-10-21-task-wakeup-restore：唤醒通知落 task_wakeup 留痕段 ────────────
+// ── 2026-10-22-turn-trigger-generalize：轮触发溯源段（原唤醒留痕段泛化） ─────
 
-describe("logsToTurns 唤醒通知折叠行段（2026-10-21-task-wakeup-restore）", () => {
+describe("logsToTurns 轮触发溯源段（2026-10-22-turn-trigger-generalize）", () => {
   const TS = (sec: number) =>
     `2026-10-21T03:${String(10 + Math.floor(sec / 60)).padStart(2, "0")}:${String(sec % 60).padStart(2, "0")}.000Z`;
 
-  it("唤醒注入开轮 → task_wakeup 段置于段序列首部（全文留痕），prompt 仍空、无 preamble", () => {
+  it("FR-01 唤醒注入开轮 → turn_trigger(task_wakeup) 段置于段序列首部（全文留痕），prompt 仍空、无 preamble", () => {
     const turns = toSegmentTurns([
       makeLog(
         "n1",
@@ -745,18 +749,99 @@ describe("logsToTurns 唤醒通知折叠行段（2026-10-21-task-wakeup-restore�
     expect(turn.prompt).toBe("");
     const segs = turn.segments ?? [];
     const first = segs[0]!;
-    expect(first.kind).toBe("task_wakeup");
+    expect(first.kind).toBe("turn_trigger");
+    expect((first as { trigger?: string }).trigger).toBe("task_wakeup");
     expect((first as { text: string }).text).toContain("[后台任务通知]");
     expect((first as { text: string }).text).toContain("任务「调研 sgm」已完成");
     expect(segs.some((s) => s.kind === "preamble")).toBe(false);
     expect(segs.some((s) => s.kind === "text" && s.text === "汇报正文")).toBe(true);
   });
 
-  it("无唤醒注入的普通轮不产出 task_wakeup 段", () => {
+  it("FR-02 auto_resume 注入开轮 → turn_trigger(auto_resume) 折叠行、prompt 空", () => {
+    const turns = toSegmentTurns([
+      makeLog(
+        "n1",
+        "run-1",
+        "user_input",
+        "[系统续跑提示] 平台服务重启中断了上一轮执行，会话上下文已完整恢复。\n请先检查上一轮已完成的操作（已修改的文件、已执行的命令），确认无误后从断点\n继续完成下面的任务；已完成的步骤不要重复执行。\n\n原任务正文",
+        { timestamp: TS(0) },
+      ),
+      makeLog("o1", "run-1", "stdout", "续跑输出", { timestamp: TS(30) }),
+    ]);
+    const turn = turns[0]!;
+    expect(turn.prompt).toBe("");
+    const segs = turn.segments ?? [];
+    const first = segs[0]!;
+    expect(first.kind).toBe("turn_trigger");
+    expect((first as { trigger?: string }).trigger).toBe("auto_resume");
+    expect((first as { text: string }).text).toContain("[系统续跑提示]");
+    expect(segs.some((s) => s.kind === "preamble")).toBe(false);
+  });
+
+  it("FR-03 影子直聊开轮 → turn_trigger(shadow_chat) 标注行 + 正文照常为 prompt、无 preamble 段", () => {
+    const turns = toSegmentTurns([
+      makeLog(
+        "n1",
+        "run-1",
+        "user_input",
+        "【影子直聊】来源：群聊「安全群」\n\n---\n\n帮我看下台账",
+        { timestamp: TS(0) },
+      ),
+      makeLog("o1", "run-1", "stdout", "回答", { timestamp: TS(30) }),
+    ]);
+    const turn = turns[0]!;
+    expect(turn.prompt).toBe("帮我看下台账");
+    const segs = turn.segments ?? [];
+    const first = segs[0]!;
+    expect(first.kind).toBe("turn_trigger");
+    expect((first as { trigger?: string }).trigger).toBe("shadow_chat");
+    expect(segs.some((s) => s.kind === "preamble")).toBe(false);
+    expect(segs.some((s) => s.kind === "text" && s.text === "回答")).toBe(true);
+  });
+
+  it("FR-03 群聊开轮 → turn_trigger(group_chat) 标注行、正文照常", () => {
+    const turns = toSegmentTurns([
+      makeLog(
+        "n1",
+        "run-1",
+        "user_input",
+        "【群聊上下文】群「运维群」@助手\n\n---\n\n查一下服务器状态",
+        { timestamp: TS(0) },
+      ),
+      makeLog("o1", "run-1", "stdout", "状态正常", { timestamp: TS(30) }),
+    ]);
+    const turn = turns[0]!;
+    expect(turn.prompt).toBe("查一下服务器状态");
+    const first = (turn.segments ?? [])[0]!;
+    expect(first.kind).toBe("turn_trigger");
+    expect((first as { trigger?: string }).trigger).toBe("group_chat");
+  });
+
+  it("FR-03 中途群聊引导注入（非开轮槽）不产触发行、维持既有 preamble 行为", () => {
+    const turns = toSegmentTurns([
+      makeLog("u1", "run-1", "user_input", "第一句", { timestamp: TS(0) }),
+      makeLog("o1", "run-1", "stdout", "输出", { timestamp: TS(30) }),
+      makeLog(
+        "n1",
+        "run-1",
+        "user_input",
+        "【群聊上下文】群「运维群」\n\n---\n\n中途追问",
+        { timestamp: TS(60) },
+      ),
+      makeLog("u2", "run-1", "user_input", "第二句", { timestamp: TS(90) }),
+    ]);
+    const turn = turns[0]!;
+    expect(turn.prompt).toBe("第一句");
+    const segs = turn.segments ?? [];
+    expect(segs.some((s) => s.kind === "turn_trigger")).toBe(false);
+    expect(segs.some((s) => s.kind === "preamble")).toBe(true);
+  });
+
+  it("无唤醒注入的普通轮不产出 turn_trigger 段", () => {
     const turns = toSegmentTurns([
       makeLog("u1", "run-1", "user_input", "普通问题", { timestamp: TS(0) }),
       makeLog("o1", "run-1", "stdout", "普通回答", { timestamp: TS(30) }),
     ]);
-    expect((turns[0]!.segments ?? []).some((s) => s.kind === "task_wakeup")).toBe(false);
+    expect((turns[0]!.segments ?? []).some((s) => s.kind === "turn_trigger")).toBe(false);
   });
 });

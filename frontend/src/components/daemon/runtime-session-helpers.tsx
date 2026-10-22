@@ -11,13 +11,15 @@ import { SessionPanel } from "@/components/daemon/session-panel";
 import type { SessionTurnView } from "@/components/daemon/turn-timeline";
 import { classifySessionLog } from "@/components/daemon/session-log-sanitize";
 import {
+  classifyPreambleTrigger,
+  classifyTurnTrigger,
   extractPreambleText,
-  isTaskWakeupInjection,
   logsToSegments,
   segmentsToLegacy,
   stripPreambleText,
   type AssemblerLogInput,
   type TurnSegment,
+  type TurnTriggerKind,
   type UserMsgTurnSegment,
 } from "@/components/daemon/session-log-assembler";
 import { type AgentRunLogEntry } from "@/lib/agent";
@@ -425,8 +427,10 @@ export function logsToTurns(logs: AgentRunLogEntry[]): SessionTurnView[] {
     // user_input 的前导块（dispatch_prompt 注入段）提取为 preamble 段（对话
     // 视图不渲染，「全部」视图显示注入来源）。
     const preambleSegments: TurnSegment[] = [];
-    // 2026-10-21-task-wakeup-restore：唤醒注入留痕段（开轮槽分支收集，轮首渲染）。
-    const wakeupSegments: Extract<TurnSegment, { kind: "task_wakeup" }>[] = [];
+    // 2026-10-22-turn-trigger-generalize：轮触发溯源段（开轮槽/开轮前导分支收集，
+    // 轮首渲染）——task_wakeup/auto_resume 系统信封 + shadow_chat/group_chat
+    // 来源标注。
+    const triggerSegments: Extract<TurnSegment, { kind: "turn_trigger" }>[] = [];
     const seenText = new Set<string>();
     const assemblerInputs: AssemblerLogInput[] = [];
     // 2026-10-10-system-opened-turn-usermsg：开轮槽占用标记——本 run 首条
@@ -460,7 +464,22 @@ export function logsToTurns(logs: AgentRunLogEntry[]): SessionTurnView[] {
         // 2026-10-13-session-taskwakeup-hide：TASK_WAKEUP 注入是纯系统通知，
         // 不落 preamble 段（进度视图不再显示「上下文注入」卡）；开轮占位槽
         // 逻辑不受影响——promptSource 仍走 strip 剥空 → 占位空组照旧。
-        if (preambleText && !isTaskWakeupInjection(seg.text)) {
+        // 2026-10-22-turn-trigger-generalize：auto_resume 注入同构剥除；
+        // 影子直聊/群聊开轮前导改由 turn_trigger 来源标注行承担（本条不落
+        // preamble 段，避免进度视图双卡）。
+        const preambleTrigger = preambleText
+          ? classifyPreambleTrigger(preambleText)
+          : null;
+        const contentTrigger = classifyTurnTrigger(seg.text);
+        // 开轮身份先行捕获（下方分支会推进 openerSlotSeen）。
+        const isOpenerUserInput = !openerSlotSeen;
+        if (
+          preambleText &&
+          !contentTrigger &&
+          !(preambleTrigger && isOpenerUserInput)
+        ) {
+          // 影子直聊/群聊前导仅在开轮位改由 turn_trigger 来源标注行承担
+          // （避免进度视图双卡）；中途到达的同前导维持既有 preamble 行为。
           preambleSegments.push({
             kind: "preamble",
             id: `preamble:${entry.id ?? `idx${turnIndex}`}`,
@@ -489,20 +508,34 @@ export function logsToTurns(logs: AgentRunLogEntry[]): SessionTurnView[] {
               firstId: entry.id ?? null,
               ts: entry.timestamp ? Date.parse(entry.timestamp) : null,
             });
-            // 2026-10-21-task-wakeup-restore：唤醒注入不再整体隐藏——落
-            // task_wakeup 留痕段（「收到任务消息」折叠行），置于轮段序列首部。
-            if (isTaskWakeupInjection(seg.text)) {
-              wakeupSegments.push({
-                kind: "task_wakeup",
-                id: `wakeup:${entry.id ?? `idx${turnIndex}`}`,
+            // 2026-10-22-turn-trigger-generalize：系统信封注入（task_wakeup/
+            // auto_resume）不再整体隐藏——落 turn_trigger 触发行（折叠看全文），
+            // 置于轮段序列首部。
+            const contentTrigger = classifyTurnTrigger(seg.text);
+            if (contentTrigger) {
+              triggerSegments.push({
+                kind: "turn_trigger",
+                id: `trigger:${entry.id ?? `idx${turnIndex}`}`,
                 text: seg.text,
                 ts: entry.timestamp ? Date.parse(entry.timestamp) : null,
+                trigger: contentTrigger,
               });
             }
           }
           continue;
         }
         openerSlotSeen = true;
+        // 2026-10-22-turn-trigger-generalize：影子直聊/群聊开轮——正文照常显示，
+        // 来源标注行置于轮段序列首部（仅开轮位；中途注入不标）。
+        if (isOpenerUserInput && preambleTrigger) {
+          triggerSegments.push({
+            kind: "turn_trigger",
+            id: `trigger:${entry.id ?? `idx${turnIndex}`}`,
+            text: preambleText ?? "",
+            ts: entry.timestamp ? Date.parse(entry.timestamp) : null,
+            trigger: preambleTrigger,
+          });
+        }
         // ql-20260825-002：剥标记行得文本主体为归一键（附件行不影响主体判定）。
         const lines = promptSource.split("\n");
         const markerLines: string[] = [];
@@ -573,7 +606,7 @@ export function logsToTurns(logs: AgentRunLogEntry[]): SessionTurnView[] {
       status: "completed",
       seenLogIds: new Set(entries.map((e) => e.id)),
       processItems: legacy.processItems,
-      segments: [...wakeupSegments, ...preambleSegments, ...segmentsWithUserMsg],
+      segments: [...triggerSegments, ...preambleSegments, ...segmentsWithUserMsg],
       turnStartedAt: firstLogTimestampMs(entries),
       // ql-20260621：历史回看无实时 token（logs 接口不含 token），置 null。
       // 若后续 logs 接口补 token 字段可在此填充。

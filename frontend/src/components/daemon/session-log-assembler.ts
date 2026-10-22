@@ -679,16 +679,19 @@ export type TurnSegment =
   // 的「[后台任务通知]」user_input（唤醒链恢复后重新出现）。此前 2026-10-13-
   // session-taskwakeup-hide 的口径是整体隐藏（对话视图无气泡、进度视图无卡）；
   // 恢复唤醒后用户要求可见的轻量留痕（dsh「收到任务消息」同款形态）：折叠行
-  // 默认收起、可展开看通知全文。装配器内不主动构造（user_input 通道在
-  // applyLogToSegments 入口即返回），仅作类型成员由 runtime-session-helpers
-  // 回放装配 / session-panel 实时 upsert 显式构建；不进 output / processItems
-  // 兼容投影（segmentsToLegacy 无 case 自动跳过）。
+  // 默认收起、可展开看通知全文。2026-10-22-turn-trigger-generalize：泛化为通用
+  // 轮触发溯源段（dsh turn-trigger.ts 同构）——单一 kind 携带 trigger 字段，
+  // 新源接入 = TURN_TRIGGER_META 配置表加一行。装配器内不主动构造（user_input
+  // 通道在 applyLogToSegments 入口即返回），仅作类型成员由 runtime-session-
+  // helpers 回放装配 / session-panel 实时 upsert 显式构建；不进 output /
+  // processItems 兼容投影（segmentsToLegacy 无 case 自动跳过）。
   | {
-      kind: "task_wakeup";
+      kind: "turn_trigger";
       id: string;
-      /** 通知全文（「[后台任务通知]」开头，含任务行与核对指引）。 */
+      /** 触发源关联文本（系统代笔源=通知全文，可展开；来源标注源=前导头，不可展开）。 */
       text: string;
       ts: number | null;
+      trigger: TurnTriggerKind;
     };
 
 export type ToolTurnSegment = Extract<TurnSegment, { kind: "tool" }>;
@@ -2162,6 +2165,73 @@ export function isTaskWakeupInjection(content: string): boolean {
   return content.trim().startsWith(TASK_WAKEUP_PROMPT_PREFIX);
 }
 
+/**
+ * 2026-10-22-turn-trigger-generalize：daemon 断线自动续跑注入判定——auto_resume.py
+ * 四模板（RESUME_PROMPT_TEMPLATE「[系统续跑提示]」/ RESUME_NUDGE_PROMPT /
+ * QUOTA_NUDGE_PROMPT / CONTEXT_OVERFLOW_REPLAY_HEADER 共用「[系统续跑]」）的
+ * 共同稳定前缀。⚠ 跨语言常量同步义务：前缀为 daemon 单一源常量（auto_resume.py
+ * 注释「单一源导出供测试锁定」），daemon 文案改动需同步此处（沿
+ * TASK_WAKEUP_PROMPT_PREFIX 先例）；metadata 驱动（auto_resume_of）留 Phase 2。
+ */
+export const AUTO_RESUME_PROMPT_PREFIX = "[系统续跑";
+
+/** 判定 user_input 是否为 auto_resume 系统注入（纯系统通知信封，原文可能内嵌）。 */
+export function isAutoResumeInjection(content: string): boolean {
+  return content.trim().startsWith(AUTO_RESUME_PROMPT_PREFIX);
+}
+
+/**
+ * 轮触发溯源种类（dsh turn-trigger.ts 同构；Phase 1 四源，schedule/webhook 等
+ * 新源留后续配置表加行）。
+ */
+export type TurnTriggerKind =
+  | "task_wakeup"
+  | "auto_resume"
+  | "shadow_chat"
+  | "group_chat";
+
+/**
+ * 触发源呈现配置表（TurnTriggerView 单一渲染真相源）：
+ *   - glyph/label：触发行图标字形与标签（平台措辞）；
+ *   - contentHidden：true = 系统代笔，正文折叠进触发行可展开（prompt 槽剥空）；
+ *     false = 用户亲笔（时间/渠道触发），正文照常显示为 prompt，触发行仅标来源
+ *     （不可展开）。
+ */
+export const TURN_TRIGGER_META: Record<
+  TurnTriggerKind,
+  { glyph: string; label: string; contentHidden: boolean }
+> = {
+  task_wakeup: { glyph: "✈", label: "收到任务消息", contentHidden: true },
+  auto_resume: { glyph: "↻", label: "断线自动续跑", contentHidden: true },
+  shadow_chat: { glyph: "💬", label: "来自影子直聊", contentHidden: false },
+  group_chat: { glyph: "👥", label: "来自群聊", contentHidden: false },
+};
+
+/**
+ * 按内容分类轮触发源（task_wakeup/auto_resume 内容前缀族）；
+ * 非触发内容返回 null。shadow_chat/group_chat 走 classifyPreambleTrigger
+ * （前导头族），不入本函数。
+ */
+export function classifyTurnTrigger(content: string): TurnTriggerKind | null {
+  if (isTaskWakeupInjection(content)) return "task_wakeup";
+  if (isAutoResumeInjection(content)) return "auto_resume";
+  return null;
+}
+
+/**
+ * 按前导头分类轮触发源（shadow_chat/group_chat 前导族；head 为
+ * extractPreambleText 剥出的前导首标记）。其余前导（【变更上下文】等
+ * dispatch 注入）非轮触发源，返回 null。
+ */
+export function classifyPreambleTrigger(
+  preambleText: string,
+): "shadow_chat" | "group_chat" | null {
+  const trimmed = preambleText.trim();
+  if (trimmed.startsWith("【影子直聊】")) return "shadow_chat";
+  if (trimmed.startsWith("【群聊上下文】")) return "group_chat";
+  return null;
+}
+
 export function extractPreambleText(content: string): string | null {
   const trimmed = content.trim();
   // quick（2026-09-03 系统注入刷屏修复）：[GROUP_CHAIN ...] 首行标记是排队
@@ -2175,6 +2245,8 @@ export function extractPreambleText(content: string): string | null {
   // [后台任务通知] 类注入：整条都是系统通知（无用户正文），整体进 preamble
   // 折叠——对话视图不再被任务唤醒通知刷屏（无分隔符，特判整条）。
   if (isTaskWakeupInjection(trimmed)) return trimmed;
+  // [系统续跑] 类注入（auto_resume）：同构系统通知信封，整体进 preamble。
+  if (isAutoResumeInjection(trimmed)) return trimmed;
   if (!PREAMBLE_HEADS.some((h) => trimmed.startsWith(h))) return null;
   const sep = trimmed.indexOf("\n\n---\n\n");
   if (sep <= 0) return null;
@@ -2198,6 +2270,8 @@ export function stripPreambleText(content: string): string {
     return stripPreambleText(trimmed.slice(nl + 1));
   }
   if (isTaskWakeupInjection(trimmed)) return "";
+  // [系统续跑] 类注入（auto_resume）：同构剥空（系统信封无用户正文可显示）。
+  if (isAutoResumeInjection(trimmed)) return "";
   if (!PREAMBLE_HEADS.some((h) => trimmed.startsWith(h))) return content;
   const sep = trimmed.indexOf("\n\n---\n\n");
   if (sep <= 0) return content;

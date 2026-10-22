@@ -1685,16 +1685,17 @@ describe("CompactSegmentView / CompactStatusRowView / CompactNoticeChip（ql-202
 
 /* ── 2026-10-13-turn-live-visibility FR-01：TaskOutput 等待行 ─────────────── */
 
-// 2026-10-21-task-wakeup-restore：后台任务唤醒通知折叠行（「收到任务消息」）。
-describe("TaskWakeupNoticeView（2026-10-21-task-wakeup-restore）", () => {
+// 2026-10-22-turn-trigger-generalize：轮触发溯源行（原 TaskWakeupNoticeView 泛化）。
+describe("TurnTriggerView（2026-10-22-turn-trigger-generalize）", () => {
   const WAKEUP_TEXT =
     "[后台任务通知] 以下 1 个后台子代理任务已全部结束（列表中的每一个都已终止，没有仍在运行的任务）：\n- 任务「调研 sgm」已完成（用时 06:26）。结果摘要：调研完成（task_id: t1，如需完整输出可调用 TaskOutput 查询，block=false）";
 
-  const wakeupSeg: Extract<TurnSegment, { kind: "task_wakeup" }> = {
-    kind: "task_wakeup",
+  const wakeupSeg: Extract<TurnSegment, { kind: "turn_trigger" }> = {
+    kind: "turn_trigger",
     id: "seg:wu1",
     text: WAKEUP_TEXT,
     ts: 1_000,
+    trigger: "task_wakeup",
   };
 
   it("默认收起：显示「收到任务消息」+ 任务数；点击展开显示通知全文", () => {
@@ -1705,6 +1706,55 @@ describe("TaskWakeupNoticeView（2026-10-21-task-wakeup-restore）", () => {
 
     fireEvent.click(screen.getByText("收到任务消息"));
     expect(screen.getByText((_c, node) => node?.textContent === WAKEUP_TEXT)).toBeInTheDocument();
+  });
+
+  it("auto_resume 源：折叠行标签「断线自动续跑」+ 系统恢复提示，展开显全文", () => {
+    const resumeText =
+      "[系统续跑提示] 平台服务重启中断了上一轮执行，会话上下文已完整恢复。\n原任务正文";
+    render(
+      <SegmentView
+        segment={{
+          kind: "turn_trigger",
+          id: "seg:ar1",
+          text: resumeText,
+          ts: 1_100,
+          trigger: "auto_resume",
+        }}
+      />,
+    );
+    expect(screen.getByText("断线自动续跑")).toBeInTheDocument();
+    expect(screen.getByText(/系统已恢复会话上下文/)).toBeInTheDocument();
+    fireEvent.click(screen.getByText("断线自动续跑"));
+    expect(screen.getByText((_c, node) => node?.textContent === resumeText)).toBeInTheDocument();
+  });
+
+  it("shadow_chat/group_chat 来源标注源：纯标注行不可展开（正文在 prompt 气泡）", () => {
+    const { rerender } = render(
+      <SegmentView
+        segment={{
+          kind: "turn_trigger",
+          id: "seg:sc1",
+          text: "【影子直聊】来源：群聊「安全群」",
+          ts: 1_200,
+          trigger: "shadow_chat",
+        }}
+      />,
+    );
+    expect(screen.getByText("来自影子直聊")).toBeInTheDocument();
+    expect(screen.queryByRole("button")).not.toBeInTheDocument();
+
+    rerender(
+      <SegmentView
+        segment={{
+          kind: "turn_trigger",
+          id: "seg:gc1",
+          text: "【群聊上下文】群「运维群」",
+          ts: 1_300,
+          trigger: "group_chat",
+        }}
+      />,
+    );
+    expect(screen.getByText("来自群聊")).toBeInTheDocument();
   });
 
   it("多任务通知：计数按任务行数（- 任务「）统计", () => {

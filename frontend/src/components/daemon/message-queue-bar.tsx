@@ -66,6 +66,7 @@ import { cn } from "@/lib/utils";
 import type { QueueEntry } from "@/hooks/use-message-queue";
 import { getProviderCaps } from "@/lib/provider-caps";
 import {
+  isAutoResumeInjection,
   isTaskWakeupInjection,
   TASK_WAKEUP_PROMPT_PREFIX,
 } from "@/components/daemon/session-log-assembler";
@@ -162,7 +163,10 @@ export function MessageQueueBar({
   // 的「不看内容前缀」口径）移出「排队消息」用户消息语义：不占计数/满员/
   // 拖拽，单独渲染为「收到任务消息 · 待本轮结束自动继续」事件行（dsh
   // turn-trigger 同款；派发后时间线 task_wakeup 折叠行接管呈现）。
-  const isWakeupEntry = (entry: QueueEntry) => entry.origin === "task_wakeup";
+  const isWakeupEntry = (entry: QueueEntry) =>
+    entry.origin === "task_wakeup" || entry.origin?.startsWith("auto_resume:") === true;
+  const triggerKindOf = (entry: QueueEntry): "task_wakeup" | "auto_resume" =>
+    entry.origin?.startsWith("auto_resume:") ? "auto_resume" : "task_wakeup";
   const wakeupEntries = entries.filter(isWakeupEntry);
   const userEntries = entries.filter((entry) => !isWakeupEntry(entry));
   // 拖拽即时预览只改本地展示序 override：orderIds 非空时按其排（entries 真相不动），
@@ -289,6 +293,7 @@ export function MessageQueueBar({
           即立即派发）。派发后时间线 task_wakeup 折叠行接管呈现。 */}
       {wakeupEntries.map((entry) => {
         const expanded = expandedId === entry.id;
+        const isAutoResume = triggerKindOf(entry) === "auto_resume";
         const wakeupBody = entry.prompt.startsWith(TASK_WAKEUP_PROMPT_PREFIX)
           ? entry.prompt.slice(TASK_WAKEUP_PROMPT_PREFIX.length).trim() ||
             "系统通知"
@@ -302,10 +307,16 @@ export function MessageQueueBar({
               className="flex w-fit cursor-pointer select-text items-center gap-[7px] rounded-md px-1.5 py-[3px] text-left text-[11px] text-muted-foreground hover:bg-muted"
             >
               <span aria-hidden className="shrink-0">
-                ✈
+                {isAutoResume ? "↻" : "✈"}
               </span>
-              <span className="shrink-0 font-medium">收到任务消息</span>
-              <span className="shrink-0 opacity-75">{`（${wakeupTaskCount(entry)} 个后台任务已结束 · 本轮结束后自动继续）`}</span>
+              <span className="shrink-0 font-medium">
+                {isAutoResume ? "断线自动续跑" : "收到任务消息"}
+              </span>
+              <span className="shrink-0 opacity-75">
+                {isAutoResume
+                  ? "（本轮结束后自动继续）"
+                  : `（${wakeupTaskCount(entry)} 个后台任务已结束 · 本轮结束后自动继续）`}
+              </span>
               <span
                 aria-hidden
                 className={cn(
@@ -383,7 +394,8 @@ export function MessageQueueBar({
           const canEdit =
             Boolean(onEdit) &&
             entry.status !== "sending" &&
-            !isTaskWakeupInjection(entry.prompt);
+            !isTaskWakeupInjection(entry.prompt) &&
+            !isAutoResumeInjection(entry.prompt);
 
           return (
             <div

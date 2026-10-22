@@ -72,7 +72,7 @@ function rowKindOf(segment: TurnSegment): TrajectoryRowKind {
     case "compact_status":
       return "compaction";
     case "user_msg":
-    case "task_wakeup":
+    case "turn_trigger":
       return "user";
     case "file":
     case "stderr":

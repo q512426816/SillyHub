@@ -68,7 +68,7 @@ import {
   CompactNoticeChip,
   CompactStatusRowView,
   SegmentView,
-  TaskWakeupNoticeView,
+  TurnTriggerView,
   TextSegmentView,
   TurnForkEntry,
 } from "@/components/daemon/turn-segment-views";
@@ -1986,7 +1986,7 @@ function segmentTsOf(seg: TurnSegment): number | null {
     case "user_msg":
       return seg.ts;
   // 2026-10-21-task-wakeup-restore：唤醒通知折叠行取捕获时刻（同 preamble 语义）。
-    case "task_wakeup":
+    case "turn_trigger":
       return seg.ts;
   }
 }
@@ -2021,7 +2021,7 @@ function isConversationSegment(seg: TurnSegment): boolean {
   if (seg.kind === "compact") return true;
   // 2026-10-21-task-wakeup-restore：唤醒通知折叠行进对话视图（TaskWakeupNoticeView
   // 两视图共用——唤醒轮不再「无人说话 agent 凭空接话」不可溯源）。
-  if (seg.kind === "task_wakeup") return true;
+  if (seg.kind === "turn_trigger") return true;
   return (
     seg.kind === "tool" &&
     seg.children.length > 0 &&
@@ -2233,8 +2233,8 @@ function SegmentedTurnBody({
               }
               // 2026-10-21-task-wakeup-restore：唤醒通知折叠行（对话视图原位渲染，
               // 两视图共用组件）。
-              if (s.kind === "task_wakeup") {
-                return <TaskWakeupNoticeView key={s.id} segment={s} />;
+              if (s.kind === "turn_trigger") {
+                return <TurnTriggerView key={s.id} segment={s} />;
               }
               if (s.kind === "compact_status") {
                 return <CompactStatusRowView key={s.id} segment={s} />;

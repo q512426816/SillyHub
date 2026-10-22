@@ -709,4 +709,28 @@ describe("MessageQueueBar 唤醒条目事件行（2026-10-21-task-wakeup-event-q
     expect(screen.getByText("排队消息（1）")).toBeTruthy();
     expect(screen.queryByText("收到任务消息")).toBeNull();
   });
+
+  it("FR-04 auto_resume 条目 → 「断线自动续跑」事件行，计入排队计数（对齐后端配额口径）", () => {
+    render(
+      <MessageQueueBar
+        entries={[
+          makeEntry({ id: "mq-u1", prompt: "用户一", displayPrompt: "用户一" }),
+          makeEntry({
+            id: "mq-ar",
+            prompt: "[系统续跑] 上一轮执行因上游输出流中断未完成，会话上下文完整。",
+            displayPrompt: "[系统续跑] 上一轮执行因上游输出流中断未完成，会话上下文完整。",
+            origin: "auto_resume:0b7e0f2e-1111-4222-8333-444455556666",
+          }),
+        ]}
+        onRemove={vi.fn()}
+        onRetry={vi.fn()}
+      />,
+    );
+    // 后端 pending 配额仅豁免 task_wakeup，auto_resume 计入 N。
+    expect(screen.getByText("排队消息（1）")).toBeTruthy();
+    expect(screen.getByText("断线自动续跑")).toBeTruthy();
+    expect(screen.getByText(/本轮结束后自动继续/)).toBeTruthy();
+    // 事件行零操作按钮。
+    expect(screen.getAllByLabelText("从队列移除该消息")).toHaveLength(1);
+  });
 });

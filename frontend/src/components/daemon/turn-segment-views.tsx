@@ -86,6 +86,7 @@ import type {
   ToolTurnSegment,
   TurnSegment,
 } from "@/components/daemon/session-log-assembler";
+import { TURN_TRIGGER_META } from "@/components/daemon/session-log-assembler";
 import { getProviderCaps } from "@/lib/provider-caps";
 import type { ProviderCaps } from "@/lib/provider-caps";
 import { workspaceTypeBadge } from "@/lib/workspace-types";
@@ -1254,21 +1255,41 @@ export function CompactNoticeChip() {
 }
 
 /**
- * 后台任务唤醒通知折叠行（2026-10-21-task-wakeup-restore）：daemon 注入的
- * 「[后台任务通知]」轮在时间线的原位留痕——dsh「收到任务消息」同款形态：
- * 一行弱化折叠行（✈ + 标题 + 用时数），默认收起、点击展开通知全文（展示
- * 语义平移 PreambleSegmentView：拖选不触发收起守卫）。对话与进度两视图共用
- * 本组件（通知本身轻量，无需 compact 式双形态）。取代 2026-10-13-
- * session-taskwakeup-hide 的整体隐藏口径（隐藏导致唤醒轮「无人说话 agent
- * 凭空接话」不可溯源）。
+ * 轮触发溯源行（2026-10-22-turn-trigger-generalize：TaskWakeupNoticeView 泛化，
+ * dsh turn-trigger.ts 同构）——非人类消息开启的轮在时间线头部的来源留痕。
+ * 按 TURN_TRIGGER_META 配置渲染：系统代笔源（task_wakeup/auto_resume）折叠行
+ * 默认收起、点击展开全文（展示语义平移 PreambleSegmentView：拖选不触发收起
+ * 守卫）；来源标注源（shadow_chat/group_chat）为纯标注行（正文照常显示为
+ * prompt 气泡，不可展开）。对话与进度两视图共用本组件。
  */
-export const TaskWakeupNoticeView = memo(function TaskWakeupNoticeView({
+export const TurnTriggerView = memo(function TurnTriggerView({
   segment,
 }: {
-  segment: Extract<TurnSegment, { kind: "task_wakeup" }>;
+  segment: Extract<TurnSegment, { kind: "turn_trigger" }>;
 }) {
+  const meta = TURN_TRIGGER_META[segment.trigger];
   const [open, setOpen] = useState(false);
-  const taskCount = (segment.text.match(/^- 任务「/gm) ?? []).length || 1;
+  // 任务数仅 task_wakeup 有意义（防漏报模板每任务一行）；解析失败兜底 1。
+  const taskCount =
+    segment.trigger === "task_wakeup"
+      ? (segment.text.match(/^- 任务「/gm) ?? []).length || 1
+      : null;
+  if (!meta.contentHidden) {
+    // 来源标注源：纯行，无展开（正文在 prompt 气泡照常可见）。
+    return (
+      <div className="flex w-full max-w-[86%] flex-col gap-1 self-start">
+        <span
+          aria-label={`${meta.label}（来源标注）`}
+          className="flex w-fit select-text items-center gap-[7px] rounded-md px-1.5 py-[3px] text-[11px] text-muted-foreground"
+        >
+          <span aria-hidden className="shrink-0">
+            {meta.glyph}
+          </span>
+          <span className="shrink-0 font-medium">{meta.label}</span>
+        </span>
+      </div>
+    );
+  }
   return (
     <div className="flex w-full max-w-[86%] flex-col gap-1 self-start">
       <button
@@ -1281,10 +1302,14 @@ export const TaskWakeupNoticeView = memo(function TaskWakeupNoticeView({
         className="flex w-fit cursor-pointer select-text items-center gap-[7px] rounded-md px-1.5 py-[3px] text-left text-[11px] text-muted-foreground hover:bg-muted"
       >
         <span aria-hidden className="shrink-0">
-          ✈
+          {meta.glyph}
         </span>
-        <span className="shrink-0 font-medium">收到任务消息</span>
-        <span className="shrink-0 opacity-75">{`（${taskCount} 个后台任务已结束）`}</span>
+        <span className="shrink-0 font-medium">{meta.label}</span>
+        <span className="shrink-0 opacity-75">
+          {segment.trigger === "task_wakeup"
+            ? `（${taskCount} 个后台任务已结束）`
+            : `（系统已恢复会话上下文）`}
+        </span>
         <span
           aria-hidden
           className={cn(
@@ -1761,10 +1786,10 @@ export const SegmentView = memo(function SegmentView({ segment }: SegmentViewPro
       // 供测试断言；自旧 SteeredMessagesFooter 迁移，正文经 parseAttachmentMarkers
       // 剥附件标记行（同 prompt 气泡展示口径）。
       return <UserMsgSegmentView segment={segment} />;
-    case "task_wakeup":
-      // 2026-10-21-task-wakeup-restore：后台任务唤醒通知折叠行——对话/进度两
-      // 视图共用（通知轻量无需双形态）。
-      return <TaskWakeupNoticeView segment={segment} />;
+    case "turn_trigger":
+      // 2026-10-22-turn-trigger-generalize：轮触发溯源行（按 trigger 配置渲染
+      // ——系统代笔折叠/来源标注两形态），对话/进度两视图共用。
+      return <TurnTriggerView segment={segment} />;
     default: {
       // 穷尽防御：TurnSegment 新增 kind 时此处编译期报错（never 不兼容）。
       const exhaustive: never = segment;
