@@ -510,7 +510,7 @@ describe('task-05 Daemon._sendHeartbeatOnce 注入 sillyspec 快照', () => {
     await expect(h.sendHeartbeatOnce()).resolves.toBe(true);
     expect(h.heartbeatMock).toHaveBeenCalledTimes(1);
     const call = h.heartbeatMock.mock.calls[0]!;
-    expect(call.length).toBe(11); // task-02 machine-id 尾参（machineId undefined 占位）使平铺形态 10→11
+    expect(call.length).toBe(12); // task-02 machine-id 尾参 + 2026-10-23-session-network-context 网卡尾参（network_interfaces，11→12）（machineId undefined 占位）使平铺形态 10→11
     expect(call[4]).toEqual({
       version: '3.26.15',
       latest_version: '3.27.11',
@@ -531,7 +531,7 @@ describe('task-05 Daemon._sendHeartbeatOnce 注入 sillyspec 快照', () => {
     });
     await expect(h.sendHeartbeatOnce()).resolves.toBe(true);
     const call = h.heartbeatMock.mock.calls[0]!;
-    expect(call.length).toBe(11); // task-02 machine-id 尾参（machineId undefined 占位）使平铺形态 10→11
+    expect(call.length).toBe(12); // task-02 machine-id 尾参 + 2026-10-23-session-network-context 网卡尾参（network_interfaces，11→12）（machineId undefined 占位）使平铺形态 10→11
     expect(call[4]).toEqual({ version: '3.26.15' });
     expect('update' in (call[4] as object)).toBe(false);
     expect('latest_version' in (call[4] as object)).toBe(false);
@@ -545,7 +545,7 @@ describe('task-05 Daemon._sendHeartbeatOnce 注入 sillyspec 快照', () => {
     });
     await expect(h.sendHeartbeatOnce()).resolves.toBe(true);
     const call = h.heartbeatMock.mock.calls[0]!;
-    expect(call.length).toBe(11); // task-02 machine-id 尾参（machineId undefined 占位）使平铺形态 10→11
+    expect(call.length).toBe(12); // task-02 machine-id 尾参 + 2026-10-23-session-network-context 网卡尾参（network_interfaces，11→12）（machineId undefined 占位）使平铺形态 10→11
     expect(call[3]).toBeUndefined();
     expect(call[4]).toBeUndefined();
   });
@@ -741,7 +741,7 @@ describe('task-02 Daemon._sendHeartbeatOnce 注入 sillyspec_status', () => {
     );
     await expect(h.sendHeartbeatOnce()).resolves.toBe(true);
     const call = h.heartbeatMock.mock.calls[0]!;
-    expect(call.length).toBe(11); // task-02 machine-id 尾参（machineId undefined 占位）使平铺形态 10→11
+    expect(call.length).toBe(12); // task-02 machine-id 尾参 + 2026-10-23-session-network-context 网卡尾参（network_interfaces，11→12）（machineId undefined 占位）使平铺形态 10→11
     expect(call[5]).toEqual(STATUS_SUMMARY);
     expect(call[3]).toBeUndefined();
     expect(call[4]).toBeUndefined();
@@ -759,7 +759,7 @@ describe('task-02 Daemon._sendHeartbeatOnce 注入 sillyspec_status', () => {
     );
     await expect(h.sendHeartbeatOnce()).resolves.toBe(true);
     const call = h.heartbeatMock.mock.calls[0]!;
-    expect(call.length).toBe(11); // task-02 machine-id 尾参（machineId undefined 占位）使平铺形态 10→11
+    expect(call.length).toBe(12); // task-02 machine-id 尾参 + 2026-10-23-session-network-context 网卡尾参（network_interfaces，11→12）（machineId undefined 占位）使平铺形态 10→11
     expect(call[5]).toBeNull();
   });
 
@@ -774,7 +774,7 @@ describe('task-02 Daemon._sendHeartbeatOnce 注入 sillyspec_status', () => {
     );
     await expect(h.sendHeartbeatOnce()).resolves.toBe(true);
     const call = h.heartbeatMock.mock.calls[0]!;
-    expect(call.length).toBe(11); // task-02 machine-id 尾参（machineId undefined 占位）使平铺形态 10→11
+    expect(call.length).toBe(12); // task-02 machine-id 尾参 + 2026-10-23-session-network-context 网卡尾参（network_interfaces，11→12）（machineId undefined 占位）使平铺形态 10→11
     expect(call[4]).toBeUndefined();
   });
 
@@ -788,7 +788,7 @@ describe('task-02 Daemon._sendHeartbeatOnce 注入 sillyspec_status', () => {
     await expect(h.sendHeartbeatOnce()).resolves.toBe(true);
     expect(h.manager.getStatusSnapshot).not.toHaveBeenCalled();
     expect(h.manager.getStatusError).not.toHaveBeenCalled();
-    expect(h.heartbeatMock.mock.calls[0]!.length).toBe(11); // task-02 machine-id 尾参
+    expect(h.heartbeatMock.mock.calls[0]!.length).toBe(12); // task-02 machine-id 尾参 + 2026-10-23-session-network-context 网卡尾参（network_interfaces，11→12）
   });
 
   // ── 2026-09-08（temp 投毒排障衍生）：第 9 参 sillyspec_status_error 装配 ──
@@ -828,7 +828,7 @@ describe('task-02 Daemon._sendHeartbeatOnce 注入 sillyspec_status', () => {
     );
     await expect(h.sendHeartbeatOnce()).resolves.toBe(true);
     const call = h.heartbeatMock.mock.calls[0]!;
-    expect(call.length).toBe(11); // task-02 machine-id 尾参（machineId undefined 占位）使平铺形态 10→11
+    expect(call.length).toBe(12); // task-02 machine-id 尾参 + 2026-10-23-session-network-context 网卡尾参（network_interfaces，11→12）（machineId undefined 占位）使平铺形态 10→11
     expect(call[8]).toBeUndefined();
   });
 

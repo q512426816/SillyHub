@@ -8,7 +8,7 @@ created_at: 2026-10-23T02:10:36.764Z
 
 - [x] task-01: daemon 新建 src/network-info.ts 采集模块（os.networkInterfaces 过滤 internal/无 cidr，IPv4+IPv6 保留）+ tests/network-info.test.ts 单测；验证：pnpm -C sillyhub-daemon test tests/network-info.test.ts 绿
 - [x] task-02: daemon 心跳体扩展——hub-client.ts HeartbeatBody 加 network_interfaces 字段 + heartbeat() 签名加尾参，daemon.ts _sendHeartbeatOnce 调 collectNetworkInterfaces 平铺传参；验证：pnpm -C sillyhub-daemon typecheck 过
-- [ ] task-03: 四个钉子测试文件参数个数断言 N→N+1（daemon-heartbeat-pending / daemon-heartbeat-sillyspec / sillyspec-platform-command×6处 / integration/selfupdate-scenarios×2处）；验证：pnpm -C sillyhub-daemon test 四文件聚焦绿
+- [x] task-03: 四个钉子测试文件参数个数断言 N→N+1（daemon-heartbeat-pending / daemon-heartbeat-sillyspec / sillyspec-platform-command×6处 / integration/selfupdate-scenarios×2处）；验证：pnpm -C sillyhub-daemon test 四文件聚焦绿
 - [ ] task-04: backend 新建 app/core/client_ip.py 共享工具（XFF 最右段→remoteAddress + has_forwarded_for），auth/router.py _client_ip 改调共享工具纯重构；验证：uv run pytest tests/modules/auth 聚焦绿（行为不变）
 - [ ] task-05: backend daemon_instances 加 network_info JSON 列（model.py）+ Alembic 迁移 + 链尾锚测试 test_align_platform_change_events_migration.py head 常量前移一行；验证：锚测试绿 + alembic upgrade head 幂等
 - [ ] task-06: backend 心跳/注册端点观测落库——heartbeat.py 加 HeartbeatNetworkInterface schema + 端点注入 Request 观测 observed_ip，version.py 注册首写，runtime/service.py heartbeat_daemon 加参落库（observed_ip 每跳直写 / network_interfaces 出现即整写缺席保留）；验证：新增落库语义用例绿（造数遵守 online⟺心跳<45s 不变量）
