@@ -57,7 +57,25 @@ function makeTrajectory(): Trajectory {
         status: "completed",
       },
     ],
-    lanes: { input: [], model: [], tool: [] },
+    lanes: {
+      input: [],
+      model: [],
+      tool: [
+        {
+          id: "span-tool1",
+          lane: "tool",
+          start: START + 1_000,
+          end: START + 5_000,
+          label: "Bash",
+          status: "ok",
+          rowId: "r1:tool1",
+          turnIndex: 1,
+          depth: 0,
+          tokensLevel: "turn",
+          subRow: 0,
+        },
+      ],
+    },
     coverage: { modelMs: 0, toolMs: 0, windowMs: 60_000 },
     modelBasis: "approx",
     windowStart: START,
@@ -215,5 +233,58 @@ describe("轨迹视图集成（D-002/D-003/D-004/D-005）", () => {
     expect(rows[1]).toHaveAttribute("aria-selected", "true");
     fireEvent.click(rows[0]!);
     expect(onSelectRow).toHaveBeenCalledWith("r1:user");
+  });
+
+  it("选中行变化时账本滚入视野（时间线条块/键盘，FR-03）", () => {
+    const spy = vi.fn();
+    const orig = Element.prototype.scrollIntoView;
+    // jsdom 无实现：包装 spy 记录滚动目标（先例 change-assets-card.test）。
+    Element.prototype.scrollIntoView = function (
+      this: Element,
+    ): void {
+      spy(this);
+    } as unknown as typeof Element.prototype.scrollIntoView;
+    try {
+      const { container } = render(<TrajectoryView trajectory={makeTrajectory()} />);
+
+      // 点时间线条块 → 对应行选中并滚入视野。
+      fireEvent.click(screen.getAllByTestId("trajectory-bar")[0]!);
+      const row = container.querySelector(
+        '[data-testid="trajectory-row"][data-row-id="r1:tool1"]',
+      ) as HTMLElement;
+      expect(row).toHaveAttribute("aria-selected", "true");
+      expect(spy.mock.calls.at(-1)![0]).toBe(row);
+
+      // 键盘 ↑ 移动选中同样滚入视野。
+      spy.mockClear();
+      fireEvent.keyDown(screen.getByTestId("trajectory-grid"), { key: "ArrowUp" });
+      expect(spy.mock.calls.length).toBeGreaterThan(0);
+    } finally {
+      Element.prototype.scrollIntoView = orig;
+    }
+  });
+
+  it("上下文行（system_event 派生）显示「上下文」标签（FR-01 集成面）", () => {
+    const trajectory = makeTrajectory();
+    trajectory.rows.push({
+      id: "r1:ctx:0",
+      kind: "system",
+      turnIndex: 1,
+      stepIndex: 5,
+      depth: 0,
+      status: "ok",
+      startedAt: START + 2_000,
+      endedAt: START + 2_000,
+      durationMs: 0,
+      outputText: "Agent sent a message",
+      meta: { contextEvent: true },
+    });
+    render(<TrajectoryView trajectory={trajectory} />);
+
+    const ctxRow = screen
+      .getAllByTestId("trajectory-row")
+      .find((el) => el.textContent?.includes("Agent sent a message"));
+    expect(ctxRow).toBeDefined();
+    expect(ctxRow!.textContent).toContain("上下文");
   });
 });

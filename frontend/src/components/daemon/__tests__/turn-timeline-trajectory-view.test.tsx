@@ -209,4 +209,33 @@ describe("会话视图三态中的「轨迹」（D-001）", () => {
     expect(screen.queryByTestId("trajectory-pane")).toBeNull();
     expect(screen.queryByTestId("progress-lens")).toBeNull();
   });
+
+  it("TurnTimeline 透传轨迹跳转信号：选中目标轮首行（2026-10-22-trajectory-context-jump FR-02）", () => {
+    render(
+      <TurnTimeline
+        {...renderProps([makeTurn()], "trajectory")}
+        trajectoryJump={{ turnKey: "run-1", nonce: 1 }}
+      />,
+    );
+
+    const rows = screen.getAllByTestId("trajectory-row");
+    // 轮首行 = 该轮按时间排序的第一行（用户输入行）。
+    expect(rows[0]).toHaveAttribute("aria-selected", "true");
+    expect(rows[0]!.getAttribute("data-row-id")).toContain(":user");
+  });
+
+  it("跳转信号指向不在轨迹的轮（预览轮）时静默跳过，不改选中", () => {
+    render(
+      <TurnTimeline
+        {...renderProps([makeTurn()], "trajectory")}
+        trajectoryJump={{ turnKey: "run-not-loaded", nonce: 1 }}
+      />,
+    );
+
+    expect(
+      screen.getAllByTestId("trajectory-row").every(
+        (row) => row.getAttribute("aria-selected") === "false",
+      ),
+    ).toBe(true);
+  });
 });

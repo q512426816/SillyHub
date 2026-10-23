@@ -11,7 +11,7 @@
  * 键盘：↑/↓ 在可见记录间移动，Esc 清空（D-014）。
  */
 
-import { useCallback, useMemo } from "react";
+import { useCallback, useEffect, useMemo, useRef } from "react";
 import type { KeyboardEvent } from "react";
 
 import { cn } from "@/lib/utils";
@@ -69,6 +69,18 @@ export function TrajectoryLedger({
   className,
 }: TrajectoryLedgerProps) {
   const visibleIds = useMemo(() => visibleRecordIds(groups), [groups]);
+  // 2026-10-22-trajectory-context-jump（FR-03）：选中行滚入视野——点行 / 点时间线
+  // 条块 / 键盘 ↑↓ / 轮次跳转统一入口；清空选中不滚动。jsdom 无实现，typeof 守卫。
+  const gridRef = useRef<HTMLDivElement | null>(null);
+  useEffect(() => {
+    if (!selectedRowId) return;
+    const el = gridRef.current?.querySelector(
+      `[data-row-id="${CSS.escape(selectedRowId)}"]`,
+    );
+    if (el && typeof el.scrollIntoView === "function") {
+      el.scrollIntoView({ block: "nearest" });
+    }
+  }, [selectedRowId]);
 
   const handleKeyDown = useCallback(
     (event: KeyboardEvent<HTMLDivElement>) => {
@@ -107,6 +119,7 @@ export function TrajectoryLedger({
 
   return (
     <div
+      ref={gridRef}
       role="grid"
       aria-label="轨迹账本"
       tabIndex={0}

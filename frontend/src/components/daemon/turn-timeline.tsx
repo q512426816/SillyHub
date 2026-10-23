@@ -430,6 +430,12 @@ export interface TurnTimelineProps {
   turns: SessionTurnView[];
   viewMode: SessionViewMode;
   /**
+   * 2026-10-22-trajectory-context-jump（FR-02）：轮次导航 → 轨迹视图的跳转信号。
+   * `{ turnKey, nonce }`——nonce 自增驱动重复点击；仅轨迹视图消费，其它视图零影响；
+   * 不传零回归。目标轮不在轨迹（预览轮/未加载）静默跳过。
+   */
+  trajectoryJump?: { turnKey: string; nonce: number } | null;
+  /**
    * 2026-10-20-session-page-dsh-alignment（D-009）：工作细节档位。
    * 不传（undefined）＝现行为零变化；传 "compact"/"standard" 时对**可折叠轮**
    * （isTurnFoldable：仅正常闭合轮）默认收起过程，只留正文 + 折叠头；
@@ -1419,9 +1425,25 @@ const BOTTOM_REASSERT_WINDOW_MS = 2500;
  * 空态：整段会话都没有可比对的时间戳（`rows` 为空）→ 出显式提示，**不白屏、不伪造条**
  * （伪造会让「没有数据」看起来像「这轮没有活动」）。
  */
-function TrajectoryPane({ turns }: { turns: SessionTurnView[] }) {
+function TrajectoryPane({
+  turns,
+  jump,
+}: {
+  turns: SessionTurnView[];
+  jump?: { turnKey: string; nonce: number } | null;
+}) {
   const trajectory = useMemo(() => trajectoryFromTurnViews(turns), [turns]);
   const [selectedRowId, setSelectedRowId] = useState<string | null>(null);
+  // 2026-10-22-trajectory-context-jump（FR-02）：轮次导航跳转——run key 匹配轮，
+  // 选中该轮首行；滚入视野由账本选中 effect 承担。目标轮不在轨迹（预览轮/
+  // 未加载）时静默跳过，不报错。
+  useEffect(() => {
+    if (!jump) return;
+    const turn = trajectory.turns.find((item) => item.runId === jump.turnKey);
+    if (!turn) return;
+    const firstRow = trajectory.rows.find((row) => row.turnIndex === turn.index);
+    if (firstRow) setSelectedRowId(firstRow.id);
+  }, [jump, trajectory]);
   if (trajectory.rows.length === 0) {
     return (
       <div
@@ -1448,6 +1470,7 @@ function TrajectoryPane({ turns }: { turns: SessionTurnView[] }) {
 export function TurnTimeline({
   turns,
   viewMode,
+  trajectoryJump,
   errorMsg,
   daemonRestartedHint,
   autoResumeEntries,
@@ -1848,7 +1871,7 @@ export function TurnTimeline({
           )
         ) : (
           <div className="min-h-0 flex-1 px-3 py-2">
-            <TrajectoryPane turns={turns} />
+            <TrajectoryPane turns={turns} jump={trajectoryJump} />
           </div>
         )}
       </div>

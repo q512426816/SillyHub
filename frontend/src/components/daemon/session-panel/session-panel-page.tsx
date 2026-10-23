@@ -2424,6 +2424,12 @@ export function SessionPanelPage({
   /** 联动计算 rAF 节流句柄（scroll 高频，一帧至多算一次）。 */
   const activeTurnRafRef = useRef<number | null>(null);
   /** activeTurnKey / highlightTurnKey 随会话切换复位（本地会话作用域态）。 */
+  // 2026-10-22-trajectory-context-jump（FR-02）：轨迹视图的轮次跳转信号
+  //（nonce 自增驱动重复点击；TurnTimeline 仅轨迹视图消费）。
+  const [trajectoryJump, setTrajectoryJump] = useState<{
+    turnKey: string;
+    nonce: number;
+  } | null>(null);
   useEffect(() => {
     setActiveTurnKey(null);
     setHighlightTurnKey(null);
@@ -2788,6 +2794,14 @@ export function SessionPanelPage({
   //    机制原样复用，一行不动。 ----
   const handleJumpToTurn = useCallback(
     async (entry: TurnCatalogEntry) => {
+      // 2026-10-22-trajectory-context-jump（FR-02）：轨迹视图无 data-turn-key 轮块
+      //（分支已移出滚动容器），改发跳转信号由 TrajectoryPane 选中目标轮首行；
+      // 同时维持导航刻度 active 联动。对话/进度视图走原路径不变。
+      if (viewMode === "trajectory") {
+        setActiveTurnKey(entry.key);
+        setTrajectoryJump((prev) => ({ turnKey: entry.key, nonce: (prev?.nonce ?? 0) + 1 }));
+        return;
+      }
       setJumpFollowSuppress(true);
       const settleFollow = () => {
         setTimeout(() => setJumpFollowSuppress(false), 1000);
@@ -3012,7 +3026,7 @@ export function SessionPanelPage({
       // 命中：直跳定位高亮（原路径）。
       locateAndHighlight();
     },
-    [timelineScrollEl, loadEarlierOnce, notify, sessionId, turnOutline, prefetchNearbyTurns],
+    [timelineScrollEl, loadEarlierOnce, notify, sessionId, turnOutline, prefetchNearbyTurns, viewMode],
   );
 
 
@@ -5101,6 +5115,7 @@ export function SessionPanelPage({
         suppressFollowBottom={jumpFollowSuppress}
         turns={dialogTurns}
         viewMode={viewMode}
+        trajectoryJump={viewMode === "trajectory" ? trajectoryJump : null}
         errorMsg={errorMsg}
         // 2026-10-23-session-first-load-ux / FR-01：详情已渲染而首屏历史在飞 →
         // 时间线骨架屏（dialogTurns 空时；大纲预览卡/底窗轮块到达即自然退场）。
