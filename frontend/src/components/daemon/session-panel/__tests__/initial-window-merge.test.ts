@@ -13,7 +13,11 @@ import { describe, it, expect } from "vitest";
 
 import type { AgentRunLogEntry } from "@/lib/agent";
 import type { InitialWindowResult } from "../initial-window";
-import { buildInitialWindowMerge } from "../initial-window-merge";
+import {
+  buildInitialWindowMerge,
+  filterPrependAgainstExisting,
+} from "../initial-window-merge";
+import type { SessionTurnView } from "@/components/daemon/turn-timeline";
 
 let seq = 0;
 function log(
@@ -129,5 +133,56 @@ describe("buildInitialWindowMerge（2026-10-23-session-first-load-ux）", () => 
     expect(r.prependTurns[1]!.realRunId).toBe("run-A");
     expect(r.replaceRunIds.has("run-A")).toBe(true);
     expect(r.replaceRunIds.has("run-0")).toBe(false);
+  });
+});
+
+/* 评审 P2 回归证伪：过滤逻辑必须是可独立断言的纯函数——渲染层
+ * mergePreviewIntoDisplayTurns 会按 outline key 去重，端到端「块数」断言在
+ * 删掉过滤后仍可能为绿，无法证伪。本组用例直接断言函数产物。 */
+function turnView(overrides: Partial<SessionTurnView>): SessionTurnView {
+  return {
+    runId: "run-x",
+    realRunId: "run-x",
+    turn: 1,
+    prompt: "",
+    output: "",
+    status: "completed",
+    seenLogIds: new Set<string>(),
+    inputTokens: null,
+    outputTokens: null,
+    ...overrides,
+  };
+}
+
+describe("filterPrependAgainstExisting（评审 P2 回归）", () => {
+  it("已有同 run 且有内容的块（含 #e 变体）→ 剔除对应 prepend 块", () => {
+    const existing = [
+      turnView({ runId: "run-0#e123-abcdef12", realRunId: "run-0", prompt: "已加载提问" }),
+    ];
+    const prepend = [
+      turnView({ runId: "run-0#w456-abcdef12", realRunId: "run-0", prompt: "整窗提问" }),
+      turnView({ runId: "run-1#w456-abcdef12", realRunId: "run-1", prompt: "另一轮" }),
+    ];
+    const kept = filterPrependAgainstExisting(prepend, existing);
+    expect(kept).toHaveLength(1);
+    expect(kept[0]!.realRunId).toBe("run-1");
+  });
+
+  it("已有同 run 但为空壳（无 prompt/segments/output）→ 保留 prepend（整轮内容覆盖）", () => {
+    const existing = [turnView({ runId: "run-0", realRunId: "run-0" })];
+    const prepend = [
+      turnView({ runId: "run-0#w456-abcdef12", realRunId: "run-0", prompt: "整窗提问" }),
+    ];
+    expect(filterPrependAgainstExisting(prepend, existing)).toHaveLength(1);
+  });
+
+  it("无冲突 → 原样返回全部 prepend（引用序列不变）", () => {
+    const prepend = [
+      turnView({ runId: "run-a#w1", realRunId: "run-a", output: "A" }),
+      turnView({ runId: "run-b#w1", realRunId: "run-b", output: "B" }),
+    ];
+    expect(
+      filterPrependAgainstExisting(prepend, []).map((t) => t.realRunId),
+    ).toEqual(["run-a", "run-b"]);
   });
 });

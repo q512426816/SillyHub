@@ -131,7 +131,10 @@ import {
 // 2026-10-23-session-first-window-turn-align：首屏自适应窗口（轮次对齐 + 预算）。
 import { buildInitialWindow } from "./initial-window";
 // 2026-10-23-session-first-load-ux：首屏窗口增量合并（两段渲染第二段）。
-import { buildInitialWindowMerge } from "./initial-window-merge";
+import {
+  buildInitialWindowMerge,
+  filterPrependAgainstExisting,
+} from "./initial-window-merge";
 import { highlightSearchHit, searchResultLabel, searchResultText } from "./search";
 // task-01（2026-10-14-session-turn-preview-cards）：消息流归并层（单一数据源，
 // 未加载轮合成预览条目，D-004 方案 A）。
@@ -1436,23 +1439,9 @@ export function SessionPanelPage({
                     })
                   : prev.turns;
               // 评审 P2：同 run 已有块（用户补拉期间主动加载）→ 跳过该 prepend
-              // 块，避免 #w 块与用户加载块双显；有内容判据对齐 fetchAndAttachTurn
-              // 的 anyBody 口径（prompt/segments/output 任一非空）。
-              const survivorRuns = new Set<string>();
-              for (const t of survivors) {
-                const body =
-                  !!(t.prompt ?? "").trim() ||
-                  (t.segments?.length ?? 0) > 0 ||
-                  !!(t.output ?? "").trim();
-                if (!body) continue;
-                const key =
-                  t.realRunId ??
-                  (t.runId.startsWith("__") ? null : stripPageKeySuffix(t.runId));
-                if (key != null) survivorRuns.add(key);
-              }
-              const kept = prependTurns.filter(
-                (t) => t.realRunId == null || !survivorRuns.has(t.realRunId),
-              );
+              // 块，避免 #w 块与用户加载块双显（纯函数单测锁定，不受渲染层归并
+              // 去重掩盖）。
+              const kept = filterPrependAgainstExisting(prependTurns, survivors);
               return { ...prev, turns: [...kept, ...survivors] };
             });
           }

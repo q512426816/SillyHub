@@ -28,6 +28,43 @@ import { logsToTurns } from "@/components/daemon/runtime-session-helpers";
 import type { SessionTurnView } from "@/components/daemon/turn-timeline";
 import type { InitialWindowResult } from "./initial-window";
 
+/** 剥 prepend 轮块的游标页键后缀（`realRunId#e<pageKey>` / `#w<windowKey>` →
+ *  realRunId；非变体块原样返回）。与 session-panel-page 的同名 helper 同构。 */
+function stripMergeKeySuffix(runId: string): string {
+  const at = runId.indexOf("#");
+  return at === -1 ? runId : runId.slice(0, at);
+}
+
+/**
+ * 剔除与已存在轮块冲突的 prepend 块（评审 P2：补拉在飞期间用户可能已通过
+ * 预览卡/导航刻度单轮直达同一 run，#e 块先入时间线；第二段整窗合并再以 #w
+ * 块 prepend 会同 run 双块）。
+ *
+ * 判定「已存在且有内容」——prompt/segments/output 任一非空（对齐
+ * fetchAndAttachTurn 的 anyBody 口径）；空壳块（快照补建）不算，保留 prepend
+ * 以便整轮内容覆盖。锚点轮由调用方先按 replaceRunIds 摘除，不在 existing 中。
+ */
+export function filterPrependAgainstExisting(
+  prependTurns: SessionTurnView[],
+  existingTurns: SessionTurnView[],
+): SessionTurnView[] {
+  const loadedRuns = new Set<string>();
+  for (const t of existingTurns) {
+    const body =
+      !!(t.prompt ?? "").trim() ||
+      (t.segments?.length ?? 0) > 0 ||
+      !!(t.output ?? "").trim();
+    if (!body) continue;
+    const key =
+      t.realRunId ??
+      (t.runId.startsWith("__") ? null : stripMergeKeySuffix(t.runId));
+    if (key != null) loadedRuns.add(key);
+  }
+  return prependTurns.filter(
+    (t) => t.realRunId == null || !loadedRuns.has(t.realRunId),
+  );
+}
+
 export interface InitialWindowMergeResult {
   /** prepend 进时间线头部的轮块（runId 带 #w 窗口键后缀；空数组=无增量）。 */
   prependTurns: SessionTurnView[];
