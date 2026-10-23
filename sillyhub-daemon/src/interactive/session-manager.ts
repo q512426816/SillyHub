@@ -1932,6 +1932,17 @@ export class SessionManager {
           baselineHead: turn?.baselineHead,
           toolCallPaths: turn?.toolCallPaths ?? [],
           turnStartedAtMs: turn?.startedAtMs,
+          // 2026-10-23-review-risk-fixes-2：diff 阶段非 timeout git 错误此前在
+          // 采集器 catch 里无痕消失——落结构化 warn（快照 reason 枚举冻结禁新增）。
+          onGitDiagnostic: (d) => {
+            console.warn('[session-manager] turn_file_changes_git_degraded', {
+              run_id: runId,
+              workspace_root: workspaceRoot,
+              stage: d.stage,
+              reason: d.reason,
+              message: d.message,
+            });
+          },
         });
         this._reportTurnSnapshot(
           this._buildTurnSnapshotReport({

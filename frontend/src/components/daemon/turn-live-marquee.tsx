@@ -312,6 +312,53 @@ export const TurnLiveMarquee = memo(function TurnLiveMarquee({
   const [visible, setVisible] = useState(true);
   const [ready, setReady] = useState(false);
 
+  /** 滚动循环句柄（null=未在跑）：追平即停排，target 更新/恢复可见时重启
+   *（2026-10-23-review-risk-fixes-2：旧形态 step 在追平分支外无条件续排，
+   * 可见且追平后仍 ~60fps 空转至轮终态卸载）。 */
+  const rafRef = useRef<number | null>(null);
+  /** visible 的 ref 镜像——ensureScroll 从 applyTarget 回调侧免陈闭包读取。 */
+  const visibleRef = useRef(visible);
+  useEffect(() => {
+    visibleRef.current = visible;
+  }, [visible]);
+
+  const stopScroll = useCallback(() => {
+    if (rafRef.current !== null) {
+      cancelAnimationFrame(rafRef.current);
+      rafRef.current = null;
+    }
+  }, []);
+
+  /** 起排（未在跑时）：追向「最新条贴右缘」的目标；到达即停，不循环、不回跳。 */
+  const ensureScroll = useCallback(() => {
+    if (reduced || !visibleRef.current) return;
+    if (rafRef.current !== null) return; // 循环已在跑
+    const track = trackRef.current;
+    if (!track) return;
+    let last = performance.now();
+    const step = (now: number) => {
+      const dt = Math.min(80, now - last);
+      last = now;
+      const target = targetRef.current;
+      const distance = offsetRef.current - target;
+      if (distance > 0.5) {
+        // 追赶距离越大速度越快：事件密集时加速，稀疏时慢速流动。
+        const speed = Math.min(
+          LIVE_MARQUEE_MAX_SPEED,
+          LIVE_MARQUEE_BASE_SPEED + distance * 1.2,
+        );
+        const delta = Math.min(distance, (speed * dt) / 1000);
+        offsetRef.current -= delta;
+        if (offsetRef.current - target < 0.5) offsetRef.current = target;
+        track.style.transform = `translate3d(${offsetRef.current}px, 0, 0)`;
+        rafRef.current = requestAnimationFrame(step); // 只有仍在追才续排
+      } else {
+        rafRef.current = null; // 追平停排；applyTarget/恢复可见时再重启
+      }
+    };
+    rafRef.current = requestAnimationFrame(step);
+  }, [reduced]);
+
   const latest = entries.length > 0 ? entries[entries.length - 1]! : null;
 
   /**
@@ -342,7 +389,9 @@ export const TurnLiveMarquee = memo(function TurnLiveMarquee({
       track.style.transform = `translate3d(${next}px, 0, 0)`;
       setReady(true);
     }
-  }, []);
+    // target 更新是重启滚动的入口之一（此前停排时新目标到来要能再起排）。
+    ensureScroll();
+  }, [ensureScroll]);
 
   // entries 变化 / 挂载：重算目标（首帧直接定位到最新；ready 前隐藏防闪）。
   useEffect(() => {
@@ -368,34 +417,16 @@ export const TurnLiveMarquee = memo(function TurnLiveMarquee({
     return () => observer.disconnect();
   }, [reduced, applyTarget]);
 
-  // 连续滚动：追向「最新条贴右缘」的目标；到达即停，不循环、不回跳。
+  // 滚动生命周期：不可见/reduced 暂停（cancel），恢复可见时重启；追平停排后
+  // 由 applyTarget（entries/resize 的 target 更新入口）负责再起排。
   useEffect(() => {
-    if (reduced || !visible) return;
-    const track = trackRef.current;
-    if (!track) return;
-    let raf = 0;
-    let last = performance.now();
-    const step = (now: number) => {
-      const dt = Math.min(80, now - last);
-      last = now;
-      const target = targetRef.current;
-      const distance = offsetRef.current - target;
-      if (distance > 0.5) {
-        // 追赶距离越大速度越快：事件密集时加速，稀疏时慢速流动。
-        const speed = Math.min(
-          LIVE_MARQUEE_MAX_SPEED,
-          LIVE_MARQUEE_BASE_SPEED + distance * 1.2,
-        );
-        const delta = Math.min(distance, (speed * dt) / 1000);
-        offsetRef.current -= delta;
-        if (offsetRef.current - target < 0.5) offsetRef.current = target;
-        track.style.transform = `translate3d(${offsetRef.current}px, 0, 0)`;
-      }
-      raf = requestAnimationFrame(step);
-    };
-    raf = requestAnimationFrame(step);
-    return () => cancelAnimationFrame(raf);
-  }, [reduced, visible]);
+    if (reduced || !visible) {
+      stopScroll();
+      return;
+    }
+    ensureScroll();
+    return stopScroll;
+  }, [reduced, visible, ensureScroll, stopScroll]);
 
   // 可见性暂停（FR-06）：observer 不可用时不报错，默认保持运行。
   useEffect(() => {

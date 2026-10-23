@@ -626,6 +626,33 @@ describe('collectTurnFileChanges × 降级路径', () => {
     expect(fileAt(snap, 'a.ts')).toMatchObject({ status: 'modified', added: 2, deleted: 0 });
   });
 
+  it('name-status 非 timeout git 错误经 onGitDiagnostic 落结构化诊断，快照语义不变（2026-10-23-review-risk-fixes-2）', async () => {
+    const dir = await plainDir();
+    const fake = makeFakeExec((args) => {
+      if (args.includes('status')) return 'M  a.ts\0';
+      if (args.includes('--name-status')) return new Error('fatal: bad object');
+      return '2\t0\ta.ts\n';
+    });
+    const diagnostics: Array<{
+      stage: string;
+      reason: string | null;
+      message: string;
+    }> = [];
+    const snap = await collectTurnFileChanges({
+      runId: 'run-name-status-git-error',
+      workspaceRoot: dir,
+      baselineHead: 'deadbeefdeadbeefdeadbeefdeadbeefdeadbeef',
+      execFile: fake.exec,
+      onGitDiagnostic: (d) => diagnostics.push({ ...d }),
+    });
+    // 旧实现：非 timeout 错误在 catch 里无痕消失（无日志/无 reason 可排查）
+    expect(diagnostics).toEqual([
+      { stage: 'name-status', reason: null, message: 'fatal: bad object' },
+    ]);
+    // 快照照常产出：numstat 行级可信、清单在——降级语义与旧一致（reason 枚举冻结禁新增）
+    expect(fileAt(snap, 'a.ts')).toMatchObject({ status: 'modified', added: 2, deleted: 0 });
+  });
+
   it('git 缺失：执行器 ENOENT → unavailable + reason=git_missing（不抛错）', async () => {
     const dir = await plainDir();
     const fake = makeFakeExec(() => {

@@ -608,6 +608,8 @@ async function collectInner(
     signal: AbortSignal;
     taskStartMs: number;
     ctx: CollectContext;
+    /** diff 阶段非 timeout 错误的结构化诊断出口（2026-10-23-review-risk-fixes-2）。 */
+    onGitDiagnostic?: CollectTurnFileChangesInput['onGitDiagnostic'];
   },
   progress: CollectProgress,
 ): Promise<CollectOutcome> {
@@ -692,9 +694,18 @@ async function collectInner(
         baselineHead,
       ]);
     } catch (error) {
-      if (classifyGitError(error)?.reason === 'timeout') {
+      const classified = classifyGitError(error);
+      if (classified?.reason === 'timeout') {
         escalateIfTimeout(error);
         progress.degradedReason = 'timeout';
+      } else {
+        // 2026-10-23-review-risk-fixes-2：非 timeout 错误（bad object / dubious
+        // ownership 等）此前无痕消失——快照 reason 枚举冻结，改走诊断回调。
+        args.onGitDiagnostic?.({
+          stage: 'name-status',
+          reason: classified?.reason ?? null,
+          message: error instanceof Error ? error.message : String(error),
+        });
       }
     }
     try {
@@ -706,9 +717,16 @@ async function collectInner(
       ]);
       progress.lineCounts = true;
     } catch (error) {
-      if (classifyGitError(error)?.reason === 'timeout') {
+      const classified = classifyGitError(error);
+      if (classified?.reason === 'timeout') {
         escalateIfTimeout(error);
         progress.degradedReason = 'timeout';
+      } else {
+        args.onGitDiagnostic?.({
+          stage: 'numstat',
+          reason: classified?.reason ?? null,
+          message: error instanceof Error ? error.message : String(error),
+        });
       }
       progress.lineCounts = false;
     }
@@ -1037,6 +1055,7 @@ export async function collectTurnFileChanges(
           signal: controller.signal,
           taskStartMs,
           ctx,
+          onGitDiagnostic: input.onGitDiagnostic,
         },
         progress,
       ),

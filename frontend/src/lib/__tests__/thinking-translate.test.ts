@@ -194,6 +194,25 @@ describe("translateText 合批/缓存/降级", () => {
     expect(apiFetchMock).toHaveBeenCalledTimes(1);
   });
 
+  it("2xx 脏响应体（null）→ 本批回退原文+退避，Promise 不悬挂（2026-10-23-review-risk-fixes-2 FR-04）", async () => {
+    // apiFetch 2xx 时 safeJsonParse 失败得 null 原样透出——旧实现 resp.engine_ready
+    // 解引用抛错后无人兜底：该批 Assembler 永不 settle（UI 恒「翻译中」）+ inflight 泄漏
+    apiFetchMock.mockResolvedValue(null);
+    const p1 = translateText("dirty response body english thinking text case.");
+    await vi.advanceTimersByTimeAsync(250);
+    await expect(p1).resolves.toBeNull();
+    // 退避期内：新文本零请求直接回退
+    await expect(translateText("second text during dirty body backoff.")).resolves.toBeNull();
+    expect(apiFetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("畸形响应缺 items → 同款降级 resolve null（不悬挂）", async () => {
+    apiFetchMock.mockResolvedValue({ ok: true, engine_ready: true, reason: null });
+    const p = translateText("malformed items missing english thinking text.");
+    await vi.advanceTimersByTimeAsync(250);
+    await expect(p).resolves.toBeNull();
+  });
+
   it("超长文按块拆分为多个 item，译文按序拼回", async () => {
     const part = "Long english paragraph for chunk splitting test. ".repeat(40); // ~2640
     const text = `${part}\n\n${part}`;

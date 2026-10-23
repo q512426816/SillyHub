@@ -734,8 +734,14 @@ export class SillySpecManager {
     | undefined;
   /** db_missing 连败计数（cwd 键控；成功清零）。 */
   private readonly _dbMissingStreaks = new Map<string, number>();
-  /** 已淘汰 cwd（进程内 skip 表：淘汰后不再对该根发起 CLI）。 */
-  private readonly _evictedCwds = new Set<string>();
+  /** 已淘汰采集目标（进程内 skip 表）：rootPath → 被淘汰的 workspaceId。
+   *
+   * 2026-10-23-review-risk-fixes-2：由裸根 Set 改双键 Map——陈旧探针的淘汰
+   * 条目只封发起淘汰的那个工作区，同根新 wsId（重建/竞态 claim）照常采集，
+   * 不再被永久静默跳过。 */
+  private readonly _evictedCwds = new Map<string, string | null>();
+  /** 淘汰 skip 命中的一次性 warn 标记（防每拍刷屏；同名重 claim 时清除可再记）。 */
+  private readonly _evictedSkipLogged = new Set<string>();
   /** 采集超时毫秒。 */
   private readonly _statusTimeoutMs: number;
   /**
@@ -1041,7 +1047,19 @@ export class SillySpecManager {
     // 不记失败（非瞬态查询失败，anyFailed 聚合不置位、_statusError 不动）；
     // 具名工作区滞留摘要槽移除（平台不再显示对该根的陈旧摘要）。
     // db_missing 淘汰表命中：项目侧永久缺库已被淘汰，不再对该根发起 CLI。
-    if (this._evictedCwds.has(cwd)) return true;
+    // 2026-10-23-review-risk-fixes-2：skip 判定收紧为双键（rootPath→被淘汰
+    // workspaceId 与本目标一致才 skip）——陈旧探针的淘汰条目不再误伤同根新
+    // wsId；命中打一次性 warn（旧形态静默停摆零日志，不可排查）。
+    if (this._evictedCwds.get(cwd) === workspaceId) {
+      if (!this._evictedSkipLogged.has(cwd)) {
+        this._evictedSkipLogged.add(cwd);
+        this._log('warn', 'sillyspec_status_skip_evicted', {
+          cwd,
+          workspace_id: workspaceId ?? undefined,
+        });
+      }
+      return true;
+    }
     const crossrepoMarker = join(cwd, '.git', 'sillyspec-crossrepo.json');
     if (existsSync(crossrepoMarker)) {
       if (!this._crossrepoSkipLogged.has(cwd)) {
@@ -1127,7 +1145,7 @@ export class SillySpecManager {
         this._log('warn', 'sillyspec_status_db_missing', { cwd, consecutive: streak });
         if (streak >= STATUS_DB_MISSING_EVICT_AFTER) {
           this._dbMissingStreaks.delete(cwd);
-          this._evictedCwds.add(cwd);
+          this._evictedCwds.set(cwd, workspaceId);
           this._log('info', 'sillyspec_status_root_evicted', {
             cwd,
             workspace_id: workspaceId ?? undefined,
@@ -1241,10 +1259,12 @@ export class SillySpecManager {
    * 清除 db_missing 淘汰标记（2026-10-22-sillyspec-probe-db-missing-evict /
    * FR-01 场景2）：工作区重新 claim 同名根时由 daemon 调用——skip 表与连败计数
    * 一并清空，该根恢复采集（若项目仍缺库则重新计满 3 次再淘汰）。
+   * 2026-10-23-review-risk-fixes-2：同步清一次性 warn 标记（再淘汰时可再记一条）。
    */
   clearStatusProbeEviction(rootPath: string): void {
     this._evictedCwds.delete(rootPath);
     this._dbMissingStreaks.delete(rootPath);
+    this._evictedSkipLogged.delete(rootPath);
   }
 
   /** 三态②：置能力缺失（快照 null）+ warn 一次同类静默。 */

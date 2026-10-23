@@ -1493,4 +1493,42 @@ describe('2026-10-22-sillyspec-probe-db-missing-evict：db_missing 连败淘汰'
     await h.manager.collectStatusOnce();
     expect(evictions).toHaveLength(0);
   });
+
+  it('同根新 workspaceId 不被陈旧淘汰条目静默跳过 + skip 命中一次性 warn（2026-10-23-review-risk-fixes-2）', async () => {
+    const evictions: Array<{ workspaceId: string; rootPath: string }> = [];
+    // 本用例私有的可变目标表（harness 闭包持同引用，末段翻转为 ws-rebuilt）
+    const targets: Array<{ workspaceId: string | null; rootPath: string }> = [
+      { workspaceId: WS, rootPath: ROOT },
+    ];
+    const h = makeStatusHarness({
+      targets,
+      outcomeByCwd: { [ROOT]: DB_MISSING },
+      statusRootEvict: (workspaceId, rootPath) =>
+        evictions.push({ workspaceId, rootPath }),
+    });
+    // 连败 3 次 → 淘汰（skip 表记 ROOT→WS）
+    await h.manager.collectStatusOnce();
+    await h.manager.collectStatusOnce();
+    await h.manager.collectStatusOnce();
+    expect(evictions).toEqual([{ workspaceId: WS, rootPath: ROOT }]);
+    const evictedCalls = h.calls.filter((c) => c.options.cwd === ROOT).length;
+    // 同 wsId 再拍：skip 生效（既有语义保持）+ 一次性 warn 恰一条不刷屏
+    await h.manager.collectStatusOnce();
+    expect(h.calls.filter((c) => c.options.cwd === ROOT).length).toBe(evictedCalls);
+    expect(h.events.filter((e) => e === 'sillyspec_status_skip_evicted')).toHaveLength(1);
+    await h.manager.collectStatusOnce();
+    expect(h.events.filter((e) => e === 'sillyspec_status_skip_evicted')).toHaveLength(1);
+    // 竞态形态：W2 重 claim 清表 → W1 陈旧探针的连败淘汰再落地一次
+    h.manager.clearStatusProbeEviction(ROOT);
+    await h.manager.collectStatusOnce();
+    await h.manager.collectStatusOnce();
+    await h.manager.collectStatusOnce();
+    expect(evictions).toHaveLength(2);
+    const afterStale = h.calls.filter((c) => c.options.cwd === ROOT).length;
+    // W2 采集同根：必须照常发起 CLI——旧实现按裸根键控恒 skip（永久静默停摆）
+    targets.length = 0;
+    targets.push({ workspaceId: 'ws-rebuilt', rootPath: ROOT });
+    await h.manager.collectStatusOnce();
+    expect(h.calls.filter((c) => c.options.cwd === ROOT).length).toBe(afterStale + 1);
+  });
 });

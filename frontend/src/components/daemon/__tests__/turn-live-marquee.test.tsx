@@ -253,6 +253,40 @@ describe("TurnLiveMarquee 连续轨道（FR-01 / FR-02 / FR-05）", () => {
       vi.unstubAllGlobals();
     }
   });
+
+  it("追平目标后 rAF 停排，entries 更新重新起排（2026-10-23-review-risk-fixes-2）", () => {
+    const rafCallbacks: FrameRequestCallback[] = [];
+    const rafSpy = vi
+      .spyOn(globalThis, "requestAnimationFrame")
+      .mockImplementation((cb) => {
+        rafCallbacks.push(cb);
+        return rafCallbacks.length;
+      });
+    const segs1 = [
+      thinking("t1", "分析登录链路"),
+      tool("tool-1", { toolName: "Read", primary: "src/lib/auth.ts" }),
+      fileSeg("f1", "report.md"),
+    ];
+    const segs2 = [...segs1, thinking("t-new", "新事件到达")];
+    try {
+      const { rerender } = render(
+        <TurnLiveMarquee entries={deriveLiveMarqueeEntries(segs1)} />,
+      );
+      // 挂载即起排（至少一帧）
+      expect(rafCallbacks.length).toBeGreaterThanOrEqual(1);
+      // 手动驱动全部已排帧：jsdom 下 clientWidth/scrollWidth 恒 0 → distance=0
+      // → 追平分支。旧实现每帧无条件续排（驱动 N 帧又排 N 帧）；新实现停排。
+      act(() => {
+        rafCallbacks.splice(0).forEach((cb) => cb(performance.now()));
+      });
+      expect(rafCallbacks.length).toBe(0);
+      // 新内容到达（target 更新唯一入口 applyTarget）→ 重新起排
+      rerender(<TurnLiveMarquee entries={deriveLiveMarqueeEntries(segs2)} />);
+      expect(rafCallbacks.length).toBeGreaterThanOrEqual(1);
+    } finally {
+      rafSpy.mockRestore();
+    }
+  });
 });
 
 describe("TurnTimeline 接入门控（FR-01 / FR-04）", () => {

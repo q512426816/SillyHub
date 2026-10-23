@@ -172,6 +172,17 @@ export interface CollectTurnFileChangesInput {
   limits?: Partial<TurnFileChangesLimits>;
   /** 测试注入点；缺省走 node:child_process.execFile。 */
   execFile?: TurnFileChangesExecFile;
+  /**
+   * diff 阶段非 timeout git 错误的结构化诊断出口（2026-10-23-review-risk-fixes-2）：
+   * 此前这类错误在 catch 里无痕消失（无日志无 reason，快照无因降级不可排查）。
+   * 快照 reason 是冻结枚举（禁新增值，错误按事件命名），故错误走诊断回调而非
+   * 快照字段——生产由 session-manager 落 `console.warn`；缺省不传=行为同旧。
+   */
+  onGitDiagnostic?: (diagnostic: {
+    stage: 'name-status' | 'numstat';
+    reason: TurnFileChangesReason | null;
+    message: string;
+  }) => void;
 }
 
 /* ── 遥测（模块内滑窗，零外部依赖）──────────────────────────────────────── */

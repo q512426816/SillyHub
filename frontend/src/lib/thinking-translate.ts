@@ -178,30 +178,31 @@ function failEntries(entries: QueueEntry[]): void {
 
 async function requestBatch(entries: QueueEntry[]): Promise<void> {
   const items = entries.map((entry, idx) => ({ id: `${idx}`, text: entry.chunk }));
-  let resp: TranslateApiResponse;
   try {
-    resp = await apiFetch<TranslateApiResponse>("/api/translate/thinking", {
+    const resp = await apiFetch<TranslateApiResponse>("/api/translate/thinking", {
       method: "POST",
       json: { items, target: "zh" },
       timeoutMs: requestTimeoutMsFor(entries),
       timeoutMessage: "翻译请求超时，已回退原文",
     });
+    if (!resp.engine_ready) {
+      unavailableUntil = Date.now() + UNAVAILABLE_BACKOFF_MS;
+      failEntries(entries);
+      return;
+    }
+    const byId = new Map(resp.items.map((it) => [it.id, it]));
+    entries.forEach((entry, idx) => {
+      const it = byId.get(`${idx}`);
+      fillEntry(entry, it && it.translated ? it.text : null);
+    });
   } catch {
-    // 网络失败与引擎不可用同语义：本批回退原文 + 退避（防风暴）
+    // 网络失败/超时与 2xx 脏响应体（safeJsonParse 得 null / items 缺失时上方
+    // 解引用抛 TypeError）同语义：本批回退原文 + 退避（防风暴）——异常逃逸会
+    // 让该批 Assembler 永不 settle（UI 恒「翻译中」）且 inflight 条目泄漏
+    //（2026-10-23-review-risk-fixes-2 / FR-04）。
     unavailableUntil = Date.now() + UNAVAILABLE_BACKOFF_MS;
     failEntries(entries);
-    return;
   }
-  if (!resp.engine_ready) {
-    unavailableUntil = Date.now() + UNAVAILABLE_BACKOFF_MS;
-    failEntries(entries);
-    return;
-  }
-  const byId = new Map(resp.items.map((it) => [it.id, it]));
-  entries.forEach((entry, idx) => {
-    const it = byId.get(`${idx}`);
-    fillEntry(entry, it && it.translated ? it.text : null);
-  });
 }
 
 function flush(): void {
