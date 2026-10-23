@@ -130,6 +130,8 @@ import {
 } from "./turn-state";
 // 2026-10-23-session-first-window-turn-align：首屏自适应窗口（轮次对齐 + 预算）。
 import { buildInitialWindow } from "./initial-window";
+// 2026-10-23-session-first-load-ux：首屏窗口增量合并（两段渲染第二段）。
+import { buildInitialWindowMerge } from "./initial-window-merge";
 import { highlightSearchHit, searchResultLabel, searchResultText } from "./search";
 // task-01（2026-10-14-session-turn-preview-cards）：消息流归并层（单一数据源，
 // 未加载轮合成预览条目，D-004 方案 A）。
@@ -769,6 +771,11 @@ export function SessionPanelPage({
   // 初始历史改 limit=100 起步（HISTORY_PAGE_SIZE），时间线顶部「加载更早消息」
   // 按钮 before 游标 prepend（resync after 增量不受影响——cursor 语义不变）。
   const [historyLoading, setHistoryLoading] = useState(false);
+  // 2026-10-23-session-first-load-ux / FR-01：首屏历史加载在飞指示（true =
+  // 详情已可渲染而历史/窗口补拉链在途）——TurnTimeline turns 为空时以骨架屏
+  // 替代静态空态文案。随 sessionId 切换置 true，establish 终态（成功/失败）
+  // 且未被取消时置 false；终态空会话保持 false → 原空态文案（FR-03）。
+  const [initialHistoryLoading, setInitialHistoryLoading] = useState(false);
   // 2026-10-10-single-turn-nav-and-jump-head：「回到会话开头」连续翻页进行中
   // （入口转圈 + disabled；随会话切换复位）。
   const [jumpHeadLoading, setJumpHeadLoading] = useState(false);
@@ -1250,6 +1257,10 @@ export function SessionPanelPage({
     setHasEarlier(false);
     setHistoryLoading(false);
     historyLoadingRef.current = false;
+    // 2026-10-23-session-first-load-ux / FR-01：新会话进入即进入「历史加载在飞」
+    // （establish 终态置 false；cancelled 路径由本重置行接管，防旧链 finally
+    // 误清新会话的加载态）。
+    setInitialHistoryLoading(true);
     // 2026-10-10-single-turn-nav-and-jump-head：回到开头循环跨会话即停——
     // inflight 锁复位（循环 tick 内 epoch 校验兜底退出），loading 态复位。
     jumpHeadInflightRef.current = false;
@@ -1280,59 +1291,27 @@ export function SessionPanelPage({
           slim: true,
         });
         if (cancelled) return;
-        // 2026-10-23-session-first-window-turn-align：首屏自适应窗口——底窗按轮
-        // 对齐补全（锚点轮完整才合并 + 向前补到预算/8 轮上限/到头），小会话尽量
-        // 全量；锚点不完整或请求失败整体回退底窗，不阻断建流（FR-01/FR-03）。
         const runsForWindow = (await runsPromise) ?? null;
         if (cancelled) return;
-        let windowLogs = logs;
-        let windowCursor: AgentRunLogEntry | null = null;
-        // 评审 P2：首屏补拉挂 AbortSignal——切会话/卸载时立即取消在途请求链，
-        // 不让旧会话的补拉继续白跑（结果仍由下方 cancelled 守卫丢弃）。
-        const windowAbort = new AbortController();
-        initialAbortRef.current = windowAbort;
-        try {
-          const adaptive = await buildInitialWindow({
-            baseLogs: logs,
-            runs: runsForWindow,
-            probeEarlier: (oldest) =>
-              probeSessionLogBefore(sessionId, oldest.timestamp, oldest.id, {
-                signal: windowAbort.signal,
-              }),
-            fetchRunLogs: (runId) =>
-              getSessionRunLogs(sessionId, runId, { signal: windowAbort.signal }),
-          });
-          if (cancelled) return;
-          windowLogs = adaptive.logs;
-          // 评审 P2：锚点轮直达不完整/失败时整体回退底窗、cursorLog 保持底窗
-          // 最旧行；完整采纳时才前移到合并后最旧行或最早已补轮首行。
-          windowCursor = adaptive.cursorLog;
-        } catch {
-          windowLogs = logs;
-        }
-        // SSE 增量游标取合并后最新行：补拉可能带到底窗之后的行（直达返回该轮
-        // 全量），游标不前进会在建流首连重复拉取同一批。
-        streamCursor = maxLogTimestamp(windowLogs);
-        // 翻页游标 = 窗口内**时间最早**行（quick ql-20260916-014：logs[0] 是 run
-        // 块序首行非时间最旧——大 run 块序靠前而尾部 ts 靠后，以其为 before 翻页
-        // 会重复拉取/留洞，见 handleLoadEarlier 同款注释）；满页即可能还有更早。
-        // id 分量必须同点写（task-06）——漏设则首次翻页 beforeId=undefined
-        // 走后端旧 <= 分支，同 ts 满 100 行批首页整页重复。
-        const oldestInit = windowLogs.length
-          ? windowLogs.reduce((m, l) => (l.timestamp < m.timestamp ? l : m), windowLogs[0]!)
+
+        // ── 第一段（2026-10-23-session-first-load-ux / FR-02）：底窗先渲染 ──────
+        // 底窗 400 行到达即装配渲染最近轮次（1 个 RTT 可见），不等下方补拉链——
+        // 大会话进入体感从「等全部串行链完成才见内容」回到「底窗即见」；窗口
+        // 轮次对齐语义由第二段增量合并达成，最终状态与整链阻塞版一致。
+        const baseOldest = logs.length
+          ? logs.reduce((m, l) => (l.timestamp < m.timestamp ? l : m), logs[0]!)
           : null;
-        const cursorRow = windowCursor ?? oldestInit;
-        historyCursorRef.current = cursorRow?.timestamp ?? null;
-        historyCursorIdRef.current = cursorRow?.id ?? null;
+        // 翻页游标先取底窗**时间最早**行（quick ql-20260916-014：logs[0] 是 run
+        // 块序首行非时间最旧——大 run 块序靠前而尾部 ts 靠后，以其为 before 翻页
+        // 会重复拉取/留洞）；补拉完成后无缺口时前移（见第二段）。id 分量必须
+        // 同点写（task-06）——漏设则首次翻页 beforeId=undefined 走后端旧 <= 分支。
+        historyCursorRef.current = baseOldest?.timestamp ?? null;
+        historyCursorIdRef.current = baseOldest?.id ?? null;
         setHasEarlier(logs.length >= HISTORY_PAGE_SIZE);
-        // 触顶补口：内容不满视口（无滚动条）时 scroll 事件永不触发——满页
-        // 且初始内容撑不满一屏时自动续拉直至可滚动/到头（见 maybeAutoFill）。
-        // 双 rAF：等本批 setState 的 DOM 提交 + 布局完成（setTimeout(0) 早于
-        // 提交，scrollHeight=0 链断——分身会话实测复现「无滚动条不加载」）。
-        if (logs.length >= HISTORY_PAGE_SIZE) {
-          scheduleAutoFillRef.current();
-        }
-        const restored = logsToTurns(windowLogs);
+        // SSE 增量游标先按底窗最新行——第二段成功时覆盖为合并窗口最新行
+        //（补拉可能带到底窗之后的行，游标不前进会在建流首连重复拉取同一批）。
+        streamCursor = maxLogTimestamp(logs);
+        const restored = logsToTurns(logs);
         // quick（ql-20260916-005）：播种「已完成副作用」集合——历史终态轮视为刷新类
         // 副作用已发生过（首连对账 / 5s 复核的重放合成不再扇出）。下方 currentRunId
         // 重放修正翻回 running 的轮不播种，其真实完成事件到达时副作用照常触发。
@@ -1362,11 +1341,98 @@ export function SessionPanelPage({
               : restored,
           };
         });
+        // 补拉在飞锁（同步 ref 立即生效）：hasEarlier 已放开而补拉未完成，触顶
+        // 翻页若此时进入会与补拉链并发 prepend（重复块/游标互踩）——持锁挂起，
+        // 第二段完成释放后续翻（cancelled 跳过释放时由换会话重置行兜底清锁）。
+        historyLoadingRef.current = true;
+        setHistoryLoading(true);
+
+        // ── 第二段：首屏自适应窗口（2026-10-23-session-first-window-turn-align）
+        // 后台跑轮次对齐补拉（锚点轮直达 + 向前补到预算/8 轮上限/到头），完成后
+        // 增量合并（2026-10-23-session-first-load-ux FR-02：不整体替换 turnState
+        // ——用户占位轮可能已写入，prepend 只动头部）。锚点不完整或请求失败整体
+        // 回退底窗，不阻断建流（FR-01/FR-03）。
+        let windowCursor: AgentRunLogEntry | null = null;
+        // 评审 P2：首屏补拉挂 AbortSignal——切会话/卸载时立即取消在途请求链，
+        // 不让旧会话的补拉继续白跑（结果仍由下方 cancelled 守卫丢弃）。
+        const windowAbort = new AbortController();
+        initialAbortRef.current = windowAbort;
+        try {
+          const adaptive = await buildInitialWindow({
+            baseLogs: logs,
+            runs: runsForWindow,
+            probeEarlier: (oldest) =>
+              probeSessionLogBefore(sessionId, oldest.timestamp, oldest.id, {
+                signal: windowAbort.signal,
+              }),
+            fetchRunLogs: (runId) =>
+              getSessionRunLogs(sessionId, runId, { signal: windowAbort.signal }),
+          });
+          if (cancelled) return;
+          const merge = buildInitialWindowMerge(logs, adaptive);
+          if (merge.prependTurns.length > 0) {
+            // 运行中锚点轮修正（同第一段 cur 重放口径）：整轮合并块翻回
+            // running（logsToTurns 一律 completed），SSE 建流后增量按 realRunId
+            // 归入该唯一块（底窗旧块已摘）。
+            const cur = currentRunIdRef.current;
+            const prependTurns = merge.prependTurns.map((t): SessionTurnView =>
+              t.realRunId === cur && t.status === "completed"
+                ? { ...t, status: "running" }
+                : t,
+            );
+            for (const t of prependTurns) {
+              if (TERMINAL_TURN_STATUSES.has(t.status)) {
+                const rid =
+                  t.realRunId ??
+                  (t.runId.startsWith("__") ? null : stripPageKeySuffix(t.runId));
+                if (rid) completedSideEffectRunIdsRef.current.add(rid);
+              }
+            }
+            setTurnState((prev) => {
+              // 摘底窗锚点旧块（整轮行已并入 prepend 块，不摘会同轮双显）。
+              // 不带终态闸：SSE 尚未建流，无实时增量链路可打断；运行中锚点
+              // 轮摘后由上方修正块唯一承载。
+              const survivors =
+                merge.replaceRunIds.size > 0
+                  ? prev.turns.filter((t) => {
+                      const key =
+                        t.realRunId ??
+                        (t.runId.startsWith("__") ? null : stripPageKeySuffix(t.runId));
+                      return !(key != null && merge.replaceRunIds.has(key));
+                    })
+                  : prev.turns;
+              return { ...prev, turns: [...prependTurns, ...survivors] };
+            });
+          }
+          // 评审 P2：锚点轮直达不完整/失败时整体回退底窗、cursorLog 保持底窗
+          // 最旧行；完整采纳时才前移到合并后最旧行或最早已补轮首行。
+          windowCursor = adaptive.cursorLog;
+          streamCursor = maxLogTimestamp(adaptive.logs);
+        } catch {
+          /* 补拉失败/中断：整体回退底窗（游标保持底窗最旧行，streamCursor 已按底窗）。 */
+        }
+        const cursorRow = windowCursor ?? baseOldest;
+        historyCursorRef.current = cursorRow?.timestamp ?? null;
+        historyCursorIdRef.current = cursorRow?.id ?? null;
+        // 释放补拉锁（翻页/触顶自动补拉恢复准入；maybeAutoFill 检查同步锁）。
+        historyLoadingRef.current = false;
+        setHistoryLoading(false);
+        // 触顶补口：内容不满视口（无滚动条）时 scroll 事件永不触发——满页
+        // 且初始内容撑不满一屏时自动续拉直至可滚动/到头（见 maybeAutoFill）。
+        // 双 rAF：等本批 setState 的 DOM 提交 + 布局完成（setTimeout(0) 早于
+        // 提交，scrollHeight=0 链断——分身会话实测复现「无滚动条不加载」）。
+        if (logs.length >= HISTORY_PAGE_SIZE) {
+          scheduleAutoFillRef.current();
+        }
       } catch {
         /* 历史拉取失败：不阻断建流，streamSession initialSync 全量对账兜底 */
         initialSync = true;
       }
       if (cancelled) return;
+      // 2026-10-23-session-first-load-ux / FR-01 / FR-03：历史加载终态（成功/
+      // 失败均到达此处）——骨架屏退场；终态空会话回原空态文案。cancelled 路径
+      // 不置 false，交新会话 effect 的重置行接管（防旧链误清新会话加载态）。
+      setInitialHistoryLoading(false);
       // quick（ql-20260916-005）：缺口同步复用宿主快照——await 已并行的 runsPromise
       //（与历史日志预取同时发起，此处通常已 settle；失败 → undefined 自拉兜底）。
       const runsSnapshot = (await runsPromise) ?? undefined;
@@ -4995,6 +5061,9 @@ export function SessionPanelPage({
         turns={dialogTurns}
         viewMode={viewMode}
         errorMsg={errorMsg}
+        // 2026-10-23-session-first-load-ux / FR-01：详情已渲染而首屏历史在飞 →
+        // 时间线骨架屏（dialogTurns 空时；大纲预览卡/底窗轮块到达即自然退场）。
+        historyLoading={initialHistoryLoading}
         // task-08（2026-09-22-session-fork-continuation / FR-01 / FR-04）：轮级
         // 「⑂ 从此分叉」入口接线——provider 走 caps 单源（none 档行内自不渲染）；
         // engineAnchor 取 /runs 快照 engine_anchor（D-014③）；点击开确认弹层。
