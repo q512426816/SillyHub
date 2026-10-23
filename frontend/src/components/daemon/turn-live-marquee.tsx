@@ -56,10 +56,11 @@ import { processLabel } from "./process-labels";
 import type { TurnSegment } from "./session-log-assembler";
 
 /**
- * 轨道条目上限：超出只保留最近 200 条（更早的早已滚出视口）。
- * 上限内不做窗口替换，保证"只向最新流、不回跳"。
+ * 轨道渲染队列上限（2026-10-23-marquee-queue-window）：只保留最近 12 条，
+ * 更早的直接丢弃。12 条约 3 屏上下文，轨道总宽收敛在约 3.3k px——
+ * 跑马灯定位是「感知」，完整过程由「进度」视图承担，无需保留长历史。
  */
-export const LIVE_MARQUEE_MAX_ENTRIES = 200;
+export const LIVE_MARQUEE_MAX_ENTRIES = 12;
 /** 追赶上限（px/s）；距离主导的缓出曲线见 marqueeSpeedForDistance。 */
 export const LIVE_MARQUEE_MAX_SPEED = 1600;
 

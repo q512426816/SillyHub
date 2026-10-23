@@ -157,7 +157,7 @@ describe("deriveLiveMarqueeEntries 纯函数（FR-01 / FR-03）", () => {
     expect(entries[1]!.text).toContain("keepalive");
   });
 
-  it("条目超过上限时只保留最近 200 条", () => {
+  it("条目超过上限时只保留最近 12 条", () => {
     const many = Array.from({ length: LIVE_MARQUEE_MAX_ENTRIES + 10 }, (_, i) =>
       thinking(`t-${i}`, `事件 ${i}`),
     );
