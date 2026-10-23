@@ -1,0 +1,34 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-23-session-dialog-input-align",
+  "reviewer": "inline-self（环境无已注册子代理，主会话按检查单代行自审）",
+  "verdict": "PASS",
+  "reviewedAgainst": "2012a0426db5ce4e6f7307f847c4c1b18eb8deac",
+  "findings": [
+    {
+      "severity": "P3",
+      "title": "page / dialog 两模式仍为两份独立实现，行为靠各自测试维系（长期漂移风险）",
+      "evidence": "本变更把 page 版三件套（受理即清 / 失败恢复 / idle 恒空白）在 dialog 手动复刻了一份（clearInputAccepted / restoreRejectedSend / 回读分支），语义一致但代码不共享；后续任一侧改动都需双点位同步，否则再次分叉。",
+      "location": "frontend/src/components/daemon/session-panel/session-panel-dialog.tsx:425"
+    },
+    {
+      "severity": "P3",
+      "title": "idle 态草稿键写空字符串而非删除，localStorage 累积空键",
+      "evidence": "idle 挂载与受理即清均调用 writeSessionDraft(null, \"\", ...)，键保留为 ''（turn-state 无 remove API）；与 page 模式同款处理，量级与真实会话数同级，无功能影响。",
+      "location": "frontend/src/components/daemon/session-panel/session-panel-dialog.tsx:391"
+    },
+    {
+      "severity": "P3",
+      "title": "定时发送（confirmSchedCreate）路径未纳入「受理即清」统一口径",
+      "evidence": "定时消息创建成功后仍由原 trim 比对守卫 setInput 清空（非 clearInputAccepted），草稿键依赖持久化 effect —— 与「发送受理」语义不同（未真正发送），故有意保持；若浮窗在 effect 前卸载，定时内容会残留在 idle 键，但 idle 恒空白已使该残留不可见。",
+      "location": "frontend/src/components/daemon/session-panel/session-panel-dialog.tsx:345"
+    }
+  ],
+  "dimensionNotes": {
+    "乱序": "ok——失败迟到：setInput 仅空时回填 + 草稿键仅空时写回，双守卫下不覆盖窗口期新输入；成功迟到（浮窗已卸载）：setState no-op，草稿键在受理点已同步清，无残留。",
+    "并发": "ok——受理即清后输入为空，第二条连发被 handleSend 首个守卫（!rawPrompt && 无附件）拦下；忙轮第二条仍走 sendToServerQueue 既有串行入队，占位轮/currentRunId 机制未动。",
+    "切换": "ok——浮窗卸载（关闭 modal / 宿主 key 由 session id 翻为 \"live\"）时 setState 安全，catch 内 writeSessionDraft 直接落盘兜底，重开原会话回读即恢复可重试；边界已裁决：可接受（idle 态放弃「写一半关窗再续」换取「新建=全新开始」，与 page 同口径）。",
+    "作用域": "ok——草稿键组装未改（真会话按 sessionId / idle 按 __pre__:<workspaceId|'-'>），本变更只改回读条件与写入时序；边界已裁决：可接受（dialog 无 runtime 维度沿用 D-001 既有约定；dialog 侧不需要 page 门户式的 remount nonce——宿主 key = attachSession?.id ?? \"live\"，idle↔真会话切换必然重挂载，关闭 modal 即卸载子树）。"
+  },
+  "reviewedAt": "2026-10-23T04:12:00Z"
+}
