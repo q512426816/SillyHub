@@ -10,7 +10,7 @@
  * 单口径（排队中/运行中/打断中/已完成/失败/已中止）；「全部/进度」视图的
  * turn-status-bar 不消费本构件（Grill G-03）。
  */
-import { memo } from "react";
+import { memo, type ReactNode } from "react";
 
 import { cn } from "@/lib/utils";
 
@@ -65,8 +65,12 @@ export interface RoundDividerProps {
    * 把那串时间细节折进本行**最右端**（等宽数字 10.5px / muted）。
    * 缺省 undefined ＝ 原样零视觉变化（胶囊仍居中等分两条渐变细线）；传值时右线
    * 让位给细节文本，左右两条 flex-1 仍等宽，胶囊视觉居中不动。
+   *
+   * 2026-10-23-live-turn-meta-time / FR-01：类型由 string 放宽为 ReactNode——
+   * 进行中轮的「历时」是每秒 tick 的 TurnLiveElapsedText 元素（tick 不外溢父级），
+   * string ⊂ ReactNode，既有字符串传参零迁移。
    */
-  detail?: string;
+  detail?: ReactNode;
 }
 
 export const RoundDivider = memo(function RoundDivider({

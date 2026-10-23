@@ -676,6 +676,21 @@ function TurnPreviewCard({
   );
 }
 
+/**
+ * 2026-10-23-live-turn-meta-time / FR-01：进行中轮底部元信息的实时历时——
+ * 「历时 mm:ss」每秒 +1（同轮次顶部 TurnStatusBar 走秒）。渲染经济同源：tick
+ * 局部 state 不外溢（父级 TurnRow 不随秒重渲染）；轮转终态后 metaDetail 不再
+ * 含本组件，随卸载满理 interval。
+ */
+function TurnLiveElapsedText({ startedAtMs }: { startedAtMs: number }) {
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    const id = window.setInterval(() => setNow(Date.now()), 1000);
+    return () => window.clearInterval(id);
+  }, []);
+  return <>历时 {formatTurnDuration(Math.max(0, now - startedAtMs))}</>;
+}
+
 const TurnRow = memo(function TurnRow({
   turn,
   viewMode,
@@ -754,9 +769,20 @@ const TurnRow = memo(function TurnRow({
    * 文本，折进状态行的最右端（等宽 / muted / 10.5px，见 RoundDivider.detail 与
    * 下方 all 视图 span）。信息不丢：轮号/状态/耗时/结束时刻/tokens/tok·s 全在
    * 同一行；锚点缺失保持原回退（仅显结束时间，不编造开始与历时）。
+   *
+   * 2026-10-23-live-turn-meta-time / FR-01/FR-02：进行中三态优先分支——只显
+   * 「开始 HH:MM:SS · 历时 mm:ss(实时)」，禁止显「结束」（运行中 run 无
+   * finished_at，数据层已不再伪造 replyAt；本分支优先于 replyAt 判定，旁路装配
+   * 带伪值也不显）；无锚点不显示（不编造）。历时由 TurnLiveElapsedText 局部
+   * 每秒 tick；轮转终态后本分支失效回退三段字符串，走秒组件随之卸载清 interval。
    */
-  const metaDetail =
-    turn.replyAt != null
+  const metaDetail: ReactNode =
+    isLiveTurn(turn.status) && turn.turnStartedAt != null ? (
+      <>
+        {`开始 ${formatTurnTimeSec(new Date(turn.turnStartedAt).toISOString())}`} ·{" "}
+        <TurnLiveElapsedText startedAtMs={turn.turnStartedAt} />
+      </>
+    ) : turn.replyAt != null
       ? [
           turn.turnStartedAt != null
             ? `开始 ${formatTurnTimeSec(new Date(turn.turnStartedAt).toISOString())}`
