@@ -178,8 +178,12 @@ export function TurnFileDiffDialog({
                       // 2026-10-23-diff-dialog-copy-fallback / FR-01：超长 diff 的复制
                       // 兜底（DiffView 2000 行上限只截渲染，rows 完整）。常显覆盖：
                       // static 拆掉默认 absolute 浮出定位、opacity-100 拆掉 hover 才显。
+                      // 2026-10-23-diff-copy-p3-cleanup / FR-01：getText 惰性取值——
+                      // 渲染期不再全量构建复制文本，点击时才由 diffRowsToText 生成。
                       <CopyButton
-                        text={diffRowsToText(section.rows)}
+                        getText={() =>
+                          section.rows == null ? null : diffRowsToText(section.rows)
+                        }
                         ariaLabel="复制该段 diff"
                         className="static right-auto bottom-auto ml-auto opacity-100"
                       />
@@ -196,6 +200,9 @@ export function TurnFileDiffDialog({
               ))}
               <p className="pb-1 text-[10.5px] leading-[1.5] text-muted-foreground/80">
                 内容来自本轮 agent 日志中编辑工具捕获的 structuredPatch；命令行/脚本改动无补丁记录，仅计入行数统计。
+                {/* 2026-10-23-diff-copy-p3-cleanup / FR-02：复制文本边界如实说明——
+                    行级前缀重建不含 hunk 头，不能直接 git apply。 */}
+                复制内容为行级文本（不含 hunk 头），不可直接用于 git apply。
               </p>
             </div>
           )}

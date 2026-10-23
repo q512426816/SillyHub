@@ -236,7 +236,11 @@ describe("TurnFileDiffDialog：复制兜底（2026-10-23-diff-dialog-copy-fallba
   it("无补丁说明态 / 删除说明态不出现复制按钮（FR-03）", async () => {
     getAgentSessionLogsMock.mockResolvedValue([]);
     const { unmount } = renderDialog();
-    expect(await screen.findByTestId("turn-file-diff-body")).toBeDefined();
+    // 2026-10-23-diff-copy-p3-cleanup / FR-03：先等说明文案出现（确认 ready 且无
+    // sections），loading 态即存在的 body 节点不能作为 ready 判据。
+    expect(
+      await screen.findByText(/未来自本轮 agent 的编辑工具/s),
+    ).toBeDefined();
     expect(screen.queryByRole("button", { name: /复制该段 diff/ })).toBeNull();
     unmount();
 
@@ -244,5 +248,35 @@ describe("TurnFileDiffDialog：复制兜底（2026-10-23-diff-dialog-copy-fallba
     renderDialog({ status: "deleted" });
     expect(await screen.findByText(/本轮被删除/)).toBeDefined();
     expect(screen.queryByRole("button", { name: /复制该段 diff/ })).toBeNull();
+  });
+});
+
+// 2026-10-23-diff-copy-p3-cleanup / FR-02：脚注如实声明复制文本边界。
+describe("TurnFileDiffDialog：复制边界脚注（2026-10-23-diff-copy-p3-cleanup）", () => {
+  it("补丁区脚注声明复制文本不含 hunk 头、不可直接 git apply", async () => {
+    getAgentSessionLogsMock.mockResolvedValue([
+      callLog("tu-1", "frontend/src/a.ts"),
+      resultLog("tu-1", ["-old", "+new"]),
+    ]);
+    renderDialog();
+
+    const footnote = await screen.findByText(/不可直接用于 git apply/);
+    expect(footnote.textContent).toContain("行级文本");
+    expect(footnote.textContent).toContain("hunk 头");
+  });
+
+  it("复制按钮点击期取值（getText 惰性），复制内容不变（FR-01）", async () => {
+    getAgentSessionLogsMock.mockResolvedValue([
+      callLog("tu-1", "frontend/src/a.ts"),
+      resultLog("tu-1", ["-lazy", "+computed"]),
+    ]);
+    renderDialog();
+
+    // 渲染完成未点击：剪贴板零调用（惰性取值路径不预先构建文本）。
+    await screen.findByTestId("turn-file-diff-section");
+    expect(copyTextToClipboardMock).not.toHaveBeenCalled();
+
+    fireEvent.click(screen.getByRole("button", { name: "复制该段 diff" }));
+    expect(copyTextToClipboardMock).toHaveBeenCalledWith("-lazy\n+computed");
   });
 });
