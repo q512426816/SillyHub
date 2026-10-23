@@ -656,6 +656,41 @@ describe("enrichDisplayTurns 计时锚点（R4：活跃轮快照优先，终态�
   });
 });
 
+/* ───── 2026-10-23-live-turn-meta-time / FR-02：活跃 run 不得伪造 replyAt ───── */
+
+describe("enrichDisplayTurns replyAt（活跃 run 禁止回退 started_at）", () => {
+  it("running 快照（finished_at=null）→ replyAt 保持 null，不回退 started_at", () => {
+    const turn = makeTurn({ turnStartedAt: null, replyAt: null });
+    const meta = makeRun({ status: "running", started_at: "2026-09-12T10:00:01Z" });
+    const [enriched] = enrichDisplayTurns([turn], new Map([["run-1", meta]]), [], "agent", null);
+    // 旧实现回退 started_at → 轮尾渲染「结束=开始时刻 · 历时 00:00」（用户实证）
+    expect(enriched?.replyAt).toBeNull();
+  });
+
+  it("pending / pending_approval 同属活跃词表 → 同样不伪造", () => {
+    for (const status of ["pending", "pending_approval"] as const) {
+      const turn = makeTurn({ turnStartedAt: null, replyAt: null });
+      const meta = makeRun({ status, started_at: "2026-09-12T10:00:01Z" });
+      const [enriched] = enrichDisplayTurns([turn], new Map([["run-1", meta]]), [], "agent", null);
+      expect(enriched?.replyAt).toBeNull();
+    }
+  });
+
+  it("turn 已有 replyAt（?? 链优先）不受活跃词表影响", () => {
+    const turn = makeTurn({ replyAt: "2026-09-12T10:09:00Z" });
+    const meta = makeRun({ status: "running", started_at: "2026-09-12T10:00:01Z" });
+    const [enriched] = enrichDisplayTurns([turn], new Map([["run-1", meta]]), [], "agent", null);
+    expect(enriched?.replyAt).toBe("2026-09-12T10:09:00Z");
+  });
+
+  it("终态 run（completed 无 finished_at 旧数据）回退 started_at 保持既有行为", () => {
+    const turn = makeTurn({ status: "completed", turnStartedAt: null, replyAt: null });
+    const meta = makeRun({ status: "completed", finished_at: null, started_at: "2026-09-12T10:00:01Z" });
+    const [enriched] = enrichDisplayTurns([turn], new Map([["run-1", meta]]), [], "agent", null);
+    expect(enriched?.replyAt).toBe("2026-09-12T10:00:01Z");
+  });
+});
+
 
 // ── 2026-10-10-system-opened-turn-usermsg：系统注入开轮的占位槽 ──────────────
 
