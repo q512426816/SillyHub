@@ -80,3 +80,12 @@ Then 段内指引必须要求：用同网段机器 IP 拼地址（端口按服�
 | D-009@v1 | FR-01..FR-06 | 方案 A 自动注入（全局选定） |
 | D-010@v1 | （rejected） | 落选方案 B，防复潮条目 |
 | D-011@v1 | （rejected） | 落选方案 C，防复潮条目 |
+
+## 测试绑定（每条 FR 至少一行：`FR-NN: test/路径「用例名」`；不适用要写理由；flow done 空行拒收）
+
+FR-01: backend/tests/modules/daemon/test_network_context.py「首轮强制注入/同快照跳过/Redis 故障降级每轮注入」
+FR-02: sillyhub-daemon/tests/network-info.test.ts「过滤回环与无cidr/IPv4+IPv6保留」+ 四钉子文件断言同步用例（daemon-heartbeat-pending 等）「心跳参数个数 N+1」
+FR-03: backend/tests/modules/daemon/test_network_context.py「落库语义：observed_ip 每跳直写/network_interfaces 出现即整写缺席保留（老 daemon 兼容场景）」+ backend/tests/test_align_platform_change_events_migration.py「链尾锚 head 前移」
+FR-04: backend/tests/modules/daemon/test_network_context.py「机器清单仅绑定+grants 借用集/超10台截断/queue 派发实时重算」
+FR-05: backend/tests/modules/daemon/test_network_context.py「同段/跨段/四态降级矩阵（网桥特征/无网卡数据/全离线/纯IPv6）/快照<60s 到点补注」
+FR-06: backend/tests/modules/daemon/test_network_context.py「渲染文案断言：指引措辞与事实陈述边界」

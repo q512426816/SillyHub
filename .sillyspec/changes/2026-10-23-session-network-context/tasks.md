@@ -15,4 +15,4 @@ created_at: 2026-10-23T02:10:36.764Z
 - [x] task-07: backend 判定引擎 session/network_context.py（render_network_env 纯函数：IPv4 CIDR 同段判定/四态降级/地址选择优先同段/超10截断 + network_context_for_turn：Redis 快照仅实际注入时更新/<60s 到点补注/故障降级每轮注入）；验证：uv run pytest tests/modules/daemon/test_network_context.py 绿
 - [x] task-08: backend 注入穿透——NetworkContextBlock 数据块穿透 inject.py/control.py/create.py/service/__init__.py/queue.py 五文件（首轮 create 强制注入；后续轮走去重；queue 入队序列化 user_ip/has_xff、派发/steering 重放实时重算）；验证：mypy 过 + 注入链聚焦测试绿
 - [x] task-09: 文档——.claude/skills/deploy-to-server/SKILL.md nginx 段标注 X-Forwarded-For 为网络判定硬依赖；验证：内容审阅
-- [ ] task-10: requirements 测试绑定槽回填 + 两端聚焦测试全量复跑（backend pytest 聚焦 + sillyhub-daemon 聚焦 + lint）；验证：绑定槽六条非空 + 全绿
+- [x] task-10: requirements 测试绑定槽回填 + 两端聚焦测试全量复跑（backend pytest 聚焦 + sillyhub-daemon 聚焦 + lint）；验证：绑定槽六条非空 + 全绿

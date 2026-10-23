@@ -382,6 +382,75 @@ async def test_snapshot_change_within_60s_defers_and_catches_up():
     assert caught_up is not None and "10.0.0.8" in caught_up
 
 
+# ── FR-04：机器清单装配（collect_session_machines）─────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_collect_session_machines_projects_runtime_owner(
+    db_session: AsyncSession,
+) -> None:
+    """会话 runtime 所属机器排首位，网络投影（名/在线/观测IP/网卡）正确。
+
+    绑定与共享分支复用既有查询函数（grants/queries.list_machines_shared_to_me
+    与 member_runtimes，各自测试已覆盖可见性口径）；本用例锁装配层：runtime →
+    daemon_instance → MachineNetworkInfo 投影。
+    """
+    from app.modules.daemon.model import DaemonRuntime
+    from app.modules.daemon.session.network_context import collect_session_machines
+
+    user = await _seed_user(db_session)
+    daemon_id = uuid.uuid4()
+    db_session.add(
+        DaemonInstance(
+            id=daemon_id,
+            user_id=user.id,
+            hostname="build-host",
+            display_alias="构建机",
+            server_url="http://backend",
+            status="online",
+            network_info={"observed_ip": "192.168.1.10", "interfaces": _nics("192.168.1.10")},
+        )
+    )
+    runtime_id = uuid.uuid4()
+    db_session.add(
+        DaemonRuntime(
+            id=runtime_id,
+            daemon_instance_id=daemon_id,
+            user_id=user.id,
+            provider="claude",
+            status="online",
+        )
+    )
+    await db_session.commit()
+
+    machines = await collect_session_machines(
+        db_session, user_id=user.id, runtime_id=runtime_id, workspace_id=None
+    )
+    assert len(machines) == 1
+    m = machines[0]
+    assert m.daemon_id == str(daemon_id)
+    assert m.name == "构建机"  # display_alias 优先于 hostname（口径同 grants/queries）
+    assert m.online is True
+    assert m.observed_ip == "192.168.1.10"
+    assert [e["ip"] for e in m.interfaces] == ["192.168.1.10"]
+
+
+@pytest.mark.asyncio
+async def test_collect_session_machines_empty_when_no_binding(
+    db_session: AsyncSession,
+) -> None:
+    """无 runtime 绑定且无工作区绑定 → 空清单（渲染层降级为无在线机器）。"""
+    from app.modules.daemon.session.network_context import collect_session_machines
+
+    user = await _seed_user(db_session)
+    assert (
+        await collect_session_machines(
+            db_session, user_id=user.id, runtime_id=None, workspace_id=None
+        )
+        == []
+    )
+
+
 @pytest.mark.asyncio
 async def test_snapshot_redis_failure_degrades_to_every_turn():
     """Redis 故障 → 每轮注入（可失去重不失功能）。"""
