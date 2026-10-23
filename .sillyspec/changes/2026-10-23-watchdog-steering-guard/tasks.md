@@ -8,4 +8,4 @@ created_at: 2026-10-23T08:09:55.208Z
 - [x] task-02: SessionState 增 lastTurnEventAt/observedRunIds；onMessage 刷新最后事件时间并记录当前 run（FR-02/FR-03 数据面）
 - [x] task-03: inject 增同 runId 守卫（跳过 stale-reset + 排队语义）与 stale 静默基准改最后事件时间（FR-01/FR-02）
 - [x] task-04: 首轮布防前检查 observedRunIds，已观测 run 跳过布防；补真僵尸轮不回归断言（FR-03/FR-04）
-- [ ] task-05: 跑 daemon 相关 vitest 与 tsc --noEmit，全绿（FR-05）
+- [x] task-05: 跑 daemon 相关 vitest 与 tsc --noEmit，全绿（FR-05）
