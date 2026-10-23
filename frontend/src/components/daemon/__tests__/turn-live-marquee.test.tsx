@@ -254,6 +254,28 @@ describe("TurnLiveMarquee 连续轨道（FR-01 / FR-02 / FR-05）", () => {
     expect(queryByTestId("marquee-duration")).toBeNull();
   });
 
+  it("思考段运行到完成由客户端计时（FR-03）", async () => {
+    const nowSpy = vi.spyOn(Date, "now").mockReturnValue(1000);
+    try {
+      const runningEntries = deriveLiveMarqueeEntries([
+        thinking("t-live", "正在思考", true),
+      ]);
+      const { rerender, findByTestId } = render(
+        <TurnLiveMarquee entries={runningEntries} />,
+      );
+
+      // 挂载 effect 已记录 running 起点（1000ms）。
+      nowSpy.mockReturnValue(2500);
+      const doneEntries = deriveLiveMarqueeEntries([thinking("t-live", "思考完成")]);
+      rerender(<TurnLiveMarquee entries={doneEntries} />);
+
+      const duration = await findByTestId("marquee-duration");
+      expect(duration.textContent).toContain("1.5s");
+    } finally {
+      nowSpy.mockRestore();
+    }
+  });
+
   it("条目固定 16rem 宽度，图标与耗时区不参与滚动（FR-04）", () => {
     const doneEntries = deriveLiveMarqueeEntries([
       tool("tool-done", { startedAt: 0, endedAt: 1500 }),
