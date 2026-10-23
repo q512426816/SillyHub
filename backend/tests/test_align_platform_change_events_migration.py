@@ -120,8 +120,10 @@ class TestMigrationStructure:
         # a05c84259_merge（alembic merge 收拢 20261021_user_default ×
         # 20261021130000 双头，无 DDL——origin 侧 agent-profile-slim-default 并行迁移分叉收拢）→
         # 20261022100000（agent_runs.change_id FK CASCADE→SET NULL + turn_count
-        # 保守对账——2026-10-22-change-delete-session-history-fix FR-02/FR-04）。
-        assert heads[0] == "20261022100000"  # 链尾锚随主线新迁移前移（注释链续写）
+        # 保守对账——2026-10-22-change-delete-session-history-fix FR-02/FR-04）→
+        # 20261023090000（daemon_instances.network_info 网络快照列——
+        # 2026-10-23-session-network-context task-05 / FR-03 / D-008@v1）。
+        assert heads[0] == "20261023090000"  # 链尾锚随主线新迁移前移（注释链续写）
 
     def test_revision_chain(self) -> None:
         mod = _load_migration_module()

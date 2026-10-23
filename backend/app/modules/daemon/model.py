@@ -161,6 +161,19 @@ class DaemonInstance(BaseModel, table=True):
         default=None,
         sa_column=Column(JSON, nullable=True),
     )
+    # 机器网络环境快照（2026-10-23-session-network-context FR-03 / D-002@v1 / D-008@v1）：
+    # {observed_ip: str|null, interfaces: [{name, ip, cidr, family}]}。
+    # - observed_ip：backend 从 daemon 注册/心跳请求**观测**的来源 IP（XFF 最右段
+    #   →remoteAddress，app/core/client_ip.py），每跳直写——平台亲眼所见不可伪造，
+    #   是会话【网络环境】段同网段判定的 ground truth；
+    # - interfaces：daemon 心跳自报网卡清单（network-info.ts 过滤后），出现即整写、
+    #   缺席保留旧值（老 daemon 兼容，键不出现≠清除）——用于拼「用哪个 IP 访问
+    #   机器服务」的地址（机器多网卡时观测 IP 只有一个）。
+    # NULL=尚无任何网络数据（老 daemon 未升级且从未观测到，或迁移前存量行）。
+    network_info: dict | None = Field(
+        default=None,
+        sa_column=Column(JSON, nullable=True),
+    )
     status: str = Field(
         default="online",
         sa_column=Column(
