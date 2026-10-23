@@ -200,6 +200,15 @@ location /daemon/ {
 }
 ```
 
+> ⚠️ **X-Forwarded-For 是会话网络环境判定的硬依赖**（2026-10-23-session-network-context）：
+> 平台用会话用户请求的来源 IP 判定「用户与执行机器是否同局域网」，并据此让 agent
+> 给出可达的服务访问地址。后端取 **XFF 最右段**（nginx `$proxy_add_x_forwarded_for`
+> 追加语义的末跳，防最左伪造）。若 nginx 未配置 `X-Forwarded-For`，用户来源 IP
+> 会退化为容器网桥地址（172.16/12），判定自动降级为「无法判定」——功能不报错但失效。
+> 因此**所有面向用户的 location 都必须带该头**，不只是 `/daemon/`。排查方法：查
+> `daemon_instances.network_info.observed_ip` 是否落在 `172.16.0.0/12`，是则说明
+> XFF 缺失。
+
 **部署/排障时怎么发现脱节**：对比「公网经 nginx」与「后端容器直出」是否一致——
 
 ```bash
