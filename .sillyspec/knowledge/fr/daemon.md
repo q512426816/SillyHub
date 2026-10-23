@@ -7588,3 +7588,86 @@
   confirmed_at: null
   source_change: 2026-10-24-close-run-quota-fallback
   status: active
+
+## FR-daemon-276 pi edit 成功结束时从入参合成补丁
+变更：2026-10-24-pi-edit-patch-synth
+状态：active
+摘要：单块替换；多块替换
+全文：.sillyspec/changes/archive/2026-10-24-pi-edit-patch-synth/requirements.md#FR-01
+最近确认：4d07114b353e26c3c2462eebf3133b4cff03ac55
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-24-pi-edit-patch-synth:flow:测试绑定FR-01
+  tests: sillyhub-daemon/tests/interactive/pi-edit-patch-synth.test.ts「edit 单块合成(行号定位精确)」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-24-pi-edit-patch-synth
+  status: active
+
+## FR-daemon-277 pi write 成功结束时合成全新增 hunk
+变更：2026-10-24-pi-edit-patch-synth
+状态：active
+摘要：新建文件
+全文：.sillyspec/changes/archive/2026-10-24-pi-edit-patch-synth/requirements.md#FR-02
+最近确认：4d07114b353e26c3c2462eebf3133b4cff03ac55
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-24-pi-edit-patch-synth:flow:测试绑定FR-02
+  tests: sillyhub-daemon/tests/interactive/pi-edit-patch-synth.test.ts「write 全新增 hunk 合成」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-24-pi-edit-patch-synth
+  status: active
+
+## FR-daemon-278 失败/超限一律不附着
+变更：2026-10-24-pi-edit-patch-synth
+状态：active
+摘要：定位失败放弃
+全文：.sillyspec/changes/archive/2026-10-24-pi-edit-patch-synth/requirements.md#FR-03
+最近确认：4d07114b353e26c3c2462eebf3133b4cff03ac55
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-24-pi-edit-patch-synth:flow:测试绑定FR-03
+  tests: sillyhub-daemon/tests/interactive/pi-edit-patch-synth.test.ts「失败/形态不符/定位失败/64KB 超限一律不附着」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-24-pi-edit-patch-synth
+  status: active
+
+## FR-daemon-279 弹窗文案区分"agent 改过但无补丁"
+变更：2026-10-24-pi-edit-patch-synth
+状态：active
+摘要：pi 历史轮次（存量无补丁数据）
+全文：.sillyspec/changes/archive/2026-10-24-pi-edit-patch-synth/requirements.md#FR-04
+最近确认：4d07114b353e26c3c2462eebf3133b4cff03ac55
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-24-pi-edit-patch-synth:flow:测试绑定FR-04
+  tests: frontend/src/components/daemon/file-changes/__tests__/turn-file-diff-dialog.test.tsx「agent 编辑过但无补丁的区分文案」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-24-pi-edit-patch-synth
+  status: active
+
+## FR-daemon-280 触及面测试与类型零错
+变更：2026-10-24-pi-edit-patch-synth
+状态：active
+摘要：验收门
+全文：.sillyspec/changes/archive/2026-10-24-pi-edit-patch-synth/requirements.md#FR-05
+最近确认：4d07114b353e26c3c2462eebf3133b4cff03ac55

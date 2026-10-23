@@ -1,0 +1,66 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-24-pi-edit-patch-synth",
+  "rows": [
+    {
+      "anchor": "FR-01",
+      "row_id": "2026-10-24-pi-edit-patch-synth:flow:测试绑定FR-01",
+      "tests": [
+        "sillyhub-daemon/tests/interactive/pi-edit-patch-synth.test.ts「edit 单块合成(行号定位精确)」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-24-pi-edit-patch-synth"
+    },
+    {
+      "anchor": "FR-02",
+      "row_id": "2026-10-24-pi-edit-patch-synth:flow:测试绑定FR-02",
+      "tests": [
+        "sillyhub-daemon/tests/interactive/pi-edit-patch-synth.test.ts「write 全新增 hunk 合成」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-24-pi-edit-patch-synth"
+    },
+    {
+      "anchor": "FR-03",
+      "row_id": "2026-10-24-pi-edit-patch-synth:flow:测试绑定FR-03",
+      "tests": [
+        "sillyhub-daemon/tests/interactive/pi-edit-patch-synth.test.ts「失败/形态不符/定位失败/64KB 超限一律不附着」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-24-pi-edit-patch-synth"
+    },
+    {
+      "anchor": "FR-04",
+      "row_id": "2026-10-24-pi-edit-patch-synth:flow:测试绑定FR-04",
+      "tests": [
+        "frontend/src/components/daemon/file-changes/__tests__/turn-file-diff-dialog.test.tsx「agent 编辑过但无补丁的区分文案」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-24-pi-edit-patch-synth"
+    }
+  ]
+}

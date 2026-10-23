@@ -1734,3 +1734,11 @@ supersedes：D-005@v1
 锚点：未记录
 最近确认：92bbf833e5595acbe7617b6bd61ad6f25c9fc748
 理由：答：最大风险是**误报**——把非限额失败标成 quota_exceeded。缓解：双重锚定（必须同时含 429 状态码与限额关键词，正则逐条对齐 classifier.ts 规则 1），且 429 语义即 Too Many Requests、配限额关键词才定 quota（纯 429 落 rate_limited 的情形本方案不推断、保持现状）；实测 9-04/10-23 两批真实限额文本均稳定命中。次风险：推断规则的维护漂移（daemon 侧改文案后端不知道）——注释钉死对齐源路径，daemon classifier 改动时须同步（评审检查点）。 试过但放弃的方案：① 前端兜底（失败卡渲染时翻时间线日志找 API Error 行）——前端拿不到结构化 run 日志查询入口，且 error_detail 为空时 buildSystemFailureItem 只吃 error_code/failure_summary 两参，跨组件翻日志链路重、auto_resume（后端读 error_detail）完全受益不到，放弃。② 后端复制 daemon 全类型分类规则——双源维护面大，auth/timeout 等类型文本特征弱误报高，收窄为 quota 专项（理由见做法概述）。③ 只升级 daemon 不改后端——那台机器不归本平台代码库管，升级排期不可控，且未来任何机器的 daemon 版本倒挂都会复发，后端兜底是对部署倒置的结构性防御。
+
+## D-unmapped-223@v1 设计期风险与放弃方案（底稿）
+状态：implemented
+变更：2026-10-24-pi-edit-patch-synth
+原编号：D-001@v1
+锚点：未记录
+最近确认：4d07114b353e26c3c2462eebf3133b4cff03ac55
+理由：答：最大风险是 **oldStart 行号的近似性**——块替换前面的内容有他源改动时，累积偏移算出的旧行号有偏差（diff 内容仍真实，行号标注可能偏几行）。缓解：jsdoc 披露；newStart（新文件行号，弹窗主体信息）由实盘定位恒精确。次风险：入参登记打破 pi-events 零状态设计——登记面收敛为 call_id→args 单 Map、轮内生命周期、容量上限，复杂度受控。 试过放弃的方案：①daemon 在 tool_use 时刻读旧文件、end 时刻读新文件算真 diff——旁路观察与工具执行竞态（start 到 end 间他源改动会被误算入该工具），且 pi 工具在 driver 外执行、时序不可靠，放弃；②解析 pi 结果文本中的路径与块数——结果无内容无行号，解析只得元数据无 diff 体，放弃；③前端从 tool_call 入参自行渲染（A+ 方案）——不改 daemon 但弹窗要做第二套渲染（write 全文视图/edit 块视图），且每会话拉全量 tool_call 入参放大 payload，放弃（用户已裁决走根治）；④放宽前端 parseStructuredPatch 行号可空——动 claude 轨道共用解析器，回归面大，放弃。

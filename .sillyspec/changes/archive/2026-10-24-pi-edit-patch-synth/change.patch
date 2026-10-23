@@ -1,0 +1,1169 @@
+diff --git a/.sillyspec/docs/SillyHub/modules/daemon.changelog.md b/.sillyspec/docs/SillyHub/modules/daemon.changelog.md
+index 2d55a9b1e..ab33249c0 100644
+--- a/.sillyspec/docs/SillyHub/modules/daemon.changelog.md
++++ b/.sillyspec/docs/SillyHub/modules/daemon.changelog.md
+@@ -98,3 +98,4 @@ created_at: 2026-08-27 14:32:24
+ - 2026-10-23-skill-prune-git-safe | daemon 会话启动时的技能裁剪(pruneSkillsToSubset)直接 rm -rf 删除…
+ - 2026-10-23-watchdog-steering-guard | 修复看门狗误杀活轮与陈旧判定
+ - 2026-10-23-knowledge-scope-maintenance | 知识注入作用域维护面板
++- 2026-10-24-close-run-quota-fallback | 交互轮失败后端从日志兜底识别限额错误
+diff --git a/.sillyspec/docs/backend/modules/daemon.changelog.md b/.sillyspec/docs/backend/modules/daemon.changelog.md
+index f75530f75..c600dae4f 100644
+--- a/.sillyspec/docs/backend/modules/daemon.changelog.md
++++ b/.sillyspec/docs/backend/modules/daemon.changelog.md
+@@ -70,3 +70,4 @@ created_at: 2026-08-29 22:56:30
+ | 2026-10-23 | 2026-10-23-marquee-motion-polish | 跑马灯动效与流光柔化 |
+ | 2026-10-23 | 2026-10-23-session-network-context | 2026-10-23-session-network-context |
+ | 2026-10-23 | 2026-10-23-session-first-window-turn-align | 会话重新进入时首屏历史窗口按最近 400 条日志截断，单轮日志超过 400 条时窗口起点落在该轮中段… |
++| 2026-10-23 | 2026-10-24-close-run-quota-fallback | 交互轮失败后端从日志兜底识别限额错误 |
+diff --git a/.sillyspec/docs/multi-agent-platform/modules/backend.changelog.md b/.sillyspec/docs/multi-agent-platform/modules/backend.changelog.md
+index 387a6db67..4b7e2e018 100644
+--- a/.sillyspec/docs/multi-agent-platform/modules/backend.changelog.md
++++ b/.sillyspec/docs/multi-agent-platform/modules/backend.changelog.md
+@@ -104,3 +104,4 @@
+ - 2026-10-23-session-network-context | 2026-10-23-session-network-context
+ - 2026-10-23-session-first-window-turn-align | 会话重新进入时首屏历史窗口按最近 400 条日志截断，单轮日志超过 400 条时窗口起点落在该轮中段…
+ - 2026-10-23-knowledge-scope-maintenance | 知识注入作用域维护面板
++- 2026-10-24-close-run-quota-fallback | 交互轮失败后端从日志兜底识别限额错误
+diff --git a/backend/app/modules/daemon/run_sync/service/close_run_steps.py b/backend/app/modules/daemon/run_sync/service/close_run_steps.py
+index 564613ef0..25904a073 100644
+--- a/backend/app/modules/daemon/run_sync/service/close_run_steps.py
++++ b/backend/app/modules/daemon/run_sync/service/close_run_steps.py
+@@ -17,6 +17,7 @@ TERMINAL_TURN_STATUSES 的既有顶部导入语句原样落在本子模块（语
+ from __future__ import annotations
+ 
+ import json
++import re
+ import uuid
+ from datetime import UTC, datetime
+ 
+@@ -25,11 +26,12 @@ from sqlalchemy import delete, select
+ import app.modules.daemon.run_sync.service as _rsvc
+ from app.modules.agent.model import (
+     AgentRun,
++    AgentRunLog,
+     AgentRunModelUsage,
+     AgentSession,
+ )
+ from app.modules.daemon.lease.service import DaemonAgentRunNotFound
+-from app.modules.daemon.model_error import ModelErrorDTO
++from app.modules.daemon.model_error import ModelErrorDTO, ModelErrorType
+ from app.modules.daemon.schema import (
+     ModelUsageItemRead,
+     TurnFileChangesSnapshot,
+@@ -71,6 +73,113 @@ async def _delayed_task_resweep(run_id: uuid.UUID) -> None:
+         )
+ 
+ 
++# ── 2026-10-24-close-run-quota-fallback：旧 daemon 失败轮错误详情兜底 ─────────
++# 背景：旧版 daemon（如 DESKTOP-VBOLHBH 实证）终态上报只带 is_error=true 不带
++# error（ModelError），后端只能落「执行端未回传详细原因」兜底文案，而真实错误
++# 文本（如 429 限额）已随消息事件落库在 agent_run_logs。本段在后端收口时从日
++# 志兜底识别 quota_exceeded 专项，使前端错误卡与 auto_resume 到点自动续跑恢复。
++#
++# ⚠️ 对齐源：sillyhub-daemon/src/model-error/classifier.ts——下方正则与文案逐条
++# 对齐该文件的 classifyBlob 规则 1（quota_exceeded）、extractCode（方括号业务
++# 码）、extractResetAt（GLM 中文重置时刻）与 ERROR_INFO.quota_exceeded；daemon
++# 侧规则改动时必须同步本处，防双源漂移（评审检查点）。
++_QUOTA_429_RE = re.compile(r"\b429\b")
++_QUOTA_KEYWORDS_RE = re.compile(
++    r"上限|额度|配额|quota|使用上限|limit reached|limit has been reached"
++    r"|usage[\s_-]{0,5}limit|exceeded[\s\S]{0,15}(quota|limit|usage)",
++    re.IGNORECASE,
++)
++_QUOTA_BRACKET_CODE_RE = re.compile(r"\[(\d+)\]")
++_QUOTA_RESET_AT_RE = re.compile(
++    r"将[在于]\s*(\d{4})-(\d{2})-(\d{2})[ T](\d{2}):(\d{2}):(\d{2})\s*重置"
++)
++
++
++def _infer_quota_error(blob: str) -> ModelErrorDTO | None:
++    """从错误文本推断 quota_exceeded（纯函数，供单测）。
++
++    双重锚定防误报：必须同时命中 429 状态码与限额关键词才归类（纯 429 属
++    rate_limited 语义，本兜底不推断、保持现状——daemon 回传是唯一来源）。
++    其余类型（auth/network/timeout 等）文本特征弱，后端不猜，一律 None。
++    """
++    if not blob or not blob.strip():
++        return None
++    if not (_QUOTA_429_RE.search(blob) and _QUOTA_KEYWORDS_RE.search(blob)):
++        return None
++    code_m = _QUOTA_BRACKET_CODE_RE.search(blob)
++    reset_at: str | None = None
++    reset_m = _QUOTA_RESET_AT_RE.search(blob)
++    if reset_m:
++        y, mo, d, h, mi, se = reset_m.groups()
++        # 显式字符串拼接 +08:00（对齐 daemon extractResetAt：GLM 文案为北京时间，
++        # 不走 new Date/strptime 解析防实现相关时区漂移）。
++        reset_at = f"{y}-{mo}-{d}T{h}:{mi}:{se}+08:00"
++    return ModelErrorDTO(
++        type=ModelErrorType.QUOTA_EXCEEDED,
++        code=code_m.group(1) if code_m else None,
++        message="额度或配额已耗尽",
++        retryable=False,
++        hint="额度耗尽，需充值或切换供应商",
++        raw=blob,
++        reset_at=reset_at,
++    )
++
++
++async def _infer_quota_model_error_from_logs(
++    svc,
++    agent_run: AgentRun,
++    result_summary: str | None,
++) -> ModelErrorDTO | None:
++    """旧 daemon 未回传 error 时，从该 run 已落库日志兜底推断 quota 错误。
++
++    文本源：该 run 日志中 channel='stdout' 且含 "API Error" 锚点的行（timestamp
++    倒序最多 3 行）+ close 请求的 result_summary。daemon 侧 onTurnResult 先
++    await flushInteractiveBatches 再 close（daemon.ts:4129），正常时序下日志
++    已落库；顺序颠倒的极端情形最坏退化为推断不到（行为同旧状，无害）。
++    best-effort：任何异常仅 warn 不阻塞 close 主链路（对齐 model_usage 落库
++    的容错范式——兜底绝不能反向卡死终态收口）。
++    """
++    try:
++        rows = (
++            (
++                await svc._session.execute(
++                    select(AgentRunLog.content_redacted)
++                    .where(
++                        AgentRunLog.run_id == agent_run.id,
++                        AgentRunLog.channel == "stdout",
++                        AgentRunLog.content_redacted.like("%API Error%"),
++                    )
++                    .order_by(AgentRunLog.timestamp.desc(), AgentRunLog.id.desc())
++                    .limit(3)
++                )
++            )
++            .scalars()
++            .all()
++        )
++    except Exception as exc:
++        _rsvc.log.warning(
++            "quota_log_fallback_query_failed",
++            run_id=str(agent_run.id),
++            error=str(exc),
++        )
++        return None
++    parts = [r for r in rows if r]
++    if result_summary and result_summary.strip():
++        parts.append(result_summary)
++    if not parts:
++        return None
++    blob = " | ".join(parts)
++    inferred = _infer_quota_error(blob)
++    if inferred is not None:
++        _rsvc.log.info(
++            "quota_log_fallback_inferred",
++            run_id=str(agent_run.id),
++            code=inferred.code,
++            reset_at=inferred.reset_at,
++        )
++    return inferred
++
++
+ async def close_interactive_run(
+     svc,
+     *,
+@@ -171,6 +280,13 @@ async def close_interactive_run(
+             await svc._session.refresh(agent_run)
+             return agent_run
+     now = datetime.now(UTC)
++    # 2026-10-24-close-run-quota-fallback（FR-01/FR-02）：旧 daemon 失败轮未回传
++    # error 时从已落库日志兜底识别 quota_exceeded 补进 error 参数——后续
++    # _close_apply_terminal（error_detail 落库）与 _close_post_commit（auto_resume
++    # 到点自动续跑排期）零改动即与「新 daemon 回传」路径行为一致。daemon 已回传
++    # error 时绝不覆盖（FR-02：daemon 分类更全、raw 更准，后端兜底仅是降级面）。
++    if is_error and error is None:
++        error = await _infer_quota_model_error_from_logs(svc, agent_run, result_summary)
+     await _close_apply_terminal(
+         svc,
+         agent_run,
+diff --git a/backend/app/modules/daemon/tests/test_close_interactive_run_quota_log_fallback.py b/backend/app/modules/daemon/tests/test_close_interactive_run_quota_log_fallback.py
+new file mode 100644
+index 000000000..dbfe10ff2
+--- /dev/null
++++ b/backend/app/modules/daemon/tests/test_close_interactive_run_quota_log_fallback.py
+@@ -0,0 +1,292 @@
++"""2026-10-24-close-run-quota-fallback 单测：旧 daemon 失败轮错误详情日志兜底。
++
++FR-01：close_interactive_run 收到 is_error=true 且 error=None 时，从该 run 已落
++库日志的 [ASSISTANT] 行提取 API Error 文本，命中限额特征（429 + 上限/额度/配额
++/quota/usage limit 等）时补写 error_detail（type=quota_exceeded，语义与 daemon
++model-error/classifier 对齐）——实证 run 0278895b（2026-10-23 OpenCode Go 限额
++轮，daemon 旧版未回传 error，前端只见「运行失败 · unknown」）。
++
++FR-02：daemon 已回传 error 时不覆盖。
++FR-03：无 API Error 行 / 非限额（如 401）不伪造，error_detail 保持 NULL、既有
++兜底文案照旧。
++
++参照 test_close_interactive_run_model_error.py 的 _seed_session_and_run +
++DaemonService facade + mocked_redis 范式；日志行按 run 0278895b 实测文本构造。
++"""
++
++from __future__ import annotations
++
++import uuid
++from datetime import UTC, datetime
++from unittest.mock import AsyncMock, patch
++
++import pytest
++from sqlalchemy.ext.asyncio import AsyncSession
++
++from app.modules.agent.model import AgentRun, AgentRunLog, AgentSession
++from app.modules.agent.placement import RunPlacementService
++from app.modules.daemon.model import DaemonRuntime
++from app.modules.daemon.model_error import ModelErrorDTO, ModelErrorType
++from app.modules.daemon.service import DaemonService
++
++# 2026-10-23 run 0278895b 实证日志文本（GLM 1308 限额，含重置时刻）。
++QUOTA_LOG_LINE = (
++    "[ASSISTANT] API Error: Request rejected (429) · [1308][已达到 5 小时的使用上限。"
++    "您的限额将在 2026-10-23 13:27:04 重置。][20261023112014df4b539296144375]"
++)
++
++
++# ── Fixtures（对齐 test_close_interactive_run_model_error.py）────────────────
++
++
++async def _create_user(session: AsyncSession) -> uuid.UUID:
++    from app.modules.auth.model import User
++
++    uid = uuid.uuid4()
++    session.add(
++        User(
++            id=uid,
++            email=f"quota-fallback-{uid}@example.com",
++            password_hash="x",
++            display_name="T",
++            status="active",
++        )
++    )
++    await session.commit()
++    return uid
++
++
++async def _create_runtime(session: AsyncSession, user_id: uuid.UUID) -> DaemonRuntime:
++    rt = DaemonRuntime(
++        id=uuid.uuid4(),
++        user_id=user_id,
++        name="daemon",
++        provider="claude",
++        status="online",
++        last_heartbeat_at=datetime.now(UTC),
++    )
++    session.add(rt)
++    await session.commit()
++    await session.refresh(rt)
++    return rt
++
++
++def _mock_redis() -> AsyncMock:
++    redis = AsyncMock()
++    redis.publish = AsyncMock()
++    return redis
++
++
++@pytest.fixture()
++def mocked_redis():
++    redis = _mock_redis()
++    with (
++        patch("app.modules.daemon.run_sync.service.get_redis", return_value=redis),
++        patch("app.modules.daemon.session.service.get_redis", return_value=redis),
++    ):
++        yield redis
++
++
++async def _seed_session_and_run(
++    db_session: AsyncSession,
++    *,
++    run_status: str = "running",
++) -> tuple[uuid.UUID, uuid.UUID, str, uuid.UUID]:
++    uid = await _create_user(db_session)
++    rt = await _create_runtime(db_session, uid)
++    placement = RunPlacementService(db_session)
++    session_id = uuid.uuid4()
++    run_id = uuid.uuid4()
++    dispatch = await placement.prepare_interactive_dispatch(
++        agent_session_id=session_id,
++        agent_run_id=run_id,
++        user_id=uid,
++        provider="claude",
++        prompt="hi",
++        model=None,
++    )
++    session = AgentSession(
++        id=session_id,
++        user_id=uid,
++        provider="claude",
++        status="active",
++        config={},
++        turn_count=1,
++        runtime_id=rt.id,
++        lease_id=dispatch.lease_id,
++        last_active_at=datetime.now(UTC),
++        created_at=datetime.now(UTC),
++    )
++    run = AgentRun(
++        id=run_id,
++        agent_type="claude_code",
++        provider="claude",
++        status=run_status,
++        spec_strategy="quick-chat",
++        agent_session_id=session_id,
++        change_id=None,
++    )
++    db_session.add_all([session, run])
++    await db_session.commit()
++    return dispatch.lease_id, run_id, dispatch.claim_token, session_id
++
++
++async def _seed_log_line(
++    db_session: AsyncSession,
++    run_id: uuid.UUID,
++    content: str,
++) -> None:
++    """种一条 stdout 日志行（对齐 daemon 落库形态：channel='stdout'）。"""
++    db_session.add(
++        AgentRunLog(
++            run_id=run_id,
++            timestamp=datetime.now(UTC),
++            channel="stdout",
++            content_redacted=content,
++        )
++    )
++    await db_session.commit()
++
++
++# ── FR-01：限额错误日志兜底补写 ──────────────────────────────────────────────
++
++
++@pytest.mark.asyncio
++async def test_quota_error_log_inferred_into_error_detail(
++    db_session: AsyncSession, mocked_redis
++) -> None:
++    """run 0278895b 实证形态：日志留有 429/1308 限额文本、daemon 未回传 error
++    → 收口时兜底补写 error_detail（type=quota_exceeded + code + reset_at + raw）。"""
++    lease_id, run_id, token, _ = await _seed_session_and_run(db_session)
++    await _seed_log_line(db_session, run_id, QUOTA_LOG_LINE)
++    svc = DaemonService(db_session)
++    run = await svc.close_interactive_run(
++        lease_id,
++        run_id,
++        token,
++        status="error_max_turns",
++        is_error=True,
++        error=None,
++        result_summary=None,
++    )
++    assert run.status == "failed"
++    assert run.error_code == "interactive_failed"
++    assert run.error_detail is not None
++    assert run.error_detail["type"] == "quota_exceeded"
++    assert run.error_detail["code"] == "1308"
++    assert run.error_detail["message"] == "额度或配额已耗尽"
++    assert run.error_detail["retryable"] is False
++    assert run.error_detail["hint"] == "额度耗尽，需充值或切换供应商"
++    assert QUOTA_LOG_LINE in run.error_detail["raw"]
++    # daemon extractResetAt 同款解析：GLM 中文重置时刻 → +08:00 ISO-8601。
++    assert run.error_detail["reset_at"] == "2026-10-23T13:27:04+08:00"
++
++    refreshed = await db_session.get(AgentRun, run_id, populate_existing=True)
++    assert refreshed is not None
++    assert refreshed.error_detail is not None
++    assert refreshed.error_detail["type"] == "quota_exceeded"
++
++
++@pytest.mark.asyncio
++async def test_quota_error_via_result_summary_inferred(
++    db_session: AsyncSession, mocked_redis
++) -> None:
++    """无日志行时 result_summary 携带限额文本同样兜底；重置时刻解析失败 → None。"""
++    lease_id, run_id, token, _ = await _seed_session_and_run(db_session)
++    svc = DaemonService(db_session)
++    run = await svc.close_interactive_run(
++        lease_id,
++        run_id,
++        token,
++        status="error_max_turns",
++        is_error=True,
++        error=None,
++        result_summary="API Error: Request rejected (429) · weekly usage limit reached",
++    )
++    assert run.status == "failed"
++    assert run.error_detail is not None
++    assert run.error_detail["type"] == "quota_exceeded"
++    assert run.error_detail["code"] is None
++    assert run.error_detail["reset_at"] is None
++    assert "weekly usage limit reached" in run.error_detail["raw"]
++
++
++# ── FR-02：daemon 已回传 error 不覆盖 ────────────────────────────────────────
++
++
++@pytest.mark.asyncio
++async def test_daemon_error_takes_precedence_over_log_inference(
++    db_session: AsyncSession, mocked_redis
++) -> None:
++    """daemon 已回传 error（auth_failed）+ 日志含限额文本 → error_detail 保持
++    daemon 回传值（禁止被日志推断的 quota_exceeded 覆盖，FR-02）。"""
++    lease_id, run_id, token, _ = await _seed_session_and_run(db_session)
++    await _seed_log_line(db_session, run_id, QUOTA_LOG_LINE)
++    svc = DaemonService(db_session)
++    run = await svc.close_interactive_run(
++        lease_id,
++        run_id,
++        token,
++        status="error_during_execution",
++        is_error=True,
++        error=ModelErrorDTO(
++            type=ModelErrorType.AUTH_FAILED,
++            code="401",
++            message="API 凭证无效或已失效",
++            retryable=False,
++            hint="请检查并更新该供应商的 API Key",
++        ),
++    )
++    assert run.status == "failed"
++    assert run.error_detail is not None
++    assert run.error_detail["type"] == "auth_failed"
++    assert run.error_detail["code"] == "401"
++
++
++# ── FR-03：非限额 / 无日志行为不变 ───────────────────────────────────────────
++
++
++@pytest.mark.asyncio
++async def test_non_quota_api_error_not_inferred(db_session: AsyncSession, mocked_redis) -> None:
++    """日志含 API Error 但非限额（401，无 429）→ 不伪造 error_detail，既有
++    兜底文案照旧（FR-03）。"""
++    lease_id, run_id, token, _ = await _seed_session_and_run(db_session)
++    await _seed_log_line(db_session, run_id, "[ASSISTANT] API Error: 401 invalid api key")
++    svc = DaemonService(db_session)
++    run = await svc.close_interactive_run(
++        lease_id,
++        run_id,
++        token,
++        status="error_max_turns",
++        is_error=True,
++        error=None,
++        result_summary=None,
++    )
++    assert run.status == "failed"
++    assert run.error_code == "interactive_failed"
++    assert run.error_detail is None
++    assert "未回传" in (run.output_redacted or "")
++
++
++@pytest.mark.asyncio
++async def test_no_api_error_log_keeps_legacy_behavior(
++    db_session: AsyncSession, mocked_redis
++) -> None:
++    """无任何含 API Error 的日志行、result_summary=None → error_detail 保持
++    NULL，error_code 与 output_redacted 兜底文案逐字不变（FR-03 / 兼容既有
++    test_close_without_error_keeps_error_detail_none 断言）。"""
++    lease_id, run_id, token, _ = await _seed_session_and_run(db_session)
++    svc = DaemonService(db_session)
++    run = await svc.close_interactive_run(
++        lease_id,
++        run_id,
++        token,
++        status="error_max_turns",
++        is_error=True,
++        error=None,
++        result_summary=None,
++    )
++    assert run.status == "failed"
++    assert run.error_code == "interactive_failed"
++    assert run.error_detail is None
++    assert run.output_redacted == "本轮执行失败（执行端未回传详细原因）"
+diff --git a/frontend/src/components/daemon/__tests__/turn-timeline-conversation-file-card.test.tsx b/frontend/src/components/daemon/__tests__/turn-timeline-conversation-file-card.test.tsx
+index 868102499..372052ca5 100644
+--- a/frontend/src/components/daemon/__tests__/turn-timeline-conversation-file-card.test.tsx
++++ b/frontend/src/components/daemon/__tests__/turn-timeline-conversation-file-card.test.tsx
+@@ -612,6 +612,29 @@ describe("文件变更卡行点击 → 本轮变更弹窗（2026-10-23-turn-file
+     };
+   }
+ 
++  it("agent 编辑归因行（改N次>0）无补丁：弹窗文案走「确实来自 agent 编辑」分支（2026-10-24-pi-edit-patch-synth FR-04 接线）", async () => {
++    // 空日志 = 配不到补丁（pi 存量轮次形态）。src/app.tsx 归因 edit_patch +
++    // editToolNames（→卡片改1次）→ 弹窗应显示区分文案而非「未来自编辑工具」。
++    getAgentSessionLogsMock.mockResolvedValue([]);
++    render(
++      <TurnTimeline
++        {...renderProps([wiringTurn()])}
++        sessionId="sess-1"
++      />,
++    );
++
++    fireEvent.click(screen.getByTestId("file-changes-header"));
++    const toolRow = screen
++      .getAllByTestId("file-changes-row")
++      .find((row) => row.getAttribute("data-path") === "src/app.tsx");
++    fireEvent.click(toolRow!);
++
++    const dialog = await screen.findByTestId("turn-file-diff-dialog");
++    const body = within(dialog).getByTestId("turn-file-diff-body").textContent!;
++    expect(body).toContain("确实来自本轮 agent 的编辑工具");
++    expect(body).not.toContain("未来自本轮 agent 的编辑工具");
++  });
++
+   it("sessionId 接线：点击文件行弹窗打开，展示该文件本轮 diff 内容（FR-01）", async () => {
+     getAgentSessionLogsMock.mockResolvedValue([
+       {
+diff --git a/frontend/src/components/daemon/file-changes/__tests__/turn-file-diff-dialog.test.tsx b/frontend/src/components/daemon/file-changes/__tests__/turn-file-diff-dialog.test.tsx
+index 70e05b1d5..9c4dee345 100644
+--- a/frontend/src/components/daemon/file-changes/__tests__/turn-file-diff-dialog.test.tsx
++++ b/frontend/src/components/daemon/file-changes/__tests__/turn-file-diff-dialog.test.tsx
+@@ -144,6 +144,20 @@ describe("TurnFileDiffDialog", () => {
+     expect(screen.queryByTestId("turn-file-diff-section")).toBeNull();
+   });
+ 
++  // 2026-10-24-pi-edit-patch-synth / FR-04：agent 编辑归因（改N次>0）但无补丁——
++  // 文案如实说「确实来自 agent 编辑但运行时未上报补丁」，禁止甩锅命令行。
++  it("agent 编辑过但无补丁（pi 存量轮次）：区分文案，不再断言「未来自编辑工具」", async () => {
++    getAgentSessionLogsMock.mockResolvedValue([]);
++    renderDialog({ agentEdited: true });
++
++    const body = (await screen.findByTestId("turn-file-diff-body")).textContent!;
++    expect(body).toContain("确实来自本轮 agent 的编辑工具");
++    expect(body).toContain("未上报结构化补丁");
++    expect(body).not.toContain("未来自本轮 agent 的编辑工具");
++    expect(body).not.toContain("命令行/脚本");
++    expect(screen.queryByTestId("turn-file-diff-section")).toBeNull();
++  });
++
+   it("补丁 JSON 不可解析：占位说明段在场（不静默丢弃）", async () => {
+     getAgentSessionLogsMock.mockResolvedValue([
+       callLog("tu-1", "frontend/src/a.ts"),
+diff --git a/frontend/src/components/daemon/file-changes/turn-file-diff-dialog.tsx b/frontend/src/components/daemon/file-changes/turn-file-diff-dialog.tsx
+index e13496e79..297f5bc0a 100644
+--- a/frontend/src/components/daemon/file-changes/turn-file-diff-dialog.tsx
++++ b/frontend/src/components/daemon/file-changes/turn-file-diff-dialog.tsx
+@@ -48,6 +48,12 @@ export interface TurnFileDiffDialogProps {
+   /** 文件状态徽标（新增/修改/删除/新文件，与文件卡同源 FILE_STATUS_META）；
+    *  deleted 且无补丁时弹窗出删除专用说明（2026-10-23-file-card-agent-grouping）。 */
+   status?: FileChangeStatus;
++  /**
++   * 该文件行有 agent 编辑归因（卡片「改N次」N>0，2026-10-24-pi-edit-patch-synth
++   * / FR-04）：无补丁时的文案区分——agent 编辑过但运行时未上报结构化补丁（pi 等
++   * provider 存量轮次）如实说明，**不再**断言「未来自编辑工具」错误甩锅。
++   */
++  agentEdited?: boolean;
+   open: boolean;
+   onOpenChange: (_open: boolean) => void;
+ }
+@@ -66,6 +72,15 @@ type LoadPhase =
+ const NO_PATCH_TEXT =
+   "该文件的改动未来自本轮 agent 的编辑工具（Edit/Write），可能由命令行/脚本、并行会话或其他进程产生；平台未捕获补丁内容，仅行数统计可信。";
+ 
++/**
++ * agent 编辑过但无补丁的说明（2026-10-24-pi-edit-patch-synth / FR-04）：卡片行
++ * 有编辑归因（改N次>0）却配不到补丁——改动**确实**来自本轮 agent 编辑工具，
++ * 但该会话运行时（pi 等无 structuredPatch 上报的 provider，或 daemon 升级前的
++ * 存量轮次）未上报结构化补丁。如实说明，**禁止**沿用上方文案错误甩锅命令行。
++ */
++const AGENT_EDITED_NO_PATCH_TEXT =
++  "该文件的改动确实来自本轮 agent 的编辑工具，但该会话运行时未上报结构化补丁（部分运行时不产出或升级前未产出），无法展示行级 diff；行数统计可信。";
++
+ /** 删除文件且无补丁（grouping FR-03）：删除说明态，如实交代无 diff 可看。 */
+ const DELETED_NO_PATCH_TEXT =
+   "该文件在本轮被删除；删除动作未来自编辑工具（如命令行 rm），平台未捕获删除补丁，无 diff 可展示。";
+@@ -74,6 +89,7 @@ export function TurnFileDiffDialog({
+   runKey,
+   path,
+   status,
++  agentEdited,
+   open,
+   onOpenChange,
+ }: TurnFileDiffDialogProps) {
+@@ -160,7 +176,11 @@ export function TurnFileDiffDialog({
+           )}
+           {state.phase === "ready" && state.sections.length === 0 && (
+             <p className="py-8 text-center text-[12px] leading-[1.6] text-muted-foreground">
+-              {status === "deleted" ? DELETED_NO_PATCH_TEXT : NO_PATCH_TEXT}
++              {status === "deleted"
++                ? DELETED_NO_PATCH_TEXT
++                : agentEdited
++                  ? AGENT_EDITED_NO_PATCH_TEXT
++                  : NO_PATCH_TEXT}
+             </p>
+           )}
+           {state.phase === "ready" && state.sections.length > 0 && (
+diff --git a/frontend/src/components/daemon/turn-timeline.tsx b/frontend/src/components/daemon/turn-timeline.tsx
+index 0cbc47959..77f69274a 100644
+--- a/frontend/src/components/daemon/turn-timeline.tsx
++++ b/frontend/src/components/daemon/turn-timeline.tsx
+@@ -429,6 +429,12 @@ export type SessionViewMode = "conversation" | "all" | "trajectory";
+ export interface TurnTimelineProps {
+   turns: SessionTurnView[];
+   viewMode: SessionViewMode;
++  /**
++   * 2026-10-22-trajectory-context-jump（FR-02）：轮次导航 → 轨迹视图的跳转信号。
++   * `{ turnKey, nonce }`——nonce 自增驱动重复点击；仅轨迹视图消费，其它视图零影响；
++   * 不传零回归。目标轮不在轨迹（预览轮/未加载）静默跳过。
++   */
++  trajectoryJump?: { turnKey: string; nonce: number } | null;
+   /**
+    * 2026-10-20-session-page-dsh-alignment（D-009）：工作细节档位。
+    * 不传（undefined）＝现行为零变化；传 "compact"/"standard" 时对**可折叠轮**
+@@ -791,7 +797,12 @@ const TurnRow = memo(function TurnRow({
+    */
+   onOpenFileChanges?: (
+     _runKey: string,
+-    _file: { path: string; status?: FileChangeStatus },
++    _file: {
++      path: string;
++      status?: FileChangeStatus;
++      /** 该文件行有 agent 编辑归因（source=tool / 改N次>0）——弹窗无补丁文案区分用。 */
++      agentEdited?: boolean;
++    },
+   ) => void;
+ }) {
+   // task-07（FR-03 / D-003@v2）：旧路径 output 气泡 askuser 标记拦截——命中则
+@@ -1339,6 +1350,9 @@ const TurnRow = memo(function TurnRow({
+                         onOpenFileChanges(runKey, {
+                           path,
+                           status: file?.status,
++                          // 2026-10-24-pi-edit-patch-synth / FR-04：agent 编辑归因
++                          //（弹窗无补丁时的文案区分——pi 等运行时存量轮次兜底）。
++                          agentEdited: file != null && file.edits > 0,
+                         });
+                       }}
+                     />
+@@ -1411,9 +1425,25 @@ const BOTTOM_REASSERT_WINDOW_MS = 2500;
+  * 空态：整段会话都没有可比对的时间戳（`rows` 为空）→ 出显式提示，**不白屏、不伪造条**
+  * （伪造会让「没有数据」看起来像「这轮没有活动」）。
+  */
+-function TrajectoryPane({ turns }: { turns: SessionTurnView[] }) {
++function TrajectoryPane({
++  turns,
++  jump,
++}: {
++  turns: SessionTurnView[];
++  jump?: { turnKey: string; nonce: number } | null;
++}) {
+   const trajectory = useMemo(() => trajectoryFromTurnViews(turns), [turns]);
+   const [selectedRowId, setSelectedRowId] = useState<string | null>(null);
++  // 2026-10-22-trajectory-context-jump（FR-02）：轮次导航跳转——run key 匹配轮，
++  // 选中该轮首行；滚入视野由账本选中 effect 承担。目标轮不在轨迹（预览轮/
++  // 未加载）时静默跳过，不报错。
++  useEffect(() => {
++    if (!jump) return;
++    const turn = trajectory.turns.find((item) => item.runId === jump.turnKey);
++    if (!turn) return;
++    const firstRow = trajectory.rows.find((row) => row.turnIndex === turn.index);
++    if (firstRow) setSelectedRowId(firstRow.id);
++  }, [jump, trajectory]);
+   if (trajectory.rows.length === 0) {
+     return (
+       <div
+@@ -1440,6 +1470,7 @@ function TrajectoryPane({ turns }: { turns: SessionTurnView[] }) {
+ export function TurnTimeline({
+   turns,
+   viewMode,
++  trajectoryJump,
+   errorMsg,
+   daemonRestartedHint,
+   autoResumeEntries,
+@@ -1524,10 +1555,25 @@ export function TurnTimeline({
+     runKey: string;
+     path: string;
+     status?: FileChangeStatus;
++    agentEdited?: boolean;
+   } | null>(null);
+   const handleOpenFileChanges = useCallback(
+-    (runKey: string, file: { path: string; status?: FileChangeStatus }) => {
+-      setFileDiffTarget({ runKey, path: file.path, status: file.status });
++    (
++      runKey: string,
++      file: {
++        path: string;
++        status?: FileChangeStatus;
++        agentEdited?: boolean;
++      },
++    ) => {
++      // agentEdited 透传（评审 P1 修复：此前漏写字段致弹窗文案二态在真实 UI
++      // 链路恒不生效——组件直传 prop 的测试测不出该断链）。
++      setFileDiffTarget({
++        runKey,
++        path: file.path,
++        status: file.status,
++        agentEdited: file.agentEdited,
++      });
+     },
+     [],
+   );
+@@ -1839,7 +1885,7 @@ export function TurnTimeline({
+           )
+         ) : (
+           <div className="min-h-0 flex-1 px-3 py-2">
+-            <TrajectoryPane turns={turns} />
++            <TrajectoryPane turns={turns} jump={trajectoryJump} />
+           </div>
+         )}
+       </div>
+@@ -1971,6 +2017,7 @@ export function TurnTimeline({
+         runKey={fileDiffTarget.runKey}
+         path={fileDiffTarget.path}
+         status={fileDiffTarget.status}
++        agentEdited={fileDiffTarget.agentEdited}
+         open
+         onOpenChange={(next) => {
+           if (!next) setFileDiffTarget(null);
+diff --git a/sillyhub-daemon/src/interactive/pi-edit-patch-synth.ts b/sillyhub-daemon/src/interactive/pi-edit-patch-synth.ts
+new file mode 100644
+index 000000000..a08065e70
+--- /dev/null
++++ b/sillyhub-daemon/src/interactive/pi-edit-patch-synth.ts
+@@ -0,0 +1,138 @@
++/**
++ * pi-edit-patch-synth.ts —— pi 运行时编辑补丁合成（2026-10-24-pi-edit-patch-synth）。
++ *
++ * 背景：pi 的 edit/write 工具结果只有「Successfully replaced/wrote …」确认文本，
++ * 无任何 diff 数据（pi-events.ts 设计期把 edit_patch 列为非目标）——轮文件变更
++ * 弹窗对 pi 会话恒「无补丁」。但 **入参本身就是完整变更内容**：
++ *   - edit：`{path, edits: [{oldText, newText}, …]}`
++ *   - write：`{path, content}`
++ * 本模块把入参合成 structuredPatch JSON 串（前端 parseStructuredPatch 既有格式
++ * `[{oldStart, newStart, lines: ["-old", "+new", …]}]`），挂 tool_result 事件的
++ * edit_patch——backend 字符串透传、前端零改动消费。
++ *
++ * 行号口径（诚实披露）：
++ *   - newStart（新文件行号，弹窗主体信息）：工具执行后实盘定位——end 时读改后
++ *     文件，按块顺序（前块结束位之后）搜 newText 首次出现，前缀换行计数得行号，
++ *     **恒精确**；
++ *   - oldStart（旧文件行号）：`newStart + 前面各块净行偏移累积` 推算——块之前
++ *     的内容若被并发他源改动，旧行号可能偏几行（diff 内容本身仍真实，来自入参）。
++ *
++ * 放弃条件（一律返回 null，宁缺不伪造，FR-03）：入参形态不符 / is_error /
++ * 读盘失败 / newText 在改后文件定位不到 / 合成 JSON 超 64KB（对齐 claude 轨道
++ * 附着上限惯例）。
++ *
++ * @module interactive/pi-edit-patch-synth
++ */
++
++/** structuredPatch 单 hunk（与前端 parseStructuredPatch 契约逐字对齐）。 */
++export interface SynthHunk {
++  oldStart: number;
++  newStart: number;
++  lines: string[];
++}
++
++/**
++ * 合成补丁 JSON 串的附着上限（超出整体放弃，不截半补丁）——UTF-8 字节口径，
++ * 逐字对齐 claude 轨道（parse-claude-code-jsonl.ts EDIT_PATCH_MAX_BYTES=64_000）。
++ */
++export const SYNTH_PATCH_MAX_BYTES = 64_000;
++
++/** 文本按行拆分（行数 = 段数；末尾空串保留为独立行，与 diff 行语义一致）。 */
++function splitLines(text: string): string[] {
++  return text.split('\n');
++}
++
++/** 位置区间的换行计数（[from,to) 逐字符；增量调用时总体单遍，避免每块全量重扫）。 */
++function countNewlines(fileText: string, from: number, to: number): number {
++  let count = 0;
++  for (let i = from; i < to; i++) {
++    if (fileText.charCodeAt(i) === 10) count += 1; // '\n'
++  }
++  return count;
++}
++
++/** hunk 数组 → JSON 串（含上限判定；空数组/超限 → null）。 */
++function stringifyHunks(hunks: SynthHunk[]): string | null {
++  if (hunks.length === 0) return null;
++  const json = JSON.stringify(hunks);
++  // 评审 P3 修正：口径对齐 claude 轨道（parse-claude-code-jsonl.ts）——UTF-8 字节
++  // 数（Buffer.byteLength）而非 UTF-16 码元长度（中文内容下两者差约 3 倍）。
++  if (Buffer.byteLength(json, 'utf8') > SYNTH_PATCH_MAX_BYTES) return null;
++  return json;
++}
++
++/**
++ * edit 入参 → structuredPatch JSON 串（或 null）。
++ *
++ * **同步读盘**：pi-events 的 dispatch 是同步事件链（逐帧返回 AgentEvent[]），
++ * 合成在 handler 内联执行——单次本地读、大小护栏（`readFile` 注入方负责），
++ * 同步开销毫秒级可接受。
++ *
++ * @param args 工具入参（`{path, edits}` 形态；edits 块需含字符串 oldText/newText）
++ * @param readFile 同步读改后文件全文的注入函数（生产 = readFileSync + 大小护栏）。
++ *   签名 (path) => string | null（失败/超大 → null 整体放弃）。
++ */
++export function synthesizePiEditPatch(
++  args: unknown,
++  readFile: (path: string) => string | null,
++): string | null {
++  if (args == null || typeof args !== 'object') return null;
++  const record = args as { path?: unknown; edits?: unknown };
++  if (typeof record.path !== 'string' || record.path === '') return null;
++  if (!Array.isArray(record.edits) || record.edits.length === 0) return null;
++
++  // 形态预检（任一块不符 → 整体放弃，不产半份补丁）。
++  const blocks: { oldText: string; newText: string }[] = [];
++  for (const raw of record.edits) {
++    if (raw == null || typeof raw !== 'object') return null;
++    const block = raw as { oldText?: unknown; newText?: unknown };
++    if (typeof block.oldText !== 'string' || typeof block.newText !== 'string') {
++      return null;
++    }
++    blocks.push({ oldText: block.oldText, newText: block.newText });
++  }
++
++  const fileText = readFile(record.path);
++  if (fileText === null) return null;
++
++  const hunks: SynthHunk[] = [];
++  // 顺序定位游标：后块只在前块结束位置之后搜（同内容多块不误配首现）。
++  let searchFrom = 0;
++  // 增量行号（评审 P3：从游标位置单遍累积，不每块全量重扫——2MB 文件多块的
++  // 最坏扫描从 O(块数×文件字节) 收敛到 O(文件字节)）。
++  let lineAtCursor = 1;
++  // 旧行号偏移累积：前面各块 (newLines - oldLines) 的和（oldStart = newStart - 偏移）。
++  let oldLineDrift = 0;
++  for (const block of blocks) {
++    const at = fileText.indexOf(block.newText, searchFrom);
++    if (at < 0) return null; // 定位不到（并发改动/非全量替换）→ 整体放弃
++    lineAtCursor += countNewlines(fileText, searchFrom, at);
++    const newStart = lineAtCursor;
++    const oldStart = newStart - oldLineDrift;
++    const lines = [
++      ...splitLines(block.oldText).map((l) => `-${l}`),
++      ...splitLines(block.newText).map((l) => `+${l}`),
++    ];
++    hunks.push({ oldStart: Math.max(1, oldStart), newStart, lines });
++    // 游标推进到本块 newText 末尾（行号增量同步数区间换行）；偏移按净行差累积。
++    searchFrom = at + block.newText.length;
++    lineAtCursor += countNewlines(fileText, at, searchFrom);
++    oldLineDrift +=
++      splitLines(block.newText).length - splitLines(block.oldText).length;
++  }
++  return stringifyHunks(hunks);
++}
++
++/**
++ * write 入参 → 全 add 行 hunk（或 null）。
++ *
++ * 覆盖写的旧行不可知——全 add 行（oldStart=1/newStart=1）是如实口径：弹窗展示
++ * 「写入后全文」。新建文件语义即全量新增；修改型覆盖写同理展示最终内容。
++ */
++export function synthesizePiWritePatch(args: unknown): string | null {
++  if (args == null || typeof args !== 'object') return null;
++  const record = args as { content?: unknown };
++  if (typeof record.content !== 'string' || record.content === '') return null;
++  const lines = splitLines(record.content).map((l) => `+${l}`);
++  return stringifyHunks([{ oldStart: 1, newStart: 1, lines }]);
++}
+diff --git a/sillyhub-daemon/src/interactive/pi-events.ts b/sillyhub-daemon/src/interactive/pi-events.ts
+index 2f5775e06..0b2a7992c 100644
+--- a/sillyhub-daemon/src/interactive/pi-events.ts
++++ b/sillyhub-daemon/src/interactive/pi-events.ts
+@@ -28,7 +28,7 @@
+ //   | message_update + ame.text_delta | text（逐 delta 直通，不合并、无 is_partial） | pi 天然逐 delta 流（对照 Anthropic block 缓冲），design §5.2 第 1 条 |
+ //   | message_end.message.content 内 thinking part | thinking（每 part 一事件） | design §5.2 第 2 条；ThinkingContent（pi-ai types.d.ts:230-238）。text part 不在 message_end 提取——text 已由 text_delta 流式直通，重复展开会双计（批量 pi-json.ts:263-266 同决策） |
+ //   | tool_execution_start | tool_use（tool_name/call_id 一等 + content=入参 JSON + metadata.tool_input） | design §5.2 第 3 条；批量 pi-json.ts:283-298 口径 |
+-//   | tool_execution_end | tool_result（call_id 配对；无 edit_patch——pi edit 结果为 diff 文本无结构化 patch，design §3 非目标） | design §5.2 第 4 条；批量 pi-json.ts:304-321 口径 |
++//   | tool_execution_end | tool_result（call_id 配对；edit/write 成功时从 start 帧入参合成 structuredPatch 挂 edit_patch——2026-10-24-pi-edit-patch-synth，推翻原「非目标」） | design §5.2 第 4 条；批量 pi-json.ts:304-321 口径 |
+ //   | error（顶层）/ extension_error / message_update+ame.error | error | design §5.2 第 5 条；ame.error 覆盖流层中止（reason=aborted|error，pi-ai types.d.ts:386-389） |
+ //   | turn_end.message.stopReason==='error' | error（errorMessage 载体） | pi 0.81.1 实跑证实（fixture real-error-turn.jsonl）：流层无独立 error 事件时，失败仅经 turn_end 浮出，不映射则错误对下游不可见 |
+ //   | turn_end.message.usage | usage（text 空事件承载，见 buildUsageEvent） | design §5.2 第 6 条；cacheRead→cache_read / cacheWrite→cache_creation（批量 pi-json.ts:341-344 已验证口径）；ctx_tokens = input + cacheRead + cacheWrite 净值三和（ctxTokensFromNetInput 共享 helper） |
+@@ -57,8 +57,11 @@
+ // 全部产出事件满足 agent-event-schema.ts 的 safeParseAgentEvent（验收项，
+ // 测试逐条断言）。
+ 
++import { readFileSync, statSync } from 'node:fs';
++
+ import type { AgentEvent, AgentEventUsage } from '../types.js';
+ import { ctxTokensFromNetInput } from './usage-ctx.js';
++import { synthesizePiEditPatch, synthesizePiWritePatch } from './pi-edit-patch-synth.js';
+ 
+ /** pi 下行事件的顶层 `type` 已知集合（词表真源见文件头）。 */
+ const KNOWN_EVENT_TYPES: ReadonlySet<string> = new Set([
+@@ -163,6 +166,16 @@ export class PiEventNormalizer {
+    */
+   private pendingError = '';
+ 
++  /**
++   * 编辑类工具入参登记（2026-10-24-pi-edit-patch-synth）：call_id → 入参对象。
++   * pi 的 tool_execution_end 帧不带 args，edit_patch 合成需要 start 帧的入参
++   * （edit 的 edits 块 / write 的 content）。turn_end 全清（与 segments 同点，
++   * 轮内生命周期）；容量上限防极端泄漏（逐出最旧）。
++   */
++  private readonly toolArgsByCallId = new Map<string, Record<string, unknown>>();
++  /** 登记容量上限（单轮编辑调用远低于此，防御性兜底）。 */
++  private static readonly TOOL_ARGS_MAX = 64;
++
+   constructor(opts: { flushIntervalMs?: number; now?: () => number } = {}) {
+     this.flushIntervalMs = opts.flushIntervalMs ?? 500;
+     this.now = opts.now ?? Date.now;
+@@ -381,6 +394,17 @@ export class PiEventNormalizer {
+     const toolName = typeof raw.toolName === 'string' ? raw.toolName : '';
+     const callId = typeof raw.toolCallId === 'string' ? raw.toolCallId : '';
+     const args = isRecord(raw.args) ? raw.args : {};
++    // 2026-10-24-pi-edit-patch-synth：编辑类工具入参登记（end 帧不带 args，
++    // 合成补丁需要 start 帧的 edits/content）。容量逐出最旧防极端泄漏。
++    const lowered = toolName.toLowerCase();
++    if (callId !== '' && (lowered === 'edit' || lowered === 'write')) {
++      this.toolArgsByCallId.set(callId, args);
++      while (this.toolArgsByCallId.size > PiEventNormalizer.TOOL_ARGS_MAX) {
++        const oldest = this.toolArgsByCallId.keys().next().value;
++        if (oldest === undefined) break;
++        this.toolArgsByCallId.delete(oldest);
++      }
++    }
+     return {
+       type: 'tool_use',
+       content: JSON.stringify(args),
+@@ -391,22 +415,61 @@ export class PiEventNormalizer {
+   }
+ 
+   /**
+-   * tool_execution_end → tool_result（call_id 与 tool_use 天然同值配对，
+-   * 归一化无状态不做登记）。isError 仅写 metadata.is_error（不改会话终态，
+-   * 批量 pi-json.ts:302-303 同决策）。无 edit_patch（design §3 非目标）。
++   * tool_execution_end → tool_result（call_id 与 tool_use 天然同值配对）。
++   * isError 仅写 metadata.is_error（不改会话终态，批量 pi-json.ts:302-303 同决策）。
++   *
++   * edit_patch 合成（2026-10-24-pi-edit-patch-synth，推翻 design §3「非目标」）：
++   * pi 的 edit/write 结果只有确认文本无 diff，但入参即完整变更内容——成功时从
++   * start 帧登记的入参**同步**合成 structuredPatch 挂 edit_patch（dispatch 是
++   * 同步事件链，单次本地读盘 + 大小护栏毫秒级）。合成失败（形态/读盘/定位/
++   * 超限）静默缺省（保持无补丁现状，宁缺不伪造）。
+    */
+   private handleToolEnd(raw: Record<string, unknown>): AgentEvent {
+     const toolName = typeof raw.toolName === 'string' ? raw.toolName : '';
+     const callId = typeof raw.toolCallId === 'string' ? raw.toolCallId : '';
+     const isError = raw.isError === true;
+     const resultText = extractResultText(raw.result);
+-    return {
++    const ev: AgentEvent = {
+       type: 'tool_result',
+       content: resultText,
+       tool_name: toolName,
+       call_id: callId,
+       metadata: { tool_output: resultText, is_error: isError },
+     };
++    const lowered = toolName.toLowerCase();
++    const args =
++      !isError && callId !== '' && (lowered === 'edit' || lowered === 'write')
++        ? this.toolArgsByCallId.get(callId)
++        : undefined;
++    this.toolArgsByCallId.delete(callId);
++    if (args === undefined) return ev;
++    try {
++      const patch =
++        lowered === 'edit'
++          ? synthesizePiEditPatch(args, PiEventNormalizer.readEditedFile)
++          : synthesizePiWritePatch(args);
++      if (patch !== null) ev.edit_patch = patch;
++    } catch {
++      // 合成异常静默缺省（观测面 best-effort，不阻塞结果事件）。
++    }
++    return ev;
++  }
++
++  /**
++   * 同步读改后文件全文（合成补丁定位行号用）：>2MB 或读失败 → null（放弃补丁，
++   * 不让大文件同步读卡事件循环）。**路径解析披露（评审 P3c）**：入参 path 原样
++   * 传 readFileSync——相对路径按 daemon 进程 cwd 解析（非会话工作区根）：典型
++   * 结果 ENOENT → null 放弃（安全降级）；pi 实测入参为绝对路径不受影响。包级
++   * 可测性：静态方法可被测试覆写。
++   */
++  private static readEditedFile(path: string): string | null {
++    try {
++      const st = statSync(path);
++      if (st.size > 2 * 1024 * 1024) return null;
++      return readFileSync(path, 'utf8');
++    } catch {
++      return null;
++    }
+   }
+ 
+   /**
+@@ -432,8 +495,9 @@ export class PiEventNormalizer {
+       out.push(this.buildUsageEvent(message.usage));
+     }
+     // ql-20260905-001：turn 边界全清 segment 记账（message_end 丢帧时的兜底，
+-    // 下一 turn 从零起段）。
++    // 下一 turn 从零起段）。2026-10-24-pi-edit-patch-synth：入参登记同点全清。
+     this.segments.clear();
++    this.toolArgsByCallId.clear();
+     return out;
+   }
+ 
+diff --git a/sillyhub-daemon/tests/interactive/pi-edit-patch-synth.test.ts b/sillyhub-daemon/tests/interactive/pi-edit-patch-synth.test.ts
+new file mode 100644
+index 000000000..5707e4143
+--- /dev/null
++++ b/sillyhub-daemon/tests/interactive/pi-edit-patch-synth.test.ts
+@@ -0,0 +1,169 @@
++// tests/interactive/pi-edit-patch-synth.test.ts
++// 2026-10-24-pi-edit-patch-synth：pi 编辑补丁合成纯函数单测 + pi-events 接线用例。
++//
++// 覆盖矩阵（FR-01/02/03）：
++//   - edit 单块合成（行号由改后文件实盘定位，newStart 精确）
++//   - edit 多块合成（顺序定位不误配首现 + oldStart 净行偏移累积）
++//   - write 全新增 hunk（oldStart=1/newStart=1，覆盖写旧行不可知的如实口径）
++//   - 放弃矩阵：形态不符 / 读盘失败 / newText 定位不到 / 64KB 超限 / is_error 不附着
++//   - pi-events 接线：edit/write 成功挂 edit_patch、bash 不挂、turn_end 清登记
++//
++// @module pi-edit-patch-synth.test
++
++import { describe, expect, it } from 'vitest';
++
++import {
++  synthesizePiEditPatch,
++  synthesizePiWritePatch,
++} from '../../src/interactive/pi-edit-patch-synth.js';
++
++/** 固定文件内容的同步读注入。 */
++const fileOf = (text: string) => (_path: string): string | null => text;
++const failRead = (_path: string): string | null => null;
++
++describe('pi-edit-patch-synth: synthesizePiEditPatch（FR-01）', () => {
++  it('单块替换：-旧行/+新行，newStart 实盘定位精确', () => {
++    // 改后文件：newText "a\nc" 出现在第 3 行起（前缀两行）。
++    const file = 'l1\nl2\na\nc\nl5\n';
++    const json = synthesizePiEditPatch(
++      { path: 'f.ts', edits: [{ oldText: 'a\nb', newText: 'a\nc' }] },
++      fileOf(file),
++    );
++    expect(json).toBe(JSON.stringify([
++      { oldStart: 3, newStart: 3, lines: ['-a', '-b', '+a', '+c'] },
++    ]));
++  });
++
++  it('多块替换：顺序定位（同内容后块不吃首现）+ oldStart 净行偏移累积', () => {
++    // 原文件 'x\nkeep\nx\n'；块1 'x\nkeep'→'x'（净 -1 行）、块2 第二个 'x'→'x\ny'。
++    // end 时读到的改后文件 = 'x\nx\ny\n'（两块都已执行）。
++    const file = 'x\nx\ny\n';
++    const json = synthesizePiEditPatch(
++      {
++        path: 'f.ts',
++        edits: [
++          { oldText: 'x\nkeep', newText: 'x' },
++          { oldText: 'x', newText: 'x\ny' },
++        ],
++      },
++      fileOf(file),
++    );
++    const hunks = JSON.parse(json as string) as { oldStart: number; newStart: number; lines: string[] }[];
++    expect(hunks).toHaveLength(2);
++    // 块1：newText "x" 首现在行1（顺序游标从 0 起）。
++    expect(hunks[0]).toEqual({ oldStart: 1, newStart: 1, lines: ['-x', '-keep', '+x'] });
++    // 块2：改后文件里块2 的 "x\ny" 起于行2（块1 净删 1 行已把它提升）；偏移 -1 →
++    // oldStart = 2+1 = 3（旧文件中该 x 原在行3）。
++    expect(hunks[1]).toEqual({ oldStart: 3, newStart: 2, lines: ['-x', '+x', '+y'] });
++  });
++
++  it('newText 定位不到（并发改动）→ null 整体放弃（FR-03）', () => {
++    expect(
++      synthesizePiEditPatch(
++        { path: 'f.ts', edits: [{ oldText: 'a', newText: 'zzz-not-in-file' }] },
++        fileOf('a\nb\n'),
++      ),
++    ).toBeNull();
++  });
++
++  it('读盘失败 → null；形态不符（edits 非数组/块缺字符串）→ null（FR-03）', () => {
++    const args = { path: 'f.ts', edits: [{ oldText: 'a', newText: 'b' }] };
++    expect(synthesizePiEditPatch(args, failRead)).toBeNull();
++    expect(synthesizePiEditPatch({ path: 'f.ts', edits: [] }, fileOf('a'))).toBeNull();
++    expect(synthesizePiEditPatch({ path: 'f.ts', edits: 'x' }, fileOf('a'))).toBeNull();
++    expect(
++      synthesizePiEditPatch({ path: 'f.ts', edits: [{ oldText: 1, newText: 'b' }] }, fileOf('a')),
++    ).toBeNull();
++    expect(synthesizePiEditPatch({ edits: [{ oldText: 'a', newText: 'b' }] }, fileOf('a'))).toBeNull();
++  });
++
++  it('合成超 64KB → null（不截半补丁，FR-03）', () => {
++    const big = 'x'.repeat(70 * 1024);
++    expect(
++      synthesizePiEditPatch(
++        { path: 'f.ts', edits: [{ oldText: 'a', newText: big }] },
++        fileOf(big),
++      ),
++    ).toBeNull();
++  });
++});
++
++describe('pi-edit-patch-synth: synthesizePiWritePatch（FR-02）', () => {
++  it('全 add 行 hunk：oldStart=1/newStart=1，content 逐行 + 前缀（含末行空串）', () => {
++    const json = synthesizePiWritePatch({ path: 'f.ts', content: 'x\ny\n' });
++    expect(json).toBe(JSON.stringify([
++      { oldStart: 1, newStart: 1, lines: ['+x', '+y', '+'] },
++    ]));
++  });
++
++  it('content 空/非字符串/args 形态不符 → null（FR-03）', () => {
++    expect(synthesizePiWritePatch({ path: 'f.ts', content: '' })).toBeNull();
++    expect(synthesizePiWritePatch({ path: 'f.ts', content: 1 })).toBeNull();
++    expect(synthesizePiWritePatch(null)).toBeNull();
++    expect(synthesizePiWritePatch({})).toBeNull();
++  });
++});
++
++describe('pi-edit-patch-synth: pi-events 接线（FR-01/02/03 集成面）', () => {
++  it('edit 成功 → tool_result 挂合成 edit_patch；bash 结果不挂（既有断言语义保持）', async () => {
++    const { PiEventNormalizer } = await import('../../src/interactive/pi-events.js');
++    const norm = new PiEventNormalizer();
++    // 覆写同步读盘（测试不触真实文件系统）。
++    (PiEventNormalizer as unknown as { readEditedFile: (p: string) => string | null }).readEditedFile =
++      () => 'l1\na\nc\n';
++    const startEv = norm.normalizeRpcLine(
++      JSON.stringify({
++        type: 'tool_execution_start',
++        toolCallId: 'call-e1',
++        toolName: 'edit',
++        args: { path: 'f.ts', edits: [{ oldText: 'a\nb', newText: 'a\nc' }] },
++      }),
++    );
++    expect(startEv[0]?.type).toBe('tool_use');
++    const endEv = norm.normalizeRpcLine(
++      JSON.stringify({
++        type: 'tool_execution_end',
++        toolCallId: 'call-e1',
++        toolName: 'edit',
++        result: { content: [{ text: 'Successfully replaced 1 block(s) in f.ts.' }] },
++      }),
++    );
++    const result = endEv.find((ev) => ev.type === 'tool_result');
++    expect(result?.edit_patch).toBe(
++      JSON.stringify([{ oldStart: 2, newStart: 2, lines: ['-a', '-b', '+a', '+c'] }]),
++    );
++  });
++
++  it('is_error=true / 未知 call_id / turn_end 后登记清空 → 不附着', async () => {
++    const { PiEventNormalizer } = await import('../../src/interactive/pi-events.js');
++    const norm = new PiEventNormalizer();
++    norm.normalizeRpcLine(
++      JSON.stringify({
++        type: 'tool_execution_start',
++        toolCallId: 'call-e2',
++        toolName: 'write',
++        args: { path: 'f.ts', content: 'x\n' },
++      }),
++    );
++    const errEv = norm.normalizeRpcLine(
++      JSON.stringify({
++        type: 'tool_execution_end',
++        toolCallId: 'call-e2',
++        toolName: 'write',
++        isError: true,
++        result: { content: [{ text: 'boom' }] },
++      }),
++    );
++    expect(errEv.find((ev) => ev.type === 'tool_result')?.edit_patch).toBeUndefined();
++    // 未知 call_id 的 write end（无登记）→ 不附着。
++    const orphanEv = norm.normalizeRpcLine(
++      JSON.stringify({
++        type: 'tool_execution_end',
++        toolCallId: 'call-unknown',
++        toolName: 'write',
++        result: { content: [{ text: 'ok' }] },
++      }),
++    );
++    expect(orphanEv.find((ev) => ev.type === 'tool_result')?.edit_patch).toBeUndefined();
++  });
++});

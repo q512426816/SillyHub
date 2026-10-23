@@ -1,0 +1,28 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-24-pi-edit-patch-synth",
+  "reviewer": "general-purpose 子代理独立评审（两轮：首轮 FAIL/P1+P3×3 → 清偿 e5b9baae1；复审 PASS 确认 P1/P3a/P3b 修复 + 新提 P3×2 → 二审清偿 4d07114b3）",
+  "verdict": "PASS",
+  "reviewedAgainst": "4d07114b3",
+  "findings": [
+    {
+      "severity": "P3",
+      "title": "复审 P3-new-1：SYNTH_PATCH_MAX_BYTES 死常量与实现口径不一致——已修 4d07114b3（常量归一 64_000 并恢复引用）",
+      "evidence": "复审：常量 65536 无引用、实现硬编码 64000；修复后常量=64_000 且 stringifyHunks 引用之",
+      "location": "sillyhub-daemon/src/interactive/pi-edit-patch-synth.ts:35"
+    },
+    {
+      "severity": "P3",
+      "title": "复审 P3-new-2（首轮 P3c）：相对路径按 daemon cwd 解析的披露未落地——已修 4d07114b3（readEditedFile jsdoc + design 作用域节措辞同步）",
+      "evidence": "复审：jsdoc/design 均无 cwd 语义且 design 措辞暗示按工作区根；修复后两处披露到位",
+      "location": "sillyhub-daemon/src/interactive/pi-events.ts:461"
+    }
+  ],
+  "dimensionNotes": {
+    "乱序": "ok——漏帧/重复 end/callId 复用均 get 落空不附着",
+    "并发": "ok——合成只读盘；竞态全部落入 FR-03 定位失败放弃",
+    "切换": "ok——登记 Map turn_end 全清 + 容量 64 逐出；会话实例私有",
+    "作用域": "ok——call_id 会话内唯一；相对路径 cwd 窗口已披露（ENOENT 安全降级，pi 实测绝对路径）"
+  },
+  "reviewedAt": "2026-10-24T00:59:00+08:00"
+}
