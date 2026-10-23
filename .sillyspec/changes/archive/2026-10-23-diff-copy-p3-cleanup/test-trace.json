@@ -1,0 +1,51 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-23-diff-copy-p3-cleanup",
+  "rows": [
+    {
+      "anchor": "FR-01",
+      "row_id": "2026-10-23-diff-copy-p3-cleanup:flow:测试绑定FR-01",
+      "tests": [
+        "frontend/src/components/daemon/file-changes/__tests__/turn-file-diff-dialog.test.tsx「每段补丁有常显复制按钮，点击写入完整 diff 文本（FR-01）」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-23-diff-copy-p3-cleanup"
+    },
+    {
+      "anchor": "FR-02",
+      "row_id": "2026-10-23-diff-copy-p3-cleanup:flow:测试绑定FR-02",
+      "tests": [
+        "frontend/src/components/daemon/file-changes/__tests__/turn-file-diff-dialog.test.tsx「补丁区脚注声明复制文本边界（不含 hunk 头/不可直接 git apply）」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-23-diff-copy-p3-cleanup"
+    },
+    {
+      "anchor": "FR-03",
+      "row_id": "2026-10-23-diff-copy-p3-cleanup:flow:测试绑定FR-03",
+      "tests": [
+        "frontend/src/components/daemon/file-changes/__tests__/turn-file-diff-dialog.test.tsx「无补丁说明态 / 删除说明态不出现复制按钮（FR-03）」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-23-diff-copy-p3-cleanup"
+    }
+  ]
+}

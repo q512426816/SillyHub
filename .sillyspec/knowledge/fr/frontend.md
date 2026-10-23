@@ -7562,3 +7562,67 @@ superseded_by：FR-app-workspace-pages-002
   confirmed_at: null
   source_change: 2026-10-22-askuser-dock-inputbar
   status: active
+
+## FR-frontend-050 复制按钮改用 getText 惰性取值，渲染期不构建 diff 文本，点击复制内容与现行为逐字一致
+变更：2026-10-23-diff-copy-p3-cleanup
+状态：active
+摘要：主路径
+全文：.sillyspec/changes/archive/2026-10-23-diff-copy-p3-cleanup/requirements.md#FR-01
+最近确认：e849e16ee3a34212c2abfd144b0503f6064b6b1d
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-23-diff-copy-p3-cleanup:flow:测试绑定FR-01
+  tests: frontend/src/components/daemon/file-changes/__tests__/turn-file-diff-dialog.test.tsx「每段补丁有常显复制按钮，点击写入完整 diff 文本（FR-01）」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-23-diff-copy-p3-cleanup
+  status: active
+
+## FR-frontend-051 补丁区脚注含「不含 hunk 头，不可直接用于 git apply」语义的如实说明
+变更：2026-10-23-diff-copy-p3-cleanup
+状态：active
+摘要：主路径
+全文：.sillyspec/changes/archive/2026-10-23-diff-copy-p3-cleanup/requirements.md#FR-02
+最近确认：e849e16ee3a34212c2abfd144b0503f6064b6b1d
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-23-diff-copy-p3-cleanup:flow:测试绑定FR-02
+  tests: frontend/src/components/daemon/file-changes/__tests__/turn-file-diff-dialog.test.tsx「补丁区脚注声明复制文本边界（不含 hunk 头/不可直接 git apply）」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-23-diff-copy-p3-cleanup
+  status: active
+
+## FR-frontend-052 无补丁说明态用例先等到说明文案出现再断言无复制按钮（不再在 loading 态误断言）
+变更：2026-10-23-diff-copy-p3-cleanup
+状态：active
+摘要：主路径
+全文：.sillyspec/changes/archive/2026-10-23-diff-copy-p3-cleanup/requirements.md#FR-03
+最近确认：e849e16ee3a34212c2abfd144b0503f6064b6b1d
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-23-diff-copy-p3-cleanup:flow:测试绑定FR-03
+  tests: frontend/src/components/daemon/file-changes/__tests__/turn-file-diff-dialog.test.tsx「无补丁说明态 / 删除说明态不出现复制按钮（FR-03）」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-23-diff-copy-p3-cleanup
+  status: active
+
+## FR-frontend-053 触及面测试绿 + tsc 零错
+变更：2026-10-23-diff-copy-p3-cleanup
+状态：active
+摘要：主路径
+全文：.sillyspec/changes/archive/2026-10-23-diff-copy-p3-cleanup/requirements.md#FR-04
+最近确认：e849e16ee3a34212c2abfd144b0503f6064b6b1d

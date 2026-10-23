@@ -1,0 +1,50 @@
+tier: thin
+legacy_fallback: false
+substeps:
+  artifacts: done
+  ledger: done
+  patch: done
+  review: done
+  probes: done
+  distill: done
+  archive: done
+  events: done
+born_face: thin
+with_tasks: false
+review_force: null
+input: >-
+  变更弹窗复制兜底P3清偿
+
+
+  动机与背景：上一变更 2026-10-23-diff-dialog-copy-fallback 评审留档 4 条 P3，本次清偿其中三条可落地项（FR 措辞矛盾属归档件不改，教训记录在案）：①无补丁用例在 loading
+  态（turn-file-diff-body 已存在）就断言无复制按钮，未严格等待 no-patch ready——改为等待说明文案出现后再断言；②design 声称的脚注落地：补丁区底部说明补一句「复制内容为行级文本，不含 hunk
+  头，不可直接用于 git apply」，避免用户误以为可直接应用；③diffRowsToText 每次渲染期全量构建，改为 CopyButton getText 惰性取值（点击时才生成，复制内容不变）。
+
+
+  成功标准：
+
+  - 复制按钮改用 getText 惰性取值，渲染期不构建 diff 文本，点击复制内容与现行为逐字一致
+
+  - 补丁区脚注含「不含 hunk 头，不可直接用于 git apply」语义的如实说明
+
+  - 无补丁说明态用例先等到说明文案出现再断言无复制按钮（不再在 loading 态误断言）
+
+  - 触及面测试绿 + tsc 零错
+autopilot: false
+prestage_ack: true
+baseline_commit: c1b81c76ca0feb3cb7ca5bb38300e75ca4f33854
+updatedAt: '2026-10-23T03:58:58.003Z'
+cross_baselines:
+  sillyspec: c309979af71cebec54c124425bb059294db15ab0
+baseline_sha256: e1fd7d21f99caae1cf3658ca543c822f454d47829dbefbcad6e08737ddd5ebda
+spec_approved: true
+spec_approved_at: '2026-10-23T03:49:52.745Z'
+spec_approved_by: anon@DESKTOP-HJ0AM09
+spec_approved_channel: agent-self
+spec_attested_by: anon@DESKTOP-HJ0AM09
+batch_ticked: true
+gate_summary: >-
+  test: passed ← module[]+deps(jsx1)（3.6s）
+  结果：C:\Users\qinyi\IdeaProjects\multi-agent-platform\.sillyspec\.runtime\verify-runs\20261023035145\test-result.json｜lint:
+  skipped — 跳过原因：local.yaml 未配置 commands.lint（或标记 unavailable）。｜门文件 244 个
+

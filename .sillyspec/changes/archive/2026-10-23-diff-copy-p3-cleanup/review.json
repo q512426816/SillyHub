@@ -1,0 +1,40 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-23-diff-copy-p3-cleanup",
+  "reviewer": "subagent",
+  "verdict": "PASS",
+  "reviewedAgainst": "e849e16ee3a34212c2abfd144b0503f6064b6b1d",
+  "findings": [
+    {
+      "severity": "P3",
+      "title": "FR-01 惰性用例无法区分新旧实现，渲染期零构建缺直接断言",
+      "evidence": "新用例只断言点击前 copyTextToClipboard 未被调用（test:275-277），旧实现 text={diffRowsToText(section.rows)} 下该断言同样成立；未对 diffRowsToText 或 getText 设 spy，故无法证明渲染期未构建文本。实现本身正确：getText 仅在 handleCopy 内调用（copy-button.tsx:60,71），CopyButton 自有单测另证渲染期零调用，不阻断。",
+      "location": "frontend/src/components/daemon/file-changes/__tests__/turn-file-diff-dialog.test.tsx:275"
+    },
+    {
+      "severity": "P3",
+      "title": "getText 路径下空文本段出现可点击但无反馈的死按钮（旧 text 路径整钮不渲染）",
+      "evidence": "CopyButton 只在 text 路径做空值门槛（copy-button.tsx:60），getText 返回空串时按钮仍渲染，handleCopy 在 value.length===0 时静默 return（copy-button.tsx:71-72）；parseStructuredPatch 对 lines: [] 的合法 JSON 返回 []（tool-diff.tsx:39-77），此时 dialog:183 仍渲染复制按钮，而改动前 text=\"\" 因空值门槛不渲染。边角 UI 行为差异，无数据正确性风险。",
+      "location": "frontend/src/components/daemon/file-changes/turn-file-diff-dialog.tsx:183"
+    },
+    {
+      "severity": "P3",
+      "title": "design 称 P3-3 教训记入本变更 requirement 语境，requirements 实际未记录",
+      "evidence": "design.md:13 写「教训记入本变更 requirement 语境」，但 requirements.md:7 只声明来源为 P3-1/P3-2/P3-4，全文无 P3-3 或 FR-02 措辞矛盾记录；该教训仅见于 proposal.md:11 与 design 风险段。归档件不回改的判断本身合理。",
+      "location": ".sillyspec/changes/2026-10-23-diff-copy-p3-cleanup/design.md:13"
+    },
+    {
+      "severity": "P3",
+      "title": "测试绑定用例名与实件 it() 标题漂移，新增惰性用例未入绑定",
+      "evidence": "requirements.md:45 绑定的「超 2000 行：复制内容不截断（FR-02）」实际标题为「超 2000 行：复制内容不截断（渲染上限不进复制面，FR-02）」；FR-02 绑定「补丁区脚注声明复制文本边界（不含 hunk 头/不可直接 git apply）」实际为「补丁区脚注声明复制文本不含 hunk 头、不可直接 git apply」；新用例「复制按钮点击期取值（getText 惰性），复制内容不变（FR-01）」未列入绑定。绑定门只校验非空，测试存在且断言成立，仅追溯锚点不精确。",
+      "location": ".sillyspec/changes/2026-10-23-diff-copy-p3-cleanup/requirements.md:45"
+    }
+  ],
+  "dimensionNotes": {
+    "乱序": "ok",
+    "并发": "ok",
+    "切换": "ok",
+    "作用域": "ok"
+  },
+  "reviewedAt": "2026-10-23T03:58:04.669Z"
+}
