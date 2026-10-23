@@ -22,6 +22,9 @@
  */
 
 import { REST_PREFIX } from './protocol.js';
+// 2026-10-23-session-network-context task-02：心跳网卡清单条目类型（采集面在
+// network-info.ts，此处仅类型引用）。
+import type { NetworkInterfaceInfo } from './network-info.js';
 // 2026-08-29-daemon-platform-resilience task-06：控制指令补拉响应条目类型
 //（手写类型过渡，task-11 收口进 api-types 生成物）+ 心跳响应扩展字段类型。
 import type {
@@ -220,6 +223,14 @@ export interface HeartbeatBody {
    * 恒可得，无 null/清除态。
    */
   machine_id?: string;
+  /**
+   * 2026-10-23-session-network-context task-02（FR-02 / D-002@v1）：本机网卡清单
+   * （network-info.ts collectNetworkInterfaces 每跳采集）。backend 落
+   * daemon_instances.network_info.network_interfaces，供会话【网络环境】段做
+   * 同网段判定与访问地址拼接。undefined → 键不出现（旧 daemon，backend 保留
+   * 旧值，D-008 兼容）；数组（含空）→ 整包直写（空=机器确无可用网卡）。
+   */
+  network_interfaces?: NetworkInterfaceInfo[];
 }
 
 /**
@@ -869,6 +880,15 @@ export class HubClient {
      * 11 参调用零破坏）；非空字符串 → 键出现（本机身份恒可得，无 null 态）。
      */
     machineId?: string,
+    /**
+     * 2026-10-23-session-network-context task-02（FR-02 / D-002@v1）：本机网卡
+     * 清单（daemon._sendHeartbeatOnce 从 collectNetworkInterfaces() 每跳采集）。
+     * 键存在性语义：undefined → 键不出现（旧 daemon 形态，backend 保留旧值，
+     * D-008 兼容）；数组（含空数组）→ 键出现整包直写（backend network_info.
+     * network_interfaces 整写，空数组=机器确无可用网卡）。可选追加末位——既有
+     * 12 参调用请求体逐字段不变（零破坏）。
+     */
+    networkInterfaces?: NetworkInterfaceInfo[],
   ): Promise<HeartbeatResponse> {
     const body: HeartbeatBody = {
       daemon_local_id: daemonLocalId,
@@ -918,6 +938,11 @@ export class HubClient {
     // = 旧 backend 零感知；本机身份无清除态）。
     if (machineId) {
       body.machine_id = machineId;
+    }
+    // 2026-10-23-session-network-context task-02（FR-02）：网卡清单——undefined
+    // → 键不出现（旧 daemon，backend 保留）；数组（含空）→ 整包直写。
+    if (networkInterfaces !== undefined) {
+      body.network_interfaces = networkInterfaces;
     }
     return this._request<HeartbeatResponse>(
       'POST',

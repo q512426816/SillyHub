@@ -77,6 +77,9 @@ import type {
 } from './types.js';
 import { AgentDetector, normalizeProvider } from './agent-detector.js';
 import type { DetectedAgent } from './agent-detector.js';
+// 2026-10-23-session-network-context task-02：心跳网卡清单采集（FR-02）。
+import { collectNetworkInterfaces } from './network-info.js';
+import type { NetworkInterfaceInfo } from './network-info.js';
 import { extractCause, HubHttpError } from './hub-client.js';
 // 2026-08-31-machine-sillyspec-version task-05：register/heartbeat 追加的 sillyspec
 // 参数形状（键存在性语义见 hub-client.ts D-002@v1 注释），daemon 组装快照时用。
@@ -1044,6 +1047,12 @@ interface ClientLike {
      * backend）；非空字符串=键出现（本机身份恒可得，无 null 态）。
      */
     machineId?: string,
+    /**
+     * 2026-10-23-session-network-context task-02（FR-02）：本机网卡清单（对齐
+     * hub-client heartbeat 末位参数）。undefined=键不出现（旧 daemon，backend
+     * 保留）；数组（含空）=整包直写。
+     */
+    networkInterfaces?: NetworkInterfaceInfo[],
   ): Promise<unknown>;
   markOffline?(runtimeId: string): Promise<unknown>;
   /**
@@ -6197,11 +6206,16 @@ export class Daemon {
         // 第 11 参（2026-09-30-tool-report task-02 / FR-01）：本机持久 machineId。
         // 首拍经下方 _ensureMachineId 懒读取（单飞）；读取失败/未完成 → undefined
         //（键不出现，本拍不带，下一拍收敛）。已缓存则直传（运行期恒定）。
+        // 第 12 参（2026-10-23-session-network-context task-02 / FR-02）：本机网卡
+        // 清单——每跳实时采集（collectNetworkInterfaces 纯同步读 os，无 IO 无
+        // 副作用，不经 _running 门控）；数组（含空）整包直写，backend
+        // network_info.network_interfaces 整写更新。
         // 共享断言面：本调用平铺参长被四处 length 钉测试锚定——加尾参须同步
         // N→N+1：daemon-heartbeat-pending / daemon-heartbeat-sillyspec /
         // sillyspec-platform-command(6 处) / integration/selfupdate-scenarios(2 处)
         //（testing-gotchas「共享断言面」②）。
         this._machineId ?? undefined,
+        collectNetworkInterfaces(),
       );
       // task-05（FR-03）→ task-07 per-daemon：成功 → 清断连计数 + 告警标记。
       // task-06（2026-08-30-daemon-self-heal / D-001）：重置前先捕获降级起点，
