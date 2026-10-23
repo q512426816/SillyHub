@@ -24,7 +24,11 @@ import type { AgentRunLogEntry } from "@/lib/agent";
 import type { SessionRunRead } from "@/lib/daemon/sessions";
 import { HISTORY_PAGE_SIZE } from "./turn-state";
 
-/** 首屏至少覆盖的轮数（对齐 deepseek-harness 的 minTurns=2）。 */
+/**
+ * 首屏覆盖轮数的语义下限（对齐 deepseek-harness 的 minTurns=2）。预算允许时
+ * 会继续向前补到全量；预算/单轮上限不足时以硬上限为准（评审 P1：不做「2 轮
+ * 即停」的额外截断）。
+ */
 export const INITIAL_WINDOW_MIN_TURNS = 2;
 
 /** 首屏合并后日志行预算（含底窗；超预算停止向前补拉）。 */
@@ -44,7 +48,6 @@ export interface InitialWindowDeps {
   fetchRunLogs: (_runId: string) => Promise<AgentRunLogEntry[]>;
   /** 测试可覆盖的预算参数（缺省用模块常量）。 */
   pageSize?: number;
-  minTurns?: number;
   budget?: number;
 }
 
@@ -53,6 +56,12 @@ export interface InitialWindowResult {
   logs: AgentRunLogEntry[];
   /** 是否发生了补拉/合并（测试与调试断言用）。 */
   extended: boolean;
+  /**
+   * 「加载更早」翻页游标锚点。直达结果完整时取合并后最旧行（或最早已补轮首行）；
+   * 直达触达 2000 上限（可能缺中段）时**保持底窗最旧行**——游标前移到轮首会让
+   * 缺口永久不可回补（评审 P2，2026-10-23）。
+   */
+  cursorLog: AgentRunLogEntry | null;
 }
 
 function groupByRun(logs: AgentRunLogEntry[]): Map<string, AgentRunLogEntry[]> {
@@ -90,29 +99,43 @@ function mergeRunLogs(
   return tail.length > 0 ? [...full, ...tail] : full;
 }
 
+/** 某批行的最大时间戳（空数组 null）。 */
+function maxTimestampOf(logs: AgentRunLogEntry[]): string | null {
+  let max: string | null = null;
+  for (const log of logs) {
+    if (max === null || log.timestamp > max) max = log.timestamp;
+  }
+  return max;
+}
+
 /**
  * 构建首屏自适应窗口。任何补拉失败都降级为已获得的行集（不阻断首屏）。
+ *
+ * 停止条件（对齐 deepseek-harness 的「硬上限」语义）：预算 INITIAL_WINDOW_BUDGET_LOGS
+ * 行耗尽、更早轮直达触达 RUN_LOGS_MAX（可能截断，不采纳）、请求失败或到头。
+ * 小会话（总行数 ≤ 预算）因此全量加载，不做「2 轮即停」的额外截断
+ * （评审 P1，2026-10-23）。
  */
 export async function buildInitialWindow(
   deps: InitialWindowDeps,
 ): Promise<InitialWindowResult> {
   const pageSize = deps.pageSize ?? HISTORY_PAGE_SIZE;
-  const minTurns = deps.minTurns ?? INITIAL_WINDOW_MIN_TURNS;
   const budget = deps.budget ?? INITIAL_WINDOW_BUDGET_LOGS;
   const { baseLogs, runs, probeEarlier, fetchRunLogs } = deps;
 
   // 不足一页 = 首屏已是全量历史（既有 hasEarlier 口径），无需自适应。
   if (baseLogs.length < pageSize) {
-    return { logs: baseLogs, extended: false };
+    return { logs: baseLogs, extended: false, cursorLog: null };
   }
 
   const baseByRun = groupByRun(baseLogs);
   const oldest = oldestOf(baseLogs);
-  if (oldest === null) return { logs: baseLogs, extended: false };
+  if (oldest === null) return { logs: baseLogs, extended: false, cursorLog: null };
 
   let extended = false;
   const runLogs = new Map<string, AgentRunLogEntry[]>();
   let mergedCount = baseLogs.length;
+  let truncatedFull: AgentRunLogEntry[] | null = null;
 
   // ── 1) 窗口起点轮是否被截断：probe 紧邻更早一行同 run 即判定 ────────────
   let truncatedRunId: string | null = null;
@@ -133,6 +156,7 @@ export async function buildInitialWindow(
         const merged = mergeRunLogs(full, baseByRun.get(truncatedRunId) ?? []);
         runLogs.set(truncatedRunId, merged);
         mergedCount = mergedCount - (baseByRun.get(truncatedRunId)?.length ?? 0) + merged.length;
+        truncatedFull = full;
         extended = true;
       }
     } catch {
@@ -140,17 +164,17 @@ export async function buildInitialWindow(
     }
   }
 
-  // ── 2) 轮数下限：从底窗起点轮向前补，直到满足 minTurns / 预算 / 截断 ────
+  // ── 2) 持续向前补更早轮，直到预算/单轮上限/到头 ────────────────────────
   const earlierRuns: AgentRunLogEntry[][] = [];
   const covered = new Set(baseByRun.keys());
-  if (runs !== null && runs.length > 0 && covered.size < minTurns) {
+  if (runs !== null && runs.length > 0) {
     const runsAsc = [...runs].sort(
       (a, b) =>
         a.created_at.localeCompare(b.created_at) || a.id.localeCompare(b.id),
     );
     const anchorIdx = runsAsc.findIndex((r) => r.id === oldest.run_id);
     if (anchorIdx > 0) {
-      for (let i = anchorIdx - 1; i >= 0 && covered.size < minTurns; i -= 1) {
+      for (let i = anchorIdx - 1; i >= 0; i -= 1) {
         const run = runsAsc[i]!;
         if (covered.has(run.id)) continue;
         let full: AgentRunLogEntry[];
@@ -179,5 +203,23 @@ export async function buildInitialWindow(
   for (const [runId, rows] of baseByRun) {
     ordered.push(...(runLogs.get(runId) ?? rows));
   }
-  return { logs: ordered, extended };
+
+  // ── 4) 翻页游标（评审 P2）：直达不完整时不得前移，否则中段缺口不可回补 ──
+  let cursorLog: AgentRunLogEntry | null = oldest;
+  if (truncatedFull !== null) {
+    const pageMax = maxTimestampOf(baseByRun.get(truncatedRunId!) ?? []);
+    const directMax = maxTimestampOf(truncatedFull);
+    const complete = pageMax === null || (directMax !== null && directMax >= pageMax);
+    if (!complete) {
+      // 直达 ASC 截断：保留底窗最旧行作游标，翻页可逐页回补中段（重复由去重吞掉）。
+      cursorLog = oldest;
+    } else if (earlierRuns.length > 0) {
+      cursorLog = earlierRuns[earlierRuns.length - 1]![0] ?? oldestOf(ordered);
+    } else {
+      cursorLog = oldestOf(ordered) ?? oldest;
+    }
+  } else if (earlierRuns.length > 0) {
+    cursorLog = earlierRuns[earlierRuns.length - 1]![0] ?? oldest;
+  }
+  return { logs: ordered, extended, cursorLog };
 }

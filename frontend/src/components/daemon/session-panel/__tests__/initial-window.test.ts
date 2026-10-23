@@ -82,6 +82,8 @@ describe("buildInitialWindow", () => {
     expect(fetchRunLogs).toHaveBeenCalledWith("r1");
     expect(result.logs).toHaveLength(full.length);
     expect(result.logs[0]?.channel).toBe("user_input");
+    // 直达完整（含底窗最新行）→ 游标前移到合并后最旧行（轮首 user_input）。
+    expect(result.cursorLog?.id).toBe("u-1");
   });
 
   it("多轮窗口起点截断 → 补全该轮并向前覆盖最近 2 轮（FR-01）", async () => {
@@ -144,6 +146,9 @@ describe("buildInitialWindow", () => {
     const ids = new Set(result.logs.map((l) => l.id));
     for (const line of base) expect(ids.has(line.id)).toBe(true);
     expect(result.logs.at(-1)?.id).toBe(base.at(-1)?.id);
+    // 评审 P2：直达 ASC 截断（directMax < 底窗最新）→ 游标必须保持底窗最旧行，
+    // 否则轮首与底窗之间的中段缺口经「加载更早」永久不可达。
+    expect(result.cursorLog?.id).toBe(base[0]?.id);
   });
 
   it("向前补更早轮触达单轮上限 → 停止且不采纳该轮（避免轮间留洞，FR-03）", async () => {
@@ -164,6 +169,30 @@ describe("buildInitialWindow", () => {
     expect(fetchRunLogs).toHaveBeenCalledWith("r1");
     expect(result.logs).toHaveLength(fullR2.length);
     expect(result.logs.every((l) => l.run_id === "r2")).toBe(true);
+  });
+
+  it("小会话总行数不超预算 → 持续向前补到全量（评审 P1：不做 2 轮即停）", async () => {
+    // 5 轮 × 150 行 = 750 行 ≤ 预算；底窗 400 行覆盖最新 3 轮的一部分。
+    const runIds = ["r1", "r2", "r3", "r4", "r5"];
+    const fullByRun = new Map(
+      runIds.map((id, idx) => [id, makeLogs(id, id, 7000 + idx * 200, 150)]),
+    );
+    // 底窗 = 最后 400 行（r3 尾部 + r4 + r5），升序。
+    const base = [...fullByRun.values()].flat().slice(-400);
+    const fetchRunLogs = vi.fn(async (runId: string) => fullByRun.get(runId) ?? []);
+    const result = await buildInitialWindow({
+      baseLogs: base,
+      runs: [...runIds].reverse().map((id) => makeRun(id, `2026-10-23T0${runIds.indexOf(id)}:00:00Z`)),
+      probeEarlier: vi.fn().mockResolvedValue([{ ...base[0]!, id: "probe" }]),
+      fetchRunLogs,
+    });
+
+    expect(result.extended).toBe(true);
+    expect(new Set(result.logs.map((l) => l.run_id))).toEqual(new Set(runIds));
+    expect(result.logs).toHaveLength(750);
+    // 全量后游标 = 最早轮首行（会话已到头）。
+    expect(result.cursorLog?.run_id).toBe("r1");
+    expect(result.cursorLog?.id).toBe("r1-0");
   });
 
   it("预算耗尽 → 停止向前补拉（常量口径）", async () => {

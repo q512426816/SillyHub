@@ -1286,6 +1286,7 @@ export function SessionPanelPage({
         const runsForWindow = (await runsPromise) ?? null;
         if (cancelled) return;
         let windowLogs = logs;
+        let windowCursor: AgentRunLogEntry | null = null;
         try {
           const adaptive = await buildInitialWindow({
             baseLogs: logs,
@@ -1296,6 +1297,9 @@ export function SessionPanelPage({
           });
           if (cancelled) return;
           windowLogs = adaptive.logs;
+          // 评审 P2：直达触达 2000 上限时 cursorLog 保持底窗最旧行（中段缺口
+          // 可经「加载更早」回补），完整时才前移到合并后最旧行。
+          windowCursor = adaptive.cursorLog;
         } catch {
           windowLogs = logs;
         }
@@ -1310,8 +1314,9 @@ export function SessionPanelPage({
         const oldestInit = windowLogs.length
           ? windowLogs.reduce((m, l) => (l.timestamp < m.timestamp ? l : m), windowLogs[0]!)
           : null;
-        historyCursorRef.current = oldestInit?.timestamp ?? null;
-        historyCursorIdRef.current = oldestInit?.id ?? null;
+        const cursorRow = windowCursor ?? oldestInit;
+        historyCursorRef.current = cursorRow?.timestamp ?? null;
+        historyCursorIdRef.current = cursorRow?.id ?? null;
         setHasEarlier(logs.length >= HISTORY_PAGE_SIZE);
         // 触顶补口：内容不满视口（无滚动条）时 scroll 事件永不触发——满页
         // 且初始内容撑不满一屏时自动续拉直至可滚动/到头（见 maybeAutoFill）。

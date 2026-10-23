@@ -34,7 +34,7 @@ Then 不发起额外 `{ runId }` 直达拉取，turns 与改动前一致
 
 ### FR-03: 直达拉取存在上限截断时按既有 okRuns 采纳闸降级，不静默丢窗口段最新内容
 
-- 窗口起点轮的直达结果**必须**与窗口行合并去重（直达 ASC 上限截断丢尾部时，窗口尾部行保留）；向前补拉更早轮时，直达行数触达单轮上限 2000 条（可能截断）**必须**停止向前并不采纳该轮，避免在轮间留下无法回补的洞；**禁止**用截断行集覆盖或替换窗口已加载行。
+- 窗口起点轮的直达结果**必须**与窗口行合并去重（直达 ASC 上限截断丢尾部时，窗口尾部行保留）；向前补拉更早轮时，直达行数触达单轮上限 2000 条（可能截断）**必须**停止向前并不采纳该轮，避免在轮间留下无法回补的洞；**禁止**用截断行集覆盖或替换窗口已加载行；窗口起点轮直达不完整（行集最大时间戳早于底窗中该轮最新行）时，翻页游标**必须**保持底窗最旧行，**禁止**前移到轮首，否则轮首与底窗之间的中段缺口经「加载更早」永久不可回补。
 
 #### 场景：直达截断安全降级
 
@@ -54,8 +54,12 @@ Then 全部通过且零类型错误
 
 ## 测试绑定（每条 FR 至少一行——`FR-NN: test/路径「用例名」`；空行/待填在 flow done 拒收）
 
-FR-01: frontend/src/app/(dashboard)/sessions/__tests__/page.test.tsx「单轮 546 条超窗口 → 首屏自适应全量，轮首用户消息可见」
-FR-01: frontend/src/app/(dashboard)/sessions/__tests__/page.test.tsx「多轮窗口起点截断 → 至少覆盖最近 2 轮完整」
-FR-02: frontend/src/app/(dashboard)/sessions/__tests__/page.test.tsx「窗口已覆盖最近 2 轮且未截断 → 不发起额外直达补拉」
-FR-03: frontend/src/app/(dashboard)/sessions/__tests__/page.test.tsx「直达触达 2000 上限 → 窗口行合并不丢、更早轮停止补拉」
+FR-01: frontend/src/app/(dashboard)/sessions/__tests__/page.test.tsx「首屏自适应：单轮日志超窗口 → 补全整轮，轮首用户消息进入首屏（FR-01）」
+FR-01: frontend/src/components/daemon/session-panel/__tests__/initial-window.test.ts「小会话总行数不超预算 → 持续向前补到全量（评审 P1：不做 2 轮即停）」
+FR-01: frontend/src/components/daemon/session-panel/__tests__/initial-window.test.ts「多轮窗口起点截断 → 补全该轮并向前覆盖最近 2 轮（FR-01）」
+FR-02: frontend/src/app/(dashboard)/sessions/__tests__/page.test.tsx「首屏自适应：窗口已覆盖 2 轮且起点轮完整 → 不发起单轮直达（FR-02）」
+FR-02: frontend/src/components/daemon/session-panel/__tests__/initial-window.test.ts「窗口已覆盖最近 2 轮且起点轮完整 → 不发起直达补拉（FR-02）」
+FR-03: frontend/src/components/daemon/session-panel/__tests__/initial-window.test.ts「直达触达 2000 上限 → 与窗口行合并去重，不丢窗口尾部（FR-03）」
+FR-03: frontend/src/components/daemon/session-panel/__tests__/initial-window.test.ts「向前补更早轮触达单轮上限 → 停止且不采纳该轮（避免轮间留洞，FR-03）」
+FR-03: frontend/src/app/(dashboard)/sessions/__tests__/page.test.tsx「满页（400 条）→ 触顶自动加载更早 prepend + 加载提示；到头后触顶不再请求」（hasEarlier 保持为真的既有翻页回归）
 FR-04: 不适用：汇总门，由上述用例与 tsc --noEmit 执行结果判定
