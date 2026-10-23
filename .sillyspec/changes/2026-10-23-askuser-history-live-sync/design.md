@@ -10,7 +10,7 @@ created_at: 2026-10-23T02:21:05.382Z
 
 根因：dialogHistory（驱动对话/进度内容流 AskUser 穿插渲染的数据源）只在 sessionId 变化的 effect 里 REST 拉一次，SSE 两个 permission 事件（onPermissionRequest ~1674 / onPermissionResolved ~1687）都只维护 pendingRequests——待答卡原先渲染在时间线内容流内，提问实时可见掩盖了历史不实时；2026-10-22-askuser-dock-inputbar 把卡迁到输入框位置后，内容流对提问/回答完全无实时回显（刷新页面才显示）。
 
-方案：在 page-helpers 新增共享工厂 `createDialogHistoryRefetch(sessionId, setDialogHistory, seqRef)`（返回带序号防护的重拉函数），两挂载点（session-panel-page / session-panel-dialog）在 onPermissionRequest 与 onPermissionResolved 回调里各调用一次重拉——提问到达时后端 dialogs 已落库 pending 项（fetchPendingDialogs 同源可证），resolved 时答案已写库（backend 落库后推事件），重拉即得权威数据。前端不手工把 SSE 事件转 SessionDialogRead（resolved 事件不含 answers，伪造会与后端不一致）；事件频率为问答级（人答），重拉开销可忽略。
+方案：在 page-helpers 新增共享函数 `refetchDialogHistory(sessionId, setDialogHistory, seqRef)`（带序号防护的重拉动作函数；评审 P3 收敛：原稿契约名 createDialogHistoryRefetch 系笔误，实态为直接执行型函数），两挂载点（session-panel-page / session-panel-dialog）在 onPermissionRequest 与 onPermissionResolved 回调里各调用一次重拉——提问到达时后端 dialogs 已落库 pending 项（fetchPendingDialogs 同源可证），resolved 时答案已写库（backend 落库后推事件），重拉即得权威数据。前端不手工把 SSE 事件转 SessionDialogRead（resolved 事件不含 answers，伪造会与后端不一致）；事件频率为问答级（人答），重拉开销可忽略。
 
 ## 接口契约
 
@@ -48,7 +48,8 @@ created_at: 2026-10-23T02:21:05.382Z
 
 | 操作 | 路径 | 说明 |
 | --- | --- | --- |
-| 修改 | frontend/src/components/daemon/session-panel/page-helpers.tsx | 新增 createDialogHistoryRefetch 共享 helper（seq 防乱序 + 静默降级） |
+| 修改 | frontend/src/components/daemon/session-panel/page-helpers.tsx | 新增 refetchDialogHistory 共享 helper（seq 防乱序 + 静默降级） |
 | 修改 | frontend/src/components/daemon/session-panel/session-panel-page.tsx | onPermissionRequest/onPermissionResolved 回调接重拉（seqRef 实例） |
 | 修改 | frontend/src/components/daemon/session-panel/session-panel-dialog.tsx | 同款接线（与 page 同构） |
-| 修改 | frontend/src/components/daemon/__tests__/session-panel-dialog.test.tsx | 新增 3 用例：request 到达重拉回显 / resolved 到达再拉更新 / 乱序防护旧响应丢弃 |
+| 修改 | frontend/src/components/daemon/__tests__/session-panel-dialog.test.tsx | 新增 2 用例：request 到达重拉回显 / resolved 到达再拉更新 |
+| 新增 | frontend/src/components/daemon/session-panel/__tests__/refetch-dialog-history.test.ts | 乱序防护/正常路径/失败降级单测（评审 P3 收敛：清单补列） |

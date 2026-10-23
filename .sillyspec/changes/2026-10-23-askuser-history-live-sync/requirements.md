@@ -67,5 +67,5 @@ created_at: 2026-10-23T02:21:05.382Z
 FR-01: frontend/src/components/daemon/__tests__/session-panel-dialog.test.tsx「permission_request 到达 → 重拉 dialogHistory，内容流实时出现提问记录」（新增用例）
 FR-02: frontend/src/components/daemon/__tests__/session-panel-dialog.test.tsx「permission_resolved 到达 → 再次重拉 dialogHistory，记录更新已答态」（新增用例）
 FR-03: 不适用：两挂载点共用同一共享 helper（page-helpers 导出），FR-01/02 用例经 helper 覆盖行为，page 挂载点与 dialog 挂载点接线同构由 tsc + 代码审查保证（helper 单点实现无分叉面）
-FR-04: frontend/src/components/daemon/__tests__/session-panel-dialog.test.tsx「重拉乱序防护：旧序号响应被丢弃」（新增用例）
+FR-04: frontend/src/components/daemon/session-panel/__tests__/refetch-dialog-history.test.ts「相邻两次拉取响应乱序 → 仅最新一次生效（旧序号响应被丢弃）」（评审 P3 收敛：原绑定行路径笔误）
 FR-05: frontend/src/components/daemon/__tests__/session-panel-dialog.test.tsx 既有套件回归 + tsc --noEmit（命令实测）
