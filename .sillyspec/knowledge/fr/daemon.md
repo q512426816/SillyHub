@@ -7101,3 +7101,86 @@
   confirmed_at: null
   source_change: 2026-10-22-conversation-live-marquee
   status: active
+
+## FR-daemon-249 排队消息等纯文本展示中的附件/工作区引用标记统一简化为简洁文件名标签，不再露出 uuid
+变更：2026-10-22-session-composer-slim
+状态：active
+摘要：排队消息含附件引用；复制用户消息
+全文：.sillyspec/changes/archive/2026-10-22-session-composer-slim/requirements.md#FR-01
+最近确认：4d6c17185a01e72e287a48f8a0b1f003dd5f63b6
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-22-session-composer-slim:flow:测试绑定FR-01
+  tests: frontend/src/components/daemon/__tests__/attachment-refs.test.ts「formatRefsForPlainText（展示层引用简化）」 | frontend/src/components/daemon/__tests__/message-queue-bar.test.tsx「引用标记在摘要与展开正文中简化为文件名」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-22-session-composer-slim
+  status: active
+
+## FR-daemon-250 配置条移除中断自动续跑开关与运行中提示，入口合并进输入框左侧 + 号菜单并可切换
+变更：2026-10-22-session-composer-slim
+状态：active
+摘要：在 + 菜单切换续跑；终态禁用
+全文：.sillyspec/changes/archive/2026-10-22-session-composer-slim/requirements.md#FR-02
+最近确认：4d6c17185a01e72e287a48f8a0b1f003dd5f63b6
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-22-session-composer-slim:flow:测试绑定FR-02
+  tests: frontend/src/components/daemon/__tests__/session-input-bar-plus-menu.test.tsx「autoResume 传入 → 菜单渲染勾选项；点击切换并保持菜单打开」 | frontend/src/components/sessions/__tests__/session-config-bar.test.tsx「配置条无续跑开关与运行中提示（即使旧调用方残留传参也不渲染）」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-22-session-composer-slim
+  status: active
+
+## FR-daemon-251 最右侧模型额度改为紧凑动态小图标，只显示最低剩余百分比，点击弹出完整明细
+变更：2026-10-22-session-composer-slim
+状态：active
+摘要：多供应商多窗口；低额度变色
+全文：.sillyspec/changes/archive/2026-10-22-session-composer-slim/requirements.md#FR-03
+最近确认：4d6c17185a01e72e287a48f8a0b1f003dd5f63b6
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-22-session-composer-slim:flow:测试绑定FR-03
+  tests: frontend/src/components/sessions/__tests__/ctx-usage-bar.test.tsx「智谱 quota 正常 → 图标只显会话供应商首窗口百分比；明细（模型名/各窗口/重置）在浮层」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-22-session-composer-slim
+  status: active
+
+## FR-daemon-252 桌面与移动端行为一致，附件预览/排队/发送等既有功能不回归
+变更：2026-10-22-session-composer-slim
+状态：active
+摘要：移动端
+全文：.sillyspec/changes/archive/2026-10-22-session-composer-slim/requirements.md#FR-04
+最近确认：4d6c17185a01e72e287a48f8a0b1f003dd5f63b6
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-22-session-composer-slim:flow:测试绑定FR-04
+  tests: frontend/src/components/daemon/__tests__/session-input-bar-plus-menu.test.tsx「autoResume.disabled（会话结束/离线）→ 禁用且点击不触发」 | frontend/src/components/sessions/__tests__/ctx-usage-bar.test.tsx「desktop（缺省 mobile=false）：与 mobile 同形态（图标 + 首窗口百分比），明细点击浮层」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-22-session-composer-slim
+  status: active
+
+## FR-daemon-253 相关单测与 lint 通过
+变更：2026-10-22-session-composer-slim
+状态：active
+摘要：交付核验
+全文：.sillyspec/changes/archive/2026-10-22-session-composer-slim/requirements.md#FR-05
+最近确认：4d6c17185a01e72e287a48f8a0b1f003dd5f63b6

@@ -62,3 +62,4 @@ created_at: 2026-08-29 22:56:30
 | 2026-10-22 | 2026-10-20-session-awaiting-answer-status | 左侧会话状态补充等待回答问号 |
 | 2026-10-22 | 2026-10-22-conversation-live-marquee | 会话页「对话」tab 运行中时只有一行状态条，用户感知不到 agent 正在真实执行；希望在该轮末尾… |
 | 2026-10-22 | 2026-10-22-agent-profiles-page-restyle | 智能体档案列表页重设计 |
+| 2026-10-23 | 2026-10-22-session-composer-slim | 会话页面底部输入区信息过载：排队消息与纯文本展示露出附件引用 uuid 长串，中断自动续跑是常驻开关… |

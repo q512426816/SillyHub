@@ -1,0 +1,22 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-22-session-composer-slim",
+  "reviewer": "subagent",
+  "verdict": "PASS",
+  "reviewedAgainst": "165f4211a0742992062e61d6b32b725708fa52f0",
+  "findings": [
+    {
+      "severity": "P3",
+      "title": "修复后函数 JSDoc / design 做法概述 / tasks 仍写「剥离附件标记行」，未反映已转为「📎 文件名」清单",
+      "evidence": "formatRefsForPlainText 已把头部标记转为附件清单（attachment-refs.ts:376-387，实现内注释 :377-379 已说明「不能直接丢弃」），但函数 JSDoc 仍称「剥离头部附件标记行」（:370），design.md:13 与 tasks.md:7 也只写剥离、未写转清单；属修复后的文档滞后，读者仍可能误以为附件名被丢弃。",
+      "location": "frontend/src/lib/attachment-refs.ts:370"
+    }
+  ],
+  "dimensionNotes": {
+    "乱序": "ok（边界已裁决：可接受——格式化为渲染期纯函数，附件清单按标记行原序拼接，非法/残缺片段回退原文不抛错）",
+    "并发": "ok（边界已裁决：可接受——无新增共享写面；续跑沿用既有单字段 PATCH，额度 in-flight 防重入+keep-last-good 未改）",
+    "切换": "ok（边界已裁决：可接受——移除的运行中提示已由供应商/模型/思考级别/档案四控件 title「运行中可切换，将于本轮结束后生效」承载，信息未丢）",
+    "作用域": "ok（边界已裁决：可接受——额度图标按 D-001 取当前会话供应商首窗口而非全供应商最低，requirements 行为句已注明该用户修订，测试绑定已指向真实用例名）"
+  },
+  "reviewedAt": "2026-10-23T01:05:51+08:00"
+}

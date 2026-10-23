@@ -1,0 +1,69 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-22-session-composer-slim",
+  "rows": [
+    {
+      "anchor": "FR-01",
+      "row_id": "2026-10-22-session-composer-slim:flow:测试绑定FR-01",
+      "tests": [
+        "frontend/src/components/daemon/__tests__/attachment-refs.test.ts「formatRefsForPlainText（展示层引用简化）」",
+        "frontend/src/components/daemon/__tests__/message-queue-bar.test.tsx「引用标记在摘要与展开正文中简化为文件名」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-22-session-composer-slim"
+    },
+    {
+      "anchor": "FR-02",
+      "row_id": "2026-10-22-session-composer-slim:flow:测试绑定FR-02",
+      "tests": [
+        "frontend/src/components/daemon/__tests__/session-input-bar-plus-menu.test.tsx「autoResume 传入 → 菜单渲染勾选项；点击切换并保持菜单打开」",
+        "frontend/src/components/sessions/__tests__/session-config-bar.test.tsx「配置条无续跑开关与运行中提示（即使旧调用方残留传参也不渲染）」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-22-session-composer-slim"
+    },
+    {
+      "anchor": "FR-03",
+      "row_id": "2026-10-22-session-composer-slim:flow:测试绑定FR-03",
+      "tests": [
+        "frontend/src/components/sessions/__tests__/ctx-usage-bar.test.tsx「智谱 quota 正常 → 图标只显会话供应商首窗口百分比；明细（模型名/各窗口/重置）在浮层」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-22-session-composer-slim"
+    },
+    {
+      "anchor": "FR-04",
+      "row_id": "2026-10-22-session-composer-slim:flow:测试绑定FR-04",
+      "tests": [
+        "frontend/src/components/daemon/__tests__/session-input-bar-plus-menu.test.tsx「autoResume.disabled（会话结束/离线）→ 禁用且点击不触发」",
+        "frontend/src/components/sessions/__tests__/ctx-usage-bar.test.tsx「desktop（缺省 mobile=false）：与 mobile 同形态（图标 + 首窗口百分比），明细点击浮层」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-22-session-composer-slim"
+    }
+  ]
+}

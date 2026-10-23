@@ -1,0 +1,3640 @@
+diff --git a/.sillyspec/docs/SillyHub/modules/daemon.changelog.md b/.sillyspec/docs/SillyHub/modules/daemon.changelog.md
+index 6713e5e8c..52bbf7d02 100644
+--- a/.sillyspec/docs/SillyHub/modules/daemon.changelog.md
++++ b/.sillyspec/docs/SillyHub/modules/daemon.changelog.md
+@@ -79,3 +79,7 @@ created_at: 2026-08-27 14:32:24
+ - 2026-10-22-merge-test-debt | 合并后测试债清偿：l10n文案与守卫钉子同步
+ - 2026-10-22-merge-regression-fixes | 合并回归债收口：grants 闭包与 lease 双流断言
+ - 2026-10-22-file-changes-card-fix | 文件变更卡采集与展示修复
++- 2026-10-22-sillyspec-probe-db-missing-evict | 已删工作区探针自动淘汰与诊断增强
++- 2026-10-20-session-awaiting-answer-status | 左侧会话状态补充等待回答问号
++- 2026-10-22-conversation-live-marquee | 会话页「对话」tab 运行中时只有一行状态条，用户感知不到 agent 正在真实执行；希望在该轮末尾…
++- 2026-10-22-agent-profiles-page-restyle | 智能体档案列表页重设计
+diff --git a/.sillyspec/docs/SillyHub/modules/frontend_app.changelog.md b/.sillyspec/docs/SillyHub/modules/frontend_app.changelog.md
+index 17ff1a2ef..0cfbc30da 100644
+--- a/.sillyspec/docs/SillyHub/modules/frontend_app.changelog.md
++++ b/.sillyspec/docs/SillyHub/modules/frontend_app.changelog.md
+@@ -37,3 +37,7 @@ created_at: 2026-09-03 14:49:48
+ - 2026-10-21-mobile-scan-birth-cleanup | 移动端与变更中心scan起步口径清零
+ - 2026-10-22-review-risk-fixes | 审查修复：原型路由防线与监听泄漏
+ - 2026-10-22-file-changes-card-fix | 文件变更卡采集与展示修复
++- 2026-10-22-sillyspec-probe-db-missing-evict | 已删工作区探针自动淘汰与诊断增强
++- 2026-10-20-session-awaiting-answer-status | 左侧会话状态补充等待回答问号
++- 2026-10-22-conversation-live-marquee | 会话页「对话」tab 运行中时只有一行状态条，用户感知不到 agent 正在真实执行；希望在该轮末尾…
++- 2026-10-22-agent-profiles-page-restyle | 智能体档案列表页重设计
+diff --git a/.sillyspec/docs/SillyHub/modules/frontend_components.changelog.md b/.sillyspec/docs/SillyHub/modules/frontend_components.changelog.md
+index f958142bb..5ab2a66ae 100644
+--- a/.sillyspec/docs/SillyHub/modules/frontend_components.changelog.md
++++ b/.sillyspec/docs/SillyHub/modules/frontend_components.changelog.md
+@@ -121,3 +121,7 @@ created_at: 2026-08-30 22:23:33
+ | 2026-10-22 | 2026-10-22-turn-trigger-metadata-p2 | 轮触发溯源 Phase 2：定时消息接入与 metadata 戳驱动 |
+ | 2026-10-22 | 2026-10-22-trajectory-view-redesign | 2026-10-22-trajectory-view-redesign |
+ | 2026-10-22 | 2026-10-22-file-changes-card-fix | 文件变更卡采集与展示修复 |
++| 2026-10-22 | 2026-10-22-sillyspec-probe-db-missing-evict | 已删工作区探针自动淘汰与诊断增强 |
++| 2026-10-22 | 2026-10-20-session-awaiting-answer-status | 左侧会话状态补充等待回答问号 |
++| 2026-10-22 | 2026-10-22-conversation-live-marquee | 会话页「对话」tab 运行中时只有一行状态条，用户感知不到 agent 正在真实执行；希望在该轮末尾… |
++| 2026-10-22 | 2026-10-22-agent-profiles-page-restyle | 智能体档案列表页重设计 |
+diff --git a/.sillyspec/docs/SillyHub/modules/frontend_lib.changelog.md b/.sillyspec/docs/SillyHub/modules/frontend_lib.changelog.md
+index 95bf4fe7b..c26d86797 100644
+--- a/.sillyspec/docs/SillyHub/modules/frontend_lib.changelog.md
++++ b/.sillyspec/docs/SillyHub/modules/frontend_lib.changelog.md
+@@ -26,3 +26,8 @@ created_at: 2026-10-16 16:40:00
+ - 2026-10-22-fix-translate-pending | 生产 /api/translate/thinking 请求长时间 pending：容器未配置 TRA…
+ - 2026-10-22-session-trajectory-third-view | 把会话轨迹从「进度」视图内的第二层呈现开关上移为与「对话 / 进度」并列的第三个顶层视图，同时修复轨…
+ - 2026-10-22-turn-trigger-metadata-p2 | 轮触发溯源 Phase 2：定时消息接入与 metadata 戳驱动
++- 2026-10-22-sillyspec-probe-db-missing-evict | 已删工作区探针自动淘汰与诊断增强
++- 2026-10-20-session-awaiting-answer-status | 左侧会话状态补充等待回答问号
++- 2026-10-22-conversation-live-marquee | 会话页「对话」tab 运行中时只有一行状态条，用户感知不到 agent 正在真实执行；希望在该轮末尾…
++- 2026-10-22-agent-profiles-page-restyle | 智能体档案列表页重设计
++- 2026-10-23-translate-budget-align | 修复翻译超时预算矛盾与缓存回填乱序
+diff --git a/.sillyspec/docs/backend/modules/daemon.changelog.md b/.sillyspec/docs/backend/modules/daemon.changelog.md
+index 7a9e9b10e..33c624baf 100644
+--- a/.sillyspec/docs/backend/modules/daemon.changelog.md
++++ b/.sillyspec/docs/backend/modules/daemon.changelog.md
+@@ -58,3 +58,7 @@ created_at: 2026-08-29 22:56:30
+ | 2026-10-21 | 2026-10-21-session-git-branch | 会话组件底部动态显示当前所在 git 分支 |
+ | 2026-10-22 | 2026-10-22-turn-trigger-metadata-p2 | 轮触发溯源 Phase 2：定时消息接入与 metadata 戳驱动 |
+ | 2026-10-22 | 2026-10-22-merge-regression-fixes | 合并回归债收口：grants 闭包与 lease 双流断言 |
++| 2026-10-22 | 2026-10-22-sillyspec-probe-db-missing-evict | 已删工作区探针自动淘汰与诊断增强 |
++| 2026-10-22 | 2026-10-20-session-awaiting-answer-status | 左侧会话状态补充等待回答问号 |
++| 2026-10-22 | 2026-10-22-conversation-live-marquee | 会话页「对话」tab 运行中时只有一行状态条，用户感知不到 agent 正在真实执行；希望在该轮末尾… |
++| 2026-10-22 | 2026-10-22-agent-profiles-page-restyle | 智能体档案列表页重设计 |
+diff --git a/.sillyspec/docs/backend/modules/platform_sync.changelog.md b/.sillyspec/docs/backend/modules/platform_sync.changelog.md
+index 1328e94b9..c360ec8e8 100644
+--- a/.sillyspec/docs/backend/modules/platform_sync.changelog.md
++++ b/.sillyspec/docs/backend/modules/platform_sync.changelog.md
+@@ -21,3 +21,4 @@ created_at: 2026-08-29 22:56:30
+ - 2026-10-13-turn-live-visibility | 会话运行中用户感知不到 agent 真实状态：TaskOutput 阻塞等待后台任务时时间线只显示原始 JSON 且静默
+ - 2026-10-16-change-title-condense-backfill | 变更中心标题提炼与存量回填
+ - 2026-10-21-spec-manifest-incremental | spec-manifest 增量游标同步
++- 2026-10-22-agent-profiles-page-restyle | 智能体档案列表页重设计
+diff --git a/.sillyspec/docs/frontend/modules/components-sessions.md b/.sillyspec/docs/frontend/modules/components-sessions.md
+index c83461522..1cb213d83 100644
+--- a/.sillyspec/docs/frontend/modules/components-sessions.md
++++ b/.sillyspec/docs/frontend/modules/components-sessions.md
+@@ -21,6 +21,7 @@ updated_at: 2026-09-16 09:45:00
+ 组件自治约定：只收 props / 只调本域接口，不做 SSE 订阅与页面路由——组装归 `app-sessions-pages` 的 SessionPanel 页面（task-10）。
+ 
+ ## 契约摘要
++- 会话底部信息降噪（2026-10-22-session-composer-slim）：中断自动续跑开关从 `SessionConfigBar` 移除（连同「运行中切换将于本轮结束后生效」提示行），入口迁入 `SessionInputBar.autoResume` 的 + 菜单项（`menuitemcheckbox`，点击切换不关菜单）；排队消息、定时消息与复制结果等纯文本展示统一经 `lib/attachment-refs.formatRefsForPlainText` 简化为 📎/📄/📁/🧾 + 名称，发送正文协议不变。`parseAttachmentMarkers` 同步迁入 `lib/attachment-refs.ts`（`runtime-session-helpers` re-export 保持兼容）。
+ - session-config-bar（2026-08-28-daemon-agent-share）：机器候选切融合列表（共享条目
+   「共享·共享人」Tag）、档案下拉共享智能体「共享」标识；useActiveSharedAgents 复用
+   lib/daemon.ts fetchSharedAgentsActive。
+@@ -51,7 +52,7 @@ updated_at: 2026-09-16 09:45:00
+   - 导出 `buildDefaultSwitchPrompt(p)`（默认切换轮提示文案）、`SWITCH_NO_PROVIDER_VALUE`、类型 `SessionConfigCtrlKind`（machine/agent/provider/profile）/ `SessionConfigSwitchField`（agent_profile_id/llm_provider_id）。
+ - `ctx-usage-bar.tsx`（FR-08 / D-009 / D-014，输入框上方一行组件）：
+   - `CtxUsageRing`：环形上下文用量（props 含 usedTokens——父层 SSE turn usage + attach 历史 logs 累计后传入，本组件不累计）。
+-  - `QuotaPill({ providerId })`：供应商额度胶囊，自调 `getProviderQuota` 显示额度+重置时间（`formatQuotaResetTime` 导出）。
++  - `QuotaPill({ providerId, mobile? })`：额度紧凑图标（2026-10-22-session-composer-slim FR-03 / D-001）——面上只显示「Gauge 图标 + 当前会话供应商首窗口百分比」（纯余额类显示金额），低量按 ≤50% 黄 / ≤20% 红着色；模型名、各窗口、重置时间、「等 N 家」收进点击 Popover 明细与 title。自调 `getProviderQuota`，5 分钟轮询 / 悬浮 2 秒刷新 / keep-last-good 语义不变（`formatQuotaResetTime` 导出）。
+   - `CtxUsageBar`：Ring+Pill 组合条。
+   - 分母三级降级链 `resolveCtxWindowTokens(roleMapping, fallbackModel)`（D-014）：
+     - 供应商 role mapping 勾选 1M（one_m=true，injector 模型名后缀 [1m]）→ 1_000_000。
+diff --git a/.sillyspec/docs/multi-agent-platform/modules/backend.changelog.md b/.sillyspec/docs/multi-agent-platform/modules/backend.changelog.md
+index e2cb80d75..f503d4539 100644
+--- a/.sillyspec/docs/multi-agent-platform/modules/backend.changelog.md
++++ b/.sillyspec/docs/multi-agent-platform/modules/backend.changelog.md
+@@ -89,3 +89,8 @@
+ - 2026-10-22-merge-test-debt | 合并后测试债清偿：l10n文案与守卫钉子同步
+ - 2026-10-22-merge-regression-fixes | 合并回归债收口：grants 闭包与 lease 双流断言
+ - 2026-10-22-change-delete-session-history-fix | 变更删除不再级联删会话轮次并恢复丢失轮次
++- 2026-10-22-sillyspec-probe-db-missing-evict | 已删工作区探针自动淘汰与诊断增强
++- 2026-10-20-session-awaiting-answer-status | 左侧会话状态补充等待回答问号
++- 2026-10-22-conversation-live-marquee | 会话页「对话」tab 运行中时只有一行状态条，用户感知不到 agent 正在真实执行；希望在该轮末尾…
++- 2026-10-22-agent-profiles-page-restyle | 智能体档案列表页重设计
++- 2026-10-23-translate-budget-align | 修复翻译超时预算矛盾与缓存回填乱序
+diff --git a/.sillyspec/docs/multi-agent-platform/modules/deploy.md b/.sillyspec/docs/multi-agent-platform/modules/deploy.md
+index 29e17b224..f315afd66 100644
+--- a/.sillyspec/docs/multi-agent-platform/modules/deploy.md
++++ b/.sillyspec/docs/multi-agent-platform/modules/deploy.md
+@@ -61,3 +61,4 @@ multi-agent-platform 的一体化部署编排组件，用 Docker Compose 把 bac
+ - 2026-10-22-daemon-snapshot-report-log | daemon 快照上报补收口日志
+ - 2026-10-22-fix-translate-pending | 生产 /api/translate/thinking 请求长时间 pending：容器未配置 TRA…
+ - 2026-10-22-session-trajectory-third-view | 把会话轨迹从「进度」视图内的第二层呈现开关上移为与「对话 / 进度」并列的第三个顶层视图，同时修复轨…
++- 2026-10-22-agent-profiles-page-restyle | 智能体档案列表页重设计
+diff --git a/.sillyspec/docs/multi-agent-platform/modules/docs.changelog.md b/.sillyspec/docs/multi-agent-platform/modules/docs.changelog.md
+index e105fd271..c8cf63910 100644
+--- a/.sillyspec/docs/multi-agent-platform/modules/docs.changelog.md
++++ b/.sillyspec/docs/multi-agent-platform/modules/docs.changelog.md
+@@ -21,3 +21,4 @@
+ - 2026-10-20-preset-engine-endpoint | 新建供应商点「OpenCode Go」预设自动填 https://opencode.ai/zen/g…
+ - 2026-10-22-daemon-snapshot-report-log | daemon 快照上报补收口日志
+ - 2026-10-22-change-delete-session-history-fix | 变更删除不再级联删会话轮次并恢复丢失轮次
++- 2026-10-22-agent-profiles-page-restyle | 智能体档案列表页重设计
+diff --git a/.sillyspec/docs/multi-agent-platform/modules/frontend.changelog.md b/.sillyspec/docs/multi-agent-platform/modules/frontend.changelog.md
+index 7809e0f5b..2b7d9412b 100644
+--- a/.sillyspec/docs/multi-agent-platform/modules/frontend.changelog.md
++++ b/.sillyspec/docs/multi-agent-platform/modules/frontend.changelog.md
+@@ -168,3 +168,8 @@
+ | 2026-10-22 | 2026-10-22-turn-trigger-metadata-p2 | 轮触发溯源 Phase 2：定时消息接入与 metadata 戳驱动 |
+ | 2026-10-22 | 2026-10-22-trajectory-view-redesign | 2026-10-22-trajectory-view-redesign |
+ | 2026-10-22 | 2026-10-22-file-changes-card-fix | 文件变更卡采集与展示修复 |
++| 2026-10-22 | 2026-10-22-sillyspec-probe-db-missing-evict | 已删工作区探针自动淘汰与诊断增强 |
++| 2026-10-22 | 2026-10-20-session-awaiting-answer-status | 左侧会话状态补充等待回答问号 |
++| 2026-10-22 | 2026-10-22-conversation-live-marquee | 会话页「对话」tab 运行中时只有一行状态条，用户感知不到 agent 正在真实执行；希望在该轮末尾… |
++| 2026-10-22 | 2026-10-22-agent-profiles-page-restyle | 智能体档案列表页重设计 |
++| 2026-10-22 | 2026-10-23-translate-budget-align | 修复翻译超时预算矛盾与缓存回填乱序 |
+diff --git a/.sillyspec/docs/multi-agent-platform/modules/sillyhub-daemon.changelog.md b/.sillyspec/docs/multi-agent-platform/modules/sillyhub-daemon.changelog.md
+index 0925cc417..b38727b17 100644
+--- a/.sillyspec/docs/multi-agent-platform/modules/sillyhub-daemon.changelog.md
++++ b/.sillyspec/docs/multi-agent-platform/modules/sillyhub-daemon.changelog.md
+@@ -31,3 +31,5 @@
+ - 2026-10-22-daemon-snapshot-report-log | daemon 快照上报补收口日志
+ - 2026-10-22-merge-test-debt | 合并后测试债清偿：l10n文案与守卫钉子同步
+ - 2026-10-22-file-changes-card-fix | 文件变更卡采集与展示修复
++- 2026-10-22-sillyspec-probe-db-missing-evict | 已删工作区探针自动淘汰与诊断增强
++- 2026-10-22-agent-profiles-page-restyle | 智能体档案列表页重设计
+diff --git a/.sillyspec/docs/sillyhub-daemon/modules/sillyspec-manager.md b/.sillyspec/docs/sillyhub-daemon/modules/sillyspec-manager.md
+index 0cca5b85f..5ce1d4bba 100644
+--- a/.sillyspec/docs/sillyhub-daemon/modules/sillyspec-manager.md
++++ b/.sillyspec/docs/sillyhub-daemon/modules/sillyspec-manager.md
+@@ -56,3 +56,20 @@ _runUpgrade: 置 running(同步先于任何 await，in-flight 门依赖) → ins
+   跑的 sillyspec 命令（ghostCleanup 含平台同步收敛）同样获得熔断预算放宽，
+   process.env 预设时原值优先。该函数已导出供测试真实 spawn 直测（`node -e`
+   打印环境变量断言），属 harness 零 spawn 策略的例外块。
++
++## 2026-10-22-sillyspec-probe-db-missing-evict 增量（db_missing 连败淘汰 + 诊断增强）
++
++- 背景：平台已删除的工作区根仍持久化在 `sillyspec-status-roots.json` 被反复探测；
++  项目未初始化进度库时 `progress show --json` 恒 exit 2（envelope `codes=['db_missing']`，
++  EXIT_UNKNOWN=「无法核验」），daemon 记瞬态失败进 backoff——纯噪音。
++- `_collectOneTarget` 非零退出时解析 stdout envelope 的 `codes`（`parseProgressEnvelopeCodes`，
++  CLI 契约保证失败时 stdout 恒为合法 JSON）：含 `db_missing` 视为项目侧永久缺库——
++  按 cwd 计连败（`sillyspec_status_db_missing` warn），连续 3 次（`STATUS_DB_MISSING_EVICT_AFTER`）
++  淘汰：cwd 进进程内 skip 表、清 `sillyspec_status_map` 槽位、经新依赖回调
++  `statusRootEvict(workspaceId, rootPath)` 通知 daemon 删 `_sillyspecStatusRoots` 条目并
++  持久化 roots 文件（重启不复活；工作区重新 claim 时 `_noteSillySpecStatusRoot` 重新注册即恢复采集）。
++  淘汰路径**不计瞬态失败**（对齐跨仓子目录跳过语义）；非 db_missing 的非零退出保持既有
++  `nonzero_exit` 记账，日志新增 `stdout_head`（首行 ≤200 字符）便于诊断。
++- 采集成功清 db_missing 连败计数；workspaceId=null（legacy 单槽位）只做 cwd 级跳过。
++- 测试面：`tests/sillyspec-manager.test.ts`「db_missing 连败淘汰」describe（淘汰时序/
++  未知退出记账/成功重置计数）。
+diff --git a/backend/app/modules/daemon/router/session_crud.py b/backend/app/modules/daemon/router/session_crud.py
+index 5b3ebdf5d..0ab5f2f69 100644
+--- a/backend/app/modules/daemon/router/session_crud.py
++++ b/backend/app/modules/daemon/router/session_crud.py
+@@ -305,6 +305,46 @@ async def list_sessions(
+         run_status_map: dict[uuid.UUID, str] = {row[0]: row[1] for row in active_rows}
+         for r in reads:
+             r.current_run_status = run_status_map.get(r.id)
++    # 2026-10-20-session-awaiting-answer-status：批量注入等待用户回答的对话请求
++    # 种类（照上方 current_run_status 的 IN 批查注入先例，零 N+1）。数据源
++    # session_dialog_requests status='pending'——模型注释明示普通 canUseTool
++    # 审批不落行、落行的都是"may wait indefinitely for a human answer"的用户
++    # 对话题；窗口函数取每会话 created_at 最新一条（连续提问时显示最新）。
++    # 前端行首状态槽据此显示问号「等待你回答」（压过 run running 转圈）；
++    # 无 pending 对话的会话保持 None（零回归）。
++    if items:
++        from app.modules.daemon.model import SessionDialogRequest
++
++        dialog_rn = (
++            sa_func.row_number()
++            .over(
++                partition_by=SessionDialogRequest.session_id,
++                order_by=SessionDialogRequest.created_at.desc(),
++            )
++            .label("rn")
++        )
++        dialog_subq = (
++            sa_select(
++                SessionDialogRequest.session_id.label("session_id"),
++                SessionDialogRequest.dialog_kind.label("dialog_kind"),
++                dialog_rn,
++            )
++            .where(
++                SessionDialogRequest.session_id.in_([item.id for item in items]),
++                SessionDialogRequest.status == "pending",
++            )
++            .subquery()
++        )
++        dialog_rows = (
++            await session.execute(
++                sa_select(dialog_subq.c.session_id, dialog_subq.c.dialog_kind).where(
++                    dialog_subq.c.rn == 1
++                )
++            )
++        ).all()
++        dialog_kind_map: dict[uuid.UUID, str | None] = {row[0]: row[1] for row in dialog_rows}
++        for r in reads:
++            r.pending_dialog_kind = dialog_kind_map.get(r.id)
+     # task-13 / FR-04 / design §5 Phase4：批量查 lease.terminating_at 注入到每个 read。
+     # 经 session.lease_id 关联 DaemonTaskLease；只查本页 lease_id 非空子集（IN 避免 N+1）。
+     # lease.terminating_at 为空 / session 无 lease → read.terminating_at 保持 None（brownfield）。
+diff --git a/backend/app/modules/daemon/schema.py b/backend/app/modules/daemon/schema.py
+index 106b99e7d..e12491760 100644
+--- a/backend/app/modules/daemon/schema.py
++++ b/backend/app/modules/daemon/schema.py
+@@ -69,6 +69,13 @@ class AgentSessionRead(BaseModel):
+     # 兜底（本地 CLI 会话基线）。值域 = AgentRun.status 词表子集（ACTIVE_RUN_
+     # STATUSES：pending/running/pending_approval）。
+     current_run_status: str | None = None
++    # 2026-10-20-session-awaiting-answer-status：等待用户回答的对话请求种类
++    # （非 ORM 字段，router 批量查 session_dialog_requests status='pending' 注入；
++    # 窗口函数取每会话 created_at 最新一条）。值域 = dialog_kind 词表
++    # （AskUserQuestion / plan_approval / codex_request_user_input /
++    # mcp_elicitation / pi_extension_ui）；None = 无 pending 对话（普通 canUseTool
++    # 审批不落行，本字段零含义）。前端行首状态槽据此显示问号「等待你回答」。
++    pending_dialog_kind: str | None = None
+     # 2026-08-05-daemon-kill-channel-unify task-13 / FR-04 / design §5 Phase4：
+     # lease 处于 terminating 态的时间戳（cancel_lease 写入、daemon 回传统态后清空）。
+     # 非 ORM 字段——AgentSession 本身没有该列，由 router 经 session.lease_id 关联
+diff --git a/backend/app/modules/daemon/tests/test_sessions_list_pending_dialog.py b/backend/app/modules/daemon/tests/test_sessions_list_pending_dialog.py
+new file mode 100644
+index 000000000..c063fc7d0
+--- /dev/null
++++ b/backend/app/modules/daemon/tests/test_sessions_list_pending_dialog.py
+@@ -0,0 +1,261 @@
++"""2026-10-20-session-awaiting-answer-status ``GET /sessions`` pending_dialog_kind 注入单测.
++
++覆盖（用户需求：等待用户回答时左侧状态显示问号）：
++
++- 有 status='pending' 的 SessionDialogRequest → 列表项 ``pending_dialog_kind``
++  返回该 dialog_kind（窗口函数取每会话 created_at 最新一条）。
++- answered/cancelled 行不注入（回答后问号消失）。
++- 无对话行 / 无 run 的会话 → None（brownfield 不崩）。
++- 每会话仅取最新 pending 行（连续提问取最新）。
++- 批查零 N+1：多会话场景下 session_dialog_requests 只发一条 SELECT。
++- OpenAPI schema 反映 pending_dialog_kind 新字段（gen:types 消费面）。
++
++夹具范式镜像 ``test_sessions_list_run_status.py``（in-memory SQLite + httpx
++client；SessionDialogRequest.run_id 非空 FK，故每会话建一条 run 行）。
++"""
++
++from __future__ import annotations
++
++import uuid
++from datetime import UTC, datetime, timedelta
++
++from httpx import AsyncClient
++from sqlalchemy import select
++from sqlalchemy.ext.asyncio import AsyncSession
++
++from app.modules.agent.model import AgentRun, AgentSession
++from app.modules.auth.model import User
++from app.modules.daemon.model import SessionDialogRequest
++
++# ── Helpers（范式照抄 test_sessions_list_run_status.py）──────────────────────
++
++
++async def _get_admin(db_session: AsyncSession) -> User:
++    admin = (
++        (await db_session.execute(select(User).where(User.email == "admin@example.com")))
++        .scalars()
++        .first()
++    )
++    assert admin is not None
++    return admin
++
++
++async def _make_session(
++    session: AsyncSession,
++    user_id: uuid.UUID,
++    *,
++    status: str = "active",
++) -> AgentSession:
++    now = datetime.now(UTC)
++    sess = AgentSession(
++        id=uuid.uuid4(),
++        user_id=user_id,
++        runtime_id=None,
++        lease_id=None,
++        provider="claude",
++        status=status,
++        agent_session_id=None,
++        turn_count=1,
++        created_at=now,
++        last_active_at=now,
++    )
++    session.add(sess)
++    await session.commit()
++    return sess
++
++
++async def _make_run(
++    session: AsyncSession,
++    agent_session_id: uuid.UUID,
++    *,
++    status: str = "running",
++) -> AgentRun:
++    run = AgentRun(
++        id=uuid.uuid4(),
++        agent_session_id=agent_session_id,
++        agent_type="claude_code",
++        status=status,
++        created_at=datetime.now(UTC),
++    )
++    session.add(run)
++    await session.commit()
++    return run
++
++
++async def _make_dialog(
++    session: AsyncSession,
++    *,
++    agent_session_id: uuid.UUID,
++    run_id: uuid.UUID,
++    dialog_kind: str | None = "AskUserQuestion",
++    status: str = "pending",
++    created_at: datetime | None = None,
++) -> SessionDialogRequest:
++    row = SessionDialogRequest(
++        id=uuid.uuid4(),
++        session_id=agent_session_id,
++        run_id=run_id,
++        request_id=f"req-{uuid.uuid4().hex[:12]}",
++        tool_name=dialog_kind or "Bash",
++        dialog_kind=dialog_kind,
++        status=status,
++        created_at=created_at or datetime.now(UTC),
++    )
++    session.add(row)
++    await session.commit()
++    return row
++
++
++# ── pending_dialog_kind 注入 ────────────────────────────────────────────────
++
++
++class TestPendingDialogKind:
++    async def test_pending_dialog_injected(
++        self,
++        client: AsyncClient,
++        auth_headers: dict[str, str],
++        db_session: AsyncSession,
++    ) -> None:
++        """pending AskUserQuestion 对话 → pending_dialog_kind='AskUserQuestion'。"""
++        admin = await _get_admin(db_session)
++        s = await _make_session(db_session, admin.id)
++        run = await _make_run(db_session, s.id)
++        await _make_dialog(db_session, agent_session_id=s.id, run_id=run.id)
++
++        resp = await client.get("/api/daemon/sessions", headers=auth_headers)
++        assert resp.status_code == 200, resp.text
++        item = next(it for it in resp.json()["items"] if it["id"] == str(s.id))
++        assert item["pending_dialog_kind"] == "AskUserQuestion"
++
++    async def test_answered_dialog_not_injected(
++        self,
++        client: AsyncClient,
++        auth_headers: dict[str, str],
++        db_session: AsyncSession,
++    ) -> None:
++        """answered 行不注入（回答后问号消失）。"""
++        admin = await _get_admin(db_session)
++        s = await _make_session(db_session, admin.id)
++        run = await _make_run(db_session, s.id)
++        await _make_dialog(
++            db_session,
++            agent_session_id=s.id,
++            run_id=run.id,
++            status="answered",
++        )
++
++        resp = await client.get("/api/daemon/sessions", headers=auth_headers)
++        assert resp.status_code == 200, resp.text
++        item = next(it for it in resp.json()["items"] if it["id"] == str(s.id))
++        assert item["pending_dialog_kind"] is None
++
++    async def test_session_without_dialog_yields_null(
++        self,
++        client: AsyncClient,
++        auth_headers: dict[str, str],
++        db_session: AsyncSession,
++    ) -> None:
++        """无对话行（本地 CLI 会话 / 普通审批不落行）→ None，列表不崩。"""
++        admin = await _get_admin(db_session)
++        s = await _make_session(db_session, admin.id)
++
++        resp = await client.get("/api/daemon/sessions", headers=auth_headers)
++        assert resp.status_code == 200, resp.text
++        item = next(it for it in resp.json()["items"] if it["id"] == str(s.id))
++        assert item["pending_dialog_kind"] is None
++
++    async def test_latest_pending_dialog_wins(
++        self,
++        client: AsyncClient,
++        auth_headers: dict[str, str],
++        db_session: AsyncSession,
++    ) -> None:
++        """连续提问两条 pending → 取 created_at 最新一条的 kind（窗口函数排序语义）。"""
++        admin = await _get_admin(db_session)
++        s = await _make_session(db_session, admin.id)
++        run = await _make_run(db_session, s.id)
++        base = datetime.now(UTC)
++        await _make_dialog(
++            db_session,
++            agent_session_id=s.id,
++            run_id=run.id,
++            dialog_kind="plan_approval",
++            created_at=base - timedelta(minutes=5),
++        )
++        await _make_dialog(
++            db_session,
++            agent_session_id=s.id,
++            run_id=run.id,
++            dialog_kind="AskUserQuestion",
++            created_at=base,
++        )
++
++        resp = await client.get("/api/daemon/sessions", headers=auth_headers)
++        assert resp.status_code == 200, resp.text
++        item = next(it for it in resp.json()["items"] if it["id"] == str(s.id))
++        assert item["pending_dialog_kind"] == "AskUserQuestion"
++
++    async def test_other_session_dialog_not_leaked(
++        self,
++        client: AsyncClient,
++        auth_headers: dict[str, str],
++        db_session: AsyncSession,
++    ) -> None:
++        """别的会话的 pending 对话不串到本会话（IN 限定本页 id 集合）。"""
++        admin = await _get_admin(db_session)
++        s1 = await _make_session(db_session, admin.id)
++        s2 = await _make_session(db_session, admin.id)
++        run2 = await _make_run(db_session, s2.id)
++        await _make_dialog(db_session, agent_session_id=s2.id, run_id=run2.id)
++
++        resp = await client.get("/api/daemon/sessions", headers=auth_headers)
++        assert resp.status_code == 200, resp.text
++        items = {it["id"]: it for it in resp.json()["items"]}
++        assert items[str(s1.id)]["pending_dialog_kind"] is None
++        assert items[str(s2.id)]["pending_dialog_kind"] == "AskUserQuestion"
++
++    async def test_dialog_query_batched_single_select(
++        self,
++        client: AsyncClient,
++        auth_headers: dict[str, str],
++        db_session: AsyncSession,
++        db_engine,
++    ) -> None:
++        """批查零 N+1：3 个会话各有 pending 对话 → session_dialog_requests 恰一条 SELECT。"""
++        from sqlalchemy import event
++
++        admin = await _get_admin(db_session)
++        for _ in range(3):
++            s = await _make_session(db_session, admin.id)
++            run = await _make_run(db_session, s.id)
++            await _make_dialog(db_session, agent_session_id=s.id, run_id=run.id)
++
++        statements: list[str] = []
++
++        def _capture(conn, cursor, statement, parameters, context, executemany):
++            if "session_dialog_requests" in statement:
++                statements.append(statement)
++
++        sync_engine = db_engine.sync_engine
++        event.listen(sync_engine, "before_cursor_execute", _capture)
++        try:
++            resp = await client.get("/api/daemon/sessions", headers=auth_headers)
++        finally:
++            event.remove(sync_engine, "before_cursor_execute", _capture)
++
++        assert resp.status_code == 200, resp.text
++        # 3 个会话 3 条 pending 行，仍只发一条 IN 批查（逐会话查询会 ≥3 条）。
++        assert len(statements) == 1, statements
++
++
++# ── OpenAPI 反映新字段（gen:types 消费面）───────────────────────────────────
++
++
++class TestOpenApiSchema:
++    async def test_openapi_exposes_pending_dialog_kind(self) -> None:
++        """非 dev 环境 openapi.json 端点关闭（main.py BS-5），直接经 app.openapi()
++        断言 schema——与 pnpm gen:types 消费的 OpenAPI 产物同源。"""
++        from app.main import app
++
++        props = app.openapi()["components"]["schemas"]["AgentSessionRead"]["properties"]
++        assert "pending_dialog_kind" in props
+diff --git a/backend/app/modules/translate/engine.py b/backend/app/modules/translate/engine.py
+index b423c1f31..06f5955cb 100644
+--- a/backend/app/modules/translate/engine.py
++++ b/backend/app/modules/translate/engine.py
+@@ -118,21 +118,29 @@ class TranslateSubprocessProxy:
+             encoding="utf-8",
+             bufsize=1,
+         )
+-        _threading.Thread(target=self._reader, args=(self._proc.stdout,), daemon=True).start()
++        _threading.Thread(
++            target=self._reader, args=(self._proc.stdout, self._responses), daemon=True
++        ).start()
+         _threading.Thread(
+             target=self._stderr_reader, args=(self._proc.stderr,), daemon=True
+         ).start()
+ 
+-    def _reader(self, stdout: object) -> None:
+-        """读线程：响应行入队；EOF/断裂入哨兵。"""
++    def _reader(self, stdout: object, responses: queue.Queue) -> None:
++        """读线程：响应行入队；EOF/断裂入哨兵。
++
++        队列经参数捕获（2026-10-23-translate-budget-align / FR-03）：崩溃重启
++        _ensure_started 换新队列后，旧读线程的 EOF 哨兵/迟到响应只落入已废弃
++        的旧队列（无人读，自然作废），不会污染新队列触发 "translate worker
++        exited"/"protocol mismatch" 假崩溃计数（3 次即 600s 退避）。
++        """
+         eof_resp = object()
+         try:
+             for line in stdout:
+-                self._responses.put(line)
++                responses.put(line)
+         except Exception:
+             pass
+         finally:
+-            self._responses.put(eof_resp)
++            responses.put(eof_resp)
+ 
+     def _stderr_reader(self, stderr: object) -> None:
+         """stderr 读线程：逐行转发到主进程日志（WARNING）；异常静默不影响请求。"""
+diff --git a/backend/app/modules/translate/service.py b/backend/app/modules/translate/service.py
+index 8080e0a12..f83a8f2db 100644
+--- a/backend/app/modules/translate/service.py
++++ b/backend/app/modules/translate/service.py
+@@ -138,8 +138,13 @@ async def translate_items(items: list[TranslateItemIn], target: str = "zh") -> d
+     pending: dict[str, list[SourceSegment]] = {}
+     # 全局送翻块队列（跨 item 合批送模型）
+     pending_chunks: list[str] = []
+-    # chunk 在 pending_chunks 中的归属填充游标：按 (item_id, seg_idx) 顺序消费
++    # 块序总账（含缓存命中块）：按块产生顺序记 (item_id, seg_idx)——回填按本序
++    # 一次成型，缓存块与推理块同序混排（2026-10-23-translate-budget-align FR-02）
+     chunk_owners: list[tuple[str, int]] = []
++    # 已解析译文（缓存命中块即时可定）：owner 序号 → 译文
++    resolved: dict[int, str] = {}
++    # pending_chunks[i] 对应的 chunk_owners 序号（推理返回后按位对账）
++    pending_owner_positions: list[int] = []
+ 
+     for item in items:
+         if not is_translation_worthy(item.text):
+@@ -166,12 +171,14 @@ async def translate_items(items: list[TranslateItemIn], target: str = "zh") -> d
+                 cached = _lru_get(key)
+                 if cached is None:
+                     cached = await _redis_get(key)
++                owner_idx = len(chunk_owners)
++                chunk_owners.append((item.id, seg_idx))
+                 if cached is not None:
+                     _lru_put(key, cached)  # Redis 命中回填 LRU
+-                    _fill_chunk(pending, item.id, seg_idx, cached)
++                    resolved[owner_idx] = cached
+                     translated_ids.add(item.id)
+                 else:
+-                    chunk_owners.append((item.id, seg_idx))
++                    pending_owner_positions.append(owner_idx)
+                     pending_chunks.append(chunk)
+ 
+     engine_ready = True
+@@ -199,12 +206,11 @@ async def translate_items(items: list[TranslateItemIn], target: str = "zh") -> d
+                     reason = "translation count mismatch"
+                 else:
+                     cache_writes: list[tuple[str, str]] = []
+-                    for (item_id, seg_idx), chunk, translated in zip(
+-                        chunk_owners, pending_chunks, translations, strict=True
+-                    ):
+-                        _fill_chunk(pending, item_id, seg_idx, translated)
+-                        translated_ids.add(item_id)
+-                        cache_writes.append((_cache_key(chunk, target), translated))
++                    for pos, translated in enumerate(translations):
++                        owner_idx = pending_owner_positions[pos]
++                        resolved[owner_idx] = translated
++                        translated_ids.add(chunk_owners[owner_idx][0])
++                        cache_writes.append((_cache_key(pending_chunks[pos], target), translated))
+                     for key, value in cache_writes:
+                         _lru_put(key, value)
+                         await _redis_put(key, value)
+@@ -218,6 +224,14 @@ async def translate_items(items: list[TranslateItemIn], target: str = "zh") -> d
+             "items": [TranslateItemOut(id=i.id, text=i.text, translated=False) for i in items],
+         }
+ 
++    # 回填：按 chunk_owners 全序一次成型——缓存块与推理块按原文块序混排。
++    # 此前缓存命中即时回填 + 推理块推理后追加，部分命中的多块段译文块序颠倒
++    # （归档 review P2；2026-10-23-translate-budget-align / FR-02）。引擎失败
++    # 路径上方已提前原文透传返回，走到这里的 owner 必有 resolved 译文——缺失
++    # 即编排缺陷，严格 KeyError 当场暴露（禁止静默拼空）。
++    for owner_idx, (item_id, seg_idx) in enumerate(chunk_owners):
++        _fill_chunk(pending, item_id, seg_idx, resolved[owner_idx])
++
+     # 重组：送翻段的占位填充后逐段拼接（保护段原样）
+     for item in items:
+         if item.id in results:
+@@ -245,8 +259,8 @@ def _fill_chunk(
+     """把单块译文按序填回所属送翻段（段内块顺序拼接）。
+ 
+     送翻段在 pending 中临时以 ``SourceSegment(text=已译拼接, translatable=True)``
+-    累积；块按产生顺序到达（缓存命中乱序于请求流内不会发生——同请求内先查
+-    缓存后推理，两类写入按 chunk_owners 顺序执行）。
++    累积；调用方保证按块产生顺序（chunk_owners 全序）逐块调用——缓存命中块
++    与推理块同序混排，段内块序与原文一致（2026-10-23-translate-budget-align）。
+     """
+     segs = pending[item_id]
+     segs[seg_idx] = SourceSegment(text=segs[seg_idx].text + translated, translatable=True)
+diff --git a/backend/app/modules/translate/tests/test_engine.py b/backend/app/modules/translate/tests/test_engine.py
+index 5604bb087..9102797cb 100644
+--- a/backend/app/modules/translate/tests/test_engine.py
++++ b/backend/app/modules/translate/tests/test_engine.py
+@@ -250,3 +250,34 @@ def test_get_translator_returns_proxy_and_backoff_reason(fake_worker_path: Path)
+     translator.retry_at = time.monotonic() + 999
+     translator2, reason2 = get_translator("unused")
+     assert translator2 is None and reason2 and "unavailable" in reason2
++
++
++def test_reader_writes_only_to_captured_queue() -> None:
++    """2026-10-23-translate-budget-align / FR-03：读线程只写构造时捕获的队列。
++
++    修复前 _reader 经 self._responses 属性写入：崩溃重启 _ensure_started 整体
++    换队列后，旧读线程的 EOF 哨兵/迟到响应落入新队列 → 下次请求读到哨兵即
++    "translate worker exited" 假崩溃，3 次即 600s 退避。修复后队列经参数捕获，
++    旧线程只写旧队列（无人读，自然作废）。
++    """
++    import queue as _queue
++    import threading as _threading
++
++    proxy = TranslateSubprocessProxy("unused")
++    try:
++        captured: _queue.Queue = _queue.Queue()  # 旧线程启动时捕获的队列
++        new_queue: _queue.Queue = _queue.Queue()  # 重启后的新队列（self._responses 已换）
++        proxy._responses = new_queue
++        thread = _threading.Thread(
++            target=proxy._reader, args=(iter(["resp-a\n"]), captured), daemon=True
++        )
++        thread.start()
++        thread.join(timeout=5.0)
++        assert not thread.is_alive()
++        # 响应行与 EOF 哨兵都只进 captured；new_queue 保持为空（无污染）
++        assert captured.get(timeout=1.0) == "resp-a\n"
++        sentinel = captured.get(timeout=1.0)
++        assert not isinstance(sentinel, str)
++        assert new_queue.empty()
++    finally:
++        proxy.close()
+diff --git a/backend/app/modules/translate/tests/test_service.py b/backend/app/modules/translate/tests/test_service.py
+index 98ada52c7..a544fd947 100644
+--- a/backend/app/modules/translate/tests/test_service.py
++++ b/backend/app/modules/translate/tests/test_service.py
+@@ -4,8 +4,14 @@ from __future__ import annotations
+ 
+ import pytest
+ 
++from app.modules.translate.chunking import collect_chunks, split_protected
+ from app.modules.translate.schema import TranslateItemIn
+-from app.modules.translate.service import reset_cache_for_tests, translate_items
++from app.modules.translate.service import (
++    _cache_key,
++    _lru_put,
++    reset_cache_for_tests,
++    translate_items,
++)
+ 
+ 
+ class _FakeTranslator:
+@@ -215,3 +221,30 @@ async def test_pure_code_content_translated_false(fake_translator: _FakeTranslat
+     assert out["items"][0].translated is False
+     assert out["items"][0].text == text
+     assert fake_translator.calls == 0
++
++
++async def test_partial_cache_hit_keeps_chunk_order(fake_translator: _FakeTranslator) -> None:
++    """2026-10-23-translate-budget-align / FR-02：部分命中缓存的多块段块序不乱。
++
++    修复前：缓存命中块扫描期立即回填、推理块推理后追加——中间块命中时译文
++    变成 [块2译文, 块1译文, 块3译文]（缓存块全部前置，归档 review P2）。
++    修复后按块产生顺序全序回填，任何部分命中组合都与原文块序逐块对齐。
++    """
++    # 每句内容唯一（重复同句会让相邻块内容相同 → 同一缓存 key 连带命中，
++    # 构不出「部分命中」形态）
++    text = "".join(
++        f"Unique english sentence number {i} for chunk ordering regression. " for i in range(40)
++    )  # ~2600 字符单段（无段界/无保护标记）→ 3 块
++    chunks = collect_chunks(split_protected(text))
++    assert len(chunks) == 3
++    assert len(set(chunks)) == 3  # 块内容互异，缓存 key 互不相同
++    # 预填中间块缓存（模拟部分命中：LRU 淘汰/Redis TTL 过期后的跨请求残缺形态）
++    _lru_put(_cache_key(chunks[1], "zh"), "CACHED[1]")
++
++    out = await translate_items([TranslateItemIn(id="a", text=text)])
++    item = out["items"][0]
++    assert item.translated is True
++    # 只有未命中的块1/块3进引擎（fake 按批内序号回显 "译[i]:<chunk>"）
++    assert fake_translator.batches == [[chunks[0], chunks[2]]]
++    # 全序拼装：块1译文 + 缓存中间块 + 块3译文（修复前 CACHED[1] 打头）
++    assert item.text == f"译[0]:{chunks[0]}CACHED[1]译[1]:{chunks[2]}"
+diff --git a/backend/openapi.json b/backend/openapi.json
+index 616b29970..42731ef6f 100644
+--- a/backend/openapi.json
++++ b/backend/openapi.json
+@@ -39238,6 +39238,17 @@
+             ],
+             "title": "Current Run Status"
+           },
++          "pending_dialog_kind": {
++            "anyOf": [
++              {
++                "type": "string"
++              },
++              {
++                "type": "null"
++              }
++            ],
++            "title": "Pending Dialog Kind"
++          },
+           "terminating_at": {
+             "anyOf": [
+               {
+diff --git a/frontend/src/app/(dashboard)/sessions/__tests__/page.test.tsx b/frontend/src/app/(dashboard)/sessions/__tests__/page.test.tsx
+index 08a474ec7..78c77dfae 100644
+--- a/frontend/src/app/(dashboard)/sessions/__tests__/page.test.tsx
++++ b/frontend/src/app/(dashboard)/sessions/__tests__/page.test.tsx
+@@ -2608,10 +2608,12 @@ describe("SessionPanel 轮次导航集成（task-06：跳转链路 + mobile Draw
+         expect(mocks.notifyWarning).toHaveBeenCalledWith(
+           "已连续加载 50 页仍未到达，可再次点击继续加载",
+         ),
+-      { timeout: 8000 },
++      // 全量并发下 50 页 × 满页渲染会明显排队（2026-10-22 实证 8s 窗口假失败）；
++      // 放宽等待与用例上限，语义不变（仍断言 50 页上限与 warning）。
++      { timeout: 15000 },
+     );
+     expect(beforeCallCount()).toBe(50);
+-  }, 20000);
++  }, 35000);
+ 
+   it("desktop 跳转翻页期 suppress 触顶：循环进行中 scroll 不触发自动加载，跳完恢复", async () => {
+     let resolvePage1!: (v: unknown) => void;
+diff --git a/frontend/src/app/globals.css b/frontend/src/app/globals.css
+index 8815e479f..700402ceb 100644
+--- a/frontend/src/app/globals.css
++++ b/frontend/src/app/globals.css
+@@ -1095,6 +1095,30 @@
+     border-radius: 6px;
+     padding: 3px 8px;
+   }
++
++  /* 2026-10-22-conversation-live-marquee（FR-02 / FR-05）：对话视图运行中
++     轮尾单行连续滚动轨道（2026-10-23 修订：只向最新流动、不循环）。
++     容器内一道很淡的流光缓慢扫过：滚动追平最新条后的空档期，也保留
++     「还在运行」的感知（低频、低对比，不干扰阅读）。 */
++  .sh-live-marquee {
++    position: relative;
++    isolation: isolate;
++  }
++  .sh-live-marquee::after {
++    content: "";
++    position: absolute;
++    inset-block: 0;
++    left: 0;
++    width: 38%;
++    background: linear-gradient(
++      90deg,
++      transparent,
++      color-mix(in srgb, var(--color-brand-400) 14%, transparent),
++      transparent
++    );
++    animation: sh-live-marquee-sheen 3.6s ease-in-out infinite;
++    pointer-events: none;
++  }
+ }
+ 
+ @keyframes sh-caret-blink {
+@@ -1114,6 +1138,22 @@
+   }
+ }
+ 
++/* 跑马灯容器内的低频流光（滚动追平最新条后也保留「运行中」感知）。 */
++@keyframes sh-live-marquee-sheen {
++  0%,
++  58% {
++    transform: translateX(-140%);
++    opacity: 0;
++  }
++  66% {
++    opacity: 0.9;
++  }
++  100% {
++    transform: translateX(360%);
++    opacity: 0;
++  }
++}
++
+ /* 无障碍降级（task-13）：光标停闪常显、三点静止半透明（显式定态，同 task-11
+    utility 层降级块模式）；base 层全局 0.01ms 块（animation-duration/iteration
+    !important）对本组动画亦已兜底覆盖，此处为双保险确定性终态。 */
+@@ -1125,6 +1165,12 @@
+     animation: none;
+     opacity: 0.35;
+   }
++  /* 2026-10-22-conversation-live-marquee（FR-05）：减少动态效果时组件静态
++     展示最新条，容器流光一并关闭。 */
++  .sh-live-marquee::after {
++    animation: none;
++    display: none;
++  }
+ }
+ 
+ /* =============================================================
+diff --git a/frontend/src/app/proto/session-live-marquee/page.tsx b/frontend/src/app/proto/session-live-marquee/page.tsx
+new file mode 100644
+index 000000000..2e9c8be1c
+--- /dev/null
++++ b/frontend/src/app/proto/session-live-marquee/page.tsx
+@@ -0,0 +1,374 @@
++"use client";
++
++/**
++ * dev-only 原型：会话「对话」视图运行中轮次末尾的实时活动跑马灯
++ * （2026-10-22-conversation-live-marquee）。
++ *
++ * 真码原型：直接引用实现同源组件 `turn-live-marquee.tsx` 与既有
++ * `TurnStatusBar` / `SessionViewTabs`，用脚本化事件流模拟 SSE 实时推进，
++ * 仅用于视觉/交互确认——不进导航、不被生产页面引用。
++ *
++ * 三种主题可切换（ai-native / blue / dark），可暂停/继续事件流。
++ */
++
++import { useEffect, useMemo, useState } from "react";
++import { ArrowLeft, Bot, Send, Sparkles } from "lucide-react";
++
++import { ChatMessageAvatar } from "@/components/chat/chat-message-avatar";
++import { TurnStatusBar } from "@/components/daemon/turn-status-bar";
++import { SessionViewTabs } from "@/components/daemon/session-panel/session-view-tabs";
++import {
++  TurnLiveMarquee,
++  deriveLiveMarqueeEntries,
++} from "@/components/daemon/turn-live-marquee";
++import type { SessionViewMode } from "@/components/daemon/turn-timeline";
++import type { TurnSegment } from "@/components/daemon/session-log-assembler";
++import { cn } from "@/lib/utils";
++
++const FULL_TEXT = `已定位登录超时根因：
++
++1. 网关 keepalive 设为 60s，而前端请求超时只有 30s，长轮询场景下连接被提前回收；
++2. 刷新 token 的请求没有复用重试策略，失败后直接跳登录页。
++
++已补上 45s 的请求重试窗口，并让刷新 token 的请求走同一套重试策略。正在跑相关测试，稍后汇总变更说明。`;
++
++/** 脚本事件：循环注入，模拟 agent 持续干活。 */
++const SCRIPT: ReadonlyArray<(_seq: number) => TurnSegment> = [
++  (n) => ({
++    kind: "thinking",
++    id: `think-${n}`,
++    text: "先读登录链路，确认超时发生在前端还是网关；同时检查 token 刷新是否吞掉了错误。",
++    streaming: n === 0,
++    ts: n,
++  }),
++  (n) => ({
++    kind: "tool",
++    id: `read-${n}`,
++    raw: "",
++    status: "ok",
++    toolName: "Read",
++    primary: "src/lib/auth.ts",
++    startedAt: n,
++    endedAt: n + 1,
++    children: [],
++    subagentType: null,
++  }),
++  (n) => ({
++    kind: "tool",
++    id: `grep-${n}`,
++    raw: "",
++    status: "ok",
++    toolName: "Grep",
++    primary: "timeout · src/**/*.ts",
++    startedAt: n,
++    endedAt: n + 1,
++    children: [],
++    subagentType: null,
++  }),
++  (n) => ({
++    kind: "tool",
++    id: `agent-${n}`,
++    raw: "",
++    status: "ok",
++    toolName: "Agent",
++    primary: "排查后端超时配置",
++    startedAt: n,
++    endedAt: n + 4,
++    subagentType: "Explore",
++    children: [
++      {
++        kind: "tool",
++        id: `agent-grep-${n}`,
++        raw: "",
++        status: "ok",
++        toolName: "Grep",
++        primary: "keepalive · nginx/**",
++        startedAt: n + 1,
++        endedAt: n + 2,
++        children: [],
++        subagentType: null,
++      },
++      {
++        kind: "tool",
++        id: `agent-bash-${n}`,
++        raw: "",
++        status: "ok",
++        toolName: "Bash",
++        primary: "grep -n keepalive nginx.conf",
++        startedAt: n + 2,
++        endedAt: n + 3,
++        children: [],
++        subagentType: null,
++      },
++    ],
++  }),
++  (n) => ({
++    kind: "thinking",
++    id: `think2-${n}`,
++    text: "网关 keepalive 60s、应用侧 30s，确认是连接提前回收；补重试窗口并统一刷新策略。",
++    streaming: false,
++    ts: n,
++  }),
++  (n) => ({
++    kind: "tool",
++    id: `edit-${n}`,
++    raw: "",
++    status: "ok",
++    toolName: "Edit",
++    primary: "src/lib/auth.ts",
++    startedAt: n,
++    endedAt: n + 1,
++    children: [],
++    subagentType: null,
++  }),
++  (n) => ({
++    kind: "stderr",
++    id: `stderr-${n}`,
++    text: "warning: retry interval below recommended minimum, clamped to 1200ms",
++    ts: n,
++  }),
++  (n) => ({
++    kind: "tool",
++    id: `bash-${n}`,
++    raw: "",
++    status: "running",
++    toolName: "Bash",
++    primary: "pnpm vitest auth",
++    startedAt: n,
++    endedAt: null,
++    children: [],
++    subagentType: null,
++  }),
++  (n) => ({
++    kind: "file",
++    id: `file-${n}`,
++    fileId: `f-${n}`,
++    name: "auth-timeout-fix.md",
++    size: 18432,
++    mime: "text/markdown",
++    description: "登录超时修复说明",
++    ts: n,
++  }),
++  (n) => ({
++    kind: "thinking",
++    id: `think3-${n}`,
++    text: "测试通过，整理变更说明并向用户汇报结果。",
++    streaming: false,
++    ts: n,
++  }),
++];
++
++function buildSegments(step: number): TurnSegment[] {
++  const total = Math.min(step + 1, 60);
++  const out: TurnSegment[] = [];
++  for (let i = 0; i < total; i += 1) {
++    const event = SCRIPT[i % SCRIPT.length]!;
++    out.push(event(i));
++  }
++  return out;
++}
++
++const THEMES = [
++  { value: "ai-native", label: "AI 紫（默认）" },
++  { value: "blue", label: "经典蓝" },
++  { value: "dark", label: "暗夜" },
++] as const;
++
++type ThemeValue = (typeof THEMES)[number]["value"];
++
++export default function SessionLiveMarqueeProtoPage() {
++  const [view, setView] = useState<SessionViewMode>("conversation");
++  const [theme, setTheme] = useState<ThemeValue>("ai-native");
++  const [step, setStep] = useState(5);
++  const [running, setRunning] = useState(true);
++  const [startedAt, setStartedAt] = useState<number | null>(null);
++
++  useEffect(() => {
++    setStartedAt(Date.now() - 74_000);
++  }, []);
++
++  useEffect(() => {
++    const root = document.documentElement;
++    if (theme === "ai-native") {
++      root.removeAttribute("data-theme");
++    } else {
++      root.setAttribute("data-theme", theme);
++    }
++  }, [theme]);
++
++  useEffect(() => {
++    if (!running) return;
++    const timer = window.setInterval(() => {
++      setStep((prev) => (prev >= 60 ? prev : prev + 1));
++    }, 1300);
++    return () => window.clearInterval(timer);
++  }, [running]);
++
++  const segments = useMemo(() => buildSegments(step), [step]);
++  const entries = useMemo(() => deriveLiveMarqueeEntries(segments), [segments]);
++  const text = FULL_TEXT.slice(0, Math.min(step * 46, FULL_TEXT.length));
++
++  return (
++    <div className="min-h-screen bg-background p-6 text-foreground">
++      <div className="mx-auto max-w-5xl">
++        <div className="overflow-hidden rounded-2xl border bg-card shadow-sm">
++          {/* 会话头 */}
++          <div className="flex items-center gap-3 border-b px-5 py-3">
++            <button
++              type="button"
++              className="inline-flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground hover:bg-muted"
++              aria-label="返回"
++            >
++              <ArrowLeft className="h-4 w-4" />
++            </button>
++            <div className="min-w-0 flex-1">
++              <div className="flex items-center gap-2">
++                <span className="truncate text-sm font-medium">修复登录超时问题</span>
++                <span className="inline-flex items-center gap-1 rounded-full bg-brand-50 px-2 py-0.5 text-[10px] text-brand-700">
++                  <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-brand-500" />
++                  运行中
++                </span>
++              </div>
++              <div className="mt-0.5 text-[11px] text-muted-foreground">
++                multi-agent-platform · Claude · 本机 daemon
++              </div>
++            </div>
++            <SessionViewTabs value={view} onChange={setView} />
++          </div>
++
++          {/* 演示控制条 */}
++          <div className="flex flex-wrap items-center gap-2 border-b bg-muted/30 px-5 py-2 text-[11px]">
++            <span className="mr-1 text-muted-foreground">预览主题</span>
++            {THEMES.map((item) => (
++              <button
++                key={item.value}
++                type="button"
++                onClick={() => setTheme(item.value)}
++                className={cn(
++                  "rounded-full border px-2.5 py-1 transition-colors",
++                  theme === item.value
++                    ? "border-brand-300 bg-card font-medium text-foreground shadow-sm"
++                    : "border-transparent text-muted-foreground hover:text-foreground",
++                )}
++              >
++                {item.label}
++              </button>
++            ))}
++            <span className="mx-1 h-3 w-px bg-border" />
++            <button
++              type="button"
++              onClick={() => setRunning((prev) => !prev)}
++              className="rounded-full border px-2.5 py-1 text-muted-foreground transition-colors hover:text-foreground"
++            >
++              {running ? "暂停事件流" : "继续事件流"}
++            </button>
++            <button
++              type="button"
++              onClick={() => setStep(5)}
++              className="rounded-full border px-2.5 py-1 text-muted-foreground transition-colors hover:text-foreground"
++            >
++              重置
++            </button>
++            <span className="ml-auto text-muted-foreground/70">
++              已注入 {entries.length} 条过程事件
++            </span>
++          </div>
++
++          {/* 消息流 */}
++          <div className="h-[540px] overflow-y-auto bg-background/60 px-6 py-5">
++            {view === "all" ? (
++              <div className="space-y-2">
++                <div className="text-[11px] text-muted-foreground">
++                  进度视图（跑马灯的信息来源，完整时间线）
++                </div>
++                <div className="ml-2 flex flex-col gap-[7px] border-l-2 border-muted pl-3.5">
++                  {segments.slice(-16).map((seg) => {
++                    const entry = entries.find((item) => seg.kind !== "text" && item.id.startsWith(seg.id))
++                      ?? entries.find((item) => item.id === seg.id);
++                    return (
++                      <div
++                        key={seg.id}
++                        className="flex items-center gap-2 text-[11px] text-muted-foreground"
++                      >
++                        <span className="w-4 shrink-0 text-center">
++                          {entry?.glyph ?? "·"}
++                        </span>
++                        <span className="truncate text-foreground/75">
++                          {entry?.text ?? seg.kind}
++                        </span>
++                      </div>
++                    );
++                  })}
++                </div>
++              </div>
++            ) : view === "trajectory" ? (
++              <div className="flex h-full items-center justify-center text-xs text-muted-foreground">
++                轨迹视图（本次不改动）
++              </div>
++            ) : (
++              <div className="flex min-h-[500px] flex-col justify-end space-y-6">
++                {/* 历史轮 1 */}
++                <div className="flex justify-end gap-2">
++                  <div className="max-w-[56%] rounded-2xl rounded-br-md border border-primary/20 bg-primary/[0.08] px-4 py-2.5 text-[13.5px] leading-6">
++                    登录偶尔会卡住，然后直接跳回登录页，帮我看看。
++                  </div>
++                  <ChatMessageAvatar kind="user" name="管理员" size={28} />
++                </div>
++                <div className="flex items-start gap-2.5">
++                  <ChatMessageAvatar kind="agent" title="智能体" size={28} />
++                  <div className="seg-text-body max-w-[52rem] text-[14.5px]">
++                    收到，我先查看登录与 token 刷新链路，定位是网关超时还是前端重试策略的问题。
++                  </div>
++                </div>
++
++                {/* 历史轮 2（用户追问） */}
++                <div className="flex justify-end gap-2">
++                  <div className="max-w-[56%] rounded-2xl rounded-br-md border border-primary/20 bg-primary/[0.08] px-4 py-2.5 text-[13.5px] leading-6">
++                    好，顺便把修复说明整理出来。
++                  </div>
++                  <ChatMessageAvatar kind="user" name="管理员" size={28} />
++                </div>
++
++                {/* 运行中轮 */}
++                <div className="space-y-2.5">
++                  {startedAt != null && (
++                    <TurnStatusBar
++                      turnStartedAt={startedAt}
++                      turnStatus="running"
++                      segments={segments}
++                    />
++                  )}
++                  <div className="flex items-start gap-2.5">
++                    <ChatMessageAvatar kind="agent" title="智能体" size={28} />
++                    <div className="seg-text-body max-w-[52rem] whitespace-pre-wrap text-[14.5px]">
++                      {text}
++                      <span aria-hidden className="sh-stream-caret" />
++                    </div>
++                  </div>
++                  <TurnLiveMarquee entries={entries} />
++                </div>
++              </div>
++            )}
++          </div>
++
++          {/* 输入区占位 */}
++          <div className="border-t px-5 py-3">
++            <div className="flex items-center gap-2 rounded-xl border bg-card px-3 py-2 text-[12px] text-muted-foreground">
++              <Sparkles className="h-3.5 w-3.5 text-brand-500" />
++              <span className="flex-1">输入消息，运行中也可以排队…</span>
++              <span className="inline-flex h-7 w-7 items-center justify-center rounded-lg bg-primary text-primary-foreground">
++                <Send className="h-3.5 w-3.5" />
++              </span>
++            </div>
++          </div>
++        </div>
++
++        <p className="mt-3 flex items-center gap-1.5 text-[11px] text-muted-foreground">
++          <Bot className="h-3 w-3" />
++          真码原型：跑马灯为实际组件 `TurnLiveMarquee`，事件由脚本模拟；「进度」tab
++          可查看同一数据的完整时间线。
++        </p>
++      </div>
++    </div>
++  );
++}
+diff --git a/frontend/src/components/daemon/__tests__/attachment-refs.test.ts b/frontend/src/components/daemon/__tests__/attachment-refs.test.ts
+index 412b1380b..cea76bdc5 100644
+--- a/frontend/src/components/daemon/__tests__/attachment-refs.test.ts
++++ b/frontend/src/components/daemon/__tests__/attachment-refs.test.ts
+@@ -8,6 +8,8 @@ import {
+   allocateWsRefToken,
+   buildAttRefToken,
+   buildWsRefToken,
++  formatRefsForPlainText,
++  parseAttachmentMarkers,
+   parseInlineAttRefs,
+   parseInlineRefs,
+   stripAttRefTokens,
+@@ -300,3 +302,47 @@ describe("parseInlineAttRefs 兼容薄封装（D-009 既有消费零改动）",
+     ]);
+   });
+ });
++
++/* ── 2026-10-22-session-composer-slim FR-01：纯文本展示格式化 ───────────── */
++
++describe("formatRefsForPlainText（展示层引用简化）", () => {
++  it("附件引用标记 → 📎 文件名，不露出 uuid", () => {
++    expect(formatRefsForPlainText(`看这个[附件引用:${UUID_A}|截图.png]谢谢`)).toBe(
++      "看这个📎 截图.png谢谢",
++    );
++  });
++
++  it("四类工作区引用 → 图标 + 路径末段（代码带行号），不露出 workspace id", () => {
++    const text =
++      `[文件引用:${WID}|src/a.md]` +
++      `[目录引用:${WID}|docs]` +
++      `[代码引用:${WID}|src/b.py|L3-L9]`;
++    expect(formatRefsForPlainText(text)).toBe("📄 a.md📁 docs🧾 b.py:3-9");
++  });
++
++  it("头部附件标记行转为人读附件清单（不丢附件名），正文引用同步简化", () => {
++    const prompt = `[附件:${UUID_A}|image|a.png]\n[附件:${UUID_B}|file|b.txt]\n\n看[附件引用:${UUID_A}|a.png]`;
++    expect(formatRefsForPlainText(prompt)).toBe(
++      "📎 a.png 📎 b.txt\n看📎 a.png",
++    );
++  });
++
++  it("仅附件、无正文：输出附件清单而不是空串（排队/定时摘要不丢附件名）", () => {
++    const prompt = `[附件:${UUID_A}|file|日志.txt]`;
++    expect(formatRefsForPlainText(prompt)).toBe("📎 日志.txt");
++  });
++
++  it("非法 uuid / 用户手写方括号原样保留（容错不吞字）", () => {
++    const bad = "普通[附件引用:not-a-uuid|x.png]文本";
++    expect(formatRefsForPlainText(bad)).toBe(bad);
++    expect(formatRefsForPlainText("只有普通文本")).toBe("只有普通文本");
++  });
++
++  it("parseAttachmentMarkers 迁入纯函数库后契约不变", () => {
++    const parsed = parseAttachmentMarkers(`[附件:${UUID_A}|file|日志.txt]\n正文`);
++    expect(parsed.attachments).toEqual([
++      { id: UUID_A, kind: "file", name: "日志.txt" },
++    ]);
++    expect(parsed.text).toBe("正文");
++  });
++});
+diff --git a/frontend/src/components/daemon/__tests__/message-queue-bar.test.tsx b/frontend/src/components/daemon/__tests__/message-queue-bar.test.tsx
+index 8c71978a1..fd57b4604 100644
+--- a/frontend/src/components/daemon/__tests__/message-queue-bar.test.tsx
++++ b/frontend/src/components/daemon/__tests__/message-queue-bar.test.tsx
+@@ -223,6 +223,37 @@ describe("MessageQueueBar（task-09 / D-002 D-003 D-004）", () => {
+     expect(container.textContent).not.toContain(tailMark);
+   });
+ 
++  it("引用标记在摘要与展开正文中简化为文件名（2026-10-22-session-composer-slim FR-01）", () => {
++    const uuid = "aaaaaaaa-1111-2222-3333-444444444444";
++    const prompt = `看[附件引用:${uuid}|截图.png]谢谢`;
++    const { container } = render(
++      <MessageQueueBar
++        entries={[
++          makeEntry({
++            id: "mq-ref",
++            prompt,
++            displayPrompt: `[附件:${uuid}|image|截图.png]\n\n${prompt}`,
++            attachmentIds: [uuid],
++          }),
++        ]}
++        onRemove={vi.fn()}
++        onRetry={vi.fn()}
++      />,
++    );
++
++    // 折叠摘要：人读标签，无 uuid / 协议字面。
++    expect(container.textContent).toContain("看📎 截图.png谢谢");
++    expect(container.textContent).not.toContain(uuid);
++    expect(container.textContent).not.toContain("[附件引用:");
++
++    // 展开：标记行转为附件清单（附件名可见），正文引用仍是简洁标签。
++    fireEvent.click(screen.getByRole("button", { name: /^等待中，/ }));
++    expect(container.textContent).toContain("📎 截图.png");
++    expect(container.textContent).toContain("看📎 截图.png谢谢");
++    expect(container.textContent).not.toContain("[附件:");
++    expect(container.textContent).not.toContain("[附件引用:");
++  });
++
+   it("附件数显示（D-004）：有附件显示「📎 N」，无附件不显示", () => {
+     render(
+       <MessageQueueBar
+diff --git a/frontend/src/components/daemon/__tests__/session-history-scroll.test.tsx b/frontend/src/components/daemon/__tests__/session-history-scroll.test.tsx
+index 0bebecdde..fd2c3c0c5 100644
+--- a/frontend/src/components/daemon/__tests__/session-history-scroll.test.tsx
++++ b/frontend/src/components/daemon/__tests__/session-history-scroll.test.tsx
+@@ -424,12 +424,12 @@ describe("scroll-up history integration", () => {
+       // 修复核心语义：scroll 事件处理器内零同步钉回（同步 apply 读 offsetTop
+       // 写 scrollTop = 强制布局，修复前风暴源）。
+       expect(writes).toBe(before);
+-      // 真实 rAF 下一帧（jsdom 原生 16ms tick）：钉回执行（50ms 窗口 <
+-      // watch interval 300ms 与锚 2.5s 存活窗，写入只可能来自钉回链路）。
+-      await act(async () => {
+-        await new Promise((r) => setTimeout(r, 50));
+-      });
+-      expect(writes).toBeGreaterThan(before);
++      // 真实 rAF 下一帧（jsdom 原生 16ms tick）：钉回执行。改用 waitFor 轮询
++      // 而非固定 50ms 窗口——全量测试并发下 jsdom rAF/定时器会明显滞后，
++      // 固定窗口会假失败（2026-10-22 实证）；语义仍是「事件内零同步写，
++      // 异步帧后才写」。watch interval 300ms 与锚 2.5s 存活窗远大于默认
++      // waitFor 轮询间隔，写入来源仍是钉回链路。
++      await waitFor(() => expect(writes).toBeGreaterThan(before));
+     } finally {
+       delete (el as { scrollTop?: number }).scrollTop;
+     }
+diff --git a/frontend/src/components/daemon/__tests__/session-input-bar-plus-menu.test.tsx b/frontend/src/components/daemon/__tests__/session-input-bar-plus-menu.test.tsx
+index 8a9d9108b..3cd817785 100644
+--- a/frontend/src/components/daemon/__tests__/session-input-bar-plus-menu.test.tsx
++++ b/frontend/src/components/daemon/__tests__/session-input-bar-plus-menu.test.tsx
+@@ -74,6 +74,42 @@ describe("SessionInputBar ＋ 功能菜单（ql-20260827-020）", () => {
+     expect(screen.queryByRole("menuitem", { name: /派团队/ })).not.toBeInTheDocument();
+   });
+ 
++  /* ── 2026-10-22-session-composer-slim FR-02：续跑开关迁入 + 菜单 ───────── */
++
++  it("autoResume 传入 → 菜单渲染勾选项；点击切换并保持菜单打开", async () => {
++    const onToggle = vi.fn();
++    render(<Harness autoResume={{ enabled: true, onToggle }} />);
++    openMenu();
++    const item = screen.getByRole("menuitemcheckbox", {
++      name: /中断自动续跑（已开启）/,
++    });
++    expect(item).toHaveAttribute("aria-checked", "true");
++    fireEvent.click(item);
++    await waitFor(() => expect(onToggle).toHaveBeenCalledWith(false));
++    // 切换不关菜单（可连续观察状态）。
++    expect(screen.getByRole("menu", { name: "输入功能" })).toBeInTheDocument();
++  });
++
++  it("autoResume 缺省 → 菜单不渲染续跑项（预会话/dialog 无会话级状态）", () => {
++    render(<Harness />);
++    openMenu();
++    expect(
++      screen.queryByRole("menuitemcheckbox", { name: /中断自动续跑/ }),
++    ).not.toBeInTheDocument();
++  });
++
++  it("autoResume.disabled（会话结束/离线）→ 禁用且点击不触发", () => {
++    const onToggle = vi.fn();
++    render(
++      <Harness autoResume={{ enabled: true, disabled: true, onToggle }} />,
++    );
++    openMenu();
++    const item = screen.getByRole("menuitemcheckbox", { name: /中断自动续跑/ });
++    expect(item).toBeDisabled();
++    fireEvent.click(item);
++    expect(onToggle).not.toHaveBeenCalled();
++  });
++
+   it("附件项 → 触发隐藏 file input 点击并关菜单", () => {
+     const clickSpy = vi
+       .spyOn(HTMLInputElement.prototype, "click")
+diff --git a/frontend/src/components/daemon/__tests__/session-panel-dialog.test.tsx b/frontend/src/components/daemon/__tests__/session-panel-dialog.test.tsx
+index 2fb1bd5d7..14febd7f3 100644
+--- a/frontend/src/components/daemon/__tests__/session-panel-dialog.test.tsx
++++ b/frontend/src/components/daemon/__tests__/session-panel-dialog.test.tsx
+@@ -14,7 +14,7 @@
+ //   输入校验 / turn 级串行禁用 / unmount close
+ 
+ import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
+-import { render, screen, fireEvent, waitFor, act } from "@testing-library/react";
++import { render, screen, fireEvent, waitFor, act, within } from "@testing-library/react";
+ 
+ import { SessionPanel } from "../session-panel";
+ import { useMentionSources } from "@/lib/session-mention-sources";
+@@ -2130,7 +2130,10 @@ describe("SessionPanel（dialog）对话/进度视图切换（ql-20260729-005）
+     // 与工具行 desc（恰为 raw 原文）用精确匹配区分）
+     await waitFor(() => expect(screen.getByText(/文件内容如下/)).toBeInTheDocument());
+     expect(screen.queryByText("Read src/a.ts")).not.toBeInTheDocument();
+-    expect(screen.queryByText(/先想想怎么读/)).not.toBeInTheDocument();
++    // 2026-10-22-conversation-live-marquee：对话视图运行中轮尾新增实时活动跑马灯，
++    // thinking 摘要作为跑马灯条目可见（纯感知）；但过程行/思考折叠块仍不在对话视图展示。
++    const marquee = screen.getByTestId("turn-live-marquee");
++    expect(within(marquee).getByText(/先想想怎么读/)).toBeInTheDocument();
+     expect(screen.queryByText("思考")).not.toBeInTheDocument();
+ 
+     // 切「进度」：过程项出现（thinking 折叠块标题 + 摘要，tool 行）
+diff --git a/frontend/src/components/daemon/__tests__/turn-live-marquee.test.tsx b/frontend/src/components/daemon/__tests__/turn-live-marquee.test.tsx
+new file mode 100644
+index 000000000..fbf2a1fca
+--- /dev/null
++++ b/frontend/src/components/daemon/__tests__/turn-live-marquee.test.tsx
+@@ -0,0 +1,278 @@
++/**
++ * 2026-10-22-conversation-live-marquee（FR-01~FR-07）：
++ * 对话视图运行中轮尾实时活动跑马灯——纯函数派生 + 连续轨道组件 +
++ * TurnTimeline 接入门控。
++ *
++ * 2026-10-23 用户裁决：连续流动、不循环、只流到最新一条（纯感知不交互）。
++ */
++import { describe, it, expect, vi, afterEach } from "vitest";
++import { act, cleanup, render, waitFor } from "@testing-library/react";
++
++import {
++  TurnLiveMarquee,
++  deriveLiveMarqueeEntries,
++  LIVE_MARQUEE_MAX_ENTRIES,
++} from "@/components/daemon/turn-live-marquee";
++import {
++  TurnTimeline,
++  type SessionTurnView,
++} from "@/components/daemon/turn-timeline";
++import type { TurnSegment } from "@/components/daemon/session-log-assembler";
++
++vi.mock("@/components/ui/markdown-text", () => ({
++  MarkdownText: ({ children }: { children: string }) => (
++    <div data-testid="markdown-text">{children}</div>
++  ),
++}));
++
++function thinking(id: string, text: string, streaming = false): TurnSegment {
++  return { kind: "thinking", id, text, streaming, ts: 0 };
++}
++
++function tool(
++  id: string,
++  over: Partial<Extract<TurnSegment, { kind: "tool" }>> = {},
++): TurnSegment {
++  return {
++    kind: "tool",
++    id,
++    raw: "",
++    status: "ok",
++    toolName: "Bash",
++    primary: "pnpm vitest",
++    startedAt: 0,
++    endedAt: 1,
++    children: [],
++    subagentType: null,
++    ...over,
++  };
++}
++
++function fileSeg(id: string, name: string): TurnSegment {
++  return {
++    kind: "file",
++    id,
++    fileId: `f-${id}`,
++    name,
++    size: 100,
++    mime: "text/markdown",
++    description: "",
++    ts: 0,
++  };
++}
++
++function makeTurn(over: Partial<SessionTurnView> = {}): SessionTurnView {
++  return {
++    runId: "run-1",
++    turn: 1,
++    prompt: "继续任务",
++    output: "",
++    status: "running",
++    seenLogIds: new Set<string>(),
++    inputTokens: null,
++    outputTokens: null,
++    ctxTokens: null,
++    apiDurationMs: null,
++    errorDetail: null,
++    processItems: [],
++    segments: [thinking("think-1", "正在分析登录超时")],
++    turnStartedAt: 0,
++    ...over,
++  };
++}
++
++function renderTimeline(
++  turns: SessionTurnView[],
++  viewMode: "conversation" | "all" | "trajectory" = "conversation",
++) {
++  return render(
++    <TurnTimeline
++      turns={turns}
++      viewMode={viewMode}
++      errorMsg={null}
++      sessionStatus="active"
++      pendingRequests={[]}
++      dialogHistory={[]}
++      onResend={vi.fn()}
++      onSwitchProvider={vi.fn()}
++      onDialogResolved={vi.fn()}
++      hasOnlineProvider
++      emptyProviderLabel="Claude"
++    />,
++  );
++}
++
++afterEach(() => cleanup());
++
++describe("deriveLiveMarqueeEntries 纯函数（FR-01 / FR-03）", () => {
++  it("按段文档序产出条目，跳过 text 答复段", () => {
++    const entries = deriveLiveMarqueeEntries([
++      thinking("t1", "先看登录链路"),
++      { kind: "text", id: "x1", text: "答复正文", streaming: true, startedAt: 0 },
++      tool("tool-1", { toolName: "Read", primary: "src/lib/auth.ts" }),
++      fileSeg("f1", "report.md"),
++    ]);
++
++    expect(entries.map((e) => e.id)).toEqual(["t1", "tool-1", "f1"]);
++    expect(entries[0]).toMatchObject({ icon: "thinking", status: "done" });
++    expect(entries[1]!.text).toContain("读写文件 · Read");
++    expect(entries[1]!.status).toBe("done");
++    expect(entries[2]!.text).toContain("report.md");
++  });
++
++  it("同一段 id 的流式更新就地覆盖文本，不重复入队（FR-03）", () => {
++    const first = deriveLiveMarqueeEntries([thinking("t1", "分析", true)]);
++    const second = deriveLiveMarqueeEntries([thinking("t1", "分析完成，准备修复", true)]);
++
++    expect(first).toHaveLength(1);
++    expect(second).toHaveLength(1);
++    expect(second[0]!.id).toBe("t1");
++    expect(second[0]!.text).toContain("分析完成，准备修复");
++    expect(second[0]!.status).toBe("running");
++  });
++
++  it("工具段状态翻转就地更新状态，不新增条目（FR-03）", () => {
++    const running = deriveLiveMarqueeEntries([tool("tool-1", { status: "running" })]);
++    const done = deriveLiveMarqueeEntries([tool("tool-1", { status: "ok" })]);
++
++    expect(running).toHaveLength(1);
++    expect(done).toHaveLength(1);
++    expect(running[0]!.status).toBe("running");
++    expect(done[0]!.status).toBe("done");
++  });
++
++  it("子代理内部工具递归进入同一轨道（FR-01）", () => {
++    const entries = deriveLiveMarqueeEntries([
++      tool("agent-1", {
++        toolName: "Agent",
++        primary: "排查后端超时",
++        subagentType: "Explore",
++        children: [tool("inner-1", { toolName: "Grep", primary: "keepalive" })],
++      }),
++    ]);
++
++    expect(entries.map((e) => e.id)).toEqual(["agent-1", "agent-1/inner-1"]);
++    expect(entries[0]!.icon).toBe("subagent");
++    expect(entries[1]!.text).toContain("keepalive");
++  });
++
++  it("条目超过上限时只保留最近 200 条", () => {
++    const many = Array.from({ length: LIVE_MARQUEE_MAX_ENTRIES + 10 }, (_, i) =>
++      thinking(`t-${i}`, `事件 ${i}`),
++    );
++    const entries = deriveLiveMarqueeEntries(many);
++
++    expect(entries).toHaveLength(LIVE_MARQUEE_MAX_ENTRIES);
++    expect(entries[0]!.id).toBe("t-10");
++    expect(entries[entries.length - 1]!.id).toBe(`t-${LIVE_MARQUEE_MAX_ENTRIES + 9}`);
++  });
++});
++
++describe("TurnLiveMarquee 连续轨道（FR-01 / FR-02 / FR-05）", () => {
++  const entries = deriveLiveMarqueeEntries([
++    thinking("t1", "分析登录链路"),
++    tool("tool-1", { toolName: "Read", primary: "src/lib/auth.ts" }),
++    fileSeg("f1", "report.md"),
++  ]);
++
++  it("轨道按顺序完整渲染全部条目，不复制内容循环", () => {
++    const { getByTestId } = render(<TurnLiveMarquee entries={entries} />);
++    const track = getByTestId("turn-live-marquee-track");
++
++    expect(track.children).toHaveLength(entries.length);
++    const texts = Array.from(track.children).map((el) => el.textContent ?? "");
++    expect(texts[0]).toContain("分析登录链路");
++    expect(texts[1]).toContain("读写文件");
++    expect(texts[texts.length - 1]).toContain("report.md");
++  });
++
++  it("reduced-motion 下静态展示最新一条，不渲染滚动轨道（FR-05）", () => {
++    const { queryByTestId, getByTestId } = render(
++      <TurnLiveMarquee entries={entries} reducedMotion />,
++    );
++
++    expect(queryByTestId("turn-live-marquee-track")).toBeNull();
++    expect(getByTestId("turn-live-marquee").textContent).toContain("report.md");
++  });
++
++  it("无条目时不渲染空壳", () => {
++    const { queryByTestId } = render(<TurnLiveMarquee entries={[]} />);
++    expect(queryByTestId("turn-live-marquee")).toBeNull();
++  });
++
++  it("组件不可见时暂停滚动，恢复可见后继续（FR-06）", async () => {
++    let callback: IntersectionObserverCallback | null = null;
++    class MockIntersectionObserver implements IntersectionObserver {
++      readonly root = null;
++      readonly rootMargin = "";
++      readonly thresholds: ReadonlyArray<number> = [];
++      constructor(cb: IntersectionObserverCallback) {
++        callback = cb;
++      }
++      observe() {}
++      unobserve() {}
++      disconnect() {}
++      takeRecords(): IntersectionObserverEntry[] {
++        return [];
++      }
++    }
++
++    vi.stubGlobal("IntersectionObserver", MockIntersectionObserver);
++    let rafCalls = 0;
++    const rafSpy = vi
++      .spyOn(globalThis, "requestAnimationFrame")
++      .mockImplementation(() => {
++        rafCalls += 1;
++        return rafCalls;
++      });
++
++    try {
++      render(<TurnLiveMarquee entries={entries} />);
++      await waitFor(() => expect(callback).not.toBeNull());
++      expect(rafCalls).toBeGreaterThan(0);
++
++      act(() => {
++        callback!(
++          [{ isIntersecting: false } as IntersectionObserverEntry],
++          {} as IntersectionObserver,
++        );
++      });
++      const pausedCalls = rafCalls;
++      await new Promise((resolve) => setTimeout(resolve, 30));
++      expect(rafCalls).toBe(pausedCalls);
++
++      act(() => {
++        callback!(
++          [{ isIntersecting: true } as IntersectionObserverEntry],
++          {} as IntersectionObserver,
++        );
++      });
++      await waitFor(() => expect(rafCalls).toBeGreaterThan(pausedCalls));
++    } finally {
++      rafSpy.mockRestore();
++      vi.unstubAllGlobals();
++    }
++  });
++});
++
++describe("TurnTimeline 接入门控（FR-01 / FR-04）", () => {
++  it("对话视图 + 运行中轮次 → 渲染跑马灯", () => {
++    const { queryByTestId } = renderTimeline([makeTurn()]);
++    expect(queryByTestId("turn-live-marquee")).not.toBeNull();
++  });
++
++  it("对话视图 + 终态轮次 → 不渲染", () => {
++    const { queryByTestId } = renderTimeline([makeTurn({ status: "completed" })]);
++    expect(queryByTestId("turn-live-marquee")).toBeNull();
++  });
++
++  it("进度视图 + 运行中轮次 → 不渲染", () => {
++    const { queryByTestId } = renderTimeline([makeTurn()], "all");
++    expect(queryByTestId("turn-live-marquee")).toBeNull();
++  });
++
++  it("轨迹视图 → 不渲染", () => {
++    const { queryByTestId } = renderTimeline([makeTurn()], "trajectory");
++    expect(queryByTestId("turn-live-marquee")).toBeNull();
++  });
++});
+diff --git a/frontend/src/components/daemon/__tests__/turn-timeline-session-input-bar.test.tsx b/frontend/src/components/daemon/__tests__/turn-timeline-session-input-bar.test.tsx
+index dc6fd6824..4d6349fe0 100644
+--- a/frontend/src/components/daemon/__tests__/turn-timeline-session-input-bar.test.tsx
++++ b/frontend/src/components/daemon/__tests__/turn-timeline-session-input-bar.test.tsx
+@@ -424,7 +424,7 @@ describe("TurnTimeline 用户气泡复制按钮（task-11 / 2026-08-31-session-q
+     expect(writeText).toHaveBeenCalledWith("用户提问");
+   });
+ 
+-  it("带附件标记 prompt：复制剥离标记后的正文（writeText 参数不含 [附件: 行）", async () => {
++  it("带附件标记 prompt：复制为人读正文（附件转 📎 清单，不含 [附件: 协议行）", async () => {
+     const writeText = vi.fn().mockResolvedValue(undefined);
+     Object.defineProperty(navigator, "clipboard", { value: { writeText }, configurable: true });
+     setupTimeline({
+@@ -440,7 +440,8 @@ describe("TurnTimeline 用户气泡复制按钮（task-11 / 2026-08-31-session-q
+       fireEvent.click(screen.getByRole("button", { name: "复制" }));
+     });
+     expect(writeText).toHaveBeenCalledTimes(1);
+-    expect(writeText).toHaveBeenCalledWith("帮我看下这个报错");
++    // 2026-10-22-session-composer-slim FR-01：附件名保留为「📎 文件名」清单。
++    expect(writeText).toHaveBeenCalledWith("📎 截图.png\n帮我看下这个报错");
+     expect(writeText.mock.calls[0]?.[0]).not.toContain("[附件:");
+   });
+ 
+diff --git a/frontend/src/components/daemon/message-queue-bar.tsx b/frontend/src/components/daemon/message-queue-bar.tsx
+index 379876f09..35346c81e 100644
+--- a/frontend/src/components/daemon/message-queue-bar.tsx
++++ b/frontend/src/components/daemon/message-queue-bar.tsx
+@@ -38,7 +38,7 @@
+  *   - pending 条目提供 ✕ 删除；sending 条目转 spinner 不提供操作；
+  *   - 队列满（用户消息条目 >= max，D-002 默认 5）显示「队列已满（N/N）」
+  *     （2026-10-21-task-wakeup-event-queue：计数/满员只计用户消息条目）；
+- *   - 点击条目展开查看完整 displayPrompt（带附件标记行）与失败原因。
++ *   - 点击条目展开查看完整 displayPrompt（附件标记行已转为人读「📎 文件名」清单）与失败原因。
+  *
+  * 纯展示组件：不 fetch、不持队列真相、不引状态库；满员判断由父级传入的
+  * entries/max 得出。三个新回调 onReorder / onEdit / onDispatchNow 均可选——
+@@ -63,6 +63,7 @@ import {
+ import { Button, Input, Tag, Tooltip } from "antd";
+ 
+ import { cn } from "@/lib/utils";
++import { formatRefsForPlainText } from "@/lib/attachment-refs";
+ import type { QueueEntry } from "@/hooks/use-message-queue";
+ import { getProviderCaps } from "@/lib/provider-caps";
+ import {
+@@ -380,7 +381,9 @@ export function MessageQueueBar({
+             ? entry.prompt.slice(TASK_WAKEUP_PROMPT_PREFIX.length).trim() ||
+               "系统通知"
+             : null;
+-          const summarySource = wakeupBody ?? entry.prompt;
++          // 2026-10-22-session-composer-slim FR-01：摘要与展开正文只展示人读引用
++          //（📎 文件名），不露出 [附件引用:uuid|…] 等协议长串；发送协议不变。
++          const summarySource = formatRefsForPlainText(wakeupBody ?? entry.prompt);
+           const summary =
+             summarySource.length > SUMMARY_LIMIT
+               ? `${summarySource.slice(0, SUMMARY_LIMIT)}…`
+@@ -457,9 +460,11 @@ export function MessageQueueBar({
+                         : "max-w-[280px] truncate",
+                     )}
+                   >
+-                    {expanded ? (wakeupBody ?? entry.displayPrompt) : summary}
++                    {expanded
++                      ? formatRefsForPlainText(wakeupBody ?? entry.displayPrompt)
++                      : summary}
+                   </span>
+-                  {/* 附件数（D-004：折叠态显示；展开态 displayPrompt 已含附件标记行）。 */}
++                  {/* 附件数（D-004：折叠态显示；展开态已转为人读「📎 文件名」清单）。 */}
+                   {!expanded && entry.attachmentIds.length > 0 && (
+                     <Tooltip title={`含 ${entry.attachmentIds.length} 个附件`}>
+                       <span className="mt-0.5 shrink-0 opacity-80">
+diff --git a/frontend/src/components/daemon/runtime-session-helpers.tsx b/frontend/src/components/daemon/runtime-session-helpers.tsx
+index 8ba0f504a..bfe42c021 100644
+--- a/frontend/src/components/daemon/runtime-session-helpers.tsx
++++ b/frontend/src/components/daemon/runtime-session-helpers.tsx
+@@ -24,6 +24,15 @@ import {
+   type UserMsgTurnSegment,
+ } from "@/components/daemon/session-log-assembler";
+ import { type AgentRunLogEntry } from "@/lib/agent";
++// 2026-10-22-session-composer-slim：标记行解析迁入纯函数库（展示层格式化共用同一实现），
++// 本模块保持既有导出面，调用方零改动。
++import {
++  parseAttachmentMarkers,
++  type ParsedAttachmentMarker,
++} from "@/lib/attachment-refs";
++
++export { parseAttachmentMarkers };
++export type { ParsedAttachmentMarker };
+ import {
+   SESSION_SUPPORTED_PROVIDERS,
+   type AgentSessionRead,
+@@ -759,45 +768,8 @@ export function SessionHistoryView({
+ }
+ 
+ // ── 2026-08-20-session-multimodal-attachments task-13（D-3）：附件标记行解析 ──
+-
+-/** 附件标记行解析产物：附件清单 + 剥离标记后的纯文本。 */
+-export interface ParsedAttachmentMarker {
+-  id: string;
+-  kind: "image" | "file";
+-  name: string;
+-}
+-
+-/**
+- * 解析 prompt 头部的附件标记行（backend inject 写入，D-3）：
+- * `[附件:<uuid>|<kind>|<name>]` 逐行一条；UUID 锚定（防用户伪标记文本误报）。
+- * 解析失败的行按原文本保留（容错）；标记行后的正文原样返回。
+- */
+-export function parseAttachmentMarkers(prompt: string): {
+-  attachments: ParsedAttachmentMarker[];
+-  text: string;
+-} {
+-  const uuidRe =
+-    /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/;
+-  const markerRe =
+-    /^\[附件:([0-9a-fA-F-]{36})\|(image|file)\|(.+)\]$/;
+-  const attachments: ParsedAttachmentMarker[] = [];
+-  const lines = prompt.split("\n");
+-  let i = 0;
+-  while (i < lines.length) {
+-    const m = markerRe.exec(lines[i]!.trim());
+-    if (!m || !uuidRe.test(m[1]!)) break;
+-    attachments.push({
+-      id: m[1]!,
+-      kind: m[2] as "image" | "file",
+-      name: m[3]!,
+-    });
+-    i += 1;
+-  }
+-  if (i === 0) return { attachments, text: prompt };
+-  // 标记行后的空行（backend 以 \n 接正文）剥一层。
+-  const rest = lines.slice(i).join("\n").replace(/^\n/, "");
+-  return { attachments, text: rest };
+-}
++// parseAttachmentMarkers 已于 2026-10-22 迁入 lib/attachment-refs.ts（纯函数库），
++// 本文件顶部 re-export 保持既有导出面。
+ 
+ /**
+  * 拼接附件标记行与正文（parseAttachmentMarkers 的逆操作，语义对齐 backend
+diff --git a/frontend/src/components/daemon/scheduled-messages-bar.tsx b/frontend/src/components/daemon/scheduled-messages-bar.tsx
+index 8cbf407b5..141696915 100644
+--- a/frontend/src/components/daemon/scheduled-messages-bar.tsx
++++ b/frontend/src/components/daemon/scheduled-messages-bar.tsx
+@@ -30,6 +30,7 @@ import { Clock, X } from "lucide-react";
+ import { Button, Modal, Tag, Tooltip } from "antd";
+ 
+ import { cn } from "@/lib/utils";
++import { formatRefsForPlainText } from "@/lib/attachment-refs";
+ import { ApiError } from "@/lib/api";
+ import { deleteScheduledMessage, type ScheduledMessageRead } from "@/lib/daemon";
+ import { useNotify } from "@/lib/errors";
+@@ -43,9 +44,12 @@ const SUMMARY_LIMIT = 40;
+ 
+ /**
+  * prompt 摘要（bar chip 与 panel 系统提示行「发送「{摘要}」」共用同一截断口径）。
++ * 2026-10-22-session-composer-slim FR-01：先做引用纯文本化（📎 文件名），
++ * 展示层不露出 [附件引用:uuid|…] 长串。
+  */
+ export function summarizeScheduledPrompt(prompt: string): string {
+-  return prompt.length > SUMMARY_LIMIT ? `${prompt.slice(0, SUMMARY_LIMIT)}…` : prompt;
++  const text = formatRefsForPlainText(prompt);
++  return text.length > SUMMARY_LIMIT ? `${text.slice(0, SUMMARY_LIMIT)}…` : text;
+ }
+ 
+ /**
+@@ -252,7 +256,10 @@ function ScheduledMessagesList({
+                 <span className="shrink-0 font-medium tabular-nums">
+                   {formatScheduledTime(msg.dispatch_at)}
+                 </span>
+-                <span className="max-w-[240px] truncate" title={msg.prompt}>
++                <span
++                  className="max-w-[240px] truncate"
++                  title={formatRefsForPlainText(msg.prompt)}
++                >
+                   {summarizeScheduledPrompt(msg.prompt)}
+                 </span>
+                 {/* 2026-09-12：系统自动排期徽标（origin=auto_resume:*；与状态
+diff --git a/frontend/src/components/daemon/session-input-bar.tsx b/frontend/src/components/daemon/session-input-bar.tsx
+index 2eba38461..af16a6669 100644
+--- a/frontend/src/components/daemon/session-input-bar.tsx
++++ b/frontend/src/components/daemon/session-input-bar.tsx
+@@ -40,6 +40,7 @@ import {
+   AtSign,
+   Clock,
+   FileText,
++  Check,
+   Image as ImageIcon,
+   Paperclip,
+   Plus,
+@@ -186,6 +187,18 @@ export interface SessionInputBarProps {
+   /** 工作区引用 token 映射受控回传（producer=输入区，组装位经父级
+    *  substituteWsRefsForSend 消费，同 onAttTokenMapChange 模式）。 */
+   onWsRefTokensChange?: (next: WsRefTokenMap) => void;
++  /**
++   * 2026-10-22-session-composer-slim FR-02：会话级「daemon 重启自动续跑」开关
++   * （原 SessionConfigBar 控件迁入 + 菜单）。enabled=当前生效态（缺省开由父层
++   * 归一——config.auto_resume_interrupted 仅显式 false 为关）；disabled=会话
++   * 结束/机器离线；onToggle 由父层接 PATCH 接口。不传不渲染该项（预会话/
++   * dialog 无会话级状态）。
++   */
++  autoResume?: {
++    enabled: boolean;
++    disabled?: boolean;
++    onToggle: (next: boolean) => void | Promise<void>;
++  };
+ }
+ 
+ function formatBytes(n: number): string {
+@@ -271,6 +284,7 @@ export function SessionInputBar({
+   pendingWsRefInsert,
+   onPendingWsRefInsertHandled,
+   onWsRefTokensChange,
++  autoResume,
+ }: SessionInputBarProps) {
+   const fileRef = useRef<HTMLInputElement>(null);
+   const textareaRef = useRef<HTMLTextAreaElement>(null);
+@@ -1056,6 +1070,50 @@ export function SessionInputBar({
+                   </span>
+                 </span>
+               </button>
++              {/* 2026-10-22-session-composer-slim FR-02：中断自动续跑从配置条
++                  迁入 + 菜单（开关形态：menuitemcheckbox + 勾选态）。点击切换
++                  不关菜单（可连续观察状态）；终态/离线禁用并说明原因。 */}
++              {autoResume ? (
++                <>
++                  <div aria-hidden className="my-1 border-t border-border" />
++                  <button
++                    type="button"
++                    role="menuitemcheckbox"
++                    aria-checked={autoResume.enabled}
++                    aria-label={`中断自动续跑（${autoResume.enabled ? "已开启" : "已关闭"}）`}
++                    data-testid="plus-menu-auto-resume"
++                    disabled={autoResume.disabled}
++                    onClick={() => void autoResume.onToggle(!autoResume.enabled)}
++                    title={
++                      autoResume.disabled
++                        ? "会话已结束或机器离线，不可切换"
++                        : autoResume.enabled
++                          ? "已开启：daemon 重启恢复后，被中断的一轮自动继续执行（最多自动续跑 2 次）；点击关闭"
++                          : "已关闭：daemon 重启后不自动续跑，中断轮保留手动「重新发送」；点击开启"
++                    }
++                    className="flex w-full items-center gap-2.5 px-3 py-2 text-left transition-colors hover:bg-muted disabled:cursor-not-allowed disabled:opacity-60"
++                  >
++                    <RefreshCw
++                      aria-hidden
++                      className="h-4 w-4 shrink-0 text-muted-foreground"
++                    />
++                    <span className="min-w-0 flex-1">
++                      <span className="block text-[13px] leading-5">中断自动续跑</span>
++                      <span className="block text-[11px] leading-4 text-muted-foreground">
++                        {autoResume.enabled
++                          ? "已开启：重启后中断轮自动继续"
++                          : "已关闭：重启后需手动重新发送"}
++                      </span>
++                    </span>
++                    {autoResume.enabled ? (
++                      <Check
++                        aria-hidden
++                        className="h-4 w-4 shrink-0 text-brand-600"
++                      />
++                    ) : null}
++                  </button>
++                </>
++              ) : null}
+             </div>
+           )}
+         </div>
+diff --git a/frontend/src/components/daemon/session-panel/session-panel-page.tsx b/frontend/src/components/daemon/session-panel/session-panel-page.tsx
+index 6fec788f3..a468ec05b 100644
+--- a/frontend/src/components/daemon/session-panel/session-panel-page.tsx
++++ b/frontend/src/components/daemon/session-panel/session-panel-page.tsx
+@@ -5797,6 +5797,15 @@ export function SessionPanelPage({
+           // task-08（FR-04）：⏰ 定时发送入口——真会话（已有 sessionId）注入；
+           // 预会话渲染点（上方）不传即不渲染。
+           onSchedule={openSchedModal}
++          // 2026-10-22-session-composer-slim FR-02：中断自动续跑开关从配置条迁入
++          // + 菜单（缺省开；config.auto_resume_interrupted 仅显式 false 为关）。
++          autoResume={{
++            enabled:
++              (session.config as Record<string, unknown> | null)
++                ?.auto_resume_interrupted !== false,
++            disabled: ended || !machineOnline,
++            onToggle: handleAutoResumeToggle,
++          }}
+         />
+         <div ref={configBarWrapRef} className="px-5 pb-3">
+           <SessionConfigBar
+@@ -5808,14 +5817,8 @@ export function SessionPanelPage({
+             configSnapshot={session.config_snapshot ?? null}
+             engine={session.provider ?? null}
+             variant={variant}
+-            // 2026-09-10-auto-resume-interrupted-turn / FR-06：中断自动续跑开关
+-            //（缺省开；config.auto_resume_interrupted 仅显式 false 为关）。
+-            autoResume={{
+-              enabled: (session.config as Record<string, unknown> | null)
+-                ?.auto_resume_interrupted !== false,
+-              disabled: ended || !machineOnline,
+-              onToggle: handleAutoResumeToggle,
+-            }}
++            // 2026-10-22-session-composer-slim FR-02：中断自动续跑入口已迁至
++            // 输入区 + 菜单（见上方 SessionInputBar.autoResume），配置条不再渲染。
+             // ql-20260904-010：错误卡「切换供应商」定位到本配置条（打开供应商下拉）。
+             providerOpenSignal={configProviderSignal}
+             // 2026-09-14-session-thinking-level task-06（FR-06 / R-04）：会话态
+diff --git a/frontend/src/components/daemon/turn-live-marquee.tsx b/frontend/src/components/daemon/turn-live-marquee.tsx
+new file mode 100644
+index 000000000..81e02547a
+--- /dev/null
++++ b/frontend/src/components/daemon/turn-live-marquee.tsx
+@@ -0,0 +1,493 @@
++"use client";
++
++/**
++ * 2026-10-22-conversation-live-marquee（FR-01~FR-06）：
++ * 会话「对话」视图运行中轮次末尾的单行实时活动跑马灯。
++ *
++ * 目标（用户原话）：让用户感知对话还在真实跑着，不必看清具体内容；
++ * 事件一到就进入轨道、有多少刷多少，一直流到最新一条为止，不循环回放。
++ *
++ * 数据源：现有 `TurnSegment[]`（SSE 实时装配，与「进度」视图同源），
++ * 后端 / daemon / API 零改动：
++ *   - `deriveLiveMarqueeEntries`：递归收集 process 类段（thinking / tool /
++ *     子代理含内部工具 / file / stderr / preamble / compact / compact_status /
++ *     user_msg / turn_trigger），跳过 text 答复段（正文已在对话流展示）；
++ *     段 id 作唯一键，流式增长的思考、状态翻转的工具只更新原条目不重复入队；
++ *   - `TurnLiveMarquee`：单行连续滚动轨道（2026-10-23 用户反馈修订）。
++ *     不做"每条停留 N 秒"的逐条轮播，也不复制内容循环——条目按时间顺序
++ *     等宽排列，轨道向左移动，**滚到最新一条贴住右侧即停**；新事件到达后
++ *     继续向左推进，旧内容滑出、新内容从右进入，始终只向最新流动。
++ *     速度按追赶距离自适应（事件越密集流得越快），空档期由容器内低频流光
++ *     提供"仍在运行"的感知。组件不可见（IntersectionObserver）或系统开启
++ *     减少动态效果时停表；reduced-motion 下静态展示最新一条。
++ *
++ * 渲染经济性（对齐 turn-status-bar 的先例）：派生 useMemo 只依赖 segments
++ * 引用；滚动由单条 rAF 直接写 transform（不走 React 每帧 setState）。
++ */
++
++import { memo, useCallback, useEffect, useRef, useState } from "react";
++
++import { cn } from "@/lib/utils";
++
++import { processLabel } from "./process-labels";
++import type { TurnSegment } from "./session-log-assembler";
++
++/**
++ * 轨道条目上限：超出只保留最近 200 条（更早的早已滚出视口）。
++ * 上限内不做窗口替换，保证"只向最新流、不回跳"。
++ */
++export const LIVE_MARQUEE_MAX_ENTRIES = 200;
++/** 滚动基础速度（px/s）与追赶上限；距离越大越快，事件爆发时能追平。 */
++export const LIVE_MARQUEE_BASE_SPEED = 180;
++export const LIVE_MARQUEE_MAX_SPEED = 1600;
++/** 单条摘要截断长度（用户不需要看清全文，单行不撑破）。 */
++const CLIP_LENGTH = 64;
++
++export type LiveMarqueeIcon =
++  | "thinking"
++  | "tool"
++  | "subagent"
++  | "file"
++  | "stderr"
++  | "system"
++  | "compact"
++  | "user"
++  | "wakeup";
++
++export interface LiveMarqueeEntry {
++  /** 段 id（子代理内部段带父路径前缀，保证树内唯一）。 */
++  id: string;
++  icon: LiveMarqueeIcon;
++  /** 单行展示图标（emoji；工具按 processLabel 类别区分）。 */
++  glyph: string;
++  text: string;
++  status: "running" | "done" | "failed" | "neutral";
++}
++
++const ICON_GLYPH: Record<LiveMarqueeIcon, string> = {
++  thinking: "💭",
++  tool: "🔧",
++  subagent: "🤖",
++  file: "📎",
++  stderr: "⚠",
++  system: "ℹ",
++  compact: "🗜",
++  user: "💬",
++  wakeup: "🔔",
++};
++
++/** 单行摘要归一：折叠空白 + 截断（与 status-bar summarizeText 同口径）。 */
++function clip(text: string | null | undefined, max = CLIP_LENGTH): string {
++  const t = (text ?? "").replace(/\s+/g, " ").trim();
++  if (!t) return "";
++  return t.length > max ? `${t.slice(0, max)}…` : t;
++}
++
++/** 工具短名：mcp__<server>__<tool> 取末段（与 processLabel 匹配口径一致）。 */
++function toolBaseName(toolName: string | null): string {
++  if (!toolName) return "工具";
++  return toolName.split("__").pop() || toolName;
++}
++
++function toolEntryStatus(status: "running" | "ok" | "deny"): LiveMarqueeEntry["status"] {
++  if (status === "running") return "running";
++  return status === "deny" ? "failed" : "done";
++}
++
++/** 压缩过程段 JSON 载荷（phase=compacting/success/failed），解析失败按进行中。 */
++function compactStatusOf(text: string): "compacting" | "success" | "failed" {
++  try {
++    const parsed = JSON.parse(text) as { phase?: unknown };
++    return parsed.phase === "success" || parsed.phase === "failed"
++      ? parsed.phase
++      : "compacting";
++  } catch {
++    return "compacting";
++  }
++}
++
++function collectEntries(
++  segments: TurnSegment[],
++  out: LiveMarqueeEntry[],
++  prefix = "",
++): void {
++  for (const seg of segments) {
++    switch (seg.kind) {
++      case "text":
++        // 答复正文不进跑马灯（对话流已完整展示，避免重复刷屏）。
++        break;
++      case "thinking":
++        out.push({
++          id: `${prefix}${seg.id}`,
++          icon: "thinking",
++          glyph: ICON_GLYPH.thinking,
++          text: clip(seg.text) || "正在思考…",
++          status: seg.streaming ? "running" : "done",
++        });
++        break;
++      case "tool": {
++        const isSubagent = seg.children.length > 0;
++        const label = processLabel("tool", seg.toolName, seg.status);
++        const primary = clip(seg.primary, 44);
++        out.push({
++          id: `${prefix}${seg.id}`,
++          icon: isSubagent ? "subagent" : "tool",
++          glyph: isSubagent ? ICON_GLYPH.subagent : label.icon,
++          text: isSubagent
++            ? `子代理 · ${toolBaseName(seg.toolName)}${primary ? ` ${primary}` : ""}`
++            : `${label.label} · ${toolBaseName(seg.toolName)}${primary ? ` ${primary}` : ""}`,
++          status: toolEntryStatus(seg.status),
++        });
++        // 子代理内部工具同样进入流（「全部过程信息」）。
++        collectEntries(seg.children, out, `${prefix}${seg.id}/`);
++        break;
++      }
++      case "subagent_stub":
++        out.push({
++          id: `${prefix}${seg.id}`,
++          icon: "subagent",
++          glyph: ICON_GLYPH.subagent,
++          text: `子代理 · ${clip(seg.subagentType ?? "子代理", 40)}`,
++          status: seg.orphaned ? "failed" : "running",
++        });
++        collectEntries(seg.children, out, `${prefix}${seg.id}/`);
++        break;
++      case "stderr":
++        out.push({
++          id: `${prefix}${seg.id}`,
++          icon: "stderr",
++          glyph: ICON_GLYPH.stderr,
++          text: `警告 · ${clip(seg.text, 56) || "输出异常"}`,
++          status: "failed",
++        });
++        break;
++      case "file":
++        out.push({
++          id: `${prefix}${seg.id}`,
++          icon: "file",
++          glyph: ICON_GLYPH.file,
++          text: `文件 · ${clip(seg.name, 40)}`,
++          status: "done",
++        });
++        break;
++      case "preamble":
++        out.push({
++          id: `${prefix}${seg.id}`,
++          icon: "system",
++          glyph: ICON_GLYPH.system,
++          text: `上下文 · ${clip(seg.text, 40)}`,
++          status: "neutral",
++        });
++        break;
++      case "compact":
++        out.push({
++          id: `${prefix}${seg.id}`,
++          icon: "compact",
++          glyph: ICON_GLYPH.compact,
++          text: "上下文已重新压缩",
++          status: "done",
++        });
++        break;
++      case "compact_status": {
++        const phase = compactStatusOf(seg.text);
++        out.push({
++          id: `${prefix}${seg.id}`,
++          icon: "compact",
++          glyph: ICON_GLYPH.compact,
++          text:
++            phase === "success"
++              ? "上下文压缩完成"
++              : phase === "failed"
++                ? "上下文压缩失败"
++                : "正在重新压缩上下文",
++          status:
++            phase === "compacting" ? "running" : phase === "failed" ? "failed" : "done",
++        });
++        break;
++      }
++      case "user_msg":
++        out.push({
++          id: `${prefix}${seg.id}`,
++          icon: "user",
++          glyph: ICON_GLYPH.user,
++          text: `引导 · ${clip(seg.text, 56)}`,
++          status: "neutral",
++        });
++        break;
++      case "turn_trigger":
++        out.push({
++          id: `${prefix}${seg.id}`,
++          icon: "wakeup",
++          glyph: ICON_GLYPH.wakeup,
++          text: `唤醒 · ${clip(seg.text, 56)}`,
++          status: "neutral",
++        });
++        break;
++    }
++  }
++}
++
++/**
++ * 段序列 → 单行跑马灯条目（纯函数，无 React 依赖）。
++ *
++ * 顺序 = 段文档序（与「进度」视图时间线同源）；同 id 段只保留一条；
++ * 超过 LIVE_MARQUEE_MAX_ENTRIES 截断最旧。
++ */
++export function deriveLiveMarqueeEntries(
++  segments: TurnSegment[],
++): LiveMarqueeEntry[] {
++  const out: LiveMarqueeEntry[] = [];
++  collectEntries(segments, out);
++  return out.length > LIVE_MARQUEE_MAX_ENTRIES
++    ? out.slice(out.length - LIVE_MARQUEE_MAX_ENTRIES)
++    : out;
++}
++
++/** 系统「减少动态效果」偏好（SSR 首帧 false，挂载后校正）。 */
++function usePrefersReducedMotion(): boolean {
++  const [reduced, setReduced] = useState(false);
++  useEffect(() => {
++    if (typeof window === "undefined" || typeof window.matchMedia !== "function") {
++      return;
++    }
++    const mq = window.matchMedia("(prefers-reduced-motion: reduce)");
++    setReduced(mq.matches);
++    const onChange = (event: MediaQueryListEvent) => setReduced(event.matches);
++    // Safari 14 之前只有 addListener（项目支持面以现代浏览器为主，防御式兜底）。
++    if (typeof mq.addEventListener === "function") {
++      mq.addEventListener("change", onChange);
++      return () => mq.removeEventListener("change", onChange);
++    }
++    mq.addListener(onChange);
++    return () => mq.removeListener(onChange);
++  }, []);
++  return reduced;
++}
++
++/** 状态点颜色：运行中 brand / 完成 emerald / 失败 destructive / 中性灰。 */
++function dotClass(status: LiveMarqueeEntry["status"]): string {
++  switch (status) {
++    case "running":
++      return "bg-brand-500";
++    case "done":
++      return "bg-emerald-500";
++    case "failed":
++      return "bg-destructive";
++    default:
++      return "bg-muted-foreground/40";
++  }
++}
++
++export interface TurnLiveMarqueeProps {
++  entries: LiveMarqueeEntry[];
++  /**
++   * 测试注入：强制减少动态效果（true=静态展示最新条）。
++   * 缺省走系统 matchMedia 偏好。
++   */
++  reducedMotion?: boolean;
++}
++
++/**
++ * 单行实时活动跑马灯（FR-01~FR-06）。
++ *
++ * 组件自身不判断轮次状态——「仅运行中轮次渲染」由消费方门控
++ * （turn-timeline 的 SegmentedTurnBody），保证状态语义只有一个来源。
++ */
++export const TurnLiveMarquee = memo(function TurnLiveMarquee({
++  entries,
++  reducedMotion,
++}: TurnLiveMarqueeProps) {
++  const prefersReduced = usePrefersReducedMotion();
++  const reduced = reducedMotion ?? prefersReduced;
++
++  const rootRef = useRef<HTMLDivElement | null>(null);
++  const viewportRef = useRef<HTMLDivElement | null>(null);
++  const trackRef = useRef<HTMLDivElement | null>(null);
++  /** 轨道当前左移距离（<=0）；target 为「最新条贴住右缘」的位置。 */
++  const offsetRef = useRef(0);
++  const targetRef = useRef(0);
++  const initializedRef = useRef(false);
++  /** 上一次渲染的首条 id：识别「达到上限后窗口滑动淘汰最旧」的瞬间。 */
++  const prevFirstIdRef = useRef<string | null>(null);
++  const [visible, setVisible] = useState(true);
++  const [ready, setReady] = useState(false);
++
++  const latest = entries.length > 0 ? entries[entries.length - 1]! : null;
++
++  /**
++   * 计算目标位置：内容右端贴视口右缘（即显示最新条）；内容不满一屏时 0。
++   * 首次测量直接定位（打开即看到最新），之后只向更负的方向推进，不回滚。
++   *
++   * @param slideByOne 达到条目上限后窗口滑动（淘汰最旧/追加最新）时为 true：
++   *   轨道宽度不变但内容整体左移了一条，需额外推进一条宽度，让新条目进入
++   *   视口——否则轨道会停在原处、最新事件永远看不见。
++   */
++  const applyTarget = useCallback((slideByOne = false) => {
++    const viewport = viewportRef.current;
++    const track = trackRef.current;
++    if (!viewport || !track) return;
++    const base = Math.min(0, viewport.clientWidth - track.scrollWidth);
++    // 目标单调不增：内容文本更新不该把已滚过的位置拉回来；窗口滑动时在
++    // 上一次目标基础上再推进一条（不能回到 base，否则新条目会瞬间跳入）。
++    let next = Math.min(targetRef.current, base);
++    if (slideByOne) {
++      const firstItem = track.firstElementChild as HTMLElement | null;
++      const gap = Number.parseFloat(getComputedStyle(track).columnGap || "0") || 0;
++      next -= (firstItem?.offsetWidth ?? 208) + gap;
++    }
++    targetRef.current = next;
++    if (!initializedRef.current) {
++      initializedRef.current = true;
++      offsetRef.current = next;
++      track.style.transform = `translate3d(${next}px, 0, 0)`;
++      setReady(true);
++    }
++  }, []);
++
++  // entries 变化 / 挂载：重算目标（首帧直接定位到最新；ready 前隐藏防闪）。
++  useEffect(() => {
++    if (reduced) return;
++    const firstId = entries.length > 0 ? entries[0]!.id : null;
++    const prevFirstId = prevFirstIdRef.current;
++    const slid =
++      prevFirstId != null &&
++      firstId != null &&
++      firstId !== prevFirstId &&
++      entries.length >= LIVE_MARQUEE_MAX_ENTRIES;
++    prevFirstIdRef.current = firstId;
++    applyTarget(slid);
++  }, [entries, reduced, applyTarget]);
++
++  // 视口尺寸变化（窗口缩放 / 侧栏开合）时重算目标。
++  useEffect(() => {
++    if (reduced) return;
++    const viewport = viewportRef.current;
++    if (!viewport || typeof ResizeObserver === "undefined") return;
++    const observer = new ResizeObserver(() => applyTarget());
++    observer.observe(viewport);
++    return () => observer.disconnect();
++  }, [reduced, applyTarget]);
++
++  // 连续滚动：追向「最新条贴右缘」的目标；到达即停，不循环、不回跳。
++  useEffect(() => {
++    if (reduced || !visible) return;
++    const track = trackRef.current;
++    if (!track) return;
++    let raf = 0;
++    let last = performance.now();
++    const step = (now: number) => {
++      const dt = Math.min(80, now - last);
++      last = now;
++      const target = targetRef.current;
++      const distance = offsetRef.current - target;
++      if (distance > 0.5) {
++        // 追赶距离越大速度越快：事件密集时加速，稀疏时慢速流动。
++        const speed = Math.min(
++          LIVE_MARQUEE_MAX_SPEED,
++          LIVE_MARQUEE_BASE_SPEED + distance * 1.2,
++        );
++        const delta = Math.min(distance, (speed * dt) / 1000);
++        offsetRef.current -= delta;
++        if (offsetRef.current - target < 0.5) offsetRef.current = target;
++        track.style.transform = `translate3d(${offsetRef.current}px, 0, 0)`;
++      }
++      raf = requestAnimationFrame(step);
++    };
++    raf = requestAnimationFrame(step);
++    return () => cancelAnimationFrame(raf);
++  }, [reduced, visible]);
++
++  // 可见性暂停（FR-06）：observer 不可用时不报错，默认保持运行。
++  useEffect(() => {
++    const el = rootRef.current;
++    if (el == null || typeof IntersectionObserver === "undefined") return;
++    const observer = new IntersectionObserver(
++      (records) => {
++        const record = records[0];
++        if (record) setVisible(record.isIntersecting);
++      },
++      { threshold: 0.1 },
++    );
++    observer.observe(el);
++    return () => observer.disconnect();
++  }, []);
++
++  if (entries.length === 0 || latest == null) return null;
++
++  return (
++    <div
++      ref={rootRef}
++      data-testid="turn-live-marquee"
++      role="status"
++      aria-live="off"
++      aria-label="实时活动流"
++      className={cn(
++        "sh-live-marquee ml-9 flex h-8 w-[min(100%,52rem)] items-center gap-2 overflow-hidden rounded-full border border-border/70 bg-card px-3 text-[12px] leading-none text-muted-foreground shadow-sm",
++      )}
++    >
++      {/* 运行状态点：运行中脉冲（reduced-motion 时静止）。 */}
++      <span aria-hidden className="relative z-10 flex h-2 w-2 shrink-0">
++        {!reduced && latest.status === "running" && (
++          <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-brand-400 opacity-60" />
++        )}
++        <span
++          className={cn("relative inline-flex h-2 w-2 rounded-full", dotClass(latest.status))}
++        />
++      </span>
++
++      {reduced ? (
++        // 减少动态效果：静态展示最新一条，不滚动。
++        <>
++          <span aria-hidden className="relative z-10 shrink-0 text-[12.5px]">
++            {latest.glyph}
++          </span>
++          <span
++            className="relative z-10 min-w-0 flex-1 truncate font-medium text-foreground"
++            title={latest.text}
++          >
++            {latest.text}
++          </span>
++        </>
++      ) : (
++        // 连续轨道：条目按时间顺序等宽排列，向左滚到最新条贴右缘即停。
++        <div
++          ref={viewportRef}
++          className={cn(
++            "relative z-10 min-w-0 flex-1 overflow-hidden transition-opacity duration-200",
++            !ready && "opacity-0",
++          )}
++        >
++          <div
++            ref={trackRef}
++            data-testid="turn-live-marquee-track"
++            className="flex w-max items-center gap-5 will-change-transform"
++          >
++            {entries.map((entry) => (
++              <span
++                key={entry.id}
++                className="flex w-[13rem] shrink-0 items-center gap-1.5"
++              >
++                <span aria-hidden className="shrink-0 text-[12.5px]">
++                  {entry.glyph}
++                </span>
++                <span
++                  className="min-w-0 flex-1 truncate font-medium text-foreground"
++                  title={entry.text}
++                >
++                  {entry.text}
++                </span>
++              </span>
++            ))}
++          </div>
++        </div>
++      )}
++
++      <span
++        aria-hidden
++        className="relative z-10 shrink-0 text-[9px] tracking-[0.12em] text-muted-foreground/50"
++      >
++        LIVE
++      </span>
++    </div>
++  );
++});
+diff --git a/frontend/src/components/daemon/turn-timeline.tsx b/frontend/src/components/daemon/turn-timeline.tsx
+index f3888025d..b521ac861 100644
+--- a/frontend/src/components/daemon/turn-timeline.tsx
++++ b/frontend/src/components/daemon/turn-timeline.tsx
+@@ -75,11 +75,16 @@ import {
+ // 2026-09-09-sessions-visual-refresh task-05/06（D-003@v1）：消息角色化共享构件
+ import { ChatMessageAvatar, RoundDivider } from "@/components/chat";
+ import { TurnStatusBar } from "@/components/daemon/turn-status-bar";
++import {
++  TurnLiveMarquee,
++  deriveLiveMarqueeEntries,
++} from "@/components/daemon/turn-live-marquee";
+ // agent-file-upload-mcp：历史回放过程项渲染 agent 上传文件卡片（TurnDetailsList）
+ import { FileMessageCard } from "@/components/daemon/file-message-card";
+ // 2026-08-20-session-multimodal-attachments task-13（D-3）：历史附件标记行解析
+ // + 图片缩略图/文件 chip 渲染。
+ import { parseAttachmentMarkers } from "@/components/daemon/runtime-session-helpers";
++import { formatRefsForPlainText } from "@/lib/attachment-refs";
+ import { turnTokenSpeedText } from "@/components/daemon/turn-speed";
+ import {
+   foldHeaderText,
+@@ -881,7 +886,9 @@ const TurnRow = memo(function TurnRow({
+                               定位 right:0 / bottom:-24px，经 className 覆盖默认右下偏移。 */}
+                           {parsed.text && (
+                             <CopyButton
+-                              getText={() => parseAttachmentMarkers(turn.prompt).text}
++                              // 2026-10-22-session-composer-slim FR-01：复制结果为
++                              // 人读文本（📎 文件名），不含协议标记。
++                              getText={() => formatRefsForPlainText(turn.prompt)}
+                               className="-bottom-6 right-0"
+                             />
+                           )}
+@@ -2141,6 +2148,16 @@ function SegmentedTurnBody({
+           ),
+     [viewMode, segments, turnStatus],
+   );
++  // 2026-10-22-conversation-live-marquee（FR-01~FR-06）：对话视图 + 运行中轮次
++  // 才派生跑马灯条目——进度/轨迹视图、终态轮、旧回退路径均不消费（渲染门控
++  // 与派生门控同源，避免无谓递归）。条目上限与去重由纯函数承担。
++  const liveEntries = useMemo(
++    () =>
++      viewMode === "conversation" && isLiveTurn(turnStatus)
++        ? deriveLiveMarqueeEntries(segments)
++        : [],
++    [viewMode, turnStatus, segments],
++  );
+   const timeline = useMemo(() => {
+     if (viewMode !== "all") return null;
+     const items: SegmentTimelineItem[] = [
+@@ -2286,6 +2303,10 @@ function SegmentedTurnBody({
+       {isLiveTurn(turnStatus) && !segments.some((s) => s.kind === "text") && (
+         <ThinkingPlaceholder viewMode={viewMode} />
+       )}
++      {/* 2026-10-22-conversation-live-marquee（FR-01 / FR-04）：对话视图运行中
++          轮次末尾的实时活动跑马灯——纯感知、不交互；进度/轨迹视图与终态轮
++          liveEntries 为空不挂载。位置=本轮最新处（思考占位之后）。 */}
++      {liveEntries.length > 0 && <TurnLiveMarquee entries={liveEntries} />}
+       {/* 2026-10-20-session-page-dsh-alignment（FR-01 / D-016①）：原 quick-3c85b05e
+           的「开始 · 结束 · 历时」独立行已删除——它与轮尾状态行重复，时间细节改由
+           TurnRow 派生 metaDetail 折进那条唯一元信息行（RoundDivider.detail / all 视图
+diff --git a/frontend/src/components/sessions/__tests__/ctx-usage-bar.test.tsx b/frontend/src/components/sessions/__tests__/ctx-usage-bar.test.tsx
+index 74ca75ee1..cf458eabd 100644
+--- a/frontend/src/components/sessions/__tests__/ctx-usage-bar.test.tsx
++++ b/frontend/src/components/sessions/__tests__/ctx-usage-bar.test.tsx
+@@ -427,7 +427,7 @@ describe("QuotaPill", () => {
+     expect(screen.queryByTestId("quota-pill")).not.toBeInTheDocument();
+   });
+ 
+-  it("智谱 quota 正常 → 渲染模型名 + 各窗口剩余 + 重置时间", async () => {
++  it("智谱 quota 正常 → 图标只显会话供应商首窗口百分比；明细（模型名/各窗口/重置）在浮层", async () => {
+     mockListProviders.mockResolvedValue([provider()]);
+     mockGetProviderQuota.mockResolvedValue(
+       quotaResp({
+@@ -440,39 +440,53 @@ describe("QuotaPill", () => {
+     );
+     renderPill(<QuotaPill providerId="p-zhipu" />);
+     const pill = await screen.findByTestId("quota-pill");
+-    expect(pill).toHaveTextContent("glm-4.7");
+-    expect(pill).toHaveTextContent("5小时窗剩");
++    // 2026-10-22-session-composer-slim FR-03 / D-001：面只留首窗口百分比。
+     expect(pill).toHaveTextContent("80%");
+-    expect(pill).toHaveTextContent("周限额剩");
+-    expect(pill).toHaveTextContent("40%");
+-    expect(pill.textContent).toMatch(/⏱ \d{2}-\d{2} \d{2}:\d{2} 重置/);
++    expect(pill.textContent).not.toContain("glm-4.7");
++    expect(pill.textContent).not.toContain("5小时窗");
++    expect(pill.textContent).not.toContain("40%");
++    expect(pill.textContent).not.toMatch(/重置/);
++    // 悬停 title 保留精简摘要（供应商 · 首窗口 · 重置）。
++    expect(pill.getAttribute("title")).toContain("glm-4.7");
++    expect(pill.getAttribute("title")).toContain("5小时窗剩 80%");
++    expect(pill.getAttribute("title")).toMatch(/\d{2}-\d{2} \d{2}:\d{2} 重置/);
++
++    // 点击浮层：完整明细照旧。
++    fireEvent.click(pill);
++    expect(await screen.findByText("模型剩余额度")).toBeInTheDocument();
++    expect(screen.getByText("5小时窗 剩余")).toBeInTheDocument();
++    expect(screen.getByText("周限额 剩余")).toBeInTheDocument();
++  });
++
++  it("低剩余变色：首窗口 ≤20% 红 / ≤50% 黄 / 正常无色", async () => {
++    const cases: Array<{ left: number; cls: string | null }> = [
++      { left: 80, cls: null },
++      { left: 50, cls: "text-warning" },
++      { left: 20, cls: "text-error" },
++    ];
++    for (const c of cases) {
++      mockListProviders.mockResolvedValue([provider()]);
++      mockGetProviderQuota.mockResolvedValue(
++        quotaResp({
++          model: "glm-4.7",
++          windows: [{ label: "5小时窗", left: c.left, reset: null }],
++        }),
++      );
++      const { unmount } = renderPill(<QuotaPill providerId="p-zhipu" />);
++      const pill = await screen.findByTestId("quota-pill");
++      const pct = Array.from(pill.querySelectorAll("span[class]")).find(
++        (s) => s.textContent === `${c.left}%`,
++      );
++      if (c.cls == null) {
++        expect(pct?.className ?? "").toBe("");
++      } else {
++        expect(pct?.className).toContain(c.cls);
++      }
++      unmount();
++    }
+   });
+ 
+-  it("低剩余变色：≤20% 红 / ≤50% 黄 / 正常无色", async () => {
+-    mockListProviders.mockResolvedValue([provider()]);
+-    mockGetProviderQuota.mockResolvedValue(
+-      quotaResp({
+-        model: "glm-4.7",
+-        windows: [
+-          { label: "5小时窗", left: 80, reset: null },
+-          { label: "低", left: 50, reset: null },
+-          { label: "危", left: 20, reset: null },
+-        ],
+-      }),
+-    );
+-    renderPill(<QuotaPill providerId="p-zhipu" />);
+-    await screen.findByTestId("quota-pill");
+-    const spans = screen
+-      .getByTestId("quota-pill")
+-      .querySelectorAll("span[class]");
+-    const byText = (t: string) =>
+-      Array.from(spans).find((s) => s.textContent === t);
+-    expect(byText("80%")?.className).toBe("");
+-    expect(byText("50%")?.className).toContain("text-warning");
+-    expect(byText("20%")?.className).toContain("text-error");
+-  });
+-
+-  it("聚合全部可查供应商：智谱走 quota 端点、Kimi 走 usage 端点、不可查的不请求；会话供应商排胶囊第一位 + 等N家", async () => {
++  it("聚合全部可查供应商：智谱走 quota 端点、Kimi 走 usage 端点、不可查的不请求；会话供应商排图标第一位", async () => {
+     mockListProviders.mockResolvedValue([
+       provider(),
+       provider({
+@@ -508,11 +522,12 @@ describe("QuotaPill", () => {
+     } satisfies UsageResult);
+     renderPill(<QuotaPill providerId="p-kimi" />);
+     const pill = await screen.findByTestId("quota-pill");
+-    // 会话供应商（Kimi）排第一位：model 名 + 其套餐窗口。
+-    expect(pill).toHaveTextContent("kimi-k2");
+-    expect(pill).toHaveTextContent("Kimi·5小时窗剩");
++    // 会话供应商（Kimi）排第一位：面只显示其首窗口百分比；其余收进 title/浮层。
+     expect(pill).toHaveTextContent("70%");
+-    expect(pill).toHaveTextContent("等1家");
++    expect(pill.textContent).not.toContain("kimi-k2");
++    expect(pill.textContent).not.toContain("等1家");
++    expect(pill.getAttribute("title")).toContain("kimi-k2");
++    expect(pill.getAttribute("title")).toContain("另有 1 家可查");
+     // 端点分流：智谱只查 quota、Kimi 只查 usage、Anthropic（不可查）不查。
+     expect(mockGetProviderQuota).toHaveBeenCalledTimes(1);
+     expect(mockGetProviderQuota).toHaveBeenCalledWith("p-zhipu");
+@@ -542,12 +557,13 @@ describe("QuotaPill", () => {
+     } satisfies UsageResult);
+     renderPill(<QuotaPill providerId="p-ds" />);
+     const pill = await screen.findByTestId("quota-pill");
+-    // 余额类无百分比窗口 → 胶囊面只显示供应商名（明细在浮层）。
+-    expect(pill).toHaveTextContent("DeepSeek");
++    // 余额类无百分比窗口 → 面只显示余额金额（供应商名/明细在 title 与浮层）。
++    expect(pill).toHaveTextContent("¥40");
+     expect(pill).not.toHaveTextContent("剩");
+     fireEvent.click(pill);
+     expect(await screen.findByText("CNY 剩余")).toBeInTheDocument();
+-    expect(screen.getByText("¥40 / 共 ¥100")).toBeInTheDocument();
++    // 图标面与浮层各一处（面显示余额金额，浮层为权威明细）。
++    expect(screen.getAllByText("¥40 / 共 ¥100").length).toBeGreaterThanOrEqual(1);
+   });
+ 
+   it("点击胶囊显示各窗口详情浮层（百分比低量红显 + 重置时间）", async () => {
+@@ -853,7 +869,8 @@ describe("QuotaPill mobile compact（ql-20260915-013）", () => {
+     renderPill(<QuotaPill providerId="p-zhipu" mobile />);
+     const pill = await screen.findByTestId("quota-pill");
+     expect(pill).toHaveTextContent("80%");
+-    expect(pill).toHaveTextContent("40%");
++    // 第二窗口不进面（只留最重要的首窗口），明细点击查看。
++    expect(pill.textContent).not.toContain("40%");
+     expect(pill.textContent).not.toContain("glm-4.7");
+     expect(pill.textContent).not.toContain("5小时窗剩");
+     expect(pill.textContent).not.toMatch(/重置/);
+@@ -862,7 +879,7 @@ describe("QuotaPill mobile compact（ql-20260915-013）", () => {
+     expect(await screen.findByText("模型剩余额度")).toBeInTheDocument();
+   });
+ 
+-  it("desktop（缺省 mobile=false）：完整胶囊照旧（零回归锚）", async () => {
++  it("desktop（缺省 mobile=false）：与 mobile 同形态（图标 + 首窗口百分比），明细点击浮层", async () => {
+     mockListProviders.mockResolvedValue([provider()]);
+     mockGetProviderQuota.mockResolvedValue(
+       quotaResp({
+@@ -872,8 +889,11 @@ describe("QuotaPill mobile compact（ql-20260915-013）", () => {
+     );
+     renderPill(<QuotaPill providerId="p-zhipu" />);
+     const pill = await screen.findByTestId("quota-pill");
+-    expect(pill).toHaveTextContent("glm-4.7");
+-    expect(pill).toHaveTextContent("5小时窗剩");
+-    expect(pill.textContent).toMatch(/重置/);
++    expect(pill).toHaveTextContent("80%");
++    expect(pill.textContent).not.toContain("glm-4.7");
++    expect(pill.textContent).not.toMatch(/重置/);
++    expect(pill.getAttribute("title")).toContain("5小时窗剩 80%");
++    fireEvent.click(pill);
++    expect(await screen.findByText("模型剩余额度")).toBeInTheDocument();
+   });
+ });
+diff --git a/frontend/src/components/sessions/__tests__/session-config-bar.test.tsx b/frontend/src/components/sessions/__tests__/session-config-bar.test.tsx
+index 3d96e7584..7d24a9e23 100644
+--- a/frontend/src/components/sessions/__tests__/session-config-bar.test.tsx
++++ b/frontend/src/components/sessions/__tests__/session-config-bar.test.tsx
+@@ -265,7 +265,7 @@ describe("SessionConfigBar 两控件渲染", () => {
+ // ── 2. running / ended 置灰（FR-05；ql-20260917-008 起 running 放开） ──────
+ 
+ describe("SessionConfigBar 状态置灰", () => {
+-  it("running：两控件可点（受理即排队，本轮结束后生效）+ Timer 提示，下拉可开", () => {
++  it("running：两控件可点（受理即排队，本轮结束后生效），下拉可开", () => {
+     renderBar({ running: true });
+     for (const name of [
+       "配置-供应商 本机默认",
+@@ -275,7 +275,9 @@ describe("SessionConfigBar 状态置灰", () => {
+         (screen.getByRole("button", { name }) as HTMLButtonElement).disabled,
+       ).toBe(false);
+     }
+-    expect(screen.getByText("运行中切换将于本轮结束后生效")).toBeInTheDocument();
++    // 2026-10-22-session-composer-slim FR-02：运行中提示行移出配置条
++    //（生效时机保留在各控件 title），释放行宽。
++    expect(screen.queryByText("运行中切换将于本轮结束后生效")).not.toBeInTheDocument();
+     // ql-20260917-008：运行中点开下拉可正常选择（请求落忙轮排队）
+     fireEvent.click(screen.getByRole("button", { name: "配置-供应商 本机默认" }));
+     expect(screen.getByTestId("config-dd-provider")).toBeInTheDocument();
+@@ -317,19 +319,17 @@ describe("SessionConfigBar 状态置灰", () => {
+   });
+   // ql-20260909-006：trailing 行尾插槽（会话面板挂 ctx 用量圆环）——
+   // 传入渲染在配置条行最右；不传零占位。
+-  it("trailing 插槽：传入内容渲染在行尾（running 提示之右），不传零占位", () => {
++  it("trailing 插槽：传入内容渲染在配置条行尾，不传零占位", () => {
+     renderBar({
+       running: true,
+       trailing: <span data-testid="trailing-slot-content">用量 12%</span>,
+     });
+     const slot = screen.getByTestId("trailing-slot-content");
+     expect(slot).toBeInTheDocument();
+-    // 与 running 提示同行——共享同一行容器（flex 行）。
++    // 与配置控件同行——共享同一行容器（flex 行）。
+     expect(
+-      slot.closest("div")?.contains(
+-        screen.getByText("运行中切换将于本轮结束后生效"),
+-      ),
+-    ).toBe(true);
++      slot.closest('[aria-label="会话配置控件条"]'),
++    ).not.toBeNull();
+ 
+     cleanup();
+     renderBar();
+@@ -1073,52 +1073,18 @@ describe("TurnTimeline whoLine 轮次快照渲染（D-008）", () => {
+ });
+ 
+ 
+-// ── 2026-09-10-auto-resume-interrupted-turn / FR-06：中断自动续跑开关 ──────────
++// ── 2026-10-22-session-composer-slim FR-02：续跑开关迁出配置条 ────────────────
+ 
+-describe("SessionConfigBar 中断自动续跑开关（autoResume 可选控件）", () => {
+-  it("不传 autoResume 不渲染（存量调用方零回归）", () => {
+-    renderBar();
+-    expect(screen.queryByTestId("config-auto-resume-switch")).toBeNull();
+-  });
+-
+-  it("传入渲染开关：默认开 + 点击触发 onToggle(false) + 禁用态不可点", async () => {
+-    const onToggle = vi.fn();
+-    const { rerender } = renderBar({ autoResume: { enabled: true, onToggle } });
+-    const sw = screen.getByTestId("config-auto-resume-switch");
+-    expect(sw.getAttribute("aria-checked")).toBe("true");
+-    fireEvent.click(sw);
+-    await waitFor(() => {
+-      expect(onToggle).toHaveBeenCalledWith(false);
++describe("SessionConfigBar 不再渲染中断自动续跑开关（入口迁至 + 菜单）", () => {
++  it("配置条无续跑开关与运行中提示（即使旧调用方残留传参也不渲染）", () => {
++    renderBar({
++      running: true,
++      // 旧调用方兼容探针：prop 已移除，运行时传参不应产生任何渲染。
++      ...({ autoResume: { enabled: true, onToggle: vi.fn() } } as any),
+     });
+-
+-    // 关态回显。
+-    rerender(
+-      <QueryClientProvider client={new QueryClient()}>
+-        <SessionConfigBar
+-          {...({ ...BASE_PROPS, autoResume: { enabled: false, onToggle } } as any)}
+-        />
+-      </QueryClientProvider>,
+-    );
+-    expect(screen.getByTestId("config-auto-resume-switch").getAttribute("aria-checked")).toBe(
+-      "false",
+-    );
+-
+-    // 禁用态：点击不触发。
+-    const onToggle2 = vi.fn();
+-    rerender(
+-      <QueryClientProvider client={new QueryClient()}>
+-        <SessionConfigBar
+-          {...({
+-            ...BASE_PROPS,
+-            autoResume: { enabled: true, disabled: true, onToggle: onToggle2 },
+-          } as any)}
+-        />
+-      </QueryClientProvider>,
+-    );
+-    const disabledSw = screen.getByTestId("config-auto-resume-switch");
+-    expect(disabledSw.classList.contains("ant-switch-disabled")).toBe(true);
+-    fireEvent.click(disabledSw);
+-    expect(onToggle2).not.toHaveBeenCalled();
++    expect(screen.queryByTestId("config-auto-resume-switch")).toBeNull();
++    expect(screen.queryByText("中断自动续跑")).toBeNull();
++    expect(screen.queryByText("运行中切换将于本轮结束后生效")).toBeNull();
+   });
+ });
+ 
+@@ -1397,13 +1363,12 @@ describe("SessionConfigBar 会话态档位切换控件（task-06 / FR-06 / R-04
+ // ── 9. ql-20260915-009 手机端降噪：variant="mobile" 收低频控件 ────────────────
+ 
+ describe("SessionConfigBar 手机端降噪（ql-20260915-009 variant=mobile）", () => {
+-  it("mobile：思考档位/档案/中断自动续跑不渲染，供应商控件保留（供应商+模型+额度形态）", async () => {
++  it("mobile：思考档位/档案不渲染，供应商控件保留（供应商+模型+额度形态）", async () => {
+     renderBar({
+       variant: "mobile",
+       llmProviderId: "prov-kimi",
+       agentProfileId: "prof-1",
+       thinkingLevel: {},
+-      autoResume: { enabled: true, onToggle: vi.fn() },
+     });
+     // 低频设置项收走。
+     expect(
+@@ -1425,7 +1390,6 @@ describe("SessionConfigBar 手机端降噪（ql-20260915-009 variant=mobile）",
+       llmProviderId: "prov-kimi",
+       agentProfileId: "prof-1",
+       thinkingLevel: {},
+-      autoResume: { enabled: true, onToggle: vi.fn() },
+     });
+     expect(
+       await screen.findByRole("button", { name: "配置-供应商 Kimi 中转" }),
+@@ -1434,18 +1398,18 @@ describe("SessionConfigBar 手机端降噪（ql-20260915-009 variant=mobile）",
+       screen.getByRole("button", { name: "配置-档案 知识经理" }),
+     ).toBeInTheDocument();
+     expect(screen.getByTestId("config-thinking-select")).toBeInTheDocument();
+-    expect(screen.getByTestId("config-auto-resume-switch")).toBeInTheDocument();
++    // 续跑入口已迁出配置条（2026-10-22-session-composer-slim FR-02）。
++    expect(screen.queryByTestId("config-auto-resume-switch")).toBeNull();
+     // 「设置」展开钮仅 mobile 渲染。
+     expect(screen.queryByTestId("config-mobile-more")).toBeNull();
+   });
+ 
+-  it("mobile：点「设置」展开思考档位/档案/自动续跑，再点收起隐藏（ql-20260915-011 收入口不砍功能）", async () => {
++  it("mobile：点「设置」展开思考档位/档案，再点收起隐藏（ql-20260915-011 收入口不砍功能）", async () => {
+     renderBar({
+       variant: "mobile",
+       llmProviderId: "prov-kimi",
+       agentProfileId: "prof-1",
+       thinkingLevel: {},
+-      autoResume: { enabled: true, onToggle: vi.fn() },
+     });
+     // 默认收起：三控件不可见，展开钮存在。
+     expect(screen.getByTestId("config-mobile-more")).toHaveAttribute(
+@@ -1465,7 +1429,6 @@ describe("SessionConfigBar 手机端降噪（ql-20260915-009 variant=mobile）",
+       screen.getByRole("button", { name: "配置-档案 知识经理" }),
+     ).toBeInTheDocument();
+     expect(screen.getByTestId("config-thinking-select")).toBeInTheDocument();
+-    expect(screen.getByTestId("config-auto-resume-switch")).toBeInTheDocument();
+     // 收起：回到紧凑态。
+     fireEvent.click(screen.getByTestId("config-mobile-more"));
+     expect(
+@@ -1474,17 +1437,17 @@ describe("SessionConfigBar 手机端降噪（ql-20260915-009 variant=mobile）",
+     expect(screen.queryByTestId("config-thinking-select")).not.toBeInTheDocument();
+   });
+ 
+-  it("mobile：running 不渲染「运行中切换将于本轮结束后生效」文字提示（ql-20260915-013 一行化，控件 title 已表意）", () => {
++  it("desktop/mobile 均不渲染「运行中切换将于本轮结束后生效」提示（2026-10-22-session-composer-slim FR-02）", () => {
++    renderBar({ running: true });
++    expect(
++      screen.queryByText("运行中切换将于本轮结束后生效"),
++    ).not.toBeInTheDocument();
++    cleanup();
+     renderBar({ variant: "mobile", running: true });
+     expect(
+       screen.queryByText("运行中切换将于本轮结束后生效"),
+     ).not.toBeInTheDocument();
+   });
+-
+-  it("desktop：running 提示照旧（零回归锚；ql-20260917-008 文案改排队说明）", () => {
+-    renderBar({ running: true });
+-    expect(screen.getByText("运行中切换将于本轮结束后生效")).toBeInTheDocument();
+-  });
+ });
+ 
+ // ── 2026-10-21-provider-default-ui-hint：兜底项文案动态化 ────────────────────
+diff --git a/frontend/src/components/sessions/__tests__/session-status-indicator.test.tsx b/frontend/src/components/sessions/__tests__/session-status-indicator.test.tsx
+new file mode 100644
+index 000000000..5308f14a0
+--- /dev/null
++++ b/frontend/src/components/sessions/__tests__/session-status-indicator.test.tsx
+@@ -0,0 +1,78 @@
++// 2026-10-20-session-awaiting-answer-status：行首状态指示器「等待你回答」问号
++// 形态单测——agent 提问（SessionDialogRequest pending）期间 run 仍 running，
++// 左栏必须显示问号而非转圈，让用户看出交互停在自己身上。
++//
++// 覆盖：
++//   1. pending_dialog_kind 非空 + run running → question（压过转圈）；
++//   2. 终态权威优先：ended/failed 即使残留 pending_dialog_kind 也走绿点/红点；
++//   3. 回答后（kind=None）run 仍 running → 回归转圈；
++//   4. None 时既有五分类零回归（pending_approval 琥珀 / running 转圈 /
++//      working 转圈 / blocked 琥珀 / reconnecting 转圈 / idle+unread 绿点 /
++//      全无信号留白）。
++import { describe, it, expect } from "vitest";
++
++import { sessionStatusIndicator } from "../session-list-panel";
++
++describe("sessionStatusIndicator 等待回答问号（2026-10-20-session-awaiting-answer-status）", () => {
++  it("pending_dialog_kind 非空 + run running → 问号「等待你回答」（压过转圈）", () => {
++    const ind = sessionStatusIndicator(
++      "active",
++      "working",
++      false,
++      "running",
++      "AskUserQuestion",
++    );
++    expect(ind).toEqual({ kind: "question", label: "等待你回答" });
++  });
++
++  it("终态 ended 权威优先：残留 pending_dialog_kind 仍显示绿点", () => {
++    const ind = sessionStatusIndicator("ended", "idle", false, null, "AskUserQuestion");
++    expect(ind).toEqual({ kind: "dot", cls: "bg-success", label: "执行完成" });
++  });
++
++  it("终态 failed 权威优先：残留 pending_dialog_kind 仍显示红点", () => {
++    const ind = sessionStatusIndicator("failed", "blocked", false, null, "AskUserQuestion");
++    expect(ind).toEqual({ kind: "dot", cls: "bg-destructive", label: "异常失败" });
++  });
++
++  it("回答后 kind=None + run 仍 running → 回归转圈「正在执行」", () => {
++    const ind = sessionStatusIndicator("active", "working", false, "running", null);
++    expect(ind).toEqual({ kind: "spinner", label: "正在执行" });
++  });
++
++  it("零回归：None 时既有分类逐一不变", () => {
++    // run 等审批 → 琥珀
++    expect(sessionStatusIndicator("active", "working", false, "pending_approval", null)).toEqual(
++      { kind: "dot", cls: "bg-warning-500", label: "在等你" },
++    );
++    // run pending/running → 转圈
++    expect(sessionStatusIndicator("active", null, false, "pending", null)).toEqual({
++      kind: "spinner",
++      label: "正在执行",
++    });
++    // 活性兜底 working → 转圈
++    expect(sessionStatusIndicator("active", "working", false, null, undefined)).toEqual({
++      kind: "spinner",
++      label: "正在执行",
++    });
++    // 活性 blocked → 琥珀
++    expect(sessionStatusIndicator("active", "blocked", false, null, undefined)).toEqual({
++      kind: "dot",
++      cls: "bg-warning-500",
++      label: "在等你",
++    });
++    // reconnecting → 转圈
++    expect(sessionStatusIndicator("reconnecting", null, false, null, null)).toEqual({
++      kind: "spinner",
++      label: "恢复中",
++    });
++    // idle + 完成未读 → 绿点
++    expect(sessionStatusIndicator("active", "idle", true, null, null)).toEqual({
++      kind: "dot",
++      cls: "bg-success",
++      label: "执行完成",
++    });
++    // 全无信号 → 留白
++    expect(sessionStatusIndicator("active", "idle", false, null, null)).toBeNull();
++  });
++});
+diff --git a/frontend/src/components/sessions/ctx-usage-bar.tsx b/frontend/src/components/sessions/ctx-usage-bar.tsx
+index 50973c9f8..e7802602b 100644
+--- a/frontend/src/components/sessions/ctx-usage-bar.tsx
++++ b/frontend/src/components/sessions/ctx-usage-bar.tsx
+@@ -28,6 +28,7 @@
+ import { Popover, InputNumber, Button } from "antd";
+ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+ import { useQuery } from "@tanstack/react-query";
++import { Gauge } from "lucide-react";
+ 
+ import {
+   detectUsageProvider,
+@@ -503,9 +504,8 @@ export interface QuotaPillProps {
+    */
+   providerId: string | null | undefined;
+   /**
+-   * ql-20260915-013 手机端一行化：compact 只显剩余百分比数字（模型名/「X 剩」
+-   * 标签/重置时间/「等 N 家」全收进点击浮层——浮层本来就是权威明细入口），
+-   * 防 verbose 胶囊占满手机配置行；desktop 缺省零变化。
++   * 手机端紧凑尺寸（2026-10-22-session-composer-slim FR-03 起桌面与移动端
++   * 同为「图标 + 首窗口百分比」形态，mobile 仅控制像素尺寸）。
+    */
+   mobile?: boolean;
+ }
+@@ -626,9 +626,21 @@ export function QuotaPill({ providerId, mobile = false }: QuotaPillProps) {
+ 
+   const face = sortedEntries[0]!;
+   const restCount = sortedEntries.length - 1;
+-  const faceReset = face.tiers.find((t) => t.reset)?.reset;
+-  // 胶囊单行只带百分比窗口（同旧口径）；余额类 supplier 的明细见浮层。
++  // 2026-10-22-session-composer-slim FR-03 / D-001：图标面只显示当前会话
++  // 供应商的首个百分比窗口（排序已把会话供应商置顶）；纯余额类显示余额金额；
++  // 模型名/其余窗口/重置时间/「等 N 家」全部收进点击浮层与 title。
+   const facePctTiers = face.tiers.filter((t) => t.leftPct != null);
++  const headTier = facePctTiers[0] ?? face.tiers[0] ?? null;
++  const headPct = headTier?.leftPct ?? null;
++  const faceReset = headTier?.reset ?? null;
++  const faceLabel = `${face.providerName}${face.model ? ` · ${face.model}` : ""}`;
++  const restHint = restCount > 0 ? `；另有 ${restCount} 家可查` : "";
++  const pillTitle =
++    headPct != null
++      ? `${faceLabel}｜${headTier?.label ?? "额度"}剩 ${headPct}%${
++          faceReset ? `｜${formatQuotaResetTime(faceReset)} 重置` : ""
++        }${restHint}（点击查看全部明细）`
++      : `${faceLabel}｜${formatQuotaBalance(headTier?.balance ?? null)}${restHint}（点击查看全部明细）`;
+ 
+   const detail = (
+     <div style={{ width: 264 }}>
+@@ -676,46 +688,27 @@ export function QuotaPill({ providerId, mobile = false }: QuotaPillProps) {
+ 
+   return (
+     <Popover trigger="click" content={detail} placement="topLeft">
+-      <span
++      <button
++        type="button"
+         data-testid="quota-pill"
+-        className="inline-flex shrink-0 cursor-pointer select-none items-center gap-[5px] whitespace-nowrap rounded-full bg-muted px-2.5 py-[3px] text-[11px] text-muted-foreground hover:text-foreground"
++        aria-label={`模型额度：${pillTitle}`}
++        title={pillTitle}
++        className={`inline-flex shrink-0 cursor-pointer select-none items-center gap-1 whitespace-nowrap rounded-md border border-border bg-card text-muted-foreground transition-colors hover:border-brand-300 hover:bg-brand-50 hover:text-foreground ${
++          mobile ? "px-1 py-[2px] text-[10px]" : "px-1.5 py-[3px] text-[11px]"
++        }`}
+         onMouseEnter={handlePillMouseEnter}
+         onMouseLeave={clearHoverTimer}
+       >
+-        {mobile ? (
+-          // compact：仅百分比（多窗斜杠分隔），明细点击浮层看。
+-          facePctTiers.map((t, i) => (
+-            <span key={i} className={quotaLeftToneClass(t.leftPct!)}>
+-              {i > 0 ? "/" : ""}
+-              {t.leftPct}%
+-            </span>
+-          ))
+-        ) : (
+-          <>
+-            {face.model ? (
+-              <b className="font-semibold text-foreground">{face.model}</b>
+-            ) : (
+-              <b className="font-semibold text-foreground">{face.providerName}</b>
+-            )}
+-            {facePctTiers.map((t, i) => (
+-              <span key={i}>
+-                · {t.label}剩{" "}
+-                <span className={quotaLeftToneClass(t.leftPct!)}>{t.leftPct}%</span>
+-              </span>
+-            ))}
+-            {faceReset ? (
+-              <span className="text-[10px] text-muted-foreground">
+-                ⏱ {formatQuotaResetTime(faceReset)} 重置
+-              </span>
+-            ) : null}
+-            {restCount > 0 ? (
+-              <span className="text-[10px] text-muted-foreground">
+-                等{restCount}家
+-              </span>
+-            ) : null}
+-          </>
+-        )}
+-      </span>
++        <Gauge
++          aria-hidden
++          className={`shrink-0 text-brand-600 ${mobile ? "h-3 w-3" : "h-3.5 w-3.5"}`}
++        />
++        {headPct != null ? (
++          <span className={quotaLeftToneClass(headPct)}>{headPct}%</span>
++        ) : headTier?.balance ? (
++          <span>{formatQuotaBalance(headTier.balance)}</span>
++        ) : null}
++      </button>
+     </Popover>
+   );
+ }
+diff --git a/frontend/src/components/sessions/session-config-bar.tsx b/frontend/src/components/sessions/session-config-bar.tsx
+index 264f2b3e2..4e2d475e2 100644
+--- a/frontend/src/components/sessions/session-config-bar.tsx
++++ b/frontend/src/components/sessions/session-config-bar.tsx
+@@ -54,8 +54,8 @@
+  */
+ import { useEffect, useMemo, useRef, useState } from "react";
+ import { useQuery, useQueryClient } from "@tanstack/react-query";
+-import { Dropdown, Switch, Tag, Tooltip, type MenuProps } from "antd";
+-import { Brain, ChevronDown, Cloud, GitBranch, Settings2, Timer, User } from "lucide-react";
++import { Dropdown, Tag, Tooltip, type MenuProps } from "antd";
++import { Brain, ChevronDown, Cloud, GitBranch, Settings2, User } from "lucide-react";
+ 
+ import { ApiError } from "@/lib/api";
+ import type { components } from "@/lib/api-types";
+@@ -210,17 +210,8 @@ export interface SessionConfigBarProps {
+    * injectSession（会话尚未创建），父层经 onProvisionalSwitch 收值并入首句
+    * createSession（llm_provider_id/agent_profile_id）。running/ended 传 false 即可。
+    */
+-  /**
+-   * 2026-09-10-auto-resume-interrupted-turn / FR-06：会话级「daemon 重启自动
+-   * 续跑」开关控件（不传不渲染，存量调用方零回归）。enabled=当前生效态
+-   * （缺省开由父层归一——config.auto_resume_interrupted 仅显式 false 为关）；
+-   * onToggle 由父层接 PATCH /sessions/{id}/auto-resume + 会话态刷新。
+-   */
+-  autoResume?: {
+-    enabled: boolean;
+-    disabled?: boolean;
+-    onToggle: (next: boolean) => void | Promise<void>;
+-  };
++  // 2026-10-22-session-composer-slim FR-02：原 autoResume 开关从配置条移除，
++  // 入口迁至输入区 + 菜单（SessionInputBar.autoResume）。
+   provisional?: boolean;
+   onProvisionalSwitch?: (
+     field: Exclude<SessionConfigSwitchField, "model">,
+@@ -382,7 +373,6 @@ export function SessionConfigBar({
+   onProvisionalThinkingLevelSwitch,
+   thinkingLevel,
+   trailing,
+-  autoResume,
+   providerOpenSignal = 0,
+   variant = "desktop",
+ }: SessionConfigBarProps) {
+@@ -1070,46 +1060,18 @@ export function SessionConfigBar({
+         {/* ql-20260915-009：mobile 不渲染弹性占位（次要开关同收，flex-wrap 行内
+             留它只会把行尾插槽顶到下一行）。 */}
+         {!mobile && <span className="flex-1" />}
+-        {/* 2026-09-10-auto-resume-interrupted-turn / FR-06：中断自动续跑开关——
+-            daemon 重启恢复后被中断轮自动续跑（默认开）；ql-20260915-009 mobile
+-            默认收进「设置」展开态（ql-20260915-011：收入口不砍功能）。 */}
+-        {autoResume != null && mobileReveal && (
+-          <label
+-            className="inline-flex shrink-0 items-center gap-1.5 text-[11px] text-muted-foreground"
+-            title={
+-              autoResume.enabled
+-                ? "已开启：daemon 重启恢复后，被中断的一轮自动继续执行（续跑提示词包装，最多自动续跑 2 次）"
+-                : "已关闭：daemon 重启后不自动续跑，中断轮保留手动「重新发送」"
+-            }
+-          >
+-            <Switch
+-              size="small"
+-              checked={autoResume.enabled}
+-              disabled={autoResume.disabled}
+-              onChange={(next) => void autoResume.onToggle(next)}
+-              aria-label="中断自动续跑"
+-              data-testid="config-auto-resume-switch"
+-            />
+-            中断自动续跑
+-          </label>
+-        )}
+-        {/* ql-20260917-008：running 不再是锁——四控件运行中可点（受理即排队/
+-            暂存，本轮结束后生效），提示行改信息性说明；desktop 文字，mobile 收
+-            （ql-20260915-013 一行化——控件 title 已带说明，不占行）。 */}
+-        {running && !mobile && (
+-          <span className="inline-flex items-center gap-1 text-[10.5px] text-muted-foreground">
+-            <Timer aria-hidden className="h-3 w-3" />
+-            运行中切换将于本轮结束后生效
+-          </span>
+-        )}
+-        {/* ql-20260915-011：mobile「设置」展开钮——默认收起的思考档位/档案/
+-            自动续跑经此可达（收入口不砍功能）；仅 mobile 渲染，desktop 零变化。 */}
++        {/* 2026-10-22-session-composer-slim FR-02：中断自动续跑开关与「运行中
++            切换将于本轮结束后生效」提示行移出配置条——续跑入口统一收进输入区
++            + 菜单（SessionInputBar），运行中生效说明保留在各控件 title 中，
++            释放行宽降低视觉噪音。 */}
++        {/* ql-20260915-011：mobile「设置」展开钮——默认收起的思考档位/档案
++            经此可达（收入口不砍功能）；仅 mobile 渲染，desktop 零变化。 */}
+         {mobile && (
+           <button
+             type="button"
+             aria-expanded={mobileMoreOpen}
+             aria-label={mobileMoreOpen ? "收起会话设置" : "更多会话设置"}
+-            title={mobileMoreOpen ? "收起会话设置" : "思考档位 / 智能体档案 / 中断自动续跑"}
++            title={mobileMoreOpen ? "收起会话设置" : "思考档位 / 智能体档案"}
+             data-testid="config-mobile-more"
+             onClick={() => setMobileMoreOpen((v) => !v)}
+             className={cn(
+diff --git a/frontend/src/components/sessions/session-list-panel.tsx b/frontend/src/components/sessions/session-list-panel.tsx
+index 1915dbe34..1ed71d1cc 100644
+--- a/frontend/src/components/sessions/session-list-panel.tsx
++++ b/frontend/src/components/sessions/session-list-panel.tsx
+@@ -589,6 +589,9 @@ function engineValueOf(s: AgentSessionRead): string | null {
+  * 口径改轮次级）：
+  *   - failed        → 红点（异常）
+  *   - ended         → 绿点（执行完成——会话级终态）
++ *   - 等待回答      → 问号（agent 提问等用户回答：pending_dialog_kind 非空，
++ *                     压过 run running 转圈——交互停在用户身上，见 2026-10-20-
++ *                     session-awaiting-answer-status）
+  *   - 活性 working  → 动态转圈（正在执行——本平台 active 只表示「会话开着」
+  *                     哪怕空闲，故「进行中」以活性推导 working 为准）
+  *   - 活性 blocked  → 琥珀点（在等你：等审批/等回答）
+@@ -602,19 +605,25 @@ function engineValueOf(s: AgentSessionRead): string | null {
+ type SessionStatusIndicator =
+   | { kind: "dot"; cls: string; label: string }
+   | { kind: "spinner"; label: string }
++  | { kind: "question"; label: string }
+   | null;
+ 
+ /** 行首状态标识单一源（status × 活性 state × 完成标记 → 形态；纯函数便于单测）。 */
+-function sessionStatusIndicator(
++export function sessionStatusIndicator(
+   status: AgentSessionStatus,
+   livenessState?: AgentLogListItem["state"] | null,
+   completedUnread?: boolean,
+   currentRunStatus?: string | null,
++  pendingDialogKind?: string | null,
+ ): SessionStatusIndicator {
+   if (status === "failed")
+     return { kind: "dot", cls: "bg-destructive", label: "异常失败" };
+   if (status === "ended")
+     return { kind: "dot", cls: "bg-success", label: "执行完成" };
++  // ── 2026-10-20-session-awaiting-answer-status：等待用户回答优先于 run 瞬态
++  // ——提问挂起期间 run 仍是 running，但交互已停在用户身上，转圈会误导；
++  // 终态（failed/ended）仍在更前面权威优先。 ──
++  if (pendingDialogKind) return { kind: "question", label: "等待你回答" };
+   // ── 2026-10-16-session-run-status-realtime：run 状态第一优先信号（后端
+   // 权威实时——发消息瞬间 running、等审批 pending_approval，不依赖 daemon
+   // 日志活性上报链）；压过活性推导（run 等审批时日志可能还在写显示 working，
+@@ -3323,6 +3332,18 @@ function SessionStatusSlot({
+           className="h-3 w-3 shrink-0 animate-spin text-muted-foreground"
+         />
+       )}
++      {indicator?.kind === "question" && (
++        /* 2026-10-20-session-awaiting-answer-status：等待用户回答——问号字形
++           （描边圆 + ?，warning 语义色；与琥珀点同族但形态可区分，色阶只用
++           已定义的 DEFAULT token，避免 bg-warning-500 未生成类的既有隐患）。 */
++        <span
++          aria-label={indicator.label}
++          title={indicator.label}
++          className="flex h-3.5 w-3.5 shrink-0 items-center justify-center rounded-full border-[1.5px] border-warning text-[10px] font-bold leading-none text-warning"
++        >
++          ?
++        </span>
++      )}
+       {completedUnread && (
+         <span
+           aria-label="此会话已执行完成"
+@@ -3504,6 +3525,7 @@ function SessionRow({
+               liveness?.state,
+               completedUnreadVisible,
+               session.current_run_status,
++              session.pending_dialog_kind,
+             )}
+             liveness={liveness}
+             completedUnread={completedUnreadVisible}
+diff --git a/frontend/src/lib/__tests__/tailwind-semantic-colors.test.ts b/frontend/src/lib/__tests__/tailwind-semantic-colors.test.ts
+new file mode 100644
+index 000000000..fbb18d9d0
+--- /dev/null
++++ b/frontend/src/lib/__tests__/tailwind-semantic-colors.test.ts
+@@ -0,0 +1,59 @@
++// 2026-10-23-semantic-color-scale-fix：语义色数字阶配置断言。
++//
++// 背景：warning/info/destructive 曾只有 DEFAULT+foreground，而组件使用
++// -50/-200/-500/-700 类名——Tailwind 对未定义键静默不生成 CSS，导致左栏琥珀点
++// 透明、活性徽章软底/描边/深字丢失。本测试钉住配置面，防止再次「类名写了但
++// 配置没定义」的静默失效（渲染级验证另见变更目录 visual-evidence.md 的构建记录）。
++import { describe, it, expect } from "vitest";
++
++import config from "../../../tailwind.config";
++
++/** 调色板对象：DEFAULT/foreground 为字符串，数字阶可能为字符串或函数（brand/slate）。 */
++type Palette = Record<string, unknown> & {
++  DEFAULT?: string;
++  foreground?: string;
++};
++
++const colors = (config.theme?.extend?.colors ?? {}) as Record<string, Palette>;
++
++function palette(name: string): Palette {
++  const p = colors[name];
++  expect(p, `${name} 调色板缺失`).toBeTruthy();
++  return p!;
++}
++
++describe("tailwind 语义色数字阶（2026-10-23-semantic-color-scale-fix）", () => {
++  const names = ["warning", "info", "destructive"] as const;
++
++  for (const name of names) {
++    it(`${name} 的 50/200/500/700 存在且派生形态正确`, () => {
++      const scale = palette(name);
++
++      // 500 = 基色本体
++      expect(scale[500]).toBe(`hsl(var(--${name}))`);
++      // 50/200 = 向背景色混出的软底
++      expect(scale[50]).toContain("color-mix");
++      expect(scale[50]).toContain(`hsl(var(--${name}))`);
++      expect(scale[50]).toContain("hsl(var(--background))");
++      expect(scale[200]).toContain("color-mix");
++      expect(scale[200]).toContain("hsl(var(--background))");
++      // 700 = 向前景色混出的字色
++      expect(scale[700]).toContain("color-mix");
++      expect(scale[700]).toContain("hsl(var(--foreground))");
++    });
++  }
++
++  it("DEFAULT/foreground 零漂移，既有 brand/slate 色阶不受影响", () => {
++    expect(palette("warning").DEFAULT).toBe("hsl(var(--warning))");
++    expect(palette("warning").foreground).toBe("hsl(var(--warning-foreground))");
++    expect(palette("info").DEFAULT).toBe("hsl(var(--info))");
++    expect(palette("info").foreground).toBe("hsl(var(--info-foreground))");
++    expect(palette("destructive").DEFAULT).toBe("hsl(var(--destructive))");
++    expect(palette("destructive").foreground).toBe(
++      "hsl(var(--destructive-foreground))",
++    );
++    // 既有函数式色阶原样保留（品牌/中性阶）
++    expect(palette("brand")[500]).toBeTypeOf("function");
++    expect(palette("slate")[500]).toBeTypeOf("function");
++  });
++});
+diff --git a/frontend/src/lib/__tests__/thinking-translate.test.ts b/frontend/src/lib/__tests__/thinking-translate.test.ts
+index 4a78d9402..249ac112b 100644
+--- a/frontend/src/lib/__tests__/thinking-translate.test.ts
++++ b/frontend/src/lib/__tests__/thinking-translate.test.ts
+@@ -17,6 +17,7 @@ vi.mock("@/lib/api", () => ({ apiFetch: (...args: unknown[]) => apiFetchMock(...
+ 
+ import {
+   needsTranslation,
++  requestTimeoutMsFor,
+   resetThinkingTranslateForTests,
+   splitIntoChunks,
+   translateText,
+@@ -70,6 +71,18 @@ describe("splitIntoChunks 分块", () => {
+   });
+ });
+ 
++describe("requestTimeoutMsFor 超时预算（与后端 engine._timeout_for 公式同源）", () => {
++  it("单块 = 基准 + 余量；按最坏后端块数（每 1000 字符一块）线性放宽", () => {
++    expect(requestTimeoutMsFor([{ chunk: "x".repeat(40) }])).toBe(25_000);
++    expect(requestTimeoutMsFor([{ chunk: "y".repeat(1800) }])).toBe(27_500); // 2 后端块
++    expect(requestTimeoutMsFor([{ chunk: "z".repeat(1000) }])).toBe(25_000); // 恰 1000 → 1 块
++  });
++  it("满批 16×1800 最坏 32 后端块 = 后端公式 97.5s + 5s 余量（有界兜底）", () => {
++    const worst = Array.from({ length: 16 }, () => ({ chunk: "w".repeat(1800) }));
++    expect(requestTimeoutMsFor(worst)).toBe(102_500);
++  });
++});
++
+ describe("translateText 合批/缓存/降级", () => {
+   it("不值得翻 → 立即 null 零请求", async () => {
+     const out = await translateText("这段中文思考不需要翻译。");
+@@ -131,13 +144,34 @@ describe("translateText 合批/缓存/降级", () => {
+     await expect(p2).resolves.toBe("恢复了");
+   });
+ 
+-  it("请求显式带 20s 超时（后端卡住时由 apiFetch 中止，不退化为无限等待）", async () => {
++  it("请求超时按批动态——单块=基准+余量（后端卡住时仍由 apiFetch 中止兜底）", async () => {
+     apiFetchMock.mockResolvedValue(okResponse([{ id: "0", text: "译超时", translated: true }]));
+     const p = translateText("timeout option english thinking text check.");
+     await vi.advanceTimersByTimeAsync(250);
+     await expect(p).resolves.toBe("译超时");
+     const options = apiFetchMock.mock.calls[0]![1] as { timeoutMs?: number };
+-    expect(options.timeoutMs).toBe(20_000);
++    expect(options.timeoutMs).toBe(25_000); // 1 个后端块：20s 基准 + 5s 余量
++  });
++
++  it("满批 16×1800 的 timeoutMs ≥ 后端公式 97.5s——不再被固定 20s 误杀（2026-10-23 FR-01）", async () => {
++    apiFetchMock.mockImplementation(
++      async (_path: string, options: { json: { items: Array<{ id: string }> } }) =>
++        okResponse(options.json.items.map((it, idx) => ({ id: it.id, text: `[${idx}]`, translated: true }))),
++    );
++    // 单段无段界长文 → 恰按 1800 硬切成 16 块满批（15×1800 + 1560）
++    const sentence = "Full batch budget english thinking sentence check. ";
++    const text = sentence.repeat(560); // ~28560 字符 → 16 块单批
++    const p = translateText(text);
++    await vi.advanceTimersByTimeAsync(250);
++    await p;
++    const options = apiFetchMock.mock.calls[0]![1] as {
++      timeoutMs?: number;
++      json: { items: Array<{ text: string }> };
++    };
++    expect(options.json.items).toHaveLength(16);
++    // 最坏 32 个后端块（1800 → 2×1000）：20s + 31×2.5s = 97.5s，前端再 +5s 余量
++    expect(options.timeoutMs).toBeGreaterThanOrEqual(20_000 + 31 * 2_500);
++    expect(options.timeoutMs).toBe(102_500);
+   });
+ 
+   it("超时（apiFetch reject timeout）→ null + 60s 退避", async () => {
+diff --git a/frontend/src/lib/api-types.ts b/frontend/src/lib/api-types.ts
+index c1d3c6c1f..fe485c8f3 100644
+--- a/frontend/src/lib/api-types.ts
++++ b/frontend/src/lib/api-types.ts
+@@ -13565,6 +13565,8 @@ export interface components {
+             current_run_id?: string | null;
+             /** Current Run Status */
+             current_run_status?: string | null;
++            /** Pending Dialog Kind */
++            pending_dialog_kind?: string | null;
+             /** Terminating At */
+             terminating_at?: string | null;
+             /** Agent Profile Id */
+diff --git a/frontend/src/lib/attachment-refs.ts b/frontend/src/lib/attachment-refs.ts
+index 53949a37a..e2bd212aa 100644
+--- a/frontend/src/lib/attachment-refs.ts
++++ b/frontend/src/lib/attachment-refs.ts
+@@ -19,6 +19,47 @@
+ /** 附件 id → 编辑态 token 文本（【📎 name】/【📎 name·2】）映射（组件持有并回传父级）。 */
+ export type AttRefTokenMap = Record<string, string>;
+ 
++// ── 附件标记行解析（原 runtime-session-helpers.tsx，2026-10-22 迁入纯函数库）──
++
++/** 附件标记行解析产物：附件清单 + 剥离标记后的纯文本。 */
++export interface ParsedAttachmentMarker {
++  id: string;
++  kind: "image" | "file";
++  name: string;
++}
++
++/**
++ * 解析 prompt 头部的附件标记行（backend inject 写入，D-3）：
++ * `[附件:<uuid>|<kind>|<name>]` 逐行一条；UUID 锚定（防用户伪标记文本误报）。
++ * 解析失败的行按原文本保留（容错）；标记行后的正文原样返回。
++ */
++export function parseAttachmentMarkers(prompt: string): {
++  attachments: ParsedAttachmentMarker[];
++  text: string;
++} {
++  const uuidRe =
++    /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/;
++  const markerRe =
++    /^\[附件:([0-9a-fA-F-]{36})\|(image|file)\|(.+)\]$/;
++  const attachments: ParsedAttachmentMarker[] = [];
++  const lines = prompt.split("\n");
++  let i = 0;
++  while (i < lines.length) {
++    const m = markerRe.exec(lines[i]!.trim());
++    if (!m || !uuidRe.test(m[1]!)) break;
++    attachments.push({
++      id: m[1]!,
++      kind: m[2] as "image" | "file",
++      name: m[3]!,
++    });
++    i += 1;
++  }
++  if (i === 0) return { attachments, text: prompt };
++  // 标记行后的空行（backend 以 \n 接正文）剥一层。
++  const rest = lines.slice(i).join("\n").replace(/^\n/, "");
++  return { attachments, text: rest };
++}
++
+ /**
+  * 引用类型内嵌图标（emoji 文本字符）。2026-10-12-ws-ref-emoji-inline：用户反馈
+  * 类型图标从左上角角标改为内嵌标签文字最前——emoji 是唯一能进文本流的图标形态
+@@ -323,3 +364,56 @@ export function parseInlineRefs(text: string): InlineRefPart[] {
+ function linesSuffix(name: string, lines: [number, number]): string {
+   return `${name}:${lines[0]}-${lines[1]}`;
+ }
++
++/**
++ * 纯文本展示格式化（2026-10-22-session-composer-slim FR-01）——排队消息摘要、
++ * 定时消息摘要、复制结果等不做富标签渲染的场合使用：把头部附件标记行转为
++ * 人读「📎 文件名」清单（不丢附件名），并把四类行内引用标记替换为人读简写
++ * （📎 文件名 / 📄 路径末段 / 📁 目录名 / 🧾 名称:起-止）。发送协议不变
++ * （仍是正式标记）；UUID/结构非法片段原样保留（与 parseInlineRefs 容错同口径，
++ * 不吞用户手写文本）。
++ */
++export function formatRefsForPlainText(text: string): string {
++  const { attachments, text: body } = parseAttachmentMarkers(text);
++  // 附件标记行（backend 写入的元数据行）不可原样露出，也不能直接丢弃——
++  // 附件本身不会自动插入正文 token（仅右击 chip 才插行内引用），丢弃会让
++  // 未引用附件在排队/定时/复制结果里彻底不可见。转为一行人读清单并保留正文。
++  const attachmentLine = attachments
++    .map((a) => `${ATT_REF_EMOJI} ${a.name}`)
++    .join(" ");
++  const withAttachments = attachmentLine
++    ? body
++      ? `${attachmentLine}\n${body}`
++      : attachmentLine
++    : body;
++  // 快速路径：不含行内引用标记时零替换开销。
++  if (!withAttachments.includes("[附件引用:") && !withAttachments.includes("引用:")) {
++    return withAttachments;
++  }
++  const withAtt = withAttachments.replace(
++    INLINE_ATT_REF_RE,
++    (_m, _id: string, name: string) => `${ATT_REF_EMOJI} ${name}`,
++  );
++  return withAtt.replace(
++    INLINE_WS_REF_RE,
++    (
++      _m,
++      label: string,
++      _workspaceId: string,
++      path: string,
++      l0?: string,
++      l1?: string,
++    ) => {
++      const name = wsRefDisplayName(path);
++      if (label === "代码引用") {
++        const emoji = WS_REF_EMOJI.code;
++        return l0 !== undefined && l1 !== undefined
++          ? `${emoji} ${name}:${l0}-${l1}`
++          : `${emoji} ${name}`;
++      }
++      return label === "目录引用"
++        ? `${WS_REF_EMOJI.dir} ${name}`
++        : `${WS_REF_EMOJI.file} ${name}`;
++    },
++  );
++}
+diff --git a/frontend/src/lib/thinking-translate.ts b/frontend/src/lib/thinking-translate.ts
+index 12df2f5fb..71cfc2d85 100644
+--- a/frontend/src/lib/thinking-translate.ts
++++ b/frontend/src/lib/thinking-translate.ts
+@@ -23,11 +23,32 @@ const BATCH_WINDOW_MS = 250;
+ /** 引擎不可用退避时长。 */
+ const UNAVAILABLE_BACKOFF_MS = 60_000;
+ /**
+- * 单次请求超时（2026-10-22-fix-translate-pending）：POST 默认无超时，后端子进程
+- * 卡在模型下载时请求会永久挂起（界面恒「翻译中」）。20s 后 abort 走网络失败同款
+- * 降级链（回退原文 + 60s 退避）；后端同类超时已同窗收紧（TRANSLATE_REQUEST_TIMEOUT_SEC）。
++ * 单次请求超时（2026-10-22-fix-translate-pending 起 POST 必带超时防挂起；
++ * 2026-10-23-translate-budget-align 改按批动态）：镜像后端等待预算公式
++ * （engine.py `_timeout_for`：基准 20s + 每多一块 2.5s，改动须双侧同步），
++ * 按本批**最坏后端块数**估算——前端块 ≤1800 字符，后端 CHUNK_MAX_CHARS=1000
++ * 二次细切，每条前端块最多膨胀为 2 块。外加 5s HTTP/线程池余量；前端超时是
++ * 兜底而非首道防线（后端预算先到期会 fail-soft 正常返回），满批 16×1800 最坏
++ * 32 块 = 102.5s，仍有界防挂起。旧固定 20s 会被 e7ce2a101 实测 21.5s 的正常
++ * 满批推理误杀并累计后端崩溃计数（3 次即 600s 退避）。
+  */
+-const REQUEST_TIMEOUT_MS = 20_000;
++const BACKEND_TIMEOUT_BASE_MS = 20_000;
++const BACKEND_TIMEOUT_PER_CHUNK_MS = 2_500;
++const BACKEND_CHUNK_MAX_CHARS = 1_000;
++const REQUEST_TIMEOUT_MARGIN_MS = 5_000;
++
++/** 按批动态请求超时：后端公式（最坏块数）+ 余量。 */
++export function requestTimeoutMsFor(entries: ReadonlyArray<{ chunk: string }>): number {
++  const backendChunks = entries.reduce(
++    (sum, entry) => sum + Math.max(1, Math.ceil(entry.chunk.length / BACKEND_CHUNK_MAX_CHARS)),
++    0,
++  );
++  return (
++    BACKEND_TIMEOUT_BASE_MS +
++    Math.max(0, backendChunks - 1) * BACKEND_TIMEOUT_PER_CHUNK_MS +
++    REQUEST_TIMEOUT_MARGIN_MS
++  );
++}
+ /** 内存缓存条目上限（FIFO 淘汰——译文纯函数结果，先入者先淘汰足够）。 */
+ const CACHE_MAX_ENTRIES = 500;
+ 
+@@ -162,7 +183,7 @@ async function requestBatch(entries: QueueEntry[]): Promise<void> {
+     resp = await apiFetch<TranslateApiResponse>("/api/translate/thinking", {
+       method: "POST",
+       json: { items, target: "zh" },
+-      timeoutMs: REQUEST_TIMEOUT_MS,
++      timeoutMs: requestTimeoutMsFor(entries),
+       timeoutMessage: "翻译请求超时，已回退原文",
+     });
+   } catch {
+diff --git a/frontend/tailwind.config.ts b/frontend/tailwind.config.ts
+index 19a05a5b9..57911491d 100644
+--- a/frontend/tailwind.config.ts
++++ b/frontend/tailwind.config.ts
+@@ -1,5 +1,24 @@
+ import type { Config } from "tailwindcss";
+ 
++/**
++ * 语义色数字阶派生（2026-10-23-semantic-color-scale-fix）。
++ *
++ * 背景：warning/info/destructive 此前只有 DEFAULT+foreground，而 liveness-badge
++ * 五态与左栏「在等你」琥珀点使用 -50/-200/-500/-700 数字阶类名——Tailwind 对
++ * 未定义键静默不生成 CSS，导致状态点透明、徽章软底/描边/深字全丢。
++ *
++ * 取值全部由主题块既有基色变量派生（无硬编码 hex，随 data-theme 自动换肤）：
++ * - 500 = 基色本体；
++ * - 50/200 向 background 混出软底（浅色淡彩 / 深色暗彩）；
++ * - 700 向 foreground 混出前景字色（浅色加深 / 深色提亮）。
++ */
++const semanticScale = (cssVar: string) => ({
++  50: `color-mix(in srgb, hsl(var(${cssVar})) 10%, hsl(var(--background)))`,
++  200: `color-mix(in srgb, hsl(var(${cssVar})) 35%, hsl(var(--background)))`,
++  500: `hsl(var(${cssVar}))`,
++  700: `color-mix(in srgb, hsl(var(${cssVar})) 75%, hsl(var(--foreground)))`,
++});
++
+ const config: Config = {
+   darkMode: ["class"],
+   content: [
+@@ -36,6 +55,7 @@ const config: Config = {
+         destructive: {
+           DEFAULT: "hsl(var(--destructive))",
+           foreground: "hsl(var(--destructive-foreground))",
++          ...semanticScale("--destructive"),
+         },
+ 
+         // ---- 状态语义(与 tokens.semantic 对齐,DEFAULT 走 hsl var,
+@@ -47,6 +67,7 @@ const config: Config = {
+         warning: {
+           DEFAULT: "hsl(var(--warning))",
+           foreground: "hsl(var(--warning-foreground))",
++          ...semanticScale("--warning"),
+         },
+         error: {
+           DEFAULT: "hsl(var(--error))",
+@@ -55,6 +76,7 @@ const config: Config = {
+         info: {
+           DEFAULT: "hsl(var(--info))",
+           foreground: "hsl(var(--info-foreground))",
++          ...semanticScale("--info"),
+         },
+ 
+         // ---- brand 语义色阶(主题感知:50-950 十一档纯 CSS 变量名映射,无硬编码 hex;
+@@ -94,7 +116,7 @@ const config: Config = {
+               return `color-mix(in srgb, var(--color-brand-${step}) ${pct}, transparent)`;
+             },
+           ])
+-        ),
++        ) as unknown as Record<string, string>,
+ 
+         // ---- 基础调色板·真实信息色(直接 hex,与 tokens.color.palette 对齐,
+         //      不走 CSS 变量;blue 阶仅限真信息蓝/外部标识色场景;
+@@ -172,7 +194,7 @@ const config: Config = {
+               return `color-mix(in srgb, var(--color-slate-${step}) ${pct}, transparent)`;
+             },
+           ])
+-        ),
++        ) as unknown as Record<string, string>,
+       },
+       fontFamily: {
+         // 通过 var(--font-inter) 接入 task-02 next/font 注入的 Inter,

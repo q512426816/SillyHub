@@ -1,0 +1,22 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-22-session-composer-slim",
+  "reviewer": "subagent",
+  "verdict": "PASS",
+  "reviewedAgainst": "4d6c17185a01e72e287a48f8a0b1f003dd5f63b6",
+  "findings": [
+    {
+      "severity": "P3",
+      "title": "前轮「剥离附件标记行」措辞残留两处：design 文件变更清单与 turn-timeline 复制注释未同步为「📎 清单」口径（JSDoc 与做法概述两处已修复到位）",
+      "evidence": "前轮 P3 修复验证：lib/attachment-refs.ts formatRefsForPlainText JSDoc 与 design.md 做法概述均已改为「📎 文件名」清单口径（修复到位、无行为回归）；但 design.md 文件变更清单 message-queue-bar.tsx 行说明仍写「摘要/展开正文剥离标记行并简化引用」，turn-timeline.tsx CopyButton 使用处注释仍写「复制剥离标记后的纯文本（与显示一致）」——实现实为 formatRefsForPlainText 转清单（📎 清单 + 正文），且与气泡显示（parseAttachmentMarkers 剥离 + chips 分层渲染）已不同源，注释/文档与实现不一致，纯措辞债不影响行为（注：attachment-refs.ts:24 ParsedAttachmentMarker JSDoc 的「剥离」描述 parseAttachmentMarkers 本体行为，语义准确，非残留）",
+      "location": ".sillyspec/changes/2026-10-22-session-composer-slim/design.md:62; frontend/src/components/daemon/turn-timeline.tsx:884"
+    }
+  ],
+  "dimensionNotes": {
+    "乱序": "ok（边界已裁决：可接受——引用格式化为渲染期纯函数（无状态无缓存），非法/残缺片段原样保留不吞字（测试有容错用例）；额度取值只读已收敛的 sortedEntries 快照，代码核实与 design 作答相符）",
+    "并发": "ok（边界已裁决：可接受——无新增共享写面；续跑切换沿用既有 PATCH 单字段链路（onToggle=父层 handleAutoResumeToggle，patch 实锚）；额度查询保留既有 in-flight 防重入/keep-last-good/5 分钟轮询/悬浮 2 秒刷新（diff 未触及查询逻辑，测试旧用例全绿）",
+    "切换": "ok（边界已裁决：可接受——+ 菜单切换续跑请求归父层处理（session-panel-page 传 onToggle: handleAutoResumeToggle），组件卸载无本地悬挂状态；formatRefsForPlainText 无状态）",
+    "作用域": "ok（边界已裁决：可接受——额度按供应商 id 聚合、续跑状态按 sessionId 走既有接口、引用格式化只作用于传入的单条消息文本，无跨工作区/跨仓数据流，代码核实无串台面）"
+  },
+  "reviewedAt": "2026-10-23T08:03:00+08:00"
+}
