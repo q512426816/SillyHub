@@ -716,3 +716,79 @@ created_at: 2026-10-14T02:51:35.432Z
 摘要：主路径
 全文：.sillyspec/changes/archive/2026-10-23-file-card-agent-grouping/requirements.md#FR-05
 最近确认：0ea7bf0d129c6dfba9a04915c83c36329bbfbbfd
+
+## FR-agent-038 点击/回车发送后输入框文本立即清空，不等网络响应
+变更：2026-10-23-session-input-clear-fix
+状态：active
+摘要：真会话直发立即清空；忙轮排队同样立即清空；群聊发送立即清空
+全文：.sillyspec/changes/archive/2026-10-23-session-input-clear-fix/requirements.md#FR-01
+最近确认：f4cceafeb72c4b28c56c69a96d4d642f2b5b87e0
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-23-session-input-clear-fix:flow:测试绑定FR-01
+  tests: frontend/src/components/daemon/__tests__/session-panel-draft-scope.test.tsx「发送受理即清输入框文本（FR-01）」 | frontend/src/components/group-chat/__tests__/group-chat-panel.test.tsx「发送受理即清：sendGroupMessage 未响应时输入框已空且草稿键已清」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-23-session-input-clear-fix
+  status: active
+
+## FR-agent-039 发送失败（网络错误/后端拒绝）时输入文本恢复到输入框可重试，附件 chips 全程保留
+变更：2026-10-23-session-input-clear-fix
+状态：active
+摘要：直发失败恢复；预会话首句创建失败恢复
+全文：.sillyspec/changes/archive/2026-10-23-session-input-clear-fix/requirements.md#FR-02
+最近确认：f4cceafeb72c4b28c56c69a96d4d642f2b5b87e0
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-23-session-input-clear-fix:flow:测试绑定FR-02
+  tests: frontend/src/components/daemon/__tests__/session-panel-draft-scope.test.tsx「发送失败恢复文本（FR-02）」 | frontend/src/components/group-chat/__tests__/group-chat-panel.test.tsx「发送失败：文本恢复到输入框可重试」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-23-session-input-clear-fix
+  status: active
+
+## FR-agent-040 发送受理即同步清 localStorage 草稿键（含预会话 __pre__:scope 键），切换会话/组件卸载后草稿不残留已发送内容
+变更：2026-10-23-session-input-clear-fix
+状态：active
+摘要：预会话发送成功后草稿键不残留；真会话发送在途切换后切回不残留
+全文：.sillyspec/changes/archive/2026-10-23-session-input-clear-fix/requirements.md#FR-03
+最近确认：f4cceafeb72c4b28c56c69a96d4d642f2b5b87e0
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-23-session-input-clear-fix:flow:测试绑定FR-03
+  tests: frontend/src/components/daemon/__tests__/session-panel-draft-scope.test.tsx「受理即同步清草稿键（FR-03）」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-23-session-input-clear-fix
+  status: active
+
+## FR-agent-041 新建会话（预会话态）输入框恒空白：不回读旧草稿，且每次重新进入预会话（同机器同引擎）输入框重置
+变更：2026-10-23-session-input-clear-fix
+状态：active
+摘要：填写未发送后重新新建为空白；真会话草稿不回归
+全文：.sillyspec/changes/archive/2026-10-23-session-input-clear-fix/requirements.md#FR-04
+最近确认：f4cceafeb72c4b28c56c69a96d4d642f2b5b87e0
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-23-session-input-clear-fix:flow:测试绑定FR-04
+  tests: frontend/src/components/daemon/__tests__/session-panel-draft-scope.test.tsx「page 真会话草稿切换时序（R-01 基线锁定）」 | frontend/src/components/daemon/__tests__/session-panel-draft-scope.test.tsx「page 预会话草稿入口隔离（task-01 / D-001）> 同一入口重进：输入框恒空白」 | frontend/src/components/sessions/__tests__/sessions-portal.test.tsx「同机器同智能体再次「＋」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-23-session-input-clear-fix
+  status: active

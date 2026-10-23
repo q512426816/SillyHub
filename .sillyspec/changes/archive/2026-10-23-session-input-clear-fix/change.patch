@@ -1,0 +1,1442 @@
+diff --git a/.sillyspec/docs/SillyHub/modules/daemon.changelog.md b/.sillyspec/docs/SillyHub/modules/daemon.changelog.md
+index 6bbd2af7a..4cb2362ae 100644
+--- a/.sillyspec/docs/SillyHub/modules/daemon.changelog.md
++++ b/.sillyspec/docs/SillyHub/modules/daemon.changelog.md
+@@ -88,3 +88,6 @@ created_at: 2026-08-27 14:32:24
+ - 2026-10-23-review-risk-fixes-2 | 审查遗留四处风险修复
+ - 2026-10-23-turn-file-diff-dialog | 轮次文件变更卡行点击弹窗显示变更内容（18字）
+ - 2026-10-23-marquee-ticker-speed | 跑马灯条目内部滚动提速
++- 2026-10-23-live-turn-meta-time | 进行中轮次底部元信息时间显示修复
++- 2026-10-23-askuser-history-live-sync | AskUser 问答历史实时回显（用户实测 bug 修复）
++- 2026-10-23-file-card-agent-grouping | 文件变更卡按AGENT编辑分组展示并修弹窗说明
+diff --git a/.sillyspec/docs/SillyHub/modules/frontend_components.changelog.md b/.sillyspec/docs/SillyHub/modules/frontend_components.changelog.md
+index 26342dc90..ec56cf8a5 100644
+--- a/.sillyspec/docs/SillyHub/modules/frontend_components.changelog.md
++++ b/.sillyspec/docs/SillyHub/modules/frontend_components.changelog.md
+@@ -131,3 +131,6 @@ created_at: 2026-08-30 22:23:33
+ | 2026-10-23 | 2026-10-23-turn-file-diff-dialog | 轮次文件变更卡行点击弹窗显示变更内容（18字） |
+ | 2026-10-23 | 2026-10-22-askuser-dock-inputbar | AskUser 问答卡迁至底部输入框位置 |
+ | 2026-10-23 | 2026-10-23-marquee-item-detail | 跑马灯条目细化：转圈、内部滚动与耗时 |
++| 2026-10-23 | 2026-10-23-live-turn-meta-time | 进行中轮次底部元信息时间显示修复 |
++| 2026-10-23 | 2026-10-23-askuser-history-live-sync | AskUser 问答历史实时回显（用户实测 bug 修复） |
++| 2026-10-23 | 2026-10-23-file-card-agent-grouping | 文件变更卡按AGENT编辑分组展示并修弹窗说明 |
+diff --git a/.sillyspec/docs/backend/modules/auth.changelog.md b/.sillyspec/docs/backend/modules/auth.changelog.md
+index 92f19f971..af9a93acf 100644
+--- a/.sillyspec/docs/backend/modules/auth.changelog.md
++++ b/.sillyspec/docs/backend/modules/auth.changelog.md
+@@ -14,3 +14,4 @@ created_at: 2026-08-29 22:56:30
+ - `auth_refresh_grace_seconds` 默认 60→300（`backend/app/core/config.py`；D-003@v1）。
+ - 用例：tests/modules/auth/test_refresh_family_revocation.py（新，4 用例：族隔离/grace 继承/legacy NULL 兜底/新族）+ test_refresh_grace_window.py 用例 2 改族断言、用例 3 过期 xfail 清偿。
+ - 2026-10-21-agent-profile-slim-default | 档案瘦身重定位为人格加技能清单并支持用户默认档案
++- 2026-10-23-askuser-history-live-sync | AskUser 问答历史实时回显（用户实测 bug 修复）
+diff --git a/.sillyspec/docs/backend/modules/daemon.changelog.md b/.sillyspec/docs/backend/modules/daemon.changelog.md
+index 150daa4fd..590ddd3be 100644
+--- a/.sillyspec/docs/backend/modules/daemon.changelog.md
++++ b/.sillyspec/docs/backend/modules/daemon.changelog.md
+@@ -63,3 +63,6 @@ created_at: 2026-08-29 22:56:30
+ | 2026-10-22 | 2026-10-22-conversation-live-marquee | 会话页「对话」tab 运行中时只有一行状态条，用户感知不到 agent 正在真实执行；希望在该轮末尾… |
+ | 2026-10-22 | 2026-10-22-agent-profiles-page-restyle | 智能体档案列表页重设计 |
+ | 2026-10-23 | 2026-10-22-session-composer-slim | 会话页面底部输入区信息过载：排队消息与纯文本展示露出附件引用 uuid 长串，中断自动续跑是常驻开关… |
++| 2026-10-23 | 2026-10-23-live-turn-meta-time | 进行中轮次底部元信息时间显示修复 |
++| 2026-10-23 | 2026-10-23-askuser-history-live-sync | AskUser 问答历史实时回显（用户实测 bug 修复） |
++| 2026-10-23 | 2026-10-23-file-card-agent-grouping | 文件变更卡按AGENT编辑分组展示并修弹窗说明 |
+diff --git a/.sillyspec/docs/multi-agent-platform/modules/backend.changelog.md b/.sillyspec/docs/multi-agent-platform/modules/backend.changelog.md
+index 5cf5c56a9..111b5e8c6 100644
+--- a/.sillyspec/docs/multi-agent-platform/modules/backend.changelog.md
++++ b/.sillyspec/docs/multi-agent-platform/modules/backend.changelog.md
+@@ -96,3 +96,6 @@
+ - 2026-10-23-translate-budget-align | 修复翻译超时预算矛盾与缓存回填乱序
+ - 2026-10-22-session-composer-slim | 会话页面底部输入区信息过载：排队消息与纯文本展示露出附件引用 uuid 长串，中断自动续跑是常驻开关…
+ - 2026-10-23-semantic-color-scale-fix | 修复语义色阶未定义导致的隐形状态标记
++- 2026-10-23-live-turn-meta-time | 进行中轮次底部元信息时间显示修复
++- 2026-10-23-askuser-history-live-sync | AskUser 问答历史实时回显（用户实测 bug 修复）
++- 2026-10-23-file-card-agent-grouping | 文件变更卡按AGENT编辑分组展示并修弹窗说明
+diff --git a/.sillyspec/docs/multi-agent-platform/modules/frontend.changelog.md b/.sillyspec/docs/multi-agent-platform/modules/frontend.changelog.md
+index f38654a44..633284379 100644
+--- a/.sillyspec/docs/multi-agent-platform/modules/frontend.changelog.md
++++ b/.sillyspec/docs/multi-agent-platform/modules/frontend.changelog.md
+@@ -180,3 +180,6 @@
+ | 2026-10-23 | 2026-10-22-askuser-dock-inputbar | AskUser 问答卡迁至底部输入框位置 |
+ | 2026-10-23 | 2026-10-23-marquee-item-detail | 跑马灯条目细化：转圈、内部滚动与耗时 |
+ | 2026-10-23 | 2026-10-23-marquee-ticker-speed | 跑马灯条目内部滚动提速 |
++| 2026-10-23 | 2026-10-23-live-turn-meta-time | 进行中轮次底部元信息时间显示修复 |
++| 2026-10-23 | 2026-10-23-askuser-history-live-sync | AskUser 问答历史实时回显（用户实测 bug 修复） |
++| 2026-10-23 | 2026-10-23-file-card-agent-grouping | 文件变更卡按AGENT编辑分组展示并修弹窗说明 |
+diff --git a/backend/app/modules/agent/model.py b/backend/app/modules/agent/model.py
+index 0c7bd2cbf..e55b03d65 100644
+--- a/backend/app/modules/agent/model.py
++++ b/backend/app/modules/agent/model.py
+@@ -1299,6 +1299,15 @@ class AgentSessionQueuedMessage(BaseModel, table=True):
+         default=None,
+         sa_column=Column(JSON, nullable=True),
+     )
++    # 网络环境块快照（NetworkContextBlock 的 dict 形态，2026-10-23-session-
++    # network-context D-012@v1：{user_ip, has_xff}——入队时存**发送时刻**的用户
++    # 网络事实；派发时携存储值调判定引擎**实时重算**机器判定并注入（机器状态
++    # 取派发时刻最新，不重放旧判定文本）。NULL = 发送时未携带（老调用/服务
++    # 身份路径），派发轮无网络环境段。
++    network_context: dict | None = Field(
++        default=None,
++        sa_column=Column(JSON, nullable=True),
++    )
+     # 切档案/切供应商快照（str 形态的 uuid；None = 发送时未携带）。
+     agent_profile_id: str | None = Field(
+         default=None,
+diff --git a/backend/app/modules/daemon/router/session_crud.py b/backend/app/modules/daemon/router/session_crud.py
+index 0ab5f2f69..87ed98eee 100644
+--- a/backend/app/modules/daemon/router/session_crud.py
++++ b/backend/app/modules/daemon/router/session_crud.py
+@@ -32,6 +32,7 @@ from sqlalchemy import select as sa_select
+ 
+ import app.modules.daemon.router as _router
+ from app.core.auth_deps import is_service_credential_request
++from app.core.client_ip import client_ip_from_request, has_forwarded_for
+ from app.core.errors import PermissionDenied
+ from app.core.logging import get_logger
+ from app.modules.agent.model import AgentSession  # task-08：自愈回写 title_fallback
+@@ -62,6 +63,7 @@ from app.modules.daemon.schema import (
+     SessionTitleUpdateRequest,
+ )
+ from app.modules.daemon.service import DaemonService
++from app.modules.daemon.session.network_context import NetworkContextBlock
+ from app.modules.daemon.session.service.compact import compact_session as _compact_session_svc
+ from app.modules.daemon.session.service.fork import fork_session as _fork_session_svc
+ from app.modules.daemon.session.service.git_status import (
+@@ -624,6 +626,7 @@ async def get_session_git_status(
+ )
+ async def create_session(
+     data: SessionCreateRequest,
++    request: Request,
+     session: SessionDep,
+     user: TaskRunAgentUser,
+ ) -> SessionCreateResponse:
+@@ -679,6 +682,12 @@ async def create_session(
+         # 是主控身份标记（无 stage → 前端 inject 侧简报/工具注入语义断裂）。
+         stage="orchestrator" if data.team_mission is not None else None,
+         page_context=data.page_context,
++        # 2026-10-23-session-network-context（FR-01）：首轮网络环境块——Request
++        # 观测构造（IP 不可从 body 携带，防伪造），首轮强制注入建立上下文。
++        network_context=NetworkContextBlock(
++            user_ip=client_ip_from_request(request),
++            has_xff=has_forwarded_for(request),
++        ),
+         attachment_ids=data.attachment_ids,
+         # task-05（2026-09-14-session-thinking-level / FR-03）：预会话思考级别
+         # 透传（None/空串=引擎默认；不写 config 列，P1-8/NG-04——仅透传
+@@ -859,6 +868,12 @@ async def inject_session(
+         attachment_ids=data.attachment_ids or None,
+         # ql-20260825-004：每轮注入携带当前页面上下文。
+         page_context=data.page_context,
++        # 2026-10-23-session-network-context（FR-01）：每轮网络环境块——Request
++        # 观测构造（渲染与快照去重在 prompt 组装点）。
++        network_context=NetworkContextBlock(
++            user_ip=client_ip_from_request(request),
++            has_xff=has_forwarded_for(request),
++        ),
+         # task-07（2026-08-26-session-input-mention / FR-06）：@ 联想绑定字段透传
+         # （幂等 binder 调用归 SessionService，三层同步加参——漏透传会 500）。
+         bind_change_key=data.bind_change_key,
+diff --git a/backend/app/modules/daemon/service.py b/backend/app/modules/daemon/service.py
+index d769c1611..80617d349 100644
+--- a/backend/app/modules/daemon/service.py
++++ b/backend/app/modules/daemon/service.py
+@@ -28,6 +28,7 @@ from app.modules.daemon.schema import (
+     TurnFileChangesSnapshot,
+     TurnTimingSnapshot,
+ )
++from app.modules.daemon.session.network_context import NetworkContextBlock
+ from app.modules.session_attachment.storage import SessionAttachmentStorage
+ 
+ log = get_logger(__name__)
+@@ -815,6 +816,9 @@ class DaemonService:
+         # 经 X-API-Key inject 携带 origin='task_wakeup'，router 层门控后传入；
+         # facade 显式签名同步，漏透传会 500）。
+         task_wakeup: bool = False,
++        # 2026-10-23-session-network-context（FR-01）：每轮网络环境块透传
++        # （router 层 Request 观测构造；facade 显式签名同步，漏透传会 500）。
++        network_context: NetworkContextBlock | None = None,
+     ) -> SessionDispatchResult:
+         return await self._sess.inject_session(
+             session_id,
+@@ -832,6 +836,7 @@ class DaemonService:
+             queue_when_busy=queue_when_busy,
+             busy_strategy=busy_strategy,
+             task_wakeup=task_wakeup,
++            network_context=network_context,
+         )
+ 
+     async def interrupt_session(
+diff --git a/backend/app/modules/daemon/session/network_context.py b/backend/app/modules/daemon/session/network_context.py
+index 0fed4738c..64031776f 100644
+--- a/backend/app/modules/daemon/session/network_context.py
++++ b/backend/app/modules/daemon/session/network_context.py
+@@ -20,6 +20,7 @@ from dataclasses import dataclass, field
+ from datetime import UTC, datetime
+ from ipaddress import AddressValueError, IPv4Address, IPv4Network, NetmaskValueError
+ 
++from pydantic import BaseModel
+ from redis.asyncio import Redis
+ 
+ from app.core.logging import get_logger
+@@ -35,16 +36,16 @@ NETENV_MAX_MACHINES = 10
+ _NETENV_FALLBACK_PREFIXES = (24, 16)
+ 
+ 
+-@dataclass(frozen=True)
+-class NetworkContextBlock:
+-    """随提问轮穿透注入链的数据块（镜像 PageContextCreateBlock 形态）。
++class NetworkContextBlock(BaseModel):
++    """随提问轮穿透注入链的数据块（镜像 PageContextCreateBlock 形态——pydantic
++    BaseModel 支持入队 model_dump 序列化与派发 **dict 重建，先例同款）。
+ 
+     queue 入队序列化存储（user_ip/has_xff），派发时携存储值调引擎实时渲染
+     （D-012@v1——不重放旧判定文本）。
+     """
+ 
+-    user_ip: str | None
+-    has_xff: bool
++    user_ip: str | None = None
++    has_xff: bool = False
+ 
+ 
+ @dataclass(frozen=True)
+@@ -241,3 +242,118 @@ async def network_context_for_turn(
+         # Redis 故障降级：每轮注入（可失去重，不失功能，D-006）。
+         log.warning("netenv_snapshot_redis_unavailable", session_id=str(session_id))
+         return text
++
++
++async def collect_session_machines(
++    db,
++    *,
++    user_id: uuid.UUID,
++    runtime_id: str | uuid.UUID | None,
++    workspace_id: uuid.UUID | None,
++) -> list[MachineNetworkInfo]:
++    """组装会话可用机器清单（FR-04 / D-005@v2）：会话 runtime 所属 daemon +
++    workspace_member_runtimes 本人绑定 + grants 表 enabled 借用集（与派发链路
++    resolve_granted_daemon_for_borrow 同源口径，list_machines_shared_to_me）。
++    会话 runtime 的机器排首位（正在执行本会话的机器信息价值最高）。
++    """
++    from sqlalchemy import select
++    from sqlmodel import col
++
++    from app.modules.daemon.grants.queries import list_machines_shared_to_me
++    from app.modules.daemon.model import DaemonInstance, DaemonRuntime
++
++    ordered_ids: list[uuid.UUID] = []
++    seen: set[uuid.UUID] = set()
++
++    def _add(candidate: uuid.UUID | None) -> None:
++        if candidate is not None and candidate not in seen:
++            seen.add(candidate)
++            ordered_ids.append(candidate)
++
++    # ① 会话 runtime 所属 daemon（首位）。
++    if runtime_id is not None:
++        rt = await db.get(DaemonRuntime, uuid.UUID(str(runtime_id)))
++        if rt is not None:
++            _add(rt.daemon_instance_id)
++    # ② 本人绑定（member_runtimes：daemon_id 直取；runtime-only 行回查 runtime）。
++    if workspace_id is not None:
++        from app.modules.workspace.member_runtimes.model import WorkspaceMemberRuntime
++
++        rows = (
++            (
++                await db.execute(
++                    select(WorkspaceMemberRuntime).where(
++                        col(WorkspaceMemberRuntime.workspace_id) == workspace_id,
++                        col(WorkspaceMemberRuntime.user_id) == user_id,
++                    )
++                )
++            )
++            .scalars()
++            .all()
++        )
++        for row in rows:
++            if row.daemon_id is not None:
++                _add(row.daemon_id)
++            elif row.runtime_id is not None:
++                rt = await db.get(DaemonRuntime, row.runtime_id)
++                if rt is not None:
++                    _add(rt.daemon_instance_id)
++    # ③ grants 借用集（enabled + 成员 + borrow 权限，查询内部已裁定）。
++    for shared in await list_machines_shared_to_me(db, actor_user_id=user_id):
++        _add(shared.machine_id)
++
++    if not ordered_ids:
++        return []
++    instances = (
++        (await db.execute(select(DaemonInstance).where(col(DaemonInstance.id).in_(ordered_ids))))
++        .scalars()
++        .all()
++    )
++    by_id = {inst.id: inst for inst in instances}
++    result: list[MachineNetworkInfo] = []
++    for daemon_id in ordered_ids:
++        inst = by_id.get(daemon_id)
++        if inst is None:
++            continue
++        info = inst.network_info if isinstance(inst.network_info, dict) else {}
++        result.append(
++            MachineNetworkInfo(
++                daemon_id=str(inst.id),
++                name=inst.display_alias or inst.hostname,
++                online=inst.status == "online",
++                observed_ip=info.get("observed_ip"),
++                interfaces=list(info.get("interfaces") or []),
++            )
++        )
++    return result
++
++
++async def network_preamble_for_turn(
++    db,
++    *,
++    agent_session,
++    block: NetworkContextBlock,
++    first_turn: bool = False,
++) -> str | None:
++    """渲染点统一入口：组装机器清单 + 引擎判定 + 快照去重。
++
++    None = 本轮不注入（去重跳过）。异常整体吞掉返回 None（网络段是增强信息，
++    永不阻断会话主链路——与 page_context 查无不注入同形降级）。
++    """
++    try:
++        machines = await collect_session_machines(
++            db,
++            user_id=agent_session.user_id,
++            runtime_id=agent_session.runtime_id,
++            workspace_id=agent_session.workspace_id,
++        )
++        return await network_context_for_turn(
++            session_id=agent_session.id,
++            user_ip=block.user_ip,
++            has_xff=block.has_xff,
++            machines=machines,
++            first_turn=first_turn,
++        )
++    except Exception:
++        log.warning("netenv_preamble_render_failed", session_id=str(agent_session.id))
++        return None
+diff --git a/backend/app/modules/daemon/session/service/__init__.py b/backend/app/modules/daemon/session/service/__init__.py
+index f1851423c..aaf5dae0a 100644
+--- a/backend/app/modules/daemon/session/service/__init__.py
++++ b/backend/app/modules/daemon/session/service/__init__.py
+@@ -70,6 +70,9 @@ from app.modules.daemon.schema import (  # noqa: F401 —— 委托签名注解
+     SessionUsageRead,
+     TeamMissionCreateBlock,
+ )
++from app.modules.daemon.session.network_context import (
++    NetworkContextBlock,
++)
+ 
+ # task-02（2026-08-24-sessions-live-updates / design §1.1）：agent_sessions 列表
+ # 变更信号发布入口。test_session_events.py:139 以别名 setattr patch 本命名空间
+@@ -385,6 +388,8 @@ class SessionService(BackgroundTaskMixin):
+         llm_provider_id: str | None = None,
+         team_mission: TeamMissionCreateBlock | None = None,
+         page_context: PageContextCreateBlock | None = None,
++        # 2026-10-23-session-network-context（FR-01）：首轮网络环境块透传。
++        network_context: NetworkContextBlock | None = None,
+         quicklog_id: str | None = None,
+         ppm_item_kind: PpmItemKind | None = None,
+         ppm_item_id: uuid.UUID | None = None,
+@@ -409,6 +414,7 @@ class SessionService(BackgroundTaskMixin):
+             llm_provider_id=llm_provider_id,
+             team_mission=team_mission,
+             page_context=page_context,
++            network_context=network_context,
+             quicklog_id=quicklog_id,
+             ppm_item_kind=ppm_item_kind,
+             ppm_item_id=ppm_item_id,
+@@ -526,6 +532,8 @@ class SessionService(BackgroundTaskMixin):
+         model: str | None = None,
+         attachment_ids: list[uuid.UUID] | None = None,
+         page_context: PageContextCreateBlock | None = None,
++        # 2026-10-23-session-network-context（FR-01）：每轮网络环境块透传。
++        network_context: NetworkContextBlock | None = None,
+         bind_change_key: str | None = None,
+         bind_quick_id: str | None = None,
+         bind_ppm_item_kind: PpmItemKind | None = None,
+@@ -550,6 +558,7 @@ class SessionService(BackgroundTaskMixin):
+             model=model,
+             attachment_ids=attachment_ids,
+             page_context=page_context,
++            network_context=network_context,
+             bind_change_key=bind_change_key,
+             bind_quick_id=bind_quick_id,
+             bind_ppm_item_kind=bind_ppm_item_kind,
+@@ -615,6 +624,8 @@ class SessionService(BackgroundTaskMixin):
+         attachment_owner_user_id: uuid.UUID | None = None,
+         prelocked_attachments: _PrelockedInjectAttachments | None = None,
+         page_context: PageContextCreateBlock | None = None,
++        # 2026-10-23-session-network-context（FR-01）：每轮网络环境块透传。
++        network_context: NetworkContextBlock | None = None,
+         queue_when_busy: bool = False,
+         busy_strategy: Literal["queue", "inject"] | None = None,
+         queue_sender_user_id: uuid.UUID | None = None,
+@@ -638,6 +649,7 @@ class SessionService(BackgroundTaskMixin):
+             attachment_owner_user_id=attachment_owner_user_id,
+             prelocked_attachments=prelocked_attachments,
+             page_context=page_context,
++            network_context=network_context,
+             queue_when_busy=queue_when_busy,
+             busy_strategy=busy_strategy,
+             queue_sender_user_id=queue_sender_user_id,
+@@ -669,6 +681,9 @@ class SessionService(BackgroundTaskMixin):
+         turn_metadata: dict | None = None,
+         # 24h 审查②：page_context 透传（前导由 control 侧拼装，语义见其 docstring）。
+         page_context: PageContextCreateBlock | None = None,
++        # 2026-10-23-session-network-context（FR-01 / D-012@v1）：steering 轮
++        # 网络环境块透传（注入点实时渲染）。
++        network_context: NetworkContextBlock | None = None,
+     ) -> SessionDispatchResult:
+         return await _control._inject_mid_turn_into_run(
+             self,
+@@ -679,6 +694,7 @@ class SessionService(BackgroundTaskMixin):
+             attachment_owner_user_id=attachment_owner_user_id,
+             turn_metadata=turn_metadata,
+             page_context=page_context,
++            network_context=network_context,
+         )
+ 
+     async def _send_interrupt_control(
+diff --git a/backend/app/modules/daemon/session/service/control.py b/backend/app/modules/daemon/session/service/control.py
+index 389ce593b..eabac8b06 100644
+--- a/backend/app/modules/daemon/session/service/control.py
++++ b/backend/app/modules/daemon/session/service/control.py
+@@ -39,6 +39,7 @@ from app.modules.daemon.model import DaemonControlCommand, DaemonTaskLease
+ from app.modules.daemon.protocol import DAEMON_MSG_PLAN_RESPONSE
+ from app.modules.daemon.runtime.service import DaemonRuntimeOffline
+ from app.modules.daemon.schema import PageContextCreateBlock, PlanResponseDecision
++from app.modules.daemon.session.network_context import NetworkContextBlock
+ 
+ from .errors import (
+     DaemonSessionConfigInvalid,
+@@ -101,6 +102,9 @@ async def _inject_mid_turn_into_run(
+     # 24h 审查②：steering 路径此前静默丢 page_context（排队路径入队行会存
+     # 并在派发时重放）——透传至此，与普通注入同口径构建页面上下文前导。
+     page_context: PageContextCreateBlock | None = None,
++    # 2026-10-23-session-network-context（FR-01 / D-012@v1）：网络环境块——
++    # steering 轮在注入点实时渲染判定（与排队路径入队存储-派发重算同语义）。
++    network_context: NetworkContextBlock | None = None,
+ ) -> SessionDispatchResult:
+     """忙轮中途注入（quick 2026-09-02 群聊 @ 忙轮成员 steering 语义）。
+ 
+@@ -253,11 +257,18 @@ async def _inject_mid_turn_into_run(
+             page_context.workspace_id,
+             page_context.tab_key,
+         )
++    # 2026-10-23-session-network-context（FR-01）：网络环境段实时渲染（快照
++    # 去重跳过时 None 不拼接）。
++    netenv_preamble = None
++    if network_context is not None:
++        from app.modules.daemon.session.network_context import network_preamble_for_turn
++
++        netenv_preamble = await network_preamble_for_turn(
++            svc._session, agent_session=session, block=network_context
++        )
+     _inject_user_msg = _strip_team_command_prefix(prompt)
+-    if page_preamble:
+-        inject_prompt = f"{page_preamble}\n\n---\n\n{_inject_user_msg}"
+-    else:
+-        inject_prompt = _inject_user_msg
++    _parts = [p for p in (netenv_preamble, page_preamble) if p]
++    inject_prompt = "\n\n---\n\n".join([*_parts, _inject_user_msg]) if _parts else _inject_user_msg
+     inject_payload = {
+         "session_id": str(session.id),
+         "lease_id": str(session.lease_id),
+@@ -696,6 +707,10 @@ async def _dispatch_inject_turn(
+     provider_config_payload: dict | None,
+     first_turn_briefing: str | None,
+     page_context: PageContextCreateBlock | None,
++    # 2026-10-23-session-network-context（FR-01）：网络环境块——本函数是普通
++    # 后续轮的 prompt 组装点（与 mid-turn/queue 重放三足鼎立），在此渲染。
++    # 缺省 None 零回归（既有直调调用方/服务身份路径无网络段）。
++    network_context: NetworkContextBlock | None = None,
+     inject_attachments: list,
+ ) -> SessionDispatchResult:
+     """commit 后派发段（task-08 自 _inject_into_session:4133-4291 拆出，零改写）。
+@@ -782,12 +797,26 @@ async def _dispatch_inject_turn(
+                     page_context.workspace_id,
+                     page_context.tab_key,
+                 )
+-            # 拼接顺序：页面前导（本轮实时）→ 团队简报（首主控轮一次性）→ 用户消息。
++            # 2026-10-23-session-network-context（FR-01）：网络环境段实时渲染
++            # （快照去重跳过时 None 不拼接；渲染异常吞掉返回 None 不阻断派发）。
++            netenv_preamble = None
++            if network_context is not None:
++                from app.modules.daemon.session.network_context import (
++                    network_preamble_for_turn,
++                )
++
++                netenv_preamble = await network_preamble_for_turn(
++                    svc._session, agent_session=session, block=network_context
++                )
++            # 拼接顺序：网络环境（本轮实时）→ 页面前导（本轮实时）→ 团队简报
++            # （首主控轮一次性）→ 用户消息。
+             # ql-20260901-002：派发文本剥 /team 前缀（前端发原始输入，展示层
+             # 保留 "/team 目标"；agent 永不接收平台指令字面）。无前缀消息
+             # 剥离为 no-op，无 mission 普通会话逐字节不变。
+             _inject_user_msg = _strip_team_command_prefix(prompt)
+             parts = []
++            if netenv_preamble:
++                parts.append(netenv_preamble)
+             if page_preamble:
+                 parts.append(page_preamble)
+             if first_turn_briefing:
+diff --git a/backend/app/modules/daemon/session/service/create.py b/backend/app/modules/daemon/session/service/create.py
+index 140b8abf2..c96304ce7 100644
+--- a/backend/app/modules/daemon/session/service/create.py
++++ b/backend/app/modules/daemon/session/service/create.py
+@@ -27,6 +27,7 @@ from app.modules.daemon.schema import (
+     PageContextCreateBlock,
+     TeamMissionCreateBlock,
+ )
++from app.modules.daemon.session.network_context import NetworkContextBlock
+ from app.modules.llm_provider.service import LlmProviderService as _PSvc
+ from app.modules.ppm.common.session_binding import PpmItemKind, bind_session_to_ppm_item
+ 
+@@ -72,6 +73,10 @@ async def create_session(
+     # 2026-08-25-unified-floating-session（FR-5 / D-005）：悬浮入口页面上下文
+     # 块——仅 page_key 枚举 + 实体 id，前导数据服务端回查；缺省 None 零回归。
+     page_context: PageContextCreateBlock | None = None,
++    # 2026-10-23-session-network-context（FR-01 / D-006@v1）：首轮网络环境块
++    # （router 层从 Request 观测构造）——首轮强制注入一次建立上下文（不走去重），
++    # 后续轮走 inject 链快照去重。缺省 None 零回归。
++    network_context: NetworkContextBlock | None = None,
+     # task-08（2026-08-25-session-spec-binding / FR-04 / FR-06）：快速修复
+     # 短码——创建落库点 bind_session_to_quicklog 补写 quicklog_session_links
+     # （savepoint best-effort，失败仅 warning 不阻断创建主事务与 201）。
+@@ -473,9 +478,21 @@ async def create_session(
+         # 占位注释的落地点）——dispatch_prompt 经 lease metadata 携带前缀
+         # （既有机制），AgentRunLog(user_input)（下方）与首 turn SESSION_INJECT
+         # 展示层仍写干净用户原文（对齐变更/页面前导先例，零 daemon 改动）。
++        # ── 2026-10-23-session-network-context（FR-01 / D-006@v1）：首轮网络
++        # 环境前导——first_turn=True 强制注入一次建立上下文（不走去重），后续
++        # 轮由 inject 链每轮渲染+快照去重。session 行已 flush（下方 :session.id
++        # 可用），机器清单按会话归属组装。缺省 None 不注入（零回归）。
++        netenv_preamble = None
++        if network_context is not None:
++            from app.modules.daemon.session.network_context import network_preamble_for_turn
++
++            netenv_preamble = await network_preamble_for_turn(
++                svc._session, agent_session=session, block=network_context, first_turn=True
++            )
+         _prefix_parts = [
+             part
+             for part in (
++                netenv_preamble,
+                 preamble,
+                 page_preamble,
+                 ppm_preamble,
+diff --git a/backend/app/modules/daemon/session/service/inject.py b/backend/app/modules/daemon/session/service/inject.py
+index db170145f..c72fcb561 100644
+--- a/backend/app/modules/daemon/session/service/inject.py
++++ b/backend/app/modules/daemon/session/service/inject.py
+@@ -27,6 +27,7 @@ from app.modules.agent.model import (
+     AgentSession,
+ )
+ from app.modules.daemon.schema import PageContextCreateBlock
++from app.modules.daemon.session.network_context import NetworkContextBlock
+ from app.modules.llm_provider.service import LlmProviderService as _PSvc
+ from app.modules.ppm.common.session_binding import PpmItemKind
+ 
+@@ -67,6 +68,11 @@ async def inject_session(
+     attachment_ids: list[uuid.UUID] | None = None,
+     # ql-20260825-004：每轮注入携带当前页面上下文。
+     page_context: PageContextCreateBlock | None = None,
++    # 2026-10-23-session-network-context（FR-01 / D-001@v1）：每轮注入携带
++    # 网络环境块（router 层从 Request 观测 user_ip/has_xff 构造；渲染与去重
++    # 在 prompt 组装点，语义同 page_context 每轮通道）。缺省 None 零回归
++    # （服务身份路径/群聊影子等无用户浏览器请求的调用方无网络段）。
++    network_context: NetworkContextBlock | None = None,
+     # task-07（2026-08-26-session-input-mention / FR-06 / D-003）：@ 联想绑定
+     # 字段——经幂等 binder 落 M:N link（见下方「会话绑定」段插入点说明），
+     # 不注入 prompt 前导；缺省 None = 不绑定（零回归）。
+@@ -244,6 +250,8 @@ async def inject_session(
+         prelocked_attachments=prelocked_attachments,
+         # ql-20260825-004：页面上下文透传。
+         page_context=page_context,
++        # 2026-10-23-session-network-context：网络环境块透传。
++        network_context=network_context,
+         # ql-20260825-011：忙轮入队透传。
+         queue_when_busy=queue_when_busy,
+         # task-05（2026-09-18-single-chat-steering）：单聊忙轮策略透传
+@@ -433,6 +441,9 @@ async def _inject_into_session(
+     # ql-20260825-004：每轮注入携带当前页面上下文（build_page_context_preamble
+     # 服务端回查注入【页面上下文】前导，复用 create 路径逻辑）。
+     page_context: PageContextCreateBlock | None = None,
++    # 2026-10-23-session-network-context（FR-01）：网络环境块（渲染在
++    # _dispatch_inject_turn / mid-turn / queue 重放的 prompt 组装点）。
++    network_context: NetworkContextBlock | None = None,
+     # ql-20260825-011：忙轮入队开关（语义见 inject_session 同名参数）。
+     queue_when_busy: bool = False,
+     # quick（2026-09-02 群聊忙轮注入 steering）：忙轮策略（语义见
+@@ -516,6 +527,7 @@ async def _inject_into_session(
+                 attachment_ids=attachment_ids,
+                 attachment_owner_user_id=attachment_owner_user_id,
+                 page_context=page_context,
++                network_context=network_context,
+                 agent_profile_id=agent_profile_id,
+                 llm_provider_id=llm_provider_id,
+                 model=model,
+diff --git a/backend/app/modules/daemon/session/service/queue.py b/backend/app/modules/daemon/session/service/queue.py
+index 051ae4ad3..4ec5f1893 100644
+--- a/backend/app/modules/daemon/session/service/queue.py
++++ b/backend/app/modules/daemon/session/service/queue.py
+@@ -28,6 +28,7 @@ from app.modules.agent.model import (
+ # provider caps steering 键（task-01 契约，pi/claude/codex=true）。
+ from app.modules.agent.provider_caps import get_provider_caps
+ from app.modules.daemon.schema import PageContextCreateBlock
++from app.modules.daemon.session.network_context import NetworkContextBlock
+ from app.modules.daemon.session.service.auto_resume import (
+     make_auto_resume_origin,
+     parse_auto_resume_origin,
+@@ -62,6 +63,10 @@ async def _handle_busy_turn(
+     attachment_ids: list[uuid.UUID] | None = None,
+     attachment_owner_user_id: uuid.UUID | None = None,
+     page_context: PageContextCreateBlock | None = None,
++    # 2026-10-23-session-network-context（FR-01 / D-012@v1）：网络环境块——
++    # steering 分支透传注入点实时渲染；排队分支随条目序列化（发送时刻用户
++    # IP），派发重放时实时重算机器判定。
++    network_context: NetworkContextBlock | None = None,
+     agent_profile_id: str | None = None,
+     llm_provider_id: str | None = None,
+     model: str | None = None,
+@@ -121,6 +126,8 @@ async def _handle_busy_turn(
+             # 24h 审查②：page_context 透传（此前 inject 分支静默丢——排队
+             # 分支会存会重放，steering 分支应同口径，前导由注入侧拼装）。
+             page_context=page_context,
++            # 2026-10-23-session-network-context：steering 分支同口径透传。
++            network_context=network_context,
+         )
+     # ql-20260825-011（后端真实排队）：忙轮不再无条件 409——
+     # queue_when_busy=True 的调用方（前端会话 UI）改落排队表，
+@@ -306,6 +313,13 @@ async def _handle_busy_turn(
+             if page_context is not None
+             else None
+         ),
++        # 2026-10-23-session-network-context（D-012@v1）：发送时刻网络事实随条目
++        # 持久化（排队窗口用户可能切网，派发用存储 IP+实时机器数据重算）。
++        network_context=(
++            network_context.model_dump(mode="json", exclude_none=True)
++            if network_context is not None
++            else None
++        ),
+         agent_profile_id=agent_profile_id,
+         llm_provider_id=llm_provider_id,
+         # ql-20260917-008：切模型快照落列（此前缺口——忙轮切模型入队后丢失，
+@@ -779,6 +793,14 @@ async def dispatch_queued_message_now(
+                     steered_page_context = PageContextCreateBlock(**entry.page_context)
+                 except Exception:
+                     steered_page_context = None
++            # 2026-10-23-session-network-context（D-012@v1）：存储网络块重放
++            # （宽容解析，坏行按 None 处理无网络段）。
++            steered_network_context: NetworkContextBlock | None = None
++            if entry.network_context is not None:
++                try:
++                    steered_network_context = NetworkContextBlock(**entry.network_context)
++                except Exception:
++                    steered_network_context = None
+             attachment_ids: list[uuid.UUID] | None = None
+             if entry.attachment_ids:
+                 try:
+@@ -821,6 +843,7 @@ async def dispatch_queued_message_now(
+                 attachment_owner_user_id=attachment_owner_user_id,
+                 turn_metadata=chain_metadata,
+                 page_context=steered_page_context,
++                network_context=steered_network_context,
+             )
+             # 注入成功：条目已随注入 commit 原子删除（消息转挂活跃 run——
+             # user_input 留痕 + SESSION_INJECT 三段式由 _inject_mid_turn_into_run
+@@ -948,6 +971,14 @@ async def dispatch_queued_messages(svc, session_id: uuid.UUID) -> None:
+                 page_context = PageContextCreateBlock(**entry.page_context)
+             except Exception:
+                 page_context = None
++        # 2026-10-23-session-network-context（D-012@v1）：存储网络块 + 派发时刻
++        # 机器数据实时重算（注入点在 _dispatch_inject_turn，本处只透传块）。
++        network_context: NetworkContextBlock | None = None
++        if entry.network_context is not None:
++            try:
++                network_context = NetworkContextBlock(**entry.network_context)
++            except Exception:
++                network_context = None
+         attachment_ids: list[uuid.UUID] | None = None
+         if entry.attachment_ids:
+             try:
+@@ -984,6 +1015,7 @@ async def dispatch_queued_messages(svc, session_id: uuid.UUID) -> None:
+                 attachment_ids=attachment_ids,
+                 attachment_owner_user_id=attachment_owner_user_id,
+                 page_context=page_context,
++                network_context=network_context,
+                 # 2026-10-22-turn-trigger-metadata-p2：排队行 origin → 轮触发
+                 # 溯源戳（task_wakeup/schedule 精确、auto_resume: 前缀），与群聊
+                 # chain_metadata 合并（戳键覆盖，现状键空间不相交）；None 行不盖。
+diff --git a/backend/migrations/versions/20261023090100_add_queued_messages_network_context.py b/backend/migrations/versions/20261023090100_add_queued_messages_network_context.py
+new file mode 100644
+index 000000000..daf0ee461
+--- /dev/null
++++ b/backend/migrations/versions/20261023090100_add_queued_messages_network_context.py
+@@ -0,0 +1,32 @@
++"""agent_session_queued_messages network_context（排队网络块快照）
++
++Revision ID: 20261023090100
++Revises: 20261023090000
++Create Date: 2026-10-23
++
++为 agent_session_queued_messages 新增 network_context JSON 列（2026-10-23-
++session-network-context task-08 / D-012@v1）：忙轮排队条目存发送时刻的
++{user_ip, has_xff}，派发时携存储值实时重算网络环境判定注入（不重放旧文本）。
++存量行 NULL=发送时未携带，派发轮无网络段（兼容）。
++"""
++
++from __future__ import annotations
++
++import sqlalchemy as sa
++from alembic import op
++
++revision = "20261023090100"
++down_revision = "20261023090000"
++branch_labels = None
++depends_on = None
++
++
++def upgrade() -> None:
++    op.add_column(
++        "agent_session_queued_messages",
++        sa.Column("network_context", sa.JSON(), nullable=True),
++    )
++
++
++def downgrade() -> None:
++    op.drop_column("agent_session_queued_messages", "network_context")
+diff --git a/backend/tests/modules/daemon/test_network_context.py b/backend/tests/modules/daemon/test_network_context.py
+index fd48746a3..557b640e9 100644
+--- a/backend/tests/modules/daemon/test_network_context.py
++++ b/backend/tests/modules/daemon/test_network_context.py
+@@ -382,6 +382,75 @@ async def test_snapshot_change_within_60s_defers_and_catches_up():
+     assert caught_up is not None and "10.0.0.8" in caught_up
+ 
+ 
++# ── FR-04：机器清单装配（collect_session_machines）─────────────────────────
++
++
++@pytest.mark.asyncio
++async def test_collect_session_machines_projects_runtime_owner(
++    db_session: AsyncSession,
++) -> None:
++    """会话 runtime 所属机器排首位，网络投影（名/在线/观测IP/网卡）正确。
++
++    绑定与共享分支复用既有查询函数（grants/queries.list_machines_shared_to_me
++    与 member_runtimes，各自测试已覆盖可见性口径）；本用例锁装配层：runtime →
++    daemon_instance → MachineNetworkInfo 投影。
++    """
++    from app.modules.daemon.model import DaemonRuntime
++    from app.modules.daemon.session.network_context import collect_session_machines
++
++    user = await _seed_user(db_session)
++    daemon_id = uuid.uuid4()
++    db_session.add(
++        DaemonInstance(
++            id=daemon_id,
++            user_id=user.id,
++            hostname="build-host",
++            display_alias="构建机",
++            server_url="http://backend",
++            status="online",
++            network_info={"observed_ip": "192.168.1.10", "interfaces": _nics("192.168.1.10")},
++        )
++    )
++    runtime_id = uuid.uuid4()
++    db_session.add(
++        DaemonRuntime(
++            id=runtime_id,
++            daemon_instance_id=daemon_id,
++            user_id=user.id,
++            provider="claude",
++            status="online",
++        )
++    )
++    await db_session.commit()
++
++    machines = await collect_session_machines(
++        db_session, user_id=user.id, runtime_id=runtime_id, workspace_id=None
++    )
++    assert len(machines) == 1
++    m = machines[0]
++    assert m.daemon_id == str(daemon_id)
++    assert m.name == "构建机"  # display_alias 优先于 hostname（口径同 grants/queries）
++    assert m.online is True
++    assert m.observed_ip == "192.168.1.10"
++    assert [e["ip"] for e in m.interfaces] == ["192.168.1.10"]
++
++
++@pytest.mark.asyncio
++async def test_collect_session_machines_empty_when_no_binding(
++    db_session: AsyncSession,
++) -> None:
++    """无 runtime 绑定且无工作区绑定 → 空清单（渲染层降级为无在线机器）。"""
++    from app.modules.daemon.session.network_context import collect_session_machines
++
++    user = await _seed_user(db_session)
++    assert (
++        await collect_session_machines(
++            db_session, user_id=user.id, runtime_id=None, workspace_id=None
++        )
++        == []
++    )
++
++
+ @pytest.mark.asyncio
+ async def test_snapshot_redis_failure_degrades_to_every_turn():
+     """Redis 故障 → 每轮注入（可失去重不失功能）。"""
+diff --git a/backend/tests/test_align_platform_change_events_migration.py b/backend/tests/test_align_platform_change_events_migration.py
+index 96fbbd31b..959824acc 100644
+--- a/backend/tests/test_align_platform_change_events_migration.py
++++ b/backend/tests/test_align_platform_change_events_migration.py
+@@ -122,8 +122,10 @@ class TestMigrationStructure:
+         # 20261022100000（agent_runs.change_id FK CASCADE→SET NULL + turn_count
+         # 保守对账——2026-10-22-change-delete-session-history-fix FR-02/FR-04）→
+         # 20261023090000（daemon_instances.network_info 网络快照列——
+-        # 2026-10-23-session-network-context task-05 / FR-03 / D-008@v1）。
+-        assert heads[0] == "20261023090000"  # 链尾锚随主线新迁移前移（注释链续写）
++        # 2026-10-23-session-network-context task-05 / FR-03 / D-008@v1）→
++        # 20261023090100（agent_session_queued_messages.network_context 排队
++        # 网络块快照列——同变更 task-08 / D-012@v1 派发实时重算）。
++        assert heads[0] == "20261023090100"  # 链尾锚随主线新迁移前移（注释链续写）
+ 
+     def test_revision_chain(self) -> None:
+         mod = _load_migration_module()
+diff --git a/frontend/src/components/daemon/__tests__/session-panel-draft-scope.test.tsx b/frontend/src/components/daemon/__tests__/session-panel-draft-scope.test.tsx
+index 2f93692da..5542fe645 100644
+--- a/frontend/src/components/daemon/__tests__/session-panel-draft-scope.test.tsx
++++ b/frontend/src/components/daemon/__tests__/session-panel-draft-scope.test.tsx
+@@ -415,13 +415,22 @@ describe("page 预会话草稿入口隔离（task-01 / D-001）", () => {
+     );
+   });
+ 
+-  it("同一入口重进：草稿恢复到输入框", async () => {
++  it("同一入口重进：输入框恒空白（新建=全新开始，残留键清除）", async () => {
++    // 2026-10-23-session-input-clear-fix / FR-04：预会话挂载不再回读草稿——
++    // 原「同入口重进恢复草稿」语义与用户「新建会话应全新空白」预期冲突
++    //（用户报障：其他会话填过 AAA，新建会话仍显示 AAA），本卡修订为恒空白
++    // 并顺带清残留键（原未发送草稿随新建废弃）。真会话草稿回读不受影响
++    //（上方时序用例锁定）。
+     window.localStorage.setItem(DRAFT_KEY("__pre__:ws-1:rt-claude"), "重进应恢复");
+     setupPage({ preContext: { workspaceId: "ws-1", runtimeId: "rt-claude" } });
+     const input = (await screen.findByPlaceholderText(
+       /发送第一句话开始对话/,
+     )) as HTMLTextAreaElement;
+-    await waitFor(() => expect(input.value).toBe("重进应恢复"));
++    await waitFor(() => expect(input.value).toBe(""));
++    // 残留键在挂载时被清（新建即弃稿，不再留下可回读的死数据）。
++    expect(
++      window.localStorage.getItem(DRAFT_KEY("__pre__:ws-1:rt-claude")),
++    ).toBe("");
+   });
+ 
+   it("workspaceId null 的入口：scope 用 '-' 分量组装（与具名工作区入口隔离）", async () => {
+@@ -490,3 +499,160 @@ describe("dialog 预会话草稿 scope（task-01 / D-001）", () => {
+     await waitFor(() => expect(input.value).toBe("dialog 重进恢复"));
+   });
+ });
++
++/* ───────── 5. 发送受理即清 + 失败恢复（2026-10-23-session-input-clear-fix） ─────
++ *
++ * 用户报障（原话）：①在其他会话填了 AAA，新建会话仍显示 AAA；②发送后 AAA 不
++ * 立即消失，卡在输入框等网络响应；③排队中切换会话，AAA 仍保留。
++ *
++ * 根因（design 做法概述）：清空走 setState→写草稿 effect 链路，组件因会话切换
++ * 卸载时 effect 不执行（草稿键残留已发送内容）；且 onSendSettled 等响应成功才清。
++ *
++ * 本节锁定修复口径：受理即清输入框文本（FR-01）、失败恢复原文（FR-02）、
++ * 受理即同步清草稿键（FR-03）。 */
++
++/** 挂起的 injectSession（永不 resolve；用例末尾手动 settle 收尾防 act 噪音）。 */
++function pendInject() {
++  const box: { settle?: (v: unknown) => void } = {};
++  sessionApi.injectSession.mockImplementation(
++    () =>
++      new Promise<unknown>((resolve) => {
++        box.settle = resolve;
++      }),
++  );
++  return () => box.settle?.({ run_id: "run-1", queued: false, steered: false });
++}
++
++/** 取真会话输入框（placeholder「继续追问」）。 */
++async function realInput() {
++  return (await screen.findByPlaceholderText(/继续追问/)) as HTMLTextAreaElement;
++}
++
++/** 点发送按钮（aria-label「发送」——有空内容时按钮才启用）。 */
++function clickSend() {
++  fireEvent.click(screen.getByLabelText("发送"));
++}
++
++describe("发送受理即清输入框文本（FR-01）", () => {
++  it("真会话直发：injectSession 未响应时输入框已清空（不等响应）", async () => {
++    const settle = pendInject();
++    setupPage({ sessionId: "sess-a" });
++    const input = await realInput();
++    await nextFrame();
++    fireEvent.change(input, { target: { value: "AAA" } });
++    await waitFor(() => expect(input.value).toBe("AAA"));
++
++    clickSend();
++    // 发送请求仍在途（mock 未 resolve），输入框必须已清空。
++    await waitFor(() => expect(input.value).toBe(""));
++    expect(sessionApi.injectSession).toHaveBeenCalled();
++    settle();
++  });
++
++  it("预会话首句：createSession 未响应时输入框已清空", async () => {
++    const box: { settle?: (v: unknown) => void } = {};
++    sessionApi.createSession.mockImplementation(
++      () =>
++        new Promise<unknown>((resolve) => {
++          box.settle = resolve;
++        }),
++    );
++    setupPage({ preContext: { workspaceId: "ws-1", runtimeId: "rt-claude" } });
++    const input = (await screen.findByPlaceholderText(
++      /发送第一句话开始对话/,
++    )) as HTMLTextAreaElement;
++    await nextFrame();
++    fireEvent.change(input, { target: { value: "AAA" } });
++    await waitFor(() => expect(input.value).toBe("AAA"));
++
++    clickSend();
++    await waitFor(() => expect(input.value).toBe(""));
++    expect(sessionApi.createSession).toHaveBeenCalled();
++    box.settle?.({ session_id: "sess-new" });
++  });
++});
++
++describe("发送失败恢复文本（FR-02）", () => {
++  it("真会话直发失败：输入框恢复原文可重试", async () => {
++    sessionApi.injectSession.mockRejectedValue(new Error("network down"));
++    setupPage({ sessionId: "sess-a" });
++    const input = await realInput();
++    await nextFrame();
++    fireEvent.change(input, { target: { value: "AAA" } });
++    await waitFor(() => expect(input.value).toBe("AAA"));
++
++    clickSend();
++    // 失败后原文回到输入框（受控 value 恢复）。
++    await waitFor(() => expect(input.value).toBe("AAA"));
++  });
++
++  it("预会话首句失败：输入框恢复原文可重试", async () => {
++    sessionApi.createSession.mockRejectedValue(new Error("创建失败"));
++    setupPage({ preContext: { workspaceId: "ws-1", runtimeId: "rt-claude" } });
++    const input = (await screen.findByPlaceholderText(
++      /发送第一句话开始对话/,
++    )) as HTMLTextAreaElement;
++    await nextFrame();
++    fireEvent.change(input, { target: { value: "AAA" } });
++    await waitFor(() => expect(input.value).toBe("AAA"));
++
++    clickSend();
++    await waitFor(() => expect(input.value).toBe("AAA"));
++  });
++});
++
++describe("受理即同步清草稿键（FR-03）", () => {
++  it("真会话：发送受理即清 localStorage 草稿；在途切走再切回不残留", async () => {
++    const settle = pendInject();
++    const { rerenderWith } = setupPage({ sessionId: "sess-a" });
++    const input = await realInput();
++    await nextFrame();
++    fireEvent.change(input, { target: { value: "AAA" } });
++    await waitFor(() =>
++      expect(window.localStorage.getItem(DRAFT_KEY("sess-a"))).toBe("AAA"),
++    );
++
++    clickSend();
++    // 受理瞬间草稿键即被清（不依赖 setInput→effect 链路，卸载后同样生效）。
++    await waitFor(() =>
++      expect(window.localStorage.getItem(DRAFT_KEY("sess-a"))).toBe(""),
++    );
++
++    // 发送在途切到另一会话，再切回：不显示已发送内容。
++    rerenderWith("sess-b");
++    await screen.findByPlaceholderText(/继续追问/);
++    rerenderWith("sess-a");
++    const backInput = await realInput();
++    await waitFor(() => expect(backInput.value).toBe(""));
++    settle();
++  });
++
++  it("预会话：首句受理即清 __pre__:scope 键（创建成功切真会话后不残留到下次新建）", async () => {
++    const box: { settle?: (v: unknown) => void } = {};
++    sessionApi.createSession.mockImplementation(
++      () =>
++        new Promise<unknown>((resolve) => {
++          box.settle = resolve;
++        }),
++    );
++    setupPage({ preContext: { workspaceId: "ws-1", runtimeId: "rt-claude" } });
++    const input = (await screen.findByPlaceholderText(
++      /发送第一句话开始对话/,
++    )) as HTMLTextAreaElement;
++    await nextFrame();
++    fireEvent.change(input, { target: { value: "AAA" } });
++    await waitFor(() =>
++      expect(window.localStorage.getItem(DRAFT_KEY("__pre__:ws-1:rt-claude"))).toBe(
++        "AAA",
++      ),
++    );
++
++    clickSend();
++    await waitFor(() =>
++      expect(window.localStorage.getItem(DRAFT_KEY("__pre__:ws-1:rt-claude"))).toBe(
++        "",
++      ),
++    );
++    box.settle?.({ session_id: "sess-new" });
++  });
++});
+diff --git a/frontend/src/components/daemon/session-panel/session-panel-page.tsx b/frontend/src/components/daemon/session-panel/session-panel-page.tsx
+index 96b2e1d4a..74dabe6a6 100644
+--- a/frontend/src/components/daemon/session-panel/session-panel-page.tsx
++++ b/frontend/src/components/daemon/session-panel/session-panel-page.tsx
+@@ -911,7 +911,19 @@ export function SessionPanelPage({
+     : null;
+   useEffect(() => {
+     draftHydratedRef.current = false;
+-    setInput(readSessionDraft(sessionId, preDraftScope));
++    // 2026-10-23-session-input-clear-fix / FR-04：预会话态恒空白——「新建会话」
++    // 必须是全新开始。原实现按 __pre__:<scope> 回读草稿，同一入口（同机器同引
++    // 擎）再次「＋」新建时把上次未发送内容带回输入框（用户报障：在其他会话
++    // 填了 AAA，新建会话输入框也显示 AAA）。此处改为预会话不回读并清残留键
++    //（新建即弃稿，不留可回读的死数据）。真会话（sessionId 非空）回读语义零
++    // 变化；dialog 模式在 session-panel-dialog.tsx，其「同 workspaceId 重开恢复
++    // 草稿」语义不在本变更范围（已知遗留，design 风险与死路已记）。
++    if (sessionId) {
++      setInput(readSessionDraft(sessionId, preDraftScope));
++    } else {
++      setInput("");
++      writeSessionDraft(null, "", preDraftScope);
++    }
+     setPendingMentions({});
+     const raf = requestAnimationFrame(() => {
+       draftHydratedRef.current = true;
+@@ -928,6 +940,44 @@ export function SessionPanelPage({
+     // eslint-disable-next-line react-hooks/exhaustive-deps
+   }, [sessionId, input]);
+ 
++  /**
++   * 2026-10-23-session-input-clear-fix / FR-01 + FR-03：发送受理即清。
++   *
++   * 用户报障：发送后文本不立即消失（卡在输入框等网络响应），排队中切换会话
++   * 文本还被带过去/切回仍在。根因：清空原走「onSendSettled 写 setInput 空串 →
++   * 持久化 effect 写磁盘」链路——① 等 HTTP 往返才清（不即时）；② 组件因会话
++   * 切换卸载时 effect 不执行，localStorage 草稿键保留已发送文本，切回/下次新建
++   * 回读即重现（本次核心根因）。
++   *
++   * 此处受理瞬间同步清两处：输入态 + 草稿键（直接落盘，不依赖组件存活）。
++   * 附件 chips / @ 联想选中仍由 onSendSettled 在响应成功后清（失败路径天然
++   * 保留可重试）；文本失败恢复走 restoreRejectedSend。
++   */
++  const clearInputAccepted = useCallback(() => {
++    setInput("");
++    writeSessionDraft(sessionId, "", preDraftScope);
++  }, [sessionId, preDraftScope]);
++
++  /**
++   * 2026-10-23-session-input-clear-fix / FR-02：发送失败（网络错误/后端拒绝）时
++   * 把所发原文恢复到输入框，可原地重试。
++   *
++   * 两条防御（与既有 handleInterrupt 回退、定时发送清空同款口径）：
++   *   - 仅当输入框为空时回填——失败窗口期用户已输入新内容则不覆盖；
++   *   - 草稿键仅当其当前为空时才写回——不覆盖用户新输入落盘的草稿。
++   * 组件存活时 setInput 触发的持久化 effect 会写回草稿；组件已卸载（发送在途
++   * 切走）时 effect 不跑，此处直接落盘兜底——切回原会话仍能读到原文重试。
++   */
++  const restoreRejectedSend = useCallback(
++    (raw: string) => {
++      setInput((prev) => (prev === "" ? raw : prev));
++      if (!readSessionDraft(sessionId, preDraftScope)) {
++        writeSessionDraft(sessionId, raw, preDraftScope);
++      }
++    },
++    [sessionId, preDraftScope],
++  );
++
+   // ── task-08（2026-09-07-session-pin-rename-scheduled-send / FR-04）：定时发送 ──
+   // 弹窗开合 + 选定时间（Dayjs，分钟级）+ 提交在途 + 定时条刷新信号（驱动
+   // ScheduledMessagesBar 局部 client 失效重拉，panel 零 react-query）+ 聊天流
+@@ -3503,7 +3553,10 @@ export function SessionPanelPage({
+    * 置位）→ run 已创建则立即补发 interruptSession 真停（消息已回退输入框）。
+    */
+   const sendFromQueue = useCallback(
+-    async (prompt: string, attachmentIds: string[]) => {
++    // 2026-10-23-session-input-clear-fix / FR-02：第三参 rawPrompt = 用户所见原文
++    //（token 置换前），失败恢复用；缺省回落 prompt（无 token 场景两者相等，
++    // 旧调用点兼容）。
++    async (prompt: string, attachmentIds: string[], rawPrompt: string = prompt) => {
+       // task-03（R-01）：预会话态无会话可 inject——sessionActive=false 时 hook
+       // 不投递，此处防御性短路（对齐 dialog 版 ?? "" + status 守卫先例）。
+       if (!sessionId) return;
+@@ -3611,6 +3664,8 @@ export function SessionPanelPage({
+             turns: prev.turns.filter((t) => t.runId !== placeholderId),
+           }));
+           setErrorMsg(errMessage(apiErr, "发送失败"));
++          // FR-02：受理即清后失败 → 原文回填可重试（输入框已有新内容则不覆盖）。
++          restoreRejectedSend(rawPrompt);
+         }
+       } finally {
+         if (inflightSendRef.current?.placeholderId === placeholderId) {
+@@ -3618,7 +3673,14 @@ export function SessionPanelPage({
+         }
+       }
+     },
+-    [sessionId, pageContextOverride, pendingMentions, qc, onSendSettled],
++    [
++      sessionId,
++      pageContextOverride,
++      pendingMentions,
++      qc,
++      onSendSettled,
++      restoreRejectedSend,
++    ],
+   );
+ 
+   /**
+@@ -3631,7 +3693,9 @@ export function SessionPanelPage({
+    * 框可改后重发。
+    */
+   const sendToServerQueue = useCallback(
+-    async (prompt: string, attachmentIds: string[]) => {
++    // FR-02（2026-10-23-session-input-clear-fix）：第三参 rawPrompt 同 sendFromQueue
++    //（失败回填用户原文；缺省回落 prompt）。
++    async (prompt: string, attachmentIds: string[], rawPrompt: string = prompt) => {
+       if (!sessionId) return;
+       try {
+         const resp = await injectSession(sessionId, prompt, {
+@@ -3673,9 +3737,18 @@ export function SessionPanelPage({
+       } catch (err) {
+         const apiErr = err as ApiError;
+         setErrorMsg(errMessage(apiErr, "发送失败"));
++        // FR-02：受理即清后失败（满员 409 / 离线 / 网络错误）→ 原文回填可重试。
++        restoreRejectedSend(rawPrompt);
+       }
+     },
+-    [sessionId, pageContextOverride, pendingMentions, qc, onSendSettled],
++    [
++      sessionId,
++      pageContextOverride,
++      pendingMentions,
++      qc,
++      onSendSettled,
++      restoreRejectedSend,
++    ],
+   );
+ 
+   // 2026-08-31-session-queue-ux（task-09）：补 refresh（SSE queue_changed 即时
+@@ -3887,10 +3960,17 @@ export function SessionPanelPage({
+    * 附件非空允许空 prompt（D-7 看图说话对齐）。失败保留附件可重试（R-02 同义）。
+    */
+   const handlePreSessionSend = useCallback(
+-    async (prompt: string, attachmentIds: string[]) => {
++    // 2026-10-23-session-input-clear-fix：第三参 rawPrompt = 用户所见原文（token
++    // 置换前），失败回填用；缺省回落 prompt。
++    async (prompt: string, attachmentIds: string[], rawPrompt: string = prompt) => {
+       if (!preContext || preCreating) return;
+       setPreCreating(true);
+       setPreError(null);
++      // FR-01 + FR-03（2026-10-23-session-input-clear-fix）：受理即清（原文改于
++      // 「成功后才清」）——预会话创建成功瞬间父层切真会话、本组件卸载，原
++      // 成功路径的 setInput("") 与写草稿 effect 均不执行 → __pre__:scope 键
++      // 残留已发送内容，下次新建同入口回读即重现（用户报障根因路径）。
++      clearInputAccepted();
+       // task-05（FR-05）：@ 联想选中与入口锁定上下文合并——同字段单值，@ 选中
+       // （用户显式最新选择，组件内「同类型后选覆盖先选」语义的延伸）优先，
+       // preContext（change/quicklog 入口 X-13 契约）兜底；缺省回落既有语义。
+@@ -3943,9 +4023,8 @@ export function SessionPanelPage({
+           // ql-20260825-001：首句附件（有值才带）。
+           ...(attachmentIds.length > 0 ? { attachment_ids: attachmentIds } : {}),
+         });
+-        // R-02：成功才清空（失败路径输入保留在 catch 之外，可原地重试——
+-        // 暂存 team payload 同语义：失败保留，重试仍携带）。
+-        setInput("");
++        // R-02：附件/@ 绑定/team 暂存仍为成功后才清（失败路径保留可重试）；
++        // 输入文本已在受理点清（FR-01/FR-03），此处不再重复 setInput。
+         setPendingAttachments([]);
+         clearAttachmentsRef.current?.();
+         // task-13：成功清空暂存（mission 已随 create 预建，再发不重复上送）。
+@@ -3956,6 +4035,8 @@ export function SessionPanelPage({
+         onPreSessionCreated?.(resp);
+       } catch (err) {
+         setPreError(errMessage(err, "创建会话失败，请重试"));
++        // FR-02：受理即清后创建失败 → 原文回填输入框（+ 草稿键）可原地重试。
++        restoreRejectedSend(rawPrompt);
+       } finally {
+         setPreCreating(false);
+       }
+@@ -3970,6 +4051,8 @@ export function SessionPanelPage({
+       preModelId,
+       preThinkingLevel,
+       preTeamMission,
++      clearInputAccepted,
++      restoreRejectedSend,
+     ],
+   );
+ 
+@@ -4005,7 +4088,7 @@ export function SessionPanelPage({
+     // （后端对 pending tool_report 的 inject 恒 409 指引 takeover）。
+     if (isToolReportBody) {
+       void handleTakeoverSend(prompt);
+-      setInput("");
++      clearInputAccepted();
+       return;
+     }
+     const teamCmd = parseTeamCommand(prompt);
+@@ -4021,7 +4104,8 @@ export function SessionPanelPage({
+       // 裸 /team（无目标文本）无可发内容不发送；带附件可发（D-7 看图说话，
+       // 后端剥离后空文本+附件走附件豁免轮）。
+       if ((!prompt || teamCmd === "") && pendingAttachments.length === 0) return;
+-      void handlePreSessionSend(prompt, pendingAttachments.map((a) => a.id));
++      // FR-02：带 rawPrompt（= 发送前用户所见原文）供创建失败回填。
++      void handlePreSessionSend(prompt, pendingAttachments.map((a) => a.id), rawPrompt);
+       return;
+     }
+     // task-11（D-004 四路等价）：/team 前缀拦截——不直接发送，弹层确认后目标文本
+@@ -4039,7 +4123,7 @@ export function SessionPanelPage({
+       machineOnline
+     ) {
+       openTeamPopover(teamCmd || null);
+-      setInput("");
++      clearInputAccepted();
+       // task-05：拦截清空输入的同点位清空 @ 联想选中（拦截不发送，残留选中
+       // 会错绑到下一条消息；/team 拦截语义本身零改动）。
+       setPendingMentions({});
+@@ -4070,13 +4154,17 @@ export function SessionPanelPage({
+       attachmentMetaRef.current.set(a.id, { kind: a.kind, name: a.name });
+     }
+     // ql-20260825-011：忙轮 → 服务端排队（无占位轮，后端 run 终态后派发）；
+-    // 空闲 → 占位轮直发。草稿与附件改为发送成功后清（onSendSettled）。
++    // 空闲 → 占位轮直发。
++    // 2026-10-23-session-input-clear-fix / FR-01 + FR-03：文本改「发送受理即
++    // 清」（原等响应成功才清，用户感知卡顿 + 切换会话后草稿残留）；rawPrompt
++    // 透传给两路径供失败回填（FR-02）。附件 chips / @ 绑定仍响应成功后清。
++    clearInputAccepted();
+     if (running) {
+-      void sendToServerQueue(prompt, attachmentIds);
++      void sendToServerQueue(prompt, attachmentIds, rawPrompt);
+       return;
+     }
+-    void sendFromQueue(prompt, attachmentIds);
+-  }, [input, sessionId, session, ended, suspended, machineOnline, running, isQueueFull, pendingAttachments, attTokenMap, wsRefTokens, notify, sendToServerQueue, sendFromQueue, sessionEngine, openTeamPopover, handlePreSessionSend, teamMissions, isToolReportBody, handleTakeoverSend]);
++    void sendFromQueue(prompt, attachmentIds, rawPrompt);
++  }, [input, sessionId, session, ended, suspended, machineOnline, running, isQueueFull, pendingAttachments, attTokenMap, wsRefTokens, notify, sendToServerQueue, sendFromQueue, sessionEngine, openTeamPopover, handlePreSessionSend, teamMissions, isToolReportBody, handleTakeoverSend, clearInputAccepted]);
+ 
+   // 2026-10-21-daemon-zombie-turn FR-04：打断 15s 超时回退（定时器簿记在
+   // interrupt-timeout.ts hook）。到点**先裁决**：该轮仍处 interrupting 才回退
+diff --git a/frontend/src/components/group-chat/__tests__/group-chat-panel.test.tsx b/frontend/src/components/group-chat/__tests__/group-chat-panel.test.tsx
+index 176d7e630..a47a1db2a 100644
+--- a/frontend/src/components/group-chat/__tests__/group-chat-panel.test.tsx
++++ b/frontend/src/components/group-chat/__tests__/group-chat-panel.test.tsx
+@@ -1401,8 +1401,62 @@ describe("GroupChatPanel 输入区（@补全 + 发送 + typing 上报）", () =>
+     });
+   });
+ 
+-  it("typing 上报：输入节流首跳 typing=true + preview 尾 400 字；发送后 typing=false", async () => {
++  /* 2026-10-23-session-input-clear-fix / FR-01 + FR-02 + FR-03（群聊同款）：
++   * 用户报障——发送后文本卡在输入框等网络响应；排队中切换会话文本还在。
++   * 群聊根因同单聊：原文「sendGroupMessage 响应成功后才 setDraft("")」，且
++   * 草稿落盘走 setDraft→writeGroupDraft effect（key={groupId} 卸载后不执行）。 */
++  it("发送受理即清：sendGroupMessage 未响应时输入框已空且草稿键已清", async () => {
+     harness.logsJson = [];
++    window.localStorage.clear();
++    const box: { settle?: (v: unknown) => void } = {};
++    mocks.sendGroupMessage.mockImplementation(
++      () => new Promise<unknown>((resolve) => {
++        box.settle = resolve;
++      }),
++    );
++    renderPanel();
++    await waitForStreamWired();
++
++    const input = screen.getByLabelText("群消息输入框");
++    fireEvent.change(input, { target: { value: "AAA" } });
++    await flushAsync(2);
++    fireEvent.keyDown(input, { key: "Enter" });
++
++    // 请求在途（mock 未 resolve）——输入框已清空。
++    await waitFor(() => expect((input as HTMLTextAreaElement).value).toBe(""));
++    // 草稿键同步清（不依赖卸载前的 effect 链路）。
++    await waitFor(() =>
++      expect(
++        window.localStorage.getItem("sillyhub.groupchats.draft.g-1"),
++      ).toBe(""),
++    );
++    box.settle?.({
++      carrier_run_id: "r-carrier",
++      log_id: "l-sent",
++      mentioned_member_ids: [],
++      mention_all: false,
++      triggered: [],
++    });
++    await flushAsync(2);
++  });
++
++  it("发送失败：文本恢复到输入框可重试", async () => {
++    harness.logsJson = [];
++    window.localStorage.clear();
++    mocks.sendGroupMessage.mockRejectedValue(new Error("network down"));
++    renderPanel();
++    await waitForStreamWired();
++
++    const input = screen.getByLabelText("群消息输入框");
++    fireEvent.change(input, { target: { value: "AAA" } });
++    await flushAsync(2);
++    fireEvent.keyDown(input, { key: "Enter" });
++
++    // 失败后原文回填（受理即清 → 失败恢复，否则文本丢失）。
++    await waitFor(() => expect((input as HTMLTextAreaElement).value).toBe("AAA"));
++  });
++
++  it("typing 上报：输入节流首跳 typing=true + preview 尾 400 字；发送后 typing=false", async () => {    harness.logsJson = [];
+     renderPanel();
+     await waitForStreamWired();
+ 
+diff --git a/frontend/src/components/group-chat/group-chat-panel.tsx b/frontend/src/components/group-chat/group-chat-panel.tsx
+index 1a51d5dfd..326eb19e4 100644
+--- a/frontend/src/components/group-chat/group-chat-panel.tsx
++++ b/frontend/src/components/group-chat/group-chat-panel.tsx
+@@ -2084,6 +2084,14 @@ export function GroupChatPanel({
+       wsRefTokens,
+     );
+     setSending(true);
++    /* 2026-10-23-session-input-clear-fix / FR-01 + FR-03（单聊同款口径）：发送
++     * 受理即清草稿——原文「等 sendGroupMessage 响应成功才 setDraft("")」，用户
++     * 感知卡在输入框排队；且清空走 setDraft→writeGroupDraft effect 链路，发送
++     * 在途切到其他群（本组件 key={groupId} 卸载）时 effect 不跑 → 草稿键残留
++     * 已发送内容，切回重现。此处同步落盘清空，不依赖组件存活。
++     * 附件 chips / @ 绑定 / 引用仍响应成功后清（失败路径保留可重试）。 */
++    setDraft("");
++    writeGroupDraft(groupId, "");
+     // 发送即收口 typing（停顿指示器 + 心跳）。
+     stopTypingReport();
+     typingLastSentRef.current = 0;
+@@ -2096,7 +2104,7 @@ export function GroupChatPanel({
+         // 群 P2 引用回复：引用条挂起时随消息带被引用行 id（无引用 null 不发键）。
+         replyTarget?.logId ?? null,
+       );
+-      setDraft("");
++      // 文本已在受理点清（FR-01/FR-03），此处只收口附件/@ 绑定/引用。
+       setPendingAttachments([]);
+       setAttTokenMap({});
+       setWsRefTokens({});
+@@ -2115,6 +2123,10 @@ export function GroupChatPanel({
+       // 时间线（design §4.1 失败语义）——提示原文，时间线以对账回显为准；
+       // 附件与草稿保留供重发。
+       notify.error(err, "发送失败，请稍后重试");
++      // FR-02：受理即清后失败 → 原文回填可重试（输入框已有新内容则不覆盖；
++      // 草稿键为空才写回，不覆盖用户新输入已落盘的草稿）。
++      setDraft((prev) => (prev === "" ? rawContent : prev));
++      if (!readGroupDraft(groupId)) writeGroupDraft(groupId, rawContent);
+     } finally {
+       setSending(false);
+       inputRef.current?.focus();
+diff --git a/frontend/src/components/sessions/__tests__/sessions-portal.test.tsx b/frontend/src/components/sessions/__tests__/sessions-portal.test.tsx
+index 8f49628ee..822766ae1 100644
+--- a/frontend/src/components/sessions/__tests__/sessions-portal.test.tsx
++++ b/frontend/src/components/sessions/__tests__/sessions-portal.test.tsx
+@@ -1439,6 +1439,25 @@ describe("SessionsPortal ?new=1 直达新建（ql-20260823-005）", () => {
+     expect(screen.queryByTestId("pre-session-picker-mask")).toBeNull();
+   });
+ 
++  it("同机器同智能体再次「＋」新建：预会话输入框重置（nonce 强制重挂载，2026-10-23-session-input-clear-fix / FR-04）", async () => {
++    renderPortal();
++    await enterPreSession("在 非工作区 新建会话");
++    const input = screen.getByPlaceholderText(
++      /发送第一句话开始对话/,
++    ) as HTMLTextAreaElement;
++    fireEvent.change(input, { target: { value: "AAA" } });
++    await waitFor(() => expect(input.value).toBe("AAA"));
++
++    // 同 scope（同机器+同智能体）再次新建：原 key 不变时 React 复用组件、
++    // 未发送文本会残留；nonce 入 key 后强制重挂载 → 空白。
++    await enterPreSession("在 非工作区 新建会话");
++    const input2 = (await screen.findByPlaceholderText(
++      /发送第一句话开始对话/,
++    )) as HTMLTextAreaElement;
++    expect(input2.value).toBe("");
++    expect(screen.getByTestId("session-pre-session-panel")).toBeTruthy();
++  });
++
+   it("workspace scope + ?new=1 → preContext 绑定 scope.workspaceId，首句 createSession 带 workspace_id", async () => {
+     window.localStorage.setItem(NEW_SESSION_MACHINE_LS_KEY, "m-1");
+     mocks.searchParams = new URLSearchParams("new=1");
+diff --git a/frontend/src/components/sessions/sessions-portal.tsx b/frontend/src/components/sessions/sessions-portal.tsx
+index a6ada2bdb..28a5e5048 100644
+--- a/frontend/src/components/sessions/sessions-portal.tsx
++++ b/frontend/src/components/sessions/sessions-portal.tsx
+@@ -187,6 +187,17 @@ export function SessionsPortal({ scope }: SessionsPortalProps) {
+   // task-06（FR-03/D-101）：预会话上下文——组头「＋」浮层选完合成；切走/创建
+   // 成功即清，不残留（首句未发时零服务端实体）。
+   const [preContext, setPreContext] = useState<SessionPreContext | null>(null);
++  // 2026-10-23-session-input-clear-fix / FR-04：预会话挂载 nonce（并入下方
++  // SessionPanel key）。同 workspace+同 runtime 再次「新建」时原 key 不变 →
++  // React 复用组件、输入态（含未发送文本）残留（用户报障：填了 AAA 新建仍
++  // 有 AAA）。nonce 每次置位新 preContext 时自增 → key 必变 → 强制重挂载。
++  const [preMountNonce, setPreMountNonce] = useState(0);
++  /** 置位预会话上下文（两处写入点共用：enterPreSession / 组头直带链）。
++   *  nonce 自增与 setPreContext 同批 commit——首次渲染即用新 key，不双挂载。 */
++  const openPreSession = useCallback((ctx: SessionPreContext) => {
++    setPreMountNonce((n) => n + 1);
++    setPreContext(ctx);
++  }, []);
+   // task-06（FR-04/D-107）：两步浮层开关 + 发起组的 workspaceId
+   //（null = 非工作区分组，D-105）。
+   const [pickerOpen, setPickerOpen] = useState(false);
+@@ -545,7 +556,7 @@ export function SessionsPortal({ scope }: SessionsPortalProps) {
+                 runtimeId,
+               }
+             : { workspaceId, runtimeId };
+-      setPreContext(nextPreContext);
++      openPreSession(nextPreContext);
+       setSelectedWorkspaceId(nextPreContext.workspaceId);
+       setSelectedSessionId(null);
+       // task-07：进预会话清群选中（右侧三分支优先级：群视图 > 真会话 > 预会话）。
+@@ -554,7 +565,7 @@ export function SessionsPortal({ scope }: SessionsPortalProps) {
+       // ql-20260824-001：清选中同步清 ?session=（刷新不恢复已离开的会话）。
+       syncSessionParam(null);
+     },
+-    [scope, syncSessionParam],
++    [scope, syncSessionParam, openPreSession],
+   );
+ 
+   // ql-20260823-005（用户反馈：ppm/projects「发起团队」等外部入口应直达会话页，
+@@ -666,7 +677,7 @@ export function SessionsPortal({ scope }: SessionsPortalProps) {
+         );
+         if (runtime) {
+           setSelectedSessionId(null);
+-          setPreContext(
++          openPreSession(
+             scope?.kind === "change"
+               ? // change 入口组头不出现，保守与 handlePickerPick 双传语义对齐（X-13）。
+                 { workspaceId: scope.workspaceId, changeId: scope.changeId, runtimeId: runtime.id }
+@@ -687,7 +698,7 @@ export function SessionsPortal({ scope }: SessionsPortalProps) {
+       setPickerWorkspaceId(workspaceId);
+       setPickerOpen(true);
+     },
+-    [machines, myBindings, pickerMachines, scope, syncSessionParam, enterPreSession, wsNameQuery.isLoading],
++    [machines, myBindings, pickerMachines, scope, syncSessionParam, enterPreSession, openPreSession, wsNameQuery.isLoading],
+   );
+ 
+   /** 浮层两步选完（两步即达）：合成 preContext 切预会话态并关浮层（X-13 双传
+@@ -1070,7 +1081,7 @@ export function SessionsPortal({ scope }: SessionsPortalProps) {
+           />
+         ) : preContext ? (
+           <SessionPanel
+-            key={`pre:${preContext.workspaceId ?? "-"}:${preContext.runtimeId}`}
++            key={`pre:${preContext.workspaceId ?? "-"}:${preContext.runtimeId}:${preMountNonce}`}
+             mode="page"
+             sessionId={null}
+             machines={pickerMachines}

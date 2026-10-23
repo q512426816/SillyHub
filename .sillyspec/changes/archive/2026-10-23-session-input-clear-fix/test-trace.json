@@ -1,0 +1,70 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-23-session-input-clear-fix",
+  "rows": [
+    {
+      "anchor": "FR-01",
+      "row_id": "2026-10-23-session-input-clear-fix:flow:测试绑定FR-01",
+      "tests": [
+        "frontend/src/components/daemon/__tests__/session-panel-draft-scope.test.tsx「发送受理即清输入框文本（FR-01）」",
+        "frontend/src/components/group-chat/__tests__/group-chat-panel.test.tsx「发送受理即清：sendGroupMessage 未响应时输入框已空且草稿键已清」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-23-session-input-clear-fix"
+    },
+    {
+      "anchor": "FR-02",
+      "row_id": "2026-10-23-session-input-clear-fix:flow:测试绑定FR-02",
+      "tests": [
+        "frontend/src/components/daemon/__tests__/session-panel-draft-scope.test.tsx「发送失败恢复文本（FR-02）」",
+        "frontend/src/components/group-chat/__tests__/group-chat-panel.test.tsx「发送失败：文本恢复到输入框可重试」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-23-session-input-clear-fix"
+    },
+    {
+      "anchor": "FR-03",
+      "row_id": "2026-10-23-session-input-clear-fix:flow:测试绑定FR-03",
+      "tests": [
+        "frontend/src/components/daemon/__tests__/session-panel-draft-scope.test.tsx「受理即同步清草稿键（FR-03）」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-23-session-input-clear-fix"
+    },
+    {
+      "anchor": "FR-04",
+      "row_id": "2026-10-23-session-input-clear-fix:flow:测试绑定FR-04",
+      "tests": [
+        "frontend/src/components/daemon/__tests__/session-panel-draft-scope.test.tsx「page 真会话草稿切换时序（R-01 基线锁定）」",
+        "frontend/src/components/daemon/__tests__/session-panel-draft-scope.test.tsx「page 预会话草稿入口隔离（task-01 / D-001）> 同一入口重进：输入框恒空白」",
+        "frontend/src/components/sessions/__tests__/sessions-portal.test.tsx「同机器同智能体再次「＋」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-23-session-input-clear-fix"
+    }
+  ]
+}
