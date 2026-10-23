@@ -16,6 +16,11 @@ from app.core.security import password_hasher
 from app.modules.auth.model import User
 from app.modules.daemon.model import DaemonInstance
 from app.modules.daemon.service import DaemonService
+from app.modules.daemon.session.network_context import (
+    MachineNetworkInfo,
+    network_context_for_turn,
+    render_network_env,
+)
 
 
 async def _seed_user(session: AsyncSession) -> User:
@@ -204,3 +209,189 @@ async def test_heartbeat_interfaces_replaces_wholesale(db_session: AsyncSession)
     inst = await db_session.get(DaemonInstance, daemon_local_id)
     assert inst is not None
     assert inst.network_info == {"observed_ip": "192.168.1.60", "interfaces": []}
+
+
+# ── FR-05/FR-06：判定引擎纯函数（render_network_env）─────────────────────────
+
+
+class _FakeRedis:
+    """快照去重测试假件：内存 dict + 可注入故障。"""
+
+    def __init__(self) -> None:
+        self.store: dict[str, str] = {}
+        self.fail = False
+
+    async def get(self, key: str) -> str | None:
+        if self.fail:
+            raise ConnectionError("fake redis down")
+        return self.store.get(key)
+
+    async def set(self, key: str, value: str, ex: int | None = None) -> bool:
+        if self.fail:
+            raise ConnectionError("fake redis down")
+        self.store[key] = value
+        return True
+
+
+def _machine(
+    name: str = "pc1",
+    observed: str | None = "192.168.1.10",
+    ips: tuple[str, ...] = ("192.168.1.10",),
+    online: bool = True,
+) -> "MachineNetworkInfo":
+    from app.modules.daemon.session.network_context import MachineNetworkInfo
+
+    return MachineNetworkInfo(
+        daemon_id=f"d-{name}",
+        name=name,
+        online=online,
+        observed_ip=observed,
+        interfaces=[
+            {"name": f"eth{i}", "ip": ip, "cidr": f"{ip}/24", "family": "IPv4"}
+            for i, ip in enumerate(ips)
+        ],
+    )
+
+
+def _render(user_ip: str | None, machines: list, has_xff: bool = True) -> str:
+
+    return render_network_env(user_ip, has_xff, machines)
+
+
+def test_render_same_subnet_verdict():
+    """FR-05 同段：用户 192.168.1.23 vs 机器 192.168.1.10/24 → 同网段大概率可直连。"""
+    text = _render("192.168.1.23", [_machine(observed="192.168.1.10")])
+    assert "同网段，大概率可直连" in text
+    assert "192.168.1.10" in text
+
+
+def test_render_cross_subnet_verdict():
+    """FR-05 跨段：10.0.3.5 → 不同网段无法直连。"""
+    text = _render("192.168.1.23", [_machine(name="build", observed="10.0.3.5", ips=("10.0.3.5",))])
+    assert "不同网段" in text and "无法直连" in text
+
+
+def test_render_degradation_user_ip_missing():
+    """FR-05 降级①：user_ip 缺失 → 无法判定 + 禁止猜测指引。"""
+    text = _render(None, [_machine()])
+    assert "无法判定" in text and "禁止猜测" in text
+
+
+def test_render_degradation_ipv6_user():
+    """FR-05 降级④：纯 IPv6 用户 → 未参与判定。"""
+    text = _render("fd00::1", [_machine()])
+    assert "IPv6" in text and "未参与" in text
+
+
+def test_render_degradation_docker_bridge_no_xff():
+    """FR-05 降级②：无 XFF 且 172.16/12 网桥特征 → 无法判定真实网段。"""
+    text = _render("172.18.0.5", [_machine()], has_xff=False)
+    assert "容器网桥" in text and "无法判定真实用户网段" in text
+    # 有 XFF（经 nginx 转发）时同一 IP 正常判定（最右段是可信来源）。
+    text2 = _render(
+        "172.18.0.5", [_machine(observed="172.18.0.9", ips=("172.18.0.9",))], has_xff=True
+    )
+    assert "同网段，大概率可直连" in text2
+
+
+def test_render_degradation_all_offline():
+    """FR-05 降级③：全部机器离线 → 无在线机器。"""
+    text = _render("192.168.1.23", [_machine(online=False)])
+    assert "无在线机器" in text or "均离线" in text
+
+
+def test_render_low_confidence_without_interfaces():
+    """FR-05：机器无网卡数据 → /24 与 /16 双档近似 + 低置信标注。"""
+    text = _render("192.168.0.7", [_machine(observed="192.168.1.10", ips=())])
+    # /24 不同段、/16 同段 → 近似判同段且带低置信标注。
+    assert "低置信" in text
+    text2 = _render("10.99.0.7", [_machine(observed="192.168.1.10", ips=())])
+    assert "低置信" in text2  # 双档都不同段也走低置信观测 IP 缺网卡数据路径
+
+
+def test_render_address_prefers_same_subnet_nic():
+    """FR-05 地址选择：多网卡时优先与观测 IP 同段的那个（规避虚拟网卡，R-02）。"""
+    text = _render(
+        "192.168.1.23",
+        [_machine(name="win", observed="192.168.1.10", ips=("172.22.1.2", "192.168.1.10"))],
+    )
+    assert "建议用 192.168.1.10" in text
+
+
+def test_render_machine_truncation_over_ten():
+    """FR-04：机器清单超 10 台截断为「等 N 台」。"""
+    machines = [_machine(name=f"m{i:02d}", observed=f"192.168.1.{i:02d}") for i in range(1, 13)]
+    text = _render("192.168.1.23", machines)
+    assert "等 2 台" in text
+    assert "m12" not in text
+
+
+def test_render_guidance_wording():
+    """FR-06 文案断言：指引措辞含端口口径/禁止猜公网/事实陈述边界。"""
+    text = _render("192.168.1.23", [_machine()])
+    assert "端口按服务实际监听" in text
+    assert "禁止猜测公网地址" in text
+    assert "事实陈述" in text
+
+
+# ── FR-01/FR-05：快照去重（network_context_for_turn，D-006@v1/D-013@v1）──────
+
+
+@pytest.mark.asyncio
+async def test_snapshot_same_text_skips_reinject():
+    """同快照 → None 不重注。"""
+
+    redis = _FakeRedis()
+    sid = uuid.uuid4()
+    kwargs = dict(session_id=sid, user_ip="192.168.1.23", has_xff=True, machines=[_machine()])
+    first = await network_context_for_turn(**kwargs, first_turn=True, redis=redis)
+    assert first is not None
+    again = await network_context_for_turn(**kwargs, redis=redis)
+    assert again is None  # 同快照跳过。
+
+
+@pytest.mark.asyncio
+async def test_snapshot_change_within_60s_defers_and_catches_up():
+    """D-013：变化但 <60s → 不注入不更新；下一轮（模拟到点）仍不同 → 补注。"""
+
+    redis = _FakeRedis()
+    sid = uuid.uuid4()
+    first = await network_context_for_turn(
+        session_id=sid,
+        user_ip="192.168.1.23",
+        has_xff=True,
+        machines=[_machine()],
+        first_turn=True,
+        redis=redis,
+    )
+    assert first is not None
+    # 用户切网（IP 变化）但仍在 60s 窗口内 → None 且快照不更新。
+    deferred = await network_context_for_turn(
+        session_id=sid, user_ip="10.0.0.8", has_xff=True, machines=[_machine()], redis=redis
+    )
+    assert deferred is None
+    # 模拟到点：把快照时间戳拨回 61s 前。
+    import json as _json
+
+    state = _json.loads(redis.store[f"session:netenv:{sid}"])
+    state["ts"] -= 61.0
+    redis.store[f"session:netenv:{sid}"] = _json.dumps(state)
+    caught_up = await network_context_for_turn(
+        session_id=sid, user_ip="10.0.0.8", has_xff=True, machines=[_machine()], redis=redis
+    )
+    assert caught_up is not None and "10.0.0.8" in caught_up
+
+
+@pytest.mark.asyncio
+async def test_snapshot_redis_failure_degrades_to_every_turn():
+    """Redis 故障 → 每轮注入（可失去重不失功能）。"""
+
+    redis = _FakeRedis()
+    redis.fail = True
+    sid = uuid.uuid4()
+    kwargs = dict(
+        session_id=sid, user_ip="192.168.1.23", has_xff=True, machines=[_machine()], redis=redis
+    )
+    first = await network_context_for_turn(**kwargs, first_turn=True)
+    again = await network_context_for_turn(**kwargs)
+    assert first is not None and again is not None  # 故障降级恒注入。
