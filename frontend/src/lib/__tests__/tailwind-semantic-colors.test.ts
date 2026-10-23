@@ -37,9 +37,11 @@ describe("tailwind 语义色数字阶（2026-10-23-semantic-color-scale-fix）",
       expect(scale[50]).toContain("hsl(var(--background))");
       expect(scale[200]).toContain("color-mix");
       expect(scale[200]).toContain("hsl(var(--background))");
-      // 700 = 向前景色混出的字色
+      // 700 = 向前景色混出的字色；50% 基色占比是对照 WCAG AA 复算后的下限
+      // （评审 P2：75% 时两套浅色主题最差 3.08:1，50% 时最差 5.07:1）
       expect(scale[700]).toContain("color-mix");
       expect(scale[700]).toContain("hsl(var(--foreground))");
+      expect(scale[700]).toContain("50%, hsl(var(--foreground))");
     });
   }
 

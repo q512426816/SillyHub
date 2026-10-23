@@ -16,7 +16,7 @@ const semanticScale = (cssVar: string) => ({
   50: `color-mix(in srgb, hsl(var(${cssVar})) 10%, hsl(var(--background)))`,
   200: `color-mix(in srgb, hsl(var(${cssVar})) 35%, hsl(var(--background)))`,
   500: `hsl(var(${cssVar}))`,
-  700: `color-mix(in srgb, hsl(var(${cssVar})) 75%, hsl(var(--foreground)))`,
+  700: `color-mix(in srgb, hsl(var(${cssVar})) 50%, hsl(var(--foreground)))`,
 });
 
 const config: Config = {

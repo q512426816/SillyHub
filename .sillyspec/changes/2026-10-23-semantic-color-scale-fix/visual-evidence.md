@@ -48,9 +48,25 @@ OK bg-destructive-500  OK border-destructive-200  OK bg-destructive-50  OK text-
   background-color: hsl(var(--warning))
 }
 .text-warning-700 {
-  color: color-mix(in srgb, hsl(var(--warning)) 75%, hsl(var(--foreground)))
+  color: color-mix(in srgb, hsl(var(--warning)) 50%, hsl(var(--foreground)))
 }
 ```
+
+## 对比度复算（评审 P2 清偿）
+
+700 档基色占比按 WCAG AA 复算从 75% 降到 50%（对 bg-50 背景，两套浅色主题 × 三调色板）：
+
+| 主题 | 调色板 | 75% 对比度 | 50% 对比度 |
+|---|---|---|---|
+| ai-native | warning | 4.24 | 6.63 |
+| ai-native | info | 4.88 | 7.19 |
+| ai-native | destructive | 5.91 | 8.37 |
+| blue | warning | 3.08 | 5.07 |
+| blue | info | 3.35 | 5.36 |
+| blue | destructive | 5.88 | 8.34 |
+
+结论：75% 时最差 3.08:1（低于 AA 4.5:1）；50% 时最差 5.07:1，全部达标。构建复跑
+`Done in 90ms`，12/12 类仍命中，`text-*-700` 规则已变为 50% 混合。
 
 ## 用户目视核对
 
