@@ -36,7 +36,9 @@ created_at: 2026-10-23T06:45:37.494Z
 
 2. 并发写：两个执行体同时操作同一数据/文件会发生什么？
 
-   单会话单 establish 链（sessionId effect 独占），无双写；切会话纪元（sessionEpochRef）+ initialAbortRef.abort() 沿用——第二段合并前校验 cancelled/纪元，旧会话补拉结果不 prepend 进新会话。多 agent 并行改码风险按仓库规则以最新态为准（Edit 前重读）。
+   单会话单 establish 链（sessionId effect 独占）；切会话纪元（sessionEpochRef）+ initialAbortRef.abort() 沿用——第二段合并前校验 cancelled/纪元，旧会话补拉结果不 prepend 进新会话。多 agent 并行改码风险按仓库规则以最新态为准（Edit 前重读）。
+
+   补充（独立评审 P2 修复）：补拉在飞期间用户可点预览卡/导航刻度单轮直达同一 run——该块会先 prepend，第二段再以 #w 整轮块 prepend 会同 run 双块。合并写入在 setTurnState updater 内按「prev 已有该 run 且有内容（prompt/segments/output 任一非空）」过滤 prepend 块，用户已加载的内容让位优先；锚点轮因 replaceRunIds 先摘除，不受该过滤影响（仍走整轮替换）。滚动侧：合并前若用户已离底（距底 ≥ 80px）则捕获元素锚，由既有锚定 effect 钉回，与 TurnTimeline 贴底跟随互不抢占。
 
 3. 切换/生命周期：会话、请求或变更中途切换/中断时状态是否安全？
 

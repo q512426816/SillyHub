@@ -17,8 +17,10 @@
  *      取合并窗口时间最旧行（ts 数字串 + id 前 8 位，与翻页 #e 键同构，前缀
  *      #w 区分）。
  *
- * 纯函数：不碰 React state/ref；摘块匹配与终态闸（运行中块不摘）由调用方
- * establish 侧按 handleLoadEarlier survivors 模式执行。
+ * 纯函数：不碰 React state/ref。摘块（replaceRunIds）由调用方 establish 侧
+ * 无条件执行——与 handleLoadEarlier 的 survivors 不同，本阶段 SSE 尚未建流，
+ * 不存在需要保护运行中块不摘的实时增量链路；运行中锚点轮由调用方把合并块
+ * 翻回 running 承接。
  */
 
 import type { AgentRunLogEntry } from "@/lib/agent";

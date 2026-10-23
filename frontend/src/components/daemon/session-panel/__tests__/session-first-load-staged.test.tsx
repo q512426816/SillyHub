@@ -14,7 +14,7 @@
  * + 仅 mock 网络层；probe/直达用 deferred 控时序）。
  */
 import { describe, it, expect, beforeEach, vi } from "vitest";
-import { render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { SessionPanel } from "../../session-panel";
 
@@ -83,6 +83,8 @@ function entry(runId: string, tsSec: number, channel: string, content: string) {
 
 const ANCHOR = "run-anchor";
 const NEW = "run-new";
+/** 更早轮（不在底窗内；用于评审 P2 并发双块用例）。 */
+const EARLIER = "run-earlier";
 /** 锚点轮被截断的底窗（400 行满页）：anchor 尾部 200 行 + new 整轮 200 行。 */
 function makeBaseLogs() {
   const anchorTail: ReturnType<typeof entry>[] = [];
@@ -109,17 +111,23 @@ function makeAnchorFull(base: ReturnType<typeof makeBaseLogs>) {
 
 const OUTLINE = {
   session_id: "s1",
-  total_turns: 2,
+  total_turns: 3,
   items: [
-    { run_id: ANCHOR, seq: 1, created_at: "2026-10-23T10:01:00.000Z", started_at: "2026-10-23T10:01:00.000Z", status: "completed", prompt_summary: "锚点轮摘要" },
-    { run_id: NEW, seq: 2, created_at: "2026-10-23T10:07:00.000Z", started_at: "2026-10-23T10:07:00.000Z", status: "completed", prompt_summary: "最新轮摘要" },
+    { run_id: EARLIER, seq: 1, created_at: "2026-10-23T09:40:00.000Z", started_at: "2026-10-23T09:40:00.000Z", status: "completed", prompt_summary: "更早轮摘要" },
+    { run_id: ANCHOR, seq: 2, created_at: "2026-10-23T10:01:00.000Z", started_at: "2026-10-23T10:01:00.000Z", status: "completed", prompt_summary: "锚点轮摘要" },
+    { run_id: NEW, seq: 3, created_at: "2026-10-23T10:07:00.000Z", started_at: "2026-10-23T10:07:00.000Z", status: "completed", prompt_summary: "最新轮摘要" },
   ],
 };
 
+function runRow(id: string, createdAt: string) {
+  return { id, status: "completed", created_at: createdAt, started_at: null, finished_at: null, error_code: null, error_detail: null, user_id: null, sender_name: null, input_tokens: null, output_tokens: null, ctx_tokens: null, duration_api_ms: null, llm_provider_id: null, agent_profile_snapshot: null, metadata: null, engine_anchor: null, failure_summary: null, run_kind: null, cwd: null, config_snapshot: null };
+}
+
 function runSnapshot() {
   return [
-    { id: ANCHOR, status: "completed", created_at: "2026-10-23T10:01:00.000Z", started_at: null, finished_at: null, error_code: null, error_detail: null, user_id: null, sender_name: null, input_tokens: null, output_tokens: null, ctx_tokens: null, duration_api_ms: null, llm_provider_id: null, agent_profile_snapshot: null, metadata: null, engine_anchor: null, failure_summary: null, run_kind: null, cwd: null, config_snapshot: null },
-    { id: NEW, status: "completed", created_at: "2026-10-23T10:07:00.000Z", started_at: null, finished_at: null, error_code: null, error_detail: null, user_id: null, sender_name: null, input_tokens: null, output_tokens: null, ctx_tokens: null, duration_api_ms: null, llm_provider_id: null, agent_profile_snapshot: null, metadata: null, engine_anchor: null, failure_summary: null, run_kind: null, cwd: null, config_snapshot: null },
+    runRow(EARLIER, "2026-10-23T09:40:00.000Z"),
+    runRow(ANCHOR, "2026-10-23T10:01:00.000Z"),
+    runRow(NEW, "2026-10-23T10:07:00.000Z"),
   ] as never[];
 }
 
@@ -197,12 +205,12 @@ describe("首屏两段渲染（2026-10-23-session-first-load-ux）", () => {
     );
     // 底窗内容不回退（最新轮仍在屏）。
     expect(screen.getAllByText(/最新轮提问正文/).length).toBeGreaterThan(0);
-    // 块序：锚点轮在最新轮之前（prepend 头部）。
+    // 块序：锚点轮在最新轮之前（prepend 头部；更早轮预览卡可排在锚点之前）。
     const blocks = screen.getAllByTestId("turn-block");
-    const firstHasAnchor = blocks[0]!.textContent?.includes("锚点轮提问正文") ?? false;
-    const lastHasNew = blocks[blocks.length - 1]!.textContent?.includes("最新轮提问正文") ?? false;
-    expect(firstHasAnchor).toBe(true);
-    expect(lastHasNew).toBe(true);
+    const idxOf = (needle: string) =>
+      blocks.findIndex((b) => b.textContent?.includes(needle));
+    expect(idxOf("锚点轮提问正文")).toBeGreaterThanOrEqual(0);
+    expect(idxOf("锚点轮提问正文")).toBeLessThan(idxOf("最新轮提问正文"));
     // 底窗锚点旧块已摘（同轮不双显）：含锚点提问的块只有一个。
     const anchorBlocks = blocks.filter((b) =>
       b.textContent?.includes("锚点轮提问正文"),
@@ -224,6 +232,95 @@ describe("首屏两段渲染（2026-10-23-session-first-load-ux）", () => {
     await waitFor(() =>
       expect(screen.getAllByText(/最新轮提问正文/).length).toBeGreaterThan(0),
     );
+  });
+
+  it("评审 P2：补拉在飞时用户主动加载的轮，合并后不双块", async () => {
+    const base = makeBaseLogs();
+    const anchorFull = makeAnchorFull(base);
+    // 更早轮整轮（用户在补拉期间点预览卡加载）。
+    const earlierFull = [
+      entry(EARLIER, 1, "user_input", "更早轮提问正文"),
+      entry(EARLIER, 2, "stdout", "更早轮回答正文"),
+    ];
+    sessionApi.getAgentSessionLogs.mockImplementation(
+      async (_sid: string, opts?: { before?: string; runId?: string }) => {
+        if (opts?.runId === EARLIER) return earlierFull;
+        if (opts?.before || opts?.runId) return [];
+        return base;
+      },
+    );
+    const probeGate = deferred<{ run_id: string }[]>();
+    sessionApi.probeSessionLogBefore.mockReturnValue(probeGate.promise);
+    sessionApi.getSessionRunLogs.mockImplementation(
+      async (_sid: string, runId: string) =>
+        runId === ANCHOR ? anchorFull : runId === EARLIER ? earlierFull : [],
+    );
+
+    render(<Host sessionId="s1" />);
+
+    // 底窗渲染 → 更早轮预览卡在屏。
+    await waitFor(() =>
+      expect(screen.getAllByText(/最新轮提问正文/).length).toBeGreaterThan(0),
+    );
+    const card = await waitFor(() => {
+      const el = document.querySelector<HTMLElement>(
+        '[data-turn-key="run-earlier"][data-turn-preview]',
+      );
+      if (!el) throw new Error("预览卡未就绪");
+      return el;
+    });
+    // 补拉在飞期间用户主动加载该轮（预览卡原地展开）。
+    fireEvent.click(card);
+    await waitFor(() =>
+      expect(screen.getAllByText(/更早轮提问正文/).length).toBeGreaterThan(0),
+    );
+
+    // 放行补拉：merge 会再次带回该 run 的整轮行——必须让位用户已加载块。
+    probeGate.resolve([{ run_id: ANCHOR }]);
+    await waitFor(() =>
+      expect(screen.getAllByText(/锚点轮提问正文/).length).toBeGreaterThan(0),
+    );
+
+    // 不双块：该 run 在时间线内（turn-block，排除导航刻度）只有一处。
+    const earlierBlocks = screen
+      .getAllByTestId("turn-block")
+      .filter((b) => b.querySelector('[data-turn-key="run-earlier"]'));
+    expect(earlierBlocks).toHaveLength(1);
+  });
+
+  it("评审 P3：补拉在飞时触顶翻页被同步锁挂起，放行后恢复", async () => {
+    const base = makeBaseLogs();
+    sessionApi.getAgentSessionLogs.mockImplementation(
+      async (_sid: string, opts?: { before?: string; runId?: string }) => {
+        if (opts?.before || opts?.runId) return [];
+        return base;
+      },
+    );
+    const probeGate = deferred<{ run_id: string }[]>();
+    sessionApi.probeSessionLogBefore.mockReturnValue(probeGate.promise);
+    sessionApi.getSessionRunLogs.mockResolvedValue([]);
+
+    render(<Host sessionId="s1" />);
+    await waitFor(() =>
+      expect(screen.getAllByText(/最新轮提问正文/).length).toBeGreaterThan(0),
+    );
+    // 等待补拉链真正在飞（probe 已发起）。
+    await waitFor(() => expect(sessionApi.probeSessionLogBefore).toHaveBeenCalled());
+
+    // 触顶滚动（jsdom scrollTop 默认 0 ≤ 触发阈值）——锁在飞：零 before 请求。
+    const scroller = screen.getByTestId("turn-timeline-scroll");
+    fireEvent.scroll(scroller);
+    await new Promise((r) => setTimeout(r, 60));
+    expect(beforeCalls()).toHaveLength(0);
+
+    // 放行补拉链（merge 完成释放锁）。
+    probeGate.resolve([]);
+    await waitFor(() =>
+      expect(sessionApi.getSessionRunLogs).toHaveBeenCalled(),
+    );
+    // 锁释放后触顶恢复翻页（before 请求发出）。
+    fireEvent.scroll(scroller);
+    await waitFor(() => expect(beforeCalls().length).toBeGreaterThan(0));
   });
 
   it("FR-03：终态空会话保持原空态文案，不残留骨架屏", async () => {

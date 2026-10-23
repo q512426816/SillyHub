@@ -773,9 +773,11 @@ export function SessionPanelPage({
   const [historyLoading, setHistoryLoading] = useState(false);
   // 2026-10-23-session-first-load-ux / FR-01：首屏历史加载在飞指示（true =
   // 详情已可渲染而历史/窗口补拉链在途）——TurnTimeline turns 为空时以骨架屏
-  // 替代静态空态文案。随 sessionId 切换置 true，establish 终态（成功/失败）
-  // 且未被取消时置 false；终态空会话保持 false → 原空态文案（FR-03）。
-  const [initialHistoryLoading, setInitialHistoryLoading] = useState(false);
+  // 替代静态空态文案。初值 true（评审 P3：初值 false 会在「详情已到、sessionId
+  // effect 尚未跑」的窗口闪一帧静态空态文案）；随 sessionId 切换重置 true，
+  // establish 终态（成功/失败）且未被取消时置 false；终态空会话保持 false →
+  // 原空态文案（FR-03）。预会话早退不渲染时间线，初值 true 无副作用。
+  const [initialHistoryLoading, setInitialHistoryLoading] = useState(true);
   // 2026-10-10-single-turn-nav-and-jump-head：「回到会话开头」连续翻页进行中
   // （入口转圈 + disabled；随会话切换复位）。
   const [jumpHeadLoading, setJumpHeadLoading] = useState(false);
@@ -1371,9 +1373,14 @@ export function SessionPanelPage({
           if (cancelled) return;
           const merge = buildInitialWindowMerge(logs, adaptive);
           if (merge.prependTurns.length > 0) {
-            // 运行中锚点轮修正（同第一段 cur 重放口径）：整轮合并块翻回
-            // running（logsToTurns 一律 completed），SSE 建流后增量按 realRunId
-            // 归入该唯一块（底窗旧块已摘）。
+            // 评审 P2：补拉在飞期间用户可能已点预览卡/导航刻度单轮直达，同一
+            // run 的完整块已 prepend（真实 id 或 #e 变体）——此时再以 #w 整轮块
+            // prepend 会同 run 双块。合并是纯数据动作，故在 updater 内按
+            // 「prev 已有该 run 且有内容」过滤（锚点轮因 replaceRunIds 先被摘，
+            // 不在 survivors 中，仍走整轮替换；其余轮已有内容则让位用户加载的块）。
+            // 运行中锚点轮修正（同第一段 cur 重放口径）：整轮合并块翻回 running
+            //（logsToTurns 一律 completed），SSE 建流后增量按 realRunId 归入该
+            // 唯一块（底窗旧块已摘）。
             const cur = currentRunIdRef.current;
             const prependTurns = merge.prependTurns.map((t): SessionTurnView =>
               t.realRunId === cur && t.status === "completed"
@@ -1386,6 +1393,33 @@ export function SessionPanelPage({
                   t.realRunId ??
                   (t.runId.startsWith("__") ? null : stripPageKeySuffix(t.runId));
                 if (rid) completedSideEffectRunIdsRef.current.add(rid);
+              }
+            }
+            // 评审 P2：合并前捕获滚动锚（与 handleLoadEarlier 元素锚同口径）。
+            // 容器 overflowAnchor:none，头部插入会让正在读的历史跳变；仅在用户
+            // 已离底（距底 ≥ 80px，同 TurnTimeline 贴底阈值）时捕获——贴底时
+            // 交给 TurnTimeline 既有贴底跟随，两者不抢滚动。锚置位后由既有锚定
+            // effect（turnState 变化）双 rAF + 滚动重申钉回。
+            const scrollEl = scrollElQueryRef.current();
+            const curAnchor = pendingAnchorRef.current;
+            if (
+              scrollEl &&
+              scrollEl.scrollHeight - scrollEl.scrollTop - scrollEl.clientHeight >= 80 &&
+              (curAnchor == null || Date.now() > curAnchor.until)
+            ) {
+              const containerTop = scrollEl.getBoundingClientRect().top;
+              let anchorRow: HTMLElement | null = null;
+              for (const row of scrollEl.querySelectorAll<HTMLElement>("[data-turn-key]")) {
+                const r = row.getBoundingClientRect();
+                if (r.bottom > containerTop + 4) { anchorRow = row; break; }
+              }
+              if (anchorRow) {
+                pendingAnchorRef.current = {
+                  key: anchorRow.getAttribute("data-turn-key") ?? "",
+                  offset: anchorRow.getBoundingClientRect().top - containerTop,
+                  until: Date.now() + 2500,
+                  el: anchorRow,
+                };
               }
             }
             setTurnState((prev) => {
@@ -1401,7 +1435,25 @@ export function SessionPanelPage({
                       return !(key != null && merge.replaceRunIds.has(key));
                     })
                   : prev.turns;
-              return { ...prev, turns: [...prependTurns, ...survivors] };
+              // 评审 P2：同 run 已有块（用户补拉期间主动加载）→ 跳过该 prepend
+              // 块，避免 #w 块与用户加载块双显；有内容判据对齐 fetchAndAttachTurn
+              // 的 anyBody 口径（prompt/segments/output 任一非空）。
+              const survivorRuns = new Set<string>();
+              for (const t of survivors) {
+                const body =
+                  !!(t.prompt ?? "").trim() ||
+                  (t.segments?.length ?? 0) > 0 ||
+                  !!(t.output ?? "").trim();
+                if (!body) continue;
+                const key =
+                  t.realRunId ??
+                  (t.runId.startsWith("__") ? null : stripPageKeySuffix(t.runId));
+                if (key != null) survivorRuns.add(key);
+              }
+              const kept = prependTurns.filter(
+                (t) => t.realRunId == null || !survivorRuns.has(t.realRunId),
+              );
+              return { ...prev, turns: [...kept, ...survivors] };
             });
           }
           // 评审 P2：锚点轮直达不完整/失败时整体回退底窗、cursorLog 保持底窗
