@@ -388,7 +388,16 @@ export function SessionPanelDialog(props: SessionPanelProps) {
   const draftHydratedRef = useRef(false);
   useEffect(() => {
     draftHydratedRef.current = false;
-    setInput(readSessionDraft(view.sessionId ?? null, workspaceId ?? '-'));
+    // 2026-10-23-session-dialog-input-align / FR-04：idle 态（无会话）恒空白——
+    // 「新建」必须是全新开始；原实现按 __pre__:<workspaceId|'-'> 回读，新建浮窗
+    // 会带回上次未发送内容（与 page 模式同源报障）。改为 idle 不回读 + 清残留键；
+    // 真会话（view.sessionId 非空）回读语义零变化。
+    if (view.sessionId) {
+      setInput(readSessionDraft(view.sessionId, workspaceId ?? '-'));
+    } else {
+      setInput("");
+      writeSessionDraft(null, "", workspaceId ?? '-');
+    }
     const raf = requestAnimationFrame(() => {
       draftHydratedRef.current = true;
     });
@@ -403,6 +412,40 @@ export function SessionPanelDialog(props: SessionPanelProps) {
     // 同上：workspaceId 不入依赖（生命周期内不变；真会话态 preScope 被忽略）。
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [view.sessionId, input]);
+
+  /**
+   * 2026-10-23-session-dialog-input-align / FR-01 + FR-03：发送受理即清（对齐 page
+   * 模式口径）。
+   *
+   * 原实现只在 onSendSettled（HTTP 响应成功）清输入；且清空走 setInput→写草稿
+   * effect 链路，浮窗卸载时该 effect 不跑 → localStorage 草稿键残留已发送文本，
+   * 重开/新建回读即重现。此处受理瞬间同步清两处：输入态 + 草稿键（直接落盘，
+   * 不依赖组件存活）。附件 chips / @ 联想选中仍由 onSendSettled 成功后清。
+   */
+  const clearInputAccepted = useCallback(() => {
+    setInput("");
+    writeSessionDraft(view.sessionId ?? null, "", workspaceId ?? '-');
+  }, [view.sessionId, workspaceId]);
+
+  /**
+   * 2026-10-23-session-dialog-input-align / FR-02：发送失败（网络错误 / 后端拒收）
+   * 时把所发原文恢复到输入框，可原地重试。
+   *
+   * 两条防御（与 page 模式、handleInterrupt 回退同款口径）：
+   *   - 仅当输入框为空时回填——失败窗口期用户已输入新内容则不覆盖；
+   *   - 草稿键仅当其当前为空时才写回——不覆盖用户新输入落盘的草稿。
+   * 浮窗存活时 setInput 触发的持久化 effect 会写回草稿；浮窗已卸载（发送在途
+   * 关闭/切走）时 effect 不跑，此处直接落盘兜底——重开原会话可读到原文重试。
+   */
+  const restoreRejectedSend = useCallback(
+    (raw: string) => {
+      setInput((prev) => (prev === "" ? raw : prev));
+      if (!readSessionDraft(view.sessionId ?? null, workspaceId ?? '-')) {
+        writeSessionDraft(view.sessionId ?? null, raw, workspaceId ?? '-');
+      }
+    },
+    [view.sessionId, workspaceId],
+  );
 
   /**
    * ql-20260825-011：发送成功（直发建轮或入服务端队列）后收敛输入区——清草稿
@@ -1267,7 +1310,7 @@ export function SessionPanelDialog(props: SessionPanelProps) {
    * （满员 409 / 离线）errorMsg 提示，草稿与附件保留可改后重发。
    */
   const sendToServerQueue = useCallback(
-    async (prompt: string, attachmentIds: string[]): Promise<void> => {
+    async (prompt: string, attachmentIds: string[], rawPrompt?: string): Promise<void> => {
       const sid = view.sessionId;
       if (!sid) return;
       try {
@@ -1317,9 +1360,12 @@ export function SessionPanelDialog(props: SessionPanelProps) {
           ...prev,
           errorMsg: errMessage(apiErr, "发送失败"),
         }));
+        // 2026-10-23-session-dialog-input-align / FR-02：受理即清后失败（满员 409 /
+        // 离线 / 网络）→ 原文回填可原地重试（缺省回落置换版 prompt，旧调用兼容）。
+        restoreRejectedSend(rawPrompt ?? prompt);
       }
     },
-    [view.sessionId, pendingMentions, onSendSettled],
+    [view.sessionId, pendingMentions, onSendSettled, restoreRejectedSend],
   );
 
   // ── task-11：会话内团队触发（弹层开关 + 预建回调，语义同 page 模式）──────
@@ -1465,7 +1511,9 @@ export function SessionPanelDialog(props: SessionPanelProps) {
       view.status === "active"
     ) {
       openTeamPopover(teamCmd || null);
-      setInput("");
+      // 2026-10-23-session-dialog-input-align / FR-01+FR-03：拦截也属受理（不发送
+      // 但输入已消费）——同点位清输入态与草稿键。
+      clearInputAccepted();
       // task-05：拦截清空输入的同点位清空 @ 联想选中（拦截不发送，残留选中
       // 会错绑到下一条消息；/team 拦截语义本身零改动）。
       setPendingMentions({});
@@ -1477,6 +1525,12 @@ export function SessionPanelDialog(props: SessionPanelProps) {
     // 裸 /team 无可发内容 → 不发（带附件可发，D-7 豁免）。
     if ((!prompt || teamCmd === "") && pendingAttachments.length === 0) return;
 
+    // 2026-10-23-session-dialog-input-align / FR-01+FR-03（对齐 page 模式）：守卫
+    // 全过 = 发送已受理——此刻即清输入态与草稿键，不等网络响应（原实现在
+    // onSendSettled 等响应成功才清，用户感知「卡在输入框」）。失败路径由下方
+    // 各 catch 的 restoreRejectedSend 回填原文（FR-02）。
+    clearInputAccepted();
+
     // 首 turn：createSession（绕过队列直发，R2）
     if (view.status === "idle") {
       // task-05（FR-05）：@ 联想选中捕获后再清（dialog idle 先清输入的既有
@@ -1486,7 +1540,6 @@ export function SessionPanelDialog(props: SessionPanelProps) {
       // 时 prop 照常生效，有 @ 选中时以用户选择为准）。
       const mentions = pendingMentions;
       const createChangeId = mentions.change?.id ?? changeId;
-      setInput("");
       setPendingMentions({});
       // task-07：idle 重建清旧引擎镜像（会话内存态不跨会话）。ql-20260920-006：
       // 引导留痕随轮内 user_msg 段承载，下方 setView(INITIAL_DIALOG_VIEW) 天然
@@ -1566,6 +1619,9 @@ export function SessionPanelDialog(props: SessionPanelProps) {
           status: "idle",
           errorMsg: msg,
         });
+        // 2026-10-23-session-dialog-input-align / FR-02：原实现清输入后创建失败即
+        // 丢文本（比 page 修复前更差）——回填原文可原地重试。
+        restoreRejectedSend(rawPrompt);
       }
       return;
     }
@@ -1578,15 +1634,17 @@ export function SessionPanelDialog(props: SessionPanelProps) {
       attachmentMetaRef.current.set(a.id, { kind: a.kind, name: a.name });
     }
     if (view.currentRunId != null) {
-      await sendToServerQueue(prompt, attachmentIds);
+      await sendToServerQueue(prompt, attachmentIds, rawPrompt);
       return;
     }
     try {
       await submitFollowup(prompt, attachmentIds);
     } catch {
       /* errorMsg 已写入 view（占位轮回滚），此路径不向上抛 */
+      // FR-02：追问失败（网络/后端拒绝）→ 原文回填可原地重试。
+      restoreRejectedSend(rawPrompt);
     }
-  }, [input, hasOnlineProvider, offlineReadOnly, view.status, view.suspended, view.sessionId, view.currentRunId, isQueueFull, notify, provider, changeId, workspaceId, pendingMentions, establishStream, onSessionCreated, sendToServerQueue, submitFollowup, openTeamPopover, pendingAttachments, attTokenMap, wsRefTokens, teamMissions]);
+  }, [input, hasOnlineProvider, offlineReadOnly, view.status, view.suspended, view.sessionId, view.currentRunId, isQueueFull, notify, provider, changeId, workspaceId, pendingMentions, establishStream, onSessionCreated, sendToServerQueue, submitFollowup, openTeamPopover, pendingAttachments, attTokenMap, wsRefTokens, teamMissions, clearInputAccepted, restoreRejectedSend]);
 
   // 失败轮次「重新发送」——复用 submitFollowup 重新提交该 turn 的 prompt。受
   // turn 级串行 / active / 在线守卫；ql-20260904-010 起 RunErrorItem 对所有失败

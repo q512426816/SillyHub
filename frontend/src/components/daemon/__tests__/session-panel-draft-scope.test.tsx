@@ -243,19 +243,14 @@ async function nextFrame() {
   });
 }
 
-/** page 模式挂载（rerenderWith 切换 sessionId；preContext 全程不变）。 */
-function setupPage(
-  overrides: {
-    sessionId?: string | null;
-    preContext?: SessionPreContext | null;
-  } = {},
-) {
+/** daemon 面基线 mock（page 挂载与 dialog attach 挂载共用）。 */
+function primeDaemonMocks() {
   sessionApi.getAgentSession.mockImplementation(async (id: string) => ({
     ...makeDetail(),
     id,
   }));
   sessionApi.getAgentSessionLogs.mockResolvedValue([]);
-    sessionApi.fetchSessionTurnOutline.mockResolvedValue({ session_id: "s-1", total_turns: 0, items: [] });
+  sessionApi.fetchSessionTurnOutline.mockResolvedValue({ session_id: "s-1", total_turns: 0, items: [] });
   sessionApi.fetchPendingDialogs.mockResolvedValue([]);
   sessionApi.fetchSessionDialogHistory.mockResolvedValue([]);
   sessionApi.listSessionTeamMissions.mockResolvedValue([]);
@@ -267,6 +262,16 @@ function setupPage(
   workspaceApi.listProjects.mockResolvedValue([]);
   workspaceApi.listProjectWorkspaces.mockResolvedValue([]);
   apiFetchMock.mockResolvedValue([]);
+}
+
+/** page 模式挂载（rerenderWith 切换 sessionId；preContext 全程不变）。 */
+function setupPage(
+  overrides: {
+    sessionId?: string | null;
+    preContext?: SessionPreContext | null;
+  } = {},
+) {
+  primeDaemonMocks();
 
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   const view = (sid: string | null, preCtx: SessionPreContext | null) => (
@@ -288,17 +293,20 @@ function setupPage(
   };
 }
 
-/** dialog 模式挂载（idle：sessionId=null；workspaceId 经 overrides 传入）。 */
-function setupDialog(overrides: Partial<Omit<SessionPanelProps, "mode" | "sessionId">> = {}) {
+/** dialog 模式挂载（缺省 idle：sessionId=null；workspaceId 经 overrides 传入）。 */
+function setupDialog(
+  overrides: Partial<Omit<SessionPanelProps, "mode">> = {},
+) {
   const props: Omit<SessionPanelProps, "mode" | "sessionId"> = {
     providers: ["claude"],
     defaultProvider: "claude",
     model: null,
     onModelChange: vi.fn(),
     hasOnlineProvider: true,
-    ...overrides,
   };
-  return render(<SessionPanel mode="dialog" sessionId={null} {...props} />);
+  return render(
+    <SessionPanel mode="dialog" sessionId={null} {...props} {...(overrides as object)} />,
+  );
 }
 
 beforeEach(() => {
@@ -490,13 +498,16 @@ describe("dialog 预会话草稿 scope（task-01 / D-001）", () => {
     );
   });
 
-  it("同 workspaceId 重开 dialog：草稿恢复到输入框", async () => {
+  it("同 workspaceId 重开 dialog（idle）：输入框恒空白（新建=全新开始，残留键清除）", async () => {
+    // 2026-10-23-session-dialog-input-align / FR-04：原语义为「重进恢复草稿」，
+    // 与用户预期「新建 = 全新开始」冲突（page 模式同款语义修正）——改为恒空白。
     window.localStorage.setItem(DRAFT_KEY("__pre__:ws-d1"), "dialog 重进恢复");
     setupDialog({ workspaceId: "ws-d1" });
     const input = (await screen.findByPlaceholderText(
       /输入首条消息创建会话/,
     )) as HTMLTextAreaElement;
-    await waitFor(() => expect(input.value).toBe("dialog 重进恢复"));
+    await waitFor(() => expect(input.value).toBe(""));
+    expect(window.localStorage.getItem(DRAFT_KEY("__pre__:ws-d1"))).toBe("");
   });
 });
 
@@ -513,7 +524,7 @@ describe("dialog 预会话草稿 scope（task-01 / D-001）", () => {
 
 /** 挂起的 injectSession（永不 resolve；用例末尾手动 settle 收尾防 act 噪音）。 */
 function pendInject() {
-  const box: { settle?: (v: unknown) => void } = {};
+  const box: { settle?: (_v: unknown) => void } = {};
   sessionApi.injectSession.mockImplementation(
     () =>
       new Promise<unknown>((resolve) => {
@@ -550,7 +561,7 @@ describe("发送受理即清输入框文本（FR-01）", () => {
   });
 
   it("预会话首句：createSession 未响应时输入框已清空", async () => {
-    const box: { settle?: (v: unknown) => void } = {};
+    const box: { settle?: (_v: unknown) => void } = {};
     sessionApi.createSession.mockImplementation(
       () =>
         new Promise<unknown>((resolve) => {
@@ -628,7 +639,7 @@ describe("受理即同步清草稿键（FR-03）", () => {
   });
 
   it("预会话：首句受理即清 __pre__:scope 键（创建成功切真会话后不残留到下次新建）", async () => {
-    const box: { settle?: (v: unknown) => void } = {};
+    const box: { settle?: (_v: unknown) => void } = {};
     sessionApi.createSession.mockImplementation(
       () =>
         new Promise<unknown>((resolve) => {
@@ -654,5 +665,222 @@ describe("受理即同步清草稿键（FR-03）", () => {
       ),
     );
     box.settle?.({ session_id: "sess-new" });
+  });
+});
+
+/* ───────── 6. dialog 模式对齐（2026-10-23-session-dialog-input-align） ─────────
+ *
+ * 背景：上一变更（2026-10-23-session-input-clear-fix）只修 page；dialog 仍
+ * 「onSendSettled 等响应才清」+「idle 回读 __pre__ 草稿」，两模式行为分叉；
+ * 且 idle 首句创建失败时输入已清且不恢复（丢文本）。
+ *
+ * 本节锁定 dialog 侧 FR-01（受理即清）/ FR-02（失败恢复）/ FR-03（受理即清
+ * 草稿键）/ FR-04（idle 恒空白 + 真会话草稿不回归）。 */
+
+/** dialog idle 输入框（placeholder「输入首条消息创建会话」）。 */
+async function dialogIdleInput() {
+  return (await screen.findByPlaceholderText(
+    /输入首条消息创建会话/,
+  )) as HTMLTextAreaElement;
+}
+
+/** dialog 真会话输入框（placeholder「继续追问」——attach 轮询转 active 后）。 */
+async function dialogActiveInput() {
+  return (await screen.findByPlaceholderText(
+    /继续追问/,
+    {},
+    { timeout: 5000 },
+  )) as HTMLTextAreaElement;
+}
+
+/** dialog attach 真会话挂载（HTTP 面同 page 基线；attach 轮询 1.5s 转 active）。 */
+function setupDialogAttached(sessionId: string) {
+  primeDaemonMocks();
+  return setupDialog({ sessionId });
+}
+
+describe("dialog 发送受理即清输入框文本（FR-01）", () => {
+  it("idle 首句：createSession 未响应时输入框已清空（既有语义保持）", async () => {
+    const box: { settle?: (_v: unknown) => void } = {};
+    sessionApi.createSession.mockImplementation(
+      () =>
+        new Promise<unknown>((resolve) => {
+          box.settle = resolve;
+        }),
+    );
+    setupDialog({ workspaceId: "ws-d1" });
+    const input = await dialogIdleInput();
+    await nextFrame();
+    fireEvent.change(input, { target: { value: "AAA" } });
+    await waitFor(() => expect(input.value).toBe("AAA"));
+
+    clickSend();
+    await waitFor(() => expect(input.value).toBe(""));
+    expect(sessionApi.createSession).toHaveBeenCalled();
+    box.settle?.({ session_id: "sess-new", run_id: "run-1" });
+  });
+
+  it("活跃轮直发：injectSession 未响应时输入框已清空（不等响应）", async () => {
+    const settle = pendInject();
+    setupDialogAttached("sess-d1");
+    const input = await dialogActiveInput();
+    await nextFrame();
+    fireEvent.change(input, { target: { value: "AAA" } });
+    await waitFor(() => expect(input.value).toBe("AAA"));
+
+    clickSend();
+    // 请求仍在途（mock 未 resolve）→ 输入框必须已清空（原实现等 inject 响应）。
+    await waitFor(() => expect(input.value).toBe(""));
+    expect(sessionApi.injectSession).toHaveBeenCalled();
+    settle();
+  });
+
+  it("忙轮排队：injectSession 未响应时输入框已清空", async () => {
+    // create 打通拿到 currentRunId（忙轮）→ 下一条走 sendToServerQueue。
+    sessionApi.createSession.mockResolvedValue({ session_id: "sess-new", run_id: "run-1" });
+    setupDialog({ workspaceId: "ws-d1" });
+    const input = await dialogIdleInput();
+    await nextFrame();
+    fireEvent.change(input, { target: { value: "首句" } });
+    clickSend();
+    await waitFor(() => expect(sessionApi.createSession).toHaveBeenCalled());
+
+    // 锁死「忙轮排队」路径：currentRunId 非空时占位文案即排队语义。
+    await waitFor(
+      () => expect(screen.getByPlaceholderText(/消息将排队/)).toBeTruthy(),
+      { timeout: 5000 },
+    );
+    const busyInput = screen.getByPlaceholderText(
+      /消息将排队/,
+    ) as HTMLTextAreaElement;
+    const settle = pendInject();
+    await waitFor(() => expect(busyInput.value).toBe(""));
+    fireEvent.change(busyInput, { target: { value: "BBB" } });
+    await waitFor(() => expect(busyInput.value).toBe("BBB"));
+
+    clickSend();
+    await waitFor(() => expect(busyInput.value).toBe(""));
+    expect(sessionApi.injectSession).toHaveBeenCalled();
+    settle();
+  });
+});
+
+describe("dialog 发送失败恢复文本（FR-02）", () => {
+  it("idle 首句创建失败：输入框恢复原文可重试（原实现丢文本）", async () => {
+    sessionApi.createSession.mockRejectedValue(new Error("创建失败"));
+    setupDialog({ workspaceId: "ws-d1" });
+    const input = await dialogIdleInput();
+    await nextFrame();
+    fireEvent.change(input, { target: { value: "AAA" } });
+    await waitFor(() => expect(input.value).toBe("AAA"));
+
+    clickSend();
+    await waitFor(() => expect(input.value).toBe("AAA"));
+    // 错误仍在页面呈现（既有 errorMsg 语义），文本可原地重试。
+    expect(screen.getByText(/创建失败/)).toBeTruthy();
+  });
+
+  it("活跃轮直发失败：输入框恢复原文可重试", async () => {
+    sessionApi.injectSession.mockRejectedValue(new Error("network down"));
+    setupDialogAttached("sess-d1");
+    const input = await dialogActiveInput();
+    await nextFrame();
+    fireEvent.change(input, { target: { value: "AAA" } });
+    await waitFor(() => expect(input.value).toBe("AAA"));
+
+    clickSend();
+    await waitFor(() => expect(input.value).toBe("AAA"));
+  });
+
+  it("忙轮排队失败（满员/网络）：输入框恢复原文可重试", async () => {
+    sessionApi.createSession.mockResolvedValue({ session_id: "sess-new", run_id: "run-1" });
+    setupDialog({ workspaceId: "ws-d1" });
+    const input = await dialogIdleInput();
+    await nextFrame();
+    fireEvent.change(input, { target: { value: "首句" } });
+    clickSend();
+    await waitFor(() => expect(sessionApi.createSession).toHaveBeenCalled());
+
+    // 锁死「忙轮排队」路径：currentRunId 非空时占位文案即排队语义。
+    await waitFor(
+      () => expect(screen.getByPlaceholderText(/消息将排队/)).toBeTruthy(),
+      { timeout: 5000 },
+    );
+    const busyInput = screen.getByPlaceholderText(
+      /消息将排队/,
+    ) as HTMLTextAreaElement;
+    sessionApi.injectSession.mockRejectedValue(new Error("queue full"));
+    await waitFor(() => expect(busyInput.value).toBe(""));
+    fireEvent.change(busyInput, { target: { value: "BBB" } });
+    await waitFor(() => expect(busyInput.value).toBe("BBB"));
+
+    clickSend();
+    await waitFor(() => expect(busyInput.value).toBe("BBB"));
+  });
+});
+
+describe("dialog 受理即同步清草稿键（FR-03）", () => {
+  it("真会话：受理即清 localStorage 草稿（卸载后重开不残留）", async () => {
+    const settle = pendInject();
+    const first = setupDialogAttached("sess-d1");
+    const input = await dialogActiveInput();
+    await nextFrame();
+    fireEvent.change(input, { target: { value: "AAA" } });
+    await waitFor(() =>
+      expect(window.localStorage.getItem(DRAFT_KEY("sess-d1"))).toBe("AAA"),
+    );
+
+    clickSend();
+    // 受理瞬间草稿键即清（不依赖 setInput→effect，浮窗卸载后同样生效）。
+    await waitFor(() =>
+      expect(window.localStorage.getItem(DRAFT_KEY("sess-d1"))).toBe(""),
+    );
+
+    // 发送在途卸载（浮窗关闭）后重开同一会话：不显示已发送内容。
+    first.unmount();
+    setupDialogAttached("sess-d1");
+    const reopened = await dialogActiveInput();
+    await waitFor(() => expect(reopened.value).toBe(""));
+    settle();
+  });
+
+  it("idle 首句：受理即清 __pre__:<workspaceId> 草稿键", async () => {
+    const box: { settle?: (_v: unknown) => void } = {};
+    sessionApi.createSession.mockImplementation(
+      () =>
+        new Promise<unknown>((resolve) => {
+          box.settle = resolve;
+        }),
+    );
+    setupDialog({ workspaceId: "ws-d1" });
+    const input = await dialogIdleInput();
+    await nextFrame();
+    fireEvent.change(input, { target: { value: "AAA" } });
+    await waitFor(() =>
+      expect(window.localStorage.getItem(DRAFT_KEY("__pre__:ws-d1"))).toBe("AAA"),
+    );
+
+    clickSend();
+    await waitFor(() =>
+      expect(window.localStorage.getItem(DRAFT_KEY("__pre__:ws-d1"))).toBe(""),
+    );
+    box.settle?.({ session_id: "sess-new", run_id: "run-1" });
+  });
+});
+
+describe("dialog idle 态恒空白 + 真会话草稿不回归（FR-04）", () => {
+  it("idle 挂载不回读 __pre__ 草稿，且清残留键", async () => {
+    window.localStorage.setItem(DRAFT_KEY("__pre__:ws-d1"), "旧内容");
+    setupDialog({ workspaceId: "ws-d1" });
+    const input = await dialogIdleInput();
+    await waitFor(() => expect(input.value).toBe(""));
+    expect(window.localStorage.getItem(DRAFT_KEY("__pre__:ws-d1"))).toBe("");
+  });
+
+  it("真会话草稿持久化不回归：重开同一会话恢复草稿", async () => {
+    window.localStorage.setItem(DRAFT_KEY("sess-d1"), "BBB");
+    setupDialogAttached("sess-d1");
+    const input = await dialogActiveInput();
+    await waitFor(() => expect(input.value).toBe("BBB"));
   });
 });
