@@ -52,13 +52,18 @@ type LoadPhase =
   | { phase: "error"; message: string }
   | { phase: "ready"; sections: TurnFilePatchSection[] };
 
-/** shell 归因（命令行/脚本改动）的如实说明——git 快照只给行数，平台无补丁可显。 */
-const SHELL_NO_PATCH_TEXT =
-  "该文件由命令行/脚本改动（git 快照归因），平台未捕获补丁内容，仅行数统计可信。";
+/**
+ * 无补丁说明（2026-10-23-file-card-agent-grouping / FR-04）：git 快照归因只证明
+ * 「改动未来自本轮 agent 编辑工具」，不区分命令行/并行会话/其他进程——文案并列
+ * 三种可能，不断言唯一原因（旧文案「该文件由命令行/脚本改动」是过度断言，
+ * 与「新增」徽标组合会误导：CLI 创建的新文件也归 command）。
+ */
+const NO_PATCH_TEXT =
+  "该文件的改动未来自本轮 agent 的编辑工具（Edit/Write），可能由命令行/脚本、并行会话或其他进程产生；平台未捕获补丁内容，仅行数统计可信。";
 
-/** tool 归因但本轮日志配不到补丁的如实说明。 */
-const NO_PATCH_TEXT = "本轮日志中未找到该文件的编辑补丁（可能为非工具改动或补丁未捕获）。";
-
+/** 删除文件且无补丁（grouping FR-03）：删除说明态，如实交代无 diff 可看。 */
+const DELETED_NO_PATCH_TEXT =
+  "该文件在本轮被删除；删除动作未来自编辑工具（如命令行 rm），平台未捕获删除补丁，无 diff 可展示。";
 export function TurnFileDiffDialog({
   sessionId,
   runKey,
@@ -119,7 +124,11 @@ export function TurnFileDiffDialog({
             )}
           </DialogTitle>
           <DialogDescription className="text-[11px]">
-            本轮文件变更内容（来自 agent 编辑日志）
+            {/* 副标题条件渲染（grouping FR-04）：只有真展示 agent 编辑补丁时才提
+                「来自 agent 编辑日志」，无补丁说明态不带该语义（防误导）。 */}
+            {state.phase === "ready" && state.sections.length > 0
+              ? "本轮文件变更内容（来自 agent 编辑日志）"
+              : "本轮文件变更内容"}
           </DialogDescription>
         </DialogHeader>
 
@@ -147,7 +156,7 @@ export function TurnFileDiffDialog({
           )}
           {state.phase === "ready" && state.sections.length === 0 && (
             <p className="py-8 text-center text-[12px] leading-[1.6] text-muted-foreground">
-              {source === "shell" ? SHELL_NO_PATCH_TEXT : NO_PATCH_TEXT}
+              {status === "deleted" ? DELETED_NO_PATCH_TEXT : NO_PATCH_TEXT}
             </p>
           )}
           {state.phase === "ready" && state.sections.length > 0 && (

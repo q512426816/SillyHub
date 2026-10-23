@@ -400,7 +400,7 @@ describe("轮级文件变更卡与会话级汇总挂载（task-11 / 线 C 1b）"
     );
 
     const card = screen.getByTestId("turn-file-changes");
-    expect(screen.getByText("2 个文件变更")).toBeInTheDocument();
+    expect(screen.getByText("总共 2 个文件变更")).toBeInTheDocument();
     expect(card).toBeInTheDocument();
     // 挂在轮尾状态行（RoundDivider「第 N 轮」）之后，不是轮首；卡片头也带「第 N 轮」，
     // 取 DOM 序第一个（分隔行在前）。
@@ -481,7 +481,7 @@ describe("轮级文件变更卡与会话级汇总挂载（task-11 / 线 C 1b）"
       />,
     );
 
-    expect(screen.getByText("1 个文件变更")).toBeInTheDocument();
+    expect(screen.getByText("总共 1 个文件变更")).toBeInTheDocument();
     expect(screen.getByText("（部分）")).toBeInTheDocument();
   });
 
@@ -661,21 +661,66 @@ describe("文件变更卡行点击 → 本轮变更弹窗（2026-10-23-turn-file
     );
   });
 
-  it("shell 归因行点击同样开弹窗：source 上抛 → 内容区如实说明（FR-03）", async () => {
+  it("shell 归因行（命令行/其他区段）点击同样开弹窗：source 上抛 → 内容区如实说明（FR-03）", async () => {
     getAgentSessionLogsMock.mockResolvedValue([]);
     render(
       <TurnTimeline {...renderProps([wiringTurn()])} sessionId="sess-1" />,
     );
 
+    // grouping 后 shell 行收进「命令行/其他」区段：展开头部 + 点开区段再点行。
     fireEvent.click(screen.getByTestId("file-changes-header"));
-    const rows = screen.getAllByTestId("file-changes-row");
-    const shellRow = rows.find((row) => row.getAttribute("data-source") === "shell");
+    fireEvent.click(screen.getByTestId("file-changes-other-toggle"));
+    const shellRow = screen
+      .getAllByTestId("file-changes-row")
+      .find((row) => row.getAttribute("data-source") === "shell");
     fireEvent.click(shellRow!);
 
     const dialog = await screen.findByTestId("turn-file-diff-dialog");
     expect(
-      await within(dialog).findByText(/命令行\/脚本改动.*未捕获补丁内容/s),
+      await within(dialog).findByText(/未来自本轮 agent 的编辑工具/s),
     ).toBeInTheDocument();
+    expect(within(dialog).queryByTestId("turn-file-diff-section")).toBeNull();
+  });
+
+  it("已删除文件行可点击并弹窗如实说明（FR-03/grouping）", async () => {
+    getAgentSessionLogsMock.mockResolvedValue([]);
+    render(
+      <TurnTimeline
+        {...renderProps([
+          wiringTurn({
+            fileChanges: {
+              runId: "run-1",
+              baselineHead: "abc1234",
+              collectedAt: "2026-10-23T08:00:00Z",
+              collectMs: 30,
+              status: "ok",
+              files: [
+                {
+                  path: "legacy/old.ts",
+                  status: "deleted",
+                  added: 0,
+                  deleted: 9,
+                  attribution: "command",
+                },
+              ],
+              concurrentSessionsHint: true,
+            },
+          }),
+        ])}
+        sessionId="sess-1"
+      />,
+    );
+
+    fireEvent.click(screen.getByTestId("file-changes-header"));
+    fireEvent.click(screen.getByTestId("file-changes-other-toggle"));
+    const deletedRow = screen
+      .getAllByTestId("file-changes-row")
+      .find((row) => row.getAttribute("data-status") === "deleted");
+    expect(deletedRow).not.toBeNull();
+    fireEvent.click(deletedRow!);
+
+    const dialog = await screen.findByTestId("turn-file-diff-dialog");
+    expect(await within(dialog).findByText(/本轮被删除/s)).toBeInTheDocument();
     expect(within(dialog).queryByTestId("turn-file-diff-section")).toBeNull();
   });
 

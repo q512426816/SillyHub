@@ -77,6 +77,8 @@ describe("TurnFileDiffDialog", () => {
     expect(screen.getByText(/Edit/)).toBeDefined();
     expect(screen.getByText("old line")).toBeDefined();
     expect(screen.getByText("new line")).toBeDefined();
+    // 有补丁态：副标题带「来自 agent 编辑日志」语义。
+    expect(screen.getByText(/来自 agent 编辑日志/)).toBeDefined();
     // 拉取参数：会话级单轮日志 API（run_id 定轮）。
     expect(getAgentSessionLogsMock).toHaveBeenCalledWith("sess-1", expect.objectContaining({ runId: "run-1" }));
   });
@@ -97,24 +99,42 @@ describe("TurnFileDiffDialog", () => {
     expect(screen.getByText("two")).toBeDefined();
   });
 
-  it("shell 归因无补丁：如实说明命令行改动，不出伪造 diff（FR-03）", async () => {
+  it("shell 归因无补丁：如实说明改动来源不唯一，不出伪造 diff（FR-03/grouping FR-04）", async () => {
     getAgentSessionLogsMock.mockResolvedValue([]);
     renderDialog({ source: "shell" });
 
-    expect(
-      await screen.findByText(/命令行\/脚本改动.*未捕获补丁内容/s),
-    ).toBeDefined();
+    const body = (await screen.findByTestId("turn-file-diff-body")).textContent!;
+    // 如实表述：不断言唯一原因（命令行/并行会话/其他进程并列），不出「该文件由
+    // 命令行/脚本改动」断言句式。
+    expect(body).toContain("未来自本轮 agent 的编辑工具");
+    expect(body).toContain("命令行/脚本");
+    expect(body).toContain("并行会话");
+    expect(body).not.toContain("该文件由命令行/脚本改动");
+    // 无补丁说明态：副标题不带「来自 agent 编辑日志」语义。
+    expect(screen.queryByText(/来自 agent 编辑日志/)).toBeNull();
     expect(screen.queryByTestId("turn-file-diff-section")).toBeNull();
   });
 
-  it("tool 归因但配不到补丁：如实说明未找到，不出空壳成功 diff", async () => {
+  it("删除文件无补丁：如实说明本轮被删除且删除动作未来自编辑工具（grouping FR-03）", async () => {
+    getAgentSessionLogsMock.mockResolvedValue([]);
+    renderDialog({ source: "shell", status: "deleted" });
+
+    const body = (await screen.findByTestId("turn-file-diff-body")).textContent!;
+    expect(body).toContain("本轮被删除");
+    expect(body).toContain("未来自编辑工具");
+    expect(screen.queryByTestId("turn-file-diff-section")).toBeNull();
+  });
+
+  it("tool 归因但配不到补丁：如实说明无证据，不出空壳成功 diff", async () => {
     getAgentSessionLogsMock.mockResolvedValue([
       callLog("tu-1", "frontend/src/other.ts"),
       resultLog("tu-1", ["+x"]),
     ]);
     renderDialog();
 
-    expect(await screen.findByText(/未找到该文件的编辑补丁/s)).toBeDefined();
+    expect(
+      await screen.findByText(/未来自本轮 agent 的编辑工具/s),
+    ).toBeDefined();
     expect(screen.queryByTestId("turn-file-diff-section")).toBeNull();
   });
 
