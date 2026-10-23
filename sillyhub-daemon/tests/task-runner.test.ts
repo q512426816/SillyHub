@@ -1491,6 +1491,13 @@ describe('task-09: batch 消费 profile.skillRefs（design §9 技能子集）',
     await mkdir(join(skillsDir, 'skill-a'), { recursive: true });
     await mkdir(join(skillsDir, 'skill-b'), { recursive: true });
     await mkdir(join(skillsDir, 'skill-c'), { recursive: true });
+    // 2026-10-23-skill-prune-git-safe：裁剪条件收窄为三重与（不在 refs ∧ daemon 库
+    // 有名 ∧ 非 git 跟踪）——被裁技能须在 daemon 技能库登记（模拟 link 副本的真实形态）。
+    const daemonDir = await mkdtemp(join(tmpdir(), 'task09-daemon-'));
+    await mkdir(join(daemonDir, 'skills', 'skill-b'), { recursive: true });
+    await mkdir(join(daemonDir, 'skills', 'skill-c'), { recursive: true });
+    const prevDaemonDirEnv = process.env.SILLYHUB_DAEMON_DIR;
+    process.env.SILLYHUB_DAEMON_DIR = daemonDir;
 
     try {
       const fakeChild = createFakeChild();
@@ -1512,7 +1519,10 @@ describe('task-09: batch 消费 profile.skillRefs（design §9 技能子集）',
       // 只保留 skill-a（profile 子集），b/c 被裁剪
       expect(remaining.sort()).toEqual(['skill-a']);
     } finally {
+      if (prevDaemonDirEnv === undefined) delete process.env.SILLYHUB_DAEMON_DIR;
+      else process.env.SILLYHUB_DAEMON_DIR = prevDaemonDirEnv;
       await rm(tmpDir, { recursive: true, force: true }).catch(() => undefined);
+      await rm(daemonDir, { recursive: true, force: true }).catch(() => undefined);
     }
   });
 
@@ -1521,6 +1531,11 @@ describe('task-09: batch 消费 profile.skillRefs（design §9 技能子集）',
     const skillsDir = join(tmpDir, '.claude', 'skills');
     await mkdir(join(skillsDir, 'alpha'), { recursive: true });
     await mkdir(join(skillsDir, 'beta'), { recursive: true });
+    // 2026-10-23-skill-prune-git-safe：alpha 须在 daemon 库登记才会被裁（三重与）。
+    const daemonDir = await mkdtemp(join(tmpdir(), 'task09-daemon-snake-'));
+    await mkdir(join(daemonDir, 'skills', 'alpha'), { recursive: true });
+    const prevDaemonDirEnv = process.env.SILLYHUB_DAEMON_DIR;
+    process.env.SILLYHUB_DAEMON_DIR = daemonDir;
 
     try {
       const fakeChild = createFakeChild();
@@ -1541,7 +1556,10 @@ describe('task-09: batch 消费 profile.skillRefs（design §9 技能子集）',
       const remaining = await readdir(skillsDir);
       expect(remaining).toEqual(['beta']);
     } finally {
+      if (prevDaemonDirEnv === undefined) delete process.env.SILLYHUB_DAEMON_DIR;
+      else process.env.SILLYHUB_DAEMON_DIR = prevDaemonDirEnv;
       await rm(tmpDir, { recursive: true, force: true }).catch(() => undefined);
+      await rm(daemonDir, { recursive: true, force: true }).catch(() => undefined);
     }
   });
 
@@ -1580,6 +1598,12 @@ describe('task-03: skillRefs 空数组 → 清空全部技能（严格挂载）'
     const skillsDir = join(tmpDir, '.claude', 'skills');
     await mkdir(join(skillsDir, 'skill-a'), { recursive: true });
     await mkdir(join(skillsDir, 'skill-b'), { recursive: true });
+    // 2026-10-23-skill-prune-git-safe：清空语义仅对 daemon 库登记的技能生效（三重与）。
+    const daemonDir = await mkdtemp(join(tmpdir(), 'task03-daemon-'));
+    await mkdir(join(daemonDir, 'skills', 'skill-a'), { recursive: true });
+    await mkdir(join(daemonDir, 'skills', 'skill-b'), { recursive: true });
+    const prevDaemonDirEnv = process.env.SILLYHUB_DAEMON_DIR;
+    process.env.SILLYHUB_DAEMON_DIR = daemonDir;
 
     try {
       const fakeChild = createFakeChild();
@@ -1600,7 +1624,10 @@ describe('task-03: skillRefs 空数组 → 清空全部技能（严格挂载）'
       const remaining = await readdir(skillsDir);
       expect(remaining).toEqual([]);
     } finally {
+      if (prevDaemonDirEnv === undefined) delete process.env.SILLYHUB_DAEMON_DIR;
+      else process.env.SILLYHUB_DAEMON_DIR = prevDaemonDirEnv;
       await rm(tmpDir, { recursive: true, force: true }).catch(() => undefined);
+      await rm(daemonDir, { recursive: true, force: true }).catch(() => undefined);
     }
   });
 });

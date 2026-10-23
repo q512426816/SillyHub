@@ -13,9 +13,11 @@
 // @module skill-manager.test
 
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import { execFile } from 'node:child_process';
 import { mkdtemp, mkdir, writeFile, readFile, rm, stat } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { promisify } from 'node:util';
 import * as zlib from 'node:zlib';
 
 import {
@@ -29,6 +31,7 @@ import {
   syncWorkspaceSkills,
   syncWorkspaceGitSkills,
   linkSkillsToWorkdir,
+  pruneSkillsToSubset,
   resetLinkedWorkdirVersionsForTest,
   resetLinkedWorkdirWsVersionsForTest,
   pathExists,
@@ -669,5 +672,123 @@ describe('skill-manager: syncWorkspaceGitSkills（bridges task-04 / D-007）', (
 
     expect(await readFile(join(workdir, '.claude', 'skills', 'clash-git', 'SKILL.md'), 'utf-8')).toBe('union-new');
     fetchSpy.mockRestore();
+  });
+});
+
+// ── pruneSkillsToSubset（2026-10-23-skill-prune-git-safe：三重与删除条件）────
+
+describe('skill-manager: pruneSkillsToSubset（2026-10-23-skill-prune-git-safe）', () => {
+  const gitExec = promisify(execFile);
+  let daemonDir: string;
+  let workDir: string;
+  let prevDaemonDirEnv: string | undefined;
+
+  beforeEach(async () => {
+    prevDaemonDirEnv = process.env.SILLYHUB_DAEMON_DIR;
+    // skillsDir() 懒计算读 SILLYHUB_DAEMON_DIR（config.ts），每用例独立隔离。
+    daemonDir = await mkdtemp(join(tmpdir(), 'sm-prune-daemon-'));
+    workDir = await mkdtemp(join(tmpdir(), 'sm-prune-work-'));
+    process.env.SILLYHUB_DAEMON_DIR = daemonDir;
+  });
+
+  afterEach(async () => {
+    if (prevDaemonDirEnv === undefined) delete process.env.SILLYHUB_DAEMON_DIR;
+    else process.env.SILLYHUB_DAEMON_DIR = prevDaemonDirEnv;
+    // .git 对象文件只读（Windows EPERM），rm 失败静默——mkdtemp 残留由系统 tmp 清理。
+    await rm(daemonDir, { recursive: true, force: true }).catch(() => undefined);
+    await rm(workDir, { recursive: true, force: true }).catch(() => undefined);
+  });
+
+  /** 在 daemon 技能库登记一个技能（skillsDir() 下建目录）。 */
+  async function seedManagedSkill(name: string): Promise<void> {
+    await mkdir(join(daemonDir, 'skills', name, 'references'), { recursive: true });
+    await writeFile(join(daemonDir, 'skills', name, 'SKILL.md'), 'managed', 'utf-8');
+  }
+
+  /** 在工作区放一个技能目录（.claude/skills/name）。 */
+  async function seedWorkdirSkill(name: string): Promise<void> {
+    await mkdir(join(workDir, '.claude', 'skills', name, 'references'), { recursive: true });
+    await writeFile(join(workDir, '.claude', 'skills', name, 'SKILL.md'), 'workdir', 'utf-8');
+  }
+
+  it('git 跟踪目录即使不在 skillRefs 也保留（FR-01）；未跟踪 daemon 副本仍裁剪', async () => {
+    await seedManagedSkill('beta');
+    await seedWorkdirSkill('brand'); // 将被 git add 跟踪（仓库正式技能）
+    await seedWorkdirSkill('beta'); // 未跟踪（daemon link 副本形态）
+    await gitExec('git', ['init', '-q'], { cwd: workDir });
+    await gitExec('git', ['add', join('.claude', 'skills', 'brand')], { cwd: workDir });
+
+    await pruneSkillsToSubset(workDir, ['sillyspec-flow'], 'lease-fr01');
+
+    expect(await pathExists(join(workDir, '.claude', 'skills', 'brand'))).toBe(true);
+    expect(await pathExists(join(workDir, '.claude', 'skills', 'beta'))).toBe(false);
+  });
+
+  it('非 git 目录：daemon 库副本被裁剪，用户自建目录保留（FR-02/FR-03）', async () => {
+    await seedManagedSkill('beta');
+    await seedWorkdirSkill('beta'); // managed 且非跟踪 → 删
+    await seedWorkdirSkill('gamma'); // 非 managed → 保留（用户自建）
+
+    await pruneSkillsToSubset(workDir, [], 'lease-fr03');
+
+    expect(await pathExists(join(workDir, '.claude', 'skills', 'beta'))).toBe(false);
+    expect(await pathExists(join(workDir, '.claude', 'skills', 'gamma'))).toBe(true);
+  });
+
+  it('git 仓内未跟踪 daemon 副本仍被裁剪（跟踪空集不误保护，FR-04 边界）', async () => {
+    await seedManagedSkill('beta');
+    await seedWorkdirSkill('beta');
+    await gitExec('git', ['init', '-q'], { cwd: workDir }); // git init 但不 add：tracked=空集
+
+    await pruneSkillsToSubset(workDir, [], 'lease-fr04a');
+
+    expect(await pathExists(join(workDir, '.claude', 'skills', 'beta'))).toBe(false);
+  });
+
+  it('keep 命中与 unmanaged 保留均按设计路径执行并打 kept 日志（FR-04）', async () => {
+    await seedManagedSkill('kappa');
+    await seedWorkdirSkill('kappa'); // keep 命中 → 保留（keep 路径在循环前，无 kept 日志）
+    await seedWorkdirSkill('gamma'); // unmanaged → 保留 + kept 日志
+    const infoSpy = vi.spyOn(console, 'info').mockImplementation(() => undefined);
+    try {
+      await pruneSkillsToSubset(workDir, ['kappa'], 'lease-fr04b');
+      // 断言须在 mockRestore 之前——restore 会清空 mock.calls。
+      expect(await pathExists(join(workDir, '.claude', 'skills', 'kappa'))).toBe(true);
+      expect(await pathExists(join(workDir, '.claude', 'skills', 'gamma'))).toBe(true);
+      const keptCalls = infoSpy.mock.calls.filter(
+        (c) => c[0] === 'skill_manager: prune_skill_kept',
+      );
+      const reasons = keptCalls.map((c) => (c[2] as { reason?: string } | undefined)?.reason);
+      expect(reasons).toContain('unmanaged');
+    } finally {
+      infoSpy.mockRestore();
+    }
+  });
+
+  it('git 跟踪保留打 reason=tracked 日志（FR-01/FR-04）', async () => {
+    await seedManagedSkill('brand');
+    await seedWorkdirSkill('brand');
+    await gitExec('git', ['init', '-q'], { cwd: workDir });
+    await gitExec('git', ['add', join('.claude', 'skills', 'brand')], { cwd: workDir });
+    const infoSpy = vi.spyOn(console, 'info').mockImplementation(() => undefined);
+    try {
+      await pruneSkillsToSubset(workDir, [], 'lease-fr01log');
+      // 断言须在 mockRestore 之前——restore 会清空 mock.calls。
+      expect(await pathExists(join(workDir, '.claude', 'skills', 'brand'))).toBe(true);
+      const keptCalls = infoSpy.mock.calls.filter(
+        (c) => c[0] === 'skill_manager: prune_skill_kept',
+      );
+      const reasons = keptCalls.map((c) => (c[2] as { reason?: string } | undefined)?.reason);
+      expect(reasons).toContain('tracked');
+    } finally {
+      infoSpy.mockRestore();
+    }
+  });
+
+  it('daemon 库读不到（空清单）→ 全保留，宁可不裁不误删（降级）', async () => {
+    // 不 seedManagedSkill：skillsDir() 无 skills 目录 → managed 空集 → 三重与恒不成立
+    await seedWorkdirSkill('beta');
+    await pruneSkillsToSubset(workDir, [], 'lease-degrade');
+    expect(await pathExists(join(workDir, '.claude', 'skills', 'beta'))).toBe(true);
   });
 });

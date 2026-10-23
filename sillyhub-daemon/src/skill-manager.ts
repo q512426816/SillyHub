@@ -24,6 +24,7 @@
  */
 
 import { createHash } from 'node:crypto';
+import { execFile } from 'node:child_process';
 import { mkdir, readFile, rename, rm, writeFile, readdir, copyFile, stat } from 'node:fs/promises';
 import { join, dirname, relative, isAbsolute } from 'node:path';
 import { gunzip } from 'node:zlib';
@@ -33,6 +34,8 @@ import { daemonStateDir } from './config.js';
 
 // Wave C 续：gunzip 移出事件循环（bundle 解压在 async extractSkillsBundle 内）。
 const gunzipAsync = promisify(gunzip);
+// pruneSkillsToSubset 的 git 跟踪判定走子进程（2026-10-23-skill-prune-git-safe）。
+const execFileAsync = promisify(execFile);
 
 // ── 常量 ──────────────────────────────────────────────────────────────────────
 
@@ -808,6 +811,47 @@ export async function linkSkillsToWorkdir(
 
 // ── 档案技能子集裁剪（2026-10-21-agent-profile-slim-default task-03）──────────
 
+/** git ls-files 单命令超时（对齐 turn-anchor GIT_TIMEOUT_MS 惯例）。 */
+const GIT_LS_FILES_TIMEOUT_MS = 15_000;
+/** ls-files 输出缓冲上限（技能文件数十~数百行，防御性兜底）。 */
+const GIT_LS_FILES_MAX_BUFFER = 16 * 1024 * 1024;
+
+/**
+ * 查询 workDir 中 `.claude/skills/` 下被 git 跟踪的一级目录名集合
+ * （2026-10-23-skill-prune-git-safe FR-01 的判定面）。
+ *
+ * 只读（`ls-files` 不写 index、不拿 index.lock），execFile 非 shell（防注入），
+ * 15s 超时；`-z` 免转义、`core.quotePath=false` 保非 ASCII 路径原样 UTF-8。
+ * 非 git 仓 / git 缺失 / dubious ownership / 超时 → **null**（调用方按「无跟踪信息」
+ * 降级：跟踪保护退化为不可用，managed 清单条件恒在场兜底，删除面不放大）。
+ * 输出为 workDir 相对 posix 路径，聚合 `.claude/skills/<一级段>` 为目录名集合
+ * （部分跟踪的目录整目录保护——安全方向保守）。
+ */
+async function gitTrackedSkillDirs(workDir: string): Promise<Set<string> | null> {
+  const prefix = '.claude/skills/';
+  try {
+    const { stdout } = await execFileAsync(
+      'git',
+      ['-c', 'core.quotePath=false', 'ls-files', '-z', '--', prefix],
+      {
+        cwd: workDir,
+        timeout: GIT_LS_FILES_TIMEOUT_MS,
+        maxBuffer: GIT_LS_FILES_MAX_BUFFER,
+        windowsHide: true,
+      },
+    );
+    const names = new Set<string>();
+    for (const token of stdout.split('\0')) {
+      if (!token.startsWith(prefix)) continue;
+      const seg = token.slice(prefix.length).split('/')[0];
+      if (seg) names.add(seg);
+    }
+    return names;
+  } catch {
+    return null;
+  }
+}
+
 /**
  * 按 profile.skillRefs 严格裁剪 <workDir>/.claude/skills/（task-09 原创于
  * task-runner.ts，task-03 迁出共享——interactive 会话路径同样消费）。
@@ -817,6 +861,13 @@ export async function linkSkillsToWorkdir(
  * 旧 lease/未选档案）」与「键在场（含空数组）=裁剪」——本函数不判 undefined。
  * 隐藏项（. 开头）与非目录跳过；单条 rm 失败仅 warn（不阻塞 spawn）。
  * 目录不存在（linkSkillsToWorkdir 未建 / mock no-op）→ 静默返回。
+ *
+ * 删除条件（2026-10-23-skill-prune-git-safe 收敛为**三重与**，收窄既有删除面）：
+ * `不在 skillRefs ∧ 目录名 ∈ daemon 技能库清单（skillsDir() 一级目录）∧ 非 git 跟踪`——
+ * daemon 只裁剪自己 link 进来的副本；git 跟踪的目录是仓库正式文件，**禁止**删除
+ * （2026-10-23 实证：会话创建时 prune 删掉 250 个 git 跟踪技能文件污染工作区）；
+ * 用户自建目录（daemon 库无同名）一律不碰。被保护跳过的目录打 `prune_skill_kept`
+ * info 日志（reason=tracked/unmanaged），审计可见。
  */
 export async function pruneSkillsToSubset(
   workDir: string,
@@ -831,18 +882,46 @@ export async function pruneSkillsToSubset(
     return; // 目录不存在（linkSkillsToWorkdir 未建 / mock no-op）→ 无可裁剪
   }
   const keep = new Set(skillRefs);
+  // daemon 技能库一级目录名清单（管理面判定）。读失败 → 空集 → 三重与恒不成立
+  // → 全保留（宁可不裁，不误删用户自建目录）。
+  const managed = new Set(
+    (
+      await readdir(skillsDir(), { withFileTypes: true }).catch(
+        () => [] as import('node:fs').Dirent[],
+      )
+    )
+      .filter((e) => e.isDirectory() && !e.name.startsWith('.'))
+      .map((e) => e.name),
+  );
+  // git 跟踪保护（FR-01）：null = 跟踪信息不可得（非 git 仓 / git 缺失 / 超时）
+  // → 降级：跟踪保护退化，managed 条件仍兜底（删除面不放大到旧逻辑之上）。
+  const tracked = await gitTrackedSkillDirs(workDir);
   for (const entry of entries) {
     if (!entry.isDirectory()) continue;
     if (entry.name.startsWith('.')) continue;
-    if (!keep.has(entry.name)) {
-      await rm(join(skillsBase, entry.name), { recursive: true, force: true }).catch(
-        (e: unknown) => {
-          console.warn('skill_manager: prune_skill_failed', leaseId, {
-            skill: entry.name,
-            error: e,
-          });
-        },
-      );
+    if (keep.has(entry.name)) continue;
+    // 三重与：不在 skillRefs（上方已判）∧ 名在 daemon 技能库 ∧ 非 git 跟踪。
+    if (!managed.has(entry.name)) {
+      console.info('skill_manager: prune_skill_kept', leaseId, {
+        skill: entry.name,
+        reason: 'unmanaged',
+      });
+      continue;
     }
+    if (tracked !== null && tracked.has(entry.name)) {
+      console.info('skill_manager: prune_skill_kept', leaseId, {
+        skill: entry.name,
+        reason: 'tracked',
+      });
+      continue;
+    }
+    await rm(join(skillsBase, entry.name), { recursive: true, force: true }).catch(
+      (e: unknown) => {
+        console.warn('skill_manager: prune_skill_failed', leaseId, {
+          skill: entry.name,
+          error: e,
+        });
+      },
+    );
   }
 }
