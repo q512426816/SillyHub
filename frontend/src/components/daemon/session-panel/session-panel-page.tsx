@@ -1281,8 +1281,8 @@ export function SessionPanelPage({
         });
         if (cancelled) return;
         // 2026-10-23-session-first-window-turn-align：首屏自适应窗口——底窗按轮
-        // 对齐补全（截断轮与底窗合并去重 + 至少覆盖最近 2 轮），小会话天然全量；
-        // 任何补拉失败降级回底窗，不阻断建流（FR-01/FR-03）。
+        // 对齐补全（锚点轮完整才合并 + 向前补到预算/8 轮上限/到头），小会话尽量
+        // 全量；锚点不完整或请求失败整体回退底窗，不阻断建流（FR-01/FR-03）。
         const runsForWindow = (await runsPromise) ?? null;
         if (cancelled) return;
         let windowLogs = logs;

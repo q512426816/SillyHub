@@ -129,7 +129,7 @@ describe("buildInitialWindow", () => {
     expect(result.logs).toEqual(base);
   });
 
-  it("直达触达 2000 上限 → 与窗口行合并去重，不丢窗口尾部（FR-03）", async () => {
+  it("锚点轮直达触达 2000 上限 → 禁止采纳，整体回退底窗（不留中段缺口，FR-03）", async () => {
     const base = makeLogs("r1", "b", 10800, 400);
     // 直达 ASC 返回前 2000 行（更早段），不含底窗尾部；模拟端点上限截断。
     const full = makeLogs("r1", "f", 7200, RUN_LOGS_MAX);
@@ -142,13 +142,47 @@ describe("buildInitialWindow", () => {
       fetchRunLogs,
     });
 
-    expect(result.logs).toHaveLength(RUN_LOGS_MAX + base.length);
-    const ids = new Set(result.logs.map((l) => l.id));
-    for (const line of base) expect(ids.has(line.id)).toBe(true);
-    expect(result.logs.at(-1)?.id).toBe(base.at(-1)?.id);
-    // 评审 P2：直达 ASC 截断（directMax < 底窗最新）→ 游标必须保持底窗最旧行，
-    // 否则轮首与底窗之间的中段缺口经「加载更早」永久不可达。
+    // 评审 P2/P3：合并会制造 [2000..底窗) 的中段缺口且回补会双块——整体不采纳。
+    expect(result.extended).toBe(false);
+    expect(result.logs).toEqual(base);
     expect(result.cursorLog?.id).toBe(base[0]?.id);
+  });
+
+  it("锚点轮直达失败 → 不向前补拉、保持底窗（FR-03 失败降级）", async () => {
+    const base = makeLogs("r2", "b2", 9000, 400);
+    const fetchRunLogs = vi.fn(async (runId: string) => {
+      if (runId === "r2") throw new Error("timeout");
+      return makeLogs("r1", "e1", 8000, 50);
+    });
+
+    const result = await buildInitialWindow({
+      baseLogs: base,
+      runs: [makeRun("r2", "2026-10-23T03:00:00Z"), makeRun("r1", "2026-10-23T01:00:00Z")],
+      probeEarlier: vi.fn().mockResolvedValue([{ ...base[0]!, id: "probe" }]),
+      fetchRunLogs,
+    });
+
+    expect(result.extended).toBe(false);
+    expect(result.logs).toEqual(base);
+    expect(result.cursorLog?.id).toBe(base[0]?.id);
+    // 锚点轮失败时不发起更早轮补拉（否则游标越洞、锚点轮缺口永久不可回补）。
+    expect(fetchRunLogs.mock.calls.map(([id]) => id)).toEqual(["r2"]);
+  });
+
+  it("probe 失败 → 整体放弃自适应，不发起任何直达拉取（FR-03 失败降级）", async () => {
+    const base = makeLogs("r1", "b", 9000, 400);
+    const fetchRunLogs = vi.fn();
+
+    const result = await buildInitialWindow({
+      baseLogs: base,
+      runs: [makeRun("r1", "2026-10-23T03:00:00Z"), makeRun("r0", "2026-10-23T01:00:00Z")],
+      probeEarlier: vi.fn().mockRejectedValue(new Error("network")),
+      fetchRunLogs,
+    });
+
+    expect(result.extended).toBe(false);
+    expect(result.logs).toEqual(base);
+    expect(fetchRunLogs).not.toHaveBeenCalled();
   });
 
   it("向前补更早轮触达单轮上限 → 停止且不采纳该轮（避免轮间留洞，FR-03）", async () => {
