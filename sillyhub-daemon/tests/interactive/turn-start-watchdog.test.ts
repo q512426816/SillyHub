@@ -231,4 +231,123 @@ describe('2026-10-21-daemon-zombie-turn FR-01：轮启动看门狗', () => {
     // P2 缓解：currentRunId 保留（迟到归属锚，见上）。
     expect(sm.get('sess-1')!.currentRunId).toBe('run-9');
   });
+
+  // ── 2026-10-23-watchdog-steering-guard：忙轮 steering 误杀回归 ──────────────
+  // 事故 run 3d3b0bae（会话 5fb28b2e）：backend mid-turn steering 复用活跃 run
+  // 的 run_id；inject 的 >60s stale-reset 只看上次 inject 时间，把仍在产事件的
+  // 活轮翻 active 并给同一 run 布防看门狗，模型 API 卡顿后 90s 到点误判 failed。
+  // 以下用例锁定三条前置守卫：同 runId 不 stale/不布防、事件新鲜不 stale、
+  // 已观测 run 不布防；同时保留真僵尸轮（新 runId 零事件）触发路径。
+
+  it('事故序列：首轮启动→事件→同 runId steering→静默 90s 不误杀', async () => {
+    vi.useFakeTimers();
+    const onTurnStartTimeout = vi.fn(async () => {});
+    const sm = createSessionManager(onTurnStartTimeout);
+    const state = makeState('sess-1', 'active');
+    seed(sm, state);
+
+    await sm.inject('sess-1', 'first', 'run-A');
+    expect(watchdogMap(sm).has('sess-1')).toBe(true);
+
+    // 引擎产生任意轮事件：撤防 + 记录已启动 run。
+    await onMessage(core(sm), state, { events: [] });
+    expect(watchdogMap(sm).has('sess-1')).toBe(false);
+    expect(state.observedRunIds?.has('run-A')).toBe(true);
+
+    // 轮跑过 60s 后追加 steering（同 runId）：不得 stale-reset、不得重新布防。
+    await vi.advanceTimersByTimeAsync(120_000);
+    await sm.inject('sess-1', 'steer', 'run-A');
+    expect(watchdogMap(sm).has('sess-1')).toBe(false);
+
+    // 即使之后静默 90s（模型卡顿形态），也不得把活轮判死。
+    await vi.advanceTimersByTimeAsync(90_000);
+    expect(onTurnStartTimeout).not.toHaveBeenCalled();
+  });
+
+  it('mid-turn steering（同 runId）不 stale-reset、不布防看门狗', async () => {
+    vi.useFakeTimers();
+    const onTurnStartTimeout = vi.fn(async () => {});
+    const sm = createSessionManager(onTurnStartTimeout);
+    const state = makeState('sess-1', 'running');
+    state.currentRunId = 'run-active';
+    state.lastActiveAt = Date.now() - 120_000;
+    state.lastTurnEventAt = Date.now() - 120_000;
+    seed(sm, state);
+
+    await sm.inject('sess-1', 'steer', 'run-active');
+
+    const after = sm.get('sess-1')!;
+    expect(after.status).toBe('running');
+    expect(after.currentRunId).toBe('run-active');
+    // 同 runId 是追加输入，不是新轮启动：不得写 stale 宽限、不得布防。
+    expect(after.staleRunResetAt).toBeUndefined();
+    expect(watchdogMap(sm).has('sess-1')).toBe(false);
+    expect(sm.getPendingInjectCount('sess-1')).toBe(1);
+
+    await vi.advanceTimersByTimeAsync(90_000);
+    expect(onTurnStartTimeout).not.toHaveBeenCalled();
+  });
+
+  it('轮内事件新鲜时 inject 不触发 stale-reset（FR-02）', async () => {
+    const onTurnStartTimeout = vi.fn(async () => {});
+    const sm = createSessionManager(onTurnStartTimeout);
+    const state = makeState('sess-1', 'running');
+    state.currentRunId = 'run-old';
+    state.lastActiveAt = Date.now() - 120_000;
+    // 5 秒前还有轮内事件：引擎没静默，不得按「上次 inject 时间」误翻。
+    state.lastTurnEventAt = Date.now() - 5_000;
+    seed(sm, state);
+
+    await sm.inject('sess-1', 'queued', 'run-new');
+
+    const after = sm.get('sess-1')!;
+    expect(after.status).toBe('running');
+    expect(after.staleRunResetAt).toBeUndefined();
+    // 前一 turn 未 result：排队语义，不布防。
+    expect(watchdogMap(sm).has('sess-1')).toBe(false);
+  });
+
+  it('onMessage 刷新最后事件时间并记录 observedRunIds（FR-02/FR-03）', async () => {
+    const sm = createSessionManager();
+    const state = makeState('sess-1', 'running');
+    state.currentRunId = 'run-9';
+    state.lastTurnEventAt = 1;
+    seed(sm, state);
+
+    const before = Date.now();
+    await onMessage(core(sm), state, { events: [] });
+
+    expect(state.lastTurnEventAt).toBeGreaterThanOrEqual(before);
+    expect(state.observedRunIds?.has('run-9')).toBe(true);
+  });
+
+  it('已观测事件的 run 不再布防看门狗（FR-03）', async () => {
+    vi.useFakeTimers();
+    const onTurnStartTimeout = vi.fn(async () => {});
+    const sm = createSessionManager(onTurnStartTimeout);
+    const state = makeState('sess-1', 'active');
+    state.observedRunIds = new Set(['run-seen']);
+    seed(sm, state);
+
+    await sm.inject('sess-1', 'replay', 'run-seen');
+
+    expect(watchdogMap(sm).has('sess-1')).toBe(false);
+    await vi.advanceTimersByTimeAsync(90_000);
+    expect(onTurnStartTimeout).not.toHaveBeenCalled();
+  });
+
+  it('新 runId 零事件仍触发（真僵尸轮不回归，FR-03/FR-04）', async () => {
+    vi.useFakeTimers();
+    const onTurnStartTimeout = vi.fn(async () => {});
+    const sm = createSessionManager(onTurnStartTimeout);
+    const state = makeState('sess-1', 'active');
+    state.observedRunIds = new Set(['run-old']);
+    seed(sm, state);
+
+    await sm.inject('sess-1', '[后台任务通知] …', 'run-zombie');
+    await vi.advanceTimersByTimeAsync(90_000);
+
+    expect(onTurnStartTimeout).toHaveBeenCalledTimes(1);
+    expect(onTurnStartTimeout).toHaveBeenCalledWith('sess-1', 'run-zombie');
+  });
 });

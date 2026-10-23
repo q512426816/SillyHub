@@ -196,6 +196,19 @@ export interface SessionState {
   staleRunResetAt?: number;
   /** 最后活动时间（D-004 空闲 30min 回收，task-07 实现）。 */
   lastActiveAt: number;
+  /**
+   * 2026-10-23-watchdog-steering-guard FR-02：最后一次轮内事件时间（onMessage
+   * 每个 envelope 刷新）。inject 的 >60s stale-running 自愈以此作为「引擎是否
+   * 真静默」的基准，而非上次 inject/result 时间（后者会把刚产生过工具事件的
+   * 长 turn 误判为 stale）。仅内存态，不参与持久化语义。
+   */
+  lastTurnEventAt?: number;
+  /**
+   * 2026-10-23-watchdog-steering-guard FR-03：已经产生过轮事件的 run id 集合
+   * （onMessage 到达时登记，256 上限 FIFO 驱逐）。轮启动看门狗不得对已启动过的
+   * run 布防——防重复/迟到 inject 把活轮误判为「引擎未启动」。仅内存态。
+   */
+  observedRunIds?: Set<string>;
   /** 固定 cwd（resume 还原用，spike D3）。driver.start 必须用 state.cwd。 */
   cwd: string;
   /**
