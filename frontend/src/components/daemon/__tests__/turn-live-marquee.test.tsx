@@ -13,6 +13,7 @@ import {
   deriveLiveMarqueeEntries,
   formatMarqueeDuration,
   marqueeSpeedForDistance,
+  resolveMarqueeTarget,
   LIVE_MARQUEE_MAX_ENTRIES,
 } from "@/components/daemon/turn-live-marquee";
 import {
@@ -191,6 +192,16 @@ describe("deriveLiveMarqueeEntries 纯函数（FR-01 / FR-03）", () => {
     expect(marqueeSpeedForDistance(100)).toBeCloseTo(90, 5);
     expect(marqueeSpeedForDistance(228)).toBeCloseTo(205.2, 5);
     expect(marqueeSpeedForDistance(10_000)).toBe(1600);
+  });
+
+  it("窗口滑动目标回到 base，连续滑动不累积越界（FR-01）", () => {
+    const base = -40_800;
+    // 滑动：无论旧目标多负，都回到 base（修复前会在旧目标上继续减，直至轨道越界空白）。
+    expect(resolveMarqueeTarget(base, -41_008, 208)).toBe(base);
+    expect(resolveMarqueeTarget(base, base, 208)).toBe(base);
+    // 普通内容增长：只向更负推进，不回滚。
+    expect(resolveMarqueeTarget(base, -40_000, null)).toBe(base);
+    expect(resolveMarqueeTarget(base, -42_000, null)).toBe(-42_000);
   });
 });
 

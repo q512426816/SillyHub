@@ -71,6 +71,23 @@ export function marqueeSpeedForDistance(distance: number): number {
   const d = Math.max(0, distance);
   return Math.min(LIVE_MARQUEE_MAX_SPEED, Math.max(40, d * 0.9));
 }
+
+/**
+ * 轨道目标位置（2026-10-23-marquee-blank-track-fix）：
+ *   - 达到条目上限后的窗口滑动（slideStep != null）：目标**回到 base**（最新条
+ *     贴右缘），禁止在旧目标上继续累减——否则长会话每来一条就再推一条宽度，
+ *     最终把整条轨道推出视口（只剩状态点与 LIVE）；
+ *   - 普通内容增长：只向更负推进，不回滚。
+ * 视觉连续由调用方补偿 offset 实现（滑动瞬间右移一条，再平滑滚回 base）。
+ */
+export function resolveMarqueeTarget(
+  base: number,
+  previousTarget: number,
+  slideStep: number | null,
+): number {
+  if (slideStep != null) return base;
+  return Math.min(previousTarget, base);
+}
 /** 单条摘要截断长度（用户不需要看清全文，单行不撑破）。 */
 const CLIP_LENGTH = 64;
 
@@ -541,27 +558,32 @@ export const TurnLiveMarquee = memo(function TurnLiveMarquee({
    * 首次测量直接定位（打开即看到最新），之后只向更负的方向推进，不回滚。
    *
    * @param slideByOne 达到条目上限后窗口滑动（淘汰最旧/追加最新）时为 true：
-   *   轨道宽度不变但内容整体左移了一条，需额外推进一条宽度，让新条目进入
-   *   视口——否则轨道会停在原处、最新事件永远看不见。
+   *   内容整体左移一条。先把 offset 右移一条抵消视觉跳变，再平滑滚回 base
+   *   （2026-10-23-marquee-blank-track-fix：目标禁止在旧值上累减，否则长会话
+   *   会把轨道永久推出视口变成空白条）。
    */
   const applyTarget = useCallback((slideByOne = false) => {
     const viewport = viewportRef.current;
     const track = trackRef.current;
     if (!viewport || !track) return;
     const base = Math.min(0, viewport.clientWidth - track.scrollWidth);
-    // 目标单调不增：内容文本更新不该把已滚过的位置拉回来；窗口滑动时在
-    // 上一次目标基础上再推进一条（不能回到 base，否则新条目会瞬间跳入）。
-    let next = Math.min(targetRef.current, base);
+    let slideStep: number | null = null;
     if (slideByOne) {
       const firstItem = track.firstElementChild as HTMLElement | null;
       const gap = Number.parseFloat(getComputedStyle(track).columnGap || "0") || 0;
-      next -= (firstItem?.offsetWidth ?? 208) + gap;
+      slideStep = (firstItem?.offsetWidth ?? 208) + gap;
+      // DOM 内容整体左移一条 → offset 右移一条抵消（clamp ≤ 0），保持画面不跳；
+      // rAF 随后从补偿位置平滑滚回 base，每次滑动只前进一条、位移不累积。
+      offsetRef.current = Math.min(0, offsetRef.current + slideStep);
+      if (initializedRef.current) {
+        track.style.transform = `translate3d(${offsetRef.current}px, 0, 0)`;
+      }
     }
-    targetRef.current = next;
+    targetRef.current = resolveMarqueeTarget(base, targetRef.current, slideStep);
     if (!initializedRef.current) {
       initializedRef.current = true;
-      offsetRef.current = next;
-      track.style.transform = `translate3d(${next}px, 0, 0)`;
+      offsetRef.current = targetRef.current;
+      track.style.transform = `translate3d(${offsetRef.current}px, 0, 0)`;
       setReady(true);
     }
     // target 更新是重启滚动的入口之一（此前停排时新目标到来要能再起排）。

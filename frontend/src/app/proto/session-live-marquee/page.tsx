@@ -159,7 +159,7 @@ const SCRIPT: ReadonlyArray<(_seq: number) => TurnSegment> = [
 ];
 
 function buildSegments(step: number): TurnSegment[] {
-  const total = Math.min(step + 1, 60);
+  const total = Math.min(step + 1, 220);
   const out: TurnSegment[] = [];
   for (let i = 0; i < total; i += 1) {
     const event = SCRIPT[i % SCRIPT.length]!;
@@ -205,6 +205,9 @@ export default function SessionLiveMarqueeProtoPage() {
   const [theme, setTheme] = useState<ThemeValue>("ai-native");
   const [step, setStep] = useState(5);
   const [running, setRunning] = useState(true);
+  // 「长会话」演示：强制重挂载跑马灯，模拟刷新后直接加载 200+ 历史事件
+  //（首次挂载应直接定位到最新，不空白）。
+  const [marqueeKey, setMarqueeKey] = useState(0);
   const [startedAt, setStartedAt] = useState<number | null>(null);
 
   useEffect(() => {
@@ -223,7 +226,7 @@ export default function SessionLiveMarqueeProtoPage() {
   useEffect(() => {
     if (!running) return;
     const timer = window.setInterval(() => {
-      setStep((prev) => (prev >= 60 ? prev : prev + 1));
+      setStep((prev) => (prev >= 220 ? prev : prev + 1));
     }, 1300);
     return () => window.clearInterval(timer);
   }, [running]);
@@ -292,6 +295,16 @@ export default function SessionLiveMarqueeProtoPage() {
               className="rounded-full border px-2.5 py-1 text-muted-foreground transition-colors hover:text-foreground"
             >
               重置
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                setStep(209);
+                setMarqueeKey((prev) => prev + 1);
+              }}
+              className="rounded-full border px-2.5 py-1 text-muted-foreground transition-colors hover:text-foreground"
+            >
+              长会话（210 条）
             </button>
             <span className="ml-auto text-muted-foreground/70">
               已注入 {entries.length} 条过程事件
@@ -369,7 +382,7 @@ export default function SessionLiveMarqueeProtoPage() {
                       <span aria-hidden className="sh-stream-caret" />
                     </div>
                   </div>
-                  <TurnLiveMarquee entries={entries} />
+                  <TurnLiveMarquee key={marqueeKey} entries={entries} />
                 </div>
               </div>
             )}
