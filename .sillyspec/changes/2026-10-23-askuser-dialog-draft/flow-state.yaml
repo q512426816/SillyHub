@@ -1,0 +1,30 @@
+tier: thin
+legacy_fallback: false
+substeps: {}
+born_face: thin
+with_tasks: false
+review_force: null
+input: |-
+  AskUser 弹窗选项与输入互斥及作答草稿保留
+
+  用户报障（原话）：1. 勾选的内容及输入的内容单选情况项应该是互斥的，目前勾选之后也能输入，输入之后还能勾选不对；2. 用户选择的选项和输入的内容刷新页面或切换会话后就丢失了（没提交的时候），这个也应该要保留的，参考会话输入方案。
+
+  成功标准：
+  - 单选问题：选中某个选项后手动输入框禁用不可输入；手动输入非空时选项按钮禁用不可勾选；取消选择/清空输入后另一侧恢复可用
+  - 多选问题保持现状：可勾多项，且可与手动输入合并作答（用户明确「仅单选互斥」）
+  - 未提交的单选项勾选、多选项勾选与手动输入文本，刷新页面或切换会话再回到该提问时原样恢复（参考会话输入草稿 localStorage 方案）
+  - 提交成功 / 被他人回答（409）/ 提问卡移除后该提问的草稿清除，不残留到下一次新提问
+  - tsc --noEmit 零错；ask-user 卡片与 pending-dialog-dock 相关测试全绿（新增互斥与持久化行为用例）
+autopilot: false
+prestage_ack: true
+baseline_commit: ffdf5d9402f4f10043d04d6451bce66d0452a210
+updatedAt: '2026-10-23T05:47:30.618Z'
+cross_baselines:
+  sillyspec: c309979af71cebec54c124425bb059294db15ab0
+baseline_sha256: 4f0c0eada24da1350e9abd6db0a5b63a3f3096ffb4d9f687dfff88fdfdb851a1
+spec_approved: true
+spec_approved_at: '2026-10-23T05:47:30.618Z'
+spec_approved_by: admin2-askuser-draft
+spec_approved_channel: user-confirmed
+spec_attested_by: admin2-askuser-draft
+
