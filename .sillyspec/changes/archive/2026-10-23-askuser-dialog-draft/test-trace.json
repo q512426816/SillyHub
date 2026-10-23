@@ -1,0 +1,67 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-23-askuser-dialog-draft",
+  "rows": [
+    {
+      "anchor": "FR-01",
+      "row_id": "2026-10-23-askuser-dialog-draft:flow:测试绑定FR-01",
+      "tests": [
+        "frontend/src/components/ask-user-dialog-card.test.tsx「单选互斥：勾选选项后手动输入框禁用，取消选择后恢复可用」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-23-askuser-dialog-draft"
+    },
+    {
+      "anchor": "FR-02",
+      "row_id": "2026-10-23-askuser-dialog-draft:flow:测试绑定FR-02",
+      "tests": [
+        "frontend/src/components/ask-user-dialog-card.test.tsx「多选保持现状：可同时勾多项且手动输入可合并作答」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-23-askuser-dialog-draft"
+    },
+    {
+      "anchor": "FR-03",
+      "row_id": "2026-10-23-askuser-dialog-draft:flow:测试绑定FR-03",
+      "tests": [
+        "frontend/src/components/ask-user-dialog-card.test.tsx「未提交作答卸载重挂载后原样恢复（刷新/切换会话同路径）」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-23-askuser-dialog-draft"
+    },
+    {
+      "anchor": "FR-04",
+      "row_id": "2026-10-23-askuser-dialog-draft:flow:测试绑定FR-04",
+      "tests": [
+        "frontend/src/components/ask-user-dialog-card.test.tsx「提交成功后清除该提问草稿，不残留」",
+        "frontend/src/components/ask-user-dialog-draft.test.ts「草稿读写/TTL 过期清理/损坏数据降级」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-23-askuser-dialog-draft"
+    }
+  ]
+}

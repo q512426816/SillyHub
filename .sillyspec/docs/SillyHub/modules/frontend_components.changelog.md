@@ -141,3 +141,4 @@ created_at: 2026-08-30 22:23:33
 | 2026-10-23 | 2026-10-23-session-network-context | 2026-10-23-session-network-context |
 | 2026-10-23 | 2026-10-23-session-dialog-input-align | 会话浮窗输入即清与草稿语义对齐修复 |
 | 2026-10-23 | 2026-10-23-session-first-window-turn-align | 会话重新进入时首屏历史窗口按最近 400 条日志截断，单轮日志超过 400 条时窗口起点落在该轮中段… |
+| 2026-10-23 | 2026-10-23-askuser-dialog-draft | AskUser 弹窗选项与输入互斥及作答草稿保留 |

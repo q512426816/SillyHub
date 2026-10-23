@@ -1,0 +1,26 @@
+{"ts":1792734156674,"kind":"file","stage":"proposal","detail":"proposal.md 出现","provisional":true}
+{"ts":1792734156674,"kind":"file","stage":"requirements","detail":"requirements.md 出现","provisional":true}
+{"ts":1792734156674,"kind":"file","stage":"design","detail":"design.md 出现","provisional":true}
+{"ts":1792734156674,"kind":"file","stage":"tasks","detail":"tasks.md 出现","provisional":true}
+{"ts":1792734179591,"kind":"file-update","stage":"requirements","detail":"requirements.md 内容变更","provisional":true}
+{"ts":1792734196541,"kind":"file-update","stage":"design","detail":"design.md 内容变更","provisional":true}
+{"ts":1792734204934,"kind":"file-update","stage":"tasks","detail":"tasks.md 内容变更","provisional":true}
+{"ts":1792734214950,"kind":"file-update","stage":"requirements","detail":"requirements.md 内容变更","provisional":true}
+{"ts":1792734214950,"kind":"file-update","stage":"design","detail":"design.md 内容变更","provisional":true}
+{"ts":1792734222153,"kind":"file-update","stage":"requirements","detail":"requirements.md 内容变更","provisional":true}
+{"ts":1792734495611,"kind":"warning","stage":null,"rule":"scope-drift","severity":"warning","detail":"声明面之外的代码文件被改：rontend/src/components/ask-user-dialog-card.test.tsx——范围漂移嫌疑（并行会话改动/越界，人判）","provisional":true}
+{"ts":1792734946292,"kind":"file-update","stage":"design","detail":"design.md 内容变更","provisional":true}
+{"ts":1792734947914,"kind":"task-done","stage":"tasks","detail":"checked 0→1","provisional":true,"source":"task-tick"}
+{"ts":1792734948296,"kind":"task-done","stage":"tasks","detail":"checked 1→2","provisional":true,"source":"task-tick"}
+{"ts":1792734948643,"kind":"task-done","stage":"tasks","detail":"checked 2→3","provisional":true,"source":"task-tick"}
+{"ts":1792734948978,"kind":"task-done","stage":"tasks","detail":"checked 3→4","provisional":true,"source":"task-tick"}
+{"ts":1792734949349,"kind":"task-done","stage":"tasks","detail":"checked 4→5","provisional":true,"source":"task-tick"}
+{"ts":1792734949774,"kind":"file-update","stage":"tasks","detail":"tasks.md 内容变更","provisional":true}
+{"ts":1792734949774,"kind":"task-done","stage":"tasks","detail":"checked 0→5","provisional":true}
+{"ts":1792734956690,"kind":"file","stage":"proposal","detail":"decisions.md 出现","provisional":true}
+{"ts":1792734960148,"kind":"file-update","stage":"proposal","detail":"decisions.md 内容变更","provisional":true}
+{"ts":1792734976695,"kind":"commit","stage":null,"detail":"1ebeb3af6","provisional":true}
+{"ts":1792734986740,"kind":"commit","stage":null,"detail":"aa3cab68f","provisional":true}
+{"ts":1792735063452,"kind":"commit","stage":null,"detail":"89eab69bc","provisional":true}
+{"ts":1792735067202,"kind":"warning","stage":null,"rule":"scope-drift","severity":"warning","detail":"声明面之外的代码文件被改：sillyspec/changes/2026-10-23-askuser-dialog-draft/flow-state.yaml——范围漂移嫌疑（并行会话改动/越界，人判）","provisional":true}
+{"ts":1792735104403,"kind":"gate-run","stage":"verify","detail":"门实测 passed（3.3s） · 20261023055822","provisional":true}

@@ -7626,3 +7626,79 @@ superseded_by：FR-app-workspace-pages-002
 摘要：主路径
 全文：.sillyspec/changes/archive/2026-10-23-diff-copy-p3-cleanup/requirements.md#FR-04
 最近确认：e849e16ee3a34212c2abfd144b0503f6064b6b1d
+
+## FR-frontend-054 单选问题：选项勾选与手动输入互斥
+变更：2026-10-23-askuser-dialog-draft
+状态：active
+摘要：（无场景名）
+全文：.sillyspec/changes/archive/2026-10-23-askuser-dialog-draft/requirements.md#FR-01
+最近确认：89eab69bc8d2ed766383f510f0f5c84e228d352c
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-23-askuser-dialog-draft:flow:测试绑定FR-01
+  tests: frontend/src/components/ask-user-dialog-card.test.tsx「单选互斥：勾选选项后手动输入框禁用，取消选择后恢复可用」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-23-askuser-dialog-draft
+  status: active
+
+## FR-frontend-055 多选问题保持现状（回归锁定）
+变更：2026-10-23-askuser-dialog-draft
+状态：active
+摘要：（无场景名）
+全文：.sillyspec/changes/archive/2026-10-23-askuser-dialog-draft/requirements.md#FR-02
+最近确认：89eab69bc8d2ed766383f510f0f5c84e228d352c
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-23-askuser-dialog-draft:flow:测试绑定FR-02
+  tests: frontend/src/components/ask-user-dialog-card.test.tsx「多选保持现状：可同时勾多项且手动输入可合并作答」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-23-askuser-dialog-draft
+  status: active
+
+## FR-frontend-056 未提交作答跨刷新 / 跨会话切换保留
+变更：2026-10-23-askuser-dialog-draft
+状态：active
+摘要：（无场景名）
+全文：.sillyspec/changes/archive/2026-10-23-askuser-dialog-draft/requirements.md#FR-03
+最近确认：89eab69bc8d2ed766383f510f0f5c84e228d352c
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-23-askuser-dialog-draft:flow:测试绑定FR-03
+  tests: frontend/src/components/ask-user-dialog-card.test.tsx「未提交作答卸载重挂载后原样恢复（刷新/切换会话同路径）」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-23-askuser-dialog-draft
+  status: active
+
+## FR-frontend-057 草稿清理不残留
+变更：2026-10-23-askuser-dialog-draft
+状态：active
+摘要：（无场景名）
+全文：.sillyspec/changes/archive/2026-10-23-askuser-dialog-draft/requirements.md#FR-04
+最近确认：89eab69bc8d2ed766383f510f0f5c84e228d352c
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-23-askuser-dialog-draft:flow:测试绑定FR-04
+  tests: frontend/src/components/ask-user-dialog-card.test.tsx「提交成功后清除该提问草稿，不残留」 | frontend/src/components/ask-user-dialog-draft.test.ts「草稿读写/TTL 过期清理/损坏数据降级」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-23-askuser-dialog-draft
+  status: active
