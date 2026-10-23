@@ -16,6 +16,7 @@
 <!-- change-title-not-readable.md：变更标题不可读——完整变更恒变更名兜底、轻量变更50字截断长句；工具侧需强制agent命名10-30字 → 已关闭（sillyspec 仓 short-change-title + title-range-gate 归档，工具侧硬门/提炼/动机回退齐；已移入 finished/） -->
 <!-- tick-timing-squash-blindspot.md：勾选时点「一把勾」警告结构性误报——判定读git历史形态与官方压扁口径自相矛盾+「对应提交」指令歧义+反馈只在收口终点（2026-10-16-change-title-condense-backfill 实证）→ 已关闭（sillyspec 仓 2026-10-17-tick-timing-source 归档 d47f7cf0，判定换源侧车墙钟时戳+tick 回显现成命令+文案消歧；已移入 finished/） -->
 <!-- 2026-10-23-flow-done-new-prefix-crossrepo-ambiguity.md：flow done 的 NEW: 新建声明被误判为跨仓声明——存在 repos 注册时 NEW: 前缀未剥离即查主仓存在性，同一批文件既报「声明了没交付」又报「交付了没声明」；设计门禁反向强制 NEW: 前缀，两规则互斥（2026-10-23-session-network-context 实证）→ 活跃 -->
+<!-- 2026-10-23-flow-done-review-findings-status-blind.md：flow done 评审门禁只判 findings 里有无 P1 条目，不识别 status=resolved——增量复审（官方推荐流程）保留历史条目即被判「仍有 P1」拒归档；与任务书 schema 无 status 字段互斥（2026-10-23-session-network-context 实证）→ 活跃 -->
 <!-- ── 以下为仍活跃坑（2026-10-17 审计补录此前漏挂的三条索引） ── -->
 <!-- cli-cwd-coupling.md：sillyspec CLI cwd 耦合——worktree/子目录内跑把 cwd 当独立 spec root（进度库分裂风险）→ 已关闭（sillyspec 仓 2026-10-20-cli-worktree-cwd-anchor 归档 a7b9764c：exit 2 硬拦改⚠️警告+自动重锚定主仓根（dir 与同 worktree 显式 --spec-dir 一并锚定），--allow-worktree-cwd/wt-commit 豁免不变，写入恒落主仓；评审 PASS 三清偿复核确认；2026-10-20 已移入 finished/） -->
 <!-- external-mode-no-root-session-resolution.md：双形态契约守则——external 模式（无根会话）parent 链/根会话解析（已知断裂点已修+冒烟用例已落；守则参考文档长期活跃，不随单点修复归档）（2026-09-11） -->
