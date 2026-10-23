@@ -77,10 +77,14 @@ scale: small  # Step 8 精判（2026-10-14 反判据口径）：虽有 daemon∥
 | 新增 | NEW:backend/app/core/client_ip.py | 共享客户端 IP 提取：`client_ip_from_request(request) -> str \| None` + `has_forwarded_for(request) -> bool`。数据流：producer=auth 登录审计 / daemon 心跳·注册端点（Request 注入）→ 本工具归一（XFF 最右段 strip→remoteAddress）→ consumer=登录限流审计（既有迁用）+ daemon observed_ip 落库 |
 | 修改 | backend/app/modules/auth/router.py | `_client_ip` 改调共享工具，行为不变（纯重构，BS-3 语义保留） |
 | 修改 | backend/app/modules/daemon/model.py | DaemonInstance 新增 `network_info: dict \| None` JSON 列（NULL 允许） |
-| 新增 | NEW:backend/migrations/versions/<rev>_add_daemon_instances_network_info.py | Alembic 迁移加列（rev 生成时定，`add_column` 可空无默认） |
+| 新增 | NEW:backend/migrations/versions/20261023090000_add_daemon_instances_network_info.py | Alembic 迁移加列（`add_column` 可空无默认，接续 20261022100000） |
+| 新增 | NEW:backend/migrations/versions/20261023090100_add_queued_messages_network_context.py | 排队表加 network_context 快照列（task-08 落实 D-012：入队存 user_ip/has_xff，派发实时重算） |
+| 修改 | backend/app/modules/agent/model.py | AgentSessionQueuedMessage 新增 network_context JSON 列（D-012 入队快照） |
+| 修改 | backend/app/modules/daemon/router/session_crud.py | create/inject 两端点注入 Request 构造 NetworkContextBlock（首轮强制/每轮去重）。数据流：producer=Request 源 IP（client_ip 工具）→ NetworkContextBlock → facade → service 链 → consumer=dispatch prompt |
 | 修改 | backend/tests/test_align_platform_change_events_migration.py | 链尾锚 head 常量前移一行（钉子①） |
 | 修改 | backend/app/modules/daemon/router/heartbeat.py | DaemonHeartbeatRequest 加可选 `network_interfaces: list[HeartbeatNetworkInterface] \| None`；端点注入 Request 取 observed_ip 传服务层。数据流：producer=daemon network-info.ts → HTTP 心跳体 → pydantic（缺省 None）→ heartbeat_daemon → daemon_instances.network_info → consumer=network_context.py 判定引擎 |
 | 修改 | backend/app/modules/daemon/runtime/service.py | `heartbeat_daemon` 加 `network_interfaces`/`observed_ip` 参数：observed_ip 每跳直写，network_interfaces 出现即整写/缺席保留（注释锚定语义） |
+| 修改 | backend/app/modules/daemon/service.py | DaemonService facade 同步 `inject_session` 的 network_context 参数与透传（漏透传会 500——facade 显式签名惯例） |
 | 修改 | backend/app/modules/daemon/router/version.py | 注册端点观测来源 IP 首写 network_info.observed_ip（daemon 首登即有观测 IP） |
 | 新增 | NEW:backend/app/modules/daemon/session/network_context.py | 判定引擎 + 【网络环境】段渲染 + Redis 快照去重。数据流：producer=用户请求 IP（client_ip 工具）+ daemon_instances.network_info → 引擎计算 → consumer=inject 通道 dispatch prompt（→ daemon SDK 会话首条 user 消息，agent 可见） |
 | 修改 | backend/app/modules/daemon/session/service/inject.py | `inject_session`/`_inject_into_session` 加 `network_context: NetworkContextBlock \| None = None` 参数透传（镜像 page_context 先例 inject.py:69/246/433/898） |
