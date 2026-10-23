@@ -7467,3 +7467,98 @@ superseded_by：FR-app-workspace-pages-002
   confirmed_at: null
   source_change: 2026-10-22-file-changes-card-fix
   status: active
+
+## FR-frontend-045 pending AskUser 问答卡渲染于真会话底部输入框位置（互斥替换 SessionInputBar，session-panel-page 与 session-panel-dialog 两挂载点同款），时间线滚动区不再渲染 pending 卡
+变更：2026-10-22-askuser-dock-inputbar
+状态：active
+摘要：pending 到达；两挂载点一致
+全文：.sillyspec/changes/archive/2026-10-22-askuser-dock-inputbar/requirements.md#FR-01
+最近确认：17f2273dc06c094cd830f77fce052c55e8606933
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-22-askuser-dock-inputbar:flow:测试绑定FR-01
+  tests: frontend/src/components/daemon/__tests__/pending-dialog-dock.test.tsx「pending 到达渲染卡区（互斥由挂载点条件渲染承担，dock 渲染卡列断言）」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-22-askuser-dock-inputbar
+  status: active
+
+## FR-frontend-046 问答卡区有固定最大高度（约 45vh 量级），内容超出时区内上下滚动；提交回答或 resolved 后输入框自动恢复
+变更：2026-10-22-askuser-dock-inputbar
+状态：active
+摘要：超高内容内滚；答完恢复
+全文：.sillyspec/changes/archive/2026-10-22-askuser-dock-inputbar/requirements.md#FR-02
+最近确认：17f2273dc06c094cd830f77fce052c55e8606933
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-22-askuser-dock-inputbar:flow:测试绑定FR-02
+  tests: frontend/src/components/daemon/__tests__/pending-dialog-dock.test.tsx「卡区 max-h + overflow-y-auto 类名断言」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-22-askuser-dock-inputbar
+  status: active
+
+## FR-frontend-047 最小化（收起为右下角胶囊）与待决策 pill 定位还原能力保留，pill 点击还原+高亮闪烁（不再滚顶）
+变更：2026-10-22-askuser-dock-inputbar
+状态：active
+摘要：最小化与还原；pill 定位
+全文：.sillyspec/changes/archive/2026-10-22-askuser-dock-inputbar/requirements.md#FR-03
+最近确认：17f2273dc06c094cd830f77fce052c55e8606933
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-22-askuser-dock-inputbar:flow:测试绑定FR-03
+  tests: frontend/src/components/daemon/__tests__/pending-dialog-dock.test.tsx「还原保留已填内容：选项 + 手动输入原样恢复」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-22-askuser-dock-inputbar
+  status: active
+
+## FR-frontend-048 ended/failed 会话不渲染问答区，输入框正常显示
+变更：2026-10-22-askuser-dock-inputbar
+状态：active
+摘要：终态会话
+全文：.sillyspec/changes/archive/2026-10-22-askuser-dock-inputbar/requirements.md#FR-04
+最近确认：17f2273dc06c094cd830f77fce052c55e8606933
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-22-askuser-dock-inputbar:flow:测试绑定FR-04
+  tests: frontend/src/components/daemon/__tests__/pending-dialog-dock.test.tsx「ended 会话不渲染卡区（胶囊同样不渲染）」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-22-askuser-dock-inputbar
+  status: active
+
+## FR-frontend-049 TurnTimeline 移除 pending 卡渲染与相关 props，群聊面板零变化，受影响测试全绿 + tsc 零错
+变更：2026-10-22-askuser-dock-inputbar
+状态：active
+摘要：验证
+全文：.sillyspec/changes/archive/2026-10-22-askuser-dock-inputbar/requirements.md#FR-05
+最近确认：17f2273dc06c094cd830f77fce052c55e8606933
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-22-askuser-dock-inputbar:flow:测试绑定FR-05
+  tests: frontend/src/components/daemon/__tests__/session-panel-dialog.test.tsx
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-22-askuser-dock-inputbar
+  status: active

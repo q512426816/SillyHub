@@ -1,0 +1,81 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-22-askuser-dock-inputbar",
+  "rows": [
+    {
+      "anchor": "FR-01",
+      "row_id": "2026-10-22-askuser-dock-inputbar:flow:测试绑定FR-01",
+      "tests": [
+        "frontend/src/components/daemon/__tests__/pending-dialog-dock.test.tsx「pending 到达渲染卡区（互斥由挂载点条件渲染承担，dock 渲染卡列断言）」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-22-askuser-dock-inputbar"
+    },
+    {
+      "anchor": "FR-02",
+      "row_id": "2026-10-22-askuser-dock-inputbar:flow:测试绑定FR-02",
+      "tests": [
+        "frontend/src/components/daemon/__tests__/pending-dialog-dock.test.tsx「卡区 max-h + overflow-y-auto 类名断言」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-22-askuser-dock-inputbar"
+    },
+    {
+      "anchor": "FR-03",
+      "row_id": "2026-10-22-askuser-dock-inputbar:flow:测试绑定FR-03",
+      "tests": [
+        "frontend/src/components/daemon/__tests__/pending-dialog-dock.test.tsx「还原保留已填内容：选项 + 手动输入原样恢复」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-22-askuser-dock-inputbar"
+    },
+    {
+      "anchor": "FR-04",
+      "row_id": "2026-10-22-askuser-dock-inputbar:flow:测试绑定FR-04",
+      "tests": [
+        "frontend/src/components/daemon/__tests__/pending-dialog-dock.test.tsx「ended 会话不渲染卡区（胶囊同样不渲染）」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-22-askuser-dock-inputbar"
+    },
+    {
+      "anchor": "FR-05",
+      "row_id": "2026-10-22-askuser-dock-inputbar:flow:测试绑定FR-05",
+      "tests": [
+        "frontend/src/components/daemon/__tests__/session-panel-dialog.test.tsx"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-22-askuser-dock-inputbar"
+    }
+  ]
+}

@@ -1,0 +1,1222 @@
+diff --git a/frontend/src/components/ask-user-marker-card.test.tsx b/frontend/src/components/ask-user-marker-card.test.tsx
+index 2623fc53d..dceb2c286 100644
+--- a/frontend/src/components/ask-user-marker-card.test.tsx
++++ b/frontend/src/components/ask-user-marker-card.test.tsx
+@@ -234,9 +234,7 @@ function renderProps(
+     viewMode: "conversation" as const,
+     errorMsg: null,
+     sessionStatus: "active" as const,
+-    pendingRequests: [],
+     dialogHistory: [],
+-    onDialogResolved: vi.fn(),
+     onResend: vi.fn(),
+     onSwitchProvider: vi.fn(),
+     hasOnlineProvider: true,
+diff --git a/frontend/src/components/daemon/__tests__/turn-timeline-dialog-minimize.test.tsx b/frontend/src/components/daemon/__tests__/pending-dialog-dock.test.tsx
+similarity index 62%
+rename from frontend/src/components/daemon/__tests__/turn-timeline-dialog-minimize.test.tsx
+rename to frontend/src/components/daemon/__tests__/pending-dialog-dock.test.tsx
+index df453ab45..00ecbaed8 100644
+--- a/frontend/src/components/daemon/__tests__/turn-timeline-dialog-minimize.test.tsx
++++ b/frontend/src/components/daemon/__tests__/pending-dialog-dock.test.tsx
+@@ -1,29 +1,29 @@
+-// ql-20260825-006：会话页 pending 提问卡（TurnTimeline 内 AskUserDialogCard）
+-// 最小化能力测试。用户反馈「会话页面 AskUserQuestion 弹窗没有最小化按钮」——
+-// task-08 只给 approvals 聚合页（SessionPermissionPanel）接了最小化，会话页
+-// TurnTimeline 渲染提问卡时未传 onMinimize/minimized（卡组件缺省不渲染按钮）。
++// 2026-10-22-askuser-dock-inputbar：PendingDialogDock（会话底部输入框位置的
++// pending AskUser 待答 dock）测试。自 turn-timeline-dialog-minimize.test.tsx
++// 迁移改写——待答卡由 TurnTimeline 时间线内渲染迁至输入框位置互斥替换
++// SessionInputBar（用户裁决：问答优先，答完自动恢复），最小化/胶囊/还原交互
++// 原样保留。
+ //
+ // 覆盖：
+-//   1. 默认展开：卡头有最小化按钮、无胶囊（改动后新增能力，不传则无按钮的
+-//      向后兼容由 ask-user-dialog-card 组件级测试覆盖）；
+-//   2. 最小化：卡片渲染 null（组件级 minimized 契约）、胶囊出现 + 角标 1、
+-//      全部最小化时容器视觉框消失（容器仅作挂载占位保 state）；
+-//   7. 2026-10-22-askuser-card-inline：容器内嵌文档流——展开态类名不含
+-//      sticky（不再钉顶悬浮，随日志滚动；用例 1 内联断言）；
++//   1. 默认展开：卡头有最小化按钮、无胶囊；dock 容器固定最大高度 + 区内滚动
++//      （max-h-[45vh] overflow-y-auto overscroll-contain，FR-02）；
++//   2. 最小化：卡片渲染 null（组件级 minimized 契约）、胶囊出现 + 角标 1；
+ //   3. 还原保留已填内容：选项 + 手动输入在最小化/还原后原样恢复；
+ //   4. 多卡累计：角标 2、展开明细列表定点还原指定卡 → 角标 1；
+ //   5. 父级移除卡（提交 / permission_resolved 后 pendingRequests 过滤）→
+ //      胶囊计数同步清（prune effect），清空后胶囊消失；
+-//   6. ended 会话不回显 pending 卡（既有门控）→ 胶囊同样不渲染。
++//   6. ended/failed 会话：dock 整体不渲染（卡区与胶囊都无）；
++//   7. focusRequest（待决策 pill 定位）：无条件还原 + 卡区 ring 闪烁（FR-03，
++//      不再滚顶——卡区不在时间线滚动区）。
+ //
+ // mock 口径：MarkdownText（next/dynamic jsdom 同步 render 得 null，照抄
+-// turn-timeline-session-input-bar.test）；@/lib/daemon 的
+-// respondSessionPermission（提交路径，本文件只验证最小化交互，mock 兜底防真实请求）。
++// turn-timeline-dialog-minimize 先例）；@/lib/daemon 的 respondSessionPermission
++// （提交路径，本文件只验证交互，mock 兜底防真实请求）。
+ 
+ import { describe, it, expect, vi } from "vitest";
+ import { render, screen, fireEvent } from "@testing-library/react";
+ 
+-import { TurnTimeline } from "../turn-timeline";
++import { PendingDialogDock } from "../pending-dialog-dock";
+ import type { SessionPermissionRequest } from "@/lib/daemon";
+ 
+ vi.mock("@/components/ui/markdown-text", () => ({
+@@ -59,27 +59,26 @@ function makeDialogRequest(
+   };
+ }
+ 
+-function setupTimeline(overrides: Record<string, unknown> = {}) {
++function setupDock(overrides: Record<string, unknown> = {}) {
+   const props = {
+-    turns: [],
+-    viewMode: "conversation" as const,
+-    errorMsg: null,
+-    sessionStatus: "active" as const,
+     pendingRequests: [makeDialogRequest()],
+-    dialogHistory: [],
+-    onDialogResolved: vi.fn(),
+-    onResend: vi.fn(),
+-    onSwitchProvider: vi.fn(),
+-    hasOnlineProvider: true,
+-    emptyProviderLabel: "Claude Code",
++    sessionStatus: "active" as const,
++    onResolved: vi.fn(),
+     ...overrides,
+   };
+-  return render(<TurnTimeline {...(props as any)} />);
++  return render(<PendingDialogDock {...(props as any)} />);
++}
++
++/** dock 卡列容器（max-h 内滚区，data-testid 锚点）。 */
++function dockListBox() {
++  const el = document.querySelector('[data-testid="pending-dialog-dock"]');
++  expect(el).not.toBeNull();
++  return el as HTMLElement;
+ }
+ 
+-describe("TurnTimeline pending 提问卡最小化（ql-20260825-006）", () => {
+-  it("默认展开：卡头有最小化按钮，无胶囊", () => {
+-    setupTimeline();
++describe("PendingDialogDock（输入框位置待答 dock，2026-10-22-askuser-dock-inputbar）", () => {
++  it("默认展开：卡头有最小化按钮，无胶囊；容器固定最大高度 + 区内滚动", () => {
++    setupDock();
+     expect(screen.getByText("第一个问题")).toBeInTheDocument();
+     expect(
+       screen.getByRole("button", { name: "最小化提问卡片" }),
+@@ -87,16 +86,16 @@ describe("TurnTimeline pending 提问卡最小化（ql-20260825-006）", () => {
+     expect(
+       screen.queryByRole("group", { name: "最小化的待决策卡片" }),
+     ).not.toBeInTheDocument();
+-    // 2026-10-22-askuser-card-inline：容器内嵌文档流——无 sticky 钉顶类，
+-    // 卡片随日志内容滚动（用户裁决：不要悬浮，直接嵌入可上下滚动）。
+-    const inlineBox = document.querySelector('[data-testid="turn-timeline-scroll"] > div');
+-    expect(inlineBox).not.toBeNull();
+-    expect(inlineBox!.className).not.toContain("sticky");
+-    expect(inlineBox!.className).toContain("space-y-2");
++    // FR-02：固定最大高度（45vh）+ 区内上下滚动 + 防滚动穿透（用户裁决：
++    // 占比高度固定一个适合的最大高度，超出显示滚动条）。
++    const box = dockListBox();
++    expect(box.className).toContain("max-h-[45vh]");
++    expect(box.className).toContain("overflow-y-auto");
++    expect(box.className).toContain("overscroll-contain");
+   });
+ 
+-  it("最小化：卡片消失、胶囊出现角标 1、容器视觉框移除", () => {
+-    setupTimeline();
++  it("最小化：卡片消失、胶囊出现角标 1", () => {
++    setupDock();
+     fireEvent.click(screen.getByRole("button", { name: "最小化提问卡片" }));
+ 
+     // 卡片渲染 null：提交按钮与最小化按钮都移出 DOM
+@@ -111,14 +110,10 @@ describe("TurnTimeline pending 提问卡最小化（ql-20260825-006）", () => {
+       screen.getByRole("group", { name: "最小化的待决策卡片" }),
+     ).toBeInTheDocument();
+     expect(screen.getByText("1")).toBeInTheDocument();
+-    // 全部最小化：容器仅作挂载占位（无视觉类）
+-    const inlineBox = document.querySelector('[data-testid="turn-timeline-scroll"] > div');
+-    expect(inlineBox).not.toBeNull();
+-    expect(inlineBox!.className).not.toContain("bg-indigo-50");
+   });
+ 
+   it("还原保留已填内容：选项 + 手动输入原样恢复", () => {
+-    setupTimeline();
++    setupDock();
+     // 先作答：点选项 A + 填手动输入
+     fireEvent.click(screen.getByText("选项 A"));
+     const input = screen.getByPlaceholderText("或手动输入（填写后以此内容作答）");
+@@ -143,7 +138,7 @@ describe("TurnTimeline pending 提问卡最小化（ql-20260825-006）", () => {
+   });
+ 
+   it("多卡累计：两卡最小化角标 2，明细列表定点还原 → 角标 1", () => {
+-    setupTimeline({
++    setupDock({
+       pendingRequests: [
+         makeDialogRequest({
+           request_id: "req-1",
+@@ -177,7 +172,7 @@ describe("TurnTimeline pending 提问卡最小化（ql-20260825-006）", () => {
+   });
+ 
+   it("父级移除卡（pendingRequests 过滤）→ 胶囊计数同步清直至消失", () => {
+-    const { rerender } = setupTimeline({
++    const { rerender } = setupDock({
+       pendingRequests: [
+         makeDialogRequest({
+           request_id: "req-1",
+@@ -197,24 +192,16 @@ describe("TurnTimeline pending 提问卡最小化（ql-20260825-006）", () => {
+ 
+     // 模拟 req-1 提交 / permission_resolved：父级从 pendingRequests 移除
+     rerender(
+-      <TurnTimeline
++      <PendingDialogDock
+         {...({
+-          turns: [],
+-          viewMode: "conversation",
+-          errorMsg: null,
+-          sessionStatus: "active",
+           pendingRequests: [
+             makeDialogRequest({
+               request_id: "req-2",
+               dialog_payload: singleQuestionPayload("第二个问题"),
+             }),
+           ],
+-          dialogHistory: [],
+-          onDialogResolved: vi.fn(),
+-          onResend: vi.fn(),
+-          onSwitchProvider: vi.fn(),
+-          hasOnlineProvider: true,
+-          emptyProviderLabel: "Claude Code",
++          sessionStatus: "active",
++          onResolved: vi.fn(),
+         } as any)}
+       />,
+     );
+@@ -223,36 +210,64 @@ describe("TurnTimeline pending 提问卡最小化（ql-20260825-006）", () => {
+       "第二个问题",
+     );
+ 
+-    // 全部移除 → 胶囊整体消失
++    // 全部移除 → dock 整体消失（输入框由挂载点恢复）
+     rerender(
+-      <TurnTimeline
++      <PendingDialogDock
+         {...({
+-          turns: [],
+-          viewMode: "conversation",
+-          errorMsg: null,
+-          sessionStatus: "active",
+           pendingRequests: [],
+-          dialogHistory: [],
+-          onDialogResolved: vi.fn(),
+-          onResend: vi.fn(),
+-          onSwitchProvider: vi.fn(),
+-          hasOnlineProvider: true,
+-          emptyProviderLabel: "Claude Code",
++          sessionStatus: "active",
++          onResolved: vi.fn(),
+         } as any)}
+       />,
+     );
+     expect(
+       screen.queryByRole("group", { name: "最小化的待决策卡片" }),
+     ).not.toBeInTheDocument();
++    expect(document.querySelector('[data-testid="pending-dialog-dock"]')).toBeNull();
+   });
+ 
+-  it("ended 会话：不回显 pending 卡，也不渲染胶囊（既有门控延伸）", () => {
+-    setupTimeline({ sessionStatus: "ended" });
++  it("ended 会话：dock 整体不渲染（卡区与胶囊都无，输入框由挂载点正常显示）", () => {
++    const { rerender } = setupDock();
++    expect(dockListBox()).toBeInTheDocument();
++
++    rerender(
++      <PendingDialogDock
++        {...({
++          pendingRequests: [makeDialogRequest()],
++          sessionStatus: "ended",
++          onResolved: vi.fn(),
++        } as any)}
++      />,
++    );
++    expect(document.querySelector('[data-testid="pending-dialog-dock"]')).toBeNull();
+     expect(
+-      screen.queryByRole("button", { name: "最小化提问卡片" }),
++      screen.queryByRole("group", { name: "最小化的待决策卡片" }),
+     ).not.toBeInTheDocument();
++  });
++
++  it("focusRequest（待决策 pill 定位）：无条件还原 + 卡区 ring 闪烁，不滚顶", () => {
++    const { rerender } = setupDock();
++    fireEvent.click(screen.getByRole("button", { name: "最小化提问卡片" }));
+     expect(
+-      screen.queryByRole("group", { name: "最小化的待决策卡片" }),
++      screen.queryByRole("button", { name: /提交回答/ }),
+     ).not.toBeInTheDocument();
++
++    // pill 点击 → focusRequest nonce 递增：还原 + ring 闪烁（dock 不持滚动容器，
++    // 原「滚顶」步骤随迁移移除——FR-03）。
++    rerender(
++      <PendingDialogDock
++        {...({
++          pendingRequests: [makeDialogRequest()],
++          sessionStatus: "active",
++          onResolved: vi.fn(),
++          focusRequest: { requestId: "req-1", nonce: 1 },
++        } as any)}
++      />,
++    );
++    expect(
++      screen.getByRole("button", { name: /提交回答/ }),
++    ).toBeInTheDocument();
++    expect(dockListBox().className).toContain("ring-2");
++    expect(dockListBox().className).toContain("ring-brand-500");
+   });
+ });
+diff --git a/frontend/src/components/daemon/__tests__/session-fork-lineage.test.tsx b/frontend/src/components/daemon/__tests__/session-fork-lineage.test.tsx
+index 6a527da10..ff578f322 100644
+--- a/frontend/src/components/daemon/__tests__/session-fork-lineage.test.tsx
++++ b/frontend/src/components/daemon/__tests__/session-fork-lineage.test.tsx
+@@ -642,11 +642,9 @@ describe("TurnTimeline forkEntry 轮级分叉入口接线", () => {
+         viewMode={viewMode}
+         errorMsg={null}
+         sessionStatus="active"
+-        pendingRequests={[]}
+         dialogHistory={[]}
+         onResend={vi.fn()}
+         onSwitchProvider={vi.fn()}
+-        onDialogResolved={vi.fn()}
+         hasOnlineProvider
+         emptyProviderLabel="Claude"
+         forkEntry={forkEntry ?? null}
+diff --git a/frontend/src/components/daemon/__tests__/turn-live-marquee.test.tsx b/frontend/src/components/daemon/__tests__/turn-live-marquee.test.tsx
+index 1e4e5cfc3..5cfe6f208 100644
+--- a/frontend/src/components/daemon/__tests__/turn-live-marquee.test.tsx
++++ b/frontend/src/components/daemon/__tests__/turn-live-marquee.test.tsx
+@@ -11,6 +11,7 @@ import { act, cleanup, render, waitFor } from "@testing-library/react";
+ import {
+   TurnLiveMarquee,
+   deriveLiveMarqueeEntries,
++  formatMarqueeDuration,
+   LIVE_MARQUEE_MAX_ENTRIES,
+ } from "@/components/daemon/turn-live-marquee";
+ import {
+@@ -91,11 +92,9 @@ function renderTimeline(
+       viewMode={viewMode}
+       errorMsg={null}
+       sessionStatus="active"
+-      pendingRequests={[]}
+       dialogHistory={[]}
+       onResend={vi.fn()}
+       onSwitchProvider={vi.fn()}
+-      onDialogResolved={vi.fn()}
+       hasOnlineProvider
+       emptyProviderLabel="Claude"
+     />,
+@@ -166,6 +165,24 @@ describe("deriveLiveMarqueeEntries 纯函数（FR-01 / FR-03）", () => {
+     expect(entries[0]!.id).toBe("t-10");
+     expect(entries[entries.length - 1]!.id).toBe(`t-${LIVE_MARQUEE_MAX_ENTRIES + 9}`);
+   });
++
++  it("工具段用真实 startedAt/endedAt 计算耗时，thinking 不伪造（FR-03）", () => {
++    const entries = deriveLiveMarqueeEntries([
++      tool("tool-1", { startedAt: 1000, endedAt: 2500 }),
++      thinking("think-1", "只有开始时刻"),
++    ]);
++
++    expect(entries[0]!.durationMs).toBe(1500);
++    expect(entries[1]!.durationMs).toBeNull();
++    expect(entries[1]!.endedAt).toBeNull();
++  });
++
++  it("耗时格式化：毫秒 / 一位小数秒 / 分钟（FR-02）", () => {
++    expect(formatMarqueeDuration(820)).toBe("820ms");
++    expect(formatMarqueeDuration(1500)).toBe("1.5s");
++    expect(formatMarqueeDuration(2000)).toBe("2s");
++    expect(formatMarqueeDuration(65_000)).toBe("1m 05s");
++  });
+ });
+ 
+ describe("TurnLiveMarquee 连续轨道（FR-01 / FR-02 / FR-05）", () => {
+@@ -186,6 +203,70 @@ describe("TurnLiveMarquee 连续轨道（FR-01 / FR-02 / FR-05）", () => {
+     expect(texts[texts.length - 1]).toContain("report.md");
+   });
+ 
++  it("运行中条目渲染 lucide 图标与转圈，文本区带内部滚动（FR-01）", () => {
++    const runningEntries = deriveLiveMarqueeEntries([
++      thinking("t-run", "先分析登录链路再检查 token 刷新策略最后补测试", true),
++    ]);
++    const { getByTestId, getAllByTestId, container } = render(
++      <TurnLiveMarquee entries={runningEntries} />,
++    );
++
++    const item = getByTestId("marquee-item");
++    expect(item.querySelector("svg")).not.toBeNull();
++    expect(getAllByTestId("marquee-spinner")).toHaveLength(1);
++    expect(container.querySelector(".sh-live-marquee-ticker")).not.toBeNull();
++    expect(item.textContent).toContain("先分析登录链路");
++  });
++
++  it("完成条目显示 Timer 图标与耗时（FR-02）", () => {
++    const doneEntries = deriveLiveMarqueeEntries([
++      tool("tool-done", { startedAt: 1000, endedAt: 2500 }),
++    ]);
++    const { getByTestId, queryByTestId } = render(
++      <TurnLiveMarquee entries={doneEntries} />,
++    );
++
++    const duration = getByTestId("marquee-duration");
++    expect(duration.textContent).toContain("1.5s");
++    expect(duration.querySelector("svg")).not.toBeNull();
++    expect(queryByTestId("marquee-spinner")).toBeNull();
++  });
++
++  it("进行中条目不显示耗时（FR-02）", () => {
++    const runningEntries = deriveLiveMarqueeEntries([
++      tool("tool-run", { status: "running", endedAt: null }),
++    ]);
++    const { getByTestId, queryByTestId } = render(
++      <TurnLiveMarquee entries={runningEntries} />,
++    );
++
++    expect(getByTestId("marquee-spinner")).not.toBeNull();
++    expect(queryByTestId("marquee-duration")).toBeNull();
++  });
++
++  it("历史已完成且无时长的条目不显示耗时（FR-03）", () => {
++    const historical = deriveLiveMarqueeEntries([thinking("t-old", "历史思考")]);
++    const { getByTestId, queryByTestId } = render(
++      <TurnLiveMarquee entries={historical} />,
++    );
++
++    expect(getByTestId("marquee-item").textContent).toContain("历史思考");
++    expect(queryByTestId("marquee-duration")).toBeNull();
++  });
++
++  it("条目固定 16rem 宽度，图标与耗时区不参与滚动（FR-04）", () => {
++    const doneEntries = deriveLiveMarqueeEntries([
++      tool("tool-done", { startedAt: 0, endedAt: 1500 }),
++    ]);
++    const { getByTestId, container } = render(
++      <TurnLiveMarquee entries={doneEntries} />,
++    );
++
++    expect(getByTestId("marquee-item").className).toContain("w-[16rem]");
++    expect(container.querySelector(".sh-live-marquee-ticker")).toBeNull();
++    expect(getByTestId("marquee-duration")).not.toBeNull();
++  });
++
+   it("reduced-motion 下静态展示最新一条，不渲染滚动轨道（FR-05）", () => {
+     const { queryByTestId, getByTestId } = render(
+       <TurnLiveMarquee entries={entries} reducedMotion />,
+diff --git a/frontend/src/components/daemon/__tests__/turn-preview-card.test.tsx b/frontend/src/components/daemon/__tests__/turn-preview-card.test.tsx
+index 5573e704c..39231b510 100644
+--- a/frontend/src/components/daemon/__tests__/turn-preview-card.test.tsx
++++ b/frontend/src/components/daemon/__tests__/turn-preview-card.test.tsx
+@@ -46,9 +46,7 @@ function renderProps(turns: SessionTurnView[], expandPreview?: (_runKey: string)
+     viewMode: "conversation" as const,
+     errorMsg: null,
+     sessionStatus: "active" as const,
+-    pendingRequests: [],
+     dialogHistory: [],
+-    onDialogResolved: () => {},
+     onResend: () => {},
+     onSwitchProvider: () => {},
+     hasOnlineProvider: true,
+diff --git a/frontend/src/components/daemon/__tests__/turn-time-display.test.tsx b/frontend/src/components/daemon/__tests__/turn-time-display.test.tsx
+index 26b93f56f..9a65dfae2 100644
+--- a/frontend/src/components/daemon/__tests__/turn-time-display.test.tsx
++++ b/frontend/src/components/daemon/__tests__/turn-time-display.test.tsx
+@@ -80,9 +80,7 @@ function renderProps(turns: SessionTurnView[], viewMode: SessionViewMode = "conv
+     viewMode,
+     errorMsg: null,
+     sessionStatus: "active" as const,
+-    pendingRequests: [],
+     dialogHistory: [],
+-    onDialogResolved: () => {},
+     onResend: () => {},
+     onSwitchProvider: () => {},
+     hasOnlineProvider: true,
+diff --git a/frontend/src/components/daemon/__tests__/turn-timeline-auto-resume-badge.test.tsx b/frontend/src/components/daemon/__tests__/turn-timeline-auto-resume-badge.test.tsx
+index 4f6dfb08f..d4cbadef1 100644
+--- a/frontend/src/components/daemon/__tests__/turn-timeline-auto-resume-badge.test.tsx
++++ b/frontend/src/components/daemon/__tests__/turn-timeline-auto-resume-badge.test.tsx
+@@ -39,11 +39,9 @@ function renderTimeline(turns: SessionTurnView[]) {
+       viewMode="all"
+       errorMsg={null}
+       sessionStatus="active"
+-      pendingRequests={[]}
+       dialogHistory={[]}
+       onResend={vi.fn()}
+       onSwitchProvider={vi.fn()}
+-      onDialogResolved={vi.fn()}
+       hasOnlineProvider
+       emptyProviderLabel="Claude"
+     />,
+diff --git a/frontend/src/components/daemon/__tests__/turn-timeline-conversation-file-card.test.tsx b/frontend/src/components/daemon/__tests__/turn-timeline-conversation-file-card.test.tsx
+index 22c488b3c..f86ab8514 100644
+--- a/frontend/src/components/daemon/__tests__/turn-timeline-conversation-file-card.test.tsx
++++ b/frontend/src/components/daemon/__tests__/turn-timeline-conversation-file-card.test.tsx
+@@ -75,9 +75,7 @@ function renderProps(turns: SessionTurnView[], viewMode: SessionViewMode = "conv
+     viewMode,
+     errorMsg: null,
+     sessionStatus: "active" as const,
+-    pendingRequests: [],
+     dialogHistory: [],
+-    onDialogResolved: () => {},
+     onResend: () => {},
+     onSwitchProvider: () => {},
+     hasOnlineProvider: true,
+diff --git a/frontend/src/components/daemon/__tests__/turn-timeline-dialog-inplace.test.tsx b/frontend/src/components/daemon/__tests__/turn-timeline-dialog-inplace.test.tsx
+index 33c0286e2..3aa00e310 100644
+--- a/frontend/src/components/daemon/__tests__/turn-timeline-dialog-inplace.test.tsx
++++ b/frontend/src/components/daemon/__tests__/turn-timeline-dialog-inplace.test.tsx
+@@ -71,9 +71,7 @@ function renderProps(
+     viewMode,
+     errorMsg: null,
+     sessionStatus: "active" as const,
+-    pendingRequests: [],
+     dialogHistory,
+-    onDialogResolved: () => {},
+     onResend: () => {},
+     onSwitchProvider: () => {},
+     hasOnlineProvider: true,
+diff --git a/frontend/src/components/daemon/__tests__/turn-timeline-scroll.test.tsx b/frontend/src/components/daemon/__tests__/turn-timeline-scroll.test.tsx
+index 1d5545d43..f9d91fc25 100644
+--- a/frontend/src/components/daemon/__tests__/turn-timeline-scroll.test.tsx
++++ b/frontend/src/components/daemon/__tests__/turn-timeline-scroll.test.tsx
+@@ -52,9 +52,7 @@ function renderProps(turns: SessionTurnView[]) {
+     viewMode: "conversation" as const,
+     errorMsg: null,
+     sessionStatus: "active" as const,
+-    pendingRequests: [],
+     dialogHistory: STABLE_DIALOG_HISTORY,
+-    onDialogResolved: noop,
+     onResend: noop,
+     onSwitchProvider: noop,
+     hasOnlineProvider: true,
+diff --git a/frontend/src/components/daemon/__tests__/turn-timeline-session-input-bar.test.tsx b/frontend/src/components/daemon/__tests__/turn-timeline-session-input-bar.test.tsx
+index 4d6349fe0..015cf22ac 100644
+--- a/frontend/src/components/daemon/__tests__/turn-timeline-session-input-bar.test.tsx
++++ b/frontend/src/components/daemon/__tests__/turn-timeline-session-input-bar.test.tsx
+@@ -64,9 +64,7 @@ function setupTimeline(overrides: Record<string, unknown> = {}) {
+     viewMode: "conversation" as const,
+     errorMsg: null,
+     sessionStatus: "active" as const,
+-    pendingRequests: [],
+     dialogHistory: [],
+-    onDialogResolved: vi.fn(),
+     onResend: vi.fn(),
+     onSwitchProvider: vi.fn(),
+     hasOnlineProvider: true,
+@@ -138,9 +136,7 @@ describe("TurnTimeline（task-13 抽取共享子组件）", () => {
+         viewMode="all"
+         errorMsg={null}
+         sessionStatus="active"
+-        pendingRequests={[]}
+         dialogHistory={[]}
+-        onDialogResolved={vi.fn()}
+         onResend={vi.fn()}
+         onSwitchProvider={vi.fn()}
+         hasOnlineProvider
+@@ -166,38 +162,9 @@ describe("TurnTimeline（task-13 抽取共享子组件）", () => {
+     expect(screen.getByText(/没有在线守护进程/)).toBeInTheDocument();
+   });
+ 
+-  it("pending 待答卡：active 渲染、ended 不渲染（ql-20260623 改动三门控）", () => {
+-    const req = {
+-      session_id: "sess-1",
+-      run_id: "run-1",
+-      request_id: "req-1",
+-      tool_name: "AskUserQuestion",
+-      input: {},
+-      dialog_kind: "ask_user",
+-      dialog_payload: {
+-        questions: [{ question: "选择哪个？", options: [{ label: "A" }] }],
+-      },
+-    } as unknown as SessionPermissionRequest;
+-    const { rerender } = setupTimeline({ pendingRequests: [req] });
+-    expect(screen.getByText(/选择哪个？/)).toBeInTheDocument();
+-
+-    rerender(
+-      <TurnTimeline
+-        turns={[makeTurn()]}
+-        viewMode="conversation"
+-        errorMsg={null}
+-        sessionStatus="ended"
+-        pendingRequests={[req]}
+-        dialogHistory={[]}
+-        onDialogResolved={vi.fn()}
+-        onResend={vi.fn()}
+-        onSwitchProvider={vi.fn()}
+-        hasOnlineProvider
+-        emptyProviderLabel="Claude Code"
+-      />,
+-    );
+-    expect(screen.queryByText(/选择哪个？/)).not.toBeInTheDocument();
+-  });
++  // 2026-10-22-askuser-dock-inputbar：原「pending 待答卡 active 渲染、ended
++  // 不渲染」用例随待答卡迁 PendingDialogDock 删除——行为断言由
++  // pending-dialog-dock.test.tsx 承接（渲染于输入框位置，不在时间线）。
+ 
+   it("AskUser 提问历史按 run_id 穿插到对应 turn（对话视图 ❓ 记录）", () => {
+     setupTimeline({
+@@ -347,9 +314,7 @@ describe("TurnTimeline v2 段模型渲染（task-06 / 2026-08-19-session-stream-
+         viewMode="conversation"
+         errorMsg={null}
+         sessionStatus="active"
+-        pendingRequests={[]}
+         dialogHistory={[]}
+-        onDialogResolved={vi.fn()}
+         onResend={vi.fn()}
+         onSwitchProvider={vi.fn()}
+         hasOnlineProvider
+diff --git a/frontend/src/components/daemon/__tests__/turn-timeline-token-speed.test.tsx b/frontend/src/components/daemon/__tests__/turn-timeline-token-speed.test.tsx
+index ac4368d2a..85c116a31 100644
+--- a/frontend/src/components/daemon/__tests__/turn-timeline-token-speed.test.tsx
++++ b/frontend/src/components/daemon/__tests__/turn-timeline-token-speed.test.tsx
+@@ -44,11 +44,9 @@ function renderTimeline(
+       viewMode={viewMode}
+       errorMsg={null}
+       sessionStatus="active"
+-      pendingRequests={[]}
+       dialogHistory={[]}
+       onResend={vi.fn()}
+       onSwitchProvider={vi.fn()}
+-      onDialogResolved={vi.fn()}
+       hasOnlineProvider
+       emptyProviderLabel="Claude"
+     />,
+diff --git a/frontend/src/components/daemon/__tests__/turn-timeline-trajectory-view.test.tsx b/frontend/src/components/daemon/__tests__/turn-timeline-trajectory-view.test.tsx
+index c13418ff9..21455cb9c 100644
+--- a/frontend/src/components/daemon/__tests__/turn-timeline-trajectory-view.test.tsx
++++ b/frontend/src/components/daemon/__tests__/turn-timeline-trajectory-view.test.tsx
+@@ -66,9 +66,7 @@ function renderProps(turns: SessionTurnView[], viewMode: SessionViewMode) {
+     viewMode,
+     errorMsg: null,
+     sessionStatus: "active" as const,
+-    pendingRequests: [],
+     dialogHistory: [],
+-    onDialogResolved: () => {},
+     onResend: () => {},
+     onSwitchProvider: () => {},
+     hasOnlineProvider: true,
+diff --git a/frontend/src/components/daemon/agent-replay-body.tsx b/frontend/src/components/daemon/agent-replay-body.tsx
+index 8f052ac9d..8fbb41ad5 100644
+--- a/frontend/src/components/daemon/agent-replay-body.tsx
++++ b/frontend/src/components/daemon/agent-replay-body.tsx
+@@ -58,7 +58,6 @@ import { cn } from "@/lib/utils";
+ 
+ /* ───────────────── 回放 no-op 回调（TurnTimeline 必填，回放只读零交互） ───────────────── */
+ 
+-const noopDialogResolved = (_requestId: string) => {};
+ const noopResend = (_prompt: string) => {};
+ const noopSwitchProvider = () => {};
+ 
+@@ -647,13 +646,15 @@ export function AgentReplayBody({
+         {/* TurnTimeline 必填 props 回放取值（design Phase 3.2 清单逐项）：
+             errorMsg=null（错误走主体三态提示行不进时间线）；daemonRestartedHint
+             =null（无 daemon_restarted 场景）；autoResumeEntries=[]；sessionStatus
+-            ="idle"（回放只读，不渲染待答卡/恢复卡）；pendingRequests=[]；
+-            dialogHistory=[]（回放无 AskUser 记录）；onDialogResolved/onResend/
++            ="idle"（回放只读，不渲染待答卡/恢复卡）；dialogHistory=[]
++            （回放无 AskUser 记录）；onResend/
+             onSwitchProvider=no-op；hasOnlineProvider=false + emptyProviderLabel
+             =""（空态不显示 provider 就绪提示——空 turns 时本组件先于时间线给出
+             回放自有空态，不落入组件内置空态文案）；highlightTurnKey=null
+             （回放无轮次跳转入口，无选中轮）；suppressFollowBottom=false（无
+-            跳转翻页，不置位）。 */}
++            跳转翻页，不置位）。2026-10-22-askuser-dock-inputbar：pendingRequests/
++            onDialogResolved 已随待答卡迁 PendingDialogDock，回放体本就传空/no-op，
++            直接删除。 */}
+         <TurnTimeline
+           turns={turns}
+           viewMode={viewMode}
+@@ -661,9 +662,7 @@ export function AgentReplayBody({
+           daemonRestartedHint={null}
+           autoResumeEntries={[]}
+           sessionStatus="idle"
+-          pendingRequests={[]}
+           dialogHistory={[]}
+-          onDialogResolved={noopDialogResolved}
+           onResend={noopResend}
+           onSwitchProvider={noopSwitchProvider}
+           hasOnlineProvider={false}
+diff --git a/frontend/src/components/daemon/pending-dialog-dock.tsx b/frontend/src/components/daemon/pending-dialog-dock.tsx
+new file mode 100644
+index 000000000..a2ce5223b
+--- /dev/null
++++ b/frontend/src/components/daemon/pending-dialog-dock.tsx
+@@ -0,0 +1,172 @@
++"use client";
++
++/**
++ * PendingDialogDock：真会话底部输入框位置的待答提问 dock（2026-10-22-askuser-dock-inputbar）。
++ *
++ * 演化轨迹：ql-20260621 起提问卡在 TurnTimeline 滚动容器 sticky 钉顶 →
++ * 2026-10-22-askuser-card-inline 改内嵌内容流顶部（用户反馈长日志时看不到）→
++ * 本变更整体迁出 TurnTimeline，渲染在输入框位置（互斥替换 SessionInputBar，
++ * 用户裁决：问答期间输入框不可用，答完自动恢复）。
++ *
++ * 承载能力（自 turn-timeline 原样迁移，逻辑零改写）：
++ *   - pending AskUser 卡列（AskUserDialogCard + ErrorBoundary 兜底）；
++ *   - 最小化（会话内存态 minimizedIds：收起为右下角浮动胶囊，已填内容随挂载
++ *     保留，胶囊点击还原——ql-20260825-006）；
++ *   - 待决策 pill 定位还原（2026-10-16-session-decision-pill FR-03）：focusRequest
++ *     nonce 触发「无条件还原 + 卡区 ring 闪烁 ~1.2s 自清」；原「滚动容器滚顶」
++ *     步骤随位置迁移移除（卡区不在时间线滚动区内）。dialog 挂载点不传
++ *     focusRequest（无决策 pill），缺省 null 零行为。
++ *
++ * 布局：外层与 SessionInputBar 同款视觉（shrink-0 bg-card px-5 pb-4 pt-1 对齐
++ * 输入栏）；内层卡列区 max-h-[45vh] overflow-y-auto overscroll-contain（用户
++ * 裁决：固定最大高度，超出区内上下滚动，不穿透到日志区）。
++ *
++ * ended/failed 会话不渲染（残留 pending 行为死卡——ql-20260623 改动三门控随迁）；
++ * 全部最小化时外层仅作挂载占位（保卡片 state），胶囊在右下角承担还原入口。
++ */
++
++import { useCallback, useEffect, useRef, useState } from "react";
++
++import { AskUserDialogCard } from "@/components/ask-user-dialog-card";
++import { ErrorBoundary } from "@/components/error-boundary";
++import {
++  MinimizedDialogCapsule,
++  resolvePendingTitle,
++} from "@/components/permissions/minimized-dialog-capsule";
++import type { SessionPermissionRequest } from "@/lib/daemon";
++
++export interface PendingDialogDockProps {
++  /** 待答 permission_request 队列（dialog_kind 存在的 AskUser 提问）。 */
++  pendingRequests: SessionPermissionRequest[];
++  /** 会话状态：ended/failed 不渲染（残留 pending 行为死卡）。 */
++  sessionStatus: string | undefined;
++  /** 卡片提交 / SSE resolved 后由父级过滤 pendingRequests（迁移自 TurnTimeline onDialogResolved）。 */
++  onResolved: (_requestId: string) => void;
++  /**
++   * 待决策 pill 定位还原请求（受控触发式——nonce 递增驱动 effect，requestId 不变
++   * 重复点击也生效）。effect：①若该卡在 minimizedIds 中先还原；②卡区高亮闪烁
++   * ~1.2s 自清。缺省 / null 零行为。旧消费方零回归（自清节奏约定同
++   * highlightTurnKey 先例——清除归本组件定时器）。
++   */
++  focusRequest?: { requestId: string; nonce: number } | null;
++}
++
++export function PendingDialogDock({
++  pendingRequests,
++  sessionStatus,
++  onResolved,
++  focusRequest = null,
++}: PendingDialogDockProps) {
++  // ── 最小化集合（会话内存态，自 turn-timeline 原样迁移）──────────────────
++  // AskUserDialogCard 收 minimized=true 渲染 null 但保持挂载 → 已选选项 / 手动
++  // 输入 state 保留，还原后继续作答。
++  const [minimizedIds, setMinimizedIds] = useState<Set<string>>(new Set());
++
++  const handleMinimize = useCallback((requestId: string) => {
++    setMinimizedIds((prev) => {
++      if (prev.has(requestId)) return prev;
++      const next = new Set(prev);
++      next.add(requestId);
++      return next;
++    });
++  }, []);
++
++  const handleRestore = useCallback((requestId: string) => {
++    setMinimizedIds((prev) => {
++      if (!prev.has(requestId)) return prev;
++      const next = new Set(prev);
++      next.delete(requestId);
++      return next;
++    });
++  }, []);
++
++  // 卡片移除（提交成功 / permission_resolved SSE 由父级过滤 pendingRequests）
++  // 后同步清最小化集合，胶囊计数不残留。集合为空时跳过（避免无谓重渲染）。
++  useEffect(() => {
++    setMinimizedIds((prev) => {
++      if (prev.size === 0) return prev;
++      const alive = new Set(pendingRequests.map((r) => r.request_id));
++      const next = new Set([...prev].filter((id) => alive.has(id)));
++      return next.size === prev.size ? prev : next;
++    });
++  }, [pendingRequests]);
++
++  // ended/failed 会话不回显 pending 卡（既有门控随迁）→ 胶囊同步不渲染。
++  const showDock =
++    pendingRequests.length > 0 &&
++    sessionStatus !== "ended" &&
++    sessionStatus !== "failed";
++
++  // ── 待决策 pill 定位还原（nonce 触发式）─────────────────────────────────
++  // 还原→闪烁两步（原第三步「滚动容器滚顶」随卡区迁出时间线滚动区移除）。
++  // 挂载首帧 nonce 变化（初始 -1 → 值）会触发一次——无害（无卡可闪时
++  // showDock 门控本就不渲染卡区）。
++  const dockListRef = useRef<HTMLDivElement>(null);
++  const focusNonceRef = useRef<number>(-1);
++  useEffect(() => {
++    if (!focusRequest || focusRequest.nonce === focusNonceRef.current) return;
++    focusNonceRef.current = focusRequest.nonce;
++    handleRestore(focusRequest.requestId);
++    const el = dockListRef.current;
++    if (!el) return;
++    el.classList.add("ring-2", "ring-brand-500");
++    const t = window.setTimeout(() => {
++      el.classList.remove("ring-2", "ring-brand-500");
++    }, 1200);
++    return () => window.clearTimeout(t);
++  }, [focusRequest, handleRestore]);
++
++  const minimizedPending = showDock
++    ? pendingRequests.filter((r) => minimizedIds.has(r.request_id))
++    : [];
++  // 全部最小化时卡列区只剩挂载占位（保卡片 state），高度趋零——胶囊为唯一
++  // 还原入口（评审 P3 收敛：原迁移残留 visiblePendingCount 死变量已删）。
++
++  if (!showDock) return null;
++
++  return (
++    <>
++      {/* 外层与 SessionInputBar 同款视觉（shrink-0 bg-card px-5 pb-4 pt-1），
++          输入框位置的等宽替代。 */}
++      <div className="shrink-0 bg-card px-5 pb-4 pt-1">
++        <div
++          ref={dockListRef}
++          data-testid="pending-dialog-dock"
++          className="max-h-[45vh] space-y-2 overflow-y-auto overscroll-contain"
++        >
++          {pendingRequests.map((req) => (
++            <ErrorBoundary
++              key={req.request_id}
++              label="ask-user-dialog-card"
++              fallback={() => (
++                <div className="text-[11px] text-red-600/70">提问卡片渲染失败</div>
++              )}
++            >
++              <AskUserDialogCard
++                request={req}
++                minimized={minimizedIds.has(req.request_id)}
++                onMinimize={handleMinimize}
++                onResolved={onResolved}
++              />
++            </ErrorBoundary>
++          ))}
++        </div>
++      </div>
++      {/* 最小化 pending 提问卡的右下角浮动胶囊（fixed 定位锚 viewport，不随日志
++          滚动），点击主体还原最近一条，chevron 展开明细定点还原。会话页 pending
++          卡恒为 AskUser 提问（无普通工具审批），isDialog 按请求实际携带判断以
++          保持组件契约。（自 turn-timeline 原样迁移，含全部最小化时 visiblePendingCount
++          为 0 的占位语义——胶囊为唯一还原入口。） */}
++      {minimizedPending.length > 0 && (
++        <MinimizedDialogCapsule
++          items={minimizedPending.map((req) => ({
++            requestId: req.request_id,
++            title: resolvePendingTitle(req),
++            isDialog: Boolean(req.dialog_kind),
++          }))}
++          onRestore={handleRestore}
++        />
++      )}
++    </>
++  );
++}
+diff --git a/frontend/src/components/daemon/session-panel/session-panel-dialog.tsx b/frontend/src/components/daemon/session-panel/session-panel-dialog.tsx
+index 9c0bd1140..939419522 100644
+--- a/frontend/src/components/daemon/session-panel/session-panel-dialog.tsx
++++ b/frontend/src/components/daemon/session-panel/session-panel-dialog.tsx
+@@ -38,6 +38,8 @@ import {
+ import {
+   SessionInputBar, type SessionInputMentions,
+ } from "@/components/daemon/session-input-bar";
++// 2026-10-22-askuser-dock-inputbar：pending AskUser 待答 dock（互斥替换输入框）。
++import { PendingDialogDock } from "@/components/daemon/pending-dialog-dock";
+ import { MessageQueueBar } from "@/components/daemon/message-queue-bar";
+ // task-08（2026-09-07-session-pin-rename-scheduled-send / FR-04）：定时消息展示条
+ // （自建局部 QueryClientProvider，page / dialog 双挂载点均可安全挂——R4 不变式
+@@ -2062,9 +2064,9 @@ export function SessionPanelDialog(props: SessionPanelProps) {
+         viewMode={viewMode}
+         errorMsg={view.errorMsg}
+         sessionStatus={view.status}
+-        pendingRequests={pendingRequests}
++        // 2026-10-22-askuser-dock-inputbar：pendingRequests/onDialogResolved 两
++        // props 随待答卡迁 PendingDialogDock（输入框位置互斥渲染，见下方）。
+         dialogHistory={dialogHistory}
+-        onDialogResolved={handleDialogResolved}
+         onResend={timelineOnResend}
+         onSwitchProvider={handleSwitchProvider}
+         hasOnlineProvider={hasOnlineProvider}
+@@ -2200,7 +2202,19 @@ export function SessionPanelDialog(props: SessionPanelProps) {
+       {/* 输入区共享子组件。ql-20260825-007：接通附件管线（此前 R3 不传附件
+           props——📎/粘贴能上传但发送被丢，因 createSession 无 attachment_ids 只
+           限制首句；追问/排队走 injectSession 早已支持）。首句门控见
+-          attachmentsDisabled 派生。 */}
++          attachmentsDisabled 派生。
++          2026-10-22-askuser-dock-inputbar：pending AskUser 待答期间互斥替换输入框
++          （答完自动恢复，page/dialog 两挂载点同款）；互斥条件与 dock 内部门控
++          同源（view.status，同 TurnTimeline sessionStatus 单源）。 */}
++      {pendingRequests.length > 0 &&
++      view.status !== "ended" &&
++      view.status !== "failed" ? (
++        <PendingDialogDock
++          pendingRequests={pendingRequests}
++          sessionStatus={view.status}
++          onResolved={handleDialogResolved}
++        />
++      ) : (
+       <SessionInputBar
+         value={input}
+         onChange={setInput}
+@@ -2234,6 +2248,7 @@ export function SessionPanelDialog(props: SessionPanelProps) {
+         // 非空）注入；idle 未建会话不渲染入口（定时条目需既有会话承载）。
+         onSchedule={view.sessionId ? openSchedModal : undefined}
+       />
++      )}
+ 
+       {/* task-14：分身会话浮层——复用 SessionPanel（dialog/attach 形态）打开分身
+           子会话；dialog 必需 props 按本面板透传（模型覆盖受控对共用父级 state）。 */}
+diff --git a/frontend/src/components/daemon/session-panel/session-panel-page.tsx b/frontend/src/components/daemon/session-panel/session-panel-page.tsx
+index 868805177..6c208bb69 100644
+--- a/frontend/src/components/daemon/session-panel/session-panel-page.tsx
++++ b/frontend/src/components/daemon/session-panel/session-panel-page.tsx
+@@ -38,6 +38,8 @@ import {
+ import {
+   SessionInputBar, type SessionInputMentions,
+ } from "@/components/daemon/session-input-bar";
++// 2026-10-22-askuser-dock-inputbar：pending AskUser 待答 dock（互斥替换输入框）。
++import { PendingDialogDock } from "@/components/daemon/pending-dialog-dock";
+ import { MessageQueueBar } from "@/components/daemon/message-queue-bar";
+ // 2026-10-13-session-change-files-hover task-05：会话悬浮变更文件入口
+ // 2026-10-16-session-decision-pill task-04：会话悬浮待决策入口（与变更文件 pill 并排）
+@@ -4745,6 +4747,16 @@ export function SessionPanelPage({
+     );
+   }
+ 
++  // 2026-10-22-askuser-dock-inputbar：时间线/输入区互斥共用会话状态单源——
++  // TurnTimeline sessionStatus 与输入框↔PendingDialogDock 互斥条件必须同源
++  // （ended 是本地派生终态，与 session.status 可能瞬时不同步，双源会出现
++  // 输入框与问答区双不渲染空档）。
++  const timelineSessionStatus = deriveTimelineSessionStatus(
++    ended,
++    session.status === "failed",
++    restoring,
++  );
++
+   // task-03（design §3.3 状态机）：输入禁用态只看终态与离线——
+   //   旧：ended || restoring || running || !machineOnline → 禁用；
+   //   新：ended || !machineOnline → 禁用；running（currentRunId 有值）/
+@@ -4871,13 +4883,11 @@ export function SessionPanelPage({
+         // 回调（runKey 上抛走 fetchAndAttachTurn 单轮直达；缺省零回归语义由
+         // TurnTimeline 内守卫承担，本挂载恒接线）。
+         expandPreview={handleExpandPreview}
+-        // 2026-10-16-session-decision-pill task-04 / FR-03：待决策 pill 定位还原
+-        // 请求（nonce 触发式；缺省 null 零行为语义由 TurnTimeline 内守卫承担）。
+-        focusDialogRequest={focusDialogRequest}
+-        sessionStatus={deriveTimelineSessionStatus(ended, session.status === "failed", restoring)}
+-        pendingRequests={pendingRequests}
++        // 2026-10-22-askuser-dock-inputbar：pendingRequests/onDialogResolved/
++        // focusDialogRequest 三 props 随待答卡迁 PendingDialogDock（输入框位置，
++        // 见下方互斥渲染），TurnTimeline 不再接线。
++        sessionStatus={timelineSessionStatus}
+         dialogHistory={dialogHistory}
+-        onDialogResolved={handleDialogResolved}
+         onResend={timelineOnResend}
+         onSwitchProvider={timelineOnSwitchProvider}
+         hasOnlineProvider={machineOnline}
+@@ -5762,6 +5772,20 @@ export function SessionPanelPage({
+               </button>
+             </div>
+           )}
++        {/* 2026-10-22-askuser-dock-inputbar：pending AskUser 待答期间互斥替换输入框
++            （用户裁决：问答优先，答完自动恢复）；ended/failed 不渲染问答区（输入框
++            正常）。互斥条件用 timelineSessionStatus（与 TurnTimeline/dock 内部
++            门控同源单源——双源会出现输入框与问答区双不渲染空档，见上方变量注释）。 */}
++        {pendingRequests.length > 0 &&
++        timelineSessionStatus !== "ended" &&
++        timelineSessionStatus !== "failed" ? (
++          <PendingDialogDock
++            pendingRequests={pendingRequests}
++            sessionStatus={timelineSessionStatus}
++            onResolved={handleDialogResolved}
++            focusRequest={focusDialogRequest}
++          />
++        ) : (
+         <SessionInputBar
+           value={input}
+           onChange={setInput}
+@@ -5810,6 +5834,7 @@ export function SessionPanelPage({
+             onToggle: handleAutoResumeToggle,
+           }}
+         />
++        )}
+         <div ref={configBarWrapRef} className="px-5 pb-3">
+           <SessionConfigBar
+             sessionId={sessionId}
+diff --git a/frontend/src/components/daemon/turn-timeline.tsx b/frontend/src/components/daemon/turn-timeline.tsx
+index 9a54dc53f..6ddd5e569 100644
+--- a/frontend/src/components/daemon/turn-timeline.tsx
++++ b/frontend/src/components/daemon/turn-timeline.tsx
+@@ -50,9 +50,10 @@ import { Fragment, memo, useCallback, useEffect, useMemo, useRef, useState, type
+ import { ArrowDown, ArrowRight, BookUser, Bot, Cloud, Settings, Wrench } from "lucide-react";
+ import { Badge } from "antd";
+ 
+-import { AskUserDialogCard } from "@/components/ask-user-dialog-card";
+ // task-07（2026-09-09-askuser-pi-cursor / FR-03）：cursor marker 型提问卡 +
+ // 标记解析器（文本段命中处原位渲染卡并隐藏标记原文）。
++// （2026-10-22-askuser-dock-inputbar：pending 待答卡 AskUserDialogCard 已迁
++//  PendingDialogDock，本组件仅保留历史 marker 卡。）
+ import { AskUserMarkerCard } from "@/components/ask-user-marker-card";
+ import { parseAskUserMarker } from "@/lib/askuser-marker";
+ import { RunErrorItem } from "@/components/agent-log/run-error-item";
+@@ -206,13 +207,7 @@ import {
+   TranslatedThinkingBody,
+   useThinkingSummary,
+ } from "@/components/thinking-translate";
+-// ql-20260825-006：会话页提问卡最小化——右下角浮动胶囊 + 标题推导（与 approvals
+-// 聚合页 SessionPermissionPanel 共用一套 UI）。
+-import {
+-  MinimizedDialogCapsule,
+-  resolvePendingTitle,
+-} from "@/components/permissions/minimized-dialog-capsule";
+-import type { SessionDialogRead, SessionPermissionRequest } from "@/lib/daemon";
++import type { SessionDialogRead } from "@/lib/daemon";
+ import { cn } from "@/lib/utils";
+ import { extractDialogQA } from "@/components/daemon/session-log-sanitize";
+ import { copyTextToClipboard } from "@/lib/clipboard";
+@@ -457,14 +452,12 @@ export interface TurnTimelineProps {
+   autoResumeEntries?: AutoResumeEntry[];
+   /**
+    * pending 待答卡渲染门控：ended/failed 会话不回显（ql-20260623 改动三，死卡防护）。
++   * （2026-10-22-askuser-dock-inputbar：pending 卡已迁 PendingDialogDock 渲染于
++   * 输入框位置，本字段仅剩空态/状态语义保留。）
+    */
+   sessionStatus: SessionUiStatus;
+-  /** AskUserQuestion 待答卡队列（permission_request.dialog_kind）。 */
+-  pendingRequests: SessionPermissionRequest[];
+   /** AskUser 提问历史（ql-20260801-003，按 run_id 穿插到对应 turn）。 */
+   dialogHistory: SessionDialogRead[];
+-  /** 待答卡提交/被 resolved 后移除（父级双保险过滤）。 */
+-  onDialogResolved: (_requestId: string) => void;
+   /** 失败轮次「重新发送」（RunErrorItem onResend，父级守卫 turn 级串行）。 */
+   onResend: (_prompt: string) => void;
+   /** RunErrorItem 主操作「切换供应商」。 */
+@@ -514,15 +507,6 @@ export interface TurnTimelineProps {
+    * 引用稳定（同 onResend 先例，防击穿 TurnRow memo）。
+    */
+   expandPreview?: (_runKey: string) => void;
+-  /**
+-   * 2026-10-16-session-decision-pill / FR-03：待决策 pill 定位还原请求（受控
+-   * 触发式——nonce 递增驱动 effect，requestId 不变重复点击也生效）。effect：
+-   * ①若该卡在 minimizedIds 中先还原；②滚动容器到顶（pending 卡内嵌在内容流
+-   * 顶部，2026-10-22-askuser-card-inline 由 sticky 钉顶改内嵌）；③容器高亮
+-   * 闪烁 ~1.2s 自清。缺省 / null 零行为（旧消费方
+-   * 零回归，同 highlightTurnKey 先例的自清节奏约定——清除归本组件定时器）。
+-   */
+-  focusDialogRequest?: { requestId: string; nonce: number } | null;
+   /**
+    * task-11（2026-10-20-session-page-dsh-alignment / FR-16 / design E7）：会话级
+    * 「文件改动汇总卡」开关——挂在会话流顶部（首轮之前），按各轮快照去重聚合。
+@@ -1388,10 +1372,10 @@ export function TurnTimeline({
+   errorMsg,
+   daemonRestartedHint,
+   autoResumeEntries,
+-  sessionStatus,
+-  pendingRequests,
++  // sessionStatus 不解构：原 pending 卡 ended/failed 门控已随卡迁
++  // PendingDialogDock（2026-10-22-askuser-dock-inputbar），prop 保留在
++  // interface（消费方零改，语义位留给终态时间线交互）。
+   dialogHistory,
+-  onDialogResolved,
+   onResend,
+   onSwitchProvider,
+   hasOnlineProvider,
+@@ -1402,7 +1386,6 @@ export function TurnTimeline({
+   suppressFollowBottom = false,
+   forkEntry,
+   expandPreview,
+-  focusDialogRequest,
+   fileChangesSummary = true,
+   sessionId,
+ }: TurnTimelineProps) {
+@@ -1651,70 +1634,9 @@ export function TurnTimeline({
+     }
+   }, [turns, suppressFollowBottom, startOrRenewBottomReassert]);
+ 
+-  // ── ql-20260825-006：pending 提问卡最小化（对齐 SessionPermissionPanel 的
+-  // task-08 FR-04 / D-003 交互）───────────────────────────────────────────
+-  // 最小化集合（会话内存态）：AskUserDialogCard 收 minimized=true 渲染 null 但
+-  // 保持挂载 → 已选选项 / 手动输入 state 保留，还原后继续作答。
+-  const [minimizedIds, setMinimizedIds] = useState<Set<string>>(new Set());
+-
+-  const handleMinimize = useCallback((requestId: string) => {
+-    setMinimizedIds((prev) => {
+-      if (prev.has(requestId)) return prev;
+-      const next = new Set(prev);
+-      next.add(requestId);
+-      return next;
+-    });
+-  }, []);
+-
+-  const handleRestore = useCallback((requestId: string) => {
+-    setMinimizedIds((prev) => {
+-      if (!prev.has(requestId)) return prev;
+-      const next = new Set(prev);
+-      next.delete(requestId);
+-      return next;
+-    });
+-  }, []);
+-
+-  // 卡片移除（提交成功 / permission_resolved SSE 由父级过滤 pendingRequests）
+-  // 后同步清最小化集合，胶囊计数不残留。集合为空时跳过（避免无谓重渲染）。
+-  useEffect(() => {
+-    setMinimizedIds((prev) => {
+-      if (prev.size === 0) return prev;
+-      const alive = new Set(pendingRequests.map((r) => r.request_id));
+-      const next = new Set([...prev].filter((id) => alive.has(id)));
+-      return next.size === prev.size ? prev : next;
+-    });
+-  }, [pendingRequests]);
+-
+-  // ended/failed 会话不回显 pending 卡（既有门控）→ 胶囊同步不渲染。
+-  const showPending =
+-    pendingRequests.length > 0 &&
+-    sessionStatus !== "ended" &&
+-    sessionStatus !== "failed";
+-
+-  // ── 2026-10-16-session-decision-pill / FR-03：待决策 pill 定位还原 ──────────
+-  // 内嵌提问卡容器 ref（高亮闪烁落点；2026-10-22-askuser-card-inline 卡片
+-  // 由 sticky 钉顶改内嵌文档流，ref 更名同步）；effect 由 nonce 触发（同 requestId
+-  // 重复点击也生效）。还原→滚顶→闪烁三步：还原最小化卡无条件删集合（不在
+-  // 集合内为 no-op）；闪烁 class 1.2s 自清（对齐父层 highlightTurnKey ~2.2s
+-  // 节奏缩短版——pill 定位是轻提示）。挂载首帧 nonce 变化（初始 null → 值）
+-  // 也会触发一次——无害（滚顶+无卡可闪，pending 为空时 showPending 门控本就
+-  // 不渲染卡片层）。
+-  const inlineCardsRef = useRef<HTMLDivElement>(null);
+-  const focusNonceRef = useRef<number>(-1);
+-  useEffect(() => {
+-    if (!focusDialogRequest || focusDialogRequest.nonce === focusNonceRef.current) return;
+-    focusNonceRef.current = focusDialogRequest.nonce;
+-    handleRestore(focusDialogRequest.requestId);
+-    scrollRef.current?.scrollTo({ top: 0, behavior: "smooth" });
+-    const el = inlineCardsRef.current;
+-    if (!el) return;
+-    el.classList.add("ring-2", "ring-brand-500");
+-    const t = window.setTimeout(() => {
+-      el.classList.remove("ring-2", "ring-brand-500");
+-    }, 1200);
+-    return () => window.clearTimeout(t);
+-  }, [focusDialogRequest, handleRestore]);
++  // （2026-10-22-askuser-dock-inputbar：pending 提问卡最小化 state、胶囊与决策
++  //  pill 定位还原 effect 已整体迁至 PendingDialogDock——渲染于输入框位置，
++  //  TurnTimeline 不再承载待答卡。）
+ 
+   // ── 2026-10-14-session-bottom-resize-observer：内容高度迟到变化的贴底兜底 ──
+   // 第四层根因（真浏览器注入取证）：懒加载图片 / markdown 迟渲染 / content-visibility
+@@ -1813,46 +1735,15 @@ export function TurnTimeline({
+   }, [hasTurns]);
+   // rAF 句柄声明在此 effect 外（cleanup 与合帧去重共用）。
+ 
+-  const minimizedPending = showPending
+-    ? pendingRequests.filter((r) => minimizedIds.has(r.request_id))
+-    : [];
+-  // 全部最小化时容器只剩挂载占位（保卡片 state），去掉间距类。
+-  const visiblePendingCount = pendingRequests.length - minimizedPending.length;
+-
+-  // 2026-10-22-trajectory-view-redesign（D-002）：pending 提问卡在两个分支复用——
+-  // 对话/进度分支在滚动容器内 sticky 置顶；轨迹分支挂在轨迹区域顶部固定层
+-  // （不参与账本滚动，保证可作答）。
+-  const pendingCardsNode = showPending ? (
+-    <div
+-      ref={inlineCardsRef}
+-      className={visiblePendingCount > 0 ? "mb-3 space-y-2" : undefined}
+-    >
+-      {pendingRequests.map((req) => (
+-        <ErrorBoundary
+-          key={req.request_id}
+-          label="ask-user-dialog-card"
+-          fallback={() => (
+-            <div className="text-[11px] text-red-600/70">提问卡片渲染失败</div>
+-          )}
+-        >
+-          <AskUserDialogCard
+-            request={req}
+-            minimized={minimizedIds.has(req.request_id)}
+-            onMinimize={handleMinimize}
+-            onResolved={onDialogResolved}
+-          />
+-        </ErrorBoundary>
+-      ))}
+-    </div>
+-  ) : null;
+-
+   return (
+     <>
+     {/* ql-20260903-023：relative 包装容器承载「回到底部」悬浮按钮的定位
+         （原 fragment 根无定位上下文）；flex 布局角色与原滚动容器等价。 */}
+     <div className="relative flex min-h-0 flex-1 flex-col">
+     {/* 2026-10-22-trajectory-view-redesign（D-002）：轨迹视图独立占满面板高度，
+-        与 turn-timeline-scroll 并列（不在滚动流内）——工具栏/时间线才能固定。 */}
++        与 turn-timeline-scroll 并列（不在滚动流内）——工具栏/时间线才能固定。
++        （2026-10-22-askuser-dock-inputbar：pending 提问卡已迁 PendingDialogDock
++        渲染于输入框位置，轨迹分支顶部固定层不再需要。） */}
+     {showTrajectory ? (
+       <div className="flex min-h-0 flex-1 flex-col bg-background">
+         {errorMsg && (
+@@ -1860,9 +1751,6 @@ export function TurnTimeline({
+             {errorMsg}
+           </div>
+         )}
+-        {showPending && visiblePendingCount > 0 ? (
+-          <div className="shrink-0 px-3 pt-2">{pendingCardsNode}</div>
+-        ) : null}
+         {turns.length === 0 ? (
+           <div className="flex h-full min-h-[260px] flex-col items-center justify-center text-center">
+             <p className="text-xs font-medium text-foreground">
+@@ -1893,11 +1781,9 @@ export function TurnTimeline({
+           {errorMsg}
+         </div>
+       )}
+-      {/* ql-20260621：AskUserQuestion 对话卡——节点由 pendingCardsNode 复用
+-          （轨迹分支挂在轨迹区域顶部固定层，不随账本滚动）。 */}
+-      {pendingCardsNode}
+       {/* ql-20260802-001：AskUser 提问记录已改为按 run_id 穿插到对应 turn 内（跟会话
+-          顺序），不再在此处堆顶展示。顶部仅保留 pending 实时交互卡片（上方 pendingRequests）。 */}
++          顺序），不再在此处堆顶展示。pending 实时待答卡 2026-10-22-askuser-dock-inputbar
++          起迁 PendingDialogDock 渲染于输入框位置，时间线滚动区不再出现。 */}
+       {turns.length === 0 ? (
+         <div className="flex h-full min-h-[260px] flex-col items-center justify-center text-center">
+           <p className="text-xs font-medium text-foreground">
+@@ -1994,20 +1880,6 @@ export function TurnTimeline({
+       </button>
+     )}
+     </div>
+-    {/* ql-20260825-006：最小化 pending 提问卡的右下角浮动胶囊——渲染在滚动
+-        容器外（fixed 定位锚 viewport，不随日志滚动），点击主体还原最近一条，
+-        chevron 展开明细定点还原。会话页 pending 卡恒为 AskUser 提问（无普通
+-        工具审批），isDialog 按请求实际携带判断以保持组件契约。 */}
+-    {minimizedPending.length > 0 && (
+-      <MinimizedDialogCapsule
+-        items={minimizedPending.map((req) => ({
+-          requestId: req.request_id,
+-          title: resolvePendingTitle(req),
+-          isDialog: Boolean(req.dialog_kind),
+-        }))}
+-        onRestore={handleRestore}
+-      />
+-    )}
+     {/* 2026-10-23-turn-file-diff-dialog / FR-01：文件行点击 → 该文件本轮变更内容
+         弹窗（受控挂 TurnTimeline 根，行内只上抛目标）。sessionId 未接线的旧消费方
+         永不为 null 目标（onOpenFileChanges 不下发），此处恒不渲染（FR-04 零回归）。 */}
+diff --git a/frontend/src/components/sessions/__tests__/session-config-bar.test.tsx b/frontend/src/components/sessions/__tests__/session-config-bar.test.tsx
+index 7d24a9e23..f3a668149 100644
+--- a/frontend/src/components/sessions/__tests__/session-config-bar.test.tsx
++++ b/frontend/src/components/sessions/__tests__/session-config-bar.test.tsx
+@@ -1002,9 +1002,7 @@ describe("TurnTimeline whoLine 轮次快照渲染（D-008）", () => {
+         viewMode="conversation"
+         errorMsg={null}
+         sessionStatus="active"
+-        pendingRequests={[]}
+         dialogHistory={[]}
+-        onDialogResolved={vi.fn()}
+         onResend={vi.fn()}
+         onSwitchProvider={vi.fn()}
+         hasOnlineProvider

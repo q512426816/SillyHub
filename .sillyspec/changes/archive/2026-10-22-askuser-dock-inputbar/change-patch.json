@@ -1,0 +1,238 @@
+{
+  "change": "2026-10-22-askuser-dock-inputbar",
+  "baseline": "bfe0517cd2959b1d043b69a59f681892b1f9b61e",
+  "head": "17f2273dc06c094cd830f77fce052c55e8606933",
+  "files": [
+    "frontend/src/components/ask-user-marker-card.test.tsx",
+    "frontend/src/components/daemon/__tests__/pending-dialog-dock.test.tsx",
+    "frontend/src/components/daemon/__tests__/session-fork-lineage.test.tsx",
+    "frontend/src/components/daemon/__tests__/turn-live-marquee.test.tsx",
+    "frontend/src/components/daemon/__tests__/turn-preview-card.test.tsx",
+    "frontend/src/components/daemon/__tests__/turn-time-display.test.tsx",
+    "frontend/src/components/daemon/__tests__/turn-timeline-auto-resume-badge.test.tsx",
+    "frontend/src/components/daemon/__tests__/turn-timeline-conversation-file-card.test.tsx",
+    "frontend/src/components/daemon/__tests__/turn-timeline-dialog-inplace.test.tsx",
+    "frontend/src/components/daemon/__tests__/turn-timeline-scroll.test.tsx",
+    "frontend/src/components/daemon/__tests__/turn-timeline-session-input-bar.test.tsx",
+    "frontend/src/components/daemon/__tests__/turn-timeline-token-speed.test.tsx",
+    "frontend/src/components/daemon/__tests__/turn-timeline-trajectory-view.test.tsx",
+    "frontend/src/components/daemon/agent-replay-body.tsx",
+    "frontend/src/components/daemon/pending-dialog-dock.tsx",
+    "frontend/src/components/daemon/session-panel/session-panel-dialog.tsx",
+    "frontend/src/components/daemon/session-panel/session-panel-page.tsx",
+    "frontend/src/components/daemon/turn-timeline.tsx",
+    "frontend/src/components/sessions/__tests__/session-config-bar.test.tsx"
+  ],
+  "totals": {
+    "files": 19,
+    "additions": 414,
+    "deletions": 292
+  },
+  "savedAt": "2026-10-23T01:53:59.038Z",
+  "note": "flow done 时点冻结（本变更可归属交付面：baseline..HEAD 提交面过滤 .sillyspec/ 只留 .sillyspec/docs/ 交付文档 + 独占树未提交交付；治理工件目录不入冻结——2026-10-12-close-trace-freeze-integrity FR-01）",
+  "modules": [
+    {
+      "id": "frontend",
+      "files": 19,
+      "doc": "docs/multi-agent-platform/modules/frontend.md",
+      "docTouched": false,
+      "docMissing": false
+    },
+    {
+      "id": "frontend_components",
+      "files": 19,
+      "doc": "docs/SillyHub/modules/frontend_components.md",
+      "docTouched": false,
+      "docMissing": false
+    }
+  ],
+  "uncoveredDirs": [],
+  "moduleMaps": [
+    "docs/backend/modules/_module-map.yaml",
+    "docs/frontend/modules/_module-map.yaml",
+    "docs/multi-agent-platform/modules/_module-map.yaml",
+    "docs/SillyHub/modules/_module-map.yaml",
+    "docs/sillyhub-daemon/modules/_module-map.yaml"
+  ],
+  "acceptedDirtyGap": 3,
+  "scopeAudit": {
+    "mode": "full-flow",
+    "ok": true,
+    "degradedReason": null,
+    "baseAnchor": "bfe0517cd2959b1d043b69a59f681892b1f9b61e",
+    "totals": {
+      "files": 20,
+      "additions": 414,
+      "deletions": 292
+    },
+    "rows": [
+      {
+        "path": "frontend/src/components/ask-user-marker-card.test.tsx",
+        "additions": 0,
+        "deletions": 2,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": "frontend/src/components/daemon/__tests__/pending-dialog-dock.test.tsx",
+        "additions": 86,
+        "deletions": 71,
+        "kind": "modified",
+        "planned": "新增",
+        "verdict": "planned"
+      },
+      {
+        "path": "frontend/src/components/daemon/__tests__/session-fork-lineage.test.tsx",
+        "additions": 0,
+        "deletions": 2,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": "frontend/src/components/daemon/__tests__/turn-live-marquee.test.tsx",
+        "additions": 83,
+        "deletions": 2,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": "frontend/src/components/daemon/__tests__/turn-preview-card.test.tsx",
+        "additions": 0,
+        "deletions": 2,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": "frontend/src/components/daemon/__tests__/turn-time-display.test.tsx",
+        "additions": 0,
+        "deletions": 2,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": "frontend/src/components/daemon/__tests__/turn-timeline-auto-resume-badge.test.tsx",
+        "additions": 0,
+        "deletions": 2,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": "frontend/src/components/daemon/__tests__/turn-timeline-conversation-file-card.test.tsx",
+        "additions": 0,
+        "deletions": 2,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": "frontend/src/components/daemon/__tests__/turn-timeline-dialog-inplace.test.tsx",
+        "additions": 0,
+        "deletions": 2,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": "frontend/src/components/daemon/__tests__/turn-timeline-scroll.test.tsx",
+        "additions": 0,
+        "deletions": 2,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": "frontend/src/components/daemon/__tests__/turn-timeline-session-input-bar.test.tsx",
+        "additions": 3,
+        "deletions": 38,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": "frontend/src/components/daemon/__tests__/turn-timeline-token-speed.test.tsx",
+        "additions": 0,
+        "deletions": 2,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": "frontend/src/components/daemon/__tests__/turn-timeline-trajectory-view.test.tsx",
+        "additions": 0,
+        "deletions": 2,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": "frontend/src/components/daemon/agent-replay-body.tsx",
+        "additions": 5,
+        "deletions": 6,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": "frontend/src/components/daemon/pending-dialog-dock.tsx",
+        "additions": 172,
+        "deletions": 0,
+        "kind": "new",
+        "planned": "新增",
+        "verdict": "planned"
+      },
+      {
+        "path": "frontend/src/components/daemon/session-panel/session-panel-dialog.tsx",
+        "additions": 18,
+        "deletions": 3,
+        "kind": "modified",
+        "planned": "修改",
+        "verdict": "planned"
+      },
+      {
+        "path": "frontend/src/components/daemon/session-panel/session-panel-page.tsx",
+        "additions": 31,
+        "deletions": 6,
+        "kind": "modified",
+        "planned": "修改",
+        "verdict": "planned"
+      },
+      {
+        "path": "frontend/src/components/daemon/turn-timeline.tsx",
+        "additions": 16,
+        "deletions": 144,
+        "kind": "modified",
+        "planned": "修改",
+        "verdict": "planned"
+      },
+      {
+        "path": "frontend/src/components/sessions/__tests__/session-config-bar.test.tsx",
+        "additions": 0,
+        "deletions": 2,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": "frontend/src/components/daemon/__tests__/turn-timeline-dialog-minimize.test.tsx",
+        "planned": "删除",
+        "additions": 0,
+        "deletions": 0,
+        "kind": "modified",
+        "verdict": "untouched"
+      }
+    ],
+    "excluded": {
+      "foreignDeclared": []
+    },
+    "note": "flow done 时点冻结（本文件落盘时采集）",
+    "closedBy": "flow done"
+  },
+  "patchSha256": "c30e3acffacccf13cc15c884fb726e148f035888ef62e0b0234cbe9160a26332",
+  "patchStatus": "ok"
+}

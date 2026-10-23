@@ -1,0 +1,43 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-22-askuser-dock-inputbar",
+  "reviewer": "subagent",
+  "verdict": "PASS",
+  "reviewedAgainst": "ba7aa585c584a35a4a0ba7dbb33979d889bc1a4e",
+  "findings": [
+    {
+      "severity": "P3",
+      "title": "FR-01 互斥行为与 page 挂载点 focusRequest 接线无正向测试断言（覆盖缺口，非承诺违反）",
+      "evidence": "绑定作答已如实披露「互斥由挂载点条件渲染承担」——session-panel-page/dialog 的互斥三元若被后续重构破坏（条件反转/dock 与输入框双渲染），现有套件不会红：pending-dialog-dock.test.tsx 只测组件级（8 用例），session-panel-dialog.test.tsx 既有 63 用例经 grep 无 PendingDialogDock/互斥断言（仅 task-09 卡消失/清空用例间接走挂载路径）；实现本身经 HEAD 代码核实真实存在且条件与 dock 门控同源单源。",
+      "location": "frontend/src/components/daemon/session-panel/session-panel-page.tsx:5772"
+    },
+    {
+      "severity": "P3",
+      "title": "pending-dialog-dock.tsx visiblePendingCount 声明后未使用（迁移残留死变量）",
+      "evidence": "原 TurnTimeline 用 visiblePendingCount 切换容器条件类名（visiblePendingCount > 0 ? \"mb-3 space-y-2\" : undefined），dock 卡列类名恒定后该变量仅剩注释引用；tsconfig 未开 noUnusedLocals 故 tsc 零错不报，代码卫生问题，宜删或恢复「全部最小化时去间距」的条件类名。",
+      "location": "frontend/src/components/daemon/pending-dialog-dock.tsx:123"
+    }
+  ],
+  "dimensionNotes": {
+    "乱序": "ok",
+    "并发": "ok",
+    "切换": "ok",
+    "作用域": "ok"
+  },
+  "disclosureAdjudications": [
+    "pending 期间输入框不可用（含全部最小化后也不恢复输入框）→ 可接受：用户显式裁决「替换（遮挡）」原话在案，pending permission 阻塞 agent 轮次的语义与队列一致，胶囊/pill 双还原入口保留",
+    "SessionInputBar 重挂载丢瞬时 UI 态（光标/展开菜单）→ 可接受：value={input} 等受控 state 在父级（patch 可见），丢失面仅为瞬时态",
+    "会话切换时最小化集合/卡内已填内容随挂载点卸载清空 → 可接受：与原 TurnTimeline 内部内存态语义完全一致，非本次引入的回归",
+    "TurnTimeline sessionStatus prop 保留在 interface 但不解构（消费方零改）→ 可接受：接口稳定向后兼容",
+    "互斥断言由挂载点条件渲染承担（无组件级互斥用例）→ 可接受（记 P3 覆盖缺口）：互斥条件极简三元且与 dock 门控同源，但无测试网",
+    "turn-live-marquee.test.tsx +83 行为并行会话混入本变更提交（主会话已披露，冻结面归声明外）→ 可接受：同文件混入难拆分，归属切分正确，后续 marquee 变更认领"
+  ],
+  "verificationEvidence": {
+    "rerun": "vitest run pending-dialog-dock + session-panel-dialog + turn-timeline-session-input-bar：3 文件 92 用例全绿（11.24s），ledger 回执 skipped exit=1 按备注口径单独复跑确认为通过（批量挂因并行在途 marquee 文件，非本变更面）",
+    "tsc": "pnpm exec tsc --noEmit → EXIT=0 零错误（FR-05 兑现；并行在途 turn-live-marquee.tsx 工作区改动未引入类型错）",
+    "visualAlignment": "dock 外层类名 shrink-0 bg-card px-5 pb-4 pt-1 与 session-input-bar.tsx:839 footer 逐字一致（FR-02 同宽对齐声称证实）",
+    "headState": "HEAD=ba7aa585c 即本变更提交（工作区 daemon/ 下仅剩并行 M turn-live-marquee.tsx）",
+    "generatedArtifacts": "不涉及：无后端 schema/类型契约改动，api-types.ts 无需同步"
+  },
+  "reviewedAt": "2026-10-23T01:52:16.000Z"
+}
