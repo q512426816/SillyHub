@@ -1,0 +1,36 @@
+tier: thin
+legacy_fallback: false
+substeps: {}
+born_face: thin
+with_tasks: false
+review_force: null
+input: >-
+  轮文件变更弹窗(turn-file-diff-dialog)在补丁行缺 tool_use_id 时走②回退配对:无主补丁按日志序塞给「路径命中目标文件的第一个未用编辑调用」——多文件编辑轮必然张冠李戴(2026-10-23 实证:会话
+  49c5c3ec run 63130ca1,点 task-runner.test.ts 行显示 design.md/requirements.md
+  的编辑内容,真补丁被挤掉)。修复:回退改「就近紧邻配对」——无主补丁只配它之前最近的未用编辑族调用(不跨其他 tool_call/tool_result 行),配不上诚实丢弃;配对后路径过滤照旧。
+
+
+  成功标准：
+
+  - 无 id 补丁按「紧邻其前的最近未用编辑族调用」配对,不再全局按序塞给路径命中的调用(实证场景:点 task-runner.test.ts 显示的必须是该文件自己的补丁)
+
+  - 并发交错(紧邻调用非其归属)时该补丁段诚实丢弃,弹窗少显示但不显示错误内容
+
+  - ①tool_use_id 精确配对路径行为不变(id 齐全时零回归)
+
+  - edit_patch 行 tool_use_id 缺失的数据面环节问题登记 docs/sillyspec 已知问题留档
+
+  - 触及面 vitest 全绿 + pnpm exec tsc --noEmit 零类型错误
+autopilot: false
+prestage_ack: true
+baseline_commit: 0d1ba62747f6e46521919b37e3b44c678b7f675a
+updatedAt: '2026-10-23T06:51:35.466Z'
+cross_baselines:
+  sillyspec: 2921364ddcc22f78cd1d62686adaf0c1c0bbc9ad
+baseline_sha256: 2d78410c2ec8822b0099fab339255284d7543de8833b45e92a1757dc91f225e3
+spec_approved: true
+spec_approved_at: '2026-10-23T06:51:35.466Z'
+spec_approved_by: anon@DESKTOP-HJ0AM09
+spec_approved_channel: user-confirmed
+spec_attested_by: anon@DESKTOP-HJ0AM09
+

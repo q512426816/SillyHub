@@ -21,7 +21,7 @@ import {
 } from "../turn-file-diff";
 
 function callLog(overrides: {
-  toolUseId?: string;
+  toolUseId?: string | null;
   tool?: string;
   filePath?: string | null;
   raw?: string;
@@ -30,6 +30,9 @@ function callLog(overrides: {
     overrides.filePath === null
       ? { command: "rm -rf dist" }
       : { file_path: overrides.filePath ?? "frontend/src/a.ts" };
+  // toolUseId=null = 调用行无 id（双侧缺 id 的②路径用例）；缺省 = 默认 id "tu-1"。
+  const tuid = overrides.toolUseId ?? "tu-1";
+  const withId = overrides.toolUseId !== null;
   return {
     id: overrides.toolUseId ?? "log-call-1",
     run_id: "run-1",
@@ -40,9 +43,9 @@ function callLog(overrides: {
       JSON.stringify({
         tool: overrides.tool ?? "Edit",
         args,
-        tool_use_id: overrides.toolUseId ?? "tu-1",
+        ...(withId ? { tool_use_id: tuid } : {}),
       }),
-    tool_use_id: overrides.toolUseId ?? "tu-1",
+    ...(withId ? { tool_use_id: tuid } : {}),
   };
 }
 
@@ -185,6 +188,58 @@ describe("collectTurnFilePatches（日志 → 按序补丁段）", () => {
   it("空日志 / 无 tool_call 行 → 空数组（不抛错）", () => {
     expect(collectTurnFilePatches([], "a.ts")).toEqual([]);
     expect(collectTurnFilePatches([resultLog({ toolUseId: "tu-1" })], "a.ts")).toEqual([]);
+  });
+
+  // 2026-10-23-diff-dialog-pairing-fix：②回退改「悬置唯一就近配对」——多文件编辑轮
+  // 不再张冠李戴（实证：会话 49c5c3ec / run 63130ca1 点 task-runner.test.ts 显示
+  // design.md 内容，旧实现把无主补丁塞给路径命中的第一个未用调用）。
+  it("就近悬置配对：多文件无 id 补丁各归其位，目标文件弹窗不再吃到他文件内容（FR-01 实证复现）", () => {
+    const designPatch = JSON.stringify([{ oldStart: 1, newStart: 1, lines: ["+design-body"] }]);
+    const reqPatch = JSON.stringify([{ oldStart: 2, newStart: 2, lines: ["+requirements-body"] }]);
+    const testPatch1 = JSON.stringify([{ oldStart: 3, newStart: 3, lines: ["+test-1"] }]);
+    const testPatch2 = JSON.stringify([{ oldStart: 4, newStart: 4, lines: ["+test-2"] }]);
+    const logs: AgentRunLogEntry[] = [
+      // 全轮无 tool_use_id（双侧缺失，走②就近配对）——design → requirements →
+      // task-runner×2，串行编辑轮，各 result 紧随其 call。
+      callLog({ toolUseId: null, tool: "Write", filePath: "design.md" }),
+      resultLog({ toolUseId: null, id: "r-d", patch: designPatch }),
+      callLog({ toolUseId: null, tool: "Write", filePath: "requirements.md" }),
+      resultLog({ toolUseId: null, id: "r-q", patch: reqPatch }),
+      callLog({ toolUseId: null, tool: "Edit", filePath: "tests/task-runner.test.ts" }),
+      resultLog({ toolUseId: null, id: "r-t1", patch: testPatch1 }),
+      callLog({ toolUseId: null, tool: "Edit", filePath: "tests/task-runner.test.ts" }),
+      resultLog({ toolUseId: null, id: "r-t2", patch: testPatch2 }),
+    ];
+    // 点 task-runner.test.ts：只含它自己的两段（旧实现会显示 design/requirements 内容）。
+    const sections = collectTurnFilePatches(logs, "tests/task-runner.test.ts");
+    expect(sections.map((s) => s.rows?.[0]?.text)).toEqual(["test-1", "test-2"]);
+    // 点 design.md：design 自己的内容（就近配对各归其位的对侧验证）。
+    const designSections = collectTurnFilePatches(logs, "design.md");
+    expect(designSections.map((s) => s.rows?.[0]?.text)).toEqual(["design-body"]);
+  });
+
+  it("悬空调用判死不毒化：补丁超限丢失的前序调用不拖死后续串行配对（FR-02）", () => {
+    const logs: AgentRunLogEntry[] = [
+      // call A 的补丁超 64KB 上限未附着（悬空）——后续 call B 到来即判死 A。
+      callLog({ toolUseId: null, tool: "Edit", filePath: "frontend/src/lost.ts" }),
+      callLog({ toolUseId: null, tool: "Edit", filePath: "frontend/src/b.ts" }),
+      resultLog({ toolUseId: null, id: "r-b", patch: JSON.stringify([{ oldStart: 1, newStart: 1, lines: ["+b"] }]) }),
+      // 悬空判死后，后续串行编辑恢复正常就近配对（不被 lost.ts 的悬置卡死）。
+      callLog({ toolUseId: null, tool: "Edit", filePath: "frontend/src/a.ts" }),
+      resultLog({ toolUseId: null, id: "r-ok", patch: JSON.stringify([{ oldStart: 2, newStart: 2, lines: ["+ok"] }]) }),
+    ];
+    expect(collectTurnFilePatches(logs, "frontend/src/a.ts").map((s) => s.rows?.[0]?.text)).toEqual(["ok"]);
+    expect(collectTurnFilePatches(logs, "frontend/src/b.ts").map((s) => s.rows?.[0]?.text)).toEqual(["b"]);
+    expect(collectTurnFilePatches(logs, "frontend/src/lost.ts")).toEqual([]);
+  });
+
+  it("无 id 补丁不配给非编辑族调用（Bash 不入悬置面，悬置空诚实丢弃）", () => {
+    const logs: AgentRunLogEntry[] = [
+      callLog({ toolUseId: null, tool: "Bash", filePath: null }),
+      resultLog({ toolUseId: null, id: "r-bash", patch: JSON.stringify([{ oldStart: 1, newStart: 1, lines: ["+x"] }]) }),
+    ];
+    // Bash 无 file_path 也非编辑族：悬置面空 → 丢弃（不猜归属）。
+    expect(collectTurnFilePatches(logs, "frontend/src/a.ts")).toEqual([]);
   });
 });
 

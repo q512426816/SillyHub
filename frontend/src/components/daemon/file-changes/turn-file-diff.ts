@@ -107,74 +107,77 @@ export function diffRowsToText(rows: readonly DiffRow[]): string {
 /**
  * 本轮日志 + 仓根相对路径 → 按编辑完成序（日志序）的补丁段列表。
  *
- * 配对两遍：① result.tool_use_id → 同 id 的 tool_call 行；② 遗留 result（无 id 或
- * id 无主）按序回退——只落「编辑族工具 + 路径命中目标文件」的遗留调用（防止
- * Bash 等无补丁调用吃掉 Edit 补丁、也防止补丁串到别的文件）。两遍都配不上的
- * result 无法归因文件 → 丢弃（不伪造归属）。
+ * 配对两遍：① result.tool_use_id → 同 id 的 tool_call 行（精确，零改动语义）；
+ * ② 遗留 result（无 id 或 id 无主）**就近悬置配对**——仅配给「最近的未消费编辑
+ * 族调用」（2026-10-23-diff-dialog-pairing-fix：旧实现「按序塞给路径命中目标文件
+ * 的第一个未用调用」在多文件编辑轮必然张冠李戴——实证会话 49c5c3ec / run 63130ca1，
+ * 点 task-runner.test.ts 显示 design.md 内容）。协议依据：agent 工具调用**串行**
+ * 执行，串行编辑轮无 id 时最近悬置调用即补丁归属；新编辑调用的到来即证明前序
+ * 调用 result 已处理（旧悬置=补丁超限/丢失的悬空调用，判死不累计毒化）。无前置
+ * 编辑调用（悬置空）→ 该段诚实丢弃（不伪造归属；违反串行假设的真并发日志为
+ * 已披露边界，见 design 风险节）。
  */
 export function collectTurnFilePatches(
   logs: readonly AgentRunLogEntry[],
   repoRelPath: string,
 ): TurnFilePatchSection[] {
+  // 单遍扫描：日志序即配对序。calls 全量留存（①按 id 索引随机访问），
+  // pending 为「已见未消费的编辑族调用」悬置栈（②就近配对的候选面）。
   const calls: ParsedToolCall[] = [];
-  const results: { patch: string; toolUseId: string | null }[] = [];
+  const callUsed: boolean[] = [];
+  const callIndexById = new Map<string, number>();
+  const pending: number[] = [];
+
+  const paired: { call: ParsedToolCall | null; patch: string }[] = [];
+
+  const noteCall = (parsed: ParsedToolCall): void => {
+    const index = calls.length;
+    calls.push(parsed);
+    callUsed.push(false);
+    if (parsed.toolUseId != null && !callIndexById.has(parsed.toolUseId)) {
+      callIndexById.set(parsed.toolUseId, index);
+    }
+    if (isPatchEligibleToolName(parsed.toolName)) {
+      // 串行协议推理（FR-02）：agent 工具调用顺序执行——新编辑调用到来 ⟹ 前序
+      // 调用的 result 已处理（哪怕无补丁）。旧悬置此时必为悬空调用（补丁超 64KB
+      // 上限不附着 / result 行丢失），判死清空，防其永久毒化后续无主补丁的配对。
+      pending.length = 0;
+      pending.push(index);
+    }
+  };
+
   for (const entry of logs) {
     if (entry.channel === "tool_call") {
       const parsed = parseToolCallEntry(entry);
-      if (parsed) calls.push(parsed);
+      if (parsed) noteCall(parsed);
       continue;
     }
     const patch = entry.edit_patch;
-    if (typeof patch === "string" && patch.length > 0) {
-      results.push({
-        patch,
-        toolUseId:
-          typeof entry.tool_use_id === "string" && entry.tool_use_id.length > 0
-            ? entry.tool_use_id
-            : null,
-      });
-    }
-  }
-
-  const callUsed = new Array<boolean>(calls.length).fill(false);
-  const callIndexById = new Map<string, number>();
-  calls.forEach((call, index) => {
-    if (call.toolUseId != null && !callIndexById.has(call.toolUseId)) {
-      callIndexById.set(call.toolUseId, index);
-    }
-  });
-
-  // ① 按 tool_use_id 精确配对；命中的调用行标记已用（同 id 多次出现取首个）。
-  const paired: { call: ParsedToolCall | null; patch: string }[] = [];
-  for (const result of results) {
+    if (typeof patch !== "string" || patch.length === 0) continue;
+    const toolUseId =
+      typeof entry.tool_use_id === "string" && entry.tool_use_id.length > 0
+        ? entry.tool_use_id
+        : null;
     let call: ParsedToolCall | null = null;
-    if (result.toolUseId != null) {
-      const index = callIndexById.get(result.toolUseId);
+    // ① 精确配对：同 id 且未被占用（同 id 多次出现取首个——callIndexById 首写者胜）。
+    if (toolUseId != null) {
+      const index = callIndexById.get(toolUseId);
       if (index != null && !callUsed[index]) {
         callUsed[index] = true;
+        if (pending[pending.length - 1] === index) pending.length = 0;
         call = calls[index] ?? null;
       }
     }
-    paired.push({ call, patch: result.patch });
-  }
-
-  // ② 遗留 result 按序回退：只考虑「编辑族工具 + 路径命中目标文件」的遗留调用。
-  //    已知局限（诚实记录）：同轮两个同族调用都无 tool_use_id 且其一只带补丁时，
-  //    先序调用可能吃到后序文件的补丁——仅影响极老的双缺 id 数据，主链路（双 id）
-  //    不经此处。
-  for (const item of paired) {
-    if (item.call != null) continue;
-    const fallbackIndex = calls.findIndex(
-      (call, index) =>
-        !callUsed[index] &&
-        isPatchEligibleToolName(call.toolName) &&
-        call.filePath != null &&
-        matchesRepoPath(call.filePath, repoRelPath),
-    );
-    if (fallbackIndex >= 0) {
-      callUsed[fallbackIndex] = true;
-      item.call = calls[fallbackIndex] ?? null;
+    // ② 就近配对（仅无主补丁）：配给最近悬置的编辑族调用（串行协议下即其归属，
+    // noteCall 已把悬置面收敛为最近一个）；无悬置（result 先于任何编辑调用 /
+    // ①已消费且后续无新调用）→ 诚实丢弃。
+    if (call == null && pending.length > 0) {
+      const index = pending[pending.length - 1]!;
+      callUsed[index] = true;
+      pending.length = 0;
+      call = calls[index] ?? null;
     }
+    paired.push({ call, patch });
   }
 
   const sections: TurnFilePatchSection[] = [];
