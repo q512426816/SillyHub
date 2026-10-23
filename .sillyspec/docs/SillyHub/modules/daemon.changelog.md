@@ -98,3 +98,4 @@ created_at: 2026-08-27 14:32:24
 - 2026-10-23-skill-prune-git-safe | daemon 会话启动时的技能裁剪(pruneSkillsToSubset)直接 rm -rf 删除…
 - 2026-10-23-watchdog-steering-guard | 修复看门狗误杀活轮与陈旧判定
 - 2026-10-23-knowledge-scope-maintenance | 知识注入作用域维护面板
+- 2026-10-24-close-run-quota-fallback | 交互轮失败后端从日志兜底识别限额错误

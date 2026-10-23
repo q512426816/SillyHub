@@ -144,6 +144,20 @@ describe("TurnFileDiffDialog", () => {
     expect(screen.queryByTestId("turn-file-diff-section")).toBeNull();
   });
 
+  // 2026-10-24-pi-edit-patch-synth / FR-04：agent 编辑归因（改N次>0）但无补丁——
+  // 文案如实说「确实来自 agent 编辑但运行时未上报补丁」，禁止甩锅命令行。
+  it("agent 编辑过但无补丁（pi 存量轮次）：区分文案，不再断言「未来自编辑工具」", async () => {
+    getAgentSessionLogsMock.mockResolvedValue([]);
+    renderDialog({ agentEdited: true });
+
+    const body = (await screen.findByTestId("turn-file-diff-body")).textContent!;
+    expect(body).toContain("确实来自本轮 agent 的编辑工具");
+    expect(body).toContain("未上报结构化补丁");
+    expect(body).not.toContain("未来自本轮 agent 的编辑工具");
+    expect(body).not.toContain("命令行/脚本");
+    expect(screen.queryByTestId("turn-file-diff-section")).toBeNull();
+  });
+
   it("补丁 JSON 不可解析：占位说明段在场（不静默丢弃）", async () => {
     getAgentSessionLogsMock.mockResolvedValue([
       callLog("tu-1", "frontend/src/a.ts"),

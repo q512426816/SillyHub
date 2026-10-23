@@ -48,6 +48,12 @@ export interface TurnFileDiffDialogProps {
   /** 文件状态徽标（新增/修改/删除/新文件，与文件卡同源 FILE_STATUS_META）；
    *  deleted 且无补丁时弹窗出删除专用说明（2026-10-23-file-card-agent-grouping）。 */
   status?: FileChangeStatus;
+  /**
+   * 该文件行有 agent 编辑归因（卡片「改N次」N>0，2026-10-24-pi-edit-patch-synth
+   * / FR-04）：无补丁时的文案区分——agent 编辑过但运行时未上报结构化补丁（pi 等
+   * provider 存量轮次）如实说明，**不再**断言「未来自编辑工具」错误甩锅。
+   */
+  agentEdited?: boolean;
   open: boolean;
   onOpenChange: (_open: boolean) => void;
 }
@@ -66,6 +72,15 @@ type LoadPhase =
 const NO_PATCH_TEXT =
   "该文件的改动未来自本轮 agent 的编辑工具（Edit/Write），可能由命令行/脚本、并行会话或其他进程产生；平台未捕获补丁内容，仅行数统计可信。";
 
+/**
+ * agent 编辑过但无补丁的说明（2026-10-24-pi-edit-patch-synth / FR-04）：卡片行
+ * 有编辑归因（改N次>0）却配不到补丁——改动**确实**来自本轮 agent 编辑工具，
+ * 但该会话运行时（pi 等无 structuredPatch 上报的 provider，或 daemon 升级前的
+ * 存量轮次）未上报结构化补丁。如实说明，**禁止**沿用上方文案错误甩锅命令行。
+ */
+const AGENT_EDITED_NO_PATCH_TEXT =
+  "该文件的改动确实来自本轮 agent 的编辑工具，但该会话运行时未上报结构化补丁（部分运行时不产出或升级前未产出），无法展示行级 diff；行数统计可信。";
+
 /** 删除文件且无补丁（grouping FR-03）：删除说明态，如实交代无 diff 可看。 */
 const DELETED_NO_PATCH_TEXT =
   "该文件在本轮被删除；删除动作未来自编辑工具（如命令行 rm），平台未捕获删除补丁，无 diff 可展示。";
@@ -74,6 +89,7 @@ export function TurnFileDiffDialog({
   runKey,
   path,
   status,
+  agentEdited,
   open,
   onOpenChange,
 }: TurnFileDiffDialogProps) {
@@ -160,7 +176,11 @@ export function TurnFileDiffDialog({
           )}
           {state.phase === "ready" && state.sections.length === 0 && (
             <p className="py-8 text-center text-[12px] leading-[1.6] text-muted-foreground">
-              {status === "deleted" ? DELETED_NO_PATCH_TEXT : NO_PATCH_TEXT}
+              {status === "deleted"
+                ? DELETED_NO_PATCH_TEXT
+                : agentEdited
+                  ? AGENT_EDITED_NO_PATCH_TEXT
+                  : NO_PATCH_TEXT}
             </p>
           )}
           {state.phase === "ready" && state.sections.length > 0 && (

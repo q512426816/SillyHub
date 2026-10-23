@@ -1,0 +1,69 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-24-close-run-quota-fallback",
+  "rows": [
+    {
+      "anchor": "FR-01",
+      "row_id": "2026-10-24-close-run-quota-fallback:flow:测试绑定FR-01",
+      "tests": [
+        "backend/app/modules/daemon/tests/test_close_interactive_run_quota_log_fallback.py「test_quota_error_log_inferred_into_error_detail」",
+        "backend/app/modules/daemon/tests/test_close_interactive_run_quota_log_fallback.py「test_quota_error_via_result_summary_inferred」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-24-close-run-quota-fallback"
+    },
+    {
+      "anchor": "FR-02",
+      "row_id": "2026-10-24-close-run-quota-fallback:flow:测试绑定FR-02",
+      "tests": [
+        "backend/app/modules/daemon/tests/test_close_interactive_run_quota_log_fallback.py「test_daemon_error_takes_precedence_over_log_inference」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-24-close-run-quota-fallback"
+    },
+    {
+      "anchor": "FR-03",
+      "row_id": "2026-10-24-close-run-quota-fallback:flow:测试绑定FR-03",
+      "tests": [
+        "backend/app/modules/daemon/tests/test_close_interactive_run_quota_log_fallback.py「test_no_api_error_log_keeps_legacy_behavior」",
+        "backend/app/modules/daemon/tests/test_close_interactive_run_quota_log_fallback.py「test_non_quota_api_error_not_inferred」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-24-close-run-quota-fallback"
+    },
+    {
+      "anchor": "FR-04",
+      "row_id": "2026-10-24-close-run-quota-fallback:flow:测试绑定FR-04",
+      "tests": [
+        "backend/app/modules/daemon/tests/test_close_interactive_run_model_error.py",
+        "backend/app/modules/daemon/tests/test_close_interactive_run_quota_log_fallback.py"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-24-close-run-quota-fallback"
+    }
+  ]
+}

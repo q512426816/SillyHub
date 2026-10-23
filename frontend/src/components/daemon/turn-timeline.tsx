@@ -791,7 +791,12 @@ const TurnRow = memo(function TurnRow({
    */
   onOpenFileChanges?: (
     _runKey: string,
-    _file: { path: string; status?: FileChangeStatus },
+    _file: {
+      path: string;
+      status?: FileChangeStatus;
+      /** 该文件行有 agent 编辑归因（source=tool / 改N次>0）——弹窗无补丁文案区分用。 */
+      agentEdited?: boolean;
+    },
   ) => void;
 }) {
   // task-07（FR-03 / D-003@v2）：旧路径 output 气泡 askuser 标记拦截——命中则
@@ -1339,6 +1344,9 @@ const TurnRow = memo(function TurnRow({
                         onOpenFileChanges(runKey, {
                           path,
                           status: file?.status,
+                          // 2026-10-24-pi-edit-patch-synth / FR-04：agent 编辑归因
+                          //（弹窗无补丁时的文案区分——pi 等运行时存量轮次兜底）。
+                          agentEdited: file != null && file.edits > 0,
                         });
                       }}
                     />
@@ -1524,6 +1532,7 @@ export function TurnTimeline({
     runKey: string;
     path: string;
     status?: FileChangeStatus;
+    agentEdited?: boolean;
   } | null>(null);
   const handleOpenFileChanges = useCallback(
     (runKey: string, file: { path: string; status?: FileChangeStatus }) => {
@@ -1971,6 +1980,7 @@ export function TurnTimeline({
         runKey={fileDiffTarget.runKey}
         path={fileDiffTarget.path}
         status={fileDiffTarget.status}
+        agentEdited={fileDiffTarget.agentEdited}
         open
         onOpenChange={(next) => {
           if (!next) setFileDiffTarget(null);

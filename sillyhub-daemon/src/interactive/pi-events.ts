@@ -28,7 +28,7 @@
 //   | message_update + ame.text_delta | text（逐 delta 直通，不合并、无 is_partial） | pi 天然逐 delta 流（对照 Anthropic block 缓冲），design §5.2 第 1 条 |
 //   | message_end.message.content 内 thinking part | thinking（每 part 一事件） | design §5.2 第 2 条；ThinkingContent（pi-ai types.d.ts:230-238）。text part 不在 message_end 提取——text 已由 text_delta 流式直通，重复展开会双计（批量 pi-json.ts:263-266 同决策） |
 //   | tool_execution_start | tool_use（tool_name/call_id 一等 + content=入参 JSON + metadata.tool_input） | design §5.2 第 3 条；批量 pi-json.ts:283-298 口径 |
-//   | tool_execution_end | tool_result（call_id 配对；无 edit_patch——pi edit 结果为 diff 文本无结构化 patch，design §3 非目标） | design §5.2 第 4 条；批量 pi-json.ts:304-321 口径 |
+//   | tool_execution_end | tool_result（call_id 配对；edit/write 成功时从 start 帧入参合成 structuredPatch 挂 edit_patch——2026-10-24-pi-edit-patch-synth，推翻原「非目标」） | design §5.2 第 4 条；批量 pi-json.ts:304-321 口径 |
 //   | error（顶层）/ extension_error / message_update+ame.error | error | design §5.2 第 5 条；ame.error 覆盖流层中止（reason=aborted|error，pi-ai types.d.ts:386-389） |
 //   | turn_end.message.stopReason==='error' | error（errorMessage 载体） | pi 0.81.1 实跑证实（fixture real-error-turn.jsonl）：流层无独立 error 事件时，失败仅经 turn_end 浮出，不映射则错误对下游不可见 |
 //   | turn_end.message.usage | usage（text 空事件承载，见 buildUsageEvent） | design §5.2 第 6 条；cacheRead→cache_read / cacheWrite→cache_creation（批量 pi-json.ts:341-344 已验证口径）；ctx_tokens = input + cacheRead + cacheWrite 净值三和（ctxTokensFromNetInput 共享 helper） |
@@ -57,8 +57,11 @@
 // 全部产出事件满足 agent-event-schema.ts 的 safeParseAgentEvent（验收项，
 // 测试逐条断言）。
 
+import { readFileSync, statSync } from 'node:fs';
+
 import type { AgentEvent, AgentEventUsage } from '../types.js';
 import { ctxTokensFromNetInput } from './usage-ctx.js';
+import { synthesizePiEditPatch, synthesizePiWritePatch } from './pi-edit-patch-synth.js';
 
 /** pi 下行事件的顶层 `type` 已知集合（词表真源见文件头）。 */
 const KNOWN_EVENT_TYPES: ReadonlySet<string> = new Set([
@@ -162,6 +165,16 @@ export class PiEventNormalizer {
    * 任务行收行时把错误带出来。''=无。turn 边界（turn_start/turn_end 收行）消费清零。
    */
   private pendingError = '';
+
+  /**
+   * 编辑类工具入参登记（2026-10-24-pi-edit-patch-synth）：call_id → 入参对象。
+   * pi 的 tool_execution_end 帧不带 args，edit_patch 合成需要 start 帧的入参
+   * （edit 的 edits 块 / write 的 content）。turn_end 全清（与 segments 同点，
+   * 轮内生命周期）；容量上限防极端泄漏（逐出最旧）。
+   */
+  private readonly toolArgsByCallId = new Map<string, Record<string, unknown>>();
+  /** 登记容量上限（单轮编辑调用远低于此，防御性兜底）。 */
+  private static readonly TOOL_ARGS_MAX = 64;
 
   constructor(opts: { flushIntervalMs?: number; now?: () => number } = {}) {
     this.flushIntervalMs = opts.flushIntervalMs ?? 500;
@@ -381,6 +394,17 @@ export class PiEventNormalizer {
     const toolName = typeof raw.toolName === 'string' ? raw.toolName : '';
     const callId = typeof raw.toolCallId === 'string' ? raw.toolCallId : '';
     const args = isRecord(raw.args) ? raw.args : {};
+    // 2026-10-24-pi-edit-patch-synth：编辑类工具入参登记（end 帧不带 args，
+    // 合成补丁需要 start 帧的 edits/content）。容量逐出最旧防极端泄漏。
+    const lowered = toolName.toLowerCase();
+    if (callId !== '' && (lowered === 'edit' || lowered === 'write')) {
+      this.toolArgsByCallId.set(callId, args);
+      while (this.toolArgsByCallId.size > PiEventNormalizer.TOOL_ARGS_MAX) {
+        const oldest = this.toolArgsByCallId.keys().next().value;
+        if (oldest === undefined) break;
+        this.toolArgsByCallId.delete(oldest);
+      }
+    }
     return {
       type: 'tool_use',
       content: JSON.stringify(args),
@@ -391,22 +415,58 @@ export class PiEventNormalizer {
   }
 
   /**
-   * tool_execution_end → tool_result（call_id 与 tool_use 天然同值配对，
-   * 归一化无状态不做登记）。isError 仅写 metadata.is_error（不改会话终态，
-   * 批量 pi-json.ts:302-303 同决策）。无 edit_patch（design §3 非目标）。
+   * tool_execution_end → tool_result（call_id 与 tool_use 天然同值配对）。
+   * isError 仅写 metadata.is_error（不改会话终态，批量 pi-json.ts:302-303 同决策）。
+   *
+   * edit_patch 合成（2026-10-24-pi-edit-patch-synth，推翻 design §3「非目标」）：
+   * pi 的 edit/write 结果只有确认文本无 diff，但入参即完整变更内容——成功时从
+   * start 帧登记的入参**同步**合成 structuredPatch 挂 edit_patch（dispatch 是
+   * 同步事件链，单次本地读盘 + 大小护栏毫秒级）。合成失败（形态/读盘/定位/
+   * 超限）静默缺省（保持无补丁现状，宁缺不伪造）。
    */
   private handleToolEnd(raw: Record<string, unknown>): AgentEvent {
     const toolName = typeof raw.toolName === 'string' ? raw.toolName : '';
     const callId = typeof raw.toolCallId === 'string' ? raw.toolCallId : '';
     const isError = raw.isError === true;
     const resultText = extractResultText(raw.result);
-    return {
+    const ev: AgentEvent = {
       type: 'tool_result',
       content: resultText,
       tool_name: toolName,
       call_id: callId,
       metadata: { tool_output: resultText, is_error: isError },
     };
+    const lowered = toolName.toLowerCase();
+    const args =
+      !isError && callId !== '' && (lowered === 'edit' || lowered === 'write')
+        ? this.toolArgsByCallId.get(callId)
+        : undefined;
+    this.toolArgsByCallId.delete(callId);
+    if (args === undefined) return ev;
+    try {
+      const patch =
+        lowered === 'edit'
+          ? synthesizePiEditPatch(args, PiEventNormalizer.readEditedFile)
+          : synthesizePiWritePatch(args);
+      if (patch !== null) ev.edit_patch = patch;
+    } catch {
+      // 合成异常静默缺省（观测面 best-effort，不阻塞结果事件）。
+    }
+    return ev;
+  }
+
+  /**
+   * 同步读改后文件全文（合成补丁定位行号用）：>2MB 或读失败 → null（放弃补丁，
+   * 不让大文件同步读卡事件循环）。包级可测性：静态方法可被测试子类覆写。
+   */
+  private static readEditedFile(path: string): string | null {
+    try {
+      const st = statSync(path);
+      if (st.size > 2 * 1024 * 1024) return null;
+      return readFileSync(path, 'utf8');
+    } catch {
+      return null;
+    }
   }
 
   /**
@@ -432,8 +492,9 @@ export class PiEventNormalizer {
       out.push(this.buildUsageEvent(message.usage));
     }
     // ql-20260905-001：turn 边界全清 segment 记账（message_end 丢帧时的兜底，
-    // 下一 turn 从零起段）。
+    // 下一 turn 从零起段）。2026-10-24-pi-edit-patch-synth：入参登记同点全清。
     this.segments.clear();
+    this.toolArgsByCallId.clear();
     return out;
   }
 

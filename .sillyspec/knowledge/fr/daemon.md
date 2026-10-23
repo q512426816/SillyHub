@@ -7502,3 +7502,89 @@
 摘要：验证命令面
 全文：.sillyspec/changes/archive/2026-10-23-watchdog-steering-guard/requirements.md#FR-05
 最近确认：8e6a6b644c3481a47ec381533ce4422fcc9b64d7
+
+## FR-daemon-272 close_interactive_run 收到 is_error=true 且 error=None 时，从该 run 已落库日志的 [ASSISTANT] 行提取 API Error 文本，命中限额特征（429 + 上限/额度/配额/quota/usage limit 等）时补写 error_detail（type=quota_exceeded，code/message/hint/raw/reset_at 语义与 daemon model-error/classifier 对齐）
+变更：2026-10-24-close-run-quota-fallback
+状态：active
+摘要：限额错误日志兜底补写（主路径，2026-10-23 实证形态）；result_summary 携带限额文本同样兜底
+场景正文：
+- 场景：限额错误日志兜底补写（主路径，2026-10-23 实证形态） — Given 一个 running 的交互 run，其日志已落库一行 `channel='stdout'`、内容为 `[ASSISTANT] API Error: Reque；When close_interactive_run 以 is_error=True、error=None、status="error_max_turns" 收口，；Then run.status=="failed" 且 error_code=="interactive_failed"，且 run.error_detail 非空并满足
+- 场景：result_summary 携带限额文本同样兜底 — Given 一个 running 的交互 run 且无相关日志行，；When close_interactive_run 以 is_error=True、error=None、result_summary="API Error: Requ；Then run.error_detail 非空且 type=="quota_exceeded"（reset_at 解析失败为 None）。
+全文：.sillyspec/changes/archive/2026-10-24-close-run-quota-fallback/requirements.md#FR-01
+最近确认：92bbf833e5595acbe7617b6bd61ad6f25c9fc748
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-24-close-run-quota-fallback:flow:测试绑定FR-01
+  tests: backend/app/modules/daemon/tests/test_close_interactive_run_quota_log_fallback.py「test_quota_error_log_inferred_into_error_detail」 | backend/app/modules/daemon/tests/test_close_interactive_run_quota_log_fallback.py「test_quota_error_via_result_summary_inferred」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-24-close-run-quota-fallback
+  status: active
+
+## FR-daemon-273 新 daemon 已回传 error 时不覆盖，现行为不变
+变更：2026-10-24-close-run-quota-fallback
+状态：active
+摘要：daemon 回传优先
+场景正文：
+- 场景：daemon 回传优先 — Given 一个 running 的交互 run，其日志已落库限额错误文本行，；When close_interactive_run 以 is_error=True、error=ModelErrorDTO(type=auth_failed, code；Then run.error_detail["type"]=="auth_failed"（未被日志推断的 quota_exceeded 覆盖），且本次收口不产生 quot
+全文：.sillyspec/changes/archive/2026-10-24-close-run-quota-fallback/requirements.md#FR-02
+最近确认：92bbf833e5595acbe7617b6bd61ad6f25c9fc748
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-24-close-run-quota-fallback:flow:测试绑定FR-02
+  tests: backend/app/modules/daemon/tests/test_close_interactive_run_quota_log_fallback.py「test_daemon_error_takes_precedence_over_log_inference」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-24-close-run-quota-fallback
+  status: active
+
+## FR-daemon-274 日志无 API Error 行或不命中限额特征时行为不变（error_detail 保持 NULL，既有兜底文案照旧）
+变更：2026-10-24-close-run-quota-fallback
+状态：active
+摘要：非限额错误不伪造；无任何错误日志行不伪造
+场景正文：
+- 场景：非限额错误不伪造 — Given 一个 running 的交互 run，其日志已落库 `[ASSISTANT] API Error: 401 invalid api key`（无 429），；When close_interactive_run 以 is_error=True、error=None 收口，；Then run.error_detail 保持 None，error_code=="interactive_failed"，output_redacted 为「本轮执行
+- 场景：无任何错误日志行不伪造 — Given 一个 running 的交互 run 且无任何含 "API Error" 的日志行、result_summary=None，；When close_interactive_run 以 is_error=True、error=None 收口，；Then run.error_detail 保持 None，既有兜底文案照旧落 output_redacted。
+全文：.sillyspec/changes/archive/2026-10-24-close-run-quota-fallback/requirements.md#FR-03
+最近确认：92bbf833e5595acbe7617b6bd61ad6f25c9fc748
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-24-close-run-quota-fallback:flow:测试绑定FR-03
+  tests: backend/app/modules/daemon/tests/test_close_interactive_run_quota_log_fallback.py「test_no_api_error_log_keeps_legacy_behavior」 | backend/app/modules/daemon/tests/test_close_interactive_run_quota_log_fallback.py「test_non_quota_api_error_not_inferred」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-24-close-run-quota-fallback
+  status: active
+
+## FR-daemon-275 补 backend 测试覆盖上述分支，既有相关测试不回归
+变更：2026-10-24-close-run-quota-fallback
+状态：active
+摘要：回归面
+场景正文：
+- 场景：回归面 — When 对 backend/app/modules/daemon/tests/test_close_interactive_run_model_error.py 与新测；Then 全部用例通过。
+全文：.sillyspec/changes/archive/2026-10-24-close-run-quota-fallback/requirements.md#FR-04
+最近确认：92bbf833e5595acbe7617b6bd61ad6f25c9fc748
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-24-close-run-quota-fallback:flow:测试绑定FR-04
+  tests: backend/app/modules/daemon/tests/test_close_interactive_run_model_error.py | backend/app/modules/daemon/tests/test_close_interactive_run_quota_log_fallback.py
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-24-close-run-quota-fallback
+  status: active

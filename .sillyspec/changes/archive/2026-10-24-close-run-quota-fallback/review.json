@@ -1,0 +1,22 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-24-close-run-quota-fallback",
+  "reviewer": "subagent",
+  "verdict": "PASS",
+  "reviewedAgainst": "92bbf833e5595acbe7617b6bd61ad6f25c9fc748",
+  "findings": [
+    {
+      "severity": "P3",
+      "title": "code 提取仅对齐 daemon extractCode 的方括号码一级，与「语义对齐 classifier」的标题措辞存在可观察差异（设计有意收窄，非缺陷，留痕防漂移审查遗漏）",
+      "evidence": "daemon extractCode（classifier.ts:126-156）为三级回退：方括号码 > EN* 网络码 > HTTP 状态码（quota 429 无方括号码时会提取 code=\"429\"）；后端 _infer_quota_error 仅有 _QUOTA_BRACKET_CODE_RE 方括号一级（close_run_steps.py），无方括号码时 code=None。requirements FR-01 承诺文本即「code=方括号业务码」、design 接口契约亦写「extractCode（方括号业务码）」，承诺自洽；code=None 为保守回退无误导，测试 test_quota_error_via_result_summary_inferred 已断言 code is None。仅提示：daemon 侧 extractCode 改动时此处须同步（design 自设评审检查点）。",
+      "location": "backend/app/modules/daemon/run_sync/service/close_run_steps.py:47"
+    }
+  ],
+  "dimensionNotes": {
+    "乱序": "边界已裁决：可接受（design 声明旧 daemon 日志落库顺序颠倒时最坏推断不到、退化为现状——daemon.ts:4129 await flushInteractiveBatches 时序假设经 grep 实证存在；漏推断不写错数据，等价现状无害）",
+    "并发": "ok（_close_verify_and_load 持 FOR UPDATE 行锁——close_run_steps.py:368 实证；推断只读日志 + 补写本 run 行参数，与日志追加无锁冲突；close 对已终态 run no-op 守卫位于推断接线之前，重试不反复触发）",
+    "切换": "边界已裁决：可接受（best-effort 边界：查询段 try/except 仅 warn 不阻塞收口——实证存在；纯函数与 ModelErrorDTO 构造段虽在 try 外，但 model_error.py 仅 type 一个宽松 validator、其余字段为简单类型，无实际抛错面，防护实质生效）",
+    "作用域": "ok（日志查询 where run_id == agent_run.id 精确锚定，不读其它 run/会话/工作区数据；关键词正则 provider 无关，与 daemon classifyBlob 同构）"
+  },
+  "reviewedAt": "2026-10-24T00:36:47+08:00"
+}
