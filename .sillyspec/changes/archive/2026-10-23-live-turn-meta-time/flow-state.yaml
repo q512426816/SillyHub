@@ -1,0 +1,50 @@
+tier: thin
+legacy_fallback: false
+substeps:
+  artifacts: done
+  ledger: done
+  patch: done
+  review: done
+  probes: done
+  distill: done
+  archive: done
+  events: done
+born_face: thin
+with_tasks: false
+review_force: null
+input: >-
+  进行中轮次底部元信息时间显示修复
+
+
+  会话页进行中轮次底部显示「开始 X · 结束 X · 历时 00:00」——结束时刻错显为开始时刻、历时恒 00:00。用户裁决：进行中不显示「结束」；「历时」显示当前轮次实时总耗时且每秒变化（参考轮次顶部 TurnStatusBar
+  走秒行为）。
+
+
+  成功标准：
+
+  - 进行中（running/pending/interrupting）轮次底部元信息行只显示「开始 HH:MM:SS · 历时 mm:ss」，无「结束」字样，历时随时间每秒递增
+
+  - 轮次完成后该行恢复「开始 · 结束 · 历时」三段（既有行为不变）
+
+  - 终态轮（无进行中态）显示零回归，既有 turn-time-display 测试全绿
+autopilot: false
+prestage_ack: false
+baseline_commit: 68568f82efb6b7949e8436e216d14139ddb04fea
+updatedAt: '2026-10-23T02:54:14.746Z'
+cross_baselines:
+  sillyspec: b0410b828d7357b0c709665bc0a68482e6dbb26a
+baseline_sha256: e45ae87eb445b48eddb46bfe86ed4957f877d85f38c286d07010ac2c9cdd78cb
+spec_approved: true
+spec_approved_at: '2026-10-23T02:32:43.089Z'
+spec_approved_by: mainagent-live-turn-meta-fix
+spec_approved_channel: user-confirmed
+spec_attested_by: mainagent-live-turn-meta-fix
+batch_ticked: true
+gate_summary: >-
+  test: passed ← module[]+deps(py25+jsx5)（144.8s）
+  结果：C:\Users\qinyi\IdeaProjects\multi-agent-platform\.sillyspec\.runtime\verify-runs\20261023025100\test-result.json｜lint:
+  passed ← cd backend && uv run ruff check . && uv run ruff format --check . && uv run mypy app && cd ../frontend &&
+  pnpm lint && cd ../sillyhub-daemon && pnpm typecheck（19.3s）
+  结果：C:\Users\qinyi\IdeaProjects\multi-agent-platform\.sillyspec\.runtime\verify-runs\20261023025100\test-result.json｜门文件
+  262 个
+

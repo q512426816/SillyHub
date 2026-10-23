@@ -1469,3 +1469,11 @@
 锚点：未记录
 最近确认：33645b42e6613df200997828141cff7eabdaafba
 理由：- 风险：速度过快时短文本重复感更明显；3s 为折中值，若仍不合适继续微调该单一常量即可。 - 放弃方案：按文本长度动态计算时长（需要测量宽度、增加 JS 复杂度，收益有限）；改轨道整体速度（用户只反馈条目内部滚动慢，轨道行为已被确认）。
+
+## D-unmapped-192@v1 设计期风险与放弃方案（底稿）
+状态：implemented
+变更：2026-10-23-live-turn-meta-time
+原编号：D-001@v1
+锚点：未记录
+最近确认：475a8da2eec4b9e711dbd43e881244d506a474aa
+理由：最大风险：RoundDivider 是 memo 组件，detail 从 string（值相等可命中 memo）变为运行中轮每渲染新建的 React 元素 → 该轮 RoundDivider memo 恒 miss。评估：仅单条运行中轮受影响、RoundDivider 渲染成本极小（几个 span），且运行中轮本就随流式 delta 高频重渲染（tokens meta 同步变化），无可感差异；终态轮 detail 仍是 string，memo 命中率不变。 放弃方案：① 父级 TurnRow 持 interval 整体重算 metaDetail——每秒整轮重渲染，违反渲染经济铁律（FR-06 惯例，TurnStatusBar 注释明载 tick 不外溢），放弃；② 只改数据层（running → replyAt=null）——该位置整体消失，不满足「进行中显示实时走秒历时」的用户裁决，放弃；③ RoundDivider 开专用 liveElapsed prop——为单场景在共享组件上扩接口面，比向后兼容的类型放宽侵入更大，放弃。

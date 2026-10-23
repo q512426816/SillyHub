@@ -88,3 +88,4 @@ created_at: 2026-08-27 14:32:24
 - 2026-10-23-review-risk-fixes-2 | 审查遗留四处风险修复
 - 2026-10-23-turn-file-diff-dialog | 轮次文件变更卡行点击弹窗显示变更内容（18字）
 - 2026-10-23-marquee-ticker-speed | 跑马灯条目内部滚动提速
+- 2026-10-23-live-turn-meta-time | 进行中轮次底部元信息时间显示修复

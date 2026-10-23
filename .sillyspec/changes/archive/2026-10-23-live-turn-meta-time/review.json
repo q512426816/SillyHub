@@ -1,0 +1,22 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-23-live-turn-meta-time",
+  "reviewer": "inline-self（环境无已注册子代理，主会话代行）",
+  "verdict": "PASS",
+  "reviewedAgainst": "475a8da2eec4b9e711dbd43e881244d506a474aa",
+  "findings": [
+    {
+      "severity": "P3",
+      "title": "page-helpers.tsx 实现体经并行会话提交 3e07d5374 整文件带入（非本变更提交），冻结面归属切分已机械标注，功能在 HEAD 可验证",
+      "evidence": "HEAD 上 enrichDisplayTurns 活跃 run 分支（ACTIVE_RUN_STATUSES.has(meta.status) ? null : meta.started_at）真实存在，且被 runtime-session-helpers 新增 4 用例（running/pending/pending_approval 不伪造、?? 链优先、终态旧数据回退保持）锁定，HEAD 复跑全绿",
+      "location": "frontend/src/components/daemon/session-panel/page-helpers.tsx:240"
+    }
+  ],
+  "dimensionNotes": {
+    "乱序": "ok｜边界已裁决：可接受——isLiveTurn 优先于 replyAt（快照 finished_at 先到而日志未收尾时继续走秒，收尾事件到达自然切三段），测试「伪 replyAt 防御」用例锁定",
+    "并发": "ok｜边界已裁决：可接受——运行中轮 RoundDivider memo 恒 miss（detail 为每渲染新建元素），design 风险节已披露：仅单条运行中轮、组件成本极小且本就高频重渲染，无可感差异",
+    "切换": "ok——TurnLiveElapsedText useEffect cleanup 清 interval 真实存在，「运行中→完成」用例 +5s 文本不变锁定卸载语义",
+    "作用域": "ok——纯前端渲染层 + 快照补齐纯函数，backend/daemon 跨仓零触达（冻结面内 backend 文件均属并行变更，归属切分已核）"
+  },
+  "reviewedAt": "2026-10-23T02:55:00.000Z"
+}

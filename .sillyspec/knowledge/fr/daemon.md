@@ -7184,3 +7184,60 @@
 摘要：交付核验
 全文：.sillyspec/changes/archive/2026-10-22-session-composer-slim/requirements.md#FR-05
 最近确认：4d6c17185a01e72e287a48f8a0b1f003dd5f63b6
+
+## FR-daemon-254 进行中（running/pending/interrupting）轮次底部元信息行只显示「开始 HH:MM:SS · 历时 mm:ss」，无「结束」字样，历时随时间每秒递增
+变更：2026-10-23-live-turn-meta-time
+状态：active
+摘要：进行中轮次底部元信息（主路径）；进行中但数据层仍带 replyAt（防御）；进行中但计时锚点缺失
+全文：.sillyspec/changes/archive/2026-10-23-live-turn-meta-time/requirements.md#FR-01
+最近确认：475a8da2eec4b9e711dbd43e881244d506a474aa
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-23-live-turn-meta-time:flow:测试绑定FR-01
+  tests: test/src/components/daemon/__tests__/turn-time-display.test.tsx「进行中轮次：底部元信息只显开始+实时历时，无结束字样（fake timers 走秒递增）」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-23-live-turn-meta-time
+  status: active
+
+## FR-daemon-255 轮次完成后该行恢复「开始 · 结束 · 历时」三段（既有行为不变）
+变更：2026-10-23-live-turn-meta-time
+状态：active
+摘要：运行中 → 完成态切换；活跃 run 快照补齐不再伪造 replyAt
+全文：.sillyspec/changes/archive/2026-10-23-live-turn-meta-time/requirements.md#FR-02
+最近确认：475a8da2eec4b9e711dbd43e881244d506a474aa
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-23-live-turn-meta-time:flow:测试绑定FR-02
+  tests: test/src/components/daemon/__tests__/runtime-session-helpers.test.tsx「活跃 run 快照（finished_at=null）不再把 replyAt 回退成 started_at」 | test/src/components/daemon/__tests__/turn-time-display.test.tsx「进行中→完成：元信息行切换为开始·结束·历时三段（走秒组件卸载）」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-23-live-turn-meta-time
+  status: active
+
+## FR-daemon-256 终态轮（无进行中态）显示零回归，既有 turn-time-display 测试全绿
+变更：2026-10-23-live-turn-meta-time
+状态：active
+摘要：完成轮双锚点（回归锁定）
+全文：.sillyspec/changes/archive/2026-10-23-live-turn-meta-time/requirements.md#FR-03
+最近确认：475a8da2eec4b9e711dbd43e881244d506a474aa
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-23-live-turn-meta-time:flow:测试绑定FR-03
+  tests: test/src/components/daemon/__tests__/turn-time-display.test.tsx「既有完成轮/仅 replyAt 回退/进度视图用例全绿（零回归）」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-23-live-turn-meta-time
+  status: active

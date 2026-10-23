@@ -1,0 +1,52 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-23-live-turn-meta-time",
+  "rows": [
+    {
+      "anchor": "FR-01",
+      "row_id": "2026-10-23-live-turn-meta-time:flow:测试绑定FR-01",
+      "tests": [
+        "test/src/components/daemon/__tests__/turn-time-display.test.tsx「进行中轮次：底部元信息只显开始+实时历时，无结束字样（fake timers 走秒递增）」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-23-live-turn-meta-time"
+    },
+    {
+      "anchor": "FR-02",
+      "row_id": "2026-10-23-live-turn-meta-time:flow:测试绑定FR-02",
+      "tests": [
+        "test/src/components/daemon/__tests__/runtime-session-helpers.test.tsx「活跃 run 快照（finished_at=null）不再把 replyAt 回退成 started_at」",
+        "test/src/components/daemon/__tests__/turn-time-display.test.tsx「进行中→完成：元信息行切换为开始·结束·历时三段（走秒组件卸载）」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-23-live-turn-meta-time"
+    },
+    {
+      "anchor": "FR-03",
+      "row_id": "2026-10-23-live-turn-meta-time:flow:测试绑定FR-03",
+      "tests": [
+        "test/src/components/daemon/__tests__/turn-time-display.test.tsx「既有完成轮/仅 replyAt 回退/进度视图用例全绿（零回归）」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-23-live-turn-meta-time"
+    }
+  ]
+}
