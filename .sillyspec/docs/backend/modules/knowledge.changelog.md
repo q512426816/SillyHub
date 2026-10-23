@@ -4,3 +4,4 @@
 - 2026-10-19-knowledge-search-build-switch | 知识搜索禁建库开关：根治首搜建库地雷
 - 2026-10-19-thinking-zh-translate | 思考内容离线翻译为中文展示
 - 2026-10-22-merge-test-debt | 合并后测试债清偿：l10n文案与守卫钉子同步
+- 2026-10-23-knowledge-scope-maintenance | 知识注入作用域维护面板

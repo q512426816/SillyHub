@@ -1,0 +1,270 @@
+{
+  "change": "2026-10-23-knowledge-scope-maintenance",
+  "baseline": "03e55ed4e74d173da27c5457c1c0d3e380541fd7",
+  "head": "80f9dd90355be5253439d049cadcd771baf88c09",
+  "files": [
+    ".sillyspec/docs/SillyHub/modules/daemon.changelog.md",
+    ".sillyspec/docs/multi-agent-platform/modules/sillyhub-daemon.changelog.md",
+    "backend/app/modules/knowledge/parser.py",
+    "backend/app/modules/knowledge/router.py",
+    "backend/app/modules/knowledge/schema.py",
+    "backend/app/modules/knowledge/service.py",
+    "backend/app/modules/knowledge/tests/test_scope_maintenance.py",
+    "backend/app/modules/knowledge/writer.py",
+    "frontend/src/app/(dashboard)/workspaces/[id]/knowledge/page.tsx",
+    "frontend/src/components/knowledge/__tests__/scope-maintain-dialog.test.tsx",
+    "frontend/src/components/knowledge/entry-card-list.tsx",
+    "frontend/src/components/knowledge/scope-maintain-dialog.tsx",
+    "frontend/src/lib/api-types.ts",
+    "frontend/src/lib/knowledge.ts",
+    "sillyhub-daemon/src/interactive/session-manager/events.ts",
+    "sillyhub-daemon/src/interactive/session-manager/turn-control.ts",
+    "sillyhub-daemon/src/interactive/types.ts",
+    "sillyhub-daemon/tests/interactive/turn-start-watchdog.test.ts"
+  ],
+  "totals": {
+    "files": 18,
+    "additions": 1325,
+    "deletions": 11
+  },
+  "savedAt": "2026-10-23T08:53:34.473Z",
+  "note": "flow done 时点冻结（本变更可归属交付面：baseline..HEAD 提交面过滤 .sillyspec/ 只留 .sillyspec/docs/ 交付文档 + 独占树未提交交付；治理工件目录不入冻结——2026-10-12-close-trace-freeze-integrity FR-01）",
+  "modules": [
+    {
+      "id": "knowledge",
+      "files": 6,
+      "doc": "docs/backend/modules/knowledge.md",
+      "docTouched": false,
+      "docMissing": false
+    },
+    {
+      "id": "backend",
+      "files": 6,
+      "doc": "docs/multi-agent-platform/modules/backend.md",
+      "docTouched": false,
+      "docMissing": false
+    },
+    {
+      "id": "frontend",
+      "files": 6,
+      "doc": "docs/multi-agent-platform/modules/frontend.md",
+      "docTouched": false,
+      "docMissing": false
+    },
+    {
+      "id": "sillyhub-daemon",
+      "files": 4,
+      "doc": "docs/multi-agent-platform/modules/sillyhub-daemon.md",
+      "docTouched": false,
+      "docMissing": false
+    },
+    {
+      "id": "daemon",
+      "files": 4,
+      "doc": "docs/SillyHub/modules/daemon.md",
+      "docTouched": false,
+      "docMissing": false
+    },
+    {
+      "id": "knowledge",
+      "files": 6,
+      "doc": "docs/SillyHub/modules/knowledge.md",
+      "docTouched": false,
+      "docMissing": false
+    },
+    {
+      "id": "frontend_app",
+      "files": 1,
+      "doc": "docs/SillyHub/modules/frontend_app.md",
+      "docTouched": false,
+      "docMissing": false
+    },
+    {
+      "id": "frontend_components",
+      "files": 3,
+      "doc": "docs/SillyHub/modules/frontend_components.md",
+      "docTouched": false,
+      "docMissing": false
+    },
+    {
+      "id": "frontend_lib",
+      "files": 2,
+      "doc": "docs/SillyHub/modules/frontend_lib.md",
+      "docTouched": false,
+      "docMissing": false
+    }
+  ],
+  "uncoveredDirs": [],
+  "moduleMaps": [
+    "docs/backend/modules/_module-map.yaml",
+    "docs/frontend/modules/_module-map.yaml",
+    "docs/multi-agent-platform/modules/_module-map.yaml",
+    "docs/SillyHub/modules/_module-map.yaml",
+    "docs/sillyhub-daemon/modules/_module-map.yaml"
+  ],
+  "acceptedDirtyGap": 1,
+  "scopeAudit": {
+    "mode": "full-flow",
+    "ok": true,
+    "degradedReason": null,
+    "baseAnchor": "03e55ed4e74d173da27c5457c1c0d3e380541fd7",
+    "totals": {
+      "files": 18,
+      "additions": 1325,
+      "deletions": 11
+    },
+    "rows": [
+      {
+        "path": ".sillyspec/docs/SillyHub/modules/daemon.changelog.md",
+        "additions": 1,
+        "deletions": 0,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": ".sillyspec/docs/multi-agent-platform/modules/sillyhub-daemon.changelog.md",
+        "additions": 1,
+        "deletions": 0,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": "backend/app/modules/knowledge/parser.py",
+        "additions": 63,
+        "deletions": 0,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "planned"
+      },
+      {
+        "path": "backend/app/modules/knowledge/router.py",
+        "additions": 24,
+        "deletions": 0,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "planned"
+      },
+      {
+        "path": "backend/app/modules/knowledge/schema.py",
+        "additions": 30,
+        "deletions": 0,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "planned"
+      },
+      {
+        "path": "backend/app/modules/knowledge/service.py",
+        "additions": 17,
+        "deletions": 2,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "planned"
+      },
+      {
+        "path": "backend/app/modules/knowledge/tests/test_scope_maintenance.py",
+        "additions": 222,
+        "deletions": 0,
+        "kind": "new",
+        "planned": null,
+        "verdict": "planned"
+      },
+      {
+        "path": "backend/app/modules/knowledge/writer.py",
+        "additions": 108,
+        "deletions": 1,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "planned"
+      },
+      {
+        "path": "frontend/src/app/(dashboard)/workspaces/[id]/knowledge/page.tsx",
+        "additions": 88,
+        "deletions": 2,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "planned"
+      },
+      {
+        "path": "frontend/src/components/knowledge/__tests__/scope-maintain-dialog.test.tsx",
+        "additions": 124,
+        "deletions": 0,
+        "kind": "new",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": "frontend/src/components/knowledge/entry-card-list.tsx",
+        "additions": 66,
+        "deletions": 0,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "planned"
+      },
+      {
+        "path": "frontend/src/components/knowledge/scope-maintain-dialog.tsx",
+        "additions": 235,
+        "deletions": 0,
+        "kind": "new",
+        "planned": null,
+        "verdict": "planned"
+      },
+      {
+        "path": "frontend/src/lib/api-types.ts",
+        "additions": 100,
+        "deletions": 0,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": "frontend/src/lib/knowledge.ts",
+        "additions": 59,
+        "deletions": 2,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "planned"
+      },
+      {
+        "path": "sillyhub-daemon/src/interactive/session-manager/events.ts",
+        "additions": 25,
+        "deletions": 0,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": "sillyhub-daemon/src/interactive/session-manager/turn-control.ts",
+        "additions": 30,
+        "deletions": 4,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": "sillyhub-daemon/src/interactive/types.ts",
+        "additions": 13,
+        "deletions": 0,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": "sillyhub-daemon/tests/interactive/turn-start-watchdog.test.ts",
+        "additions": 119,
+        "deletions": 0,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "unplanned"
+      }
+    ],
+    "excluded": {
+      "foreignDeclared": []
+    },
+    "note": "flow done 时点冻结（本文件落盘时采集）",
+    "closedBy": "flow done"
+  },
+  "patchSha256": "d7aec7fd82a36815d74cc79de01c6072d7d04cc80fffc9ae789f9fbd3f932f52",
+  "patchStatus": "ok"
+}

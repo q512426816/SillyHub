@@ -1,0 +1,1695 @@
+diff --git a/.sillyspec/docs/SillyHub/modules/daemon.changelog.md b/.sillyspec/docs/SillyHub/modules/daemon.changelog.md
+index bc85f13bc..5914b8a75 100644
+--- a/.sillyspec/docs/SillyHub/modules/daemon.changelog.md
++++ b/.sillyspec/docs/SillyHub/modules/daemon.changelog.md
+@@ -96,3 +96,4 @@ created_at: 2026-08-27 14:32:24
+ - 2026-10-23-session-network-context | 2026-10-23-session-network-context
+ - 2026-10-23-session-first-window-turn-align | 会话重新进入时首屏历史窗口按最近 400 条日志截断，单轮日志超过 400 条时窗口起点落在该轮中段…
+ - 2026-10-23-skill-prune-git-safe | daemon 会话启动时的技能裁剪(pruneSkillsToSubset)直接 rm -rf 删除…
++- 2026-10-23-watchdog-steering-guard | 修复看门狗误杀活轮与陈旧判定
+diff --git a/.sillyspec/docs/multi-agent-platform/modules/sillyhub-daemon.changelog.md b/.sillyspec/docs/multi-agent-platform/modules/sillyhub-daemon.changelog.md
+index 70a0d16f9..e83a51a9f 100644
+--- a/.sillyspec/docs/multi-agent-platform/modules/sillyhub-daemon.changelog.md
++++ b/.sillyspec/docs/multi-agent-platform/modules/sillyhub-daemon.changelog.md
+@@ -41,3 +41,4 @@
+ - 2026-10-23-session-network-context | 2026-10-23-session-network-context
+ - 2026-10-23-session-first-window-turn-align | 会话重新进入时首屏历史窗口按最近 400 条日志截断，单轮日志超过 400 条时窗口起点落在该轮中段…
+ - 2026-10-23-skill-prune-git-safe | daemon 会话启动时的技能裁剪(pruneSkillsToSubset)直接 rm -rf 删除…
++- 2026-10-23-watchdog-steering-guard | 修复看门狗误杀活轮与陈旧判定
+diff --git a/backend/app/modules/knowledge/parser.py b/backend/app/modules/knowledge/parser.py
+index 627aa35b6..7253accaa 100644
+--- a/backend/app/modules/knowledge/parser.py
++++ b/backend/app/modules/knowledge/parser.py
+@@ -49,6 +49,69 @@ def _extract_title(content: str) -> str | None:
+     return None
+ 
+ 
++#: 知识注入作用域标记（2026-10-23-knowledge-scope-maintenance，与 CLI knowledge-scope.js
++#: 标记语法同源）：HTML 注释形态，写在 section heading 之后、本节内有效。
++SCOPE_MARKER_RE = re.compile(
++    r"<!--\s*scope\s*:\s*(always|repo|module\s*:\s*([^>]+?))\s*-->", re.IGNORECASE
++)
++_HEADING_LINE_RE = re.compile(r"^(#{1,6})\s+(.+?)\s*$")
++
++
++def extract_scope_sections(content: str | None) -> list[dict]:
++    """解析文件内携带作用域标记的节（heading/scope/domains）。
++
++    与 CLI 注入扫描同口径：节边界=任意级 heading；标记行须落在本节内；
++    无标记节不返回。返回 [{heading, scope, domains}]。
++    """
++    sections: list[dict] = []
++    if not content:
++        return sections
++    cur: dict | None = None
++
++    def flush() -> None:
++        nonlocal cur
++        if cur is not None and cur.get("scope"):
++            sections.append(
++                {"heading": cur["heading"], "scope": cur["scope"], "domains": cur["domains"]}
++            )
++        cur = None
++
++    for raw in content.splitlines():
++        h = _HEADING_LINE_RE.match(raw)
++        if h:
++            flush()
++            cur = {"heading": h.group(2).strip(), "scope": None, "domains": []}
++            continue
++        if cur is None:
++            continue
++        m = SCOPE_MARKER_RE.search(raw)
++        if not m:
++            continue
++        kind = m.group(1).lower()
++        if kind.startswith("module"):
++            cur["scope"] = "module"
++            cur["domains"] = [d.strip() for d in (m.group(2) or "").split(",") if d.strip()]
++        else:
++            cur["scope"] = kind
++            cur["domains"] = []
++    flush()
++    return sections
++
++
++def extract_headings(content: str | None) -> list[str]:
++    """文件内全部 section heading 清单（作用域维护目标选择用；与标记解析同口径）。"""
++    if not content:
++        return []
++    out: list[str] = []
++    for raw in content.splitlines():
++        m = _HEADING_LINE_RE.match(raw)
++        if m:
++            h = m.group(2).strip()
++            if h and h not in out:
++                out.append(h)
++    return out
++
++
+ def _read_file_safe(path: Path) -> tuple[str, bool]:
+     size = path.stat().st_size
+     if size > MAX_CONTENT_BYTES:
+diff --git a/backend/app/modules/knowledge/router.py b/backend/app/modules/knowledge/router.py
+index 451fdb4b2..3b58a2aae 100644
+--- a/backend/app/modules/knowledge/router.py
++++ b/backend/app/modules/knowledge/router.py
+@@ -36,6 +36,7 @@ from app.modules.knowledge.schema import (
+     KnowledgeMergeIn,
+     KnowledgeMergeResult,
+     KnowledgeProposeIn,
++    KnowledgeScopeIn,
+     KnowledgeSearchIn,
+     KnowledgeSearchOut,
+     KnowledgeSearchResultItem,
+@@ -109,6 +110,29 @@ async def update_knowledge_entry(
+     )
+ 
+ 
++@router.patch("/knowledge/scope", response_model=KnowledgeEntry)
++async def update_knowledge_scope(
++    workspace_id: uuid.UUID,
++    payload: KnowledgeScopeIn,
++    session: SessionDep,
++    user: Annotated[User, Depends(require_permission(Permission.KNOWLEDGE_WRITE))],
++) -> KnowledgeEntry:
++    """节级注入作用域维护（2026-10-23-knowledge-scope-maintenance）。
++
++    always/repo/module 写入对应 marker；keyword=移除本节 marker（回关键词档）。
++    仅 top zone 顶层知识文件；heading 精确唯一；写入走单写者 apply_ops。
++    """
++    service = KnowledgeWriterService(session)
++    return await service.update_scope(
++        workspace_id,
++        user,
++        filename=payload.filename,
++        heading=payload.heading,
++        scope=payload.scope,
++        domains=payload.domains,
++    )
++
++
+ @router.post("/knowledge/proposed/{filename:path}/preview-merge", response_model=MergePreviewOut)
+ async def preview_merge_knowledge(
+     workspace_id: uuid.UUID,
+diff --git a/backend/app/modules/knowledge/schema.py b/backend/app/modules/knowledge/schema.py
+index c513525db..9f2acea0a 100644
+--- a/backend/app/modules/knowledge/schema.py
++++ b/backend/app/modules/knowledge/schema.py
+@@ -9,6 +9,18 @@ from typing import Literal
+ from pydantic import BaseModel, ConfigDict, Field, field_validator
+ 
+ 
++class KnowledgeSection(BaseModel):
++    """节级注入作用域（2026-10-23-knowledge-scope-maintenance）。
++
++    与 CLI `knowledge-scope.js` 标记语法同源：节内 `<!-- scope: always|repo|module:域 -->`。
++    无标记节不返回（空数组=该文件无作用域声明）。
++    """
++
++    heading: str
++    scope: Literal["always", "repo", "module"]
++    domains: list[str] = Field(default_factory=list)
++
++
+ class KnowledgeEntry(BaseModel):
+     """A single knowledge file entry."""
+ 
+@@ -25,6 +37,11 @@ class KnowledgeEntry(BaseModel):
+     # knowledge-effect-panel）先加字段默认 None（DTO 契约先行），task-03 由
+     # list 透传真实聚合值；前端文件级 🔥 徽标数据源。
+     use_count: int | None = None
++    # 节级注入作用域（2026-10-23-knowledge-scope-maintenance，加法字段）：有标记的节
++    # 逐条返回，无标记文件为空数组——旧消费方零影响。
++    sections: list[KnowledgeSection] = Field(default_factory=list)
++    # 全部 section heading（同变更加法字段）：作用域维护对话框的目标节选择源。
++    headings: list[str] = Field(default_factory=list)
+ 
+ 
+ class KnowledgeList(BaseModel):
+@@ -68,6 +85,19 @@ class KnowledgeUpdateIn(BaseModel):
+     content: str
+ 
+ 
++class KnowledgeScopeIn(BaseModel):
++    """PATCH /knowledge/scope 请求体（节级作用域维护；keyword=移除标记）。
++
++    2026-10-23-knowledge-scope-maintenance：语义与 CLI 四档一致——always/repo/module
++    写入对应 marker；keyword 清除本节 marker（回关键词档）；module 档 domains 必填。
++    """
++
++    filename: str = Field(min_length=1, max_length=500)
++    heading: str = Field(min_length=1, max_length=200)
++    scope: Literal["always", "repo", "module", "keyword"]
++    domains: list[str] = Field(default_factory=list, max_length=8)
++
++
+ class KnowledgeMergeIn(BaseModel):
+     """合并请求体（preview-merge / merge 共用）。
+ 
+diff --git a/backend/app/modules/knowledge/service.py b/backend/app/modules/knowledge/service.py
+index fdedeed7d..b303b40a0 100644
+--- a/backend/app/modules/knowledge/service.py
++++ b/backend/app/modules/knowledge/service.py
+@@ -9,8 +9,19 @@ from pathlib import Path
+ 
+ from sqlalchemy.ext.asyncio import AsyncSession
+ 
+-from app.modules.knowledge.parser import KnowledgeParser, ParsedEntry
+-from app.modules.knowledge.schema import KnowledgeEntry, KnowledgeList, QuicklogEntry, QuicklogList
++from app.modules.knowledge.parser import (
++    KnowledgeParser,
++    ParsedEntry,
++    extract_headings,
++    extract_scope_sections,
++)
++from app.modules.knowledge.schema import (
++    KnowledgeEntry,
++    KnowledgeList,
++    KnowledgeSection,
++    QuicklogEntry,
++    QuicklogList,
++)
+ from app.modules.workspace.service import WorkspaceService
+ 
+ 
+@@ -234,6 +245,10 @@ class KnowledgeService:
+             content=e.content if include_content else None,
+             last_modified_at=e.last_modified_at,
+             use_count=use_count,
++            # 节级注入作用域（2026-10-23-knowledge-scope-maintenance）：content 在
++            # ParsedEntry 内恒在场（DTO 是否回传不影响解析），无标记→空数组。
++            sections=[KnowledgeSection(**s) for s in extract_scope_sections(e.content)],
++            headings=extract_headings(e.content),
+         )
+ 
+     @staticmethod
+diff --git a/backend/app/modules/knowledge/tests/test_scope_maintenance.py b/backend/app/modules/knowledge/tests/test_scope_maintenance.py
+new file mode 100644
+index 000000000..d9fedd7f1
+--- /dev/null
++++ b/backend/app/modules/knowledge/tests/test_scope_maintenance.py
+@@ -0,0 +1,222 @@
++"""知识注入作用域维护（2026-10-23-knowledge-scope-maintenance）。
++
++覆盖：
++- sections 透传：GET 列表条目的节级作用域（always/repo/module+domains；无标记空数组）
++- update_scope 增/改/删：keyword=移除标记；只改本节 marker，其他节逐字保留
++- 422 矩阵：decisions zone / INDEX.md / 子目录 / heading 不存在 / heading 多义 /
++  module 缺 domains / 非法域 id
++
++author: qinyi
++created_at: 2026-10-23
++"""
++
++from __future__ import annotations
++
++import base64
++import uuid
++from types import SimpleNamespace
++
++import pytest
++
++from app.modules.auth.model import User
++from app.modules.knowledge.service import KnowledgeService
++from app.modules.knowledge.writer import KnowledgeEditForbidden, KnowledgeWriterService
++from app.modules.spec_workspace.model import SpecWorkspace
++from app.modules.spec_workspace.schema import FileOp
++from app.modules.spec_workspace.service import SpecWorkspaceService
++from app.modules.workspace.model import Workspace
++
++PATTERNS_MD = (
++    "# Patterns\n"
++    "\n"
++    "## 既有\n"
++    "\n"
++    "已有小节。\n"
++    "\n"
++    "## 模块路由\n"
++    "\n"
++    "<!-- scope: module:cli-entry,core-engine -->\n"
++    "\n"
++    "域 id 与 FR 域同源。\n"
++    "\n"
++    "## 通用规约\n"
++    "\n"
++    "<!-- scope: always -->\n"
++    "\n"
++    "每次变更都注入的规约。\n"
++)
++DECISION_MD = "# Decision Daemon\n\n决策正文。\n"
++
++
++def _b64(text: str) -> str:
++    return base64.b64encode(text.encode("utf-8")).decode("ascii")
++
++
++@pytest.fixture()
++async def env(db_session, tmp_path):
++    """平台管理 spec_root + 经 apply_ops 铺底的知识树（与 test_writer 同款）。"""
++    ws = Workspace(
++        id=uuid.uuid4(),
++        name="knowledge-scope",
++        slug=f"ks-{uuid.uuid4().hex[:8]}",
++        root_path=str(tmp_path / "client-machine-path"),
++        status="active",
++    )
++    db_session.add(ws)
++    await db_session.commit()
++    await db_session.refresh(ws)
++
++    spec_root = tmp_path / "scope-spec"
++    db_session.add(
++        SpecWorkspace(
++            id=uuid.uuid4(),
++            workspace_id=ws.id,
++            spec_root=str(spec_root),
++            strategy="platform-managed",
++            sync_status="clean",
++        )
++    )
++    await db_session.commit()
++
++    await SpecWorkspaceService(db_session).apply_ops(
++        ws.id,
++        [
++            FileOp(
++                op="add",
++                path="knowledge/patterns.md",
++                content=_b64(PATTERNS_MD),
++                base_version=0,
++            ),
++            FileOp(
++                op="add",
++                path="knowledge/decisions/daemon.md",
++                content=_b64(DECISION_MD),
++                base_version=0,
++            ),
++        ],
++    )
++
++    user = User(
++        id=uuid.uuid4(),
++        display_name="张三",
++        email="zhang@example.com",
++        status="active",
++        is_platform_admin=True,
++    )
++    return SimpleNamespace(ws=ws, spec_root=spec_root, user=user, session=db_session)
++
++
++class TestSectionsRead:
++    async def test_list_transports_section_scopes(self, env, db_session) -> None:
++        listing = await KnowledgeService(db_session).list_knowledge(env.ws.id)
++        patterns = next(i for i in listing.items if i.filename == "patterns.md")
++        by_heading = {s.heading: s for s in patterns.sections}
++        assert set(by_heading) == {"模块路由", "通用规约"}
++        assert by_heading["模块路由"].scope == "module"
++        assert by_heading["模块路由"].domains == ["cli-entry", "core-engine"]
++        assert by_heading["通用规约"].scope == "always"
++        assert by_heading["通用规约"].domains == []
++        # 无标记文件 → 空数组（零回归）
++        decision = next(i for i in listing.items if i.filename == "decisions/daemon.md")
++        assert decision.sections == []
++
++
++class TestUpdateScope:
++    async def test_add_marker_keeps_other_sections(self, env, db_session) -> None:
++        writer = KnowledgeWriterService(db_session)
++        entry = await writer.update_scope(
++            env.ws.id,
++            env.user,
++            filename="patterns.md",
++            heading="既有",
++            scope="repo",
++            domains=[],
++        )
++        assert [s.scope for s in entry.sections if s.heading == "既有"] == ["repo"]
++        raw = (env.spec_root / "knowledge" / "patterns.md").read_text(encoding="utf-8")
++        assert "## 既有\n<!-- scope: repo -->\n\n已有小节。" in raw
++        # 其他节逐字保留（既有 scope 行不动）
++        assert "<!-- scope: module:cli-entry,core-engine -->" in raw
++        assert "<!-- scope: always -->" in raw
++
++    async def test_change_scope_replaces_marker(self, env, db_session) -> None:
++        writer = KnowledgeWriterService(db_session)
++        entry = await writer.update_scope(
++            env.ws.id,
++            env.user,
++            filename="patterns.md",
++            heading="通用规约",
++            scope="module",
++            domains=["cli-entry"],
++        )
++        mod = next(s for s in entry.sections if s.heading == "通用规约")
++        assert mod.scope == "module"
++        assert mod.domains == ["cli-entry"]
++        raw = (env.spec_root / "knowledge" / "patterns.md").read_text(encoding="utf-8")
++        section = raw.split("## 通用规约", 2)[1].split("\n## ", 1)[0]
++        assert section.count("<!-- scope:") == 1, "节内 marker 恒至多一条"
++        assert "<!-- scope: module:cli-entry -->" in section
++
++    async def test_keyword_removes_marker(self, env, db_session) -> None:
++        writer = KnowledgeWriterService(db_session)
++        entry = await writer.update_scope(
++            env.ws.id,
++            env.user,
++            filename="patterns.md",
++            heading="通用规约",
++            scope="keyword",
++            domains=[],
++        )
++        assert all(s.heading != "通用规约" for s in entry.sections)
++        raw = (env.spec_root / "knowledge" / "patterns.md").read_text(encoding="utf-8")
++        assert "每次变更都注入的规约。" in raw, "正文保留"
++        assert "## 通用规约\n\n<!-- scope:" not in raw, "标记已删"
++
++    @pytest.mark.parametrize(
++        ("kwargs", "needle"),
++        [
++            (
++                {"filename": "decisions/daemon.md", "heading": "Decision Daemon", "scope": "repo"},
++                "仅顶层知识文件",
++            ),
++            (
++                {"filename": "INDEX.md", "heading": "任意", "scope": "repo"},
++                "仅顶层知识文件",
++            ),
++            (
++                {"filename": "patterns.md", "heading": "不存在的节", "scope": "repo"},
++                "目标节不存在",
++            ),
++            (
++                {"filename": "patterns.md", "heading": "既有", "scope": "module", "domains": []},
++                "至少一个知识域",
++            ),
++            (
++                {
++                    "filename": "patterns.md",
++                    "heading": "既有",
++                    "scope": "module",
++                    "domains": ["Bad Domain"],
++                },
++                "非法知识域",
++            ),
++        ],
++    )
++    async def test_rejections(self, env, db_session, kwargs, needle) -> None:
++        writer = KnowledgeWriterService(db_session)
++        with pytest.raises(KnowledgeEditForbidden) as ei:
++            await writer.update_scope(env.ws.id, env.user, **kwargs)
++        assert needle in str(ei.value)
++
++    async def test_duplicate_heading_rejected(self, env, db_session) -> None:
++        # 追加同名节（整文件 update 造多义态）
++        writer = KnowledgeWriterService(db_session)
++        raw = (env.spec_root / "knowledge" / "patterns.md").read_text(encoding="utf-8")
++        await writer.update_entry(
++            env.ws.id, env.user, filename="patterns.md", content=raw + "\n## 既有\n\n重复节。\n"
++        )
++        with pytest.raises(KnowledgeEditForbidden) as ei:
++            await writer.update_scope(
++                env.ws.id, env.user, filename="patterns.md", heading="既有", scope="repo"
++            )
++        assert "标题重复" in str(ei.value)
+diff --git a/backend/app/modules/knowledge/writer.py b/backend/app/modules/knowledge/writer.py
+index 0d527ad02..bd34feb15 100644
+--- a/backend/app/modules/knowledge/writer.py
++++ b/backend/app/modules/knowledge/writer.py
+@@ -36,7 +36,11 @@ from app.core.logging import get_logger
+ from app.modules.agent.model import AgentRun
+ from app.modules.auth.model import User
+ from app.modules.knowledge.distill import DISTILL_RUN_KIND
+-from app.modules.knowledge.parser import MAX_CONTENT_BYTES
++from app.modules.knowledge.parser import (
++    _HEADING_LINE_RE,
++    MAX_CONTENT_BYTES,
++    SCOPE_MARKER_RE,
++)
+ from app.modules.knowledge.schema import (
+     KnowledgeEntry,
+     KnowledgeMergeResult,
+@@ -534,6 +538,109 @@ class KnowledgeWriterService:
+         await self._apply_ops(workspace_id, ops)
+         return await self._reader.get_knowledge(workspace_id, filename)
+ 
++    async def update_scope(
++        self,
++        workspace_id: uuid.UUID,
++        user: User,
++        *,
++        filename: str,
++        heading: str,
++        scope: str,
++        domains: list[str] | None = None,
++    ) -> KnowledgeEntry:
++        """节级注入作用域维护（2026-10-23-knowledge-scope-maintenance）。
++
++        语义与 CLI `knowledge-scope.js` 四档一致：always/repo/module 写入对应 marker，
++        keyword=移除本节 marker（回关键词档）。仅 top zone 顶层知识文件（CLI 注入扫描面
++        同口径：knowledge/*.md，INDEX/子目录/其他 zone 拒 422）；heading 精确匹配且唯一
++        （不存在/多义 → 422）。写入走 apply_ops 单写者（行版本锁 + spec-backups），只改
++        本节 marker 行，其余节内容逐字保留；超限/坏编码守卫与 update_entry 同口径。
++        """
++        _validate_knowledge_filename(filename)
++        norm = filename.replace("\\", "/")
++        if "/" in norm or norm == "INDEX.md":
++            raise KnowledgeEditForbidden(
++                "仅顶层知识文件（knowledge/*.md，INDEX.md 除外）支持作用域维护。",
++                details={"filename": filename},
++            )
++        entry = await self._reader.get_knowledge(workspace_id, filename)
++        if entry.zone != "top":
++            raise KnowledgeEditForbidden(
++                "仅知识手册（top zone）支持作用域维护——决策库/需求规则由归档流程维护。",
++                details={"filename": filename, "zone": entry.zone},
++            )
++        if scope not in ("always", "repo", "module", "keyword"):
++            raise KnowledgeEditForbidden(
++                "scope 须为 always|repo|module|keyword。",
++                details={"scope": scope},
++            )
++        doms = [d.strip().lower() for d in (domains or []) if d and d.strip()]
++        if scope == "module":
++            if not doms:
++                raise KnowledgeEditForbidden(
++                    "module 作用域需要至少一个知识域 id（逗号分隔，与 FR 域同源）。",
++                    details={"filename": filename, "heading": heading},
++                )
++            bad = [d for d in doms if not re.fullmatch(r"[a-z0-9][a-z0-9_-]*", d)]
++            if bad:
++                raise KnowledgeEditForbidden(
++                    f"非法知识域 id：{'、'.join(bad)}（小写字母/数字/下划线/连字符）。",
++                    details={"domains": doms},
++                )
++        else:
++            doms = []
++
++        disk_path = await self._knowledge_path(workspace_id, filename)
++        if disk_path.is_file() and disk_path.stat().st_size > MAX_CONTENT_BYTES:
++            raise KnowledgeFileTooLarge(
++                "文件超过网页维护的大小上限，作用域维护需要整文件读改写——请在本机编辑该文件后再同步。",
++                details={"filename": filename},
++            )
++        raw = await self._read_raw(workspace_id, filename)
++        lines = raw.split("\n")
++        matched = [
++            i
++            for i, line in enumerate(lines)
++            if (m := _HEADING_LINE_RE.match(line)) and m.group(2).strip() == heading.strip()
++        ]
++        if not matched:
++            raise KnowledgeEditForbidden(
++                "目标节不存在——标题须与文件内 heading 逐字一致（不含 # 前缀）。",
++                details={"filename": filename, "heading": heading},
++            )
++        if len(matched) > 1:
++            raise KnowledgeEditForbidden(
++                f"目标节标题重复（{len(matched)} 处）——请先在本机合并同名节再维护作用域。",
++                details={"filename": filename, "heading": heading},
++            )
++        h = matched[0]
++        end = len(lines)
++        for j in range(h + 1, len(lines)):
++            if _HEADING_LINE_RE.match(lines[j]):
++                end = j
++                break
++        body = [line for line in lines[h + 1 : end] if not SCOPE_MARKER_RE.search(line)]
++        if scope != "keyword":
++            marker = (
++                f"<!-- scope: module:{','.join(doms)} -->"
++                if scope == "module"
++                else f"<!-- scope: {scope} -->"
++            )
++            body = [marker, *body]
++        new_content = "\n".join([*lines[: h + 1], *body, *lines[end:]])
++
++        op_path = f"{KNOWLEDGE_PREFIX}{filename}"
++        ops = [
++            FileOp(
++                op="update",
++                path=op_path,
++                content=_b64(new_content),
++                base_version=await self._manifest_version(workspace_id, op_path),
++            )
++        ]
++        await self._apply_ops(workspace_id, ops)
++        return await self._reader.get_knowledge(workspace_id, filename)
++
+     async def preview_merge(
+         self,
+         workspace_id: uuid.UUID,
+diff --git a/frontend/src/app/(dashboard)/workspaces/[id]/knowledge/page.tsx b/frontend/src/app/(dashboard)/workspaces/[id]/knowledge/page.tsx
+index bcfd4c9da..73482dd80 100644
+--- a/frontend/src/app/(dashboard)/workspaces/[id]/knowledge/page.tsx
++++ b/frontend/src/app/(dashboard)/workspaces/[id]/knowledge/page.tsx
+@@ -67,9 +67,11 @@ import { PanelResizer, usePanelWidth } from "@/components/ui/panel-resizer";
+ import { TreeBox } from "@/components/ui/tree-box";
+ import { ApiError } from "@/lib/api";
+ import { errMessage, useNotify } from "@/lib/errors";
++import { ScopeMaintainDialog } from "@/components/knowledge/scope-maintain-dialog";
+ import {
+   getKnowledge,
+   getKnowledgeStats,
++  knowledgeEntryMatchesScope,
+   listKnowledge,
+   // 深链 file 参数归一（2026-10-14-assets-knowledge-popup-preview 迁 lib 单一源：
+   // 沉淀资产卡条目预览弹窗取数前同款归一，避免组件反向 import 页面模块）。
+@@ -77,6 +79,7 @@ import {
+   rejectKnowledge,
+   searchKnowledge,
+   type KnowledgeEntry,
++  type KnowledgeEntryWithScopes,
+   type KnowledgeSearchResultItem,
+ } from "@/lib/knowledge";
+ import { useSession } from "@/stores/session";
+@@ -332,7 +335,13 @@ export default function KnowledgePage({ params }: Props) {
+   /** 外部深链参数（沉淀资产卡 FR/决策索引行等入口）。 */
+   const deepLinkFile = searchParams.get("file");
+   const deepLinkAnchor = searchParams.get("anchor");
+-  const [knowledgeItems, setKnowledgeItems] = useState<KnowledgeEntry[]>([]);
++  const [knowledgeItems, setKnowledgeItems] = useState<KnowledgeEntryWithScopes[]>([]);
++  /** 作用域筛选（2026-10-23-knowledge-scope-maintenance）：全部/三档/关键词档。 */
++  const [scopeFilter, setScopeFilter] = useState<
++    "all" | "always" | "repo" | "module" | "keyword"
++  >("all");
++  /** 作用域维护对话框目标文件（null=关闭）。 */
++  const [scopeDialogFor, setScopeDialogFor] = useState<string | null>(null);
+   /** 选中文件名（API 详情键）与展示态。 */
+   const [selectedFilename, setSelectedFilename] = useState<string | null>(null);
+   const [selectedContent, setSelectedContent] = useState<string | null>(null);
+@@ -412,7 +421,25 @@ export default function KnowledgePage({ params }: Props) {
+     loadList(workspaceId);
+   }, [workspaceId, loadList]);
+ 
+-  const tree = useMemo(() => buildKnowledgeTree(knowledgeItems), [knowledgeItems]);
++  /** 作用域筛选（judge 在 lib 单一源：keyword 档=无任何标记，其余=该档命中任意节）。 */
++  const visibleItems = useMemo(
++    () => knowledgeItems.filter((item) => knowledgeEntryMatchesScope(item, scopeFilter)),
++    [knowledgeItems, scopeFilter],
++  );
++  const scopeCounts = useMemo(() => {
++    const counts = { all: knowledgeItems.length, always: 0, repo: 0, module: 0, keyword: 0 };
++    for (const item of knowledgeItems) {
++      const sections = item.sections ?? [];
++      if (sections.length === 0) counts.keyword += 1;
++      for (const s of sections) {
++        if (s.scope === "always") counts.always += 1;
++        else if (s.scope === "repo") counts.repo += 1;
++        else if (s.scope === "module") counts.module += 1;
++      }
++    }
++    return counts;
++  }, [knowledgeItems]);
++  const tree = useMemo(() => buildKnowledgeTree(visibleItems), [visibleItems]);
+   const treeData = useMemo(() => toAntdNodes(tree), [tree]);
+   const [expandedKeys, setExpandedKeys] = useState<React.Key[]>([]);
+ 
+@@ -821,6 +848,36 @@ export default function KnowledgePage({ params }: Props) {
+                   )}
+                 </div>
+               ) : (
++                <>
++                <div
++                  className="mb-2 flex flex-wrap items-center gap-1.5"
++                  data-testid="knowledge-scope-filter"
++                >
++                  {(
++                    [
++                      ["all", "全部"],
++                      ["always", "always"],
++                      ["repo", "repo"],
++                      ["module", "module"],
++                      ["keyword", "关键词档"],
++                    ] as const
++                  ).map(([value, label]) => (
++                    <button
++                      key={value}
++                      type="button"
++                      data-testid={`scope-filter-${value}`}
++                      onClick={() => setScopeFilter(value)}
++                      className={
++                        scopeFilter === value
++                          ? "rounded-full border border-brand-400 bg-brand-50 px-2 py-0.5 text-[11px] font-semibold text-brand-600"
++                          : "rounded-full border border-border/60 px-2 py-0.5 text-[11px] text-muted-foreground hover:text-brand-600"
++                      }
++                    >
++                      {label}
++                      <span className="ml-1 text-[10px] opacity-70">{scopeCounts[value]}</span>
++                    </button>
++                  ))}
++                </div>
+                 <TreeBox className="max-h-[calc(100vh-260px)]">
+                   <Tree
+                     treeData={treeData}
+@@ -833,6 +890,7 @@ export default function KnowledgePage({ params }: Props) {
+                     blockNode
+                   />
+                 </TreeBox>
++                </>
+               )}
+             </SectionCard>
+           </div>
+@@ -993,6 +1051,17 @@ export default function KnowledgePage({ params }: Props) {
+                         // 条目级落点：锚点透传（验收建议 2——INDEX 路由/依据决策互跳
+                         // 落到小节级而非仅文件级；selectEntry 忽略锚点时降级文件级）。
+                         onJumpToEntry={(file, anchor) => selectEntry(file, anchor)}
++                        scopeSections={
++                          knowledgeItems.find((i) => i.filename === selectedFilename)?.sections ?? []
++                        }
++                        onMaintainScope={
++                          canWriteKnowledge &&
++                          selectedZone === "top" &&
++                          !selectedFilename.includes("/") &&
++                          selectedFilename !== "INDEX.md"
++                            ? () => setScopeDialogFor(selectedFilename)
++                            : undefined
++                        }
+                         className="max-h-[70vh] overflow-y-auto pr-1"
+                       />
+                     ) : (
+@@ -1038,6 +1107,23 @@ export default function KnowledgePage({ params }: Props) {
+         onJumpToEntry={selectEntry}
+       />
+ 
++      {scopeDialogFor
++        ? (() => {
++            const item = knowledgeItems.find((i) => i.filename === scopeDialogFor);
++            if (!item) return null;
++            return (
++              <ScopeMaintainDialog
++                workspaceId={workspaceId}
++                filename={item.filename}
++                headings={item.headings ?? []}
++                sections={item.sections ?? []}
++                onClose={() => setScopeDialogFor(null)}
++                onSaved={() => loadList(workspaceId)}
++              />
++            );
++          })()
++        : null}
++
+       {mergeTarget !== null && (
+         <MergeDialog
+           workspaceId={workspaceId}
+diff --git a/frontend/src/components/knowledge/__tests__/scope-maintain-dialog.test.tsx b/frontend/src/components/knowledge/__tests__/scope-maintain-dialog.test.tsx
+new file mode 100644
+index 000000000..f8489636f
+--- /dev/null
++++ b/frontend/src/components/knowledge/__tests__/scope-maintain-dialog.test.tsx
+@@ -0,0 +1,124 @@
++/**
++ * 知识注入作用域维护（2026-10-23-knowledge-scope-maintenance）前端用例。
++ *
++ * ① knowledgeEntryMatchesScope：筛选档矩阵（all/always/repo/module/keyword）
++ * ② ScopeMaintainDialog：目标节切换回填当前档位、module 显示域输入并解析逗号域、
++ *    保存调用 updateKnowledgeScope 后 onSaved/onClose 触发
++ */
++import { describe, expect, it, vi } from "vitest";
++import { fireEvent, render, screen, waitFor } from "@testing-library/react";
++
++import {
++  knowledgeEntryMatchesScope,
++  type KnowledgeEntryWithScopes,
++} from "@/lib/knowledge";
++
++const updateKnowledgeScope = vi.fn();
++vi.mock("@/lib/knowledge", async () => {
++  const actual = await vi.importActual<typeof import("@/lib/knowledge")>("@/lib/knowledge");
++  return {
++    ...actual,
++    updateKnowledgeScope: (...args: unknown[]) => updateKnowledgeScope(...args),
++  };
++});
++vi.mock("@/lib/errors", () => ({
++  errMessage: (e: unknown) => String(e),
++  useNotify: () => ({ error: vi.fn(), success: vi.fn(), warning: vi.fn() }),
++}));
++
++import { ScopeMaintainDialog } from "@/components/knowledge/scope-maintain-dialog";
++
++const item = (sections: KnowledgeEntryWithScopes["sections"]): KnowledgeEntryWithScopes =>
++  ({ zone: "top", filename: "conventions.md", path: "", sections }) as KnowledgeEntryWithScopes;
++
++describe("knowledgeEntryMatchesScope", () => {
++  it("all 恒真；keyword=无任何节级标记", () => {
++    expect(knowledgeEntryMatchesScope(item([]), "all")).toBe(true);
++    expect(knowledgeEntryMatchesScope(item([]), "keyword")).toBe(true);
++    expect(knowledgeEntryMatchesScope(item([]), "always")).toBe(false);
++    expect(
++      knowledgeEntryMatchesScope(item([{ heading: "A", scope: "always", domains: [] }]), "keyword"),
++    ).toBe(false);
++  });
++
++  it("按节档位命中（module 含域）", () => {
++    const withModule = item([
++      { heading: "A", scope: "module", domains: ["cli-entry"] },
++    ]);
++    expect(knowledgeEntryMatchesScope(withModule, "module")).toBe(true);
++    expect(knowledgeEntryMatchesScope(withModule, "always")).toBe(false);
++    expect(
++      knowledgeEntryMatchesScope(item([{ heading: "B", scope: "repo", domains: [] }]), "repo"),
++    ).toBe(true);
++  });
++});
++
++describe("ScopeMaintainDialog", () => {
++  it("切换目标节回填当前档位；module 输入解析逗号域并提交", async () => {
++    updateKnowledgeScope.mockResolvedValue({});
++    const onSaved = vi.fn();
++    const onClose = vi.fn();
++    render(
++      <ScopeMaintainDialog
++        workspaceId="ws-1"
++        filename="conventions.md"
++        headings={["工具中立性", "本仓发布纪律"]}
++        sections={[{ heading: "工具中立性", scope: "always", domains: [] }]}
++        onClose={onClose}
++        onSaved={onSaved}
++      />,
++    );
++
++    // 首个节=always 已回填
++    expect((screen.getByTestId("scope-radio-always") as HTMLInputElement).checked).toBe(true);
++
++    // 切到无标记节 → 关键词档
++    fireEvent.change(screen.getByTestId("scope-heading-select"), {
++      target: { value: "本仓发布纪律" },
++    });
++    expect((screen.getByTestId("scope-radio-keyword") as HTMLInputElement).checked).toBe(true);
++
++    // 选 module → 出现域输入 → 填写并保存
++    fireEvent.click(screen.getByTestId("scope-radio-module"));
++    fireEvent.change(screen.getByTestId("scope-domains-input"), {
++      target: { value: "cli-entry, core-engine" },
++    });
++    fireEvent.click(screen.getByTestId("scope-save-button"));
++
++    await waitFor(() => expect(updateKnowledgeScope).toHaveBeenCalledTimes(1));
++    expect(updateKnowledgeScope).toHaveBeenCalledWith("ws-1", {
++      filename: "conventions.md",
++      heading: "本仓发布纪律",
++      scope: "module",
++      domains: ["cli-entry", "core-engine"],
++    });
++    await waitFor(() => expect(onSaved).toHaveBeenCalled());
++    expect(onClose).toHaveBeenCalled();
++  });
++
++  it("关键词档提交 domains 为空（移除标记语义）", async () => {
++    updateKnowledgeScope.mockClear();
++    updateKnowledgeScope.mockResolvedValue({});
++    render(
++      <ScopeMaintainDialog
++        workspaceId="ws-1"
++        filename="patterns.md"
++        headings={["既有"]}
++        sections={[{ heading: "既有", scope: "repo", domains: [] }]}
++        onClose={vi.fn()}
++        onSaved={vi.fn()}
++      />,
++    );
++    // repo 回填 → 改关键词档 → 保存
++    expect((screen.getByTestId("scope-radio-repo") as HTMLInputElement).checked).toBe(true);
++    fireEvent.click(screen.getByTestId("scope-radio-keyword"));
++    fireEvent.click(screen.getByTestId("scope-save-button"));
++    await waitFor(() => expect(updateKnowledgeScope).toHaveBeenCalledTimes(1));
++    expect(updateKnowledgeScope).toHaveBeenCalledWith("ws-1", {
++      filename: "patterns.md",
++      heading: "既有",
++      scope: "keyword",
++      domains: [],
++    });
++  });
++});
+diff --git a/frontend/src/components/knowledge/entry-card-list.tsx b/frontend/src/components/knowledge/entry-card-list.tsx
+index c843604a8..8022a439e 100644
+--- a/frontend/src/components/knowledge/entry-card-list.tsx
++++ b/frontend/src/components/knowledge/entry-card-list.tsx
+@@ -371,6 +371,17 @@ export interface EntryCardListProps {
+   entryCounts?: Record<string, number>;
+   /** 点击依赖决策 / INDEX 路由跳目标文件（可选锚点，调用方决定用法）。 */
+   onJumpToEntry?: (filename: string, anchor?: string) => void;
++  /**
++   * 节级注入作用域（2026-10-23-knowledge-scope-maintenance，列表接口 sections 透传）：
++   * 头部汇总徽标 + 小节卡档位徽标。
++   */
++  scopeSections?: Array<{
++    heading: string;
++    scope: "always" | "repo" | "module";
++    domains: string[];
++  }>;
++  /** 「维护作用域」入口（调用方按 top zone + 写权限决定是否注入）。 */
++  onMaintainScope?: () => void;
+   className?: string;
+ }
+ 
+@@ -642,8 +653,27 @@ export function EntryCardList({
+   useCount,
+   entryCounts,
+   onJumpToEntry,
++  scopeSections,
++  onMaintainScope,
+   className,
+ }: EntryCardListProps) {
++  const scopeList = scopeSections ?? [];
++  const scopeSummary = scopeList.length
++    ? {
++        always: scopeList.filter((s) => s.scope === "always").length,
++        repo: scopeList.filter((s) => s.scope === "repo").length,
++        module: scopeList.filter((s) => s.scope === "module").length,
++      }
++    : null;
++  const summaryText = scopeSummary
++    ? [
++        scopeSummary.always > 0 ? `always×${scopeSummary.always}` : null,
++        scopeSummary.repo > 0 ? `repo×${scopeSummary.repo}` : null,
++        scopeSummary.module > 0 ? `module×${scopeSummary.module}` : null,
++      ]
++        .filter(Boolean)
++        .join(" · ")
++    : "";
+   const form = detectEntryCardForm(filename, zone);
+   // frontmatter 元信息（FR-03）：顶层解析一次向 manual/SingleCard 各卡传递；
+   // 缺失时 FrontmatterMetaLine 整条降级隐藏。
+@@ -693,6 +723,25 @@ export function EntryCardList({
+         {typeof useCount === "number" && useCount > 0 ? (
+           <UseBadge count={useCount} title={`文件级命中 ${useCount} 次（条目级明细不可得时以文件级口径展示，FR-06）`} />
+         ) : null}
++        {scopeSummary ? (
++          <span
++            data-testid="entry-scope-badges"
++            title="节级注入作用域汇总（always=每次变更注入 / repo=本仓注入 / module=触达域注入）"
++            className="shrink-0 rounded-full bg-muted px-2 py-0.5 text-[10px] font-semibold leading-4 text-muted-foreground"
++          >
++            🧭 {summaryText}
++          </span>
++        ) : null}
++        {onMaintainScope ? (
++          <button
++            type="button"
++            data-testid="maintain-scope-button"
++            onClick={onMaintainScope}
++            className="shrink-0 rounded border border-border/70 px-1.5 py-0.5 text-[10px] font-semibold leading-4 text-muted-foreground transition-colors hover:border-brand-400 hover:text-brand-600"
++          >
++            维护作用域
++          </button>
++        ) : null}
+       </div>
+ 
+       {/* 防复潮横幅（zone=decisions 且存在 rejected；原型 .rejected-banner） */}
+@@ -721,6 +770,23 @@ export function EntryCardList({
+               >
+                 <div className="flex flex-wrap items-center gap-2 border-b border-border/60 bg-brand-50 px-2.5 py-1.5">
+                   <h4 className="min-w-0 flex-1 break-words text-[13px] font-semibold text-brand-700">{s.title}</h4>
++                  {(() => {
++                    const sc = scopeList.find((x) => x.heading === s.title);
++                    if (!sc) return null;
++                    const label =
++                      sc.scope === "module"
++                        ? `module:${sc.domains.join(",")}`
++                        : sc.scope;
++                    return (
++                      <span
++                        data-testid="entry-section-scope-badge"
++                        title={`本节注入作用域：${label}`}
++                        className="shrink-0 rounded-full bg-brand-100 px-1.5 py-0.5 text-[10px] font-semibold leading-4 text-brand-700"
++                      >
++                        🧭 {label}
++                      </span>
++                    );
++                  })()}
+                   {n !== undefined && n > 0 ? (
+                     <UseBadge count={n} title={`条目命中 ${n} 次（${s.anchor}）`} />
+                   ) : null}
+diff --git a/frontend/src/components/knowledge/scope-maintain-dialog.tsx b/frontend/src/components/knowledge/scope-maintain-dialog.tsx
+new file mode 100644
+index 000000000..abee734a4
+--- /dev/null
++++ b/frontend/src/components/knowledge/scope-maintain-dialog.tsx
+@@ -0,0 +1,235 @@
++"use client";
++
++/**
++ * 知识注入作用域维护对话框（2026-10-23-knowledge-scope-maintenance）。
++ *
++ * 用户指令入口：平台知识库页面「维护作用域」——节级维护 CLI 注入四档
++ * （always/repo/module:域/关键词）。语义与 CLI `knowledge-scope.js` 同源：
++ * always=每次变更恒注入；repo=本仓恒注入；module=触达知识域时注入；
++ * keyword=无标记（按关键词命中，现状缺省）。
++ *
++ * 节目标清单来自列表接口 headings（文件全部 section），当前档位回填自
++ * sections（仅含已有标记的节）。保存走 PATCH /knowledge/scope → 成功后父级
++ * 刷新列表（徽标/筛选即时更新）。
++ */
++
++import { useEffect, useMemo, useState } from "react";
++import { Compass } from "lucide-react";
++
++import { Button } from "@/components/ui/button";
++import {
++  Dialog,
++  DialogContent,
++  DialogDescription,
++  DialogFooter,
++  DialogHeader,
++  DialogTitle,
++} from "@/components/ui/dialog";
++import { Input } from "@/components/ui/input";
++import { useNotify } from "@/lib/errors";
++import {
++  updateKnowledgeScope,
++  type KnowledgeScopeSection,
++} from "@/lib/knowledge";
++
++type ScopeValue = "always" | "repo" | "module" | "keyword";
++
++const SCOPES: ReadonlyArray<{ value: ScopeValue; label: string; hint: string }> = [
++  { value: "always", label: "always", hint: "每次变更恒注入（跨仓通用规约）" },
++  { value: "repo", label: "repo", hint: "本仓每次变更恒注入（仓级约束）" },
++  { value: "module", label: "module", hint: "仅当触达指定知识域时注入" },
++  { value: "keyword", label: "关键词档", hint: "无标记——按关键词命中（现状缺省）" },
++];
++
++interface Props {
++  workspaceId: string;
++  filename: string;
++  /** 文件全部 section heading（列表接口 headings）。 */
++  headings: string[];
++  /** 已有作用域声明的节（列表接口 sections）。 */
++  sections: KnowledgeScopeSection[];
++  onClose: () => void;
++  /** 保存成功（父级刷新列表）。 */
++  onSaved: () => void;
++}
++
++export function ScopeMaintainDialog({
++  workspaceId,
++  filename,
++  headings,
++  sections,
++  onClose,
++  onSaved,
++}: Props) {
++  const notify = useNotify();
++  const [heading, setHeading] = useState(headings[0] ?? "");
++  const [scope, setScope] = useState<ScopeValue>("keyword");
++  const [domains, setDomains] = useState("");
++  const [submitting, setSubmitting] = useState(false);
++
++  const current = useMemo(
++    () => sections.find((s) => s.heading === heading) ?? null,
++    [sections, heading],
++  );
++
++  // 目标节切换 → 回填该节当前档位（无标记=关键词档）。
++  useEffect(() => {
++    if (current) {
++      setScope(current.scope);
++      setDomains(current.domains.join(","));
++    } else {
++      setScope("keyword");
++      setDomains("");
++    }
++  }, [current, heading]);
++
++  const submit = async () => {
++    if (!heading) {
++      notify.warning("请选择目标节");
++      return;
++    }
++    setSubmitting(true);
++    try {
++      const doms =
++        scope === "module"
++          ? domains
++              .split(/[,，\s]+/)
++              .map((d) => d.trim())
++              .filter(Boolean)
++          : [];
++      await updateKnowledgeScope(workspaceId, {
++        filename,
++        heading,
++        scope,
++        domains: doms,
++      });
++      notify.success(`作用域已保存：${heading} → ${scope === "keyword" ? "关键词档" : scope}`);
++      onSaved();
++      onClose();
++    } catch (err) {
++      notify.error(err, "保存作用域失败");
++    } finally {
++      setSubmitting(false);
++    }
++  };
++
++  return (
++    <Dialog
++      open
++      onOpenChange={(open) => {
++        if (!open && !submitting) onClose();
++      }}
++    >
++      <DialogContent className="max-w-lg">
++        <DialogHeader>
++          <div className="mb-2 flex h-10 w-10 items-center justify-center rounded-lg bg-brand-50 text-brand-700">
++            <Compass className="h-5 w-5" />
++          </div>
++          <DialogTitle>维护注入作用域</DialogTitle>
++          <DialogDescription>
++            {filename} · 节级声明知识注入作用域（flow start 注入块会按档位呈现）。
++          </DialogDescription>
++        </DialogHeader>
++
++        <div className="space-y-4">
++          <div>
++            <label
++              htmlFor="scope-heading"
++              className="text-xs font-medium text-muted-foreground"
++            >
++              目标节 <span className="text-destructive">*</span>
++            </label>
++            <select
++              id="scope-heading"
++              aria-label="目标节"
++              data-testid="scope-heading-select"
++              className="mt-1 w-full rounded-md border border-border bg-background px-2 py-1.5 text-sm"
++              value={heading}
++              onChange={(e) => setHeading(e.target.value)}
++              disabled={submitting}
++            >
++              {headings.length === 0 ? (
++                <option value="">（该文件无可维护的 section）</option>
++              ) : (
++                headings.map((h) => (
++                  <option key={h} value={h}>
++                    {h}
++                  </option>
++                ))
++              )}
++            </select>
++          </div>
++
++          <fieldset>
++            <legend className="text-xs font-medium text-muted-foreground">注入作用域</legend>
++            <div className="mt-1 space-y-1.5">
++              {SCOPES.map((s) => (
++                <label
++                  key={s.value}
++                  className="flex cursor-pointer items-start gap-2 rounded-md border border-border/60 px-2 py-1.5 text-xs hover:border-brand-400"
++                >
++                  <input
++                    type="radio"
++                    name="knowledge-scope"
++                    value={s.value}
++                    data-testid={`scope-radio-${s.value}`}
++                    checked={scope === s.value}
++                    onChange={() => setScope(s.value)}
++                    disabled={submitting}
++                    className="mt-0.5"
++                  />
++                  <span>
++                    <span className="font-mono font-semibold">{s.label}</span>
++                    <span className="text-muted-foreground"> — {s.hint}</span>
++                  </span>
++                </label>
++              ))}
++            </div>
++          </fieldset>
++
++          {scope === "module" && (
++            <div>
++              <label
++                htmlFor="scope-domains"
++                className="text-xs font-medium text-muted-foreground"
++              >
++                知识域 id（逗号分隔，与 FR 域同源）
++              </label>
++              <Input
++                id="scope-domains"
++                aria-label="知识域 id"
++                data-testid="scope-domains-input"
++                className="mt-1"
++                value={domains}
++                onChange={(e) => setDomains(e.target.value)}
++                placeholder="cli-entry,core-engine"
++                disabled={submitting}
++              />
++            </div>
++          )}
++
++          <p className="text-[11px] leading-5 text-muted-foreground">
++            写入形态：节 heading 下一行 HTML 注释{" "}
++            <code className="rounded bg-muted px-1">
++              {"<!-- scope: always|repo|module:域 -->"}
++            </code>
++            ；关键词档=移除标记。仅知识手册（top zone）顶层文件可维护，保存走单写者语义（其他节内容不动）。
++          </p>
++        </div>
++
++        <DialogFooter>
++          <Button variant="ghost" onClick={onClose} disabled={submitting}>
++            取消
++          </Button>
++          <Button
++            onClick={() => void submit()}
++            disabled={submitting || !heading}
++            data-testid="scope-save-button"
++          >
++            {submitting ? "保存中…" : "保存作用域"}
++          </Button>
++        </DialogFooter>
++      </DialogContent>
++    </Dialog>
++  );
++}
+diff --git a/frontend/src/lib/api-types.ts b/frontend/src/lib/api-types.ts
+index 5119d73c8..1eacc0732 100644
+--- a/frontend/src/lib/api-types.ts
++++ b/frontend/src/lib/api-types.ts
+@@ -8251,6 +8251,29 @@ export interface paths {
+         patch: operations["update_knowledge_entry_api_workspaces__workspace_id__knowledge_entries__filename__patch"];
+         trace?: never;
+     };
++    "/api/workspaces/{workspace_id}/knowledge/scope": {
++        parameters: {
++            query?: never;
++            header?: never;
++            path?: never;
++            cookie?: never;
++        };
++        get?: never;
++        put?: never;
++        post?: never;
++        delete?: never;
++        options?: never;
++        head?: never;
++        /**
++         * Update Knowledge Scope
++         * @description 节级注入作用域维护（2026-10-23-knowledge-scope-maintenance）。
++         *
++         *     always/repo/module 写入对应 marker；keyword=移除本节 marker（回关键词档）。
++         *     仅 top zone 顶层知识文件；heading 精确唯一；写入走单写者 apply_ops。
++         */
++        patch: operations["update_knowledge_scope_api_workspaces__workspace_id__knowledge_scope_patch"];
++        trace?: never;
++    };
+     "/api/workspaces/{workspace_id}/knowledge/proposed/{filename}/preview-merge": {
+         parameters: {
+             query?: never;
+@@ -19352,6 +19375,10 @@ export interface components {
+             last_modified_at?: string | null;
+             /** Use Count */
+             use_count?: number | null;
++            /** Sections */
++            sections?: components["schemas"]["KnowledgeSection"][];
++            /** Headings */
++            headings?: string[];
+         };
+         /** KnowledgeList */
+         KnowledgeList: {
+@@ -19414,6 +19441,26 @@ export interface components {
+             /** Tags */
+             tags?: string[];
+         };
++        /**
++         * KnowledgeScopeIn
++         * @description PATCH /knowledge/scope 请求体（节级作用域维护；keyword=移除标记）。
++         *
++         *     2026-10-23-knowledge-scope-maintenance：语义与 CLI 四档一致——always/repo/module
++         *     写入对应 marker；keyword 清除本节 marker（回关键词档）；module 档 domains 必填。
++         */
++        KnowledgeScopeIn: {
++            /** Filename */
++            filename: string;
++            /** Heading */
++            heading: string;
++            /**
++             * Scope
++             * @enum {string}
++             */
++            scope: "always" | "repo" | "module" | "keyword";
++            /** Domains */
++            domains?: string[];
++        };
+         /**
+          * KnowledgeSearchIn
+          * @description 检索入参：query 截断 4000 字符（沿用 vector_router 同款上限）、limit 钳 1-50。
+@@ -19466,6 +19513,24 @@ export interface components {
+             /** Score */
+             score: number;
+         };
++        /**
++         * KnowledgeSection
++         * @description 节级注入作用域（2026-10-23-knowledge-scope-maintenance）。
++         *
++         *     与 CLI `knowledge-scope.js` 标记语法同源：节内 `<!-- scope: always|repo|module:域 -->`。
++         *     无标记节不返回（空数组=该文件无作用域声明）。
++         */
++        KnowledgeSection: {
++            /** Heading */
++            heading: string;
++            /**
++             * Scope
++             * @enum {string}
++             */
++            scope: "always" | "repo" | "module";
++            /** Domains */
++            domains?: string[];
++        };
+         /**
+          * KnowledgeStatsOut
+          * @description GET /knowledge/stats 响应（四指标 + 使用率榜 + 文件级计数）。
+@@ -43731,6 +43796,41 @@ export interface operations {
+             };
+         };
+     };
++    update_knowledge_scope_api_workspaces__workspace_id__knowledge_scope_patch: {
++        parameters: {
++            query?: never;
++            header?: never;
++            path: {
++                workspace_id: string;
++            };
++            cookie?: never;
++        };
++        requestBody: {
++            content: {
++                "application/json": components["schemas"]["KnowledgeScopeIn"];
++            };
++        };
++        responses: {
++            /** @description Successful Response */
++            200: {
++                headers: {
++                    [name: string]: unknown;
++                };
++                content: {
++                    "application/json": components["schemas"]["KnowledgeEntry"];
++                };
++            };
++            /** @description Validation Error */
++            422: {
++                headers: {
++                    [name: string]: unknown;
++                };
++                content: {
++                    "application/json": components["schemas"]["HTTPValidationError"];
++                };
++            };
++        };
++    };
+     preview_merge_knowledge_api_workspaces__workspace_id__knowledge_proposed__filename__preview_merge_post: {
+         parameters: {
+             query?: never;
+diff --git a/frontend/src/lib/knowledge.ts b/frontend/src/lib/knowledge.ts
+index 75e89d87e..9064cf222 100644
+--- a/frontend/src/lib/knowledge.ts
++++ b/frontend/src/lib/knowledge.ts
+@@ -8,6 +8,30 @@ import type { components, operations } from "@/lib/api-types";
+ // 消除手写类型漂移。后端 schema 来源：backend/app/modules/knowledge/schema.py。
+ export type KnowledgeEntry = components["schemas"]["KnowledgeEntry"];
+ export type KnowledgeList = components["schemas"]["KnowledgeList"];
++
++/**
++ * 节级注入作用域（2026-10-23-knowledge-scope-maintenance）：后端 GET /knowledge
++ * 加法字段 sections/headings——OpenAPI 生成类型待下次 codegen 同步，前端先以
++ * 结构扩展类型消费（与后端 schema.py 同形）。
++ */
++export interface KnowledgeScopeSection {
++  heading: string;
++  scope: "always" | "repo" | "module";
++  domains: string[];
++}
++export type KnowledgeEntryWithScopes = KnowledgeEntry & {
++  sections?: KnowledgeScopeSection[];
++  headings?: string[];
++};
++export type KnowledgeListWithScopes = Omit<KnowledgeList, "items"> & {
++  items: KnowledgeEntryWithScopes[];
++};
++export type KnowledgeScopeUpdateInput = {
++  filename: string;
++  heading: string;
++  scope: "always" | "repo" | "module" | "keyword";
++  domains?: string[];
++};
+ export type QuicklogEntry = components["schemas"]["QuicklogEntry"];
+ export type QuicklogList = components["schemas"]["QuicklogList"];
+ // 写侧 DTO（task-05 / 2026-09-17-knowledge-precipitation，task-04 交付的生成类型）。
+@@ -87,12 +111,45 @@ function encodeKnowledgeFilename(filename: string): string {
+ 
+ export async function listKnowledge(
+   workspaceId: string,
+-): Promise<KnowledgeList> {
+-  return apiFetch<KnowledgeList>(
++): Promise<KnowledgeListWithScopes> {
++  return apiFetch<KnowledgeListWithScopes>(
+     `/api/workspaces/${workspaceId}/knowledge`,
+   );
+ }
+ 
++/** 作用域筛选档（2026-10-23-knowledge-scope-maintenance；keyword=无任何节级标记）。 */
++export type KnowledgeScopeFilter = "all" | "always" | "repo" | "module" | "keyword";
++
++/** 条目是否命中筛选档（纯函数，页面筛选条与测试单一源）。 */
++export function knowledgeEntryMatchesScope(
++  item: Pick<KnowledgeEntryWithScopes, "sections">,
++  filter: KnowledgeScopeFilter,
++): boolean {
++  const sections = item.sections ?? [];
++  if (filter === "all") return true;
++  if (filter === "keyword") return sections.length === 0;
++  return sections.some((s) => s.scope === filter);
++}
++
++/**
++ * 节级作用域维护（2026-10-23-knowledge-scope-maintenance）：PATCH /knowledge/scope。
++ * always/repo/module 写入对应 marker；keyword=移除本节 marker（回关键词档）。
++ * 仅 top zone 顶层知识文件；heading 精确唯一；写入走后端单写者 apply_ops。
++ */
++export async function updateKnowledgeScope(
++  workspaceId: string,
++  input: KnowledgeScopeUpdateInput,
++): Promise<KnowledgeEntryWithScopes> {
++  return apiFetch<KnowledgeEntryWithScopes>(
++    `/api/workspaces/${workspaceId}/knowledge/scope`,
++    {
++      method: "PATCH",
++      json: { ...input, domains: input.domains ?? [] },
++      timeoutMs: 30_000,
++    },
++  );
++}
++
+ /**
+  * 外部深链 file 参数 → 知识库相对文件名（2026-09-25-change-detail-assets-usability /
+  * FR-01/02；2026-10-14-assets-knowledge-popup-preview 自知识库页迁入——沉淀资产卡
+diff --git a/sillyhub-daemon/src/interactive/session-manager/events.ts b/sillyhub-daemon/src/interactive/session-manager/events.ts
+index 82656681a..023099a19 100644
+--- a/sillyhub-daemon/src/interactive/session-manager/events.ts
++++ b/sillyhub-daemon/src/interactive/session-manager/events.ts
+@@ -33,6 +33,25 @@ import { recordTurnAnchor } from '../turn-anchor.js';
+ import { eventMetaOf, numOf, strOf } from './helpers.js';
+ import type { SessionManagerCore } from './types.js';
+ 
++/**
++ * 2026-10-23-watchdog-steering-guard FR-03：登记「已经产生过轮事件」的 run。
++ *
++ * 有界 Set（256 上限 FIFO 驱逐，单会话约 9KB）：看门狗只服务「新 run 从未
++ * 启动」形态，已观测 run 再被 inject 时不得布防。仅内存态，不参与持久化。
++ */
++const OBSERVED_RUN_IDS_MAX = 256;
++
++function rememberObservedRun(state: SessionState, runId: string): void {
++  const set = state.observedRunIds ?? new Set<string>();
++  state.observedRunIds = set;
++  if (set.has(runId)) return;
++  set.add(runId);
++  if (set.size > OBSERVED_RUN_IDS_MAX) {
++    const oldest = set.values().next().value;
++    if (oldest !== undefined) set.delete(oldest);
++  }
++}
++
+ /**
+  * onResult（spike D4：result 是干净 turn 边界）。
+  *   - result.subtype=success → onTurnResult(sessionId, currentRunId, result)
+@@ -57,6 +76,8 @@ export async function onResult(
+   // 也能在 onTurnResult 回调内读到稳定的 active 状态；且避免 onTurnResult 抛错时
+   // status 残留 running（虽然 onTurnResult 应不抛，但先收敛更鲁棒）。
+   const runId = state.currentRunId;
++  // 2026-10-23-watchdog-steering-guard FR-03：result 到达同样证明该 run 启动过。
++  if (runId) rememberObservedRun(state, runId);
+   state.status = 'active';
+   // 2026-09-15-background-task-permission-lockout（FR-01 / 坑 subagent-write-channel）：
+   // 主轮收尾时若该会话后台任务注册表非空，保留 currentRunId 作「后台锚点」——后台
+@@ -243,6 +264,10 @@ export async function onMessage(
+   // 入口，偶发「无关事件误撤防」由 backend pending run 启动超时清扫兜底
+   // （300s），不在事件流里做 run 归属精细判定的成本权衡。
+   mgr._disarmTurnStartWatchdog(state.sessionId);
++  // 2026-10-23-watchdog-steering-guard FR-02/FR-03：envelope 到达即轮内活动——
++  // 刷新 stale 判定基准（lastTurnEventAt），并登记当前 run 为「已启动」。
++  state.lastTurnEventAt = Date.now();
++  if (state.currentRunId) rememberObservedRun(state, state.currentRunId);
+   const events = Array.isArray(envelope?.events) ? envelope.events : [];
+   // 对账表 #4 前置判定：本 envelope 是否含 Task/Agent tool_use 事件——归一化器把
+   // 同一 assistant message 的 tool_use 派生会话信号（agent_task_status running）
+diff --git a/sillyhub-daemon/src/interactive/session-manager/turn-control.ts b/sillyhub-daemon/src/interactive/session-manager/turn-control.ts
+index 37d83c861..9a0b430b4 100644
+--- a/sillyhub-daemon/src/interactive/session-manager/turn-control.ts
++++ b/sillyhub-daemon/src/interactive/session-manager/turn-control.ts
+@@ -212,23 +212,43 @@ export async function inject(
+   // "session not in running turn"（30 分钟级封锁，turn 真正结束才恢复）。翻转时
+   // 记 staleRunResetAt 且不清 currentRunId（正常 result 收尾才清）：写通道守卫据此
+   // 在宽限窗内放行（见 _writeChannelGuardDeny）。
++  //
++  // 2026-10-23-watchdog-steering-guard FR-01：backend mid-turn steering 复用活跃
++  // run 的 run_id（不建新 run，见 backend session/service/control.py）。同 runId
++  // 的 inject 是给正在执行的轮追加输入，不是新轮启动：不得 stale-reset（会把活轮
++  // 翻 active），也不得布防看门狗（看门狗只服务「新 run 从未启动」形态）。
++  const sameRunInject = !!state.currentRunId && state.currentRunId === runId;
++  // FR-02：静默基准取「最后一次轮内事件」——lastActiveAt 只在 inject/result/
++  // interrupt 更新，单用它等于按「本轮开始多久」判 stale，刚产过事件的长 turn
++  // 会被误翻（事故 15:32:24：5 秒前还有工具结果仍判 stale）。
++  const lastTurnActivityAt = Math.max(
++    state.lastActiveAt,
++    state.lastTurnEventAt ?? 0,
++  );
+   if (
++    !sameRunInject &&
+     state.status === 'running' &&
+-    Date.now() - state.lastActiveAt > 60_000
++    Date.now() - lastTurnActivityAt > 60_000
+   ) {
+     // eslint-disable-next-line no-console
+     console.warn(
+       '[session-manager] inject: stale running state detected (>60s no result), ' +
+         'resetting to active. Possible backend restart while turn was running. ' +
+         '(write-channel grace armed: staleRunResetAt recorded; quiet long turns stay writable)',
+-      { sessionId, lastActiveAt: state.lastActiveAt },
++      {
++        sessionId,
++        lastActiveAt: state.lastActiveAt,
++        lastTurnEventAt: state.lastTurnEventAt ?? null,
++      },
+     );
+     state.status = 'active';
+     state.staleRunResetAt = Date.now();
+     // 清理可能挂起的 pending 计数（旧 turn 的排队消息已无意义）。
+     mgr._pendingInjectCount.delete(sessionId);
+   }
+-  const wasRunningBeforeInject = state.status === 'running';
++  // 同 runId 注入恒按「追加输入」处理：即使此前 stale 翻转把 status 翻成 active，
++  // 也不得走首轮启动路径（否则会给活轮重新布防看门狗）。
++  const wasRunningBeforeInject = state.status === 'running' || sameRunInject;
+ 
+   // spike S1：push 永远进 InputQueue（turn 级串行由 SDK result 边界保证），不拒绝。
+   // currentRunId 在前 turn result 收尾前由本 inject 切换（task-04 既有行为，保留）：
+@@ -359,7 +379,13 @@ export async function inject(
+     // 预期立即开新轮，窗口内零轮事件即判「push 被 SDK 吞掉」（打断 abort 收尾
+     // 竞态），到点重置会话态 + 回报该 run 失败。任意轮事件到达即撤防（events.ts
+     // onMessage/onResult），见 turn-control.ts 尾部看门狗簇注释。
+-    mgr._armTurnStartWatchdog(sessionId, runId);
++    //
++    // 2026-10-23-watchdog-steering-guard FR-03：已经产生过事件的 run 不得布防。
++    // 同 runId steering 已被上方 sameRunInject 拦到排队分支；此处再挡「currentRunId
++    // 已清空但 run 实际启动过」的重复/迟到 inject（如 watchdog 收敛后 backend 重投）。
++    if (!state.observedRunIds?.has(runId)) {
++      mgr._armTurnStartWatchdog(sessionId, runId);
++    }
+   }
+ 
+   return { runId };
+diff --git a/sillyhub-daemon/src/interactive/types.ts b/sillyhub-daemon/src/interactive/types.ts
+index 377e7f07d..6a84a553d 100644
+--- a/sillyhub-daemon/src/interactive/types.ts
++++ b/sillyhub-daemon/src/interactive/types.ts
+@@ -196,6 +196,19 @@ export interface SessionState {
+   staleRunResetAt?: number;
+   /** 最后活动时间（D-004 空闲 30min 回收，task-07 实现）。 */
+   lastActiveAt: number;
++  /**
++   * 2026-10-23-watchdog-steering-guard FR-02：最后一次轮内事件时间（onMessage
++   * 每个 envelope 刷新）。inject 的 >60s stale-running 自愈以此作为「引擎是否
++   * 真静默」的基准，而非上次 inject/result 时间（后者会把刚产生过工具事件的
++   * 长 turn 误判为 stale）。仅内存态，不参与持久化语义。
++   */
++  lastTurnEventAt?: number;
++  /**
++   * 2026-10-23-watchdog-steering-guard FR-03：已经产生过轮事件的 run id 集合
++   * （onMessage 到达时登记，256 上限 FIFO 驱逐）。轮启动看门狗不得对已启动过的
++   * run 布防——防重复/迟到 inject 把活轮误判为「引擎未启动」。仅内存态。
++   */
++  observedRunIds?: Set<string>;
+   /** 固定 cwd（resume 还原用，spike D3）。driver.start 必须用 state.cwd。 */
+   cwd: string;
+   /**
+diff --git a/sillyhub-daemon/tests/interactive/turn-start-watchdog.test.ts b/sillyhub-daemon/tests/interactive/turn-start-watchdog.test.ts
+index bbcd4ed8f..15e3b6a63 100644
+--- a/sillyhub-daemon/tests/interactive/turn-start-watchdog.test.ts
++++ b/sillyhub-daemon/tests/interactive/turn-start-watchdog.test.ts
+@@ -231,4 +231,123 @@ describe('2026-10-21-daemon-zombie-turn FR-01：轮启动看门狗', () => {
+     // P2 缓解：currentRunId 保留（迟到归属锚，见上）。
+     expect(sm.get('sess-1')!.currentRunId).toBe('run-9');
+   });
++
++  // ── 2026-10-23-watchdog-steering-guard：忙轮 steering 误杀回归 ──────────────
++  // 事故 run 3d3b0bae（会话 5fb28b2e）：backend mid-turn steering 复用活跃 run
++  // 的 run_id；inject 的 >60s stale-reset 只看上次 inject 时间，把仍在产事件的
++  // 活轮翻 active 并给同一 run 布防看门狗，模型 API 卡顿后 90s 到点误判 failed。
++  // 以下用例锁定三条前置守卫：同 runId 不 stale/不布防、事件新鲜不 stale、
++  // 已观测 run 不布防；同时保留真僵尸轮（新 runId 零事件）触发路径。
++
++  it('事故序列：首轮启动→事件→同 runId steering→静默 90s 不误杀', async () => {
++    vi.useFakeTimers();
++    const onTurnStartTimeout = vi.fn(async () => {});
++    const sm = createSessionManager(onTurnStartTimeout);
++    const state = makeState('sess-1', 'active');
++    seed(sm, state);
++
++    await sm.inject('sess-1', 'first', 'run-A');
++    expect(watchdogMap(sm).has('sess-1')).toBe(true);
++
++    // 引擎产生任意轮事件：撤防 + 记录已启动 run。
++    await onMessage(core(sm), state, { events: [] });
++    expect(watchdogMap(sm).has('sess-1')).toBe(false);
++    expect(state.observedRunIds?.has('run-A')).toBe(true);
++
++    // 轮跑过 60s 后追加 steering（同 runId）：不得 stale-reset、不得重新布防。
++    await vi.advanceTimersByTimeAsync(120_000);
++    await sm.inject('sess-1', 'steer', 'run-A');
++    expect(watchdogMap(sm).has('sess-1')).toBe(false);
++
++    // 即使之后静默 90s（模型卡顿形态），也不得把活轮判死。
++    await vi.advanceTimersByTimeAsync(90_000);
++    expect(onTurnStartTimeout).not.toHaveBeenCalled();
++  });
++
++  it('mid-turn steering（同 runId）不 stale-reset、不布防看门狗', async () => {
++    vi.useFakeTimers();
++    const onTurnStartTimeout = vi.fn(async () => {});
++    const sm = createSessionManager(onTurnStartTimeout);
++    const state = makeState('sess-1', 'running');
++    state.currentRunId = 'run-active';
++    state.lastActiveAt = Date.now() - 120_000;
++    state.lastTurnEventAt = Date.now() - 120_000;
++    seed(sm, state);
++
++    await sm.inject('sess-1', 'steer', 'run-active');
++
++    const after = sm.get('sess-1')!;
++    expect(after.status).toBe('running');
++    expect(after.currentRunId).toBe('run-active');
++    // 同 runId 是追加输入，不是新轮启动：不得写 stale 宽限、不得布防。
++    expect(after.staleRunResetAt).toBeUndefined();
++    expect(watchdogMap(sm).has('sess-1')).toBe(false);
++    expect(sm.getPendingInjectCount('sess-1')).toBe(1);
++
++    await vi.advanceTimersByTimeAsync(90_000);
++    expect(onTurnStartTimeout).not.toHaveBeenCalled();
++  });
++
++  it('轮内事件新鲜时 inject 不触发 stale-reset（FR-02）', async () => {
++    const onTurnStartTimeout = vi.fn(async () => {});
++    const sm = createSessionManager(onTurnStartTimeout);
++    const state = makeState('sess-1', 'running');
++    state.currentRunId = 'run-old';
++    state.lastActiveAt = Date.now() - 120_000;
++    // 5 秒前还有轮内事件：引擎没静默，不得按「上次 inject 时间」误翻。
++    state.lastTurnEventAt = Date.now() - 5_000;
++    seed(sm, state);
++
++    await sm.inject('sess-1', 'queued', 'run-new');
++
++    const after = sm.get('sess-1')!;
++    expect(after.status).toBe('running');
++    expect(after.staleRunResetAt).toBeUndefined();
++    // 前一 turn 未 result：排队语义，不布防。
++    expect(watchdogMap(sm).has('sess-1')).toBe(false);
++  });
++
++  it('onMessage 刷新最后事件时间并记录 observedRunIds（FR-02/FR-03）', async () => {
++    const sm = createSessionManager();
++    const state = makeState('sess-1', 'running');
++    state.currentRunId = 'run-9';
++    state.lastTurnEventAt = 1;
++    seed(sm, state);
++
++    const before = Date.now();
++    await onMessage(core(sm), state, { events: [] });
++
++    expect(state.lastTurnEventAt).toBeGreaterThanOrEqual(before);
++    expect(state.observedRunIds?.has('run-9')).toBe(true);
++  });
++
++  it('已观测事件的 run 不再布防看门狗（FR-03）', async () => {
++    vi.useFakeTimers();
++    const onTurnStartTimeout = vi.fn(async () => {});
++    const sm = createSessionManager(onTurnStartTimeout);
++    const state = makeState('sess-1', 'active');
++    state.observedRunIds = new Set(['run-seen']);
++    seed(sm, state);
++
++    await sm.inject('sess-1', 'replay', 'run-seen');
++
++    expect(watchdogMap(sm).has('sess-1')).toBe(false);
++    await vi.advanceTimersByTimeAsync(90_000);
++    expect(onTurnStartTimeout).not.toHaveBeenCalled();
++  });
++
++  it('新 runId 零事件仍触发（真僵尸轮不回归，FR-03/FR-04）', async () => {
++    vi.useFakeTimers();
++    const onTurnStartTimeout = vi.fn(async () => {});
++    const sm = createSessionManager(onTurnStartTimeout);
++    const state = makeState('sess-1', 'active');
++    state.observedRunIds = new Set(['run-old']);
++    seed(sm, state);
++
++    await sm.inject('sess-1', '[后台任务通知] …', 'run-zombie');
++    await vi.advanceTimersByTimeAsync(90_000);
++
++    expect(onTurnStartTimeout).toHaveBeenCalledTimes(1);
++    expect(onTurnStartTimeout).toHaveBeenCalledWith('sess-1', 'run-zombie');
++  });
+ });
