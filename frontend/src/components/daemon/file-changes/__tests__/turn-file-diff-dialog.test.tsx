@@ -20,6 +20,12 @@ vi.mock("@/lib/daemon/sessions", () => ({
   getAgentSessionLogs: (...args: unknown[]) => getAgentSessionLogsMock(...args),
 }));
 
+// 2026-10-23-diff-dialog-copy-fallback：剪贴板零副作用 mock（断言复制内容）。
+const copyTextToClipboardMock = vi.fn(() => Promise.resolve());
+vi.mock("@/lib/clipboard", () => ({
+  copyTextToClipboard: (...args: unknown[]) => copyTextToClipboardMock(...args),
+}));
+
 function callLog(toolUseId: string, filePath: string, tool = "Edit"): AgentRunLogEntry {
   return {
     id: `call-${toolUseId}`,
@@ -186,5 +192,57 @@ describe("TurnFileDiffDialog", () => {
     renderDialog();
     expect(await screen.findByText(/正在加载本轮编辑补丁/s)).toBeDefined();
     expect(screen.queryByTestId("turn-file-diff-section")).toBeNull();
+  });
+});
+
+// 2026-10-23-diff-dialog-copy-fallback：超长 diff 复制兜底（FR-01~03）。
+describe("TurnFileDiffDialog：复制兜底（2026-10-23-diff-dialog-copy-fallback）", () => {
+  afterEach(() => {
+    copyTextToClipboardMock.mockClear();
+  });
+
+  it("每段补丁有常显复制按钮，点击写入完整 diff 文本（FR-01）", async () => {
+    getAgentSessionLogsMock.mockResolvedValue([
+      callLog("tu-1", "frontend/src/a.ts"),
+      resultLog("tu-1", ["-old line", "+new line"]),
+    ]);
+    renderDialog();
+
+    const button = await screen.findByRole("button", { name: "复制该段 diff" });
+    // 常显：不依赖父容器 hover（opacity-100 + static 覆盖默认浮出定位）。
+    expect(button.className).toContain("opacity-100");
+    expect(button.className).toContain("static");
+
+    fireEvent.click(button);
+    expect(copyTextToClipboardMock).toHaveBeenCalledTimes(1);
+    expect(copyTextToClipboardMock).toHaveBeenCalledWith("-old line\n+new line");
+  });
+
+  it("超 2000 行：复制内容不截断（渲染上限不进复制面，FR-02）", async () => {
+    const lines = Array.from({ length: 2500 }, (_, i) => `+row-${i}`);
+    getAgentSessionLogsMock.mockResolvedValue([
+      callLog("tu-1", "frontend/src/a.ts"),
+      resultLog("tu-1", lines),
+    ]);
+    renderDialog();
+
+    fireEvent.click(await screen.findByRole("button", { name: "复制该段 diff" }));
+    const copied = copyTextToClipboardMock.mock.calls[0]?.[0] as string;
+    const copiedLines = copied.split("\n");
+    expect(copiedLines).toHaveLength(2500);
+    expect(copiedLines[2499]).toBe("+row-2499");
+  });
+
+  it("无补丁说明态 / 删除说明态不出现复制按钮（FR-03）", async () => {
+    getAgentSessionLogsMock.mockResolvedValue([]);
+    const { unmount } = renderDialog();
+    expect(await screen.findByTestId("turn-file-diff-body")).toBeDefined();
+    expect(screen.queryByRole("button", { name: /复制该段 diff/ })).toBeNull();
+    unmount();
+
+    getAgentSessionLogsMock.mockResolvedValue([]);
+    renderDialog({ status: "deleted" });
+    expect(await screen.findByText(/本轮被删除/)).toBeDefined();
+    expect(screen.queryByRole("button", { name: /复制该段 diff/ })).toBeNull();
   });
 });

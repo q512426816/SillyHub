@@ -19,6 +19,7 @@
 import { useEffect, useState } from "react";
 
 import { DiffView } from "@/components/agent-log/tool-diff";
+import { CopyButton } from "@/components/daemon/copy-button";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -31,7 +32,11 @@ import { getAgentSessionLogs } from "@/lib/daemon/sessions";
 import { cn } from "@/lib/utils";
 
 import { FILE_STATUS_META, type FileChangeStatus } from "./file-changes-card";
-import { collectTurnFilePatches, type TurnFilePatchSection } from "./turn-file-diff";
+import {
+  collectTurnFilePatches,
+  diffRowsToText,
+  type TurnFilePatchSection,
+} from "./turn-file-diff";
 
 export interface TurnFileDiffDialogProps {
   sessionId: string;
@@ -169,6 +174,16 @@ export function TurnFileDiffDialog({
                     <span className="font-medium text-foreground">第 {index + 1} 次</span>
                     <span>·</span>
                     <span>{section.toolName}</span>
+                    {section.rows != null && (
+                      // 2026-10-23-diff-dialog-copy-fallback / FR-01：超长 diff 的复制
+                      // 兜底（DiffView 2000 行上限只截渲染，rows 完整）。常显覆盖：
+                      // static 拆掉默认 absolute 浮出定位、opacity-100 拆掉 hover 才显。
+                      <CopyButton
+                        text={diffRowsToText(section.rows)}
+                        ariaLabel="复制该段 diff"
+                        className="static right-auto bottom-auto ml-auto opacity-100"
+                      />
+                    )}
                   </p>
                   {section.rows ? (
                     <DiffView rows={section.rows} />
