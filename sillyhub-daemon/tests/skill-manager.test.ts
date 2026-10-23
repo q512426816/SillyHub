@@ -712,8 +712,11 @@ describe('skill-manager: pruneSkillsToSubset（2026-10-23-skill-prune-git-safe�
   }
 
   it('git 跟踪目录即使不在 skillRefs 也保留（FR-01）；未跟踪 daemon 副本仍裁剪', async () => {
+    // brand 同时登记进 daemon 库——排除 unmanaged 兜底，保证保留走的是 tracked 分支
+    //（评审 P3 修正：否则 git init/add 是死设置，保护分支未被本用例行使）。
+    await seedManagedSkill('brand');
     await seedManagedSkill('beta');
-    await seedWorkdirSkill('brand'); // 将被 git add 跟踪（仓库正式技能）
+    await seedWorkdirSkill('brand'); // 将被 git add 跟踪（仓库正式技能 ∧ daemon 库同名）
     await seedWorkdirSkill('beta'); // 未跟踪（daemon link 副本形态）
     await gitExec('git', ['init', '-q'], { cwd: workDir });
     await gitExec('git', ['add', join('.claude', 'skills', 'brand')], { cwd: workDir });

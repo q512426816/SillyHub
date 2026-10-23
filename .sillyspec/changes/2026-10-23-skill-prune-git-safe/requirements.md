@@ -36,7 +36,7 @@ created_at: 2026-10-23T06:01:11.085Z
 
 #### 场景：三重与边界
 
-- Given `.claude/skills/` 下同时存在 keep 命中目录、非 daemon 库目录、git 跟踪目录（均不在 skillRefs 的按各条件打破），When 执行 pruneSkillsToSubset，Then 三者全部保留且日志可见保留原因；仅「不在 keep ∧ 在 daemon 库 ∧ 非跟踪」目录被删除。
+- Given `.claude/skills/` 下同时存在 keep 命中目录、非 daemon 库目录、git 跟踪目录，When 执行 pruneSkillsToSubset，Then 三者全部保留；其中「非 daemon 库目录」「git 跟踪目录」两条保护路径打 `prune_skill_kept` 日志（reason=unmanaged / tracked），keep 命中目录在循环前置判断保留、无 kept 日志；仅「不在 keep ∧ 在 daemon 库 ∧ 非跟踪」目录被删除。
 
 #### 场景：git 跟踪信息不可得时降级安全
 
