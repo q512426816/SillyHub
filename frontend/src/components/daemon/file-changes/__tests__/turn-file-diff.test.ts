@@ -15,6 +15,7 @@ import type { AgentRunLogEntry } from "@/lib/agent";
 
 import {
   collectTurnFilePatches,
+  diffRowsToText,
   matchesRepoPath,
   toolCallFilePath,
 } from "../turn-file-diff";
@@ -184,5 +185,52 @@ describe("collectTurnFilePatches（日志 → 按序补丁段）", () => {
   it("空日志 / 无 tool_call 行 → 空数组（不抛错）", () => {
     expect(collectTurnFilePatches([], "a.ts")).toEqual([]);
     expect(collectTurnFilePatches([resultLog({ toolUseId: "tu-1" })], "a.ts")).toEqual([]);
+  });
+});
+
+// 2026-10-23-diff-dialog-copy-fallback task-01：diffRowsToText 纯映射。
+describe("diffRowsToText（DiffRow → unified 前缀文本）", () => {
+  it("按行类型重建前缀：del=-、add=+、ctx=空格，行序保持", () => {
+    const text = diffRowsToText([
+      { type: "ctx", oldNo: 1, newNo: 1, text: "keep" },
+      { type: "del", oldNo: 2, newNo: null, text: "gone" },
+      { type: "add", oldNo: null, newNo: 2, text: "fresh" },
+    ]);
+    expect(text).toBe(" keep\n-gone\n+fresh");
+  });
+
+  it("hunk 分隔伪行（oldNo/newNo 均 null 的 ctx）被剔除，不污染复制文本", () => {
+    const text = diffRowsToText([
+      { type: "del", oldNo: 1, newNo: null, text: "a" },
+      { type: "ctx", oldNo: null, newNo: null, text: "…" },
+      { type: "add", oldNo: null, newNo: 5, text: "b" },
+    ]);
+    expect(text).toBe("-a\n+b");
+    expect(text).not.toContain(" …");
+  });
+
+  it("内容自带前导空格/符号时原样保留（只加类型前缀一次）", () => {
+    expect(diffRowsToText([{ type: "ctx", oldNo: 3, newNo: 3, text: "  indented" }])).toBe(
+      "   indented",
+    );
+    expect(diffRowsToText([{ type: "add", oldNo: null, newNo: 1, text: "-not-a-del" }])).toBe(
+      "+-not-a-del",
+    );
+  });
+
+  it("不截断：2500 行 rows 全量输出（渲染 2000 行上限不进复制面）", () => {
+    const rows = Array.from({ length: 2500 }, (_, i) => ({
+      type: "add" as const,
+      oldNo: null,
+      newNo: i + 1,
+      text: `line-${i}`,
+    }));
+    const text = diffRowsToText(rows);
+    expect(text.split("\n")).toHaveLength(2500);
+    expect(text.endsWith("+line-2499")).toBe(true);
+  });
+
+  it("空数组 → 空串", () => {
+    expect(diffRowsToText([])).toBe("");
   });
 });

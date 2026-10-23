@@ -87,6 +87,24 @@ function parseToolCallEntry(entry: AgentRunLogEntry): ParsedToolCall | null {
 }
 
 /**
+ * DiffRow[] → unified 前缀文本（2026-10-23-diff-dialog-copy-fallback / FR-01/02）。
+ *
+ * 复制兜底的数据源：DiffView 的 2000 行上限只是渲染截断（rows 本身完整），本函数
+ * 对全部行重建 `-` / `+` / 空格 前缀文本；parseStructuredPatch 在多 hunk 间插入的
+ * 「…」视觉分隔（type=ctx 且 oldNo/newNo 均 null）不是真实 diff 行，剔除不进入
+ * 复制文本。不拼造 unified header（hunk 边界信息已丢，伪造会误导 git apply）。
+ */
+export function diffRowsToText(rows: readonly DiffRow[]): string {
+  const lines: string[] = [];
+  for (const row of rows) {
+    if (row.type === "ctx" && row.oldNo == null && row.newNo == null) continue;
+    const prefix = row.type === "del" ? "-" : row.type === "add" ? "+" : " ";
+    lines.push(prefix + row.text);
+  }
+  return lines.join("\n");
+}
+
+/**
  * 本轮日志 + 仓根相对路径 → 按编辑完成序（日志序）的补丁段列表。
  *
  * 配对两遍：① result.tool_use_id → 同 id 的 tool_call 行；② 遗留 result（无 id 或
