@@ -165,30 +165,21 @@ function buildSegments(step: number): TurnSegment[] {
     const event = SCRIPT[i % SCRIPT.length]!;
     const seg = event(i);
     // 历史条目里的「运行中」工具段收敛为完成态，便于演示耗时。
-    if (i < total - 1 && seg.kind === "tool" && seg.status === "running") {
+    if (seg.kind === "tool" && seg.status === "running") {
       seg.status = "ok";
       seg.endedAt = (seg.startedAt ?? 0) + 2100;
     }
+    if (seg.kind === "thinking") seg.streaming = false;
     out.push(seg);
   }
-  // 最新一条置为进行中：演示转圈 + 条目内部滚动；历史条目保持完成态与耗时。
-  const last = out[out.length - 1];
-  if (last?.kind === "thinking") {
-    last.streaming = true;
-  } else if (last?.kind === "tool") {
-    last.status = "running";
-    last.endedAt = null;
-  } else {
-    // 脚本末条是文件/警告时，补一条稳定的 streaming thinking，
-    // 让最新处始终能看到转圈与内部滚动。
-    out.push({
-      kind: "thinking",
-      id: "live-thinking",
-      text: `正在核对 keepalive 与重试窗口的配合，确认长轮询连接不会再被提前回收（第 ${step + 1} 次刷新）…`,
-      streaming: true,
-      ts: total * 1000,
-    });
-  }
+  // 最新一条始终是进行中的长思考：演示转圈 + 全文跟随流式增长滚动。
+  out.push({
+    kind: "thinking",
+    id: "live-thinking",
+    text: `正在核对 keepalive 与重试窗口的配合：网关 keepalive 为 60 秒，而应用侧请求超时只有 30 秒，长轮询场景下连接可能被提前回收；接着检查 token 刷新请求是否复用了同一套重试策略，确认失败后不会直接跳转登录页；再核对重试窗口、退避间隔与幂等键，避免重复提交；随后对比修复前后的连接回收日志，确认长轮询不再被网关提前断开；最后补齐回归测试并整理变更说明。（第 ${step + 1} 次刷新）`,
+    streaming: true,
+    ts: total * 1000,
+  });
   return out;
 }
 

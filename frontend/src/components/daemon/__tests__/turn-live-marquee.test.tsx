@@ -13,6 +13,7 @@ import {
   deriveLiveMarqueeEntries,
   formatMarqueeDuration,
   marqueeSpeedForDistance,
+  marqueeTickerEnd,
   resolveMarqueeTarget,
   LIVE_MARQUEE_MAX_ENTRIES,
 } from "@/components/daemon/turn-live-marquee";
@@ -157,6 +158,17 @@ describe("deriveLiveMarqueeEntries 纯函数（FR-01 / FR-03）", () => {
     expect(entries[1]!.text).toContain("keepalive");
   });
 
+  it("长思考文本不截断，保留完整内容（FR-01）", () => {
+    const longThinking = "这是一段很长的思考内容。".repeat(30);
+    const entries = deriveLiveMarqueeEntries([
+      thinking("t-long", longThinking, true),
+    ]);
+
+    expect(entries).toHaveLength(1);
+    expect(entries[0]!.text).toBe(longThinking);
+    expect(entries[0]!.text.length).toBeGreaterThan(64);
+  });
+
   it("条目超过上限时只保留最近 12 条", () => {
     const many = Array.from({ length: LIVE_MARQUEE_MAX_ENTRIES + 10 }, (_, i) =>
       thinking(`t-${i}`, `事件 ${i}`),
@@ -238,6 +250,23 @@ describe("TurnLiveMarquee 连续轨道（FR-01 / FR-02 / FR-05）", () => {
     // 运行中滚动窗口带左右渐隐（FR-02）。
     expect(container.querySelector(".sh-live-marquee-window")).not.toBeNull();
     expect(item.textContent).toContain("先分析登录链路");
+  });
+
+  it("ticker 一次滚到末尾即停、不复制循环，跟随流式增长（FR-02）", () => {
+    // 终点：文本末尾贴右缘；不溢出为 0。
+    expect(marqueeTickerEnd(1000, 200)).toBe(-800);
+    expect(marqueeTickerEnd(100, 200)).toBe(0);
+
+    const longText = "长".repeat(210);
+    const { container, getAllByText } = render(
+      <TurnLiveMarquee entries={deriveLiveMarqueeEntries([thinking("t-long", longText, true)])} />,
+    );
+
+    // 单份文本（不是双份无限循环）；不再依赖 CSS 动画。
+    expect(container.querySelectorAll('[data-testid="marquee-ticker"]')).toHaveLength(1);
+    expect(getAllByText(longText)).toHaveLength(1);
+    const ticker = container.querySelector('[data-testid="marquee-ticker"]') as HTMLElement;
+    expect(ticker.style.animationDuration).toBe("");
   });
 
   it("完成条目显示 Timer 图标与耗时（FR-02）", () => {

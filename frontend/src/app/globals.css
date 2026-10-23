@@ -1160,11 +1160,10 @@
     );
   }
 
-  /* 2026-10-23-marquee-item-detail（FR-01）：运行中条目内部文本循环滚动——
-     双份文本各占 50%，平移一份即无缝；只在文本窗口 overflow-hidden 内滚动，
-     图标/状态/耗时区不参与。 */
+  /* 2026-10-23-marquee-thinking-fulltext（FR-02）：ticker 由组件 rAF 驱动，
+     从开头一次滚到最后一个字符即停，**不循环**；类名仅作标记与合成提示。 */
   .sh-live-marquee-ticker {
-    animation: sh-live-marquee-ticker 3s linear infinite;
+    will-change: transform;
   }
 }
 
