@@ -1119,6 +1119,13 @@
     animation: sh-live-marquee-sheen 3.6s ease-in-out infinite;
     pointer-events: none;
   }
+
+  /* 2026-10-23-marquee-item-detail（FR-01）：运行中条目内部文本循环滚动——
+     双份文本各占 50%，平移一份即无缝；只在文本窗口 overflow-hidden 内滚动，
+     图标/状态/耗时区不参与。 */
+  .sh-live-marquee-ticker {
+    animation: sh-live-marquee-ticker 8s linear infinite;
+  }
 }
 
 @keyframes sh-caret-blink {
@@ -1154,6 +1161,16 @@
   }
 }
 
+/* 条目内部文本循环（双份内容，平移一份宽度）。 */
+@keyframes sh-live-marquee-ticker {
+  from {
+    transform: translateX(0);
+  }
+  to {
+    transform: translateX(-50%);
+  }
+}
+
 /* 无障碍降级（task-13）：光标停闪常显、三点静止半透明（显式定态，同 task-11
    utility 层降级块模式）；base 层全局 0.01ms 块（animation-duration/iteration
    !important）对本组动画亦已兜底覆盖，此处为双保险确定性终态。 */
@@ -1170,6 +1187,10 @@
   .sh-live-marquee::after {
     animation: none;
     display: none;
+  }
+  /* 2026-10-23-marquee-item-detail（FR-05）：条目内部文本不滚动。 */
+  .sh-live-marquee-ticker {
+    animation: none;
   }
 }
 

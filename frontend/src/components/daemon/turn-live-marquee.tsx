@@ -23,8 +23,31 @@
  *
  * 渲染经济性（对齐 turn-status-bar 的先例）：派生 useMemo 只依赖 segments
  * 引用；滚动由单条 rAF 直接写 transform（不走 React 每帧 setState）。
+ *
+ * 2026-10-23-marquee-item-detail（FR-01~FR-06）单条目细化：
+ *   - 图标改 lucide-react 组件（禁止 emoji 字符串）；
+ *   - 运行中：右侧 CSS 转圈 + 文本区双份 CSS 横向循环（展示文本不同片段）；
+ *   - 完成：停止滚动、截断文本、Timer 图标 + 格式化耗时；
+ *   - 工具/子代理用段 startedAt/endedAt 真实差值；thinking 由客户端从首次
+ *     观察到 running 计到完成；历史已完成且无数据的不显示（不伪造）。
  */
 
+import {
+  AlertTriangle,
+  Bell,
+  Bot,
+  Brain,
+  FileText,
+  FileUp,
+  Info,
+  MessageSquare,
+  Minimize2,
+  Search,
+  Terminal,
+  Timer,
+  Wrench,
+} from "lucide-react";
+import type { LucideIcon } from "lucide-react";
 import { memo, useCallback, useEffect, useRef, useState } from "react";
 
 import { cn } from "@/lib/utils";
@@ -45,6 +68,9 @@ const CLIP_LENGTH = 64;
 
 export type LiveMarqueeIcon =
   | "thinking"
+  | "command"
+  | "edit"
+  | "search"
   | "tool"
   | "subagent"
   | "file"
@@ -58,23 +84,69 @@ export interface LiveMarqueeEntry {
   /** 段 id（子代理内部段带父路径前缀，保证树内唯一）。 */
   id: string;
   icon: LiveMarqueeIcon;
-  /** 单行展示图标（emoji；工具按 processLabel 类别区分）。 */
-  glyph: string;
   text: string;
   status: "running" | "done" | "failed" | "neutral";
+  /** 段真实开始/结束时刻（tool/subagent 可得；thinking 只有开始 ts）。 */
+  startedAt: number | null;
+  endedAt: number | null;
+  /** 服务端权威时长（仅 startedAt/endedAt 均可信时有值）。 */
+  durationMs: number | null;
 }
 
-const ICON_GLYPH: Record<LiveMarqueeIcon, string> = {
-  thinking: "💭",
-  tool: "🔧",
-  subagent: "🤖",
-  file: "📎",
-  stderr: "⚠",
-  system: "ℹ",
-  compact: "🗜",
-  user: "💬",
-  wakeup: "🔔",
+/** 项目 UI 图标（lucide 单色，禁止 emoji 字符串充数）。 */
+const ICON_COMPONENTS: Record<LiveMarqueeIcon, LucideIcon> = {
+  thinking: Brain,
+  command: Terminal,
+  edit: FileText,
+  search: Search,
+  tool: Wrench,
+  subagent: Bot,
+  file: FileUp,
+  stderr: AlertTriangle,
+  system: Info,
+  compact: Minimize2,
+  user: MessageSquare,
+  wakeup: Bell,
 };
+
+/** processLabel 类别 → 图标枚举（工具七类词表语义保留）。 */
+function toolIconOf(label: string): LiveMarqueeIcon {
+  switch (label) {
+    case "运行命令":
+      return "command";
+    case "读写文件":
+      return "edit";
+    case "搜索":
+      return "search";
+    case "失败":
+      return "stderr";
+    default:
+      return "tool";
+  }
+}
+
+/** 耗时格式化：<1s 显示毫秒、<60s 显示一位小数秒、更长显示 m ss。 */
+export function formatMarqueeDuration(ms: number): string {
+  const safe = Math.max(0, Math.round(ms));
+  if (safe < 1000) return `${safe}ms`;
+  if (safe < 60_000) {
+    const seconds = safe / 1000;
+    return `${Number.isInteger(seconds) ? seconds : seconds.toFixed(1)}s`;
+  }
+  const minutes = Math.floor(safe / 60_000);
+  const rest = Math.round((safe % 60_000) / 1000);
+  return `${minutes}m ${String(rest).padStart(2, "0")}s`;
+}
+
+/** 段真实时长：两端齐全且顺序合理才算，否则 null（不伪造）。 */
+function segmentDuration(
+  startedAt: number | null | undefined,
+  endedAt: number | null | undefined,
+): number | null {
+  if (startedAt == null || endedAt == null) return null;
+  const diff = endedAt - startedAt;
+  return diff >= 0 ? diff : null;
+}
 
 /** 单行摘要归一：折叠空白 + 截断（与 status-bar summarizeText 同口径）。 */
 function clip(text: string | null | undefined, max = CLIP_LENGTH): string {
@@ -120,9 +192,11 @@ function collectEntries(
         out.push({
           id: `${prefix}${seg.id}`,
           icon: "thinking",
-          glyph: ICON_GLYPH.thinking,
           text: clip(seg.text) || "正在思考…",
           status: seg.streaming ? "running" : "done",
+          startedAt: seg.ts,
+          endedAt: null,
+          durationMs: null,
         });
         break;
       case "tool": {
@@ -131,12 +205,14 @@ function collectEntries(
         const primary = clip(seg.primary, 44);
         out.push({
           id: `${prefix}${seg.id}`,
-          icon: isSubagent ? "subagent" : "tool",
-          glyph: isSubagent ? ICON_GLYPH.subagent : label.icon,
+          icon: isSubagent ? "subagent" : toolIconOf(label.label),
           text: isSubagent
             ? `子代理 · ${toolBaseName(seg.toolName)}${primary ? ` ${primary}` : ""}`
             : `${label.label} · ${toolBaseName(seg.toolName)}${primary ? ` ${primary}` : ""}`,
           status: toolEntryStatus(seg.status),
+          startedAt: seg.startedAt,
+          endedAt: seg.endedAt,
+          durationMs: segmentDuration(seg.startedAt, seg.endedAt),
         });
         // 子代理内部工具同样进入流（「全部过程信息」）。
         collectEntries(seg.children, out, `${prefix}${seg.id}/`);
@@ -146,9 +222,11 @@ function collectEntries(
         out.push({
           id: `${prefix}${seg.id}`,
           icon: "subagent",
-          glyph: ICON_GLYPH.subagent,
           text: `子代理 · ${clip(seg.subagentType ?? "子代理", 40)}`,
           status: seg.orphaned ? "failed" : "running",
+          startedAt: null,
+          endedAt: null,
+          durationMs: null,
         });
         collectEntries(seg.children, out, `${prefix}${seg.id}/`);
         break;
@@ -156,36 +234,44 @@ function collectEntries(
         out.push({
           id: `${prefix}${seg.id}`,
           icon: "stderr",
-          glyph: ICON_GLYPH.stderr,
           text: `警告 · ${clip(seg.text, 56) || "输出异常"}`,
           status: "failed",
+          startedAt: null,
+          endedAt: null,
+          durationMs: null,
         });
         break;
       case "file":
         out.push({
           id: `${prefix}${seg.id}`,
           icon: "file",
-          glyph: ICON_GLYPH.file,
           text: `文件 · ${clip(seg.name, 40)}`,
           status: "done",
+          startedAt: null,
+          endedAt: null,
+          durationMs: null,
         });
         break;
       case "preamble":
         out.push({
           id: `${prefix}${seg.id}`,
           icon: "system",
-          glyph: ICON_GLYPH.system,
           text: `上下文 · ${clip(seg.text, 40)}`,
           status: "neutral",
+          startedAt: null,
+          endedAt: null,
+          durationMs: null,
         });
         break;
       case "compact":
         out.push({
           id: `${prefix}${seg.id}`,
           icon: "compact",
-          glyph: ICON_GLYPH.compact,
           text: "上下文已重新压缩",
           status: "done",
+          startedAt: null,
+          endedAt: null,
+          durationMs: null,
         });
         break;
       case "compact_status": {
@@ -193,7 +279,6 @@ function collectEntries(
         out.push({
           id: `${prefix}${seg.id}`,
           icon: "compact",
-          glyph: ICON_GLYPH.compact,
           text:
             phase === "success"
               ? "上下文压缩完成"
@@ -202,6 +287,9 @@ function collectEntries(
                 : "正在重新压缩上下文",
           status:
             phase === "compacting" ? "running" : phase === "failed" ? "failed" : "done",
+          startedAt: null,
+          endedAt: null,
+          durationMs: null,
         });
         break;
       }
@@ -209,18 +297,22 @@ function collectEntries(
         out.push({
           id: `${prefix}${seg.id}`,
           icon: "user",
-          glyph: ICON_GLYPH.user,
           text: `引导 · ${clip(seg.text, 56)}`,
           status: "neutral",
+          startedAt: null,
+          endedAt: null,
+          durationMs: null,
         });
         break;
       case "turn_trigger":
         out.push({
           id: `${prefix}${seg.id}`,
           icon: "wakeup",
-          glyph: ICON_GLYPH.wakeup,
           text: `唤醒 · ${clip(seg.text, 56)}`,
           status: "neutral",
+          startedAt: null,
+          endedAt: null,
+          durationMs: null,
         });
         break;
     }
@@ -278,6 +370,74 @@ function dotClass(status: LiveMarqueeEntry["status"]): string {
   }
 }
 
+/**
+ * 单条目视图（FR-01~FR-05）：固定 lucide 图标 + 文本区 + 状态/耗时区。
+ *   - running：文本双份 CSS 循环滚动，右侧 CSS 转圈；
+ *   - 完成：文本单份截断，右侧 Timer 图标 + 耗时（无数据不显示）；
+ *   - reduced-motion：不滚动、不转圈，静态截断。
+ * 只有文本区参与滚动，图标与耗时区固定。
+ */
+function MarqueeItemView({
+  entry,
+  durationMs,
+  reduced,
+  fixedWidth = true,
+}: {
+  entry: LiveMarqueeEntry;
+  durationMs: number | null;
+  reduced: boolean;
+  fixedWidth?: boolean;
+}) {
+  const running = entry.status === "running";
+  const Icon = ICON_COMPONENTS[entry.icon];
+  return (
+    <span
+      data-testid="marquee-item"
+      data-status={entry.status}
+      className={cn(
+        "flex items-center gap-1.5",
+        fixedWidth ? "w-[16rem] shrink-0" : "min-w-0 flex-1",
+      )}
+    >
+      <Icon aria-hidden className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+      <span className="relative min-w-0 flex-1 overflow-hidden">
+        {running && !reduced ? (
+          <span className="sh-live-marquee-ticker inline-flex w-max items-center">
+            <span className="whitespace-nowrap pr-6 font-medium text-foreground">
+              {entry.text}
+            </span>
+            <span aria-hidden className="whitespace-nowrap pr-6 font-medium text-foreground">
+              {entry.text}
+            </span>
+          </span>
+        ) : (
+          <span className="block truncate font-medium text-foreground" title={entry.text}>
+            {entry.text}
+          </span>
+        )}
+      </span>
+      {running ? (
+        <span
+          aria-hidden
+          data-testid="marquee-spinner"
+          className={cn(
+            "h-3 w-3 shrink-0 rounded-full border-2 border-primary/25 border-t-primary",
+            !reduced && "animate-spin",
+          )}
+        />
+      ) : durationMs != null ? (
+        <span
+          data-testid="marquee-duration"
+          className="flex shrink-0 items-center gap-0.5 text-[10.5px] text-muted-foreground"
+        >
+          <Timer aria-hidden className="h-3 w-3" />
+          <span className="tabular-nums">{formatMarqueeDuration(durationMs)}</span>
+        </span>
+      ) : null}
+    </span>
+  );
+}
+
 export interface TurnLiveMarqueeProps {
   entries: LiveMarqueeEntry[];
   /**
@@ -311,6 +471,10 @@ export const TurnLiveMarquee = memo(function TurnLiveMarquee({
   const prevFirstIdRef = useRef<string | null>(null);
   const [visible, setVisible] = useState(true);
   const [ready, setReady] = useState(false);
+  /** 无段真实时长的条目（thinking 等）客户端计时：id → 首次观察 running 的时刻。 */
+  const runtimeStartsRef = useRef(new Map<string, number>());
+  /** 已完成条目的客户端时长快照（仅无服务端时长时写入）。 */
+  const [runtimeDurations, setRuntimeDurations] = useState<Record<string, number>>({});
 
   /** 滚动循环句柄（null=未在跑）：追平即停排，target 更新/恢复可见时重启
    *（2026-10-23-review-risk-fixes-2：旧形态 step 在追平分支外无条件续排，
@@ -393,6 +557,35 @@ export const TurnLiveMarquee = memo(function TurnLiveMarquee({
     ensureScroll();
   }, [ensureScroll]);
 
+  // 2026-10-23-marquee-item-detail（FR-03）：无段真实时长的条目（thinking 等）
+  // 由客户端计时——首次观察到 running 记起点，观察到完成算差值；挂载时已经
+  // 完成的条目没有起点 → 不显示耗时（宁缺勿假）。
+  useEffect(() => {
+    const starts = runtimeStartsRef.current;
+    const now = Date.now();
+    const finished: Record<string, number> = {};
+    for (const entry of entries) {
+      if (entry.status === "running") {
+        if (entry.durationMs == null && !starts.has(entry.id)) {
+          starts.set(entry.id, now);
+        }
+      } else if (entry.status === "done" || entry.status === "failed") {
+        const startedAt = starts.get(entry.id);
+        starts.delete(entry.id);
+        if (startedAt != null && entry.durationMs == null) {
+          finished[entry.id] = Math.max(0, now - startedAt);
+        }
+      }
+    }
+    // 淘汰/切轮后清掉不在当前条目的起点，避免 Map 无界增长。
+    for (const id of starts.keys()) {
+      if (!entries.some((entry) => entry.id === id)) starts.delete(id);
+    }
+    if (Object.keys(finished).length > 0) {
+      setRuntimeDurations((prev) => ({ ...prev, ...finished }));
+    }
+  }, [entries]);
+
   // entries 变化 / 挂载：重算目标（首帧直接定位到最新；ready 前隐藏防闪）。
   useEffect(() => {
     if (reduced) return;
@@ -467,18 +660,13 @@ export const TurnLiveMarquee = memo(function TurnLiveMarquee({
       </span>
 
       {reduced ? (
-        // 减少动态效果：静态展示最新一条，不滚动。
-        <>
-          <span aria-hidden className="relative z-10 shrink-0 text-[12.5px]">
-            {latest.glyph}
-          </span>
-          <span
-            className="relative z-10 min-w-0 flex-1 truncate font-medium text-foreground"
-            title={latest.text}
-          >
-            {latest.text}
-          </span>
-        </>
+        // 减少动态效果：静态展示最新一条，不滚动、不转圈。
+        <MarqueeItemView
+          entry={latest}
+          durationMs={latest.durationMs ?? runtimeDurations[latest.id] ?? null}
+          reduced
+          fixedWidth={false}
+        />
       ) : (
         // 连续轨道：条目按时间顺序等宽排列，向左滚到最新条贴右缘即停。
         <div
@@ -494,20 +682,12 @@ export const TurnLiveMarquee = memo(function TurnLiveMarquee({
             className="flex w-max items-center gap-5 will-change-transform"
           >
             {entries.map((entry) => (
-              <span
+              <MarqueeItemView
                 key={entry.id}
-                className="flex w-[13rem] shrink-0 items-center gap-1.5"
-              >
-                <span aria-hidden className="shrink-0 text-[12.5px]">
-                  {entry.glyph}
-                </span>
-                <span
-                  className="min-w-0 flex-1 truncate font-medium text-foreground"
-                  title={entry.text}
-                >
-                  {entry.text}
-                </span>
-              </span>
+                entry={entry}
+                durationMs={entry.durationMs ?? runtimeDurations[entry.id] ?? null}
+                reduced={false}
+              />
             ))}
           </div>
         </div>

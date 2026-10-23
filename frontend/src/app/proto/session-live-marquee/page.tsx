@@ -37,8 +37,8 @@ const SCRIPT: ReadonlyArray<(_seq: number) => TurnSegment> = [
   (n) => ({
     kind: "thinking",
     id: `think-${n}`,
-    text: "先读登录链路，确认超时发生在前端还是网关；同时检查 token 刷新是否吞掉了错误。",
-    streaming: n === 0,
+    text: "先读登录链路，确认超时发生在前端还是网关；同时检查 token 刷新是否吞掉了错误，再决定补重试还是修 keepalive。",
+    streaming: false,
     ts: n,
   }),
   (n) => ({
@@ -48,8 +48,8 @@ const SCRIPT: ReadonlyArray<(_seq: number) => TurnSegment> = [
     status: "ok",
     toolName: "Read",
     primary: "src/lib/auth.ts",
-    startedAt: n,
-    endedAt: n + 1,
+    startedAt: n * 1000,
+    endedAt: n * 1000 + 1200,
     children: [],
     subagentType: null,
   }),
@@ -60,8 +60,8 @@ const SCRIPT: ReadonlyArray<(_seq: number) => TurnSegment> = [
     status: "ok",
     toolName: "Grep",
     primary: "timeout · src/**/*.ts",
-    startedAt: n,
-    endedAt: n + 1,
+    startedAt: n * 1000,
+    endedAt: n * 1000 + 820,
     children: [],
     subagentType: null,
   }),
@@ -72,8 +72,8 @@ const SCRIPT: ReadonlyArray<(_seq: number) => TurnSegment> = [
     status: "ok",
     toolName: "Agent",
     primary: "排查后端超时配置",
-    startedAt: n,
-    endedAt: n + 4,
+    startedAt: n * 1000,
+    endedAt: n * 1000 + 3800,
     subagentType: "Explore",
     children: [
       {
@@ -83,8 +83,8 @@ const SCRIPT: ReadonlyArray<(_seq: number) => TurnSegment> = [
         status: "ok",
         toolName: "Grep",
         primary: "keepalive · nginx/**",
-        startedAt: n + 1,
-        endedAt: n + 2,
+        startedAt: n * 1000 + 600,
+        endedAt: n * 1000 + 1400,
         children: [],
         subagentType: null,
       },
@@ -95,8 +95,8 @@ const SCRIPT: ReadonlyArray<(_seq: number) => TurnSegment> = [
         status: "ok",
         toolName: "Bash",
         primary: "grep -n keepalive nginx.conf",
-        startedAt: n + 2,
-        endedAt: n + 3,
+        startedAt: n * 1000 + 1600,
+        endedAt: n * 1000 + 2600,
         children: [],
         subagentType: null,
       },
@@ -116,8 +116,8 @@ const SCRIPT: ReadonlyArray<(_seq: number) => TurnSegment> = [
     status: "ok",
     toolName: "Edit",
     primary: "src/lib/auth.ts",
-    startedAt: n,
-    endedAt: n + 1,
+    startedAt: n * 1000,
+    endedAt: n * 1000 + 1600,
     children: [],
     subagentType: null,
   }),
@@ -133,8 +133,8 @@ const SCRIPT: ReadonlyArray<(_seq: number) => TurnSegment> = [
     raw: "",
     status: "running",
     toolName: "Bash",
-    primary: "pnpm vitest auth",
-    startedAt: n,
+    primary: "pnpm vitest auth --reporter=verbose",
+    startedAt: n * 1000,
     endedAt: null,
     children: [],
     subagentType: null,
@@ -163,7 +163,31 @@ function buildSegments(step: number): TurnSegment[] {
   const out: TurnSegment[] = [];
   for (let i = 0; i < total; i += 1) {
     const event = SCRIPT[i % SCRIPT.length]!;
-    out.push(event(i));
+    const seg = event(i);
+    // 历史条目里的「运行中」工具段收敛为完成态，便于演示耗时。
+    if (i < total - 1 && seg.kind === "tool" && seg.status === "running") {
+      seg.status = "ok";
+      seg.endedAt = (seg.startedAt ?? 0) + 2100;
+    }
+    out.push(seg);
+  }
+  // 最新一条置为进行中：演示转圈 + 条目内部滚动；历史条目保持完成态与耗时。
+  const last = out[out.length - 1];
+  if (last?.kind === "thinking") {
+    last.streaming = true;
+  } else if (last?.kind === "tool") {
+    last.status = "running";
+    last.endedAt = null;
+  } else {
+    // 脚本末条是文件/警告时，补一条稳定的 streaming thinking，
+    // 让最新处始终能看到转圈与内部滚动。
+    out.push({
+      kind: "thinking",
+      id: "live-thinking",
+      text: `正在核对 keepalive 与重试窗口的配合，确认长轮询连接不会再被提前回收（第 ${step + 1} 次刷新）…`,
+      streaming: true,
+      ts: total * 1000,
+    });
   }
   return out;
 }
@@ -291,7 +315,7 @@ export default function SessionLiveMarqueeProtoPage() {
                         className="flex items-center gap-2 text-[11px] text-muted-foreground"
                       >
                         <span className="w-4 shrink-0 text-center">
-                          {entry?.glyph ?? "·"}
+                          {entry ? "•" : "·"}
                         </span>
                         <span className="truncate text-foreground/75">
                           {entry?.text ?? seg.kind}
