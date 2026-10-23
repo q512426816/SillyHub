@@ -1,0 +1,46 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-23-diff-dialog-pairing-fix",
+  "reviewer": "general-purpose 子代理（两轮独立评审：首轮 FAIL/P1+P2+P3，增量复审 PASS）",
+  "verdict": "PASS",
+  "reviewedAgainst": "06f315da8",
+  "findings": [
+    {
+      "severity": "P1",
+      "title": "首轮：串行假设不成立——后台子代理并行交错时①不可达、②跨文件错配（已修：②按 parent_tool_use_id 轨道隔离 + 同轨唯一悬置；复审确认 resolved）",
+      "evidence": "首轮 evidence：noteCall 重置 pending 且②不看轨道；复审确认 resolved：trackOf/appearedByTrack 分轨（turn-file-diff.ts），子代理交错用例通过",
+      "location": "frontend/src/components/daemon/file-changes/turn-file-diff.ts"
+    },
+    {
+      "severity": "P2",
+      "title": "首轮：①精确配对读 entry.tool_use_id 恒 undefined（agent_run_logs 无该列），真实键在 metadata.agent_event.call_id（已修：entryCallId 主来源；复审确认 resolved）",
+      "evidence": "首轮：schema.py:201-205 明注 DB 无此列；复审确认：entryCallId 读 metadata.agent_event.call_id，调用/结果两侧同入口，metadata 精确配对用例通过",
+      "location": "frontend/src/components/daemon/file-changes/turn-file-diff.ts"
+    },
+    {
+      "severity": "P3",
+      "title": "首轮 P3a：单遍增量建 id 索引在乱序批次下回归（已修：全量预建 + callIndexByEntry 免重复解析；复审 resolved，并补乱序用例）",
+      "evidence": "第一遍全量预建 calls/callIndexById；第二遍查 callIndexByEntry；用例「乱序批次」通过",
+      "location": "frontend/src/components/daemon/file-changes/turn-file-diff.ts"
+    },
+    {
+      "severity": "P3",
+      "title": "首轮 P3b 残留：有 id 但调用行缺失时回落②会错挂同轨悬置（已修：exactOrphaned 禁止回落②；用例「有 id 但调用行缺失」固化）",
+      "evidence": "resultId 非空但索引未命中 → exactOrphaned=true → 跳过②并丢弃（turn-file-diff.ts）",
+      "location": "frontend/src/components/daemon/file-changes/turn-file-diff.ts"
+    },
+    {
+      "severity": "P3",
+      "title": "首轮 P3c：注释/测试标题与实现不一致（已修：文件头与用例标题按轨道隔离与 metadata 键口径改写；死字段 CallEntry.id 删除）",
+      "evidence": "turn-file-diff.ts 头注、turn-file-diff-dialog.tsx 头注、测试文件头与用例标题均已同步",
+      "location": "frontend/src/components/daemon/file-changes/turn-file-diff.ts"
+    }
+  ],
+  "dimensionNotes": {
+    "乱序": "ok——全量预建 id 索引容忍 result 先于 call 的同时间戳批次；无 id 乱序诚实丢弃",
+    "并发": "ok——②按 parent_tool_use_id 分轨，同轨唯一悬置才配；跨轨与同轨多悬置均丢弃不错配",
+    "切换": "ok——纯映射无跨调用状态",
+    "作用域": "ok——弹窗 fetch 按 sessionId+runId 圈定，路径过滤按仓根相对路径"
+  },
+  "reviewedAt": "2026-10-23T15:50:00+08:00"
+}

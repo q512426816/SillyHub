@@ -882,3 +882,86 @@ created_at: 2026-10-15T16:16:15.707Z
   confirmed_at: null
   source_change: 2026-10-23-session-first-load-ux
   status: active
+
+## FR-docs-053 无 id 补丁按「紧邻其前的最近未用编辑族调用」配对
+变更：2026-10-23-diff-dialog-pairing-fix
+状态：active
+摘要：多文件编辑轮点目标文件（2026-10-23 实证复现）
+全文：.sillyspec/changes/archive/2026-10-23-diff-dialog-pairing-fix/requirements.md#FR-01
+最近确认：ea5e7eb64b9bf39787f9d8b2ba1870c240086cee
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-23-diff-dialog-pairing-fix:flow:测试绑定FR-01
+  tests: frontend/src/components/daemon/file-changes/__tests__/turn-file-diff.test.ts「metadata.agent_event.call_id 精确配对:多文件各归其位,目标文件弹窗不再吃到他文件内容」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-23-diff-dialog-pairing-fix
+  status: active
+
+## FR-docs-054 回退按子代理轨道隔离，同轨唯一悬置才配
+变更：2026-10-23-diff-dialog-pairing-fix
+状态：active
+摘要：子代理交错无 id；同轨多悬置诚实丢弃
+全文：.sillyspec/changes/archive/2026-10-23-diff-dialog-pairing-fix/requirements.md#FR-02
+最近确认：ea5e7eb64b9bf39787f9d8b2ba1870c240086cee
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-23-diff-dialog-pairing-fix:flow:测试绑定FR-02
+  tests: frontend/src/components/daemon/file-changes/__tests__/turn-file-diff.test.ts「②回退同轨唯一悬置」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-23-diff-dialog-pairing-fix
+  status: active
+
+## FR-docs-055 ①精确配对键恢复真实来源且零回归
+变更：2026-10-23-diff-dialog-pairing-fix
+状态：active
+摘要：metadata 键精确配对；乱序批次
+全文：.sillyspec/changes/archive/2026-10-23-diff-dialog-pairing-fix/requirements.md#FR-03
+最近确认：ea5e7eb64b9bf39787f9d8b2ba1870c240086cee
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-23-diff-dialog-pairing-fix:flow:测试绑定FR-03
+  tests: frontend/src/components/daemon/file-changes/__tests__/turn-file-diff.test.ts「metadata 键精确配对」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-23-diff-dialog-pairing-fix
+  status: active
+
+## FR-docs-056 配对键事实登记
+变更：2026-10-23-diff-dialog-pairing-fix
+状态：active
+摘要：留档可查且与代码事实一致
+全文：.sillyspec/changes/archive/2026-10-23-diff-dialog-pairing-fix/requirements.md#FR-04
+最近确认：ea5e7eb64b9bf39787f9d8b2ba1870c240086cee
+
+## FR-docs-057 触及面测试与类型零错
+变更：2026-10-23-diff-dialog-pairing-fix
+状态：active
+摘要：验收门
+全文：.sillyspec/changes/archive/2026-10-23-diff-dialog-pairing-fix/requirements.md#FR-05
+最近确认：ea5e7eb64b9bf39787f9d8b2ba1870c240086cee
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-23-diff-dialog-pairing-fix:flow:测试绑定FR-05
+  tests: frontend/src/components/daemon/file-changes/__tests__/turn-file-diff.test.ts
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-23-diff-dialog-pairing-fix
+  status: active

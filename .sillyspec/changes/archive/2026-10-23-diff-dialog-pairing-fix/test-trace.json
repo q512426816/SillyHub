@@ -1,0 +1,66 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-23-diff-dialog-pairing-fix",
+  "rows": [
+    {
+      "anchor": "FR-01",
+      "row_id": "2026-10-23-diff-dialog-pairing-fix:flow:测试绑定FR-01",
+      "tests": [
+        "frontend/src/components/daemon/file-changes/__tests__/turn-file-diff.test.ts「metadata.agent_event.call_id 精确配对:多文件各归其位,目标文件弹窗不再吃到他文件内容」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-23-diff-dialog-pairing-fix"
+    },
+    {
+      "anchor": "FR-02",
+      "row_id": "2026-10-23-diff-dialog-pairing-fix:flow:测试绑定FR-02",
+      "tests": [
+        "frontend/src/components/daemon/file-changes/__tests__/turn-file-diff.test.ts「②回退同轨唯一悬置」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-23-diff-dialog-pairing-fix"
+    },
+    {
+      "anchor": "FR-03",
+      "row_id": "2026-10-23-diff-dialog-pairing-fix:flow:测试绑定FR-03",
+      "tests": [
+        "frontend/src/components/daemon/file-changes/__tests__/turn-file-diff.test.ts「metadata 键精确配对」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-23-diff-dialog-pairing-fix"
+    },
+    {
+      "anchor": "FR-05",
+      "row_id": "2026-10-23-diff-dialog-pairing-fix:flow:测试绑定FR-05",
+      "tests": [
+        "frontend/src/components/daemon/file-changes/__tests__/turn-file-diff.test.ts"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-23-diff-dialog-pairing-fix"
+    }
+  ]
+}
