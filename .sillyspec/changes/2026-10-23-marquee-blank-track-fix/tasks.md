@@ -6,7 +6,7 @@ created_at: 2026-10-23T06:18:54.173Z
 
 - [x] task-01: 新增 `resolveMarqueeTarget`；滑动时目标回到 base，offset 补偿后平滑前进一条（FR-01）
 - [x] task-02: 长会话不再空白；原型页加「长会话（210 条）」入口（FR-02）
-- [x] task-03: 新增滑动目标回归测试；现有 23 用例通过（FR-03）
+- [x] task-03: 新增滑动目标回归测试；现有 24 用例通过（FR-03）
 - [x] task-04: lint / typecheck 通过（FR-03）
 
 ## 文件清单
