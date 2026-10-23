@@ -13565,6 +13565,8 @@ export interface components {
             current_run_id?: string | null;
             /** Current Run Status */
             current_run_status?: string | null;
+            /** Pending Dialog Kind */
+            pending_dialog_kind?: string | null;
             /** Terminating At */
             terminating_at?: string | null;
             /** Agent Profile Id */
