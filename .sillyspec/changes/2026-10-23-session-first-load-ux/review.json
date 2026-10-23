@@ -1,9 +1,9 @@
 {
   "schemaVersion": 1,
   "change": "2026-10-23-session-first-load-ux",
-  "reviewer": "inline-self（独立评审子代理首轮给出 2×P2+3×P3 后，复审消息未落盘更新 review.json——主会话按修复证据逐条复核代行，降级留痕）",
+  "reviewer": "subagent（独立评审两轮：首轮 2×P2+3×P3 → 修复后复审 PASS，保留 1 条 P3；该 P3 已由主会话按评审建议抽纯函数并补证伪单测关闭。reviewedAgainst 含最终修复提交）",
   "verdict": "PASS",
-  "reviewedAgainst": "29cd597209a14fbcfabb0b81ec4e4e70f2252bc9",
+  "reviewedAgainst": "114099d2b2738b680bcb8fe5ebfba5c3e0c3d2ee",
   "findings": [
     {
       "severity": "P3",
@@ -14,9 +14,9 @@
   ],
   "dimensionNotes": {
     "乱序": "ok",
-    "并发": "ok（原 P2：同 run 双块已由 updater 内 survivorRuns 过滤修复，新增用例「评审 P2：补拉在飞时用户主动加载的轮，合并后不双块」实证）",
+    "并发": "ok（原 P2 同 run 双块：过滤逻辑已抽为纯函数 filterPrependAgainstExisting + 3 条单测直接断言函数产物，不受渲染层归并去重掩盖，可证伪）",
     "切换": "ok",
     "作用域": "ok"
   },
-  "reviewedAt": "2026-10-23T07:39:00Z"
+  "reviewedAt": "2026-10-23T07:44:00Z"
 }
