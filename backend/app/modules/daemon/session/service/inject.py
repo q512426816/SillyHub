@@ -908,5 +908,9 @@ async def _inject_into_session(
         provider_config_payload=provider_config_payload,
         first_turn_briefing=first_turn_briefing,
         page_context=page_context,
+        # 2026-10-23-session-network-context（评审 P1-1 修复）：常规后续轮必须
+        # 透传网络块——漏此参数则只有首轮（create 路径）有网络段，后续轮静默
+        # 丢弃。渲染点在 control._dispatch_inject_turn。
+        network_context=network_context,
         inject_attachments=inject_attachments,
     )

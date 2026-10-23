@@ -87,13 +87,14 @@ def _same_subnet(a: str, b: str, prefixes: tuple[int, ...] = (24,)) -> bool:
 def _pick_address(machine: MachineNetworkInfo) -> tuple[str | None, str]:
     """拼访问地址的网卡选择（FR-05）：优先与 observed_ip 同网段的 IPv4 网卡。
 
-    返回 (地址, 说明)：命中同段网卡 → (ip, "")；无同段 → (首个 IPv4, "（未与
-    观测 IP 同段， uncertain）")式标注；无 IPv4 网卡 → (None, "无可用 IPv4 地址")。
+    返回 (地址, 说明)：命中同段网卡 → (ip, "")；未命中任何同段网卡 → 首个 IPv4
+    +「（多网卡未定，候选：a、b）」标注（评审 P3-1：注释与实现文案对齐）；
+    无 IPv4 网卡 → (None, "无可用 IPv4 地址…")。
     Windows 虚拟网卡（WSL/Hyper-V）在此层不过滤——同段优先已天然规避（R-02）。
     """
     ipv4s = [e for e in machine.interfaces if e.get("family") == "IPv4" and e.get("ip")]
     if not ipv4s:
-        return None, "无可用 IPv4 地址"
+        return None, "无可用 IPv4 地址（daemon 未上报网卡）"
     observed = machine.observed_ip
     # 网卡自身 cidr 精确判定优先；无 cidr 或 observed 缺失时按 /24 近似。
     for entry in ipv4s:
@@ -114,23 +115,58 @@ def _pick_address(machine: MachineNetworkInfo) -> tuple[str | None, str]:
     return first, f"（多网卡未定，候选：{all_ips}）"
 
 
+def _same_subnet_by_cidr(user_ip: str, observed: str, interfaces: list[dict]) -> bool | None:
+    """用网卡 cidr 精确判定同网段（评审 P1-3）。
+
+    真实局域网不总是 /24（企业 /16、/8 常见），固定 /24 会把同网段误判为不可达。
+    口径：找包含 observed_ip 的网卡网段——用户 IP 也在其中 → 同段；该网卡网段
+    不含用户 IP → 不同段；没有任何网卡网段包含 observed_ip（NAT 出口/无数据）
+    → None，调用方退 /24+/16 近似档并标注低置信。
+    """
+    try:
+        user_addr = IPv4Address(user_ip)
+        obs_addr = IPv4Address(observed)
+    except (AddressValueError, NetmaskValueError):
+        return None
+    saw_observed_segment = False
+    for entry in interfaces:
+        if entry.get("family") != "IPv4" or not entry.get("cidr"):
+            continue
+        try:
+            net = IPv4Network(str(entry["cidr"]), strict=False)
+        except (AddressValueError, NetmaskValueError):
+            continue
+        if obs_addr not in net:
+            continue
+        saw_observed_segment = True
+        if user_addr in net:
+            return True
+    return False if saw_observed_segment else None
+
+
 def _machine_line(machine: MachineNetworkInfo, user_ip: str | None) -> str:
     """单机器判定行渲染。"""
     observed = machine.observed_ip
-    has_nics = bool(machine.interfaces)
-    if user_ip and observed and _is_user_ipv4(user_ip):
-        if has_nics:
-            same = _same_subnet(user_ip, observed)
-        else:
-            # 无网卡数据：/24 与 /16 双档近似，低置信标注（FR-05/design Phase 3）。
+    if not observed:
+        # P2-2（评审）：network_info 为 NULL / 无观测 IP = daemon 从未上报网络
+        # 数据，网段与地址都无法判定——禁止用它做任何可达性推断。
+        verdict = "无网络数据（daemon 尚未上报来源 IP 与网卡），无法判定网段或给出访问地址"
+    elif user_ip and _is_user_ipv4(user_ip):
+        precise = _same_subnet_by_cidr(user_ip, observed, machine.interfaces)
+        if precise is None:
+            # 无可用网卡掩码（NAT 出口/网卡未上报）：/24+/16 双档近似，低置信。
             same = _same_subnet(user_ip, observed, prefixes=_NETENV_FALLBACK_PREFIXES)
+            low_conf = True
+        else:
+            same = precise
+            low_conf = False
         verdict = (
             "与用户同网段，大概率可直连该机服务" if same else "与用户不同网段，用户浏览器无法直连"
         )
-        if not has_nics:
-            verdict += "（低置信：无网卡数据，按默认掩码近似）"
+        if low_conf:
+            verdict += "（低置信：仅观测 IP 判定，无网卡掩码，按默认掩码近似；拼地址信息不可用）"
     else:
-        verdict = "观测 IP 缺失，无法判定网段关系"
+        verdict = "用户来源 IP 非 IPv4 或缺失，无法判定网段关系"
     addr, note = _pick_address(machine)
     addr_text = f"访问地址建议用 {addr}{note}" if addr else note
     return f"{machine.name}（{observed or 'IP 未知'}，{verdict}；{addr_text}）"
@@ -221,9 +257,11 @@ async def network_context_for_turn(
     text = render_network_env(user_ip, has_xff, machines)
     digest = _snapshot_hash(text)
     now = datetime.now(UTC).timestamp()
-    client = redis if redis is not None else get_redis()
     key = _snapshot_key(session_id)
     try:
+        # P3-3（评审）：get_redis 移入 try——构造期异常（settings/连接池）同样
+        # 降级为每轮注入，而非把异常抛给会话主链路。
+        client = redis if redis is not None else get_redis()
         if first_turn:
             await client.set(
                 key, json.dumps({"h": digest, "ts": now}), ex=NETENV_SNAPSHOT_TTL_SECONDS
@@ -298,9 +336,14 @@ async def collect_session_machines(
                 rt = await db.get(DaemonRuntime, row.runtime_id)
                 if rt is not None:
                     _add(rt.daemon_instance_id)
-    # ③ grants 借用集（enabled + 成员 + borrow 权限，查询内部已裁定）。
-    for shared in await list_machines_shared_to_me(db, actor_user_id=user_id):
-        _add(shared.machine_id)
+    # ③ grants 借用集——**仅本会话工作区**授予的借用（评审 P1-2：该查询返回用户
+    # 在全部工作区可借的机器，不按 source_workspace_id 过滤会把他工作区机器注入
+    # 本会话，超出 D-005「本会话可用机器」边界）。无工作区会话 → 不注入借用机器
+    # （只留 ①②：runtime 所属 + 本人绑定）。
+    if workspace_id is not None:
+        for shared in await list_machines_shared_to_me(db, actor_user_id=user_id):
+            if shared.source_workspace_id == workspace_id:
+                _add(shared.machine_id)
 
     if not ordered_ids:
         return []

@@ -300,6 +300,36 @@ def test_render_degradation_all_offline():
     assert "无在线机器" in text or "均离线" in text
 
 
+def test_render_same_subnet_uses_nic_cidr_not_fixed_24():
+    """P1-3 回归锁：/16 局域网（同段但不同 /24）必须判同段。
+
+    旧实现固定 /24：10.1.5.7 与 10.1.9.200 会被误判「不同网段、无法直连」；
+    按网卡 cidr（/16）精确判定后应为同段。
+    """
+    from app.modules.daemon.session.network_context import MachineNetworkInfo
+
+    machine = MachineNetworkInfo(
+        daemon_id="d-big",
+        name="big-lan",
+        online=True,
+        observed_ip="10.1.9.200",
+        interfaces=[
+            {"name": "eth0", "ip": "10.1.9.200", "cidr": "10.1.9.200/16", "family": "IPv4"}
+        ],
+    )
+    text = _render("10.1.5.7", [machine])
+    assert "同网段，大概率可直连" in text
+    assert "低置信" not in text  # 有 cidr 走精确判定，不应打低置信标注
+
+
+def test_render_no_network_data_wording():
+    """P2-2 回归锁：network_info 为 NULL（无观测 IP）→ 明确「无网络数据」文案，
+    不得输出任何可达性推断。"""
+    text = _render("192.168.1.23", [_machine(observed=None, ips=())])
+    assert "无网络数据" in text
+    assert "大概率可直连" not in text  # 无数据不得输出可达性推断（指引行不算）
+
+
 def test_render_low_confidence_without_interfaces():
     """FR-05：机器无网卡数据 → /24 与 /16 双档近似 + 低置信标注。"""
     text = _render("192.168.0.7", [_machine(observed="192.168.1.10", ips=())])
@@ -449,6 +479,147 @@ async def test_collect_session_machines_empty_when_no_binding(
         )
         == []
     )
+
+
+# ── FR-01：注入链路（后续轮 SESSION_INJECT prompt 含网络段）──────────────
+
+
+def _mock_ws_hub():
+    from unittest.mock import AsyncMock, MagicMock
+
+    hub = MagicMock()
+    hub.is_connected.return_value = True
+    hub.connected_runtime_ids = []
+    hub.connected_daemon_ids = []
+    hub.send_wakeup = AsyncMock(return_value=True)
+    hub.send_session_control = AsyncMock(return_value=True)
+    return hub
+
+
+def _inject_prompt_for_run(hub, run) -> str:
+    from app.modules.daemon.protocol import DAEMON_MSG_SESSION_INJECT
+
+    for call in hub.send_session_control.call_args_list:
+        args = call.args
+        if (
+            len(args) >= 3
+            and args[1] == DAEMON_MSG_SESSION_INJECT
+            and args[2].get("run_id") == str(run.id)
+        ):
+            return args[2]["prompt"]
+    raise AssertionError(f"no SESSION_INJECT payload for run {run.id}")
+
+
+@pytest.mark.asyncio
+async def test_later_turn_prompt_contains_network_env(db_session: AsyncSession) -> None:
+    """P1-1 回归锁：**后续轮**（非首轮）注入链也必须带【网络环境】段。
+
+    首轮走 create 路径、后续轮走 inject→_dispatch_inject_turn 路径；评审发现
+    后者曾漏传 network_context，只测首轮会漏掉该缺陷。
+    """
+    from datetime import UTC, datetime
+    from unittest.mock import patch
+
+    from app.modules.daemon.model import DaemonRuntime
+    from app.modules.daemon.session.network_context import NetworkContextBlock
+
+    user = await _seed_user(db_session)
+    # 与 test_inject_first_turn_briefing 先例同形：runtime 不绑 daemon_instance
+    # （避免 placement 的 ws-connected 候选校验影响 create）。
+    db_session.add(
+        DaemonRuntime(
+            id=uuid.uuid4(),
+            user_id=user.id,
+            name="daemon",
+            provider="claude",
+            status="online",
+            last_heartbeat_at=datetime.now(UTC),
+        )
+    )
+    await db_session.commit()
+
+    svc = DaemonService(db_session)
+    hub = _mock_ws_hub()
+    # patch 必须覆盖 create——create 也经 WS 派发首轮（先例 fixture 全程 patch）。
+    with patch("app.modules.daemon.ws_hub.get_daemon_ws_hub", return_value=hub):
+        created = await svc.create_session(user.id, provider="claude", prompt="first")
+        # 会话首轮完结，才能注入后续轮（单会话单活跃 run 不变式）。
+        created.agent_run.status = "completed"
+        created.agent_run.finished_at = datetime.now(UTC)
+        await db_session.commit()
+
+        result = await svc.inject_session(
+            created.agent_session.id,
+            user.id,
+            prompt="怎么访问项目地址",
+            network_context=NetworkContextBlock(user_ip="192.168.1.23", has_xff=True),
+        )
+
+    dispatched = _inject_prompt_for_run(hub, result.agent_run)
+    assert "【网络环境】" in dispatched
+    assert "192.168.1.23" in dispatched
+    # 无在线机器（本用例未绑机器）→ 走「在线机器：无」降级，仍须给出指引。
+    assert "在线机器：无" in dispatched
+    assert dispatched.endswith("怎么访问项目地址")  # 用户原文在段后（展示层干净不变）
+
+
+# ── FR-04：grants 借用集按会话工作区过滤（P1-2 回归锁）──────────────────────
+
+
+@pytest.mark.asyncio
+async def test_collect_machines_excludes_other_workspace_grants(
+    db_session: AsyncSession,
+) -> None:
+    """P1-2 回归锁：他工作区授予的借用机器不得进入本会话机器清单。
+
+    构造：机器 A 由 workspace_a 共享、机器 B 由 workspace_b 共享，查询
+    workspace_a → 只应含 A。此用例锁 collect_session_machines 的
+    source_workspace_id 过滤分支（查询函数本身返回全部工作区借用集）。
+    """
+    from app.modules.daemon.session.network_context import collect_session_machines
+
+    user = await _seed_user(db_session)
+    ws_a, ws_b = uuid.uuid4(), uuid.uuid4()
+    machines = {}
+    for key, _ws in (("a", ws_a), ("b", ws_b)):
+        did = uuid.uuid4()
+        db_session.add(
+            DaemonInstance(
+                id=did,
+                user_id=user.id,
+                hostname=f"m-{key}",
+                server_url="http://backend",
+                status="online",
+                network_info={"observed_ip": f"192.168.1.{(key == 'a' and 10) or 20}"},
+            )
+        )
+        machines[key] = did
+    await db_session.commit()
+
+    class _Shared:
+        def __init__(self, machine_id, ws):
+            self.machine_id = machine_id
+            self.source_workspace_id = ws
+
+    async def _fake_shared(_db, *, actor_user_id):
+        return [
+            _Shared(machines["a"], ws_a),
+            _Shared(machines["b"], ws_b),
+        ]
+
+    from unittest.mock import patch
+
+    with patch("app.modules.daemon.grants.queries.list_machines_shared_to_me", new=_fake_shared):
+        result = await collect_session_machines(
+            db_session, user_id=user.id, runtime_id=None, workspace_id=ws_a
+        )
+    assert [m.daemon_id for m in result] == [str(machines["a"])]
+    # 无工作区会话 → 不注入任何借用机器。
+    with patch("app.modules.daemon.grants.queries.list_machines_shared_to_me", new=_fake_shared):
+        none_ws = await collect_session_machines(
+            db_session, user_id=user.id, runtime_id=None, workspace_id=None
+        )
+    assert none_ws == []
 
 
 @pytest.mark.asyncio

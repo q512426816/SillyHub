@@ -15684,6 +15684,8 @@ export interface components {
             spec_cache?: components["schemas"]["DaemonHeartbeatSpecCacheItem"][];
             /** Machine Id */
             machine_id?: string | null;
+            /** Network Interfaces */
+            network_interfaces?: components["schemas"]["HeartbeatNetworkInterface"][] | null;
         };
         /**
          * DaemonHeartbeatResponse
@@ -18997,6 +18999,24 @@ export interface components {
             server_time: string;
             /** Environment */
             environment: string;
+        };
+        /**
+         * HeartbeatNetworkInterface
+         * @description 心跳网卡清单条目（2026-10-23-session-network-context FR-02 / D-002@v1）。
+         *
+         *     daemon network-info.ts collectNetworkInterfaces 过滤后的条目（internal 回环
+         *     与无 cidr 已剔除；IPv4+IPv6 都上报，判定层只消费 IPv4）。字段宽松校验
+         *     （心跳通道宁宽勿断先例）：cidr 容 null、family 原样透传存储。
+         */
+        HeartbeatNetworkInterface: {
+            /** Name */
+            name: string;
+            /** Ip */
+            ip: string;
+            /** Cidr */
+            cidr?: string | null;
+            /** Family */
+            family: string;
         };
         /**
          * HitsBatchIn

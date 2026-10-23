@@ -44176,6 +44176,20 @@
               }
             ],
             "title": "Machine Id"
+          },
+          "network_interfaces": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/HeartbeatNetworkInterface"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Network Interfaces"
           }
         },
         "type": "object",
@@ -51780,6 +51794,45 @@
           "environment"
         ],
         "title": "HealthResponse"
+      },
+      "HeartbeatNetworkInterface": {
+        "properties": {
+          "name": {
+            "type": "string",
+            "maxLength": 100,
+            "title": "Name"
+          },
+          "ip": {
+            "type": "string",
+            "maxLength": 64,
+            "title": "Ip"
+          },
+          "cidr": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 72
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cidr"
+          },
+          "family": {
+            "type": "string",
+            "maxLength": 10,
+            "title": "Family"
+          }
+        },
+        "type": "object",
+        "required": [
+          "name",
+          "ip",
+          "family"
+        ],
+        "title": "HeartbeatNetworkInterface",
+        "description": "心跳网卡清单条目（2026-10-23-session-network-context FR-02 / D-002@v1）。\n\ndaemon network-info.ts collectNetworkInterfaces 过滤后的条目（internal 回环\n与无 cidr 已剔除；IPv4+IPv6 都上报，判定层只消费 IPv4）。字段宽松校验\n（心跳通道宁宽勿断先例）：cidr 容 null、family 原样透传存储。"
       },
       "HitsBatchIn": {
         "properties": {

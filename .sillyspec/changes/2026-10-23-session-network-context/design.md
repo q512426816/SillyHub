@@ -54,7 +54,7 @@ scale: small  # Step 8 精判（2026-10-14 反判据口径）：虽有 daemon∥
 2. **判定**（Python 标准库 `ipaddress`，仅 IPv4）：
    - 主判定：user_ip 与各机器 `observed_ip` 是否同网段（按 observed_ip 所在网卡 cidr 归属计算；observed_ip 无网卡数据时按 /24 与 /16 双档近似，文案标注「低置信（无网卡数据，按默认掩码近似）」）。
    - 地址选择：拼访问地址优先选与 observed_ip 同网段的网卡 IPv4（规避 Windows 虚拟网卡干扰）；都不匹配则列出全部 IPv4 并标注不确定。
-   - 降级矩阵（四态）：user_ip 缺失→「无法判定」；无 XFF 且 user_ip ∈ 172.16.0.0/12（容器网桥特征）→「服务端疑似容器直连，无法判定真实用户网段」；机器在线但 network_info 为 NULL→「仅观测 IP 判定，拼地址信息不可用」；全部机器离线→「无在线机器」。纯 IPv6 user_ip→「IPv6 未参与判定」。
+   - 降级矩阵（四态）：user_ip 缺失→「无法判定」；无 XFF 且 user_ip ∈ 172.16.0.0/12（容器网桥特征）→「服务端疑似容器直连，无法判定真实用户网段」；机器 network_info 为 NULL（无观测 IP）→「无网络数据（daemon 尚未上报来源 IP 与网卡），无法判定网段或给出访问地址」；无网卡掩码（有观测 IP 但无可用 cidr，NAT 出口等）→「仅观测 IP 判定，低置信，拼地址信息不可用」；全部机器离线→「在线机器：无」。纯 IPv6 user_ip→「未参与判定」。
 3. **去重**：Redis（key `session:netenv:<session_id>`，TTL 7 天）存「上次**已注入**内容 hash + 注入时间戳」；当前渲染与上次注入相同→不注入；不同且距上次注入 ≥60s→注入并更新快照；<60s→不注入也**不更新**快照，下一轮重比、到点补注（变化不丢失，D-013）；Redis 故障降级为每轮注入（正确性优先，与 auth 缓存降级约定同向）。
 4. **注入**：以 `NetworkContextBlock(user_ip, has_xff)` 数据块镜像 `page_context` 的**完整穿透面**——service/__init__.py 方法面（:387/:528/:617/:671 四处）、control.py（:103/:698）、create.py（:74）、inject.py（:69/:246/:433/:898）与 queue.py（入队序列化 :304、steering 重放 :776-823、排队派发重放 :945-986）——渲染点在 dispatch prompt 组装处调引擎；首轮（create 路径）不走去重强制注入一次建立上下文。排队/steering 轮：入队时随条目序列化 user_ip/has_xff（queue.py:304 同款先例），派发时用存储 IP + 实时机器数据**重算判定**注入，不重放旧判定文本（D-012——queue.py:774「只重放不注入」曾是审查修复缺陷，不重蹈）。
 
