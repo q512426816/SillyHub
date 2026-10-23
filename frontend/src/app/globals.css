@@ -1124,7 +1124,7 @@
      双份文本各占 50%，平移一份即无缝；只在文本窗口 overflow-hidden 内滚动，
      图标/状态/耗时区不参与。 */
   .sh-live-marquee-ticker {
-    animation: sh-live-marquee-ticker 8s linear infinite;
+    animation: sh-live-marquee-ticker 3s linear infinite;
   }
 }
 

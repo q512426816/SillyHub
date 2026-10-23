@@ -1,0 +1,29 @@
+tier: thin
+legacy_fallback: false
+substeps: {}
+born_face: thin
+with_tasks: false
+review_force: null
+input: |-
+  跑马灯条目内部滚动提速
+
+  动机：用户反馈条目内部文本横向滚动太慢，流动感不足；需要明显加快。
+
+  成功标准：
+  - .sh-live-marquee-ticker 单圈时长由 8s 缩短到 3s，内部文本滚动速度明显提升
+  - 仅调整条目内部滚动速度，不改轨道整体推进速度与「只流到最新」行为
+  - prefers-reduced-motion 下仍保持静态，不恢复滚动
+  - 现有跑马灯测试全部通过，lint / typecheck 通过
+autopilot: false
+prestage_ack: false
+baseline_commit: 40e4a067e2ccfff90162d2eb23ffe55c361dfc52
+updatedAt: '2026-10-23T02:15:15.486Z'
+cross_baselines:
+  sillyspec: b0410b828d7357b0c709665bc0a68482e6dbb26a
+baseline_sha256: 406353ef544cb02bfd7060194c97ec02b5b14d9c9c1ff3ed26d1e0873001689c
+spec_approved: true
+spec_approved_at: '2026-10-23T02:15:15.485Z'
+spec_approved_by: anon@DESKTOP-HJ0AM09
+spec_approved_channel: user-confirmed
+spec_attested_by: anon@DESKTOP-HJ0AM09
+
