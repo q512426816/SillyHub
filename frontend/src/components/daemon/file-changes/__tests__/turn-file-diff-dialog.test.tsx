@@ -21,9 +21,9 @@ vi.mock("@/lib/daemon/sessions", () => ({
 }));
 
 // 2026-10-23-diff-dialog-copy-fallback：剪贴板零副作用 mock（断言复制内容）。
-const copyTextToClipboardMock = vi.fn(() => Promise.resolve());
+const copyTextToClipboardMock = vi.fn((_text: string) => Promise.resolve());
 vi.mock("@/lib/clipboard", () => ({
-  copyTextToClipboard: (...args: unknown[]) => copyTextToClipboardMock(...args),
+  copyTextToClipboard: (text: string) => copyTextToClipboardMock(text),
 }));
 
 function callLog(toolUseId: string, filePath: string, tool = "Edit"): AgentRunLogEntry {
@@ -227,7 +227,7 @@ describe("TurnFileDiffDialog：复制兜底（2026-10-23-diff-dialog-copy-fallba
     renderDialog();
 
     fireEvent.click(await screen.findByRole("button", { name: "复制该段 diff" }));
-    const copied = copyTextToClipboardMock.mock.calls[0]?.[0] as string;
+    const copied = copyTextToClipboardMock.mock.calls[0]?.[0] ?? "";
     const copiedLines = copied.split("\n");
     expect(copiedLines).toHaveLength(2500);
     expect(copiedLines[2499]).toBe("+row-2499");
