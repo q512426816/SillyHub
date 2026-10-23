@@ -54,7 +54,7 @@ created_at: 2026-10-23T08:09:55.208Z
 
 #### 场景：测试矩阵
 
-- Given `turn-start-watchdog.test.ts` 现有 7 个用例
+- Given `turn-start-watchdog.test.ts` 现有 9 个用例
 - When 追加同 runId steering、已观测 run、事件新鲜 stale 判定三类回归用例
 - Then 新增用例与既有用例全部通过，且真僵尸轮触发路径仍被断言
 
@@ -72,5 +72,5 @@ created_at: 2026-10-23T08:09:55.208Z
 FR-01: sillyhub-daemon/tests/interactive/turn-start-watchdog.test.ts「mid-turn steering（同 runId）不 stale-reset、不布防看门狗」
 FR-02: sillyhub-daemon/tests/interactive/turn-start-watchdog.test.ts「轮内事件新鲜时 inject 不触发 stale-reset」/「onMessage 刷新最后事件时间并记录 observedRunIds」
 FR-03: sillyhub-daemon/tests/interactive/turn-start-watchdog.test.ts「已观测事件的 run 不再布防看门狗」/「新 runId 零事件仍触发（真僵尸轮不回归）」
-FR-04: sillyhub-daemon/tests/interactive/turn-start-watchdog.test.ts（上述用例矩阵 + 既有 7 用例）
+FR-04: sillyhub-daemon/tests/interactive/turn-start-watchdog.test.ts（上述用例矩阵 + 既有 9 用例）
 FR-05: 不适用：本条是验证命令面（daemon vitest + tsc --noEmit），无独立用例

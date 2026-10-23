@@ -25,7 +25,7 @@ created_at: 2026-10-23T08:09:55.208Z
 ## 边界与并发（盲维四问——每问必答，答不了即设计缺口）
 
 1. 乱序/迟到到达：输入或事件乱序时，本设计的假设还成立吗？
-   - 答：同 runId inject 与 result 的先后都已覆盖。result 先到会清空 currentRunId（无后台任务时），此时 `sameRunInject=false`，但 `observedRunIds` 已记录该 run，布防前检查仍会跳过（FR-03 兜底）；result 未到时 `sameRunInject=true`，直接按排队处理。两种顺序都不会误杀活轮，也不会漏掉真僵尸轮（真僵尸轮的 runId 从未产生事件、也不在 observedRunIds）。
+   - 答：同 runId inject 与 result 的先后都已覆盖。result 先到会清空 currentRunId（无后台任务时），此时 `sameRunInject=false`，但 `observedRunIds` 已记录该 run，布防前检查仍会跳过（FR-03 兜底）；result 未到时 `sameRunInject=true`，直接按排队处理。两种顺序都不会误杀活轮，也不会漏掉真僵尸轮（真僵尸轮的 runId 从未产生事件、也不在 observedRunIds）。迟到/后台任务的 envelope 与既有撤防逻辑同粒度（都按当前 currentRunId 归属），可能把尚未产事件的 run 记为已观测；该形态由 backend 300s pending 清扫兜底，不新增误杀/漏杀面。
 2. 并发写：两个执行体同时操作同一数据/文件会发生什么？
    - 答：`inject`、`onMessage`、`onResult` 都在 Node 单线程事件循环内执行；`lastTurnEventAt` 与 `observedRunIds` 的更新都是同步语句，没有 await 窗口，不存在交错写。`observedRunIds` 的 FIFO 驱逐也在同一同步段完成。
 3. 切换/生命周期：会话、请求或变更中途切换/中断时状态是否安全？
