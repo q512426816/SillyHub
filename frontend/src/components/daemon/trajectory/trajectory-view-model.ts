@@ -107,6 +107,12 @@ function clipSummary(text: string | undefined, max = 160): string {
 }
 
 /** 工具行摘要：优先主参数/命令，其次工具名。 */
+/** 行标签：system_event 派生行显示「上下文」（dsh 对照的 context 类）。 */
+function recordKindLabel(row: TrajectoryRow): string {
+  if (row.kind === "system" && row.meta?.contextEvent) return "上下文";
+  return KIND_LABEL[row.kind] ?? row.kind;
+}
+
 function recordSummary(row: TrajectoryRow): string {
   if (row.kind === "tool") {
     const base = row.toolName ?? "tool";
@@ -126,6 +132,7 @@ function recordResultSummary(row: TrajectoryRow): string | undefined {
 
 function searchFields(row: TrajectoryRow): string[] {
   return [
+    recordKindLabel(row),
     KIND_LABEL[row.kind] ?? "",
     row.toolName ?? "",
     row.inputText ?? "",
@@ -198,7 +205,7 @@ export function buildLedgerView(
         .map((row) => ({
           kind: "record" as const,
           record: row,
-          kindLabel: KIND_LABEL[row.kind] ?? row.kind,
+          kindLabel: recordKindLabel(row),
           summary: recordSummary(row),
           resultSummary: recordResultSummary(row),
           depth: row.depth,
@@ -260,7 +267,7 @@ export function buildLedgerView(
       currentGroup.rows.push({
         kind: "record",
         record: row,
-        kindLabel: KIND_LABEL[row.kind] ?? row.kind,
+        kindLabel: recordKindLabel(row),
         summary: recordSummary(row),
         resultSummary: recordResultSummary(row),
         depth: row.depth,

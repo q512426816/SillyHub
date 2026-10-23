@@ -209,7 +209,33 @@ export function trajectoryFromTurnViews(
       });
     });
 
-    // 3) 轮尾（replyAt 可能是唯一可靠的「这轮什么时候完」锚点）。
+    // 3) 上下文行（2026-10-22-trajectory-context-jump / FR-01）：processItems 的
+    //    system_event（agent 注入消息 / 后台通知等，dsh 对照的 context 类）进账本——
+    //    锚点取项 ts，缺失落到轮首（与段缺锚点同语义，不伪造）；零事件轮零变化。
+    const processItems = (turn.processItems ?? []) as Array<{
+      kind?: string;
+      text?: string;
+      ts?: number;
+    }>;
+    processItems.forEach((item, i) => {
+      if (!item || item.kind !== "system_event" || !(item.text ?? "").trim()) return;
+      const startedAt = typeof item.ts === "number" ? item.ts : turnStart;
+      turnRows.push({
+        id: `${runId}:ctx:${i}`,
+        kind: "system",
+        turnIndex,
+        stepIndex: 0,
+        depth: 0,
+        status: rowStatusOf(turn.status),
+        startedAt,
+        endedAt: startedAt,
+        durationMs: 0,
+        outputText: clip(item.text, maxTextLen).value,
+        meta: { seq: i, contextEvent: true },
+      });
+    });
+
+    // 4) 轮尾（replyAt 可能是唯一可靠的「这轮什么时候完」锚点）。
     let turnEnd = turnStart;
     for (const row of turnRows) turnEnd = Math.max(turnEnd, row.endedAt);
     if (replyAt != null) turnEnd = Math.max(turnEnd, replyAt);

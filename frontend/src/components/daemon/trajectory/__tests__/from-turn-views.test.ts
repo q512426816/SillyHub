@@ -178,7 +178,7 @@ describe("trajectoryFromTurnViews：轮视图 → 三泳道轨迹", () => {
 
 describe("产品路径数据边界与工具行映射（2026-10-22-trajectory-view-redesign）", () => {
   it("产品路径只派发六类行型（无 tool_result / error 行）", () => {
-    const traj = trajectoryFromTurnViews([makeTurn()]);
+    const traj = trajectoryFromTurnViews([makeTurn({ processItems: undefined })]);
     const allowed = new Set(["user", "assistant", "thinking", "tool", "system", "compaction"]);
 
     for (const row of traj.rows) {
@@ -234,5 +234,34 @@ describe("产品路径数据边界与工具行映射（2026-10-22-trajectory-vie
     const tool = traj.rows.find((row) => row.kind === "tool")!;
     expect(tool.outputText).toBe("pnpm lint");
     expect(tool.meta?.resultFromPrimary).toBe(true);
+  });
+});
+
+describe("system_event 派生为上下文行（2026-10-22-trajectory-context-jump / FR-01）", () => {
+  it("system_event 派生为上下文行：原文摘要 + ts 锚点 + 无事件轮零变化", () => {
+    const withEvent = trajectoryFromTurnViews([
+      makeTurn({
+        processItems: [
+          { kind: "system_event", text: "Agent sent a message", ts: START + 10_000 },
+          { kind: "system_event", text: "Background subagent finished" },
+        ],
+      }),
+    ]);
+    const ctxRows = withEvent.rows.filter((row) => row.meta?.contextEvent);
+    expect(ctxRows).toHaveLength(2);
+
+    const first = ctxRows.find((row) => row.outputText === "Agent sent a message")!;
+    expect(first.kind).toBe("system");
+    expect(first.startedAt).toBe(START + 10_000);
+    // 缺 ts 的项落到轮首锚点（turnStartedAt=START），不伪造。
+    const second = ctxRows.find((row) => row.outputText === "Background subagent finished")!;
+    expect(second.startedAt).toBe(START);
+
+    // 零回归：无 system_event 的轮行集合与派生前一致（上下文行不出现）。
+    const withoutEvent = trajectoryFromTurnViews([makeTurn()]);
+    expect(withoutEvent.rows.some((row) => row.meta?.contextEvent)).toBe(false);
+    expect(withoutEvent.rows.map((row) => row.id)).toEqual(
+      trajectoryFromTurnViews([makeTurn()]).rows.map((row) => row.id),
+    );
   });
 });

@@ -67,6 +67,9 @@ export interface TrajectoryRow {
     /** 2026-10-22-trajectory-view-redesign：工具结果缺配对时退回 primary 摘要
      *  （详情「结果」页据此标注「未捕获结果」）。 */
     resultFromPrimary?: boolean;
+    /** 2026-10-22-trajectory-context-jump：system_event 派生的上下文行
+     *  （账本标签显示「上下文」）。 */
+    contextEvent?: boolean;
   };
 }
 
