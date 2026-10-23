@@ -34,6 +34,25 @@ import { eventMetaOf, numOf, strOf } from './helpers.js';
 import type { SessionManagerCore } from './types.js';
 
 /**
+ * 2026-10-23-watchdog-steering-guard FR-03：登记「已经产生过轮事件」的 run。
+ *
+ * 有界 Set（256 上限 FIFO 驱逐，单会话约 9KB）：看门狗只服务「新 run 从未
+ * 启动」形态，已观测 run 再被 inject 时不得布防。仅内存态，不参与持久化。
+ */
+const OBSERVED_RUN_IDS_MAX = 256;
+
+function rememberObservedRun(state: SessionState, runId: string): void {
+  const set = state.observedRunIds ?? new Set<string>();
+  state.observedRunIds = set;
+  if (set.has(runId)) return;
+  set.add(runId);
+  if (set.size > OBSERVED_RUN_IDS_MAX) {
+    const oldest = set.values().next().value;
+    if (oldest !== undefined) set.delete(oldest);
+  }
+}
+
+/**
  * onResult（spike D4：result 是干净 turn 边界）。
  *   - result.subtype=success → onTurnResult(sessionId, currentRunId, result)
  *   - is_error / subtype=error_* → onTurnResult（backend 据 is_error 标 failed/interrupted）
@@ -57,6 +76,8 @@ export async function onResult(
   // 也能在 onTurnResult 回调内读到稳定的 active 状态；且避免 onTurnResult 抛错时
   // status 残留 running（虽然 onTurnResult 应不抛，但先收敛更鲁棒）。
   const runId = state.currentRunId;
+  // 2026-10-23-watchdog-steering-guard FR-03：result 到达同样证明该 run 启动过。
+  if (runId) rememberObservedRun(state, runId);
   state.status = 'active';
   // 2026-09-15-background-task-permission-lockout（FR-01 / 坑 subagent-write-channel）：
   // 主轮收尾时若该会话后台任务注册表非空，保留 currentRunId 作「后台锚点」——后台
@@ -243,6 +264,10 @@ export async function onMessage(
   // 入口，偶发「无关事件误撤防」由 backend pending run 启动超时清扫兜底
   // （300s），不在事件流里做 run 归属精细判定的成本权衡。
   mgr._disarmTurnStartWatchdog(state.sessionId);
+  // 2026-10-23-watchdog-steering-guard FR-02/FR-03：envelope 到达即轮内活动——
+  // 刷新 stale 判定基准（lastTurnEventAt），并登记当前 run 为「已启动」。
+  state.lastTurnEventAt = Date.now();
+  if (state.currentRunId) rememberObservedRun(state, state.currentRunId);
   const events = Array.isArray(envelope?.events) ? envelope.events : [];
   // 对账表 #4 前置判定：本 envelope 是否含 Task/Agent tool_use 事件——归一化器把
   // 同一 assistant message 的 tool_use 派生会话信号（agent_task_status running）
