@@ -1,0 +1,39 @@
+tier: thin
+legacy_fallback: false
+substeps:
+  artifacts: done
+  ledger: done
+  patch: done
+  review: done
+  probes: done
+  distill: done
+  archive: done
+  events: done
+born_face: thin
+with_tasks: false
+review_force: null
+input: >-
+  坑11 留痕 rename 幽灵变更根治与清理
+
+  动机：2026-10-23 变更中心现幽灵行 2026-10-23-new-change-43a74c51——裸跑 run brainstorm 自动建名 16 秒后被 change-rename 改名，平台按 change_key
+  建行而 rename 只改本地，旧行永挂 active（坑9 家族第三变种）。根治修复落在 sillyspec 仓 2026-10-23-rename-platform-tombstone（renameChange
+  成功后旧名落删除台账，借 sync 台账墓碑分支收敛平台行），本变更把事故与修复落成坑11 文档存档。
+
+
+  成功标准：
+
+  - docs/sillyspec/finished/ 新增坑11 文档，含现象/根因/修复/现场清理/验证要点五段，与坑9/坑10 体例一致并互链
+autopilot: false
+prestage_ack: true
+baseline_commit: 7d13ad7dbbba352aa76d3fe09cf7a92ae4c35d4c
+updatedAt: '2026-10-23T06:28:13.007Z'
+cross_baselines:
+  sillyspec: bfc29340e77ff756064656462e8ec0ecabf690a7
+baseline_sha256: 976655548464cdedad9db823c2d913ddbb64c3048975e94020ec525a56af396b
+spec_approved: true
+spec_approved_at: '2026-10-23T06:27:26.302Z'
+spec_approved_by: zcode-pit11-doc
+spec_approved_channel: user-confirmed
+spec_attested_by: zcode-pit11-doc
+gate_summary: 'test: —｜lint: —｜门文件 2 个'
+

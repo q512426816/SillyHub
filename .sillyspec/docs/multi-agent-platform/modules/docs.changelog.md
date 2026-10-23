@@ -23,3 +23,4 @@
 - 2026-10-22-change-delete-session-history-fix | 变更删除不再级联删会话轮次并恢复丢失轮次
 - 2026-10-22-agent-profiles-page-restyle | 智能体档案列表页重设计
 - 2026-10-23-session-network-context | 2026-10-23-session-network-context
+- 2026-10-23-rename-ghost-pit-doc | 坑11 留痕 rename 幽灵变更根治与清理

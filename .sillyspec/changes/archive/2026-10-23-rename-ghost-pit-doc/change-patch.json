@@ -1,0 +1,60 @@
+{
+  "change": "2026-10-23-rename-ghost-pit-doc",
+  "baseline": "7d13ad7dbbba352aa76d3fe09cf7a92ae4c35d4c",
+  "head": "e24e1eb9da5f05b4950b595c8f33640034e3bf4d",
+  "files": [
+    "docs/sillyspec/finished/坑11-rename-弃名不落台账平台幽灵永挂.md"
+  ],
+  "totals": {
+    "files": 1,
+    "additions": 35,
+    "deletions": 0
+  },
+  "savedAt": "2026-10-23T06:28:11.671Z",
+  "note": "flow done 时点冻结（本变更可归属交付面：baseline..HEAD 提交面过滤 .sillyspec/ 只留 .sillyspec/docs/ 交付文档 + 独占树未提交交付；治理工件目录不入冻结——2026-10-12-close-trace-freeze-integrity FR-01）",
+  "modules": [
+    {
+      "id": "docs",
+      "files": 1,
+      "doc": "docs/multi-agent-platform/modules/docs.md",
+      "docTouched": false,
+      "docMissing": false
+    }
+  ],
+  "uncoveredDirs": [],
+  "moduleMaps": [
+    "docs/backend/modules/_module-map.yaml",
+    "docs/frontend/modules/_module-map.yaml",
+    "docs/multi-agent-platform/modules/_module-map.yaml",
+    "docs/SillyHub/modules/_module-map.yaml",
+    "docs/sillyhub-daemon/modules/_module-map.yaml"
+  ],
+  "scopeAudit": {
+    "mode": "full-flow",
+    "ok": true,
+    "degradedReason": null,
+    "baseAnchor": "7d13ad7dbbba352aa76d3fe09cf7a92ae4c35d4c",
+    "totals": {
+      "files": 1,
+      "additions": 35,
+      "deletions": 0
+    },
+    "rows": [
+      {
+        "path": "docs/sillyspec/finished/坑11-rename-弃名不落台账平台幽灵永挂.md",
+        "additions": 35,
+        "deletions": 0,
+        "kind": "new",
+        "planned": "新增",
+        "verdict": "planned"
+      }
+    ],
+    "excluded": {
+      "foreignDeclared": []
+    },
+    "note": "flow done 时点冻结（本文件落盘时采集）",
+    "closedBy": "flow done"
+  },
+  "patchSha256": "75870e738d141b97805df424e236a2281f38f7705e7f3059c421e61214ab85c6",
+  "patchStatus": "ok"
+}

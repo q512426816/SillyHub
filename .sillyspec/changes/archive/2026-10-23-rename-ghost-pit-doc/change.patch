@@ -1,0 +1,41 @@
+diff --git a/docs/sillyspec/finished/坑11-rename-弃名不落台账平台幽灵永挂.md b/docs/sillyspec/finished/坑11-rename-弃名不落台账平台幽灵永挂.md
+new file mode 100644
+index 000000000..deeec2d83
+--- /dev/null
++++ b/docs/sillyspec/finished/坑11-rename-弃名不落台账平台幽灵永挂.md
+@@ -0,0 +1,35 @@
++# 坑11：change-rename 弃名不落台账——平台按 change_key 建行，旧名行幽灵永挂
++
++> 发现于 2026-10-23（事故变更 2026-10-23-new-change-43a74c51，本仓 multi-agent-platform）。
++> 状态：已根治（sillyspec 仓变更 2026-10-23-rename-platform-tombstone，提交 bfc29340：renameChange 成功后旧名落删除台账；本仓 backend/daemon 无需改动）。存量幽灵行同日经台账墓碑清理收敛。
++> 家族定位：坑9（物理删除后墓碑失源）→ 坑10（无 --change 自动建名并发双建）→ **本坑（rename 弃名无终态凭证）**——幽灵变更第三变种，前两坑修复均不覆盖。
++
++## 现象
++
++平台变更中心出现 `2026-10-23-new-change-43a74c51`「进行中/头脑风暴」行，永不消失；本地 `.sillyspec/changes/` 无此目录、进度库无此行、删除台账（deleted-changes.jsonl）无此名——三个"无痕"比坑9 更彻底，连台账都没接住。
++
++## 根因
++
++三段叠加，无一处越权：
++
++1. **自动建名（合法路径）**：daemon 会话 agent 裸跑 `sillyspec run brainstorm`（不带 `--change`，会话原话"重新启动 sillyspec brainstorm 流程"），当时仓内零活跃变更，CLI 自动建名 `日期-new-change-随机4字节hex`（run/command.js），后台 spec-sync 0.1 秒内推平台——平台按 `change_key`（变更名）建行，`2026-10-23-new-change-43a74c51` 行就此落座。
++2. **改名弃名（16 秒后）**：agent 按 CLI 提示执行 `change-rename 2026-10-23-new-change-43a74c51 2026-10-23-session-network-context`。`renameChange`（change-registry.js）只 UPDATE 本地库行名 + 搬目录——本地行（即后来的 session-network-context，正常推进并归档）与平台旧行从此脱钩。
++3. **墓碑链失源（rename 不在台账接入面）**：坑9 修复把删除台账只接在 deleteChange/unregisterChange 两个终态上；rename 不是终态转换，不落账。平台旧行无任何本地事件再去收敛——daemon reconcile 对平台侧 active 行轮询 `platform sync --change 旧名` 时，行缺失 + 台账无此名 = never-existed，按防误删设计不发墓碑（坑9 修复的的正确行为在这里成了"正确地不作为"）。
++
++## 修复（sillyspec 仓 2026-10-23-rename-platform-tombstone，提交 bfc29340）
++
++- `renameChange` 成功路径（DB 事务 ok 且目录 rename 成功，或目录本缺失走 mkdir 兜底）追加 `appendDeletedLedger(specDir, 旧名, 'deleted')`——旧名对平台即「终态弃名」，语义复用既有 `'deleted'`（平台 `_apply_cli_tombstone` 只认 deleted/archived，不扩表面=零平台侧改动、零 sync.js 改动）。
++- 落账时机在 DB+目录双成之后：missing/conflict/stolen/FS 回滚分支不落账（行还叫旧名时不得有其终态台账）；fail-open 同删除/归档。
++- 成功文案追加 ℹ️ 提示行（旧名已记删除台账，平台旧名行将由墓碑同步收敛）。
++- 收敛触发面：daemon reconcile 串行 `platform sync --change`（对平台侧 active 行轮询）或显式 `platform sync --change 旧名`——行缺失分支查台账命中 → 合成墓碑 POST → 平台行收敛。
++- 测试锚：sillyspec 仓 test/rename-ledger-tombstone.test.mjs（3 例：落账含目录缺失分支/旧名 sync 合成 deleted 墓碑 POST/失败路径不落账），deleted-ledger.test.mjs 回归 7 例，10/10 绿。
++
++## 现场清理（2026-10-23 已执行）
++
++对本仓台账补记 `{"name":"2026-10-23-new-change-43a74c51","status":"deleted"}` 后 `sillyspec platform sync --change 2026-10-23-new-change-43a74c51` → exit 0、`已上行台账墓碑（行已清除，status=deleted）`；平台 GET 该变更回读 `status=deleted, current_stage=archive`——收敛闭环，未动平台库裸 SQL（对比坑9 当年需人工物理 DELETE，本坑起有官方清理通道）。
++
++## 验证要点
++
++- rename A→B 后：台账含 `A:deleted`；`platform sync --change A`（mock 或真平台）→ 墓碑 POST 载荷 `status=deleted, current_stage=archive`、exit 0。
++- rename 失败路径（旧名缺失/新名冲突/FS 回滚）零台账写入。
++- 残余边界（已备案）：A→B→A 改回且平台 A 行已被墓碑收敛时，活载荷上行得 409 change_deleted——平台已删 key 拒收复活通道的既定设计（与删后重建同语义），按 CLI ℹ️ 分流文案处理，不为 rename 特例扩机制。

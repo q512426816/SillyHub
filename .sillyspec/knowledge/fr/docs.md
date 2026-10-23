@@ -799,3 +799,10 @@ created_at: 2026-10-15T16:16:15.707Z
   confirmed_at: null
   source_change: 2026-10-22-agent-profile-edit-refresh
   status: active
+
+## FR-docs-048 docs/sillyspec/finished/ 新增坑11 文档，含现象/根因/修复/现场清理/验证要点五段，与坑9/坑10 体例一致并互链
+变更：2026-10-23-rename-ghost-pit-doc
+状态：active
+摘要：主路径
+全文：.sillyspec/changes/archive/2026-10-23-rename-ghost-pit-doc/requirements.md#FR-01
+最近确认：e24e1eb9da5f05b4950b595c8f33640034e3bf4d
