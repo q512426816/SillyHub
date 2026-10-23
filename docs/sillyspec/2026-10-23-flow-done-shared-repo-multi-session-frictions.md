@@ -55,3 +55,35 @@ brainstorm/archive 指引，没有任何 flow design 骨架（grep `MACHINE-DRAF
   （源码注释 line 954 已实现），实测一致。
 - `--accept-unmapped` / `--accept-dirty-gap` 的显式留痕通道，在共享主仓并行噪声下
   是必要出口，比 silent pass 诚实。
+
+## 处置进展（2026-10-23 定时收口：①③已修，②锐化诊断留活跃）
+
+- **缺陷①（恢复指引失效）已修**（sillyspec 仓 src/flow.js artifacts 门恢复指引）：骨架原文
+  实际永存于 `.runtime/state/draft-ledger-<变更名>.json` 的 `files["design.md"].text`
+  （R7 draft-ledger 机器稿首版永存机制，`draftAll` 起草时落盘）——旧指引指向的
+  step-guides/ 只有阶段指引、从未缓存 flow design 骨架（坑内 grep 实证）。指引改为指向
+  ledger 真实路径，并补两条实操要点：作答须放问题行之后（`verifyDesignRecordFilled`
+  只查槽后非空行——槽在问题行前会被问题行当答案，坑内「注意」项随指引入文）；删
+  design.md 重生成路径注明会重置为骨架态。测试：无既有断言面钉旧文案（全 test/ grep
+  实证），flow-draft 套件回归绿。
+- **缺陷③（归档提交打印未落库）已修**（sillyspec 仓 src/run/complete-handlers.js）：
+  新增纯函数 `archiveLandedInHeadTree`（HEAD 树含 `.sillyspec/changes/archive/<变更名>/`
+  首段即已落库；`-<变更名>` 后缀兼容历史形态、同名子串不误报、反斜杠归一）；
+  「归档提交一笔到位」提示块加落库断言双态——**未落库**（staged 面在场但 HEAD 树无归档
+  路径）🚨 升级 stderr：`归档提交未落库` + 立即执行（幂等 pathspec 命令原样可复制）+
+  不执行的后果（pull/清理/重置丢归档）+ 执行后核对方式（`git log --oneline -1`）；
+  **已落库**保持 ℹ️ 语气（余下 staged 面一笔带走）。测试：
+  test/archive-commit-suggest-race.test.mjs 5/5（⑤纯函数六断言 + ②e2e 未落库态断言
+  [🚨在场/立即执行/后果/核对/不走已落库文案] + 命令执行后 landed 翻 true 复核；测试
+  harness 双流捕获 console.error）；flow-draft/archive 系 5 套件回归 26/26；lint 1070
+  文件绿；doc-ref-check 93/93（platform-interface-map.md L117 行号锚随移 2871→2905）。
+- **缺陷②（FR/文件面膨胀）锐化诊断，留活跃**——坑内「建议 3：FR/文件面聚合统一过
+  splitOwnVsForeignDiffFiles 归属刀」**事实上已接线**（2026-09-25-thin-dogfood-fixes 修复②
+  起，flow.js:1311 `attributedChangedFiles` → thin 实测门 faceOverride 链全走该刀；本坑
+  实证膨胀的泄漏点不在「没过刀」而在刀刃：baseline..HEAD 提交 subject 无可归因变更名
+  （release/Merge/裸提交等 unknown 形态）时 fail-closed 判 own 保留——并行会话的不规范
+  提交整批穿透）。FileHeader 41 页扩散属 import 依赖合法扇出（discoverModuleDependentTests
+  语义正确）。剩余修法属语义级取舍（unknown 提交文件是否退出 FR 域投票 vs 保守保留 /
+  `--fr-scope=declared` / 归因判定增强），需开变更拍板，不在扫描轮裸改。增量重跑面
+  「失败批滚全量」已有部分护栏（`computeIncrementalFace` 增量 ≥ 基线实测集时退化全量，
+  不会无限叠加）。**本文件保持活跃（缺陷②余项）。**
