@@ -116,7 +116,7 @@ import { getQuicklogDetail } from "@/lib/quicklog";
 // task-03（2026-09-27-session-fast-replay / FR-04 FR-05）：fetchSessionTurnOutline
 // 打开链路并行拉取全量轮次大纲（导航骨架 + 未加载轮 run_id 直达跳转）。
 import {
-  ScheduledMessageRead, cancelTeamMission, compactSession, createScheduledMessage, createSession, fetchPendingDialogs, fetchSessionDialogHistory, fetchSessionTurnOutline, getAgentSession, getAgentSessionLogs, injectSession, interruptSession, listDaemonMachines, resetToolReportSession, takeoverSession, listSessionRuns, maxLogTimestamp, reopenSession, streamSession, triggerSessionTeamMission, type PlanSummary, type SessionCreateTeamMission, type SessionDialogRead, type SessionPermissionRequest, type SessionRunRead, type SessionStreamConnection, type SessionTurnOutlineRead, type TeamMissionTriggerRequest, updateSessionAutoResume, updateSessionCtxWindow,
+  ScheduledMessageRead, cancelTeamMission, compactSession, createScheduledMessage, createSession, fetchPendingDialogs, fetchSessionDialogHistory, fetchSessionTurnOutline, getAgentSession, getAgentSessionLogs, getSessionRunLogs, probeSessionLogBefore, injectSession, interruptSession, listDaemonMachines, resetToolReportSession, takeoverSession, listSessionRuns, maxLogTimestamp, reopenSession, streamSession, triggerSessionTeamMission, type PlanSummary, type SessionCreateTeamMission, type SessionDialogRead, type SessionPermissionRequest, type SessionRunRead, type SessionStreamConnection, type SessionTurnOutlineRead, type TeamMissionTriggerRequest, updateSessionAutoResume, updateSessionCtxWindow,
 } from "@/lib/daemon";
 import { getProviderCaps, PROVIDER_SWITCH_ENGINES } from "@/lib/provider-caps";
 import { cn } from "@/lib/utils";
@@ -128,6 +128,8 @@ import {
   findSegmentById, mentionBindOptions, parseRunStartedAt, readPersistedViewMode,
   readSessionDraft, replacePlaceholderTurn, subagentBlockNameOf, upsertTurn, writePersistedViewMode, writeSessionDraft,
 } from "./turn-state";
+// 2026-10-23-session-first-window-turn-align：首屏自适应窗口（轮次对齐 + 预算）。
+import { buildInitialWindow } from "./initial-window";
 import { highlightSearchHit, searchResultLabel, searchResultText } from "./search";
 // task-01（2026-10-14-session-turn-preview-cards）：消息流归并层（单一数据源，
 // 未加载轮合成预览条目，D-004 方案 A）。
@@ -1278,14 +1280,35 @@ export function SessionPanelPage({
           slim: true,
         });
         if (cancelled) return;
-        streamCursor = maxLogTimestamp(logs);
+        // 2026-10-23-session-first-window-turn-align：首屏自适应窗口——底窗按轮
+        // 对齐补全（截断轮与底窗合并去重 + 至少覆盖最近 2 轮），小会话天然全量；
+        // 任何补拉失败降级回底窗，不阻断建流（FR-01/FR-03）。
+        const runsForWindow = (await runsPromise) ?? null;
+        if (cancelled) return;
+        let windowLogs = logs;
+        try {
+          const adaptive = await buildInitialWindow({
+            baseLogs: logs,
+            runs: runsForWindow,
+            probeEarlier: (oldest) =>
+              probeSessionLogBefore(sessionId, oldest.timestamp, oldest.id),
+            fetchRunLogs: (runId) => getSessionRunLogs(sessionId, runId),
+          });
+          if (cancelled) return;
+          windowLogs = adaptive.logs;
+        } catch {
+          windowLogs = logs;
+        }
+        // SSE 增量游标取合并后最新行：补拉可能带到底窗之后的行（直达返回该轮
+        // 全量），游标不前进会在建流首连重复拉取同一批。
+        streamCursor = maxLogTimestamp(windowLogs);
         // 翻页游标 = 窗口内**时间最早**行（quick ql-20260916-014：logs[0] 是 run
         // 块序首行非时间最旧——大 run 块序靠前而尾部 ts 靠后，以其为 before 翻页
         // 会重复拉取/留洞，见 handleLoadEarlier 同款注释）；满页即可能还有更早。
         // id 分量必须同点写（task-06）——漏设则首次翻页 beforeId=undefined
         // 走后端旧 <= 分支，同 ts 满 100 行批首页整页重复。
-        const oldestInit = logs.length
-          ? logs.reduce((m, l) => (l.timestamp < m.timestamp ? l : m), logs[0]!)
+        const oldestInit = windowLogs.length
+          ? windowLogs.reduce((m, l) => (l.timestamp < m.timestamp ? l : m), windowLogs[0]!)
           : null;
         historyCursorRef.current = oldestInit?.timestamp ?? null;
         historyCursorIdRef.current = oldestInit?.id ?? null;
@@ -1297,7 +1320,7 @@ export function SessionPanelPage({
         if (logs.length >= HISTORY_PAGE_SIZE) {
           scheduleAutoFillRef.current();
         }
-        const restored = logsToTurns(logs);
+        const restored = logsToTurns(windowLogs);
         // quick（ql-20260916-005）：播种「已完成副作用」集合——历史终态轮视为刷新类
         // 副作用已发生过（首连对账 / 5s 复核的重放合成不再扇出）。下方 currentRunId
         // 重放修正翻回 running 的轮不播种，其真实完成事件到达时副作用照常触发。

@@ -1,0 +1,52 @@
+---
+author: flow-machine-draft
+created_at: 2026-10-23T03:00:27.832Z
+---
+# 设计记录（Design Record）— 2026-10-23-session-first-window-turn-align
+
+## 做法概述
+
+本变更怎么解决问题？改哪里、为什么选这个方案（一两段）。
+
+参考 deepseek-harness 的自适应分页（首屏「至少 50 条消息、至少 2 个 turn，最多 500 条消息」，优先在 turn/start 处裁切，并配全量轮次大纲与按需补拉），把会话页首屏从「固定 400 行日志窗口」升级为「轮次对齐 + 预算自适应」：仍先拉最近 400 行日志作为底窗，随后用 `listSessionRuns` 快照按轮补拉——先补全窗口起点被截断的轮（直达结果与窗口行合并去重），再向前补到至少最近 2 个完整轮次；累计超过预算（3000 行）或更早轮直达达到单轮上限（2000 行，可能截断）即停止。合并后的行集统一走 `logsToTurns` 装配，游标取合并后时间最旧行，`hasEarlier` 仍按底窗是否满页判定；底部「加载更早消息」保持既有日志游标翻页能力。
+
+## 接口契约
+
+动了哪些函数/端点/命令/文件格式？对外可见的签名或行为变化是什么（含「无」的说明）？
+
+无新增端点、无后端签名变更。复用既有 `getAgentSessionLogs(sessionId, { limit, slim })`、`getAgentSessionLogs(sessionId, { before, beforeId, limit, slim })`、`getAgentSessionLogs(sessionId, { runId, slim })` 与 `listSessionRuns(sessionId)`。前端新增 `session-panel/initial-window.ts` 纯编排模块（fetch 注入、可单测）与首屏窗口常量（预算行数、最小轮数）；后端响应结构零变化。
+
+## 边界与并发（盲维四问——每问必答，答不了即设计缺口）
+
+1. 乱序/迟到到达：输入或事件乱序时，本设计的假设还成立吗？
+
+成立。首屏补拉全部在建立 SSE 流之前完成（保持 ql-20260827-018「先回灌再建流」），`streamCursor` 取合并后最大日志时间，SSE 增量从该切点继续；补拉等待期间用 `cancelled` 标志与会话 epoch 丢弃过期结果。合并按 `(timestamp, id)` 排序并去重，跨 run 顺序与组内顺序均保持稳定。
+
+2. 并发写：两个执行体同时操作同一数据/文件会发生什么？
+
+本设计只发只读 GET，无写入；首屏补拉位于 `establish()` 单飞序列内，`historyLoadingRef`/abort 与「加载更早」隔离。`listSessionRuns` 快照复用 `runsPromise`，不额外增加并发请求风暴。
+
+3. 切换/生命周期：会话、请求或变更中途切换/中断时状态是否安全？
+
+安全。补拉前后校验 `cancelled` 与 epoch；切换会话后旧响应不落地。补拉失败（runs 快照失败、直拉失败、直达截断）均降级回底窗装配，不阻断建流；游标与 `hasEarlier` 在降级路径保持原语义。
+
+4. 作用域：跨工作区/跨仓/多实例时数据会不会串台？
+
+不会。所有请求以当前 `sessionId` 为作用域，`runId` 直达端点自带「run 不属于该会话即 404」校验。
+
+## 风险与死路
+
+本方案最大的风险是什么？试过但放弃的方案及放弃理由？
+
+最大风险是首屏多一次 runs 快照与至多 2~3 次单轮直达拉取（slim 截断传输），长会话首屏延迟增加一次 RTT 量级；预算 3000 行与单轮 2000 行双上限把最坏传输量锁死。直达 ASC 截断丢尾部的问题用「与窗口行合并去重」规避，新增更早轮只在完整时采纳，避免轮间留洞。放弃方案：① 直接调大 `HISTORY_PAGE_SIZE`——仍会在大轮上复现且无轮对齐；② 后端改日志接口做服务端自适应分页——最优雅但改动面跨前后端、影响所有消费方，留待后续；③ 首屏全量加载所有轮次——长会话传输不可控（500 轮 × 数千行）。
+
+## 文件变更清单
+
+| 操作 | 路径 | 说明 |
+| --- | --- | --- |
+| 新增 | frontend/src/components/daemon/session-panel/initial-window.ts | 首屏自适应编排纯模块：probe 截断判定、合并去重、最小轮数、预算与单轮上限门控 |
+| 修改 | frontend/src/lib/daemon/sessions.ts | 新增 probeSessionLogBefore / getSessionRunLogs 两个语义化封装（复用 logs 端点，隔离探测/直达调用面） |
+| 新增 | frontend/src/components/daemon/session-panel/__tests__/initial-window.test.ts | 自适应编排单测（单轮超窗全量 / 多轮 2 轮 / 已满足不补拉 / 直达截断降级） |
+| 修改 | frontend/src/components/daemon/session-panel/session-panel-page.tsx | 首屏接入自适应窗口：cursor / streamCursor / hasEarlier 与取消校验 |
+| 修改 | frontend/src/components/daemon/session-panel/turn-state.ts | 新增首屏自适应常量（预算行数 / 最小轮数） |
+| 修改 | frontend/src/app/(dashboard)/sessions/__tests__/page.test.tsx | 新增首屏自适应接线集成用例 + 既有用例零回归 |

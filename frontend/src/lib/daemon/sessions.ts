@@ -722,6 +722,43 @@ export async function getAgentSessionLogs(
   );
 }
 
+/**
+ * 2026-10-23-session-first-window-turn-align：首屏自适应窗口探测——返回游标
+ * 之前紧邻的一条日志（limit=1 + slim）。独立导出供会话页注入并让测试隔离
+ * mock（不混入「加载更早」的翻页调用面，避免污染既有翻页游标断言）。
+ */
+export async function probeSessionLogBefore(
+  sessionId: string,
+  before: string,
+  beforeId: string,
+  opts?: { signal?: AbortSignal },
+): Promise<AgentRunLogEntry[]> {
+  return getAgentSessionLogs(sessionId, {
+    before,
+    beforeId,
+    limit: 1,
+    slim: true,
+    signal: opts?.signal,
+  });
+}
+
+/**
+ * 2026-10-23-session-first-window-turn-align：首屏自适应窗口单轮直达——返回
+ * 该 run 全部日志（slim；后端 `_SESSION_RUN_LOGS_MAX=2000` 上限，触达即可能
+ * 截断，调用方按「合并去重 / 不采纳更早轮」降级）。
+ */
+export async function getSessionRunLogs(
+  sessionId: string,
+  runId: string,
+  opts?: { signal?: AbortSignal },
+): Promise<AgentRunLogEntry[]> {
+  return getAgentSessionLogs(sessionId, {
+    runId,
+    slim: true,
+    signal: opts?.signal,
+  });
+}
+
 /* ---------- Session fast replay（2026-09-27-session-fast-replay task-03 / FR-01 FR-02） ---------- */
 
 /**

@@ -69,6 +69,10 @@ const mocks = vi.hoisted(() => ({
   listAgentSessions: vi.fn(),
   getAgentSession: vi.fn(),
   getAgentSessionLogs: vi.fn(),
+  // 2026-10-23-session-first-window-turn-align：首屏自适应窗口探测 / 单轮直达
+  //（独立函数名，避免消耗 getAgentSessionLogs 的 once 队列污染既有翻页断言）。
+  probeSessionLogBefore: vi.fn(),
+  getSessionRunLogs: vi.fn(),
   // 2026-09-27-session-fast-replay task-03：大纲 + 单条全文（打开链路并行拉取
   // / slim 截断展开回填）。默认空大纲 = 降级口径（导航列回退 runsMeta 派生，
   // 既有跳转用例走 interval 翻页回退链路零改动）。
@@ -145,6 +149,11 @@ vi.mock("@/lib/daemon", async (importOriginal) => {
     listAgentSessions: (...args: unknown[]) => mocks.listAgentSessions(...args),
     getAgentSession: (...args: unknown[]) => mocks.getAgentSession(...args),
     getAgentSessionLogs: (...args: unknown[]) => mocks.getAgentSessionLogs(...args),
+    // 2026-10-23-session-first-window-turn-align：首屏自适应窗口（默认空 =
+    // 不截断、不补轮，既有用例行为零变化）。
+    probeSessionLogBefore: (...args: unknown[]) =>
+      mocks.probeSessionLogBefore(...args),
+    getSessionRunLogs: (...args: unknown[]) => mocks.getSessionRunLogs(...args),
     // 2026-09-27-session-fast-replay task-03：面板打开链路并行拉大纲（FR-04）。
     fetchSessionTurnOutline: (...args: unknown[]) =>
       mocks.fetchSessionTurnOutline(...args),
@@ -442,6 +451,12 @@ beforeEach(() => {
   // 持久实现），reset 后下一行立即回填默认值，安全。
   mocks.getAgentSessionLogs.mockReset();
   mocks.getAgentSessionLogs.mockResolvedValue([]);
+  // 2026-10-23-session-first-window-turn-align：首屏自适应探测/直达默认空——
+  // 满页用例下 probe=[] 视为窗口起点轮完整、直达未被调用，既有断言零变化。
+  mocks.probeSessionLogBefore.mockReset();
+  mocks.probeSessionLogBefore.mockResolvedValue([]);
+  mocks.getSessionRunLogs.mockReset();
+  mocks.getSessionRunLogs.mockResolvedValue([]);
   // task-03（2026-09-27-session-fast-replay）：默认空大纲（total_turns=0 + 空
   // items）= 大纲不可用降级口径——导航列回退 runsMeta 派生，跳转走既有 interval
   // 翻页回退，既有用例零改动；大纲驱动用例（直达跳转/未加载摘要）在本文件
@@ -1837,6 +1852,54 @@ describe("SessionPanel 加载更早消息与会话内搜索（quick）", () => {
     fireEvent.scroll(scroller);
     await new Promise((r) => setTimeout(r, 0));
     expect(beforeCallCount()).toBe(1);
+  });
+
+  it("首屏自适应：单轮日志超窗口 → 补全整轮，轮首用户消息进入首屏（FR-01）", async () => {
+    // 底窗 400 行全部属同一轮（工具日志撑爆窗口），轮首 user_input 在窗口外。
+    const base = Array.from({ length: HISTORY_PAGE_SIZE }, (_, i) =>
+      quickLog(`q-b-${i}`, "r-cur", "stdout", `窗口内输出 ${i}`, "2026-08-15T08:00:00Z"),
+    );
+    const full = [
+      quickLog("q-first", "r-cur", "user_input", "首屏应可见的提问", "2026-08-15T07:00:00Z"),
+      ...base,
+    ];
+    mocks.getAgentSessionLogs.mockResolvedValueOnce(base);
+    mocks.probeSessionLogBefore.mockResolvedValueOnce([
+      quickLog("q-probe", "r-cur", "stdout", "更早一行", "2026-08-15T07:59:59Z"),
+    ]);
+    mocks.getSessionRunLogs.mockResolvedValueOnce(full);
+
+    renderPage();
+    await selectDefaultSession();
+
+    expect(await screen.findByText("首屏应可见的提问")).toBeTruthy();
+    expect(mocks.getSessionRunLogs).toHaveBeenCalledWith("s-1", "r-cur");
+    // 自适应在首屏内完成——不触发「加载更早」翻页请求。
+    expect(
+      mocks.getAgentSessionLogs.mock.calls.filter(
+        (c) => c[1] && "before" in (c[1] as Record<string, unknown>),
+      ),
+    ).toHaveLength(0);
+  });
+
+  it("首屏自适应：窗口已覆盖 2 轮且起点轮完整 → 不发起单轮直达（FR-02）", async () => {
+    const base = [
+      ...Array.from({ length: 200 }, (_, i) =>
+        quickLog(`q-r1-${i}`, "r-old", "stdout", `早期输出 ${i}`, "2026-08-15T07:00:00Z"),
+      ),
+      ...Array.from({ length: 200 }, (_, i) =>
+        quickLog(`q-r2-${i}`, "r-cur", "stdout", `近期输出 ${i}`, "2026-08-15T08:00:00Z"),
+      ),
+    ];
+    mocks.getAgentSessionLogs.mockResolvedValueOnce(base);
+
+    renderPage();
+    await selectDefaultSession();
+
+    // 同轮 stdout 装配为整段 reply 文本，用包含匹配（不按节点精确相等）。
+    expect(await screen.findByText(/近期输出 199/)).toBeTruthy();
+    expect(mocks.probeSessionLogBefore).toHaveBeenCalledTimes(1);
+    expect(mocks.getSessionRunLogs).not.toHaveBeenCalled();
   });
 
   it("内容不满视口（无滚动条）→ 自动续拉更早（无需滚动事件）；到头即停", async () => {

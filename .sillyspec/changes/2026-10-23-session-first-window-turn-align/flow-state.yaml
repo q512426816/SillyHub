@@ -1,0 +1,33 @@
+tier: thin
+legacy_fallback: false
+substeps: {}
+born_face: thin
+with_tasks: false
+review_force: null
+input: >-
+  会话重新进入时首屏历史窗口按最近 400 条日志截断，单轮日志超过 400 条时窗口起点落在该轮中段，轮首 user_input（用户自己发的消息）被截到窗口外，页面看起来像用户发言丢失（数据实际都在 DB
+  与日志里，点加载更早可见）。生产实证：会话 16f0ef66 最新 400 条窗口内 user_input 为 0，当前轮 696 条日志，用户两条输入排在第 695/696 条。
+
+
+  成功标准：
+
+  - 首屏加载后，窗口最旧行所在轮若被窗口截断，自动补拉该轮全量日志并装配，保证该轮 prompt 用户消息气泡在场
+
+  - 已完整落在窗口内的轮次装配结果不变，零回归
+
+  - 直达拉取存在上限截断时按既有 okRuns 采纳闸降级，不静默丢窗口段最新内容
+
+  - 相关 vitest 全绿，tsc 零错
+autopilot: false
+prestage_ack: true
+baseline_commit: 03572adfc23741e49bcd494648f42a3d3681b21b
+updatedAt: '2026-10-23T03:26:12.885Z'
+cross_baselines:
+  sillyspec: f8708f85953d6d8b382fb0b2432504008fc410e7
+baseline_sha256: 06670dfeb036218f725f1f4bc9a7ab76b952e6363d1a13ba529c6b6af7696c3f
+spec_approved: true
+spec_approved_at: '2026-10-23T03:26:12.885Z'
+spec_approved_by: anon@DESKTOP-HJ0AM09
+spec_approved_channel: user-confirmed
+spec_attested_by: anon@DESKTOP-HJ0AM09
+
