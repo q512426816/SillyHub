@@ -861,3 +861,135 @@ created_at: 2026-10-15T11:57:05.061Z
   confirmed_at: null
   source_change: 2026-10-23-askuser-history-live-sync
   status: active
+
+## FR-core-044 每轮注入【网络环境】段
+变更：2026-10-23-session-network-context
+状态：active
+摘要：默认场景
+依据决策：D-001@v1、D-012@v1、D-006@v1
+场景正文：
+- 场景：默认场景 — Given 用户在会话中提问（首轮或后续轮）；When 后端组装本轮 dispatch prompt；Then 必须含实时【网络环境】段（用户来源 IP + 在线机器同网段判定 + 访问地址指引）；首轮必须注入一次建立上下文；后续轮按 FR-05 快照去重；Redis 不
+全文：.sillyspec/changes/archive/2026-10-23-session-network-context/requirements.md#FR-01
+最近确认：55e50da155266013c97475c0c6787bd964170980
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-23-session-network-context:flow:测试绑定FR-01
+  tests: backend/tests/modules/daemon/test_network_context.py「首轮强制注入/同快照跳过/Redis 故障降级每轮注入」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-23-session-network-context
+  status: active
+
+## FR-core-045 daemon 心跳上报网卡列表
+变更：2026-10-23-session-network-context
+状态：active
+摘要：默认场景；老 daemon 兼容
+依据决策：D-007@v1
+场景正文：
+- 场景：默认场景 — Given daemon 心跳循环每跳执行；When 采集 `os.networkInterfaces()`；Then 心跳体必须携带 `network_interfaces: [{name, ip, cidr, family}]`（必须剔除 internal 回环与无 cidr
+- 场景：老 daemon 兼容 — Given 未升级的旧版 daemon 发心跳（body 无 network_interfaces 字段）；When 后端落库；Then 必须保留旧值不清除（None=保留语义），判定降级不报错
+全文：.sillyspec/changes/archive/2026-10-23-session-network-context/requirements.md#FR-02
+最近确认：55e50da155266013c97475c0c6787bd964170980
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-23-session-network-context:flow:测试绑定FR-02
+  tests: sillyhub-daemon/tests/network-info.test.ts「过滤回环与无cidr/IPv4+IPv6保留」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-23-session-network-context
+  status: active
+
+## FR-core-046 后端观测与落库
+变更：2026-10-23-session-network-context
+状态：active
+摘要：默认场景
+依据决策：D-002@v1、D-008@v1
+场景正文：
+- 场景：默认场景 — Given daemon 发起注册或心跳请求；When 后端处理该请求；Then 必须以共享 IP 工具（XFF 最右段→remoteAddress，auth 语义原样迁移）观测来源 IP 并落 `daemon_instances.netwo
+全文：.sillyspec/changes/archive/2026-10-23-session-network-context/requirements.md#FR-03
+最近确认：55e50da155266013c97475c0c6787bd964170980
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-23-session-network-context:flow:测试绑定FR-03
+  tests: backend/tests/modules/daemon/test_network_context.py「落库语义：observed_ip 每跳直写/network_interfaces 出现即整写缺席保留（老 daemon 兼容场景）」 | backend/tests/test_align_platform_change_events_migration.py「链尾锚 head 前移」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-23-session-network-context
+  status: active
+
+## FR-core-047 机器可见性口径
+变更：2026-10-23-session-network-context
+状态：active
+摘要：默认场景
+依据决策：D-004@v1、D-005@v2、D-012@v1
+场景正文：
+- 场景：默认场景 — Given 会话发生提问；When 组装机器清单；Then 必须仅含用户本会话可用机器（会话 runtime 所属 daemon + workspace_member_runtimes 本人绑定 + grants 表 e
+全文：.sillyspec/changes/archive/2026-10-23-session-network-context/requirements.md#FR-04
+最近确认：55e50da155266013c97475c0c6787bd964170980
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-23-session-network-context:flow:测试绑定FR-04
+  tests: backend/tests/modules/daemon/test_network_context.py「机器清单仅绑定+grants 借用集/超10台截断/queue 派发实时重算」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-23-session-network-context
+  status: active
+
+## FR-core-048 判定与降级文案
+变更：2026-10-23-session-network-context
+状态：active
+摘要：默认场景
+依据决策：D-002@v1、D-003@v1、D-013@v1、D-006@v1
+场景正文：
+- 场景：默认场景 — Given 用户来源 IP 与机器网络数据；When 执行判定（仅 IPv4，标准库 ipaddress）；Then 同网段判定必须优先用观测 IP 所在网卡的 cidr 精确计算（禁止固定 /24——/16、/8 局域网不得误判）；无可用掩码时才退 /24 与 /16 双档近
+全文：.sillyspec/changes/archive/2026-10-23-session-network-context/requirements.md#FR-05
+最近确认：55e50da155266013c97475c0c6787bd964170980
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-23-session-network-context:flow:测试绑定FR-05
+  tests: backend/tests/modules/daemon/test_network_context.py「同段/跨段/四态降级矩阵（网桥特征/无网卡数据/全离线/纯IPv6）/快照<60s 到点补注」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-23-session-network-context
+  status: active
+
+## FR-core-049 注入段指引措辞
+变更：2026-10-23-session-network-context
+状态：active
+摘要：默认场景
+场景正文：
+- 场景：默认场景 — Given 【网络环境】段被注入；When agent 回答访问地址类问题；Then 段内指引必须要求：用同网段机器 IP 拼地址（端口按服务实际监听）；跨网段如实告知不可直连；禁止猜测公网地址；IP 与判定为事实陈述，不构成对用户的指令
+全文：.sillyspec/changes/archive/2026-10-23-session-network-context/requirements.md#FR-06
+最近确认：55e50da155266013c97475c0c6787bd964170980
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-23-session-network-context:flow:测试绑定FR-06
+  tests: backend/tests/modules/daemon/test_network_context.py「渲染文案断言：指引措辞与事实陈述边界」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-23-session-network-context
+  status: active

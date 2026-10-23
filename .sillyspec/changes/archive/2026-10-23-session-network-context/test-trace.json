@@ -1,0 +1,97 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-23-session-network-context",
+  "rows": [
+    {
+      "anchor": "FR-01",
+      "row_id": "2026-10-23-session-network-context:flow:测试绑定FR-01",
+      "tests": [
+        "backend/tests/modules/daemon/test_network_context.py「首轮强制注入/同快照跳过/Redis 故障降级每轮注入」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-23-session-network-context"
+    },
+    {
+      "anchor": "FR-02",
+      "row_id": "2026-10-23-session-network-context:flow:测试绑定FR-02",
+      "tests": [
+        "sillyhub-daemon/tests/network-info.test.ts「过滤回环与无cidr/IPv4+IPv6保留」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-23-session-network-context"
+    },
+    {
+      "anchor": "FR-03",
+      "row_id": "2026-10-23-session-network-context:flow:测试绑定FR-03",
+      "tests": [
+        "backend/tests/modules/daemon/test_network_context.py「落库语义：observed_ip 每跳直写/network_interfaces 出现即整写缺席保留（老 daemon 兼容场景）」",
+        "backend/tests/test_align_platform_change_events_migration.py「链尾锚 head 前移」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-23-session-network-context"
+    },
+    {
+      "anchor": "FR-04",
+      "row_id": "2026-10-23-session-network-context:flow:测试绑定FR-04",
+      "tests": [
+        "backend/tests/modules/daemon/test_network_context.py「机器清单仅绑定+grants 借用集/超10台截断/queue 派发实时重算」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-23-session-network-context"
+    },
+    {
+      "anchor": "FR-05",
+      "row_id": "2026-10-23-session-network-context:flow:测试绑定FR-05",
+      "tests": [
+        "backend/tests/modules/daemon/test_network_context.py「同段/跨段/四态降级矩阵（网桥特征/无网卡数据/全离线/纯IPv6）/快照<60s 到点补注」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-23-session-network-context"
+    },
+    {
+      "anchor": "FR-06",
+      "row_id": "2026-10-23-session-network-context:flow:测试绑定FR-06",
+      "tests": [
+        "backend/tests/modules/daemon/test_network_context.py「渲染文案断言：指引措辞与事实陈述边界」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-23-session-network-context"
+    }
+  ]
+}

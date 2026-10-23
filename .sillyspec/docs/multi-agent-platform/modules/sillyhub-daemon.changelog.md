@@ -38,3 +38,4 @@
 - 2026-10-23-turn-file-diff-dialog | 轮次文件变更卡行点击弹窗显示变更内容（18字）
 - 2026-10-23-marquee-ticker-speed | 跑马灯条目内部滚动提速
 - 2026-10-23-marquee-motion-polish | 跑马灯动效与流光柔化
+- 2026-10-23-session-network-context | 2026-10-23-session-network-context

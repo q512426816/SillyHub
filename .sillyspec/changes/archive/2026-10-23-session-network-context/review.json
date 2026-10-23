@@ -1,0 +1,16 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-23-session-network-context",
+  "reviewer": "subagent",
+  "verdict": "PASS",
+  "reviewedAgainst": "55e50da155266013c97475c0c6787bd964170980",
+  "findings": [],
+  "reviewerNotes": "增量复审（针对 0bf494db1）确认首轮 6 项 P1/P2 全部 resolved：P1-1 后续轮/排队派发透传断链已补 network_context（inject.py:911），并以真实 inject→_dispatch_inject_turn 用例断言 SESSION_INJECT prompt 含【网络环境】；P1-2 collect_session_machines 已按 shared.source_workspace_id == workspace_id 过滤且无工作区不取借用机；P1-3 新增 _same_subnet_by_cidr 按 observed 所在网卡 cidr 精确判定，无可用掩码才退 /24+/16 低置信；P2-1 openapi.json 与前后端/daemon api-types 已重新生成并含 network_interfaces + HeartbeatNetworkInterface；P2-2 降级文案改为「无网络数据」/「仅观测 IP 判定·低置信」并与 requirements/design 同步；P2-3 新增后续轮 prompt、跨工作区作用域、/16 CIDR、无网络数据 4 个回归用例。首轮 2 项 P3 亦 resolved（注释文案对齐、get_redis 移入 try）。P3-2（network_info 读改写无行锁）裁定 resolved-as-accepted：最坏为单次心跳键值瞬态丢失、下一跳自愈，无持久数据正确性影响。聚焦抽验 test_network_context.py 24 passed；dimensionNotes 四项 ok，无剩余 open 发现。基线刷新至 55e50da1（0bf494db1..HEAD 未触及本变更代码面，仅 docs 与并行会话提交）。",
+  "dimensionNotes": {
+    "乱序": "ok",
+    "并发": "ok",
+    "切换": "ok",
+    "作用域": "ok"
+  },
+  "reviewedAt": "2026-10-23T12:02:02+08:00"
+}

@@ -1525,3 +1525,116 @@
 锚点：未记录
 最近确认：e849e16ee3a34212c2abfd144b0503f6064b6b1d
 理由：答：最大风险是脚注文案过长挤压 85vh 弹窗的可视区——缓解：脚注保持 10.5px muted 两行内文案，追加在半句后而非独立段；若仍拥挤可后移为 tooltip（本变更不做，避免过度设计）。 试过放弃的方案：① 给 diffRowsToText 加缓存（Map by rows 引用）——rows 每段唯一且弹窗生命周期短，缓存无收益还增加清理面，放弃；② 改 CopyButton 共享组件加 builtin getText 优化——其 getText 已存在，无需改；③ 回改上一变更归档的 requirements 修正 FR-02 措辞——归档件冻结（审计真相），不回改历史文档，放弃。
+
+## D-unmapped-199@v1 每轮注入【网络环境】前导段，不动首轮一次性策略
+状态：implemented
+变更：2026-10-23-session-network-context
+原编号：D-001@v1
+锚点：backend/app/modules/daemon/session/service/inject.py:433
+最近确认：55e50da155266013c97475c0c6787bd964170980
+理由：每轮注入。复用【页面上下文】的每轮注入通道先例（backend/app/modules/daemon/session/service/inject.py:433 的 page_context 参数，create.py 与 control.py:246 两处复用）；既有 D-002「前导仅首轮拼装」决策不触碰，网络环境走独立每轮段。
+故障面：每轮注入若不去重会重复烧 token——由 D-006 去重机制对冲。
+退役判据：若平台改为会话级网络信息主动推送（WS 通道）且 agent 可按需查询，可退役每轮注入。
+
+## D-unmapped-200@v1 同网段判定双源——后端观测 daemon 请求源 IP 为 ground truth，daemon 自报网卡列表用于拼访问地址
+状态：implemented
+变更：2026-10-23-session-network-context
+原编号：D-002@v1
+锚点：未记录
+最近确认：55e50da155266013c97475c0c6787bd964170980
+理由：我的判断：双源。①后端从 daemon 心跳/注册请求直接观测来源 IP（复用 auth 模块 _client_ip 的 XFF 最右段逻辑，提为公共工具），这是平台亲眼所见、不可伪造的 ground truth，落库 daemon_instances；②daemon 心跳体新增自报 network_interfaces（os.networkInterfaces 过滤后），用于给 agent 拼「用哪个 IP 访问机器上的服务」（机器多网卡时观测 IP 只有一个，拼 URL 需要网卡列表选合适地址）。CIDR 匹配在两源上做：用户请求源 IP vs daemon 观测 IP（主判定）、vs 各网卡 IP（辅助，找可达地址）。
+故障面：daemon 经 NAT 出口访问平台时观测 IP 是 NAT 出口而非机器本机 IP——同网段判定仍成立（用户与 daemon 同 NAT 即同可达域），但拼 URL 必须用自报网卡列表。
+退役判据：无（观测 IP 是零成本副产品，长期保留）。
+
+## D-unmapped-201@v1 共享机器的内网 IP 对借用人可见
+状态：implemented
+变更：2026-10-23-session-network-context
+原编号：D-004@v1
+锚点：未记录
+最近确认：55e50da155266013c97475c0c6787bd964170980
+理由：可见。内网 IP 属低敏信息（不出局域网无路由意义），共享语义本身即「授权在这台机器上干活」，拼访问地址是借用场景的核心诉求；方案中已建议、用户「做吧」批准。
+故障面：内网拓扑对借用人暴露——接受（共享授权已含更高权限的机器操作权）。
+
+## D-unmapped-202@v2 共享机器权威口径 = grants 表（supersedes D-005@v1）
+状态：implemented
+变更：2026-10-23-session-network-context
+原编号：D-005@v2
+锚点：未记录
+最近确认：55e50da155266013c97475c0c6787bd964170980
+理由：我的判断（经源码查证）：绑定机器仍查 workspace_member_runtimes（本人 runtime 绑定）；共享借用查 daemon grants 表——grants/queries.py:352 的 resolve_granted_daemon_for_borrow 注释明确记录借用判定已从 member_runtimes/queries.py:171 的 binding 表迁移至 grants 表（enabled=TRUE / grantee 工作区+成员 / 非本人 / online，语义逐条等价）。网络环境段的机器清单与派发链路同源，复用该函数族查询。
+supersedes：D-005@v1
+故障面：口径再迁移（grants 表重构）时本清单滞后——与派发链路共用函数族可同步演进。
+
+## D-unmapped-203@v1 注入去重——内容快照变化才重注 + 会话内最短间隔兜底
+状态：implemented
+变更：2026-10-23-session-network-context
+原编号：D-006@v1
+锚点：未记录
+最近确认：55e50da155266013c97475c0c6787bd964170980
+理由：网络环境段内容做规范化快照（源 IP + 各机器判定结果摘要的 hash），与上一轮相同则不重注（只在首轮注入）；变化（用户切网、机器上下线）才重注；另设最短重注间隔（60s）防移动网络 IP 抖动导致连注。快照存 Redis（会话级 key，TTL 7 天）。
+故障面：Redis 快照丢失→多注一次，无正确性影响。
+
+## D-unmapped-204@v1 排队/steering 轮注入语义——入队存用户 IP，派发时重算判定
+状态：implemented
+变更：2026-10-23-session-network-context
+原编号：D-012@v1
+锚点：未记录
+最近确认：55e50da155266013c97475c0c6787bd964170980
+理由：我的判断：镜像 page_context 的入队存储模式——入队时把 user_ip/has_xff 随条目序列化存储（queue.py:304 同款）；派发/steering 重放时用存储的用户 IP + **实时**机器数据（daemon 心跳最新态）重算判定并注入，不重放旧判定文本。排队窗口通常秒级~分钟级，用户 IP 变化概率低，机器状态取最新最准。
+故障面：排队期间用户切网→派发用旧 IP 判定——接受（窗口短，且下轮提问即纠正）。
+
+## D-unmapped-205@v1 快照 60s 窗口语义——不吞变化，到点补注
+状态：implemented
+变更：2026-10-23-session-network-context
+原编号：D-013@v1
+锚点：未记录
+最近确认：55e50da155266013c97475c0c6787bd964170980
+理由：我的判断：Redis 存「上次**已注入**的内容 hash + 注入时间戳」。当前渲染 ≠ 上次注入且 ≥60s → 注入并更新；<60s → 不注入也**不更新**快照，下一轮重新比较，到点即补注。变化永不丢失，抖动被窗口吸收。
+故障面：无新增（相对 D-006 仅明确写入时机）。
+
+## D-unmapped-206@v1 心跳契约扩展须同步四个钉子测试文件
+状态：implemented
+变更：2026-10-23-session-network-context
+原编号：D-007@v1
+锚点：未记录
+最近确认：55e50da155266013c97475c0c6787bd964170980
+理由：知识库共享断言面钉子②：daemon 心跳加参（sillyhub-daemon/src/daemon.ts _sendHeartbeatOnce 平铺传参）后，length 钉四文件必须全部 N→N+1：tests/daemon-heartbeat-pending.test.ts、tests/daemon-heartbeat-sillyspec.test.ts、tests/sillyspec-platform-command.test.ts（6 处）、tests/integration/selfupdate-scenarios.test.ts（2 处）。同一变更内完成，否则 CI 补红。
+故障面：遗漏任一钉子文件即 CI 红——task 清单显式列出四文件。
+
+## D-unmapped-207@v1 daemon_instances 加 JSON 列 + Alembic 迁移，链尾锚测试前移一行
+状态：implemented
+变更：2026-10-23-session-network-context
+原编号：D-008@v1
+锚点：backend/tests/test_align_platform_change_events_migration.py
+最近确认：55e50da155266013c97475c0c6787bd964170980
+理由：我的判断：daemon_instances 新增 network_info JSON 列（存 {observed_ip, interfaces:[{name,ip,cidr,family}]}，单列整体读写）+ observed 单独查询便利不加独立列（JSON 内取）。不复用 capabilities（语义混杂）。新 Alembic 迁移落库时必须前移链尾锚测试 backend/tests/test_align_platform_change_events_migration.py 的 head 常量一行（知识库钉子①）。
+故障面：老版本 daemon 未升级时 network_info 恒 NULL——判定降级为「无网卡数据，仅观测 IP」，不报错。
+
+## D-unmapped-208@v1 实现方案选定——方案 A 平台自动注入（每轮 CIDR 判定 + 前导段注入）
+状态：implemented
+变更：2026-10-23-session-network-context
+原编号：D-009@v1
+锚点：未记录
+最近确认：55e50da155266013c97475c0c6787bd964170980
+理由：用户选定方案 A：daemon 心跳上报网卡 + 后端观测落库 + 每轮 CIDR 判定生成【网络环境】段自动注入。理由：原始诉求是「agent 每次回答时都知道网络情况」，只有注入保证 100% 触达；B 依赖 agent 主动查询、最需要的场景最容易漏；C 浏览器探测被 Chrome mDNS 混淆封死且 agent 依旧无感知。
+故障面：见 D-001/D-006（token 成本由去重对冲）。
+
+## D-unmapped-209@v1 落选方案 B——agent 按需查询工具（get_network_info MCP 工具）
+状态：rejected
+变更：2026-10-23-session-network-context
+原编号：D-010@v1
+锚点：未记录
+最近确认：55e50da155266013c97475c0c6787bd964170980
+理由：落选。不主动注入，新增 MCP 查询工具让 agent 按需调用。
+否决理由：治不了本——agent 不主动调用就依旧不知道网络情况，而用户最需要的场景（问「怎么访问项目地址」）恰恰最容易漏；且需扩 MCP 工具面、daemon 不掌握用户浏览器源 IP 须回平台查询，链路更长。
+复潮条件：若注入 token 成本实测不可接受且 agent 主动调用习惯可被 prompt 稳定养成，可重议按需查询形态。
+
+## D-unmapped-210@v1 落选方案 C——仅前端展示网络徽标不注入
+状态：rejected
+变更：2026-10-23-session-network-context
+原编号：D-011@v1
+锚点：未记录
+最近确认：55e50da155266013c97475c0c6787bd964170980
+理由：落选。仅在聊天界面显示网络徽标，agent 无感知。
+否决理由：浏览器侧探测局域网 IP 已被 Chrome mDNS 混淆机制基本封死（返回 *.local），拿不到可用数据；且不解决核心诉求——agent 依旧不知道网络环境，等于不做。
+复潮条件：若浏览器重新开放可靠的本机 IP 探测能力且需求退化为「仅人看」，可重议。
