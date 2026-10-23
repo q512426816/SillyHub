@@ -1304,8 +1304,8 @@ export function SessionPanelPage({
           });
           if (cancelled) return;
           windowLogs = adaptive.logs;
-          // 评审 P2：直达触达 2000 上限时 cursorLog 保持底窗最旧行（中段缺口
-          // 可经「加载更早」回补），完整时才前移到合并后最旧行。
+          // 评审 P2：锚点轮直达不完整/失败时整体回退底窗、cursorLog 保持底窗
+          // 最旧行；完整采纳时才前移到合并后最旧行或最早已补轮首行。
           windowCursor = adaptive.cursorLog;
         } catch {
           windowLogs = logs;

@@ -44,8 +44,8 @@ created_at: 2026-10-23T03:00:27.832Z
 
 | 操作 | 路径 | 说明 |
 | --- | --- | --- |
-| 新增 | frontend/src/components/daemon/session-panel/initial-window.ts | 首屏自适应编排纯模块：probe 截断判定、合并去重、最小轮数、预算与单轮上限门控 |
+| 新增 | frontend/src/components/daemon/session-panel/initial-window.ts | 首屏自适应编排纯模块：probe 截断判定、完整才合并、预算/单轮/8 轮上限、失败整体回退 |
 | 修改 | frontend/src/lib/daemon/sessions.ts | 新增 probeSessionLogBefore / getSessionRunLogs 两个语义化封装（复用 logs 端点，隔离探测/直达调用面） |
-| 新增 | frontend/src/components/daemon/session-panel/__tests__/initial-window.test.ts | 自适应编排单测（单轮超窗全量 / 多轮 2 轮 / 已满足不补拉 / 直达截断降级） |
+| 新增 | frontend/src/components/daemon/session-panel/__tests__/initial-window.test.ts | 自适应编排单测（单轮超窗全量 / 小会话全量 / 到头不补拉 / 直达截断回退 / 失败降级 / 轮数上限） |
 | 修改 | frontend/src/components/daemon/session-panel/session-panel-page.tsx | 首屏接入自适应窗口：cursor / streamCursor / hasEarlier 与取消校验 |
 | 修改 | frontend/src/app/(dashboard)/sessions/__tests__/page.test.tsx | 新增首屏自适应接线集成用例 + 既有用例零回归 |
