@@ -9,8 +9,19 @@ from pathlib import Path
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.modules.knowledge.parser import KnowledgeParser, ParsedEntry
-from app.modules.knowledge.schema import KnowledgeEntry, KnowledgeList, QuicklogEntry, QuicklogList
+from app.modules.knowledge.parser import (
+    KnowledgeParser,
+    ParsedEntry,
+    extract_headings,
+    extract_scope_sections,
+)
+from app.modules.knowledge.schema import (
+    KnowledgeEntry,
+    KnowledgeList,
+    KnowledgeSection,
+    QuicklogEntry,
+    QuicklogList,
+)
 from app.modules.workspace.service import WorkspaceService
 
 
@@ -234,6 +245,10 @@ class KnowledgeService:
             content=e.content if include_content else None,
             last_modified_at=e.last_modified_at,
             use_count=use_count,
+            # 节级注入作用域（2026-10-23-knowledge-scope-maintenance）：content 在
+            # ParsedEntry 内恒在场（DTO 是否回传不影响解析），无标记→空数组。
+            sections=[KnowledgeSection(**s) for s in extract_scope_sections(e.content)],
+            headings=extract_headings(e.content),
         )
 
     @staticmethod

@@ -8,6 +8,30 @@ import type { components, operations } from "@/lib/api-types";
 // 消除手写类型漂移。后端 schema 来源：backend/app/modules/knowledge/schema.py。
 export type KnowledgeEntry = components["schemas"]["KnowledgeEntry"];
 export type KnowledgeList = components["schemas"]["KnowledgeList"];
+
+/**
+ * 节级注入作用域（2026-10-23-knowledge-scope-maintenance）：后端 GET /knowledge
+ * 加法字段 sections/headings——OpenAPI 生成类型待下次 codegen 同步，前端先以
+ * 结构扩展类型消费（与后端 schema.py 同形）。
+ */
+export interface KnowledgeScopeSection {
+  heading: string;
+  scope: "always" | "repo" | "module";
+  domains: string[];
+}
+export type KnowledgeEntryWithScopes = KnowledgeEntry & {
+  sections?: KnowledgeScopeSection[];
+  headings?: string[];
+};
+export type KnowledgeListWithScopes = Omit<KnowledgeList, "items"> & {
+  items: KnowledgeEntryWithScopes[];
+};
+export type KnowledgeScopeUpdateInput = {
+  filename: string;
+  heading: string;
+  scope: "always" | "repo" | "module" | "keyword";
+  domains?: string[];
+};
 export type QuicklogEntry = components["schemas"]["QuicklogEntry"];
 export type QuicklogList = components["schemas"]["QuicklogList"];
 // 写侧 DTO（task-05 / 2026-09-17-knowledge-precipitation，task-04 交付的生成类型）。
@@ -87,9 +111,42 @@ function encodeKnowledgeFilename(filename: string): string {
 
 export async function listKnowledge(
   workspaceId: string,
-): Promise<KnowledgeList> {
-  return apiFetch<KnowledgeList>(
+): Promise<KnowledgeListWithScopes> {
+  return apiFetch<KnowledgeListWithScopes>(
     `/api/workspaces/${workspaceId}/knowledge`,
+  );
+}
+
+/** 作用域筛选档（2026-10-23-knowledge-scope-maintenance；keyword=无任何节级标记）。 */
+export type KnowledgeScopeFilter = "all" | "always" | "repo" | "module" | "keyword";
+
+/** 条目是否命中筛选档（纯函数，页面筛选条与测试单一源）。 */
+export function knowledgeEntryMatchesScope(
+  item: Pick<KnowledgeEntryWithScopes, "sections">,
+  filter: KnowledgeScopeFilter,
+): boolean {
+  const sections = item.sections ?? [];
+  if (filter === "all") return true;
+  if (filter === "keyword") return sections.length === 0;
+  return sections.some((s) => s.scope === filter);
+}
+
+/**
+ * 节级作用域维护（2026-10-23-knowledge-scope-maintenance）：PATCH /knowledge/scope。
+ * always/repo/module 写入对应 marker；keyword=移除本节 marker（回关键词档）。
+ * 仅 top zone 顶层知识文件；heading 精确唯一；写入走后端单写者 apply_ops。
+ */
+export async function updateKnowledgeScope(
+  workspaceId: string,
+  input: KnowledgeScopeUpdateInput,
+): Promise<KnowledgeEntryWithScopes> {
+  return apiFetch<KnowledgeEntryWithScopes>(
+    `/api/workspaces/${workspaceId}/knowledge/scope`,
+    {
+      method: "PATCH",
+      json: { ...input, domains: input.domains ?? [] },
+      timeoutMs: 30_000,
+    },
   );
 }
 

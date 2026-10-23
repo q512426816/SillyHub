@@ -8251,6 +8251,29 @@ export interface paths {
         patch: operations["update_knowledge_entry_api_workspaces__workspace_id__knowledge_entries__filename__patch"];
         trace?: never;
     };
+    "/api/workspaces/{workspace_id}/knowledge/scope": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /**
+         * Update Knowledge Scope
+         * @description 节级注入作用域维护（2026-10-23-knowledge-scope-maintenance）。
+         *
+         *     always/repo/module 写入对应 marker；keyword=移除本节 marker（回关键词档）。
+         *     仅 top zone 顶层知识文件；heading 精确唯一；写入走单写者 apply_ops。
+         */
+        patch: operations["update_knowledge_scope_api_workspaces__workspace_id__knowledge_scope_patch"];
+        trace?: never;
+    };
     "/api/workspaces/{workspace_id}/knowledge/proposed/{filename}/preview-merge": {
         parameters: {
             query?: never;
@@ -19352,6 +19375,10 @@ export interface components {
             last_modified_at?: string | null;
             /** Use Count */
             use_count?: number | null;
+            /** Sections */
+            sections?: components["schemas"]["KnowledgeSection"][];
+            /** Headings */
+            headings?: string[];
         };
         /** KnowledgeList */
         KnowledgeList: {
@@ -19415,6 +19442,26 @@ export interface components {
             tags?: string[];
         };
         /**
+         * KnowledgeScopeIn
+         * @description PATCH /knowledge/scope 请求体（节级作用域维护；keyword=移除标记）。
+         *
+         *     2026-10-23-knowledge-scope-maintenance：语义与 CLI 四档一致——always/repo/module
+         *     写入对应 marker；keyword 清除本节 marker（回关键词档）；module 档 domains 必填。
+         */
+        KnowledgeScopeIn: {
+            /** Filename */
+            filename: string;
+            /** Heading */
+            heading: string;
+            /**
+             * Scope
+             * @enum {string}
+             */
+            scope: "always" | "repo" | "module" | "keyword";
+            /** Domains */
+            domains?: string[];
+        };
+        /**
          * KnowledgeSearchIn
          * @description 检索入参：query 截断 4000 字符（沿用 vector_router 同款上限）、limit 钳 1-50。
          */
@@ -19465,6 +19512,24 @@ export interface components {
             snippet: string;
             /** Score */
             score: number;
+        };
+        /**
+         * KnowledgeSection
+         * @description 节级注入作用域（2026-10-23-knowledge-scope-maintenance）。
+         *
+         *     与 CLI `knowledge-scope.js` 标记语法同源：节内 `<!-- scope: always|repo|module:域 -->`。
+         *     无标记节不返回（空数组=该文件无作用域声明）。
+         */
+        KnowledgeSection: {
+            /** Heading */
+            heading: string;
+            /**
+             * Scope
+             * @enum {string}
+             */
+            scope: "always" | "repo" | "module";
+            /** Domains */
+            domains?: string[];
         };
         /**
          * KnowledgeStatsOut
@@ -43708,6 +43773,41 @@ export interface operations {
         requestBody: {
             content: {
                 "application/json": components["schemas"]["KnowledgeUpdateIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["KnowledgeEntry"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    update_knowledge_scope_api_workspaces__workspace_id__knowledge_scope_patch: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                workspace_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["KnowledgeScopeIn"];
             };
         };
         responses: {

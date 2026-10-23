@@ -9,6 +9,18 @@ from typing import Literal
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 
+class KnowledgeSection(BaseModel):
+    """节级注入作用域（2026-10-23-knowledge-scope-maintenance）。
+
+    与 CLI `knowledge-scope.js` 标记语法同源：节内 `<!-- scope: always|repo|module:域 -->`。
+    无标记节不返回（空数组=该文件无作用域声明）。
+    """
+
+    heading: str
+    scope: Literal["always", "repo", "module"]
+    domains: list[str] = Field(default_factory=list)
+
+
 class KnowledgeEntry(BaseModel):
     """A single knowledge file entry."""
 
@@ -25,6 +37,11 @@ class KnowledgeEntry(BaseModel):
     # knowledge-effect-panel）先加字段默认 None（DTO 契约先行），task-03 由
     # list 透传真实聚合值；前端文件级 🔥 徽标数据源。
     use_count: int | None = None
+    # 节级注入作用域（2026-10-23-knowledge-scope-maintenance，加法字段）：有标记的节
+    # 逐条返回，无标记文件为空数组——旧消费方零影响。
+    sections: list[KnowledgeSection] = Field(default_factory=list)
+    # 全部 section heading（同变更加法字段）：作用域维护对话框的目标节选择源。
+    headings: list[str] = Field(default_factory=list)
 
 
 class KnowledgeList(BaseModel):
@@ -66,6 +83,19 @@ class KnowledgeUpdateIn(BaseModel):
     """PATCH /knowledge/entries/{filename} 请求体（整文件正文替换）。"""
 
     content: str
+
+
+class KnowledgeScopeIn(BaseModel):
+    """PATCH /knowledge/scope 请求体（节级作用域维护；keyword=移除标记）。
+
+    2026-10-23-knowledge-scope-maintenance：语义与 CLI 四档一致——always/repo/module
+    写入对应 marker；keyword 清除本节 marker（回关键词档）；module 档 domains 必填。
+    """
+
+    filename: str = Field(min_length=1, max_length=500)
+    heading: str = Field(min_length=1, max_length=200)
+    scope: Literal["always", "repo", "module", "keyword"]
+    domains: list[str] = Field(default_factory=list, max_length=8)
 
 
 class KnowledgeMergeIn(BaseModel):

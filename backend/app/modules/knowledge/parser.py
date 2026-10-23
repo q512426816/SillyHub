@@ -49,6 +49,69 @@ def _extract_title(content: str) -> str | None:
     return None
 
 
+#: 知识注入作用域标记（2026-10-23-knowledge-scope-maintenance，与 CLI knowledge-scope.js
+#: 标记语法同源）：HTML 注释形态，写在 section heading 之后、本节内有效。
+SCOPE_MARKER_RE = re.compile(
+    r"<!--\s*scope\s*:\s*(always|repo|module\s*:\s*([^>]+?))\s*-->", re.IGNORECASE
+)
+_HEADING_LINE_RE = re.compile(r"^(#{1,6})\s+(.+?)\s*$")
+
+
+def extract_scope_sections(content: str | None) -> list[dict]:
+    """解析文件内携带作用域标记的节（heading/scope/domains）。
+
+    与 CLI 注入扫描同口径：节边界=任意级 heading；标记行须落在本节内；
+    无标记节不返回。返回 [{heading, scope, domains}]。
+    """
+    sections: list[dict] = []
+    if not content:
+        return sections
+    cur: dict | None = None
+
+    def flush() -> None:
+        nonlocal cur
+        if cur is not None and cur.get("scope"):
+            sections.append(
+                {"heading": cur["heading"], "scope": cur["scope"], "domains": cur["domains"]}
+            )
+        cur = None
+
+    for raw in content.splitlines():
+        h = _HEADING_LINE_RE.match(raw)
+        if h:
+            flush()
+            cur = {"heading": h.group(2).strip(), "scope": None, "domains": []}
+            continue
+        if cur is None:
+            continue
+        m = SCOPE_MARKER_RE.search(raw)
+        if not m:
+            continue
+        kind = m.group(1).lower()
+        if kind.startswith("module"):
+            cur["scope"] = "module"
+            cur["domains"] = [d.strip() for d in (m.group(2) or "").split(",") if d.strip()]
+        else:
+            cur["scope"] = kind
+            cur["domains"] = []
+    flush()
+    return sections
+
+
+def extract_headings(content: str | None) -> list[str]:
+    """文件内全部 section heading 清单（作用域维护目标选择用；与标记解析同口径）。"""
+    if not content:
+        return []
+    out: list[str] = []
+    for raw in content.splitlines():
+        m = _HEADING_LINE_RE.match(raw)
+        if m:
+            h = m.group(2).strip()
+            if h and h not in out:
+                out.append(h)
+    return out
+
+
 def _read_file_safe(path: Path) -> tuple[str, bool]:
     size = path.stat().st_size
     if size > MAX_CONTENT_BYTES:

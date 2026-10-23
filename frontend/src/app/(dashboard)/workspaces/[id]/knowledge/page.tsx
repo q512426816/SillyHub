@@ -67,9 +67,11 @@ import { PanelResizer, usePanelWidth } from "@/components/ui/panel-resizer";
 import { TreeBox } from "@/components/ui/tree-box";
 import { ApiError } from "@/lib/api";
 import { errMessage, useNotify } from "@/lib/errors";
+import { ScopeMaintainDialog } from "@/components/knowledge/scope-maintain-dialog";
 import {
   getKnowledge,
   getKnowledgeStats,
+  knowledgeEntryMatchesScope,
   listKnowledge,
   // 深链 file 参数归一（2026-10-14-assets-knowledge-popup-preview 迁 lib 单一源：
   // 沉淀资产卡条目预览弹窗取数前同款归一，避免组件反向 import 页面模块）。
@@ -77,6 +79,7 @@ import {
   rejectKnowledge,
   searchKnowledge,
   type KnowledgeEntry,
+  type KnowledgeEntryWithScopes,
   type KnowledgeSearchResultItem,
 } from "@/lib/knowledge";
 import { useSession } from "@/stores/session";
@@ -332,7 +335,13 @@ export default function KnowledgePage({ params }: Props) {
   /** 外部深链参数（沉淀资产卡 FR/决策索引行等入口）。 */
   const deepLinkFile = searchParams.get("file");
   const deepLinkAnchor = searchParams.get("anchor");
-  const [knowledgeItems, setKnowledgeItems] = useState<KnowledgeEntry[]>([]);
+  const [knowledgeItems, setKnowledgeItems] = useState<KnowledgeEntryWithScopes[]>([]);
+  /** 作用域筛选（2026-10-23-knowledge-scope-maintenance）：全部/三档/关键词档。 */
+  const [scopeFilter, setScopeFilter] = useState<
+    "all" | "always" | "repo" | "module" | "keyword"
+  >("all");
+  /** 作用域维护对话框目标文件（null=关闭）。 */
+  const [scopeDialogFor, setScopeDialogFor] = useState<string | null>(null);
   /** 选中文件名（API 详情键）与展示态。 */
   const [selectedFilename, setSelectedFilename] = useState<string | null>(null);
   const [selectedContent, setSelectedContent] = useState<string | null>(null);
@@ -412,7 +421,25 @@ export default function KnowledgePage({ params }: Props) {
     loadList(workspaceId);
   }, [workspaceId, loadList]);
 
-  const tree = useMemo(() => buildKnowledgeTree(knowledgeItems), [knowledgeItems]);
+  /** 作用域筛选（judge 在 lib 单一源：keyword 档=无任何标记，其余=该档命中任意节）。 */
+  const visibleItems = useMemo(
+    () => knowledgeItems.filter((item) => knowledgeEntryMatchesScope(item, scopeFilter)),
+    [knowledgeItems, scopeFilter],
+  );
+  const scopeCounts = useMemo(() => {
+    const counts = { all: knowledgeItems.length, always: 0, repo: 0, module: 0, keyword: 0 };
+    for (const item of knowledgeItems) {
+      const sections = item.sections ?? [];
+      if (sections.length === 0) counts.keyword += 1;
+      for (const s of sections) {
+        if (s.scope === "always") counts.always += 1;
+        else if (s.scope === "repo") counts.repo += 1;
+        else if (s.scope === "module") counts.module += 1;
+      }
+    }
+    return counts;
+  }, [knowledgeItems]);
+  const tree = useMemo(() => buildKnowledgeTree(visibleItems), [visibleItems]);
   const treeData = useMemo(() => toAntdNodes(tree), [tree]);
   const [expandedKeys, setExpandedKeys] = useState<React.Key[]>([]);
 
@@ -821,6 +848,36 @@ export default function KnowledgePage({ params }: Props) {
                   )}
                 </div>
               ) : (
+                <>
+                <div
+                  className="mb-2 flex flex-wrap items-center gap-1.5"
+                  data-testid="knowledge-scope-filter"
+                >
+                  {(
+                    [
+                      ["all", "全部"],
+                      ["always", "always"],
+                      ["repo", "repo"],
+                      ["module", "module"],
+                      ["keyword", "关键词档"],
+                    ] as const
+                  ).map(([value, label]) => (
+                    <button
+                      key={value}
+                      type="button"
+                      data-testid={`scope-filter-${value}`}
+                      onClick={() => setScopeFilter(value)}
+                      className={
+                        scopeFilter === value
+                          ? "rounded-full border border-brand-400 bg-brand-50 px-2 py-0.5 text-[11px] font-semibold text-brand-600"
+                          : "rounded-full border border-border/60 px-2 py-0.5 text-[11px] text-muted-foreground hover:text-brand-600"
+                      }
+                    >
+                      {label}
+                      <span className="ml-1 text-[10px] opacity-70">{scopeCounts[value]}</span>
+                    </button>
+                  ))}
+                </div>
                 <TreeBox className="max-h-[calc(100vh-260px)]">
                   <Tree
                     treeData={treeData}
@@ -833,6 +890,7 @@ export default function KnowledgePage({ params }: Props) {
                     blockNode
                   />
                 </TreeBox>
+                </>
               )}
             </SectionCard>
           </div>
@@ -993,6 +1051,17 @@ export default function KnowledgePage({ params }: Props) {
                         // 条目级落点：锚点透传（验收建议 2——INDEX 路由/依据决策互跳
                         // 落到小节级而非仅文件级；selectEntry 忽略锚点时降级文件级）。
                         onJumpToEntry={(file, anchor) => selectEntry(file, anchor)}
+                        scopeSections={
+                          knowledgeItems.find((i) => i.filename === selectedFilename)?.sections ?? []
+                        }
+                        onMaintainScope={
+                          canWriteKnowledge &&
+                          selectedZone === "top" &&
+                          !selectedFilename.includes("/") &&
+                          selectedFilename !== "INDEX.md"
+                            ? () => setScopeDialogFor(selectedFilename)
+                            : undefined
+                        }
                         className="max-h-[70vh] overflow-y-auto pr-1"
                       />
                     ) : (
@@ -1037,6 +1106,23 @@ export default function KnowledgePage({ params }: Props) {
         onOpenChange={setDistillHistoryOpen}
         onJumpToEntry={selectEntry}
       />
+
+      {scopeDialogFor
+        ? (() => {
+            const item = knowledgeItems.find((i) => i.filename === scopeDialogFor);
+            if (!item) return null;
+            return (
+              <ScopeMaintainDialog
+                workspaceId={workspaceId}
+                filename={item.filename}
+                headings={item.headings ?? []}
+                sections={item.sections ?? []}
+                onClose={() => setScopeDialogFor(null)}
+                onSaved={() => loadList(workspaceId)}
+              />
+            );
+          })()
+        : null}
 
       {mergeTarget !== null && (
         <MergeDialog

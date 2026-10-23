@@ -36,6 +36,7 @@ from app.modules.knowledge.schema import (
     KnowledgeMergeIn,
     KnowledgeMergeResult,
     KnowledgeProposeIn,
+    KnowledgeScopeIn,
     KnowledgeSearchIn,
     KnowledgeSearchOut,
     KnowledgeSearchResultItem,
@@ -106,6 +107,29 @@ async def update_knowledge_entry(
         user,
         filename=filename,
         content=payload.content,
+    )
+
+
+@router.patch("/knowledge/scope", response_model=KnowledgeEntry)
+async def update_knowledge_scope(
+    workspace_id: uuid.UUID,
+    payload: KnowledgeScopeIn,
+    session: SessionDep,
+    user: Annotated[User, Depends(require_permission(Permission.KNOWLEDGE_WRITE))],
+) -> KnowledgeEntry:
+    """节级注入作用域维护（2026-10-23-knowledge-scope-maintenance）。
+
+    always/repo/module 写入对应 marker；keyword=移除本节 marker（回关键词档）。
+    仅 top zone 顶层知识文件；heading 精确唯一；写入走单写者 apply_ops。
+    """
+    service = KnowledgeWriterService(session)
+    return await service.update_scope(
+        workspace_id,
+        user,
+        filename=payload.filename,
+        heading=payload.heading,
+        scope=payload.scope,
+        domains=payload.domains,
     )
 
 

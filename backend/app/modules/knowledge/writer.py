@@ -36,7 +36,11 @@ from app.core.logging import get_logger
 from app.modules.agent.model import AgentRun
 from app.modules.auth.model import User
 from app.modules.knowledge.distill import DISTILL_RUN_KIND
-from app.modules.knowledge.parser import MAX_CONTENT_BYTES
+from app.modules.knowledge.parser import (
+    _HEADING_LINE_RE,
+    MAX_CONTENT_BYTES,
+    SCOPE_MARKER_RE,
+)
 from app.modules.knowledge.schema import (
     KnowledgeEntry,
     KnowledgeMergeResult,
@@ -528,6 +532,109 @@ class KnowledgeWriterService:
                 op="update",
                 path=op_path,
                 content=_b64(content),
+                base_version=await self._manifest_version(workspace_id, op_path),
+            )
+        ]
+        await self._apply_ops(workspace_id, ops)
+        return await self._reader.get_knowledge(workspace_id, filename)
+
+    async def update_scope(
+        self,
+        workspace_id: uuid.UUID,
+        user: User,
+        *,
+        filename: str,
+        heading: str,
+        scope: str,
+        domains: list[str] | None = None,
+    ) -> KnowledgeEntry:
+        """节级注入作用域维护（2026-10-23-knowledge-scope-maintenance）。
+
+        语义与 CLI `knowledge-scope.js` 四档一致：always/repo/module 写入对应 marker，
+        keyword=移除本节 marker（回关键词档）。仅 top zone 顶层知识文件（CLI 注入扫描面
+        同口径：knowledge/*.md，INDEX/子目录/其他 zone 拒 422）；heading 精确匹配且唯一
+        （不存在/多义 → 422）。写入走 apply_ops 单写者（行版本锁 + spec-backups），只改
+        本节 marker 行，其余节内容逐字保留；超限/坏编码守卫与 update_entry 同口径。
+        """
+        _validate_knowledge_filename(filename)
+        norm = filename.replace("\\", "/")
+        if "/" in norm or norm == "INDEX.md":
+            raise KnowledgeEditForbidden(
+                "仅顶层知识文件（knowledge/*.md，INDEX.md 除外）支持作用域维护。",
+                details={"filename": filename},
+            )
+        entry = await self._reader.get_knowledge(workspace_id, filename)
+        if entry.zone != "top":
+            raise KnowledgeEditForbidden(
+                "仅知识手册（top zone）支持作用域维护——决策库/需求规则由归档流程维护。",
+                details={"filename": filename, "zone": entry.zone},
+            )
+        if scope not in ("always", "repo", "module", "keyword"):
+            raise KnowledgeEditForbidden(
+                "scope 须为 always|repo|module|keyword。",
+                details={"scope": scope},
+            )
+        doms = [d.strip().lower() for d in (domains or []) if d and d.strip()]
+        if scope == "module":
+            if not doms:
+                raise KnowledgeEditForbidden(
+                    "module 作用域需要至少一个知识域 id（逗号分隔，与 FR 域同源）。",
+                    details={"filename": filename, "heading": heading},
+                )
+            bad = [d for d in doms if not re.fullmatch(r"[a-z0-9][a-z0-9_-]*", d)]
+            if bad:
+                raise KnowledgeEditForbidden(
+                    f"非法知识域 id：{'、'.join(bad)}（小写字母/数字/下划线/连字符）。",
+                    details={"domains": doms},
+                )
+        else:
+            doms = []
+
+        disk_path = await self._knowledge_path(workspace_id, filename)
+        if disk_path.is_file() and disk_path.stat().st_size > MAX_CONTENT_BYTES:
+            raise KnowledgeFileTooLarge(
+                "文件超过网页维护的大小上限，作用域维护需要整文件读改写——请在本机编辑该文件后再同步。",
+                details={"filename": filename},
+            )
+        raw = await self._read_raw(workspace_id, filename)
+        lines = raw.split("\n")
+        matched = [
+            i
+            for i, line in enumerate(lines)
+            if (m := _HEADING_LINE_RE.match(line)) and m.group(2).strip() == heading.strip()
+        ]
+        if not matched:
+            raise KnowledgeEditForbidden(
+                "目标节不存在——标题须与文件内 heading 逐字一致（不含 # 前缀）。",
+                details={"filename": filename, "heading": heading},
+            )
+        if len(matched) > 1:
+            raise KnowledgeEditForbidden(
+                f"目标节标题重复（{len(matched)} 处）——请先在本机合并同名节再维护作用域。",
+                details={"filename": filename, "heading": heading},
+            )
+        h = matched[0]
+        end = len(lines)
+        for j in range(h + 1, len(lines)):
+            if _HEADING_LINE_RE.match(lines[j]):
+                end = j
+                break
+        body = [line for line in lines[h + 1 : end] if not SCOPE_MARKER_RE.search(line)]
+        if scope != "keyword":
+            marker = (
+                f"<!-- scope: module:{','.join(doms)} -->"
+                if scope == "module"
+                else f"<!-- scope: {scope} -->"
+            )
+            body = [marker, *body]
+        new_content = "\n".join([*lines[: h + 1], *body, *lines[end:]])
+
+        op_path = f"{KNOWLEDGE_PREFIX}{filename}"
+        ops = [
+            FileOp(
+                op="update",
+                path=op_path,
+                content=_b64(new_content),
                 base_version=await self._manifest_version(workspace_id, op_path),
             )
         ]

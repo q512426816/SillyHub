@@ -371,6 +371,17 @@ export interface EntryCardListProps {
   entryCounts?: Record<string, number>;
   /** 点击依赖决策 / INDEX 路由跳目标文件（可选锚点，调用方决定用法）。 */
   onJumpToEntry?: (filename: string, anchor?: string) => void;
+  /**
+   * 节级注入作用域（2026-10-23-knowledge-scope-maintenance，列表接口 sections 透传）：
+   * 头部汇总徽标 + 小节卡档位徽标。
+   */
+  scopeSections?: Array<{
+    heading: string;
+    scope: "always" | "repo" | "module";
+    domains: string[];
+  }>;
+  /** 「维护作用域」入口（调用方按 top zone + 写权限决定是否注入）。 */
+  onMaintainScope?: () => void;
   className?: string;
 }
 
@@ -642,8 +653,27 @@ export function EntryCardList({
   useCount,
   entryCounts,
   onJumpToEntry,
+  scopeSections,
+  onMaintainScope,
   className,
 }: EntryCardListProps) {
+  const scopeList = scopeSections ?? [];
+  const scopeSummary = scopeList.length
+    ? {
+        always: scopeList.filter((s) => s.scope === "always").length,
+        repo: scopeList.filter((s) => s.scope === "repo").length,
+        module: scopeList.filter((s) => s.scope === "module").length,
+      }
+    : null;
+  const summaryText = scopeSummary
+    ? [
+        scopeSummary.always > 0 ? `always×${scopeSummary.always}` : null,
+        scopeSummary.repo > 0 ? `repo×${scopeSummary.repo}` : null,
+        scopeSummary.module > 0 ? `module×${scopeSummary.module}` : null,
+      ]
+        .filter(Boolean)
+        .join(" · ")
+    : "";
   const form = detectEntryCardForm(filename, zone);
   // frontmatter 元信息（FR-03）：顶层解析一次向 manual/SingleCard 各卡传递；
   // 缺失时 FrontmatterMetaLine 整条降级隐藏。
@@ -693,6 +723,25 @@ export function EntryCardList({
         {typeof useCount === "number" && useCount > 0 ? (
           <UseBadge count={useCount} title={`文件级命中 ${useCount} 次（条目级明细不可得时以文件级口径展示，FR-06）`} />
         ) : null}
+        {scopeSummary ? (
+          <span
+            data-testid="entry-scope-badges"
+            title="节级注入作用域汇总（always=每次变更注入 / repo=本仓注入 / module=触达域注入）"
+            className="shrink-0 rounded-full bg-muted px-2 py-0.5 text-[10px] font-semibold leading-4 text-muted-foreground"
+          >
+            🧭 {summaryText}
+          </span>
+        ) : null}
+        {onMaintainScope ? (
+          <button
+            type="button"
+            data-testid="maintain-scope-button"
+            onClick={onMaintainScope}
+            className="shrink-0 rounded border border-border/70 px-1.5 py-0.5 text-[10px] font-semibold leading-4 text-muted-foreground transition-colors hover:border-brand-400 hover:text-brand-600"
+          >
+            维护作用域
+          </button>
+        ) : null}
       </div>
 
       {/* 防复潮横幅（zone=decisions 且存在 rejected；原型 .rejected-banner） */}
@@ -721,6 +770,23 @@ export function EntryCardList({
               >
                 <div className="flex flex-wrap items-center gap-2 border-b border-border/60 bg-brand-50 px-2.5 py-1.5">
                   <h4 className="min-w-0 flex-1 break-words text-[13px] font-semibold text-brand-700">{s.title}</h4>
+                  {(() => {
+                    const sc = scopeList.find((x) => x.heading === s.title);
+                    if (!sc) return null;
+                    const label =
+                      sc.scope === "module"
+                        ? `module:${sc.domains.join(",")}`
+                        : sc.scope;
+                    return (
+                      <span
+                        data-testid="entry-section-scope-badge"
+                        title={`本节注入作用域：${label}`}
+                        className="shrink-0 rounded-full bg-brand-100 px-1.5 py-0.5 text-[10px] font-semibold leading-4 text-brand-700"
+                      >
+                        🧭 {label}
+                      </span>
+                    );
+                  })()}
                   {n !== undefined && n > 0 ? (
                     <UseBadge count={n} title={`条目命中 ${n} 次（${s.anchor}）`} />
                   ) : null}
