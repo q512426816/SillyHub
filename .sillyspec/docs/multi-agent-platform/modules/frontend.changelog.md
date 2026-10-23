@@ -185,3 +185,4 @@
 | 2026-10-23 | 2026-10-23-file-card-agent-grouping | 文件变更卡按AGENT编辑分组展示并修弹窗说明 |
 | 2026-10-23 | 2026-10-23-session-input-clear-fix | 会话输入框发送即清与草稿隔离修复 |
 | 2026-10-23 | 2026-10-23-marquee-motion-polish | 跑马灯动效与流光柔化 |
+| 2026-10-23 | 2026-10-23-diff-dialog-copy-fallback | 变更弹窗超长diff补复制兜底 |

@@ -45,3 +45,4 @@ created_at: 2026-09-03 14:49:48
 - 2026-10-23-marquee-item-detail | 跑马灯条目细化：转圈、内部滚动与耗时
 - 2026-10-23-marquee-ticker-speed | 跑马灯条目内部滚动提速
 - 2026-10-23-marquee-motion-polish | 跑马灯动效与流光柔化
+- 2026-10-23-diff-dialog-copy-fallback | 变更弹窗超长diff补复制兜底

@@ -1,0 +1,410 @@
+diff --git a/frontend/src/app/globals.css b/frontend/src/app/globals.css
+index bde8f03ae..6cb6d91d9 100644
+--- a/frontend/src/app/globals.css
++++ b/frontend/src/app/globals.css
+@@ -1109,17 +1109,57 @@
+     position: absolute;
+     inset-block: 0;
+     left: 0;
+-    width: 38%;
++    width: 22%;
+     background: linear-gradient(
+       90deg,
+       transparent,
+-      color-mix(in srgb, var(--color-brand-400) 14%, transparent),
++      color-mix(in srgb, var(--color-brand-300) 26%, transparent),
+       transparent
+     );
+-    animation: sh-live-marquee-sheen 3.6s ease-in-out infinite;
++    filter: blur(6px);
++    opacity: 0;
++    animation: sh-live-marquee-sheen 6.5s ease-in-out infinite;
+     pointer-events: none;
+   }
+ 
++  /* 2026-10-23-marquee-motion-polish（FR-02）：轨道视口左右渐隐——条目
++     进出容器边缘柔和，不再硬切。 */
++  .sh-live-marquee-vp {
++    -webkit-mask-image: linear-gradient(
++      90deg,
++      transparent 0,
++      #000 14px,
++      #000 calc(100% - 14px),
++      transparent 100%
++    );
++    mask-image: linear-gradient(
++      90deg,
++      transparent 0,
++      #000 14px,
++      #000 calc(100% - 14px),
++      transparent 100%
++    );
++  }
++
++  /* 2026-10-23-marquee-motion-polish（FR-02）：运行中条目内部滚动窗口
++     左右各 10px 渐隐，文字进出柔和；完成态截断文本不挂本类。 */
++  .sh-live-marquee-window {
++    -webkit-mask-image: linear-gradient(
++      90deg,
++      transparent 0,
++      #000 10px,
++      #000 calc(100% - 10px),
++      transparent 100%
++    );
++    mask-image: linear-gradient(
++      90deg,
++      transparent 0,
++      #000 10px,
++      #000 calc(100% - 10px),
++      transparent 100%
++    );
++  }
++
+   /* 2026-10-23-marquee-item-detail（FR-01）：运行中条目内部文本循环滚动——
+      双份文本各占 50%，平移一份即无缝；只在文本窗口 overflow-hidden 内滚动，
+      图标/状态/耗时区不参与。 */
+@@ -1149,14 +1189,17 @@
+ @keyframes sh-live-marquee-sheen {
+   0%,
+   58% {
+-    transform: translateX(-140%);
++    transform: translateX(-160%);
+     opacity: 0;
+   }
+-  66% {
+-    opacity: 0.9;
++  68% {
++    opacity: 0.5;
++  }
++  88% {
++    opacity: 0.4;
+   }
+   100% {
+-    transform: translateX(360%);
++    transform: translateX(420%);
+     opacity: 0;
+   }
+ }
+diff --git a/frontend/src/components/daemon/__tests__/turn-live-marquee.test.tsx b/frontend/src/components/daemon/__tests__/turn-live-marquee.test.tsx
+index db8fc53bf..061be947b 100644
+--- a/frontend/src/components/daemon/__tests__/turn-live-marquee.test.tsx
++++ b/frontend/src/components/daemon/__tests__/turn-live-marquee.test.tsx
+@@ -12,6 +12,7 @@ import {
+   TurnLiveMarquee,
+   deriveLiveMarqueeEntries,
+   formatMarqueeDuration,
++  marqueeSpeedForDistance,
+   LIVE_MARQUEE_MAX_ENTRIES,
+ } from "@/components/daemon/turn-live-marquee";
+ import {
+@@ -183,6 +184,14 @@ describe("deriveLiveMarqueeEntries 纯函数（FR-01 / FR-03）", () => {
+     expect(formatMarqueeDuration(2000)).toBe("2s");
+     expect(formatMarqueeDuration(65_000)).toBe("1m 05s");
+   });
++
++  it("轨道速度随距离缓出，接近目标时减速（FR-01）", () => {
++    expect(marqueeSpeedForDistance(0)).toBe(40);
++    expect(marqueeSpeedForDistance(20)).toBe(40);
++    expect(marqueeSpeedForDistance(100)).toBeCloseTo(90, 5);
++    expect(marqueeSpeedForDistance(228)).toBeCloseTo(205.2, 5);
++    expect(marqueeSpeedForDistance(10_000)).toBe(1600);
++  });
+ });
+ 
+ describe("TurnLiveMarquee 连续轨道（FR-01 / FR-02 / FR-05）", () => {
+@@ -215,6 +224,8 @@ describe("TurnLiveMarquee 连续轨道（FR-01 / FR-02 / FR-05）", () => {
+     expect(item.querySelector("svg")).not.toBeNull();
+     expect(getAllByTestId("marquee-spinner")).toHaveLength(1);
+     expect(container.querySelector(".sh-live-marquee-ticker")).not.toBeNull();
++    // 运行中滚动窗口带左右渐隐（FR-02）。
++    expect(container.querySelector(".sh-live-marquee-window")).not.toBeNull();
+     expect(item.textContent).toContain("先分析登录链路");
+   });
+ 
+@@ -222,7 +233,7 @@ describe("TurnLiveMarquee 连续轨道（FR-01 / FR-02 / FR-05）", () => {
+     const doneEntries = deriveLiveMarqueeEntries([
+       tool("tool-done", { startedAt: 1000, endedAt: 2500 }),
+     ]);
+-    const { getByTestId, queryByTestId } = render(
++    const { getByTestId, queryByTestId, container } = render(
+       <TurnLiveMarquee entries={doneEntries} />,
+     );
+ 
+@@ -230,6 +241,8 @@ describe("TurnLiveMarquee 连续轨道（FR-01 / FR-02 / FR-05）", () => {
+     expect(duration.textContent).toContain("1.5s");
+     expect(duration.querySelector("svg")).not.toBeNull();
+     expect(queryByTestId("marquee-spinner")).toBeNull();
++    // 完成态截断文本不加渐隐遮罩（FR-02）。
++    expect(container.querySelector(".sh-live-marquee-window")).toBeNull();
+   });
+ 
+   it("进行中条目不显示耗时（FR-02）", () => {
+diff --git a/frontend/src/components/daemon/file-changes/__tests__/turn-file-diff-dialog.test.tsx b/frontend/src/components/daemon/file-changes/__tests__/turn-file-diff-dialog.test.tsx
+index f5c279425..63202748b 100644
+--- a/frontend/src/components/daemon/file-changes/__tests__/turn-file-diff-dialog.test.tsx
++++ b/frontend/src/components/daemon/file-changes/__tests__/turn-file-diff-dialog.test.tsx
+@@ -20,6 +20,12 @@ vi.mock("@/lib/daemon/sessions", () => ({
+   getAgentSessionLogs: (...args: unknown[]) => getAgentSessionLogsMock(...args),
+ }));
+ 
++// 2026-10-23-diff-dialog-copy-fallback：剪贴板零副作用 mock（断言复制内容）。
++const copyTextToClipboardMock = vi.fn((_text: string) => Promise.resolve());
++vi.mock("@/lib/clipboard", () => ({
++  copyTextToClipboard: (text: string) => copyTextToClipboardMock(text),
++}));
++
+ function callLog(toolUseId: string, filePath: string, tool = "Edit"): AgentRunLogEntry {
+   return {
+     id: `call-${toolUseId}`,
+@@ -188,3 +194,55 @@ describe("TurnFileDiffDialog", () => {
+     expect(screen.queryByTestId("turn-file-diff-section")).toBeNull();
+   });
+ });
++
++// 2026-10-23-diff-dialog-copy-fallback：超长 diff 复制兜底（FR-01~03）。
++describe("TurnFileDiffDialog：复制兜底（2026-10-23-diff-dialog-copy-fallback）", () => {
++  afterEach(() => {
++    copyTextToClipboardMock.mockClear();
++  });
++
++  it("每段补丁有常显复制按钮，点击写入完整 diff 文本（FR-01）", async () => {
++    getAgentSessionLogsMock.mockResolvedValue([
++      callLog("tu-1", "frontend/src/a.ts"),
++      resultLog("tu-1", ["-old line", "+new line"]),
++    ]);
++    renderDialog();
++
++    const button = await screen.findByRole("button", { name: "复制该段 diff" });
++    // 常显：不依赖父容器 hover（opacity-100 + static 覆盖默认浮出定位）。
++    expect(button.className).toContain("opacity-100");
++    expect(button.className).toContain("static");
++
++    fireEvent.click(button);
++    expect(copyTextToClipboardMock).toHaveBeenCalledTimes(1);
++    expect(copyTextToClipboardMock).toHaveBeenCalledWith("-old line\n+new line");
++  });
++
++  it("超 2000 行：复制内容不截断（渲染上限不进复制面，FR-02）", async () => {
++    const lines = Array.from({ length: 2500 }, (_, i) => `+row-${i}`);
++    getAgentSessionLogsMock.mockResolvedValue([
++      callLog("tu-1", "frontend/src/a.ts"),
++      resultLog("tu-1", lines),
++    ]);
++    renderDialog();
++
++    fireEvent.click(await screen.findByRole("button", { name: "复制该段 diff" }));
++    const copied = copyTextToClipboardMock.mock.calls[0]?.[0] ?? "";
++    const copiedLines = copied.split("\n");
++    expect(copiedLines).toHaveLength(2500);
++    expect(copiedLines[2499]).toBe("+row-2499");
++  });
++
++  it("无补丁说明态 / 删除说明态不出现复制按钮（FR-03）", async () => {
++    getAgentSessionLogsMock.mockResolvedValue([]);
++    const { unmount } = renderDialog();
++    expect(await screen.findByTestId("turn-file-diff-body")).toBeDefined();
++    expect(screen.queryByRole("button", { name: /复制该段 diff/ })).toBeNull();
++    unmount();
++
++    getAgentSessionLogsMock.mockResolvedValue([]);
++    renderDialog({ status: "deleted" });
++    expect(await screen.findByText(/本轮被删除/)).toBeDefined();
++    expect(screen.queryByRole("button", { name: /复制该段 diff/ })).toBeNull();
++  });
++});
+diff --git a/frontend/src/components/daemon/file-changes/__tests__/turn-file-diff.test.ts b/frontend/src/components/daemon/file-changes/__tests__/turn-file-diff.test.ts
+index 032b1ff78..d2ba5aa94 100644
+--- a/frontend/src/components/daemon/file-changes/__tests__/turn-file-diff.test.ts
++++ b/frontend/src/components/daemon/file-changes/__tests__/turn-file-diff.test.ts
+@@ -15,6 +15,7 @@ import type { AgentRunLogEntry } from "@/lib/agent";
+ 
+ import {
+   collectTurnFilePatches,
++  diffRowsToText,
+   matchesRepoPath,
+   toolCallFilePath,
+ } from "../turn-file-diff";
+@@ -186,3 +187,50 @@ describe("collectTurnFilePatches（日志 → 按序补丁段）", () => {
+     expect(collectTurnFilePatches([resultLog({ toolUseId: "tu-1" })], "a.ts")).toEqual([]);
+   });
+ });
++
++// 2026-10-23-diff-dialog-copy-fallback task-01：diffRowsToText 纯映射。
++describe("diffRowsToText（DiffRow → unified 前缀文本）", () => {
++  it("按行类型重建前缀：del=-、add=+、ctx=空格，行序保持", () => {
++    const text = diffRowsToText([
++      { type: "ctx", oldNo: 1, newNo: 1, text: "keep" },
++      { type: "del", oldNo: 2, newNo: null, text: "gone" },
++      { type: "add", oldNo: null, newNo: 2, text: "fresh" },
++    ]);
++    expect(text).toBe(" keep\n-gone\n+fresh");
++  });
++
++  it("hunk 分隔伪行（oldNo/newNo 均 null 的 ctx）被剔除，不污染复制文本", () => {
++    const text = diffRowsToText([
++      { type: "del", oldNo: 1, newNo: null, text: "a" },
++      { type: "ctx", oldNo: null, newNo: null, text: "…" },
++      { type: "add", oldNo: null, newNo: 5, text: "b" },
++    ]);
++    expect(text).toBe("-a\n+b");
++    expect(text).not.toContain(" …");
++  });
++
++  it("内容自带前导空格/符号时原样保留（只加类型前缀一次）", () => {
++    expect(diffRowsToText([{ type: "ctx", oldNo: 3, newNo: 3, text: "  indented" }])).toBe(
++      "   indented",
++    );
++    expect(diffRowsToText([{ type: "add", oldNo: null, newNo: 1, text: "-not-a-del" }])).toBe(
++      "+-not-a-del",
++    );
++  });
++
++  it("不截断：2500 行 rows 全量输出（渲染 2000 行上限不进复制面）", () => {
++    const rows = Array.from({ length: 2500 }, (_, i) => ({
++      type: "add" as const,
++      oldNo: null,
++      newNo: i + 1,
++      text: `line-${i}`,
++    }));
++    const text = diffRowsToText(rows);
++    expect(text.split("\n")).toHaveLength(2500);
++    expect(text.endsWith("+line-2499")).toBe(true);
++  });
++
++  it("空数组 → 空串", () => {
++    expect(diffRowsToText([])).toBe("");
++  });
++});
+diff --git a/frontend/src/components/daemon/file-changes/turn-file-diff-dialog.tsx b/frontend/src/components/daemon/file-changes/turn-file-diff-dialog.tsx
+index f4b3f78b4..5811edb2c 100644
+--- a/frontend/src/components/daemon/file-changes/turn-file-diff-dialog.tsx
++++ b/frontend/src/components/daemon/file-changes/turn-file-diff-dialog.tsx
+@@ -19,6 +19,7 @@
+ import { useEffect, useState } from "react";
+ 
+ import { DiffView } from "@/components/agent-log/tool-diff";
++import { CopyButton } from "@/components/daemon/copy-button";
+ import { Button } from "@/components/ui/button";
+ import {
+   Dialog,
+@@ -31,7 +32,11 @@ import { getAgentSessionLogs } from "@/lib/daemon/sessions";
+ import { cn } from "@/lib/utils";
+ 
+ import { FILE_STATUS_META, type FileChangeStatus } from "./file-changes-card";
+-import { collectTurnFilePatches, type TurnFilePatchSection } from "./turn-file-diff";
++import {
++  collectTurnFilePatches,
++  diffRowsToText,
++  type TurnFilePatchSection,
++} from "./turn-file-diff";
+ 
+ export interface TurnFileDiffDialogProps {
+   sessionId: string;
+@@ -169,6 +174,16 @@ export function TurnFileDiffDialog({
+                     <span className="font-medium text-foreground">第 {index + 1} 次</span>
+                     <span>·</span>
+                     <span>{section.toolName}</span>
++                    {section.rows != null && (
++                      // 2026-10-23-diff-dialog-copy-fallback / FR-01：超长 diff 的复制
++                      // 兜底（DiffView 2000 行上限只截渲染，rows 完整）。常显覆盖：
++                      // static 拆掉默认 absolute 浮出定位、opacity-100 拆掉 hover 才显。
++                      <CopyButton
++                        text={diffRowsToText(section.rows)}
++                        ariaLabel="复制该段 diff"
++                        className="static right-auto bottom-auto ml-auto opacity-100"
++                      />
++                    )}
+                   </p>
+                   {section.rows ? (
+                     <DiffView rows={section.rows} />
+diff --git a/frontend/src/components/daemon/file-changes/turn-file-diff.ts b/frontend/src/components/daemon/file-changes/turn-file-diff.ts
+index b2888f503..01a809c29 100644
+--- a/frontend/src/components/daemon/file-changes/turn-file-diff.ts
++++ b/frontend/src/components/daemon/file-changes/turn-file-diff.ts
+@@ -86,6 +86,24 @@ function parseToolCallEntry(entry: AgentRunLogEntry): ParsedToolCall | null {
+   return { toolName: record.tool, filePath: toolCallFilePath(args), toolUseId };
+ }
+ 
++/**
++ * DiffRow[] → unified 前缀文本（2026-10-23-diff-dialog-copy-fallback / FR-01/02）。
++ *
++ * 复制兜底的数据源：DiffView 的 2000 行上限只是渲染截断（rows 本身完整），本函数
++ * 对全部行重建 `-` / `+` / 空格 前缀文本；parseStructuredPatch 在多 hunk 间插入的
++ * 「…」视觉分隔（type=ctx 且 oldNo/newNo 均 null）不是真实 diff 行，剔除不进入
++ * 复制文本。不拼造 unified header（hunk 边界信息已丢，伪造会误导 git apply）。
++ */
++export function diffRowsToText(rows: readonly DiffRow[]): string {
++  const lines: string[] = [];
++  for (const row of rows) {
++    if (row.type === "ctx" && row.oldNo == null && row.newNo == null) continue;
++    const prefix = row.type === "del" ? "-" : row.type === "add" ? "+" : " ";
++    lines.push(prefix + row.text);
++  }
++  return lines.join("\n");
++}
++
+ /**
+  * 本轮日志 + 仓根相对路径 → 按编辑完成序（日志序）的补丁段列表。
+  *
+diff --git a/frontend/src/components/daemon/turn-live-marquee.tsx b/frontend/src/components/daemon/turn-live-marquee.tsx
+index d66f8ab2a..dffea4b54 100644
+--- a/frontend/src/components/daemon/turn-live-marquee.tsx
++++ b/frontend/src/components/daemon/turn-live-marquee.tsx
+@@ -60,9 +60,17 @@ import type { TurnSegment } from "./session-log-assembler";
+  * 上限内不做窗口替换，保证"只向最新流、不回跳"。
+  */
+ export const LIVE_MARQUEE_MAX_ENTRIES = 200;
+-/** 滚动基础速度（px/s）与追赶上限；距离越大越快，事件爆发时能追平。 */
+-export const LIVE_MARQUEE_BASE_SPEED = 180;
++/** 追赶上限（px/s）；距离主导的缓出曲线见 marqueeSpeedForDistance。 */
+ export const LIVE_MARQUEE_MAX_SPEED = 1600;
++
++/**
++ * 轨道推进速度（px/s）——距离主导的缓出曲线（2026-10-23-marquee-motion-polish）：
++ * 距离大时加速追赶，接近目标时自然减速；下限 40px/s 防长尾巴，上限沿用 1600。
++ */
++export function marqueeSpeedForDistance(distance: number): number {
++  const d = Math.max(0, distance);
++  return Math.min(LIVE_MARQUEE_MAX_SPEED, Math.max(40, d * 0.9));
++}
+ /** 单条摘要截断长度（用户不需要看清全文，单行不撑破）。 */
+ const CLIP_LENGTH = 64;
+ 
+@@ -400,7 +408,13 @@ function MarqueeItemView({
+       )}
+     >
+       <Icon aria-hidden className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+-      <span className="relative min-w-0 flex-1 overflow-hidden">
++      <span
++        className={cn(
++          "relative min-w-0 flex-1 overflow-hidden",
++          // 运行中滚动窗口左右渐隐；完成态截断文本不加，保持清晰。
++          running && !reduced && "sh-live-marquee-window",
++        )}
++      >
+         {running && !reduced ? (
+           <span className="sh-live-marquee-ticker inline-flex w-max items-center">
+             <span className="whitespace-nowrap pr-6 font-medium text-foreground">
+@@ -506,11 +520,8 @@ export const TurnLiveMarquee = memo(function TurnLiveMarquee({
+       const target = targetRef.current;
+       const distance = offsetRef.current - target;
+       if (distance > 0.5) {
+-        // 追赶距离越大速度越快：事件密集时加速，稀疏时慢速流动。
+-        const speed = Math.min(
+-          LIVE_MARQUEE_MAX_SPEED,
+-          LIVE_MARQUEE_BASE_SPEED + distance * 1.2,
+-        );
++        // 距离主导的缓出：追近时减速，事件密集时加速追赶（2026-10-23-marquee-motion-polish）。
++        const speed = marqueeSpeedForDistance(distance);
+         const delta = Math.min(distance, (speed * dt) / 1000);
+         offsetRef.current -= delta;
+         if (offsetRef.current - target < 0.5) offsetRef.current = target;
+@@ -672,7 +683,7 @@ export const TurnLiveMarquee = memo(function TurnLiveMarquee({
+         <div
+           ref={viewportRef}
+           className={cn(
+-            "relative z-10 min-w-0 flex-1 overflow-hidden transition-opacity duration-200",
++            "sh-live-marquee-vp relative z-10 min-w-0 flex-1 overflow-hidden transition-opacity duration-200",
+             !ready && "opacity-0",
+           )}
+         >

@@ -1,0 +1,49 @@
+tier: thin
+legacy_fallback: false
+substeps:
+  artifacts: done
+  ledger: done
+  patch: done
+  review: done
+  probes: done
+  distill: done
+  archive: done
+  events: done
+born_face: thin
+with_tasks: false
+review_force: null
+input: >-
+  变更弹窗超长diff补复制兜底
+
+
+  动机与背景：上一变更 2026-10-23-file-card-agent-grouping 评审留档 P3-1——TurnFileDiffDialog 每段补丁用 DiffView 渲染，超 2000 行时 DiffView
+  截断脚注提示「完整内容用「复制」按钮」，但弹窗没提供复制按钮，超长 diff 无法取回完整内容。本次补上：每段补丁标题行加常显复制按钮，复制文本由 DiffRow 重建（- / + / 空格前缀），跳过
+  parseStructuredPatch 插入的 hunk 间「…」分隔伪行（oldNo/newNo 均 null 的 ctx 行），不受 2000 行渲染截断影响。
+
+
+  成功标准：
+
+  - 弹窗每段补丁标题行有常显复制按钮（非 hover 才可见），点击复制该段完整 diff 文本
+
+  - 复制文本含全部 diff 行（含超过 2000 行渲染上限的部分），hunk 分隔伪行不进入文本
+
+  - 无补丁说明态/删除说明态不出现复制按钮
+
+  - 相关测试绿（diffRowsToText 纯映射 + 弹窗按钮与复制内容）+ tsc 零错
+autopilot: false
+prestage_ack: false
+baseline_commit: 0bf494db1933de45e3e268a4f35a8feeeda32b7a
+updatedAt: '2026-10-23T03:46:29.129Z'
+cross_baselines:
+  sillyspec: c309979af71cebec54c124425bb059294db15ab0
+baseline_sha256: 8efdef7209d5e0d93dea9bb73e32db5065774c66f162bb0ed1037288906d3adb
+spec_approved: true
+spec_approved_at: '2026-10-23T03:32:47.220Z'
+spec_approved_by: anon@DESKTOP-HJ0AM09
+spec_approved_channel: agent-self
+spec_attested_by: anon@DESKTOP-HJ0AM09
+gate_summary: >-
+  test: passed ← module[]+deps(jsx3)（7.5s）
+  结果：C:\Users\qinyi\IdeaProjects\multi-agent-platform\.sillyspec\.runtime\verify-runs\20261023033715\test-result.json｜lint:
+  skipped — 跳过原因：local.yaml 未配置 commands.lint（或标记 unavailable）。｜门文件 249 个
+

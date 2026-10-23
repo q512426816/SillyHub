@@ -1,0 +1,40 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-23-diff-dialog-copy-fallback",
+  "reviewer": "subagent",
+  "verdict": "PASS",
+  "reviewedAgainst": "e045542bef44de0da5b7138c15d08dfdf2c47db5",
+  "findings": [
+    {
+      "severity": "P3",
+      "title": "FR-03 无补丁态用例前半段可能在校验 loading 态，未真正等待 no-patch ready",
+      "evidence": "findByTestId('turn-file-diff-body') 在 loading 分支即存在（turn-file-diff-dialog.tsx:138-146），用例随后直接 queryByRole 断言无复制按钮（test:239-240），未等待 NO_PATCH_TEXT 出现；该断言在 loading 态同样为真。删除态半段已等待「本轮被删除」，覆盖同一 sections.length===0 分支，实际风险有限。",
+      "location": "frontend/src/components/daemon/file-changes/__tests__/turn-file-diff-dialog.test.tsx:239"
+    },
+    {
+      "severity": "P3",
+      "title": "design 的脚注缓解描述未落地：实际脚注未说明复制文本仅行级、不可直接 git apply",
+      "evidence": "design.md:46 称「脚注保持『仅行级内容』表述」，但 turn-file-diff-dialog.tsx:197-199 的脚注只说明内容来自 structuredPatch/命令行改动仅计入行数，未提示无 hunk header、不可直接 git apply；复制按钮 label「复制该段 diff」可能让用户误以为可应用。",
+      "location": ".sillyspec/changes/2026-10-23-diff-dialog-copy-fallback/design.md:46"
+    },
+    {
+      "severity": "P3",
+      "title": "FR-02 场景「文本行数 = rows 长度」与剔除 hunk 分隔伪行的主条款在多 hunk 下自相矛盾",
+      "evidence": "requirements.md:25 要求文本行数等于 rows 长度且无「…」伪行；多 hunk 的 rows 含分隔伪行，剔除后行数 = rows.length - 分隔数，二者不能同时成立。实现（turn-file-diff.ts:100）按主条款剔除分隔行是正确的，测试仅用单 hunk 2500 行验证，未暴露该措辞矛盾。",
+      "location": ".sillyspec/changes/2026-10-23-diff-dialog-copy-fallback/requirements.md:25"
+    },
+    {
+      "severity": "P3",
+      "title": "复制文本在每次渲染时全量构建，超长 diff 有重复开销",
+      "evidence": "turn-file-diff-dialog.tsx:182 在渲染期调用 diffRowsToText(section.rows)；CopyButton 支持 getText 点击期惰性取值（copy-button.tsx:16-20）。TurnTimeline 未 memo，父层流式更新会触发弹窗重渲染并按全部 rows 反复构建字符串。当前 2500 行规模无实测问题，超长补丁可考虑 useMemo 或 getText。",
+      "location": "frontend/src/components/daemon/file-changes/turn-file-diff-dialog.tsx:182"
+    }
+  ],
+  "dimensionNotes": {
+    "乱序": "ok",
+    "并发": "ok",
+    "切换": "ok",
+    "作用域": "ok"
+  },
+  "reviewedAt": "2026-10-23T03:44:24.390Z"
+}
