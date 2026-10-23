@@ -5,12 +5,14 @@
  * 数据源（全部既有，零后端改动）：本轮 agent_run_logs——
  *   - tool_call 行（channel="tool_call"）：content_redacted = JSON
  *     `{tool, args:{file_path…}, tool_use_id}`（backend sdk_pipeline 双写之一起）；
- *   - 编辑结果行：edit_patch 列 = structuredPatch JSON 串（hunks 带真实文件行号），
- *     tool_use_id 与调用行配对（Anthropic tool_result 块自带）。
+ *   - 编辑结果行：edit_patch 列 = structuredPatch JSON 串（hunks 带真实文件行号）。
+ *   **配对键**：`metadata.agent_event.call_id`（新轨事件逐行落库；`agent_run_logs`
+ *   无顶层 tool_use_id 列，顶层键仅 slim 截断时内存回填）——见 `entryCallId`。
  *
  * 归因口径（与文件变更卡一致的对齐点）：文件卡 numstat 归因不区分主/子代理，
  * 本映射同样按「本轮全部日志（含 subagent 行）」配对——子代理对同一文件的编辑
- * 也是该文件本轮的真实改动，不做主/子过滤（过滤反而丢内容）。
+ * 也是该文件本轮的真实改动，不做主/子过滤（过滤反而丢内容）；但**回退配对**
+ * 按 `parent_tool_use_id` 轨道隔离（并行子代理形态下跨轨配对会张冠李戴）。
  *
  * 诚实性约束（FR-03）：配不到补丁返回空数组（弹窗出如实说明）；edit_patch 在但
  * JSON 形状不可解析 → 段保留 rows=null（占位说明），**不静默丢弃、不伪造 diff**。
@@ -130,8 +132,6 @@ export function collectTurnFilePatches(
     parsed: ParsedToolCall;
     /** 轨道键（parent_tool_use_id；主代理 `__main__`）——子代理并行隔离面。 */
     track: string;
-    /** 配对键（metadata.agent_event.call_id > 顶层 slim 键 > null）。 */
-    id: string | null;
     /** 是否编辑族（只有编辑族进②回退候选面）。 */
     patchEligible: boolean;
   }
@@ -139,40 +139,38 @@ export function collectTurnFilePatches(
   const trackOf = (entry: AgentRunLogEntry): string => entry.parent_tool_use_id ?? "__main__";
   const calls: CallEntry[] = [];
   const callIndexById = new Map<string, number>();
+  /** 日志行 → calls 下标（第二遍免重复解析；仅解析成功的 tool_call 行在场）。 */
+  const callIndexByEntry = new Map<AgentRunLogEntry, number>();
 
-  // 第一遍：全量 call 索引（①按 id 随机访问——容忍 result 行先于 call 行的
-  // 同时间戳乱序批次，与旧实现全量预建口径一致）。
+  // 第一遍：全量预建 call 索引（①按 id 随机访问——容忍 result 行先于 call 行的
+  // 同时间戳乱序批次；评审 P3 要求，勿改回单遍增量建索引）。
   for (const entry of logs) {
     if (entry.channel !== "tool_call") continue;
     const parsed = parseToolCallEntry(entry);
     if (!parsed) continue;
     const index = calls.length;
-    // 调用侧配对键同样以 metadata.agent_event.call_id 为主（content JSON 的
-    // tool_use_id 为旧轨来源；二者同源时无差异，metadata 缺失时回退）。
+    // 调用侧配对键以 metadata.agent_event.call_id 为主（content JSON 的
+    // tool_use_id 为旧轨来源；metadata 缺失时回退）。
     const id = entryCallId(entry) ?? parsed.toolUseId;
     calls.push({
-      parsed: { ...parsed, toolUseId: id },
+      parsed,
       track: trackOf(entry),
-      id,
       patchEligible: isPatchEligibleToolName(parsed.toolName),
     });
+    callIndexByEntry.set(entry, index);
     if (id != null && !callIndexById.has(id)) callIndexById.set(id, index);
   }
 
   const callUsed = new Array<boolean>(calls.length).fill(false);
   /** 轨道 → 日志序上「已出现、未消费」的编辑族调用下标（②回退候选面）。 */
   const appearedByTrack = new Map<string, number[]>();
-  /** 第二遍扫描推进的 call 游标（calls 与 logs 中 tool_call 行同序同过滤）。 */
-  let callCursor = 0;
 
   const paired: { call: ParsedToolCall | null; patch: string }[] = [];
 
   for (const entry of logs) {
     if (entry.channel === "tool_call") {
-      // 与第一遍同过滤（解析失败行不进 calls）——保证 cursor 与 calls 下标对齐。
-      if (parseToolCallEntry(entry) == null) continue;
-      const index = callCursor;
-      callCursor += 1;
+      const index = callIndexByEntry.get(entry);
+      if (index == null) continue; // 解析失败行不进 calls（第一遍同口径）
       const call = calls[index];
       if (call == null || !call.patchEligible) continue;
       const list = appearedByTrack.get(call.track) ?? [];
@@ -185,17 +183,23 @@ export function collectTurnFilePatches(
     let call: ParsedToolCall | null = null;
     // ① 精确配对：id 全局唯一，跨轨道也成立。
     const resultId = entryCallId(entry);
+    // 结果行「有 id 但索引未命中」= 其调用行缺失/不可解析（如 content 超 50KB
+    // 落库截断）或同 id 已被消费——归属已由 id 语境确定，**禁止**回落②把补丁
+    // 错挂到同轨其他悬置调用（评审 P3b）。
+    let exactOrphaned = false;
     if (resultId != null) {
       const index = callIndexById.get(resultId);
       if (index != null && !callUsed[index]) {
         callUsed[index] = true;
         call = calls[index]?.parsed ?? null;
+      } else {
+        exactOrphaned = true;
       }
     }
-    // ② 回退：**同轨**已出现未消费的编辑族调用恰好一个才配（串行执行下即其归属；
-    //    同轨 >1 = 同执行体并行多 tool_use，跨轨 = 子代理交错——均无法确证归属，
-    //    诚实丢弃，不把 A 的补丁挂到 B 名下）。
-    if (call == null) {
+    // ② 回退（仅两侧都取不到 id 的补丁）：**同轨**已出现未消费的编辑族调用恰好
+    //    一个才配（串行执行下即其归属；同轨 >1 = 同执行体并行多 tool_use，跨轨 =
+    //    子代理交错——均无法确证归属，诚实丢弃，不把 A 的补丁挂到 B 名下）。
+    if (call == null && !exactOrphaned) {
       const track = trackOf(entry);
       const candidates = (appearedByTrack.get(track) ?? []).filter((i) => !callUsed[i]);
       if (candidates.length === 1) {

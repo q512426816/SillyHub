@@ -16,7 +16,7 @@ created_at: 2026-10-23T06:40:17.501Z
 
 **修法**：①配对键改为 `entryCallId(entry)`——`metadata.agent_event.call_id` 为主，回退顶层 `tool_use_id`（slim）与 content JSON 内 `tool_use_id`（旧轨）；id 索引全量预建（容忍乱序批次）。②回退改为**子代理轨道隔离 + 同轨唯一悬置**：按 `parent_tool_use_id` 分轨，候选取「同轨、日志序已出现、未消费的编辑族调用」，恰好一个才配、否则丢弃（平台支持后台子代理并行，跨轨配对会把 A 的补丁挂到 B 名下；同轨多悬置亦无法确证）。
 
-选「就近紧邻」而非「修数据面补 id」的原因：数据面哪一环丢 id 未定（本地 transcript/rollout 均无 structuredPatch，取证只能靠平台日志接口——当日对长会话持续超时），前端就近配对在 id 缺失前提下独立成立且立刻止血；数据面问题登记 docs/sillyspec 活跃坑留待根治（FR-04）。
+为什么先误判为「数据面丢 id」：初版只看到补丁行顶层 `tool_use_id` 为空，误以为数据链丢键；独立评审核对 backend 后确认该字段本就不是 DB 列、真实键在 `metadata.agent_event.call_id`——根因属于前端读错来源，无需改数据面（FR-04 因此改为「事实登记」）。回退配对保留为旧轨/异常数据的兜底，按轨道隔离 + 同轨唯一悬置，宁缺勿错。
 
 ## 接口契约
 
@@ -58,6 +58,7 @@ created_at: 2026-10-23T06:40:17.501Z
 
 | 操作 | 路径 | 说明 |
 |---|---|---|
-| 修改 | frontend/src/components/daemon/file-changes/turn-file-diff.ts | ②回退改就近紧邻配对 + 诚实丢弃；①分支零改动 |
+| 修改 | frontend/src/components/daemon/file-changes/turn-file-diff.ts | ①配对键改读 metadata.agent_event.call_id + 全量预建索引；②回退按 parent_tool_use_id 轨道隔离、同轨唯一悬置才配；有 id 孤儿不回落② |
+| 修改 | frontend/src/components/daemon/file-changes/turn-file-diff-dialog.tsx | 头注数据源/配对键口径同步（零行为改动） |
 | 修改 | frontend/src/components/daemon/file-changes/__tests__/turn-file-diff.test.ts | 就近配对/交错丢弃/实证复现用例 + 既有用例零回归 |
 | 新增 | docs/sillyspec/edit-patch-tool-use-id-missing.md | 数据面 id 缺失已知问题登记（现象/影响/取证路径） |

@@ -1,13 +1,16 @@
 // 2026-10-23-turn-file-diff-dialog task-01：轮文件变更弹窗纯映射单测。
 //
 // 锁定契约（design「接口契约」）：
-//   1. tool_call 行（channel=tool_call，content_redacted=JSON）与 tool_result 行
-//      （edit_patch 列）按 tool_use_id 配对，命中目标路径 → 补丁段（工具名 + DiffRow[]）；
+//   1. tool_call 行（channel=tool_call，content_redacted=JSON）与 edit_patch 行
+//      **按配对键精确配对**——主来源 metadata.agent_event.call_id（新轨逐行落库；
+//      DB 无顶层 tool_use_id 列），回退顶层 slim tool_use_id / content JSON 内键；
+//      命中目标路径 → 补丁段（工具名 + DiffRow[]）；
 //   2. 绝对路径（含 Windows 反斜杠）按后缀匹配仓根相对 posix 路径；
 //   3. 同一文件多次编辑按日志序逐段返回（FR-02 改N次多段）；
 //   4. edit_patch JSON 形状不可解析 → 段保留 rows=null（占位说明，不静默丢弃、不伪造）；
-//   5. result 无 tool_use_id 的遗留行按序回退配对（优先同工具名、须路径命中）；
-//   6. 其他文件 / Bash 等无路径工具的补丁不入选；subagent 行（带归属列）同样参与。
+//   5. 两侧均无配对键时按②回退：**同轨（parent_tool_use_id）唯一未消费编辑族调用**
+//      才配，否则诚实丢弃（跨轨/多悬置/有 id 但调用行缺失均不猜）；
+//   6. 其他文件 / Bash 等无路径工具的补丁不入选；subagent 行（带归属列）按轨道隔离。
 
 import { describe, expect, it } from "vitest";
 
@@ -167,7 +170,7 @@ describe("collectTurnFilePatches（日志 → 按序补丁段）", () => {
     expect(sections[0]?.rows).toBeNull();
   });
 
-  it("遗留 result（无 tool_use_id）按序回退配对：优先同工具名，且只落路径命中的调用", () => {
+  it("遗留 result（无配对键）回退：同轨唯一未消费编辑调用即其归属，只落路径命中的文件", () => {
     const sections = collectTurnFilePatches(
       [
         callLog({ toolUseId: "tu-a", filePath: "frontend/src/a.ts", raw: JSON.stringify({ tool: "Write", args: { file_path: "frontend/src/a.ts" } }) }),
@@ -285,6 +288,35 @@ describe("collectTurnFilePatches（日志 → 按序补丁段）", () => {
       resultLog({ toolUseId: null, id: "r-bash", patch: JSON.stringify([{ oldStart: 1, newStart: 1, lines: ["+x"] }]) }),
     ];
     expect(collectTurnFilePatches(logs, "frontend/src/a.ts")).toEqual([]);
+  });
+
+  it("乱序批次：补丁行先于其调用行，①按全量预建索引仍精确命中（评审 P3a）", () => {
+    const logs: AgentRunLogEntry[] = [
+      resultLog({ toolUseId: null, eventCallId: "tu-x", id: "r-x", patch: JSON.stringify([{ oldStart: 1, newStart: 1, lines: ["+x"] }]) }),
+      callLog({ toolUseId: null, eventCallId: "tu-x", tool: "Edit", filePath: "frontend/src/x.ts" }),
+    ];
+    expect(collectTurnFilePatches(logs, "frontend/src/x.ts").map((s) => s.rows?.[0]?.text)).toEqual(["x"]);
+  });
+
+  it("有 id 但调用行缺失（content 截断不可解析）：禁止回落②错挂到同轨其他悬置（评审 P3b）", () => {
+    const logs: AgentRunLogEntry[] = [
+      // 同轨一个编辑调用（无补丁结果，保持未消费）——旧逻辑会把它当②候选。
+      callLog({ toolUseId: null, tool: "Edit", filePath: "frontend/src/other.ts" }),
+      // 孤儿补丁：有 id、但其调用行不存在（模拟 content 超 50KB 被截断后解析失败）。
+      resultLog({ toolUseId: null, eventCallId: "tu-missing", id: "r-orphan", patch: JSON.stringify([{ oldStart: 1, newStart: 1, lines: ["+orphan"] }]) }),
+    ];
+    // 归属已由 id 语境确定（调用行缺失）→ 丢弃，不挂给 other.ts。
+    expect(collectTurnFilePatches(logs, "frontend/src/other.ts")).toEqual([]);
+  });
+
+  it("①已消费的调用不参与②候选（同 id 重复补丁行丢弃不回退）", () => {
+    const logs: AgentRunLogEntry[] = [
+      callLog({ toolUseId: null, eventCallId: "tu-a", tool: "Edit", filePath: "frontend/src/a.ts" }),
+      resultLog({ toolUseId: null, eventCallId: "tu-a", id: "r1", patch: JSON.stringify([{ oldStart: 1, newStart: 1, lines: ["+first"] }]) }),
+      resultLog({ toolUseId: null, eventCallId: "tu-a", id: "r2", patch: JSON.stringify([{ oldStart: 2, newStart: 2, lines: ["+dup"] }]) }),
+    ];
+    // 只出①命中的第一段；重复补丁行 id 已消费 → 不回退、不重复展示。
+    expect(collectTurnFilePatches(logs, "frontend/src/a.ts").map((s) => s.rows?.[0]?.text)).toEqual(["first"]);
   });
 });
 

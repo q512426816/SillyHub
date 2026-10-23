@@ -6,9 +6,10 @@
  *
  * 依据（用户原话「具体变更内容点击没显示，这个应该要能显示的，弹窗形式」）：
  * - 数据面：open 时经会话级单轮日志 API `getAgentSessionLogs(sessionId, { runId })`
- *   拉本轮 agent_run_logs，`collectTurnFilePatches`（./turn-file-diff）按 tool_use_id
- *   配对 edit_patch → 按次分段；渲染复用 DiffView（agent-log/tool-diff，双侧行号 +
- *   红删绿增 + 2000 行截断护栏），与 agent-log 工具卡同一 diff 原语。
+ *   拉本轮 agent_run_logs，`collectTurnFilePatches`（./turn-file-diff）按配对键
+ *   （metadata.agent_event.call_id 主来源）配对 edit_patch → 按次分段；渲染复用
+ *   DiffView（agent-log/tool-diff，双侧行号 + 红删绿增 + 2000 行截断护栏），
+ *   与 agent-log 工具卡同一 diff 原语。
  * - 形态：shadcn 受控 Dialog（对齐 session-change-files-hover「点项开大弹窗」先例）。
  * - 诚实性（FR-03 / E6/E8 立意同源）：无补丁（shell 归因 / 配不到 / JSON 不可解析）
  *   一律如实说明原因，**禁止渲染伪造 diff 或空壳成功态**；失败可重试。
