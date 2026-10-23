@@ -17,6 +17,7 @@ TERMINAL_TURN_STATUSES 的既有顶部导入语句原样落在本子模块（语
 from __future__ import annotations
 
 import json
+import re
 import uuid
 from datetime import UTC, datetime
 
@@ -25,11 +26,12 @@ from sqlalchemy import delete, select
 import app.modules.daemon.run_sync.service as _rsvc
 from app.modules.agent.model import (
     AgentRun,
+    AgentRunLog,
     AgentRunModelUsage,
     AgentSession,
 )
 from app.modules.daemon.lease.service import DaemonAgentRunNotFound
-from app.modules.daemon.model_error import ModelErrorDTO
+from app.modules.daemon.model_error import ModelErrorDTO, ModelErrorType
 from app.modules.daemon.schema import (
     ModelUsageItemRead,
     TurnFileChangesSnapshot,
@@ -69,6 +71,113 @@ async def _delayed_task_resweep(run_id: uuid.UUID) -> None:
             agent_run_id=str(run_id),
             swept_tasks=swept,
         )
+
+
+# ── 2026-10-24-close-run-quota-fallback：旧 daemon 失败轮错误详情兜底 ─────────
+# 背景：旧版 daemon（如 DESKTOP-VBOLHBH 实证）终态上报只带 is_error=true 不带
+# error（ModelError），后端只能落「执行端未回传详细原因」兜底文案，而真实错误
+# 文本（如 429 限额）已随消息事件落库在 agent_run_logs。本段在后端收口时从日
+# 志兜底识别 quota_exceeded 专项，使前端错误卡与 auto_resume 到点自动续跑恢复。
+#
+# ⚠️ 对齐源：sillyhub-daemon/src/model-error/classifier.ts——下方正则与文案逐条
+# 对齐该文件的 classifyBlob 规则 1（quota_exceeded）、extractCode（方括号业务
+# 码）、extractResetAt（GLM 中文重置时刻）与 ERROR_INFO.quota_exceeded；daemon
+# 侧规则改动时必须同步本处，防双源漂移（评审检查点）。
+_QUOTA_429_RE = re.compile(r"\b429\b")
+_QUOTA_KEYWORDS_RE = re.compile(
+    r"上限|额度|配额|quota|使用上限|limit reached|limit has been reached"
+    r"|usage[\s_-]{0,5}limit|exceeded[\s\S]{0,15}(quota|limit|usage)",
+    re.IGNORECASE,
+)
+_QUOTA_BRACKET_CODE_RE = re.compile(r"\[(\d+)\]")
+_QUOTA_RESET_AT_RE = re.compile(
+    r"将[在于]\s*(\d{4})-(\d{2})-(\d{2})[ T](\d{2}):(\d{2}):(\d{2})\s*重置"
+)
+
+
+def _infer_quota_error(blob: str) -> ModelErrorDTO | None:
+    """从错误文本推断 quota_exceeded（纯函数，供单测）。
+
+    双重锚定防误报：必须同时命中 429 状态码与限额关键词才归类（纯 429 属
+    rate_limited 语义，本兜底不推断、保持现状——daemon 回传是唯一来源）。
+    其余类型（auth/network/timeout 等）文本特征弱，后端不猜，一律 None。
+    """
+    if not blob or not blob.strip():
+        return None
+    if not (_QUOTA_429_RE.search(blob) and _QUOTA_KEYWORDS_RE.search(blob)):
+        return None
+    code_m = _QUOTA_BRACKET_CODE_RE.search(blob)
+    reset_at: str | None = None
+    reset_m = _QUOTA_RESET_AT_RE.search(blob)
+    if reset_m:
+        y, mo, d, h, mi, se = reset_m.groups()
+        # 显式字符串拼接 +08:00（对齐 daemon extractResetAt：GLM 文案为北京时间，
+        # 不走 new Date/strptime 解析防实现相关时区漂移）。
+        reset_at = f"{y}-{mo}-{d}T{h}:{mi}:{se}+08:00"
+    return ModelErrorDTO(
+        type=ModelErrorType.QUOTA_EXCEEDED,
+        code=code_m.group(1) if code_m else None,
+        message="额度或配额已耗尽",
+        retryable=False,
+        hint="额度耗尽，需充值或切换供应商",
+        raw=blob,
+        reset_at=reset_at,
+    )
+
+
+async def _infer_quota_model_error_from_logs(
+    svc,
+    agent_run: AgentRun,
+    result_summary: str | None,
+) -> ModelErrorDTO | None:
+    """旧 daemon 未回传 error 时，从该 run 已落库日志兜底推断 quota 错误。
+
+    文本源：该 run 日志中 channel='stdout' 且含 "API Error" 锚点的行（timestamp
+    倒序最多 3 行）+ close 请求的 result_summary。daemon 侧 onTurnResult 先
+    await flushInteractiveBatches 再 close（daemon.ts:4129），正常时序下日志
+    已落库；顺序颠倒的极端情形最坏退化为推断不到（行为同旧状，无害）。
+    best-effort：任何异常仅 warn 不阻塞 close 主链路（对齐 model_usage 落库
+    的容错范式——兜底绝不能反向卡死终态收口）。
+    """
+    try:
+        rows = (
+            (
+                await svc._session.execute(
+                    select(AgentRunLog.content_redacted)
+                    .where(
+                        AgentRunLog.run_id == agent_run.id,
+                        AgentRunLog.channel == "stdout",
+                        AgentRunLog.content_redacted.like("%API Error%"),
+                    )
+                    .order_by(AgentRunLog.timestamp.desc(), AgentRunLog.id.desc())
+                    .limit(3)
+                )
+            )
+            .scalars()
+            .all()
+        )
+    except Exception as exc:
+        _rsvc.log.warning(
+            "quota_log_fallback_query_failed",
+            run_id=str(agent_run.id),
+            error=str(exc),
+        )
+        return None
+    parts = [r for r in rows if r]
+    if result_summary and result_summary.strip():
+        parts.append(result_summary)
+    if not parts:
+        return None
+    blob = " | ".join(parts)
+    inferred = _infer_quota_error(blob)
+    if inferred is not None:
+        _rsvc.log.info(
+            "quota_log_fallback_inferred",
+            run_id=str(agent_run.id),
+            code=inferred.code,
+            reset_at=inferred.reset_at,
+        )
+    return inferred
 
 
 async def close_interactive_run(
@@ -171,6 +280,13 @@ async def close_interactive_run(
             await svc._session.refresh(agent_run)
             return agent_run
     now = datetime.now(UTC)
+    # 2026-10-24-close-run-quota-fallback（FR-01/FR-02）：旧 daemon 失败轮未回传
+    # error 时从已落库日志兜底识别 quota_exceeded 补进 error 参数——后续
+    # _close_apply_terminal（error_detail 落库）与 _close_post_commit（auto_resume
+    # 到点自动续跑排期）零改动即与「新 daemon 回传」路径行为一致。daemon 已回传
+    # error 时绝不覆盖（FR-02：daemon 分类更全、raw 更准，后端兜底仅是降级面）。
+    if is_error and error is None:
+        error = await _infer_quota_model_error_from_logs(svc, agent_run, result_summary)
     await _close_apply_terminal(
         svc,
         agent_run,
