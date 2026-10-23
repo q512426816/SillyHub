@@ -48,3 +48,4 @@ created_at: 2026-09-03 14:49:48
 - 2026-10-23-diff-dialog-copy-fallback | 变更弹窗超长diff补复制兜底
 - 2026-10-23-session-network-context | 2026-10-23-session-network-context
 - 2026-10-23-session-dialog-input-align | 会话浮窗输入即清与草稿语义对齐修复
+- 2026-10-23-session-first-window-turn-align | 会话重新进入时首屏历史窗口按最近 400 条日志截断，单轮日志超过 400 条时窗口起点落在该轮中段…

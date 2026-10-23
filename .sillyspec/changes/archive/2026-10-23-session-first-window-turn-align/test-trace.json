@@ -1,0 +1,171 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-23-session-first-window-turn-align",
+  "rows": [
+    {
+      "anchor": "FR-01",
+      "row_id": "2026-10-23-session-first-window-turn-align:flow:测试绑定FR-01",
+      "tests": [
+        "frontend/src/app/(dashboard)/sessions/__tests__/page.test.tsx「首屏自适应：单轮日志超窗口 → 补全整轮，轮首用户消息进入首屏（FR-01）」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-23-session-first-window-turn-align"
+    },
+    {
+      "anchor": "FR-01",
+      "row_id": "2026-10-23-session-first-window-turn-align:flow:测试绑定FR-01",
+      "tests": [
+        "frontend/src/components/daemon/session-panel/__tests__/initial-window.test.ts「小会话总行数不超预算 → 持续向前补到全量（评审 P1：不做 2 轮即停）」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-23-session-first-window-turn-align"
+    },
+    {
+      "anchor": "FR-01",
+      "row_id": "2026-10-23-session-first-window-turn-align:flow:测试绑定FR-01",
+      "tests": [
+        "frontend/src/components/daemon/session-panel/__tests__/initial-window.test.ts「多轮窗口起点截断 → 补全该轮并向前覆盖最近 2 轮（FR-01）」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-23-session-first-window-turn-align"
+    },
+    {
+      "anchor": "FR-02",
+      "row_id": "2026-10-23-session-first-window-turn-align:flow:测试绑定FR-02",
+      "tests": [
+        "frontend/src/app/(dashboard)/sessions/__tests__/page.test.tsx「首屏自适应：已到会话开头且起点轮完整 → 不发起单轮直达（FR-02）」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-23-session-first-window-turn-align"
+    },
+    {
+      "anchor": "FR-02",
+      "row_id": "2026-10-23-session-first-window-turn-align:flow:测试绑定FR-02",
+      "tests": [
+        "frontend/src/components/daemon/session-panel/__tests__/initial-window.test.ts「已到会话开头且窗口起点轮完整 → 不发起直达补拉（FR-02）」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-23-session-first-window-turn-align"
+    },
+    {
+      "anchor": "FR-02",
+      "row_id": "2026-10-23-session-first-window-turn-align:flow:测试绑定FR-02",
+      "tests": [
+        "frontend/src/components/daemon/session-panel/__tests__/initial-window.test.ts「向前补拉受轮数上限约束 → 只并行拉最近 maxRuns 个更早轮（评审 P2 请求量）」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-23-session-first-window-turn-align"
+    },
+    {
+      "anchor": "FR-03",
+      "row_id": "2026-10-23-session-first-window-turn-align:flow:测试绑定FR-03",
+      "tests": [
+        "frontend/src/components/daemon/session-panel/__tests__/initial-window.test.ts「锚点轮直达触达 2000 上限 → 禁止采纳，整体回退底窗（不留中段缺口，FR-03）」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-23-session-first-window-turn-align"
+    },
+    {
+      "anchor": "FR-03",
+      "row_id": "2026-10-23-session-first-window-turn-align:flow:测试绑定FR-03",
+      "tests": [
+        "frontend/src/components/daemon/session-panel/__tests__/initial-window.test.ts「锚点轮直达失败 → 不向前补拉、保持底窗（FR-03 失败降级）」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-23-session-first-window-turn-align"
+    },
+    {
+      "anchor": "FR-03",
+      "row_id": "2026-10-23-session-first-window-turn-align:flow:测试绑定FR-03",
+      "tests": [
+        "frontend/src/components/daemon/session-panel/__tests__/initial-window.test.ts「probe 失败 → 整体放弃自适应，不发起任何直达拉取（FR-03 失败降级）」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-23-session-first-window-turn-align"
+    },
+    {
+      "anchor": "FR-03",
+      "row_id": "2026-10-23-session-first-window-turn-align:flow:测试绑定FR-03",
+      "tests": [
+        "frontend/src/components/daemon/session-panel/__tests__/initial-window.test.ts「向前补更早轮触达单轮上限 → 停止且不采纳该轮（避免轮间留洞，FR-03）」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-23-session-first-window-turn-align"
+    },
+    {
+      "anchor": "FR-03",
+      "row_id": "2026-10-23-session-first-window-turn-align:flow:测试绑定FR-03",
+      "tests": [
+        "frontend/src/app/(dashboard)/sessions/__tests__/page.test.tsx「满页（400 条）→ 触顶自动加载更早 prepend + 加载提示；到头后触顶不再请求」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-23-session-first-window-turn-align"
+    }
+  ]
+}

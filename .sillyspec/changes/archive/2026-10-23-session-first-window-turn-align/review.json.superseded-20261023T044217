@@ -1,0 +1,34 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-23-session-first-window-turn-align",
+  "reviewer": "subagent",
+  "verdict": "PASS",
+  "reviewedAgainst": "04d631572cab175d1e7f44abc1a99475fc436adf",
+  "findings": [
+    {
+      "severity": "P3",
+      "title": "FR-03「直达截断安全降级」场景仍要求按合并结果装配，与同节规约及实现相反（不阻塞）",
+      "evidence": "requirements.md:43 场景写「Then 窗口起点轮仍按合并结果装配（尾部不丢）」，但同节 :37 规约已改为触达 2000 上限「禁止采纳或合并、必须整体回退底窗」，实现 initial-window.ts:169-179 走 adaptiveBlocked 回退分支，绑定用例「锚点轮直达触达 2000 上限 → 禁止采纳，整体回退底窗」断言 logs===base；文档内部自相矛盾，按场景验收会误判。",
+      "location": ".sillyspec/changes/2026-10-23-session-first-window-turn-align/requirements.md:43"
+    },
+    {
+      "severity": "P3",
+      "title": "代码注释仍描述旧方案「截断时合并去重 / 小会话≤预算即全量 / 中段缺口可回补」（不阻塞）",
+      "evidence": "initial-window.ts:14「合并去重——直达 ASC 上限可能丢尾部，合并而非替换…」、:63「触达 2000 上限（可能缺中段）」、:118「小会话（总行数 ≤ 预算）因此全量加载」（8 轮上限下 15 轮×100 行=1500 行也不会全量）均为已被 04d631572 推翻的旧表述；session-panel-page.tsx:1307「中段缺口可经加载更早回补」的缺口在新实现中不存在（不完整即整体不合并）；design.md:47 文件清单仍写「最小轮数」。属 CLAUDE.md 规则 18 的注释/实现不一致，建议归档前顺手清理。",
+      "location": "frontend/src/components/daemon/session-panel/initial-window.ts:14"
+    },
+    {
+      "severity": "P3",
+      "title": "FR-01「单次首屏最多覆盖 9 轮」口径不成立（不阻塞）",
+      "evidence": "8 轮上限只约束额外候选轮（initial-window.ts:196-202），底窗 400 行本身可包含任意多轮（如 400 个单行轮），现有行集 + 最多 8 个更早轮后首屏轮数可远超 9；该表述把「额外补拉 8 轮」写成「首屏最多 9 轮」，按字面无法验收。",
+      "location": ".sillyspec/changes/2026-10-23-session-first-window-turn-align/requirements.md:11"
+    }
+  ],
+  "dimensionNotes": {
+    "乱序": "ok",
+    "并发": "ok",
+    "切换": "ok",
+    "作用域": "ok"
+  },
+  "reviewedAt": "2026-10-23T04:40:15Z"
+}

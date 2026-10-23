@@ -1,0 +1,28 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-23-session-first-window-turn-align",
+  "reviewer": "subagent",
+  "verdict": "PASS",
+  "reviewedAgainst": "780bda6099858d50f9908ea6d9e308c2eb46b8ab",
+  "findings": [
+    {
+      "severity": "P3",
+      "title": "更早轮直达返回空数组时中断向前补拉（不在声明的停止条件内）",
+      "evidence": "`if (full.length === 0) break;` 使一个「存在但无日志」的更早轮（日志被清理/轮未产日志，导航已有「该轮次日志不存在」先例）直接终止后续轮采纳；requirements FR-01 与 design 列出的停止条件只有到头/预算/8 轮/单轮上限，此处属于未声明的额外停止，结果是预算内更早轮不首屏加载（保守、无数据风险，仅少加载）。",
+      "location": "frontend/src/components/daemon/session-panel/initial-window.ts:216"
+    },
+    {
+      "severity": "P3",
+      "title": "块序/时间序错位下锚点轮识别盲区（残留洞，前提较窄）",
+      "evidence": "锚点取 `oldestOf(baseLogs)`（时间最旧）而非底窗块序首块；ql-20260916-014 已证实生产存在「大 run 块序靠前、尾部 ts 靠后」的迟到日志错位——此时底窗首块 A 被截断但其包含段 ts 晚于后续块 B 的早行，oldest 落在 B；A 因 `covered` 被跳过、永不直达补全，若再采纳更早轮则游标越过 A 缺口，A 头部在首屏与「加载更早」均不可达。非本次回归（时间游标口径沿袭既有），建议补一个块序≠时间序的夹具或在模块头声明该局限。",
+      "location": "frontend/src/components/daemon/session-panel/initial-window.ts:136"
+    }
+  ],
+  "dimensionNotes": {
+    "乱序": "finding",
+    "并发": "ok",
+    "切换": "ok",
+    "作用域": "ok"
+  },
+  "reviewedAt": "2026-10-23T12:49:54+08:00"
+}

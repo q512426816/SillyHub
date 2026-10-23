@@ -792,3 +792,76 @@ created_at: 2026-10-14T02:51:35.432Z
   confirmed_at: null
   source_change: 2026-10-23-session-input-clear-fix
   status: active
+
+## FR-agent-042 首屏加载后，窗口最旧行所在轮若被窗口截断，自动补拉该轮全量日志并装配，保证该轮 prompt 用户消息气泡在场
+变更：2026-10-23-session-first-window-turn-align
+状态：active
+摘要：单轮超窗口全量显示；多轮会话自适应覆盖最近 2 轮
+场景正文：
+- 场景：单轮超窗口全量显示 — Given 会话整场仅 1 轮、日志 546 条，首屏窗口 400 条（生产会话 f815989f 实证）；When 用户重新进入会话；Then 该轮 546 条全部装配，轮首 user_input（用户提问）与后续回复均可见，无需点击「加载更早消息」
+- 场景：多轮会话自适应覆盖最近 2 轮 — Given 会话 8 轮，最新轮 696 条日志，窗口起点落在最新轮中段；When 首屏加载；Then 补全最新轮并向前覆盖到上一完整轮，首屏至少显示最近 2 个完整轮次，最近一次用户发言可见
+全文：.sillyspec/changes/archive/2026-10-23-session-first-window-turn-align/requirements.md#FR-01
+最近确认：780bda6099858d50f9908ea6d9e308c2eb46b8ab
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-23-session-first-window-turn-align:flow:测试绑定FR-01
+  tests: frontend/src/components/daemon/session-panel/__tests__/initial-window.test.ts「多轮窗口起点截断 → 补全该轮并向前覆盖最近 2 轮（FR-01）」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-23-session-first-window-turn-align
+  status: active
+
+## FR-agent-043 已完整落在窗口内的轮次装配结果不变，零回归
+变更：2026-10-23-session-first-window-turn-align
+状态：active
+摘要：窗口已满足自适应条件
+场景正文：
+- 场景：窗口已满足自适应条件 — Given 首屏窗口起点轮完整且起点轮已是会话第一轮；When 首屏加载完成；Then 不发起任何 `{ runId }` 直达拉取，turns 与改动前一致
+全文：.sillyspec/changes/archive/2026-10-23-session-first-window-turn-align/requirements.md#FR-02
+最近确认：780bda6099858d50f9908ea6d9e308c2eb46b8ab
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-23-session-first-window-turn-align:flow:测试绑定FR-02
+  tests: frontend/src/components/daemon/session-panel/__tests__/initial-window.test.ts「向前补拉受轮数上限约束 → 只并行拉最近 maxRuns 个更早轮（评审 P2 请求量）」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-23-session-first-window-turn-align
+  status: active
+
+## FR-agent-044 直达拉取存在上限截断时按既有 okRuns 采纳闸降级，不静默丢窗口段最新内容
+变更：2026-10-23-session-first-window-turn-align
+状态：active
+摘要：直达截断安全降级
+场景正文：
+- 场景：直达截断安全降级 — Given 某轮直达返回行数达到 2000 条上限；When 首屏自适应补拉执行；Then 该轮不采纳并整体回退底窗装配（不合并、无中段缺口），更早轮停止补拉且 hasEarlier 保持为真，可由「加载更早消息」继续
+全文：.sillyspec/changes/archive/2026-10-23-session-first-window-turn-align/requirements.md#FR-03
+最近确认：780bda6099858d50f9908ea6d9e308c2eb46b8ab
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-23-session-first-window-turn-align:flow:测试绑定FR-03
+  tests: frontend/src/app/(dashboard)/sessions/__tests__/page.test.tsx「满页（400 条）→ 触顶自动加载更早 prepend + 加载提示；到头后触顶不再请求」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-23-session-first-window-turn-align
+  status: active
+
+## FR-agent-045 相关 vitest 全绿，tsc 零错
+变更：2026-10-23-session-first-window-turn-align
+状态：active
+摘要：质量门
+场景正文：
+- 场景：质量门 — Given 变更完成；When 执行相关 vitest 与 tsc；Then 全部通过且零类型错误
+全文：.sillyspec/changes/archive/2026-10-23-session-first-window-turn-align/requirements.md#FR-04
+最近确认：780bda6099858d50f9908ea6d9e308c2eb46b8ab
