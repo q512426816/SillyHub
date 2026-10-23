@@ -1,6 +1,9 @@
 tier: thin
 legacy_fallback: false
-substeps: {}
+substeps:
+  artifacts: done
+  ledger: done
+  patch: done
 born_face: thin
 with_tasks: false
 review_force: null
@@ -24,7 +27,7 @@ input: >-
 autopilot: false
 prestage_ack: true
 baseline_commit: 0d1ba62747f6e46521919b37e3b44c678b7f675a
-updatedAt: '2026-10-23T06:51:35.466Z'
+updatedAt: '2026-10-23T07:06:37.099Z'
 cross_baselines:
   sillyspec: 2921364ddcc22f78cd1d62686adaf0c1c0bbc9ad
 baseline_sha256: 2d78410c2ec8822b0099fab339255284d7543de8833b45e92a1757dc91f225e3
@@ -33,4 +36,10 @@ spec_approved_at: '2026-10-23T06:51:35.466Z'
 spec_approved_by: anon@DESKTOP-HJ0AM09
 spec_approved_channel: user-confirmed
 spec_attested_by: anon@DESKTOP-HJ0AM09
+batch_ticked: true
+gate_summary: >-
+  test: skipped ← module[]+deps(jsx3+jsx-e2e-skip1)（7.9s）
+  结果：C:\Users\qinyi\IdeaProjects\multi-agent-platform\.sillyspec\.runtime\verify-runs\20261023070622\test-result.json —
+  跳过原因：模块子集含环境缺件跳过（已跑模块全绿）：deps(auto-jsx-e2e-skip)——补装依赖后恢复实测。｜lint: skipped — 跳过原因：local.yaml 未配置 commands.lint（或标记
+  unavailable）。｜门文件 10 个
 

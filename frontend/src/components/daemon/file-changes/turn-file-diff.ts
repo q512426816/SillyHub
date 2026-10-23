@@ -107,75 +107,102 @@ export function diffRowsToText(rows: readonly DiffRow[]): string {
 /**
  * 本轮日志 + 仓根相对路径 → 按编辑完成序（日志序）的补丁段列表。
  *
- * 配对两遍：① result.tool_use_id → 同 id 的 tool_call 行（精确，零改动语义）；
- * ② 遗留 result（无 id 或 id 无主）**就近悬置配对**——仅配给「最近的未消费编辑
- * 族调用」（2026-10-23-diff-dialog-pairing-fix：旧实现「按序塞给路径命中目标文件
- * 的第一个未用调用」在多文件编辑轮必然张冠李戴——实证会话 49c5c3ec / run 63130ca1，
- * 点 task-runner.test.ts 显示 design.md 内容）。协议依据：agent 工具调用**串行**
- * 执行，串行编辑轮无 id 时最近悬置调用即补丁归属；新编辑调用的到来即证明前序
- * 调用 result 已处理（旧悬置=补丁超限/丢失的悬空调用，判死不累计毒化）。无前置
- * 编辑调用（悬置空）→ 该段诚实丢弃（不伪造归属；违反串行假设的真并发日志为
- * 已披露边界，见 design 风险节）。
+ * 配对键（2026-10-23-diff-dialog-pairing-fix 评审修正）：**优先
+ * `metadata.agent_event.call_id`**——新轨事件逐行落库该键（backend
+ * submit_steps.py `metadata_['agent_event']`，tool_call 与 edit_patch 行都有），
+ * 弹窗日志行顶层的 `tool_use_id` 并非 DB 列（仅 slim 截断时内存回填），旧实现只读
+ * 顶层键 → ①精确配对在真实链路上从未生效，全部补丁落到②启发式配对，多文件编辑
+ * 轮必然张冠李戴（实证会话 49c5c3ec / run 63130ca1，点 task-runner.test.ts 显示
+ * design.md 内容）。回退面：顶层 `tool_use_id`（slim）> tool_call content JSON 内
+ * `tool_use_id`（旧轨）。
+ *
+ * ① 精确配对：任一侧取得相同 id 即配对成功（跨子代理轨道也成立——id 全局唯一）。
+ * ② 回退（两侧都取不到 id）：**按子代理轨道隔离 + 同轨唯一悬置**——平台支持后台
+ * 子代理并行（事件按到达序落库，主代理与子代理行交错），跨轨配对会把 A 的补丁
+ * 挂到 B 名下；因此回退只在「同轨（parent_tool_use_id 相同）、日志序上已出现、
+ * 未被①消费的编辑族调用恰好一个」时配对，否则该段诚实丢弃（不伪造归属）。
  */
 export function collectTurnFilePatches(
   logs: readonly AgentRunLogEntry[],
   repoRelPath: string,
 ): TurnFilePatchSection[] {
-  // 单遍扫描：日志序即配对序。calls 全量留存（①按 id 索引随机访问），
-  // pending 为「已见未消费的编辑族调用」悬置栈（②就近配对的候选面）。
-  const calls: ParsedToolCall[] = [];
-  const callUsed: boolean[] = [];
+  interface CallEntry {
+    parsed: ParsedToolCall;
+    /** 轨道键（parent_tool_use_id；主代理 `__main__`）——子代理并行隔离面。 */
+    track: string;
+    /** 配对键（metadata.agent_event.call_id > 顶层 slim 键 > null）。 */
+    id: string | null;
+    /** 是否编辑族（只有编辑族进②回退候选面）。 */
+    patchEligible: boolean;
+  }
+
+  const trackOf = (entry: AgentRunLogEntry): string => entry.parent_tool_use_id ?? "__main__";
+  const calls: CallEntry[] = [];
   const callIndexById = new Map<string, number>();
-  const pending: number[] = [];
+
+  // 第一遍：全量 call 索引（①按 id 随机访问——容忍 result 行先于 call 行的
+  // 同时间戳乱序批次，与旧实现全量预建口径一致）。
+  for (const entry of logs) {
+    if (entry.channel !== "tool_call") continue;
+    const parsed = parseToolCallEntry(entry);
+    if (!parsed) continue;
+    const index = calls.length;
+    // 调用侧配对键同样以 metadata.agent_event.call_id 为主（content JSON 的
+    // tool_use_id 为旧轨来源；二者同源时无差异，metadata 缺失时回退）。
+    const id = entryCallId(entry) ?? parsed.toolUseId;
+    calls.push({
+      parsed: { ...parsed, toolUseId: id },
+      track: trackOf(entry),
+      id,
+      patchEligible: isPatchEligibleToolName(parsed.toolName),
+    });
+    if (id != null && !callIndexById.has(id)) callIndexById.set(id, index);
+  }
+
+  const callUsed = new Array<boolean>(calls.length).fill(false);
+  /** 轨道 → 日志序上「已出现、未消费」的编辑族调用下标（②回退候选面）。 */
+  const appearedByTrack = new Map<string, number[]>();
+  /** 第二遍扫描推进的 call 游标（calls 与 logs 中 tool_call 行同序同过滤）。 */
+  let callCursor = 0;
 
   const paired: { call: ParsedToolCall | null; patch: string }[] = [];
 
-  const noteCall = (parsed: ParsedToolCall): void => {
-    const index = calls.length;
-    calls.push(parsed);
-    callUsed.push(false);
-    if (parsed.toolUseId != null && !callIndexById.has(parsed.toolUseId)) {
-      callIndexById.set(parsed.toolUseId, index);
-    }
-    if (isPatchEligibleToolName(parsed.toolName)) {
-      // 串行协议推理（FR-02）：agent 工具调用顺序执行——新编辑调用到来 ⟹ 前序
-      // 调用的 result 已处理（哪怕无补丁）。旧悬置此时必为悬空调用（补丁超 64KB
-      // 上限不附着 / result 行丢失），判死清空，防其永久毒化后续无主补丁的配对。
-      pending.length = 0;
-      pending.push(index);
-    }
-  };
-
   for (const entry of logs) {
     if (entry.channel === "tool_call") {
-      const parsed = parseToolCallEntry(entry);
-      if (parsed) noteCall(parsed);
+      // 与第一遍同过滤（解析失败行不进 calls）——保证 cursor 与 calls 下标对齐。
+      if (parseToolCallEntry(entry) == null) continue;
+      const index = callCursor;
+      callCursor += 1;
+      const call = calls[index];
+      if (call == null || !call.patchEligible) continue;
+      const list = appearedByTrack.get(call.track) ?? [];
+      list.push(index);
+      appearedByTrack.set(call.track, list);
       continue;
     }
     const patch = entry.edit_patch;
     if (typeof patch !== "string" || patch.length === 0) continue;
-    const toolUseId =
-      typeof entry.tool_use_id === "string" && entry.tool_use_id.length > 0
-        ? entry.tool_use_id
-        : null;
     let call: ParsedToolCall | null = null;
-    // ① 精确配对：同 id 且未被占用（同 id 多次出现取首个——callIndexById 首写者胜）。
-    if (toolUseId != null) {
-      const index = callIndexById.get(toolUseId);
+    // ① 精确配对：id 全局唯一，跨轨道也成立。
+    const resultId = entryCallId(entry);
+    if (resultId != null) {
+      const index = callIndexById.get(resultId);
       if (index != null && !callUsed[index]) {
         callUsed[index] = true;
-        if (pending[pending.length - 1] === index) pending.length = 0;
-        call = calls[index] ?? null;
+        call = calls[index]?.parsed ?? null;
       }
     }
-    // ② 就近配对（仅无主补丁）：配给最近悬置的编辑族调用（串行协议下即其归属，
-    // noteCall 已把悬置面收敛为最近一个）；无悬置（result 先于任何编辑调用 /
-    // ①已消费且后续无新调用）→ 诚实丢弃。
-    if (call == null && pending.length > 0) {
-      const index = pending[pending.length - 1]!;
-      callUsed[index] = true;
-      pending.length = 0;
-      call = calls[index] ?? null;
+    // ② 回退：**同轨**已出现未消费的编辑族调用恰好一个才配（串行执行下即其归属；
+    //    同轨 >1 = 同执行体并行多 tool_use，跨轨 = 子代理交错——均无法确证归属，
+    //    诚实丢弃，不把 A 的补丁挂到 B 名下）。
+    if (call == null) {
+      const track = trackOf(entry);
+      const candidates = (appearedByTrack.get(track) ?? []).filter((i) => !callUsed[i]);
+      if (candidates.length === 1) {
+        const index = candidates[0]!;
+        callUsed[index] = true;
+        call = calls[index]?.parsed ?? null;
+      }
     }
     paired.push({ call, patch });
   }
@@ -192,10 +219,32 @@ export function collectTurnFilePatches(
 }
 
 /**
+ * 日志行 → 工具调用 id（配对键单一入口）：
+ *   ① `metadata.agent_event.call_id`——新轨事件逐行落库的真实 id（主来源）；
+ *   ② 顶层 `tool_use_id`——slim 截断时的内存回填（DB 无此列）；
+ * 均缺 → null（该行不提供配对键）。
+ */
+function entryCallId(entry: AgentRunLogEntry): string | null {
+  const metadata = entry.metadata;
+  if (metadata != null && typeof metadata === "object") {
+    const event = (metadata as Record<string, unknown>).agent_event;
+    if (event != null && typeof event === "object") {
+      const callId = (event as Record<string, unknown>).call_id;
+      if (typeof callId === "string" && callId.length > 0) return callId;
+    }
+  }
+  if (typeof entry.tool_use_id === "string" && entry.tool_use_id.length > 0) {
+    return entry.tool_use_id;
+  }
+  return null;
+}
+
+/**
  * 回退配对（②）的编辑族工具先验：structuredPatch 抓取链不限工具名（Edit 与
  * Write 覆盖写均携带），但回退没有 id 可查，必须收紧到「可能有补丁」的调用，
- * 否则 Bash/Read 等调用会吃走 Edit 的补丁。命名按「含 edit/write/patch 词根」
- * 宽匹配，覆盖 provider 方言（apply_patch / edit_file / str_replace…）。
+ * 否则 Bash/Read 等调用会吃走 Edit 的补丁。按「含 edit / write / patch 词根」
+ * 宽匹配，覆盖 apply_patch / edit_file / write_file 等方言；不含这些词根的工具名
+ * （如 str_replace）不入候选面——宁可少配不误配。
  */
 function isPatchEligibleToolName(toolName: string): boolean {
   const lowered = toolName.toLowerCase();

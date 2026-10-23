@@ -22,15 +22,18 @@ import {
 
 function callLog(overrides: {
   toolUseId?: string | null;
+  /** metadata.agent_event.call_id（新轨真实配对键；2026-10-23 评审修正后的主来源）。 */
+  eventCallId?: string | null;
   tool?: string;
   filePath?: string | null;
   raw?: string;
+  parentToolUseId?: string;
 }): AgentRunLogEntry {
   const args: Record<string, unknown> =
     overrides.filePath === null
       ? { command: "rm -rf dist" }
       : { file_path: overrides.filePath ?? "frontend/src/a.ts" };
-  // toolUseId=null = 调用行无 id（双侧缺 id 的②路径用例）；缺省 = 默认 id "tu-1"。
+  // toolUseId=null = 调用行顶层无 id；缺省 = 默认 id "tu-1"。
   const tuid = overrides.toolUseId ?? "tu-1";
   const withId = overrides.toolUseId !== null;
   return {
@@ -46,13 +49,22 @@ function callLog(overrides: {
         ...(withId ? { tool_use_id: tuid } : {}),
       }),
     ...(withId ? { tool_use_id: tuid } : {}),
-  };
+    ...(overrides.eventCallId != null
+      ? { metadata: { agent_event: { call_id: overrides.eventCallId } } }
+      : {}),
+    ...(overrides.parentToolUseId != null
+      ? { parent_tool_use_id: overrides.parentToolUseId }
+      : {}),
+  } as AgentRunLogEntry;
 }
 
 function resultLog(overrides: {
   toolUseId?: string | null;
+  /** metadata.agent_event.call_id（新轨真实配对键）。 */
+  eventCallId?: string | null;
   patch?: string | null;
   id?: string;
+  parentToolUseId?: string;
 }): AgentRunLogEntry {
   return {
     id: overrides.id ?? "log-result-1",
@@ -65,7 +77,13 @@ function resultLog(overrides: {
         ? JSON.stringify([{ oldStart: 1, newStart: 1, lines: ["-old", "+new"] }])
         : overrides.patch,
     ...(overrides.toolUseId === null ? {} : { tool_use_id: overrides.toolUseId ?? "tu-1" }),
-  };
+    ...(overrides.eventCallId != null
+      ? { metadata: { agent_event: { call_id: overrides.eventCallId } } }
+      : {}),
+    ...(overrides.parentToolUseId != null
+      ? { parent_tool_use_id: overrides.parentToolUseId }
+      : {}),
+  } as AgentRunLogEntry;
 }
 
 describe("matchesRepoPath / toolCallFilePath（路径匹配基元）", () => {
@@ -190,55 +208,82 @@ describe("collectTurnFilePatches（日志 → 按序补丁段）", () => {
     expect(collectTurnFilePatches([resultLog({ toolUseId: "tu-1" })], "a.ts")).toEqual([]);
   });
 
-  // 2026-10-23-diff-dialog-pairing-fix：②回退改「悬置唯一就近配对」——多文件编辑轮
-  // 不再张冠李戴（实证：会话 49c5c3ec / run 63130ca1 点 task-runner.test.ts 显示
-  // design.md 内容，旧实现把无主补丁塞给路径命中的第一个未用调用）。
-  it("就近悬置配对：多文件无 id 补丁各归其位，目标文件弹窗不再吃到他文件内容（FR-01 实证复现）", () => {
+  // 2026-10-23-diff-dialog-pairing-fix（评审修正后）：
+  // 配对键主来源 = metadata.agent_event.call_id（新轨逐行落库，DB 无顶层 tool_use_id 列）；
+  // ①精确配对恢复后，多文件编辑轮各归其位。②回退仅在「同轨唯一悬置」时兜底。
+  it("metadata.agent_event.call_id 精确配对：多文件各归其位，目标文件弹窗不再吃到他文件内容（实证复现）", () => {
     const designPatch = JSON.stringify([{ oldStart: 1, newStart: 1, lines: ["+design-body"] }]);
     const reqPatch = JSON.stringify([{ oldStart: 2, newStart: 2, lines: ["+requirements-body"] }]);
     const testPatch1 = JSON.stringify([{ oldStart: 3, newStart: 3, lines: ["+test-1"] }]);
     const testPatch2 = JSON.stringify([{ oldStart: 4, newStart: 4, lines: ["+test-2"] }]);
     const logs: AgentRunLogEntry[] = [
-      // 全轮无 tool_use_id（双侧缺失，走②就近配对）——design → requirements →
-      // task-runner×2，串行编辑轮，各 result 紧随其 call。
-      callLog({ toolUseId: null, tool: "Write", filePath: "design.md" }),
-      resultLog({ toolUseId: null, id: "r-d", patch: designPatch }),
-      callLog({ toolUseId: null, tool: "Write", filePath: "requirements.md" }),
-      resultLog({ toolUseId: null, id: "r-q", patch: reqPatch }),
-      callLog({ toolUseId: null, tool: "Edit", filePath: "tests/task-runner.test.ts" }),
-      resultLog({ toolUseId: null, id: "r-t1", patch: testPatch1 }),
-      callLog({ toolUseId: null, tool: "Edit", filePath: "tests/task-runner.test.ts" }),
-      resultLog({ toolUseId: null, id: "r-t2", patch: testPatch2 }),
+      // 真实链路形态：顶层 tool_use_id 恒无（非 slim），id 在 metadata.agent_event。
+      callLog({ toolUseId: null, eventCallId: "tu-d", tool: "Write", filePath: "design.md" }),
+      resultLog({ toolUseId: null, eventCallId: "tu-d", id: "r-d", patch: designPatch }),
+      callLog({ toolUseId: null, eventCallId: "tu-q", tool: "Write", filePath: "requirements.md" }),
+      resultLog({ toolUseId: null, eventCallId: "tu-q", id: "r-q", patch: reqPatch }),
+      callLog({ toolUseId: null, eventCallId: "tu-t1", tool: "Edit", filePath: "tests/task-runner.test.ts" }),
+      resultLog({ toolUseId: null, eventCallId: "tu-t1", id: "r-t1", patch: testPatch1 }),
+      callLog({ toolUseId: null, eventCallId: "tu-t2", tool: "Edit", filePath: "tests/task-runner.test.ts" }),
+      resultLog({ toolUseId: null, eventCallId: "tu-t2", id: "r-t2", patch: testPatch2 }),
     ];
-    // 点 task-runner.test.ts：只含它自己的两段（旧实现会显示 design/requirements 内容）。
-    const sections = collectTurnFilePatches(logs, "tests/task-runner.test.ts");
-    expect(sections.map((s) => s.rows?.[0]?.text)).toEqual(["test-1", "test-2"]);
-    // 点 design.md：design 自己的内容（就近配对各归其位的对侧验证）。
-    const designSections = collectTurnFilePatches(logs, "design.md");
-    expect(designSections.map((s) => s.rows?.[0]?.text)).toEqual(["design-body"]);
+    expect(collectTurnFilePatches(logs, "tests/task-runner.test.ts").map((s) => s.rows?.[0]?.text)).toEqual([
+      "test-1",
+      "test-2",
+    ]);
+    expect(collectTurnFilePatches(logs, "design.md").map((s) => s.rows?.[0]?.text)).toEqual(["design-body"]);
   });
 
-  it("悬空调用判死不毒化：补丁超限丢失的前序调用不拖死后续串行配对（FR-02）", () => {
+  it("②回退同轨唯一悬置：完全无 id 的串行编辑轮仍各归其位（FR-02）", () => {
     const logs: AgentRunLogEntry[] = [
-      // call A 的补丁超 64KB 上限未附着（悬空）——后续 call B 到来即判死 A。
+      callLog({ toolUseId: null, tool: "Write", filePath: "design.md" }),
+      resultLog({ toolUseId: null, id: "r-d", patch: JSON.stringify([{ oldStart: 1, newStart: 1, lines: ["+d"] }]) }),
+      callLog({ toolUseId: null, tool: "Edit", filePath: "tests/x.test.ts" }),
+      resultLog({ toolUseId: null, id: "r-x", patch: JSON.stringify([{ oldStart: 2, newStart: 2, lines: ["+x"] }]) }),
+    ];
+    expect(collectTurnFilePatches(logs, "tests/x.test.ts").map((s) => s.rows?.[0]?.text)).toEqual(["x"]);
+    expect(collectTurnFilePatches(logs, "design.md").map((s) => s.rows?.[0]?.text)).toEqual(["d"]);
+  });
+
+  it("子代理轨道隔离：主/子代理交错且无 id 时不跨轨错配（FR-02 并发面）", () => {
+    const logs: AgentRunLogEntry[] = [
+      // 主代理 call A 悬置 → 子代理 call S（不同 parent_tool_use_id）→ 主代理 result A。
+      callLog({ toolUseId: null, tool: "Edit", filePath: "frontend/src/main.ts" }),
+      callLog({ toolUseId: null, tool: "Edit", filePath: "frontend/src/sub.ts", parentToolUseId: "tu-p" }),
+      resultLog({ toolUseId: null, id: "r-a", patch: JSON.stringify([{ oldStart: 1, newStart: 1, lines: ["+main"] }]) }),
+    ];
+    // 主轨唯一悬置 = A → 正确配 A；子轨的 S 不被主代理补丁吃掉。
+    expect(collectTurnFilePatches(logs, "frontend/src/main.ts").map((s) => s.rows?.[0]?.text)).toEqual(["main"]);
+    expect(collectTurnFilePatches(logs, "frontend/src/sub.ts")).toEqual([]);
+  });
+
+  it("同轨多个悬置（同执行体并行 tool_use）无法确证归属 → 诚实丢弃", () => {
+    const logs: AgentRunLogEntry[] = [
+      callLog({ toolUseId: null, tool: "Edit", filePath: "frontend/src/a.ts" }),
+      callLog({ toolUseId: null, tool: "Edit", filePath: "frontend/src/b.ts" }),
+      resultLog({ toolUseId: null, id: "r-amb", patch: JSON.stringify([{ oldStart: 1, newStart: 1, lines: ["+amb"] }]) }),
+    ];
+    expect(collectTurnFilePatches(logs, "frontend/src/a.ts")).toEqual([]);
+    expect(collectTurnFilePatches(logs, "frontend/src/b.ts")).toEqual([]);
+  });
+
+  it("悬空调用（补丁丢失）使同轨出现两个未消费调用 → 后续补丁诚实丢弃，不错配", () => {
+    const logs: AgentRunLogEntry[] = [
+      // call A 的补丁超 64KB 未附着（悬空）→ 后续 call B + result B 时同轨悬置 = [A,B]。
       callLog({ toolUseId: null, tool: "Edit", filePath: "frontend/src/lost.ts" }),
       callLog({ toolUseId: null, tool: "Edit", filePath: "frontend/src/b.ts" }),
       resultLog({ toolUseId: null, id: "r-b", patch: JSON.stringify([{ oldStart: 1, newStart: 1, lines: ["+b"] }]) }),
-      // 悬空判死后，后续串行编辑恢复正常就近配对（不被 lost.ts 的悬置卡死）。
-      callLog({ toolUseId: null, tool: "Edit", filePath: "frontend/src/a.ts" }),
-      resultLog({ toolUseId: null, id: "r-ok", patch: JSON.stringify([{ oldStart: 2, newStart: 2, lines: ["+ok"] }]) }),
     ];
-    expect(collectTurnFilePatches(logs, "frontend/src/a.ts").map((s) => s.rows?.[0]?.text)).toEqual(["ok"]);
-    expect(collectTurnFilePatches(logs, "frontend/src/b.ts").map((s) => s.rows?.[0]?.text)).toEqual(["b"]);
+    // 无法确证 B 的补丁归属 → 两文件都不展示（不把 B 的补丁挂到 lost.ts）。
+    expect(collectTurnFilePatches(logs, "frontend/src/b.ts")).toEqual([]);
     expect(collectTurnFilePatches(logs, "frontend/src/lost.ts")).toEqual([]);
   });
 
-  it("无 id 补丁不配给非编辑族调用（Bash 不入悬置面，悬置空诚实丢弃）", () => {
+  it("无 id 补丁不配给非编辑族调用（Bash 不入回退候选面，诚实丢弃）", () => {
     const logs: AgentRunLogEntry[] = [
       callLog({ toolUseId: null, tool: "Bash", filePath: null }),
       resultLog({ toolUseId: null, id: "r-bash", patch: JSON.stringify([{ oldStart: 1, newStart: 1, lines: ["+x"] }]) }),
     ];
-    // Bash 无 file_path 也非编辑族：悬置面空 → 丢弃（不猜归属）。
     expect(collectTurnFilePatches(logs, "frontend/src/a.ts")).toEqual([]);
   });
 });
