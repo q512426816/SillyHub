@@ -7702,3 +7702,48 @@ superseded_by：FR-app-workspace-pages-002
   confirmed_at: null
   source_change: 2026-10-23-askuser-dialog-draft
   status: active
+
+## FR-frontend-058 条目达到 200 条上限后，每次窗口滑动只平滑前进一条，位移不得累积越过内容边界
+变更：2026-10-23-marquee-blank-track-fix
+状态：active
+摘要：超过 200 条后继续新增；连续多次滑动
+全文：.sillyspec/changes/archive/2026-10-23-marquee-blank-track-fix/requirements.md#FR-01
+最近确认：d32d1a2b1f4f1d6bff5ad855aee08edf0e154678
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-23-marquee-blank-track-fix:flow:测试绑定FR-01
+  tests: frontend/src/components/daemon/__tests__/turn-live-marquee.test.tsx「窗口滑动目标回到 base，连续滑动不累积越界（FR-01）」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-23-marquee-blank-track-fix
+  status: active
+
+## FR-frontend-059 长会话持续新增事件时，跑马灯始终能显示最近条目，不再出现空白轨道
+变更：2026-10-23-marquee-blank-track-fix
+状态：active
+摘要：真实长会话
+全文：.sillyspec/changes/archive/2026-10-23-marquee-blank-track-fix/requirements.md#FR-02
+最近确认：d32d1a2b1f4f1d6bff5ad855aee08edf0e154678
+
+## FR-frontend-060 新增回归测试模拟 200→201 条滑动，断言轨道位移不越界；现有 23 用例通过
+变更：2026-10-23-marquee-blank-track-fix
+状态：active
+摘要：回归核验
+全文：.sillyspec/changes/archive/2026-10-23-marquee-blank-track-fix/requirements.md#FR-03
+最近确认：d32d1a2b1f4f1d6bff5ad855aee08edf0e154678
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-23-marquee-blank-track-fix:flow:测试绑定FR-03
+  tests: frontend/src/components/daemon/__tests__/turn-live-marquee.test.tsx「轨道速度随距离缓出，接近目标时减速（FR-01）」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-23-marquee-blank-track-fix
+  status: active

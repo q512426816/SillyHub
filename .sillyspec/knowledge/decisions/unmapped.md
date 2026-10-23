@@ -1662,3 +1662,11 @@ supersedes：D-005@v1
 锚点：未记录
 最近确认：dd0532e5d5ffdcb72e047c5a157a4bf4d4fa786a
 理由：答：最大风险是「裁剪失效感」——git 仓库里的技能目录不再被删，会话 agent 能看到（读到）全部仓库自带技能，超出会话勾选的技能面。定性：技能只是说明书文档，读取面放宽不改变工具权限面；且平台技能下线本就走「仓库提交」通道（2026-10-23 实证 b6f3114d9），daemon prune 对 git 仓的删除本就属于越权行为。缓解：`prune_skill_kept` 日志保留可观测。次风险：`git ls-files` 在超大仓的耗时——限定 pathspec `.claude/skills` 后输出量级为技能文件数（几十到几百行），15s 超时兜底，启动路径一次性可接受。 试过放弃的方案：①link 时打 marker 文件/命名约定——存量已 link 目录无 marker，需迁移清理，且 marker 本身又落在工作区（新污染），放弃；②workDir 是 git 仓则整体跳过 prune——判定太粗，daemon link 副本在 git 仓里（.gitignore 了 .claude/skills 的部署形态）也无法清理，放弃；③删除改移动到 daemon 回收站——仍改工作区，只解决可恢复不解决「不该动」，放弃；④把 `.claude/skills` 整体加 gitignore——动仓库契约、影响技能作为正式文件分发的既有形态，放弃。
+
+## D-unmapped-214@v1 设计期风险与放弃方案（底稿）
+状态：implemented
+变更：2026-10-23-marquee-blank-track-fix
+原编号：D-001@v1
+锚点：未记录
+最近确认：d32d1a2b1f4f1d6bff5ad855aee08edf0e154678
+理由：- 风险：offset 补偿瞬间若测量宽度为 0（字体未加载/隐藏容器），step 回退 208，可能有一次轻微跳动；已在 clamp 与 rAF 缓出下弱化。 - 放弃方案：① 每次滑动直接重置 offset=base（画面会瞬移一条，不流畅）；② 无限保留历史条目（DOM 无界增长）；③ 用 CSS 循环轨道（无法满足“只到最新不循环”）。

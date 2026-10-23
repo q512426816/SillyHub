@@ -1,0 +1,157 @@
+diff --git a/frontend/src/app/proto/session-live-marquee/page.tsx b/frontend/src/app/proto/session-live-marquee/page.tsx
+index 186421540..c1d971c57 100644
+--- a/frontend/src/app/proto/session-live-marquee/page.tsx
++++ b/frontend/src/app/proto/session-live-marquee/page.tsx
+@@ -159,7 +159,7 @@ const SCRIPT: ReadonlyArray<(_seq: number) => TurnSegment> = [
+ ];
+ 
+ function buildSegments(step: number): TurnSegment[] {
+-  const total = Math.min(step + 1, 60);
++  const total = Math.min(step + 1, 220);
+   const out: TurnSegment[] = [];
+   for (let i = 0; i < total; i += 1) {
+     const event = SCRIPT[i % SCRIPT.length]!;
+@@ -205,6 +205,9 @@ export default function SessionLiveMarqueeProtoPage() {
+   const [theme, setTheme] = useState<ThemeValue>("ai-native");
+   const [step, setStep] = useState(5);
+   const [running, setRunning] = useState(true);
++  // 「长会话」演示：强制重挂载跑马灯，模拟刷新后直接加载 200+ 历史事件
++  //（首次挂载应直接定位到最新，不空白）。
++  const [marqueeKey, setMarqueeKey] = useState(0);
+   const [startedAt, setStartedAt] = useState<number | null>(null);
+ 
+   useEffect(() => {
+@@ -223,7 +226,7 @@ export default function SessionLiveMarqueeProtoPage() {
+   useEffect(() => {
+     if (!running) return;
+     const timer = window.setInterval(() => {
+-      setStep((prev) => (prev >= 60 ? prev : prev + 1));
++      setStep((prev) => (prev >= 220 ? prev : prev + 1));
+     }, 1300);
+     return () => window.clearInterval(timer);
+   }, [running]);
+@@ -293,6 +296,16 @@ export default function SessionLiveMarqueeProtoPage() {
+             >
+               重置
+             </button>
++            <button
++              type="button"
++              onClick={() => {
++                setStep(209);
++                setMarqueeKey((prev) => prev + 1);
++              }}
++              className="rounded-full border px-2.5 py-1 text-muted-foreground transition-colors hover:text-foreground"
++            >
++              长会话（210 条）
++            </button>
+             <span className="ml-auto text-muted-foreground/70">
+               已注入 {entries.length} 条过程事件
+             </span>
+@@ -369,7 +382,7 @@ export default function SessionLiveMarqueeProtoPage() {
+                       <span aria-hidden className="sh-stream-caret" />
+                     </div>
+                   </div>
+-                  <TurnLiveMarquee entries={entries} />
++                  <TurnLiveMarquee key={marqueeKey} entries={entries} />
+                 </div>
+               </div>
+             )}
+diff --git a/frontend/src/components/daemon/__tests__/turn-live-marquee.test.tsx b/frontend/src/components/daemon/__tests__/turn-live-marquee.test.tsx
+index 061be947b..67cd2eea9 100644
+--- a/frontend/src/components/daemon/__tests__/turn-live-marquee.test.tsx
++++ b/frontend/src/components/daemon/__tests__/turn-live-marquee.test.tsx
+@@ -13,6 +13,7 @@ import {
+   deriveLiveMarqueeEntries,
+   formatMarqueeDuration,
+   marqueeSpeedForDistance,
++  resolveMarqueeTarget,
+   LIVE_MARQUEE_MAX_ENTRIES,
+ } from "@/components/daemon/turn-live-marquee";
+ import {
+@@ -192,6 +193,16 @@ describe("deriveLiveMarqueeEntries 纯函数（FR-01 / FR-03）", () => {
+     expect(marqueeSpeedForDistance(228)).toBeCloseTo(205.2, 5);
+     expect(marqueeSpeedForDistance(10_000)).toBe(1600);
+   });
++
++  it("窗口滑动目标回到 base，连续滑动不累积越界（FR-01）", () => {
++    const base = -40_800;
++    // 滑动：无论旧目标多负，都回到 base（修复前会在旧目标上继续减，直至轨道越界空白）。
++    expect(resolveMarqueeTarget(base, -41_008, 208)).toBe(base);
++    expect(resolveMarqueeTarget(base, base, 208)).toBe(base);
++    // 普通内容增长：只向更负推进，不回滚。
++    expect(resolveMarqueeTarget(base, -40_000, null)).toBe(base);
++    expect(resolveMarqueeTarget(base, -42_000, null)).toBe(-42_000);
++  });
+ });
+ 
+ describe("TurnLiveMarquee 连续轨道（FR-01 / FR-02 / FR-05）", () => {
+diff --git a/frontend/src/components/daemon/turn-live-marquee.tsx b/frontend/src/components/daemon/turn-live-marquee.tsx
+index dffea4b54..5b925efc5 100644
+--- a/frontend/src/components/daemon/turn-live-marquee.tsx
++++ b/frontend/src/components/daemon/turn-live-marquee.tsx
+@@ -71,6 +71,23 @@ export function marqueeSpeedForDistance(distance: number): number {
+   const d = Math.max(0, distance);
+   return Math.min(LIVE_MARQUEE_MAX_SPEED, Math.max(40, d * 0.9));
+ }
++
++/**
++ * 轨道目标位置（2026-10-23-marquee-blank-track-fix）：
++ *   - 达到条目上限后的窗口滑动（slideStep != null）：目标**回到 base**（最新条
++ *     贴右缘），禁止在旧目标上继续累减——否则长会话每来一条就再推一条宽度，
++ *     最终把整条轨道推出视口（只剩状态点与 LIVE）；
++ *   - 普通内容增长：只向更负推进，不回滚。
++ * 视觉连续由调用方补偿 offset 实现（滑动瞬间右移一条，再平滑滚回 base）。
++ */
++export function resolveMarqueeTarget(
++  base: number,
++  previousTarget: number,
++  slideStep: number | null,
++): number {
++  if (slideStep != null) return base;
++  return Math.min(previousTarget, base);
++}
+ /** 单条摘要截断长度（用户不需要看清全文，单行不撑破）。 */
+ const CLIP_LENGTH = 64;
+ 
+@@ -541,27 +558,32 @@ export const TurnLiveMarquee = memo(function TurnLiveMarquee({
+    * 首次测量直接定位（打开即看到最新），之后只向更负的方向推进，不回滚。
+    *
+    * @param slideByOne 达到条目上限后窗口滑动（淘汰最旧/追加最新）时为 true：
+-   *   轨道宽度不变但内容整体左移了一条，需额外推进一条宽度，让新条目进入
+-   *   视口——否则轨道会停在原处、最新事件永远看不见。
++   *   内容整体左移一条。先把 offset 右移一条抵消视觉跳变，再平滑滚回 base
++   *   （2026-10-23-marquee-blank-track-fix：目标禁止在旧值上累减，否则长会话
++   *   会把轨道永久推出视口变成空白条）。
+    */
+   const applyTarget = useCallback((slideByOne = false) => {
+     const viewport = viewportRef.current;
+     const track = trackRef.current;
+     if (!viewport || !track) return;
+     const base = Math.min(0, viewport.clientWidth - track.scrollWidth);
+-    // 目标单调不增：内容文本更新不该把已滚过的位置拉回来；窗口滑动时在
+-    // 上一次目标基础上再推进一条（不能回到 base，否则新条目会瞬间跳入）。
+-    let next = Math.min(targetRef.current, base);
++    let slideStep: number | null = null;
+     if (slideByOne) {
+       const firstItem = track.firstElementChild as HTMLElement | null;
+       const gap = Number.parseFloat(getComputedStyle(track).columnGap || "0") || 0;
+-      next -= (firstItem?.offsetWidth ?? 208) + gap;
++      slideStep = (firstItem?.offsetWidth ?? 208) + gap;
++      // DOM 内容整体左移一条 → offset 右移一条抵消（clamp ≤ 0），保持画面不跳；
++      // rAF 随后从补偿位置平滑滚回 base，每次滑动只前进一条、位移不累积。
++      offsetRef.current = Math.min(0, offsetRef.current + slideStep);
++      if (initializedRef.current) {
++        track.style.transform = `translate3d(${offsetRef.current}px, 0, 0)`;
++      }
+     }
+-    targetRef.current = next;
++    targetRef.current = resolveMarqueeTarget(base, targetRef.current, slideStep);
+     if (!initializedRef.current) {
+       initializedRef.current = true;
+-      offsetRef.current = next;
+-      track.style.transform = `translate3d(${next}px, 0, 0)`;
++      offsetRef.current = targetRef.current;
++      track.style.transform = `translate3d(${offsetRef.current}px, 0, 0)`;
+       setReady(true);
+     }
+     // target 更新是重启滚动的入口之一（此前停排时新目标到来要能再起排）。

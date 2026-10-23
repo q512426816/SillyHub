@@ -1,0 +1,42 @@
+tier: thin
+legacy_fallback: false
+substeps:
+  artifacts: done
+  ledger: done
+  patch: done
+  review: done
+  probes: done
+  distill: done
+  archive: done
+  events: done
+born_face: thin
+with_tasks: false
+review_force: null
+input: |-
+  修复跑马灯长会话空白
+
+  动机：真实长会话事件超过 200 条后，跑马灯轨道被持续推离视口，只剩状态点与 LIVE，内容空白。
+
+  成功标准：
+  - 条目达到 200 条上限后，每次窗口滑动只平滑前进一条，位移不得累积越过内容边界
+  - 长会话持续新增事件时，跑马灯始终能显示最近条目，不再出现空白轨道
+  - 新增回归测试模拟 200→201 条滑动，断言轨道位移不越界；现有 23 用例通过
+  - lint / typecheck 通过
+autopilot: false
+prestage_ack: true
+baseline_commit: 9807e295678028a9d3034a4037fb8a2c9a6a8f19
+updatedAt: '2026-10-23T06:25:32.832Z'
+cross_baselines:
+  sillyspec: c309979af71cebec54c124425bb059294db15ab0
+baseline_sha256: e318ddcc565c8ef363367dd0ae83eb4c2e08e16a3de169f646b4bd16d80ae16c
+spec_approved: true
+spec_approved_at: '2026-10-23T06:19:48.827Z'
+spec_approved_by: anon@DESKTOP-HJ0AM09
+spec_approved_channel: user-confirmed
+spec_attested_by: anon@DESKTOP-HJ0AM09
+batch_ticked: true
+gate_summary: >-
+  test: passed ← module[]+deps(jsx1)（7.3s）
+  结果：C:\Users\qinyi\IdeaProjects\multi-agent-platform\.sillyspec\.runtime\verify-runs\20261023062521\test-result.json｜lint:
+  skipped — 跳过原因：local.yaml 未配置 commands.lint（或标记 unavailable）。｜门文件 5 个
+
