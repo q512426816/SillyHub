@@ -13,6 +13,7 @@ import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { AskUserDialogCard } from "@/components/ask-user-dialog-card";
+import { ASKUSER_DRAFT_PREFIX } from "@/components/ask-user-dialog-draft";
 import type { SessionPermissionRequest } from "@/lib/daemon";
 
 // mock api 模块的 fetch 链路（拦截 useSession.getState + global fetch）
@@ -78,6 +79,12 @@ const MULTI_QUESTION_PAYLOAD = {
     },
   ],
 };
+
+// 2026-10-23-askuser-dialog-draft：作答草稿落 localStorage，用例间共用 request_id
+// "req-1" → 必须逐例清库，否则上一例的勾选/输入会被下一例 lazy initializer 读回。
+beforeEach(() => {
+  window.localStorage.clear();
+});
 
 describe("AskUserDialogCard", () => {
   beforeEach(() => {
@@ -778,3 +785,214 @@ describe("AskUserDialogCard", () => {
     });
     fetchMock.mockRestore();
   });
+
+/* ── 2026-10-23-askuser-dialog-draft：单选互斥 + 作答草稿持久化 ──────────────
+ *
+ * 用户报障：①单选问题勾选后还能输入、输入后还能勾选（应互斥）；②未提交的勾选
+ * 与输入刷新/切换会话后丢失（应保留，参考会话输入草稿方案）。
+ * 边界（用户裁决）：仅单选互斥，多选保持「可勾多项 + 可与输入合并」。 */
+
+const TWO_QUESTION_PAYLOAD = {
+  questions: [
+    {
+      question: "部署目标？",
+      header: "目标",
+      options: [{ label: "本地" }, { label: "远程" }],
+    },
+    {
+      question: "启用哪些功能？",
+      multiSelect: true,
+      options: [{ label: "同步" }, { label: "导入" }],
+    },
+  ],
+};
+
+const INPUT_PLACEHOLDER = "或手动输入（填写后以此内容作答）";
+const draftKey = (id: string) => `${ASKUSER_DRAFT_PREFIX}${id}`;
+
+/** 选项按钮（按 label 文本定位最近的 button）。 */
+function optionBtn(label: string): HTMLButtonElement {
+  return screen.getByText(label).closest("button") as HTMLButtonElement;
+}
+
+describe("AskUserDialogCard 单选互斥（FR-01 / FR-02）", () => {
+  beforeEach(() => {
+    window.localStorage.clear();
+  });
+
+  it("FR-01 勾选选项后手动输入框禁用，取消选择后恢复可用", () => {
+    render(
+      <AskUserDialogCard request={makeDialogRequest(SINGLE_QUESTION_PAYLOAD)} />,
+    );
+    const input = screen.getByPlaceholderText(INPUT_PLACEHOLDER);
+    expect(input).not.toBeDisabled();
+
+    fireEvent.click(screen.getByText("使用项目本地目录"));
+    expect(input).toBeDisabled();
+    expect(screen.getByText(/再点一次/)).toBeInTheDocument();
+
+    // 再点一次取消 → 输入框恢复可用。
+    fireEvent.click(screen.getByText("使用项目本地目录"));
+    expect(screen.getByPlaceholderText(INPUT_PLACEHOLDER)).not.toBeDisabled();
+    expect(screen.queryByText(/再点一次/)).toBeNull();
+  });
+
+  it("FR-01 手动输入非空后选项按钮禁用，清空后恢复可点", () => {
+    render(
+      <AskUserDialogCard request={makeDialogRequest(SINGLE_QUESTION_PAYLOAD)} />,
+    );
+    fireEvent.change(screen.getByPlaceholderText(INPUT_PLACEHOLDER), {
+      target: { value: "/data/rt" },
+    });
+    expect(optionBtn("使用项目本地目录")).toBeDisabled();
+    expect(optionBtn("使用用户临时目录")).toBeDisabled();
+    expect(screen.getByText(/清空输入框后可选择选项/)).toBeInTheDocument();
+
+    fireEvent.change(screen.getByPlaceholderText(INPUT_PLACEHOLDER), {
+      target: { value: "" },
+    });
+    expect(optionBtn("使用项目本地目录")).not.toBeDisabled();
+    expect(screen.queryByText(/清空输入框后可选择选项/)).toBeNull();
+  });
+
+  it("FR-01 空白字符不算「已输入」：只填空格不锁选项", () => {
+    render(
+      <AskUserDialogCard request={makeDialogRequest(SINGLE_QUESTION_PAYLOAD)} />,
+    );
+    fireEvent.change(screen.getByPlaceholderText(INPUT_PLACEHOLDER), {
+      target: { value: "   " },
+    });
+    expect(optionBtn("使用项目本地目录")).not.toBeDisabled();
+  });
+
+  it("FR-02 多选：可同时勾多项且输入框保持可用（不套用互斥禁用）", () => {
+    render(
+      <AskUserDialogCard request={makeDialogRequest(MULTI_QUESTION_PAYLOAD)} />,
+    );
+    fireEvent.click(screen.getByText("自动同步"));
+    fireEvent.click(screen.getByText("自动导入"));
+    const input = screen.getByPlaceholderText(INPUT_PLACEHOLDER);
+    expect(input).not.toBeDisabled();
+    fireEvent.change(input, { target: { value: "自定义" } });
+    // 输入非空后选项仍可点（多选不互斥）。
+    expect(optionBtn("自动同步")).not.toBeDisabled();
+    expect(
+      screen.getByRole("button", { name: /提交回答/ }),
+    ).not.toBeDisabled();
+  });
+
+  it("FR-02 多选提交答案 = 已勾选标签 ∪ 手动输入（去重）", async () => {
+    const fetchMock = vi
+      .spyOn(globalThis, "fetch")
+      .mockResolvedValue(
+        new Response(JSON.stringify({ accepted: true }), { status: 200 }),
+      );
+    render(
+      <AskUserDialogCard request={makeDialogRequest(MULTI_QUESTION_PAYLOAD)} />,
+    );
+    fireEvent.click(screen.getByText("自动同步"));
+    fireEvent.change(screen.getByPlaceholderText(INPUT_PLACEHOLDER), {
+      target: { value: "自定义功能" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: /提交回答/ }));
+
+    await waitFor(() => expect(fetchMock).toHaveBeenCalled());
+    const body = JSON.parse(
+      String((fetchMock.mock.calls[0]![1] as RequestInit).body),
+    ) as { dialog_result: { answers: { answer: string[] }[] } };
+    expect(body.dialog_result.answers[0]!.answer).toEqual([
+      "自动同步",
+      "自定义功能",
+    ]);
+    fetchMock.mockRestore();
+  });
+});
+
+describe("AskUserDialogCard 作答草稿持久化（FR-03 / FR-04）", () => {
+  beforeEach(() => {
+    window.localStorage.clear();
+  });
+
+  it("FR-03 未提交作答卸载后重挂载（刷新/切换会话同路径）原样恢复", async () => {
+    const request = makeDialogRequest(TWO_QUESTION_PAYLOAD);
+    const first = render(<AskUserDialogCard request={request} />);
+    fireEvent.click(screen.getByText("本地"));
+    const inputs = screen.getAllByPlaceholderText(INPUT_PLACEHOLDER);
+    // 第二个问题是多选 → 输入框可用；填自定义文本随草稿一起保留。
+    fireEvent.change(inputs[1]!, { target: { value: "灰度" } });
+    expect(window.localStorage.getItem(draftKey("req-1"))).toBeTruthy();
+    first.unmount();
+
+    // 重挂载（等同刷新页面 / 切走再切回）：已选与输入原样恢复。
+    render(<AskUserDialogCard request={request} />);
+    const restored = screen.getAllByPlaceholderText(INPUT_PLACEHOLDER);
+    expect(restored[1]).toHaveValue("灰度");
+    // 单选第一个问题：已选中「本地」→ 其输入框恢复为禁用态（互斥态一致）。
+    expect(restored[0]!).toBeDisabled();
+    expect(
+      screen.getByRole("button", { name: /提交回答/ }),
+    ).not.toBeDisabled();
+  });
+
+  it("FR-03 不同 request_id 的提问互不串台（新提问全新空白）", () => {
+    const first = render(
+      <AskUserDialogCard request={makeDialogRequest(SINGLE_QUESTION_PAYLOAD)} />,
+    );
+    fireEvent.click(screen.getByText("使用项目本地目录"));
+    first.unmount();
+
+    render(
+      <AskUserDialogCard
+        request={makeDialogRequest(SINGLE_QUESTION_PAYLOAD, {
+          request_id: "req-2",
+        })}
+      />,
+    );
+    expect(screen.getByPlaceholderText(INPUT_PLACEHOLDER)).not.toBeDisabled();
+    expect(
+      screen.getByRole("button", { name: /提交回答/ }),
+    ).toBeDisabled();
+  });
+
+  it("FR-04 提交成功后清除该提问草稿", async () => {
+    const fetchMock = vi
+      .spyOn(globalThis, "fetch")
+      .mockResolvedValue(
+        new Response(JSON.stringify({ accepted: true }), { status: 200 }),
+      );
+    render(
+      <AskUserDialogCard request={makeDialogRequest(SINGLE_QUESTION_PAYLOAD)} />,
+    );
+    fireEvent.click(screen.getByText("使用项目本地目录"));
+    expect(window.localStorage.getItem(draftKey("req-1"))).toBeTruthy();
+
+    fireEvent.click(screen.getByRole("button", { name: /提交回答/ }));
+    await waitFor(() =>
+      expect(window.localStorage.getItem(draftKey("req-1"))).toBeNull(),
+    );
+    fetchMock.mockRestore();
+  });
+
+  it("FR-04 撞 409 已被他人回答时清除该提问草稿", async () => {
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          code: "HTTP_409_DAEMON_DIALOG_ALREADY_RESOLVED",
+          message: "already answered",
+          request_id: "req-1",
+          details: { session_id: "s-1", request_id: "req-1" },
+        }),
+        { status: 409 },
+      ),
+    );
+    render(
+      <AskUserDialogCard request={makeDialogRequest(SINGLE_QUESTION_PAYLOAD)} />,
+    );
+    fireEvent.click(screen.getByText("使用项目本地目录"));
+    fireEvent.click(screen.getByRole("button", { name: /提交回答/ }));
+    await waitFor(() =>
+      expect(window.localStorage.getItem(draftKey("req-1"))).toBeNull(),
+    );
+    fetchMock.mockRestore();
+  });
+});

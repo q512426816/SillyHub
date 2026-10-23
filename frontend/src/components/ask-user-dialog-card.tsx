@@ -37,9 +37,14 @@
  *     「已回答」不带名，不崩。群聊聚合挂载归 task-11。
  */
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Check, HelpCircle, Minimize2 } from "lucide-react";
 
+import {
+  clearAskUserDraft,
+  readAskUserDraft,
+  writeAskUserDraft,
+} from "@/components/ask-user-dialog-draft";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -219,7 +224,20 @@ export function AskUserDialogCard({
   );
 
   // 每个问题一个独立选择态，key 为问题在数组中的下标（稳定）。
-  const [states, setStates] = useState<Record<number, QuestionState>>({});
+  // 2026-10-23-askuser-dialog-draft（FR-03）：lazy initializer 直接从 localStorage
+  // 读回未提交草稿 → 首帧即恢复（刷新 / 切会话回来无「先空后填」闪动）。键按
+  // request_id（一次提问一个 id）→ 新提问全新空白，旧草稿不会串台。
+  const [states, setStates] = useState<Record<number, QuestionState>>(() => {
+    const draft = readAskUserDraft(request.request_id);
+    if (!draft) return {};
+    const restored: Record<number, QuestionState> = {};
+    for (const [idx, st] of Object.entries(draft)) {
+      const n = Number(idx);
+      if (!Number.isInteger(n) || n < 0) continue;
+      restored[n] = { selected: st.selected, customText: st.customText };
+    }
+    return restored;
+  });
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   // ql-20260910-004：409 已被他人回答时的本地关闭态（父组件 answered prop 带
@@ -228,10 +246,33 @@ export function AskUserDialogCard({
 
   const getQState = (idx: number): QuestionState => states[idx] ?? emptyState();
 
+  // FR-04：已答关闭态（父组件 answered prop，或本地 409 alreadyAnswered）→ 清草稿。
+  // 群聊「先到先得」下后答者收到 answered 后本题已关闭，草稿不应再留存待重放。
+  useEffect(() => {
+    if (answered || alreadyAnswered) {
+      clearAskUserDraft(request.request_id);
+    }
+  }, [answered, alreadyAnswered, request.request_id]);
+
+  // FR-03：每次作答变化落盘草稿（不依赖卸载钩子——输入后立刻关页面也不丢）。
+  // 空 payload（无法解析）不写，避免制造无意义条目；孤儿条目由模块内 TTL prune
+  // 兜底回收（本 effect 每次写入顺带触发一次扫描）。
+  useEffect(() => {
+    if (questions.length === 0) return;
+    const snapshot: Record<string, QuestionState> = {};
+    for (const [idx, st] of Object.entries(states)) {
+      snapshot[idx] = st;
+    }
+    writeAskUserDraft(request.request_id, snapshot);
+  }, [states, questions.length, request.request_id]);
+
   const selectOption = (idx: number, q: DialogQuestion, label: string) => {
     if (submitting) return;
     setStates((prev) => {
       const cur = prev[idx] ?? emptyState();
+      // FR-01（单选互斥）：已填手动输入时选项不可勾选。UI 已 disabled，此处再守一道
+      // 防御（程序化事件 / 旧草稿残留态）。多选不参与互斥（FR-02）。
+      if (!q.multiSelect && cur.customText.trim() !== "") return prev;
       if (q.multiSelect) {
         const set = new Set(cur.selected);
         if (set.has(label)) set.delete(label);
@@ -305,6 +346,8 @@ export function AskUserDialogCard({
         undefined,
         dialogResult,
       );
+      // FR-04：提交成功 → 清掉本提问草稿（不靠 TTL 兜底，避免同提问重试时复活旧作答）。
+      clearAskUserDraft(request.request_id);
       // 成功送达 backend；permission_resolved SSE 到达后父组件移除本卡。
       onResolved?.(request.request_id, "allow");
     } catch (err) {
@@ -318,6 +361,8 @@ export function AskUserDialogCard({
         const details = (err.details ?? {}) as { answered_by?: unknown };
         const answeredBy =
           typeof details.answered_by === "string" ? details.answered_by : null;
+        // FR-04：已被他人回答 → 草稿一并清除（本题已关闭，重放会误导后答题者）。
+        clearAskUserDraft(request.request_id);
         setAlreadyAnswered({ answeredByName: null });
         onAlreadyResolved?.(request.request_id, answeredBy);
         setSubmitting(false);
@@ -503,6 +548,13 @@ export function AskUserDialogCard({
         )}
         {questions.map((q, idx) => {
           const st = getQState(idx);
+          // FR-01（单选互斥，用户裁决「仅单选」）：勾选与手动输入二选一。
+          // 互斥优先级「输入 > 选项」：旧草稿若两者同时存在，只锁选项、不锁输入——
+          // 避免两侧互锁导致用户无法继续（输入框可清空 → 选项解锁）。
+          const isSingle = !q.multiSelect;
+          const hasText = st.customText.trim() !== "";
+          const optionsLocked = isSingle && hasText;
+          const inputLocked = isSingle && st.selected.length > 0 && !hasText;
           return (
             <div
               key={`${idx}-${q.question.slice(0, 16)}`}
@@ -523,6 +575,16 @@ export function AskUserDialogCard({
                   </span>
                 )}
               </div>
+              {optionsLocked && (
+                <p className="text-[10px] text-amber-700">
+                  已填写自定义内容，清空输入框后可选择选项
+                </p>
+              )}
+              {inputLocked && (
+                <p className="text-[10px] text-muted-foreground">
+                  已选择选项，再点一次可取消并改为手动输入
+                </p>
+              )}
               <div className="space-y-1">
                 {q.options.map((opt) => {
                   const selected = st.selected.includes(opt.label);
@@ -530,7 +592,7 @@ export function AskUserDialogCard({
                     <div key={opt.label}>
                       <button
                         type="button"
-                        disabled={submitting}
+                        disabled={submitting || optionsLocked}
                         onClick={() => selectOption(idx, q, opt.label)}
                         className={cn(
                           "flex w-full items-start gap-2 rounded-md border px-2.5 py-1.5 text-left transition-colors disabled:cursor-not-allowed disabled:opacity-60",
@@ -569,12 +631,13 @@ export function AskUserDialogCard({
                     </div>
                   );
                 })}
-                {/* ql-013：常驻手动输入框——填写后以此内容作答（覆盖选项）。 */}
+                {/* ql-013：常驻手动输入框——填写后以此内容作答（覆盖选项）。
+                    FR-01：单选已勾选项时禁用（互斥），多选恒可用（FR-02）。 */}
                 <Input
                   placeholder="或手动输入（填写后以此内容作答）"
                   value={st.customText}
                   onChange={(e) => setCustomText(idx, e.target.value)}
-                  disabled={submitting}
+                  disabled={submitting || inputLocked}
                   className="h-8 text-xs"
                 />
               </div>
