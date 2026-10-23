@@ -1,0 +1,43 @@
+tier: thin
+legacy_fallback: false
+substeps:
+  artifacts: done
+  ledger: done
+  patch: done
+born_face: thin
+with_tasks: false
+review_force: null
+input: >-
+  会话首屏加载提速：补拉链不阻塞渲染+加载骨架屏
+
+
+  进入会话面板时轮次列表出现慢且加载中无动态指示。慢的根因：首屏自适应补拉链（底窗→probe→锚点轮直达→并行补8轮）串行阻塞首次渲染，大会话多等数秒。无指示根因：历史在飞时时间线渲染静态空态文案（如「XX
+  已就绪」），用户以为页面空白卡死。
+
+
+  成功标准：
+
+  - 历史加载在飞期间，时间线区域显示轮次骨架屏（动态加载指示），不再显示静态空态文案或空白
+
+  - 首屏轮次内容在底窗日志（400行）到达后立即渲染，不等 buildInitialWindow 补拉链完成；补拉结果到达后增量合并进时间线，翻页游标与「加载更早」语义不回退
+
+  - 真无轮次的空会话仍显示原空态文案，不误显骨架屏
+
+  - 既有测试不回归，新增加载态与分阶段渲染行为有测试覆盖
+autopilot: false
+prestage_ack: false
+baseline_commit: 0d1ba62747f6e46521919b37e3b44c678b7f675a
+updatedAt: '2026-10-23T07:22:43.330Z'
+cross_baselines:
+  sillyspec: 44d1ad75cc462ae18c49423c6b490bcc7a757e18
+baseline_sha256: 89ec2620c4bab87bc1ed057698fb2957a8472770e985d86f682d18cfd5f7ad99
+spec_approved: true
+spec_approved_at: '2026-10-23T06:52:15.492Z'
+spec_approved_by: anon@DESKTOP-HJ0AM09
+spec_approved_channel: user-confirmed
+spec_attested_by: anon@DESKTOP-HJ0AM09
+gate_summary: >-
+  test: passed ← module[]+deps(jsx4)（8.9s）
+  结果：C:\Users\qinyi\IdeaProjects\multi-agent-platform\.sillyspec\.runtime\verify-runs\20261023072231\test-result.json｜lint:
+  skipped — 跳过原因：local.yaml 未配置 commands.lint（或标记 unavailable）。｜门文件 12 个
+
