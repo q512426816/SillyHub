@@ -9,6 +9,7 @@ from fastapi import APIRouter, Depends, Path, Query, Request, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.auth_deps import get_current_user, require_permission_any
+from app.core.client_ip import client_ip_from_request as _client_ip_from_request
 from app.core.config import Settings, get_settings
 from app.core.db import get_session
 from app.core.errors import ApiKeyNotFound, AuthInvalidCredentials, LoginCaptchaRequired
@@ -46,19 +47,12 @@ SettingsDep = Annotated[Settings, Depends(get_settings)]
 
 
 def _client_ip(request: Request) -> str | None:
-    """客户端 IP:nginx 反代下取 X-Forwarded-For 最右段(可信代理追加的末跳),直连回退 client.host。
+    """客户端 IP（2026-10-23-session-network-context task-04 纯重构：逻辑迁 app/core/client_ip.py 共享工具）。
 
-    ⚠️ 2026-08-20 审计 BS-3:原实现取最左段(客户端自报可伪造,换假 IP 即绕过
-    登录限流/失败计数/验证码)。nginx ``$proxy_add_x_forwarded_for`` 是**追加**语义,
-    最右段才是离我们最近的可信代理实际看到的来源 IP,伪造只能影响左侧历史段。
-    残余风险:无反代直连时攻击者仍可自报整条 XFF(部署拓扑含 nginx 时不成立)。
+    语义不变：nginx 反代下取 X-Forwarded-For 最右段(可信代理追加的末跳,2026-08-20
+    审计 BS-3),直连回退 client.host。本包装保留供模块内既有调用点零改动。
     """
-    xff = request.headers.get("x-forwarded-for")
-    if xff:
-        segments = [s.strip() for s in xff.split(",") if s.strip()]
-        if segments:
-            return segments[-1]
-    return request.client.host if request.client else None
+    return _client_ip_from_request(request)
 
 
 def _client_metadata(request: Request) -> tuple[str | None, str | None]:
