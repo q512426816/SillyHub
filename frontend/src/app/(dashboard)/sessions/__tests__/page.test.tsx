@@ -1873,7 +1873,10 @@ describe("SessionPanel 加载更早消息与会话内搜索（quick）", () => {
     await selectDefaultSession();
 
     expect(await screen.findByText("首屏应可见的提问")).toBeTruthy();
-    expect(mocks.getSessionRunLogs).toHaveBeenCalledWith("s-1", "r-cur");
+    // 首屏补拉携带 AbortSignal（切会话/卸载即取消，评审 P2）。
+    expect(mocks.getSessionRunLogs).toHaveBeenCalledWith("s-1", "r-cur", {
+      signal: expect.any(AbortSignal),
+    });
     // 自适应在首屏内完成——不触发「加载更早」翻页请求。
     expect(
       mocks.getAgentSessionLogs.mock.calls.filter(
@@ -1882,7 +1885,7 @@ describe("SessionPanel 加载更早消息与会话内搜索（quick）", () => {
     ).toHaveLength(0);
   });
 
-  it("首屏自适应：窗口已覆盖 2 轮且起点轮完整 → 不发起单轮直达（FR-02）", async () => {
+  it("首屏自适应：已到会话开头且起点轮完整 → 不发起单轮直达（FR-02）", async () => {
     const base = [
       ...Array.from({ length: 200 }, (_, i) =>
         quickLog(`q-r1-${i}`, "r-old", "stdout", `早期输出 ${i}`, "2026-08-15T07:00:00Z"),
@@ -1892,6 +1895,11 @@ describe("SessionPanel 加载更早消息与会话内搜索（quick）", () => {
       ),
     ];
     mocks.getAgentSessionLogs.mockResolvedValueOnce(base);
+    // 两轮即会话全部：底窗起点轮（r-old）已是第一轮 → 到头，不再向前补拉。
+    mocks.listSessionRuns.mockResolvedValue([
+      { id: "r-cur", created_at: "2026-08-15T08:00:00Z" },
+      { id: "r-old", created_at: "2026-08-15T07:00:00Z" },
+    ] as unknown as SessionRunRead[]);
 
     renderPage();
     await selectDefaultSession();

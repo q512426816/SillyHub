@@ -1287,13 +1287,20 @@ export function SessionPanelPage({
         if (cancelled) return;
         let windowLogs = logs;
         let windowCursor: AgentRunLogEntry | null = null;
+        // 评审 P2：首屏补拉挂 AbortSignal——切会话/卸载时立即取消在途请求链，
+        // 不让旧会话的补拉继续白跑（结果仍由下方 cancelled 守卫丢弃）。
+        const windowAbort = new AbortController();
+        initialAbortRef.current = windowAbort;
         try {
           const adaptive = await buildInitialWindow({
             baseLogs: logs,
             runs: runsForWindow,
             probeEarlier: (oldest) =>
-              probeSessionLogBefore(sessionId, oldest.timestamp, oldest.id),
-            fetchRunLogs: (runId) => getSessionRunLogs(sessionId, runId),
+              probeSessionLogBefore(sessionId, oldest.timestamp, oldest.id, {
+                signal: windowAbort.signal,
+              }),
+            fetchRunLogs: (runId) =>
+              getSessionRunLogs(sessionId, runId, { signal: windowAbort.signal }),
           });
           if (cancelled) return;
           windowLogs = adaptive.logs;
@@ -1872,6 +1879,9 @@ export function SessionPanelPage({
 
     return () => {
       cancelled = true;
+      // 评审 P2：取消首屏自适应补拉的在途请求链（切会话/卸载即停）。
+      initialAbortRef.current?.abort();
+      initialAbortRef.current = null;
       streamRef.current?.close();
       streamRef.current = null;
     };
@@ -1915,6 +1925,8 @@ export function SessionPanelPage({
   const sessionEpochRef = useRef(0);
   /** 在途「加载更早」请求的取消器（换会话时 abort，省在途带宽）。 */
   const historyAbortRef = useRef<AbortController | null>(null);
+  /** 首屏自适应补拉的取消器（切会话/卸载时 abort，评审 P2）。 */
+  const initialAbortRef = useRef<AbortController | null>(null);
   // ── task-04（2026-09-08-session-turn-nav / FR-04 FR-05 / R-02）：跳转链路 refs ──
   /** 跳转翻页期间抑制触顶自动加载（R-02：防跳转定位滚动与触顶加载竞争）。
    *  仅 handleJumpToTurn 以 try/finally 置位/恢复——任何异常路径不得永久抑制。 */

@@ -12,9 +12,10 @@
  *   1. 底窗仍是最近 HISTORY_PAGE_SIZE 行（保持既有请求与翻页游标口径）；
  *   2. 若底窗最旧行所在轮被截断（紧邻更早一行同 run），直达拉该轮并与底窗行
  *      合并去重——直达 ASC 上限可能丢尾部，合并而非替换可保证窗口段不丢；
- *   3. 若底窗覆盖轮数不足 INITIAL_WINDOW_MIN_TURNS，从更早轮向前补，直到满足
- *      轮数下限、预算耗尽（INITIAL_WINDOW_BUDGET_LOGS）或单轮直达触达
- *      RUN_LOGS_MAX（可能截断，停而不采纳，避免轮间留洞）。
+ *   3. 从更早轮向前**并行**补最多 INITIAL_WINDOW_MAX_RUNS 个候选轮（一个
+ *      RTT 批量，避免短轮会话串行数百次请求），按时间顺序累加采纳，直到
+ *      预算耗尽（INITIAL_WINDOW_BUDGET_LOGS）、单轮直达触达 RUN_LOGS_MAX
+ *      （可能截断，停而不采纳，避免轮间留洞）或到达会话开头。
  * 小会话（日志不足一页）原样返回，天然全量。
  *
  * 纯编排：网络请求由调用方注入（fetchRunLogs / probeEarlier），便于单测与降级。
@@ -24,15 +25,15 @@ import type { AgentRunLogEntry } from "@/lib/agent";
 import type { SessionRunRead } from "@/lib/daemon/sessions";
 import { HISTORY_PAGE_SIZE } from "./turn-state";
 
-/**
- * 首屏覆盖轮数的语义下限（对齐 deepseek-harness 的 minTurns=2）。预算允许时
- * 会继续向前补到全量；预算/单轮上限不足时以硬上限为准（评审 P1：不做「2 轮
- * 即停」的额外截断）。
- */
-export const INITIAL_WINDOW_MIN_TURNS = 2;
-
 /** 首屏合并后日志行预算（含底窗；超预算停止向前补拉）。 */
 export const INITIAL_WINDOW_BUDGET_LOGS = 3000;
+
+/**
+ * 首屏单次向前补拉的候选轮数上限（并行一个 RTT 批量）。防「短轮会话」按行
+ * 预算仍发起数百次串行请求（评审 P2，2026-10-23）；未覆盖的更早轮照旧走
+ * 「加载更早消息」。
+ */
+export const INITIAL_WINDOW_MAX_RUNS = 8;
 
 /** 单轮直达端点上限（后端 _SESSION_RUN_LOGS_MAX=2000；触达即可能截断）。 */
 export const RUN_LOGS_MAX = 2000;
@@ -46,9 +47,10 @@ export interface InitialWindowDeps {
   probeEarlier: (_oldest: AgentRunLogEntry) => Promise<AgentRunLogEntry[]>;
   /** 单轮直达（{ runId } 升序，上限 RUN_LOGS_MAX）。 */
   fetchRunLogs: (_runId: string) => Promise<AgentRunLogEntry[]>;
-  /** 测试可覆盖的预算参数（缺省用模块常量）。 */
+  /** 测试可覆盖的预算/轮数参数（缺省用模块常量）。 */
   pageSize?: number;
   budget?: number;
+  maxRuns?: number;
 }
 
 export interface InitialWindowResult {
@@ -121,6 +123,7 @@ export async function buildInitialWindow(
 ): Promise<InitialWindowResult> {
   const pageSize = deps.pageSize ?? HISTORY_PAGE_SIZE;
   const budget = deps.budget ?? INITIAL_WINDOW_BUDGET_LOGS;
+  const maxRuns = deps.maxRuns ?? INITIAL_WINDOW_MAX_RUNS;
   const { baseLogs, runs, probeEarlier, fetchRunLogs } = deps;
 
   // 不足一页 = 首屏已是全量历史（既有 hasEarlier 口径），无需自适应。
@@ -164,7 +167,8 @@ export async function buildInitialWindow(
     }
   }
 
-  // ── 2) 持续向前补更早轮，直到预算/单轮上限/到头 ────────────────────────
+  // ── 2) 向前补更早轮：最多 maxRuns 个候选并行拉取（一个 RTT 批量）， ──────
+  //      再按时间顺序累加采纳，直到预算/单轮上限/到头（评审 P2：限制请求量）。
   const earlierRuns: AgentRunLogEntry[][] = [];
   const covered = new Set(baseByRun.keys());
   if (runs !== null && runs.length > 0) {
@@ -174,21 +178,29 @@ export async function buildInitialWindow(
     );
     const anchorIdx = runsAsc.findIndex((r) => r.id === oldest.run_id);
     if (anchorIdx > 0) {
-      for (let i = anchorIdx - 1; i >= 0; i -= 1) {
+      const candidates: SessionRunRead[] = [];
+      for (let i = anchorIdx - 1; i >= 0 && candidates.length < maxRuns; i -= 1) {
         const run = runsAsc[i]!;
         if (covered.has(run.id)) continue;
-        let full: AgentRunLogEntry[];
-        try {
-          full = await fetchRunLogs(run.id);
-        } catch {
-          break;
-        }
+        candidates.push(run);
+      }
+      const fetched = await Promise.all(
+        candidates.map(async (run) => {
+          try {
+            return { full: await fetchRunLogs(run.id) };
+          } catch {
+            // 取消（AbortSignal）/网络失败：停止后续采纳（保守不留洞）。
+            return { full: null as AgentRunLogEntry[] | null };
+          }
+        }),
+      );
+      for (const { full } of fetched) {
+        if (full === null) break;
         if (full.length === 0) break;
         // 触达单轮上限 = 可能截断（ASC 丢尾部）；不采纳，避免轮间留无法回补的洞。
         if (full.length >= RUN_LOGS_MAX) break;
         if (mergedCount + full.length > budget) break;
         earlierRuns.push(full);
-        covered.add(run.id);
         mergedCount += full.length;
         extended = true;
       }

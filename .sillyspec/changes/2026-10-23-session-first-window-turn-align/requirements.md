@@ -8,7 +8,7 @@ created_at: 2026-10-23T03:00:27.832Z
 
 ### FR-01: 首屏加载后，窗口最旧行所在轮若被窗口截断，自动补拉该轮全量日志并装配，保证该轮 prompt 用户消息气泡在场
 
-- 首屏历史加载**必须**由「固定 400 行硬窗口」改为「轮次对齐 + 预算自适应」：窗口最旧行所在轮被截断时**必须**补拉该轮（与窗口行合并去重，不删窗口已有行）；首屏**必须**至少覆盖最近 2 个轮次，小会话（合并后总行数不超过预算）**必须**全量显示；仅当超过预算（3000 行）或更早轮无法完整拉取时才停止向前，并保留顶部「加载更早消息」入口。设计对齐 deepseek-harness 的「最小消息数 + 最小轮数 + 硬上限」自适应分页语义（其首屏为 50 条消息 / 2 轮 / 500 条消息上限）。
+- 首屏历史加载**必须**由「固定 400 行硬窗口」改为「轮次对齐 + 预算自适应」：窗口最旧行所在轮被截断时**必须**补拉该轮（与窗口行合并去重，不删窗口已有行）；小会话（合并后总行数不超过预算）**必须**全量显示；向前补拉**必须**受三个硬上限约束——预算 3000 行、单轮直达 2000 行、单次最多 8 个更早轮（候选并行拉取，避免短轮会话串行数百次请求）；到达会话开头、预算耗尽或轮数上限后**必须**停止，并保留顶部「加载更早消息」入口。设计对齐 deepseek-harness 的「最小消息数 + 最小轮数 + 硬上限」自适应分页语义（其首屏为 50 条消息 / 2 轮 / 500 条消息上限）。
 
 #### 场景：单轮超窗口全量显示
 
@@ -24,13 +24,13 @@ Then 补全最新轮并向前覆盖到上一完整轮，首屏至少显示最近
 
 ### FR-02: 已完整落在窗口内的轮次装配结果不变，零回归
 
-- 窗口起点轮完整且最近 2 轮均已覆盖时，**禁止**额外发起直达补拉；装配结果**必须**与现状逐字段一致。
+- 已完整落在窗口内的轮次**禁止**重复直达补拉，其装配结果**必须**与改动前逐字段一致；向前补更早轮**必须**在到达会话开头、预算耗尽或触达单次 8 轮上限时停止，停止后**禁止**再发起任何直达请求（已到头的会话零额外请求）。
 
 #### 场景：窗口已满足自适应条件
 
-Given 首屏窗口已完整覆盖最近 2 轮且起点轮未被截断
+Given 首屏窗口起点轮完整且起点轮已是会话第一轮
 When 首屏加载完成
-Then 不发起额外 `{ runId }` 直达拉取，turns 与改动前一致
+Then 不发起任何 `{ runId }` 直达拉取，turns 与改动前一致
 
 ### FR-03: 直达拉取存在上限截断时按既有 okRuns 采纳闸降级，不静默丢窗口段最新内容
 
@@ -57,8 +57,9 @@ Then 全部通过且零类型错误
 FR-01: frontend/src/app/(dashboard)/sessions/__tests__/page.test.tsx「首屏自适应：单轮日志超窗口 → 补全整轮，轮首用户消息进入首屏（FR-01）」
 FR-01: frontend/src/components/daemon/session-panel/__tests__/initial-window.test.ts「小会话总行数不超预算 → 持续向前补到全量（评审 P1：不做 2 轮即停）」
 FR-01: frontend/src/components/daemon/session-panel/__tests__/initial-window.test.ts「多轮窗口起点截断 → 补全该轮并向前覆盖最近 2 轮（FR-01）」
-FR-02: frontend/src/app/(dashboard)/sessions/__tests__/page.test.tsx「首屏自适应：窗口已覆盖 2 轮且起点轮完整 → 不发起单轮直达（FR-02）」
-FR-02: frontend/src/components/daemon/session-panel/__tests__/initial-window.test.ts「窗口已覆盖最近 2 轮且起点轮完整 → 不发起直达补拉（FR-02）」
+FR-02: frontend/src/app/(dashboard)/sessions/__tests__/page.test.tsx「首屏自适应：已到会话开头且起点轮完整 → 不发起单轮直达（FR-02）」
+FR-02: frontend/src/components/daemon/session-panel/__tests__/initial-window.test.ts「已到会话开头且窗口起点轮完整 → 不发起直达补拉（FR-02）」
+FR-02: frontend/src/components/daemon/session-panel/__tests__/initial-window.test.ts「向前补拉受轮数上限约束 → 只并行拉最近 maxRuns 个更早轮（评审 P2 请求量）」
 FR-03: frontend/src/components/daemon/session-panel/__tests__/initial-window.test.ts「直达触达 2000 上限 → 与窗口行合并去重，不丢窗口尾部（FR-03）」
 FR-03: frontend/src/components/daemon/session-panel/__tests__/initial-window.test.ts「向前补更早轮触达单轮上限 → 停止且不采纳该轮（避免轮间留洞，FR-03）」
 FR-03: frontend/src/app/(dashboard)/sessions/__tests__/page.test.tsx「满页（400 条）→ 触顶自动加载更早 prepend + 加载提示；到头后触顶不再请求」（hasEarlier 保持为真的既有翻页回归）

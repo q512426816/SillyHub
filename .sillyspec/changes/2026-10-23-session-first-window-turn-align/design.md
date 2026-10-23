@@ -14,7 +14,7 @@ created_at: 2026-10-23T03:00:27.832Z
 
 动了哪些函数/端点/命令/文件格式？对外可见的签名或行为变化是什么（含「无」的说明）？
 
-无新增端点、无后端签名变更。复用既有 `getAgentSessionLogs(sessionId, { limit, slim })`、`getAgentSessionLogs(sessionId, { before, beforeId, limit, slim })`、`getAgentSessionLogs(sessionId, { runId, slim })` 与 `listSessionRuns(sessionId)`。前端新增 `session-panel/initial-window.ts` 纯编排模块（fetch 注入、可单测）与首屏窗口常量（预算行数、最小轮数）；后端响应结构零变化。
+无新增端点、无后端签名变更。复用既有 `getAgentSessionLogs(sessionId, { limit, slim })`、`getAgentSessionLogs(sessionId, { before, beforeId, limit, slim })`、`getAgentSessionLogs(sessionId, { runId, slim })` 与 `listSessionRuns(sessionId)`。前端新增 `session-panel/initial-window.ts` 纯编排模块（fetch 注入、可单测）与首屏窗口常量（预算行数、单次补拉轮数上限 8）；`probeSessionLogBefore` / `getSessionRunLogs` 均支持 AbortSignal；后端响应结构零变化。
 
 ## 边界与并发（盲维四问——每问必答，答不了即设计缺口）
 
@@ -28,7 +28,7 @@ created_at: 2026-10-23T03:00:27.832Z
 
 3. 切换/生命周期：会话、请求或变更中途切换/中断时状态是否安全？
 
-安全。补拉前后校验 `cancelled`；切换会话时 effect 重置 `turnState` 并关闭旧流，旧响应因 `cancelled` 不落地。补拉失败（runs 快照失败、直拉失败、直达截断）均降级回底窗装配，不阻断建流；游标与 `hasEarlier` 在降级路径保持原语义。
+安全。补拉前后校验 `cancelled`；首屏补拉链挂 `AbortSignal`，切换会话/卸载时 effect cleanup 立即 abort 在途请求（不再白跑到链尾），旧响应因 `cancelled` 不落地。补拉失败（runs 快照失败、直拉失败、直达截断、abort）均降级回底窗装配，不阻断建流；游标与 `hasEarlier` 在降级路径保持原语义。
 
 4. 作用域：跨工作区/跨仓/多实例时数据会不会串台？
 
@@ -38,7 +38,7 @@ created_at: 2026-10-23T03:00:27.832Z
 
 本方案最大的风险是什么？试过但放弃的方案及放弃理由？
 
-最大风险是首屏多一次 runs 快照与至多 2~3 次单轮直达拉取（slim 截断传输），长会话首屏延迟增加一次 RTT 量级；预算 3000 行与单轮 2000 行双上限把最坏传输量锁死。直达 ASC 截断丢尾部的问题用「与窗口行合并去重」规避，新增更早轮只在完整时采纳，避免轮间留洞。放弃方案：① 直接调大 `HISTORY_PAGE_SIZE`——仍会在大轮上复现且无轮对齐；② 后端改日志接口做服务端自适应分页——最优雅但改动面跨前后端、影响所有消费方，留待后续；③ 首屏全量加载所有轮次——长会话传输不可控（500 轮 × 数千行）。
+最大风险是首屏多一次 runs 快照与至多 9 次单轮直达拉取（1 次截断轮 + 最多 8 个更早轮候选**并行**，一个 RTT 批量；slim 截断传输）；预算 3000 行、单轮 2000 行、单次 8 轮三上限把最坏请求量与传输量同时锁死，短轮会话不会串行发数百次请求。切会话/卸载经 AbortSignal 立即取消在途补拉链。直达 ASC 截断丢尾部的问题用「与窗口行合并去重 + 游标不前移」规避，新增更早轮只在完整时采纳，避免轮间留洞。放弃方案：① 直接调大 `HISTORY_PAGE_SIZE`——仍会在大轮上复现且无轮对齐；② 后端改日志接口做服务端自适应分页——最优雅但改动面跨前后端、影响所有消费方，留待后续；③ 首屏全量加载所有轮次——长会话传输不可控（500 轮 × 数千行）。
 
 ## 文件变更清单
 

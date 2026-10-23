@@ -1,7 +1,7 @@
 /**
  * 2026-10-23-session-first-window-turn-align：首屏自适应窗口编排单测。
- * 覆盖 FR-01（截断轮补全 + 最小 2 轮 / 小会话全量）、FR-02（已满足不补拉）、
- * FR-03（直达上限截断安全合并、更早轮不采纳）。
+ * 覆盖 FR-01（截断轮补全 + 小会话全量）、FR-02（已到会话开头不补拉）、
+ * FR-03（直达上限截断安全合并、更早轮不采纳、游标不前进）。
  */
 
 import { describe, expect, it, vi } from "vitest";
@@ -10,7 +10,7 @@ import type { SessionRunRead } from "@/lib/daemon/sessions";
 import {
   buildInitialWindow,
   INITIAL_WINDOW_BUDGET_LOGS,
-  INITIAL_WINDOW_MIN_TURNS,
+  INITIAL_WINDOW_MAX_RUNS,
   RUN_LOGS_MAX,
 } from "../initial-window";
 
@@ -111,7 +111,7 @@ describe("buildInitialWindow", () => {
     expect(result.logs.at(-1)?.run_id).toBe("r2");
   });
 
-  it("窗口已覆盖最近 2 轮且起点轮完整 → 不发起直达补拉（FR-02）", async () => {
+  it("已到会话开头且窗口起点轮完整 → 不发起直达补拉（FR-02）", async () => {
     const base = [...makeLogs("r1", "a", 8000, 200), ...makeLogs("r2", "b", 9000, 200)];
     const fetchRunLogs = vi.fn();
     const result = await buildInitialWindow({
@@ -195,6 +195,34 @@ describe("buildInitialWindow", () => {
     expect(result.cursorLog?.id).toBe("r1-0");
   });
 
+  it("向前补拉受轮数上限约束 → 只并行拉最近 maxRuns 个更早轮（评审 P2 请求量）", async () => {
+    // 10 轮 × 100 行；底窗覆盖 r7-r10，向更早的 r6/r5/r4 补（maxRuns=3），r3 及更早不拉。
+    const runIds = Array.from({ length: 10 }, (_, i) => `r${i + 1}`);
+    const fullByRun = new Map(
+      runIds.map((id, idx) => [id, makeLogs(id, id, 6000 + idx * 100, 100)]),
+    );
+    const base = [...fullByRun.values()].flat().slice(-400);
+    const fetchRunLogs = vi.fn(async (runId: string) => fullByRun.get(runId) ?? []);
+    const result = await buildInitialWindow({
+      baseLogs: base,
+      runs: [...runIds]
+        .reverse()
+        .map((id) => makeRun(id, `2026-10-23T${String(runIds.indexOf(id)).padStart(2, "0")}:00:00Z`)),
+      probeEarlier: vi.fn().mockResolvedValue([]),
+      fetchRunLogs,
+      maxRuns: 3,
+    });
+
+    expect(fetchRunLogs).toHaveBeenCalledTimes(3);
+    expect(fetchRunLogs.mock.calls.map(([id]) => id)).toEqual(["r6", "r5", "r4"]);
+    const coveredRuns = new Set(result.logs.map((l) => l.run_id));
+    for (const id of ["r4", "r5", "r6", "r7", "r8", "r9", "r10"]) {
+      expect(coveredRuns.has(id)).toBe(true);
+    }
+    expect(coveredRuns.has("r3")).toBe(false);
+    expect(result.logs).toHaveLength(700);
+  });
+
   it("预算耗尽 → 停止向前补拉（常量口径）", async () => {
     const base = makeLogs("r2", "b2", 9000, 400);
     const fullR2 = [...makeLogs("r2", "e2", 8900, 100), ...base];
@@ -217,6 +245,6 @@ describe("buildInitialWindow", () => {
     expect(result.logs.every((l) => l.run_id === "r2")).toBe(true);
     // 常量本身仍是 3000（防误改）。
     expect(INITIAL_WINDOW_BUDGET_LOGS).toBe(3000);
-    expect(INITIAL_WINDOW_MIN_TURNS).toBe(2);
+    expect(INITIAL_WINDOW_MAX_RUNS).toBe(8);
   });
 });
