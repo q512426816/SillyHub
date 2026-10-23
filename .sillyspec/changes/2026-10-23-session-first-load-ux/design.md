@@ -63,5 +63,8 @@ created_at: 2026-10-23T06:45:37.494Z
 | --- | --- | --- |
 | 修改 | frontend/src/components/daemon/session-panel/session-panel-page.tsx | establish 两段化渲染 + initialHistoryLoading state + 补拉增量合并 + TurnTimeline 传 prop |
 | 修改 | frontend/src/components/daemon/turn-timeline.tsx | 新增可选 historyLoading prop + 骨架屏分支 |
+| 新增 | frontend/src/components/daemon/session-panel/initial-window-merge.ts | 首屏窗口增量合并纯函数 buildInitialWindowMerge |
 | 新增 | frontend/src/components/daemon/__tests__/turn-timeline-history-loading.test.tsx | FR-01/FR-03 骨架屏与空态测试 |
+| 新增 | frontend/src/components/daemon/session-panel/__tests__/initial-window-merge.test.ts | 增量合并纯函数四形态单测 |
 | 新增 | frontend/src/components/daemon/session-panel/__tests__/session-first-load-staged.test.tsx | FR-02 分阶段渲染测试 |
+| 新增 | .sillyspec/changes/2026-10-23-session-first-load-ux/visual-evidence.md | 视觉证据与对照说明 |
