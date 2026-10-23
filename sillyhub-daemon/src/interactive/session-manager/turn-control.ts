@@ -212,23 +212,43 @@ export async function inject(
   // "session not in running turn"（30 分钟级封锁，turn 真正结束才恢复）。翻转时
   // 记 staleRunResetAt 且不清 currentRunId（正常 result 收尾才清）：写通道守卫据此
   // 在宽限窗内放行（见 _writeChannelGuardDeny）。
+  //
+  // 2026-10-23-watchdog-steering-guard FR-01：backend mid-turn steering 复用活跃
+  // run 的 run_id（不建新 run，见 backend session/service/control.py）。同 runId
+  // 的 inject 是给正在执行的轮追加输入，不是新轮启动：不得 stale-reset（会把活轮
+  // 翻 active），也不得布防看门狗（看门狗只服务「新 run 从未启动」形态）。
+  const sameRunInject = !!state.currentRunId && state.currentRunId === runId;
+  // FR-02：静默基准取「最后一次轮内事件」——lastActiveAt 只在 inject/result/
+  // interrupt 更新，单用它等于按「本轮开始多久」判 stale，刚产过事件的长 turn
+  // 会被误翻（事故 15:32:24：5 秒前还有工具结果仍判 stale）。
+  const lastTurnActivityAt = Math.max(
+    state.lastActiveAt,
+    state.lastTurnEventAt ?? 0,
+  );
   if (
+    !sameRunInject &&
     state.status === 'running' &&
-    Date.now() - state.lastActiveAt > 60_000
+    Date.now() - lastTurnActivityAt > 60_000
   ) {
     // eslint-disable-next-line no-console
     console.warn(
       '[session-manager] inject: stale running state detected (>60s no result), ' +
         'resetting to active. Possible backend restart while turn was running. ' +
         '(write-channel grace armed: staleRunResetAt recorded; quiet long turns stay writable)',
-      { sessionId, lastActiveAt: state.lastActiveAt },
+      {
+        sessionId,
+        lastActiveAt: state.lastActiveAt,
+        lastTurnEventAt: state.lastTurnEventAt ?? null,
+      },
     );
     state.status = 'active';
     state.staleRunResetAt = Date.now();
     // 清理可能挂起的 pending 计数（旧 turn 的排队消息已无意义）。
     mgr._pendingInjectCount.delete(sessionId);
   }
-  const wasRunningBeforeInject = state.status === 'running';
+  // 同 runId 注入恒按「追加输入」处理：即使此前 stale 翻转把 status 翻成 active，
+  // 也不得走首轮启动路径（否则会给活轮重新布防看门狗）。
+  const wasRunningBeforeInject = state.status === 'running' || sameRunInject;
 
   // spike S1：push 永远进 InputQueue（turn 级串行由 SDK result 边界保证），不拒绝。
   // currentRunId 在前 turn result 收尾前由本 inject 切换（task-04 既有行为，保留）：
@@ -359,7 +379,13 @@ export async function inject(
     // 预期立即开新轮，窗口内零轮事件即判「push 被 SDK 吞掉」（打断 abort 收尾
     // 竞态），到点重置会话态 + 回报该 run 失败。任意轮事件到达即撤防（events.ts
     // onMessage/onResult），见 turn-control.ts 尾部看门狗簇注释。
-    mgr._armTurnStartWatchdog(sessionId, runId);
+    //
+    // 2026-10-23-watchdog-steering-guard FR-03：已经产生过事件的 run 不得布防。
+    // 同 runId steering 已被上方 sameRunInject 拦到排队分支；此处再挡「currentRunId
+    // 已清空但 run 实际启动过」的重复/迟到 inject（如 watchdog 收敛后 backend 重投）。
+    if (!state.observedRunIds?.has(runId)) {
+      mgr._armTurnStartWatchdog(sessionId, runId);
+    }
   }
 
   return { runId };
