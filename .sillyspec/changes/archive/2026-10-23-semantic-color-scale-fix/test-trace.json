@@ -1,0 +1,36 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-23-semantic-color-scale-fix",
+  "rows": [
+    {
+      "anchor": "FR-01",
+      "row_id": "2026-10-23-semantic-color-scale-fix:flow:测试绑定FR-01",
+      "tests": [
+        "frontend/src/lib/__tests__/tailwind-semantic-colors.test.ts「三调色板 × 50/200/500/700 存在且派生形态正确 + DEFAULT/foreground/既有色阶零漂移」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-23-semantic-color-scale-fix"
+    },
+    {
+      "anchor": "FR-04",
+      "row_id": "2026-10-23-semantic-color-scale-fix:flow:测试绑定FR-04",
+      "tests": [
+        "frontend/src/lib/__tests__/tailwind-semantic-colors.test.ts「配置断言防复发」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-23-semantic-color-scale-fix"
+    }
+  ]
+}

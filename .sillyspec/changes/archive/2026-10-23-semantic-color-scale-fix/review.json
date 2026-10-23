@@ -1,0 +1,40 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-23-semantic-color-scale-fix",
+  "reviewer": "subagent",
+  "verdict": "PASS",
+  "reviewedAgainst": "1a5d48d7494d0f7bec986e85be536c6c12407b16",
+  "findings": [
+    {
+      "severity": "P3",
+      "title": "对比度复算表数字无法按 globals.css + color-mix(in srgb) 语义复现（方法未注明），但 50% 档达标结论仍成立",
+      "evidence": "以 globals.css 的 HSL 值与 CSS color-mix(in srgb) 的 gamma 编码分量插值、WCAG 2.x 相对亮度独立复算：75% 档 ai-native warning/info/destructive=3.98/4.54/5.48、blue=2.95/3.22/5.59（表记 4.24/4.88/5.91/3.08/3.35/5.88）；50% 档 ai-native=6.19/6.67/7.80、blue=4.89/5.17/7.90（表记 6.63/7.19/8.37/5.07/5.36/8.34）。表中 75% 数字亦与上一轮评审自身复算（3.97/2.94/3.20）不一致，说明表未由可复现脚本固化；但按更保守的独立复算，50% 档最小值 4.89:1（blue warning）仍 ≥4.5:1，六个组合全部达标，P2 清偿结论不受影响。建议补计算脚本或注明插值空间与舍入口径。",
+      "location": ".sillyspec/changes/2026-10-23-semantic-color-scale-fix/visual-evidence.md:59-66"
+    },
+    {
+      "severity": "P3",
+      "title": "visual-evidence「修法」节仍写 700 = 75%，与实际配置、样例、复算表矛盾",
+      "evidence": "visual-evidence.md:17 仍为「700 = color-mix(… 75%, hsl(var(--foreground)))」，而同文件 :51 的生成样例、:57-68 的复算表与结论均已为 50%，tailwind.config.ts:19 也是 50%；属修复提交漏改的陈述，后续维护者可能按 75% 回填。",
+      "location": ".sillyspec/changes/2026-10-23-semantic-color-scale-fix/visual-evidence.md:17"
+    },
+    {
+      "severity": "P3",
+      "title": "用户目视确认仍未闭环（维持留债，agent-self 通道已如实声明）",
+      "evidence": "visual-evidence.md:83-86 明写「待用户在会话页/agent-log 页目视确认」；1a5d48d74 补充的「用户裁决」节（:71-81）如实声明本次为 agent 自批、未取得用户逐项目视确认，且本变更属缺陷修复+对比度校准、无视觉降级项，处置可接受，但目视结论仍需用户回填。",
+      "location": ".sillyspec/changes/2026-10-23-semantic-color-scale-fix/visual-evidence.md:71-86"
+    },
+    {
+      "severity": "P3",
+      "title": "semanticScale 的 color-mix 字符串不支持 Tailwind 3 /alpha 修饰符（当前无调用点，维持留债）",
+      "evidence": "tailwind.config.ts:15-20 四档均为纯 color-mix 字符串；Tailwind 3 的 withAlphaVariable 在 parseColor 失败时原样输出颜色，未来写 bg-warning-50/50 会静默丢弃透明度。全仓 grep（frontend/src，*.ts/*.tsx）确认当前无任何 semantic 数字阶 /alpha 调用点，且 brand/slate 已用函数式 color-mix 处理 alpha，故不阻断。",
+      "location": "frontend/tailwind.config.ts:15-20"
+    }
+  ],
+  "dimensionNotes": {
+    "乱序": "n/a（纯构建期静态配置，无运行时输入/事件顺序面；颜色值在 CSS 计算值阶段解析）",
+    "并发": "ok（70f436d87 仅 4 个文件、1a5d48d74 仅 visual-evidence.md；评审期间并行会话提交 88ab49238 属另一变更 2026-10-23-review-risk-fixes-2，git diff 1a5d48d74..HEAD -- 受审文件 为空，受审面未被扰动）",
+    "切换": "ok（50% 档两套浅色主题独立复算 4.89~7.90:1 全部 ≥4.5:1；同法复算 dark 主题 7.82~11.95:1；三套主题块均定义 --warning/--info/--destructive/--background/--foreground，data-theme 切换由 CSS 重算）",
+    "作用域": "ok（semanticScale 仅挂 warning/info/destructive；success/error 无数字阶调用点；sillyhub-daemon 独立配置未触碰）"
+  },
+  "reviewedAt": "2026-10-23T08:09:57+08:00"
+}

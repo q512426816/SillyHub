@@ -1,0 +1,1388 @@
+diff --git a/.sillyspec/docs/SillyHub/modules/daemon.changelog.md b/.sillyspec/docs/SillyHub/modules/daemon.changelog.md
+index 52bbf7d02..91d346b8b 100644
+--- a/.sillyspec/docs/SillyHub/modules/daemon.changelog.md
++++ b/.sillyspec/docs/SillyHub/modules/daemon.changelog.md
+@@ -83,3 +83,4 @@ created_at: 2026-08-27 14:32:24
+ - 2026-10-20-session-awaiting-answer-status | 左侧会话状态补充等待回答问号
+ - 2026-10-22-conversation-live-marquee | 会话页「对话」tab 运行中时只有一行状态条，用户感知不到 agent 正在真实执行；希望在该轮末尾…
+ - 2026-10-22-agent-profiles-page-restyle | 智能体档案列表页重设计
++- 2026-10-22-session-composer-slim | 会话页面底部输入区信息过载：排队消息与纯文本展示露出附件引用 uuid 长串，中断自动续跑是常驻开关…
+diff --git a/.sillyspec/docs/SillyHub/modules/frontend_app.changelog.md b/.sillyspec/docs/SillyHub/modules/frontend_app.changelog.md
+index 0cfbc30da..1e4551348 100644
+--- a/.sillyspec/docs/SillyHub/modules/frontend_app.changelog.md
++++ b/.sillyspec/docs/SillyHub/modules/frontend_app.changelog.md
+@@ -41,3 +41,4 @@ created_at: 2026-09-03 14:49:48
+ - 2026-10-20-session-awaiting-answer-status | 左侧会话状态补充等待回答问号
+ - 2026-10-22-conversation-live-marquee | 会话页「对话」tab 运行中时只有一行状态条，用户感知不到 agent 正在真实执行；希望在该轮末尾…
+ - 2026-10-22-agent-profiles-page-restyle | 智能体档案列表页重设计
++- 2026-10-22-session-composer-slim | 会话页面底部输入区信息过载：排队消息与纯文本展示露出附件引用 uuid 长串，中断自动续跑是常驻开关…
+diff --git a/.sillyspec/docs/SillyHub/modules/frontend_components.changelog.md b/.sillyspec/docs/SillyHub/modules/frontend_components.changelog.md
+index 5ab2a66ae..0045b39b5 100644
+--- a/.sillyspec/docs/SillyHub/modules/frontend_components.changelog.md
++++ b/.sillyspec/docs/SillyHub/modules/frontend_components.changelog.md
+@@ -125,3 +125,4 @@ created_at: 2026-08-30 22:23:33
+ | 2026-10-22 | 2026-10-20-session-awaiting-answer-status | 左侧会话状态补充等待回答问号 |
+ | 2026-10-22 | 2026-10-22-conversation-live-marquee | 会话页「对话」tab 运行中时只有一行状态条，用户感知不到 agent 正在真实执行；希望在该轮末尾… |
+ | 2026-10-22 | 2026-10-22-agent-profiles-page-restyle | 智能体档案列表页重设计 |
++| 2026-10-23 | 2026-10-22-session-composer-slim | 会话页面底部输入区信息过载：排队消息与纯文本展示露出附件引用 uuid 长串，中断自动续跑是常驻开关… |
+diff --git a/.sillyspec/docs/SillyHub/modules/frontend_lib.changelog.md b/.sillyspec/docs/SillyHub/modules/frontend_lib.changelog.md
+index bb8af7340..c5e046dcf 100644
+--- a/.sillyspec/docs/SillyHub/modules/frontend_lib.changelog.md
++++ b/.sillyspec/docs/SillyHub/modules/frontend_lib.changelog.md
+@@ -30,3 +30,5 @@ created_at: 2026-10-16 16:40:00
+ - 2026-10-20-session-awaiting-answer-status | 左侧会话状态补充等待回答问号
+ - 2026-10-22-conversation-live-marquee | 会话页「对话」tab 运行中时只有一行状态条，用户感知不到 agent 正在真实执行；希望在该轮末尾…
+ - 2026-10-22-agent-profiles-page-restyle | 智能体档案列表页重设计
++- 2026-10-23-translate-budget-align | 修复翻译超时预算矛盾与缓存回填乱序
++- 2026-10-22-session-composer-slim | 会话页面底部输入区信息过载：排队消息与纯文本展示露出附件引用 uuid 长串，中断自动续跑是常驻开关…
+diff --git a/.sillyspec/docs/backend/modules/daemon.changelog.md b/.sillyspec/docs/backend/modules/daemon.changelog.md
+index 33c624baf..150daa4fd 100644
+--- a/.sillyspec/docs/backend/modules/daemon.changelog.md
++++ b/.sillyspec/docs/backend/modules/daemon.changelog.md
+@@ -62,3 +62,4 @@ created_at: 2026-08-29 22:56:30
+ | 2026-10-22 | 2026-10-20-session-awaiting-answer-status | 左侧会话状态补充等待回答问号 |
+ | 2026-10-22 | 2026-10-22-conversation-live-marquee | 会话页「对话」tab 运行中时只有一行状态条，用户感知不到 agent 正在真实执行；希望在该轮末尾… |
+ | 2026-10-22 | 2026-10-22-agent-profiles-page-restyle | 智能体档案列表页重设计 |
++| 2026-10-23 | 2026-10-22-session-composer-slim | 会话页面底部输入区信息过载：排队消息与纯文本展示露出附件引用 uuid 长串，中断自动续跑是常驻开关… |
+diff --git a/.sillyspec/docs/multi-agent-platform/modules/backend.changelog.md b/.sillyspec/docs/multi-agent-platform/modules/backend.changelog.md
+index 7c89dac32..0efc5c5c1 100644
+--- a/.sillyspec/docs/multi-agent-platform/modules/backend.changelog.md
++++ b/.sillyspec/docs/multi-agent-platform/modules/backend.changelog.md
+@@ -93,3 +93,5 @@
+ - 2026-10-20-session-awaiting-answer-status | 左侧会话状态补充等待回答问号
+ - 2026-10-22-conversation-live-marquee | 会话页「对话」tab 运行中时只有一行状态条，用户感知不到 agent 正在真实执行；希望在该轮末尾…
+ - 2026-10-22-agent-profiles-page-restyle | 智能体档案列表页重设计
++- 2026-10-23-translate-budget-align | 修复翻译超时预算矛盾与缓存回填乱序
++- 2026-10-22-session-composer-slim | 会话页面底部输入区信息过载：排队消息与纯文本展示露出附件引用 uuid 长串，中断自动续跑是常驻开关…
+diff --git a/.sillyspec/docs/multi-agent-platform/modules/frontend.changelog.md b/.sillyspec/docs/multi-agent-platform/modules/frontend.changelog.md
+index 3b140affe..f218bfc87 100644
+--- a/.sillyspec/docs/multi-agent-platform/modules/frontend.changelog.md
++++ b/.sillyspec/docs/multi-agent-platform/modules/frontend.changelog.md
+@@ -172,3 +172,5 @@
+ | 2026-10-22 | 2026-10-20-session-awaiting-answer-status | 左侧会话状态补充等待回答问号 |
+ | 2026-10-22 | 2026-10-22-conversation-live-marquee | 会话页「对话」tab 运行中时只有一行状态条，用户感知不到 agent 正在真实执行；希望在该轮末尾… |
+ | 2026-10-22 | 2026-10-22-agent-profiles-page-restyle | 智能体档案列表页重设计 |
++| 2026-10-22 | 2026-10-23-translate-budget-align | 修复翻译超时预算矛盾与缓存回填乱序 |
++| 2026-10-23 | 2026-10-22-session-composer-slim | 会话页面底部输入区信息过载：排队消息与纯文本展示露出附件引用 uuid 长串，中断自动续跑是常驻开关… |
+diff --git a/backend/app/modules/translate/engine.py b/backend/app/modules/translate/engine.py
+index b423c1f31..06f5955cb 100644
+--- a/backend/app/modules/translate/engine.py
++++ b/backend/app/modules/translate/engine.py
+@@ -118,21 +118,29 @@ class TranslateSubprocessProxy:
+             encoding="utf-8",
+             bufsize=1,
+         )
+-        _threading.Thread(target=self._reader, args=(self._proc.stdout,), daemon=True).start()
++        _threading.Thread(
++            target=self._reader, args=(self._proc.stdout, self._responses), daemon=True
++        ).start()
+         _threading.Thread(
+             target=self._stderr_reader, args=(self._proc.stderr,), daemon=True
+         ).start()
+ 
+-    def _reader(self, stdout: object) -> None:
+-        """读线程：响应行入队；EOF/断裂入哨兵。"""
++    def _reader(self, stdout: object, responses: queue.Queue) -> None:
++        """读线程：响应行入队；EOF/断裂入哨兵。
++
++        队列经参数捕获（2026-10-23-translate-budget-align / FR-03）：崩溃重启
++        _ensure_started 换新队列后，旧读线程的 EOF 哨兵/迟到响应只落入已废弃
++        的旧队列（无人读，自然作废），不会污染新队列触发 "translate worker
++        exited"/"protocol mismatch" 假崩溃计数（3 次即 600s 退避）。
++        """
+         eof_resp = object()
+         try:
+             for line in stdout:
+-                self._responses.put(line)
++                responses.put(line)
+         except Exception:
+             pass
+         finally:
+-            self._responses.put(eof_resp)
++            responses.put(eof_resp)
+ 
+     def _stderr_reader(self, stderr: object) -> None:
+         """stderr 读线程：逐行转发到主进程日志（WARNING）；异常静默不影响请求。"""
+diff --git a/backend/app/modules/translate/service.py b/backend/app/modules/translate/service.py
+index 8080e0a12..f83a8f2db 100644
+--- a/backend/app/modules/translate/service.py
++++ b/backend/app/modules/translate/service.py
+@@ -138,8 +138,13 @@ async def translate_items(items: list[TranslateItemIn], target: str = "zh") -> d
+     pending: dict[str, list[SourceSegment]] = {}
+     # 全局送翻块队列（跨 item 合批送模型）
+     pending_chunks: list[str] = []
+-    # chunk 在 pending_chunks 中的归属填充游标：按 (item_id, seg_idx) 顺序消费
++    # 块序总账（含缓存命中块）：按块产生顺序记 (item_id, seg_idx)——回填按本序
++    # 一次成型，缓存块与推理块同序混排（2026-10-23-translate-budget-align FR-02）
+     chunk_owners: list[tuple[str, int]] = []
++    # 已解析译文（缓存命中块即时可定）：owner 序号 → 译文
++    resolved: dict[int, str] = {}
++    # pending_chunks[i] 对应的 chunk_owners 序号（推理返回后按位对账）
++    pending_owner_positions: list[int] = []
+ 
+     for item in items:
+         if not is_translation_worthy(item.text):
+@@ -166,12 +171,14 @@ async def translate_items(items: list[TranslateItemIn], target: str = "zh") -> d
+                 cached = _lru_get(key)
+                 if cached is None:
+                     cached = await _redis_get(key)
++                owner_idx = len(chunk_owners)
++                chunk_owners.append((item.id, seg_idx))
+                 if cached is not None:
+                     _lru_put(key, cached)  # Redis 命中回填 LRU
+-                    _fill_chunk(pending, item.id, seg_idx, cached)
++                    resolved[owner_idx] = cached
+                     translated_ids.add(item.id)
+                 else:
+-                    chunk_owners.append((item.id, seg_idx))
++                    pending_owner_positions.append(owner_idx)
+                     pending_chunks.append(chunk)
+ 
+     engine_ready = True
+@@ -199,12 +206,11 @@ async def translate_items(items: list[TranslateItemIn], target: str = "zh") -> d
+                     reason = "translation count mismatch"
+                 else:
+                     cache_writes: list[tuple[str, str]] = []
+-                    for (item_id, seg_idx), chunk, translated in zip(
+-                        chunk_owners, pending_chunks, translations, strict=True
+-                    ):
+-                        _fill_chunk(pending, item_id, seg_idx, translated)
+-                        translated_ids.add(item_id)
+-                        cache_writes.append((_cache_key(chunk, target), translated))
++                    for pos, translated in enumerate(translations):
++                        owner_idx = pending_owner_positions[pos]
++                        resolved[owner_idx] = translated
++                        translated_ids.add(chunk_owners[owner_idx][0])
++                        cache_writes.append((_cache_key(pending_chunks[pos], target), translated))
+                     for key, value in cache_writes:
+                         _lru_put(key, value)
+                         await _redis_put(key, value)
+@@ -218,6 +224,14 @@ async def translate_items(items: list[TranslateItemIn], target: str = "zh") -> d
+             "items": [TranslateItemOut(id=i.id, text=i.text, translated=False) for i in items],
+         }
+ 
++    # 回填：按 chunk_owners 全序一次成型——缓存块与推理块按原文块序混排。
++    # 此前缓存命中即时回填 + 推理块推理后追加，部分命中的多块段译文块序颠倒
++    # （归档 review P2；2026-10-23-translate-budget-align / FR-02）。引擎失败
++    # 路径上方已提前原文透传返回，走到这里的 owner 必有 resolved 译文——缺失
++    # 即编排缺陷，严格 KeyError 当场暴露（禁止静默拼空）。
++    for owner_idx, (item_id, seg_idx) in enumerate(chunk_owners):
++        _fill_chunk(pending, item_id, seg_idx, resolved[owner_idx])
++
+     # 重组：送翻段的占位填充后逐段拼接（保护段原样）
+     for item in items:
+         if item.id in results:
+@@ -245,8 +259,8 @@ def _fill_chunk(
+     """把单块译文按序填回所属送翻段（段内块顺序拼接）。
+ 
+     送翻段在 pending 中临时以 ``SourceSegment(text=已译拼接, translatable=True)``
+-    累积；块按产生顺序到达（缓存命中乱序于请求流内不会发生——同请求内先查
+-    缓存后推理，两类写入按 chunk_owners 顺序执行）。
++    累积；调用方保证按块产生顺序（chunk_owners 全序）逐块调用——缓存命中块
++    与推理块同序混排，段内块序与原文一致（2026-10-23-translate-budget-align）。
+     """
+     segs = pending[item_id]
+     segs[seg_idx] = SourceSegment(text=segs[seg_idx].text + translated, translatable=True)
+diff --git a/backend/app/modules/translate/tests/test_engine.py b/backend/app/modules/translate/tests/test_engine.py
+index 5604bb087..9102797cb 100644
+--- a/backend/app/modules/translate/tests/test_engine.py
++++ b/backend/app/modules/translate/tests/test_engine.py
+@@ -250,3 +250,34 @@ def test_get_translator_returns_proxy_and_backoff_reason(fake_worker_path: Path)
+     translator.retry_at = time.monotonic() + 999
+     translator2, reason2 = get_translator("unused")
+     assert translator2 is None and reason2 and "unavailable" in reason2
++
++
++def test_reader_writes_only_to_captured_queue() -> None:
++    """2026-10-23-translate-budget-align / FR-03：读线程只写构造时捕获的队列。
++
++    修复前 _reader 经 self._responses 属性写入：崩溃重启 _ensure_started 整体
++    换队列后，旧读线程的 EOF 哨兵/迟到响应落入新队列 → 下次请求读到哨兵即
++    "translate worker exited" 假崩溃，3 次即 600s 退避。修复后队列经参数捕获，
++    旧线程只写旧队列（无人读，自然作废）。
++    """
++    import queue as _queue
++    import threading as _threading
++
++    proxy = TranslateSubprocessProxy("unused")
++    try:
++        captured: _queue.Queue = _queue.Queue()  # 旧线程启动时捕获的队列
++        new_queue: _queue.Queue = _queue.Queue()  # 重启后的新队列（self._responses 已换）
++        proxy._responses = new_queue
++        thread = _threading.Thread(
++            target=proxy._reader, args=(iter(["resp-a\n"]), captured), daemon=True
++        )
++        thread.start()
++        thread.join(timeout=5.0)
++        assert not thread.is_alive()
++        # 响应行与 EOF 哨兵都只进 captured；new_queue 保持为空（无污染）
++        assert captured.get(timeout=1.0) == "resp-a\n"
++        sentinel = captured.get(timeout=1.0)
++        assert not isinstance(sentinel, str)
++        assert new_queue.empty()
++    finally:
++        proxy.close()
+diff --git a/backend/app/modules/translate/tests/test_service.py b/backend/app/modules/translate/tests/test_service.py
+index 98ada52c7..a544fd947 100644
+--- a/backend/app/modules/translate/tests/test_service.py
++++ b/backend/app/modules/translate/tests/test_service.py
+@@ -4,8 +4,14 @@ from __future__ import annotations
+ 
+ import pytest
+ 
++from app.modules.translate.chunking import collect_chunks, split_protected
+ from app.modules.translate.schema import TranslateItemIn
+-from app.modules.translate.service import reset_cache_for_tests, translate_items
++from app.modules.translate.service import (
++    _cache_key,
++    _lru_put,
++    reset_cache_for_tests,
++    translate_items,
++)
+ 
+ 
+ class _FakeTranslator:
+@@ -215,3 +221,30 @@ async def test_pure_code_content_translated_false(fake_translator: _FakeTranslat
+     assert out["items"][0].translated is False
+     assert out["items"][0].text == text
+     assert fake_translator.calls == 0
++
++
++async def test_partial_cache_hit_keeps_chunk_order(fake_translator: _FakeTranslator) -> None:
++    """2026-10-23-translate-budget-align / FR-02：部分命中缓存的多块段块序不乱。
++
++    修复前：缓存命中块扫描期立即回填、推理块推理后追加——中间块命中时译文
++    变成 [块2译文, 块1译文, 块3译文]（缓存块全部前置，归档 review P2）。
++    修复后按块产生顺序全序回填，任何部分命中组合都与原文块序逐块对齐。
++    """
++    # 每句内容唯一（重复同句会让相邻块内容相同 → 同一缓存 key 连带命中，
++    # 构不出「部分命中」形态）
++    text = "".join(
++        f"Unique english sentence number {i} for chunk ordering regression. " for i in range(40)
++    )  # ~2600 字符单段（无段界/无保护标记）→ 3 块
++    chunks = collect_chunks(split_protected(text))
++    assert len(chunks) == 3
++    assert len(set(chunks)) == 3  # 块内容互异，缓存 key 互不相同
++    # 预填中间块缓存（模拟部分命中：LRU 淘汰/Redis TTL 过期后的跨请求残缺形态）
++    _lru_put(_cache_key(chunks[1], "zh"), "CACHED[1]")
++
++    out = await translate_items([TranslateItemIn(id="a", text=text)])
++    item = out["items"][0]
++    assert item.translated is True
++    # 只有未命中的块1/块3进引擎（fake 按批内序号回显 "译[i]:<chunk>"）
++    assert fake_translator.batches == [[chunks[0], chunks[2]]]
++    # 全序拼装：块1译文 + 缓存中间块 + 块3译文（修复前 CACHED[1] 打头）
++    assert item.text == f"译[0]:{chunks[0]}CACHED[1]译[1]:{chunks[2]}"
+diff --git a/frontend/src/components/daemon/__tests__/turn-live-marquee.test.tsx b/frontend/src/components/daemon/__tests__/turn-live-marquee.test.tsx
+index fbf2a1fca..1e4e5cfc3 100644
+--- a/frontend/src/components/daemon/__tests__/turn-live-marquee.test.tsx
++++ b/frontend/src/components/daemon/__tests__/turn-live-marquee.test.tsx
+@@ -253,6 +253,40 @@ describe("TurnLiveMarquee 连续轨道（FR-01 / FR-02 / FR-05）", () => {
+       vi.unstubAllGlobals();
+     }
+   });
++
++  it("追平目标后 rAF 停排，entries 更新重新起排（2026-10-23-review-risk-fixes-2）", () => {
++    const rafCallbacks: FrameRequestCallback[] = [];
++    const rafSpy = vi
++      .spyOn(globalThis, "requestAnimationFrame")
++      .mockImplementation((cb) => {
++        rafCallbacks.push(cb);
++        return rafCallbacks.length;
++      });
++    const segs1 = [
++      thinking("t1", "分析登录链路"),
++      tool("tool-1", { toolName: "Read", primary: "src/lib/auth.ts" }),
++      fileSeg("f1", "report.md"),
++    ];
++    const segs2 = [...segs1, thinking("t-new", "新事件到达")];
++    try {
++      const { rerender } = render(
++        <TurnLiveMarquee entries={deriveLiveMarqueeEntries(segs1)} />,
++      );
++      // 挂载即起排（至少一帧）
++      expect(rafCallbacks.length).toBeGreaterThanOrEqual(1);
++      // 手动驱动全部已排帧：jsdom 下 clientWidth/scrollWidth 恒 0 → distance=0
++      // → 追平分支。旧实现每帧无条件续排（驱动 N 帧又排 N 帧）；新实现停排。
++      act(() => {
++        rafCallbacks.splice(0).forEach((cb) => cb(performance.now()));
++      });
++      expect(rafCallbacks.length).toBe(0);
++      // 新内容到达（target 更新唯一入口 applyTarget）→ 重新起排
++      rerender(<TurnLiveMarquee entries={deriveLiveMarqueeEntries(segs2)} />);
++      expect(rafCallbacks.length).toBeGreaterThanOrEqual(1);
++    } finally {
++      rafSpy.mockRestore();
++    }
++  });
+ });
+ 
+ describe("TurnTimeline 接入门控（FR-01 / FR-04）", () => {
+diff --git a/frontend/src/components/daemon/file-changes/__tests__/turn-file-diff.test.ts b/frontend/src/components/daemon/file-changes/__tests__/turn-file-diff.test.ts
+new file mode 100644
+index 000000000..032b1ff78
+--- /dev/null
++++ b/frontend/src/components/daemon/file-changes/__tests__/turn-file-diff.test.ts
+@@ -0,0 +1,188 @@
++// 2026-10-23-turn-file-diff-dialog task-01：轮文件变更弹窗纯映射单测。
++//
++// 锁定契约（design「接口契约」）：
++//   1. tool_call 行（channel=tool_call，content_redacted=JSON）与 tool_result 行
++//      （edit_patch 列）按 tool_use_id 配对，命中目标路径 → 补丁段（工具名 + DiffRow[]）；
++//   2. 绝对路径（含 Windows 反斜杠）按后缀匹配仓根相对 posix 路径；
++//   3. 同一文件多次编辑按日志序逐段返回（FR-02 改N次多段）；
++//   4. edit_patch JSON 形状不可解析 → 段保留 rows=null（占位说明，不静默丢弃、不伪造）；
++//   5. result 无 tool_use_id 的遗留行按序回退配对（优先同工具名、须路径命中）；
++//   6. 其他文件 / Bash 等无路径工具的补丁不入选；subagent 行（带归属列）同样参与。
++
++import { describe, expect, it } from "vitest";
++
++import type { AgentRunLogEntry } from "@/lib/agent";
++
++import {
++  collectTurnFilePatches,
++  matchesRepoPath,
++  toolCallFilePath,
++} from "../turn-file-diff";
++
++function callLog(overrides: {
++  toolUseId?: string;
++  tool?: string;
++  filePath?: string | null;
++  raw?: string;
++}): AgentRunLogEntry {
++  const args: Record<string, unknown> =
++    overrides.filePath === null
++      ? { command: "rm -rf dist" }
++      : { file_path: overrides.filePath ?? "frontend/src/a.ts" };
++  return {
++    id: overrides.toolUseId ?? "log-call-1",
++    run_id: "run-1",
++    timestamp: "2026-10-23T08:00:00Z",
++    channel: "tool_call",
++    content_redacted:
++      overrides.raw ??
++      JSON.stringify({
++        tool: overrides.tool ?? "Edit",
++        args,
++        tool_use_id: overrides.toolUseId ?? "tu-1",
++      }),
++    tool_use_id: overrides.toolUseId ?? "tu-1",
++  };
++}
++
++function resultLog(overrides: {
++  toolUseId?: string | null;
++  patch?: string | null;
++  id?: string;
++}): AgentRunLogEntry {
++  return {
++    id: overrides.id ?? "log-result-1",
++    run_id: "run-1",
++    timestamp: "2026-10-23T08:00:01Z",
++    channel: "stdout",
++    content_redacted: "[TOOL_RESULT] ok",
++    edit_patch:
++      overrides.patch === undefined
++        ? JSON.stringify([{ oldStart: 1, newStart: 1, lines: ["-old", "+new"] }])
++        : overrides.patch,
++    ...(overrides.toolUseId === null ? {} : { tool_use_id: overrides.toolUseId ?? "tu-1" }),
++  };
++}
++
++describe("matchesRepoPath / toolCallFilePath（路径匹配基元）", () => {
++  it("全等与后缀（posix / Windows 反斜杠 / ./ 前缀）命中，其余不命中", () => {
++    expect(matchesRepoPath("frontend/src/a.ts", "frontend/src/a.ts")).toBe(true);
++    expect(matchesRepoPath("C:\\proj\\frontend/src/a.ts", "frontend/src/a.ts")).toBe(true);
++    expect(matchesRepoPath("./frontend/src/a.ts", "frontend/src/a.ts")).toBe(true);
++    expect(matchesRepoPath("frontend/src/ab.ts", "frontend/src/a.ts")).toBe(false);
++    expect(matchesRepoPath("src/a.ts", "frontend/src/a.ts")).toBe(false);
++  });
++
++  it("toolCallFilePath 按 file_path / notebook_path / path 顺序取第一个字符串", () => {
++    expect(toolCallFilePath({ file_path: "a.ts" })).toBe("a.ts");
++    expect(toolCallFilePath({ notebook_path: "n.ipynb" })).toBe("n.ipynb");
++    expect(toolCallFilePath({ path: "p.txt" })).toBe("p.txt");
++    expect(toolCallFilePath({ file_path: 123 })).toBeNull();
++    expect(toolCallFilePath({})).toBeNull();
++  });
++});
++
++describe("collectTurnFilePatches（日志 → 按序补丁段）", () => {
++  it("tool_use_id 配对：命中路径出一段，工具名与 diff 行齐全", () => {
++    const sections = collectTurnFilePatches(
++      [callLog({ toolUseId: "tu-1", filePath: "frontend/src/a.ts" }), resultLog({ toolUseId: "tu-1" })],
++      "frontend/src/a.ts",
++    );
++    expect(sections).toHaveLength(1);
++    expect(sections[0]?.toolName).toBe("Edit");
++    expect(sections[0]?.rows).toEqual([
++      { type: "del", oldNo: 1, newNo: null, text: "old" },
++      { type: "add", oldNo: null, newNo: 1, text: "new" },
++    ]);
++  });
++
++  it("Windows 绝对路径入参按后缀匹配仓根相对路径", () => {
++    const sections = collectTurnFilePatches(
++      [
++        callLog({ toolUseId: "tu-1", filePath: "C:\\repo\\frontend\\src\\a.ts" }),
++        resultLog({ toolUseId: "tu-1" }),
++      ],
++      "frontend/src/a.ts",
++    );
++    expect(sections).toHaveLength(1);
++  });
++
++  it("同一文件多次编辑按日志序逐段返回（FR-02）", () => {
++    const sections = collectTurnFilePatches(
++      [
++        callLog({ toolUseId: "tu-1", filePath: "frontend/src/a.ts" }),
++        resultLog({ toolUseId: "tu-1", id: "r1", patch: JSON.stringify([{ oldStart: 1, newStart: 1, lines: ["-one"] }]) }),
++        callLog({ toolUseId: "tu-2", filePath: "frontend/src/a.ts" }),
++        resultLog({ toolUseId: "tu-2", id: "r2", patch: JSON.stringify([{ oldStart: 5, newStart: 5, lines: ["+two"] }]) }),
++      ],
++      "frontend/src/a.ts",
++    );
++    expect(sections.map((s) => s.rows)).toEqual([
++      [{ type: "del", oldNo: 1, newNo: null, text: "one" }],
++      [{ type: "add", oldNo: null, newNo: 5, text: "two" }],
++    ]);
++  });
++
++  it("其他文件与无路径工具（Bash）的补丁不入选", () => {
++    const sections = collectTurnFilePatches(
++      [
++        callLog({ toolUseId: "tu-1", filePath: "frontend/src/other.ts" }),
++        resultLog({ toolUseId: "tu-1", id: "r1" }),
++        callLog({ toolUseId: "tu-2", tool: "Bash", filePath: null }),
++        resultLog({ toolUseId: "tu-2", id: "r2" }),
++      ],
++      "frontend/src/a.ts",
++    );
++    expect(sections).toEqual([]);
++  });
++
++  it("edit_patch JSON 形状不可解析 → 段保留 rows=null（不静默丢弃）", () => {
++    const sections = collectTurnFilePatches(
++      [callLog({ toolUseId: "tu-1" }), resultLog({ toolUseId: "tu-1", patch: "{not-json" })],
++      "frontend/src/a.ts",
++    );
++    expect(sections).toHaveLength(1);
++    expect(sections[0]?.rows).toBeNull();
++  });
++
++  it("遗留 result（无 tool_use_id）按序回退配对：优先同工具名，且只落路径命中的调用", () => {
++    const sections = collectTurnFilePatches(
++      [
++        callLog({ toolUseId: "tu-a", filePath: "frontend/src/a.ts", raw: JSON.stringify({ tool: "Write", args: { file_path: "frontend/src/a.ts" } }) }),
++        resultLog({ toolUseId: null, id: "r1", patch: JSON.stringify([{ oldStart: 1, newStart: 1, lines: ["+w"] }]) }),
++      ],
++      "frontend/src/a.ts",
++    );
++    expect(sections).toHaveLength(1);
++    expect(sections[0]?.toolName).toBe("Write");
++  });
++
++  it("遗留 result 回退配对不串到路径不符的调用", () => {
++    const sections = collectTurnFilePatches(
++      [
++        callLog({ toolUseId: "tu-b", filePath: "frontend/src/other.ts" }),
++        resultLog({ toolUseId: null, id: "r1" }),
++      ],
++      "frontend/src/a.ts",
++    );
++    expect(sections).toEqual([]);
++  });
++
++  it("subagent 行（带 parent_tool_use_id 归属列）同样参与配对", () => {
++    const sub = {
++      ...callLog({ toolUseId: "tu-sub", filePath: "frontend/src/a.ts" }),
++      parent_tool_use_id: "tu-parent",
++      depth: 1,
++    };
++    const sections = collectTurnFilePatches(
++      [sub, resultLog({ toolUseId: "tu-sub" })],
++      "frontend/src/a.ts",
++    );
++    expect(sections).toHaveLength(1);
++  });
++
++  it("空日志 / 无 tool_call 行 → 空数组（不抛错）", () => {
++    expect(collectTurnFilePatches([], "a.ts")).toEqual([]);
++    expect(collectTurnFilePatches([resultLog({ toolUseId: "tu-1" })], "a.ts")).toEqual([]);
++  });
++});
+diff --git a/frontend/src/components/daemon/file-changes/turn-file-diff.ts b/frontend/src/components/daemon/file-changes/turn-file-diff.ts
+new file mode 100644
+index 000000000..b2888f503
+--- /dev/null
++++ b/frontend/src/components/daemon/file-changes/turn-file-diff.ts
+@@ -0,0 +1,182 @@
++/**
++ * turn-file-diff.ts —— 轮文件变更弹窗的**数据纯映射**（2026-10-23-turn-file-diff-dialog
++ * task-01）。零 DOM / 零 React / 零 fetch。
++ *
++ * 数据源（全部既有，零后端改动）：本轮 agent_run_logs——
++ *   - tool_call 行（channel="tool_call"）：content_redacted = JSON
++ *     `{tool, args:{file_path…}, tool_use_id}`（backend sdk_pipeline 双写之一起）；
++ *   - 编辑结果行：edit_patch 列 = structuredPatch JSON 串（hunks 带真实文件行号），
++ *     tool_use_id 与调用行配对（Anthropic tool_result 块自带）。
++ *
++ * 归因口径（与文件变更卡一致的对齐点）：文件卡 numstat 归因不区分主/子代理，
++ * 本映射同样按「本轮全部日志（含 subagent 行）」配对——子代理对同一文件的编辑
++ * 也是该文件本轮的真实改动，不做主/子过滤（过滤反而丢内容）。
++ *
++ * 诚实性约束（FR-03）：配不到补丁返回空数组（弹窗出如实说明）；edit_patch 在但
++ * JSON 形状不可解析 → 段保留 rows=null（占位说明），**不静默丢弃、不伪造 diff**。
++ */
++
++import { parseStructuredPatch } from "@/components/agent-log/tool-diff";
++import type { DiffRow } from "@/components/agent-log/tool-diff";
++import type { AgentRunLogEntry } from "@/lib/agent";
++
++/** 单次编辑补丁段：工具名 + 行级 diff 行（rows=null = 补丁形状不可解析的占位段）。 */
++export interface TurnFilePatchSection {
++  toolName: string;
++  rows: DiffRow[] | null;
++}
++
++/** tool 入参里可能的文件路径字段（Claude 工具族命名，按命中率排序）。 */
++const FILE_PATH_ARG_KEYS = ["file_path", "notebook_path", "path"] as const;
++
++/** 从 tool args 提取文件路径（无/非字符串 → null）。 */
++export function toolCallFilePath(args: Record<string, unknown>): string | null {
++  for (const key of FILE_PATH_ARG_KEYS) {
++    const value = args[key];
++    if (typeof value === "string" && value.length > 0) return value;
++  }
++  return null;
++}
++
++/** 路径归一：反斜杠 → posix 分隔符，剥 `./` 前缀（大小写敏感，git 路径口径）。 */
++function normalizePath(p: string): string {
++  return p.replace(/\\/g, "/").replace(/^\.\//, "");
++}
++
++/**
++ * tool 入参路径是否指向目标仓根相对路径：全等或「以 /<rel> 结尾」的后缀匹配
++ * （绝对路径 C:\repo\frontend\src\a.ts ⊃ frontend/src/a.ts）。后缀必须整段对齐
++ * （ab.ts 不匹配 a.ts）。
++ */
++export function matchesRepoPath(argPath: string, repoRelPath: string): boolean {
++  const arg = normalizePath(argPath);
++  const rel = normalizePath(repoRelPath);
++  return arg === rel || arg.endsWith(`/${rel}`);
++}
++
++/** tool_call 行解析产物（解析失败的行不进配对池）。 */
++interface ParsedToolCall {
++  toolName: string;
++  filePath: string | null;
++  toolUseId: string | null;
++}
++
++/** tool_call 行 content JSON → {tool, args, tool_use_id}（与 tool-args-detail 同容错口径）。 */
++function parseToolCallEntry(entry: AgentRunLogEntry): ParsedToolCall | null {
++  if (entry.channel !== "tool_call") return null;
++  const raw = entry.content_redacted;
++  if (typeof raw !== "string" || raw.length === 0) return null;
++  let obj: unknown;
++  try {
++    obj = JSON.parse(raw.trim());
++  } catch {
++    return null;
++  }
++  if (obj == null || typeof obj !== "object") return null;
++  const record = obj as { tool?: unknown; args?: unknown; tool_use_id?: unknown };
++  if (typeof record.tool !== "string" || record.tool.length === 0) return null;
++  const args =
++    record.args != null && typeof record.args === "object"
++      ? (record.args as Record<string, unknown>)
++      : {};
++  const toolUseId =
++    typeof record.tool_use_id === "string" && record.tool_use_id.length > 0
++      ? record.tool_use_id
++      : null;
++  return { toolName: record.tool, filePath: toolCallFilePath(args), toolUseId };
++}
++
++/**
++ * 本轮日志 + 仓根相对路径 → 按编辑完成序（日志序）的补丁段列表。
++ *
++ * 配对两遍：① result.tool_use_id → 同 id 的 tool_call 行；② 遗留 result（无 id 或
++ * id 无主）按序回退——只落「编辑族工具 + 路径命中目标文件」的遗留调用（防止
++ * Bash 等无补丁调用吃掉 Edit 补丁、也防止补丁串到别的文件）。两遍都配不上的
++ * result 无法归因文件 → 丢弃（不伪造归属）。
++ */
++export function collectTurnFilePatches(
++  logs: readonly AgentRunLogEntry[],
++  repoRelPath: string,
++): TurnFilePatchSection[] {
++  const calls: ParsedToolCall[] = [];
++  const results: { patch: string; toolUseId: string | null }[] = [];
++  for (const entry of logs) {
++    if (entry.channel === "tool_call") {
++      const parsed = parseToolCallEntry(entry);
++      if (parsed) calls.push(parsed);
++      continue;
++    }
++    const patch = entry.edit_patch;
++    if (typeof patch === "string" && patch.length > 0) {
++      results.push({
++        patch,
++        toolUseId:
++          typeof entry.tool_use_id === "string" && entry.tool_use_id.length > 0
++            ? entry.tool_use_id
++            : null,
++      });
++    }
++  }
++
++  const callUsed = new Array<boolean>(calls.length).fill(false);
++  const callIndexById = new Map<string, number>();
++  calls.forEach((call, index) => {
++    if (call.toolUseId != null && !callIndexById.has(call.toolUseId)) {
++      callIndexById.set(call.toolUseId, index);
++    }
++  });
++
++  // ① 按 tool_use_id 精确配对；命中的调用行标记已用（同 id 多次出现取首个）。
++  const paired: { call: ParsedToolCall | null; patch: string }[] = [];
++  for (const result of results) {
++    let call: ParsedToolCall | null = null;
++    if (result.toolUseId != null) {
++      const index = callIndexById.get(result.toolUseId);
++      if (index != null && !callUsed[index]) {
++        callUsed[index] = true;
++        call = calls[index] ?? null;
++      }
++    }
++    paired.push({ call, patch: result.patch });
++  }
++
++  // ② 遗留 result 按序回退：只考虑「编辑族工具 + 路径命中目标文件」的遗留调用。
++  //    已知局限（诚实记录）：同轮两个同族调用都无 tool_use_id 且其一只带补丁时，
++  //    先序调用可能吃到后序文件的补丁——仅影响极老的双缺 id 数据，主链路（双 id）
++  //    不经此处。
++  for (const item of paired) {
++    if (item.call != null) continue;
++    const fallbackIndex = calls.findIndex(
++      (call, index) =>
++        !callUsed[index] &&
++        isPatchEligibleToolName(call.toolName) &&
++        call.filePath != null &&
++        matchesRepoPath(call.filePath, repoRelPath),
++    );
++    if (fallbackIndex >= 0) {
++      callUsed[fallbackIndex] = true;
++      item.call = calls[fallbackIndex] ?? null;
++    }
++  }
++
++  const sections: TurnFilePatchSection[] = [];
++  for (const item of paired) {
++    if (item.call == null) continue;
++    if (item.call.filePath == null || !matchesRepoPath(item.call.filePath, repoRelPath)) {
++      continue;
++    }
++    sections.push({ toolName: item.call.toolName, rows: parseStructuredPatch(item.patch) });
++  }
++  return sections;
++}
++
++/**
++ * 回退配对（②）的编辑族工具先验：structuredPatch 抓取链不限工具名（Edit 与
++ * Write 覆盖写均携带），但回退没有 id 可查，必须收紧到「可能有补丁」的调用，
++ * 否则 Bash/Read 等调用会吃走 Edit 的补丁。命名按「含 edit/write/patch 词根」
++ * 宽匹配，覆盖 provider 方言（apply_patch / edit_file / str_replace…）。
++ */
++function isPatchEligibleToolName(toolName: string): boolean {
++  const lowered = toolName.toLowerCase();
++  return lowered.includes("edit") || lowered.includes("write") || lowered.includes("patch");
++}
+diff --git a/frontend/src/components/daemon/turn-live-marquee.tsx b/frontend/src/components/daemon/turn-live-marquee.tsx
+index 81e02547a..b632ecd80 100644
+--- a/frontend/src/components/daemon/turn-live-marquee.tsx
++++ b/frontend/src/components/daemon/turn-live-marquee.tsx
+@@ -312,6 +312,53 @@ export const TurnLiveMarquee = memo(function TurnLiveMarquee({
+   const [visible, setVisible] = useState(true);
+   const [ready, setReady] = useState(false);
+ 
++  /** 滚动循环句柄（null=未在跑）：追平即停排，target 更新/恢复可见时重启
++   *（2026-10-23-review-risk-fixes-2：旧形态 step 在追平分支外无条件续排，
++   * 可见且追平后仍 ~60fps 空转至轮终态卸载）。 */
++  const rafRef = useRef<number | null>(null);
++  /** visible 的 ref 镜像——ensureScroll 从 applyTarget 回调侧免陈闭包读取。 */
++  const visibleRef = useRef(visible);
++  useEffect(() => {
++    visibleRef.current = visible;
++  }, [visible]);
++
++  const stopScroll = useCallback(() => {
++    if (rafRef.current !== null) {
++      cancelAnimationFrame(rafRef.current);
++      rafRef.current = null;
++    }
++  }, []);
++
++  /** 起排（未在跑时）：追向「最新条贴右缘」的目标；到达即停，不循环、不回跳。 */
++  const ensureScroll = useCallback(() => {
++    if (reduced || !visibleRef.current) return;
++    if (rafRef.current !== null) return; // 循环已在跑
++    const track = trackRef.current;
++    if (!track) return;
++    let last = performance.now();
++    const step = (now: number) => {
++      const dt = Math.min(80, now - last);
++      last = now;
++      const target = targetRef.current;
++      const distance = offsetRef.current - target;
++      if (distance > 0.5) {
++        // 追赶距离越大速度越快：事件密集时加速，稀疏时慢速流动。
++        const speed = Math.min(
++          LIVE_MARQUEE_MAX_SPEED,
++          LIVE_MARQUEE_BASE_SPEED + distance * 1.2,
++        );
++        const delta = Math.min(distance, (speed * dt) / 1000);
++        offsetRef.current -= delta;
++        if (offsetRef.current - target < 0.5) offsetRef.current = target;
++        track.style.transform = `translate3d(${offsetRef.current}px, 0, 0)`;
++        rafRef.current = requestAnimationFrame(step); // 只有仍在追才续排
++      } else {
++        rafRef.current = null; // 追平停排；applyTarget/恢复可见时再重启
++      }
++    };
++    rafRef.current = requestAnimationFrame(step);
++  }, [reduced]);
++
+   const latest = entries.length > 0 ? entries[entries.length - 1]! : null;
+ 
+   /**
+@@ -342,7 +389,9 @@ export const TurnLiveMarquee = memo(function TurnLiveMarquee({
+       track.style.transform = `translate3d(${next}px, 0, 0)`;
+       setReady(true);
+     }
+-  }, []);
++    // target 更新是重启滚动的入口之一（此前停排时新目标到来要能再起排）。
++    ensureScroll();
++  }, [ensureScroll]);
+ 
+   // entries 变化 / 挂载：重算目标（首帧直接定位到最新；ready 前隐藏防闪）。
+   useEffect(() => {
+@@ -368,34 +417,16 @@ export const TurnLiveMarquee = memo(function TurnLiveMarquee({
+     return () => observer.disconnect();
+   }, [reduced, applyTarget]);
+ 
+-  // 连续滚动：追向「最新条贴右缘」的目标；到达即停，不循环、不回跳。
++  // 滚动生命周期：不可见/reduced 暂停（cancel），恢复可见时重启；追平停排后
++  // 由 applyTarget（entries/resize 的 target 更新入口）负责再起排。
+   useEffect(() => {
+-    if (reduced || !visible) return;
+-    const track = trackRef.current;
+-    if (!track) return;
+-    let raf = 0;
+-    let last = performance.now();
+-    const step = (now: number) => {
+-      const dt = Math.min(80, now - last);
+-      last = now;
+-      const target = targetRef.current;
+-      const distance = offsetRef.current - target;
+-      if (distance > 0.5) {
+-        // 追赶距离越大速度越快：事件密集时加速，稀疏时慢速流动。
+-        const speed = Math.min(
+-          LIVE_MARQUEE_MAX_SPEED,
+-          LIVE_MARQUEE_BASE_SPEED + distance * 1.2,
+-        );
+-        const delta = Math.min(distance, (speed * dt) / 1000);
+-        offsetRef.current -= delta;
+-        if (offsetRef.current - target < 0.5) offsetRef.current = target;
+-        track.style.transform = `translate3d(${offsetRef.current}px, 0, 0)`;
+-      }
+-      raf = requestAnimationFrame(step);
+-    };
+-    raf = requestAnimationFrame(step);
+-    return () => cancelAnimationFrame(raf);
+-  }, [reduced, visible]);
++    if (reduced || !visible) {
++      stopScroll();
++      return;
++    }
++    ensureScroll();
++    return stopScroll;
++  }, [reduced, visible, ensureScroll, stopScroll]);
+ 
+   // 可见性暂停（FR-06）：observer 不可用时不报错，默认保持运行。
+   useEffect(() => {
+diff --git a/frontend/src/lib/__tests__/tailwind-semantic-colors.test.ts b/frontend/src/lib/__tests__/tailwind-semantic-colors.test.ts
+new file mode 100644
+index 000000000..30dd0e6c6
+--- /dev/null
++++ b/frontend/src/lib/__tests__/tailwind-semantic-colors.test.ts
+@@ -0,0 +1,61 @@
++// 2026-10-23-semantic-color-scale-fix：语义色数字阶配置断言。
++//
++// 背景：warning/info/destructive 曾只有 DEFAULT+foreground，而组件使用
++// -50/-200/-500/-700 类名——Tailwind 对未定义键静默不生成 CSS，导致左栏琥珀点
++// 透明、活性徽章软底/描边/深字丢失。本测试钉住配置面，防止再次「类名写了但
++// 配置没定义」的静默失效（渲染级验证另见变更目录 visual-evidence.md 的构建记录）。
++import { describe, it, expect } from "vitest";
++
++import config from "../../../tailwind.config";
++
++/** 调色板对象：DEFAULT/foreground 为字符串，数字阶可能为字符串或函数（brand/slate）。 */
++type Palette = Record<string, unknown> & {
++  DEFAULT?: string;
++  foreground?: string;
++};
++
++const colors = (config.theme?.extend?.colors ?? {}) as Record<string, Palette>;
++
++function palette(name: string): Palette {
++  const p = colors[name];
++  expect(p, `${name} 调色板缺失`).toBeTruthy();
++  return p!;
++}
++
++describe("tailwind 语义色数字阶（2026-10-23-semantic-color-scale-fix）", () => {
++  const names = ["warning", "info", "destructive"] as const;
++
++  for (const name of names) {
++    it(`${name} 的 50/200/500/700 存在且派生形态正确`, () => {
++      const scale = palette(name);
++
++      // 500 = 基色本体
++      expect(scale[500]).toBe(`hsl(var(--${name}))`);
++      // 50/200 = 向背景色混出的软底
++      expect(scale[50]).toContain("color-mix");
++      expect(scale[50]).toContain(`hsl(var(--${name}))`);
++      expect(scale[50]).toContain("hsl(var(--background))");
++      expect(scale[200]).toContain("color-mix");
++      expect(scale[200]).toContain("hsl(var(--background))");
++      // 700 = 向前景色混出的字色；50% 基色占比是对照 WCAG AA 复算后的下限
++      // （评审 P2：75% 时两套浅色主题最差 3.08:1，50% 时最差 5.07:1）
++      expect(scale[700]).toContain("color-mix");
++      expect(scale[700]).toContain("hsl(var(--foreground))");
++      expect(scale[700]).toContain("50%, hsl(var(--foreground))");
++    });
++  }
++
++  it("DEFAULT/foreground 零漂移，既有 brand/slate 色阶不受影响", () => {
++    expect(palette("warning").DEFAULT).toBe("hsl(var(--warning))");
++    expect(palette("warning").foreground).toBe("hsl(var(--warning-foreground))");
++    expect(palette("info").DEFAULT).toBe("hsl(var(--info))");
++    expect(palette("info").foreground).toBe("hsl(var(--info-foreground))");
++    expect(palette("destructive").DEFAULT).toBe("hsl(var(--destructive))");
++    expect(palette("destructive").foreground).toBe(
++      "hsl(var(--destructive-foreground))",
++    );
++    // 既有函数式色阶原样保留（品牌/中性阶）
++    expect(palette("brand")[500]).toBeTypeOf("function");
++    expect(palette("slate")[500]).toBeTypeOf("function");
++  });
++});
+diff --git a/frontend/src/lib/__tests__/thinking-translate.test.ts b/frontend/src/lib/__tests__/thinking-translate.test.ts
+index 4a78d9402..b65522531 100644
+--- a/frontend/src/lib/__tests__/thinking-translate.test.ts
++++ b/frontend/src/lib/__tests__/thinking-translate.test.ts
+@@ -17,6 +17,7 @@ vi.mock("@/lib/api", () => ({ apiFetch: (...args: unknown[]) => apiFetchMock(...
+ 
+ import {
+   needsTranslation,
++  requestTimeoutMsFor,
+   resetThinkingTranslateForTests,
+   splitIntoChunks,
+   translateText,
+@@ -70,6 +71,18 @@ describe("splitIntoChunks 分块", () => {
+   });
+ });
+ 
++describe("requestTimeoutMsFor 超时预算（与后端 engine._timeout_for 公式同源）", () => {
++  it("单块 = 基准 + 余量；按最坏后端块数（每 1000 字符一块）线性放宽", () => {
++    expect(requestTimeoutMsFor([{ chunk: "x".repeat(40) }])).toBe(25_000);
++    expect(requestTimeoutMsFor([{ chunk: "y".repeat(1800) }])).toBe(27_500); // 2 后端块
++    expect(requestTimeoutMsFor([{ chunk: "z".repeat(1000) }])).toBe(25_000); // 恰 1000 → 1 块
++  });
++  it("满批 16×1800 最坏 32 后端块 = 后端公式 97.5s + 5s 余量（有界兜底）", () => {
++    const worst = Array.from({ length: 16 }, () => ({ chunk: "w".repeat(1800) }));
++    expect(requestTimeoutMsFor(worst)).toBe(102_500);
++  });
++});
++
+ describe("translateText 合批/缓存/降级", () => {
+   it("不值得翻 → 立即 null 零请求", async () => {
+     const out = await translateText("这段中文思考不需要翻译。");
+@@ -131,13 +144,34 @@ describe("translateText 合批/缓存/降级", () => {
+     await expect(p2).resolves.toBe("恢复了");
+   });
+ 
+-  it("请求显式带 20s 超时（后端卡住时由 apiFetch 中止，不退化为无限等待）", async () => {
++  it("请求超时按批动态——单块=基准+余量（后端卡住时仍由 apiFetch 中止兜底）", async () => {
+     apiFetchMock.mockResolvedValue(okResponse([{ id: "0", text: "译超时", translated: true }]));
+     const p = translateText("timeout option english thinking text check.");
+     await vi.advanceTimersByTimeAsync(250);
+     await expect(p).resolves.toBe("译超时");
+     const options = apiFetchMock.mock.calls[0]![1] as { timeoutMs?: number };
+-    expect(options.timeoutMs).toBe(20_000);
++    expect(options.timeoutMs).toBe(25_000); // 1 个后端块：20s 基准 + 5s 余量
++  });
++
++  it("满批 16×1800 的 timeoutMs ≥ 后端公式 97.5s——不再被固定 20s 误杀（2026-10-23 FR-01）", async () => {
++    apiFetchMock.mockImplementation(
++      async (_path: string, options: { json: { items: Array<{ id: string }> } }) =>
++        okResponse(options.json.items.map((it, idx) => ({ id: it.id, text: `[${idx}]`, translated: true }))),
++    );
++    // 单段无段界长文 → 恰按 1800 硬切成 16 块满批（15×1800 + 1560）
++    const sentence = "Full batch budget english thinking sentence check. ";
++    const text = sentence.repeat(560); // ~28560 字符 → 16 块单批
++    const p = translateText(text);
++    await vi.advanceTimersByTimeAsync(250);
++    await p;
++    const options = apiFetchMock.mock.calls[0]![1] as {
++      timeoutMs?: number;
++      json: { items: Array<{ text: string }> };
++    };
++    expect(options.json.items).toHaveLength(16);
++    // 最坏 32 个后端块（1800 → 2×1000）：20s + 31×2.5s = 97.5s，前端再 +5s 余量
++    expect(options.timeoutMs).toBeGreaterThanOrEqual(20_000 + 31 * 2_500);
++    expect(options.timeoutMs).toBe(102_500);
+   });
+ 
+   it("超时（apiFetch reject timeout）→ null + 60s 退避", async () => {
+@@ -160,6 +194,25 @@ describe("translateText 合批/缓存/降级", () => {
+     expect(apiFetchMock).toHaveBeenCalledTimes(1);
+   });
+ 
++  it("2xx 脏响应体（null）→ 本批回退原文+退避，Promise 不悬挂（2026-10-23-review-risk-fixes-2 FR-04）", async () => {
++    // apiFetch 2xx 时 safeJsonParse 失败得 null 原样透出——旧实现 resp.engine_ready
++    // 解引用抛错后无人兜底：该批 Assembler 永不 settle（UI 恒「翻译中」）+ inflight 泄漏
++    apiFetchMock.mockResolvedValue(null);
++    const p1 = translateText("dirty response body english thinking text case.");
++    await vi.advanceTimersByTimeAsync(250);
++    await expect(p1).resolves.toBeNull();
++    // 退避期内：新文本零请求直接回退
++    await expect(translateText("second text during dirty body backoff.")).resolves.toBeNull();
++    expect(apiFetchMock).toHaveBeenCalledTimes(1);
++  });
++
++  it("畸形响应缺 items → 同款降级 resolve null（不悬挂）", async () => {
++    apiFetchMock.mockResolvedValue({ ok: true, engine_ready: true, reason: null });
++    const p = translateText("malformed items missing english thinking text.");
++    await vi.advanceTimersByTimeAsync(250);
++    await expect(p).resolves.toBeNull();
++  });
++
+   it("超长文按块拆分为多个 item，译文按序拼回", async () => {
+     const part = "Long english paragraph for chunk splitting test. ".repeat(40); // ~2640
+     const text = `${part}\n\n${part}`;
+diff --git a/frontend/src/lib/thinking-translate.ts b/frontend/src/lib/thinking-translate.ts
+index 12df2f5fb..334d3e436 100644
+--- a/frontend/src/lib/thinking-translate.ts
++++ b/frontend/src/lib/thinking-translate.ts
+@@ -23,11 +23,32 @@ const BATCH_WINDOW_MS = 250;
+ /** 引擎不可用退避时长。 */
+ const UNAVAILABLE_BACKOFF_MS = 60_000;
+ /**
+- * 单次请求超时（2026-10-22-fix-translate-pending）：POST 默认无超时，后端子进程
+- * 卡在模型下载时请求会永久挂起（界面恒「翻译中」）。20s 后 abort 走网络失败同款
+- * 降级链（回退原文 + 60s 退避）；后端同类超时已同窗收紧（TRANSLATE_REQUEST_TIMEOUT_SEC）。
++ * 单次请求超时（2026-10-22-fix-translate-pending 起 POST 必带超时防挂起；
++ * 2026-10-23-translate-budget-align 改按批动态）：镜像后端等待预算公式
++ * （engine.py `_timeout_for`：基准 20s + 每多一块 2.5s，改动须双侧同步），
++ * 按本批**最坏后端块数**估算——前端块 ≤1800 字符，后端 CHUNK_MAX_CHARS=1000
++ * 二次细切，每条前端块最多膨胀为 2 块。外加 5s HTTP/线程池余量；前端超时是
++ * 兜底而非首道防线（后端预算先到期会 fail-soft 正常返回），满批 16×1800 最坏
++ * 32 块 = 102.5s，仍有界防挂起。旧固定 20s 会被 e7ce2a101 实测 21.5s 的正常
++ * 满批推理误杀并累计后端崩溃计数（3 次即 600s 退避）。
+  */
+-const REQUEST_TIMEOUT_MS = 20_000;
++const BACKEND_TIMEOUT_BASE_MS = 20_000;
++const BACKEND_TIMEOUT_PER_CHUNK_MS = 2_500;
++const BACKEND_CHUNK_MAX_CHARS = 1_000;
++const REQUEST_TIMEOUT_MARGIN_MS = 5_000;
++
++/** 按批动态请求超时：后端公式（最坏块数）+ 余量。 */
++export function requestTimeoutMsFor(entries: ReadonlyArray<{ chunk: string }>): number {
++  const backendChunks = entries.reduce(
++    (sum, entry) => sum + Math.max(1, Math.ceil(entry.chunk.length / BACKEND_CHUNK_MAX_CHARS)),
++    0,
++  );
++  return (
++    BACKEND_TIMEOUT_BASE_MS +
++    Math.max(0, backendChunks - 1) * BACKEND_TIMEOUT_PER_CHUNK_MS +
++    REQUEST_TIMEOUT_MARGIN_MS
++  );
++}
+ /** 内存缓存条目上限（FIFO 淘汰——译文纯函数结果，先入者先淘汰足够）。 */
+ const CACHE_MAX_ENTRIES = 500;
+ 
+@@ -157,30 +178,31 @@ function failEntries(entries: QueueEntry[]): void {
+ 
+ async function requestBatch(entries: QueueEntry[]): Promise<void> {
+   const items = entries.map((entry, idx) => ({ id: `${idx}`, text: entry.chunk }));
+-  let resp: TranslateApiResponse;
+   try {
+-    resp = await apiFetch<TranslateApiResponse>("/api/translate/thinking", {
++    const resp = await apiFetch<TranslateApiResponse>("/api/translate/thinking", {
+       method: "POST",
+       json: { items, target: "zh" },
+-      timeoutMs: REQUEST_TIMEOUT_MS,
++      timeoutMs: requestTimeoutMsFor(entries),
+       timeoutMessage: "翻译请求超时，已回退原文",
+     });
++    if (!resp.engine_ready) {
++      unavailableUntil = Date.now() + UNAVAILABLE_BACKOFF_MS;
++      failEntries(entries);
++      return;
++    }
++    const byId = new Map(resp.items.map((it) => [it.id, it]));
++    entries.forEach((entry, idx) => {
++      const it = byId.get(`${idx}`);
++      fillEntry(entry, it && it.translated ? it.text : null);
++    });
+   } catch {
+-    // 网络失败与引擎不可用同语义：本批回退原文 + 退避（防风暴）
+-    unavailableUntil = Date.now() + UNAVAILABLE_BACKOFF_MS;
+-    failEntries(entries);
+-    return;
+-  }
+-  if (!resp.engine_ready) {
++    // 网络失败/超时与 2xx 脏响应体（safeJsonParse 得 null / items 缺失时上方
++    // 解引用抛 TypeError）同语义：本批回退原文 + 退避（防风暴）——异常逃逸会
++    // 让该批 Assembler 永不 settle（UI 恒「翻译中」）且 inflight 条目泄漏
++    //（2026-10-23-review-risk-fixes-2 / FR-04）。
+     unavailableUntil = Date.now() + UNAVAILABLE_BACKOFF_MS;
+     failEntries(entries);
+-    return;
+   }
+-  const byId = new Map(resp.items.map((it) => [it.id, it]));
+-  entries.forEach((entry, idx) => {
+-    const it = byId.get(`${idx}`);
+-    fillEntry(entry, it && it.translated ? it.text : null);
+-  });
+ }
+ 
+ function flush(): void {
+diff --git a/frontend/tailwind.config.ts b/frontend/tailwind.config.ts
+index 19a05a5b9..d525e1206 100644
+--- a/frontend/tailwind.config.ts
++++ b/frontend/tailwind.config.ts
+@@ -1,5 +1,24 @@
+ import type { Config } from "tailwindcss";
+ 
++/**
++ * 语义色数字阶派生（2026-10-23-semantic-color-scale-fix）。
++ *
++ * 背景：warning/info/destructive 此前只有 DEFAULT+foreground，而 liveness-badge
++ * 五态与左栏「在等你」琥珀点使用 -50/-200/-500/-700 数字阶类名——Tailwind 对
++ * 未定义键静默不生成 CSS，导致状态点透明、徽章软底/描边/深字全丢。
++ *
++ * 取值全部由主题块既有基色变量派生（无硬编码 hex，随 data-theme 自动换肤）：
++ * - 500 = 基色本体；
++ * - 50/200 向 background 混出软底（浅色淡彩 / 深色暗彩）；
++ * - 700 向 foreground 混出前景字色（浅色加深 / 深色提亮）。
++ */
++const semanticScale = (cssVar: string) => ({
++  50: `color-mix(in srgb, hsl(var(${cssVar})) 10%, hsl(var(--background)))`,
++  200: `color-mix(in srgb, hsl(var(${cssVar})) 35%, hsl(var(--background)))`,
++  500: `hsl(var(${cssVar}))`,
++  700: `color-mix(in srgb, hsl(var(${cssVar})) 50%, hsl(var(--foreground)))`,
++});
++
+ const config: Config = {
+   darkMode: ["class"],
+   content: [
+@@ -36,6 +55,7 @@ const config: Config = {
+         destructive: {
+           DEFAULT: "hsl(var(--destructive))",
+           foreground: "hsl(var(--destructive-foreground))",
++          ...semanticScale("--destructive"),
+         },
+ 
+         // ---- 状态语义(与 tokens.semantic 对齐,DEFAULT 走 hsl var,
+@@ -47,6 +67,7 @@ const config: Config = {
+         warning: {
+           DEFAULT: "hsl(var(--warning))",
+           foreground: "hsl(var(--warning-foreground))",
++          ...semanticScale("--warning"),
+         },
+         error: {
+           DEFAULT: "hsl(var(--error))",
+@@ -55,6 +76,7 @@ const config: Config = {
+         info: {
+           DEFAULT: "hsl(var(--info))",
+           foreground: "hsl(var(--info-foreground))",
++          ...semanticScale("--info"),
+         },
+ 
+         // ---- brand 语义色阶(主题感知:50-950 十一档纯 CSS 变量名映射,无硬编码 hex;
+@@ -94,7 +116,7 @@ const config: Config = {
+               return `color-mix(in srgb, var(--color-brand-${step}) ${pct}, transparent)`;
+             },
+           ])
+-        ),
++        ) as unknown as Record<string, string>,
+ 
+         // ---- 基础调色板·真实信息色(直接 hex,与 tokens.color.palette 对齐,
+         //      不走 CSS 变量;blue 阶仅限真信息蓝/外部标识色场景;
+@@ -172,7 +194,7 @@ const config: Config = {
+               return `color-mix(in srgb, var(--color-slate-${step}) ${pct}, transparent)`;
+             },
+           ])
+-        ),
++        ) as unknown as Record<string, string>,
+       },
+       fontFamily: {
+         // 通过 var(--font-inter) 接入 task-02 next/font 注入的 Inter,
+diff --git a/sillyhub-daemon/src/interactive/session-manager.ts b/sillyhub-daemon/src/interactive/session-manager.ts
+index 063d249af..c399fc7ef 100644
+--- a/sillyhub-daemon/src/interactive/session-manager.ts
++++ b/sillyhub-daemon/src/interactive/session-manager.ts
+@@ -1932,6 +1932,17 @@ export class SessionManager {
+           baselineHead: turn?.baselineHead,
+           toolCallPaths: turn?.toolCallPaths ?? [],
+           turnStartedAtMs: turn?.startedAtMs,
++          // 2026-10-23-review-risk-fixes-2：diff 阶段非 timeout git 错误此前在
++          // 采集器 catch 里无痕消失——落结构化 warn（快照 reason 枚举冻结禁新增）。
++          onGitDiagnostic: (d) => {
++            console.warn('[session-manager] turn_file_changes_git_degraded', {
++              run_id: runId,
++              workspace_root: workspaceRoot,
++              stage: d.stage,
++              reason: d.reason,
++              message: d.message,
++            });
++          },
+         });
+         this._reportTurnSnapshot(
+           this._buildTurnSnapshotReport({
+diff --git a/sillyhub-daemon/src/interactive/turn-file-changes-types.ts b/sillyhub-daemon/src/interactive/turn-file-changes-types.ts
+index 4fc831075..9651a0368 100644
+--- a/sillyhub-daemon/src/interactive/turn-file-changes-types.ts
++++ b/sillyhub-daemon/src/interactive/turn-file-changes-types.ts
+@@ -172,6 +172,17 @@ export interface CollectTurnFileChangesInput {
+   limits?: Partial<TurnFileChangesLimits>;
+   /** 测试注入点；缺省走 node:child_process.execFile。 */
+   execFile?: TurnFileChangesExecFile;
++  /**
++   * diff 阶段非 timeout git 错误的结构化诊断出口（2026-10-23-review-risk-fixes-2）：
++   * 此前这类错误在 catch 里无痕消失（无日志无 reason，快照无因降级不可排查）。
++   * 快照 reason 是冻结枚举（禁新增值，错误按事件命名），故错误走诊断回调而非
++   * 快照字段——生产由 session-manager 落 `console.warn`；缺省不传=行为同旧。
++   */
++  onGitDiagnostic?: (diagnostic: {
++    stage: 'name-status' | 'numstat';
++    reason: TurnFileChangesReason | null;
++    message: string;
++  }) => void;
+ }
+ 
+ /* ── 遥测（模块内滑窗，零外部依赖）──────────────────────────────────────── */
+diff --git a/sillyhub-daemon/src/interactive/turn-file-changes.ts b/sillyhub-daemon/src/interactive/turn-file-changes.ts
+index 0e505851b..e06dff564 100644
+--- a/sillyhub-daemon/src/interactive/turn-file-changes.ts
++++ b/sillyhub-daemon/src/interactive/turn-file-changes.ts
+@@ -608,6 +608,8 @@ async function collectInner(
+     signal: AbortSignal;
+     taskStartMs: number;
+     ctx: CollectContext;
++    /** diff 阶段非 timeout 错误的结构化诊断出口（2026-10-23-review-risk-fixes-2）。 */
++    onGitDiagnostic?: CollectTurnFileChangesInput['onGitDiagnostic'];
+   },
+   progress: CollectProgress,
+ ): Promise<CollectOutcome> {
+@@ -692,9 +694,18 @@ async function collectInner(
+         baselineHead,
+       ]);
+     } catch (error) {
+-      if (classifyGitError(error)?.reason === 'timeout') {
++      const classified = classifyGitError(error);
++      if (classified?.reason === 'timeout') {
+         escalateIfTimeout(error);
+         progress.degradedReason = 'timeout';
++      } else {
++        // 2026-10-23-review-risk-fixes-2：非 timeout 错误（bad object / dubious
++        // ownership 等）此前无痕消失——快照 reason 枚举冻结，改走诊断回调。
++        args.onGitDiagnostic?.({
++          stage: 'name-status',
++          reason: classified?.reason ?? null,
++          message: error instanceof Error ? error.message : String(error),
++        });
+       }
+     }
+     try {
+@@ -706,9 +717,16 @@ async function collectInner(
+       ]);
+       progress.lineCounts = true;
+     } catch (error) {
+-      if (classifyGitError(error)?.reason === 'timeout') {
++      const classified = classifyGitError(error);
++      if (classified?.reason === 'timeout') {
+         escalateIfTimeout(error);
+         progress.degradedReason = 'timeout';
++      } else {
++        args.onGitDiagnostic?.({
++          stage: 'numstat',
++          reason: classified?.reason ?? null,
++          message: error instanceof Error ? error.message : String(error),
++        });
+       }
+       progress.lineCounts = false;
+     }
+@@ -1037,6 +1055,7 @@ export async function collectTurnFileChanges(
+           signal: controller.signal,
+           taskStartMs,
+           ctx,
++          onGitDiagnostic: input.onGitDiagnostic,
+         },
+         progress,
+       ),
+diff --git a/sillyhub-daemon/src/sillyspec-manager.ts b/sillyhub-daemon/src/sillyspec-manager.ts
+index 41422b5df..fcbc3ef99 100644
+--- a/sillyhub-daemon/src/sillyspec-manager.ts
++++ b/sillyhub-daemon/src/sillyspec-manager.ts
+@@ -734,8 +734,14 @@ export class SillySpecManager {
+     | undefined;
+   /** db_missing 连败计数（cwd 键控；成功清零）。 */
+   private readonly _dbMissingStreaks = new Map<string, number>();
+-  /** 已淘汰 cwd（进程内 skip 表：淘汰后不再对该根发起 CLI）。 */
+-  private readonly _evictedCwds = new Set<string>();
++  /** 已淘汰采集目标（进程内 skip 表）：rootPath → 被淘汰的 workspaceId。
++   *
++   * 2026-10-23-review-risk-fixes-2：由裸根 Set 改双键 Map——陈旧探针的淘汰
++   * 条目只封发起淘汰的那个工作区，同根新 wsId（重建/竞态 claim）照常采集，
++   * 不再被永久静默跳过。 */
++  private readonly _evictedCwds = new Map<string, string | null>();
++  /** 淘汰 skip 命中的一次性 warn 标记（防每拍刷屏；同名重 claim 时清除可再记）。 */
++  private readonly _evictedSkipLogged = new Set<string>();
+   /** 采集超时毫秒。 */
+   private readonly _statusTimeoutMs: number;
+   /**
+@@ -1041,7 +1047,19 @@ export class SillySpecManager {
+     // 不记失败（非瞬态查询失败，anyFailed 聚合不置位、_statusError 不动）；
+     // 具名工作区滞留摘要槽移除（平台不再显示对该根的陈旧摘要）。
+     // db_missing 淘汰表命中：项目侧永久缺库已被淘汰，不再对该根发起 CLI。
+-    if (this._evictedCwds.has(cwd)) return true;
++    // 2026-10-23-review-risk-fixes-2：skip 判定收紧为双键（rootPath→被淘汰
++    // workspaceId 与本目标一致才 skip）——陈旧探针的淘汰条目不再误伤同根新
++    // wsId；命中打一次性 warn（旧形态静默停摆零日志，不可排查）。
++    if (this._evictedCwds.get(cwd) === workspaceId) {
++      if (!this._evictedSkipLogged.has(cwd)) {
++        this._evictedSkipLogged.add(cwd);
++        this._log('warn', 'sillyspec_status_skip_evicted', {
++          cwd,
++          workspace_id: workspaceId ?? undefined,
++        });
++      }
++      return true;
++    }
+     const crossrepoMarker = join(cwd, '.git', 'sillyspec-crossrepo.json');
+     if (existsSync(crossrepoMarker)) {
+       if (!this._crossrepoSkipLogged.has(cwd)) {
+@@ -1127,7 +1145,7 @@ export class SillySpecManager {
+         this._log('warn', 'sillyspec_status_db_missing', { cwd, consecutive: streak });
+         if (streak >= STATUS_DB_MISSING_EVICT_AFTER) {
+           this._dbMissingStreaks.delete(cwd);
+-          this._evictedCwds.add(cwd);
++          this._evictedCwds.set(cwd, workspaceId);
+           this._log('info', 'sillyspec_status_root_evicted', {
+             cwd,
+             workspace_id: workspaceId ?? undefined,
+@@ -1241,10 +1259,12 @@ export class SillySpecManager {
+    * 清除 db_missing 淘汰标记（2026-10-22-sillyspec-probe-db-missing-evict /
+    * FR-01 场景2）：工作区重新 claim 同名根时由 daemon 调用——skip 表与连败计数
+    * 一并清空，该根恢复采集（若项目仍缺库则重新计满 3 次再淘汰）。
++   * 2026-10-23-review-risk-fixes-2：同步清一次性 warn 标记（再淘汰时可再记一条）。
+    */
+   clearStatusProbeEviction(rootPath: string): void {
+     this._evictedCwds.delete(rootPath);
+     this._dbMissingStreaks.delete(rootPath);
++    this._evictedSkipLogged.delete(rootPath);
+   }
+ 
+   /** 三态②：置能力缺失（快照 null）+ warn 一次同类静默。 */
+diff --git a/sillyhub-daemon/tests/interactive/turn-file-changes.test.ts b/sillyhub-daemon/tests/interactive/turn-file-changes.test.ts
+index 6588e20ae..7cc025b2e 100644
+--- a/sillyhub-daemon/tests/interactive/turn-file-changes.test.ts
++++ b/sillyhub-daemon/tests/interactive/turn-file-changes.test.ts
+@@ -626,6 +626,33 @@ describe('collectTurnFileChanges × 降级路径', () => {
+     expect(fileAt(snap, 'a.ts')).toMatchObject({ status: 'modified', added: 2, deleted: 0 });
+   });
+ 
++  it('name-status 非 timeout git 错误经 onGitDiagnostic 落结构化诊断，快照语义不变（2026-10-23-review-risk-fixes-2）', async () => {
++    const dir = await plainDir();
++    const fake = makeFakeExec((args) => {
++      if (args.includes('status')) return 'M  a.ts\0';
++      if (args.includes('--name-status')) return new Error('fatal: bad object');
++      return '2\t0\ta.ts\n';
++    });
++    const diagnostics: Array<{
++      stage: string;
++      reason: string | null;
++      message: string;
++    }> = [];
++    const snap = await collectTurnFileChanges({
++      runId: 'run-name-status-git-error',
++      workspaceRoot: dir,
++      baselineHead: 'deadbeefdeadbeefdeadbeefdeadbeefdeadbeef',
++      execFile: fake.exec,
++      onGitDiagnostic: (d) => diagnostics.push({ ...d }),
++    });
++    // 旧实现：非 timeout 错误在 catch 里无痕消失（无日志/无 reason 可排查）
++    expect(diagnostics).toEqual([
++      { stage: 'name-status', reason: null, message: 'fatal: bad object' },
++    ]);
++    // 快照照常产出：numstat 行级可信、清单在——降级语义与旧一致（reason 枚举冻结禁新增）
++    expect(fileAt(snap, 'a.ts')).toMatchObject({ status: 'modified', added: 2, deleted: 0 });
++  });
++
+   it('git 缺失：执行器 ENOENT → unavailable + reason=git_missing（不抛错）', async () => {
+     const dir = await plainDir();
+     const fake = makeFakeExec(() => {
+diff --git a/sillyhub-daemon/tests/sillyspec-manager.test.ts b/sillyhub-daemon/tests/sillyspec-manager.test.ts
+index 086470370..a7df6b526 100644
+--- a/sillyhub-daemon/tests/sillyspec-manager.test.ts
++++ b/sillyhub-daemon/tests/sillyspec-manager.test.ts
+@@ -1493,4 +1493,42 @@ describe('2026-10-22-sillyspec-probe-db-missing-evict：db_missing 连败淘汰'
+     await h.manager.collectStatusOnce();
+     expect(evictions).toHaveLength(0);
+   });
++
++  it('同根新 workspaceId 不被陈旧淘汰条目静默跳过 + skip 命中一次性 warn（2026-10-23-review-risk-fixes-2）', async () => {
++    const evictions: Array<{ workspaceId: string; rootPath: string }> = [];
++    // 本用例私有的可变目标表（harness 闭包持同引用，末段翻转为 ws-rebuilt）
++    const targets: Array<{ workspaceId: string | null; rootPath: string }> = [
++      { workspaceId: WS, rootPath: ROOT },
++    ];
++    const h = makeStatusHarness({
++      targets,
++      outcomeByCwd: { [ROOT]: DB_MISSING },
++      statusRootEvict: (workspaceId, rootPath) =>
++        evictions.push({ workspaceId, rootPath }),
++    });
++    // 连败 3 次 → 淘汰（skip 表记 ROOT→WS）
++    await h.manager.collectStatusOnce();
++    await h.manager.collectStatusOnce();
++    await h.manager.collectStatusOnce();
++    expect(evictions).toEqual([{ workspaceId: WS, rootPath: ROOT }]);
++    const evictedCalls = h.calls.filter((c) => c.options.cwd === ROOT).length;
++    // 同 wsId 再拍：skip 生效（既有语义保持）+ 一次性 warn 恰一条不刷屏
++    await h.manager.collectStatusOnce();
++    expect(h.calls.filter((c) => c.options.cwd === ROOT).length).toBe(evictedCalls);
++    expect(h.events.filter((e) => e === 'sillyspec_status_skip_evicted')).toHaveLength(1);
++    await h.manager.collectStatusOnce();
++    expect(h.events.filter((e) => e === 'sillyspec_status_skip_evicted')).toHaveLength(1);
++    // 竞态形态：W2 重 claim 清表 → W1 陈旧探针的连败淘汰再落地一次
++    h.manager.clearStatusProbeEviction(ROOT);
++    await h.manager.collectStatusOnce();
++    await h.manager.collectStatusOnce();
++    await h.manager.collectStatusOnce();
++    expect(evictions).toHaveLength(2);
++    const afterStale = h.calls.filter((c) => c.options.cwd === ROOT).length;
++    // W2 采集同根：必须照常发起 CLI——旧实现按裸根键控恒 skip（永久静默停摆）
++    targets.length = 0;
++    targets.push({ workspaceId: 'ws-rebuilt', rootPath: ROOT });
++    await h.manager.collectStatusOnce();
++    expect(h.calls.filter((c) => c.options.cwd === ROOT).length).toBe(afterStale + 1);
++  });
+ });
+\ No newline at end of file

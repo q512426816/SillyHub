@@ -7551,3 +7551,55 @@ superseded_by：FR-auth-003
   confirmed_at: null
   source_change: 2026-10-23-translate-budget-align
   status: active
+
+## FR-backend-028 tailwind.config.ts 为 warning/info/destructive 补齐数字阶 50/200/500/700，基于既有语义 CSS 变量用 color-mix 派生（主题感知、无硬编码 hex，三套主题块零新增变量）
+变更：2026-10-23-semantic-color-scale-fix
+状态：active
+摘要：类名按设计生成；双主题感知；DEFAULT 零漂移
+全文：.sillyspec/changes/archive/2026-10-23-semantic-color-scale-fix/requirements.md#FR-01
+最近确认：aeae93b1364ac8a3e84863afc939e3fd625da7ca
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-23-semantic-color-scale-fix:flow:测试绑定FR-01
+  tests: frontend/src/lib/__tests__/tailwind-semantic-colors.test.ts「三调色板 × 50/200/500/700 存在且派生形态正确 + DEFAULT/foreground/既有色阶零漂移」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-23-semantic-color-scale-fix
+  status: active
+
+## FR-backend-029 调用点零改动（liveness-badge 五态 + session-list-panel 两处 bg-warning-500 原样生效）
+变更：2026-10-23-semantic-color-scale-fix
+状态：active
+摘要：左栏琥珀点可见；活性徽章恢复软底
+全文：.sillyspec/changes/archive/2026-10-23-semantic-color-scale-fix/requirements.md#FR-02
+最近确认：aeae93b1364ac8a3e84863afc939e3fd625da7ca
+
+## FR-backend-030 用真实 tailwind 构建验证 bg-warning-500 / border-warning-200 等类确实生成 CSS（非仅配置在场）
+变更：2026-10-23-semantic-color-scale-fix
+状态：active
+摘要：构建产物命中
+全文：.sillyspec/changes/archive/2026-10-23-semantic-color-scale-fix/requirements.md#FR-03
+最近确认：aeae93b1364ac8a3e84863afc939e3fd625da7ca
+
+## FR-backend-031 新增配置断言测试防复发；触及面既有测试全绿
+变更：2026-10-23-semantic-color-scale-fix
+状态：active
+摘要：配置缺键即红
+全文：.sillyspec/changes/archive/2026-10-23-semantic-color-scale-fix/requirements.md#FR-04
+最近确认：aeae93b1364ac8a3e84863afc939e3fd625da7ca
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-23-semantic-color-scale-fix:flow:测试绑定FR-04
+  tests: frontend/src/lib/__tests__/tailwind-semantic-colors.test.ts「配置断言防复发」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-23-semantic-color-scale-fix
+  status: active
