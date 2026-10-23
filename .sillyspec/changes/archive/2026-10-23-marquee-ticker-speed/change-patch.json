@@ -1,0 +1,93 @@
+{
+  "change": "2026-10-23-marquee-ticker-speed",
+  "baseline": "40e4a067e2ccfff90162d2eb23ffe55c361dfc52",
+  "head": "33645b42e6613df200997828141cff7eabdaafba",
+  "files": [
+    "frontend/src/app/globals.css",
+    "sillyhub-daemon/src/network-info.ts",
+    "sillyhub-daemon/tests/network-info.test.ts"
+  ],
+  "totals": {
+    "files": 3,
+    "additions": 129,
+    "deletions": 1
+  },
+  "savedAt": "2026-10-23T02:18:26.687Z",
+  "note": "flow done 时点冻结（本变更可归属交付面：baseline..HEAD 提交面过滤 .sillyspec/ 只留 .sillyspec/docs/ 交付文档 + 独占树未提交交付；治理工件目录不入冻结——2026-10-12-close-trace-freeze-integrity FR-01）",
+  "modules": [
+    {
+      "id": "frontend",
+      "files": 1,
+      "doc": "docs/multi-agent-platform/modules/frontend.md",
+      "docTouched": false,
+      "docMissing": false
+    },
+    {
+      "id": "sillyhub-daemon",
+      "files": 2,
+      "doc": "docs/multi-agent-platform/modules/sillyhub-daemon.md",
+      "docTouched": false,
+      "docMissing": false
+    },
+    {
+      "id": "daemon",
+      "files": 2,
+      "doc": "docs/SillyHub/modules/daemon.md",
+      "docTouched": false,
+      "docMissing": false
+    },
+    {
+      "id": "frontend_app",
+      "files": 1,
+      "doc": "docs/SillyHub/modules/frontend_app.md",
+      "docTouched": false,
+      "docMissing": false
+    }
+  ],
+  "uncoveredDirs": [],
+  "moduleMaps": [
+    "docs/backend/modules/_module-map.yaml",
+    "docs/frontend/modules/_module-map.yaml",
+    "docs/multi-agent-platform/modules/_module-map.yaml",
+    "docs/SillyHub/modules/_module-map.yaml",
+    "docs/sillyhub-daemon/modules/_module-map.yaml"
+  ],
+  "scopeAudit": {
+    "mode": "full-flow",
+    "ok": true,
+    "degradedReason": null,
+    "baseAnchor": "40e4a067e2ccfff90162d2eb23ffe55c361dfc52",
+    "totals": {
+      "files": 3,
+      "additions": 129,
+      "deletions": 1
+    },
+    "rows": [
+      {
+        "path": "frontend/src/app/globals.css",
+        "additions": 1,
+        "deletions": 1,
+        "kind": "modified"
+      },
+      {
+        "path": "sillyhub-daemon/src/network-info.ts",
+        "additions": 52,
+        "deletions": 0,
+        "kind": "new"
+      },
+      {
+        "path": "sillyhub-daemon/tests/network-info.test.ts",
+        "additions": 76,
+        "deletions": 0,
+        "kind": "new"
+      }
+    ],
+    "excluded": {
+      "foreignDeclared": []
+    },
+    "note": "flow done 时点冻结（本文件落盘时采集）",
+    "closedBy": "flow done"
+  },
+  "patchSha256": "572c0b69a2a1194f48f3c60779afc19e8723127b1592faf3b2d99204f4ea6bf3",
+  "patchStatus": "ok"
+}

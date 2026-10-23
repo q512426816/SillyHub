@@ -410,3 +410,22 @@ superseded_by：FR-app-workspace-pages-002
   confirmed_at: null
   source_change: 2026-10-23-marquee-item-detail
   status: active
+
+## FR-styles-024 .sh-live-marquee-ticker 单圈时长由 8s 缩短到 3s，内部文本滚动速度明显提升
+变更：2026-10-23-marquee-ticker-speed
+状态：active
+摘要：运行中条目；减少动态效果
+全文：.sillyspec/changes/archive/2026-10-23-marquee-ticker-speed/requirements.md#FR-01
+最近确认：33645b42e6613df200997828141cff7eabdaafba
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-23-marquee-ticker-speed:flow:测试绑定FR-01
+  tests: frontend/src/components/daemon/__tests__/turn-live-marquee.test.tsx「运行中条目渲染 lucide 图标与转圈，文本区带内部滚动（FR-01）」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-23-marquee-ticker-speed
+  status: active

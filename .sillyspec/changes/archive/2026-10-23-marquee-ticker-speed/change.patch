@@ -1,0 +1,153 @@
+diff --git a/frontend/src/app/globals.css b/frontend/src/app/globals.css
+index c958def8a..bde8f03ae 100644
+--- a/frontend/src/app/globals.css
++++ b/frontend/src/app/globals.css
+@@ -1124,7 +1124,7 @@
+      双份文本各占 50%，平移一份即无缝；只在文本窗口 overflow-hidden 内滚动，
+      图标/状态/耗时区不参与。 */
+   .sh-live-marquee-ticker {
+-    animation: sh-live-marquee-ticker 8s linear infinite;
++    animation: sh-live-marquee-ticker 3s linear infinite;
+   }
+ }
+ 
+diff --git a/sillyhub-daemon/src/network-info.ts b/sillyhub-daemon/src/network-info.ts
+new file mode 100644
+index 000000000..32906cfd8
+--- /dev/null
++++ b/sillyhub-daemon/src/network-info.ts
+@@ -0,0 +1,52 @@
++import { networkInterfaces } from 'node:os';
++
++/**
++ * 本机网卡信息采集（2026-10-23-session-network-context）。
++ *
++ * 心跳每跳调用，产出随心跳体 `network_interfaces` 字段上报平台，供会话
++ * 【网络环境】段做同网段判定与访问地址拼接（design §Phase 1 / D-002）。
++ *
++ * 过滤口径（FR-02）：
++ * - 剔除 internal 回环条目（127.0.0.1 / ::1，无拼址价值）；
++ * - 剔除无 cidr 条目（DHCP 未完成/虚拟半配置网卡，无法参与子网计算）；
++ * - IPv4 与 IPv6 都保留上报——判定层（backend）只消费 IPv4，IPv6 仅
++ *   存储标注「未参与判定」（D-003）。
++ *
++ * family 归一：Node ≥18 的 os.networkInterfaces 返回字符串族
++ * （'IPv4'/'IPv6'）；兼容旧数值形态（4/6）统一映射为字符串族。
++ */
++
++/** 单网卡上报条目（backend HeartbeatNetworkInterface 同构）。 */
++export interface NetworkInterfaceInfo {
++  name: string;
++  ip: string;
++  cidr: string;
++  family: 'IPv4' | 'IPv6';
++}
++
++/** os.networkInterfaces 的条目/表形态（可注入测试替身）。 */
++type NicTable = Record<string, { address: string; cidr: string | null; family: string | number; internal: boolean }[] | undefined>;
++
++function normalizeFamily(family: string | number): 'IPv4' | 'IPv6' | null {
++  if (family === 'IPv4' || family === 4) return 'IPv4';
++  if (family === 'IPv6' || family === 6) return 'IPv6';
++  return null;
++}
++
++/**
++ * 采集过滤后的网卡列表。`source` 缺省取真实 os.networkInterfaces()，
++ * 测试注入构造表（回环/无 cidr/数值族等边界用例不依赖宿主网卡形态）。
++ */
++export function collectNetworkInterfaces(source: NicTable = networkInterfaces()): NetworkInterfaceInfo[] {
++  const result: NetworkInterfaceInfo[] = [];
++  for (const [name, entries] of Object.entries(source)) {
++    for (const entry of entries ?? []) {
++      if (entry.internal) continue;
++      if (!entry.cidr || !entry.address) continue;
++      const family = normalizeFamily(entry.family);
++      if (family === null) continue;
++      result.push({ name, ip: entry.address, cidr: entry.cidr, family });
++    }
++  }
++  return result;
++}
+diff --git a/sillyhub-daemon/tests/network-info.test.ts b/sillyhub-daemon/tests/network-info.test.ts
+new file mode 100644
+index 000000000..67a4e7e6f
+--- /dev/null
++++ b/sillyhub-daemon/tests/network-info.test.ts
+@@ -0,0 +1,76 @@
++import { describe, expect, it } from 'vitest';
++import { collectNetworkInterfaces } from '../src/network-info.js';
++
++// 2026-10-23-session-network-context task-01：采集过滤口径单测（FR-02）。
++// 全部走注入构造表，不依赖宿主真实网卡形态（跨 Windows/Linux/macOS 可复跑）。
++
++describe('collectNetworkInterfaces', () => {
++  it('剔除 internal 回环条目', () => {
++    const out = collectNetworkInterfaces({
++      lo: [
++        { address: '127.0.0.1', cidr: '127.0.0.1/8', family: 'IPv4', internal: true },
++        { address: '::1', cidr: '::1/128', family: 'IPv6', internal: true },
++      ],
++      eth0: [{ address: '192.168.1.10', cidr: '192.168.1.10/24', family: 'IPv4', internal: false }],
++    });
++    expect(out).toEqual([
++      { name: 'eth0', ip: '192.168.1.10', cidr: '192.168.1.10/24', family: 'IPv4' },
++    ]);
++  });
++
++  it('剔除无 cidr 条目（DHCP 未完成/半配置虚拟网卡）', () => {
++    const out = collectNetworkInterfaces({
++      eth0: [
++        { address: '192.168.1.10', cidr: null, family: 'IPv4', internal: false },
++        { address: '169.254.7.7', cidr: null, family: 'IPv4', internal: false },
++        { address: '192.168.1.11', cidr: '192.168.1.11/24', family: 'IPv4', internal: false },
++      ],
++    });
++    expect(out).toHaveLength(1);
++    expect(out[0]?.ip).toBe('192.168.1.11');
++  });
++
++  it('IPv4 与 IPv6 都保留上报（判定层只消费 IPv4，IPv6 仅存储）', () => {
++    const out = collectNetworkInterfaces({
++      eth0: [
++        { address: '192.168.1.10', cidr: '192.168.1.10/24', family: 'IPv4', internal: false },
++        { address: 'fd00::a1', cidr: 'fd00::a1/64', family: 'IPv6', internal: false },
++      ],
++    });
++    expect(out.map((e) => e.family).sort()).toEqual(['IPv4', 'IPv6']);
++  });
++
++  it('family 数值形态（旧 Node）归一为字符串族', () => {
++    const out = collectNetworkInterfaces({
++      eth0: [
++        { address: '10.0.0.5', cidr: '10.0.0.5/24', family: 4, internal: false },
++        { address: 'fd00::b2', cidr: 'fd00::b2/64', family: 6, internal: false },
++      ],
++    });
++    expect(out).toEqual([
++      { name: 'eth0', ip: '10.0.0.5', cidr: '10.0.0.5/24', family: 'IPv4' },
++      { name: 'eth0', ip: 'fd00::b2', cidr: 'fd00::b2/64', family: 'IPv6' },
++    ]);
++  });
++
++  it('未知 family 形态剔除不炸（防御半配置网卡）', () => {
++    const out = collectNetworkInterfaces({
++      weird: [{ address: '0.0.0.0', cidr: '0.0.0.0/0', family: 'weird' as unknown as string, internal: false }],
++    });
++    expect(out).toEqual([]);
++  });
++
++  it('多网卡全量保留且条目名随网卡名（Windows vEthernet 等虚拟网卡不在此层过滤——判定层选址）', () => {
++    const out = collectNetworkInterfaces({
++      'vEthernet (WSL)': [{ address: '172.22.1.2', cidr: '172.22.1.2/20', family: 'IPv4', internal: false }],
++      WLAN: [{ address: '192.168.1.23', cidr: '192.168.1.23/24', family: 'IPv4', internal: false }],
++    });
++    expect(out).toHaveLength(2);
++    expect(out.map((e) => e.name)).toEqual(['vEthernet (WSL)', 'WLAN']);
++  });
++
++  it('空表/undefined 网卡槽返回空数组', () => {
++    expect(collectNetworkInterfaces({})).toEqual([]);
++    expect(collectNetworkInterfaces({ eth0: undefined })).toEqual([]);
++  });
++});
