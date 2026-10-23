@@ -1,0 +1,66 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-23-session-first-load-ux",
+  "rows": [
+    {
+      "anchor": "FR-01",
+      "row_id": "2026-10-23-session-first-load-ux:flow:测试绑定FR-01",
+      "tests": [
+        "frontend/src/components/daemon/__tests__/turn-timeline-history-loading.test.tsx「历史在飞时渲染轮次骨架屏替代空态文案；turns 非空即退场」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-23-session-first-load-ux"
+    },
+    {
+      "anchor": "FR-02",
+      "row_id": "2026-10-23-session-first-load-ux:flow:测试绑定FR-02",
+      "tests": [
+        "frontend/src/components/daemon/session-panel/__tests__/session-first-load-staged.test.tsx「底窗到达即渲染最近轮；补拉完成后增量 prepend；补拉在飞挂起加载更早」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-23-session-first-load-ux"
+    },
+    {
+      "anchor": "FR-03",
+      "row_id": "2026-10-23-session-first-load-ux:flow:测试绑定FR-03",
+      "tests": [
+        "frontend/src/components/daemon/__tests__/turn-timeline-history-loading.test.tsx「历史拉取终态空会话保持原空态文案」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-23-session-first-load-ux"
+    },
+    {
+      "anchor": "FR-04",
+      "row_id": "2026-10-23-session-first-load-ux:flow:测试绑定FR-04",
+      "tests": [
+        "frontend/src/components/daemon/session-panel/__tests__/session-first-load-staged.test.tsx"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-23-session-first-load-ux"
+    }
+  ]
+}

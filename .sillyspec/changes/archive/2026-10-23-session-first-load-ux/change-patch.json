@@ -1,7 +1,7 @@
 {
   "change": "2026-10-23-session-first-load-ux",
   "baseline": "0d1ba62747f6e46521919b37e3b44c678b7f675a",
-  "head": "c40f5f4bcdecec18fe52136b16f8cff29700b641",
+  "head": "58cebf9df158804564dd87110c7673ef898a3703",
   "files": [
     "docs/sillyspec/active-pitfalls.md",
     "docs/sillyspec/edit-patch-tool-use-id-missing.md",
@@ -16,10 +16,10 @@
   ],
   "totals": {
     "files": 10,
-    "additions": 917,
-    "deletions": 102
+    "additions": 1259,
+    "deletions": 112
   },
-  "savedAt": "2026-10-23T07:22:43.328Z",
+  "savedAt": "2026-10-23T07:44:46.306Z",
   "note": "flow done 时点冻结（本变更可归属交付面：baseline..HEAD 提交面过滤 .sillyspec/ 只留 .sillyspec/docs/ 交付文档 + 独占树未提交交付；治理工件目录不入冻结——2026-10-12-close-trace-freeze-integrity FR-01）",
   "modules": [
     {
@@ -52,6 +52,7 @@
     "docs/SillyHub/modules/_module-map.yaml",
     "docs/sillyhub-daemon/modules/_module-map.yaml"
   ],
+  "acceptedDirtyGap": 4,
   "scopeAudit": {
     "mode": "full-flow",
     "ok": true,
@@ -59,8 +60,8 @@
     "baseAnchor": "0d1ba62747f6e46521919b37e3b44c678b7f675a",
     "totals": {
       "files": 10,
-      "additions": 917,
-      "deletions": 102
+      "additions": 1259,
+      "deletions": 112
     },
     "rows": [
       {
@@ -73,7 +74,7 @@
       },
       {
         "path": "docs/sillyspec/edit-patch-tool-use-id-missing.md",
-        "additions": 39,
+        "additions": 40,
         "deletions": 0,
         "kind": "new",
         "planned": null,
@@ -89,31 +90,31 @@
       },
       {
         "path": "frontend/src/components/daemon/file-changes/__tests__/turn-file-diff.test.ts",
-        "additions": 58,
-        "deletions": 3,
+        "additions": 112,
+        "deletions": 9,
         "kind": "modified",
         "planned": null,
         "verdict": "unplanned"
       },
       {
         "path": "frontend/src/components/daemon/file-changes/turn-file-diff.ts",
-        "additions": 52,
-        "deletions": 49,
+        "additions": 107,
+        "deletions": 53,
         "kind": "modified",
         "planned": null,
         "verdict": "unplanned"
       },
       {
         "path": "frontend/src/components/daemon/session-panel/__tests__/initial-window-merge.test.ts",
-        "additions": 133,
+        "additions": 188,
         "deletions": 0,
         "kind": "new",
-        "planned": null,
-        "verdict": "unplanned"
+        "planned": "新增",
+        "verdict": "planned"
       },
       {
         "path": "frontend/src/components/daemon/session-panel/__tests__/session-first-load-staged.test.tsx",
-        "additions": 246,
+        "additions": 343,
         "deletions": 0,
         "kind": "new",
         "planned": "新增",
@@ -121,15 +122,15 @@
       },
       {
         "path": "frontend/src/components/daemon/session-panel/initial-window-merge.ts",
-        "additions": 102,
+        "additions": 141,
         "deletions": 0,
         "kind": "new",
-        "planned": null,
-        "verdict": "unplanned"
+        "planned": "新增",
+        "verdict": "planned"
       },
       {
         "path": "frontend/src/components/daemon/session-panel/session-panel-page.tsx",
-        "additions": 118,
+        "additions": 159,
         "deletions": 49,
         "kind": "modified",
         "planned": "修改",
@@ -150,6 +151,6 @@
     "note": "flow done 时点冻结（本文件落盘时采集）",
     "closedBy": "flow done"
   },
-  "patchSha256": "1714a6c358e8873a2555146edb45702bafa13f148ab93060ab8b07b64367608a",
+  "patchSha256": "3bb2a5f326602ee750f503b07d2fb2544d1f97f20eec500e64b6f64fb907f5e0",
   "patchStatus": "ok"
 }

@@ -1,57 +1,58 @@
 diff --git a/docs/sillyspec/active-pitfalls.md b/docs/sillyspec/active-pitfalls.md
-index 3ee80eeb2..eb58c8857 100644
+index 3ee80eeb2..815bb2ec9 100644
 --- a/docs/sillyspec/active-pitfalls.md
 +++ b/docs/sillyspec/active-pitfalls.md
 @@ -24,3 +24,4 @@
  <!-- archive-half-state-location-stuck-active.md：归档半态保底缺口——location（文件树通道）与 status（DB 通道）双通道半成功 + 重试挂「下一条命令」死事件源，已归档变更平台「进行中」幽灵滞留（2026-10-17 实证 54 分钟）→ 已关闭（2026-10-17-archive-terminal-sync-strict 5147c63f：triggerSyncTerminalStrict 三终态点强校验——终态判定/内联有界/🚨+自救命令+exit1；560af6a2 signal 形状修复 dogfood 实战验证；terminal-sync-strict 10/10 绿；存量半态一次性手动 platform sync 收敛；2026-10-18 已移入 finished/） -->
  <!-- 2026-10-19-sillyspec-v3.33.1-rewrites-agents-md-deletes-claude-md.md：v3.33.1 自升级静默重写 AGENTS.md + 删 .claude/CLAUDE.md（工作区事件 + 工具三项修复要求）→ 已关闭（2026-10-19 用户裁决落地 b35291abb 全部提交、CLAUDE.md 恢复入库；2026-10-20 核查：CLI 面注入仅显式 init 可达、无删除 CLAUDE.md 路径、升级不覆盖仅告警（src/init.js:195/:244）、工具模板剔出交付/冻结/跨仓面（71b3ff3e+6049c3e0）；daemon 平台模式自动 init 属设计语义留文件内注记；2026-10-20 已移入 finished/） -->
  <!-- 2026-10-23-flow-done-shared-repo-multi-session-frictions.md：flow done 共享主仓多会话三摩擦——①design 骨架恢复指引指向不存在的 step-guides 缓存（已修 2026-10-23：指引改指 .runtime/state/draft-ledger-<变更名>.json 首版永存件+作答位置要点）；②baseline..HEAD 并行提交致文件面/FR 域膨胀（留活跃：归属刀已接线 flow.js:1311 attributedChangedFiles，泄漏=subject 无归因名的提交 fail-closed 判 own 穿透，语义级取舍需开变更拍板）；③归档提交打印命令未落库仍报成功（已修 2026-10-23：archiveLandedInHeadTree 落库断言双态——未落库 🚨+可复制命令+后果+核对方式，已落库 ℹ️；race 测试 5/5+回归 26/26+lint+doc-ref 93/93） -->
-+<!-- edit-patch-tool-use-id-missing.md：edit_patch 日志行 tool_use_id 缺失——弹窗补丁配对被迫走启发式回退（2026-10-23 会话 49c5c3ec/run 63130ca1 实证张冠李戴；前端兜底已修就近悬置配对，数据面丢 id 环节待平台侧取证根治）→ 活跃 -->
++<!-- edit-patch-tool-use-id-missing.md：弹窗补丁配对键事实——agent_run_logs 无顶层 tool_use_id 列（仅 slim 回填），真实键在 metadata.agent_event.call_id，旧前端只读顶层致①精确配对从未生效、全落②错配（2026-10-23 会话 49c5c3ec/run 63130ca1 实证）；已修复（①改读 metadata 键 + ②按 parent_tool_use_id 轨道隔离同轨唯一悬置）→ 活跃（留作事实记录） -->
 diff --git a/docs/sillyspec/edit-patch-tool-use-id-missing.md b/docs/sillyspec/edit-patch-tool-use-id-missing.md
 new file mode 100644
-index 000000000..e59817722
+index 000000000..d1a2b2e99
 --- /dev/null
 +++ b/docs/sillyspec/edit-patch-tool-use-id-missing.md
-@@ -0,0 +1,39 @@
-+# edit_patch 日志行 tool_use_id 缺失——弹窗补丁配对被迫走回退
+@@ -0,0 +1,40 @@
++# 弹窗补丁配对键事实：id 在 metadata.agent_event.call_id（DB 无顶层列）
 +
-+- **发现**：2026-10-23（变更 2026-10-23-diff-dialog-pairing-fix 排查期）
-+- **状态**：活跃（前端兜底已修：就近悬置配对；数据面丢 id 环节未定）
++- **发现**：2026-10-23（变更 2026-10-23-diff-dialog-pairing-fix；初版根因判断在独立评审中修正）
++- **状态**：已修复（前端配对键改读 metadata）；**无遗留数据面缺陷**
 +
-+## 现象
++## 事实（评审修正后，与代码一致）
 +
-+轮文件变更弹窗（turn-file-diff-dialog）的补丁按 tool_use_id 与 tool_call 行配对；
-+补丁行（`agent_run_logs.edit_patch` 所在行）的 `tool_use_id` 缺失时配对退化为启发式
-+回退。实证会话：49c5c3ec / run 63130ca1（2026-10-23 13:30~14:17 轮，43 文件）——
-+点 `tests/task-runner.test.ts` 行显示 `design.md`/`requirements.md` 的编辑内容
-+（旧回退「按序塞给路径命中的第一个未用调用」张冠李戴，真补丁被挤掉丢弃）。
++1. `agent_run_logs` **没有** `tool_use_id` 列（`backend/app/modules/agent/model.py` 无该列；
++   `backend/app/modules/agent/schema.py:201-205` 明注“DB 无此列”——该 DTO 字段仅在
++   `/logs?slim=true` 截断时由路由从完整原文解析后**内存回填**）。
++2. 新轨事件的真实配对键在 **`metadata.agent_event.call_id`**：daemon 归一化器给每条
++   tool_use/tool_result 事件置 `call_id`（`sillyhub-daemon/src/interactive/claude-events.ts`），
++   backend `submit_steps.py` 把整条事件落进 `metadata_['agent_event']`（每行都有）。
++3. 前端旧实现 `collectTurnFilePatches` 只读顶层 `entry.tool_use_id` → 真实链路上恒 undefined
++   → ①精确配对**从未生效**，全部补丁落②启发式回退 → 多文件编辑轮系统性张冠李戴。
++4. 前端读取先例：`frontend/src/components/daemon/trajectory/build-trajectory.ts:259-283`
++   （`metadata.agent_event.call_id`）。
 +
-+## 已定位事实
++## 实证
 +
-+- backend sdk_pipeline 双侧写 id 的前提是事件 `call_id` 在：
-+  `sillyhub-daemon/src/interactive/claude-events.ts:529-531`（tool_result 从 block
-+  `tool_use_id` 提取 call_id）与 `backend .../run_sync/service/sdk_pipeline.py:560-572`
-+  （call/result 双侧 `tool_use_id` 列）。
-+- claude 本地 transcript（~/.claude/projects）与 zcode rollout（~/.zcode/cli/rollout）
-+  均无 structuredPatch（0 命中）——edit_patch 只存在于 daemon 事件流→上报→落库链，
-+  本地无取证面。
-+- 现象反证：实证轮弹窗错配 ⇒ 该轮补丁行 id 缺失（id 齐全则①精确配对不会错）。
++会话 49c5c3ec / run 63130ca1（2026-10-23 13:30~14:17，43 文件）：点
++`tests/task-runner.test.ts` 行显示 `design.md`/`requirements.md` 的编辑内容。
 +
-+## 待查（后续变更根治）
++## 修复
 +
-+1. 平台侧取证：`GET /api/daemon/sessions/49c5c3ec-.../logs?run_id=63130ca1-...`
-+   抽查补丁行顶层 `tool_use_id` 与 tool_call 行 content JSON 内 `tool_use_id`
-+   （2026-10-23 当日该端点对长会话持续超时未取到；可从生产库直查
-+   `agent_run_logs`）。
-+2. 嫌疑环节：claude-events 归一化器对「Edit 结构化结果消息」的 record 形态解析
-+   （edit_patch 取自 `record.tool_use_result` 顶层，而 call_id 取自 content block
-+   `tool_use_id`——两种形态若不同源同条，可能出现 edit_patch 附着但 call_id 缺）。
-+3. 修复后撤前端兜底或降级为纯观测（id 齐全时①已覆盖）。
++- ①配对键 `entryCallId(entry)`：`metadata.agent_event.call_id` 为主，回退顶层
++  `tool_use_id`（slim）与 content JSON `tool_use_id`（旧轨）；全量预建 id 索引（乱序容忍）。
++- ②回退：按 `parent_tool_use_id` 轨道隔离 + 同轨唯一悬置才配，否则诚实丢弃。
++
++## 需要注意的上游形态
++
++- 后台子代理并行是**受支持形态**（事件按到达序落库，主/子代理行交错）——任何配对逻辑
++  必须按 `parent_tool_use_id` 分轨，不能假设全局串行。
++- 同轨多个并行 tool_use（一条 assistant message 多 block）出现时，无 id 补丁无法确证归属，
++  平台选择诚实丢弃（弹窗出「未捕获补丁」说明）。
 +
 +## 关联
 +
-+- 前端止血：2026-10-23-diff-dialog-pairing-fix（就近悬置配对；串行协议推理）。
-+- 链路文档：turn-file-diff.ts 头注、sdk_pipeline.py 注释（ql-20260706-002）。
++- 变更：2026-10-23-diff-dialog-pairing-fix。
++- 代码：`frontend/src/components/daemon/file-changes/turn-file-diff.ts`。
 diff --git a/frontend/src/components/daemon/__tests__/turn-timeline-history-loading.test.tsx b/frontend/src/components/daemon/__tests__/turn-timeline-history-loading.test.tsx
 new file mode 100644
 index 000000000..1f848587f
@@ -165,29 +166,33 @@ index 000000000..1f848587f
 +  });
 +});
 diff --git a/frontend/src/components/daemon/file-changes/__tests__/turn-file-diff.test.ts b/frontend/src/components/daemon/file-changes/__tests__/turn-file-diff.test.ts
-index d2ba5aa94..7bd633f4e 100644
+index d2ba5aa94..8f88a2e2a 100644
 --- a/frontend/src/components/daemon/file-changes/__tests__/turn-file-diff.test.ts
 +++ b/frontend/src/components/daemon/file-changes/__tests__/turn-file-diff.test.ts
-@@ -21,7 +21,7 @@ import {
+@@ -21,15 +21,21 @@ import {
  } from "../turn-file-diff";
  
  function callLog(overrides: {
 -  toolUseId?: string;
 +  toolUseId?: string | null;
++  /** metadata.agent_event.call_id（新轨真实配对键；2026-10-23 评审修正后的主来源）。 */
++  eventCallId?: string | null;
    tool?: string;
    filePath?: string | null;
    raw?: string;
-@@ -30,6 +30,9 @@ function callLog(overrides: {
++  parentToolUseId?: string;
+ }): AgentRunLogEntry {
+   const args: Record<string, unknown> =
      overrides.filePath === null
        ? { command: "rm -rf dist" }
        : { file_path: overrides.filePath ?? "frontend/src/a.ts" };
-+  // toolUseId=null = 调用行无 id（双侧缺 id 的②路径用例）；缺省 = 默认 id "tu-1"。
++  // toolUseId=null = 调用行顶层无 id；缺省 = 默认 id "tu-1"。
 +  const tuid = overrides.toolUseId ?? "tu-1";
 +  const withId = overrides.toolUseId !== null;
    return {
      id: overrides.toolUseId ?? "log-call-1",
      run_id: "run-1",
-@@ -40,9 +43,9 @@ function callLog(overrides: {
+@@ -40,16 +46,25 @@ function callLog(overrides: {
        JSON.stringify({
          tool: overrides.tool ?? "Edit",
          args,
@@ -195,74 +200,133 @@ index d2ba5aa94..7bd633f4e 100644
 +        ...(withId ? { tool_use_id: tuid } : {}),
        }),
 -    tool_use_id: overrides.toolUseId ?? "tu-1",
+-  };
 +    ...(withId ? { tool_use_id: tuid } : {}),
-   };
++    ...(overrides.eventCallId != null
++      ? { metadata: { agent_event: { call_id: overrides.eventCallId } } }
++      : {}),
++    ...(overrides.parentToolUseId != null
++      ? { parent_tool_use_id: overrides.parentToolUseId }
++      : {}),
++  } as AgentRunLogEntry;
  }
  
-@@ -186,6 +189,58 @@ describe("collectTurnFilePatches（日志 → 按序补丁段）", () => {
+ function resultLog(overrides: {
+   toolUseId?: string | null;
++  /** metadata.agent_event.call_id（新轨真实配对键）。 */
++  eventCallId?: string | null;
+   patch?: string | null;
+   id?: string;
++  parentToolUseId?: string;
+ }): AgentRunLogEntry {
+   return {
+     id: overrides.id ?? "log-result-1",
+@@ -62,7 +77,13 @@ function resultLog(overrides: {
+         ? JSON.stringify([{ oldStart: 1, newStart: 1, lines: ["-old", "+new"] }])
+         : overrides.patch,
+     ...(overrides.toolUseId === null ? {} : { tool_use_id: overrides.toolUseId ?? "tu-1" }),
+-  };
++    ...(overrides.eventCallId != null
++      ? { metadata: { agent_event: { call_id: overrides.eventCallId } } }
++      : {}),
++    ...(overrides.parentToolUseId != null
++      ? { parent_tool_use_id: overrides.parentToolUseId }
++      : {}),
++  } as AgentRunLogEntry;
+ }
+ 
+ describe("matchesRepoPath / toolCallFilePath（路径匹配基元）", () => {
+@@ -186,6 +207,85 @@ describe("collectTurnFilePatches（日志 → 按序补丁段）", () => {
      expect(collectTurnFilePatches([], "a.ts")).toEqual([]);
      expect(collectTurnFilePatches([resultLog({ toolUseId: "tu-1" })], "a.ts")).toEqual([]);
    });
 +
-+  // 2026-10-23-diff-dialog-pairing-fix：②回退改「悬置唯一就近配对」——多文件编辑轮
-+  // 不再张冠李戴（实证：会话 49c5c3ec / run 63130ca1 点 task-runner.test.ts 显示
-+  // design.md 内容，旧实现把无主补丁塞给路径命中的第一个未用调用）。
-+  it("就近悬置配对：多文件无 id 补丁各归其位，目标文件弹窗不再吃到他文件内容（FR-01 实证复现）", () => {
++  // 2026-10-23-diff-dialog-pairing-fix（评审修正后）：
++  // 配对键主来源 = metadata.agent_event.call_id（新轨逐行落库，DB 无顶层 tool_use_id 列）；
++  // ①精确配对恢复后，多文件编辑轮各归其位。②回退仅在「同轨唯一悬置」时兜底。
++  it("metadata.agent_event.call_id 精确配对：多文件各归其位，目标文件弹窗不再吃到他文件内容（实证复现）", () => {
 +    const designPatch = JSON.stringify([{ oldStart: 1, newStart: 1, lines: ["+design-body"] }]);
 +    const reqPatch = JSON.stringify([{ oldStart: 2, newStart: 2, lines: ["+requirements-body"] }]);
 +    const testPatch1 = JSON.stringify([{ oldStart: 3, newStart: 3, lines: ["+test-1"] }]);
 +    const testPatch2 = JSON.stringify([{ oldStart: 4, newStart: 4, lines: ["+test-2"] }]);
 +    const logs: AgentRunLogEntry[] = [
-+      // 全轮无 tool_use_id（双侧缺失，走②就近配对）——design → requirements →
-+      // task-runner×2，串行编辑轮，各 result 紧随其 call。
-+      callLog({ toolUseId: null, tool: "Write", filePath: "design.md" }),
-+      resultLog({ toolUseId: null, id: "r-d", patch: designPatch }),
-+      callLog({ toolUseId: null, tool: "Write", filePath: "requirements.md" }),
-+      resultLog({ toolUseId: null, id: "r-q", patch: reqPatch }),
-+      callLog({ toolUseId: null, tool: "Edit", filePath: "tests/task-runner.test.ts" }),
-+      resultLog({ toolUseId: null, id: "r-t1", patch: testPatch1 }),
-+      callLog({ toolUseId: null, tool: "Edit", filePath: "tests/task-runner.test.ts" }),
-+      resultLog({ toolUseId: null, id: "r-t2", patch: testPatch2 }),
++      // 真实链路形态：顶层 tool_use_id 恒无（非 slim），id 在 metadata.agent_event。
++      callLog({ toolUseId: null, eventCallId: "tu-d", tool: "Write", filePath: "design.md" }),
++      resultLog({ toolUseId: null, eventCallId: "tu-d", id: "r-d", patch: designPatch }),
++      callLog({ toolUseId: null, eventCallId: "tu-q", tool: "Write", filePath: "requirements.md" }),
++      resultLog({ toolUseId: null, eventCallId: "tu-q", id: "r-q", patch: reqPatch }),
++      callLog({ toolUseId: null, eventCallId: "tu-t1", tool: "Edit", filePath: "tests/task-runner.test.ts" }),
++      resultLog({ toolUseId: null, eventCallId: "tu-t1", id: "r-t1", patch: testPatch1 }),
++      callLog({ toolUseId: null, eventCallId: "tu-t2", tool: "Edit", filePath: "tests/task-runner.test.ts" }),
++      resultLog({ toolUseId: null, eventCallId: "tu-t2", id: "r-t2", patch: testPatch2 }),
 +    ];
-+    // 点 task-runner.test.ts：只含它自己的两段（旧实现会显示 design/requirements 内容）。
-+    const sections = collectTurnFilePatches(logs, "tests/task-runner.test.ts");
-+    expect(sections.map((s) => s.rows?.[0]?.text)).toEqual(["test-1", "test-2"]);
-+    // 点 design.md：design 自己的内容（就近配对各归其位的对侧验证）。
-+    const designSections = collectTurnFilePatches(logs, "design.md");
-+    expect(designSections.map((s) => s.rows?.[0]?.text)).toEqual(["design-body"]);
++    expect(collectTurnFilePatches(logs, "tests/task-runner.test.ts").map((s) => s.rows?.[0]?.text)).toEqual([
++      "test-1",
++      "test-2",
++    ]);
++    expect(collectTurnFilePatches(logs, "design.md").map((s) => s.rows?.[0]?.text)).toEqual(["design-body"]);
 +  });
 +
-+  it("悬空调用判死不毒化：补丁超限丢失的前序调用不拖死后续串行配对（FR-02）", () => {
++  it("②回退同轨唯一悬置：完全无 id 的串行编辑轮仍各归其位（FR-02）", () => {
 +    const logs: AgentRunLogEntry[] = [
-+      // call A 的补丁超 64KB 上限未附着（悬空）——后续 call B 到来即判死 A。
++      callLog({ toolUseId: null, tool: "Write", filePath: "design.md" }),
++      resultLog({ toolUseId: null, id: "r-d", patch: JSON.stringify([{ oldStart: 1, newStart: 1, lines: ["+d"] }]) }),
++      callLog({ toolUseId: null, tool: "Edit", filePath: "tests/x.test.ts" }),
++      resultLog({ toolUseId: null, id: "r-x", patch: JSON.stringify([{ oldStart: 2, newStart: 2, lines: ["+x"] }]) }),
++    ];
++    expect(collectTurnFilePatches(logs, "tests/x.test.ts").map((s) => s.rows?.[0]?.text)).toEqual(["x"]);
++    expect(collectTurnFilePatches(logs, "design.md").map((s) => s.rows?.[0]?.text)).toEqual(["d"]);
++  });
++
++  it("子代理轨道隔离：主/子代理交错且无 id 时不跨轨错配（FR-02 并发面）", () => {
++    const logs: AgentRunLogEntry[] = [
++      // 主代理 call A 悬置 → 子代理 call S（不同 parent_tool_use_id）→ 主代理 result A。
++      callLog({ toolUseId: null, tool: "Edit", filePath: "frontend/src/main.ts" }),
++      callLog({ toolUseId: null, tool: "Edit", filePath: "frontend/src/sub.ts", parentToolUseId: "tu-p" }),
++      resultLog({ toolUseId: null, id: "r-a", patch: JSON.stringify([{ oldStart: 1, newStart: 1, lines: ["+main"] }]) }),
++    ];
++    // 主轨唯一悬置 = A → 正确配 A；子轨的 S 不被主代理补丁吃掉。
++    expect(collectTurnFilePatches(logs, "frontend/src/main.ts").map((s) => s.rows?.[0]?.text)).toEqual(["main"]);
++    expect(collectTurnFilePatches(logs, "frontend/src/sub.ts")).toEqual([]);
++  });
++
++  it("同轨多个悬置（同执行体并行 tool_use）无法确证归属 → 诚实丢弃", () => {
++    const logs: AgentRunLogEntry[] = [
++      callLog({ toolUseId: null, tool: "Edit", filePath: "frontend/src/a.ts" }),
++      callLog({ toolUseId: null, tool: "Edit", filePath: "frontend/src/b.ts" }),
++      resultLog({ toolUseId: null, id: "r-amb", patch: JSON.stringify([{ oldStart: 1, newStart: 1, lines: ["+amb"] }]) }),
++    ];
++    expect(collectTurnFilePatches(logs, "frontend/src/a.ts")).toEqual([]);
++    expect(collectTurnFilePatches(logs, "frontend/src/b.ts")).toEqual([]);
++  });
++
++  it("悬空调用（补丁丢失）使同轨出现两个未消费调用 → 后续补丁诚实丢弃，不错配", () => {
++    const logs: AgentRunLogEntry[] = [
++      // call A 的补丁超 64KB 未附着（悬空）→ 后续 call B + result B 时同轨悬置 = [A,B]。
 +      callLog({ toolUseId: null, tool: "Edit", filePath: "frontend/src/lost.ts" }),
 +      callLog({ toolUseId: null, tool: "Edit", filePath: "frontend/src/b.ts" }),
 +      resultLog({ toolUseId: null, id: "r-b", patch: JSON.stringify([{ oldStart: 1, newStart: 1, lines: ["+b"] }]) }),
-+      // 悬空判死后，后续串行编辑恢复正常就近配对（不被 lost.ts 的悬置卡死）。
-+      callLog({ toolUseId: null, tool: "Edit", filePath: "frontend/src/a.ts" }),
-+      resultLog({ toolUseId: null, id: "r-ok", patch: JSON.stringify([{ oldStart: 2, newStart: 2, lines: ["+ok"] }]) }),
 +    ];
-+    expect(collectTurnFilePatches(logs, "frontend/src/a.ts").map((s) => s.rows?.[0]?.text)).toEqual(["ok"]);
-+    expect(collectTurnFilePatches(logs, "frontend/src/b.ts").map((s) => s.rows?.[0]?.text)).toEqual(["b"]);
++    // 无法确证 B 的补丁归属 → 两文件都不展示（不把 B 的补丁挂到 lost.ts）。
++    expect(collectTurnFilePatches(logs, "frontend/src/b.ts")).toEqual([]);
 +    expect(collectTurnFilePatches(logs, "frontend/src/lost.ts")).toEqual([]);
 +  });
 +
-+  it("无 id 补丁不配给非编辑族调用（Bash 不入悬置面，悬置空诚实丢弃）", () => {
++  it("无 id 补丁不配给非编辑族调用（Bash 不入回退候选面，诚实丢弃）", () => {
 +    const logs: AgentRunLogEntry[] = [
 +      callLog({ toolUseId: null, tool: "Bash", filePath: null }),
 +      resultLog({ toolUseId: null, id: "r-bash", patch: JSON.stringify([{ oldStart: 1, newStart: 1, lines: ["+x"] }]) }),
 +    ];
-+    // Bash 无 file_path 也非编辑族：悬置面空 → 丢弃（不猜归属）。
 +    expect(collectTurnFilePatches(logs, "frontend/src/a.ts")).toEqual([]);
 +  });
  });
  
  // 2026-10-23-diff-dialog-copy-fallback task-01：diffRowsToText 纯映射。
 diff --git a/frontend/src/components/daemon/file-changes/turn-file-diff.ts b/frontend/src/components/daemon/file-changes/turn-file-diff.ts
-index 01a809c29..481df8b81 100644
+index 01a809c29..f474d5fc0 100644
 --- a/frontend/src/components/daemon/file-changes/turn-file-diff.ts
 +++ b/frontend/src/components/daemon/file-changes/turn-file-diff.ts
-@@ -107,74 +107,77 @@ export function diffRowsToText(rows: readonly DiffRow[]): string {
+@@ -107,74 +107,104 @@ export function diffRowsToText(rows: readonly DiffRow[]): string {
  /**
   * 本轮日志 + 仓根相对路径 → 按编辑完成序（日志序）的补丁段列表。
   *
@@ -270,54 +334,50 @@ index 01a809c29..481df8b81 100644
 - * id 无主）按序回退——只落「编辑族工具 + 路径命中目标文件」的遗留调用（防止
 - * Bash 等无补丁调用吃掉 Edit 补丁、也防止补丁串到别的文件）。两遍都配不上的
 - * result 无法归因文件 → 丢弃（不伪造归属）。
-+ * 配对两遍：① result.tool_use_id → 同 id 的 tool_call 行（精确，零改动语义）；
-+ * ② 遗留 result（无 id 或 id 无主）**就近悬置配对**——仅配给「最近的未消费编辑
-+ * 族调用」（2026-10-23-diff-dialog-pairing-fix：旧实现「按序塞给路径命中目标文件
-+ * 的第一个未用调用」在多文件编辑轮必然张冠李戴——实证会话 49c5c3ec / run 63130ca1，
-+ * 点 task-runner.test.ts 显示 design.md 内容）。协议依据：agent 工具调用**串行**
-+ * 执行，串行编辑轮无 id 时最近悬置调用即补丁归属；新编辑调用的到来即证明前序
-+ * 调用 result 已处理（旧悬置=补丁超限/丢失的悬空调用，判死不累计毒化）。无前置
-+ * 编辑调用（悬置空）→ 该段诚实丢弃（不伪造归属；违反串行假设的真并发日志为
-+ * 已披露边界，见 design 风险节）。
++ * 配对键（2026-10-23-diff-dialog-pairing-fix 评审修正）：**优先
++ * `metadata.agent_event.call_id`**——新轨事件逐行落库该键（backend
++ * submit_steps.py `metadata_['agent_event']`，tool_call 与 edit_patch 行都有），
++ * 弹窗日志行顶层的 `tool_use_id` 并非 DB 列（仅 slim 截断时内存回填），旧实现只读
++ * 顶层键 → ①精确配对在真实链路上从未生效，全部补丁落到②启发式配对，多文件编辑
++ * 轮必然张冠李戴（实证会话 49c5c3ec / run 63130ca1，点 task-runner.test.ts 显示
++ * design.md 内容）。回退面：顶层 `tool_use_id`（slim）> tool_call content JSON 内
++ * `tool_use_id`（旧轨）。
++ *
++ * ① 精确配对：任一侧取得相同 id 即配对成功（跨子代理轨道也成立——id 全局唯一）。
++ * ② 回退（两侧都取不到 id）：**按子代理轨道隔离 + 同轨唯一悬置**——平台支持后台
++ * 子代理并行（事件按到达序落库，主代理与子代理行交错），跨轨配对会把 A 的补丁
++ * 挂到 B 名下；因此回退只在「同轨（parent_tool_use_id 相同）、日志序上已出现、
++ * 未被①消费的编辑族调用恰好一个」时配对，否则该段诚实丢弃（不伪造归属）。
   */
  export function collectTurnFilePatches(
    logs: readonly AgentRunLogEntry[],
    repoRelPath: string,
  ): TurnFilePatchSection[] {
-+  // 单遍扫描：日志序即配对序。calls 全量留存（①按 id 索引随机访问），
-+  // pending 为「已见未消费的编辑族调用」悬置栈（②就近配对的候选面）。
-   const calls: ParsedToolCall[] = [];
+-  const calls: ParsedToolCall[] = [];
 -  const results: { patch: string; toolUseId: string | null }[] = [];
-+  const callUsed: boolean[] = [];
++  interface CallEntry {
++    parsed: ParsedToolCall;
++    /** 轨道键（parent_tool_use_id；主代理 `__main__`）——子代理并行隔离面。 */
++    track: string;
++    /** 配对键（metadata.agent_event.call_id > 顶层 slim 键 > null）。 */
++    id: string | null;
++    /** 是否编辑族（只有编辑族进②回退候选面）。 */
++    patchEligible: boolean;
++  }
++
++  const trackOf = (entry: AgentRunLogEntry): string => entry.parent_tool_use_id ?? "__main__";
++  const calls: CallEntry[] = [];
 +  const callIndexById = new Map<string, number>();
-+  const pending: number[] = [];
 +
-+  const paired: { call: ParsedToolCall | null; patch: string }[] = [];
-+
-+  const noteCall = (parsed: ParsedToolCall): void => {
-+    const index = calls.length;
-+    calls.push(parsed);
-+    callUsed.push(false);
-+    if (parsed.toolUseId != null && !callIndexById.has(parsed.toolUseId)) {
-+      callIndexById.set(parsed.toolUseId, index);
-+    }
-+    if (isPatchEligibleToolName(parsed.toolName)) {
-+      // 串行协议推理（FR-02）：agent 工具调用顺序执行——新编辑调用到来 ⟹ 前序
-+      // 调用的 result 已处理（哪怕无补丁）。旧悬置此时必为悬空调用（补丁超 64KB
-+      // 上限不附着 / result 行丢失），判死清空，防其永久毒化后续无主补丁的配对。
-+      pending.length = 0;
-+      pending.push(index);
-+    }
-+  };
-+
++  // 第一遍：全量 call 索引（①按 id 随机访问——容忍 result 行先于 call 行的
++  // 同时间戳乱序批次，与旧实现全量预建口径一致）。
    for (const entry of logs) {
-     if (entry.channel === "tool_call") {
-       const parsed = parseToolCallEntry(entry);
+-    if (entry.channel === "tool_call") {
+-      const parsed = parseToolCallEntry(entry);
 -      if (parsed) calls.push(parsed);
-+      if (parsed) noteCall(parsed);
-       continue;
-     }
-     const patch = entry.edit_patch;
+-      continue;
+-    }
+-    const patch = entry.edit_patch;
 -    if (typeof patch === "string" && patch.length > 0) {
 -      results.push({
 -        patch,
@@ -327,34 +387,64 @@ index 01a809c29..481df8b81 100644
 -            : null,
 -      });
 -    }
--  }
--
--  const callUsed = new Array<boolean>(calls.length).fill(false);
++    if (entry.channel !== "tool_call") continue;
++    const parsed = parseToolCallEntry(entry);
++    if (!parsed) continue;
++    const index = calls.length;
++    // 调用侧配对键同样以 metadata.agent_event.call_id 为主（content JSON 的
++    // tool_use_id 为旧轨来源；二者同源时无差异，metadata 缺失时回退）。
++    const id = entryCallId(entry) ?? parsed.toolUseId;
++    calls.push({
++      parsed: { ...parsed, toolUseId: id },
++      track: trackOf(entry),
++      id,
++      patchEligible: isPatchEligibleToolName(parsed.toolName),
++    });
++    if (id != null && !callIndexById.has(id)) callIndexById.set(id, index);
+   }
+ 
+   const callUsed = new Array<boolean>(calls.length).fill(false);
 -  const callIndexById = new Map<string, number>();
 -  calls.forEach((call, index) => {
 -    if (call.toolUseId != null && !callIndexById.has(call.toolUseId)) {
 -      callIndexById.set(call.toolUseId, index);
 -    }
 -  });
--
++  /** 轨道 → 日志序上「已出现、未消费」的编辑族调用下标（②回退候选面）。 */
++  const appearedByTrack = new Map<string, number[]>();
++  /** 第二遍扫描推进的 call 游标（calls 与 logs 中 tool_call 行同序同过滤）。 */
++  let callCursor = 0;
+ 
 -  // ① 按 tool_use_id 精确配对；命中的调用行标记已用（同 id 多次出现取首个）。
--  const paired: { call: ParsedToolCall | null; patch: string }[] = [];
+   const paired: { call: ParsedToolCall | null; patch: string }[] = [];
 -  for (const result of results) {
++
++  for (const entry of logs) {
++    if (entry.channel === "tool_call") {
++      // 与第一遍同过滤（解析失败行不进 calls）——保证 cursor 与 calls 下标对齐。
++      if (parseToolCallEntry(entry) == null) continue;
++      const index = callCursor;
++      callCursor += 1;
++      const call = calls[index];
++      if (call == null || !call.patchEligible) continue;
++      const list = appearedByTrack.get(call.track) ?? [];
++      list.push(index);
++      appearedByTrack.set(call.track, list);
++      continue;
++    }
++    const patch = entry.edit_patch;
 +    if (typeof patch !== "string" || patch.length === 0) continue;
-+    const toolUseId =
-+      typeof entry.tool_use_id === "string" && entry.tool_use_id.length > 0
-+        ? entry.tool_use_id
-+        : null;
      let call: ParsedToolCall | null = null;
 -    if (result.toolUseId != null) {
 -      const index = callIndexById.get(result.toolUseId);
-+    // ① 精确配对：同 id 且未被占用（同 id 多次出现取首个——callIndexById 首写者胜）。
-+    if (toolUseId != null) {
-+      const index = callIndexById.get(toolUseId);
++    // ① 精确配对：id 全局唯一，跨轨道也成立。
++    const resultId = entryCallId(entry);
++    if (resultId != null) {
++      const index = callIndexById.get(resultId);
        if (index != null && !callUsed[index]) {
          callUsed[index] = true;
-+        if (pending[pending.length - 1] === index) pending.length = 0;
-         call = calls[index] ?? null;
+-        call = calls[index] ?? null;
++        call = calls[index]?.parsed ?? null;
        }
      }
 -    paired.push({ call, patch: result.patch });
@@ -376,25 +466,64 @@ index 01a809c29..481df8b81 100644
 -    if (fallbackIndex >= 0) {
 -      callUsed[fallbackIndex] = true;
 -      item.call = calls[fallbackIndex] ?? null;
-+    // ② 就近配对（仅无主补丁）：配给最近悬置的编辑族调用（串行协议下即其归属，
-+    // noteCall 已把悬置面收敛为最近一个）；无悬置（result 先于任何编辑调用 /
-+    // ①已消费且后续无新调用）→ 诚实丢弃。
-+    if (call == null && pending.length > 0) {
-+      const index = pending[pending.length - 1]!;
-+      callUsed[index] = true;
-+      pending.length = 0;
-+      call = calls[index] ?? null;
++    // ② 回退：**同轨**已出现未消费的编辑族调用恰好一个才配（串行执行下即其归属；
++    //    同轨 >1 = 同执行体并行多 tool_use，跨轨 = 子代理交错——均无法确证归属，
++    //    诚实丢弃，不把 A 的补丁挂到 B 名下）。
++    if (call == null) {
++      const track = trackOf(entry);
++      const candidates = (appearedByTrack.get(track) ?? []).filter((i) => !callUsed[i]);
++      if (candidates.length === 1) {
++        const index = candidates[0]!;
++        callUsed[index] = true;
++        call = calls[index]?.parsed ?? null;
++      }
      }
 +    paired.push({ call, patch });
    }
  
    const sections: TurnFilePatchSection[] = [];
+@@ -188,11 +218,33 @@ export function collectTurnFilePatches(
+   return sections;
+ }
+ 
++/**
++ * 日志行 → 工具调用 id（配对键单一入口）：
++ *   ① `metadata.agent_event.call_id`——新轨事件逐行落库的真实 id（主来源）；
++ *   ② 顶层 `tool_use_id`——slim 截断时的内存回填（DB 无此列）；
++ * 均缺 → null（该行不提供配对键）。
++ */
++function entryCallId(entry: AgentRunLogEntry): string | null {
++  const metadata = entry.metadata;
++  if (metadata != null && typeof metadata === "object") {
++    const event = (metadata as Record<string, unknown>).agent_event;
++    if (event != null && typeof event === "object") {
++      const callId = (event as Record<string, unknown>).call_id;
++      if (typeof callId === "string" && callId.length > 0) return callId;
++    }
++  }
++  if (typeof entry.tool_use_id === "string" && entry.tool_use_id.length > 0) {
++    return entry.tool_use_id;
++  }
++  return null;
++}
++
+ /**
+  * 回退配对（②）的编辑族工具先验：structuredPatch 抓取链不限工具名（Edit 与
+  * Write 覆盖写均携带），但回退没有 id 可查，必须收紧到「可能有补丁」的调用，
+- * 否则 Bash/Read 等调用会吃走 Edit 的补丁。命名按「含 edit/write/patch 词根」
+- * 宽匹配，覆盖 provider 方言（apply_patch / edit_file / str_replace…）。
++ * 否则 Bash/Read 等调用会吃走 Edit 的补丁。按「含 edit / write / patch 词根」
++ * 宽匹配，覆盖 apply_patch / edit_file / write_file 等方言；不含这些词根的工具名
++ * （如 str_replace）不入候选面——宁可少配不误配。
+  */
+ function isPatchEligibleToolName(toolName: string): boolean {
+   const lowered = toolName.toLowerCase();
 diff --git a/frontend/src/components/daemon/session-panel/__tests__/initial-window-merge.test.ts b/frontend/src/components/daemon/session-panel/__tests__/initial-window-merge.test.ts
 new file mode 100644
-index 000000000..3e59340d3
+index 000000000..ac3f29032
 --- /dev/null
 +++ b/frontend/src/components/daemon/session-panel/__tests__/initial-window-merge.test.ts
-@@ -0,0 +1,133 @@
+@@ -0,0 +1,188 @@
 +// 2026-10-23-session-first-load-ux / FR-02：首屏自适应窗口增量合并纯函数单测。
 +//
 +// 锁定的行为（design「风险与死路」承诺的四形态）：
@@ -410,7 +539,11 @@ index 000000000..3e59340d3
 +
 +import type { AgentRunLogEntry } from "@/lib/agent";
 +import type { InitialWindowResult } from "../initial-window";
-+import { buildInitialWindowMerge } from "../initial-window-merge";
++import {
++  buildInitialWindowMerge,
++  filterPrependAgainstExisting,
++} from "../initial-window-merge";
++import type { SessionTurnView } from "@/components/daemon/turn-timeline";
 +
 +let seq = 0;
 +function log(
@@ -528,12 +661,63 @@ index 000000000..3e59340d3
 +    expect(r.replaceRunIds.has("run-0")).toBe(false);
 +  });
 +});
++
++/* 评审 P2 回归证伪：过滤逻辑必须是可独立断言的纯函数——渲染层
++ * mergePreviewIntoDisplayTurns 会按 outline key 去重，端到端「块数」断言在
++ * 删掉过滤后仍可能为绿，无法证伪。本组用例直接断言函数产物。 */
++function turnView(overrides: Partial<SessionTurnView>): SessionTurnView {
++  return {
++    runId: "run-x",
++    realRunId: "run-x",
++    turn: 1,
++    prompt: "",
++    output: "",
++    status: "completed",
++    seenLogIds: new Set<string>(),
++    inputTokens: null,
++    outputTokens: null,
++    ...overrides,
++  };
++}
++
++describe("filterPrependAgainstExisting（评审 P2 回归）", () => {
++  it("已有同 run 且有内容的块（含 #e 变体）→ 剔除对应 prepend 块", () => {
++    const existing = [
++      turnView({ runId: "run-0#e123-abcdef12", realRunId: "run-0", prompt: "已加载提问" }),
++    ];
++    const prepend = [
++      turnView({ runId: "run-0#w456-abcdef12", realRunId: "run-0", prompt: "整窗提问" }),
++      turnView({ runId: "run-1#w456-abcdef12", realRunId: "run-1", prompt: "另一轮" }),
++    ];
++    const kept = filterPrependAgainstExisting(prepend, existing);
++    expect(kept).toHaveLength(1);
++    expect(kept[0]!.realRunId).toBe("run-1");
++  });
++
++  it("已有同 run 但为空壳（无 prompt/segments/output）→ 保留 prepend（整轮内容覆盖）", () => {
++    const existing = [turnView({ runId: "run-0", realRunId: "run-0" })];
++    const prepend = [
++      turnView({ runId: "run-0#w456-abcdef12", realRunId: "run-0", prompt: "整窗提问" }),
++    ];
++    expect(filterPrependAgainstExisting(prepend, existing)).toHaveLength(1);
++  });
++
++  it("无冲突 → 原样返回全部 prepend（引用序列不变）", () => {
++    const prepend = [
++      turnView({ runId: "run-a#w1", realRunId: "run-a", output: "A" }),
++      turnView({ runId: "run-b#w1", realRunId: "run-b", output: "B" }),
++    ];
++    expect(
++      filterPrependAgainstExisting(prepend, []).map((t) => t.realRunId),
++    ).toEqual(["run-a", "run-b"]);
++  });
++});
 diff --git a/frontend/src/components/daemon/session-panel/__tests__/session-first-load-staged.test.tsx b/frontend/src/components/daemon/session-panel/__tests__/session-first-load-staged.test.tsx
 new file mode 100644
-index 000000000..42e10ce9a
+index 000000000..9317fed72
 --- /dev/null
 +++ b/frontend/src/components/daemon/session-panel/__tests__/session-first-load-staged.test.tsx
-@@ -0,0 +1,246 @@
+@@ -0,0 +1,343 @@
 +/**
 + * 2026-10-23-session-first-load-ux / FR-02 / FR-03：首屏两段渲染整页集成测试。
 + *
@@ -550,7 +734,7 @@ index 000000000..42e10ce9a
 + * + 仅 mock 网络层；probe/直达用 deferred 控时序）。
 + */
 +import { describe, it, expect, beforeEach, vi } from "vitest";
-+import { render, screen, waitFor } from "@testing-library/react";
++import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 +import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 +import { SessionPanel } from "../../session-panel";
 +
@@ -619,6 +803,8 @@ index 000000000..42e10ce9a
 +
 +const ANCHOR = "run-anchor";
 +const NEW = "run-new";
++/** 更早轮（不在底窗内；用于评审 P2 并发双块用例）。 */
++const EARLIER = "run-earlier";
 +/** 锚点轮被截断的底窗（400 行满页）：anchor 尾部 200 行 + new 整轮 200 行。 */
 +function makeBaseLogs() {
 +  const anchorTail: ReturnType<typeof entry>[] = [];
@@ -645,17 +831,23 @@ index 000000000..42e10ce9a
 +
 +const OUTLINE = {
 +  session_id: "s1",
-+  total_turns: 2,
++  total_turns: 3,
 +  items: [
-+    { run_id: ANCHOR, seq: 1, created_at: "2026-10-23T10:01:00.000Z", started_at: "2026-10-23T10:01:00.000Z", status: "completed", prompt_summary: "锚点轮摘要" },
-+    { run_id: NEW, seq: 2, created_at: "2026-10-23T10:07:00.000Z", started_at: "2026-10-23T10:07:00.000Z", status: "completed", prompt_summary: "最新轮摘要" },
++    { run_id: EARLIER, seq: 1, created_at: "2026-10-23T09:40:00.000Z", started_at: "2026-10-23T09:40:00.000Z", status: "completed", prompt_summary: "更早轮摘要" },
++    { run_id: ANCHOR, seq: 2, created_at: "2026-10-23T10:01:00.000Z", started_at: "2026-10-23T10:01:00.000Z", status: "completed", prompt_summary: "锚点轮摘要" },
++    { run_id: NEW, seq: 3, created_at: "2026-10-23T10:07:00.000Z", started_at: "2026-10-23T10:07:00.000Z", status: "completed", prompt_summary: "最新轮摘要" },
 +  ],
 +};
 +
++function runRow(id: string, createdAt: string) {
++  return { id, status: "completed", created_at: createdAt, started_at: null, finished_at: null, error_code: null, error_detail: null, user_id: null, sender_name: null, input_tokens: null, output_tokens: null, ctx_tokens: null, duration_api_ms: null, llm_provider_id: null, agent_profile_snapshot: null, metadata: null, engine_anchor: null, failure_summary: null, run_kind: null, cwd: null, config_snapshot: null };
++}
++
 +function runSnapshot() {
 +  return [
-+    { id: ANCHOR, status: "completed", created_at: "2026-10-23T10:01:00.000Z", started_at: null, finished_at: null, error_code: null, error_detail: null, user_id: null, sender_name: null, input_tokens: null, output_tokens: null, ctx_tokens: null, duration_api_ms: null, llm_provider_id: null, agent_profile_snapshot: null, metadata: null, engine_anchor: null, failure_summary: null, run_kind: null, cwd: null, config_snapshot: null },
-+    { id: NEW, status: "completed", created_at: "2026-10-23T10:07:00.000Z", started_at: null, finished_at: null, error_code: null, error_detail: null, user_id: null, sender_name: null, input_tokens: null, output_tokens: null, ctx_tokens: null, duration_api_ms: null, llm_provider_id: null, agent_profile_snapshot: null, metadata: null, engine_anchor: null, failure_summary: null, run_kind: null, cwd: null, config_snapshot: null },
++    runRow(EARLIER, "2026-10-23T09:40:00.000Z"),
++    runRow(ANCHOR, "2026-10-23T10:01:00.000Z"),
++    runRow(NEW, "2026-10-23T10:07:00.000Z"),
 +  ] as never[];
 +}
 +
@@ -733,12 +925,12 @@ index 000000000..42e10ce9a
 +    );
 +    // 底窗内容不回退（最新轮仍在屏）。
 +    expect(screen.getAllByText(/最新轮提问正文/).length).toBeGreaterThan(0);
-+    // 块序：锚点轮在最新轮之前（prepend 头部）。
++    // 块序：锚点轮在最新轮之前（prepend 头部；更早轮预览卡可排在锚点之前）。
 +    const blocks = screen.getAllByTestId("turn-block");
-+    const firstHasAnchor = blocks[0]!.textContent?.includes("锚点轮提问正文") ?? false;
-+    const lastHasNew = blocks[blocks.length - 1]!.textContent?.includes("最新轮提问正文") ?? false;
-+    expect(firstHasAnchor).toBe(true);
-+    expect(lastHasNew).toBe(true);
++    const idxOf = (needle: string) =>
++      blocks.findIndex((b) => b.textContent?.includes(needle));
++    expect(idxOf("锚点轮提问正文")).toBeGreaterThanOrEqual(0);
++    expect(idxOf("锚点轮提问正文")).toBeLessThan(idxOf("最新轮提问正文"));
 +    // 底窗锚点旧块已摘（同轮不双显）：含锚点提问的块只有一个。
 +    const anchorBlocks = blocks.filter((b) =>
 +      b.textContent?.includes("锚点轮提问正文"),
@@ -762,6 +954,95 @@ index 000000000..42e10ce9a
 +    );
 +  });
 +
++  it("评审 P2：补拉在飞时用户主动加载的轮，合并后不双块", async () => {
++    const base = makeBaseLogs();
++    const anchorFull = makeAnchorFull(base);
++    // 更早轮整轮（用户在补拉期间点预览卡加载）。
++    const earlierFull = [
++      entry(EARLIER, 1, "user_input", "更早轮提问正文"),
++      entry(EARLIER, 2, "stdout", "更早轮回答正文"),
++    ];
++    sessionApi.getAgentSessionLogs.mockImplementation(
++      async (_sid: string, opts?: { before?: string; runId?: string }) => {
++        if (opts?.runId === EARLIER) return earlierFull;
++        if (opts?.before || opts?.runId) return [];
++        return base;
++      },
++    );
++    const probeGate = deferred<{ run_id: string }[]>();
++    sessionApi.probeSessionLogBefore.mockReturnValue(probeGate.promise);
++    sessionApi.getSessionRunLogs.mockImplementation(
++      async (_sid: string, runId: string) =>
++        runId === ANCHOR ? anchorFull : runId === EARLIER ? earlierFull : [],
++    );
++
++    render(<Host sessionId="s1" />);
++
++    // 底窗渲染 → 更早轮预览卡在屏。
++    await waitFor(() =>
++      expect(screen.getAllByText(/最新轮提问正文/).length).toBeGreaterThan(0),
++    );
++    const card = await waitFor(() => {
++      const el = document.querySelector<HTMLElement>(
++        '[data-turn-key="run-earlier"][data-turn-preview]',
++      );
++      if (!el) throw new Error("预览卡未就绪");
++      return el;
++    });
++    // 补拉在飞期间用户主动加载该轮（预览卡原地展开）。
++    fireEvent.click(card);
++    await waitFor(() =>
++      expect(screen.getAllByText(/更早轮提问正文/).length).toBeGreaterThan(0),
++    );
++
++    // 放行补拉：merge 会再次带回该 run 的整轮行——必须让位用户已加载块。
++    probeGate.resolve([{ run_id: ANCHOR }]);
++    await waitFor(() =>
++      expect(screen.getAllByText(/锚点轮提问正文/).length).toBeGreaterThan(0),
++    );
++
++    // 不双块：该 run 在时间线内（turn-block，排除导航刻度）只有一处。
++    const earlierBlocks = screen
++      .getAllByTestId("turn-block")
++      .filter((b) => b.querySelector('[data-turn-key="run-earlier"]'));
++    expect(earlierBlocks).toHaveLength(1);
++  });
++
++  it("评审 P3：补拉在飞时触顶翻页被同步锁挂起，放行后恢复", async () => {
++    const base = makeBaseLogs();
++    sessionApi.getAgentSessionLogs.mockImplementation(
++      async (_sid: string, opts?: { before?: string; runId?: string }) => {
++        if (opts?.before || opts?.runId) return [];
++        return base;
++      },
++    );
++    const probeGate = deferred<{ run_id: string }[]>();
++    sessionApi.probeSessionLogBefore.mockReturnValue(probeGate.promise);
++    sessionApi.getSessionRunLogs.mockResolvedValue([]);
++
++    render(<Host sessionId="s1" />);
++    await waitFor(() =>
++      expect(screen.getAllByText(/最新轮提问正文/).length).toBeGreaterThan(0),
++    );
++    // 等待补拉链真正在飞（probe 已发起）。
++    await waitFor(() => expect(sessionApi.probeSessionLogBefore).toHaveBeenCalled());
++
++    // 触顶滚动（jsdom scrollTop 默认 0 ≤ 触发阈值）——锁在飞：零 before 请求。
++    const scroller = screen.getByTestId("turn-timeline-scroll");
++    fireEvent.scroll(scroller);
++    await new Promise((r) => setTimeout(r, 60));
++    expect(beforeCalls()).toHaveLength(0);
++
++    // 放行补拉链（merge 完成释放锁）。
++    probeGate.resolve([]);
++    await waitFor(() =>
++      expect(sessionApi.getSessionRunLogs).toHaveBeenCalled(),
++    );
++    // 锁释放后触顶恢复翻页（before 请求发出）。
++    fireEvent.scroll(scroller);
++    await waitFor(() => expect(beforeCalls().length).toBeGreaterThan(0));
++  });
++
 +  it("FR-03：终态空会话保持原空态文案，不残留骨架屏", async () => {
 +    sessionApi.fetchSessionTurnOutline.mockResolvedValue({
 +      session_id: "s1", total_turns: 0, items: [],
@@ -782,10 +1063,10 @@ index 000000000..42e10ce9a
 +});
 diff --git a/frontend/src/components/daemon/session-panel/initial-window-merge.ts b/frontend/src/components/daemon/session-panel/initial-window-merge.ts
 new file mode 100644
-index 000000000..b9d3b68a8
+index 000000000..336b3bcf2
 --- /dev/null
 +++ b/frontend/src/components/daemon/session-panel/initial-window-merge.ts
-@@ -0,0 +1,102 @@
+@@ -0,0 +1,141 @@
 +/**
 + * 2026-10-23-session-first-load-ux：首屏自适应窗口增量合并（两段渲染第二段）。
 + *
@@ -805,14 +1086,53 @@ index 000000000..b9d3b68a8
 + *      取合并窗口时间最旧行（ts 数字串 + id 前 8 位，与翻页 #e 键同构，前缀
 + *      #w 区分）。
 + *
-+ * 纯函数：不碰 React state/ref；摘块匹配与终态闸（运行中块不摘）由调用方
-+ * establish 侧按 handleLoadEarlier survivors 模式执行。
++ * 纯函数：不碰 React state/ref。摘块（replaceRunIds）由调用方 establish 侧
++ * 无条件执行——与 handleLoadEarlier 的 survivors 不同，本阶段 SSE 尚未建流，
++ * 不存在需要保护运行中块不摘的实时增量链路；运行中锚点轮由调用方把合并块
++ * 翻回 running 承接。
 + */
 +
 +import type { AgentRunLogEntry } from "@/lib/agent";
 +import { logsToTurns } from "@/components/daemon/runtime-session-helpers";
 +import type { SessionTurnView } from "@/components/daemon/turn-timeline";
 +import type { InitialWindowResult } from "./initial-window";
++
++/** 剥 prepend 轮块的游标页键后缀（`realRunId#e<pageKey>` / `#w<windowKey>` →
++ *  realRunId；非变体块原样返回）。与 session-panel-page 的同名 helper 同构。 */
++function stripMergeKeySuffix(runId: string): string {
++  const at = runId.indexOf("#");
++  return at === -1 ? runId : runId.slice(0, at);
++}
++
++/**
++ * 剔除与已存在轮块冲突的 prepend 块（评审 P2：补拉在飞期间用户可能已通过
++ * 预览卡/导航刻度单轮直达同一 run，#e 块先入时间线；第二段整窗合并再以 #w
++ * 块 prepend 会同 run 双块）。
++ *
++ * 判定「已存在且有内容」——prompt/segments/output 任一非空（对齐
++ * fetchAndAttachTurn 的 anyBody 口径）；空壳块（快照补建）不算，保留 prepend
++ * 以便整轮内容覆盖。锚点轮由调用方先按 replaceRunIds 摘除，不在 existing 中。
++ */
++export function filterPrependAgainstExisting(
++  prependTurns: SessionTurnView[],
++  existingTurns: SessionTurnView[],
++): SessionTurnView[] {
++  const loadedRuns = new Set<string>();
++  for (const t of existingTurns) {
++    const body =
++      !!(t.prompt ?? "").trim() ||
++      (t.segments?.length ?? 0) > 0 ||
++      !!(t.output ?? "").trim();
++    if (!body) continue;
++    const key =
++      t.realRunId ??
++      (t.runId.startsWith("__") ? null : stripMergeKeySuffix(t.runId));
++    if (key != null) loadedRuns.add(key);
++  }
++  return prependTurns.filter(
++    (t) => t.realRunId == null || !loadedRuns.has(t.realRunId),
++  );
++}
 +
 +export interface InitialWindowMergeResult {
 +  /** prepend 进时间线头部的轮块（runId 带 #w 窗口键后缀；空数组=无增量）。 */
@@ -889,31 +1209,36 @@ index 000000000..b9d3b68a8
 +  };
 +}
 diff --git a/frontend/src/components/daemon/session-panel/session-panel-page.tsx b/frontend/src/components/daemon/session-panel/session-panel-page.tsx
-index 0566e6411..1b17ee565 100644
+index 0566e6411..1eb39d32f 100644
 --- a/frontend/src/components/daemon/session-panel/session-panel-page.tsx
 +++ b/frontend/src/components/daemon/session-panel/session-panel-page.tsx
-@@ -130,6 +130,8 @@ import {
+@@ -130,6 +130,11 @@ import {
  } from "./turn-state";
  // 2026-10-23-session-first-window-turn-align：首屏自适应窗口（轮次对齐 + 预算）。
  import { buildInitialWindow } from "./initial-window";
 +// 2026-10-23-session-first-load-ux：首屏窗口增量合并（两段渲染第二段）。
-+import { buildInitialWindowMerge } from "./initial-window-merge";
++import {
++  buildInitialWindowMerge,
++  filterPrependAgainstExisting,
++} from "./initial-window-merge";
  import { highlightSearchHit, searchResultLabel, searchResultText } from "./search";
  // task-01（2026-10-14-session-turn-preview-cards）：消息流归并层（单一数据源，
  // 未加载轮合成预览条目，D-004 方案 A）。
-@@ -769,6 +771,11 @@ export function SessionPanelPage({
+@@ -769,6 +774,13 @@ export function SessionPanelPage({
    // 初始历史改 limit=100 起步（HISTORY_PAGE_SIZE），时间线顶部「加载更早消息」
    // 按钮 before 游标 prepend（resync after 增量不受影响——cursor 语义不变）。
    const [historyLoading, setHistoryLoading] = useState(false);
 +  // 2026-10-23-session-first-load-ux / FR-01：首屏历史加载在飞指示（true =
 +  // 详情已可渲染而历史/窗口补拉链在途）——TurnTimeline turns 为空时以骨架屏
-+  // 替代静态空态文案。随 sessionId 切换置 true，establish 终态（成功/失败）
-+  // 且未被取消时置 false；终态空会话保持 false → 原空态文案（FR-03）。
-+  const [initialHistoryLoading, setInitialHistoryLoading] = useState(false);
++  // 替代静态空态文案。初值 true（评审 P3：初值 false 会在「详情已到、sessionId
++  // effect 尚未跑」的窗口闪一帧静态空态文案）；随 sessionId 切换重置 true，
++  // establish 终态（成功/失败）且未被取消时置 false；终态空会话保持 false →
++  // 原空态文案（FR-03）。预会话早退不渲染时间线，初值 true 无副作用。
++  const [initialHistoryLoading, setInitialHistoryLoading] = useState(true);
    // 2026-10-10-single-turn-nav-and-jump-head：「回到会话开头」连续翻页进行中
    // （入口转圈 + disabled；随会话切换复位）。
    const [jumpHeadLoading, setJumpHeadLoading] = useState(false);
-@@ -1250,6 +1257,10 @@ export function SessionPanelPage({
+@@ -1250,6 +1262,10 @@ export function SessionPanelPage({
      setHasEarlier(false);
      setHistoryLoading(false);
      historyLoadingRef.current = false;
@@ -924,7 +1249,7 @@ index 0566e6411..1b17ee565 100644
      // 2026-10-10-single-turn-nav-and-jump-head：回到开头循环跨会话即停——
      // inflight 锁复位（循环 tick 内 epoch 校验兜底退出），loading 态复位。
      jumpHeadInflightRef.current = false;
-@@ -1280,59 +1291,27 @@ export function SessionPanelPage({
+@@ -1280,59 +1296,27 @@ export function SessionPanelPage({
            slim: true,
          });
          if (cancelled) return;
@@ -1001,7 +1326,7 @@ index 0566e6411..1b17ee565 100644
          // quick（ql-20260916-005）：播种「已完成副作用」集合——历史终态轮视为刷新类
          // 副作用已发生过（首连对账 / 5s 复核的重放合成不再扇出）。下方 currentRunId
          // 重放修正翻回 running 的轮不播种，其真实完成事件到达时副作用照常触发。
-@@ -1362,11 +1341,98 @@ export function SessionPanelPage({
+@@ -1362,11 +1346,134 @@ export function SessionPanelPage({
                : restored,
            };
          });
@@ -1035,9 +1360,14 @@ index 0566e6411..1b17ee565 100644
 +          if (cancelled) return;
 +          const merge = buildInitialWindowMerge(logs, adaptive);
 +          if (merge.prependTurns.length > 0) {
-+            // 运行中锚点轮修正（同第一段 cur 重放口径）：整轮合并块翻回
-+            // running（logsToTurns 一律 completed），SSE 建流后增量按 realRunId
-+            // 归入该唯一块（底窗旧块已摘）。
++            // 评审 P2：补拉在飞期间用户可能已点预览卡/导航刻度单轮直达，同一
++            // run 的完整块已 prepend（真实 id 或 #e 变体）——此时再以 #w 整轮块
++            // prepend 会同 run 双块。合并是纯数据动作，故在 updater 内按
++            // 「prev 已有该 run 且有内容」过滤（锚点轮因 replaceRunIds 先被摘，
++            // 不在 survivors 中，仍走整轮替换；其余轮已有内容则让位用户加载的块）。
++            // 运行中锚点轮修正（同第一段 cur 重放口径）：整轮合并块翻回 running
++            //（logsToTurns 一律 completed），SSE 建流后增量按 realRunId 归入该
++            // 唯一块（底窗旧块已摘）。
 +            const cur = currentRunIdRef.current;
 +            const prependTurns = merge.prependTurns.map((t): SessionTurnView =>
 +              t.realRunId === cur && t.status === "completed"
@@ -1050,6 +1380,33 @@ index 0566e6411..1b17ee565 100644
 +                  t.realRunId ??
 +                  (t.runId.startsWith("__") ? null : stripPageKeySuffix(t.runId));
 +                if (rid) completedSideEffectRunIdsRef.current.add(rid);
++              }
++            }
++            // 评审 P2：合并前捕获滚动锚（与 handleLoadEarlier 元素锚同口径）。
++            // 容器 overflowAnchor:none，头部插入会让正在读的历史跳变；仅在用户
++            // 已离底（距底 ≥ 80px，同 TurnTimeline 贴底阈值）时捕获——贴底时
++            // 交给 TurnTimeline 既有贴底跟随，两者不抢滚动。锚置位后由既有锚定
++            // effect（turnState 变化）双 rAF + 滚动重申钉回。
++            const scrollEl = scrollElQueryRef.current();
++            const curAnchor = pendingAnchorRef.current;
++            if (
++              scrollEl &&
++              scrollEl.scrollHeight - scrollEl.scrollTop - scrollEl.clientHeight >= 80 &&
++              (curAnchor == null || Date.now() > curAnchor.until)
++            ) {
++              const containerTop = scrollEl.getBoundingClientRect().top;
++              let anchorRow: HTMLElement | null = null;
++              for (const row of scrollEl.querySelectorAll<HTMLElement>("[data-turn-key]")) {
++                const r = row.getBoundingClientRect();
++                if (r.bottom > containerTop + 4) { anchorRow = row; break; }
++              }
++              if (anchorRow) {
++                pendingAnchorRef.current = {
++                  key: anchorRow.getAttribute("data-turn-key") ?? "",
++                  offset: anchorRow.getBoundingClientRect().top - containerTop,
++                  until: Date.now() + 2500,
++                  el: anchorRow,
++                };
 +              }
 +            }
 +            setTurnState((prev) => {
@@ -1065,7 +1422,11 @@ index 0566e6411..1b17ee565 100644
 +                      return !(key != null && merge.replaceRunIds.has(key));
 +                    })
 +                  : prev.turns;
-+              return { ...prev, turns: [...prependTurns, ...survivors] };
++              // 评审 P2：同 run 已有块（用户补拉期间主动加载）→ 跳过该 prepend
++              // 块，避免 #w 块与用户加载块双显（纯函数单测锁定，不受渲染层归并
++              // 去重掩盖）。
++              const kept = filterPrependAgainstExisting(prependTurns, survivors);
++              return { ...prev, turns: [...kept, ...survivors] };
 +            });
 +          }
 +          // 评审 P2：锚点轮直达不完整/失败时整体回退底窗、cursorLog 保持底窗
@@ -1100,7 +1461,7 @@ index 0566e6411..1b17ee565 100644
        // quick（ql-20260916-005）：缺口同步复用宿主快照——await 已并行的 runsPromise
        //（与历史日志预取同时发起，此处通常已 settle；失败 → undefined 自拉兜底）。
        const runsSnapshot = (await runsPromise) ?? undefined;
-@@ -4995,6 +5061,9 @@ export function SessionPanelPage({
+@@ -4995,6 +5102,9 @@ export function SessionPanelPage({
          turns={dialogTurns}
          viewMode={viewMode}
          errorMsg={errorMsg}

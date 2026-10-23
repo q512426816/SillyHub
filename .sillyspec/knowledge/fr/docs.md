@@ -806,3 +806,79 @@ created_at: 2026-10-15T16:16:15.707Z
 摘要：主路径
 全文：.sillyspec/changes/archive/2026-10-23-rename-ghost-pit-doc/requirements.md#FR-01
 最近确认：e24e1eb9da5f05b4950b595c8f33640034e3bf4d
+
+## FR-docs-049 历史加载在飞期间，时间线区域显示轮次骨架屏（动态加载指示），不再显示静态空态文案或空白
+变更：2026-10-23-session-first-load-ux
+状态：active
+摘要：进入大会话，历史在拉；大纲先到（预览卡先渲染）
+全文：.sillyspec/changes/archive/2026-10-23-session-first-load-ux/requirements.md#FR-01
+最近确认：58cebf9df158804564dd87110c7673ef898a3703
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-23-session-first-load-ux:flow:测试绑定FR-01
+  tests: frontend/src/components/daemon/__tests__/turn-timeline-history-loading.test.tsx「历史在飞时渲染轮次骨架屏替代空态文案；turns 非空即退场」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-23-session-first-load-ux
+  status: active
+
+## FR-docs-050 首屏轮次内容在底窗日志（400行）到达后立即渲染，不等 buildInitialWindow 补拉链完成；补拉结果到达后增量合并进时间线，翻页游标与「加载更早」语义不回退
+变更：2026-10-23-session-first-load-ux
+状态：active
+摘要：大会话进入，底窗先见；补拉与 SSE 并发；补拉在飞时用户触顶
+全文：.sillyspec/changes/archive/2026-10-23-session-first-load-ux/requirements.md#FR-02
+最近确认：58cebf9df158804564dd87110c7673ef898a3703
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-23-session-first-load-ux:flow:测试绑定FR-02
+  tests: frontend/src/components/daemon/session-panel/__tests__/session-first-load-staged.test.tsx「底窗到达即渲染最近轮；补拉完成后增量 prepend；补拉在飞挂起加载更早」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-23-session-first-load-ux
+  status: active
+
+## FR-docs-051 真无轮次的空会话仍显示原空态文案，不误显骨架屏
+变更：2026-10-23-session-first-load-ux
+状态：active
+摘要：新建空会话
+全文：.sillyspec/changes/archive/2026-10-23-session-first-load-ux/requirements.md#FR-03
+最近确认：58cebf9df158804564dd87110c7673ef898a3703
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-23-session-first-load-ux:flow:测试绑定FR-03
+  tests: frontend/src/components/daemon/__tests__/turn-timeline-history-loading.test.tsx「历史拉取终态空会话保持原空态文案」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-23-session-first-load-ux
+  status: active
+
+## FR-docs-052 既有测试不回归，新增加载态与分阶段渲染行为有测试覆盖
+变更：2026-10-23-session-first-load-ux
+状态：active
+摘要：回归护栏
+全文：.sillyspec/changes/archive/2026-10-23-session-first-load-ux/requirements.md#FR-04
+最近确认：58cebf9df158804564dd87110c7673ef898a3703
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-23-session-first-load-ux:flow:测试绑定FR-04
+  tests: frontend/src/components/daemon/session-panel/__tests__/session-first-load-staged.test.tsx
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-23-session-first-load-ux
+  status: active

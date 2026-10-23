@@ -24,3 +24,4 @@
 - 2026-10-22-agent-profiles-page-restyle | 智能体档案列表页重设计
 - 2026-10-23-session-network-context | 2026-10-23-session-network-context
 - 2026-10-23-rename-ghost-pit-doc | 坑11 留痕 rename 幽灵变更根治与清理
+- 2026-10-23-session-first-load-ux | 会话首屏加载提速：补拉链不阻塞渲染+加载骨架屏

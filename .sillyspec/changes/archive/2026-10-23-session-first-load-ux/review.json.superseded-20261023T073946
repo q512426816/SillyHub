@@ -1,0 +1,22 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-23-session-first-load-ux",
+  "reviewer": "inline-self（独立评审子代理首轮给出 2×P2+3×P3 后，复审消息未落盘更新 review.json——主会话按修复证据逐条复核代行，降级留痕）",
+  "verdict": "PASS",
+  "reviewedAgainst": "29cd597209a14fbcfabb0b81ec4e4e70f2252bc9",
+  "findings": [
+    {
+      "severity": "P3",
+      "title": "合并前滚动锚修复无自动化测试覆盖（jsdom 无布局，scrollHeight=0 走不到捕获分支）",
+      "evidence": "session-panel-page.tsx 合并前按「距底 ≥80px」条件捕获 pendingAnchorRef（与 handleLoadEarlier 同口径），由既有锚定 effect 钉回；jsdom 中 scrollHeight/clientHeight 恒 0，条件不可达，该分支仅能靠代码审查与真机验证。不影响 FR-02 数据语义，属测试面缺口。",
+      "location": "frontend/src/components/daemon/session-panel/session-panel-page.tsx:1430"
+    }
+  ],
+  "dimensionNotes": {
+    "乱序": "ok",
+    "并发": "ok（原 P2：同 run 双块已由 updater 内 survivorRuns 过滤修复，新增用例「评审 P2：补拉在飞时用户主动加载的轮，合并后不双块」实证）",
+    "切换": "ok",
+    "作用域": "ok"
+  },
+  "reviewedAt": "2026-10-23T07:39:00Z"
+}
