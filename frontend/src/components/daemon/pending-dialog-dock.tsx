@@ -119,8 +119,8 @@ export function PendingDialogDock({
   const minimizedPending = showDock
     ? pendingRequests.filter((r) => minimizedIds.has(r.request_id))
     : [];
-  // 全部最小化时卡列区只剩挂载占位（保卡片 state），高度趋零。
-  const visiblePendingCount = pendingRequests.length - minimizedPending.length;
+  // 全部最小化时卡列区只剩挂载占位（保卡片 state），高度趋零——胶囊为唯一
+  // 还原入口（评审 P3 收敛：原迁移残留 visiblePendingCount 死变量已删）。
 
   if (!showDock) return null;
 
