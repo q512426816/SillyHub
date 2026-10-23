@@ -121,8 +121,9 @@ function isActivationKey(event: KeyboardEvent<HTMLElement>): boolean {
   return event.key === "Enter" || event.key === " " || event.key === "Spacebar";
 }
 
-/** 文件状态徽标（2026-10-22-file-changes-card-fix）：文案 + 语义 token 配色。 */
-const FILE_STATUS_META: Record<
+/** 文件状态徽标（2026-10-22-file-changes-card-fix）：文案 + 语义 token 配色。
+ *  2026-10-23-turn-file-diff-dialog：导出供 TurnFileDiffDialog 头部复用同一徽标面。 */
+export const FILE_STATUS_META: Record<
   FileChangeStatus,
   { label: string; className: string }
 > = {

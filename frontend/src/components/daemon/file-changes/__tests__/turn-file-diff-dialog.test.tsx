@@ -1,0 +1,170 @@
+// 2026-10-23-turn-file-diff-dialog task-02：TurnFileDiffDialog 组件单测。
+//
+// 锁定契约（FR-01/02/03）：
+//   1. open=true 拉本轮日志，命中补丁 → 弹窗渲染路径 + 按次分段 DiffView（红删绿增行）；
+//   2. 同文件多次编辑 → 第 1 次/第 2 次…逐段（FR-02）；
+//   3. 无补丁（shell 归因 / 配不到）→ 如实说明原因，不出伪造 diff（FR-03）；
+//   4. 加载中/失败（可重试）两态；open=false 不渲染、不拉数。
+//
+// 测试纪律：mock @/lib/daemon/sessions（日志 API 零真网）；DiffView 用真件
+// （渲染行是本组件核心契约，mock 掉反而锁不住行号/加减号）。
+
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+
+import { TurnFileDiffDialog } from "../turn-file-diff-dialog";
+import type { AgentRunLogEntry } from "@/lib/agent";
+
+const getAgentSessionLogsMock = vi.fn();
+vi.mock("@/lib/daemon/sessions", () => ({
+  getAgentSessionLogs: (...args: unknown[]) => getAgentSessionLogsMock(...args),
+}));
+
+function callLog(toolUseId: string, filePath: string, tool = "Edit"): AgentRunLogEntry {
+  return {
+    id: `call-${toolUseId}`,
+    run_id: "run-1",
+    timestamp: "2026-10-23T08:00:00Z",
+    channel: "tool_call",
+    content_redacted: JSON.stringify({ tool, args: { file_path: filePath }, tool_use_id: toolUseId }),
+    tool_use_id: toolUseId,
+  };
+}
+
+function resultLog(toolUseId: string, lines: string[]): AgentRunLogEntry {
+  return {
+    id: `result-${toolUseId}`,
+    run_id: "run-1",
+    timestamp: "2026-10-23T08:00:01Z",
+    channel: "stdout",
+    content_redacted: "[TOOL_RESULT] ok",
+    edit_patch: JSON.stringify([{ oldStart: 1, newStart: 1, lines }]),
+    tool_use_id: toolUseId,
+  };
+}
+
+function renderDialog(
+  overrides: Partial<Parameters<typeof TurnFileDiffDialog>[0]> = {},
+) {
+  return render(
+    <TurnFileDiffDialog
+      sessionId="sess-1"
+      runKey="run-1"
+      path="frontend/src/a.ts"
+      open
+      onOpenChange={() => {}}
+      {...overrides}
+    />,
+  );
+}
+
+afterEach(() => {
+  cleanup();
+  getAgentSessionLogsMock.mockReset();
+});
+
+describe("TurnFileDiffDialog", () => {
+  it("命中补丁：渲染路径标题 + 第 1 次 Edit 分段 + 行级 diff（红删绿增）", async () => {
+    getAgentSessionLogsMock.mockResolvedValue([
+      callLog("tu-1", "frontend/src/a.ts"),
+      resultLog("tu-1", ["-old line", "+new line"]),
+    ]);
+    renderDialog();
+
+    expect(await screen.findByTestId("turn-file-diff-dialog")).toBeDefined();
+    expect(screen.getByText("frontend/src/a.ts")).toBeDefined();
+    expect(screen.getByText(/第 1 次/)).toBeDefined();
+    expect(screen.getByText(/Edit/)).toBeDefined();
+    expect(screen.getByText("old line")).toBeDefined();
+    expect(screen.getByText("new line")).toBeDefined();
+    // 拉取参数：会话级单轮日志 API（run_id 定轮）。
+    expect(getAgentSessionLogsMock).toHaveBeenCalledWith("sess-1", expect.objectContaining({ runId: "run-1" }));
+  });
+
+  it("同文件多次编辑：第 1/2 次分段齐全（FR-02）", async () => {
+    getAgentSessionLogsMock.mockResolvedValue([
+      callLog("tu-1", "frontend/src/a.ts"),
+      resultLog("tu-1", ["-one"]),
+      callLog("tu-2", "frontend/src/a.ts", "MultiEdit"),
+      resultLog("tu-2", ["+two"]),
+    ]);
+    renderDialog();
+
+    expect(await screen.findByText(/第 1 次/)).toBeDefined();
+    expect(screen.getByText(/第 2 次/)).toBeDefined();
+    expect(screen.getByText(/MultiEdit/)).toBeDefined();
+    expect(screen.getByText("one")).toBeDefined();
+    expect(screen.getByText("two")).toBeDefined();
+  });
+
+  it("shell 归因无补丁：如实说明命令行改动，不出伪造 diff（FR-03）", async () => {
+    getAgentSessionLogsMock.mockResolvedValue([]);
+    renderDialog({ source: "shell" });
+
+    expect(
+      await screen.findByText(/命令行\/脚本改动.*未捕获补丁内容/s),
+    ).toBeDefined();
+    expect(screen.queryByTestId("turn-file-diff-section")).toBeNull();
+  });
+
+  it("tool 归因但配不到补丁：如实说明未找到，不出空壳成功 diff", async () => {
+    getAgentSessionLogsMock.mockResolvedValue([
+      callLog("tu-1", "frontend/src/other.ts"),
+      resultLog("tu-1", ["+x"]),
+    ]);
+    renderDialog();
+
+    expect(await screen.findByText(/未找到该文件的编辑补丁/s)).toBeDefined();
+    expect(screen.queryByTestId("turn-file-diff-section")).toBeNull();
+  });
+
+  it("补丁 JSON 不可解析：占位说明段在场（不静默丢弃）", async () => {
+    getAgentSessionLogsMock.mockResolvedValue([
+      callLog("tu-1", "frontend/src/a.ts"),
+      {
+        ...resultLog("tu-1", []),
+        edit_patch: "{broken",
+      },
+    ]);
+    renderDialog();
+
+    expect(await screen.findByText(/补丁格式不可解析/s)).toBeDefined();
+  });
+
+  it("加载中与失败态：失败可重试，重试成功后出内容（FR-03）", async () => {
+    getAgentSessionLogsMock.mockRejectedValueOnce(new Error("网络中断"));
+    renderDialog();
+
+    expect(await screen.findByText(/加载失败/s)).toBeDefined();
+    expect(screen.getByText(/网络中断/)).toBeDefined();
+
+    getAgentSessionLogsMock.mockResolvedValue([
+      callLog("tu-1", "frontend/src/a.ts"),
+      resultLog("tu-1", ["-old after retry", "+new after retry"]),
+    ]);
+    fireEvent.click(screen.getByRole("button", { name: /重试/ }));
+    expect(await screen.findByText("new after retry")).toBeDefined();
+  });
+
+  it("open=false：不渲染弹窗、不发起拉取", () => {
+    getAgentSessionLogsMock.mockResolvedValue([]);
+    render(
+      <TurnFileDiffDialog
+        sessionId="sess-1"
+        runKey="run-1"
+        path="frontend/src/a.ts"
+        open={false}
+        onOpenChange={() => {}}
+      />,
+    );
+    expect(screen.queryByTestId("turn-file-diff-dialog")).toBeNull();
+    expect(getAgentSessionLogsMock).not.toHaveBeenCalled();
+  });
+
+  it("等待中无伪造内容：loading 文案在场", async () => {
+    getAgentSessionLogsMock.mockReturnValue(new Promise(() => {}));
+    renderDialog();
+    expect(await screen.findByText(/正在加载本轮编辑补丁/s)).toBeDefined();
+    expect(screen.queryByTestId("turn-file-diff-section")).toBeNull();
+  });
+});
