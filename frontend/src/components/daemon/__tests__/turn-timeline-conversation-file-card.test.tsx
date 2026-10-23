@@ -18,7 +18,7 @@
 // ssr:false 在 jsdom 同步渲染为 null）与 FileMessageCard（卡片本体两形态由
 // file-message-card.test.tsx 专项覆盖，本文件只锁视图归属）。
 import { afterEach, describe, it, expect, vi } from "vitest";
-import { cleanup, render, screen, within } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 
 import { TurnTimeline } from "../turn-timeline";
 import type { SessionTurnView, SessionViewMode } from "../turn-timeline";
@@ -37,6 +37,12 @@ vi.mock("@/components/ui/markdown-text", () => ({
   MarkdownText: ({ content }: { content: string }) => (
     <div data-testid="markdown-text">{content}</div>
   ),
+}));
+
+// 2026-10-23-turn-file-diff-dialog：文件行点击弹窗的取数 mock（零真网）。
+const getAgentSessionLogsMock = vi.fn();
+vi.mock("@/lib/daemon/sessions", () => ({
+  getAgentSessionLogs: (...args: unknown[]) => getAgentSessionLogsMock(...args),
 }));
 
 vi.mock("@/components/daemon/file-message-card", () => ({
@@ -183,6 +189,7 @@ const TEAM_DISPATCH_SEG: ToolTurnSegment = {
 
 afterEach(() => {
   cleanup();
+  getAgentSessionLogsMock.mockReset();
 });
 
 describe("「对话」视图渲染文件卡片（quick-d12af6dd / FR-01）", () => {
@@ -556,5 +563,135 @@ describe("轮级文件变更卡与会话级汇总挂载（task-11 / 线 C 1b）"
 
     expect(screen.queryByTestId("file-changes-summary")).toBeNull();
     expect(screen.getByTestId("turn-file-changes")).toBeInTheDocument();
+  });
+});
+
+// ── 2026-10-23-turn-file-diff-dialog：文件行点击 → 本轮变更内容弹窗 ──
+// 锁定契约：sessionId 接线的挂载面点击行开弹窗（FR-01）；未接线的旧消费方
+// 行点击零行为、DOM 无弹窗（FR-04 零回归）。弹窗取数（logs mock）与渲染形态
+// 细节由 turn-file-diff-dialog.test.tsx 专项覆盖，这里只锁接线。
+
+describe("文件变更卡行点击 → 本轮变更弹窗（2026-10-23-turn-file-diff-dialog）", () => {
+  function wiringTurn(
+    overrides: Partial<SessionTurnView> = {},
+  ): SessionTurnView {
+    return {
+      runId: "run-1",
+      turn: 1,
+      prompt: "改一下代码",
+      output: "已完成",
+      status: "completed",
+      seenLogIds: new Set<string>(),
+      inputTokens: null,
+      outputTokens: null,
+      fileChanges: {
+        runId: "run-1",
+        baselineHead: "abc1234",
+        collectedAt: "2026-10-23T08:00:00Z",
+        collectMs: 30,
+        status: "ok",
+        files: [
+          {
+            path: "src/app.tsx",
+            status: "modified",
+            added: 3,
+            deleted: 1,
+            attribution: "edit_patch",
+            editToolNames: ["Edit"],
+          },
+          {
+            path: "scripts/build.sh",
+            status: "modified",
+            added: 2,
+            deleted: 0,
+            attribution: "command",
+          },
+        ],
+        concurrentSessionsHint: true,
+      },
+      fileChangesCapability: "full",
+      ...overrides,
+    };
+  }
+
+  it("sessionId 接线：点击文件行弹窗打开，展示该文件本轮 diff 内容（FR-01）", async () => {
+    getAgentSessionLogsMock.mockResolvedValue([
+      {
+        id: "c1",
+        run_id: "run-1",
+        timestamp: "2026-10-23T08:00:00Z",
+        channel: "tool_call",
+        content_redacted: JSON.stringify({
+          tool: "Edit",
+          args: { file_path: "src/app.tsx" },
+          tool_use_id: "tu-1",
+        }),
+        tool_use_id: "tu-1",
+      },
+      {
+        id: "c2",
+        run_id: "run-1",
+        timestamp: "2026-10-23T08:00:01Z",
+        channel: "stdout",
+        content_redacted: "[TOOL_RESULT] ok",
+        edit_patch: JSON.stringify([{ oldStart: 1, newStart: 1, lines: ["-old", "+new"] }]),
+        tool_use_id: "tu-1",
+      },
+    ]);
+    render(
+      <TurnTimeline
+        {...renderProps([wiringTurn()])}
+        sessionId="sess-1"
+      />,
+    );
+
+    // 卡片默认折叠：先点头部展开，再点目标文件行（按 data-path 精确选行）。
+    fireEvent.click(screen.getByTestId("file-changes-header"));
+    const toolRow = screen
+      .getAllByTestId("file-changes-row")
+      .find((row) => row.getAttribute("data-path") === "src/app.tsx");
+    fireEvent.click(toolRow!);
+
+    const dialog = await screen.findByTestId("turn-file-diff-dialog");
+    expect(within(dialog).getByText("src/app.tsx")).toBeInTheDocument();
+    // diff 内容出在弹窗内（红删绿增行），且本轮日志按 runKey 单轮拉取。
+    expect(await within(dialog).findByText("old")).toBeInTheDocument();
+    expect(within(dialog).getByText("new")).toBeInTheDocument();
+    expect(getAgentSessionLogsMock).toHaveBeenCalledWith(
+      "sess-1",
+      expect.objectContaining({ runId: "run-1" }),
+    );
+  });
+
+  it("shell 归因行点击同样开弹窗：source 上抛 → 内容区如实说明（FR-03）", async () => {
+    getAgentSessionLogsMock.mockResolvedValue([]);
+    render(
+      <TurnTimeline {...renderProps([wiringTurn()])} sessionId="sess-1" />,
+    );
+
+    fireEvent.click(screen.getByTestId("file-changes-header"));
+    const rows = screen.getAllByTestId("file-changes-row");
+    const shellRow = rows.find((row) => row.getAttribute("data-source") === "shell");
+    fireEvent.click(shellRow!);
+
+    const dialog = await screen.findByTestId("turn-file-diff-dialog");
+    expect(
+      await within(dialog).findByText(/命令行\/脚本改动.*未捕获补丁内容/s),
+    ).toBeInTheDocument();
+    expect(within(dialog).queryByTestId("turn-file-diff-section")).toBeNull();
+  });
+
+  it("未接 sessionId（旧消费方）：行点击零行为、全树无弹窗（FR-04 零回归）", () => {
+    getAgentSessionLogsMock.mockResolvedValue([]);
+    render(<TurnTimeline {...renderProps([wiringTurn()])} />);
+
+    fireEvent.click(screen.getByTestId("file-changes-header"));
+    const anyRow = screen
+      .getAllByTestId("file-changes-row")
+      .find((row) => row.getAttribute("data-path") === "src/app.tsx");
+    fireEvent.click(anyRow!);
+
+    expect(screen.queryByTestId("turn-file-diff-dialog")).toBeNull();
+    expect(getAgentSessionLogsMock).not.toHaveBeenCalled();
   });
 });

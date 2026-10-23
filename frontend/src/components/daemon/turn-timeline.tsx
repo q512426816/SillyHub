@@ -97,6 +97,7 @@ import {
 // fileChangesCapability，由挂载方从 /runs 读模型透传），本组件零 fetch。
 import {
   FileChangesCard,
+  type FileChangeStatus,
   type FileChangesCapability,
 } from "@/components/daemon/file-changes/file-changes-card";
 import { FileChangesSummary } from "@/components/daemon/file-changes/file-changes-summary";
@@ -104,6 +105,9 @@ import {
   toFileChangesCardProps,
   type TurnFileChangesSnapshot,
 } from "@/components/daemon/file-changes/turn-file-changes";
+// 2026-10-23-turn-file-diff-dialog：文件行点击 → 本轮变更内容弹窗（自取数组件，
+// 仅 sessionId 接线的挂载面渲染；旧消费方不传 prop 零回归）。
+import { TurnFileDiffDialog } from "@/components/daemon/file-changes/turn-file-diff-dialog";
 import { InlineAttRefTextWithPreview } from "@/components/daemon/attachment-ref-tag";
 // task-10（2026-09-10-account-avatar-upload / FR-05）：自己（sender.me）的气泡
 // 头像取 useSession user.avatar（选择器订阅仅 avatar 切片）。
@@ -527,6 +531,13 @@ export interface TurnTimelineProps {
    * 不取数（FR-22：不碰取数/分页/SSE）。
    */
   fileChangesSummary?: boolean;
+  /**
+   * 2026-10-23-turn-file-diff-dialog / FR-01/FR-04：会话 id——轮文件变更卡行点击
+   * 查看该文件本轮变更内容弹窗的取数归属（getAgentSessionLogs(sessionId,{runId})）。
+   * 缺省（undefined）＝旧消费方零回归：文件行不接线点击、弹窗不渲染
+   * （agent-replay-body / group-chat-panel / proto 页等照旧）。
+   */
+  sessionId?: string;
 }
 
 /**
@@ -697,6 +708,7 @@ const TurnRow = memo(function TurnRow({
   onForkTurn,
   onExpandPreview,
   detailLevel,
+  onOpenFileChanges,
 }: {
   turn: SessionTurnView;
   viewMode: SessionViewMode;
@@ -726,6 +738,16 @@ const TurnRow = memo(function TurnRow({
   onExpandPreview?: (_runKey: string) => void;
   /** 2026-10-20-session-page-dsh-alignment：工作细节档位（undefined＝现行为）。 */
   detailLevel?: DetailLevel;
+  /**
+   * 2026-10-23-turn-file-diff-dialog / FR-01/FR-04：文件变更卡行点击回调
+   * （runKey + 行元信息上抛，弹窗挂 TurnTimeline 根）。undefined＝挂载面未接
+   * sessionId，行点击零行为（旧消费方零回归）。引用由父级 useCallback 保证
+   * 稳定（R-07，同 onResend 先例）。
+   */
+  onOpenFileChanges?: (
+    _runKey: string,
+    _file: { path: string; source?: "tool" | "shell"; status?: FileChangeStatus },
+  ) => void;
 }) {
   // task-07（FR-03 / D-003@v2）：旧路径 output 气泡 askuser 标记拦截——命中则
   // 气泡正文换 textBefore（标记原文不显示，提问卡随气泡原位渲染（下方 ml-9）；
@@ -1242,9 +1264,29 @@ const TurnRow = memo(function TurnRow({
                   { turnNo: turn.turn ?? undefined },
                 );
                 if (cardProps == null) return null;
-                return (
+                // 2026-10-23-turn-file-diff-dialog / FR-01：行点击上抛（runKey+行元信息），
+                // 弹窗由 TurnTimeline 根统一挂载。未接线（无 sessionId）→ undefined，
+                // 行点击零行为（FR-04 旧消费方零回归）。行内闭包在 TurnRow 渲染期
+                // 生成，不影响行 memo（R-07：memo 面只看 TurnRow 的 props）。
+                if (onOpenFileChanges == null) return (
                   <div data-testid="turn-file-changes" className="pl-9">
                     <FileChangesCard {...cardProps} />
+                  </div>
+                );
+                const runKey = turn.realRunId ?? turn.runId;
+                return (
+                  <div data-testid="turn-file-changes" className="pl-9">
+                    <FileChangesCard
+                      {...cardProps}
+                      onOpenFile={(path) => {
+                        const file = cardProps.files.find((f) => f.path === path);
+                        onOpenFileChanges(runKey, {
+                          path,
+                          source: file?.source,
+                          status: file?.status,
+                        });
+                      }}
+                    />
                   </div>
                 );
               })()}
@@ -1362,6 +1404,7 @@ export function TurnTimeline({
   expandPreview,
   focusDialogRequest,
   fileChangesSummary = true,
+  sessionId,
 }: TurnTimelineProps) {
   const scrollRef = useRef<HTMLDivElement>(null);
   // 2026-10-22-session-trajectory-third-view（D-001）：轨迹是第三个顶层视图，
@@ -1417,6 +1460,25 @@ export function TurnTimeline({
         capability: turn.fileChangesCapability ?? null,
       })),
     [turns],
+  );
+
+  // 2026-10-23-turn-file-diff-dialog / FR-01：文件行点击目标（弹窗受控态）。
+  // sessionId 缺省时 onOpenFileChanges 不下发（undefined），行点击零行为——
+  // 旧消费方零回归（FR-04）。useCallback 保引用稳定（TurnRow memo，R-07）。
+  const [fileDiffTarget, setFileDiffTarget] = useState<{
+    runKey: string;
+    path: string;
+    source?: "tool" | "shell";
+    status?: FileChangeStatus;
+  } | null>(null);
+  const handleOpenFileChanges = useCallback(
+    (
+      runKey: string,
+      file: { path: string; source?: "tool" | "shell"; status?: FileChangeStatus },
+    ) => {
+      setFileDiffTarget({ runKey, path: file.path, source: file.source, status: file.status });
+    },
+    [],
   );
 
   const lastTurnIdentity = (() => {
@@ -1900,6 +1962,9 @@ export function TurnTimeline({
               onForkTurn={forkEntry?.onForkTurn}
               onExpandPreview={expandPreview}
               detailLevel={detailLevel}
+              onOpenFileChanges={
+                sessionId != null ? handleOpenFileChanges : undefined
+              }
             />
             </div>
           ))}
@@ -1941,6 +2006,22 @@ export function TurnTimeline({
           isDialog: Boolean(req.dialog_kind),
         }))}
         onRestore={handleRestore}
+      />
+    )}
+    {/* 2026-10-23-turn-file-diff-dialog / FR-01：文件行点击 → 该文件本轮变更内容
+        弹窗（受控挂 TurnTimeline 根，行内只上抛目标）。sessionId 未接线的旧消费方
+        永不为 null 目标（onOpenFileChanges 不下发），此处恒不渲染（FR-04 零回归）。 */}
+    {sessionId != null && fileDiffTarget != null && (
+      <TurnFileDiffDialog
+        sessionId={sessionId}
+        runKey={fileDiffTarget.runKey}
+        path={fileDiffTarget.path}
+        source={fileDiffTarget.source}
+        status={fileDiffTarget.status}
+        open
+        onOpenChange={(next) => {
+          if (!next) setFileDiffTarget(null);
+        }}
       />
     )}
     </>

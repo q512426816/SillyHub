@@ -44,7 +44,7 @@ export interface TurnFileDiffDialogProps {
   /** 文件状态徽标（新增/修改/删除/新文件，与文件卡同源 FILE_STATUS_META）。 */
   status?: FileChangeStatus;
   open: boolean;
-  onOpenChange: (open: boolean) => void;
+  onOpenChange: (_open: boolean) => void;
 }
 
 type LoadPhase =
