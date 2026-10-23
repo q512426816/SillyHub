@@ -31,8 +31,11 @@ export interface SynthHunk {
   lines: string[];
 }
 
-/** 合成补丁 JSON 串的附着上限（超出整体放弃，不截半补丁）。 */
-export const SYNTH_PATCH_MAX_BYTES = 64 * 1024;
+/**
+ * 合成补丁 JSON 串的附着上限（超出整体放弃，不截半补丁）——UTF-8 字节口径，
+ * 逐字对齐 claude 轨道（parse-claude-code-jsonl.ts EDIT_PATCH_MAX_BYTES=64_000）。
+ */
+export const SYNTH_PATCH_MAX_BYTES = 64_000;
 
 /** 文本按行拆分（行数 = 段数；末尾空串保留为独立行，与 diff 行语义一致）。 */
 function splitLines(text: string): string[] {
@@ -53,9 +56,8 @@ function stringifyHunks(hunks: SynthHunk[]): string | null {
   if (hunks.length === 0) return null;
   const json = JSON.stringify(hunks);
   // 评审 P3 修正：口径对齐 claude 轨道（parse-claude-code-jsonl.ts）——UTF-8 字节
-  // 数（Buffer.byteLength）而非 UTF-16 码元长度，上限 64000 而非 64*1024（中文
-  // 内容下两者差约 3 倍）。
-  if (Buffer.byteLength(json, 'utf8') > 64_000) return null;
+  // 数（Buffer.byteLength）而非 UTF-16 码元长度（中文内容下两者差约 3 倍）。
+  if (Buffer.byteLength(json, 'utf8') > SYNTH_PATCH_MAX_BYTES) return null;
   return json;
 }
 

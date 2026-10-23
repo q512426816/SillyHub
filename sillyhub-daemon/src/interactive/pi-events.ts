@@ -457,7 +457,10 @@ export class PiEventNormalizer {
 
   /**
    * 同步读改后文件全文（合成补丁定位行号用）：>2MB 或读失败 → null（放弃补丁，
-   * 不让大文件同步读卡事件循环）。包级可测性：静态方法可被测试子类覆写。
+   * 不让大文件同步读卡事件循环）。**路径解析披露（评审 P3c）**：入参 path 原样
+   * 传 readFileSync——相对路径按 daemon 进程 cwd 解析（非会话工作区根）：典型
+   * 结果 ENOENT → null 放弃（安全降级）；pi 实测入参为绝对路径不受影响。包级
+   * 可测性：静态方法可被测试覆写。
    */
   private static readEditedFile(path: string): string | null {
     try {

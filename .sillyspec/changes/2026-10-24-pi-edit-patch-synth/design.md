@@ -38,7 +38,7 @@ created_at: 2026-10-23T16:07:38.885Z
 
 4. 作用域：跨工作区/跨仓/多实例时数据会不会串台？
 
-答：不会。入参登记按 call_id（pi call_id 会话内唯一）；读盘路径来自入参 path（该会话工作区内）；多 daemon 实例各自进程内状态。
+答：不会。入参登记按 call_id（pi call_id 会话内唯一）；读盘路径来自入参 path（**原样传 readFileSync——相对路径按 daemon 进程 cwd 解析**而非会话工作区根，典型结果 ENOENT→放弃补丁的安全降级，pi 实测入参为绝对路径不受影响，已在代码 jsdoc 披露）；多 daemon 实例各自进程内状态。
 
 ## 风险与死路
 
@@ -56,5 +56,6 @@ created_at: 2026-10-23T16:07:38.885Z
 | 新增 | sillyhub-daemon/src/interactive/pi-edit-patch-synth.ts | 合成纯函数（edit 定位行号/write 全 add/64KB 上限） |
 | 新增 | sillyhub-daemon/tests/interactive/pi-edit-patch-synth.test.ts | 合成矩阵单测 + pi-events 事件级接线用例 |
 | 修改 | frontend/src/components/daemon/file-changes/turn-file-diff-dialog.tsx | agentEdited prop + 无补丁文案二态 |
-| 修改 | frontend/src/components/daemon/file-changes/file-changes-card.tsx | 行点击透传 agentEdited（最小面） |
+| 修改 | frontend/src/components/daemon/turn-timeline.tsx | 行点击上抛 agentEdited（edits>0）+ 根组件 handleOpenFileChanges 透传至弹窗（评审 P1 修复补全链路）——卡片组件零改动（闭包内查 files，范围裁剪：原清单的 file-changes-card.tsx 不再触及） |
 | 修改 | frontend/src/components/daemon/file-changes/__tests__/turn-file-diff-dialog.test.tsx | 文案区分用例 |
+| 修改 | frontend/src/components/daemon/__tests__/turn-timeline-conversation-file-card.test.tsx | agentEdited 接线用例（链路级守护，评审 P1 修复配套） |
