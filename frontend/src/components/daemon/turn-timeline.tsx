@@ -48,7 +48,7 @@
 
 import { Fragment, memo, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { ArrowDown, ArrowRight, BookUser, Bot, Cloud, Settings, Wrench } from "lucide-react";
-import { Badge } from "antd";
+import { Badge, Skeleton } from "antd";
 
 // task-07（2026-09-09-askuser-pi-cursor / FR-03）：cursor marker 型提问卡 +
 // 标记解析器（文本段命中处原位渲染卡并隐藏标记原文）。
@@ -522,6 +522,14 @@ export interface TurnTimelineProps {
    * （agent-replay-body / group-chat-panel / proto 页等照旧）。
    */
   sessionId?: string;
+  /**
+   * 2026-10-23-session-first-load-ux / FR-01：首屏历史加载在飞指示。true 且
+   * turns 为空时，以轮次卡形状骨架屏（antd Skeleton active 微光）替代静态
+   * 空态文案——详情已返回而历史仍在拉取的阶段显示「已就绪」会被误读为
+   * 页面卡死。缺省 false＝旧消费方（dialog / /runtimes / proto 页等）零回归；
+   * turns 非空时本 prop 不起作用（骨架退场，预览卡/轮块照常渲染）。
+   */
+  historyLoading?: boolean;
 }
 
 /**
@@ -535,6 +543,44 @@ export interface TurnForkEntryWiring {
   engineAnchors: ReadonlyMap<string, string | null | undefined>;
   /** 轮入口点击（置灰态组件内已拦截）——挂载方开分叉确认弹层。 */
   onForkTurn: (_runKey: string, _seq: number) => void;
+}
+
+/* ── 2026-10-23-session-first-load-ux / FR-01：首屏历史加载骨架屏 ────────────
+ * 详情已返回而首屏历史仍在拉取时，以轮次卡形状骨架占位替代静态空态文案
+ * （「XX 已就绪」在加载期会被误读为页面卡死）。形态对齐轮块视觉：每张卡
+ * 模拟「轮次徽标 + 时间行 + 两行正文」。antd Skeleton 经 ConfigProvider
+ * token 着色（blue / ai-native 双主题自适应），active 微光即动态加载指示。
+ * 纯占位展示：不取数、不参与滚动锚/贴底判定语义——轮次（含预览卡）到达
+ * 即整体卸载。 */
+function TurnHistorySkeleton() {
+  return (
+    <div
+      data-testid="turn-history-skeleton"
+      aria-label="正在加载会话历史"
+      className="flex h-full min-h-[260px] flex-col justify-center gap-7 py-6"
+    >
+      <p className="text-xs text-muted-foreground">正在加载会话历史…</p>
+      {[0, 1, 2].map((i) => (
+        <div key={i} className="space-y-2.5">
+          <div className="flex items-center gap-2">
+            <Skeleton.Button
+              active
+              size="small"
+              block={false}
+              style={{ width: 56, height: 20 }}
+            />
+            <Skeleton.Button
+              active
+              size="small"
+              block={false}
+              style={{ width: 64, height: 12 }}
+            />
+          </div>
+          <Skeleton active title={false} paragraph={{ rows: 2 }} />
+        </div>
+      ))}
+    </div>
+  );
 }
 
 /** ql-20260903-026：单轮行 memo 组件——配合 session-panel displayTurns 的引用
@@ -1413,6 +1459,7 @@ export function TurnTimeline({
   expandPreview,
   fileChangesSummary = true,
   sessionId,
+  historyLoading = false,
 }: TurnTimelineProps) {
   const scrollRef = useRef<HTMLDivElement>(null);
   // 2026-10-22-session-trajectory-third-view（D-001）：轨迹是第三个顶层视图，
@@ -1773,6 +1820,12 @@ export function TurnTimeline({
           </div>
         )}
         {turns.length === 0 ? (
+          /* 2026-10-23-session-first-load-ux / FR-01：加载在飞优先骨架屏——
+             旧静态空态文案（「已就绪」）仅在历史拉取终态（成功空/失败/旧
+             消费方不传 prop）时出现，防误读为页面卡死。 */
+          historyLoading ? (
+            <TurnHistorySkeleton />
+          ) : (
           <div className="flex h-full min-h-[260px] flex-col items-center justify-center text-center">
             <p className="text-xs font-medium text-foreground">
               {hasOnlineProvider ? `${emptyProviderLabel} 已就绪` : "没有在线守护进程"}
@@ -1783,6 +1836,7 @@ export function TurnTimeline({
                 : "启动守护进程后即可发送。"}
             </p>
           </div>
+          )
         ) : (
           <div className="min-h-0 flex-1 px-3 py-2">
             <TrajectoryPane turns={turns} />
@@ -1806,6 +1860,12 @@ export function TurnTimeline({
           顺序），不再在此处堆顶展示。pending 实时待答卡 2026-10-22-askuser-dock-inputbar
           起迁 PendingDialogDock 渲染于输入框位置，时间线滚动区不再出现。 */}
       {turns.length === 0 ? (
+        /* 2026-10-23-session-first-load-ux / FR-01：加载在飞优先骨架屏——
+           旧静态空态文案（「已就绪」）仅在历史拉取终态（成功空/失败/旧
+           消费方不传 prop）时出现，防误读为页面卡死。 */
+        historyLoading ? (
+          <TurnHistorySkeleton />
+        ) : (
         <div className="flex h-full min-h-[260px] flex-col items-center justify-center text-center">
           <p className="text-xs font-medium text-foreground">
             {hasOnlineProvider
@@ -1818,6 +1878,7 @@ export function TurnTimeline({
               : "启动守护进程后即可发送。"}
           </p>
         </div>
+        )
       ) : (
         /* 2026-10-20-session-page-dsh-alignment（FR-04 / D-013@v1 / D-016④）：轮间
            节奏——原 `space-y-5`（20px 等距）改「28px 留白」（每轮下留 pb-7）。
