@@ -1,0 +1,82 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-23-skill-prune-git-safe",
+  "rows": [
+    {
+      "anchor": "FR-01",
+      "row_id": "2026-10-23-skill-prune-git-safe:flow:测试绑定FR-01",
+      "tests": [
+        "sillyhub-daemon/tests/skill-manager.test.ts「pruneSkillsToSubset: git 跟踪目录即使不在 skillRefs 也保留」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-23-skill-prune-git-safe"
+    },
+    {
+      "anchor": "FR-02",
+      "row_id": "2026-10-23-skill-prune-git-safe:flow:测试绑定FR-02",
+      "tests": [
+        "sillyhub-daemon/tests/skill-manager.test.ts「pruneSkillsToSubset: daemon 库未跟踪副本不在 skillRefs 时被裁剪」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-23-skill-prune-git-safe"
+    },
+    {
+      "anchor": "FR-03",
+      "row_id": "2026-10-23-skill-prune-git-safe:flow:测试绑定FR-03",
+      "tests": [
+        "sillyhub-daemon/tests/skill-manager.test.ts「pruneSkillsToSubset: 非 git 目录仅删 daemon 库技能,用户自建目录保留」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-23-skill-prune-git-safe"
+    },
+    {
+      "anchor": "FR-04",
+      "row_id": "2026-10-23-skill-prune-git-safe:flow:测试绑定FR-04",
+      "tests": [
+        "sillyhub-daemon/tests/skill-manager.test.ts「pruneSkillsToSubset: git ls-files 失败按无跟踪信息降级」",
+        "sillyhub-daemon/tests/skill-manager.test.ts「pruneSkillsToSubset: 三重与边界与保留原因日志」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-23-skill-prune-git-safe"
+    },
+    {
+      "anchor": "FR-05",
+      "row_id": "2026-10-23-skill-prune-git-safe:flow:测试绑定FR-05",
+      "tests": [
+        "sillyhub-daemon/tests/skill-manager.test.ts"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-23-skill-prune-git-safe"
+    }
+  ]
+}

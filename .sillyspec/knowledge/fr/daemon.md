@@ -7324,3 +7324,98 @@
   confirmed_at: null
   source_change: 2026-10-23-marquee-motion-polish
   status: active
+
+## FR-daemon-262 git 跟踪的技能目录一律不删除
+变更：2026-10-23-skill-prune-git-safe
+状态：active
+摘要：git 仓正式技能被保护
+全文：.sillyspec/changes/archive/2026-10-23-skill-prune-git-safe/requirements.md#FR-01
+最近确认：dd0532e5d5ffdcb72e047c5a157a4bf4d4fa786a
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-23-skill-prune-git-safe:flow:测试绑定FR-01
+  tests: sillyhub-daemon/tests/skill-manager.test.ts「pruneSkillsToSubset: git 跟踪目录即使不在 skillRefs 也保留」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-23-skill-prune-git-safe
+  status: active
+
+## FR-daemon-263 daemon 管理的未跟踪副本仍被裁剪
+变更：2026-10-23-skill-prune-git-safe
+状态：active
+摘要：非 git 工作目录裁剪 daemon 副本
+全文：.sillyspec/changes/archive/2026-10-23-skill-prune-git-safe/requirements.md#FR-02
+最近确认：dd0532e5d5ffdcb72e047c5a157a4bf4d4fa786a
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-23-skill-prune-git-safe:flow:测试绑定FR-02
+  tests: sillyhub-daemon/tests/skill-manager.test.ts「pruneSkillsToSubset: daemon 库未跟踪副本不在 skillRefs 时被裁剪」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-23-skill-prune-git-safe
+  status: active
+
+## FR-daemon-264 非 git 仓工作目录仅删 daemon 库目录
+变更：2026-10-23-skill-prune-git-safe
+状态：active
+摘要：用户自建目录被保护
+全文：.sillyspec/changes/archive/2026-10-23-skill-prune-git-safe/requirements.md#FR-03
+最近确认：dd0532e5d5ffdcb72e047c5a157a4bf4d4fa786a
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-23-skill-prune-git-safe:flow:测试绑定FR-03
+  tests: sillyhub-daemon/tests/skill-manager.test.ts「pruneSkillsToSubset: 非 git 目录仅删 daemon 库技能,用户自建目录保留」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-23-skill-prune-git-safe
+  status: active
+
+## FR-daemon-265 删除条件收敛为三重与
+变更：2026-10-23-skill-prune-git-safe
+状态：active
+摘要：三重与边界；git 跟踪信息不可得时降级安全
+全文：.sillyspec/changes/archive/2026-10-23-skill-prune-git-safe/requirements.md#FR-04
+最近确认：dd0532e5d5ffdcb72e047c5a157a4bf4d4fa786a
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-23-skill-prune-git-safe:flow:测试绑定FR-04
+  tests: sillyhub-daemon/tests/skill-manager.test.ts「pruneSkillsToSubset: git ls-files 失败按无跟踪信息降级」 | sillyhub-daemon/tests/skill-manager.test.ts「pruneSkillsToSubset: 三重与边界与保留原因日志」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-23-skill-prune-git-safe
+  status: active
+
+## FR-daemon-266 触及面测试与类型零错
+变更：2026-10-23-skill-prune-git-safe
+状态：active
+摘要：验收门
+全文：.sillyspec/changes/archive/2026-10-23-skill-prune-git-safe/requirements.md#FR-05
+最近确认：dd0532e5d5ffdcb72e047c5a157a4bf4d4fa786a
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-23-skill-prune-git-safe:flow:测试绑定FR-05
+  tests: sillyhub-daemon/tests/skill-manager.test.ts
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-23-skill-prune-git-safe
+  status: active

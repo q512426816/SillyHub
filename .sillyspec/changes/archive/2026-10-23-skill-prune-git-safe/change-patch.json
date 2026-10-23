@@ -1,0 +1,85 @@
+{
+  "change": "2026-10-23-skill-prune-git-safe",
+  "baseline": "438bee8706410ab73bd8fd6275edd1ee179afd23",
+  "head": "dd0532e5d5ffdcb72e047c5a157a4bf4d4fa786a",
+  "files": [
+    "sillyhub-daemon/src/skill-manager.ts",
+    "sillyhub-daemon/tests/skill-manager.test.ts",
+    "sillyhub-daemon/tests/task-runner.test.ts"
+  ],
+  "totals": {
+    "files": 3,
+    "additions": 239,
+    "deletions": 9
+  },
+  "savedAt": "2026-10-23T06:16:30.068Z",
+  "note": "flow done 时点冻结（本变更可归属交付面：baseline..HEAD 提交面过滤 .sillyspec/ 只留 .sillyspec/docs/ 交付文档 + 独占树未提交交付；治理工件目录不入冻结——2026-10-12-close-trace-freeze-integrity FR-01）",
+  "modules": [
+    {
+      "id": "sillyhub-daemon",
+      "files": 3,
+      "doc": "docs/multi-agent-platform/modules/sillyhub-daemon.md",
+      "docTouched": false,
+      "docMissing": false
+    },
+    {
+      "id": "daemon",
+      "files": 3,
+      "doc": "docs/SillyHub/modules/daemon.md",
+      "docTouched": false,
+      "docMissing": false
+    }
+  ],
+  "uncoveredDirs": [],
+  "moduleMaps": [
+    "docs/backend/modules/_module-map.yaml",
+    "docs/frontend/modules/_module-map.yaml",
+    "docs/multi-agent-platform/modules/_module-map.yaml",
+    "docs/SillyHub/modules/_module-map.yaml",
+    "docs/sillyhub-daemon/modules/_module-map.yaml"
+  ],
+  "scopeAudit": {
+    "mode": "full-flow",
+    "ok": true,
+    "degradedReason": null,
+    "baseAnchor": "438bee8706410ab73bd8fd6275edd1ee179afd23",
+    "totals": {
+      "files": 3,
+      "additions": 239,
+      "deletions": 9
+    },
+    "rows": [
+      {
+        "path": "sillyhub-daemon/src/skill-manager.ts",
+        "additions": 88,
+        "deletions": 9,
+        "kind": "modified",
+        "planned": "修改",
+        "verdict": "planned"
+      },
+      {
+        "path": "sillyhub-daemon/tests/skill-manager.test.ts",
+        "additions": 124,
+        "deletions": 0,
+        "kind": "modified",
+        "planned": "修改",
+        "verdict": "planned"
+      },
+      {
+        "path": "sillyhub-daemon/tests/task-runner.test.ts",
+        "additions": 27,
+        "deletions": 0,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "unplanned"
+      }
+    ],
+    "excluded": {
+      "foreignDeclared": []
+    },
+    "note": "flow done 时点冻结（本文件落盘时采集）",
+    "closedBy": "flow done"
+  },
+  "patchSha256": "fb99c989f48ca782c4afcd3de505d0e4eac07c3b0cbc0820b9ba12e2265f9c63",
+  "patchStatus": "ok"
+}

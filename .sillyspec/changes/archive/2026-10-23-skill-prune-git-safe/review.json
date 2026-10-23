@@ -1,0 +1,28 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-23-skill-prune-git-safe",
+  "reviewer": "general-purpose 子代理独立评审（只读，主会话落盘；宿主 agents 通用通道）",
+  "verdict": "PASS",
+  "reviewedAgainst": "dd0532e5d",
+  "findings": [
+    {
+      "severity": "P3",
+      "title": "FR-01 绑定用例的 tracked 保护分支被 unmanaged 条件架空，git 设置是死设置——已修复（dd0532e5d：brand 同时 seed 进 daemon 库，保留分支真实走 tracked）",
+      "evidence": "原用例只 seedManagedSkill('beta')，brand 保留走 unmanaged 分支（实测 stdout 日志 reason:'unmanaged'）；真正行使 tracked 分支的用例 5 对 git 失败敏感、覆盖成立",
+      "location": "sillyhub-daemon/tests/skill-manager.test.ts:706"
+    },
+    {
+      "severity": "P3",
+      "title": "FR-04 场景文字与实现出入：keep 命中目录无 kept 日志且场景前提自相矛盾——已修复（dd0532e5d：场景文字改为 keep 路径循环前置保留无日志，两条保护路径各有日志）",
+      "evidence": "场景写『均不在 skillRefs…三者全部保留且日志可见』与 keep 命中语义矛盾；实现 keep 命中走循环前 continue 无日志，FR-04 正文只要求被保护跳过目录打日志，实现与正文一致",
+      "location": ".sillyspec/changes/2026-10-23-skill-prune-git-safe/requirements.md:39"
+    }
+  ],
+  "dimensionNotes": {
+    "乱序": "ok——readdir 与 rm 间 TOCTOU 与现状同构（rm force:true 幂等）；managed 快照陈旧窗口不放大删除面（仍为旧逻辑子集）",
+    "并发": "ok——git ls-files 只读属实（不写 index、不取 index.lock）；execFile 非 shell + cwd 传参无注入面；三重与收窄子集论断经代码核实成立",
+    "切换": "ok——prune 无跨调用状态；单目录 rm 失败仅 warn；git 子进程超时/失败 catch 收口 null 与 design 作答一致",
+    "作用域": "ok——ls-files 以 cwd=workDir 执行（worktree/子模块语义正确）；skillsDir() 懒读 env 多实例隔离；两调用点均为启动路径一次性"
+  },
+  "reviewedAt": "2026-10-23T14:18:00+08:00"
+}
