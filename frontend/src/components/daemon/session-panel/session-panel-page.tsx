@@ -162,7 +162,7 @@ import {
   resolveAgentDisplayName, resolveCtxRoleMapping, resolvePageProjectId,
   resolvePreChangeName, resolvePreQuicklogName, resolvePreWorkspaceName,
   resolveWorkspaceName, splitToolReportTurns, type SessionPanelPageProps,
-  ACTIVE_RUN_STATUSES, deriveTakeoverChrome,
+  ACTIVE_RUN_STATUSES, deriveTakeoverChrome, refetchDialogHistory,
 } from "./page-helpers";
 import { listAgentLogs } from "@/lib/agent-logs";
 // task-11（2026-10-20-session-page-dsh-alignment / FR-14 / D-023@v1）：`/runs` 读模型的
@@ -787,6 +787,9 @@ export function SessionPanelPage({
     SessionPermissionRequest[]
   >([]);
   const [dialogHistory, setDialogHistory] = useState<SessionDialogRead[]>([]);
+  // 2026-10-23-askuser-history-live-sync：dialogHistory 实时重拉序号（防相邻
+  // 事件两次拉取的响应乱序覆盖，见 page-helpers.refetchDialogHistory）。
+  const dialogHistorySeqRef = useRef(0);
   // task-09：plan 模式待确认卡片状态（按 runId 去重，一次只挂一张）。
   const [planPending, setPlanPending] = useState<{
     runId: string;
@@ -1678,6 +1681,9 @@ export function SessionPanelPage({
                 ? prev
                 : [...prev, req],
             );
+            // 2026-10-23-askuser-history-live-sync：提问落库后重拉问答历史，
+            // 对话/进度内容流实时出现该提问记录（原仅刷新页面可见）。
+            refetchDialogHistory(sessionId, setDialogHistory, dialogHistorySeqRef);
             // 2026-10-20-session-status-live-sync：审批等待边沿即时刷左栏列表
             //（徽标翻「在等你」，经 400ms 去抖）——Redis 列表信号丢失时的本地
             // 兜底；与 turn_completed 新完成分支同款调用，dialog 模式不传
@@ -1688,6 +1694,9 @@ export function SessionPanelPage({
             setPendingRequests((prev) =>
               prev.filter((r) => r.request_id === resolved.request_id),
             );
+            // 2026-10-23-askuser-history-live-sync：回答收口后重拉问答历史，
+            // 记录实时更新为已答态（答案/答题人取后端落库权威数据）。
+            refetchDialogHistory(sessionId, setDialogHistory, dialogHistorySeqRef);
           },
           // task-09：plan 模式进入 → 展示 PlanApprovalCard（按 runId 去重）。
           onPlanModeEntered: (event) => {

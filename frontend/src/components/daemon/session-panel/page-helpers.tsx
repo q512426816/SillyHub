@@ -19,10 +19,12 @@ import {
   type SessionRunRead,
   type AgentSessionRead,
   type SessionCreateResponse,
+  type SessionDialogRead,
   type SharedAgentActiveView,
   type TeamMissionSummary,
   PROVIDER_META,
   SESSION_SUPPORTED_PROVIDERS,
+  fetchSessionDialogHistory,
 } from "@/lib/daemon";
 import type {
   LlmProviderRead,
@@ -235,8 +237,18 @@ export function enrichDisplayTurns(
         // 2026-10-10-session-turn-token-speed FR-05：轮内 API 时长历史回填
         // （tok/s 分母；引擎未上报 / 旧数据 null → 轮尾不显示速度）。
         apiDurationMs: t.apiDurationMs ?? meta.duration_api_ms ?? null,
-        // ql-20260817-004：答复完成时间（finished_at 优先；运行中/旧数据 null 不显示）。
-        replyAt: t.replyAt ?? meta.finished_at ?? meta.started_at ?? null,
+        // ql-20260817-004：答复完成时间（finished_at 优先；旧数据回退 started_at）。
+        // 2026-10-23-live-turn-meta-time / FR-02：活跃 run（running/pending/
+        // pending_approval）禁止把 started_at 伪造成「答复完成时间」——轮尾元信息
+        // 行曾据此渲染「结束=开始时刻 · 历时 00:00」（用户实证）。运行中保持 null，
+        // 排序函数按「最新 = Infinity 排末尾」既有语义（ql-20260818-011-d）。
+        replyAt:
+          t.replyAt ??
+          meta.finished_at ??
+          (meta.status != null && ACTIVE_RUN_STATUSES.has(meta.status)
+            ? null
+            : meta.started_at) ??
+          null,
         // task-09（FR-02）计时锚点：终态轮维持 ?? 链（turn 已有值优先——live 发送
         // 占位 / 首条 log timestamp 兜底，attach 恢复计时不归零不计）。
         // 2026-09-12-session-live-display-fixes（R4）：活跃轮（running/pending/
@@ -877,6 +889,38 @@ export function deriveTimelineSessionStatus(
 ): "failed" | "ended" | "reconnecting" | "active" {
   if (ended) return failed ? "failed" : "ended";
   return restoring ? "reconnecting" : "active";
+}
+
+/**
+ * 2026-10-23-askuser-history-live-sync：dialogHistory 实时重拉（page / dialog
+ * 两挂载点共用）。
+ *
+ * 背景：dialogHistory（驱动对话/进度内容流 AskUser 穿插渲染）原仅在 sessionId
+ * 变化时 REST 拉一次；SSE permission_request / permission_resolved 都不更新它
+ * ——待答卡迁至输入框位置（2026-10-22-askuser-dock-inputbar）后，提问/回答在
+ * 内容流无实时回显（需刷新页面）。本 helper 由两个 SSE 回调触发：提问到达时
+ * 后端 dialogs 已落库 pending 项（fetchPendingDialogs 同源），resolved 时答案
+ * 已写库（backend 落库后广播），重拉即得权威数据——前端不把 SSE 事件手工转
+ * SessionDialogRead（resolved 事件不含 answers，伪造会与后端不一致）。
+ *
+ * 乱序防护：递增 seq，回调仅最新一次拉取的结果生效（相邻事件两次拉取的响应
+ * 乱序时旧数据被丢弃）。失败静默降级（内容流回显等下一事件/刷新兜底，同
+ * REST 恢复路径口径，不阻塞 SSE 主流程）。
+ */
+export function refetchDialogHistory(
+  sessionId: string,
+  setDialogHistory: (history: SessionDialogRead[]) => void,
+  seqRef: { current: number },
+): void {
+  const seq = ++seqRef.current;
+  void fetchSessionDialogHistory(sessionId)
+    .then((history) => {
+      if (!history || seqRef.current !== seq) return;
+      setDialogHistory(history);
+    })
+    .catch(() => {
+      /* 静默降级：见上 */
+    });
 }
 
 /** 引擎 label（PROVIDER_META 查表，缺省回退原值；dialog-helpers.getProviderLabel 同款）。 */

@@ -2736,3 +2736,68 @@ describe("SessionPanel（dialog）终止中态显示（task-13 / FR-04）", () =
     await waitFor(() => expect(screen.getByText("失败")).toBeInTheDocument());
   });
 });
+
+// ── 2026-10-23-askuser-history-live-sync：AskUser 问答历史实时回显 ─────────
+// 背景：dialogHistory（对话/进度内容流 AskUser 穿插渲染数据源）原仅 attach 时拉
+// 一次；待答卡迁输入框位置后内容流无实时回显。现在 SSE 两个 permission 事件都
+// 触发重拉（refetchDialogHistory）。本组用例断言「事件 → 重拉（sessionId 闭包
+// 正确）」；穿插渲染细节由 turn-timeline-dialog-inplace 既有套件覆盖。
+describe("AskUser 问答历史实时回显（2026-10-23-askuser-history-live-sync）", () => {
+  function mockAttachActive() {
+    const stream = makeStreamMock();
+    sessionApi.streamSession.mockImplementation(stream.factory);
+    sessionApi.getAgentSession.mockResolvedValue({
+      id: "sess-attach", runtime_id: null, lease_id: null,
+      provider: "claude", status: "active", agent_session_id: "ag-1",
+      config: null, turn_count: 0, created_at: "t", last_active_at: null, ended_at: null,
+    });
+    return stream;
+  }
+
+  it("permission_request 到达 → 重拉 dialogHistory（内容流实时出现提问记录的数据源）", async () => {
+    const stream = mockAttachActive();
+    setupPanel({ attachSessionId: "sess-attach" });
+    await waitFor(() => expect(sessionApi.streamSession).toHaveBeenCalledTimes(1));
+    // attach 期初始拉取已发生；清零后仅观察 SSE 触发的重拉。
+    sessionApi.fetchSessionDialogHistory.mockClear();
+
+    act(() => {
+      stream.conn.handlers.onPermissionRequest({
+        session_id: "sess-attach",
+        run_id: "run-1",
+        request_id: "req-1",
+        tool_name: "AskUserQuestion",
+        input: {},
+        dialog_kind: "ask_user",
+        dialog_payload: {
+          questions: [{ question: "选哪个？", options: [{ label: "A" }] }],
+        },
+      });
+    });
+
+    await waitFor(() =>
+      expect(sessionApi.fetchSessionDialogHistory).toHaveBeenCalledWith("sess-attach"),
+    );
+    // 待答卡（输入框位置 dock）同步出现。
+    expect(screen.getByText("选哪个？")).toBeInTheDocument();
+  });
+
+  it("permission_resolved 到达 → 再次重拉 dialogHistory（已答态权威数据）", async () => {
+    const stream = mockAttachActive();
+    setupPanel({ attachSessionId: "sess-attach" });
+    await waitFor(() => expect(sessionApi.streamSession).toHaveBeenCalledTimes(1));
+    sessionApi.fetchSessionDialogHistory.mockClear();
+
+    act(() => {
+      stream.conn.handlers.onPermissionResolved({
+        session_id: "sess-attach",
+        request_id: "req-1",
+        decision: "allow",
+      });
+    });
+
+    await waitFor(() =>
+      expect(sessionApi.fetchSessionDialogHistory).toHaveBeenCalledWith("sess-attach"),
+    );
+  });
+});

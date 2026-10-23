@@ -98,6 +98,8 @@ import {
   appendDeliveredUserMsgIfAbsent, appendSteeredSegment, claimPendingPlaceholderTurn,
   markSteeredSegmentDelivered, markSteeredSegmentsEnded,
 } from "./session-panel-page";
+// 2026-10-23-askuser-history-live-sync：dialogHistory 实时重拉（与 page 挂载点共用）。
+import { refetchDialogHistory } from "./page-helpers";
 
 export function SessionPanelDialog(props: SessionPanelProps) {
   // dialog props 解构（公共接口按草案全可选，适配层 task-07 保证 9 个必需项必传；
@@ -170,6 +172,9 @@ export function SessionPanelDialog(props: SessionPanelProps) {
   // AskUserQuestion 问答历史（pending+answered），独立于实时卡片——卡片回答后
   // 即移除、failed/ended 会话不渲染卡片，历史靠 GET /dialogs/history 恢复展示。
   const [dialogHistory, setDialogHistory] = useState<SessionDialogRead[]>([]);
+  // 2026-10-23-askuser-history-live-sync：dialogHistory 实时重拉序号（防相邻
+  // 事件两次拉取的响应乱序覆盖，见 page-helpers.refetchDialogHistory）。
+  const dialogHistorySeqRef = useRef(0);
   // 消息视图模式：「对话」（默认）只显用户消息 + agent 答复正文；「进度」追加
   // thinking/工具调用/stderr 过程项（v2 段模型下为完整段时间线）；「轨迹」直接显示
   // 三泳道时间轴（2026-10-22-session-trajectory-third-view / D-001）。dialog 适配层
@@ -803,11 +808,17 @@ export function SessionPanelDialog(props: SessionPanelProps) {
                   ? prev
                   : [...prev, req],
               );
+              // 2026-10-23-askuser-history-live-sync：提问落库后重拉问答历史，
+              // 对话/进度内容流实时出现该提问记录（与 page 挂载点同款）。
+              refetchDialogHistory(sessionId, setDialogHistory, dialogHistorySeqRef);
             },
             onPermissionResolved: (resolved) => {
               setPendingRequests((prev) =>
                 prev.filter((r) => r.request_id !== resolved.request_id),
               );
+              // 2026-10-23-askuser-history-live-sync：回答收口后重拉问答历史，
+              // 记录实时更新为已答态（答案/答题人取后端落库权威数据）。
+              refetchDialogHistory(sessionId, setDialogHistory, dialogHistorySeqRef);
             },
             // task-09：plan 模式进入 → 展示 PlanApprovalCard（按 runId 去重）。
             onPlanModeEntered: (event) => {
