@@ -20,6 +20,7 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from ipaddress import AddressValueError, IPv4Address, IPv4Network, NetmaskValueError
 
+from pydantic import BaseModel
 from redis.asyncio import Redis
 
 from app.core.logging import get_logger
@@ -35,16 +36,16 @@ NETENV_MAX_MACHINES = 10
 _NETENV_FALLBACK_PREFIXES = (24, 16)
 
 
-@dataclass(frozen=True)
-class NetworkContextBlock:
-    """随提问轮穿透注入链的数据块（镜像 PageContextCreateBlock 形态）。
+class NetworkContextBlock(BaseModel):
+    """随提问轮穿透注入链的数据块（镜像 PageContextCreateBlock 形态——pydantic
+    BaseModel 支持入队 model_dump 序列化与派发 **dict 重建，先例同款）。
 
     queue 入队序列化存储（user_ip/has_xff），派发时携存储值调引擎实时渲染
     （D-012@v1——不重放旧判定文本）。
     """
 
-    user_ip: str | None
-    has_xff: bool
+    user_ip: str | None = None
+    has_xff: bool = False
 
 
 @dataclass(frozen=True)
@@ -241,3 +242,118 @@ async def network_context_for_turn(
         # Redis 故障降级：每轮注入（可失去重，不失功能，D-006）。
         log.warning("netenv_snapshot_redis_unavailable", session_id=str(session_id))
         return text
+
+
+async def collect_session_machines(
+    db,
+    *,
+    user_id: uuid.UUID,
+    runtime_id: str | uuid.UUID | None,
+    workspace_id: uuid.UUID | None,
+) -> list[MachineNetworkInfo]:
+    """组装会话可用机器清单（FR-04 / D-005@v2）：会话 runtime 所属 daemon +
+    workspace_member_runtimes 本人绑定 + grants 表 enabled 借用集（与派发链路
+    resolve_granted_daemon_for_borrow 同源口径，list_machines_shared_to_me）。
+    会话 runtime 的机器排首位（正在执行本会话的机器信息价值最高）。
+    """
+    from sqlalchemy import select
+    from sqlmodel import col
+
+    from app.modules.daemon.grants.queries import list_machines_shared_to_me
+    from app.modules.daemon.model import DaemonInstance, DaemonRuntime
+
+    ordered_ids: list[uuid.UUID] = []
+    seen: set[uuid.UUID] = set()
+
+    def _add(candidate: uuid.UUID | None) -> None:
+        if candidate is not None and candidate not in seen:
+            seen.add(candidate)
+            ordered_ids.append(candidate)
+
+    # ① 会话 runtime 所属 daemon（首位）。
+    if runtime_id is not None:
+        rt = await db.get(DaemonRuntime, uuid.UUID(str(runtime_id)))
+        if rt is not None:
+            _add(rt.daemon_instance_id)
+    # ② 本人绑定（member_runtimes：daemon_id 直取；runtime-only 行回查 runtime）。
+    if workspace_id is not None:
+        from app.modules.workspace.member_runtimes.model import WorkspaceMemberRuntime
+
+        rows = (
+            (
+                await db.execute(
+                    select(WorkspaceMemberRuntime).where(
+                        col(WorkspaceMemberRuntime.workspace_id) == workspace_id,
+                        col(WorkspaceMemberRuntime.user_id) == user_id,
+                    )
+                )
+            )
+            .scalars()
+            .all()
+        )
+        for row in rows:
+            if row.daemon_id is not None:
+                _add(row.daemon_id)
+            elif row.runtime_id is not None:
+                rt = await db.get(DaemonRuntime, row.runtime_id)
+                if rt is not None:
+                    _add(rt.daemon_instance_id)
+    # ③ grants 借用集（enabled + 成员 + borrow 权限，查询内部已裁定）。
+    for shared in await list_machines_shared_to_me(db, actor_user_id=user_id):
+        _add(shared.machine_id)
+
+    if not ordered_ids:
+        return []
+    instances = (
+        (await db.execute(select(DaemonInstance).where(col(DaemonInstance.id).in_(ordered_ids))))
+        .scalars()
+        .all()
+    )
+    by_id = {inst.id: inst for inst in instances}
+    result: list[MachineNetworkInfo] = []
+    for daemon_id in ordered_ids:
+        inst = by_id.get(daemon_id)
+        if inst is None:
+            continue
+        info = inst.network_info if isinstance(inst.network_info, dict) else {}
+        result.append(
+            MachineNetworkInfo(
+                daemon_id=str(inst.id),
+                name=inst.display_alias or inst.hostname,
+                online=inst.status == "online",
+                observed_ip=info.get("observed_ip"),
+                interfaces=list(info.get("interfaces") or []),
+            )
+        )
+    return result
+
+
+async def network_preamble_for_turn(
+    db,
+    *,
+    agent_session,
+    block: NetworkContextBlock,
+    first_turn: bool = False,
+) -> str | None:
+    """渲染点统一入口：组装机器清单 + 引擎判定 + 快照去重。
+
+    None = 本轮不注入（去重跳过）。异常整体吞掉返回 None（网络段是增强信息，
+    永不阻断会话主链路——与 page_context 查无不注入同形降级）。
+    """
+    try:
+        machines = await collect_session_machines(
+            db,
+            user_id=agent_session.user_id,
+            runtime_id=agent_session.runtime_id,
+            workspace_id=agent_session.workspace_id,
+        )
+        return await network_context_for_turn(
+            session_id=agent_session.id,
+            user_ip=block.user_ip,
+            has_xff=block.has_xff,
+            machines=machines,
+            first_turn=first_turn,
+        )
+    except Exception:
+        log.warning("netenv_preamble_render_failed", session_id=str(agent_session.id))
+        return None

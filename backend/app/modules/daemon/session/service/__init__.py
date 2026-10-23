@@ -70,6 +70,9 @@ from app.modules.daemon.schema import (  # noqa: F401 —— 委托签名注解�
     SessionUsageRead,
     TeamMissionCreateBlock,
 )
+from app.modules.daemon.session.network_context import (
+    NetworkContextBlock,
+)
 
 # task-02（2026-08-24-sessions-live-updates / design §1.1）：agent_sessions 列表
 # 变更信号发布入口。test_session_events.py:139 以别名 setattr patch 本命名空间
@@ -385,6 +388,8 @@ class SessionService(BackgroundTaskMixin):
         llm_provider_id: str | None = None,
         team_mission: TeamMissionCreateBlock | None = None,
         page_context: PageContextCreateBlock | None = None,
+        # 2026-10-23-session-network-context（FR-01）：首轮网络环境块透传。
+        network_context: NetworkContextBlock | None = None,
         quicklog_id: str | None = None,
         ppm_item_kind: PpmItemKind | None = None,
         ppm_item_id: uuid.UUID | None = None,
@@ -409,6 +414,7 @@ class SessionService(BackgroundTaskMixin):
             llm_provider_id=llm_provider_id,
             team_mission=team_mission,
             page_context=page_context,
+            network_context=network_context,
             quicklog_id=quicklog_id,
             ppm_item_kind=ppm_item_kind,
             ppm_item_id=ppm_item_id,
@@ -526,6 +532,8 @@ class SessionService(BackgroundTaskMixin):
         model: str | None = None,
         attachment_ids: list[uuid.UUID] | None = None,
         page_context: PageContextCreateBlock | None = None,
+        # 2026-10-23-session-network-context（FR-01）：每轮网络环境块透传。
+        network_context: NetworkContextBlock | None = None,
         bind_change_key: str | None = None,
         bind_quick_id: str | None = None,
         bind_ppm_item_kind: PpmItemKind | None = None,
@@ -550,6 +558,7 @@ class SessionService(BackgroundTaskMixin):
             model=model,
             attachment_ids=attachment_ids,
             page_context=page_context,
+            network_context=network_context,
             bind_change_key=bind_change_key,
             bind_quick_id=bind_quick_id,
             bind_ppm_item_kind=bind_ppm_item_kind,
@@ -615,6 +624,8 @@ class SessionService(BackgroundTaskMixin):
         attachment_owner_user_id: uuid.UUID | None = None,
         prelocked_attachments: _PrelockedInjectAttachments | None = None,
         page_context: PageContextCreateBlock | None = None,
+        # 2026-10-23-session-network-context（FR-01）：每轮网络环境块透传。
+        network_context: NetworkContextBlock | None = None,
         queue_when_busy: bool = False,
         busy_strategy: Literal["queue", "inject"] | None = None,
         queue_sender_user_id: uuid.UUID | None = None,
@@ -638,6 +649,7 @@ class SessionService(BackgroundTaskMixin):
             attachment_owner_user_id=attachment_owner_user_id,
             prelocked_attachments=prelocked_attachments,
             page_context=page_context,
+            network_context=network_context,
             queue_when_busy=queue_when_busy,
             busy_strategy=busy_strategy,
             queue_sender_user_id=queue_sender_user_id,
@@ -669,6 +681,9 @@ class SessionService(BackgroundTaskMixin):
         turn_metadata: dict | None = None,
         # 24h 审查②：page_context 透传（前导由 control 侧拼装，语义见其 docstring）。
         page_context: PageContextCreateBlock | None = None,
+        # 2026-10-23-session-network-context（FR-01 / D-012@v1）：steering 轮
+        # 网络环境块透传（注入点实时渲染）。
+        network_context: NetworkContextBlock | None = None,
     ) -> SessionDispatchResult:
         return await _control._inject_mid_turn_into_run(
             self,
@@ -679,6 +694,7 @@ class SessionService(BackgroundTaskMixin):
             attachment_owner_user_id=attachment_owner_user_id,
             turn_metadata=turn_metadata,
             page_context=page_context,
+            network_context=network_context,
         )
 
     async def _send_interrupt_control(

@@ -32,6 +32,7 @@ from sqlalchemy import select as sa_select
 
 import app.modules.daemon.router as _router
 from app.core.auth_deps import is_service_credential_request
+from app.core.client_ip import client_ip_from_request, has_forwarded_for
 from app.core.errors import PermissionDenied
 from app.core.logging import get_logger
 from app.modules.agent.model import AgentSession  # task-08：自愈回写 title_fallback
@@ -62,6 +63,7 @@ from app.modules.daemon.schema import (
     SessionTitleUpdateRequest,
 )
 from app.modules.daemon.service import DaemonService
+from app.modules.daemon.session.network_context import NetworkContextBlock
 from app.modules.daemon.session.service.compact import compact_session as _compact_session_svc
 from app.modules.daemon.session.service.fork import fork_session as _fork_session_svc
 from app.modules.daemon.session.service.git_status import (
@@ -624,6 +626,7 @@ async def get_session_git_status(
 )
 async def create_session(
     data: SessionCreateRequest,
+    request: Request,
     session: SessionDep,
     user: TaskRunAgentUser,
 ) -> SessionCreateResponse:
@@ -679,6 +682,12 @@ async def create_session(
         # 是主控身份标记（无 stage → 前端 inject 侧简报/工具注入语义断裂）。
         stage="orchestrator" if data.team_mission is not None else None,
         page_context=data.page_context,
+        # 2026-10-23-session-network-context（FR-01）：首轮网络环境块——Request
+        # 观测构造（IP 不可从 body 携带，防伪造），首轮强制注入建立上下文。
+        network_context=NetworkContextBlock(
+            user_ip=client_ip_from_request(request),
+            has_xff=has_forwarded_for(request),
+        ),
         attachment_ids=data.attachment_ids,
         # task-05（2026-09-14-session-thinking-level / FR-03）：预会话思考级别
         # 透传（None/空串=引擎默认；不写 config 列，P1-8/NG-04——仅透传
@@ -859,6 +868,12 @@ async def inject_session(
         attachment_ids=data.attachment_ids or None,
         # ql-20260825-004：每轮注入携带当前页面上下文。
         page_context=data.page_context,
+        # 2026-10-23-session-network-context（FR-01）：每轮网络环境块——Request
+        # 观测构造（渲染与快照去重在 prompt 组装点）。
+        network_context=NetworkContextBlock(
+            user_ip=client_ip_from_request(request),
+            has_xff=has_forwarded_for(request),
+        ),
         # task-07（2026-08-26-session-input-mention / FR-06）：@ 联想绑定字段透传
         # （幂等 binder 调用归 SessionService，三层同步加参——漏透传会 500）。
         bind_change_key=data.bind_change_key,

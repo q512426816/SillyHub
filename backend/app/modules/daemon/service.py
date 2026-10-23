@@ -28,6 +28,7 @@ from app.modules.daemon.schema import (
     TurnFileChangesSnapshot,
     TurnTimingSnapshot,
 )
+from app.modules.daemon.session.network_context import NetworkContextBlock
 from app.modules.session_attachment.storage import SessionAttachmentStorage
 
 log = get_logger(__name__)
@@ -815,6 +816,9 @@ class DaemonService:
         # 经 X-API-Key inject 携带 origin='task_wakeup'，router 层门控后传入；
         # facade 显式签名同步，漏透传会 500）。
         task_wakeup: bool = False,
+        # 2026-10-23-session-network-context（FR-01）：每轮网络环境块透传
+        # （router 层 Request 观测构造；facade 显式签名同步，漏透传会 500）。
+        network_context: NetworkContextBlock | None = None,
     ) -> SessionDispatchResult:
         return await self._sess.inject_session(
             session_id,
@@ -832,6 +836,7 @@ class DaemonService:
             queue_when_busy=queue_when_busy,
             busy_strategy=busy_strategy,
             task_wakeup=task_wakeup,
+            network_context=network_context,
         )
 
     async def interrupt_session(

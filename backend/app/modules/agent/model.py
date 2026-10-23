@@ -1299,6 +1299,15 @@ class AgentSessionQueuedMessage(BaseModel, table=True):
         default=None,
         sa_column=Column(JSON, nullable=True),
     )
+    # 网络环境块快照（NetworkContextBlock 的 dict 形态，2026-10-23-session-
+    # network-context D-012@v1：{user_ip, has_xff}——入队时存**发送时刻**的用户
+    # 网络事实；派发时携存储值调判定引擎**实时重算**机器判定并注入（机器状态
+    # 取派发时刻最新，不重放旧判定文本）。NULL = 发送时未携带（老调用/服务
+    # 身份路径），派发轮无网络环境段。
+    network_context: dict | None = Field(
+        default=None,
+        sa_column=Column(JSON, nullable=True),
+    )
     # 切档案/切供应商快照（str 形态的 uuid；None = 发送时未携带）。
     agent_profile_id: str | None = Field(
         default=None,

@@ -27,6 +27,7 @@ from app.modules.daemon.schema import (
     PageContextCreateBlock,
     TeamMissionCreateBlock,
 )
+from app.modules.daemon.session.network_context import NetworkContextBlock
 from app.modules.llm_provider.service import LlmProviderService as _PSvc
 from app.modules.ppm.common.session_binding import PpmItemKind, bind_session_to_ppm_item
 
@@ -72,6 +73,10 @@ async def create_session(
     # 2026-08-25-unified-floating-session（FR-5 / D-005）：悬浮入口页面上下文
     # 块——仅 page_key 枚举 + 实体 id，前导数据服务端回查；缺省 None 零回归。
     page_context: PageContextCreateBlock | None = None,
+    # 2026-10-23-session-network-context（FR-01 / D-006@v1）：首轮网络环境块
+    # （router 层从 Request 观测构造）——首轮强制注入一次建立上下文（不走去重），
+    # 后续轮走 inject 链快照去重。缺省 None 零回归。
+    network_context: NetworkContextBlock | None = None,
     # task-08（2026-08-25-session-spec-binding / FR-04 / FR-06）：快速修复
     # 短码——创建落库点 bind_session_to_quicklog 补写 quicklog_session_links
     # （savepoint best-effort，失败仅 warning 不阻断创建主事务与 201）。
@@ -473,9 +478,21 @@ async def create_session(
         # 占位注释的落地点）——dispatch_prompt 经 lease metadata 携带前缀
         # （既有机制），AgentRunLog(user_input)（下方）与首 turn SESSION_INJECT
         # 展示层仍写干净用户原文（对齐变更/页面前导先例，零 daemon 改动）。
+        # ── 2026-10-23-session-network-context（FR-01 / D-006@v1）：首轮网络
+        # 环境前导——first_turn=True 强制注入一次建立上下文（不走去重），后续
+        # 轮由 inject 链每轮渲染+快照去重。session 行已 flush（下方 :session.id
+        # 可用），机器清单按会话归属组装。缺省 None 不注入（零回归）。
+        netenv_preamble = None
+        if network_context is not None:
+            from app.modules.daemon.session.network_context import network_preamble_for_turn
+
+            netenv_preamble = await network_preamble_for_turn(
+                svc._session, agent_session=session, block=network_context, first_turn=True
+            )
         _prefix_parts = [
             part
             for part in (
+                netenv_preamble,
                 preamble,
                 page_preamble,
                 ppm_preamble,

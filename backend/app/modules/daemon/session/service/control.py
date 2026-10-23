@@ -39,6 +39,7 @@ from app.modules.daemon.model import DaemonControlCommand, DaemonTaskLease
 from app.modules.daemon.protocol import DAEMON_MSG_PLAN_RESPONSE
 from app.modules.daemon.runtime.service import DaemonRuntimeOffline
 from app.modules.daemon.schema import PageContextCreateBlock, PlanResponseDecision
+from app.modules.daemon.session.network_context import NetworkContextBlock
 
 from .errors import (
     DaemonSessionConfigInvalid,
@@ -101,6 +102,9 @@ async def _inject_mid_turn_into_run(
     # 24h 审查②：steering 路径此前静默丢 page_context（排队路径入队行会存
     # 并在派发时重放）——透传至此，与普通注入同口径构建页面上下文前导。
     page_context: PageContextCreateBlock | None = None,
+    # 2026-10-23-session-network-context（FR-01 / D-012@v1）：网络环境块——
+    # steering 轮在注入点实时渲染判定（与排队路径入队存储-派发重算同语义）。
+    network_context: NetworkContextBlock | None = None,
 ) -> SessionDispatchResult:
     """忙轮中途注入（quick 2026-09-02 群聊 @ 忙轮成员 steering 语义）。
 
@@ -253,11 +257,18 @@ async def _inject_mid_turn_into_run(
             page_context.workspace_id,
             page_context.tab_key,
         )
+    # 2026-10-23-session-network-context（FR-01）：网络环境段实时渲染（快照
+    # 去重跳过时 None 不拼接）。
+    netenv_preamble = None
+    if network_context is not None:
+        from app.modules.daemon.session.network_context import network_preamble_for_turn
+
+        netenv_preamble = await network_preamble_for_turn(
+            svc._session, agent_session=session, block=network_context
+        )
     _inject_user_msg = _strip_team_command_prefix(prompt)
-    if page_preamble:
-        inject_prompt = f"{page_preamble}\n\n---\n\n{_inject_user_msg}"
-    else:
-        inject_prompt = _inject_user_msg
+    _parts = [p for p in (netenv_preamble, page_preamble) if p]
+    inject_prompt = "\n\n---\n\n".join([*_parts, _inject_user_msg]) if _parts else _inject_user_msg
     inject_payload = {
         "session_id": str(session.id),
         "lease_id": str(session.lease_id),
@@ -696,6 +707,10 @@ async def _dispatch_inject_turn(
     provider_config_payload: dict | None,
     first_turn_briefing: str | None,
     page_context: PageContextCreateBlock | None,
+    # 2026-10-23-session-network-context（FR-01）：网络环境块——本函数是普通
+    # 后续轮的 prompt 组装点（与 mid-turn/queue 重放三足鼎立），在此渲染。
+    # 缺省 None 零回归（既有直调调用方/服务身份路径无网络段）。
+    network_context: NetworkContextBlock | None = None,
     inject_attachments: list,
 ) -> SessionDispatchResult:
     """commit 后派发段（task-08 自 _inject_into_session:4133-4291 拆出，零改写）。
@@ -782,12 +797,26 @@ async def _dispatch_inject_turn(
                     page_context.workspace_id,
                     page_context.tab_key,
                 )
-            # 拼接顺序：页面前导（本轮实时）→ 团队简报（首主控轮一次性）→ 用户消息。
+            # 2026-10-23-session-network-context（FR-01）：网络环境段实时渲染
+            # （快照去重跳过时 None 不拼接；渲染异常吞掉返回 None 不阻断派发）。
+            netenv_preamble = None
+            if network_context is not None:
+                from app.modules.daemon.session.network_context import (
+                    network_preamble_for_turn,
+                )
+
+                netenv_preamble = await network_preamble_for_turn(
+                    svc._session, agent_session=session, block=network_context
+                )
+            # 拼接顺序：网络环境（本轮实时）→ 页面前导（本轮实时）→ 团队简报
+            # （首主控轮一次性）→ 用户消息。
             # ql-20260901-002：派发文本剥 /team 前缀（前端发原始输入，展示层
             # 保留 "/team 目标"；agent 永不接收平台指令字面）。无前缀消息
             # 剥离为 no-op，无 mission 普通会话逐字节不变。
             _inject_user_msg = _strip_team_command_prefix(prompt)
             parts = []
+            if netenv_preamble:
+                parts.append(netenv_preamble)
             if page_preamble:
                 parts.append(page_preamble)
             if first_turn_briefing:

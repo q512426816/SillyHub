@@ -28,6 +28,7 @@ from app.modules.agent.model import (
 # provider caps steering 键（task-01 契约，pi/claude/codex=true）。
 from app.modules.agent.provider_caps import get_provider_caps
 from app.modules.daemon.schema import PageContextCreateBlock
+from app.modules.daemon.session.network_context import NetworkContextBlock
 from app.modules.daemon.session.service.auto_resume import (
     make_auto_resume_origin,
     parse_auto_resume_origin,
@@ -62,6 +63,10 @@ async def _handle_busy_turn(
     attachment_ids: list[uuid.UUID] | None = None,
     attachment_owner_user_id: uuid.UUID | None = None,
     page_context: PageContextCreateBlock | None = None,
+    # 2026-10-23-session-network-context（FR-01 / D-012@v1）：网络环境块——
+    # steering 分支透传注入点实时渲染；排队分支随条目序列化（发送时刻用户
+    # IP），派发重放时实时重算机器判定。
+    network_context: NetworkContextBlock | None = None,
     agent_profile_id: str | None = None,
     llm_provider_id: str | None = None,
     model: str | None = None,
@@ -121,6 +126,8 @@ async def _handle_busy_turn(
             # 24h 审查②：page_context 透传（此前 inject 分支静默丢——排队
             # 分支会存会重放，steering 分支应同口径，前导由注入侧拼装）。
             page_context=page_context,
+            # 2026-10-23-session-network-context：steering 分支同口径透传。
+            network_context=network_context,
         )
     # ql-20260825-011（后端真实排队）：忙轮不再无条件 409——
     # queue_when_busy=True 的调用方（前端会话 UI）改落排队表，
@@ -304,6 +311,13 @@ async def _handle_busy_turn(
         page_context=(
             page_context.model_dump(mode="json", exclude_none=True)
             if page_context is not None
+            else None
+        ),
+        # 2026-10-23-session-network-context（D-012@v1）：发送时刻网络事实随条目
+        # 持久化（排队窗口用户可能切网，派发用存储 IP+实时机器数据重算）。
+        network_context=(
+            network_context.model_dump(mode="json", exclude_none=True)
+            if network_context is not None
             else None
         ),
         agent_profile_id=agent_profile_id,
@@ -779,6 +793,14 @@ async def dispatch_queued_message_now(
                     steered_page_context = PageContextCreateBlock(**entry.page_context)
                 except Exception:
                     steered_page_context = None
+            # 2026-10-23-session-network-context（D-012@v1）：存储网络块重放
+            # （宽容解析，坏行按 None 处理无网络段）。
+            steered_network_context: NetworkContextBlock | None = None
+            if entry.network_context is not None:
+                try:
+                    steered_network_context = NetworkContextBlock(**entry.network_context)
+                except Exception:
+                    steered_network_context = None
             attachment_ids: list[uuid.UUID] | None = None
             if entry.attachment_ids:
                 try:
@@ -821,6 +843,7 @@ async def dispatch_queued_message_now(
                 attachment_owner_user_id=attachment_owner_user_id,
                 turn_metadata=chain_metadata,
                 page_context=steered_page_context,
+                network_context=steered_network_context,
             )
             # 注入成功：条目已随注入 commit 原子删除（消息转挂活跃 run——
             # user_input 留痕 + SESSION_INJECT 三段式由 _inject_mid_turn_into_run
@@ -948,6 +971,14 @@ async def dispatch_queued_messages(svc, session_id: uuid.UUID) -> None:
                 page_context = PageContextCreateBlock(**entry.page_context)
             except Exception:
                 page_context = None
+        # 2026-10-23-session-network-context（D-012@v1）：存储网络块 + 派发时刻
+        # 机器数据实时重算（注入点在 _dispatch_inject_turn，本处只透传块）。
+        network_context: NetworkContextBlock | None = None
+        if entry.network_context is not None:
+            try:
+                network_context = NetworkContextBlock(**entry.network_context)
+            except Exception:
+                network_context = None
         attachment_ids: list[uuid.UUID] | None = None
         if entry.attachment_ids:
             try:
@@ -984,6 +1015,7 @@ async def dispatch_queued_messages(svc, session_id: uuid.UUID) -> None:
                 attachment_ids=attachment_ids,
                 attachment_owner_user_id=attachment_owner_user_id,
                 page_context=page_context,
+                network_context=network_context,
                 # 2026-10-22-turn-trigger-metadata-p2：排队行 origin → 轮触发
                 # 溯源戳（task_wakeup/schedule 精确、auto_resume: 前缀），与群聊
                 # chain_metadata 合并（戳键覆盖，现状键空间不相交）；None 行不盖。

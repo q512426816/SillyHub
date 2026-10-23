@@ -27,6 +27,7 @@ from app.modules.agent.model import (
     AgentSession,
 )
 from app.modules.daemon.schema import PageContextCreateBlock
+from app.modules.daemon.session.network_context import NetworkContextBlock
 from app.modules.llm_provider.service import LlmProviderService as _PSvc
 from app.modules.ppm.common.session_binding import PpmItemKind
 
@@ -67,6 +68,11 @@ async def inject_session(
     attachment_ids: list[uuid.UUID] | None = None,
     # ql-20260825-004：每轮注入携带当前页面上下文。
     page_context: PageContextCreateBlock | None = None,
+    # 2026-10-23-session-network-context（FR-01 / D-001@v1）：每轮注入携带
+    # 网络环境块（router 层从 Request 观测 user_ip/has_xff 构造；渲染与去重
+    # 在 prompt 组装点，语义同 page_context 每轮通道）。缺省 None 零回归
+    # （服务身份路径/群聊影子等无用户浏览器请求的调用方无网络段）。
+    network_context: NetworkContextBlock | None = None,
     # task-07（2026-08-26-session-input-mention / FR-06 / D-003）：@ 联想绑定
     # 字段——经幂等 binder 落 M:N link（见下方「会话绑定」段插入点说明），
     # 不注入 prompt 前导；缺省 None = 不绑定（零回归）。
@@ -244,6 +250,8 @@ async def inject_session(
         prelocked_attachments=prelocked_attachments,
         # ql-20260825-004：页面上下文透传。
         page_context=page_context,
+        # 2026-10-23-session-network-context：网络环境块透传。
+        network_context=network_context,
         # ql-20260825-011：忙轮入队透传。
         queue_when_busy=queue_when_busy,
         # task-05（2026-09-18-single-chat-steering）：单聊忙轮策略透传
@@ -433,6 +441,9 @@ async def _inject_into_session(
     # ql-20260825-004：每轮注入携带当前页面上下文（build_page_context_preamble
     # 服务端回查注入【页面上下文】前导，复用 create 路径逻辑）。
     page_context: PageContextCreateBlock | None = None,
+    # 2026-10-23-session-network-context（FR-01）：网络环境块（渲染在
+    # _dispatch_inject_turn / mid-turn / queue 重放的 prompt 组装点）。
+    network_context: NetworkContextBlock | None = None,
     # ql-20260825-011：忙轮入队开关（语义见 inject_session 同名参数）。
     queue_when_busy: bool = False,
     # quick（2026-09-02 群聊忙轮注入 steering）：忙轮策略（语义见
@@ -516,6 +527,7 @@ async def _inject_into_session(
                 attachment_ids=attachment_ids,
                 attachment_owner_user_id=attachment_owner_user_id,
                 page_context=page_context,
+                network_context=network_context,
                 agent_profile_id=agent_profile_id,
                 llm_provider_id=llm_provider_id,
                 model=model,
