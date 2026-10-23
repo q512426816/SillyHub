@@ -1485,3 +1485,11 @@
 锚点：未记录
 最近确认：cd3a5746b656945ae7c55a801932582e1ba94d7d
 理由：最大风险：resolved 事件到达时后端答案落库与事件推送的时序竞态——若推送先于落库（理论窗口），重拉拿到的仍是 pending 态，记录短暂停留未更新，直到下一次事件/刷新兜底。评估可接受：backend 的 resolved 语义是"请求已收口"（落库后广播），实际窗口极小；且问答级频率下无重试风暴风险。 放弃的方案：a) 前端把 SSE 事件手工转 SessionDialogRead 增量 append/merge——resolved 事件不含 answers（SessionPermissionResolved 无答案字段），必须伪造或再查单条，且 id/created_at 等 REST 字段 SSE 缺失，拼装体与刷新后权威数据不一致（闪变）；b) 后端在 resolved 事件里加 answers 字段——动 SSE 契约+后端，改动面大且只解决 resolved 一半（request 到达仍需转换），违背"前端回显权威数据"原则；c) 轮询 dialogHistory——问答级频率用轮询浪费且延迟不可控。均弃。
+
+## D-unmapped-194@v1 设计期风险与放弃方案（底稿）
+状态：implemented
+变更：2026-10-23-file-card-agent-grouping
+原编号：D-001@v1
+锚点：未记录
+最近确认：0ea7bf0d129c6dfba9a04915c83c36329bbfbbfd
+理由：答：最大风险是「本轮AGENT 0 个但 shell 很多」的形态——用户会先点开卡只看到空列表 + 按钮行，可能困惑；缓解：agent=0 时头部第一段显示「本轮AGENT 无直接文件编辑」（不渲染 +0 −0 假零），按钮行置顶显眼。次要风险：双段标题在一行 28px 内拥挤（长数字/窄面板），处理：两段间分隔符 + min-w-0 截断，两端 shrink-0。 试过放弃的方案：① daemon 侧给快照加「并行会话」独立归因（把 shell 再拆 command/parallel）——需要 mtime/进程级证据，daemon 现有采集拿不到可靠信号，放弃；② 前端按路径启发式猜并行会话（如 .sillyspec/ 前缀）——路径黑名单是伪归因，误伤用户业务文件，放弃；③ 两张独立卡片（agent 卡 + 其他卡）——把一个快照拆两张卡破坏「一轮一卡」的既有形态与测试锚，用户要的是卡内分组不是拆卡，放弃。

@@ -1,0 +1,1420 @@
+diff --git a/backend/app/modules/daemon/session/network_context.py b/backend/app/modules/daemon/session/network_context.py
+new file mode 100644
+index 000000000..0fed4738c
+--- /dev/null
++++ b/backend/app/modules/daemon/session/network_context.py
+@@ -0,0 +1,243 @@
++"""会话网络环境判定引擎 + 【网络环境】前导段渲染（2026-10-23-session-network-context）。
++
++三路数据（D-002@v1 双源）：
++- 用户请求来源 IP（router 层 app/core/client_ip.py 观测，每轮提问实时取）；
++- daemon_instances.network_info.observed_ip（backend 从 daemon 心跳/注册请求观测，
++  ground truth，不可伪造）；
++- daemon_instances.network_info.interfaces（daemon 心跳自报网卡清单，拼访问地址用）。
++
++render_network_env 为纯函数（判定 + 四态降级 + 文案）；network_context_for_turn
++叠加 Redis 快照去重（D-006@v1/D-013@v1：同快照跳过、变化但 <60s 到点补注、
++Redis 故障降级每轮注入）。
++"""
++
++from __future__ import annotations
++
++import hashlib
++import json
++import uuid
++from dataclasses import dataclass, field
++from datetime import UTC, datetime
++from ipaddress import AddressValueError, IPv4Address, IPv4Network, NetmaskValueError
++
++from redis.asyncio import Redis
++
++from app.core.logging import get_logger
++
++log = get_logger(__name__)
++
++# 快照去重参数（D-006@v1）。
++NETENV_SNAPSHOT_TTL_SECONDS = 7 * 24 * 3600
++NETENV_MIN_REINJECT_INTERVAL_SECONDS = 60.0
++# FR-04：机器清单超 10 台截断（token 预算）。
++NETENV_MAX_MACHINES = 10
++# FR-05：无网卡数据时的近似掩码档（低置信标注）。
++_NETENV_FALLBACK_PREFIXES = (24, 16)
++
++
++@dataclass(frozen=True)
++class NetworkContextBlock:
++    """随提问轮穿透注入链的数据块（镜像 PageContextCreateBlock 形态）。
++
++    queue 入队序列化存储（user_ip/has_xff），派发时携存储值调引擎实时渲染
++    （D-012@v1——不重放旧判定文本）。
++    """
++
++    user_ip: str | None
++    has_xff: bool
++
++
++@dataclass(frozen=True)
++class MachineNetworkInfo:
++    """判定引擎的机器输入（daemon_instances 一行的网络投影）。"""
++
++    daemon_id: str
++    name: str  # display_alias or hostname（口径同 grants/queries.py）
++    online: bool
++    observed_ip: str | None = None
++    interfaces: list[dict] = field(default_factory=list)
++
++
++def _is_docker_bridge(ip: str) -> bool:
++    """容器网桥特征：172.16.0.0/12 私网段（compose 默认池）。
++
++    FR-05 降级矩阵：无 XFF（绕过 nginx 直连容器）且来源 IP 落该段 → 用户真实
++    网段不可判定。
++    """
++    try:
++        return IPv4Address(ip) in IPv4Network("172.16.0.0/12")
++    except (AddressValueError, NetmaskValueError):
++        return False
++
++
++def _same_subnet(a: str, b: str, prefixes: tuple[int, ...] = (24,)) -> bool:
++    """IPv4 同网段判定：任一前缀档下 a/b 同网即真（默认 /24）。"""
++    try:
++        addr_a, addr_b = IPv4Address(a), IPv4Address(b)
++    except (AddressValueError, NetmaskValueError):
++        return False
++    for prefix in prefixes:
++        mask = (0xFFFFFFFF << (32 - prefix)) & 0xFFFFFFFF
++        if (int(addr_a) & mask) == (int(addr_b) & mask):
++            return True
++    return False
++
++
++def _pick_address(machine: MachineNetworkInfo) -> tuple[str | None, str]:
++    """拼访问地址的网卡选择（FR-05）：优先与 observed_ip 同网段的 IPv4 网卡。
++
++    返回 (地址, 说明)：命中同段网卡 → (ip, "")；无同段 → (首个 IPv4, "（未与
++    观测 IP 同段， uncertain）")式标注；无 IPv4 网卡 → (None, "无可用 IPv4 地址")。
++    Windows 虚拟网卡（WSL/Hyper-V）在此层不过滤——同段优先已天然规避（R-02）。
++    """
++    ipv4s = [e for e in machine.interfaces if e.get("family") == "IPv4" and e.get("ip")]
++    if not ipv4s:
++        return None, "无可用 IPv4 地址"
++    observed = machine.observed_ip
++    # 网卡自身 cidr 精确判定优先；无 cidr 或 observed 缺失时按 /24 近似。
++    for entry in ipv4s:
++        cidr = entry.get("cidr")
++        if observed and cidr:
++            try:
++                net = IPv4Network(cidr, strict=False)
++                if IPv4Address(observed) in net:
++                    return str(entry["ip"]), ""
++            except (AddressValueError, NetmaskValueError):
++                continue
++    if observed and any(_same_subnet(str(e["ip"]), observed) for e in ipv4s):
++        for entry in ipv4s:
++            if _same_subnet(str(entry["ip"]), observed):
++                return str(entry["ip"]), ""
++    first = str(ipv4s[0]["ip"])
++    all_ips = "、".join(str(e["ip"]) for e in ipv4s)
++    return first, f"（多网卡未定，候选：{all_ips}）"
++
++
++def _machine_line(machine: MachineNetworkInfo, user_ip: str | None) -> str:
++    """单机器判定行渲染。"""
++    observed = machine.observed_ip
++    has_nics = bool(machine.interfaces)
++    if user_ip and observed and _is_user_ipv4(user_ip):
++        if has_nics:
++            same = _same_subnet(user_ip, observed)
++        else:
++            # 无网卡数据：/24 与 /16 双档近似，低置信标注（FR-05/design Phase 3）。
++            same = _same_subnet(user_ip, observed, prefixes=_NETENV_FALLBACK_PREFIXES)
++        verdict = (
++            "与用户同网段，大概率可直连该机服务" if same else "与用户不同网段，用户浏览器无法直连"
++        )
++        if not has_nics:
++            verdict += "（低置信：无网卡数据，按默认掩码近似）"
++    else:
++        verdict = "观测 IP 缺失，无法判定网段关系"
++    addr, note = _pick_address(machine)
++    addr_text = f"访问地址建议用 {addr}{note}" if addr else note
++    return f"{machine.name}（{observed or 'IP 未知'}，{verdict}；{addr_text}）"
++
++
++def _is_user_ipv4(ip: str | None) -> bool:
++    if not ip:
++        return False
++    try:
++        IPv4Address(ip)
++        return True
++    except (AddressValueError, NetmaskValueError):
++        return False
++
++
++def render_network_env(
++    user_ip: str | None,
++    has_xff: bool,
++    machines: list[MachineNetworkInfo],
++) -> str:
++    """纯函数：【网络环境】段渲染（判定 + 四态降级 + 指引，FR-01/FR-05/FR-06）。
++
++    - user_ip 缺失 →「无法判定」（请求无来源 IP，理论不可达，防御）；
++    - 无 XFF 且 user_ip ∈ 172.16/12 → 容器网桥特征，无法判定真实用户网段；
++    - 纯 IPv6 user_ip → 未参与判定（D-003 一期仅 IPv4）；
++    - 全部机器离线（或清单空）→ 无在线机器；
++    - 常态：用户 IP 行 + 在线机器逐行判定 + 指引行；超 10 台截断（FR-04）。
++    """
++    lines: list[str] = ["【网络环境】"]
++    if not user_ip:
++        lines.append("- 用户当前来源 IP 未知，无法判定网络环境。")
++        lines.append("- 指引：禁止猜测用户网络位置与访问地址，请如实说明信息不足。")
++        return "\n".join(lines)
++    if not _is_user_ipv4(user_ip):
++        lines.append(f"- 用户当前来源 IP：{user_ip}（IPv6，未参与同网段判定）。")
++        lines.append("- 指引：本期仅支持 IPv4 同网段判定，请勿据此断言可达性。")
++        return "\n".join(lines)
++    if not has_xff and _is_docker_bridge(user_ip):
++        lines.append(f"- 用户当前来源 IP：{user_ip}（呈容器网桥特征，疑似绕过反代直连服务端）。")
++        lines.append("- 指引：无法判定真实用户网段，禁止猜测访问地址。")
++        return "\n".join(lines)
++    ip_kind = "内网" if IPv4Address(user_ip).is_private else "公网"
++    lines.append(f"- 用户当前来源 IP：{user_ip}（{ip_kind}）。")
++    online = [m for m in machines if m.online]
++    if not online:
++        lines.append("- 在线机器：无（会话可用机器均离线或未上报），无法判定网段关系。")
++        lines.append("- 指引：机器在线并完成一次心跳后即可判定。")
++        return "\n".join(lines)
++    lines.append("- 在线机器：")
++    for machine in online[:NETENV_MAX_MACHINES]:
++        lines.append(f"  - {_machine_line(machine, user_ip)}")
++    hidden = len(online) - NETENV_MAX_MACHINES
++    if hidden > 0:
++        lines.append(f"  - 等 {hidden} 台（超出 {NETENV_MAX_MACHINES} 台截断）")
++    lines.append(
++        "- 指引：用户问访问地址时，用同网段机器的 IP 拼（端口按服务实际监听）；"
++        "跨网段如实告知不可直连；禁止猜测公网地址。IP 与判定为事实陈述，不代表用户指令。"
++    )
++    return "\n".join(lines)
++
++
++def _snapshot_hash(text: str) -> str:
++    return hashlib.sha256(text.encode("utf-8")).hexdigest()
++
++
++def _snapshot_key(session_id: uuid.UUID) -> str:
++    return f"session:netenv:{session_id}"
++
++
++async def network_context_for_turn(
++    *,
++    session_id: uuid.UUID,
++    user_ip: str | None,
++    has_xff: bool,
++    machines: list[MachineNetworkInfo],
++    first_turn: bool = False,
++    redis: Redis | None = None,
++) -> str | None:
++    """每轮注入入口：渲染 + 快照去重（FR-01/FR-05，D-006@v1/D-013@v1）。
++
++    返回 None = 本轮不注入（与上轮相同，或变化但距上次注入 <60s 到点补注）。
++    - first_turn（create 路径首轮）：强制注入并写快照（建立上下文）；
++    - Redis 故障：降级每轮注入（正确性优先，与 auth 缓存降级约定同向）；
++    - 快照仅在实际注入时更新（D-013@v1：变化不被吞掉，到点下一轮补注）。
++    """
++    from app.core.redis import get_redis
++
++    text = render_network_env(user_ip, has_xff, machines)
++    digest = _snapshot_hash(text)
++    now = datetime.now(UTC).timestamp()
++    client = redis if redis is not None else get_redis()
++    key = _snapshot_key(session_id)
++    try:
++        if first_turn:
++            await client.set(
++                key, json.dumps({"h": digest, "ts": now}), ex=NETENV_SNAPSHOT_TTL_SECONDS
++            )
++            return text
++        raw = await client.get(key)
++        if raw:
++            state = json.loads(raw)
++            if state.get("h") == digest:
++                return None  # 同快照：跳过（D-006）。
++            if now - float(state.get("ts", 0.0)) < NETENV_MIN_REINJECT_INTERVAL_SECONDS:
++                return None  # 变化但未到 60s：不注入也不更新快照（D-013 到点补注）。
++        await client.set(key, json.dumps({"h": digest, "ts": now}), ex=NETENV_SNAPSHOT_TTL_SECONDS)
++        return text
++    except Exception:
++        # Redis 故障降级：每轮注入（可失去重，不失功能，D-006）。
++        log.warning("netenv_snapshot_redis_unavailable", session_id=str(session_id))
++        return text
+diff --git a/backend/tests/modules/daemon/test_network_context.py b/backend/tests/modules/daemon/test_network_context.py
+index 7e98940a3..fd48746a3 100644
+--- a/backend/tests/modules/daemon/test_network_context.py
++++ b/backend/tests/modules/daemon/test_network_context.py
+@@ -16,6 +16,11 @@ from app.core.security import password_hasher
+ from app.modules.auth.model import User
+ from app.modules.daemon.model import DaemonInstance
+ from app.modules.daemon.service import DaemonService
++from app.modules.daemon.session.network_context import (
++    MachineNetworkInfo,
++    network_context_for_turn,
++    render_network_env,
++)
+ 
+ 
+ async def _seed_user(session: AsyncSession) -> User:
+@@ -204,3 +209,189 @@ async def test_heartbeat_interfaces_replaces_wholesale(db_session: AsyncSession)
+     inst = await db_session.get(DaemonInstance, daemon_local_id)
+     assert inst is not None
+     assert inst.network_info == {"observed_ip": "192.168.1.60", "interfaces": []}
++
++
++# ── FR-05/FR-06：判定引擎纯函数（render_network_env）─────────────────────────
++
++
++class _FakeRedis:
++    """快照去重测试假件：内存 dict + 可注入故障。"""
++
++    def __init__(self) -> None:
++        self.store: dict[str, str] = {}
++        self.fail = False
++
++    async def get(self, key: str) -> str | None:
++        if self.fail:
++            raise ConnectionError("fake redis down")
++        return self.store.get(key)
++
++    async def set(self, key: str, value: str, ex: int | None = None) -> bool:
++        if self.fail:
++            raise ConnectionError("fake redis down")
++        self.store[key] = value
++        return True
++
++
++def _machine(
++    name: str = "pc1",
++    observed: str | None = "192.168.1.10",
++    ips: tuple[str, ...] = ("192.168.1.10",),
++    online: bool = True,
++) -> "MachineNetworkInfo":
++    from app.modules.daemon.session.network_context import MachineNetworkInfo
++
++    return MachineNetworkInfo(
++        daemon_id=f"d-{name}",
++        name=name,
++        online=online,
++        observed_ip=observed,
++        interfaces=[
++            {"name": f"eth{i}", "ip": ip, "cidr": f"{ip}/24", "family": "IPv4"}
++            for i, ip in enumerate(ips)
++        ],
++    )
++
++
++def _render(user_ip: str | None, machines: list, has_xff: bool = True) -> str:
++
++    return render_network_env(user_ip, has_xff, machines)
++
++
++def test_render_same_subnet_verdict():
++    """FR-05 同段：用户 192.168.1.23 vs 机器 192.168.1.10/24 → 同网段大概率可直连。"""
++    text = _render("192.168.1.23", [_machine(observed="192.168.1.10")])
++    assert "同网段，大概率可直连" in text
++    assert "192.168.1.10" in text
++
++
++def test_render_cross_subnet_verdict():
++    """FR-05 跨段：10.0.3.5 → 不同网段无法直连。"""
++    text = _render("192.168.1.23", [_machine(name="build", observed="10.0.3.5", ips=("10.0.3.5",))])
++    assert "不同网段" in text and "无法直连" in text
++
++
++def test_render_degradation_user_ip_missing():
++    """FR-05 降级①：user_ip 缺失 → 无法判定 + 禁止猜测指引。"""
++    text = _render(None, [_machine()])
++    assert "无法判定" in text and "禁止猜测" in text
++
++
++def test_render_degradation_ipv6_user():
++    """FR-05 降级④：纯 IPv6 用户 → 未参与判定。"""
++    text = _render("fd00::1", [_machine()])
++    assert "IPv6" in text and "未参与" in text
++
++
++def test_render_degradation_docker_bridge_no_xff():
++    """FR-05 降级②：无 XFF 且 172.16/12 网桥特征 → 无法判定真实网段。"""
++    text = _render("172.18.0.5", [_machine()], has_xff=False)
++    assert "容器网桥" in text and "无法判定真实用户网段" in text
++    # 有 XFF（经 nginx 转发）时同一 IP 正常判定（最右段是可信来源）。
++    text2 = _render(
++        "172.18.0.5", [_machine(observed="172.18.0.9", ips=("172.18.0.9",))], has_xff=True
++    )
++    assert "同网段，大概率可直连" in text2
++
++
++def test_render_degradation_all_offline():
++    """FR-05 降级③：全部机器离线 → 无在线机器。"""
++    text = _render("192.168.1.23", [_machine(online=False)])
++    assert "无在线机器" in text or "均离线" in text
++
++
++def test_render_low_confidence_without_interfaces():
++    """FR-05：机器无网卡数据 → /24 与 /16 双档近似 + 低置信标注。"""
++    text = _render("192.168.0.7", [_machine(observed="192.168.1.10", ips=())])
++    # /24 不同段、/16 同段 → 近似判同段且带低置信标注。
++    assert "低置信" in text
++    text2 = _render("10.99.0.7", [_machine(observed="192.168.1.10", ips=())])
++    assert "低置信" in text2  # 双档都不同段也走低置信观测 IP 缺网卡数据路径
++
++
++def test_render_address_prefers_same_subnet_nic():
++    """FR-05 地址选择：多网卡时优先与观测 IP 同段的那个（规避虚拟网卡，R-02）。"""
++    text = _render(
++        "192.168.1.23",
++        [_machine(name="win", observed="192.168.1.10", ips=("172.22.1.2", "192.168.1.10"))],
++    )
++    assert "建议用 192.168.1.10" in text
++
++
++def test_render_machine_truncation_over_ten():
++    """FR-04：机器清单超 10 台截断为「等 N 台」。"""
++    machines = [_machine(name=f"m{i:02d}", observed=f"192.168.1.{i:02d}") for i in range(1, 13)]
++    text = _render("192.168.1.23", machines)
++    assert "等 2 台" in text
++    assert "m12" not in text
++
++
++def test_render_guidance_wording():
++    """FR-06 文案断言：指引措辞含端口口径/禁止猜公网/事实陈述边界。"""
++    text = _render("192.168.1.23", [_machine()])
++    assert "端口按服务实际监听" in text
++    assert "禁止猜测公网地址" in text
++    assert "事实陈述" in text
++
++
++# ── FR-01/FR-05：快照去重（network_context_for_turn，D-006@v1/D-013@v1）──────
++
++
++@pytest.mark.asyncio
++async def test_snapshot_same_text_skips_reinject():
++    """同快照 → None 不重注。"""
++
++    redis = _FakeRedis()
++    sid = uuid.uuid4()
++    kwargs = dict(session_id=sid, user_ip="192.168.1.23", has_xff=True, machines=[_machine()])
++    first = await network_context_for_turn(**kwargs, first_turn=True, redis=redis)
++    assert first is not None
++    again = await network_context_for_turn(**kwargs, redis=redis)
++    assert again is None  # 同快照跳过。
++
++
++@pytest.mark.asyncio
++async def test_snapshot_change_within_60s_defers_and_catches_up():
++    """D-013：变化但 <60s → 不注入不更新；下一轮（模拟到点）仍不同 → 补注。"""
++
++    redis = _FakeRedis()
++    sid = uuid.uuid4()
++    first = await network_context_for_turn(
++        session_id=sid,
++        user_ip="192.168.1.23",
++        has_xff=True,
++        machines=[_machine()],
++        first_turn=True,
++        redis=redis,
++    )
++    assert first is not None
++    # 用户切网（IP 变化）但仍在 60s 窗口内 → None 且快照不更新。
++    deferred = await network_context_for_turn(
++        session_id=sid, user_ip="10.0.0.8", has_xff=True, machines=[_machine()], redis=redis
++    )
++    assert deferred is None
++    # 模拟到点：把快照时间戳拨回 61s 前。
++    import json as _json
++
++    state = _json.loads(redis.store[f"session:netenv:{sid}"])
++    state["ts"] -= 61.0
++    redis.store[f"session:netenv:{sid}"] = _json.dumps(state)
++    caught_up = await network_context_for_turn(
++        session_id=sid, user_ip="10.0.0.8", has_xff=True, machines=[_machine()], redis=redis
++    )
++    assert caught_up is not None and "10.0.0.8" in caught_up
++
++
++@pytest.mark.asyncio
++async def test_snapshot_redis_failure_degrades_to_every_turn():
++    """Redis 故障 → 每轮注入（可失去重不失功能）。"""
++
++    redis = _FakeRedis()
++    redis.fail = True
++    sid = uuid.uuid4()
++    kwargs = dict(
++        session_id=sid, user_ip="192.168.1.23", has_xff=True, machines=[_machine()], redis=redis
++    )
++    first = await network_context_for_turn(**kwargs, first_turn=True)
++    again = await network_context_for_turn(**kwargs)
++    assert first is not None and again is not None  # 故障降级恒注入。
+diff --git a/frontend/src/components/daemon/__tests__/turn-timeline-conversation-file-card.test.tsx b/frontend/src/components/daemon/__tests__/turn-timeline-conversation-file-card.test.tsx
+index f86ab8514..868102499 100644
+--- a/frontend/src/components/daemon/__tests__/turn-timeline-conversation-file-card.test.tsx
++++ b/frontend/src/components/daemon/__tests__/turn-timeline-conversation-file-card.test.tsx
+@@ -400,7 +400,7 @@ describe("轮级文件变更卡与会话级汇总挂载（task-11 / 线 C 1b）"
+     );
+ 
+     const card = screen.getByTestId("turn-file-changes");
+-    expect(screen.getByText("2 个文件变更")).toBeInTheDocument();
++    expect(screen.getByText("总共 2 个文件变更")).toBeInTheDocument();
+     expect(card).toBeInTheDocument();
+     // 挂在轮尾状态行（RoundDivider「第 N 轮」）之后，不是轮首；卡片头也带「第 N 轮」，
+     // 取 DOM 序第一个（分隔行在前）。
+@@ -481,7 +481,7 @@ describe("轮级文件变更卡与会话级汇总挂载（task-11 / 线 C 1b）"
+       />,
+     );
+ 
+-    expect(screen.getByText("1 个文件变更")).toBeInTheDocument();
++    expect(screen.getByText("总共 1 个文件变更")).toBeInTheDocument();
+     expect(screen.getByText("（部分）")).toBeInTheDocument();
+   });
+ 
+@@ -661,24 +661,69 @@ describe("文件变更卡行点击 → 本轮变更弹窗（2026-10-23-turn-file
+     );
+   });
+ 
+-  it("shell 归因行点击同样开弹窗：source 上抛 → 内容区如实说明（FR-03）", async () => {
++  it("shell 归因行（命令行/其他区段）点击同样开弹窗：source 上抛 → 内容区如实说明（FR-03）", async () => {
+     getAgentSessionLogsMock.mockResolvedValue([]);
+     render(
+       <TurnTimeline {...renderProps([wiringTurn()])} sessionId="sess-1" />,
+     );
+ 
++    // grouping 后 shell 行收进「命令行/其他」区段：展开头部 + 点开区段再点行。
+     fireEvent.click(screen.getByTestId("file-changes-header"));
+-    const rows = screen.getAllByTestId("file-changes-row");
+-    const shellRow = rows.find((row) => row.getAttribute("data-source") === "shell");
++    fireEvent.click(screen.getByTestId("file-changes-other-toggle"));
++    const shellRow = screen
++      .getAllByTestId("file-changes-row")
++      .find((row) => row.getAttribute("data-source") === "shell");
+     fireEvent.click(shellRow!);
+ 
+     const dialog = await screen.findByTestId("turn-file-diff-dialog");
+     expect(
+-      await within(dialog).findByText(/命令行\/脚本改动.*未捕获补丁内容/s),
++      await within(dialog).findByText(/未来自本轮 agent 的编辑工具/s),
+     ).toBeInTheDocument();
+     expect(within(dialog).queryByTestId("turn-file-diff-section")).toBeNull();
+   });
+ 
++  it("已删除文件行可点击并弹窗如实说明（FR-03/grouping）", async () => {
++    getAgentSessionLogsMock.mockResolvedValue([]);
++    render(
++      <TurnTimeline
++        {...renderProps([
++          wiringTurn({
++            fileChanges: {
++              runId: "run-1",
++              baselineHead: "abc1234",
++              collectedAt: "2026-10-23T08:00:00Z",
++              collectMs: 30,
++              status: "ok",
++              files: [
++                {
++                  path: "legacy/old.ts",
++                  status: "deleted",
++                  added: 0,
++                  deleted: 9,
++                  attribution: "command",
++                },
++              ],
++              concurrentSessionsHint: true,
++            },
++          }),
++        ])}
++        sessionId="sess-1"
++      />,
++    );
++
++    fireEvent.click(screen.getByTestId("file-changes-header"));
++    fireEvent.click(screen.getByTestId("file-changes-other-toggle"));
++    const deletedRow = screen
++      .getAllByTestId("file-changes-row")
++      .find((row) => row.getAttribute("data-status") === "deleted");
++    expect(deletedRow).not.toBeNull();
++    fireEvent.click(deletedRow!);
++
++    const dialog = await screen.findByTestId("turn-file-diff-dialog");
++    expect(await within(dialog).findByText(/本轮被删除/s)).toBeInTheDocument();
++    expect(within(dialog).queryByTestId("turn-file-diff-section")).toBeNull();
++  });
++
+   it("未接 sessionId（旧消费方）：行点击零行为、全树无弹窗（FR-04 零回归）", () => {
+     getAgentSessionLogsMock.mockResolvedValue([]);
+     render(<TurnTimeline {...renderProps([wiringTurn()])} />);
+diff --git a/frontend/src/components/daemon/file-changes/__tests__/file-changes-card.test.tsx b/frontend/src/components/daemon/file-changes/__tests__/file-changes-card.test.tsx
+index 7f0fdb676..c1eec5da2 100644
+--- a/frontend/src/components/daemon/file-changes/__tests__/file-changes-card.test.tsx
++++ b/frontend/src/components/daemon/file-changes/__tests__/file-changes-card.test.tsx
+@@ -12,6 +12,8 @@
+ //   9. task-11：降级形态（degraded + capability="tool_only"）——「仅工具编辑」+ 说明行、
+ //      无文件行、头部不可展开、全树无「无改动」；
+ //  10. task-11：binary 行破折号；命令行归因行（edits=0）不出「改0次」；tool 行工具名提示。
++//  11. 2026-10-23-file-card-agent-grouping：双段头部（本轮AGENT 段 + 总共段）、
++//      展开区默认只列 agent 行、shell 行收进「命令行/其他」按钮展开、删除行可点。
+ 
+ import { describe, expect, it, vi } from "vitest";
+ import { fireEvent, render, screen } from "@testing-library/react";
+@@ -44,20 +46,23 @@ const EIGHT_FILES: ChangedFile[] = [
+ ];
+ 
+ describe("FileChangesCard", () => {
+-  it("折叠态只渲染 28px 头部一行，totals 由 files 求和", () => {
++  it("折叠态只渲染 28px 头部一行，双段标题 totals 由 files 求和", () => {
+     render(<FileChangesCard files={EIGHT_FILES} turnNo={16} />);
+ 
+     const header = screen.getByTestId("file-changes-header");
+     expect(header.className).toContain("h-7");
+     expect(screen.getByTestId("file-changes-card")).toHaveAttribute("data-expanded", "false");
+-    expect(screen.getByText("8 个文件变更")).toBeInTheDocument();
+-    expect(screen.getByText("+230")).toBeInTheDocument();
++    // 双段：本轮AGENT 7 个（+230 −7）| 总共 8 个（+230 −8）。
++    expect(screen.getByText("本轮AGENT 7 个文件变更")).toBeInTheDocument();
++    expect(screen.getByText("总共 8 个文件变更")).toBeInTheDocument();
++    expect(screen.getAllByText("+230")).toHaveLength(2);
++    expect(screen.getByText("−7")).toBeInTheDocument();
+     expect(screen.getByText("−8")).toBeInTheDocument();
+     expect(screen.getByText("第 16 轮")).toBeInTheDocument();
+     expect(screen.queryAllByTestId("file-changes-row")).toHaveLength(0);
+   });
+ 
+-  it("点头部展开：行高 24px、逐文件 +/− 与「改N次」", () => {
++  it("点头部展开：行高 24px、逐文件 +/− 与「改N次」；主列表只列 agent 行", () => {
+     render(<FileChangesCard files={EIGHT_FILES} />);
+ 
+     fireEvent.click(screen.getByTestId("file-changes-header"));
+@@ -68,23 +73,35 @@ describe("FileChangesCard", () => {
+       screen.getByTestId("file-changes-header").getAttribute("aria-controls"),
+     ).toBe(screen.getByTestId("file-changes-list").id);
+ 
++    // 2026-10-23-file-card-agent-grouping：主列表默认只列 tool 行（7 个），
++    // shell 行收进「命令行/其他」按钮，不在主列表。
+     const rows = screen.getAllByTestId("file-changes-row");
+-    expect(rows).toHaveLength(8);
++    expect(rows).toHaveLength(7);
+     expect(rows[0]!.className).toContain("h-6");
+     expect(rows[0]!.textContent).toContain("+128");
+     expect(rows[0]!.textContent).toContain("−4");
+     expect(rows[0]!.textContent).toContain("改3次");
++    expect(screen.queryByText("package.json")).toBeNull();
+   });
+ 
+-  it("shell 归因只在对应行出「命令行」徽标", () => {
++  it("命令行/其他按钮展开后 shell 行可见（含「命令行」徽标），再点收起", () => {
+     render(<FileChangesCard files={EIGHT_FILES} startExpanded />);
+ 
+-    expect(screen.getAllByText("命令行")).toHaveLength(1);
++    const toggle = screen.getByTestId("file-changes-other-toggle");
++    expect(toggle).toHaveAttribute("aria-expanded", "false");
++    expect(screen.queryByText("package.json")).toBeNull();
++
++    fireEvent.click(toggle);
++    expect(screen.getByTestId("file-changes-other-toggle")).toHaveAttribute("aria-expanded", "true");
+     const shellRow = screen.getByText("package.json").closest('[data-testid="file-changes-row"]');
+     expect(shellRow).toHaveAttribute("data-source", "shell");
++    expect(screen.getAllByText("命令行")).toHaveLength(1);
++
++    fireEvent.click(screen.getByTestId("file-changes-other-toggle"));
++    expect(screen.queryByText("package.json")).toBeNull();
+   });
+ 
+-  it("truncated：头部（部分）+ 行级统计退化为 —，不拿半截 numstat 充总数", () => {
++  it("truncated：头部（部分）+ 两段行级统计退化为 —，不拿半截 numstat 充总数", () => {
+     render(<FileChangesCard files={EIGHT_FILES.slice(0, 3)} truncated startExpanded />);
+ 
+     expect(screen.getByText("（部分）")).toBeInTheDocument();
+@@ -93,7 +110,7 @@ describe("FileChangesCard", () => {
+     expect(screen.getByTestId("file-changes-header").textContent).not.toContain("−");
+     expect(screen.getAllByTestId("file-changes-row")[0]!.textContent).toContain("—");
+     // 计数仍可靠：文件数与编辑次数照常。
+-    expect(screen.getByText("3 个文件变更")).toBeInTheDocument();
++    expect(screen.getByText("总共 3 个文件变更")).toBeInTheDocument();
+     expect(screen.getAllByTestId("file-changes-row")[0]!.textContent).toContain("改3次");
+   });
+ 
+@@ -216,7 +233,7 @@ describe("FileChangesCard：降级形态与真实快照细节（task-11）", ()
+     ).not.toBeNull();
+   });
+ 
+-  it("命令行归因行（edits=0）不出「改0次」；tool 行保留工具名提示", () => {
++  it("命令行归因行（edits=0）不出「改0次」；tool 行保留工具名提示（其他区段内同样适用）", () => {
+     render(
+       <FileChangesCard
+         files={[
+@@ -234,7 +251,14 @@ describe("FileChangesCard：降级形态与真实快照细节（task-11）", ()
+       />,
+     );
+ 
+-    const [shellRow, toolRow] = screen.getAllByTestId("file-changes-row");
++    // shell 行在「命令行/其他」区段：先展开再取行（DOM 序：agent 主列表在前）。
++    fireEvent.click(screen.getByTestId("file-changes-other-toggle"));
++    const shellRow = screen
++      .getAllByTestId("file-changes-row")
++      .find((row) => row.getAttribute("data-source") === "shell")!;
++    const toolRow = screen
++      .getAllByTestId("file-changes-row")
++      .find((row) => row.getAttribute("data-source") === "tool")!;
+     // 0 会被读成「没改过」，而该行就在改动清单里 → 整列不渲染。
+     expect(shellRow!.textContent).not.toContain("改0次");
+     expect(shellRow!.querySelector('[data-testid="file-changes-edits"]')).toBeNull();
+@@ -244,7 +268,7 @@ describe("FileChangesCard：降级形态与真实快照细节（task-11）", ()
+     expect(edits!.getAttribute("title")).toBe("编辑工具：Edit、Write");
+   });
+ 
+-  it("状态徽标与交互：新增/删除/新文件；删除行不可点击、untracked 行破折号", () => {
++  it("状态徽标：新增/新文件在主列表，删除行在「其他」区段且可点击（grouping 后）", () => {
+     const onOpenFile = vi.fn();
+     render(
+       <FileChangesCard
+@@ -266,36 +290,64 @@ describe("FileChangesCard：降级形态与真实快照细节（task-11）", ()
+       />,
+     );
+ 
+-    const badges = screen
+-      .getAllByTestId("file-changes-status")
+-      .map((el) => el.textContent);
+-    expect(badges).toEqual(["新增", "删除", "新文件"]);
+-
+-    const rows = screen.getAllByTestId("file-changes-row");
+-    expect(rows[1]).toHaveAttribute("data-clickable", "false");
+-    fireEvent.click(rows[1]!);
+-    expect(onOpenFile).not.toHaveBeenCalled();
+-    fireEvent.click(rows[0]!);
+-    expect(onOpenFile).toHaveBeenCalledWith("a.ts");
++    // 主列表：a.ts（新增）+ c.ts（新文件）；b.ts（删除，shell）在「其他」区段。
++    expect(
++      screen.getAllByTestId("file-changes-status").map((el) => el.textContent),
++    ).toEqual(["新增", "新文件"]);
++    expect(screen.queryByText("b.ts")).toBeNull();
+ 
++    fireEvent.click(screen.getByTestId("file-changes-other-toggle"));
+     expect(
+-      rows[2]!.querySelector('[title="新文件：无行级统计"]'),
+-    ).not.toBeNull();
++      screen.getAllByTestId("file-changes-status").map((el) => el.textContent),
++    ).toEqual(["新增", "新文件", "删除"]);
++
++    // 删除行可点（grouping FR-03：不再禁点），路径保留删除线样式。
++    const deletedRow = screen.getByText("b.ts").closest('[data-testid="file-changes-row"]');
++    expect(deletedRow).toHaveAttribute("data-clickable", "true");
++    expect(deletedRow!.innerHTML).toContain("line-through");
++    fireEvent.click(deletedRow!);
++    expect(onOpenFile).toHaveBeenCalledWith("b.ts");
+   });
++});
+ 
+-  it("notice 态也显示共享工作区提示", () => {
++/* 2026-10-23-file-card-agent-grouping：双段头部与分组展示。 */
++describe("FileChangesCard：AGENT 编辑分组（2026-10-23-file-card-agent-grouping）", () => {
++  it("双段标题合计：本轮AGENT 段（tool 计数+行级）与总共段独立求和", () => {
+     render(
+       <FileChangesCard
+-        files={[]}
+-        capability="full"
+-        truncated
+-        notice="工作区快照采集超时（1.5s），本轮改动未知"
+-        sharedWorkspace
+-        turnNo={7}
++        files={[
++          { path: "a.ts", adds: 15, dels: 12, edits: 2, source: "tool" },
++          { path: ".sillyspec/x.md", adds: 250, dels: 2, edits: 0, source: "shell" },
++        ]}
+       />,
+     );
+-    const notice = screen.getByTestId("file-changes-notice");
+-    expect(notice.textContent).toContain("共享工作区");
+-    expect(notice.textContent).toContain("1.5s");
++
++    expect(screen.getByText("本轮AGENT 1 个文件变更")).toBeInTheDocument();
++    expect(screen.getByText("+15")).toBeInTheDocument();
++    expect(screen.getByText("−12")).toBeInTheDocument();
++    expect(screen.getByText("总共 2 个文件变更")).toBeInTheDocument();
++    expect(screen.getByText("+265")).toBeInTheDocument();
++    expect(screen.getByText("−14")).toBeInTheDocument();
++  });
++
++  it("agent 行为零：第一段「本轮AGENT 无直接文件编辑」，不渲染 +0 −0 假零；按钮行仍在", () => {
++    render(
++      <FileChangesCard
++        files={[{ path: ".sillyspec/x.md", adds: 40, dels: 0, edits: 0, source: "shell" }]}
++        startExpanded
++      />,
++    );
++
++    expect(screen.getByText("本轮AGENT 无直接文件编辑")).toBeInTheDocument();
++    expect(screen.getByTestId("file-changes-header").textContent).not.toContain("+0");
++    expect(screen.getByText("总共 1 个文件变更")).toBeInTheDocument();
++    expect(screen.getByTestId("file-changes-other-toggle")).toBeInTheDocument();
++    expect(screen.queryAllByTestId("file-changes-row")).toHaveLength(0);
++  });
++
++  it("只有 agent 行：不出「命令行/其他」按钮行", () => {
++    render(<FileChangesCard files={EIGHT_FILES.slice(0, 3)} startExpanded />);
++    expect(screen.queryByTestId("file-changes-other-toggle")).toBeNull();
++    expect(screen.getAllByTestId("file-changes-row")).toHaveLength(3);
+   });
+ });
+diff --git a/frontend/src/components/daemon/file-changes/__tests__/turn-file-diff-dialog.test.tsx b/frontend/src/components/daemon/file-changes/__tests__/turn-file-diff-dialog.test.tsx
+index c6378668b..f5c279425 100644
+--- a/frontend/src/components/daemon/file-changes/__tests__/turn-file-diff-dialog.test.tsx
++++ b/frontend/src/components/daemon/file-changes/__tests__/turn-file-diff-dialog.test.tsx
+@@ -77,6 +77,8 @@ describe("TurnFileDiffDialog", () => {
+     expect(screen.getByText(/Edit/)).toBeDefined();
+     expect(screen.getByText("old line")).toBeDefined();
+     expect(screen.getByText("new line")).toBeDefined();
++    // 有补丁态：副标题带「来自 agent 编辑日志」语义。
++    expect(screen.getByText(/来自 agent 编辑日志/)).toBeDefined();
+     // 拉取参数：会话级单轮日志 API（run_id 定轮）。
+     expect(getAgentSessionLogsMock).toHaveBeenCalledWith("sess-1", expect.objectContaining({ runId: "run-1" }));
+   });
+@@ -97,24 +99,42 @@ describe("TurnFileDiffDialog", () => {
+     expect(screen.getByText("two")).toBeDefined();
+   });
+ 
+-  it("shell 归因无补丁：如实说明命令行改动，不出伪造 diff（FR-03）", async () => {
++  it("shell 归因无补丁：如实说明改动来源不唯一，不出伪造 diff（FR-03/grouping FR-04）", async () => {
+     getAgentSessionLogsMock.mockResolvedValue([]);
+-    renderDialog({ source: "shell" });
++    renderDialog();
+ 
+-    expect(
+-      await screen.findByText(/命令行\/脚本改动.*未捕获补丁内容/s),
+-    ).toBeDefined();
++    const body = (await screen.findByTestId("turn-file-diff-body")).textContent!;
++    // 如实表述：不断言唯一原因（命令行/并行会话/其他进程并列），不出「该文件由
++    // 命令行/脚本改动」断言句式。
++    expect(body).toContain("未来自本轮 agent 的编辑工具");
++    expect(body).toContain("命令行/脚本");
++    expect(body).toContain("并行会话");
++    expect(body).not.toContain("该文件由命令行/脚本改动");
++    // 无补丁说明态：副标题不带「来自 agent 编辑日志」语义。
++    expect(screen.queryByText(/来自 agent 编辑日志/)).toBeNull();
++    expect(screen.queryByTestId("turn-file-diff-section")).toBeNull();
++  });
++
++  it("删除文件无补丁：如实说明本轮被删除且删除动作未来自编辑工具（grouping FR-03）", async () => {
++    getAgentSessionLogsMock.mockResolvedValue([]);
++    renderDialog({ status: "deleted" });
++
++    const body = (await screen.findByTestId("turn-file-diff-body")).textContent!;
++    expect(body).toContain("本轮被删除");
++    expect(body).toContain("未来自编辑工具");
+     expect(screen.queryByTestId("turn-file-diff-section")).toBeNull();
+   });
+ 
+-  it("tool 归因但配不到补丁：如实说明未找到，不出空壳成功 diff", async () => {
++  it("tool 归因但配不到补丁：如实说明无证据，不出空壳成功 diff", async () => {
+     getAgentSessionLogsMock.mockResolvedValue([
+       callLog("tu-1", "frontend/src/other.ts"),
+       resultLog("tu-1", ["+x"]),
+     ]);
+     renderDialog();
+ 
+-    expect(await screen.findByText(/未找到该文件的编辑补丁/s)).toBeDefined();
++    expect(
++      await screen.findByText(/未来自本轮 agent 的编辑工具/s),
++    ).toBeDefined();
+     expect(screen.queryByTestId("turn-file-diff-section")).toBeNull();
+   });
+ 
+diff --git a/frontend/src/components/daemon/file-changes/file-changes-card.tsx b/frontend/src/components/daemon/file-changes/file-changes-card.tsx
+index 2950aee03..05520afc3 100644
+--- a/frontend/src/components/daemon/file-changes/file-changes-card.tsx
++++ b/frontend/src/components/daemon/file-changes/file-changes-card.tsx
+@@ -40,7 +40,6 @@ import type { KeyboardEvent } from "react";
+ import { ChevronRight, FileDiff } from "lucide-react";
+ 
+ import { cn } from "@/lib/utils";
+-
+ /**
+  * 快照能力档（design「文件变更卡 DTO」）：`full` = daemon 上报了工作区快照；
+  * `tool_only` = 老 daemon 无快照能力 → 卡片降级为「仅工具编辑」。
+@@ -158,11 +157,21 @@ export function FileChangesCard({
+   className,
+ }: FileChangesCardProps) {
+   const [expanded, setExpanded] = useState(startExpanded);
++  // 2026-10-23-file-card-agent-grouping：「命令行/其他」区段展开态（每卡独立）。
++  const [otherOpen, setOtherOpen] = useState(false);
+   // aria-controls 需要稳定 id：useId 会带冒号（合法但选择器里要转义），先剥掉。
+   const listId = `file-changes-${useId().replace(/:/g, "")}`;
+ 
+-  const totalAdds = files.reduce((sum, file) => sum + file.adds, 0);
+-  const totalDels = files.reduce((sum, file) => sum + file.dels, 0);
++  // 分组（FR-01/FR-02）：tool = 本轮 agent 编辑工具命中（默认主列表）；
++  // shell = git 快照归因的其他改动（命令行/并行会话/其他进程，收进按钮区段）。
++  const agentFiles = files.filter((file) => file.source === "tool");
++  const otherFiles = files.filter((file) => file.source !== "tool");
++  const sum = (rows: ChangedFile[]) => ({
++    adds: rows.reduce((acc, file) => acc + file.adds, 0),
++    dels: rows.reduce((acc, file) => acc + file.dels, 0),
++  });
++  const agentTotals = sum(agentFiles);
++  const allTotals = sum(files);
+ 
+   // 空态零渲染（design E6：无快照字段 → 省略卡片，不出「0 个文件」空壳）。
+   // 降级态是**有话说**的形态（显式提示缺快照能力），文件行恒空但卡照出。
+@@ -209,6 +218,139 @@ export function FileChangesCard({
+   // 行级统计不可信：快照超时/截断（partial）或二进制文件（numstat 0/0）。
+   const noLineStats = truncated || degraded;
+ 
++  /** 段内行级 +/−（truncated/degraded 段级破折号；数字为零时弱化灰色避免假强调）。 */
++  const renderDelta = (adds: number, dels: number) =>
++    noLineStats ? (
++      <span
++        className="text-muted-foreground"
++        title={degraded ? "daemon 未上报工作区快照：无行级统计" : "快照超时：只有文件数可靠"}
++      >
++        —
++      </span>
++    ) : (
++      <>
++        <span className={adds > 0 ? "text-success" : "text-muted-foreground/50"}>+{adds}</span>
++        <span className={dels > 0 ? "text-error" : "text-muted-foreground/50"}>−{dels}</span>
++      </>
++    );
++
++  /** 文件行渲染（agent 主列表与「命令行/其他」区段共用同一行形态）。 */
++  const renderFileRow = (file: ChangedFile, index: number) => {
++    const clickable = true;
++    const rowNoStats =
++      truncated || file.binary === true || file.hasLineStats === false;
++    const noStatsTitle =
++      file.binary === true
++        ? "二进制文件：无行级行数统计"
++        : file.status === "untracked"
++          ? "新文件：无行级统计"
++          : file.hasLineStats === false
++            ? "mtime 探测：无行级统计"
++            : "快照超时：无行级统计";
++    const statusMeta = file.status ? FILE_STATUS_META[file.status] : null;
++    return (
++      <div
++        key={`${file.path}#${index}`}
++        role={clickable ? "button" : undefined}
++        tabIndex={clickable ? 0 : undefined}
++        data-testid="file-changes-row"
++        data-path={file.path}
++        data-source={file.source}
++        data-status={file.status}
++        data-clickable={clickable ? "true" : "false"}
++        aria-label={clickable ? `打开 ${file.path}` : undefined}
++        title={file.path}
++        onClick={clickable ? () => openFile(file.path) : undefined}
++        onKeyDown={
++          clickable
++            ? (event) => {
++                if (!isActivationKey(event)) return;
++                event.preventDefault();
++                openFile(file.path);
++              }
++            : undefined
++        }
++        className={cn(
++          "group flex h-6 items-center gap-2 px-2",
++          clickable &&
++            "cursor-pointer hover:bg-muted/60 focus-visible:bg-muted/60 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring",
++        )}
++      >
++        {/* 路径不吃 flex-1：短路径时状态/归因徽标紧跟文件名，而不是被甩到数字列旁边。 */}
++        <span
++          className={cn(
++            "min-w-0 shrink truncate font-mono text-[11.5px] text-muted-foreground",
++            clickable && "group-hover:text-foreground group-hover:underline",
++            file.status === "deleted" && "line-through",
++          )}
++        >
++          {file.path}
++        </span>
++        {statusMeta && (
++          <span
++            data-testid="file-changes-status"
++            className={cn(
++              "shrink-0 rounded border px-1 py-px text-[10px] leading-none",
++              statusMeta.className,
++            )}
++          >
++            {statusMeta.label}
++          </span>
++        )}
++        {file.source === "shell" && (
++          <span
++            className="shrink-0 rounded border border-border bg-muted/60 px-1 py-px text-[10px] leading-none text-muted-foreground"
++            title="命令行/脚本改动（git 快照归因）"
++          >
++            命令行
++          </span>
++        )}
++        <span className="ml-auto flex shrink-0 items-center gap-2">
++          <span className="w-[68px] shrink-0 text-right font-mono text-[11.5px] tabular-nums">
++            {rowNoStats ? (
++              // 快照超时/截断、二进制、未跟踪新文件、mtime 探测行——「+0 −0」是假精确。
++              <span className="text-muted-foreground" title={noStatsTitle}>
++                —
++              </span>
++            ) : (
++              <>
++                <span
++                  className={
++                    file.adds > 0 ? "text-success" : "text-muted-foreground/50"
++                  }
++                >
++                  +{file.adds}
++                </span>{" "}
++                <span
++                  className={
++                    file.dels > 0 ? "text-error" : "text-muted-foreground/50"
++                  }
++                >
++                  −{file.dels}
++                </span>
++              </>
++            )}
++          </span>
++          {/* edits<=0（命令行归因的行没有「编辑次数」概念）不出「改0次」——
++              0 会被读成「没改过」，而行本身就在改动清单里。 */}
++          {file.edits > 0 && (
++            <span
++              data-testid="file-changes-edits"
++              className="w-12 shrink-0 text-right font-mono text-[11px] tabular-nums text-muted-foreground"
++              title={
++                file.editToolNames != null && file.editToolNames.length > 0
++                  ? `编辑工具：${Array.from(new Set(file.editToolNames)).join("、")}`
++                  : undefined
++              }
++            >
++              改{file.edits}次
++            </span>
++          )}
++        </span>
++      </div>
++    );
++  };
++
+   return (
+     <div
+       data-testid="file-changes-card"
+@@ -221,50 +363,55 @@ export function FileChangesCard({
+         className,
+       )}
+     >
+-      {/* 头部（折叠态即整卡）：28px 单行。有文件行时整行可点开合（aria-expanded 供
+-          读屏）；降级态无行可开，头部退化为非交互行（不撒谎给读屏一个可展开控件）。 */}
++      {/* 头部（折叠态即整卡）：28px 单行双段标题（2026-10-23-file-card-agent-grouping）——
++          「本轮AGENT N 个文件变更 +a −d | 总共 M 个文件变更 +A −D」。有文件行时整行可点
++          开合（aria-expanded 供读屏）；降级态无行可开，头部退化为非交互行（不撒谎给读屏
++          一个可展开控件）。 */}
+       {(() => {
+         const headerContent = (
+           <>
+             <FileDiff className="h-3.5 w-3.5 shrink-0 text-muted-foreground" aria-hidden />
+             <span className="flex min-w-0 items-center gap-1">
+               <span className="shrink-0 font-medium text-foreground">
+-                {degraded ? "仅工具编辑" : `${files.length} 个文件变更`}
++                {degraded
++                  ? "仅工具编辑"
++                  : agentFiles.length > 0
++                    ? `本轮AGENT ${agentFiles.length} 个文件变更`
++                    : "本轮AGENT 无直接文件编辑"}
+               </span>
+-              {truncated && (
+-                <span className="shrink-0 text-[11px] text-muted-foreground">（部分）</span>
++              {!degraded && agentFiles.length > 0 && (
++                <span className="shrink-0 font-mono text-[11.5px] tabular-nums">
++                  {renderDelta(agentTotals.adds, agentTotals.dels)}
++                </span>
+               )}
+             </span>
++            {!degraded && (
++              <>
++                <span className="shrink-0 text-muted-foreground/40">|</span>
++                <span className="flex min-w-0 items-center gap-1">
++                  <span className="shrink-0 font-medium text-foreground">
++                    总共 {files.length} 个文件变更
++                  </span>
++                  <span className="shrink-0 font-mono text-[11.5px] tabular-nums">
++                    {renderDelta(allTotals.adds, allTotals.dels)}
++                  </span>
++                </span>
++              </>
++            )}
++            {truncated && (
++              <span className="shrink-0 text-[11px] text-muted-foreground">（部分）</span>
++            )}
+             {turnNo != null && (
+-              <span className="shrink-0 font-mono text-[11px] tabular-nums text-muted-foreground/80">
++              <span className="ml-auto shrink-0 font-mono text-[11px] tabular-nums text-muted-foreground/80">
+                 第 {turnNo} 轮
+               </span>
+             )}
+-            <span className="ml-auto flex shrink-0 items-center gap-1.5 font-mono text-[11.5px] tabular-nums">
+-              {noLineStats ? (
+-                // 没有可信行级统计：不拿 0 或半截 numstat 冒充总数（design E3 partial）。
+-                <span
+-                  className="text-muted-foreground"
+-                  title={
+-                    degraded
+-                      ? "daemon 未上报工作区快照：无行级统计"
+-                      : "快照超时：只有文件数可靠"
+-                  }
+-                >
+-                  —
+-                </span>
+-              ) : (
+-                <>
+-                  <span className="text-success">+{totalAdds}</span>
+-                  <span className="text-error">−{totalDels}</span>
+-                </>
+-              )}
+-            </span>
+             {files.length > 0 && (
+               <ChevronRight
+                 aria-hidden
+                 className={cn(
+                   "h-3 w-3 shrink-0 text-muted-foreground transition-transform duration-150",
++                  turnNo == null && "ml-auto",
+                   expanded && "rotate-90",
+                 )}
+               />
+@@ -321,135 +468,49 @@ export function FileChangesCard({
+           data-testid="file-changes-list"
+           className="max-h-[240px] overflow-y-auto border-t border-border/60 py-0.5"
+         >
+-          {files.map((file, index) => {
+-            const clickable = file.status !== "deleted";
+-            const rowNoStats =
+-              truncated || file.binary === true || file.hasLineStats === false;
+-            const noStatsTitle =
+-              file.binary === true
+-                ? "二进制文件：无行级行数统计"
+-                : file.status === "untracked"
+-                  ? "新文件：无行级统计"
+-                  : file.hasLineStats === false
+-                    ? "mtime 探测：无行级统计"
+-                    : "快照超时：无行级统计";
+-            const statusMeta = file.status
+-              ? FILE_STATUS_META[file.status]
+-              : null;
+-            return (
+-              <div
+-                key={`${file.path}#${index}`}
+-                role={clickable ? "button" : undefined}
+-                tabIndex={clickable ? 0 : undefined}
+-                data-testid="file-changes-row"
+-                data-path={file.path}
+-                data-source={file.source}
+-                data-status={file.status}
+-                data-clickable={clickable ? "true" : "false"}
+-                aria-label={clickable ? `打开 ${file.path}` : undefined}
+-                title={file.path}
+-                onClick={clickable ? () => openFile(file.path) : undefined}
+-                onKeyDown={
+-                  clickable
+-                    ? (event) => {
+-                        if (!isActivationKey(event)) return;
+-                        event.preventDefault();
+-                        openFile(file.path);
+-                      }
+-                    : undefined
+-                }
++          {/* 2026-10-23-file-card-agent-grouping：主列表默认只列本轮 agent 编辑行；
++              命令行/并行会话等其他改动收进按钮区段（点击展开），不再与 agent 编辑
++              混列（.sillyspec 等 CLI 生成文件会淹没真正的编辑）。agent 为零时按钮
++              置顶，其他改动入口不被吞。 */}
++          {otherFiles.length > 0 && (
++            <button
++              type="button"
++              data-testid="file-changes-other-toggle"
++              aria-expanded={otherOpen}
++              aria-controls={`${listId}-other`}
++              onClick={() => {
++                if (hasActiveTextSelection()) return;
++                setOtherOpen((value) => !value);
++              }}
++              className={cn(
++                "flex h-6 w-full items-center gap-1.5 px-2 text-left text-[11px] transition-colors",
++                "hover:bg-muted/60 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring",
++              )}
++            >
++              <ChevronRight
++                aria-hidden
+                 className={cn(
+-                  "group flex h-6 items-center gap-2 px-2",
+-                  clickable
+-                    ? "cursor-pointer hover:bg-muted/60 focus-visible:bg-muted/60 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+-                    : "cursor-default",
+-                )}
+-              >
+-                {/* 路径不吃 flex-1：短路径时状态/归因徽标紧跟文件名，而不是被甩到数字列旁边。 */}
+-                <span
+-                  className={cn(
+-                    "min-w-0 shrink truncate font-mono text-[11.5px] text-muted-foreground",
+-                    clickable &&
+-                      "group-hover:text-foreground group-hover:underline",
+-                    file.status === "deleted" && "line-through",
+-                  )}
+-                >
+-                  {file.path}
+-                </span>
+-                {statusMeta && (
+-                  <span
+-                    data-testid="file-changes-status"
+-                    className={cn(
+-                      "shrink-0 rounded border px-1 py-px text-[10px] leading-none",
+-                      statusMeta.className,
+-                    )}
+-                  >
+-                    {statusMeta.label}
+-                  </span>
++                  "h-3 w-3 shrink-0 text-muted-foreground transition-transform duration-150",
++                  otherOpen && "rotate-90",
+                 )}
+-                {file.source === "shell" && (
+-                  <span
+-                    className="shrink-0 rounded border border-border bg-muted/60 px-1 py-px text-[10px] leading-none text-muted-foreground"
+-                    title="命令行/脚本改动（git 快照归因）"
+-                  >
+-                    命令行
+-                  </span>
++              />
++              <span className="shrink-0 font-medium text-muted-foreground">
++                命令行/其他 {otherFiles.length} 个文件
++              </span>
++              <span className="ml-auto shrink-0 font-mono text-[11px] tabular-nums">
++                {renderDelta(
++                  otherFiles.reduce((acc, file) => acc + file.adds, 0),
++                  otherFiles.reduce((acc, file) => acc + file.dels, 0),
+                 )}
+-                <span className="ml-auto flex shrink-0 items-center gap-2">
+-                  <span className="w-[68px] shrink-0 text-right font-mono text-[11.5px] tabular-nums">
+-                    {rowNoStats ? (
+-                      // 快照超时/截断、二进制、未跟踪新文件、mtime 探测行——「+0 −0」是假精确。
+-                      <span
+-                        className="text-muted-foreground"
+-                        title={noStatsTitle}
+-                      >
+-                        —
+-                      </span>
+-                    ) : (
+-                      <>
+-                        <span
+-                          className={
+-                            file.adds > 0
+-                              ? "text-success"
+-                              : "text-muted-foreground/50"
+-                          }
+-                        >
+-                          +{file.adds}
+-                        </span>{" "}
+-                        <span
+-                          className={
+-                            file.dels > 0
+-                              ? "text-error"
+-                              : "text-muted-foreground/50"
+-                          }
+-                        >
+-                          −{file.dels}
+-                        </span>
+-                      </>
+-                    )}
+-                  </span>
+-                  {/* edits<=0（命令行归因的行没有「编辑次数」概念）不出「改0次」——
+-                      0 会被读成「没改过」，而行本身就在改动清单里。 */}
+-                  {file.edits > 0 && (
+-                    <span
+-                      data-testid="file-changes-edits"
+-                      className="w-12 shrink-0 text-right font-mono text-[11px] tabular-nums text-muted-foreground"
+-                      title={
+-                        file.editToolNames != null &&
+-                        file.editToolNames.length > 0
+-                          ? `编辑工具：${Array.from(
+-                              new Set(file.editToolNames),
+-                            ).join("、")}`
+-                          : undefined
+-                      }
+-                    >
+-                      改{file.edits}次
+-                    </span>
+-                  )}
+-                </span>
+-              </div>
+-            );
+-          })}
++              </span>
++            </button>
++          )}
++          {agentFiles.map((file, index) => renderFileRow(file, index))}
++          {otherFiles.length > 0 && otherOpen && (
++            <div id={`${listId}-other`} data-testid="file-changes-other-list" className="border-t border-border/40">
++              {otherFiles.map((file, index) => renderFileRow(file, index))}
++            </div>
++          )}
+         </div>
+       )}
+     </div>
+diff --git a/frontend/src/components/daemon/file-changes/turn-file-diff-dialog.tsx b/frontend/src/components/daemon/file-changes/turn-file-diff-dialog.tsx
+index 89c88da96..f4b3f78b4 100644
+--- a/frontend/src/components/daemon/file-changes/turn-file-diff-dialog.tsx
++++ b/frontend/src/components/daemon/file-changes/turn-file-diff-dialog.tsx
+@@ -39,9 +39,8 @@ export interface TurnFileDiffDialogProps {
+   runKey: string;
+   /** 仓根相对 posix 路径（文件卡行原样）。 */
+   path: string;
+-  /** 行归因：shell 行点击也开弹窗，但内容区出如实说明（无补丁可显）。 */
+-  source?: "tool" | "shell";
+-  /** 文件状态徽标（新增/修改/删除/新文件，与文件卡同源 FILE_STATUS_META）。 */
++  /** 文件状态徽标（新增/修改/删除/新文件，与文件卡同源 FILE_STATUS_META）；
++   *  deleted 且无补丁时弹窗出删除专用说明（2026-10-23-file-card-agent-grouping）。 */
+   status?: FileChangeStatus;
+   open: boolean;
+   onOpenChange: (_open: boolean) => void;
+@@ -52,18 +51,22 @@ type LoadPhase =
+   | { phase: "error"; message: string }
+   | { phase: "ready"; sections: TurnFilePatchSection[] };
+ 
+-/** shell 归因（命令行/脚本改动）的如实说明——git 快照只给行数，平台无补丁可显。 */
+-const SHELL_NO_PATCH_TEXT =
+-  "该文件由命令行/脚本改动（git 快照归因），平台未捕获补丁内容，仅行数统计可信。";
+-
+-/** tool 归因但本轮日志配不到补丁的如实说明。 */
+-const NO_PATCH_TEXT = "本轮日志中未找到该文件的编辑补丁（可能为非工具改动或补丁未捕获）。";
++/**
++ * 无补丁说明（2026-10-23-file-card-agent-grouping / FR-04）：git 快照归因只证明
++ * 「改动未来自本轮 agent 编辑工具」，不区分命令行/并行会话/其他进程——文案并列
++ * 三种可能，不断言唯一原因（旧文案「该文件由命令行/脚本改动」是过度断言，
++ * 与「新增」徽标组合会误导：CLI 创建的新文件也归 command）。
++ */
++const NO_PATCH_TEXT =
++  "该文件的改动未来自本轮 agent 的编辑工具（Edit/Write），可能由命令行/脚本、并行会话或其他进程产生；平台未捕获补丁内容，仅行数统计可信。";
+ 
++/** 删除文件且无补丁（grouping FR-03）：删除说明态，如实交代无 diff 可看。 */
++const DELETED_NO_PATCH_TEXT =
++  "该文件在本轮被删除；删除动作未来自编辑工具（如命令行 rm），平台未捕获删除补丁，无 diff 可展示。";
+ export function TurnFileDiffDialog({
+   sessionId,
+   runKey,
+   path,
+-  source,
+   status,
+   open,
+   onOpenChange,
+@@ -119,7 +122,11 @@ export function TurnFileDiffDialog({
+             )}
+           </DialogTitle>
+           <DialogDescription className="text-[11px]">
+-            本轮文件变更内容（来自 agent 编辑日志）
++            {/* 副标题条件渲染（grouping FR-04）：只有真展示 agent 编辑补丁时才提
++                「来自 agent 编辑日志」，无补丁说明态不带该语义（防误导）。 */}
++            {state.phase === "ready" && state.sections.length > 0
++              ? "本轮文件变更内容（来自 agent 编辑日志）"
++              : "本轮文件变更内容"}
+           </DialogDescription>
+         </DialogHeader>
+ 
+@@ -147,7 +154,7 @@ export function TurnFileDiffDialog({
+           )}
+           {state.phase === "ready" && state.sections.length === 0 && (
+             <p className="py-8 text-center text-[12px] leading-[1.6] text-muted-foreground">
+-              {source === "shell" ? SHELL_NO_PATCH_TEXT : NO_PATCH_TEXT}
++              {status === "deleted" ? DELETED_NO_PATCH_TEXT : NO_PATCH_TEXT}
+             </p>
+           )}
+           {state.phase === "ready" && state.sections.length > 0 && (
+diff --git a/frontend/src/components/daemon/turn-timeline.tsx b/frontend/src/components/daemon/turn-timeline.tsx
+index 6ddd5e569..4f73676ce 100644
+--- a/frontend/src/components/daemon/turn-timeline.tsx
++++ b/frontend/src/components/daemon/turn-timeline.tsx
+@@ -676,6 +676,21 @@ function TurnPreviewCard({
+   );
+ }
+ 
++/**
++ * 2026-10-23-live-turn-meta-time / FR-01：进行中轮底部元信息的实时历时——
++ * 「历时 mm:ss」每秒 +1（同轮次顶部 TurnStatusBar 走秒）。渲染经济同源：tick
++ * 局部 state 不外溢（父级 TurnRow 不随秒重渲染）；轮转终态后 metaDetail 不再
++ * 含本组件，随卸载满理 interval。
++ */
++function TurnLiveElapsedText({ startedAtMs }: { startedAtMs: number }) {
++  const [now, setNow] = useState(() => Date.now());
++  useEffect(() => {
++    const id = window.setInterval(() => setNow(Date.now()), 1000);
++    return () => window.clearInterval(id);
++  }, []);
++  return <>历时 {formatTurnDuration(Math.max(0, now - startedAtMs))}</>;
++}
++
+ const TurnRow = memo(function TurnRow({
+   turn,
+   viewMode,
+@@ -730,7 +745,7 @@ const TurnRow = memo(function TurnRow({
+    */
+   onOpenFileChanges?: (
+     _runKey: string,
+-    _file: { path: string; source?: "tool" | "shell"; status?: FileChangeStatus },
++    _file: { path: string; status?: FileChangeStatus },
+   ) => void;
+ }) {
+   // task-07（FR-03 / D-003@v2）：旧路径 output 气泡 askuser 标记拦截——命中则
+@@ -754,9 +769,20 @@ const TurnRow = memo(function TurnRow({
+    * 文本，折进状态行的最右端（等宽 / muted / 10.5px，见 RoundDivider.detail 与
+    * 下方 all 视图 span）。信息不丢：轮号/状态/耗时/结束时刻/tokens/tok·s 全在
+    * 同一行；锚点缺失保持原回退（仅显结束时间，不编造开始与历时）。
++   *
++   * 2026-10-23-live-turn-meta-time / FR-01/FR-02：进行中三态优先分支——只显
++   * 「开始 HH:MM:SS · 历时 mm:ss(实时)」，禁止显「结束」（运行中 run 无
++   * finished_at，数据层已不再伪造 replyAt；本分支优先于 replyAt 判定，旁路装配
++   * 带伪值也不显）；无锚点不显示（不编造）。历时由 TurnLiveElapsedText 局部
++   * 每秒 tick；轮转终态后本分支失效回退三段字符串，走秒组件随之卸载清 interval。
+    */
+-  const metaDetail =
+-    turn.replyAt != null
++  const metaDetail: ReactNode =
++    isLiveTurn(turn.status) && turn.turnStartedAt != null ? (
++      <>
++        {`开始 ${formatTurnTimeSec(new Date(turn.turnStartedAt).toISOString())}`} ·{" "}
++        <TurnLiveElapsedText startedAtMs={turn.turnStartedAt} />
++      </>
++    ) : turn.replyAt != null
+       ? [
+           turn.turnStartedAt != null
+             ? `开始 ${formatTurnTimeSec(new Date(turn.turnStartedAt).toISOString())}`
+@@ -1266,7 +1292,6 @@ const TurnRow = memo(function TurnRow({
+                         const file = cardProps.files.find((f) => f.path === path);
+                         onOpenFileChanges(runKey, {
+                           path,
+-                          source: file?.source,
+                           status: file?.status,
+                         });
+                       }}
+@@ -1451,15 +1476,11 @@ export function TurnTimeline({
+   const [fileDiffTarget, setFileDiffTarget] = useState<{
+     runKey: string;
+     path: string;
+-    source?: "tool" | "shell";
+     status?: FileChangeStatus;
+   } | null>(null);
+   const handleOpenFileChanges = useCallback(
+-    (
+-      runKey: string,
+-      file: { path: string; source?: "tool" | "shell"; status?: FileChangeStatus },
+-    ) => {
+-      setFileDiffTarget({ runKey, path: file.path, source: file.source, status: file.status });
++    (runKey: string, file: { path: string; status?: FileChangeStatus }) => {
++      setFileDiffTarget({ runKey, path: file.path, status: file.status });
+     },
+     [],
+   );
+@@ -1888,7 +1909,6 @@ export function TurnTimeline({
+         sessionId={sessionId}
+         runKey={fileDiffTarget.runKey}
+         path={fileDiffTarget.path}
+-        source={fileDiffTarget.source}
+         status={fileDiffTarget.status}
+         open
+         onOpenChange={(next) => {

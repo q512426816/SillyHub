@@ -1,0 +1,22 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-23-file-card-agent-grouping",
+  "reviewer": "inline-self（子代理通道两次 upstream invalid_request_error: reasoning_content 回传兼容错误不可用，按任务书降级通道主会话代行自审，降级留痕）",
+  "verdict": "PASS",
+  "reviewedAgainst": "03572adfc23741e49bcd494648f42a3d3681b21b",
+  "findings": [
+    {
+      "severity": "P3",
+      "title": "design「切换/生命周期」作答与代码有偏差：折叠收起不会重置 otherOpen",
+      "evidence": "design 四问第 3 答称「展开态随卡片实例（折叠收起时整卡条件渲染卸载即重置——既有语义）」，实际 FileChangesCard 组件实例在折叠时不卸载（仅内部 list 条件渲染），otherOpen 在折叠→展开间保持上次状态；行为无害（用户点开「其他」后折叠再展开仍展开，符合预期），但作答不精确。",
+      "location": "frontend/src/components/daemon/file-changes/file-changes-card.tsx:161"
+    }
+  ],
+  "dimensionNotes": {
+    "乱序": "ok（分组为渲染期纯派生，无事件/流依赖；弹窗 AbortController 守卫未改动）",
+    "并发": "ok（otherOpen 为组件内 useState，每卡独立；弹窗只读日志）",
+    "切换": "ok（折叠不重置 otherOpen 为无害行为，已记 P3；会话切换 key 重挂既有纪律未变）",
+    "作用域": "ok（分组只吃本卡 props.files；弹窗归属 sessionId+runKey 双闸门沿用上一变更）"
+  },
+  "reviewedAt": "2026-10-23T11:16:00+08:00"
+}

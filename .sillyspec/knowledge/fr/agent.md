@@ -633,3 +633,86 @@ created_at: 2026-10-14T02:51:35.432Z
   confirmed_at: null
   source_change: 2026-10-22-change-delete-session-history-fix
   status: active
+
+## FR-agent-033 折叠头双段标题：本轮AGENT 段（tool 归因计数与行级合计）+ 总共段（全部文件计数与合计），共享工作区提示保持
+变更：2026-10-23-file-card-agent-grouping
+状态：active
+摘要：主路径
+全文：.sillyspec/changes/archive/2026-10-23-file-card-agent-grouping/requirements.md#FR-01
+最近确认：0ea7bf0d129c6dfba9a04915c83c36329bbfbbfd
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-23-file-card-agent-grouping:flow:测试绑定FR-01
+  tests: frontend/src/components/daemon/file-changes/__tests__/file-changes-card.test.tsx「折叠头双段标题：本轮AGENT 段 + 总共段 + 行级合计」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-23-file-card-agent-grouping
+  status: active
+
+## FR-agent-034 展开区默认只列 agent 编辑行；命令行/其他变更收进按钮行，点击展开该区段
+变更：2026-10-23-file-card-agent-grouping
+状态：active
+摘要：主路径
+全文：.sillyspec/changes/archive/2026-10-23-file-card-agent-grouping/requirements.md#FR-02
+最近确认：0ea7bf0d129c6dfba9a04915c83c36329bbfbbfd
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-23-file-card-agent-grouping:flow:测试绑定FR-02
+  tests: frontend/src/components/daemon/file-changes/__tests__/file-changes-card.test.tsx「展开区默认只列 agent 行，命令行/其他收进按钮展开」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-23-file-card-agent-grouping
+  status: active
+
+## FR-agent-035 已删除文件行可点击，弹窗展示补丁或如实说明删除无补丁
+变更：2026-10-23-file-card-agent-grouping
+状态：active
+摘要：主路径
+全文：.sillyspec/changes/archive/2026-10-23-file-card-agent-grouping/requirements.md#FR-03
+最近确认：0ea7bf0d129c6dfba9a04915c83c36329bbfbbfd
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-23-file-card-agent-grouping:flow:测试绑定FR-03
+  tests: frontend/src/components/daemon/__tests__/turn-timeline-conversation-file-card.test.tsx「已删除文件行可点击并弹窗如实说明（FR-03）」 | frontend/src/components/daemon/file-changes/__tests__/turn-file-diff-dialog.test.tsx「删除文件无补丁时如实说明删除」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-23-file-card-agent-grouping
+  status: active
+
+## FR-agent-036 无补丁弹窗说明改为如实表述，不再断言唯一原因；有补丁时副标题才提 agent 编辑日志
+变更：2026-10-23-file-card-agent-grouping
+状态：active
+摘要：主路径
+全文：.sillyspec/changes/archive/2026-10-23-file-card-agent-grouping/requirements.md#FR-04
+最近确认：0ea7bf0d129c6dfba9a04915c83c36329bbfbbfd
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-23-file-card-agent-grouping:flow:测试绑定FR-04
+  tests: frontend/src/components/daemon/file-changes/__tests__/turn-file-diff-dialog.test.tsx「无补丁说明如实表述不断言唯一原因」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-23-file-card-agent-grouping
+  status: active
+
+## FR-agent-037 既有 notice/degraded/破折号语义不回归，触及面测试绿
+变更：2026-10-23-file-card-agent-grouping
+状态：active
+摘要：主路径
+全文：.sillyspec/changes/archive/2026-10-23-file-card-agent-grouping/requirements.md#FR-05
+最近确认：0ea7bf0d129c6dfba9a04915c83c36329bbfbbfd

@@ -1,0 +1,67 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-23-file-card-agent-grouping",
+  "rows": [
+    {
+      "anchor": "FR-01",
+      "row_id": "2026-10-23-file-card-agent-grouping:flow:测试绑定FR-01",
+      "tests": [
+        "frontend/src/components/daemon/file-changes/__tests__/file-changes-card.test.tsx「折叠头双段标题：本轮AGENT 段 + 总共段 + 行级合计」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-23-file-card-agent-grouping"
+    },
+    {
+      "anchor": "FR-02",
+      "row_id": "2026-10-23-file-card-agent-grouping:flow:测试绑定FR-02",
+      "tests": [
+        "frontend/src/components/daemon/file-changes/__tests__/file-changes-card.test.tsx「展开区默认只列 agent 行，命令行/其他收进按钮展开」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-23-file-card-agent-grouping"
+    },
+    {
+      "anchor": "FR-03",
+      "row_id": "2026-10-23-file-card-agent-grouping:flow:测试绑定FR-03",
+      "tests": [
+        "frontend/src/components/daemon/__tests__/turn-timeline-conversation-file-card.test.tsx「已删除文件行可点击并弹窗如实说明（FR-03）」",
+        "frontend/src/components/daemon/file-changes/__tests__/turn-file-diff-dialog.test.tsx「删除文件无补丁时如实说明删除」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-23-file-card-agent-grouping"
+    },
+    {
+      "anchor": "FR-04",
+      "row_id": "2026-10-23-file-card-agent-grouping:flow:测试绑定FR-04",
+      "tests": [
+        "frontend/src/components/daemon/file-changes/__tests__/turn-file-diff-dialog.test.tsx「无补丁说明如实表述不断言唯一原因」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-23-file-card-agent-grouping"
+    }
+  ]
+}
