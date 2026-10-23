@@ -39,20 +39,23 @@ function splitLines(text: string): string[] {
   return text.split('\n');
 }
 
-/** 前缀 text 的换行计数 +1 = 首行行号（1 基）。 */
-function lineNoOf(fileText: string, index: number): number {
-  let line = 1;
-  for (let i = 0; i < index; i++) {
-    if (fileText.charCodeAt(i) === 10) line += 1; // '\n'
+/** 位置区间的换行计数（[from,to) 逐字符；增量调用时总体单遍，避免每块全量重扫）。 */
+function countNewlines(fileText: string, from: number, to: number): number {
+  let count = 0;
+  for (let i = from; i < to; i++) {
+    if (fileText.charCodeAt(i) === 10) count += 1; // '\n'
   }
-  return line;
+  return count;
 }
 
-/** hunk 数组 → JSON 串（含 64KB 上限判定；空数组/超限 → null）。 */
+/** hunk 数组 → JSON 串（含上限判定；空数组/超限 → null）。 */
 function stringifyHunks(hunks: SynthHunk[]): string | null {
   if (hunks.length === 0) return null;
   const json = JSON.stringify(hunks);
-  if (json.length > SYNTH_PATCH_MAX_BYTES) return null;
+  // 评审 P3 修正：口径对齐 claude 轨道（parse-claude-code-jsonl.ts）——UTF-8 字节
+  // 数（Buffer.byteLength）而非 UTF-16 码元长度，上限 64000 而非 64*1024（中文
+  // 内容下两者差约 3 倍）。
+  if (Buffer.byteLength(json, 'utf8') > 64_000) return null;
   return json;
 }
 
@@ -93,20 +96,25 @@ export function synthesizePiEditPatch(
   const hunks: SynthHunk[] = [];
   // 顺序定位游标：后块只在前块结束位置之后搜（同内容多块不误配首现）。
   let searchFrom = 0;
+  // 增量行号（评审 P3：从游标位置单遍累积，不每块全量重扫——2MB 文件多块的
+  // 最坏扫描从 O(块数×文件字节) 收敛到 O(文件字节)）。
+  let lineAtCursor = 1;
   // 旧行号偏移累积：前面各块 (newLines - oldLines) 的和（oldStart = newStart - 偏移）。
   let oldLineDrift = 0;
   for (const block of blocks) {
     const at = fileText.indexOf(block.newText, searchFrom);
     if (at < 0) return null; // 定位不到（并发改动/非全量替换）→ 整体放弃
-    const newStart = lineNoOf(fileText, at);
+    lineAtCursor += countNewlines(fileText, searchFrom, at);
+    const newStart = lineAtCursor;
     const oldStart = newStart - oldLineDrift;
     const lines = [
       ...splitLines(block.oldText).map((l) => `-${l}`),
       ...splitLines(block.newText).map((l) => `+${l}`),
     ];
     hunks.push({ oldStart: Math.max(1, oldStart), newStart, lines });
-    // 游标推进到本块 newText 末尾；偏移按净行差累积。
+    // 游标推进到本块 newText 末尾（行号增量同步数区间换行）；偏移按净行差累积。
     searchFrom = at + block.newText.length;
+    lineAtCursor += countNewlines(fileText, at, searchFrom);
     oldLineDrift +=
       splitLines(block.newText).length - splitLines(block.oldText).length;
   }

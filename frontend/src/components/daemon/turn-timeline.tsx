@@ -1558,8 +1558,22 @@ export function TurnTimeline({
     agentEdited?: boolean;
   } | null>(null);
   const handleOpenFileChanges = useCallback(
-    (runKey: string, file: { path: string; status?: FileChangeStatus }) => {
-      setFileDiffTarget({ runKey, path: file.path, status: file.status });
+    (
+      runKey: string,
+      file: {
+        path: string;
+        status?: FileChangeStatus;
+        agentEdited?: boolean;
+      },
+    ) => {
+      // agentEdited 透传（评审 P1 修复：此前漏写字段致弹窗文案二态在真实 UI
+      // 链路恒不生效——组件直传 prop 的测试测不出该断链）。
+      setFileDiffTarget({
+        runKey,
+        path: file.path,
+        status: file.status,
+        agentEdited: file.agentEdited,
+      });
     },
     [],
   );

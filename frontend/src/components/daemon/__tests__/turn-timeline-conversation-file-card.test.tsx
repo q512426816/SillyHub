@@ -612,6 +612,29 @@ describe("文件变更卡行点击 → 本轮变更弹窗（2026-10-23-turn-file
     };
   }
 
+  it("agent 编辑归因行（改N次>0）无补丁：弹窗文案走「确实来自 agent 编辑」分支（2026-10-24-pi-edit-patch-synth FR-04 接线）", async () => {
+    // 空日志 = 配不到补丁（pi 存量轮次形态）。src/app.tsx 归因 edit_patch +
+    // editToolNames（→卡片改1次）→ 弹窗应显示区分文案而非「未来自编辑工具」。
+    getAgentSessionLogsMock.mockResolvedValue([]);
+    render(
+      <TurnTimeline
+        {...renderProps([wiringTurn()])}
+        sessionId="sess-1"
+      />,
+    );
+
+    fireEvent.click(screen.getByTestId("file-changes-header"));
+    const toolRow = screen
+      .getAllByTestId("file-changes-row")
+      .find((row) => row.getAttribute("data-path") === "src/app.tsx");
+    fireEvent.click(toolRow!);
+
+    const dialog = await screen.findByTestId("turn-file-diff-dialog");
+    const body = within(dialog).getByTestId("turn-file-diff-body").textContent!;
+    expect(body).toContain("确实来自本轮 agent 的编辑工具");
+    expect(body).not.toContain("未来自本轮 agent 的编辑工具");
+  });
+
   it("sessionId 接线：点击文件行弹窗打开，展示该文件本轮 diff 内容（FR-01）", async () => {
     getAgentSessionLogsMock.mockResolvedValue([
       {
