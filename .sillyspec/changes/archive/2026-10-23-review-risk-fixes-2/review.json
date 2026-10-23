@@ -1,0 +1,28 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-23-review-risk-fixes-2",
+  "reviewer": "subagent",
+  "verdict": "PASS",
+  "reviewedAgainst": "aeae93b1364ac8a3e84863afc939e3fd625da7ca",
+  "findings": [
+    {
+      "severity": "P3",
+      "title": "change.patch 冻结污染：混入 9 个并行会话文件，冻结证据面与交付提交不一致",
+      "evidence": "冻结 patch 实含 19 文件，其中 7 个 changelog 文档属 2026-10-22-session-composer-slim、turn-file-diff.ts/.test.ts 两文件属 2026-10-23-turn-file-diff-dialog，均非本变更内容；交付提交 88ab49238 仅含本变更自属 10 代码文件+6 个本变更 sillyspec 文档，代码本体与 patch 中自属 hunk 逐一比对一致，无正确性影响，但作为冻结证据的 patch 未按交付面裁剪",
+      "location": ".sillyspec/changes/2026-10-23-review-risk-fixes-2/change.patch"
+    },
+    {
+      "severity": "P3",
+      "title": "多工作区同根 db_missing 稳态互覆未被风险节披露（重 claim 单 ws 形态已披露）",
+      "evidence": "两个活跃 ws 指向同一 root 且项目侧永久缺库时，_evictedCwds 条目被双方各自 3 拍连败交替覆盖（ROOT→ws-a/ws-b 互写），稳态退化为每轮约 1 次 CLI 探测+周期 evict 日志——这是 FR-01 双键判定的规定行为（每 ws 有权独立探测）、skip warn 被 _evictedSkipLogged（cwd 键控）封顶不刷屏、成本有界，但 design 风险节只披露了『同根换 wsId 重建多付 3 拍』的瞬时形态，未覆盖多 ws 同根持续互覆形态",
+      "location": "sillyhub-daemon/src/sillyspec-manager.ts:1148"
+    }
+  ],
+  "dimensionNotes": {
+    "乱序": "ok",
+    "并发": "ok",
+    "切换": "ok",
+    "作用域": "ok"
+  },
+  "reviewedAt": "2026-10-23T08:20:03+08:00"
+}

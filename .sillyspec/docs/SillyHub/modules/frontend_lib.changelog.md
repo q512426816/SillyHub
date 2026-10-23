@@ -33,3 +33,4 @@ created_at: 2026-10-16 16:40:00
 - 2026-10-23-translate-budget-align | 修复翻译超时预算矛盾与缓存回填乱序
 - 2026-10-22-session-composer-slim | 会话页面底部输入区信息过载：排队消息与纯文本展示露出附件引用 uuid 长串，中断自动续跑是常驻开关…
 - 2026-10-23-semantic-color-scale-fix | 修复语义色阶未定义导致的隐形状态标记
+- 2026-10-23-review-risk-fixes-2 | 审查遗留四处风险修复

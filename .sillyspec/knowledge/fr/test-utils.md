@@ -830,6 +830,7 @@ created_at: 2026-10-16T01:30:35.950Z
   confirmed_at: null
   source_change: 2026-10-22-askuser-card-inline
   status: active
+
 ## FR-test-utils-042 拖拽吸附到边界容器左侧后,停靠组内容左对齐;吸附右侧后保持右对齐
 变更：2026-10-20-pill-dock-left-align
 状态：active
@@ -1006,4 +1007,80 @@ created_at: 2026-10-16T01:30:35.950Z
   confirmed_by: null
   confirmed_at: null
   source_change: 2026-10-21-profile-default-prehint
+  status: active
+
+## FR-test-utils-051 同根新 workspaceId 的采集不再被旧探针的淘汰条目静默跳过（竞态测试钉住），skip 命中有一次性 warn 日志
+变更：2026-10-23-review-risk-fixes-2
+状态：active
+摘要：主路径
+全文：.sillyspec/changes/archive/2026-10-23-review-risk-fixes-2/requirements.md#FR-01
+最近确认：d5025964ba5f773353e8fbe92bcf4c07569660ea
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-23-review-risk-fixes-2:flow:测试绑定FR-01
+  tests: sillyhub-daemon/tests/sillyspec-manager.test.ts「同根新 workspaceId 不被陈旧淘汰条目静默跳过 + skip 命中一次性 warn（2026-10-23-review-risk-fixes-2）」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-23-review-risk-fixes-2
+  status: active
+
+## FR-test-utils-052 跑马灯追平目标后 rAF 停排，新内容到达或重新可见时恢复动画
+变更：2026-10-23-review-risk-fixes-2
+状态：active
+摘要：主路径
+全文：.sillyspec/changes/archive/2026-10-23-review-risk-fixes-2/requirements.md#FR-02
+最近确认：d5025964ba5f773353e8fbe92bcf4c07569660ea
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-23-review-risk-fixes-2:flow:测试绑定FR-02
+  tests: frontend/src/components/daemon/__tests__/turn-live-marquee.test.tsx「追平目标后 rAF 停排，entries 更新重新起排（2026-10-23-review-risk-fixes-2）」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-23-review-risk-fixes-2
+  status: active
+
+## FR-test-utils-053 diff 阶段非 timeout git 错误落结构化 warn 日志（stage+错误归类），不再无痕消失
+变更：2026-10-23-review-risk-fixes-2
+状态：active
+摘要：主路径
+全文：.sillyspec/changes/archive/2026-10-23-review-risk-fixes-2/requirements.md#FR-03
+最近确认：d5025964ba5f773353e8fbe92bcf4c07569660ea
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-23-review-risk-fixes-2:flow:测试绑定FR-03
+  tests: sillyhub-daemon/tests/interactive/turn-file-changes.test.ts「name-status 非 timeout git 错误经 onGitDiagnostic 落结构化诊断（2026-10-23-review-risk-fixes-2）」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-23-review-risk-fixes-2
+  status: active
+
+## FR-test-utils-054 requestBatch 响应处理异常时该批回退原文并入退避，Promise 不再悬挂
+变更：2026-10-23-review-risk-fixes-2
+状态：active
+摘要：主路径
+全文：.sillyspec/changes/archive/2026-10-23-review-risk-fixes-2/requirements.md#FR-04
+最近确认：d5025964ba5f773353e8fbe92bcf4c07569660ea
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-23-review-risk-fixes-2:flow:测试绑定FR-04
+  tests: frontend/src/lib/__tests__/thinking-translate.test.ts「2xx 脏响应体（null/缺 items）→ 本批回退原文+退避，Promise 不悬挂（FR-04）」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-23-review-risk-fixes-2
   status: active

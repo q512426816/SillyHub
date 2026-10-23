@@ -1,6 +1,14 @@
 tier: thin
 legacy_fallback: false
-substeps: {}
+substeps:
+  artifacts: done
+  ledger: done
+  patch: done
+  review: done
+  probes: done
+  distill: done
+  archive: done
+  events: done
 born_face: thin
 with_tasks: false
 review_force: null
@@ -27,7 +35,7 @@ input: >-
 autopilot: false
 prestage_ack: true
 baseline_commit: 4d6c17185a01e72e287a48f8a0b1f003dd5f63b6
-updatedAt: '2026-10-23T00:02:00.717Z'
+updatedAt: '2026-10-23T00:20:58.136Z'
 cross_baselines:
   sillyspec: 6df7e3d814ae3a9eab2395d7a61660aaba9f60e8
 baseline_sha256: 69cef2512ee6657f281d262d4b4bb44c6dc053dd082748ffd71d8c475236cb7b
@@ -36,4 +44,13 @@ spec_approved_at: '2026-10-23T00:02:00.716Z'
 spec_approved_by: zcode-review-fixes-2
 spec_approved_channel: user-confirmed
 spec_attested_by: zcode-review-fixes-2
+batch_ticked: true
+gate_summary: >-
+  test: skipped ← module[]+deps(py35+nontest-skip4+jsx19+jsx39+jsx-e2e-skip1)+fr(97)（316.9s）
+  结果：C:\Users\qinyi\IdeaProjects\multi-agent-platform\.sillyspec\.runtime\verify-runs\20261023001351\test-result.json —
+  跳过原因：模块子集含环境缺件跳过（已跑模块全绿）：deps(auto-nontest-skip)、deps(auto-jsx-e2e-skip)——补装依赖后恢复实测。｜lint: passed ← cd backend && uv
+  run ruff check . && uv run ruff format --check . && uv run mypy app && cd ../frontend && pnpm lint && cd
+  ../sillyhub-daemon && pnpm typecheck（8.0s）
+  结果：C:\Users\qinyi\IdeaProjects\multi-agent-platform\.sillyspec\.runtime\verify-runs\20261023001351\test-result.json｜门文件
+  10 个
 

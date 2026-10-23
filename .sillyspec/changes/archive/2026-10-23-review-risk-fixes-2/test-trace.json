@@ -1,0 +1,66 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-23-review-risk-fixes-2",
+  "rows": [
+    {
+      "anchor": "FR-01",
+      "row_id": "2026-10-23-review-risk-fixes-2:flow:测试绑定FR-01",
+      "tests": [
+        "sillyhub-daemon/tests/sillyspec-manager.test.ts「同根新 workspaceId 不被陈旧淘汰条目静默跳过 + skip 命中一次性 warn（2026-10-23-review-risk-fixes-2）」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-23-review-risk-fixes-2"
+    },
+    {
+      "anchor": "FR-02",
+      "row_id": "2026-10-23-review-risk-fixes-2:flow:测试绑定FR-02",
+      "tests": [
+        "frontend/src/components/daemon/__tests__/turn-live-marquee.test.tsx「追平目标后 rAF 停排，entries 更新重新起排（2026-10-23-review-risk-fixes-2）」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-23-review-risk-fixes-2"
+    },
+    {
+      "anchor": "FR-03",
+      "row_id": "2026-10-23-review-risk-fixes-2:flow:测试绑定FR-03",
+      "tests": [
+        "sillyhub-daemon/tests/interactive/turn-file-changes.test.ts「name-status 非 timeout git 错误经 onGitDiagnostic 落结构化诊断（2026-10-23-review-risk-fixes-2）」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-23-review-risk-fixes-2"
+    },
+    {
+      "anchor": "FR-04",
+      "row_id": "2026-10-23-review-risk-fixes-2:flow:测试绑定FR-04",
+      "tests": [
+        "frontend/src/lib/__tests__/thinking-translate.test.ts「2xx 脏响应体（null/缺 items）→ 本批回退原文+退避，Promise 不悬挂（FR-04）」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-23-review-risk-fixes-2"
+    }
+  ]
+}
