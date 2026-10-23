@@ -14,3 +14,4 @@ created_at: 2026-08-29 22:56:30
 - `auth_refresh_grace_seconds` 默认 60→300（`backend/app/core/config.py`；D-003@v1）。
 - 用例：tests/modules/auth/test_refresh_family_revocation.py（新，4 用例：族隔离/grace 继承/legacy NULL 兜底/新族）+ test_refresh_grace_window.py 用例 2 改族断言、用例 3 过期 xfail 清偿。
 - 2026-10-21-agent-profile-slim-default | 档案瘦身重定位为人格加技能清单并支持用户默认档案
+- 2026-10-23-askuser-history-live-sync | AskUser 问答历史实时回显（用户实测 bug 修复）

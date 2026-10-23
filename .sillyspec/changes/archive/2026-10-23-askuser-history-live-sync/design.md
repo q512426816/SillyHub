@@ -16,7 +16,7 @@ created_at: 2026-10-23T02:21:05.382Z
 
 动了哪些函数/端点/命令/文件格式？对外可见的签名或行为变化是什么（含「无」的说明）？
 
-新增导出：page-helpers.tsx `createDialogHistoryRefetch(sessionId, setDialogHistory, seqRef)`——纯前端 helper，无后端/协议/SSE 事件格式变化；消费方仅 session-panel-page 与 session-panel-dialog 两处 SSE 回调内调用（组件对外 props 零变化）。
+新增导出：page-helpers.tsx `refetchDialogHistory(sessionId, setDialogHistory, seqRef)`——纯前端 helper（直接执行型函数），无后端/协议/SSE 事件格式变化；消费方仅 session-panel-page 与 session-panel-dialog 两处 SSE 回调内调用（组件对外 props 零变化）。
 
 ## 边界与并发（盲维四问——每问必答，答不了即设计缺口）
 

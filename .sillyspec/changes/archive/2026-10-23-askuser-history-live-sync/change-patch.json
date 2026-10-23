@@ -1,0 +1,313 @@
+{
+  "change": "2026-10-23-askuser-history-live-sync",
+  "baseline": "44c748745dc3dd3bc22533db6db611b8599bfcac",
+  "head": "475a8da2eec4b9e711dbd43e881244d506a474aa",
+  "files": [
+    "backend/app/core/client_ip.py",
+    "backend/app/modules/auth/router.py",
+    "backend/app/modules/daemon/model.py",
+    "backend/app/modules/daemon/router/heartbeat.py",
+    "backend/app/modules/daemon/router/version.py",
+    "backend/app/modules/daemon/runtime/service.py",
+    "backend/app/modules/daemon/service.py",
+    "backend/app/modules/daemon/session/network_context.py",
+    "backend/migrations/versions/20261023090000_add_daemon_instances_network_info.py",
+    "backend/tests/modules/daemon/test_network_context.py",
+    "backend/tests/test_align_platform_change_events_migration.py",
+    "frontend/src/components/daemon/__tests__/session-panel-dialog.test.tsx",
+    "frontend/src/components/daemon/__tests__/turn-timeline-conversation-file-card.test.tsx",
+    "frontend/src/components/daemon/file-changes/__tests__/file-changes-card.test.tsx",
+    "frontend/src/components/daemon/file-changes/__tests__/turn-file-diff-dialog.test.tsx",
+    "frontend/src/components/daemon/file-changes/file-changes-card.tsx",
+    "frontend/src/components/daemon/file-changes/turn-file-diff-dialog.tsx",
+    "frontend/src/components/daemon/session-panel/__tests__/refetch-dialog-history.test.ts",
+    "frontend/src/components/daemon/session-panel/page-helpers.tsx",
+    "frontend/src/components/daemon/session-panel/session-panel-dialog.tsx",
+    "frontend/src/components/daemon/session-panel/session-panel-page.tsx",
+    "frontend/src/components/daemon/turn-timeline.tsx"
+  ],
+  "totals": {
+    "files": 22,
+    "additions": 1572,
+    "deletions": 244
+  },
+  "savedAt": "2026-10-23T02:51:08.546Z",
+  "note": "flow done 时点冻结（本变更可归属交付面：baseline..HEAD 提交面过滤 .sillyspec/ 只留 .sillyspec/docs/ 交付文档 + 独占树未提交交付；治理工件目录不入冻结——2026-10-12-close-trace-freeze-integrity FR-01）",
+  "modules": [
+    {
+      "id": "core",
+      "files": 1,
+      "doc": "docs/backend/modules/core.md",
+      "docTouched": false,
+      "docMissing": false
+    },
+    {
+      "id": "auth",
+      "files": 1,
+      "doc": "docs/backend/modules/auth.md",
+      "docTouched": false,
+      "docMissing": false
+    },
+    {
+      "id": "daemon",
+      "files": 6,
+      "doc": "docs/backend/modules/daemon.md",
+      "docTouched": false,
+      "docMissing": false
+    },
+    {
+      "id": "migrations",
+      "files": 1,
+      "doc": "docs/backend/modules/migrations.md",
+      "docTouched": false,
+      "docMissing": false
+    },
+    {
+      "id": "backend",
+      "files": 11,
+      "doc": "docs/multi-agent-platform/modules/backend.md",
+      "docTouched": false,
+      "docMissing": false
+    },
+    {
+      "id": "frontend",
+      "files": 11,
+      "doc": "docs/multi-agent-platform/modules/frontend.md",
+      "docTouched": false,
+      "docMissing": false
+    },
+    {
+      "id": "core",
+      "files": 1,
+      "doc": "docs/SillyHub/modules/core.md",
+      "docTouched": false,
+      "docMissing": false
+    },
+    {
+      "id": "auth",
+      "files": 1,
+      "doc": "docs/SillyHub/modules/auth.md",
+      "docTouched": false,
+      "docMissing": false
+    },
+    {
+      "id": "daemon",
+      "files": 6,
+      "doc": "docs/SillyHub/modules/daemon.md",
+      "docTouched": false,
+      "docMissing": false
+    },
+    {
+      "id": "frontend_components",
+      "files": 11,
+      "doc": "docs/SillyHub/modules/frontend_components.md",
+      "docTouched": false,
+      "docMissing": false
+    }
+  ],
+  "uncoveredDirs": [],
+  "moduleMaps": [
+    "docs/backend/modules/_module-map.yaml",
+    "docs/frontend/modules/_module-map.yaml",
+    "docs/multi-agent-platform/modules/_module-map.yaml",
+    "docs/SillyHub/modules/_module-map.yaml",
+    "docs/sillyhub-daemon/modules/_module-map.yaml"
+  ],
+  "acceptedDirtyGap": 4,
+  "scopeAudit": {
+    "mode": "full-flow",
+    "ok": true,
+    "degradedReason": null,
+    "baseAnchor": "44c748745dc3dd3bc22533db6db611b8599bfcac",
+    "totals": {
+      "files": 22,
+      "additions": 1572,
+      "deletions": 244
+    },
+    "rows": [
+      {
+        "path": "backend/app/core/client_ip.py",
+        "additions": 42,
+        "deletions": 0,
+        "kind": "new",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": "backend/app/modules/auth/router.py",
+        "additions": 5,
+        "deletions": 11,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": "backend/app/modules/daemon/model.py",
+        "additions": 13,
+        "deletions": 0,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": "backend/app/modules/daemon/router/heartbeat.py",
+        "additions": 31,
+        "deletions": 1,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": "backend/app/modules/daemon/router/version.py",
+        "additions": 7,
+        "deletions": 1,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": "backend/app/modules/daemon/runtime/service.py",
+        "additions": 39,
+        "deletions": 0,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": "backend/app/modules/daemon/service.py",
+        "additions": 4,
+        "deletions": 0,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": "backend/app/modules/daemon/session/network_context.py",
+        "additions": 358,
+        "deletions": 0,
+        "kind": "new",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": "backend/migrations/versions/20261023090000_add_daemon_instances_network_info.py",
+        "additions": 33,
+        "deletions": 0,
+        "kind": "new",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": "backend/tests/modules/daemon/test_network_context.py",
+        "additions": 397,
+        "deletions": 0,
+        "kind": "new",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": "backend/tests/test_align_platform_change_events_migration.py",
+        "additions": 6,
+        "deletions": 2,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": "frontend/src/components/daemon/__tests__/session-panel-dialog.test.tsx",
+        "additions": 65,
+        "deletions": 0,
+        "kind": "modified",
+        "planned": "修改",
+        "verdict": "planned"
+      },
+      {
+        "path": "frontend/src/components/daemon/__tests__/turn-timeline-conversation-file-card.test.tsx",
+        "additions": 51,
+        "deletions": 6,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": "frontend/src/components/daemon/file-changes/__tests__/file-changes-card.test.tsx",
+        "additions": 87,
+        "deletions": 35,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": "frontend/src/components/daemon/file-changes/__tests__/turn-file-diff-dialog.test.tsx",
+        "additions": 27,
+        "deletions": 7,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": "frontend/src/components/daemon/file-changes/file-changes-card.tsx",
+        "additions": 216,
+        "deletions": 155,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": "frontend/src/components/daemon/file-changes/turn-file-diff-dialog.tsx",
+        "additions": 19,
+        "deletions": 12,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": "frontend/src/components/daemon/session-panel/__tests__/refetch-dialog-history.test.ts",
+        "additions": 74,
+        "deletions": 0,
+        "kind": "new",
+        "planned": "新增",
+        "verdict": "planned"
+      },
+      {
+        "path": "frontend/src/components/daemon/session-panel/page-helpers.tsx",
+        "additions": 46,
+        "deletions": 2,
+        "kind": "modified",
+        "planned": "修改",
+        "verdict": "planned"
+      },
+      {
+        "path": "frontend/src/components/daemon/session-panel/session-panel-dialog.tsx",
+        "additions": 11,
+        "deletions": 0,
+        "kind": "modified",
+        "planned": "修改",
+        "verdict": "planned"
+      },
+      {
+        "path": "frontend/src/components/daemon/session-panel/session-panel-page.tsx",
+        "additions": 10,
+        "deletions": 1,
+        "kind": "modified",
+        "planned": "修改",
+        "verdict": "planned"
+      },
+      {
+        "path": "frontend/src/components/daemon/turn-timeline.tsx",
+        "additions": 31,
+        "deletions": 11,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "unplanned"
+      }
+    ],
+    "excluded": {
+      "foreignDeclared": []
+    },
+    "note": "flow done 时点冻结（本文件落盘时采集）",
+    "closedBy": "flow done"
+  },
+  "patchSha256": "68db97132d2e06d8c848559b5ee54147754e6068a28e0db8de8677d4468ea9e1",
+  "patchStatus": "ok"
+}

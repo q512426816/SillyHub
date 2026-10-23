@@ -1477,3 +1477,11 @@
 锚点：未记录
 最近确认：475a8da2eec4b9e711dbd43e881244d506a474aa
 理由：最大风险：RoundDivider 是 memo 组件，detail 从 string（值相等可命中 memo）变为运行中轮每渲染新建的 React 元素 → 该轮 RoundDivider memo 恒 miss。评估：仅单条运行中轮受影响、RoundDivider 渲染成本极小（几个 span），且运行中轮本就随流式 delta 高频重渲染（tokens meta 同步变化），无可感差异；终态轮 detail 仍是 string，memo 命中率不变。 放弃方案：① 父级 TurnRow 持 interval 整体重算 metaDetail——每秒整轮重渲染，违反渲染经济铁律（FR-06 惯例，TurnStatusBar 注释明载 tick 不外溢），放弃；② 只改数据层（running → replyAt=null）——该位置整体消失，不满足「进行中显示实时走秒历时」的用户裁决，放弃；③ RoundDivider 开专用 liveElapsed prop——为单场景在共享组件上扩接口面，比向后兼容的类型放宽侵入更大，放弃。
+
+## D-unmapped-193@v1 设计期风险与放弃方案（底稿）
+状态：implemented
+变更：2026-10-23-askuser-history-live-sync
+原编号：D-001@v1
+锚点：未记录
+最近确认：cd3a5746b656945ae7c55a801932582e1ba94d7d
+理由：最大风险：resolved 事件到达时后端答案落库与事件推送的时序竞态——若推送先于落库（理论窗口），重拉拿到的仍是 pending 态，记录短暂停留未更新，直到下一次事件/刷新兜底。评估可接受：backend 的 resolved 语义是"请求已收口"（落库后广播），实际窗口极小；且问答级频率下无重试风暴风险。 放弃的方案：a) 前端把 SSE 事件手工转 SessionDialogRead 增量 append/merge——resolved 事件不含 answers（SessionPermissionResolved 无答案字段），必须伪造或再查单条，且 id/created_at 等 REST 字段 SSE 缺失，拼装体与刷新后权威数据不一致（闪变）；b) 后端在 resolved 事件里加 answers 字段——动 SSE 契约+后端，改动面大且只解决 resolved 一半（request 到达仍需转换），违背"前端回显权威数据"原则；c) 轮询 dialogHistory——问答级频率用轮询浪费且延迟不可控。均弃。

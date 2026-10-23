@@ -778,3 +778,86 @@ created_at: 2026-10-15T11:57:05.061Z
 - 场景：主路径 — Given 变更落盘；When 在 `frontend` 跑 `pnpm exec tsc --noEmit`；Then 退出码为 0。
 全文：.sillyspec/changes/archive/2026-10-22-session-trajectory-third-view/requirements.md#FR-08
 最近确认：28c19e2677fae0639cda0a7ba96aec3ba484749e
+
+## FR-core-039 SSE permission_request（dialog_kind 存在）到达时，对话与进度内容流实时出现该提问记录（无需刷新页面）
+变更：2026-10-23-askuser-history-live-sync
+状态：active
+摘要：提问到达实时回显；拉取失败降级
+全文：.sillyspec/changes/archive/2026-10-23-askuser-history-live-sync/requirements.md#FR-01
+最近确认：cd3a5746b656945ae7c55a801932582e1ba94d7d
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-23-askuser-history-live-sync:flow:测试绑定FR-01
+  tests: frontend/src/components/daemon/__tests__/session-panel-dialog.test.tsx「permission_request 到达 → 重拉 dialogHistory，内容流实时出现提问记录」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-23-askuser-history-live-sync
+  status: active
+
+## FR-core-040 SSE permission_resolved 到达时，对应问答记录实时更新为已答态（答案/答题人来自后端落库数据），待答卡同步移除
+变更：2026-10-23-askuser-history-live-sync
+状态：active
+摘要：回答收口实时更新
+全文：.sillyspec/changes/archive/2026-10-23-askuser-history-live-sync/requirements.md#FR-02
+最近确认：cd3a5746b656945ae7c55a801932582e1ba94d7d
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-23-askuser-history-live-sync:flow:测试绑定FR-02
+  tests: frontend/src/components/daemon/__tests__/session-panel-dialog.test.tsx「permission_resolved 到达 → 再次重拉 dialogHistory，记录更新已答态」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-23-askuser-history-live-sync
+  status: active
+
+## FR-core-041 session-panel-page 与 session-panel-dialog 两挂载点同款行为
+变更：2026-10-23-askuser-history-live-sync
+状态：active
+摘要：两挂载点一致
+全文：.sillyspec/changes/archive/2026-10-23-askuser-history-live-sync/requirements.md#FR-03
+最近确认：cd3a5746b656945ae7c55a801932582e1ba94d7d
+
+## FR-core-042 重拉并发防乱序（仅最新一次拉取结果生效）
+变更：2026-10-23-askuser-history-live-sync
+状态：active
+摘要：相邻事件并发拉取
+全文：.sillyspec/changes/archive/2026-10-23-askuser-history-live-sync/requirements.md#FR-04
+最近确认：cd3a5746b656945ae7c55a801932582e1ba94d7d
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-23-askuser-history-live-sync:flow:测试绑定FR-04
+  tests: frontend/src/components/daemon/session-panel/__tests__/refetch-dialog-history.test.ts「相邻两次拉取响应乱序 → 仅最新一次生效（旧序号响应被丢弃）」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-23-askuser-history-live-sync
+  status: active
+
+## FR-core-043 受影响测试全绿，tsc 零错
+变更：2026-10-23-askuser-history-live-sync
+状态：active
+摘要：验证
+全文：.sillyspec/changes/archive/2026-10-23-askuser-history-live-sync/requirements.md#FR-05
+最近确认：cd3a5746b656945ae7c55a801932582e1ba94d7d
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-23-askuser-history-live-sync:flow:测试绑定FR-05
+  tests: frontend/src/components/daemon/__tests__/session-panel-dialog.test.tsx
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-23-askuser-history-live-sync
+  status: active

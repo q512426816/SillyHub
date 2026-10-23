@@ -97,3 +97,4 @@
 - 2026-10-22-session-composer-slim | 会话页面底部输入区信息过载：排队消息与纯文本展示露出附件引用 uuid 长串，中断自动续跑是常驻开关…
 - 2026-10-23-semantic-color-scale-fix | 修复语义色阶未定义导致的隐形状态标记
 - 2026-10-23-live-turn-meta-time | 进行中轮次底部元信息时间显示修复
+- 2026-10-23-askuser-history-live-sync | AskUser 问答历史实时回显（用户实测 bug 修复）

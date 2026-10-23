@@ -1,0 +1,34 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-23-askuser-history-live-sync",
+  "reviewer": "subagent",
+  "verdict": "PASS",
+  "reviewedAgainst": "7d46401c7963ffca22310cdc3ed6c6ae550868fd",
+  "findings": [
+    {
+      "severity": "P3",
+      "title": "design 接口契约与实现命名漂移：createDialogHistoryRefetch（工厂）vs 实态 refetchDialogHistory（直调函数）",
+      "evidence": "design.md 接口契约与变更清单写 createDialogHistoryRefetch(sessionId, setDialogHistory, seqRef) 工厂语义；工作区实态导出的是直接执行函数 refetchDialogHistory(sessionId, setDialogHistory, seqRef)（page-helpers.tsx:910），参数序一致、行为等价，测试 import 证实实态名，但文档名未随实现更新（注释/文档与实现不一致）",
+      "location": "frontend/src/components/daemon/session-panel/page-helpers.tsx:910"
+    },
+    {
+      "severity": "P3",
+      "title": "FR-04 测试绑定行路径笔误 + design 文件清单漏列：乱序防护单测实际在 refetch-dialog-history.test.ts 而非绑定的 session-panel-dialog.test.tsx",
+      "evidence": "requirements.md:70 FR-04 绑定写 session-panel-dialog.test.tsx「重拉乱序防护：旧序号响应被丢弃」，该文件中无此用例；实际用例「相邻两次拉取响应乱序 → 仅最新一次生效（旧序号响应被丢弃）」在 refetch-dialog-history.test.ts:27，断言精确（setHistory 仅 1 次且值为 newer）；design 文件变更清单（4 文件）漏列该 +74 行测试文件。任务书备注已如实披露，实际用例存在且复跑通过",
+      "location": "frontend/src/components/daemon/session-panel/__tests__/refetch-dialog-history.test.ts:27"
+    },
+    {
+      "severity": "P3",
+      "title": "FR-05「tsc 零错」在当前工作区实态不成立（exit=2），归因为并行会话未提交在途改动，非本变更缺陷",
+      "evidence": "复跑 tsc --noEmit 报 3 处错误（turn-file-diff-dialog.test.tsx:104/120、turn-timeline.tsx:1917 的 source prop 类型缺失），涉事两文件均为工作区未提交 M 状态的 file-changes 域并行半成品；本变更 5 个声明文件在 7d46401c..HEAD 零漂移且类型检查干净；ledger 收口回执（2026-10-23T02:43）当时 passed exit=0。属共享仓并行噪音，不构成对本变更的否决",
+      "location": "frontend/src/components/daemon/turn-timeline.tsx:1917"
+    }
+  ],
+  "dimensionNotes": {
+    "乱序": "ok（seq 守卫真实生效：page-helpers.tsx:915-918 递增 seqRef + 回调比对 seqRef.current !== seq 丢弃旧响应；乱序单测断言精确，边界已裁决：可接受）",
+    "并发": "ok（纯前端 React 单线程 state 更新、GET 只读，无跨执行体写面，design 盲维 2 作答属实；边界已裁决：可接受）",
+    "切换": "ok（design 盲维 3 披露的旧会话迟到响应闪现窗口经代码核实存在兜底：seqRef 不随切换重置、新会话 effect 全量覆盖；边界已裁决：可接受——窗口需毫秒级交错才触发、展示级自愈无持久污染；备注 design「最坏一次闪现后被覆盖」在极端交错下（新会话拉取先于旧响应完成）偏乐观，污染会停留到下一 permission 事件，仍非数据正确性风险）",
+    "作用域": "ok（fetch 按 sessionId 建流闭包取数，两挂载点各自 dialogHistorySeqRef/state 实例（session-panel-dialog.tsx:177 / session-panel-page.tsx:792），无串台面；边界已裁决：可接受）"
+  },
+  "reviewedAt": "2026-10-23T10:49:14+08:00"
+}

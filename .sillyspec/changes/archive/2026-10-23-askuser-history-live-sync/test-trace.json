@@ -1,0 +1,66 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-23-askuser-history-live-sync",
+  "rows": [
+    {
+      "anchor": "FR-01",
+      "row_id": "2026-10-23-askuser-history-live-sync:flow:测试绑定FR-01",
+      "tests": [
+        "frontend/src/components/daemon/__tests__/session-panel-dialog.test.tsx「permission_request 到达 → 重拉 dialogHistory，内容流实时出现提问记录」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-23-askuser-history-live-sync"
+    },
+    {
+      "anchor": "FR-02",
+      "row_id": "2026-10-23-askuser-history-live-sync:flow:测试绑定FR-02",
+      "tests": [
+        "frontend/src/components/daemon/__tests__/session-panel-dialog.test.tsx「permission_resolved 到达 → 再次重拉 dialogHistory，记录更新已答态」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-23-askuser-history-live-sync"
+    },
+    {
+      "anchor": "FR-04",
+      "row_id": "2026-10-23-askuser-history-live-sync:flow:测试绑定FR-04",
+      "tests": [
+        "frontend/src/components/daemon/session-panel/__tests__/refetch-dialog-history.test.ts「相邻两次拉取响应乱序 → 仅最新一次生效（旧序号响应被丢弃）」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-23-askuser-history-live-sync"
+    },
+    {
+      "anchor": "FR-05",
+      "row_id": "2026-10-23-askuser-history-live-sync:flow:测试绑定FR-05",
+      "tests": [
+        "frontend/src/components/daemon/__tests__/session-panel-dialog.test.tsx"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-23-askuser-history-live-sync"
+    }
+  ]
+}

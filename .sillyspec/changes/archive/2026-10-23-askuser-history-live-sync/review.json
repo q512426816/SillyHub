@@ -1,0 +1,22 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-23-askuser-history-live-sync",
+  "reviewer": "subagent",
+  "verdict": "PASS",
+  "reviewedAgainst": "475a8da2eec4b9e711dbd43e881244d506a474aa",
+  "findings": [
+    {
+      "severity": "P3",
+      "title": "前轮契约名笔误修复不彻底：design.md 接口契约段（:19）仍残留 createDialogHistoryRefetch 旧名，与已更正的做法概述段（:13）同文档矛盾",
+      "evidence": "治理提交 475a8da2e 更正了 design.md 做法概述段的契约名并注明笔误来源，但接口契约段漏改，仍以旧名 createDialogHistoryRefetch(sessionId, setDialogHistory, seqRef) 声明签名——恰是声明签名的段落；实态导出为 page-helpers.tsx:910 的 refetchDialogHistory，无代码影响，纯文档治理残留",
+      "location": ".sillyspec/changes/2026-10-23-askuser-history-live-sync/design.md:19"
+    }
+  ],
+  "dimensionNotes": {
+    "乱序": "ok（边界已裁决：可接受——resolved 推送先于落库的理论竞态窗口：后端语义为落库后广播、窗口极小、问答级频率无重试风暴，下一事件/刷新兜底存在；拉取失败静默降级同理可接受：不阻塞 SSE 主流程、待答卡 pendingRequests 链路独立不受影响）",
+    "并发": "ok（setDialogHistory 为 React 单线程 state 更新、重拉为只读 GET，无跨执行体写面，与 design 盲维2 作答一致）",
+    "切换": "ok（边界已裁决：可接受——旧会话迟到响应最坏一次旧数据闪现：seq 守卫管同会话乱序、sessionId 闭包隔离取数、新会话 effect 全量覆盖兜底，非持久污染；测试 2779 断言闭包传 attach 会话 id）",
+    "作用域": "ok（边界已裁决：可接受——FR-03 page 挂载点无直接用例：helper 单点实现无分叉面，两挂载点 4 处调用同签名同模式经代码审查证实（dialog.tsx:813/821、page.tsx:1686/1699），tsc 保证编译面；残余风险为未来接线漂移无测试拦截，属既有测试格局取舍非本变且回归）"
+  },
+  "reviewedAt": "2026-10-23T02:57:00.000Z"
+}
