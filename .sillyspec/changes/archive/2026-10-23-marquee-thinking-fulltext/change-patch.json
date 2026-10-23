@@ -1,0 +1,142 @@
+{
+  "change": "2026-10-23-marquee-thinking-fulltext",
+  "baseline": "f06e71410beb5065a6154aaf2303821bea0f0f20",
+  "head": "092618dd5c0095a13d5e2646e92c1a5a826d42f7",
+  "files": [
+    ".sillyspec/docs/SillyHub/modules/frontend_components.changelog.md",
+    ".sillyspec/docs/multi-agent-platform/modules/docs.changelog.md",
+    ".sillyspec/docs/multi-agent-platform/modules/frontend.changelog.md",
+    "frontend/src/app/globals.css",
+    "frontend/src/app/proto/session-live-marquee/page.tsx",
+    "frontend/src/components/daemon/__tests__/turn-live-marquee.test.tsx",
+    "frontend/src/components/daemon/session-panel/__tests__/initial-window-merge.test.ts",
+    "frontend/src/components/daemon/session-panel/__tests__/session-first-load-staged.test.tsx",
+    "frontend/src/components/daemon/session-panel/initial-window-merge.ts",
+    "frontend/src/components/daemon/session-panel/session-panel-page.tsx",
+    "frontend/src/components/daemon/turn-live-marquee.tsx"
+  ],
+  "totals": {
+    "files": 11,
+    "additions": 411,
+    "deletions": 57
+  },
+  "savedAt": "2026-10-23T07:50:28.068Z",
+  "note": "flow done 时点冻结（本变更可归属交付面：baseline..HEAD 提交面过滤 .sillyspec/ 只留 .sillyspec/docs/ 交付文档 + 独占树未提交交付；治理工件目录不入冻结——2026-10-12-close-trace-freeze-integrity FR-01）",
+  "modules": [
+    {
+      "id": "frontend",
+      "files": 8,
+      "doc": "docs/multi-agent-platform/modules/frontend.md",
+      "docTouched": false,
+      "docMissing": false
+    },
+    {
+      "id": "frontend_app",
+      "files": 2,
+      "doc": "docs/SillyHub/modules/frontend_app.md",
+      "docTouched": false,
+      "docMissing": false
+    },
+    {
+      "id": "frontend_components",
+      "files": 6,
+      "doc": "docs/SillyHub/modules/frontend_components.md",
+      "docTouched": false,
+      "docMissing": false
+    }
+  ],
+  "uncoveredDirs": [],
+  "moduleMaps": [
+    "docs/backend/modules/_module-map.yaml",
+    "docs/frontend/modules/_module-map.yaml",
+    "docs/multi-agent-platform/modules/_module-map.yaml",
+    "docs/SillyHub/modules/_module-map.yaml",
+    "docs/sillyhub-daemon/modules/_module-map.yaml"
+  ],
+  "scopeAudit": {
+    "mode": "full-flow",
+    "ok": true,
+    "degradedReason": null,
+    "baseAnchor": "f06e71410beb5065a6154aaf2303821bea0f0f20",
+    "totals": {
+      "files": 11,
+      "additions": 411,
+      "deletions": 57
+    },
+    "rows": [
+      {
+        "path": ".sillyspec/docs/SillyHub/modules/frontend_components.changelog.md",
+        "additions": 1,
+        "deletions": 0,
+        "kind": "modified"
+      },
+      {
+        "path": ".sillyspec/docs/multi-agent-platform/modules/docs.changelog.md",
+        "additions": 1,
+        "deletions": 0,
+        "kind": "modified"
+      },
+      {
+        "path": ".sillyspec/docs/multi-agent-platform/modules/frontend.changelog.md",
+        "additions": 1,
+        "deletions": 0,
+        "kind": "modified"
+      },
+      {
+        "path": "frontend/src/app/globals.css",
+        "additions": 3,
+        "deletions": 4,
+        "kind": "modified"
+      },
+      {
+        "path": "frontend/src/app/proto/session-live-marquee/page.tsx",
+        "additions": 10,
+        "deletions": 19,
+        "kind": "modified"
+      },
+      {
+        "path": "frontend/src/components/daemon/__tests__/turn-live-marquee.test.tsx",
+        "additions": 29,
+        "deletions": 0,
+        "kind": "modified"
+      },
+      {
+        "path": "frontend/src/components/daemon/session-panel/__tests__/initial-window-merge.test.ts",
+        "additions": 56,
+        "deletions": 1,
+        "kind": "modified"
+      },
+      {
+        "path": "frontend/src/components/daemon/session-panel/__tests__/session-first-load-staged.test.tsx",
+        "additions": 108,
+        "deletions": 11,
+        "kind": "modified"
+      },
+      {
+        "path": "frontend/src/components/daemon/session-panel/initial-window-merge.ts",
+        "additions": 41,
+        "deletions": 2,
+        "kind": "modified"
+      },
+      {
+        "path": "frontend/src/components/daemon/session-panel/session-panel-page.tsx",
+        "additions": 49,
+        "deletions": 8,
+        "kind": "modified"
+      },
+      {
+        "path": "frontend/src/components/daemon/turn-live-marquee.tsx",
+        "additions": 112,
+        "deletions": 12,
+        "kind": "modified"
+      }
+    ],
+    "excluded": {
+      "foreignDeclared": []
+    },
+    "note": "flow done 时点冻结（本文件落盘时采集）",
+    "closedBy": "flow done"
+  },
+  "patchSha256": "e88437d5b66e531bc2c6940f6e66d9e1551e27ca998ec440d2562f7ca984c776",
+  "patchStatus": "ok"
+}

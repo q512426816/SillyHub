@@ -1,0 +1,713 @@
+diff --git a/.sillyspec/docs/SillyHub/modules/frontend_components.changelog.md b/.sillyspec/docs/SillyHub/modules/frontend_components.changelog.md
+index 59b17fc99..aff9d91ef 100644
+--- a/.sillyspec/docs/SillyHub/modules/frontend_components.changelog.md
++++ b/.sillyspec/docs/SillyHub/modules/frontend_components.changelog.md
+@@ -144,3 +144,4 @@ created_at: 2026-08-30 22:23:33
+ | 2026-10-23 | 2026-10-23-askuser-dialog-draft | AskUser 弹窗选项与输入互斥及作答草稿保留 |
+ | 2026-10-23 | 2026-10-23-marquee-blank-track-fix | 修复跑马灯长会话空白 |
+ | 2026-10-23 | 2026-10-23-marquee-queue-window | 跑马灯渲染队列收敛到最近12条 |
++| 2026-10-23 | 2026-10-23-session-first-load-ux | 会话首屏加载提速：补拉链不阻塞渲染+加载骨架屏 |
+diff --git a/.sillyspec/docs/multi-agent-platform/modules/docs.changelog.md b/.sillyspec/docs/multi-agent-platform/modules/docs.changelog.md
+index db44b04b0..9506067fa 100644
+--- a/.sillyspec/docs/multi-agent-platform/modules/docs.changelog.md
++++ b/.sillyspec/docs/multi-agent-platform/modules/docs.changelog.md
+@@ -24,3 +24,4 @@
+ - 2026-10-22-agent-profiles-page-restyle | 智能体档案列表页重设计
+ - 2026-10-23-session-network-context | 2026-10-23-session-network-context
+ - 2026-10-23-rename-ghost-pit-doc | 坑11 留痕 rename 幽灵变更根治与清理
++- 2026-10-23-session-first-load-ux | 会话首屏加载提速：补拉链不阻塞渲染+加载骨架屏
+diff --git a/.sillyspec/docs/multi-agent-platform/modules/frontend.changelog.md b/.sillyspec/docs/multi-agent-platform/modules/frontend.changelog.md
+index 83e15889f..f25d75c08 100644
+--- a/.sillyspec/docs/multi-agent-platform/modules/frontend.changelog.md
++++ b/.sillyspec/docs/multi-agent-platform/modules/frontend.changelog.md
+@@ -193,3 +193,4 @@
+ | 2026-10-23 | 2026-10-23-askuser-dialog-draft | AskUser 弹窗选项与输入互斥及作答草稿保留 |
+ | 2026-10-23 | 2026-10-23-marquee-blank-track-fix | 修复跑马灯长会话空白 |
+ | 2026-10-23 | 2026-10-23-marquee-queue-window | 跑马灯渲染队列收敛到最近12条 |
++| 2026-10-23 | 2026-10-23-session-first-load-ux | 会话首屏加载提速：补拉链不阻塞渲染+加载骨架屏 |
+diff --git a/frontend/src/app/globals.css b/frontend/src/app/globals.css
+index 6cb6d91d9..77c5c5805 100644
+--- a/frontend/src/app/globals.css
++++ b/frontend/src/app/globals.css
+@@ -1160,11 +1160,10 @@
+     );
+   }
+ 
+-  /* 2026-10-23-marquee-item-detail（FR-01）：运行中条目内部文本循环滚动——
+-     双份文本各占 50%，平移一份即无缝；只在文本窗口 overflow-hidden 内滚动，
+-     图标/状态/耗时区不参与。 */
++  /* 2026-10-23-marquee-thinking-fulltext（FR-02）：ticker 由组件 rAF 驱动，
++     从开头一次滚到最后一个字符即停，**不循环**；类名仅作标记与合成提示。 */
+   .sh-live-marquee-ticker {
+-    animation: sh-live-marquee-ticker 3s linear infinite;
++    will-change: transform;
+   }
+ }
+ 
+diff --git a/frontend/src/app/proto/session-live-marquee/page.tsx b/frontend/src/app/proto/session-live-marquee/page.tsx
+index c1d971c57..45e968b27 100644
+--- a/frontend/src/app/proto/session-live-marquee/page.tsx
++++ b/frontend/src/app/proto/session-live-marquee/page.tsx
+@@ -165,30 +165,21 @@ function buildSegments(step: number): TurnSegment[] {
+     const event = SCRIPT[i % SCRIPT.length]!;
+     const seg = event(i);
+     // 历史条目里的「运行中」工具段收敛为完成态，便于演示耗时。
+-    if (i < total - 1 && seg.kind === "tool" && seg.status === "running") {
++    if (seg.kind === "tool" && seg.status === "running") {
+       seg.status = "ok";
+       seg.endedAt = (seg.startedAt ?? 0) + 2100;
+     }
++    if (seg.kind === "thinking") seg.streaming = false;
+     out.push(seg);
+   }
+-  // 最新一条置为进行中：演示转圈 + 条目内部滚动；历史条目保持完成态与耗时。
+-  const last = out[out.length - 1];
+-  if (last?.kind === "thinking") {
+-    last.streaming = true;
+-  } else if (last?.kind === "tool") {
+-    last.status = "running";
+-    last.endedAt = null;
+-  } else {
+-    // 脚本末条是文件/警告时，补一条稳定的 streaming thinking，
+-    // 让最新处始终能看到转圈与内部滚动。
+-    out.push({
+-      kind: "thinking",
+-      id: "live-thinking",
+-      text: `正在核对 keepalive 与重试窗口的配合，确认长轮询连接不会再被提前回收（第 ${step + 1} 次刷新）…`,
+-      streaming: true,
+-      ts: total * 1000,
+-    });
+-  }
++  // 最新一条始终是进行中的长思考：演示转圈 + 全文跟随流式增长滚动。
++  out.push({
++    kind: "thinking",
++    id: "live-thinking",
++    text: `正在核对 keepalive 与重试窗口的配合：网关 keepalive 为 60 秒，而应用侧请求超时只有 30 秒，长轮询场景下连接可能被提前回收；接着检查 token 刷新请求是否复用了同一套重试策略，确认失败后不会直接跳转登录页；再核对重试窗口、退避间隔与幂等键，避免重复提交；随后对比修复前后的连接回收日志，确认长轮询不再被网关提前断开；最后补齐回归测试并整理变更说明。（第 ${step + 1} 次刷新）`,
++    streaming: true,
++    ts: total * 1000,
++  });
+   return out;
+ }
+ 
+diff --git a/frontend/src/components/daemon/__tests__/turn-live-marquee.test.tsx b/frontend/src/components/daemon/__tests__/turn-live-marquee.test.tsx
+index 3310d9d61..c8867add6 100644
+--- a/frontend/src/components/daemon/__tests__/turn-live-marquee.test.tsx
++++ b/frontend/src/components/daemon/__tests__/turn-live-marquee.test.tsx
+@@ -13,6 +13,7 @@ import {
+   deriveLiveMarqueeEntries,
+   formatMarqueeDuration,
+   marqueeSpeedForDistance,
++  marqueeTickerEnd,
+   resolveMarqueeTarget,
+   LIVE_MARQUEE_MAX_ENTRIES,
+ } from "@/components/daemon/turn-live-marquee";
+@@ -157,6 +158,17 @@ describe("deriveLiveMarqueeEntries 纯函数（FR-01 / FR-03）", () => {
+     expect(entries[1]!.text).toContain("keepalive");
+   });
+ 
++  it("长思考文本不截断，保留完整内容（FR-01）", () => {
++    const longThinking = "这是一段很长的思考内容。".repeat(30);
++    const entries = deriveLiveMarqueeEntries([
++      thinking("t-long", longThinking, true),
++    ]);
++
++    expect(entries).toHaveLength(1);
++    expect(entries[0]!.text).toBe(longThinking);
++    expect(entries[0]!.text.length).toBeGreaterThan(64);
++  });
++
+   it("条目超过上限时只保留最近 12 条", () => {
+     const many = Array.from({ length: LIVE_MARQUEE_MAX_ENTRIES + 10 }, (_, i) =>
+       thinking(`t-${i}`, `事件 ${i}`),
+@@ -240,6 +252,23 @@ describe("TurnLiveMarquee 连续轨道（FR-01 / FR-02 / FR-05）", () => {
+     expect(item.textContent).toContain("先分析登录链路");
+   });
+ 
++  it("ticker 一次滚到末尾即停、不复制循环，跟随流式增长（FR-02）", () => {
++    // 终点：文本末尾贴右缘；不溢出为 0。
++    expect(marqueeTickerEnd(1000, 200)).toBe(-800);
++    expect(marqueeTickerEnd(100, 200)).toBe(0);
++
++    const longText = "长".repeat(210);
++    const { container, getAllByText } = render(
++      <TurnLiveMarquee entries={deriveLiveMarqueeEntries([thinking("t-long", longText, true)])} />,
++    );
++
++    // 单份文本（不是双份无限循环）；不再依赖 CSS 动画。
++    expect(container.querySelectorAll('[data-testid="marquee-ticker"]')).toHaveLength(1);
++    expect(getAllByText(longText)).toHaveLength(1);
++    const ticker = container.querySelector('[data-testid="marquee-ticker"]') as HTMLElement;
++    expect(ticker.style.animationDuration).toBe("");
++  });
++
+   it("完成条目显示 Timer 图标与耗时（FR-02）", () => {
+     const doneEntries = deriveLiveMarqueeEntries([
+       tool("tool-done", { startedAt: 1000, endedAt: 2500 }),
+diff --git a/frontend/src/components/daemon/session-panel/__tests__/initial-window-merge.test.ts b/frontend/src/components/daemon/session-panel/__tests__/initial-window-merge.test.ts
+index 3e59340d3..ac3f29032 100644
+--- a/frontend/src/components/daemon/session-panel/__tests__/initial-window-merge.test.ts
++++ b/frontend/src/components/daemon/session-panel/__tests__/initial-window-merge.test.ts
+@@ -13,7 +13,11 @@ import { describe, it, expect } from "vitest";
+ 
+ import type { AgentRunLogEntry } from "@/lib/agent";
+ import type { InitialWindowResult } from "../initial-window";
+-import { buildInitialWindowMerge } from "../initial-window-merge";
++import {
++  buildInitialWindowMerge,
++  filterPrependAgainstExisting,
++} from "../initial-window-merge";
++import type { SessionTurnView } from "@/components/daemon/turn-timeline";
+ 
+ let seq = 0;
+ function log(
+@@ -131,3 +135,54 @@ describe("buildInitialWindowMerge（2026-10-23-session-first-load-ux）", () =>
+     expect(r.replaceRunIds.has("run-0")).toBe(false);
+   });
+ });
++
++/* 评审 P2 回归证伪：过滤逻辑必须是可独立断言的纯函数——渲染层
++ * mergePreviewIntoDisplayTurns 会按 outline key 去重，端到端「块数」断言在
++ * 删掉过滤后仍可能为绿，无法证伪。本组用例直接断言函数产物。 */
++function turnView(overrides: Partial<SessionTurnView>): SessionTurnView {
++  return {
++    runId: "run-x",
++    realRunId: "run-x",
++    turn: 1,
++    prompt: "",
++    output: "",
++    status: "completed",
++    seenLogIds: new Set<string>(),
++    inputTokens: null,
++    outputTokens: null,
++    ...overrides,
++  };
++}
++
++describe("filterPrependAgainstExisting（评审 P2 回归）", () => {
++  it("已有同 run 且有内容的块（含 #e 变体）→ 剔除对应 prepend 块", () => {
++    const existing = [
++      turnView({ runId: "run-0#e123-abcdef12", realRunId: "run-0", prompt: "已加载提问" }),
++    ];
++    const prepend = [
++      turnView({ runId: "run-0#w456-abcdef12", realRunId: "run-0", prompt: "整窗提问" }),
++      turnView({ runId: "run-1#w456-abcdef12", realRunId: "run-1", prompt: "另一轮" }),
++    ];
++    const kept = filterPrependAgainstExisting(prepend, existing);
++    expect(kept).toHaveLength(1);
++    expect(kept[0]!.realRunId).toBe("run-1");
++  });
++
++  it("已有同 run 但为空壳（无 prompt/segments/output）→ 保留 prepend（整轮内容覆盖）", () => {
++    const existing = [turnView({ runId: "run-0", realRunId: "run-0" })];
++    const prepend = [
++      turnView({ runId: "run-0#w456-abcdef12", realRunId: "run-0", prompt: "整窗提问" }),
++    ];
++    expect(filterPrependAgainstExisting(prepend, existing)).toHaveLength(1);
++  });
++
++  it("无冲突 → 原样返回全部 prepend（引用序列不变）", () => {
++    const prepend = [
++      turnView({ runId: "run-a#w1", realRunId: "run-a", output: "A" }),
++      turnView({ runId: "run-b#w1", realRunId: "run-b", output: "B" }),
++    ];
++    expect(
++      filterPrependAgainstExisting(prepend, []).map((t) => t.realRunId),
++    ).toEqual(["run-a", "run-b"]);
++  });
++});
+diff --git a/frontend/src/components/daemon/session-panel/__tests__/session-first-load-staged.test.tsx b/frontend/src/components/daemon/session-panel/__tests__/session-first-load-staged.test.tsx
+index 42e10ce9a..9317fed72 100644
+--- a/frontend/src/components/daemon/session-panel/__tests__/session-first-load-staged.test.tsx
++++ b/frontend/src/components/daemon/session-panel/__tests__/session-first-load-staged.test.tsx
+@@ -14,7 +14,7 @@
+  * + 仅 mock 网络层；probe/直达用 deferred 控时序）。
+  */
+ import { describe, it, expect, beforeEach, vi } from "vitest";
+-import { render, screen, waitFor } from "@testing-library/react";
++import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+ import { SessionPanel } from "../../session-panel";
+ 
+@@ -83,6 +83,8 @@ function entry(runId: string, tsSec: number, channel: string, content: string) {
+ 
+ const ANCHOR = "run-anchor";
+ const NEW = "run-new";
++/** 更早轮（不在底窗内；用于评审 P2 并发双块用例）。 */
++const EARLIER = "run-earlier";
+ /** 锚点轮被截断的底窗（400 行满页）：anchor 尾部 200 行 + new 整轮 200 行。 */
+ function makeBaseLogs() {
+   const anchorTail: ReturnType<typeof entry>[] = [];
+@@ -109,17 +111,23 @@ function makeAnchorFull(base: ReturnType<typeof makeBaseLogs>) {
+ 
+ const OUTLINE = {
+   session_id: "s1",
+-  total_turns: 2,
++  total_turns: 3,
+   items: [
+-    { run_id: ANCHOR, seq: 1, created_at: "2026-10-23T10:01:00.000Z", started_at: "2026-10-23T10:01:00.000Z", status: "completed", prompt_summary: "锚点轮摘要" },
+-    { run_id: NEW, seq: 2, created_at: "2026-10-23T10:07:00.000Z", started_at: "2026-10-23T10:07:00.000Z", status: "completed", prompt_summary: "最新轮摘要" },
++    { run_id: EARLIER, seq: 1, created_at: "2026-10-23T09:40:00.000Z", started_at: "2026-10-23T09:40:00.000Z", status: "completed", prompt_summary: "更早轮摘要" },
++    { run_id: ANCHOR, seq: 2, created_at: "2026-10-23T10:01:00.000Z", started_at: "2026-10-23T10:01:00.000Z", status: "completed", prompt_summary: "锚点轮摘要" },
++    { run_id: NEW, seq: 3, created_at: "2026-10-23T10:07:00.000Z", started_at: "2026-10-23T10:07:00.000Z", status: "completed", prompt_summary: "最新轮摘要" },
+   ],
+ };
+ 
++function runRow(id: string, createdAt: string) {
++  return { id, status: "completed", created_at: createdAt, started_at: null, finished_at: null, error_code: null, error_detail: null, user_id: null, sender_name: null, input_tokens: null, output_tokens: null, ctx_tokens: null, duration_api_ms: null, llm_provider_id: null, agent_profile_snapshot: null, metadata: null, engine_anchor: null, failure_summary: null, run_kind: null, cwd: null, config_snapshot: null };
++}
++
+ function runSnapshot() {
+   return [
+-    { id: ANCHOR, status: "completed", created_at: "2026-10-23T10:01:00.000Z", started_at: null, finished_at: null, error_code: null, error_detail: null, user_id: null, sender_name: null, input_tokens: null, output_tokens: null, ctx_tokens: null, duration_api_ms: null, llm_provider_id: null, agent_profile_snapshot: null, metadata: null, engine_anchor: null, failure_summary: null, run_kind: null, cwd: null, config_snapshot: null },
+-    { id: NEW, status: "completed", created_at: "2026-10-23T10:07:00.000Z", started_at: null, finished_at: null, error_code: null, error_detail: null, user_id: null, sender_name: null, input_tokens: null, output_tokens: null, ctx_tokens: null, duration_api_ms: null, llm_provider_id: null, agent_profile_snapshot: null, metadata: null, engine_anchor: null, failure_summary: null, run_kind: null, cwd: null, config_snapshot: null },
++    runRow(EARLIER, "2026-10-23T09:40:00.000Z"),
++    runRow(ANCHOR, "2026-10-23T10:01:00.000Z"),
++    runRow(NEW, "2026-10-23T10:07:00.000Z"),
+   ] as never[];
+ }
+ 
+@@ -197,12 +205,12 @@ describe("首屏两段渲染（2026-10-23-session-first-load-ux）", () => {
+     );
+     // 底窗内容不回退（最新轮仍在屏）。
+     expect(screen.getAllByText(/最新轮提问正文/).length).toBeGreaterThan(0);
+-    // 块序：锚点轮在最新轮之前（prepend 头部）。
++    // 块序：锚点轮在最新轮之前（prepend 头部；更早轮预览卡可排在锚点之前）。
+     const blocks = screen.getAllByTestId("turn-block");
+-    const firstHasAnchor = blocks[0]!.textContent?.includes("锚点轮提问正文") ?? false;
+-    const lastHasNew = blocks[blocks.length - 1]!.textContent?.includes("最新轮提问正文") ?? false;
+-    expect(firstHasAnchor).toBe(true);
+-    expect(lastHasNew).toBe(true);
++    const idxOf = (needle: string) =>
++      blocks.findIndex((b) => b.textContent?.includes(needle));
++    expect(idxOf("锚点轮提问正文")).toBeGreaterThanOrEqual(0);
++    expect(idxOf("锚点轮提问正文")).toBeLessThan(idxOf("最新轮提问正文"));
+     // 底窗锚点旧块已摘（同轮不双显）：含锚点提问的块只有一个。
+     const anchorBlocks = blocks.filter((b) =>
+       b.textContent?.includes("锚点轮提问正文"),
+@@ -226,6 +234,95 @@ describe("首屏两段渲染（2026-10-23-session-first-load-ux）", () => {
+     );
+   });
+ 
++  it("评审 P2：补拉在飞时用户主动加载的轮，合并后不双块", async () => {
++    const base = makeBaseLogs();
++    const anchorFull = makeAnchorFull(base);
++    // 更早轮整轮（用户在补拉期间点预览卡加载）。
++    const earlierFull = [
++      entry(EARLIER, 1, "user_input", "更早轮提问正文"),
++      entry(EARLIER, 2, "stdout", "更早轮回答正文"),
++    ];
++    sessionApi.getAgentSessionLogs.mockImplementation(
++      async (_sid: string, opts?: { before?: string; runId?: string }) => {
++        if (opts?.runId === EARLIER) return earlierFull;
++        if (opts?.before || opts?.runId) return [];
++        return base;
++      },
++    );
++    const probeGate = deferred<{ run_id: string }[]>();
++    sessionApi.probeSessionLogBefore.mockReturnValue(probeGate.promise);
++    sessionApi.getSessionRunLogs.mockImplementation(
++      async (_sid: string, runId: string) =>
++        runId === ANCHOR ? anchorFull : runId === EARLIER ? earlierFull : [],
++    );
++
++    render(<Host sessionId="s1" />);
++
++    // 底窗渲染 → 更早轮预览卡在屏。
++    await waitFor(() =>
++      expect(screen.getAllByText(/最新轮提问正文/).length).toBeGreaterThan(0),
++    );
++    const card = await waitFor(() => {
++      const el = document.querySelector<HTMLElement>(
++        '[data-turn-key="run-earlier"][data-turn-preview]',
++      );
++      if (!el) throw new Error("预览卡未就绪");
++      return el;
++    });
++    // 补拉在飞期间用户主动加载该轮（预览卡原地展开）。
++    fireEvent.click(card);
++    await waitFor(() =>
++      expect(screen.getAllByText(/更早轮提问正文/).length).toBeGreaterThan(0),
++    );
++
++    // 放行补拉：merge 会再次带回该 run 的整轮行——必须让位用户已加载块。
++    probeGate.resolve([{ run_id: ANCHOR }]);
++    await waitFor(() =>
++      expect(screen.getAllByText(/锚点轮提问正文/).length).toBeGreaterThan(0),
++    );
++
++    // 不双块：该 run 在时间线内（turn-block，排除导航刻度）只有一处。
++    const earlierBlocks = screen
++      .getAllByTestId("turn-block")
++      .filter((b) => b.querySelector('[data-turn-key="run-earlier"]'));
++    expect(earlierBlocks).toHaveLength(1);
++  });
++
++  it("评审 P3：补拉在飞时触顶翻页被同步锁挂起，放行后恢复", async () => {
++    const base = makeBaseLogs();
++    sessionApi.getAgentSessionLogs.mockImplementation(
++      async (_sid: string, opts?: { before?: string; runId?: string }) => {
++        if (opts?.before || opts?.runId) return [];
++        return base;
++      },
++    );
++    const probeGate = deferred<{ run_id: string }[]>();
++    sessionApi.probeSessionLogBefore.mockReturnValue(probeGate.promise);
++    sessionApi.getSessionRunLogs.mockResolvedValue([]);
++
++    render(<Host sessionId="s1" />);
++    await waitFor(() =>
++      expect(screen.getAllByText(/最新轮提问正文/).length).toBeGreaterThan(0),
++    );
++    // 等待补拉链真正在飞（probe 已发起）。
++    await waitFor(() => expect(sessionApi.probeSessionLogBefore).toHaveBeenCalled());
++
++    // 触顶滚动（jsdom scrollTop 默认 0 ≤ 触发阈值）——锁在飞：零 before 请求。
++    const scroller = screen.getByTestId("turn-timeline-scroll");
++    fireEvent.scroll(scroller);
++    await new Promise((r) => setTimeout(r, 60));
++    expect(beforeCalls()).toHaveLength(0);
++
++    // 放行补拉链（merge 完成释放锁）。
++    probeGate.resolve([]);
++    await waitFor(() =>
++      expect(sessionApi.getSessionRunLogs).toHaveBeenCalled(),
++    );
++    // 锁释放后触顶恢复翻页（before 请求发出）。
++    fireEvent.scroll(scroller);
++    await waitFor(() => expect(beforeCalls().length).toBeGreaterThan(0));
++  });
++
+   it("FR-03：终态空会话保持原空态文案，不残留骨架屏", async () => {
+     sessionApi.fetchSessionTurnOutline.mockResolvedValue({
+       session_id: "s1", total_turns: 0, items: [],
+diff --git a/frontend/src/components/daemon/session-panel/initial-window-merge.ts b/frontend/src/components/daemon/session-panel/initial-window-merge.ts
+index b9d3b68a8..336b3bcf2 100644
+--- a/frontend/src/components/daemon/session-panel/initial-window-merge.ts
++++ b/frontend/src/components/daemon/session-panel/initial-window-merge.ts
+@@ -17,8 +17,10 @@
+  *      取合并窗口时间最旧行（ts 数字串 + id 前 8 位，与翻页 #e 键同构，前缀
+  *      #w 区分）。
+  *
+- * 纯函数：不碰 React state/ref；摘块匹配与终态闸（运行中块不摘）由调用方
+- * establish 侧按 handleLoadEarlier survivors 模式执行。
++ * 纯函数：不碰 React state/ref。摘块（replaceRunIds）由调用方 establish 侧
++ * 无条件执行——与 handleLoadEarlier 的 survivors 不同，本阶段 SSE 尚未建流，
++ * 不存在需要保护运行中块不摘的实时增量链路；运行中锚点轮由调用方把合并块
++ * 翻回 running 承接。
+  */
+ 
+ import type { AgentRunLogEntry } from "@/lib/agent";
+@@ -26,6 +28,43 @@ import { logsToTurns } from "@/components/daemon/runtime-session-helpers";
+ import type { SessionTurnView } from "@/components/daemon/turn-timeline";
+ import type { InitialWindowResult } from "./initial-window";
+ 
++/** 剥 prepend 轮块的游标页键后缀（`realRunId#e<pageKey>` / `#w<windowKey>` →
++ *  realRunId；非变体块原样返回）。与 session-panel-page 的同名 helper 同构。 */
++function stripMergeKeySuffix(runId: string): string {
++  const at = runId.indexOf("#");
++  return at === -1 ? runId : runId.slice(0, at);
++}
++
++/**
++ * 剔除与已存在轮块冲突的 prepend 块（评审 P2：补拉在飞期间用户可能已通过
++ * 预览卡/导航刻度单轮直达同一 run，#e 块先入时间线；第二段整窗合并再以 #w
++ * 块 prepend 会同 run 双块）。
++ *
++ * 判定「已存在且有内容」——prompt/segments/output 任一非空（对齐
++ * fetchAndAttachTurn 的 anyBody 口径）；空壳块（快照补建）不算，保留 prepend
++ * 以便整轮内容覆盖。锚点轮由调用方先按 replaceRunIds 摘除，不在 existing 中。
++ */
++export function filterPrependAgainstExisting(
++  prependTurns: SessionTurnView[],
++  existingTurns: SessionTurnView[],
++): SessionTurnView[] {
++  const loadedRuns = new Set<string>();
++  for (const t of existingTurns) {
++    const body =
++      !!(t.prompt ?? "").trim() ||
++      (t.segments?.length ?? 0) > 0 ||
++      !!(t.output ?? "").trim();
++    if (!body) continue;
++    const key =
++      t.realRunId ??
++      (t.runId.startsWith("__") ? null : stripMergeKeySuffix(t.runId));
++    if (key != null) loadedRuns.add(key);
++  }
++  return prependTurns.filter(
++    (t) => t.realRunId == null || !loadedRuns.has(t.realRunId),
++  );
++}
++
+ export interface InitialWindowMergeResult {
+   /** prepend 进时间线头部的轮块（runId 带 #w 窗口键后缀；空数组=无增量）。 */
+   prependTurns: SessionTurnView[];
+diff --git a/frontend/src/components/daemon/session-panel/session-panel-page.tsx b/frontend/src/components/daemon/session-panel/session-panel-page.tsx
+index 1b17ee565..1eb39d32f 100644
+--- a/frontend/src/components/daemon/session-panel/session-panel-page.tsx
++++ b/frontend/src/components/daemon/session-panel/session-panel-page.tsx
+@@ -131,7 +131,10 @@ import {
+ // 2026-10-23-session-first-window-turn-align：首屏自适应窗口（轮次对齐 + 预算）。
+ import { buildInitialWindow } from "./initial-window";
+ // 2026-10-23-session-first-load-ux：首屏窗口增量合并（两段渲染第二段）。
+-import { buildInitialWindowMerge } from "./initial-window-merge";
++import {
++  buildInitialWindowMerge,
++  filterPrependAgainstExisting,
++} from "./initial-window-merge";
+ import { highlightSearchHit, searchResultLabel, searchResultText } from "./search";
+ // task-01（2026-10-14-session-turn-preview-cards）：消息流归并层（单一数据源，
+ // 未加载轮合成预览条目，D-004 方案 A）。
+@@ -773,9 +776,11 @@ export function SessionPanelPage({
+   const [historyLoading, setHistoryLoading] = useState(false);
+   // 2026-10-23-session-first-load-ux / FR-01：首屏历史加载在飞指示（true =
+   // 详情已可渲染而历史/窗口补拉链在途）——TurnTimeline turns 为空时以骨架屏
+-  // 替代静态空态文案。随 sessionId 切换置 true，establish 终态（成功/失败）
+-  // 且未被取消时置 false；终态空会话保持 false → 原空态文案（FR-03）。
+-  const [initialHistoryLoading, setInitialHistoryLoading] = useState(false);
++  // 替代静态空态文案。初值 true（评审 P3：初值 false 会在「详情已到、sessionId
++  // effect 尚未跑」的窗口闪一帧静态空态文案）；随 sessionId 切换重置 true，
++  // establish 终态（成功/失败）且未被取消时置 false；终态空会话保持 false →
++  // 原空态文案（FR-03）。预会话早退不渲染时间线，初值 true 无副作用。
++  const [initialHistoryLoading, setInitialHistoryLoading] = useState(true);
+   // 2026-10-10-single-turn-nav-and-jump-head：「回到会话开头」连续翻页进行中
+   // （入口转圈 + disabled；随会话切换复位）。
+   const [jumpHeadLoading, setJumpHeadLoading] = useState(false);
+@@ -1371,9 +1376,14 @@ export function SessionPanelPage({
+           if (cancelled) return;
+           const merge = buildInitialWindowMerge(logs, adaptive);
+           if (merge.prependTurns.length > 0) {
+-            // 运行中锚点轮修正（同第一段 cur 重放口径）：整轮合并块翻回
+-            // running（logsToTurns 一律 completed），SSE 建流后增量按 realRunId
+-            // 归入该唯一块（底窗旧块已摘）。
++            // 评审 P2：补拉在飞期间用户可能已点预览卡/导航刻度单轮直达，同一
++            // run 的完整块已 prepend（真实 id 或 #e 变体）——此时再以 #w 整轮块
++            // prepend 会同 run 双块。合并是纯数据动作，故在 updater 内按
++            // 「prev 已有该 run 且有内容」过滤（锚点轮因 replaceRunIds 先被摘，
++            // 不在 survivors 中，仍走整轮替换；其余轮已有内容则让位用户加载的块）。
++            // 运行中锚点轮修正（同第一段 cur 重放口径）：整轮合并块翻回 running
++            //（logsToTurns 一律 completed），SSE 建流后增量按 realRunId 归入该
++            // 唯一块（底窗旧块已摘）。
+             const cur = currentRunIdRef.current;
+             const prependTurns = merge.prependTurns.map((t): SessionTurnView =>
+               t.realRunId === cur && t.status === "completed"
+@@ -1388,6 +1398,33 @@ export function SessionPanelPage({
+                 if (rid) completedSideEffectRunIdsRef.current.add(rid);
+               }
+             }
++            // 评审 P2：合并前捕获滚动锚（与 handleLoadEarlier 元素锚同口径）。
++            // 容器 overflowAnchor:none，头部插入会让正在读的历史跳变；仅在用户
++            // 已离底（距底 ≥ 80px，同 TurnTimeline 贴底阈值）时捕获——贴底时
++            // 交给 TurnTimeline 既有贴底跟随，两者不抢滚动。锚置位后由既有锚定
++            // effect（turnState 变化）双 rAF + 滚动重申钉回。
++            const scrollEl = scrollElQueryRef.current();
++            const curAnchor = pendingAnchorRef.current;
++            if (
++              scrollEl &&
++              scrollEl.scrollHeight - scrollEl.scrollTop - scrollEl.clientHeight >= 80 &&
++              (curAnchor == null || Date.now() > curAnchor.until)
++            ) {
++              const containerTop = scrollEl.getBoundingClientRect().top;
++              let anchorRow: HTMLElement | null = null;
++              for (const row of scrollEl.querySelectorAll<HTMLElement>("[data-turn-key]")) {
++                const r = row.getBoundingClientRect();
++                if (r.bottom > containerTop + 4) { anchorRow = row; break; }
++              }
++              if (anchorRow) {
++                pendingAnchorRef.current = {
++                  key: anchorRow.getAttribute("data-turn-key") ?? "",
++                  offset: anchorRow.getBoundingClientRect().top - containerTop,
++                  until: Date.now() + 2500,
++                  el: anchorRow,
++                };
++              }
++            }
+             setTurnState((prev) => {
+               // 摘底窗锚点旧块（整轮行已并入 prepend 块，不摘会同轮双显）。
+               // 不带终态闸：SSE 尚未建流，无实时增量链路可打断；运行中锚点
+@@ -1401,7 +1438,11 @@ export function SessionPanelPage({
+                       return !(key != null && merge.replaceRunIds.has(key));
+                     })
+                   : prev.turns;
+-              return { ...prev, turns: [...prependTurns, ...survivors] };
++              // 评审 P2：同 run 已有块（用户补拉期间主动加载）→ 跳过该 prepend
++              // 块，避免 #w 块与用户加载块双显（纯函数单测锁定，不受渲染层归并
++              // 去重掩盖）。
++              const kept = filterPrependAgainstExisting(prependTurns, survivors);
++              return { ...prev, turns: [...kept, ...survivors] };
+             });
+           }
+           // 评审 P2：锚点轮直达不完整/失败时整体回退底窗、cursorLog 保持底窗
+diff --git a/frontend/src/components/daemon/turn-live-marquee.tsx b/frontend/src/components/daemon/turn-live-marquee.tsx
+index a29eb4ced..9d628a4c1 100644
+--- a/frontend/src/components/daemon/turn-live-marquee.tsx
++++ b/frontend/src/components/daemon/turn-live-marquee.tsx
+@@ -174,9 +174,14 @@ function segmentDuration(
+   return diff >= 0 ? diff : null;
+ }
+ 
++/** 空白归一（不截断）：thinking 全文流动展示用。 */
++function normalizeText(text: string | null | undefined): string {
++  return (text ?? "").replace(/\s+/g, " ").trim();
++}
++
+ /** 单行摘要归一：折叠空白 + 截断（与 status-bar summarizeText 同口径）。 */
+ function clip(text: string | null | undefined, max = CLIP_LENGTH): string {
+-  const t = (text ?? "").replace(/\s+/g, " ").trim();
++  const t = normalizeText(text);
+   if (!t) return "";
+   return t.length > max ? `${t.slice(0, max)}…` : t;
+ }
+@@ -218,7 +223,9 @@ function collectEntries(
+         out.push({
+           id: `${prefix}${seg.id}`,
+           icon: "thinking",
+-          text: clip(seg.text) || "正在思考…",
++          // 2026-10-23-marquee-thinking-fulltext（FR-01）：思考保留全文（仅折叠
++          // 空白），运行中在条目窗口内完整流动；完成态由渲染层单行截断。
++          text: normalizeText(seg.text) || "正在思考…",
+           status: seg.streaming ? "running" : "done",
+           startedAt: seg.ts,
+           endedAt: null,
+@@ -396,11 +403,24 @@ function dotClass(status: LiveMarqueeEntry["status"]): string {
+   }
+ }
+ 
++/** 条目内部一次性滚动速度（px/s）；全文滚到最后一个字符即停。 */
++const TICKER_SPEED = 220;
++
++/**
++ * ticker 终点（2026-10-23-marquee-thinking-fulltext / FR-02）：
++ * 文本末尾贴住窗口右缘（<=0）；文本不溢出窗口时为 0。
++ * 规则：一次滚到最后一个字符即停，**不循环**；完成态回到开头截断显示。
++ */
++export function marqueeTickerEnd(textWidth: number, viewWidth: number): number {
++  return Math.min(0, viewWidth - textWidth);
++}
++
+ /**
+  * 单条目视图（FR-01~FR-05）：固定 lucide 图标 + 文本区 + 状态/耗时区。
+- *   - running：文本双份 CSS 循环滚动，右侧 CSS 转圈；
+- *   - 完成：文本单份截断，右侧 Timer 图标 + 耗时（无数据不显示）；
+- *   - reduced-motion：不滚动、不转圈，静态截断。
++ *   - running：文本从开头一次向左滚到当前最后一个字符；流式思考持续增长时
++ *     跟随新末尾继续滚（落后越多越快），不循环；
++ *   - 完成：停止滚动，回到开头单份截断，右侧 Timer 图标 + 耗时；
++ *   - reduced-motion：不滚动、不转圈，静态截断；
+  * 只有文本区参与滚动，图标与耗时区固定。
+  */
+ function MarqueeItemView({
+@@ -416,6 +436,86 @@ function MarqueeItemView({
+ }) {
+   const running = entry.status === "running";
+   const Icon = ICON_COMPONENTS[entry.icon];
++  const tickerWindowRef = useRef<HTMLSpanElement | null>(null);
++  const tickerTextRef = useRef<HTMLSpanElement | null>(null);
++  const tickerOffsetRef = useRef(0);
++  const tickerEndRef = useRef(0);
++  const tickerRafRef = useRef<number | null>(null);
++
++  const stopTicker = useCallback(() => {
++    if (tickerRafRef.current !== null) {
++      cancelAnimationFrame(tickerRafRef.current);
++      tickerRafRef.current = null;
++    }
++  }, []);
++
++  /** 起排：向终点滚动，到达最后一个字符即停（不循环）。 */
++  const ensureTickerScroll = useCallback(() => {
++    if (!running || reduced || tickerRafRef.current !== null) return;
++    const text = tickerTextRef.current;
++    if (!text) return;
++    let last = performance.now();
++    const step = (now: number) => {
++      const dt = Math.min(80, now - last);
++      last = now;
++      const end = tickerEndRef.current;
++      const distance = tickerOffsetRef.current - end;
++      if (distance > 0) {
++        // 跟随流式输出：落后越多滚得越快，避免永远追不上新增长的内容。
++        const speed = Math.min(900, Math.max(TICKER_SPEED, distance * 1.5));
++        tickerOffsetRef.current = Math.max(
++          end,
++          tickerOffsetRef.current - (speed * dt) / 1000,
++        );
++        text.style.transform = `translate3d(${tickerOffsetRef.current}px, 0, 0)`;
++        tickerRafRef.current = requestAnimationFrame(step);
++      } else {
++        // 当前文本末尾已到达；思考若继续增长，文本变化 effect 会再次起排。
++        tickerRafRef.current = null;
++      }
++    };
++    tickerRafRef.current = requestAnimationFrame(step);
++  }, [running, reduced]);
++
++  // 测量文本/窗口宽度 → 更新终点；文本流式增长时终点变远，继续滚。
++  useEffect(() => {
++    if (!running || reduced) return;
++    const text = tickerTextRef.current;
++    const win = tickerWindowRef.current;
++    if (!text || !win) return;
++    const update = () => {
++      tickerEndRef.current = marqueeTickerEnd(text.scrollWidth, win.clientWidth);
++      ensureTickerScroll();
++    };
++    update();
++    if (typeof ResizeObserver === "undefined") return;
++    const observer = new ResizeObserver(update);
++    observer.observe(text);
++    observer.observe(win);
++    return () => observer.disconnect();
++  }, [running, reduced, ensureTickerScroll]);
++
++  // 流式思考持续增长：每次文本变化重新测量终点并继续滚（不重置位置），
++  // 直到思考结束（status 变为 done 后切换到开头截断展示）。
++  useEffect(() => {
++    if (!running || reduced) return;
++    const text = tickerTextRef.current;
++    const win = tickerWindowRef.current;
++    if (!text || !win) return;
++    tickerEndRef.current = marqueeTickerEnd(text.scrollWidth, win.clientWidth);
++    ensureTickerScroll();
++  }, [entry.text, running, reduced, ensureTickerScroll]);
++
++  // 新条目从开头开始；卸载/完成后停排。文本增长（同 id）不重置位置。
++  useEffect(() => {
++    tickerOffsetRef.current = 0;
++    if (tickerTextRef.current) {
++      tickerTextRef.current.style.transform = "translate3d(0, 0, 0)";
++    }
++    ensureTickerScroll();
++    return stopTicker;
++  }, [entry.id, ensureTickerScroll, stopTicker]);
++
+   return (
+     <span
+       data-testid="marquee-item"
+@@ -427,6 +527,7 @@ function MarqueeItemView({
+     >
+       <Icon aria-hidden className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+       <span
++        ref={tickerWindowRef}
+         className={cn(
+           "relative min-w-0 flex-1 overflow-hidden",
+           // 运行中滚动窗口左右渐隐；完成态截断文本不加，保持清晰。
+@@ -434,13 +535,12 @@ function MarqueeItemView({
+         )}
+       >
+         {running && !reduced ? (
+-          <span className="sh-live-marquee-ticker inline-flex w-max items-center">
+-            <span className="whitespace-nowrap pr-6 font-medium text-foreground">
+-              {entry.text}
+-            </span>
+-            <span aria-hidden className="whitespace-nowrap pr-6 font-medium text-foreground">
+-              {entry.text}
+-            </span>
++          <span
++            ref={tickerTextRef}
++            data-testid="marquee-ticker"
++            className="sh-live-marquee-ticker inline-block whitespace-nowrap font-medium text-foreground"
++          >
++            {entry.text}
+           </span>
+         ) : (
+           <span className="block truncate font-medium text-foreground" title={entry.text}>

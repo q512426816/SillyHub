@@ -429,3 +429,86 @@ superseded_by：FR-app-workspace-pages-002
   confirmed_at: null
   source_change: 2026-10-23-marquee-ticker-speed
   status: active
+
+## FR-styles-025 thinking 条目的文本不再按 64 字截断，保留折叠空白后的完整思考内容
+变更：2026-10-23-marquee-thinking-fulltext
+状态：active
+摘要：长思考；工具条目
+全文：.sillyspec/changes/archive/2026-10-23-marquee-thinking-fulltext/requirements.md#FR-01
+最近确认：092618dd5c0095a13d5e2646e92c1a5a826d42f7
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-23-marquee-thinking-fulltext:flow:测试绑定FR-01
+  tests: frontend/src/components/daemon/__tests__/turn-live-marquee.test.tsx「长思考文本不截断，保留完整内容」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-23-marquee-thinking-fulltext
+  status: active
+
+## FR-styles-026 运行中的思考条目按文本长度自适应滚动时长，保持约 21 字每秒的稳定速度，全文依次流过
+变更：2026-10-23-marquee-thinking-fulltext
+状态：active
+摘要：流式增长跟随；思考完成
+全文：.sillyspec/changes/archive/2026-10-23-marquee-thinking-fulltext/requirements.md#FR-02
+最近确认：092618dd5c0095a13d5e2646e92c1a5a826d42f7
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-23-marquee-thinking-fulltext:flow:测试绑定FR-02
+  tests: frontend/src/components/daemon/__tests__/turn-live-marquee.test.tsx「ticker 一次滚到末尾即停、不复制循环，跟随流式增长（FR-02）」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-23-marquee-thinking-fulltext
+  status: active
+
+## FR-styles-027 完成态仍显示截断文本与耗时；其他类型条目的摘要截断规则不变
+变更：2026-10-23-marquee-thinking-fulltext
+状态：active
+摘要：思考完成
+全文：.sillyspec/changes/archive/2026-10-23-marquee-thinking-fulltext/requirements.md#FR-03
+最近确认：092618dd5c0095a13d5e2646e92c1a5a826d42f7
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-23-marquee-thinking-fulltext:flow:测试绑定FR-03
+  tests: frontend/src/components/daemon/__tests__/turn-live-marquee.test.tsx「完成条目显示 Timer 图标与耗时（FR-02）」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-23-marquee-thinking-fulltext
+  status: active
+
+## FR-styles-028 现有测试更新并通过，新增全文与滚动时长断言；lint 与 typecheck 通过
+变更：2026-10-23-marquee-thinking-fulltext
+状态：active
+摘要：回归核验
+全文：.sillyspec/changes/archive/2026-10-23-marquee-thinking-fulltext/requirements.md#FR-04
+最近确认：092618dd5c0095a13d5e2646e92c1a5a826d42f7
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-23-marquee-thinking-fulltext:flow:测试绑定FR-04
+  tests: frontend/src/components/daemon/__tests__/turn-live-marquee.test.tsx
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-23-marquee-thinking-fulltext
+  status: active
+
+## FR-styles-029 原型中的长思考文本可看到完整内容流动展示
+变更：2026-10-23-marquee-thinking-fulltext
+状态：active
+摘要：原型核验
+全文：.sillyspec/changes/archive/2026-10-23-marquee-thinking-fulltext/requirements.md#FR-05
+最近确认：092618dd5c0095a13d5e2646e92c1a5a826d42f7

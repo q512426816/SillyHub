@@ -50,3 +50,4 @@ created_at: 2026-09-03 14:49:48
 - 2026-10-23-session-dialog-input-align | 会话浮窗输入即清与草稿语义对齐修复
 - 2026-10-23-session-first-window-turn-align | 会话重新进入时首屏历史窗口按最近 400 条日志截断，单轮日志超过 400 条时窗口起点落在该轮中段…
 - 2026-10-23-marquee-blank-track-fix | 修复跑马灯长会话空白
+- 2026-10-23-marquee-thinking-fulltext | 跑马灯思考条目展示全文

@@ -1,0 +1,66 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-23-marquee-thinking-fulltext",
+  "rows": [
+    {
+      "anchor": "FR-01",
+      "row_id": "2026-10-23-marquee-thinking-fulltext:flow:测试绑定FR-01",
+      "tests": [
+        "frontend/src/components/daemon/__tests__/turn-live-marquee.test.tsx「长思考文本不截断，保留完整内容」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-23-marquee-thinking-fulltext"
+    },
+    {
+      "anchor": "FR-02",
+      "row_id": "2026-10-23-marquee-thinking-fulltext:flow:测试绑定FR-02",
+      "tests": [
+        "frontend/src/components/daemon/__tests__/turn-live-marquee.test.tsx「ticker 一次滚到末尾即停、不复制循环，跟随流式增长（FR-02）」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-23-marquee-thinking-fulltext"
+    },
+    {
+      "anchor": "FR-03",
+      "row_id": "2026-10-23-marquee-thinking-fulltext:flow:测试绑定FR-03",
+      "tests": [
+        "frontend/src/components/daemon/__tests__/turn-live-marquee.test.tsx「完成条目显示 Timer 图标与耗时（FR-02）」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-23-marquee-thinking-fulltext"
+    },
+    {
+      "anchor": "FR-04",
+      "row_id": "2026-10-23-marquee-thinking-fulltext:flow:测试绑定FR-04",
+      "tests": [
+        "frontend/src/components/daemon/__tests__/turn-live-marquee.test.tsx"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-23-marquee-thinking-fulltext"
+    }
+  ]
+}
