@@ -1109,15 +1109,55 @@
     position: absolute;
     inset-block: 0;
     left: 0;
-    width: 38%;
+    width: 22%;
     background: linear-gradient(
       90deg,
       transparent,
-      color-mix(in srgb, var(--color-brand-400) 14%, transparent),
+      color-mix(in srgb, var(--color-brand-300) 26%, transparent),
       transparent
     );
-    animation: sh-live-marquee-sheen 3.6s ease-in-out infinite;
+    filter: blur(6px);
+    opacity: 0;
+    animation: sh-live-marquee-sheen 6.5s ease-in-out infinite;
     pointer-events: none;
+  }
+
+  /* 2026-10-23-marquee-motion-polish（FR-02）：轨道视口左右渐隐——条目
+     进出容器边缘柔和，不再硬切。 */
+  .sh-live-marquee-vp {
+    -webkit-mask-image: linear-gradient(
+      90deg,
+      transparent 0,
+      #000 14px,
+      #000 calc(100% - 14px),
+      transparent 100%
+    );
+    mask-image: linear-gradient(
+      90deg,
+      transparent 0,
+      #000 14px,
+      #000 calc(100% - 14px),
+      transparent 100%
+    );
+  }
+
+  /* 2026-10-23-marquee-motion-polish（FR-02）：运行中条目内部滚动窗口
+     左右各 10px 渐隐，文字进出柔和；完成态截断文本不挂本类。 */
+  .sh-live-marquee-window {
+    -webkit-mask-image: linear-gradient(
+      90deg,
+      transparent 0,
+      #000 10px,
+      #000 calc(100% - 10px),
+      transparent 100%
+    );
+    mask-image: linear-gradient(
+      90deg,
+      transparent 0,
+      #000 10px,
+      #000 calc(100% - 10px),
+      transparent 100%
+    );
   }
 
   /* 2026-10-23-marquee-item-detail（FR-01）：运行中条目内部文本循环滚动——
@@ -1149,14 +1189,17 @@
 @keyframes sh-live-marquee-sheen {
   0%,
   58% {
-    transform: translateX(-140%);
+    transform: translateX(-160%);
     opacity: 0;
   }
-  66% {
-    opacity: 0.9;
+  68% {
+    opacity: 0.5;
+  }
+  88% {
+    opacity: 0.4;
   }
   100% {
-    transform: translateX(360%);
+    transform: translateX(420%);
     opacity: 0;
   }
 }

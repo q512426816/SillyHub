@@ -60,9 +60,17 @@ import type { TurnSegment } from "./session-log-assembler";
  * 上限内不做窗口替换，保证"只向最新流、不回跳"。
  */
 export const LIVE_MARQUEE_MAX_ENTRIES = 200;
-/** 滚动基础速度（px/s）与追赶上限；距离越大越快，事件爆发时能追平。 */
-export const LIVE_MARQUEE_BASE_SPEED = 180;
+/** 追赶上限（px/s）；距离主导的缓出曲线见 marqueeSpeedForDistance。 */
 export const LIVE_MARQUEE_MAX_SPEED = 1600;
+
+/**
+ * 轨道推进速度（px/s）——距离主导的缓出曲线（2026-10-23-marquee-motion-polish）：
+ * 距离大时加速追赶，接近目标时自然减速；下限 40px/s 防长尾巴，上限沿用 1600。
+ */
+export function marqueeSpeedForDistance(distance: number): number {
+  const d = Math.max(0, distance);
+  return Math.min(LIVE_MARQUEE_MAX_SPEED, Math.max(40, d * 0.9));
+}
 /** 单条摘要截断长度（用户不需要看清全文，单行不撑破）。 */
 const CLIP_LENGTH = 64;
 
@@ -400,7 +408,13 @@ function MarqueeItemView({
       )}
     >
       <Icon aria-hidden className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
-      <span className="relative min-w-0 flex-1 overflow-hidden">
+      <span
+        className={cn(
+          "relative min-w-0 flex-1 overflow-hidden",
+          // 运行中滚动窗口左右渐隐；完成态截断文本不加，保持清晰。
+          running && !reduced && "sh-live-marquee-window",
+        )}
+      >
         {running && !reduced ? (
           <span className="sh-live-marquee-ticker inline-flex w-max items-center">
             <span className="whitespace-nowrap pr-6 font-medium text-foreground">
@@ -506,11 +520,8 @@ export const TurnLiveMarquee = memo(function TurnLiveMarquee({
       const target = targetRef.current;
       const distance = offsetRef.current - target;
       if (distance > 0.5) {
-        // 追赶距离越大速度越快：事件密集时加速，稀疏时慢速流动。
-        const speed = Math.min(
-          LIVE_MARQUEE_MAX_SPEED,
-          LIVE_MARQUEE_BASE_SPEED + distance * 1.2,
-        );
+        // 距离主导的缓出：追近时减速，事件密集时加速追赶（2026-10-23-marquee-motion-polish）。
+        const speed = marqueeSpeedForDistance(distance);
         const delta = Math.min(distance, (speed * dt) / 1000);
         offsetRef.current -= delta;
         if (offsetRef.current - target < 0.5) offsetRef.current = target;
@@ -672,7 +683,7 @@ export const TurnLiveMarquee = memo(function TurnLiveMarquee({
         <div
           ref={viewportRef}
           className={cn(
-            "relative z-10 min-w-0 flex-1 overflow-hidden transition-opacity duration-200",
+            "sh-live-marquee-vp relative z-10 min-w-0 flex-1 overflow-hidden transition-opacity duration-200",
             !ready && "opacity-0",
           )}
         >

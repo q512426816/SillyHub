@@ -12,6 +12,7 @@ import {
   TurnLiveMarquee,
   deriveLiveMarqueeEntries,
   formatMarqueeDuration,
+  marqueeSpeedForDistance,
   LIVE_MARQUEE_MAX_ENTRIES,
 } from "@/components/daemon/turn-live-marquee";
 import {
@@ -183,6 +184,14 @@ describe("deriveLiveMarqueeEntries 纯函数（FR-01 / FR-03）", () => {
     expect(formatMarqueeDuration(2000)).toBe("2s");
     expect(formatMarqueeDuration(65_000)).toBe("1m 05s");
   });
+
+  it("轨道速度随距离缓出，接近目标时减速（FR-01）", () => {
+    expect(marqueeSpeedForDistance(0)).toBe(40);
+    expect(marqueeSpeedForDistance(20)).toBe(40);
+    expect(marqueeSpeedForDistance(100)).toBeCloseTo(90, 5);
+    expect(marqueeSpeedForDistance(228)).toBeCloseTo(205.2, 5);
+    expect(marqueeSpeedForDistance(10_000)).toBe(1600);
+  });
 });
 
 describe("TurnLiveMarquee 连续轨道（FR-01 / FR-02 / FR-05）", () => {
@@ -215,6 +224,8 @@ describe("TurnLiveMarquee 连续轨道（FR-01 / FR-02 / FR-05）", () => {
     expect(item.querySelector("svg")).not.toBeNull();
     expect(getAllByTestId("marquee-spinner")).toHaveLength(1);
     expect(container.querySelector(".sh-live-marquee-ticker")).not.toBeNull();
+    // 运行中滚动窗口带左右渐隐（FR-02）。
+    expect(container.querySelector(".sh-live-marquee-window")).not.toBeNull();
     expect(item.textContent).toContain("先分析登录链路");
   });
 
@@ -222,7 +233,7 @@ describe("TurnLiveMarquee 连续轨道（FR-01 / FR-02 / FR-05）", () => {
     const doneEntries = deriveLiveMarqueeEntries([
       tool("tool-done", { startedAt: 1000, endedAt: 2500 }),
     ]);
-    const { getByTestId, queryByTestId } = render(
+    const { getByTestId, queryByTestId, container } = render(
       <TurnLiveMarquee entries={doneEntries} />,
     );
 
@@ -230,6 +241,8 @@ describe("TurnLiveMarquee 连续轨道（FR-01 / FR-02 / FR-05）", () => {
     expect(duration.textContent).toContain("1.5s");
     expect(duration.querySelector("svg")).not.toBeNull();
     expect(queryByTestId("marquee-spinner")).toBeNull();
+    // 完成态截断文本不加渐隐遮罩（FR-02）。
+    expect(container.querySelector(".sh-live-marquee-window")).toBeNull();
   });
 
   it("进行中条目不显示耗时（FR-02）", () => {
