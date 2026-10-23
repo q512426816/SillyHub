@@ -1179,3 +1179,60 @@ created_at: 2026-10-16T01:30:35.950Z
   confirmed_at: null
   source_change: 2026-10-23-turn-file-diff-dialog
   status: active
+
+## FR-test-utils-060 只保留最近12条过程事件，更早的直接丢弃，渲染条目数恒定不超过12
+变更：2026-10-23-marquee-queue-window
+状态：active
+摘要：普通会话；长会话
+全文：.sillyspec/changes/archive/2026-10-23-marquee-queue-window/requirements.md#FR-01
+最近确认：bde8745c66dec2a3745f7cfdfaeff7d3708ea923
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-23-marquee-queue-window:flow:测试绑定FR-01
+  tests: frontend/src/components/daemon/__tests__/turn-live-marquee.test.tsx「条目超过上限时只保留最近 12 条」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-23-marquee-queue-window
+  status: active
+
+## FR-test-utils-061 轨道总宽收敛到约3.3k px，不再出现数万px宽轨道
+变更：2026-10-23-marquee-queue-window
+状态：active
+摘要：窗口滑动
+全文：.sillyspec/changes/archive/2026-10-23-marquee-queue-window/requirements.md#FR-02
+最近确认：bde8745c66dec2a3745f7cfdfaeff7d3708ea923
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-23-marquee-queue-window:flow:测试绑定FR-02
+  tests: frontend/src/components/daemon/__tests__/turn-live-marquee.test.tsx「窗口滑动目标回到 base，连续滑动不累积越界（FR-01）」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-23-marquee-queue-window
+  status: active
+
+## FR-test-utils-062 更新上限相关测试并全部通过，lint与typecheck通过
+变更：2026-10-23-marquee-queue-window
+状态：active
+摘要：回归核验
+全文：.sillyspec/changes/archive/2026-10-23-marquee-queue-window/requirements.md#FR-03
+最近确认：bde8745c66dec2a3745f7cfdfaeff7d3708ea923
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-23-marquee-queue-window:flow:测试绑定FR-03
+  tests: frontend/src/components/daemon/__tests__/turn-live-marquee.test.tsx
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-23-marquee-queue-window
+  status: active

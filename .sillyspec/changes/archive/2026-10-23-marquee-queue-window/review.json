@@ -1,0 +1,22 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-23-marquee-queue-window",
+  "reviewer": "inline-self（环境无已注册子代理，主会话代行）",
+  "verdict": "PASS",
+  "reviewedAgainst": "6f939d79924a8c583bf007f35147c52331b1af13",
+  "findings": [
+    {
+      "severity": "P3",
+      "title": "窗口收敛后的性能收益以 DOM 数/轨道宽度对比与原型实测表征，未做真实设备帧率采样",
+      "evidence": "条目 200→12、轨道宽 55180→3292px、位移 -54177→-2306px（合法下界 -2533）；实际帧率未采集，但成本面已从数百 DOM/大图层降为 12 条固定节点。",
+      "location": "frontend/src/components/daemon/turn-live-marquee.tsx:62"
+    }
+  ],
+  "dimensionNotes": {
+    "乱序": "ok（边界已裁决：可接受——按段文档序保留最后 12 条，迟到段作为最新一条；旧内容按队列丢弃）",
+    "并发": "ok（不适用——仅组件内状态，无共享写面）",
+    "切换": "ok（边界已裁决：可接受——窗口滑动沿用 offset 补偿与 rAF 停排/清理；内容未满 12 条时不触发滑动；用户无法在跑马灯回看 12 条之前的内容，完整过程由「进度」视图承担）",
+    "作用域": "ok（不适用——不涉及数据；每个组件实例独立）"
+  },
+  "reviewedAt": "2026-10-23T14:36:29+08:00"
+}

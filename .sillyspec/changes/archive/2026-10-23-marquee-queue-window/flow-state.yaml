@@ -1,0 +1,43 @@
+tier: thin
+legacy_fallback: false
+substeps:
+  artifacts: done
+  ledger: done
+  patch: done
+  review: done
+  probes: done
+  distill: done
+  archive: done
+  events: done
+born_face: thin
+with_tasks: false
+review_force: null
+input: |-
+  跑马灯渲染队列收敛到最近12条
+
+  动机：当前保留200条过程事件，轨道总宽可达5.5万px，DOM与高频重渲染成本没有必要。跑马灯只需感知最新动态。
+
+  成功标准：
+  - 只保留最近12条过程事件，更早的直接丢弃，渲染条目数恒定不超过12
+  - 轨道总宽收敛到约3.3k px，不再出现数万px宽轨道
+  - 新事件到达仍平滑前进一条、只流到最新、不循环
+  - 更新上限相关测试并全部通过，lint与typecheck通过
+  - 原型长会话验证条目数不超过12，位移在合法范围，不空白
+autopilot: false
+prestage_ack: true
+baseline_commit: c4980f1c48361a930c04c19b844d9fc6ccc456c6
+updatedAt: '2026-10-23T06:37:26.040Z'
+cross_baselines:
+  sillyspec: 111d9de9f8c2499428b92ddddeddc5481e4bed01
+baseline_sha256: 5e3b43b9713964debe9bf45baa181475b920119e1281cf52dee458087aad4ff0
+spec_approved: true
+spec_approved_at: '2026-10-23T06:34:44.579Z'
+spec_approved_by: anon@DESKTOP-HJ0AM09
+spec_approved_channel: user-confirmed
+spec_attested_by: anon@DESKTOP-HJ0AM09
+batch_ticked: true
+gate_summary: >-
+  test: passed ← module[]+deps(jsx1)（13.9s）
+  结果：C:\Users\qinyi\IdeaProjects\multi-agent-platform\.sillyspec\.runtime\verify-runs\20261023063713\test-result.json｜lint:
+  skipped — 跳过原因：local.yaml 未配置 commands.lint（或标记 unavailable）。｜门文件 3 个
+

@@ -1,0 +1,31 @@
+diff --git a/frontend/src/components/daemon/__tests__/turn-live-marquee.test.tsx b/frontend/src/components/daemon/__tests__/turn-live-marquee.test.tsx
+index 67cd2eea9..3310d9d61 100644
+--- a/frontend/src/components/daemon/__tests__/turn-live-marquee.test.tsx
++++ b/frontend/src/components/daemon/__tests__/turn-live-marquee.test.tsx
+@@ -157,7 +157,7 @@ describe("deriveLiveMarqueeEntries 纯函数（FR-01 / FR-03）", () => {
+     expect(entries[1]!.text).toContain("keepalive");
+   });
+ 
+-  it("条目超过上限时只保留最近 200 条", () => {
++  it("条目超过上限时只保留最近 12 条", () => {
+     const many = Array.from({ length: LIVE_MARQUEE_MAX_ENTRIES + 10 }, (_, i) =>
+       thinking(`t-${i}`, `事件 ${i}`),
+     );
+diff --git a/frontend/src/components/daemon/turn-live-marquee.tsx b/frontend/src/components/daemon/turn-live-marquee.tsx
+index 5b925efc5..a29eb4ced 100644
+--- a/frontend/src/components/daemon/turn-live-marquee.tsx
++++ b/frontend/src/components/daemon/turn-live-marquee.tsx
+@@ -56,10 +56,11 @@ import { processLabel } from "./process-labels";
+ import type { TurnSegment } from "./session-log-assembler";
+ 
+ /**
+- * 轨道条目上限：超出只保留最近 200 条（更早的早已滚出视口）。
+- * 上限内不做窗口替换，保证"只向最新流、不回跳"。
++ * 轨道渲染队列上限（2026-10-23-marquee-queue-window）：只保留最近 12 条，
++ * 更早的直接丢弃。12 条约 3 屏上下文，轨道总宽收敛在约 3.3k px——
++ * 跑马灯定位是「感知」，完整过程由「进度」视图承担，无需保留长历史。
+  */
+-export const LIVE_MARQUEE_MAX_ENTRIES = 200;
++export const LIVE_MARQUEE_MAX_ENTRIES = 12;
+ /** 追赶上限（px/s）；距离主导的缓出曲线见 marqueeSpeedForDistance。 */
+ export const LIVE_MARQUEE_MAX_SPEED = 1600;
