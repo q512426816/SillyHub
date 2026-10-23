@@ -26,7 +26,7 @@
 
 ## 核验
 
-- 测试：`turn-live-marquee.test.tsx` 21 用例通过（含转圈/内部滚动/耗时/布局/降级）；
+- 测试：`turn-live-marquee.test.tsx` 22 用例通过（含转圈/内部滚动/耗时/布局/降级）；
   turn-timeline 相关回归 32 用例通过。
 - lint / typecheck 通过。
 - 截图（Playwright Chromium 1440×1000 @2x/@4x）：
