@@ -48,6 +48,7 @@ created_at: 2026-10-23T16:30:40.307Z
 | 操作 | 路径 | 说明 |
 | --- | --- | --- |
 | 修改 | frontend/src/components/daemon/trajectory/from-turn-views.ts | processItems 的 system_event → kind=system 行（meta.contextEvent，ts/轮首锚点） |
+| 修改 | frontend/src/components/daemon/trajectory/build-trajectory.ts | TrajectoryRow.meta 类型补 contextEvent 可选标记（仅类型，零逻辑改动） |
 | 修改 | frontend/src/components/daemon/trajectory/trajectory-view-model.ts | contextEvent 行标签「上下文」；搜索字段纳入其文本 |
 | 修改 | frontend/src/components/daemon/trajectory/trajectory-ledger.tsx | 选中行 scrollIntoView effect（typeof 守卫） |
 | 修改 | frontend/src/components/daemon/turn-timeline.tsx | TurnTimeline 新增 trajectoryJump prop 透传给 TrajectoryPane；Pane 内按 run key 选中轮首行 |
