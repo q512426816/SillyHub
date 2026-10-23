@@ -11,11 +11,12 @@ import uuid
 from datetime import datetime
 from typing import Annotated
 
-from fastapi import Depends
+from fastapi import Depends, Request
 from pydantic import BaseModel, Field
 from sqlalchemy import select
 
 from app.core.auth_deps import get_current_principal
+from app.core.client_ip import client_ip_from_request
 from app.modules.auth.model import User
 from app.modules.daemon.router import SessionDep, router
 
@@ -202,6 +203,20 @@ class DaemonHeartbeatSpecCacheItem(BaseModel):
     spec_version: int = Field(ge=0)
 
 
+class HeartbeatNetworkInterface(BaseModel):
+    """心跳网卡清单条目（2026-10-23-session-network-context FR-02 / D-002@v1）。
+
+    daemon network-info.ts collectNetworkInterfaces 过滤后的条目（internal 回环
+    与无 cidr 已剔除；IPv4+IPv6 都上报，判定层只消费 IPv4）。字段宽松校验
+    （心跳通道宁宽勿断先例）：cidr 容 null、family 原样透传存储。
+    """
+
+    name: str = Field(max_length=100)
+    ip: str = Field(max_length=64)
+    cidr: str | None = Field(default=None, max_length=72)
+    family: str = Field(max_length=10)
+
+
 class DaemonHeartbeatRequest(BaseModel):
     """Per-daemon 心跳请求体（design §5.4 / §9.1 / D-006）。
 
@@ -268,6 +283,11 @@ class DaemonHeartbeatRequest(BaseModel):
     # machine_id（takeover 四级匹配①级精确锚）。兄弟字段语义（None=不覆盖，
     # 旧 daemon 不携带零破坏）；本字段无清除态（身份恒在，覆盖同值幂等）。
     machine_id: str | None = Field(default=None, max_length=64)
+    # 本机网卡清单（2026-10-23-session-network-context FR-02 / FR-03 / D-008@v1）。
+    # 语义同 sillyspec_status_map——None=保留旧值（老 daemon 不发该键，缺省与
+    # 显式 null 不可区分且均保留），非 None 整包直写 network_info.interfaces
+    # （含空列表=机器确无可用网卡）。供会话【网络环境】段拼访问地址。
+    network_interfaces: list[HeartbeatNetworkInterface] | None = Field(default=None)
 
 
 class DaemonHeartbeatRuntimePolicy(BaseModel):
@@ -303,6 +323,7 @@ class DaemonHeartbeatResponse(BaseModel):
 )
 async def daemon_heartbeat(
     data: DaemonHeartbeatRequest,
+    request: Request,
     session: SessionDep,
     user: Annotated[User, Depends(get_current_principal)],
 ) -> DaemonHeartbeatResponse:
@@ -382,6 +403,15 @@ async def daemon_heartbeat(
         # task-03（security-audit-remediation / FR-12）：心跳归属校验——
         # instance.user_id 必须等于当前认证 user，不匹配 404（owner-only）。
         actor_user_id=user.id,
+        # 2026-10-23-session-network-context task-06（FR-03 / D-002@v1）：观测来源
+        # IP 每跳直写（平台亲见不可伪造，判定 ground truth）；网卡清单 None=保留
+        # （老 daemon）/非 None 整写（dict 契约同 providers/pending_update 先例）。
+        observed_ip=client_ip_from_request(request),
+        network_interfaces=(
+            [item.model_dump() for item in data.network_interfaces]
+            if data.network_interfaces is not None
+            else None
+        ),
     )
     # ql-20260706-005：col 属 sqlmodel（非 sqlalchemy 顶层），误从 sqlalchemy
     # 导入会 ImportError → heartbeat 端点 500 → daemon 拿不到 per-runtime

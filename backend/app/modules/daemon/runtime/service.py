@@ -182,12 +182,19 @@ class RuntimeService:
         started_at: datetime | None = None,
         sillyspec_version: str | None = None,
         sillyspec_latest_version: str | None = None,
+        observed_ip: str | None = None,
     ) -> DaemonRegisterResult:
         """Per-daemon 注册（design §5.2 / D-006 / D-001）。
 
         2026-08-05-daemon-start-time D-002@v1：started_at（daemon 进程启动时间）
         透传并写入 instance.started_at（new + else 两分支均写，register 直接落值）。
         可空兼容旧 daemon（不上报 → None，保持 NULL）。
+
+        2026-10-23-session-network-context task-06（FR-03 / D-002@v1）：observed_ip
+        = backend 从注册请求**观测**的来源 IP（XFF 最右段→remoteAddress，router
+        层 app/core/client_ip.py），首写 network_info.observed_ip——只动该键，
+        既有 interfaces 保留（daemon 重启网卡不变，旧清单仍有效；新清单随首次
+        心跳整写刷新）。可空（测试/内部直调无 Request 时 None=不动）。
 
         2026-08-31-machine-sillyspec-version（FR-05 / D-002@v1）：sillyspec_version
         / sillyspec_latest_version **无条件直写**（new + else 两分支，含 None——本机
@@ -245,6 +252,9 @@ class RuntimeService:
                 # 2026-09-04-conflict-resolve-entry task-03：command_result 同款
                 # 恒清——命令结果槽在内存，进程重启即失（同 status 收敛理由）。
                 sillyspec_command_result=None,
+                # 2026-10-23-session-network-context task-06：register 首写观测 IP
+                # （新实例无旧数据可保留；interfaces 待首次心跳整写）。
+                network_info={"observed_ip": observed_ip} if observed_ip is not None else None,
                 allowed_roots=roots,
                 status="online",
                 last_heartbeat_at=now,
@@ -286,6 +296,14 @@ class RuntimeService:
             # 2026-09-04-conflict-resolve-entry task-03：command_result 同款恒清
             # （else 分支，同 status 收敛理由）。
             instance.sillyspec_command_result = None
+            # 2026-10-23-session-network-context task-06：观测 IP 合并写入——只动
+            # observed_ip 键，既有 interfaces 保留（daemon 重启网卡不变）。
+            if observed_ip is not None:
+                info = (
+                    dict(instance.network_info) if isinstance(instance.network_info, dict) else {}
+                )
+                info["observed_ip"] = observed_ip
+                instance.network_info = info
             instance.allowed_roots = roots
             instance.status = "online"
             instance.last_heartbeat_at = now
@@ -408,6 +426,8 @@ class RuntimeService:
         sillyspec_status_error: dict | None = None,
         sillyspec_status_map: dict | None = None,
         sillyspec_command_result: dict | None = None,
+        network_interfaces: list[dict] | None = None,
+        observed_ip: str | None = None,
         *,
         actor_user_id: uuid.UUID | None = None,
     ) -> DaemonInstance:
@@ -462,6 +482,13 @@ class RuntimeService:
         X-04 修订）；非 None 时 **dict 整包直写**（latest-wins 结果槽非状态机，
         无 since/upsert——backend 不补字段不改写，design §7「落库形态=上报
         形态」）。register 恒清（进程重启即失，见 register_daemon 注释）。
+
+        2026-10-23-session-network-context task-06（FR-03 / D-002@v1）：
+        ``observed_ip``（backend 从心跳请求观测的来源 IP，XFF 最右段→
+        remoteAddress）每跳直写 ``network_info.observed_ip``；``network_interfaces``
+        （daemon 自报网卡清单，router 层 DTO 已校验）语义同 ``sillyspec_status_map``
+        ——``None``=保留旧值（老 daemon 不发该键），非 None 整包直写
+        ``network_info.interfaces``（含空列表）。两键合并写互不干扰（见写点注释）。
 
         daemon 单条心跳合并上报 ``daemon_local_id`` + 各 provider 状态。backend：
 
@@ -606,6 +633,18 @@ class RuntimeService:
         # （daemon 终态窗口过期后停发该键，无「保持旧值」三态分支，X-04）；非
         # None dict 整包直写（latest-wins，backend 不增删改写，design §7）。
         instance.sillyspec_command_result = sillyspec_command_result
+        # network_info（2026-10-23-session-network-context task-06 / FR-03 / D-002@v1）：
+        # observed_ip = backend 从本跳心跳请求观测的来源 IP，每跳直写（平台亲见，
+        # 不可伪造，判定 ground truth）；network_interfaces 语义同 sillyspec_status_map
+        # ——None=保留旧值（老 daemon 不发该键，D-008 兼容），非 None 整包直写
+        # （含空列表=机器确无可用网卡）。合并写：只动出现的键，另一半保留。
+        if observed_ip is not None or network_interfaces is not None:
+            info = dict(instance.network_info) if isinstance(instance.network_info, dict) else {}
+            if observed_ip is not None:
+                info["observed_ip"] = observed_ip
+            if network_interfaces is not None:
+                info["interfaces"] = [dict(item) for item in network_interfaces]
+            instance.network_info = info
         if instance.status != "disabled":
             instance.status = "online"
         self._session.add(instance)

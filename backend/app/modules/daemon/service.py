@@ -172,6 +172,7 @@ class DaemonService:
         started_at: datetime | None = None,
         sillyspec_version: str | None = None,
         sillyspec_latest_version: str | None = None,
+        observed_ip: str | None = None,
     ) -> DaemonRegisterResult:
         """Per-daemon 注册 facade（design §5.2 / D-006）。
 
@@ -181,6 +182,8 @@ class DaemonService:
         2026-08-05-daemon-start-time：透传 started_at。
         2026-08-31-machine-sillyspec-version（FR-05 / D-002@v1）：透传
         sillyspec_version/latest（register 无条件直写，含 None）。
+        2026-10-23-session-network-context task-06（FR-03）：透传 observed_ip
+        （backend 观测的注册请求来源 IP，首写 network_info.observed_ip）。
         """
         return await self._rt.register_daemon(
             user_id,
@@ -196,6 +199,7 @@ class DaemonService:
             started_at=started_at,
             sillyspec_version=sillyspec_version,
             sillyspec_latest_version=sillyspec_latest_version,
+            observed_ip=observed_ip,
         )
 
     async def heartbeat_daemon(

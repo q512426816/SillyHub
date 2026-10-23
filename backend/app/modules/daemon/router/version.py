@@ -10,10 +10,11 @@ from __future__ import annotations
 
 from typing import Annotated
 
-from fastapi import Depends, status
+from fastapi import Depends, Request, status
 from pydantic import BaseModel, Field
 
 from app.core.auth_deps import get_current_principal
+from app.core.client_ip import client_ip_from_request
 from app.core.config import get_settings
 from app.modules.auth.model import User
 from app.modules.daemon.router import SessionDep, router
@@ -142,6 +143,7 @@ async def get_daemon_version() -> DaemonVersionResponse:
 )
 async def register_daemon(
     data: DaemonRegisterRequest,
+    request: Request,
     session: SessionDep,
     user: Annotated[User, Depends(get_current_principal)],
 ) -> DaemonRegisterResponse:
@@ -168,6 +170,10 @@ async def register_daemon(
         # 直写（含 None——本机卸载后重启收敛为 NULL，服务层注释已锚定）。
         sillyspec_version=data.sillyspec_version,
         sillyspec_latest_version=data.sillyspec_latest_version,
+        # 2026-10-23-session-network-context task-06（FR-03 / D-002@v1）：观测来源
+        # IP 首写 network_info.observed_ip（daemon 首登即有观测值；既有 interfaces
+        # 保留，服务层合并写）。
+        observed_ip=client_ip_from_request(request),
     )
     return DaemonRegisterResponse(
         daemon_instance_id=result.daemon_instance_id,
