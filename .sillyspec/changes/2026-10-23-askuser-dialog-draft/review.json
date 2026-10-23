@@ -1,0 +1,40 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-23-askuser-dialog-draft",
+  "reviewer": "inline-self（环境无已注册子代理，主会话按检查单代行自审）",
+  "verdict": "PASS",
+  "reviewedAgainst": "aa3cab68f4f158878160afb1864ab0afb350ada4",
+  "findings": [
+    {
+      "severity": "P3",
+      "title": "孤儿草稿只靠 TTL 回收（7 天），SSE 移除/会话结束时无即时清理",
+      "evidence": "卡片因 permission_resolved SSE 或会话结束被父组件卸载时，组件内无法区分「已答完」与「只是切走」，故不做卸载即删（否则破坏 FR-03 切会话保留）；孤儿条目靠 writeAskUserDraft 顺带的 TTL prune 在 7 天内回收，量级与提问次数同级、有界。已写入 design「明确边界」。",
+      "location": "frontend/src/components/ask-user-dialog-draft.ts:169"
+    },
+    {
+      "severity": "P3",
+      "title": "互斥优先级「输入 > 选项」下，异常残留态（同时有勾选与输入）只锁选项不锁输入",
+      "evidence": "为免双锁死刻意如此（两侧都禁用会让用户既不能取消勾选也不能清空输入）；代价是这种状态下选项按钮全灰、输入框可用，仅靠一行提示说明原因。正常 UI 路径不可能产生该组合（勾选即禁输入、输入即禁勾选），只有旧草稿/程序化事件才可能。",
+      "location": "frontend/src/components/ask-user-dialog-card.tsx:551"
+    },
+    {
+      "severity": "P3",
+      "title": "卡片测试文件依赖顶层 clear localStorage 保隔离（新增耦合）",
+      "evidence": "既有 21 个用例共用 request_id=\"req-1\"，草稿持久化后上一例的勾选/输入会被下一例 lazy initializer 读回（本次实测连带挂 3 个存量用例）；已在文件顶层加 beforeEach 清库并加注释说明。真实使用 request_id 唯一，属测试隔离问题而非实现缺陷。",
+      "location": "frontend/src/components/ask-user-dialog-card.test.tsx:82"
+    },
+    {
+      "severity": "P3",
+      "title": "同一 request_id 若被渲染成多张卡（群聊多成员气泡），两份实例共享同一草稿键",
+      "evidence": "群聊聚合当前一个提问只归属一个成员气泡（外层 div key=request_id），契约上不会重复渲染；若将来出现同 id 多实例，两处会同步显示同一份作答（实时同步，不串台到别的提问），不影响提交正确性。",
+      "location": "frontend/src/components/group-chat/group-chat-panel.tsx:2945"
+    }
+  ],
+  "dimensionNotes": {
+    "乱序": "ok——草稿为整份覆盖写，无字段级合并故无字段乱序；迟到 permission_resolved 使父组件过滤 pending → 卡片卸载，残留草稿无人再读（request_id 唯一），至多到 TTL 回收；迟到 409 同样走 clear 分支。",
+    "并发": "ok——同端多次输入覆盖写、最终态一致；多标签同 origin 共享 localStorage 为 last-write-wins（与既有会话输入草稿同语义），提交仍先到先得（后端 409 契约未动）；prune 只扫 sillyhub.askuser.draft. 前缀，不碰 sillyhub.sessions.draft.*（有用例锁定）。",
+    "切换": "ok——切会话/刷新后 clamp 到 lazy initializer 首帧读回，不依赖卸载钩子；每次输入即落盘，输入后立刻关页面不丢；最小化（task-08 保持挂载）零影响；已答关闭态 effect 会清草稿。",
+    "作用域": "ok——键维度为 request_id（一次提问一个 id，跨会话/工作区天然隔离），不含 sessionId 以免切会话后键变化读不到；跨用户不共享（localStorage 按浏览器 profile 隔离）。边界已裁决：不跨设备同步（用户诉求仅刷新与切换会话）。"
+  },
+  "reviewedAt": "2026-10-23T06:00:00Z"
+}
