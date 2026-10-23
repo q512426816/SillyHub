@@ -1,0 +1,96 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-23-marquee-item-detail",
+  "rows": [
+    {
+      "anchor": "FR-01",
+      "row_id": "2026-10-23-marquee-item-detail:flow:测试绑定FR-01",
+      "tests": [
+        "frontend/src/components/daemon/__tests__/turn-live-marquee.test.tsx「运行中条目渲染 lucide 图标与转圈，文本区域带滚动类」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-23-marquee-item-detail"
+    },
+    {
+      "anchor": "FR-02",
+      "row_id": "2026-10-23-marquee-item-detail:flow:测试绑定FR-02",
+      "tests": [
+        "frontend/src/components/daemon/__tests__/turn-live-marquee.test.tsx「完成条目显示 Timer 图标与耗时，进行中不显示」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-23-marquee-item-detail"
+    },
+    {
+      "anchor": "FR-03",
+      "row_id": "2026-10-23-marquee-item-detail:flow:测试绑定FR-03",
+      "tests": [
+        "frontend/src/components/daemon/__tests__/turn-live-marquee.test.tsx「工具段用真实 startedAt/endedAt 计算耗时」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-23-marquee-item-detail"
+    },
+    {
+      "anchor": "FR-04",
+      "row_id": "2026-10-23-marquee-item-detail:flow:测试绑定FR-04",
+      "tests": [
+        "frontend/src/components/daemon/__tests__/turn-live-marquee.test.tsx「条目固定 16rem 宽度，图标与耗时区不参与滚动」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-23-marquee-item-detail"
+    },
+    {
+      "anchor": "FR-05",
+      "row_id": "2026-10-23-marquee-item-detail:flow:测试绑定FR-05",
+      "tests": [
+        "frontend/src/components/daemon/__tests__/turn-live-marquee.test.tsx「reduced-motion 下静态展示最新一条，不渲染滚动轨道（FR-05）」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-23-marquee-item-detail"
+    },
+    {
+      "anchor": "FR-06",
+      "row_id": "2026-10-23-marquee-item-detail:flow:测试绑定FR-06",
+      "tests": [
+        "frontend/src/components/daemon/__tests__/turn-live-marquee.test.tsx「轨道按顺序完整渲染全部条目，不复制内容循环」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-23-marquee-item-detail"
+    }
+  ]
+}

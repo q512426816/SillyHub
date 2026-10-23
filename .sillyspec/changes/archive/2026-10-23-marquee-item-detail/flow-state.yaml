@@ -1,0 +1,46 @@
+tier: thin
+legacy_fallback: false
+substeps:
+  artifacts: done
+  ledger: done
+  patch: done
+  review: done
+  probes: done
+  distill: done
+  archive: done
+  events: done
+born_face: thin
+with_tasks: false
+review_force: null
+input: |-
+  跑马灯条目细化：转圈、内部滚动与耗时
+
+  动机：当前跑马灯条目只显示 emoji 图标 + 截断文本，进行中与完成态区分不明显；用户希望每个条目内部也能滚动展示长内容，并区分「转圈进行中」与「完成显示耗时」。
+
+  成功标准：
+  - 运行中条目使用项目 UI 的 lucide 图标（禁止 emoji 字符串），右侧显示 CSS 转圈指示；条目内部文本在固定宽度窗口内持续向左滚动，展示文本的不同片段
+  - 条目完成后停止内部滚动，文本截断显示，并在右侧显示耗时（Timer 图标 + 1.5s 格式）；进行中条目不显示耗时
+  - 工具/子代理优先使用段真实 startedAt/endedAt 计算耗时；思考段由客户端从首次运行到完成计时；历史已完成且无时长的条目不显示耗时，禁止伪造
+  - 条目宽度适当加宽到 16rem；图标与耗时固定不滚动，仅文本区域滚动
+  - prefers-reduced-motion 下不滚动、不转圈，静态展示最新状态
+  - 视觉走现有主题 token，三主题可读；相关测试更新并通过；lint / typecheck 通过
+autopilot: false
+prestage_ack: false
+baseline_commit: bfe0517cd2959b1d043b69a59f681892b1f9b61e
+updatedAt: '2026-10-23T02:02:12.571Z'
+cross_baselines:
+  sillyspec: d38a113b43a2a3d44122d202e82b8c7088309518
+baseline_sha256: 9606251cd70ea7f26a3827a8347d65cdd9b449cfb3995c3e47798ebe7609b944
+spec_approved: true
+spec_approved_at: '2026-10-23T01:37:54.892Z'
+spec_approved_by: anon@DESKTOP-HJ0AM09
+spec_approved_channel: user-confirmed
+spec_attested_by: anon@DESKTOP-HJ0AM09
+gate_summary: >-
+  test: passed ← module[]+deps(jsx1)（8.2s）
+  结果：C:\Users\qinyi\IdeaProjects\multi-agent-platform\.sillyspec\.runtime\verify-runs\20261023020152\test-result.json｜lint:
+  passed ← cd backend && uv run ruff check . && uv run ruff format --check . && uv run mypy app && cd ../frontend &&
+  pnpm lint && cd ../sillyhub-daemon && pnpm typecheck（7.1s）
+  结果：C:\Users\qinyi\IdeaProjects\multi-agent-platform\.sillyspec\.runtime\verify-runs\20261023020152\test-result.json｜门文件
+  5 个
+

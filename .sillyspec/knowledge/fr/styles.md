@@ -296,3 +296,117 @@ superseded_by：FR-app-workspace-pages-002
 - 场景：默认场景 — Given blue/ai-native/dark 三主题；When 逐页切换主题查看五个页面；Then 观感 MUST 达标（GitHub 布局语言不变、色值随主题），dark 主题 MUST NOT 依赖新增的逐类补丁；浅色两主题既有页面 MUST 零回归（FR
 全文：.sillyspec/changes/archive/2026-09-26-core-pages-visual-redesign/requirements.md#FR-10
 最近确认：f41468b59
+
+## FR-styles-018 运行中条目使用项目 UI 的 lucide 图标（禁止 emoji 字符串），右侧显示 CSS 转圈指示；条目内部文本在固定宽度窗口内持续向左滚动，展示文本的不同片段
+变更：2026-10-23-marquee-item-detail
+状态：active
+摘要：长文本进行中；短文本进行中
+全文：.sillyspec/changes/archive/2026-10-23-marquee-item-detail/requirements.md#FR-01
+最近确认：f4421724555649a61a85146556038565c84c0b3b
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-23-marquee-item-detail:flow:测试绑定FR-01
+  tests: frontend/src/components/daemon/__tests__/turn-live-marquee.test.tsx「运行中条目渲染 lucide 图标与转圈，文本区域带滚动类」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-23-marquee-item-detail
+  status: active
+
+## FR-styles-019 条目完成后停止内部滚动，文本截断显示，并在右侧显示耗时（Timer 图标 + 1.5s 格式）；进行中条目不显示耗时
+变更：2026-10-23-marquee-item-detail
+状态：active
+摘要：完成显示耗时；进行中不显示耗时
+全文：.sillyspec/changes/archive/2026-10-23-marquee-item-detail/requirements.md#FR-02
+最近确认：f4421724555649a61a85146556038565c84c0b3b
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-23-marquee-item-detail:flow:测试绑定FR-02
+  tests: frontend/src/components/daemon/__tests__/turn-live-marquee.test.tsx「完成条目显示 Timer 图标与耗时，进行中不显示」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-23-marquee-item-detail
+  status: active
+
+## FR-styles-020 工具/子代理优先使用段真实 startedAt/endedAt 计算耗时；思考段由客户端从首次运行到完成计时；历史已完成且无时长的条目不显示耗时，禁止伪造
+变更：2026-10-23-marquee-item-detail
+状态：active
+摘要：历史已完成无数据；实时思考计时
+全文：.sillyspec/changes/archive/2026-10-23-marquee-item-detail/requirements.md#FR-03
+最近确认：f4421724555649a61a85146556038565c84c0b3b
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-23-marquee-item-detail:flow:测试绑定FR-03
+  tests: frontend/src/components/daemon/__tests__/turn-live-marquee.test.tsx「工具段用真实 startedAt/endedAt 计算耗时」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-23-marquee-item-detail
+  status: active
+
+## FR-styles-021 条目宽度适当加宽到 16rem；图标与耗时固定不滚动，仅文本区域滚动
+变更：2026-10-23-marquee-item-detail
+状态：active
+摘要：条目布局
+全文：.sillyspec/changes/archive/2026-10-23-marquee-item-detail/requirements.md#FR-04
+最近确认：f4421724555649a61a85146556038565c84c0b3b
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-23-marquee-item-detail:flow:测试绑定FR-04
+  tests: frontend/src/components/daemon/__tests__/turn-live-marquee.test.tsx「条目固定 16rem 宽度，图标与耗时区不参与滚动」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-23-marquee-item-detail
+  status: active
+
+## FR-styles-022 prefers-reduced-motion 下不滚动、不转圈，静态展示最新状态
+变更：2026-10-23-marquee-item-detail
+状态：active
+摘要：减少动态效果
+全文：.sillyspec/changes/archive/2026-10-23-marquee-item-detail/requirements.md#FR-05
+最近确认：f4421724555649a61a85146556038565c84c0b3b
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-23-marquee-item-detail:flow:测试绑定FR-05
+  tests: frontend/src/components/daemon/__tests__/turn-live-marquee.test.tsx「reduced-motion 下静态展示最新一条，不渲染滚动轨道（FR-05）」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-23-marquee-item-detail
+  status: active
+
+## FR-styles-023 视觉走现有主题 token，三主题可读；相关测试更新并通过；lint / typecheck 通过
+变更：2026-10-23-marquee-item-detail
+状态：active
+摘要：交付核验
+全文：.sillyspec/changes/archive/2026-10-23-marquee-item-detail/requirements.md#FR-06
+最近确认：f4421724555649a61a85146556038565c84c0b3b
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-23-marquee-item-detail:flow:测试绑定FR-06
+  tests: frontend/src/components/daemon/__tests__/turn-live-marquee.test.tsx「轨道按顺序完整渲染全部条目，不复制内容循环」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-23-marquee-item-detail
+  status: active
