@@ -38,6 +38,8 @@ import {
 import {
   SessionInputBar, type SessionInputMentions,
 } from "@/components/daemon/session-input-bar";
+// 2026-10-22-askuser-dock-inputbar：pending AskUser 待答 dock（互斥替换输入框）。
+import { PendingDialogDock } from "@/components/daemon/pending-dialog-dock";
 import { MessageQueueBar } from "@/components/daemon/message-queue-bar";
 // task-08（2026-09-07-session-pin-rename-scheduled-send / FR-04）：定时消息展示条
 // （自建局部 QueryClientProvider，page / dialog 双挂载点均可安全挂——R4 不变式
@@ -2062,9 +2064,9 @@ export function SessionPanelDialog(props: SessionPanelProps) {
         viewMode={viewMode}
         errorMsg={view.errorMsg}
         sessionStatus={view.status}
-        pendingRequests={pendingRequests}
+        // 2026-10-22-askuser-dock-inputbar：pendingRequests/onDialogResolved 两
+        // props 随待答卡迁 PendingDialogDock（输入框位置互斥渲染，见下方）。
         dialogHistory={dialogHistory}
-        onDialogResolved={handleDialogResolved}
         onResend={timelineOnResend}
         onSwitchProvider={handleSwitchProvider}
         hasOnlineProvider={hasOnlineProvider}
@@ -2200,7 +2202,19 @@ export function SessionPanelDialog(props: SessionPanelProps) {
       {/* 输入区共享子组件。ql-20260825-007：接通附件管线（此前 R3 不传附件
           props——📎/粘贴能上传但发送被丢，因 createSession 无 attachment_ids 只
           限制首句；追问/排队走 injectSession 早已支持）。首句门控见
-          attachmentsDisabled 派生。 */}
+          attachmentsDisabled 派生。
+          2026-10-22-askuser-dock-inputbar：pending AskUser 待答期间互斥替换输入框
+          （答完自动恢复，page/dialog 两挂载点同款）；互斥条件与 dock 内部门控
+          同源（view.status，同 TurnTimeline sessionStatus 单源）。 */}
+      {pendingRequests.length > 0 &&
+      view.status !== "ended" &&
+      view.status !== "failed" ? (
+        <PendingDialogDock
+          pendingRequests={pendingRequests}
+          sessionStatus={view.status}
+          onResolved={handleDialogResolved}
+        />
+      ) : (
       <SessionInputBar
         value={input}
         onChange={setInput}
@@ -2234,6 +2248,7 @@ export function SessionPanelDialog(props: SessionPanelProps) {
         // 非空）注入；idle 未建会话不渲染入口（定时条目需既有会话承载）。
         onSchedule={view.sessionId ? openSchedModal : undefined}
       />
+      )}
 
       {/* task-14：分身会话浮层——复用 SessionPanel（dialog/attach 形态）打开分身
           子会话；dialog 必需 props 按本面板透传（模型覆盖受控对共用父级 state）。 */}

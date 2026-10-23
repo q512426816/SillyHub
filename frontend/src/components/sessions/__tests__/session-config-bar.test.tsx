@@ -1002,9 +1002,7 @@ describe("TurnTimeline whoLine 轮次快照渲染（D-008）", () => {
         viewMode="conversation"
         errorMsg={null}
         sessionStatus="active"
-        pendingRequests={[]}
         dialogHistory={[]}
-        onDialogResolved={vi.fn()}
         onResend={vi.fn()}
         onSwitchProvider={vi.fn()}
         hasOnlineProvider

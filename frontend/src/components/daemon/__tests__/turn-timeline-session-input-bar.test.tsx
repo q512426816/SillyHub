@@ -64,9 +64,7 @@ function setupTimeline(overrides: Record<string, unknown> = {}) {
     viewMode: "conversation" as const,
     errorMsg: null,
     sessionStatus: "active" as const,
-    pendingRequests: [],
     dialogHistory: [],
-    onDialogResolved: vi.fn(),
     onResend: vi.fn(),
     onSwitchProvider: vi.fn(),
     hasOnlineProvider: true,
@@ -138,9 +136,7 @@ describe("TurnTimeline（task-13 抽取共享子组件）", () => {
         viewMode="all"
         errorMsg={null}
         sessionStatus="active"
-        pendingRequests={[]}
         dialogHistory={[]}
-        onDialogResolved={vi.fn()}
         onResend={vi.fn()}
         onSwitchProvider={vi.fn()}
         hasOnlineProvider
@@ -166,38 +162,9 @@ describe("TurnTimeline（task-13 抽取共享子组件）", () => {
     expect(screen.getByText(/没有在线守护进程/)).toBeInTheDocument();
   });
 
-  it("pending 待答卡：active 渲染、ended 不渲染（ql-20260623 改动三门控）", () => {
-    const req = {
-      session_id: "sess-1",
-      run_id: "run-1",
-      request_id: "req-1",
-      tool_name: "AskUserQuestion",
-      input: {},
-      dialog_kind: "ask_user",
-      dialog_payload: {
-        questions: [{ question: "选择哪个？", options: [{ label: "A" }] }],
-      },
-    } as unknown as SessionPermissionRequest;
-    const { rerender } = setupTimeline({ pendingRequests: [req] });
-    expect(screen.getByText(/选择哪个？/)).toBeInTheDocument();
-
-    rerender(
-      <TurnTimeline
-        turns={[makeTurn()]}
-        viewMode="conversation"
-        errorMsg={null}
-        sessionStatus="ended"
-        pendingRequests={[req]}
-        dialogHistory={[]}
-        onDialogResolved={vi.fn()}
-        onResend={vi.fn()}
-        onSwitchProvider={vi.fn()}
-        hasOnlineProvider
-        emptyProviderLabel="Claude Code"
-      />,
-    );
-    expect(screen.queryByText(/选择哪个？/)).not.toBeInTheDocument();
-  });
+  // 2026-10-22-askuser-dock-inputbar：原「pending 待答卡 active 渲染、ended
+  // 不渲染」用例随待答卡迁 PendingDialogDock 删除——行为断言由
+  // pending-dialog-dock.test.tsx 承接（渲染于输入框位置，不在时间线）。
 
   it("AskUser 提问历史按 run_id 穿插到对应 turn（对话视图 ❓ 记录）", () => {
     setupTimeline({
@@ -347,9 +314,7 @@ describe("TurnTimeline v2 段模型渲染（task-06 / 2026-08-19-session-stream-
         viewMode="conversation"
         errorMsg={null}
         sessionStatus="active"
-        pendingRequests={[]}
         dialogHistory={[]}
-        onDialogResolved={vi.fn()}
         onResend={vi.fn()}
         onSwitchProvider={vi.fn()}
         hasOnlineProvider

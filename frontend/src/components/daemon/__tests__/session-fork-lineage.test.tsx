@@ -642,11 +642,9 @@ describe("TurnTimeline forkEntry 轮级分叉入口接线", () => {
         viewMode={viewMode}
         errorMsg={null}
         sessionStatus="active"
-        pendingRequests={[]}
         dialogHistory={[]}
         onResend={vi.fn()}
         onSwitchProvider={vi.fn()}
-        onDialogResolved={vi.fn()}
         hasOnlineProvider
         emptyProviderLabel="Claude"
         forkEntry={forkEntry ?? null}

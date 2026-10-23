@@ -50,9 +50,10 @@ import { Fragment, memo, useCallback, useEffect, useMemo, useRef, useState, type
 import { ArrowDown, ArrowRight, BookUser, Bot, Cloud, Settings, Wrench } from "lucide-react";
 import { Badge } from "antd";
 
-import { AskUserDialogCard } from "@/components/ask-user-dialog-card";
 // task-07（2026-09-09-askuser-pi-cursor / FR-03）：cursor marker 型提问卡 +
 // 标记解析器（文本段命中处原位渲染卡并隐藏标记原文）。
+// （2026-10-22-askuser-dock-inputbar：pending 待答卡 AskUserDialogCard 已迁
+//  PendingDialogDock，本组件仅保留历史 marker 卡。）
 import { AskUserMarkerCard } from "@/components/ask-user-marker-card";
 import { parseAskUserMarker } from "@/lib/askuser-marker";
 import { RunErrorItem } from "@/components/agent-log/run-error-item";
@@ -206,13 +207,7 @@ import {
   TranslatedThinkingBody,
   useThinkingSummary,
 } from "@/components/thinking-translate";
-// ql-20260825-006：会话页提问卡最小化——右下角浮动胶囊 + 标题推导（与 approvals
-// 聚合页 SessionPermissionPanel 共用一套 UI）。
-import {
-  MinimizedDialogCapsule,
-  resolvePendingTitle,
-} from "@/components/permissions/minimized-dialog-capsule";
-import type { SessionDialogRead, SessionPermissionRequest } from "@/lib/daemon";
+import type { SessionDialogRead } from "@/lib/daemon";
 import { cn } from "@/lib/utils";
 import { extractDialogQA } from "@/components/daemon/session-log-sanitize";
 import { copyTextToClipboard } from "@/lib/clipboard";
@@ -457,14 +452,12 @@ export interface TurnTimelineProps {
   autoResumeEntries?: AutoResumeEntry[];
   /**
    * pending 待答卡渲染门控：ended/failed 会话不回显（ql-20260623 改动三，死卡防护）。
+   * （2026-10-22-askuser-dock-inputbar：pending 卡已迁 PendingDialogDock 渲染于
+   * 输入框位置，本字段仅剩空态/状态语义保留。）
    */
   sessionStatus: SessionUiStatus;
-  /** AskUserQuestion 待答卡队列（permission_request.dialog_kind）。 */
-  pendingRequests: SessionPermissionRequest[];
   /** AskUser 提问历史（ql-20260801-003，按 run_id 穿插到对应 turn）。 */
   dialogHistory: SessionDialogRead[];
-  /** 待答卡提交/被 resolved 后移除（父级双保险过滤）。 */
-  onDialogResolved: (_requestId: string) => void;
   /** 失败轮次「重新发送」（RunErrorItem onResend，父级守卫 turn 级串行）。 */
   onResend: (_prompt: string) => void;
   /** RunErrorItem 主操作「切换供应商」。 */
@@ -514,15 +507,6 @@ export interface TurnTimelineProps {
    * 引用稳定（同 onResend 先例，防击穿 TurnRow memo）。
    */
   expandPreview?: (_runKey: string) => void;
-  /**
-   * 2026-10-16-session-decision-pill / FR-03：待决策 pill 定位还原请求（受控
-   * 触发式——nonce 递增驱动 effect，requestId 不变重复点击也生效）。effect：
-   * ①若该卡在 minimizedIds 中先还原；②滚动容器到顶（pending 卡内嵌在内容流
-   * 顶部，2026-10-22-askuser-card-inline 由 sticky 钉顶改内嵌）；③容器高亮
-   * 闪烁 ~1.2s 自清。缺省 / null 零行为（旧消费方
-   * 零回归，同 highlightTurnKey 先例的自清节奏约定——清除归本组件定时器）。
-   */
-  focusDialogRequest?: { requestId: string; nonce: number } | null;
   /**
    * task-11（2026-10-20-session-page-dsh-alignment / FR-16 / design E7）：会话级
    * 「文件改动汇总卡」开关——挂在会话流顶部（首轮之前），按各轮快照去重聚合。
@@ -1388,10 +1372,10 @@ export function TurnTimeline({
   errorMsg,
   daemonRestartedHint,
   autoResumeEntries,
-  sessionStatus,
-  pendingRequests,
+  // sessionStatus 不解构：原 pending 卡 ended/failed 门控已随卡迁
+  // PendingDialogDock（2026-10-22-askuser-dock-inputbar），prop 保留在
+  // interface（消费方零改，语义位留给终态时间线交互）。
   dialogHistory,
-  onDialogResolved,
   onResend,
   onSwitchProvider,
   hasOnlineProvider,
@@ -1402,7 +1386,6 @@ export function TurnTimeline({
   suppressFollowBottom = false,
   forkEntry,
   expandPreview,
-  focusDialogRequest,
   fileChangesSummary = true,
   sessionId,
 }: TurnTimelineProps) {
@@ -1651,70 +1634,9 @@ export function TurnTimeline({
     }
   }, [turns, suppressFollowBottom, startOrRenewBottomReassert]);
 
-  // ── ql-20260825-006：pending 提问卡最小化（对齐 SessionPermissionPanel 的
-  // task-08 FR-04 / D-003 交互）───────────────────────────────────────────
-  // 最小化集合（会话内存态）：AskUserDialogCard 收 minimized=true 渲染 null 但
-  // 保持挂载 → 已选选项 / 手动输入 state 保留，还原后继续作答。
-  const [minimizedIds, setMinimizedIds] = useState<Set<string>>(new Set());
-
-  const handleMinimize = useCallback((requestId: string) => {
-    setMinimizedIds((prev) => {
-      if (prev.has(requestId)) return prev;
-      const next = new Set(prev);
-      next.add(requestId);
-      return next;
-    });
-  }, []);
-
-  const handleRestore = useCallback((requestId: string) => {
-    setMinimizedIds((prev) => {
-      if (!prev.has(requestId)) return prev;
-      const next = new Set(prev);
-      next.delete(requestId);
-      return next;
-    });
-  }, []);
-
-  // 卡片移除（提交成功 / permission_resolved SSE 由父级过滤 pendingRequests）
-  // 后同步清最小化集合，胶囊计数不残留。集合为空时跳过（避免无谓重渲染）。
-  useEffect(() => {
-    setMinimizedIds((prev) => {
-      if (prev.size === 0) return prev;
-      const alive = new Set(pendingRequests.map((r) => r.request_id));
-      const next = new Set([...prev].filter((id) => alive.has(id)));
-      return next.size === prev.size ? prev : next;
-    });
-  }, [pendingRequests]);
-
-  // ended/failed 会话不回显 pending 卡（既有门控）→ 胶囊同步不渲染。
-  const showPending =
-    pendingRequests.length > 0 &&
-    sessionStatus !== "ended" &&
-    sessionStatus !== "failed";
-
-  // ── 2026-10-16-session-decision-pill / FR-03：待决策 pill 定位还原 ──────────
-  // 内嵌提问卡容器 ref（高亮闪烁落点；2026-10-22-askuser-card-inline 卡片
-  // 由 sticky 钉顶改内嵌文档流，ref 更名同步）；effect 由 nonce 触发（同 requestId
-  // 重复点击也生效）。还原→滚顶→闪烁三步：还原最小化卡无条件删集合（不在
-  // 集合内为 no-op）；闪烁 class 1.2s 自清（对齐父层 highlightTurnKey ~2.2s
-  // 节奏缩短版——pill 定位是轻提示）。挂载首帧 nonce 变化（初始 null → 值）
-  // 也会触发一次——无害（滚顶+无卡可闪，pending 为空时 showPending 门控本就
-  // 不渲染卡片层）。
-  const inlineCardsRef = useRef<HTMLDivElement>(null);
-  const focusNonceRef = useRef<number>(-1);
-  useEffect(() => {
-    if (!focusDialogRequest || focusDialogRequest.nonce === focusNonceRef.current) return;
-    focusNonceRef.current = focusDialogRequest.nonce;
-    handleRestore(focusDialogRequest.requestId);
-    scrollRef.current?.scrollTo({ top: 0, behavior: "smooth" });
-    const el = inlineCardsRef.current;
-    if (!el) return;
-    el.classList.add("ring-2", "ring-brand-500");
-    const t = window.setTimeout(() => {
-      el.classList.remove("ring-2", "ring-brand-500");
-    }, 1200);
-    return () => window.clearTimeout(t);
-  }, [focusDialogRequest, handleRestore]);
+  // （2026-10-22-askuser-dock-inputbar：pending 提问卡最小化 state、胶囊与决策
+  //  pill 定位还原 effect 已整体迁至 PendingDialogDock——渲染于输入框位置，
+  //  TurnTimeline 不再承载待答卡。）
 
   // ── 2026-10-14-session-bottom-resize-observer：内容高度迟到变化的贴底兜底 ──
   // 第四层根因（真浏览器注入取证）：懒加载图片 / markdown 迟渲染 / content-visibility
@@ -1813,46 +1735,15 @@ export function TurnTimeline({
   }, [hasTurns]);
   // rAF 句柄声明在此 effect 外（cleanup 与合帧去重共用）。
 
-  const minimizedPending = showPending
-    ? pendingRequests.filter((r) => minimizedIds.has(r.request_id))
-    : [];
-  // 全部最小化时容器只剩挂载占位（保卡片 state），去掉间距类。
-  const visiblePendingCount = pendingRequests.length - minimizedPending.length;
-
-  // 2026-10-22-trajectory-view-redesign（D-002）：pending 提问卡在两个分支复用——
-  // 对话/进度分支在滚动容器内 sticky 置顶；轨迹分支挂在轨迹区域顶部固定层
-  // （不参与账本滚动，保证可作答）。
-  const pendingCardsNode = showPending ? (
-    <div
-      ref={inlineCardsRef}
-      className={visiblePendingCount > 0 ? "mb-3 space-y-2" : undefined}
-    >
-      {pendingRequests.map((req) => (
-        <ErrorBoundary
-          key={req.request_id}
-          label="ask-user-dialog-card"
-          fallback={() => (
-            <div className="text-[11px] text-red-600/70">提问卡片渲染失败</div>
-          )}
-        >
-          <AskUserDialogCard
-            request={req}
-            minimized={minimizedIds.has(req.request_id)}
-            onMinimize={handleMinimize}
-            onResolved={onDialogResolved}
-          />
-        </ErrorBoundary>
-      ))}
-    </div>
-  ) : null;
-
   return (
     <>
     {/* ql-20260903-023：relative 包装容器承载「回到底部」悬浮按钮的定位
         （原 fragment 根无定位上下文）；flex 布局角色与原滚动容器等价。 */}
     <div className="relative flex min-h-0 flex-1 flex-col">
     {/* 2026-10-22-trajectory-view-redesign（D-002）：轨迹视图独立占满面板高度，
-        与 turn-timeline-scroll 并列（不在滚动流内）——工具栏/时间线才能固定。 */}
+        与 turn-timeline-scroll 并列（不在滚动流内）——工具栏/时间线才能固定。
+        （2026-10-22-askuser-dock-inputbar：pending 提问卡已迁 PendingDialogDock
+        渲染于输入框位置，轨迹分支顶部固定层不再需要。） */}
     {showTrajectory ? (
       <div className="flex min-h-0 flex-1 flex-col bg-background">
         {errorMsg && (
@@ -1860,9 +1751,6 @@ export function TurnTimeline({
             {errorMsg}
           </div>
         )}
-        {showPending && visiblePendingCount > 0 ? (
-          <div className="shrink-0 px-3 pt-2">{pendingCardsNode}</div>
-        ) : null}
         {turns.length === 0 ? (
           <div className="flex h-full min-h-[260px] flex-col items-center justify-center text-center">
             <p className="text-xs font-medium text-foreground">
@@ -1893,11 +1781,9 @@ export function TurnTimeline({
           {errorMsg}
         </div>
       )}
-      {/* ql-20260621：AskUserQuestion 对话卡——节点由 pendingCardsNode 复用
-          （轨迹分支挂在轨迹区域顶部固定层，不随账本滚动）。 */}
-      {pendingCardsNode}
       {/* ql-20260802-001：AskUser 提问记录已改为按 run_id 穿插到对应 turn 内（跟会话
-          顺序），不再在此处堆顶展示。顶部仅保留 pending 实时交互卡片（上方 pendingRequests）。 */}
+          顺序），不再在此处堆顶展示。pending 实时待答卡 2026-10-22-askuser-dock-inputbar
+          起迁 PendingDialogDock 渲染于输入框位置，时间线滚动区不再出现。 */}
       {turns.length === 0 ? (
         <div className="flex h-full min-h-[260px] flex-col items-center justify-center text-center">
           <p className="text-xs font-medium text-foreground">
@@ -1994,20 +1880,6 @@ export function TurnTimeline({
       </button>
     )}
     </div>
-    {/* ql-20260825-006：最小化 pending 提问卡的右下角浮动胶囊——渲染在滚动
-        容器外（fixed 定位锚 viewport，不随日志滚动），点击主体还原最近一条，
-        chevron 展开明细定点还原。会话页 pending 卡恒为 AskUser 提问（无普通
-        工具审批），isDialog 按请求实际携带判断以保持组件契约。 */}
-    {minimizedPending.length > 0 && (
-      <MinimizedDialogCapsule
-        items={minimizedPending.map((req) => ({
-          requestId: req.request_id,
-          title: resolvePendingTitle(req),
-          isDialog: Boolean(req.dialog_kind),
-        }))}
-        onRestore={handleRestore}
-      />
-    )}
     {/* 2026-10-23-turn-file-diff-dialog / FR-01：文件行点击 → 该文件本轮变更内容
         弹窗（受控挂 TurnTimeline 根，行内只上抛目标）。sessionId 未接线的旧消费方
         永不为 null 目标（onOpenFileChanges 不下发），此处恒不渲染（FR-04 零回归）。 */}

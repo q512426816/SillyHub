@@ -39,11 +39,9 @@ function renderTimeline(turns: SessionTurnView[]) {
       viewMode="all"
       errorMsg={null}
       sessionStatus="active"
-      pendingRequests={[]}
       dialogHistory={[]}
       onResend={vi.fn()}
       onSwitchProvider={vi.fn()}
-      onDialogResolved={vi.fn()}
       hasOnlineProvider
       emptyProviderLabel="Claude"
     />,

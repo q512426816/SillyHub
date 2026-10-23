@@ -11,6 +11,7 @@ import { act, cleanup, render, waitFor } from "@testing-library/react";
 import {
   TurnLiveMarquee,
   deriveLiveMarqueeEntries,
+  formatMarqueeDuration,
   LIVE_MARQUEE_MAX_ENTRIES,
 } from "@/components/daemon/turn-live-marquee";
 import {
@@ -91,11 +92,9 @@ function renderTimeline(
       viewMode={viewMode}
       errorMsg={null}
       sessionStatus="active"
-      pendingRequests={[]}
       dialogHistory={[]}
       onResend={vi.fn()}
       onSwitchProvider={vi.fn()}
-      onDialogResolved={vi.fn()}
       hasOnlineProvider
       emptyProviderLabel="Claude"
     />,
@@ -166,6 +165,24 @@ describe("deriveLiveMarqueeEntries 纯函数（FR-01 / FR-03）", () => {
     expect(entries[0]!.id).toBe("t-10");
     expect(entries[entries.length - 1]!.id).toBe(`t-${LIVE_MARQUEE_MAX_ENTRIES + 9}`);
   });
+
+  it("工具段用真实 startedAt/endedAt 计算耗时，thinking 不伪造（FR-03）", () => {
+    const entries = deriveLiveMarqueeEntries([
+      tool("tool-1", { startedAt: 1000, endedAt: 2500 }),
+      thinking("think-1", "只有开始时刻"),
+    ]);
+
+    expect(entries[0]!.durationMs).toBe(1500);
+    expect(entries[1]!.durationMs).toBeNull();
+    expect(entries[1]!.endedAt).toBeNull();
+  });
+
+  it("耗时格式化：毫秒 / 一位小数秒 / 分钟（FR-02）", () => {
+    expect(formatMarqueeDuration(820)).toBe("820ms");
+    expect(formatMarqueeDuration(1500)).toBe("1.5s");
+    expect(formatMarqueeDuration(2000)).toBe("2s");
+    expect(formatMarqueeDuration(65_000)).toBe("1m 05s");
+  });
 });
 
 describe("TurnLiveMarquee 连续轨道（FR-01 / FR-02 / FR-05）", () => {
@@ -184,6 +201,70 @@ describe("TurnLiveMarquee 连续轨道（FR-01 / FR-02 / FR-05）", () => {
     expect(texts[0]).toContain("分析登录链路");
     expect(texts[1]).toContain("读写文件");
     expect(texts[texts.length - 1]).toContain("report.md");
+  });
+
+  it("运行中条目渲染 lucide 图标与转圈，文本区带内部滚动（FR-01）", () => {
+    const runningEntries = deriveLiveMarqueeEntries([
+      thinking("t-run", "先分析登录链路再检查 token 刷新策略最后补测试", true),
+    ]);
+    const { getByTestId, getAllByTestId, container } = render(
+      <TurnLiveMarquee entries={runningEntries} />,
+    );
+
+    const item = getByTestId("marquee-item");
+    expect(item.querySelector("svg")).not.toBeNull();
+    expect(getAllByTestId("marquee-spinner")).toHaveLength(1);
+    expect(container.querySelector(".sh-live-marquee-ticker")).not.toBeNull();
+    expect(item.textContent).toContain("先分析登录链路");
+  });
+
+  it("完成条目显示 Timer 图标与耗时（FR-02）", () => {
+    const doneEntries = deriveLiveMarqueeEntries([
+      tool("tool-done", { startedAt: 1000, endedAt: 2500 }),
+    ]);
+    const { getByTestId, queryByTestId } = render(
+      <TurnLiveMarquee entries={doneEntries} />,
+    );
+
+    const duration = getByTestId("marquee-duration");
+    expect(duration.textContent).toContain("1.5s");
+    expect(duration.querySelector("svg")).not.toBeNull();
+    expect(queryByTestId("marquee-spinner")).toBeNull();
+  });
+
+  it("进行中条目不显示耗时（FR-02）", () => {
+    const runningEntries = deriveLiveMarqueeEntries([
+      tool("tool-run", { status: "running", endedAt: null }),
+    ]);
+    const { getByTestId, queryByTestId } = render(
+      <TurnLiveMarquee entries={runningEntries} />,
+    );
+
+    expect(getByTestId("marquee-spinner")).not.toBeNull();
+    expect(queryByTestId("marquee-duration")).toBeNull();
+  });
+
+  it("历史已完成且无时长的条目不显示耗时（FR-03）", () => {
+    const historical = deriveLiveMarqueeEntries([thinking("t-old", "历史思考")]);
+    const { getByTestId, queryByTestId } = render(
+      <TurnLiveMarquee entries={historical} />,
+    );
+
+    expect(getByTestId("marquee-item").textContent).toContain("历史思考");
+    expect(queryByTestId("marquee-duration")).toBeNull();
+  });
+
+  it("条目固定 16rem 宽度，图标与耗时区不参与滚动（FR-04）", () => {
+    const doneEntries = deriveLiveMarqueeEntries([
+      tool("tool-done", { startedAt: 0, endedAt: 1500 }),
+    ]);
+    const { getByTestId, container } = render(
+      <TurnLiveMarquee entries={doneEntries} />,
+    );
+
+    expect(getByTestId("marquee-item").className).toContain("w-[16rem]");
+    expect(container.querySelector(".sh-live-marquee-ticker")).toBeNull();
+    expect(getByTestId("marquee-duration")).not.toBeNull();
   });
 
   it("reduced-motion 下静态展示最新一条，不渲染滚动轨道（FR-05）", () => {

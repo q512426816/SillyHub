@@ -58,7 +58,6 @@ import { cn } from "@/lib/utils";
 
 /* ───────────────── 回放 no-op 回调（TurnTimeline 必填，回放只读零交互） ───────────────── */
 
-const noopDialogResolved = (_requestId: string) => {};
 const noopResend = (_prompt: string) => {};
 const noopSwitchProvider = () => {};
 
@@ -647,13 +646,15 @@ export function AgentReplayBody({
         {/* TurnTimeline 必填 props 回放取值（design Phase 3.2 清单逐项）：
             errorMsg=null（错误走主体三态提示行不进时间线）；daemonRestartedHint
             =null（无 daemon_restarted 场景）；autoResumeEntries=[]；sessionStatus
-            ="idle"（回放只读，不渲染待答卡/恢复卡）；pendingRequests=[]；
-            dialogHistory=[]（回放无 AskUser 记录）；onDialogResolved/onResend/
+            ="idle"（回放只读，不渲染待答卡/恢复卡）；dialogHistory=[]
+            （回放无 AskUser 记录）；onResend/
             onSwitchProvider=no-op；hasOnlineProvider=false + emptyProviderLabel
             =""（空态不显示 provider 就绪提示——空 turns 时本组件先于时间线给出
             回放自有空态，不落入组件内置空态文案）；highlightTurnKey=null
             （回放无轮次跳转入口，无选中轮）；suppressFollowBottom=false（无
-            跳转翻页，不置位）。 */}
+            跳转翻页，不置位）。2026-10-22-askuser-dock-inputbar：pendingRequests/
+            onDialogResolved 已随待答卡迁 PendingDialogDock，回放体本就传空/no-op，
+            直接删除。 */}
         <TurnTimeline
           turns={turns}
           viewMode={viewMode}
@@ -661,9 +662,7 @@ export function AgentReplayBody({
           daemonRestartedHint={null}
           autoResumeEntries={[]}
           sessionStatus="idle"
-          pendingRequests={[]}
           dialogHistory={[]}
-          onDialogResolved={noopDialogResolved}
           onResend={noopResend}
           onSwitchProvider={noopSwitchProvider}
           hasOnlineProvider={false}

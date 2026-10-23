@@ -38,6 +38,8 @@ import {
 import {
   SessionInputBar, type SessionInputMentions,
 } from "@/components/daemon/session-input-bar";
+// 2026-10-22-askuser-dock-inputbar：pending AskUser 待答 dock（互斥替换输入框）。
+import { PendingDialogDock } from "@/components/daemon/pending-dialog-dock";
 import { MessageQueueBar } from "@/components/daemon/message-queue-bar";
 // 2026-10-13-session-change-files-hover task-05：会话悬浮变更文件入口
 // 2026-10-16-session-decision-pill task-04：会话悬浮待决策入口（与变更文件 pill 并排）
@@ -4745,6 +4747,16 @@ export function SessionPanelPage({
     );
   }
 
+  // 2026-10-22-askuser-dock-inputbar：时间线/输入区互斥共用会话状态单源——
+  // TurnTimeline sessionStatus 与输入框↔PendingDialogDock 互斥条件必须同源
+  // （ended 是本地派生终态，与 session.status 可能瞬时不同步，双源会出现
+  // 输入框与问答区双不渲染空档）。
+  const timelineSessionStatus = deriveTimelineSessionStatus(
+    ended,
+    session.status === "failed",
+    restoring,
+  );
+
   // task-03（design §3.3 状态机）：输入禁用态只看终态与离线——
   //   旧：ended || restoring || running || !machineOnline → 禁用；
   //   新：ended || !machineOnline → 禁用；running（currentRunId 有值）/
@@ -4871,13 +4883,11 @@ export function SessionPanelPage({
         // 回调（runKey 上抛走 fetchAndAttachTurn 单轮直达；缺省零回归语义由
         // TurnTimeline 内守卫承担，本挂载恒接线）。
         expandPreview={handleExpandPreview}
-        // 2026-10-16-session-decision-pill task-04 / FR-03：待决策 pill 定位还原
-        // 请求（nonce 触发式；缺省 null 零行为语义由 TurnTimeline 内守卫承担）。
-        focusDialogRequest={focusDialogRequest}
-        sessionStatus={deriveTimelineSessionStatus(ended, session.status === "failed", restoring)}
-        pendingRequests={pendingRequests}
+        // 2026-10-22-askuser-dock-inputbar：pendingRequests/onDialogResolved/
+        // focusDialogRequest 三 props 随待答卡迁 PendingDialogDock（输入框位置，
+        // 见下方互斥渲染），TurnTimeline 不再接线。
+        sessionStatus={timelineSessionStatus}
         dialogHistory={dialogHistory}
-        onDialogResolved={handleDialogResolved}
         onResend={timelineOnResend}
         onSwitchProvider={timelineOnSwitchProvider}
         hasOnlineProvider={machineOnline}
@@ -5762,6 +5772,20 @@ export function SessionPanelPage({
               </button>
             </div>
           )}
+        {/* 2026-10-22-askuser-dock-inputbar：pending AskUser 待答期间互斥替换输入框
+            （用户裁决：问答优先，答完自动恢复）；ended/failed 不渲染问答区（输入框
+            正常）。互斥条件用 timelineSessionStatus（与 TurnTimeline/dock 内部
+            门控同源单源——双源会出现输入框与问答区双不渲染空档，见上方变量注释）。 */}
+        {pendingRequests.length > 0 &&
+        timelineSessionStatus !== "ended" &&
+        timelineSessionStatus !== "failed" ? (
+          <PendingDialogDock
+            pendingRequests={pendingRequests}
+            sessionStatus={timelineSessionStatus}
+            onResolved={handleDialogResolved}
+            focusRequest={focusDialogRequest}
+          />
+        ) : (
         <SessionInputBar
           value={input}
           onChange={setInput}
@@ -5810,6 +5834,7 @@ export function SessionPanelPage({
             onToggle: handleAutoResumeToggle,
           }}
         />
+        )}
         <div ref={configBarWrapRef} className="px-5 pb-3">
           <SessionConfigBar
             sessionId={sessionId}
