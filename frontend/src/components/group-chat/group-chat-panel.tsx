@@ -2084,6 +2084,14 @@ export function GroupChatPanel({
       wsRefTokens,
     );
     setSending(true);
+    /* 2026-10-23-session-input-clear-fix / FR-01 + FR-03（单聊同款口径）：发送
+     * 受理即清草稿——原文「等 sendGroupMessage 响应成功才 setDraft("")」，用户
+     * 感知卡在输入框排队；且清空走 setDraft→writeGroupDraft effect 链路，发送
+     * 在途切到其他群（本组件 key={groupId} 卸载）时 effect 不跑 → 草稿键残留
+     * 已发送内容，切回重现。此处同步落盘清空，不依赖组件存活。
+     * 附件 chips / @ 绑定 / 引用仍响应成功后清（失败路径保留可重试）。 */
+    setDraft("");
+    writeGroupDraft(groupId, "");
     // 发送即收口 typing（停顿指示器 + 心跳）。
     stopTypingReport();
     typingLastSentRef.current = 0;
@@ -2096,7 +2104,7 @@ export function GroupChatPanel({
         // 群 P2 引用回复：引用条挂起时随消息带被引用行 id（无引用 null 不发键）。
         replyTarget?.logId ?? null,
       );
-      setDraft("");
+      // 文本已在受理点清（FR-01/FR-03），此处只收口附件/@ 绑定/引用。
       setPendingAttachments([]);
       setAttTokenMap({});
       setWsRefTokens({});
@@ -2115,6 +2123,10 @@ export function GroupChatPanel({
       // 时间线（design §4.1 失败语义）——提示原文，时间线以对账回显为准；
       // 附件与草稿保留供重发。
       notify.error(err, "发送失败，请稍后重试");
+      // FR-02：受理即清后失败 → 原文回填可重试（输入框已有新内容则不覆盖；
+      // 草稿键为空才写回，不覆盖用户新输入已落盘的草稿）。
+      setDraft((prev) => (prev === "" ? rawContent : prev));
+      if (!readGroupDraft(groupId)) writeGroupDraft(groupId, rawContent);
     } finally {
       setSending(false);
       inputRef.current?.focus();

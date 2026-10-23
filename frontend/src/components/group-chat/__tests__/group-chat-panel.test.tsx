@@ -1401,8 +1401,62 @@ describe("GroupChatPanel 输入区（@补全 + 发送 + typing 上报）", () =>
     });
   });
 
-  it("typing 上报：输入节流首跳 typing=true + preview 尾 400 字；发送后 typing=false", async () => {
+  /* 2026-10-23-session-input-clear-fix / FR-01 + FR-02 + FR-03（群聊同款）：
+   * 用户报障——发送后文本卡在输入框等网络响应；排队中切换会话文本还在。
+   * 群聊根因同单聊：原文「sendGroupMessage 响应成功后才 setDraft("")」，且
+   * 草稿落盘走 setDraft→writeGroupDraft effect（key={groupId} 卸载后不执行）。 */
+  it("发送受理即清：sendGroupMessage 未响应时输入框已空且草稿键已清", async () => {
     harness.logsJson = [];
+    window.localStorage.clear();
+    const box: { settle?: (v: unknown) => void } = {};
+    mocks.sendGroupMessage.mockImplementation(
+      () => new Promise<unknown>((resolve) => {
+        box.settle = resolve;
+      }),
+    );
+    renderPanel();
+    await waitForStreamWired();
+
+    const input = screen.getByLabelText("群消息输入框");
+    fireEvent.change(input, { target: { value: "AAA" } });
+    await flushAsync(2);
+    fireEvent.keyDown(input, { key: "Enter" });
+
+    // 请求在途（mock 未 resolve）——输入框已清空。
+    await waitFor(() => expect((input as HTMLTextAreaElement).value).toBe(""));
+    // 草稿键同步清（不依赖卸载前的 effect 链路）。
+    await waitFor(() =>
+      expect(
+        window.localStorage.getItem("sillyhub.groupchats.draft.g-1"),
+      ).toBe(""),
+    );
+    box.settle?.({
+      carrier_run_id: "r-carrier",
+      log_id: "l-sent",
+      mentioned_member_ids: [],
+      mention_all: false,
+      triggered: [],
+    });
+    await flushAsync(2);
+  });
+
+  it("发送失败：文本恢复到输入框可重试", async () => {
+    harness.logsJson = [];
+    window.localStorage.clear();
+    mocks.sendGroupMessage.mockRejectedValue(new Error("network down"));
+    renderPanel();
+    await waitForStreamWired();
+
+    const input = screen.getByLabelText("群消息输入框");
+    fireEvent.change(input, { target: { value: "AAA" } });
+    await flushAsync(2);
+    fireEvent.keyDown(input, { key: "Enter" });
+
+    // 失败后原文回填（受理即清 → 失败恢复，否则文本丢失）。
+    await waitFor(() => expect((input as HTMLTextAreaElement).value).toBe("AAA"));
+  });
+
+  it("typing 上报：输入节流首跳 typing=true + preview 尾 400 字；发送后 typing=false", async () => {    harness.logsJson = [];
     renderPanel();
     await waitForStreamWired();
 

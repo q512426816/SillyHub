@@ -1439,6 +1439,25 @@ describe("SessionsPortal ?new=1 直达新建（ql-20260823-005）", () => {
     expect(screen.queryByTestId("pre-session-picker-mask")).toBeNull();
   });
 
+  it("同机器同智能体再次「＋」新建：预会话输入框重置（nonce 强制重挂载，2026-10-23-session-input-clear-fix / FR-04）", async () => {
+    renderPortal();
+    await enterPreSession("在 非工作区 新建会话");
+    const input = screen.getByPlaceholderText(
+      /发送第一句话开始对话/,
+    ) as HTMLTextAreaElement;
+    fireEvent.change(input, { target: { value: "AAA" } });
+    await waitFor(() => expect(input.value).toBe("AAA"));
+
+    // 同 scope（同机器+同智能体）再次新建：原 key 不变时 React 复用组件、
+    // 未发送文本会残留；nonce 入 key 后强制重挂载 → 空白。
+    await enterPreSession("在 非工作区 新建会话");
+    const input2 = (await screen.findByPlaceholderText(
+      /发送第一句话开始对话/,
+    )) as HTMLTextAreaElement;
+    expect(input2.value).toBe("");
+    expect(screen.getByTestId("session-pre-session-panel")).toBeTruthy();
+  });
+
   it("workspace scope + ?new=1 → preContext 绑定 scope.workspaceId，首句 createSession 带 workspace_id", async () => {
     window.localStorage.setItem(NEW_SESSION_MACHINE_LS_KEY, "m-1");
     mocks.searchParams = new URLSearchParams("new=1");

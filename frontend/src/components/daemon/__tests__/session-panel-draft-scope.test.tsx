@@ -415,13 +415,22 @@ describe("page 预会话草稿入口隔离（task-01 / D-001）", () => {
     );
   });
 
-  it("同一入口重进：草稿恢复到输入框", async () => {
+  it("同一入口重进：输入框恒空白（新建=全新开始，残留键清除）", async () => {
+    // 2026-10-23-session-input-clear-fix / FR-04：预会话挂载不再回读草稿——
+    // 原「同入口重进恢复草稿」语义与用户「新建会话应全新空白」预期冲突
+    //（用户报障：其他会话填过 AAA，新建会话仍显示 AAA），本卡修订为恒空白
+    // 并顺带清残留键（原未发送草稿随新建废弃）。真会话草稿回读不受影响
+    //（上方时序用例锁定）。
     window.localStorage.setItem(DRAFT_KEY("__pre__:ws-1:rt-claude"), "重进应恢复");
     setupPage({ preContext: { workspaceId: "ws-1", runtimeId: "rt-claude" } });
     const input = (await screen.findByPlaceholderText(
       /发送第一句话开始对话/,
     )) as HTMLTextAreaElement;
-    await waitFor(() => expect(input.value).toBe("重进应恢复"));
+    await waitFor(() => expect(input.value).toBe(""));
+    // 残留键在挂载时被清（新建即弃稿，不再留下可回读的死数据）。
+    expect(
+      window.localStorage.getItem(DRAFT_KEY("__pre__:ws-1:rt-claude")),
+    ).toBe("");
   });
 
   it("workspaceId null 的入口：scope 用 '-' 分量组装（与具名工作区入口隔离）", async () => {
@@ -488,5 +497,162 @@ describe("dialog 预会话草稿 scope（task-01 / D-001）", () => {
       /输入首条消息创建会话/,
     )) as HTMLTextAreaElement;
     await waitFor(() => expect(input.value).toBe("dialog 重进恢复"));
+  });
+});
+
+/* ───────── 5. 发送受理即清 + 失败恢复（2026-10-23-session-input-clear-fix） ─────
+ *
+ * 用户报障（原话）：①在其他会话填了 AAA，新建会话仍显示 AAA；②发送后 AAA 不
+ * 立即消失，卡在输入框等网络响应；③排队中切换会话，AAA 仍保留。
+ *
+ * 根因（design 做法概述）：清空走 setState→写草稿 effect 链路，组件因会话切换
+ * 卸载时 effect 不执行（草稿键残留已发送内容）；且 onSendSettled 等响应成功才清。
+ *
+ * 本节锁定修复口径：受理即清输入框文本（FR-01）、失败恢复原文（FR-02）、
+ * 受理即同步清草稿键（FR-03）。 */
+
+/** 挂起的 injectSession（永不 resolve；用例末尾手动 settle 收尾防 act 噪音）。 */
+function pendInject() {
+  const box: { settle?: (v: unknown) => void } = {};
+  sessionApi.injectSession.mockImplementation(
+    () =>
+      new Promise<unknown>((resolve) => {
+        box.settle = resolve;
+      }),
+  );
+  return () => box.settle?.({ run_id: "run-1", queued: false, steered: false });
+}
+
+/** 取真会话输入框（placeholder「继续追问」）。 */
+async function realInput() {
+  return (await screen.findByPlaceholderText(/继续追问/)) as HTMLTextAreaElement;
+}
+
+/** 点发送按钮（aria-label「发送」——有空内容时按钮才启用）。 */
+function clickSend() {
+  fireEvent.click(screen.getByLabelText("发送"));
+}
+
+describe("发送受理即清输入框文本（FR-01）", () => {
+  it("真会话直发：injectSession 未响应时输入框已清空（不等响应）", async () => {
+    const settle = pendInject();
+    setupPage({ sessionId: "sess-a" });
+    const input = await realInput();
+    await nextFrame();
+    fireEvent.change(input, { target: { value: "AAA" } });
+    await waitFor(() => expect(input.value).toBe("AAA"));
+
+    clickSend();
+    // 发送请求仍在途（mock 未 resolve），输入框必须已清空。
+    await waitFor(() => expect(input.value).toBe(""));
+    expect(sessionApi.injectSession).toHaveBeenCalled();
+    settle();
+  });
+
+  it("预会话首句：createSession 未响应时输入框已清空", async () => {
+    const box: { settle?: (v: unknown) => void } = {};
+    sessionApi.createSession.mockImplementation(
+      () =>
+        new Promise<unknown>((resolve) => {
+          box.settle = resolve;
+        }),
+    );
+    setupPage({ preContext: { workspaceId: "ws-1", runtimeId: "rt-claude" } });
+    const input = (await screen.findByPlaceholderText(
+      /发送第一句话开始对话/,
+    )) as HTMLTextAreaElement;
+    await nextFrame();
+    fireEvent.change(input, { target: { value: "AAA" } });
+    await waitFor(() => expect(input.value).toBe("AAA"));
+
+    clickSend();
+    await waitFor(() => expect(input.value).toBe(""));
+    expect(sessionApi.createSession).toHaveBeenCalled();
+    box.settle?.({ session_id: "sess-new" });
+  });
+});
+
+describe("发送失败恢复文本（FR-02）", () => {
+  it("真会话直发失败：输入框恢复原文可重试", async () => {
+    sessionApi.injectSession.mockRejectedValue(new Error("network down"));
+    setupPage({ sessionId: "sess-a" });
+    const input = await realInput();
+    await nextFrame();
+    fireEvent.change(input, { target: { value: "AAA" } });
+    await waitFor(() => expect(input.value).toBe("AAA"));
+
+    clickSend();
+    // 失败后原文回到输入框（受控 value 恢复）。
+    await waitFor(() => expect(input.value).toBe("AAA"));
+  });
+
+  it("预会话首句失败：输入框恢复原文可重试", async () => {
+    sessionApi.createSession.mockRejectedValue(new Error("创建失败"));
+    setupPage({ preContext: { workspaceId: "ws-1", runtimeId: "rt-claude" } });
+    const input = (await screen.findByPlaceholderText(
+      /发送第一句话开始对话/,
+    )) as HTMLTextAreaElement;
+    await nextFrame();
+    fireEvent.change(input, { target: { value: "AAA" } });
+    await waitFor(() => expect(input.value).toBe("AAA"));
+
+    clickSend();
+    await waitFor(() => expect(input.value).toBe("AAA"));
+  });
+});
+
+describe("受理即同步清草稿键（FR-03）", () => {
+  it("真会话：发送受理即清 localStorage 草稿；在途切走再切回不残留", async () => {
+    const settle = pendInject();
+    const { rerenderWith } = setupPage({ sessionId: "sess-a" });
+    const input = await realInput();
+    await nextFrame();
+    fireEvent.change(input, { target: { value: "AAA" } });
+    await waitFor(() =>
+      expect(window.localStorage.getItem(DRAFT_KEY("sess-a"))).toBe("AAA"),
+    );
+
+    clickSend();
+    // 受理瞬间草稿键即被清（不依赖 setInput→effect 链路，卸载后同样生效）。
+    await waitFor(() =>
+      expect(window.localStorage.getItem(DRAFT_KEY("sess-a"))).toBe(""),
+    );
+
+    // 发送在途切到另一会话，再切回：不显示已发送内容。
+    rerenderWith("sess-b");
+    await screen.findByPlaceholderText(/继续追问/);
+    rerenderWith("sess-a");
+    const backInput = await realInput();
+    await waitFor(() => expect(backInput.value).toBe(""));
+    settle();
+  });
+
+  it("预会话：首句受理即清 __pre__:scope 键（创建成功切真会话后不残留到下次新建）", async () => {
+    const box: { settle?: (v: unknown) => void } = {};
+    sessionApi.createSession.mockImplementation(
+      () =>
+        new Promise<unknown>((resolve) => {
+          box.settle = resolve;
+        }),
+    );
+    setupPage({ preContext: { workspaceId: "ws-1", runtimeId: "rt-claude" } });
+    const input = (await screen.findByPlaceholderText(
+      /发送第一句话开始对话/,
+    )) as HTMLTextAreaElement;
+    await nextFrame();
+    fireEvent.change(input, { target: { value: "AAA" } });
+    await waitFor(() =>
+      expect(window.localStorage.getItem(DRAFT_KEY("__pre__:ws-1:rt-claude"))).toBe(
+        "AAA",
+      ),
+    );
+
+    clickSend();
+    await waitFor(() =>
+      expect(window.localStorage.getItem(DRAFT_KEY("__pre__:ws-1:rt-claude"))).toBe(
+        "",
+      ),
+    );
+    box.settle?.({ session_id: "sess-new" });
   });
 });

@@ -911,7 +911,19 @@ export function SessionPanelPage({
     : null;
   useEffect(() => {
     draftHydratedRef.current = false;
-    setInput(readSessionDraft(sessionId, preDraftScope));
+    // 2026-10-23-session-input-clear-fix / FR-04：预会话态恒空白——「新建会话」
+    // 必须是全新开始。原实现按 __pre__:<scope> 回读草稿，同一入口（同机器同引
+    // 擎）再次「＋」新建时把上次未发送内容带回输入框（用户报障：在其他会话
+    // 填了 AAA，新建会话输入框也显示 AAA）。此处改为预会话不回读并清残留键
+    //（新建即弃稿，不留可回读的死数据）。真会话（sessionId 非空）回读语义零
+    // 变化；dialog 模式在 session-panel-dialog.tsx，其「同 workspaceId 重开恢复
+    // 草稿」语义不在本变更范围（已知遗留，design 风险与死路已记）。
+    if (sessionId) {
+      setInput(readSessionDraft(sessionId, preDraftScope));
+    } else {
+      setInput("");
+      writeSessionDraft(null, "", preDraftScope);
+    }
     setPendingMentions({});
     const raf = requestAnimationFrame(() => {
       draftHydratedRef.current = true;
@@ -927,6 +939,44 @@ export function SessionPanelPage({
     // 恰是 D-001 要消除的跨入口串台。
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sessionId, input]);
+
+  /**
+   * 2026-10-23-session-input-clear-fix / FR-01 + FR-03：发送受理即清。
+   *
+   * 用户报障：发送后文本不立即消失（卡在输入框等网络响应），排队中切换会话
+   * 文本还被带过去/切回仍在。根因：清空原走「onSendSettled 写 setInput 空串 →
+   * 持久化 effect 写磁盘」链路——① 等 HTTP 往返才清（不即时）；② 组件因会话
+   * 切换卸载时 effect 不执行，localStorage 草稿键保留已发送文本，切回/下次新建
+   * 回读即重现（本次核心根因）。
+   *
+   * 此处受理瞬间同步清两处：输入态 + 草稿键（直接落盘，不依赖组件存活）。
+   * 附件 chips / @ 联想选中仍由 onSendSettled 在响应成功后清（失败路径天然
+   * 保留可重试）；文本失败恢复走 restoreRejectedSend。
+   */
+  const clearInputAccepted = useCallback(() => {
+    setInput("");
+    writeSessionDraft(sessionId, "", preDraftScope);
+  }, [sessionId, preDraftScope]);
+
+  /**
+   * 2026-10-23-session-input-clear-fix / FR-02：发送失败（网络错误/后端拒绝）时
+   * 把所发原文恢复到输入框，可原地重试。
+   *
+   * 两条防御（与既有 handleInterrupt 回退、定时发送清空同款口径）：
+   *   - 仅当输入框为空时回填——失败窗口期用户已输入新内容则不覆盖；
+   *   - 草稿键仅当其当前为空时才写回——不覆盖用户新输入落盘的草稿。
+   * 组件存活时 setInput 触发的持久化 effect 会写回草稿；组件已卸载（发送在途
+   * 切走）时 effect 不跑，此处直接落盘兜底——切回原会话仍能读到原文重试。
+   */
+  const restoreRejectedSend = useCallback(
+    (raw: string) => {
+      setInput((prev) => (prev === "" ? raw : prev));
+      if (!readSessionDraft(sessionId, preDraftScope)) {
+        writeSessionDraft(sessionId, raw, preDraftScope);
+      }
+    },
+    [sessionId, preDraftScope],
+  );
 
   // ── task-08（2026-09-07-session-pin-rename-scheduled-send / FR-04）：定时发送 ──
   // 弹窗开合 + 选定时间（Dayjs，分钟级）+ 提交在途 + 定时条刷新信号（驱动
@@ -3503,7 +3553,10 @@ export function SessionPanelPage({
    * 置位）→ run 已创建则立即补发 interruptSession 真停（消息已回退输入框）。
    */
   const sendFromQueue = useCallback(
-    async (prompt: string, attachmentIds: string[]) => {
+    // 2026-10-23-session-input-clear-fix / FR-02：第三参 rawPrompt = 用户所见原文
+    //（token 置换前），失败恢复用；缺省回落 prompt（无 token 场景两者相等，
+    // 旧调用点兼容）。
+    async (prompt: string, attachmentIds: string[], rawPrompt: string = prompt) => {
       // task-03（R-01）：预会话态无会话可 inject——sessionActive=false 时 hook
       // 不投递，此处防御性短路（对齐 dialog 版 ?? "" + status 守卫先例）。
       if (!sessionId) return;
@@ -3611,6 +3664,8 @@ export function SessionPanelPage({
             turns: prev.turns.filter((t) => t.runId !== placeholderId),
           }));
           setErrorMsg(errMessage(apiErr, "发送失败"));
+          // FR-02：受理即清后失败 → 原文回填可重试（输入框已有新内容则不覆盖）。
+          restoreRejectedSend(rawPrompt);
         }
       } finally {
         if (inflightSendRef.current?.placeholderId === placeholderId) {
@@ -3618,7 +3673,14 @@ export function SessionPanelPage({
         }
       }
     },
-    [sessionId, pageContextOverride, pendingMentions, qc, onSendSettled],
+    [
+      sessionId,
+      pageContextOverride,
+      pendingMentions,
+      qc,
+      onSendSettled,
+      restoreRejectedSend,
+    ],
   );
 
   /**
@@ -3631,7 +3693,9 @@ export function SessionPanelPage({
    * 框可改后重发。
    */
   const sendToServerQueue = useCallback(
-    async (prompt: string, attachmentIds: string[]) => {
+    // FR-02（2026-10-23-session-input-clear-fix）：第三参 rawPrompt 同 sendFromQueue
+    //（失败回填用户原文；缺省回落 prompt）。
+    async (prompt: string, attachmentIds: string[], rawPrompt: string = prompt) => {
       if (!sessionId) return;
       try {
         const resp = await injectSession(sessionId, prompt, {
@@ -3673,9 +3737,18 @@ export function SessionPanelPage({
       } catch (err) {
         const apiErr = err as ApiError;
         setErrorMsg(errMessage(apiErr, "发送失败"));
+        // FR-02：受理即清后失败（满员 409 / 离线 / 网络错误）→ 原文回填可重试。
+        restoreRejectedSend(rawPrompt);
       }
     },
-    [sessionId, pageContextOverride, pendingMentions, qc, onSendSettled],
+    [
+      sessionId,
+      pageContextOverride,
+      pendingMentions,
+      qc,
+      onSendSettled,
+      restoreRejectedSend,
+    ],
   );
 
   // 2026-08-31-session-queue-ux（task-09）：补 refresh（SSE queue_changed 即时
@@ -3887,10 +3960,17 @@ export function SessionPanelPage({
    * 附件非空允许空 prompt（D-7 看图说话对齐）。失败保留附件可重试（R-02 同义）。
    */
   const handlePreSessionSend = useCallback(
-    async (prompt: string, attachmentIds: string[]) => {
+    // 2026-10-23-session-input-clear-fix：第三参 rawPrompt = 用户所见原文（token
+    // 置换前），失败回填用；缺省回落 prompt。
+    async (prompt: string, attachmentIds: string[], rawPrompt: string = prompt) => {
       if (!preContext || preCreating) return;
       setPreCreating(true);
       setPreError(null);
+      // FR-01 + FR-03（2026-10-23-session-input-clear-fix）：受理即清（原文改于
+      // 「成功后才清」）——预会话创建成功瞬间父层切真会话、本组件卸载，原
+      // 成功路径的 setInput("") 与写草稿 effect 均不执行 → __pre__:scope 键
+      // 残留已发送内容，下次新建同入口回读即重现（用户报障根因路径）。
+      clearInputAccepted();
       // task-05（FR-05）：@ 联想选中与入口锁定上下文合并——同字段单值，@ 选中
       // （用户显式最新选择，组件内「同类型后选覆盖先选」语义的延伸）优先，
       // preContext（change/quicklog 入口 X-13 契约）兜底；缺省回落既有语义。
@@ -3943,9 +4023,8 @@ export function SessionPanelPage({
           // ql-20260825-001：首句附件（有值才带）。
           ...(attachmentIds.length > 0 ? { attachment_ids: attachmentIds } : {}),
         });
-        // R-02：成功才清空（失败路径输入保留在 catch 之外，可原地重试——
-        // 暂存 team payload 同语义：失败保留，重试仍携带）。
-        setInput("");
+        // R-02：附件/@ 绑定/team 暂存仍为成功后才清（失败路径保留可重试）；
+        // 输入文本已在受理点清（FR-01/FR-03），此处不再重复 setInput。
         setPendingAttachments([]);
         clearAttachmentsRef.current?.();
         // task-13：成功清空暂存（mission 已随 create 预建，再发不重复上送）。
@@ -3956,6 +4035,8 @@ export function SessionPanelPage({
         onPreSessionCreated?.(resp);
       } catch (err) {
         setPreError(errMessage(err, "创建会话失败，请重试"));
+        // FR-02：受理即清后创建失败 → 原文回填输入框（+ 草稿键）可原地重试。
+        restoreRejectedSend(rawPrompt);
       } finally {
         setPreCreating(false);
       }
@@ -3970,6 +4051,8 @@ export function SessionPanelPage({
       preModelId,
       preThinkingLevel,
       preTeamMission,
+      clearInputAccepted,
+      restoreRejectedSend,
     ],
   );
 
@@ -4005,7 +4088,7 @@ export function SessionPanelPage({
     // （后端对 pending tool_report 的 inject 恒 409 指引 takeover）。
     if (isToolReportBody) {
       void handleTakeoverSend(prompt);
-      setInput("");
+      clearInputAccepted();
       return;
     }
     const teamCmd = parseTeamCommand(prompt);
@@ -4021,7 +4104,8 @@ export function SessionPanelPage({
       // 裸 /team（无目标文本）无可发内容不发送；带附件可发（D-7 看图说话，
       // 后端剥离后空文本+附件走附件豁免轮）。
       if ((!prompt || teamCmd === "") && pendingAttachments.length === 0) return;
-      void handlePreSessionSend(prompt, pendingAttachments.map((a) => a.id));
+      // FR-02：带 rawPrompt（= 发送前用户所见原文）供创建失败回填。
+      void handlePreSessionSend(prompt, pendingAttachments.map((a) => a.id), rawPrompt);
       return;
     }
     // task-11（D-004 四路等价）：/team 前缀拦截——不直接发送，弹层确认后目标文本
@@ -4039,7 +4123,7 @@ export function SessionPanelPage({
       machineOnline
     ) {
       openTeamPopover(teamCmd || null);
-      setInput("");
+      clearInputAccepted();
       // task-05：拦截清空输入的同点位清空 @ 联想选中（拦截不发送，残留选中
       // 会错绑到下一条消息；/team 拦截语义本身零改动）。
       setPendingMentions({});
@@ -4070,13 +4154,17 @@ export function SessionPanelPage({
       attachmentMetaRef.current.set(a.id, { kind: a.kind, name: a.name });
     }
     // ql-20260825-011：忙轮 → 服务端排队（无占位轮，后端 run 终态后派发）；
-    // 空闲 → 占位轮直发。草稿与附件改为发送成功后清（onSendSettled）。
+    // 空闲 → 占位轮直发。
+    // 2026-10-23-session-input-clear-fix / FR-01 + FR-03：文本改「发送受理即
+    // 清」（原等响应成功才清，用户感知卡顿 + 切换会话后草稿残留）；rawPrompt
+    // 透传给两路径供失败回填（FR-02）。附件 chips / @ 绑定仍响应成功后清。
+    clearInputAccepted();
     if (running) {
-      void sendToServerQueue(prompt, attachmentIds);
+      void sendToServerQueue(prompt, attachmentIds, rawPrompt);
       return;
     }
-    void sendFromQueue(prompt, attachmentIds);
-  }, [input, sessionId, session, ended, suspended, machineOnline, running, isQueueFull, pendingAttachments, attTokenMap, wsRefTokens, notify, sendToServerQueue, sendFromQueue, sessionEngine, openTeamPopover, handlePreSessionSend, teamMissions, isToolReportBody, handleTakeoverSend]);
+    void sendFromQueue(prompt, attachmentIds, rawPrompt);
+  }, [input, sessionId, session, ended, suspended, machineOnline, running, isQueueFull, pendingAttachments, attTokenMap, wsRefTokens, notify, sendToServerQueue, sendFromQueue, sessionEngine, openTeamPopover, handlePreSessionSend, teamMissions, isToolReportBody, handleTakeoverSend, clearInputAccepted]);
 
   // 2026-10-21-daemon-zombie-turn FR-04：打断 15s 超时回退（定时器簿记在
   // interrupt-timeout.ts hook）。到点**先裁决**：该轮仍处 interrupting 才回退

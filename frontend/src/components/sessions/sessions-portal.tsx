@@ -187,6 +187,17 @@ export function SessionsPortal({ scope }: SessionsPortalProps) {
   // task-06（FR-03/D-101）：预会话上下文——组头「＋」浮层选完合成；切走/创建
   // 成功即清，不残留（首句未发时零服务端实体）。
   const [preContext, setPreContext] = useState<SessionPreContext | null>(null);
+  // 2026-10-23-session-input-clear-fix / FR-04：预会话挂载 nonce（并入下方
+  // SessionPanel key）。同 workspace+同 runtime 再次「新建」时原 key 不变 →
+  // React 复用组件、输入态（含未发送文本）残留（用户报障：填了 AAA 新建仍
+  // 有 AAA）。nonce 每次置位新 preContext 时自增 → key 必变 → 强制重挂载。
+  const [preMountNonce, setPreMountNonce] = useState(0);
+  /** 置位预会话上下文（两处写入点共用：enterPreSession / 组头直带链）。
+   *  nonce 自增与 setPreContext 同批 commit——首次渲染即用新 key，不双挂载。 */
+  const openPreSession = useCallback((ctx: SessionPreContext) => {
+    setPreMountNonce((n) => n + 1);
+    setPreContext(ctx);
+  }, []);
   // task-06（FR-04/D-107）：两步浮层开关 + 发起组的 workspaceId
   //（null = 非工作区分组，D-105）。
   const [pickerOpen, setPickerOpen] = useState(false);
@@ -545,7 +556,7 @@ export function SessionsPortal({ scope }: SessionsPortalProps) {
                 runtimeId,
               }
             : { workspaceId, runtimeId };
-      setPreContext(nextPreContext);
+      openPreSession(nextPreContext);
       setSelectedWorkspaceId(nextPreContext.workspaceId);
       setSelectedSessionId(null);
       // task-07：进预会话清群选中（右侧三分支优先级：群视图 > 真会话 > 预会话）。
@@ -554,7 +565,7 @@ export function SessionsPortal({ scope }: SessionsPortalProps) {
       // ql-20260824-001：清选中同步清 ?session=（刷新不恢复已离开的会话）。
       syncSessionParam(null);
     },
-    [scope, syncSessionParam],
+    [scope, syncSessionParam, openPreSession],
   );
 
   // ql-20260823-005（用户反馈：ppm/projects「发起团队」等外部入口应直达会话页，
@@ -666,7 +677,7 @@ export function SessionsPortal({ scope }: SessionsPortalProps) {
         );
         if (runtime) {
           setSelectedSessionId(null);
-          setPreContext(
+          openPreSession(
             scope?.kind === "change"
               ? // change 入口组头不出现，保守与 handlePickerPick 双传语义对齐（X-13）。
                 { workspaceId: scope.workspaceId, changeId: scope.changeId, runtimeId: runtime.id }
@@ -687,7 +698,7 @@ export function SessionsPortal({ scope }: SessionsPortalProps) {
       setPickerWorkspaceId(workspaceId);
       setPickerOpen(true);
     },
-    [machines, myBindings, pickerMachines, scope, syncSessionParam, enterPreSession, wsNameQuery.isLoading],
+    [machines, myBindings, pickerMachines, scope, syncSessionParam, enterPreSession, openPreSession, wsNameQuery.isLoading],
   );
 
   /** 浮层两步选完（两步即达）：合成 preContext 切预会话态并关浮层（X-13 双传
@@ -1070,7 +1081,7 @@ export function SessionsPortal({ scope }: SessionsPortalProps) {
           />
         ) : preContext ? (
           <SessionPanel
-            key={`pre:${preContext.workspaceId ?? "-"}:${preContext.runtimeId}`}
+            key={`pre:${preContext.workspaceId ?? "-"}:${preContext.runtimeId}:${preMountNonce}`}
             mode="page"
             sessionId={null}
             machines={pickerMachines}
