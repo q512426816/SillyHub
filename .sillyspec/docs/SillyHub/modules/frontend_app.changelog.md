@@ -44,3 +44,4 @@ created_at: 2026-09-03 14:49:48
 - 2026-10-22-session-composer-slim | 会话页面底部输入区信息过载：排队消息与纯文本展示露出附件引用 uuid 长串，中断自动续跑是常驻开关…
 - 2026-10-23-marquee-item-detail | 跑马灯条目细化：转圈、内部滚动与耗时
 - 2026-10-23-marquee-ticker-speed | 跑马灯条目内部滚动提速
+- 2026-10-23-marquee-motion-polish | 跑马灯动效与流光柔化

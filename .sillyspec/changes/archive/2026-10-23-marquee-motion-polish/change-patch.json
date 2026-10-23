@@ -1,0 +1,191 @@
+{
+  "change": "2026-10-23-marquee-motion-polish",
+  "baseline": "9f59cb55b39adcfe4318b59bd2ca25e4a5c24ee2",
+  "head": "997f1963fcc327dd57cce4cc431382d1c309270c",
+  "files": [
+    "backend/app/modules/daemon/session/network_context.py",
+    "backend/app/modules/daemon/session/service/inject.py",
+    "backend/openapi.json",
+    "backend/tests/modules/daemon/test_network_context.py",
+    "frontend/src/app/globals.css",
+    "frontend/src/components/daemon/__tests__/turn-live-marquee.test.tsx",
+    "frontend/src/components/daemon/file-changes/__tests__/turn-file-diff-dialog.test.tsx",
+    "frontend/src/components/daemon/file-changes/__tests__/turn-file-diff.test.ts",
+    "frontend/src/components/daemon/file-changes/turn-file-diff-dialog.tsx",
+    "frontend/src/components/daemon/file-changes/turn-file-diff.ts",
+    "frontend/src/components/daemon/turn-live-marquee.tsx",
+    "frontend/src/lib/api-types.ts",
+    "sillyhub-daemon/src/api-types.ts"
+  ],
+  "totals": {
+    "files": 13,
+    "additions": 551,
+    "deletions": 34
+  },
+  "savedAt": "2026-10-23T03:38:37.176Z",
+  "note": "flow done 时点冻结（本变更可归属交付面：baseline..HEAD 提交面过滤 .sillyspec/ 只留 .sillyspec/docs/ 交付文档 + 独占树未提交交付；治理工件目录不入冻结——2026-10-12-close-trace-freeze-integrity FR-01）",
+  "modules": [
+    {
+      "id": "daemon",
+      "files": 2,
+      "doc": "docs/backend/modules/daemon.md",
+      "docTouched": false,
+      "docMissing": false
+    },
+    {
+      "id": "backend",
+      "files": 4,
+      "doc": "docs/multi-agent-platform/modules/backend.md",
+      "docTouched": false,
+      "docMissing": false
+    },
+    {
+      "id": "frontend",
+      "files": 8,
+      "doc": "docs/multi-agent-platform/modules/frontend.md",
+      "docTouched": false,
+      "docMissing": false
+    },
+    {
+      "id": "sillyhub-daemon",
+      "files": 1,
+      "doc": "docs/multi-agent-platform/modules/sillyhub-daemon.md",
+      "docTouched": false,
+      "docMissing": false
+    },
+    {
+      "id": "daemon",
+      "files": 3,
+      "doc": "docs/SillyHub/modules/daemon.md",
+      "docTouched": false,
+      "docMissing": false
+    },
+    {
+      "id": "frontend_app",
+      "files": 1,
+      "doc": "docs/SillyHub/modules/frontend_app.md",
+      "docTouched": false,
+      "docMissing": false
+    },
+    {
+      "id": "frontend_components",
+      "files": 6,
+      "doc": "docs/SillyHub/modules/frontend_components.md",
+      "docTouched": false,
+      "docMissing": false
+    },
+    {
+      "id": "frontend_lib",
+      "files": 1,
+      "doc": "docs/SillyHub/modules/frontend_lib.md",
+      "docTouched": false,
+      "docMissing": false
+    }
+  ],
+  "uncoveredDirs": [],
+  "moduleMaps": [
+    "docs/backend/modules/_module-map.yaml",
+    "docs/frontend/modules/_module-map.yaml",
+    "docs/multi-agent-platform/modules/_module-map.yaml",
+    "docs/SillyHub/modules/_module-map.yaml",
+    "docs/sillyhub-daemon/modules/_module-map.yaml"
+  ],
+  "scopeAudit": {
+    "mode": "full-flow",
+    "ok": true,
+    "degradedReason": null,
+    "baseAnchor": "9f59cb55b39adcfe4318b59bd2ca25e4a5c24ee2",
+    "totals": {
+      "files": 13,
+      "additions": 551,
+      "deletions": 34
+    },
+    "rows": [
+      {
+        "path": "backend/app/modules/daemon/session/network_context.py",
+        "additions": 59,
+        "deletions": 16,
+        "kind": "modified"
+      },
+      {
+        "path": "backend/app/modules/daemon/session/service/inject.py",
+        "additions": 4,
+        "deletions": 0,
+        "kind": "modified"
+      },
+      {
+        "path": "backend/openapi.json",
+        "additions": 53,
+        "deletions": 0,
+        "kind": "modified"
+      },
+      {
+        "path": "backend/tests/modules/daemon/test_network_context.py",
+        "additions": 171,
+        "deletions": 0,
+        "kind": "modified"
+      },
+      {
+        "path": "frontend/src/app/globals.css",
+        "additions": 50,
+        "deletions": 7,
+        "kind": "modified"
+      },
+      {
+        "path": "frontend/src/components/daemon/__tests__/turn-live-marquee.test.tsx",
+        "additions": 14,
+        "deletions": 1,
+        "kind": "modified"
+      },
+      {
+        "path": "frontend/src/components/daemon/file-changes/__tests__/turn-file-diff-dialog.test.tsx",
+        "additions": 58,
+        "deletions": 0,
+        "kind": "modified"
+      },
+      {
+        "path": "frontend/src/components/daemon/file-changes/__tests__/turn-file-diff.test.ts",
+        "additions": 48,
+        "deletions": 0,
+        "kind": "modified"
+      },
+      {
+        "path": "frontend/src/components/daemon/file-changes/turn-file-diff-dialog.tsx",
+        "additions": 16,
+        "deletions": 1,
+        "kind": "modified"
+      },
+      {
+        "path": "frontend/src/components/daemon/file-changes/turn-file-diff.ts",
+        "additions": 18,
+        "deletions": 0,
+        "kind": "modified"
+      },
+      {
+        "path": "frontend/src/components/daemon/turn-live-marquee.tsx",
+        "additions": 20,
+        "deletions": 9,
+        "kind": "modified"
+      },
+      {
+        "path": "frontend/src/lib/api-types.ts",
+        "additions": 20,
+        "deletions": 0,
+        "kind": "modified"
+      },
+      {
+        "path": "sillyhub-daemon/src/api-types.ts",
+        "additions": 20,
+        "deletions": 0,
+        "kind": "modified"
+      }
+    ],
+    "excluded": {
+      "foreignDeclared": []
+    },
+    "note": "flow done 时点冻结（本文件落盘时采集）",
+    "closedBy": "flow done"
+  },
+  "patchSha256": "af9ad3e7378a637bec90dee581daea7b9c39b4de582fce0c4dc6923d1fb120ed",
+  "patchStatus": "ok"
+}

@@ -7241,3 +7241,86 @@
   confirmed_at: null
   source_change: 2026-10-23-live-turn-meta-time
   status: active
+
+## FR-daemon-257 轨道推进改为接近目标时自然减速（缓出），不再线性急停；事件密集时仍能加速追赶
+变更：2026-10-23-marquee-motion-polish
+状态：active
+摘要：单条事件后的推进；事件爆发
+全文：.sillyspec/changes/archive/2026-10-23-marquee-motion-polish/requirements.md#FR-01
+最近确认：997f1963fcc327dd57cce4cc431382d1c309270c
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-23-marquee-motion-polish:flow:测试绑定FR-01
+  tests: frontend/src/components/daemon/__tests__/turn-live-marquee.test.tsx「轨道速度随距离缓出，接近目标时减速（FR-01）」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-23-marquee-motion-polish
+  status: active
+
+## FR-daemon-258 条目内部滚动窗口左右各加约 10px 渐隐遮罩，文本进出柔和；滚动速度维持约 3s 一圈
+变更：2026-10-23-marquee-motion-polish
+状态：active
+摘要：运行中滚动；完成后
+全文：.sillyspec/changes/archive/2026-10-23-marquee-motion-polish/requirements.md#FR-02
+最近确认：997f1963fcc327dd57cce4cc431382d1c309270c
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-23-marquee-motion-polish:flow:测试绑定FR-02
+  tests: frontend/src/components/daemon/__tests__/turn-live-marquee.test.tsx「运行中条目渲染 lucide 图标与转圈，文本区带内部滚动（FR-01）」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-23-marquee-motion-polish
+  status: active
+
+## FR-daemon-259 容器流光改为更窄、更低对比、带模糊、更慢（不少于 6s）的柔和扫过，消除色块感
+变更：2026-10-23-marquee-motion-polish
+状态：active
+摘要：空闲态
+全文：.sillyspec/changes/archive/2026-10-23-marquee-motion-polish/requirements.md#FR-03
+最近确认：997f1963fcc327dd57cce4cc431382d1c309270c
+
+## FR-daemon-260 prefers-reduced-motion 下新增动效全部关闭，reduced 静态展示不变
+变更：2026-10-23-marquee-motion-polish
+状态：active
+摘要：减少动态效果
+全文：.sillyspec/changes/archive/2026-10-23-marquee-motion-polish/requirements.md#FR-04
+最近确认：997f1963fcc327dd57cce4cc431382d1c309270c
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-23-marquee-motion-polish:flow:测试绑定FR-04
+  tests: frontend/src/components/daemon/__tests__/turn-live-marquee.test.tsx「reduced-motion 下静态展示最新一条，不渲染滚动轨道（FR-05）」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-23-marquee-motion-polish
+  status: active
+
+## FR-daemon-261 现有跑马灯 22 用例通过，lint / typecheck 通过
+变更：2026-10-23-marquee-motion-polish
+状态：active
+摘要：交付核验
+全文：.sillyspec/changes/archive/2026-10-23-marquee-motion-polish/requirements.md#FR-05
+最近确认：997f1963fcc327dd57cce4cc431382d1c309270c
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-23-marquee-motion-polish:flow:测试绑定FR-05
+  tests: frontend/src/components/daemon/__tests__/turn-live-marquee.test.tsx
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-23-marquee-motion-polish
+  status: active

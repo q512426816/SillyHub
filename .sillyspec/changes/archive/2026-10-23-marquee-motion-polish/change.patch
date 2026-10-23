@@ -1,0 +1,881 @@
+diff --git a/backend/app/modules/daemon/session/network_context.py b/backend/app/modules/daemon/session/network_context.py
+index 64031776f..0ed615b6c 100644
+--- a/backend/app/modules/daemon/session/network_context.py
++++ b/backend/app/modules/daemon/session/network_context.py
+@@ -87,13 +87,14 @@ def _same_subnet(a: str, b: str, prefixes: tuple[int, ...] = (24,)) -> bool:
+ def _pick_address(machine: MachineNetworkInfo) -> tuple[str | None, str]:
+     """拼访问地址的网卡选择（FR-05）：优先与 observed_ip 同网段的 IPv4 网卡。
+ 
+-    返回 (地址, 说明)：命中同段网卡 → (ip, "")；无同段 → (首个 IPv4, "（未与
+-    观测 IP 同段， uncertain）")式标注；无 IPv4 网卡 → (None, "无可用 IPv4 地址")。
++    返回 (地址, 说明)：命中同段网卡 → (ip, "")；未命中任何同段网卡 → 首个 IPv4
++    +「（多网卡未定，候选：a、b）」标注（评审 P3-1：注释与实现文案对齐）；
++    无 IPv4 网卡 → (None, "无可用 IPv4 地址…")。
+     Windows 虚拟网卡（WSL/Hyper-V）在此层不过滤——同段优先已天然规避（R-02）。
+     """
+     ipv4s = [e for e in machine.interfaces if e.get("family") == "IPv4" and e.get("ip")]
+     if not ipv4s:
+-        return None, "无可用 IPv4 地址"
++        return None, "无可用 IPv4 地址（daemon 未上报网卡）"
+     observed = machine.observed_ip
+     # 网卡自身 cidr 精确判定优先；无 cidr 或 observed 缺失时按 /24 近似。
+     for entry in ipv4s:
+@@ -114,23 +115,58 @@ def _pick_address(machine: MachineNetworkInfo) -> tuple[str | None, str]:
+     return first, f"（多网卡未定，候选：{all_ips}）"
+ 
+ 
++def _same_subnet_by_cidr(user_ip: str, observed: str, interfaces: list[dict]) -> bool | None:
++    """用网卡 cidr 精确判定同网段（评审 P1-3）。
++
++    真实局域网不总是 /24（企业 /16、/8 常见），固定 /24 会把同网段误判为不可达。
++    口径：找包含 observed_ip 的网卡网段——用户 IP 也在其中 → 同段；该网卡网段
++    不含用户 IP → 不同段；没有任何网卡网段包含 observed_ip（NAT 出口/无数据）
++    → None，调用方退 /24+/16 近似档并标注低置信。
++    """
++    try:
++        user_addr = IPv4Address(user_ip)
++        obs_addr = IPv4Address(observed)
++    except (AddressValueError, NetmaskValueError):
++        return None
++    saw_observed_segment = False
++    for entry in interfaces:
++        if entry.get("family") != "IPv4" or not entry.get("cidr"):
++            continue
++        try:
++            net = IPv4Network(str(entry["cidr"]), strict=False)
++        except (AddressValueError, NetmaskValueError):
++            continue
++        if obs_addr not in net:
++            continue
++        saw_observed_segment = True
++        if user_addr in net:
++            return True
++    return False if saw_observed_segment else None
++
++
+ def _machine_line(machine: MachineNetworkInfo, user_ip: str | None) -> str:
+     """单机器判定行渲染。"""
+     observed = machine.observed_ip
+-    has_nics = bool(machine.interfaces)
+-    if user_ip and observed and _is_user_ipv4(user_ip):
+-        if has_nics:
+-            same = _same_subnet(user_ip, observed)
+-        else:
+-            # 无网卡数据：/24 与 /16 双档近似，低置信标注（FR-05/design Phase 3）。
++    if not observed:
++        # P2-2（评审）：network_info 为 NULL / 无观测 IP = daemon 从未上报网络
++        # 数据，网段与地址都无法判定——禁止用它做任何可达性推断。
++        verdict = "无网络数据（daemon 尚未上报来源 IP 与网卡），无法判定网段或给出访问地址"
++    elif user_ip and _is_user_ipv4(user_ip):
++        precise = _same_subnet_by_cidr(user_ip, observed, machine.interfaces)
++        if precise is None:
++            # 无可用网卡掩码（NAT 出口/网卡未上报）：/24+/16 双档近似，低置信。
+             same = _same_subnet(user_ip, observed, prefixes=_NETENV_FALLBACK_PREFIXES)
++            low_conf = True
++        else:
++            same = precise
++            low_conf = False
+         verdict = (
+             "与用户同网段，大概率可直连该机服务" if same else "与用户不同网段，用户浏览器无法直连"
+         )
+-        if not has_nics:
+-            verdict += "（低置信：无网卡数据，按默认掩码近似）"
++        if low_conf:
++            verdict += "（低置信：仅观测 IP 判定，无网卡掩码，按默认掩码近似；拼地址信息不可用）"
+     else:
+-        verdict = "观测 IP 缺失，无法判定网段关系"
++        verdict = "用户来源 IP 非 IPv4 或缺失，无法判定网段关系"
+     addr, note = _pick_address(machine)
+     addr_text = f"访问地址建议用 {addr}{note}" if addr else note
+     return f"{machine.name}（{observed or 'IP 未知'}，{verdict}；{addr_text}）"
+@@ -221,9 +257,11 @@ async def network_context_for_turn(
+     text = render_network_env(user_ip, has_xff, machines)
+     digest = _snapshot_hash(text)
+     now = datetime.now(UTC).timestamp()
+-    client = redis if redis is not None else get_redis()
+     key = _snapshot_key(session_id)
+     try:
++        # P3-3（评审）：get_redis 移入 try——构造期异常（settings/连接池）同样
++        # 降级为每轮注入，而非把异常抛给会话主链路。
++        client = redis if redis is not None else get_redis()
+         if first_turn:
+             await client.set(
+                 key, json.dumps({"h": digest, "ts": now}), ex=NETENV_SNAPSHOT_TTL_SECONDS
+@@ -298,9 +336,14 @@ async def collect_session_machines(
+                 rt = await db.get(DaemonRuntime, row.runtime_id)
+                 if rt is not None:
+                     _add(rt.daemon_instance_id)
+-    # ③ grants 借用集（enabled + 成员 + borrow 权限，查询内部已裁定）。
+-    for shared in await list_machines_shared_to_me(db, actor_user_id=user_id):
+-        _add(shared.machine_id)
++    # ③ grants 借用集——**仅本会话工作区**授予的借用（评审 P1-2：该查询返回用户
++    # 在全部工作区可借的机器，不按 source_workspace_id 过滤会把他工作区机器注入
++    # 本会话，超出 D-005「本会话可用机器」边界）。无工作区会话 → 不注入借用机器
++    # （只留 ①②：runtime 所属 + 本人绑定）。
++    if workspace_id is not None:
++        for shared in await list_machines_shared_to_me(db, actor_user_id=user_id):
++            if shared.source_workspace_id == workspace_id:
++                _add(shared.machine_id)
+ 
+     if not ordered_ids:
+         return []
+diff --git a/backend/app/modules/daemon/session/service/inject.py b/backend/app/modules/daemon/session/service/inject.py
+index c72fcb561..3edb655c0 100644
+--- a/backend/app/modules/daemon/session/service/inject.py
++++ b/backend/app/modules/daemon/session/service/inject.py
+@@ -908,5 +908,9 @@ async def _inject_into_session(
+         provider_config_payload=provider_config_payload,
+         first_turn_briefing=first_turn_briefing,
+         page_context=page_context,
++        # 2026-10-23-session-network-context（评审 P1-1 修复）：常规后续轮必须
++        # 透传网络块——漏此参数则只有首轮（create 路径）有网络段，后续轮静默
++        # 丢弃。渲染点在 control._dispatch_inject_turn。
++        network_context=network_context,
+         inject_attachments=inject_attachments,
+     )
+diff --git a/backend/openapi.json b/backend/openapi.json
+index 42731ef6f..e15842ad1 100644
+--- a/backend/openapi.json
++++ b/backend/openapi.json
+@@ -44176,6 +44176,20 @@
+               }
+             ],
+             "title": "Machine Id"
++          },
++          "network_interfaces": {
++            "anyOf": [
++              {
++                "items": {
++                  "$ref": "#/components/schemas/HeartbeatNetworkInterface"
++                },
++                "type": "array"
++              },
++              {
++                "type": "null"
++              }
++            ],
++            "title": "Network Interfaces"
+           }
+         },
+         "type": "object",
+@@ -51781,6 +51795,45 @@
+         ],
+         "title": "HealthResponse"
+       },
++      "HeartbeatNetworkInterface": {
++        "properties": {
++          "name": {
++            "type": "string",
++            "maxLength": 100,
++            "title": "Name"
++          },
++          "ip": {
++            "type": "string",
++            "maxLength": 64,
++            "title": "Ip"
++          },
++          "cidr": {
++            "anyOf": [
++              {
++                "type": "string",
++                "maxLength": 72
++              },
++              {
++                "type": "null"
++              }
++            ],
++            "title": "Cidr"
++          },
++          "family": {
++            "type": "string",
++            "maxLength": 10,
++            "title": "Family"
++          }
++        },
++        "type": "object",
++        "required": [
++          "name",
++          "ip",
++          "family"
++        ],
++        "title": "HeartbeatNetworkInterface",
++        "description": "心跳网卡清单条目（2026-10-23-session-network-context FR-02 / D-002@v1）。\n\ndaemon network-info.ts collectNetworkInterfaces 过滤后的条目（internal 回环\n与无 cidr 已剔除；IPv4+IPv6 都上报，判定层只消费 IPv4）。字段宽松校验\n（心跳通道宁宽勿断先例）：cidr 容 null、family 原样透传存储。"
++      },
+       "HitsBatchIn": {
+         "properties": {
+           "daemon_local_id": {
+diff --git a/backend/tests/modules/daemon/test_network_context.py b/backend/tests/modules/daemon/test_network_context.py
+index 557b640e9..e9078a103 100644
+--- a/backend/tests/modules/daemon/test_network_context.py
++++ b/backend/tests/modules/daemon/test_network_context.py
+@@ -300,6 +300,36 @@ def test_render_degradation_all_offline():
+     assert "无在线机器" in text or "均离线" in text
+ 
+ 
++def test_render_same_subnet_uses_nic_cidr_not_fixed_24():
++    """P1-3 回归锁：/16 局域网（同段但不同 /24）必须判同段。
++
++    旧实现固定 /24：10.1.5.7 与 10.1.9.200 会被误判「不同网段、无法直连」；
++    按网卡 cidr（/16）精确判定后应为同段。
++    """
++    from app.modules.daemon.session.network_context import MachineNetworkInfo
++
++    machine = MachineNetworkInfo(
++        daemon_id="d-big",
++        name="big-lan",
++        online=True,
++        observed_ip="10.1.9.200",
++        interfaces=[
++            {"name": "eth0", "ip": "10.1.9.200", "cidr": "10.1.9.200/16", "family": "IPv4"}
++        ],
++    )
++    text = _render("10.1.5.7", [machine])
++    assert "同网段，大概率可直连" in text
++    assert "低置信" not in text  # 有 cidr 走精确判定，不应打低置信标注
++
++
++def test_render_no_network_data_wording():
++    """P2-2 回归锁：network_info 为 NULL（无观测 IP）→ 明确「无网络数据」文案，
++    不得输出任何可达性推断。"""
++    text = _render("192.168.1.23", [_machine(observed=None, ips=())])
++    assert "无网络数据" in text
++    assert "大概率可直连" not in text  # 无数据不得输出可达性推断（指引行不算）
++
++
+ def test_render_low_confidence_without_interfaces():
+     """FR-05：机器无网卡数据 → /24 与 /16 双档近似 + 低置信标注。"""
+     text = _render("192.168.0.7", [_machine(observed="192.168.1.10", ips=())])
+@@ -451,6 +481,147 @@ async def test_collect_session_machines_empty_when_no_binding(
+     )
+ 
+ 
++# ── FR-01：注入链路（后续轮 SESSION_INJECT prompt 含网络段）──────────────
++
++
++def _mock_ws_hub():
++    from unittest.mock import AsyncMock, MagicMock
++
++    hub = MagicMock()
++    hub.is_connected.return_value = True
++    hub.connected_runtime_ids = []
++    hub.connected_daemon_ids = []
++    hub.send_wakeup = AsyncMock(return_value=True)
++    hub.send_session_control = AsyncMock(return_value=True)
++    return hub
++
++
++def _inject_prompt_for_run(hub, run) -> str:
++    from app.modules.daemon.protocol import DAEMON_MSG_SESSION_INJECT
++
++    for call in hub.send_session_control.call_args_list:
++        args = call.args
++        if (
++            len(args) >= 3
++            and args[1] == DAEMON_MSG_SESSION_INJECT
++            and args[2].get("run_id") == str(run.id)
++        ):
++            return args[2]["prompt"]
++    raise AssertionError(f"no SESSION_INJECT payload for run {run.id}")
++
++
++@pytest.mark.asyncio
++async def test_later_turn_prompt_contains_network_env(db_session: AsyncSession) -> None:
++    """P1-1 回归锁：**后续轮**（非首轮）注入链也必须带【网络环境】段。
++
++    首轮走 create 路径、后续轮走 inject→_dispatch_inject_turn 路径；评审发现
++    后者曾漏传 network_context，只测首轮会漏掉该缺陷。
++    """
++    from datetime import UTC, datetime
++    from unittest.mock import patch
++
++    from app.modules.daemon.model import DaemonRuntime
++    from app.modules.daemon.session.network_context import NetworkContextBlock
++
++    user = await _seed_user(db_session)
++    # 与 test_inject_first_turn_briefing 先例同形：runtime 不绑 daemon_instance
++    # （避免 placement 的 ws-connected 候选校验影响 create）。
++    db_session.add(
++        DaemonRuntime(
++            id=uuid.uuid4(),
++            user_id=user.id,
++            name="daemon",
++            provider="claude",
++            status="online",
++            last_heartbeat_at=datetime.now(UTC),
++        )
++    )
++    await db_session.commit()
++
++    svc = DaemonService(db_session)
++    hub = _mock_ws_hub()
++    # patch 必须覆盖 create——create 也经 WS 派发首轮（先例 fixture 全程 patch）。
++    with patch("app.modules.daemon.ws_hub.get_daemon_ws_hub", return_value=hub):
++        created = await svc.create_session(user.id, provider="claude", prompt="first")
++        # 会话首轮完结，才能注入后续轮（单会话单活跃 run 不变式）。
++        created.agent_run.status = "completed"
++        created.agent_run.finished_at = datetime.now(UTC)
++        await db_session.commit()
++
++        result = await svc.inject_session(
++            created.agent_session.id,
++            user.id,
++            prompt="怎么访问项目地址",
++            network_context=NetworkContextBlock(user_ip="192.168.1.23", has_xff=True),
++        )
++
++    dispatched = _inject_prompt_for_run(hub, result.agent_run)
++    assert "【网络环境】" in dispatched
++    assert "192.168.1.23" in dispatched
++    # 无在线机器（本用例未绑机器）→ 走「在线机器：无」降级，仍须给出指引。
++    assert "在线机器：无" in dispatched
++    assert dispatched.endswith("怎么访问项目地址")  # 用户原文在段后（展示层干净不变）
++
++
++# ── FR-04：grants 借用集按会话工作区过滤（P1-2 回归锁）──────────────────────
++
++
++@pytest.mark.asyncio
++async def test_collect_machines_excludes_other_workspace_grants(
++    db_session: AsyncSession,
++) -> None:
++    """P1-2 回归锁：他工作区授予的借用机器不得进入本会话机器清单。
++
++    构造：机器 A 由 workspace_a 共享、机器 B 由 workspace_b 共享，查询
++    workspace_a → 只应含 A。此用例锁 collect_session_machines 的
++    source_workspace_id 过滤分支（查询函数本身返回全部工作区借用集）。
++    """
++    from app.modules.daemon.session.network_context import collect_session_machines
++
++    user = await _seed_user(db_session)
++    ws_a, ws_b = uuid.uuid4(), uuid.uuid4()
++    machines = {}
++    for key, _ws in (("a", ws_a), ("b", ws_b)):
++        did = uuid.uuid4()
++        db_session.add(
++            DaemonInstance(
++                id=did,
++                user_id=user.id,
++                hostname=f"m-{key}",
++                server_url="http://backend",
++                status="online",
++                network_info={"observed_ip": f"192.168.1.{(key == 'a' and 10) or 20}"},
++            )
++        )
++        machines[key] = did
++    await db_session.commit()
++
++    class _Shared:
++        def __init__(self, machine_id, ws):
++            self.machine_id = machine_id
++            self.source_workspace_id = ws
++
++    async def _fake_shared(_db, *, actor_user_id):
++        return [
++            _Shared(machines["a"], ws_a),
++            _Shared(machines["b"], ws_b),
++        ]
++
++    from unittest.mock import patch
++
++    with patch("app.modules.daemon.grants.queries.list_machines_shared_to_me", new=_fake_shared):
++        result = await collect_session_machines(
++            db_session, user_id=user.id, runtime_id=None, workspace_id=ws_a
++        )
++    assert [m.daemon_id for m in result] == [str(machines["a"])]
++    # 无工作区会话 → 不注入任何借用机器。
++    with patch("app.modules.daemon.grants.queries.list_machines_shared_to_me", new=_fake_shared):
++        none_ws = await collect_session_machines(
++            db_session, user_id=user.id, runtime_id=None, workspace_id=None
++        )
++    assert none_ws == []
++
++
+ @pytest.mark.asyncio
+ async def test_snapshot_redis_failure_degrades_to_every_turn():
+     """Redis 故障 → 每轮注入（可失去重不失功能）。"""
+diff --git a/frontend/src/app/globals.css b/frontend/src/app/globals.css
+index bde8f03ae..6cb6d91d9 100644
+--- a/frontend/src/app/globals.css
++++ b/frontend/src/app/globals.css
+@@ -1109,17 +1109,57 @@
+     position: absolute;
+     inset-block: 0;
+     left: 0;
+-    width: 38%;
++    width: 22%;
+     background: linear-gradient(
+       90deg,
+       transparent,
+-      color-mix(in srgb, var(--color-brand-400) 14%, transparent),
++      color-mix(in srgb, var(--color-brand-300) 26%, transparent),
+       transparent
+     );
+-    animation: sh-live-marquee-sheen 3.6s ease-in-out infinite;
++    filter: blur(6px);
++    opacity: 0;
++    animation: sh-live-marquee-sheen 6.5s ease-in-out infinite;
+     pointer-events: none;
+   }
+ 
++  /* 2026-10-23-marquee-motion-polish（FR-02）：轨道视口左右渐隐——条目
++     进出容器边缘柔和，不再硬切。 */
++  .sh-live-marquee-vp {
++    -webkit-mask-image: linear-gradient(
++      90deg,
++      transparent 0,
++      #000 14px,
++      #000 calc(100% - 14px),
++      transparent 100%
++    );
++    mask-image: linear-gradient(
++      90deg,
++      transparent 0,
++      #000 14px,
++      #000 calc(100% - 14px),
++      transparent 100%
++    );
++  }
++
++  /* 2026-10-23-marquee-motion-polish（FR-02）：运行中条目内部滚动窗口
++     左右各 10px 渐隐，文字进出柔和；完成态截断文本不挂本类。 */
++  .sh-live-marquee-window {
++    -webkit-mask-image: linear-gradient(
++      90deg,
++      transparent 0,
++      #000 10px,
++      #000 calc(100% - 10px),
++      transparent 100%
++    );
++    mask-image: linear-gradient(
++      90deg,
++      transparent 0,
++      #000 10px,
++      #000 calc(100% - 10px),
++      transparent 100%
++    );
++  }
++
+   /* 2026-10-23-marquee-item-detail（FR-01）：运行中条目内部文本循环滚动——
+      双份文本各占 50%，平移一份即无缝；只在文本窗口 overflow-hidden 内滚动，
+      图标/状态/耗时区不参与。 */
+@@ -1149,14 +1189,17 @@
+ @keyframes sh-live-marquee-sheen {
+   0%,
+   58% {
+-    transform: translateX(-140%);
++    transform: translateX(-160%);
+     opacity: 0;
+   }
+-  66% {
+-    opacity: 0.9;
++  68% {
++    opacity: 0.5;
++  }
++  88% {
++    opacity: 0.4;
+   }
+   100% {
+-    transform: translateX(360%);
++    transform: translateX(420%);
+     opacity: 0;
+   }
+ }
+diff --git a/frontend/src/components/daemon/__tests__/turn-live-marquee.test.tsx b/frontend/src/components/daemon/__tests__/turn-live-marquee.test.tsx
+index db8fc53bf..061be947b 100644
+--- a/frontend/src/components/daemon/__tests__/turn-live-marquee.test.tsx
++++ b/frontend/src/components/daemon/__tests__/turn-live-marquee.test.tsx
+@@ -12,6 +12,7 @@ import {
+   TurnLiveMarquee,
+   deriveLiveMarqueeEntries,
+   formatMarqueeDuration,
++  marqueeSpeedForDistance,
+   LIVE_MARQUEE_MAX_ENTRIES,
+ } from "@/components/daemon/turn-live-marquee";
+ import {
+@@ -183,6 +184,14 @@ describe("deriveLiveMarqueeEntries 纯函数（FR-01 / FR-03）", () => {
+     expect(formatMarqueeDuration(2000)).toBe("2s");
+     expect(formatMarqueeDuration(65_000)).toBe("1m 05s");
+   });
++
++  it("轨道速度随距离缓出，接近目标时减速（FR-01）", () => {
++    expect(marqueeSpeedForDistance(0)).toBe(40);
++    expect(marqueeSpeedForDistance(20)).toBe(40);
++    expect(marqueeSpeedForDistance(100)).toBeCloseTo(90, 5);
++    expect(marqueeSpeedForDistance(228)).toBeCloseTo(205.2, 5);
++    expect(marqueeSpeedForDistance(10_000)).toBe(1600);
++  });
+ });
+ 
+ describe("TurnLiveMarquee 连续轨道（FR-01 / FR-02 / FR-05）", () => {
+@@ -215,6 +224,8 @@ describe("TurnLiveMarquee 连续轨道（FR-01 / FR-02 / FR-05）", () => {
+     expect(item.querySelector("svg")).not.toBeNull();
+     expect(getAllByTestId("marquee-spinner")).toHaveLength(1);
+     expect(container.querySelector(".sh-live-marquee-ticker")).not.toBeNull();
++    // 运行中滚动窗口带左右渐隐（FR-02）。
++    expect(container.querySelector(".sh-live-marquee-window")).not.toBeNull();
+     expect(item.textContent).toContain("先分析登录链路");
+   });
+ 
+@@ -222,7 +233,7 @@ describe("TurnLiveMarquee 连续轨道（FR-01 / FR-02 / FR-05）", () => {
+     const doneEntries = deriveLiveMarqueeEntries([
+       tool("tool-done", { startedAt: 1000, endedAt: 2500 }),
+     ]);
+-    const { getByTestId, queryByTestId } = render(
++    const { getByTestId, queryByTestId, container } = render(
+       <TurnLiveMarquee entries={doneEntries} />,
+     );
+ 
+@@ -230,6 +241,8 @@ describe("TurnLiveMarquee 连续轨道（FR-01 / FR-02 / FR-05）", () => {
+     expect(duration.textContent).toContain("1.5s");
+     expect(duration.querySelector("svg")).not.toBeNull();
+     expect(queryByTestId("marquee-spinner")).toBeNull();
++    // 完成态截断文本不加渐隐遮罩（FR-02）。
++    expect(container.querySelector(".sh-live-marquee-window")).toBeNull();
+   });
+ 
+   it("进行中条目不显示耗时（FR-02）", () => {
+diff --git a/frontend/src/components/daemon/file-changes/__tests__/turn-file-diff-dialog.test.tsx b/frontend/src/components/daemon/file-changes/__tests__/turn-file-diff-dialog.test.tsx
+index f5c279425..63202748b 100644
+--- a/frontend/src/components/daemon/file-changes/__tests__/turn-file-diff-dialog.test.tsx
++++ b/frontend/src/components/daemon/file-changes/__tests__/turn-file-diff-dialog.test.tsx
+@@ -20,6 +20,12 @@ vi.mock("@/lib/daemon/sessions", () => ({
+   getAgentSessionLogs: (...args: unknown[]) => getAgentSessionLogsMock(...args),
+ }));
+ 
++// 2026-10-23-diff-dialog-copy-fallback：剪贴板零副作用 mock（断言复制内容）。
++const copyTextToClipboardMock = vi.fn((_text: string) => Promise.resolve());
++vi.mock("@/lib/clipboard", () => ({
++  copyTextToClipboard: (text: string) => copyTextToClipboardMock(text),
++}));
++
+ function callLog(toolUseId: string, filePath: string, tool = "Edit"): AgentRunLogEntry {
+   return {
+     id: `call-${toolUseId}`,
+@@ -188,3 +194,55 @@ describe("TurnFileDiffDialog", () => {
+     expect(screen.queryByTestId("turn-file-diff-section")).toBeNull();
+   });
+ });
++
++// 2026-10-23-diff-dialog-copy-fallback：超长 diff 复制兜底（FR-01~03）。
++describe("TurnFileDiffDialog：复制兜底（2026-10-23-diff-dialog-copy-fallback）", () => {
++  afterEach(() => {
++    copyTextToClipboardMock.mockClear();
++  });
++
++  it("每段补丁有常显复制按钮，点击写入完整 diff 文本（FR-01）", async () => {
++    getAgentSessionLogsMock.mockResolvedValue([
++      callLog("tu-1", "frontend/src/a.ts"),
++      resultLog("tu-1", ["-old line", "+new line"]),
++    ]);
++    renderDialog();
++
++    const button = await screen.findByRole("button", { name: "复制该段 diff" });
++    // 常显：不依赖父容器 hover（opacity-100 + static 覆盖默认浮出定位）。
++    expect(button.className).toContain("opacity-100");
++    expect(button.className).toContain("static");
++
++    fireEvent.click(button);
++    expect(copyTextToClipboardMock).toHaveBeenCalledTimes(1);
++    expect(copyTextToClipboardMock).toHaveBeenCalledWith("-old line\n+new line");
++  });
++
++  it("超 2000 行：复制内容不截断（渲染上限不进复制面，FR-02）", async () => {
++    const lines = Array.from({ length: 2500 }, (_, i) => `+row-${i}`);
++    getAgentSessionLogsMock.mockResolvedValue([
++      callLog("tu-1", "frontend/src/a.ts"),
++      resultLog("tu-1", lines),
++    ]);
++    renderDialog();
++
++    fireEvent.click(await screen.findByRole("button", { name: "复制该段 diff" }));
++    const copied = copyTextToClipboardMock.mock.calls[0]?.[0] ?? "";
++    const copiedLines = copied.split("\n");
++    expect(copiedLines).toHaveLength(2500);
++    expect(copiedLines[2499]).toBe("+row-2499");
++  });
++
++  it("无补丁说明态 / 删除说明态不出现复制按钮（FR-03）", async () => {
++    getAgentSessionLogsMock.mockResolvedValue([]);
++    const { unmount } = renderDialog();
++    expect(await screen.findByTestId("turn-file-diff-body")).toBeDefined();
++    expect(screen.queryByRole("button", { name: /复制该段 diff/ })).toBeNull();
++    unmount();
++
++    getAgentSessionLogsMock.mockResolvedValue([]);
++    renderDialog({ status: "deleted" });
++    expect(await screen.findByText(/本轮被删除/)).toBeDefined();
++    expect(screen.queryByRole("button", { name: /复制该段 diff/ })).toBeNull();
++  });
++});
+diff --git a/frontend/src/components/daemon/file-changes/__tests__/turn-file-diff.test.ts b/frontend/src/components/daemon/file-changes/__tests__/turn-file-diff.test.ts
+index 032b1ff78..d2ba5aa94 100644
+--- a/frontend/src/components/daemon/file-changes/__tests__/turn-file-diff.test.ts
++++ b/frontend/src/components/daemon/file-changes/__tests__/turn-file-diff.test.ts
+@@ -15,6 +15,7 @@ import type { AgentRunLogEntry } from "@/lib/agent";
+ 
+ import {
+   collectTurnFilePatches,
++  diffRowsToText,
+   matchesRepoPath,
+   toolCallFilePath,
+ } from "../turn-file-diff";
+@@ -186,3 +187,50 @@ describe("collectTurnFilePatches（日志 → 按序补丁段）", () => {
+     expect(collectTurnFilePatches([resultLog({ toolUseId: "tu-1" })], "a.ts")).toEqual([]);
+   });
+ });
++
++// 2026-10-23-diff-dialog-copy-fallback task-01：diffRowsToText 纯映射。
++describe("diffRowsToText（DiffRow → unified 前缀文本）", () => {
++  it("按行类型重建前缀：del=-、add=+、ctx=空格，行序保持", () => {
++    const text = diffRowsToText([
++      { type: "ctx", oldNo: 1, newNo: 1, text: "keep" },
++      { type: "del", oldNo: 2, newNo: null, text: "gone" },
++      { type: "add", oldNo: null, newNo: 2, text: "fresh" },
++    ]);
++    expect(text).toBe(" keep\n-gone\n+fresh");
++  });
++
++  it("hunk 分隔伪行（oldNo/newNo 均 null 的 ctx）被剔除，不污染复制文本", () => {
++    const text = diffRowsToText([
++      { type: "del", oldNo: 1, newNo: null, text: "a" },
++      { type: "ctx", oldNo: null, newNo: null, text: "…" },
++      { type: "add", oldNo: null, newNo: 5, text: "b" },
++    ]);
++    expect(text).toBe("-a\n+b");
++    expect(text).not.toContain(" …");
++  });
++
++  it("内容自带前导空格/符号时原样保留（只加类型前缀一次）", () => {
++    expect(diffRowsToText([{ type: "ctx", oldNo: 3, newNo: 3, text: "  indented" }])).toBe(
++      "   indented",
++    );
++    expect(diffRowsToText([{ type: "add", oldNo: null, newNo: 1, text: "-not-a-del" }])).toBe(
++      "+-not-a-del",
++    );
++  });
++
++  it("不截断：2500 行 rows 全量输出（渲染 2000 行上限不进复制面）", () => {
++    const rows = Array.from({ length: 2500 }, (_, i) => ({
++      type: "add" as const,
++      oldNo: null,
++      newNo: i + 1,
++      text: `line-${i}`,
++    }));
++    const text = diffRowsToText(rows);
++    expect(text.split("\n")).toHaveLength(2500);
++    expect(text.endsWith("+line-2499")).toBe(true);
++  });
++
++  it("空数组 → 空串", () => {
++    expect(diffRowsToText([])).toBe("");
++  });
++});
+diff --git a/frontend/src/components/daemon/file-changes/turn-file-diff-dialog.tsx b/frontend/src/components/daemon/file-changes/turn-file-diff-dialog.tsx
+index f4b3f78b4..5811edb2c 100644
+--- a/frontend/src/components/daemon/file-changes/turn-file-diff-dialog.tsx
++++ b/frontend/src/components/daemon/file-changes/turn-file-diff-dialog.tsx
+@@ -19,6 +19,7 @@
+ import { useEffect, useState } from "react";
+ 
+ import { DiffView } from "@/components/agent-log/tool-diff";
++import { CopyButton } from "@/components/daemon/copy-button";
+ import { Button } from "@/components/ui/button";
+ import {
+   Dialog,
+@@ -31,7 +32,11 @@ import { getAgentSessionLogs } from "@/lib/daemon/sessions";
+ import { cn } from "@/lib/utils";
+ 
+ import { FILE_STATUS_META, type FileChangeStatus } from "./file-changes-card";
+-import { collectTurnFilePatches, type TurnFilePatchSection } from "./turn-file-diff";
++import {
++  collectTurnFilePatches,
++  diffRowsToText,
++  type TurnFilePatchSection,
++} from "./turn-file-diff";
+ 
+ export interface TurnFileDiffDialogProps {
+   sessionId: string;
+@@ -169,6 +174,16 @@ export function TurnFileDiffDialog({
+                     <span className="font-medium text-foreground">第 {index + 1} 次</span>
+                     <span>·</span>
+                     <span>{section.toolName}</span>
++                    {section.rows != null && (
++                      // 2026-10-23-diff-dialog-copy-fallback / FR-01：超长 diff 的复制
++                      // 兜底（DiffView 2000 行上限只截渲染，rows 完整）。常显覆盖：
++                      // static 拆掉默认 absolute 浮出定位、opacity-100 拆掉 hover 才显。
++                      <CopyButton
++                        text={diffRowsToText(section.rows)}
++                        ariaLabel="复制该段 diff"
++                        className="static right-auto bottom-auto ml-auto opacity-100"
++                      />
++                    )}
+                   </p>
+                   {section.rows ? (
+                     <DiffView rows={section.rows} />
+diff --git a/frontend/src/components/daemon/file-changes/turn-file-diff.ts b/frontend/src/components/daemon/file-changes/turn-file-diff.ts
+index b2888f503..01a809c29 100644
+--- a/frontend/src/components/daemon/file-changes/turn-file-diff.ts
++++ b/frontend/src/components/daemon/file-changes/turn-file-diff.ts
+@@ -86,6 +86,24 @@ function parseToolCallEntry(entry: AgentRunLogEntry): ParsedToolCall | null {
+   return { toolName: record.tool, filePath: toolCallFilePath(args), toolUseId };
+ }
+ 
++/**
++ * DiffRow[] → unified 前缀文本（2026-10-23-diff-dialog-copy-fallback / FR-01/02）。
++ *
++ * 复制兜底的数据源：DiffView 的 2000 行上限只是渲染截断（rows 本身完整），本函数
++ * 对全部行重建 `-` / `+` / 空格 前缀文本；parseStructuredPatch 在多 hunk 间插入的
++ * 「…」视觉分隔（type=ctx 且 oldNo/newNo 均 null）不是真实 diff 行，剔除不进入
++ * 复制文本。不拼造 unified header（hunk 边界信息已丢，伪造会误导 git apply）。
++ */
++export function diffRowsToText(rows: readonly DiffRow[]): string {
++  const lines: string[] = [];
++  for (const row of rows) {
++    if (row.type === "ctx" && row.oldNo == null && row.newNo == null) continue;
++    const prefix = row.type === "del" ? "-" : row.type === "add" ? "+" : " ";
++    lines.push(prefix + row.text);
++  }
++  return lines.join("\n");
++}
++
+ /**
+  * 本轮日志 + 仓根相对路径 → 按编辑完成序（日志序）的补丁段列表。
+  *
+diff --git a/frontend/src/components/daemon/turn-live-marquee.tsx b/frontend/src/components/daemon/turn-live-marquee.tsx
+index d66f8ab2a..dffea4b54 100644
+--- a/frontend/src/components/daemon/turn-live-marquee.tsx
++++ b/frontend/src/components/daemon/turn-live-marquee.tsx
+@@ -60,9 +60,17 @@ import type { TurnSegment } from "./session-log-assembler";
+  * 上限内不做窗口替换，保证"只向最新流、不回跳"。
+  */
+ export const LIVE_MARQUEE_MAX_ENTRIES = 200;
+-/** 滚动基础速度（px/s）与追赶上限；距离越大越快，事件爆发时能追平。 */
+-export const LIVE_MARQUEE_BASE_SPEED = 180;
++/** 追赶上限（px/s）；距离主导的缓出曲线见 marqueeSpeedForDistance。 */
+ export const LIVE_MARQUEE_MAX_SPEED = 1600;
++
++/**
++ * 轨道推进速度（px/s）——距离主导的缓出曲线（2026-10-23-marquee-motion-polish）：
++ * 距离大时加速追赶，接近目标时自然减速；下限 40px/s 防长尾巴，上限沿用 1600。
++ */
++export function marqueeSpeedForDistance(distance: number): number {
++  const d = Math.max(0, distance);
++  return Math.min(LIVE_MARQUEE_MAX_SPEED, Math.max(40, d * 0.9));
++}
+ /** 单条摘要截断长度（用户不需要看清全文，单行不撑破）。 */
+ const CLIP_LENGTH = 64;
+ 
+@@ -400,7 +408,13 @@ function MarqueeItemView({
+       )}
+     >
+       <Icon aria-hidden className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+-      <span className="relative min-w-0 flex-1 overflow-hidden">
++      <span
++        className={cn(
++          "relative min-w-0 flex-1 overflow-hidden",
++          // 运行中滚动窗口左右渐隐；完成态截断文本不加，保持清晰。
++          running && !reduced && "sh-live-marquee-window",
++        )}
++      >
+         {running && !reduced ? (
+           <span className="sh-live-marquee-ticker inline-flex w-max items-center">
+             <span className="whitespace-nowrap pr-6 font-medium text-foreground">
+@@ -506,11 +520,8 @@ export const TurnLiveMarquee = memo(function TurnLiveMarquee({
+       const target = targetRef.current;
+       const distance = offsetRef.current - target;
+       if (distance > 0.5) {
+-        // 追赶距离越大速度越快：事件密集时加速，稀疏时慢速流动。
+-        const speed = Math.min(
+-          LIVE_MARQUEE_MAX_SPEED,
+-          LIVE_MARQUEE_BASE_SPEED + distance * 1.2,
+-        );
++        // 距离主导的缓出：追近时减速，事件密集时加速追赶（2026-10-23-marquee-motion-polish）。
++        const speed = marqueeSpeedForDistance(distance);
+         const delta = Math.min(distance, (speed * dt) / 1000);
+         offsetRef.current -= delta;
+         if (offsetRef.current - target < 0.5) offsetRef.current = target;
+@@ -672,7 +683,7 @@ export const TurnLiveMarquee = memo(function TurnLiveMarquee({
+         <div
+           ref={viewportRef}
+           className={cn(
+-            "relative z-10 min-w-0 flex-1 overflow-hidden transition-opacity duration-200",
++            "sh-live-marquee-vp relative z-10 min-w-0 flex-1 overflow-hidden transition-opacity duration-200",
+             !ready && "opacity-0",
+           )}
+         >
+diff --git a/frontend/src/lib/api-types.ts b/frontend/src/lib/api-types.ts
+index fe485c8f3..5119d73c8 100644
+--- a/frontend/src/lib/api-types.ts
++++ b/frontend/src/lib/api-types.ts
+@@ -15684,6 +15684,8 @@ export interface components {
+             spec_cache?: components["schemas"]["DaemonHeartbeatSpecCacheItem"][];
+             /** Machine Id */
+             machine_id?: string | null;
++            /** Network Interfaces */
++            network_interfaces?: components["schemas"]["HeartbeatNetworkInterface"][] | null;
+         };
+         /**
+          * DaemonHeartbeatResponse
+@@ -18998,6 +19000,24 @@ export interface components {
+             /** Environment */
+             environment: string;
+         };
++        /**
++         * HeartbeatNetworkInterface
++         * @description 心跳网卡清单条目（2026-10-23-session-network-context FR-02 / D-002@v1）。
++         *
++         *     daemon network-info.ts collectNetworkInterfaces 过滤后的条目（internal 回环
++         *     与无 cidr 已剔除；IPv4+IPv6 都上报，判定层只消费 IPv4）。字段宽松校验
++         *     （心跳通道宁宽勿断先例）：cidr 容 null、family 原样透传存储。
++         */
++        HeartbeatNetworkInterface: {
++            /** Name */
++            name: string;
++            /** Ip */
++            ip: string;
++            /** Cidr */
++            cidr?: string | null;
++            /** Family */
++            family: string;
++        };
+         /**
+          * HitsBatchIn
+          * @description POST /knowledge/hits/batch 请求体。
+diff --git a/sillyhub-daemon/src/api-types.ts b/sillyhub-daemon/src/api-types.ts
+index fe485c8f3..5119d73c8 100644
+--- a/sillyhub-daemon/src/api-types.ts
++++ b/sillyhub-daemon/src/api-types.ts
+@@ -15684,6 +15684,8 @@ export interface components {
+             spec_cache?: components["schemas"]["DaemonHeartbeatSpecCacheItem"][];
+             /** Machine Id */
+             machine_id?: string | null;
++            /** Network Interfaces */
++            network_interfaces?: components["schemas"]["HeartbeatNetworkInterface"][] | null;
+         };
+         /**
+          * DaemonHeartbeatResponse
+@@ -18998,6 +19000,24 @@ export interface components {
+             /** Environment */
+             environment: string;
+         };
++        /**
++         * HeartbeatNetworkInterface
++         * @description 心跳网卡清单条目（2026-10-23-session-network-context FR-02 / D-002@v1）。
++         *
++         *     daemon network-info.ts collectNetworkInterfaces 过滤后的条目（internal 回环
++         *     与无 cidr 已剔除；IPv4+IPv6 都上报，判定层只消费 IPv4）。字段宽松校验
++         *     （心跳通道宁宽勿断先例）：cidr 容 null、family 原样透传存储。
++         */
++        HeartbeatNetworkInterface: {
++            /** Name */
++            name: string;
++            /** Ip */
++            ip: string;
++            /** Cidr */
++            cidr?: string | null;
++            /** Family */
++            family: string;
++        };
+         /**
+          * HitsBatchIn
+          * @description POST /knowledge/hits/batch 请求体。
