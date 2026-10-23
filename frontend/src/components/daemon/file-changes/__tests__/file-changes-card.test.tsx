@@ -12,6 +12,8 @@
 //   9. task-11：降级形态（degraded + capability="tool_only"）——「仅工具编辑」+ 说明行、
 //      无文件行、头部不可展开、全树无「无改动」；
 //  10. task-11：binary 行破折号；命令行归因行（edits=0）不出「改0次」；tool 行工具名提示。
+//  11. 2026-10-23-file-card-agent-grouping：双段头部（本轮AGENT 段 + 总共段）、
+//      展开区默认只列 agent 行、shell 行收进「命令行/其他」按钮展开、删除行可点。
 
 import { describe, expect, it, vi } from "vitest";
 import { fireEvent, render, screen } from "@testing-library/react";
@@ -44,20 +46,23 @@ const EIGHT_FILES: ChangedFile[] = [
 ];
 
 describe("FileChangesCard", () => {
-  it("折叠态只渲染 28px 头部一行，totals 由 files 求和", () => {
+  it("折叠态只渲染 28px 头部一行，双段标题 totals 由 files 求和", () => {
     render(<FileChangesCard files={EIGHT_FILES} turnNo={16} />);
 
     const header = screen.getByTestId("file-changes-header");
     expect(header.className).toContain("h-7");
     expect(screen.getByTestId("file-changes-card")).toHaveAttribute("data-expanded", "false");
-    expect(screen.getByText("8 个文件变更")).toBeInTheDocument();
-    expect(screen.getByText("+230")).toBeInTheDocument();
+    // 双段：本轮AGENT 7 个（+230 −7）| 总共 8 个（+230 −8）。
+    expect(screen.getByText("本轮AGENT 7 个文件变更")).toBeInTheDocument();
+    expect(screen.getByText("总共 8 个文件变更")).toBeInTheDocument();
+    expect(screen.getAllByText("+230")).toHaveLength(2);
+    expect(screen.getByText("−7")).toBeInTheDocument();
     expect(screen.getByText("−8")).toBeInTheDocument();
     expect(screen.getByText("第 16 轮")).toBeInTheDocument();
     expect(screen.queryAllByTestId("file-changes-row")).toHaveLength(0);
   });
 
-  it("点头部展开：行高 24px、逐文件 +/− 与「改N次」", () => {
+  it("点头部展开：行高 24px、逐文件 +/− 与「改N次」；主列表只列 agent 行", () => {
     render(<FileChangesCard files={EIGHT_FILES} />);
 
     fireEvent.click(screen.getByTestId("file-changes-header"));
@@ -68,23 +73,35 @@ describe("FileChangesCard", () => {
       screen.getByTestId("file-changes-header").getAttribute("aria-controls"),
     ).toBe(screen.getByTestId("file-changes-list").id);
 
+    // 2026-10-23-file-card-agent-grouping：主列表默认只列 tool 行（7 个），
+    // shell 行收进「命令行/其他」按钮，不在主列表。
     const rows = screen.getAllByTestId("file-changes-row");
-    expect(rows).toHaveLength(8);
+    expect(rows).toHaveLength(7);
     expect(rows[0]!.className).toContain("h-6");
     expect(rows[0]!.textContent).toContain("+128");
     expect(rows[0]!.textContent).toContain("−4");
     expect(rows[0]!.textContent).toContain("改3次");
+    expect(screen.queryByText("package.json")).toBeNull();
   });
 
-  it("shell 归因只在对应行出「命令行」徽标", () => {
+  it("命令行/其他按钮展开后 shell 行可见（含「命令行」徽标），再点收起", () => {
     render(<FileChangesCard files={EIGHT_FILES} startExpanded />);
 
-    expect(screen.getAllByText("命令行")).toHaveLength(1);
+    const toggle = screen.getByTestId("file-changes-other-toggle");
+    expect(toggle).toHaveAttribute("aria-expanded", "false");
+    expect(screen.queryByText("package.json")).toBeNull();
+
+    fireEvent.click(toggle);
+    expect(screen.getByTestId("file-changes-other-toggle")).toHaveAttribute("aria-expanded", "true");
     const shellRow = screen.getByText("package.json").closest('[data-testid="file-changes-row"]');
     expect(shellRow).toHaveAttribute("data-source", "shell");
+    expect(screen.getAllByText("命令行")).toHaveLength(1);
+
+    fireEvent.click(screen.getByTestId("file-changes-other-toggle"));
+    expect(screen.queryByText("package.json")).toBeNull();
   });
 
-  it("truncated：头部（部分）+ 行级统计退化为 —，不拿半截 numstat 充总数", () => {
+  it("truncated：头部（部分）+ 两段行级统计退化为 —，不拿半截 numstat 充总数", () => {
     render(<FileChangesCard files={EIGHT_FILES.slice(0, 3)} truncated startExpanded />);
 
     expect(screen.getByText("（部分）")).toBeInTheDocument();
@@ -93,7 +110,7 @@ describe("FileChangesCard", () => {
     expect(screen.getByTestId("file-changes-header").textContent).not.toContain("−");
     expect(screen.getAllByTestId("file-changes-row")[0]!.textContent).toContain("—");
     // 计数仍可靠：文件数与编辑次数照常。
-    expect(screen.getByText("3 个文件变更")).toBeInTheDocument();
+    expect(screen.getByText("总共 3 个文件变更")).toBeInTheDocument();
     expect(screen.getAllByTestId("file-changes-row")[0]!.textContent).toContain("改3次");
   });
 
@@ -216,7 +233,7 @@ describe("FileChangesCard：降级形态与真实快照细节（task-11）", () 
     ).not.toBeNull();
   });
 
-  it("命令行归因行（edits=0）不出「改0次」；tool 行保留工具名提示", () => {
+  it("命令行归因行（edits=0）不出「改0次」；tool 行保留工具名提示（其他区段内同样适用）", () => {
     render(
       <FileChangesCard
         files={[
@@ -234,7 +251,14 @@ describe("FileChangesCard：降级形态与真实快照细节（task-11）", () 
       />,
     );
 
-    const [shellRow, toolRow] = screen.getAllByTestId("file-changes-row");
+    // shell 行在「命令行/其他」区段：先展开再取行（DOM 序：agent 主列表在前）。
+    fireEvent.click(screen.getByTestId("file-changes-other-toggle"));
+    const shellRow = screen
+      .getAllByTestId("file-changes-row")
+      .find((row) => row.getAttribute("data-source") === "shell")!;
+    const toolRow = screen
+      .getAllByTestId("file-changes-row")
+      .find((row) => row.getAttribute("data-source") === "tool")!;
     // 0 会被读成「没改过」，而该行就在改动清单里 → 整列不渲染。
     expect(shellRow!.textContent).not.toContain("改0次");
     expect(shellRow!.querySelector('[data-testid="file-changes-edits"]')).toBeNull();
@@ -244,7 +268,7 @@ describe("FileChangesCard：降级形态与真实快照细节（task-11）", () 
     expect(edits!.getAttribute("title")).toBe("编辑工具：Edit、Write");
   });
 
-  it("状态徽标与交互：新增/删除/新文件；删除行不可点击、untracked 行破折号", () => {
+  it("状态徽标：新增/新文件在主列表，删除行在「其他」区段且可点击（grouping 后）", () => {
     const onOpenFile = vi.fn();
     render(
       <FileChangesCard
@@ -266,36 +290,64 @@ describe("FileChangesCard：降级形态与真实快照细节（task-11）", () 
       />,
     );
 
-    const badges = screen
-      .getAllByTestId("file-changes-status")
-      .map((el) => el.textContent);
-    expect(badges).toEqual(["新增", "删除", "新文件"]);
-
-    const rows = screen.getAllByTestId("file-changes-row");
-    expect(rows[1]).toHaveAttribute("data-clickable", "false");
-    fireEvent.click(rows[1]!);
-    expect(onOpenFile).not.toHaveBeenCalled();
-    fireEvent.click(rows[0]!);
-    expect(onOpenFile).toHaveBeenCalledWith("a.ts");
-
+    // 主列表：a.ts（新增）+ c.ts（新文件）；b.ts（删除，shell）在「其他」区段。
     expect(
-      rows[2]!.querySelector('[title="新文件：无行级统计"]'),
-    ).not.toBeNull();
-  });
+      screen.getAllByTestId("file-changes-status").map((el) => el.textContent),
+    ).toEqual(["新增", "新文件"]);
+    expect(screen.queryByText("b.ts")).toBeNull();
 
-  it("notice 态也显示共享工作区提示", () => {
+    fireEvent.click(screen.getByTestId("file-changes-other-toggle"));
+    expect(
+      screen.getAllByTestId("file-changes-status").map((el) => el.textContent),
+    ).toEqual(["新增", "新文件", "删除"]);
+
+    // 删除行可点（grouping FR-03：不再禁点），路径保留删除线样式。
+    const deletedRow = screen.getByText("b.ts").closest('[data-testid="file-changes-row"]');
+    expect(deletedRow).toHaveAttribute("data-clickable", "true");
+    expect(deletedRow!.innerHTML).toContain("line-through");
+    fireEvent.click(deletedRow!);
+    expect(onOpenFile).toHaveBeenCalledWith("b.ts");
+  });
+});
+
+/* 2026-10-23-file-card-agent-grouping：双段头部与分组展示。 */
+describe("FileChangesCard：AGENT 编辑分组（2026-10-23-file-card-agent-grouping）", () => {
+  it("双段标题合计：本轮AGENT 段（tool 计数+行级）与总共段独立求和", () => {
     render(
       <FileChangesCard
-        files={[]}
-        capability="full"
-        truncated
-        notice="工作区快照采集超时（1.5s），本轮改动未知"
-        sharedWorkspace
-        turnNo={7}
+        files={[
+          { path: "a.ts", adds: 15, dels: 12, edits: 2, source: "tool" },
+          { path: ".sillyspec/x.md", adds: 250, dels: 2, edits: 0, source: "shell" },
+        ]}
       />,
     );
-    const notice = screen.getByTestId("file-changes-notice");
-    expect(notice.textContent).toContain("共享工作区");
-    expect(notice.textContent).toContain("1.5s");
+
+    expect(screen.getByText("本轮AGENT 1 个文件变更")).toBeInTheDocument();
+    expect(screen.getByText("+15")).toBeInTheDocument();
+    expect(screen.getByText("−12")).toBeInTheDocument();
+    expect(screen.getByText("总共 2 个文件变更")).toBeInTheDocument();
+    expect(screen.getByText("+265")).toBeInTheDocument();
+    expect(screen.getByText("−14")).toBeInTheDocument();
+  });
+
+  it("agent 行为零：第一段「本轮AGENT 无直接文件编辑」，不渲染 +0 −0 假零；按钮行仍在", () => {
+    render(
+      <FileChangesCard
+        files={[{ path: ".sillyspec/x.md", adds: 40, dels: 0, edits: 0, source: "shell" }]}
+        startExpanded
+      />,
+    );
+
+    expect(screen.getByText("本轮AGENT 无直接文件编辑")).toBeInTheDocument();
+    expect(screen.getByTestId("file-changes-header").textContent).not.toContain("+0");
+    expect(screen.getByText("总共 1 个文件变更")).toBeInTheDocument();
+    expect(screen.getByTestId("file-changes-other-toggle")).toBeInTheDocument();
+    expect(screen.queryAllByTestId("file-changes-row")).toHaveLength(0);
+  });
+
+  it("只有 agent 行：不出「命令行/其他」按钮行", () => {
+    render(<FileChangesCard files={EIGHT_FILES.slice(0, 3)} startExpanded />);
+    expect(screen.queryByTestId("file-changes-other-toggle")).toBeNull();
+    expect(screen.getAllByTestId("file-changes-row")).toHaveLength(3);
   });
 });

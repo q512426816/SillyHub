@@ -40,7 +40,6 @@ import type { KeyboardEvent } from "react";
 import { ChevronRight, FileDiff } from "lucide-react";
 
 import { cn } from "@/lib/utils";
-
 /**
  * 快照能力档（design「文件变更卡 DTO」）：`full` = daemon 上报了工作区快照；
  * `tool_only` = 老 daemon 无快照能力 → 卡片降级为「仅工具编辑」。
@@ -158,11 +157,21 @@ export function FileChangesCard({
   className,
 }: FileChangesCardProps) {
   const [expanded, setExpanded] = useState(startExpanded);
+  // 2026-10-23-file-card-agent-grouping：「命令行/其他」区段展开态（每卡独立）。
+  const [otherOpen, setOtherOpen] = useState(false);
   // aria-controls 需要稳定 id：useId 会带冒号（合法但选择器里要转义），先剥掉。
   const listId = `file-changes-${useId().replace(/:/g, "")}`;
 
-  const totalAdds = files.reduce((sum, file) => sum + file.adds, 0);
-  const totalDels = files.reduce((sum, file) => sum + file.dels, 0);
+  // 分组（FR-01/FR-02）：tool = 本轮 agent 编辑工具命中（默认主列表）；
+  // shell = git 快照归因的其他改动（命令行/并行会话/其他进程，收进按钮区段）。
+  const agentFiles = files.filter((file) => file.source === "tool");
+  const otherFiles = files.filter((file) => file.source !== "tool");
+  const sum = (rows: ChangedFile[]) => ({
+    adds: rows.reduce((acc, file) => acc + file.adds, 0),
+    dels: rows.reduce((acc, file) => acc + file.dels, 0),
+  });
+  const agentTotals = sum(agentFiles);
+  const allTotals = sum(files);
 
   // 空态零渲染（design E6：无快照字段 → 省略卡片，不出「0 个文件」空壳）。
   // 降级态是**有话说**的形态（显式提示缺快照能力），文件行恒空但卡照出。
@@ -209,6 +218,139 @@ export function FileChangesCard({
   // 行级统计不可信：快照超时/截断（partial）或二进制文件（numstat 0/0）。
   const noLineStats = truncated || degraded;
 
+  /** 段内行级 +/−（truncated/degraded 段级破折号；数字为零时弱化灰色避免假强调）。 */
+  const renderDelta = (adds: number, dels: number) =>
+    noLineStats ? (
+      <span
+        className="text-muted-foreground"
+        title={degraded ? "daemon 未上报工作区快照：无行级统计" : "快照超时：只有文件数可靠"}
+      >
+        —
+      </span>
+    ) : (
+      <>
+        <span className={adds > 0 ? "text-success" : "text-muted-foreground/50"}>+{adds}</span>
+        <span className={dels > 0 ? "text-error" : "text-muted-foreground/50"}>−{dels}</span>
+      </>
+    );
+
+  /** 文件行渲染（agent 主列表与「命令行/其他」区段共用同一行形态）。 */
+  const renderFileRow = (file: ChangedFile, index: number) => {
+    const clickable = true;
+    const rowNoStats =
+      truncated || file.binary === true || file.hasLineStats === false;
+    const noStatsTitle =
+      file.binary === true
+        ? "二进制文件：无行级行数统计"
+        : file.status === "untracked"
+          ? "新文件：无行级统计"
+          : file.hasLineStats === false
+            ? "mtime 探测：无行级统计"
+            : "快照超时：无行级统计";
+    const statusMeta = file.status ? FILE_STATUS_META[file.status] : null;
+    return (
+      <div
+        key={`${file.path}#${index}`}
+        role={clickable ? "button" : undefined}
+        tabIndex={clickable ? 0 : undefined}
+        data-testid="file-changes-row"
+        data-path={file.path}
+        data-source={file.source}
+        data-status={file.status}
+        data-clickable={clickable ? "true" : "false"}
+        aria-label={clickable ? `打开 ${file.path}` : undefined}
+        title={file.path}
+        onClick={clickable ? () => openFile(file.path) : undefined}
+        onKeyDown={
+          clickable
+            ? (event) => {
+                if (!isActivationKey(event)) return;
+                event.preventDefault();
+                openFile(file.path);
+              }
+            : undefined
+        }
+        className={cn(
+          "group flex h-6 items-center gap-2 px-2",
+          clickable &&
+            "cursor-pointer hover:bg-muted/60 focus-visible:bg-muted/60 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring",
+        )}
+      >
+        {/* 路径不吃 flex-1：短路径时状态/归因徽标紧跟文件名，而不是被甩到数字列旁边。 */}
+        <span
+          className={cn(
+            "min-w-0 shrink truncate font-mono text-[11.5px] text-muted-foreground",
+            clickable && "group-hover:text-foreground group-hover:underline",
+            file.status === "deleted" && "line-through",
+          )}
+        >
+          {file.path}
+        </span>
+        {statusMeta && (
+          <span
+            data-testid="file-changes-status"
+            className={cn(
+              "shrink-0 rounded border px-1 py-px text-[10px] leading-none",
+              statusMeta.className,
+            )}
+          >
+            {statusMeta.label}
+          </span>
+        )}
+        {file.source === "shell" && (
+          <span
+            className="shrink-0 rounded border border-border bg-muted/60 px-1 py-px text-[10px] leading-none text-muted-foreground"
+            title="命令行/脚本改动（git 快照归因）"
+          >
+            命令行
+          </span>
+        )}
+        <span className="ml-auto flex shrink-0 items-center gap-2">
+          <span className="w-[68px] shrink-0 text-right font-mono text-[11.5px] tabular-nums">
+            {rowNoStats ? (
+              // 快照超时/截断、二进制、未跟踪新文件、mtime 探测行——「+0 −0」是假精确。
+              <span className="text-muted-foreground" title={noStatsTitle}>
+                —
+              </span>
+            ) : (
+              <>
+                <span
+                  className={
+                    file.adds > 0 ? "text-success" : "text-muted-foreground/50"
+                  }
+                >
+                  +{file.adds}
+                </span>{" "}
+                <span
+                  className={
+                    file.dels > 0 ? "text-error" : "text-muted-foreground/50"
+                  }
+                >
+                  −{file.dels}
+                </span>
+              </>
+            )}
+          </span>
+          {/* edits<=0（命令行归因的行没有「编辑次数」概念）不出「改0次」——
+              0 会被读成「没改过」，而行本身就在改动清单里。 */}
+          {file.edits > 0 && (
+            <span
+              data-testid="file-changes-edits"
+              className="w-12 shrink-0 text-right font-mono text-[11px] tabular-nums text-muted-foreground"
+              title={
+                file.editToolNames != null && file.editToolNames.length > 0
+                  ? `编辑工具：${Array.from(new Set(file.editToolNames)).join("、")}`
+                  : undefined
+              }
+            >
+              改{file.edits}次
+            </span>
+          )}
+        </span>
+      </div>
+    );
+  };
+
   return (
     <div
       data-testid="file-changes-card"
@@ -221,50 +363,55 @@ export function FileChangesCard({
         className,
       )}
     >
-      {/* 头部（折叠态即整卡）：28px 单行。有文件行时整行可点开合（aria-expanded 供
-          读屏）；降级态无行可开，头部退化为非交互行（不撒谎给读屏一个可展开控件）。 */}
+      {/* 头部（折叠态即整卡）：28px 单行双段标题（2026-10-23-file-card-agent-grouping）——
+          「本轮AGENT N 个文件变更 +a −d | 总共 M 个文件变更 +A −D」。有文件行时整行可点
+          开合（aria-expanded 供读屏）；降级态无行可开，头部退化为非交互行（不撒谎给读屏
+          一个可展开控件）。 */}
       {(() => {
         const headerContent = (
           <>
             <FileDiff className="h-3.5 w-3.5 shrink-0 text-muted-foreground" aria-hidden />
             <span className="flex min-w-0 items-center gap-1">
               <span className="shrink-0 font-medium text-foreground">
-                {degraded ? "仅工具编辑" : `${files.length} 个文件变更`}
+                {degraded
+                  ? "仅工具编辑"
+                  : agentFiles.length > 0
+                    ? `本轮AGENT ${agentFiles.length} 个文件变更`
+                    : "本轮AGENT 无直接文件编辑"}
               </span>
-              {truncated && (
-                <span className="shrink-0 text-[11px] text-muted-foreground">（部分）</span>
+              {!degraded && agentFiles.length > 0 && (
+                <span className="shrink-0 font-mono text-[11.5px] tabular-nums">
+                  {renderDelta(agentTotals.adds, agentTotals.dels)}
+                </span>
               )}
             </span>
+            {!degraded && (
+              <>
+                <span className="shrink-0 text-muted-foreground/40">|</span>
+                <span className="flex min-w-0 items-center gap-1">
+                  <span className="shrink-0 font-medium text-foreground">
+                    总共 {files.length} 个文件变更
+                  </span>
+                  <span className="shrink-0 font-mono text-[11.5px] tabular-nums">
+                    {renderDelta(allTotals.adds, allTotals.dels)}
+                  </span>
+                </span>
+              </>
+            )}
+            {truncated && (
+              <span className="shrink-0 text-[11px] text-muted-foreground">（部分）</span>
+            )}
             {turnNo != null && (
-              <span className="shrink-0 font-mono text-[11px] tabular-nums text-muted-foreground/80">
+              <span className="ml-auto shrink-0 font-mono text-[11px] tabular-nums text-muted-foreground/80">
                 第 {turnNo} 轮
               </span>
             )}
-            <span className="ml-auto flex shrink-0 items-center gap-1.5 font-mono text-[11.5px] tabular-nums">
-              {noLineStats ? (
-                // 没有可信行级统计：不拿 0 或半截 numstat 冒充总数（design E3 partial）。
-                <span
-                  className="text-muted-foreground"
-                  title={
-                    degraded
-                      ? "daemon 未上报工作区快照：无行级统计"
-                      : "快照超时：只有文件数可靠"
-                  }
-                >
-                  —
-                </span>
-              ) : (
-                <>
-                  <span className="text-success">+{totalAdds}</span>
-                  <span className="text-error">−{totalDels}</span>
-                </>
-              )}
-            </span>
             {files.length > 0 && (
               <ChevronRight
                 aria-hidden
                 className={cn(
                   "h-3 w-3 shrink-0 text-muted-foreground transition-transform duration-150",
+                  turnNo == null && "ml-auto",
                   expanded && "rotate-90",
                 )}
               />
@@ -321,135 +468,49 @@ export function FileChangesCard({
           data-testid="file-changes-list"
           className="max-h-[240px] overflow-y-auto border-t border-border/60 py-0.5"
         >
-          {files.map((file, index) => {
-            const clickable = file.status !== "deleted";
-            const rowNoStats =
-              truncated || file.binary === true || file.hasLineStats === false;
-            const noStatsTitle =
-              file.binary === true
-                ? "二进制文件：无行级行数统计"
-                : file.status === "untracked"
-                  ? "新文件：无行级统计"
-                  : file.hasLineStats === false
-                    ? "mtime 探测：无行级统计"
-                    : "快照超时：无行级统计";
-            const statusMeta = file.status
-              ? FILE_STATUS_META[file.status]
-              : null;
-            return (
-              <div
-                key={`${file.path}#${index}`}
-                role={clickable ? "button" : undefined}
-                tabIndex={clickable ? 0 : undefined}
-                data-testid="file-changes-row"
-                data-path={file.path}
-                data-source={file.source}
-                data-status={file.status}
-                data-clickable={clickable ? "true" : "false"}
-                aria-label={clickable ? `打开 ${file.path}` : undefined}
-                title={file.path}
-                onClick={clickable ? () => openFile(file.path) : undefined}
-                onKeyDown={
-                  clickable
-                    ? (event) => {
-                        if (!isActivationKey(event)) return;
-                        event.preventDefault();
-                        openFile(file.path);
-                      }
-                    : undefined
-                }
+          {/* 2026-10-23-file-card-agent-grouping：主列表默认只列本轮 agent 编辑行；
+              命令行/并行会话等其他改动收进按钮区段（点击展开），不再与 agent 编辑
+              混列（.sillyspec 等 CLI 生成文件会淹没真正的编辑）。agent 为零时按钮
+              置顶，其他改动入口不被吞。 */}
+          {otherFiles.length > 0 && (
+            <button
+              type="button"
+              data-testid="file-changes-other-toggle"
+              aria-expanded={otherOpen}
+              aria-controls={`${listId}-other`}
+              onClick={() => {
+                if (hasActiveTextSelection()) return;
+                setOtherOpen((value) => !value);
+              }}
+              className={cn(
+                "flex h-6 w-full items-center gap-1.5 px-2 text-left text-[11px] transition-colors",
+                "hover:bg-muted/60 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring",
+              )}
+            >
+              <ChevronRight
+                aria-hidden
                 className={cn(
-                  "group flex h-6 items-center gap-2 px-2",
-                  clickable
-                    ? "cursor-pointer hover:bg-muted/60 focus-visible:bg-muted/60 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
-                    : "cursor-default",
+                  "h-3 w-3 shrink-0 text-muted-foreground transition-transform duration-150",
+                  otherOpen && "rotate-90",
                 )}
-              >
-                {/* 路径不吃 flex-1：短路径时状态/归因徽标紧跟文件名，而不是被甩到数字列旁边。 */}
-                <span
-                  className={cn(
-                    "min-w-0 shrink truncate font-mono text-[11.5px] text-muted-foreground",
-                    clickable &&
-                      "group-hover:text-foreground group-hover:underline",
-                    file.status === "deleted" && "line-through",
-                  )}
-                >
-                  {file.path}
-                </span>
-                {statusMeta && (
-                  <span
-                    data-testid="file-changes-status"
-                    className={cn(
-                      "shrink-0 rounded border px-1 py-px text-[10px] leading-none",
-                      statusMeta.className,
-                    )}
-                  >
-                    {statusMeta.label}
-                  </span>
+              />
+              <span className="shrink-0 font-medium text-muted-foreground">
+                命令行/其他 {otherFiles.length} 个文件
+              </span>
+              <span className="ml-auto shrink-0 font-mono text-[11px] tabular-nums">
+                {renderDelta(
+                  otherFiles.reduce((acc, file) => acc + file.adds, 0),
+                  otherFiles.reduce((acc, file) => acc + file.dels, 0),
                 )}
-                {file.source === "shell" && (
-                  <span
-                    className="shrink-0 rounded border border-border bg-muted/60 px-1 py-px text-[10px] leading-none text-muted-foreground"
-                    title="命令行/脚本改动（git 快照归因）"
-                  >
-                    命令行
-                  </span>
-                )}
-                <span className="ml-auto flex shrink-0 items-center gap-2">
-                  <span className="w-[68px] shrink-0 text-right font-mono text-[11.5px] tabular-nums">
-                    {rowNoStats ? (
-                      // 快照超时/截断、二进制、未跟踪新文件、mtime 探测行——「+0 −0」是假精确。
-                      <span
-                        className="text-muted-foreground"
-                        title={noStatsTitle}
-                      >
-                        —
-                      </span>
-                    ) : (
-                      <>
-                        <span
-                          className={
-                            file.adds > 0
-                              ? "text-success"
-                              : "text-muted-foreground/50"
-                          }
-                        >
-                          +{file.adds}
-                        </span>{" "}
-                        <span
-                          className={
-                            file.dels > 0
-                              ? "text-error"
-                              : "text-muted-foreground/50"
-                          }
-                        >
-                          −{file.dels}
-                        </span>
-                      </>
-                    )}
-                  </span>
-                  {/* edits<=0（命令行归因的行没有「编辑次数」概念）不出「改0次」——
-                      0 会被读成「没改过」，而行本身就在改动清单里。 */}
-                  {file.edits > 0 && (
-                    <span
-                      data-testid="file-changes-edits"
-                      className="w-12 shrink-0 text-right font-mono text-[11px] tabular-nums text-muted-foreground"
-                      title={
-                        file.editToolNames != null &&
-                        file.editToolNames.length > 0
-                          ? `编辑工具：${Array.from(
-                              new Set(file.editToolNames),
-                            ).join("、")}`
-                          : undefined
-                      }
-                    >
-                      改{file.edits}次
-                    </span>
-                  )}
-                </span>
-              </div>
-            );
-          })}
+              </span>
+            </button>
+          )}
+          {agentFiles.map((file, index) => renderFileRow(file, index))}
+          {otherFiles.length > 0 && otherOpen && (
+            <div id={`${listId}-other`} data-testid="file-changes-other-list" className="border-t border-border/40">
+              {otherFiles.map((file, index) => renderFileRow(file, index))}
+            </div>
+          )}
         </div>
       )}
     </div>
