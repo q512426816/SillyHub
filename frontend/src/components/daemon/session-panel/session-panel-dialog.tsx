@@ -2042,6 +2042,9 @@ export function SessionPanelDialog(props: SessionPanelProps) {
         // 重挂会话时滚动判定 refs 归零（同 page 模式，见 session-panel-page 挂载
         // 点注释；attachSessionId 为弹窗承载会话 id）。
         key={view.sessionId ?? attachSessionId ?? "pre"}
+        // 2026-10-23-turn-file-diff-dialog / FR-01：接线轮文件变更卡行点击弹窗
+        // （同 page 模式；弹窗承载会话 id 与 key 同源）。
+        sessionId={view.sessionId ?? attachSessionId ?? undefined}
         autoResumeEntries={autoResumeEntries}
         turns={view.turns}
         // task-08（session-fork / FR-01 / FR-04）：轮级「⑂ 从此分叉」入口——

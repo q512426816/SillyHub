@@ -4839,6 +4839,9 @@ export function SessionPanelPage({
           key 强制重挂载：全部滚动状态归零，恢复初始贴底语义。 */}
       <TurnTimeline
         key={sessionId ?? "pre"}
+        // 2026-10-23-turn-file-diff-dialog / FR-01：接线轮文件变更卡行点击弹窗的
+        // 取数归属（会话级单轮日志 API 按本轮 runId 拉 edit_patch）。
+        sessionId={sessionId}
         suppressFollowBottom={jumpFollowSuppress}
         turns={dialogTurns}
         viewMode={viewMode}
