@@ -101,7 +101,7 @@ describe("TurnFileDiffDialog", () => {
 
   it("shell 归因无补丁：如实说明改动来源不唯一，不出伪造 diff（FR-03/grouping FR-04）", async () => {
     getAgentSessionLogsMock.mockResolvedValue([]);
-    renderDialog({ source: "shell" });
+    renderDialog();
 
     const body = (await screen.findByTestId("turn-file-diff-body")).textContent!;
     // 如实表述：不断言唯一原因（命令行/并行会话/其他进程并列），不出「该文件由
@@ -117,7 +117,7 @@ describe("TurnFileDiffDialog", () => {
 
   it("删除文件无补丁：如实说明本轮被删除且删除动作未来自编辑工具（grouping FR-03）", async () => {
     getAgentSessionLogsMock.mockResolvedValue([]);
-    renderDialog({ source: "shell", status: "deleted" });
+    renderDialog({ status: "deleted" });
 
     const body = (await screen.findByTestId("turn-file-diff-body")).textContent!;
     expect(body).toContain("本轮被删除");

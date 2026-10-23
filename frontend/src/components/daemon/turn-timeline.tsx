@@ -745,7 +745,7 @@ const TurnRow = memo(function TurnRow({
    */
   onOpenFileChanges?: (
     _runKey: string,
-    _file: { path: string; source?: "tool" | "shell"; status?: FileChangeStatus },
+    _file: { path: string; status?: FileChangeStatus },
   ) => void;
 }) {
   // task-07（FR-03 / D-003@v2）：旧路径 output 气泡 askuser 标记拦截——命中则
@@ -1292,7 +1292,6 @@ const TurnRow = memo(function TurnRow({
                         const file = cardProps.files.find((f) => f.path === path);
                         onOpenFileChanges(runKey, {
                           path,
-                          source: file?.source,
                           status: file?.status,
                         });
                       }}
@@ -1477,15 +1476,11 @@ export function TurnTimeline({
   const [fileDiffTarget, setFileDiffTarget] = useState<{
     runKey: string;
     path: string;
-    source?: "tool" | "shell";
     status?: FileChangeStatus;
   } | null>(null);
   const handleOpenFileChanges = useCallback(
-    (
-      runKey: string,
-      file: { path: string; source?: "tool" | "shell"; status?: FileChangeStatus },
-    ) => {
-      setFileDiffTarget({ runKey, path: file.path, source: file.source, status: file.status });
+    (runKey: string, file: { path: string; status?: FileChangeStatus }) => {
+      setFileDiffTarget({ runKey, path: file.path, status: file.status });
     },
     [],
   );
@@ -1914,7 +1909,6 @@ export function TurnTimeline({
         sessionId={sessionId}
         runKey={fileDiffTarget.runKey}
         path={fileDiffTarget.path}
-        source={fileDiffTarget.source}
         status={fileDiffTarget.status}
         open
         onOpenChange={(next) => {

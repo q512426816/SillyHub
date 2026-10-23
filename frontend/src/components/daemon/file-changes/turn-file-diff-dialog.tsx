@@ -39,9 +39,8 @@ export interface TurnFileDiffDialogProps {
   runKey: string;
   /** 仓根相对 posix 路径（文件卡行原样）。 */
   path: string;
-  /** 行归因：shell 行点击也开弹窗，但内容区出如实说明（无补丁可显）。 */
-  source?: "tool" | "shell";
-  /** 文件状态徽标（新增/修改/删除/新文件，与文件卡同源 FILE_STATUS_META）。 */
+  /** 文件状态徽标（新增/修改/删除/新文件，与文件卡同源 FILE_STATUS_META）；
+   *  deleted 且无补丁时弹窗出删除专用说明（2026-10-23-file-card-agent-grouping）。 */
   status?: FileChangeStatus;
   open: boolean;
   onOpenChange: (_open: boolean) => void;
@@ -68,7 +67,6 @@ export function TurnFileDiffDialog({
   sessionId,
   runKey,
   path,
-  source,
   status,
   open,
   onOpenChange,
