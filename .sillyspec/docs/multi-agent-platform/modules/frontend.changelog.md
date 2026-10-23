@@ -196,3 +196,4 @@
 | 2026-10-23 | 2026-10-23-session-first-load-ux | 会话首屏加载提速：补拉链不阻塞渲染+加载骨架屏 |
 | 2026-10-23 | 2026-10-23-marquee-thinking-fulltext | 跑马灯思考条目展示全文 |
 | 2026-10-23 | 2026-10-23-diff-dialog-pairing-fix | 轮文件变更弹窗(turn-file-diff-dialog)在补丁行缺 tool_use_id 时走… |
+| 2026-10-23 | 2026-10-23-knowledge-scope-maintenance | 知识注入作用域维护面板 |

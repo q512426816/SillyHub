@@ -11,8 +11,8 @@ export type KnowledgeList = components["schemas"]["KnowledgeList"];
 
 /**
  * 节级注入作用域（2026-10-23-knowledge-scope-maintenance）：后端 GET /knowledge
- * 加法字段 sections/headings——OpenAPI 生成类型待下次 codegen 同步，前端先以
- * 结构扩展类型消费（与后端 schema.py 同形）。
+ * 加法字段 sections/headings。生成类型已随 pnpm gen:types 同步入 api-types.ts；
+ * 此处扩展类型保留做消费侧显式契约（KnowledgeListWithScopes 供列表页直接用）。
  */
 export interface KnowledgeScopeSection {
   heading: string;

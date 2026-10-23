@@ -21350,6 +21350,60 @@
         }
       }
     },
+    "/api/workspaces/{workspace_id}/knowledge/scope": {
+      "patch": {
+        "tags": [
+          "knowledge"
+        ],
+        "summary": "Update Knowledge Scope",
+        "description": "节级注入作用域维护（2026-10-23-knowledge-scope-maintenance）。\n\nalways/repo/module 写入对应 marker；keyword=移除本节 marker（回关键词档）。\n仅 top zone 顶层知识文件；heading 精确唯一；写入走单写者 apply_ops。",
+        "operationId": "update_knowledge_scope_api_workspaces__workspace_id__knowledge_scope_patch",
+        "parameters": [
+          {
+            "name": "workspace_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Workspace Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/KnowledgeScopeIn"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/KnowledgeEntry"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/workspaces/{workspace_id}/knowledge/proposed/{filename}/preview-merge": {
       "post": {
         "tags": [
@@ -52840,6 +52894,20 @@
               }
             ],
             "title": "Use Count"
+          },
+          "sections": {
+            "items": {
+              "$ref": "#/components/schemas/KnowledgeSection"
+            },
+            "type": "array",
+            "title": "Sections"
+          },
+          "headings": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Headings"
           }
         },
         "type": "object",
@@ -52977,6 +53045,48 @@
         "title": "KnowledgeProposeIn",
         "description": "POST /knowledge/propose 请求体（手工录入候选）。"
       },
+      "KnowledgeScopeIn": {
+        "properties": {
+          "filename": {
+            "type": "string",
+            "maxLength": 500,
+            "minLength": 1,
+            "title": "Filename"
+          },
+          "heading": {
+            "type": "string",
+            "maxLength": 200,
+            "minLength": 1,
+            "title": "Heading"
+          },
+          "scope": {
+            "type": "string",
+            "enum": [
+              "always",
+              "repo",
+              "module",
+              "keyword"
+            ],
+            "title": "Scope"
+          },
+          "domains": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "maxItems": 8,
+            "title": "Domains"
+          }
+        },
+        "type": "object",
+        "required": [
+          "filename",
+          "heading",
+          "scope"
+        ],
+        "title": "KnowledgeScopeIn",
+        "description": "PATCH /knowledge/scope 请求体（节级作用域维护；keyword=移除标记）。\n\n2026-10-23-knowledge-scope-maintenance：语义与 CLI 四档一致——always/repo/module\n写入对应 marker；keyword 清除本节 marker（回关键词档）；module 档 domains 必填。"
+      },
       "KnowledgeSearchIn": {
         "properties": {
           "query": {
@@ -53078,6 +53188,37 @@
         ],
         "title": "KnowledgeSearchResultItem",
         "description": "单条召回：kind 由 spec_path 派生（decision/fr/knowledge/module/scan/...）。"
+      },
+      "KnowledgeSection": {
+        "properties": {
+          "heading": {
+            "type": "string",
+            "title": "Heading"
+          },
+          "scope": {
+            "type": "string",
+            "enum": [
+              "always",
+              "repo",
+              "module"
+            ],
+            "title": "Scope"
+          },
+          "domains": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Domains"
+          }
+        },
+        "type": "object",
+        "required": [
+          "heading",
+          "scope"
+        ],
+        "title": "KnowledgeSection",
+        "description": "节级注入作用域（2026-10-23-knowledge-scope-maintenance）。\n\n与 CLI `knowledge-scope.js` 标记语法同源：节内 `<!-- scope: always|repo|module:域 -->`。\n无标记节不返回（空数组=该文件无作用域声明）。"
       },
       "KnowledgeStatsOut": {
         "properties": {

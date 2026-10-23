@@ -103,3 +103,4 @@
 - 2026-10-23-marquee-motion-polish | 跑马灯动效与流光柔化
 - 2026-10-23-session-network-context | 2026-10-23-session-network-context
 - 2026-10-23-session-first-window-turn-align | 会话重新进入时首屏历史窗口按最近 400 条日志截断，单轮日志超过 400 条时窗口起点落在该轮中段…
+- 2026-10-23-knowledge-scope-maintenance | 知识注入作用域维护面板
