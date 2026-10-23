@@ -20,7 +20,7 @@
  * （next/dynamic ssr:false 在 jsdom 同步渲染为 null）。
  */
 import { describe, it, expect, vi } from "vitest";
-import { render, screen } from "@testing-library/react";
+import { act, render, screen } from "@testing-library/react";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 
@@ -153,6 +153,130 @@ describe("轮次时间三段显示（quick-3c85b05e；2026-10-20 合并为一条
       <TurnStatusBar turnStartedAt={null} segments={[TEXT_SEG]} turnStatus="running" />,
     );
     expect(screen.queryByText(/开始 /)).toBeNull();
+  });
+
+  /* ───── 2026-10-23-live-turn-meta-time / FR-01/FR-02：进行中轮底部元信息 ───── */
+
+  it("进行中轮：底部元信息只显「开始+实时历时」，无「结束」；走秒每秒递增", () => {
+    vi.useFakeTimers();
+    try {
+      const startedAt = Date.now() - 5_000; // 已跑 5s（<15s 顶部状态条不显秒，底部历时不受该门槛）
+      render(
+        <TurnTimeline
+          {...renderProps([
+            makeTurn({ status: "running", output: "", segments: [], turnStartedAt: startedAt, replyAt: null }),
+          ])}
+        />,
+      );
+      const detail = screen.getByTestId("round-divider-detail");
+      expect(detail).toHaveTextContent(`开始 ${localHms(startedAt)}`);
+      expect(detail.textContent).not.toContain("结束");
+      expect(detail).toHaveTextContent("历时 00:05");
+      // 走秒：+2s 后历时 00:07（tick 局部不外溢，但 DOM 随自身 state 更新）
+      act(() => {
+        vi.advanceTimersByTime(2_000);
+      });
+      expect(detail).toHaveTextContent("历时 00:07");
+      expect(detail.textContent).not.toContain("结束");
+      // 整页「结束」零出现（旧实现错显「结束=开始时刻 · 历时 00:00」）
+      expect(screen.queryAllByText(/结束 \d/)).toHaveLength(0);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("进行中轮带伪 replyAt（旁路装配防御）：isLiveTurn 优先，仍不显「结束」", () => {
+    render(
+      <TurnTimeline
+        {...renderProps([
+          makeTurn({
+            status: "running",
+            output: "",
+            segments: [],
+            turnStartedAt: START_MS,
+            replyAt: new Date(START_MS).toISOString(), // 旧路径伪造值（=开始时刻）
+          }),
+        ])}
+      />,
+    );
+    const detail = screen.getByTestId("round-divider-detail");
+    expect(detail).toHaveTextContent(`开始 ${localHms(START_MS)}`);
+    expect(detail.textContent).not.toContain("结束");
+  });
+
+  it("运行中→完成：切回「开始 · 结束 · 历时」三段，走秒组件卸载（interval 清理）", () => {
+    vi.useFakeTimers();
+    try {
+      const startedAt = Date.now() - 5_000;
+      const baseTurn = makeTurn({
+        status: "running",
+        output: "",
+        segments: [],
+        turnStartedAt: startedAt,
+        replyAt: null,
+      });
+      const { rerender } = render(<TurnTimeline {...renderProps([baseTurn])} />);
+      expect(screen.getByTestId("round-divider-detail").textContent).not.toContain("结束");
+      // 终态：replyAt=finished_at（+96s）→ 三段格式回归
+      const endIso = new Date(startedAt + 96_000).toISOString();
+      rerender(
+        <TurnTimeline
+          {...renderProps([
+            makeTurn({
+              status: "completed",
+              turnStartedAt: startedAt,
+              replyAt: endIso,
+            }),
+          ])}
+        />,
+      );
+      const detail = screen.getByTestId("round-divider-detail");
+      expect(detail).toHaveTextContent(`开始 ${localHms(startedAt)}`);
+      expect(detail).toHaveTextContent(`结束 ${localHms(startedAt + 96_000)}`);
+      expect(detail).toHaveTextContent("历时 01:36");
+      // 走秒组件已卸载：再过 5s 文本不再变化（无活跃 interval 驱动重渲染）
+      act(() => {
+        vi.advanceTimersByTime(5_000);
+      });
+      expect(detail).toHaveTextContent("历时 01:36");
+      expect(screen.getAllByText(/历时 01:36/)).toHaveLength(1);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("进行中轮无计时锚点：不显示时间细节（不编造，既有容错语义）", () => {
+    render(
+      <TurnTimeline
+        {...renderProps([makeTurn({ status: "running", output: "", segments: [], turnStartedAt: null, replyAt: null })])}
+      />,
+    );
+    expect(screen.queryByTestId("round-divider-detail")).toBeNull();
+  });
+
+  it("进度视图（all）进行中轮同享实时历时（turn-meta-detail 承载）", () => {
+    vi.useFakeTimers();
+    try {
+      const startedAt = Date.now() - 5_000;
+      render(
+        <TurnTimeline
+          {...renderProps(
+            [makeTurn({ status: "running", output: "", segments: [], turnStartedAt: startedAt, replyAt: null })],
+            "all",
+          )}
+        />,
+      );
+      const detail = screen.getByTestId("turn-meta-detail");
+      expect(detail).toHaveTextContent(`开始 ${localHms(startedAt)}`);
+      expect(detail).toHaveTextContent("历时 00:05");
+      expect(detail.textContent).not.toContain("结束");
+      act(() => {
+        vi.advanceTimersByTime(1_000);
+      });
+      expect(detail).toHaveTextContent("历时 00:06");
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });
 
