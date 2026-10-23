@@ -1,0 +1,28 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-23-session-first-load-ux",
+  "reviewer": "subagent",
+  "verdict": "PASS",
+  "reviewedAgainst": "58cebf9df158804564dd87110c7673ef898a3703",
+  "findings": [
+    {
+      "severity": "P3",
+      "title": "合并前滚动锚捕获仍无自动化覆盖（jsdom 无真实布局，scrollHeight=0，变更测试面不触达该分支）",
+      "evidence": "滚动锚捕获在 session-panel-page.tsx:1401-1423，依赖 scrollEl.scrollHeight - scrollTop - clientHeight >= 80；jsdom 下三者恒 0，staged/merge/history-loading 三文件均不会进入捕获分支，钉回行为仅经代码级核验（与 handleLoadEarlier:2064-2080 同构、容器 overflowAnchor:none 已确认）。非功能缺陷，属测试覆盖缺口。",
+      "location": "frontend/src/components/daemon/session-panel/session-panel-page.tsx:1401"
+    },
+    {
+      "severity": "P3",
+      "title": "stripMergeKeySuffix 注释称与页面 helper『同构』，实际剥离规则不同（任意 # vs 仅 #e）",
+      "evidence": "initial-window-merge.ts:31-36 在首个 # 处截断；页面 stripPageKeySuffix（session-panel-page.tsx:382-387）仅识别 #e。当前真实输入面等价（existing 块来自 logsToTurns/#e 装饰均带 realRunId；SSE 轮 runId 无后缀；__attach_history_ 伪 id 被 startsWith(\"__\") 分支排除），无行为差异，但注释不精确，后续若出现无 realRunId 的 #w/#其他后缀块会分叉。",
+      "location": "frontend/src/components/daemon/session-panel/initial-window-merge.ts:31"
+    }
+  ],
+  "dimensionNotes": {
+    "乱序": "ok",
+    "并发": "ok",
+    "切换": "ok",
+    "作用域": "ok"
+  },
+  "reviewedAt": "2026-10-23T07:46:36Z"
+}
