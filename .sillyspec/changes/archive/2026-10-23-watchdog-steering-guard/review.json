@@ -1,0 +1,15 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-23-watchdog-steering-guard",
+  "reviewer": "subagent",
+  "verdict": "PASS",
+  "reviewedAgainst": "8e6a6b644c3481a47ec381533ce4422fcc9b64d7",
+  "findings": [],
+  "dimensionNotes": {
+    "乱序": "ok（边界已裁决：可接受——design 已披露迟到/后台任务 envelope 与既有撤防同粒度、按当前 currentRunId 归属，可能把尚未产事件的 run 记为已观测；该形态本就不布防/已撤防，由 backend 300s pending 清扫兜底，不新增误杀/漏杀面；result↔同 runId inject 两种先后均已覆盖）",
+    "并发": "ok（边界已裁决：可接受——lastTurnEventAt 赋值与 observedRunIds 增删均为同步语句，无 await 交错；同 runId 守卫在首个 await 前求值）",
+    "切换": "ok（边界已裁决：可接受——reload 不清两字段，但新轮 runId 不同、lastActiveAt 在 reload/inject 刷新，旧值不参与新轮 stale 判定；end/fail 随 state 回收）",
+    "作用域": "ok（边界已裁决：可接受——字段挂 per-session 内存态、不进 snapshotPersistable，run id 全局唯一；observedRunIds 256 上限 FIFO 有界，无跨会话/跨实例串台）"
+  },
+  "reviewedAt": "2026-10-23T16:40:09+08:00"
+}

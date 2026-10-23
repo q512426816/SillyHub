@@ -7419,3 +7419,86 @@
   confirmed_at: null
   source_change: 2026-10-23-skill-prune-git-safe
   status: active
+
+## FR-daemon-267 inject 时 runId === 当前 currentRunId（mid-turn steering）不得 stale-reset、不得布防看门狗
+变更：2026-10-23-watchdog-steering-guard
+状态：active
+摘要：忙轮 steering 同 runId
+全文：.sillyspec/changes/archive/2026-10-23-watchdog-steering-guard/requirements.md#FR-01
+最近确认：8e6a6b644c3481a47ec381533ce4422fcc9b64d7
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-23-watchdog-steering-guard:flow:测试绑定FR-01
+  tests: sillyhub-daemon/tests/interactive/turn-start-watchdog.test.ts「mid-turn steering（同 runId）不 stale-reset、不布防看门狗」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-23-watchdog-steering-guard
+  status: active
+
+## FR-daemon-268 stale 判定改用最后轮内事件时间（onMessage 更新），不再用上次 inject 时间
+变更：2026-10-23-watchdog-steering-guard
+状态：active
+摘要：轮内事件新鲜时 inject；onMessage 刷新最后事件时间
+全文：.sillyspec/changes/archive/2026-10-23-watchdog-steering-guard/requirements.md#FR-02
+最近确认：8e6a6b644c3481a47ec381533ce4422fcc9b64d7
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-23-watchdog-steering-guard:flow:测试绑定FR-02
+  tests: sillyhub-daemon/tests/interactive/turn-start-watchdog.test.ts「轮内事件新鲜时 inject 不触发 stale-reset」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-23-watchdog-steering-guard
+  status: active
+
+## FR-daemon-269 看门狗不得对已经产生过事件的 run 布防
+变更：2026-10-23-watchdog-steering-guard
+状态：active
+摘要：已观测 run 再次 inject；真僵尸轮仍触发
+全文：.sillyspec/changes/archive/2026-10-23-watchdog-steering-guard/requirements.md#FR-03
+最近确认：8e6a6b644c3481a47ec381533ce4422fcc9b64d7
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-23-watchdog-steering-guard:flow:测试绑定FR-03
+  tests: sillyhub-daemon/tests/interactive/turn-start-watchdog.test.ts「已观测事件的 run 不再布防看门狗」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-23-watchdog-steering-guard
+  status: active
+
+## FR-daemon-270 回归测试：同 runId steering + 静默 90s 不触发；新 runId 真吞消息仍触发
+变更：2026-10-23-watchdog-steering-guard
+状态：active
+摘要：测试矩阵
+全文：.sillyspec/changes/archive/2026-10-23-watchdog-steering-guard/requirements.md#FR-04
+最近确认：8e6a6b644c3481a47ec381533ce4422fcc9b64d7
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-23-watchdog-steering-guard:flow:测试绑定FR-04
+  tests: sillyhub-daemon/tests/interactive/turn-start-watchdog.test.ts
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-23-watchdog-steering-guard
+  status: active
+
+## FR-daemon-271 daemon 现有测试与 tsc 通过
+变更：2026-10-23-watchdog-steering-guard
+状态：active
+摘要：验证命令面
+全文：.sillyspec/changes/archive/2026-10-23-watchdog-steering-guard/requirements.md#FR-05
+最近确认：8e6a6b644c3481a47ec381533ce4422fcc9b64d7

@@ -1,0 +1,66 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-23-watchdog-steering-guard",
+  "rows": [
+    {
+      "anchor": "FR-01",
+      "row_id": "2026-10-23-watchdog-steering-guard:flow:测试绑定FR-01",
+      "tests": [
+        "sillyhub-daemon/tests/interactive/turn-start-watchdog.test.ts「mid-turn steering（同 runId）不 stale-reset、不布防看门狗」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-23-watchdog-steering-guard"
+    },
+    {
+      "anchor": "FR-02",
+      "row_id": "2026-10-23-watchdog-steering-guard:flow:测试绑定FR-02",
+      "tests": [
+        "sillyhub-daemon/tests/interactive/turn-start-watchdog.test.ts「轮内事件新鲜时 inject 不触发 stale-reset」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-23-watchdog-steering-guard"
+    },
+    {
+      "anchor": "FR-03",
+      "row_id": "2026-10-23-watchdog-steering-guard:flow:测试绑定FR-03",
+      "tests": [
+        "sillyhub-daemon/tests/interactive/turn-start-watchdog.test.ts「已观测事件的 run 不再布防看门狗」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-23-watchdog-steering-guard"
+    },
+    {
+      "anchor": "FR-04",
+      "row_id": "2026-10-23-watchdog-steering-guard:flow:测试绑定FR-04",
+      "tests": [
+        "sillyhub-daemon/tests/interactive/turn-start-watchdog.test.ts"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-23-watchdog-steering-guard"
+    }
+  ]
+}

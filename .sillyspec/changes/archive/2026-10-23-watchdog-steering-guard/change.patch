@@ -1,0 +1,268 @@
+diff --git a/sillyhub-daemon/src/interactive/session-manager/events.ts b/sillyhub-daemon/src/interactive/session-manager/events.ts
+index 82656681a..023099a19 100644
+--- a/sillyhub-daemon/src/interactive/session-manager/events.ts
++++ b/sillyhub-daemon/src/interactive/session-manager/events.ts
+@@ -33,6 +33,25 @@ import { recordTurnAnchor } from '../turn-anchor.js';
+ import { eventMetaOf, numOf, strOf } from './helpers.js';
+ import type { SessionManagerCore } from './types.js';
+ 
++/**
++ * 2026-10-23-watchdog-steering-guard FR-03：登记「已经产生过轮事件」的 run。
++ *
++ * 有界 Set（256 上限 FIFO 驱逐，单会话约 9KB）：看门狗只服务「新 run 从未
++ * 启动」形态，已观测 run 再被 inject 时不得布防。仅内存态，不参与持久化。
++ */
++const OBSERVED_RUN_IDS_MAX = 256;
++
++function rememberObservedRun(state: SessionState, runId: string): void {
++  const set = state.observedRunIds ?? new Set<string>();
++  state.observedRunIds = set;
++  if (set.has(runId)) return;
++  set.add(runId);
++  if (set.size > OBSERVED_RUN_IDS_MAX) {
++    const oldest = set.values().next().value;
++    if (oldest !== undefined) set.delete(oldest);
++  }
++}
++
+ /**
+  * onResult（spike D4：result 是干净 turn 边界）。
+  *   - result.subtype=success → onTurnResult(sessionId, currentRunId, result)
+@@ -57,6 +76,8 @@ export async function onResult(
+   // 也能在 onTurnResult 回调内读到稳定的 active 状态；且避免 onTurnResult 抛错时
+   // status 残留 running（虽然 onTurnResult 应不抛，但先收敛更鲁棒）。
+   const runId = state.currentRunId;
++  // 2026-10-23-watchdog-steering-guard FR-03：result 到达同样证明该 run 启动过。
++  if (runId) rememberObservedRun(state, runId);
+   state.status = 'active';
+   // 2026-09-15-background-task-permission-lockout（FR-01 / 坑 subagent-write-channel）：
+   // 主轮收尾时若该会话后台任务注册表非空，保留 currentRunId 作「后台锚点」——后台
+@@ -243,6 +264,10 @@ export async function onMessage(
+   // 入口，偶发「无关事件误撤防」由 backend pending run 启动超时清扫兜底
+   // （300s），不在事件流里做 run 归属精细判定的成本权衡。
+   mgr._disarmTurnStartWatchdog(state.sessionId);
++  // 2026-10-23-watchdog-steering-guard FR-02/FR-03：envelope 到达即轮内活动——
++  // 刷新 stale 判定基准（lastTurnEventAt），并登记当前 run 为「已启动」。
++  state.lastTurnEventAt = Date.now();
++  if (state.currentRunId) rememberObservedRun(state, state.currentRunId);
+   const events = Array.isArray(envelope?.events) ? envelope.events : [];
+   // 对账表 #4 前置判定：本 envelope 是否含 Task/Agent tool_use 事件——归一化器把
+   // 同一 assistant message 的 tool_use 派生会话信号（agent_task_status running）
+diff --git a/sillyhub-daemon/src/interactive/session-manager/turn-control.ts b/sillyhub-daemon/src/interactive/session-manager/turn-control.ts
+index 37d83c861..9a0b430b4 100644
+--- a/sillyhub-daemon/src/interactive/session-manager/turn-control.ts
++++ b/sillyhub-daemon/src/interactive/session-manager/turn-control.ts
+@@ -212,23 +212,43 @@ export async function inject(
+   // "session not in running turn"（30 分钟级封锁，turn 真正结束才恢复）。翻转时
+   // 记 staleRunResetAt 且不清 currentRunId（正常 result 收尾才清）：写通道守卫据此
+   // 在宽限窗内放行（见 _writeChannelGuardDeny）。
++  //
++  // 2026-10-23-watchdog-steering-guard FR-01：backend mid-turn steering 复用活跃
++  // run 的 run_id（不建新 run，见 backend session/service/control.py）。同 runId
++  // 的 inject 是给正在执行的轮追加输入，不是新轮启动：不得 stale-reset（会把活轮
++  // 翻 active），也不得布防看门狗（看门狗只服务「新 run 从未启动」形态）。
++  const sameRunInject = !!state.currentRunId && state.currentRunId === runId;
++  // FR-02：静默基准取「最后一次轮内事件」——lastActiveAt 只在 inject/result/
++  // interrupt 更新，单用它等于按「本轮开始多久」判 stale，刚产过事件的长 turn
++  // 会被误翻（事故 15:32:24：5 秒前还有工具结果仍判 stale）。
++  const lastTurnActivityAt = Math.max(
++    state.lastActiveAt,
++    state.lastTurnEventAt ?? 0,
++  );
+   if (
++    !sameRunInject &&
+     state.status === 'running' &&
+-    Date.now() - state.lastActiveAt > 60_000
++    Date.now() - lastTurnActivityAt > 60_000
+   ) {
+     // eslint-disable-next-line no-console
+     console.warn(
+       '[session-manager] inject: stale running state detected (>60s no result), ' +
+         'resetting to active. Possible backend restart while turn was running. ' +
+         '(write-channel grace armed: staleRunResetAt recorded; quiet long turns stay writable)',
+-      { sessionId, lastActiveAt: state.lastActiveAt },
++      {
++        sessionId,
++        lastActiveAt: state.lastActiveAt,
++        lastTurnEventAt: state.lastTurnEventAt ?? null,
++      },
+     );
+     state.status = 'active';
+     state.staleRunResetAt = Date.now();
+     // 清理可能挂起的 pending 计数（旧 turn 的排队消息已无意义）。
+     mgr._pendingInjectCount.delete(sessionId);
+   }
+-  const wasRunningBeforeInject = state.status === 'running';
++  // 同 runId 注入恒按「追加输入」处理：即使此前 stale 翻转把 status 翻成 active，
++  // 也不得走首轮启动路径（否则会给活轮重新布防看门狗）。
++  const wasRunningBeforeInject = state.status === 'running' || sameRunInject;
+ 
+   // spike S1：push 永远进 InputQueue（turn 级串行由 SDK result 边界保证），不拒绝。
+   // currentRunId 在前 turn result 收尾前由本 inject 切换（task-04 既有行为，保留）：
+@@ -359,7 +379,13 @@ export async function inject(
+     // 预期立即开新轮，窗口内零轮事件即判「push 被 SDK 吞掉」（打断 abort 收尾
+     // 竞态），到点重置会话态 + 回报该 run 失败。任意轮事件到达即撤防（events.ts
+     // onMessage/onResult），见 turn-control.ts 尾部看门狗簇注释。
+-    mgr._armTurnStartWatchdog(sessionId, runId);
++    //
++    // 2026-10-23-watchdog-steering-guard FR-03：已经产生过事件的 run 不得布防。
++    // 同 runId steering 已被上方 sameRunInject 拦到排队分支；此处再挡「currentRunId
++    // 已清空但 run 实际启动过」的重复/迟到 inject（如 watchdog 收敛后 backend 重投）。
++    if (!state.observedRunIds?.has(runId)) {
++      mgr._armTurnStartWatchdog(sessionId, runId);
++    }
+   }
+ 
+   return { runId };
+diff --git a/sillyhub-daemon/src/interactive/types.ts b/sillyhub-daemon/src/interactive/types.ts
+index 377e7f07d..6a84a553d 100644
+--- a/sillyhub-daemon/src/interactive/types.ts
++++ b/sillyhub-daemon/src/interactive/types.ts
+@@ -196,6 +196,19 @@ export interface SessionState {
+   staleRunResetAt?: number;
+   /** 最后活动时间（D-004 空闲 30min 回收，task-07 实现）。 */
+   lastActiveAt: number;
++  /**
++   * 2026-10-23-watchdog-steering-guard FR-02：最后一次轮内事件时间（onMessage
++   * 每个 envelope 刷新）。inject 的 >60s stale-running 自愈以此作为「引擎是否
++   * 真静默」的基准，而非上次 inject/result 时间（后者会把刚产生过工具事件的
++   * 长 turn 误判为 stale）。仅内存态，不参与持久化语义。
++   */
++  lastTurnEventAt?: number;
++  /**
++   * 2026-10-23-watchdog-steering-guard FR-03：已经产生过轮事件的 run id 集合
++   * （onMessage 到达时登记，256 上限 FIFO 驱逐）。轮启动看门狗不得对已启动过的
++   * run 布防——防重复/迟到 inject 把活轮误判为「引擎未启动」。仅内存态。
++   */
++  observedRunIds?: Set<string>;
+   /** 固定 cwd（resume 还原用，spike D3）。driver.start 必须用 state.cwd。 */
+   cwd: string;
+   /**
+diff --git a/sillyhub-daemon/tests/interactive/turn-start-watchdog.test.ts b/sillyhub-daemon/tests/interactive/turn-start-watchdog.test.ts
+index bbcd4ed8f..15e3b6a63 100644
+--- a/sillyhub-daemon/tests/interactive/turn-start-watchdog.test.ts
++++ b/sillyhub-daemon/tests/interactive/turn-start-watchdog.test.ts
+@@ -231,4 +231,123 @@ describe('2026-10-21-daemon-zombie-turn FR-01：轮启动看门狗', () => {
+     // P2 缓解：currentRunId 保留（迟到归属锚，见上）。
+     expect(sm.get('sess-1')!.currentRunId).toBe('run-9');
+   });
++
++  // ── 2026-10-23-watchdog-steering-guard：忙轮 steering 误杀回归 ──────────────
++  // 事故 run 3d3b0bae（会话 5fb28b2e）：backend mid-turn steering 复用活跃 run
++  // 的 run_id；inject 的 >60s stale-reset 只看上次 inject 时间，把仍在产事件的
++  // 活轮翻 active 并给同一 run 布防看门狗，模型 API 卡顿后 90s 到点误判 failed。
++  // 以下用例锁定三条前置守卫：同 runId 不 stale/不布防、事件新鲜不 stale、
++  // 已观测 run 不布防；同时保留真僵尸轮（新 runId 零事件）触发路径。
++
++  it('事故序列：首轮启动→事件→同 runId steering→静默 90s 不误杀', async () => {
++    vi.useFakeTimers();
++    const onTurnStartTimeout = vi.fn(async () => {});
++    const sm = createSessionManager(onTurnStartTimeout);
++    const state = makeState('sess-1', 'active');
++    seed(sm, state);
++
++    await sm.inject('sess-1', 'first', 'run-A');
++    expect(watchdogMap(sm).has('sess-1')).toBe(true);
++
++    // 引擎产生任意轮事件：撤防 + 记录已启动 run。
++    await onMessage(core(sm), state, { events: [] });
++    expect(watchdogMap(sm).has('sess-1')).toBe(false);
++    expect(state.observedRunIds?.has('run-A')).toBe(true);
++
++    // 轮跑过 60s 后追加 steering（同 runId）：不得 stale-reset、不得重新布防。
++    await vi.advanceTimersByTimeAsync(120_000);
++    await sm.inject('sess-1', 'steer', 'run-A');
++    expect(watchdogMap(sm).has('sess-1')).toBe(false);
++
++    // 即使之后静默 90s（模型卡顿形态），也不得把活轮判死。
++    await vi.advanceTimersByTimeAsync(90_000);
++    expect(onTurnStartTimeout).not.toHaveBeenCalled();
++  });
++
++  it('mid-turn steering（同 runId）不 stale-reset、不布防看门狗', async () => {
++    vi.useFakeTimers();
++    const onTurnStartTimeout = vi.fn(async () => {});
++    const sm = createSessionManager(onTurnStartTimeout);
++    const state = makeState('sess-1', 'running');
++    state.currentRunId = 'run-active';
++    state.lastActiveAt = Date.now() - 120_000;
++    state.lastTurnEventAt = Date.now() - 120_000;
++    seed(sm, state);
++
++    await sm.inject('sess-1', 'steer', 'run-active');
++
++    const after = sm.get('sess-1')!;
++    expect(after.status).toBe('running');
++    expect(after.currentRunId).toBe('run-active');
++    // 同 runId 是追加输入，不是新轮启动：不得写 stale 宽限、不得布防。
++    expect(after.staleRunResetAt).toBeUndefined();
++    expect(watchdogMap(sm).has('sess-1')).toBe(false);
++    expect(sm.getPendingInjectCount('sess-1')).toBe(1);
++
++    await vi.advanceTimersByTimeAsync(90_000);
++    expect(onTurnStartTimeout).not.toHaveBeenCalled();
++  });
++
++  it('轮内事件新鲜时 inject 不触发 stale-reset（FR-02）', async () => {
++    const onTurnStartTimeout = vi.fn(async () => {});
++    const sm = createSessionManager(onTurnStartTimeout);
++    const state = makeState('sess-1', 'running');
++    state.currentRunId = 'run-old';
++    state.lastActiveAt = Date.now() - 120_000;
++    // 5 秒前还有轮内事件：引擎没静默，不得按「上次 inject 时间」误翻。
++    state.lastTurnEventAt = Date.now() - 5_000;
++    seed(sm, state);
++
++    await sm.inject('sess-1', 'queued', 'run-new');
++
++    const after = sm.get('sess-1')!;
++    expect(after.status).toBe('running');
++    expect(after.staleRunResetAt).toBeUndefined();
++    // 前一 turn 未 result：排队语义，不布防。
++    expect(watchdogMap(sm).has('sess-1')).toBe(false);
++  });
++
++  it('onMessage 刷新最后事件时间并记录 observedRunIds（FR-02/FR-03）', async () => {
++    const sm = createSessionManager();
++    const state = makeState('sess-1', 'running');
++    state.currentRunId = 'run-9';
++    state.lastTurnEventAt = 1;
++    seed(sm, state);
++
++    const before = Date.now();
++    await onMessage(core(sm), state, { events: [] });
++
++    expect(state.lastTurnEventAt).toBeGreaterThanOrEqual(before);
++    expect(state.observedRunIds?.has('run-9')).toBe(true);
++  });
++
++  it('已观测事件的 run 不再布防看门狗（FR-03）', async () => {
++    vi.useFakeTimers();
++    const onTurnStartTimeout = vi.fn(async () => {});
++    const sm = createSessionManager(onTurnStartTimeout);
++    const state = makeState('sess-1', 'active');
++    state.observedRunIds = new Set(['run-seen']);
++    seed(sm, state);
++
++    await sm.inject('sess-1', 'replay', 'run-seen');
++
++    expect(watchdogMap(sm).has('sess-1')).toBe(false);
++    await vi.advanceTimersByTimeAsync(90_000);
++    expect(onTurnStartTimeout).not.toHaveBeenCalled();
++  });
++
++  it('新 runId 零事件仍触发（真僵尸轮不回归，FR-03/FR-04）', async () => {
++    vi.useFakeTimers();
++    const onTurnStartTimeout = vi.fn(async () => {});
++    const sm = createSessionManager(onTurnStartTimeout);
++    const state = makeState('sess-1', 'active');
++    state.observedRunIds = new Set(['run-old']);
++    seed(sm, state);
++
++    await sm.inject('sess-1', '[后台任务通知] …', 'run-zombie');
++    await vi.advanceTimersByTimeAsync(90_000);
++
++    expect(onTurnStartTimeout).toHaveBeenCalledTimes(1);
++    expect(onTurnStartTimeout).toHaveBeenCalledWith('sess-1', 'run-zombie');
++  });
+ });
