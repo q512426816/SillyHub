@@ -1,0 +1,82 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-23-turn-file-diff-dialog",
+  "rows": [
+    {
+      "anchor": "FR-01",
+      "row_id": "2026-10-23-turn-file-diff-dialog:flow:测试绑定FR-01",
+      "tests": [
+        "frontend/src/components/daemon/__tests__/turn-timeline-conversation-file-card.test.tsx「sessionId 接线：点击文件行弹窗打开，展示该文件本轮 diff 内容（FR-01）」",
+        "frontend/src/components/daemon/file-changes/__tests__/turn-file-diff-dialog.test.tsx「命中补丁：渲染路径标题 + 第 1 次 Edit 分段 + 行级 diff（红删绿增）」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-23-turn-file-diff-dialog"
+    },
+    {
+      "anchor": "FR-02",
+      "row_id": "2026-10-23-turn-file-diff-dialog:flow:测试绑定FR-02",
+      "tests": [
+        "frontend/src/components/daemon/file-changes/__tests__/turn-file-diff-dialog.test.tsx「同文件多次编辑按次展示多段」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-23-turn-file-diff-dialog"
+    },
+    {
+      "anchor": "FR-03",
+      "row_id": "2026-10-23-turn-file-diff-dialog:flow:测试绑定FR-03",
+      "tests": [
+        "frontend/src/components/daemon/file-changes/__tests__/turn-file-diff-dialog.test.tsx「shell 归因行如实说明无补丁」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-23-turn-file-diff-dialog"
+    },
+    {
+      "anchor": "FR-04",
+      "row_id": "2026-10-23-turn-file-diff-dialog:flow:测试绑定FR-04",
+      "tests": [
+        "frontend/src/components/daemon/__tests__/turn-timeline-conversation-file-card.test.tsx「未接 sessionId 文件行不响应点击」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-23-turn-file-diff-dialog"
+    },
+    {
+      "anchor": "FR-05",
+      "row_id": "2026-10-23-turn-file-diff-dialog:flow:测试绑定FR-05",
+      "tests": [
+        "frontend/src/components/daemon/file-changes/__tests__/turn-file-diff.test.ts「日志配对纯映射」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-23-turn-file-diff-dialog"
+    }
+  ]
+}

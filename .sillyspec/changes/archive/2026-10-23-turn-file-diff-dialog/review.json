@@ -1,0 +1,28 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-23-turn-file-diff-dialog",
+  "reviewer": "subagent",
+  "verdict": "PASS",
+  "reviewedAgainst": "dbe998ee030eb30f877747028c74efe65c19181a",
+  "findings": [
+    {
+      "severity": "P3",
+      "title": "DiffView 超 2000 行截断提示指向不存在的「复制」按钮（本弹窗无复制兜底）",
+      "evidence": "DiffView 截断脚注文案「完整内容用『复制』按钮」由调用方提供复制按钮兜底（tool-diff.tsx 文档明示），但 TurnFileDiffDialog 渲染 DiffView 时不提供任何复制按钮，超 2000 行的 diff 用户既看不到余下行也无从复制，提示文案在本挂载面成为误导；截断护栏本身生效且如实声明截断，不违反任何 FR。",
+      "location": "frontend/src/components/daemon/file-changes/turn-file-diff-dialog.tsx:167"
+    },
+    {
+      "severity": "P3",
+      "title": "FR-01 测试绑定名与实际用例不符（点击开弹窗断言不在绑定文件内）",
+      "evidence": "已清偿（绑定修正，dbe998ee）：requirements.md FR-01 绑定改为双半边真实用例名——点击接线半边 turn-timeline-conversation-file-card.test.tsx「sessionId 接线：点击文件行弹窗打开，展示该文件本轮 diff 内容（FR-01）」+ 渲染半边 turn-file-diff-dialog.test.tsx「命中补丁：渲染路径标题 + 第 1 次 Edit 分段 + 行级 diff（红删绿增）」，两个用例名经复核与测试文件逐字一致；该增量仅动 requirements.md + review.json，零代码面变化。",
+      "location": ".sillyspec/changes/2026-10-23-turn-file-diff-dialog/requirements.md:53"
+    }
+  ],
+  "dimensionNotes": {
+    "乱序": "ok",
+    "并发": "ok",
+    "切换": "ok",
+    "作用域": "ok"
+  },
+  "reviewedAt": "2026-10-23T08:33:39+08:00"
+}

@@ -1084,3 +1084,98 @@ created_at: 2026-10-16T01:30:35.950Z
   confirmed_at: null
   source_change: 2026-10-23-review-risk-fixes-2
   status: active
+
+## FR-test-utils-055 点击文件变更卡中的文件行，弹出模态弹窗显示该文件本轮的具体变更内容（diff 形式，带行号红删绿增）
+变更：2026-10-23-turn-file-diff-dialog
+状态：active
+摘要：主路径
+全文：.sillyspec/changes/archive/2026-10-23-turn-file-diff-dialog/requirements.md#FR-01
+最近确认：c91a1d6c30d543016c1570e8bdc00cade0374987
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-23-turn-file-diff-dialog:flow:测试绑定FR-01
+  tests: frontend/src/components/daemon/__tests__/turn-timeline-conversation-file-card.test.tsx「sessionId 接线：点击文件行弹窗打开，展示该文件本轮 diff 内容（FR-01）」 | frontend/src/components/daemon/file-changes/__tests__/turn-file-diff-dialog.test.tsx「命中补丁：渲染路径标题 + 第 1 次 Edit 分段 + 行级 diff（红删绿增）」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-23-turn-file-diff-dialog
+  status: active
+
+## FR-test-utils-056 同一文件多次编辑（改N次）在弹窗中按次展示多段 diff
+变更：2026-10-23-turn-file-diff-dialog
+状态：active
+摘要：主路径
+全文：.sillyspec/changes/archive/2026-10-23-turn-file-diff-dialog/requirements.md#FR-02
+最近确认：c91a1d6c30d543016c1570e8bdc00cade0374987
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-23-turn-file-diff-dialog:flow:测试绑定FR-02
+  tests: frontend/src/components/daemon/file-changes/__tests__/turn-file-diff-dialog.test.tsx「同文件多次编辑按次展示多段」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-23-turn-file-diff-dialog
+  status: active
+
+## FR-test-utils-057 命令行归因/二进制等无补丁内容的行，点击后弹窗如实说明无补丁原因，不显示伪造内容
+变更：2026-10-23-turn-file-diff-dialog
+状态：active
+摘要：主路径
+全文：.sillyspec/changes/archive/2026-10-23-turn-file-diff-dialog/requirements.md#FR-03
+最近确认：c91a1d6c30d543016c1570e8bdc00cade0374987
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-23-turn-file-diff-dialog:flow:测试绑定FR-03
+  tests: frontend/src/components/daemon/file-changes/__tests__/turn-file-diff-dialog.test.tsx「shell 归因行如实说明无补丁」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-23-turn-file-diff-dialog
+  status: active
+
+## FR-test-utils-058 未接 sessionId 的旧消费方（agent-replay-body 等）零回归：行不响应点击、不出弹窗
+变更：2026-10-23-turn-file-diff-dialog
+状态：active
+摘要：主路径
+全文：.sillyspec/changes/archive/2026-10-23-turn-file-diff-dialog/requirements.md#FR-04
+最近确认：c91a1d6c30d543016c1570e8bdc00cade0374987
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-23-turn-file-diff-dialog:flow:测试绑定FR-04
+  tests: frontend/src/components/daemon/__tests__/turn-timeline-conversation-file-card.test.tsx「未接 sessionId 文件行不响应点击」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-23-turn-file-diff-dialog
+  status: active
+
+## FR-test-utils-059 相关组件测试绿（纯映射配对逻辑 + 弹窗形态 + 挂载面接线）
+变更：2026-10-23-turn-file-diff-dialog
+状态：active
+摘要：主路径
+全文：.sillyspec/changes/archive/2026-10-23-turn-file-diff-dialog/requirements.md#FR-05
+最近确认：c91a1d6c30d543016c1570e8bdc00cade0374987
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-23-turn-file-diff-dialog:flow:测试绑定FR-05
+  tests: frontend/src/components/daemon/file-changes/__tests__/turn-file-diff.test.ts「日志配对纯映射」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-23-turn-file-diff-dialog
+  status: active
