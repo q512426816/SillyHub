@@ -1750,3 +1750,11 @@ supersedes：D-005@v1
 锚点：未记录
 最近确认：bbe1bbf6ba02b08fa3ef2bf7a5558d94f4d026ff
 理由：风险：`scrollIntoView` effect 在流式更新（新行追加）时可能把用户正在阅读的位置拉走——限定为「selectedRowId 变化时」触发（非滚动容器内容变化），与旧实现同口径。放弃的方案：让 TurnCatalog 直接操作轨迹 DOM（跨组件 querySelector）——耦合 DOM 结构且绕过选中状态机；放弃 imperative ref 暴露滚动方法——受控信号 + 选中 effect 已够用，少一条命令式通道。
+
+## D-unmapped-225@v1 设计期风险与放弃方案（底稿）
+状态：implemented
+变更：2026-10-24-backend-mem-limit-raise
+原编号：D-001@v1
+锚点：未记录
+最近确认：0a3e4ee1ab582ce08c68a988d7da3697f3436448
+理由：最大风险：若后续再引入第三类常驻模型 worker 或批量推理峰值再涨，2500m 仍可能触顶——但 cgroup OOM 兜底行为不变（杀 worker 保主进程），且宿主 7.5G 对 2500m 上限仍有 3G+ 安全边际，风险可控。放弃的方案：①worker 拆独立 sidecar 容器（治本但改部署管线与进程拓扑，改动面大，超出本次决策范围）；②调小嵌入/翻译批上限（治标：压峰不治底，主进程+单 worker 稳态仍贴 1100m 顶，且推理延迟恶化）；③不设 mem_limit（失去 OOM 隔离，宿主与其它容器暴露在被挤爆风险下）。

@@ -2156,3 +2156,17 @@ superseded_by：FR-app-workspace-pages-009
 摘要：存量清零 + 工具脚本不回归
 全文：.sillyspec/changes/archive/2026-10-20-root-ruff-config/requirements.md#FR-03
 最近确认：978336829578f84f9c18d7ded93c25ce05f432da
+
+## FR-build-144 deploy/docker-compose.yml backend mem_limit 从 1100m 提到 2500m，注释修正「服务器 1.6G」过时认知并记入实测 7.5G 与 OOM 证据
+变更：2026-10-24-backend-mem-limit-raise
+状态：active
+摘要：主路径
+全文：.sillyspec/changes/archive/2026-10-24-backend-mem-limit-raise/requirements.md#FR-01
+最近确认：0a3e4ee1ab582ce08c68a988d7da3697f3436448
+
+## FR-build-145 服务器同步新 compose 并 recreate backend 后 docker stats 显示 limit 约 2.44GiB，容器 healthy
+变更：2026-10-24-backend-mem-limit-raise
+状态：active
+摘要：主路径
+全文：.sillyspec/changes/archive/2026-10-24-backend-mem-limit-raise/requirements.md#FR-02
+最近确认：0a3e4ee1ab582ce08c68a988d7da3697f3436448

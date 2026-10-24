@@ -1,0 +1,21 @@
+diff --git a/deploy/docker-compose.yml b/deploy/docker-compose.yml
+index 5d88e18ec..bec484b7d 100644
+--- a/deploy/docker-compose.yml
++++ b/deploy/docker-compose.yml
+@@ -170,10 +170,12 @@ services:
+       # 默认 16MiB 上限会被 >12MB 的 spec 目录撑爆（WS close 1009 致 import 必断）。
+       # 治本在 daemon 端 gzip 压缩，这里是防御性兜底。
+       - "alembic upgrade head && exec uvicorn app.main:app --host 0.0.0.0 --port 8000 --ws-max-size 104857600"
+-    # 2026-10-15 生产实证：知识搜索嵌入（fastembed bge-small）在 800m 限额下与
+-    # 服务本体合计超限被 cgroup OOM（预建进程 247M 时容器总量触顶）——提至 1100m；
+-    # 服务器 1.6G：backend 1100 + 其他实际 ~270 + 系统 ~150 仍在总量内。
+-    mem_limit: 1100m
++    # 2026-10-24-backend-mem-limit-raise：1100m → 2500m。宿主实测 7.5G（旧注释
++    # 「服务器 1.6G」认知已过时——1100m 装不下服务本体 ~460M + 模型 worker 峰值
++    # ~1.05G：嵌入 fastembed / 翻译 ct2，dmesg 记 10-16~10-23 共 25 次 cgroup OOM，
++    # 10-23 一天 9 次，OOM 窗口前端超时连败反复触发全局熔断横幅）。2500m 兜住
++    # 双 worker 并存与批量推理峰，宿主仍有 3G+ 安全边际。
++    mem_limit: 2500m
+     # 2026-10-16-backend-mem-polling task-09 / D-001@v1：主进程 OOM 保护——容器
+     # 内存告急时内核优先牺牲嵌入子进程（worker 启动时自重置 oom_score_adj=0），
+     # 主服务存活。compose 服务级设置免 entrypoint CAP_SYS_RESOURCE 权限问题。

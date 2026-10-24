@@ -1,0 +1,68 @@
+{
+  "change": "2026-10-24-backend-mem-limit-raise",
+  "baseline": "732c0deefaf16106e5b5abc13a5a4409b3eefc89",
+  "head": "0a3e4ee1ab582ce08c68a988d7da3697f3436448",
+  "files": [
+    "deploy/docker-compose.yml"
+  ],
+  "totals": {
+    "files": 1,
+    "additions": 6,
+    "deletions": 4
+  },
+  "savedAt": "2026-10-24T04:29:35.943Z",
+  "note": "flow done 时点冻结（本变更可归属交付面：baseline..HEAD 提交面过滤 .sillyspec/ 只留 .sillyspec/docs/ 交付文档 + 独占树未提交交付；治理工件目录不入冻结——2026-10-12-close-trace-freeze-integrity FR-01）",
+  "modules": [
+    {
+      "id": "deploy",
+      "files": 1,
+      "doc": "docs/multi-agent-platform/modules/deploy.md",
+      "docTouched": false,
+      "docMissing": false
+    },
+    {
+      "id": "build",
+      "files": 1,
+      "doc": "docs/multi-agent-platform/modules/build.md",
+      "docTouched": false,
+      "docMissing": false
+    }
+  ],
+  "uncoveredDirs": [],
+  "moduleMaps": [
+    "docs/backend/modules/_module-map.yaml",
+    "docs/frontend/modules/_module-map.yaml",
+    "docs/multi-agent-platform/modules/_module-map.yaml",
+    "docs/SillyHub/modules/_module-map.yaml",
+    "docs/sillyhub-daemon/modules/_module-map.yaml"
+  ],
+  "acceptedDirtyGap": 9,
+  "scopeAudit": {
+    "mode": "full-flow",
+    "ok": true,
+    "degradedReason": null,
+    "baseAnchor": "732c0deefaf16106e5b5abc13a5a4409b3eefc89",
+    "totals": {
+      "files": 1,
+      "additions": 6,
+      "deletions": 4
+    },
+    "rows": [
+      {
+        "path": "deploy/docker-compose.yml",
+        "additions": 6,
+        "deletions": 4,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "planned"
+      }
+    ],
+    "excluded": {
+      "foreignDeclared": []
+    },
+    "note": "flow done 时点冻结（本文件落盘时采集）",
+    "closedBy": "flow done"
+  },
+  "patchSha256": "bd7bb85837d45626a285ce96df9a4b52dc8366d2b0441f75136dcdc27acf8072",
+  "patchStatus": "ok"
+}

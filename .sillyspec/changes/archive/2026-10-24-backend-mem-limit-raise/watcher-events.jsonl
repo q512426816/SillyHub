@@ -1,0 +1,13 @@
+{"ts":1792815762402,"kind":"file-update","stage":"requirements","detail":"requirements.md 内容变更","provisional":true}
+{"ts":1792815762402,"kind":"file-update","stage":"design","detail":"design.md 内容变更","provisional":true}
+{"ts":1792815782762,"kind":"file-update","stage":"design","detail":"design.md 内容变更","provisional":true}
+{"ts":1792815816248,"kind":"warning","stage":null,"rule":"scope-drift","severity":"warning","detail":"声明面之外的代码文件被改：eploy/docker-compose.yml——范围漂移嫌疑（并行会话改动/越界，人判）","provisional":true}
+{"ts":1792815829109,"kind":"task-done","stage":"tasks","detail":"checked 0→1","provisional":true,"source":"task-tick"}
+{"ts":1792815829371,"kind":"file-update","stage":"tasks","detail":"tasks.md 内容变更","provisional":true}
+{"ts":1792815829371,"kind":"task-done","stage":"tasks","detail":"checked 0→1","provisional":true}
+{"ts":1792815986695,"kind":"commit","stage":null,"detail":"266912158","provisional":true}
+{"ts":1792816079421,"kind":"task-done","stage":"tasks","detail":"checked 1→2","provisional":true,"source":"task-tick"}
+{"ts":1792816079498,"kind":"file-update","stage":"tasks","detail":"tasks.md 内容变更","provisional":true}
+{"ts":1792816079498,"kind":"task-done","stage":"tasks","detail":"checked 1→2","provisional":true}
+{"ts":1792816079764,"kind":"warning","stage":null,"rule":"scope-drift","severity":"warning","detail":"声明面之外的代码文件被改：sillyspec/changes/2026-10-24-backend-mem-limit-raise/task-ticks.jsonl——范围漂移嫌疑（并行会话改动/越界，人判）","provisional":true}
+{"ts":1792816090423,"kind":"commit","stage":null,"detail":"0a3e4ee1a","provisional":true}

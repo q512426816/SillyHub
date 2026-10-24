@@ -1,0 +1,44 @@
+tier: thin
+legacy_fallback: false
+substeps:
+  artifacts: done
+  ledger: done
+  patch: done
+  review: done
+  probes: done
+  distill: done
+  archive: done
+  events: done
+born_face: thin
+with_tasks: false
+review_force: null
+input: >-
+  提升 backend 容器内存限额防 OOM
+
+
+  动机与背景：
+
+  服务器实测宿主内存 7.5G（compose 旧注释「服务器 1.6G」认知过时，available 常年 5.9G），而 backend 容器 mem_limit 1100m 装不下 uvicorn 主进程（~460MB）+ 模型
+  worker 子进程（嵌入 fastembed / 翻译 ct2，峰值 rss ~1.05GB）。2026-10-16 以来内核日志 25 次 cgroup OOM（10-23 一天 9 次，全部杀 oom_score_adj=0 的
+  worker），OOM 窗口容器卡顿导致前端读请求 30s 超时连续 5 次，反复触发全局熔断横幅「与服务器的连接暂时中断」。宿主余量充足，提额是治本项。
+
+
+  成功标准：
+
+  - deploy/docker-compose.yml backend mem_limit 从 1100m 提到 2500m，注释修正「服务器 1.6G」过时认知并记入实测 7.5G 与 OOM 证据
+
+  - 服务器同步新 compose 并 recreate backend 后 docker stats 显示 limit 约 2.44GiB，容器 healthy
+autopilot: false
+prestage_ack: true
+baseline_commit: 732c0deefaf16106e5b5abc13a5a4409b3eefc89
+updatedAt: '2026-10-24T04:29:38.754Z'
+cross_baselines:
+  sillyspec: e26546db6247f7b07df5e68583ab7e5a041d9014
+baseline_sha256: 92da282270e46234fb363d2e95ec031e049337742556e1a3063a6dd1e9b55dfb
+spec_approved: true
+spec_approved_at: '2026-10-24T04:23:09.001Z'
+spec_approved_by: main-backend-mem-raise
+spec_approved_channel: user-confirmed
+spec_attested_by: main-backend-mem-raise
+gate_summary: 'test: —｜lint: —｜门文件 10 个'
+
