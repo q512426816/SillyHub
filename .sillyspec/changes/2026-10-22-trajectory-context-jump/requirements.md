@@ -53,6 +53,6 @@ Given 变更落盘；When 跑轨迹目录与会话面板相关测试与 tsc；Th
 ## 测试绑定（每条 FR 至少一行——`FR-NN: test/路径「用例名」`；空行/待填在 flow done 拒收）
 
 FR-01: `frontend/src/components/daemon/trajectory/__tests__/from-turn-views.test.ts`「system_event 派生为上下文行：原文摘要 + ts 锚点 + 无事件轮零变化」
-FR-02: `frontend/src/components/daemon/trajectory/__tests__/trajectory-redesign.test.tsx`「轮次跳转信号：选中目标轮首行并滚入视野」+ `frontend/src/components/daemon/__tests__/turn-timeline-trajectory-view.test.tsx`「TurnTimeline 透传轨迹跳转信号」
+FR-02: `frontend/src/components/daemon/__tests__/turn-timeline-trajectory-view.test.tsx`「TurnTimeline 透传轨迹跳转信号：选中目标轮首行（2026-10-22-trajectory-context-jump FR-02）」+「跳转信号指向不在轨迹的轮（预览轮）时静默跳过，不改选中」
 FR-03: `frontend/src/components/daemon/trajectory/__tests__/trajectory-redesign.test.tsx`「选中行变化时账本滚入视野（时间线条块/键盘）」
 FR-04: 不适用：类型检查无测试面，`pnpm exec tsc --noEmit` 直接验证退出码；回归面由上述目录全量跑覆盖

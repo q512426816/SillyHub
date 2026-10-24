@@ -1,0 +1,35 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-22-trajectory-context-jump",
+  "reviewer": "subagent",
+  "verdict": "PASS",
+  "reviewedAgainst": "e7b1efa316dd46484c4b9cb5db664d964d9a14f4",
+  "findings": [
+    {
+      "severity": "P2",
+      "title": "跳转信号残留：流式更新时 effect 随 trajectory 变化重跑，覆盖用户手动选中（design「effect 消费后不残留」声明与实现不符）",
+      "evidence": "design.md 边界四问第 3 问声明「TrajectoryPane 用 effect 消费后不残留」。实态 turn-timeline.tsx:1440-1446 effect 依赖 [jump, trajectory]：trajectory 是 useMemo(() => trajectoryFromTurnViews(turns), [turns])，同一会话流式更新（turns 新引用）即重算并重跑 effect，此时 jump 信号仍残留在 session-panel-page 的 state（setTrajectoryJump 仅在下次点击时覆盖，无清空路径，session-panel-page.tsx:2429-2432/2802），会把选中重置为 jump 轮首行并经账本 scroll effect 拉走视野——覆盖用户跳转后手动点选/键盘移动的选中。仅会话切换重挂载（sessions/[sid]/page.tsx:60 key={sid}）可复位。FR-02 条文（点击时选中+滚动）本身满足，属 design 声明失实 + 窄路径 UX 缺陷，非数据正确性风险，故判 P2 不判 P1。",
+      "location": "frontend/src/components/daemon/turn-timeline.tsx:1440-1446"
+    },
+    {
+      "severity": "P3",
+      "title": "FR-02 测试绑定第一项指向不存在的用例名",
+      "evidence": "requirements.md:56 声明 trajectory-redesign.test.tsx 有「轮次跳转信号：选中目标轮首行并滚入视野」用例；该文件实态 13 个 it() 中无此用例（逐条枚举核实）。FR-02 行为实际由绑定第二项 turn-timeline-trajectory-view.test.tsx「TurnTimeline 透传轨迹跳转信号：选中目标轮首行」+「跳转信号指向不在轨迹的轮（预览轮）时静默跳过，不改选中」覆盖（断言 aria-selected/data-row-id/静默跳过，真实有效），滚动由 FR-03 用例覆盖。「每 FR 至少一行」义务实质履行，仅绑定声明与实际文件/用例名错位。",
+      "location": ".sillyspec/changes/2026-10-22-trajectory-context-jump/requirements.md:56"
+    },
+    {
+      "severity": "P3",
+      "title": "change.patch 冻结件夹带两个并行变更的 diff，评审对照需人工剥离",
+      "evidence": "change.patch（1523 行）中约半数内容属并行变更 2026-10-24-close-run-quota-fallback（backend close_run_steps.py + 其测试）与 2026-10-24-pi-edit-patch-synth（pi-events.ts、pi-edit-patch-synth.ts、turn-file-diff-dialog、turn-timeline.tsx agentEdited 段、5 个 changelog），均不在 design.md 文件清单内。系 patch 冻结时并行会话在途工作区改动一并收入（git status 可证），非本变更承诺违反，但与仓库「不夹带并行会话在途面」惯例（cf. commit 4cc074803）相悖，影响材料纯净度。",
+      "location": ".sillyspec/changes/2026-10-22-trajectory-context-jump/change.patch:58-1067"
+    }
+  ],
+  "dimensionNotes": {
+    "乱序": "成立。system_event 行进轮后参与既有 turnRows.sort((a,b)=>a.startedAt-b.startedAt||a.id.localeCompare(b.id))（from-turn-views.ts:243），时间排序正确位置属实；纯函数同输入同输出，重复渲染幂等；行 id 用 `${runId}:ctx:${i}` 数组序号（design 允许「text 哈希或序号」），processItems 尾部追加模型下稳定。",
+    "并发": "成立。派生为纯函数，跳转信号与会话选中态均为单组件持有 state，无共享可变数据/文件写面。",
+    "切换": "主路径成立：page 挂载 key={sid}（sessions/[sid]/page.tsx:60）、runtime 挂载 key={attachSession?.id ?? \"live\"} 均按会话重挂载，trajectoryJump 随之复位；runId 全局唯一保证旧信号残留时也仅静默跳过（turn 不匹配即 return），不串台。cannot_verify 尾注：floating-session-host.tsx:602 与 worker-session-overlay.tsx:110 两处 dialog 挂载点未逐一核对 key——但即便不重挂载，按 runId 唯一性推演亦无实际影响。另见 P2：同一会话内（非切换）的流式更新存在信号残留重触发，属切换问句之外的生命周期缝隙。",
+    "作用域": "成立。trajectoryJump 为会话面板实例内 state，不进全局store/URL；多实例各自独立 state，run key 匹配限定当前 turns（realRunId ?? runId 口径与 TurnCatalogEntry.key 同源，turn-catalog.tsx:50 ↔ from-turn-views.ts:122），不串台。"
+  },
+  "reviewNotes": "检查单裁决：①FR↔实现↔测试三方一致（FR-01/03/04 完全一致；FR-02 行为有等效测试但绑定声明错位见 P3-2）；②盲维四问：乱序/并发/作用域声明属实，切换声明部分失实见 P2；③防护声明逐条验证生效——ts 锚点 `typeof item.ts === \"number\" ? item.ts : turnStart` 不伪造（from-turn-views.ts:222，turnStart 为真实轮首锚点，与段缺锚点同语义）、无事件轮零变化（makeTurn 默认无 processItems，零回归断言比较两次调用 id 集合，真实有效）、清空选中不滚动（trajectory-ledger.tsx:76 `if (!selectedRowId) return`）、typeof 守卫在场（:80）；④生成物同步：无后端 API/DTO 变更，确认无 gen:types 义务；⑤复跑：vitest 抽验 trajectory 目录 7 文件 + turn-timeline-trajectory-view 共 105/105 绿（7.3s），pnpm exec tsc --noEmit 退出 0。既有用例「产品路径只派发六类行型」的 makeTurn()→makeTurn({processItems: undefined}) 改动经核实为语义等价（默认即无 processItems），不构成放宽。工作区 HEAD 已推进至 3926037d7，本变更相关文件实态与冻结件一致（逐文件 grep 核对）。",
+  "reviewedAt": "2026-10-24T08:02:08+08:00"
+}

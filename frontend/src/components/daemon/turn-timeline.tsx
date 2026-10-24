@@ -1436,9 +1436,13 @@ function TrajectoryPane({
   const [selectedRowId, setSelectedRowId] = useState<string | null>(null);
   // 2026-10-22-trajectory-context-jump（FR-02）：轮次导航跳转——run key 匹配轮，
   // 选中该轮首行；滚入视野由账本选中 effect 承担。目标轮不在轨迹（预览轮/
-  // 未加载）时静默跳过，不报错。
+  // 未加载）时静默跳过，不报错。nonce 只消费一次：流式更新（trajectory 引用
+  // 变化）重跑本 effect 不得覆盖用户手动选中（评审 P2）。
+  const lastJumpNonceRef = useRef(-1);
   useEffect(() => {
     if (!jump) return;
+    if (jump.nonce === lastJumpNonceRef.current) return;
+    lastJumpNonceRef.current = jump.nonce;
     const turn = trajectory.turns.find((item) => item.runId === jump.turnKey);
     if (!turn) return;
     const firstRow = trajectory.rows.find((row) => row.turnIndex === turn.index);
