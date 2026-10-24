@@ -1,0 +1,284 @@
+{
+  "change": "2026-10-22-trajectory-context-jump",
+  "baseline": "3951a75d6e90bd3f5d640bdf6eaf0212e839d321",
+  "head": "bbe1bbf6ba02b08fa3ef2bf7a5558d94f4d026ff",
+  "files": [
+    ".sillyspec/docs/SillyHub/modules/daemon.changelog.md",
+    ".sillyspec/docs/SillyHub/modules/frontend_components.changelog.md",
+    ".sillyspec/docs/backend/modules/daemon.changelog.md",
+    ".sillyspec/docs/multi-agent-platform/modules/backend.changelog.md",
+    ".sillyspec/docs/multi-agent-platform/modules/frontend.changelog.md",
+    ".sillyspec/docs/multi-agent-platform/modules/sillyhub-daemon.changelog.md",
+    "backend/app/modules/daemon/run_sync/service/close_run_steps.py",
+    "backend/app/modules/daemon/tests/test_close_interactive_run_quota_log_fallback.py",
+    "frontend/src/components/daemon/__tests__/turn-timeline-trajectory-view.test.tsx",
+    "frontend/src/components/daemon/file-changes/__tests__/turn-file-diff-dialog.test.tsx",
+    "frontend/src/components/daemon/file-changes/turn-file-diff-dialog.tsx",
+    "frontend/src/components/daemon/session-panel/session-panel-page.tsx",
+    "frontend/src/components/daemon/trajectory/__tests__/from-turn-views.test.ts",
+    "frontend/src/components/daemon/trajectory/__tests__/trajectory-redesign.test.tsx",
+    "frontend/src/components/daemon/trajectory/build-trajectory.ts",
+    "frontend/src/components/daemon/trajectory/from-turn-views.ts",
+    "frontend/src/components/daemon/trajectory/trajectory-ledger.tsx",
+    "frontend/src/components/daemon/trajectory/trajectory-view-model.ts",
+    "frontend/src/components/daemon/turn-timeline.tsx",
+    "sillyhub-daemon/src/interactive/pi-edit-patch-synth.ts",
+    "sillyhub-daemon/src/interactive/pi-events.ts",
+    "sillyhub-daemon/tests/interactive/pi-edit-patch-synth.test.ts"
+  ],
+  "totals": {
+    "files": 22,
+    "additions": 1086,
+    "deletions": 20
+  },
+  "savedAt": "2026-10-24T00:04:01.427Z",
+  "note": "flow done 时点冻结（本变更可归属交付面：baseline..HEAD 提交面过滤 .sillyspec/ 只留 .sillyspec/docs/ 交付文档 + 独占树未提交交付；治理工件目录不入冻结——2026-10-12-close-trace-freeze-integrity FR-01）",
+  "modules": [
+    {
+      "id": "daemon",
+      "files": 2,
+      "doc": "docs/backend/modules/daemon.md",
+      "docTouched": false,
+      "docMissing": false
+    },
+    {
+      "id": "backend",
+      "files": 2,
+      "doc": "docs/multi-agent-platform/modules/backend.md",
+      "docTouched": false,
+      "docMissing": false
+    },
+    {
+      "id": "frontend",
+      "files": 11,
+      "doc": "docs/multi-agent-platform/modules/frontend.md",
+      "docTouched": false,
+      "docMissing": false
+    },
+    {
+      "id": "sillyhub-daemon",
+      "files": 3,
+      "doc": "docs/multi-agent-platform/modules/sillyhub-daemon.md",
+      "docTouched": false,
+      "docMissing": false
+    },
+    {
+      "id": "daemon",
+      "files": 5,
+      "doc": "docs/SillyHub/modules/daemon.md",
+      "docTouched": false,
+      "docMissing": false
+    },
+    {
+      "id": "frontend_components",
+      "files": 11,
+      "doc": "docs/SillyHub/modules/frontend_components.md",
+      "docTouched": false,
+      "docMissing": false
+    }
+  ],
+  "uncoveredDirs": [],
+  "moduleMaps": [
+    "docs/backend/modules/_module-map.yaml",
+    "docs/frontend/modules/_module-map.yaml",
+    "docs/multi-agent-platform/modules/_module-map.yaml",
+    "docs/SillyHub/modules/_module-map.yaml",
+    "docs/sillyhub-daemon/modules/_module-map.yaml"
+  ],
+  "scopeAudit": {
+    "mode": "full-flow",
+    "ok": true,
+    "degradedReason": null,
+    "baseAnchor": "3951a75d6e90bd3f5d640bdf6eaf0212e839d321",
+    "totals": {
+      "files": 22,
+      "additions": 1086,
+      "deletions": 20
+    },
+    "rows": [
+      {
+        "path": ".sillyspec/docs/SillyHub/modules/daemon.changelog.md",
+        "additions": 2,
+        "deletions": 0,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": ".sillyspec/docs/SillyHub/modules/frontend_components.changelog.md",
+        "additions": 1,
+        "deletions": 0,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": ".sillyspec/docs/backend/modules/daemon.changelog.md",
+        "additions": 2,
+        "deletions": 0,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": ".sillyspec/docs/multi-agent-platform/modules/backend.changelog.md",
+        "additions": 2,
+        "deletions": 0,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": ".sillyspec/docs/multi-agent-platform/modules/frontend.changelog.md",
+        "additions": 1,
+        "deletions": 0,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": ".sillyspec/docs/multi-agent-platform/modules/sillyhub-daemon.changelog.md",
+        "additions": 1,
+        "deletions": 0,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": "backend/app/modules/daemon/run_sync/service/close_run_steps.py",
+        "additions": 117,
+        "deletions": 1,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": "backend/app/modules/daemon/tests/test_close_interactive_run_quota_log_fallback.py",
+        "additions": 292,
+        "deletions": 0,
+        "kind": "new",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": "frontend/src/components/daemon/__tests__/turn-timeline-trajectory-view.test.tsx",
+        "additions": 29,
+        "deletions": 0,
+        "kind": "modified",
+        "planned": "修改",
+        "verdict": "planned"
+      },
+      {
+        "path": "frontend/src/components/daemon/file-changes/__tests__/turn-file-diff-dialog.test.tsx",
+        "additions": 14,
+        "deletions": 0,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": "frontend/src/components/daemon/file-changes/turn-file-diff-dialog.tsx",
+        "additions": 21,
+        "deletions": 1,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": "frontend/src/components/daemon/session-panel/session-panel-page.tsx",
+        "additions": 16,
+        "deletions": 1,
+        "kind": "modified",
+        "planned": "修改",
+        "verdict": "planned"
+      },
+      {
+        "path": "frontend/src/components/daemon/trajectory/__tests__/from-turn-views.test.ts",
+        "additions": 30,
+        "deletions": 1,
+        "kind": "modified",
+        "planned": "修改",
+        "verdict": "planned"
+      },
+      {
+        "path": "frontend/src/components/daemon/trajectory/__tests__/trajectory-redesign.test.tsx",
+        "additions": 72,
+        "deletions": 1,
+        "kind": "modified",
+        "planned": "修改",
+        "verdict": "planned"
+      },
+      {
+        "path": "frontend/src/components/daemon/trajectory/build-trajectory.ts",
+        "additions": 3,
+        "deletions": 0,
+        "kind": "modified",
+        "planned": "修改",
+        "verdict": "planned"
+      },
+      {
+        "path": "frontend/src/components/daemon/trajectory/from-turn-views.ts",
+        "additions": 27,
+        "deletions": 1,
+        "kind": "modified",
+        "planned": "修改",
+        "verdict": "planned"
+      },
+      {
+        "path": "frontend/src/components/daemon/trajectory/trajectory-ledger.tsx",
+        "additions": 14,
+        "deletions": 1,
+        "kind": "modified",
+        "planned": "修改",
+        "verdict": "planned"
+      },
+      {
+        "path": "frontend/src/components/daemon/trajectory/trajectory-view-model.ts",
+        "additions": 9,
+        "deletions": 2,
+        "kind": "modified",
+        "planned": "修改",
+        "verdict": "planned"
+      },
+      {
+        "path": "frontend/src/components/daemon/turn-timeline.tsx",
+        "additions": 56,
+        "deletions": 5,
+        "kind": "modified",
+        "planned": "修改",
+        "verdict": "planned"
+      },
+      {
+        "path": "sillyhub-daemon/src/interactive/pi-edit-patch-synth.ts",
+        "additions": 138,
+        "deletions": 0,
+        "kind": "new",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": "sillyhub-daemon/src/interactive/pi-events.ts",
+        "additions": 70,
+        "deletions": 6,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": "sillyhub-daemon/tests/interactive/pi-edit-patch-synth.test.ts",
+        "additions": 169,
+        "deletions": 0,
+        "kind": "new",
+        "planned": null,
+        "verdict": "unplanned"
+      }
+    ],
+    "excluded": {
+      "foreignDeclared": []
+    },
+    "note": "flow done 时点冻结（本文件落盘时采集）",
+    "closedBy": "flow done"
+  },
+  "patchSha256": "8eb438f46ede2da3355e857539b9e514c055beb407ffbf92b1e2f984e993b47f",
+  "patchStatus": "ok"
+}

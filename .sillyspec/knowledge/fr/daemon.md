@@ -7671,3 +7671,78 @@
 摘要：验收门
 全文：.sillyspec/changes/archive/2026-10-24-pi-edit-patch-synth/requirements.md#FR-05
 最近确认：4d07114b353e26c3c2462eebf3133b4cff03ac55
+
+## FR-daemon-281 processItems 的 system_event 在轨迹账本显示为「上下文」类型行（真实文案与时间锚点，缺锚点用轮首，不伪造）
+变更：2026-10-22-trajectory-context-jump
+状态：active
+摘要：主路径；缺锚点；零回归
+场景正文：
+- 场景：主路径 — Given 一轮 processItems 含 `system_event`（text="Agent sent a message"，ts=轮中段时刻）；When 打开轨迹
+- 场景：缺锚点 — Given `system_event` 无 ts；When 派生；Then 行锚点=该轮首锚点，行不丢失。
+- 场景：零回归 — Given 一轮无任何 system_event；When 派生；Then 该轮行集合与改动前完全一致。
+全文：.sillyspec/changes/archive/2026-10-22-trajectory-context-jump/requirements.md#FR-01
+最近确认：bbe1bbf6ba02b08fa3ef2bf7a5558d94f4d026ff
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-22-trajectory-context-jump:flow:测试绑定FR-01
+  tests: frontend/src/components/daemon/trajectory/__tests__/from-turn-views.test.ts
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-22-trajectory-context-jump
+  status: active
+
+## FR-daemon-282 轨迹视图下点击左侧轮次刻度，账本滚动定位到对应轮次首行并选中（复用 handleJumpToTurn 的轨迹分支）
+变更：2026-10-22-trajectory-context-jump
+状态：active
+摘要：主路径；未加载轮
+场景正文：
+- 场景：主路径 — Given 轨迹视图 + 多轮会话；When 点击左侧第 N 轮刻度；Then 账本滚动到第 N 轮首行且该行选中（详情面板显示该行）。
+- 场景：未加载轮 — Given 目标轮尚未加载（预览态）；When 点击该轮刻度；Then 行为不劣化——预览轮本就不进轨迹（既有 D-006 语义），定位跳过该轮不报错。
+全文：.sillyspec/changes/archive/2026-10-22-trajectory-context-jump/requirements.md#FR-02
+最近确认：bbe1bbf6ba02b08fa3ef2bf7a5558d94f4d026ff
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-22-trajectory-context-jump:flow:测试绑定FR-02
+  tests: frontend/src/components/daemon/__tests__/turn-timeline-trajectory-view.test.tsx
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-22-trajectory-context-jump
+  status: active
+
+## FR-daemon-283 点击时间线条块或键盘 ↑/↓ 移动选中时，账本自动把选中行滚入视野
+变更：2026-10-22-trajectory-context-jump
+状态：active
+摘要：主路径
+场景正文：
+- 场景：主路径 — Given 账本已滚出选中行视口；When 点击时间线某条块；Then 对应行被选中且滚回视野。
+全文：.sillyspec/changes/archive/2026-10-22-trajectory-context-jump/requirements.md#FR-03
+最近确认：bbe1bbf6ba02b08fa3ef2bf7a5558d94f4d026ff
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-22-trajectory-context-jump:flow:测试绑定FR-03
+  tests: frontend/src/components/daemon/trajectory/__tests__/trajectory-redesign.test.tsx
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-22-trajectory-context-jump
+  status: active
+
+## FR-daemon-284 轨迹相关测试零回归、新增用例全绿、frontend tsc --noEmit 退出 0
+变更：2026-10-22-trajectory-context-jump
+状态：active
+摘要：主路径
+场景正文：
+- 场景：主路径 — Given 变更落盘；When 跑轨迹目录与会话面板相关测试与 tsc；Then 全部通过。
+全文：.sillyspec/changes/archive/2026-10-22-trajectory-context-jump/requirements.md#FR-04
+最近确认：bbe1bbf6ba02b08fa3ef2bf7a5558d94f4d026ff

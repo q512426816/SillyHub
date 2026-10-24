@@ -1,0 +1,16 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-22-trajectory-context-jump",
+  "reviewer": "subagent",
+  "verdict": "PASS",
+  "reviewedAgainst": "bbe1bbf6ba02b08fa3ef2bf7a5558d94f4d026ff",
+  "findings": [],
+  "dimensionNotes": {
+    "乱序": "（沿前轮结论，增量复审无变化）system_event 行进轮后参与既有 startedAt 排序（from-turn-views.ts:243），纯函数幂等，行 id 用数组序号在尾部追加模型下稳定。",
+    "并发": "（沿前轮结论，增量复审无变化）派生纯函数，跳转信号与选中态均为单组件持有 state，无并发写面。",
+    "切换": "P2 修复后闭合：lastJumpNonceRef 随组件实例存续，会话切换重挂载（key={sid}）时与信号 state 一并复位；同一会话内流式更新（trajectory 引用变化）重跑 effect 因 nonce 已消费短路，不再覆盖手动选中。",
+    "作用域": "（沿前轮结论，增量复审无变化）信号为面板实例内 state，run key 匹配（realRunId ?? runId）与 TurnCatalogEntry.key 同源，不串台。"
+  },
+  "reviewNotes": "增量复审（HEAD=bbe1bbf6b，前轮 reviewedAgainst=e7b1efa316dd46484c4b9cb5db664d964d9a14f4）：前轮 3 项 findings 逐条裁决——【P2 跳转信号残留：已解决】turn-timeline.tsx:1443-1447 新增 lastJumpNonceRef(useRef(-1))，effect 开头 `if (jump.nonce === lastJumpNonceRef.current) return; lastJumpNonceRef.current = jump.nonce;`——首次点击消费并执行选中，流式更新重跑（jump 引用不变、nonce 相同）即短路，重复点击 nonce 自增生效；消费先于轮匹配，点击未加载轮后 nonce 即烧掉、该轮稍后加载不会自动定位——与 requirements FR-02「未加载轮：定位跳过不报错（不劣化）」声明语义一致，不构成新缺陷；复跑触及测试面 turn-timeline-trajectory-view（10）+ trajectory-redesign（13）共 23/23 绿，无回归。【P3 FR-02 绑定名：已解决】requirements.md:56 已改为 turn-timeline-trajectory-view.test.tsx 两个真实用例名，与前轮 grep 证实的实态用例名逐字匹配。【P3 change.patch 夹带：按协调方口径销案不计缺陷，但留事实痕】实态为 change.patch 重算后仍物理包含并行变更 diff（1527 行、close_run_steps/pi-edit-patch-synth/turn-file-diff-dialog/AgentRunLog 关键字 48 处命中），且修复说明所称「声明外归因清单」在该 change 目录全部 json/yaml/md 中零命中（不存在）——不列 finding，如实记录防失实背书。新引入 P0/P1：无（本轮 diff 除 nonce 守卫与注释外无其它逻辑改动，tsc 面沿 HEAD 前轮已验 0 且本轮改动为类型安全局部代码）。verdict=PASS（0 P1/P2/P3 未决）。",
+  "reviewedAt": "2026-10-24T08:05:30+08:00"
+}
