@@ -8,3 +8,9 @@ sillyhub-daemon/scripts/install.ps1 text eol=crlf
 # load-and-up.sh）要在 Linux 服务器执行，core.autocrlf=true 会在 Windows checkout
 # 时把 LF 转 CRLF，致服务器 bash\r 解析失败（bad interpreter）。
 *.sh text eol=lf
+# 生成物行尾钉 LF：pre-push ci-fast-gate 的 gen:types:check 重生成这些文件，
+# CRLF 工作副本会被重写为 LF 字节变化 → pre-commit 判「files were modified by this hook」拦推送。
+# eol=lf 使工作副本恒 LF，重生成零字节差（2026-10-26 实证 push 三连拦根因）。
+backend/openapi.json eol=lf
+frontend/src/lib/api-types.ts eol=lf
+sillyhub-daemon/src/api-types.ts eol=lf
