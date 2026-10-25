@@ -324,6 +324,59 @@ export interface GitStatusResult {
   error: string | null;
 }
 
+// ── task-01（2026-10-25-explorer-git-status）git_dirty_files / git_worktree_diff 返回结构 ──
+
+/** porcelain v2 → 四态映射（--no-renames 统一口径，rename 拆 D+A 两条，R-04）。 */
+export type GitDirtyFileStatus = 'added' | 'modified' | 'deleted' | 'untracked';
+
+/** git_dirty_files 单文件条目（design §接口定义，与 backend GitDirtyFileItem 逐字对齐）。 */
+export interface GitDirtyFileItem {
+  /** 仓库相对 POSIX 路径（quotepath off 原样）。 */
+  path: string;
+  status: GitDirtyFileStatus;
+  /** numstat 行数；二进制 / untracked → null（numstat 不覆盖 untracked，R-06）。 */
+  additions: number | null;
+  deletions: number | null;
+  /** numstat `-` 二进制行。 */
+  binary: boolean;
+}
+
+/** git_dirty_files 忽略条目（ls-files --directory 顶层聚合，D-003@v2）。 */
+export interface GitIgnoredItem {
+  /** 目录行带尾 "/"。 */
+  path: string;
+  is_dir: boolean;
+}
+
+/** git_dirty_files 返回结构：`{ head_short, empty, files, ignored, error }`。 */
+export interface GitDirtyFilesResult {
+  /** HEAD 前 8 位；空仓库 null。 */
+  head_short: string | null;
+  /** 空仓库（branch.oid "(initial)"）→ files/ignored 均空数组。 */
+  empty: boolean;
+  files: GitDirtyFileItem[];
+  ignored: GitIgnoredItem[];
+  /** 失败文案；成功为 null（不抛，对齐既有五 git 方法）。 */
+  error: string | null;
+}
+
+/**
+ * git_worktree_diff 单文件判态（porcelain 四态的 diff 分流投影）：
+ * untracked → added（no-index 全新增形态）；接口不含 untracked 字面值。
+ */
+export type GitWorktreeDiffStatus = 'modified' | 'added' | 'deleted';
+
+/** git_worktree_diff 返回结构：`{ status, head_short, diff, truncated, binary, error }`。 */
+export interface GitWorktreeDiffResult {
+  status: GitWorktreeDiffStatus;
+  head_short: string | null;
+  /** unified diff（--unified=3 --no-color；超 64KB 截断）。 */
+  diff: string;
+  truncated: boolean;
+  binary: boolean;
+  error: string | null;
+}
+
 /** pollution_archive 返回结构（对齐 backend post_scan_validator._archive_and_clean_pollution）。 */
 export interface PollutionArchiveResult {
   /** 是否成功归档（source 不存在 / 空也算 false，但不抛）。 */
@@ -886,6 +939,153 @@ function runGitFetch(
       },
     );
   });
+}
+
+// ── task-01（2026-10-25-explorer-git-status）porcelain v2 条目解析辅助（gitDirtyFiles /
+// gitWorktreeDiff 共用）────────────────────────────────────────────────────────
+
+/**
+ * porcelain v2 `1`/`u` 条目 → path + XY（D-011 末段 rejoin）。
+ *
+ * 字段区（`1`：1 XY sub mH mI mW hH hI 共 8 token；`u`：u XY sub m1 m2 m3 mW h1 h2 h3
+ * 共 10 token）与 path 的分隔**双形态兼容**：
+ * - **空格形态**（本仓实证 git 2.45.1.windows.1，2026-10-25 临时仓库含空格/中文路径实测）：
+ *   path 是行尾字段，含空格原样——按单空格 split 后取第 fieldCount token 起整体 rejoin；
+ * - **制表符形态**（设计文档写作期口径）：path 与字段区之间 `\t` 分隔——行内首个 `\t`
+ *   且其前恰为 fieldCount 个 token 时按 `\t` 切（path 内原始 `\t` 被 git C-quote 包裹，
+ *   首个 `\t` 不会出现在 path 区，判定无歧义）。两形态按证据优先级自动命中其一。
+ *
+ * path 过 decodeGitCQuote（残余 C 引号 → 原文，见 GIT_QUOTEPATH_OFF_ARGS 注）。
+ * 非法形态（token 不足）→ null，调用方跳过该行。
+ */
+function parsePorcelainChangedLine(
+  line: string,
+  fieldCount: number,
+): { xy: string; path: string } | null {
+  const tabIdx = line.indexOf('\t');
+  if (tabIdx >= 0 && line.slice(0, tabIdx).split(' ').length === fieldCount) {
+    const heads = line.slice(0, tabIdx).split(' ');
+    const xy = heads[1] ?? '';
+    return xy.length > 0
+      ? { xy, path: decodeGitCQuote(line.slice(tabIdx + 1)) }
+      : null;
+  }
+  const tokens = line.split(' ');
+  if (tokens.length <= fieldCount) return null;
+  const xy = tokens[1] ?? '';
+  if (xy.length === 0) return null;
+  return { xy, path: decodeGitCQuote(tokens.slice(fieldCount).join(' ')) };
+}
+
+/**
+ * porcelain v2 XY 两态字符 → 三态（git_worktree_diff 判态分流；D-011 u 条目恒 modified
+ * 不经本函数）。含 `D` → deleted；含 `A` → added；其余 → modified。
+ */
+function classifyPorcelainXY(xy: string): 'deleted' | 'added' | 'modified' {
+  if (xy.includes('D')) return 'deleted';
+  if (xy.includes('A')) return 'added';
+  return 'modified';
+}
+
+/**
+ * porcelain v2 整行 → 四态 + path（gitDirtyFiles ① 段解析）。
+ *
+ * `1`（changed）/ `u`（unmerged）条目：u 按 modified 归类（D-011 四态不扩冲突态）；
+ * `?` 条目 → untracked（`? <path>` 单空格分隔，path 为行尾 rejoin）；
+ * `#` 头行 / 空行 / 其余（`2` rename 在 --no-renames 下不出现）→ null 跳过。
+ */
+function parsePorcelainLine(line: string): {
+  status: GitDirtyFileStatus;
+  path: string;
+} | null {
+  if (line.startsWith('1 ')) {
+    const entry = parsePorcelainChangedLine(line, 8);
+    return entry === null
+      ? null
+      : { status: classifyPorcelainXY(entry.xy), path: entry.path };
+  }
+  if (line.startsWith('u ')) {
+    const entry = parsePorcelainChangedLine(line, 10);
+    // D-011：unmerged（合并冲突）条目按 modified 归类，不扩第五态。
+    return entry === null ? null : { status: 'modified', path: entry.path };
+  }
+  if (line.startsWith('? ')) {
+    const path = decodeGitCQuote(line.slice(2));
+    return path.length > 0 ? { status: 'untracked', path } : null;
+  }
+  return null;
+}
+
+/**
+ * `git diff --no-index` 局部 execFile（D-010，对齐 runGitFetch 先例）。
+ *
+ * **不走 runCmd ok 通道**：no-index 有差异时 git 约定 exit=1（隐含 --exit-code 语义，
+ * 本仓实证 git 2.45.1），runCmd 对任何非零 exit 一律 ok:false 且 ExecResult 不暴露退出
+ * 码。本封装直接读退出码：exit 0（无差异，如空文件）/ 1（有差异，常态）均成功回传
+ * stdout+stderr；≥2、killed/signal（超时）或非数值 code（git 不在 PATH 等）→ error。
+ *
+ * stderr 原样透传给调用方（CRLF warning 过滤在调用方做，错误文案组装单一职责）。
+ */
+function runGitNoIndexDiff(
+  root: string,
+  relPath: string,
+): Promise<
+  | { ok: true; stdout: string; stderr: string }
+  | { ok: false; error: string }
+> {
+  return new Promise((resolve) => {
+    execFile(
+      'git',
+      [
+        '-C',
+        root,
+        ...GIT_QUOTEPATH_OFF_ARGS,
+        'diff',
+        '--no-index',
+        '--unified=3',
+        '--no-color',
+        '--',
+        '/dev/null',
+        relPath,
+      ],
+      { timeout: GIT_READ_TIMEOUT_MS, maxBuffer: 10 * 1024 * 1024, windowsHide: true },
+      (err, stdout, stderr) => {
+        const out = Buffer.isBuffer(stdout) ? stdout.toString('utf8') : stdout ?? '';
+        const errOut = Buffer.isBuffer(stderr) ? stderr.toString('utf8') : stderr ?? '';
+        if (err === null || typeof err !== 'object') {
+          resolve({ ok: true, stdout: out, stderr: errOut });
+          return;
+        }
+        const e = err as NodeJS.ErrnoException & {
+          killed?: boolean;
+          signal?: string;
+          code?: number | string;
+        };
+        // 超时（Node SIGTERM）与 spawn 失败（code 非数值，如 ENOENT）→ 真失败。
+        const timedOut =
+          e.signal === 'SIGTERM' || e.killed === true;
+        const numericCode = typeof e.code === 'number' ? e.code : null;
+        if (!timedOut && numericCode !== null && numericCode <= 1) {
+          resolve({ ok: true, stdout: out, stderr: errOut });
+          return;
+        }
+        resolve({ ok: false, error: errOut.trim() || out.trim() || String(e.code ?? 'git diff --no-index failed') });
+      },
+    );
+  });
+}
+
+/**
+ * no-index 分支 stderr 过滤（D-010）：CRLF warning 行不进 error 文案——
+ * `warning: in the working copy of 'X', LF will be replaced by CRLF ...` 族是
+ * Windows autocrlf 常态噪声，非失败。过滤后非空才算真错误文案。
+ */
+function filterNoIndexStderr(stderr: string): string {
+  return stderr
+    .split('\n')
+    .filter((l) => l.length > 0 && !/^warning: .*(CRLF|LF will be replaced)/i.test(l))
+    .join('\n')
+    .trim();
 }
 
 // ── HostFsHandler：十方法宿主实现 ─────────────────────────────────────────────
@@ -1789,6 +1989,278 @@ export class HostFsHandler {
       fetch_performed: fetchPerformed,
       fetch_error: fetchError,
       error: diffError,
+    };
+  }
+
+  // ── git_dirty_files / git_worktree_diff（task-01 2026-10-25-explorer-git-status，
+  //    第 6/7 个平名 git 方法——只读，骨架对齐既有五方法）──────────────────────────
+
+  /**
+   * `git_dirty_files({ root }) → { head_short, empty, files, ignored, error }`
+   * （design §Phase 1 / §接口定义，D-007 单一数据源——explorer 着色与更改卡共用）。
+   *
+   * 三段采集（全部只读子命令独立 argv + GIT_QUOTEPATH_OFF_ARGS + 30s 读超时）：
+   *
+   *   ① `git status --porcelain=v2 --branch --no-renames --no-show-stash`：
+   *      branch.oid 前 8 位 → head_short；"(initial)" → empty=true 早退（files/ignored
+   *      空数组，空仓库契约）；`1`/`u`/`?` 条目 → 四态清单（D-011：u 归 modified；
+   *      --no-renames 下 rename 拆 D+A 两条，R-04）。
+   *   ② `git ls-files --others --ignored --exclude-standard --directory`：忽略顶层
+   *      聚合（D-003@v2——目录带尾 `/` → is_dir=true；散落忽略单文件逐条，规模与忽略
+   *      目录内部文件数无关）。
+   *   ③ `git diff HEAD --numstat --no-renames`：按 path join 行数——`-` 二进制行 →
+   *      binary=true 行数 null；untracked 不在 numstat（R-06）→ 行数恒 null。
+   *
+   * 失败不抛（error 通道）：① porcelain 失败 → 整体 error 返回；②③ 失败 → 保留已采集
+   * 字段并记 error（对齐 gitStatus 的 diffError 模式；空仓库 diff HEAD exit 128 族由
+   * empty 早退天然短路，不走 ③）。
+   */
+  async gitDirtyFiles(params: { root: string }): Promise<GitDirtyFilesResult> {
+    // 1. 白名单守卫（与既有 git 方法同款）。
+    assertWithinAllowedRoots(params.root, this._rootsProvider());
+    const root = pathResolve(params.root);
+
+    // ── ① porcelain v2（head_short / empty / 四态清单）──
+    const status = await runCmd(
+      'git',
+      [
+        '-C', root,
+        ...GIT_QUOTEPATH_OFF_ARGS,
+        'status', '--porcelain=v2', '--branch', '--no-renames', '--no-show-stash',
+      ],
+      { timeout: GIT_READ_TIMEOUT_MS },
+    );
+    if (!status.ok) {
+      return {
+        head_short: null,
+        empty: false,
+        files: [],
+        ignored: [],
+        error: status.stderr.trim() || status.stdout.trim() || 'git status failed',
+      };
+    }
+
+    let headShort: string | null = null;
+    let empty = false;
+    const files: GitDirtyFileItem[] = [];
+    const filesByPath = new Map<string, GitDirtyFileItem>();
+    for (const line of status.stdout.split('\n')) {
+      if (line.startsWith('# branch.oid ')) {
+        const oid = line.slice('# branch.oid '.length).trim();
+        if (oid === '(initial)') {
+          empty = true; // 空仓库判据（无 HEAD）——早退，files/ignored 空数组契约
+        } else {
+          headShort = oid.slice(0, 8);
+        }
+        continue;
+      }
+      const entry = parsePorcelainLine(line);
+      if (entry === null) continue;
+      const item: GitDirtyFileItem = {
+        path: entry.path,
+        status: entry.status,
+        additions: null, // untracked 恒 null；其余由 ③ numstat join 填充
+        deletions: null,
+        binary: false,
+      };
+      files.push(item);
+      filesByPath.set(entry.path, item);
+    }
+
+    if (empty) {
+      // 空仓库：files/ignored 均空数组（design §接口定义；与 gitStatus 空态口径一致，
+      // untracked 也归空态）。②③ 不执行（diff HEAD 必 exit 128）。
+      return { head_short: null, empty: true, files: [], ignored: [], error: null };
+    }
+
+    let collectError: string | null = null;
+
+    // ── ② ignored 顶层聚合（ls-files --directory）──
+    const ignoredResult = await runCmd(
+      'git',
+      [
+        '-C', root,
+        ...GIT_QUOTEPATH_OFF_ARGS,
+        'ls-files', '--others', '--ignored', '--exclude-standard', '--directory',
+      ],
+      { timeout: GIT_READ_TIMEOUT_MS },
+    );
+    const ignored: GitIgnoredItem[] = [];
+    if (ignoredResult.ok) {
+      for (const line of ignoredResult.stdout.split('\n')) {
+        if (line.length === 0) continue;
+        ignored.push({
+          path: decodeGitCQuote(line),
+          is_dir: line.endsWith('/'),
+        });
+      }
+    } else {
+      collectError =
+        ignoredResult.stderr.trim() || ignoredResult.stdout.trim() || 'git ls-files failed';
+    }
+
+    // ── ③ numstat 行数 join（按 path 命中填 additions/deletions/binary）──
+    const numstat = await runCmd(
+      'git',
+      [
+        '-C', root,
+        ...GIT_QUOTEPATH_OFF_ARGS,
+        'diff', 'HEAD', '--numstat', '--no-renames',
+      ],
+      { timeout: GIT_READ_TIMEOUT_MS },
+    );
+    if (numstat.ok) {
+      for (const line of numstat.stdout.split('\n')) {
+        const m = /^(\d+|-)\t(\d+|-)\t(.+)$/.exec(line);
+        if (m === null) continue; // 空行 / 噪声行
+        const numPath = decodeGitCQuote(m[3] ?? '');
+        const item = filesByPath.get(numPath);
+        if (item === undefined) continue; // porcelain 外的行（理论不出现，防御跳过）
+        const binary = m[1] === '-' && m[2] === '-';
+        item.binary = binary;
+        item.additions = binary ? null : Number(m[1]);
+        item.deletions = binary ? null : Number(m[2]);
+      }
+    } else if (!GIT_DIFF_HEAD_MISSING_RE.test(numstat.stderr)) {
+      // 非 HEAD 缺失族失败 → 记 error（行数保持 null）；HEAD 缺失族容错（空仓库已被
+      // empty 早退短路，此分支仅为防御）。
+      collectError =
+        numstat.stderr.trim() || numstat.stdout.trim() || 'git diff HEAD failed';
+    }
+
+    return { head_short: headShort, empty: false, files, ignored, error: collectError };
+  }
+
+  /**
+   * `git_worktree_diff({ root, path }) → { status, head_short, diff, truncated, binary, error }`
+   * （design §Phase 1 / §接口定义，D-004「工作区 vs HEAD」单口径 + D-010 untracked 分流）。
+   *
+   * 判态分流（① porcelain 单文件 → ② 差异采集）：
+   *
+   *   ① `git status --porcelain=v2 --branch --no-renames --no-show-stash -- <path>`：
+   *      单文件判态 + head_short；untracked → added（接口投影，无 untracked 字面值）。
+   *      无条目（文件与 HEAD 一致 / 竞态下已被提交）→ 按 modified 走 ②（diff 为空串，
+   *      前端弹窗呈现空态，不走红通道）。
+   *   ② modified/deleted → runCmd `git diff HEAD --unified=3 --no-color -- <path>`
+   *      （!ok → error 通道）；untracked → `runGitNoIndexDiff`（局部 execFile 读退出码，
+   *      D-010：exit 0/1 均成功、≥2/killed 才 error；CRLF warning 不进 error 文案）。
+   *
+   * 64KB 截断 + `Binary files` binary 检测对齐 gitDiffFile（:1602-1612 同款）。
+   */
+  async gitWorktreeDiff(params: {
+    root: string;
+    path: string;
+  }): Promise<GitWorktreeDiffResult> {
+    // 1. 白名单守卫 + pathspec 校验（与 gitDiffFile 同款）。
+    assertWithinAllowedRoots(params.root, this._rootsProvider());
+    const root = pathResolve(params.root);
+    assertGitPathspec(params.path);
+
+    // ── ① 单文件判态（--branch 供 head_short；空仓库 "(initial)" → null）──
+    const status = await runCmd(
+      'git',
+      [
+        '-C', root,
+        ...GIT_QUOTEPATH_OFF_ARGS,
+        'status', '--porcelain=v2', '--branch', '--no-renames', '--no-show-stash',
+        '--', params.path,
+      ],
+      { timeout: GIT_READ_TIMEOUT_MS },
+    );
+    if (!status.ok) {
+      return {
+        status: 'modified',
+        head_short: null,
+        diff: '',
+        truncated: false,
+        binary: false,
+        error: status.stderr.trim() || status.stdout.trim() || 'git status failed',
+      };
+    }
+
+    let headShort: string | null = null;
+    let fileStatus: GitWorktreeDiffStatus = 'modified';
+    let isUntracked = false;
+    for (const line of status.stdout.split('\n')) {
+      if (line.startsWith('# branch.oid ')) {
+        const oid = line.slice('# branch.oid '.length).trim();
+        headShort = oid === '(initial)' ? null : oid.slice(0, 8);
+        continue;
+      }
+      if (line.startsWith('1 ')) {
+        const entry = parsePorcelainChangedLine(line, 8);
+        if (entry !== null) fileStatus = classifyPorcelainXY(entry.xy);
+      } else if (line.startsWith('u ')) {
+        fileStatus = 'modified'; // D-011：unmerged 归 modified
+      } else if (line.startsWith('? ')) {
+        fileStatus = 'added'; // untracked → 接口投影 added（no-index 全新增形态）
+        isUntracked = true;
+      }
+    }
+
+    // ── ② 差异采集（分流）+ 64KB 截断 + binary 检测（gitDiffFile 同款）──
+    let diffOut: string;
+    if (isUntracked) {
+      // 真 untracked（`?` 条目）→ no-index（D-010 局部 execFile，exit 1 = 有差异常态）。
+      // 注意：staged-add（`1 A.` 条目）fileStatus 也是 added，但在 index 内有 blob，
+      // 走 diff HEAD 分支正常出 diff——分流依据是 `?` 条目存在而非 added 投影值。
+      const r = await runGitNoIndexDiff(root, params.path);
+      if (r.ok) {
+        diffOut = r.stdout;
+      } else {
+        const filtered = filterNoIndexStderr(r.error);
+        return {
+          status: fileStatus,
+          head_short: headShort,
+          diff: '',
+          truncated: false,
+          binary: false,
+          error: filtered.length > 0 ? filtered : 'git diff --no-index failed',
+        };
+      }
+    } else {
+      // modified / deleted / staged-add / 无条目 → git diff HEAD（diff 子命令纯输出无 commit 头）。
+      const r = await runCmd(
+        'git',
+        [
+          '-C', root,
+          ...GIT_QUOTEPATH_OFF_ARGS,
+          'diff', 'HEAD', '--unified=3', '--no-color', '--', params.path,
+        ],
+        { timeout: GIT_READ_TIMEOUT_MS },
+      );
+      if (!r.ok) {
+        return {
+          status: fileStatus,
+          head_short: headShort,
+          diff: '',
+          truncated: false,
+          binary: false,
+          error: r.stderr.trim() || r.stdout.trim() || 'git diff HEAD failed',
+        };
+      }
+      diffOut = r.stdout;
+    }
+
+    const binary = diffOut.includes('Binary files');
+    const bytes = Buffer.from(diffOut, 'utf8');
+    if (bytes.length <= GIT_DIFF_MAX_BYTES) {
+      return {
+        status: fileStatus,
+        head_short: headShort,
+        diff: diffOut,
+        truncated: false,
+        binary,
+        error: null,
+      };
+    }
+    return {
+      status: fileStatus,
+      head_short: headShort,
+      diff: bytes.subarray(0, GIT_DIFF_MAX_BYTES).toString('utf8'),
+      truncated: true,
+      binary,
+      error: null,
     };
   }
 

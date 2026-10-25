@@ -40,6 +40,16 @@ export type GitLogStatusResponse =
   components["schemas"]["GitLogStatusResponse"];
 export type GitLogDirtyItem = components["schemas"]["GitLogDirtyItem"];
 export type GitLogFetchItem = components["schemas"]["GitLogFetchItem"];
+// 2026-10-25-explorer-git-status task-04：工作区文件级状态清单 + 单文件
+// 工作区 diff 两类型（explorer 着色与更改卡共用 dirty-files 单一数据源 D-007）。
+export type GitDirtyFilesResponse =
+  components["schemas"]["GitDirtyFilesResponse"];
+export type GitDirtyFileItem = components["schemas"]["GitDirtyFileItem"];
+export type GitIgnoredItem = components["schemas"]["GitIgnoredItem"];
+export type GitWorktreeDiffResponse =
+  components["schemas"]["GitWorktreeDiffResponse"];
+/** 四态文件状态（更改卡着色与弹窗判态共用；ignored 为展示层扩展态）。 */
+export type DirtyFileStatus = GitDirtyFileItem["status"] | "ignored";
 
 /** git-log 查询 key（本文件内定义，供 hook 与组件层失效/复用缓存）。 */
 export const gitLogQueryKeys = {
@@ -57,6 +67,12 @@ export const gitLogQueryKeys = {
   // status（task-03）：workspaceId 维度下的轻状态——git-log 页刷新按钮
   // invalidate 的 ["git-log", wid] 前缀天然覆盖本 key（commits 前缀兼容不变）。
   status: (workspaceId: string) => ["git-log", workspaceId, "status"] as const,
+  // dirty-files / worktree-diff（2026-10-25-explorer-git-status task-04）：
+  // 同挂 ["git-log", wid] 前缀下——页面刷新按钮与更改卡刷新天然覆盖。
+  dirtyFiles: (workspaceId: string) =>
+    ["git-log", workspaceId, "dirty-files"] as const,
+  worktreeDiff: (workspaceId: string, path: string) =>
+    ["git-log", workspaceId, "worktree-diff", path] as const,
 };
 
 // ── fetch 封装 ────────────────────────────────────────────────────────
@@ -120,6 +136,34 @@ export function fetchGitLogStatus(
 ): Promise<GitLogStatusResponse> {
   return apiFetch<GitLogStatusResponse>(
     `/api/workspaces/${encodeURIComponent(workspaceId)}/git-log/status`,
+  );
+}
+
+/**
+ * 工作区改动文件清单（GET /api/workspaces/{wid}/git-log/dirty-files，
+ * 2026-10-25-explorer-git-status task-04）：四态清单 + 忽略顶层聚合 + numstat
+ * 行数。explorer 树着色与「工作区更改」卡共用本端点（D-007 单一数据源）。
+ */
+export function fetchDirtyFiles(
+  workspaceId: string,
+): Promise<GitDirtyFilesResponse> {
+  return apiFetch<GitDirtyFilesResponse>(
+    `/api/workspaces/${encodeURIComponent(workspaceId)}/git-log/dirty-files`,
+  );
+}
+
+/**
+ * 单文件「工作区 vs 最近一次提交」diff（GET /api/workspaces/{wid}/git-log/
+ * worktree-diff?path=，2026-10-25-explorer-git-status task-04）：untracked 走
+ * no-index 全新增形态；超 64KB 截断（``truncated``）、二进制 ``binary=true``。
+ */
+export function fetchWorktreeDiff(
+  workspaceId: string,
+  path: string,
+): Promise<GitWorktreeDiffResponse> {
+  return apiFetch<GitWorktreeDiffResponse>(
+    `/api/workspaces/${encodeURIComponent(workspaceId)}/git-log/worktree-diff`,
+    { query: { path } },
   );
 }
 
@@ -198,5 +242,40 @@ export function useGitLogStatus(workspaceId: string) {
     queryFn: () => fetchGitLogStatus(workspaceId),
     enabled: workspaceId !== "",
     staleTime: 60_000,
+  });
+}
+
+/**
+ * 工作区改动文件清单查询（2026-10-25-explorer-git-status task-04）。
+ *
+ * - ``staleTime`` 60s 对齐 ``useGitLogStatus``：daemon 侧三段 git 采集
+ *   （status+ls-files+numstat），Git 日志页更改卡与 explorer 树着色两处消费
+ *   共享缓存，60s 内只采集一次（D-007 单一数据源）；
+ * - 不设 ``refetchInterval``（D-007/D-009 拉取式快照）：新鲜度由 staleTime +
+ *   手动刷新（更改卡/页面刷新按钮 invalidate ``["git-log", wid]`` 前缀）控制。
+ */
+export function useGitLogDirtyFiles(workspaceId: string) {
+  return useQuery<GitDirtyFilesResponse, ApiError>({
+    queryKey: gitLogQueryKeys.dirtyFiles(workspaceId),
+    queryFn: () => fetchDirtyFiles(workspaceId),
+    enabled: workspaceId !== "",
+    staleTime: 60_000,
+  });
+}
+
+/**
+ * 单文件工作区 diff 查询（2026-10-25-explorer-git-status task-04）——弹窗
+ * 打开才拉（``enabled`` 由组件层随弹窗 open+path 传入，对齐
+ * ``useGitLogDiff`` 形态）；同一 (workspaceId, path) 结果进缓存。
+ */
+export function useGitLogWorktreeDiff(
+  workspaceId: string,
+  path: string,
+  enabled = true,
+) {
+  return useQuery<GitWorktreeDiffResponse, ApiError>({
+    queryKey: gitLogQueryKeys.worktreeDiff(workspaceId, path),
+    queryFn: () => fetchWorktreeDiff(workspaceId, path),
+    enabled: enabled && workspaceId !== "" && path !== "",
   });
 }

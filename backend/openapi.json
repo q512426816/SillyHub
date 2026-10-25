@@ -4061,6 +4061,106 @@
         }
       }
     },
+    "/api/workspaces/{workspace_id}/git-log/dirty-files": {
+      "get": {
+        "tags": [
+          "git-log"
+        ],
+        "summary": "Get Git Log Dirty Files",
+        "description": "工作区改动文件清单（2026-10-25-explorer-git-status，RPC 超时 30s，无 query 参数）。\n\n四态清单（added/modified/deleted/untracked）+ 忽略顶层聚合 + numstat 行数\njoin——explorer 树着色与「工作区更改」卡共用的单一数据源（D-007）。",
+        "operationId": "get_git_log_dirty_files_api_workspaces__workspace_id__git_log_dirty_files_get",
+        "parameters": [
+          {
+            "name": "workspace_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Workspace Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GitDirtyFilesResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/workspaces/{workspace_id}/git-log/worktree-diff": {
+      "get": {
+        "tags": [
+          "git-log"
+        ],
+        "summary": "Get Git Log Worktree Diff",
+        "description": "单文件「工作区 vs 最近一次提交」diff（2026-10-25-explorer-git-status，RPC 超时 30s）。\n\nuntracked 文件走 no-index 全新增形态（daemon 侧分流）；超 64KB 截断。",
+        "operationId": "get_git_log_worktree_diff_api_workspaces__workspace_id__git_log_worktree_diff_get",
+        "parameters": [
+          {
+            "name": "workspace_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Workspace Id"
+            }
+          },
+          {
+            "name": "path",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "description": "仓库内文件相对路径（必填）",
+              "title": "Path"
+            },
+            "description": "仓库内文件相对路径（必填）"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GitWorktreeDiffResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/auth/login": {
       "post": {
         "tags": [
@@ -47915,6 +48015,121 @@
         "title": "FreshnessOut",
         "description": "新知识生效速度：近 30 天新增条目数（条目首见=frontmatter created_at 优先/\nhits 首见兜底）与其中已被命中数。"
       },
+      "GitDirtyFileItem": {
+        "properties": {
+          "path": {
+            "type": "string",
+            "title": "Path",
+            "description": "仓库内相对路径（POSIX；空格/中文原样）"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "added",
+              "modified",
+              "deleted",
+              "untracked"
+            ],
+            "title": "Status",
+            "description": "added=新增/暂存新文件 / modified=修改（含 unmerged 冲突归类）/ deleted=删除 / untracked=未跟踪"
+          },
+          "additions": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Additions",
+            "description": "新增行数（numstat join；二进制与未跟踪文件为 null）"
+          },
+          "deletions": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Deletions",
+            "description": "删除行数（numstat join；二进制与未跟踪文件为 null）"
+          },
+          "binary": {
+            "type": "boolean",
+            "title": "Binary",
+            "description": "是否二进制文件（numstat 输出「-」时为 true）"
+          }
+        },
+        "type": "object",
+        "required": [
+          "path",
+          "status",
+          "additions",
+          "deletions",
+          "binary"
+        ],
+        "title": "GitDirtyFileItem",
+        "description": "单文件改动条目（porcelain v2 四态；--no-renames 口径 rename 拆删+增两条）。"
+      },
+      "GitDirtyFilesResponse": {
+        "properties": {
+          "git_mode": {
+            "type": "string",
+            "enum": [
+              "git",
+              "no_git"
+            ],
+            "title": "Git Mode",
+            "description": "git=git 仓库 / no_git=非 git 工作区（空态，清单为空）"
+          },
+          "head_short": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Head Short",
+            "description": "HEAD 短哈希（前 8 位；空仓库为 null）"
+          },
+          "empty": {
+            "type": "boolean",
+            "title": "Empty",
+            "description": "是否空仓库（无任何提交，清单为空数组）"
+          },
+          "files": {
+            "items": {
+              "$ref": "#/components/schemas/GitDirtyFileItem"
+            },
+            "type": "array",
+            "title": "Files",
+            "description": "改动文件清单（四态，staged+unstaged 合并口径）"
+          },
+          "ignored": {
+            "items": {
+              "$ref": "#/components/schemas/GitIgnoredItem"
+            },
+            "type": "array",
+            "title": "Ignored",
+            "description": "忽略条目清单（顶层聚合）"
+          }
+        },
+        "type": "object",
+        "required": [
+          "git_mode",
+          "head_short",
+          "empty",
+          "files",
+          "ignored"
+        ],
+        "title": "GitDirtyFilesResponse",
+        "description": "GET /api/workspaces/{wid}/git-log/dirty-files 响应（工作区改动文件清单）。"
+      },
       "GitIdentityCreate": {
         "properties": {
           "provider": {
@@ -48115,6 +48330,27 @@
           "created_at"
         ],
         "title": "GitIdentityRead"
+      },
+      "GitIgnoredItem": {
+        "properties": {
+          "path": {
+            "type": "string",
+            "title": "Path",
+            "description": "仓库内相对路径（目录带尾「/」）"
+          },
+          "is_dir": {
+            "type": "boolean",
+            "title": "Is Dir",
+            "description": "是否目录（node_modules/ 等整目录一行聚合）"
+          }
+        },
+        "type": "object",
+        "required": [
+          "path",
+          "is_dir"
+        ],
+        "title": "GitIgnoredItem",
+        "description": "忽略条目（gitignore 顶层聚合，不递归展开目录内部）。"
       },
       "GitLogBranchItem": {
         "properties": {
@@ -48855,6 +49091,57 @@
           "timestamp"
         ],
         "title": "GitOperationResponse"
+      },
+      "GitWorktreeDiffResponse": {
+        "properties": {
+          "status": {
+            "type": "string",
+            "enum": [
+              "modified",
+              "added",
+              "deleted"
+            ],
+            "title": "Status",
+            "description": "modified=修改 / added=新增（含未跟踪 no-index 全新增形态）/ deleted=删除"
+          },
+          "head_short": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Head Short",
+            "description": "对比基线 HEAD 短哈希；空仓库为 null"
+          },
+          "diff": {
+            "type": "string",
+            "title": "Diff",
+            "description": "unified diff 文本（--unified=3 --no-color；二进制文件为空串）"
+          },
+          "truncated": {
+            "type": "boolean",
+            "title": "Truncated",
+            "description": "是否超 64KB 上限被截断"
+          },
+          "binary": {
+            "type": "boolean",
+            "title": "Binary",
+            "description": "是否二进制文件（true 时前端直接提示「二进制文件」）"
+          }
+        },
+        "type": "object",
+        "required": [
+          "status",
+          "head_short",
+          "diff",
+          "truncated",
+          "binary"
+        ],
+        "title": "GitWorktreeDiffResponse",
+        "description": "GET /api/workspaces/{wid}/git-log/worktree-diff 响应（单文件「工作区 vs 最近一次提交」）。"
       },
       "GovernanceActionIn": {
         "properties": {

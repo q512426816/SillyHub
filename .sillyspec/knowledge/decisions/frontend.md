@@ -607,3 +607,23 @@ supersedes：D-006@v1
 最近确认：28c19e2677fae0639cda0a7ba96aec3ba484749e
 理由：用户裁决为第三个顶层视图：会话面板显示对话 / 进度 / 轨迹三态并列；「进度」恢复纯时间线，不再保留「时间线 / 轨迹」第二层开关。覆盖 2026-10-22-session-trajectory-view 的 D-035。
 supersedes：D-035
+
+## D-frontend-021@v1 新功能采用 IDEA 颜色语义，现有文件变更卡不动
+状态：implemented
+变更：2026-10-25-explorer-git-status
+原编号：D-002@v1
+锚点：frontend/src/components/prototype/explorer-git-status-view.tsx:24
+最近确认：19783ad99
+理由：用户选「只新功能用 IDEA 语义」——现有文件变更卡颜色不在本变更范围
+故障面：平台内两套状态色并存，用户可能困惑——文档与图例需标明
+退役判据：后续全局统一颜色语义时另立变更收敛两套映射
+
+## D-backend-035@v1 方案 A——平行状态接口 + 前端 join（选定）
+状态：implemented
+变更：2026-10-25-explorer-git-status
+原编号：D-007@v1
+锚点：sillyhub-daemon/src/daemon.ts:7803
+最近确认：19783ad99
+理由：用户选定方案 A——daemon 新增「改动文件清单」（porcelain v2 文件行 + ignored --directory 聚合 + numstat）与「工作区单文件 vs HEAD diff」两个平名 RPC，backend 暴露两个只读端点；前端一次拉清单建 path→status 映射，explorer 树着色与 Git 日志页修改集合同源消费
+故障面：状态清单为拉取式快照，daemon 侧文件变动后页面不自动变色——需手动刷新或重新进页
+退役判据：出现「多端同改工作区需秒级感知」的真实场景时重议推送（见 D-009）

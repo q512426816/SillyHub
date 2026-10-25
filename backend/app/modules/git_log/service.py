@@ -11,7 +11,8 @@
   渲染空态卡）/ unknown（传输失败）→按 offline 502 处理、不入枚举；
 - 平名 RPC 直连（design §5.2 CC-02）：``ws_hub.send_rpc`` 显式超时转发
   ``git_log`` / ``git_refs`` / ``git_show`` / ``git_diff_file`` / ``git_status``
-  五方法，不经
+  五方法（2026-10-25-explorer-git-status 追加 ``git_dirty_files`` /
+  ``git_worktree_diff`` 两方法，文件级状态清单与单文件工作区 diff），不经
   ``HostFsDelegate`` 的 ``host_fs.`` 前缀降级通道、不走静默降级（offline/timeout
   显式 502/504；probe 是 delegate 的独立 helper、异常自持归 unknown，例外）；
 - refs 合并（design §7.4）：git_refs 结果按 sha 映射进各 commit 的 refs[]
@@ -50,6 +51,9 @@ from app.modules.daemon.runtime.service import (
 )
 from app.modules.git_log.graph_layout import CommitRef, compute_lanes
 from app.modules.git_log.schema import (
+    GitDirtyFileItem,
+    GitDirtyFilesResponse,
+    GitIgnoredItem,
     GitLogBranchItem,
     GitLogCommitDetailResponse,
     GitLogCommitItem,
@@ -62,6 +66,7 @@ from app.modules.git_log.schema import (
     GitLogFileStatItem,
     GitLogRefItem,
     GitLogStatusResponse,
+    GitWorktreeDiffResponse,
 )
 from app.modules.workspace.member_runtimes.resolver import MemberBindingResolver
 from app.modules.workspace.model import Workspace
@@ -74,6 +79,10 @@ LOG_RPC_TIMEOUT_SECONDS: Final[float] = 30.0
 SHOW_RPC_TIMEOUT_SECONDS: Final[float] = 30.0
 DIFF_RPC_TIMEOUT_SECONDS: Final[float] = 30.0
 STATUS_RPC_TIMEOUT_SECONDS: Final[float] = 30.0
+# 2026-10-25-explorer-git-status：dirty-files 三段采集（status+ls-files+numstat，
+# daemon 侧单命令各自 30s 读超时）与 worktree-diff 两段采集（判态+diff）各 30s 档。
+DIRTY_FILES_RPC_TIMEOUT_SECONDS: Final[float] = 30.0
+WORKTREE_DIFF_RPC_TIMEOUT_SECONDS: Final[float] = 30.0
 
 # 参数校验上限（design §7.1 / R-02 / §5.2 安全约束）。
 MAX_SKIP: Final[int] = 2000
@@ -389,6 +398,44 @@ class _DaemonGitStatusResult(BaseModel):
     empty: bool
     fetch_performed: bool
     fetch_error: GitLogFetchErrorCode | None
+    error: str | None
+
+
+class _DaemonDirtyFile(BaseModel):
+    """git_dirty_files 单文件条目（2026-10-25-explorer-git-status §接口定义）。"""
+
+    path: str
+    status: Literal["added", "modified", "deleted", "untracked"]
+    additions: int | None
+    deletions: int | None
+    binary: bool
+
+
+class _DaemonIgnoredItem(BaseModel):
+    """git_dirty_files 忽略条目（ls-files --directory 顶层聚合，目录带尾「/」）。"""
+
+    path: str
+    is_dir: bool
+
+
+class _DaemonGitDirtyFilesResult(BaseModel):
+    """git_dirty_files 结果：``{head_short, empty, files, ignored, error}``。"""
+
+    head_short: str | None
+    empty: bool
+    files: list[_DaemonDirtyFile]
+    ignored: list[_DaemonIgnoredItem]
+    error: str | None
+
+
+class _DaemonWorktreeDiffResult(BaseModel):
+    """git_worktree_diff 结果：``{status, head_short, diff, truncated, binary, error}``。"""
+
+    status: Literal["modified", "added", "deleted"]
+    head_short: str | None
+    diff: str
+    truncated: bool
+    binary: bool
     error: str | None
 
 
@@ -984,4 +1031,123 @@ class GitLogService:
             # fetch 嵌套；fetch_error 非空时 behind 已是 stale 值，直传即降级形态。
             fetch=GitLogFetchItem(performed=result.fetch_performed, error=result.fetch_error),
             synced_at=datetime.now(UTC).isoformat(),
+        )
+
+    # ── 2026-10-25-explorer-git-status：工作区文件级状态 + 单文件工作区 diff ──
+
+    async def get_dirty_files(
+        self,
+        workspace_id: uuid.UUID,
+        user_id: uuid.UUID,
+    ) -> GitDirtyFilesResponse:
+        """工作区改动文件清单（design §接口定义 dirty-files；RPC 30s）。
+
+        链路：绑定解析 → probe 三态映射（direct→no_git 空态 200，清单为空数组）
+        → 平名 RPC git_dirty_files → 契约校验（缺字段 → GitLogContractGap 502）
+        → 字段直传组装（explorer 着色与「工作区更改」卡同一数据源，D-007）。
+        daemon 置 error（git 命令真失败）→ 502，原始文案保 details。
+        """
+        daemon_id, root_path = await self._resolve_binding(workspace_id, user_id)
+        workspace = await self._fetch_workspace(workspace_id)
+        if await self._probe_git_mode(workspace) == "direct":
+            # 非 git 工作区 → 200 空态（清单为空数组，前端渲染空态，同 commits/status 语义）。
+            return GitDirtyFilesResponse(
+                git_mode="no_git",
+                head_short=None,
+                empty=False,
+                files=[],
+                ignored=[],
+            )
+
+        daemon_root = resolve_root_path_for_daemon(root_path)
+        result = _validate_result(
+            await self._send_git_rpc(
+                daemon_id,
+                "git_dirty_files",
+                {"root": daemon_root},
+                timeout=DIRTY_FILES_RPC_TIMEOUT_SECONDS,
+                context={"workspace_id": str(workspace_id)},
+            ),
+            _DaemonGitDirtyFilesResult,
+            method="git_dirty_files",
+            daemon_id=daemon_id,
+        )
+        if result.error:
+            raise GitLogDaemonRemoteError(
+                "守护进程查询工作区文件状态失败，请稍后重试。",
+                details={
+                    "daemon_id": str(daemon_id),
+                    "method": "git_dirty_files",
+                    "daemon_message": result.error,
+                    "workspace_id": str(workspace_id),
+                },
+            )
+        return GitDirtyFilesResponse(
+            git_mode="git",
+            head_short=result.head_short,
+            empty=result.empty,
+            files=[
+                GitDirtyFileItem(
+                    path=f.path,
+                    status=f.status,
+                    additions=f.additions,
+                    deletions=f.deletions,
+                    binary=f.binary,
+                )
+                for f in result.files
+            ],
+            ignored=[GitIgnoredItem(path=i.path, is_dir=i.is_dir) for i in result.ignored],
+        )
+
+    async def get_worktree_diff(
+        self,
+        workspace_id: uuid.UUID,
+        user_id: uuid.UUID,
+        path: str,
+    ) -> GitWorktreeDiffResponse:
+        """单文件「工作区 vs 最近一次提交」diff（design §接口定义 worktree-diff；RPC 30s）。
+
+        链路：绑定解析 → containment 预检（先于 RPC，R-01）→ probe（direct →
+        404「不是 Git 仓库」——本端点响应模型无 git_mode 字段，无法表达 no_git
+        空态 200；对齐 get_commit_detail 的 direct 处理先例）→ 平名 RPC
+        git_worktree_diff → 契约校验 → 字段直传。daemon 置 error（文件已不存在/
+        已被提交等）→ 404 引导刷新。
+        """
+        daemon_id, root_path = await self._resolve_binding(workspace_id, user_id)
+        _check_repo_rel_path(path, root_path, workspace_id=workspace_id)
+        workspace = await self._fetch_workspace(workspace_id)
+        if await self._probe_git_mode(workspace) == "direct":
+            raise GitLogCommitNotFound(
+                "该工作区不是 Git 仓库，无法查看文件差异。",
+                details={"workspace_id": str(workspace_id)},
+            )
+
+        daemon_root = resolve_root_path_for_daemon(root_path)
+        result = _validate_result(
+            await self._send_git_rpc(
+                daemon_id,
+                "git_worktree_diff",
+                {"root": daemon_root, "path": path},
+                timeout=WORKTREE_DIFF_RPC_TIMEOUT_SECONDS,
+                context={"workspace_id": str(workspace_id), "path": path},
+            ),
+            _DaemonWorktreeDiffResult,
+            method="git_worktree_diff",
+            daemon_id=daemon_id,
+        )
+        if result.error:
+            raise GitLogCommitNotFound(
+                "文件差异不存在：文件可能已被提交或删除，请刷新后重试。",
+                details={
+                    "workspace_id": str(workspace_id),
+                    "path": path,
+                    "daemon_message": result.error,
+                },
+            )
+        return GitWorktreeDiffResponse(
+            status=result.status,
+            head_short=result.head_short,
+            diff=result.diff,
+            truncated=result.truncated,
+            binary=result.binary,
         )

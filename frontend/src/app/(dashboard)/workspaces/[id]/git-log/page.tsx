@@ -32,6 +32,8 @@ import { FolderX, GitBranch, RefreshCw } from "lucide-react";
 import { CommitDetailDrawer } from "@/components/git-log/commit-detail-drawer";
 import { CommitList } from "@/components/git-log/commit-list";
 import { GitStatusBar } from "@/components/git-log/git-status-bar";
+import { WorktreeChangesCard } from "@/components/git-log/worktree-changes-card";
+import { WorktreeDiffModal } from "@/components/git-log/worktree-diff-modal";
 import { PageContainer, PageHeader } from "@/components/layout";
 import { EmptyState } from "@/components/ui/empty-state";
 import { ErrorBanner } from "@/components/ui/error-banner";
@@ -39,6 +41,7 @@ import { ApiError } from "@/lib/api";
 import {
   fetchGitLogCommits,
   gitLogQueryKeys,
+  type DirtyFileStatus,
   type GitLogCommitItem,
 } from "@/lib/git-log";
 import { getWorkspace } from "@/lib/workspaces";
@@ -58,6 +61,12 @@ export default function WorkspaceGitLogPage() {
   // 已加载页数（加载更多 skip += limit；过滤条件变更时重置回第 1 页）
   const [pageCount, setPageCount] = useState(1);
   const [selectedSha, setSelectedSha] = useState<string | null>(null);
+  // 工作区文件 diff 弹窗目标（task-06 2026-10-25-explorer-git-status）：
+  // 更改卡文件行点击置入，null 即关闭（关闭清 state 不留悬挂查询）。
+  const [diffTarget, setDiffTarget] = useState<{
+    path: string;
+    status: DirtyFileStatus;
+  } | null>(null);
 
   // 工作区名（副标题展示用；失败静默降级为不显示名字，不阻断页面）
   const workspaceQuery = useQuery({
@@ -130,6 +139,13 @@ export default function WorkspaceGitLogPage() {
   const handleSelectCommit = useCallback((commit: GitLogCommitItem) => {
     setSelectedSha(commit.hash);
   }, []);
+  // 更改卡文件行 → 工作区 diff 弹窗（task-06，D-001 挂载接线）。
+  const handleOpenWorktreeFile = useCallback(
+    (path: string, status: DirtyFileStatus) => {
+      setDiffTarget({ path, status });
+    },
+    [],
+  );
 
   // ── 副标题：工作区名 · 已加载 N 条 · 当前过滤态（无提交总数，CC-06）────
   const subtitle = useMemo(() => {
@@ -188,6 +204,16 @@ export default function WorkspaceGitLogPage() {
           （分支/↑↓/改动行数/同步时刻，staleTime 60s 与 sessions 门户紧凑态
           共享缓存；no_git/查询失败时组件自渲染 null，不与下方空态卡重复） */}
       <GitStatusBar workspaceId={workspaceId} variant="full" />
+
+      {/* task-06（2026-10-25-explorer-git-status，D-001）：「工作区更改」卡挂
+          状态条之下、工具栏之上；gitMode=no_git 时不渲染（与页面 no_git 空态卡
+          二选一不堆叠，卡自身 error/加载态在组件内消化）。 */}
+      {gitMode !== "no_git" && (
+        <WorktreeChangesCard
+          workspaceId={workspaceId}
+          onOpenFile={handleOpenWorktreeFile}
+        />
+      )}
 
       {degradeCard}
 
@@ -299,6 +325,15 @@ export default function WorkspaceGitLogPage() {
         sha={selectedSha}
         open={selectedSha != null}
         onClose={() => setSelectedSha(null)}
+      />
+
+      {/* 工作区文件 diff 弹窗（task-06，FR-03）：受控 open/path，关闭清 state。 */}
+      <WorktreeDiffModal
+        workspaceId={workspaceId}
+        path={diffTarget?.path ?? null}
+        status={diffTarget?.status ?? null}
+        open={diffTarget !== null}
+        onClose={() => setDiffTarget(null)}
       />
     </PageContainer>
   );

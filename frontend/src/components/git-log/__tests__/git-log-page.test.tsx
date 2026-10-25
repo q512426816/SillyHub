@@ -56,6 +56,10 @@ const gitLogMock = vi.hoisted(() => ({
   useGitLogCommitDetail: vi.fn(),
   useGitLogDiff: vi.fn(),
   useGitLogStatus: vi.fn(),
+  // task-06（2026-10-25-explorer-git-status）：页面新挂更改卡/弹窗取数 hook
+  // 一并 mock（默认 data=null → 卡片渲染 null 零噪声；挂载用例内覆写载荷）。
+  useGitLogDirtyFiles: vi.fn(),
+  useGitLogWorktreeDiff: vi.fn(),
 }));
 vi.mock("@/lib/git-log", async () => {
   const actual = await vi.importActual<typeof import("@/lib/git-log")>(
@@ -67,6 +71,8 @@ vi.mock("@/lib/git-log", async () => {
     useGitLogCommitDetail: gitLogMock.useGitLogCommitDetail,
     useGitLogDiff: gitLogMock.useGitLogDiff,
     useGitLogStatus: gitLogMock.useGitLogStatus,
+    useGitLogDirtyFiles: gitLogMock.useGitLogDirtyFiles,
+    useGitLogWorktreeDiff: gitLogMock.useGitLogWorktreeDiff,
   };
 });
 
@@ -172,6 +178,20 @@ beforeEach(() => {
   // task-03：status hook 默认已就绪空数据（data=null → 状态条渲染 null，
   // 不产生加载文案噪声；既有页面断言零影响）。
   gitLogMock.useGitLogStatus.mockReturnValue({
+    data: null,
+    isPending: false,
+    isError: false,
+    error: null,
+  });
+  // task-06：dirty-files hook 默认空数据（卡片渲染 null）。
+  gitLogMock.useGitLogDirtyFiles.mockReturnValue({
+    data: null,
+    isPending: false,
+    isError: false,
+    error: null,
+    dataUpdatedAt: 0,
+  });
+  gitLogMock.useGitLogWorktreeDiff.mockReturnValue({
     data: null,
     isPending: false,
     isError: false,
@@ -357,5 +377,101 @@ describe("WorkspaceTabs「Git 日志」标签（task-06）", () => {
     expect(
       screen.getByRole("link", { name: "Git 日志" }),
     ).toHaveAttribute("aria-current", "page");
+  });
+});
+
+// ── 工作区更改卡挂载（task-06 2026-10-25-explorer-git-status，D-001/FR-02/03）──
+
+describe("Git 日志页 · 工作区更改卡挂载（task-06）", () => {
+  const DIRTY_PAYLOAD = {
+    git_mode: "git",
+    head_short: "a9f5fae1",
+    empty: false,
+    files: [
+      {
+        path: "src/app/page.tsx",
+        status: "modified",
+        additions: 12,
+        deletions: 3,
+        binary: false,
+      },
+    ],
+    ignored: [],
+  };
+  const DIFF_PAYLOAD = {
+    status: "modified",
+    head_short: "a9f5fae1",
+    diff: "diff --git a/src/app/page.tsx b/src/app/page.tsx\n@@ -1 +1 @@\n+新行",
+    truncated: false,
+    binary: false,
+    error: null,
+  };
+
+  beforeEach(() => {
+    gitLogMock.useGitLogDirtyFiles.mockReturnValue({
+      data: DIRTY_PAYLOAD,
+      isPending: false,
+      isError: false,
+      error: null,
+      dataUpdatedAt: Date.now(),
+    });
+    gitLogMock.useGitLogWorktreeDiff.mockReturnValue({
+      data: DIFF_PAYLOAD,
+      isPending: false,
+      isError: false,
+      error: null,
+    });
+  });
+
+  it("正常数据 → 更改卡在场（状态条之下工具栏之上），文件行渲染", async () => {
+    gitLogMock.fetchGitLogCommits.mockResolvedValue(makeCommitsResponse());
+    renderPage();
+
+    const card = await screen.findByTestId("worktree-changes-card");
+    expect(card).toBeInTheDocument();
+    // 分组与文件行可见（三分组之「更改」）。
+    expect(screen.getByTestId("worktree-group-changed")).toBeInTheDocument();
+    expect(
+      screen.getByTestId("worktree-file-src/app/page.tsx"),
+    ).toBeInTheDocument();
+  });
+
+  it("点击更改卡文件行 → 工作区 diff 弹窗打开；关闭后清理（path 回 null）", async () => {
+    gitLogMock.fetchGitLogCommits.mockResolvedValue(makeCommitsResponse());
+    renderPage();
+
+    const fileRow = await screen.findByTestId("worktree-file-src/app/page.tsx");
+    fireEvent.click(fileRow);
+
+    // 弹窗头部路径 + diff 体渲染（hook mock 的 worktree-diff 载荷）。
+    await waitFor(() => {
+      expect(screen.getByTestId("worktree-diff-path")).toHaveTextContent(
+        "src/app/page.tsx",
+      );
+    });
+    expect(
+      document.querySelector('[data-testid="git-log-diff"]'),
+    ).not.toBeNull();
+
+    // 关闭：state 清 null + destroyOnClose 卸载内容（diff 体/路径头一并消失）。
+    fireEvent.click(document.querySelector(".ant-modal-close") as HTMLElement);
+    await waitFor(() => {
+      expect(screen.queryByTestId("worktree-diff-path")).not.toBeInTheDocument();
+    });
+  });
+
+  it("git_mode=no_git → 更改卡不渲染（与页面空态卡二选一不堆叠）", async () => {
+    gitLogMock.fetchGitLogCommits.mockResolvedValue(
+      makeCommitsResponse({ git_mode: "no_git", branches: [] }),
+    );
+    renderPage();
+
+    expect(await screen.findByTestId("git-log-no-git")).toBeInTheDocument();
+    await waitFor(() => {
+      expect(screen.queryByTestId("worktree-changes-card")).not.toBeInTheDocument();
+      expect(screen.queryByTestId("worktree-changes-loading")).not.toBeInTheDocument();
+    });
+    // 门控为数据驱动（初次渲染 gitMode 未知时卡片会短暂挂载后卸载）——
+    // 终态断言：空态卡在场且更改卡/加载态不在场即「二选一不堆叠」。
   });
 });

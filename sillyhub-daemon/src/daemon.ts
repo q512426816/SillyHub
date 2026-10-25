@@ -7804,6 +7804,19 @@ export class Daemon {
       const root = typeof params.root === 'string' ? params.root : '';
       return handler.gitStatus({ root });
     });
+    // task-01（2026-10-25-explorer-git-status）：第 6/7 个平名 git 方法——
+    // git_dirty_files（四态清单 + ignored 顶层聚合 + numstat 行数 join，D-007 单一
+    // 数据源）与 git_worktree_diff（单文件工作区 vs HEAD，untracked no-index 分流
+    // D-010）；消费方=backend git_log 模块 dirty-files / worktree-diff 端点。
+    ws.registerRpcHandler('git_dirty_files', async (params) => {
+      const root = typeof params.root === 'string' ? params.root : '';
+      return handler.gitDirtyFiles({ root });
+    });
+    ws.registerRpcHandler('git_worktree_diff', async (params) => {
+      const root = typeof params.root === 'string' ? params.root : '';
+      const path = typeof params.path === 'string' ? params.path : '';
+      return handler.gitWorktreeDiff({ root, path });
+    });
   }
 
   /**

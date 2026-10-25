@@ -184,7 +184,13 @@ export function parseUnifiedDiff(diff: string): DiffLine[] {
 
 // ── diff 展示 ─────────────────────────────────────────────────────────
 
-function DiffBody({ diff }: { diff: string }) {
+/**
+ * unified diff 行渲染件（+ 行绿底 bg-success/10 text-success、- 行红底
+ * bg-error/10 text-error、@@ 头 muted 灰底）。
+ * 2026-10-25-explorer-git-status task-05 起导出：工作区 diff 弹窗
+ * （worktree-diff-modal.tsx）复用同一红绿渲染语义（此前为文件内私有）。
+ */
+export function DiffBody({ diff }: { diff: string }) {
   const lines = useMemo(() => parseUnifiedDiff(diff), [diff]);
   if (lines.length === 0) {
     return (

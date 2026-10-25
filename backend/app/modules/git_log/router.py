@@ -1,9 +1,11 @@
-"""HTTP routes for the git_log module — 工作区 Git 日志 + Git 健康状态，共四端点。
+"""HTTP routes for the git_log module — 工作区 Git 日志 + Git 健康状态，共六端点。
 
 「浏览器 → backend → daemon → 宿主机 git」只读查询链路的 HTTP 层（design §7.1）：
 
-- 四 GET 端点统一 ``require_permission(Permission.WORKSPACE_READ)`` 门控，
+- GET 端点统一 ``require_permission(Permission.WORKSPACE_READ)`` 门控，
   依赖形态沿用 explorer/router.py 先例（``Annotated[User, Depends(...)]``）；
+- 2026-10-25-explorer-git-status 追加 dirty-files / worktree-diff 两端点
+  （工作区文件级状态清单 + 单文件工作区 diff，形态对齐既有四端点）；
 - router 层做参数静态校验（skip/limit 窗口、sha/branch/author/path 白名单；
   status 端点无参数），helper 为 service 层模块内共享函数，非法统一
   ``GitLogInvalidParam`` 422；
@@ -28,10 +30,12 @@ from app.core.db import get_session
 from app.modules.auth.model import User
 from app.modules.auth.permissions import Permission
 from app.modules.git_log.schema import (
+    GitDirtyFilesResponse,
     GitLogCommitDetailResponse,
     GitLogCommitsResponse,
     GitLogDiffResponse,
     GitLogStatusResponse,
+    GitWorktreeDiffResponse,
 )
 from app.modules.git_log.service import (
     GitLogService,
@@ -112,3 +116,34 @@ async def get_git_log_status(
     """
     service = GitLogService(session)
     return await service.get_status(workspace_id, user.id)
+
+
+@router.get("/dirty-files", response_model=GitDirtyFilesResponse)
+async def get_git_log_dirty_files(
+    workspace_id: uuid.UUID,
+    session: SessionDep,
+    user: Annotated[User, Depends(require_permission(Permission.WORKSPACE_READ))],
+) -> GitDirtyFilesResponse:
+    """工作区改动文件清单（2026-10-25-explorer-git-status，RPC 超时 30s，无 query 参数）。
+
+    四态清单（added/modified/deleted/untracked）+ 忽略顶层聚合 + numstat 行数
+    join——explorer 树着色与「工作区更改」卡共用的单一数据源（D-007）。
+    """
+    service = GitLogService(session)
+    return await service.get_dirty_files(workspace_id, user.id)
+
+
+@router.get("/worktree-diff", response_model=GitWorktreeDiffResponse)
+async def get_git_log_worktree_diff(
+    workspace_id: uuid.UUID,
+    session: SessionDep,
+    user: Annotated[User, Depends(require_permission(Permission.WORKSPACE_READ))],
+    path: str = Query(min_length=1, description="仓库内文件相对路径（必填）"),
+) -> GitWorktreeDiffResponse:
+    """单文件「工作区 vs 最近一次提交」diff（2026-10-25-explorer-git-status，RPC 超时 30s）。
+
+    untracked 文件走 no-index 全新增形态（daemon 侧分流）；超 64KB 截断。
+    """
+    _validate_diff_path(path)
+    service = GitLogService(session)
+    return await service.get_worktree_diff(workspace_id, user.id, path)

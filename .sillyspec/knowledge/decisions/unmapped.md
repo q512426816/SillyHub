@@ -1934,3 +1934,94 @@ supersedes：D-005@v1
 锚点：未记录
 最近确认：a632a37e3975ae0bf31c92290078a9fbede8ce2a
 理由：风险可忽略：`?.` 与 `?? null` 在 i>0 且元素必存在的构造下与原 `.whoLine` 等值。试过放弃的方案：把测试 opts 类型改为 LlmProviderRead[]（需 import + 464/504 fixture 补齐必填字段，改动面扩大且可能引出 agent_kinds 类新错）——放弃，取 never[] 边界断言最小面。
+
+## D-unmapped-247@v2 忽略条目按顶层聚合展示，不递归展开（措辞精度修订）
+状态：implemented
+变更：2026-10-25-explorer-git-status
+原编号：D-003@v2
+锚点：未记录
+最近确认：19783ad99
+理由：结论不变（顶层聚合）；normalized_requirement 措辞收敛为「与忽略目录内部文件数无关（--directory 只聚合目录），散落的忽略单文件仍逐条、规模与其线性相关」
+supersedes：D-003@v1
+故障面：同 D-003@v1
+退役判据：同 D-003@v1
+
+## D-unmapped-248@v1 diff 基线一律 HEAD，不区分暂存区；untracked/已删除特例展示
+状态：implemented
+变更：2026-10-25-explorer-git-status
+原编号：D-004@v1
+锚点：未记录
+最近确认：19783ad99
+理由：我的判断：一律与 HEAD（最近一次提交）比，不拆「更改/已暂存更改」两组（平台 agent 场景不走暂存流程，YAGNI）；untracked 文件 diff 展示整文件为新增（全绿）；已删除文件保留在修改集合清单（红色删除线），diff 展示整文件删除（全红）
+故障面：用户本地手动 stage 后清单不体现暂存态，可能误判「还有未暂存改动」
+退役判据：平台引入暂存区工作流（如平台内提交功能）时重议口径
+
+## D-unmapped-249@v1 explorer 树着色不改点击行为，diff 入口仅修改集合视图
+状态：implemented
+变更：2026-10-25-explorer-git-status
+原编号：D-005@v1
+锚点：未记录
+最近确认：19783ad99
+理由：我的判断（按用户原话字面）：explorer 树点击行为维持现状（右侧内容预览）；「点击看 diff」仅是修改文件集合视图的交互。explorer 树只加状态着色
+故障面：用户若预期「树上点文件直接看 diff」会与实现不符——design 图例中写明
+退役判据：用户反馈想从 explorer 树直达 diff 时，加辅助入口（如右键菜单/图标按钮）
+
+## D-unmapped-250@v1 状态采集沿用 git_log 既有三层链路，daemon 新增两个平名能力
+状态：implemented
+变更：2026-10-25-explorer-git-status
+原编号：D-006@v1
+锚点：未记录
+最近确认：19783ad99
+理由：我的判断：沿用 git_log 模块既有「backend(GitLogService 绑定解析) → ws_hub.send_rpc → daemon execFile git」链路与安全守卫；daemon 侧新增两个平名 RPC 能力——①文件级状态清单（porcelain v2 文件行 + ignored --directory 聚合行 + numstat 增删行数）②工作区单文件 vs HEAD diff（git diff HEAD --unified=3 --no-color -- <path>，untracked 用 no-index 形态或标记位由前端渲染全文新增）。backend 暴露两个新只读端点（WORKSPACE_READ 门控）
+故障面：daemon 旧版本无新平名能力 → backend 需按未知方法映射为 422「daemon 版本过旧」降级（对齐现有 git-log 降级形态）
+退役判据：若后续 daemon 与 backend 合并部署形态变化，再评估链路简化
+
+## D-unmapped-251@v1 落选——方案 B（explorer 契约内嵌状态字段）— rejected
+状态：rejected
+变更：2026-10-25-explorer-git-status
+原编号：D-008@v1
+锚点：未记录
+最近确认：19783ad99
+理由：落选
+否决理由：懒加载树逐层列目录导致重复采集（每层一次 git status）；逐目录语义拼不出全量修改清单，Git 日志页修改集合另开接口形成两处数据源，一致性无保障；ExplorerEntry DTO 变更牵动 gen:types 双份义务
+复潮条件：explorer 树改为一次性全量返回（无逐层懒加载）且修改集合需求取消时，可重议内嵌口径
+
+## D-unmapped-252@v1 落选——方案 C（daemon watch + 实时推送）— rejected
+状态：rejected
+变更：2026-10-25-explorer-git-status
+原编号：D-009@v1
+锚点：未记录
+最近确认：19783ad99
+理由：落选
+否决理由：大仓库 fs 监听开销大且 Windows 文件监听坑多；需新增推送通道与连接状态机；当前场景刷新按钮 + react-query 失效机制已覆盖，YAGNI 严重超范围
+复潮条件：出现多端同改工作区需秒级感知的真实场景（如多人协作审阅同一工作区）时重议
+
+## D-unmapped-253@v1 untracked diff 采集用局部 execFile 读退出码（exit 0/1 均成功）
+状态：implemented
+变更：2026-10-25-explorer-git-status
+原编号：D-010@v1
+锚点：sillyhub-daemon/src/host-fs-handler.ts:1661
+最近确认：19783ad99
+理由：我的判断：untracked 分支不走 runCmd 的 ok 通道，用局部 execFile（对齐 runGitFetch 先例 sillyhub-daemon/src/host-fs-handler.ts:1661）直接读退出码——exit 0/1 均视为成功（1=有差异，常态），≥2 或 killed 才 error；stderr 的 CRLF warning 行不进 error 文案。备选「改 ExecResult 暴露退出码」影响公共件全调用面，不取
+故障面：git 未安装/版本极旧时 no-index 旗标行为差异——退化为 error 通道，前端按 diff 拉取失败降级，不致错数据
+退役判据：ExecResult 未来暴露退出码后，可回归统一 runCmd 通道
+
+## D-unmapped-254@v1 porcelain v2 解析契约——末段 rejoin、u 条目按 modified、祖先蓝点不含 ignored
+状态：implemented
+变更：2026-10-25-explorer-git-status
+原编号：D-011@v1
+锚点：未记录
+最近确认：19783ad99
+理由：我的判断：① `1` 条目前段字段以单空格分隔、path 以制表符与前段分隔（git 官方契约）——按行内首个 `\t` 切出 path（含空格安全；path 含 `\t`/换行时 git 自动 C-quote 包裹）；② `u`（unmerged，合并冲突）条目按 modified 归类（四态不扩冲突态，YAGNI，测试用例覆盖）；③ explorer 祖先目录蓝点口径=子树内存在 added/modified/deleted/untracked 任一，ignored 不算改动
+故障面：冲突文件显示为「修改」蓝而非专门冲突标识——平台场景罕见，图例不提示；用户在别处解决冲突后状态自然消失
+退役判据：平台出现高频合并冲突场景时增补第五态「冲突」
+
+## D-unmapped-255@v1 并行变更遗留红测试的就地对齐（turn-timeline 断言恢复）
+状态：implemented
+变更：2026-10-25-explorer-git-status
+原编号：D-014@v1
+锚点：未记录
+最近确认：19783ad99
+理由：我的判断：该红由并行变更 subagent-card-unify-panel 已提交主仓但漏更新对应测试所致，非本变更文件；为恢复提交门可用，在收口提交 0f3bf815a 中顺带对齐断言（20/20 绿），commit message 留痕
+故障面：顺手修复与变更主体混于同一提交，追溯需读 commit message
+退役判据：无（一次性修复留痕）

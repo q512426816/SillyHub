@@ -764,3 +764,13 @@ supersedes：D-006@v1
 锚点：未记录
 最近确认：d3c425bf6
 理由：全部按审查结论修订进 design/requirements/tasks——①失败卡分支键＝`details.daemon_code`（daemon 业务失败时外层 `ApiError.code` 恒为 `HTTP_502_DAEMON_RPC_REMOTE`，不可作键；离线/超时臂按外层 `HTTP_504_DAEMON_RUNTIME_OFFLINE` / `HTTP_504_DAEMON_RPC_TIMEOUT`）；②关闭成功后 invalidate 键＝`["platform-sync-section","spec-conflicts",workspaceId]`（`QUERY_KEY_ROOT=["platform-sync-section"]` 实际值）；③「标记已处理」关闭范围＝整条注册表记录（一条记录可含多个变更名，并列展示的兄弟行会一起消失），写进确认文案并记 R-07；④兜底命中时 `ql_id` 恒 null、archive 路径排序沉底、>300 路径时属该变更的路径可能被帽截掉（表现为缺路径）——均接受为已知边界，记 R-08/R-02。
+
+## D-backend-035@v1 方案 A——平行状态接口 + 前端 join（选定）
+状态：implemented
+变更：2026-10-25-explorer-git-status
+原编号：D-007@v1
+锚点：sillyhub-daemon/src/daemon.ts:7803
+最近确认：19783ad99
+理由：用户选定方案 A——daemon 新增「改动文件清单」（porcelain v2 文件行 + ignored --directory 聚合 + numstat）与「工作区单文件 vs HEAD diff」两个平名 RPC，backend 暴露两个只读端点；前端一次拉清单建 path→status 映射，explorer 树着色与 Git 日志页修改集合同源消费
+故障面：状态清单为拉取式快照，daemon 侧文件变动后页面不自动变色——需手动刷新或重新进页
+退役判据：出现「多端同改工作区需秒级感知」的真实场景时重议推送（见 D-009）

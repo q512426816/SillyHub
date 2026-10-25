@@ -323,3 +323,13 @@ supersedes：D-003@v2（仅回传机制部分，其余维持）
 理由：方案 C 落选（用户选 A）。
 否决理由：必须等 daemon 自更新铺开才生效，新增 RPC 带来协议/权限/测试成本，而当前机器侧只有 full-tree 一种已成形形态，收益是假想的未来变化。
 复潮条件：机器侧出现第三种以上记录命名形态（如按工作区/轮次改名）导致「猜名字」清单不可维护时，重议升级为目录发现。
+
+## D-backend-035@v1 方案 A——平行状态接口 + 前端 join（选定）
+状态：implemented
+变更：2026-10-25-explorer-git-status
+原编号：D-007@v1
+锚点：sillyhub-daemon/src/daemon.ts:7803
+最近确认：19783ad99
+理由：用户选定方案 A——daemon 新增「改动文件清单」（porcelain v2 文件行 + ignored --directory 聚合 + numstat）与「工作区单文件 vs HEAD diff」两个平名 RPC，backend 暴露两个只读端点；前端一次拉清单建 path→status 映射，explorer 树着色与 Git 日志页修改集合同源消费
+故障面：状态清单为拉取式快照，daemon 侧文件变动后页面不自动变色——需手动刷新或重新进页
+退役判据：出现「多端同改工作区需秒级感知」的真实场景时重议推送（见 D-009）

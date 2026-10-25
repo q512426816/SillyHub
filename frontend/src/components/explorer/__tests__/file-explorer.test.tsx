@@ -31,12 +31,38 @@ vi.mock("@/lib/explorer", async (importOriginal) => {
   };
 });
 
+// task-07（2026-10-25-explorer-git-status）：FileExplorer 组件内自取
+// useGitLogDirtyFiles（@/lib/api 的 apiFetch）——mock 成干净空清单（无着色，
+// 既有断言全部维持现状语义），并需 QueryClientProvider 包装（renderExplorer）。
+const apiFetchMock = vi.hoisted(() =>
+  vi.fn(async () => ({
+    git_mode: "git",
+    head_short: null,
+    empty: false,
+    files: [],
+    ignored: [],
+  })),
+);
+vi.mock("@/lib/api", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/api")>();
+  return { ...actual, apiFetch: apiFetchMock };
+});
+
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import type { ReactElement } from "react";
+
 import { FileExplorer } from "../file-explorer";
 import { fetchTree, fetchSearch } from "@/lib/explorer";
 import { closestAntdTreeRow, queryAntdTreeIcon, queryAntdTreeSwitcher, closestAntdTreeNodeWrapper } from "@/test/dom-queries";
 
 const mockFetchTree = fetchTree as unknown as ReturnType<typeof vi.fn>;
 const mockFetchSearch = fetchSearch as unknown as ReturnType<typeof vi.fn>;
+
+/** 带 QueryClient 的渲染（useGitLogDirtyFiles 需要 Provider；每用例新 client 隔离缓存）。 */
+function renderExplorer(ui: ReactElement) {
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  return render(<QueryClientProvider client={client}>{ui}</QueryClientProvider>);
+}
 
 const MTIME = "2026-08-18T00:00:00Z";
 const dir = (name: string) => ({ name, type: "dir" as const, size: 0, mtime: MTIME });
@@ -103,7 +129,7 @@ describe("FileExplorer（task-06）", () => {
 
   it("挂载 → fetchTree(wsId, '') 拉根层一次，渲染根节点与一级条目", async () => {
     mockDefaultTree();
-    render(<FileExplorer workspaceId="ws1" onSelectFile={vi.fn()} />);
+    renderExplorer(<FileExplorer workspaceId="ws1" onSelectFile={vi.fn()} />);
     await waitForRoot();
     expect(screen.getByText("backend")).toBeInTheDocument();
     expect(screen.getByText("README.md")).toBeInTheDocument();
@@ -116,7 +142,7 @@ describe("FileExplorer（task-06）", () => {
     mockFetchTree.mockResolvedValue({
       entries: [file("z.md"), dir("b"), dir("a"), file("a.txt")],
     });
-    const { container } = render(<FileExplorer workspaceId="ws1" onSelectFile={vi.fn()} />);
+    const { container } = renderExplorer(<FileExplorer workspaceId="ws1" onSelectFile={vi.fn()} />);
     await waitForRoot();
     // 根自动展开 → 一级条目按「目录优先再按名」渲染（后端已保证，前端兜底排序）。
     const titles = Array.from(container.querySelectorAll(".ant-tree-title")).map((el) =>
@@ -134,7 +160,7 @@ describe("FileExplorer（task-06）", () => {
     mockFetchTree.mockResolvedValue({
       entries: [file("main.ts"), file("config.json"), file("logo.png"), file("data.xyz"), dir("docs")],
     });
-    render(<FileExplorer workspaceId="ws1" onSelectFile={vi.fn()} />);
+    renderExplorer(<FileExplorer workspaceId="ws1" onSelectFile={vi.fn()} />);
     await waitForRoot();
 
     // 取 iconEle 内的图标 svg（目录行第一个 svg 是 switcher 展开箭头，无 lucide class）。
@@ -162,7 +188,7 @@ describe("FileExplorer（task-06）", () => {
         file("run.sh"),
       ],
     });
-    render(<FileExplorer workspaceId="ws1" onSelectFile={vi.fn()} />);
+    renderExplorer(<FileExplorer workspaceId="ws1" onSelectFile={vi.fn()} />);
     await waitForRoot();
 
     const rowIconClass = (name: string) =>
@@ -191,7 +217,7 @@ describe("FileExplorer（task-06）", () => {
 
   it("展开目录 → loadData 调 fetchTree(wsId, 该目录 rel 路径)，只取当前层不递归预取", async () => {
     mockDefaultTree();
-    render(<FileExplorer workspaceId="ws1" onSelectFile={vi.fn()} />);
+    renderExplorer(<FileExplorer workspaceId="ws1" onSelectFile={vi.fn()} />);
     await waitForRoot();
 
     expandRow("backend");
@@ -207,7 +233,7 @@ describe("FileExplorer（task-06）", () => {
   it("点击文件节点 → onSelectFile 带相对根 POSIX 路径（根层 + 子层）", async () => {
     mockDefaultTree();
     const onSelectFile = vi.fn();
-    render(<FileExplorer workspaceId="ws1" onSelectFile={onSelectFile} />);
+    renderExplorer(<FileExplorer workspaceId="ws1" onSelectFile={onSelectFile} />);
     await waitForRoot();
 
     clickNode("README.md");
@@ -222,7 +248,7 @@ describe("FileExplorer（task-06）", () => {
   it("点击目录节点 → 只选中不触发 onSelectFile", async () => {
     mockDefaultTree();
     const onSelectFile = vi.fn();
-    render(<FileExplorer workspaceId="ws1" onSelectFile={onSelectFile} />);
+    renderExplorer(<FileExplorer workspaceId="ws1" onSelectFile={onSelectFile} />);
     await waitForRoot();
 
     clickNode("backend");
@@ -233,7 +259,7 @@ describe("FileExplorer（task-06）", () => {
 
   it("点击目录节点 → 展开并懒加载当前层（expandAction=click，ql-20260821-015）", async () => {
     mockDefaultTree();
-    render(<FileExplorer workspaceId="ws1" onSelectFile={vi.fn()} />);
+    renderExplorer(<FileExplorer workspaceId="ws1" onSelectFile={vi.fn()} />);
     await waitForRoot();
 
     clickNode("backend");
@@ -246,7 +272,7 @@ describe("FileExplorer（task-06）", () => {
 
   it("点击已展开目录 → 收起（子行隐藏、不重复拉取）", async () => {
     mockDefaultTree();
-    render(<FileExplorer workspaceId="ws1" onSelectFile={vi.fn()} />);
+    renderExplorer(<FileExplorer workspaceId="ws1" onSelectFile={vi.fn()} />);
     await waitForRoot();
 
     clickNode("backend");
@@ -258,7 +284,7 @@ describe("FileExplorer（task-06）", () => {
 
   it("点击文件节点 → 不触发展开请求（叶子忽略）", async () => {
     mockDefaultTree();
-    render(<FileExplorer workspaceId="ws1" onSelectFile={vi.fn()} />);
+    renderExplorer(<FileExplorer workspaceId="ws1" onSelectFile={vi.fn()} />);
     await waitForRoot();
 
     clickNode("README.md");
@@ -270,7 +296,7 @@ describe("FileExplorer（task-06）", () => {
 
   it("根加载失败 → 红条提示不崩溃，点「重试」重新拉根", async () => {
     mockFetchTree.mockRejectedValue(new Error("daemon offline"));
-    render(<FileExplorer workspaceId="ws1" onSelectFile={vi.fn()} />);
+    renderExplorer(<FileExplorer workspaceId="ws1" onSelectFile={vi.fn()} />);
     await waitFor(() => {
       expect(screen.getByRole("alert")).toBeInTheDocument();
     });
@@ -287,7 +313,7 @@ describe("FileExplorer（task-06）", () => {
       if (path === "") return { entries: [dir("backend"), file("README.md")] };
       throw new Error("boom");
     });
-    render(<FileExplorer workspaceId="ws1" onSelectFile={vi.fn()} />);
+    renderExplorer(<FileExplorer workspaceId="ws1" onSelectFile={vi.fn()} />);
     await waitForRoot();
 
     expandRow("backend");
@@ -304,7 +330,7 @@ describe("FileExplorer（task-06）", () => {
       if (path === "") return { entries: [dir("empty-dir"), file("README.md")] };
       return { entries: [] };
     });
-    render(<FileExplorer workspaceId="ws1" onSelectFile={vi.fn()} />);
+    renderExplorer(<FileExplorer workspaceId="ws1" onSelectFile={vi.fn()} />);
     await waitForRoot();
 
     expandRow("empty-dir");
@@ -323,7 +349,7 @@ describe("FileExplorer（task-06）", () => {
       matches: [{ path: "backend/app/main.py", name: "main.py", type: "file" }],
       truncated: false,
     });
-    render(<FileExplorer workspaceId="ws1" onSelectFile={vi.fn()} />);
+    renderExplorer(<FileExplorer workspaceId="ws1" onSelectFile={vi.fn()} />);
     await waitForRoot();
 
     fireEvent.change(screen.getByPlaceholderText("搜索文件名…"), {
@@ -339,7 +365,7 @@ describe("FileExplorer（task-06）", () => {
   it("回车提交立即搜索（不等防抖）", async () => {
     mockDefaultTree();
     mockFetchSearch.mockResolvedValue({ matches: [], truncated: false });
-    render(<FileExplorer workspaceId="ws1" onSelectFile={vi.fn()} />);
+    renderExplorer(<FileExplorer workspaceId="ws1" onSelectFile={vi.fn()} />);
     await waitForRoot();
 
     submitSearch("main");
@@ -356,7 +382,7 @@ describe("FileExplorer（task-06）", () => {
       matches: [{ path: "a.py", name: "a.py", type: "file" }],
       truncated: true,
     });
-    render(<FileExplorer workspaceId="ws1" onSelectFile={vi.fn()} />);
+    renderExplorer(<FileExplorer workspaceId="ws1" onSelectFile={vi.fn()} />);
     await waitForRoot();
 
     submitSearch("a");
@@ -367,7 +393,7 @@ describe("FileExplorer（task-06）", () => {
   it("搜索失败 → 面板内错误提示不崩溃", async () => {
     mockDefaultTree();
     mockFetchSearch.mockRejectedValue(new Error("search down"));
-    render(<FileExplorer workspaceId="ws1" onSelectFile={vi.fn()} />);
+    renderExplorer(<FileExplorer workspaceId="ws1" onSelectFile={vi.fn()} />);
     await waitForRoot();
 
     submitSearch("main");
@@ -384,7 +410,7 @@ describe("FileExplorer（task-06）", () => {
       truncated: false,
     });
     const onSelectFile = vi.fn();
-    render(<FileExplorer workspaceId="ws1" onSelectFile={onSelectFile} />);
+    renderExplorer(<FileExplorer workspaceId="ws1" onSelectFile={onSelectFile} />);
     await waitForRoot();
 
     submitSearch("main");
@@ -413,7 +439,7 @@ describe("FileExplorer（task-06）", () => {
       truncated: false,
     });
     const onSelectFile = vi.fn();
-    render(<FileExplorer workspaceId="ws1" onSelectFile={onSelectFile} />);
+    renderExplorer(<FileExplorer workspaceId="ws1" onSelectFile={onSelectFile} />);
     await waitForRoot();
 
     submitSearch("backend");
@@ -434,7 +460,7 @@ describe("FileExplorer（task-06）", () => {
   it("右键文件节点出单项菜单，点击回调 desc 逐字段正确（file）", async () => {
     mockDefaultTree();
     const onAddNodeRef = vi.fn();
-    render(<FileExplorer workspaceId="ws1" onSelectFile={vi.fn()} onAddNodeRef={onAddNodeRef} />);
+    renderExplorer(<FileExplorer workspaceId="ws1" onSelectFile={vi.fn()} onAddNodeRef={onAddNodeRef} />);
     await waitForRoot();
 
     fireEvent.contextMenu(screen.getByText("README.md"), { clientX: 120, clientY: 80 });
@@ -455,7 +481,7 @@ describe("FileExplorer（task-06）", () => {
   it("右键目录节点菜单文案为目录，desc path 为相对根路径", async () => {
     mockDefaultTree();
     const onAddNodeRef = vi.fn();
-    render(<FileExplorer workspaceId="ws1" onSelectFile={vi.fn()} onAddNodeRef={onAddNodeRef} />);
+    renderExplorer(<FileExplorer workspaceId="ws1" onSelectFile={vi.fn()} onAddNodeRef={onAddNodeRef} />);
     await waitForRoot();
 
     fireEvent.contextMenu(screen.getByText("backend"), { clientX: 60, clientY: 40 });
@@ -473,7 +499,7 @@ describe("FileExplorer（task-06）", () => {
   it("右键根节点：kind=dir、path 空串、name=工作区根", async () => {
     mockDefaultTree();
     const onAddNodeRef = vi.fn();
-    render(<FileExplorer workspaceId="ws1" onSelectFile={vi.fn()} onAddNodeRef={onAddNodeRef} />);
+    renderExplorer(<FileExplorer workspaceId="ws1" onSelectFile={vi.fn()} onAddNodeRef={onAddNodeRef} />);
     await waitForRoot();
 
     fireEvent.contextMenu(screen.getByText("工作区根"), { clientX: 30, clientY: 30 });
@@ -489,7 +515,7 @@ describe("FileExplorer（task-06）", () => {
   it("document 点击/右键别处关闭菜单；未传 onAddNodeRef 时右键零拦截", async () => {
     mockDefaultTree();
     const onAddNodeRef = vi.fn();
-    const { unmount } = render(
+    const { unmount } = renderExplorer(
       <FileExplorer workspaceId="ws1" onSelectFile={vi.fn()} onAddNodeRef={onAddNodeRef} />,
     );
     await waitForRoot();
@@ -509,7 +535,7 @@ describe("FileExplorer（task-06）", () => {
 
     // 未传回调（新实例）：右键为浏览器默认菜单（不 preventDefault）
     unmount();
-    render(<FileExplorer workspaceId="ws1" onSelectFile={vi.fn()} />);
+    renderExplorer(<FileExplorer workspaceId="ws1" onSelectFile={vi.fn()} />);
     await waitForRoot();
     const evt = fireEvent.contextMenu(screen.getByText("backend"), { clientX: 5, clientY: 5 });
     expect(evt).toBe(true);

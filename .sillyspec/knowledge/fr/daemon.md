@@ -7803,3 +7803,202 @@
   confirmed_at: null
   source_change: 2026-10-25-session-git-worktree-root
   status: active
+
+## FR-daemon-288 explorer 文件树 git 状态着色
+变更：2026-10-25-explorer-git-status
+状态：active
+摘要：默认场景
+依据决策：D-002@v1、D-003@v2、D-005@v1、D-007@v1、D-008@v1、D-011@v1
+场景正文：
+- 场景：默认场景 — Given 用户已绑定本机工作区且 daemon 在线，工作区为 git 仓库；When 用户进入工作区「文件」页；Then 文件树文件名按 git 状态着色——新增/新文件=绿（success）、修改=蓝（primary）、忽略=灰（muted）；含改动的祖先目录名旁显示蓝点；忽略条
+全文：.sillyspec/changes/archive/2026-10-25-explorer-git-status/requirements.md#FR-01
+最近确认：19783ad99
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-25-explorer-git-status:task-01:acc-0-30c9c743
+  tests: sillyhub-daemon/tests/host-fs-handler-git-dirty-files.test.ts
+  reason: spec
+  state: active
+  discovery: machine
+  confirmed_by: agent
+  confirmed_at: 3615228c11a82dc5cb5689c5157e95ccf015cca9
+  source_change: 2026-10-25-explorer-git-status
+  status: active
+- row: 2026-10-25-explorer-git-status:task-01:acc-1-2fab0eb7
+  tests: sillyhub-daemon/tests/host-fs-handler-git-dirty-files.test.ts
+  reason: spec
+  state: active
+  discovery: machine
+  confirmed_by: agent
+  confirmed_at: 3615228c11a82dc5cb5689c5157e95ccf015cca9
+  source_change: 2026-10-25-explorer-git-status
+  status: active
+- row: 2026-10-25-explorer-git-status:task-01:acc-2-54b853a8
+  tests: sillyhub-daemon/tests/host-fs-handler-git-dirty-files.test.ts
+  reason: spec
+  state: active
+  discovery: machine
+  confirmed_by: agent
+  confirmed_at: 3615228c11a82dc5cb5689c5157e95ccf015cca9
+  source_change: 2026-10-25-explorer-git-status
+  status: active
+- row: 2026-10-25-explorer-git-status:task-07:acc-0-0bea604f
+  tests: frontend/src/components/explorer/__tests__/file-explorer.test.tsx
+  reason: spec
+  state: active
+  discovery: machine
+  confirmed_by: agent
+  confirmed_at: 3615228c11a82dc5cb5689c5157e95ccf015cca9
+  source_change: 2026-10-25-explorer-git-status
+  status: active
+
+## FR-daemon-289 Git 日志页「工作区更改」修改文件集合卡
+变更：2026-10-25-explorer-git-status
+状态：active
+摘要：默认场景
+依据决策：D-001@v1、D-002@v1、D-003@v2、D-007@v1、D-009@v1、D-011@v1
+场景正文：
+- 场景：默认场景 — Given 同上；When 用户进入工作区「Git 日志」页；Then 在状态条下方展示「工作区更改」卡：按 IDEA 分组（更改 / 未纳入版本管理 / 已忽略聚合）展示改动文件目录树，文件行四色 + 增删行数（untracked
+全文：.sillyspec/changes/archive/2026-10-25-explorer-git-status/requirements.md#FR-02
+最近确认：19783ad99
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-25-explorer-git-status:task-04:acc-0-cbca0911
+  tests: frontend/src/components/git-log/__tests__/worktree-changes-card.test.tsx
+  reason: spec
+  state: active
+  discovery: machine
+  confirmed_by: agent
+  confirmed_at: 3615228c11a82dc5cb5689c5157e95ccf015cca9
+  source_change: 2026-10-25-explorer-git-status
+  status: active
+- row: 2026-10-25-explorer-git-status:task-04:acc-1-1ff449eb
+  tests: frontend/src/components/git-log/__tests__/worktree-changes-card.test.tsx
+  reason: spec
+  state: active
+  discovery: machine
+  confirmed_by: agent
+  confirmed_at: 3615228c11a82dc5cb5689c5157e95ccf015cca9
+  source_change: 2026-10-25-explorer-git-status
+  status: active
+- row: 2026-10-25-explorer-git-status:task-04:acc-2-62e9a76c
+  tests: frontend/src/components/git-log/__tests__/worktree-changes-card.test.tsx
+  reason: spec
+  state: active
+  discovery: machine
+  confirmed_by: agent
+  confirmed_at: 3615228c11a82dc5cb5689c5157e95ccf015cca9
+  source_change: 2026-10-25-explorer-git-status
+  status: active
+- row: 2026-10-25-explorer-git-status:task-06:acc-0-4840f065
+  tests: frontend/src/components/git-log/__tests__/git-log-page.test.tsx | frontend/src/components/git-log/__tests__/git-status-bar.test.tsx
+  reason: spec
+  state: active
+  discovery: machine
+  confirmed_by: agent
+  confirmed_at: 3615228c11a82dc5cb5689c5157e95ccf015cca9
+  source_change: 2026-10-25-explorer-git-status
+  status: active
+- row: 2026-10-25-explorer-git-status:task-06:acc-1-bad39a8b
+  tests: frontend/src/components/git-log/__tests__/git-log-page.test.tsx | frontend/src/components/git-log/__tests__/git-status-bar.test.tsx
+  reason: spec
+  state: active
+  discovery: machine
+  confirmed_by: agent
+  confirmed_at: 3615228c11a82dc5cb5689c5157e95ccf015cca9
+  source_change: 2026-10-25-explorer-git-status
+  status: active
+
+## FR-daemon-290 文件级「工作区 vs 最近一次提交」diff 弹窗
+变更：2026-10-25-explorer-git-status
+状态：active
+摘要：默认场景
+依据决策：D-004@v1、D-007@v1、D-010@v1
+场景正文：
+- 场景：默认场景 — Given 用户在「工作区更改」卡点击任一文件行；When 弹窗打开；Then 展示该文件工作区内容与最近一次提交（HEAD）的 unified diff（红删绿增，64KB 截断提示，二进制提示）；基线一律 HEAD 不分暂存组（D-00
+全文：.sillyspec/changes/archive/2026-10-25-explorer-git-status/requirements.md#FR-03
+最近确认：19783ad99
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-25-explorer-git-status:task-05:acc-0-e274185c
+  tests: frontend/src/components/git-log/__tests__/file-tree.test.tsx
+  reason: spec
+  state: active
+  discovery: machine
+  confirmed_by: agent
+  confirmed_at: 3615228c11a82dc5cb5689c5157e95ccf015cca9
+  source_change: 2026-10-25-explorer-git-status
+  status: active
+- row: 2026-10-25-explorer-git-status:task-05:acc-1-7b7453f6
+  tests: frontend/src/components/git-log/__tests__/file-tree.test.tsx
+  reason: spec
+  state: active
+  discovery: machine
+  confirmed_by: agent
+  confirmed_at: 3615228c11a82dc5cb5689c5157e95ccf015cca9
+  source_change: 2026-10-25-explorer-git-status
+  status: active
+
+## FR-daemon-291 后端只读端点与降级
+变更：2026-10-25-explorer-git-status
+状态：active
+摘要：默认场景
+依据决策：D-006@v1
+场景正文：
+- 场景：默认场景 — Given 任意持有 WORKSPACE_READ 权限的用户；When 调用 `GET /workspaces/{wid}/git-log/dirty-files` 或 `GET /workspaces/{wid}/git-log/；Then 正常时返回文件清单（path/status/additions/deletions/binary）+ 忽略聚合条目，或 diff 文本（status/trunc
+全文：.sillyspec/changes/archive/2026-10-25-explorer-git-status/requirements.md#FR-04
+最近确认：19783ad99
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-25-explorer-git-status:task-02:acc-0-6d298736
+  tests: backend/tests/modules/git_log/__init__.py | backend/tests/modules/git_log/test_git_log_dirty_files.py
+  reason: spec
+  state: active
+  discovery: machine
+  confirmed_by: agent
+  confirmed_at: 3615228c11a82dc5cb5689c5157e95ccf015cca9
+  source_change: 2026-10-25-explorer-git-status
+  status: active
+- row: 2026-10-25-explorer-git-status:task-02:acc-1-e87ec008
+  tests: backend/tests/modules/git_log/__init__.py | backend/tests/modules/git_log/test_git_log_dirty_files.py
+  reason: spec
+  state: active
+  discovery: machine
+  confirmed_by: agent
+  confirmed_at: 3615228c11a82dc5cb5689c5157e95ccf015cca9
+  source_change: 2026-10-25-explorer-git-status
+  status: active
+- row: 2026-10-25-explorer-git-status:task-02:acc-2-4a05ca50
+  tests: backend/tests/modules/git_log/__init__.py | backend/tests/modules/git_log/test_git_log_dirty_files.py
+  reason: spec
+  state: active
+  discovery: machine
+  confirmed_by: agent
+  confirmed_at: 3615228c11a82dc5cb5689c5157e95ccf015cca9
+  source_change: 2026-10-25-explorer-git-status
+  status: active
+
+## FR-daemon-292 类型产物同批再生成
+变更：2026-10-25-explorer-git-status
+状态：active
+摘要：默认场景
+场景正文：
+- 场景：默认场景 — Given backend DTO schema 有新增（GitDirtyFilesResponse 等 4 个）；When 本变更收口提交；Then `backend/openapi.json`、`frontend/src/lib/api-types.ts`、`sillyhub-daemon/src/api-
+全文：.sillyspec/changes/archive/2026-10-25-explorer-git-status/requirements.md#FR-05
+最近确认：19783ad99
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-25-explorer-git-status:task-03:acc-2-7da9d193
+  tests: backend/app/modules/agent/tests/test_agent_session_model.py | backend/app/modules/agent/tests/test_cleanup_stale_runs_error_code.py | backend/app/modules/agent/tests/test_finalizer.py | backend/app/modules/agent/tests/test_group_chat_models.py | backend/app/modules/agent/tests/test_mcp_tools.py | backend/app/modules/agent/tests/test_orchestrator.py | backend/app/modules/agent/tests/test_placement_borrow_integration.py | backend/app/modules/agent/tests/test_provider_caps_alignment.py | backend/app/modules/agent/tests/test_worktree_integration.py | backend/app/modules/change/tests/test_assets.py | backend/app/modules/change/tests/test_dispatch_execute_team_mode.py | backend/app/modules/change/tests/test_files_refresh_sync.py | backend/app/modules/change/tests/test_files_router.py | backend/app/modules/change/tests/test_parser.py | backend/app/modules/change/tests/test_session_changes_endpoint.py | backend/app/modules/change/tests/test_spec_binding.py | backend/app/modules/change/tests/test_step_progress.py | backend/app/modules/change/tests/test_timeline.py | backend/app/modules/change/tests/test_title_normalization.py | backend/app/modules/change/tests/test_usage_stats.py
+  reason: spec
+  state: active
+  discovery: machine
+  confirmed_by: agent
+  confirmed_at: 3615228c11a82dc5cb5689c5157e95ccf015cca9
+  source_change: 2026-10-25-explorer-git-status
+  status: active

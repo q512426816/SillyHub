@@ -1107,14 +1107,16 @@ describe('daemon 注册器 — _registerGitLogRpcHandler（task-01 GL30~GL33，C
     await rm(root, { recursive: true, force: true });
   });
 
-  it('GL30: 注册且仅注册五个平名方法（无 host_fs. 前缀，CC-02；git_status 为第 5 个）', () => {
+  it('GL30: 注册且仅注册七个平名方法（无 host_fs. 前缀，CC-02；git_status 第 5 + explorer-git-status 第 6/7）', () => {
     const h = makeHarness(['/tmp/whatever-root']);
     expect([...h.methods.keys()].sort()).toEqual([
       'git_diff_file',
+      'git_dirty_files', // task-01 2026-10-25-explorer-git-status（第 6 个平名方法）
       'git_log',
       'git_refs',
       'git_show',
       'git_status', // task-01 2026-08-26-workspace-git-status（CC-11 计数更正）
+      'git_worktree_diff', // task-01 2026-10-25-explorer-git-status（第 7 个平名方法）
     ]);
   });
 

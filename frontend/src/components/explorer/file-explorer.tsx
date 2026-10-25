@@ -29,11 +29,22 @@
  * 依据：design.md §7.2 / Wave3 + tasks/task-06.md。
  */
 
-import { useCallback, useEffect, useRef, useState, type MouseEvent as ReactMouseEvent } from "react";
+import {
+  createContext,
+  useCallback,
+  useContext,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type MouseEvent as ReactMouseEvent,
+} from "react";
+import { useQueryClient } from "@tanstack/react-query";
 import { Button, Input, Spin, Tree, type TreeProps } from "antd";
 import type { DataNode } from "antd/es/tree";
 import { FolderOpen } from "lucide-react";
 
+import { WORKTREE_STATUS_META } from "@/components/git-log/worktree-changes-card";
 import { FileNodeIcon } from "@/components/ui/file-node-icon";
 import { FloatingContextMenu } from "@/components/ui/floating-context-menu";
 import { TreeBox } from "@/components/ui/tree-box";
@@ -45,6 +56,12 @@ import {
   type ExplorerEntry,
   type ExplorerSearchMatch,
 } from "@/lib/explorer";
+import {
+  gitLogQueryKeys,
+  useGitLogDirtyFiles,
+  type DirtyFileStatus,
+} from "@/lib/git-log";
+import { cn } from "@/lib/utils";
 
 /** 根节点 key——对应相对路径 ""（antd Tree 空串 key 语义不稳，用哨兵代替）。 */
 const ROOT_KEY = "__workspace_root__";
@@ -78,6 +95,71 @@ export function formatSize(bytes: number): string {
 /** 树节点 key → 相对根 POSIX 路径：根哨兵 → ""，其余 key 本身即 rel 路径。 */
 function keyToPath(key: React.Key): string {
   return key === ROOT_KEY ? "" : String(key);
+}
+
+// ── git 状态渲染期映射（2026-10-25-explorer-git-status task-07，FR-01）──────
+//
+// Grill P2-③ 实现注意：renderTitle 为模块级纯函数、title 在拉树时已固化进
+// treeData state——着色不可沿用固化 title，改为**渲染期读取**：状态映射经
+// React context 注入，标题内的 GitStatusName 消费者在 render 时取色，晚到的
+// dirty-files 数据（context value 变更）穿透 rc-tree 节点 memo 触发已渲染节点
+// 变色（时序竞态的既定解法，design §Phase 4）。
+
+/** 渲染期可读的 git 状态映射（query 失败/加载中为 null → 静默降级无色）。 */
+interface GitStatusMaps {
+  /** 精确文件路径 → 四态（deleted 不在 fs 扫描树上，天然不命中）。 */
+  statusByPath: Map<string, DirtyFileStatus>;
+  /** 忽略条目路径（目录已去尾 "/" 归一；含单文件）。 */
+  ignoredPaths: Set<string>;
+  /** 含改动的祖先目录集合（子树存在 added/modified/deleted/untracked 任一即算，
+   *  ignored 不算改动——D-011）。 */
+  dirtyAncestors: Set<string>;
+}
+
+const WorktreeGitStatusContext = createContext<GitStatusMaps | null>(null);
+
+/**
+ * 状态着色文件名（渲染期消费 context）：四色按 D-002（新增/新文件=绿、修改=蓝、
+ * 删除=红+删除线、忽略=灰）+ 忽略条目「忽略」小徽标 + 含改动目录名旁蓝点
+ * （bg-primary 圆点，口径见 GitStatusMaps.dirtyAncestors）。
+ */
+function GitStatusName({ path, name, isDir }: { path: string; name: string; isDir: boolean }) {
+  const maps = useContext(WorktreeGitStatusContext);
+  const status = maps?.statusByPath.get(path);
+  const ignored = status == null && (maps?.ignoredPaths.has(path) ?? false);
+  const meta =
+    status != null
+      ? WORKTREE_STATUS_META[status]
+      : ignored
+        ? WORKTREE_STATUS_META.ignored
+        : null;
+  const dirtyDir = isDir && !ignored && (maps?.dirtyAncestors.has(path) ?? false);
+  return (
+    <span className="inline-flex items-baseline gap-1">
+      <span
+        title={name}
+        data-git-status={status ?? (ignored ? "ignored" : undefined)}
+        className={cn(meta != null && meta.text)}
+      >
+        {name}
+      </span>
+      {dirtyDir && (
+        <span
+          className="h-1.5 w-1.5 shrink-0 self-center rounded-full bg-primary"
+          aria-label="目录内含改动"
+          data-testid={`git-dirty-dot-${path}`}
+        />
+      )}
+      {ignored && (
+        <span
+          className="shrink-0 rounded bg-muted px-1 text-[10px] leading-4 text-muted-foreground"
+          data-testid={`git-ignored-badge-${path}`}
+        >
+          忽略
+        </span>
+      )}
+    </span>
+  );
 }
 
 /** 递归更新树数据（antd Tree loadData 模式，remote-folder-picker 先例）。 */
@@ -117,7 +199,9 @@ function sortEntries(entries: ExplorerEntry[]): ExplorerEntry[] {
 /** 条目标题：名称 + 文件大小缩写（灰字）。整行单行展示——容器 whitespace-nowrap，
  *  行宽超出容器由树容器 w-max 放开靠外层 overflow-auto 横向滚动看全名
  *  （ql-20260818-010-f551 滚动语义 + ql-20260821-008-fade 单行修复）。
- *  onContextMenu 挂 title 行元素（FR-01 树右键入口），闭包携带 kind 与 relPath。 */
+ *  onContextMenu 挂 title 行元素（FR-01 树右键入口），闭包携带 kind 与 relPath。
+ *  名称段用 GitStatusName（task-07）：着色在渲染期读 context，晚到的
+ *  dirty-files 不需要重建 treeData 即可变色（Grill P2-③）。 */
 function renderTitle(
   entry: ExplorerEntry,
   relPath: string,
@@ -139,7 +223,11 @@ function renderTitle(
           : undefined
       }
     >
-      <span title={entry.name}>{entry.name}</span>
+      <GitStatusName
+        path={relPath}
+        name={entry.name}
+        isDir={entry.type === "dir"}
+      />
       {size ? <span className="shrink-0 text-[11px] text-muted-foreground">{size}</span> : null}
     </span>
   );
@@ -206,6 +294,34 @@ export function FileExplorer({ workspaceId, onSelectFile, onAddNodeRef }: FileEx
   const [treeError, setTreeError] = useState("");
   /** 根层重试计数器（自增触发 effect 重载）。 */
   const [rootNonce, setRootNonce] = useState(0);
+
+  // ── git 状态着色数据（task-07，FR-01 / D-007 单一数据源）────────────────
+  // 组件内自取（对齐 GitStatusBar 先例，不改 explorer page 装配）；查询失败/
+  // 加载中/no_git → maps=null → 渲染期静默降级为无色现状，不阻断文件浏览。
+  const queryClient = useQueryClient();
+  const dirtyQuery = useGitLogDirtyFiles(workspaceId);
+  const gitStatusMaps = useMemo<GitStatusMaps | null>(() => {
+    const d = dirtyQuery.data;
+    if (!d || d.git_mode !== "git") return null;
+    const statusByPath = new Map<string, DirtyFileStatus>();
+    const dirtyAncestors = new Set<string>();
+    for (const f of d.files) {
+      statusByPath.set(f.path, f.status);
+      // 祖先目录集（D-011）：子树内存在改动（四态任一，ignored 不参与——
+      // ignored 不在 files 数组，天然不贡献）即算。
+      const parts = f.path.split("/");
+      parts.pop();
+      while (parts.length > 0) {
+        dirtyAncestors.add(parts.join("/"));
+        parts.pop();
+      }
+    }
+    // 忽略路径归一：目录条目去尾 "/"（与树节点 key 形态对齐才能命中）。
+    const ignoredPaths = new Set<string>(
+      d.ignored.map((i) => (i.is_dir ? i.path.replace(/\/+$/, "") : i.path)),
+    );
+    return { statusByPath, ignoredPaths, dirtyAncestors };
+  }, [dirtyQuery.data]);
 
   // ── 树右键菜单（FR-01）：未传 onAddNodeRef 时零拦截（浏览器默认菜单）────
   const [nodeMenu, setNodeMenu] = useState<{
@@ -408,7 +524,16 @@ export function FileExplorer({ workspaceId, onSelectFile, onAddNodeRef }: FileEx
 
   const showResultPanel = searching || searchError !== "" || results !== null;
 
+  /** 根重试：重载树 + 失效 dirty-files（刷新入口联动，task-07 / design §Phase 4）。 */
+  const handleRootRetry = () => {
+    setRootNonce((n) => n + 1);
+    void queryClient.invalidateQueries({
+      queryKey: gitLogQueryKeys.dirtyFiles(workspaceId),
+    });
+  };
+
   return (
+    <WorktreeGitStatusContext.Provider value={gitStatusMaps}>
     <div className="flex h-full min-h-0 w-full flex-col gap-2">
       {/* 文件名搜索：防抖 + 回车提交（不逐键请求） */}
       <Input.Search
@@ -428,7 +553,7 @@ export function FileExplorer({ workspaceId, onSelectFile, onAddNodeRef }: FileEx
         >
           <span className="min-w-0 flex-1 break-all">{treeError}</span>
           {treeData.length === 0 ? (
-            <Button size="small" className="ml-2 shrink-0" onClick={() => setRootNonce((n) => n + 1)}>
+            <Button size="small" className="ml-2 shrink-0" onClick={handleRootRetry}>
               重试
             </Button>
           ) : null}
@@ -531,6 +656,7 @@ export function FileExplorer({ workspaceId, onSelectFile, onAddNodeRef }: FileEx
         }
       />
     </div>
+    </WorktreeGitStatusContext.Provider>
   );
 }
 

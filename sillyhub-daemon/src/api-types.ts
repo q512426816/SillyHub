@@ -1611,6 +1611,51 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/workspaces/{workspace_id}/git-log/dirty-files": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Git Log Dirty Files
+         * @description 工作区改动文件清单（2026-10-25-explorer-git-status，RPC 超时 30s，无 query 参数）。
+         *
+         *     四态清单（added/modified/deleted/untracked）+ 忽略顶层聚合 + numstat 行数
+         *     join——explorer 树着色与「工作区更改」卡共用的单一数据源（D-007）。
+         */
+        get: operations["get_git_log_dirty_files_api_workspaces__workspace_id__git_log_dirty_files_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/workspaces/{workspace_id}/git-log/worktree-diff": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Git Log Worktree Diff
+         * @description 单文件「工作区 vs 最近一次提交」diff（2026-10-25-explorer-git-status，RPC 超时 30s）。
+         *
+         *     untracked 文件走 no-index 全新增形态（daemon 侧分流）；超 64KB 截断。
+         */
+        get: operations["get_git_log_worktree_diff_api_workspaces__workspace_id__git_log_worktree_diff_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/auth/login": {
         parameters: {
             query?: never;
@@ -17180,6 +17225,70 @@ export interface components {
             /** Recent Used */
             recent_used: number;
         };
+        /**
+         * GitDirtyFileItem
+         * @description 单文件改动条目（porcelain v2 四态；--no-renames 口径 rename 拆删+增两条）。
+         */
+        GitDirtyFileItem: {
+            /**
+             * Path
+             * @description 仓库内相对路径（POSIX；空格/中文原样）
+             */
+            path: string;
+            /**
+             * Status
+             * @description added=新增/暂存新文件 / modified=修改（含 unmerged 冲突归类）/ deleted=删除 / untracked=未跟踪
+             * @enum {string}
+             */
+            status: "added" | "modified" | "deleted" | "untracked";
+            /**
+             * Additions
+             * @description 新增行数（numstat join；二进制与未跟踪文件为 null）
+             */
+            additions: number | null;
+            /**
+             * Deletions
+             * @description 删除行数（numstat join；二进制与未跟踪文件为 null）
+             */
+            deletions: number | null;
+            /**
+             * Binary
+             * @description 是否二进制文件（numstat 输出「-」时为 true）
+             */
+            binary: boolean;
+        };
+        /**
+         * GitDirtyFilesResponse
+         * @description GET /api/workspaces/{wid}/git-log/dirty-files 响应（工作区改动文件清单）。
+         */
+        GitDirtyFilesResponse: {
+            /**
+             * Git Mode
+             * @description git=git 仓库 / no_git=非 git 工作区（空态，清单为空）
+             * @enum {string}
+             */
+            git_mode: "git" | "no_git";
+            /**
+             * Head Short
+             * @description HEAD 短哈希（前 8 位；空仓库为 null）
+             */
+            head_short: string | null;
+            /**
+             * Empty
+             * @description 是否空仓库（无任何提交，清单为空数组）
+             */
+            empty: boolean;
+            /**
+             * Files
+             * @description 改动文件清单（四态，staged+unstaged 合并口径）
+             */
+            files: components["schemas"]["GitDirtyFileItem"][];
+            /**
+             * Ignored
+             * @description 忽略条目清单（顶层聚合）
+             */
+            ignored: components["schemas"]["GitIgnoredItem"][];
+        };
         /** GitIdentityCreate */
         GitIdentityCreate: {
             /** Provider */
@@ -17242,6 +17351,22 @@ export interface components {
              * Format: date-time
              */
             created_at: string;
+        };
+        /**
+         * GitIgnoredItem
+         * @description 忽略条目（gitignore 顶层聚合，不递归展开目录内部）。
+         */
+        GitIgnoredItem: {
+            /**
+             * Path
+             * @description 仓库内相对路径（目录带尾「/」）
+             */
+            path: string;
+            /**
+             * Is Dir
+             * @description 是否目录（node_modules/ 等整目录一行聚合）
+             */
+            is_dir: boolean;
         };
         /**
          * GitLogBranchItem
@@ -17676,6 +17801,38 @@ export interface components {
              * Format: date-time
              */
             timestamp: string;
+        };
+        /**
+         * GitWorktreeDiffResponse
+         * @description GET /api/workspaces/{wid}/git-log/worktree-diff 响应（单文件「工作区 vs 最近一次提交」）。
+         */
+        GitWorktreeDiffResponse: {
+            /**
+             * Status
+             * @description modified=修改 / added=新增（含未跟踪 no-index 全新增形态）/ deleted=删除
+             * @enum {string}
+             */
+            status: "modified" | "added" | "deleted";
+            /**
+             * Head Short
+             * @description 对比基线 HEAD 短哈希；空仓库为 null
+             */
+            head_short: string | null;
+            /**
+             * Diff
+             * @description unified diff 文本（--unified=3 --no-color；二进制文件为空串）
+             */
+            diff: string;
+            /**
+             * Truncated
+             * @description 是否超 64KB 上限被截断
+             */
+            truncated: boolean;
+            /**
+             * Binary
+             * @description 是否二进制文件（true 时前端直接提示「二进制文件」）
+             */
+            binary: boolean;
         };
         /** GovernanceActionIn */
         GovernanceActionIn: {
@@ -33208,6 +33365,71 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["GitLogStatusResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_git_log_dirty_files_api_workspaces__workspace_id__git_log_dirty_files_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                workspace_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GitDirtyFilesResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_git_log_worktree_diff_api_workspaces__workspace_id__git_log_worktree_diff_get: {
+        parameters: {
+            query: {
+                /** @description 仓库内文件相对路径（必填） */
+                path: string;
+            };
+            header?: never;
+            path: {
+                workspace_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GitWorktreeDiffResponse"];
                 };
             };
             /** @description Validation Error */

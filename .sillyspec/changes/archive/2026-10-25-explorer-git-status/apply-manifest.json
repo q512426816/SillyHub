@@ -1,0 +1,100 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-25-explorer-git-status",
+  "appliedAt": "2026-10-25T19:01:58.570Z",
+  "baseHash": "b2d6c3280a4bb6ca9c5fafcf52aa553c9a6ab137",
+  "files": [
+    {
+      "path": "backend/app/modules/git_log/router.py",
+      "sha256": "516f3b2eddbd48c9f8dd684e0268dae4032194130304c16d9551fbd1e4c054b2"
+    },
+    {
+      "path": "backend/app/modules/git_log/schema.py",
+      "sha256": "8f35f4afa1e98de1acc4d27be943368ce5829f4af56b553f42e1f253a311c425"
+    },
+    {
+      "path": "backend/app/modules/git_log/service.py",
+      "sha256": "96463b12cdc3b7f7702fb0bda0cc2315245dbf4044ec50c32d52dfde0ea11025"
+    },
+    {
+      "path": "backend/openapi.json",
+      "sha256": "2b75f3862d2e49ffb72be7598e119848fb13bdb54f54ad54d8c57ef2e33e57ca"
+    },
+    {
+      "path": "backend/tests/modules/git_log/__init__.py",
+      "sha256": "44e81baf347eaa9ebcbfb9f2b7cbfff660dc32a49bd6d5d38a3af75ea8e2fa08"
+    },
+    {
+      "path": "backend/tests/modules/git_log/test_git_log_dirty_files.py",
+      "sha256": "7d3fbf7fe4c2fee15653f55ef9710c80395562509c8b4ff35d5e55e450e67ece"
+    },
+    {
+      "path": "frontend/src/app/(dashboard)/workspaces/[id]/git-log/page.tsx",
+      "sha256": "ecfcbff7a251c23a38fbbe15617929d5cfcec6c03e4d699f9ed84a053d5ecabe"
+    },
+    {
+      "path": "frontend/src/components/explorer/__tests__/file-explorer-git-status.test.tsx",
+      "sha256": "126281a7bd6e2cadf1989276efcdb5f7e0c69481d241fdd034b3294e33dc7989"
+    },
+    {
+      "path": "frontend/src/components/explorer/__tests__/file-explorer.test.tsx",
+      "sha256": "a45ef12e405c356abb31738ab769c95bb5662b20e5b5c94c678f0b563cb8101e"
+    },
+    {
+      "path": "frontend/src/components/explorer/file-explorer.tsx",
+      "sha256": "6d9ffa285e867d5d99a71d7caf1b3e567c2452983c6f06972a440c10fd41f84a"
+    },
+    {
+      "path": "frontend/src/components/git-log/__tests__/git-log-page.test.tsx",
+      "sha256": "00bbbc02062bf8eab75f3cfd71296c88d111462dcff5a8b98f91ccbca363f2f0"
+    },
+    {
+      "path": "frontend/src/components/git-log/__tests__/worktree-changes-card.test.tsx",
+      "sha256": "2d1ab1e4167774cf609844121c13da3702b9731efaa7eb14682b7d21d2d8f8f2"
+    },
+    {
+      "path": "frontend/src/components/git-log/__tests__/worktree-diff-modal.test.tsx",
+      "sha256": "cc2b764d526ba1be103441685a0ec36f627ea6c6bcc4f40373a0e45fd4ad577f"
+    },
+    {
+      "path": "frontend/src/components/git-log/file-tree.tsx",
+      "sha256": "6b01369e24022dc33809805fb536e546478771101459fb2ae07763424ee9ffd2"
+    },
+    {
+      "path": "frontend/src/components/git-log/worktree-changes-card.tsx",
+      "sha256": "c0d2b3dd3be11b8dbf5124544ce6d6f00ee7e89606be11adc6be3c1a5d1aeebe"
+    },
+    {
+      "path": "frontend/src/components/git-log/worktree-diff-modal.tsx",
+      "sha256": "81ccd14519cd4efe8ac19be572489e3d9757198c5ae3195b10d4df72297e5570"
+    },
+    {
+      "path": "frontend/src/lib/api-types.ts",
+      "sha256": "bdcbba143a6424df5d460f659b9e7ceb06d2200d9296f8a5bdb9655a221655c5"
+    },
+    {
+      "path": "frontend/src/lib/git-log.ts",
+      "sha256": "b6f404fda8412c4f38bf69f1fa363aa6095fdfdeac0bf40b01192e7eae9229e8"
+    },
+    {
+      "path": "sillyhub-daemon/src/api-types.ts",
+      "sha256": "bdcbba143a6424df5d460f659b9e7ceb06d2200d9296f8a5bdb9655a221655c5"
+    },
+    {
+      "path": "sillyhub-daemon/src/daemon.ts",
+      "sha256": "676847d1b44dcebaa59ef7a668a2d8cc1ca6fd63f0ef02a44d01576de2dfff11"
+    },
+    {
+      "path": "sillyhub-daemon/src/host-fs-handler.ts",
+      "sha256": "75a3cace9e9210b46d228cbc2bf430423cc6942398bbaffbf1c30c94fc366c50"
+    },
+    {
+      "path": "sillyhub-daemon/tests/host-fs-handler-git-dirty-files.test.ts",
+      "sha256": "b230ffc5aac7b730edd84a67bd1b4983b750a29053885e2345008bae9023bfb9"
+    },
+    {
+      "path": "sillyhub-daemon/tests/host-fs-handler-git-log.test.ts",
+      "sha256": "b66e9bb71bc54eef7e51cfe2328da39bb978c8b99104a8068601611b827de969"
+    }
+  ]
+}

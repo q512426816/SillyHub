@@ -184,3 +184,66 @@ class GitLogStatusResponse(BaseModel):
         ...,
         description="状态组装时刻（ISO 8601 UTC，backend 生成；前端显示「已同步 · HH:MM」）",
     )
+
+
+# ── 2026-10-25-explorer-git-status 增量：工作区文件级状态清单 + 单文件工作区 diff ──
+#
+# producer=daemon 平名 RPC（git_dirty_files / git_worktree_diff，§接口定义）→
+# service 归一化（契约校验 + no_git 空态）→ response_model 序列化 → consumer=
+# 前端 ``pnpm gen:types`` 生成类型（explorer 着色与「工作区更改」卡同一数据源 D-007）。
+
+GitDirtyFileStatus = Literal["added", "modified", "deleted", "untracked"]
+GitWorktreeDiffStatus = Literal["modified", "added", "deleted"]
+
+
+class GitDirtyFileItem(BaseModel):
+    """单文件改动条目（porcelain v2 四态；--no-renames 口径 rename 拆删+增两条）。"""
+
+    path: str = Field(..., description="仓库内相对路径（POSIX；空格/中文原样）")
+    status: GitDirtyFileStatus = Field(
+        ...,
+        description="added=新增/暂存新文件 / modified=修改（含 unmerged 冲突归类）/ deleted=删除 / untracked=未跟踪",
+    )
+    additions: int | None = Field(
+        ..., description="新增行数（numstat join；二进制与未跟踪文件为 null）"
+    )
+    deletions: int | None = Field(
+        ..., description="删除行数（numstat join；二进制与未跟踪文件为 null）"
+    )
+    binary: bool = Field(..., description="是否二进制文件（numstat 输出「-」时为 true）")
+
+
+class GitIgnoredItem(BaseModel):
+    """忽略条目（gitignore 顶层聚合，不递归展开目录内部）。"""
+
+    path: str = Field(..., description="仓库内相对路径（目录带尾「/」）")
+    is_dir: bool = Field(..., description="是否目录（node_modules/ 等整目录一行聚合）")
+
+
+class GitDirtyFilesResponse(BaseModel):
+    """GET /api/workspaces/{wid}/git-log/dirty-files 响应（工作区改动文件清单）。"""
+
+    git_mode: GitLogMode = Field(
+        ..., description="git=git 仓库 / no_git=非 git 工作区（空态，清单为空）"
+    )
+    head_short: str | None = Field(..., description="HEAD 短哈希（前 8 位；空仓库为 null）")
+    empty: bool = Field(..., description="是否空仓库（无任何提交，清单为空数组）")
+    files: list[GitDirtyFileItem] = Field(
+        ..., description="改动文件清单（四态，staged+unstaged 合并口径）"
+    )
+    ignored: list[GitIgnoredItem] = Field(..., description="忽略条目清单（顶层聚合）")
+
+
+class GitWorktreeDiffResponse(BaseModel):
+    """GET /api/workspaces/{wid}/git-log/worktree-diff 响应（单文件「工作区 vs 最近一次提交」）。"""
+
+    status: GitWorktreeDiffStatus = Field(
+        ...,
+        description="modified=修改 / added=新增（含未跟踪 no-index 全新增形态）/ deleted=删除",
+    )
+    head_short: str | None = Field(..., description="对比基线 HEAD 短哈希；空仓库为 null")
+    diff: str = Field(
+        ..., description="unified diff 文本（--unified=3 --no-color；二进制文件为空串）"
+    )
+    truncated: bool = Field(..., description="是否超 64KB 上限被截断")
+    binary: bool = Field(..., description="是否二进制文件（true 时前端直接提示「二进制文件」）")
