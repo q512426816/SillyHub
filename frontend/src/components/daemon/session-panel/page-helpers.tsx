@@ -432,7 +432,9 @@ export function enrichDisplayTurns(
     return ordered.map((t, i) => {
       if (t.configChangeLine) return t;
       const line = buildConfigChangeLine(
-        i > 0 ? ordered[i - 1].whoLine : null,
+        // noUncheckedIndexedAccess：i=0 时 ordered[-1] 为 undefined——?. 收窄
+        //（行为零变化：首轮本就传 null）。
+        i > 0 ? (ordered[i - 1]?.whoLine ?? null) : null,
         t.whoLine,
       );
       return line ? { ...t, configChangeLine: line } : t;

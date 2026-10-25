@@ -1,0 +1,35 @@
+tier: thin
+legacy_fallback: false
+substeps: {}
+born_face: thin
+with_tasks: false
+review_force: null
+input: >-
+  修复前端构建红态两处类型错误
+
+
+  动机与背景：并行变更 2026-10-25-session-config-deferred-switch 提交面带进两处类型错误致 next build 失败（main 红态、部署构建阻断）：page-helpers.tsx:435
+  TS2532（noUncheckedIndexedAccess 下 ordered[i-1] 可能为 undefined）；session-panel-variant.test.tsx:238 TS2322（unknown[] 不能赋给
+  LlmProviderRead[]）。均为类型层面修复，行为零变化（?. 与 as never[] 断言收口）。
+
+
+  成功标准：
+
+  - pnpm build 成功（Type error 归零）
+
+  - session-panel-variant.test.tsx 13 用例全绿
+
+  - 行为零变化：首轮 configChangeLine 前轮传 null 语义不变
+autopilot: false
+prestage_ack: true
+baseline_commit: dcbba025ed89cdf551695c0386c72e06e7b26020
+updatedAt: '2026-10-25T12:37:58.970Z'
+cross_baselines:
+  sillyspec: 67e50bcca2adb9ecd502d12086c0ac8cb994da84
+baseline_sha256: 62ed322d6a79830976f4ba7725a2c1a929a47b711e0b447dd367caf961556588
+spec_approved: true
+spec_approved_at: '2026-10-25T12:37:58.970Z'
+spec_approved_by: anon@DESKTOP-HJ0AM09
+spec_approved_channel: agent-self
+spec_attested_by: anon@DESKTOP-HJ0AM09
+

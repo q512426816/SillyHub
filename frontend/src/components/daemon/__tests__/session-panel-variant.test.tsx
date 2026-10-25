@@ -235,7 +235,7 @@ function setupPage(
         mode="page"
         sessionId="sess-variant"
         machines={[]}
-        llmProviders={opts?.llmProviders ?? ([] as never[])}
+        llmProviders={(opts?.llmProviders ?? []) as never[]}
         {...(variant ? { variant } : {})}
       />
     </QueryClientProvider>,
