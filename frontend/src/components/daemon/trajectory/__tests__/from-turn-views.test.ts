@@ -265,3 +265,55 @@ describe("system_event 派生为上下文行（2026-10-22-trajectory-context-jum
     );
   });
 });
+
+describe("turn_trigger 段派生与锚点（2026-10-24-trajectory-context-rows）", () => {
+  it("turn_trigger 段派生为上下文行：通知原文 + ts 锚点 + 不再标用户", () => {
+    const traj = trajectoryFromTurnViews([
+      makeTurn({
+        segments: seg(
+          {
+            kind: "turn_trigger",
+            id: "tt-1",
+            text: "[后台任务通知] 任务完成",
+            ts: START + 10_000,
+            trigger: "task_wakeup",
+          },
+          { kind: "thinking", id: "th-1", text: "想一下", streaming: false, ts: START + 20_000 },
+        ),
+      }),
+    ]);
+
+    const ctx = traj.rows.find((row) => row.meta?.contextEvent);
+    expect(ctx).toBeDefined();
+    expect(ctx!.kind).toBe("system");
+    expect(ctx!.outputText).toBe("[后台任务通知] 任务完成");
+    // ts 锚点生效：不再挤在轮首（turnStartedAt=START）。
+    expect(ctx!.startedAt).toBe(START + 10_000);
+    // 排序：上下文行（+10s）在 thinking（+20s）之前。
+    expect(ctx!.startedAt).toBeLessThan(
+      traj.rows.find((row) => row.kind === "thinking")!.startedAt,
+    );
+  });
+
+  it("user_msg 段保持「用户」行，锚点取 ts（不挤轮首）", () => {
+    const traj = trajectoryFromTurnViews([
+      makeTurn({
+        segments: seg(
+          {
+            kind: "user_msg",
+            id: "um-1",
+            text: "中途追问",
+            ts: START + 15_000,
+            phase: "delivered",
+          },
+        ),
+      }),
+    ]);
+
+    const um = traj.rows.find((row) => row.inputText === "中途追问");
+    expect(um).toBeDefined();
+    expect(um!.kind).toBe("user");
+    expect(um!.meta?.contextEvent).toBeUndefined();
+    expect(um!.startedAt).toBe(START + 15_000);
+  });
+});

@@ -59,7 +59,11 @@ function rowStatusOf(status: SessionTurnView["status"]): TrajectoryRowStatus {
   return "running";
 }
 
-/** 段类别 → 轨迹行类别（未识别段一律 system，不丢、不冒充正文）。 */
+/** 段类别 → 轨迹行类别（未识别段一律 system，不丢、不冒充正文）。
+ * 2026-10-24-trajectory-context-rows：turn_trigger（后台任务通知 / 自动续跑 /
+ * 群聊影子直聊来源 / 定时到点等轮触发源）改映射 system + meta.contextEvent
+ * （账本标签「上下文」，dsh「收到任务消息」同款形态）——DB 实证注入信息以
+ * user_input 落库、装配成 turn_trigger 段，此前误标「用户」行。 */
 function rowKindOf(segment: TurnSegment): TrajectoryRowKind {
   switch (segment.kind) {
     case "text":
@@ -72,8 +76,9 @@ function rowKindOf(segment: TurnSegment): TrajectoryRowKind {
     case "compact_status":
       return "compaction";
     case "user_msg":
-    case "turn_trigger":
       return "user";
+    case "turn_trigger":
+      return "system";
     case "file":
     case "stderr":
     case "preamble":
@@ -84,11 +89,13 @@ function rowKindOf(segment: TurnSegment): TrajectoryRowKind {
   }
 }
 
-/** 段的起始锚点（text 用 startedAt，thinking 用 ts，tool 用 startedAt）。 */
+/** 段的起始锚点：先 startedAt（text/tool），再回退 ts（thinking / stderr /
+ * user_msg / turn_trigger 等 ts 系段）——数字才采用，缺失由调用方落轮首。 */
 function segmentStart(segment: TurnSegment): number | null {
-  if (segment.kind === "thinking") return segment.ts ?? null;
   const start = (segment as { startedAt?: number | null }).startedAt;
-  return typeof start === "number" ? start : null;
+  if (typeof start === "number") return start;
+  const ts = (segment as { ts?: number | null }).ts;
+  return typeof ts === "number" ? ts : null;
 }
 
 /** 段的结束锚点（仅工具段有真实 end；其余零宽）。 */
@@ -204,6 +211,7 @@ export function trajectoryFromTurnViews(
                 ...(isTool && !toolSeg.result && toolSeg.primary
                   ? { resultFromPrimary: true }
                   : {}),
+                ...(segment.kind === "turn_trigger" ? { contextEvent: true } : {}),
               },
             }),
       });
