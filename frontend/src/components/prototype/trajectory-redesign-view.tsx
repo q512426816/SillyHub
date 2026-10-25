@@ -45,7 +45,10 @@ const KIND_CLASS: Record<Kind, string> = {
 };
 
 const ROWS: Row[] = [
-  { id: "r1", turn: 7, turnStart: true, kind: "user", summary: "继续收口，按评审意见修正后再跑 flow done" },
+  { id: "r0", turn: 7, turnStart: true, kind: "system", summary: "系统提示词已更新（档案 systemPrompt 配置段变更）" },
+  { id: "r0b", turn: 7, kind: "system", summary: "工具已更新（新增 2 个：mcp__sillyhub-daemon__dispatch_worker、mcp__sillyhub-daemon__get_worker_result）" },
+  { id: "r0c", turn: 7, kind: "context", summary: "团队派发 · 你是多 Agent 团队的主 agent（项目经理，role=orchestrator）…" },
+  { id: "r1", turn: 7, kind: "user", summary: "继续收口，按评审意见修正后再跑 flow done" },
   { id: "r2", turn: 7, kind: "assistant", summary: "（仅工具调用）" },
   {
     id: "r3",
