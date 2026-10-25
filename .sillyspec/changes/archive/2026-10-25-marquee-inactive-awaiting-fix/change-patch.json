@@ -1,0 +1,86 @@
+{
+  "change": "2026-10-25-marquee-inactive-awaiting-fix",
+  "baseline": "2b046d5d56f50bb9f8d2f3de357d766f72da6b9d",
+  "head": "3a1f4551fb083eb1cd2ef1ec56438fdcadf60c13",
+  "files": [
+    "frontend/src/components/daemon/__tests__/turn-live-marquee.test.tsx",
+    "frontend/src/components/daemon/__tests__/turn-segment-views.test.tsx",
+    "frontend/src/components/daemon/turn-live-marquee.tsx",
+    "frontend/src/components/daemon/turn-segment-views.tsx"
+  ],
+  "totals": {
+    "files": 4,
+    "additions": 55,
+    "deletions": 1
+  },
+  "savedAt": "2026-10-25T06:50:02.007Z",
+  "note": "flow done 时点冻结（本变更可归属交付面：baseline..HEAD 提交面过滤 .sillyspec/ 只留 .sillyspec/docs/ 交付文档 + 独占树未提交交付；治理工件目录不入冻结——2026-10-12-close-trace-freeze-integrity FR-01）",
+  "modules": [
+    {
+      "id": "frontend",
+      "files": 4,
+      "doc": "docs/multi-agent-platform/modules/frontend.md",
+      "docTouched": false,
+      "docMissing": false
+    },
+    {
+      "id": "frontend_components",
+      "files": 4,
+      "doc": "docs/SillyHub/modules/frontend_components.md",
+      "docTouched": false,
+      "docMissing": false
+    }
+  ],
+  "uncoveredDirs": [],
+  "moduleMaps": [
+    "docs/backend/modules/_module-map.yaml",
+    "docs/frontend/modules/_module-map.yaml",
+    "docs/multi-agent-platform/modules/_module-map.yaml",
+    "docs/SillyHub/modules/_module-map.yaml",
+    "docs/sillyhub-daemon/modules/_module-map.yaml"
+  ],
+  "scopeAudit": {
+    "mode": "full-flow",
+    "ok": true,
+    "degradedReason": null,
+    "baseAnchor": "2b046d5d56f50bb9f8d2f3de357d766f72da6b9d",
+    "totals": {
+      "files": 4,
+      "additions": 55,
+      "deletions": 1
+    },
+    "rows": [
+      {
+        "path": "frontend/src/components/daemon/__tests__/turn-live-marquee.test.tsx",
+        "additions": 11,
+        "deletions": 0,
+        "kind": "modified"
+      },
+      {
+        "path": "frontend/src/components/daemon/__tests__/turn-segment-views.test.tsx",
+        "additions": 32,
+        "deletions": 0,
+        "kind": "modified"
+      },
+      {
+        "path": "frontend/src/components/daemon/turn-live-marquee.tsx",
+        "additions": 9,
+        "deletions": 1,
+        "kind": "modified"
+      },
+      {
+        "path": "frontend/src/components/daemon/turn-segment-views.tsx",
+        "additions": 3,
+        "deletions": 0,
+        "kind": "modified"
+      }
+    ],
+    "excluded": {
+      "foreignDeclared": []
+    },
+    "note": "flow done 时点冻结（本文件落盘时采集）",
+    "closedBy": "flow done"
+  },
+  "patchSha256": "d8871aa8b66afe69a9f8af84c06a413571d026d3dc311e003a032287667e0b6a",
+  "patchStatus": "ok"
+}

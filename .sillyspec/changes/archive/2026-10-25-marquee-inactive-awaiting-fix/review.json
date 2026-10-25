@@ -1,0 +1,15 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-25-marquee-inactive-awaiting-fix",
+  "reviewer": "inline-self（环境无已注册子代理，主会话代行）",
+  "verdict": "PASS",
+  "reviewedAgainst": "bbe178e32a92982c2d82ec6abcc92e076402d132",
+  "findings": [],
+  "dimensionNotes": {
+    "乱序": "ok（边界已裁决：可接受——active 取卡片自身状态，终态后迟到 children 更新只影响条目内容，不复活等待条目）",
+    "并发": "ok（不适用——纯展示开关，无写面）",
+    "切换": "ok（边界已裁决：可接受——running→终态翻转时 active 变 false，等待条目卸载、interval 既有 cleanup 释放；外部跑马灯默认 active 零变化）",
+    "作用域": "ok（不适用——不涉及数据；每卡片实例独立）"
+  },
+  "reviewedAt": "2026-10-25T14:48:59+08:00"
+}

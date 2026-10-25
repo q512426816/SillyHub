@@ -1,0 +1,114 @@
+diff --git a/frontend/src/components/daemon/__tests__/turn-live-marquee.test.tsx b/frontend/src/components/daemon/__tests__/turn-live-marquee.test.tsx
+index b9f1e0cb5..1f8b34c17 100644
+--- a/frontend/src/components/daemon/__tests__/turn-live-marquee.test.tsx
++++ b/frontend/src/components/daemon/__tests__/turn-live-marquee.test.tsx
+@@ -438,6 +438,17 @@ describe("TurnLiveMarquee 连续轨道（FR-01 / FR-02 / FR-05）", () => {
+     expect(elapsed.textContent).toMatch(/\d+(ms|s)/);
+   });
+ 
++  it("active=false 时不显示等待条目（FR-01）", () => {
++    const { queryByTestId } = render(
++      <TurnLiveMarquee
++        active={false}
++        entries={deriveLiveMarqueeEntries([thinking("t-done", "思考完成")])}
++      />,
++    );
++
++    expect(queryByTestId("marquee-awaiting")).toBeNull();
++  });
++
+   it("无条目时不渲染空壳", () => {
+     const { queryByTestId } = render(<TurnLiveMarquee entries={[]} />);
+     expect(queryByTestId("turn-live-marquee")).toBeNull();
+diff --git a/frontend/src/components/daemon/__tests__/turn-segment-views.test.tsx b/frontend/src/components/daemon/__tests__/turn-segment-views.test.tsx
+index fa94848c5..16703c7bb 100644
+--- a/frontend/src/components/daemon/__tests__/turn-segment-views.test.tsx
++++ b/frontend/src/components/daemon/__tests__/turn-segment-views.test.tsx
+@@ -1044,6 +1044,38 @@ describe("SubagentBlockView 子代理块", () => {
+     expect(document.querySelectorAll(".seg-subagent-body").length).toBe(0);
+   });
+ 
++  it("终态子代理卡片内嵌流动条无等待条目（FR-02，2026-10-25 修复）", () => {
++    const seg = makeToolSeg({
++      id: "call_done",
++      toolName: "Agent",
++      primary: "已完成的调研",
++      subagentType: "research",
++      startedAt: 1_000,
++      endedAt: 4_000,
++      status: "ok",
++      children: [
++        {
++          kind: "tool",
++          id: "call_inner_done",
++          raw: "",
++          status: "ok",
++          toolName: "Grep",
++          primary: "src/**",
++          startedAt: 1_200,
++          endedAt: 2_400,
++          children: [],
++          subagentType: null,
++        },
++      ],
++    });
++    render(<SubagentBlockView segment={seg} />);
++    const marquee = document.querySelector('[data-testid="subagent-live-marquee"]');
++    // 流动条存在（内部工具 + 总耗时），但无「等待模型响应」假等待（子代理已终态）。
++    expect(marquee).not.toBeNull();
++    expect(marquee?.textContent).toContain("搜索");
++    expect(marquee?.textContent).not.toContain("等待模型响应");
++  });
++
+   it("无 children 不渲染内嵌流动条（FR-05）", () => {
+     const seg = makeToolSeg({
+       id: "call_bare",
+diff --git a/frontend/src/components/daemon/turn-live-marquee.tsx b/frontend/src/components/daemon/turn-live-marquee.tsx
+index 53a0964c3..d5abd5f18 100644
+--- a/frontend/src/components/daemon/turn-live-marquee.tsx
++++ b/frontend/src/components/daemon/turn-live-marquee.tsx
+@@ -605,6 +605,12 @@ export interface TurnLiveMarqueeProps {
+   layout?: "bar" | "inline";
+   /** 根节点 data-testid（缺省 turn-live-marquee；inline 场景用独立 id 消歧）。 */
+   testId?: string;
++  /**
++   * 宿主是否仍在进行（2026-10-25-marquee-inactive-awaiting-fix / FR-01，默认 true）。
++   * false = 宿主已终态（如已完成的子代理卡片）：不追加「等待模型响应」合成条目、
++   * 等待计时不启动——等待指示只属于仍在运行的宿主。
++   */
++  active?: boolean;
+ }
+ 
+ /**
+@@ -618,6 +624,7 @@ export const TurnLiveMarquee = memo(function TurnLiveMarquee({
+   reducedMotion,
+   layout = "bar",
+   testId,
++  active = true,
+ }: TurnLiveMarqueeProps) {
+   const prefersReduced = usePrefersReducedMotion();
+   const reduced = reducedMotion ?? prefersReduced;
+@@ -691,7 +698,8 @@ export const TurnLiveMarquee = memo(function TurnLiveMarquee({
+   // entries / 计时 Map / 窗口滑动检测）。
+   const awaitingSinceRef = useRef<number | null>(null);
+   const [awaitingElapsedMs, setAwaitingElapsedMs] = useState(0);
+-  const isAwaiting = latest != null && latest.status !== "running";
++  // 等待条目仅在宿主仍在进行时出现（终态卡片不得假等——FR-01）。
++  const isAwaiting = active && latest != null && latest.status !== "running";
+   const awaitingKey = `${latest?.id ?? "none"}:${latest?.status ?? "none"}`;
+ 
+   useEffect(() => {
+diff --git a/frontend/src/components/daemon/turn-segment-views.tsx b/frontend/src/components/daemon/turn-segment-views.tsx
+index 79fe608cc..e291ccb99 100644
+--- a/frontend/src/components/daemon/turn-segment-views.tsx
++++ b/frontend/src/components/daemon/turn-segment-views.tsx
+@@ -1031,6 +1031,9 @@ export const SubagentBlockView = memo(function SubagentBlockView({
+           layout="inline"
+           testId="subagent-live-marquee"
+           entries={inlineEntries}
++          // 子代理终态后不再显示「等待模型响应」（2026-10-25 修复：等待只属于
++          // 仍在运行的宿主；终态条目显示总耗时）。
++          active={running}
+         />
+       </div>
+     ) : null;

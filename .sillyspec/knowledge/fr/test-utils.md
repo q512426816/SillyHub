@@ -1388,3 +1388,67 @@ created_at: 2026-10-16T01:30:35.950Z
   confirmed_at: null
   source_change: 2026-10-25-askuser-keyword-overkill-fix
   status: active
+
+## FR-test-utils-071 TurnLiveMarquee 新增 active 属性（默认 true）：active=false 时不再追加「等待模型响应」合成条目，走秒 tick 也不为等待而启动
+变更：2026-10-25-marquee-inactive-awaiting-fix
+状态：active
+摘要：终态宿主
+全文：.sillyspec/changes/archive/2026-10-25-marquee-inactive-awaiting-fix/requirements.md#FR-01
+最近确认：3a1f4551fb083eb1cd2ef1ec56438fdcadf60c13
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-25-marquee-inactive-awaiting-fix:flow:测试绑定FR-01
+  tests: frontend/src/components/daemon/__tests__/turn-live-marquee.test.tsx「active=false 时不显示等待条目（FR-01）」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-25-marquee-inactive-awaiting-fix
+  status: active
+
+## FR-test-utils-072 SubagentBlockView 按卡片自身运行态传 active：子代理终态后内嵌流动条无等待条目、无转圈；运行中行为不变
+变更：2026-10-25-marquee-inactive-awaiting-fix
+状态：active
+摘要：子代理结束
+全文：.sillyspec/changes/archive/2026-10-25-marquee-inactive-awaiting-fix/requirements.md#FR-02
+最近确认：3a1f4551fb083eb1cd2ef1ec56438fdcadf60c13
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-25-marquee-inactive-awaiting-fix:flow:测试绑定FR-02
+  tests: frontend/src/components/daemon/__tests__/turn-segment-views.test.tsx「终态子代理卡片内嵌流动条无等待条目（FR-02）」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-25-marquee-inactive-awaiting-fix
+  status: active
+
+## FR-test-utils-073 外部会话跑马灯不传 active，行为零变化
+变更：2026-10-25-marquee-inactive-awaiting-fix
+状态：active
+摘要：外部零回归
+全文：.sillyspec/changes/archive/2026-10-25-marquee-inactive-awaiting-fix/requirements.md#FR-03
+最近确认：3a1f4551fb083eb1cd2ef1ec56438fdcadf60c13
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-25-marquee-inactive-awaiting-fix:flow:测试绑定FR-03
+  tests: frontend/src/components/daemon/__tests__/turn-live-marquee.test.tsx「最新条目非运行中时出现等待模型响应条目」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-25-marquee-inactive-awaiting-fix
+  status: active
+
+## FR-test-utils-074 新增终态不显示等待条目用例；现有全部用例通过；lint与typecheck通过
+变更：2026-10-25-marquee-inactive-awaiting-fix
+状态：active
+摘要：回归核验
+全文：.sillyspec/changes/archive/2026-10-25-marquee-inactive-awaiting-fix/requirements.md#FR-04
+最近确认：3a1f4551fb083eb1cd2ef1ec56438fdcadf60c13

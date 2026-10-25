@@ -1,0 +1,51 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-25-marquee-inactive-awaiting-fix",
+  "rows": [
+    {
+      "anchor": "FR-01",
+      "row_id": "2026-10-25-marquee-inactive-awaiting-fix:flow:测试绑定FR-01",
+      "tests": [
+        "frontend/src/components/daemon/__tests__/turn-live-marquee.test.tsx「active=false 时不显示等待条目（FR-01）」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-25-marquee-inactive-awaiting-fix"
+    },
+    {
+      "anchor": "FR-02",
+      "row_id": "2026-10-25-marquee-inactive-awaiting-fix:flow:测试绑定FR-02",
+      "tests": [
+        "frontend/src/components/daemon/__tests__/turn-segment-views.test.tsx「终态子代理卡片内嵌流动条无等待条目（FR-02）」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-25-marquee-inactive-awaiting-fix"
+    },
+    {
+      "anchor": "FR-03",
+      "row_id": "2026-10-25-marquee-inactive-awaiting-fix:flow:测试绑定FR-03",
+      "tests": [
+        "frontend/src/components/daemon/__tests__/turn-live-marquee.test.tsx「最新条目非运行中时出现等待模型响应条目」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-25-marquee-inactive-awaiting-fix"
+    }
+  ]
+}
