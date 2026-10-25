@@ -1,0 +1,22 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-25-marquee-subagent-outer-only",
+  "reviewer": "inline-self（环境无已注册子代理，主会话代行）",
+  "verdict": "PASS",
+  "reviewedAgainst": "dff2a5bf6b23af23f11c17f0a3068b23822d120a",
+  "findings": [
+    {
+      "severity": "P3",
+      "title": "走秒计时挂载后渲染的判定与子代理卡片行为依赖真码原型核验，jsdom 仅覆盖纯函数与结构",
+      "evidence": "原型实测：innerLeak 为空（子代理内部工具不出现）、容器条目显示 3.8s 总耗时、运行中思考走秒 2.0s、无 hydration 错误（elapsedMounted 门控后消除首验的 mismatch）；子代理卡片路径零改动由 diff 范围保证。",
+      "location": "frontend/src/components/daemon/turn-live-marquee.tsx:700"
+    }
+  ],
+  "dimensionNotes": {
+    "乱序": "ok（边界已裁决：可接受——容器条目独立于内部顺序；计时起点用段 startedAt 或客户端首次观察时刻，与事件顺序无关）",
+    "并发": "ok（不适用——1s tick 与计时起点均为组件内存，无共享写面）",
+    "切换": "ok（边界已裁决：可接受——interval cleanup；elapsed 挂载后渲染避免 SSR 水合不一致；attach 场景 startedAt 为挂钟差值即真实已运行时长）",
+    "作用域": "ok（不适用——不涉及数据；derive 行为变化仅限外部跑马灯，子代理卡片路径零改动）"
+  },
+  "reviewedAt": "2026-10-25T10:17:04+08:00"
+}
