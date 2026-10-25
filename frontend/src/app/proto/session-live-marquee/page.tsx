@@ -39,7 +39,8 @@ const SCRIPT: ReadonlyArray<(_seq: number) => TurnSegment> = [
     id: `think-${n}`,
     text: "先读登录链路，确认超时发生在前端还是网关；同时检查 token 刷新是否吞掉了错误，再决定补重试还是修 keepalive。",
     streaming: false,
-    ts: n,
+    // 原型无真实挂钟时间戳：thinking 计时走客户端起点兜底（ts 留 null）。
+    ts: null,
   }),
   (n) => ({
     kind: "tool",
@@ -107,7 +108,7 @@ const SCRIPT: ReadonlyArray<(_seq: number) => TurnSegment> = [
     id: `think2-${n}`,
     text: "网关 keepalive 60s、应用侧 30s，确认是连接提前回收；补重试窗口并统一刷新策略。",
     streaming: false,
-    ts: n,
+    ts: null,
   }),
   (n) => ({
     kind: "tool",
@@ -154,7 +155,7 @@ const SCRIPT: ReadonlyArray<(_seq: number) => TurnSegment> = [
     id: `think3-${n}`,
     text: "测试通过，整理变更说明并向用户汇报结果。",
     streaming: false,
-    ts: n,
+    ts: null,
   }),
 ];
 
@@ -178,7 +179,7 @@ function buildSegments(step: number, liveThinking: boolean): TurnSegment[] {
     id: "live-thinking",
     text: `正在核对 keepalive 与重试窗口的配合：网关 keepalive 为 60 秒，而应用侧请求超时只有 30 秒，长轮询场景下连接可能被提前回收；接着检查 token 刷新请求是否复用了同一套重试策略，确认失败后不会直接跳转登录页；再核对重试窗口、退避间隔与幂等键，避免重复提交；随后对比修复前后的连接回收日志，确认长轮询不再被网关提前断开；最后补齐回归测试并整理变更说明。（第 ${step + 1} 次刷新）`,
     streaming: liveThinking,
-    ts: total * 1000,
+    ts: null,
   });
   return out;
 }

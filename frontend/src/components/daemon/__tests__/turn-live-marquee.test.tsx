@@ -143,7 +143,7 @@ describe("deriveLiveMarqueeEntries 纯函数（FR-01 / FR-03）", () => {
     expect(done[0]!.status).toBe("done");
   });
 
-  it("子代理内部工具递归进入同一轨道（FR-01）", () => {
+  it("子代理内部工具不进入外部轨道，仅容器条目（FR-01）", () => {
     const entries = deriveLiveMarqueeEntries([
       tool("agent-1", {
         toolName: "Agent",
@@ -153,9 +153,11 @@ describe("deriveLiveMarqueeEntries 纯函数（FR-01 / FR-03）", () => {
       }),
     ]);
 
-    expect(entries.map((e) => e.id)).toEqual(["agent-1", "agent-1/inner-1"]);
+    // 2026-10-25-marquee-subagent-outer-only：外部只保留容器条目，
+    // 内部消息由对话流子代理卡片（SubagentBlockView）展示。
+    expect(entries.map((e) => e.id)).toEqual(["agent-1"]);
     expect(entries[0]!.icon).toBe("subagent");
-    expect(entries[1]!.text).toContain("keepalive");
+    expect(entries[0]!.text).toContain("排查后端超时");
   });
 
   it("长思考文本不截断，保留完整内容（FR-01）", () => {
@@ -389,6 +391,51 @@ describe("TurnLiveMarquee 连续轨道（FR-01 / FR-02 / FR-05）", () => {
       />,
     );
     expect(queryByTestId("marquee-awaiting")).toBeNull();
+  });
+
+  it("运行中条目显示走秒计时（FR-02）", async () => {
+    const nowSpy = vi.spyOn(Date, "now").mockReturnValue(10_000);
+    try {
+      const { getByTestId } = render(
+        <TurnLiveMarquee
+          entries={deriveLiveMarqueeEntries([
+            tool("tool-run", { status: "running", endedAt: null, startedAt: 6000 }),
+          ])}
+        />,
+      );
+
+      const item = getByTestId("marquee-item");
+      // elapsed 在挂载后渲染（SSR/水合一致门控），waitFor 等待出现。
+      const elapsed = await waitFor(() => {
+        const el = item.querySelector('[data-testid="marquee-running-elapsed"]');
+        expect(el).not.toBeNull();
+        return el as HTMLElement;
+      });
+      expect(elapsed.textContent).toContain("4s");
+    } finally {
+      nowSpy.mockRestore();
+    }
+  });
+
+  it("无段起点的运行中条目用客户端起点计时（FR-02）", async () => {
+    const { getByTestId } = render(
+      <TurnLiveMarquee
+        entries={deriveLiveMarqueeEntries([
+          { kind: "thinking", id: "t-none", text: "正在思考", streaming: true, ts: null },
+        ])}
+      />,
+    );
+
+    const item = getByTestId("marquee-item");
+    expect(item.querySelector('[data-testid="marquee-spinner"]')).not.toBeNull();
+    // 段无 startedAt → 组件以首次观察到 running 的客户端时刻为起点，
+    // 1s tick 后显示走秒计时（防御路径：两者皆无才只转圈）。
+    const elapsed = await waitFor(() => {
+      const el = item.querySelector('[data-testid="marquee-running-elapsed"]');
+      expect(el).not.toBeNull();
+      return el as HTMLElement;
+    });
+    expect(elapsed.textContent).toMatch(/\d+(ms|s)/);
   });
 
   it("无条目时不渲染空壳", () => {

@@ -251,8 +251,9 @@ function collectEntries(
           endedAt: seg.endedAt,
           durationMs: segmentDuration(seg.startedAt, seg.endedAt),
         });
-        // 子代理内部工具同样进入流（「全部过程信息」）。
-        collectEntries(seg.children, out, `${prefix}${seg.id}/`);
+        // 2026-10-25-marquee-subagent-outer-only（FR-01）：子代理内部消息不再
+        // 进入外部轨道（用户裁决：外部只显示容器条目，内部消息留在对话流
+        // 的子代理卡片 SubagentBlockView 内展示——该路径零改动）。
         break;
       }
       case "subagent_stub":
@@ -265,7 +266,6 @@ function collectEntries(
           endedAt: null,
           durationMs: null,
         });
-        collectEntries(seg.children, out, `${prefix}${seg.id}/`);
         break;
       case "stderr":
         out.push({
@@ -433,12 +433,15 @@ function MarqueeItemView({
   reduced,
   fixedWidth = true,
   testId = "marquee-item",
+  runningElapsedMs,
 }: {
   entry: LiveMarqueeEntry;
   durationMs: number | null;
   reduced: boolean;
   fixedWidth?: boolean;
   testId?: string;
+  /** 运行中已耗时（FR-02/FR-03，2026-10-25-marquee-subagent-outer-only）；无起点为 null（只转圈）。 */
+  runningElapsedMs?: number | null;
 }) {
   const running = entry.status === "running";
   const Icon = ICON_COMPONENTS[entry.icon];
@@ -555,14 +558,25 @@ function MarqueeItemView({
         )}
       </span>
       {running ? (
-        <span
-          aria-hidden
-          data-testid="marquee-spinner"
-          className={cn(
-            "h-3 w-3 shrink-0 rounded-full border-2 border-primary/25 border-t-primary",
-            !reduced && "animate-spin",
+        <span className="flex shrink-0 items-center gap-1">
+          <span
+            aria-hidden
+            data-testid="marquee-spinner"
+            className={cn(
+              "h-3 w-3 shrink-0 rounded-full border-2 border-primary/25 border-t-primary",
+              !reduced && "animate-spin",
+            )}
+          />
+          {runningElapsedMs != null && (
+            <span
+              data-testid="marquee-running-elapsed"
+              className="flex items-center gap-0.5 text-[10.5px] tabular-nums text-muted-foreground"
+            >
+              <Timer aria-hidden className="h-3 w-3" />
+              {formatMarqueeDuration(runningElapsedMs)}
+            </span>
           )}
-        />
+        </span>
       ) : durationMs != null ? (
         <span
           data-testid="marquee-duration"
@@ -702,6 +716,29 @@ export const TurnLiveMarquee = memo(function TurnLiveMarquee({
         }
       : null;
   const displayEntries = awaitingEntry != null ? [...entries, awaitingEntry] : entries;
+
+  // 2026-10-25-marquee-subagent-outer-only（FR-02/FR-03）：运行中条目走秒计时。
+  // 起点：段 startedAt（挂钟，attach 场景为真实已运行时长）优先，缺省用组件
+  // 首次观察到 running 的客户端时刻；两者皆无 → 只转圈不显示时间（不伪造）。
+  const [nowTs, setNowTs] = useState(() => Date.now());
+  const [elapsedMounted, setElapsedMounted] = useState(false);
+  const hasRunning = entries.some((entry) => entry.status === "running");
+  useEffect(() => {
+    setElapsedMounted(true);
+  }, []);
+  useEffect(() => {
+    if (!hasRunning && !isAwaiting) return;
+    const timer = window.setInterval(() => setNowTs(Date.now()), 1000);
+    return () => window.clearInterval(timer);
+  }, [hasRunning, isAwaiting]);
+
+  const runningElapsedFor = (entry: LiveMarqueeEntry): number | null => {
+    if (entry.status !== "running" || entry.id === "marquee-awaiting") return null;
+    if (!elapsedMounted) return null;
+    const startedAt =
+      entry.startedAt ?? runtimeStartsRef.current.get(entry.id) ?? null;
+    return startedAt != null ? Math.max(0, nowTs - startedAt) : null;
+  };
 
   /**
    * 计算目标位置：内容右端贴视口右缘（即显示最新条）；内容不满一屏时 0。
@@ -855,6 +892,7 @@ export const TurnLiveMarquee = memo(function TurnLiveMarquee({
               ? null
               : (latest.durationMs ?? runtimeDurations[latest.id] ?? null)
           }
+          runningElapsedMs={awaitingEntry != null ? null : runningElapsedFor(latest)}
           reduced
           fixedWidth={false}
           testId={awaitingEntry != null ? "marquee-awaiting" : "marquee-item"}
@@ -878,6 +916,7 @@ export const TurnLiveMarquee = memo(function TurnLiveMarquee({
                 key={entry.id}
                 entry={entry}
                 durationMs={entry.durationMs ?? runtimeDurations[entry.id] ?? null}
+                runningElapsedMs={runningElapsedFor(entry)}
                 reduced={false}
                 testId={entry.id === "marquee-awaiting" ? "marquee-awaiting" : "marquee-item"}
               />

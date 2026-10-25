@@ -1,0 +1,31 @@
+tier: thin
+legacy_fallback: false
+substeps: {}
+born_face: thin
+with_tasks: false
+review_force: null
+input: |-
+  跑马灯外部只显示子代理容器条目
+
+  动机：子代理内部消息目前也进入外部跑马灯刷屏；用户希望外部只显示子代理名称+运行状态+时间，内部消息留在对话流的子代理卡片内展示。
+
+  成功标准：
+  - 外部跑马灯不再收集子代理内部消息：tool 带 children 与 subagent_stub 分支都不递归 children，仅保留容器条目
+  - 子代理容器条目显示名称、运行状态（转圈）与时间：运行中显示走秒计时（优先用段 startedAt，缺省用客户端首次观察起点），完成后显示总耗时
+  - 工具条目同样获得运行中走秒计时；无起点数据时只转圈不显示时间
+  - 子代理内部消息继续在对话流子代理卡片内展示（现有行为不变）
+  - 更新子代理递归相关测试并新增走秒计时用例，全部通过；lint与typecheck通过
+  - 原型核验：外部只出现子代理容器条目，内部工具不出现
+autopilot: false
+prestage_ack: true
+baseline_commit: 314fed54ead4bc7dd385b9084cf1082d140f07ce
+updatedAt: '2026-10-25T02:08:49.309Z'
+cross_baselines:
+  sillyspec: e26546db6247f7b07df5e68583ab7e5a041d9014
+baseline_sha256: 63ea929f41c170004dbb771671fc956ebf7cff51852da8fbeb625225987e555e
+spec_approved: true
+spec_approved_at: '2026-10-25T02:08:49.309Z'
+spec_approved_by: anon@DESKTOP-HJ0AM09
+spec_approved_channel: user-confirmed
+spec_attested_by: anon@DESKTOP-HJ0AM09
+
