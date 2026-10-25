@@ -611,6 +611,17 @@ export interface TurnLiveMarqueeProps {
    * 等待计时不启动——等待指示只属于仍在运行的宿主。
    */
   active?: boolean;
+  /**
+   * 最后事件的服务端毫秒时间戳（2026-10-25-marquee-awaiting-real-data / FR-01）。
+   * 等待计时起点优先取它（Date.now() - lastEventAt）——刷新/中途打开后等待时长
+   * 继续累计不重置；缺省回退客户端首次观察起点。
+   */
+  lastEventAt?: number | null;
+  /**
+   * 本轮累计 token（FR-02；来自 tokens 事件实时更新的轮级 inputTokens/outputTokens）。
+   * 等待条目回显「↑输入 ↓输出」；两值皆 null / 缺省不显示 token 段。
+   */
+  turnTokens?: { input: number | null; output: number | null } | null;
 }
 
 /**
@@ -625,6 +636,8 @@ export const TurnLiveMarquee = memo(function TurnLiveMarquee({
   layout = "bar",
   testId,
   active = true,
+  lastEventAt,
+  turnTokens,
 }: TurnLiveMarqueeProps) {
   const prefersReduced = usePrefersReducedMotion();
   const reduced = reducedMotion ?? prefersReduced;
@@ -698,35 +711,60 @@ export const TurnLiveMarquee = memo(function TurnLiveMarquee({
   // entries / 计时 Map / 窗口滑动检测）。
   const awaitingSinceRef = useRef<number | null>(null);
   const [awaitingElapsedMs, setAwaitingElapsedMs] = useState(0);
+  // 数值段（时长/token）挂载后渲染——SSR/水合首帧只渲染骨架文案，避免
+  // Date.now 派生值的服务端/客户端不一致（同 runningElapsed 的 elapsedMounted 门控）。
+  const [awaitingMounted, setAwaitingMounted] = useState(false);
+  useEffect(() => {
+    setAwaitingMounted(true);
+  }, []);
   // 等待条目仅在宿主仍在进行时出现（终态卡片不得假等——FR-01）。
   const isAwaiting = active && latest != null && latest.status !== "running";
   const awaitingKey = `${latest?.id ?? "none"}:${latest?.status ?? "none"}`;
 
+  // 2026-10-25-marquee-awaiting-real-data（FR-01）：等待起点优先最后事件的
+  // 服务端时间戳——刷新/中途打开后等待时长继续累计不重置；缺省回退客户端
+  // 首次观察起点（旧数据/无时间戳）。
+  const awaitingAnchor = (): number | null =>
+    lastEventAt ?? awaitingSinceRef.current ?? null;
+
   useEffect(() => {
     if (isAwaiting) {
-      // 新的已完成条目到达（latest.id 变化）= 新间隙开始，从头计时。
+      // 新的已完成条目到达（latest.id 变化）= 新间隙开始，客户端兜底起点重记。
       awaitingSinceRef.current = Date.now();
-      setAwaitingElapsedMs(0);
+      const anchor = awaitingAnchor();
+      setAwaitingElapsedMs(anchor != null ? Math.max(0, Date.now() - anchor) : 0);
     } else {
       awaitingSinceRef.current = null;
     }
-  }, [isAwaiting, awaitingKey]);
+    // awaitingAnchor 读 lastEventAt / ref——不进依赖（ref 可变引用），lastEventAt
+    // 变化即新事件到达，isAwaiting/awaitingKey 随之翻转触发本 effect。
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isAwaiting, awaitingKey, lastEventAt]);
 
   useEffect(() => {
     if (!isAwaiting) return;
     const timer = window.setInterval(() => {
-      const since = awaitingSinceRef.current;
-      if (since != null) setAwaitingElapsedMs(Math.max(0, Date.now() - since));
+      const anchor = awaitingAnchor();
+      if (anchor != null) setAwaitingElapsedMs(Math.max(0, Date.now() - anchor));
     }, 1000);
     return () => window.clearInterval(timer);
-  }, [isAwaiting, awaitingKey]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isAwaiting, awaitingKey, lastEventAt]);
 
+  // FR-02：本轮累计 token 段（tokens 事件实时更新；两值皆 null 不显示——旧 daemon/早期）。
+  const tokenSuffix =
+    turnTokens != null && (turnTokens.input != null || turnTokens.output != null)
+      ? ` · ↑${(turnTokens.input ?? 0).toLocaleString("zh-CN")} ↓${(turnTokens.output ?? 0).toLocaleString("zh-CN")}`
+      : "";
   const awaitingEntry: LiveMarqueeEntry | null =
     isAwaiting && latest != null
       ? {
           id: "marquee-awaiting",
           icon: "awaiting",
-          text: `等待模型响应 · ${formatMarqueeDuration(awaitingElapsedMs)}`,
+          // 数值段挂载后渲染（awaitingMounted）：SSR 首帧骨架，客户端水合后填时长/token。
+          text: awaitingMounted
+            ? `等待模型响应 · ${formatMarqueeDuration(awaitingElapsedMs)}${tokenSuffix}`
+            : "等待模型响应…",
           status: "running",
           startedAt: null,
           endedAt: null,

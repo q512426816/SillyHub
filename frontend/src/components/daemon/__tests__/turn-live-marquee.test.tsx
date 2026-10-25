@@ -449,6 +449,53 @@ describe("TurnLiveMarquee 连续轨道（FR-01 / FR-02 / FR-05）", () => {
     expect(queryByTestId("marquee-awaiting")).toBeNull();
   });
 
+  it("lastEventAt 服务端起点：挂载即累计、不重置（FR-01）", async () => {
+    const nowSpy = vi.spyOn(Date, "now").mockReturnValue(50_000);
+    try {
+      const { getByTestId } = render(
+        <TurnLiveMarquee
+          // 最后事件发生在 40s 前（服务端时间戳 10_000）。
+          lastEventAt={10_000}
+          entries={deriveLiveMarqueeEntries([
+            tool("tool-done", { startedAt: 5_000, endedAt: 10_000 }),
+          ])}
+        />,
+      );
+
+      const awaiting = getByTestId("marquee-awaiting");
+      // 挂载后数值段渲染：等待 ≈ 40s（服务端起点，不从 0 重置）。
+      await waitFor(() => {
+        expect(awaiting.textContent).toContain("40s");
+      });
+    } finally {
+      nowSpy.mockRestore();
+    }
+  });
+
+  it("等待条目回显本轮 token；无数据不显示（FR-02）", async () => {
+    const { getByTestId, rerender } = render(
+      <TurnLiveMarquee
+        turnTokens={{ input: 8400, output: 1250 }}
+        entries={deriveLiveMarqueeEntries([thinking("t-done", "思考完成")])}
+      />,
+    );
+    const awaiting = getByTestId("marquee-awaiting");
+    await waitFor(() => {
+      expect(awaiting.textContent).toContain("↑8,400 ↓1,250");
+    });
+
+    // 两值皆 null → 不显示 token 段。
+    rerender(
+      <TurnLiveMarquee
+        turnTokens={{ input: null, output: null }}
+        entries={deriveLiveMarqueeEntries([thinking("t-done", "思考完成")])}
+      />,
+    );
+    await waitFor(() => {
+      expect(getByTestId("marquee-awaiting").textContent).not.toContain("↑");
+    });
+  });
+
   it("无条目时不渲染空壳", () => {
     const { queryByTestId } = render(<TurnLiveMarquee entries={[]} />);
     expect(queryByTestId("turn-live-marquee")).toBeNull();

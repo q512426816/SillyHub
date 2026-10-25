@@ -1128,6 +1128,13 @@ const TurnRow = memo(function TurnRow({
                   dialogHistory={dialogHistory}
                   markerAnswered={hasLaterUserMessage}
                   onMarkerSubmit={onResend}
+                  // 2026-10-25-marquee-awaiting-real-data（FR-03）：轮级 token +
+                  // 最后事件服务端时间戳——等待条目回显真实计时与本轮累计 token。
+                  turnTokens={
+                    turn.inputTokens != null || turn.outputTokens != null
+                      ? { input: turn.inputTokens, output: turn.outputTokens }
+                      : null
+                  }
                   />
                 </>
               ) : (
@@ -2247,6 +2254,7 @@ function SegmentedTurnBody({
   dialogHistory,
   markerAnswered,
   onMarkerSubmit,
+  turnTokens,
 }: {
   segments: TurnSegment[];
   turnStatus: TurnUiStatus;
@@ -2259,6 +2267,8 @@ function SegmentedTurnBody({
   markerAnswered: boolean;
   /** task-07：marker 提问卡提交回调（答案作下一条用户消息，父级传 onResend）。 */
   onMarkerSubmit: (_prompt: string) => void;
+  /** 2026-10-25-marquee-awaiting-real-data：轮级累计 token（tokens 事件实时更新）。 */
+  turnTokens?: { input: number | null; output: number | null } | null;
 }) {
   const turnDialogs = useMemo(
     () => dialogHistory.filter((d) => d.run_id === runKey),
@@ -2287,6 +2297,17 @@ function SegmentedTurnBody({
         : [],
     [viewMode, turnStatus, segments],
   );
+  // 2026-10-25-marquee-awaiting-real-data（FR-01）：最后事件服务端时间戳——
+  // 等待计时真实锚点（刷新/中途打开不重置）。取条目三时刻最大值。
+  const liveLastEventAt = useMemo(() => {
+    if (liveEntries.length === 0) return null;
+    let max: number | null = null;
+    for (const entry of liveEntries) {
+      const ts = entry.endedAt ?? entry.startedAt ?? null;
+      if (ts != null && (max == null || ts > max)) max = ts;
+    }
+    return max;
+  }, [liveEntries]);
   const timeline = useMemo(() => {
     if (viewMode !== "all") return null;
     const items: SegmentTimelineItem[] = [
@@ -2436,8 +2457,16 @@ function SegmentedTurnBody({
       )}
       {/* 2026-10-22-conversation-live-marquee（FR-01 / FR-04）：对话视图运行中
           轮次末尾的实时活动跑马灯——纯感知、不交互；进度/轨迹视图与终态轮
-          liveEntries 为空不挂载。位置=本轮最新处（思考占位之后）。 */}
-      {liveEntries.length > 0 && <TurnLiveMarquee entries={liveEntries} />}
+          liveEntries 为空不挂载。位置=本轮最新处（思考占位之后）。
+          2026-10-25-marquee-awaiting-real-data：等待条目接入服务端真实计时
+          与本轮累计 token。 */}
+      {liveEntries.length > 0 && (
+        <TurnLiveMarquee
+          entries={liveEntries}
+          lastEventAt={liveLastEventAt}
+          turnTokens={turnTokens}
+        />
+      )}
       {/* 2026-10-20-session-page-dsh-alignment（FR-01 / D-016①）：原 quick-3c85b05e
           的「开始 · 结束 · 历时」独立行已删除——它与轮尾状态行重复，时间细节改由
           TurnRow 派生 metaDetail 折进那条唯一元信息行（RoundDivider.detail / all 视图
