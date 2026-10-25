@@ -56,3 +56,4 @@ created_at: 2026-09-03 14:49:48
 - 2026-10-23-marquee-awaiting-indicator | 跑马灯等待模型响应指示
 - 2026-10-25-marquee-subagent-outer-only | 跑马灯外部只显示子代理容器条目
 - 2026-10-25-subagent-card-unify-panel | 子代理卡片统一为紧凑卡片+详情栏
+- 2026-10-25-trajectory-source-model | 2026-10-25-trajectory-source-model

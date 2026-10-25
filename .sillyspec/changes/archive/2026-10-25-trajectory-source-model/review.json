@@ -3,14 +3,14 @@
   "change": "2026-10-25-trajectory-source-model",
   "reviewer": "subagent",
   "verdict": "PASS",
-  "reviewedAgainst": "69985ca9d964fec611afffcbb49211e4bfd758b3",
+  "reviewedAgainst": "024af1a9d8d16d48a68fa1dfe07103c16afd049c",
   "findings": [
     {
       "severity": "P2",
-      "status": "open",
-      "title": "Grill P2 裁定「daemon 重启报 initial 但 prev 存在时不误报初始系统提示词」未在实现兑现",
-      "evidence": "classifyHeaderChange 对 prev 非 null 且三字段全等时兜底返回 \"initial\"（from-turn-views.ts:127-130）；decideHeaderReport 在 daemon 重启缓存丢失时报 initial（session-header-snapshot.ts:117 注释明确该场景），配置未变时落库快照与前端 prev 链全等，该行 headerChange=\"initial\" 经 HEADER_CHANGE_SUMMARY 渲染「初始系统提示词」（trajectory-view-model.ts:135-136）——与 design.md:100 接口定义裁定字面冲突。from-turn-views.test.ts:374-380 用例名「不误报初始」与断言 toBe(\"initial\") 自相矛盾，冲突行为被测试锁定。附注：配置已变的重启场景纠偏有效（diff 出 system/tools 态，裁定主体满足）；仅「重启+配置未变」边缘场景违约。若 logsToTurns 装配层对 prev 全等段有过滤则该路径不可达（runtime-session-helpers.tsx:472-490 未见过滤逻辑，直读代码无此分支），本条维持。",
-      "location": "frontend/src/components/daemon/trajectory/from-turn-views.ts:130"
+      "status": "resolved",
+      "title": "Grill P2 裁定「daemon 重启报 initial 但 prev 存在时不误报初始系统提示词」未在实现兑现（已修复 024af1a9d）",
+      "evidence": "首轮发现：classifyHeaderChange 对 prev 非 null 且三字段全等时兜底返回 \"initial\"，daemon 重启+配置未变场景渲染「初始系统提示词」，与 design.md:100 裁定字面冲突，且测试用例名与断言 toBe(\"initial\") 自相矛盾。增量复审（024af1a9d8d16d48a68fa1dfe07103c16afd049c）验证修复到位：classifyHeaderChange 返回类型扩五态、尾分支 return \"unchanged\" 并注释防御语义（from-turn-views.ts:119,131）；build-trajectory.ts:76 meta.headerChange 类型同步五态；trajectory-view-model.ts:127 HEADER_CHANGE_SUMMARY 增 unchanged 文案「配置快照（无变化）」（其余四态顺带补「（配置面）」标注，D-002 边界强化）；from-turn-views.test.ts:374-381 用例名改「如实标无变化（不误报初始，评审 P2 修复）」+ 断言 toBe(\"unchanged\")，名与断言矛盾消除。提交改动面仅 4 个源文件（+本 review.json）精确对准 P2，无越界改动，未引入新 P0/P1。",
+      "location": "frontend/src/components/daemon/trajectory/from-turn-views.ts:131"
     },
     {
       "severity": "P3",
@@ -42,10 +42,10 @@
     }
   ],
   "dimensionNotes": {
-    "乱序": "prev 链在 logsToTurns 分组前对 session_header 日志全量扫描按落库序建链（runtime-session-helpers.tsx:472 注释+实现），穿透 run 边界，run 级乱序/SSE 补发与历史回放共用行序不影响链序；headerChange 分类为纯函数无时间源（from-turn-views.test.ts:151 断言两次调用一致）；daemon reason 仅随行携带不参与时序判定。",
+    "乱序": "prev 链在 logsToTurns 分组前对 session_header 日志全量扫描按落库序建链（runtime-session-helpers.tsx:472 注释+实现），穿透 run 边界，run 级乱序/SSE 补发与历史回放共用行序不影响链序；headerChange 分类为纯函数无时间源（from-turn-views.test.ts 两次调用一致断言）；daemon reason 仅随行携带不参与时序判定。",
     "并发": "采集/字段比较/缓存更新在 driver 生命周期点同步完成（JS 单线程无竞态窗口，session-manager.ts:1433-1452）；上报 fire-and-forget 双层吞错（onTurnMessage 内部 warn + 同步 try/catch，:1477-1490）绝不反向打断生命周期；连续无 runId 采集 pending 后写胜出（:457 注释）语义明确；上报失败仅丢一条日志行，下一变更点仍会报，无状态损坏。",
-    "切换": "terminate 双 Map 清缓存（lifecycle.ts:258-259 _headerSnapshotBySession/_pendingHeaderReport delete）；restoreAndReconnect 无 runId 采集暂存 pending，首次 inject 补发且 claimToken 已先刷新（session-manager.ts:1459-1463，daemon 测试 :296 锁定）；create 直发（:1295 firstRunId）、reload 直发（:2872 headerRunId）均经 onTurnMessage 桥。",
-    "作用域": "快照缓存为 daemon 进程级 Map 按 sessionId 隔离（session-manager.ts:446-461），盖戳 metadata 按日志行落库无会话级状态，多会话/多实例互不串扰；多 daemon 实例或重启后缓存丢失报 initial 属 D-010 已接受行为，前端 prev diff 纠偏在配置已变场景有效、配置未变场景见 P2 finding。"
+    "切换": "terminate 双 Map 清缓存（lifecycle.ts:258-259 _headerSnapshotBySession/_pendingHeaderReport delete）；restoreAndReconnect 无 runId 采集暂存 pending，首次 inject 补发且 claimToken 已先刷新（session-manager.ts:1459-1463，daemon 测试锁定）；create 直发（:1295 firstRunId）、reload 直发（:2872 headerRunId）均经 onTurnMessage 桥。",
+    "作用域": "快照缓存为 daemon 进程级 Map 按 sessionId 隔离（session-manager.ts:446-461），盖戳 metadata 按日志行落库无会话级状态，多会话/多实例互不串扰；多 daemon 实例或重启后缓存丢失报 initial 属 D-010 已接受行为，前端 prev diff 纠偏经 024af1a9d 修复后全场景成立（配置已变→system/tools/双变更态，配置未变→unchanged 防御态不误报初始）。"
   },
-  "reviewedAt": "2026-10-25T13:00:23+08:00"
+  "reviewedAt": "2026-10-25T13:03:11+08:00"
 }

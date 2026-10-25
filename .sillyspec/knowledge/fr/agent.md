@@ -865,3 +865,88 @@ created_at: 2026-10-14T02:51:35.432Z
 - 场景：质量门 — Given 变更完成；When 执行相关 vitest 与 tsc；Then 全部通过且零类型错误
 全文：.sillyspec/changes/archive/2026-10-23-session-first-window-turn-align/requirements.md#FR-04
 最近确认：780bda6099858d50f9908ea6d9e308c2eb46b8ab
+
+## FR-agent-046 三类系统注入消息在数据层携带 turn_trigger 来源标记
+变更：2026-10-25-trajectory-source-model
+状态：active
+摘要：主路径；Worker 派发；后台通知
+依据决策：D-009@v1
+场景正文：
+- 场景：主路径 — Given 会话存在活跃 mission 且用户发送首句（或续问）触发主控简报拼接；When 该轮 user_input 落库；Then `metadata_.turn_t
+- 场景：Worker 派发 — Given 团队派发 Worker run；When 其会话首条 user_input 落库；Then `metadata_.turn_trigger === "worke
+- 场景：后台通知 — Given 后台任务收敛触发 workers-done / child-wake 注入；When `inject_session_as_service` 落库；Then `
+全文：.sillyspec/changes/archive/2026-10-25-trajectory-source-model/requirements.md#FR-01
+最近确认：024af1a9d8d16d48a68fa1dfe07103c16afd049c
+
+## FR-agent-047 daemon 在轮边界上报配置面请求头快照（仅 initial / change）
+变更：2026-10-25-trajectory-source-model
+状态：active
+摘要：主路径；无变化
+依据决策：D-002@v1、D-010@v1
+场景正文：
+- 场景：主路径 — Given 新会话首轮；When driver 启动完成；Then 落一条 `channel=session_header` 日志（reason=initial）。Give
+- 场景：无变化 — Given 连续多轮快照相同；When 轮边界比较；Then 不新增日志。
+全文：.sillyspec/changes/archive/2026-10-25-trajectory-source-model/requirements.md#FR-02
+最近确认：024af1a9d8d16d48a68fa1dfe07103c16afd049c
+
+## FR-agent-048 前端按标记装配轨迹行
+变更：2026-10-25-trajectory-source-model
+状态：active
+摘要：主路径
+依据决策：D-011@v1
+场景正文：
+- 场景：主路径 — Given 轮含 turn_trigger=team_brief 的消息；When 打开轨迹；Then 该消息行为「上下文」标签（团队派发形态）。Given 会话第二条 s
+全文：.sillyspec/changes/archive/2026-10-25-trajectory-source-model/requirements.md#FR-03
+最近确认：024af1a9d8d16d48a68fa1dfe07103c16afd049c
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-25-trajectory-source-model:flow:测试绑定FR-03
+  tests: frontend/src/components/daemon/__tests__/turn-timeline-trajectory-view.test.tsx | frontend/src/components/daemon/trajectory/__tests__/from-turn-views.test.ts
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-25-trajectory-source-model
+  status: active
+
+## FR-agent-049 submit_steps metadata 通用透传（白名单键集）
+变更：2026-10-25-trajectory-source-model
+状态：active
+摘要：主路径
+场景正文：
+- 场景：主路径 — Given daemon 提交带 `{channel: "session_header", metadata: {reason: "initial"}}` 的日志；When
+全文：.sillyspec/changes/archive/2026-10-25-trajectory-source-model/requirements.md#FR-04
+最近确认：024af1a9d8d16d48a68fa1dfe07103c16afd049c
+
+## FR-agent-050 revert 前端启发式代码
+变更：2026-10-25-trajectory-source-model
+状态：active
+摘要：主路径
+依据决策：D-004@v1
+场景正文：
+- 场景：主路径 — Given 存量会话的团队派发轮（无戳）；When 打开轨迹；Then 显示「用户」行（如实呈现，无启发式识别）。
+全文：.sillyspec/changes/archive/2026-10-25-trajectory-source-model/requirements.md#FR-05
+最近确认：024af1a9d8d16d48a68fa1dfe07103c16afd049c
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-25-trajectory-source-model:flow:测试绑定FR-05
+  tests: frontend/src/components/daemon/trajectory/__tests__/from-turn-views.test.ts
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-25-trajectory-source-model
+  status: active
+
+## FR-agent-051 兼容与回归
+变更：2026-10-25-trajectory-source-model
+状态：active
+摘要：主路径
+场景正文：
+- 场景：主路径 — Given 变更落盘；When 跑三端相关测试与类型检查；Then 全部通过。
+全文：.sillyspec/changes/archive/2026-10-25-trajectory-source-model/requirements.md#FR-06
+最近确认：024af1a9d8d16d48a68fa1dfe07103c16afd049c

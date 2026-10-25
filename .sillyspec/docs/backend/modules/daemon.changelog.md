@@ -73,3 +73,4 @@ created_at: 2026-08-29 22:56:30
 | 2026-10-23 | 2026-10-24-close-run-quota-fallback | 交互轮失败后端从日志兜底识别限额错误 |
 | 2026-10-23 | 2026-10-24-pi-edit-patch-synth | pi 会话的文件变更卡弹窗永远显示无补丁(pi-events.ts 设计期把 edit_patch … |
 | 2026-10-24 | 2026-10-22-trajectory-context-jump | 轨迹视图两处体验缺口（对照 dsh）：1) processItems 里的 system_event… |
+| 2026-10-25 | 2026-10-25-trajectory-source-model | 2026-10-25-trajectory-source-model |

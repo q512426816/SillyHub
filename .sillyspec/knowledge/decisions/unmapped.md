@@ -1790,3 +1790,91 @@ supersedes：D-005@v1
 锚点：未记录
 最近确认：2e0ff863327ec51edee4eb034e54adfaaeb1db5e
 理由：- 风险：无 Provider 宿主（回放体、悬浮助手）失去子代理详情入口——头部信息仍完整，完整过程可去「进度」视图看；属用户裁决的统一取舍（已声明边界）。 - Drawer 覆盖在弹窗内容上而非并排：弹窗宽度有限（约 60vw~90vw），固定右栏会把消息流压到不可用；浮层是移动端已验证的同构方案。 - 放弃方案：① dialog 内固定右栏（布局压缩严重）；② 保留内联展开作为无 Provider 回退（用户明确要求去掉）；③ 把 page 右栏整套抽出共享 hook（改动面大，dialog 仅需 Drawer 出口，复制 20 行状态更小）。
+
+## D-unmapped-230@v1 按 dsh 引擎机制做全套（消息来源标记 + 请求头快照），跨三端
+状态：implemented
+变更：2026-10-25-trajectory-source-model
+原编号：D-001@v1
+锚点：未记录
+最近确认：024af1a9d8d16d48a68fa1dfe07103c16afd049c
+理由：用户否决前端启发式（2026-10-25-trajectory-system-rows 已 reject），要求按 dsh 机制做全套：消息来源标记（source）+ 请求级系统提示词/工具快照上报，含 daemon 侧改造，跨 backend + sillyhub-daemon + frontend 三端完整流程。
+故障面：盖戳遗漏新增注入点时该类消息回退「用户」行（可发现的标签回退，非数据损坏）。
+退役判据：若平台日志层未来引入原生来源列，metadata 键机制可整体退役。
+
+## D-unmapped-231@v1 系统提示词行做「配置面快照」口径（引擎全文不可得）
+状态：implemented
+变更：2026-10-25-trajectory-source-model
+原编号：D-002@v1
+锚点：未记录
+最近确认：024af1a9d8d16d48a68fa1dfe07103c16afd049c
+理由：用户裁决：做配置面快照——daemon 轮边界上报「档案配置的 systemPrompt 追加段 + 工具清单」快照，变更时显示「系统提示词已更新/工具已更新」行；对比对象是配置面非引擎全文，该边界写入设计文档。
+
+## D-unmapped-232@v1 存量历史会话如实呈现（无标记 → 用户行），不做启发式兜底
+状态：implemented
+变更：2026-10-25-trajectory-source-model
+原编号：D-003@v1
+锚点：未记录
+最近确认：024af1a9d8d16d48a68fa1dfe07103c16afd049c
+理由：用户裁决：如实呈现——新机制只对新产生的会话生效，存量无标记的历史注入仍显示「用户」行，不伪造标记、不保留启发式兜底（与 dsh 数据驱动同构）。
+
+## D-unmapped-233@v1 revert 已提交的启发式代码（77ba0588b / c93aafc84）
+状态：implemented
+变更：2026-10-25-trajectory-source-model
+原编号：D-004@v1
+锚点：未记录
+最近确认：024af1a9d8d16d48a68fa1dfe07103c16afd049c
+理由：用户裁决：在新变更中 revert 这两笔提交，方案彻底切换到 dsh 机制（代码已在 main，通过 revert commit 处理，不 reset 历史）。
+
+## D-unmapped-234@v1 采用方案 A——复用日志通道（metadata 盖戳 + 新 channel 快照 + submit 透传修复）
+状态：implemented
+变更：2026-10-25-trajectory-source-model
+原编号：D-005@v1
+锚点：未记录
+最近确认：024af1a9d8d16d48a68fa1dfe07103c16afd049c
+理由：用户选 A：注入点盖 metadata（照 turn_trigger 先例）；daemon 轮边界把配置快照作为新 channel 日志上报；修复 submit_steps metadata 只落 _agent_event 的透传缺陷；前端新增段类型照 turn_trigger 先例装配。全链路复用现有管道，历史回放自动有快照。
+故障面：channel 扩枚举后旧前端把快照行当未知日志（需前端兼容分类：未知 channel 归中性系统行不丢）。
+退役判据：若日志层拆分内容/元数据双流，快照 channel 可迁离。
+
+## D-unmapped-235@v1 否决「独立快照表 + REST 上报」（方案 B）
+状态：rejected
+变更：2026-10-25-trajectory-source-model
+原编号：D-006@v1
+锚点：未记录
+最近确认：024af1a9d8d16d48a68fa1dfe07103c16afd049c
+理由：用户未选 B。
+否决理由：新表+新端点+前端新查询链路，实时/回放各接一套，改动面远大于复用现有日志管道且无对应收益。
+复潮条件：日志表容量/查询性能因快照行出现实测问题时重议。
+
+## D-unmapped-236@v1 否决「纯前端不落库」（方案 C）
+状态：rejected
+变更：2026-10-25-trajectory-source-model
+原编号：D-007@v1
+锚点：未记录
+最近确认：024af1a9d8d16d48a68fa1dfe07103c16afd049c
+理由：用户未选 C。
+否决理由：刷新即丢、历史会话无快照，不满足 D-001 的历史回放要求。
+复潮条件：无（需求本身要求持久化，除非需求变更）。
+
+## D-unmapped-237@v1 设计定稿——三段式（注入盖戳 / daemon 快照 / 前端行）+ 真码原型
+状态：implemented
+变更：2026-10-25-trajectory-source-model
+原编号：D-008@v1
+锚点：未记录
+最近确认：024af1a9d8d16d48a68fa1dfe07103c16afd049c
+理由：用户确认定稿；原型（轨迹原型扩展三类新行）已登记 prototype-trajectory-source-model.html。
+
+## D-unmapped-238@v1 新注入类归 turn_trigger 体系（非独立 sender 键）
+状态：implemented
+变更：2026-10-25-trajectory-source-model
+原编号：D-009@v1
+锚点：未记录
+最近确认：024af1a9d8d16d48a68fa1dfe07103c16afd049c
+理由：我的判断：扩 turn_trigger（team_brief / worker_dispatch / agent_notice 三新 kind）——前端配置表/装配链/轨迹映射全套已就位，零新管道；dsh 的 source.kind 独立轴在本平台等价物即该闭表。
+
+## D-unmapped-239@v1 变更检测在 daemon 侧，只报 initial/change（非每轮落快照）
+状态：implemented
+变更：2026-10-25-trajectory-source-model
+原编号：D-010@v1
+锚点：未记录
+最近确认：024af1a9d8d16d48a68fa1dfe07103c16afd049c
+理由：我的判断：daemon 缓存上次快照做字段级比较，仅 initial 与 change 上报——dsh 同构（agent.ts:635-650 同款条件），省日志量。

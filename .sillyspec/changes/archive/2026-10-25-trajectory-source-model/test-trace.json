@@ -1,0 +1,37 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-25-trajectory-source-model",
+  "rows": [
+    {
+      "anchor": "FR-03",
+      "row_id": "2026-10-25-trajectory-source-model:flow:测试绑定FR-03",
+      "tests": [
+        "frontend/src/components/daemon/__tests__/turn-timeline-trajectory-view.test.tsx",
+        "frontend/src/components/daemon/trajectory/__tests__/from-turn-views.test.ts"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-25-trajectory-source-model"
+    },
+    {
+      "anchor": "FR-05",
+      "row_id": "2026-10-25-trajectory-source-model:flow:测试绑定FR-05",
+      "tests": [
+        "frontend/src/components/daemon/trajectory/__tests__/from-turn-views.test.ts"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-25-trajectory-source-model"
+    }
+  ]
+}
