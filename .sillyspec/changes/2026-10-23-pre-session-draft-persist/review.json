@@ -1,7 +1,7 @@
 {
   "change": "2026-10-23-pre-session-draft-persist",
   "mode": "inline-self",
-  "reviewedAgainst": "b54c598fc75e93d6ea4f27a7d2a30ba1a06e47d3",
+  "reviewedAgainst": "b54c598fcfa4e920899a29f600996fdd2110068d",
   "reviewedAt": "2026-10-25T11:45:00Z",
   "reviewer": "admin2-pre-draft-persist",
   "verdict": "PASS",
