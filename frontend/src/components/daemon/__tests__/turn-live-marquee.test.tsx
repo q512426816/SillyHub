@@ -225,14 +225,18 @@ describe("TurnLiveMarquee 连续轨道（FR-01 / FR-02 / FR-05）", () => {
   ]);
 
   it("轨道按顺序完整渲染全部条目，不复制内容循环", () => {
-    const { getByTestId } = render(<TurnLiveMarquee entries={entries} />);
+    const { getByTestId, getAllByTestId } = render(<TurnLiveMarquee entries={entries} />);
     const track = getByTestId("turn-live-marquee-track");
 
-    expect(track.children).toHaveLength(entries.length);
+    // entries 全为完成态 → 末尾追加 1 条「等待模型响应」合成条目（LLM 间隙）。
+    expect(getAllByTestId("marquee-item")).toHaveLength(entries.length);
+    expect(getByTestId("marquee-awaiting")).not.toBeNull();
+    expect(track.children).toHaveLength(entries.length + 1);
     const texts = Array.from(track.children).map((el) => el.textContent ?? "");
     expect(texts[0]).toContain("分析登录链路");
     expect(texts[1]).toContain("读写文件");
-    expect(texts[texts.length - 1]).toContain("report.md");
+    expect(texts[2]).toContain("report.md");
+    expect(texts[3]).toContain("等待模型响应");
   });
 
   it("运行中条目渲染 lucide 图标与转圈，文本区带内部滚动（FR-01）", () => {
@@ -273,16 +277,16 @@ describe("TurnLiveMarquee 连续轨道（FR-01 / FR-02 / FR-05）", () => {
     const doneEntries = deriveLiveMarqueeEntries([
       tool("tool-done", { startedAt: 1000, endedAt: 2500 }),
     ]);
-    const { getByTestId, queryByTestId, container } = render(
-      <TurnLiveMarquee entries={doneEntries} />,
-    );
+    const { getByTestId } = render(<TurnLiveMarquee entries={doneEntries} />);
 
+    // 真实条目（marquee-item）本身完成态：耗时 + 无转圈 + 无滚动窗口
+    //（末尾等待条目上的转圈/滚动窗口属预期，不在此断言范围）。
+    const item = getByTestId("marquee-item");
     const duration = getByTestId("marquee-duration");
     expect(duration.textContent).toContain("1.5s");
     expect(duration.querySelector("svg")).not.toBeNull();
-    expect(queryByTestId("marquee-spinner")).toBeNull();
-    // 完成态截断文本不加渐隐遮罩（FR-02）。
-    expect(container.querySelector(".sh-live-marquee-window")).toBeNull();
+    expect(item.querySelector('[data-testid="marquee-spinner"]')).toBeNull();
+    expect(item.querySelector(".sh-live-marquee-window")).toBeNull();
   });
 
   it("进行中条目不显示耗时（FR-02）", () => {
@@ -333,12 +337,11 @@ describe("TurnLiveMarquee 连续轨道（FR-01 / FR-02 / FR-05）", () => {
     const doneEntries = deriveLiveMarqueeEntries([
       tool("tool-done", { startedAt: 0, endedAt: 1500 }),
     ]);
-    const { getByTestId, container } = render(
-      <TurnLiveMarquee entries={doneEntries} />,
-    );
+    const { getByTestId } = render(<TurnLiveMarquee entries={doneEntries} />);
 
-    expect(getByTestId("marquee-item").className).toContain("w-[16rem]");
-    expect(container.querySelector(".sh-live-marquee-ticker")).toBeNull();
+    const item = getByTestId("marquee-item");
+    expect(item.className).toContain("w-[16rem]");
+    expect(item.querySelector(".sh-live-marquee-ticker")).toBeNull();
     expect(getByTestId("marquee-duration")).not.toBeNull();
   });
 
@@ -348,7 +351,44 @@ describe("TurnLiveMarquee 连续轨道（FR-01 / FR-02 / FR-05）", () => {
     );
 
     expect(queryByTestId("turn-live-marquee-track")).toBeNull();
-    expect(getByTestId("turn-live-marquee").textContent).toContain("report.md");
+    // 等待态优先静态显示「等待模型响应」条目（FR-03，2026-10-23 修订）。
+    expect(getByTestId("marquee-awaiting").textContent).toContain("等待模型响应");
+  });
+
+  it("最新条目非运行中时出现等待模型响应条目（FR-01）", () => {
+    const { getByTestId } = render(
+      <TurnLiveMarquee entries={deriveLiveMarqueeEntries([thinking("t-done", "思考完成")])} />,
+    );
+
+    const awaiting = getByTestId("marquee-awaiting");
+    expect(awaiting.textContent).toContain("等待模型响应");
+    // 等待条目为 running：带转圈。
+    expect(awaiting.querySelector('[data-testid="marquee-spinner"]')).not.toBeNull();
+  });
+
+  it("最新条目运行中时无等待条目（FR-03）", () => {
+    const { queryByTestId } = render(
+      <TurnLiveMarquee entries={deriveLiveMarqueeEntries([thinking("t-run", "思考中", true)])} />,
+    );
+
+    expect(queryByTestId("marquee-awaiting")).toBeNull();
+  });
+
+  it("新事件到达后等待条目消失（FR-02）", () => {
+    const { rerender, getByTestId, queryByTestId } = render(
+      <TurnLiveMarquee entries={deriveLiveMarqueeEntries([thinking("t-done", "思考完成")])} />,
+    );
+    expect(getByTestId("marquee-awaiting")).not.toBeNull();
+
+    rerender(
+      <TurnLiveMarquee
+        entries={deriveLiveMarqueeEntries([
+          thinking("t-done", "思考完成"),
+          tool("tool-run", { status: "running", endedAt: null }),
+        ])}
+      />,
+    );
+    expect(queryByTestId("marquee-awaiting")).toBeNull();
   });
 
   it("无条目时不渲染空壳", () => {

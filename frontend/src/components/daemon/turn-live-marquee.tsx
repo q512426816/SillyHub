@@ -43,6 +43,7 @@ import {
   MessageSquare,
   Minimize2,
   Search,
+  Sparkles,
   Terminal,
   Timer,
   Wrench,
@@ -104,7 +105,9 @@ export type LiveMarqueeIcon =
   | "system"
   | "compact"
   | "user"
-  | "wakeup";
+  | "wakeup"
+  // 2026-10-23-marquee-awaiting-indicator：LLM 生成间隙的合成「等待模型响应」条目。
+  | "awaiting";
 
 export interface LiveMarqueeEntry {
   /** 段 id（子代理内部段带父路径前缀，保证树内唯一）。 */
@@ -133,6 +136,7 @@ const ICON_COMPONENTS: Record<LiveMarqueeIcon, LucideIcon> = {
   compact: Minimize2,
   user: MessageSquare,
   wakeup: Bell,
+  awaiting: Sparkles,
 };
 
 /** processLabel 类别 → 图标枚举（工具七类词表语义保留）。 */
@@ -428,11 +432,13 @@ function MarqueeItemView({
   durationMs,
   reduced,
   fixedWidth = true,
+  testId = "marquee-item",
 }: {
   entry: LiveMarqueeEntry;
   durationMs: number | null;
   reduced: boolean;
   fixedWidth?: boolean;
+  testId?: string;
 }) {
   const running = entry.status === "running";
   const Icon = ICON_COMPONENTS[entry.icon];
@@ -518,7 +524,7 @@ function MarqueeItemView({
 
   return (
     <span
-      data-testid="marquee-item"
+      data-testid={testId}
       data-status={entry.status}
       className={cn(
         "flex items-center gap-1.5",
@@ -654,6 +660,49 @@ export const TurnLiveMarquee = memo(function TurnLiveMarquee({
 
   const latest = entries.length > 0 ? entries[entries.length - 1]! : null;
 
+  // 2026-10-23-marquee-awaiting-indicator（FR-01~FR-03）：LLM 生成间隙指示。
+  // 组件仅在运行中轮次被消费方渲染，因此「最新真实条目非 running」即可判定
+  // 处于「工具已完成、下一段未到」的等待态——追加合成「等待模型响应」条目，
+  // 计时每秒递增；新事件到达/回到 running 即消失并清零（渲染层拼接，不进
+  // entries / 计时 Map / 窗口滑动检测）。
+  const awaitingSinceRef = useRef<number | null>(null);
+  const [awaitingElapsedMs, setAwaitingElapsedMs] = useState(0);
+  const isAwaiting = latest != null && latest.status !== "running";
+  const awaitingKey = `${latest?.id ?? "none"}:${latest?.status ?? "none"}`;
+
+  useEffect(() => {
+    if (isAwaiting) {
+      // 新的已完成条目到达（latest.id 变化）= 新间隙开始，从头计时。
+      awaitingSinceRef.current = Date.now();
+      setAwaitingElapsedMs(0);
+    } else {
+      awaitingSinceRef.current = null;
+    }
+  }, [isAwaiting, awaitingKey]);
+
+  useEffect(() => {
+    if (!isAwaiting) return;
+    const timer = window.setInterval(() => {
+      const since = awaitingSinceRef.current;
+      if (since != null) setAwaitingElapsedMs(Math.max(0, Date.now() - since));
+    }, 1000);
+    return () => window.clearInterval(timer);
+  }, [isAwaiting, awaitingKey]);
+
+  const awaitingEntry: LiveMarqueeEntry | null =
+    isAwaiting && latest != null
+      ? {
+          id: "marquee-awaiting",
+          icon: "awaiting",
+          text: `等待模型响应 · ${formatMarqueeDuration(awaitingElapsedMs)}`,
+          status: "running",
+          startedAt: null,
+          endedAt: null,
+          durationMs: null,
+        }
+      : null;
+  const displayEntries = awaitingEntry != null ? [...entries, awaitingEntry] : entries;
+
   /**
    * 计算目标位置：内容右端贴视口右缘（即显示最新条）；内容不满一屏时 0。
    * 首次测量直接定位（打开即看到最新），之后只向更负的方向推进，不回滚。
@@ -783,23 +832,32 @@ export const TurnLiveMarquee = memo(function TurnLiveMarquee({
         "sh-live-marquee ml-9 flex h-8 w-[min(100%,52rem)] items-center gap-2 overflow-hidden rounded-full border border-border/70 bg-card px-3 text-[12px] leading-none text-muted-foreground shadow-sm",
       )}
     >
-      {/* 运行状态点：运行中脉冲（reduced-motion 时静止）。 */}
+      {/* 运行状态点：运行中脉冲（reduced-motion 时静止）。等待态（合成条目
+          running）同样脉冲，保证 LLM 生成间隙仍有运行感知。 */}
       <span aria-hidden className="relative z-10 flex h-2 w-2 shrink-0">
-        {!reduced && latest.status === "running" && (
+        {!reduced && (latest.status === "running" || awaitingEntry != null) && (
           <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-brand-400 opacity-60" />
         )}
         <span
-          className={cn("relative inline-flex h-2 w-2 rounded-full", dotClass(latest.status))}
+          className={cn(
+            "relative inline-flex h-2 w-2 rounded-full",
+            dotClass(awaitingEntry != null ? "running" : latest.status),
+          )}
         />
       </span>
 
       {reduced ? (
-        // 减少动态效果：静态展示最新一条，不滚动、不转圈。
+        // 减少动态效果：静态展示最新一条（等待态优先显示等待条目），不滚动、不转圈。
         <MarqueeItemView
-          entry={latest}
-          durationMs={latest.durationMs ?? runtimeDurations[latest.id] ?? null}
+          entry={awaitingEntry ?? latest}
+          durationMs={
+            awaitingEntry != null
+              ? null
+              : (latest.durationMs ?? runtimeDurations[latest.id] ?? null)
+          }
           reduced
           fixedWidth={false}
+          testId={awaitingEntry != null ? "marquee-awaiting" : "marquee-item"}
         />
       ) : (
         // 连续轨道：条目按时间顺序等宽排列，向左滚到最新条贴右缘即停。
@@ -815,12 +873,13 @@ export const TurnLiveMarquee = memo(function TurnLiveMarquee({
             data-testid="turn-live-marquee-track"
             className="flex w-max items-center gap-5 will-change-transform"
           >
-            {entries.map((entry) => (
+            {displayEntries.map((entry) => (
               <MarqueeItemView
                 key={entry.id}
                 entry={entry}
                 durationMs={entry.durationMs ?? runtimeDurations[entry.id] ?? null}
                 reduced={false}
+                testId={entry.id === "marquee-awaiting" ? "marquee-awaiting" : "marquee-item"}
               />
             ))}
           </div>

@@ -158,7 +158,7 @@ const SCRIPT: ReadonlyArray<(_seq: number) => TurnSegment> = [
   }),
 ];
 
-function buildSegments(step: number): TurnSegment[] {
+function buildSegments(step: number, liveThinking: boolean): TurnSegment[] {
   const total = Math.min(step + 1, 220);
   const out: TurnSegment[] = [];
   for (let i = 0; i < total; i += 1) {
@@ -177,7 +177,7 @@ function buildSegments(step: number): TurnSegment[] {
     kind: "thinking",
     id: "live-thinking",
     text: `正在核对 keepalive 与重试窗口的配合：网关 keepalive 为 60 秒，而应用侧请求超时只有 30 秒，长轮询场景下连接可能被提前回收；接着检查 token 刷新请求是否复用了同一套重试策略，确认失败后不会直接跳转登录页；再核对重试窗口、退避间隔与幂等键，避免重复提交；随后对比修复前后的连接回收日志，确认长轮询不再被网关提前断开；最后补齐回归测试并整理变更说明。（第 ${step + 1} 次刷新）`,
-    streaming: true,
+    streaming: liveThinking,
     ts: total * 1000,
   });
   return out;
@@ -222,7 +222,9 @@ export default function SessionLiveMarqueeProtoPage() {
     return () => window.clearInterval(timer);
   }, [running]);
 
-  const segments = useMemo(() => buildSegments(step), [step]);
+  // 暂停事件流时把 live-thinking 置为完成态：模拟「工具完成后、下一段
+  // 未到」的 LLM 生成间隙，演示「等待模型响应」指示条目。
+  const segments = useMemo(() => buildSegments(step, running), [step, running]);
   const entries = useMemo(() => deriveLiveMarqueeEntries(segments), [segments]);
   const text = FULL_TEXT.slice(0, Math.min(step * 46, FULL_TEXT.length));
 
