@@ -1,70 +1,34 @@
 {
+  "schemaVersion": 1,
   "change": "2026-10-23-pre-session-draft-persist",
-  "mode": "inline-self",
+  "reviewer": "inline-self（环境无已注册子代理，主会话按检查单代行自审）",
+  "verdict": "PASS",
   "reviewedAgainst": "b54c598fcfa4e920899a29f600996fdd2110068d",
   "reviewedAt": "2026-10-25T11:45:00Z",
-  "reviewer": "admin2-pre-draft-persist",
-  "verdict": "PASS",
-  "summary": "两处读分支反转（page 预会话 / dialog idle）+ 4 文件测试对齐；写侧零改动（持久化 effect / 受理即清 / 失败恢复原样）。与需求逐条对读：FR-01 两场景（切换/刷新同路径=重挂载回读入口键）、FR-02（清空随写 effect 落空串，重进读回为空）、FR-03（真会话草稿/受理即清/入口隔离三语义回归全绿）均有着落；前序串台报障不复潮的论证（回读源与真会话键无交集）落在 design 与代码注释。",
-  "checks": [
-    {
-      "name": "FR 覆盖",
-      "result": "PASS",
-      "evidence": "FR-01→draft-scope「page 预会话：同一入口重进恢复未发送草稿」「dialog idle：同 workspaceId 重开恢复未发送草稿」+ sessions-portal nonce 用例反转为保留口径；FR-02→「page 预会话：清空后重进保持为空」「dialog idle：清空后重开保持为空」；FR-03→既有 FR-03 用例加重挂载断言 + 三套件全绿（169 例）+ pre-session/panel 64 例回归。"
-    },
-    {
-      "name": "需求逐条对读",
-      "result": "PASS",
-      "evidence": "需求四条成功标准与 flow start --input 原文逐字对应；「清空后重进要为空」的机制（写 effect 随清空落 \"\"）在 FR-02 用例以键值断言锁定，非仅 UI 断言。"
-    },
-    {
-      "name": "盲维（乱序/并发/生命周期/作用域）",
-      "result": "PASS",
-      "evidence": "design 四问逐问作答：读先于写（rAF 门闩）、同键单实例无并发写、清空→切走为先后人手操作（effect commit 后同步 flush）、键空间含 workspace/runtime 维度不串台。"
-    },
-    {
-      "name": "测试先行的真实性",
-      "result": "PASS",
-      "evidence": "TDD 红绿有据：反转两用例在基线实现上红（2 failed / 26 passed），实现落盘后三套件 169 全绿；红在行为变更点，非测试自身缺陷。"
-    },
-    {
-      "name": "提交面对账",
-      "result": "PASS",
-      "evidence": "代码提交 b54c598fc（4 文件，显式 pathspec 与 add 同清单）+ spec 251475c21（3 文件）；暂存面未夹带他会话文件（session-config-bar.tsx 在途改动未入暂存区）。"
-    },
-    {
-      "name": "验证面完整性",
-      "result": "PASS_WITH_NOTES",
-      "evidence": "tsc 本变更文件零错，全仓余 2 错系并行会话已提交 a9f5fae15 的文件（session-panel-variant.test.tsx:238 / page-helpers.tsx:435），非本变更面；eslint 4 文件警告数与 HEAD 完全同量（零新增）。验证期间主树被并行会话在途语法错误阻塞，基线与红绿判定在临时 worktree（7355638b7）完成，主树可编译后全量复跑通过——过程有据，结论不受影响。"
-    }
-  ],
   "findings": [
     {
       "severity": "P3",
-      "location": "frontend/src/components/daemon/session-panel/session-panel-page.tsx",
-      "note": "预会话草稿无 TTL（会话草稿同款），入口数 × 一条文本的残留量级；与既有键族口径一致，暂不引入清理机制。"
+      "title": "预会话草稿无 TTL（会话草稿同款），残留量级 = 入口数 × 一条文本",
+      "evidence": "入口隔离键 __pre__:<scope> 无回收机制；与前序会话草稿键族口径一致，量级有界（入口数有限、每键一条短文本）。已写入 design「明确边界」，暂不引入清理机制（引入 TTL 反而与「跨天回来还能找回未发送内容」的保留语义相抵）。"
     },
     {
       "severity": "P3",
-      "location": "frontend/src/components/sessions/__tests__/sessions-portal.test.tsx",
-      "note": "nonce 用例现在断言「保留」，与组头＋再新建的用户直觉（找回未发送内容）一致；若未来产品要「每次＋都全新」，需再走一次显式反转，本用例会红在正确位置。"
+      "title": "sessions-portal nonce 用例口径已反转为「保留」——若未来产品要「每次＋都全新」需再走显式反转",
+      "evidence": "用例「同机器同智能体再次「＋」新建：未发送草稿保留」现在断言重挂载后回读 AAA；这是用户本次显式裁决，不是回归。若产品口径再变，该用例会红在正确位置，防静默漂移。"
     },
     {
       "severity": "P3",
-      "location": "frontend/src/components/daemon/session-panel/session-panel-dialog.tsx",
-      "note": "dialog idle 键无 runtime 维度（同 workspaceId 跨引擎共享一条草稿）——既有 D-001 裁决，未在本变更范围。"
+      "title": "dialog idle 键无 runtime 维度（同 workspaceId 跨引擎共享一条草稿）",
+      "evidence": "既有 D-001 裁决（dialog 无 runtime 维度，仅按 workspaceId 区分入口），本变更未触碰；如需按引擎分键属独立需求。"
     }
   ],
-  "decisionReversals": [
-    {
-      "supersedes": "2026-10-23-session-input-clear-fix FR-04（预会话恒空白、新建即弃稿）",
-      "reason": "用户实测后显式要求保留（flow start --input 原话：切走/刷新再新建要显示 AAA；清空后要为空）",
-      "recordedIn": "design.md 风险与死路 + 两处被反转用例就地改写"
-    },
-    {
-      "supersedes": "2026-10-23-session-dialog-input-align FR-04（idle 恒空白）",
-      "reason": "与 page 同步反转（用户同一诉求覆盖两模式）",
-      "recordedIn": "design.md 风险与死路 + dialog FR-04 describe 就地改写"
-    }
-  ]
+  "dimensionNotes": {
+    "乱序": "ok——回读 effect 依赖 [sessionId]（null=预会话），挂载即同步 setInput(read)，rAF 门闩放行写 effect，读先于写顺序确定；预会话发送受理即清 / 失败恢复回填均为同步直写 localStorage（不走 effect、不依赖组件存活），无乱序窗口。",
+    "并发": "ok——同一预会话键单实例（page 门户 nonce 重挂载互斥 / dialog 单实例）；跨标签页 last-write-wins（与既有会话草稿同语义）；真会话键 <sessionId> 与 __pre__ 系无交集，前序串台报障不复潮。",
+    "切换": "ok——写侧随每次输入变化（含清空落 \"\"）commit 后同步 flush，不依赖卸载钩子；清空→切走是人手先后操作，必然晚于 effect；发送成功切真会话键已清，再新建为空（FR-03 用例加重挂载断言锁定）。",
+    "作用域": "ok——键含 workspaceId（缺省 '-'）与 runtimeId（page）；不同入口互不可见（既有用例锁定）；group-chat 键族独立。边界：同一入口草稿不区分用户意图，想丢弃就手动清空（FR-02 即为此设计）。",
+    "FR覆盖与验证面": "FR-01→page/dialog 重挂载恢复用例 + portal nonce 用例反转；FR-02→page/dialog 清空后重进保持为空（键值断言非仅 UI）；FR-03→既有 FR-03 用例加重挂载断言 + 三套件 169 例全绿 + pre-session/panel 64 例回归。tsc 本变更文件零错（全仓余 2 错系并行会话已提交 a9f5fae15 的文件，非本变更面）；eslint 4 文件警告数与 HEAD 完全同量。验证期间主树被并行会话在途语法错误阻塞，基线与红绿判定在临时 worktree（7355638b7）完成，主树可编译后全量复跑通过。",
+    "决策反转对账": "本变更显式反转 2026-10-23-session-input-clear-fix FR-04 与 2026-10-23-session-dialog-input-align FR-04 的「恒空白」裁决；复潮条件=用户实测后显式要求（flow start --input 原话）；两处被反转用例就地改写防口径漂移，已记 design「风险与死路」。",
+    "提交面": "代码 b54c598fc（4 文件）+ spec 251475c21（3 文件）+ review d64231252/d5ea8d67d，全显式 pathspec；并行会话在途 session-config-bar.tsx 未入暂存区，提交面无夹带。"
+  }
 }
