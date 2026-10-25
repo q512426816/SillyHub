@@ -429,7 +429,10 @@ describe("scroll-up history integration", () => {
       // 固定窗口会假失败（2026-10-22 实证）；语义仍是「事件内零同步写，
       // 异步帧后才写」。watch interval 300ms 与锚 2.5s 存活窗远大于默认
       // waitFor 轮询间隔，写入来源仍是钉回链路。
-      await waitFor(() => expect(writes).toBeGreaterThan(before));
+      // 2026-10-25 加固：waitFor 默认 1s 窗在全量并发下仍会假失败（本会话两轮
+      // 全量均在此 0>0、隔离 13s 稳绿；rAF+300ms watch 链路在 jsdom 高负载下
+      // 滞后超 1s）——放宽到 5s，语义不变（事件内零同步写、异步帧后写）。
+      await waitFor(() => expect(writes).toBeGreaterThan(before), { timeout: 5000 });
     } finally {
       delete (el as { scrollTop?: number }).scrollTop;
     }

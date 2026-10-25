@@ -37,6 +37,11 @@ const VIEWS = [
     title: "轨迹面板重设计",
     desc: "对齐 dsh：固定工具栏（时长/轮次/调用+搜索）+ 三泳道时间线 + 两列账本 + 多标签详情",
   },
+  {
+    file: "explorer-git-status-view",
+    title: "工作区 Git 文件状态",
+    desc: "Git 日志页工作区更改卡（IDEA 分组四色）/ 文件 diff 弹窗三态 / explorer 树着色 + 图例",
+  },
 ];
 
 function run(cmd, args) {

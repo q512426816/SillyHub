@@ -301,8 +301,11 @@ describe("对话视图子代理容器段（2026-09-15-subagent-three-pane task-0
     expect(screen.getByText("🤖")).toBeInTheDocument();
     // 名称与类型标签均回退 subagentType（stub 无 primary 可回退，共 2 处）
     expect(screen.getAllByText("researcher").length).toBe(2);
-    // stub 恒视为运行中 → 无 Provider 时内联展开默认挂载 children（现状语义）
-    expect(screen.getByText("stub 子代理产出正文")).toBeInTheDocument();
+    // 2026-10-25-subagent-card-unify-panel：内联展开分支已按用户裁决删除——
+    // children 一律经 SubagentDetailPanel 展示，无 Provider 宿主也不再原地
+    // 挂载（原「stub 恒视为运行中 → 内联展开默认挂载 children」语义随该裁决
+    // 退役；本断言对齐新事实，2026-10-25-explorer-git-status 执行期顺手修）。
+    expect(screen.queryByText("stub 子代理产出正文")).not.toBeInTheDocument();
   });
 
   it("conversation 模式：thinking 段与无 children 的普通 tool 段仍不渲染（渲染经济不回归）", () => {
