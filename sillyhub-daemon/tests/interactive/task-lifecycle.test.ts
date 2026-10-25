@@ -489,8 +489,16 @@ describe('task-lifecycle FR-01/FR-03 — task_started→task_progress×3→task_
       summary: '扫描完成，产出 3 份报告',
     });
 
-    // system/task_* 拦截后不透传：onTurnMessage 全部调用即上述 3 条 [TASK_*] 行。
-    expect(h.deps.onTurnMessage.mock.calls).toHaveLength(3);
+    // system/task_* 拦截后不透传：onTurnMessage 的 TASK 流调用即上述 3 条
+    // [TASK_*] 行（2026-10-25-trajectory-source-model 起另有 session_header
+    // 快照旁路消息——非 TASK 流，过滤后断言，测试意图收窄到 TASK 落行）。
+    expect(
+      h.deps.onTurnMessage.mock.calls.filter(
+        ([, , m]) =>
+          !(m as { channel?: string } | undefined)?.channel ||
+          (m as { channel?: string }).channel !== 'session_header',
+      ),
+    ).toHaveLength(3);
   });
 });
 
@@ -656,7 +664,13 @@ describe('task-lifecycle FR-01 — task_started 注册口径', () => {
     );
     expect(taskEventCalls(h)).toHaveLength(0);
     expect(taskLineCalls(h)).toHaveLength(0);
-    expect(h.deps.onTurnMessage.mock.calls).toHaveLength(0); // 也不透传
+    // 也不透传（session_header 快照旁路消息除外——create 生命周期合法旁路，
+    // 2026-10-25-trajectory-source-model）。
+    expect(
+      h.deps.onTurnMessage.mock.calls.filter(
+        ([, , m]) => (m as { channel?: string } | undefined)?.channel !== 'session_header',
+      ),
+    ).toHaveLength(0);
   });
 });
 

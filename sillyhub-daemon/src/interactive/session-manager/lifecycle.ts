@@ -252,6 +252,12 @@ export async function terminateSession(
   //     readLastRecord 尾行兜底）。在飞锚链由清理函数自行挂链收尾后执行。
   clearTurnAnchorCache(state.sessionId);
 
+  // 4c-2. 2026-10-25-trajectory-source-model task-03/04：清配置面请求头快照缓存
+  //       与待上报队列（会话终态不再采集；立即清而非等延迟清理——同 id recreate
+  //       时新会话首采必须 reason=initial，残留基线会误判 change / 静默跳过上报）。
+  mgr._headerSnapshotBySession.delete(state.sessionId);
+  mgr._pendingHeaderReport.delete(state.sessionId);
+
   // 5. task-08：销毁会话级 usage 台账 + budget 软切断登记（旧 _destroyPartialBuffer
   //    的清理职责收口；partial 定时器已随缓冲链下沉归一化器，由 driver.dispose 兜底）。
   mgr._destroyUsageLedger(state.sessionId);

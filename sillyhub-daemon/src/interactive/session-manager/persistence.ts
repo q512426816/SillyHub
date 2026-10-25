@@ -55,7 +55,9 @@ import {
 // perSessionDir；详见下方 restoreAndReconnect 内注释）。
 import { INTERACTIVE_PROVIDERS } from '../providers.js';
 import type { ProviderAdapter } from '../providers.js';
-import type { SessionManagerCore } from './types.js';
+// 2026-10-25-trajectory-source-model task-03：restoreAndReconnect 的 spec 提升
+// （快照采集源）需要 DriverOptionsSpec 类型。
+import type { DriverOptionsSpec, SessionManagerCore } from './types.js';
 
 /**
  * task-10（§4.3）：快照可恢复记录（active|running 且 agentSessionId 非空）。
@@ -453,7 +455,10 @@ export async function restoreAndReconnect(
       }
     }
 
-    const driverOpts = mgr._buildDriverOptions(state, {
+    // 2026-10-25-trajectory-source-model task-03：spec 提升为局部变量——除传
+    // _buildDriverOptions 外，下方 driver.start 成功后作配置面请求头快照的
+    // 采集源（快照=当次恢复重建的配置面）。
+    const spec: DriverOptionsSpec = {
       exePath: exe,
       model: record.model,
       env: restoreEnv,
@@ -462,7 +467,8 @@ export async function restoreAndReconnect(
       resume: record.agentSessionId, // spike D3 跨进程 resume。
       mcpServers: mainAgentMcp,
       systemPrompt: state.systemPrompt, // task-05：resume 重注入 systemPrompt preset+append
-    });
+    };
+    const driverOpts = mgr._buildDriverOptions(state, spec);
     // task-02（D-001）：用归属 driver，按 provider 写句柄。
     const handleOrQuery = (await driver.start(
       inputQueue,
@@ -475,6 +481,15 @@ export async function restoreAndReconnect(
     }
     // fire consume 后台协程（同 create，长生命周期）。
     void mgr._runConsume(state);
+    // 2026-10-25-trajectory-source-model task-03/04：driver 生命周期点③
+    // restoreAndReconnect——恢复重建成功后采集配置面请求头快照。此刻
+    // currentRunId/claimToken 均空（崩溃 run 由 backend recover 收敛，恢复后
+    // 的首个 run 由 SESSION_INJECT 下发）：不传 runId，快照暂存 pending，等
+    // 恢复后首次 inject（带新 runId + rotated claim_token）补发——直接上报
+    // 会被 daemon.onTurnMessage 空 runId 守卫拒掉（backend submit_messages
+    // 要求真实 agent_run_id）。daemon 重启缓存已丢 → prev=undefined →
+    // reason=initial（design：可接受，前端 prev diff 为准会纠偏）。
+    mgr._captureSessionHeader(state, spec);
   } catch {
     // driver.start 抛错（cwd 不一致 / executable 缺失 / SDK jsonl 缺失）：
     // 同步收敛 → onSessionEnd(failed) + 从 store 移除（不复活）。

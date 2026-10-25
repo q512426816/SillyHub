@@ -42,6 +42,14 @@ import type {
 } from '../types.js';
 import type { SessionInjectAttachment } from '../../protocol.js';
 import type { ShellKind } from '../../policy/shell-paths.js';
+// 2026-10-25-trajectory-source-model task-03/04：配置面请求头快照（类型见
+// session-header-snapshot.ts；缓存/接线本体在 facade 类，经 SessionManagerCore
+// 暴露给 persistence.ts / turn-control.ts / lifecycle.ts 子模块）。
+import type {
+  PendingSessionHeaderReport,
+  SessionHeaderSnapshot,
+  SessionHeaderSpecSource,
+} from '../session-header-snapshot.js';
 
 /** task-08：Claude SDK ``CanUseTool`` 的结构性本地别名（SDK 类型 import 清零）。 */
 export type CanUseToolFn = NonNullable<ClaudeStartOptions['canUseTool']>;
@@ -558,6 +566,10 @@ export interface SessionManagerCore {
     string,
     { timer: ReturnType<typeof setTimeout>; runId: string }
   >;
+  /** 2026-10-25-trajectory-source-model task-03：配置面请求头快照缓存（变更检测基线）。 */
+  readonly _headerSnapshotBySession: Map<string, SessionHeaderSnapshot>;
+  /** 2026-10-25-trajectory-source-model task-04：无 runId 采集的待上报快照（inject 补发）。 */
+  readonly _pendingHeaderReport: Map<string, PendingSessionHeaderReport>;
   _flushScheduled: Promise<void> | null;
 
   // ── 跨簇协作方法（facade 同名方法一行委托到对应子模块 / 类内保留实现）─────
@@ -579,6 +591,21 @@ export interface SessionManagerCore {
     | undefined;
   /** driver-factory.ts */
   _buildDriverOptions(state: SessionState, spec: DriverOptionsSpec): Record<string, unknown>;
+  /**
+   * facade 类内保留（2026-10-25-trajectory-source-model task-03/04）：配置面请求头
+   * 快照采集 + 变更检测 + 上报（runId 空暂存 pending）。persistence.ts 的
+   * restoreAndReconnect 经本签名调用。
+   */
+  _captureSessionHeader(
+    state: SessionState,
+    spec: SessionHeaderSpecSource,
+    runId?: string,
+  ): void;
+  /**
+   * facade 类内保留（同上）：inject 成功后补发 pending 快照。turn-control.ts 的
+   * inject 经本签名调用。
+   */
+  _flushPendingSessionHeader(sessionId: string, runId: string): void;
   /** permission.ts */
   getPermissionResolver(sessionId: string): PermissionResolver | undefined;
   /** permission.ts */

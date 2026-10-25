@@ -54,6 +54,10 @@ function makeFakeMgr(): { mgr: SessionManagerCore; extras: FakeMgrExtras } {
     _disarmTurnStartWatchdog: extras.disarmTurnStartWatchdog,
     // 2026-10-21-task-wakeup-restore：4b-2 唤醒 debounce 清理触及的注册表。
     _taskWakeupPending: new Map(),
+    // 2026-10-25-trajectory-source-model task-03/04：4c-2 配置面请求头快照
+    // 缓存 + 待上报队列清理触及的两个 Map。
+    _headerSnapshotBySession: new Map(),
+    _pendingHeaderReport: new Map(),
     _destroyUsageLedger: extras.destroyUsageLedger,
     _runNotifyChain: vi.fn(async (_sid: string, fn: () => Promise<void>) => {
       await fn();

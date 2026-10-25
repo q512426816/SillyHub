@@ -359,6 +359,12 @@ export async function inject(
   state.lastActiveAt = Date.now();
   // task-10：inject push 后排队 flush（含 currentRunId，崩溃对账用）。
   mgr._scheduleFlush();
+  // 2026-10-25-trajectory-source-model task-04：补发待上报的配置面请求头快照。
+  // restoreAndReconnect 采集时无 runId（暂存 pending）在此落锚——inject 携带的
+  // runId 即恢复后首个 run，且 daemon 的 SESSION_INJECT 路由已先刷新 claimToken
+  // （refreshClaimToken 先于 sessionManager.inject），上报链畅通。常规轮 pending
+  // 为空 no-op（create/reload 采集时有 runId 已直发）。
+  mgr._flushPendingSessionHeader(sessionId, runId);
 
   if (wasRunningBeforeInject) {
     // 本条 inject 排在前一未 result turn 之后（spike S1 QUEUED 语义）。

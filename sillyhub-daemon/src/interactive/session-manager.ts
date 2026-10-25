@@ -57,6 +57,19 @@ import type {
 } from './driver.js';
 import { InputQueue } from './input-queue.js';
 import { PermissionResolver } from './permission-resolver.js';
+// 2026-10-25-trajectory-source-model task-03/04：配置面请求头快照——纯函数
+// （采集/比较/决策/消息形态）来自 session-header-snapshot.ts，会话级缓存与本类
+// 生命周期接线（create/reloadWithConfig/restoreAndReconnect 三处重建 spec 后采集）
+// 见 _headerSnapshotBySession / _captureSessionHeader 簇。
+import {
+  buildHeaderReportMessage,
+  buildSessionHeaderSnapshot,
+  decideHeaderReport,
+  type PendingSessionHeaderReport,
+  type SessionHeaderReportReason,
+  type SessionHeaderSnapshot,
+  type SessionHeaderSpecSource,
+} from './session-header-snapshot.js';
 import type {
   CanUseToolDecision,
   CreateSessionInput,
@@ -417,6 +430,36 @@ export class SessionManager {
   private readonly _turnStartWatchdogs = new Map<
     string,
     { timer: ReturnType<typeof setTimeout>; runId: string }
+  >();
+
+  /**
+   * 2026-10-25-trajectory-source-model task-03：sessionId → 上次已采集的配置面
+   * 请求头快照（变更检测基线）。create / reloadWithConfig 内核 / restore
+   * AndReconnect 三处重建 spec 后经 `_captureSessionHeader` 写入。
+   *
+   * daemon 重启（SessionManager 实例重建）缓存丢失 → 下次采集 prev=undefined →
+   * reason=initial（design：可接受，前端 prev diff 为准会纠偏）。会话终态由
+   * terminateSession 清理（防 Map 泄漏 + 同 id recreate 不拿陈旧基线误判
+   * change/skip）。纯内存态，不进 snapshotPersistable（快照消息已落 backend
+   * AgentRunLog，恢复侧由前端读历史，daemon 无需持久化基线）。
+   */
+  private readonly _headerSnapshotBySession = new Map<
+    string,
+    SessionHeaderSnapshot
+  >();
+
+  /**
+   * 2026-10-25-trajectory-source-model task-04：sessionId → 待上报的快照条目。
+   * 采集时决策出 reason 但无 runId 可挂（restoreAndReconnect 重建后
+   * currentRunId/claimToken 均空，直接上报会被 daemon.onTurnMessage 的空 runId
+   * 守卫拒掉——backend submit_messages 要求真实 agent_run_id）→ 暂存本 Map，
+   * 下一次 inject（backend SESSION_INJECT 携带新 runId + rotated claim_token）
+   * 时经 `_flushPendingSessionHeader` 补发。后写胜出（连续无 runId 采集覆盖
+   * 旧条目，最新配置面为准）。
+   */
+  private readonly _pendingHeaderReport = new Map<
+    string,
+    PendingSessionHeaderReport
   >();
 
   /** 方法体已下沉 notify-chain.ts（task-02 拆包），见该文件头注释。 */
@@ -1187,7 +1230,10 @@ export class SessionManager {
         effectiveAllowedRoots: input.effectiveAllowedRoots,
         systemPrompt: input.systemPrompt,
       });
-      const driverOpts = this._buildDriverOptions(state, {
+      // 2026-10-25-trajectory-source-model task-03：spec 提升为局部变量——除传
+      // _buildDriverOptions 外，下方 driver.start 成功后作配置面请求头快照的
+      // 采集源（同一 spec 单源，快照=当次重建的配置面，见 _captureSessionHeader）。
+      const spec: DriverOptionsSpec = {
         exePath,
         model: input.model,
         allowedTools: input.allowedTools,
@@ -1211,7 +1257,8 @@ export class SessionManager {
         forkMode: input.forkMode,
         mcpServers: mainAgentMcp,
         systemPrompt: input.systemPrompt,
-      });
+      };
+      const driverOpts = this._buildDriverOptions(state, spec);
       // task-03（2026-09-14-session-thinking-level / FR-03 创建链 / plan-review
       // P1-4）：思考档位透传——input.thinkingLevel → driverOpts.thinkingLevel
       //（InteractiveDriverStartOptions.thinkingLevel 契约字段，driver 侧
@@ -1241,6 +1288,11 @@ export class SessionManager {
 
       // 4. 异步 fire driver.consume（不阻塞 create 返回）。
       void this._runConsume(state);
+      // 2026-10-25-trajectory-source-model task-03/04：driver 生命周期点①create——
+      // 句柄就位后采集配置面请求头快照（首条 reason=initial），firstRunId 作上报
+      // 锚（空 runId 的旧形态由 pending → 首 inject 补发兜底）。失败路径（上方
+      // catch 删 store）不采集——会话未成立，缓存不留残余。
+      this._captureSessionHeader(state, spec, input.firstRunId ?? '');
       // task-09（1b / E1）：首轮也记轮首基线——create 不走 inject，但首轮工区快照
       // 与后续轮同口径（state.currentRunId 已是 firstRunId）。fire-and-forget。
       this._armTurnFileChanges(state.sessionId, state.currentRunId);
@@ -1347,6 +1399,84 @@ export class SessionManager {
       } catch {
         // 清理路径不抛（resolver 内部异常已被 settle 的 promise 吞，pending 不残留）。
       }
+    }
+  }
+
+  // ── 2026-10-25-trajectory-source-model task-03/04：配置面请求头快照簇 ─────────
+
+  /**
+   * 采集配置面请求头快照 + 变更检测 + （有 runId 时）上报。
+   *
+   * 采集时机（design 契约，仅三处 driver 生命周期点，轮内不采集——避免 MCP
+   * discover 抖动误报 change）：
+   *   1. create：driver.start 成功后（runId = firstRunId）；
+   *   2. reloadWithConfig：_reloadSessionNow 内核句柄重建成功后（runId 由
+   *      reloadWithConfig 主体经 opts.headerRunId 传入 = 切换轮 runId）；
+   *   3. restoreAndReconnect：driver.start 成功后（无 runId → pending，等 inject）。
+   *
+   * 快照取自当次重建的 spec（DriverOptionsSpec 三数据点原值：systemPrompt /
+   * allowedTools / mcpServers，纯函数见 session-header-snapshot.ts）；与会话级
+   * 缓存 `_headerSnapshotBySession` 字段级比较——首条/重启后 reason=initial、
+   * 不等 reason=change、相等不上报。
+   *
+   * 上报走既有 deps.onTurnMessage 桥（daemon.onTurnMessage → hubClient
+   * submitMessages）：session_header 消息是无 type+seq 特征的 legacy flat dict，
+   * daemon 侧原样透传（不进 agent_event 包装），复用其 dedup_key / 微批 /
+   * resilience 重试 / claim_token 空窗 pending_token 全套基建——对 daemon.ts
+   * 零侵入。fire-and-forget：快照上报失败不阻塞生命周期主路径（onTurnMessage
+   * 内部已 warn 吞错，此处再兜一层防测试 mock 同步抛）。
+   *
+   * @param state 目标会话（driver 生命周期点均在句柄就位后调用）
+   * @param spec 当次传给 _buildDriverOptions 的 spec（快照三数据点来源）
+   * @param runId 上报锚定 run；空（restore 路径）→ 暂存 pendingHeaderReport
+   */
+  private _captureSessionHeader(
+    state: SessionState,
+    spec: SessionHeaderSpecSource,
+    runId?: string,
+  ): void {
+    const next = buildSessionHeaderSnapshot(spec);
+    const reason = decideHeaderReport(
+      this._headerSnapshotBySession.get(state.sessionId),
+      next,
+    );
+    this._headerSnapshotBySession.set(state.sessionId, next);
+    if (reason === null) return; // 配置面无变化：不上报（缓存已刷新为最新）。
+    if (runId) {
+      this._emitSessionHeaderReport(state.sessionId, runId, next, reason);
+    } else {
+      this._pendingHeaderReport.set(state.sessionId, { snapshot: next, reason });
+    }
+  }
+
+  /**
+   * 补发待上报快照（inject 成功 push 后调用，turn-control.ts 接线）。
+   *
+   * restoreAndReconnect 采集时无 runId 的条目在此落锚：inject 携带的 runId
+   * 即恢复后首个 run，且 SESSION_INJECT 路由已先刷新 claimToken（daemon.ts
+   * refreshClaimToken 先于 sessionManager.inject），上报链畅通。无条目 no-op。
+   */
+  private _flushPendingSessionHeader(sessionId: string, runId: string): void {
+    const pending = this._pendingHeaderReport.get(sessionId);
+    if (!pending) return;
+    this._pendingHeaderReport.delete(sessionId);
+    this._emitSessionHeaderReport(sessionId, runId, pending.snapshot, pending.reason);
+  }
+
+  /** 组装 session_header 消息并 fire-and-forget 走 onTurnMessage 桥。 */
+  private _emitSessionHeaderReport(
+    sessionId: string,
+    runId: string,
+    snapshot: SessionHeaderSnapshot,
+    reason: SessionHeaderReportReason,
+  ): void {
+    const msg = buildHeaderReportMessage(snapshot, reason);
+    try {
+      void Promise.resolve(
+        this.deps.onTurnMessage(sessionId, runId, msg),
+      ).catch(() => undefined);
+    } catch {
+      // 同步抛（测试 mock 形态）兜底吞掉：快照上报绝不反向打断生命周期路径。
     }
   }
 
@@ -2301,6 +2431,13 @@ export class SessionManager {
       systemPrompt: nextSystemPrompt,
       providerConfig: nextProviderConfig,
       forkSession: profileSwitched,
+      // 2026-10-25-trajectory-source-model task-03/04：driver 生命周期点②reload
+      // WithConfig——内核重建 spec 后采集配置面快照，切换轮 runId 作上报锚。
+      // 空串（异常载荷）→ 采集照做但暂存 pending，等下一次 inject 补发。
+      // 键缺席（reloadWithProvider 既有路径）= 不采集——provider 热切换的 spec
+      // 不携带 systemPrompt（人格已固化 jsonl，无需重注入），采集出的快照不代表
+      // 完整配置面，design 契约把采集点限定在 reloadWithConfig。
+      headerRunId: payload.runId ?? '',
     });
     // reload 成功：同步 profile 承载字段（mcpRefs/skillRefs 透传；systemPrompt 已由
     // 内核写入 state）。profile=null 不动（保留现值）。
@@ -2368,6 +2505,12 @@ export class SessionManager {
       providerConfig?: ProviderConfig | null;
       /** ql-20260818-002/004：档案维度切换（含取消）→ fork 新会话使人格生效。 */
       forkSession?: boolean;
+      /**
+       * 2026-10-25-trajectory-source-model task-03：配置面请求头快照的上报锚
+       * runId。**键在场（含空串）= 本轮 reload 要采集快照**；键缺席
+       * （reloadWithProvider 既有路径）= 不采集。见 reloadWithConfig 传参处注释。
+       */
+      headerRunId?: string;
     },
   ): Promise<void> {
     // ql-20260825-f3#2：per-session 串行化（chain 模式）。等上一轮同会话 reload 完成
@@ -2448,6 +2591,8 @@ export class SessionManager {
       providerConfig?: ProviderConfig | null;
       /** ql-20260818-002/004：档案维度切换（含取消）→ fork 新会话使人格生效。 */
       forkSession?: boolean;
+      /** 2026-10-25-trajectory-source-model task-03：见 _reloadSession 同名注释。 */
+      headerRunId?: string;
     },
   ): Promise<void> {
     const state = this._store.get(sessionId);
@@ -2641,7 +2786,10 @@ export class SessionManager {
           : {}),
         ...(state.systemPrompt !== undefined ? { systemPrompt: state.systemPrompt } : {}),
       });
-      const driverOpts = this._buildDriverOptions(state, {
+      // 2026-10-25-trajectory-source-model task-03：spec 提升为局部变量——除传
+      // _buildDriverOptions 外，下方句柄重建成功后作配置面请求头快照采集源
+      // （仅 opts.headerRunId 在场时采集，见 _reloadSession 同名注释）。
+      const spec: DriverOptionsSpec = {
         exePath,
         env: newEnv,
         enableApproval: state.manualApproval ?? false,
@@ -2657,7 +2805,8 @@ export class SessionManager {
           : {}),
         // ql-20260818-002/004：档案维度切换 → fork（resume 下人格仅对 fork 生效）。
         ...(opts.forkSession === true ? { forkSession: true } : {}),
-      });
+      };
+      const driverOpts = this._buildDriverOptions(state, spec);
 
       // ── ⑤ driver.start(state.inputQueue, driverOpts) → 新句柄 ──
       // SDK spawn 新子进程并从 ~/.claude/projects/<encoded-cwd>/<sid>.jsonl
@@ -2715,6 +2864,13 @@ export class SessionManager {
       void this._runConsume(state);
       // 排队 flush（snapshotPersistable 落盘；env / providerConfig / systemPrompt 已替换）。
       this._scheduleFlush();
+      // 2026-10-25-trajectory-source-model task-03/04：driver 生命周期点②（续）——
+      // 句柄重建成功后采集配置面请求头快照。采集与上报都在成功段（失败段 R-01
+      // 回滚旧句柄，配置面未变，不动缓存）。仅 opts.headerRunId 在场
+      // （reloadWithConfig 路径）采集；headerRunId 空串 → pending 等 inject 补发。
+      if (opts.headerRunId !== undefined) {
+        this._captureSessionHeader(state, spec, opts.headerRunId);
+      }
       // reload 成功通知（ql-20260911-003-355a：daemon 回收 modelUsage 差分基线——
       // pi/cursor 快照 per-handle 从 0 累计，句柄重建后残留基线会让恢复首轮少记）。
       try {
