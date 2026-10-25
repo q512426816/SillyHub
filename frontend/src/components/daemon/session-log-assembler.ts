@@ -497,6 +497,7 @@ export interface AssemblerLogInput {
 export type TurnSegment =
   | { kind: "text"; id: string; text: string; streaming: boolean; startedAt: number | null; segId?: string | null }
   | { kind: "thinking"; id: string; text: string; streaming: boolean; ts: number | null; segId?: string | null }
+  | RequestHeaderTurnSegment
   | {
       /** 工具段：id = 解析自 tool_call JSON 的 tool_use_id（result 配对定位 +
        * 子代理归属路由 key）；解析失败用 logId 兜底（toolName=null 原样显示 raw，R-07）。 */
@@ -695,6 +696,25 @@ export type TurnSegment =
     };
 
 export type ToolTurnSegment = Extract<TurnSegment, { kind: "tool" }>;
+
+/** 配置面请求头快照（2026-10-25-trajectory-source-model / D-002：档案
+ *  systemPrompt 配置段 + 工具白名单 + MCP 服务清单——非引擎全文）。 */
+export interface SessionHeaderSnapshot {
+  systemPrompt: string | null;
+  allowedTools: string[];
+  mcpServers: string[];
+}
+
+// 会话级独立序列段（daemon session_header 日志行装配产物；不进轮块流，
+// D-011——轨迹按 ts 落入对应轮区间派生「系统」行）。
+export interface RequestHeaderTurnSegment {
+  kind: "request_header";
+  id: string;
+  header: SessionHeaderSnapshot;
+  /** 同会话前一条快照（diff 基准；首条为 null）。 */
+  prev: SessionHeaderSnapshot | null;
+  ts: number | null;
+}
 export type StubTurnSegment = Extract<TurnSegment, { kind: "subagent_stub" }>;
 // ql-20260920-006：轮内用户消息段（引导注入留痕，见 TurnSegment.user_msg 注）。
 export type UserMsgTurnSegment = Extract<TurnSegment, { kind: "user_msg" }>;
@@ -2189,7 +2209,12 @@ export type TurnTriggerKind =
   | "auto_resume"
   | "shadow_chat"
   | "group_chat"
-  | "schedule";
+  | "schedule"
+  // 2026-10-25-trajectory-source-model FR-01：系统注入来源（dsh source.kind
+  // !== 'user' 同构）——主控简报 / Worker 派发 / 后台通知，均系统代笔。
+  | "team_brief"
+  | "worker_dispatch"
+  | "agent_notice";
 
 /**
  * 触发源呈现配置表（TurnTriggerView 单一渲染真相源）：
@@ -2209,6 +2234,12 @@ export const TURN_TRIGGER_META: Record<
   // 2026-10-22-turn-trigger-metadata-p2：定时消息到点（服务端 metadata 戳驱动，
   // 用户亲笔正文照常显示）。
   schedule: { glyph: "⏰", label: "定时消息到点", contentHidden: false },
+  // 2026-10-25-trajectory-source-model FR-01：系统注入来源三行（系统代笔，
+  // contentHidden=true——DB 行 content 为用户 /team 原文或通知全文，折叠展开
+  // 如实显示）。
+  team_brief: { glyph: "🧭", label: "团队派发简报", contentHidden: true },
+  worker_dispatch: { glyph: "🛠", label: "Worker 派发指令", contentHidden: true },
+  agent_notice: { glyph: "🔔", label: "后台系统通知", contentHidden: true },
 };
 
 /**

@@ -2077,6 +2077,10 @@ function segmentTsOf(seg: TurnSegment): number | null {
       return seg.startedAt;
     case "thinking":
       return seg.ts;
+    // 2026-10-25-trajectory-source-model：请求头快照段取捕获 ts（仅轨迹消费，
+    // 轮块流渲染已跳过——此分支只为类型穷尽，不参与 AskUser 穿插）。
+    case "request_header":
+      return seg.ts;
     case "tool":
       return seg.startedAt;
     case "stderr":

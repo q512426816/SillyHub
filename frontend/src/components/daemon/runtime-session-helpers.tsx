@@ -19,6 +19,8 @@ import {
   segmentsToLegacy,
   stripPreambleText,
   type AssemblerLogInput,
+  type RequestHeaderTurnSegment,
+  type SessionHeaderSnapshot,
   type TurnSegment,
   type TurnTriggerKind,
   type UserMsgTurnSegment,
@@ -412,6 +414,29 @@ export function logsToTurns(logs: AgentRunLogEntry[]): SessionTurnView[] {
     list.push(log);
     map.set(log.run_id, list);
   }
+  // 2026-10-25-trajectory-source-model FR-03：session_header prev 链——分组前
+  // 全量扫描（跨 run_id 穿透分组边界，Grill 裁定），按时间序给每条快照行
+  // 记录前一条快照（首条 null）。
+  const headerPrevById = new Map<string, SessionHeaderSnapshot | null>();
+  {
+    let prevHeader: SessionHeaderSnapshot | null = null;
+    const headerLogs = logs
+      .filter((log) => log.channel === "session_header")
+      .sort((a, b) => Date.parse(a.timestamp) - Date.parse(b.timestamp));
+    for (const log of headerLogs) {
+      headerPrevById.set(log.id, prevHeader);
+      try {
+        const parsed = JSON.parse(log.content_redacted ?? "") as SessionHeaderSnapshot;
+        prevHeader = {
+          systemPrompt: parsed.systemPrompt ?? null,
+          allowedTools: Array.isArray(parsed.allowedTools) ? parsed.allowedTools : [],
+          mcpServers: Array.isArray(parsed.mcpServers) ? parsed.mcpServers : [],
+        };
+      } catch {
+        prevHeader = null;
+      }
+    }
+  }
   regroupSubagentLogsByParent(map);
   const turns: HistoryAttachTurnView[] = [];
   let turnIndex = 0;
@@ -443,6 +468,10 @@ export function logsToTurns(logs: AgentRunLogEntry[]): SessionTurnView[] {
     const triggerSegments: Extract<TurnSegment, { kind: "turn_trigger" }>[] = [];
     const seenText = new Set<string>();
     const assemblerInputs: AssemblerLogInput[] = [];
+    // 2026-10-25-trajectory-source-model FR-03：配置面请求头快照段（session_header
+    // 日志行 → request_header 段，挂当轮；prev 链会话级——分组前全量扫描建
+    // map[logId] → prev 快照，供前端 diff 分类，daemon reason 仅校验）。
+    const headerSegments: RequestHeaderTurnSegment[] = [];
     // 2026-10-10-system-opened-turn-usermsg：开轮槽占用标记——本 run 首条
     // user_input 即使被剥空（[后台任务通知] / 纯前导系统注入）也占住 prompt 槽
     // （占位空组 → prompt 保持空、顶部无用户气泡）；后到真实消息进组 2+ 转
@@ -452,6 +481,27 @@ export function logsToTurns(logs: AgentRunLogEntry[]): SessionTurnView[] {
     let openerSlotSeen = false;
     const OPENER_RESERVED_KEY = "\u0000__opener__";
     for (const entry of entries) {
+      // 2026-10-25-trajectory-source-model FR-03：session_header 行不进段分类
+      // （classifySessionLog 未知 channel 原样返回会污染装配），独立建快照段。
+      if (entry.channel === "session_header") {
+        try {
+          const parsed = JSON.parse(entry.content_redacted ?? "") as SessionHeaderSnapshot;
+          headerSegments.push({
+            kind: "request_header",
+            id: `header:${entry.id ?? `idx${turnIndex}-${headerSegments.length}`}`,
+            header: {
+              systemPrompt: parsed.systemPrompt ?? null,
+              allowedTools: Array.isArray(parsed.allowedTools) ? parsed.allowedTools : [],
+              mcpServers: Array.isArray(parsed.mcpServers) ? parsed.mcpServers : [],
+            },
+            prev: headerPrevById.get(entry.id) ?? null,
+            ts: entry.timestamp ? Date.parse(entry.timestamp) : null,
+          });
+        } catch {
+          // 快照 JSON 不可解析：跳过（不伪造）。
+        }
+        continue;
+      }
       const seg = classifySessionLog(entry.content_redacted ?? "", entry.channel);
       if (!seg) continue;
       // ql-20260822-010：内容级去重收窄到 user_input / reply——原 kind:text 一刀切
@@ -641,7 +691,14 @@ export function logsToTurns(logs: AgentRunLogEntry[]): SessionTurnView[] {
       status: "completed",
       seenLogIds: new Set(entries.map((e) => e.id)),
       processItems: legacy.processItems,
-      segments: [...triggerSegments, ...preambleSegments, ...segmentsWithUserMsg],
+      segments: [
+        ...triggerSegments,
+        ...preambleSegments,
+        ...segmentsWithUserMsg,
+        // 2026-10-25-trajectory-source-model：请求头快照段挂当轮（轮块流渲染
+        // 已跳过 kind=request_header；轨迹全轮扫描消费）。
+        ...headerSegments,
+      ],
       turnStartedAt: firstLogTimestampMs(entries),
       // ql-20260621：历史回看无实时 token（logs 接口不含 token），置 null。
       // 若后续 logs 接口补 token 字段可在此填充。

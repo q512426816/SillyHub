@@ -72,6 +72,12 @@ import { processLabel } from "@/components/daemon/process-labels";
 import { CopyButton } from "@/components/daemon/copy-button";
 import { FileMessageCard } from "@/components/daemon/file-message-card";
 import { useSubagentPanel } from "@/components/daemon/subagent-panel-context";
+// 2026-10-25-subagent-card-unify-panel（FR-05）：子代理卡片内嵌内部活动流动条
+//（与外部会话跑马灯同一组件/机制，inline 变体贴卡片布局）。
+import {
+  TurnLiveMarquee,
+  deriveLiveMarqueeEntries,
+} from "@/components/daemon/turn-live-marquee";
 import { ToolExpandBody } from "@/components/daemon/tool-args-detail";
 import {
   TranslatedThinkingBody,
@@ -925,7 +931,7 @@ export const SubagentBlockView = memo(function SubagentBlockView({
   useSegmentAnimations();
   // task-01：右栏面板 context——null（dialog 等旧宿主无 Provider）走下方原内联
   // 展开分支；有值（page 模式）提前 return 紧凑卡片。两分支共享全部头部派生
-  //（metaStatus/taskSeg/durationText/dotCls/name），零复制粘贴。
+  //（metaStatus/durationText/dotCls/name），零复制粘贴。
   const panel = useSubagentPanel();
   // 2026-10-13-subagent-stub-reconcile：任务快照对账（tool_use_id = 段 id）——
   // 仅在「无元数据且段三态 running」时生效（与 subagentHeaderOf 同一优先级
@@ -944,19 +950,11 @@ export const SubagentBlockView = memo(function SubagentBlockView({
       : null;
   // task-13：[TASK_*] 元数据优先（stub 段无元数据恒走原三态推导）；
   // FR-02 收敛：running 元数据 + 快照终态 → 快照终态（与 subagentHeaderOf 同一裁决）。
-  const taskSeg = segment.kind === "tool" ? segment : null;
   const status =
     reconciled && metaStatus === "running" && reconciled.status !== "running"
       ? reconciled.status
       : (metaStatus ?? reconciled?.status ?? subagentStatus(segment));
   const running = status === "running";
-  const [open, setOpen] = useState(running);
-  // running→终态过渡：收敛为折叠（初值已按运行态取展开，此处只管生命周期中段翻转）。
-  const prevRunningRef = useRef(running);
-  useEffect(() => {
-    if (prevRunningRef.current && !running) setOpen(false);
-    prevRunningRef.current = running;
-  }, [running]);
 
   // task-13：后台异步运行中本地走秒（FR-06 渲染经济性对齐 subagent-catalog 模式：
   // tick 是组件局部 state，仅 async 运行中启动，终态/卸载清理）；锚点 = 段
@@ -977,25 +975,11 @@ export const SubagentBlockView = memo(function SubagentBlockView({
   // 参传入（纯函数内同一优先级契约再裁决一次，双保险）。
   const header = subagentHeaderOf(segment, now, reconciled);
   const { dotCls, name, durationText } = header;
-  // task-13：正文尾行 = 最近一条 [TASK_*] 消费后的进度摘要（段元数据，原型
-  // blk-body 的 └ 行）——运行中 = 最近工具名（brand 阶）+ 进行中摘要（PROGRESS
-  // 行）；终态 = 终态文案 + 摘要（NOTIFICATION 行，taskToolName 已陈旧不展示）。
-  // 无摘要不渲染。
-  const progressLine: { label: string | null; tool: string | null; summary: string } | null =
-    (() => {
-      if (taskSeg == null || metaStatus == null) return null;
-      const summary = taskSeg.taskSummary?.trim() ?? "";
-      if (metaStatus === "running") {
-        const tool = taskSeg.taskToolName?.trim() ?? "";
-        return tool || summary ? { label: null, tool: tool || null, summary } : null;
-      }
-      return summary
-        ? { label: TASK_STATUS_BADGE[metaStatus].label, tool: null, summary }
-        : null;
-    })();
-  // 头部行内容子结构（task-01 抽出，两分支共享）：状态点 / 🤖 / 名称 / 类型
-  // 标签 / task-13 徽标 / 时长——紧凑卡片与内联展开同源派生，避免大段 JSX
-  // 复制漂移。
+  // 头部行内容子结构：状态点 / 🤖 / 名称 / 类型标签 / task-13 徽标 / 时长——
+  // 紧凑卡片与纯展示两分支同源派生，避免大段 JSX 复制漂移。
+  // 2026-10-25-subagent-card-unify-panel：内联展开分支（children 原地渲染 +
+  // progressLine 尾行）已按用户裁决删除——卡片统一为「紧凑卡片 + 右栏/Drawer
+  // 详情」，children 一律经 SubagentDetailPanel 展示。
   const headerContent = (
     <>
       <span aria-hidden className={cn("h-2 w-2 shrink-0 rounded-full", dotCls)} />
@@ -1027,6 +1011,25 @@ export const SubagentBlockView = memo(function SubagentBlockView({
       )}
     </>
   );
+
+  // 2026-10-25-subagent-card-unify-panel（FR-05）：卡片内嵌内部活动流动条——
+  // 子代理内部过程在框内流动展示（与外部会话跑马灯同机制：只向最新推进、
+  // 不循环、运行中转圈/走秒/等待指示）；children 为空不渲染。外部会话跑马灯
+  // 维持容器条目（名称/状态/时间），两层分工。
+  const inlineEntries = useMemo(
+    () => deriveLiveMarqueeEntries(segment.children),
+    [segment.children],
+  );
+  const inlineMarquee =
+    segment.children.length > 0 ? (
+      <div className="border-t border-indigo-200/60 px-3 pb-2 pt-1.5">
+        <TurnLiveMarquee
+          layout="inline"
+          testId="subagent-live-marquee"
+          entries={inlineEntries}
+        />
+      </div>
+    ) : null;
 
   // task-01：紧凑卡片分支（page 模式有 context）——中栏只显头部行，无展开
   // body、不内联 children（详情移右栏）；头部仍是可点击 button（含 Enter/Space
@@ -1066,72 +1069,25 @@ export const SubagentBlockView = memo(function SubagentBlockView({
         >
           {headerContent}
         </div>
+        {inlineMarquee}
       </div>
     );
   }
 
+  // 2026-10-25-subagent-card-unify-panel（FR-01）：无面板上下文（回放体/悬浮
+  // 助手等无 Provider 宿主）——同款头部纯展示：不可点击、无展开语义；完整
+  // 内部过程由「进度」视图或具备面板能力的宿主承载。
   return (
     <div className="w-full self-stretch overflow-hidden rounded-[10px] border border-indigo-200 bg-indigo-50">
       <div
-        role="button"
-        tabIndex={0}
-        aria-expanded={open}
-        onClick={() => {
-          if (hasActiveTextSelection()) return; // ql-20260825-011：拖选中不触发折叠
-          setOpen(!open);
-        }}
-        onKeyDown={(e) => {
-          if (e.key === "Enter" || e.key === " ") {
-            e.preventDefault();
-            setOpen(!open);
-          }
-        }}
         className={cn(
-          "relative flex cursor-pointer select-text items-center gap-2 overflow-hidden px-3.5 py-[7px] text-xs",
+          "relative flex select-text items-center gap-2 overflow-hidden px-3.5 py-[7px] text-xs",
           running && "seg-sweep",
         )}
       >
         {headerContent}
       </div>
-      {open && (
-        <div className="seg-subagent-body flex flex-col gap-[5px] border-t border-indigo-200 px-3.5 pb-2.5 pl-5 pt-2">
-          {segment.children.map((child) => (
-            <SegmentView key={child.id} segment={child} />
-          ))}
-          {progressLine && (
-            <p
-              className="flex min-w-0 items-baseline gap-1.5 font-mono text-[10.5px] text-muted-foreground"
-              title={`${progressLine.tool ?? progressLine.label ?? ""} ${progressLine.summary}`.trim()}
-            >
-              <span aria-hidden className="shrink-0 text-muted-foreground/70">
-                └
-              </span>
-              {progressLine.label && (
-                <span
-                  className={cn(
-                    "shrink-0 font-semibold",
-                    metaStatus === "completed"
-                      ? "text-emerald-600"
-                      : metaStatus === "failed"
-                        ? "text-destructive"
-                        : "text-muted-foreground",
-                  )}
-                >
-                  {progressLine.label}
-                </span>
-              )}
-              {progressLine.tool && (
-                <span className="shrink-0 font-semibold text-brand-600">
-                  {progressLine.tool}
-                </span>
-              )}
-              {progressLine.summary && (
-                <span className="min-w-0 truncate">{progressLine.summary}</span>
-              )}
-            </p>
-          )}
-        </div>
-      )}
+      {inlineMarquee}
     </div>
   );
 });
@@ -1790,6 +1746,10 @@ export const SegmentView = memo(function SegmentView({ segment }: SegmentViewPro
       // 2026-10-22-turn-trigger-generalize：轮触发溯源行（按 trigger 配置渲染
       // ——系统代笔折叠/来源标注两形态），对话/进度两视图共用。
       return <TurnTriggerView segment={segment} />;
+    case "request_header":
+      // 2026-10-25-trajectory-source-model（D-011）：配置面请求头快照段——会话级
+      // 序列数据，仅轨迹视图消费（TrajectoryPane 全轮扫描）；轮块流不渲染。
+      return null;
     default: {
       // 穷尽防御：TurnSegment 新增 kind 时此处编译期报错（never 不兼容）。
       const exhaustive: never = segment;

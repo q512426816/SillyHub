@@ -1525,6 +1525,11 @@ export function SessionPanelPage({
             refreshQueue();
           },
           onLog: (env) => {
+            // 2026-10-25-trajectory-source-model FR-03：session_header 快照行实时
+            // 到达时不进装配器（未知通道污染 output）——刷新后历史路径 logsToTurns
+            // 装配为 request_header 段（快照低频 initial/change，可接受延迟呈现；
+            // 实时装配留待实测需要再加）。
+            if (env.channel === "session_header") return;
             // user_input 是用户消息（attach 历史/占位 turn 已作 prompt），不进 output
             // （装配器内同语义双保险）。task-09（FR-05）：其余日志归一喂共享装配器，
             // 分类 / override 撤回 / tool 配对 / 子代理归属一律依赖装配器导出。

@@ -61,7 +61,10 @@ export type AgentRunLogChannel =
   | "user_input"
   // 2026-09-10-group-agent-direct-chat：群会话 channel=system 行（汇总收口
   // 状态卡落库形态，design §5.6；单聊路径不产生）。
-  | "system";
+  | "system"
+  // 2026-10-25-trajectory-source-model：daemon 轮边界上报的配置面请求头
+  // 快照行（backend channel 直通落库；前端装配 request_header 段）。
+  | "session_header";
 
 export interface AgentRunLogEntry {
   id: string;
