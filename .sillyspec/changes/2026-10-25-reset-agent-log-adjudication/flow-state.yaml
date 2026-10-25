@@ -1,0 +1,37 @@
+tier: thin
+legacy_fallback: false
+substeps:
+  artifacts: done
+born_face: thin
+with_tasks: false
+review_force: null
+input: >-
+  agent日志清库脚本终局裁决落痕
+
+
+  动机：reset_agent_log_attribution.py（2026-09-13 部署裁决从迁移链抽出的一次性脚本）原定时序为「backend 发布 → CLI 升级 → 重推开始前跑一次」。2026-10-25
+  生产库实证重推窗口早已关闭：09-14 周起 1059 行 platform_agent_logs 100% 由新版 daemon own-only 推送写入正确归属、897 个新代 tool_report
+  会话活跃、change_session_links 最新一条 10-25 当天；旧错配残留仅 6 行日志 + 1 个旧会话 + 2 条旧链接。此时 apply = 摧毁 6 周正确数据换取清理 9 行残留，DG-03
+  前提不成立，终局裁决为永不执行。deploy-to-server skill 的「一次性运维动作（执行完可删本段）」按约定改写为终局裁决记录，防止每次部署重新纠结。
+
+
+  成功标准：
+
+  - SKILL.md 原「一次性运维动作」段替换为终局裁决记录（含窗口关闭实证数据与永不执行结论、残留面数字）
+
+  - 常见坑清单对应条目口径同步（不再指向一次性运维段）
+
+  - 纯文档改动，不触 src/test
+autopilot: false
+prestage_ack: true
+baseline_commit: f6ba7bd9cf58d4ea0bef8e6987fed75537f71672
+updatedAt: '2026-10-25T10:37:12.827Z'
+cross_baselines:
+  sillyspec: e26546db6247f7b07df5e68583ab7e5a041d9014
+baseline_sha256: ead3c67d0970fbd49763b7d38d05bc62213ed146cf19262eaf87b780dd2d789b
+spec_approved: true
+spec_approved_at: '2026-10-25T10:35:27.280Z'
+spec_approved_by: anon@DESKTOP-HJ0AM09
+spec_approved_channel: agent-self
+spec_attested_by: anon@DESKTOP-HJ0AM09
+
