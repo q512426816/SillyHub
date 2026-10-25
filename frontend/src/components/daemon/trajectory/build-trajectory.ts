@@ -70,9 +70,6 @@ export interface TrajectoryRow {
     /** 2026-10-22-trajectory-context-jump：system_event 派生的上下文行
      *  （账本标签显示「上下文」）。 */
     contextEvent?: boolean;
-    /** 2026-10-25-trajectory-system-rows：团队派发指令（主控 brief / Worker
-     *  派发，特征前缀识别）派生的系统行（账本标签显示「系统」）。 */
-    systemBrief?: boolean;
   };
 }
 

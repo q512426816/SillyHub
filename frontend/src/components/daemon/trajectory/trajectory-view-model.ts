@@ -107,11 +107,9 @@ function clipSummary(text: string | undefined, max = 160): string {
 }
 
 /** 工具行摘要：优先主参数/命令，其次工具名。 */
-/** 行标签：system_event 派生行显示「上下文」（dsh 对照的 context 类）；
- *  团队派发指令识别行显示「系统」（dsh 对照的 system 类）。 */
+/** 行标签：system_event 派生行显示「上下文」（dsh 对照的 context 类）。 */
 function recordKindLabel(row: TrajectoryRow): string {
   if (row.kind === "system" && row.meta?.contextEvent) return "上下文";
-  if (row.kind === "system" && row.meta?.systemBrief) return "系统";
   return KIND_LABEL[row.kind] ?? row.kind;
 }
 
