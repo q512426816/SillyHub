@@ -1,0 +1,21 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-25-fe-build-unblock",
+  "rows": [
+    {
+      "anchor": "FR-02",
+      "row_id": "2026-10-25-fe-build-unblock:flow:测试绑定FR-02",
+      "tests": [
+        "frontend/src/components/daemon/__tests__/session-panel-variant.test.tsx「全部 13 用例（既有回归面）」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-25-fe-build-unblock"
+    }
+  ]
+}

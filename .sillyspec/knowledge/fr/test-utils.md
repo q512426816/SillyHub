@@ -1573,3 +1573,29 @@ created_at: 2026-10-16T01:30:35.950Z
 摘要：回归核验
 全文：.sillyspec/changes/archive/2026-10-25-marquee-awaiting-real-data/requirements.md#FR-04
 最近确认：6cfbdbe137fdb12b2a8829192a79c454cd394a5f
+
+## FR-test-utils-082 pnpm build 成功（Type error 归零）
+变更：2026-10-25-fe-build-unblock
+状态：active
+摘要：主路径
+全文：.sillyspec/changes/archive/2026-10-25-fe-build-unblock/requirements.md#FR-01
+最近确认：a632a37e3975ae0bf31c92290078a9fbede8ce2a
+
+## FR-test-utils-083 行为零变化：首轮 configChangeLine 前轮传 null 语义不变
+变更：2026-10-25-fe-build-unblock
+状态：active
+摘要：零回归
+全文：.sillyspec/changes/archive/2026-10-25-fe-build-unblock/requirements.md#FR-02
+最近确认：a632a37e3975ae0bf31c92290078a9fbede8ce2a
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-25-fe-build-unblock:flow:测试绑定FR-02
+  tests: frontend/src/components/daemon/__tests__/session-panel-variant.test.tsx「全部 13 用例（既有回归面）」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-25-fe-build-unblock
+  status: active

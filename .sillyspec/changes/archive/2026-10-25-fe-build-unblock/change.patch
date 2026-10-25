@@ -1,0 +1,28 @@
+diff --git a/frontend/src/components/daemon/__tests__/session-panel-variant.test.tsx b/frontend/src/components/daemon/__tests__/session-panel-variant.test.tsx
+index 8a19f4535..6e316baf7 100644
+--- a/frontend/src/components/daemon/__tests__/session-panel-variant.test.tsx
++++ b/frontend/src/components/daemon/__tests__/session-panel-variant.test.tsx
+@@ -235,7 +235,7 @@ function setupPage(
+         mode="page"
+         sessionId="sess-variant"
+         machines={[]}
+-        llmProviders={opts?.llmProviders ?? ([] as never[])}
++        llmProviders={(opts?.llmProviders ?? []) as never[]}
+         {...(variant ? { variant } : {})}
+       />
+     </QueryClientProvider>,
+diff --git a/frontend/src/components/daemon/session-panel/page-helpers.tsx b/frontend/src/components/daemon/session-panel/page-helpers.tsx
+index 5034482f1..f5271b4a2 100644
+--- a/frontend/src/components/daemon/session-panel/page-helpers.tsx
++++ b/frontend/src/components/daemon/session-panel/page-helpers.tsx
+@@ -432,7 +432,9 @@ export function enrichDisplayTurns(
+     return ordered.map((t, i) => {
+       if (t.configChangeLine) return t;
+       const line = buildConfigChangeLine(
+-        i > 0 ? ordered[i - 1].whoLine : null,
++        // noUncheckedIndexedAccess：i=0 时 ordered[-1] 为 undefined——?. 收窄
++        //（行为零变化：首轮本就传 null）。
++        i > 0 ? (ordered[i - 1]?.whoLine ?? null) : null,
+         t.whoLine,
+       );
+       return line ? { ...t, configChangeLine: line } : t;

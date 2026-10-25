@@ -211,3 +211,4 @@
 | 2026-10-25 | 2026-10-23-pre-session-draft-persist | 新建会话未发送草稿跨刷新切换保留 |
 | 2026-10-25 | 2026-10-25-marquee-awaiting-real-data | 跑马灯等待条目接入真实计时与token |
 | 2026-10-25 | 2026-10-25-session-git-worktree-root | 会话 git 分支指示项感知 sillyspec 工作树 |
+| 2026-10-25 | 2026-10-25-fe-build-unblock | 修复前端构建红态两处类型错误 |
