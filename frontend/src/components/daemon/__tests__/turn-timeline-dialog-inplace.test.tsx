@@ -7,8 +7,9 @@
 //      （两段之间的提问渲染在两段之间，晚于全部段的提问渲染在末段之后）；
 //   2. 仅有提问、无对话段的轮也渲染 ❓ 块（旧行为的块同样不依赖段存在）；
 //   3. 旧回退路径（segments undefined）：❓ 块仍渲染（旧行为不回归）；
-//   4. 「全部」视图穿插行为零改动（AskUserToolCard 路径，已有用例覆盖，此处
-//      仅断言对话视图块在全部视图不双画轻量块）。
+//   4. 「全部」视图与对话视图统一同款 ❓ 问答块（2026-10-25-session-tab-visual-unify：
+//      原 AskUserToolCard 工具卡路径删除，穿插排序不受影响；此处断言全部视图
+//      问答块单份不双画）。
 //
 // mock 口径：MarkdownText（next/dynamic jsdom 同步渲染 null）——照抄
 // turn-timeline-conversation-file-card.test 惯例。
@@ -178,7 +179,7 @@ describe("「对话」视图 ❓ 提问记录按时间穿插（2026-10-10-dialog
     expect(screen.queryByTitle("智能体")).not.toBeInTheDocument();
   });
 
-  it("「全部」视图：轻量 ❓ 块不双画（AskUser 走工具卡路径）", () => {
+  it("「全部」视图：AskUser 统一渲染同款问答块（两视图同组件，单份不双画）", () => {
     render(
       <TurnTimeline
         {...renderProps(
@@ -188,6 +189,8 @@ describe("「对话」视图 ❓ 提问记录按时间穿插（2026-10-10-dialog
         )}
       />,
     );
-    expect(screen.queryByTestId("dialog-qa-block")).not.toBeInTheDocument();
+    // 2026-10-25-session-tab-visual-unify：两视图统一 DialogQaBlock——全部视图
+    // 提问以同款问答块出现（原 AskUserToolCard 工具卡已删），且仅渲染一份。
+    expect(screen.getAllByTestId("dialog-qa-block")).toHaveLength(1);
   });
 });

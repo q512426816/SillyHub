@@ -1261,7 +1261,7 @@ describe("SessionPanel（dialog）", () => {
     expect(screen.queryByText(/提问记录/)).not.toBeInTheDocument();
   });
 
-  it("AC-10-01c 「进度」视图 AskUser 工具卡片显全部选项（选中✓ + 未选可见）(ql-20260802-003)", async () => {
+  it("AC-10-01c 「进度」视图 AskUser 与对话视图统一问答块形态 (2026-10-25-session-tab-visual-unify)", async () => {
     const stream = makeStreamMock();
     sessionApi.streamSession.mockImplementation(stream.factory);
     sessionApi.getAgentSession.mockResolvedValue({
@@ -1296,11 +1296,15 @@ describe("SessionPanel（dialog）", () => {
     expect(screen.queryByText(/AskUserQuestion/)).not.toBeInTheDocument();
     expect(screen.queryByText(/用户主目录/)).not.toBeInTheDocument();
 
-    // 切「进度」：AskUser 工具卡片显全部选项——选中项「用户桌面」(✓) + 未选项「用户主目录」均可见
+    // 切「进度」：提问仍以同款问答块渲染（两视图统一 DialogQaBlock——原工具卡
+    // 显全部选项形态已删，用户裁决统一优先对话视图形态；未选项不再展示）
     fireEvent.click(screen.getByRole("tab", { name: "进度" }));
-    await waitFor(() => expect(screen.getByText(/AskUserQuestion/)).toBeInTheDocument());
+    await waitFor(() =>
+      expect(screen.getAllByTestId("dialog-qa-block").length).toBeGreaterThan(0),
+    );
+    expect(screen.queryByText(/AskUserQuestion/)).not.toBeInTheDocument();
     expect(screen.getByText(/用户桌面/)).toBeInTheDocument();
-    expect(screen.getByText(/用户主目录/)).toBeInTheDocument();
+    expect(screen.queryByText(/用户主目录/)).not.toBeInTheDocument();
   });
 
   it("AC-10-03 轮询到 active → status active + 输入启用 + 清轮询", async () => {

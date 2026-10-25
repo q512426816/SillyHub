@@ -633,13 +633,17 @@ export const TextSegmentView = memo(function TextSegmentView({ segment }: TextSe
   return (
     // task-11（FR-07）：group+relative 供 CopyButton 右下角 hover 浮出（纯 CSS 零状态）
     // 2026-09-20-agent-reply-no-bubble：去气泡——容器改无框正文（w-full +
-    // max-w-[min(100%,48rem)]，铺在时间线背景上），排版交 .markdown-text 既有
+    // 阅读限宽，铺在时间线背景上），排版交 .markdown-text 既有
     // 规则（原 ql-20260909-009 的 80% 收窄 + 描边分层形态被此取代）。
     // 2026-10-20-session-page-dsh-alignment（FR-02 / D-016②）：正文与过程字阶分离——
-    // 阅读限宽 48rem→52rem（宽屏少折行）；字号/行高/段距（14.5px / 1.78 / 0.6em）
+    // 字号/行高/段距（14.5px / 1.78 / 0.6em）
     // 由 globals.css 的 `.seg-text-body` 元素级规则承担（MarkdownText compact 的
     // !text-xs 带 !important，容器类挂 font-size 压不住它，故不在此写死字号）。
-    <div className="seg-text-body group relative w-full max-w-[min(100%,52rem)] self-start">
+    // 2026-10-25-session-tab-visual-unify：阅读限宽统一为「整行宽度-120px」
+    // （max-w-[calc(100%-120px)]，随容器自适应）——原 48rem→52rem 限宽与其它
+    // agent 信息块的 86% 限宽并存导致两视图宽度不齐（用户实测反馈），agent 侧
+    // 信息块全部收口同一限宽（用户侧气泡 56%/80% 不在此列）。
+    <div className="seg-text-body group relative w-full max-w-[calc(100%-120px)] self-start">
       <MarkdownText content={segment.text} />
       {segment.streaming && (
         <span
@@ -1119,7 +1123,7 @@ export const PreambleSegmentView = memo(function PreambleSegmentView({
   const [open, setOpen] = useState(false);
   const charCount = segment.text.length;
   return (
-    <div className="flex w-full max-w-[86%] flex-col gap-1 self-start">
+    <div className="flex w-full max-w-[calc(100%-120px)] flex-col gap-1 self-start">
       <button
         type="button"
         onClick={() => {
@@ -1163,7 +1167,7 @@ export const CompactSegmentView = memo(function CompactSegmentView({
   const [open, setOpen] = useState(false);
   const charCount = segment.text.length;
   return (
-    <div className="flex w-full max-w-[86%] flex-col gap-1 self-start">
+    <div className="flex w-full max-w-[calc(100%-120px)] flex-col gap-1 self-start">
       <button
         type="button"
         onClick={() => {
@@ -1233,7 +1237,7 @@ export const TurnTriggerView = memo(function TurnTriggerView({
   if (!meta.contentHidden) {
     // 来源标注源：纯行，无展开（正文在 prompt 气泡照常可见）。
     return (
-      <div className="flex w-full max-w-[86%] flex-col gap-1 self-start">
+      <div className="flex w-full max-w-[calc(100%-120px)] flex-col gap-1 self-start">
         <span
           aria-label={`${meta.label}（来源标注）`}
           className="flex w-fit select-text items-center gap-[7px] rounded-md px-1.5 py-[3px] text-[11px] text-muted-foreground"
@@ -1247,7 +1251,7 @@ export const TurnTriggerView = memo(function TurnTriggerView({
     );
   }
   return (
-    <div className="flex w-full max-w-[86%] flex-col gap-1 self-start">
+    <div className="flex w-full max-w-[calc(100%-120px)] flex-col gap-1 self-start">
       <button
         type="button"
         onClick={() => {
@@ -1722,7 +1726,7 @@ export const SegmentView = memo(function SegmentView({ segment }: SegmentViewPro
       // 卡两形态，antd 仅经其间接使用）；本层只加「agent 上传了文件」标注行
       // （原型 .file-msg .who），卡片本体在 task-09 产出文件区可原样复用。
       return (
-        <div className="flex w-full max-w-[86%] flex-col gap-1 self-start">
+        <div className="flex w-full max-w-[calc(100%-120px)] flex-col gap-1 self-start">
           <span className="select-none pl-0.5 text-[11px] text-muted-foreground">
             agent 上传了文件
           </span>

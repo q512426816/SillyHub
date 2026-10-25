@@ -1117,10 +1117,12 @@ const TurnRow = memo(function TurnRow({
                                ql-20260915-009 的 mobile 放大标记类自此仅用户气泡持有
                                （globals.css 规则迁移归 task-03）。
                                2026-10-20-session-page-dsh-alignment（FR-02 / D-016②）：
-                               阅读限宽 48rem→52rem，与 v2 主路径同宽；字号/行高/段距
+                               与 v2 主路径同宽；字号/行高/段距
                                （14.5px / 1.78 / 0.6em）由 globals.css 的 .seg-text-body
-                               元素级规则统一承担，两条路径不再各写一套。 */}
-                          <div className="seg-text-body max-w-[min(100%,52rem)]">
+                               元素级规则统一承担，两条路径不再各写一套。
+                               2026-10-25-session-tab-visual-unify：阅读限宽随 v2 主路径
+                               统一为「整行宽度-120px」（max-w-[calc(100%-120px)]）。 */}
+                          <div className="seg-text-body max-w-[calc(100%-120px)]">
                             <HugeOutputBlock text={outputMarker ? outputMarker.textBefore : turn.output} />
                             {/* task-13（FR-05 / D-004@v1）：流式光标——旧路径 output
                                 气泡运行中（isLiveTurn 三态）挂正文尾，轮终态随条件转
@@ -1179,7 +1181,9 @@ const TurnRow = memo(function TurnRow({
               )}
               {turn.errorDetail && (
                 <div className="flex justify-start">
-                  <div className="max-w-[86%]">
+                  {/* 2026-10-25-session-tab-visual-unify：错误卡同属 agent 反馈
+                      信息块，限宽随统一规则（整行宽度-120px），原 86% 弃。 */}
+                  <div className="max-w-[calc(100%-120px)]">
                     <ErrorBoundary
                       label="run-error-item"
                       fallback={() => (
@@ -2162,8 +2166,9 @@ function isConversationSegment(seg: TurnSegment): boolean {
  *   - 「全部（进度）」视图（viewMode=all）：完整段时间线——ml-9 竖线容器（原型
  *     .turn-timeline：左缩进 36px + 2px 边线 + 14px 内距 + 6px 段距）内按序渲染
  *     SegmentView 段组件族（key=segment.id，段级 memo 由 task-05 保证）；AskUser
- *     提问记录按 created_at 与段 ts 合并排序穿插（merged 排序逻辑平移自旧路径，
- *     渲染复用 AskUserToolCard 工具卡片）；
+ *     提问记录按 created_at 与段 ts 合并排序穿插（merged 排序逻辑平移自旧路径；
+ *     2026-10-25-session-tab-visual-unify 起渲染统一用对话视图同款 DialogQaBlock
+ *     问答块，原 AskUserToolCard 工具卡已删）；
  *   - TurnStatusBar 内置（FR-02 / Grill X-09）：轮处于 pending/running/interrupting
  *     且计时锚点 turnStartedAt 有值时渲染（两视图同显，段序列之前）；终态或锚点
  *     缺失不挂载；
@@ -2174,15 +2179,19 @@ function isConversationSegment(seg: TurnSegment): boolean {
  * 装配器 path-copy 保证未触及段引用稳定）；段组件由 SegmentView 内部 memo。
  */
 /** 2026-10-10-dialog-qa-inplace：对话视图轻量 ❓ 提问记录卡——原「整组前置轮
- *  头部」的同一标记原位组件化（视觉逐字不变），供 SegmentedTurnBody 按时间戳
- *  穿插与旧回退路径两处复用。空 QA（不可解析 payload）渲染 null。 */
+ *  头部」的同一标记原位组件化，供 SegmentedTurnBody 按时间戳穿插与旧回退路径
+ *  两处复用。空 QA（不可解析 payload）渲染 null。
+ *  2026-10-25-session-tab-visual-unify：升格两视图唯一 AskUser 渲染（进度视图
+ *  原用 AskUserToolCard 工具卡，用户裁决统一优先对话视图形态）；原仅对话视图
+ *  语境合理的 ml-9 缩进移除（对话视图与其它 agent 段左缘对齐、进度视图不与
+ *  竖线容器双重缩进），宽度随 agent 反馈信息块统一规则（整行宽度-120px）。 */
 function DialogQaBlock({ dialog }: { dialog: SessionDialogRead }) {
   const qa = extractDialogQA(dialog);
   if (qa.length === 0) return null;
   return (
     <div
       data-testid="dialog-qa-block"
-      className="ml-9 space-y-0.5 rounded-md border border-indigo-200 bg-indigo-50/40 px-3 py-1.5 text-xs leading-5"
+      className="max-w-[calc(100%-120px)] space-y-0.5 rounded-md border border-indigo-200 bg-indigo-50/40 px-3 py-1.5 text-xs leading-5"
     >
       {qa.map((item, i) => (
         <div key={i} className="break-words">
@@ -2323,7 +2332,9 @@ function SegmentedTurnBody({
             item.kind === "segment" ? (
               <SegmentView key={item.segment.id} segment={item.segment} />
             ) : (
-              <AskUserToolCard key={`dialog-${item.dialog.request_id}`} dialog={item.dialog} />
+              // 2026-10-25-session-tab-visual-unify：进度视图 AskUser 统一用对话
+              // 视图同款问答块（原 AskUserToolCard 工具卡形态弃，组件已删除）。
+              <DialogQaBlock key={`dialog-${item.dialog.request_id}`} dialog={item.dialog} />
             ),
           )}
         </div>
@@ -2495,7 +2506,9 @@ function TurnDetailsList({
           return <ToolEventCard key={idx} event={item.event} />;
         }
         if (item.kind === "askUser") {
-          return <AskUserToolCard key={idx} dialog={item.dialog} />;
+          // 2026-10-25-session-tab-visual-unify：AskUser 统一用对话视图同款
+          // 问答块（原 AskUserToolCard 工具卡形态弃，组件已删除）。
+          return <DialogQaBlock key={idx} dialog={item.dialog} />;
         }
         if (item.kind === "file") {
           // agent-file-upload-mcp：历史回放的 agent 上传文件卡片（与段渲染路径
@@ -2595,67 +2608,6 @@ function ToolEventCard({ event }: { event: SessionToolEvent }) {
           </div>
         </SessionCollapsible>
       )}
-    </div>
-  );
-}
-
-/**
- * ql-20260802-002/003：「全部」视图把 AskUser 提问渲染成工具调用卡片（和 Write/Bash 一致），
- * 让 AskUser 在工具区可见。AskUser 不走 tool_use 日志（走 onUserDialog 对话协议，
- * cli.ts:653-659），故用 dialog 历史数据模拟工具卡片：工具名 AskUserQuestion +
- * ✓已答/⏳待答 徽章 + 问题（参数）+ 全部可选项（选中项绿底✓，未选灰○，hover 显 description）。
- * ql-20260802-003 修复：旧版只显用户选中的那一项、看不到其余备选；现显全部 options。
- */
-function AskUserToolCard({ dialog }: { dialog: SessionDialogRead }) {
-  const qa = extractDialogQA(dialog);
-  if (qa.length === 0) return null;
-  const pending = dialog.status === "pending";
-  const badge = pending
-    ? { icon: "⏳", cls: "text-brand-600", title: "等待回答" }
-    : { icon: "✓", cls: "text-emerald-600", title: "已回答" };
-  return (
-    <div className="rounded border border-brand-200 bg-brand-50/40 px-2 py-1.5">
-      <div className="mb-0.5 flex items-center gap-1.5 text-[10px] text-brand-700">
-        <Wrench className="h-3 w-3 shrink-0" aria-hidden />
-        <span className="font-medium">AskUserQuestion</span>
-        <span className={cn("font-mono", badge.cls)} title={badge.title} aria-label={badge.title}>
-          {badge.icon}
-        </span>
-      </div>
-      <div className="space-y-1">
-        {qa.map((item, i) => (
-          <div key={i} className="space-y-0.5">
-            <div className="break-words font-mono text-[10px] text-muted-foreground">
-              ❓ {item.question}
-            </div>
-            {item.options.length > 0 ? (
-              <div className="space-y-0.5 pl-1">
-                {item.options.map((opt, j) => (
-                  <div
-                    key={j}
-                    title={opt.description}
-                    className={cn(
-                      "flex items-start gap-1 rounded px-1.5 py-0.5 text-[10px] leading-5",
-                      opt.selected
-                        ? "bg-emerald-50 font-medium text-emerald-700"
-                        : "text-muted-foreground/70",
-                    )}
-                  >
-                    <span aria-hidden className="shrink-0">
-                      {opt.selected ? "✓" : "○"}
-                    </span>
-                    <span className="min-w-0 break-words">{opt.label}</span>
-                  </div>
-                ))}
-              </div>
-            ) : (
-              <div className="break-words text-muted-foreground">
-                → {item.answerText ?? (pending ? "（待答）" : "（未回答）")}
-              </div>
-            )}
-          </div>
-        ))}
-      </div>
     </div>
   );
 }

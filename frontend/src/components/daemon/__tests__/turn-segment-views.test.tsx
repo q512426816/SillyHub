@@ -209,20 +209,21 @@ describe("TextSegmentView 文本段", () => {
     expect(document.querySelector(".seg-caret")).toBeNull();
   });
 
-  it("无框形态：容器挂 seg-text-body（w-full + 52rem 阅读限宽），无气泡框样式类", () => {
+  it("无框形态：容器挂 seg-text-body（w-full + 整行宽度-120px 统一限宽），无气泡框样式类", () => {
     // 2026-09-20-agent-reply-no-bubble：容器改无框正文，markdown-text 的直接父容器
     // 即 seg-text-body 容器——断言新类存在 + 旧气泡框类（border/bg-card/shadow-sm/
     // rounded-2xl/px-4）不存在
     // 2026-10-20-session-page-dsh-alignment（FR-02 / D-016②）：正文与过程字阶分离
-    // ——阅读限宽 48rem→52rem（原先 48rem 断言编码的是旧视觉结构与新稿不符，按新的
-    // 用户可见行为更新）；15px/1.8/0.65em 这套字号由 globals.css 的 .seg-text-body
+    // ——15px/1.8/0.65em 这套字号由 globals.css 的 .seg-text-body
     // 元素级规则承担（见本文件「正文/过程字阶分离」用例）。
+    // 2026-10-25-session-tab-visual-unify：阅读限宽统一为整行宽度-120px
+    // （原先 52rem 断言编码的是旧限宽体系，按统一后的用户可见行为更新）。
     render(<TextSegmentView segment={makeTextSeg()} />);
     const container = screen.getByTestId("markdown-text").parentElement;
     expect(container).not.toBeNull();
     expect(container?.className).toContain("seg-text-body");
     expect(container?.className).toContain("w-full");
-    expect(container?.className).toContain("max-w-[min(100%,52rem)]");
+    expect(container?.className).toContain("max-w-[calc(100%-120px)]");
     for (const legacy of ["border", "bg-card", "shadow-sm", "rounded-2xl", "px-4"]) {
       expect(container?.className).not.toContain(legacy);
     }

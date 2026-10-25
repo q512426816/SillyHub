@@ -143,6 +143,16 @@ describe("SessionChangeFilesHover（2026-10-13-session-change-files-hover task-0
     expect(r2.container.querySelector('[data-testid="session-change-files-hover"]')).toBeNull();
   });
 
+  it("入口按钮可见文案为「变更」两字（aria-label 保留完整语义）", () => {
+    // 2026-10-25-session-tab-visual-unify：可见文案精简为「变更」两字（用户需求）；
+    // 无障碍读屏描述 aria-label 不变。
+    mockData([activeThin]);
+    render(<SessionChangeFilesHover workspaceId="ws-1" sessionId="s-1" />);
+    const btn = screen.getByLabelText("查看会话关联的变更文件");
+    expect(btn.textContent).toContain("变更");
+    expect(btn.textContent).not.toContain("变更文件");
+  });
+
   it("点击弹下拉（hover 不再触发）：进行中置顶（轻量徽标+阶段），已归档默认折叠", async () => {
     mockData([activeThin, activeFull, archivedOne]);
     render(<SessionChangeFilesHover workspaceId="ws-1" sessionId="s-1" />);

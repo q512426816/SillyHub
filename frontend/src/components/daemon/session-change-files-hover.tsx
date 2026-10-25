@@ -205,7 +205,9 @@ export function SessionChangeFilesHover({
           aria-label="查看会话关联的变更文件"
         >
           <FolderGit2 className="h-3.5 w-3.5" aria-hidden />
-          变更文件
+          {/* 2026-10-25-session-tab-visual-unify：可见文案精简为「变更」两字
+              （用户需求）；aria-label 保留完整语义供读屏。 */}
+          变更
           <span
             data-testid="session-change-count"
             className={`rounded-full bg-emerald-600 px-1.5 text-[10px] font-bold leading-4 text-white ${

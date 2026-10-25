@@ -354,12 +354,14 @@ describe("TurnTimeline v2 段模型渲染（task-06 / 2026-08-19-session-stream-
         },
       ],
     });
-    // AskUser 以工具卡片形态出现在段线中
-    expect(screen.getByText("AskUserQuestion")).toBeInTheDocument();
+    // AskUser 以对话视图同款问答块形态出现在段线中（2026-10-25-session-tab-visual-unify：
+    // 两视图统一 DialogQaBlock，原 AskUserQuestion 工具卡标签不再渲染）
+    expect(screen.queryByText("AskUserQuestion")).not.toBeInTheDocument();
+    expect(screen.getByTestId("dialog-qa-block")).toBeInTheDocument();
     expect(screen.getByText(/穿插问题？/)).toBeInTheDocument();
-    // 按 ts 穿插：text 段 → AskUser 卡 → 工具段（文档顺序）
+    // 按 ts 穿插：text 段 → AskUser 问答块 → 工具段（文档顺序）
     const textEl = screen.getByText("穿插前文本");
-    const askEl = screen.getByText("AskUserQuestion");
+    const askEl = screen.getByTestId("dialog-qa-block");
     const toolEl = screen.getByText("Grep");
     expect(textEl.compareDocumentPosition(askEl) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     expect(askEl.compareDocumentPosition(toolEl) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
