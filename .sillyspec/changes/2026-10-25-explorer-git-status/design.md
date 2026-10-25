@@ -86,6 +86,7 @@ scale: large  # 跨 daemon/backend/frontend 三子项目、新增 2 RPC + 2 端�
 | 修改 | sillyhub-daemon/src/daemon.ts | 注册 `git_dirty_files`/`git_worktree_diff` 平名 RPC handler（对齐 `daemon.ts:7803` git_status 注册形态） |
 | 修改 | sillyhub-daemon/src/api-types.ts | `pnpm -C sillyhub-daemon gen:types` 产物——新 DTO 类型；producer=backend/openapi.json → 生成器归一化 → consumer=daemon 类型引用 |
 | 新增 | NEW:sillyhub-daemon/tests/host-fs-handler-git-dirty-files.test.ts | daemon 双指令解析单测（§测试面 Wave 1） |
+| 修改 | sillyhub-daemon/tests/host-fs-handler-git-log.test.ts | GL30 平名注册方法集断言 5→7（D-013 执行期触达既有测试——plan 阶段漏标 related_tests，module-impact Wave 1 回填已记录，此处补清单行） |
 | 修改 | backend/app/modules/git_log/schema.py | 新增 `GitDirtyFilesResponse`/`GitDirtyFileItem`/`GitIgnoredItem`/`GitWorktreeDiffResponse`；字段数据流：producer=daemon RPC 载荷 → service 归一化（porcelain XY→四态、路径 POSIX 化、空态兜底）→ response_model 序列化 → consumer=前端 api-types 生成类型 |
 | 修改 | backend/app/modules/git_log/service.py | `get_dirty_files`/`get_worktree_diff`（绑定解析/probe/错误映射全复用；daemon 未知方法→422） |
 | 修改 | backend/app/modules/git_log/router.py | 新增 `GET .../dirty-files`、`GET .../worktree-diff`（WORKSPACE_READ、path 校验复用 `_validate_diff_path`） |
