@@ -33,3 +33,24 @@
 
 - `review.json`、`requirements/design` 之外的治理件提交不应触发「审计时点漂移」重评（当前区分不出治理件与交付件）。
 - 归档完成后，CLI 应拒绝向旧 change 路径写入（子代理重建目录应报错而非静默创建）。
+
+## 处置记录（2026-10-24 定时收口：循环根因修复，关闭归档）
+
+- **根因锐化（比坑文推断深一层）**：治理件保留路径 2026-10-10 起已存在（detectPatchDrift
+  `governanceOnly` + 未触承诺面 → review.json 保留不隔离，flow.js 漂移分支），纯治理件提交
+  本不触发重评。坑内三连循环的真实机制是**两保留路径的复合盲区**：①reviewAnchoredToHead
+  要求 reviewedAgainst==当前 HEAD——复审锚与 HEAD 之间隔着 review.json 自身的提交即恒 false；
+  ②governanceOnly 聚合整个冻结窗——窗口内更早的「复审前修复提交」（复审 reviewedAgainst 已
+  覆盖）把 ownFiles 拖进交付文件恒 false → 隔离重评 → 重评再提交 review.json 又前移 → 循环。
+- **已修**（sillyspec 仓）：flow-parity.js 新增 `deliveryFaceAnchoredAfter({cwd, change,
+  anchorSha})`——把「复审已覆盖」的度量单位从冻结窗换成锚点（锚后 own 提交只碰 .sillyspec/**
+  且未触 requirements/design → 交付面自锚点起未变，结论有效）；flow.js 漂移分支接线为第三
+  保留路径（anchored → governanceOnly → **交付面锚定** → 隔离），fail-safe：锚空/非祖先
+  （rebase 重写）/git 失败 → 隔离（宁可多评）。
+- **第二缺陷（子代理重建已归档目录）**：CLI 无法拦截裸 fs 写——评审任务书（renderReviewerTaskbook）
+  补「写入纪律」行：review.json 只写 changeDir 指定路径、目录不存在=已归档即停止报告勿重建、
+  评审产物保持工作区未提交态随归档一次性入库（先行提交会触发漂移判定——坑内绕过①的正式化）。
+- **测试**：flowdone-disposition-drift.test.mjs 新增 ⑥（四形态：锚后仅治理件提交 ok /
+  锚后交付提交拦 / 触承诺面拦 / 非祖先与空锚 fail-safe）7/7 绿；既有 e2e ②（漂移隔离链）
+  ④⑤（缺件重冻+锚定保留）零回归。superseded 堆积随循环消除自然止增。
+- 处置结论：循环根因修复+纪律面教学，本文件移入 finished/（若生产再现实测新形态另登记）。

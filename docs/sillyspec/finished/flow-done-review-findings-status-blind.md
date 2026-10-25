@@ -39,3 +39,21 @@
 
 - `flow-done-new-prefix-crossrepo-ambiguity.md`（同变更另一条 flow done 摩擦：NEW: 前缀跨仓误判）
 - `2026-10-23-flow-done-shared-repo-multi-session-frictions.md`（共享主仓多会话三摩擦）
+
+## 处置记录（2026-10-24 定时收口：已修，关闭归档）
+
+- **门禁改开放项判定**（sillyspec 仓）：flow-review.js 新增 `isOpenFinding` 谓词——已解决集
+  {resolved, resolved-as-accepted, accepted, false-positive}（大小写不敏感）判非开放；status
+  缺省/未知值判开放（fail-closed 不因新词表静默放行）。flow.js 评审门两消费点（阻断主路径
+  registerReviewOutcome + 断点回填 findingsP1）统一换口径：`FAIL 或开放 P1 才拦`，拦截面
+  （`开放 P1 发现 N 项`）与展示（`[P1·resolved]`）带 status；错误文案补增量复审提示
+  （status 词表一次给全，勿反复改 verdict——坑内建议③）。
+- **任务书 schema 正式定义 status**（坑内建议②）：renderReviewerTaskbook 的 findings 行加
+  status 枚举 + 增量复审语义说明（保留历史条目标 status、阻断只计 open、首评可省略）——
+  validateReviewJson 对额外 status 字段本就容忍（实证），现教学面与门禁口径对齐，增量复审
+  成为一等流程。
+- **测试**：flow-review.test.mjs 13/13（新增 isOpenFinding 词表/缺省/未知值/null 防御 +
+  validateReviewJson 容忍 status 双 finding 形态）；thin-empty-face-crosscheck.test.mjs e2e
+  两臂（承诺词强制评审必经门——resolved P1+PASS → 收口通过归档；open P1 显式 status → 仍拦
+  且文案计开放项）+ 既有面 13/13。
+- 处置结论：三门（判定/教学/schema）对齐，本文件移入 finished/。

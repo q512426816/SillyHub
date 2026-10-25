@@ -43,3 +43,17 @@ design.md 文件变更清单里用门禁要求的 `NEW:` 前缀声明新建文�
 
 - 同批次观察：`commands.lint: "unavailable"` 是 local.yaml 显式配置（第 342 行），flow done 报 `lint: skipped` 属预期，**不是缺陷**。
 - 姊妹条：`2026-10-23-flow-done-shared-repo-multi-session-frictions.md`（共享主仓多会话三摩擦）。
+
+## 处置记录（2026-10-24 定时收口：已修，关闭归档）
+
+- **已修**（sillyspec 仓 src/flow.js 三处裸比点剥 `NEW:` 前缀，scope-audit.js:1263 既有
+  「比对语义剥前缀」同款口径）：①跨仓嫌疑判定（`_declared` 归一化行）——剥后按真实路径
+  查主仓存在性（NEW 文件已提交即在盘 → 非嫌疑，不再落「疑似跨仓」误报）；②design 声明面
+  自证（declared vs 冻结面）——剥后路径命中冻结面，不再同批文件既「声明未交付」又「交付未声明」
+  双误报；③评审归属装配（buildFreezeAttribution 的 declaredFiles）——NEW 声明正确参与归属。
+  未在解析层（parseFileChangeListDetailed）统一剥除：design-facts 模块域的 `NEW:` 前缀豁免
+  语义（计划新建豁免/新模块标注）依赖原文前缀，解析层动刀爆炸半径过大。
+- **测试**：test/thin-empty-face-crosscheck.test.mjs 新增 e2e（repos 注册在场 + design 清单
+  `NEW:src/newmod/helper.js` 已提交 → flow done 收口通过 + 零「疑似跨仓」+ 零「声明面自证」
+  三断言）；既有防呆告警面（FR-02 非空面 libx 命中带 key）零回归。全套件 13/13 绿。
+- 处置结论：三处消费点修复+e2e 钉住，本文件移入 finished/。

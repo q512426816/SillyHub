@@ -38,3 +38,14 @@
 
 - 变更：2026-10-23-diff-dialog-pairing-fix。
 - 代码：`frontend/src/components/daemon/file-changes/turn-file-diff.ts`。
+
+## 处置记录（2026-10-24 定时收口：修复已核实在 main，关闭归档）
+
+- 独立评审修正版结论（id 在 metadata.agent_event.call_id、DB 无顶层列、回退按
+  parent_tool_use_id 轨道隔离）已随变更落地：main 提交 6e6a196b4（配对键改读
+  metadata.agent_event.call_id + 回退按子代理轨道隔离）+ 06f315da8（二审 P3 清偿——
+  孤儿补丁不回落回退、注释口径对齐、补乱序/重复 id 用例）。本轮 grep 复核 entryCallId
+  实现在 turn-file-diff.ts（:9/:113/:152-154 注释链与坑文事实一致）。
+- 「需要注意的上游形态」（子代理并行分轨、同轨多 tool_use 诚实丢弃）已随二审用例
+  （乱序/重复 id）入测试面。无遗留数据面缺陷。
+- 处置结论：已修复且实证在 main，本文件移入 finished/。
