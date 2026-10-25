@@ -201,3 +201,4 @@
 | 2026-10-24 | 2026-10-22-trajectory-context-jump | 轨迹视图两处体验缺口（对照 dsh）：1) processItems 里的 system_event… |
 | 2026-10-25 | 2026-10-24-trajectory-context-rows | 上一变更（2026-10-22-trajectory-context-jump）接错了数据源：pro… |
 | 2026-10-25 | 2026-10-23-marquee-awaiting-indicator | 跑马灯等待模型响应指示 |
+| 2026-10-25 | 2026-10-25-marquee-subagent-outer-only | 跑马灯外部只显示子代理容器条目 |

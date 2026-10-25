@@ -1,0 +1,66 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-25-marquee-subagent-outer-only",
+  "rows": [
+    {
+      "anchor": "FR-01",
+      "row_id": "2026-10-25-marquee-subagent-outer-only:flow:测试绑定FR-01",
+      "tests": [
+        "frontend/src/components/daemon/__tests__/turn-live-marquee.test.tsx「子代理内部工具不进入外部轨道，仅容器条目」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-25-marquee-subagent-outer-only"
+    },
+    {
+      "anchor": "FR-02",
+      "row_id": "2026-10-25-marquee-subagent-outer-only:flow:测试绑定FR-02",
+      "tests": [
+        "frontend/src/components/daemon/__tests__/turn-live-marquee.test.tsx「运行中条目显示走秒计时」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-25-marquee-subagent-outer-only"
+    },
+    {
+      "anchor": "FR-03",
+      "row_id": "2026-10-25-marquee-subagent-outer-only:flow:测试绑定FR-03",
+      "tests": [
+        "frontend/src/components/daemon/__tests__/turn-live-marquee.test.tsx「无段起点的运行中条目用客户端起点计时（FR-02）」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-25-marquee-subagent-outer-only"
+    },
+    {
+      "anchor": "FR-04",
+      "row_id": "2026-10-25-marquee-subagent-outer-only:flow:测试绑定FR-04",
+      "tests": [
+        "frontend/src/components/daemon/__tests__/turn-live-marquee.test.tsx"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-25-marquee-subagent-outer-only"
+    }
+  ]
+}

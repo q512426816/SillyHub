@@ -1,0 +1,239 @@
+diff --git a/frontend/src/app/proto/session-live-marquee/page.tsx b/frontend/src/app/proto/session-live-marquee/page.tsx
+index df44bb379..f8fb336fb 100644
+--- a/frontend/src/app/proto/session-live-marquee/page.tsx
++++ b/frontend/src/app/proto/session-live-marquee/page.tsx
+@@ -39,7 +39,8 @@ const SCRIPT: ReadonlyArray<(_seq: number) => TurnSegment> = [
+     id: `think-${n}`,
+     text: "先读登录链路，确认超时发生在前端还是网关；同时检查 token 刷新是否吞掉了错误，再决定补重试还是修 keepalive。",
+     streaming: false,
+-    ts: n,
++    // 原型无真实挂钟时间戳：thinking 计时走客户端起点兜底（ts 留 null）。
++    ts: null,
+   }),
+   (n) => ({
+     kind: "tool",
+@@ -107,7 +108,7 @@ const SCRIPT: ReadonlyArray<(_seq: number) => TurnSegment> = [
+     id: `think2-${n}`,
+     text: "网关 keepalive 60s、应用侧 30s，确认是连接提前回收；补重试窗口并统一刷新策略。",
+     streaming: false,
+-    ts: n,
++    ts: null,
+   }),
+   (n) => ({
+     kind: "tool",
+@@ -154,7 +155,7 @@ const SCRIPT: ReadonlyArray<(_seq: number) => TurnSegment> = [
+     id: `think3-${n}`,
+     text: "测试通过，整理变更说明并向用户汇报结果。",
+     streaming: false,
+-    ts: n,
++    ts: null,
+   }),
+ ];
+ 
+@@ -178,7 +179,7 @@ function buildSegments(step: number, liveThinking: boolean): TurnSegment[] {
+     id: "live-thinking",
+     text: `正在核对 keepalive 与重试窗口的配合：网关 keepalive 为 60 秒，而应用侧请求超时只有 30 秒，长轮询场景下连接可能被提前回收；接着检查 token 刷新请求是否复用了同一套重试策略，确认失败后不会直接跳转登录页；再核对重试窗口、退避间隔与幂等键，避免重复提交；随后对比修复前后的连接回收日志，确认长轮询不再被网关提前断开；最后补齐回归测试并整理变更说明。（第 ${step + 1} 次刷新）`,
+     streaming: liveThinking,
+-    ts: total * 1000,
++    ts: null,
+   });
+   return out;
+ }
+diff --git a/frontend/src/components/daemon/__tests__/turn-live-marquee.test.tsx b/frontend/src/components/daemon/__tests__/turn-live-marquee.test.tsx
+index 3beaed94d..b9f1e0cb5 100644
+--- a/frontend/src/components/daemon/__tests__/turn-live-marquee.test.tsx
++++ b/frontend/src/components/daemon/__tests__/turn-live-marquee.test.tsx
+@@ -143,7 +143,7 @@ describe("deriveLiveMarqueeEntries 纯函数（FR-01 / FR-03）", () => {
+     expect(done[0]!.status).toBe("done");
+   });
+ 
+-  it("子代理内部工具递归进入同一轨道（FR-01）", () => {
++  it("子代理内部工具不进入外部轨道，仅容器条目（FR-01）", () => {
+     const entries = deriveLiveMarqueeEntries([
+       tool("agent-1", {
+         toolName: "Agent",
+@@ -153,9 +153,11 @@ describe("deriveLiveMarqueeEntries 纯函数（FR-01 / FR-03）", () => {
+       }),
+     ]);
+ 
+-    expect(entries.map((e) => e.id)).toEqual(["agent-1", "agent-1/inner-1"]);
++    // 2026-10-25-marquee-subagent-outer-only：外部只保留容器条目，
++    // 内部消息由对话流子代理卡片（SubagentBlockView）展示。
++    expect(entries.map((e) => e.id)).toEqual(["agent-1"]);
+     expect(entries[0]!.icon).toBe("subagent");
+-    expect(entries[1]!.text).toContain("keepalive");
++    expect(entries[0]!.text).toContain("排查后端超时");
+   });
+ 
+   it("长思考文本不截断，保留完整内容（FR-01）", () => {
+@@ -391,6 +393,51 @@ describe("TurnLiveMarquee 连续轨道（FR-01 / FR-02 / FR-05）", () => {
+     expect(queryByTestId("marquee-awaiting")).toBeNull();
+   });
+ 
++  it("运行中条目显示走秒计时（FR-02）", async () => {
++    const nowSpy = vi.spyOn(Date, "now").mockReturnValue(10_000);
++    try {
++      const { getByTestId } = render(
++        <TurnLiveMarquee
++          entries={deriveLiveMarqueeEntries([
++            tool("tool-run", { status: "running", endedAt: null, startedAt: 6000 }),
++          ])}
++        />,
++      );
++
++      const item = getByTestId("marquee-item");
++      // elapsed 在挂载后渲染（SSR/水合一致门控），waitFor 等待出现。
++      const elapsed = await waitFor(() => {
++        const el = item.querySelector('[data-testid="marquee-running-elapsed"]');
++        expect(el).not.toBeNull();
++        return el as HTMLElement;
++      });
++      expect(elapsed.textContent).toContain("4s");
++    } finally {
++      nowSpy.mockRestore();
++    }
++  });
++
++  it("无段起点的运行中条目用客户端起点计时（FR-02）", async () => {
++    const { getByTestId } = render(
++      <TurnLiveMarquee
++        entries={deriveLiveMarqueeEntries([
++          { kind: "thinking", id: "t-none", text: "正在思考", streaming: true, ts: null },
++        ])}
++      />,
++    );
++
++    const item = getByTestId("marquee-item");
++    expect(item.querySelector('[data-testid="marquee-spinner"]')).not.toBeNull();
++    // 段无 startedAt → 组件以首次观察到 running 的客户端时刻为起点，
++    // 1s tick 后显示走秒计时（防御路径：两者皆无才只转圈）。
++    const elapsed = await waitFor(() => {
++      const el = item.querySelector('[data-testid="marquee-running-elapsed"]');
++      expect(el).not.toBeNull();
++      return el as HTMLElement;
++    });
++    expect(elapsed.textContent).toMatch(/\d+(ms|s)/);
++  });
++
+   it("无条目时不渲染空壳", () => {
+     const { queryByTestId } = render(<TurnLiveMarquee entries={[]} />);
+     expect(queryByTestId("turn-live-marquee")).toBeNull();
+diff --git a/frontend/src/components/daemon/turn-live-marquee.tsx b/frontend/src/components/daemon/turn-live-marquee.tsx
+index b48e12ddf..1d5b55054 100644
+--- a/frontend/src/components/daemon/turn-live-marquee.tsx
++++ b/frontend/src/components/daemon/turn-live-marquee.tsx
+@@ -251,8 +251,9 @@ function collectEntries(
+           endedAt: seg.endedAt,
+           durationMs: segmentDuration(seg.startedAt, seg.endedAt),
+         });
+-        // 子代理内部工具同样进入流（「全部过程信息」）。
+-        collectEntries(seg.children, out, `${prefix}${seg.id}/`);
++        // 2026-10-25-marquee-subagent-outer-only（FR-01）：子代理内部消息不再
++        // 进入外部轨道（用户裁决：外部只显示容器条目，内部消息留在对话流
++        // 的子代理卡片 SubagentBlockView 内展示——该路径零改动）。
+         break;
+       }
+       case "subagent_stub":
+@@ -265,7 +266,6 @@ function collectEntries(
+           endedAt: null,
+           durationMs: null,
+         });
+-        collectEntries(seg.children, out, `${prefix}${seg.id}/`);
+         break;
+       case "stderr":
+         out.push({
+@@ -433,12 +433,15 @@ function MarqueeItemView({
+   reduced,
+   fixedWidth = true,
+   testId = "marquee-item",
++  runningElapsedMs,
+ }: {
+   entry: LiveMarqueeEntry;
+   durationMs: number | null;
+   reduced: boolean;
+   fixedWidth?: boolean;
+   testId?: string;
++  /** 运行中已耗时（FR-02/FR-03，2026-10-25-marquee-subagent-outer-only）；无起点为 null（只转圈）。 */
++  runningElapsedMs?: number | null;
+ }) {
+   const running = entry.status === "running";
+   const Icon = ICON_COMPONENTS[entry.icon];
+@@ -555,14 +558,25 @@ function MarqueeItemView({
+         )}
+       </span>
+       {running ? (
+-        <span
+-          aria-hidden
+-          data-testid="marquee-spinner"
+-          className={cn(
+-            "h-3 w-3 shrink-0 rounded-full border-2 border-primary/25 border-t-primary",
+-            !reduced && "animate-spin",
++        <span className="flex shrink-0 items-center gap-1">
++          <span
++            aria-hidden
++            data-testid="marquee-spinner"
++            className={cn(
++              "h-3 w-3 shrink-0 rounded-full border-2 border-primary/25 border-t-primary",
++              !reduced && "animate-spin",
++            )}
++          />
++          {runningElapsedMs != null && (
++            <span
++              data-testid="marquee-running-elapsed"
++              className="flex items-center gap-0.5 text-[10.5px] tabular-nums text-muted-foreground"
++            >
++              <Timer aria-hidden className="h-3 w-3" />
++              {formatMarqueeDuration(runningElapsedMs)}
++            </span>
+           )}
+-        />
++        </span>
+       ) : durationMs != null ? (
+         <span
+           data-testid="marquee-duration"
+@@ -703,6 +717,29 @@ export const TurnLiveMarquee = memo(function TurnLiveMarquee({
+       : null;
+   const displayEntries = awaitingEntry != null ? [...entries, awaitingEntry] : entries;
+ 
++  // 2026-10-25-marquee-subagent-outer-only（FR-02/FR-03）：运行中条目走秒计时。
++  // 起点：段 startedAt（挂钟，attach 场景为真实已运行时长）优先，缺省用组件
++  // 首次观察到 running 的客户端时刻；两者皆无 → 只转圈不显示时间（不伪造）。
++  const [nowTs, setNowTs] = useState(() => Date.now());
++  const [elapsedMounted, setElapsedMounted] = useState(false);
++  const hasRunning = entries.some((entry) => entry.status === "running");
++  useEffect(() => {
++    setElapsedMounted(true);
++  }, []);
++  useEffect(() => {
++    if (!hasRunning && !isAwaiting) return;
++    const timer = window.setInterval(() => setNowTs(Date.now()), 1000);
++    return () => window.clearInterval(timer);
++  }, [hasRunning, isAwaiting]);
++
++  const runningElapsedFor = (entry: LiveMarqueeEntry): number | null => {
++    if (entry.status !== "running" || entry.id === "marquee-awaiting") return null;
++    if (!elapsedMounted) return null;
++    const startedAt =
++      entry.startedAt ?? runtimeStartsRef.current.get(entry.id) ?? null;
++    return startedAt != null ? Math.max(0, nowTs - startedAt) : null;
++  };
++
+   /**
+    * 计算目标位置：内容右端贴视口右缘（即显示最新条）；内容不满一屏时 0。
+    * 首次测量直接定位（打开即看到最新），之后只向更负的方向推进，不回滚。
+@@ -855,6 +892,7 @@ export const TurnLiveMarquee = memo(function TurnLiveMarquee({
+               ? null
+               : (latest.durationMs ?? runtimeDurations[latest.id] ?? null)
+           }
++          runningElapsedMs={awaitingEntry != null ? null : runningElapsedFor(latest)}
+           reduced
+           fixedWidth={false}
+           testId={awaitingEntry != null ? "marquee-awaiting" : "marquee-item"}
+@@ -878,6 +916,7 @@ export const TurnLiveMarquee = memo(function TurnLiveMarquee({
+                 key={entry.id}
+                 entry={entry}
+                 durationMs={entry.durationMs ?? runtimeDurations[entry.id] ?? null}
++                runningElapsedMs={runningElapsedFor(entry)}
+                 reduced={false}
+                 testId={entry.id === "marquee-awaiting" ? "marquee-awaiting" : "marquee-item"}
+               />

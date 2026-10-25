@@ -54,3 +54,4 @@ created_at: 2026-09-03 14:49:48
 - 2026-10-23-diff-dialog-pairing-fix | 轮文件变更弹窗(turn-file-diff-dialog)在补丁行缺 tool_use_id 时走…
 - 2026-10-23-knowledge-scope-maintenance | 知识注入作用域维护面板
 - 2026-10-23-marquee-awaiting-indicator | 跑马灯等待模型响应指示
+- 2026-10-25-marquee-subagent-outer-only | 跑马灯外部只显示子代理容器条目

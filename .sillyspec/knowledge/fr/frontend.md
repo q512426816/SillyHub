@@ -7887,3 +7887,79 @@ superseded_by：FR-app-workspace-pages-002
   confirmed_at: null
   source_change: 2026-10-23-marquee-awaiting-indicator
   status: active
+
+## FR-frontend-068 外部跑马灯不再收集子代理内部消息：tool 带 children 与 subagent_stub 分支都不递归 children，仅保留容器条目
+变更：2026-10-25-marquee-subagent-outer-only
+状态：active
+摘要：子代理派发；子代理卡片（不变）
+全文：.sillyspec/changes/archive/2026-10-25-marquee-subagent-outer-only/requirements.md#FR-01
+最近确认：c596944e9698db5bfd828734cc1958b27b36ba61
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-25-marquee-subagent-outer-only:flow:测试绑定FR-01
+  tests: frontend/src/components/daemon/__tests__/turn-live-marquee.test.tsx「子代理内部工具不进入外部轨道，仅容器条目」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-25-marquee-subagent-outer-only
+  status: active
+
+## FR-frontend-069 子代理容器条目显示名称、运行状态（转圈）与时间：运行中显示走秒计时（优先用段 startedAt，缺省用客户端首次观察起点），完成后显示总耗时
+变更：2026-10-25-marquee-subagent-outer-only
+状态：active
+摘要：子代理运行中；无段起点的思考条目
+全文：.sillyspec/changes/archive/2026-10-25-marquee-subagent-outer-only/requirements.md#FR-02
+最近确认：c596944e9698db5bfd828734cc1958b27b36ba61
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-25-marquee-subagent-outer-only:flow:测试绑定FR-02
+  tests: frontend/src/components/daemon/__tests__/turn-live-marquee.test.tsx「运行中条目显示走秒计时」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-25-marquee-subagent-outer-only
+  status: active
+
+## FR-frontend-070 工具条目同样获得运行中走秒计时；无起点数据时只转圈不显示时间
+变更：2026-10-25-marquee-subagent-outer-only
+状态：active
+摘要：Bash 运行中
+全文：.sillyspec/changes/archive/2026-10-25-marquee-subagent-outer-only/requirements.md#FR-03
+最近确认：c596944e9698db5bfd828734cc1958b27b36ba61
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-25-marquee-subagent-outer-only:flow:测试绑定FR-03
+  tests: frontend/src/components/daemon/__tests__/turn-live-marquee.test.tsx「无段起点的运行中条目用客户端起点计时（FR-02）」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-25-marquee-subagent-outer-only
+  status: active
+
+## FR-frontend-071 更新子代理递归相关测试并新增走秒计时用例，全部通过；lint与typecheck通过
+变更：2026-10-25-marquee-subagent-outer-only
+状态：active
+摘要：回归核验
+全文：.sillyspec/changes/archive/2026-10-25-marquee-subagent-outer-only/requirements.md#FR-04
+最近确认：c596944e9698db5bfd828734cc1958b27b36ba61
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-25-marquee-subagent-outer-only:flow:测试绑定FR-04
+  tests: frontend/src/components/daemon/__tests__/turn-live-marquee.test.tsx
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-25-marquee-subagent-outer-only
+  status: active
