@@ -1,0 +1,725 @@
+diff --git a/frontend/src/app/proto/session-live-marquee/page.tsx b/frontend/src/app/proto/session-live-marquee/page.tsx
+index f8fb336fb..89b3e606c 100644
+--- a/frontend/src/app/proto/session-live-marquee/page.tsx
++++ b/frontend/src/app/proto/session-live-marquee/page.tsx
+@@ -13,10 +13,16 @@
+ 
+ import { useEffect, useMemo, useState } from "react";
+ import { ArrowLeft, Bot, Send, Sparkles } from "lucide-react";
++import { Drawer } from "antd";
+ 
+ import { ChatMessageAvatar } from "@/components/chat/chat-message-avatar";
+ import { TurnStatusBar } from "@/components/daemon/turn-status-bar";
+ import { SessionViewTabs } from "@/components/daemon/session-panel/session-view-tabs";
++// 2026-10-25-subagent-card-unify-panel：真实子代理卡片演示（内嵌流动条 + Drawer 详情）。
++import { SubagentBlockView } from "@/components/daemon/turn-segment-views";
++import { SubagentDetailPanel } from "@/components/daemon/subagent-detail-panel";
++import { SubagentPanelContext } from "@/components/daemon/subagent-panel-context";
++import type { SubagentPanelContextValue } from "@/components/daemon/subagent-panel-context";
+ import {
+   TurnLiveMarquee,
+   deriveLiveMarqueeEntries,
+@@ -226,6 +232,61 @@ export default function SessionLiveMarqueeProtoPage() {
+   // 暂停事件流时把 live-thinking 置为完成态：模拟「工具完成后、下一段
+   // 未到」的 LLM 生成间隙，演示「等待模型响应」指示条目。
+   const segments = useMemo(() => buildSegments(step, running), [step, running]);
++
++  // ── 子代理卡片演示（2026-10-25-subagent-card-unify-panel）：取脚本里的
++  //    Agent 容器段（带 children）渲染真实 SubagentBlockView；点击卡片开
++  //    Drawer 详情（模拟弹窗形态的交互）。 ──
++  const agentSeg = useMemo(() => {
++    for (const s of segments) {
++      if ((s.kind === "tool" || s.kind === "subagent_stub") && s.children.length > 0) {
++        return s;
++      }
++    }
++    return null;
++  }, [segments]);
++  const [demoActiveId, setDemoActiveId] = useState<string | null>(null);
++  const demoPanelValue = useMemo<SubagentPanelContextValue>(
++    () => ({
++      openSubagent: (segmentId) =>
++        setDemoActiveId((prev) => (prev === segmentId ? null : segmentId)),
++      closeSubagent: () => setDemoActiveId(null),
++      activeId: demoActiveId,
++    }),
++    [demoActiveId],
++  );
++  const demoOpenSeg = useMemo(() => {
++    if (demoActiveId == null || agentSeg == null) return null;
++    const find = (list: TurnSegment[]): TurnSegment | null => {
++      for (const s of list) {
++        if (s.id === demoActiveId) return s;
++        if (s.kind === "tool" || s.kind === "subagent_stub") {
++          const inner = find(s.children);
++          if (inner) return inner;
++        }
++      }
++      return null;
++    };
++    const seg = find([agentSeg]);
++    return seg && (seg.kind === "tool" || seg.kind === "subagent_stub") ? seg : null;
++  }, [demoActiveId, agentSeg]);
++  const demoDrawer =
++    demoOpenSeg != null ? (
++      <Drawer
++        open
++        onClose={() => setDemoActiveId(null)}
++        placement="right"
++        size="min(92vw, 420px)"
++        getContainer={false}
++        destroyOnHidden
++        rootClassName="session-subagent-drawer-root"
++        styles={{ body: { padding: 8, display: "flex", flexDirection: "column" } }}
++      >
++        <SubagentDetailPanel
++          segment={demoOpenSeg}
++          onClose={() => setDemoActiveId(null)}
++        />
++      </Drawer>
++    ) : null;
+   const entries = useMemo(() => deriveLiveMarqueeEntries(segments), [segments]);
+   const text = FULL_TEXT.slice(0, Math.min(step * 46, FULL_TEXT.length));
+ 
+@@ -377,6 +438,16 @@ export default function SessionLiveMarqueeProtoPage() {
+                     </div>
+                   </div>
+                   <TurnLiveMarquee key={marqueeKey} entries={entries} />
++                  {/* 真实子代理卡片（2026-10-25-subagent-card-unify-panel）：头部 +
++                      内嵌流动条；点击开 Drawer 详情（模拟弹窗形态）。 */}
++                  {agentSeg != null && (
++                    <div className="ml-9 w-[min(100%,52rem)]">
++                      <SubagentPanelContext.Provider value={demoPanelValue}>
++                        <SubagentBlockView segment={agentSeg} />
++                        {demoDrawer}
++                      </SubagentPanelContext.Provider>
++                    </div>
++                  )}
+                 </div>
+               </div>
+             )}
+diff --git a/frontend/src/components/daemon/__tests__/session-panel-dialog-subagent-drawer.test.tsx b/frontend/src/components/daemon/__tests__/session-panel-dialog-subagent-drawer.test.tsx
+new file mode 100644
+index 000000000..619bb8438
+--- /dev/null
++++ b/frontend/src/components/daemon/__tests__/session-panel-dialog-subagent-drawer.test.tsx
+@@ -0,0 +1,243 @@
++// 2026-10-25-subagent-card-unify-panel（FR-02）：弹窗会话子代理卡片 → Drawer 详情。
++// mock 面与 setupPanel 复制自 session-panel-dialog.test.tsx（同源惯例）；
++// 本文件只覆盖：子代理卡片渲染（含内嵌流动条）→ 点击开 Drawer → toggle 关闭。
++import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
++import { render, screen, fireEvent, waitFor, act } from "@testing-library/react";
++
++import { SessionPanel } from "../session-panel";
++import { useMentionSources } from "@/lib/session-mention-sources";
++import type { SessionStreamConnection } from "@/lib/daemon";
++
++vi.mock("@/lib/session-mention-sources", () => ({
++  useMentionSources: vi.fn(),
++}));
++vi.mocked(useMentionSources);
++
++vi.mock("@/components/ui/markdown-text", () => ({
++  MarkdownText: ({ content }: { content: string }) => (
++    <div data-testid="markdown-text">{content}</div>
++  ),
++}));
++
++const sessionApi = vi.hoisted(() => ({
++  getSessionUsage: vi.fn().mockResolvedValue(null),
++  listSessionRuns: vi.fn().mockResolvedValue([]),
++  listSessionTasks: vi.fn().mockResolvedValue([]),
++  listScheduledMessages: vi.fn().mockResolvedValue([]),
++  createSession: vi.fn(),
++  injectSession: vi.fn(),
++  interruptSession: vi.fn(),
++  endSession: vi.fn(),
++  streamSession: vi.fn(),
++  getAgentSession: vi.fn().mockResolvedValue(null),
++  getAgentSessionLogs: vi.fn(),
++  fetchSessionTurnOutline: vi.fn(),
++  fetchPendingDialogs: vi.fn(),
++  fetchSessionDialogHistory: vi.fn(),
++  listSessionTeamMissions: vi.fn(),
++  triggerSessionTeamMission: vi.fn(),
++  fetchSessionQueue: vi.fn(),
++  deleteSessionQueueEntry: vi.fn(),
++  retrySessionQueueEntry: vi.fn(),
++}));
++
++vi.mock("@/lib/daemon", async () => {
++  const actual = await vi.importActual<typeof import("@/lib/daemon")>("@/lib/daemon");
++  return {
++    ...actual,
++    getSessionUsage: sessionApi.getSessionUsage,
++    listSessionTasks: sessionApi.listSessionTasks,
++    listScheduledMessages: sessionApi.listScheduledMessages,
++    listSessionRuns: sessionApi.listSessionRuns,
++    createSession: sessionApi.createSession,
++    injectSession: sessionApi.injectSession,
++    interruptSession: sessionApi.interruptSession,
++    endSession: sessionApi.endSession,
++    streamSession: sessionApi.streamSession,
++    getAgentSession: sessionApi.getAgentSession,
++    getAgentSessionLogs: sessionApi.getAgentSessionLogs,
++    fetchSessionTurnOutline: sessionApi.fetchSessionTurnOutline,
++    fetchPendingDialogs: sessionApi.fetchPendingDialogs,
++    fetchSessionDialogHistory: sessionApi.fetchSessionDialogHistory,
++    listSessionTeamMissions: sessionApi.listSessionTeamMissions,
++    triggerSessionTeamMission: sessionApi.triggerSessionTeamMission,
++    fetchSessionQueue: sessionApi.fetchSessionQueue,
++    deleteSessionQueueEntry: sessionApi.deleteSessionQueueEntry,
++    retrySessionQueueEntry: sessionApi.retrySessionQueueEntry,
++  };
++});
++
++/* ----- fake SSE connection（同 session-panel-dialog.test.tsx） ----- */
++
++interface FakeConnHandlers {
++  onTurnStarted: (_env: any) => void;
++  onLog: (_env: any, _cursor?: string | null) => void;
++  onTurnCompleted: (_env: any) => void;
++  onSessionEnded: (_env: any) => void;
++  onError: (_err: Error) => void;
++  onPermissionRequest: (_req: any) => void;
++  onPermissionResolved: (_resolved: any) => void;
++  route: (_env: any, _cursor?: string | null) => void;
++}
++
++interface FakeConn extends SessionStreamConnection {
++  handlers: FakeConnHandlers;
++  closeSpy: ReturnType<typeof vi.fn>;
++}
++
++function makeStreamMock(): { conn: FakeConn; factory: ReturnType<typeof vi.fn> } {
++  let captured: FakeConn | null = null;
++  const factory = vi.fn((_sessionId: string, handlers: any): FakeConn => {
++    const closeSpy = vi.fn();
++    captured = {
++      close: closeSpy,
++      getLastEventId: () => null,
++      closeSpy,
++      handlers: {
++        onTurnStarted: (env: any) => handlers.onTurnStarted(env),
++        onLog: (env: any, cursor?: string | null) => handlers.onLog(env, cursor ?? null),
++        onTurnCompleted: (env: any) => handlers.onTurnCompleted(env),
++        onSessionEnded: (env: any) => handlers.onSessionEnded(env),
++        onError: (err: Error) => handlers.onError(err),
++        onPermissionRequest: (req: any) => handlers.onPermissionRequest?.(req),
++        onPermissionResolved: (resolved: any) =>
++          handlers.onPermissionResolved?.(resolved),
++        route: (env: any, cursor?: string | null) => {
++          switch (env.event) {
++            case "turn_started": handlers.onTurnStarted(env); break;
++            case "log": handlers.onLog(env, cursor ?? null); break;
++            case "turn_completed": handlers.onTurnCompleted(env); break;
++            case "session_ended": handlers.onSessionEnded(env); break;
++          }
++        },
++      },
++    };
++    return captured;
++  });
++  return {
++    get conn() { return captured!; },
++    factory,
++  };
++}
++
++function makeEnvelope(event: string, overrides: Record<string, any> = {}): any {
++  return {
++    event,
++    session_id: "sess-1",
++    run_id: null,
++    turn: null,
++    log_id: null,
++    timestamp: "t",
++    channel: null,
++    content: null,
++    status: null,
++    exit_code: null,
++    reason: null,
++    ...overrides,
++  };
++}
++
++function setupPanel() {
++  return render(
++    <SessionPanel
++      mode="dialog"
++      sessionId={null}
++      providers={["claude", "codex"]}
++      defaultProvider="claude"
++      model={null}
++      onModelChange={vi.fn()}
++      hasOnlineProvider
++    />,
++  );
++}
++
++/** 建立 SSE 并推入一个带 children 的子代理容器段（Task 工具 + 归属思考行）。 */
++async function establishSubagentTurn(stream: { conn: FakeConn }) {
++  const input = screen.getByPlaceholderText(/输入首条消息创建会话/) as HTMLTextAreaElement;
++  fireEvent.change(input, { target: { value: "帮我调研" } });
++  fireEvent.click(screen.getByTitle("发送"));
++  await waitFor(() => expect(sessionApi.createSession).toHaveBeenCalled());
++
++  const conn = stream.conn;
++  act(() => {
++    conn.handlers.route(makeEnvelope("turn_started", { run_id: "run-1", turn: 1 }));
++    conn.handlers.route(
++      makeEnvelope("log", {
++        run_id: "run-1",
++        channel: "tool_call",
++        content:
++          '{"tool":"Task","args":{"description":"调研"},"tool_use_id":"tu_1","success":true}',
++      }),
++      "L1",
++    );
++    // 归属子代理的思考行 → parent_tool_use_id 路由进 tu_1 的 children。
++    conn.handlers.route(
++      makeEnvelope("log", {
++        run_id: "run-1",
++        channel: "stdout",
++        content: "[THINKING] 子代理内部思考",
++        parent_tool_use_id: "tu_1",
++        subagent_type: "research",
++      }),
++      "L2",
++    );
++  });
++}
++
++describe("弹窗子代理卡片 Drawer 详情（2026-10-25-subagent-card-unify-panel）", () => {
++  beforeEach(() => {
++    vi.clearAllMocks();
++    // 挂载即取数的 API 默认 resolve（裸 vi.fn() 返回 undefined 会被 .then 同步崩）。
++    sessionApi.fetchPendingDialogs.mockResolvedValue([]);
++    sessionApi.fetchSessionDialogHistory.mockResolvedValue([]);
++    sessionApi.listSessionTeamMissions.mockResolvedValue([]);
++    sessionApi.fetchSessionQueue.mockResolvedValue([]);
++    sessionApi.getAgentSessionLogs.mockResolvedValue({ logs: [] });
++  });
++  afterEach(() => {
++    vi.restoreAllMocks();
++  });
++
++  it("点击子代理卡片打开 Drawer 详情，再点关闭（FR-02）", async () => {
++    const stream = makeStreamMock();
++    sessionApi.streamSession.mockImplementation(stream.factory);
++    sessionApi.createSession.mockResolvedValue({
++      session_id: "sess-1",
++      run_id: "run-1",
++      lease_id: "l",
++      status: "active",
++      stream_url: "",
++    });
++    setupPanel();
++
++    await establishSubagentTurn(stream);
++
++    // 子代理卡片渲染：头部 + 内嵌流动条（children 含思考 → 思考条目）。
++    const card = await waitFor(() => {
++      const el = document.querySelector('[data-segment-id="tu_1"]');
++      expect(el).not.toBeNull();
++      return el as HTMLElement;
++    });
++    const marquee = card.querySelector('[data-testid="subagent-live-marquee"]');
++    expect(marquee?.textContent).toContain("子代理内部思考");
++
++    // 点击卡片头部 → Drawer 打开，内嵌详情面板（头部 + children 时间线）。
++    const header = card.querySelector('div[role="button"]') as HTMLElement;
++    expect(header).not.toBeNull();
++    fireEvent.click(header);
++    // Drawer 头部与卡片头部同名「调研」→ 打开后同名文本 ≥ 2 处。
++    await waitFor(() => {
++      expect(screen.getAllByText("调研").length).toBeGreaterThanOrEqual(2);
++    });
++    // Drawer 详情含子代理内部过程（思考行；卡片流动条同名 → ≥ 2 处）。
++    await waitFor(() => {
++      expect(screen.getAllByText(/子代理内部思考/).length).toBeGreaterThanOrEqual(2);
++    });
++
++    // 再点同一卡片 → toggle 关闭（详情面板卸载，同名文本回落到仅卡片 1 处）。
++    fireEvent.click(header);
++    await waitFor(() => {
++      expect(screen.getAllByText("调研").length).toBe(1);
++    });
++  });
++});
+diff --git a/frontend/src/components/daemon/__tests__/session-panel-mobile-subagent.test.tsx b/frontend/src/components/daemon/__tests__/session-panel-mobile-subagent.test.tsx
+index 5741732d9..0766d1aac 100644
+--- a/frontend/src/components/daemon/__tests__/session-panel-mobile-subagent.test.tsx
++++ b/frontend/src/components/daemon/__tests__/session-panel-mobile-subagent.test.tsx
+@@ -216,19 +216,13 @@ describe("mobile 子代理紧凑卡 + Drawer 弹窗（2026-10-11-mobile-subagent
+     });
+   });
+ 
+-  it("零回归锚：desktop 悬浮宿主形态（未装配右栏 props）仍内联展开（children 可见）", async () => {
++  it("零回归锚更新（2026-10-25-subagent-card-unify-panel）：desktop 悬浮宿主形态（未装配右栏 props）为纯展示头部", async () => {
+     setupPanel();
+     await awaitTurns();
+-    // 无 Provider → SubagentBlockView 内联分支：终端态默认折叠，头部可展开
+-    // （aria-expanded 语义为内联分支专属）——展开后 children 正文直接在对话流。
+-    // 同名按钮多处命中（块头 + 段内工具行等），取带 aria-expanded 的容器块头。
+-    const head = (await screen.findAllByRole("button", { name: /调研缓存方案/ })).find(
+-      (b) => b.hasAttribute("aria-expanded"),
+-    );
+-    expect(head).toBeTruthy();
+-    fireEvent.click(head!);
+-    await waitFor(() => {
+-      expect(screen.getByText("子代理调研完成，结论如下。")).toBeInTheDocument();
+-    });
++    // 无 Provider → 统一形态后为纯展示：块头无按钮语义（closest role=button 为空）；
++    // children 不原地上屏（内嵌流动条承载过程摘要，正文产出不上屏）。
++    const head = (await screen.findAllByText(/调研缓存方案/))[0]!;
++    expect(head.closest('div[role="button"]')).toBeNull();
++    expect(screen.queryByText("子代理调研完成，结论如下。")).not.toBeInTheDocument();
+   });
+ });
+diff --git a/frontend/src/components/daemon/__tests__/turn-segment-views.test.tsx b/frontend/src/components/daemon/__tests__/turn-segment-views.test.tsx
+index dab1dcd90..1fde0f3b4 100644
+--- a/frontend/src/components/daemon/__tests__/turn-segment-views.test.tsx
++++ b/frontend/src/components/daemon/__tests__/turn-segment-views.test.tsx
+@@ -905,7 +905,7 @@ describe("SegmentView 统一分发器", () => {
+     expect(screen.queryByText("子代理内部文本")).not.toBeInTheDocument(); // 默认折叠
+   });
+ 
+-  it("subagent_stub 兜底段复用子代理块：名称回退 subagentType，恒 running 默认展开", () => {
++  it("subagent_stub 兜底段复用子代理块：名称回退 subagentType，恒 running 形态（2026-10-25 起无原地展开）", () => {
+     render(
+       <SegmentView
+         segment={makeStubSeg({ children: [makeTextSeg({ id: "text:stub", text: "stub 内部文本" })] })}
+@@ -913,7 +913,9 @@ describe("SegmentView 统一分发器", () => {
+     );
+     // 名称与类型标签均显示 subagentType（stub 无 primary/toolName 可回退）
+     expect(screen.getAllByText("Explore").length).toBe(2);
+-    expect(screen.getByText("stub 内部文本")).toBeInTheDocument(); // running 默认展开
++    expect(screen.getByText("运行中")).toBeInTheDocument();
++    // children 不再原地上屏（text 段也不进内嵌流动条）。
++    expect(screen.queryByText("stub 内部文本")).not.toBeInTheDocument();
+   });
+ 
+   it("subagent_stub 无 subagentType：名称回退「子代理」且无类型标签", () => {
+@@ -921,7 +923,7 @@ describe("SegmentView 统一分发器", () => {
+     expect(screen.getByText("子代理")).toBeInTheDocument();
+   });
+ 
+-  it("orphaned stub（历史孤儿，2026-10-13-slim-subagent-false-running / FR-04）：灰点无脉冲、不显示「运行中」、默认折叠", () => {
++  it("orphaned stub（历史孤儿，2026-10-13-slim-subagent-false-running / FR-04）：灰点无脉冲、不显示「运行中」（2026-10-25 起无原地展开）", () => {
+     render(
+       <SegmentView
+         segment={makeStubSeg({
+@@ -934,10 +936,8 @@ describe("SegmentView 统一分发器", () => {
+     expect(document.querySelector(".animate-pulse")).toBeNull();
+     expect(document.querySelector(".bg-brand-600")).toBeNull();
+     expect(document.querySelector(".bg-muted-foreground")).not.toBeNull(); // 中性灰点
+-    // 非 running → 默认折叠（点击仍可展开看子内容，数据不丢）。
++    // 无原地展开：内部文本不上屏（完整数据仍在，由进度视图/详情面板承载）。
+     expect(screen.queryByText("孤儿内部文本")).not.toBeInTheDocument();
+-    fireEvent.click(screen.getAllByText("Explore")[0]!);
+-    expect(screen.getByText("孤儿内部文本")).toBeInTheDocument();
+   });
+ 
+   it("实时暂态 stub（未标记 orphaned）仍 running 脉冲——孤儿兜底不误伤实时路径（FR-05）", () => {
+@@ -961,7 +961,7 @@ describe("SegmentView 统一分发器", () => {
+ /* ───────── 2/3/4. 折叠交互 / 扫动动画 / 子代理递归 ───────── */
+ 
+ describe("SubagentBlockView 子代理块", () => {
+-  it("完成态默认折叠：头部绿点 / 名称 / 类型标签 / mm:ss 时长；点击展开 children", () => {
++  it("完成态纯展示：头部绿点 / 名称 / 类型标签 / mm:ss 时长；不可点击、children 不原地上屏（FR-01）", () => {
+     const seg = makeToolSeg({
+       id: "call_agent",
+       toolName: "Agent",
+@@ -976,12 +976,13 @@ describe("SubagentBlockView 子代理块", () => {
+     expect(screen.getByText("调研员")).toBeInTheDocument();
+     expect(screen.getByText("research")).toBeInTheDocument();
+     expect(screen.getByText("01:24")).toBeInTheDocument();
+-    expect(screen.queryByText("子代理正文产出")).not.toBeInTheDocument(); // 折叠不挂载
+-    fireEvent.click(rowOf("调研员"));
+-    expect(screen.getByText("子代理正文产出")).toBeInTheDocument();
++    // 2026-10-25-subagent-card-unify-panel：无 Provider 纯展示——无按钮语义，
++    // children 不原地挂载（text 段也不进内嵌流动条——答复正文不进跑马灯）。
++    expect(document.querySelector('div[role="button"]')).toBeNull();
++    expect(screen.queryByText("子代理正文产出")).not.toBeInTheDocument();
+   });
+ 
+-  it("运行中默认展开：头部 seg-sweep 扫动 + 蓝色脉冲点 + 「运行中」时长，内部工具行可见", () => {
++  it("运行中：头部 seg-sweep 扫动 + 蓝色脉冲点 + 「运行中」时长；内部工具经内嵌流动条展示（FR-05）", () => {
+     const seg = makeToolSeg({
+       id: "call_agent_r",
+       toolName: "Agent",
+@@ -994,14 +995,18 @@ describe("SubagentBlockView 子代理块", () => {
+       children: [makeBashRunningSeg({ id: "call_inner" })],
+     });
+     render(<SubagentBlockView segment={seg} />);
+-    expect(screen.getByText("npm test")).toBeInTheDocument(); // 默认展开 → 内部工具行可见
+-    const header = rowOf("执行调研");
+-    expect(header.className).toContain("seg-sweep");
++    const marquee = document.querySelector('[data-testid="subagent-live-marquee"]');
++    expect(marquee).not.toBeNull();
++    expect(marquee?.textContent).toContain("运行命令");
++    expect(marquee?.textContent).toContain("npm test");
++    // 纯展示头（无 role=button）——seg-sweep 挂在头部行容器上。
++    const header = screen.getByText("执行调研").closest("div");
++    expect(header?.className).toContain("seg-sweep");
+     expect(screen.getByText("运行中")).toBeInTheDocument();
+     expect(document.querySelector(".bg-brand-600")).not.toBeNull();
+   });
+ 
+-  it("children 递归渲染支持 depth>1 嵌套（孙辈块嵌在子辈 body 内，非顶层平铺）", () => {
++  it("嵌套子代理：直接子代理以容器条目进入内嵌流动条，孙辈不露出（FR-01/FR-05）", () => {
+     const grandchild = makeToolSeg({
+       id: "call_g",
+       toolName: "Agent",
+@@ -1028,31 +1033,29 @@ describe("SubagentBlockView 子代理块", () => {
+       children: [child],
+     });
+     render(<SegmentView segment={root} />);
+-    fireEvent.click(rowOf("顶层代理")); // 展开根 → 子辈块挂载（自身折叠）
+-    expect(screen.getByText("子辈代理")).toBeInTheDocument();
+-    fireEvent.click(rowOf("子辈代理")); // 展开子辈 → 孙辈块挂载
+-    const grandchildHeader = rowOf("孙辈代理");
+-    expect(grandchildHeader).toBeInTheDocument();
+-    // 嵌套结构证明：孙辈头位于子辈 body 内；孙辈自身折叠不挂 body（全树恰两个 body）
+-    const bodies = document.querySelectorAll(".seg-subagent-body");
+-    expect(bodies.length).toBe(2);
+-    expect(bodies[1]?.contains(grandchildHeader)).toBe(true);
+-  });
+-
+-  it("running → 终态过渡自动收敛为折叠（完成折叠默认）", () => {
+-    const running = makeToolSeg({
+-      id: "call_auto",
++    // 根卡片内嵌流动条：只显示直接子代理容器（孙辈在其自己的卡片层级内）。
++    const marquee = document.querySelector('[data-testid="subagent-live-marquee"]');
++    expect(marquee).not.toBeNull();
++    expect(marquee?.textContent).toContain("子辈代理");
++    expect(marquee?.textContent).not.toContain("孙辈代理");
++    // 无原地展开：孙辈文本产出不上屏（text 段也不进流动条）。
++    expect(screen.queryByText("孙辈文本产出")).not.toBeInTheDocument();
++    expect(document.querySelectorAll(".seg-subagent-body").length).toBe(0);
++  });
++
++  it("无 children 不渲染内嵌流动条（FR-05）", () => {
++    const seg = makeToolSeg({
++      id: "call_bare",
+       toolName: "Agent",
+-      primary: "自动收敛",
++      primary: "刚派发",
++      subagentType: "research",
+       status: "running",
+       result: undefined,
+-      children: [makeTextSeg({ id: "text:auto", text: "运行中的内部文本" })],
++      children: [],
+     });
+-    const { rerender } = render(<SubagentBlockView segment={running} />);
+-    expect(screen.getByText("运行中的内部文本")).toBeInTheDocument(); // 运行中默认展开
+-    const finished: ToolTurnSegment = { ...running, status: "ok", result: "产出", endedAt: 9_000 };
+-    rerender(<SubagentBlockView segment={finished} />);
+-    expect(screen.queryByText("运行中的内部文本")).not.toBeInTheDocument(); // 过渡即收敛折叠
++    render(<SubagentBlockView segment={seg} />);
++    expect(document.querySelector('[data-testid="subagent-live-marquee"]')).toBeNull();
++    expect(screen.getByText("刚派发")).toBeInTheDocument();
+   });
+ });
+ 
+@@ -1081,7 +1084,7 @@ describe("SubagentBlockView 紧凑卡片模式（subagent-three-pane）", () =>
+     return { ...utils, value };
+   }
+ 
+-  it("无 Provider（现状回归）：完成态默认折叠、点击头部仍可展开 children（aria-expanded 语义保留）", () => {
++  it("无 Provider（2026-10-25-subagent-card-unify-panel）：纯展示头部，无展开语义、children 不上屏", () => {
+     const seg = makeToolSeg({
+       id: "call_agent",
+       toolName: "Agent",
+@@ -1092,11 +1095,12 @@ describe("SubagentBlockView 紧凑卡片模式（subagent-three-pane）", () =>
+       children: [makeTextSeg({ id: "text:c9", text: "无 Provider 的正文产出" })],
+     });
+     render(<SubagentBlockView segment={seg} />);
+-    const header = rowOf("调研员");
+-    expect(header).toHaveAttribute("aria-expanded", "false"); // 内联折叠器语义仍在
++    expect(screen.getByText("调研员")).toBeInTheDocument();
++    expect(screen.getByText("research")).toBeInTheDocument();
++    expect(screen.getByText("01:24")).toBeInTheDocument();
++    // 统一形态后无 Provider = 纯展示：无按钮/折叠语义，children 不挂载。
++    expect(document.querySelector('div[role="button"]')).toBeNull();
+     expect(screen.queryByText("无 Provider 的正文产出")).not.toBeInTheDocument();
+-    fireEvent.click(header);
+-    expect(screen.getByText("无 Provider 的正文产出")).toBeInTheDocument();
+   });
+ 
+   it("有 Provider（activeId:null）：紧凑卡片仅头部行——children 不渲染、无折叠语义，头部名称/类型/时长齐全", () => {
+diff --git a/frontend/src/components/daemon/session-panel/session-panel-dialog.tsx b/frontend/src/components/daemon/session-panel/session-panel-dialog.tsx
+index 143779716..d3c0263d9 100644
+--- a/frontend/src/components/daemon/session-panel/session-panel-dialog.tsx
++++ b/frontend/src/components/daemon/session-panel/session-panel-dialog.tsx
+@@ -11,7 +11,7 @@ import dayjs, { type Dayjs } from "dayjs";
+ import {
+   Ban, MessageSquareText, PauseCircle, Plus, RefreshCw, Square, TriangleAlert, Users,
+ } from "lucide-react";
+-import { Button, Tag } from "antd";
++import { Button, Drawer, Tag } from "antd";
+ import { AgentModelInput } from "@/components/AgentModelInput";
+ import { buildErrorLogItem, buildSystemFailureItem } from "@/components/agent-log/normalize";
+ import { applyLogToSegments, extractPreambleText, finishTurn, stripPreambleText } from "@/components/daemon/session-log-assembler";
+@@ -26,6 +26,14 @@ import { SessionViewTabs } from "./session-view-tabs";
+ // 分叉确认弹层（dialog 模式与 page 双挂载点同步惯例）。
+ import { LineageBlock } from "@/components/daemon/session-fork/lineage-block";
+ import { ForkConfirmModal } from "@/components/daemon/session-fork/fork-confirm-modal";
++// 2026-10-25-subagent-card-unify-panel（FR-02）：弹窗子代理详情 Drawer——
++// SubagentBlockView 统一紧凑卡片后，dialog 挂面板上下文 + 右侧滑出详情。
++import {
++  SubagentPanelContext,
++  type SubagentPanelContextValue,
++} from "@/components/daemon/subagent-panel-context";
++import { SubagentDetailPanel } from "@/components/daemon/subagent-detail-panel";
++import { findSegmentById } from "./turn-state";
+ import { type AttachmentRead } from "@/lib/api/session-attachments";
+ import { joinAttachmentMarkers } from "@/components/daemon/runtime-session-helpers";
+ import {
+@@ -1900,7 +1908,54 @@ export function SessionPanelDialog(props: SessionPanelProps) {
+                     ? `继续追问…（Enter 发送 · Shift+Enter 换行 · ${MENTION_PLACEHOLDER_HINT}）`
+                     : `输入首条消息创建会话…（${MENTION_PLACEHOLDER_HINT}）`;
+ 
++  // ── 2026-10-25-subagent-card-unify-panel（FR-02）：弹窗子代理详情 Drawer ──
++  // 卡片统一紧凑形态后 dialog 挂 SubagentPanelContext：点击卡片 toggle 槽位，
++  // 右侧滑出 Drawer 内嵌 SubagentDetailPanel（与 page 移动端 Drawer 同构）；
++  // 段解析复用 findSegmentById DFS（活引用，SSE 更新即重渲），段失效自动关闭。
++  const [subagentSegmentId, setSubagentSegmentId] = useState<string | null>(null);
++  const openSubagentSegment = useMemo(() => {
++    if (subagentSegmentId == null) return null;
++    for (const t of view.turns) {
++      const seg = findSegmentById(t.segments, subagentSegmentId);
++      if (seg && (seg.kind === "tool" || seg.kind === "subagent_stub")) return seg;
++    }
++    return null;
++  }, [view.turns, subagentSegmentId]);
++  useEffect(() => {
++    if (subagentSegmentId != null && openSubagentSegment == null) {
++      setSubagentSegmentId(null);
++    }
++  }, [subagentSegmentId, openSubagentSegment]);
++  const subagentPanelContextValue = useMemo<SubagentPanelContextValue>(
++    () => ({
++      openSubagent: (segmentId) =>
++        setSubagentSegmentId((prev) => (prev === segmentId ? null : segmentId)),
++      closeSubagent: () => setSubagentSegmentId(null),
++      activeId: subagentSegmentId,
++    }),
++    [subagentSegmentId],
++  );
++  const subagentDrawer =
++    subagentSegmentId != null && openSubagentSegment != null ? (
++      <Drawer
++        open
++        onClose={() => setSubagentSegmentId(null)}
++        placement="right"
++        size="min(92vw, 420px)"
++        getContainer={false}
++        destroyOnHidden
++        rootClassName="session-subagent-drawer-root"
++        styles={{ body: { padding: 8, display: "flex", flexDirection: "column" } }}
++      >
++        <SubagentDetailPanel
++          segment={openSubagentSegment}
++          onClose={() => setSubagentSegmentId(null)}
++        />
++      </Drawer>
++    ) : null;
++
+   return (
++    <SubagentPanelContext.Provider value={subagentPanelContextValue}>
+     <section className="flex h-full min-h-0 flex-col overflow-hidden bg-card">
+       {offlineReadOnly ? (
+         <div className="flex items-center gap-2 border-b border-amber-300 bg-amber-50 px-5 py-2 text-xs text-amber-800">
+@@ -2388,5 +2443,7 @@ export function SessionPanelDialog(props: SessionPanelProps) {
+         }}
+       />
+     </section>
++    {subagentDrawer}
++    </SubagentPanelContext.Provider>
+   );
+ }
+diff --git a/frontend/src/components/daemon/turn-live-marquee.tsx b/frontend/src/components/daemon/turn-live-marquee.tsx
+index 1d5b55054..53a0964c3 100644
+--- a/frontend/src/components/daemon/turn-live-marquee.tsx
++++ b/frontend/src/components/daemon/turn-live-marquee.tsx
+@@ -597,6 +597,14 @@ export interface TurnLiveMarqueeProps {
+    * 缺省走系统 matchMedia 偏好。
+    */
+   reducedMotion?: boolean;
++  /**
++   * 布局变体（2026-10-25-subagent-card-unify-panel / FR-05）：
++   *   - bar（默认）：会话对话视图轮尾的独立胶囊条（ml-9 / 52rem 限宽 / 圆角胶囊）；
++   *   - inline：子代理卡片内嵌（w-full / 更低矮 / 贴卡片 indigo 底色）。
++   */
++  layout?: "bar" | "inline";
++  /** 根节点 data-testid（缺省 turn-live-marquee；inline 场景用独立 id 消歧）。 */
++  testId?: string;
+ }
+ 
+ /**
+@@ -608,6 +616,8 @@ export interface TurnLiveMarqueeProps {
+ export const TurnLiveMarquee = memo(function TurnLiveMarquee({
+   entries,
+   reducedMotion,
++  layout = "bar",
++  testId,
+ }: TurnLiveMarqueeProps) {
+   const prefersReduced = usePrefersReducedMotion();
+   const reduced = reducedMotion ?? prefersReduced;
+@@ -858,15 +868,23 @@ export const TurnLiveMarquee = memo(function TurnLiveMarquee({
+ 
+   if (entries.length === 0 || latest == null) return null;
+ 
++  const rootTestId = testId ?? "turn-live-marquee";
++  const trackTestId = testId != null ? `${testId}-track` : "turn-live-marquee-track";
++  const itemTestId = testId != null ? `${testId}-item` : "marquee-item";
++  const awaitingTestId = testId != null ? `${testId}-awaiting` : "marquee-awaiting";
++
+   return (
+     <div
+       ref={rootRef}
+-      data-testid="turn-live-marquee"
++      data-testid={rootTestId}
+       role="status"
+       aria-live="off"
+       aria-label="实时活动流"
+       className={cn(
+-        "sh-live-marquee ml-9 flex h-8 w-[min(100%,52rem)] items-center gap-2 overflow-hidden rounded-full border border-border/70 bg-card px-3 text-[12px] leading-none text-muted-foreground shadow-sm",
++        "sh-live-marquee flex items-center gap-2 overflow-hidden text-[12px] leading-none text-muted-foreground",
++        layout === "inline"
++          ? "h-7 w-full rounded-md border border-indigo-200/60 bg-card/70 px-2.5 text-[11px]"
++          : "ml-9 h-8 w-[min(100%,52rem)] rounded-full border border-border/70 bg-card px-3 shadow-sm",
+       )}
+     >
+       {/* 运行状态点：运行中脉冲（reduced-motion 时静止）。等待态（合成条目
+@@ -895,7 +913,7 @@ export const TurnLiveMarquee = memo(function TurnLiveMarquee({
+           runningElapsedMs={awaitingEntry != null ? null : runningElapsedFor(latest)}
+           reduced
+           fixedWidth={false}
+-          testId={awaitingEntry != null ? "marquee-awaiting" : "marquee-item"}
++          testId={awaitingEntry != null ? awaitingTestId : itemTestId}
+         />
+       ) : (
+         // 连续轨道：条目按时间顺序等宽排列，向左滚到最新条贴右缘即停。
+@@ -908,7 +926,7 @@ export const TurnLiveMarquee = memo(function TurnLiveMarquee({
+         >
+           <div
+             ref={trackRef}
+-            data-testid="turn-live-marquee-track"
++            data-testid={trackTestId}
+             className="flex w-max items-center gap-5 will-change-transform"
+           >
+             {displayEntries.map((entry) => (
+@@ -918,7 +936,9 @@ export const TurnLiveMarquee = memo(function TurnLiveMarquee({
+                 durationMs={entry.durationMs ?? runtimeDurations[entry.id] ?? null}
+                 runningElapsedMs={runningElapsedFor(entry)}
+                 reduced={false}
+-                testId={entry.id === "marquee-awaiting" ? "marquee-awaiting" : "marquee-item"}
++                testId={
++                  entry.id === "marquee-awaiting" ? awaitingTestId : itemTestId
++                }
+               />
+             ))}
+           </div>

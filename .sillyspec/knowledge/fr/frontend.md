@@ -7963,3 +7963,98 @@ superseded_by：FR-app-workspace-pages-002
   confirmed_at: null
   source_change: 2026-10-25-marquee-subagent-outer-only
   status: active
+
+## FR-frontend-072 SubagentBlockView 删除内联展开分支：无面板上下文时渲染同款头部纯展示（不可点击），不再原地展开 children
+变更：2026-10-25-subagent-card-unify-panel
+状态：active
+摘要：无 Provider 宿主（回放/悬浮助手等）；整页会话（有 Provider）
+全文：.sillyspec/changes/archive/2026-10-25-subagent-card-unify-panel/requirements.md#FR-01
+最近确认：2e0ff863327ec51edee4eb034e54adfaaeb1db5e
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-25-subagent-card-unify-panel:flow:测试绑定FR-01
+  tests: frontend/src/components/daemon/__tests__/turn-segment-views.test.tsx「无 Provider 渲染纯展示头部：信息完整、不可点击、children 不挂载」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-25-subagent-card-unify-panel
+  status: active
+
+## FR-frontend-073 会话弹窗（dialog 模式）挂 SubagentPanelContext：点击紧凑卡片右侧滑出 Drawer，内嵌 SubagentDetailPanel 展示子代理完整内部过程
+变更：2026-10-25-subagent-card-unify-panel
+状态：active
+摘要：弹窗点击子代理卡片；会话切换
+全文：.sillyspec/changes/archive/2026-10-25-subagent-card-unify-panel/requirements.md#FR-02
+最近确认：2e0ff863327ec51edee4eb034e54adfaaeb1db5e
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-25-subagent-card-unify-panel:flow:测试绑定FR-02
+  tests: frontend/src/components/daemon/__tests__/session-panel-dialog-subagent-drawer.test.tsx「点击子代理卡片打开 Drawer 详情，再点关闭」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-25-subagent-card-unify-panel
+  status: active
+
+## FR-frontend-074 整页会话行为零变化（右栏详情照旧）
+变更：2026-10-25-subagent-card-unify-panel
+状态：active
+摘要：整页回归
+全文：.sillyspec/changes/archive/2026-10-25-subagent-card-unify-panel/requirements.md#FR-03
+最近确认：2e0ff863327ec51edee4eb034e54adfaaeb1db5e
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-25-subagent-card-unify-panel:flow:测试绑定FR-03
+  tests: frontend/src/components/daemon/__tests__/turn-segment-views.test.tsx「紧凑卡片模式（subagent-three-pane）」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-25-subagent-card-unify-panel
+  status: active
+
+## FR-frontend-075 内联展开相关测试改写为纯展示断言；弹窗新增点击开 Drawer 用例；全部通过
+变更：2026-10-25-subagent-card-unify-panel
+状态：active
+摘要：回归核验
+全文：.sillyspec/changes/archive/2026-10-25-subagent-card-unify-panel/requirements.md#FR-04
+最近确认：2e0ff863327ec51edee4eb034e54adfaaeb1db5e
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-25-subagent-card-unify-panel:flow:测试绑定FR-04
+  tests: frontend/src/components/daemon/__tests__/agent-replay-body.test.tsx
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-25-subagent-card-unify-panel
+  status: active
+
+## FR-frontend-076 子代理卡片内嵌内部活动流动条（与外部跑马灯同款机制）
+变更：2026-10-25-subagent-card-unify-panel
+状态：active
+摘要：子代理运行中；无 children
+全文：.sillyspec/changes/archive/2026-10-25-subagent-card-unify-panel/requirements.md#FR-05
+最近确认：2e0ff863327ec51edee4eb034e54adfaaeb1db5e
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-25-subagent-card-unify-panel:flow:测试绑定FR-05
+  tests: frontend/src/components/daemon/__tests__/turn-segment-views.test.tsx「子代理卡片内嵌内部活动流动条（FR-05）」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-25-subagent-card-unify-panel
+  status: active

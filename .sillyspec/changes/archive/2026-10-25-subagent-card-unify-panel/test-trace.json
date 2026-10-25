@@ -1,0 +1,81 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-25-subagent-card-unify-panel",
+  "rows": [
+    {
+      "anchor": "FR-01",
+      "row_id": "2026-10-25-subagent-card-unify-panel:flow:测试绑定FR-01",
+      "tests": [
+        "frontend/src/components/daemon/__tests__/turn-segment-views.test.tsx「无 Provider 渲染纯展示头部：信息完整、不可点击、children 不挂载」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-25-subagent-card-unify-panel"
+    },
+    {
+      "anchor": "FR-02",
+      "row_id": "2026-10-25-subagent-card-unify-panel:flow:测试绑定FR-02",
+      "tests": [
+        "frontend/src/components/daemon/__tests__/session-panel-dialog-subagent-drawer.test.tsx「点击子代理卡片打开 Drawer 详情，再点关闭」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-25-subagent-card-unify-panel"
+    },
+    {
+      "anchor": "FR-03",
+      "row_id": "2026-10-25-subagent-card-unify-panel:flow:测试绑定FR-03",
+      "tests": [
+        "frontend/src/components/daemon/__tests__/turn-segment-views.test.tsx「紧凑卡片模式（subagent-three-pane）」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-25-subagent-card-unify-panel"
+    },
+    {
+      "anchor": "FR-04",
+      "row_id": "2026-10-25-subagent-card-unify-panel:flow:测试绑定FR-04",
+      "tests": [
+        "frontend/src/components/daemon/__tests__/agent-replay-body.test.tsx"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-25-subagent-card-unify-panel"
+    },
+    {
+      "anchor": "FR-05",
+      "row_id": "2026-10-25-subagent-card-unify-panel:flow:测试绑定FR-05",
+      "tests": [
+        "frontend/src/components/daemon/__tests__/turn-segment-views.test.tsx「子代理卡片内嵌内部活动流动条（FR-05）」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-25-subagent-card-unify-panel"
+    }
+  ]
+}

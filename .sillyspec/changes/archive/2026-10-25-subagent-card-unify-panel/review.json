@@ -1,0 +1,28 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-25-subagent-card-unify-panel",
+  "reviewer": "inline-self（环境无已注册子代理，主会话代行）",
+  "verdict": "PASS",
+  "reviewedAgainst": "c9e6c96b7ffc72f8741e4b0ed0055b76ca7278dc",
+  "findings": [
+    {
+      "severity": "P3",
+      "title": "无 Provider 宿主（回放体/悬浮助手）失去子代理详情入口，卡片退化为纯展示",
+      "evidence": "SubagentBlockView 无 panel 分支仅头部纯展示；该路径宿主（agent-replay-body 回放、旧悬浮助手）无法打开详情——头部信息完整，完整过程仍可在「进度」视图查看。属用户裁决的统一取舍，requirements FR-03 已声明边界。",
+      "location": "frontend/src/components/daemon/turn-segment-views.tsx:1057"
+    },
+    {
+      "severity": "P3",
+      "title": "嵌套子代理的内嵌流动条只显示直接子代理容器，深层嵌套需逐层进 Drawer 查看",
+      "evidence": "deriveLiveMarqueeEntries 不递归 children（上轮用户裁决），内嵌条目为直接子级容器/工具；深层活动经 Drawer 内 SubagentDetailPanel 递归查看。与「外部只显示容器级别」的分层语义一致。",
+      "location": "frontend/src/components/daemon/turn-segment-views.tsx:1015"
+    }
+  ],
+  "dimensionNotes": {
+    "乱序": "ok（边界已裁决：可接受——卡片/流动条消费段树快照，children 归属路由由装配器负责；Drawer 段解析 DFS 活引用，SSE 更新即重渲）",
+    "并发": "ok（不适用——activeId/Drawer 为组件内状态，无共享写面）",
+    "切换": "ok（边界已裁决：可接受——dialog 段失效 effect 自动关 Drawer；弹窗卸载随实例销毁；整页右栏与移动端 Drawer 零改动回归全绿）",
+    "作用域": "ok（不适用——context 为组件树局部；内嵌流动条每卡片独立实例，entries 仅来自该卡 children）"
+  },
+  "reviewedAt": "2026-10-25T11:51:37+08:00"
+}
