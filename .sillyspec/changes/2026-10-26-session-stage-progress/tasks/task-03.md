@@ -19,6 +19,7 @@ allowed_paths:
   - frontend/src/components/daemon/turn-timeline.tsx
   - frontend/src/lib/api-types.ts
   - frontend/src/lib/daemon/__tests__/session-stream-turn-phase.test.ts
+  - sillyhub-daemon/tests/protocol-session-contract.test.ts
 target_files:
   - frontend/src/lib/daemon/session-sse.ts
   - frontend/src/lib/daemon/session-stream.ts
@@ -45,7 +46,7 @@ implementation:
   - frontend/src/components/daemon/session-panel/turn-state.ts：导出 TurnPhaseState 类型；轮状态加 currentPhase 字段；upsertTurn/replacePlaceholderTurn 路径透传；新增 applyTurnPhase(turns, runId, phase) helper（at=Date.now() 到达时刻）与终态清理（turn_completed/failed/killed 分支清空 currentPhase，D-013③）
   - frontend/src/components/daemon/session-panel/session-panel-page.tsx 与 session-panel-dialog.tsx：注册 onTurnPhase handler → applyTurnPhase 写轮状态（双消费方同款接线）
   - frontend/src/components/daemon/turn-timeline.tsx：TurnStatusBar 渲染点（约 2370 行）透传 currentPhase={turn.currentPhase ?? null}
-  - 新增 frontend/src/lib/daemon/__tests__/session-stream-turn-phase.test.ts：①turn_phase 事件消费→currentPhase 写入（phase/at 断言）②缺失 run_id 事件被白名单丢弃③乱序到达 last-write-wins④turn_completed/failed/killed 终态清空 currentPhase⑤跨 run 事件不污染他轮（run_id 归属路由）
+  - 新增 frontend/src/lib/daemon/__tests__/session-stream-turn-phase.test.ts：①turn_phase 事件消费→currentPhase 写入（phase/at 断言）②缺失 run_id 事件被白名单丢弃③乱序到达 last-write-wins④turn_completed/failed/killed 终态清空 currentPhase⑤跨 run 事件不污染他轮（run_id 归属路由）⑥重挂载（组件 unmount→mount）后 currentPhase 从轮状态重读不丢（盲区 #3，plan review G3）⑦keepalive 非 JSON 帧不触发 onTurnPhase、lastLogTs 游标不因 phase 事件推进（盲区 #5）
   - cd frontend && pnpm gen:types 重生成 frontend/src/lib/api-types.ts（含 task-01 DTO；若暴露无关旧测试债按仓库规则 21 顺手补字段修好）
 acceptance:
   - turn_phase 事件→轮状态 currentPhase 写入（at=本地 Date.now()）；缺失/null run_id 事件被丢弃不建轮
@@ -57,6 +58,8 @@ verify:
   - cd frontend && pnpm exec tsc --noEmit
 constraints:
   - lastLogTs 游标仅 log 事件推进（既有逻辑零改动）；keepalive 帧不触发 handler
+related_tests:
+  - sillyhub-daemon/tests/protocol-session-contract.test.ts  # SessionEventKind 前端侧枚举扩展可能命中全量枚举断言（plan review G2；daemon 侧 WS 消息类型未动，daemon 契约测试预期零改——若断言面涉及前端信封需同步钉子）
   - currentPhase 挂轮状态（turn 对象）非组件局部 state——面板重挂载不丢失（Review Focus #3）
   - 双消费方（page/dialog）接线同款，勿只接一处
 ---

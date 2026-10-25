@@ -13,6 +13,7 @@ decision_ids: [D-001@v1, D-003@v1, D-007@v1, D-008@v1]
 allowed_paths:
   - frontend/src/components/daemon/turn-status-bar.tsx
   - frontend/src/components/daemon/__tests__/turn-status-bar-phase.test.tsx
+  - frontend/src/components/daemon/__tests__/turn-time-display.test.tsx
 target_files:
   - frontend/src/components/daemon/turn-status-bar.tsx
   - NEW:frontend/src/components/daemon/__tests__/turn-status-bar-phase.test.tsx
@@ -64,3 +65,5 @@ constraints:
      provides:      仅当本 task 给其他 task 提供接口/DTO/响应时填
      expects_from:  仅当本 task 消费其他 task 的契约时填
      related_tests: 仅当本 task 改动导致既有测试断言失效时填（测试路径须同时进 allowed_paths） -->
+related_tests:
+  - frontend/src/components/daemon/__tests__/turn-time-display.test.tsx  # 状态条相邻既有用例（计时锚点/文案），props 扩展防回归（plan review G2）

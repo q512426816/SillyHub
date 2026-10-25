@@ -12,10 +12,10 @@ execution_mode: main  # 缺省 main 直写（R7/R8 对撞实证派发税 3.6×�
 ## Wave 1（协议层，串行）
 - task-01
 
-## Wave 2（三端并行，依赖 W1 契约；main 模式下按序直写）
+## Wave 2（三端并行，依赖 W1 契约；main 模式下按序直写——**拓扑定序：task-04 先于 task-03**（task-03 透传 currentPhase prop 前 TurnStatusBar 须已有该 prop，否则 tsc 红；plan review G1））
 - task-02
-- task-03
 - task-04
+- task-03
 
 ## Wave 3（收尾）
 - task-05
@@ -30,7 +30,7 @@ execution_mode: main  # 缺省 main 直写（R7/R8 对撞实证派发税 3.6×�
 | task-05 | 收尾验收与文档同步 | W3 | P1 | task-02, task-03, task-04 | 全 FR | design 成功标准逐条验收+模块文档登记+原型同源提交 |
 
 ## 关键路径
-task-01 → task-03 → task-05（协议定稿 → 前端数据层 → 收尾；task-02/04 与 task-03 文件正交可插空）
+task-01 → task-04 → task-03 → task-05（协议定稿 → 状态条 prop → 数据层接线 → 收尾；task-02 与前端两任务文件正交可插空）
 
 ## 全局硬约束（从 design.md 逐字抄录，绑定所有 task）
 
