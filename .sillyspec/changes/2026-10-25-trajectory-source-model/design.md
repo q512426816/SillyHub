@@ -2,7 +2,7 @@
 author: qinyi
 created_at: 2026-10-25 10:08:01
 generated_by: sillyspec-design-init
-scale: "large"
+scale: "small"
 ---
 
 # 设计文档（Design）— 2026-10-25-trajectory-source-model
@@ -39,9 +39,10 @@ scale: "large"
 3. 新 channel `session_header` 落库（AgentRunLog.channel 字符串列，无枚举约束，落库侧仅按 channel 归类）。
 
 **Wave2 daemon——配置面请求头快照**
-1. 采集：driver 启动/轮边界读取 `{systemPrompt: state.systemPrompt 配置段, allowedTools, mcpServers: [{name}]}`（driver-factory / claude-sdk-driver 既有数据点）。
+1. 采集：**driver 生命周期事件采集**（Grill P1 修订）——仅在 driver `start` / `reloadWithConfig` / `restoreAndReconnect` 三处重建 spec 后采集 `{systemPrompt: state.systemPrompt 配置段, allowedTools, mcpServers 名称清单}`（driver-factory / claude-sdk-driver 既有数据点）；轮内不采集（避免 MCP discover 抖动面，R-02 一致）。mcpServers 取 `opts.mcpServers`（profile.mcpRefs 过滤后子集）的 name 键去重。
 2. 变更检测：session 级缓存上次快照，字段级比较（照 dsh `headerEquals`）；首轮 → `reason: "initial"`，与缓存不等 → `reason: "change"`；相同不重复上报（D-010）。
 3. 上报：经 `submitMessages` 额外提交一条 `{type: "log", channel: "session_header", content: header JSON, metadata: {reason}}`。
+4. team_brief 行 content 语义（Grill P2 修订）：主控简报只进 SESSION_INJECT payload 不落库（control.py:782-784 既有注释），DB user_input 行 content 保持用户 `/team` 原文；`contentHidden=true` 折叠展开显示 `/team` 原文（如实，不隐藏）。盖戳时断言该轮 `task_wakeup`/`auto_resume_of` 为空（落库点优先级 task_wakeup > auto_resume > 显式值，简报轮由用户发送触发不冲突，测试断言防回归）。
 
 **Wave3 frontend——装配与轨迹行**
 1. `TURN_TRIGGER_META` 加三行（team_brief / worker_dispatch / agent_notice，glyph+label+contentHidden=true）；盖戳消息经既有 `classifyTurnTrigger` → `turn_trigger` 段 → 轨迹「上下文」行（链路已就位，零新装配代码）。
@@ -62,13 +63,15 @@ scale: "large"
 | 修改 | sillyhub-daemon/src/interactive/claude-sdk-driver.ts | 轮边界采集 header 快照 + 字段级变更比较 + 上报 session_header 日志消息 |
 | 修改 | sillyhub-daemon/src/interactive/session-manager/driver-factory.ts | header 采集取数（systemPrompt 配置段 / allowedTools / mcpServers）辅助导出 |
 | 修改 | frontend/src/components/daemon/session-log-assembler.ts | `TURN_TRIGGER_META` 加三行；`TurnSegment` 加 `request_header` 段类型与分类 |
-| 修改 | frontend/src/components/daemon/runtime-session-helpers.tsx | `logsToTurns` 装配 `session_header` → `request_header` 段（prev 快照引用）；`classifySessionLog` 分类 |
+| 修改 | frontend/src/components/daemon/runtime-session-helpers.tsx | `logsToTurns` 装配 `session_header` → `request_header` 段（prev 快照链 + 会话级独立序列，见接口定义修订） |
+| 修改 | frontend/src/components/daemon/session-log-sanitize.ts | `classifySessionLog` 加 `session_header` 分类分支（Grill 修订：分类函数归属地在此模块） |
 | 修改 | frontend/src/components/daemon/trajectory/from-turn-views.ts | `request_header` 段 → 系统行（meta.headerChange）；revert 启发式（TEAM_DISPATCH_PREFIXES/isTeamDispatchText/systemBrief 移除） |
 | 修改 | frontend/src/components/daemon/trajectory/build-trajectory.ts | meta 类型：`systemBrief` 移除、`headerChange` 新增 |
 | 修改 | frontend/src/components/daemon/trajectory/trajectory-view-model.ts | 标签「系统」+ 四态文案（初始/系统提示词/工具/双变更）；revert 启发式分支 |
 | 修改 | frontend/src/components/daemon/trajectory/__tests__/from-turn-views.test.ts | request_header 段用例 + revert 启发式用例改写 |
-| 修改 | backend/app/modules/daemon/tests/test_session_inject_metadata.py 或新增同域测试 | 盖戳与透传用例（按实际测试文件归属落位） |
-| 修改 | sillyhub-daemon/tests/interactive/ 下快照上报用例 | 采集/变更检测/上报用例（按实际测试文件归属落位） |
+| 修改 | backend/app/modules/daemon/tests/test_inject_first_turn_briefing.py | 主控简报轮盖 team_brief 用例（含优先级断言：该轮 task_wakeup/auto_resume 为空） |
+| 新增 | NEW:backend/app/modules/daemon/tests/test_session_inject_source_stamps.py | Worker 首轮 worker_dispatch / 通知 agent_notice / 真实输入不盖戳 / submit_steps 白名单透传用例 |
+| 新增 | NEW:sillyhub-daemon/tests/interactive/session-header-snapshot.test.ts | 快照采集（driver 生命周期事件）/ 字段级比较（initial/change/相同不报）/ 上报消息形态用例 |
 
 ## 接口定义
 
@@ -90,6 +93,13 @@ interface SessionHeaderSnapshot {
 // frontend TurnSegment 新成员
 | { kind: "request_header"; id: string; header: SessionHeaderSnapshot; prev: SessionHeaderSnapshot | null; ts: number | null }
 
+/* prev 装配算法（Grill P2 修订）：
+   - logsToTurns 分组（按 run_id）前先全量扫描 session_header 日志行序列，按时间序建 prev 链；
+   - request_header 段挂**会话级独立序列**（不挂具体 run 的轮——D-011「不进轮块流」的自然延伸），
+     轨迹派生时按 ts 落入对应轮区间的行序；
+   - headerChange 分类以**前端 prev diff 为准**（daemon reason 仅作校验/日志：daemon 重启报 initial
+     但 prev 存在时不误报「初始系统提示词」，Grill P2 双信号源裁定）。 */
+
 // TrajectoryRow.meta 新成员（build-trajectory.ts）
 meta?: { ...; headerChange?: "initial" | "system" | "tools" | "system-and-tools" };
 
@@ -109,7 +119,7 @@ type TurnTriggerKind = "task_wakeup" | "auto_resume" | "shadow_chat" | "group_ch
 ## 兼容策略（brownfield 必填）
 
 - 旧 daemon / 旧 backend 组合：无盖戳、无 session_header 日志——前端按现状渲染（用户行），零行为变化。
-- 新 daemon + 旧前端：session_header 日志被 `classifySessionLog` 归未知类——按既有未知 channel 兜底（中性系统行/跳过，不崩）。
+- 新 daemon + 旧前端：session_header 日志被旧 `classifySessionLog` 归未知类——sanitize 对未知 channel 原样返回（不崩；如实口径：旧前端不渲染该行而非"映射为系统行"，Grill 修订）。
 - 存量历史会话：无标记如实呈现（D-003）。
 - 日志读取 API / OpenAPI schema 无形状变化（metadata 已是自由 dict 透传），无需 gen:types。
 
@@ -119,9 +129,9 @@ type TurnTriggerKind = "task_wakeup" | "auto_resume" | "shadow_chat" | "group_ch
 |---|---|---|---|
 | R-01 | daemon 拿不到 preset 展开的引擎系统提示词全文，配置面快照可能让用户误以为看到全文 | P1 | 行文案与文档显式标注「配置面」（档案 systemPrompt 配置段），不声称引擎全文（D-002 边界写入设计） |
 | R-02 | MCP discover 时机导致同会话工具清单抖动，快照误报「工具已更新」 | P1 | 快照取 driver 启动时确定的面（allowedTools + 已注册 mcpServers 名称），轮内动态 discover 结果不入快照；实测抖动再收敛 |
-| R-03 | submit_steps metadata 通用透传扩大注入面 | P1 | 白名单键集（turn_trigger/chain 既有键/reason）落库，未知键丢弃并计数 |
+| R-03 | submit_steps metadata 通用透传扩大注入面 | P1 | 白名单封闭键集落库：`turn_trigger`、chain 既有键（`source_group_id` / `source_member_id` / `source_carrier_run_id` / `chain_depth` / `sender_user_id`——plan 首步核对真实键名后冻结清单）、`reason`；白名单外丢弃并计数 |
 | R-04 | 注入点遗漏（未来新增注入链路不盖戳） | P2 | 注入函数签名带 turn_trigger 形参（已备）+ 模块文档登记惯例；漏盖表现为「用户」行，可发现 |
-| R-05 | 旧前端遇 session_header 未知 channel | P2 | 未知 channel 归中性系统行不丢（既有兜底路径），不崩 |
+| R-05 | 旧前端遇 session_header 未知 channel | P2 | sanitize 未知 channel 原样返回不崩；旧前端不渲染该行（如实口径，非"系统行映射"） |
 | R-06 | 并行会话共享仓竞态（本会话历史实证） | P1 | 显式 pathspec 提交；收口前核对暂存面 |
 | R-07 | 无长驻进程/外部资源，生命周期面不适用 | P3 | 接受：快照采集在轮边界同步完成，无后台任务 |
 
@@ -151,3 +161,4 @@ type TurnTriggerKind = "task_wakeup" | "auto_resume" | "shadow_chat" | "group_ch
 - [x] 生命周期关键词在场，已写紧邻豁免短语「不涉及生命周期契约」
 - [x] UI 原型：登记复用+扩展（轨迹真码原型加三类新行，产物 `prototype-trajectory-source-model.html`；素材源 frontend/src/components/prototype/trajectory-redesign-view.tsx，经 `pnpm prototype:build` 编译）
 - [x] 无「⚠️ 自审存疑」项
+- [x] Grill 修订收纳（2026-10-25 独立评审 PASS，P1×1/P2×4/cannot_verify×1）：采集时机改「driver 生命周期事件」（start/reloadWithConfig/restoreAndReconnect，轮内不采）；prev 装配算法与会话级独立序列、headerChange 以 prev diff 为准写入接口定义；文件清单补 session-log-sanitize.ts；R-03 白名单给封闭键集；R-05 改如实口径；team_brief content 语义与优先级断言写入 Wave1/Wave2；遗留 plan 首步两查：submit_steps channel 派生点（:520 前段）、chain 既有键名核对
