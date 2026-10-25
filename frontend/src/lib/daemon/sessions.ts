@@ -598,11 +598,15 @@ export async function getAgentSession(
  * 同构，照 SessionUsageRead 手写过渡形态——gen:types 生成版落地后消费方可
  * 改引生成版）。git_mode 三态：git=正常采集 / no_git=目录非 git 仓库 /
  * no_root=无 cwd 且无可解析绑定——空态 branch 等字段全 null，消费方
- * （SessionConfigBar 分支指示项）静默隐藏。
+ * （SessionConfigBar 分支指示项）静默隐藏。root_source 标识根来源
+ * （2026-10-25-session-git-worktree-root）：worktree=命中 sillyspec 工作树
+ * 标准布局、cwd=会话 cwd 快照、workspace_root=绑定根回退、none=no_root
+ * 空态——前端据此渲染工作树标识。
  */
 export interface SessionGitStatus {
   git_mode: "git" | "no_git" | "no_root";
   root: string | null;
+  root_source: "worktree" | "cwd" | "workspace_root" | "none";
   branch: string | null;
   detached: boolean;
   head_short: string | null;

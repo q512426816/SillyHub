@@ -70997,6 +70997,17 @@
             ],
             "title": "Root"
           },
+          "root_source": {
+            "type": "string",
+            "enum": [
+              "worktree",
+              "cwd",
+              "workspace_root",
+              "none"
+            ],
+            "title": "Root Source",
+            "default": "none"
+          },
           "branch": {
             "anyOf": [
               {

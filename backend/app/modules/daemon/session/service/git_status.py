@@ -1,12 +1,23 @@
-"""会话级 git 状态 service（2026-10-21-session-git-branch / FR-01..03）。
+"""会话级 git 状态 service（2026-10-21-session-git-branch / FR-01..03；
+2026-10-25-session-git-worktree-root 加工作树探测层）。
 
 会话维度的**当前** git 分支实时查询（FR-02：每请求现场采集，非创建快照）：
 
-- root 决策链：``AgentSession.cwd``（SessionManager working dir，daemon 宿主
-  路径，``resolve_root_path_for_daemon`` 做 container→host 改写）优先；cwd
-  为空回退所属工作区的成员绑定根（``MemberBindingResolver``，只看本人绑定
-  行——git_log ``_resolve_binding`` 同语义）。两者皆无、或 cwd 有值但无
-  workspace 可解析 daemon → 200 ``no_root`` 空态（不报错，FR-03）。
+- root 决策链（2026-10-25 版，三层）：① **工作树探测层（尽力而为）**——
+  ``AgentSession.current_change_id``（inject 打锚、随命令游走）→
+  ``changes.change_key``（sillyspec change 名）→ 候选 = 成员绑定根下
+  ``.sillyspec/.runtime/worktrees/<change_key>/``（sillyspec 固定布局，
+  src/worktree.js WORKTREES_REL）→ daemon 平名 RPC ``host_fs.stat`` 探测
+  候选下 ``.git``（worktree 检出的 .git 是文件，lstat 可见）；命中则 root=
+  工作树、root_source="worktree"——平台其余 cwd 信号（AgentSession.cwd 创建
+  快照 / platform_agent_logs.agent_cwd 启动目录快照）均不随 agent cd 更新，
+  这是唯一结构化可推导的工作树信号。miss / current_change_id 空 / change 行
+  缺失 / stat 异常（离线/超时/远端错）→ 静默落回，探测不新增错误面。
+  ② ``AgentSession.cwd``（``resolve_root_path_for_daemon`` 改写），
+  root_source="cwd"；③ 成员绑定根（``MemberBindingResolver``，只看本人绑定
+  行——git_log ``_resolve_binding`` 同语义），root_source="workspace_root"。
+  ①②③全 miss（无 workspace 可解析 daemon）→ 200 ``no_root`` 空态
+  （root_source="none"）。
 - 采集：既有平名 RPC ``git_status``（``ws_hub.send_rpc`` 直连 + 显式 30s
   超时，照 ``git_log/service.py:_send_git_rpc`` 模式）——daemon 内建 fetch
   降级（no_remote/fetch_failed/fetch_timeout 不阻断分支采集），零 daemon
@@ -16,7 +27,8 @@
   error → 502；RPC forbidden（root 越界 allowed_roots，如 worktree 未入
   白名单）→ 403；offline/mid-rpc 断连 → 502；timeout → 504。
 
-设计依据：``.sillyspec/changes/2026-10-21-session-git-branch/design.md``。
+设计依据：``.sillyspec/changes/2026-10-21-session-git-branch/design.md``、
+``.sillyspec/changes/2026-10-25-session-git-worktree-root/design.md``。
 """
 
 from __future__ import annotations
@@ -24,6 +36,8 @@ from __future__ import annotations
 import uuid
 from datetime import UTC, datetime
 from typing import Any, Final, Literal
+
+from sqlalchemy import select
 
 from app.core.errors import AppError
 from app.modules.daemon.runtime.service import (
@@ -38,6 +52,15 @@ from app.modules.workspace.service import resolve_root_path_for_daemon
 # git_status RPC 超时（git_log STATUS_RPC_TIMEOUT_SECONDS 同档：daemon 侧整体
 # 兜底 30s，内含 fetch 15s 局部超时）。
 SESSION_GIT_RPC_TIMEOUT_SECONDS: Final[float] = 30.0
+
+# 工作树探测 stat RPC 短预算（UI 路径尽力而为层，非关键面——host_fs delegate
+# probe 同档思路；本地 lstat 毫秒级，5s 只兜传输抖动）。
+WORKTREE_PROBE_RPC_TIMEOUT_SECONDS: Final[float] = 5.0
+
+# sillyspec worktree 固定布局（src/worktree.js WORKTREES_REL）——相对工作区
+# 绑定根的固定相对路径，跨仓 worktree 的「--<repoKey>」双连后缀命名不匹配
+# change_key 自然 miss 落回（design 边界 4）。
+_WORKTREES_REL: Final[str] = ".sillyspec/.runtime/worktrees"
 
 # 非 git 仓库判据：git 标准错误文案（git_gateway/tests/test_router.py 已依赖
 # 同形态），daemon porcelain 失败时经 error 字段回传。
@@ -83,13 +106,47 @@ def _now_iso() -> str:
     return datetime.now(UTC).isoformat()
 
 
+async def _probe_worktree(
+    hub: Any,
+    daemon_id: uuid.UUID,
+    binding_root: str,
+    change_key: str,
+) -> str | None:
+    """探测 sillyspec 工作树标准布局（2026-10-25-session-git-worktree-root）。
+
+    候选 = ``<binding_root>/.sillyspec/.runtime/worktrees/<change_key>/``，经
+    daemon 平名 RPC ``host_fs.stat`` 查候选下 ``.git``（worktree 检出为文件，
+    lstat 语义可见——delegate probe_workspace_git_mode 同判据）。返回候选
+    绝对路径（命中）或 None（miss）。
+
+    尽力而为层：任何异常（离线/超时/远端错）与答非约定形状一律 None 落回，
+    不新增错误面（FR-02）；不读 meta.json（避开 CLI 并发写面，design 边界 2）。
+    """
+    candidate = binding_root.rstrip("/\\") + "/" + _WORKTREES_REL + "/" + change_key
+    try:
+        result = await hub.send_rpc(
+            daemon_id,
+            "host_fs.stat",
+            {"path": candidate + "/.git"},
+            timeout=WORKTREE_PROBE_RPC_TIMEOUT_SECONDS,
+        )
+    except Exception:
+        return None
+    if isinstance(result, dict) and result.get("exists") is True:
+        return candidate
+    return None
+
+
 def _empty(
-    git_mode: Literal["no_git", "no_root"], root: str | None = None
+    git_mode: Literal["no_git", "no_root"],
+    root: str | None = None,
+    root_source: Literal["worktree", "cwd", "workspace_root", "none"] = "none",
 ) -> SessionGitStatusResponse:
     """空态响应（no_root / no_git）：branch 等字段全 None（FR-03）。"""
     return SessionGitStatusResponse(
         git_mode=git_mode,
         root=root,
+        root_source=root_source,
         branch=None,
         detached=False,
         head_short=None,
@@ -113,52 +170,60 @@ async def get_session_git_status(
 
     agent_session = await svc.get_agent_session(session_id, user_id)
 
-    # ── root 决策链（design「做法概述」）────────────────────────────────────
-    # cwd 优先（daemon 宿主路径快照）；cwd 有值但无 workspace → 无法解析
-    # daemon_id（AgentSession 无 daemon 直连列）→ no_root 空态守护。
-    daemon_id: uuid.UUID | None = None
-    if agent_session.cwd:
-        if agent_session.workspace_id is None:
-            return _empty("no_root")
-        binding = await MemberBindingResolver.resolve_member_binding_or_none(
-            svc._session,
-            agent_session.workspace_id,
-            user_id,
-            log_tag="session_git_resolve_member_binding_unexpected_error",
-        )
-        if binding is None or binding.daemon_id is None:
-            raise SessionGitNotBound(
-                "当前账号未绑定本机工作区，无法查询会话 Git 状态。",
-                details={
-                    "session_id": str(session_id),
-                    "workspace_id": str(agent_session.workspace_id),
-                },
-            )
-        daemon_id = binding.daemon_id
-        root = resolve_root_path_for_daemon(agent_session.cwd)
-    elif agent_session.workspace_id is not None:
-        binding = await MemberBindingResolver.resolve_member_binding_or_none(
-            svc._session,
-            agent_session.workspace_id,
-            user_id,
-            log_tag="session_git_resolve_member_binding_unexpected_error",
-        )
-        if binding is None or binding.daemon_id is None:
-            raise SessionGitNotBound(
-                "当前账号未绑定本机工作区，无法查询会话 Git 状态。",
-                details={
-                    "session_id": str(session_id),
-                    "workspace_id": str(agent_session.workspace_id),
-                },
-            )
-        daemon_id = binding.daemon_id
-        root = resolve_root_path_for_daemon(binding.root_path)
-    else:
+    # ── binding 统一解析（cwd 链与探测层都需要 daemon_id + 绑定根锚）──────────
+    # 无 workspace → 无从解析 daemon（AgentSession 无 daemon 直连列）与探测锚
+    # → no_root 空态守护（cwd 有值同理——2026-10-21 版语义保持）。
+    if agent_session.workspace_id is None:
         return _empty("no_root")
+    binding = await MemberBindingResolver.resolve_member_binding_or_none(
+        svc._session,
+        agent_session.workspace_id,
+        user_id,
+        log_tag="session_git_resolve_member_binding_unexpected_error",
+    )
+    if binding is None or binding.daemon_id is None:
+        raise SessionGitNotBound(
+            "当前账号未绑定本机工作区，无法查询会话 Git 状态。",
+            details={
+                "session_id": str(session_id),
+                "workspace_id": str(agent_session.workspace_id),
+            },
+        )
+    daemon_id = binding.daemon_id
+    binding_root = resolve_root_path_for_daemon(binding.root_path)
+    hub = get_daemon_ws_hub()
+
+    # ── ① 工作树探测层（2026-10-25-session-git-worktree-root / FR-01）────────
+    # current_change_id（inject 打锚、随命令游走）→ change_key → 标准布局候选
+    # → host_fs.stat 探测；miss/异常静默落回②③（FR-02）。
+    root: str | None = None
+    root_source: Literal["worktree", "cwd", "workspace_root", "none"] = "none"
+    change_key: str | None = None
+    if agent_session.current_change_id is not None:
+        from app.modules.change.model import Change
+
+        change_key = (
+            await svc._session.execute(
+                select(Change.change_key).where(Change.id == agent_session.current_change_id)
+            )
+        ).scalar_one_or_none()
+    if change_key:
+        worktree_root = await _probe_worktree(hub, daemon_id, binding_root, change_key)
+        if worktree_root is not None:
+            root = worktree_root
+            root_source = "worktree"
+
+    # ── ② cwd 快照链 → ③ 绑定根回退（2026-10-21 版语义，零回归）─────────────
+    if root is None:
+        if agent_session.cwd:
+            root = resolve_root_path_for_daemon(agent_session.cwd)
+            root_source = "cwd"
+        else:
+            root = binding_root
+            root_source = "workspace_root"
 
     # ── 平名 RPC 直连（git_log _send_git_rpc 同模式：显式超时 + 全量错误映射）──
     context: dict[str, Any] = {"session_id": str(session_id)}
-    hub = get_daemon_ws_hub()
     try:
         result: dict[str, Any] = await hub.send_rpc(
             daemon_id,
@@ -219,7 +284,7 @@ async def get_session_git_status(
     error = result.get("error")
     if error:
         if _NOT_A_GIT_REPO_MARKER in str(error):
-            return _empty("no_git", root=root)
+            return _empty("no_git", root=root, root_source=root_source)
         raise SessionGitDaemonRemoteError(
             "守护进程查询会话 Git 状态失败，请稍后重试。",
             details={
@@ -233,6 +298,7 @@ async def get_session_git_status(
     return SessionGitStatusResponse(
         git_mode="git",
         root=root,
+        root_source=root_source,
         branch=result.get("branch"),
         detached=bool(result.get("detached")),
         head_short=result.get("head_short"),

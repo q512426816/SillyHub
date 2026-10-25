@@ -246,10 +246,12 @@ beforeEach(() => {
   });
   mocks.setSessionThinkingLevel.mockReset().mockResolvedValue({ ok: true });
   // 2026-10-21-session-git-branch：默认正常 git 态（feature-x 分支）——既有
-  // 用例不感知指示项；空态/失败态由本变更新增用例覆盖。
+  // 用例不感知指示项；空态/失败态由本变更新增用例覆盖。root_source 缺省
+  // cwd（2026-10-25-session-git-worktree-root 加字段，工作树形态另有用例）。
   mocks.fetchSessionGitStatus.mockReset().mockResolvedValue({
     git_mode: "git",
     root: "C:\\repo",
+    root_source: "cwd",
     branch: "feature-x",
     detached: false,
     head_short: "1a2b3c4d",
@@ -1720,7 +1722,8 @@ describe("SessionConfigBar 档案默认预示（profile-default-prehint）", () 
 describe("SessionConfigBar git 分支指示项（2026-10-21-session-git-branch）", () => {
   const GIT_OK = {
     git_mode: "git",
-    root: "C:\wt\feature-x",
+    root: "C:\\wt\\feature-x",
+    root_source: "cwd",
     branch: "feature-x",
     detached: false,
     head_short: "1a2b3c4d",
@@ -1799,5 +1802,39 @@ describe("SessionConfigBar git 分支指示项（2026-10-21-session-git-branch�
     renderBar({ sessionId: "" });
     expect(screen.queryByTestId("session-git-branch")).not.toBeInTheDocument();
     expect(mocks.fetchSessionGitStatus).not.toHaveBeenCalled();
+  });
+});
+
+// ── 15. 工作树标识（2026-10-25-session-git-worktree-root / FR-03）───────────
+
+describe("SessionConfigBar git 指示项工作树标识（2026-10-25-session-git-worktree-root）", () => {
+  const WT_OK = {
+    git_mode: "git",
+    root: "C:\\repo\\.sillyspec\\.runtime\\worktrees\\2026-10-25-wt-demo",
+    root_source: "worktree",
+    branch: "wt-branch",
+    detached: false,
+    head_short: "9f8e7d6c",
+    files_changed: 3,
+    untracked_count: 0,
+    synced_at: "2026-10-25T12:00:00Z",
+  };
+
+  it("shows worktree badge when root_source is worktree（FR-03：工作树可见标识）", async () => {
+    mocks.fetchSessionGitStatus.mockResolvedValue(WT_OK);
+    renderBar();
+    const badge = await screen.findByTestId("session-git-branch");
+    expect(badge).toHaveTextContent("wt-branch");
+    expect(badge).toHaveAttribute("data-root-source", "worktree");
+    expect(screen.getByTestId("session-git-worktree-tag")).toHaveTextContent(
+      "工作树",
+    );
+  });
+
+  it("cwd 来源无工作树标识（FR-03：非工作树形态展示与现状一致）", async () => {
+    renderBar(); // beforeEach 默认 mock root_source=cwd
+    const badge = await screen.findByTestId("session-git-branch");
+    expect(badge).toHaveAttribute("data-root-source", "cwd");
+    expect(screen.queryByTestId("session-git-worktree-tag")).not.toBeInTheDocument();
   });
 });

@@ -348,6 +348,9 @@ export function buildDefaultSwitchPrompt(p: PendingSwitch): string {
  * 默认 false，后台标签页暂停）。detached HEAD 显示 head 短 sha；no_git /
  * no_root 空态静默隐藏（FR-03，不报错不 toast）；查询失败渲染「⎇ —」占位不阻塞其余
  * 控件（retry=false——失败由下一轮轮询自然重取，不与轮询叠加堆积）。
+ * 2026-10-25-session-git-worktree-root / FR-03：root_source="worktree"（会话
+ * 当前变更命中 sillyspec 工作树标准布局）时 badge 加「工作树」标识、Tooltip
+ * 首行标注 sillyspec 工作树——会话在隔离工作树里干活时与主仓形态可区分。
  */
 function SessionGitBranchBadge({
   sessionId,
@@ -374,9 +377,15 @@ function SessionGitBranchBadge({
   //（不闪骨架，数据到了再出现）；仅失败态走占位。
   if (!gitQuery.isError && label == null) return null;
 
+  const inWorktree = data?.root_source === "worktree";
+
   const tooltip = (
     <div className="max-w-[280px] space-y-0.5 text-xs">
-      <p>会话工作目录当前分支（60s 自动刷新）</p>
+      <p>
+        {inWorktree
+          ? "sillyspec 工作树当前分支（60s 自动刷新）"
+          : "会话工作目录当前分支（60s 自动刷新）"}
+      </p>
       {data?.root ? <p className="break-all">目录：{data.root}</p> : null}
       {data && (data.files_changed != null || data.untracked_count != null) ? (
         <p>
@@ -393,13 +402,28 @@ function SessionGitBranchBadge({
     <Tooltip title={tooltip}>
       <span
         data-testid="session-git-branch"
-        title={gitQuery.isError ? "会话 Git 状态查询失败" : "会话当前 Git 分支"}
+        data-root-source={data?.root_source ?? "unknown"}
+        title={
+          gitQuery.isError
+            ? "会话 Git 状态查询失败"
+            : inWorktree
+              ? "会话所在 sillyspec 工作树当前分支"
+              : "会话当前 Git 分支"
+        }
         className="inline-flex cursor-default items-center gap-1.5 rounded-md px-2 py-1 text-xs text-muted-foreground/80"
       >
         <GitBranch aria-hidden className="h-3.5 w-3.5 shrink-0 text-brand-600" />
         <span className={cn("max-w-[140px] truncate", mobile && "max-w-[100px]")}>
           {gitQuery.isError ? "—" : label}
         </span>
+        {inWorktree && (
+          <span
+            data-testid="session-git-worktree-tag"
+            className="shrink-0 rounded bg-muted px-1 py-px text-[10px] leading-tight text-muted-foreground"
+          >
+            工作树
+          </span>
+        )}
       </span>
     </Tooltip>
   );

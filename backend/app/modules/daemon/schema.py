@@ -143,6 +143,11 @@ class AgentSessionListResponse(BaseModel):
 class SessionGitStatusResponse(BaseModel):
     git_mode: Literal["git", "no_git", "no_root"]
     root: str | None = None
+    # 2026-10-25-session-git-worktree-root：根来源标识——worktree=命中 sillyspec
+    # 工作树标准布局（current_change_id→change_key→stat 探测）；cwd=会话 cwd
+    # 快照链；workspace_root=成员绑定根回退；none=no_root 空态。前端据此渲染
+    # 工作树标识。
+    root_source: Literal["worktree", "cwd", "workspace_root", "none"] = "none"
     branch: str | None = None
     detached: bool = False
     head_short: str | None = None

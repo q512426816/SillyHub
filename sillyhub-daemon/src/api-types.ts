@@ -25816,6 +25816,12 @@ export interface components {
             git_mode: "git" | "no_git" | "no_root";
             /** Root */
             root?: string | null;
+            /**
+             * Root Source
+             * @default none
+             * @enum {string}
+             */
+            root_source: "worktree" | "cwd" | "workspace_root" | "none";
             /** Branch */
             branch?: string | null;
             /**

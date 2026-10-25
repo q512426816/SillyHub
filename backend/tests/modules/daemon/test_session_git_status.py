@@ -367,3 +367,145 @@ async def test_openapi_lists_session_git_status_path():
 
     paths = app.openapi()["paths"]
     assert "/api/daemon/sessions/{session_id}/git-status" in paths
+
+
+# ── 2026-10-25-session-git-worktree-root：工作树探测层 ──────────────────────
+
+
+async def _seed_change(
+    db_session: AsyncSession,
+    *,
+    workspace_id: uuid.UUID,
+    change_key: str,
+) -> uuid.UUID:
+    """造 Change 行（change_key 即 sillyspec change 名；location/path 必填）。"""
+    from app.modules.change.model import Change
+
+    change_id = uuid.uuid4()
+    db_session.add(
+        Change(
+            id=change_id,
+            workspace_id=workspace_id,
+            change_key=change_key,
+            title="工作树探测测试变更",
+            status="active",
+            location="active",
+            path=f".sillyspec/changes/{change_key}",
+        )
+    )
+    await db_session.commit()
+    return change_id
+
+
+async def _seed_env_with_change(
+    db_session: AsyncSession,
+    *,
+    cwd: str | None = r"C:\repo",
+    with_change: bool = True,
+) -> tuple[AgentSession, str, FakeHub]:
+    """带 current_change_id 锚的场景（change_key=2026-10-25-wt-demo）。"""
+    sess, token, hub, _ = await _seed_env(db_session, cwd=cwd)
+    if with_change:
+        change_id = await _seed_change(
+            db_session, workspace_id=sess.workspace_id, change_key="2026-10-25-wt-demo"
+        )
+        sess.current_change_id = change_id
+        db_session.add(sess)
+        await db_session.commit()
+        await db_session.refresh(sess)
+    return sess, token, hub
+
+
+async def test_git_status_prefers_active_sillyspec_worktree(
+    client: AsyncClient, db_session: AsyncSession, monkeypatch
+):
+    """FR-01：current_change_id 有活跃工作树（stat 命中）→ root=工作树路径、
+    root_source=worktree、git_status RPC 按工作树采集（优先于 cwd 主仓快照）。"""
+    sess, token, hub = await _seed_env_with_change(db_session, cwd=r"C:\repo")
+    # 探测层拼接形态：绑定根（Windows 反斜杠原样）+ 正斜杠相对段（_probe_worktree
+    # 以 "/" 连接，daemon pathResolve 容忍混合分隔符）。
+    wt_path = r"C:\repo" + "/.sillyspec/.runtime/worktrees/2026-10-25-wt-demo"
+    hub.on("host_fs.stat", result={"exists": True, "is_dir": False, "size": 1})
+    hub.on("git_status", result=dict(_GIT_STATUS_RESULT, branch="wt-branch"))
+    monkeypatch.setattr("app.modules.daemon.ws_hub.get_daemon_ws_hub", lambda: hub)
+
+    resp = await client.get(_url(sess.id), headers={"Authorization": f"Bearer {token}"})
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["root_source"] == "worktree"
+    assert body["root"] == wt_path
+    assert body["branch"] == "wt-branch"
+
+    stat_calls = [c for c in hub.calls if c["method"] == "host_fs.stat"]
+    assert len(stat_calls) == 1
+    assert stat_calls[0]["params"] == {"path": wt_path + "/.git"}
+    rpc_calls = _git_status_calls(hub)
+    assert len(rpc_calls) == 1
+    assert rpc_calls[0]["params"] == {"root": wt_path}
+
+
+async def test_git_status_worktree_probe_miss_falls_back_to_cwd(
+    client: AsyncClient, db_session: AsyncSession, monkeypatch
+):
+    """FR-02：目录已清理（stat exists=false）→ 落回 cwd 链，root_source=cwd。"""
+    sess, token, hub = await _seed_env_with_change(db_session, cwd=r"C:\repo")
+    hub.on("host_fs.stat", result={"exists": False, "is_dir": False, "size": 0})
+    hub.on("git_status", result=dict(_GIT_STATUS_RESULT))
+    monkeypatch.setattr("app.modules.daemon.ws_hub.get_daemon_ws_hub", lambda: hub)
+
+    resp = await client.get(_url(sess.id), headers={"Authorization": f"Bearer {token}"})
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["root_source"] == "cwd"
+    assert body["root"] == r"C:\repo"
+    assert _git_status_calls(hub)[0]["params"] == {"root": r"C:\repo"}
+
+
+async def test_git_status_worktree_probe_error_falls_back_silently(
+    client: AsyncClient, db_session: AsyncSession, monkeypatch
+):
+    """FR-02：探测 stat RPC 异常（离线）→ 静默落回，不新增错误面（后续
+    git_status RPC 正常则整体 200，root_source=cwd）。"""
+    sess, token, hub = await _seed_env_with_change(db_session, cwd=r"C:\repo")
+    hub.on(
+        "host_fs.stat",
+        exc=DaemonRuntimeOffline("daemon 'x' is offline (no WS connection)."),
+    )
+    hub.on("git_status", result=dict(_GIT_STATUS_RESULT))
+    monkeypatch.setattr("app.modules.daemon.ws_hub.get_daemon_ws_hub", lambda: hub)
+
+    resp = await client.get(_url(sess.id), headers={"Authorization": f"Bearer {token}"})
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["root_source"] == "cwd"
+
+
+async def test_git_status_no_change_anchor_skips_probe(
+    client: AsyncClient, db_session: AsyncSession, monkeypatch
+):
+    """FR-02：无 current_change_id → 零 stat 调用（探测层跳过），行为同 2026-10-21 版。"""
+    sess, token, hub = await _seed_env_with_change(db_session, with_change=False)
+    hub.on("git_status", result=dict(_GIT_STATUS_RESULT))
+    monkeypatch.setattr("app.modules.daemon.ws_hub.get_daemon_ws_hub", lambda: hub)
+
+    resp = await client.get(_url(sess.id), headers={"Authorization": f"Bearer {token}"})
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["root_source"] == "cwd"
+    assert not [c for c in hub.calls if c["method"] == "host_fs.stat"]
+
+
+async def test_git_status_stale_change_id_falls_back(
+    client: AsyncClient, db_session: AsyncSession, monkeypatch
+):
+    """FR-02：current_change_id 指向已删 change 行（查无 change_key）→ 落回。"""
+    sess, token, hub, _ = await _seed_env(db_session)
+    sess.current_change_id = uuid.uuid4()  # 幽灵 id（无对应行）
+    db_session.add(sess)
+    await db_session.commit()
+    hub.on("git_status", result=dict(_GIT_STATUS_RESULT))
+    monkeypatch.setattr("app.modules.daemon.ws_hub.get_daemon_ws_hub", lambda: hub)
+
+    resp = await client.get(_url(sess.id), headers={"Authorization": f"Bearer {token}"})
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["root_source"] == "cwd"
+    assert not [c for c in hub.calls if c["method"] == "host_fs.stat"]
