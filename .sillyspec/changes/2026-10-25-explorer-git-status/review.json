@@ -1,0 +1,87 @@
+{
+  "schemaVersion": 1,
+  "reviewType": "acceptance",
+  "specVerdict": "pass",
+  "qualityVerdict": "pass",
+  "reviewedFiles": [
+    "changes/2026-10-25-explorer-git-status/design.md",
+    "changes/2026-10-25-explorer-git-status/plan.md",
+    "changes/2026-10-25-explorer-git-status/tasks.md",
+    "changes/2026-10-25-explorer-git-status/decisions.md"
+  ],
+  "docHash": "TODO",
+  "checklist": [
+    {
+      "item": "task-01 daemon 双指令与卡验收对照（解析/注册/守卫/不抛）",
+      "result": "pass",
+      "note": "daemon.ts:7811/7815 平名注册 git_dirty_files/git_worktree_diff；host-fs-handler.ts:961 parsePorcelainChangedLine 双形态（首个 \\t 且前段 token 数=fieldCount 判定制表符形态，否则单空格 split 后第 fieldCount token 起 rejoin）；:1007-1010 u 条目恒 modified（D-011）；gitDirtyFiles 三段采集（porcelain=v2 --branch→四态+head_short+empty 早退 / ls-files --directory→ignored 聚合 is_dir=尾'/' / numstat join，'-'→binary 行数 null）；gitWorktreeDiff 单文件判态分流（? 条目→runGitNoIndexDiff 局部 execFile :1029-1076 exit 0/1 均成功，CRLF 过滤 :1083；modified/deleted→git diff HEAD）+GIT_DIFF_MAX_BYTES 截断；两方法均 assertWithinAllowedRoots 守卫+error 通道结构化回传不抛；27 新用例+GL30 更新（commit 4d510fe0b）"
+    },
+    {
+      "item": "task-02 backend 双端点与降级骨架复用",
+      "result": "pass",
+      "note": "router.py:121-140 两端点均 require_permission(WORKSPACE_READ)；service.py:1038 get_dirty_files/:1102 get_worktree_diff 复用 _resolve_binding(:519)/_probe_git_mode(:556)/_send_git_rpc(:581)/_map_remote_error(:468) 零改映射代码；schema.py:199-249 四 DTO（GitDirtyFileItem/GitIgnoredItem/GitDirtyFilesResponse/GitWorktreeDiffResponse）字段齐；test_git_log_dirty_files.py 18 用例覆盖 200 聚合/404 未绑定/502 离线/422 版本过旧/no_git/504 超时/契约缺口/path 预检/缺参/鉴权（commit 509f7a6ae）"
+    },
+    {
+      "item": "task-03 gen:types 三份产物一致",
+      "result": "pass",
+      "note": "backend/openapi.json + frontend/src/lib/api-types.ts + sillyhub-daemon/src/api-types.ts 三份均含 GitDirtyFilesResponse（grep 各命中 3 处）与 GitWorktreeDiffResponse；提交 e0b90f0ae 含前置 tsc 健康检查说明；无手写类型残留迹象"
+    },
+    {
+      "item": "task-04 前端取数层+工作区更改卡",
+      "result": "pass",
+      "note": "lib/git-log.ts:72-74 queryKeys/dirtyFiles+worktreeDiff、:147 fetchDirtyFiles、:160 fetchWorktreeDiff、:257 useGitLogDirtyFiles、:271 useGitLogWorktreeDiff 与 design §前端契约逐项对齐；worktree-changes-card.tsx:55-80 四色类名（text-success/text-primary/text-error line-through/text-muted-foreground，D-002）、:29 import buildFileTree + :261 changedTree 消费（design 目录聚合复用落实）；13 用例全绿（commit f6a366dab）"
+    },
+    {
+      "item": "task-05 diff 弹窗与 file-tree 导出回归",
+      "result": "pass",
+      "note": "file-tree.tsx diff 仅 DiffBody 加 export+注释（行为零改，buildFileTree 基线已是导出态）；worktree-diff-modal.tsx:27 复用 DiffBody、:53-77 错误分型（422 升级引导/404 双文案/502/504 可重试）、:135-161 binary/truncated 提示条；弹窗 13 用例+file-tree 回归 13 用例全绿（commit 24a1281ef）"
+    },
+    {
+      "item": "task-06 Git 日志页挂载接线与 no_git 不堆叠",
+      "result": "pass",
+      "note": "page.tsx:211 gitMode!==\"no_git\" 门控渲染 WorktreeChangesCard（与页面 no_git 空态卡二选一）、:331 WorktreeDiffModal 受控接线、onOpenFile→handleOpenWorktreeFile；page 测试新增挂载/点击弹窗/no_git 三用例，git-log 全组 4 文件 52 用例全绿（commit 2e5824030）"
+    },
+    {
+      "item": "task-07 explorer 四色着色+点击不变+收尾对账",
+      "result": "pass",
+      "note": "file-explorer.tsx:302 useGitLogDirtyFiles 组件内自取+渲染期状态映射（Grill P2-③ 时序竞态既定解法）、:155-158 忽略徽标、:421-424 onSelect 仍走 onSelectFile 内容预览（D-005）、:123 蓝点口径注释（ignored 不贡献，D-011）；既有 explorer 24 用例补 QueryClient 包装回归全绿+新增 7 着色用例；worktree 提交面不含 prototype-dist 漂移文件（R-05 提交范围约束满足，commit ca545af3f）"
+    },
+    {
+      "item": "全局硬约束 1-3：全链路只读 / D-002 四色且 FILE_STATUS_META 零改动 / D-005 点击不变",
+      "result": "pass",
+      "note": "daemon 命令面仅 status --porcelain=v2 / ls-files / diff HEAD / diff --no-index（无 commit/add/checkout/stash 写面）；file-changes-card.tsx 不在 23 文件 diff 中（FILE_STATUS_META 未触）；onSelect 链路原样"
+    },
+    {
+      "item": "全局硬约束 4-7：类型零手写 / daemon execFile argv+守卫+quotepath off+不抛 / D-010 no-index 退出码 / porcelain 口径",
+      "result": "pass",
+      "note": "三份 gen:types 产物同批提交；全部 execFile 非 shell argv 数组+assertWithinAllowedRoots+GIT_QUOTEPATH_OFF_ARGS(:750)；runGitNoIndexDiff(:1064-1072) timedOut/非数值 code/≥2 才 error、exit 0/1 成功、filterNoIndexStderr CRLF 过滤(:1083)；u→modified/ignored 聚合/蓝点不含 ignored 均有实现与单测锚点"
+    },
+    {
+      "item": "全局硬约束 8-11：聚焦测试 / 中文 UI / 三平台兼容 / 提交纪律",
+      "result": "pass",
+      "note": "各提交均为本变更相关测试组（daemon 27+回归49、backend 18、前端分组 52/24+7/13/13）非全量；组件文案中文（忽略/目录整体/工作区没有文件等）；windowsHide+execFile+/dev/null（MSYS git 接受，D-010 Grill 实证 git 2.45.1）；7 提交 Conventional Commits 中文 subject、23 文件全在 design 清单内、无 --no-verify 迹象"
+    },
+    {
+      "item": "执行期裁决 D-012（porcelain v2 双形态解析）合规性",
+      "result": "pass",
+      "note": "接口契约（path 字符串、空格/中文安全）不变，仅解析机制按本机实证修正，双形态兼容+DF2/DF3 单测锚定；属非破坏性自裁决，decisions.md 记录完整（歧义/选择/理由/影响 task）"
+    },
+    {
+      "item": "执行期裁决 D-013（GL30 5→7）合规性",
+      "result": "pass",
+      "note": "GL30 断言集更新为七方法、保留平名/无前缀/封闭集合防意外注册的测试意图（host-fs-handler-git-log.test.ts diff 逐行核对），与 plan-review P2-① 对前端 related_tests 的处理同构；plan 漏标 daemon 侧 related_tests 的就地补齐理由成立——不更新则全局验收标准 3 无法成立"
+    },
+    {
+      "item": "design §接口定义 契约对齐抽验（daemon RPC / backend DTO / 前端 lib）",
+      "result": "pass",
+      "note": "git_dirty_files 响应（head_short 前 8 位/empty/files 四态+additions/deletions/binary/ignored is_dir/error）与 git_worktree_diff（status/head_short/diff/truncated/binary/error）逐字段一致；backend DTO 同构；两处偏差均自洽：① status 命令带 --branch（design 未写，但 head_short/empty 需 branch.oid 行，必需增补）② worktree-diff no_git 返回 404 而 dirty-files 为 200 空态（design 错误码列表含 404，语义合理）"
+    },
+    {
+      "item": "既有测试不破（GL30 更新语义 / file-tree / explorer / git-log-page 回归）",
+      "result": "pass",
+      "note": "GL30 断言与新事实对齐非删断言凑绿；file-tree.tsx 仅加 export；file-explorer.test.tsx 24 用例补 QueryClient 包装后回归全绿（+74 行）；git-log-page.test.tsx 结构回归；tsc 仅 2 个基线既有 session-panel 错误（a9f5fae15 引入，非本变更文件）"
+    }
+  ],
+  "reviewer": { "channel": "agent-tool", "missionId": null, "model": null },
+  "reviewerNotes": "7 任务提交面（b2d6c3280..HEAD，23 文件 +4745/-33）与 design 文件变更清单逐项对得上，四件套口径与实现互相印证，无阻断项。三点非阻断观察留痕：① 原型 3 件（explorer-git-status-view.tsx 未跟踪 / prototype-build.mjs 已改 / prototype-dist/explorer-git-status.html 未跟踪）与 11 个 prototype-dist 漂移产物仍在主仓工作区未提交——R-05 对提交范围的约束在 worktree 侧已满足，主仓侧统一提交收尾需在归档前完成；② plan 全局验收标准 4「dev 环境集成冒烟」为人工运行项，静态审查无法覆盖，留给 verify 阶段；③ gitDirtyFiles 的 numstat join 对「 porcelain 外的行理论不出现」做了防御跳过、HEAD 缺失族 stderr 容错，注释与实现一致。D-012/D-013 均属非破坏性自裁决且台账记录完整。"
+}
