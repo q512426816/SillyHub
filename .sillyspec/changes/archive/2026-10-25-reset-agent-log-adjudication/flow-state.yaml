@@ -2,6 +2,13 @@ tier: thin
 legacy_fallback: false
 substeps:
   artifacts: done
+  ledger: done
+  patch: done
+  review: done
+  probes: done
+  distill: done
+  archive: done
+  events: done
 born_face: thin
 with_tasks: false
 review_force: null
@@ -25,7 +32,7 @@ input: >-
 autopilot: false
 prestage_ack: true
 baseline_commit: f6ba7bd9cf58d4ea0bef8e6987fed75537f71672
-updatedAt: '2026-10-25T10:37:12.827Z'
+updatedAt: '2026-10-25T10:41:26.423Z'
 cross_baselines:
   sillyspec: e26546db6247f7b07df5e68583ab7e5a041d9014
 baseline_sha256: ead3c67d0970fbd49763b7d38d05bc62213ed146cf19262eaf87b780dd2d789b
@@ -34,4 +41,6 @@ spec_approved_at: '2026-10-25T10:35:27.280Z'
 spec_approved_by: anon@DESKTOP-HJ0AM09
 spec_approved_channel: agent-self
 spec_attested_by: anon@DESKTOP-HJ0AM09
+batch_ticked: true
+gate_summary: 'test: —｜lint: —｜门文件 1 个'
 

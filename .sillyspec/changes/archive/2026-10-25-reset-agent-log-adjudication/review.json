@@ -1,0 +1,23 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-25-reset-agent-log-adjudication",
+  "reviewer": "inline-self（环境无已注册子代理，主会话代行）",
+  "verdict": "PASS",
+  "reviewedAgainst": "464b28fec5e3a5cc4fa9ea895de016a826f8adf8",
+  "findings": [
+    {
+      "severity": "P3",
+      "status": "accepted",
+      "title": "change.patch 冻结工件未在变更目录落盘",
+      "evidence": "flow done patch 子步自称完成但 changeDir 无 change.patch；评审以 git show 464b28fec 直接核验文件面替代（8 文件=SKILL.md+变更目录 7 件，无越界）",
+      "location": ".sillyspec/changes/2026-10-25-reset-agent-log-adjudication/"
+    }
+  ],
+  "dimensionNotes": {
+    "乱序": "ok（纯文档；裁决基于生产库快照，10-16 冻结点回滚亦含新代数据，结论时序稳健——design 四问作答与实际相符）",
+    "并发": "ok（共享仓提交走显式 pathspec；本轮实证：暂存区混有他会话 marquee 变更 7 文件，已被 pathspec commit 正确隔离未带走）",
+    "切换": "ok（中断重入由 flow done 断点续机制覆盖，本轮实际经历 ledger/review 两断点重入均幂等推进）",
+    "作用域": "ok（裁决仅限腾讯机 platform 库；.codex 旧版 skill 无此段无需同步——已核实）"
+  },
+  "reviewedAt": "2026-10-25T10:41:10Z"
+}

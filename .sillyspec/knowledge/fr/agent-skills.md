@@ -235,3 +235,24 @@ created_at: 2026-10-19T02:55:25.079Z
   confirmed_at: null
   source_change: 2026-10-22-agent-profiles-page-restyle
   status: active
+
+## FR-agent-skills-014 SKILL.md 原「一次性运维动作」段替换为终局裁决记录
+变更：2026-10-25-reset-agent-log-adjudication
+状态：active
+摘要：主路径
+全文：.sillyspec/changes/archive/2026-10-25-reset-agent-log-adjudication/requirements.md#FR-01
+最近确认：464b28fec5e3a5cc4fa9ea895de016a826f8adf8
+
+## FR-agent-skills-015 常见坑清单对应条目口径同步
+变更：2026-10-25-reset-agent-log-adjudication
+状态：active
+摘要：主路径
+全文：.sillyspec/changes/archive/2026-10-25-reset-agent-log-adjudication/requirements.md#FR-02
+最近确认：464b28fec5e3a5cc4fa9ea895de016a826f8adf8
+
+## FR-agent-skills-016 纯文档改动边界
+变更：2026-10-25-reset-agent-log-adjudication
+状态：active
+摘要：主路径
+全文：.sillyspec/changes/archive/2026-10-25-reset-agent-log-adjudication/requirements.md#FR-03
+最近确认：464b28fec5e3a5cc4fa9ea895de016a826f8adf8
