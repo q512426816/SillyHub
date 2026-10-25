@@ -10,8 +10,10 @@
  * 消息渲染 BUG：[SYSTEM:thinking_tokens]/[THINKING] 不再显示）。
  *
  * 过滤规则（史：源自原 interactive-session-panel 内 renderLogContent，语义
- * 完全一致）：
- *   - 含 AskUserQuestion / [TOOL_RESULT] User answered / [SYSTEM…]/[RESULT…] → 丢弃
+ * 完全一致；2026-10-25-askuser-keyword-overkill-fix 收紧——正文前缀行豁免，
+ * 详见 classifySessionLog 同名注释）：
+ *   - 含 AskUserQuestion（[ASSISTANT]/[THINKING] 正文前缀行豁免）/ [TOOL_RESULT]
+ *     User answered / [SYSTEM…]/[RESULT…] → 丢弃
  *   - channel=stderr → 加 ⚠️ 前缀
  *   - channel=tool_call → 不加 🔧 前缀（ql-20260730-001：tool 内容走 classifySessionLog
  *     分流到工具卡片，卡片自带图标；保留正文不再加 emoji 前缀）
@@ -41,7 +43,15 @@ export type {
 export function sanitizeSessionLogContent(content: string, channel?: string | null): string {
   const trimmed = (content ?? "").trim();
   if (!trimmed) return "";
-  if (trimmed.includes("AskUserQuestion")) return "";
+  // 与 classifySessionLog 同源同款丢弃规则（2026-10-25-askuser-keyword-overkill-fix
+  // 同步收紧：正文前缀行豁免——[ASSISTANT]/[THINKING] 前缀行不再因子串提及
+  // 「AskUserQuestion」被误杀，理由与锚定口径见 session-log-assembler.ts 同名注释）。
+  if (
+    !/^\[(ASSISTANT|THINKING)\]\s?/.test(trimmed) &&
+    trimmed.includes("AskUserQuestion")
+  ) {
+    return "";
+  }
   if (/^\[TOOL_RESULT\]\s*User answered/.test(trimmed)) return "";
   if (/^\[(SYSTEM|RESULT)[^\]]*\]/.test(trimmed)) return "";
   // 2026-08-03-session-stream-partial-revoke / FR-04 / R-04：override 撤回令箭前缀不

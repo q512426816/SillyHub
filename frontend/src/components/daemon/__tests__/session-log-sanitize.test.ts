@@ -142,6 +142,63 @@ describe("classifySessionLog", () => {
     expect(classifySessionLog("   ")).toBeNull();
   });
 
+  // 2026-10-25-askuser-keyword-overkill-fix：原 trimmed.includes("AskUserQuestion")
+  // 全子串匹配会把正文提到该词的合法 [ASSISTANT] 回复 / [THINKING] 思考行整条静默
+  // 吞掉（会话 96b55567 实证：收尾汇报 1860 字含「AskUserQuestion 工具卡片」字样
+  // 被丢弃，对话视图丢内容无失败卡兜底）。收紧为正文前缀行豁免（对齐 ql-20260906-001
+  // 对 isAssistantApiErrorText 的行首锚定先例）。
+  it("[ASSISTANT] 正文提及 AskUserQuestion → reply 全文保留（96b55567 形态回归）", () => {
+    // 96b55567 收尾汇报真实形态：千字级正文、中段含该词、以汇报格式开头。
+    const body =
+      "爸爸~爸爸~[2026-10-25 13:28:28]：\n\n**归档断点③汇报——变更已收口归档**\n\n" +
+      "**改了什么**\n1. agent 反馈信息宽度统一（略）。\n" +
+      "2. AskUser 组件统一（优先对话 tab 的）：进度 tab 的提问记录从「AskUserQuestion 工具卡片」" +
+      "换成对话 tab 同款「❓ 问题 + → 回答」问答块，旧工具卡组件删除。\n" +
+      "风险与交付记录等章节填充内容。".repeat(40);
+    const content = `[ASSISTANT] ${body}`;
+    const seg = classifySessionLog(content, "stdout");
+    expect(seg).not.toBeNull();
+    expect(seg?.kind).toBe("reply");
+    expect(seg?.text).toBe(body); // 全文保留（含「AskUserQuestion」），非截断非丢弃
+  });
+
+  it("[THINKING] 正文提及 AskUserQuestion → thinking 不误杀", () => {
+    const seg = classifySessionLog(
+      "[THINKING] 用户问的 AskUserQuestion 已回答，继续收口",
+      "stdout",
+    );
+    expect(seg).toEqual({
+      kind: "thinking",
+      text: "用户问的 AskUserQuestion 已回答，继续收口",
+    });
+  });
+
+  it("AskUserQuestion 工具调用行维持丢弃（tool_call JSON / 裸 JSON / [TOOL_USE] 文本行）", () => {
+    // 提问卡权威源是 dialog 通道（DialogQaBlock 渲染），过程视图不画工具行防双画；
+    // 收紧只豁免正文前缀行，工具调用协议行行为零变化。
+    expect(
+      classifySessionLog(
+        '{"tool": "AskUserQuestion", "args": {"questions": [{"header": "收口确认"}]}}',
+        "tool_call",
+      ),
+    ).toBeNull();
+    expect(
+      classifySessionLog('{"tool": "AskUserQuestion", "question": "..."}'),
+    ).toBeNull();
+    expect(
+      classifySessionLog('[TOOL_USE] AskUserQuestion: {"questions":[...]}', "stdout"),
+    ).toBeNull();
+  });
+
+  it("sanitizeSessionLogContent 同款收紧：正文提及不再清空，协议行仍清空", () => {
+    expect(
+      sanitizeSessionLogContent("[ASSISTANT] 从「AskUserQuestion 工具卡片」换成问答块"),
+    ).toBe("从「AskUserQuestion 工具卡片」换成问答块");
+    expect(
+      sanitizeSessionLogContent('{"tool": "AskUserQuestion", "question": "..."}'),
+    ).toBe("");
+  });
+
   it("tool_call channel 的 SYSTEM 行仍丢弃（丢弃规则优先于 channel 分流）", () => {
     expect(classifySessionLog("[SYSTEM] noise", "tool_call")).toBeNull();
   });

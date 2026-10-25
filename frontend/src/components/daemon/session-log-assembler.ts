@@ -315,7 +315,18 @@ export function classifySessionLog(
 ): SessionLogSegment | null {
   const trimmed = (content ?? "").trim();
   if (!trimmed) return null;
-  if (trimmed.includes("AskUserQuestion")) return null;
+  // AskUser 卡片协议行丢弃。2026-10-25-askuser-keyword-overkill-fix 收紧：原
+  // `trimmed.includes("AskUserQuestion")` 全子串匹配会把正文提到该词的合法
+  // [ASSISTANT] 回复 / [THINKING] 思考行整条静默吞掉（会话 96b55567 实证：收尾
+  // 汇报 1860 字含「AskUserQuestion 工具卡片」字样被丢弃，无失败卡兜底）。
+  // 收紧为正文前缀行豁免（对齐 ql-20260906-001 对 isAssistantApiErrorText 的
+  // 行首锚定先例）：[ASSISTANT]/[THINKING] 前缀行跳过本判定落回正常分类；其余
+  // 形态（tool_call JSON 权威行、无 channel 裸 JSON、[TOOL_USE] AskUserQuestion
+  // 文本行等）维持丢弃零变化——提问卡由 dialog 通道（DialogQaBlock）渲染，
+  // 过程视图不画工具行防双画；[TOOL_USE] 文本行另有下方通用丢弃规则兜底。
+  if (!/^\[(ASSISTANT|THINKING)\]\s?/.test(trimmed) && trimmed.includes("AskUserQuestion")) {
+    return null;
+  }
   if (/^\[TOOL_RESULT\]\s*User answered/.test(trimmed)) return null;
   if (/^\[(SYSTEM|RESULT)[^\]]*\]/.test(trimmed)) return null;
   // 2026-08-03-session-stream-partial-revoke / FR-04：override 撤回令箭识别。必须在
