@@ -107,17 +107,33 @@ function clipSummary(text: string | undefined, max = 160): string {
 }
 
 /** 工具行摘要：优先主参数/命令，其次工具名。 */
-/** 行标签：system_event 派生行显示「上下文」（dsh 对照的 context 类）。 */
+/** 行标签：system_event 派生行显示「上下文」（dsh 对照的 context 类）；
+ * 请求头快照行显示「系统」（dsh 对照的 system 类，2026-10-25-source-model）。 */
 function recordKindLabel(row: TrajectoryRow): string {
   if (row.kind === "system" && row.meta?.contextEvent) return "上下文";
+  if (row.kind === "system" && row.meta?.headerChange) return "系统";
   return KIND_LABEL[row.kind] ?? row.kind;
 }
+
+/** 请求头快照行文案（dsh 口径四态；配置面快照，非引擎全文——D-002）。 */
+const HEADER_CHANGE_SUMMARY: Record<
+  NonNullable<TrajectoryRow["meta"]>["headerChange"] & string,
+  string
+> = {
+  initial: "初始系统提示词（配置面）",
+  system: "系统提示词已更新（配置面）",
+  tools: "工具已更新",
+  "system-and-tools": "系统提示词与工具已更新（配置面）",
+};
 
 function recordSummary(row: TrajectoryRow): string {
   if (row.kind === "tool") {
     const base = row.toolName ?? "tool";
     const detail = clipSummary(row.inputText, 120);
     return detail ? `${base} · ${detail}` : base;
+  }
+  if (row.meta?.headerChange) {
+    return HEADER_CHANGE_SUMMARY[row.meta.headerChange];
   }
   const text = clipSummary(row.outputText ?? row.inputText);
   return text || row.toolName || KIND_LABEL[row.kind] || "—";

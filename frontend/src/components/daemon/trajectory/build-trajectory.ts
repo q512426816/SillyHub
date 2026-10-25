@@ -70,6 +70,9 @@ export interface TrajectoryRow {
     /** 2026-10-22-trajectory-context-jump：system_event 派生的上下文行
      *  （账本标签显示「上下文」）。 */
     contextEvent?: boolean;
+    /** 2026-10-25-trajectory-source-model：配置面请求头快照行（账本标签
+     *  「系统」，四态文案 initial/system/tools/system-and-tools）。 */
+    headerChange?: "initial" | "system" | "tools" | "system-and-tools";
   };
 }
 

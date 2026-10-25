@@ -317,3 +317,65 @@ describe("turn_trigger 段派生与锚点（2026-10-24-trajectory-context-rows�
     expect(um!.startedAt).toBe(START + 15_000);
   });
 });
+
+describe("请求头快照段派生系统行（2026-10-25-trajectory-source-model FR-03）", () => {
+  function headerSeg(
+    header: { systemPrompt: string | null; allowedTools: string[]; mcpServers: string[] },
+    prev: { systemPrompt: string | null; allowedTools: string[]; mcpServers: string[] } | null,
+    ts: number,
+  ) {
+    return {
+      kind: "request_header",
+      id: `header-${ts}`,
+      header,
+      prev,
+      ts,
+    } as never;
+  }
+
+  const H1 = { systemPrompt: "指令A", allowedTools: ["Bash"], mcpServers: ["mcp1"] };
+
+  it("首条快照（prev=null）→ 初始系统提示词（initial）", () => {
+    const traj = trajectoryFromTurnViews([
+      makeTurn({ segments: seg(headerSeg(H1, null, START + 1_000) as never) }),
+    ]);
+    const headerRow = traj.rows.find((row) => row.meta?.headerChange);
+    expect(headerRow).toBeDefined();
+    expect(headerRow!.kind).toBe("system");
+    expect(headerRow!.meta!.headerChange).toBe("initial");
+    expect(headerRow!.startedAt).toBe(START + 1_000);
+  });
+
+  it("systemPrompt 变更 → system；工具清单变更 → tools；双变更 → system-and-tools", () => {
+    const cases: Array<
+      [
+        { systemPrompt: string | null; allowedTools: string[]; mcpServers: string[] },
+        { systemPrompt: string | null; allowedTools: string[]; mcpServers: string[] },
+        string,
+      ]
+    > = [
+      [{ ...H1, systemPrompt: "指令B" }, H1, "system"],
+      [{ ...H1, allowedTools: ["Bash", "Read"] }, H1, "tools"],
+      [
+        { ...H1, systemPrompt: "指令B", mcpServers: ["mcp1", "mcp2"] },
+        H1,
+        "system-and-tools",
+      ],
+    ];
+    for (const [header, prev, expected] of cases) {
+      const traj = trajectoryFromTurnViews([
+        makeTurn({ segments: seg(headerSeg(header, prev, START + 1_000) as never) }),
+      ]);
+      const headerRow = traj.rows.find((row) => row.meta?.headerChange);
+      expect(headerRow!.meta!.headerChange).toBe(expected);
+    }
+  });
+
+  it("prev 相同（daemon 重复上报 initial）→ diff 仍按 prev 判（不误报初始）", () => {
+    const traj = trajectoryFromTurnViews([
+      makeTurn({ segments: seg(headerSeg(H1, H1, START + 1_000) as never) }),
+    ]);
+    const headerRow = traj.rows.find((row) => row.meta?.headerChange);
+    expect(headerRow!.meta!.headerChange).toBe("initial");
+  });
+});

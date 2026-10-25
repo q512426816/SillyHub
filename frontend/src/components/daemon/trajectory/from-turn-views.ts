@@ -63,7 +63,9 @@ function rowStatusOf(status: SessionTurnView["status"]): TrajectoryRowStatus {
  * 2026-10-24-trajectory-context-rows：turn_trigger（后台任务通知 / 自动续跑 /
  * 群聊影子直聊来源 / 定时到点等轮触发源）改映射 system + meta.contextEvent
  * （账本标签「上下文」，dsh「收到任务消息」同款形态）——DB 实证注入信息以
- * user_input 落库、装配成 turn_trigger 段，此前误标「用户」行。 */
+ * user_input 落库、装配成 turn_trigger 段，此前误标「用户」行。
+ * 2026-10-25-trajectory-source-model：request_header（配置面快照）→ system +
+ * meta.headerChange（账本「系统」行，四态文案由 view-model 派生）。 */
 function rowKindOf(segment: TurnSegment): TrajectoryRowKind {
   switch (segment.kind) {
     case "text":
@@ -78,6 +80,8 @@ function rowKindOf(segment: TurnSegment): TrajectoryRowKind {
     case "user_msg":
       return "user";
     case "turn_trigger":
+      return "system";
+    case "request_header":
       return "system";
     case "file":
     case "stderr":
@@ -102,6 +106,26 @@ function segmentStart(segment: TurnSegment): number | null {
 function segmentEnd(segment: TurnSegment, start: number): number {
   const end = (segment as { endedAt?: number | null }).endedAt;
   return typeof end === "number" && end >= start ? end : start;
+}
+
+/**
+ * 请求头快照 diff 分类（2026-10-25-trajectory-source-model FR-03，照 dsh
+ * inspectRequestPrompt 口径）：**prev diff 为准**，daemon reason 仅校验——
+ * daemon 重启报 initial 但 prev 存在时不误报「初始系统提示词」（Grill 裁定）。
+ */
+export function classifyHeaderChange(
+  header: { systemPrompt: string | null; allowedTools: string[]; mcpServers: string[] },
+  prev: { systemPrompt: string | null; allowedTools: string[]; mcpServers: string[] } | null,
+): "initial" | "system" | "tools" | "system-and-tools" {
+  if (prev == null) return "initial";
+  const systemChanged = (header.systemPrompt ?? null) !== (prev.systemPrompt ?? null);
+  const toolsChanged =
+    header.allowedTools.join("\n") !== prev.allowedTools.join("\n") ||
+    header.mcpServers.join("\n") !== prev.mcpServers.join("\n");
+  if (systemChanged && toolsChanged) return "system-and-tools";
+  if (systemChanged) return "system";
+  if (toolsChanged) return "tools";
+  return "initial";
 }
 
 /**
@@ -155,6 +179,24 @@ export function trajectoryFromTurnViews(
 
     // 2) 段行（思考 / 工具 / 正文 / 其它）。
     segs.forEach((segment, i) => {
+      // 2026-10-25-trajectory-source-model FR-03：请求头快照段 → 系统行
+      //（meta.headerChange 四态，文案由 view-model 派生；锚点取捕获 ts）。
+      if (segment.kind === "request_header") {
+        const headerAt = segment.ts ?? turnStart;
+        turnRows.push({
+          id: `${runId}:header:${segment.id}`,
+          kind: "system",
+          turnIndex,
+          stepIndex: 0,
+          depth: 0,
+          status: rowStatusOf(turn.status),
+          startedAt: headerAt,
+          endedAt: headerAt,
+          durationMs: 0,
+          meta: { headerChange: classifyHeaderChange(segment.header, segment.prev) },
+        });
+        return;
+      }
       const start = segmentStart(segment);
       // 段缺锚点：用轮首兜底（真实轮首锚点，不是伪造值）。
       const startedAt = start ?? turnStart;
