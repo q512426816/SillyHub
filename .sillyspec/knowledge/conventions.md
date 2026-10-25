@@ -143,3 +143,7 @@ sdk 1.29 的 McpServer 注册工具用 `server.registerTool(name, { description,
 ## daemon mcp-server 的 env 契约：MCP_SERVER_BACKEND_URL + MCP_TOOLSET（file/mission_worker 两档）
 
 daemon 侧 stdio MCP server（mcp-server.js）从 env 读 backend URL：键名是 `MCP_SERVER_BACKEND_URL`（不是 MCP_HUB_BASE_URL），token 走 `MCP_SERVER_DAEMON_API_KEY`（X-API-Key 优先）+ `MCP_SERVER_DAEMON_TOKEN`（Bearer）；工具集由 `MCP_TOOLSET` env 控制且仅认字面量 file / mission_worker，拼写错误或漏配**容错回落编排 5 工具**（不报错）——手动探测时工具集不对先查这个键。上传 fail-closed：MCP_ALLOWED_ROOT 未设时 upload_file 一律拒绝。来源：2026-10-10-all-engines-mcp-injection task-09 端到端实测。
+
+## porcelain v2 `1` 条目 path 分隔符：git 2.45.1 实证是空格不是 \t
+
+git status --porcelain=v2 的 `1`/`u` 条目，字段区（1 XY sub mH mI mW hH hI）与 path 之间在 git 2.45.1（本仓主力版本）为**单空格**分隔、path 为行尾字段（含空格原样，需末段 rejoin）；`\t` 分隔是 `2`（rename）条目 path/origPath 之间的形态，容易被误推广到 `1` 条目（2026-10-25-explorer-git-status 设计写作期即踩）。按「首个 \t 切 path」硬编码会导致所有路径解析失败（indexOf('\t')=-1）。规避：解析函数做双形态兼容（\t 且前置 token 数恰等于 fieldCount 时按 \t 切，否则空格 split 后 slice(fieldCount).join(' ')），两形态各有单测锚定；`-z`（NUL 分隔）输出可作对照验证工具。来源：task-01（执行期裁决 D-012）。

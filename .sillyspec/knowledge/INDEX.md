@@ -28,6 +28,7 @@
 - pi|mcp.json|PI_CODING_AGENT_DIR|原生 MCP|codex 同风格|配置目录 → [pi 1.0+ 原生 MCP：PI_CODING_AGENT_DIR 重定向后 mcp.json 平铺在目录根（无 agent 子层）](conventions.md#pi-10-原生-mcppi_coding_agent_dir-重定向后-mcpjson-平铺在目录根无-agent-子层)
 - @modelcontextprotocol/sdk|registerTool|mcp sdk 1.29|zod raw shape|工具注册 → [@modelcontextprotocol/sdk 1.29 高级 API 是 registerTool（tool() 旧三参形状已不兼容）](conventions.md#modelcontextprotocolsdk-129-高级-api-是-registertooltool-旧三参形状已不兼容)
 - mcp-server|MCP_SERVER_BACKEND_URL|MCP_TOOLSET|env 契约|X-API-Key|fail-closed → [daemon mcp-server 的 env 契约：MCP_SERVER_BACKEND_URL + MCP_TOOLSET（file/mission_worker 两档）](conventions.md#daemon-mcp-server-的-env-契约mcp_server_backend_url--mcp_toolsetfilemission_worker-两档)
+- porcelain|v2|条目|path|分隔符|git → [conventions.md#porcelain v2 `1` 条目 path 分隔符：git 2.45.1 实证是空格不是 \t](conventions.md#porcelain v2 `1` 条目 path 分隔符：git 2.45.1 实证是空格不是 \t)
 
 ## Patterns
 
