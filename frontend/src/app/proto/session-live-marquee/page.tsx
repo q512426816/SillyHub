@@ -13,10 +13,16 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { ArrowLeft, Bot, Send, Sparkles } from "lucide-react";
+import { Drawer } from "antd";
 
 import { ChatMessageAvatar } from "@/components/chat/chat-message-avatar";
 import { TurnStatusBar } from "@/components/daemon/turn-status-bar";
 import { SessionViewTabs } from "@/components/daemon/session-panel/session-view-tabs";
+// 2026-10-25-subagent-card-unify-panel：真实子代理卡片演示（内嵌流动条 + Drawer 详情）。
+import { SubagentBlockView } from "@/components/daemon/turn-segment-views";
+import { SubagentDetailPanel } from "@/components/daemon/subagent-detail-panel";
+import { SubagentPanelContext } from "@/components/daemon/subagent-panel-context";
+import type { SubagentPanelContextValue } from "@/components/daemon/subagent-panel-context";
 import {
   TurnLiveMarquee,
   deriveLiveMarqueeEntries,
@@ -226,6 +232,61 @@ export default function SessionLiveMarqueeProtoPage() {
   // 暂停事件流时把 live-thinking 置为完成态：模拟「工具完成后、下一段
   // 未到」的 LLM 生成间隙，演示「等待模型响应」指示条目。
   const segments = useMemo(() => buildSegments(step, running), [step, running]);
+
+  // ── 子代理卡片演示（2026-10-25-subagent-card-unify-panel）：取脚本里的
+  //    Agent 容器段（带 children）渲染真实 SubagentBlockView；点击卡片开
+  //    Drawer 详情（模拟弹窗形态的交互）。 ──
+  const agentSeg = useMemo(() => {
+    for (const s of segments) {
+      if ((s.kind === "tool" || s.kind === "subagent_stub") && s.children.length > 0) {
+        return s;
+      }
+    }
+    return null;
+  }, [segments]);
+  const [demoActiveId, setDemoActiveId] = useState<string | null>(null);
+  const demoPanelValue = useMemo<SubagentPanelContextValue>(
+    () => ({
+      openSubagent: (segmentId) =>
+        setDemoActiveId((prev) => (prev === segmentId ? null : segmentId)),
+      closeSubagent: () => setDemoActiveId(null),
+      activeId: demoActiveId,
+    }),
+    [demoActiveId],
+  );
+  const demoOpenSeg = useMemo(() => {
+    if (demoActiveId == null || agentSeg == null) return null;
+    const find = (list: TurnSegment[]): TurnSegment | null => {
+      for (const s of list) {
+        if (s.id === demoActiveId) return s;
+        if (s.kind === "tool" || s.kind === "subagent_stub") {
+          const inner = find(s.children);
+          if (inner) return inner;
+        }
+      }
+      return null;
+    };
+    const seg = find([agentSeg]);
+    return seg && (seg.kind === "tool" || seg.kind === "subagent_stub") ? seg : null;
+  }, [demoActiveId, agentSeg]);
+  const demoDrawer =
+    demoOpenSeg != null ? (
+      <Drawer
+        open
+        onClose={() => setDemoActiveId(null)}
+        placement="right"
+        size="min(92vw, 420px)"
+        getContainer={false}
+        destroyOnHidden
+        rootClassName="session-subagent-drawer-root"
+        styles={{ body: { padding: 8, display: "flex", flexDirection: "column" } }}
+      >
+        <SubagentDetailPanel
+          segment={demoOpenSeg}
+          onClose={() => setDemoActiveId(null)}
+        />
+      </Drawer>
+    ) : null;
   const entries = useMemo(() => deriveLiveMarqueeEntries(segments), [segments]);
   const text = FULL_TEXT.slice(0, Math.min(step * 46, FULL_TEXT.length));
 
@@ -377,6 +438,16 @@ export default function SessionLiveMarqueeProtoPage() {
                     </div>
                   </div>
                   <TurnLiveMarquee key={marqueeKey} entries={entries} />
+                  {/* 真实子代理卡片（2026-10-25-subagent-card-unify-panel）：头部 +
+                      内嵌流动条；点击开 Drawer 详情（模拟弹窗形态）。 */}
+                  {agentSeg != null && (
+                    <div className="ml-9 w-[min(100%,52rem)]">
+                      <SubagentPanelContext.Provider value={demoPanelValue}>
+                        <SubagentBlockView segment={agentSeg} />
+                        {demoDrawer}
+                      </SubagentPanelContext.Provider>
+                    </div>
+                  )}
                 </div>
               </div>
             )}

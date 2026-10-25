@@ -11,7 +11,7 @@ import dayjs, { type Dayjs } from "dayjs";
 import {
   Ban, MessageSquareText, PauseCircle, Plus, RefreshCw, Square, TriangleAlert, Users,
 } from "lucide-react";
-import { Button, Tag } from "antd";
+import { Button, Drawer, Tag } from "antd";
 import { AgentModelInput } from "@/components/AgentModelInput";
 import { buildErrorLogItem, buildSystemFailureItem } from "@/components/agent-log/normalize";
 import { applyLogToSegments, extractPreambleText, finishTurn, stripPreambleText } from "@/components/daemon/session-log-assembler";
@@ -26,6 +26,14 @@ import { SessionViewTabs } from "./session-view-tabs";
 // 分叉确认弹层（dialog 模式与 page 双挂载点同步惯例）。
 import { LineageBlock } from "@/components/daemon/session-fork/lineage-block";
 import { ForkConfirmModal } from "@/components/daemon/session-fork/fork-confirm-modal";
+// 2026-10-25-subagent-card-unify-panel（FR-02）：弹窗子代理详情 Drawer——
+// SubagentBlockView 统一紧凑卡片后，dialog 挂面板上下文 + 右侧滑出详情。
+import {
+  SubagentPanelContext,
+  type SubagentPanelContextValue,
+} from "@/components/daemon/subagent-panel-context";
+import { SubagentDetailPanel } from "@/components/daemon/subagent-detail-panel";
+import { findSegmentById } from "./turn-state";
 import { type AttachmentRead } from "@/lib/api/session-attachments";
 import { joinAttachmentMarkers } from "@/components/daemon/runtime-session-helpers";
 import {
@@ -1900,7 +1908,54 @@ export function SessionPanelDialog(props: SessionPanelProps) {
                     ? `继续追问…（Enter 发送 · Shift+Enter 换行 · ${MENTION_PLACEHOLDER_HINT}）`
                     : `输入首条消息创建会话…（${MENTION_PLACEHOLDER_HINT}）`;
 
+  // ── 2026-10-25-subagent-card-unify-panel（FR-02）：弹窗子代理详情 Drawer ──
+  // 卡片统一紧凑形态后 dialog 挂 SubagentPanelContext：点击卡片 toggle 槽位，
+  // 右侧滑出 Drawer 内嵌 SubagentDetailPanel（与 page 移动端 Drawer 同构）；
+  // 段解析复用 findSegmentById DFS（活引用，SSE 更新即重渲），段失效自动关闭。
+  const [subagentSegmentId, setSubagentSegmentId] = useState<string | null>(null);
+  const openSubagentSegment = useMemo(() => {
+    if (subagentSegmentId == null) return null;
+    for (const t of view.turns) {
+      const seg = findSegmentById(t.segments, subagentSegmentId);
+      if (seg && (seg.kind === "tool" || seg.kind === "subagent_stub")) return seg;
+    }
+    return null;
+  }, [view.turns, subagentSegmentId]);
+  useEffect(() => {
+    if (subagentSegmentId != null && openSubagentSegment == null) {
+      setSubagentSegmentId(null);
+    }
+  }, [subagentSegmentId, openSubagentSegment]);
+  const subagentPanelContextValue = useMemo<SubagentPanelContextValue>(
+    () => ({
+      openSubagent: (segmentId) =>
+        setSubagentSegmentId((prev) => (prev === segmentId ? null : segmentId)),
+      closeSubagent: () => setSubagentSegmentId(null),
+      activeId: subagentSegmentId,
+    }),
+    [subagentSegmentId],
+  );
+  const subagentDrawer =
+    subagentSegmentId != null && openSubagentSegment != null ? (
+      <Drawer
+        open
+        onClose={() => setSubagentSegmentId(null)}
+        placement="right"
+        size="min(92vw, 420px)"
+        getContainer={false}
+        destroyOnHidden
+        rootClassName="session-subagent-drawer-root"
+        styles={{ body: { padding: 8, display: "flex", flexDirection: "column" } }}
+      >
+        <SubagentDetailPanel
+          segment={openSubagentSegment}
+          onClose={() => setSubagentSegmentId(null)}
+        />
+      </Drawer>
+    ) : null;
+
   return (
+    <SubagentPanelContext.Provider value={subagentPanelContextValue}>
     <section className="flex h-full min-h-0 flex-col overflow-hidden bg-card">
       {offlineReadOnly ? (
         <div className="flex items-center gap-2 border-b border-amber-300 bg-amber-50 px-5 py-2 text-xs text-amber-800">
@@ -2388,5 +2443,7 @@ export function SessionPanelDialog(props: SessionPanelProps) {
         }}
       />
     </section>
+    {subagentDrawer}
+    </SubagentPanelContext.Provider>
   );
 }

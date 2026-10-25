@@ -597,6 +597,14 @@ export interface TurnLiveMarqueeProps {
    * 缺省走系统 matchMedia 偏好。
    */
   reducedMotion?: boolean;
+  /**
+   * 布局变体（2026-10-25-subagent-card-unify-panel / FR-05）：
+   *   - bar（默认）：会话对话视图轮尾的独立胶囊条（ml-9 / 52rem 限宽 / 圆角胶囊）；
+   *   - inline：子代理卡片内嵌（w-full / 更低矮 / 贴卡片 indigo 底色）。
+   */
+  layout?: "bar" | "inline";
+  /** 根节点 data-testid（缺省 turn-live-marquee；inline 场景用独立 id 消歧）。 */
+  testId?: string;
 }
 
 /**
@@ -608,6 +616,8 @@ export interface TurnLiveMarqueeProps {
 export const TurnLiveMarquee = memo(function TurnLiveMarquee({
   entries,
   reducedMotion,
+  layout = "bar",
+  testId,
 }: TurnLiveMarqueeProps) {
   const prefersReduced = usePrefersReducedMotion();
   const reduced = reducedMotion ?? prefersReduced;
@@ -858,15 +868,23 @@ export const TurnLiveMarquee = memo(function TurnLiveMarquee({
 
   if (entries.length === 0 || latest == null) return null;
 
+  const rootTestId = testId ?? "turn-live-marquee";
+  const trackTestId = testId != null ? `${testId}-track` : "turn-live-marquee-track";
+  const itemTestId = testId != null ? `${testId}-item` : "marquee-item";
+  const awaitingTestId = testId != null ? `${testId}-awaiting` : "marquee-awaiting";
+
   return (
     <div
       ref={rootRef}
-      data-testid="turn-live-marquee"
+      data-testid={rootTestId}
       role="status"
       aria-live="off"
       aria-label="实时活动流"
       className={cn(
-        "sh-live-marquee ml-9 flex h-8 w-[min(100%,52rem)] items-center gap-2 overflow-hidden rounded-full border border-border/70 bg-card px-3 text-[12px] leading-none text-muted-foreground shadow-sm",
+        "sh-live-marquee flex items-center gap-2 overflow-hidden text-[12px] leading-none text-muted-foreground",
+        layout === "inline"
+          ? "h-7 w-full rounded-md border border-indigo-200/60 bg-card/70 px-2.5 text-[11px]"
+          : "ml-9 h-8 w-[min(100%,52rem)] rounded-full border border-border/70 bg-card px-3 shadow-sm",
       )}
     >
       {/* 运行状态点：运行中脉冲（reduced-motion 时静止）。等待态（合成条目
@@ -895,7 +913,7 @@ export const TurnLiveMarquee = memo(function TurnLiveMarquee({
           runningElapsedMs={awaitingEntry != null ? null : runningElapsedFor(latest)}
           reduced
           fixedWidth={false}
-          testId={awaitingEntry != null ? "marquee-awaiting" : "marquee-item"}
+          testId={awaitingEntry != null ? awaitingTestId : itemTestId}
         />
       ) : (
         // 连续轨道：条目按时间顺序等宽排列，向左滚到最新条贴右缘即停。
@@ -908,7 +926,7 @@ export const TurnLiveMarquee = memo(function TurnLiveMarquee({
         >
           <div
             ref={trackRef}
-            data-testid="turn-live-marquee-track"
+            data-testid={trackTestId}
             className="flex w-max items-center gap-5 will-change-transform"
           >
             {displayEntries.map((entry) => (
@@ -918,7 +936,9 @@ export const TurnLiveMarquee = memo(function TurnLiveMarquee({
                 durationMs={entry.durationMs ?? runtimeDurations[entry.id] ?? null}
                 runningElapsedMs={runningElapsedFor(entry)}
                 reduced={false}
-                testId={entry.id === "marquee-awaiting" ? "marquee-awaiting" : "marquee-item"}
+                testId={
+                  entry.id === "marquee-awaiting" ? awaitingTestId : itemTestId
+                }
               />
             ))}
           </div>

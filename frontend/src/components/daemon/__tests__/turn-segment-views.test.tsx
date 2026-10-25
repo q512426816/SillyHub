@@ -905,7 +905,7 @@ describe("SegmentView 统一分发器", () => {
     expect(screen.queryByText("子代理内部文本")).not.toBeInTheDocument(); // 默认折叠
   });
 
-  it("subagent_stub 兜底段复用子代理块：名称回退 subagentType，恒 running 默认展开", () => {
+  it("subagent_stub 兜底段复用子代理块：名称回退 subagentType，恒 running 形态（2026-10-25 起无原地展开）", () => {
     render(
       <SegmentView
         segment={makeStubSeg({ children: [makeTextSeg({ id: "text:stub", text: "stub 内部文本" })] })}
@@ -913,7 +913,9 @@ describe("SegmentView 统一分发器", () => {
     );
     // 名称与类型标签均显示 subagentType（stub 无 primary/toolName 可回退）
     expect(screen.getAllByText("Explore").length).toBe(2);
-    expect(screen.getByText("stub 内部文本")).toBeInTheDocument(); // running 默认展开
+    expect(screen.getByText("运行中")).toBeInTheDocument();
+    // children 不再原地上屏（text 段也不进内嵌流动条）。
+    expect(screen.queryByText("stub 内部文本")).not.toBeInTheDocument();
   });
 
   it("subagent_stub 无 subagentType：名称回退「子代理」且无类型标签", () => {
@@ -921,7 +923,7 @@ describe("SegmentView 统一分发器", () => {
     expect(screen.getByText("子代理")).toBeInTheDocument();
   });
 
-  it("orphaned stub（历史孤儿，2026-10-13-slim-subagent-false-running / FR-04）：灰点无脉冲、不显示「运行中」、默认折叠", () => {
+  it("orphaned stub（历史孤儿，2026-10-13-slim-subagent-false-running / FR-04）：灰点无脉冲、不显示「运行中」（2026-10-25 起无原地展开）", () => {
     render(
       <SegmentView
         segment={makeStubSeg({
@@ -934,10 +936,8 @@ describe("SegmentView 统一分发器", () => {
     expect(document.querySelector(".animate-pulse")).toBeNull();
     expect(document.querySelector(".bg-brand-600")).toBeNull();
     expect(document.querySelector(".bg-muted-foreground")).not.toBeNull(); // 中性灰点
-    // 非 running → 默认折叠（点击仍可展开看子内容，数据不丢）。
+    // 无原地展开：内部文本不上屏（完整数据仍在，由进度视图/详情面板承载）。
     expect(screen.queryByText("孤儿内部文本")).not.toBeInTheDocument();
-    fireEvent.click(screen.getAllByText("Explore")[0]!);
-    expect(screen.getByText("孤儿内部文本")).toBeInTheDocument();
   });
 
   it("实时暂态 stub（未标记 orphaned）仍 running 脉冲——孤儿兜底不误伤实时路径（FR-05）", () => {
@@ -961,7 +961,7 @@ describe("SegmentView 统一分发器", () => {
 /* ───────── 2/3/4. 折叠交互 / 扫动动画 / 子代理递归 ───────── */
 
 describe("SubagentBlockView 子代理块", () => {
-  it("完成态默认折叠：头部绿点 / 名称 / 类型标签 / mm:ss 时长；点击展开 children", () => {
+  it("完成态纯展示：头部绿点 / 名称 / 类型标签 / mm:ss 时长；不可点击、children 不原地上屏（FR-01）", () => {
     const seg = makeToolSeg({
       id: "call_agent",
       toolName: "Agent",
@@ -976,12 +976,13 @@ describe("SubagentBlockView 子代理块", () => {
     expect(screen.getByText("调研员")).toBeInTheDocument();
     expect(screen.getByText("research")).toBeInTheDocument();
     expect(screen.getByText("01:24")).toBeInTheDocument();
-    expect(screen.queryByText("子代理正文产出")).not.toBeInTheDocument(); // 折叠不挂载
-    fireEvent.click(rowOf("调研员"));
-    expect(screen.getByText("子代理正文产出")).toBeInTheDocument();
+    // 2026-10-25-subagent-card-unify-panel：无 Provider 纯展示——无按钮语义，
+    // children 不原地挂载（text 段也不进内嵌流动条——答复正文不进跑马灯）。
+    expect(document.querySelector('div[role="button"]')).toBeNull();
+    expect(screen.queryByText("子代理正文产出")).not.toBeInTheDocument();
   });
 
-  it("运行中默认展开：头部 seg-sweep 扫动 + 蓝色脉冲点 + 「运行中」时长，内部工具行可见", () => {
+  it("运行中：头部 seg-sweep 扫动 + 蓝色脉冲点 + 「运行中」时长；内部工具经内嵌流动条展示（FR-05）", () => {
     const seg = makeToolSeg({
       id: "call_agent_r",
       toolName: "Agent",
@@ -994,14 +995,18 @@ describe("SubagentBlockView 子代理块", () => {
       children: [makeBashRunningSeg({ id: "call_inner" })],
     });
     render(<SubagentBlockView segment={seg} />);
-    expect(screen.getByText("npm test")).toBeInTheDocument(); // 默认展开 → 内部工具行可见
-    const header = rowOf("执行调研");
-    expect(header.className).toContain("seg-sweep");
+    const marquee = document.querySelector('[data-testid="subagent-live-marquee"]');
+    expect(marquee).not.toBeNull();
+    expect(marquee?.textContent).toContain("运行命令");
+    expect(marquee?.textContent).toContain("npm test");
+    // 纯展示头（无 role=button）——seg-sweep 挂在头部行容器上。
+    const header = screen.getByText("执行调研").closest("div");
+    expect(header?.className).toContain("seg-sweep");
     expect(screen.getByText("运行中")).toBeInTheDocument();
     expect(document.querySelector(".bg-brand-600")).not.toBeNull();
   });
 
-  it("children 递归渲染支持 depth>1 嵌套（孙辈块嵌在子辈 body 内，非顶层平铺）", () => {
+  it("嵌套子代理：直接子代理以容器条目进入内嵌流动条，孙辈不露出（FR-01/FR-05）", () => {
     const grandchild = makeToolSeg({
       id: "call_g",
       toolName: "Agent",
@@ -1028,31 +1033,29 @@ describe("SubagentBlockView 子代理块", () => {
       children: [child],
     });
     render(<SegmentView segment={root} />);
-    fireEvent.click(rowOf("顶层代理")); // 展开根 → 子辈块挂载（自身折叠）
-    expect(screen.getByText("子辈代理")).toBeInTheDocument();
-    fireEvent.click(rowOf("子辈代理")); // 展开子辈 → 孙辈块挂载
-    const grandchildHeader = rowOf("孙辈代理");
-    expect(grandchildHeader).toBeInTheDocument();
-    // 嵌套结构证明：孙辈头位于子辈 body 内；孙辈自身折叠不挂 body（全树恰两个 body）
-    const bodies = document.querySelectorAll(".seg-subagent-body");
-    expect(bodies.length).toBe(2);
-    expect(bodies[1]?.contains(grandchildHeader)).toBe(true);
+    // 根卡片内嵌流动条：只显示直接子代理容器（孙辈在其自己的卡片层级内）。
+    const marquee = document.querySelector('[data-testid="subagent-live-marquee"]');
+    expect(marquee).not.toBeNull();
+    expect(marquee?.textContent).toContain("子辈代理");
+    expect(marquee?.textContent).not.toContain("孙辈代理");
+    // 无原地展开：孙辈文本产出不上屏（text 段也不进流动条）。
+    expect(screen.queryByText("孙辈文本产出")).not.toBeInTheDocument();
+    expect(document.querySelectorAll(".seg-subagent-body").length).toBe(0);
   });
 
-  it("running → 终态过渡自动收敛为折叠（完成折叠默认）", () => {
-    const running = makeToolSeg({
-      id: "call_auto",
+  it("无 children 不渲染内嵌流动条（FR-05）", () => {
+    const seg = makeToolSeg({
+      id: "call_bare",
       toolName: "Agent",
-      primary: "自动收敛",
+      primary: "刚派发",
+      subagentType: "research",
       status: "running",
       result: undefined,
-      children: [makeTextSeg({ id: "text:auto", text: "运行中的内部文本" })],
+      children: [],
     });
-    const { rerender } = render(<SubagentBlockView segment={running} />);
-    expect(screen.getByText("运行中的内部文本")).toBeInTheDocument(); // 运行中默认展开
-    const finished: ToolTurnSegment = { ...running, status: "ok", result: "产出", endedAt: 9_000 };
-    rerender(<SubagentBlockView segment={finished} />);
-    expect(screen.queryByText("运行中的内部文本")).not.toBeInTheDocument(); // 过渡即收敛折叠
+    render(<SubagentBlockView segment={seg} />);
+    expect(document.querySelector('[data-testid="subagent-live-marquee"]')).toBeNull();
+    expect(screen.getByText("刚派发")).toBeInTheDocument();
   });
 });
 
@@ -1081,7 +1084,7 @@ describe("SubagentBlockView 紧凑卡片模式（subagent-three-pane）", () => 
     return { ...utils, value };
   }
 
-  it("无 Provider（现状回归）：完成态默认折叠、点击头部仍可展开 children（aria-expanded 语义保留）", () => {
+  it("无 Provider（2026-10-25-subagent-card-unify-panel）：纯展示头部，无展开语义、children 不上屏", () => {
     const seg = makeToolSeg({
       id: "call_agent",
       toolName: "Agent",
@@ -1092,11 +1095,12 @@ describe("SubagentBlockView 紧凑卡片模式（subagent-three-pane）", () => 
       children: [makeTextSeg({ id: "text:c9", text: "无 Provider 的正文产出" })],
     });
     render(<SubagentBlockView segment={seg} />);
-    const header = rowOf("调研员");
-    expect(header).toHaveAttribute("aria-expanded", "false"); // 内联折叠器语义仍在
+    expect(screen.getByText("调研员")).toBeInTheDocument();
+    expect(screen.getByText("research")).toBeInTheDocument();
+    expect(screen.getByText("01:24")).toBeInTheDocument();
+    // 统一形态后无 Provider = 纯展示：无按钮/折叠语义，children 不挂载。
+    expect(document.querySelector('div[role="button"]')).toBeNull();
     expect(screen.queryByText("无 Provider 的正文产出")).not.toBeInTheDocument();
-    fireEvent.click(header);
-    expect(screen.getByText("无 Provider 的正文产出")).toBeInTheDocument();
   });
 
   it("有 Provider（activeId:null）：紧凑卡片仅头部行——children 不渲染、无折叠语义，头部名称/类型/时长齐全", () => {

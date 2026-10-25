@@ -216,19 +216,13 @@ describe("mobile 子代理紧凑卡 + Drawer 弹窗（2026-10-11-mobile-subagent
     });
   });
 
-  it("零回归锚：desktop 悬浮宿主形态（未装配右栏 props）仍内联展开（children 可见）", async () => {
+  it("零回归锚更新（2026-10-25-subagent-card-unify-panel）：desktop 悬浮宿主形态（未装配右栏 props）为纯展示头部", async () => {
     setupPanel();
     await awaitTurns();
-    // 无 Provider → SubagentBlockView 内联分支：终端态默认折叠，头部可展开
-    // （aria-expanded 语义为内联分支专属）——展开后 children 正文直接在对话流。
-    // 同名按钮多处命中（块头 + 段内工具行等），取带 aria-expanded 的容器块头。
-    const head = (await screen.findAllByRole("button", { name: /调研缓存方案/ })).find(
-      (b) => b.hasAttribute("aria-expanded"),
-    );
-    expect(head).toBeTruthy();
-    fireEvent.click(head!);
-    await waitFor(() => {
-      expect(screen.getByText("子代理调研完成，结论如下。")).toBeInTheDocument();
-    });
+    // 无 Provider → 统一形态后为纯展示：块头无按钮语义（closest role=button 为空）；
+    // children 不原地上屏（内嵌流动条承载过程摘要，正文产出不上屏）。
+    const head = (await screen.findAllByText(/调研缓存方案/))[0]!;
+    expect(head.closest('div[role="button"]')).toBeNull();
+    expect(screen.queryByText("子代理调研完成，结论如下。")).not.toBeInTheDocument();
   });
 });
