@@ -45,6 +45,29 @@ function clip(
   return { value: text.slice(0, max), truncated: true };
 }
 
+/**
+ * 团队派发指令特征前缀（2026-10-25-trajectory-system-rows / FR-01）。
+ *
+ * 来源锚定（backend 文案改版须同步此处，退化形态仅标签回退「用户」）：
+ *   - 主控 brief：backend/app/modules/agent/orchestrator.py:495
+ *     「你是多 Agent 团队的主 agent（项目经理，role=orchestrator）」
+ *   - Worker 派发：backend/app/modules/agent/execution.py:210,229
+ *     「你是多 Agent 团队中的一个 Worker（角色：…）」
+ *   - 分身派发（session 团队）：backend/app/modules/agent/mission_context.py:204
+ *     「你是多 Agent 团队中的一个分身（角色：…）」
+ * 前缀取文案开头稳定段，后缀（角色名等）不参与匹配。
+ */
+const TEAM_DISPATCH_PREFIXES = [
+  "你是多 Agent 团队的主 agent",
+  "你是多 Agent 团队中的一个",
+] as const;
+
+/** 团队派发指令识别（纯前端启发式，存量历史会话立即生效，FR-02）。 */
+function isTeamDispatchText(text: string | null | undefined): boolean {
+  if (!text) return false;
+  return TEAM_DISPATCH_PREFIXES.some((prefix) => text.startsWith(prefix));
+}
+
 function parseIso(value: string | null | undefined): number | null {
   if (!value) return null;
   const ts = Date.parse(value);
@@ -140,9 +163,12 @@ export function trajectoryFromTurnViews(
     const turnRows: TrajectoryRow[] = [];
 
     // 1) 用户输入行（零宽 tick；prompt 空也不丢——泳道需要知道「这轮由谁触发」）。
+    //    2026-10-25-trajectory-system-rows：团队派发指令（主控 brief / Worker
+    //    派发，落库为 user_input 无标记）按特征前缀识别为「系统」行。
+    const promptIsTeamDispatch = isTeamDispatchText(turn.prompt);
     turnRows.push({
-      id: `${runId}:user`,
-      kind: "user",
+      id: promptIsTeamDispatch ? `${runId}:system` : `${runId}:user`,
+      kind: promptIsTeamDispatch ? "system" : "user",
       turnIndex,
       stepIndex: 0,
       depth: 0,
@@ -151,6 +177,7 @@ export function trajectoryFromTurnViews(
       endedAt: turnStart,
       durationMs: 0,
       inputText: clip(turn.prompt, maxTextLen).value,
+      ...(promptIsTeamDispatch ? { meta: { systemBrief: true } } : {}),
     });
 
     // 2) 段行（思考 / 工具 / 正文 / 其它）。
@@ -160,6 +187,11 @@ export function trajectoryFromTurnViews(
       const startedAt = start ?? turnStart;
       const endedAt = segmentEnd(segment, startedAt);
       const kind = rowKindOf(segment);
+      // 2026-10-25-trajectory-system-rows：user_msg 段命中团队指令前缀 → 系统行。
+      const userMsgIsTeamDispatch =
+        segment.kind === "user_msg" &&
+        isTeamDispatchText((segment as { text?: string }).text);
+      const rowKind = userMsgIsTeamDispatch ? "system" : kind;
       // 2026-10-22-trajectory-view-redesign（D-015）：工具行拆出参数与结果——
       // raw = tool_use JSON 原文（详情「参数」），result = 配对的 tool_result
       // （详情「结果」，缺失时退回 primary 摘要并标「未捕获结果」归渲染端）。
@@ -181,8 +213,8 @@ export function trajectoryFromTurnViews(
 
       turnRows.push({
         // R-08：段 id 缺失时用「起点 + 位置」组合，避免纯下标在流式追加中漂移。
-        id: `${runId}:${kind}:${segment.id || `${startedAt}:${i}`}`,
-        kind,
+        id: `${runId}:${rowKind}:${segment.id || `${startedAt}:${i}`}`,
+        kind: rowKind,
         turnIndex,
         stepIndex: 0,
         depth: 0,
@@ -212,6 +244,7 @@ export function trajectoryFromTurnViews(
                   ? { resultFromPrimary: true }
                   : {}),
                 ...(segment.kind === "turn_trigger" ? { contextEvent: true } : {}),
+                ...(userMsgIsTeamDispatch ? { systemBrief: true } : {}),
               },
             }),
       });

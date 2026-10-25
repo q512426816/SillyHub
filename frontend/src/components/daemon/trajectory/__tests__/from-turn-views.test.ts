@@ -317,3 +317,40 @@ describe("turn_trigger 段派生与锚点（2026-10-24-trajectory-context-rows�
     expect(um!.startedAt).toBe(START + 15_000);
   });
 });
+
+describe("团队派发指令识别为系统行（2026-10-25-trajectory-system-rows / FR-01）", () => {
+  it("主控 brief 前缀：轮首行显示「系统」（kind=system + meta.systemBrief）", () => {
+    const traj = trajectoryFromTurnViews([
+      makeTurn({
+        prompt: "你是多 Agent 团队的主 agent（项目经理，role=orchestrator）。\n关键标识…",
+      }),
+    ]);
+
+    const first = traj.rows.find((row) => row.inputText?.includes("主 agent"));
+    expect(first).toBeDefined();
+    expect(first!.kind).toBe("system");
+    expect(first!.meta?.systemBrief).toBe(true);
+  });
+
+  it("Worker 派发前缀：轮首行显示「系统」", () => {
+    const traj = trajectoryFromTurnViews([
+      makeTurn({
+        prompt: "你是多 Agent 团队中的一个 Worker（角色：worker）。\n你的目标…",
+      }),
+    ]);
+
+    const first = traj.rows.find((row) => row.inputText?.includes("Worker"));
+    expect(first).toBeDefined();
+    expect(first!.kind).toBe("system");
+    expect(first!.meta?.systemBrief).toBe(true);
+  });
+
+  it("普通用户输入保持「用户」行（零回归）", () => {
+    const traj = trajectoryFromTurnViews([makeTurn()]);
+
+    const first = traj.rows.find((row) => row.kind === "user");
+    expect(first).toBeDefined();
+    expect(first!.inputText).toBe("跑一下测试");
+    expect(first!.meta?.systemBrief).toBeUndefined();
+  });
+});
