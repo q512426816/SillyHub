@@ -42,6 +42,11 @@ const VIEWS = [
     title: "工作区 Git 文件状态",
     desc: "Git 日志页工作区更改卡（IDEA 分组四色）/ 文件 diff 弹窗三态 / explorer 树着色 + 图例",
   },
+  {
+    file: "session-stage-progress-view",
+    title: "会话阶段化进度",
+    desc: "状态条阶段文案（冷启动/复用序列）/ 超时警示态 / 现状对照 / 轮内既有能力（2026-10-26-session-stage-progress）",
+  },
 ];
 
 function run(cmd, args) {

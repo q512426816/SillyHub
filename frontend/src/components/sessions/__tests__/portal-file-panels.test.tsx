@@ -1,5 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen, fireEvent, waitFor } from "@testing-library/react";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import type { ReactElement } from "react";
 
 /**
  * portal-file-panels 单测（2026-09-09-sessions-file-browser-three-pane task-01）。
@@ -111,6 +113,17 @@ function clickNode(name: string) {
   fireEvent.click(closestAntdTreeNodeWrapper(screen.getByText(name))!);
 }
 
+/**
+ * 树壳渲染包装（file-explorer.test renderExplorer 同款）：FileExplorer 自
+ * 2026-10-25-explorer-git-status 起组件内 useQueryClient 取 git dirty 查询，
+ * 挂载缺 QueryClientProvider 会崩——预览壳不消费 query client，维持裸 render。
+ */
+/** 带 QueryClient 的渲染（useGitLogDirtyFiles 需要 Provider；每用例新 client 隔离缓存）。 */
+function renderTree(ui: ReactElement) {
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  return render(<QueryClientProvider client={client}>{ui}</QueryClientProvider>);
+}
+
 describe("portal-file-panels（task-01）", () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -121,7 +134,7 @@ describe("portal-file-panels（task-01）", () => {
   // ── 两组件渲染 ───────────────────────────────────────────────────────
 
   it("PortalFileTreePanel 渲染：头部「返回会话」+「工作区文件」+ FileExplorer 树根/首层条目", async () => {
-    render(
+    renderTree(
       <PortalFileTreePanel workspaceId="ws1" onBack={() => {}} onSelectFile={() => {}} />,
     );
 
@@ -160,7 +173,7 @@ describe("portal-file-panels（task-01）", () => {
 
   it("onBack 直通：点 sessions-files-back 触发回调", () => {
     const onBack = vi.fn();
-    render(
+    renderTree(
       <PortalFileTreePanel workspaceId="ws1" onBack={onBack} onSelectFile={() => {}} />,
     );
 
@@ -184,7 +197,7 @@ describe("portal-file-panels（task-01）", () => {
 
   it("onSelectFile 直通：点根层文件树行 → 回调收到相对工作区根路径", async () => {
     const onSelectFile = vi.fn();
-    render(
+    renderTree(
       <PortalFileTreePanel workspaceId="ws1" onBack={() => {}} onSelectFile={onSelectFile} />,
     );
 
@@ -195,7 +208,7 @@ describe("portal-file-panels（task-01）", () => {
 
   it("onSelectFile 直通（嵌套路径）：展开目录后点子文件 → 收到 backend/pyproject.toml", async () => {
     const onSelectFile = vi.fn();
-    render(
+    renderTree(
       <PortalFileTreePanel workspaceId="ws1" onBack={() => {}} onSelectFile={onSelectFile} />,
     );
 
@@ -243,7 +256,7 @@ describe("portal-file-panels 引用入口 props 直通（workspace-ref-intake ta
   it("PortalFileTreePanel 透传 onAddNodeRef——右键文件节点经菜单触发回调", async () => {
     mockDefaultTree();
     const onAddNodeRef = vi.fn();
-    render(
+    renderTree(
       <PortalFileTreePanel
         workspaceId="ws-1"
         onBack={() => {}}
