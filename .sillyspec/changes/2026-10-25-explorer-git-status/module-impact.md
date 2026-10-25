@@ -24,10 +24,10 @@ change: 2026-10-25-explorer-git-status
 
 | 文档 | 状态 | 备注 |
 |---|---|---|
-| modules/backend.md | pending | execute/verify 后回填 |
-| modules/frontend.md | pending | execute/verify 后回填 |
-| modules/sillyhub-daemon.md | pending | execute/verify 后回填（若存在） |
-| _module-map.yaml | pending | execute/verify 后回填 |
+| modules/backend.md | done | verify 阶段同步：git_log 段追加 2026-10-25-explorer-git-status 增量（第 5/6 端点、no_git 语义分叉、18 用例） |
+| modules/frontend.md | done | verify 阶段同步：新增「工作区 git 感知三层 UI」段（更改卡/弹窗/explorer 着色/取数层/挂载门控） |
+| modules/sillyhub-daemon.md | done | verify 阶段同步：新增「host_fs git 第 6/7 方法 git_dirty_files/git_worktree_diff」段（三段采集/判态分流/D-010~D-013） |
+| _module-map.yaml | skipped | 本次触达文件均落在既有模块前缀归属内（backend/app/modules/git_log/ 等），无需新增映射条目 |
 
 ## Wave 1 实况回填（execute 主控，2026-10-25）
 

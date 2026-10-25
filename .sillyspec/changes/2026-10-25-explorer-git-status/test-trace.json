@@ -1,0 +1,255 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-25-explorer-git-status",
+  "rows": [
+    {
+      "anchor": "FR-01",
+      "row_id": "2026-10-25-explorer-git-status:task-01:acc-0-30c9c743",
+      "tests": [
+        "sillyhub-daemon/tests/host-fs-handler-git-dirty-files.test.ts"
+      ],
+      "reason": "spec",
+      "state": "active",
+      "discovery": "machine",
+      "confirmed_by": "agent",
+      "confirmed_at": "3615228c11a82dc5cb5689c5157e95ccf015cca9",
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-25-explorer-git-status"
+    },
+    {
+      "anchor": "FR-01",
+      "row_id": "2026-10-25-explorer-git-status:task-01:acc-1-2fab0eb7",
+      "tests": [
+        "sillyhub-daemon/tests/host-fs-handler-git-dirty-files.test.ts"
+      ],
+      "reason": "spec",
+      "state": "active",
+      "discovery": "machine",
+      "confirmed_by": "agent",
+      "confirmed_at": "3615228c11a82dc5cb5689c5157e95ccf015cca9",
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-25-explorer-git-status"
+    },
+    {
+      "anchor": "FR-01",
+      "row_id": "2026-10-25-explorer-git-status:task-01:acc-2-54b853a8",
+      "tests": [
+        "sillyhub-daemon/tests/host-fs-handler-git-dirty-files.test.ts"
+      ],
+      "reason": "spec",
+      "state": "active",
+      "discovery": "machine",
+      "confirmed_by": "agent",
+      "confirmed_at": "3615228c11a82dc5cb5689c5157e95ccf015cca9",
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-25-explorer-git-status"
+    },
+    {
+      "anchor": "FR-04",
+      "row_id": "2026-10-25-explorer-git-status:task-02:acc-0-6d298736",
+      "tests": [
+        "backend/tests/modules/git_log/__init__.py",
+        "backend/tests/modules/git_log/test_git_log_dirty_files.py"
+      ],
+      "reason": "spec",
+      "state": "active",
+      "discovery": "machine",
+      "confirmed_by": "agent",
+      "confirmed_at": "3615228c11a82dc5cb5689c5157e95ccf015cca9",
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-25-explorer-git-status"
+    },
+    {
+      "anchor": "FR-04",
+      "row_id": "2026-10-25-explorer-git-status:task-02:acc-1-e87ec008",
+      "tests": [
+        "backend/tests/modules/git_log/__init__.py",
+        "backend/tests/modules/git_log/test_git_log_dirty_files.py"
+      ],
+      "reason": "spec",
+      "state": "active",
+      "discovery": "machine",
+      "confirmed_by": "agent",
+      "confirmed_at": "3615228c11a82dc5cb5689c5157e95ccf015cca9",
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-25-explorer-git-status"
+    },
+    {
+      "anchor": "FR-04",
+      "row_id": "2026-10-25-explorer-git-status:task-02:acc-2-4a05ca50",
+      "tests": [
+        "backend/tests/modules/git_log/__init__.py",
+        "backend/tests/modules/git_log/test_git_log_dirty_files.py"
+      ],
+      "reason": "spec",
+      "state": "active",
+      "discovery": "machine",
+      "confirmed_by": "agent",
+      "confirmed_at": "3615228c11a82dc5cb5689c5157e95ccf015cca9",
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-25-explorer-git-status"
+    },
+    {
+      "anchor": "FR-05",
+      "row_id": "2026-10-25-explorer-git-status:task-03:acc-2-7da9d193",
+      "tests": [
+        "backend/app/modules/agent/tests/test_agent_session_model.py",
+        "backend/app/modules/agent/tests/test_cleanup_stale_runs_error_code.py",
+        "backend/app/modules/agent/tests/test_finalizer.py",
+        "backend/app/modules/agent/tests/test_group_chat_models.py",
+        "backend/app/modules/agent/tests/test_mcp_tools.py",
+        "backend/app/modules/agent/tests/test_orchestrator.py",
+        "backend/app/modules/agent/tests/test_placement_borrow_integration.py",
+        "backend/app/modules/agent/tests/test_provider_caps_alignment.py",
+        "backend/app/modules/agent/tests/test_worktree_integration.py",
+        "backend/app/modules/change/tests/test_assets.py",
+        "backend/app/modules/change/tests/test_dispatch_execute_team_mode.py",
+        "backend/app/modules/change/tests/test_files_refresh_sync.py",
+        "backend/app/modules/change/tests/test_files_router.py",
+        "backend/app/modules/change/tests/test_parser.py",
+        "backend/app/modules/change/tests/test_session_changes_endpoint.py",
+        "backend/app/modules/change/tests/test_spec_binding.py",
+        "backend/app/modules/change/tests/test_step_progress.py",
+        "backend/app/modules/change/tests/test_timeline.py",
+        "backend/app/modules/change/tests/test_title_normalization.py",
+        "backend/app/modules/change/tests/test_usage_stats.py"
+      ],
+      "reason": "spec",
+      "state": "active",
+      "discovery": "machine",
+      "confirmed_by": "agent",
+      "confirmed_at": "3615228c11a82dc5cb5689c5157e95ccf015cca9",
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-25-explorer-git-status"
+    },
+    {
+      "anchor": "FR-02",
+      "row_id": "2026-10-25-explorer-git-status:task-04:acc-0-cbca0911",
+      "tests": [
+        "frontend/src/components/git-log/__tests__/worktree-changes-card.test.tsx"
+      ],
+      "reason": "spec",
+      "state": "active",
+      "discovery": "machine",
+      "confirmed_by": "agent",
+      "confirmed_at": "3615228c11a82dc5cb5689c5157e95ccf015cca9",
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-25-explorer-git-status"
+    },
+    {
+      "anchor": "FR-02",
+      "row_id": "2026-10-25-explorer-git-status:task-04:acc-1-1ff449eb",
+      "tests": [
+        "frontend/src/components/git-log/__tests__/worktree-changes-card.test.tsx"
+      ],
+      "reason": "spec",
+      "state": "active",
+      "discovery": "machine",
+      "confirmed_by": "agent",
+      "confirmed_at": "3615228c11a82dc5cb5689c5157e95ccf015cca9",
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-25-explorer-git-status"
+    },
+    {
+      "anchor": "FR-02",
+      "row_id": "2026-10-25-explorer-git-status:task-04:acc-2-62e9a76c",
+      "tests": [
+        "frontend/src/components/git-log/__tests__/worktree-changes-card.test.tsx"
+      ],
+      "reason": "spec",
+      "state": "active",
+      "discovery": "machine",
+      "confirmed_by": "agent",
+      "confirmed_at": "3615228c11a82dc5cb5689c5157e95ccf015cca9",
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-25-explorer-git-status"
+    },
+    {
+      "anchor": "FR-03",
+      "row_id": "2026-10-25-explorer-git-status:task-05:acc-0-e274185c",
+      "tests": [
+        "frontend/src/components/git-log/__tests__/file-tree.test.tsx"
+      ],
+      "reason": "spec",
+      "state": "active",
+      "discovery": "machine",
+      "confirmed_by": "agent",
+      "confirmed_at": "3615228c11a82dc5cb5689c5157e95ccf015cca9",
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-25-explorer-git-status"
+    },
+    {
+      "anchor": "FR-03",
+      "row_id": "2026-10-25-explorer-git-status:task-05:acc-1-7b7453f6",
+      "tests": [
+        "frontend/src/components/git-log/__tests__/file-tree.test.tsx"
+      ],
+      "reason": "spec",
+      "state": "active",
+      "discovery": "machine",
+      "confirmed_by": "agent",
+      "confirmed_at": "3615228c11a82dc5cb5689c5157e95ccf015cca9",
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-25-explorer-git-status"
+    },
+    {
+      "anchor": "FR-02",
+      "row_id": "2026-10-25-explorer-git-status:task-06:acc-0-4840f065",
+      "tests": [
+        "frontend/src/components/git-log/__tests__/git-log-page.test.tsx",
+        "frontend/src/components/git-log/__tests__/git-status-bar.test.tsx"
+      ],
+      "reason": "spec",
+      "state": "active",
+      "discovery": "machine",
+      "confirmed_by": "agent",
+      "confirmed_at": "3615228c11a82dc5cb5689c5157e95ccf015cca9",
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-25-explorer-git-status"
+    },
+    {
+      "anchor": "FR-02",
+      "row_id": "2026-10-25-explorer-git-status:task-06:acc-1-bad39a8b",
+      "tests": [
+        "frontend/src/components/git-log/__tests__/git-log-page.test.tsx",
+        "frontend/src/components/git-log/__tests__/git-status-bar.test.tsx"
+      ],
+      "reason": "spec",
+      "state": "active",
+      "discovery": "machine",
+      "confirmed_by": "agent",
+      "confirmed_at": "3615228c11a82dc5cb5689c5157e95ccf015cca9",
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-25-explorer-git-status"
+    },
+    {
+      "anchor": "FR-01",
+      "row_id": "2026-10-25-explorer-git-status:task-07:acc-0-0bea604f",
+      "tests": [
+        "frontend/src/components/explorer/__tests__/file-explorer.test.tsx"
+      ],
+      "reason": "spec",
+      "state": "active",
+      "discovery": "machine",
+      "confirmed_by": "agent",
+      "confirmed_at": "3615228c11a82dc5cb5689c5157e95ccf015cca9",
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-25-explorer-git-status"
+    }
+  ]
+}

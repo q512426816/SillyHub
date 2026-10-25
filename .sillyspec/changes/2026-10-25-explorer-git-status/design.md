@@ -46,8 +46,8 @@ scale: large  # 跨 daemon/backend/frontend 三子项目、新增 2 RPC + 2 端�
 
 `sillyhub-daemon/src/host-fs-handler.ts` 新增两个方法（紧邻 `gitStatus`（:1642）/`gitDiffFile`（:1567）同款形态），`sillyhub-daemon/src/daemon.ts:7801` 附近注册平名 RPC：
 
-- **`git_dirty_files({ root })`**：一次采集三段——① `git status --porcelain=v2 --no-renames --no-show-stash`（文件行解析：`1` 条目前段字段以单空格分隔、path 与字段区之间以制表符分隔——按行内首个 `\t` 切出 path，含空格安全；path 含 `\t`/换行时 git 自动 C-quote 包裹，quotepath off 不影响该行为；`? <path>` → untracked；`u`（unmerged，冲突）条目按 modified 归类（D-011））；② `git ls-files --others --ignored --exclude-standard --directory`（忽略顶层聚合行，目录带尾 `/` → `is_dir=true`，D-003；注意 `--directory` 只聚合目录，散落的忽略单文件仍逐条出现——忽略条目规模与忽略**目录内部**文件数无关，与散落忽略文件数线性相关）；③ `git diff HEAD --numstat --no-renames`（文件级增删行数，按 path join 到 ①；`-` 二进制行 → `binary=true`、行数 null；untracked 不在 numstat 中 → 行数 null，Grill 实证）。空仓库（`branch.oid (initial)`）→ `empty=true`、files/ignored 空数组。全程 `runCmd` + `GIT_QUOTEPATH_OFF_ARGS` + 30s 读超时，失败不抛（对齐既有五 git 方法的 error 通道）。
-- **`git_worktree_diff({ root, path })`**：先 `git status --porcelain=v2 --no-renames -- <path>` 单文件判态分流——modified/deleted → `git diff HEAD --unified=3 --no-color -- <path>`（走 `runCmd`，`!ok` → error 通道）；untracked → `git diff --no-index --unified=3 --no-color -- /dev/null <path>`，**该分支不走 `runCmd` 的 ok 通道**——no-index 有差异时 git 约定 exit=1（隐含 `--exit-code` 语义，Grill 实证 git 2.45.1），而 `runCmd` 对任何非零 exit 一律 `ok:false`（`host-fs-handler.ts:570-584`）且 `ExecResult` 不暴露退出码。按 D-010：untracked 分支用**局部 execFile**（对齐 `runGitFetch` 先例 :1661）直接读退出码——exit 0/1 均视为成功（1=有差异，常态）、≥2 或 killed 才 error；stderr 中的 CRLF warning 行不进 error 文案。64KB 截断 + `Binary files` binary 检测对齐 `gitDiffFile`（:1602-1612）。
+- **`git_dirty_files({ root })`**：一次采集三段——① `git status --porcelain=v2 --branch --no-renames --no-show-stash`（`--branch` 供 branch.oid → head_short——verify Reverse Sync 补记：设计初稿命令清单漏该旗标，接口契约要求 head_short 故实现补上；文件行解析：`1` 条目前段字段以单空格分隔、path 与字段区之间以制表符分隔——按行内首个 `\t` 切出 path，含空格安全；path 含 `\t`/换行时 git 自动 C-quote 包裹，quotepath off 不影响该行为；`? <path>` → untracked；`u`（unmerged，冲突）条目按 modified 归类（D-011））；② `git ls-files --others --ignored --exclude-standard --directory`（忽略顶层聚合行，目录带尾 `/` → `is_dir=true`，D-003；注意 `--directory` 只聚合目录，散落的忽略单文件仍逐条出现——忽略条目规模与忽略**目录内部**文件数无关，与散落忽略文件数线性相关）；③ `git diff HEAD --numstat --no-renames`（文件级增删行数，按 path join 到 ①；`-` 二进制行 → `binary=true`、行数 null；untracked 不在 numstat 中 → 行数 null，Grill 实证）。空仓库（`branch.oid (initial)`）→ `empty=true`、files/ignored 空数组。全程 `runCmd` + `GIT_QUOTEPATH_OFF_ARGS` + 30s 读超时，失败不抛（对齐既有五 git 方法的 error 通道）。
+- **`git_worktree_diff({ root, path })`**：先 `git status --porcelain=v2 --branch --no-renames -- <path>`（`--branch` 供 head_short，同上补记）单文件判态分流——modified/deleted → `git diff HEAD --unified=3 --no-color -- <path>`（走 `runCmd`，`!ok` → error 通道）；untracked → `git diff --no-index --unified=3 --no-color -- /dev/null <path>`，**该分支不走 `runCmd` 的 ok 通道**——no-index 有差异时 git 约定 exit=1（隐含 `--exit-code` 语义，Grill 实证 git 2.45.1），而 `runCmd` 对任何非零 exit 一律 `ok:false`（`host-fs-handler.ts:570-584`）且 `ExecResult` 不暴露退出码。按 D-010：untracked 分支用**局部 execFile**（对齐 `runGitFetch` 先例 :1661）直接读退出码——exit 0/1 均视为成功（1=有差异，常态）、≥2 或 killed 才 error；stderr 中的 CRLF warning 行不进 error 文案。64KB 截断 + `Binary files` binary 检测对齐 `gitDiffFile`（:1602-1612）。
 
 ### Phase 2（Wave 2）：backend 双端点 + 类型生成
 
@@ -157,7 +157,7 @@ GET /workspaces/{workspace_id}/git-log/dirty-files
 
 GET /workspaces/{workspace_id}/git-log/worktree-diff?path=<仓库相对路径>
   → 200 GitWorktreeDiffResponse { status, head_short, diff, truncated, binary }
-  → 错误码同上；path 校验复用 _validate_diff_path
+  → 错误码同上；path 校验复用 _validate_diff_path；no_git 工作区 → 404「不是 Git 仓库」（verify Reverse Sync 补记：响应模型无 git_mode 字段无法表达 no_git 空态，对齐 get_commit_detail 先例，测试 test_worktree_diff_no_git_404 锚定）
 ```
 
 ### 前端契约

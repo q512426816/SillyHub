@@ -1,0 +1,173 @@
+{
+  "schemaVersion": 2,
+  "change": "2026-10-25-explorer-git-status",
+  "generatedAt": "2026-10-25T14:49:57.444Z",
+  "probes": {
+    "probe1": {
+      "command": "sillyspec verify-probes --change 2026-10-25-explorer-git-status",
+      "metrics": {
+        "matches": 0,
+        "skippedFiles": 0,
+        "worktreeHits": 7,
+        "globEntries": 1
+      }
+    },
+    "probe3": {
+      "command": "sillyspec verify-probes --change 2026-10-25-explorer-git-status",
+      "metrics": {
+        "tasks": 7,
+        "hasTest": 7
+      }
+    },
+    "probe5": {
+      "command": "sillyspec verify-probes --change 2026-10-25-explorer-git-status",
+      "metrics": {
+        "backendEndpoints": 2439,
+        "frontendCalls": 0
+      }
+    },
+    "probe6": {
+      "command": "sillyspec verify-probes --change 2026-10-25-explorer-git-status",
+      "metrics": {
+        "deletions": 0,
+        "unavailable": false
+      }
+    },
+    "probe8": {
+      "command": "sillyspec verify-probes --change 2026-10-25-explorer-git-status",
+      "metrics": {
+        "mispairs": 0,
+        "feOnly": 0,
+        "missingNotNull": 0,
+        "contractCount": 0,
+        "contractOrphans": 0,
+        "missingRequired": 0,
+        "feKeys": 0,
+        "backendFields": 0
+      }
+    },
+    "probe9": {
+      "command": "sillyspec verify-probes --change 2026-10-25-explorer-git-status",
+      "metrics": {
+        "javaFileCount": 0,
+        "groupCount": 0,
+        "inconsistentGroups": 0
+      }
+    },
+    "probe10": {
+      "command": "sillyspec verify-probes --change 2026-10-25-explorer-git-status",
+      "metrics": {
+        "checkedFiles": 8,
+        "unclearedFiles": 0
+      }
+    }
+  },
+  "apiFace": {
+    "endpoints": [
+      {
+        "method": "GET",
+        "path": "/workspaces/{wid}/git-log/dirty-files",
+        "rowIdx": 1
+      },
+      {
+        "method": "GET",
+        "path": "/workspaces/{workspace_id}/git-log/dirty-files",
+        "rowIdx": 1
+      },
+      {
+        "method": "GET",
+        "path": "/workspaces/{workspace_id}/git-log/worktree-diff",
+        "rowIdx": 2
+      }
+    ],
+    "declared": null,
+    "writeEndpoints": []
+  },
+  "conclusion": "PASS WITH NOTES",
+  "runtimeEvidence": [
+    {
+      "claim": "worktree 内三层聚焦测试全绿（daemon 双文件 76 用例 + backend 单文件 18 用例 + 前端 7 文件 96 用例；daemon tsc 0 错误、frontend tsc 仅 2 个基线既有 session-panel 债非本变更文件）",
+      "command": "pnpm exec vitest run tests/host-fs-handler-git-dirty-files.test.ts tests/host-fs-handler-git-log.test.ts（sillyhub-daemon @ worktree）",
+      "exitCode": 0,
+      "logPath": ".sillyspec/.runtime/logs/verify-daemon-test.log"
+    },
+    {
+      "claim": "backend 端点降级/聚合测试全绿（18 passed；61 warnings 均为 starlette DeprecationWarning 噪音）",
+      "command": "uv run pytest tests/modules/git_log/test_git_log_dirty_files.py -q（backend @ worktree）",
+      "exitCode": 0,
+      "logPath": ".sillyspec/.runtime/logs/verify-backend-test.log"
+    },
+    {
+      "claim": "前端 7 聚焦测试文件全绿（含 task-04/05/06/07 全部新测试与 git-log/explorer 既有回归）",
+      "command": "pnpm exec vitest run src/components/git-log/__tests__/worktree-changes-card.test.tsx src/components/git-log/__tests__/worktree-diff-modal.test.tsx src/components/git-log/__tests__/file-tree.test.tsx src/components/git-log/__tests__/git-log-page.test.tsx src/components/git-log/__tests__/git-status-bar.test.tsx src/components/explorer/__tests__/file-explorer-git-status.test.tsx src/components/explorer/__tests__/file-explorer.test.tsx（frontend @ worktree）",
+      "exitCode": 0,
+      "logPath": ".sillyspec/.runtime/logs/verify-frontend-test.log"
+    }
+  ],
+  "handover": {
+    "count": 5,
+    "items": [
+      {
+        "type": "manual-acceptance",
+        "item": "dev 集成冒烟（全局验收标准 4）：Git 日志页「工作区更改」卡与 explorer 树着色在真实数据下的可见性",
+        "condition": "① 起 dev 栈（backend uvicorn + frontend next dev + 本机 sillyhub-daemon 在线并绑定一个含未提交改动的 git 工作区）；② 打开该工作区 Git 日志页，确认更改卡三分组/四色/计数/刷新/点击弹窗 diff（modified 红绿、untracked 全绿、deleted 全红）；③ 打开「文件」页确认树着色+目录蓝点+忽略灰徽标+点击仍为内容预览；④ 旧 daemon（无新 RPC）场景确认 422 降级卡不阻断提交历史",
+        "severity": "advisory"
+      },
+      {
+        "type": "manual-acceptance",
+        "item": "worktree 分支 apply/merge 主仓（Apply: pending，变更代码在分支 sillyspec/2026-10-25-explorer-git-status 上，主仓 main 尚未合并）",
+        "condition": "由主代理/用户决策后执行 apply（或 merge）；apply 后主仓复跑本报告「测试结果」节三组聚焦命令确认全绿",
+        "severity": "advisory"
+      },
+      {
+        "type": "other",
+        "item": "decisions.md 补 D-014 条目（主仓提交门两处既有红修复裁决：turn-timeline 陈旧断言对齐 unify + session-history-scroll rAF 加固——内容现仅存在于 0f3bf815a 提交信息，台账缺条目）",
+        "condition": "主代理择机补记（与 D-012/D-013 同格式）；不影响本变更功能",
+        "severity": "advisory"
+      },
+      {
+        "type": "other",
+        "item": "requirements.md 测试绑定段（FR-01~FR-05）为 brainstorm 模板残留「（待填…）」",
+        "condition": "归档前由主代理补填（可直接抄本报告探针 7 矩阵与测试结果节的锚点）",
+        "severity": "advisory"
+      },
+      {
+        "type": "other",
+        "item": "0f3bf815a 缺 Co-Authored-By 尾注（提交竞态遗留，按纪律不 amend 赌工作区）",
+        "condition": "记录在案，不回改",
+        "severity": "advisory"
+      }
+    ]
+  },
+  "dbScriptDeclarations": [],
+  "runtimeEndpointExcluded": false,
+  "integrationRan": "ran",
+  "matrixPartialRows": 0,
+  "consumerHints": {
+    "script": [
+      "sillyhub-daemon/tests/host-fs-handler-git-dirty-files.test.ts",
+      "backend/tests/modules/git_log/test_git_log_dirty_files.py",
+      "frontend/scripts/prototype-build.mjs"
+    ]
+  },
+  "smokeRan": "not-configured",
+  "factsConsistency": {
+    "checked": [
+      "probe1",
+      "probe3",
+      "probe5",
+      "probe6",
+      "probe8",
+      "probe9"
+    ],
+    "verdict": "match",
+    "detail": null
+  },
+  "tests": {
+    "command": "module[]+deps(jsx5+jsx1)",
+    "exitCode": 0,
+    "strategy": "dynamic-subset",
+    "failedRemaining": [],
+    "passedAt": "2026-10-25T15:02:36.677Z"
+  }
+}
