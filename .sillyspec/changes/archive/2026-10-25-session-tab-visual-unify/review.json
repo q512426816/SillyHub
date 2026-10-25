@@ -1,0 +1,15 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-25-session-tab-visual-unify",
+  "reviewer": "subagent",
+  "verdict": "PASS",
+  "reviewedAgainst": "17f1dfc084703c7d72c86a4c5d44eb1099c5794f",
+  "findings": [],
+  "dimensionNotes": {
+    "乱序": "ok（边界已裁决：可接受——design 声明 merged 排序逻辑不动属实：diff 对 ts 合并穿插逻辑零触及仅换渲染组件，turn-timeline-session-input-bar 的文档顺序断言（text→ask→tool compareDocumentPosition）复跑全绿佐证穿插行为未变）",
+    "并发": "n/a（不适用声明属实——diff 全为静态 className 替换/渲染分支组件替换/注释，无新增状态、无 effect、无共享可变写面，不存在并发写窗口）",
+    "切换": "ok（viewMode 三态门控零改动属实；对话↔进度切换用例（session-panel-dialog AC-10-01c、turn-timeline-dialog-inplace「全部视图」反转用例）复跑全绿，DialogQaBlock 两分支共用无双重渲染）",
+    "作用域": "n/a（不适用声明属实——弹窗版/整页版共用 TurnTimeline 展示层改动，pill 文案纯展示无状态；无 API/types/openapi 触及，无跨工作区数据面变化）"
+  },
+  "reviewedAt": "2026-10-25T13:28:30+08:00"
+}

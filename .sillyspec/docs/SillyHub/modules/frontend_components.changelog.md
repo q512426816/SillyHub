@@ -155,3 +155,4 @@ created_at: 2026-08-30 22:23:33
 | 2026-10-25 | 2026-10-25-marquee-subagent-outer-only | 跑马灯外部只显示子代理容器条目 |
 | 2026-10-25 | 2026-10-25-subagent-card-unify-panel | 子代理卡片统一为紧凑卡片+详情栏 |
 | 2026-10-25 | 2026-10-25-trajectory-source-model | 2026-10-25-trajectory-source-model |
+| 2026-10-25 | 2026-10-25-session-tab-visual-unify | 会话页对话与进度tab宽度组件统一改版 |

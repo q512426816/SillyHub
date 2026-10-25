@@ -1,0 +1,382 @@
+diff --git a/frontend/src/components/daemon/__tests__/session-change-files-hover.test.tsx b/frontend/src/components/daemon/__tests__/session-change-files-hover.test.tsx
+index f89a25c17..8d2ca8308 100644
+--- a/frontend/src/components/daemon/__tests__/session-change-files-hover.test.tsx
++++ b/frontend/src/components/daemon/__tests__/session-change-files-hover.test.tsx
+@@ -143,6 +143,16 @@ describe("SessionChangeFilesHover（2026-10-13-session-change-files-hover task-0
+     expect(r2.container.querySelector('[data-testid="session-change-files-hover"]')).toBeNull();
+   });
+ 
++  it("入口按钮可见文案为「变更」两字（aria-label 保留完整语义）", () => {
++    // 2026-10-25-session-tab-visual-unify：可见文案精简为「变更」两字（用户需求）；
++    // 无障碍读屏描述 aria-label 不变。
++    mockData([activeThin]);
++    render(<SessionChangeFilesHover workspaceId="ws-1" sessionId="s-1" />);
++    const btn = screen.getByLabelText("查看会话关联的变更文件");
++    expect(btn.textContent).toContain("变更");
++    expect(btn.textContent).not.toContain("变更文件");
++  });
++
+   it("点击弹下拉（hover 不再触发）：进行中置顶（轻量徽标+阶段），已归档默认折叠", async () => {
+     mockData([activeThin, activeFull, archivedOne]);
+     render(<SessionChangeFilesHover workspaceId="ws-1" sessionId="s-1" />);
+diff --git a/frontend/src/components/daemon/__tests__/session-panel-dialog.test.tsx b/frontend/src/components/daemon/__tests__/session-panel-dialog.test.tsx
+index 93c41da81..a27cc2106 100644
+--- a/frontend/src/components/daemon/__tests__/session-panel-dialog.test.tsx
++++ b/frontend/src/components/daemon/__tests__/session-panel-dialog.test.tsx
+@@ -1261,7 +1261,7 @@ describe("SessionPanel（dialog）", () => {
+     expect(screen.queryByText(/提问记录/)).not.toBeInTheDocument();
+   });
+ 
+-  it("AC-10-01c 「进度」视图 AskUser 工具卡片显全部选项（选中✓ + 未选可见）(ql-20260802-003)", async () => {
++  it("AC-10-01c 「进度」视图 AskUser 与对话视图统一问答块形态 (2026-10-25-session-tab-visual-unify)", async () => {
+     const stream = makeStreamMock();
+     sessionApi.streamSession.mockImplementation(stream.factory);
+     sessionApi.getAgentSession.mockResolvedValue({
+@@ -1296,11 +1296,15 @@ describe("SessionPanel（dialog）", () => {
+     expect(screen.queryByText(/AskUserQuestion/)).not.toBeInTheDocument();
+     expect(screen.queryByText(/用户主目录/)).not.toBeInTheDocument();
+ 
+-    // 切「进度」：AskUser 工具卡片显全部选项——选中项「用户桌面」(✓) + 未选项「用户主目录」均可见
++    // 切「进度」：提问仍以同款问答块渲染（两视图统一 DialogQaBlock——原工具卡
++    // 显全部选项形态已删，用户裁决统一优先对话视图形态；未选项不再展示）
+     fireEvent.click(screen.getByRole("tab", { name: "进度" }));
+-    await waitFor(() => expect(screen.getByText(/AskUserQuestion/)).toBeInTheDocument());
++    await waitFor(() =>
++      expect(screen.getAllByTestId("dialog-qa-block").length).toBeGreaterThan(0),
++    );
++    expect(screen.queryByText(/AskUserQuestion/)).not.toBeInTheDocument();
+     expect(screen.getByText(/用户桌面/)).toBeInTheDocument();
+-    expect(screen.getByText(/用户主目录/)).toBeInTheDocument();
++    expect(screen.queryByText(/用户主目录/)).not.toBeInTheDocument();
+   });
+ 
+   it("AC-10-03 轮询到 active → status active + 输入启用 + 清轮询", async () => {
+diff --git a/frontend/src/components/daemon/__tests__/turn-segment-views.test.tsx b/frontend/src/components/daemon/__tests__/turn-segment-views.test.tsx
+index 1fde0f3b4..fa94848c5 100644
+--- a/frontend/src/components/daemon/__tests__/turn-segment-views.test.tsx
++++ b/frontend/src/components/daemon/__tests__/turn-segment-views.test.tsx
+@@ -209,20 +209,21 @@ describe("TextSegmentView 文本段", () => {
+     expect(document.querySelector(".seg-caret")).toBeNull();
+   });
+ 
+-  it("无框形态：容器挂 seg-text-body（w-full + 52rem 阅读限宽），无气泡框样式类", () => {
++  it("无框形态：容器挂 seg-text-body（w-full + 整行宽度-120px 统一限宽），无气泡框样式类", () => {
+     // 2026-09-20-agent-reply-no-bubble：容器改无框正文，markdown-text 的直接父容器
+     // 即 seg-text-body 容器——断言新类存在 + 旧气泡框类（border/bg-card/shadow-sm/
+     // rounded-2xl/px-4）不存在
+     // 2026-10-20-session-page-dsh-alignment（FR-02 / D-016②）：正文与过程字阶分离
+-    // ——阅读限宽 48rem→52rem（原先 48rem 断言编码的是旧视觉结构与新稿不符，按新的
+-    // 用户可见行为更新）；15px/1.8/0.65em 这套字号由 globals.css 的 .seg-text-body
++    // ——15px/1.8/0.65em 这套字号由 globals.css 的 .seg-text-body
+     // 元素级规则承担（见本文件「正文/过程字阶分离」用例）。
++    // 2026-10-25-session-tab-visual-unify：阅读限宽统一为整行宽度-120px
++    // （原先 52rem 断言编码的是旧限宽体系，按统一后的用户可见行为更新）。
+     render(<TextSegmentView segment={makeTextSeg()} />);
+     const container = screen.getByTestId("markdown-text").parentElement;
+     expect(container).not.toBeNull();
+     expect(container?.className).toContain("seg-text-body");
+     expect(container?.className).toContain("w-full");
+-    expect(container?.className).toContain("max-w-[min(100%,52rem)]");
++    expect(container?.className).toContain("max-w-[calc(100%-120px)]");
+     for (const legacy of ["border", "bg-card", "shadow-sm", "rounded-2xl", "px-4"]) {
+       expect(container?.className).not.toContain(legacy);
+     }
+diff --git a/frontend/src/components/daemon/__tests__/turn-timeline-dialog-inplace.test.tsx b/frontend/src/components/daemon/__tests__/turn-timeline-dialog-inplace.test.tsx
+index 3aa00e310..911010c89 100644
+--- a/frontend/src/components/daemon/__tests__/turn-timeline-dialog-inplace.test.tsx
++++ b/frontend/src/components/daemon/__tests__/turn-timeline-dialog-inplace.test.tsx
+@@ -7,8 +7,9 @@
+ //      （两段之间的提问渲染在两段之间，晚于全部段的提问渲染在末段之后）；
+ //   2. 仅有提问、无对话段的轮也渲染 ❓ 块（旧行为的块同样不依赖段存在）；
+ //   3. 旧回退路径（segments undefined）：❓ 块仍渲染（旧行为不回归）；
+-//   4. 「全部」视图穿插行为零改动（AskUserToolCard 路径，已有用例覆盖，此处
+-//      仅断言对话视图块在全部视图不双画轻量块）。
++//   4. 「全部」视图与对话视图统一同款 ❓ 问答块（2026-10-25-session-tab-visual-unify：
++//      原 AskUserToolCard 工具卡路径删除，穿插排序不受影响；此处断言全部视图
++//      问答块单份不双画）。
+ //
+ // mock 口径：MarkdownText（next/dynamic jsdom 同步渲染 null）——照抄
+ // turn-timeline-conversation-file-card.test 惯例。
+@@ -178,7 +179,7 @@ describe("「对话」视图 ❓ 提问记录按时间穿插（2026-10-10-dialog
+     expect(screen.queryByTitle("智能体")).not.toBeInTheDocument();
+   });
+ 
+-  it("「全部」视图：轻量 ❓ 块不双画（AskUser 走工具卡路径）", () => {
++  it("「全部」视图：AskUser 统一渲染同款问答块（两视图同组件，单份不双画）", () => {
+     render(
+       <TurnTimeline
+         {...renderProps(
+@@ -188,6 +189,8 @@ describe("「对话」视图 ❓ 提问记录按时间穿插（2026-10-10-dialog
+         )}
+       />,
+     );
+-    expect(screen.queryByTestId("dialog-qa-block")).not.toBeInTheDocument();
++    // 2026-10-25-session-tab-visual-unify：两视图统一 DialogQaBlock——全部视图
++    // 提问以同款问答块出现（原 AskUserToolCard 工具卡已删），且仅渲染一份。
++    expect(screen.getAllByTestId("dialog-qa-block")).toHaveLength(1);
+   });
+ });
+diff --git a/frontend/src/components/daemon/__tests__/turn-timeline-session-input-bar.test.tsx b/frontend/src/components/daemon/__tests__/turn-timeline-session-input-bar.test.tsx
+index 015cf22ac..09c3ede7d 100644
+--- a/frontend/src/components/daemon/__tests__/turn-timeline-session-input-bar.test.tsx
++++ b/frontend/src/components/daemon/__tests__/turn-timeline-session-input-bar.test.tsx
+@@ -354,12 +354,14 @@ describe("TurnTimeline v2 段模型渲染（task-06 / 2026-08-19-session-stream-
+         },
+       ],
+     });
+-    // AskUser 以工具卡片形态出现在段线中
+-    expect(screen.getByText("AskUserQuestion")).toBeInTheDocument();
++    // AskUser 以对话视图同款问答块形态出现在段线中（2026-10-25-session-tab-visual-unify：
++    // 两视图统一 DialogQaBlock，原 AskUserQuestion 工具卡标签不再渲染）
++    expect(screen.queryByText("AskUserQuestion")).not.toBeInTheDocument();
++    expect(screen.getByTestId("dialog-qa-block")).toBeInTheDocument();
+     expect(screen.getByText(/穿插问题？/)).toBeInTheDocument();
+-    // 按 ts 穿插：text 段 → AskUser 卡 → 工具段（文档顺序）
++    // 按 ts 穿插：text 段 → AskUser 问答块 → 工具段（文档顺序）
+     const textEl = screen.getByText("穿插前文本");
+-    const askEl = screen.getByText("AskUserQuestion");
++    const askEl = screen.getByTestId("dialog-qa-block");
+     const toolEl = screen.getByText("Grep");
+     expect(textEl.compareDocumentPosition(askEl) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+     expect(askEl.compareDocumentPosition(toolEl) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+diff --git a/frontend/src/components/daemon/session-change-files-hover.tsx b/frontend/src/components/daemon/session-change-files-hover.tsx
+index 659aea7c0..f2e7f24e0 100644
+--- a/frontend/src/components/daemon/session-change-files-hover.tsx
++++ b/frontend/src/components/daemon/session-change-files-hover.tsx
+@@ -205,7 +205,9 @@ export function SessionChangeFilesHover({
+           aria-label="查看会话关联的变更文件"
+         >
+           <FolderGit2 className="h-3.5 w-3.5" aria-hidden />
+-          变更文件
++          {/* 2026-10-25-session-tab-visual-unify：可见文案精简为「变更」两字
++              （用户需求）；aria-label 保留完整语义供读屏。 */}
++          变更
+           <span
+             data-testid="session-change-count"
+             className={`rounded-full bg-emerald-600 px-1.5 text-[10px] font-bold leading-4 text-white ${
+diff --git a/frontend/src/components/daemon/turn-segment-views.tsx b/frontend/src/components/daemon/turn-segment-views.tsx
+index d2f27ece7..79fe608cc 100644
+--- a/frontend/src/components/daemon/turn-segment-views.tsx
++++ b/frontend/src/components/daemon/turn-segment-views.tsx
+@@ -633,13 +633,17 @@ export const TextSegmentView = memo(function TextSegmentView({ segment }: TextSe
+   return (
+     // task-11（FR-07）：group+relative 供 CopyButton 右下角 hover 浮出（纯 CSS 零状态）
+     // 2026-09-20-agent-reply-no-bubble：去气泡——容器改无框正文（w-full +
+-    // max-w-[min(100%,48rem)]，铺在时间线背景上），排版交 .markdown-text 既有
++    // 阅读限宽，铺在时间线背景上），排版交 .markdown-text 既有
+     // 规则（原 ql-20260909-009 的 80% 收窄 + 描边分层形态被此取代）。
+     // 2026-10-20-session-page-dsh-alignment（FR-02 / D-016②）：正文与过程字阶分离——
+-    // 阅读限宽 48rem→52rem（宽屏少折行）；字号/行高/段距（14.5px / 1.78 / 0.6em）
++    // 字号/行高/段距（14.5px / 1.78 / 0.6em）
+     // 由 globals.css 的 `.seg-text-body` 元素级规则承担（MarkdownText compact 的
+     // !text-xs 带 !important，容器类挂 font-size 压不住它，故不在此写死字号）。
+-    <div className="seg-text-body group relative w-full max-w-[min(100%,52rem)] self-start">
++    // 2026-10-25-session-tab-visual-unify：阅读限宽统一为「整行宽度-120px」
++    // （max-w-[calc(100%-120px)]，随容器自适应）——原 48rem→52rem 限宽与其它
++    // agent 信息块的 86% 限宽并存导致两视图宽度不齐（用户实测反馈），agent 侧
++    // 信息块全部收口同一限宽（用户侧气泡 56%/80% 不在此列）。
++    <div className="seg-text-body group relative w-full max-w-[calc(100%-120px)] self-start">
+       <MarkdownText content={segment.text} />
+       {segment.streaming && (
+         <span
+@@ -1119,7 +1123,7 @@ export const PreambleSegmentView = memo(function PreambleSegmentView({
+   const [open, setOpen] = useState(false);
+   const charCount = segment.text.length;
+   return (
+-    <div className="flex w-full max-w-[86%] flex-col gap-1 self-start">
++    <div className="flex w-full max-w-[calc(100%-120px)] flex-col gap-1 self-start">
+       <button
+         type="button"
+         onClick={() => {
+@@ -1163,7 +1167,7 @@ export const CompactSegmentView = memo(function CompactSegmentView({
+   const [open, setOpen] = useState(false);
+   const charCount = segment.text.length;
+   return (
+-    <div className="flex w-full max-w-[86%] flex-col gap-1 self-start">
++    <div className="flex w-full max-w-[calc(100%-120px)] flex-col gap-1 self-start">
+       <button
+         type="button"
+         onClick={() => {
+@@ -1233,7 +1237,7 @@ export const TurnTriggerView = memo(function TurnTriggerView({
+   if (!meta.contentHidden) {
+     // 来源标注源：纯行，无展开（正文在 prompt 气泡照常可见）。
+     return (
+-      <div className="flex w-full max-w-[86%] flex-col gap-1 self-start">
++      <div className="flex w-full max-w-[calc(100%-120px)] flex-col gap-1 self-start">
+         <span
+           aria-label={`${meta.label}（来源标注）`}
+           className="flex w-fit select-text items-center gap-[7px] rounded-md px-1.5 py-[3px] text-[11px] text-muted-foreground"
+@@ -1247,7 +1251,7 @@ export const TurnTriggerView = memo(function TurnTriggerView({
+     );
+   }
+   return (
+-    <div className="flex w-full max-w-[86%] flex-col gap-1 self-start">
++    <div className="flex w-full max-w-[calc(100%-120px)] flex-col gap-1 self-start">
+       <button
+         type="button"
+         onClick={() => {
+@@ -1722,7 +1726,7 @@ export const SegmentView = memo(function SegmentView({ segment }: SegmentViewPro
+       // 卡两形态，antd 仅经其间接使用）；本层只加「agent 上传了文件」标注行
+       // （原型 .file-msg .who），卡片本体在 task-09 产出文件区可原样复用。
+       return (
+-        <div className="flex w-full max-w-[86%] flex-col gap-1 self-start">
++        <div className="flex w-full max-w-[calc(100%-120px)] flex-col gap-1 self-start">
+           <span className="select-none pl-0.5 text-[11px] text-muted-foreground">
+             agent 上传了文件
+           </span>
+diff --git a/frontend/src/components/daemon/turn-timeline.tsx b/frontend/src/components/daemon/turn-timeline.tsx
+index 495a39609..deb4b87a2 100644
+--- a/frontend/src/components/daemon/turn-timeline.tsx
++++ b/frontend/src/components/daemon/turn-timeline.tsx
+@@ -1117,10 +1117,12 @@ const TurnRow = memo(function TurnRow({
+                                ql-20260915-009 的 mobile 放大标记类自此仅用户气泡持有
+                                （globals.css 规则迁移归 task-03）。
+                                2026-10-20-session-page-dsh-alignment（FR-02 / D-016②）：
+-                               阅读限宽 48rem→52rem，与 v2 主路径同宽；字号/行高/段距
++                               与 v2 主路径同宽；字号/行高/段距
+                                （14.5px / 1.78 / 0.6em）由 globals.css 的 .seg-text-body
+-                               元素级规则统一承担，两条路径不再各写一套。 */}
+-                          <div className="seg-text-body max-w-[min(100%,52rem)]">
++                               元素级规则统一承担，两条路径不再各写一套。
++                               2026-10-25-session-tab-visual-unify：阅读限宽随 v2 主路径
++                               统一为「整行宽度-120px」（max-w-[calc(100%-120px)]）。 */}
++                          <div className="seg-text-body max-w-[calc(100%-120px)]">
+                             <HugeOutputBlock text={outputMarker ? outputMarker.textBefore : turn.output} />
+                             {/* task-13（FR-05 / D-004@v1）：流式光标——旧路径 output
+                                 气泡运行中（isLiveTurn 三态）挂正文尾，轮终态随条件转
+@@ -1179,7 +1181,9 @@ const TurnRow = memo(function TurnRow({
+               )}
+               {turn.errorDetail && (
+                 <div className="flex justify-start">
+-                  <div className="max-w-[86%]">
++                  {/* 2026-10-25-session-tab-visual-unify：错误卡同属 agent 反馈
++                      信息块，限宽随统一规则（整行宽度-120px），原 86% 弃。 */}
++                  <div className="max-w-[calc(100%-120px)]">
+                     <ErrorBoundary
+                       label="run-error-item"
+                       fallback={() => (
+@@ -2162,8 +2166,9 @@ function isConversationSegment(seg: TurnSegment): boolean {
+  *   - 「全部（进度）」视图（viewMode=all）：完整段时间线——ml-9 竖线容器（原型
+  *     .turn-timeline：左缩进 36px + 2px 边线 + 14px 内距 + 6px 段距）内按序渲染
+  *     SegmentView 段组件族（key=segment.id，段级 memo 由 task-05 保证）；AskUser
+- *     提问记录按 created_at 与段 ts 合并排序穿插（merged 排序逻辑平移自旧路径，
+- *     渲染复用 AskUserToolCard 工具卡片）；
++ *     提问记录按 created_at 与段 ts 合并排序穿插（merged 排序逻辑平移自旧路径；
++ *     2026-10-25-session-tab-visual-unify 起渲染统一用对话视图同款 DialogQaBlock
++ *     问答块，原 AskUserToolCard 工具卡已删）；
+  *   - TurnStatusBar 内置（FR-02 / Grill X-09）：轮处于 pending/running/interrupting
+  *     且计时锚点 turnStartedAt 有值时渲染（两视图同显，段序列之前）；终态或锚点
+  *     缺失不挂载；
+@@ -2174,15 +2179,19 @@ function isConversationSegment(seg: TurnSegment): boolean {
+  * 装配器 path-copy 保证未触及段引用稳定）；段组件由 SegmentView 内部 memo。
+  */
+ /** 2026-10-10-dialog-qa-inplace：对话视图轻量 ❓ 提问记录卡——原「整组前置轮
+- *  头部」的同一标记原位组件化（视觉逐字不变），供 SegmentedTurnBody 按时间戳
+- *  穿插与旧回退路径两处复用。空 QA（不可解析 payload）渲染 null。 */
++ *  头部」的同一标记原位组件化，供 SegmentedTurnBody 按时间戳穿插与旧回退路径
++ *  两处复用。空 QA（不可解析 payload）渲染 null。
++ *  2026-10-25-session-tab-visual-unify：升格两视图唯一 AskUser 渲染（进度视图
++ *  原用 AskUserToolCard 工具卡，用户裁决统一优先对话视图形态）；原仅对话视图
++ *  语境合理的 ml-9 缩进移除（对话视图与其它 agent 段左缘对齐、进度视图不与
++ *  竖线容器双重缩进），宽度随 agent 反馈信息块统一规则（整行宽度-120px）。 */
+ function DialogQaBlock({ dialog }: { dialog: SessionDialogRead }) {
+   const qa = extractDialogQA(dialog);
+   if (qa.length === 0) return null;
+   return (
+     <div
+       data-testid="dialog-qa-block"
+-      className="ml-9 space-y-0.5 rounded-md border border-indigo-200 bg-indigo-50/40 px-3 py-1.5 text-xs leading-5"
++      className="max-w-[calc(100%-120px)] space-y-0.5 rounded-md border border-indigo-200 bg-indigo-50/40 px-3 py-1.5 text-xs leading-5"
+     >
+       {qa.map((item, i) => (
+         <div key={i} className="break-words">
+@@ -2323,7 +2332,9 @@ function SegmentedTurnBody({
+             item.kind === "segment" ? (
+               <SegmentView key={item.segment.id} segment={item.segment} />
+             ) : (
+-              <AskUserToolCard key={`dialog-${item.dialog.request_id}`} dialog={item.dialog} />
++              // 2026-10-25-session-tab-visual-unify：进度视图 AskUser 统一用对话
++              // 视图同款问答块（原 AskUserToolCard 工具卡形态弃，组件已删除）。
++              <DialogQaBlock key={`dialog-${item.dialog.request_id}`} dialog={item.dialog} />
+             ),
+           )}
+         </div>
+@@ -2495,7 +2506,9 @@ function TurnDetailsList({
+           return <ToolEventCard key={idx} event={item.event} />;
+         }
+         if (item.kind === "askUser") {
+-          return <AskUserToolCard key={idx} dialog={item.dialog} />;
++          // 2026-10-25-session-tab-visual-unify：AskUser 统一用对话视图同款
++          // 问答块（原 AskUserToolCard 工具卡形态弃，组件已删除）。
++          return <DialogQaBlock key={idx} dialog={item.dialog} />;
+         }
+         if (item.kind === "file") {
+           // agent-file-upload-mcp：历史回放的 agent 上传文件卡片（与段渲染路径
+@@ -2599,67 +2612,6 @@ function ToolEventCard({ event }: { event: SessionToolEvent }) {
+   );
+ }
+ 
+-/**
+- * ql-20260802-002/003：「全部」视图把 AskUser 提问渲染成工具调用卡片（和 Write/Bash 一致），
+- * 让 AskUser 在工具区可见。AskUser 不走 tool_use 日志（走 onUserDialog 对话协议，
+- * cli.ts:653-659），故用 dialog 历史数据模拟工具卡片：工具名 AskUserQuestion +
+- * ✓已答/⏳待答 徽章 + 问题（参数）+ 全部可选项（选中项绿底✓，未选灰○，hover 显 description）。
+- * ql-20260802-003 修复：旧版只显用户选中的那一项、看不到其余备选；现显全部 options。
+- */
+-function AskUserToolCard({ dialog }: { dialog: SessionDialogRead }) {
+-  const qa = extractDialogQA(dialog);
+-  if (qa.length === 0) return null;
+-  const pending = dialog.status === "pending";
+-  const badge = pending
+-    ? { icon: "⏳", cls: "text-brand-600", title: "等待回答" }
+-    : { icon: "✓", cls: "text-emerald-600", title: "已回答" };
+-  return (
+-    <div className="rounded border border-brand-200 bg-brand-50/40 px-2 py-1.5">
+-      <div className="mb-0.5 flex items-center gap-1.5 text-[10px] text-brand-700">
+-        <Wrench className="h-3 w-3 shrink-0" aria-hidden />
+-        <span className="font-medium">AskUserQuestion</span>
+-        <span className={cn("font-mono", badge.cls)} title={badge.title} aria-label={badge.title}>
+-          {badge.icon}
+-        </span>
+-      </div>
+-      <div className="space-y-1">
+-        {qa.map((item, i) => (
+-          <div key={i} className="space-y-0.5">
+-            <div className="break-words font-mono text-[10px] text-muted-foreground">
+-              ❓ {item.question}
+-            </div>
+-            {item.options.length > 0 ? (
+-              <div className="space-y-0.5 pl-1">
+-                {item.options.map((opt, j) => (
+-                  <div
+-                    key={j}
+-                    title={opt.description}
+-                    className={cn(
+-                      "flex items-start gap-1 rounded px-1.5 py-0.5 text-[10px] leading-5",
+-                      opt.selected
+-                        ? "bg-emerald-50 font-medium text-emerald-700"
+-                        : "text-muted-foreground/70",
+-                    )}
+-                  >
+-                    <span aria-hidden className="shrink-0">
+-                      {opt.selected ? "✓" : "○"}
+-                    </span>
+-                    <span className="min-w-0 break-words">{opt.label}</span>
+-                  </div>
+-                ))}
+-              </div>
+-            ) : (
+-              <div className="break-words text-muted-foreground">
+-                → {item.answerText ?? (pending ? "（待答）" : "（未回答）")}
+-              </div>
+-            )}
+-          </div>
+-        ))}
+-      </div>
+-    </div>
+-  );
+-}
+-
+ /**
+  * ql-20260730-003：会话气泡内的折叠卡片（灰底思考 / 蓝底工具）。
+  * 带摘要的单行折叠条，点击展开内容。替代 agent-log 的 CollapsibleSection

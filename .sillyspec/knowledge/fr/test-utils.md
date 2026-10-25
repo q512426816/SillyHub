@@ -1236,3 +1236,79 @@ created_at: 2026-10-16T01:30:35.950Z
   confirmed_at: null
   source_change: 2026-10-23-marquee-queue-window
   status: active
+
+## FR-test-utils-063 对话与进度两视图中 agent 反馈信息块宽度统一为整行宽度-120px
+变更：2026-10-25-session-tab-visual-unify
+状态：active
+摘要：两视图宽度一致
+全文：.sillyspec/changes/archive/2026-10-25-session-tab-visual-unify/requirements.md#FR-01
+最近确认：17f1dfc084703c7d72c86a4c5d44eb1099c5794f
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-25-session-tab-visual-unify:flow:测试绑定FR-01
+  tests: frontend/src/components/daemon/__tests__/turn-segment-views.test.tsx「无框形态：容器挂 seg-text-body（w-full + 52rem 阅读限宽），无气泡框样式类」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-25-session-tab-visual-unify
+  status: active
+
+## FR-test-utils-064 AskUser 提问记录两视图统一用对话视图的问答块组件渲染
+变更：2026-10-25-session-tab-visual-unify
+状态：active
+摘要：进度视图提问卡换形态
+全文：.sillyspec/changes/archive/2026-10-25-session-tab-visual-unify/requirements.md#FR-02
+最近确认：17f1dfc084703c7d72c86a4c5d44eb1099c5794f
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-25-session-tab-visual-unify:flow:测试绑定FR-02
+  tests: frontend/src/components/daemon/__tests__/turn-timeline-session-input-bar.test.tsx「all 视图 AskUser 提问按时间戳穿插在段线对应位置（merged 排序平移）」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-25-session-tab-visual-unify
+  status: active
+
+## FR-test-utils-065 右侧悬浮按钮文案由「变更文件」改为「变更」
+变更：2026-10-25-session-tab-visual-unify
+状态：active
+摘要：入口按钮文案
+全文：.sillyspec/changes/archive/2026-10-25-session-tab-visual-unify/requirements.md#FR-03
+最近确认：17f1dfc084703c7d72c86a4c5d44eb1099c5794f
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-25-session-tab-visual-unify:flow:测试绑定FR-03
+  tests: frontend/src/components/daemon/__tests__/session-change-files-hover.test.tsx
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-25-session-tab-visual-unify
+  status: active
+
+## FR-test-utils-066 受影响的既有测试断言同步更新，本变更相关测试通过
+变更：2026-10-25-session-tab-visual-unify
+状态：active
+摘要：回归验证
+全文：.sillyspec/changes/archive/2026-10-25-session-tab-visual-unify/requirements.md#FR-04
+最近确认：17f1dfc084703c7d72c86a4c5d44eb1099c5794f
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-25-session-tab-visual-unify:flow:测试绑定FR-04
+  tests: frontend/src/components/daemon/__tests__/turn-timeline-dialog-inplace.test.tsx
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-25-session-tab-visual-unify
+  status: active

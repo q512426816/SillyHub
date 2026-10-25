@@ -1,0 +1,66 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-25-session-tab-visual-unify",
+  "rows": [
+    {
+      "anchor": "FR-01",
+      "row_id": "2026-10-25-session-tab-visual-unify:flow:测试绑定FR-01",
+      "tests": [
+        "frontend/src/components/daemon/__tests__/turn-segment-views.test.tsx「无框形态：容器挂 seg-text-body（w-full + 52rem 阅读限宽），无气泡框样式类」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-25-session-tab-visual-unify"
+    },
+    {
+      "anchor": "FR-02",
+      "row_id": "2026-10-25-session-tab-visual-unify:flow:测试绑定FR-02",
+      "tests": [
+        "frontend/src/components/daemon/__tests__/turn-timeline-session-input-bar.test.tsx「all 视图 AskUser 提问按时间戳穿插在段线对应位置（merged 排序平移）」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-25-session-tab-visual-unify"
+    },
+    {
+      "anchor": "FR-03",
+      "row_id": "2026-10-25-session-tab-visual-unify:flow:测试绑定FR-03",
+      "tests": [
+        "frontend/src/components/daemon/__tests__/session-change-files-hover.test.tsx"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-25-session-tab-visual-unify"
+    },
+    {
+      "anchor": "FR-04",
+      "row_id": "2026-10-25-session-tab-visual-unify:flow:测试绑定FR-04",
+      "tests": [
+        "frontend/src/components/daemon/__tests__/turn-timeline-dialog-inplace.test.tsx"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-25-session-tab-visual-unify"
+    }
+  ]
+}
