@@ -448,7 +448,11 @@ async def notify_orchestrator_workers_done(
     )
     try:
         async with get_session_factory()() as ndb:
-            await SessionService(ndb).inject_session_as_service(session_id, prompt=prompt)
+            # 2026-10-25-trajectory-source-model FR-01：系统通知轮盖来源戳
+            # （轨迹「上下文」行的数据源，dsh source.kind !== 'user' 同构）。
+            await SessionService(ndb).inject_session_as_service(
+                session_id, prompt=prompt, turn_trigger="agent_notice"
+            )
     except AppError as exc:
         # 主控轮进行中（turn 冲突）/ 会话已结束等：主控醒着或已不可唤醒，
         # 通知缺失由 patrol awaiting_input 超时自动收敛兜底（§7.5）。
@@ -557,7 +561,10 @@ async def notify_parent_workers_done(
     )
     try:
         async with get_session_factory()() as ndb:
-            await SessionService(ndb).inject_session_as_service(parent_session_id, prompt=prompt)
+            # 2026-10-25-trajectory-source-model FR-01：子分身完成通知轮盖来源戳。
+            await SessionService(ndb).inject_session_as_service(
+                parent_session_id, prompt=prompt, turn_trigger="agent_notice"
+            )
     except AppError as exc:
         # 父会话恰好刚起了新一轮（turn 冲突）等：父醒着，自会查到，不视为失败。
         log.info(

@@ -372,7 +372,7 @@ def notify_env(monkeypatch: pytest.MonkeyPatch):
         def __init__(self, db) -> None:
             pass
 
-        async def inject_session_as_service(self, session_id, *, prompt):
+        async def inject_session_as_service(self, session_id, *, prompt, turn_trigger=None):
             injected.append((session_id, prompt))
 
     monkeypatch.setattr(_svc_mod, "SessionService", _FakeSessionService)

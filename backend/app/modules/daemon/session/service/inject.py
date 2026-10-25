@@ -792,6 +792,10 @@ async def _inject_into_session(
                 # task_wakeup 参数 → 'task_wakeup'、auto_resume_of →
                 # 'auto_resume'、显式 turn_trigger 直通（'schedule'）；前端
                 # classifyTurnTrigger metadata 优先消费，内容前缀降兜底。
+                # 2026-10-25-trajectory-source-model FR-01：主控首轮简报轮盖
+                # 'team_brief'（该轮由用户发送触发，task_wakeup/auto_resume
+                # 恒空——优先级链放两者之后；简报只进 payload 不改 content，
+                # 轨迹「上下文」行据此盖戳判定，DB 行内容保持用户原文）。
                 metadata_=_merged_turn_metadata(
                     turn_metadata,
                     (
@@ -799,6 +803,8 @@ async def _inject_into_session(
                         if task_wakeup
                         else "auto_resume"
                         if auto_resume_of is not None
+                        else "team_brief"
+                        if first_turn_briefing is not None
                         else turn_trigger
                     ),
                 ),

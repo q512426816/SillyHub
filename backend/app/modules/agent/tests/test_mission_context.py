@@ -466,7 +466,7 @@ class TestWorkersDoneNotify:
             def __init__(self, db):
                 pass
 
-            async def inject_session_as_service(self, session_id, *, prompt):
+            async def inject_session_as_service(self, session_id, *, prompt, turn_trigger=None):
                 injected.append((session_id, prompt))
 
         import app.modules.daemon.session.service as _svc_mod

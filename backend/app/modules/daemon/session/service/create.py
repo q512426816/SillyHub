@@ -716,12 +716,24 @@ async def create_session(
         # 污染回放）。存量路径 prompt 非空或附件标记行非空，恒落行——行为
         # 逐字节不变。
         if _user_input_content:
+            # 2026-10-25-trajectory-source-model FR-01：首轮来源盖戳——
+            # 分身形态（parent_session_id，dispatch_worker 派发）→ 'worker_dispatch'；
+            # 预建团队 mission 的主控首轮（简报拼进 payload、DB 落用户原文）→
+            # 'team_brief'；普通会话不盖（前端按戳归类轨迹「上下文」行）。
+            _first_turn_stamp = (
+                "worker_dispatch"
+                if parent_session_id is not None
+                else "team_brief"
+                if mission is not None
+                else None
+            )
             svc._session.add(
                 AgentRunLog(
                     run_id=run.id,
                     channel="user_input",
                     content_redacted=_user_input_content[:USER_INPUT_LOG_MAX_CHARS],
                     timestamp=now,
+                    metadata_=({"turn_trigger": _first_turn_stamp} if _first_turn_stamp else None),
                 )
             )
         await svc._session.commit()
