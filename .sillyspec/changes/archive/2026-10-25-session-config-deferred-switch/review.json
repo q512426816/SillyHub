@@ -1,0 +1,37 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-25-session-config-deferred-switch",
+  "reviewer": "inline-self（环境无已注册子代理，主会话代行——降级留痕）",
+  "verdict": "PASS",
+  "reviewedAgainst": "61ea24349aaa56a7af93a756ac36927b21b167b4",
+  "findings": [
+    {
+      "severity": "P3",
+      "status": "accepted",
+      "title": "FR-06 测试绑定文件名笔误：requirements/design 写 page-helpers-config-change-line.test.tsx，实际文件为 config-change-line.test.ts",
+      "evidence": "实际测试文件 frontend/src/components/daemon/session-panel/__tests__/config-change-line.test.ts（10 用例）已覆盖 FR-06 承诺的 buildConfigChangeLine 文案 + enrich 相邻对比；收口归属切分机械核算已将其列为声明外候选并抽查确认为本变更交付。语义无失真，评审只读纪律下不改文档，记录留痕。",
+      "location": ".sillyspec/changes/2026-10-25-session-config-deferred-switch/requirements.md:FR-06 绑定行"
+    },
+    {
+      "severity": "P3",
+      "status": "accepted",
+      "title": "冻结面混入他侧文件 docs/releases/2026-10-25-002-d21c3a70c.md（部署记录，+50/-0）",
+      "evidence": "抽查该文件内容为 2026-10-25-002 部署记录（commit_from 8ca9018c4 → commit_to d21c3a70c，记录他侧「终态子代理卡片假等待修复」部署），系 baseline 后他侧提交进入提交面，与本变更交付无关；收口归属切分已标注「并行混入候选」，不影响本变更审计语义。",
+      "location": "docs/releases/2026-10-25-002-d21c3a70c.md"
+    }
+  ],
+  "dimensionNotes": {
+    "乱序": "ok——暂存为纯本地 React state，无网络乱序面；发送窗口期（inject 在途）再点选 → 新暂存挂到下一次发送（本次已带旧快照），语义自洽；SSE 迟到不影响暂存显示（显示值与网络态解耦，staged 受控优先于会话真值）",
+    "并发": "ok——暂存唯一写方为面板 handleStagedSwitch/settleStagedAfterSend（React 单线程更新）；后端多端并发不受影响（暂存不落库，发送时以请求字段覆盖，后端排队条目按字段保存/覆盖合并既有机制）",
+    "切换": "ok——sessionId 切换即清空暂存（session-panel-page.tsx useEffect [sessionId] 重置 state 与 labelRef，diff 确认在位）；发送失败暂存保留可重试；档位失败仅保留档位维并 toast 警告不阻塞消息",
+    "作用域": "ok——暂存为面板内 state，不写 storage、不跨工作区/跨仓；历史路对比仅在当前会话 turns 序列内（enrichDisplayTurns 单会话输入）；刷新即丢已在 requirements 声明且用户显式确认（D-001 批准语境）"
+  },
+  "checklist": {
+    "fr_impl_test_consistency": "PASS——FR-01..07 逐条核对：实现兑现（组件 stagedMode 分支不发请求/受控显示/选回 cancel；面板三发送点位并入+档位先调+清暂存；TurnRow 渲染 configChangeLine；enrich 相邻对比），绑定测试真实存在且断言该行为（config-bar 72 用例含暂存上抛/cancel/running 兜底/兼容锚；config-change-line 10 用例；variant 13 用例含发送并入+清空+切换说明行渲染）。本会话实测：触达 5 文件 153 用例 + 回归 7 文件 157 用例全绿，ledger 回执 passed exit=0 同口径",
+    "blind_spots": "PASS——design 四问作答与 diff 对照无虚答：乱序/并发/切换/作用域四维代码面均与作答一致（见 dimensionNotes）",
+    "disclosed_tradeoffs": "已裁决——①暂存不落库刷新即丢：可接受（用户显式确认，暂存与发送秒级相邻）；②定时消息/派团队入口不并入暂存：可接受（创建时自带各自配置语义，非主发送路径）；③历史路模型维缺失（run 快照无会话级模型覆盖列）由实时路补足：可接受（如实缺失不编造，后端加列成本不成比例）；④档位切换失败保留暂存下次发送重试：可接受（失败已可见警告，消息不受阻）",
+    "guard_claims": "PASS——「暂存为空时请求形态与现状逐字段一致」防护真实在位：buildStagedInjectOptions 空暂存返回 null、注入点 (stagedOpts ?? {}) 展开为空；测试钉死：variant「第二条发送不带 llm_provider_id」+ 组件三组「未传 onStagedSwitch（兼容）旧行为」锚",
+    "generated_artifacts": "n/a——纯前端改动，无后端 schema/OpenAPI 形状变化，api-types 未触达，无生成物同步义务"
+  },
+  "reviewedAt": "2026-10-25T19:40:30+08:00"
+}

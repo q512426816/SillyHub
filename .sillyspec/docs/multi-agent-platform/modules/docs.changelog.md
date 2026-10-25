@@ -26,3 +26,4 @@
 - 2026-10-23-rename-ghost-pit-doc | 坑11 留痕 rename 幽灵变更根治与清理
 - 2026-10-23-session-first-load-ux | 会话首屏加载提速：补拉链不阻塞渲染+加载骨架屏
 - 2026-10-23-diff-dialog-pairing-fix | 轮文件变更弹窗(turn-file-diff-dialog)在补丁行缺 tool_use_id 时走…
+- 2026-10-25-session-config-deferred-switch | 会话配置点选改暂存随下条消息生效

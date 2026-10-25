@@ -965,3 +965,136 @@ created_at: 2026-10-15T16:16:15.707Z
   confirmed_at: null
   source_change: 2026-10-23-diff-dialog-pairing-fix
   status: active
+
+## FR-docs-058 空闲点选仅前端记住不发请求
+变更：2026-10-25-session-config-deferred-switch
+状态：active
+摘要：空闲点选供应商；空闲点选思考级别
+全文：.sillyspec/changes/archive/2026-10-25-session-config-deferred-switch/requirements.md#FR-01
+最近确认：61ea24349aaa56a7af93a756ac36927b21b167b4
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-25-session-config-deferred-switch:flow:测试绑定FR-01
+  tests: frontend/src/components/sessions/__tests__/session-config-bar.test.tsx「idle 点选供应商/档案/模型/档位 → 暂存上抛不 inject 无 toast」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-25-session-config-deferred-switch
+  status: active
+
+## FR-docs-059 发送消息时暂存配置随消息生效
+变更：2026-10-25-session-config-deferred-switch
+状态：active
+摘要：暂存后发送；无暂存发送零回归
+全文：.sillyspec/changes/archive/2026-10-25-session-config-deferred-switch/requirements.md#FR-02
+最近确认：61ea24349aaa56a7af93a756ac36927b21b167b4
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-25-session-config-deferred-switch:flow:测试绑定FR-02
+  tests: frontend/src/components/daemon/__tests__/session-panel-variant.test.tsx「发送消息并入暂存配置并清空」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-25-session-config-deferred-switch
+  status: active
+
+## FR-docs-060 选回当前生效值即取消暂存
+变更：2026-10-25-session-config-deferred-switch
+状态：active
+摘要：取消供应商暂存
+全文：.sillyspec/changes/archive/2026-10-25-session-config-deferred-switch/requirements.md#FR-03
+最近确认：61ea24349aaa56a7af93a756ac36927b21b167b4
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-25-session-config-deferred-switch:flow:测试绑定FR-03
+  tests: frontend/src/components/sessions/__tests__/session-config-bar.test.tsx「选回当前生效值 → 取消该字段暂存」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-25-session-config-deferred-switch
+  status: active
+
+## FR-docs-061 运行中点选保持忙轮排队现状
+变更：2026-10-25-session-config-deferred-switch
+状态：active
+摘要：运行中点选供应商
+全文：.sillyspec/changes/archive/2026-10-25-session-config-deferred-switch/requirements.md#FR-04
+最近确认：61ea24349aaa56a7af93a756ac36927b21b167b4
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-25-session-config-deferred-switch:flow:测试绑定FR-04
+  tests: frontend/src/components/sessions/__tests__/session-config-bar.test.tsx「running 点选供应商照常 injectSession 忙轮排队」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-25-session-config-deferred-switch
+  status: active
+
+## FR-docs-062 结束/离线态不可切
+变更：2026-10-25-session-config-deferred-switch
+状态：active
+摘要：会话已结束
+全文：.sillyspec/changes/archive/2026-10-25-session-config-deferred-switch/requirements.md#FR-05
+最近确认：61ea24349aaa56a7af93a756ac36927b21b167b4
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-25-session-config-deferred-switch:flow:测试绑定FR-05
+  tests: frontend/src/components/sessions/__tests__/session-config-bar.test.tsx「ended 全部禁用」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-25-session-config-deferred-switch
+  status: active
+
+## FR-docs-063 发送后时间线显示配置切换说明行（D-001）
+变更：2026-10-25-session-config-deferred-switch
+状态：active
+摘要：暂存模型后发送；无配置变化不显示
+全文：.sillyspec/changes/archive/2026-10-25-session-config-deferred-switch/requirements.md#FR-06
+最近确认：61ea24349aaa56a7af93a756ac36927b21b167b4
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-25-session-config-deferred-switch:flow:测试绑定FR-06
+  tests: frontend/src/components/daemon/__tests__/page-helpers-config-change-line.test.ts
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-25-session-config-deferred-switch
+  status: active
+
+## FR-docs-064 单测覆盖暂存与切换行行为
+变更：2026-10-25-session-config-deferred-switch
+状态：active
+摘要：组件测试更新
+全文：.sillyspec/changes/archive/2026-10-25-session-config-deferred-switch/requirements.md#FR-07
+最近确认：61ea24349aaa56a7af93a756ac36927b21b167b4
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-25-session-config-deferred-switch:flow:测试绑定FR-07
+  tests: frontend/src/components/sessions/__tests__/session-config-bar.test.tsx「暂存模式全量回归」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-25-session-config-deferred-switch
+  status: active
