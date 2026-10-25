@@ -1758,3 +1758,11 @@ supersedes：D-005@v1
 锚点：未记录
 最近确认：0a3e4ee1ab582ce08c68a988d7da3697f3436448
 理由：最大风险：若后续再引入第三类常驻模型 worker 或批量推理峰值再涨，2500m 仍可能触顶——但 cgroup OOM 兜底行为不变（杀 worker 保主进程），且宿主 7.5G 对 2500m 上限仍有 3G+ 安全边际，风险可控。放弃的方案：①worker 拆独立 sidecar 容器（治本但改部署管线与进程拓扑，改动面大，超出本次决策范围）；②调小嵌入/翻译批上限（治标：压峰不治底，主进程+单 worker 稳态仍贴 1100m 顶，且推理延迟恶化）；③不设 mem_limit（失去 OOM 隔离，宿主与其它容器暴露在被挤爆风险下）。
+
+## D-unmapped-226@v1 设计期风险与放弃方案（底稿）
+状态：implemented
+变更：2026-10-24-trajectory-context-rows
+原编号：D-001@v1
+锚点：未记录
+最近确认：b1d1ed8ee47ffcd26dba1175753a470e3caf08e9
+理由：风险：turn_trigger 含「用户亲笔来源标注」类（shadow_chat/group_chat/schedule，contentHidden=false）——它们也显示为「上下文」行。接受：dsh 同款形态（触发源即 context 行），且行摘要有原文，用户可辨识；如需区分可后续按 trigger 字段细分。放弃的方案：继续用 processItems.system_event 作数据源——DB 实证该路径近乎恒空，修不动；为注入信息新增后端 channel——跨端大改，本平台注入已有 turn_trigger 承载，无需新通道。

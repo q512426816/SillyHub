@@ -1,0 +1,23 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-24-trajectory-context-rows",
+  "reviewer": "subagent",
+  "verdict": "PASS",
+  "reviewedAgainst": "b1d1ed8ee47ffcd26dba1175753a470e3caf08e9",
+  "findings": [
+    {
+      "severity": "P3",
+      "status": "accepted",
+      "title": "披露边界裁决：用户亲笔来源类 turn_trigger（shadow_chat/group_chat/schedule）也显示为「上下文」行——接受，附措辞偏差备注",
+      "evidence": "design 风险段显式披露并接受该形态，代码实态与披露一致：rowKindOf（from-turn-views.ts:80-81）与 meta 构造（from-turn-views.ts:214）对五种 TurnTriggerKind（session-log-assembler.ts:2187-2192：task_wakeup/auto_resume/shadow_chat/group_chat/schedule）一律映射 system + contextEvent，无 trigger 细分。可辨识性成立：亲笔源（contentHidden=false）正文照常进轮 prompt 行（TURN_TRIGGER_META 注释 session-log-assembler.ts:2197-2199），turn_trigger 段 text 为前导头来源标注（session-log-assembler.ts:691 字段注释「来源标注源=前导头」），上下文行标来源、不吞正文，dsh 同款形态理由成立。附注：design 措辞「行摘要有原文，用户可辨识」对亲笔源实态是上下文行摘要=前导头来源标注（亲笔原文在 prompt 行而非上下文行），措辞与实态有轻微偏差，不影响裁决方向。",
+      "location": "frontend/src/components/daemon/trajectory/from-turn-views.ts:80"
+    }
+  ],
+  "dimensionNotes": {
+    "乱序": "排序稳定：turnRows.sort 按 startedAt 升序 + id.localeCompare 平局决胜（from-turn-views.ts:251），锚点来源变化只影响位置、不改排序算法，design 盲维 1 声明属实。既有段锚点语义核查（FR-02「禁止改变 thinking/tool 既有锚点语义」）：TurnSegment 类型字段互斥——thinking 只有 ts 无 startedAt、tool/text 只有 startedAt 无 ts（session-log-assembler.ts:498-563），新 segmentStart「先 startedAt 再 ts」（from-turn-views.ts:94-99）对 thinking/tool/text 与旧逻辑类型层面等价。stderr/preamble/compact/compact_status/file 等 ts 系段锚点由挤轮首变为真实 ts，属 FR-02「等 ts 系段」措辞涵盖的预期扩面（语义更真实），非回归。ts 缺失防护真实生效：segmentStart 返回 null 时 startedAt = start ?? turnStart（from-turn-views.ts:158-160，turnStart 来自 turnStartedAt/首段锚点等真实数据），整轮无锚点直接跳过不伪造 now()/0（from-turn-views.ts:136-137）。user_msg 防护真实生效：contextEvent 仅对 segment.kind===\"turn_trigger\" 置位（from-turn-views.ts:214），渲染标签双条件 kind===\"system\" && meta?.contextEvent（trajectory-view-model.ts:112），测试断言 um.meta?.contextEvent 为 undefined。",
+    "并发": "纯函数派生：trajectoryFromTurnViews 无模块级可变状态、零网络请求、零副作用，design 盲维 2「无并发写面」声明属实。",
+    "切换": "无新增状态：上下文行是随 turns 输入幂等重算的派生产物，中断/刷新后重放结果一致，design 盲维 3 声明属实。",
+    "作用域": "段与 processItems 均来自当前会话轮视图入参（SessionTurnView[]），无跨会话/跨仓/多实例读取面，design 盲维 4 声明属实。生成物同步核查：change.patch 仅触及前端派生逻辑与测试 2 文件，无后端 schema/API/DTO 变更，无需 pnpm gen:types（前端与 daemon 两义务面均不触发）。核验记录：change.patch 冻结件与 HEAD 实态一致（git apply --check --reverse 通过 + befc4436a..HEAD 该目录零改动）；from-turn-views.test.ts 复跑 15 passed（含 FR-01/FR-02 新增 2 用例与既有 system_event 用例零回归）；trajectory-redesign.test.tsx 抽验 13 passed；pnpm exec tsc --noEmit 退出 0（FR-03 承诺兑现）。"
+  },
+  "reviewedAt": "2026-10-25T08:25:32+08:00"
+}

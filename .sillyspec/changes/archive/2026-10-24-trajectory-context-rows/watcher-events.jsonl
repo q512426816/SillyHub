@@ -1,0 +1,12 @@
+{"ts":1792858138871,"kind":"file-update","stage":"requirements","detail":"requirements.md 内容变更","provisional":true}
+{"ts":1792858166943,"kind":"file-update","stage":"design","detail":"design.md 内容变更","provisional":true}
+{"ts":1792858181048,"kind":"file-update","stage":"tasks","detail":"tasks.md 内容变更","provisional":true}
+{"ts":1792859382817,"kind":"warning","stage":null,"rule":"stall","severity":"warning","detail":"brainstorm/plan 期已 20 分钟无事件——停滞嫌疑（区分在想/死了，人判）","provisional":true}
+{"ts":1792887532208,"kind":"file-update","stage":"tasks","detail":"tasks.md 内容变更","provisional":true}
+{"ts":1792887532208,"kind":"task-done","stage":"tasks","detail":"checked 0→1","provisional":true}
+{"ts":1792887539464,"kind":"commit","stage":null,"detail":"befc4436a","provisional":true}
+{"ts":1792887543044,"kind":"file-update","stage":"tasks","detail":"tasks.md 内容变更","provisional":true}
+{"ts":1792887543044,"kind":"task-done","stage":"tasks","detail":"checked 1→2","provisional":true}
+{"ts":1792887546732,"kind":"commit","stage":null,"detail":"b1d1ed8ee","provisional":true}
+{"ts":1792887594651,"kind":"warning","stage":null,"rule":"scope-drift","severity":"warning","detail":"声明面之外的代码文件被改：sillyspec/changes/2026-10-24-trajectory-context-rows/flow-state.yaml——范围漂移嫌疑（并行会话改动/越界，人判）","provisional":true}
+{"ts":1792887628535,"kind":"gate-run","stage":"verify","detail":"门实测 passed（3.0s） · 20261025002026","provisional":true}

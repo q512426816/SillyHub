@@ -7747,3 +7747,67 @@ superseded_by：FR-app-workspace-pages-002
   confirmed_at: null
   source_change: 2026-10-23-marquee-blank-track-fix
   status: active
+
+## FR-frontend-061 turn_trigger 段在轨迹账本显示为「上下文」类型行（kind=system + meta.contextEvent），摘要为段 text，锚点取段 ts（缺失用轮首，不伪造）
+变更：2026-10-24-trajectory-context-rows
+状态：active
+摘要：主路径；零回归
+场景正文：
+- 场景：主路径 — Given 一轮含 `turn_trigger` 段（trigger=task_wakeup，text="[后台任务通知] 任务完成"，ts=轮中段）；When 打开轨迹；
+- 场景：零回归 — Given 一轮不含 turn_trigger 段；When 派生；Then 行集合与改动前一致（user_msg 仍为「用户」行）。
+全文：.sillyspec/changes/archive/2026-10-24-trajectory-context-rows/requirements.md#FR-01
+最近确认：b1d1ed8ee47ffcd26dba1175753a470e3caf08e9
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-24-trajectory-context-rows:flow:测试绑定FR-01
+  tests: frontend/src/components/daemon/trajectory/__tests__/from-turn-views.test.ts
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-24-trajectory-context-rows
+  status: active
+
+## FR-frontend-062 段锚点统一「先 startedAt 再 ts」读取
+变更：2026-10-24-trajectory-context-rows
+状态：active
+摘要：主路径
+场景正文：
+- 场景：主路径 — Given user_msg 段 ts=轮中段时刻；When 派生；Then 该行 startedAt=ts（不再挤在轮首）。
+全文：.sillyspec/changes/archive/2026-10-24-trajectory-context-rows/requirements.md#FR-02
+最近确认：b1d1ed8ee47ffcd26dba1175753a470e3caf08e9
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-24-trajectory-context-rows:flow:测试绑定FR-02
+  tests: frontend/src/components/daemon/trajectory/__tests__/from-turn-views.test.ts
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-24-trajectory-context-rows
+  status: active
+
+## FR-frontend-063 processItems.system_event 派生保留（回放路径零回归）
+变更：2026-10-24-trajectory-context-rows
+状态：active
+摘要：主路径
+场景正文：
+- 场景：主路径 — Given 变更落盘；When 跑轨迹目录测试与 tsc；Then 全部通过。
+全文：.sillyspec/changes/archive/2026-10-24-trajectory-context-rows/requirements.md#FR-03
+最近确认：b1d1ed8ee47ffcd26dba1175753a470e3caf08e9
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-24-trajectory-context-rows:flow:测试绑定FR-03
+  tests: frontend/src/components/daemon/trajectory/__tests__/from-turn-views.test.ts
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-24-trajectory-context-rows
+  status: active

@@ -150,3 +150,4 @@ created_at: 2026-08-30 22:23:33
 | 2026-10-23 | 2026-10-23-knowledge-scope-maintenance | 知识注入作用域维护面板 |
 | 2026-10-23 | 2026-10-24-pi-edit-patch-synth | pi 会话的文件变更卡弹窗永远显示无补丁(pi-events.ts 设计期把 edit_patch … |
 | 2026-10-24 | 2026-10-22-trajectory-context-jump | 轨迹视图两处体验缺口（对照 dsh）：1) processItems 里的 system_event… |
+| 2026-10-25 | 2026-10-24-trajectory-context-rows | 上一变更（2026-10-22-trajectory-context-jump）接错了数据源：pro… |
