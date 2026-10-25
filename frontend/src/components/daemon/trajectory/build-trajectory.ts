@@ -71,8 +71,9 @@ export interface TrajectoryRow {
      *  （账本标签显示「上下文」）。 */
     contextEvent?: boolean;
     /** 2026-10-25-trajectory-source-model：配置面请求头快照行（账本标签
-     *  「系统」，四态文案 initial/system/tools/system-and-tools）。 */
-    headerChange?: "initial" | "system" | "tools" | "system-and-tools";
+     *  「系统」，五态文案 initial/system/tools/system-and-tools/unchanged——
+     *  unchanged 为 daemon 重复上报的防御态，不误报首次）。 */
+    headerChange?: "initial" | "system" | "tools" | "system-and-tools" | "unchanged";
   };
 }
 

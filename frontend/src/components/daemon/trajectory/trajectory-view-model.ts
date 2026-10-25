@@ -115,7 +115,7 @@ function recordKindLabel(row: TrajectoryRow): string {
   return KIND_LABEL[row.kind] ?? row.kind;
 }
 
-/** 请求头快照行文案（dsh 口径四态；配置面快照，非引擎全文——D-002）。 */
+/** 请求头快照行文案（dsh 口径四态 + unchanged 防御态；配置面快照，非引擎全文——D-002）。 */
 const HEADER_CHANGE_SUMMARY: Record<
   NonNullable<TrajectoryRow["meta"]>["headerChange"] & string,
   string
@@ -124,6 +124,7 @@ const HEADER_CHANGE_SUMMARY: Record<
   system: "系统提示词已更新（配置面）",
   tools: "工具已更新",
   "system-and-tools": "系统提示词与工具已更新（配置面）",
+  unchanged: "配置快照（无变化）",
 };
 
 function recordSummary(row: TrajectoryRow): string {

@@ -371,11 +371,11 @@ describe("请求头快照段派生系统行（2026-10-25-trajectory-source-model
     }
   });
 
-  it("prev 相同（daemon 重复上报 initial）→ diff 仍按 prev 判（不误报初始）", () => {
+  it("prev 相同（daemon 重复上报 initial）→ 如实标无变化（不误报初始，评审 P2 修复）", () => {
     const traj = trajectoryFromTurnViews([
       makeTurn({ segments: seg(headerSeg(H1, H1, START + 1_000) as never) }),
     ]);
     const headerRow = traj.rows.find((row) => row.meta?.headerChange);
-    expect(headerRow!.meta!.headerChange).toBe("initial");
+    expect(headerRow!.meta!.headerChange).toBe("unchanged");
   });
 });

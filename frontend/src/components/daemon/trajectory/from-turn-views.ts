@@ -116,7 +116,7 @@ function segmentEnd(segment: TurnSegment, start: number): number {
 export function classifyHeaderChange(
   header: { systemPrompt: string | null; allowedTools: string[]; mcpServers: string[] },
   prev: { systemPrompt: string | null; allowedTools: string[]; mcpServers: string[] } | null,
-): "initial" | "system" | "tools" | "system-and-tools" {
+): "initial" | "system" | "tools" | "system-and-tools" | "unchanged" {
   if (prev == null) return "initial";
   const systemChanged = (header.systemPrompt ?? null) !== (prev.systemPrompt ?? null);
   const toolsChanged =
@@ -125,7 +125,10 @@ export function classifyHeaderChange(
   if (systemChanged && toolsChanged) return "system-and-tools";
   if (systemChanged) return "system";
   if (toolsChanged) return "tools";
-  return "initial";
+  // Grill 裁定（评审 P2 修复）：prev 存在且全等 → daemon 重复上报（重启后
+  // 缓存丢失报 initial 但 prev 链在场）——不误报「初始系统提示词」，如实标
+  // 「无变化」。daemon 侧 decideHeaderReport 已保证同值不重发，此分支是防御。
+  return "unchanged";
 }
 
 /**

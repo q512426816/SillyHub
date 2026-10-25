@@ -1,0 +1,51 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-25-trajectory-source-model",
+  "reviewer": "subagent",
+  "verdict": "PASS",
+  "reviewedAgainst": "69985ca9d964fec611afffcbb49211e4bfd758b3",
+  "findings": [
+    {
+      "severity": "P2",
+      "status": "open",
+      "title": "Grill P2 裁定「daemon 重启报 initial 但 prev 存在时不误报初始系统提示词」未在实现兑现",
+      "evidence": "classifyHeaderChange 对 prev 非 null 且三字段全等时兜底返回 \"initial\"（from-turn-views.ts:127-130）；decideHeaderReport 在 daemon 重启缓存丢失时报 initial（session-header-snapshot.ts:117 注释明确该场景），配置未变时落库快照与前端 prev 链全等，该行 headerChange=\"initial\" 经 HEADER_CHANGE_SUMMARY 渲染「初始系统提示词」（trajectory-view-model.ts:135-136）——与 design.md:100 接口定义裁定字面冲突。from-turn-views.test.ts:374-380 用例名「不误报初始」与断言 toBe(\"initial\") 自相矛盾，冲突行为被测试锁定。附注：配置已变的重启场景纠偏有效（diff 出 system/tools 态，裁定主体满足）；仅「重启+配置未变」边缘场景违约。若 logsToTurns 装配层对 prev 全等段有过滤则该路径不可达（runtime-session-helpers.tsx:472-490 未见过滤逻辑，直读代码无此分支），本条维持。",
+      "location": "frontend/src/components/daemon/trajectory/from-turn-views.ts:130"
+    },
+    {
+      "severity": "P3",
+      "status": "open",
+      "title": "FR-03 测试绑定第二项落空：turn-timeline-trajectory-view.test.tsx 无 turn_trigger 新 kind 用例",
+      "evidence": "requirements.md:103 绑定 frontend/src/components/daemon/__tests__/turn-timeline-trajectory-view.test.tsx「turn_trigger 新 kind 经既有链路进上下文行」，实态该文件 grep team_brief/worker_dispatch/agent_notice/session_header 计数为 0，无对应用例；链路覆盖实际依赖既有 turn_trigger 用例（from-turn-views.test.ts:269 describe）与 turn-segment-views.test.tsx（patch 内修改 172 行）。绑定声明与实态不符，三新 kind 的端到端链路（盖戳→落库→装配→上下文行）无专门断言，仅靠 TURN_TRIGGER_META 配置表驱动的既有链路泛化保证。",
+      "location": "frontend/src/components/daemon/__tests__/turn-timeline-trajectory-view.test.tsx"
+    },
+    {
+      "severity": "P3",
+      "status": "open",
+      "title": "design 文件清单两处未按图落盘 + 优先级链防回归断言未兑现",
+      "evidence": "design.md:67（session-log-sanitize.ts 加 session_header 分类分支）与 design.md:72（test_inject_first_turn_briefing.py 含优先级断言用例）均不在 change.patch 50 文件清单且实态无对应改动；sanitize 链路依赖既有「未知 channel 原样透传」兜底不受阻（R-05 同款口径，属实现归位调整而非缺陷）。但 design.md:45 承诺「盖戳时断言该轮 task_wakeup/auto_resume_of 为空（测试断言防回归）」未落：test_session_inject_source_stamps.py:58-70 简报用例仅断言 turn_trigger 值，优先级链前级与 team_brief 的组合（task_wakeup>auto_resume>team_brief，inject.py:801-808）无显式断言，未来链序被改坏测试不红。",
+      "location": ".sillyspec/changes/2026-10-25-trajectory-source-model/design.md:45"
+    },
+    {
+      "severity": "P3",
+      "status": "open",
+      "title": "logsToTurns 的 session_header→request_header 段装配无直接测试",
+      "evidence": "frontend 测试面 from-turn-views.test.ts 18 例只覆盖段→轨迹行派生（classifyHeaderChange 四态/prev diff）；runtime-session-helpers.tsx:472-490 的日志行→段装配、prev 链分组前全量扫描穿透 run 边界、轮块流跳过 request_header 段（:699，D-011）均无单测，仅由 tsc 与实现注释保证——上游装配若回归（如 sanitize 改为丢弃未知 channel）测试面不红。",
+      "location": "frontend/src/components/daemon/runtime-session-helpers.tsx:472"
+    },
+    {
+      "severity": "P3",
+      "status": "resolved-as-accepted",
+      "title": "披露边界裁决：reload 内核 spec 无 allowedTools → 快照采集为空数组 → 如实报 change「工具已更新」",
+      "evidence": "reloadWithConfig 采集点（session-manager.ts:2872，headerRunId 直发）所用内核 spec 不含 allowedTools（执行方自述+提交 496589fa6），buildSessionHeaderSnapshot 按原值采集 spec.allowedTools ?? []（session-header-snapshot.ts:75-77），与缓存非空清单不等即报 change。裁决：与 D-002「配置面快照=spec 三数据点原值」口径一致，如实反映当次重建的 spec，不违反「配置面快照」承诺；若 driver 实际工具面继承自旧配置则该「工具已更新」行存在误导性语义噪声，此边界已由执行方显式披露，接受现状。",
+      "location": "sillyhub-daemon/src/interactive/session-manager.ts:2872"
+    }
+  ],
+  "dimensionNotes": {
+    "乱序": "prev 链在 logsToTurns 分组前对 session_header 日志全量扫描按落库序建链（runtime-session-helpers.tsx:472 注释+实现），穿透 run 边界，run 级乱序/SSE 补发与历史回放共用行序不影响链序；headerChange 分类为纯函数无时间源（from-turn-views.test.ts:151 断言两次调用一致）；daemon reason 仅随行携带不参与时序判定。",
+    "并发": "采集/字段比较/缓存更新在 driver 生命周期点同步完成（JS 单线程无竞态窗口，session-manager.ts:1433-1452）；上报 fire-and-forget 双层吞错（onTurnMessage 内部 warn + 同步 try/catch，:1477-1490）绝不反向打断生命周期；连续无 runId 采集 pending 后写胜出（:457 注释）语义明确；上报失败仅丢一条日志行，下一变更点仍会报，无状态损坏。",
+    "切换": "terminate 双 Map 清缓存（lifecycle.ts:258-259 _headerSnapshotBySession/_pendingHeaderReport delete）；restoreAndReconnect 无 runId 采集暂存 pending，首次 inject 补发且 claimToken 已先刷新（session-manager.ts:1459-1463，daemon 测试 :296 锁定）；create 直发（:1295 firstRunId）、reload 直发（:2872 headerRunId）均经 onTurnMessage 桥。",
+    "作用域": "快照缓存为 daemon 进程级 Map 按 sessionId 隔离（session-manager.ts:446-461），盖戳 metadata 按日志行落库无会话级状态，多会话/多实例互不串扰；多 daemon 实例或重启后缓存丢失报 initial 属 D-010 已接受行为，前端 prev diff 纠偏在配置已变场景有效、配置未变场景见 P2 finding。"
+  },
+  "reviewedAt": "2026-10-25T13:00:23+08:00"
+}
