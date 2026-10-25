@@ -168,6 +168,38 @@ export type SessionConfigSwitchField =
   | "llm_provider_id"
   | "model";
 
+/**
+ * 暂存可暂存字段（2026-10-25-session-config-deferred-switch）：四控件统一
+ * 「点选暂存、随下一条消息生效」——inject options 三键 + 思考级别（发送时经
+ * thinking-level 端点生效）。
+ */
+export type SessionConfigStagedField =
+  | SessionConfigSwitchField
+  | "thinking_level";
+
+/**
+ * 受控暂存值（面板持有；键存在 = 该字段有暂存）。值语义同 inject options：
+ * llm_provider_id ""=本机默认、model ""=跟随供应商配置、agent_profile_id
+ * ""=无人格；thinking_level 为七档词表值。
+ */
+export interface SessionConfigStaged {
+  agent_profile_id?: string;
+  llm_provider_id?: string;
+  model?: string;
+  thinking_level?: string;
+}
+
+/** 暂存上抛 patch（组件点选 → 面板合并；cancel=true 表示取消该字段暂存）。 */
+export interface SessionConfigStagedPatch {
+  field: SessionConfigStagedField;
+  /** 目标值（语义同 SessionConfigStaged 各键）。 */
+  value: string;
+  /** 目标展示名（toast 用）。 */
+  label: string;
+  /** 选回当前生效值 → 取消该字段暂存（组件持当前值判定，面板纯执行）。 */
+  cancel?: boolean;
+}
+
 /** 切换目标（选中下拉项直接执行，ql-20260817-009 去掉确认行）。 */
 interface PendingSwitch {
   field: SessionConfigSwitchField;
@@ -264,6 +296,22 @@ export interface SessionConfigBarProps {
    * 防 flex-wrap 在窄视口挤成三行；desktop 默认不传零变化。
    */
   variant?: "desktop" | "mobile";
+  /**
+   * 2026-10-25-session-config-deferred-switch：受控暂存值（面板持有，键存在 =
+   * 该字段有暂存）。传入后控件显示优先暂存值并带「待生效」标识；与
+   * onStagedSwitch 成对使用（仅 staged 不上抛 = 只读展示暂存）。
+   */
+  staged?: SessionConfigStaged;
+  /**
+   * 2026-10-25-session-config-deferred-switch：空闲暂存模式上抛回调（与面板
+   * 暂存 state 成对传入）。挂载后**空闲态**点选四控件不再立即请求后端（不再
+   * 产生空切换轮），改为上抛 patch 由面板暂存、随用户下一条消息一并生效；
+   * 选回当前生效值 → patch.cancel=true（取消该字段暂存）。**运行中点选不受
+   * 影响**（仍走 injectSession 忙轮排队——本轮结束后生效，后端不建切换轮）；
+   * provisional 暂存模式不受影响（自有 onProvisional* 通道）。未传保持旧行为
+   * （点选即切换），存量调用面零回归。
+   */
+  onStagedSwitch?: (_patch: SessionConfigStagedPatch) => void;
 }
 
 /* ────────────────────── 纯辅助（组件外便于单测推理） ────────────────────── */
@@ -375,6 +423,8 @@ export function SessionConfigBar({
   trailing,
   providerOpenSignal = 0,
   variant = "desktop",
+  staged,
+  onStagedSwitch,
 }: SessionConfigBarProps) {
   const mobile = variant === "mobile";
   // task-10：档案下拉共享智能体标识（对照 active 生效列表）。
@@ -535,9 +585,14 @@ export function SessionConfigBar({
    * （快照直显免二次解析，Grill C-12；空=「默认」）。
    */
   const [provisionalModel, setProvisionalModel] = useState("");
+  // 2026-10-25-session-config-deferred-switch：会话态模型显示优先受控暂存值
+  // （键存在 = 面板侧已归一为真暂存，值 ≠ 当前生效值）。
+  const stagedModel = staged?.model;
   const currentModel = provisional
     ? provisionalModel
-    : (configSnapshot?.model ?? "");
+    : stagedModel !== undefined
+      ? stagedModel
+      : (configSnapshot?.model ?? "");
 
   /**
    * 快照模型可能已不在候选集（供应商高级设置后续改过）→ 追加到尾部兜底，
@@ -586,6 +641,24 @@ export function SessionConfigBar({
   // 就是事实上的当前档，不再显示「现值未知」占位（UX 反馈：占位项长且灰
   // 显得像 bug；claude/codex SDK 不暴露现值恒 null 属常态非异常）。
   const currentThinkingLevel = thinkingLevelsQ.data?.current ?? "off";
+
+  // ── 2026-10-25-session-config-deferred-switch：空闲暂存模式 ────────────────
+  // onStagedSwitch 挂载且非 provisional 时启用：空闲点选四控件仅上抛暂存
+  // （不 inject/不 POST，不产生切换轮），随面板下一条消息一并生效；运行中
+  // 点选仍走原 injectSession 忙轮排队（后端不建切换轮，行为不变）。
+  const stagedMode = !provisional && onStagedSwitch != null;
+  const stagedThinkingLevel = staged?.thinking_level;
+  /**
+   * 各字段当前生效值口径（选回即取消暂存的判定基准；空串 = 该字段「默认」态）：
+   * provider null=本机默认、profile null=未指定、model 快照空=跟随配置、
+   * thinking 现值回退 off（与控件显示回退链同源）。
+   */
+  const effectiveValues: Record<SessionConfigStagedField, string> = {
+    llm_provider_id: llmProviderId ?? "",
+    agent_profile_id: agentProfileId ?? "",
+    model: configSnapshot?.model ?? "",
+    thinking_level: currentThinkingLevel || THINKING_LEVEL_OFF_VALUE,
+  };
   const sessionLevelOptions = useMemo(() => {
     const levels = thinkingLevelsQ.data?.levels ?? [];
     // 现值不在动态列表（引擎返回了列表外的现值）→ 追加兜底（照 modelOptions
@@ -645,7 +718,7 @@ export function SessionConfigBar({
     !canSwitch || (!provisional && (thinkingLevel?.disabled ?? false));
   const thinkingCtrlValue = provisional
     ? provisionalThinkingDisplay
-    : (currentThinkingLevel || "");
+    : (stagedThinkingLevel ?? (currentThinkingLevel || ""));
   const thinkingMenuItems: MenuProps["items"] = (
     provisional
       ? THINKING_LEVEL_OPTIONS.map((o) => o.value)
@@ -669,33 +742,62 @@ export function SessionConfigBar({
     if (provisional) {
       setProvisionalThinkingLevel(v);
       onProvisionalThinkingLevelSwitch?.(v);
+    } else if (stagedMode && !running) {
+      // 2026-10-25-session-config-deferred-switch：会话态暂存模式（仅空闲——
+      // running 保持 POST 忙轮排队现状，对齐供应商/模型/档案同款分流）——点选
+      // 仅上抛暂存（不 POST setSessionThinkingLevel，不即时改引擎档位），随面板
+      // 下一条消息发送时先调端点生效；选回当前档 = 取消暂存。D-001：静默（控件
+      // 值变化即反馈，不弹 toast），切换结果由发送后的时间线切换信息行呈现。
+      const cancel = effectiveValues.thinking_level === v;
+      onStagedSwitch({
+        field: "thinking_level",
+        value: v,
+        label: thinkingLevelLabel(v),
+        cancel: cancel || undefined,
+      });
     } else {
       void handleThinkingLevelSwitch(v);
     }
   };
 
   // 当前值展示（快照直显免二次解析，Grill C-12；id 兜底防列表缺行）。
-  const profileLabel = agentProfileId
-    ? profiles.find((p) => p.id === agentProfileId)?.name ??
-      configSnapshot?.profile_name ??
-      agentProfileId
-    : // provisional（将创建）未选 → 预示用户默认档案（创建时注入）；非
-      // provisional 保持「未指定」真值——默认只在创建时注入，存量会话不追溯
-      //（2026-10-21-profile-default-prehint）。
-      provisional
-      ? (profiles.find((p) => p.is_user_default)?.name ?? "未指定")
-      : "未指定";
-  const providerLabel = llmProviderId
-    ? providers.find((p) => p.id === llmProviderId)?.name ??
-      configSnapshot?.provider_name ??
-      llmProviderId
-    : // 未显式选 → 用户默认供应商名（claim 链实际注入它）；无默认回落本机默认
-      //（2026-10-21-provider-default-ui-hint，与下拉兜底项同源）。
-      providers.find((p) => p.is_default)?.name ?? "本机默认";
+  // 2026-10-25：受控暂存存在时控件显示暂存值（待生效）优先于会话真值。
+  const stagedProfileId = staged?.agent_profile_id;
+  const stagedProviderId = staged?.llm_provider_id;
+  const profileLabel =
+    stagedProfileId !== undefined
+      ? stagedProfileId === ""
+        ? "未指定"
+        : (profiles.find((p) => p.id === stagedProfileId)?.name ?? stagedProfileId)
+      : agentProfileId
+        ? profiles.find((p) => p.id === agentProfileId)?.name ??
+          configSnapshot?.profile_name ??
+          agentProfileId
+        : // provisional（将创建）未选 → 预示用户默认档案（创建时注入）；非
+          // provisional 保持「未指定」真值——默认只在创建时注入，存量会话不追溯
+          //（2026-10-21-profile-default-prehint）。
+          provisional
+          ? (profiles.find((p) => p.is_user_default)?.name ?? "未指定")
+          : "未指定";
+  const providerLabel =
+    stagedProviderId !== undefined
+      ? stagedProviderId === ""
+        ? noProviderFallbackLabel
+        : (providers.find((p) => p.id === stagedProviderId)?.name ?? stagedProviderId)
+      : llmProviderId
+        ? providers.find((p) => p.id === llmProviderId)?.name ??
+          configSnapshot?.provider_name ??
+          llmProviderId
+        : // 未显式选 → 用户默认供应商名（claim 链实际注入它）；无默认回落本机默认
+          //（2026-10-21-provider-default-ui-hint，与下拉兜底项同源）。
+          providers.find((p) => p.is_default)?.name ?? "本机默认";
 
   /** ql-20260817-010：点选即**静默**切换——prompt 发空串（后端静默切换契约：
    * 有切换字段允许空 prompt；daemon 收到空 prompt 只 reload 配置不喂消息，
-   * 切换轮无用户消息/模型回应）。switchPrompt 传入时仍作为切换轮消息发出。 */
+   * 切换轮无用户消息/模型回应）。switchPrompt 传入时仍作为切换轮消息发出。
+   * 2026-10-25-session-config-deferred-switch：空闲暂存模式（stagedMode 且非
+   * running）点选改为仅上抛暂存——不再发请求建空切换轮，随面板下一条消息一并
+   * 生效；运行中不走本分支（忙轮排队原语义）。 */
   const executeSwitch = async (p: PendingSwitch) => {
     if (submitting) return;
     const what = switchFieldWhat(p.field);
@@ -703,6 +805,25 @@ export function SessionConfigBar({
       p.field === "llm_provider_id" && p.value === SWITCH_NO_PROVIDER_VALUE
         ? "本机默认"
         : p.label;
+    if (stagedMode && !running) {
+      setOpenKind(null);
+      const cancel = effectiveValues[p.field] === p.value;
+      // 暂存供应商（非取消）级联重置模型暂存——候选随供应商变，旧模型对新供应
+      // 商无意义；值 "" 经面板归一（与生效模型一致即清字段），生效模型非空时
+      // 「模型 → 默认」是真实生效变化（对齐旧「切供应商 inject 带 model:""」语义）。
+      if (p.field === "llm_provider_id" && !cancel) {
+        onStagedSwitch({ field: "model", value: SWITCH_MODEL_DEFAULT_VALUE, label: "默认" });
+      }
+      onStagedSwitch({
+        field: p.field,
+        value: p.value,
+        label: p.label,
+        cancel: cancel || undefined,
+      });
+      // D-001（用户定调）：暂存静默——控件值变化即反馈，不弹 toast、不渲染
+      // 「待生效」标记；切换结果由发送成功后的时间线切换信息行呈现。
+      return;
+    }
     // ql-20260823-008：预会话暂存——不 inject（无会话），值随首句 createSession 生效。
     if (provisional) {
       setOpenKind(null);

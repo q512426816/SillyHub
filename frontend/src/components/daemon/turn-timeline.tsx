@@ -369,7 +369,22 @@ export interface SessionTurnView {
     agentName: string;
     /** 供应商名；null=该轮用本机默认供应商。 */
     providerName: string | null;
+    /**
+     * 2026-10-25-session-config-deferred-switch：该轮档案快照的模型名（run
+     * 级快照 agent_profile_snapshot.model）。null=档案未配模型（跟随引擎默认）。
+     * 注意这是**档案级**模型——会话级模型覆盖（模型子下拉）不落 run 快照，
+     * 轮级不可得，configChangeLine 的实时路（发送方前端权威）不受此限。
+     */
+    modelName?: string | null;
   };
+  /**
+   * 2026-10-25-session-config-deferred-switch：该轮相对上一轮的配置切换说明
+   * （如「模型已切换 A → B」；page-helpers.buildConfigChangeLine 生成——实时路
+   * 由发送方在占位轮预置（含会话级模型覆盖维度），历史路由 enrichDisplayTurns
+   * 相邻快照对比生成（供应商/档案维度））。null/缺省 = 无变化或无前轮快照，
+   * 不渲染（零回归）。
+   */
+  configChangeLine?: string | null;
   /**
    * ql-20260817-003：轮次发送者（共享守护进程场景多用户同会话）。父层从
    * runs 快照（run.user_id + sender_name）注入。可选：不传（/runtimes 弹窗
@@ -902,6 +917,22 @@ const TurnRow = memo(function TurnRow({
                     isHighlighted && "rounded-md ring-2 ring-brand-200 bg-brand-50",
                   )}
                 >
+              {/* 2026-10-25-session-config-deferred-switch（D-001）：配置切换说明行
+                  ——本轮相对上一轮生效配置有变化时（供应商/模型/档案），轮块顶部
+                  独占一行轻量提示（形态对齐 system_event 药丸：居中虚线圆角 +
+                  muted 小字），替代旧「空切换轮」的轮次占位。缺省/无变化不渲染。 */}
+              {turn.configChangeLine && (
+                <div className="flex justify-center">
+                  <div
+                    data-testid="turn-config-change"
+                    title={turn.configChangeLine}
+                    className="flex min-w-0 max-w-full items-center gap-1.5 rounded-full border border-dashed border-border bg-card px-3 py-[3px] text-[11px] text-muted-foreground"
+                  >
+                    <span aria-hidden className="shrink-0">⇄</span>
+                    <span className="min-w-0 truncate">{turn.configChangeLine}</span>
+                  </div>
+                </div>
+              )}
               {/* 回带④（2026-09-20 双实现对撞深读裁决）：系统事件双视图可见——对话视图
                   也渲染 system_event 过程项（同「全部」视图的中性虚线药丸形态，从
                   processItems 提取；不冒充用户气泡、不带假运行语义，D-003 同源）。

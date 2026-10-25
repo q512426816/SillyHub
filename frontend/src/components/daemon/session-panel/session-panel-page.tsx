@@ -60,6 +60,7 @@ import { QUEUE_MAX_PENDING, useMessageQueue } from "@/hooks/use-message-queue";
 import { CtxUsageBar } from "@/components/sessions/ctx-usage-bar";
 import {
   SessionConfigBar, useActiveSharedAgents,
+  type SessionConfigStaged, type SessionConfigStagedPatch,
 } from "@/components/sessions/session-config-bar";
 import { SubagentCatalog } from "@/components/sessions/subagent-catalog";
 // task-03（2026-09-15-subagent-three-pane-display / FR-03 / FR-05 / design §5.B §5.E）：
@@ -116,7 +117,7 @@ import { getQuicklogDetail } from "@/lib/quicklog";
 // task-03（2026-09-27-session-fast-replay / FR-04 FR-05）：fetchSessionTurnOutline
 // 打开链路并行拉取全量轮次大纲（导航骨架 + 未加载轮 run_id 直达跳转）。
 import {
-  ScheduledMessageRead, cancelTeamMission, compactSession, createScheduledMessage, createSession, fetchPendingDialogs, fetchSessionDialogHistory, fetchSessionTurnOutline, getAgentSession, getAgentSessionLogs, getSessionRunLogs, probeSessionLogBefore, injectSession, interruptSession, listDaemonMachines, resetToolReportSession, takeoverSession, listSessionRuns, maxLogTimestamp, reopenSession, streamSession, triggerSessionTeamMission, type PlanSummary, type SessionCreateTeamMission, type SessionDialogRead, type SessionPermissionRequest, type SessionRunRead, type SessionStreamConnection, type SessionTurnOutlineRead, type TeamMissionTriggerRequest, updateSessionAutoResume, updateSessionCtxWindow,
+  ScheduledMessageRead, cancelTeamMission, compactSession, createScheduledMessage, createSession, fetchPendingDialogs, fetchSessionDialogHistory, fetchSessionTurnOutline, getAgentSession, getAgentSessionLogs, getSessionRunLogs, probeSessionLogBefore, injectSession, interruptSession, listDaemonMachines, resetToolReportSession, setSessionThinkingLevel, takeoverSession, listSessionRuns, maxLogTimestamp, reopenSession, streamSession, triggerSessionTeamMission, type PlanSummary, type SessionCreateTeamMission, type SessionDialogRead, type SessionInjectOptions, type SessionPermissionRequest, type SessionRunRead, type SessionStreamConnection, type SessionTurnOutlineRead, type TeamMissionTriggerRequest, updateSessionAutoResume, updateSessionCtxWindow,
 } from "@/lib/daemon";
 import { getProviderCaps, PROVIDER_SWITCH_ENGINES } from "@/lib/provider-caps";
 import { cn } from "@/lib/utils";
@@ -157,6 +158,7 @@ import { applyAgentTaskStatusEvent } from "../agent-task-store";
 import { buildSubagentTaskLookup, useSessionTasks } from "@/hooks/use-session-tasks";
 import { SubagentTaskLookupContext } from "../turn-segment-views";
 import {
+  buildConfigChangeLine,
   deriveMachineMeta, derivePreMachineLabels, derivePreSessionChrome,
   deriveSessionPlaceholder, deriveSessionStatusFlags, deriveStatusBadge,
   deriveTeamButtonState, deriveTimelineSessionStatus, enrichDisplayTurns,
@@ -1069,6 +1071,135 @@ export function SessionPanelPage({
   // preModelId 同款模式（专用回调收值，首句 createSession 携带；""=未选择/级联
   // 重置清空不传——引擎默认零回归；显式选「默认」off=上送，daemon 按引擎映射）。
   const [preThinkingLevel, setPreThinkingLevel] = useState("");
+  // ── 2026-10-25-session-config-deferred-switch：会话态配置暂存 ──────────────
+  // 空闲点选供应商/模型/档案/思考级别仅暂存于此（不发请求、不产生空切换轮），
+  // 随下一条消息发送时一并生效（sendFromQueue / sendToServerQueue / handleResend
+  // 三点位并入）。键存在 = 该字段有暂存（组件已按当前生效值判定 cancel/归一）。
+  // D-001：暂存静默（控件值变化即反馈）；发送成功后由时间线切换信息行呈现结果。
+  // 不落库：刷新页面即丢（暂存与发送通常秒级相邻，可接受）。
+  const [stagedConfig, setStagedConfig] = useState<SessionConfigStaged>({});
+  // 暂存目标展示名（组件上抛 patch.label；实时切换说明行的「新值」名——面板无
+  // 档案列表查询，档案名只能由组件侧解析上抛）。ref 不参与渲染，发送时读。
+  const stagedLabelRef = useRef<Partial<Record<string, string>>>({});
+  // 会话切换（换会话/关面板）即清空，防跨会话串台。
+  useEffect(() => {
+    setStagedConfig({});
+    stagedLabelRef.current = {};
+  }, [sessionId]);
+  // 暂存合并/取消——组件 cancel flag 决定删除该字段（组件持当前生效值判定），
+  // 非 cancel 直接设值；label 同步进 ref 供实时切换说明取名。
+  const handleStagedSwitch = useCallback((patch: SessionConfigStagedPatch) => {
+    setStagedConfig((prev) => {
+      const next = { ...prev };
+      if (patch.cancel) delete next[patch.field];
+      else next[patch.field] = patch.value;
+      return next;
+    });
+    if (patch.cancel) delete stagedLabelRef.current[patch.field];
+    else stagedLabelRef.current[patch.field] = patch.label;
+  }, []);
+
+  /**
+   * 2026-10-25：暂存并入 inject options。仅暂存非空才返回字段（null = 与现状
+   * 请求形态逐字段一致，零回归）；模型非空必须挂供应商（后端 422 守卫）——
+   * 未显式暂存供应商时带会话当前供应商（空串 = 本机默认），对齐配置条
+   * executeSwitch 的 companion 语义。
+   */
+  const buildStagedInjectOptions = useCallback((): Partial<SessionInjectOptions> | null => {
+    if (Object.keys(stagedConfig).length === 0) return null;
+    const opts: Partial<SessionInjectOptions> = {};
+    if (stagedConfig.llm_provider_id !== undefined)
+      opts.llm_provider_id = stagedConfig.llm_provider_id;
+    if (stagedConfig.agent_profile_id !== undefined)
+      opts.agent_profile_id = stagedConfig.agent_profile_id;
+    if (stagedConfig.model !== undefined) {
+      opts.model = stagedConfig.model;
+      if (stagedConfig.llm_provider_id === undefined)
+        opts.llm_provider_id = session?.llm_provider_id ?? "";
+    }
+    return opts;
+  }, [stagedConfig, session]);
+
+  /**
+   * 2026-10-25：暂存思考级别先调端点（消息 inject 之前——档位先就位，本轮即用
+   * 新档）。失败仅警告不阻塞消息发送；返回 false 时档位暂存保留（下次发送重试）。
+   */
+  const applyStagedThinkingLevel = useCallback(async (): Promise<boolean> => {
+    const level = stagedConfig.thinking_level;
+    if (level === undefined || !sessionId) return true;
+    try {
+      const resp = await setSessionThinkingLevel(sessionId, level);
+      if (resp.ok === false || resp.error) {
+        notify.error(
+          new Error(resp.error ?? "思考级别切换未被受理"),
+          "思考级别切换失败（消息照常发送，档位暂存保留）",
+        );
+        return false;
+      }
+      return true;
+    } catch (err) {
+      notify.error(err, "思考级别切换失败（消息照常发送，档位暂存保留）");
+      return false;
+    }
+  }, [stagedConfig, sessionId, notify]);
+
+  /**
+   * 2026-10-25：发送受理成功后的暂存收敛——清空暂存 + 刷新会话详情（配置条
+   * 回显新生效值）。档位失败时保留档位暂存（其余字段照清）。
+   */
+  const settleStagedAfterSend = useCallback(
+    (thinkingApplied: boolean) => {
+      if (Object.keys(stagedConfig).length === 0) return;
+      setStagedConfig(
+        thinkingApplied ? {} : { thinking_level: stagedConfig.thinking_level },
+      );
+      if (sessionId) {
+        void qc.invalidateQueries({ queryKey: ["agentSessionDetail", sessionId] });
+      }
+    },
+    [stagedConfig, sessionId, qc],
+  );
+
+  /**
+   * 2026-10-25（D-001）：实时切换说明行文案——发送方前端权威（prev = 会话当前
+   * 生效值，next = prev ⊕ 暂存值，含会话级模型覆盖维度——run 快照路无此维）。
+   * 无暂存 / 无会话快照 → null（不预置，历史快照路兜底）。名字解析：供应商走
+   * llmProviders、档案取组件上抛 label（面板无档案列表查询）、模型即值。
+   */
+  const buildStagedChangeLine = useCallback((): string | null => {
+    if (Object.keys(stagedConfig).length === 0 || !session) return null;
+    const prev = {
+      profileName:
+        session.agent_profile_id
+          ? (session.config_snapshot?.profile_name ?? null)
+          : null,
+      providerName: session.llm_provider_id
+        ? (llmProviders.find((p) => p.id === session.llm_provider_id)?.name ?? null)
+        : (llmProviders.find((p) => p.is_default)?.name ?? null),
+      modelName: session.config_snapshot?.model ?? null,
+    };
+    const next = { ...prev };
+    if (stagedConfig.llm_provider_id !== undefined) {
+      next.providerName =
+        stagedConfig.llm_provider_id === ""
+          ? "本机默认"
+          : (llmProviders.find((p) => p.id === stagedConfig.llm_provider_id)?.name ??
+            stagedLabelRef.current.llm_provider_id ??
+            stagedConfig.llm_provider_id);
+    }
+    if (stagedConfig.model !== undefined) {
+      next.modelName =
+        stagedConfig.model === "" ? "默认" : stagedConfig.model;
+    }
+    if (stagedConfig.agent_profile_id !== undefined) {
+      next.profileName =
+        stagedConfig.agent_profile_id === ""
+          ? "未指定"
+          : (stagedLabelRef.current.agent_profile_id ??
+            stagedConfig.agent_profile_id);
+    }
+    return buildConfigChangeLine(prev, next);
+  }, [stagedConfig, session, llmProviders]);
   const [preError, setPreError] = useState<string | null>(null);
   // ── 2026-10-19-shared-agent-onboarding-hint：预会话共享智能体默认选中引导 ──
   // 门控数据：轻量机器查询（limit=1 仅探 total/shared_to_me 有无）。不复用
@@ -3727,6 +3858,11 @@ export function SessionPanelPage({
       // 不投递，此处防御性短路（对齐 dialog 版 ?? "" + status 守卫先例）。
       if (!sessionId) return;
       const placeholderId = `__pending_inject_${Date.now()}__`;
+      // 2026-10-25-session-config-deferred-switch：本次发送携带的暂存配置——
+      // options 并入 inject（仅暂存非空才带字段，空形态与现状一致零回归）；
+      // 切换说明预置占位轮（发送方权威，含会话级模型覆盖维度）。
+      const stagedOpts = buildStagedInjectOptions();
+      const stagedChangeLine = buildStagedChangeLine();
       inflightSendRef.current = { placeholderId, prompt };
       // ql-20260821-002：占位轮合成标记行——与 handleSend 入队侧逐字同构
       // （后端落库标记行同款，真实日志到达后无感接管）；kind/name 查
@@ -3761,11 +3897,18 @@ export function SessionPanelPage({
             // 状态条/思考占位立即生效，SSE run_id 到达后原位接管不重计）。
             segments: [],
             turnStartedAt: Date.now(),
+            // 2026-10-25-session-config-deferred-switch（D-001）：本次发送带暂存
+            // 配置 → 占位轮顶部预置切换说明行（轮块顶部独占一行轻量提示）。
+            ...(stagedChangeLine ? { configChangeLine: stagedChangeLine } : {}),
           },
         ],
       }));
       try {
+        // 暂存思考级别先调端点（档位先就位本轮即用新档；失败警告不阻塞发送）。
+        const thinkingApplied = await applyStagedThinkingLevel();
         const resp = await injectSession(sessionId, prompt, {
+          // 2026-10-25：暂存供应商/模型/档案随本轮消息一并生效（无暂存不多传）。
+          ...(stagedOpts ?? {}),
           // 2026-08-20 task-12：附件引用（空数组不进 body，保持既有 payload 形态）。
           ...(attachmentIds.length > 0 ? { attachment_ids: attachmentIds } : {}),
           // ql-20260825-004：每轮注入携带当前页面上下文（有值才带，零回归）。
@@ -3793,6 +3936,8 @@ export function SessionPanelPage({
           }));
           setErrorMsg(null);
           void qc.invalidateQueries({ queryKey: ["agentSessionQueue", sessionId] });
+          // 受理成功（排队条目后端保存配置字段、派发重放生效）→ 暂存收敛。
+          settleStagedAfterSend(thinkingApplied);
           onSendSettled(prompt, attachmentIds);
           return;
         }
@@ -3811,6 +3956,7 @@ export function SessionPanelPage({
             ),
           }));
           setErrorMsg(null);
+          settleStagedAfterSend(thinkingApplied);
           onSendSettled(prompt, attachmentIds);
           return;
         }
@@ -3821,6 +3967,7 @@ export function SessionPanelPage({
           turns: replacePlaceholderTurn(prev.turns, placeholderId, resp.run_id!, "running"),
         }));
         setErrorMsg(null);
+        settleStagedAfterSend(thinkingApplied);
         onSendSettled(prompt, attachmentIds);
       } catch (err) {
         const apiErr = err as ApiError;
@@ -3846,6 +3993,11 @@ export function SessionPanelPage({
       qc,
       onSendSettled,
       restoreRejectedSend,
+      // 2026-10-25-session-config-deferred-switch：暂存并入链路回调。
+      buildStagedInjectOptions,
+      buildStagedChangeLine,
+      applyStagedThinkingLevel,
+      settleStagedAfterSend,
     ],
   );
 
@@ -3863,8 +4015,15 @@ export function SessionPanelPage({
     //（失败回填用户原文；缺省回落 prompt）。
     async (prompt: string, attachmentIds: string[], rawPrompt: string = prompt) => {
       if (!sessionId) return;
+      // 2026-10-25-session-config-deferred-switch：忙轮排队路径同样并入暂存
+      // （后端排队条目按字段保存配置、派发重放生效——queue.py enqueue 落列）。
+      // 排队消息暂无 runId 关联点，实时切换说明不预置（历史快照路兜底显示）。
+      const stagedOpts = buildStagedInjectOptions();
       try {
+        const thinkingApplied = await applyStagedThinkingLevel();
         const resp = await injectSession(sessionId, prompt, {
+          // 2026-10-25：暂存配置随排队消息生效（无暂存不多传，零回归）。
+          ...(stagedOpts ?? {}),
           ...(attachmentIds.length > 0 ? { attachment_ids: attachmentIds } : {}),
           ...(pageContextOverride ? { page_context: pageContextOverride } : {}),
           // task-05（FR-06 / D-003）：忙轮排队路径同样带绑定字段（后端 binder
@@ -3891,11 +4050,13 @@ export function SessionPanelPage({
             ),
           }));
           setErrorMsg(null);
+          settleStagedAfterSend(thinkingApplied);
           onSendSettled(prompt, attachmentIds);
           return;
         }
         setErrorMsg(null);
         void qc.invalidateQueries({ queryKey: ["agentSessionQueue", sessionId] });
+        settleStagedAfterSend(thinkingApplied);
         onSendSettled(prompt, attachmentIds);
         if (!resp.queued && resp.run_id) {
           // 竞态直发：发送瞬间上一轮终结 → 后端已开新 run（SSE 会建轮）。
@@ -3914,6 +4075,11 @@ export function SessionPanelPage({
       qc,
       onSendSettled,
       restoreRejectedSend,
+      // 2026-10-25-session-config-deferred-switch：暂存并入链路回调（排队路径
+      // 无占位轮不预置切换说明，buildStagedChangeLine 不在本路径依赖）。
+      buildStagedInjectOptions,
+      applyStagedThinkingLevel,
+      settleStagedAfterSend,
     ],
   );
 
@@ -4462,6 +4628,10 @@ export function SessionPanelPage({
       const trimmed = parseAttachmentMarkers(prompt).text.trim();
       if (!trimmed || trimmed.length > MAX_PROMPT_LEN) return;
       const placeholderId = `__pending_inject_${Date.now()}__`;
+      // 2026-10-25-session-config-deferred-switch：重发同主发送——暂存配置随
+      // 重发生效（用户点重发 = 发起一轮，不带会让暂存悬挂到下一次发送）。
+      const stagedOpts = buildStagedInjectOptions();
+      const stagedChangeLine = buildStagedChangeLine();
       setTurnState((prev) => ({
         currentRunId: placeholderId,
         turns: [
@@ -4482,13 +4652,17 @@ export function SessionPanelPage({
             // task-09（FR-02）：同 handleSend——live 锚点 = 本地重发占位时刻。
             segments: [],
             turnStartedAt: Date.now(),
+            // 2026-10-25（D-001）：带暂存时预置切换说明行。
+            ...(stagedChangeLine ? { configChangeLine: stagedChangeLine } : {}),
           },
         ],
       }));
       try {
+        const thinkingApplied = await applyStagedThinkingLevel();
         // task-05（R-7 取舍）：重发不携带 mentions——@ 文本保留在重发原文中
         // 仅作提示，绑定需用户重新选择（草稿恢复同语义，design §3.4）。
-        const resp = await injectSession(sessionId, trimmed);
+        // 2026-10-25：暂存供应商/模型/档案随重发一并生效（无暂存不多传）。
+        const resp = await injectSession(sessionId, trimmed, stagedOpts ?? undefined);
         const runId = resp.run_id;
         if (resp.queued || !runId) {
           // ql-20260825-011：重发瞬间已被占用（竞态）→ 撤占位轮转服务端排队。
@@ -4498,6 +4672,7 @@ export function SessionPanelPage({
           }));
           setErrorMsg(null);
           void qc.invalidateQueries({ queryKey: ["agentSessionQueue", sessionId] });
+          settleStagedAfterSend(thinkingApplied);
           return;
         }
         // task-07（FR-01 / FR-05）→ ql-20260920-006：重发竞态引导——上一轮尚未
@@ -4513,6 +4688,7 @@ export function SessionPanelPage({
             ),
           }));
           setErrorMsg(null);
+          settleStagedAfterSend(thinkingApplied);
           return;
         }
         setTurnState((prev) => ({
@@ -4524,6 +4700,7 @@ export function SessionPanelPage({
           ),
         }));
         setErrorMsg(null);
+        settleStagedAfterSend(thinkingApplied);
       } catch (err) {
         const apiErr = err as ApiError;
         setTurnState((prev) => ({
@@ -4534,7 +4711,18 @@ export function SessionPanelPage({
       }
     },
     // qc 为 useQueryClient 稳定实例，补入 deps 消除 exhaustive-deps 告警（行为不变）。
-    [session, machineOnline, turnState.currentRunId, sessionId, qc],
+    // 2026-10-25-session-config-deferred-switch：暂存并入链路回调同补。
+    [
+      session,
+      machineOnline,
+      turnState.currentRunId,
+      sessionId,
+      qc,
+      buildStagedInjectOptions,
+      buildStagedChangeLine,
+      applyStagedThinkingLevel,
+      settleStagedAfterSend,
+    ],
   );
 
   // ql-20260903-026：行级 memo props 稳定化——内联箭头每次渲染新引用会击穿
@@ -6112,6 +6300,11 @@ export function SessionPanelPage({
             configSnapshot={session.config_snapshot ?? null}
             engine={session.provider ?? null}
             variant={variant}
+            // 2026-10-25-session-config-deferred-switch（D-001）：空闲点选四控件
+            // 仅暂存（不 inject 不建空切换轮），随下一条消息发送一并生效；控件
+            // 直接显示暂存值（无「待生效」标记，静默记住）。
+            staged={stagedConfig}
+            onStagedSwitch={handleStagedSwitch}
             // 2026-10-22-session-composer-slim FR-02：中断自动续跑入口已迁至
             // 输入区 + 菜单（见上方 SessionInputBar.autoResume），配置条不再渲染。
             // ql-20260904-010：错误卡「切换供应商」定位到本配置条（打开供应商下拉）。

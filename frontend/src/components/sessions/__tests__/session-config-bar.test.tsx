@@ -38,6 +38,7 @@
  * 得 null → mock 成纯文本渲染（与 turn-timeline-session-input-bar.test.tsx 一致）。
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { useState } from "react";
 import { cleanup, render, screen, fireEvent, waitFor } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 
@@ -176,6 +177,42 @@ function renderBar(overrides: Record<string, unknown> = {}) {
       </QueryClientProvider>,
     ),
   };
+}
+
+/**
+ * 2026-10-25-session-config-deferred-switch：受控暂存挂载——Harness 内部持
+ * staged state（与面板 session-panel-page.handleStagedSwitch 同款合并/取消
+ * 逻辑），点选上抛 → 合并 → 回传 staged，串起「暂存→受控显示」完整闭环。
+ * 同时记录收到的全部 patch 供断言。
+ */
+function renderBarControlled(overrides: Record<string, unknown> = {}) {
+  const client = new QueryClient({
+    defaultOptions: {
+      queries: { retry: false, gcTime: 0, refetchInterval: false },
+      mutations: { retry: false },
+    },
+  });
+  const patches: unknown[] = [];
+  function Harness() {
+    const [staged, setStaged] = useState<Record<string, string>>({});
+    return (
+      <QueryClientProvider client={client}>
+        <SessionConfigBar
+          {...({ ...BASE_PROPS, ...overrides, staged } as any)}
+          onStagedSwitch={(patch: any) => {
+            patches.push(patch);
+            setStaged((prev) => {
+              const next = { ...prev };
+              if (patch.cancel) delete next[patch.field];
+              else next[patch.field] = patch.value;
+              return next;
+            });
+          }}
+        />
+      </QueryClientProvider>
+    );
+  }
+  return { patches, ...render(<Harness />) };
 }
 
 function openCtrl(labelPart: string) {
@@ -340,15 +377,80 @@ describe("SessionConfigBar 状态置灰", () => {
 // ── 4. 供应商切换（含「不指定」空串语义，task-16 契约） ───────────────────
 
 describe("SessionConfigBar 切换供应商", () => {
-  it("idle 选择供应商 → 点选即静默切换（空 prompt）→ injectSession 参数正确 + 成功 toast", async () => {
+  // 2026-10-25-session-config-deferred-switch（D-001）：暂存模式下 idle 点选仅
+  // 上抛暂存（不发请求、不产生空切换轮、无 toast），随下一条消息生效。
+  it("暂存模式 idle 选择供应商 → onStagedSwitch 上抛（含级联 model 重置）不 inject 无 toast，控件显示暂存值", async () => {
+    const { patches } = renderBarControlled({ llmProviderId: "prov-kimi" });
+    openCtrl("配置-供应商");
+    fireEvent.click(await screen.findByRole("button", { name: "选择 GLM 平台" }));
+
+    // 不发请求（不产生空切换轮）、不弹 toast（D-001 静默）
+    expect(mocks.injectSession).not.toHaveBeenCalled();
+    expect(mocks.messageSuccess).not.toHaveBeenCalled();
+    // 级联：切供应商同时重置模型暂存（""=跟随供应商配置，对齐 provisional 先例）
+    expect(patches[0]).toEqual({
+      field: "model",
+      value: SWITCH_MODEL_DEFAULT_VALUE,
+      label: "默认",
+      cancel: undefined,
+    });
+    expect(patches[1]).toEqual({
+      field: "llm_provider_id",
+      value: "prov-glm",
+      label: "GLM 平台",
+      cancel: undefined,
+    });
+    // 控件直接显示暂存值（受控闭环；无待生效标记，D-001）
+    await waitFor(() =>
+      expect(
+        screen.getByRole("button", { name: "配置-供应商 GLM 平台" }),
+      ).toBeInTheDocument(),
+    );
+    expect(screen.queryByTestId("config-staged-dot")).not.toBeInTheDocument();
+  });
+
+  it("暂存模式「不指定（本机默认）」→ llm_provider_id 空串 \"\" 暂存上抛（cancel 未触发）", async () => {
+    const onStagedSwitch = vi.fn();
+    renderBar({ llmProviderId: "prov-kimi", onStagedSwitch });
+    openCtrl("配置-供应商");
+    fireEvent.click(
+      await screen.findByRole("button", { name: "选择 不指定（本机默认）" }),
+    );
+    expect(mocks.injectSession).not.toHaveBeenCalled();
+    expect(onStagedSwitch).toHaveBeenCalledWith({
+      field: "llm_provider_id",
+      value: SWITCH_NO_PROVIDER_VALUE,
+      label: "不指定（本机默认）",
+      cancel: undefined,
+    });
+  });
+
+  it("暂存模式选回当前生效供应商 → cancel=true 取消暂存（不级联重置模型）", async () => {
+    const onStagedSwitch = vi.fn();
+    renderBar({ llmProviderId: "prov-kimi", onStagedSwitch });
+    openCtrl("配置-供应商");
+    fireEvent.click(
+      await screen.findByRole("button", { name: "选择 Kimi 中转" }),
+    );
+    expect(mocks.injectSession).not.toHaveBeenCalled();
+    expect(onStagedSwitch).toHaveBeenCalledWith({
+      field: "llm_provider_id",
+      value: "prov-kimi",
+      label: "Kimi 中转",
+      cancel: true,
+    });
+    // 选回当前值不是切换动作，不级联重置模型暂存
+    expect(onStagedSwitch).toHaveBeenCalledTimes(1);
+  });
+
+  // 兼容锚：未挂 onStagedSwitch（存量调用面）保持点选即切换旧行为。
+  it("未传 onStagedSwitch（兼容）→ idle 点选即静默切换 injectSession 参数正确 + 成功 toast", async () => {
     renderBar({ llmProviderId: "prov-kimi" });
     openCtrl("配置-供应商");
-    // 供应商选项经 react-query 异步到达 → findBy 等待；点选即执行（无确认行）
     fireEvent.click(await screen.findByRole("button", { name: "选择 GLM 平台" }));
 
     await waitFor(() => expect(mocks.injectSession).toHaveBeenCalledTimes(1));
-    // ql-20260817-010：静默切换——prompt 空串（daemon 只 reload 不喂消息）；
-    // task-10：切供应商同请求级联重置 model=""（候选随供应商变）。
+    // ql-20260817-010：静默切换——prompt 空串；task-10：切供应商同请求级联重置 model=""。
     expect(mocks.injectSession).toHaveBeenCalledWith("sess-1", "", {
       llm_provider_id: "prov-glm",
       model: "",
@@ -358,25 +460,6 @@ describe("SessionConfigBar 切换供应商", () => {
         expect.stringContaining("下一轮生效"),
       ),
     );
-  });
-
-  it("「不指定（本机默认）」→ llm_provider_id 空串 \"\" 切回本机默认", async () => {
-    renderBar({ llmProviderId: "prov-kimi" });
-    openCtrl("配置-供应商");
-    fireEvent.click(
-      await screen.findByRole("button", { name: "选择 不指定（本机默认）" }),
-    );
-    await waitFor(() => expect(mocks.injectSession).toHaveBeenCalledTimes(1));
-    expect(mocks.injectSession).toHaveBeenCalledWith(
-      "sess-1",
-      expect.any(String),
-      { llm_provider_id: SWITCH_NO_PROVIDER_VALUE, model: "" },
-    );
-    // 空串语义钉死：两键的 "" 都必须下发（task-16：llm_provider_id ""=切回本机
-    // 默认；task-10：model ""=跟随供应商配置；undefined=不切换）
-    const firstCall = mocks.injectSession.mock.calls.at(0);
-    expect(firstCall?.[2]?.llm_provider_id).toBe("");
-    expect(firstCall?.[2]?.model).toBe("");
   });
 
   // task-07（2026-09-11-session-provider-switch-codex-pi / FR-03）：原「Codex 引擎
@@ -435,7 +518,7 @@ describe("SessionConfigBar 切换供应商", () => {
     }
   });
 
-  it("切换失败 → message.error（点选即切换无确认行，可再点重试）", async () => {
+  it("切换失败 → message.error（仅兼容路径未传 onStagedSwitch；暂存模式无请求无失败）", async () => {
     mocks.injectSession.mockRejectedValueOnce(new Error("daemon 离线"));
     renderBar();
     openCtrl("配置-供应商");
@@ -672,7 +755,26 @@ describe("SessionConfigBar 供应商+模型级联（task-10）", () => {
     expect(select.value).toBe("");
   });
 
-  it("选模型 → injectSession 同请求带 llm_provider_id + model", async () => {
+  it("暂存模式选模型 → onStagedSwitch 上抛 model（不 inject），控件显示暂存模型", async () => {
+    mocks.listProviders.mockResolvedValue([GLM_PROVIDER] as never);
+    const { patches } = renderBarControlled({ llmProviderId: "prov-glm" });
+    const select = (await screen.findByRole("combobox", {
+      name: "配置-模型",
+    })) as HTMLSelectElement;
+    fireEvent.change(select, { target: { value: "glm-4.5-air" } });
+    expect(mocks.injectSession).not.toHaveBeenCalled();
+    expect(patches[0]).toEqual({
+      field: "model",
+      value: "glm-4.5-air",
+      label: "glm-4.5-air",
+      cancel: undefined,
+    });
+    // 控件直接显示暂存值（受控闭环），快照原值被覆盖
+    await waitFor(() => expect(select.value).toBe("glm-4.5-air"));
+  });
+
+  // 兼容锚：未挂 onStagedSwitch（存量调用面）保持切模型同请求带供应商旧行为。
+  it("未传 onStagedSwitch（兼容）→ 选模型 injectSession 同请求带 llm_provider_id + model", async () => {
     mocks.listProviders.mockResolvedValue([GLM_PROVIDER] as never);
     renderBar({ llmProviderId: "prov-glm" });
     const select = (await screen.findByRole("combobox", {
@@ -686,10 +788,12 @@ describe("SessionConfigBar 供应商+模型级联（task-10）", () => {
     });
   });
 
-  it("切回「默认」→ model 空串下发（当前值来自 config_snapshot.model）", async () => {
+  it("暂存模式切回「默认」→ model 空串上抛 cancel（值等于快照当前值）；未挂时兼容路径空串下发", async () => {
     mocks.listProviders.mockResolvedValue([GLM_PROVIDER] as never);
+    const onStagedSwitch = vi.fn();
     renderBar({
       llmProviderId: "prov-glm",
+      onStagedSwitch,
       configSnapshot: {
         ...BASE_PROPS.configSnapshot,
         provider_name: "GLM 平台",
@@ -702,10 +806,15 @@ describe("SessionConfigBar 供应商+模型级联（task-10）", () => {
     // 快照模型直显为当前选中项
     expect(select.value).toBe("glm-4.6");
     fireEvent.change(select, { target: { value: SWITCH_MODEL_DEFAULT_VALUE } });
-    await waitFor(() => expect(mocks.injectSession).toHaveBeenCalledTimes(1));
-    const call = mocks.injectSession.mock.calls.at(0);
-    expect(call?.[2]?.llm_provider_id).toBe("prov-glm");
-    expect(call?.[2]?.model).toBe("");
+    expect(mocks.injectSession).not.toHaveBeenCalled();
+    // 快照 model="glm-4.6" 非空 → 选「默认」是真实切换暂存（cancel 未触发；
+    // 选回 glm-4.6 才是 cancel 场景，见供应商组 cancel 用例同构判定）
+    expect(onStagedSwitch).toHaveBeenCalledWith({
+      field: "model",
+      value: "",
+      label: "默认",
+      cancel: undefined,
+    });
   });
 
   // task-07 语义翻转：原 Codex 锁定分支（D-010）改为 codex 解锁后选中供应商即
@@ -789,7 +898,30 @@ describe("SessionConfigBar 供应商+模型级联（task-10）", () => {
 // ── 5. 档案切换 ──────────────────────────────────────────────────────────
 
 describe("SessionConfigBar 切换档案", () => {
-  it("idle 选择档案 → 点选即切换（默认 prompt）→ injectSession 带 agent_profile_id + toast + onSwitched 回调", async () => {
+  // 2026-10-25-session-config-deferred-switch（D-001）：暂存模式 idle 点选仅
+  // 上抛暂存，不 inject 不弹 toast；onSwitched 不触发（无请求）。
+  it("暂存模式 idle 选择档案 → onStagedSwitch 上抛（不 inject 无 toast），控件显示暂存档案", async () => {
+    const { patches } = renderBarControlled({});
+    openCtrl("配置-档案");
+    fireEvent.click(screen.getByRole("button", { name: "选择 严肃代码审查员" }));
+
+    expect(mocks.injectSession).not.toHaveBeenCalled();
+    expect(mocks.messageSuccess).not.toHaveBeenCalled();
+    expect(patches[0]).toEqual({
+      field: "agent_profile_id",
+      value: "prof-2",
+      label: "严肃代码审查员",
+      cancel: undefined,
+    });
+    await waitFor(() =>
+      expect(
+        screen.getByRole("button", { name: "配置-档案 严肃代码审查员" }),
+      ).toBeInTheDocument(),
+    );
+  });
+
+  // 兼容锚：未挂 onStagedSwitch（存量调用面）保持点选即切换旧行为。
+  it("未传 onStagedSwitch（兼容）→ idle 选择档案点选即切换 + onSwitched 回调", async () => {
     const onSwitched = vi.fn();
     renderBar({ onSwitched });
     openCtrl("配置-档案");
@@ -809,7 +941,24 @@ describe("SessionConfigBar 切换档案", () => {
     );
   });
 
-  it("「不指定」→ agent_profile_id 空串取消档案回无人格（ql-20260818-004）", async () => {
+  it("暂存模式「不指定」→ agent_profile_id 空串暂存上抛（cancel 未触发，当前有档案）", async () => {
+    const onStagedSwitch = vi.fn();
+    renderBar({ agentProfileId: "prof-1", onStagedSwitch });
+    openCtrl("配置-档案");
+    fireEvent.click(
+      screen.getByRole("button", { name: "选择 不指定（无人格）" }),
+    );
+    expect(mocks.injectSession).not.toHaveBeenCalled();
+    expect(onStagedSwitch).toHaveBeenCalledWith({
+      field: "agent_profile_id",
+      value: "",
+      label: "不指定",
+      cancel: undefined,
+    });
+  });
+
+  // 兼容锚：未挂 onStagedSwitch（存量调用面）保持点选即切换旧行为（空串语义钉死）。
+  it("未传 onStagedSwitch（兼容）→「不指定」agent_profile_id 空串取消档案回无人格（ql-20260818-004）", async () => {
     renderBar({ agentProfileId: "prof-1" });
     openCtrl("配置-档案");
     fireEvent.click(
@@ -1256,7 +1405,47 @@ describe("SessionConfigBar 会话态档位切换控件（task-06 / FR-06 / R-04�
     ).toBe(true);
   });
 
-  it("点选即切换：setSessionThinkingLevel 调用 + 成功通知「已切换思考级别：X」+ 乐观缓存 current（不 invalidate）", async () => {
+  // 2026-10-25-session-config-deferred-switch（D-001）：暂存模式档位点选仅上抛
+  // 暂存（不 POST 不即时改引擎档位），随下一条消息发送时先调端点生效。
+  it("暂存模式点选档位 → onStagedSwitch 上抛（不 POST 无 toast），控件直接显示暂存档", async () => {
+    const { patches } = renderBarControlled({ thinkingLevel: {} });
+    const trigger = (await screen.findByTestId(
+      "config-thinking-select",
+    )) as HTMLButtonElement;
+    await waitFor(() => expect(trigger.textContent).toBe("中"));
+    fireEvent.click(trigger);
+    fireEvent.click(await screen.findByRole("menuitem", { name: "高" }));
+    expect(mocks.setSessionThinkingLevel).not.toHaveBeenCalled();
+    expect(mocks.messageSuccess).not.toHaveBeenCalled();
+    expect(patches[0]).toEqual({
+      field: "thinking_level",
+      value: "high",
+      label: "高",
+      cancel: undefined,
+    });
+    // 控件直接显示暂存档（高）——静默记住，无任何标记（D-001）
+    await waitFor(() => expect(trigger.textContent).toBe("高"));
+  });
+
+  it("暂存模式选回当前档 → cancel=true 取消暂存", async () => {
+    const { patches } = renderBarControlled({ thinkingLevel: {} });
+    const trigger = (await screen.findByTestId(
+      "config-thinking-select",
+    )) as HTMLButtonElement;
+    await waitFor(() => expect(trigger.textContent).toBe("中"));
+    fireEvent.click(trigger);
+    fireEvent.click(await screen.findByRole("menuitem", { name: "中" }));
+    expect(mocks.setSessionThinkingLevel).not.toHaveBeenCalled();
+    expect(patches[0]).toEqual({
+      field: "thinking_level",
+      value: "medium",
+      label: "中",
+      cancel: true,
+    });
+  });
+
+  // 兼容锚：未挂 onStagedSwitch（存量调用面）保持点选即 POST 旧行为。
+  it("未传 onStagedSwitch（兼容）→ 点选即切换：setSessionThinkingLevel 调用 + 成功通知 + 乐观缓存 current（不 invalidate）", async () => {
     renderBar({ thinkingLevel: {} });
     const trigger = (await screen.findByTestId(
       "config-thinking-select",
@@ -1314,6 +1503,21 @@ describe("SessionConfigBar 会话态档位切换控件（task-06 / FR-06 / R-04�
         expect.stringContaining("本轮结束后生效"),
       ),
     );
+  });
+
+  // 2026-10-25：暂存模式 running 点选不受暂存影响——仍走 inject 忙轮排队（FR-04）。
+  it("暂存模式 running 点选供应商/档位 → 照常走忙轮排队（不走暂存上抛）", async () => {
+    const onStagedSwitch = vi.fn();
+    renderBar({
+      running: true,
+      llmProviderId: "prov-kimi",
+      thinkingLevel: {},
+      onStagedSwitch,
+    });
+    openCtrl("配置-供应商");
+    fireEvent.click(await screen.findByRole("button", { name: "选择 GLM 平台" }));
+    await waitFor(() => expect(mocks.injectSession).toHaveBeenCalledTimes(1));
+    expect(onStagedSwitch).not.toHaveBeenCalled();
   });
 
   it("200 结构化失败（ok=false + error）→ notify error 带 error 原文（如旧 daemon 升级提示）", async () => {

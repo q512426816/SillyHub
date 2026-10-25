@@ -145,6 +145,51 @@ export interface SessionPanelPageProps {
 export const ACTIVE_RUN_STATUSES = new Set(["running", "pending", "pending_approval"]);
 
 /**
+ * 2026-10-25-session-config-deferred-switch（D-001）：轮级生效配置摘要
+ * （whoLine 形状子集——buildConfigChangeLine 的入参/出参基准）。
+ */
+export interface ConfigChangeWho {
+  profileName: string | null;
+  providerName: string | null;
+  /** 档案快照模型名（会话级模型覆盖不落 run 快照，快照路该维如实缺失）。 */
+  modelName?: string | null;
+}
+
+/**
+ * 2026-10-25-session-config-deferred-switch（D-001）：配置切换说明文案生成——
+ * 逐维对比前后两轮生效配置（供应商/模型/档案），任一变化生成「XX已切换 A → B」
+ * 段，多维变化用「 · 」连接（轮头 meta 行风格）。全等 / 任一侧缺快照 → null
+ * （不渲染，不编造）。null 值显示口径与 whoLine 一致：供应商 null=本机默认、
+ * 档案 null=未指定、模型 null=默认。
+ *
+ * 两条生产链共用本函数保证文案同构：
+ *   - 实时路：发送受理成功时面板以「会话当前生效值 ⊕ 暂存值」预置占位轮
+ *     （含会话级模型覆盖维度——发送方前端权威）；
+ *   - 历史路：enrichDisplayTurns 相邻轮快照对比（供应商/档案快照维度）。
+ */
+export function buildConfigChangeLine(
+  prev: ConfigChangeWho | null | undefined,
+  next: ConfigChangeWho | null | undefined,
+): string | null {
+  if (!prev || !next) return null;
+  const seg = (
+    label: string,
+    a: string | null | undefined,
+    b: string | null | undefined,
+    emptyLabel: string,
+  ): string | null =>
+    (a ?? null) !== (b ?? null)
+      ? `${label}已切换 ${a || emptyLabel} → ${b || emptyLabel}`
+      : null;
+  const parts = [
+    seg("供应商", prev.providerName, next.providerName, "本机默认"),
+    seg("模型", prev.modelName, next.modelName, "默认"),
+    seg("档案", prev.profileName, next.profileName, "未指定"),
+  ].filter((s): s is string => s !== null);
+  return parts.length > 0 ? parts.join(" · ") : null;
+}
+
+/**
  * 按 run 快照补 whoLine / 历史 usage（原 SessionPanelPage displayTurns useMemo 体外提）：
  * 只补缺（?? 链），实时 SSE 值优先；run 快照缺失（拉取失败 / 占位 turn）原样返回——
  * whoLine 不渲染（零回归）。
@@ -228,6 +273,11 @@ export function enrichDisplayTurns(
           providerName: meta.llm_provider_id
             ? (llmProviders.find((p) => p.id === meta.llm_provider_id)?.name ?? null)
             : (llmProviders.find((p) => p.is_default)?.name ?? null),
+          // 2026-10-25-session-config-deferred-switch：档案快照模型名（buildConfig
+          // ChangeLine 历史路模型维；档案未配模型 → null 如实）。
+          modelName:
+            (meta.agent_profile_snapshot as { model?: string | null } | null)?.model ??
+            null,
         },
         inputTokens: t.inputTokens ?? meta.input_tokens ?? null,
         outputTokens: t.outputTokens ?? meta.output_tokens ?? null,
@@ -343,6 +393,10 @@ export function enrichDisplayTurns(
           providerName: meta.llm_provider_id
             ? (llmProviders.find((p) => p.id === meta.llm_provider_id)?.name ?? null)
             : null,
+          // 2026-10-25-session-config-deferred-switch：同 enrichOne——档案快照模型名。
+          modelName:
+            (meta.agent_profile_snapshot as { model?: string | null } | null)?.model ??
+            null,
         },
         sender: meta.user_id && meta.sender_name
           ? {
@@ -368,10 +422,21 @@ export function enrichDisplayTurns(
     // quick（ql-20260916-009）：稳定兜底——时间戳同值（含同 run 多块同一
     // finished_at / 快照与日志时间同源到秒）时保持数组序（「加载更早」prepend
     // 的自然位置优先于排序），运行中无时间戳轮维持「最新 = 末尾」语义。
-    return [...enriched, ...orphanTurns]
+    const ordered = [...enriched, ...orphanTurns]
       .map((t, i) => [t, i] as const)
       .sort(([a, ai], [b, bi]) => ts(a) - ts(b) || ai - bi)
       .map(([t]) => t);
+    // 2026-10-25-session-config-deferred-switch（D-001）：历史路切换说明——显示
+    // 序相邻轮快照对比（供应商/档案快照维度）。实时路预置值（发送方权威，含
+    // 会话级模型覆盖维度）优先保留不覆盖；无前轮快照 / 无变化 → 不填。
+    return ordered.map((t, i) => {
+      if (t.configChangeLine) return t;
+      const line = buildConfigChangeLine(
+        i > 0 ? ordered[i - 1].whoLine : null,
+        t.whoLine,
+      );
+      return line ? { ...t, configChangeLine: line } : t;
+    });
 }
 
 /**

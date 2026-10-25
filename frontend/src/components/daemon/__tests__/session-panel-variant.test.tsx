@@ -124,11 +124,26 @@ vi.mock("@/lib/agent-profiles", async () => {
   );
   return { ...actual, useMineAgentProfiles: () => ({ profiles: [] }) };
 });
+// page 模式 chrome（SessionConfigBar）数据 hook：无网络，空数据。
+vi.mock("@/lib/use-daemon-machines", () => ({
+  useDaemonMachines: () => ({ items: [] }),
+}));
+vi.mock("@/lib/agent-profiles", async () => {
+  const actual = await vi.importActual<typeof import("@/lib/agent-profiles")>(
+    "@/lib/agent-profiles",
+  );
+  return { ...actual, useMineAgentProfiles: () => ({ profiles: [] }) };
+});
+// 2026-10-25-session-config-deferred-switch：配置条供应商下拉取数改 hoisted
+// 可控 mock（暂存发送用例按需注入供应商列表）。
+const llmApi = vi.hoisted(() => ({
+  listProviders: vi.fn(),
+}));
 vi.mock("@/lib/api/llm-providers", async () => {
   const actual = await vi.importActual<typeof import("@/lib/api/llm-providers")>(
     "@/lib/api/llm-providers",
   );
-  return { ...actual, listProviders: vi.fn().mockResolvedValue([]) };
+  return { ...actual, listProviders: llmApi.listProviders };
 });
 
 /* ----- 回归锚字面量（硬编码防源文件漂移自证；2026-09-09-sessions-visual-refresh
@@ -207,7 +222,10 @@ function makeMission(): TeamMissionSummary {
 }
 
 /** page 模式挂载（variant 缺省 = 既有调用点形态；传则显式声明）。 */
-function setupPage(variant?: "desktop" | "mobile") {
+function setupPage(
+  variant?: "desktop" | "mobile",
+  opts?: { llmProviders?: unknown[] },
+) {
   const qc = new QueryClient({
     defaultOptions: { queries: { retry: false } },
   });
@@ -217,7 +235,7 @@ function setupPage(variant?: "desktop" | "mobile") {
         mode="page"
         sessionId="sess-variant"
         machines={[]}
-        llmProviders={[]}
+        llmProviders={opts?.llmProviders ?? ([] as never[])}
         {...(variant ? { variant } : {})}
       />
     </QueryClientProvider>,
@@ -252,6 +270,7 @@ beforeEach(() => {
   workspaceApi.listWorkspaces.mockResolvedValue({ items: [] });
   workspaceApi.listProjects.mockResolvedValue([]);
   workspaceApi.listProjectWorkspaces.mockResolvedValue([]);
+  llmApi.listProviders.mockResolvedValue([]);
 });
 
 /* ───────── 1. 回归锚：不传 variant = desktop（FR-11 桌面零回归） ───────── */
@@ -432,6 +451,75 @@ describe("SessionPanel variant='mobile' 布局类与收纳", () => {
       "你好",
       expect.anything(),
     );
+  });
+
+  // 2026-10-25-session-config-deferred-switch（FR-02 / D-001）：空闲点选供应商
+  // 仅暂存（不发请求、无空切换轮）；发送消息时随 injectSession 一并生效，受理
+  // 成功后暂存清空（再次发送不带配置字段，零回归形态）。
+  it("暂存供应商 → 发送消息随 injectSession 生效并清空暂存", async () => {
+    llmApi.listProviders.mockResolvedValue([
+      { id: "prov-glm", name: "GLM 平台", models: [], agent_kinds: ["claude"] },
+    ]);
+    setupPage("desktop", {
+      llmProviders: [{ id: "prov-glm", name: "GLM 平台" }],
+    });
+
+    // 等会话详情加载（配置条随会话态渲染）
+    await screen.findByPlaceholderText(/继续追问/);
+    // 空闲点选供应商 → 暂存（无 injectSession 请求、时间线无新增轮）
+    fireEvent.click(screen.getByRole("button", { name: /配置-供应商/ }));
+    fireEvent.click(
+      await screen.findByRole("button", { name: "选择 GLM 平台" }),
+    );
+    expect(sessionApi.injectSession).not.toHaveBeenCalled();
+
+    // 发送消息 → injectSession 带暂存供应商（随本轮消息生效）
+    const input = (await screen.findByPlaceholderText(
+      /继续追问/,
+    )) as HTMLTextAreaElement;
+    fireEvent.change(input, { target: { value: "你好" } });
+    fireEvent.click(screen.getByTitle("发送"));
+    await waitFor(() => expect(sessionApi.injectSession).toHaveBeenCalled());
+    const call = sessionApi.injectSession.mock.calls.at(-1);
+    expect(call?.[0]).toBe("sess-variant");
+    expect(call?.[1]).toBe("你好");
+    expect(call?.[2]?.llm_provider_id).toBe("prov-glm");
+
+    // 受理成功 → 暂存清空：再次发送不带配置字段（与无暂存形态一致）
+    sessionApi.injectSession.mockClear();
+    fireEvent.change(input, { target: { value: "第二条" } });
+    fireEvent.click(screen.getByTitle("发送"));
+    await waitFor(() => expect(sessionApi.injectSession).toHaveBeenCalledTimes(1));
+    const call2 = sessionApi.injectSession.mock.calls.at(0);
+    expect(call2?.[2]?.llm_provider_id).toBeUndefined();
+  });
+
+  // 2026-10-25（FR-06 / D-001）：发送带暂存配置 → 时间线轮块顶部独占一行切换
+  // 说明（占位轮预置，发送方权威——含会话级模型覆盖维度）。
+  it("暂存供应商发送 → 时间线显示切换说明行（模型/供应商已切换 A → B）", async () => {
+    llmApi.listProviders.mockResolvedValue([
+      { id: "prov-glm", name: "GLM 平台", models: [], agent_kinds: ["claude"] },
+    ]);
+    setupPage("desktop", {
+      llmProviders: [{ id: "prov-glm", name: "GLM 平台" }],
+    });
+
+    // 等会话详情加载（配置条随会话态渲染）
+    await screen.findByPlaceholderText(/继续追问/);
+    fireEvent.click(screen.getByRole("button", { name: /配置-供应商/ }));
+    fireEvent.click(
+      await screen.findByRole("button", { name: "选择 GLM 平台" }),
+    );
+    const input = (await screen.findByPlaceholderText(
+      /继续追问/,
+    )) as HTMLTextAreaElement;
+    fireEvent.change(input, { target: { value: "你好" } });
+    fireEvent.click(screen.getByTitle("发送"));
+
+    // 占位轮（configChangeLine 预置）渲染：会话当前无供应商（本机默认）→ GLM 平台
+    const line = await screen.findByTestId("turn-config-change");
+    expect(line.textContent).toContain("供应商已切换");
+    expect(line.textContent).toContain("GLM 平台");
   });
 
   // ql-20260915-009 手机端降噪：用量条（六项统计）mobile 整条不渲染——纯辅助
