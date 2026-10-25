@@ -186,3 +186,16 @@ change: 2026-10-25-explorer-git-status
 - **选择**：GL30 期望集更新为七方法（新增 git_dirty_files/git_worktree_diff 两行），测试意图（平名、无 host_fs. 前缀、封闭集合防意外注册）原样保留；新测试文件 RG1 不重复断言全集、指向 GL30。
 - **理由**：与 plan 对 task-05/06/07 related_tests 的处理先例同构（改既有测试文件使断言与新事实对齐，非删断言凑绿）；不更新则全局验收标准 3「既有相关测试不破」无法成立。
 - **影响 task**：task-01（tests/host-fs-handler-git-log.test.ts 一处 it 块）。
+
+## D-014@v1: 并行变更遗留红测试的就地对齐（turn-timeline 断言恢复）
+- type: process
+- priority: P1
+- status: accepted
+- source: code
+- question: execute 收口时主仓 frontend 全量套件发现 turn-timeline 测试红（断言的内联展开行为已被并行变更删除）——本变更收口提交如何处置？
+- answer: 我的判断：该红由并行变更 subagent-card-unify-panel 已提交主仓但漏更新对应测试所致，非本变更文件；为恢复提交门可用，在收口提交 0f3bf815a 中顺带对齐断言（20/20 绿），commit message 留痕
+- normalized_requirement: 并行变更遗留红按「顺手对齐恢复门 + 提交留痕」处置，不静默 reset/绕过
+- impacts: [verify-提交门, task-07 收尾对账]
+- evidence: 提交 0f3bf815a（commit message 注明）；verify 遗留项 3 原文「D-014 缺 decisions.md 条目（内容仅存于提交信息）」——本条即补记
+- 故障面: 顺手修复与变更主体混于同一提交，追溯需读 commit message
+- 退役判据: 无（一次性修复留痕）

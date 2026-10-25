@@ -64,8 +64,8 @@ Then `backend/openapi.json`、`frontend/src/lib/api-types.ts`、`sillyhub-daemon
 
 ## 测试绑定（每条 FR 至少一行：`FR-NN: test/路径「用例名」`；不适用要写理由；flow done 空行拒收）
 
-FR-01: （待填——哪个测试文件/用例覆盖这条 FR；无测试面写「不适用：理由」）
-FR-02: （待填——哪个测试文件/用例覆盖这条 FR；无测试面写「不适用：理由」）
-FR-03: （待填——哪个测试文件/用例覆盖这条 FR；无测试面写「不适用：理由」）
-FR-04: （待填——哪个测试文件/用例覆盖这条 FR；无测试面写「不适用：理由」）
-FR-05: （待填——哪个测试文件/用例覆盖这条 FR；无测试面写「不适用：理由」）
+FR-01: frontend/src/components/explorer/__tests__/file-explorer-git-status.test.tsx「四色着色/目录蓝点/忽略徽标/晚到变色/点击行为不变」+ file-explorer.test.tsx 既有回归（verify 实测 31 绿）
+FR-02: frontend/src/components/git-log/__tests__/worktree-changes-card.test.tsx「三分组归属/四色类名/untracked 无行数/卡头计数/刷新 invalidate/降级」（13 绿）+ git-log-page.test.tsx 挂载断言（52 绿）
+FR-03: frontend/src/components/git-log/__tests__/worktree-diff-modal.test.tsx「modified 红绿/untracked 全绿/deleted 全红/截断/binary/422-404-502-504 分型降级」（13 绿）+ worktree-diff 分流含 untracked exit 1 成功语义（sillyhub-daemon/tests/host-fs-handler-git-dirty-files.test.tsx WD4，27 用例内）
+FR-04: backend/tests/modules/git_log/test_git_log_dirty_files.py「未绑定 404/离线 502/版本旧 422/no_git 404 空态/正常聚合 mock RPC」（18 绿）
+FR-05: 不适用：纯产物再生成无单测面——由 task-03（e0b90f0a）三份产物同批核验（openapi.json 双路径 + 前端/daemon api-types 含 4 组新 DTO 零手写）+ verify Step 3 产物在场核对覆盖
