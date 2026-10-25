@@ -927,19 +927,14 @@ export function SessionPanelPage({
     : null;
   useEffect(() => {
     draftHydratedRef.current = false;
-    // 2026-10-23-session-input-clear-fix / FR-04：预会话态恒空白——「新建会话」
-    // 必须是全新开始。原实现按 __pre__:<scope> 回读草稿，同一入口（同机器同引
-    // 擎）再次「＋」新建时把上次未发送内容带回输入框（用户报障：在其他会话
-    // 填了 AAA，新建会话输入框也显示 AAA）。此处改为预会话不回读并清残留键
-    //（新建即弃稿，不留可回读的死数据）。真会话（sessionId 非空）回读语义零
-    // 变化；dialog 模式在 session-panel-dialog.tsx，其「同 workspaceId 重开恢复
-    // 草稿」语义不在本变更范围（已知遗留，design 风险与死路已记）。
-    if (sessionId) {
-      setInput(readSessionDraft(sessionId, preDraftScope));
-    } else {
-      setInput("");
-      writeSessionDraft(null, "", preDraftScope);
-    }
+    // 2026-10-23-pre-session-draft-persist / FR-01：预会话回读入口隔离键草稿。
+    // （本卡显式反转 2026-10-23-session-input-clear-fix 的「恒空白」裁决——
+    // 用户实测后要求：未发送的 AAA 切走/刷新再新建要原样显示；清空后重进要为
+    // 空，由写 effect 随清空落 "" 保证。）回读源 __pre__:<scope> 与真会话键
+    // <sessionId> 无交集——前序报障「其他会话填 AAA 新建会话显示 AAA」不复潮；
+    // 真会话（sessionId 非空）回读语义零变化。dialog 模式在
+    // session-panel-dialog.tsx 同步改读（同卡 FR-01）。
+    setInput(readSessionDraft(sessionId, preDraftScope));
     setPendingMentions({});
     const raf = requestAnimationFrame(() => {
       draftHydratedRef.current = true;

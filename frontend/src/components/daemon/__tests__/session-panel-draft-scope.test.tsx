@@ -423,22 +423,59 @@ describe("page 预会话草稿入口隔离（task-01 / D-001）", () => {
     );
   });
 
-  it("同一入口重进：输入框恒空白（新建=全新开始，残留键清除）", async () => {
-    // 2026-10-23-session-input-clear-fix / FR-04：预会话挂载不再回读草稿——
-    // 原「同入口重进恢复草稿」语义与用户「新建会话应全新空白」预期冲突
-    //（用户报障：其他会话填过 AAA，新建会话仍显示 AAA），本卡修订为恒空白
-    // 并顺带清残留键（原未发送草稿随新建废弃）。真会话草稿回读不受影响
-    //（上方时序用例锁定）。
-    window.localStorage.setItem(DRAFT_KEY("__pre__:ws-1:rt-claude"), "重进应恢复");
-    setupPage({ preContext: { workspaceId: "ws-1", runtimeId: "rt-claude" } });
+  it("page 预会话：同一入口重进恢复未发送草稿（切走再回/刷新同路径）", async () => {
+    // 2026-10-23-pre-session-draft-persist / FR-01：用户显式反转前序「恒空白」
+    // 裁决——预会话未发送草稿必须跨切换/刷新保留；回读源是入口隔离键
+    // __pre__:<scope>，真会话草稿在 <sessionId> 键下，前序报障「其他会话填
+    // AAA 新建会话显示 AAA」不复潮（两键无交集）。
+    const first = setupPage({
+      preContext: { workspaceId: "ws-1", runtimeId: "rt-claude" },
+    });
     const input = (await screen.findByPlaceholderText(
       /发送第一句话开始对话/,
     )) as HTMLTextAreaElement;
-    await waitFor(() => expect(input.value).toBe(""));
-    // 残留键在挂载时被清（新建即弃稿，不再留下可回读的死数据）。
-    expect(
-      window.localStorage.getItem(DRAFT_KEY("__pre__:ws-1:rt-claude")),
-    ).toBe("");
+    await nextFrame();
+    fireEvent.change(input, { target: { value: "AAA" } });
+    await waitFor(() =>
+      expect(window.localStorage.getItem(DRAFT_KEY("__pre__:ws-1:rt-claude"))).toBe(
+        "AAA",
+      ),
+    );
+    first.unmount();
+
+    // 重挂载（重新点新建会话 / 刷新后重新进入同一入口）：原样恢复 AAA。
+    setupPage({ preContext: { workspaceId: "ws-1", runtimeId: "rt-claude" } });
+    const back = (await screen.findByPlaceholderText(
+      /发送第一句话开始对话/,
+    )) as HTMLTextAreaElement;
+    await waitFor(() => expect(back.value).toBe("AAA"));
+  });
+
+  it("page 预会话：清空后重进保持为空（不回显旧稿）", async () => {
+    // 2026-10-23-pre-session-draft-persist / FR-02：清空动作本身要被持久化
+    //（写 effect 随输入变化落 ""），重进读回为空——不是旧 AAA。
+    const first = setupPage({
+      preContext: { workspaceId: "ws-1", runtimeId: "rt-claude" },
+    });
+    const input = (await screen.findByPlaceholderText(
+      /发送第一句话开始对话/,
+    )) as HTMLTextAreaElement;
+    await nextFrame();
+    fireEvent.change(input, { target: { value: "AAA" } });
+    await waitFor(() => expect(input.value).toBe("AAA"));
+    fireEvent.change(input, { target: { value: "" } });
+    await waitFor(() =>
+      expect(window.localStorage.getItem(DRAFT_KEY("__pre__:ws-1:rt-claude"))).toBe(
+        "",
+      ),
+    );
+    first.unmount();
+
+    setupPage({ preContext: { workspaceId: "ws-1", runtimeId: "rt-claude" } });
+    const back = (await screen.findByPlaceholderText(
+      /发送第一句话开始对话/,
+    )) as HTMLTextAreaElement;
+    await waitFor(() => expect(back.value).toBe(""));
   });
 
   it("workspaceId null 的入口：scope 用 '-' 分量组装（与具名工作区入口隔离）", async () => {
@@ -498,16 +535,39 @@ describe("dialog 预会话草稿 scope（task-01 / D-001）", () => {
     );
   });
 
-  it("同 workspaceId 重开 dialog（idle）：输入框恒空白（新建=全新开始，残留键清除）", async () => {
-    // 2026-10-23-session-dialog-input-align / FR-04：原语义为「重进恢复草稿」，
-    // 与用户预期「新建 = 全新开始」冲突（page 模式同款语义修正）——改为恒空白。
-    window.localStorage.setItem(DRAFT_KEY("__pre__:ws-d1"), "dialog 重进恢复");
+  it("dialog idle：同 workspaceId 重开恢复未发送草稿（切走/刷新同路径）", async () => {
+    // 2026-10-23-pre-session-draft-persist / FR-01：用户显式反转 dialog 侧
+    //「恒空白」裁决（与 page 同步）；回读源 __pre__:<workspaceId>，真会话键无交集。
+    const first = setupDialog({ workspaceId: "ws-d1" });
+    const input = await dialogIdleInput();
+    await nextFrame();
+    fireEvent.change(input, { target: { value: "AAA" } });
+    await waitFor(() =>
+      expect(window.localStorage.getItem(DRAFT_KEY("__pre__:ws-d1"))).toBe("AAA"),
+    );
+    first.unmount();
+
     setupDialog({ workspaceId: "ws-d1" });
-    const input = (await screen.findByPlaceholderText(
-      /输入首条消息创建会话/,
-    )) as HTMLTextAreaElement;
-    await waitFor(() => expect(input.value).toBe(""));
-    expect(window.localStorage.getItem(DRAFT_KEY("__pre__:ws-d1"))).toBe("");
+    const back = await dialogIdleInput();
+    await waitFor(() => expect(back.value).toBe("AAA"));
+  });
+
+  it("dialog idle：清空后重开保持为空（不回显旧稿）", async () => {
+    // 2026-10-23-pre-session-draft-persist / FR-02（dialog 侧同构）。
+    const first = setupDialog({ workspaceId: "ws-d1" });
+    const input = await dialogIdleInput();
+    await nextFrame();
+    fireEvent.change(input, { target: { value: "AAA" } });
+    await waitFor(() => expect(input.value).toBe("AAA"));
+    fireEvent.change(input, { target: { value: "" } });
+    await waitFor(() =>
+      expect(window.localStorage.getItem(DRAFT_KEY("__pre__:ws-d1"))).toBe(""),
+    );
+    first.unmount();
+
+    setupDialog({ workspaceId: "ws-d1" });
+    const back = await dialogIdleInput();
+    await waitFor(() => expect(back.value).toBe(""));
   });
 });
 
@@ -646,7 +706,9 @@ describe("受理即同步清草稿键（FR-03）", () => {
           box.settle = resolve;
         }),
     );
-    setupPage({ preContext: { workspaceId: "ws-1", runtimeId: "rt-claude" } });
+    const first = setupPage({
+      preContext: { workspaceId: "ws-1", runtimeId: "rt-claude" },
+    });
     const input = (await screen.findByPlaceholderText(
       /发送第一句话开始对话/,
     )) as HTMLTextAreaElement;
@@ -664,6 +726,14 @@ describe("受理即同步清草稿键（FR-03）", () => {
         "",
       ),
     );
+    // 2026-10-23-pre-session-draft-persist / FR-03 回归锁定：受理即清后重挂载
+    // 预会话（回读语义开启后），输入框为空——发送过的内容不回显。
+    first.unmount();
+    setupPage({ preContext: { workspaceId: "ws-1", runtimeId: "rt-claude" } });
+    const back = (await screen.findByPlaceholderText(
+      /发送第一句话开始对话/,
+    )) as HTMLTextAreaElement;
+    await waitFor(() => expect(back.value).toBe(""));
     box.settle?.({ session_id: "sess-new" });
   });
 });
@@ -675,7 +745,8 @@ describe("受理即同步清草稿键（FR-03）", () => {
  * 且 idle 首句创建失败时输入已清且不恢复（丢文本）。
  *
  * 本节锁定 dialog 侧 FR-01（受理即清）/ FR-02（失败恢复）/ FR-03（受理即清
- * 草稿键）/ FR-04（idle 恒空白 + 真会话草稿不回归）。 */
+ * 草稿键）；FR-04 的「idle 恒空白」已被 2026-10-23-pre-session-draft-persist
+ * 反转为「idle 回读 __pre__ 草稿」（见下方 describe），真会话草稿不回归。 */
 
 /** dialog idle 输入框（placeholder「输入首条消息创建会话」）。 */
 async function dialogIdleInput() {
@@ -868,13 +939,15 @@ describe("dialog 受理即同步清草稿键（FR-03）", () => {
   });
 });
 
-describe("dialog idle 态恒空白 + 真会话草稿不回归（FR-04）", () => {
-  it("idle 挂载不回读 __pre__ 草稿，且清残留键", async () => {
+describe("dialog idle 态草稿保留 + 真会话草稿不回归（2026-10-23-pre-session-draft-persist）", () => {
+  it("idle 挂载回读 __pre__ 草稿（未发送内容跨重开保留）", async () => {
+    // 反转 session-dialog-input-align FR-04「恒空白」：用户显式要求未发送
+    // 草稿跨重开/刷新保留；残留键不再被清，由回读展示（清空则写 ""）。
     window.localStorage.setItem(DRAFT_KEY("__pre__:ws-d1"), "旧内容");
     setupDialog({ workspaceId: "ws-d1" });
     const input = await dialogIdleInput();
-    await waitFor(() => expect(input.value).toBe(""));
-    expect(window.localStorage.getItem(DRAFT_KEY("__pre__:ws-d1"))).toBe("");
+    await waitFor(() => expect(input.value).toBe("旧内容"));
+    expect(window.localStorage.getItem(DRAFT_KEY("__pre__:ws-d1"))).toBe("旧内容");
   });
 
   it("真会话草稿持久化不回归：重开同一会话恢复草稿", async () => {

@@ -1439,7 +1439,7 @@ describe("SessionsPortal ?new=1 直达新建（ql-20260823-005）", () => {
     expect(screen.queryByTestId("pre-session-picker-mask")).toBeNull();
   });
 
-  it("同机器同智能体再次「＋」新建：预会话输入框重置（nonce 强制重挂载，2026-10-23-session-input-clear-fix / FR-04）", async () => {
+  it("同机器同智能体再次「＋」新建：未发送草稿保留（nonce 强制重挂载后回读，2026-10-23-pre-session-draft-persist / FR-01）", async () => {
     renderPortal();
     await enterPreSession("在 非工作区 新建会话");
     const input = screen.getByPlaceholderText(
@@ -1448,13 +1448,15 @@ describe("SessionsPortal ?new=1 直达新建（ql-20260823-005）", () => {
     fireEvent.change(input, { target: { value: "AAA" } });
     await waitFor(() => expect(input.value).toBe("AAA"));
 
-    // 同 scope（同机器+同智能体）再次新建：原 key 不变时 React 复用组件、
-    // 未发送文本会残留；nonce 入 key 后强制重挂载 → 空白。
+    // 同 scope（同机器+同智能体）再次新建：nonce 入 key 强制重挂载（防 React
+    // 复用组件绕过回读 effect）；重挂载后回读 __pre__:<scope> 未发送草稿 →
+    // 原样显示 AAA（用户显式反转前序「重置空白」裁决：切走再回新建要能找回
+    // 未发送内容；想丢弃就手动清空，清空随写 effect 落 ""）。
     await enterPreSession("在 非工作区 新建会话");
     const input2 = (await screen.findByPlaceholderText(
       /发送第一句话开始对话/,
     )) as HTMLTextAreaElement;
-    expect(input2.value).toBe("");
+    await waitFor(() => expect(input2.value).toBe("AAA"));
     expect(screen.getByTestId("session-pre-session-panel")).toBeTruthy();
   });
 

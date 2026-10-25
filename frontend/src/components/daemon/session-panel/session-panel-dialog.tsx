@@ -396,16 +396,13 @@ export function SessionPanelDialog(props: SessionPanelProps) {
   const draftHydratedRef = useRef(false);
   useEffect(() => {
     draftHydratedRef.current = false;
-    // 2026-10-23-session-dialog-input-align / FR-04：idle 态（无会话）恒空白——
-    // 「新建」必须是全新开始；原实现按 __pre__:<workspaceId|'-'> 回读，新建浮窗
-    // 会带回上次未发送内容（与 page 模式同源报障）。改为 idle 不回读 + 清残留键；
-    // 真会话（view.sessionId 非空）回读语义零变化。
-    if (view.sessionId) {
-      setInput(readSessionDraft(view.sessionId, workspaceId ?? '-'));
-    } else {
-      setInput("");
-      writeSessionDraft(null, "", workspaceId ?? '-');
-    }
+    // 2026-10-23-pre-session-draft-persist / FR-01：idle 态（无会话）回读入口
+    // 隔离键 __pre__:<workspaceId|'-'> 的未发送草稿（本卡显式反转上一卡
+    // session-dialog-input-align 的「恒空白」裁决——用户要求与 page 同步：
+    // 未发送内容切走/刷新再新建要原样显示；清空后重开为空由写 effect 随清空
+    // 落 "" 保证）。回读源与真会话键 <sessionId> 无交集，前序「串台」报障
+    // 不复潮；真会话（view.sessionId 非空）回读语义零变化。
+    setInput(readSessionDraft(view.sessionId, workspaceId ?? '-'));
     const raf = requestAnimationFrame(() => {
       draftHydratedRef.current = true;
     });
