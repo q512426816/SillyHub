@@ -1031,6 +1031,9 @@ export const SubagentBlockView = memo(function SubagentBlockView({
           layout="inline"
           testId="subagent-live-marquee"
           entries={inlineEntries}
+          // 子代理终态后不再显示「等待模型响应」（2026-10-25 修复：等待只属于
+          // 仍在运行的宿主；终态条目显示总耗时）。
+          active={running}
         />
       </div>
     ) : null;

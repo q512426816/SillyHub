@@ -605,6 +605,12 @@ export interface TurnLiveMarqueeProps {
   layout?: "bar" | "inline";
   /** 根节点 data-testid（缺省 turn-live-marquee；inline 场景用独立 id 消歧）。 */
   testId?: string;
+  /**
+   * 宿主是否仍在进行（2026-10-25-marquee-inactive-awaiting-fix / FR-01，默认 true）。
+   * false = 宿主已终态（如已完成的子代理卡片）：不追加「等待模型响应」合成条目、
+   * 等待计时不启动——等待指示只属于仍在运行的宿主。
+   */
+  active?: boolean;
 }
 
 /**
@@ -618,6 +624,7 @@ export const TurnLiveMarquee = memo(function TurnLiveMarquee({
   reducedMotion,
   layout = "bar",
   testId,
+  active = true,
 }: TurnLiveMarqueeProps) {
   const prefersReduced = usePrefersReducedMotion();
   const reduced = reducedMotion ?? prefersReduced;
@@ -691,7 +698,8 @@ export const TurnLiveMarquee = memo(function TurnLiveMarquee({
   // entries / 计时 Map / 窗口滑动检测）。
   const awaitingSinceRef = useRef<number | null>(null);
   const [awaitingElapsedMs, setAwaitingElapsedMs] = useState(0);
-  const isAwaiting = latest != null && latest.status !== "running";
+  // 等待条目仅在宿主仍在进行时出现（终态卡片不得假等——FR-01）。
+  const isAwaiting = active && latest != null && latest.status !== "running";
   const awaitingKey = `${latest?.id ?? "none"}:${latest?.status ?? "none"}`;
 
   useEffect(() => {

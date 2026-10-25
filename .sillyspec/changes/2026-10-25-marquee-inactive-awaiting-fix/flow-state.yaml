@@ -1,0 +1,29 @@
+tier: thin
+legacy_fallback: false
+substeps: {}
+born_face: thin
+with_tasks: false
+review_force: null
+input: |-
+  修复终态子代理卡片内嵌流动条仍显示等待转圈
+
+  动机：子代理已结束后卡片内嵌流动条仍显示「等待模型响应」转圈——等待条目是为运行中场景设计的，终态宿主不该出现。
+
+  成功标准：
+  - TurnLiveMarquee 新增 active 属性（默认 true）：active=false 时不再追加「等待模型响应」合成条目，走秒 tick 也不为等待而启动
+  - SubagentBlockView 按卡片自身运行态传 active：子代理终态后内嵌流动条无等待条目、无转圈；运行中行为不变
+  - 外部会话跑马灯不传 active，行为零变化
+  - 新增终态不显示等待条目用例；现有全部用例通过；lint与typecheck通过
+autopilot: false
+prestage_ack: true
+baseline_commit: 2b046d5d56f50bb9f8d2f3de357d766f72da6b9d
+updatedAt: '2026-10-25T06:45:52.004Z'
+cross_baselines:
+  sillyspec: e26546db6247f7b07df5e68583ab7e5a041d9014
+baseline_sha256: 1ee7f5f2b9ca10a77bda52a91b40eb147fdeb23977a178a0a9759bee945292b0
+spec_approved: true
+spec_approved_at: '2026-10-25T06:45:52.003Z'
+spec_approved_by: anon@DESKTOP-HJ0AM09
+spec_approved_channel: user-confirmed
+spec_attested_by: anon@DESKTOP-HJ0AM09
+

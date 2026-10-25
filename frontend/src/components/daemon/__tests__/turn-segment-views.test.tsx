@@ -1044,6 +1044,38 @@ describe("SubagentBlockView 子代理块", () => {
     expect(document.querySelectorAll(".seg-subagent-body").length).toBe(0);
   });
 
+  it("终态子代理卡片内嵌流动条无等待条目（FR-02，2026-10-25 修复）", () => {
+    const seg = makeToolSeg({
+      id: "call_done",
+      toolName: "Agent",
+      primary: "已完成的调研",
+      subagentType: "research",
+      startedAt: 1_000,
+      endedAt: 4_000,
+      status: "ok",
+      children: [
+        {
+          kind: "tool",
+          id: "call_inner_done",
+          raw: "",
+          status: "ok",
+          toolName: "Grep",
+          primary: "src/**",
+          startedAt: 1_200,
+          endedAt: 2_400,
+          children: [],
+          subagentType: null,
+        },
+      ],
+    });
+    render(<SubagentBlockView segment={seg} />);
+    const marquee = document.querySelector('[data-testid="subagent-live-marquee"]');
+    // 流动条存在（内部工具 + 总耗时），但无「等待模型响应」假等待（子代理已终态）。
+    expect(marquee).not.toBeNull();
+    expect(marquee?.textContent).toContain("搜索");
+    expect(marquee?.textContent).not.toContain("等待模型响应");
+  });
+
   it("无 children 不渲染内嵌流动条（FR-05）", () => {
     const seg = makeToolSeg({
       id: "call_bare",

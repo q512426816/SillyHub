@@ -438,6 +438,17 @@ describe("TurnLiveMarquee 连续轨道（FR-01 / FR-02 / FR-05）", () => {
     expect(elapsed.textContent).toMatch(/\d+(ms|s)/);
   });
 
+  it("active=false 时不显示等待条目（FR-01）", () => {
+    const { queryByTestId } = render(
+      <TurnLiveMarquee
+        active={false}
+        entries={deriveLiveMarqueeEntries([thinking("t-done", "思考完成")])}
+      />,
+    );
+
+    expect(queryByTestId("marquee-awaiting")).toBeNull();
+  });
+
   it("无条目时不渲染空壳", () => {
     const { queryByTestId } = render(<TurnLiveMarquee entries={[]} />);
     expect(queryByTestId("turn-live-marquee")).toBeNull();
