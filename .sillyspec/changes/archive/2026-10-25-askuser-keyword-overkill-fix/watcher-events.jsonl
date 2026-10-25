@@ -1,0 +1,13 @@
+{"ts":1792908411164,"kind":"file-update","stage":"requirements","detail":"requirements.md 内容变更","provisional":true}
+{"ts":1792908421756,"kind":"file-update","stage":"design","detail":"design.md 内容变更","provisional":true}
+{"ts":1792908438865,"kind":"file-update","stage":"design","detail":"design.md 内容变更","provisional":true}
+{"ts":1792908765152,"kind":"warning","stage":null,"rule":"scope-drift","severity":"warning","detail":"声明面之外的代码文件被改：logs-replay-400.json——范围漂移嫌疑（并行会话改动/越界，人判）","provisional":true}
+{"ts":1792908772229,"kind":"warning","stage":null,"rule":"scope-drift","severity":"warning","detail":"声明面之外的代码文件被改：frontend/src/components/daemon/__replay-verify.test.ts——范围漂移嫌疑（并行会话改动/越界，人判）","provisional":true}
+{"ts":1792908828516,"kind":"task-done","stage":"tasks","detail":"checked 0→1","provisional":true,"source":"task-tick"}
+{"ts":1792908828891,"kind":"task-done","stage":"tasks","detail":"checked 1→2","provisional":true,"source":"task-tick"}
+{"ts":1792908829269,"kind":"task-done","stage":"tasks","detail":"checked 2→3","provisional":true,"source":"task-tick"}
+{"ts":1792908829696,"kind":"task-done","stage":"tasks","detail":"checked 3→4","provisional":true,"source":"task-tick"}
+{"ts":1792908830044,"kind":"file-update","stage":"tasks","detail":"tasks.md 内容变更","provisional":true}
+{"ts":1792908830044,"kind":"task-done","stage":"tasks","detail":"checked 0→4","provisional":true}
+{"ts":1792908840643,"kind":"commit","stage":null,"detail":"e283fed09","provisional":true}
+{"ts":1792909316483,"kind":"gate-run","stage":"verify","detail":"门实测 passed（3.0s） · 20261025062154","provisional":true}

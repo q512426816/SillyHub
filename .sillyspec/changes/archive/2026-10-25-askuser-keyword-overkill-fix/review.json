@@ -1,0 +1,37 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-25-askuser-keyword-overkill-fix",
+  "reviewer": "subagent",
+  "verdict": "PASS",
+  "reviewedAgainst": "e283fed09",
+  "findings": [
+    {
+      "severity": "P3",
+      "status": "accepted",
+      "title": "FR-01 场景 2 的 segmentsToLegacy 投影断言未落测试（用例只断言到分类层）",
+      "evidence": "requirements.md FR-01 场景 2 承诺「classifySessionLog 后接 segmentsToLegacy 投影，output 含首尾特征文本」，新增用例仅断言 kind=reply + text 全文等值；投影链路 reply→text 段→output（session-log-assembler.ts:1506-1554 appendStreamText、:2121-2145 output 累加）为既有装配逻辑且有 session-log-assembler.test.ts 94 用例覆盖，分类层断言已等价覆盖 96b55567 丢失根因（分类层不再返回 null），故接受不阻断。",
+      "location": "frontend/src/components/daemon/__tests__/session-log-sanitize.test.ts:153-175"
+    },
+    {
+      "severity": "P3",
+      "status": "accepted",
+      "title": "tool_call 通道的 [ASSISTANT] 前缀含词行落 tool_use 段而非 design 接口契约字面的「reply/thinking」",
+      "evidence": "豁免后该退化输入落回 channel=tool_call 分支返回 kind=tool_use（session-log-assembler.ts:338-341），design 接口契约写「正常分类（reply/thinking）」未列此形态；生产库 [ASSISTANT] 前缀行恒走 stdout（design 做法概述「落回各自正常分类分支」已概括），属文档措辞粒度问题非行为漂移。",
+      "location": "frontend/src/components/daemon/session-log-assembler.ts:327"
+    },
+    {
+      "severity": "P3",
+      "status": "false-positive",
+      "title": "冻结提交含 2 个交付面声明外文件——为 SillySpec flow done 协议档案非代码混入",
+      "evidence": "git show e283fed09 --stat 共 5 文件：3 个声明交付文件 + .sillyspec/changes/<change>/tasks.md（任务勾选态）与 task-ticks.jsonl（流程打点），均为 SillySpec 流程自身产物，随 flow 提交入库属预期，无代码声明外混入。",
+      "location": ".sillyspec/changes/2026-10-25-askuser-keyword-overkill-fix/tasks.md"
+    }
+  ],
+  "dimensionNotes": {
+    "乱序": "ok——design 作答与代码相符：改动仅为分类层单条丢弃判定的纯函数收紧，不触 override 撤回/流式合并/去重时序（applyLogToSegments 未动）；不含词行经 && 短路零影响，含词前缀行落回既有分类分支后走同一 appendStreamText 路径，行序无关，行为单调改善。",
+    "并发": "ok——纯函数无共享状态无 IO，新增正则无 /g 标志（无 lastIndex 跨调用态），design「不适用」作答与代码事实一致。",
+    "切换": "ok——无状态迁移；历史日志在 attach 时经 logsToSegments→classifySessionLog 重放分类，收紧后重新打开会话/刷新即按新规则恢复显示，无需数据回填，design 作答与代码事实一致。",
+    "作用域": "ok——单仓单模块（frontend 会话装配层）；FR-03 用例实证 tool_call JSON/裸 JSON/[TOOL_USE] 文本行维持 null，过程视图不新增 AskUser 工具行，与 DialogQaBlock 单画约定无冲突；全库 grep 确认子串规则仅 assembler:327 与 sanitize:51 两处且同款收紧，daemon 侧无同款日志分类规则无串台面。"
+  },
+  "reviewedAt": "2026-10-25T06:25:13Z"
+}

@@ -1312,3 +1312,79 @@ created_at: 2026-10-16T01:30:35.950Z
   confirmed_at: null
   source_change: 2026-10-25-session-tab-visual-unify
   status: active
+
+## FR-test-utils-067 [ASSISTANT] 回复正文含「AskUserQuestion」字样的消息不再被丢弃，全文按 reply 段装配渲染（以 96b55567 收尾汇报真实形态做回归测试）
+变更：2026-10-25-askuser-keyword-overkill-fix
+状态：active
+摘要：正文提及关键词的回复完整保留；96b55567 真实形态回归
+全文：.sillyspec/changes/archive/2026-10-25-askuser-keyword-overkill-fix/requirements.md#FR-01
+最近确认：e283fed09505c71f36ac96dc6ec1d237a80b08c0
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-25-askuser-keyword-overkill-fix:flow:测试绑定FR-01
+  tests: frontend/src/components/daemon/__tests__/session-log-sanitize.test.ts「[ASSISTANT] 正文提及 AskUserQuestion → reply 全文保留（96b55567 形态回归）」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-25-askuser-keyword-overkill-fix
+  status: active
+
+## FR-test-utils-068 [THINKING] 正文含该词的思考行不再被误杀，正常产出 thinking 段
+变更：2026-10-25-askuser-keyword-overkill-fix
+状态：active
+摘要：思考行正文提及关键词
+全文：.sillyspec/changes/archive/2026-10-25-askuser-keyword-overkill-fix/requirements.md#FR-02
+最近确认：e283fed09505c71f36ac96dc6ec1d237a80b08c0
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-25-askuser-keyword-overkill-fix:flow:测试绑定FR-02
+  tests: frontend/src/components/daemon/__tests__/session-log-sanitize.test.ts「[THINKING] 正文提及 AskUserQuestion → thinking 不误杀」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-25-askuser-keyword-overkill-fix
+  status: active
+
+## FR-test-utils-069 AskUserQuestion 工具调用行维持现状：tool_call JSON 行仍被丢弃（提问卡由 dialog 通道 DialogQaBlock 渲染，防双画），stdout 的 [TOOL_USE] AskUserQuestion 文本行仍被丢弃
+变更：2026-10-25-askuser-keyword-overkill-fix
+状态：active
+摘要：tool_call JSON 行维持丢弃；[TOOL_USE] 文本行维持丢弃
+全文：.sillyspec/changes/archive/2026-10-25-askuser-keyword-overkill-fix/requirements.md#FR-03
+最近确认：e283fed09505c71f36ac96dc6ec1d237a80b08c0
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-25-askuser-keyword-overkill-fix:flow:测试绑定FR-03
+  tests: frontend/src/components/daemon/__tests__/session-log-sanitize.test.ts「AskUserQuestion 工具调用行维持丢弃（tool_call JSON / 裸 JSON / [TOOL_USE] 文本行）」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-25-askuser-keyword-overkill-fix
+  status: active
+
+## FR-test-utils-070 触及测试全绿 + 触及文件 lint 0 errors + typecheck 通过
+变更：2026-10-25-askuser-keyword-overkill-fix
+状态：active
+摘要：验证门
+全文：.sillyspec/changes/archive/2026-10-25-askuser-keyword-overkill-fix/requirements.md#FR-04
+最近确认：e283fed09505c71f36ac96dc6ec1d237a80b08c0
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-25-askuser-keyword-overkill-fix:flow:测试绑定FR-04
+  tests: frontend/src/components/daemon/__tests__/session-log-assembler.test.ts | frontend/src/components/daemon/__tests__/session-log-sanitize.test.ts
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-25-askuser-keyword-overkill-fix
+  status: active

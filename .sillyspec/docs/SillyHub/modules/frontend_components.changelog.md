@@ -156,3 +156,4 @@ created_at: 2026-08-30 22:23:33
 | 2026-10-25 | 2026-10-25-subagent-card-unify-panel | 子代理卡片统一为紧凑卡片+详情栏 |
 | 2026-10-25 | 2026-10-25-trajectory-source-model | 2026-10-25-trajectory-source-model |
 | 2026-10-25 | 2026-10-25-session-tab-visual-unify | 会话页对话与进度tab宽度组件统一改版 |
+| 2026-10-25 | 2026-10-25-askuser-keyword-overkill-fix | 会话 96b55567 排查实证——前端 session-log-assembler.ts clas… |
