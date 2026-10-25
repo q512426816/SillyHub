@@ -593,6 +593,18 @@ async def _submit_process_flat_messages(svc, st: _SubmitState) -> None:
         # 独立 INSERT 自带 metadata_，与本键互不覆盖，design §8）。
         agent_event_payload = msg.get("_agent_event") if isinstance(msg, dict) else None
 
+        # 2026-10-25-trajectory-source-model FR-04：daemon 上报 metadata 白名单
+        # 透传——turn_trigger（轮触发溯源戳）/ reason（session_header 快照变更
+        # 因由）落 metadata_；白名单外键丢弃（防注入面，design R-03）。群聊
+        # chain 键走 inject 直落路径（_merged_turn_metadata），不经 daemon 上报，
+        # 不在白名单内。
+        _daemon_metadata = msg.get("metadata") if isinstance(msg, dict) else None
+        _passthrough_metadata: dict[str, object] = {}
+        if isinstance(_daemon_metadata, dict):
+            for _key in ("turn_trigger", "reason"):
+                if _daemon_metadata.get(_key) is not None:
+                    _passthrough_metadata[_key] = _daemon_metadata[_key]
+
         # F2a（task-01 / FR-02）：行级时间戳优先取 wire 事件时刻（旧版 daemon
         # 无字段 / 非法 / 钟差超带回落后 st.now）——消除整批共享 st.now 单值的
         # 同毫秒时间戳塌缩（生产 8~31 行同刻度实证）。SSE 推送（下方
@@ -625,10 +637,18 @@ async def _submit_process_flat_messages(svc, st: _SubmitState) -> None:
             # flat record），落库供 REST 历史 + SSE 实时两路透传前端 diff 真实行号。
             edit_patch=msg.get("edit_patch") if isinstance(msg, dict) else None,
             # task-07：新轨 agent_event 行的结构化事件 JSON（见上方注释）。
+            # 2026-10-25-trajectory-source-model FR-04：agent_event 与白名单
+            # 透传键合并落库（双 None → None 零回归）。
             metadata_=(
-                {"agent_event": agent_event_payload}
-                if isinstance(agent_event_payload, dict)
-                else None
+                {
+                    **(
+                        {"agent_event": agent_event_payload}
+                        if isinstance(agent_event_payload, dict)
+                        else {}
+                    ),
+                    **_passthrough_metadata,
+                }
+                or None
             ),
         )
         svc._session.add(log_entry)

@@ -151,3 +151,48 @@ class TestCreatePathStamps:
         log = await _last_user_input_log(db_session, created.agent_run.id)
         assert log is not None
         assert not (log.metadata_ or {}).get("turn_trigger")
+
+
+class TestSubmitMetadataPassthrough:
+    """FR-04：daemon 上报 metadata 白名单透传与 session_header channel 直通。"""
+
+    async def test_whitelist_keys_persist_and_unknown_dropped(
+        self, db_session, mocked_redis
+    ) -> None:
+        from .test_run_sync_submit_timestamp import _seed_one_run
+
+        lease_id, token, run_id = await _seed_one_run(db_session)
+        svc = DaemonService(db_session)
+
+        result = await svc.submit_messages(
+            lease_id,
+            token,
+            run_id,
+            [
+                {
+                    "event_type": "text",
+                    "content": '{"systemPrompt": null}',
+                    "channel": "session_header",
+                    "metadata": {"reason": "initial", "evil_key": "x"},
+                },
+                {
+                    "event_type": "text",
+                    "content": "普通输出",
+                    "channel": "stdout",
+                    "metadata": {"turn_trigger": "agent_notice", "evil_key": "y"},
+                },
+            ],
+        )
+        assert result == 2
+
+        rows = (
+            (await db_session.execute(select(AgentRunLog).where(AgentRunLog.run_id == run_id)))
+            .scalars()
+            .all()
+        )
+        header = next(r for r in rows if r.channel == "session_header")
+        assert header.metadata_["reason"] == "initial"
+        assert "evil_key" not in header.metadata_
+        stamped = next(r for r in rows if r.channel == "stdout")
+        assert stamped.metadata_["turn_trigger"] == "agent_notice"
+        assert "evil_key" not in stamped.metadata_
