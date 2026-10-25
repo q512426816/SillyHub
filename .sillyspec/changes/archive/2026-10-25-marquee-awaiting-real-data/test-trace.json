@@ -1,0 +1,51 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-25-marquee-awaiting-real-data",
+  "rows": [
+    {
+      "anchor": "FR-01",
+      "row_id": "2026-10-25-marquee-awaiting-real-data:flow:测试绑定FR-01",
+      "tests": [
+        "frontend/src/components/daemon/__tests__/turn-live-marquee.test.tsx「lastEventAt 服务端起点：挂载即累计、不重置（FR-01）」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-25-marquee-awaiting-real-data"
+    },
+    {
+      "anchor": "FR-02",
+      "row_id": "2026-10-25-marquee-awaiting-real-data:flow:测试绑定FR-02",
+      "tests": [
+        "frontend/src/components/daemon/__tests__/turn-live-marquee.test.tsx「等待条目回显本轮 token；无数据不显示（FR-02）」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-25-marquee-awaiting-real-data"
+    },
+    {
+      "anchor": "FR-03",
+      "row_id": "2026-10-25-marquee-awaiting-real-data:flow:测试绑定FR-03",
+      "tests": [
+        "frontend/src/components/daemon/__tests__/turn-live-marquee.test.tsx「轨道按顺序完整渲染全部条目，不复制内容循环」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-25-marquee-awaiting-real-data"
+    }
+  ]
+}

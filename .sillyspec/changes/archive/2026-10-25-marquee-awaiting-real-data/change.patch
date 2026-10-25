@@ -1,0 +1,230 @@
+diff --git a/frontend/src/components/daemon/__tests__/turn-live-marquee.test.tsx b/frontend/src/components/daemon/__tests__/turn-live-marquee.test.tsx
+index 1f8b34c17..ad85264f1 100644
+--- a/frontend/src/components/daemon/__tests__/turn-live-marquee.test.tsx
++++ b/frontend/src/components/daemon/__tests__/turn-live-marquee.test.tsx
+@@ -449,6 +449,53 @@ describe("TurnLiveMarquee 连续轨道（FR-01 / FR-02 / FR-05）", () => {
+     expect(queryByTestId("marquee-awaiting")).toBeNull();
+   });
+ 
++  it("lastEventAt 服务端起点：挂载即累计、不重置（FR-01）", async () => {
++    const nowSpy = vi.spyOn(Date, "now").mockReturnValue(50_000);
++    try {
++      const { getByTestId } = render(
++        <TurnLiveMarquee
++          // 最后事件发生在 40s 前（服务端时间戳 10_000）。
++          lastEventAt={10_000}
++          entries={deriveLiveMarqueeEntries([
++            tool("tool-done", { startedAt: 5_000, endedAt: 10_000 }),
++          ])}
++        />,
++      );
++
++      const awaiting = getByTestId("marquee-awaiting");
++      // 挂载后数值段渲染：等待 ≈ 40s（服务端起点，不从 0 重置）。
++      await waitFor(() => {
++        expect(awaiting.textContent).toContain("40s");
++      });
++    } finally {
++      nowSpy.mockRestore();
++    }
++  });
++
++  it("等待条目回显本轮 token；无数据不显示（FR-02）", async () => {
++    const { getByTestId, rerender } = render(
++      <TurnLiveMarquee
++        turnTokens={{ input: 8400, output: 1250 }}
++        entries={deriveLiveMarqueeEntries([thinking("t-done", "思考完成")])}
++      />,
++    );
++    const awaiting = getByTestId("marquee-awaiting");
++    await waitFor(() => {
++      expect(awaiting.textContent).toContain("↑8,400 ↓1,250");
++    });
++
++    // 两值皆 null → 不显示 token 段。
++    rerender(
++      <TurnLiveMarquee
++        turnTokens={{ input: null, output: null }}
++        entries={deriveLiveMarqueeEntries([thinking("t-done", "思考完成")])}
++      />,
++    );
++    await waitFor(() => {
++      expect(getByTestId("marquee-awaiting").textContent).not.toContain("↑");
++    });
++  });
++
+   it("无条目时不渲染空壳", () => {
+     const { queryByTestId } = render(<TurnLiveMarquee entries={[]} />);
+     expect(queryByTestId("turn-live-marquee")).toBeNull();
+diff --git a/frontend/src/components/daemon/turn-live-marquee.tsx b/frontend/src/components/daemon/turn-live-marquee.tsx
+index d5abd5f18..b168d3b75 100644
+--- a/frontend/src/components/daemon/turn-live-marquee.tsx
++++ b/frontend/src/components/daemon/turn-live-marquee.tsx
+@@ -611,6 +611,17 @@ export interface TurnLiveMarqueeProps {
+    * 等待计时不启动——等待指示只属于仍在运行的宿主。
+    */
+   active?: boolean;
++  /**
++   * 最后事件的服务端毫秒时间戳（2026-10-25-marquee-awaiting-real-data / FR-01）。
++   * 等待计时起点优先取它（Date.now() - lastEventAt）——刷新/中途打开后等待时长
++   * 继续累计不重置；缺省回退客户端首次观察起点。
++   */
++  lastEventAt?: number | null;
++  /**
++   * 本轮累计 token（FR-02；来自 tokens 事件实时更新的轮级 inputTokens/outputTokens）。
++   * 等待条目回显「↑输入 ↓输出」；两值皆 null / 缺省不显示 token 段。
++   */
++  turnTokens?: { input: number | null; output: number | null } | null;
+ }
+ 
+ /**
+@@ -625,6 +636,8 @@ export const TurnLiveMarquee = memo(function TurnLiveMarquee({
+   layout = "bar",
+   testId,
+   active = true,
++  lastEventAt,
++  turnTokens,
+ }: TurnLiveMarqueeProps) {
+   const prefersReduced = usePrefersReducedMotion();
+   const reduced = reducedMotion ?? prefersReduced;
+@@ -698,35 +711,60 @@ export const TurnLiveMarquee = memo(function TurnLiveMarquee({
+   // entries / 计时 Map / 窗口滑动检测）。
+   const awaitingSinceRef = useRef<number | null>(null);
+   const [awaitingElapsedMs, setAwaitingElapsedMs] = useState(0);
++  // 数值段（时长/token）挂载后渲染——SSR/水合首帧只渲染骨架文案，避免
++  // Date.now 派生值的服务端/客户端不一致（同 runningElapsed 的 elapsedMounted 门控）。
++  const [awaitingMounted, setAwaitingMounted] = useState(false);
++  useEffect(() => {
++    setAwaitingMounted(true);
++  }, []);
+   // 等待条目仅在宿主仍在进行时出现（终态卡片不得假等——FR-01）。
+   const isAwaiting = active && latest != null && latest.status !== "running";
+   const awaitingKey = `${latest?.id ?? "none"}:${latest?.status ?? "none"}`;
+ 
++  // 2026-10-25-marquee-awaiting-real-data（FR-01）：等待起点优先最后事件的
++  // 服务端时间戳——刷新/中途打开后等待时长继续累计不重置；缺省回退客户端
++  // 首次观察起点（旧数据/无时间戳）。
++  const awaitingAnchor = (): number | null =>
++    lastEventAt ?? awaitingSinceRef.current ?? null;
++
+   useEffect(() => {
+     if (isAwaiting) {
+-      // 新的已完成条目到达（latest.id 变化）= 新间隙开始，从头计时。
++      // 新的已完成条目到达（latest.id 变化）= 新间隙开始，客户端兜底起点重记。
+       awaitingSinceRef.current = Date.now();
+-      setAwaitingElapsedMs(0);
++      const anchor = awaitingAnchor();
++      setAwaitingElapsedMs(anchor != null ? Math.max(0, Date.now() - anchor) : 0);
+     } else {
+       awaitingSinceRef.current = null;
+     }
+-  }, [isAwaiting, awaitingKey]);
++    // awaitingAnchor 读 lastEventAt / ref——不进依赖（ref 可变引用），lastEventAt
++    // 变化即新事件到达，isAwaiting/awaitingKey 随之翻转触发本 effect。
++    // eslint-disable-next-line react-hooks/exhaustive-deps
++  }, [isAwaiting, awaitingKey, lastEventAt]);
+ 
+   useEffect(() => {
+     if (!isAwaiting) return;
+     const timer = window.setInterval(() => {
+-      const since = awaitingSinceRef.current;
+-      if (since != null) setAwaitingElapsedMs(Math.max(0, Date.now() - since));
++      const anchor = awaitingAnchor();
++      if (anchor != null) setAwaitingElapsedMs(Math.max(0, Date.now() - anchor));
+     }, 1000);
+     return () => window.clearInterval(timer);
+-  }, [isAwaiting, awaitingKey]);
+-
++    // eslint-disable-next-line react-hooks/exhaustive-deps
++  }, [isAwaiting, awaitingKey, lastEventAt]);
++
++  // FR-02：本轮累计 token 段（tokens 事件实时更新；两值皆 null 不显示——旧 daemon/早期）。
++  const tokenSuffix =
++    turnTokens != null && (turnTokens.input != null || turnTokens.output != null)
++      ? ` · ↑${(turnTokens.input ?? 0).toLocaleString("zh-CN")} ↓${(turnTokens.output ?? 0).toLocaleString("zh-CN")}`
++      : "";
+   const awaitingEntry: LiveMarqueeEntry | null =
+     isAwaiting && latest != null
+       ? {
+           id: "marquee-awaiting",
+           icon: "awaiting",
+-          text: `等待模型响应 · ${formatMarqueeDuration(awaitingElapsedMs)}`,
++          // 数值段挂载后渲染（awaitingMounted）：SSR 首帧骨架，客户端水合后填时长/token。
++          text: awaitingMounted
++            ? `等待模型响应 · ${formatMarqueeDuration(awaitingElapsedMs)}${tokenSuffix}`
++            : "等待模型响应…",
+           status: "running",
+           startedAt: null,
+           endedAt: null,
+diff --git a/frontend/src/components/daemon/turn-timeline.tsx b/frontend/src/components/daemon/turn-timeline.tsx
+index 3c9bb0a76..8f6b4a7a3 100644
+--- a/frontend/src/components/daemon/turn-timeline.tsx
++++ b/frontend/src/components/daemon/turn-timeline.tsx
+@@ -1128,6 +1128,13 @@ const TurnRow = memo(function TurnRow({
+                   dialogHistory={dialogHistory}
+                   markerAnswered={hasLaterUserMessage}
+                   onMarkerSubmit={onResend}
++                  // 2026-10-25-marquee-awaiting-real-data（FR-03）：轮级 token +
++                  // 最后事件服务端时间戳——等待条目回显真实计时与本轮累计 token。
++                  turnTokens={
++                    turn.inputTokens != null || turn.outputTokens != null
++                      ? { input: turn.inputTokens, output: turn.outputTokens }
++                      : null
++                  }
+                   />
+                 </>
+               ) : (
+@@ -2247,6 +2254,7 @@ function SegmentedTurnBody({
+   dialogHistory,
+   markerAnswered,
+   onMarkerSubmit,
++  turnTokens,
+ }: {
+   segments: TurnSegment[];
+   turnStatus: TurnUiStatus;
+@@ -2259,6 +2267,8 @@ function SegmentedTurnBody({
+   markerAnswered: boolean;
+   /** task-07：marker 提问卡提交回调（答案作下一条用户消息，父级传 onResend）。 */
+   onMarkerSubmit: (_prompt: string) => void;
++  /** 2026-10-25-marquee-awaiting-real-data：轮级累计 token（tokens 事件实时更新）。 */
++  turnTokens?: { input: number | null; output: number | null } | null;
+ }) {
+   const turnDialogs = useMemo(
+     () => dialogHistory.filter((d) => d.run_id === runKey),
+@@ -2287,6 +2297,17 @@ function SegmentedTurnBody({
+         : [],
+     [viewMode, turnStatus, segments],
+   );
++  // 2026-10-25-marquee-awaiting-real-data（FR-01）：最后事件服务端时间戳——
++  // 等待计时真实锚点（刷新/中途打开不重置）。取条目三时刻最大值。
++  const liveLastEventAt = useMemo(() => {
++    if (liveEntries.length === 0) return null;
++    let max: number | null = null;
++    for (const entry of liveEntries) {
++      const ts = entry.endedAt ?? entry.startedAt ?? null;
++      if (ts != null && (max == null || ts > max)) max = ts;
++    }
++    return max;
++  }, [liveEntries]);
+   const timeline = useMemo(() => {
+     if (viewMode !== "all") return null;
+     const items: SegmentTimelineItem[] = [
+@@ -2436,8 +2457,16 @@ function SegmentedTurnBody({
+       )}
+       {/* 2026-10-22-conversation-live-marquee（FR-01 / FR-04）：对话视图运行中
+           轮次末尾的实时活动跑马灯——纯感知、不交互；进度/轨迹视图与终态轮
+-          liveEntries 为空不挂载。位置=本轮最新处（思考占位之后）。 */}
+-      {liveEntries.length > 0 && <TurnLiveMarquee entries={liveEntries} />}
++          liveEntries 为空不挂载。位置=本轮最新处（思考占位之后）。
++          2026-10-25-marquee-awaiting-real-data：等待条目接入服务端真实计时
++          与本轮累计 token。 */}
++      {liveEntries.length > 0 && (
++        <TurnLiveMarquee
++          entries={liveEntries}
++          lastEventAt={liveLastEventAt}
++          turnTokens={turnTokens}
++        />
++      )}
+       {/* 2026-10-20-session-page-dsh-alignment（FR-01 / D-016①）：原 quick-3c85b05e
+           的「开始 · 结束 · 历时」独立行已删除——它与轮尾状态行重复，时间细节改由
+           TurnRow 派生 metaDetail 折进那条唯一元信息行（RoundDivider.detail / all 视图

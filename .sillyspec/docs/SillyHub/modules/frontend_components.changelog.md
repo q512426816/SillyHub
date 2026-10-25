@@ -160,3 +160,4 @@ created_at: 2026-08-30 22:23:33
 | 2026-10-25 | 2026-10-25-marquee-inactive-awaiting-fix | 修复终态子代理卡片内嵌流动条仍显示等待转圈 |
 | 2026-10-25 | 2026-10-25-session-config-deferred-switch | 会话配置点选改暂存随下条消息生效 |
 | 2026-10-25 | 2026-10-23-pre-session-draft-persist | 新建会话未发送草稿跨刷新切换保留 |
+| 2026-10-25 | 2026-10-25-marquee-awaiting-real-data | 跑马灯等待条目接入真实计时与token |

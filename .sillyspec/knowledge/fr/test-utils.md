@@ -1509,3 +1509,67 @@ created_at: 2026-10-16T01:30:35.950Z
   confirmed_at: null
   source_change: 2026-10-23-pre-session-draft-persist
   status: active
+
+## FR-test-utils-078 等待起点改用最后事件的服务端时间戳（日志/工具段的 endedAt/startedAt/ts 最大值），刷新或中途打开页面后等待时长继续累计不重置；无服务端时间时回退客户端起点
+变更：2026-10-25-marquee-awaiting-real-data
+状态：active
+摘要：中途打开会话；无服务端时间
+全文：.sillyspec/changes/archive/2026-10-25-marquee-awaiting-real-data/requirements.md#FR-01
+最近确认：6cfbdbe137fdb12b2a8829192a79c454cd394a5f
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-25-marquee-awaiting-real-data:flow:测试绑定FR-01
+  tests: frontend/src/components/daemon/__tests__/turn-live-marquee.test.tsx「lastEventAt 服务端起点：挂载即累计、不重置（FR-01）」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-25-marquee-awaiting-real-data
+  status: active
+
+## FR-test-utils-079 等待条目回显本轮累计 token（↑输入 ↓输出，来自 tokens 事件实时更新的轮级数据）；无 token 数据不显示该段
+变更：2026-10-25-marquee-awaiting-real-data
+状态：active
+摘要：等待中回显；无 token（旧 daemon/早期）
+全文：.sillyspec/changes/archive/2026-10-25-marquee-awaiting-real-data/requirements.md#FR-02
+最近确认：6cfbdbe137fdb12b2a8829192a79c454cd394a5f
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-25-marquee-awaiting-real-data:flow:测试绑定FR-02
+  tests: frontend/src/components/daemon/__tests__/turn-live-marquee.test.tsx「等待条目回显本轮 token；无数据不显示（FR-02）」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-25-marquee-awaiting-real-data
+  status: active
+
+## FR-test-utils-080 会话整页与弹窗两模式均接入；子代理卡片内嵌条不显示轮级 token（作用域是主轮）
+变更：2026-10-25-marquee-awaiting-real-data
+状态：active
+摘要：两模式一致
+全文：.sillyspec/changes/archive/2026-10-25-marquee-awaiting-real-data/requirements.md#FR-03
+最近确认：6cfbdbe137fdb12b2a8829192a79c454cd394a5f
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-25-marquee-awaiting-real-data:flow:测试绑定FR-03
+  tests: frontend/src/components/daemon/__tests__/turn-live-marquee.test.tsx「轨道按顺序完整渲染全部条目，不复制内容循环」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-25-marquee-awaiting-real-data
+  status: active
+
+## FR-test-utils-081 相关测试更新与新增；全部通过；lint与typecheck通过
+变更：2026-10-25-marquee-awaiting-real-data
+状态：active
+摘要：回归核验
+全文：.sillyspec/changes/archive/2026-10-25-marquee-awaiting-real-data/requirements.md#FR-04
+最近确认：6cfbdbe137fdb12b2a8829192a79c454cd394a5f

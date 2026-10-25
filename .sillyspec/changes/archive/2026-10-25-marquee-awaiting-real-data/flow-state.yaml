@@ -1,0 +1,41 @@
+tier: thin
+legacy_fallback: false
+substeps:
+  artifacts: done
+  ledger: done
+  patch: done
+  review: done
+  probes: done
+  distill: done
+  archive: done
+  events: done
+born_face: thin
+with_tasks: false
+review_force: null
+input: |-
+  跑马灯等待条目接入真实计时与token
+
+  动机：用户反馈等待模型响应的计时是页面本地掐表不真实（刷新重置）；且 daemon 的 tokens 事件已实时推本轮累计 token，应在等待条目回显。
+
+  成功标准：
+  - 等待起点改用最后事件的服务端时间戳（日志/工具段的 endedAt/startedAt/ts 最大值），刷新或中途打开页面后等待时长继续累计不重置；无服务端时间时回退客户端起点
+  - 等待条目回显本轮累计 token（↑输入 ↓输出，来自 tokens 事件实时更新的轮级数据）；无 token 数据不显示该段
+  - 会话整页与弹窗两模式均接入；子代理卡片内嵌条不显示轮级 token（作用域是主轮）
+  - 相关测试更新与新增；全部通过；lint与typecheck通过
+autopilot: false
+prestage_ack: true
+baseline_commit: 8a10514a93b175db5d1f6e5b1e50339bc6d84470
+updatedAt: '2026-10-25T12:04:51.684Z'
+cross_baselines:
+  sillyspec: 67e50bcca2adb9ecd502d12086c0ac8cb994da84
+baseline_sha256: 74a6f177defc381486cc99f0e0b787be19e68544a9806246ade0b7a9433785c7
+spec_approved: true
+spec_approved_at: '2026-10-25T11:53:25.286Z'
+spec_approved_by: anon@DESKTOP-HJ0AM09
+spec_approved_channel: user-confirmed
+spec_attested_by: anon@DESKTOP-HJ0AM09
+gate_summary: >-
+  test: passed ← module[]+deps(jsx1)（8.4s）
+  结果：C:\Users\qinyi\IdeaProjects\multi-agent-platform\.sillyspec\.runtime\verify-runs\20261025120436\test-result.json｜lint:
+  skipped — 跳过原因：local.yaml 未配置 commands.lint（或标记 unavailable）。｜门文件 16 个
+
