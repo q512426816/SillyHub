@@ -1452,3 +1452,60 @@ created_at: 2026-10-16T01:30:35.950Z
 摘要：回归核验
 全文：.sillyspec/changes/archive/2026-10-25-marquee-inactive-awaiting-fix/requirements.md#FR-04
 最近确认：3a1f4551fb083eb1cd2ef1ec56438fdcadf60c13
+
+## FR-test-utils-075 预会话未发送草稿跨刷新 / 跨切换保留（page 与 dialog 两模式）
+变更：2026-10-23-pre-session-draft-persist
+状态：active
+摘要：（无场景名）
+全文：.sillyspec/changes/archive/2026-10-23-pre-session-draft-persist/requirements.md#FR-01
+最近确认：b83d2f2da7b9f30541f9b80b1bb7311d27462be0
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-23-pre-session-draft-persist:flow:测试绑定FR-01
+  tests: frontend/src/components/daemon/__tests__/session-panel-draft-scope.test.tsx「dialog idle：同 workspaceId 重开恢复未发送草稿」 | frontend/src/components/daemon/__tests__/session-panel-draft-scope.test.tsx「page 预会话：同一入口重进恢复未发送草稿（切走再回/刷新同路径）」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-23-pre-session-draft-persist
+  status: active
+
+## FR-test-utils-076 清空语义如实保留
+变更：2026-10-23-pre-session-draft-persist
+状态：active
+摘要：（无场景名）
+全文：.sillyspec/changes/archive/2026-10-23-pre-session-draft-persist/requirements.md#FR-02
+最近确认：b83d2f2da7b9f30541f9b80b1bb7311d27462be0
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-23-pre-session-draft-persist:flow:测试绑定FR-02
+  tests: frontend/src/components/daemon/__tests__/session-panel-draft-scope.test.tsx「dialog idle：清空后重开保持为空」 | frontend/src/components/daemon/__tests__/session-panel-draft-scope.test.tsx「page 预会话：清空后重进保持为空（不回显旧稿）」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-23-pre-session-draft-persist
+  status: active
+
+## FR-test-utils-077 三条既有语义零回归（回归锁定）
+变更：2026-10-23-pre-session-draft-persist
+状态：active
+摘要：（无场景名）
+全文：.sillyspec/changes/archive/2026-10-23-pre-session-draft-persist/requirements.md#FR-03
+最近确认：b83d2f2da7b9f30541f9b80b1bb7311d27462be0
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-23-pre-session-draft-persist:flow:测试绑定FR-03
+  tests: frontend/src/components/daemon/__tests__/session-panel-draft-scope.test.tsx「真会话草稿/入口隔离既有用例（套件全绿回归）」 | frontend/src/components/daemon/__tests__/session-panel-draft-scope.test.tsx「预会话发送受理即清后再次新建为空（既有语义零回归）」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-23-pre-session-draft-persist
+  status: active

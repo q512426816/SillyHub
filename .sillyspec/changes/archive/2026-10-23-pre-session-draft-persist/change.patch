@@ -1,0 +1,1764 @@
+diff --git a/.sillyspec/docs/SillyHub/modules/frontend_components.changelog.md b/.sillyspec/docs/SillyHub/modules/frontend_components.changelog.md
+index a9ca2ecfb..b28d72bcd 100644
+--- a/.sillyspec/docs/SillyHub/modules/frontend_components.changelog.md
++++ b/.sillyspec/docs/SillyHub/modules/frontend_components.changelog.md
+@@ -158,3 +158,4 @@ created_at: 2026-08-30 22:23:33
+ | 2026-10-25 | 2026-10-25-session-tab-visual-unify | 会话页对话与进度tab宽度组件统一改版 |
+ | 2026-10-25 | 2026-10-25-askuser-keyword-overkill-fix | 会话 96b55567 排查实证——前端 session-log-assembler.ts clas… |
+ | 2026-10-25 | 2026-10-25-marquee-inactive-awaiting-fix | 修复终态子代理卡片内嵌流动条仍显示等待转圈 |
++| 2026-10-25 | 2026-10-25-session-config-deferred-switch | 会话配置点选改暂存随下条消息生效 |
+diff --git a/.sillyspec/docs/multi-agent-platform/modules/docs.changelog.md b/.sillyspec/docs/multi-agent-platform/modules/docs.changelog.md
+index 17497c50a..689f149d4 100644
+--- a/.sillyspec/docs/multi-agent-platform/modules/docs.changelog.md
++++ b/.sillyspec/docs/multi-agent-platform/modules/docs.changelog.md
+@@ -26,3 +26,4 @@
+ - 2026-10-23-rename-ghost-pit-doc | 坑11 留痕 rename 幽灵变更根治与清理
+ - 2026-10-23-session-first-load-ux | 会话首屏加载提速：补拉链不阻塞渲染+加载骨架屏
+ - 2026-10-23-diff-dialog-pairing-fix | 轮文件变更弹窗(turn-file-diff-dialog)在补丁行缺 tool_use_id 时走…
++- 2026-10-25-session-config-deferred-switch | 会话配置点选改暂存随下条消息生效
+diff --git a/.sillyspec/docs/multi-agent-platform/modules/frontend.changelog.md b/.sillyspec/docs/multi-agent-platform/modules/frontend.changelog.md
+index df301dac8..cb34b443b 100644
+--- a/.sillyspec/docs/multi-agent-platform/modules/frontend.changelog.md
++++ b/.sillyspec/docs/multi-agent-platform/modules/frontend.changelog.md
+@@ -207,3 +207,4 @@
+ | 2026-10-25 | 2026-10-25-session-tab-visual-unify | 会话页对话与进度tab宽度组件统一改版 |
+ | 2026-10-25 | 2026-10-25-askuser-keyword-overkill-fix | 会话 96b55567 排查实证——前端 session-log-assembler.ts clas… |
+ | 2026-10-25 | 2026-10-25-marquee-inactive-awaiting-fix | 修复终态子代理卡片内嵌流动条仍显示等待转圈 |
++| 2026-10-25 | 2026-10-25-session-config-deferred-switch | 会话配置点选改暂存随下条消息生效 |
+diff --git a/frontend/src/components/daemon/__tests__/session-panel-draft-scope.test.tsx b/frontend/src/components/daemon/__tests__/session-panel-draft-scope.test.tsx
+index b7e710702..f6de86ad1 100644
+--- a/frontend/src/components/daemon/__tests__/session-panel-draft-scope.test.tsx
++++ b/frontend/src/components/daemon/__tests__/session-panel-draft-scope.test.tsx
+@@ -423,22 +423,59 @@ describe("page 预会话草稿入口隔离（task-01 / D-001）", () => {
+     );
+   });
+ 
+-  it("同一入口重进：输入框恒空白（新建=全新开始，残留键清除）", async () => {
+-    // 2026-10-23-session-input-clear-fix / FR-04：预会话挂载不再回读草稿——
+-    // 原「同入口重进恢复草稿」语义与用户「新建会话应全新空白」预期冲突
+-    //（用户报障：其他会话填过 AAA，新建会话仍显示 AAA），本卡修订为恒空白
+-    // 并顺带清残留键（原未发送草稿随新建废弃）。真会话草稿回读不受影响
+-    //（上方时序用例锁定）。
+-    window.localStorage.setItem(DRAFT_KEY("__pre__:ws-1:rt-claude"), "重进应恢复");
++  it("page 预会话：同一入口重进恢复未发送草稿（切走再回/刷新同路径）", async () => {
++    // 2026-10-23-pre-session-draft-persist / FR-01：用户显式反转前序「恒空白」
++    // 裁决——预会话未发送草稿必须跨切换/刷新保留；回读源是入口隔离键
++    // __pre__:<scope>，真会话草稿在 <sessionId> 键下，前序报障「其他会话填
++    // AAA 新建会话显示 AAA」不复潮（两键无交集）。
++    const first = setupPage({
++      preContext: { workspaceId: "ws-1", runtimeId: "rt-claude" },
++    });
++    const input = (await screen.findByPlaceholderText(
++      /发送第一句话开始对话/,
++    )) as HTMLTextAreaElement;
++    await nextFrame();
++    fireEvent.change(input, { target: { value: "AAA" } });
++    await waitFor(() =>
++      expect(window.localStorage.getItem(DRAFT_KEY("__pre__:ws-1:rt-claude"))).toBe(
++        "AAA",
++      ),
++    );
++    first.unmount();
++
++    // 重挂载（重新点新建会话 / 刷新后重新进入同一入口）：原样恢复 AAA。
+     setupPage({ preContext: { workspaceId: "ws-1", runtimeId: "rt-claude" } });
++    const back = (await screen.findByPlaceholderText(
++      /发送第一句话开始对话/,
++    )) as HTMLTextAreaElement;
++    await waitFor(() => expect(back.value).toBe("AAA"));
++  });
++
++  it("page 预会话：清空后重进保持为空（不回显旧稿）", async () => {
++    // 2026-10-23-pre-session-draft-persist / FR-02：清空动作本身要被持久化
++    //（写 effect 随输入变化落 ""），重进读回为空——不是旧 AAA。
++    const first = setupPage({
++      preContext: { workspaceId: "ws-1", runtimeId: "rt-claude" },
++    });
+     const input = (await screen.findByPlaceholderText(
+       /发送第一句话开始对话/,
+     )) as HTMLTextAreaElement;
+-    await waitFor(() => expect(input.value).toBe(""));
+-    // 残留键在挂载时被清（新建即弃稿，不再留下可回读的死数据）。
+-    expect(
+-      window.localStorage.getItem(DRAFT_KEY("__pre__:ws-1:rt-claude")),
+-    ).toBe("");
++    await nextFrame();
++    fireEvent.change(input, { target: { value: "AAA" } });
++    await waitFor(() => expect(input.value).toBe("AAA"));
++    fireEvent.change(input, { target: { value: "" } });
++    await waitFor(() =>
++      expect(window.localStorage.getItem(DRAFT_KEY("__pre__:ws-1:rt-claude"))).toBe(
++        "",
++      ),
++    );
++    first.unmount();
++
++    setupPage({ preContext: { workspaceId: "ws-1", runtimeId: "rt-claude" } });
++    const back = (await screen.findByPlaceholderText(
++      /发送第一句话开始对话/,
++    )) as HTMLTextAreaElement;
++    await waitFor(() => expect(back.value).toBe(""));
+   });
+ 
+   it("workspaceId null 的入口：scope 用 '-' 分量组装（与具名工作区入口隔离）", async () => {
+@@ -498,16 +535,39 @@ describe("dialog 预会话草稿 scope（task-01 / D-001）", () => {
+     );
+   });
+ 
+-  it("同 workspaceId 重开 dialog（idle）：输入框恒空白（新建=全新开始，残留键清除）", async () => {
+-    // 2026-10-23-session-dialog-input-align / FR-04：原语义为「重进恢复草稿」，
+-    // 与用户预期「新建 = 全新开始」冲突（page 模式同款语义修正）——改为恒空白。
+-    window.localStorage.setItem(DRAFT_KEY("__pre__:ws-d1"), "dialog 重进恢复");
++  it("dialog idle：同 workspaceId 重开恢复未发送草稿（切走/刷新同路径）", async () => {
++    // 2026-10-23-pre-session-draft-persist / FR-01：用户显式反转 dialog 侧
++    //「恒空白」裁决（与 page 同步）；回读源 __pre__:<workspaceId>，真会话键无交集。
++    const first = setupDialog({ workspaceId: "ws-d1" });
++    const input = await dialogIdleInput();
++    await nextFrame();
++    fireEvent.change(input, { target: { value: "AAA" } });
++    await waitFor(() =>
++      expect(window.localStorage.getItem(DRAFT_KEY("__pre__:ws-d1"))).toBe("AAA"),
++    );
++    first.unmount();
++
+     setupDialog({ workspaceId: "ws-d1" });
+-    const input = (await screen.findByPlaceholderText(
+-      /输入首条消息创建会话/,
+-    )) as HTMLTextAreaElement;
+-    await waitFor(() => expect(input.value).toBe(""));
+-    expect(window.localStorage.getItem(DRAFT_KEY("__pre__:ws-d1"))).toBe("");
++    const back = await dialogIdleInput();
++    await waitFor(() => expect(back.value).toBe("AAA"));
++  });
++
++  it("dialog idle：清空后重开保持为空（不回显旧稿）", async () => {
++    // 2026-10-23-pre-session-draft-persist / FR-02（dialog 侧同构）。
++    const first = setupDialog({ workspaceId: "ws-d1" });
++    const input = await dialogIdleInput();
++    await nextFrame();
++    fireEvent.change(input, { target: { value: "AAA" } });
++    await waitFor(() => expect(input.value).toBe("AAA"));
++    fireEvent.change(input, { target: { value: "" } });
++    await waitFor(() =>
++      expect(window.localStorage.getItem(DRAFT_KEY("__pre__:ws-d1"))).toBe(""),
++    );
++    first.unmount();
++
++    setupDialog({ workspaceId: "ws-d1" });
++    const back = await dialogIdleInput();
++    await waitFor(() => expect(back.value).toBe(""));
+   });
+ });
+ 
+@@ -646,7 +706,9 @@ describe("受理即同步清草稿键（FR-03）", () => {
+           box.settle = resolve;
+         }),
+     );
+-    setupPage({ preContext: { workspaceId: "ws-1", runtimeId: "rt-claude" } });
++    const first = setupPage({
++      preContext: { workspaceId: "ws-1", runtimeId: "rt-claude" },
++    });
+     const input = (await screen.findByPlaceholderText(
+       /发送第一句话开始对话/,
+     )) as HTMLTextAreaElement;
+@@ -664,6 +726,14 @@ describe("受理即同步清草稿键（FR-03）", () => {
+         "",
+       ),
+     );
++    // 2026-10-23-pre-session-draft-persist / FR-03 回归锁定：受理即清后重挂载
++    // 预会话（回读语义开启后），输入框为空——发送过的内容不回显。
++    first.unmount();
++    setupPage({ preContext: { workspaceId: "ws-1", runtimeId: "rt-claude" } });
++    const back = (await screen.findByPlaceholderText(
++      /发送第一句话开始对话/,
++    )) as HTMLTextAreaElement;
++    await waitFor(() => expect(back.value).toBe(""));
+     box.settle?.({ session_id: "sess-new" });
+   });
+ });
+@@ -675,7 +745,8 @@ describe("受理即同步清草稿键（FR-03）", () => {
+  * 且 idle 首句创建失败时输入已清且不恢复（丢文本）。
+  *
+  * 本节锁定 dialog 侧 FR-01（受理即清）/ FR-02（失败恢复）/ FR-03（受理即清
+- * 草稿键）/ FR-04（idle 恒空白 + 真会话草稿不回归）。 */
++ * 草稿键）；FR-04 的「idle 恒空白」已被 2026-10-23-pre-session-draft-persist
++ * 反转为「idle 回读 __pre__ 草稿」（见下方 describe），真会话草稿不回归。 */
+ 
+ /** dialog idle 输入框（placeholder「输入首条消息创建会话」）。 */
+ async function dialogIdleInput() {
+@@ -868,13 +939,15 @@ describe("dialog 受理即同步清草稿键（FR-03）", () => {
+   });
+ });
+ 
+-describe("dialog idle 态恒空白 + 真会话草稿不回归（FR-04）", () => {
+-  it("idle 挂载不回读 __pre__ 草稿，且清残留键", async () => {
++describe("dialog idle 态草稿保留 + 真会话草稿不回归（2026-10-23-pre-session-draft-persist）", () => {
++  it("idle 挂载回读 __pre__ 草稿（未发送内容跨重开保留）", async () => {
++    // 反转 session-dialog-input-align FR-04「恒空白」：用户显式要求未发送
++    // 草稿跨重开/刷新保留；残留键不再被清，由回读展示（清空则写 ""）。
+     window.localStorage.setItem(DRAFT_KEY("__pre__:ws-d1"), "旧内容");
+     setupDialog({ workspaceId: "ws-d1" });
+     const input = await dialogIdleInput();
+-    await waitFor(() => expect(input.value).toBe(""));
+-    expect(window.localStorage.getItem(DRAFT_KEY("__pre__:ws-d1"))).toBe("");
++    await waitFor(() => expect(input.value).toBe("旧内容"));
++    expect(window.localStorage.getItem(DRAFT_KEY("__pre__:ws-d1"))).toBe("旧内容");
+   });
+ 
+   it("真会话草稿持久化不回归：重开同一会话恢复草稿", async () => {
+diff --git a/frontend/src/components/daemon/__tests__/session-panel-variant.test.tsx b/frontend/src/components/daemon/__tests__/session-panel-variant.test.tsx
+index 011d75d28..8a19f4535 100644
+--- a/frontend/src/components/daemon/__tests__/session-panel-variant.test.tsx
++++ b/frontend/src/components/daemon/__tests__/session-panel-variant.test.tsx
+@@ -124,11 +124,26 @@ vi.mock("@/lib/agent-profiles", async () => {
+   );
+   return { ...actual, useMineAgentProfiles: () => ({ profiles: [] }) };
+ });
++// page 模式 chrome（SessionConfigBar）数据 hook：无网络，空数据。
++vi.mock("@/lib/use-daemon-machines", () => ({
++  useDaemonMachines: () => ({ items: [] }),
++}));
++vi.mock("@/lib/agent-profiles", async () => {
++  const actual = await vi.importActual<typeof import("@/lib/agent-profiles")>(
++    "@/lib/agent-profiles",
++  );
++  return { ...actual, useMineAgentProfiles: () => ({ profiles: [] }) };
++});
++// 2026-10-25-session-config-deferred-switch：配置条供应商下拉取数改 hoisted
++// 可控 mock（暂存发送用例按需注入供应商列表）。
++const llmApi = vi.hoisted(() => ({
++  listProviders: vi.fn(),
++}));
+ vi.mock("@/lib/api/llm-providers", async () => {
+   const actual = await vi.importActual<typeof import("@/lib/api/llm-providers")>(
+     "@/lib/api/llm-providers",
+   );
+-  return { ...actual, listProviders: vi.fn().mockResolvedValue([]) };
++  return { ...actual, listProviders: llmApi.listProviders };
+ });
+ 
+ /* ----- 回归锚字面量（硬编码防源文件漂移自证；2026-09-09-sessions-visual-refresh
+@@ -207,7 +222,10 @@ function makeMission(): TeamMissionSummary {
+ }
+ 
+ /** page 模式挂载（variant 缺省 = 既有调用点形态；传则显式声明）。 */
+-function setupPage(variant?: "desktop" | "mobile") {
++function setupPage(
++  variant?: "desktop" | "mobile",
++  opts?: { llmProviders?: unknown[] },
++) {
+   const qc = new QueryClient({
+     defaultOptions: { queries: { retry: false } },
+   });
+@@ -217,7 +235,7 @@ function setupPage(variant?: "desktop" | "mobile") {
+         mode="page"
+         sessionId="sess-variant"
+         machines={[]}
+-        llmProviders={[]}
++        llmProviders={opts?.llmProviders ?? ([] as never[])}
+         {...(variant ? { variant } : {})}
+       />
+     </QueryClientProvider>,
+@@ -252,6 +270,7 @@ beforeEach(() => {
+   workspaceApi.listWorkspaces.mockResolvedValue({ items: [] });
+   workspaceApi.listProjects.mockResolvedValue([]);
+   workspaceApi.listProjectWorkspaces.mockResolvedValue([]);
++  llmApi.listProviders.mockResolvedValue([]);
+ });
+ 
+ /* ───────── 1. 回归锚：不传 variant = desktop（FR-11 桌面零回归） ───────── */
+@@ -434,6 +453,75 @@ describe("SessionPanel variant='mobile' 布局类与收纳", () => {
+     );
+   });
+ 
++  // 2026-10-25-session-config-deferred-switch（FR-02 / D-001）：空闲点选供应商
++  // 仅暂存（不发请求、无空切换轮）；发送消息时随 injectSession 一并生效，受理
++  // 成功后暂存清空（再次发送不带配置字段，零回归形态）。
++  it("暂存供应商 → 发送消息随 injectSession 生效并清空暂存", async () => {
++    llmApi.listProviders.mockResolvedValue([
++      { id: "prov-glm", name: "GLM 平台", models: [], agent_kinds: ["claude"] },
++    ]);
++    setupPage("desktop", {
++      llmProviders: [{ id: "prov-glm", name: "GLM 平台" }],
++    });
++
++    // 等会话详情加载（配置条随会话态渲染）
++    await screen.findByPlaceholderText(/继续追问/);
++    // 空闲点选供应商 → 暂存（无 injectSession 请求、时间线无新增轮）
++    fireEvent.click(screen.getByRole("button", { name: /配置-供应商/ }));
++    fireEvent.click(
++      await screen.findByRole("button", { name: "选择 GLM 平台" }),
++    );
++    expect(sessionApi.injectSession).not.toHaveBeenCalled();
++
++    // 发送消息 → injectSession 带暂存供应商（随本轮消息生效）
++    const input = (await screen.findByPlaceholderText(
++      /继续追问/,
++    )) as HTMLTextAreaElement;
++    fireEvent.change(input, { target: { value: "你好" } });
++    fireEvent.click(screen.getByTitle("发送"));
++    await waitFor(() => expect(sessionApi.injectSession).toHaveBeenCalled());
++    const call = sessionApi.injectSession.mock.calls.at(-1);
++    expect(call?.[0]).toBe("sess-variant");
++    expect(call?.[1]).toBe("你好");
++    expect(call?.[2]?.llm_provider_id).toBe("prov-glm");
++
++    // 受理成功 → 暂存清空：再次发送不带配置字段（与无暂存形态一致）
++    sessionApi.injectSession.mockClear();
++    fireEvent.change(input, { target: { value: "第二条" } });
++    fireEvent.click(screen.getByTitle("发送"));
++    await waitFor(() => expect(sessionApi.injectSession).toHaveBeenCalledTimes(1));
++    const call2 = sessionApi.injectSession.mock.calls.at(0);
++    expect(call2?.[2]?.llm_provider_id).toBeUndefined();
++  });
++
++  // 2026-10-25（FR-06 / D-001）：发送带暂存配置 → 时间线轮块顶部独占一行切换
++  // 说明（占位轮预置，发送方权威——含会话级模型覆盖维度）。
++  it("暂存供应商发送 → 时间线显示切换说明行（模型/供应商已切换 A → B）", async () => {
++    llmApi.listProviders.mockResolvedValue([
++      { id: "prov-glm", name: "GLM 平台", models: [], agent_kinds: ["claude"] },
++    ]);
++    setupPage("desktop", {
++      llmProviders: [{ id: "prov-glm", name: "GLM 平台" }],
++    });
++
++    // 等会话详情加载（配置条随会话态渲染）
++    await screen.findByPlaceholderText(/继续追问/);
++    fireEvent.click(screen.getByRole("button", { name: /配置-供应商/ }));
++    fireEvent.click(
++      await screen.findByRole("button", { name: "选择 GLM 平台" }),
++    );
++    const input = (await screen.findByPlaceholderText(
++      /继续追问/,
++    )) as HTMLTextAreaElement;
++    fireEvent.change(input, { target: { value: "你好" } });
++    fireEvent.click(screen.getByTitle("发送"));
++
++    // 占位轮（configChangeLine 预置）渲染：会话当前无供应商（本机默认）→ GLM 平台
++    const line = await screen.findByTestId("turn-config-change");
++    expect(line.textContent).toContain("供应商已切换");
++    expect(line.textContent).toContain("GLM 平台");
++  });
++
+   // ql-20260915-009 手机端降噪：用量条（六项统计）mobile 整条不渲染——纯辅助
+   // 信息不占会话主体；desktop 照旧（回归锚）。
+   const usagePayload = {
+diff --git a/frontend/src/components/daemon/session-panel/__tests__/config-change-line.test.ts b/frontend/src/components/daemon/session-panel/__tests__/config-change-line.test.ts
+new file mode 100644
+index 000000000..0a72be941
+--- /dev/null
++++ b/frontend/src/components/daemon/session-panel/__tests__/config-change-line.test.ts
+@@ -0,0 +1,212 @@
++/**
++ * 配置切换说明行单测（2026-10-25-session-config-deferred-switch / FR-06 / D-001）。
++ *
++ * 依据：
++ *   - components/daemon/session-panel/page-helpers.tsx buildConfigChangeLine（纯函数）
++ *   - components/daemon/session-panel/page-helpers.tsx enrichDisplayTurns（历史路：
++ *     显示序相邻轮快照对比 → configChangeLine；whoLine.modelName = 档案快照 model）
++ *   - components/daemon/turn-timeline.tsx SessionTurnView.configChangeLine（渲染契约：
++ *     非空才渲染，零回归）
++ *
++ * 覆盖面：文案生成（单维/多维/null 口径/缺快照）+ enrich 相邻对比（变化轮标注、
++ * 无变化不标、预置值优先保留、孤儿轮参与对比）。
++ */
++import { describe, it, expect } from "vitest";
++
++import {
++  buildConfigChangeLine,
++  enrichDisplayTurns,
++  type ConfigChangeWho,
++} from "../page-helpers";
++import type { SessionTurnView } from "@/components/daemon/turn-timeline";
++import type { SessionRunRead } from "@/lib/daemon";
++import type { LlmProviderRead } from "@/lib/api/llm-providers";
++
++const WHO = (over: Partial<ConfigChangeWho> = {}): ConfigChangeWho => ({
++  profileName: null,
++  providerName: null,
++  modelName: null,
++  ...over,
++});
++
++describe("buildConfigChangeLine 文案生成", () => {
++  it("prev 缺失（首轮/无快照）→ null 不编造", () => {
++    expect(buildConfigChangeLine(null, WHO())).toBeNull();
++    expect(buildConfigChangeLine(WHO(), null)).toBeNull();
++    expect(buildConfigChangeLine(undefined, WHO())).toBeNull();
++  });
++
++  it("全等 → null（无变化不渲染）", () => {
++    const who = WHO({
++      profileName: "知识经理",
++      providerName: "GLM 平台",
++      modelName: "glm-5.3",
++    });
++    expect(buildConfigChangeLine(who, { ...who })).toBeNull();
++  });
++
++  it("单维模型变化 → 「模型已切换 A → B」（用户示例口径）", () => {
++    expect(
++      buildConfigChangeLine(
++        WHO({ providerName: "GLM 个人套餐", modelName: "GLM-5.3" }),
++        WHO({ providerName: "GLM 个人套餐", modelName: "GLM-5.3-FlashX" }),
++      ),
++    ).toBe("模型已切换 GLM-5.3 → GLM-5.3-FlashX");
++  });
++
++  it("单维供应商变化 → 「供应商已切换 A → B」；null → 本机默认", () => {
++    expect(
++      buildConfigChangeLine(
++        WHO({ providerName: "Kimi 中转" }),
++        WHO({ providerName: null }),
++      ),
++    ).toBe("供应商已切换 Kimi 中转 → 本机默认");
++    expect(
++      buildConfigChangeLine(
++        WHO({ providerName: null }),
++        WHO({ providerName: "Kimi 中转" }),
++      ),
++    ).toBe("供应商已切换 本机默认 → Kimi 中转");
++  });
++
++  it("档案变化 → 「档案已切换 A → B」；null → 未指定、模型 null → 默认", () => {
++    expect(
++      buildConfigChangeLine(
++        WHO({ profileName: "知识经理", modelName: "glm-5.3" }),
++        WHO({ profileName: null, modelName: null }),
++      ),
++    ).toBe("模型已切换 glm-5.3 → 默认 · 档案已切换 知识经理 → 未指定");
++  });
++
++  it("多维同时变化 → 「 · 」连接（供应商 · 模型 · 档案固定顺序）", () => {
++    expect(
++      buildConfigChangeLine(
++        WHO({ profileName: "A", providerName: "X", modelName: "m1" }),
++        WHO({ profileName: "B", providerName: "Y", modelName: "m2" }),
++      ),
++    ).toBe(
++      "供应商已切换 X → Y · 模型已切换 m1 → m2 · 档案已切换 A → B",
++    );
++  });
++
++  it("undefined 与 null 同视（modelName 缺省不误报变化）", () => {
++    expect(
++      buildConfigChangeLine(
++        WHO({ modelName: undefined }),
++        WHO({ modelName: null }),
++      ),
++    ).toBeNull();
++  });
++});
++
++// ── enrichDisplayTurns 历史路相邻对比 ────────────────────────────────────────
++
++function runMeta(over: Partial<SessionRunRead> = {}): SessionRunRead {
++  return {
++    id: "run-x",
++    created_at: "2026-10-25T10:00:00Z",
++    status: "completed",
++    error_code: null,
++    error_detail: null,
++    started_at: "2026-10-25T10:00:00Z",
++    finished_at: "2026-10-25T10:01:00Z",
++    exit_code: 0,
++    agent_profile_snapshot: null,
++    llm_provider_id: null,
++    input_tokens: null,
++    output_tokens: null,
++    failure_summary: null,
++    user_id: null,
++    sender_name: null,
++    ...over,
++  } as SessionRunRead;
++}
++
++function turn(over: Partial<SessionTurnView> = {}): SessionTurnView {
++  return {
++    runId: "run-x",
++    turn: 1,
++    prompt: "hi",
++    output: "",
++    status: "completed",
++    seenLogIds: new Set<string>(),
++    inputTokens: null,
++    outputTokens: null,
++    ctxTokens: null,
++    apiDurationMs: null,
++    errorDetail: null,
++    processItems: [],
++    ...over,
++  } as SessionTurnView;
++}
++
++const PROVIDERS = [
++  { id: "prov-glm", name: "GLM 平台" },
++  { id: "prov-kimi", name: "Kimi 中转" },
++] as unknown as LlmProviderRead[];
++
++describe("enrichDisplayTurns 历史路切换说明", () => {
++  it("相邻轮快照模型/供应商变化 → 后轮标注切换说明（前轮不标）", () => {
++    const metaA = runMeta({
++      id: "run-a",
++      agent_profile_snapshot: { name: "知识经理", model: "glm-5.3" },
++      llm_provider_id: "prov-glm",
++    });
++    const metaB = runMeta({
++      id: "run-b",
++      agent_profile_snapshot: { name: "知识经理", model: "glm-5.3-flashx" },
++      llm_provider_id: "prov-glm",
++    });
++    const turns = [
++      turn({ runId: "run-a", turn: 1 }),
++      turn({ runId: "run-b", turn: 2 }),
++    ];
++    const runsMeta = new Map([
++      ["run-a", metaA],
++      ["run-b", metaB],
++    ]);
++    const enriched = enrichDisplayTurns(turns, runsMeta, PROVIDERS, "Claude Code", null);
++    expect(enriched[0]?.configChangeLine ?? null).toBeNull();
++    expect(enriched[1]?.configChangeLine).toBe(
++      "模型已切换 glm-5.3 → glm-5.3-flashx",
++    );
++    // whoLine 扩展 modelName 生效（档案快照 model 直通）
++    expect(enriched[1]?.whoLine?.modelName).toBe("glm-5.3-flashx");
++  });
++
++  it("配置无变化 / 首轮 → 不标注（零回归）", () => {
++    const meta = runMeta({
++      agent_profile_snapshot: { name: "知识经理", model: "m1" },
++      llm_provider_id: "prov-glm",
++    });
++    const turns = [turn({ runId: "run-a", turn: 1 }), turn({ runId: "run-b", turn: 2 })];
++    const runsMeta = new Map([
++      ["run-a", meta],
++      ["run-b", { ...meta, id: "run-b" } as SessionRunRead],
++    ]);
++    const enriched = enrichDisplayTurns(turns, runsMeta, PROVIDERS, "Claude Code", null);
++    expect(enriched[0]?.configChangeLine ?? null).toBeNull();
++    expect(enriched[1]?.configChangeLine ?? null).toBeNull();
++  });
++
++  it("实时路预置值优先保留（不覆盖——含会话级模型覆盖维度）", () => {
++    const metaB = runMeta({
++      id: "run-b",
++      agent_profile_snapshot: { name: "知识经理", model: "glm-5.3" },
++    });
++    const turns = [
++      turn({ runId: "run-a", turn: 1 }),
++      turn({
++        runId: "run-b",
++        turn: 2,
++        // 快照对比路会生成同文案；预置另一形态文本验证「预置优先不覆盖」
++        configChangeLine: "模型已切换 GLM-5.3(个人套餐) → GLM-5.3-FlashX(个人套餐)",
++      }),
++    ];
++    const runsMeta = new Map([["run-b", metaB]]);
++    const enriched = enrichDisplayTurns(turns, runsMeta, PROVIDERS, "Claude Code", null);
++    expect(enriched[1]?.configChangeLine).toBe(
++      "模型已切换 GLM-5.3(个人套餐) → GLM-5.3-FlashX(个人套餐)",
++    );
++  });
++});
+diff --git a/frontend/src/components/daemon/session-panel/page-helpers.tsx b/frontend/src/components/daemon/session-panel/page-helpers.tsx
+index 3d991e8f9..5034482f1 100644
+--- a/frontend/src/components/daemon/session-panel/page-helpers.tsx
++++ b/frontend/src/components/daemon/session-panel/page-helpers.tsx
+@@ -144,6 +144,51 @@ export interface SessionPanelPageProps {
+  */
+ export const ACTIVE_RUN_STATUSES = new Set(["running", "pending", "pending_approval"]);
+ 
++/**
++ * 2026-10-25-session-config-deferred-switch（D-001）：轮级生效配置摘要
++ * （whoLine 形状子集——buildConfigChangeLine 的入参/出参基准）。
++ */
++export interface ConfigChangeWho {
++  profileName: string | null;
++  providerName: string | null;
++  /** 档案快照模型名（会话级模型覆盖不落 run 快照，快照路该维如实缺失）。 */
++  modelName?: string | null;
++}
++
++/**
++ * 2026-10-25-session-config-deferred-switch（D-001）：配置切换说明文案生成——
++ * 逐维对比前后两轮生效配置（供应商/模型/档案），任一变化生成「XX已切换 A → B」
++ * 段，多维变化用「 · 」连接（轮头 meta 行风格）。全等 / 任一侧缺快照 → null
++ * （不渲染，不编造）。null 值显示口径与 whoLine 一致：供应商 null=本机默认、
++ * 档案 null=未指定、模型 null=默认。
++ *
++ * 两条生产链共用本函数保证文案同构：
++ *   - 实时路：发送受理成功时面板以「会话当前生效值 ⊕ 暂存值」预置占位轮
++ *     （含会话级模型覆盖维度——发送方前端权威）；
++ *   - 历史路：enrichDisplayTurns 相邻轮快照对比（供应商/档案快照维度）。
++ */
++export function buildConfigChangeLine(
++  prev: ConfigChangeWho | null | undefined,
++  next: ConfigChangeWho | null | undefined,
++): string | null {
++  if (!prev || !next) return null;
++  const seg = (
++    label: string,
++    a: string | null | undefined,
++    b: string | null | undefined,
++    emptyLabel: string,
++  ): string | null =>
++    (a ?? null) !== (b ?? null)
++      ? `${label}已切换 ${a || emptyLabel} → ${b || emptyLabel}`
++      : null;
++  const parts = [
++    seg("供应商", prev.providerName, next.providerName, "本机默认"),
++    seg("模型", prev.modelName, next.modelName, "默认"),
++    seg("档案", prev.profileName, next.profileName, "未指定"),
++  ].filter((s): s is string => s !== null);
++  return parts.length > 0 ? parts.join(" · ") : null;
++}
++
+ /**
+  * 按 run 快照补 whoLine / 历史 usage（原 SessionPanelPage displayTurns useMemo 体外提）：
+  * 只补缺（?? 链），实时 SSE 值优先；run 快照缺失（拉取失败 / 占位 turn）原样返回——
+@@ -228,6 +273,11 @@ export function enrichDisplayTurns(
+           providerName: meta.llm_provider_id
+             ? (llmProviders.find((p) => p.id === meta.llm_provider_id)?.name ?? null)
+             : (llmProviders.find((p) => p.is_default)?.name ?? null),
++          // 2026-10-25-session-config-deferred-switch：档案快照模型名（buildConfig
++          // ChangeLine 历史路模型维；档案未配模型 → null 如实）。
++          modelName:
++            (meta.agent_profile_snapshot as { model?: string | null } | null)?.model ??
++            null,
+         },
+         inputTokens: t.inputTokens ?? meta.input_tokens ?? null,
+         outputTokens: t.outputTokens ?? meta.output_tokens ?? null,
+@@ -343,6 +393,10 @@ export function enrichDisplayTurns(
+           providerName: meta.llm_provider_id
+             ? (llmProviders.find((p) => p.id === meta.llm_provider_id)?.name ?? null)
+             : null,
++          // 2026-10-25-session-config-deferred-switch：同 enrichOne——档案快照模型名。
++          modelName:
++            (meta.agent_profile_snapshot as { model?: string | null } | null)?.model ??
++            null,
+         },
+         sender: meta.user_id && meta.sender_name
+           ? {
+@@ -368,10 +422,21 @@ export function enrichDisplayTurns(
+     // quick（ql-20260916-009）：稳定兜底——时间戳同值（含同 run 多块同一
+     // finished_at / 快照与日志时间同源到秒）时保持数组序（「加载更早」prepend
+     // 的自然位置优先于排序），运行中无时间戳轮维持「最新 = 末尾」语义。
+-    return [...enriched, ...orphanTurns]
++    const ordered = [...enriched, ...orphanTurns]
+       .map((t, i) => [t, i] as const)
+       .sort(([a, ai], [b, bi]) => ts(a) - ts(b) || ai - bi)
+       .map(([t]) => t);
++    // 2026-10-25-session-config-deferred-switch（D-001）：历史路切换说明——显示
++    // 序相邻轮快照对比（供应商/档案快照维度）。实时路预置值（发送方权威，含
++    // 会话级模型覆盖维度）优先保留不覆盖；无前轮快照 / 无变化 → 不填。
++    return ordered.map((t, i) => {
++      if (t.configChangeLine) return t;
++      const line = buildConfigChangeLine(
++        i > 0 ? ordered[i - 1].whoLine : null,
++        t.whoLine,
++      );
++      return line ? { ...t, configChangeLine: line } : t;
++    });
+ }
+ 
+ /**
+diff --git a/frontend/src/components/daemon/session-panel/session-panel-dialog.tsx b/frontend/src/components/daemon/session-panel/session-panel-dialog.tsx
+index d3c0263d9..b0eac00f2 100644
+--- a/frontend/src/components/daemon/session-panel/session-panel-dialog.tsx
++++ b/frontend/src/components/daemon/session-panel/session-panel-dialog.tsx
+@@ -396,16 +396,13 @@ export function SessionPanelDialog(props: SessionPanelProps) {
+   const draftHydratedRef = useRef(false);
+   useEffect(() => {
+     draftHydratedRef.current = false;
+-    // 2026-10-23-session-dialog-input-align / FR-04：idle 态（无会话）恒空白——
+-    // 「新建」必须是全新开始；原实现按 __pre__:<workspaceId|'-'> 回读，新建浮窗
+-    // 会带回上次未发送内容（与 page 模式同源报障）。改为 idle 不回读 + 清残留键；
+-    // 真会话（view.sessionId 非空）回读语义零变化。
+-    if (view.sessionId) {
+-      setInput(readSessionDraft(view.sessionId, workspaceId ?? '-'));
+-    } else {
+-      setInput("");
+-      writeSessionDraft(null, "", workspaceId ?? '-');
+-    }
++    // 2026-10-23-pre-session-draft-persist / FR-01：idle 态（无会话）回读入口
++    // 隔离键 __pre__:<workspaceId|'-'> 的未发送草稿（本卡显式反转上一卡
++    // session-dialog-input-align 的「恒空白」裁决——用户要求与 page 同步：
++    // 未发送内容切走/刷新再新建要原样显示；清空后重开为空由写 effect 随清空
++    // 落 "" 保证）。回读源与真会话键 <sessionId> 无交集，前序「串台」报障
++    // 不复潮；真会话（view.sessionId 非空）回读语义零变化。
++    setInput(readSessionDraft(view.sessionId, workspaceId ?? '-'));
+     const raf = requestAnimationFrame(() => {
+       draftHydratedRef.current = true;
+     });
+diff --git a/frontend/src/components/daemon/session-panel/session-panel-page.tsx b/frontend/src/components/daemon/session-panel/session-panel-page.tsx
+index cd42a042b..85388d824 100644
+--- a/frontend/src/components/daemon/session-panel/session-panel-page.tsx
++++ b/frontend/src/components/daemon/session-panel/session-panel-page.tsx
+@@ -60,6 +60,7 @@ import { QUEUE_MAX_PENDING, useMessageQueue } from "@/hooks/use-message-queue";
+ import { CtxUsageBar } from "@/components/sessions/ctx-usage-bar";
+ import {
+   SessionConfigBar, useActiveSharedAgents,
++  type SessionConfigStaged, type SessionConfigStagedPatch,
+ } from "@/components/sessions/session-config-bar";
+ import { SubagentCatalog } from "@/components/sessions/subagent-catalog";
+ // task-03（2026-09-15-subagent-three-pane-display / FR-03 / FR-05 / design §5.B §5.E）：
+@@ -116,7 +117,7 @@ import { getQuicklogDetail } from "@/lib/quicklog";
+ // task-03（2026-09-27-session-fast-replay / FR-04 FR-05）：fetchSessionTurnOutline
+ // 打开链路并行拉取全量轮次大纲（导航骨架 + 未加载轮 run_id 直达跳转）。
+ import {
+-  ScheduledMessageRead, cancelTeamMission, compactSession, createScheduledMessage, createSession, fetchPendingDialogs, fetchSessionDialogHistory, fetchSessionTurnOutline, getAgentSession, getAgentSessionLogs, getSessionRunLogs, probeSessionLogBefore, injectSession, interruptSession, listDaemonMachines, resetToolReportSession, takeoverSession, listSessionRuns, maxLogTimestamp, reopenSession, streamSession, triggerSessionTeamMission, type PlanSummary, type SessionCreateTeamMission, type SessionDialogRead, type SessionPermissionRequest, type SessionRunRead, type SessionStreamConnection, type SessionTurnOutlineRead, type TeamMissionTriggerRequest, updateSessionAutoResume, updateSessionCtxWindow,
++  ScheduledMessageRead, cancelTeamMission, compactSession, createScheduledMessage, createSession, fetchPendingDialogs, fetchSessionDialogHistory, fetchSessionTurnOutline, getAgentSession, getAgentSessionLogs, getSessionRunLogs, probeSessionLogBefore, injectSession, interruptSession, listDaemonMachines, resetToolReportSession, setSessionThinkingLevel, takeoverSession, listSessionRuns, maxLogTimestamp, reopenSession, streamSession, triggerSessionTeamMission, type PlanSummary, type SessionCreateTeamMission, type SessionDialogRead, type SessionInjectOptions, type SessionPermissionRequest, type SessionRunRead, type SessionStreamConnection, type SessionTurnOutlineRead, type TeamMissionTriggerRequest, updateSessionAutoResume, updateSessionCtxWindow,
+ } from "@/lib/daemon";
+ import { getProviderCaps, PROVIDER_SWITCH_ENGINES } from "@/lib/provider-caps";
+ import { cn } from "@/lib/utils";
+@@ -157,6 +158,7 @@ import { applyAgentTaskStatusEvent } from "../agent-task-store";
+ import { buildSubagentTaskLookup, useSessionTasks } from "@/hooks/use-session-tasks";
+ import { SubagentTaskLookupContext } from "../turn-segment-views";
+ import {
++  buildConfigChangeLine,
+   deriveMachineMeta, derivePreMachineLabels, derivePreSessionChrome,
+   deriveSessionPlaceholder, deriveSessionStatusFlags, deriveStatusBadge,
+   deriveTeamButtonState, deriveTimelineSessionStatus, enrichDisplayTurns,
+@@ -925,19 +927,14 @@ export function SessionPanelPage({
+     : null;
+   useEffect(() => {
+     draftHydratedRef.current = false;
+-    // 2026-10-23-session-input-clear-fix / FR-04：预会话态恒空白——「新建会话」
+-    // 必须是全新开始。原实现按 __pre__:<scope> 回读草稿，同一入口（同机器同引
+-    // 擎）再次「＋」新建时把上次未发送内容带回输入框（用户报障：在其他会话
+-    // 填了 AAA，新建会话输入框也显示 AAA）。此处改为预会话不回读并清残留键
+-    //（新建即弃稿，不留可回读的死数据）。真会话（sessionId 非空）回读语义零
+-    // 变化；dialog 模式在 session-panel-dialog.tsx，其「同 workspaceId 重开恢复
+-    // 草稿」语义不在本变更范围（已知遗留，design 风险与死路已记）。
+-    if (sessionId) {
+-      setInput(readSessionDraft(sessionId, preDraftScope));
+-    } else {
+-      setInput("");
+-      writeSessionDraft(null, "", preDraftScope);
+-    }
++    // 2026-10-23-pre-session-draft-persist / FR-01：预会话回读入口隔离键草稿。
++    // （本卡显式反转 2026-10-23-session-input-clear-fix 的「恒空白」裁决——
++    // 用户实测后要求：未发送的 AAA 切走/刷新再新建要原样显示；清空后重进要为
++    // 空，由写 effect 随清空落 "" 保证。）回读源 __pre__:<scope> 与真会话键
++    // <sessionId> 无交集——前序报障「其他会话填 AAA 新建会话显示 AAA」不复潮；
++    // 真会话（sessionId 非空）回读语义零变化。dialog 模式在
++    // session-panel-dialog.tsx 同步改读（同卡 FR-01）。
++    setInput(readSessionDraft(sessionId, preDraftScope));
+     setPendingMentions({});
+     const raf = requestAnimationFrame(() => {
+       draftHydratedRef.current = true;
+@@ -1069,6 +1066,135 @@ export function SessionPanelPage({
+   // preModelId 同款模式（专用回调收值，首句 createSession 携带；""=未选择/级联
+   // 重置清空不传——引擎默认零回归；显式选「默认」off=上送，daemon 按引擎映射）。
+   const [preThinkingLevel, setPreThinkingLevel] = useState("");
++  // ── 2026-10-25-session-config-deferred-switch：会话态配置暂存 ──────────────
++  // 空闲点选供应商/模型/档案/思考级别仅暂存于此（不发请求、不产生空切换轮），
++  // 随下一条消息发送时一并生效（sendFromQueue / sendToServerQueue / handleResend
++  // 三点位并入）。键存在 = 该字段有暂存（组件已按当前生效值判定 cancel/归一）。
++  // D-001：暂存静默（控件值变化即反馈）；发送成功后由时间线切换信息行呈现结果。
++  // 不落库：刷新页面即丢（暂存与发送通常秒级相邻，可接受）。
++  const [stagedConfig, setStagedConfig] = useState<SessionConfigStaged>({});
++  // 暂存目标展示名（组件上抛 patch.label；实时切换说明行的「新值」名——面板无
++  // 档案列表查询，档案名只能由组件侧解析上抛）。ref 不参与渲染，发送时读。
++  const stagedLabelRef = useRef<Partial<Record<string, string>>>({});
++  // 会话切换（换会话/关面板）即清空，防跨会话串台。
++  useEffect(() => {
++    setStagedConfig({});
++    stagedLabelRef.current = {};
++  }, [sessionId]);
++  // 暂存合并/取消——组件 cancel flag 决定删除该字段（组件持当前生效值判定），
++  // 非 cancel 直接设值；label 同步进 ref 供实时切换说明取名。
++  const handleStagedSwitch = useCallback((patch: SessionConfigStagedPatch) => {
++    setStagedConfig((prev) => {
++      const next = { ...prev };
++      if (patch.cancel) delete next[patch.field];
++      else next[patch.field] = patch.value;
++      return next;
++    });
++    if (patch.cancel) delete stagedLabelRef.current[patch.field];
++    else stagedLabelRef.current[patch.field] = patch.label;
++  }, []);
++
++  /**
++   * 2026-10-25：暂存并入 inject options。仅暂存非空才返回字段（null = 与现状
++   * 请求形态逐字段一致，零回归）；模型非空必须挂供应商（后端 422 守卫）——
++   * 未显式暂存供应商时带会话当前供应商（空串 = 本机默认），对齐配置条
++   * executeSwitch 的 companion 语义。
++   */
++  const buildStagedInjectOptions = useCallback((): Partial<SessionInjectOptions> | null => {
++    if (Object.keys(stagedConfig).length === 0) return null;
++    const opts: Partial<SessionInjectOptions> = {};
++    if (stagedConfig.llm_provider_id !== undefined)
++      opts.llm_provider_id = stagedConfig.llm_provider_id;
++    if (stagedConfig.agent_profile_id !== undefined)
++      opts.agent_profile_id = stagedConfig.agent_profile_id;
++    if (stagedConfig.model !== undefined) {
++      opts.model = stagedConfig.model;
++      if (stagedConfig.llm_provider_id === undefined)
++        opts.llm_provider_id = session?.llm_provider_id ?? "";
++    }
++    return opts;
++  }, [stagedConfig, session]);
++
++  /**
++   * 2026-10-25：暂存思考级别先调端点（消息 inject 之前——档位先就位，本轮即用
++   * 新档）。失败仅警告不阻塞消息发送；返回 false 时档位暂存保留（下次发送重试）。
++   */
++  const applyStagedThinkingLevel = useCallback(async (): Promise<boolean> => {
++    const level = stagedConfig.thinking_level;
++    if (level === undefined || !sessionId) return true;
++    try {
++      const resp = await setSessionThinkingLevel(sessionId, level);
++      if (resp.ok === false || resp.error) {
++        notify.error(
++          new Error(resp.error ?? "思考级别切换未被受理"),
++          "思考级别切换失败（消息照常发送，档位暂存保留）",
++        );
++        return false;
++      }
++      return true;
++    } catch (err) {
++      notify.error(err, "思考级别切换失败（消息照常发送，档位暂存保留）");
++      return false;
++    }
++  }, [stagedConfig, sessionId, notify]);
++
++  /**
++   * 2026-10-25：发送受理成功后的暂存收敛——清空暂存 + 刷新会话详情（配置条
++   * 回显新生效值）。档位失败时保留档位暂存（其余字段照清）。
++   */
++  const settleStagedAfterSend = useCallback(
++    (thinkingApplied: boolean) => {
++      if (Object.keys(stagedConfig).length === 0) return;
++      setStagedConfig(
++        thinkingApplied ? {} : { thinking_level: stagedConfig.thinking_level },
++      );
++      if (sessionId) {
++        void qc.invalidateQueries({ queryKey: ["agentSessionDetail", sessionId] });
++      }
++    },
++    [stagedConfig, sessionId, qc],
++  );
++
++  /**
++   * 2026-10-25（D-001）：实时切换说明行文案——发送方前端权威（prev = 会话当前
++   * 生效值，next = prev ⊕ 暂存值，含会话级模型覆盖维度——run 快照路无此维）。
++   * 无暂存 / 无会话快照 → null（不预置，历史快照路兜底）。名字解析：供应商走
++   * llmProviders、档案取组件上抛 label（面板无档案列表查询）、模型即值。
++   */
++  const buildStagedChangeLine = useCallback((): string | null => {
++    if (Object.keys(stagedConfig).length === 0 || !session) return null;
++    const prev = {
++      profileName:
++        session.agent_profile_id
++          ? (session.config_snapshot?.profile_name ?? null)
++          : null,
++      providerName: session.llm_provider_id
++        ? (llmProviders.find((p) => p.id === session.llm_provider_id)?.name ?? null)
++        : (llmProviders.find((p) => p.is_default)?.name ?? null),
++      modelName: session.config_snapshot?.model ?? null,
++    };
++    const next = { ...prev };
++    if (stagedConfig.llm_provider_id !== undefined) {
++      next.providerName =
++        stagedConfig.llm_provider_id === ""
++          ? "本机默认"
++          : (llmProviders.find((p) => p.id === stagedConfig.llm_provider_id)?.name ??
++            stagedLabelRef.current.llm_provider_id ??
++            stagedConfig.llm_provider_id);
++    }
++    if (stagedConfig.model !== undefined) {
++      next.modelName =
++        stagedConfig.model === "" ? "默认" : stagedConfig.model;
++    }
++    if (stagedConfig.agent_profile_id !== undefined) {
++      next.profileName =
++        stagedConfig.agent_profile_id === ""
++          ? "未指定"
++          : (stagedLabelRef.current.agent_profile_id ??
++            stagedConfig.agent_profile_id);
++    }
++    return buildConfigChangeLine(prev, next);
++  }, [stagedConfig, session, llmProviders]);
+   const [preError, setPreError] = useState<string | null>(null);
+   // ── 2026-10-19-shared-agent-onboarding-hint：预会话共享智能体默认选中引导 ──
+   // 门控数据：轻量机器查询（limit=1 仅探 total/shared_to_me 有无）。不复用
+@@ -3727,6 +3853,11 @@ export function SessionPanelPage({
+       // 不投递，此处防御性短路（对齐 dialog 版 ?? "" + status 守卫先例）。
+       if (!sessionId) return;
+       const placeholderId = `__pending_inject_${Date.now()}__`;
++      // 2026-10-25-session-config-deferred-switch：本次发送携带的暂存配置——
++      // options 并入 inject（仅暂存非空才带字段，空形态与现状一致零回归）；
++      // 切换说明预置占位轮（发送方权威，含会话级模型覆盖维度）。
++      const stagedOpts = buildStagedInjectOptions();
++      const stagedChangeLine = buildStagedChangeLine();
+       inflightSendRef.current = { placeholderId, prompt };
+       // ql-20260821-002：占位轮合成标记行——与 handleSend 入队侧逐字同构
+       // （后端落库标记行同款，真实日志到达后无感接管）；kind/name 查
+@@ -3761,11 +3892,18 @@ export function SessionPanelPage({
+             // 状态条/思考占位立即生效，SSE run_id 到达后原位接管不重计）。
+             segments: [],
+             turnStartedAt: Date.now(),
++            // 2026-10-25-session-config-deferred-switch（D-001）：本次发送带暂存
++            // 配置 → 占位轮顶部预置切换说明行（轮块顶部独占一行轻量提示）。
++            ...(stagedChangeLine ? { configChangeLine: stagedChangeLine } : {}),
+           },
+         ],
+       }));
+       try {
++        // 暂存思考级别先调端点（档位先就位本轮即用新档；失败警告不阻塞发送）。
++        const thinkingApplied = await applyStagedThinkingLevel();
+         const resp = await injectSession(sessionId, prompt, {
++          // 2026-10-25：暂存供应商/模型/档案随本轮消息一并生效（无暂存不多传）。
++          ...(stagedOpts ?? {}),
+           // 2026-08-20 task-12：附件引用（空数组不进 body，保持既有 payload 形态）。
+           ...(attachmentIds.length > 0 ? { attachment_ids: attachmentIds } : {}),
+           // ql-20260825-004：每轮注入携带当前页面上下文（有值才带，零回归）。
+@@ -3793,6 +3931,8 @@ export function SessionPanelPage({
+           }));
+           setErrorMsg(null);
+           void qc.invalidateQueries({ queryKey: ["agentSessionQueue", sessionId] });
++          // 受理成功（排队条目后端保存配置字段、派发重放生效）→ 暂存收敛。
++          settleStagedAfterSend(thinkingApplied);
+           onSendSettled(prompt, attachmentIds);
+           return;
+         }
+@@ -3811,6 +3951,7 @@ export function SessionPanelPage({
+             ),
+           }));
+           setErrorMsg(null);
++          settleStagedAfterSend(thinkingApplied);
+           onSendSettled(prompt, attachmentIds);
+           return;
+         }
+@@ -3821,6 +3962,7 @@ export function SessionPanelPage({
+           turns: replacePlaceholderTurn(prev.turns, placeholderId, resp.run_id!, "running"),
+         }));
+         setErrorMsg(null);
++        settleStagedAfterSend(thinkingApplied);
+         onSendSettled(prompt, attachmentIds);
+       } catch (err) {
+         const apiErr = err as ApiError;
+@@ -3846,6 +3988,11 @@ export function SessionPanelPage({
+       qc,
+       onSendSettled,
+       restoreRejectedSend,
++      // 2026-10-25-session-config-deferred-switch：暂存并入链路回调。
++      buildStagedInjectOptions,
++      buildStagedChangeLine,
++      applyStagedThinkingLevel,
++      settleStagedAfterSend,
+     ],
+   );
+ 
+@@ -3863,8 +4010,15 @@ export function SessionPanelPage({
+     //（失败回填用户原文；缺省回落 prompt）。
+     async (prompt: string, attachmentIds: string[], rawPrompt: string = prompt) => {
+       if (!sessionId) return;
++      // 2026-10-25-session-config-deferred-switch：忙轮排队路径同样并入暂存
++      // （后端排队条目按字段保存配置、派发重放生效——queue.py enqueue 落列）。
++      // 排队消息暂无 runId 关联点，实时切换说明不预置（历史快照路兜底显示）。
++      const stagedOpts = buildStagedInjectOptions();
+       try {
++        const thinkingApplied = await applyStagedThinkingLevel();
+         const resp = await injectSession(sessionId, prompt, {
++          // 2026-10-25：暂存配置随排队消息生效（无暂存不多传，零回归）。
++          ...(stagedOpts ?? {}),
+           ...(attachmentIds.length > 0 ? { attachment_ids: attachmentIds } : {}),
+           ...(pageContextOverride ? { page_context: pageContextOverride } : {}),
+           // task-05（FR-06 / D-003）：忙轮排队路径同样带绑定字段（后端 binder
+@@ -3891,11 +4045,13 @@ export function SessionPanelPage({
+             ),
+           }));
+           setErrorMsg(null);
++          settleStagedAfterSend(thinkingApplied);
+           onSendSettled(prompt, attachmentIds);
+           return;
+         }
+         setErrorMsg(null);
+         void qc.invalidateQueries({ queryKey: ["agentSessionQueue", sessionId] });
++        settleStagedAfterSend(thinkingApplied);
+         onSendSettled(prompt, attachmentIds);
+         if (!resp.queued && resp.run_id) {
+           // 竞态直发：发送瞬间上一轮终结 → 后端已开新 run（SSE 会建轮）。
+@@ -3914,6 +4070,11 @@ export function SessionPanelPage({
+       qc,
+       onSendSettled,
+       restoreRejectedSend,
++      // 2026-10-25-session-config-deferred-switch：暂存并入链路回调（排队路径
++      // 无占位轮不预置切换说明，buildStagedChangeLine 不在本路径依赖）。
++      buildStagedInjectOptions,
++      applyStagedThinkingLevel,
++      settleStagedAfterSend,
+     ],
+   );
+ 
+@@ -4462,6 +4623,10 @@ export function SessionPanelPage({
+       const trimmed = parseAttachmentMarkers(prompt).text.trim();
+       if (!trimmed || trimmed.length > MAX_PROMPT_LEN) return;
+       const placeholderId = `__pending_inject_${Date.now()}__`;
++      // 2026-10-25-session-config-deferred-switch：重发同主发送——暂存配置随
++      // 重发生效（用户点重发 = 发起一轮，不带会让暂存悬挂到下一次发送）。
++      const stagedOpts = buildStagedInjectOptions();
++      const stagedChangeLine = buildStagedChangeLine();
+       setTurnState((prev) => ({
+         currentRunId: placeholderId,
+         turns: [
+@@ -4482,13 +4647,17 @@ export function SessionPanelPage({
+             // task-09（FR-02）：同 handleSend——live 锚点 = 本地重发占位时刻。
+             segments: [],
+             turnStartedAt: Date.now(),
++            // 2026-10-25（D-001）：带暂存时预置切换说明行。
++            ...(stagedChangeLine ? { configChangeLine: stagedChangeLine } : {}),
+           },
+         ],
+       }));
+       try {
++        const thinkingApplied = await applyStagedThinkingLevel();
+         // task-05（R-7 取舍）：重发不携带 mentions——@ 文本保留在重发原文中
+         // 仅作提示，绑定需用户重新选择（草稿恢复同语义，design §3.4）。
+-        const resp = await injectSession(sessionId, trimmed);
++        // 2026-10-25：暂存供应商/模型/档案随重发一并生效（无暂存不多传）。
++        const resp = await injectSession(sessionId, trimmed, stagedOpts ?? undefined);
+         const runId = resp.run_id;
+         if (resp.queued || !runId) {
+           // ql-20260825-011：重发瞬间已被占用（竞态）→ 撤占位轮转服务端排队。
+@@ -4498,6 +4667,7 @@ export function SessionPanelPage({
+           }));
+           setErrorMsg(null);
+           void qc.invalidateQueries({ queryKey: ["agentSessionQueue", sessionId] });
++          settleStagedAfterSend(thinkingApplied);
+           return;
+         }
+         // task-07（FR-01 / FR-05）→ ql-20260920-006：重发竞态引导——上一轮尚未
+@@ -4513,6 +4683,7 @@ export function SessionPanelPage({
+             ),
+           }));
+           setErrorMsg(null);
++          settleStagedAfterSend(thinkingApplied);
+           return;
+         }
+         setTurnState((prev) => ({
+@@ -4524,6 +4695,7 @@ export function SessionPanelPage({
+           ),
+         }));
+         setErrorMsg(null);
++        settleStagedAfterSend(thinkingApplied);
+       } catch (err) {
+         const apiErr = err as ApiError;
+         setTurnState((prev) => ({
+@@ -4534,7 +4706,18 @@ export function SessionPanelPage({
+       }
+     },
+     // qc 为 useQueryClient 稳定实例，补入 deps 消除 exhaustive-deps 告警（行为不变）。
+-    [session, machineOnline, turnState.currentRunId, sessionId, qc],
++    // 2026-10-25-session-config-deferred-switch：暂存并入链路回调同补。
++    [
++      session,
++      machineOnline,
++      turnState.currentRunId,
++      sessionId,
++      qc,
++      buildStagedInjectOptions,
++      buildStagedChangeLine,
++      applyStagedThinkingLevel,
++      settleStagedAfterSend,
++    ],
+   );
+ 
+   // ql-20260903-026：行级 memo props 稳定化——内联箭头每次渲染新引用会击穿
+@@ -6112,6 +6295,11 @@ export function SessionPanelPage({
+             configSnapshot={session.config_snapshot ?? null}
+             engine={session.provider ?? null}
+             variant={variant}
++            // 2026-10-25-session-config-deferred-switch（D-001）：空闲点选四控件
++            // 仅暂存（不 inject 不建空切换轮），随下一条消息发送一并生效；控件
++            // 直接显示暂存值（无「待生效」标记，静默记住）。
++            staged={stagedConfig}
++            onStagedSwitch={handleStagedSwitch}
+             // 2026-10-22-session-composer-slim FR-02：中断自动续跑入口已迁至
+             // 输入区 + 菜单（见上方 SessionInputBar.autoResume），配置条不再渲染。
+             // ql-20260904-010：错误卡「切换供应商」定位到本配置条（打开供应商下拉）。
+diff --git a/frontend/src/components/daemon/turn-timeline.tsx b/frontend/src/components/daemon/turn-timeline.tsx
+index deb4b87a2..3c9bb0a76 100644
+--- a/frontend/src/components/daemon/turn-timeline.tsx
++++ b/frontend/src/components/daemon/turn-timeline.tsx
+@@ -369,7 +369,22 @@ export interface SessionTurnView {
+     agentName: string;
+     /** 供应商名；null=该轮用本机默认供应商。 */
+     providerName: string | null;
++    /**
++     * 2026-10-25-session-config-deferred-switch：该轮档案快照的模型名（run
++     * 级快照 agent_profile_snapshot.model）。null=档案未配模型（跟随引擎默认）。
++     * 注意这是**档案级**模型——会话级模型覆盖（模型子下拉）不落 run 快照，
++     * 轮级不可得，configChangeLine 的实时路（发送方前端权威）不受此限。
++     */
++    modelName?: string | null;
+   };
++  /**
++   * 2026-10-25-session-config-deferred-switch：该轮相对上一轮的配置切换说明
++   * （如「模型已切换 A → B」；page-helpers.buildConfigChangeLine 生成——实时路
++   * 由发送方在占位轮预置（含会话级模型覆盖维度），历史路由 enrichDisplayTurns
++   * 相邻快照对比生成（供应商/档案维度））。null/缺省 = 无变化或无前轮快照，
++   * 不渲染（零回归）。
++   */
++  configChangeLine?: string | null;
+   /**
+    * ql-20260817-003：轮次发送者（共享守护进程场景多用户同会话）。父层从
+    * runs 快照（run.user_id + sender_name）注入。可选：不传（/runtimes 弹窗
+@@ -902,6 +917,22 @@ const TurnRow = memo(function TurnRow({
+                     isHighlighted && "rounded-md ring-2 ring-brand-200 bg-brand-50",
+                   )}
+                 >
++              {/* 2026-10-25-session-config-deferred-switch（D-001）：配置切换说明行
++                  ——本轮相对上一轮生效配置有变化时（供应商/模型/档案），轮块顶部
++                  独占一行轻量提示（形态对齐 system_event 药丸：居中虚线圆角 +
++                  muted 小字），替代旧「空切换轮」的轮次占位。缺省/无变化不渲染。 */}
++              {turn.configChangeLine && (
++                <div className="flex justify-center">
++                  <div
++                    data-testid="turn-config-change"
++                    title={turn.configChangeLine}
++                    className="flex min-w-0 max-w-full items-center gap-1.5 rounded-full border border-dashed border-border bg-card px-3 py-[3px] text-[11px] text-muted-foreground"
++                  >
++                    <span aria-hidden className="shrink-0">⇄</span>
++                    <span className="min-w-0 truncate">{turn.configChangeLine}</span>
++                  </div>
++                </div>
++              )}
+               {/* 回带④（2026-09-20 双实现对撞深读裁决）：系统事件双视图可见——对话视图
+                   也渲染 system_event 过程项（同「全部」视图的中性虚线药丸形态，从
+                   processItems 提取；不冒充用户气泡、不带假运行语义，D-003 同源）。
+diff --git a/frontend/src/components/sessions/__tests__/session-config-bar.test.tsx b/frontend/src/components/sessions/__tests__/session-config-bar.test.tsx
+index f3a668149..59ec71f9f 100644
+--- a/frontend/src/components/sessions/__tests__/session-config-bar.test.tsx
++++ b/frontend/src/components/sessions/__tests__/session-config-bar.test.tsx
+@@ -38,6 +38,7 @@
+  * 得 null → mock 成纯文本渲染（与 turn-timeline-session-input-bar.test.tsx 一致）。
+  */
+ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
++import { useState } from "react";
+ import { cleanup, render, screen, fireEvent, waitFor } from "@testing-library/react";
+ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+ 
+@@ -178,6 +179,42 @@ function renderBar(overrides: Record<string, unknown> = {}) {
+   };
+ }
+ 
++/**
++ * 2026-10-25-session-config-deferred-switch：受控暂存挂载——Harness 内部持
++ * staged state（与面板 session-panel-page.handleStagedSwitch 同款合并/取消
++ * 逻辑），点选上抛 → 合并 → 回传 staged，串起「暂存→受控显示」完整闭环。
++ * 同时记录收到的全部 patch 供断言。
++ */
++function renderBarControlled(overrides: Record<string, unknown> = {}) {
++  const client = new QueryClient({
++    defaultOptions: {
++      queries: { retry: false, gcTime: 0, refetchInterval: false },
++      mutations: { retry: false },
++    },
++  });
++  const patches: unknown[] = [];
++  function Harness() {
++    const [staged, setStaged] = useState<Record<string, string>>({});
++    return (
++      <QueryClientProvider client={client}>
++        <SessionConfigBar
++          {...({ ...BASE_PROPS, ...overrides, staged } as any)}
++          onStagedSwitch={(patch: any) => {
++            patches.push(patch);
++            setStaged((prev) => {
++              const next = { ...prev };
++              if (patch.cancel) delete next[patch.field];
++              else next[patch.field] = patch.value;
++              return next;
++            });
++          }}
++        />
++      </QueryClientProvider>
++    );
++  }
++  return { patches, ...render(<Harness />) };
++}
++
+ function openCtrl(labelPart: string) {
+   fireEvent.click(screen.getByRole("button", { name: new RegExp(labelPart) }));
+ }
+@@ -340,43 +377,89 @@ describe("SessionConfigBar 状态置灰", () => {
+ // ── 4. 供应商切换（含「不指定」空串语义，task-16 契约） ───────────────────
+ 
+ describe("SessionConfigBar 切换供应商", () => {
+-  it("idle 选择供应商 → 点选即静默切换（空 prompt）→ injectSession 参数正确 + 成功 toast", async () => {
+-    renderBar({ llmProviderId: "prov-kimi" });
++  // 2026-10-25-session-config-deferred-switch（D-001）：暂存模式下 idle 点选仅
++  // 上抛暂存（不发请求、不产生空切换轮、无 toast），随下一条消息生效。
++  it("暂存模式 idle 选择供应商 → onStagedSwitch 上抛（含级联 model 重置）不 inject 无 toast，控件显示暂存值", async () => {
++    const { patches } = renderBarControlled({ llmProviderId: "prov-kimi" });
+     openCtrl("配置-供应商");
+-    // 供应商选项经 react-query 异步到达 → findBy 等待；点选即执行（无确认行）
+     fireEvent.click(await screen.findByRole("button", { name: "选择 GLM 平台" }));
+ 
+-    await waitFor(() => expect(mocks.injectSession).toHaveBeenCalledTimes(1));
+-    // ql-20260817-010：静默切换——prompt 空串（daemon 只 reload 不喂消息）；
+-    // task-10：切供应商同请求级联重置 model=""（候选随供应商变）。
+-    expect(mocks.injectSession).toHaveBeenCalledWith("sess-1", "", {
+-      llm_provider_id: "prov-glm",
+-      model: "",
++    // 不发请求（不产生空切换轮）、不弹 toast（D-001 静默）
++    expect(mocks.injectSession).not.toHaveBeenCalled();
++    expect(mocks.messageSuccess).not.toHaveBeenCalled();
++    // 级联：切供应商同时重置模型暂存（""=跟随供应商配置，对齐 provisional 先例）
++    expect(patches[0]).toEqual({
++      field: "model",
++      value: SWITCH_MODEL_DEFAULT_VALUE,
++      label: "默认",
++      cancel: undefined,
++    });
++    expect(patches[1]).toEqual({
++      field: "llm_provider_id",
++      value: "prov-glm",
++      label: "GLM 平台",
++      cancel: undefined,
+     });
++    // 控件直接显示暂存值（受控闭环；无待生效标记，D-001）
+     await waitFor(() =>
+-      expect(mocks.messageSuccess).toHaveBeenCalledWith(
+-        expect.stringContaining("下一轮生效"),
+-      ),
++      expect(
++        screen.getByRole("button", { name: "配置-供应商 GLM 平台" }),
++      ).toBeInTheDocument(),
+     );
++    expect(screen.queryByTestId("config-staged-dot")).not.toBeInTheDocument();
+   });
+ 
+-  it("「不指定（本机默认）」→ llm_provider_id 空串 \"\" 切回本机默认", async () => {
+-    renderBar({ llmProviderId: "prov-kimi" });
++  it("暂存模式「不指定（本机默认）」→ llm_provider_id 空串 \"\" 暂存上抛（cancel 未触发）", async () => {
++    const onStagedSwitch = vi.fn();
++    renderBar({ llmProviderId: "prov-kimi", onStagedSwitch });
+     openCtrl("配置-供应商");
+     fireEvent.click(
+       await screen.findByRole("button", { name: "选择 不指定（本机默认）" }),
+     );
++    expect(mocks.injectSession).not.toHaveBeenCalled();
++    expect(onStagedSwitch).toHaveBeenCalledWith({
++      field: "llm_provider_id",
++      value: SWITCH_NO_PROVIDER_VALUE,
++      label: "不指定（本机默认）",
++      cancel: undefined,
++    });
++  });
++
++  it("暂存模式选回当前生效供应商 → cancel=true 取消暂存（不级联重置模型）", async () => {
++    const onStagedSwitch = vi.fn();
++    renderBar({ llmProviderId: "prov-kimi", onStagedSwitch });
++    openCtrl("配置-供应商");
++    fireEvent.click(
++      await screen.findByRole("button", { name: "选择 Kimi 中转" }),
++    );
++    expect(mocks.injectSession).not.toHaveBeenCalled();
++    expect(onStagedSwitch).toHaveBeenCalledWith({
++      field: "llm_provider_id",
++      value: "prov-kimi",
++      label: "Kimi 中转",
++      cancel: true,
++    });
++    // 选回当前值不是切换动作，不级联重置模型暂存
++    expect(onStagedSwitch).toHaveBeenCalledTimes(1);
++  });
++
++  // 兼容锚：未挂 onStagedSwitch（存量调用面）保持点选即切换旧行为。
++  it("未传 onStagedSwitch（兼容）→ idle 点选即静默切换 injectSession 参数正确 + 成功 toast", async () => {
++    renderBar({ llmProviderId: "prov-kimi" });
++    openCtrl("配置-供应商");
++    fireEvent.click(await screen.findByRole("button", { name: "选择 GLM 平台" }));
++
+     await waitFor(() => expect(mocks.injectSession).toHaveBeenCalledTimes(1));
+-    expect(mocks.injectSession).toHaveBeenCalledWith(
+-      "sess-1",
+-      expect.any(String),
+-      { llm_provider_id: SWITCH_NO_PROVIDER_VALUE, model: "" },
++    // ql-20260817-010：静默切换——prompt 空串；task-10：切供应商同请求级联重置 model=""。
++    expect(mocks.injectSession).toHaveBeenCalledWith("sess-1", "", {
++      llm_provider_id: "prov-glm",
++      model: "",
++    });
++    await waitFor(() =>
++      expect(mocks.messageSuccess).toHaveBeenCalledWith(
++        expect.stringContaining("下一轮生效"),
++      ),
+     );
+-    // 空串语义钉死：两键的 "" 都必须下发（task-16：llm_provider_id ""=切回本机
+-    // 默认；task-10：model ""=跟随供应商配置；undefined=不切换）
+-    const firstCall = mocks.injectSession.mock.calls.at(0);
+-    expect(firstCall?.[2]?.llm_provider_id).toBe("");
+-    expect(firstCall?.[2]?.model).toBe("");
+   });
+ 
+   // task-07（2026-09-11-session-provider-switch-codex-pi / FR-03）：原「Codex 引擎
+@@ -435,7 +518,7 @@ describe("SessionConfigBar 切换供应商", () => {
+     }
+   });
+ 
+-  it("切换失败 → message.error（点选即切换无确认行，可再点重试）", async () => {
++  it("切换失败 → message.error（仅兼容路径未传 onStagedSwitch；暂存模式无请求无失败）", async () => {
+     mocks.injectSession.mockRejectedValueOnce(new Error("daemon 离线"));
+     renderBar();
+     openCtrl("配置-供应商");
+@@ -672,7 +755,26 @@ describe("SessionConfigBar 供应商+模型级联（task-10）", () => {
+     expect(select.value).toBe("");
+   });
+ 
+-  it("选模型 → injectSession 同请求带 llm_provider_id + model", async () => {
++  it("暂存模式选模型 → onStagedSwitch 上抛 model（不 inject），控件显示暂存模型", async () => {
++    mocks.listProviders.mockResolvedValue([GLM_PROVIDER] as never);
++    const { patches } = renderBarControlled({ llmProviderId: "prov-glm" });
++    const select = (await screen.findByRole("combobox", {
++      name: "配置-模型",
++    })) as HTMLSelectElement;
++    fireEvent.change(select, { target: { value: "glm-4.5-air" } });
++    expect(mocks.injectSession).not.toHaveBeenCalled();
++    expect(patches[0]).toEqual({
++      field: "model",
++      value: "glm-4.5-air",
++      label: "glm-4.5-air",
++      cancel: undefined,
++    });
++    // 控件直接显示暂存值（受控闭环），快照原值被覆盖
++    await waitFor(() => expect(select.value).toBe("glm-4.5-air"));
++  });
++
++  // 兼容锚：未挂 onStagedSwitch（存量调用面）保持切模型同请求带供应商旧行为。
++  it("未传 onStagedSwitch（兼容）→ 选模型 injectSession 同请求带 llm_provider_id + model", async () => {
+     mocks.listProviders.mockResolvedValue([GLM_PROVIDER] as never);
+     renderBar({ llmProviderId: "prov-glm" });
+     const select = (await screen.findByRole("combobox", {
+@@ -686,10 +788,12 @@ describe("SessionConfigBar 供应商+模型级联（task-10）", () => {
+     });
+   });
+ 
+-  it("切回「默认」→ model 空串下发（当前值来自 config_snapshot.model）", async () => {
++  it("暂存模式切回「默认」→ model 空串上抛 cancel（值等于快照当前值）；未挂时兼容路径空串下发", async () => {
+     mocks.listProviders.mockResolvedValue([GLM_PROVIDER] as never);
++    const onStagedSwitch = vi.fn();
+     renderBar({
+       llmProviderId: "prov-glm",
++      onStagedSwitch,
+       configSnapshot: {
+         ...BASE_PROPS.configSnapshot,
+         provider_name: "GLM 平台",
+@@ -702,10 +806,15 @@ describe("SessionConfigBar 供应商+模型级联（task-10）", () => {
+     // 快照模型直显为当前选中项
+     expect(select.value).toBe("glm-4.6");
+     fireEvent.change(select, { target: { value: SWITCH_MODEL_DEFAULT_VALUE } });
+-    await waitFor(() => expect(mocks.injectSession).toHaveBeenCalledTimes(1));
+-    const call = mocks.injectSession.mock.calls.at(0);
+-    expect(call?.[2]?.llm_provider_id).toBe("prov-glm");
+-    expect(call?.[2]?.model).toBe("");
++    expect(mocks.injectSession).not.toHaveBeenCalled();
++    // 快照 model="glm-4.6" 非空 → 选「默认」是真实切换暂存（cancel 未触发；
++    // 选回 glm-4.6 才是 cancel 场景，见供应商组 cancel 用例同构判定）
++    expect(onStagedSwitch).toHaveBeenCalledWith({
++      field: "model",
++      value: "",
++      label: "默认",
++      cancel: undefined,
++    });
+   });
+ 
+   // task-07 语义翻转：原 Codex 锁定分支（D-010）改为 codex 解锁后选中供应商即
+@@ -789,7 +898,30 @@ describe("SessionConfigBar 供应商+模型级联（task-10）", () => {
+ // ── 5. 档案切换 ──────────────────────────────────────────────────────────
+ 
+ describe("SessionConfigBar 切换档案", () => {
+-  it("idle 选择档案 → 点选即切换（默认 prompt）→ injectSession 带 agent_profile_id + toast + onSwitched 回调", async () => {
++  // 2026-10-25-session-config-deferred-switch（D-001）：暂存模式 idle 点选仅
++  // 上抛暂存，不 inject 不弹 toast；onSwitched 不触发（无请求）。
++  it("暂存模式 idle 选择档案 → onStagedSwitch 上抛（不 inject 无 toast），控件显示暂存档案", async () => {
++    const { patches } = renderBarControlled({});
++    openCtrl("配置-档案");
++    fireEvent.click(screen.getByRole("button", { name: "选择 严肃代码审查员" }));
++
++    expect(mocks.injectSession).not.toHaveBeenCalled();
++    expect(mocks.messageSuccess).not.toHaveBeenCalled();
++    expect(patches[0]).toEqual({
++      field: "agent_profile_id",
++      value: "prof-2",
++      label: "严肃代码审查员",
++      cancel: undefined,
++    });
++    await waitFor(() =>
++      expect(
++        screen.getByRole("button", { name: "配置-档案 严肃代码审查员" }),
++      ).toBeInTheDocument(),
++    );
++  });
++
++  // 兼容锚：未挂 onStagedSwitch（存量调用面）保持点选即切换旧行为。
++  it("未传 onStagedSwitch（兼容）→ idle 选择档案点选即切换 + onSwitched 回调", async () => {
+     const onSwitched = vi.fn();
+     renderBar({ onSwitched });
+     openCtrl("配置-档案");
+@@ -809,7 +941,24 @@ describe("SessionConfigBar 切换档案", () => {
+     );
+   });
+ 
+-  it("「不指定」→ agent_profile_id 空串取消档案回无人格（ql-20260818-004）", async () => {
++  it("暂存模式「不指定」→ agent_profile_id 空串暂存上抛（cancel 未触发，当前有档案）", async () => {
++    const onStagedSwitch = vi.fn();
++    renderBar({ agentProfileId: "prof-1", onStagedSwitch });
++    openCtrl("配置-档案");
++    fireEvent.click(
++      screen.getByRole("button", { name: "选择 不指定（无人格）" }),
++    );
++    expect(mocks.injectSession).not.toHaveBeenCalled();
++    expect(onStagedSwitch).toHaveBeenCalledWith({
++      field: "agent_profile_id",
++      value: "",
++      label: "不指定",
++      cancel: undefined,
++    });
++  });
++
++  // 兼容锚：未挂 onStagedSwitch（存量调用面）保持点选即切换旧行为（空串语义钉死）。
++  it("未传 onStagedSwitch（兼容）→「不指定」agent_profile_id 空串取消档案回无人格（ql-20260818-004）", async () => {
+     renderBar({ agentProfileId: "prof-1" });
+     openCtrl("配置-档案");
+     fireEvent.click(
+@@ -1256,7 +1405,47 @@ describe("SessionConfigBar 会话态档位切换控件（task-06 / FR-06 / R-04
+     ).toBe(true);
+   });
+ 
+-  it("点选即切换：setSessionThinkingLevel 调用 + 成功通知「已切换思考级别：X」+ 乐观缓存 current（不 invalidate）", async () => {
++  // 2026-10-25-session-config-deferred-switch（D-001）：暂存模式档位点选仅上抛
++  // 暂存（不 POST 不即时改引擎档位），随下一条消息发送时先调端点生效。
++  it("暂存模式点选档位 → onStagedSwitch 上抛（不 POST 无 toast），控件直接显示暂存档", async () => {
++    const { patches } = renderBarControlled({ thinkingLevel: {} });
++    const trigger = (await screen.findByTestId(
++      "config-thinking-select",
++    )) as HTMLButtonElement;
++    await waitFor(() => expect(trigger.textContent).toBe("中"));
++    fireEvent.click(trigger);
++    fireEvent.click(await screen.findByRole("menuitem", { name: "高" }));
++    expect(mocks.setSessionThinkingLevel).not.toHaveBeenCalled();
++    expect(mocks.messageSuccess).not.toHaveBeenCalled();
++    expect(patches[0]).toEqual({
++      field: "thinking_level",
++      value: "high",
++      label: "高",
++      cancel: undefined,
++    });
++    // 控件直接显示暂存档（高）——静默记住，无任何标记（D-001）
++    await waitFor(() => expect(trigger.textContent).toBe("高"));
++  });
++
++  it("暂存模式选回当前档 → cancel=true 取消暂存", async () => {
++    const { patches } = renderBarControlled({ thinkingLevel: {} });
++    const trigger = (await screen.findByTestId(
++      "config-thinking-select",
++    )) as HTMLButtonElement;
++    await waitFor(() => expect(trigger.textContent).toBe("中"));
++    fireEvent.click(trigger);
++    fireEvent.click(await screen.findByRole("menuitem", { name: "中" }));
++    expect(mocks.setSessionThinkingLevel).not.toHaveBeenCalled();
++    expect(patches[0]).toEqual({
++      field: "thinking_level",
++      value: "medium",
++      label: "中",
++      cancel: true,
++    });
++  });
++
++  // 兼容锚：未挂 onStagedSwitch（存量调用面）保持点选即 POST 旧行为。
++  it("未传 onStagedSwitch（兼容）→ 点选即切换：setSessionThinkingLevel 调用 + 成功通知 + 乐观缓存 current（不 invalidate）", async () => {
+     renderBar({ thinkingLevel: {} });
+     const trigger = (await screen.findByTestId(
+       "config-thinking-select",
+@@ -1316,6 +1505,21 @@ describe("SessionConfigBar 会话态档位切换控件（task-06 / FR-06 / R-04
+     );
+   });
+ 
++  // 2026-10-25：暂存模式 running 点选不受暂存影响——仍走 inject 忙轮排队（FR-04）。
++  it("暂存模式 running 点选供应商/档位 → 照常走忙轮排队（不走暂存上抛）", async () => {
++    const onStagedSwitch = vi.fn();
++    renderBar({
++      running: true,
++      llmProviderId: "prov-kimi",
++      thinkingLevel: {},
++      onStagedSwitch,
++    });
++    openCtrl("配置-供应商");
++    fireEvent.click(await screen.findByRole("button", { name: "选择 GLM 平台" }));
++    await waitFor(() => expect(mocks.injectSession).toHaveBeenCalledTimes(1));
++    expect(onStagedSwitch).not.toHaveBeenCalled();
++  });
++
+   it("200 结构化失败（ok=false + error）→ notify error 带 error 原文（如旧 daemon 升级提示）", async () => {
+     mocks.setSessionThinkingLevel.mockResolvedValue({
+       ok: false,
+diff --git a/frontend/src/components/sessions/__tests__/sessions-portal.test.tsx b/frontend/src/components/sessions/__tests__/sessions-portal.test.tsx
+index 822766ae1..b092dbc12 100644
+--- a/frontend/src/components/sessions/__tests__/sessions-portal.test.tsx
++++ b/frontend/src/components/sessions/__tests__/sessions-portal.test.tsx
+@@ -1439,7 +1439,7 @@ describe("SessionsPortal ?new=1 直达新建（ql-20260823-005）", () => {
+     expect(screen.queryByTestId("pre-session-picker-mask")).toBeNull();
+   });
+ 
+-  it("同机器同智能体再次「＋」新建：预会话输入框重置（nonce 强制重挂载，2026-10-23-session-input-clear-fix / FR-04）", async () => {
++  it("同机器同智能体再次「＋」新建：未发送草稿保留（nonce 强制重挂载后回读，2026-10-23-pre-session-draft-persist / FR-01）", async () => {
+     renderPortal();
+     await enterPreSession("在 非工作区 新建会话");
+     const input = screen.getByPlaceholderText(
+@@ -1448,13 +1448,15 @@ describe("SessionsPortal ?new=1 直达新建（ql-20260823-005）", () => {
+     fireEvent.change(input, { target: { value: "AAA" } });
+     await waitFor(() => expect(input.value).toBe("AAA"));
+ 
+-    // 同 scope（同机器+同智能体）再次新建：原 key 不变时 React 复用组件、
+-    // 未发送文本会残留；nonce 入 key 后强制重挂载 → 空白。
++    // 同 scope（同机器+同智能体）再次新建：nonce 入 key 强制重挂载（防 React
++    // 复用组件绕过回读 effect）；重挂载后回读 __pre__:<scope> 未发送草稿 →
++    // 原样显示 AAA（用户显式反转前序「重置空白」裁决：切走再回新建要能找回
++    // 未发送内容；想丢弃就手动清空，清空随写 effect 落 ""）。
+     await enterPreSession("在 非工作区 新建会话");
+     const input2 = (await screen.findByPlaceholderText(
+       /发送第一句话开始对话/,
+     )) as HTMLTextAreaElement;
+-    expect(input2.value).toBe("");
++    await waitFor(() => expect(input2.value).toBe("AAA"));
+     expect(screen.getByTestId("session-pre-session-panel")).toBeTruthy();
+   });
+ 
+diff --git a/frontend/src/components/sessions/session-config-bar.tsx b/frontend/src/components/sessions/session-config-bar.tsx
+index 4e2d475e2..969b89efc 100644
+--- a/frontend/src/components/sessions/session-config-bar.tsx
++++ b/frontend/src/components/sessions/session-config-bar.tsx
+@@ -168,6 +168,38 @@ export type SessionConfigSwitchField =
+   | "llm_provider_id"
+   | "model";
+ 
++/**
++ * 暂存可暂存字段（2026-10-25-session-config-deferred-switch）：四控件统一
++ * 「点选暂存、随下一条消息生效」——inject options 三键 + 思考级别（发送时经
++ * thinking-level 端点生效）。
++ */
++export type SessionConfigStagedField =
++  | SessionConfigSwitchField
++  | "thinking_level";
++
++/**
++ * 受控暂存值（面板持有；键存在 = 该字段有暂存）。值语义同 inject options：
++ * llm_provider_id ""=本机默认、model ""=跟随供应商配置、agent_profile_id
++ * ""=无人格；thinking_level 为七档词表值。
++ */
++export interface SessionConfigStaged {
++  agent_profile_id?: string;
++  llm_provider_id?: string;
++  model?: string;
++  thinking_level?: string;
++}
++
++/** 暂存上抛 patch（组件点选 → 面板合并；cancel=true 表示取消该字段暂存）。 */
++export interface SessionConfigStagedPatch {
++  field: SessionConfigStagedField;
++  /** 目标值（语义同 SessionConfigStaged 各键）。 */
++  value: string;
++  /** 目标展示名（toast 用）。 */
++  label: string;
++  /** 选回当前生效值 → 取消该字段暂存（组件持当前值判定，面板纯执行）。 */
++  cancel?: boolean;
++}
++
+ /** 切换目标（选中下拉项直接执行，ql-20260817-009 去掉确认行）。 */
+ interface PendingSwitch {
+   field: SessionConfigSwitchField;
+@@ -264,6 +296,22 @@ export interface SessionConfigBarProps {
+    * 防 flex-wrap 在窄视口挤成三行；desktop 默认不传零变化。
+    */
+   variant?: "desktop" | "mobile";
++  /**
++   * 2026-10-25-session-config-deferred-switch：受控暂存值（面板持有，键存在 =
++   * 该字段有暂存）。传入后控件显示优先暂存值并带「待生效」标识；与
++   * onStagedSwitch 成对使用（仅 staged 不上抛 = 只读展示暂存）。
++   */
++  staged?: SessionConfigStaged;
++  /**
++   * 2026-10-25-session-config-deferred-switch：空闲暂存模式上抛回调（与面板
++   * 暂存 state 成对传入）。挂载后**空闲态**点选四控件不再立即请求后端（不再
++   * 产生空切换轮），改为上抛 patch 由面板暂存、随用户下一条消息一并生效；
++   * 选回当前生效值 → patch.cancel=true（取消该字段暂存）。**运行中点选不受
++   * 影响**（仍走 injectSession 忙轮排队——本轮结束后生效，后端不建切换轮）；
++   * provisional 暂存模式不受影响（自有 onProvisional* 通道）。未传保持旧行为
++   * （点选即切换），存量调用面零回归。
++   */
++  onStagedSwitch?: (_patch: SessionConfigStagedPatch) => void;
+ }
+ 
+ /* ────────────────────── 纯辅助（组件外便于单测推理） ────────────────────── */
+@@ -375,6 +423,8 @@ export function SessionConfigBar({
+   trailing,
+   providerOpenSignal = 0,
+   variant = "desktop",
++  staged,
++  onStagedSwitch,
+ }: SessionConfigBarProps) {
+   const mobile = variant === "mobile";
+   // task-10：档案下拉共享智能体标识（对照 active 生效列表）。
+@@ -535,9 +585,14 @@ export function SessionConfigBar({
+    * （快照直显免二次解析，Grill C-12；空=「默认」）。
+    */
+   const [provisionalModel, setProvisionalModel] = useState("");
++  // 2026-10-25-session-config-deferred-switch：会话态模型显示优先受控暂存值
++  // （键存在 = 面板侧已归一为真暂存，值 ≠ 当前生效值）。
++  const stagedModel = staged?.model;
+   const currentModel = provisional
+     ? provisionalModel
+-    : (configSnapshot?.model ?? "");
++    : stagedModel !== undefined
++      ? stagedModel
++      : (configSnapshot?.model ?? "");
+ 
+   /**
+    * 快照模型可能已不在候选集（供应商高级设置后续改过）→ 追加到尾部兜底，
+@@ -586,6 +641,24 @@ export function SessionConfigBar({
+   // 就是事实上的当前档，不再显示「现值未知」占位（UX 反馈：占位项长且灰
+   // 显得像 bug；claude/codex SDK 不暴露现值恒 null 属常态非异常）。
+   const currentThinkingLevel = thinkingLevelsQ.data?.current ?? "off";
++
++  // ── 2026-10-25-session-config-deferred-switch：空闲暂存模式 ────────────────
++  // onStagedSwitch 挂载且非 provisional 时启用：空闲点选四控件仅上抛暂存
++  // （不 inject/不 POST，不产生切换轮），随面板下一条消息一并生效；运行中
++  // 点选仍走原 injectSession 忙轮排队（后端不建切换轮，行为不变）。
++  const stagedMode = !provisional && onStagedSwitch != null;
++  const stagedThinkingLevel = staged?.thinking_level;
++  /**
++   * 各字段当前生效值口径（选回即取消暂存的判定基准；空串 = 该字段「默认」态）：
++   * provider null=本机默认、profile null=未指定、model 快照空=跟随配置、
++   * thinking 现值回退 off（与控件显示回退链同源）。
++   */
++  const effectiveValues: Record<SessionConfigStagedField, string> = {
++    llm_provider_id: llmProviderId ?? "",
++    agent_profile_id: agentProfileId ?? "",
++    model: configSnapshot?.model ?? "",
++    thinking_level: currentThinkingLevel || THINKING_LEVEL_OFF_VALUE,
++  };
+   const sessionLevelOptions = useMemo(() => {
+     const levels = thinkingLevelsQ.data?.levels ?? [];
+     // 现值不在动态列表（引擎返回了列表外的现值）→ 追加兜底（照 modelOptions
+@@ -645,7 +718,7 @@ export function SessionConfigBar({
+     !canSwitch || (!provisional && (thinkingLevel?.disabled ?? false));
+   const thinkingCtrlValue = provisional
+     ? provisionalThinkingDisplay
+-    : (currentThinkingLevel || "");
++    : (stagedThinkingLevel ?? (currentThinkingLevel || ""));
+   const thinkingMenuItems: MenuProps["items"] = (
+     provisional
+       ? THINKING_LEVEL_OPTIONS.map((o) => o.value)
+@@ -669,33 +742,62 @@ export function SessionConfigBar({
+     if (provisional) {
+       setProvisionalThinkingLevel(v);
+       onProvisionalThinkingLevelSwitch?.(v);
++    } else if (stagedMode && !running) {
++      // 2026-10-25-session-config-deferred-switch：会话态暂存模式（仅空闲——
++      // running 保持 POST 忙轮排队现状，对齐供应商/模型/档案同款分流）——点选
++      // 仅上抛暂存（不 POST setSessionThinkingLevel，不即时改引擎档位），随面板
++      // 下一条消息发送时先调端点生效；选回当前档 = 取消暂存。D-001：静默（控件
++      // 值变化即反馈，不弹 toast），切换结果由发送后的时间线切换信息行呈现。
++      const cancel = effectiveValues.thinking_level === v;
++      onStagedSwitch({
++        field: "thinking_level",
++        value: v,
++        label: thinkingLevelLabel(v),
++        cancel: cancel || undefined,
++      });
+     } else {
+       void handleThinkingLevelSwitch(v);
+     }
+   };
+ 
+   // 当前值展示（快照直显免二次解析，Grill C-12；id 兜底防列表缺行）。
+-  const profileLabel = agentProfileId
+-    ? profiles.find((p) => p.id === agentProfileId)?.name ??
+-      configSnapshot?.profile_name ??
+-      agentProfileId
+-    : // provisional（将创建）未选 → 预示用户默认档案（创建时注入）；非
+-      // provisional 保持「未指定」真值——默认只在创建时注入，存量会话不追溯
+-      //（2026-10-21-profile-default-prehint）。
+-      provisional
+-      ? (profiles.find((p) => p.is_user_default)?.name ?? "未指定")
+-      : "未指定";
+-  const providerLabel = llmProviderId
+-    ? providers.find((p) => p.id === llmProviderId)?.name ??
+-      configSnapshot?.provider_name ??
+-      llmProviderId
+-    : // 未显式选 → 用户默认供应商名（claim 链实际注入它）；无默认回落本机默认
+-      //（2026-10-21-provider-default-ui-hint，与下拉兜底项同源）。
+-      providers.find((p) => p.is_default)?.name ?? "本机默认";
++  // 2026-10-25：受控暂存存在时控件显示暂存值（待生效）优先于会话真值。
++  const stagedProfileId = staged?.agent_profile_id;
++  const stagedProviderId = staged?.llm_provider_id;
++  const profileLabel =
++    stagedProfileId !== undefined
++      ? stagedProfileId === ""
++        ? "未指定"
++        : (profiles.find((p) => p.id === stagedProfileId)?.name ?? stagedProfileId)
++      : agentProfileId
++        ? profiles.find((p) => p.id === agentProfileId)?.name ??
++          configSnapshot?.profile_name ??
++          agentProfileId
++        : // provisional（将创建）未选 → 预示用户默认档案（创建时注入）；非
++          // provisional 保持「未指定」真值——默认只在创建时注入，存量会话不追溯
++          //（2026-10-21-profile-default-prehint）。
++          provisional
++          ? (profiles.find((p) => p.is_user_default)?.name ?? "未指定")
++          : "未指定";
++  const providerLabel =
++    stagedProviderId !== undefined
++      ? stagedProviderId === ""
++        ? noProviderFallbackLabel
++        : (providers.find((p) => p.id === stagedProviderId)?.name ?? stagedProviderId)
++      : llmProviderId
++        ? providers.find((p) => p.id === llmProviderId)?.name ??
++          configSnapshot?.provider_name ??
++          llmProviderId
++        : // 未显式选 → 用户默认供应商名（claim 链实际注入它）；无默认回落本机默认
++          //（2026-10-21-provider-default-ui-hint，与下拉兜底项同源）。
++          providers.find((p) => p.is_default)?.name ?? "本机默认";
+ 
+   /** ql-20260817-010：点选即**静默**切换——prompt 发空串（后端静默切换契约：
+    * 有切换字段允许空 prompt；daemon 收到空 prompt 只 reload 配置不喂消息，
+-   * 切换轮无用户消息/模型回应）。switchPrompt 传入时仍作为切换轮消息发出。 */
++   * 切换轮无用户消息/模型回应）。switchPrompt 传入时仍作为切换轮消息发出。
++   * 2026-10-25-session-config-deferred-switch：空闲暂存模式（stagedMode 且非
++   * running）点选改为仅上抛暂存——不再发请求建空切换轮，随面板下一条消息一并
++   * 生效；运行中不走本分支（忙轮排队原语义）。 */
+   const executeSwitch = async (p: PendingSwitch) => {
+     if (submitting) return;
+     const what = switchFieldWhat(p.field);
+@@ -703,6 +805,25 @@ export function SessionConfigBar({
+       p.field === "llm_provider_id" && p.value === SWITCH_NO_PROVIDER_VALUE
+         ? "本机默认"
+         : p.label;
++    if (stagedMode && !running) {
++      setOpenKind(null);
++      const cancel = effectiveValues[p.field] === p.value;
++      // 暂存供应商（非取消）级联重置模型暂存——候选随供应商变，旧模型对新供应
++      // 商无意义；值 "" 经面板归一（与生效模型一致即清字段），生效模型非空时
++      // 「模型 → 默认」是真实生效变化（对齐旧「切供应商 inject 带 model:""」语义）。
++      if (p.field === "llm_provider_id" && !cancel) {
++        onStagedSwitch({ field: "model", value: SWITCH_MODEL_DEFAULT_VALUE, label: "默认" });
++      }
++      onStagedSwitch({
++        field: p.field,
++        value: p.value,
++        label: p.label,
++        cancel: cancel || undefined,
++      });
++      // D-001（用户定调）：暂存静默——控件值变化即反馈，不弹 toast、不渲染
++      // 「待生效」标记；切换结果由发送成功后的时间线切换信息行呈现。
++      return;
++    }
+     // ql-20260823-008：预会话暂存——不 inject（无会话），值随首句 createSession 生效。
+     if (provisional) {
+       setOpenKind(null);

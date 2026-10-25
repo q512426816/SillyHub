@@ -1,0 +1,54 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-23-pre-session-draft-persist",
+  "rows": [
+    {
+      "anchor": "FR-01",
+      "row_id": "2026-10-23-pre-session-draft-persist:flow:测试绑定FR-01",
+      "tests": [
+        "frontend/src/components/daemon/__tests__/session-panel-draft-scope.test.tsx「dialog idle：同 workspaceId 重开恢复未发送草稿」",
+        "frontend/src/components/daemon/__tests__/session-panel-draft-scope.test.tsx「page 预会话：同一入口重进恢复未发送草稿（切走再回/刷新同路径）」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-23-pre-session-draft-persist"
+    },
+    {
+      "anchor": "FR-02",
+      "row_id": "2026-10-23-pre-session-draft-persist:flow:测试绑定FR-02",
+      "tests": [
+        "frontend/src/components/daemon/__tests__/session-panel-draft-scope.test.tsx「dialog idle：清空后重开保持为空」",
+        "frontend/src/components/daemon/__tests__/session-panel-draft-scope.test.tsx「page 预会话：清空后重进保持为空（不回显旧稿）」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-23-pre-session-draft-persist"
+    },
+    {
+      "anchor": "FR-03",
+      "row_id": "2026-10-23-pre-session-draft-persist:flow:测试绑定FR-03",
+      "tests": [
+        "frontend/src/components/daemon/__tests__/session-panel-draft-scope.test.tsx「真会话草稿/入口隔离既有用例（套件全绿回归）」",
+        "frontend/src/components/daemon/__tests__/session-panel-draft-scope.test.tsx「预会话发送受理即清后再次新建为空（既有语义零回归）」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-23-pre-session-draft-persist"
+    }
+  ]
+}
