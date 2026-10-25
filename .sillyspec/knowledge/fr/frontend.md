@@ -7811,3 +7811,79 @@ superseded_by：FR-app-workspace-pages-002
   confirmed_at: null
   source_change: 2026-10-24-trajectory-context-rows
   status: active
+
+## FR-frontend-064 最新条目非运行中时，追加「等待模型响应 · 耗时」合成条目：带转圈、计时每秒递增
+变更：2026-10-23-marquee-awaiting-indicator
+状态：active
+摘要：工具完成后的间隙；思考进行中
+全文：.sillyspec/changes/archive/2026-10-23-marquee-awaiting-indicator/requirements.md#FR-01
+最近确认：0fa5913d2e4444e1dc0f9a6f01469da91a958814
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-23-marquee-awaiting-indicator:flow:测试绑定FR-01
+  tests: frontend/src/components/daemon/__tests__/turn-live-marquee.test.tsx「最新条目非运行中时出现等待模型响应条目」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-23-marquee-awaiting-indicator
+  status: active
+
+## FR-frontend-065 新事件到达或最新条目回到运行中时，等待条目立即消失；不进入事件队列、不影响窗口滑动
+变更：2026-10-23-marquee-awaiting-indicator
+状态：active
+摘要：新事件到达
+全文：.sillyspec/changes/archive/2026-10-23-marquee-awaiting-indicator/requirements.md#FR-02
+最近确认：0fa5913d2e4444e1dc0f9a6f01469da91a958814
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-23-marquee-awaiting-indicator:flow:测试绑定FR-02
+  tests: frontend/src/components/daemon/__tests__/turn-live-marquee.test.tsx「新事件到达后等待条目消失」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-23-marquee-awaiting-indicator
+  status: active
+
+## FR-frontend-066 最新条目运行中时不显示等待条目；reduced-motion 下显示静态文本（转圈静止）
+变更：2026-10-23-marquee-awaiting-indicator
+状态：active
+摘要：减少动态效果
+全文：.sillyspec/changes/archive/2026-10-23-marquee-awaiting-indicator/requirements.md#FR-03
+最近确认：0fa5913d2e4444e1dc0f9a6f01469da91a958814
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-23-marquee-awaiting-indicator:flow:测试绑定FR-03
+  tests: frontend/src/components/daemon/__tests__/turn-live-marquee.test.tsx「最新条目运行中时无等待条目」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-23-marquee-awaiting-indicator
+  status: active
+
+## FR-frontend-067 新增出现/消失/计时断言测试，全部用例通过；lint与typecheck通过
+变更：2026-10-23-marquee-awaiting-indicator
+状态：active
+摘要：回归核验
+全文：.sillyspec/changes/archive/2026-10-23-marquee-awaiting-indicator/requirements.md#FR-04
+最近确认：0fa5913d2e4444e1dc0f9a6f01469da91a958814
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-23-marquee-awaiting-indicator:flow:测试绑定FR-04
+  tests: frontend/src/components/daemon/__tests__/turn-live-marquee.test.tsx
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-23-marquee-awaiting-indicator
+  status: active

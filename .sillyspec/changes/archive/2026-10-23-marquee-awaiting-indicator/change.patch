@@ -1,0 +1,303 @@
+diff --git a/frontend/src/app/proto/session-live-marquee/page.tsx b/frontend/src/app/proto/session-live-marquee/page.tsx
+index 45e968b27..df44bb379 100644
+--- a/frontend/src/app/proto/session-live-marquee/page.tsx
++++ b/frontend/src/app/proto/session-live-marquee/page.tsx
+@@ -158,7 +158,7 @@ const SCRIPT: ReadonlyArray<(_seq: number) => TurnSegment> = [
+   }),
+ ];
+ 
+-function buildSegments(step: number): TurnSegment[] {
++function buildSegments(step: number, liveThinking: boolean): TurnSegment[] {
+   const total = Math.min(step + 1, 220);
+   const out: TurnSegment[] = [];
+   for (let i = 0; i < total; i += 1) {
+@@ -177,7 +177,7 @@ function buildSegments(step: number): TurnSegment[] {
+     kind: "thinking",
+     id: "live-thinking",
+     text: `正在核对 keepalive 与重试窗口的配合：网关 keepalive 为 60 秒，而应用侧请求超时只有 30 秒，长轮询场景下连接可能被提前回收；接着检查 token 刷新请求是否复用了同一套重试策略，确认失败后不会直接跳转登录页；再核对重试窗口、退避间隔与幂等键，避免重复提交；随后对比修复前后的连接回收日志，确认长轮询不再被网关提前断开；最后补齐回归测试并整理变更说明。（第 ${step + 1} 次刷新）`,
+-    streaming: true,
++    streaming: liveThinking,
+     ts: total * 1000,
+   });
+   return out;
+@@ -222,7 +222,9 @@ export default function SessionLiveMarqueeProtoPage() {
+     return () => window.clearInterval(timer);
+   }, [running]);
+ 
+-  const segments = useMemo(() => buildSegments(step), [step]);
++  // 暂停事件流时把 live-thinking 置为完成态：模拟「工具完成后、下一段
++  // 未到」的 LLM 生成间隙，演示「等待模型响应」指示条目。
++  const segments = useMemo(() => buildSegments(step, running), [step, running]);
+   const entries = useMemo(() => deriveLiveMarqueeEntries(segments), [segments]);
+   const text = FULL_TEXT.slice(0, Math.min(step * 46, FULL_TEXT.length));
+ 
+diff --git a/frontend/src/components/daemon/__tests__/turn-live-marquee.test.tsx b/frontend/src/components/daemon/__tests__/turn-live-marquee.test.tsx
+index c8867add6..3beaed94d 100644
+--- a/frontend/src/components/daemon/__tests__/turn-live-marquee.test.tsx
++++ b/frontend/src/components/daemon/__tests__/turn-live-marquee.test.tsx
+@@ -225,14 +225,18 @@ describe("TurnLiveMarquee 连续轨道（FR-01 / FR-02 / FR-05）", () => {
+   ]);
+ 
+   it("轨道按顺序完整渲染全部条目，不复制内容循环", () => {
+-    const { getByTestId } = render(<TurnLiveMarquee entries={entries} />);
++    const { getByTestId, getAllByTestId } = render(<TurnLiveMarquee entries={entries} />);
+     const track = getByTestId("turn-live-marquee-track");
+ 
+-    expect(track.children).toHaveLength(entries.length);
++    // entries 全为完成态 → 末尾追加 1 条「等待模型响应」合成条目（LLM 间隙）。
++    expect(getAllByTestId("marquee-item")).toHaveLength(entries.length);
++    expect(getByTestId("marquee-awaiting")).not.toBeNull();
++    expect(track.children).toHaveLength(entries.length + 1);
+     const texts = Array.from(track.children).map((el) => el.textContent ?? "");
+     expect(texts[0]).toContain("分析登录链路");
+     expect(texts[1]).toContain("读写文件");
+-    expect(texts[texts.length - 1]).toContain("report.md");
++    expect(texts[2]).toContain("report.md");
++    expect(texts[3]).toContain("等待模型响应");
+   });
+ 
+   it("运行中条目渲染 lucide 图标与转圈，文本区带内部滚动（FR-01）", () => {
+@@ -273,16 +277,16 @@ describe("TurnLiveMarquee 连续轨道（FR-01 / FR-02 / FR-05）", () => {
+     const doneEntries = deriveLiveMarqueeEntries([
+       tool("tool-done", { startedAt: 1000, endedAt: 2500 }),
+     ]);
+-    const { getByTestId, queryByTestId, container } = render(
+-      <TurnLiveMarquee entries={doneEntries} />,
+-    );
++    const { getByTestId } = render(<TurnLiveMarquee entries={doneEntries} />);
+ 
++    // 真实条目（marquee-item）本身完成态：耗时 + 无转圈 + 无滚动窗口
++    //（末尾等待条目上的转圈/滚动窗口属预期，不在此断言范围）。
++    const item = getByTestId("marquee-item");
+     const duration = getByTestId("marquee-duration");
+     expect(duration.textContent).toContain("1.5s");
+     expect(duration.querySelector("svg")).not.toBeNull();
+-    expect(queryByTestId("marquee-spinner")).toBeNull();
+-    // 完成态截断文本不加渐隐遮罩（FR-02）。
+-    expect(container.querySelector(".sh-live-marquee-window")).toBeNull();
++    expect(item.querySelector('[data-testid="marquee-spinner"]')).toBeNull();
++    expect(item.querySelector(".sh-live-marquee-window")).toBeNull();
+   });
+ 
+   it("进行中条目不显示耗时（FR-02）", () => {
+@@ -333,12 +337,11 @@ describe("TurnLiveMarquee 连续轨道（FR-01 / FR-02 / FR-05）", () => {
+     const doneEntries = deriveLiveMarqueeEntries([
+       tool("tool-done", { startedAt: 0, endedAt: 1500 }),
+     ]);
+-    const { getByTestId, container } = render(
+-      <TurnLiveMarquee entries={doneEntries} />,
+-    );
++    const { getByTestId } = render(<TurnLiveMarquee entries={doneEntries} />);
+ 
+-    expect(getByTestId("marquee-item").className).toContain("w-[16rem]");
+-    expect(container.querySelector(".sh-live-marquee-ticker")).toBeNull();
++    const item = getByTestId("marquee-item");
++    expect(item.className).toContain("w-[16rem]");
++    expect(item.querySelector(".sh-live-marquee-ticker")).toBeNull();
+     expect(getByTestId("marquee-duration")).not.toBeNull();
+   });
+ 
+@@ -348,7 +351,44 @@ describe("TurnLiveMarquee 连续轨道（FR-01 / FR-02 / FR-05）", () => {
+     );
+ 
+     expect(queryByTestId("turn-live-marquee-track")).toBeNull();
+-    expect(getByTestId("turn-live-marquee").textContent).toContain("report.md");
++    // 等待态优先静态显示「等待模型响应」条目（FR-03，2026-10-23 修订）。
++    expect(getByTestId("marquee-awaiting").textContent).toContain("等待模型响应");
++  });
++
++  it("最新条目非运行中时出现等待模型响应条目（FR-01）", () => {
++    const { getByTestId } = render(
++      <TurnLiveMarquee entries={deriveLiveMarqueeEntries([thinking("t-done", "思考完成")])} />,
++    );
++
++    const awaiting = getByTestId("marquee-awaiting");
++    expect(awaiting.textContent).toContain("等待模型响应");
++    // 等待条目为 running：带转圈。
++    expect(awaiting.querySelector('[data-testid="marquee-spinner"]')).not.toBeNull();
++  });
++
++  it("最新条目运行中时无等待条目（FR-03）", () => {
++    const { queryByTestId } = render(
++      <TurnLiveMarquee entries={deriveLiveMarqueeEntries([thinking("t-run", "思考中", true)])} />,
++    );
++
++    expect(queryByTestId("marquee-awaiting")).toBeNull();
++  });
++
++  it("新事件到达后等待条目消失（FR-02）", () => {
++    const { rerender, getByTestId, queryByTestId } = render(
++      <TurnLiveMarquee entries={deriveLiveMarqueeEntries([thinking("t-done", "思考完成")])} />,
++    );
++    expect(getByTestId("marquee-awaiting")).not.toBeNull();
++
++    rerender(
++      <TurnLiveMarquee
++        entries={deriveLiveMarqueeEntries([
++          thinking("t-done", "思考完成"),
++          tool("tool-run", { status: "running", endedAt: null }),
++        ])}
++      />,
++    );
++    expect(queryByTestId("marquee-awaiting")).toBeNull();
+   });
+ 
+   it("无条目时不渲染空壳", () => {
+diff --git a/frontend/src/components/daemon/turn-live-marquee.tsx b/frontend/src/components/daemon/turn-live-marquee.tsx
+index 9d628a4c1..b48e12ddf 100644
+--- a/frontend/src/components/daemon/turn-live-marquee.tsx
++++ b/frontend/src/components/daemon/turn-live-marquee.tsx
+@@ -43,6 +43,7 @@ import {
+   MessageSquare,
+   Minimize2,
+   Search,
++  Sparkles,
+   Terminal,
+   Timer,
+   Wrench,
+@@ -104,7 +105,9 @@ export type LiveMarqueeIcon =
+   | "system"
+   | "compact"
+   | "user"
+-  | "wakeup";
++  | "wakeup"
++  // 2026-10-23-marquee-awaiting-indicator：LLM 生成间隙的合成「等待模型响应」条目。
++  | "awaiting";
+ 
+ export interface LiveMarqueeEntry {
+   /** 段 id（子代理内部段带父路径前缀，保证树内唯一）。 */
+@@ -133,6 +136,7 @@ const ICON_COMPONENTS: Record<LiveMarqueeIcon, LucideIcon> = {
+   compact: Minimize2,
+   user: MessageSquare,
+   wakeup: Bell,
++  awaiting: Sparkles,
+ };
+ 
+ /** processLabel 类别 → 图标枚举（工具七类词表语义保留）。 */
+@@ -428,11 +432,13 @@ function MarqueeItemView({
+   durationMs,
+   reduced,
+   fixedWidth = true,
++  testId = "marquee-item",
+ }: {
+   entry: LiveMarqueeEntry;
+   durationMs: number | null;
+   reduced: boolean;
+   fixedWidth?: boolean;
++  testId?: string;
+ }) {
+   const running = entry.status === "running";
+   const Icon = ICON_COMPONENTS[entry.icon];
+@@ -518,7 +524,7 @@ function MarqueeItemView({
+ 
+   return (
+     <span
+-      data-testid="marquee-item"
++      data-testid={testId}
+       data-status={entry.status}
+       className={cn(
+         "flex items-center gap-1.5",
+@@ -654,6 +660,49 @@ export const TurnLiveMarquee = memo(function TurnLiveMarquee({
+ 
+   const latest = entries.length > 0 ? entries[entries.length - 1]! : null;
+ 
++  // 2026-10-23-marquee-awaiting-indicator（FR-01~FR-03）：LLM 生成间隙指示。
++  // 组件仅在运行中轮次被消费方渲染，因此「最新真实条目非 running」即可判定
++  // 处于「工具已完成、下一段未到」的等待态——追加合成「等待模型响应」条目，
++  // 计时每秒递增；新事件到达/回到 running 即消失并清零（渲染层拼接，不进
++  // entries / 计时 Map / 窗口滑动检测）。
++  const awaitingSinceRef = useRef<number | null>(null);
++  const [awaitingElapsedMs, setAwaitingElapsedMs] = useState(0);
++  const isAwaiting = latest != null && latest.status !== "running";
++  const awaitingKey = `${latest?.id ?? "none"}:${latest?.status ?? "none"}`;
++
++  useEffect(() => {
++    if (isAwaiting) {
++      // 新的已完成条目到达（latest.id 变化）= 新间隙开始，从头计时。
++      awaitingSinceRef.current = Date.now();
++      setAwaitingElapsedMs(0);
++    } else {
++      awaitingSinceRef.current = null;
++    }
++  }, [isAwaiting, awaitingKey]);
++
++  useEffect(() => {
++    if (!isAwaiting) return;
++    const timer = window.setInterval(() => {
++      const since = awaitingSinceRef.current;
++      if (since != null) setAwaitingElapsedMs(Math.max(0, Date.now() - since));
++    }, 1000);
++    return () => window.clearInterval(timer);
++  }, [isAwaiting, awaitingKey]);
++
++  const awaitingEntry: LiveMarqueeEntry | null =
++    isAwaiting && latest != null
++      ? {
++          id: "marquee-awaiting",
++          icon: "awaiting",
++          text: `等待模型响应 · ${formatMarqueeDuration(awaitingElapsedMs)}`,
++          status: "running",
++          startedAt: null,
++          endedAt: null,
++          durationMs: null,
++        }
++      : null;
++  const displayEntries = awaitingEntry != null ? [...entries, awaitingEntry] : entries;
++
+   /**
+    * 计算目标位置：内容右端贴视口右缘（即显示最新条）；内容不满一屏时 0。
+    * 首次测量直接定位（打开即看到最新），之后只向更负的方向推进，不回滚。
+@@ -783,23 +832,32 @@ export const TurnLiveMarquee = memo(function TurnLiveMarquee({
+         "sh-live-marquee ml-9 flex h-8 w-[min(100%,52rem)] items-center gap-2 overflow-hidden rounded-full border border-border/70 bg-card px-3 text-[12px] leading-none text-muted-foreground shadow-sm",
+       )}
+     >
+-      {/* 运行状态点：运行中脉冲（reduced-motion 时静止）。 */}
++      {/* 运行状态点：运行中脉冲（reduced-motion 时静止）。等待态（合成条目
++          running）同样脉冲，保证 LLM 生成间隙仍有运行感知。 */}
+       <span aria-hidden className="relative z-10 flex h-2 w-2 shrink-0">
+-        {!reduced && latest.status === "running" && (
++        {!reduced && (latest.status === "running" || awaitingEntry != null) && (
+           <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-brand-400 opacity-60" />
+         )}
+         <span
+-          className={cn("relative inline-flex h-2 w-2 rounded-full", dotClass(latest.status))}
++          className={cn(
++            "relative inline-flex h-2 w-2 rounded-full",
++            dotClass(awaitingEntry != null ? "running" : latest.status),
++          )}
+         />
+       </span>
+ 
+       {reduced ? (
+-        // 减少动态效果：静态展示最新一条，不滚动、不转圈。
++        // 减少动态效果：静态展示最新一条（等待态优先显示等待条目），不滚动、不转圈。
+         <MarqueeItemView
+-          entry={latest}
+-          durationMs={latest.durationMs ?? runtimeDurations[latest.id] ?? null}
++          entry={awaitingEntry ?? latest}
++          durationMs={
++            awaitingEntry != null
++              ? null
++              : (latest.durationMs ?? runtimeDurations[latest.id] ?? null)
++          }
+           reduced
+           fixedWidth={false}
++          testId={awaitingEntry != null ? "marquee-awaiting" : "marquee-item"}
+         />
+       ) : (
+         // 连续轨道：条目按时间顺序等宽排列，向左滚到最新条贴右缘即停。
+@@ -815,12 +873,13 @@ export const TurnLiveMarquee = memo(function TurnLiveMarquee({
+             data-testid="turn-live-marquee-track"
+             className="flex w-max items-center gap-5 will-change-transform"
+           >
+-            {entries.map((entry) => (
++            {displayEntries.map((entry) => (
+               <MarqueeItemView
+                 key={entry.id}
+                 entry={entry}
+                 durationMs={entry.durationMs ?? runtimeDurations[entry.id] ?? null}
+                 reduced={false}
++                testId={entry.id === "marquee-awaiting" ? "marquee-awaiting" : "marquee-item"}
+               />
+             ))}
+           </div>

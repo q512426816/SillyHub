@@ -1,0 +1,66 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-23-marquee-awaiting-indicator",
+  "rows": [
+    {
+      "anchor": "FR-01",
+      "row_id": "2026-10-23-marquee-awaiting-indicator:flow:测试绑定FR-01",
+      "tests": [
+        "frontend/src/components/daemon/__tests__/turn-live-marquee.test.tsx「最新条目非运行中时出现等待模型响应条目」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-23-marquee-awaiting-indicator"
+    },
+    {
+      "anchor": "FR-02",
+      "row_id": "2026-10-23-marquee-awaiting-indicator:flow:测试绑定FR-02",
+      "tests": [
+        "frontend/src/components/daemon/__tests__/turn-live-marquee.test.tsx「新事件到达后等待条目消失」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-23-marquee-awaiting-indicator"
+    },
+    {
+      "anchor": "FR-03",
+      "row_id": "2026-10-23-marquee-awaiting-indicator:flow:测试绑定FR-03",
+      "tests": [
+        "frontend/src/components/daemon/__tests__/turn-live-marquee.test.tsx「最新条目运行中时无等待条目」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-23-marquee-awaiting-indicator"
+    },
+    {
+      "anchor": "FR-04",
+      "row_id": "2026-10-23-marquee-awaiting-indicator:flow:测试绑定FR-04",
+      "tests": [
+        "frontend/src/components/daemon/__tests__/turn-live-marquee.test.tsx"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-23-marquee-awaiting-indicator"
+    }
+  ]
+}

@@ -1766,3 +1766,11 @@ supersedes：D-005@v1
 锚点：未记录
 最近确认：b1d1ed8ee47ffcd26dba1175753a470e3caf08e9
 理由：风险：turn_trigger 含「用户亲笔来源标注」类（shadow_chat/group_chat/schedule，contentHidden=false）——它们也显示为「上下文」行。接受：dsh 同款形态（触发源即 context 行），且行摘要有原文，用户可辨识；如需区分可后续按 trigger 字段细分。放弃的方案：继续用 processItems.system_event 作数据源——DB 实证该路径近乎恒空，修不动；为注入信息新增后端 channel——跨端大改，本平台注入已有 turn_trigger 承载，无需新通道。
+
+## D-unmapped-227@v1 设计期风险与放弃方案（底稿）
+状态：implemented
+变更：2026-10-23-marquee-awaiting-indicator
+原编号：D-001@v1
+锚点：未记录
+最近确认：0fa5913d2e4444e1dc0f9a6f01469da91a958814
+理由：- 风险：1s interval 在等待期间每秒触发一次组件重渲染；列表仅 12+1 条，成本可忽略，且只在等待态运行。 - 等待条目出现/消失使轨道宽度变化一条，target 单调规则下推进连续，短暂右端空档可接受（与真实事件到达通常几乎同时）。 - 放弃方案：① 从后端/daemon 发心跳事件（跨服务改动，收益不成比例）；② 用状态条文案兜底（已有「当前活动」但不持续、也无法区分等待与执行）；③ 等待条目参与 entries 队列（会污染窗口滑动与去重语义）。
