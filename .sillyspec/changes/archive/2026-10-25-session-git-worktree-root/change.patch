@@ -1,0 +1,857 @@
+diff --git a/.sillyspec/docs/SillyHub/modules/frontend_components.changelog.md b/.sillyspec/docs/SillyHub/modules/frontend_components.changelog.md
+index b28d72bcd..30fc702cb 100644
+--- a/.sillyspec/docs/SillyHub/modules/frontend_components.changelog.md
++++ b/.sillyspec/docs/SillyHub/modules/frontend_components.changelog.md
+@@ -159,3 +159,5 @@ created_at: 2026-08-30 22:23:33
+ | 2026-10-25 | 2026-10-25-askuser-keyword-overkill-fix | 会话 96b55567 排查实证——前端 session-log-assembler.ts clas… |
+ | 2026-10-25 | 2026-10-25-marquee-inactive-awaiting-fix | 修复终态子代理卡片内嵌流动条仍显示等待转圈 |
+ | 2026-10-25 | 2026-10-25-session-config-deferred-switch | 会话配置点选改暂存随下条消息生效 |
++| 2026-10-25 | 2026-10-23-pre-session-draft-persist | 新建会话未发送草稿跨刷新切换保留 |
++| 2026-10-25 | 2026-10-25-marquee-awaiting-real-data | 跑马灯等待条目接入真实计时与token |
+diff --git a/.sillyspec/docs/multi-agent-platform/modules/frontend.changelog.md b/.sillyspec/docs/multi-agent-platform/modules/frontend.changelog.md
+index cb34b443b..385cc3335 100644
+--- a/.sillyspec/docs/multi-agent-platform/modules/frontend.changelog.md
++++ b/.sillyspec/docs/multi-agent-platform/modules/frontend.changelog.md
+@@ -208,3 +208,5 @@
+ | 2026-10-25 | 2026-10-25-askuser-keyword-overkill-fix | 会话 96b55567 排查实证——前端 session-log-assembler.ts clas… |
+ | 2026-10-25 | 2026-10-25-marquee-inactive-awaiting-fix | 修复终态子代理卡片内嵌流动条仍显示等待转圈 |
+ | 2026-10-25 | 2026-10-25-session-config-deferred-switch | 会话配置点选改暂存随下条消息生效 |
++| 2026-10-25 | 2026-10-23-pre-session-draft-persist | 新建会话未发送草稿跨刷新切换保留 |
++| 2026-10-25 | 2026-10-25-marquee-awaiting-real-data | 跑马灯等待条目接入真实计时与token |
+diff --git a/backend/app/modules/daemon/schema.py b/backend/app/modules/daemon/schema.py
+index e12491760..3d672c3b9 100644
+--- a/backend/app/modules/daemon/schema.py
++++ b/backend/app/modules/daemon/schema.py
+@@ -143,6 +143,11 @@ class AgentSessionListResponse(BaseModel):
+ class SessionGitStatusResponse(BaseModel):
+     git_mode: Literal["git", "no_git", "no_root"]
+     root: str | None = None
++    # 2026-10-25-session-git-worktree-root：根来源标识——worktree=命中 sillyspec
++    # 工作树标准布局（current_change_id→change_key→stat 探测）；cwd=会话 cwd
++    # 快照链；workspace_root=成员绑定根回退；none=no_root 空态。前端据此渲染
++    # 工作树标识。
++    root_source: Literal["worktree", "cwd", "workspace_root", "none"] = "none"
+     branch: str | None = None
+     detached: bool = False
+     head_short: str | None = None
+diff --git a/backend/app/modules/daemon/session/service/git_status.py b/backend/app/modules/daemon/session/service/git_status.py
+index 0966c376e..30898b2a5 100644
+--- a/backend/app/modules/daemon/session/service/git_status.py
++++ b/backend/app/modules/daemon/session/service/git_status.py
+@@ -1,12 +1,23 @@
+-"""会话级 git 状态 service（2026-10-21-session-git-branch / FR-01..03）。
++"""会话级 git 状态 service（2026-10-21-session-git-branch / FR-01..03；
++2026-10-25-session-git-worktree-root 加工作树探测层）。
+ 
+ 会话维度的**当前** git 分支实时查询（FR-02：每请求现场采集，非创建快照）：
+ 
+-- root 决策链：``AgentSession.cwd``（SessionManager working dir，daemon 宿主
+-  路径，``resolve_root_path_for_daemon`` 做 container→host 改写）优先；cwd
+-  为空回退所属工作区的成员绑定根（``MemberBindingResolver``，只看本人绑定
+-  行——git_log ``_resolve_binding`` 同语义）。两者皆无、或 cwd 有值但无
+-  workspace 可解析 daemon → 200 ``no_root`` 空态（不报错，FR-03）。
++- root 决策链（2026-10-25 版，三层）：① **工作树探测层（尽力而为）**——
++  ``AgentSession.current_change_id``（inject 打锚、随命令游走）→
++  ``changes.change_key``（sillyspec change 名）→ 候选 = 成员绑定根下
++  ``.sillyspec/.runtime/worktrees/<change_key>/``（sillyspec 固定布局，
++  src/worktree.js WORKTREES_REL）→ daemon 平名 RPC ``host_fs.stat`` 探测
++  候选下 ``.git``（worktree 检出的 .git 是文件，lstat 可见）；命中则 root=
++  工作树、root_source="worktree"——平台其余 cwd 信号（AgentSession.cwd 创建
++  快照 / platform_agent_logs.agent_cwd 启动目录快照）均不随 agent cd 更新，
++  这是唯一结构化可推导的工作树信号。miss / current_change_id 空 / change 行
++  缺失 / stat 异常（离线/超时/远端错）→ 静默落回，探测不新增错误面。
++  ② ``AgentSession.cwd``（``resolve_root_path_for_daemon`` 改写），
++  root_source="cwd"；③ 成员绑定根（``MemberBindingResolver``，只看本人绑定
++  行——git_log ``_resolve_binding`` 同语义），root_source="workspace_root"。
++  ①②③全 miss（无 workspace 可解析 daemon）→ 200 ``no_root`` 空态
++  （root_source="none"）。
+ - 采集：既有平名 RPC ``git_status``（``ws_hub.send_rpc`` 直连 + 显式 30s
+   超时，照 ``git_log/service.py:_send_git_rpc`` 模式）——daemon 内建 fetch
+   降级（no_remote/fetch_failed/fetch_timeout 不阻断分支采集），零 daemon
+@@ -16,7 +27,8 @@
+   error → 502；RPC forbidden（root 越界 allowed_roots，如 worktree 未入
+   白名单）→ 403；offline/mid-rpc 断连 → 502；timeout → 504。
+ 
+-设计依据：``.sillyspec/changes/2026-10-21-session-git-branch/design.md``。
++设计依据：``.sillyspec/changes/2026-10-21-session-git-branch/design.md``、
++``.sillyspec/changes/2026-10-25-session-git-worktree-root/design.md``。
+ """
+ 
+ from __future__ import annotations
+@@ -25,6 +37,8 @@ import uuid
+ from datetime import UTC, datetime
+ from typing import Any, Final, Literal
+ 
++from sqlalchemy import select
++
+ from app.core.errors import AppError
+ from app.modules.daemon.runtime.service import (
+     DaemonRpcRemoteError,
+@@ -39,6 +53,15 @@ from app.modules.workspace.service import resolve_root_path_for_daemon
+ # 兜底 30s，内含 fetch 15s 局部超时）。
+ SESSION_GIT_RPC_TIMEOUT_SECONDS: Final[float] = 30.0
+ 
++# 工作树探测 stat RPC 短预算（UI 路径尽力而为层，非关键面——host_fs delegate
++# probe 同档思路；本地 lstat 毫秒级，5s 只兜传输抖动）。
++WORKTREE_PROBE_RPC_TIMEOUT_SECONDS: Final[float] = 5.0
++
++# sillyspec worktree 固定布局（src/worktree.js WORKTREES_REL）——相对工作区
++# 绑定根的固定相对路径，跨仓 worktree 的「--<repoKey>」双连后缀命名不匹配
++# change_key 自然 miss 落回（design 边界 4）。
++_WORKTREES_REL: Final[str] = ".sillyspec/.runtime/worktrees"
++
+ # 非 git 仓库判据：git 标准错误文案（git_gateway/tests/test_router.py 已依赖
+ # 同形态），daemon porcelain 失败时经 error 字段回传。
+ _NOT_A_GIT_REPO_MARKER: Final[str] = "not a git repository"
+@@ -83,13 +106,47 @@ def _now_iso() -> str:
+     return datetime.now(UTC).isoformat()
+ 
+ 
++async def _probe_worktree(
++    hub: Any,
++    daemon_id: uuid.UUID,
++    binding_root: str,
++    change_key: str,
++) -> str | None:
++    """探测 sillyspec 工作树标准布局（2026-10-25-session-git-worktree-root）。
++
++    候选 = ``<binding_root>/.sillyspec/.runtime/worktrees/<change_key>/``，经
++    daemon 平名 RPC ``host_fs.stat`` 查候选下 ``.git``（worktree 检出为文件，
++    lstat 语义可见——delegate probe_workspace_git_mode 同判据）。返回候选
++    绝对路径（命中）或 None（miss）。
++
++    尽力而为层：任何异常（离线/超时/远端错）与答非约定形状一律 None 落回，
++    不新增错误面（FR-02）；不读 meta.json（避开 CLI 并发写面，design 边界 2）。
++    """
++    candidate = binding_root.rstrip("/\\") + "/" + _WORKTREES_REL + "/" + change_key
++    try:
++        result = await hub.send_rpc(
++            daemon_id,
++            "host_fs.stat",
++            {"path": candidate + "/.git"},
++            timeout=WORKTREE_PROBE_RPC_TIMEOUT_SECONDS,
++        )
++    except Exception:
++        return None
++    if isinstance(result, dict) and result.get("exists") is True:
++        return candidate
++    return None
++
++
+ def _empty(
+-    git_mode: Literal["no_git", "no_root"], root: str | None = None
++    git_mode: Literal["no_git", "no_root"],
++    root: str | None = None,
++    root_source: Literal["worktree", "cwd", "workspace_root", "none"] = "none",
+ ) -> SessionGitStatusResponse:
+     """空态响应（no_root / no_git）：branch 等字段全 None（FR-03）。"""
+     return SessionGitStatusResponse(
+         git_mode=git_mode,
+         root=root,
++        root_source=root_source,
+         branch=None,
+         detached=False,
+         head_short=None,
+@@ -113,52 +170,60 @@ async def get_session_git_status(
+ 
+     agent_session = await svc.get_agent_session(session_id, user_id)
+ 
+-    # ── root 决策链（design「做法概述」）────────────────────────────────────
+-    # cwd 优先（daemon 宿主路径快照）；cwd 有值但无 workspace → 无法解析
+-    # daemon_id（AgentSession 无 daemon 直连列）→ no_root 空态守护。
+-    daemon_id: uuid.UUID | None = None
+-    if agent_session.cwd:
+-        if agent_session.workspace_id is None:
+-            return _empty("no_root")
+-        binding = await MemberBindingResolver.resolve_member_binding_or_none(
+-            svc._session,
+-            agent_session.workspace_id,
+-            user_id,
+-            log_tag="session_git_resolve_member_binding_unexpected_error",
+-        )
+-        if binding is None or binding.daemon_id is None:
+-            raise SessionGitNotBound(
+-                "当前账号未绑定本机工作区，无法查询会话 Git 状态。",
+-                details={
+-                    "session_id": str(session_id),
+-                    "workspace_id": str(agent_session.workspace_id),
+-                },
+-            )
+-        daemon_id = binding.daemon_id
+-        root = resolve_root_path_for_daemon(agent_session.cwd)
+-    elif agent_session.workspace_id is not None:
+-        binding = await MemberBindingResolver.resolve_member_binding_or_none(
+-            svc._session,
+-            agent_session.workspace_id,
+-            user_id,
+-            log_tag="session_git_resolve_member_binding_unexpected_error",
++    # ── binding 统一解析（cwd 链与探测层都需要 daemon_id + 绑定根锚）──────────
++    # 无 workspace → 无从解析 daemon（AgentSession 无 daemon 直连列）与探测锚
++    # → no_root 空态守护（cwd 有值同理——2026-10-21 版语义保持）。
++    if agent_session.workspace_id is None:
++        return _empty("no_root")
++    binding = await MemberBindingResolver.resolve_member_binding_or_none(
++        svc._session,
++        agent_session.workspace_id,
++        user_id,
++        log_tag="session_git_resolve_member_binding_unexpected_error",
++    )
++    if binding is None or binding.daemon_id is None:
++        raise SessionGitNotBound(
++            "当前账号未绑定本机工作区，无法查询会话 Git 状态。",
++            details={
++                "session_id": str(session_id),
++                "workspace_id": str(agent_session.workspace_id),
++            },
+         )
+-        if binding is None or binding.daemon_id is None:
+-            raise SessionGitNotBound(
+-                "当前账号未绑定本机工作区，无法查询会话 Git 状态。",
+-                details={
+-                    "session_id": str(session_id),
+-                    "workspace_id": str(agent_session.workspace_id),
+-                },
++    daemon_id = binding.daemon_id
++    binding_root = resolve_root_path_for_daemon(binding.root_path)
++    hub = get_daemon_ws_hub()
++
++    # ── ① 工作树探测层（2026-10-25-session-git-worktree-root / FR-01）────────
++    # current_change_id（inject 打锚、随命令游走）→ change_key → 标准布局候选
++    # → host_fs.stat 探测；miss/异常静默落回②③（FR-02）。
++    root: str | None = None
++    root_source: Literal["worktree", "cwd", "workspace_root", "none"] = "none"
++    change_key: str | None = None
++    if agent_session.current_change_id is not None:
++        from app.modules.change.model import Change
++
++        change_key = (
++            await svc._session.execute(
++                select(Change.change_key).where(Change.id == agent_session.current_change_id)
+             )
+-        daemon_id = binding.daemon_id
+-        root = resolve_root_path_for_daemon(binding.root_path)
+-    else:
+-        return _empty("no_root")
++        ).scalar_one_or_none()
++    if change_key:
++        worktree_root = await _probe_worktree(hub, daemon_id, binding_root, change_key)
++        if worktree_root is not None:
++            root = worktree_root
++            root_source = "worktree"
++
++    # ── ② cwd 快照链 → ③ 绑定根回退（2026-10-21 版语义，零回归）─────────────
++    if root is None:
++        if agent_session.cwd:
++            root = resolve_root_path_for_daemon(agent_session.cwd)
++            root_source = "cwd"
++        else:
++            root = binding_root
++            root_source = "workspace_root"
+ 
+     # ── 平名 RPC 直连（git_log _send_git_rpc 同模式：显式超时 + 全量错误映射）──
+     context: dict[str, Any] = {"session_id": str(session_id)}
+-    hub = get_daemon_ws_hub()
+     try:
+         result: dict[str, Any] = await hub.send_rpc(
+             daemon_id,
+@@ -219,7 +284,7 @@ async def get_session_git_status(
+     error = result.get("error")
+     if error:
+         if _NOT_A_GIT_REPO_MARKER in str(error):
+-            return _empty("no_git", root=root)
++            return _empty("no_git", root=root, root_source=root_source)
+         raise SessionGitDaemonRemoteError(
+             "守护进程查询会话 Git 状态失败，请稍后重试。",
+             details={
+@@ -233,6 +298,7 @@ async def get_session_git_status(
+     return SessionGitStatusResponse(
+         git_mode="git",
+         root=root,
++        root_source=root_source,
+         branch=result.get("branch"),
+         detached=bool(result.get("detached")),
+         head_short=result.get("head_short"),
+diff --git a/backend/openapi.json b/backend/openapi.json
+index ed01cbd40..4969f05d5 100644
+--- a/backend/openapi.json
++++ b/backend/openapi.json
+@@ -70997,6 +70997,17 @@
+             ],
+             "title": "Root"
+           },
++          "root_source": {
++            "type": "string",
++            "enum": [
++              "worktree",
++              "cwd",
++              "workspace_root",
++              "none"
++            ],
++            "title": "Root Source",
++            "default": "none"
++          },
+           "branch": {
+             "anyOf": [
+               {
+diff --git a/backend/tests/modules/daemon/test_session_git_status.py b/backend/tests/modules/daemon/test_session_git_status.py
+index ed5c1a187..1827a993f 100644
+--- a/backend/tests/modules/daemon/test_session_git_status.py
++++ b/backend/tests/modules/daemon/test_session_git_status.py
+@@ -367,3 +367,145 @@ async def test_openapi_lists_session_git_status_path():
+ 
+     paths = app.openapi()["paths"]
+     assert "/api/daemon/sessions/{session_id}/git-status" in paths
++
++
++# ── 2026-10-25-session-git-worktree-root：工作树探测层 ──────────────────────
++
++
++async def _seed_change(
++    db_session: AsyncSession,
++    *,
++    workspace_id: uuid.UUID,
++    change_key: str,
++) -> uuid.UUID:
++    """造 Change 行（change_key 即 sillyspec change 名；location/path 必填）。"""
++    from app.modules.change.model import Change
++
++    change_id = uuid.uuid4()
++    db_session.add(
++        Change(
++            id=change_id,
++            workspace_id=workspace_id,
++            change_key=change_key,
++            title="工作树探测测试变更",
++            status="active",
++            location="active",
++            path=f".sillyspec/changes/{change_key}",
++        )
++    )
++    await db_session.commit()
++    return change_id
++
++
++async def _seed_env_with_change(
++    db_session: AsyncSession,
++    *,
++    cwd: str | None = r"C:\repo",
++    with_change: bool = True,
++) -> tuple[AgentSession, str, FakeHub]:
++    """带 current_change_id 锚的场景（change_key=2026-10-25-wt-demo）。"""
++    sess, token, hub, _ = await _seed_env(db_session, cwd=cwd)
++    if with_change:
++        change_id = await _seed_change(
++            db_session, workspace_id=sess.workspace_id, change_key="2026-10-25-wt-demo"
++        )
++        sess.current_change_id = change_id
++        db_session.add(sess)
++        await db_session.commit()
++        await db_session.refresh(sess)
++    return sess, token, hub
++
++
++async def test_git_status_prefers_active_sillyspec_worktree(
++    client: AsyncClient, db_session: AsyncSession, monkeypatch
++):
++    """FR-01：current_change_id 有活跃工作树（stat 命中）→ root=工作树路径、
++    root_source=worktree、git_status RPC 按工作树采集（优先于 cwd 主仓快照）。"""
++    sess, token, hub = await _seed_env_with_change(db_session, cwd=r"C:\repo")
++    # 探测层拼接形态：绑定根（Windows 反斜杠原样）+ 正斜杠相对段（_probe_worktree
++    # 以 "/" 连接，daemon pathResolve 容忍混合分隔符）。
++    wt_path = r"C:\repo" + "/.sillyspec/.runtime/worktrees/2026-10-25-wt-demo"
++    hub.on("host_fs.stat", result={"exists": True, "is_dir": False, "size": 1})
++    hub.on("git_status", result=dict(_GIT_STATUS_RESULT, branch="wt-branch"))
++    monkeypatch.setattr("app.modules.daemon.ws_hub.get_daemon_ws_hub", lambda: hub)
++
++    resp = await client.get(_url(sess.id), headers={"Authorization": f"Bearer {token}"})
++    assert resp.status_code == 200, resp.text
++    body = resp.json()
++    assert body["root_source"] == "worktree"
++    assert body["root"] == wt_path
++    assert body["branch"] == "wt-branch"
++
++    stat_calls = [c for c in hub.calls if c["method"] == "host_fs.stat"]
++    assert len(stat_calls) == 1
++    assert stat_calls[0]["params"] == {"path": wt_path + "/.git"}
++    rpc_calls = _git_status_calls(hub)
++    assert len(rpc_calls) == 1
++    assert rpc_calls[0]["params"] == {"root": wt_path}
++
++
++async def test_git_status_worktree_probe_miss_falls_back_to_cwd(
++    client: AsyncClient, db_session: AsyncSession, monkeypatch
++):
++    """FR-02：目录已清理（stat exists=false）→ 落回 cwd 链，root_source=cwd。"""
++    sess, token, hub = await _seed_env_with_change(db_session, cwd=r"C:\repo")
++    hub.on("host_fs.stat", result={"exists": False, "is_dir": False, "size": 0})
++    hub.on("git_status", result=dict(_GIT_STATUS_RESULT))
++    monkeypatch.setattr("app.modules.daemon.ws_hub.get_daemon_ws_hub", lambda: hub)
++
++    resp = await client.get(_url(sess.id), headers={"Authorization": f"Bearer {token}"})
++    assert resp.status_code == 200, resp.text
++    body = resp.json()
++    assert body["root_source"] == "cwd"
++    assert body["root"] == r"C:\repo"
++    assert _git_status_calls(hub)[0]["params"] == {"root": r"C:\repo"}
++
++
++async def test_git_status_worktree_probe_error_falls_back_silently(
++    client: AsyncClient, db_session: AsyncSession, monkeypatch
++):
++    """FR-02：探测 stat RPC 异常（离线）→ 静默落回，不新增错误面（后续
++    git_status RPC 正常则整体 200，root_source=cwd）。"""
++    sess, token, hub = await _seed_env_with_change(db_session, cwd=r"C:\repo")
++    hub.on(
++        "host_fs.stat",
++        exc=DaemonRuntimeOffline("daemon 'x' is offline (no WS connection)."),
++    )
++    hub.on("git_status", result=dict(_GIT_STATUS_RESULT))
++    monkeypatch.setattr("app.modules.daemon.ws_hub.get_daemon_ws_hub", lambda: hub)
++
++    resp = await client.get(_url(sess.id), headers={"Authorization": f"Bearer {token}"})
++    assert resp.status_code == 200, resp.text
++    body = resp.json()
++    assert body["root_source"] == "cwd"
++
++
++async def test_git_status_no_change_anchor_skips_probe(
++    client: AsyncClient, db_session: AsyncSession, monkeypatch
++):
++    """FR-02：无 current_change_id → 零 stat 调用（探测层跳过），行为同 2026-10-21 版。"""
++    sess, token, hub = await _seed_env_with_change(db_session, with_change=False)
++    hub.on("git_status", result=dict(_GIT_STATUS_RESULT))
++    monkeypatch.setattr("app.modules.daemon.ws_hub.get_daemon_ws_hub", lambda: hub)
++
++    resp = await client.get(_url(sess.id), headers={"Authorization": f"Bearer {token}"})
++    assert resp.status_code == 200, resp.text
++    assert resp.json()["root_source"] == "cwd"
++    assert not [c for c in hub.calls if c["method"] == "host_fs.stat"]
++
++
++async def test_git_status_stale_change_id_falls_back(
++    client: AsyncClient, db_session: AsyncSession, monkeypatch
++):
++    """FR-02：current_change_id 指向已删 change 行（查无 change_key）→ 落回。"""
++    sess, token, hub, _ = await _seed_env(db_session)
++    sess.current_change_id = uuid.uuid4()  # 幽灵 id（无对应行）
++    db_session.add(sess)
++    await db_session.commit()
++    hub.on("git_status", result=dict(_GIT_STATUS_RESULT))
++    monkeypatch.setattr("app.modules.daemon.ws_hub.get_daemon_ws_hub", lambda: hub)
++
++    resp = await client.get(_url(sess.id), headers={"Authorization": f"Bearer {token}"})
++    assert resp.status_code == 200, resp.text
++    assert resp.json()["root_source"] == "cwd"
++    assert not [c for c in hub.calls if c["method"] == "host_fs.stat"]
+diff --git a/frontend/src/components/daemon/__tests__/turn-live-marquee.test.tsx b/frontend/src/components/daemon/__tests__/turn-live-marquee.test.tsx
+index 1f8b34c17..ad85264f1 100644
+--- a/frontend/src/components/daemon/__tests__/turn-live-marquee.test.tsx
++++ b/frontend/src/components/daemon/__tests__/turn-live-marquee.test.tsx
+@@ -449,6 +449,53 @@ describe("TurnLiveMarquee 连续轨道（FR-01 / FR-02 / FR-05）", () => {
+     expect(queryByTestId("marquee-awaiting")).toBeNull();
+   });
+ 
++  it("lastEventAt 服务端起点：挂载即累计、不重置（FR-01）", async () => {
++    const nowSpy = vi.spyOn(Date, "now").mockReturnValue(50_000);
++    try {
++      const { getByTestId } = render(
++        <TurnLiveMarquee
++          // 最后事件发生在 40s 前（服务端时间戳 10_000）。
++          lastEventAt={10_000}
++          entries={deriveLiveMarqueeEntries([
++            tool("tool-done", { startedAt: 5_000, endedAt: 10_000 }),
++          ])}
++        />,
++      );
++
++      const awaiting = getByTestId("marquee-awaiting");
++      // 挂载后数值段渲染：等待 ≈ 40s（服务端起点，不从 0 重置）。
++      await waitFor(() => {
++        expect(awaiting.textContent).toContain("40s");
++      });
++    } finally {
++      nowSpy.mockRestore();
++    }
++  });
++
++  it("等待条目回显本轮 token；无数据不显示（FR-02）", async () => {
++    const { getByTestId, rerender } = render(
++      <TurnLiveMarquee
++        turnTokens={{ input: 8400, output: 1250 }}
++        entries={deriveLiveMarqueeEntries([thinking("t-done", "思考完成")])}
++      />,
++    );
++    const awaiting = getByTestId("marquee-awaiting");
++    await waitFor(() => {
++      expect(awaiting.textContent).toContain("↑8,400 ↓1,250");
++    });
++
++    // 两值皆 null → 不显示 token 段。
++    rerender(
++      <TurnLiveMarquee
++        turnTokens={{ input: null, output: null }}
++        entries={deriveLiveMarqueeEntries([thinking("t-done", "思考完成")])}
++      />,
++    );
++    await waitFor(() => {
++      expect(getByTestId("marquee-awaiting").textContent).not.toContain("↑");
++    });
++  });
++
+   it("无条目时不渲染空壳", () => {
+     const { queryByTestId } = render(<TurnLiveMarquee entries={[]} />);
+     expect(queryByTestId("turn-live-marquee")).toBeNull();
+diff --git a/frontend/src/components/daemon/turn-live-marquee.tsx b/frontend/src/components/daemon/turn-live-marquee.tsx
+index d5abd5f18..b168d3b75 100644
+--- a/frontend/src/components/daemon/turn-live-marquee.tsx
++++ b/frontend/src/components/daemon/turn-live-marquee.tsx
+@@ -611,6 +611,17 @@ export interface TurnLiveMarqueeProps {
+    * 等待计时不启动——等待指示只属于仍在运行的宿主。
+    */
+   active?: boolean;
++  /**
++   * 最后事件的服务端毫秒时间戳（2026-10-25-marquee-awaiting-real-data / FR-01）。
++   * 等待计时起点优先取它（Date.now() - lastEventAt）——刷新/中途打开后等待时长
++   * 继续累计不重置；缺省回退客户端首次观察起点。
++   */
++  lastEventAt?: number | null;
++  /**
++   * 本轮累计 token（FR-02；来自 tokens 事件实时更新的轮级 inputTokens/outputTokens）。
++   * 等待条目回显「↑输入 ↓输出」；两值皆 null / 缺省不显示 token 段。
++   */
++  turnTokens?: { input: number | null; output: number | null } | null;
+ }
+ 
+ /**
+@@ -625,6 +636,8 @@ export const TurnLiveMarquee = memo(function TurnLiveMarquee({
+   layout = "bar",
+   testId,
+   active = true,
++  lastEventAt,
++  turnTokens,
+ }: TurnLiveMarqueeProps) {
+   const prefersReduced = usePrefersReducedMotion();
+   const reduced = reducedMotion ?? prefersReduced;
+@@ -698,35 +711,60 @@ export const TurnLiveMarquee = memo(function TurnLiveMarquee({
+   // entries / 计时 Map / 窗口滑动检测）。
+   const awaitingSinceRef = useRef<number | null>(null);
+   const [awaitingElapsedMs, setAwaitingElapsedMs] = useState(0);
++  // 数值段（时长/token）挂载后渲染——SSR/水合首帧只渲染骨架文案，避免
++  // Date.now 派生值的服务端/客户端不一致（同 runningElapsed 的 elapsedMounted 门控）。
++  const [awaitingMounted, setAwaitingMounted] = useState(false);
++  useEffect(() => {
++    setAwaitingMounted(true);
++  }, []);
+   // 等待条目仅在宿主仍在进行时出现（终态卡片不得假等——FR-01）。
+   const isAwaiting = active && latest != null && latest.status !== "running";
+   const awaitingKey = `${latest?.id ?? "none"}:${latest?.status ?? "none"}`;
+ 
++  // 2026-10-25-marquee-awaiting-real-data（FR-01）：等待起点优先最后事件的
++  // 服务端时间戳——刷新/中途打开后等待时长继续累计不重置；缺省回退客户端
++  // 首次观察起点（旧数据/无时间戳）。
++  const awaitingAnchor = (): number | null =>
++    lastEventAt ?? awaitingSinceRef.current ?? null;
++
+   useEffect(() => {
+     if (isAwaiting) {
+-      // 新的已完成条目到达（latest.id 变化）= 新间隙开始，从头计时。
++      // 新的已完成条目到达（latest.id 变化）= 新间隙开始，客户端兜底起点重记。
+       awaitingSinceRef.current = Date.now();
+-      setAwaitingElapsedMs(0);
++      const anchor = awaitingAnchor();
++      setAwaitingElapsedMs(anchor != null ? Math.max(0, Date.now() - anchor) : 0);
+     } else {
+       awaitingSinceRef.current = null;
+     }
+-  }, [isAwaiting, awaitingKey]);
++    // awaitingAnchor 读 lastEventAt / ref——不进依赖（ref 可变引用），lastEventAt
++    // 变化即新事件到达，isAwaiting/awaitingKey 随之翻转触发本 effect。
++    // eslint-disable-next-line react-hooks/exhaustive-deps
++  }, [isAwaiting, awaitingKey, lastEventAt]);
+ 
+   useEffect(() => {
+     if (!isAwaiting) return;
+     const timer = window.setInterval(() => {
+-      const since = awaitingSinceRef.current;
+-      if (since != null) setAwaitingElapsedMs(Math.max(0, Date.now() - since));
++      const anchor = awaitingAnchor();
++      if (anchor != null) setAwaitingElapsedMs(Math.max(0, Date.now() - anchor));
+     }, 1000);
+     return () => window.clearInterval(timer);
+-  }, [isAwaiting, awaitingKey]);
+-
++    // eslint-disable-next-line react-hooks/exhaustive-deps
++  }, [isAwaiting, awaitingKey, lastEventAt]);
++
++  // FR-02：本轮累计 token 段（tokens 事件实时更新；两值皆 null 不显示——旧 daemon/早期）。
++  const tokenSuffix =
++    turnTokens != null && (turnTokens.input != null || turnTokens.output != null)
++      ? ` · ↑${(turnTokens.input ?? 0).toLocaleString("zh-CN")} ↓${(turnTokens.output ?? 0).toLocaleString("zh-CN")}`
++      : "";
+   const awaitingEntry: LiveMarqueeEntry | null =
+     isAwaiting && latest != null
+       ? {
+           id: "marquee-awaiting",
+           icon: "awaiting",
+-          text: `等待模型响应 · ${formatMarqueeDuration(awaitingElapsedMs)}`,
++          // 数值段挂载后渲染（awaitingMounted）：SSR 首帧骨架，客户端水合后填时长/token。
++          text: awaitingMounted
++            ? `等待模型响应 · ${formatMarqueeDuration(awaitingElapsedMs)}${tokenSuffix}`
++            : "等待模型响应…",
+           status: "running",
+           startedAt: null,
+           endedAt: null,
+diff --git a/frontend/src/components/daemon/turn-timeline.tsx b/frontend/src/components/daemon/turn-timeline.tsx
+index 3c9bb0a76..8f6b4a7a3 100644
+--- a/frontend/src/components/daemon/turn-timeline.tsx
++++ b/frontend/src/components/daemon/turn-timeline.tsx
+@@ -1128,6 +1128,13 @@ const TurnRow = memo(function TurnRow({
+                   dialogHistory={dialogHistory}
+                   markerAnswered={hasLaterUserMessage}
+                   onMarkerSubmit={onResend}
++                  // 2026-10-25-marquee-awaiting-real-data（FR-03）：轮级 token +
++                  // 最后事件服务端时间戳——等待条目回显真实计时与本轮累计 token。
++                  turnTokens={
++                    turn.inputTokens != null || turn.outputTokens != null
++                      ? { input: turn.inputTokens, output: turn.outputTokens }
++                      : null
++                  }
+                   />
+                 </>
+               ) : (
+@@ -2247,6 +2254,7 @@ function SegmentedTurnBody({
+   dialogHistory,
+   markerAnswered,
+   onMarkerSubmit,
++  turnTokens,
+ }: {
+   segments: TurnSegment[];
+   turnStatus: TurnUiStatus;
+@@ -2259,6 +2267,8 @@ function SegmentedTurnBody({
+   markerAnswered: boolean;
+   /** task-07：marker 提问卡提交回调（答案作下一条用户消息，父级传 onResend）。 */
+   onMarkerSubmit: (_prompt: string) => void;
++  /** 2026-10-25-marquee-awaiting-real-data：轮级累计 token（tokens 事件实时更新）。 */
++  turnTokens?: { input: number | null; output: number | null } | null;
+ }) {
+   const turnDialogs = useMemo(
+     () => dialogHistory.filter((d) => d.run_id === runKey),
+@@ -2287,6 +2297,17 @@ function SegmentedTurnBody({
+         : [],
+     [viewMode, turnStatus, segments],
+   );
++  // 2026-10-25-marquee-awaiting-real-data（FR-01）：最后事件服务端时间戳——
++  // 等待计时真实锚点（刷新/中途打开不重置）。取条目三时刻最大值。
++  const liveLastEventAt = useMemo(() => {
++    if (liveEntries.length === 0) return null;
++    let max: number | null = null;
++    for (const entry of liveEntries) {
++      const ts = entry.endedAt ?? entry.startedAt ?? null;
++      if (ts != null && (max == null || ts > max)) max = ts;
++    }
++    return max;
++  }, [liveEntries]);
+   const timeline = useMemo(() => {
+     if (viewMode !== "all") return null;
+     const items: SegmentTimelineItem[] = [
+@@ -2436,8 +2457,16 @@ function SegmentedTurnBody({
+       )}
+       {/* 2026-10-22-conversation-live-marquee（FR-01 / FR-04）：对话视图运行中
+           轮次末尾的实时活动跑马灯——纯感知、不交互；进度/轨迹视图与终态轮
+-          liveEntries 为空不挂载。位置=本轮最新处（思考占位之后）。 */}
+-      {liveEntries.length > 0 && <TurnLiveMarquee entries={liveEntries} />}
++          liveEntries 为空不挂载。位置=本轮最新处（思考占位之后）。
++          2026-10-25-marquee-awaiting-real-data：等待条目接入服务端真实计时
++          与本轮累计 token。 */}
++      {liveEntries.length > 0 && (
++        <TurnLiveMarquee
++          entries={liveEntries}
++          lastEventAt={liveLastEventAt}
++          turnTokens={turnTokens}
++        />
++      )}
+       {/* 2026-10-20-session-page-dsh-alignment（FR-01 / D-016①）：原 quick-3c85b05e
+           的「开始 · 结束 · 历时」独立行已删除——它与轮尾状态行重复，时间细节改由
+           TurnRow 派生 metaDetail 折进那条唯一元信息行（RoundDivider.detail / all 视图
+diff --git a/frontend/src/components/sessions/__tests__/session-config-bar.test.tsx b/frontend/src/components/sessions/__tests__/session-config-bar.test.tsx
+index 59ec71f9f..f88b631af 100644
+--- a/frontend/src/components/sessions/__tests__/session-config-bar.test.tsx
++++ b/frontend/src/components/sessions/__tests__/session-config-bar.test.tsx
+@@ -246,10 +246,12 @@ beforeEach(() => {
+   });
+   mocks.setSessionThinkingLevel.mockReset().mockResolvedValue({ ok: true });
+   // 2026-10-21-session-git-branch：默认正常 git 态（feature-x 分支）——既有
+-  // 用例不感知指示项；空态/失败态由本变更新增用例覆盖。
++  // 用例不感知指示项；空态/失败态由本变更新增用例覆盖。root_source 缺省
++  // cwd（2026-10-25-session-git-worktree-root 加字段，工作树形态另有用例）。
+   mocks.fetchSessionGitStatus.mockReset().mockResolvedValue({
+     git_mode: "git",
+     root: "C:\\repo",
++    root_source: "cwd",
+     branch: "feature-x",
+     detached: false,
+     head_short: "1a2b3c4d",
+@@ -1720,7 +1722,8 @@ describe("SessionConfigBar 档案默认预示（profile-default-prehint）", ()
+ describe("SessionConfigBar git 分支指示项（2026-10-21-session-git-branch）", () => {
+   const GIT_OK = {
+     git_mode: "git",
+-    root: "C:\wt\feature-x",
++    root: "C:\\wt\\feature-x",
++    root_source: "cwd",
+     branch: "feature-x",
+     detached: false,
+     head_short: "1a2b3c4d",
+@@ -1801,3 +1804,37 @@ describe("SessionConfigBar git 分支指示项（2026-10-21-session-git-branch
+     expect(mocks.fetchSessionGitStatus).not.toHaveBeenCalled();
+   });
+ });
++
++// ── 15. 工作树标识（2026-10-25-session-git-worktree-root / FR-03）───────────
++
++describe("SessionConfigBar git 指示项工作树标识（2026-10-25-session-git-worktree-root）", () => {
++  const WT_OK = {
++    git_mode: "git",
++    root: "C:\\repo\\.sillyspec\\.runtime\\worktrees\\2026-10-25-wt-demo",
++    root_source: "worktree",
++    branch: "wt-branch",
++    detached: false,
++    head_short: "9f8e7d6c",
++    files_changed: 3,
++    untracked_count: 0,
++    synced_at: "2026-10-25T12:00:00Z",
++  };
++
++  it("shows worktree badge when root_source is worktree（FR-03：工作树可见标识）", async () => {
++    mocks.fetchSessionGitStatus.mockResolvedValue(WT_OK);
++    renderBar();
++    const badge = await screen.findByTestId("session-git-branch");
++    expect(badge).toHaveTextContent("wt-branch");
++    expect(badge).toHaveAttribute("data-root-source", "worktree");
++    expect(screen.getByTestId("session-git-worktree-tag")).toHaveTextContent(
++      "工作树",
++    );
++  });
++
++  it("cwd 来源无工作树标识（FR-03：非工作树形态展示与现状一致）", async () => {
++    renderBar(); // beforeEach 默认 mock root_source=cwd
++    const badge = await screen.findByTestId("session-git-branch");
++    expect(badge).toHaveAttribute("data-root-source", "cwd");
++    expect(screen.queryByTestId("session-git-worktree-tag")).not.toBeInTheDocument();
++  });
++});
+diff --git a/frontend/src/components/sessions/session-config-bar.tsx b/frontend/src/components/sessions/session-config-bar.tsx
+index 969b89efc..f5403efa4 100644
+--- a/frontend/src/components/sessions/session-config-bar.tsx
++++ b/frontend/src/components/sessions/session-config-bar.tsx
+@@ -348,6 +348,9 @@ export function buildDefaultSwitchPrompt(p: PendingSwitch): string {
+  * 默认 false，后台标签页暂停）。detached HEAD 显示 head 短 sha；no_git /
+  * no_root 空态静默隐藏（FR-03，不报错不 toast）；查询失败渲染「⎇ —」占位不阻塞其余
+  * 控件（retry=false——失败由下一轮轮询自然重取，不与轮询叠加堆积）。
++ * 2026-10-25-session-git-worktree-root / FR-03：root_source="worktree"（会话
++ * 当前变更命中 sillyspec 工作树标准布局）时 badge 加「工作树」标识、Tooltip
++ * 首行标注 sillyspec 工作树——会话在隔离工作树里干活时与主仓形态可区分。
+  */
+ function SessionGitBranchBadge({
+   sessionId,
+@@ -374,9 +377,15 @@ function SessionGitBranchBadge({
+   //（不闪骨架，数据到了再出现）；仅失败态走占位。
+   if (!gitQuery.isError && label == null) return null;
+ 
++  const inWorktree = data?.root_source === "worktree";
++
+   const tooltip = (
+     <div className="max-w-[280px] space-y-0.5 text-xs">
+-      <p>会话工作目录当前分支（60s 自动刷新）</p>
++      <p>
++        {inWorktree
++          ? "sillyspec 工作树当前分支（60s 自动刷新）"
++          : "会话工作目录当前分支（60s 自动刷新）"}
++      </p>
+       {data?.root ? <p className="break-all">目录：{data.root}</p> : null}
+       {data && (data.files_changed != null || data.untracked_count != null) ? (
+         <p>
+@@ -393,13 +402,28 @@ function SessionGitBranchBadge({
+     <Tooltip title={tooltip}>
+       <span
+         data-testid="session-git-branch"
+-        title={gitQuery.isError ? "会话 Git 状态查询失败" : "会话当前 Git 分支"}
++        data-root-source={data?.root_source ?? "unknown"}
++        title={
++          gitQuery.isError
++            ? "会话 Git 状态查询失败"
++            : inWorktree
++              ? "会话所在 sillyspec 工作树当前分支"
++              : "会话当前 Git 分支"
++        }
+         className="inline-flex cursor-default items-center gap-1.5 rounded-md px-2 py-1 text-xs text-muted-foreground/80"
+       >
+         <GitBranch aria-hidden className="h-3.5 w-3.5 shrink-0 text-brand-600" />
+         <span className={cn("max-w-[140px] truncate", mobile && "max-w-[100px]")}>
+           {gitQuery.isError ? "—" : label}
+         </span>
++        {inWorktree && (
++          <span
++            data-testid="session-git-worktree-tag"
++            className="shrink-0 rounded bg-muted px-1 py-px text-[10px] leading-tight text-muted-foreground"
++          >
++            工作树
++          </span>
++        )}
+       </span>
+     </Tooltip>
+   );
+diff --git a/frontend/src/lib/api-types.ts b/frontend/src/lib/api-types.ts
+index 1eacc0732..631705c8c 100644
+--- a/frontend/src/lib/api-types.ts
++++ b/frontend/src/lib/api-types.ts
+@@ -25816,6 +25816,12 @@ export interface components {
+             git_mode: "git" | "no_git" | "no_root";
+             /** Root */
+             root?: string | null;
++            /**
++             * Root Source
++             * @default none
++             * @enum {string}
++             */
++            root_source: "worktree" | "cwd" | "workspace_root" | "none";
+             /** Branch */
+             branch?: string | null;
+             /**
+diff --git a/frontend/src/lib/daemon/sessions.ts b/frontend/src/lib/daemon/sessions.ts
+index cdfbff501..c5ec55db3 100644
+--- a/frontend/src/lib/daemon/sessions.ts
++++ b/frontend/src/lib/daemon/sessions.ts
+@@ -598,11 +598,15 @@ export async function getAgentSession(
+  * 同构，照 SessionUsageRead 手写过渡形态——gen:types 生成版落地后消费方可
+  * 改引生成版）。git_mode 三态：git=正常采集 / no_git=目录非 git 仓库 /
+  * no_root=无 cwd 且无可解析绑定——空态 branch 等字段全 null，消费方
+- * （SessionConfigBar 分支指示项）静默隐藏。
++ * （SessionConfigBar 分支指示项）静默隐藏。root_source 标识根来源
++ * （2026-10-25-session-git-worktree-root）：worktree=命中 sillyspec 工作树
++ * 标准布局、cwd=会话 cwd 快照、workspace_root=绑定根回退、none=no_root
++ * 空态——前端据此渲染工作树标识。
+  */
+ export interface SessionGitStatus {
+   git_mode: "git" | "no_git" | "no_root";
+   root: string | null;
++  root_source: "worktree" | "cwd" | "workspace_root" | "none";
+   branch: string | null;
+   detached: boolean;
+   head_short: string | null;
+diff --git a/sillyhub-daemon/src/api-types.ts b/sillyhub-daemon/src/api-types.ts
+index 1eacc0732..631705c8c 100644
+--- a/sillyhub-daemon/src/api-types.ts
++++ b/sillyhub-daemon/src/api-types.ts
+@@ -25816,6 +25816,12 @@ export interface components {
+             git_mode: "git" | "no_git" | "no_root";
+             /** Root */
+             root?: string | null;
++            /**
++             * Root Source
++             * @default none
++             * @enum {string}
++             */
++            root_source: "worktree" | "cwd" | "workspace_root" | "none";
+             /** Branch */
+             branch?: string | null;
+             /**

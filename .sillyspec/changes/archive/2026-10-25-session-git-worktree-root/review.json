@@ -1,0 +1,73 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-25-session-git-worktree-root",
+  "reviewer": "subagent",
+  "verdict": "PASS",
+  "reviewedAgainst": "02a41abacd68fef103b96a0e005733cccc0566bc",
+  "findings": [
+    {
+      "id": "F-01",
+      "severity": "P3",
+      "status": "resolved",
+      "title": "FR-02 测试绑定名与实际用例名不匹配",
+      "detail": "requirements.md FR-02 绑定引用「test_git_status_worktree_probe_miss_and_error_fallback」，该用例名在代码库中不存在（grep 全仓零命中）。实际覆盖为两个独立用例 test_git_status_worktree_probe_miss_falls_back_to_cwd 与 test_git_status_worktree_probe_error_falls_back_silently（另有 no_change_anchor_skips_probe / stale_change_id_falls_back 补充覆盖）。行为完整兑现、断言真实，仅绑定名是错误的合并式简称，非虚绑。",
+      "evidence": "backend/tests/modules/daemon/test_session_git_status.py:447,464；requirements.md:39"
+    },
+    {
+      "id": "F-02",
+      "severity": "P3",
+      "title": "Tooltip「sillyspec 工作树」标注已实现但未被测试断言",
+      "detail": "FR-03 MUST 含「Tooltip 标注『sillyspec 工作树』」。实现真实存在（session-config-bar.tsx tooltip 首行『sillyspec 工作树当前分支（60s 自动刷新）』+ title 属性『会话所在 sillyspec 工作树当前分支』），但前端第 15 节两用例只断言 badge 文本 / data-root-source / worktree-tag 存在性，未断言 Tooltip 文案。人工核验代码已兑现，属测试覆盖小缺口，不阻断。",
+      "evidence": "frontend/src/components/sessions/session-config-bar.tsx:380-409；session-config-bar.test.tsx 第 15 节（1807-1840 行）"
+    },
+    {
+      "id": "F-03",
+      "severity": "P3",
+      "status": "resolved-as-accepted",
+      "title": "评审口径说明：baseline 3da9e8d44 距 HEAD 347 commits，实际评审面为单个交付提交 02a41abac",
+      "detail": "3da9e8d44..02a41abac 含 347 个提交（大量无关并行变更），本评审按任务书「单个交付提交」口径以 02a41abac（父 196662eb0）的 diff 为准；已核对工作区与 HEAD 在全部触及文件上零漂移（git diff 02a41abac --stat 为空）。",
+      "evidence": "git rev-list --count 3da9e8d44..02a41abac = 347"
+    },
+    {
+      "id": "F-04",
+      "severity": "P3",
+      "status": "resolved",
+      "title": "顺带修正既有 fixture 潜在转义缺陷",
+      "detail": "同测试块内旧 GIT_OK fixture 的 root 由 \"C:\\wt\\feature-x\"（JS 字符串中 \\w/\\f 非法转义，实际值为损坏路径）改为 \"C:\\\\wt\\\\feature-x\"，方向正确且为本次 mock 补 root_source 的同一代码块内修正，无行为面影响。"
+    }
+  ],
+  "boundaryAdjudications": [
+    {
+      "boundary": "apply 回主仓后 worktree 未清理时探测命中显示工作树分支（语义偏差方向正确）",
+      "ruling": "acceptable",
+      "reason": "① root_source=\"worktree\" + Tooltip 首行「sillyspec 工作树当前分支」使标注为真——展示的是该 change 隔离环境分支而非谎称 agent cwd；② 显示的分支正是用户关心的 change 隔离态，偏差方向正确；③ 窗口受 worktree cleanup 收敛，且回退链（cwd→绑定根）行为零回归；属显式标注的展示语义取舍，非错误数据。"
+    },
+    {
+      "boundary": "60s 轮询上探测加一次 stat RPC（本地 lstat 毫秒级）",
+      "ruling": "acceptable",
+      "reason": "① stat 在 daemon 宿主是 lstat（host-fs-handler.ts:925），毫秒级；② 5s 独立短预算兜传输抖动，与 git_status 30s 预算分列不放大尾延迟；③ 离线场景 stat 先快速失败（静默 miss）后 git_status 照旧 502，不新增错误面；每轮成本可忽略。"
+    }
+  ],
+  "protectionClaims": {
+    "stat_exception_silent_fallback": "verified — _probe_worktree try/except Exception 归 None（git_status.py:133-134）；返回形状校验 isinstance(dict) and exists is True，答非约定形状归 miss；asyncio.CancelledError 属 BaseException 不被吞，取消语义保留",
+    "no_new_error_surface": "verified — 探测任何失败均降级 miss 落回②③；git_status 错误映射（403/502/504/no_git）与 2026-10-21 版逐行一致，既有 11 用例零回归",
+    "ghost_change_id_safe": "verified — select(Change.change_key).where(id==current_change_id) + scalar_one_or_none，幽灵 id 返回 None 跳过探测；test_git_status_stale_change_id_falls_back 用随机 uuid 实证；FK ondelete=SET NULL（agent/model.py:783）使常态下 change 删除即锚空"
+  },
+  "generatedArtifactsSync": "verified — openapi.json SessionGitStatusResponse 含 root_source 四态 enum + default none；frontend/src/lib/api-types.ts 与 sillyhub-daemon/src/api-types.ts 字节一致（cmp 通过）且均含 root_source；手写 frontend/src/lib/daemon/sessions.ts SessionGitStatus 与后端 Literal 四态同构",
+  "frConsistency": {
+    "FR-01": "兑现 — 探测层实现与 requirements 候选公式一致（绑定根 rstrip 尾分隔符 + '/.sillyspec/.runtime/worktrees/' + change_key，stat <候选>/.git）；test_git_status_prefers_active_sillyspec_worktree 断言 root=工作树/root_source=worktree/branch=wt-branch/git_status RPC root 参数与 stat 参数；绑定名精确匹配",
+    "FR-02": "兑现 — miss（exists=false）/异常（DaemonRuntimeOffline）/无锚/幽灵 id 四路落回均有独立用例；锚定成员绑定根；既有 cwd→绑定根链 11 用例零回归；唯绑定名不精确（F-01）",
+    "FR-03": "兑现 — schema/类型/生成物/前端标识全链路落地；第 15 节 2 用例断言 worktree 标识与 cwd 形态无标识；Tooltip 文案实现未测（F-02）"
+  },
+  "rerun": {
+    "backend": "cd backend && ./.venv/Scripts/python.exe -m pytest tests/modules/daemon/test_session_git_status.py -q → 16 passed（18.93s）",
+    "frontend": "cd frontend && pnpm vitest run src/components/sessions/__tests__/session-config-bar.test.tsx → 74 passed（9.17s）"
+  },
+  "dimensionNotes": {
+    "乱序": "答为真。探测（host_fs.stat）与采集（git_status）在同一请求 handler 内顺序 await，无乱序面；无任何缓存——get_agent_session、change_key 查询、stat 均每请求现读，锚随 inject 游走即刻生效；轮询周期间 worktree 建/删窗口最多延迟一周期（≤60s）显示，与 FR-02 语义一致。",
+    "并发": "答为真。端点纯只读（session 行/resolver/change 行全 SELECT，无写）；stat 与 git_status 均只读 RPC；meta.json 刻意不读（只 stat .git），避开 CLI 对 meta.json 的并发写面——代码证实 _probe_worktree 仅传 candidate + '/.git'；worktree create/cleanup 与探测竞态下 stat true/false 双向安全（true=当下真实态，false=落回主仓链一周期，非错误数据）。",
+    "切换": "答为真。探测请求内完成无状态残留；current_change_id 为 None 直接跳过探测（test_no_change_anchor_skips_probe 实证零 stat 调用）；change 行删除 FK SET NULL（agent/model.py ondelete=\"SET NULL\" 实证），竞态残留幽灵 id 经 scalar_one_or_none 安全落回（test_stale_change_id_falls_back 用随机 uuid 实证）；探测 5s 短预算常量与 git_status 30s 分列（git_status.py:54,58）。",
+    "作用域": "答为真。候选以成员绑定根为锚（MemberBindingResolver 只看本人绑定行 + resolve_root_path_for_daemon，daemon-client 每成员本机副本）；change 行按 session.current_change_id 主键查；跨仓双连后缀命名经实测安装的 sillyspec 3.33.6 源码证实（node_modules/sillyspec/src/worktree.js isCrossWorktreeDir 注释：主仓 worktree 恒为纯 <change>，'--<repoKey>' 双连后缀是跨仓专属），候选以 change_key 精确拼接目录名自然 miss 落回；布局常量 .sillyspec/.runtime/worktrees/ 与 worktree.js 头注释一致且本机 .sillyspec/.runtime/worktrees/ 目录实证存在。"
+  },
+  "reviewedAt": "2026-10-25T20:26:00+08:00"
+}

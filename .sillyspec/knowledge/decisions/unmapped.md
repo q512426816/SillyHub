@@ -1918,3 +1918,11 @@ supersedes：D-005@v1
 锚点：未记录
 最近确认：6cfbdbe137fdb12b2a8829192a79c454cd394a5f
 理由：- 风险：本机与服务器时钟偏差使等待时长有几秒误差——感知级展示可接受；如需精确可后续由 daemon 推等待起点事件（跨服务改动，本次不做）。 - 等待期间 token 不再增长（tokens 事件随日志批次到达，等待期无新批次）——显示的是"本轮已消耗"快照，语义如实。 - 放弃方案：① daemon 新增"API 请求开始"心跳事件（跨服务改动大，收益秒级）；② 等待条目显示 ctx 环（已有轮头状态条展示，避免重复）；③ 前端轮询 usage 接口（无谓请求）。
+
+## D-unmapped-245@v1 设计期风险与放弃方案（底稿）
+状态：implemented
+变更：2026-10-25-session-git-worktree-root
+原编号：D-001@v1
+锚点：未记录
+最近确认：02a41abacd68fef103b96a0e005733cccc0566bc
+理由：最大风险：探测层多一次 RPC（stat 5s）加在每轮 60s 轮询上——离线场景先 stat 失败（静默 miss，≈即时）再 git_status 502，延迟增加可忽略；正常场景 stat 是本地文件 lstat，毫秒级。次风险：current_change_id 有值但 agent 实际已 apply 回主仓继续干、worktree 未清理——探测命中显示工作树分支（非 agent 实际工作目录），语义偏差存在但方向正确（该 change 的隔离环境分支正是用户关心的），接受为显式边界（收口评审裁决）。 试过放弃的方案：① 从会话日志 stdout 文本解析 agent 输出的 worktree 路径——自然语言解析脆弱、覆盖率不可控，放弃；② daemon 侧实时跟踪 agent 进程 cwd——agent 的 cd 是 harness Bash 内 shell 状态，外部进程不可见，机制上不可行，放弃；③ sillyspec worktree create/apply 时回调平台 API 登记——跨系统契约变更（CLI/npm 包 + daemon + backend 三端），且存量已创建的 worktree 无登记回填，重；留作后续正路（平台 worktree 注册表），本变更先零侵入探测。

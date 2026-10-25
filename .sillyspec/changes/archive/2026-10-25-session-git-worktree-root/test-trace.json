@@ -1,0 +1,81 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-25-session-git-worktree-root",
+  "rows": [
+    {
+      "anchor": "FR-01",
+      "row_id": "2026-10-25-session-git-worktree-root:flow:测试绑定FR-01",
+      "tests": [
+        "backend/tests/modules/daemon/test_session_git_status.py「test_git_status_prefers_active_sillyspec_worktree」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-25-session-git-worktree-root"
+    },
+    {
+      "anchor": "FR-02",
+      "row_id": "2026-10-25-session-git-worktree-root:flow:测试绑定FR-02",
+      "tests": [
+        "backend/tests/modules/daemon/test_session_git_status.py「test_git_status_worktree_probe_miss_falls_back_to_cwd」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-25-session-git-worktree-root"
+    },
+    {
+      "anchor": "FR-02",
+      "row_id": "2026-10-25-session-git-worktree-root:flow:测试绑定FR-02",
+      "tests": [
+        "backend/tests/modules/daemon/test_session_git_status.py「test_git_status_worktree_probe_error_falls_back_silently」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-25-session-git-worktree-root"
+    },
+    {
+      "anchor": "FR-02",
+      "row_id": "2026-10-25-session-git-worktree-root:flow:测试绑定FR-02",
+      "tests": [
+        "backend/tests/modules/daemon/test_session_git_status.py「test_git_status_no_change_anchor_skips_probe」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-25-session-git-worktree-root"
+    },
+    {
+      "anchor": "FR-03",
+      "row_id": "2026-10-25-session-git-worktree-root:flow:测试绑定FR-03",
+      "tests": [
+        "frontend/src/components/sessions/__tests__/session-config-bar.test.tsx「shows worktree badge when root_source is worktree」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-25-session-git-worktree-root"
+    }
+  ]
+}

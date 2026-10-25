@@ -1,0 +1,220 @@
+{
+  "change": "2026-10-25-session-git-worktree-root",
+  "baseline": "d5ea8d67d8c68a13d3f17e05d85c2bc31c047aff",
+  "head": "02a41abacd68fef103b96a0e005733cccc0566bc",
+  "files": [
+    ".sillyspec/docs/SillyHub/modules/frontend_components.changelog.md",
+    ".sillyspec/docs/multi-agent-platform/modules/frontend.changelog.md",
+    "backend/app/modules/daemon/schema.py",
+    "backend/app/modules/daemon/session/service/git_status.py",
+    "backend/openapi.json",
+    "backend/tests/modules/daemon/test_session_git_status.py",
+    "frontend/src/components/daemon/__tests__/turn-live-marquee.test.tsx",
+    "frontend/src/components/daemon/turn-live-marquee.tsx",
+    "frontend/src/components/daemon/turn-timeline.tsx",
+    "frontend/src/components/sessions/__tests__/session-config-bar.test.tsx",
+    "frontend/src/components/sessions/session-config-bar.tsx",
+    "frontend/src/lib/api-types.ts",
+    "frontend/src/lib/daemon/sessions.ts",
+    "sillyhub-daemon/src/api-types.ts"
+  ],
+  "totals": {
+    "files": 14,
+    "additions": 484,
+    "deletions": 65
+  },
+  "savedAt": "2026-10-25T12:11:06.282Z",
+  "note": "flow done 时点冻结（本变更可归属交付面：baseline..HEAD 提交面过滤 .sillyspec/ 只留 .sillyspec/docs/ 交付文档 + 独占树未提交交付；治理工件目录不入冻结——2026-10-12-close-trace-freeze-integrity FR-01）",
+  "modules": [
+    {
+      "id": "daemon",
+      "files": 2,
+      "doc": "docs/backend/modules/daemon.md",
+      "docTouched": false,
+      "docMissing": false
+    },
+    {
+      "id": "backend",
+      "files": 4,
+      "doc": "docs/multi-agent-platform/modules/backend.md",
+      "docTouched": false,
+      "docMissing": false
+    },
+    {
+      "id": "frontend",
+      "files": 7,
+      "doc": "docs/multi-agent-platform/modules/frontend.md",
+      "docTouched": false,
+      "docMissing": false
+    },
+    {
+      "id": "sillyhub-daemon",
+      "files": 1,
+      "doc": "docs/multi-agent-platform/modules/sillyhub-daemon.md",
+      "docTouched": false,
+      "docMissing": false
+    },
+    {
+      "id": "daemon",
+      "files": 3,
+      "doc": "docs/SillyHub/modules/daemon.md",
+      "docTouched": false,
+      "docMissing": false
+    },
+    {
+      "id": "frontend_components",
+      "files": 5,
+      "doc": "docs/SillyHub/modules/frontend_components.md",
+      "docTouched": false,
+      "docMissing": false
+    },
+    {
+      "id": "frontend_lib",
+      "files": 2,
+      "doc": "docs/SillyHub/modules/frontend_lib.md",
+      "docTouched": false,
+      "docMissing": false
+    }
+  ],
+  "uncoveredDirs": [],
+  "moduleMaps": [
+    "docs/backend/modules/_module-map.yaml",
+    "docs/frontend/modules/_module-map.yaml",
+    "docs/multi-agent-platform/modules/_module-map.yaml",
+    "docs/SillyHub/modules/_module-map.yaml",
+    "docs/sillyhub-daemon/modules/_module-map.yaml"
+  ],
+  "acceptedDirtyGap": 12,
+  "scopeAudit": {
+    "mode": "full-flow",
+    "ok": true,
+    "degradedReason": null,
+    "baseAnchor": "d5ea8d67d8c68a13d3f17e05d85c2bc31c047aff",
+    "totals": {
+      "files": 14,
+      "additions": 484,
+      "deletions": 65
+    },
+    "rows": [
+      {
+        "path": ".sillyspec/docs/SillyHub/modules/frontend_components.changelog.md",
+        "additions": 2,
+        "deletions": 0,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": ".sillyspec/docs/multi-agent-platform/modules/frontend.changelog.md",
+        "additions": 2,
+        "deletions": 0,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": "backend/app/modules/daemon/schema.py",
+        "additions": 5,
+        "deletions": 0,
+        "kind": "modified",
+        "planned": "修改",
+        "verdict": "planned"
+      },
+      {
+        "path": "backend/app/modules/daemon/session/service/git_status.py",
+        "additions": 116,
+        "deletions": 50,
+        "kind": "modified",
+        "planned": "修改",
+        "verdict": "planned"
+      },
+      {
+        "path": "backend/openapi.json",
+        "additions": 11,
+        "deletions": 0,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "planned"
+      },
+      {
+        "path": "backend/tests/modules/daemon/test_session_git_status.py",
+        "additions": 142,
+        "deletions": 0,
+        "kind": "modified",
+        "planned": "修改",
+        "verdict": "planned"
+      },
+      {
+        "path": "frontend/src/components/daemon/__tests__/turn-live-marquee.test.tsx",
+        "additions": 47,
+        "deletions": 0,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": "frontend/src/components/daemon/turn-live-marquee.tsx",
+        "additions": 46,
+        "deletions": 8,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": "frontend/src/components/daemon/turn-timeline.tsx",
+        "additions": 31,
+        "deletions": 2,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": "frontend/src/components/sessions/__tests__/session-config-bar.test.tsx",
+        "additions": 39,
+        "deletions": 2,
+        "kind": "modified",
+        "planned": "修改",
+        "verdict": "planned"
+      },
+      {
+        "path": "frontend/src/components/sessions/session-config-bar.tsx",
+        "additions": 26,
+        "deletions": 2,
+        "kind": "modified",
+        "planned": "修改",
+        "verdict": "planned"
+      },
+      {
+        "path": "frontend/src/lib/api-types.ts",
+        "additions": 6,
+        "deletions": 0,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "planned"
+      },
+      {
+        "path": "frontend/src/lib/daemon/sessions.ts",
+        "additions": 5,
+        "deletions": 1,
+        "kind": "modified",
+        "planned": "修改",
+        "verdict": "planned"
+      },
+      {
+        "path": "sillyhub-daemon/src/api-types.ts",
+        "additions": 6,
+        "deletions": 0,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "planned"
+      }
+    ],
+    "excluded": {
+      "foreignDeclared": []
+    },
+    "note": "flow done 时点冻结（本文件落盘时采集）",
+    "closedBy": "flow done"
+  },
+  "patchSha256": "7505ff6af241aa5352a106666864aa6c2fe552eb1a35e27aff8bade4b5864a16",
+  "patchStatus": "ok"
+}

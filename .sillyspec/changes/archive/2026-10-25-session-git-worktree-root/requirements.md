@@ -36,5 +36,7 @@ created_at: "2026-10-25T11:42:55.549Z"
 ## 测试绑定（每条 FR 至少一行——`FR-NN: test/路径「用例名」`；空行/待填在 flow done 拒收）
 
 FR-01: backend/tests/modules/daemon/test_session_git_status.py「test_git_status_prefers_active_sillyspec_worktree」
-FR-02: backend/tests/modules/daemon/test_session_git_status.py「test_git_status_worktree_probe_miss_and_error_fallback」
+FR-02: backend/tests/modules/daemon/test_session_git_status.py「test_git_status_worktree_probe_miss_falls_back_to_cwd」
+FR-02: backend/tests/modules/daemon/test_session_git_status.py「test_git_status_worktree_probe_error_falls_back_silently」
+FR-02: backend/tests/modules/daemon/test_session_git_status.py「test_git_status_no_change_anchor_skips_probe」
 FR-03: frontend/src/components/sessions/__tests__/session-config-bar.test.tsx「shows worktree badge when root_source is worktree」

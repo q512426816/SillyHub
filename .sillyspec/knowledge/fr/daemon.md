@@ -7746,3 +7746,60 @@
 - 场景：主路径 — Given 变更落盘；When 跑轨迹目录与会话面板相关测试与 tsc；Then 全部通过。
 全文：.sillyspec/changes/archive/2026-10-22-trajectory-context-jump/requirements.md#FR-04
 最近确认：bbe1bbf6ba02b08fa3ef2bf7a5558d94f4d026ff
+
+## FR-daemon-285 会话当前变更存在 sillyspec 工作树时（标准目录布局且未清理），指示项显示该工作树的分支与目录（经 stat 探测命中，root 取工作树路径）
+变更：2026-10-25-session-git-worktree-root
+状态：active
+摘要：主路径
+全文：.sillyspec/changes/archive/2026-10-25-session-git-worktree-root/requirements.md#FR-01
+最近确认：02a41abacd68fef103b96a0e005733cccc0566bc
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-25-session-git-worktree-root:flow:测试绑定FR-01
+  tests: backend/tests/modules/daemon/test_session_git_status.py「test_git_status_prefers_active_sillyspec_worktree」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-25-session-git-worktree-root
+  status: active
+
+## FR-daemon-286 无工作树/已清理/探测失败的会话行为与现状一致（落回 cwd→绑定根链，空态照旧）
+变更：2026-10-25-session-git-worktree-root
+状态：active
+摘要：回退形态
+全文：.sillyspec/changes/archive/2026-10-25-session-git-worktree-root/requirements.md#FR-02
+最近确认：02a41abacd68fef103b96a0e005733cccc0566bc
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-25-session-git-worktree-root:flow:测试绑定FR-02
+  tests: backend/tests/modules/daemon/test_session_git_status.py「test_git_status_no_change_anchor_skips_probe」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-25-session-git-worktree-root
+  status: active
+
+## FR-daemon-287 响应新增 root_source 字段标识根来源，前端在工作树形态给出可见标识
+变更：2026-10-25-session-git-worktree-root
+状态：active
+摘要：前端标识
+全文：.sillyspec/changes/archive/2026-10-25-session-git-worktree-root/requirements.md#FR-03
+最近确认：02a41abacd68fef103b96a0e005733cccc0566bc
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-25-session-git-worktree-root:flow:测试绑定FR-03
+  tests: frontend/src/components/sessions/__tests__/session-config-bar.test.tsx「shows worktree badge when root_source is worktree」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-25-session-git-worktree-root
+  status: active
