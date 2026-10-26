@@ -1006,6 +1006,14 @@ describe('task-03: interactive skillsStep 档案技能裁剪', () => {
     const skillsDir = join(tmp, '.claude', 'skills');
     await mkdir(join(skillsDir, 'skill-a'), { recursive: true });
     await mkdir(join(skillsDir, 'skill-b'), { recursive: true });
+    // pruneSkillsToSubset 三重与守卫：仅「daemon 技能库清单内」目录可裁——fixture
+    // skill-a/b 必须登记为本机技能库才可删（2026-10-26-ci-red-to-green：此前直接
+    // 读真实 ~/.sillyhub/daemon/skills，清单外目录被 unmanaged 守卫故意保留，
+    // CI/任意干净机器上必红）。daemonStateDir() 懒读 env，stub 即生效。
+    const stateDir = join(tmp, 'daemon-state');
+    await mkdir(join(stateDir, 'skills', 'skill-a'), { recursive: true });
+    await mkdir(join(stateDir, 'skills', 'skill-b'), { recursive: true });
+    vi.stubEnv('SILLYHUB_DAEMON_DIR', stateDir);
     const infoSpy = vi.spyOn(console, 'info').mockImplementation(() => {});
     const { daemon, client, wsClientMock } = buildDaemon({ sessionManager });
 
@@ -1045,6 +1053,7 @@ describe('task-03: interactive skillsStep 档案技能裁剪', () => {
         true,
       );
     } finally {
+      vi.unstubAllEnvs();
       infoSpy.mockRestore();
       await rm(tmp, { recursive: true, force: true }).catch(() => undefined);
       await daemon.stop();
@@ -1104,6 +1113,11 @@ describe('task-03(补): interactive skillsStep 非空子集', () => {
     const skillsDir = join(tmp, '.claude', 'skills');
     await mkdir(join(skillsDir, 'skill-a'), { recursive: true });
     await mkdir(join(skillsDir, 'skill-b'), { recursive: true });
+    // 同上：fixture 登记进本机技能库（unmanaged 守卫只放行清单内目录）。
+    const stateDir = join(tmp, 'daemon-state');
+    await mkdir(join(stateDir, 'skills', 'skill-a'), { recursive: true });
+    await mkdir(join(stateDir, 'skills', 'skill-b'), { recursive: true });
+    vi.stubEnv('SILLYHUB_DAEMON_DIR', stateDir);
     const { daemon, client, wsClientMock } = buildDaemon({ sessionManager });
     try {
       await daemon.start();
@@ -1138,6 +1152,7 @@ describe('task-03(补): interactive skillsStep 非空子集', () => {
       expect(remaining).toContain('skill-a');
       expect(remaining).not.toContain('skill-b');
     } finally {
+      vi.unstubAllEnvs();
       await rm(tmp, { recursive: true, force: true }).catch(() => undefined);
       await daemon.stop();
     }

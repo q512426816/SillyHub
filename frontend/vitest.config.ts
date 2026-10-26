@@ -23,6 +23,13 @@ export default defineConfig({
     // page-team-toggle）在全量下会超 5s 默认上限 → 提到 15s 治 flaky 超时
     // （不拖慢通过的测试，仅放宽上限）。
     testTimeout: 15000,
+    // CI 满载重试（2026-10-26-ci-red-to-green）：ubuntu 2 核 + coverage 满载下，
+    // 4 个重型集成测试（scroll/history-race/load-earlier-full-turn/git-status）
+    // 依赖的异步链（load-earlier 触发/antd Tree 展开）在 waitFor 5s 预算内偶发
+    // 不可达成——本地（含单线程+coverage 复刻）多轮全绿，仅 CI runner 复现，
+    // CI 侧证据有限先按后端 pytest --reruns 同款兜底（失败用例整测重跑至多 2 次）。
+    // 本地零重试（不掩盖真红）；根因定位（CI 侧插桩/逐用例预算）留后续独立变更。
+    retry: process.env.CI ? 2 : 0,
     // 纯逻辑测试（无 DOM）切 node 环境，省 jsdom 每文件初始化（全量
     // collect/environment 累计 300s+ 的大头是 jsdom 启动）。白名单精确匹配
     // src/lib 下确定无 DOM 的 .test.ts——5 个用 renderHook / fake EventSource

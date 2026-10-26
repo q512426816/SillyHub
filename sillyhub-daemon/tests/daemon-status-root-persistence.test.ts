@@ -80,7 +80,10 @@ async function buildDaemon(): Promise<InstanceType<
   };
   return new Daemon(config as never, {} as never, null as never, {
     sessionManager: null,
-    sillyspecManager: {} as never,
+    // clearStatusProbeEviction：2026-10-22-sillyspec-probe-db-missing-evict 起
+    // _noteSillySpecStatusRoot 会调它清 db_missing 淘汰标记——mock 补 no-op
+    // （2026-10-26-ci-red-to-green：空对象 mock 在 CI 实跑 TypeError 致 5 用例红）。
+    sillyspecManager: { clearStatusProbeEviction: () => {} } as never,
   }) as never;
 }
 

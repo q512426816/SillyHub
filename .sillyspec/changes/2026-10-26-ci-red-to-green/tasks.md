@@ -11,3 +11,6 @@ created_at: 2026-10-26T15:08:59.742Z
 - [x] task-05: backend-ci 失败判定与修复——非挂死非撞顶：Pytest 实跑 40:55 后 1 例真实断言失败（test_http_heartbeat_accepts_and_clears_sillyspec_status 期望键集缺 thin_flows，c326a4b2b DTO 增字段漏更）——测试对账更新（run 40341250526 终态 failure 留痕）
 - [x] task-06: 全量回归——daemon vitest 全量 299 文件（5129 passed，仅 8 失败且经 stash 对照实证为 Windows 本地固有、CI ubuntu 不触发）+ frontend 触及面（5 文件组合×4 轮 103 用例全绿、dialog/draft-scope 6 文件 106 用例全绿、typecheck 净、eslint 0 error 且存量告警少 1 条）；frontend 全量套件在本会话末段因并行会话 merge 冲突标记在途（turn-segment-views 等 5 文件）collect 级失败 92 文件——非本变更面（该批文件 import 链不触及本改动验证组合），待其收尾后 CI 实跑兜底（验证：触及面零新增失败）
 - [x] task-07: backend heartbeat 测试键集对账 thin_flows（验证：uv run pytest test_machine_sillyspec.py 39 passed）
+- [x] task-08: daemon 第二轮 CI 实测收尾——status-root mock 补 clearStatusProbeEviction（5 用例）+ kind-dispatch 技能库 fixture 注入 SILLYHUB_DAEMON_DIR（2 用例）（验证：两文件本地 33/33 绿；provider-session-dir ×1 为 Windows 偶发单跑绿不阻塞）
+- [x] task-09: e2e-ci runner 钉 ubuntu-24.04——ubuntu-latest 已滚 26.04，Playwright 1.60 --with-deps 无 26.04 依赖包（验证：yml diff 仅 runs-on 行+注释）
+- [x] task-10: frontend CI 满载兜底——vitest config CI 条件 retry:2（backend --reruns 同款先例），sessions-portal 经门闩修复 CI 实测转绿（426 文件仅剩 4 个 CI 独有失败）（验证：本地 retry=0 全绿不受影响；CI 实跑留痕）

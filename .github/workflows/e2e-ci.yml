@@ -15,7 +15,10 @@ on:
 
 jobs:
   e2e:
-    runs-on: ubuntu-latest
+    # 钉 24.04（2026-10-26-ci-red-to-green）：ubuntu-latest 已滚到 26.04，Playwright
+    # 1.60 的 --with-deps 尚无 26.04 依赖包（"Cannot install dependencies for
+    # ubuntu26.04-x64"）——其余 workflow 无浏览器依赖不受影响，仅此处钉版本。
+    runs-on: ubuntu-24.04
     timeout-minutes: 20
 
     # GH Actions services 容器映射到 job 容器网络，backend 用 localhost 直连。
