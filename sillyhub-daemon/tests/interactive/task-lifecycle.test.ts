@@ -288,6 +288,25 @@ function taskLineCalls(h: Harness) {
   );
 }
 
+/**
+ * onTurnMessage 非「控制旁路」调用（透传断言用）。合法旁路两类，逐型排除、
+ * 不放宽为白名单制（2026-10-26-ci-red-to-green）：
+ * - channel='session_header'：create 生命周期快照旁路（2026-10-25-trajectory-source-model 先例）；
+ * - type='turn_phase_report'：turn_phase 上报桥消息（2026-10-26-session-stage-progress
+ *   D-013④——session-manager 每 envelope 无状态直发、去重在 daemon 层拦截分支，
+ *   单测直击本 mock 故按型排除；同 session_header 收窄先例）。
+ */
+function passthroughCalls(h: Harness) {
+  return h.deps.onTurnMessage.mock.calls.filter(
+    ([, , m]) => {
+      const msg = m as { channel?: string; type?: string } | undefined;
+      if (msg?.channel === 'session_header') return false;
+      if (msg?.type === 'turn_phase_report') return false;
+      return true;
+    },
+  );
+}
+
 /** 解析一条 [TASK_*] 行：前缀 + 单行 JSON 载荷。 */
 function parseTaskLine(call: unknown[]) {
   const [sid, rid, msg] = call as [
@@ -491,14 +510,10 @@ describe('task-lifecycle FR-01/FR-03 — task_started→task_progress×3→task_
 
     // system/task_* 拦截后不透传：onTurnMessage 的 TASK 流调用即上述 3 条
     // [TASK_*] 行（2026-10-25-trajectory-source-model 起另有 session_header
-    // 快照旁路消息——非 TASK 流，过滤后断言，测试意图收窄到 TASK 落行）。
-    expect(
-      h.deps.onTurnMessage.mock.calls.filter(
-        ([, , m]) =>
-          !(m as { channel?: string } | undefined)?.channel ||
-          (m as { channel?: string }).channel !== 'session_header',
-      ),
-    ).toHaveLength(3);
+    // 快照旁路消息——非 TASK 流；2026-10-26-session-stage-progress 起另有
+    // turn_phase_report 上报桥消息——同属控制旁路，passthroughCalls 逐型排除，
+    // 测试意图收窄到 TASK 落行）。
+    expect(passthroughCalls(h)).toHaveLength(3);
   });
 });
 
@@ -664,13 +679,10 @@ describe('task-lifecycle FR-01 — task_started 注册口径', () => {
     );
     expect(taskEventCalls(h)).toHaveLength(0);
     expect(taskLineCalls(h)).toHaveLength(0);
-    // 也不透传（session_header 快照旁路消息除外——create 生命周期合法旁路，
-    // 2026-10-25-trajectory-source-model）。
-    expect(
-      h.deps.onTurnMessage.mock.calls.filter(
-        ([, , m]) => (m as { channel?: string } | undefined)?.channel !== 'session_header',
-      ),
-    ).toHaveLength(0);
+    // 也不透传（session_header 快照旁路与 turn_phase_report 上报桥消息除外——
+    // 两类 create/事件生命周期合法旁路，passthroughCalls 逐型排除，
+    // 2026-10-25-trajectory-source-model / 2026-10-26-session-stage-progress）。
+    expect(passthroughCalls(h)).toHaveLength(0);
   });
 });
 

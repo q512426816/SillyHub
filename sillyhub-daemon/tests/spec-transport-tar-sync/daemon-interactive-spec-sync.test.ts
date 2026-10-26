@@ -47,7 +47,13 @@ const specSyncMocks = vi.hoisted(() => ({
     },
   ),
 }));
-vi.mock('../../src/spec-sync.js', () => ({
+vi.mock('../../src/spec-sync.js', async (importOriginal) => ({
+  // importOriginal 兜底（2026-10-26-ci-red-to-green）：daemon.ts/task-runner.ts 从
+  // 本模块导入 7 个导出（含 readLocalSpecVersion/shouldRefreshSpec/bumpLocalSpecVersion
+  // /hasUnsyncedLocalChanges），工厂白名单制漏一个即「No export is defined on the
+  // mock」运行时抛（heartbeat_failed 实证）——展开真实模块再覆盖 spy，未来新增
+  // 导出零漂移。
+  ...(await importOriginal<Record<string, unknown>>()),
   pullSpecBundle: specSyncMocks.pullSpecBundle,
   postSpecSync: specSyncMocks.postSpecSync,
   resolveSpecDir: specSyncMocks.resolveSpecDir,
@@ -152,6 +158,10 @@ function createMockClient(overrides: Partial<MockClient> = {}): MockClient {
     })),
     notifyRunResult: vi.fn(async () => ({})),
     notifySessionEnd: vi.fn(async () => ({})),
+    // turn_phase 上报（2026-10-26-session-stage-progress）：真实 HubClient 面含此
+    // 方法（hub-client.ts notifyTurnPhase），mock 缺失会让 reportTurnPhase 的
+    // 属性访问同步抛（源码侧已加 try/catch 兜底，mock 仍镜像真实面以测正常路径）。
+    notifyTurnPhase: vi.fn(async () => ({})),
     getSpecBundle: vi.fn(async () => Buffer.alloc(0)),
     postSpecSync: vi.fn(async () => ({ ok: true, reparsed: 0 })),
     close: vi.fn(),

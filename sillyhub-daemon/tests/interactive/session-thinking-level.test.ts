@@ -645,6 +645,9 @@ function buildWiringDaemon(opts: { sessionManager: SessionManagerType }) {
       agent_run_id: 'run-default',
       claude_md: '',
     })),
+    // turn_phase 上报（2026-10-26-session-stage-progress）：真实 HubClient 面含此
+    // 方法（hub-client.ts notifyTurnPhase），创建链各阶段点会调——mock 镜像真实面。
+    notifyTurnPhase: vi.fn(async () => ({})),
     close: vi.fn(),
   };
   const taskRunner = {

@@ -4879,21 +4879,33 @@ export class Daemon {
         }
       }
       if (phase !== '') {
-        this._client
-          .notifyTurnPhase(
-            sessionId,
-            runId,
-            phase as TurnPhaseValue,
-            typeof fwdMsg['detail'] === 'string' ? fwdMsg['detail'] : undefined,
-          )
-          .catch((e: unknown) => {
-            this._logger.debug('turn_phase_report_failed', {
-              session_id: sessionId,
-              run_id: runId,
-              phase,
-              error: e instanceof Error ? e.message : String(e),
+        // try 包同步抛（2026-10-26-ci-red-to-green：client 缺 notifyTurnPhase 方法
+        // 时属性访问在 .catch 挂上前抛 TypeError——D-009 要求上报失败不阻塞消息
+        // 主链路，异步失败走下方 catch、同步失败走此处，口径一致）。
+        try {
+          this._client
+            .notifyTurnPhase(
+              sessionId,
+              runId,
+              phase as TurnPhaseValue,
+              typeof fwdMsg['detail'] === 'string' ? fwdMsg['detail'] : undefined,
+            )
+            .catch((e: unknown) => {
+              this._logger.debug('turn_phase_report_failed', {
+                session_id: sessionId,
+                run_id: runId,
+                phase,
+                error: e instanceof Error ? e.message : String(e),
+              });
             });
+        } catch (e) {
+          this._logger.debug('turn_phase_report_failed', {
+            session_id: sessionId,
+            run_id: runId,
+            phase,
+            error: e instanceof Error ? e.message : String(e),
           });
+        }
       }
       return;
     }
@@ -9499,19 +9511,35 @@ export class Daemon {
       notePhaseEmit(phase, sessionId, firstRunId, phase, (event, kv) =>
         this._logger.info(event, kv),
       );
-      this._client
-        .notifyTurnPhase(sessionId, firstRunId, phase, detail)
-        .catch((e: unknown) => {
-          warnOncePhaseFailure(phase, sessionId, firstRunId, phase, e, (event, kv) =>
-            this._logger.warn(event, kv),
-          );
-          this._logger.debug('turn_phase_report_failed', {
-            session_id: sessionId,
-            run_id: firstRunId,
-            phase,
-            error: e instanceof Error ? e.message : String(e),
+      // try 包同步抛（2026-10-26-ci-red-to-green：client 缺 notifyTurnPhase 方法时
+      // 属性访问在 .catch 挂上前同步抛 TypeError，会中断 _startInteractiveSession
+      // 创建链——违背本 helper 注释声明的 D-009「上报失败不阻塞创建主流程」；
+      // 异步失败仍走 .catch、同步失败走此 catch，两者同 warn 口径）。
+      try {
+        this._client
+          .notifyTurnPhase(sessionId, firstRunId, phase, detail)
+          .catch((e: unknown) => {
+            warnOncePhaseFailure(phase, sessionId, firstRunId, phase, e, (event, kv) =>
+              this._logger.warn(event, kv),
+            );
+            this._logger.debug('turn_phase_report_failed', {
+              session_id: sessionId,
+              run_id: firstRunId,
+              phase,
+              error: e instanceof Error ? e.message : String(e),
+            });
           });
+      } catch (e) {
+        warnOncePhaseFailure(phase, sessionId, firstRunId, phase, e, (event, kv) =>
+          this._logger.warn(event, kv),
+        );
+        this._logger.debug('turn_phase_report_failed', {
+          session_id: sessionId,
+          run_id: firstRunId,
+          phase,
+          error: e instanceof Error ? e.message : String(e),
         });
+      }
     };
 
     // 路径映射：backend 在 Docker 容器内跑，spec_root 用容器内路径（如
