@@ -927,9 +927,9 @@ async def test_http_heartbeat_accepts_and_clears_sillyspec_status(
     db_session: AsyncSession,
     client: AsyncClient,
 ) -> None:
-    """HTTP 全链路：带对象 → DTO model_dump 落库（11 键齐、嵌套 steps 投影、无
-    since 键）；显式 null → 置 NULL；缺省（旧 daemon 无字段）→ 同样置 NULL
-    （pydantic 缺省与显式 null 不可区分，NFR-01 旧 daemon 路径零破坏）。"""
+    """HTTP 全链路：带对象 → DTO model_dump 落库（11 键齐 + thin_flows 键、嵌套
+    steps 投影、无 since 键）；显式 null → 置 NULL；缺省（旧 daemon 无字段）→
+    同样置 NULL（pydantic 缺省与显式 null 不可区分，NFR-01 旧 daemon 路径零破坏）。"""
     owner, token = await _seed_user(db_session, name="owner-status")
     daemon_local_id = await _register_daemon(db_session, owner.id)
     headers = _headers(token)
@@ -942,7 +942,12 @@ async def test_http_heartbeat_accepts_and_clears_sillyspec_status(
     assert resp.status_code == 200, resp.text
     row = await _reload_instance(db_session, daemon_local_id)
     assert row.sillyspec_status is not None
-    assert set(row.sillyspec_status) == _STATUS_KEYS
+    # HTTP 路径经 DTO model_dump：2026-10-26-session-change-progress-hover 起
+    # sillyspec_status 增 thin_flows 字段（默认 None，整包直写含 None 键），
+    # 落库行比 _STATUS_FULL 多 thin_flows 键（专项见 test_heartbeat_thin_flows）。
+    # 直写 dict 的服务层/读侧（_STATUS_KEYS 11 键）不受影响，勿共用此断言。
+    assert set(row.sillyspec_status) == _STATUS_KEYS | {"thin_flows"}
+    assert row.sillyspec_status["thin_flows"] is None
     assert row.sillyspec_status["changes"][0]["steps"] == {"total": 8, "completed": 3}
     assert "since" not in row.sillyspec_status
 
