@@ -1,0 +1,27 @@
+tier: thin
+legacy_fallback: false
+substeps:
+  artifacts: done
+born_face: thin
+with_tasks: false
+review_force: null
+input: |-
+  用户反馈（功能上线后实测）：Git 日志页「工作区更改」卡的三个分组标题（更改/未纳入版本管理/已忽略）点击无反应收不起来；期望「未纳入版本管理」与「已忽略」两组默认收起、「更改」保持展开。
+
+  成功标准：
+  - 三个分组标题可点击切换展开/收起（箭头随状态翻转，带 aria-expanded）
+  - 未纳入版本管理与已忽略默认收起、更改默认展开
+  - 既有 worktree-changes-card 聚焦测试按新默认态更新并全绿（仅跑该测试文件）
+autopilot: false
+prestage_ack: true
+baseline_commit: 67fb83be3edf37fdd128201ac3efa3af4892e3f6
+updatedAt: '2026-10-26T01:19:58.995Z'
+cross_baselines:
+  sillyspec: 67e50bcca2adb9ecd502d12086c0ac8cb994da84
+baseline_sha256: bd86ecff30bfe7c29a5bbee7249f166fd02554af1e6abf4d188f5b49ce3fd6f7
+spec_approved: true
+spec_approved_at: '2026-10-26T01:19:58.285Z'
+spec_approved_by: anon@DESKTOP-HJ0AM09
+spec_approved_channel: user-confirmed
+spec_attested_by: anon@DESKTOP-HJ0AM09
+

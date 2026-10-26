@@ -235,6 +235,15 @@ export function WorktreeChangesCard({
   const query = useGitLogDirtyFiles(workspaceId);
   const queryClient = useQueryClient();
   const [collapsed, setCollapsed] = useState(false);
+  // 分组折叠态（2026-10-26-worktree-group-collapse，用户实测反馈）：「更改」
+  // 默认展开；「未纳入版本管理」「已忽略」默认收起（聚合/散落条目量大，省屏）。
+  const [groupOpen, setGroupOpen] = useState({
+    changed: true,
+    untracked: false,
+    ignored: false,
+  });
+  const toggleGroup = (key: keyof typeof groupOpen) =>
+    setGroupOpen((prev) => ({ ...prev, [key]: !prev[key] }));
 
   const data = query.data;
 
@@ -261,6 +270,8 @@ export function WorktreeChangesCard({
       changedTree: buildFileTree(changed.map(toStat)),
       untrackedTree: buildFileTree(untracked.map(toStat)),
       statusByPath,
+      changedCount: changed.length,
+      untrackedCount: untracked.length,
       counts: {
         modified: changed.filter((f) => f.status === "modified").length,
         deleted: changed.filter((f) => f.status === "deleted").length,
@@ -386,54 +397,109 @@ export function WorktreeChangesCard({
             </div>
           ) : (
             <>
-              {/* 更改组：已跟踪文件 vs 最近一次提交（D-004 HEAD 基线） */}
+              {/* 更改组：已跟踪文件 vs 最近一次提交（D-004 HEAD 基线）；默认展开 */}
               {groups && groups.changedTree.length > 0 && (
                 <div data-testid="worktree-group-changed">
-                  <div className="flex items-center gap-2 px-1 py-1 text-xs font-medium text-muted-foreground">
-                    <span>▾</span> 更改
+                  <button
+                    type="button"
+                    className="flex w-full items-center gap-1.5 rounded px-1 py-1 text-xs font-medium text-muted-foreground transition-colors hover:bg-muted/60"
+                    onClick={() => toggleGroup("changed")}
+                    aria-expanded={groupOpen.changed}
+                    data-testid="worktree-group-toggle-changed"
+                  >
+                    <ChevronRight
+                      className={cn(
+                        "h-3 w-3 shrink-0 transition-transform duration-200",
+                        groupOpen.changed && "rotate-90",
+                      )}
+                      aria-hidden
+                    />
+                    更改
                     {data?.head_short && (
                       <span className="font-normal">
                         （对比基线：最近一次提交 {data.head_short}）
                       </span>
                     )}
-                  </div>
-                  <div className="ml-2">
-                    <StatusTreeRows
-                      nodes={groups.changedTree}
-                      statusByPath={groups.statusByPath}
-                      onOpenFile={onOpenFile}
-                    />
-                  </div>
+                    <span className="ml-auto shrink-0 font-normal">
+                      {groups.changedCount} 个文件
+                    </span>
+                  </button>
+                  {groupOpen.changed && (
+                    <div className="ml-2">
+                      <StatusTreeRows
+                        nodes={groups.changedTree}
+                        statusByPath={groups.statusByPath}
+                        onOpenFile={onOpenFile}
+                      />
+                    </div>
+                  )}
                 </div>
               )}
 
-              {/* 未纳入版本管理组（untracked，D-004 全文新增语义） */}
+              {/* 未纳入版本管理组（untracked，D-004 全文新增语义）；默认收起 */}
               {groups && groups.untrackedTree.length > 0 && (
                 <div className="mt-2" data-testid="worktree-group-untracked">
-                  <div className="flex items-center gap-2 px-1 py-1 text-xs font-medium text-muted-foreground">
-                    <span>▾</span> 未纳入版本管理
-                  </div>
-                  <div className="ml-2">
-                    <StatusTreeRows
-                      nodes={groups.untrackedTree}
-                      statusByPath={groups.statusByPath}
-                      onOpenFile={onOpenFile}
+                  <button
+                    type="button"
+                    className="flex w-full items-center gap-1.5 rounded px-1 py-1 text-xs font-medium text-muted-foreground transition-colors hover:bg-muted/60"
+                    onClick={() => toggleGroup("untracked")}
+                    aria-expanded={groupOpen.untracked}
+                    data-testid="worktree-group-toggle-untracked"
+                  >
+                    <ChevronRight
+                      className={cn(
+                        "h-3 w-3 shrink-0 transition-transform duration-200",
+                        groupOpen.untracked && "rotate-90",
+                      )}
+                      aria-hidden
                     />
-                  </div>
+                    未纳入版本管理
+                    <span className="ml-auto shrink-0 font-normal">
+                      {groups.untrackedCount} 个文件
+                    </span>
+                  </button>
+                  {groupOpen.untracked && (
+                    <div className="ml-2">
+                      <StatusTreeRows
+                        nodes={groups.untrackedTree}
+                        statusByPath={groups.statusByPath}
+                        onOpenFile={onOpenFile}
+                      />
+                    </div>
+                  )}
                 </div>
               )}
 
-              {/* 忽略组：顶层聚合一行式（D-003 不递归） */}
+              {/* 忽略组：顶层聚合一行式（D-003 不递归）；默认收起 */}
               {data && data.ignored.length > 0 && (
                 <div className="mt-2" data-testid="worktree-group-ignored">
-                  <div className="flex items-center gap-2 px-1 py-1 text-xs font-medium text-muted-foreground">
-                    <span>▸</span> 已忽略（目录按整体聚合，不逐个列出）
-                  </div>
-                  <div className="ml-2">
-                    {data.ignored.map((item) => (
-                      <IgnoredRow key={item.path} item={item} />
-                    ))}
-                  </div>
+                  <button
+                    type="button"
+                    className="flex w-full items-center gap-1.5 rounded px-1 py-1 text-xs font-medium text-muted-foreground transition-colors hover:bg-muted/60"
+                    onClick={() => toggleGroup("ignored")}
+                    aria-expanded={groupOpen.ignored}
+                    data-testid="worktree-group-toggle-ignored"
+                  >
+                    <ChevronRight
+                      className={cn(
+                        "h-3 w-3 shrink-0 transition-transform duration-200",
+                        groupOpen.ignored && "rotate-90",
+                      )}
+                      aria-hidden
+                    />
+                    已忽略
+                    <span className="font-normal">（目录按整体聚合，不逐个列出）</span>
+                    <span className="ml-auto shrink-0 font-normal">
+                      {data.ignored.length} 项
+                    </span>
+                  </button>
+                  {groupOpen.ignored && (
+                    <div className="ml-2">
+                      {data.ignored.map((item) => (
+                        <IgnoredRow key={item.path} item={item} />
+                      ))}
+                    </div>
+                  )}
                 </div>
               )}
             </>

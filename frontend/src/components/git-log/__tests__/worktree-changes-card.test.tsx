@@ -5,6 +5,8 @@
  * 覆盖（tasks/task-04.md acceptance + design §Phase 3 / D-002 / D-007 / R-06）：
  * 1. 三分组渲染归属：modified/added/deleted → 「更改」组（含 HEAD 基线说明）、
  *    untracked → 「未纳入版本管理」组、ignored → 「已忽略」组（顶层聚合行）；
+ *    分组可点击折叠——untracked/ignored 默认收起、更改默认展开
+ *    （2026-10-26-worktree-group-collapse，用户实测反馈）；
  * 2. 四色类名（D-002）：新增/新文件=text-success、修改=text-primary、删除=
  *    text-error line-through、忽略=text-muted-foreground；
  * 3. untracked 无行数仅「新文件」徽标（R-06）；modified 行 +N/−N；
@@ -130,7 +132,7 @@ describe("WorktreeChangesCard — 三分组与四色（task-04）", () => {
     await waitFor(() => {
       expect(screen.getByTestId("worktree-changes-card")).toBeInTheDocument();
     });
-    // 更改组：modified/added/deleted 三行 + 基线说明。
+    // 更改组默认展开：modified/added/deleted 三行 + 基线说明。
     const changed = screen.getByTestId("worktree-group-changed");
     expect(changed).toHaveTextContent("对比基线：最近一次提交 a9f5fae1");
     expect(
@@ -138,15 +140,49 @@ describe("WorktreeChangesCard — 三分组与四色（task-04）", () => {
     ).toBeInTheDocument();
     expect(screen.getByTestId("worktree-file-frontend/src/lib/legacy-search.ts")).toBeInTheDocument();
     expect(screen.getByTestId("worktree-file-backend/app/modules/git_log/router.py")).toBeInTheDocument();
-    // untracked 独立组。
+    // untracked 独立组：默认收起，展开后行可见。
     const untracked = screen.getByTestId("worktree-group-untracked");
     expect(untracked).toHaveTextContent("未纳入版本管理");
+    fireEvent.click(screen.getByTestId("worktree-group-toggle-untracked"));
     expect(screen.getByTestId("worktree-file-docs/设计 文档.md")).toBeInTheDocument();
-    // ignored 聚合组：目录与散落单文件各一行。
+    // ignored 聚合组：默认收起，展开后目录与散落单文件各一行。
     const ignored = screen.getByTestId("worktree-group-ignored");
     expect(ignored).toHaveTextContent("已忽略");
+    fireEvent.click(screen.getByTestId("worktree-group-toggle-ignored"));
     expect(screen.getByTestId("worktree-ignored-node_modules/")).toHaveTextContent("目录整体");
     expect(screen.getByTestId("worktree-ignored-.env")).toBeInTheDocument();
+  });
+
+  it("分组折叠（2026-10-26-worktree-group-collapse）：untracked/ignored 默认收起、更改默认展开、点击切换", async () => {
+    renderCard(makeDirtyFiles());
+    await waitFor(() => {
+      expect(screen.getByTestId("worktree-changes-card")).toBeInTheDocument();
+    });
+    // 默认态：更改展开（aria-expanded=true），另两组收起且内容不在 DOM。
+    expect(screen.getByTestId("worktree-group-toggle-changed")).toHaveAttribute(
+      "aria-expanded",
+      "true",
+    );
+    const untrackedToggle = screen.getByTestId("worktree-group-toggle-untracked");
+    const ignoredToggle = screen.getByTestId("worktree-group-toggle-ignored");
+    expect(untrackedToggle).toHaveAttribute("aria-expanded", "false");
+    expect(ignoredToggle).toHaveAttribute("aria-expanded", "false");
+    expect(screen.queryByTestId("worktree-file-docs/设计 文档.md")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("worktree-ignored-node_modules/")).not.toBeInTheDocument();
+    // 收起态头行仍带计数，收起不丢信息量。
+    expect(untrackedToggle).toHaveTextContent("1 个文件");
+    expect(ignoredToggle).toHaveTextContent("2 项");
+    // 点击展开 → 内容出现；再点收起 → 内容消失、aria 翻回。
+    fireEvent.click(untrackedToggle);
+    expect(screen.getByTestId("worktree-file-docs/设计 文档.md")).toBeInTheDocument();
+    fireEvent.click(untrackedToggle);
+    expect(screen.queryByTestId("worktree-file-docs/设计 文档.md")).not.toBeInTheDocument();
+    expect(untrackedToggle).toHaveAttribute("aria-expanded", "false");
+    // 更改组同样可收起。
+    fireEvent.click(screen.getByTestId("worktree-group-toggle-changed"));
+    expect(
+      screen.queryByTestId("worktree-file-frontend/src/components/explorer/file-explorer.tsx"),
+    ).not.toBeInTheDocument();
   });
 
   it("四色类名（D-002）：修改蓝 / 新增绿 / 删除红+删除线 / 新文件绿 / 忽略灰", async () => {
@@ -154,6 +190,9 @@ describe("WorktreeChangesCard — 三分组与四色（task-04）", () => {
     await waitFor(() => {
       expect(screen.getByTestId("worktree-changes-card")).toBeInTheDocument();
     });
+    // untracked/ignored 默认收起，展开后再断言行颜色。
+    fireEvent.click(screen.getByTestId("worktree-group-toggle-untracked"));
+    fireEvent.click(screen.getByTestId("worktree-group-toggle-ignored"));
     const rowOf = (testId: string) =>
       screen.getByTestId(testId).querySelector("span.font-mono");
     expect(rowOf("worktree-file-frontend/src/components/explorer/file-explorer.tsx")).toHaveClass(
@@ -176,6 +215,7 @@ describe("WorktreeChangesCard — 三分组与四色（task-04）", () => {
     await waitFor(() => {
       expect(screen.getByTestId("worktree-changes-card")).toBeInTheDocument();
     });
+    fireEvent.click(screen.getByTestId("worktree-group-toggle-untracked"));
     const untrackedRow = screen.getByTestId("worktree-file-docs/设计 文档.md");
     expect(untrackedRow).toHaveTextContent("新文件");
     expect(untrackedRow.textContent).not.toMatch(/\+\d/);
@@ -216,6 +256,7 @@ describe("WorktreeChangesCard — 三分组与四色（task-04）", () => {
       "frontend/src/lib/legacy-search.ts",
       "deleted",
     );
+    fireEvent.click(screen.getByTestId("worktree-group-toggle-untracked"));
     fireEvent.click(screen.getByTestId("worktree-file-docs/设计 文档.md"));
     expect(onOpenFile).toHaveBeenCalledWith("docs/设计 文档.md", "untracked");
   });
