@@ -39,8 +39,8 @@ test("文件变更卡：折叠 / 展开 / 降级三态与 100 文件内滚", asy
   await expect(page.getByTestId("file-changes-card")).toHaveCount(3);
   const first = page.getByTestId("file-changes-card").nth(0);
   await expect(first.getByText("8 个文件变更")).toBeVisible();
-  await expect(first.getByText("+226")).toBeVisible();
-  await expect(first.getByText("−8")).toBeVisible();
+  await expect(first.getByText("+226", { exact: true })).toBeVisible();
+  await expect(first.getByText("−8", { exact: true })).toBeVisible();
   await expect(first).toHaveAttribute("data-expanded", "false");
   await expect(first.getByTestId("file-changes-row")).toHaveCount(0);
 

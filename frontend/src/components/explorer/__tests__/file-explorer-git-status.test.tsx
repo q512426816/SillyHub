@@ -127,8 +127,15 @@ function coloredSpanOf(name: string): HTMLElement | undefined {
 async function expandDir(name: string, ws = "ws1", path = "") {
   const row = closestAntdTreeRow(screen.getByText(name));
   const switcher = queryAntdTreeSwitcher(row as HTMLElement);
+  const rowsBefore = document.querySelectorAll(".ant-tree-treenode").length;
   if (switcher) fireEvent.click(switcher);
   await waitFor(() => expect(mockFetchTree).toHaveBeenCalledWith(ws, path === "" ? name : path));
+  // 等子行真正渲染（2026-10-26-ci-red-to-green）：fetch 已发≠DOM 已渲染——CI 满载
+  // 下 antd Tree 懒加载子节点晚一帧到达，调用方紧跟的 getByText(子名) 不等待即
+  // 竞态必红（CI 三连挂实证）。以行数增长为「子行已出」信号（children 非空路径）。
+  await waitFor(() => {
+    expect(document.querySelectorAll(".ant-tree-treenode").length).toBeGreaterThan(rowsBefore);
+  });
 }
 
 beforeEach(() => {
