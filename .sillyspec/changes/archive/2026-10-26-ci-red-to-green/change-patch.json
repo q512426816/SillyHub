@@ -1,0 +1,199 @@
+{
+  "change": "2026-10-26-ci-red-to-green",
+  "baseline": "f1e476a90cfedcb734965cf7087d678a2fb01280",
+  "head": "fa5a6fe1108b468f037a94263c1adb76f2e62dc6",
+  "files": [
+    ".github/workflows/e2e-ci.yml",
+    "backend/app/modules/daemon/tests/test_machine_sillyspec.py",
+    "docs/releases/2026-10-26-004-f1e476a90.md",
+    "frontend/e2e/proto-file-card.spec.ts",
+    "frontend/src/components/daemon/session-panel/session-panel-dialog.tsx",
+    "frontend/src/components/daemon/session-panel/session-panel-page.tsx",
+    "frontend/src/components/explorer/__tests__/file-explorer-git-status.test.tsx",
+    "frontend/vitest.config.ts",
+    "sillyhub-daemon/src/daemon.ts",
+    "sillyhub-daemon/tests/daemon-kind-dispatch.test.ts",
+    "sillyhub-daemon/tests/daemon-status-root-persistence.test.ts",
+    "sillyhub-daemon/tests/interactive/session-thinking-level.test.ts",
+    "sillyhub-daemon/tests/interactive/task-lifecycle.test.ts",
+    "sillyhub-daemon/tests/spec-transport-tar-sync/daemon-interactive-spec-sync.test.ts"
+  ],
+  "totals": {
+    "files": 14,
+    "additions": 236,
+    "deletions": 67
+  },
+  "savedAt": "2026-10-26T23:34:26.208Z",
+  "note": "flow done 时点冻结（本变更可归属交付面：baseline..HEAD 提交面过滤 .sillyspec/ 只留 .sillyspec/docs/ 交付文档 + 独占树未提交交付；治理工件目录不入冻结——2026-10-12-close-trace-freeze-integrity FR-01）",
+  "modules": [
+    {
+      "id": "daemon",
+      "files": 1,
+      "doc": "docs/backend/modules/daemon.md",
+      "docTouched": false,
+      "docMissing": false
+    },
+    {
+      "id": "backend",
+      "files": 1,
+      "doc": "docs/multi-agent-platform/modules/backend.md",
+      "docTouched": false,
+      "docMissing": false
+    },
+    {
+      "id": "frontend",
+      "files": 5,
+      "doc": "docs/multi-agent-platform/modules/frontend.md",
+      "docTouched": false,
+      "docMissing": false
+    },
+    {
+      "id": "sillyhub-daemon",
+      "files": 6,
+      "doc": "docs/multi-agent-platform/modules/sillyhub-daemon.md",
+      "docTouched": false,
+      "docMissing": false
+    },
+    {
+      "id": "ci",
+      "files": 1,
+      "doc": "docs/multi-agent-platform/modules/ci.md",
+      "docTouched": false,
+      "docMissing": false
+    },
+    {
+      "id": "docs",
+      "files": 1,
+      "doc": "docs/multi-agent-platform/modules/docs.md",
+      "docTouched": false,
+      "docMissing": false
+    },
+    {
+      "id": "daemon",
+      "files": 7,
+      "doc": "docs/SillyHub/modules/daemon.md",
+      "docTouched": false,
+      "docMissing": false
+    },
+    {
+      "id": "frontend_components",
+      "files": 3,
+      "doc": "docs/SillyHub/modules/frontend_components.md",
+      "docTouched": false,
+      "docMissing": false
+    }
+  ],
+  "uncoveredDirs": [],
+  "moduleMaps": [
+    "docs/backend/modules/_module-map.yaml",
+    "docs/frontend/modules/_module-map.yaml",
+    "docs/multi-agent-platform/modules/_module-map.yaml",
+    "docs/SillyHub/modules/_module-map.yaml",
+    "docs/sillyhub-daemon/modules/_module-map.yaml"
+  ],
+  "acceptedDirtyGap": 1,
+  "scopeAudit": {
+    "mode": "full-flow",
+    "ok": true,
+    "degradedReason": null,
+    "baseAnchor": "f1e476a90cfedcb734965cf7087d678a2fb01280",
+    "totals": {
+      "files": 14,
+      "additions": 236,
+      "deletions": 67
+    },
+    "rows": [
+      {
+        "path": ".github/workflows/e2e-ci.yml",
+        "additions": 8,
+        "deletions": 2,
+        "kind": "modified"
+      },
+      {
+        "path": "backend/app/modules/daemon/tests/test_machine_sillyspec.py",
+        "additions": 9,
+        "deletions": 4,
+        "kind": "modified"
+      },
+      {
+        "path": "docs/releases/2026-10-26-004-f1e476a90.md",
+        "additions": 44,
+        "deletions": 0,
+        "kind": "new"
+      },
+      {
+        "path": "frontend/e2e/proto-file-card.spec.ts",
+        "additions": 25,
+        "deletions": 4,
+        "kind": "modified"
+      },
+      {
+        "path": "frontend/src/components/daemon/session-panel/session-panel-dialog.tsx",
+        "additions": 10,
+        "deletions": 7,
+        "kind": "modified"
+      },
+      {
+        "path": "frontend/src/components/daemon/session-panel/session-panel-page.tsx",
+        "additions": 14,
+        "deletions": 9,
+        "kind": "modified"
+      },
+      {
+        "path": "frontend/src/components/explorer/__tests__/file-explorer-git-status.test.tsx",
+        "additions": 7,
+        "deletions": 0,
+        "kind": "modified"
+      },
+      {
+        "path": "frontend/vitest.config.ts",
+        "additions": 7,
+        "deletions": 0,
+        "kind": "modified"
+      },
+      {
+        "path": "sillyhub-daemon/src/daemon.ts",
+        "additions": 52,
+        "deletions": 24,
+        "kind": "modified"
+      },
+      {
+        "path": "sillyhub-daemon/tests/daemon-kind-dispatch.test.ts",
+        "additions": 15,
+        "deletions": 0,
+        "kind": "modified"
+      },
+      {
+        "path": "sillyhub-daemon/tests/daemon-status-root-persistence.test.ts",
+        "additions": 4,
+        "deletions": 1,
+        "kind": "modified"
+      },
+      {
+        "path": "sillyhub-daemon/tests/interactive/session-thinking-level.test.ts",
+        "additions": 3,
+        "deletions": 0,
+        "kind": "modified"
+      },
+      {
+        "path": "sillyhub-daemon/tests/interactive/task-lifecycle.test.ts",
+        "additions": 27,
+        "deletions": 15,
+        "kind": "modified"
+      },
+      {
+        "path": "sillyhub-daemon/tests/spec-transport-tar-sync/daemon-interactive-spec-sync.test.ts",
+        "additions": 11,
+        "deletions": 1,
+        "kind": "modified"
+      }
+    ],
+    "excluded": {
+      "foreignDeclared": []
+    },
+    "note": "flow done 时点冻结（本文件落盘时采集）",
+    "closedBy": "flow done"
+  },
+  "patchSha256": "6a94944da0211a1fde55b397188b4458512449f04d1855ea9321a2904db03510",
+  "patchStatus": "ok"
+}

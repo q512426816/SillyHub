@@ -168,3 +168,4 @@ created_at: 2026-08-30 22:23:33
 | 2026-10-26 | 2026-10-26-turn-phase-orphan-fallback | 阶段事件竞态丢弃修复:turn_phase 事件按 run_id 精确匹配未命中时改为回退归属到当前… |
 | 2026-10-26 | 2026-10-26-subagent-card-width-unify | 子代理卡片与工具卡限宽统一补漏 |
 | 2026-10-26 | 2026-10-26-subagent-task-meta-restore | 子代理任务元数据装配竞态修复 |
+| 2026-10-26 | 2026-10-26-ci-red-to-green | 修复四条CI工作流失败转绿 |

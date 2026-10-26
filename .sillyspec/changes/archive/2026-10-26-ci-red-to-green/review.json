@@ -1,0 +1,37 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-26-ci-red-to-green",
+  "reviewer": "inline-self（环境无已注册子代理，主会话代行）",
+  "verdict": "PASS",
+  "reviewedAgainst": "fa5a6fe1108b468f037a94263c1adb76f2e62dc6",
+  "findings": [
+    {
+      "severity": "P3",
+      "status": "accepted",
+      "title": "frontend 4 个重型集成测试在 CI 2 核满载下 waitFor 预算内偶发不可达成，以 CI 条件 retry:2 兜底，根因未定位",
+      "evidence": "三轮 CI 实测：sessions-portal（门闩修复）与 scroll/history-race/load-earlier（retry 命中）转绿，本地全量/coverage/单线程复刻多轮全绿、仅真实 runner 复现，静态分析未锁定触发链（design.md 做法概述第 3 节已如实披露）；已留后续独立变更定位",
+      "location": "frontend/vitest.config.ts:27-32"
+    },
+    {
+      "severity": "P3",
+      "status": "accepted",
+      "title": "e2e proto-file-card 按现组件形态对齐（agent 分组折叠区段/删除行可点）——若产品要恢复「删除行不可点」属独立产品决策",
+      "evidence": "renderFileRow clickable=true 自 2026-10-23-file-card-agent-grouping 起生效（file-changes-card.tsx:236），e2e 旧预期（扁平 8 行/删除行不可点）停留在分组前形态；本变更仅 spec 跟随已上线组件，组件零改动",
+      "location": "frontend/e2e/proto-file-card.spec.ts:81-95"
+    },
+    {
+      "severity": "P3",
+      "status": "resolved",
+      "title": "ledger 亲测回执异常（unknown exit=1 0s 面：module[]），评审以复跑抽验补证",
+      "evidence": "按复跑口径抽验变更测试面全绿：frontend 84 用例（sessions-portal+file-explorer）、daemon 99 用例（task-lifecycle/thinking-level/spec-sync/status-root/kind-dispatch）、backend 39 用例（test_machine_sillyspec）；另有推送后 GitHub Actions 四条 workflow 全绿（frontend-ci/e2e-ci @940ddbd29、daemon-ci @7bb623fde、backend-ci @0d26c67cb）",
+      "location": ".sillyspec/.runtime/verify-runs"
+    }
+  ],
+  "dimensionNotes": {
+    "乱序": "ok——daemon try/catch 加固不新增消息面，turn_phase_report 无序容忍为既有设计（backend 侧 phase 幂等+first_event 防重 Set）；边界已裁决：可接受",
+    "并发": "ok——reportTurnPhase 加固仅包异常面；前端草稿门闩改 effect 顺序放行，同 commit 内 effect 声明序确定性保证抑制窗口恰为恢复 commit 本身；边界已裁决：可接受",
+    "切换": "ok——门闩按 sessionId 重置且释放 effect 与 restore 同 deps，切换会话恢复语义不变（dialog/page 双模式同构）；reportTurnPhase 失败不阻塞创建链五阶段点；边界已裁决：可接受",
+    "作用域": "ok——vi.mock 工厂单文件作用域，importOriginal 顶层纯声明已核对；SILLYHUB_DAEMON_DIR stub 按用例 stub/unstub 不外溢；e2e-ci 镜像/runs-on 仅影响该 workflow；边界已裁决：可接受"
+  },
+  "reviewedAt": "2026-10-27T07:45:00+08:00"
+}

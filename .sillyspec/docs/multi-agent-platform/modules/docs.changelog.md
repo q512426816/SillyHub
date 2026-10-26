@@ -27,3 +27,4 @@
 - 2026-10-23-session-first-load-ux | 会话首屏加载提速：补拉链不阻塞渲染+加载骨架屏
 - 2026-10-23-diff-dialog-pairing-fix | 轮文件变更弹窗(turn-file-diff-dialog)在补丁行缺 tool_use_id 时走…
 - 2026-10-25-session-config-deferred-switch | 会话配置点选改暂存随下条消息生效
+- 2026-10-26-ci-red-to-green | 修复四条CI工作流失败转绿

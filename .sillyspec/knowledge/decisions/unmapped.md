@@ -2256,3 +2256,11 @@ supersedes：D-008@v1
 锚点：未记录
 最近确认：97d4780904d3f99be61dc78d641f6e34ee291707
 理由：答：最大风险是 `close` 的 await 在 socket 极端僵死时理论上可悬挂——但 Starlette 的 close 仅向 ASGI 协议层投递 close 消息（不走网络层关闭握手），uvicorn 侧对死 transport 的投递立即返回或抛错，与同文件 `connect()` 替换路径 `await existing.close(code=4000, ...)` 的既有先例风险面完全一致（该先例运行至今无事故），故不加超时、保持同款写法。已试放弃的方案：daemon 侧「HTTP 心跳正常但 WS 长期无下行 → 主动重连」看门狗——协议改动大、需 daemon 发版铺开才生效，且 backend 单侧修复到位后该缺陷类不再产生，留作后续纵深防御候选（另立变更）。
+
+## D-unmapped-283@v1 设计期风险与放弃方案（底稿）
+状态：implemented
+变更：2026-10-26-ci-red-to-green
+原编号：D-001@v1
+锚点：未记录
+最近确认：fa5a6fe1108b468f037a94263c1adb76f2e62dc6
+理由：- **最大风险**：daemon 源码 try/catch 加固若吞掉本应上抛的错误——已核对 reportTurnPhase 唯一职责是 fire-and-forget 上报（后端 POST），失败本就设计为不可见（D-009 + 2026-10-26-turn-phase-prod-fix 观测首警兜底），吞同步异常不改变任何业务承诺；且加固后被影响测试断言的是「create 被调用」「pull 被调用」，不依赖上报失败外溢。 - **断言收窄的掩盖风险**：task-lifecycle 过滤收窄可能掩盖未来真实旁路消息污染——对策：收窄精确到 `type==='turn_phase_report'`（不放宽为白名单制），TASK 行数/形状断言原样保留。 - **importOriginal 风险**：真实 spec-sync.js 顶层执行若未来引入副作用（如启动定时器）会进测试——记为已知取舍，当前顶层纯声明（已核对 export 清单）。 - **试过放弃的方案**：① 给 SessionManager deps 增加独立 `onTurnPhaseReport` 回调取代带内 `turn_phase_report` 消息——属 2026-10-26-session-stage-progress D-013④ 已定桥协议的重构，超出本修复变更范围且要动 archived 变更的契约，放弃；② frontend 删/跳过 5 个慢文件——掩盖手法，违反 FR-03「不得删断言」，放弃；③ backend-ci 撞顶再抬 timeout-minutes 到 60——治标，若无挂死实证不先动，留待 FR-04 判定。

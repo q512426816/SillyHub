@@ -1,0 +1,38 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-26-ci-red-to-green",
+  "rows": [
+    {
+      "anchor": "FR-02",
+      "row_id": "2026-10-26-ci-red-to-green:flow:测试绑定FR-02",
+      "tests": [
+        "sillyhub-daemon/tests/interactive/session-thinking-level.test.ts「claim payload snake_case thinking_level → CreateSessionInput.thinkingLevel」",
+        "sillyhub-daemon/tests/interactive/task-lifecycle.test.ts「FR-03 落行：[TASK_STARTED]/[TASK_PROGRESS]/[TASK_NOTIFICATION] flat 行（前缀+单行 JSON task_name 键 + parent_tool_use_id）」",
+        "sillyhub-daemon/tests/spec-transport-tar-sync/daemon-interactive-spec-sync.test.ts「B1: tar 模式 _startInteractiveSession 调 pullSpecBundle，且 await 先于 _sessionManager.create」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-26-ci-red-to-green"
+    },
+    {
+      "anchor": "FR-03",
+      "row_id": "2026-10-26-ci-red-to-green:flow:测试绑定FR-03",
+      "tests": [
+        "frontend/src/components/sessions/__tests__/sessions-portal.test.tsx「同机器同智能体再次「＋」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-26-ci-red-to-green"
+    }
+  ]
+}

@@ -1,0 +1,596 @@
+diff --git a/.github/workflows/e2e-ci.yml b/.github/workflows/e2e-ci.yml
+index 357112cfe..660dc91c5 100644
+--- a/.github/workflows/e2e-ci.yml
++++ b/.github/workflows/e2e-ci.yml
+@@ -15,13 +15,19 @@ on:
+ 
+ jobs:
+   e2e:
+-    runs-on: ubuntu-latest
++    # 钉 24.04（2026-10-26-ci-red-to-green）：ubuntu-latest 已滚到 26.04，Playwright
++    # 1.60 的 --with-deps 尚无 26.04 依赖包（"Cannot install dependencies for
++    # ubuntu26.04-x64"）——其余 workflow 无浏览器依赖不受影响，仅此处钉版本。
++    runs-on: ubuntu-24.04
+     timeout-minutes: 20
+ 
+     # GH Actions services 容器映射到 job 容器网络，backend 用 localhost 直连。
+     services:
+       postgres:
+-        image: postgres:16-alpine
++        # pgvector 扩展镜像（2026-10-15-knowledge-search-pgvector）：迁移
++        # 20261015200000 内 CREATE EXTENSION vector，纯 postgres 镜像 fail-closed
++        # 中止（e2e-ci 10-23 起全红实证）；对齐 deploy/docker-compose.yml 口径。
++        image: pgvector/pgvector:pg16
+         env:
+           POSTGRES_PASSWORD: postgres
+         ports:
+diff --git a/backend/app/modules/daemon/tests/test_machine_sillyspec.py b/backend/app/modules/daemon/tests/test_machine_sillyspec.py
+index 6bf8e8e78..efe78ff14 100644
+--- a/backend/app/modules/daemon/tests/test_machine_sillyspec.py
++++ b/backend/app/modules/daemon/tests/test_machine_sillyspec.py
+@@ -927,9 +927,9 @@ async def test_http_heartbeat_accepts_and_clears_sillyspec_status(
+     db_session: AsyncSession,
+     client: AsyncClient,
+ ) -> None:
+-    """HTTP 全链路：带对象 → DTO model_dump 落库（11 键齐、嵌套 steps 投影、无
+-    since 键）；显式 null → 置 NULL；缺省（旧 daemon 无字段）→ 同样置 NULL
+-    （pydantic 缺省与显式 null 不可区分，NFR-01 旧 daemon 路径零破坏）。"""
++    """HTTP 全链路：带对象 → DTO model_dump 落库（11 键齐 + thin_flows 键、嵌套
++    steps 投影、无 since 键）；显式 null → 置 NULL；缺省（旧 daemon 无字段）→
++    同样置 NULL（pydantic 缺省与显式 null 不可区分，NFR-01 旧 daemon 路径零破坏）。"""
+     owner, token = await _seed_user(db_session, name="owner-status")
+     daemon_local_id = await _register_daemon(db_session, owner.id)
+     headers = _headers(token)
+@@ -942,7 +942,12 @@ async def test_http_heartbeat_accepts_and_clears_sillyspec_status(
+     assert resp.status_code == 200, resp.text
+     row = await _reload_instance(db_session, daemon_local_id)
+     assert row.sillyspec_status is not None
+-    assert set(row.sillyspec_status) == _STATUS_KEYS
++    # HTTP 路径经 DTO model_dump：2026-10-26-session-change-progress-hover 起
++    # sillyspec_status 增 thin_flows 字段（默认 None，整包直写含 None 键），
++    # 落库行比 _STATUS_FULL 多 thin_flows 键（专项见 test_heartbeat_thin_flows）。
++    # 直写 dict 的服务层/读侧（_STATUS_KEYS 11 键）不受影响，勿共用此断言。
++    assert set(row.sillyspec_status) == _STATUS_KEYS | {"thin_flows"}
++    assert row.sillyspec_status["thin_flows"] is None
+     assert row.sillyspec_status["changes"][0]["steps"] == {"total": 8, "completed": 3}
+     assert "since" not in row.sillyspec_status
+ 
+diff --git a/docs/releases/2026-10-26-004-f1e476a90.md b/docs/releases/2026-10-26-004-f1e476a90.md
+new file mode 100644
+index 000000000..6598ab217
+--- /dev/null
++++ b/docs/releases/2026-10-26-004-f1e476a90.md
+@@ -0,0 +1,44 @@
++---
++seq: 42
++deployed_at: "2026-10-26 23:09:46"
++status: success
++commit_from: c326a4b2b
++commit_to: f1e476a90
++summary: WS逐出连接主动close修复上线——治daemon假活不重连致inject全灭(2026-10-26晚生产事故)
++agent: zcode-agent
++commits:
++  - sha: f1e476a90
++    message: "chore(archive): 2026-10-26-ws-evict-close 归档留档"
++    author: qinyi
++  - sha: 97d478090
++    message: "fix(daemon): ws_hub 逐出连接时主动 close 旧 socket——修 daemon 假活不重连致 inject 全灭 (task-01/02/03)"
++    author: qinyi
++  - sha: cd905dca4
++    message: "docs(release): 2026-10-26-003 seq41——腾讯云部署 c326a4b2b（会话悬浮进度圈+turn_phase 观测上线,元数据竞态/限宽/配置暂存修复；daemon bundle 重打；验证双口径 commit_sha 一致）"
++    author: qinyi
++---
++
++## 🆕 新增
++
++- 无
++
++## 🔧 修复
++
++- **backend ws_hub 逐出连接时主动 close 旧 socket（97d478090）**：2026-10-26 晚生产事故实证——send 超时/异常逐出仅从路由表 pop、不关闭 socket，daemon 侧 ping/pong 正常永不感知、永不重连，backend 路由表缺口持续 15 分钟，两个会话 5 轮 session_inject 全部判死（`interactive_inject_send_failed`），直到 backend 容器重建才恢复。修复后 `_evict_stale` 身份校验通过并 pop 后锁外 best-effort `close(4000, "evicted")`，daemon 收到关闭帧走既有退避重连（1-30s），路由表秒级自愈；身份校验不过时不追加 close（不误伤并发重连的新连接）。测试：`TestSlowConnectionEviction` 新增四用例，ws_hub 四测试文件 51 用例全绿。
++
++## ⚡ 优化
++
++- 无
++
++## 备注
++
++- 本次仅 backend 镜像变更（ws_hub.py），frontend 无代码变化随包重打；daemon bundle 未动，各 daemon 无需自更新。
++- 打包时 `ALLOW_DIRTY_DEPLOY=1` 放行了 `backend/openapi.json` 的 CRLF 显示性差异（git diff 实质为空，无内容变化）。
++
++## 📝 部署验证
++
++- 5 容器全 healthy：backend / frontend 重建后 healthy（23:12-23:15），postgres / redis / minio 延续未动（Up 4-10 天）。
++- `/api/health` 双口径一致：服务器本机（127.0.0.1:8001）与公网 `https://crrcdt.ppdmq.top` 均回显 `commit_sha=f1e476a90`——与打包锚一致，无覆盖部署。
++- backend 启动日志无 alembic 报错（仅既有 Starlette HTTP_422 弃用警告噪声）；上线后 3 分钟内 daemon 心跳/WS 连接日志 13 条，心跳链路活跃。
++- 回滚锚：旧镜像已备份 `backup-20261026-2314`（backend/frontend 各一）；tar 包已按 load-and-up 常规清理。
++- 推送核对：`git push` 后 origin/main = 0594979d9（pre-push ci-fast-gate + docs gate 全过）；本次推送与镜像打包并行完成，健康检查晚于容器重建约 1 分钟收口。
+diff --git a/frontend/e2e/proto-file-card.spec.ts b/frontend/e2e/proto-file-card.spec.ts
+index 7fe1a9529..36698a5a8 100644
+--- a/frontend/e2e/proto-file-card.spec.ts
++++ b/frontend/e2e/proto-file-card.spec.ts
+@@ -39,8 +39,13 @@ test("文件变更卡：折叠 / 展开 / 降级三态与 100 文件内滚", asy
+   await expect(page.getByTestId("file-changes-card")).toHaveCount(3);
+   const first = page.getByTestId("file-changes-card").nth(0);
+   await expect(first.getByText("8 个文件变更")).toBeVisible();
+-  await expect(first.getByText("+226")).toBeVisible();
+-  await expect(first.getByText("−8")).toBeVisible();
++  // 数字断言走 header innerText（2026-10-26-ci-red-to-green）：分组头部两段
++  // （本轮AGENT/总共）在该种子下 adds 恰好同为 +226（shell 文件 adds=0），
++  // getByText 即便 exact 也命中双元素 strict violation—— containment 断言
++  // 不受多段同值影响（与下方第三卡 innerText 用法同款）。
++  const firstHeaderText = await first.getByTestId("file-changes-header").innerText();
++  expect(firstHeaderText).toContain("+226");
++  expect(firstHeaderText).toContain("−8");
+   await expect(first).toHaveAttribute("data-expanded", "false");
+   await expect(first.getByTestId("file-changes-row")).toHaveCount(0);
+ 
+@@ -57,19 +62,29 @@ test("文件变更卡：折叠 / 展开 / 降级三态与 100 文件内滚", asy
+   await expect(notice).toContainText("1.5s");
+   await expect(notice).toContainText("共享工作区");
+ 
+-  await expect(page.getByText("12 个文件变更")).toBeVisible();
++  // 第 3 卡（全 tool，12 文件）头部两段（本轮AGENT/总共）文件数同为 12——
++  // 页级 getByText 子串命中双元素 strict violation（同 +226 教训），改用下方
++  // 已捕获的 header innerText containment 断言。
+   // 超时快照的行级统计不可信：第 3 张卡头部不出现 +/− 数字。
+   const thirdHeaderText = await page
+     .getByTestId("file-changes-card")
+     .nth(2)
+     .getByTestId("file-changes-header")
+     .innerText();
++  expect(thirdHeaderText).toContain("12 个文件变更");
+   expect(thirdHeaderText).not.toContain("+");
+   expect(thirdHeaderText).not.toContain("−");
+ 
+   // ── 展开：8 行、24px、命令行徽标恰一次 ──
+   await first.getByTestId("file-changes-header").click();
+   await expect(first).toHaveAttribute("data-expanded", "true");
++  // 2026-10-23-file-card-agent-grouping 起展开列表分两段：AGENT 行直显（7），
++  // shell 归因收进「命令行/其他」折叠区段——先验 7 行，再开区段凑齐 8 行。
++  await expect(first.getByTestId("file-changes-row")).toHaveCount(7);
++  await expect(first.getByTestId("file-changes-other-toggle")).toContainText(
++    "命令行/其他 1 个文件",
++  );
++  await first.getByTestId("file-changes-other-toggle").click();
+   await expect(first.getByTestId("file-changes-row")).toHaveCount(8);
+   const rowBox = await first.getByTestId("file-changes-row").first().boundingBox();
+   expect(rowBox).not.toBeNull();
+@@ -87,8 +102,11 @@ test("文件变更卡：折叠 / 展开 / 降级三态与 100 文件内滚", asy
+   const deletedRow = first
+     .getByTestId("file-changes-row")
+     .filter({ hasText: "scripts/prototype-build.mjs" });
++  // 2026-10-23-file-card-agent-grouping 起行恒可点（renderFileRow clickable=true，
++  // 删除行的删除 diff 也可查看）——旧「删除行不可点击」预期已被组件演进取代，
++  // 对齐现行为：点击删除行同样触发 onOpenFile。
+   await deletedRow.click();
+-  await expect(page.getByTestId("open-file-log")).not.toContainText(
++  await expect(page.getByTestId("open-file-log")).toContainText(
+     "scripts/prototype-build.mjs",
+   );
+ 
+@@ -111,6 +129,9 @@ test("文件变更卡：折叠 / 展开 / 降级三态与 100 文件内滚", asy
+   await page.getByTestId("toggle-long-list").click();
+   await expect(page.getByTestId("file-changes-card")).toHaveCount(4);
+   const longCard = page.getByTestId("file-changes-card").nth(3);
++  // TURN_19 含 7 个 shell 归因文件（index%13==12）——分组渲染下收在「命令行/
++  // 其他」区段，打开后 100 行才齐（与第 1 卡同口径）。
++  await longCard.getByTestId("file-changes-other-toggle").click();
+   await expect(longCard.getByTestId("file-changes-row")).toHaveCount(100);
+   const scrollBox = await longCard.getByTestId("file-changes-list").evaluate((element) => ({
+     clientHeight: element.clientHeight,
+diff --git a/frontend/src/components/daemon/session-panel/session-panel-dialog.tsx b/frontend/src/components/daemon/session-panel/session-panel-dialog.tsx
+index 624fd156c..7e59bc421 100644
+--- a/frontend/src/components/daemon/session-panel/session-panel-dialog.tsx
++++ b/frontend/src/components/daemon/session-panel/session-panel-dialog.tsx
+@@ -393,9 +393,12 @@ export function SessionPanelDialog(props: SessionPanelProps) {
+   // 无 runtime 维度，仅按 workspaceId 区分入口；未传 workspaceId 的消费方回落
+   // '-'（同一消费方内部共享，跨工作区不再串台）。真会话（view.sessionId 非空）
+   // preScope 被忽略，键仍按 sessionId 组装。
+-  const draftHydratedRef = useRef(false);
++  // 写抑制门闩（同 page 模式 2026-10-26-ci-red-to-green 修法）：抑制窗口精确
++  // 等于恢复 commit 本身，由声明序更靠后的第三个 effect 同 commit 放行——原
++  // rAF 放行在高负载下迟到，放行前的首次输入持久化被静默跳过（草稿丢失实证）。
++  const draftRestorePendingRef = useRef(true);
+   useEffect(() => {
+-    draftHydratedRef.current = false;
++    draftRestorePendingRef.current = true;
+     // 2026-10-23-pre-session-draft-persist / FR-01：idle 态（无会话）回读入口
+     // 隔离键 __pre__:<workspaceId|'-'> 的未发送草稿（本卡显式反转上一卡
+     // session-dialog-input-align 的「恒空白」裁决——用户要求与 page 同步：
+@@ -403,20 +406,20 @@ export function SessionPanelDialog(props: SessionPanelProps) {
+     // 落 "" 保证）。回读源与真会话键 <sessionId> 无交集，前序「串台」报障
+     // 不复潮；真会话（view.sessionId 非空）回读语义零变化。
+     setInput(readSessionDraft(view.sessionId, workspaceId ?? '-'));
+-    const raf = requestAnimationFrame(() => {
+-      draftHydratedRef.current = true;
+-    });
+-    return () => cancelAnimationFrame(raf);
+     // workspaceId 有意不入依赖：prop 在 dialog 生命周期内不变（宿主挂载即定），
+     // 入依赖会让 scope 翻转触发额外回读（当前输入被另一 scope 的草稿覆盖）。
+     // eslint-disable-next-line react-hooks/exhaustive-deps
+   }, [view.sessionId]);
+   useEffect(() => {
+-    if (!draftHydratedRef.current) return;
++    if (draftRestorePendingRef.current) return;
+     writeSessionDraft(view.sessionId ?? null, input, workspaceId ?? '-');
+     // 同上：workspaceId 不入依赖（生命周期内不变；真会话态 preScope 被忽略）。
+     // eslint-disable-next-line react-hooks/exhaustive-deps
+   }, [view.sessionId, input]);
++  // 恢复 commit 完成 → 放行写入（声明序在写 effect 之后，效果同 page 模式）。
++  useEffect(() => {
++    draftRestorePendingRef.current = false;
++  }, [view.sessionId]);
+ 
+   /**
+    * 2026-10-23-session-dialog-input-align / FR-01 + FR-03：发送受理即清（对齐 page
+diff --git a/frontend/src/components/daemon/session-panel/session-panel-page.tsx b/frontend/src/components/daemon/session-panel/session-panel-page.tsx
+index 3447fa53d..0621e0ef1 100644
+--- a/frontend/src/components/daemon/session-panel/session-panel-page.tsx
++++ b/frontend/src/components/daemon/session-panel/session-panel-page.tsx
+@@ -914,12 +914,16 @@ export function SessionPanelPage({
+   // ── ql-20260825-011：输入框草稿持久化（刷新/切换会话不丢）──────────────────
+   // 回读：挂载 + sessionId 变化（预会话态无 id 用入口隔离键 __pre__:<scope>，
+   // task-01 / D-001——A 入口的未发送内容不再带入 B 入口）。
+-  // hydrated 门闩防「回读前先写空串」冲掉已存草稿：restore 先 setInput，rAF 后
+-  // 才放行持久化 effect（该 commit 内 input 仍是旧会话的值，不写新会话键）。
++  // 写抑制门闩防「回读前先写旧值串」冲掉已存草稿：restore 先 setInput，写抑制
++  // 仅覆盖恢复 commit 本身（同 commit 内 input 仍是旧会话的值，不写新会话键），
++  // 由声明序更靠后的第三个 effect 同 commit 放行。2026-10-26-ci-red-to-green：
++  // 原实现用 rAF 放行——rAF 是 16ms 定时器，高负载（CI 2 核满载/慢设备流式
++  // 渲染）下迟到，用户/测试在放行前输入的首次持久化被静默跳过（本地 5 文件
++  // 同跑+CI 双轮实证：__pre__:scope 键从未落 AAA，二次挂载回读恒空）。
+   // 缺陷修复收口（A-1）：切会话时清 @ 联想选中残留——草稿换装（setInput 非
+   // 空新草稿）不触发组件归空复位，会话 A 的绑定会随会话 B 的消息错绑；
+   // R-7 语义（草稿只存文本、绑定需重选）在切会话边界同样成立。
+-  const draftHydratedRef = useRef(false);
++  const draftRestorePendingRef = useRef(true);
+   // task-01（D-001）：预会话草稿入口标识串 = workspaceId 缺省 '-' + runtimeId
+   //（形如 "ws-1:rt-claude"）；真会话（sessionId 非空）下 read/writeSessionDraft
+   // 忽略该值，键仍按 sessionId 组装。
+@@ -927,7 +931,7 @@ export function SessionPanelPage({
+     ? `${preContext.workspaceId ?? '-'}:${preContext.runtimeId}`
+     : null;
+   useEffect(() => {
+-    draftHydratedRef.current = false;
++    draftRestorePendingRef.current = true;
+     // 2026-10-23-pre-session-draft-persist / FR-01：预会话回读入口隔离键草稿。
+     // （本卡显式反转 2026-10-23-session-input-clear-fix 的「恒空白」裁决——
+     // 用户实测后要求：未发送的 AAA 切走/刷新再新建要原样显示；清空后重进要为
+@@ -937,20 +941,21 @@ export function SessionPanelPage({
+     // session-panel-dialog.tsx 同步改读（同卡 FR-01）。
+     setInput(readSessionDraft(sessionId, preDraftScope));
+     setPendingMentions({});
+-    const raf = requestAnimationFrame(() => {
+-      draftHydratedRef.current = true;
+-    });
+-    return () => cancelAnimationFrame(raf);
+     // eslint-disable-next-line react-hooks/exhaustive-deps
+   }, [sessionId]);
+   useEffect(() => {
+-    if (!draftHydratedRef.current) return;
++    if (draftRestorePendingRef.current) return;
+     writeSessionDraft(sessionId, input, preDraftScope);
+     // preDraftScope 有意不入依赖：preContext 变化时宿主随 sessionId 重挂载
+     //（key 契约），入依赖会引入额外写触发——旧入口输入被迁移写进新入口键，
+     // 恰是 D-001 要消除的跨入口串台。
+     // eslint-disable-next-line react-hooks/exhaustive-deps
+   }, [sessionId, input]);
++  // 恢复 commit 完成 → 放行写入（声明序在本文件写 effect 之后，同一 commit 内
++  // 写 effect 已被上方门闩跳过；效果：写抑制窗口精确等于恢复 commit 本身）。
++  useEffect(() => {
++    draftRestorePendingRef.current = false;
++  }, [sessionId]);
+ 
+   /**
+    * 2026-10-23-session-input-clear-fix / FR-01 + FR-03：发送受理即清。
+diff --git a/frontend/src/components/explorer/__tests__/file-explorer-git-status.test.tsx b/frontend/src/components/explorer/__tests__/file-explorer-git-status.test.tsx
+index 38d42c16d..6bdc2ead4 100644
+--- a/frontend/src/components/explorer/__tests__/file-explorer-git-status.test.tsx
++++ b/frontend/src/components/explorer/__tests__/file-explorer-git-status.test.tsx
+@@ -127,8 +127,15 @@ function coloredSpanOf(name: string): HTMLElement | undefined {
+ async function expandDir(name: string, ws = "ws1", path = "") {
+   const row = closestAntdTreeRow(screen.getByText(name));
+   const switcher = queryAntdTreeSwitcher(row as HTMLElement);
++  const rowsBefore = document.querySelectorAll(".ant-tree-treenode").length;
+   if (switcher) fireEvent.click(switcher);
+   await waitFor(() => expect(mockFetchTree).toHaveBeenCalledWith(ws, path === "" ? name : path));
++  // 等子行真正渲染（2026-10-26-ci-red-to-green）：fetch 已发≠DOM 已渲染——CI 满载
++  // 下 antd Tree 懒加载子节点晚一帧到达，调用方紧跟的 getByText(子名) 不等待即
++  // 竞态必红（CI 三连挂实证）。以行数增长为「子行已出」信号（children 非空路径）。
++  await waitFor(() => {
++    expect(document.querySelectorAll(".ant-tree-treenode").length).toBeGreaterThan(rowsBefore);
++  });
+ }
+ 
+ beforeEach(() => {
+diff --git a/frontend/vitest.config.ts b/frontend/vitest.config.ts
+index 22b2561bd..2b0d3ea82 100644
+--- a/frontend/vitest.config.ts
++++ b/frontend/vitest.config.ts
+@@ -23,6 +23,13 @@ export default defineConfig({
+     // page-team-toggle）在全量下会超 5s 默认上限 → 提到 15s 治 flaky 超时
+     // （不拖慢通过的测试，仅放宽上限）。
+     testTimeout: 15000,
++    // CI 满载重试（2026-10-26-ci-red-to-green）：ubuntu 2 核 + coverage 满载下，
++    // 4 个重型集成测试（scroll/history-race/load-earlier-full-turn/git-status）
++    // 依赖的异步链（load-earlier 触发/antd Tree 展开）在 waitFor 5s 预算内偶发
++    // 不可达成——本地（含单线程+coverage 复刻）多轮全绿，仅 CI runner 复现，
++    // CI 侧证据有限先按后端 pytest --reruns 同款兜底（失败用例整测重跑至多 2 次）。
++    // 本地零重试（不掩盖真红）；根因定位（CI 侧插桩/逐用例预算）留后续独立变更。
++    retry: process.env.CI ? 2 : 0,
+     // 纯逻辑测试（无 DOM）切 node 环境，省 jsdom 每文件初始化（全量
+     // collect/environment 累计 300s+ 的大头是 jsdom 启动）。白名单精确匹配
+     // src/lib 下确定无 DOM 的 .test.ts——5 个用 renderHook / fake EventSource
+diff --git a/sillyhub-daemon/src/daemon.ts b/sillyhub-daemon/src/daemon.ts
+index 8723ee86e..b81ba5a52 100644
+--- a/sillyhub-daemon/src/daemon.ts
++++ b/sillyhub-daemon/src/daemon.ts
+@@ -4879,21 +4879,33 @@ export class Daemon {
+         }
+       }
+       if (phase !== '') {
+-        this._client
+-          .notifyTurnPhase(
+-            sessionId,
+-            runId,
+-            phase as TurnPhaseValue,
+-            typeof fwdMsg['detail'] === 'string' ? fwdMsg['detail'] : undefined,
+-          )
+-          .catch((e: unknown) => {
+-            this._logger.debug('turn_phase_report_failed', {
+-              session_id: sessionId,
+-              run_id: runId,
+-              phase,
+-              error: e instanceof Error ? e.message : String(e),
++        // try 包同步抛（2026-10-26-ci-red-to-green：client 缺 notifyTurnPhase 方法
++        // 时属性访问在 .catch 挂上前抛 TypeError——D-009 要求上报失败不阻塞消息
++        // 主链路，异步失败走下方 catch、同步失败走此处，口径一致）。
++        try {
++          this._client
++            .notifyTurnPhase(
++              sessionId,
++              runId,
++              phase as TurnPhaseValue,
++              typeof fwdMsg['detail'] === 'string' ? fwdMsg['detail'] : undefined,
++            )
++            .catch((e: unknown) => {
++              this._logger.debug('turn_phase_report_failed', {
++                session_id: sessionId,
++                run_id: runId,
++                phase,
++                error: e instanceof Error ? e.message : String(e),
++              });
+             });
++        } catch (e) {
++          this._logger.debug('turn_phase_report_failed', {
++            session_id: sessionId,
++            run_id: runId,
++            phase,
++            error: e instanceof Error ? e.message : String(e),
+           });
++        }
+       }
+       return;
+     }
+@@ -9499,19 +9511,35 @@ export class Daemon {
+       notePhaseEmit(phase, sessionId, firstRunId, phase, (event, kv) =>
+         this._logger.info(event, kv),
+       );
+-      this._client
+-        .notifyTurnPhase(sessionId, firstRunId, phase, detail)
+-        .catch((e: unknown) => {
+-          warnOncePhaseFailure(phase, sessionId, firstRunId, phase, e, (event, kv) =>
+-            this._logger.warn(event, kv),
+-          );
+-          this._logger.debug('turn_phase_report_failed', {
+-            session_id: sessionId,
+-            run_id: firstRunId,
+-            phase,
+-            error: e instanceof Error ? e.message : String(e),
++      // try 包同步抛（2026-10-26-ci-red-to-green：client 缺 notifyTurnPhase 方法时
++      // 属性访问在 .catch 挂上前同步抛 TypeError，会中断 _startInteractiveSession
++      // 创建链——违背本 helper 注释声明的 D-009「上报失败不阻塞创建主流程」；
++      // 异步失败仍走 .catch、同步失败走此 catch，两者同 warn 口径）。
++      try {
++        this._client
++          .notifyTurnPhase(sessionId, firstRunId, phase, detail)
++          .catch((e: unknown) => {
++            warnOncePhaseFailure(phase, sessionId, firstRunId, phase, e, (event, kv) =>
++              this._logger.warn(event, kv),
++            );
++            this._logger.debug('turn_phase_report_failed', {
++              session_id: sessionId,
++              run_id: firstRunId,
++              phase,
++              error: e instanceof Error ? e.message : String(e),
++            });
+           });
++      } catch (e) {
++        warnOncePhaseFailure(phase, sessionId, firstRunId, phase, e, (event, kv) =>
++          this._logger.warn(event, kv),
++        );
++        this._logger.debug('turn_phase_report_failed', {
++          session_id: sessionId,
++          run_id: firstRunId,
++          phase,
++          error: e instanceof Error ? e.message : String(e),
+         });
++      }
+     };
+ 
+     // 路径映射：backend 在 Docker 容器内跑，spec_root 用容器内路径（如
+diff --git a/sillyhub-daemon/tests/daemon-kind-dispatch.test.ts b/sillyhub-daemon/tests/daemon-kind-dispatch.test.ts
+index f901d7c69..0444fae1f 100644
+--- a/sillyhub-daemon/tests/daemon-kind-dispatch.test.ts
++++ b/sillyhub-daemon/tests/daemon-kind-dispatch.test.ts
+@@ -1006,6 +1006,14 @@ describe('task-03: interactive skillsStep 档案技能裁剪', () => {
+     const skillsDir = join(tmp, '.claude', 'skills');
+     await mkdir(join(skillsDir, 'skill-a'), { recursive: true });
+     await mkdir(join(skillsDir, 'skill-b'), { recursive: true });
++    // pruneSkillsToSubset 三重与守卫：仅「daemon 技能库清单内」目录可裁——fixture
++    // skill-a/b 必须登记为本机技能库才可删（2026-10-26-ci-red-to-green：此前直接
++    // 读真实 ~/.sillyhub/daemon/skills，清单外目录被 unmanaged 守卫故意保留，
++    // CI/任意干净机器上必红）。daemonStateDir() 懒读 env，stub 即生效。
++    const stateDir = join(tmp, 'daemon-state');
++    await mkdir(join(stateDir, 'skills', 'skill-a'), { recursive: true });
++    await mkdir(join(stateDir, 'skills', 'skill-b'), { recursive: true });
++    vi.stubEnv('SILLYHUB_DAEMON_DIR', stateDir);
+     const infoSpy = vi.spyOn(console, 'info').mockImplementation(() => {});
+     const { daemon, client, wsClientMock } = buildDaemon({ sessionManager });
+ 
+@@ -1045,6 +1053,7 @@ describe('task-03: interactive skillsStep 档案技能裁剪', () => {
+         true,
+       );
+     } finally {
++      vi.unstubAllEnvs();
+       infoSpy.mockRestore();
+       await rm(tmp, { recursive: true, force: true }).catch(() => undefined);
+       await daemon.stop();
+@@ -1104,6 +1113,11 @@ describe('task-03(补): interactive skillsStep 非空子集', () => {
+     const skillsDir = join(tmp, '.claude', 'skills');
+     await mkdir(join(skillsDir, 'skill-a'), { recursive: true });
+     await mkdir(join(skillsDir, 'skill-b'), { recursive: true });
++    // 同上：fixture 登记进本机技能库（unmanaged 守卫只放行清单内目录）。
++    const stateDir = join(tmp, 'daemon-state');
++    await mkdir(join(stateDir, 'skills', 'skill-a'), { recursive: true });
++    await mkdir(join(stateDir, 'skills', 'skill-b'), { recursive: true });
++    vi.stubEnv('SILLYHUB_DAEMON_DIR', stateDir);
+     const { daemon, client, wsClientMock } = buildDaemon({ sessionManager });
+     try {
+       await daemon.start();
+@@ -1138,6 +1152,7 @@ describe('task-03(补): interactive skillsStep 非空子集', () => {
+       expect(remaining).toContain('skill-a');
+       expect(remaining).not.toContain('skill-b');
+     } finally {
++      vi.unstubAllEnvs();
+       await rm(tmp, { recursive: true, force: true }).catch(() => undefined);
+       await daemon.stop();
+     }
+diff --git a/sillyhub-daemon/tests/daemon-status-root-persistence.test.ts b/sillyhub-daemon/tests/daemon-status-root-persistence.test.ts
+index 16cb8bb1d..a5f1ea704 100644
+--- a/sillyhub-daemon/tests/daemon-status-root-persistence.test.ts
++++ b/sillyhub-daemon/tests/daemon-status-root-persistence.test.ts
+@@ -80,7 +80,10 @@ async function buildDaemon(): Promise<InstanceType<
+   };
+   return new Daemon(config as never, {} as never, null as never, {
+     sessionManager: null,
+-    sillyspecManager: {} as never,
++    // clearStatusProbeEviction：2026-10-22-sillyspec-probe-db-missing-evict 起
++    // _noteSillySpecStatusRoot 会调它清 db_missing 淘汰标记——mock 补 no-op
++    // （2026-10-26-ci-red-to-green：空对象 mock 在 CI 实跑 TypeError 致 5 用例红）。
++    sillyspecManager: { clearStatusProbeEviction: () => {} } as never,
+   }) as never;
+ }
+ 
+diff --git a/sillyhub-daemon/tests/interactive/session-thinking-level.test.ts b/sillyhub-daemon/tests/interactive/session-thinking-level.test.ts
+index 4db434297..70b028681 100644
+--- a/sillyhub-daemon/tests/interactive/session-thinking-level.test.ts
++++ b/sillyhub-daemon/tests/interactive/session-thinking-level.test.ts
+@@ -645,6 +645,9 @@ function buildWiringDaemon(opts: { sessionManager: SessionManagerType }) {
+       agent_run_id: 'run-default',
+       claude_md: '',
+     })),
++    // turn_phase 上报（2026-10-26-session-stage-progress）：真实 HubClient 面含此
++    // 方法（hub-client.ts notifyTurnPhase），创建链各阶段点会调——mock 镜像真实面。
++    notifyTurnPhase: vi.fn(async () => ({})),
+     close: vi.fn(),
+   };
+   const taskRunner = {
+diff --git a/sillyhub-daemon/tests/interactive/task-lifecycle.test.ts b/sillyhub-daemon/tests/interactive/task-lifecycle.test.ts
+index 11faf4371..23269ad8b 100644
+--- a/sillyhub-daemon/tests/interactive/task-lifecycle.test.ts
++++ b/sillyhub-daemon/tests/interactive/task-lifecycle.test.ts
+@@ -288,6 +288,25 @@ function taskLineCalls(h: Harness) {
+   );
+ }
+ 
++/**
++ * onTurnMessage 非「控制旁路」调用（透传断言用）。合法旁路两类，逐型排除、
++ * 不放宽为白名单制（2026-10-26-ci-red-to-green）：
++ * - channel='session_header'：create 生命周期快照旁路（2026-10-25-trajectory-source-model 先例）；
++ * - type='turn_phase_report'：turn_phase 上报桥消息（2026-10-26-session-stage-progress
++ *   D-013④——session-manager 每 envelope 无状态直发、去重在 daemon 层拦截分支，
++ *   单测直击本 mock 故按型排除；同 session_header 收窄先例）。
++ */
++function passthroughCalls(h: Harness) {
++  return h.deps.onTurnMessage.mock.calls.filter(
++    ([, , m]) => {
++      const msg = m as { channel?: string; type?: string } | undefined;
++      if (msg?.channel === 'session_header') return false;
++      if (msg?.type === 'turn_phase_report') return false;
++      return true;
++    },
++  );
++}
++
+ /** 解析一条 [TASK_*] 行：前缀 + 单行 JSON 载荷。 */
+ function parseTaskLine(call: unknown[]) {
+   const [sid, rid, msg] = call as [
+@@ -491,14 +510,10 @@ describe('task-lifecycle FR-01/FR-03 — task_started→task_progress×3→task_
+ 
+     // system/task_* 拦截后不透传：onTurnMessage 的 TASK 流调用即上述 3 条
+     // [TASK_*] 行（2026-10-25-trajectory-source-model 起另有 session_header
+-    // 快照旁路消息——非 TASK 流，过滤后断言，测试意图收窄到 TASK 落行）。
+-    expect(
+-      h.deps.onTurnMessage.mock.calls.filter(
+-        ([, , m]) =>
+-          !(m as { channel?: string } | undefined)?.channel ||
+-          (m as { channel?: string }).channel !== 'session_header',
+-      ),
+-    ).toHaveLength(3);
++    // 快照旁路消息——非 TASK 流；2026-10-26-session-stage-progress 起另有
++    // turn_phase_report 上报桥消息——同属控制旁路，passthroughCalls 逐型排除，
++    // 测试意图收窄到 TASK 落行）。
++    expect(passthroughCalls(h)).toHaveLength(3);
+   });
+ });
+ 
+@@ -664,13 +679,10 @@ describe('task-lifecycle FR-01 — task_started 注册口径', () => {
+     );
+     expect(taskEventCalls(h)).toHaveLength(0);
+     expect(taskLineCalls(h)).toHaveLength(0);
+-    // 也不透传（session_header 快照旁路消息除外——create 生命周期合法旁路，
+-    // 2026-10-25-trajectory-source-model）。
+-    expect(
+-      h.deps.onTurnMessage.mock.calls.filter(
+-        ([, , m]) => (m as { channel?: string } | undefined)?.channel !== 'session_header',
+-      ),
+-    ).toHaveLength(0);
++    // 也不透传（session_header 快照旁路与 turn_phase_report 上报桥消息除外——
++    // 两类 create/事件生命周期合法旁路，passthroughCalls 逐型排除，
++    // 2026-10-25-trajectory-source-model / 2026-10-26-session-stage-progress）。
++    expect(passthroughCalls(h)).toHaveLength(0);
+   });
+ });
+ 
+diff --git a/sillyhub-daemon/tests/spec-transport-tar-sync/daemon-interactive-spec-sync.test.ts b/sillyhub-daemon/tests/spec-transport-tar-sync/daemon-interactive-spec-sync.test.ts
+index c935e275f..0f1699b61 100644
+--- a/sillyhub-daemon/tests/spec-transport-tar-sync/daemon-interactive-spec-sync.test.ts
++++ b/sillyhub-daemon/tests/spec-transport-tar-sync/daemon-interactive-spec-sync.test.ts
+@@ -47,7 +47,13 @@ const specSyncMocks = vi.hoisted(() => ({
+     },
+   ),
+ }));
+-vi.mock('../../src/spec-sync.js', () => ({
++vi.mock('../../src/spec-sync.js', async (importOriginal) => ({
++  // importOriginal 兜底（2026-10-26-ci-red-to-green）：daemon.ts/task-runner.ts 从
++  // 本模块导入 7 个导出（含 readLocalSpecVersion/shouldRefreshSpec/bumpLocalSpecVersion
++  // /hasUnsyncedLocalChanges），工厂白名单制漏一个即「No export is defined on the
++  // mock」运行时抛（heartbeat_failed 实证）——展开真实模块再覆盖 spy，未来新增
++  // 导出零漂移。
++  ...(await importOriginal<Record<string, unknown>>()),
+   pullSpecBundle: specSyncMocks.pullSpecBundle,
+   postSpecSync: specSyncMocks.postSpecSync,
+   resolveSpecDir: specSyncMocks.resolveSpecDir,
+@@ -152,6 +158,10 @@ function createMockClient(overrides: Partial<MockClient> = {}): MockClient {
+     })),
+     notifyRunResult: vi.fn(async () => ({})),
+     notifySessionEnd: vi.fn(async () => ({})),
++    // turn_phase 上报（2026-10-26-session-stage-progress）：真实 HubClient 面含此
++    // 方法（hub-client.ts notifyTurnPhase），mock 缺失会让 reportTurnPhase 的
++    // 属性访问同步抛（源码侧已加 try/catch 兜底，mock 仍镜像真实面以测正常路径）。
++    notifyTurnPhase: vi.fn(async () => ({})),
+     getSpecBundle: vi.fn(async () => Buffer.alloc(0)),
+     postSpecSync: vi.fn(async () => ({ ok: true, reparsed: 0 })),
+     close: vi.fn(),

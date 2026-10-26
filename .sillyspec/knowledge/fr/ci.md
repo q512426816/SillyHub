@@ -29,3 +29,55 @@ created_at: 2026-10-15T08:08:54.577Z
 摘要：主路径
 全文：.sillyspec/changes/archive/2026-10-11-backend-ci-golden-fixture-path/requirements.md#FR-03
 最近确认：4892540870bff8d45997995ad89d60eb9ed323ed
+
+## FR-ci-001 e2e-ci workflow 的 PG service 必须使用含 pgvector 扩展的镜像，迁移链可完整执行
+变更：2026-10-26-ci-red-to-green
+状态：active
+摘要：主路径
+全文：.sillyspec/changes/archive/2026-10-26-ci-red-to-green/requirements.md#FR-01
+最近确认：fa5a6fe1108b468f037a94263c1adb76f2e62dc6
+
+## FR-ci-002 daemon 11 个失败用例必须修复——turn_phase 上报不得中断会话创建链，测试夹具须与新源码导出面同步
+变更：2026-10-26-ci-red-to-green
+状态：active
+摘要：主路径；夹具同步
+全文：.sillyspec/changes/archive/2026-10-26-ci-red-to-green/requirements.md#FR-02
+最近确认：fa5a6fe1108b468f037a94263c1adb76f2e62dc6
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-26-ci-red-to-green:flow:测试绑定FR-02
+  tests: sillyhub-daemon/tests/interactive/session-thinking-level.test.ts「claim payload snake_case thinking_level → CreateSessionInput.thinkingLevel」 | sillyhub-daemon/tests/interactive/task-lifecycle.test.ts「FR-03 落行：[TASK_STARTED]/[TASK_PROGRESS]/[TASK_NOTIFICATION] flat 行（前缀+单行 JSON task_name 键 + parent_tool_use_id）」 | sillyhub-daemon/tests/spec-transport-tar-sync/daemon-interactive-spec-sync.test.ts「B1: tar 模式 _startInteractiveSession 调 pullSpecBundle，且 await 先于 _sessionManager.create」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-26-ci-red-to-green
+  status: active
+
+## FR-ci-003 frontend CI 5 个失败文件必须根因定位并修复——CI 同条件复刻跑必须全绿
+变更：2026-10-26-ci-red-to-green
+状态：active
+摘要：主路径
+全文：.sillyspec/changes/archive/2026-10-26-ci-red-to-green/requirements.md#FR-03
+最近确认：fa5a6fe1108b468f037a94263c1adb76f2e62dc6
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-26-ci-red-to-green:flow:测试绑定FR-03
+  tests: frontend/src/components/sessions/__tests__/sessions-portal.test.tsx「同机器同智能体再次「＋」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-26-ci-red-to-green
+  status: active
+
+## FR-ci-004 修复推送后 GitHub Actions 四条 workflow 必须全绿
+变更：2026-10-26-ci-red-to-green
+状态：active
+摘要：主路径
+全文：.sillyspec/changes/archive/2026-10-26-ci-red-to-green/requirements.md#FR-04
+最近确认：fa5a6fe1108b468f037a94263c1adb76f2e62dc6
