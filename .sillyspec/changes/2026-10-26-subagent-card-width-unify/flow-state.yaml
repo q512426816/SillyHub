@@ -1,0 +1,26 @@
+tier: thin
+legacy_fallback: false
+substeps: {}
+born_face: thin
+with_tasks: false
+review_force: null
+input: |-
+  子代理卡片与工具卡限宽统一补漏
+  动机：用户反馈宽度统一改动后，子代理卡片、进度视图工具调用卡等组件仍铺满整行，与 2026-10-25-session-tab-visual-unify 建立的 max-w-[calc(100%-120px)] 限宽规范不一致。
+  成功标准：
+  - SubagentBlockView 两分支根容器（panel 紧凑卡片与纯展示）限宽统一为 max-w-[calc(100%-120px)]，不再铺满整行
+  - 进度视图工具调用卡（工具段容器）等 agent 侧信息块同步限宽，与文本段左对齐
+  - 既有相关测试全绿，宽度断言同步更新
+autopilot: false
+prestage_ack: false
+baseline_commit: f8d6db60af6d40416709c57f4719802dbc28ace5
+updatedAt: '2026-10-26T07:32:43.065Z'
+cross_baselines:
+  sillyspec: 67e50bcca2adb9ecd502d12086c0ac8cb994da84
+baseline_sha256: eaf8d2815508577cb52e2eba28edde70888c6bcfdbab8e9787101813b459d4a9
+spec_approved: true
+spec_approved_at: '2026-10-26T07:32:43.065Z'
+spec_approved_by: anon@DESKTOP-HJ0AM09
+spec_approved_channel: unattested
+spec_attested_by: null
+
