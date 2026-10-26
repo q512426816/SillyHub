@@ -39,8 +39,13 @@ test("文件变更卡：折叠 / 展开 / 降级三态与 100 文件内滚", asy
   await expect(page.getByTestId("file-changes-card")).toHaveCount(3);
   const first = page.getByTestId("file-changes-card").nth(0);
   await expect(first.getByText("8 个文件变更")).toBeVisible();
-  await expect(first.getByText("+226", { exact: true })).toBeVisible();
-  await expect(first.getByText("−8", { exact: true })).toBeVisible();
+  // 数字断言走 header innerText（2026-10-26-ci-red-to-green）：分组头部两段
+  // （本轮AGENT/总共）在该种子下 adds 恰好同为 +226（shell 文件 adds=0），
+  // getByText 即便 exact 也命中双元素 strict violation—— containment 断言
+  // 不受多段同值影响（与下方第三卡 innerText 用法同款）。
+  const firstHeaderText = await first.getByTestId("file-changes-header").innerText();
+  expect(firstHeaderText).toContain("+226");
+  expect(firstHeaderText).toContain("−8");
   await expect(first).toHaveAttribute("data-expanded", "false");
   await expect(first.getByTestId("file-changes-row")).toHaveCount(0);
 
