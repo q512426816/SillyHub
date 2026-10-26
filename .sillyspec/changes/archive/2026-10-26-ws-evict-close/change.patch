@@ -1,0 +1,117 @@
+diff --git a/backend/app/modules/daemon/tests/test_ws_hub.py b/backend/app/modules/daemon/tests/test_ws_hub.py
+index a3bb39f03..1d0a78744 100644
+--- a/backend/app/modules/daemon/tests/test_ws_hub.py
++++ b/backend/app/modules/daemon/tests/test_ws_hub.py
+@@ -325,6 +325,89 @@ class TestSlowConnectionEviction:
+         assert result is False
+         assert hub.is_connected(rid) is False
+ 
++    # 2026-10-26-ws-evict-close：逐出必须对旧 socket 主动 close——否则 daemon
++    # 侧 TCP 连接仍在（ping/pong 正常）永不感知、永不重连，backend 路由表缺口
++    # 持续到重启（2026-10-26 生产事故实证：15min 全部 session_inject 判死）。
++
++    @pytest.mark.asyncio
++    async def test_evicted_socket_gets_closed_on_timeout(self) -> None:
++        """Timeout eviction must actively close the evicted socket (code=4000)."""
++        hub = DaemonWsHub()
++        rid = uuid.uuid4()
++
++        ws = AsyncMock()
++        ws.send_json = AsyncMock(side_effect=TimeoutError())
++        ws.close = AsyncMock()
++
++        await hub.connect(rid, ws)
++        result = await hub.send_to_runtime(rid, {"type": "test"})
++
++        assert result is False
++        ws.close.assert_awaited_once()
++        assert ws.close.await_args.kwargs.get("code") == 4000
++
++    @pytest.mark.asyncio
++    async def test_evicted_socket_gets_closed_on_send_error(self) -> None:
++        """Exception eviction must actively close the evicted socket (code=4000)."""
++        hub = DaemonWsHub()
++        rid = uuid.uuid4()
++
++        ws = AsyncMock()
++        ws.send_json = AsyncMock(side_effect=RuntimeError("connection reset"))
++        ws.close = AsyncMock()
++
++        await hub.connect(rid, ws)
++        result = await hub.send_to_runtime(rid, {"type": "test"})
++
++        assert result is False
++        ws.close.assert_awaited_once()
++        assert ws.close.await_args.kwargs.get("code") == 4000
++
++    @pytest.mark.asyncio
++    async def test_close_failure_does_not_break_eviction(self) -> None:
++        """close itself failing must not break eviction semantics (best-effort)."""
++        hub = DaemonWsHub()
++        rid = uuid.uuid4()
++
++        ws = AsyncMock()
++        ws.send_json = AsyncMock(side_effect=TimeoutError())
++        ws.close = AsyncMock(side_effect=RuntimeError("transport already closed"))
++
++        await hub.connect(rid, ws)
++        result = await hub.send_to_runtime(rid, {"type": "test"})
++
++        assert result is False
++        assert hub.is_connected(rid) is False
++        ws.close.assert_awaited_once()
++
++    @pytest.mark.asyncio
++    async def test_evict_identity_check_spares_reconnected_new_socket(self) -> None:
++        """_evict_stale on a replaced socket must not close either socket.
++
++        快速重连：connect 换新 ws 后，旧 ws 触发的逐出（身份校验不过）既不清表、
++        也不追加 close——新连接无辜；旧 ws 此前已被 connect 替换路径关闭
++        （"replaced" 先例），本断言对比基准次数排除该既有关闭的干扰。
++        """
++        hub = DaemonWsHub()
++        rid = uuid.uuid4()
++        old_ws = _make_mock_ws()
++        new_ws = _make_mock_ws()
++        old_ws.send_json = AsyncMock(side_effect=TimeoutError())
++        old_ws.close = AsyncMock()
++        new_ws.close = AsyncMock()
++
++        await hub.connect(rid, old_ws)
++        await hub.connect(rid, new_ws)  # 替换注册（connect 内已 close 旧 ws）
++        replaced_close_count = old_ws.close.await_count
++
++        result = await hub._evict_stale(rid, old_ws)
++
++        assert result is False
++        assert hub.is_connected(rid) is True
++        assert hub._connections.get(rid) is new_ws
++        assert old_ws.close.await_count == replaced_close_count
++        new_ws.close.assert_not_awaited()
++
+ 
+ # ── Broadcast ───────────────────────────────────────────────────────────────
+ 
+diff --git a/backend/app/modules/daemon/ws_hub.py b/backend/app/modules/daemon/ws_hub.py
+index 0aaec224f..da5dfa25c 100644
+--- a/backend/app/modules/daemon/ws_hub.py
++++ b/backend/app/modules/daemon/ws_hub.py
+@@ -156,6 +156,18 @@ class DaemonWsHub:
+                 return False
+             self._connections.pop(daemon_id, None)
+ 
++        # 2026-10-26-ws-evict-close：逐出必须对旧 socket 主动 close。仅从路由
++        # 表 pop 时 daemon 侧 TCP 连接仍在（其 ping/pong 正常），daemon 永不感
++        # 知、永不重连，路由表缺口会一直持续到 backend 重启（2026-10-26 生产
++        # 事故实证：15min 内该 daemon 全部 session_inject 判死）。close(4000)
++        # 触发 daemon 既有 close→退避重连路径，路由表秒级自愈；与 connect()
++        # 替换路径的 close(code=4000, "replaced") 同款语义。best-effort：socket
++        # 已死时 close 抛错吞掉，不影响逐出结果。
++        try:
++            await ws.close(code=4000, reason="evicted")
++        except Exception:
++            pass
++
+         # 真正逐出旧连接：取消该 daemon 在途 RPC（awaiters 收 DaemonRuntimeOffline，
+         # 仅本 daemon 的调用——ql-20260903-015 绑定语义）。
+         await self.cancel_pending_for_daemon(daemon_id)

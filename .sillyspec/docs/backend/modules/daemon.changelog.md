@@ -76,3 +76,4 @@ created_at: 2026-08-29 22:56:30
 | 2026-10-25 | 2026-10-25-trajectory-source-model | 2026-10-25-trajectory-source-model |
 | 2026-10-25 | 2026-10-25-session-git-worktree-root | 会话 git 分支指示项感知 sillyspec 工作树 |
 | 2026-10-26 | 2026-10-26-turn-phase-prod-fix | 阶段上报生产断链修复与观测补盲。背景:阶段化进度功能(2026-10-26-session-stag… |
+| 2026-10-26 | 2026-10-26-ws-evict-close | 修复WS逐出不关socket致daemon假活不重连 |

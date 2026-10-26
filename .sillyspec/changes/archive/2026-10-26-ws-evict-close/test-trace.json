@@ -1,0 +1,56 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-26-ws-evict-close",
+  "rows": [
+    {
+      "anchor": "FR-01",
+      "row_id": "2026-10-26-ws-evict-close:flow:测试绑定FR-01",
+      "tests": [
+        "backend/app/modules/daemon/tests/test_ws_hub.py「TestSlowConnectionEviction::test_close_failure_does_not_break_eviction」",
+        "backend/app/modules/daemon/tests/test_ws_hub.py「TestSlowConnectionEviction::test_evicted_socket_gets_closed_on_send_error」",
+        "backend/app/modules/daemon/tests/test_ws_hub.py「TestSlowConnectionEviction::test_evicted_socket_gets_closed_on_timeout」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-26-ws-evict-close"
+    },
+    {
+      "anchor": "FR-02",
+      "row_id": "2026-10-26-ws-evict-close:flow:测试绑定FR-02",
+      "tests": [
+        "backend/app/modules/daemon/tests/test_ws_hub.py「TestSlowConnectionEviction::test_evict_identity_check_spares_reconnected_new_socket」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-26-ws-evict-close"
+    },
+    {
+      "anchor": "FR-03",
+      "row_id": "2026-10-26-ws-evict-close:flow:测试绑定FR-03",
+      "tests": [
+        "backend/app/modules/daemon/tests/test_ws_hub.py",
+        "backend/app/modules/daemon/tests/test_ws_hub_permission.py",
+        "backend/app/modules/daemon/tests/test_ws_hub_policy.py",
+        "backend/app/modules/daemon/tests/test_ws_hub_session_control.py"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-26-ws-evict-close"
+    }
+  ]
+}

@@ -8345,3 +8345,68 @@
   confirmed_at: null
   source_change: 2026-10-26-turn-phase-prod-fix
   status: active
+
+## FR-daemon-304 send 超时逐出与异常逐出路径均对旧 socket 主动 close（code=4000），daemon 侧可感知断线并重连
+变更：2026-10-26-ws-evict-close
+状态：active
+摘要：超时逐出触发主动关闭；异常逐出触发主动关闭；close 本身失败不反噬逐出
+场景正文：
+- 场景：超时逐出触发主动关闭 — Given 某 daemon 连接已注册且其 `send_json` 抛 `TimeoutError`，When `send_to_runtime` 执行完毕，Then 返
+- 场景：异常逐出触发主动关闭 — Given 某 daemon 连接已注册且其 `send_json` 抛一般异常（如 `RuntimeError`），When `send_to_runtime` 执行完毕
+- 场景：close 本身失败不反噬逐出 — Given 被逐出 ws 的 `close` 方法抛异常，When 逐出路径执行完毕，Then 异常被吞掉（不向上传播）、逐出结果与既有语义完全一致。
+全文：.sillyspec/changes/archive/2026-10-26-ws-evict-close/requirements.md#FR-01
+最近确认：97d4780904d3f99be61dc78d641f6e34ee291707
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-26-ws-evict-close:flow:测试绑定FR-01
+  tests: backend/app/modules/daemon/tests/test_ws_hub.py「TestSlowConnectionEviction::test_close_failure_does_not_break_eviction」 | backend/app/modules/daemon/tests/test_ws_hub.py「TestSlowConnectionEviction::test_evicted_socket_gets_closed_on_send_error」 | backend/app/modules/daemon/tests/test_ws_hub.py「TestSlowConnectionEviction::test_evicted_socket_gets_closed_on_timeout」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-26-ws-evict-close
+  status: active
+
+## FR-daemon-305 逐出 close 仅作用于被逐出的旧连接对象，不误伤并发重连的新连接（对象身份校验）
+变更：2026-10-26-ws-evict-close
+状态：active
+摘要：身份校验放过新连接
+场景正文：
+- 场景：身份校验放过新连接 — Given 路由表中某 daemon_id 的连接已被 new_ws 替换，When 以 old_ws 触发 `_evict_stale`，Then 返回 False、ne
+全文：.sillyspec/changes/archive/2026-10-26-ws-evict-close/requirements.md#FR-02
+最近确认：97d4780904d3f99be61dc78d641f6e34ee291707
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-26-ws-evict-close:flow:测试绑定FR-02
+  tests: backend/app/modules/daemon/tests/test_ws_hub.py「TestSlowConnectionEviction::test_evict_identity_check_spares_reconnected_new_socket」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-26-ws-evict-close
+  status: active
+
+## FR-daemon-306 现有 ws_hub 相关测试全绿
+变更：2026-10-26-ws-evict-close
+状态：active
+摘要：主路径
+场景正文：
+- 场景：主路径 — Given 既有 ws_hub 四个测试文件，When 全量执行，Then 全部用例通过、无新增失败。
+全文：.sillyspec/changes/archive/2026-10-26-ws-evict-close/requirements.md#FR-03
+最近确认：97d4780904d3f99be61dc78d641f6e34ee291707
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-26-ws-evict-close:flow:测试绑定FR-03
+  tests: backend/app/modules/daemon/tests/test_ws_hub.py | backend/app/modules/daemon/tests/test_ws_hub_permission.py | backend/app/modules/daemon/tests/test_ws_hub_policy.py | backend/app/modules/daemon/tests/test_ws_hub_session_control.py
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-26-ws-evict-close
+  status: active

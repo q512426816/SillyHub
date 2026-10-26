@@ -1,0 +1,15 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-26-ws-evict-close",
+  "reviewer": "subagent",
+  "verdict": "PASS",
+  "reviewedAgainst": "97d4780904d3f99be61dc78d641f6e34ee291707",
+  "findings": [],
+  "dimensionNotes": {
+    "乱序": "边界已裁决：可接受 —— close 作用于被 pop 的旧 ws 对象引用本身（ws_hub.py:167 用参数 ws 而非路由表回查），与 daemon 并发重连的新 connect 竞态安全；「恢复延迟依赖 daemon 既有 1-30s 退避重连、非即时」为显式声明的交付语义边界，优于现状（永不自愈、持续到重启）。",
+    "并发": "边界已裁决：可接受 —— 身份校验+pop 在 _lock 内、close 在锁外 try/except 吞一切异常（best-effort 声明属实）；「close 理论可悬挂、不加超时」取舍与同文件 connect() replaced 先例（ws_hub.py:102-105）风险面一致，且 pop 先于 close，路由表自愈不被潜在悬挂阻塞。",
+    "切换": "ok —— 沿用 D-004@v1/R4 既有对象身份判定结构，close 仅追加在身份校验通过且 pop 成功的分支；_schedule_offline_downgrade 挂载点与 ws_daemon_disconnected 日志事件均未变（ws_hub.py:174-180）。",
+    "作用域": "ok —— 单 backend 实例内存路由表，无跨工作区数据面；close 只触达被逐出的单条连接对象，不广播、不串台。"
+  },
+  "reviewedAt": "2026-10-26T23:07:31+08:00"
+}
