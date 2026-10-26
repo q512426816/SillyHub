@@ -1,0 +1,72 @@
+{
+  "change": "2026-10-26-worktree-group-collapse",
+  "baseline": "67fb83be3edf37fdd128201ac3efa3af4892e3f6",
+  "head": "01714da0c91b515bd6e12b0c4a02ae2cc9ae2401",
+  "files": [
+    "frontend/src/components/git-log/__tests__/worktree-changes-card.test.tsx",
+    "frontend/src/components/git-log/worktree-changes-card.tsx"
+  ],
+  "totals": {
+    "files": 2,
+    "additions": 140,
+    "deletions": 33
+  },
+  "savedAt": "2026-10-26T01:21:05.757Z",
+  "note": "flow done 时点冻结（本变更可归属交付面：baseline..HEAD 提交面过滤 .sillyspec/ 只留 .sillyspec/docs/ 交付文档 + 独占树未提交交付；治理工件目录不入冻结——2026-10-12-close-trace-freeze-integrity FR-01）",
+  "modules": [
+    {
+      "id": "frontend",
+      "files": 2,
+      "doc": "docs/multi-agent-platform/modules/frontend.md",
+      "docTouched": false,
+      "docMissing": false
+    },
+    {
+      "id": "frontend_components",
+      "files": 2,
+      "doc": "docs/SillyHub/modules/frontend_components.md",
+      "docTouched": false,
+      "docMissing": false
+    }
+  ],
+  "uncoveredDirs": [],
+  "moduleMaps": [
+    "docs/backend/modules/_module-map.yaml",
+    "docs/frontend/modules/_module-map.yaml",
+    "docs/multi-agent-platform/modules/_module-map.yaml",
+    "docs/SillyHub/modules/_module-map.yaml",
+    "docs/sillyhub-daemon/modules/_module-map.yaml"
+  ],
+  "scopeAudit": {
+    "mode": "full-flow",
+    "ok": true,
+    "degradedReason": null,
+    "baseAnchor": "67fb83be3edf37fdd128201ac3efa3af4892e3f6",
+    "totals": {
+      "files": 2,
+      "additions": 140,
+      "deletions": 33
+    },
+    "rows": [
+      {
+        "path": "frontend/src/components/git-log/__tests__/worktree-changes-card.test.tsx",
+        "additions": 44,
+        "deletions": 3,
+        "kind": "modified"
+      },
+      {
+        "path": "frontend/src/components/git-log/worktree-changes-card.tsx",
+        "additions": 96,
+        "deletions": 30,
+        "kind": "modified"
+      }
+    ],
+    "excluded": {
+      "foreignDeclared": []
+    },
+    "note": "flow done 时点冻结（本文件落盘时采集）",
+    "closedBy": "flow done"
+  },
+  "patchSha256": "f037f762a2c662050622d7e60a1eb453ba0cf9d4b3634908a2a77d623c6e335e",
+  "patchStatus": "ok"
+}

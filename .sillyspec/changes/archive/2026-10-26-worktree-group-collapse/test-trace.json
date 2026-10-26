@@ -1,0 +1,51 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-26-worktree-group-collapse",
+  "rows": [
+    {
+      "anchor": "FR-01",
+      "row_id": "2026-10-26-worktree-group-collapse:flow:测试绑定FR-01",
+      "tests": [
+        "frontend/src/components/git-log/__tests__/worktree-changes-card.test.tsx「分组折叠：untracked/ignored 默认收起、更改默认展开、点击切换」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-26-worktree-group-collapse"
+    },
+    {
+      "anchor": "FR-02",
+      "row_id": "2026-10-26-worktree-group-collapse:flow:测试绑定FR-02",
+      "tests": [
+        "frontend/src/components/git-log/__tests__/worktree-changes-card.test.tsx「分组折叠：untracked/ignored 默认收起、更改默认展开、点击切换」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-26-worktree-group-collapse"
+    },
+    {
+      "anchor": "FR-03",
+      "row_id": "2026-10-26-worktree-group-collapse:flow:测试绑定FR-03",
+      "tests": [
+        "frontend/src/components/git-log/__tests__/worktree-changes-card.test.tsx"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-26-worktree-group-collapse"
+    }
+  ]
+}

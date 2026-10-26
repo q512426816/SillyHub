@@ -1,0 +1,29 @@
+{
+  "schemaVersion": 1,
+  "reviewer": "self",
+  "verdict": "PASS",
+  "reviewedAgainst": "01714da0c91b515bd6e12b0c4a02ae2cc9ae2401",
+  "findings": [
+    {
+      "severity": "P3",
+      "status": "accepted",
+      "title": "更改组头行内含「对比基线：最近一次提交 <sha>」文案，点击基线文案也会触发折叠",
+      "evidence": "基线说明从原独立 div 移入 toggle 按钮内（worktree-changes-card.tsx 更改组头），整行可点是既有目录行同款交互惯例，误触成本低（再点即恢复）",
+      "location": "frontend/src/components/git-log/worktree-changes-card.tsx:402"
+    },
+    {
+      "severity": "P3",
+      "status": "resolved",
+      "title": "默认收起后用户可能找不到 untracked/ignored 内容",
+      "evidence": "收起态头行右缘显示该组计数（N 个文件 / N 项）+ ChevronRight 旋转箭头可展开提示，信息量不丢失",
+      "location": "frontend/src/components/git-log/worktree-changes-card.tsx:437"
+    }
+  ],
+  "dimensionNotes": {
+    "乱序": "ok",
+    "并发": "ok",
+    "切换": "ok",
+    "作用域": "ok"
+  },
+  "reviewedAt": "2026-10-26T09:21:21+08:00"
+}

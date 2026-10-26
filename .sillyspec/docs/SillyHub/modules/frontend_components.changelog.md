@@ -163,3 +163,4 @@ created_at: 2026-08-30 22:23:33
 | 2026-10-25 | 2026-10-25-marquee-awaiting-real-data | 跑马灯等待条目接入真实计时与token |
 | 2026-10-25 | 2026-10-25-session-git-worktree-root | 会话 git 分支指示项感知 sillyspec 工作树 |
 | 2026-10-25 | 2026-10-25-fe-build-unblock | 修复前端构建红态两处类型错误 |
+| 2026-10-26 | 2026-10-26-worktree-group-collapse | 用户反馈（功能上线后实测）：Git 日志页「工作区更改」卡的三个分组标题（更改/未纳入版本管理/已忽… |

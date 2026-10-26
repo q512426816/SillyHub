@@ -8058,3 +8058,66 @@ superseded_by：FR-app-workspace-pages-002
   confirmed_at: null
   source_change: 2026-10-25-subagent-card-unify-panel
   status: active
+
+## FR-frontend-077 三个分组标题可点击切换展开/收起（箭头随状态翻转，带 aria-expanded）
+变更：2026-10-26-worktree-group-collapse
+状态：active
+摘要：主路径
+场景正文：
+- 场景：主路径 — Given 卡片已渲染出至少一组内容；When 点击该组头按钮；Then 该组内容隐藏、aria-expanded=false；再次点击恢复显示、aria-expanded=true
+全文：.sillyspec/changes/archive/2026-10-26-worktree-group-collapse/requirements.md#FR-01
+最近确认：01714da0c91b515bd6e12b0c4a02ae2cc9ae2401
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-26-worktree-group-collapse:flow:测试绑定FR-01
+  tests: frontend/src/components/git-log/__tests__/worktree-changes-card.test.tsx「分组折叠：untracked/ignored 默认收起、更改默认展开、点击切换」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-26-worktree-group-collapse
+  status: active
+
+## FR-frontend-078 未纳入版本管理与已忽略默认收起、更改默认展开
+变更：2026-10-26-worktree-group-collapse
+状态：active
+摘要：主路径
+场景正文：
+- 场景：主路径 — Given 含 untracked 与 ignored 条目的工作区数据；When 卡片渲染完成（未点任何组头）；Then 更改组文件行在 DOM；untracked 行与 ignored 行不在 DOM；两组头可见且带计数
+全文：.sillyspec/changes/archive/2026-10-26-worktree-group-collapse/requirements.md#FR-02
+最近确认：01714da0c91b515bd6e12b0c4a02ae2cc9ae2401
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-26-worktree-group-collapse:flow:测试绑定FR-02
+  tests: frontend/src/components/git-log/__tests__/worktree-changes-card.test.tsx「分组折叠：untracked/ignored 默认收起、更改默认展开、点击切换」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-26-worktree-group-collapse
+  status: active
+
+## FR-frontend-079 既有 worktree-changes-card 聚焦测试按新默认态更新并全绿（仅跑该测试文件）
+变更：2026-10-26-worktree-group-collapse
+状态：active
+摘要：主路径
+场景正文：
+- 场景：主路径 — Given 本变更代码与测试更新落盘；When 运行 vitest 单文件 worktree-changes-card.test.tsx；Then 全部用例通过（14/14）
+全文：.sillyspec/changes/archive/2026-10-26-worktree-group-collapse/requirements.md#FR-03
+最近确认：01714da0c91b515bd6e12b0c4a02ae2cc9ae2401
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-26-worktree-group-collapse:flow:测试绑定FR-03
+  tests: frontend/src/components/git-log/__tests__/worktree-changes-card.test.tsx
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-26-worktree-group-collapse
+  status: active

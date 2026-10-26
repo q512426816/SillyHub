@@ -2025,3 +2025,11 @@ supersedes：D-003@v1
 理由：我的判断：该红由并行变更 subagent-card-unify-panel 已提交主仓但漏更新对应测试所致，非本变更文件；为恢复提交门可用，在收口提交 0f3bf815a 中顺带对齐断言（20/20 绿），commit message 留痕
 故障面：顺手修复与变更主体混于同一提交，追溯需读 commit message
 退役判据：无（一次性修复留痕）
+
+## D-unmapped-256@v1 设计期风险与放弃方案（底稿）
+状态：implemented
+变更：2026-10-26-worktree-group-collapse
+原编号：D-001@v1
+锚点：未记录
+最近确认：01714da0c91b515bd6e12b0c4a02ae2cc9ae2401
+理由：最大风险：默认收起后用户找不到 untracked/ignored 内容——已用收起态头行计数（N 个文件/N 项）+ 旋转箭头提示可展开缓解。试过放弃：把三组并成 Tab 切换（放弃——破坏三组同屏对照，IDEA 参照形态就是纵向分组树）。
