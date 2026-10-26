@@ -1,0 +1,21 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-26-push-skill-docs",
+  "reviewer": "inline-self（环境无已注册子代理，主会话代行）",
+  "verdict": "PASS",
+  "reviewedAgainst": "a02cfdce546116b079b6df27d6db3c137402cb12",
+  "findings": [],
+  "dimensionNotes": {
+    "乱序": "n/a",
+    "并发": "ok",
+    "切换": "n/a",
+    "作用域": "ok"
+  },
+  "checklistNotes": {
+    "FR对账": "FR-01 push 技能文件存在且含 frontmatter+用法/流程/模式与守卫/绝对规则各节，命令 flag 与 sillyspec push --help 输出一致（--mode/--dry-run/--no-push/--undo/--remote/--branch/--json 全部存在）；FR-02 config SKILL.md:44 起新增知识注入作用域节，scope: always 标记语法与 sillyspec knowledge scope 自查入口在文；FR-03 提交 8411fc090 恰含两文件（git show --stat 核验）",
+    "断言面": "纯文档变更零代码，无断言面可跑；ledger 文档面豁免",
+    "防护声明": "无声明边界",
+    "生成物同步": "n/a"
+  },
+  "reviewedAt": "2026-10-26T03:40:00.000Z"
+}

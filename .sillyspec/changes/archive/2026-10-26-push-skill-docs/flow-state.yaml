@@ -1,0 +1,41 @@
+tier: thin
+legacy_fallback: false
+substeps:
+  artifacts: done
+  ledger: done
+  patch: done
+  review: done
+  probes: done
+  distill: done
+  archive: done
+  events: done
+born_face: thin
+with_tasks: false
+review_force: null
+input: >-
+  推送压扁技能与知识作用域配置文档；sillyspec push（推送前压扁+快进推送）与 knowledge scope（知识恒注入作用域）为 CLI 新能力，.claude/skills 缺对应技能与配置指引——补
+  sillyspec-push 技能文档与 sillyspec-config 知识注入作用域节。
+
+
+  成功标准：
+
+  - .claude/skills/sillyspec-push/SKILL.md 存在，含 frontmatter、用法、流程（预检/确认/执行/汇报）、模式与守卫、绝对规则节，命令与 sillyspec push --help 一致
+
+  - .claude/skills/sillyspec-config/SKILL.md 新增「知识注入作用域」节：scope: always/repo/module 标记语法与 sillyspec knowledge scope 自查入口
+
+  - 两文件以显式 pathspec 提交入库
+autopilot: false
+prestage_ack: false
+baseline_commit: 3b6351440c6b308abdb95164ec56199598e80fcf
+updatedAt: '2026-10-26T03:37:41.018Z'
+cross_baselines:
+  sillyspec: 67e50bcca2adb9ecd502d12086c0ac8cb994da84
+baseline_sha256: 26ca590a2dc5ee398e3df8e3a3098e0f1c46f7057465590d5b2ae9f13779f872
+spec_approved: true
+spec_approved_at: '2026-10-26T03:36:30.469Z'
+spec_approved_by: anon@DESKTOP-HJ0AM09
+spec_approved_channel: unattested
+spec_attested_by: null
+batch_ticked: true
+gate_summary: 'test: —｜lint: —｜门文件 2 个'
+

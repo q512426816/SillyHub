@@ -41,6 +41,28 @@ description: 用于 SillySpec local.yaml 配置引导。适合用户说"配置�
    - 凭据段报缺键=两键要成对（或整段删除回退）。
    - **禁止**在 validate 未通过时向用户宣称配置完成。
 
+## 知识注入作用域（非 local.yaml——写在知识文件标记行，不改配置）
+
+> 这是「配置」之外唯一需要写的声明：让某条知识每次变更都被注入（规约/仓级约束），而不是等关键词命中。
+
+在 `knowledge/<文件>.md` 某个 section 的 heading 下方写一行 HTML 注释（无标记=关键词命中现状）：
+
+```markdown
+## 工具中立性
+<!-- scope: always -->
+不锁死开发语言/框架……
+
+## 本仓发布纪律
+<!-- scope: repo -->
+发布前必须跑锚套件……
+
+## 模块路由规则
+<!-- scope: module:cli-entry,core-engine -->
+```
+
+- `always`=每次变更恒注入（跨仓通用规约）；`repo`=本仓恒注入；`module:<域>[,<域>]`=触达该知识域时注入（域 id 与 FR 域同源）；无标记=关键词档不恒注入。
+- 查看现状/语法自查：`sillyspec knowledge scope`（纯读；空态会提示「仅关键词档在用」）；flow start 注入块以 📌 行呈现。
+
 ## 边界
 
 - 禁止写 `.sillyspec/` 之外的 local.yaml（hook 拦截）；项目根没有这个文件。

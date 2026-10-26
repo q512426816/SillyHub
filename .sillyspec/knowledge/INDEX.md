@@ -258,3 +258,4 @@
 - llm_provider → [fr/llm_provider.md](fr/llm_provider.md)
 - platform_sync → [fr/platform_sync.md](fr/platform_sync.md)
 - app-sessions-pages → [fr/app-sessions-pages.md](fr/app-sessions-pages.md)
+- auto-claude|claude → [fr/auto-claude.md](fr/auto-claude.md)
