@@ -1,0 +1,163 @@
+diff --git a/frontend/src/components/daemon/session-panel/session-panel-dialog.tsx b/frontend/src/components/daemon/session-panel/session-panel-dialog.tsx
+index 811aa1ce3..624fd156c 100644
+--- a/frontend/src/components/daemon/session-panel/session-panel-dialog.tsx
++++ b/frontend/src/components/daemon/session-panel/session-panel-dialog.tsx
+@@ -915,7 +915,14 @@ export function SessionPanelDialog(props: SessionPanelProps) {
+               if (!event.run_id || !event.phase) return;
+               setView((prev) => ({
+                 ...prev,
+-                turns: applyTurnPhase(prev.turns, event.run_id, event.phase ?? ""),
++                turns: applyTurnPhase(
++                  prev.turns,
++                  event.run_id,
++                  event.phase ?? "",
++                  // 2026-10-26-turn-phase-orphan-fallback FR-01：竞态回退——事件
++                  // 先于占位轮替换到达时写当前活跃轮。
++                  prev.currentRunId,
++                ),
+               }));
+             },
+           }),
+diff --git a/frontend/src/components/daemon/session-panel/session-panel-page.tsx b/frontend/src/components/daemon/session-panel/session-panel-page.tsx
+index 47afcc63e..3447fa53d 100644
+--- a/frontend/src/components/daemon/session-panel/session-panel-page.tsx
++++ b/frontend/src/components/daemon/session-panel/session-panel-page.tsx
+@@ -2069,7 +2069,14 @@ export function SessionPanelPage({
+             if (!event.run_id || !event.phase) return;
+             setTurnState((prev) => ({
+               ...prev,
+-              turns: applyTurnPhase(prev.turns, event.run_id, event.phase ?? ""),
++              turns: applyTurnPhase(
++                prev.turns,
++                event.run_id,
++                event.phase ?? "",
++                // 2026-10-26-turn-phase-orphan-fallback FR-01：竞态回退——事件
++                // 先于占位轮替换到达时写当前活跃轮。
++                prev.currentRunId,
++              ),
+             }));
+           },
+         }),
+diff --git a/frontend/src/components/daemon/session-panel/turn-state.ts b/frontend/src/components/daemon/session-panel/turn-state.ts
+index 79e2082fe..3749e9b19 100644
+--- a/frontend/src/components/daemon/session-panel/turn-state.ts
++++ b/frontend/src/components/daemon/session-panel/turn-state.ts
+@@ -93,13 +93,22 @@ export interface TurnPhaseState {
+ /**
+  * turn_phase 事件 → 轮状态 currentPhase 写入（last-write-wins，乱序到达按事件
+  * 序覆盖）；按 runId 归属路由（含 realRunId 匹配），未命中既有轮时**不建轮**
+- * （phase 不是轮存在性信号——轮由 turn_started/log 创建，孤 phase 丢弃）。
+- * 返回新数组（不可变更新）；未命中/无 runId 原样返回。
++ * （phase 不是轮存在性信号——轮由 turn_started/log 创建）。
++ *
++ * 2026-10-26-turn-phase-orphan-fallback FR-01/02/04：未命中时不再静默丢弃——
++ * 若 currentRunId 指向活跃轮（发送后 HTTP 响应未回、占位轮尚未换真实 run_id
++ * 的竞态窗口——事件跑赢响应被丢弃 = 生产实证卡「执行器已接收」超时的根因），
++ * 回退写入该活跃轮；无活跃轮回退不命中时维持原丢弃（断线重连迟到事件，防
++ * 幽灵轮原语义不变）。回退只认 currentRunId（单会话单活跃 run 不变式，
++ * decisions D-001 反例排查：子代理/团队/steering/排队均不构成多活跃轮），不
++ * 做模糊匹配。replacePlaceholderTurn 以对象展开保留 currentPhase（FR-03）。
++ * 返回新数组（不可变更新）；无 runId / 全程未命中原样返回。
+  */
+ export function applyTurnPhase(
+   turns: SessionTurnView[],
+   runId: string | null | undefined,
+   phase: string,
++  currentRunId?: string | null,
+ ): SessionTurnView[] {
+   if (!runId) return turns;
+   const at = Date.now();
+@@ -111,7 +120,22 @@ export function applyTurnPhase(
+     }
+     return t;
+   });
+-  return hit ? next : turns;
++  if (hit) return next;
++  // FR-01 竞态回退：事件带真实 run_id 先于占位轮替换到达 → 写当前活跃轮。
++  // FR-04：排队轮不在 currentRunId 指向内（它尚未建轮），天然不接回退事件。
++  if (currentRunId) {
++    let fallbackHit = false;
++    const fallback = turns.map((t) => {
++      if (t.runId === currentRunId) {
++        fallbackHit = true;
++        return { ...t, currentPhase: { phase, at } };
++      }
++      return t;
++    });
++    if (fallbackHit) return fallback;
++  }
++  // FR-02：无活跃轮（断线重连迟到事件等）维持丢弃，不建幽灵轮。
++  return turns;
+ }
+ 
+ /**
+diff --git a/frontend/src/lib/daemon/__tests__/session-stream-turn-phase.test.ts b/frontend/src/lib/daemon/__tests__/session-stream-turn-phase.test.ts
+index 457e0158b..8bc49d629 100644
+--- a/frontend/src/lib/daemon/__tests__/session-stream-turn-phase.test.ts
++++ b/frontend/src/lib/daemon/__tests__/session-stream-turn-phase.test.ts
+@@ -16,6 +16,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
+ import {
+   applyTurnPhase,
+   clearTurnPhase,
++  replacePlaceholderTurn,
+ } from "@/components/daemon/session-panel/turn-state";
+ import type { SessionTurnView } from "@/components/daemon/turn-timeline";
+ import type { FetchSseConnection } from "@/lib/fetch-sse";
+@@ -198,6 +199,57 @@ describe("applyTurnPhase（FR-04 / D-013①②）", () => {
+   });
+ });
+ 
++// ── orphan-fallback（2026-10-26-turn-phase-orphan-fallback FR-01/02/04）──────
++
++describe("applyTurnPhase 竞态回退（事件跑赢占位轮替换）", () => {
++  it("FR-01 未命中 run_id 时回退写入 currentRunId 指向的活跃轮", () => {
++    // 生产实证形态：占位轮 ph-1（currentRunId 指向）尚未换真实 run_id，
++    // daemon 事件（run-real）先到——原设计丢弃 = 卡「执行器已接收」根因。
++    const turns = [makeTurn("ph-1", { status: "pending" }), makeTurn("run-old")];
++    const next = applyTurnPhase(turns, "run-real", "first_event", "ph-1");
++    expect(next[0]!.currentPhase?.phase).toBe("first_event");
++    expect(next[1]!.currentPhase).toBeUndefined(); // 只写活跃轮，不波及他轮
++  });
++
++  it("FR-01 精确命中优先——回退仅未命中时生效", () => {
++    const turns = [makeTurn("run-active"), makeTurn("ph-1")];
++    const next = applyTurnPhase(turns, "ph-1", "ready", "run-active");
++    expect(next[1]!.currentPhase?.phase).toBe("ready"); // ph-1 精确命中
++    expect(next[0]!.currentPhase).toBeUndefined(); // 回退未触发
++  });
++
++  it("FR-02 无活跃轮（currentRunId 空）维持丢弃不建幽灵轮", () => {
++    const turns = [makeTurn("run-done", { status: "completed" })];
++    const next = applyTurnPhase(turns, "run-late", "ready", null);
++    expect(next).toBe(turns);
++  });
++
++  it("FR-02 currentRunId 指向轮已不在列表（终态清理后）维持丢弃", () => {
++    const turns = [makeTurn("run-1")];
++    const next = applyTurnPhase(turns, "run-late", "ready", "run-gone");
++    expect(next).toBe(turns);
++  });
++
++  it("FR-04 排队轮不接回退——事件只写活跃轮，不建排队轮", () => {
++    // 排队消息（未来 run-q）派发前不是轮：回退只落 currentRunId（run-active）。
++    const turns = [makeTurn("run-active")];
++    const next = applyTurnPhase(turns, "run-q", "inject_received", "run-active");
++    expect(next).toHaveLength(1);
++    expect(next[0]!.currentPhase?.phase).toBe("inject_received");
++  });
++
++  it("FR-03 竞态全链：回退写占位轮 → replacePlaceholderTurn 换真实 id 后 phase 保留", () => {
++    let turns = [makeTurn("ph-1", { status: "pending", prompt: "你好" })];
++    turns = applyTurnPhase(turns, "run-real", "first_event", "ph-1");
++    turns = replacePlaceholderTurn(turns, "ph-1", "run-real", "running");
++    expect(turns[0]!.runId).toBe("run-real");
++    expect(turns[0]!.currentPhase?.phase).toBe("first_event"); // spread 保留
++    // 后续事件按真实 id 精确命中，last-write-wins 继续生效。
++    turns = applyTurnPhase(turns, "run-real", "first_event", "run-real");
++    expect(turns[0]!.currentPhase?.phase).toBe("first_event");
++  });
++});
++
+ describe("clearTurnPhase（D-013③ 终态清理）", () => {
+   it("有值清 null；null/undefined 幂等原样返回", () => {
+     const withPhase = makeTurn("run-1", {

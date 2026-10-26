@@ -1,0 +1,66 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-26-turn-phase-orphan-fallback",
+  "rows": [
+    {
+      "anchor": "FR-01",
+      "row_id": "2026-10-26-turn-phase-orphan-fallback:flow:测试绑定FR-01",
+      "tests": [
+        "frontend/src/lib/daemon/__tests__/session-stream-turn-phase.test.ts「未命中 run_id 回退写 currentRunId 轮/竞态事件先于替换」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-26-turn-phase-orphan-fallback"
+    },
+    {
+      "anchor": "FR-02",
+      "row_id": "2026-10-26-turn-phase-orphan-fallback:flow:测试绑定FR-02",
+      "tests": [
+        "frontend/src/lib/daemon/__tests__/session-stream-turn-phase.test.ts「无活跃轮丢弃不建轮不写历史轮」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-26-turn-phase-orphan-fallback"
+    },
+    {
+      "anchor": "FR-03",
+      "row_id": "2026-10-26-turn-phase-orphan-fallback:flow:测试绑定FR-03",
+      "tests": [
+        "frontend/src/lib/daemon/__tests__/session-stream-turn-phase.test.ts「竞态全链：回退写占位轮→replacePlaceholderTurn 换真实 id 后 phase 保留」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-26-turn-phase-orphan-fallback"
+    },
+    {
+      "anchor": "FR-04",
+      "row_id": "2026-10-26-turn-phase-orphan-fallback:flow:测试绑定FR-04",
+      "tests": [
+        "frontend/src/lib/daemon/__tests__/session-stream-turn-phase.test.ts「排队轮不接回退事件」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-26-turn-phase-orphan-fallback"
+    }
+  ]
+}

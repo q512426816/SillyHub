@@ -1,0 +1,31 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-26-turn-phase-orphan-fallback",
+  "reviewer": "subagent",
+  "verdict": "PASS",
+  "reviewedAgainst": "a443b81eab6d0daf1ed7dc3131aaea5cd5ac73e3",
+  "findings": [
+    {
+      "severity": "P3",
+      "status": "resolved-as-accepted",
+      "title": "design 文件清单列 turn-state.test.ts（实际不存在），FR-03 锁定用例落在 requirements 绑定的 session-stream-turn-phase.test.ts",
+      "evidence": "design 文件变更清单第 3 行列为『修改 __tests__/turn-state.test.ts（FR-03；文件已存在则追加用例）』，Glob 确认该文件不存在；FR-03 锁定用例实际在 session-stream-turn-phase.test.ts『竞态全链：回退写占位轮→replacePlaceholderTurn 换真实 id 后 phase 保留』，与 requirements.md 测试绑定条目一致——需求绑定为权威，锁定存在且随套件通过，属设计清单与交付位置的微小偏差而非缺口",
+      "location": ".sillyspec/changes/2026-10-26-turn-phase-orphan-fallback/design.md:25"
+    },
+    {
+      "severity": "P3",
+      "status": "accepted",
+      "title": "回退匹配只认 t.runId===currentRunId，不复核该轮 status 活跃性——依赖状态机不变式（decisions D-001 已显式披露）",
+      "evidence": "turn-state.ts:129 按 runId 匹配不查 status；『currentRunId 只指向 pending/running/interrupting』由状态机维护（turn-state.ts:73 注释 + upsertTurn 终态 clearCurrentRun 路径），不变式成立时 FR-02『指向轮已终态则丢弃』语义兑现；该依赖在 decisions.md D-001 实现侧保险条目（『现有状态机维护，只指向 pending/running/interrupting，不做模糊匹配』）已披露，且即使不变式被破坏，爆炸半径=写错一个轮的 phase（终态 clearTurnPhase 兜底可清），不建轮不扩面——接受为已披露边界而非缺陷",
+      "location": "frontend/src/components/daemon/session-panel/turn-state.ts:129"
+    }
+  ],
+  "dimensionNotes": {
+    "乱序": "ok",
+    "并发": "ok",
+    "切换": "ok",
+    "作用域": "ok"
+  },
+  "reviewerNotes": "FR↔实现↔测试三方一致：FR-01 回退只写 currentRunId 指向轮且无扫描猜测（turn-state.ts:126-136，page:2072-2079 / dialog:918-925 双调用点均传 prev.currentRunId，测试『未命中回退』『精确命中优先』锁定）；FR-02 无活跃轮维持原引用丢弃不建幽灵轮（turn-state.ts:138，测试两用例以 toBe(turns) 锁定）；FR-03 replacePlaceholderTurn 非竞态分支 spread 保留 currentPhase（turn-state.ts:169），竞态全链用例锁定；FR-04 排队轮非轮不接回退（用例断言 length 不变且只写活跃轮）；FR-05 落盘 decisions.md D-001 五类反例排查+重评护栏条款。盲维四问与代码实态一致：乱序=last-write-wins 不变（回退写与精确命中同语义按到达序覆盖）；并发=纯函数不可变更新+React 单线程消费；切换=回退只写 currentRunId 轮、clearTurnPhase 不变、replacePlaceholderTurn 竞态分支对存活轮 spread 保留（占位轮被删时其 phase 丢弃无害——竞态分支下真实 id 轮已存在、phase 走精确命中）；作用域=按会话 SSE 频道路由、currentRunId 会话内状态机，无跨会话面。边界裁决①（前端 currentRunId 滞后窗口错写）：可接受——窗口有界（HTTP 响应到达即 replacePlaceholderTurn 收口），错写由后续精确命中 last-write-wins 覆盖+终态 clearTurnPhase 兜底自愈，同窗口原设计=直接丢弃（生产实证卡『执行器已接收』根因），回退严格不劣于现状。边界裁决②（单会话单活跃 run 前提，D-001）：可接受——跨轮子代理/团队分身/忙轮守卫/steering/自动续跑五反例均有代码级证据锚点（queue.py 守卫、AgentSession.parent_session_id 等），FR-05 附『放松不变式须重评』护栏，实现只认 currentRunId 不做模糊匹配，前提破坏时爆炸半径有限。防护声明核验真实：纯函数不可变更新（map+spread）、不建轮（未命中未回退原引用返回）、命中优先于回退（turn-state.ts:123 提前 return）；第 4 参可选，旧 3 参调用=原丢弃行为，命中路径逐字节不变、revert 面窄。生成物同步判断成立：纯前端纯函数改动，无后端 schema/DTO/事件格式变化，无 gen:types 义务，applyTurnPhase 为前端模块内部函数非对外契约。预消化事实抽验：交付目录 git status --porcelain 为空（工作区==HEAD），测试文件实读确认 6 新增用例存在且与 FR 逐条对应。",
+  "reviewedAt": "2026-10-26T15:35:34+08:00"
+}
