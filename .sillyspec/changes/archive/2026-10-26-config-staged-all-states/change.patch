@@ -1,0 +1,238 @@
+diff --git a/frontend/src/components/sessions/__tests__/session-config-bar.test.tsx b/frontend/src/components/sessions/__tests__/session-config-bar.test.tsx
+index f88b631af..ba8a27d2b 100644
+--- a/frontend/src/components/sessions/__tests__/session-config-bar.test.tsx
++++ b/frontend/src/components/sessions/__tests__/session-config-bar.test.tsx
+@@ -775,6 +775,37 @@ describe("SessionConfigBar 供应商+模型级联（task-10）", () => {
+     await waitFor(() => expect(select.value).toBe("glm-4.5-air"));
+   });
+ 
++  // 2026-10-26-config-staged-all-states FR-02：模型子下拉显示与候选跟随暂存供应商
++  //（会话真值无供应商时模型下拉隐藏，暂存供应商后必须立即出现且候选正确）。
++  it("暂存供应商后模型下拉立即显示，候选=暂存供应商模型；取消暂存回退真值隐藏", async () => {
++    mocks.listProviders.mockResolvedValue([GLM_PROVIDER] as never);
++    // 真值无供应商 → 初始模型下拉隐藏
++    const { patches } = renderBarControlled({ llmProviderId: null });
++    expect(
++      screen.queryByRole("combobox", { name: "配置-模型" }),
++    ).not.toBeInTheDocument();
++    // 暂存供应商 → 模型下拉立即出现，候选 = GLM 三模型
++    openCtrl("配置-供应商");
++    fireEvent.click(await screen.findByRole("button", { name: "选择 GLM 平台" }));
++    const select = (await screen.findByRole("combobox", {
++      name: "配置-模型",
++    })) as HTMLSelectElement;
++    const values = Array.from(select.options).map((o) => o.value);
++    expect(values).toEqual(["", "glm-4.7", "glm-4.6", "glm-4.5-air"]);
++    // 选回「不指定（本机默认）」= 真值(null) → cancel 暂存 → 模型下拉回退隐藏
++    openCtrl("配置-供应商");
++    fireEvent.click(
++      await screen.findByRole("button", { name: "选择 不指定（本机默认）" }),
++    );
++    const lastPatch = patches.at(-1) as any;
++    expect(lastPatch.cancel).toBe(true);
++    await waitFor(() =>
++      expect(
++        screen.queryByRole("combobox", { name: "配置-模型" }),
++      ).not.toBeInTheDocument(),
++    );
++  });
++
+   // 兼容锚：未挂 onStagedSwitch（存量调用面）保持切模型同请求带供应商旧行为。
+   it("未传 onStagedSwitch（兼容）→ 选模型 injectSession 同请求带 llm_provider_id + model", async () => {
+     mocks.listProviders.mockResolvedValue([GLM_PROVIDER] as never);
+@@ -1407,6 +1438,29 @@ describe("SessionConfigBar 会话态档位切换控件（task-06 / FR-06 / R-04
+     ).toBe(true);
+   });
+ 
++  // 2026-10-26-config-staged-all-states FR-01：stagedMode 下 running 不再禁用档位
++  // 控件（点选仅暂存不发请求，禁用理由消失）；点选照常暂存上抛。
++  it("暂存模式 running 档位控件可点且点选仅暂存（不 POST）", async () => {
++    const { patches } = renderBarControlled({
++      running: true,
++      thinkingLevel: { disabled: true },
++    });
++    const trigger = (await screen.findByTestId(
++      "config-thinking-select",
++    )) as HTMLButtonElement;
++    // stagedMode 解除 running 禁用
++    expect(trigger.disabled).toBe(false);
++    fireEvent.click(trigger);
++    fireEvent.click(await screen.findByRole("menuitem", { name: "高" }));
++    expect(mocks.setSessionThinkingLevel).not.toHaveBeenCalled();
++    expect(patches[0]).toEqual({
++      field: "thinking_level",
++      value: "high",
++      label: "高",
++      cancel: undefined,
++    });
++  });
++
+   // 2026-10-25-session-config-deferred-switch（D-001）：暂存模式档位点选仅上抛
+   // 暂存（不 POST 不即时改引擎档位），随下一条消息发送时先调端点生效。
+   it("暂存模式点选档位 → onStagedSwitch 上抛（不 POST 无 toast），控件直接显示暂存档", async () => {
+@@ -1507,19 +1561,33 @@ describe("SessionConfigBar 会话态档位切换控件（task-06 / FR-06 / R-04
+     );
+   });
+ 
+-  // 2026-10-25：暂存模式 running 点选不受暂存影响——仍走 inject 忙轮排队（FR-04）。
+-  it("暂存模式 running 点选供应商/档位 → 照常走忙轮排队（不走暂存上抛）", async () => {
+-    const onStagedSwitch = vi.fn();
+-    renderBar({
++  // 2026-10-26-config-staged-all-states FR-01：暂存模式 running 点选同样仅暂存——
++  // 四控件全状态统一（旧行为「运行中即时 inject 忙轮排队」撤销：排队条目派发
++  // 会建静默切换轮，用户实测看到新轮次）。
++  it("暂存模式 running 点选供应商/模型/档案 → 仅暂存上抛，不 inject", async () => {
++    mocks.listProviders.mockResolvedValue([
++      { id: "prov-glm", name: "GLM 平台", models: [{ name: "glm-4.7", roles: ["sonnet"] }], agent_kinds: ["claude"] },
++    ] as never);
++    const { patches } = renderBarControlled({
+       running: true,
+       llmProviderId: "prov-kimi",
+-      thinkingLevel: {},
+-      onStagedSwitch,
+     });
++    // 供应商：running 态点选 → 暂存上抛（级联 model 重置 + provider）
+     openCtrl("配置-供应商");
+     fireEvent.click(await screen.findByRole("button", { name: "选择 GLM 平台" }));
+-    await waitFor(() => expect(mocks.injectSession).toHaveBeenCalledTimes(1));
+-    expect(onStagedSwitch).not.toHaveBeenCalled();
++    expect(mocks.injectSession).not.toHaveBeenCalled();
++    expect(patches.some((p: any) => p.field === "llm_provider_id" && p.value === "prov-glm")).toBe(true);
++    // 模型：running 态切模型 → 同样暂存
++    const select = (await screen.findByRole("combobox", {
++      name: "配置-模型",
++    })) as HTMLSelectElement;
++    fireEvent.change(select, { target: { value: "glm-4.7" } });
++    expect(mocks.injectSession).not.toHaveBeenCalled();
++    // 档案：running 态点选 → 同样暂存
++    openCtrl("配置-档案");
++    fireEvent.click(screen.getByRole("button", { name: "选择 严肃代码审查员" }));
++    expect(mocks.injectSession).not.toHaveBeenCalled();
++    expect(patches.some((p: any) => p.field === "agent_profile_id" && p.value === "prof-2")).toBe(true);
+   });
+ 
+   it("200 结构化失败（ok=false + error）→ notify error 带 error 原文（如旧 daemon 升级提示）", async () => {
+diff --git a/frontend/src/components/sessions/session-config-bar.tsx b/frontend/src/components/sessions/session-config-bar.tsx
+index f5403efa4..5dc15ead8 100644
+--- a/frontend/src/components/sessions/session-config-bar.tsx
++++ b/frontend/src/components/sessions/session-config-bar.tsx
+@@ -556,10 +556,21 @@ export function SessionConfigBar({
+ 
+   // ── task-10（FR-03-2/5 / D-002@v1）：供应商+模型级联 ──────────────────────
+ 
++  /**
++   * 显示层供应商 id（2026-10-26-config-staged-all-states FR-02）：暂存供应商
++   * 优先——模型子下拉的显示条件与候选列表必须跟随暂存值（会话真值在发送前
++   * 不变，直接用真值会让「暂存供应商后模型框不出现/候选不跟随」）；取消暂存
++   * （staged 键删除）自然回退真值。provisional 不受影响（无 staged）。
++   */
++  const displayProviderId =
++    staged?.llm_provider_id !== undefined
++      ? staged.llm_provider_id
++      : llmProviderId;
++
+   /** 当前选中供应商行（「不指定」/列表未含该 id → null，模型子下拉随之隐藏）。 */
+   const selectedProvider = useMemo(
+-    () => providers.find((p) => p.id === llmProviderId) ?? null,
+-    [providers, llmProviderId],
++    () => providers.find((p) => p.id === displayProviderId) ?? null,
++    [providers, displayProviderId],
+   );
+ 
+   /**
+@@ -738,8 +749,13 @@ export function SessionConfigBar({
+   // 按钮 openKind 语义）；菜单照 theme-toggle 先例 selectable + selectedKeys
+   // 高亮当前档，placement=topLeft 对齐 ConfigDropdown bottom-full 上弹方向。
+   const [thinkingOpen, setThinkingOpen] = useState(false);
++  // 2026-10-26-config-staged-all-states FR-01：stagedMode 下不再叠
++  // thinkingLevel.disabled（=running）——暂存点选不发请求，运行中禁用的理由
++  // 消失（D-002「档位切换仅空闲」约束的是端点 RPC，发送时先调已满足）；
++  // 仅 ended/离线（!canSwitch）与旧调用面（非 stagedMode）保持原禁用。
+   const thinkingCtrlDisabled =
+-    !canSwitch || (!provisional && (thinkingLevel?.disabled ?? false));
++    !canSwitch ||
++    (!provisional && !stagedMode && (thinkingLevel?.disabled ?? false));
+   const thinkingCtrlValue = provisional
+     ? provisionalThinkingDisplay
+     : (stagedThinkingLevel ?? (currentThinkingLevel || ""));
+@@ -766,12 +782,13 @@ export function SessionConfigBar({
+     if (provisional) {
+       setProvisionalThinkingLevel(v);
+       onProvisionalThinkingLevelSwitch?.(v);
+-    } else if (stagedMode && !running) {
+-      // 2026-10-25-session-config-deferred-switch：会话态暂存模式（仅空闲——
+-      // running 保持 POST 忙轮排队现状，对齐供应商/模型/档案同款分流）——点选
+-      // 仅上抛暂存（不 POST setSessionThinkingLevel，不即时改引擎档位），随面板
+-      // 下一条消息发送时先调端点生效；选回当前档 = 取消暂存。D-001：静默（控件
+-      // 值变化即反馈，不弹 toast），切换结果由发送后的时间线切换信息行呈现。
++    } else if (stagedMode) {
++      // 2026-10-25-session-config-deferred-switch：会话态暂存模式——点选仅上抛
++      // 暂存（不 POST setSessionThinkingLevel，不即时改引擎档位），随面板下一条
++      // 消息发送时先调端点生效；选回当前档 = 取消暂存。D-001：静默（控件值
++      // 变化即反馈，不弹 toast），切换结果由发送后的时间线切换信息行呈现。
++      // 2026-10-26-config-staged-all-states FR-01：去掉 !running 条件——运行中
++      // 点选同样仅暂存（四控件全状态统一，端点调用收敛到发送时）。
+       const cancel = effectiveValues.thinking_level === v;
+       onStagedSwitch({
+         field: "thinking_level",
+@@ -819,9 +836,12 @@ export function SessionConfigBar({
+   /** ql-20260817-010：点选即**静默**切换——prompt 发空串（后端静默切换契约：
+    * 有切换字段允许空 prompt；daemon 收到空 prompt 只 reload 配置不喂消息，
+    * 切换轮无用户消息/模型回应）。switchPrompt 传入时仍作为切换轮消息发出。
+-   * 2026-10-25-session-config-deferred-switch：空闲暂存模式（stagedMode 且非
+-   * running）点选改为仅上抛暂存——不再发请求建空切换轮，随面板下一条消息一并
+-   * 生效；运行中不走本分支（忙轮排队原语义）。 */
++   * 2026-10-25-session-config-deferred-switch：暂存模式（stagedMode）点选改为
++   * 仅上抛暂存——不发请求建空切换轮，随面板下一条消息一并生效。
++   * 2026-10-26-config-staged-all-states FR-01：去掉 !running 条件——运行中
++   * 点选同样仅暂存（旧行为「运行中即时 inject 忙轮排队」撤销：排队条目派发
++   * 会建静默切换轮，用户实测看到新轮次；现统一四控件全状态点选=暂存，
++   * 配置随下一条消息（含排队路径）生效，后端建带消息的正常轮）。 */
+   const executeSwitch = async (p: PendingSwitch) => {
+     if (submitting) return;
+     const what = switchFieldWhat(p.field);
+@@ -829,7 +849,7 @@ export function SessionConfigBar({
+       p.field === "llm_provider_id" && p.value === SWITCH_NO_PROVIDER_VALUE
+         ? "本机默认"
+         : p.label;
+-    if (stagedMode && !running) {
++    if (stagedMode) {
+       setOpenKind(null);
+       const cancel = effectiveValues[p.field] === p.value;
+       // 暂存供应商（非取消）级联重置模型暂存——候选随供应商变，旧模型对新供应
+@@ -982,7 +1002,7 @@ export function SessionConfigBar({
+                 ? "当前引擎不支持会话级供应商切换"
+                 : ended
+                   ? "会话已结束或机器离线，不可切换供应商"
+-                  : running
++                  : running && !stagedMode
+                     ? "运行中可切换，将于本轮结束后生效"
+                     : "供应商（不选=本机默认配置）",
+             <ConfigDropdown
+@@ -1038,7 +1058,7 @@ export function SessionConfigBar({
+               title={
+                 !canSwitch
+                   ? "会话已结束或机器离线，不可切换模型"
+-                  : running
++                  : running && !stagedMode
+                     ? "运行中可切换，将于本轮结束后生效"
+                     : "模型（默认=跟随供应商配置）"
+               }
+@@ -1103,7 +1123,7 @@ export function SessionConfigBar({
+                   ? ended
+                     ? "会话已结束或机器离线，不可切换思考级别"
+                     : "思考级别切换不可用"
+-                  : running && !provisional
++                  : running && !provisional && !stagedMode
+                     ? "运行中可切换，将于本轮结束后生效"
+                     : "思考级别（默认=引擎默认档位，语义随引擎不同见「默认」项说明）"
+               }
+@@ -1143,7 +1163,7 @@ export function SessionConfigBar({
+             // ql-20260909-005：同供应商按钮——禁用态 title 说明原因。
+             ended
+               ? "会话已结束或机器离线，不可切换档案"
+-              : running
++              : running && !stagedMode
+                 ? "运行中可切换，将于本轮结束后生效"
+                 : "智能体档案",
+           <ConfigDropdown

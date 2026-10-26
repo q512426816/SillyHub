@@ -1599,3 +1599,79 @@ created_at: 2026-10-16T01:30:35.950Z
   confirmed_at: null
   source_change: 2026-10-25-fe-build-unblock
   status: active
+
+## FR-test-utils-084 轮运行中点选供应商/模型/档案/思考级别不发任何网络请求(不 inject 不 POST),仅暂存
+变更：2026-10-26-config-staged-all-states
+状态：active
+摘要：运行中点选供应商；运行中点选思考档位
+全文：.sillyspec/changes/archive/2026-10-26-config-staged-all-states/requirements.md#FR-01
+最近确认：23e594809cead8633de53663204401d5a0458413
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-26-config-staged-all-states:flow:测试绑定FR-01
+  tests: frontend/src/components/sessions/__tests__/session-config-bar.test.tsx「running 点选供应商/模型/档案/档位 → 仅暂存上抛不 inject 不 POST」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-26-config-staged-all-states
+  status: active
+
+## FR-test-utils-085 暂存供应商后模型子下拉立即显示,候选为暂存供应商的模型列表
+变更：2026-10-26-config-staged-all-states
+状态：active
+摘要：暂存供应商后模型下拉出现且候选正确；取消暂存回退真值
+全文：.sillyspec/changes/archive/2026-10-26-config-staged-all-states/requirements.md#FR-02
+最近确认：23e594809cead8633de53663204401d5a0458413
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-26-config-staged-all-states:flow:测试绑定FR-02
+  tests: frontend/src/components/sessions/__tests__/session-config-bar.test.tsx「暂存供应商后模型下拉显示且候选为新供应商模型；取消暂存回退」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-26-config-staged-all-states
+  status: active
+
+## FR-test-utils-086 发送时暂存配置随消息一并生效(含排队路径),不产生静默切换轮
+变更：2026-10-26-config-staged-all-states
+状态：active
+摘要：运行中暂存后发送
+全文：.sillyspec/changes/archive/2026-10-26-config-staged-all-states/requirements.md#FR-03
+最近确认：23e594809cead8633de53663204401d5a0458413
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-26-config-staged-all-states:flow:测试绑定FR-03
+  tests: frontend/src/components/daemon/__tests__/session-panel-variant.test.tsx「发送并入暂存（含排队路径）零回归」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-26-config-staged-all-states
+  status: active
+
+## FR-test-utils-087 空闲态行为零回归
+变更：2026-10-26-config-staged-all-states
+状态：active
+摘要：空闲态回归
+全文：.sillyspec/changes/archive/2026-10-26-config-staged-all-states/requirements.md#FR-04
+最近确认：23e594809cead8633de53663204401d5a0458413
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-26-config-staged-all-states:flow:测试绑定FR-04
+  tests: frontend/src/components/sessions/__tests__/session-config-bar.test.tsx「空闲态与既有兼容锚全量回归」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-26-config-staged-all-states
+  status: active

@@ -1,0 +1,66 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-26-config-staged-all-states",
+  "rows": [
+    {
+      "anchor": "FR-01",
+      "row_id": "2026-10-26-config-staged-all-states:flow:测试绑定FR-01",
+      "tests": [
+        "frontend/src/components/sessions/__tests__/session-config-bar.test.tsx「running 点选供应商/模型/档案/档位 → 仅暂存上抛不 inject 不 POST」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-26-config-staged-all-states"
+    },
+    {
+      "anchor": "FR-02",
+      "row_id": "2026-10-26-config-staged-all-states:flow:测试绑定FR-02",
+      "tests": [
+        "frontend/src/components/sessions/__tests__/session-config-bar.test.tsx「暂存供应商后模型下拉显示且候选为新供应商模型；取消暂存回退」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-26-config-staged-all-states"
+    },
+    {
+      "anchor": "FR-03",
+      "row_id": "2026-10-26-config-staged-all-states:flow:测试绑定FR-03",
+      "tests": [
+        "frontend/src/components/daemon/__tests__/session-panel-variant.test.tsx「发送并入暂存（含排队路径）零回归」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-26-config-staged-all-states"
+    },
+    {
+      "anchor": "FR-04",
+      "row_id": "2026-10-26-config-staged-all-states:flow:测试绑定FR-04",
+      "tests": [
+        "frontend/src/components/sessions/__tests__/session-config-bar.test.tsx「空闲态与既有兼容锚全量回归」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-26-config-staged-all-states"
+    }
+  ]
+}

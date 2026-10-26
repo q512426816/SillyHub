@@ -1,0 +1,22 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-26-config-staged-all-states",
+  "reviewer": "inline-self（环境无已注册子代理，主会话代行——降级留痕）",
+  "verdict": "PASS",
+  "reviewedAgainst": "23e594809cead8633de53663204401d5a0458413",
+  "findings": [],
+  "dimensionNotes": {
+    "乱序": "ok——暂存纯本地 state 无新增网络面；点选不再依赖 running 分流，SSE 迟到导致的 running 派生抖动不影响点选行为（diff 证实 executeSwitch/onThinkingMenuClick 的 stagedMode 分支均无 running 条件）",
+    "并发": "ok——暂存唯一写方仍为面板（上抛合并+发送清空），本变更未新增写方；后端排队条目带配置字段走既有 enqueue 覆盖合并机制，零后端改动",
+    "切换": "ok——运行中暂存+不发送 → 本轮自然结束暂存仍挂着（下一条消息生效），与空闲暂存同构；sessionId 切换清空为上一变更既有逻辑未触碰",
+    "作用域": "ok——displayProviderId 为组件内纯函数派生（staged.llm_provider_id ?? llmProviderId），无落库无跨实例面；暂存边界（刷新即丢）沿用上一变更声明"
+  },
+  "checklist": {
+    "fr_impl_test_consistency": "PASS——FR-01:组件 stagedMode 分支去 !running（executeSwitch/onThinkingMenuClick）+ thinkingCtrlDisabled stagedMode 下不叠 disabled + title 四处同步；测试「running 点选供应商/模型/档案仅暂存」「running 档位可点且仅暂存不 POST」断言真实存在且绿。FR-02:displayProviderId 派生 selectedProvider（模型下拉显示+候选基准）；测试「暂存供应商后模型下拉立即显示候选正确；取消暂存回退隐藏」绿。FR-03:排队路径并入为上一变更既有接线（sendToServerQueue stagedOpts），本变更 task-03 复核接口未断，variant 回归绿。FR-04:config-bar 76 用例全量绿（空闲暂存/取消/受控显示/兼容锚齐备）。本会话实测 76+45=121 用例全绿，ledger 回执 passed exit=0 同口径",
+    "blind_spots": "PASS——design 四问作答与 diff 对照一致（见 dimensionNotes），无虚答",
+    "disclosed_tradeoffs": "已裁决——①运行中点选需发送下一条消息才生效（不再本轮结束自动换）：可接受（用户明确指令「全部都不要触发新轮次」，自动换且无轮次需后端新通道，成本不成比例）；②未挂 onStagedSwitch 存量调用面保留旧「点选即切换」行为：可接受（兼容锚，现有调用面唯一且已挂暂存）；③thinkingLevel.disabled prop 语义收窄至非 stagedMode：可接受（面板传参不变，行为收窄有测试钉死）",
+    "guard_claims": "PASS——「四控件全状态零请求」防护由测试钉死：running 态点选断言 injectSession/setSessionThinkingLevel 未调用；「模型下拉跟随暂存」由显示/候选/取消回退三段断言钉死",
+    "generated_artifacts": "n/a——纯前端两文件改动，无 schema/API/类型生成物触达"
+  },
+  "reviewedAt": "2026-10-26T13:30:10+08:00"
+}
