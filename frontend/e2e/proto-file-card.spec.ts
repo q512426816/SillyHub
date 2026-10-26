@@ -102,8 +102,11 @@ test("文件变更卡：折叠 / 展开 / 降级三态与 100 文件内滚", asy
   const deletedRow = first
     .getByTestId("file-changes-row")
     .filter({ hasText: "scripts/prototype-build.mjs" });
+  // 2026-10-23-file-card-agent-grouping 起行恒可点（renderFileRow clickable=true，
+  // 删除行的删除 diff 也可查看）——旧「删除行不可点击」预期已被组件演进取代，
+  // 对齐现行为：点击删除行同样触发 onOpenFile。
   await deletedRow.click();
-  await expect(page.getByTestId("open-file-log")).not.toContainText(
+  await expect(page.getByTestId("open-file-log")).toContainText(
     "scripts/prototype-build.mjs",
   );
 
