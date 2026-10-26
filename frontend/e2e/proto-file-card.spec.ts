@@ -78,6 +78,13 @@ test("文件变更卡：折叠 / 展开 / 降级三态与 100 文件内滚", asy
   // ── 展开：8 行、24px、命令行徽标恰一次 ──
   await first.getByTestId("file-changes-header").click();
   await expect(first).toHaveAttribute("data-expanded", "true");
+  // 2026-10-23-file-card-agent-grouping 起展开列表分两段：AGENT 行直显（7），
+  // shell 归因收进「命令行/其他」折叠区段——先验 7 行，再开区段凑齐 8 行。
+  await expect(first.getByTestId("file-changes-row")).toHaveCount(7);
+  await expect(first.getByTestId("file-changes-other-toggle")).toContainText(
+    "命令行/其他 1 个文件",
+  );
+  await first.getByTestId("file-changes-other-toggle").click();
   await expect(first.getByTestId("file-changes-row")).toHaveCount(8);
   const rowBox = await first.getByTestId("file-changes-row").first().boundingBox();
   expect(rowBox).not.toBeNull();
@@ -119,6 +126,9 @@ test("文件变更卡：折叠 / 展开 / 降级三态与 100 文件内滚", asy
   await page.getByTestId("toggle-long-list").click();
   await expect(page.getByTestId("file-changes-card")).toHaveCount(4);
   const longCard = page.getByTestId("file-changes-card").nth(3);
+  // TURN_19 含 7 个 shell 归因文件（index%13==12）——分组渲染下收在「命令行/
+  // 其他」区段，打开后 100 行才齐（与第 1 卡同口径）。
+  await longCard.getByTestId("file-changes-other-toggle").click();
   await expect(longCard.getByTestId("file-changes-row")).toHaveCount(100);
   const scrollBox = await longCard.getByTestId("file-changes-list").evaluate((element) => ({
     clientHeight: element.clientHeight,
