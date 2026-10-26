@@ -62,6 +62,7 @@ import type {
   SessionRunRead,
 } from "@/lib/daemon";
 import { closestAntdSelect, queryAntdSelectZone } from "@/test/dom-queries";
+import { deriveSessionPlaceholder } from "@/components/daemon/session-panel/page-helpers";
 
 // ── hoisted mock 状态 ─────────────────────────────────────────────────────
 
@@ -3138,5 +3139,30 @@ describe("2026-10-15-dsh-engine-acp task-07：dsh 单聊引擎边界钉（FR-08�
     );
     expect(wizardSrc).toContain('GROUP_SUPPORTED_PROVIDERS = new Set(["claude", "codex", "pi"])');
     expect(wizardSrc).not.toContain('GROUP_SUPPORTED_PROVIDERS = new Set(["claude", "codex", "pi", "dsh"])');
+  });
+});
+
+describe("deriveSessionPlaceholder 排队态 mobile 短句（2026-10-26-mobile-four-page-layout-fix task-07 / FR-03）", () => {
+  const BASE = {
+    sessionWorkspaceArchived: false,
+    ended: false,
+    suspended: false,
+    machineOnline: true,
+    isToolReportBody: false,
+    isQueueFull: false,
+    restoring: false,
+    running: true,
+  };
+
+  it("running+mobile → 短句「已排队，结束后自动发送…」（≤14 字，430pt 输入框不截断）", () => {
+    const text = deriveSessionPlaceholder({ ...BASE, mobile: true });
+    expect(text).toBe("已排队，结束后自动发送…");
+    expect([...text].length).toBeLessThanOrEqual(14);
+  });
+
+  it("desktop 锚：running 缺省占位「消息将排队，等待本轮完成后自动发送…」逐字符不变", () => {
+    expect(deriveSessionPlaceholder({ ...BASE })).toBe(
+      "消息将排队，等待本轮完成后自动发送…",
+    );
   });
 });

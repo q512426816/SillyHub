@@ -975,7 +975,7 @@ export default function MobileChangesPage() {
           changes 页「解析警告」卡后同位镜像（task-03 起上方有重新扫描反馈区，
           置于反馈区后、Tab 前）；compact 紧凑布局（行纵向堆叠 + 44px 触摸热区）。
           无绑定或无 sillyspec_status 时组件自渲染 null，页面行为与现状一致 */}
-      <PlatformSyncSection workspaceId={workspaceId} compact />
+      <PlatformSyncSection workspaceId={workspaceId} compact mobile />
 
       {/* 双 Tab + 计数徽标（tabTotals 独立 useQuery，不随筛选变化）；quicklog
           tab 已隐藏（2026-10-07-hide-quicklog-tab），存量视图经深链进下方条件区 */}
@@ -1018,7 +1018,10 @@ export default function MobileChangesPage() {
         //    （FR-04）起挂独立筛选抽屉（状态/作者/空壳占位，与主列表抽屉分离）；
         //    卡片点击 MobileDetailSheet 全屏详情 ─────────────────────────────────
         <>
-          <div className="flex items-center gap-2">
+          {/* 工具栏两行化（2026-10-26-mobile-four-page-layout-fix task-09 / FR-06）：
+              搜索框 w-full 独占一行（placeholder 完整可见），搜索/筛选/重扫折到
+              第二行——四控件挤一行时 430pt 视口搜索框被压到裁切的根因修复。 */}
+          <div className="flex flex-wrap items-center gap-2">
             <input
               value={searchInput}
               onChange={(e) => setSearchInput(e.target.value)}
@@ -1028,7 +1031,7 @@ export default function MobileChangesPage() {
               placeholder="搜索标题 / 正文全文…"
               aria-label="搜索快速修复"
               data-testid="m-quicklog-search-input"
-              className="min-h-[44px] min-w-0 flex-1 rounded-[var(--radius-md)] border border-border bg-card px-3 text-[14px] text-foreground outline-none placeholder:text-muted-foreground focus:border-primary/50"
+              className="min-h-[44px] w-full rounded-[var(--radius-md)] border border-border bg-card px-3 text-[14px] text-foreground outline-none placeholder:text-muted-foreground focus:border-primary/50"
             />
             <button
               type="button"
@@ -1171,8 +1174,9 @@ export default function MobileChangesPage() {
         </>
       ) : (
         <>
-          {/* 工具栏：搜索框 + 筛选抽屉入口（阶段 / 排序 / 只看待我处理收进抽屉） */}
-          <div className="flex items-center gap-2">
+          {/* 工具栏：搜索框 + 筛选抽屉入口（阶段 / 排序 / 只看待我处理收进抽屉）。
+              两行化同 quicklog tab（task-09 / FR-06）：搜索框独占一行，按钮第二行。 */}
+          <div className="flex flex-wrap items-center gap-2">
             <input
               value={searchInput}
               onChange={(e) => setSearchInput(e.target.value)}
@@ -1182,7 +1186,7 @@ export default function MobileChangesPage() {
               placeholder="搜索 Key / 标题 / 描述 / 组件…"
               aria-label="搜索变更"
               data-testid="m-changes-search-input"
-              className="min-h-[44px] min-w-0 flex-1 rounded-[var(--radius-md)] border border-border bg-card px-3 text-[14px] text-foreground outline-none placeholder:text-muted-foreground focus:border-primary/50"
+              className="min-h-[44px] w-full rounded-[var(--radius-md)] border border-border bg-card px-3 text-[14px] text-foreground outline-none placeholder:text-muted-foreground focus:border-primary/50"
             />
             <button
               type="button"

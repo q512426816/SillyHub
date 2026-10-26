@@ -52,6 +52,26 @@ const STATUS_PREFIX: Record<RoundDividerStatus, string> = {
   killed: "✗",
 };
 
+/**
+ * 大数缩写（2026-10-26-mobile-four-page-layout-fix / FR-02）：≥10000 的整数
+ * 缩写为 k 单位一位小数（78,489→78.5k，99,999→100.0k 可接受）；<10000 原样
+ * 返回千分位串。口径全局统一（plan 盲区③），desktop 永不缩写。
+ */
+export function abbreviateCount(n: number): string {
+  if (!Number.isFinite(n) || Math.abs(n) < 10000) {
+    return n.toLocaleString("en-US");
+  }
+  return `${(n / 1000).toFixed(1)}k`;
+}
+
+/** meta 串中的 ↑/↓ 计数段缩写（mobile 分支用）：仅命中 ↑/↓ 后的千分位数字段。 */
+function abbreviateMeta(meta: string): string {
+  return meta.replace(/([↑↓])\s?([\d,]+)/g, (_m, arrow: string, digits: string) => {
+    const n = Number.parseInt(digits.replace(/,/g, ""), 10);
+    return Number.isNaN(n) ? `${arrow}${digits}` : `${arrow}${abbreviateCount(n)}`;
+  });
+}
+
 export interface RoundDividerProps {
   /** 主标签，如「第 2 轮」 */
   label: string;
@@ -59,6 +79,12 @@ export interface RoundDividerProps {
   status?: RoundDividerStatus;
   /** 右侧 meta（token/时间等自由文本，等宽数字） */
   meta?: string;
+  /**
+   * 手机端窄视口分支（2026-10-26-mobile-four-page-layout-fix / FR-02，默认 false）：
+   * true 时胶囊允许收缩折行 + meta 中 ↑/↓ 大数缩写；缺省 desktop 零变化
+   * （shrink-0 + whitespace-nowrap 原样）。
+   */
+  mobile?: boolean;
   /**
    * 2026-10-20-session-page-dsh-alignment（FR-01 / D-016① / D-015@v2）：轮元信息
    * 合并成**一行**——原「开始 · 结束 · 历时」独立行与轮尾状态胶囊重复，本 prop
@@ -78,6 +104,7 @@ export const RoundDivider = memo(function RoundDivider({
   status,
   meta,
   detail,
+  mobile = false,
 }: RoundDividerProps) {
   return (
     <div
@@ -89,7 +116,14 @@ export const RoundDivider = memo(function RoundDivider({
         aria-hidden
         className="h-px flex-1 bg-gradient-to-r from-transparent via-border to-border"
       />
-      <span className="inline-flex shrink-0 items-center gap-1.5 whitespace-nowrap rounded-full border border-border/60 bg-card/80 px-3 py-0.5 text-[10.5px] text-muted-foreground shadow-sm backdrop-blur-sm">
+      <span
+        className={cn(
+          "inline-flex items-center gap-1.5 rounded-full border border-border/60 bg-card/80 px-3 py-0.5 text-[10.5px] text-muted-foreground shadow-sm backdrop-blur-sm",
+          // mobile（FR-02）：允许收缩与折行（长 meta 在 430pt 视口内换行不溢出）；
+          // desktop 缺省保持 shrink-0 + nowrap 单行（零变化）。
+          mobile ? "min-w-0 shrink whitespace-normal" : "shrink-0 whitespace-nowrap",
+        )}
+      >
         <span className="tracking-wide">{label}</span>
         {status && (
           <>
@@ -103,7 +137,9 @@ export const RoundDivider = memo(function RoundDivider({
         {meta && (
           <>
             <span aria-hidden>·</span>
-            <span className="font-mono tabular-nums opacity-80">{meta}</span>
+            <span className="font-mono tabular-nums opacity-80">
+              {mobile ? abbreviateMeta(meta) : meta}
+            </span>
           </>
         )}
       </span>

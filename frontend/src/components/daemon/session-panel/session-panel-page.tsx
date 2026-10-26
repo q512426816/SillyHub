@@ -5323,6 +5323,10 @@ export function SessionPanelPage({
           key 强制重挂载：全部滚动状态归零，恢复初始贴底语义。 */}
       <TurnTimeline
         key={sessionId ?? "pre"}
+        // 2026-10-26-mobile-four-page-layout-fix task-05 / FR-01/02：视口变体
+        // 透传——mobile 下轮尾 marquee 隐藏 LIVE、轮次胶囊收缩折行+大数缩写；
+        // desktop/dialog/悬浮宿主走缺省零变化。
+        variant={variant}
         // 2026-10-23-turn-file-diff-dialog / FR-01：接线轮文件变更卡行点击弹窗的
         // 取数归属（会话级单轮日志 API 按本轮 runId 拉 edit_patch）。
         sessionId={sessionId}

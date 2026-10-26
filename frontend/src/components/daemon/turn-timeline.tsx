@@ -455,6 +455,13 @@ export interface TurnTimelineProps {
   turns: SessionTurnView[];
   viewMode: SessionViewMode;
   /**
+   * 视口样式变体（2026-10-26-mobile-four-page-layout-fix task-05 / FR-01/02，
+   * 默认 "desktop"）：mobile 时向轮尾 TurnLiveMarquee（隐藏 LIVE 徽标）与
+   * RoundDivider（胶囊收缩折行 + meta 大数缩写）下传 mobile 分支；缺省 desktop
+   * 既有宿主（PC 会话页 / dialog / 悬浮宿主）零变化。
+   */
+  variant?: "desktop" | "mobile";
+  /**
    * 2026-10-22-trajectory-context-jump（FR-02）：轮次导航 → 轨迹视图的跳转信号。
    * `{ turnKey, nonce }`——nonce 自增驱动重复点击；仅轨迹视图消费，其它视图零影响；
    * 不传零回归。目标轮不在轨迹（预览轮/未加载）静默跳过。
@@ -771,6 +778,7 @@ function TurnLiveElapsedText({ startedAtMs }: { startedAtMs: number }) {
 const TurnRow = memo(function TurnRow({
   turn,
   viewMode,
+  mobile = false,
   isHighlighted,
   hasLaterUserMessage,
   dialogHistory,
@@ -788,6 +796,12 @@ const TurnRow = memo(function TurnRow({
 }: {
   turn: SessionTurnView;
   viewMode: SessionViewMode;
+  /**
+   * 手机端窄视口布尔（2026-10-26-mobile-four-page-layout-fix task-05，默认 false）：
+   * 父级 TurnTimeline 由 variant 派生（memo 友好基元），下传轮尾 marquee
+   * （隐藏 LIVE）与 RoundDivider（收缩折行+大数缩写）；缺省 desktop 零变化。
+   */
+  mobile?: boolean;
   /** task-01：父级派生的 per-row 高亮布尔（命中行加 ring+浅底，R-07 防击穿）。 */
   isHighlighted: boolean;
   /** task-07：该轮之后是否已存在用户消息（marker 提问卡已答态 best-effort 判定）。 */
@@ -1135,6 +1149,7 @@ const TurnRow = memo(function TurnRow({
                   turnStartedAt={turn.turnStartedAt}
                   viewMode={viewMode}
                   runKey={turn.realRunId ?? turn.runId}
+                  mobile={mobile}
                   dialogHistory={dialogHistory}
                   markerAnswered={hasLaterUserMessage}
                   onMarkerSubmit={onResend}
@@ -1283,6 +1298,7 @@ const TurnRow = memo(function TurnRow({
                     <RoundDivider
                       label={turn.turn != null ? `第 ${turn.turn} 轮` : "轮次"}
                       status={turn.status}
+                      mobile={mobile}
                       detail={metaDetail ?? undefined}
                       meta={
                         // ql-20260831-010 语义保持：运行中输入 null 显示「↑执行中…」
@@ -1529,6 +1545,7 @@ function TrajectoryPane({
 export function TurnTimeline({
   turns,
   viewMode,
+  variant = "desktop",
   trajectoryJump,
   errorMsg,
   daemonRestartedHint,
@@ -2021,6 +2038,9 @@ export function TurnTimeline({
               onResend={onResend}
               onSwitchProvider={onSwitchProvider}
               daemonRestartedHint={daemonRestartedHint}
+              /* task-05（2026-10-26-mobile-four-page-layout-fix / R-07）：mobile
+                 布尔基元下传（variant 派生，memo 友好）；desktop 宿主恒 false 零变化。 */
+              mobile={variant === "mobile"}
             autoResumeEntries={autoResumeEntries}
               /* task-08（session-fork / FR-01 / R-07）：分叉入口 per-row 基元派生
                  （provider 字符串 / anchor string|null / seq number / 稳定回调），
@@ -2269,6 +2289,7 @@ function SegmentedTurnBody({
   onMarkerSubmit,
   turnTokens,
   currentPhase,
+  mobile = false,
 }: {
   segments: TurnSegment[];
   turnStatus: TurnUiStatus;
@@ -2276,6 +2297,9 @@ function SegmentedTurnBody({
   viewMode: SessionViewMode;
   /** AskUser 提问历史按 run_id 过滤键（realRunId ?? runId，同旧路径）。 */
   runKey: string;
+  /** 手机端窄视口布尔（2026-10-26-mobile-four-page-layout-fix task-05，默认 false）：
+   *  下传轮尾 marquee 隐藏 LIVE；缺省 desktop 零变化。 */
+  mobile?: boolean;
   dialogHistory: SessionDialogRead[];
   /** task-07：marker 提问卡已答态 best-effort（该轮之后已存在用户消息）。 */
   markerAnswered: boolean;
@@ -2484,6 +2508,7 @@ function SegmentedTurnBody({
       {liveEntries.length > 0 && (
         <TurnLiveMarquee
           entries={liveEntries}
+          mobile={mobile}
           lastEventAt={liveLastEventAt}
           turnTokens={turnTokens}
         />

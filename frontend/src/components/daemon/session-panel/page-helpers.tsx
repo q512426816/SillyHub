@@ -784,7 +784,10 @@ export function deriveSessionPlaceholder(o: {
                 : "恢复会话中，消息将排队等待恢复完成后自动发送…"
               : running
                 ? mobile
-                  ? "排队中，本轮结束后自动发送…"
+                  ? // 2026-10-26-mobile-four-page-layout-fix task-07 / FR-03：原
+                    // 「排队中，本轮结束后自动发送…」在 430pt 输入框内被截断，收紧为
+                    // 等长短句（保留「排队 + 自动发送」两个关键语义）。
+                    "已排队，结束后自动发送…"
                   : "消息将排队，等待本轮完成后自动发送…"
                 : mobile
                   ? "继续追问…"

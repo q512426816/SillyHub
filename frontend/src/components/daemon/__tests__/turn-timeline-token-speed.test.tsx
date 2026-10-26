@@ -37,11 +37,13 @@ function makeTurn(over: Partial<SessionTurnView> = {}): SessionTurnView {
 function renderTimeline(
   turns: SessionTurnView[],
   viewMode: "all" | "conversation" = "all",
+  variant?: "desktop" | "mobile",
 ) {
   return render(
     <TurnTimeline
       turns={turns}
       viewMode={viewMode}
+      variant={variant}
       errorMsg={null}
       sessionStatus="active"
       dialogHistory={[]}
@@ -86,5 +88,29 @@ describe("turn-timeline 轮尾 token 速度（FR-03/FR-04）", () => {
   it("对话视图（RoundDivider meta）同样追加速度段", () => {
     const { container } = renderTimeline([makeTurn()], "conversation");
     expect(container.textContent).toContain("↓1,250 · 100 tok/s");
+  });
+});
+
+describe("variant 透传链端到端（2026-10-26-mobile-four-page-layout-fix task-05 / FR-02）", () => {
+  afterEach(() => cleanup());
+
+  it("variant=mobile 端到端：conversation 视图 RoundDivider meta 大数缩写真实生效（78,489→78.5k）", () => {
+    const { container } = renderTimeline(
+      [makeTurn({ status: "completed", inputTokens: 78489, outputTokens: 2170 })],
+      "conversation",
+      "mobile",
+    );
+    expect(container.textContent).toContain("↑78.5k");
+    expect(container.textContent).toContain("↓2,170");
+    expect(container.textContent).not.toContain("↑78,489");
+  });
+
+  it("desktop 锚：不传 variant（PC 会话页/dialog/悬浮宿主形态）meta 原样千分位不缩写", () => {
+    const { container } = renderTimeline(
+      [makeTurn({ status: "completed", inputTokens: 78489, outputTokens: 2170 })],
+      "conversation",
+    );
+    expect(container.textContent).toContain("↑78,489");
+    expect(container.textContent).not.toContain("78.5k");
   });
 });

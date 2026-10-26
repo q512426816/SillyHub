@@ -270,7 +270,7 @@ type BindingFixture = {
 };
 
 function renderSection(
-  props: { compact?: boolean } = {},
+  props: { compact?: boolean; mobile?: boolean } = {},
   bindingOverride: Partial<BindingFixture> = {},
 ) {
   queryClient = new QueryClient({
@@ -1049,5 +1049,23 @@ describe("PlatformSyncSection（task-09 落地 + task-06 行改造适配）", ()
       expect(screen.getAllByTestId("platform-sync-conflict-row").length).toBeGreaterThan(0);
     });
     expect(screen.queryByTestId("platform-sync-mark-resolved")).not.toBeInTheDocument();
+  });
+});
+
+describe("PlatformSyncSection 手机端窄视口分支（2026-10-26-mobile-four-page-layout-fix / FR-05）", () => {
+  it("mobile=true：卡头统计块纵向堆叠（flex-col）——不再横向挤占标题空间", async () => {
+    setupMachine(makeMachine(makeStatus()));
+    renderSection({ compact: true, mobile: true });
+    const meta = await screen.findByTestId("platform-sync-head-meta");
+    expect(meta.className).toContain("flex-col");
+    expect(meta.className).not.toContain("flex-wrap");
+  });
+
+  it("desktop 锚：缺省统计块保持横向 flex-wrap 排布（逐类名不变）", async () => {
+    setupMachine(makeMachine(makeStatus()));
+    renderSection();
+    const meta = await screen.findByTestId("platform-sync-head-meta");
+    expect(meta.className).toContain("flex-wrap");
+    expect(meta.className).not.toContain("flex-col");
   });
 });

@@ -383,6 +383,17 @@
     font-size: 16px;
   }
 
+  /* /m/ 壳内密度规约（2026-10-26-mobile-four-page-layout-fix task-02）：手机端
+     控件密度基准一处定义，/m/ 页面以 var() 引用（如 h-[var(--m-ctl-h)]、
+     p-[var(--m-card-pad)]），避免逐页散调。只定义变量不强改元素——antd 组件内部
+     布局不经此处强设（组件色/形走 ConfigProvider token，尺寸同理不在此劫持）；
+     页面按需引用，局部覆盖权保留。desktop 不在 .m-app 内，零波及。 */
+  .m-app {
+    --m-ctl-h: 36px; /* 控件高度基准（按钮/输入/筛选器一档） */
+    --m-card-pad: 12px; /* 卡片内距基准 */
+    --m-row-min-h: 44px; /* 列表行触控最小高（触屏可达性下限，只升不降） */
+  }
+
   h1 {
     @apply text-xl font-semibold tracking-tight text-foreground;
   }

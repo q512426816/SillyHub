@@ -69,18 +69,20 @@ describe("MobileTabBar 渲染", () => {
     expect(MOBILE_TABS).toHaveLength(5);
   });
 
-  it("悬浮胶囊形态（quick-a4939946）：胶囊容器圆角+毛玻璃+离底占位", () => {
+  it("悬浮胶囊形态（quick-a4939946 + task-01 遮挡治理）：胶囊容器圆角+实底不透明+离底占位", () => {
     render(<MobileTabBar />);
     const nav = screen.getByTestId("mobile-tab-bar");
     // 外层 nav：离底 12px + 安全区占位（不再贴底通栏）
     expect(nav.className).toContain("bottom-0");
     expect(nav.className).toContain("px-3");
     expect(nav.className).toContain("pb-[calc(env(safe-area-inset-bottom)+12px)]");
-    // 内层 ul：圆角胶囊 + 毛玻璃 + 上限 432px
+    // 内层 ul：圆角胶囊 + 实底不透明（task-01：bg-card/95+毛玻璃滚动透字，改实底）
     const ul = nav.querySelector("ul");
     expect(ul).not.toBeNull();
     expect(ul?.className).toContain("rounded-[var(--radius-lg)]");
-    expect(ul?.className).toContain("backdrop-blur");
+    expect(ul?.className).toContain("bg-card");
+    expect(ul?.className).not.toContain("bg-card/95");
+    expect(ul?.className).not.toContain("backdrop-blur");
     expect(ul?.className).toContain("max-w-[432px]");
   });
 

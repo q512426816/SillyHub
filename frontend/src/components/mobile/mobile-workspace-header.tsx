@@ -65,7 +65,7 @@ export function MobileWorkspaceHeader({
         >
           <ChevronLeft className="h-5 w-5" aria-hidden />
         </button>
-        <div className="min-w-0 flex-1 py-1 pl-1">
+        <div className="min-w-0 flex-1 py-0.5 pl-1">
           <h1 className="truncate text-base font-medium text-foreground">
             {title}
           </h1>
@@ -80,7 +80,9 @@ export function MobileWorkspaceHeader({
         role="tablist"
         aria-label="工作区视图切换"
         data-testid="mobile-workspace-header-tabs"
-        className="flex gap-1 px-2 pb-2"
+        /* task-11 / FR-09：pb-2→pb-1 微收（触摸热区 min-h-[44px] 触控下限不动——
+           降高度与触控可达性冲突，按约束保留；title 行 py-1 同步微收） */
+        className="flex gap-1 px-2 pb-1"
       >
         {WORKSPACE_TABS.map((t) => {
           const selected = t.key === tab;

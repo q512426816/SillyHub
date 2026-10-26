@@ -49,9 +49,11 @@ export function MobileAppShell({
         onBack={onBack}
         actions={actions === undefined ? <ThemeToggle /> : actions}
       />
-      {/* pb-28：避让悬浮胶囊 TabBar（quick-a4939946：TabBar 贴底改悬浮后
-          占位 = 胶囊高 56px + 底距 12px + 安全区，原 pb-20 不够露馅） */}
-      <main className="min-w-0 flex-1 overflow-y-auto px-4 py-3 pb-28 text-[14px] text-foreground">
+      {/* 底部避让（2026-10-26-mobile-four-page-layout-fix task-01）：悬浮胶囊 TabBar
+          占位 = 胶囊高 56px + 底距 12px + 安全区 + 缓冲 8px，原固定 pb-28 在带 home
+          indicator 的真机上被 safe-area 吃掉余量致列表末项被遮。env() 带 0px fallback，
+          桌面浏览器移动模拟（safe-area 恒 0）退化为基础 76px 仍够避让。 */}
+      <main className="min-w-0 flex-1 overflow-y-auto px-4 py-3 pb-[calc(76px+env(safe-area-inset-bottom,0px))] text-[14px] text-foreground">
         {children}
       </main>
       <MobileTabBar activeTab={activeTab} />

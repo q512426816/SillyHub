@@ -282,7 +282,11 @@ export default function MobileWorkspaceSessionsPage() {
         onNewGroup={() => setGroupWizardOpen(true)}
       />
 
-      {/* ＋ 新建会话（原型 .fab：悬浮右下、底部 Tab 上方留白；触摸热区 ≥44px） */}
+      {/* ＋ 新建会话（原型 .fab：悬浮右下、底部 Tab 上方留白；触摸热区 ≥44px）。
+          FAB 占位区间 = 视口底 96~148px（bottom-24 + 高 52）；外壳 main 底部避让
+          （76px+safe-area）只覆盖 TabBar——列表滚动到底时最后一张卡片底边落在
+          76px 处，仍与 FAB 重叠 ~72px（截图③「+」压卡片文字根因）。列表末尾
+          h-20 spacer 让最后内容底边抬到 ≥148px，滚动到底完整可见（盲区④）。 */}
       <button
         type="button"
         onClick={() => setPickerOpen(true)}
@@ -292,6 +296,8 @@ export default function MobileWorkspaceSessionsPage() {
       >
         <Plus className="h-6 w-6" aria-hidden />
       </button>
+      {/* FAB 让位 spacer（task-11 / FR-09）：80px 保守覆盖 72px 净距 + safe-area 余量 */}
+      <div aria-hidden className="h-20" />
 
       {/* 新建两步浮层（贴底抽屉形态；machines 同源注入，两步逻辑零分叉）。
           2026-10-15-workspace-session-agent-only：有绑定机器时转绑定模式

@@ -93,9 +93,10 @@ const SPEC_STRATEGY_OPTIONS: Array<{
   { value: "repo-native", shortLabel: "源项目即真理", label: "源项目即真理（软链接，扫描直接写源项目）" },
 ];
 
-// 页内内联筛选控件统一样式（≥44px 触摸热区、≥14px 正文，R-04）。
+// 页内内联筛选控件统一样式（2026-10-26-mobile-four-page-layout-fix task-10 / FR-08
+// 密度降档：44→36px 对齐 m-app 密度基座 var(--m-ctl-h)，全宽触控足够；≥14px 正文）。
 const FILTER_CONTROL_CLASS =
-  "h-11 w-full rounded-[var(--radius-md)] border border-border bg-card px-3 text-[14px] text-foreground";
+  "h-9 w-full rounded-[var(--radius-md)] border border-border bg-card px-3 text-[14px] text-foreground";
 
 export default function WorkspacesMobilePage() {
   const router = useRouter();
@@ -279,11 +280,13 @@ export default function WorkspacesMobilePage() {
               type="button"
               data-testid="mobile-workspace-create"
               onClick={() => setCreateOpen(true)}
-              className="inline-flex min-h-[44px] w-full items-center justify-center rounded-[var(--radius-md)] bg-primary px-3 text-[14px] font-medium text-primary-foreground transition-colors hover:opacity-90"
+              className="inline-flex h-[var(--m-ctl-h)] w-full items-center justify-center rounded-[var(--radius-md)] bg-primary px-3 text-[14px] font-medium text-primary-foreground transition-colors hover:opacity-90"
             >
               + 创建工作区
             </button>
-            {/* 筛选 q/type/status/owner（页内内联控件，对齐桌面 page.tsx） */}
+            {/* 筛选 q/type/status/owner（页内内联控件，对齐桌面 page.tsx）。
+                task-10 / FR-08 密度收敛：类型/状态/人员三筛选压一行（flex-1 均分，
+                原两行 grid 省一行高）。 */}
             <input
               aria-label="搜索工作区"
               placeholder="搜索别名/名称/slug/路径"
@@ -291,7 +294,7 @@ export default function WorkspacesMobilePage() {
               onChange={(e) => updateFilter(setQuery)(e.target.value)}
               className={FILTER_CONTROL_CLASS}
             />
-            <div className="grid w-full grid-cols-2 gap-2">
+            <div className="flex w-full gap-2">
               <select
                 aria-label="筛选类型"
                 value={typeFilter ?? ""}
@@ -304,7 +307,7 @@ export default function WorkspacesMobilePage() {
                         : (e.target.value as WorkspaceType),
                   )
                 }
-                className={cn(FILTER_CONTROL_CLASS, "px-2")}
+                className={cn(FILTER_CONTROL_CLASS, "min-w-0 flex-1 px-2")}
               >
                 <option value="">全部类型</option>
                 {WORKSPACE_TYPE_OPTIONS.map((o) => (
@@ -318,7 +321,7 @@ export default function WorkspacesMobilePage() {
                 aria-label="筛选状态"
                 value={statusFilter}
                 onChange={(e) => updateFilter(setStatusFilter)(e.target.value)}
-                className={cn(FILTER_CONTROL_CLASS, "px-2")}
+                className={cn(FILTER_CONTROL_CLASS, "min-w-0 flex-1 px-2")}
               >
                 {STATUS_FILTER_OPTIONS.map((o) => (
                   <option key={o.value} value={o.value}>
@@ -326,22 +329,22 @@ export default function WorkspacesMobilePage() {
                   </option>
                 ))}
               </select>
+              {isPlatformAdmin ? (
+                <select
+                  aria-label="筛选人员"
+                  value={ownerUserId ?? ""}
+                  onChange={(e) => updateFilter(setOwnerUserId)(e.target.value || null)}
+                  className={cn(FILTER_CONTROL_CLASS, "min-w-0 flex-1 px-2")}
+                >
+                  <option value="">全部人员</option>
+                  {userOptions.map((u) => (
+                    <option key={u.id} value={u.id}>
+                      {u.display_name ?? u.email ?? u.username}
+                    </option>
+                  ))}
+                </select>
+              ) : null}
             </div>
-            {isPlatformAdmin ? (
-              <select
-                aria-label="筛选人员"
-                value={ownerUserId ?? ""}
-                onChange={(e) => updateFilter(setOwnerUserId)(e.target.value || null)}
-                className={cn(FILTER_CONTROL_CLASS, "px-2")}
-              >
-                <option value="">全部人员</option>
-                {userOptions.map((u) => (
-                  <option key={u.id} value={u.id}>
-                    {u.display_name ?? u.email ?? u.username}
-                  </option>
-                ))}
-              </select>
-            ) : null}
           </>
         }
         renderCard={(w) => (
@@ -447,18 +450,16 @@ function WorkspaceMobileCard({
         ) : null}
       </div>
 
-      {/* 行 3：slug（等宽） */}
-      <p
-        className="truncate font-mono text-[12px] text-muted-foreground"
-        title={w.slug}
-      >
-        {w.slug}
-      </p>
-
-      {/* 行 4：负责人（未绑定态由徽标展示，配置入口在概览页，不再做进门引导） */}
-      {ownerName ? (
-        <p className="text-[12px] text-muted-foreground">负责人：{ownerName}</p>
-      ) : null}
+      {/* 行 3：slug（等宽，truncate 单行）+ 负责人同行右置（task-10 / FR-08 密度
+          收敛：原 slug/负责人两行合并单行——盲区⑤ 超长路径 truncate 防溢出撑高） */}
+      <div className="flex min-w-0 items-center gap-2 text-[12px] text-muted-foreground">
+        <span className="min-w-0 truncate font-mono" title={w.slug}>
+          {w.slug}
+        </span>
+        {ownerName ? (
+          <span className="shrink-0 whitespace-nowrap">负责人：{ownerName}</span>
+        ) : null}
+      </div>
     </div>
   );
 }

@@ -1906,3 +1906,30 @@ describe("SessionConfigBar git 指示项工作树标识（2026-10-25-session-git
     expect(screen.queryByTestId("session-git-worktree-tag")).not.toBeInTheDocument();
   });
 });
+
+describe("SessionConfigBar 模型名截断放宽（2026-10-26-mobile-four-page-layout-fix task-06 / FR-04）", () => {
+  const RENDER_OVERRIDES = {
+    llmProviderId: "prov-kimi",
+    agentProfileId: "prof-1",
+    thinkingLevel: {},
+  };
+
+  it("mobile 下模型 select 宽度放宽至 150px（原 110px 截断「glm-5.3-fla…」观感差）", async () => {
+    renderBar({ variant: "mobile", ...RENDER_OVERRIDES });
+    expect(
+      await screen.findByRole("button", { name: "配置-供应商 Kimi 中转" }),
+    ).toBeInTheDocument();
+    const select = screen.getByTestId("config-model-select") as HTMLSelectElement;
+    expect(select.className).toContain("max-w-[150px]");
+    expect(select.className).not.toContain("max-w-[110px]");
+  });
+
+  it("desktop 锚：模型 select 宽度保持 150px 不变", async () => {
+    renderBar({ ...RENDER_OVERRIDES });
+    expect(
+      await screen.findByRole("button", { name: "配置-供应商 Kimi 中转" }),
+    ).toBeInTheDocument();
+    const select = screen.getByTestId("config-model-select") as HTMLSelectElement;
+    expect(select.className).toContain("max-w-[150px]");
+  });
+});

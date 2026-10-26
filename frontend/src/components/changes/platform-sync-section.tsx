@@ -218,6 +218,12 @@ export interface PlatformSyncSectionProps {
   workspaceId: string;
   /** 移动端紧凑布局：冲突行纵向堆叠 + 按钮铺满 44px 触摸热区（m/ 页适配模式）。 */
   compact?: boolean;
+  /**
+   * 手机端窄视口分支（2026-10-26-mobile-four-page-layout-fix / FR-05，默认 false）：
+   * true 时卡头 extra 统计块改纵向堆叠——不再横向挤占标题空间（修复「平台同步」
+   * 被挤成两行竖排）；缺省 desktop 零变化。
+   */
+  mobile?: boolean;
   className?: string;
   /** 2026-09-28-change-ux-detail-batch：抽屉承载模式——无绑定数据源（原本
    * return null）时渲染中性提示而非空白，避免点开按钮见空抽屉。 */
@@ -227,6 +233,7 @@ export interface PlatformSyncSectionProps {
 export function PlatformSyncSection({
   workspaceId,
   compact = false,
+  mobile = false,
   className,
   drawerHint = false,
 }: PlatformSyncSectionProps) {
@@ -731,9 +738,17 @@ export function PlatformSyncSection({
       title="平台同步"
       bodyPadding="p-0"
       className={className}
-      // 卡头摘要（原型 .card-head）：未决冲突/ghost 计数 + 数据源机器与新鲜度
+      // 卡头摘要（原型 .card-head）：未决冲突/ghost 计数 + 数据源机器与新鲜度。
+      // mobile（FR-05）：统计块纵向堆叠——横向排布的「数据源机器：…」长串会把
+      // SectionCard 头部的标题挤到 min-content 宽（「平台同步」竖排成两行的根因）。
       extra={
-        <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground">
+        <div
+          data-testid="platform-sync-head-meta"
+          className={cn(
+            "flex items-center text-xs text-muted-foreground",
+            mobile ? "flex-col items-start gap-y-0.5" : "flex-wrap gap-x-3 gap-y-1",
+          )}
+        >
           <span>
             未决冲突{" "}
             <b className={cn(renderRows.length > 0 && "text-error")}>

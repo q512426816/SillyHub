@@ -1068,7 +1068,11 @@ export function SessionConfigBar({
               }}
               className={cn(
                 "h-6 cursor-pointer truncate rounded-md border border-border bg-card px-1 text-xs transition-colors hover:bg-muted",
-                mobile ? "max-w-[110px]" : "max-w-[150px]",
+                // mobile 原 max-w-[110px] 放宽到与 desktop 同为 150px
+                // （2026-10-26-mobile-four-page-layout-fix task-06 / FR-04）：110px 下
+                // 「glm-5.3-fla…」截断观感差；放不下时由外层 flex-wrap 自然折行，
+                // 信息完整优先于单行。
+                "max-w-[150px]",
                 !canSwitch &&
                   "cursor-not-allowed text-muted-foreground/60 hover:bg-card",
               )}

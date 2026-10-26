@@ -611,3 +611,25 @@ describe("TurnTimeline 接入门控（FR-01 / FR-04）", () => {
     expect(queryByTestId("turn-live-marquee")).toBeNull();
   });
 });
+
+describe("TurnLiveMarquee 手机端窄视口分支（2026-10-26-mobile-four-page-layout-fix / FR-01）", () => {
+  const entries = deriveLiveMarqueeEntries([thinking("t1", "分析登录链路")]);
+
+  it("mobile=true 隐藏右缘 LIVE 徽标——480px 视口省宽给轨道", () => {
+    const { queryByText } = render(<TurnLiveMarquee entries={entries} mobile />);
+    expect(queryByText("LIVE")).toBeNull();
+  });
+
+  it("desktop 锚：缺省（不传 mobile）LIVE 徽标照旧渲染", () => {
+    const { getByText } = render(<TurnLiveMarquee entries={entries} />);
+    expect(getByText("LIVE")).not.toBeNull();
+  });
+
+  it("宽度基准扣自身 ml-9——修复胶囊右缘恒溢出 36px（结构性修复，desktop/mobile 通用）", () => {
+    const { getByTestId } = render(<TurnLiveMarquee entries={entries} />);
+    const root = getByTestId("turn-live-marquee");
+    expect(root.className).toContain("ml-9");
+    expect(root.className).toContain("w-[min(calc(100%-2.25rem),52rem)]");
+    expect(root.className).not.toContain("w-[min(100%,52rem)]");
+  });
+});

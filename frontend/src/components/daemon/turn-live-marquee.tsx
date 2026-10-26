@@ -603,6 +603,12 @@ export interface TurnLiveMarqueeProps {
    *   - inline：子代理卡片内嵌（w-full / 更低矮 / 贴卡片 indigo 底色）。
    */
   layout?: "bar" | "inline";
+  /**
+   * 手机端窄视口分支（2026-10-26-mobile-four-page-layout-fix / FR-01，默认 false）。
+   * true 时隐藏右缘 LIVE 徽标（480px 视口省 ~30px 宽给轨道）；缺省 desktop 零变化。
+   * 宽度基准修正（ml-9 与 w 的 100% 基准叠加溢出 36px）不分支——desktop 窄窗口同受益。
+   */
+  mobile?: boolean;
   /** 根节点 data-testid（缺省 turn-live-marquee；inline 场景用独立 id 消歧）。 */
   testId?: string;
   /**
@@ -634,6 +640,7 @@ export const TurnLiveMarquee = memo(function TurnLiveMarquee({
   entries,
   reducedMotion,
   layout = "bar",
+  mobile = false,
   testId,
   active = true,
   lastEventAt,
@@ -930,7 +937,9 @@ export const TurnLiveMarquee = memo(function TurnLiveMarquee({
         "sh-live-marquee flex items-center gap-2 overflow-hidden text-[12px] leading-none text-muted-foreground",
         layout === "inline"
           ? "h-7 w-full rounded-md border border-indigo-200/60 bg-card/70 px-2.5 text-[11px]"
-          : "ml-9 h-8 w-[min(100%,52rem)] rounded-full border border-border/70 bg-card px-3 shadow-sm",
+          // 宽度基准扣自身 ml-9（2.25rem）——原 min(100%,52rem) 的 100% 未扣左边距，
+          // 右缘恒溢出 36px（手机端整条被裁的根因；desktop 窄窗口同受益）。
+          : "ml-9 h-8 w-[min(calc(100%-2.25rem),52rem)] rounded-full border border-border/70 bg-card px-3 shadow-sm",
       )}
     >
       {/* 运行状态点：运行中脉冲（reduced-motion 时静止）。等待态（合成条目
@@ -991,12 +1000,15 @@ export const TurnLiveMarquee = memo(function TurnLiveMarquee({
         </div>
       )}
 
-      <span
-        aria-hidden
-        className="relative z-10 shrink-0 text-[9px] tracking-[0.12em] text-muted-foreground/50"
-      >
-        LIVE
-      </span>
+      {/* 右缘 LIVE 徽标：mobile 分支隐藏（窄视口省宽给轨道，FR-01）；desktop 照旧。 */}
+      {!mobile && (
+        <span
+          aria-hidden
+          className="relative z-10 shrink-0 text-[9px] tracking-[0.12em] text-muted-foreground/50"
+        >
+          LIVE
+        </span>
+      )}
     </div>
   );
 });
