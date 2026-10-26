@@ -43,6 +43,7 @@ import {
   TeamWorkerBlockView,
   SubagentTaskLookupContext,
   parseTaskOutputWait,
+  subagentHeaderOf,
 } from "../turn-segment-views";
 import type {
   TextTurnSegment,
@@ -2052,5 +2053,60 @@ describe("过程信息块限宽统一（2026-10-26-subagent-card-width-unify）"
     const { container } = render(<StderrRowView segment={makeStderrSeg()} />);
     const root = container.firstChild as HTMLElement;
     expect(root.className).toContain(MAX_W);
+  });
+});
+
+/* ───────── 10. 回填元数据压回执假终态（2026-10-26-subagent-task-meta-restore） ───────── */
+
+/**
+ * 生产实证（会话 83a96b92）：daemon 同毫秒落库四行无二级排序键，[TASK_STARTED]
+ * 先于 tool_call 段建立时元数据丢失 → async 回执按 8~11 秒差值配对假终态（复现
+ * taskStatus=null / durationText "00:08"）。悬挂回填后 metaStatus=running 在位，
+ * subagentHeaderOf 既有「元数据 > 段三态」优先级自然压住假终态显示——本组用例
+ * 锁定该显示契约（FR-02 验收，显示层零改动的前提验证）。
+ */
+describe("回填元数据压回执假终态（2026-10-26-subagent-task-meta-restore）", () => {
+  it("taskStatus=running 回填后：段三态 ok（回执假终态）不影响头部派生——徽章/走秒锚取元数据", () => {
+    const T0 = Date.parse("2026-10-26T06:18:11.800Z");
+    const seg = makeToolSeg({
+      id: "call_meta",
+      toolName: "Agent",
+      primary: "填 backend 投影簇卡片",
+      subagentType: "general-purpose",
+      // async 回执配对的假终态（生产 8 秒差值实证）。
+      status: "ok",
+      startedAt: T0,
+      endedAt: T0 + 8_000,
+      // 悬挂回填的 [TASK_STARTED] 元数据（running + async + 真实进度校准值）。
+      taskStatus: "running",
+      taskAsync: true,
+      taskElapsedMs: 271_842,
+    });
+    const header = subagentHeaderOf(seg, T0 + 60_000, null);
+    // 元数据优先：状态 running（非段三态 ok 假完成），徽章「后台运行中」。
+    expect(header.status).toBe("running");
+    expect(header.metaStatus).toBe("running");
+    expect(header.badge?.label).toBe("后台运行中");
+    // 走秒锚 = 段 startedAt（派发时刻），非回执 8 秒差值（假时长 00:08 不再出现）。
+    expect(header.durationText).toBe("01:00");
+  });
+
+  it("终态元数据回填（TASK_NOTIFICATION 后到）：显示终态与服务端权威时长", () => {
+    const T0 = Date.parse("2026-10-26T06:18:11.800Z");
+    const seg = makeToolSeg({
+      id: "call_meta2",
+      toolName: "Agent",
+      primary: "填卡终态",
+      status: "ok",
+      startedAt: T0,
+      endedAt: T0 + 8_000,
+      taskStatus: "completed",
+      taskAsync: true,
+      taskElapsedMs: 271_842, // 服务端权威 4:31（真实运行时长）
+    });
+    const header = subagentHeaderOf(seg, T0 + 600_000, null);
+    expect(header.status).toBe("completed");
+    expect(header.badge?.label).toBe("已完成");
+    expect(header.durationText).toBe("04:32"); // 权威时长（271842ms→round 272s），非回执差值 00:08
   });
 });
