@@ -675,7 +675,9 @@ export const ThinkingRowView = memo(function ThinkingRowView({ segment }: Thinki
   const summary = useThinkingSummary(segment.text, segment.streaming);
   const label = processLabel("thinking");
   return (
-    <div className="w-full">
+    // 2026-10-26-subagent-card-width-unify：过程行限宽统一（整行-120px，随容器
+    // 自适应）——与文本段/文件段同口径，思考行不再铺满整行。
+    <div className="w-full max-w-[calc(100%-120px)]">
       <button
         type="button"
         onClick={() => {
@@ -796,7 +798,9 @@ export const ToolRowView = memo(function ToolRowView({ segment }: ToolRowViewPro
       : "等待后台任务输出"
     : (teamSummary ?? segment.primary ?? (segment.raw || null));
   return (
-    <div className="w-full">
+    // 2026-10-26-subagent-card-width-unify：工具调用行限宽统一（整行-120px）——
+    // 用户实证进度视图工具卡铺满整行，与 2026-10-25 宽度统一规范补齐。
+    <div className="w-full max-w-[calc(100%-120px)]">
       <div
         role="button"
         tabIndex={0}
@@ -1055,7 +1059,9 @@ export const SubagentBlockView = memo(function SubagentBlockView({
       <div
         data-segment-id={segment.id}
         className={cn(
-          "w-full self-stretch overflow-hidden rounded-[10px] border border-indigo-200 bg-indigo-50",
+          // 2026-10-26-subagent-card-width-unify：子代理卡限宽统一（整行-120px，
+          // self-stretch→self-start 防 flex 父容器 stretch 反噬，对齐 file 段先例）。
+          "w-full max-w-[calc(100%-120px)] self-start overflow-hidden rounded-[10px] border border-indigo-200 bg-indigo-50",
           active && "ring-1 ring-brand-300",
         )}
       >
@@ -1085,7 +1091,9 @@ export const SubagentBlockView = memo(function SubagentBlockView({
   // 助手等无 Provider 宿主）——同款头部纯展示：不可点击、无展开语义；完整
   // 内部过程由「进度」视图或具备面板能力的宿主承载。
   return (
-    <div className="w-full self-stretch overflow-hidden rounded-[10px] border border-indigo-200 bg-indigo-50">
+    // 2026-10-26-subagent-card-width-unify：无 Provider 纯展示分支同款限宽（与
+    // panel 紧凑卡片分支同口径，两分支视觉一致）。
+    <div className="w-full max-w-[calc(100%-120px)] self-start overflow-hidden rounded-[10px] border border-indigo-200 bg-indigo-50">
       <div
         className={cn(
           "relative flex select-text items-center gap-2 overflow-hidden px-3.5 py-[7px] text-xs",
@@ -1105,7 +1113,9 @@ export const SubagentBlockView = memo(function SubagentBlockView({
  */
 export const StderrRowView = memo(function StderrRowView({ segment }: StderrRowViewProps) {
   return (
-    <div className="flex items-start gap-1.5 px-1 py-0.5 text-[11px] text-amber-700">
+    // 2026-10-26-subagent-card-width-unify：警告行限宽统一（原无 w-full 但在
+    // flex-col 父容器被 stretch 铺满，加 max-w 收口；弹性容器无需 self-start）。
+    <div className="flex max-w-[calc(100%-120px)] items-start gap-1.5 px-1 py-0.5 text-[11px] text-amber-700">
       <span aria-hidden className="shrink-0">
         ⚠
       </span>
@@ -1474,7 +1484,8 @@ export const TeamWorkerBlockView = memo(function TeamWorkerBlockView({
 
   const hasWs = Boolean(workspaceName || workspaceId);
   return (
-    <div className="w-full self-stretch overflow-hidden rounded-[10px] border border-brand-200 bg-brand-50">
+    // 2026-10-26-subagent-card-width-unify：团队分身卡限宽统一（与子代理卡同口径）。
+    <div className="w-full max-w-[calc(100%-120px)] self-start overflow-hidden rounded-[10px] border border-brand-200 bg-brand-50">
       <div
         role="button"
         tabIndex={0}
