@@ -62,13 +62,16 @@ test("文件变更卡：折叠 / 展开 / 降级三态与 100 文件内滚", asy
   await expect(notice).toContainText("1.5s");
   await expect(notice).toContainText("共享工作区");
 
-  await expect(page.getByText("12 个文件变更")).toBeVisible();
+  // 第 3 卡（全 tool，12 文件）头部两段（本轮AGENT/总共）文件数同为 12——
+  // 页级 getByText 子串命中双元素 strict violation（同 +226 教训），改用下方
+  // 已捕获的 header innerText containment 断言。
   // 超时快照的行级统计不可信：第 3 张卡头部不出现 +/− 数字。
   const thirdHeaderText = await page
     .getByTestId("file-changes-card")
     .nth(2)
     .getByTestId("file-changes-header")
     .innerText();
+  expect(thirdHeaderText).toContain("12 个文件变更");
   expect(thirdHeaderText).not.toContain("+");
   expect(thirdHeaderText).not.toContain("−");
 
