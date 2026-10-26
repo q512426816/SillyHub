@@ -1,0 +1,2950 @@
+diff --git a/backend/app/modules/agent/service.py b/backend/app/modules/agent/service.py
+index 049b2bfeb..451390ba5 100644
+--- a/backend/app/modules/agent/service.py
++++ b/backend/app/modules/agent/service.py
+@@ -2722,15 +2722,20 @@ async def _run_daemon_alive(session: AsyncSession, run_id: uuid.UUID) -> bool |
+ 
+ 
+ async def _recheck_deferred_runs(session: AsyncSession, tracked: set[uuid.UUID]) -> set[uuid.UUID]:
+-    """单轮复扫：对仍 running 的追踪项做「日志 recency → daemon 活性 → 锁定重读」三级判。
++    """单轮复扫：对仍 running 的追踪项做「日志 recency → daemon 活性 → askwait 豁免 → 锁定重读」分级判。
+ 
+     - 已非 running（正常收口/其它路径终态化）→ 出列停止追踪；
+     - 日志宽限窗内（daemon 仍在报）→ 保持追踪；
+     - 日志停滞 + daemon 活性门 True（健康 daemon 上的长静默轮：等待用户
+       应答/长工具调用；在线实例须 lease 续约新鲜——停滞即 daemon 重启丢态
+       放弃此 run，活性门回 False）→ 不判死，保持追踪等真终态；
+-    - 日志停滞 + 活性门 False/None（daemon 确死或链路不可解析）→ 行锁重读
+-      后判死（None 退回纯 recency 语义，防永卡兜底不缩小）。
++    - 日志停滞 + 活性门 False/None + askwait 豁免命中（最后 ask 信号晚于
++      最后 user_input 且未超 24h 上限——等待用户回答提问的轮，与启动清理
++      2026-10-12-stale-run-askwait-fix 同函数同上限；生产实证会话 388bb823
++      run 3b601319 无 lease 注入轮活性门不可解析返回 None 后被纯 recency
++      判死的补丁）→ 不判死，保持追踪等真终态；
++    - 其余（活性门 False/None 且非等待交互）→ 行锁重读后判死（None 退回
++      纯 recency 语义，防永卡兜底不缩小）。
+     """
+     # ql-20260815-003：late import 防 agent ↔ daemon 循环依赖（daemon.service 引 agent 模型）。
+     from app.modules.daemon.permission_service import cancel_pending_dialogs_for_run
+@@ -2752,6 +2757,21 @@ async def _recheck_deferred_runs(session: AsyncSession, tracked: set[uuid.UUID])
+             log.info("stale_run_recheck_daemon_alive", run_id=str(run_id))
+             still_tracked.add(run_id)
+             continue
++        # 2026-10-26-session-stage-progress task-06（FR-07 / D-014）：等待用户
++        # 回答提问的轮豁免判死——生产实证会话 388bb823（run 3b601319）：
++        # AskUserQuestion 等待回答期间 daemon_alive=None（对话轮 lease 为会话
++        # 级绑定 agent_run_id=NULL，inject 注入轮按 run 维度查无 lease），日志
++        # 停滞即被复扫判死（stale_run_recheck_cleaned@21:59:06），pending 提问
++        # 联动取消、daemon 侧 agent 成僵尸等待、用户后续消息按 busy 入队永不
++        # 消费、会话楔死。与启动清理 askwait 豁免同函数同上限（24h）纯复用；
++        # 豁免分支不调 cancel_pending_dialogs_for_run——提问保持可答。
++        if await _run_awaiting_user_input(session, run_id, now):
++            log.info(
++                "stale_run_recheck_deferred_awaiting_user",
++                run_id=str(run_id),
++            )
++            still_tracked.add(run_id)
++            continue
+         # 判死路径：先无锁判定已过，仅此处 FOR UPDATE 重读（锁粒度收窄）。
+         locked_run = (
+             await session.execute(
+@@ -2785,11 +2805,12 @@ async def _recheck_stale_runs_loop(deferred_run_ids: list[uuid.UUID]) -> None:
+     """延迟复扫链（FR-01 兜底）：只追踪启动清理的宽限跳过项，集合清空即退出。
+ 
+     睡满宽限窗复扫一轮（``_recheck_deferred_runs``）：正常收口的项自动出列；
+-    daemon 死亡且日志停滞的项判 failed；daemon 仍在线/仍在上报的项保持追踪
+-    等真终态。2026-10-09-stale-recheck-scope 两处收窄：追踪面=启动快照（新
+-    开轮不进判死面，长期僵尸归还 patrol）；判死前叠加 daemon 活性门。单次
+-    迭代异常不终止整链（连续失败超 ``_RECHECK_MAX_CONSECUTIVE_ERRORS`` 才
+-    放弃留 error 痕）。
++    daemon 死亡且日志停滞且非等待交互（askwait 未命中）的项判 failed；daemon
++    仍在线/仍在上报/等待用户回答提问（askwait 豁免，2026-10-26 task-06 与
++    启动清理对齐）的项保持追踪等真终态。2026-10-09-stale-recheck-scope 两处
++    收窄：追踪面=启动快照（新开轮不进判死面，长期僵尸归还 patrol）；判死前
++    叠加 daemon 活性门。单次迭代异常不终止整链（连续失败超
++    ``_RECHECK_MAX_CONSECUTIVE_ERRORS`` 才放弃留 error 痕）。
+     """
+     tracked = set(deferred_run_ids)
+     consecutive_errors = 0
+diff --git a/backend/app/modules/daemon/control_commands.py b/backend/app/modules/daemon/control_commands.py
+index 8244042ef..3757056f1 100644
+--- a/backend/app/modules/daemon/control_commands.py
++++ b/backend/app/modules/daemon/control_commands.py
+@@ -52,6 +52,47 @@ if TYPE_CHECKING:
+ 
+ log = get_logger(__name__)
+ 
++
++# ── 2026-10-26-session-stage-progress task-01（FR-01 / D-011 / D-009）────────
++# turn_phase 派发段发布：dispatched 挂 enqueue_and_push 下发成功点（WS push
++# 成功与待补拉两路径都发——「已发送·等待执行器领取」语义兼容 pending-for-pull），
++# delivered 挂 ack 回执点（daemon 真实确认，非 mark_delivered 的 WS push 成功
++# 点——两者是状态机不同时刻，daemon 离线补拉时差可达分钟级，D-011）。
++# 发布为纯增强（D-009）：publish_turn_phase_event 内部已吞噬（publish_json_event
++# 底座），await 直发时序确定、测试可断言；payload 反查 session_id/run_id 失败
++# （非轮推进指令/手工造数/旧形状缺键）静默跳过，对齐 gc 联动的防御风格。
++
++
++async def _emit_turn_phase(payload: dict[str, Any] | None, phase: str) -> None:
++    """从控制指令 payload 反查 session_id/run_id 并发布 turn_phase（尽力而为）。
++
++    无 session_id/run_id（permission_response 等非轮推进指令）或形状异常 →
++    跳过不发；发布链路（publish_turn_phase_event → publish_json_event）内部
++    吞噬，异常不外溢，指令状态机时序零影响。
++    """
++    raw_sid = (payload or {}).get("session_id")
++    raw_rid = (payload or {}).get("run_id")
++    try:
++        session_id = uuid.UUID(str(raw_sid))
++        run_id = uuid.UUID(str(raw_rid))
++    except (ValueError, TypeError, AttributeError):
++        log.debug("control_command_turn_phase_skipped_no_ids", phase=phase)
++        return
++    try:
++        from app.modules.daemon.run_sync.service import publish_turn_phase_event
++
++        await publish_turn_phase_event(session_id, run_id, phase)
++    except Exception:
++        # D-009 双保险：helper 内部已吞噬，此处防 import 层面等罕见异常外溢。
++        log.warning(
++            "control_command_turn_phase_publish_failed",
++            session_id=str(session_id),
++            run_id=str(run_id),
++            phase=phase,
++            exc_info=True,
++        )
++
++
+ # ── kind 词表（design A2；enqueue 缺省 expires_at 亦按 kind 取值）──────────
+ KIND_SESSION_INJECT = "session_inject"
+ KIND_SESSION_INTERRUPT = "session_interrupt"
+@@ -213,6 +254,11 @@ class ControlCommandService:
+         command_id = uuid.uuid4()
+         enriched = {**(payload or {}), "command_id": str(command_id)}
+         row = await self.enqueue(runtime_id, kind, enriched, command_id=command_id)
++        # turn_phase=dispatched（2026-10-26-session-stage-progress FR-01）：指令
++        # 已落库待发/已发出即「已发送·等待执行器领取」——push 成败都发（待补拉
++        # 照发，词表语义兼容 pending-for-pull）；发布失败不阻断（D-009，helper
++        # 内部吞噬）。
++        await _emit_turn_phase(enriched, "dispatched")
+ 
+         delivered = False
+         try:
+@@ -349,6 +395,15 @@ class ControlCommandService:
+         ]
+         if runtime_id is not None:
+             conditions.append(col(DaemonControlCommand.runtime_id) == runtime_id)
++        # 快照候选（id+payload）：bulk UPDATE 拿不到行级命中，先取「翻转前仍
++        # pending/delivered」的行，UPDATE 后对快照行发 turn_phase=delivered。
++        # SELECT 与 UPDATE 之间被并发 ack 的行（0 翻转）会多发一次 delivered——
++        # 事件幂等（前端 last-write-wins）可接受，不为对账加第二轮查询。
++        snapshot = (
++            await self._session.execute(
++                select(DaemonControlCommand.id, DaemonControlCommand.payload).where(*conditions)
++            )
++        ).all()
+         stmt = (
+             update(DaemonControlCommand)
+             .where(*conditions)
+@@ -359,6 +414,9 @@ class ControlCommandService:
+         )
+         result = await self._session.execute(stmt)
+         await self._session.commit()
++        for _cid, snap_payload in snapshot:
++            # daemon 真实确认点（D-011）：ack 回执 ≠ mark_delivered 的 push 成功。
++            await _emit_turn_phase(snap_payload, "delivered")
+         return int(result.rowcount or 0)
+ 
+     async def gc(self, now: datetime) -> ControlCommandGcResult:
+diff --git a/backend/app/modules/daemon/router/__init__.py b/backend/app/modules/daemon/router/__init__.py
+index d79f7b67f..c6b212382 100644
+--- a/backend/app/modules/daemon/router/__init__.py
++++ b/backend/app/modules/daemon/router/__init__.py
+@@ -199,6 +199,9 @@ _ENDPOINT_ORDER: tuple[str, ...] = (
+     "notify_session_ready",
+     "handle_plan_response",
+     "notify_plan_mode_entered",
++    # 2026-10-26-session-stage-progress task-01：轮阶段上报（紧跟 plan_mode，
++    # 物理注册序在 bash-status 之前）。
++    "notify_turn_phase",
+     "notify_bash_status",
+     "notify_bash_chunk",
+     "notify_agent_task_status",
+diff --git a/backend/app/modules/daemon/router/notify.py b/backend/app/modules/daemon/router/notify.py
+index af7a45771..8a74bef51 100644
+--- a/backend/app/modules/daemon/router/notify.py
++++ b/backend/app/modules/daemon/router/notify.py
+@@ -35,6 +35,7 @@ from app.modules.daemon.router import SessionDep, TaskRunAgentUser, router
+ from app.modules.daemon.run_sync.service import (
+     publish_bash_chunk_event,
+     publish_session_event,
++    publish_turn_phase_event,
+ )
+ from app.modules.daemon.schema import (
+     AgentTaskStatusEvent,
+@@ -42,6 +43,7 @@ from app.modules.daemon.schema import (
+     BashStatusEvent,
+     PlanModeEnteredEvent,
+     PlanResponseRequest,
++    TurnPhaseReportRequest,
+ )
+ from app.modules.daemon.service import DaemonRuntimeNotFound, DaemonService
+ from app.modules.daemon.session.service import SessionService
+@@ -322,6 +324,32 @@ async def notify_plan_mode_entered(
+     return {"ok": True}
+ 
+ 
++@router.post(
++    "/sessions/{session_id}/turn-phase",
++    response_model=dict[str, bool],
++)
++async def notify_turn_phase(
++    session_id: uuid.UUID,
++    data: TurnPhaseReportRequest,
++    session: SessionDep,
++    user: Annotated[User, Depends(get_current_principal)],
++) -> dict[str, bool]:
++    """Receive daemon turn-phase report and forward to frontend SSE (FR-02/FR-03).
++
++    2026-10-26-session-stage-progress task-01：daemon 启动准备段/轮内段边界
++    上报（notifyTurnPhase）→ ``publish_turn_phase_event`` 发布 turn_phase 事件
++    （payload 键 phase/detail/timestamp 与前端信封逐字对齐，D-012）。
++    dispatched/delivered 不收上报——由 backend 控制指令状态机翻转点自产
++    （FR-01），phase 枚举在 DTO 层已封闭。
++
++    越权防护（2026-08-25 P1）：同 notify_bash_status，发布前做 runtime
++    归属校验（404 不泄露存在性）。
++    """
++    await SessionService(session).get_session_for_runtime_owner(session_id, user.id)
++    await publish_turn_phase_event(session_id, data.run_id, data.phase, data.detail)
++    return {"ok": True}
++
++
+ @router.post(
+     "/sessions/{session_id}/bash-status",
+     response_model=dict[str, bool],
+diff --git a/backend/app/modules/daemon/run_sync/service/__init__.py b/backend/app/modules/daemon/run_sync/service/__init__.py
+index f2f96a5db..7e4985bd6 100644
+--- a/backend/app/modules/daemon/run_sync/service/__init__.py
++++ b/backend/app/modules/daemon/run_sync/service/__init__.py
+@@ -101,6 +101,7 @@ from .publish import (  # noqa: E402
+     publish_bash_chunk_event,
+     publish_session_event,
+     publish_submitted_messages,
++    publish_turn_phase_event,
+ )
+ from .sdk_pipeline import (  # noqa: E402
+     _TOOL_USE_RUN_LRU_CAPACITY,
+@@ -140,6 +141,7 @@ __all__ = [
+     "publish_session_event",
+     "publish_sessions_changed",
+     "publish_submitted_messages",
++    "publish_turn_phase_event",
+     "resolve_group_member_identity",
+ ]
+ 
+diff --git a/backend/app/modules/daemon/run_sync/service/publish.py b/backend/app/modules/daemon/run_sync/service/publish.py
+index 06a175e66..aa6801f8c 100644
+--- a/backend/app/modules/daemon/run_sync/service/publish.py
++++ b/backend/app/modules/daemon/run_sync/service/publish.py
+@@ -16,6 +16,7 @@ import json
+ import time
+ import uuid
+ from dataclasses import dataclass, field
++from datetime import UTC, datetime
+ from uuid import UUID
+ 
+ from pydantic import BaseModel
+@@ -345,6 +346,44 @@ async def publish_session_event(session_id: uuid.UUID, payload: dict | BaseModel
+     )
+ 
+ 
++async def publish_turn_phase_event(
++    session_id: uuid.UUID,
++    run_id: uuid.UUID,
++    phase: str,
++    detail: str | None = None,
++) -> None:
++    """发布 ``turn_phase`` 事件到 ``agent_session:{session_id}`` 频道。
++
++    2026-10-26-session-stage-progress task-01（FR-01/FR-06 / D-004 / D-012）：
++    轮阶段事件的统一发布出口——backend 自产（控制指令状态机两翻转点
++    dispatched/delivered）与 daemon 上报转发（turn-phase 端点七个上报值）
++    共用本 helper。
++
++    payload 键名 ``phase`` / ``detail`` / ``timestamp`` 与前端 SSE 信封
++    **逐字对齐**（D-012：SSE 透传层原样转发不改名，键名不一致字段必丢）；
++    ``timestamp`` 为 ISO 8601 UTC（发布时刻）。异常吞噬 + warning（D-009：
++    阶段展示为纯增强，发布失败不阻断控制指令状态机与上报主流程），底座
++    ``publish_json_event`` 已兜，本层不再包 try——调用方语义即"尽力发布"。
++    """
++    payload: dict = {
++        "event": "turn_phase",
++        "session_id": str(session_id),
++        "run_id": str(run_id),
++        "phase": phase,
++        "detail": detail,
++        "timestamp": datetime.now(UTC).isoformat(),
++    }
++    await publish_json_event(
++        redis_getter=_rsvc.get_redis,
++        channel=f"agent_session:{session_id}",
++        payload=payload,
++        log=_rsvc.log,
++        failure_event="turn_phase_redis_publish_failed",
++        session_id=str(session_id),
++        event_type="turn_phase",
++    )
++
++
+ async def publish_bash_chunk_event(event: BashChunkEvent) -> bool:
+     """发布 bash_chunk 事件（100ms 节流 + 8KB 截断），返回是否实际发布。
+ 
+diff --git a/backend/app/modules/daemon/schema.py b/backend/app/modules/daemon/schema.py
+index 3d672c3b9..248e592f0 100644
+--- a/backend/app/modules/daemon/schema.py
++++ b/backend/app/modules/daemon/schema.py
+@@ -1661,6 +1661,33 @@ class PlanModeEnteredEvent(BaseModel):
+     requested_at: str  # ISO 8601 UTC
+ 
+ 
++class TurnPhaseReportRequest(BaseModel):
++    """daemon 轮阶段上报（2026-10-26-session-stage-progress FR-02/FR-03）。
++
++    daemon 在启动准备段/轮内段边界上报（``notifyTurnPhase``）→ backend 校验后
++    经 ``publish_turn_phase_event`` 发布 ``turn_phase`` 事件到
++    ``agent_session:{id}`` 频道，前端 SSE 状态条按词表展示当前阶段。
++
++    - ``run_id`` **必填**（daemon 恒带 firstRunId，daemon.ts:9522 守卫后必非空；
++      前端对缺失 run_id 的 phase 事件防御丢弃，D-013②）；
++    - ``phase`` 7 值封闭枚举——``dispatched``/``delivered`` 由 backend 自产
++      （控制指令状态机翻转点），不收 daemon 上报；
++    - session_id 走路径参数（端点层归属校验），DTO 不带。
++    """
++
++    run_id: uuid.UUID
++    phase: Literal[
++        "skills_sync",
++        "spec_sync",
++        "mcp_prefetch",
++        "spawning",
++        "ready",
++        "inject_received",
++        "first_event",
++    ]
++    detail: str | None = None
++
++
+ class BashStatusEvent(BaseModel):
+     """``bash_status`` 事件——Bash 命令开始/结束状态（FR-02）。
+ 
+diff --git a/backend/app/modules/daemon/tests/test_turn_phase_events.py b/backend/app/modules/daemon/tests/test_turn_phase_events.py
+new file mode 100644
+index 000000000..47eb103b4
+--- /dev/null
++++ b/backend/app/modules/daemon/tests/test_turn_phase_events.py
+@@ -0,0 +1,566 @@
++"""2026-10-26-session-stage-progress task-01：turn_phase 协议与发布全集测试。
++
++Covers FR-01/FR-06 / D-011@v1 / D-012@v1 / D-009@v1:
++  * 上报端点 POST /sessions/{session_id}/turn-phase：无凭据 401 / 跨 owner 与
++    未知会话 404（不泄露存在性）/ 合法上报 200 且 agent_session:{id} 频道收到
++    turn_phase 事件（payload 键名 phase/detail/timestamp 逐字断言，D-012）；
++  * phase 枚举封闭：7 个上报值合法，dispatched/delivered（backend 自产）422；
++  * 控制指令状态机翻转点发布：enqueue_and_push 下发成功点发布 dispatched
++    （push 成功与待补拉两路径都发）、ack 回执点发布 delivered（D-011——非
++    mark_delivered 的 WS push 成功点，负向断言）；
++  * D-009 吞噬：Redis 抛异常时端点/状态机/ack 全部照常，不抛出。
++
++Redis mock（AsyncMock）模式对齐 test_session_plan_bash_events.py；hub 用
++AsyncMock fake（send_session_control 返回可控 bool）。
++"""
++
++from __future__ import annotations
++
++import json
++import uuid
++from datetime import UTC, datetime
++from unittest.mock import AsyncMock, patch
++
++import pytest
++from httpx import AsyncClient
++from sqlalchemy import select
++from sqlalchemy.ext.asyncio import AsyncSession
++
++from app.modules.agent.model import AgentRun, AgentSession
++from app.modules.daemon.control_commands import ControlCommandService
++from app.modules.daemon.model import DaemonControlCommand, DaemonRuntime
++from app.modules.daemon.schema import TurnPhaseReportRequest
++
++# ── Fixtures / helpers（对齐 test_session_plan_bash_events.py 模式）──────────
++
++
++async def _admin_id(session: AsyncSession) -> uuid.UUID:
++    from app.modules.auth.model import User
++
++    admin = (
++        (await session.execute(select(User).where(User.email == "admin@example.com")))
++        .scalars()
++        .first()
++    )
++    assert admin is not None
++    return admin.id
++
++
++async def _create_runtime(session: AsyncSession, user_id: uuid.UUID) -> DaemonRuntime:
++    rt = DaemonRuntime(
++        id=uuid.uuid4(),
++        user_id=user_id,
++        name="daemon",
++        provider="claude",
++        status="online",
++        last_heartbeat_at=datetime.now(UTC),
++    )
++    session.add(rt)
++    await session.commit()
++    await session.refresh(rt)
++    return rt
++
++
++async def _create_session_with_run(
++    session: AsyncSession,
++    user_id: uuid.UUID,
++    runtime_id: uuid.UUID,
++) -> tuple[AgentSession, AgentRun]:
++    ag_session = AgentSession(
++        id=uuid.uuid4(),
++        user_id=user_id,
++        runtime_id=runtime_id,
++        provider="claude",
++        status="active",
++    )
++    run = AgentRun(
++        id=uuid.uuid4(),
++        task_id=uuid.uuid4(),
++        agent_type="claude_code",
++        status="running",
++        agent_session_id=ag_session.id,
++    )
++    session.add_all([ag_session, run])
++    await session.commit()
++    await session.refresh(ag_session)
++    await session.refresh(run)
++    return ag_session, run
++
++
++def _mock_redis() -> AsyncMock:
++    redis = AsyncMock()
++    redis.publish = AsyncMock()
++    return redis
++
++
++def _decode_publishes(redis: AsyncMock) -> list[tuple[str, dict]]:
++    decoded: list[tuple[str, dict]] = []
++    for call in redis.publish.await_args_list:
++        channel, raw = call.args
++        decoded.append((channel, json.loads(raw)))
++    return decoded
++
++
++def _turn_phase_payload(session_id: uuid.UUID, run_id: uuid.UUID) -> dict:
++    return {"run_id": str(run_id), "phase": "skills_sync", "detail": "step 1/5"}
++
++
++# ── ① 上报端点 ───────────────────────────────────────────────────────────────
++
++
++class TestTurnPhaseEndpoint:
++    @pytest.mark.asyncio
++    async def test_no_credentials_401(self, client: AsyncClient) -> None:
++        """无凭据 → 401（daemon X-API-Key / Bearer 均未带）。"""
++        session_id = uuid.uuid4()
++        resp = await client.post(
++            f"/api/daemon/sessions/{session_id}/turn-phase",
++            json=_turn_phase_payload(session_id, uuid.uuid4()),
++        )
++        assert resp.status_code == 401, resp.text
++
++    @pytest.mark.asyncio
++    async def test_non_owner_404_and_no_publish(
++        self,
++        client: AsyncClient,
++        auth_headers: dict[str, str],
++        db_session: AsyncSession,
++    ) -> None:
++        """admin（非 runtime owner）向他人会话上报 → 404，零发布。"""
++        from app.modules.auth.model import User
++
++        other_id = uuid.uuid4()
++        db_session.add(
++            User(
++                id=other_id,
++                email=f"foreign-{other_id}@example.com",
++                password_hash="x",
++                display_name="foreign",
++                status="active",
++            )
++        )
++        await db_session.commit()
++        rt = await _create_runtime(db_session, other_id)
++        ag_session, _run = await _create_session_with_run(db_session, other_id, rt.id)
++        redis = _mock_redis()
++
++        with patch("app.modules.daemon.run_sync.service.get_redis", return_value=redis):
++            resp = await client.post(
++                f"/api/daemon/sessions/{ag_session.id}/turn-phase",
++                json=_turn_phase_payload(ag_session.id, uuid.uuid4()),
++                headers=auth_headers,
++            )
++
++        assert resp.status_code == 404, resp.text
++        assert resp.json()["code"] == "HTTP_404_DAEMON_SESSION_NOT_FOUND"
++        assert redis.publish.await_count == 0
++
++    @pytest.mark.asyncio
++    async def test_unknown_session_404_no_publish(
++        self,
++        client: AsyncClient,
++        auth_headers: dict[str, str],
++    ) -> None:
++        """会话不存在 → 404（与跨 owner 同码，不泄露存在性），零发布。"""
++        session_id = uuid.uuid4()
++        redis = _mock_redis()
++
++        with patch("app.modules.daemon.run_sync.service.get_redis", return_value=redis):
++            resp = await client.post(
++                f"/api/daemon/sessions/{session_id}/turn-phase",
++                json=_turn_phase_payload(session_id, uuid.uuid4()),
++                headers=auth_headers,
++            )
++
++        assert resp.status_code == 404, resp.text
++        assert redis.publish.await_count == 0
++
++    @pytest.mark.asyncio
++    async def test_valid_report_200_and_payload_keys_verbatim(
++        self,
++        client: AsyncClient,
++        auth_headers: dict[str, str],
++        db_session: AsyncSession,
++    ) -> None:
++        """runtime owner 合法上报 → 200 且频道收到 turn_phase，键名逐字（D-012）。"""
++        user_id = await _admin_id(db_session)
++        rt = await _create_runtime(db_session, user_id)
++        ag_session, _run = await _create_session_with_run(db_session, user_id, rt.id)
++        run_id = uuid.uuid4()
++        redis = _mock_redis()
++
++        with patch("app.modules.daemon.run_sync.service.get_redis", return_value=redis):
++            resp = await client.post(
++                f"/api/daemon/sessions/{ag_session.id}/turn-phase",
++                json=_turn_phase_payload(ag_session.id, run_id),
++                headers=auth_headers,
++            )
++
++        assert resp.status_code == 200, resp.text
++        assert resp.json()["ok"] is True
++        publishes = _decode_publishes(redis)
++        assert len(publishes) == 1
++        channel, payload = publishes[0]
++        assert channel == f"agent_session:{ag_session.id}"
++        # D-012 逐字断言：SSE 载荷键恰为 event/session_id/run_id/phase/detail/
++        # timestamp——phase/detail/timestamp 三键与前端信封逐字对齐。
++        assert set(payload.keys()) == {
++            "event",
++            "session_id",
++            "run_id",
++            "phase",
++            "detail",
++            "timestamp",
++        }
++        assert payload["event"] == "turn_phase"
++        assert payload["phase"] == "skills_sync"
++        assert payload["detail"] == "step 1/5"
++        assert payload["run_id"] == str(run_id)
++        assert payload["session_id"] == str(ag_session.id)
++        assert payload["timestamp"]  # ISO 8601 非空
++
++    @pytest.mark.asyncio
++    @pytest.mark.parametrize(
++        "phase",
++        [
++            "skills_sync",
++            "spec_sync",
++            "mcp_prefetch",
++            "spawning",
++            "ready",
++            "inject_received",
++            "first_event",
++        ],
++    )
++    async def test_all_seven_report_phases_accepted(
++        self,
++        phase: str,
++        client: AsyncClient,
++        auth_headers: dict[str, str],
++        db_session: AsyncSession,
++    ) -> None:
++        """7 个上报值全部合法（词表封闭枚举正向覆盖）。"""
++        user_id = await _admin_id(db_session)
++        rt = await _create_runtime(db_session, user_id)
++        ag_session, _run = await _create_session_with_run(db_session, user_id, rt.id)
++        redis = _mock_redis()
++
++        with patch("app.modules.daemon.run_sync.service.get_redis", return_value=redis):
++            resp = await client.post(
++                f"/api/daemon/sessions/{ag_session.id}/turn-phase",
++                json={"run_id": str(uuid.uuid4()), "phase": phase},
++                headers=auth_headers,
++            )
++
++        assert resp.status_code == 200, resp.text
++        assert _decode_publishes(redis)[0][1]["phase"] == phase
++
++    @pytest.mark.asyncio
++    @pytest.mark.parametrize("phase", ["dispatched", "delivered", "unknown_phase"])
++    async def test_backend_owned_and_unknown_phases_rejected(
++        self,
++        phase: str,
++        client: AsyncClient,
++        auth_headers: dict[str, str],
++        db_session: AsyncSession,
++    ) -> None:
++        """dispatched/delivered（backend 自产，D-011）与未知值 → 422 不收上报。"""
++        user_id = await _admin_id(db_session)
++        rt = await _create_runtime(db_session, user_id)
++        ag_session, _run = await _create_session_with_run(db_session, user_id, rt.id)
++        redis = _mock_redis()
++
++        with patch("app.modules.daemon.run_sync.service.get_redis", return_value=redis):
++            resp = await client.post(
++                f"/api/daemon/sessions/{ag_session.id}/turn-phase",
++                json={"run_id": str(uuid.uuid4()), "phase": phase},
++                headers=auth_headers,
++            )
++
++        assert resp.status_code == 422, resp.text
++        assert redis.publish.await_count == 0
++
++    @pytest.mark.asyncio
++    async def test_missing_run_id_422(
++        self,
++        client: AsyncClient,
++        auth_headers: dict[str, str],
++        db_session: AsyncSession,
++    ) -> None:
++        """run_id 必填（D-013②）：缺失 → 422。"""
++        user_id = await _admin_id(db_session)
++        rt = await _create_runtime(db_session, user_id)
++        ag_session, _run = await _create_session_with_run(db_session, user_id, rt.id)
++
++        resp = await client.post(
++            f"/api/daemon/sessions/{ag_session.id}/turn-phase",
++            json={"phase": "ready"},
++            headers=auth_headers,
++        )
++
++        assert resp.status_code == 422, resp.text
++
++
++# ── ② 控制指令状态机翻转点发布（D-011）───────────────────────────────────────
++
++
++class _FakeHub:
++    """send_session_control 可控返回的 fake hub（True=推送成功 / False=不在线）。"""
++
++    def __init__(self, delivered: bool) -> None:
++        self._delivered = delivered
++        self.send_session_control = AsyncMock(return_value=self._delivered)
++
++
++async def _seed_command_row(
++    db_session: AsyncSession,
++    *,
++    payload: dict | None = None,
++) -> tuple[uuid.UUID, uuid.UUID]:
++    """建 runtime + 指令归属环境，返回 (runtime_id, user_id)。"""
++    from app.modules.auth.model import User
++
++    uid = uuid.uuid4()
++    db_session.add(
++        User(
++            id=uid,
++            email=f"tp-{uid}@example.com",
++            password_hash="x",
++            display_name="TP",
++            status="active",
++        )
++    )
++    rt = DaemonRuntime(
++        id=uuid.uuid4(),
++        user_id=uid,
++        name="daemon",
++        provider="claude",
++        status="online",
++        last_heartbeat_at=datetime.now(UTC),
++    )
++    db_session.add(rt)
++    await db_session.commit()
++    return rt.id, uid
++
++
++class TestControlCommandTurnPhase:
++    @pytest.mark.asyncio
++    async def test_enqueue_and_push_publishes_dispatched_on_success(
++        self, db_session: AsyncSession
++    ) -> None:
++        """下发编排 push 成功 → dispatched 发布一次（enqueue 成功点）。"""
++        runtime_id, _uid = await _seed_command_row(db_session)
++        session_id = uuid.uuid4()
++        run_id = uuid.uuid4()
++        redis = _mock_redis()
++
++        with patch("app.modules.daemon.run_sync.service.get_redis", return_value=redis):
++            row, delivered = await ControlCommandService(db_session).enqueue_and_push(
++                daemon_id=runtime_id,
++                runtime_id=runtime_id,
++                kind="session_inject",
++                payload={"session_id": str(session_id), "run_id": str(run_id)},
++                hub=_FakeHub(delivered=True),
++            )
++
++        assert delivered is True
++        assert row.status == "delivered"
++        phases = [p["phase"] for _ch, p in _decode_publishes(redis)]
++        assert phases == ["dispatched"]  # mark_delivered（WS push 成功点）不发——负向
++
++    @pytest.mark.asyncio
++    async def test_enqueue_and_push_publishes_dispatched_when_pending_for_pull(
++        self, db_session: AsyncSession
++    ) -> None:
++        """daemon 不在线（待补拉）→ dispatched 照发（pending-for-pull 语义兼容）。"""
++        runtime_id, _uid = await _seed_command_row(db_session)
++        redis = _mock_redis()
++
++        with patch("app.modules.daemon.run_sync.service.get_redis", return_value=redis):
++            _row, delivered = await ControlCommandService(db_session).enqueue_and_push(
++                daemon_id=runtime_id,
++                runtime_id=runtime_id,
++                kind="session_inject",
++                payload={"session_id": str(uuid.uuid4()), "run_id": str(uuid.uuid4())},
++                hub=_FakeHub(delivered=False),
++            )
++
++        assert delivered is False
++        phases = [p["phase"] for _ch, p in _decode_publishes(redis)]
++        assert phases == ["dispatched"]
++
++    @pytest.mark.asyncio
++    async def test_ack_publishes_delivered_from_payload(self, db_session: AsyncSession) -> None:
++        """ack 回执点 → delivered 发布一次（D-011：daemon 真实确认点）。
++
++        直接落一行 pending（payload 带 session_id/run_id，模拟 enqueue 产物），
++        ack 后按 payload 反查发布。
++        """
++        runtime_id, _uid = await _seed_command_row(db_session)
++        session_id = uuid.uuid4()
++        run_id = uuid.uuid4()
++        row = DaemonControlCommand(
++            runtime_id=runtime_id,
++            kind="session_inject",
++            payload={"session_id": str(session_id), "run_id": str(run_id)},
++            status="pending",
++            created_at=datetime.now(UTC),
++            expires_at=datetime.now(UTC).replace(microsecond=0),
++        )
++        db_session.add(row)
++        await db_session.commit()
++        redis = _mock_redis()
++
++        with patch("app.modules.daemon.run_sync.service.get_redis", return_value=redis):
++            flipped = await ControlCommandService(db_session).ack([row.id])
++
++        assert flipped == 1
++        publishes = _decode_publishes(redis)
++        assert len(publishes) == 1
++        channel, payload = publishes[0]
++        assert channel == f"agent_session:{session_id}"
++        assert payload["phase"] == "delivered"
++        assert payload["run_id"] == str(run_id)
++
++    @pytest.mark.asyncio
++    async def test_mark_delivered_alone_publishes_nothing(self, db_session: AsyncSession) -> None:
++        """mark_delivered（WS push 成功点）单独调用不发布（D-011 负向断言）。"""
++        runtime_id, _uid = await _seed_command_row(db_session)
++        row = DaemonControlCommand(
++            runtime_id=runtime_id,
++            kind="session_inject",
++            payload={"session_id": str(uuid.uuid4()), "run_id": str(uuid.uuid4())},
++            status="pending",
++            created_at=datetime.now(UTC),
++            expires_at=datetime.now(UTC).replace(microsecond=0),
++        )
++        db_session.add(row)
++        await db_session.commit()
++        redis = _mock_redis()
++
++        with patch("app.modules.daemon.run_sync.service.get_redis", return_value=redis):
++            await ControlCommandService(db_session).mark_delivered([row.id])
++
++        assert redis.publish.await_count == 0
++
++    @pytest.mark.asyncio
++    async def test_payload_without_session_ids_skips_publish(
++        self, db_session: AsyncSession
++    ) -> None:
++        """payload 无 session_id/run_id（permission_response 等形状）→ 跳过不发。"""
++        runtime_id, _uid = await _seed_command_row(db_session)
++        row = DaemonControlCommand(
++            runtime_id=runtime_id,
++            kind="session_inject",
++            payload={"x": 1},
++            status="pending",
++            created_at=datetime.now(UTC),
++            expires_at=datetime.now(UTC).replace(microsecond=0),
++        )
++        db_session.add(row)
++        await db_session.commit()
++        redis = _mock_redis()
++
++        with patch("app.modules.daemon.run_sync.service.get_redis", return_value=redis):
++            flipped = await ControlCommandService(db_session).ack([row.id])
++
++        assert flipped == 1
++        assert redis.publish.await_count == 0
++
++
++# ── ③ D-009 吞噬断言 ─────────────────────────────────────────────────────────
++
++
++class TestTurnPhasePublishSwallow:
++    @pytest.mark.asyncio
++    async def test_redis_failure_does_not_break_dispatch(self, db_session: AsyncSession) -> None:
++        """Redis 抛异常 → enqueue_and_push 不抛、指令状态照常落库（D-009）。"""
++        runtime_id, _uid = await _seed_command_row(db_session)
++
++        exploding_redis = AsyncMock()
++        exploding_redis.publish = AsyncMock(side_effect=ConnectionError("redis down"))
++
++        with patch(
++            "app.modules.daemon.run_sync.service.get_redis",
++            return_value=exploding_redis,
++        ):
++            row, delivered = await ControlCommandService(db_session).enqueue_and_push(
++                daemon_id=runtime_id,
++                runtime_id=runtime_id,
++                kind="session_inject",
++                payload={"session_id": str(uuid.uuid4()), "run_id": str(uuid.uuid4())},
++                hub=_FakeHub(delivered=True),
++            )
++
++        assert row.status == "delivered"
++        assert delivered is True  # 状态机照常流转
++
++    @pytest.mark.asyncio
++    async def test_redis_failure_does_not_break_ack(self, db_session: AsyncSession) -> None:
++        """Redis 抛异常 → ack 不抛、翻转照常返回（D-009）。"""
++        runtime_id, _uid = await _seed_command_row(db_session)
++        row = DaemonControlCommand(
++            runtime_id=runtime_id,
++            kind="session_inject",
++            payload={"session_id": str(uuid.uuid4()), "run_id": str(uuid.uuid4())},
++            status="pending",
++            created_at=datetime.now(UTC),
++            expires_at=datetime.now(UTC).replace(microsecond=0),
++        )
++        db_session.add(row)
++        await db_session.commit()
++
++        exploding_redis = AsyncMock()
++        exploding_redis.publish = AsyncMock(side_effect=ConnectionError("redis down"))
++
++        with patch(
++            "app.modules.daemon.run_sync.service.get_redis",
++            return_value=exploding_redis,
++        ):
++            flipped = await ControlCommandService(db_session).ack([row.id])
++
++        assert flipped == 1
++
++    @pytest.mark.asyncio
++    async def test_endpoint_redis_failure_still_200(
++        self,
++        client: AsyncClient,
++        auth_headers: dict[str, str],
++        db_session: AsyncSession,
++    ) -> None:
++        """Redis 抛异常 → 端点仍 200 ok（归属校验通过后发布尽力而为）。"""
++        user_id = await _admin_id(db_session)
++        rt = await _create_runtime(db_session, user_id)
++        ag_session, _run = await _create_session_with_run(db_session, user_id, rt.id)
++
++        exploding_redis = AsyncMock()
++        exploding_redis.publish = AsyncMock(side_effect=ConnectionError("redis down"))
++
++        with patch(
++            "app.modules.daemon.run_sync.service.get_redis",
++            return_value=exploding_redis,
++        ):
++            resp = await client.post(
++                f"/api/daemon/sessions/{ag_session.id}/turn-phase",
++                json=_turn_phase_payload(ag_session.id, uuid.uuid4()),
++                headers=auth_headers,
++            )
++
++        assert resp.status_code == 200, resp.text
++        assert resp.json()["ok"] is True
++
++
++# ── DTO 契约钉子 ─────────────────────────────────────────────────────────────
++
++
++def test_turn_phase_report_request_shape() -> None:
++    """DTO 形状钉子：run_id 必填 / phase 7 值 / detail 可选。"""
++    import pydantic
++
++    assert issubclass(TurnPhaseReportRequest, pydantic.BaseModel)
++    fields = TurnPhaseReportRequest.model_fields
++    assert set(fields.keys()) == {"run_id", "phase", "detail"}
++    assert fields["run_id"].is_required()
++    assert fields["detail"].default is None
++    with pytest.raises(pydantic.ValidationError):
++        TurnPhaseReportRequest(run_id=uuid.uuid4(), phase="dispatched")
+diff --git a/backend/openapi.json b/backend/openapi.json
+index af10ecc29..8bb9b091c 100644
+--- a/backend/openapi.json
++++ b/backend/openapi.json
+@@ -15701,6 +15701,64 @@
+         }
+       }
+     },
++    "/api/daemon/sessions/{session_id}/turn-phase": {
++      "post": {
++        "tags": [
++          "daemon"
++        ],
++        "summary": "Notify Turn Phase",
++        "description": "Receive daemon turn-phase report and forward to frontend SSE (FR-02/FR-03).\n\n2026-10-26-session-stage-progress task-01：daemon 启动准备段/轮内段边界\n上报（notifyTurnPhase）→ ``publish_turn_phase_event`` 发布 turn_phase 事件\n（payload 键 phase/detail/timestamp 与前端信封逐字对齐，D-012）。\ndispatched/delivered 不收上报——由 backend 控制指令状态机翻转点自产\n（FR-01），phase 枚举在 DTO 层已封闭。\n\n越权防护（2026-08-25 P1）：同 notify_bash_status，发布前做 runtime\n归属校验（404 不泄露存在性）。",
++        "operationId": "notify_turn_phase_api_daemon_sessions__session_id__turn_phase_post",
++        "parameters": [
++          {
++            "name": "session_id",
++            "in": "path",
++            "required": true,
++            "schema": {
++              "type": "string",
++              "format": "uuid",
++              "title": "Session Id"
++            }
++          }
++        ],
++        "requestBody": {
++          "required": true,
++          "content": {
++            "application/json": {
++              "schema": {
++                "$ref": "#/components/schemas/TurnPhaseReportRequest"
++              }
++            }
++          }
++        },
++        "responses": {
++          "200": {
++            "description": "Successful Response",
++            "content": {
++              "application/json": {
++                "schema": {
++                  "type": "object",
++                  "additionalProperties": {
++                    "type": "boolean"
++                  },
++                  "title": "Response Notify Turn Phase Api Daemon Sessions  Session Id  Turn Phase Post"
++                }
++              }
++            }
++          },
++          "422": {
++            "description": "Validation Error",
++            "content": {
++              "application/json": {
++                "schema": {
++                  "$ref": "#/components/schemas/HTTPValidationError"
++                }
++              }
++            }
++          }
++        }
++      }
++    },
+     "/api/daemon/sessions/{session_id}/bash-status": {
+       "post": {
+         "tags": [
+@@ -78090,6 +78148,46 @@
+         "title": "TurnOutlineItemRead",
+         "description": "turn-outline 单轮摘要项（FR-01）。\n\n轻列字段直映 ``AgentRun`` 既有列（**不含** agent_profile_snapshot /\nerror_detail 大 JSON，design 做法概述①「轻列」）；``auto_resume_of`` 从\n``AgentRun.metadata_`` 的 ``{\"auto_resume_of\": \"<源 run id>\"}` 抽出（续跑轮\n徽标数据源，普通轮 None）；``prompt_summary`` / ``answer_summary`` 为窗口\n函数抽出的每 run 首条 channel=user_input / 首条非空 channel=stdout 日志的\n截断文本（后端日志通道实际枚举 user_input/stdout/tool_call/stderr，无\n\"reply\" 通道——assistant 文本即 stdout，见 sdk_pipeline._channel_from_event_type），\n无对应日志的行为 None（不伪造）。"
+       },
++      "TurnPhaseReportRequest": {
++        "properties": {
++          "run_id": {
++            "type": "string",
++            "format": "uuid",
++            "title": "Run Id"
++          },
++          "phase": {
++            "type": "string",
++            "enum": [
++              "skills_sync",
++              "spec_sync",
++              "mcp_prefetch",
++              "spawning",
++              "ready",
++              "inject_received",
++              "first_event"
++            ],
++            "title": "Phase"
++          },
++          "detail": {
++            "anyOf": [
++              {
++                "type": "string"
++              },
++              {
++                "type": "null"
++              }
++            ],
++            "title": "Detail"
++          }
++        },
++        "type": "object",
++        "required": [
++          "run_id",
++          "phase"
++        ],
++        "title": "TurnPhaseReportRequest",
++        "description": "daemon 轮阶段上报（2026-10-26-session-stage-progress FR-02/FR-03）。\n\ndaemon 在启动准备段/轮内段边界上报（``notifyTurnPhase``）→ backend 校验后\n经 ``publish_turn_phase_event`` 发布 ``turn_phase`` 事件到\n``agent_session:{id}`` 频道，前端 SSE 状态条按词表展示当前阶段。\n\n- ``run_id`` **必填**（daemon 恒带 firstRunId，daemon.ts:9522 守卫后必非空；\n  前端对缺失 run_id 的 phase 事件防御丢弃，D-013②）；\n- ``phase`` 7 值封闭枚举——``dispatched``/``delivered`` 由 backend 自产\n  （控制指令状态机翻转点），不收 daemon 上报；\n- session_id 走路径参数（端点层归属校验），DTO 不带。"
++      },
+       "TurnTimingSnapshot": {
+         "properties": {
+           "runId": {
+diff --git a/backend/tests/modules/agent/test_stale_run_recheck.py b/backend/tests/modules/agent/test_stale_run_recheck.py
+index 84e8c3ba7..877b26021 100644
+--- a/backend/tests/modules/agent/test_stale_run_recheck.py
++++ b/backend/tests/modules/agent/test_stale_run_recheck.py
+@@ -43,11 +43,19 @@ def _make_running_run() -> AgentRun:
+     )
+ 
+ 
+-async def _add_log(db_session: AsyncSession, run_id: uuid.UUID, age: timedelta) -> None:
++async def _add_log(
++    db_session: AsyncSession,
++    run_id: uuid.UUID,
++    age: timedelta,
++    *,
++    channel: str = "stdout",
++    tool_kind: str | None = None,
++) -> None:
+     db_session.add(
+         AgentRunLog(
+             run_id=run_id,
+-            channel="stdout",
++            channel=channel,
++            tool_kind=tool_kind,
+             timestamp=datetime.now(UTC) - age,
+             content_redacted="[TOOL_USE] bash: echo hi",
+         )
+@@ -256,6 +264,98 @@ async def test_recheck_unresolvable_daemon_falls_back_to_recency(
+     assert refreshed.error_code == "SERVICE_RESTART_INTERRUPTED"
+ 
+ 
++# ── 2026-10-26-session-stage-progress task-06（FR-07 / D-014）askwait 豁免 ──
++
++
++@pytest.mark.asyncio
++async def test_recheck_pardons_awaiting_user_input_run_without_lease(
++    db_session: AsyncSession,
++) -> None:
++    """生产实证复刻（会话 388bb823 / run 3b601319）：AskUserQuestion 等待用户
++    回答的轮（最后 ask 信号晚于最后 user_input）+ 无 lease（对话轮 lease 为
++    会话级绑定，inject 注入轮按 run 维度查无 lease，活性门返回 None）+ 日志
++    停滞超宽限窗 → 豁免判死，保持追踪等真终态。与启动清理 askwait 豁免
++    （2026-10-12-stale-run-askwait-fix）同函数同上限，补齐复扫链盲区。"""
++    run = _make_running_run()
++    db_session.add(run)
++    await db_session.commit()
++    # 用户发消息（-2h）→ agent 提问后等待回答（-18min，停滞 18 分钟 > 宽限窗 10 分钟）
++    await _add_log(db_session, run.id, timedelta(hours=2), channel="user_input")
++    await _add_log(
++        db_session,
++        run.id,
++        STALE_RUN_ACTIVE_GRACE + timedelta(minutes=8),
++        channel="tool_call",
++        tool_kind="ask",
++    )
++
++    still = await agent_service._recheck_deferred_runs(db_session, {run.id})
++
++    assert still == {run.id}
++    refreshed = await db_session.get(AgentRun, run.id)
++    assert refreshed is not None
++    assert refreshed.status == "running"
++    assert refreshed.error_code is None
++    assert refreshed.finished_at is None
++
++
++@pytest.mark.asyncio
++async def test_recheck_still_kills_awaiting_user_input_past_24h(
++    db_session: AsyncSession,
++) -> None:
++    """askwait 豁免受 24h 上限约束（_ASKWAIT_EXEMPT_MAX_AGE）：最后 ask 距今
++    超龄 → 回落既有判死路径（防 daemon 真死 + 提问未答 run 永卡 running，
++    与启动清理同款权衡）。"""
++    run = _make_running_run()
++    db_session.add(run)
++    await db_session.commit()
++    # ask 距今 24h5m（超 24h 上限），user_input 更早（-25h）
++    await _add_log(db_session, run.id, timedelta(hours=25), channel="user_input")
++    await _add_log(
++        db_session,
++        run.id,
++        timedelta(hours=24, minutes=5),
++        channel="tool_call",
++        tool_kind="ask",
++    )
++
++    still = await agent_service._recheck_deferred_runs(db_session, {run.id})
++
++    assert still == set()
++    refreshed = await db_session.get(AgentRun, run.id)
++    assert refreshed is not None
++    assert refreshed.status == "failed"
++    assert refreshed.error_code == "SERVICE_RESTART_INTERRUPTED"
++
++
++@pytest.mark.asyncio
++async def test_recheck_still_kills_when_user_input_after_ask(
++    db_session: AsyncSession,
++) -> None:
++    """最后 user_input 晚于最后 ask（用户已回答、回答后静默）→ askwait 不命中，
++    判死照旧——豁免只保护「未回答的等待」，不保护已回答后的真死静默。"""
++    run = _make_running_run()
++    db_session.add(run)
++    await db_session.commit()
++    # agent 提问（-30min）→ 用户回答（-15min，最后日志，停滞 15 分钟 > 宽限窗）
++    await _add_log(
++        db_session,
++        run.id,
++        STALE_RUN_ACTIVE_GRACE + timedelta(minutes=20),
++        channel="tool_call",
++        tool_kind="ask",
++    )
++    await _add_log(db_session, run.id, timedelta(minutes=15), channel="user_input")
++
++    still = await agent_service._recheck_deferred_runs(db_session, {run.id})
++
++    assert still == set()
++    refreshed = await db_session.get(AgentRun, run.id)
++    assert refreshed is not None
++    assert refreshed.status == "failed"
++    assert refreshed.error_code == "SERVICE_RESTART_INTERRUPTED"
++
++
+ # ── FR-03 循环韧性 ────────────────────────────────────────────────────────
+ 
+ 
+diff --git a/frontend/src/components/daemon/__tests__/turn-status-bar-phase.test.tsx b/frontend/src/components/daemon/__tests__/turn-status-bar-phase.test.tsx
+new file mode 100644
+index 000000000..319fae8dc
+--- /dev/null
++++ b/frontend/src/components/daemon/__tests__/turn-status-bar-phase.test.tsx
+@@ -0,0 +1,141 @@
++/**
++ * 2026-10-26-session-stage-progress task-04（FR-04/FR-05 / D-001/D-003/D-007/D-008）：
++ * TurnStatusBar 阶段展示单测。
++ *
++ * 锁定：
++ *   1. PHASE_LABEL 九值文案与 design 词表逐字一致（导出常量锚定）；
++ *   2. 阶段停留 ≥30s 切警示样式（warning token）+「已等待 N 秒」；<30s 不警示；
++ *   3. first_event 退位：标签回退 STATUS_LABEL、不警示（超时计时失效，D-008）；
++ *   4. 无 currentPhase 渲染与现状一致（零回归锚定——STATUS_LABEL + 无警示类）；
++ *   5. 未知 phase 值显示原始字符串（兼容策略兜底）。
++ *
++ * 测试纪律：fake timers 下 waitFor 不推进——用 advanceTimersByTimeAsync 排干
++ * （testing-gotchas 既有坑）；组件每秒 tick 是局部 state，推进由
++ * advanceTimersByTimeAsync 驱动。
++ */
++import { describe, it, expect, vi, afterEach } from "vitest";
++import { act, render, screen } from "@testing-library/react";
++
++import {
++  PHASE_LABEL,
++  PHASE_TIMEOUT_MS,
++  TurnStatusBar,
++} from "../turn-status-bar";
++import type { TurnSegment } from "../session-log-assembler";
++
++const SEGMENTS: TurnSegment[] = [];
++
++afterEach(() => {
++  vi.useRealTimers();
++});
++
++function renderBar(props: Partial<Parameters<typeof TurnStatusBar>[0]> = {}) {
++  return render(
++    <TurnStatusBar
++      turnStartedAt={null}
++      segments={SEGMENTS}
++      turnStatus="running"
++      {...props}
++    />,
++  );
++}
++
++describe("PHASE_LABEL 词表（design 九值逐字）", () => {
++  it("九个词表值文案与 design.md 阶段词表逐字一致", () => {
++    expect(PHASE_LABEL).toEqual({
++      dispatched: "已发送 · 等待执行器领取",
++      delivered: "执行器已接收",
++      skills_sync: "正在准备技能环境",
++      spec_sync: "正在同步规范文件",
++      mcp_prefetch: "正在加载工具配置",
++      spawning: "正在启动 AI 进程",
++      ready: "已就绪 · 等待 AI 响应",
++      inject_received: "消息已送达 AI",
++      first_event: "AI 开始响应",
++    });
++  });
++
++  it("有 currentPhase 时标签位显示词表文案（替代笼统执行中）", () => {
++    vi.useFakeTimers();
++    const now = Date.now();
++    renderBar({ currentPhase: { phase: "spec_sync", at: now } });
++    expect(screen.getByText("正在同步规范文件")).toBeInTheDocument();
++  });
++});
++
++describe("阶段超时警示（FR-05 / D-003 / D-007）", () => {
++  it("≥30s 切警示样式并追加「已等待 N 秒」", async () => {
++    vi.useFakeTimers();
++    const at = Date.now();
++    const { container } = renderBar({
++      currentPhase: { phase: "spawning", at },
++    });
++    // 推进 31s（跨 30 次 tick + 余量），排干微任务（testing-gotchas 坑）。
++    await act(async () => {
++      await vi.advanceTimersByTimeAsync(PHASE_TIMEOUT_MS + 1_000);
++    });
++    expect(screen.getByText(/已等待 31 秒/)).toBeInTheDocument();
++    expect(container.firstElementChild?.className).toContain(
++      "border-warning/40",
++    );
++    expect(container.firstElementChild?.className).toContain("bg-warning/10");
++  });
++
++  it("30s 内不警示（现状样式）", () => {
++    vi.useFakeTimers();
++    const at = Date.now();
++    const { container } = renderBar({
++      currentPhase: { phase: "spawning", at: at - 5_000 },
++    });
++    expect(screen.queryByText(/已等待/)).not.toBeInTheDocument();
++    expect(container.firstElementChild?.className).toContain(
++      "border-primary/[0.18]",
++    );
++    expect(container.firstElementChild?.className).not.toContain("warning");
++  });
++});
++
++describe("first_event 退位（D-008）", () => {
++  it("first_event 后标签回退状态文案且不警示（超时计时失效）", async () => {
++    vi.useFakeTimers();
++    const at = Date.now() - 60_000; // 远超 30s——退位后不得出现警示
++    const { container } = renderBar({
++      currentPhase: { phase: "first_event", at },
++    });
++    await act(async () => {
++      await vi.advanceTimersByTimeAsync(2_000);
++    });
++    expect(screen.getByText("执行中")).toBeInTheDocument();
++    expect(screen.queryByText(/已等待/)).not.toBeInTheDocument();
++    expect(container.firstElementChild?.className).toContain(
++      "border-primary/[0.18]",
++    );
++  });
++});
++
++describe("零回归锚定（D-010）与未知值兜底", () => {
++  it("无 currentPhase 渲染与现状一致（STATUS_LABEL + 主色样式）", () => {
++    vi.useFakeTimers();
++    const { container } = renderBar();
++    expect(screen.getByText("执行中")).toBeInTheDocument();
++    expect(screen.queryByText(/已等待/)).not.toBeInTheDocument();
++    expect(container.firstElementChild?.className).toContain(
++      "border-primary/[0.18]",
++    );
++    expect(container.firstElementChild?.className).not.toContain("warning");
++  });
++
++  it("currentPhase null 显式传入同样走现状分支", () => {
++    vi.useFakeTimers();
++    renderBar({ currentPhase: null });
++    expect(screen.getByText("执行中")).toBeInTheDocument();
++  });
++
++  it("未知 phase 值显示原始字符串（兼容策略兜底）", () => {
++    vi.useFakeTimers();
++    renderBar({
++      currentPhase: { phase: "future_phase_x", at: Date.now() },
++    });
++    expect(screen.getByText("future_phase_x")).toBeInTheDocument();
++  });
++});
+diff --git a/frontend/src/components/daemon/session-panel/session-panel-dialog.tsx b/frontend/src/components/daemon/session-panel/session-panel-dialog.tsx
+index b0eac00f2..811aa1ce3 100644
+--- a/frontend/src/components/daemon/session-panel/session-panel-dialog.tsx
++++ b/frontend/src/components/daemon/session-panel/session-panel-dialog.tsx
+@@ -83,8 +83,8 @@ import { getProviderCaps } from "@/lib/provider-caps";
+ import { type SessionPanelProps } from "./index";
+ import {
+   HISTORY_PAGE_SIZE, MAX_PROMPT_LEN, MENTION_PLACEHOLDER_HINT, SUSPENDED_SESSION_REFETCH_MS,
+-  TERMINAL_TURN_STATUSES, applyBashStatusEvent, appendBashChunk, BashProgressState,
+-  deriveTurnTerminalStatus, mentionBindOptions, readSessionDraft, replacePlaceholderTurn, writeSessionDraft,
++  TERMINAL_TURN_STATUSES, applyBashStatusEvent, appendBashChunk, applyTurnPhase, BashProgressState,
++  clearTurnPhase, deriveTurnTerminalStatus, mentionBindOptions, readSessionDraft, replacePlaceholderTurn, writeSessionDraft,
+ } from "./turn-state";
+ import {
+   assembledViewOf, ATTACH_POLL_MAX_ATTEMPTS, ATTACH_POLL_MS, getProviderLabel,
+@@ -730,7 +730,9 @@ export function SessionPanelDialog(props: SessionPanelProps) {
+                 const finished =
+                   turn.segments !== undefined ? finishTurn(assembledViewOf(turn)) : null;
+                 return {
+-                  ...turn,
++                  // 2026-10-26-session-stage-progress D-013③：终态同时清 currentPhase
++                  // （clearTurnPhase；防断线错过 first_event 的轮挂假超时警示）。
++                  ...clearTurnPhase(turn),
+                   ...(finished ?? {}),
+                   // turn_completed 收敛到 deriveTurnTerminalStatus 推导的真实终态
+                   // （completed/failed/killed），无论 prior 是 running 还是 interrupting。
+@@ -905,6 +907,17 @@ export function SessionPanelDialog(props: SessionPanelProps) {
+               // useSessionTasks 按 session_id 守卫 + task_id upsert 归并任务清单）。
+               taskPanelRef.current?.applyEvent(event);
+             },
++            // 2026-10-26-session-stage-progress（FR-04 / D-013②）：phase 事件按 run
++            // 归属写入轮 currentPhase（at=本地到达时刻，applyTurnPhase 内取）；缺失
++            // run_id / phase 的事件已在 stream 层白名单拦截，此处双守卫；未知 run
++            // 不建轮（phase 非轮存在性信号）。
++            onTurnPhase: (event) => {
++              if (!event.run_id || !event.phase) return;
++              setView((prev) => ({
++                ...prev,
++                turns: applyTurnPhase(prev.turns, event.run_id, event.phase ?? ""),
++              }));
++            },
+           }),
+           { cursor: streamCursor, initialSync },
+         );
+diff --git a/frontend/src/components/daemon/session-panel/session-panel-page.tsx b/frontend/src/components/daemon/session-panel/session-panel-page.tsx
+index 85388d824..47afcc63e 100644
+--- a/frontend/src/components/daemon/session-panel/session-panel-page.tsx
++++ b/frontend/src/components/daemon/session-panel/session-panel-page.tsx
+@@ -125,7 +125,8 @@ import { cn } from "@/lib/utils";
+ import {
+   HISTORY_PAGE_SIZE, INITIAL_TURN_STATE, MAX_PROMPT_LEN,
+   SUSPENDED_SESSION_REFETCH_MS, TERMINAL_TURN_STATUSES, TurnState, applyBashStatusEvent,
+-  appendBashChunk, applyEnvelopeToTurn, asAssembled, BashProgressState, deriveTurnTerminalStatus,
++  appendBashChunk, applyEnvelopeToTurn, applyTurnPhase, asAssembled, BashProgressState,
++  clearTurnPhase, deriveTurnTerminalStatus,
+   findSegmentById, mentionBindOptions, parseRunStartedAt, readPersistedViewMode,
+   readSessionDraft, replacePlaceholderTurn, subagentBlockNameOf, upsertTurn, writePersistedViewMode, writeSessionDraft,
+ } from "./turn-state";
+@@ -1858,9 +1859,11 @@ export function SessionPanelPage({
+                 (turn) => {
+                   // task-09：finishTurn 清全部 text/thinking 段 streaming 标记
+                   // （流式光标收起，段级状态随终态收敛）；终态与 token 照旧页面胶水写入。
++                  // 2026-10-26-session-stage-progress D-013③：终态同时清 currentPhase
++                  // （clearTurnPhase；防断线错过 first_event 的轮挂假超时警示）。
+                   const finished = finishTurn(asAssembled(turn));
+                   return {
+-                    ...turn,
++                    ...clearTurnPhase(turn),
+                     segments: finished.segments,
+                     output: finished.output,
+                     processItems: finished.processItems,
+@@ -2058,6 +2061,17 @@ export function SessionPanelPage({
+             // useSessionTasks 按 session_id 守卫 + task_id upsert 归并任务清单）。
+             taskPanelRef.current?.applyEvent(event);
+           },
++          // 2026-10-26-session-stage-progress（FR-04 / D-013②）：phase 事件按 run
++          // 归属写入轮 currentPhase（at=本地到达时刻，applyTurnPhase 内取）；缺失
++          // run_id / phase 的事件已在 stream 层白名单拦截，此处双守卫；未知 run
++          // 不建轮（phase 非轮存在性信号）。
++          onTurnPhase: (event) => {
++            if (!event.run_id || !event.phase) return;
++            setTurnState((prev) => ({
++              ...prev,
++              turns: applyTurnPhase(prev.turns, event.run_id, event.phase ?? ""),
++            }));
++          },
+         }),
+         { cursor: streamCursor, initialSync, runsSnapshot },
+       );
+diff --git a/frontend/src/components/daemon/session-panel/turn-state.ts b/frontend/src/components/daemon/session-panel/turn-state.ts
+index 9d21b192d..79e2082fe 100644
+--- a/frontend/src/components/daemon/session-panel/turn-state.ts
++++ b/frontend/src/components/daemon/session-panel/turn-state.ts
+@@ -78,6 +78,55 @@ export interface TurnState {
+ 
+ export const INITIAL_TURN_STATE: TurnState = { turns: [], currentRunId: null };
+ 
++/**
++ * 当前阶段（2026-10-26-session-stage-progress FR-04 / D-013①③）。
++ * phase 为 turn_phase 事件词表值（词表外值透传原始字符串，兜底展示由
++ * TurnStatusBar PHASE_LABEL 缺省分支承接）；at = 客户端本地到达时刻
++ * Date.now()（事件到达时刻，规避服务端/客户端时钟偏移，D-013①）。
++ * task-04 的 currentPhase prop 与本类型同构。
++ */
++export interface TurnPhaseState {
++  phase: string;
++  at: number;
++}
++
++/**
++ * turn_phase 事件 → 轮状态 currentPhase 写入（last-write-wins，乱序到达按事件
++ * 序覆盖）；按 runId 归属路由（含 realRunId 匹配），未命中既有轮时**不建轮**
++ * （phase 不是轮存在性信号——轮由 turn_started/log 创建，孤 phase 丢弃）。
++ * 返回新数组（不可变更新）；未命中/无 runId 原样返回。
++ */
++export function applyTurnPhase(
++  turns: SessionTurnView[],
++  runId: string | null | undefined,
++  phase: string,
++): SessionTurnView[] {
++  if (!runId) return turns;
++  const at = Date.now();
++  let hit = false;
++  const next = turns.map((t) => {
++    if (t.runId === runId || t.realRunId === runId) {
++      hit = true;
++      return { ...t, currentPhase: { phase, at } };
++    }
++    return t;
++  });
++  return hit ? next : turns;
++}
++
++/**
++ * 轮终态清空 currentPhase（D-013③ / R-01「不显示陈旧值」兑现点）：
++ * turn_completed/failed/killed 终态分支消费——防断线错过 first_event 的轮在
++ * 终态后仍挂「正在启动 AI 进程 · 已等待 N 秒」假警示。泛型签名兼容 page
++ * （SessionTurnView）与 dialog（DialogTurnView，segments 可选旧形状）双轮型。
++ */
++export function clearTurnPhase<T extends { currentPhase?: TurnPhaseState | null }>(
++  turn: T,
++): T {
++  if (turn.currentPhase == null) return turn;
++  return { ...turn, currentPhase: null };
++}
++
+ /**
+  * ql-20260918-003：直发占位轮 → 真实 run_id 的合并替换（page/dialog 发送路径共用）。
+  *
+diff --git a/frontend/src/components/daemon/turn-status-bar.tsx b/frontend/src/components/daemon/turn-status-bar.tsx
+index 4472d2b40..1f196a4c0 100644
+--- a/frontend/src/components/daemon/turn-status-bar.tsx
++++ b/frontend/src/components/daemon/turn-status-bar.tsx
+@@ -32,6 +32,8 @@
+ 
+ import { memo, useContext, useEffect, useMemo, useState } from "react";
+ 
++import { cn } from "@/lib/utils";
++
+ import type { ToolTurnSegment, TurnSegment } from "./session-log-assembler";
+ import { SubagentTaskLookupContext } from "./turn-segment-views";
+ import type { SubagentTaskLookup } from "./turn-segment-views";
+@@ -122,9 +124,7 @@ function segmentTs(seg: TurnSegment): number {
+ 
+ /** 单行摘要归一：折叠空白（多行命令/长 JSON 不撑破单行）+ 截断（同装配器 raw 120 字符惯例）。 */
+ function summarizeText(text: string | null | undefined): string | null {
+-  const t = (text ?? "")
+-    .replace(/\s+/g, " ")
+-    .trim();
++  const t = (text ?? "").replace(/\s+/g, " ").trim();
+   return t ? t.slice(0, 120) : null;
+ }
+ 
+@@ -137,14 +137,21 @@ function toolSummary(tool: ToolTurnSegment): string {
+ 
+ /** 子代理展示名（task-07 契约：primary ?? toolName ?? subagentType ?? 「子代理」）。 */
+ function subagentDisplayName(tool: ToolTurnSegment): string {
+-  return summarizeText(tool.primary) ?? tool.toolName ?? tool.subagentType ?? "子代理";
++  return (
++    summarizeText(tool.primary) ??
++    tool.toolName ??
++    tool.subagentType ??
++    "子代理"
++  );
+ }
+ 
+ /**
+  * 树内最新 running 工具段（DFS，ts 最大；同 ts 取 DFS 后到者 = 文档序更晚）。
+  * 容器（tool / subagent_stub）的 children 一并搜索——嵌套子代理内部工具同样候选。
+  */
+-function findLatestRunningTool(segments: TurnSegment[]): ToolTurnSegment | null {
++function findLatestRunningTool(
++  segments: TurnSegment[],
++): ToolTurnSegment | null {
+   let best: ToolTurnSegment | null = null;
+   let bestTs = Number.NEGATIVE_INFINITY;
+   const walk = (list: TurnSegment[]) => {
+@@ -183,7 +190,11 @@ function latestStreamingSummary(segments: TurnSegment[]): string | null {
+     }
+   };
+   walk(segments);
+-  return best === "text" ? "正在输出文本" : best === "thinking" ? "正在思考" : null;
++  return best === "text"
++    ? "正在输出文本"
++    : best === "thinking"
++      ? "正在思考"
++      : null;
+ }
+ 
+ /**
+@@ -263,13 +274,18 @@ function collectSubagents(
+         const snap =
+           lookup == null
+             ? null
+-            : lookup.byToolUseId.get(s.id) ??
++            : (lookup.byToolUseId.get(s.id) ??
+               (s.taskTaskId ? lookup.byTaskId.get(s.taskTaskId) : undefined) ??
+-              null;
++              null);
+         const converged =
+-          s.taskStatus === "running" && snap != null && snap.status !== "running";
+-        const effMetaStatus = converged ? snap.status : (s.taskStatus ?? "running");
+-        const metaDriven = s.taskStatus !== undefined || s.taskAsync !== undefined;
++          s.taskStatus === "running" &&
++          snap != null &&
++          snap.status !== "running";
++        const effMetaStatus = converged
++          ? snap.status
++          : (s.taskStatus ?? "running");
++        const metaDriven =
++          s.taskStatus !== undefined || s.taskAsync !== undefined;
+         const effElapsedMs = converged
+           ? (snap?.elapsedMs ?? s.taskElapsedMs)
+           : s.taskElapsedMs;
+@@ -288,10 +304,16 @@ function collectSubagents(
+           endedAt: s.endedAt,
+           latestActivity: latestActivityWithin(s.children),
+           ...(s.taskStatus !== undefined ? { taskStatus: effMetaStatus } : {}),
+-          ...(effElapsedMs !== undefined ? { taskElapsedMs: effElapsedMs } : {}),
++          ...(effElapsedMs !== undefined
++            ? { taskElapsedMs: effElapsedMs }
++            : {}),
+           ...(s.taskAsync !== undefined ? { taskAsync: s.taskAsync } : {}),
+-          ...(s.taskSummary !== undefined ? { taskSummary: s.taskSummary } : {}),
+-          ...(s.taskToolName !== undefined ? { taskToolName: s.taskToolName } : {}),
++          ...(s.taskSummary !== undefined
++            ? { taskSummary: s.taskSummary }
++            : {}),
++          ...(s.taskToolName !== undefined
++            ? { taskToolName: s.taskToolName }
++            : {}),
+         });
+       }
+       collectSubagents(s.children, out, lookup);
+@@ -331,7 +353,9 @@ export function deriveTurnActivity(
+     toolCount: countTools(segments),
+     subagents,
+     currentActivity:
+-      segments.length === 0 ? null : (latestActivityWithin(segments) ?? "思考中"),
++      segments.length === 0
++        ? null
++        : (latestActivityWithin(segments) ?? "思考中"),
+   };
+ }
+ 
+@@ -347,6 +371,13 @@ export interface TurnStatusBarProps {
+   segments: TurnSegment[];
+   /** 轮次状态（仅非终态渲染本组件，终态由消费方不挂载）。 */
+   turnStatus: "pending" | "running" | "interrupting";
++  /**
++   * 当前阶段（2026-10-26-session-stage-progress FR-04/FR-05，task-03 写入轮状态）：
++   * phase 为 turn_phase 事件词表值、at 为前端本地到达时刻（D-013①）。
++   * undefined/null = 无 phase 信号（老 daemon / 断线 / 轮终态已清理）→ 渲染路径
++   * 与现状完全一致（零回归，D-010）。
++   */
++  currentPhase?: { phase: string; at: number } | null;
+ }
+ 
+ const STATUS_LABEL: Record<TurnStatusBarProps["turnStatus"], string> = {
+@@ -355,6 +386,26 @@ const STATUS_LABEL: Record<TurnStatusBarProps["turnStatus"], string> = {
+   interrupting: "打断中",
+ };
+ 
++/**
++ * 阶段词表中文文案（2026-10-26-session-stage-progress design 阶段词表 9 值，
++ * 三端共同契约——backend dispatched/delivered 自产 + daemon 七值上报；文案与
++ * design.md 词表逐字一致，测试锚定本导出）。
++ */
++export const PHASE_LABEL: Record<string, string> = {
++  dispatched: "已发送 · 等待执行器领取",
++  delivered: "执行器已接收",
++  skills_sync: "正在准备技能环境",
++  spec_sync: "正在同步规范文件",
++  mcp_prefetch: "正在加载工具配置",
++  spawning: "正在启动 AI 进程",
++  ready: "已就绪 · 等待 AI 响应",
++  inject_received: "消息已送达 AI",
++  first_event: "AI 开始响应",
++};
++
++/** 阶段超时警示阈值（D-007：前端常量不做配置项）。 */
++export const PHASE_TIMEOUT_MS = 30_000;
++
+ /** 具体秒数显示门槛（对齐 deepseek TurnStatus：前 15 秒保持简洁只显文案）。 */
+ export const TURN_STATUS_ELAPSED_MIN_MS = 15_000;
+ 
+@@ -375,6 +426,7 @@ export const TurnStatusBar = memo(function TurnStatusBar({
+   turnStartedAt,
+   segments,
+   turnStatus,
++  currentPhase,
+ }: TurnStatusBarProps) {
+   // 每秒 tick：仅组件内部 state（卸载清理）；同一 tick 同时驱动轮计时与（task-08 消费
+   // deriveTurnActivity.startedAt 时的）子代理运行时长，展示侧各自 (now - 锚点) 派生。
+@@ -396,9 +448,11 @@ export const TurnStatusBar = memo(function TurnStatusBar({
+     [activity],
+   );
+ 
+-  const elapsedMs = turnStartedAt != null ? Math.max(0, now - turnStartedAt) : null;
++  const elapsedMs =
++    turnStartedAt != null ? Math.max(0, now - turnStartedAt) : null;
+   // 前 15 秒不显具体秒数（deepseek TurnStatus 对齐），≥15s 才显示 mm:ss。
+-  const showElapsed = elapsedMs != null && elapsedMs >= TURN_STATUS_ELAPSED_MIN_MS;
++  const showElapsed =
++    elapsedMs != null && elapsedMs >= TURN_STATUS_ELAPSED_MIN_MS;
+   // quick-3c85b05e（2026-09-15 轮次时间三段显示）：运行中补开始时刻（HH:MM:SS，
+   // 锚点存在即显示——与走秒的 ≥15s 门槛解耦，开始时间一秒内也有信息量）。
+   const startClock =
+@@ -410,13 +464,47 @@ export const TurnStatusBar = memo(function TurnStatusBar({
+         })()
+       : null;
+ 
++  // ── 2026-10-26-session-stage-progress（FR-04/FR-05 / D-001/D-003/D-007/D-008）──
++  // 阶段展示判定序（design 组合推演定序：先 phase 存在性 → 退位 → 超时 → 正常）：
++  //   1. currentPhase 缺省（undefined/null）→ 全部现状分支（零回归锚点）；
++  //   2. phase === "first_event" → 退位：标签位回退 STATUS_LABEL[turnStatus]，
++  //      右侧活动摘要接管（D-008；退位后超时计时随之失效——不警示）；
++  //   3. 停留 ≥ PHASE_TIMEOUT_MS → 整条切警示样式（warning token）+「已等待 N 秒」；
++  //   4. 其余 → PHASE_LABEL[phase]，未知值显示原始字符串（兼容策略兜底）。
++  const phaseRetired = currentPhase?.phase === "first_event";
++  const phaseElapsedMs =
++    currentPhase && !phaseRetired ? Math.max(0, now - currentPhase.at) : null;
++  const phaseTimedOut =
++    phaseElapsedMs != null && phaseElapsedMs >= PHASE_TIMEOUT_MS;
++  const statusLabel =
++    currentPhase && !phaseRetired
++      ? (PHASE_LABEL[currentPhase.phase] ?? currentPhase.phase)
++      : STATUS_LABEL[turnStatus];
++
+   return (
+-    <div className="flex items-center gap-2.5 rounded-md border border-primary/[0.18] bg-primary/[0.06] px-3 py-1.5 text-xs">
++    <div
++      className={cn(
++        "flex items-center gap-2.5 rounded-md border px-3 py-1.5 text-xs",
++        phaseTimedOut
++          ? "border-warning/40 bg-warning/10"
++          : "border-primary/[0.18] bg-primary/[0.06]",
++      )}
++    >
+       <span
+         aria-hidden
+         className="h-3 w-3 shrink-0 animate-spin rounded-full border-2 border-primary/25 border-t-primary"
+       />
+-      <span className="shrink-0 text-muted-foreground">{STATUS_LABEL[turnStatus]}</span>
++      <span
++        className={cn(
++          "shrink-0",
++          phaseTimedOut ? "text-warning" : "text-muted-foreground",
++        )}
++      >
++        {statusLabel}
++        {phaseTimedOut && phaseElapsedMs != null && (
++          <> · 已等待 {Math.floor(phaseElapsedMs / 1000)} 秒</>
++        )}
++      </span>
+       {startClock && (
+         <span className="shrink-0 text-muted-foreground" title="本轮开始时间">
+           开始 {startClock}
+@@ -433,7 +521,10 @@ export const TurnStatusBar = memo(function TurnStatusBar({
+             |
+           </span>
+           <span className="shrink-0 text-muted-foreground">
+-            工具 <span className="font-medium text-foreground">{activity.toolCount}</span>
++            工具{" "}
++            <span className="font-medium text-foreground">
++              {activity.toolCount}
++            </span>
+           </span>
+         </>
+       )}
+@@ -443,7 +534,11 @@ export const TurnStatusBar = memo(function TurnStatusBar({
+             |
+           </span>
+           <span className="shrink-0 text-muted-foreground">
+-            子代理 <span className="font-medium text-foreground">{runningSubagents}</span> 运行中
++            子代理{" "}
++            <span className="font-medium text-foreground">
++              {runningSubagents}
++            </span>{" "}
++            运行中
+           </span>
+         </>
+       )}
+diff --git a/frontend/src/components/daemon/turn-timeline.tsx b/frontend/src/components/daemon/turn-timeline.tsx
+index 8f6b4a7a3..fe3664294 100644
+--- a/frontend/src/components/daemon/turn-timeline.tsx
++++ b/frontend/src/components/daemon/turn-timeline.tsx
+@@ -76,6 +76,8 @@ import {
+ // 2026-09-09-sessions-visual-refresh task-05/06（D-003@v1）：消息角色化共享构件
+ import { ChatMessageAvatar, RoundDivider } from "@/components/chat";
+ import { TurnStatusBar } from "@/components/daemon/turn-status-bar";
++// 2026-10-26-session-stage-progress（FR-04）：currentPhase 类型（turn-state 单源）。
++import type { TurnPhaseState } from "@/components/daemon/session-panel/turn-state";
+ import {
+   TurnLiveMarquee,
+   deriveLiveMarqueeEntries,
+@@ -325,6 +327,14 @@ export interface SessionTurnView {
+    * null/缺省（老 daemon / 无采样 / 运行中）→ 保持近似空档并标「近似」。
+    */
+   timing?: TurnTimingSnapshot | null;
++  /**
++   * 2026-10-26-session-stage-progress（FR-04 / D-013①③）：当前阶段（turn_phase
++   * 事件写入，applyTurnPhase last-write-wins；轮终态 clearTurnPhase 清空）。
++   * 挂轮状态（非组件局部 state）——面板重挂载不丢失（Review Focus #3）。
++   * 缺省/undefined = 无 phase 信号（老 daemon / 断线 / 已清理）→ 状态条走现状
++   * 渲染路径（零回归，D-010）。
++   */
++  currentPhase?: TurnPhaseState | null;
+   /**
+    * 2026-07-29-model-error-visibility / FR-04：turn 终态=failed 时拉取的结构化错误
+    * 详情（GET /sessions/{id}/runs 的 error_detail 经 buildErrorLogItem 映射）。
+@@ -1135,6 +1145,9 @@ const TurnRow = memo(function TurnRow({
+                       ? { input: turn.inputTokens, output: turn.outputTokens }
+                       : null
+                   }
++                  // 2026-10-26-session-stage-progress（FR-04）：轮当前阶段透传
++                  // 状态条（缺省 undefined → 状态条现状分支，零回归）。
++                  currentPhase={turn.currentPhase}
+                   />
+                 </>
+               ) : (
+@@ -2255,6 +2268,7 @@ function SegmentedTurnBody({
+   markerAnswered,
+   onMarkerSubmit,
+   turnTokens,
++  currentPhase,
+ }: {
+   segments: TurnSegment[];
+   turnStatus: TurnUiStatus;
+@@ -2269,6 +2283,8 @@ function SegmentedTurnBody({
+   onMarkerSubmit: (_prompt: string) => void;
+   /** 2026-10-25-marquee-awaiting-real-data：轮级累计 token（tokens 事件实时更新）。 */
+   turnTokens?: { input: number | null; output: number | null } | null;
++  /** 2026-10-26-session-stage-progress（FR-04）：轮当前阶段（turn 对象透传）。 */
++  currentPhase?: TurnPhaseState | null;
+ }) {
+   const turnDialogs = useMemo(
+     () => dialogHistory.filter((d) => d.run_id === runKey),
+@@ -2367,7 +2383,12 @@ function SegmentedTurnBody({
+           段时间线之前，全宽。 */}
+       {(turnStatus === "pending" || turnStatus === "running" || turnStatus === "interrupting") &&
+         turnStartedAt != null && (
+-          <TurnStatusBar turnStartedAt={turnStartedAt} turnStatus={turnStatus} segments={segments} />
++          <TurnStatusBar
++            turnStartedAt={turnStartedAt}
++            turnStatus={turnStatus}
++            segments={segments}
++            currentPhase={currentPhase ?? null}
++          />
+         )}
+       {/* 「全部（进度）」：完整段时间线（段 + AskUser 按时间戳穿插）。空轮不渲染空容器。 */}
+       {timeline != null && timeline.length > 0 && (
+diff --git a/frontend/src/lib/api-types.ts b/frontend/src/lib/api-types.ts
+index 942355723..795d64d57 100644
+--- a/frontend/src/lib/api-types.ts
++++ b/frontend/src/lib/api-types.ts
+@@ -5979,6 +5979,35 @@ export interface paths {
+         patch?: never;
+         trace?: never;
+     };
++    "/api/daemon/sessions/{session_id}/turn-phase": {
++        parameters: {
++            query?: never;
++            header?: never;
++            path?: never;
++            cookie?: never;
++        };
++        get?: never;
++        put?: never;
++        /**
++         * Notify Turn Phase
++         * @description Receive daemon turn-phase report and forward to frontend SSE (FR-02/FR-03).
++         *
++         *     2026-10-26-session-stage-progress task-01：daemon 启动准备段/轮内段边界
++         *     上报（notifyTurnPhase）→ ``publish_turn_phase_event`` 发布 turn_phase 事件
++         *     （payload 键 phase/detail/timestamp 与前端信封逐字对齐，D-012）。
++         *     dispatched/delivered 不收上报——由 backend 控制指令状态机翻转点自产
++         *     （FR-01），phase 枚举在 DTO 层已封闭。
++         *
++         *     越权防护（2026-08-25 P1）：同 notify_bash_status，发布前做 runtime
++         *     归属校验（404 不泄露存在性）。
++         */
++        post: operations["notify_turn_phase_api_daemon_sessions__session_id__turn_phase_post"];
++        delete?: never;
++        options?: never;
++        head?: never;
++        patch?: never;
++        trace?: never;
++    };
+     "/api/daemon/sessions/{session_id}/bash-status": {
+         parameters: {
+             query?: never;
+@@ -29014,6 +29043,34 @@ export interface components {
+             /** Answer Summary */
+             answer_summary?: string | null;
+         };
++        /**
++         * TurnPhaseReportRequest
++         * @description daemon 轮阶段上报（2026-10-26-session-stage-progress FR-02/FR-03）。
++         *
++         *     daemon 在启动准备段/轮内段边界上报（``notifyTurnPhase``）→ backend 校验后
++         *     经 ``publish_turn_phase_event`` 发布 ``turn_phase`` 事件到
++         *     ``agent_session:{id}`` 频道，前端 SSE 状态条按词表展示当前阶段。
++         *
++         *     - ``run_id`` **必填**（daemon 恒带 firstRunId，daemon.ts:9522 守卫后必非空；
++         *       前端对缺失 run_id 的 phase 事件防御丢弃，D-013②）；
++         *     - ``phase`` 7 值封闭枚举——``dispatched``/``delivered`` 由 backend 自产
++         *       （控制指令状态机翻转点），不收 daemon 上报；
++         *     - session_id 走路径参数（端点层归属校验），DTO 不带。
++         */
++        TurnPhaseReportRequest: {
++            /**
++             * Run Id
++             * Format: uuid
++             */
++            run_id: string;
++            /**
++             * Phase
++             * @enum {string}
++             */
++            phase: "skills_sync" | "spec_sync" | "mcp_prefetch" | "spawning" | "ready" | "inject_received" | "first_event";
++            /** Detail */
++            detail?: string | null;
++        };
+         /**
+          * TurnTimingSnapshot
+          * @description 一轮模型调用时序（``GET /sessions/{id}/runs`` 的 ``timing``）。
+@@ -40415,6 +40472,43 @@ export interface operations {
+             };
+         };
+     };
++    notify_turn_phase_api_daemon_sessions__session_id__turn_phase_post: {
++        parameters: {
++            query?: never;
++            header?: never;
++            path: {
++                session_id: string;
++            };
++            cookie?: never;
++        };
++        requestBody: {
++            content: {
++                "application/json": components["schemas"]["TurnPhaseReportRequest"];
++            };
++        };
++        responses: {
++            /** @description Successful Response */
++            200: {
++                headers: {
++                    [name: string]: unknown;
++                };
++                content: {
++                    "application/json": {
++                        [key: string]: boolean;
++                    };
++                };
++            };
++            /** @description Validation Error */
++            422: {
++                headers: {
++                    [name: string]: unknown;
++                };
++                content: {
++                    "application/json": components["schemas"]["HTTPValidationError"];
++                };
++            };
++        };
++    };
+     notify_bash_status_api_daemon_sessions__session_id__bash_status_post: {
+         parameters: {
+             query?: never;
+diff --git a/frontend/src/lib/daemon/__tests__/session-stream-turn-phase.test.ts b/frontend/src/lib/daemon/__tests__/session-stream-turn-phase.test.ts
+new file mode 100644
+index 000000000..457e0158b
+--- /dev/null
++++ b/frontend/src/lib/daemon/__tests__/session-stream-turn-phase.test.ts
+@@ -0,0 +1,215 @@
++/**
++ * 2026-10-26-session-stage-progress task-03（FR-04/FR-06 / D-010/D-012/D-013）：
++ * turn_phase 事件前端全链路单测。
++ *
++ * stream 层（vi.mock fetch-sse，手动派发 onmessage）：
++ *   ① turn_phase 事件 → onTurnPhase envelope（phase 透传，词表外值不丢弃）；
++ *   ② 缺失 run_id → 白名单拦截 onError，onTurnPhase 不触发（D-013②）；
++ *   ③ keepalive（无 event 载荷）→ onHeartbeat 路径，不触发 onTurnPhase。
++ * turn-state 层（纯函数）：
++ *   ④ applyTurnPhase 写入 currentPhase（at=本地时刻）+ 乱序 last-write-wins；
++ *   ⑤ 跨 run 不污染（run_id / realRunId 归属路由）；未知 run 不建轮；
++ *   ⑥ clearTurnPhase 终态清理（有值清 null / 无值幂等）。
++ */
++import { describe, it, expect, vi, beforeEach } from "vitest";
++
++import {
++  applyTurnPhase,
++  clearTurnPhase,
++} from "@/components/daemon/session-panel/turn-state";
++import type { SessionTurnView } from "@/components/daemon/turn-timeline";
++import type { FetchSseConnection } from "@/lib/fetch-sse";
++import { streamSession } from "../session-stream";
++import type { SessionStreamEnvelope } from "../session-sse";
++
++// ── mock 依赖（streamSession 触达面）────────────────────────────────────────
++
++const connections: FetchSseConnection[] = [];
++
++vi.mock("@/lib/fetch-sse", () => ({
++  fetchSse: vi.fn(() => {
++    const conn = {
++      onmessage: null,
++      onopen: null,
++      onerror: null,
++      onHeartbeat: null,
++      readyState: 1,
++      addEventListener: vi.fn(() => vi.fn()),
++      close: vi.fn(),
++    };
++    connections.push(conn as unknown as FetchSseConnection);
++    return conn as unknown as FetchSseConnection;
++  }),
++}));
++
++vi.mock("@/stores/session", () => ({
++  useSession: { getState: () => ({ accessToken: "tok" }) },
++}));
++
++vi.mock("@/lib/api", () => ({
++  getApiBaseUrl: () => "http://test.local",
++}));
++
++vi.mock("../sessions", () => ({
++  listSessionRuns: vi.fn(async () => []),
++  getAgentSessionLogs: vi.fn(async () => ({ logs: [], hasMore: false })),
++}));
++
++function requiredHandlers() {
++  return {
++    onTurnStarted: vi.fn(),
++    onLog: vi.fn(),
++    onTurnCompleted: vi.fn(),
++    onSessionEnded: vi.fn(),
++    onError: vi.fn(),
++  };
++}
++
++function send(conn: FetchSseConnection, payload: unknown): void {
++  actHandlers(conn);
++  conn.onmessage?.({ data: JSON.stringify(payload), lastEventId: "" });
++}
++
++function actHandlers(conn: FetchSseConnection): void {
++  if (!conn.onmessage) {
++    throw new Error("wireConnection 未建立（fetchSse mock 未被消费）");
++  }
++}
++
++// ── stream 层 ────────────────────────────────────────────────────────────────
++
++describe("stream 层：turn_phase 分发（D-012/D-013②）", () => {
++  beforeEach(() => {
++    connections.length = 0;
++  });
++
++  it("① turn_phase 事件透传 onTurnPhase（词表外值不丢弃）", () => {
++    const handlers = {
++      ...requiredHandlers(),
++      onTurnPhase: vi.fn(),
++    };
++    streamSession("sess-1", handlers);
++    send(connections[0]!, {
++      event: "turn_phase",
++      session_id: "sess-1",
++      run_id: "run-1",
++      phase: "future_phase_x",
++      detail: null,
++      timestamp: "2026-10-26T01:00:00Z",
++    });
++    expect(handlers.onTurnPhase).toHaveBeenCalledTimes(1);
++    const env = handlers.onTurnPhase.mock.calls[0]![0] as SessionStreamEnvelope;
++    expect(env.phase).toBe("future_phase_x");
++    expect(env.run_id).toBe("run-1");
++  });
++
++  it("② 缺失 run_id 的 turn_phase → onError 拦截，onTurnPhase 不触发（D-013②）", () => {
++    const handlers = {
++      ...requiredHandlers(),
++      onTurnPhase: vi.fn(),
++    };
++    streamSession("sess-1", handlers);
++    send(connections[0]!, {
++      event: "turn_phase",
++      session_id: "sess-1",
++      phase: "ready",
++    });
++    expect(handlers.onTurnPhase).not.toHaveBeenCalled();
++    expect(handlers.onError).toHaveBeenCalledTimes(1);
++    expect(String(handlers.onError.mock.calls[0]![0])).toContain(
++      "Missing run_id on turn_phase",
++    );
++  });
++
++  it("③ keepalive 无 event 载荷 → onHeartbeat，不触发 onTurnPhase", () => {
++    const handlers = {
++      ...requiredHandlers(),
++      onHeartbeat: vi.fn(),
++      onTurnPhase: vi.fn(),
++    };
++    streamSession("sess-1", handlers);
++    send(connections[0]!, { ts: "2026-10-26T01:00:00Z" });
++    expect(handlers.onHeartbeat).toHaveBeenCalledTimes(1);
++    expect(handlers.onTurnPhase).not.toHaveBeenCalled();
++  });
++});
++
++// ── turn-state 层（纯函数）───────────────────────────────────────────────────
++
++function makeTurn(
++  runId: string,
++  overrides: Partial<SessionTurnView> = {},
++): SessionTurnView {
++  return {
++    runId,
++    turn: 1,
++    prompt: "",
++    output: "",
++    status: "running",
++    seenLogIds: new Set<string>(),
++    inputTokens: null,
++    outputTokens: null,
++    ...overrides,
++  };
++}
++
++describe("applyTurnPhase（FR-04 / D-013①②）", () => {
++  it("按 runId 写入 currentPhase，at 为本地到达时刻", () => {
++    const before = Date.now();
++    const turns = [makeTurn("run-1")];
++    const next = applyTurnPhase(turns, "run-1", "spec_sync");
++    const phase = next[0]!.currentPhase;
++    expect(phase?.phase).toBe("spec_sync");
++    expect(phase!.at).toBeGreaterThanOrEqual(before);
++    expect(next[0]).not.toBe(turns[0]);
++  });
++
++  it("乱序到达 last-write-wins（同轮覆盖式刷新）", () => {
++    let turns = [makeTurn("run-1")];
++    turns = applyTurnPhase(turns, "run-1", "spawning");
++    turns = applyTurnPhase(turns, "run-1", "ready");
++    expect(turns[0]!.currentPhase?.phase).toBe("ready");
++  });
++
++  it("跨 run 不污染：run-1 事件不动 run-2 轮", () => {
++    const turns = [makeTurn("run-1"), makeTurn("run-2")];
++    const next = applyTurnPhase(turns, "run-1", "skills_sync");
++    expect(next[0]!.currentPhase?.phase).toBe("skills_sync");
++    expect(next[1]!.currentPhase).toBeUndefined();
++  });
++
++  it("realRunId 匹配同款路由（attach 历史轮）", () => {
++    const turns = [makeTurn("ph-1", { realRunId: "real-1" })];
++    const next = applyTurnPhase(turns, "real-1", "ready");
++    expect(next[0]!.currentPhase?.phase).toBe("ready");
++  });
++
++  it("未知 run 不建轮（phase 非轮存在性信号）", () => {
++    const turns = [makeTurn("run-1")];
++    const next = applyTurnPhase(turns, "run-404", "ready");
++    expect(next).toBe(turns);
++    expect(next).toHaveLength(1);
++  });
++
++  it("runId 缺失原样返回（防御）", () => {
++    const turns = [makeTurn("run-1")];
++    expect(applyTurnPhase(turns, null, "ready")).toBe(turns);
++    expect(applyTurnPhase(turns, undefined, "ready")).toBe(turns);
++  });
++});
++
++describe("clearTurnPhase（D-013③ 终态清理）", () => {
++  it("有值清 null；null/undefined 幂等原样返回", () => {
++    const withPhase = makeTurn("run-1", {
++      currentPhase: { phase: "spawning", at: Date.now() },
++    });
++    const cleared = clearTurnPhase(withPhase);
++    expect(cleared.currentPhase).toBeNull();
++
++    const withoutPhase = makeTurn("run-1");
++    expect(clearTurnPhase(withoutPhase)).toBe(withoutPhase);
++
++    const nullPhase = makeTurn("run-1", { currentPhase: null });
++    expect(clearTurnPhase(nullPhase)).toBe(nullPhase);
++  });
++});
+diff --git a/frontend/src/lib/daemon/session-sse.ts b/frontend/src/lib/daemon/session-sse.ts
+index 322ea663d..979088525 100644
+--- a/frontend/src/lib/daemon/session-sse.ts
++++ b/frontend/src/lib/daemon/session-sse.ts
+@@ -82,7 +82,8 @@ export type SessionEventKind =
+   | "bash_status"
+   | "bash_chunk"
+   | "agent_task_status"
+-  | "queue_changed";
++  | "queue_changed"
++  | "turn_phase";
+ 
+ /** Plan 模式摘要（plan_mode_entered 事件 payload）。 */
+ export interface PlanSummary {
+@@ -176,6 +177,14 @@ export interface SessionStreamEnvelope {
+    * （已中止）而非 failed（轮次失败）。其它事件 / 老 backend 事件为 null。
+    */
+   error_code?: string | null;
++  /**
++   * 2026-10-26-session-stage-progress（FR-04 / D-012）：turn_phase 事件携带的
++   * 阶段词表值与补充说明。payload 键名与 backend 发布侧**逐字对齐**（SSE 透传
++   * 层原样转发不改名，键名不一致字段必丢）；timestamp 复用信封既有字段名。
++   * 其它事件为 undefined。
++   */
++  phase?: string | null;
++  detail?: string | null;
+   /**
+    * task-05 / 2026-08-24-platform-session-feedback-fix：plan 模式进入事件携带的
+    * 计划摘要与请求时间。
+@@ -334,6 +343,13 @@ export interface SessionStreamHandlers {
+    * total_tokens / tool_uses / async（全可选，旧 daemon 事件为 null）。
+    */
+   onAgentTaskStatus?(event: AgentTaskStatusEvent): void;
++  /**
++   * 2026-10-26-session-stage-progress（FR-04 / D-013②）：turn_phase 事件——轮
++   * 阶段词表值（envelope.phase，detail/envelope.detail 补充说明）。消费方经
++   * applyTurnPhase 写入轮状态 currentPhase（at=本地到达时刻），缺失 run_id 的
++   * 事件已在 stream 层白名单拦截丢弃（不会到达本回调）。
++   */
++  onTurnPhase?(event: SessionStreamEnvelope): void;
+   /**
+    * task-09 / design A6（2026-08-29-daemon-platform-resilience）：连接状态回调
+    * （可选，不传不影响既有退避 / resync 行为）。进入退避重连上报
+diff --git a/frontend/src/lib/daemon/session-stream.ts b/frontend/src/lib/daemon/session-stream.ts
+index eed73b1d5..15a9369cd 100644
+--- a/frontend/src/lib/daemon/session-stream.ts
++++ b/frontend/src/lib/daemon/session-stream.ts
+@@ -285,6 +285,8 @@ export function streamSession(
+     // turn / plan / bash / agent_task 类事件必须有 run_id（缺 run_id 的畸形
+     // payload 事件丢弃——否则 run_id: String(undefined) 归一成字符串 "undefined"
+     // 挂到不存在的 run 上）。agent_task_status 2026-08-25 补入白名单。
++    // turn_phase 2026-10-26-session-stage-progress 补入（D-013②防御丢弃实现点：
++    // phase 语义绑定 run，缺 run_id 无可归属轮）。
+     if (
+       (kind === "turn_started" ||
+         kind === "log" ||
+@@ -293,7 +295,8 @@ export function streamSession(
+         kind === "plan_mode_entered" ||
+         kind === "bash_status" ||
+         kind === "bash_chunk" ||
+-        kind === "agent_task_status") &&
++        kind === "agent_task_status" ||
++        kind === "turn_phase") &&
+       !env.run_id
+     ) {
+       handlers.onError(new Error(`Missing run_id on ${kind} event`));
+@@ -337,6 +340,12 @@ export function streamSession(
+       case "agent_task_status":
+         handlers.onAgentTaskStatus?.(parseAgentTaskStatusEvent(parsed, sessionId));
+         break;
++      case "turn_phase":
++        // 2026-10-26-session-stage-progress（FR-04 / D-013②）：run_id 白名单已
++        // 在上方拦截缺失事件；phase/detail 原样透传（词表外值不丢弃——兜底展示
++        // 由 TurnStatusBar PHASE_LABEL 缺省分支承接）。
++        handlers.onTurnPhase?.(envelope);
++        break;
+       case "queue_changed":
+         // 2026-08-31-session-queue-ux FR-03：会话级队列变更事件——无 run_id，
+         // 铁律不入上方 run_id 必填白名单（加入会在缺 run_id 时被误判丢弃）。
+diff --git a/sillyhub-daemon/src/api-types.ts b/sillyhub-daemon/src/api-types.ts
+index 942355723..795d64d57 100644
+--- a/sillyhub-daemon/src/api-types.ts
++++ b/sillyhub-daemon/src/api-types.ts
+@@ -5979,6 +5979,35 @@ export interface paths {
+         patch?: never;
+         trace?: never;
+     };
++    "/api/daemon/sessions/{session_id}/turn-phase": {
++        parameters: {
++            query?: never;
++            header?: never;
++            path?: never;
++            cookie?: never;
++        };
++        get?: never;
++        put?: never;
++        /**
++         * Notify Turn Phase
++         * @description Receive daemon turn-phase report and forward to frontend SSE (FR-02/FR-03).
++         *
++         *     2026-10-26-session-stage-progress task-01：daemon 启动准备段/轮内段边界
++         *     上报（notifyTurnPhase）→ ``publish_turn_phase_event`` 发布 turn_phase 事件
++         *     （payload 键 phase/detail/timestamp 与前端信封逐字对齐，D-012）。
++         *     dispatched/delivered 不收上报——由 backend 控制指令状态机翻转点自产
++         *     （FR-01），phase 枚举在 DTO 层已封闭。
++         *
++         *     越权防护（2026-08-25 P1）：同 notify_bash_status，发布前做 runtime
++         *     归属校验（404 不泄露存在性）。
++         */
++        post: operations["notify_turn_phase_api_daemon_sessions__session_id__turn_phase_post"];
++        delete?: never;
++        options?: never;
++        head?: never;
++        patch?: never;
++        trace?: never;
++    };
+     "/api/daemon/sessions/{session_id}/bash-status": {
+         parameters: {
+             query?: never;
+@@ -29014,6 +29043,34 @@ export interface components {
+             /** Answer Summary */
+             answer_summary?: string | null;
+         };
++        /**
++         * TurnPhaseReportRequest
++         * @description daemon 轮阶段上报（2026-10-26-session-stage-progress FR-02/FR-03）。
++         *
++         *     daemon 在启动准备段/轮内段边界上报（``notifyTurnPhase``）→ backend 校验后
++         *     经 ``publish_turn_phase_event`` 发布 ``turn_phase`` 事件到
++         *     ``agent_session:{id}`` 频道，前端 SSE 状态条按词表展示当前阶段。
++         *
++         *     - ``run_id`` **必填**（daemon 恒带 firstRunId，daemon.ts:9522 守卫后必非空；
++         *       前端对缺失 run_id 的 phase 事件防御丢弃，D-013②）；
++         *     - ``phase`` 7 值封闭枚举——``dispatched``/``delivered`` 由 backend 自产
++         *       （控制指令状态机翻转点），不收 daemon 上报；
++         *     - session_id 走路径参数（端点层归属校验），DTO 不带。
++         */
++        TurnPhaseReportRequest: {
++            /**
++             * Run Id
++             * Format: uuid
++             */
++            run_id: string;
++            /**
++             * Phase
++             * @enum {string}
++             */
++            phase: "skills_sync" | "spec_sync" | "mcp_prefetch" | "spawning" | "ready" | "inject_received" | "first_event";
++            /** Detail */
++            detail?: string | null;
++        };
+         /**
+          * TurnTimingSnapshot
+          * @description 一轮模型调用时序（``GET /sessions/{id}/runs`` 的 ``timing``）。
+@@ -40415,6 +40472,43 @@ export interface operations {
+             };
+         };
+     };
++    notify_turn_phase_api_daemon_sessions__session_id__turn_phase_post: {
++        parameters: {
++            query?: never;
++            header?: never;
++            path: {
++                session_id: string;
++            };
++            cookie?: never;
++        };
++        requestBody: {
++            content: {
++                "application/json": components["schemas"]["TurnPhaseReportRequest"];
++            };
++        };
++        responses: {
++            /** @description Successful Response */
++            200: {
++                headers: {
++                    [name: string]: unknown;
++                };
++                content: {
++                    "application/json": {
++                        [key: string]: boolean;
++                    };
++                };
++            };
++            /** @description Validation Error */
++            422: {
++                headers: {
++                    [name: string]: unknown;
++                };
++                content: {
++                    "application/json": components["schemas"]["HTTPValidationError"];
++                };
++            };
++        };
++    };
+     notify_bash_status_api_daemon_sessions__session_id__bash_status_post: {
+         parameters: {
+             query?: never;
+diff --git a/sillyhub-daemon/src/daemon.ts b/sillyhub-daemon/src/daemon.ts
+index 33c2a94c7..b4fb45c1a 100644
+--- a/sillyhub-daemon/src/daemon.ts
++++ b/sillyhub-daemon/src/daemon.ts
+@@ -113,9 +113,15 @@ import {
+   fetchRegisteredAgentLogs,
+   pushAgentLogStates,
+   type LivenessPushTargetMeta,
++  type TurnPhaseValue,
+ } from './hub-client.js';
+ import { findTopLevelSectionRange } from './local-yaml-writer.js';
+ import { JsonSessionPersistence } from './interactive/session-store-persistence.js';
++
++// 2026-10-26-session-stage-progress task-02（D-013④）：first_event 防重键集合
++// 上限（FIFO 驱逐）——活跃会话数 × 每 run 一键，512 覆盖高频会话场景绰绰有余；
++// 超限驱逐最老键后同 run 重发为幂等事件（前端 last-write-wins），无正确性影响。
++const TURN_PHASE_FIRST_EVENT_MAX = 512;
+ // 2026-08-28-fix-cross-machine-worker-dispatch task-05/06（FR-05 / D-004@v1）：
+ // interactive 会话 cwd 守卫纯函数——白名单终检 + 存在性判定，daemon.ts 认领段只接线。
+ import { checkWorkspaceBoundCwd } from './interactive-cwd-guard.js';
+@@ -1164,6 +1170,19 @@ interface ClientLike {
+    * hub-client 实现失败 warn 不抛，调用点无需额外 try/catch。W1 已在 hub-client.ts 实现。
+    */
+   notifySessionReady(sessionId: string): Promise<void>;
++  /**
++   * 2026-10-26-session-stage-progress task-02（FR-02/FR-03）：轮阶段上报。
++   * 运行时真实 _client 为 HubClient 实例（hub-client.ts notifyTurnPhase 已实现，
++   * 与 notifySessionReady 同款 best-effort 语义：失败 HubHttpError/网络异常透传，
++   * 由调用方 reportTurnPhase helper / onTurnMessage 拦截分支 catch 吞噬）。
++   * ClientLike 为 daemon 内部鸭子类型——additive 声明（对齐 getSpecBundle 先例）。
++   */
++  notifyTurnPhase(
++    sessionId: string,
++    runId: string,
++    phase: TurnPhaseValue,
++    detail?: string,
++  ): Promise<Record<string, unknown>>;
+   /**
+    * task-06（session-reopen-resume / DS-3 / FR-03）：reopen 恢复成功后向
+    * backend 确认 reconnecting → active。可选方法（? 有 markOffline 先例）：
+@@ -1934,6 +1953,13 @@ export class Daemon {
+    * Map 跟随 daemon 实例生命周期（重启即清零，只影响本次终态上报，不落盘）。
+    */
+   private readonly _assistantMsgCountByRun = new Map<string, number>();
++
++  /**
++   * 2026-10-26-session-stage-progress task-02（D-013④）：first_event 已上报的
++   * (session_id, run_id) 防重键集合（有界 FIFO，防长生命周期进程内存增长；
++   * 超限驱逐最老键——同 run 二次驱逐后的重发为幂等 last-write-wins，无害）。
++   */
++  private readonly _turnPhaseFirstEventReported = new Set<string>();
+   /**
+    * ql-20260911-028：会话级最后一条完整 assistant 全文（延迟兜底代报数据源）。
+    * 写入点两处：onTurnMessage 完整 text 事件（override 晚到场景的唯一来源）+
+@@ -4808,6 +4834,46 @@ export class Daemon {
+       return;
+     }
+     const fwdMsg = msg;
++    // 2026-10-26-session-stage-progress task-02（FR-03 / D-009 / D-013④）：turn_phase
++    // 轮内上报桥——session-manager 层（turn-control inject / events onMessage）无
++    // HubClient 访问权，经 deps.onTurnMessage 通道发 ``{type:'turn_phase_report',
++    // phase, detail?}`` 控制标记，daemon 层在此拦截转 notifyTurnPhase（不进
++    // submitMessages 日志轨；同 _emitSessionHeaderReport 走 onTurnMessage 桥先例，
++    // 控制标记与事件轨/flat 消息特征零撞车）。first_event 防重键 (session_id,
++    // run_id) 每 run 至多一次（D-013④，daemon 进程级有界 Set，新 run 天然重置）；
++    // 上报失败仅 debug（D-009：不阻塞消息主链路）。
++    if (fwdMsg['type'] === 'turn_phase_report') {
++      const phase = typeof fwdMsg['phase'] === 'string' ? fwdMsg['phase'] : '';
++      if (phase === 'first_event') {
++        const firstEventKey = `${sessionId}:${runId}`;
++        if (this._turnPhaseFirstEventReported.has(firstEventKey)) {
++          return;
++        }
++        this._turnPhaseFirstEventReported.add(firstEventKey);
++        if (this._turnPhaseFirstEventReported.size > TURN_PHASE_FIRST_EVENT_MAX) {
++          const oldest = this._turnPhaseFirstEventReported.values().next().value;
++          if (oldest !== undefined) this._turnPhaseFirstEventReported.delete(oldest);
++        }
++      }
++      if (phase !== '') {
++        this._client
++          .notifyTurnPhase(
++            sessionId,
++            runId,
++            phase as TurnPhaseValue,
++            typeof fwdMsg['detail'] === 'string' ? fwdMsg['detail'] : undefined,
++          )
++          .catch((e: unknown) => {
++            this._logger.debug('turn_phase_report_failed', {
++              session_id: sessionId,
++              run_id: runId,
++              phase,
++              error: e instanceof Error ? e.message : String(e),
++            });
++          });
++      }
++      return;
++    }
+     // task-09：事件轨 dict 识别。_eventToReportDict 恒产 event_type + type 同值 +
+     // seq 数字；legacy flat（[TASK_*] 行 / budget_exceeded / Codex flat）无
+     // type+seq 对，raw SDK 消息无 event_type/seq——特征不撞车，识别零歧义。
+@@ -9387,6 +9453,26 @@ export class Daemon {
+       });
+     };
+ 
++    // 2026-10-26-session-stage-progress task-02（FR-02 / D-009 / R-07）：轮阶段
++    // 上报统一 helper——把既有 endStep 计时边界「顺便」发到 backend
++    // （notifyTurnPhase → POST turn-phase → SSE turn_phase 事件）。fire-and-forget
++    // + catch 吞噬（D-009：上报失败仅 debug，不阻塞会话创建主流程；fetch 内部
++    // 非拓扑异常也不外溢）。所有调用点都在本函数下方 `if (!sessionId || !firstRunId
++    // || !prompt)` 非空守卫之后（D-013②：run_id 恒带）；SWR 命中跳过的步骤不发
++    // （design Phase 2）。
++    const reportTurnPhase = (phase: TurnPhaseValue, detail?: string): void => {
++      this._client
++        .notifyTurnPhase(sessionId, firstRunId, phase, detail)
++        .catch((e: unknown) => {
++          this._logger.debug('turn_phase_report_failed', {
++            session_id: sessionId,
++            run_id: firstRunId,
++            phase,
++            error: e instanceof Error ? e.message : String(e),
++          });
++        });
++    };
++
+     // 路径映射：backend 在 Docker 容器内跑，spec_root 用容器内路径（如
+     // /data/spec-workspaces/{id}）；daemon 跑在宿主机上（Windows/Mac），本地无 /data。
+     // spec_root_map 格式 "from:to"，如 "/data/spec-workspaces:C:/data/spec-workspaces"。
+@@ -9768,6 +9854,8 @@ export class Daemon {
+     // <cwd>/.claude/skills/——不接线则交互式会话看不到技能）。失败仅 warn。
+     const skillsStep = async (): Promise<void> => {
+       const skillsStart = Date.now();
++      // turn_phase=skills_sync（FR-02）：技能环境准备段发起信号（endStep 处自然收尾）。
++      reportTurnPhase('skills_sync');
+       try {
+         await linkSkillsToWorkdir(cwd, (level, msg, data) => {
+           this._logger[level](msg, data);
+@@ -9904,6 +9992,10 @@ export class Daemon {
+             // 签名（additive），运行时真实 _client 为 HubClient 实例（main.ts
+             // 注入），duck-type 安全（task-06 §4.1/边界 11）——该断言已收进
+             // _pullSpecShared，此处不再直调 pullSpecBundle。
++            // turn_phase=spec_sync（FR-02）：仅真拉取分支发——版本新鲜跳过
++            // （skipPullDueToVersion）与 SWR 旧缓存放行（serveStaleSpec）均为
++            // 瞬间完成，无用户可感知阶段（design Phase 2 裁决）。
++            reportTurnPhase('spec_sync');
+             const specDir = await this._pullSpecShared(workspaceId, {
+               strategy: specStrategy,
+               rootPath: specRootPath,
+@@ -9970,6 +10062,9 @@ export class Daemon {
+             // platform ∪ user 渲染注入集（lease 归属强校验，D-010）。
+             // undefined（旧 backend / 归属无法解析）→ 不带参数，端点回落
+             // platform only，行为与现状一致（向后兼容）。
++            // turn_phase=mcp_prefetch（FR-02）：仅实际预取分支发（无 workspaceId
++            // 的 quick-chat 空过不发——瞬间完成无用户可感知阶段）。
++            reportTurnPhase('mcp_prefetch');
+             const bundle = await fetchMcpBundle(
+               this._config.server_url,
+               this._config.token,
+@@ -10024,6 +10119,9 @@ export class Daemon {
+ 
+     const createStepStart = Date.now();
+     try {
++      // turn_phase=spawning（FR-02）：AI 进程启动前信号（SessionManager.create
++      // 调用前——driver spawn 在 create 内同步发生）。
++      reportTurnPhase('spawning');
+       await this._sessionManager.create({
+         sessionId,
+         leaseId,
+@@ -10126,6 +10224,8 @@ export class Daemon {
+       // /model 空白的时序竞态）。best-effort：notifySessionReady 自身失败 warn 不抛
+       //（hub-client.ts 实现），调用点无需 try/catch；catch 块（create 失败）改为
+       // 主动回传 run failed（见下方 P2b），不再依赖 backend 兜底。
++      // turn_phase=ready（FR-02）：notifySessionReady 同点位——进程就绪、等待 AI 响应。
++      reportTurnPhase('ready');
+       await this._client.notifySessionReady(sessionId);
+       // quick-c1ac3c85（SWR）：specStep 挂起的旧缓存后台再验证在此 fire——
+       // 会话已确认启动、ready 通知已发（首响关键路径走完），~40s 拉取全程后台。
+diff --git a/sillyhub-daemon/src/hub-client.ts b/sillyhub-daemon/src/hub-client.ts
+index 492ee400c..423a67e25 100644
+--- a/sillyhub-daemon/src/hub-client.ts
++++ b/sillyhub-daemon/src/hub-client.ts
+@@ -321,6 +321,29 @@ export interface NotifyBashChunkBody {
+   is_final: boolean;
+ }
+ 
++/**
++ * 轮阶段上报值词表（2026-10-26-session-stage-progress FR-02/FR-03）。
++ *
++ * 仅 daemon 侧可上报的 7 值——dispatched/delivered 由 backend 控制指令状态机
++ * 自产（task-01），不在此列（对齐 backend TurnPhaseReportRequest.phase Literal）。
++ */
++export type TurnPhaseValue =
++  | 'skills_sync'
++  | 'spec_sync'
++  | 'mcp_prefetch'
++  | 'spawning'
++  | 'ready'
++  | 'inject_received'
++  | 'first_event';
++
++/** 轮阶段事件上报体（对齐 backend TurnPhaseReportRequest / task-01 DTO）。 */
++export interface NotifyTurnPhaseBody {
++  session_id: string;
++  run_id: string;
++  phase: TurnPhaseValue;
++  detail?: string;
++}
++
+ /**
+  * task-02（2026-08-27-background-subagent-progress / design §8）：Agent 任务状态
+  * 事件扩展可选字段（契约冻结，snake_case 对齐 backend AgentTaskStatusEvent 新字段）。
+@@ -1470,6 +1493,38 @@ export class HubClient {
+     );
+   }
+ 
++  /**
++   * 轮阶段事件上报（2026-10-26-session-stage-progress FR-02/FR-03）。
++   *
++   * 端点：POST {REST_PREFIX}/sessions/{sessionId}/turn-phase
++   * body（snake_case，对齐 backend TurnPhaseReportRequest / task-01 DTO）：
++   *   { session_id, run_id, phase, detail? }
++   *
++   * run_id 恒带（D-013②：冷启动段用 firstRunId——daemon _startInteractiveSession
++   * 的 sessionId/firstRunId 非空守卫之后才调 reportTurnPhase，必非空）。
++   * 失败语义（对齐 _request）：非 2xx → HubHttpError；网络/超时透传。
++   * 调用方（daemon.ts / turn-control.ts / events.ts）负责 try-catch 吞噬
++   * （D-009：上报失败仅记日志，不阻塞会话创建/注入主流程）。
++   */
++  async notifyTurnPhase(
++    sessionId: string,
++    runId: string,
++    phase: TurnPhaseValue,
++    detail?: string,
++  ): Promise<Record<string, unknown>> {
++    const body: NotifyTurnPhaseBody = {
++      session_id: sessionId,
++      run_id: runId,
++      phase,
++    };
++    if (detail !== undefined) body.detail = detail;
++    return this._request<Record<string, unknown>>(
++      'POST',
++      `${REST_PREFIX}/sessions/${encodeURIComponent(sessionId)}/turn-phase`,
++      body,
++    );
++  }
++
+   /**
+    * task-03（FR-01）：上报 Bash 执行状态事件。
+    *
+diff --git a/sillyhub-daemon/src/interactive/session-manager/events.ts b/sillyhub-daemon/src/interactive/session-manager/events.ts
+index 023099a19..0b89e3f0c 100644
+--- a/sillyhub-daemon/src/interactive/session-manager/events.ts
++++ b/sillyhub-daemon/src/interactive/session-manager/events.ts
+@@ -264,6 +264,26 @@ export async function onMessage(
+   // 入口，偶发「无关事件误撤防」由 backend pending run 启动超时清扫兜底
+   // （300s），不在事件流里做 run 归属精细判定的成本权衡。
+   mgr._disarmTurnStartWatchdog(state.sessionId);
++  // turn_phase=first_event（2026-10-26-session-stage-progress FR-03）：AI 首个
++  // 事件到达（撤看门狗同点位）。防重键 (session_id, run_id) 的判定在 daemon 层
++  // 拦截分支（D-013④，daemon 进程级有界 Set——本层每 envelope 无状态直发，主
++  // envelope 流量大不在本层做 Map 记账）。fire-and-forget 走 deps.onTurnMessage
++  // 桥（daemon 层拦截转 notifyTurnPhase，不进日志轨），失败静默（D-009）。
++  // currentRunId 类型为 string | undefined：无 run 的 envelope（收尾窗口）跳过
++  // 上报——first_event 语义绑定 run，无 run 无可归属阶段。
++  const firstEventRunId = state.currentRunId;
++  if (firstEventRunId) {
++    try {
++      void Promise.resolve(
++        mgr.deps.onTurnMessage(state.sessionId, firstEventRunId, {
++          type: 'turn_phase_report',
++          phase: 'first_event',
++        }),
++      ).catch(() => undefined);
++    } catch {
++      // 同步抛（测试 mock 形态）兜底吞掉：上报绝不反向打断事件主链路。
++    }
++  }
+   // 2026-10-23-watchdog-steering-guard FR-02/FR-03：envelope 到达即轮内活动——
+   // 刷新 stale 判定基准（lastTurnEventAt），并登记当前 run 为「已启动」。
+   state.lastTurnEventAt = Date.now();
+diff --git a/sillyhub-daemon/src/interactive/session-manager/turn-control.ts b/sillyhub-daemon/src/interactive/session-manager/turn-control.ts
+index f2fbe6fc4..509863a2b 100644
+--- a/sillyhub-daemon/src/interactive/session-manager/turn-control.ts
++++ b/sillyhub-daemon/src/interactive/session-manager/turn-control.ts
+@@ -354,6 +354,20 @@ export async function inject(
+     }
+     throw err;
+   }
++  // turn_phase=inject_received（2026-10-26-session-stage-progress FR-03）：消息已
++  // 送达 AI 队列（InputQueue.push 成功后）。fire-and-forget 走 deps.onTurnMessage
++  // 桥（daemon 层按 type='turn_phase_report' 拦截转 notifyTurnPhase，不进日志轨；
++  // 同 _emitSessionHeaderReport 先例），失败静默（D-009：不阻塞注入主流程）。
++  try {
++    void Promise.resolve(
++      mgr.deps.onTurnMessage(sessionId, runId, {
++        type: 'turn_phase_report',
++        phase: 'inject_received',
++      }),
++    ).catch(() => undefined);
++  } catch {
++    // 同步抛（测试 mock 形态）兜底吞掉：上报绝不反向打断注入路径。
++  }
+   state.currentRunId = runId;
+   state.status = 'running';
+   state.lastActiveAt = Date.now();
+diff --git a/sillyhub-daemon/tests/turn-phase-report.test.ts b/sillyhub-daemon/tests/turn-phase-report.test.ts
+new file mode 100644
+index 000000000..52da5bcb9
+--- /dev/null
++++ b/sillyhub-daemon/tests/turn-phase-report.test.ts
+@@ -0,0 +1,328 @@
++// tests/turn-phase-report.test.ts
++// 2026-10-26-session-stage-progress task-02（FR-02/FR-03 / D-009 / D-013④）：
++// daemon 侧轮阶段信号源测试——
++//   ① hub-client.notifyTurnPhase：URL/body 构造（detail 有无守卫）、非 2xx 透传
++//      HubHttpError（吞噬职责在调用方，方法本身不吞——对齐 notifyBashStatus）；
++//   ② daemon.onTurnMessage 拦截分支：{type:'turn_phase_report'} 控制标记转
++//      notifyTurnPhase（不进 submitMessages 日志轨）、first_event 防重键
++//      (session_id, run_id) 每 run 至多一次（D-013④）、notifyTurnPhase reject
++//      不抛（D-009）、非控制标记消息照常走 submitMessages（零回归）；
++//   ③ 发射点：turn-control inject push 成功后发 inject_received（push 抛错不发）、
++//      events onMessage 撤防处发 first_event（currentRunId 空跳过）——
++//      均经 deps.onTurnMessage 桥 fire-and-forget。
++//
++// mock 模式对齐 daemon-agent-event-report.test.ts（Daemon 构造 + createMockClient
++// 扩展 notifyTurnPhase）与 hub-client.test.ts（vi.stubGlobal('fetch')）。
++
++import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
++
++import { Daemon } from "../src/daemon.js";
++import { HubClient, HubHttpError } from "../src/hub-client.js";
++import { REST_PREFIX } from "../src/protocol.js";
++import { onMessage } from "../src/interactive/session-manager/events.js";
++import { inject as injectTurn } from "../src/interactive/session-manager/turn-control.js";
++import type { SessionState } from "../src/interactive/types.js";
++import {
++  createMockClient,
++  createMockSessionManager,
++  mockConfig,
++} from "./interactive-test-helpers.js";
++
++// ── ① hub-client.notifyTurnPhase ─────────────────────────────────────────────
++
++describe("① hub-client notifyTurnPhase", () => {
++  beforeEach(() => {
++    vi.stubGlobal(
++      "fetch",
++      vi.fn(
++        async () => new Response(JSON.stringify({ ok: true }), { status: 200 }),
++      ),
++    );
++  });
++  afterEach(() => {
++    vi.unstubAllGlobals();
++  });
++
++  it("POST 到 turn-phase 端点，body 含 session_id/run_id/phase，detail 缺省不传", async () => {
++    const fetchMock = vi.fn(
++      async () => new Response('{"ok":true}', { status: 200 }),
++    );
++    vi.stubGlobal("fetch", fetchMock);
++    const c = new HubClient("http://x:8000", "tok");
++
++    await c.notifyTurnPhase("sess-1", "run-1", "skills_sync");
++
++    expect(fetchMock).toHaveBeenCalledTimes(1);
++    const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
++    expect(url).toBe(`http://x:8000${REST_PREFIX}/sessions/sess-1/turn-phase`);
++    const body = JSON.parse(String(init.body));
++    expect(body).toEqual({
++      session_id: "sess-1",
++      run_id: "run-1",
++      phase: "skills_sync",
++    });
++  });
++
++  it("detail 提供时进 body；非 2xx 透传 HubHttpError（吞噬职责在调用方）", async () => {
++    const c = new HubClient("http://x:8000", "tok");
++
++    const fetchOk = vi.fn(
++      async () => new Response('{"ok":true}', { status: 200 }),
++    );
++    vi.stubGlobal("fetch", fetchOk);
++    await c.notifyTurnPhase("s", "r", "inject_received", "mid-turn");
++    const body = JSON.parse(
++      String((fetchOk.mock.calls[0] as [string, RequestInit])[1].body),
++    );
++    expect(body.detail).toBe("mid-turn");
++
++    vi.stubGlobal(
++      "fetch",
++      vi.fn(async () => new Response("boom", { status: 500 })),
++    );
++    await expect(c.notifyTurnPhase("s", "r", "ready")).rejects.toBeInstanceOf(
++      HubHttpError,
++    );
++  });
++});
++
++// ── ② daemon.onTurnMessage 拦截分支 ──────────────────────────────────────────
++
++function buildDaemon(stateMap: Map<string, Partial<SessionState>>) {
++  const detector = {
++    detectAgents: vi.fn(async () => [
++      {
++        provider: "claude",
++        path: "/fake/claude",
++        version: "1.0.0",
++        protocol: "stream_json",
++        status: "available",
++        versionWarning: null,
++      },
++    ]),
++  };
++  const wsClientMock = {
++    connect: vi.fn(),
++    close: vi.fn(),
++    send: vi.fn(() => true),
++    registerRpcHandler: vi.fn(),
++  };
++  const daemon = new Daemon(
++    mockConfig,
++    createMockClient() as never,
++    { runLease: vi.fn(async () => ({})) } as never,
++    {
++      detector,
++      wsClientFactory: vi.fn(() => wsClientMock),
++      sessionManager: createMockSessionManager(stateMap),
++    } as never,
++  );
++  const client = createMockClient() as unknown as Record<
++    string,
++    ReturnType<typeof vi.fn>
++  >;
++  client.notifyTurnPhase = vi.fn(async () => ({}));
++  (daemon as unknown as { _client: unknown })._client = client;
++  return { daemon, client };
++}
++
++function defaultStateMap(): Map<string, Partial<SessionState>> {
++  return new Map<string, Partial<SessionState>>([
++    ["sess-1", { leaseId: "lease-1", claimToken: "tok-1", provider: "claude" }],
++  ]);
++}
++
++describe("② daemon.onTurnMessage turn_phase_report 拦截", () => {
++  it("控制标记转 notifyTurnPhase 且不进 submitMessages 日志轨", async () => {
++    const { daemon, client } = buildDaemon(defaultStateMap());
++
++    await daemon.onTurnMessage("sess-1", "run-1", {
++      type: "turn_phase_report",
++      phase: "inject_received",
++      detail: "queued",
++    });
++
++    expect(client.notifyTurnPhase).toHaveBeenCalledWith(
++      "sess-1",
++      "run-1",
++      "inject_received",
++      "queued",
++    );
++    expect(client.submitMessages).not.toHaveBeenCalled();
++  });
++
++  it("first_event 同 (session_id, run_id) 至多一次；新 run 重新上报（D-013④）", async () => {
++    const { daemon, client } = buildDaemon(defaultStateMap());
++    const marker = { type: "turn_phase_report", phase: "first_event" };
++
++    await daemon.onTurnMessage("sess-1", "run-1", marker);
++    await daemon.onTurnMessage("sess-1", "run-1", marker);
++    await daemon.onTurnMessage("sess-1", "run-1", marker);
++    expect(client.notifyTurnPhase).toHaveBeenCalledTimes(1);
++
++    await daemon.onTurnMessage("sess-1", "run-2", marker);
++    expect(client.notifyTurnPhase).toHaveBeenCalledTimes(2);
++    expect(client.notifyTurnPhase).toHaveBeenLastCalledWith(
++      "sess-1",
++      "run-2",
++      "first_event",
++      undefined,
++    );
++  });
++
++  it("notifyTurnPhase reject 不抛出（D-009）", async () => {
++    const { daemon, client } = buildDaemon(defaultStateMap());
++    client.notifyTurnPhase = vi.fn(async () => {
++      throw new Error("network down");
++    });
++
++    await expect(
++      daemon.onTurnMessage("sess-1", "run-1", {
++        type: "turn_phase_report",
++        phase: "first_event",
++      }),
++    ).resolves.toBeUndefined();
++  });
++
++  it("非控制标记消息照常走 submitMessages（零回归）", async () => {
++    const { daemon, client } = buildDaemon(defaultStateMap());
++
++    await daemon.onTurnMessage("sess-1", "run-1", {
++      event_type: "text",
++      type: "text",
++      seq: 1,
++      content: "hello",
++    });
++
++    expect(client.submitMessages).toHaveBeenCalledTimes(1);
++    expect(client.notifyTurnPhase).not.toHaveBeenCalled();
++  });
++});
++
++// ── ③ 发射点：inject_received / first_event ─────────────────────────────────
++
++/** 最小 duck-type mgr（仅覆盖 inject/onMessage 触达面；inject 经 _store 取 state）。 */
++function makeLightMgr(deps: Record<string, unknown>, state?: SessionState) {
++  return {
++    deps: deps as never,
++    _store: new Map<string, SessionState>(state ? [["sess-1", state]] : []),
++    _overBudgetSessions: new Set<string>(),
++    _pendingFirstPrompt: new Map<string, unknown>(),
++    _drivers: {},
++    _resolversBySession: new Map<string, unknown>(),
++    _turnStartWatchdogs: new Map<string, unknown>(),
++    _pendingInjectCount: new Map<string, number>(),
++    _scheduleFlush: vi.fn(),
++    _flushPendingSessionHeader: vi.fn(),
++    _armTurnStartWatchdog: vi.fn(),
++    _disarmTurnStartWatchdog: vi.fn(),
++    _liftSessionUsage: vi.fn(),
++  } as never;
++}
++
++describe("③ turn-control inject push 后发 inject_received", () => {
++  function makeInjectState(): SessionState {
++    return {
++      sessionId: "sess-1",
++      provider: "claude",
++      cwd: "/tmp/ws",
++      leaseId: "lease-1",
++      status: "active",
++      currentRunId: "",
++      inputQueue: { push: vi.fn() },
++      lastActiveAt: Date.now(),
++    } as unknown as SessionState;
++  }
++
++  it("push 成功后经 onTurnMessage 桥发 inject_received", async () => {
++    const onTurnMessage = vi.fn(async () => {});
++    const state = makeInjectState();
++    const mgr = makeLightMgr(
++      {
++        onTurnMessage,
++        onTurnResult: vi.fn(),
++        onSessionEnd: vi.fn(),
++        driver: {},
++      },
++      state,
++    );
++
++    await injectTurn(mgr, "sess-1", "hello", "run-9");
++
++    const tpCalls = onTurnMessage.mock.calls.filter(
++      (c) => (c[2] as Record<string, unknown>)["type"] === "turn_phase_report",
++    );
++    expect(tpCalls).toHaveLength(1);
++    expect((tpCalls[0][2] as Record<string, unknown>).phase).toBe(
++      "inject_received",
++    );
++    expect(tpCalls[0][1]).toBe("run-9");
++  });
++
++  it("push 抛错（会话已收口）→ 上报不发生、异常照常透传", async () => {
++    const onTurnMessage = vi.fn(async () => {});
++    const state = makeInjectState();
++    state.inputQueue = {
++      push: vi.fn(() => {
++        throw new Error("closed");
++      }),
++    } as never;
++    const mgr = makeLightMgr(
++      {
++        onTurnMessage,
++        onTurnResult: vi.fn(),
++        onSessionEnd: vi.fn(),
++        driver: {},
++      },
++      state,
++    );
++
++    await expect(injectTurn(mgr, "sess-1", "hello", "run-9")).rejects.toThrow(
++      "closed",
++    );
++    expect(onTurnMessage).not.toHaveBeenCalled();
++  });
++});
++
++describe("③ events onMessage 撤防处发 first_event", () => {
++  function makeMsgState(): SessionState {
++    return {
++      sessionId: "sess-1",
++      provider: "claude",
++      cwd: "/tmp/ws",
++      leaseId: "lease-1",
++      status: "running",
++      currentRunId: "run-3",
++      lastActiveAt: Date.now(),
++    } as unknown as SessionState;
++  }
++
++  it("事件到达即经桥发 first_event（runId 取 currentRunId）", async () => {
++    const onTurnMessage = vi.fn(async () => {});
++    const mgr = makeLightMgr({ onTurnMessage });
++    const state = makeMsgState();
++
++    await onMessage(mgr, state, { events: [] } as never);
++
++    const tpCalls = onTurnMessage.mock.calls.filter(
++      (c) => (c[2] as Record<string, unknown>)["type"] === "turn_phase_report",
++    );
++    expect(tpCalls).toHaveLength(1);
++    expect((tpCalls[0][2] as Record<string, unknown>).phase).toBe(
++      "first_event",
++    );
++    expect(tpCalls[0][1]).toBe("run-3");
++  });
++
++  it("currentRunId 空（收尾窗口）→ 跳过上报不抛", async () => {
++    const onTurnMessage = vi.fn(async () => {});
++    const mgr = makeLightMgr({ onTurnMessage });
++    const state = makeMsgState();
++    state.currentRunId = undefined;
++
++    await expect(
++      onMessage(mgr, state, { events: [] } as never),
++    ).resolves.toBeUndefined();
++    expect(onTurnMessage).not.toHaveBeenCalled();
++  });
++});

@@ -41,7 +41,7 @@ provides:
   - currentPhase 类型: "turn-state.ts 导出 TurnPhaseState={phase: string; at: number}；轮对象可选字段 currentPhase"
   - 轮状态接线: "onTurnPhase handler 写入/更新轮 currentPhase；turn_completed/failed/killed 终态清空；timeline 渲染点透传给 TurnStatusBar"
 implementation:
-  - frontend/src/lib/daemon/session-sse.ts：SessionEventKind 加 "turn_phase"；SessionStreamEnvelope 加可选 phase?: string、detail?: string | null（timestamp 复用既有字段名——三键与 payload 逐字对齐 D-012）
+  - frontend/src/lib/daemon/session-sse.ts：SessionEventKind 加 "turn_phase"；SessionStreamEnvelope 加可选字段 phase（string）与 detail（string 或 null）（timestamp 复用既有字段名——三键与 payload 逐字对齐 D-012）
   - frontend/src/lib/daemon/session-stream.ts：run_id 必填白名单（约 288-301 行）加 "turn_phase"（缺失即丢弃=D-013 防御丢弃实现点）；switch 加 case "turn_phase" → handlers.onTurnPhase?.(envelope)；handlers 接口加可选 onTurnPhase
   - frontend/src/components/daemon/session-panel/turn-state.ts：导出 TurnPhaseState 类型；轮状态加 currentPhase 字段；upsertTurn/replacePlaceholderTurn 路径透传；新增 applyTurnPhase(turns, runId, phase) helper（at=Date.now() 到达时刻）与终态清理（turn_completed/failed/killed 分支清空 currentPhase，D-013③）
   - frontend/src/components/daemon/session-panel/session-panel-page.tsx 与 session-panel-dialog.tsx：注册 onTurnPhase handler → applyTurnPhase 写轮状态（双消费方同款接线）

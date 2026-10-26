@@ -1,0 +1,359 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-26-session-stage-progress",
+  "rows": [
+    {
+      "anchor": "FR-01",
+      "row_id": "2026-10-26-session-stage-progress:task-01:acc-0-5a1412ca",
+      "tests": [
+        "backend/app/modules/daemon/tests/test_turn_phase_events.py"
+      ],
+      "reason": "spec",
+      "state": "active",
+      "discovery": "machine",
+      "confirmed_by": "agent",
+      "confirmed_at": "b377bb75bbb0c4bf603e59b2bcd5d009a8f21276",
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-26-session-stage-progress"
+    },
+    {
+      "anchor": "FR-01",
+      "row_id": "2026-10-26-session-stage-progress:task-01:acc-1-d20a55b0",
+      "tests": [
+        "backend/app/modules/daemon/tests/test_turn_phase_events.py"
+      ],
+      "reason": "spec",
+      "state": "active",
+      "discovery": "machine",
+      "confirmed_by": "agent",
+      "confirmed_at": "b377bb75bbb0c4bf603e59b2bcd5d009a8f21276",
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-26-session-stage-progress"
+    },
+    {
+      "anchor": "FR-01",
+      "row_id": "2026-10-26-session-stage-progress:task-01:acc-2-bdca2a72",
+      "tests": [
+        "backend/app/modules/daemon/tests/test_turn_phase_events.py"
+      ],
+      "reason": "spec",
+      "state": "active",
+      "discovery": "machine",
+      "confirmed_by": "agent",
+      "confirmed_at": "b377bb75bbb0c4bf603e59b2bcd5d009a8f21276",
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-26-session-stage-progress"
+    },
+    {
+      "anchor": "FR-01",
+      "row_id": "2026-10-26-session-stage-progress:task-01:acc-3-1ed8f1d6",
+      "tests": [
+        "backend/app/modules/daemon/tests/test_turn_phase_events.py"
+      ],
+      "reason": "spec",
+      "state": "active",
+      "discovery": "machine",
+      "confirmed_by": "agent",
+      "confirmed_at": "b377bb75bbb0c4bf603e59b2bcd5d009a8f21276",
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-26-session-stage-progress"
+    },
+    {
+      "anchor": "FR-02",
+      "row_id": "2026-10-26-session-stage-progress:task-02:acc-0-932bc7f4",
+      "tests": [
+        "sillyhub-daemon/tests/turn-phase-report.test.ts"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-26-session-stage-progress"
+    },
+    {
+      "anchor": "FR-02",
+      "row_id": "2026-10-26-session-stage-progress:task-02:acc-1-616d9f08",
+      "tests": [
+        "sillyhub-daemon/tests/turn-phase-report.test.ts"
+      ],
+      "reason": "spec",
+      "state": "active",
+      "discovery": "machine",
+      "confirmed_by": "agent",
+      "confirmed_at": "b377bb75bbb0c4bf603e59b2bcd5d009a8f21276",
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-26-session-stage-progress"
+    },
+    {
+      "anchor": "FR-02",
+      "row_id": "2026-10-26-session-stage-progress:task-02:acc-2-3c5a1c25",
+      "tests": [
+        "sillyhub-daemon/tests/turn-phase-report.test.ts"
+      ],
+      "reason": "spec",
+      "state": "active",
+      "discovery": "machine",
+      "confirmed_by": "agent",
+      "confirmed_at": "b377bb75bbb0c4bf603e59b2bcd5d009a8f21276",
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-26-session-stage-progress"
+    },
+    {
+      "anchor": "FR-02",
+      "row_id": "2026-10-26-session-stage-progress:task-02:acc-3-ac91886b",
+      "tests": [
+        "sillyhub-daemon/tests/turn-phase-report.test.ts"
+      ],
+      "reason": "spec",
+      "state": "active",
+      "discovery": "machine",
+      "confirmed_by": "agent",
+      "confirmed_at": "b377bb75bbb0c4bf603e59b2bcd5d009a8f21276",
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-26-session-stage-progress"
+    },
+    {
+      "anchor": "FR-04",
+      "row_id": "2026-10-26-session-stage-progress:task-03:acc-0-fa612601",
+      "tests": [
+        "sillyhub-daemon/tests/protocol-session-contract.test.ts"
+      ],
+      "reason": "spec",
+      "state": "active",
+      "discovery": "machine",
+      "confirmed_by": "agent",
+      "confirmed_at": "b377bb75bbb0c4bf603e59b2bcd5d009a8f21276",
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-26-session-stage-progress"
+    },
+    {
+      "anchor": "FR-04",
+      "row_id": "2026-10-26-session-stage-progress:task-03:acc-1-b2df4660",
+      "tests": [
+        "sillyhub-daemon/tests/protocol-session-contract.test.ts"
+      ],
+      "reason": "spec",
+      "state": "active",
+      "discovery": "machine",
+      "confirmed_by": "agent",
+      "confirmed_at": "b377bb75bbb0c4bf603e59b2bcd5d009a8f21276",
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-26-session-stage-progress"
+    },
+    {
+      "anchor": "FR-04",
+      "row_id": "2026-10-26-session-stage-progress:task-03:acc-2-d7e99587",
+      "tests": [
+        "sillyhub-daemon/tests/protocol-session-contract.test.ts"
+      ],
+      "reason": "spec",
+      "state": "active",
+      "discovery": "machine",
+      "confirmed_by": "agent",
+      "confirmed_at": "b377bb75bbb0c4bf603e59b2bcd5d009a8f21276",
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-26-session-stage-progress"
+    },
+    {
+      "anchor": "FR-04",
+      "row_id": "2026-10-26-session-stage-progress:task-03:acc-3-ae31b33b",
+      "tests": [
+        "sillyhub-daemon/tests/protocol-session-contract.test.ts"
+      ],
+      "reason": "spec",
+      "state": "active",
+      "discovery": "machine",
+      "confirmed_by": "agent",
+      "confirmed_at": "b377bb75bbb0c4bf603e59b2bcd5d009a8f21276",
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-26-session-stage-progress"
+    },
+    {
+      "anchor": "FR-04",
+      "row_id": "2026-10-26-session-stage-progress:task-04:acc-0-80d4f0e3",
+      "tests": [
+        "frontend/src/components/daemon/__tests__/turn-time-display.test.tsx"
+      ],
+      "reason": "spec",
+      "state": "active",
+      "discovery": "machine",
+      "confirmed_by": "agent",
+      "confirmed_at": "b377bb75bbb0c4bf603e59b2bcd5d009a8f21276",
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-26-session-stage-progress"
+    },
+    {
+      "anchor": "FR-04",
+      "row_id": "2026-10-26-session-stage-progress:task-04:acc-1-c0c2a91a",
+      "tests": [
+        "frontend/src/components/daemon/__tests__/turn-time-display.test.tsx"
+      ],
+      "reason": "spec",
+      "state": "active",
+      "discovery": "machine",
+      "confirmed_by": "agent",
+      "confirmed_at": "b377bb75bbb0c4bf603e59b2bcd5d009a8f21276",
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-26-session-stage-progress"
+    },
+    {
+      "anchor": "FR-04",
+      "row_id": "2026-10-26-session-stage-progress:task-04:acc-2-22a10eeb",
+      "tests": [
+        "frontend/src/components/daemon/__tests__/turn-time-display.test.tsx"
+      ],
+      "reason": "spec",
+      "state": "active",
+      "discovery": "machine",
+      "confirmed_by": "agent",
+      "confirmed_at": "b377bb75bbb0c4bf603e59b2bcd5d009a8f21276",
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-26-session-stage-progress"
+    },
+    {
+      "anchor": "FR-04",
+      "row_id": "2026-10-26-session-stage-progress:task-04:acc-3-f6a78f98",
+      "tests": [
+        "frontend/src/components/daemon/__tests__/turn-time-display.test.tsx"
+      ],
+      "reason": "spec",
+      "state": "active",
+      "discovery": "machine",
+      "confirmed_by": "agent",
+      "confirmed_at": "b377bb75bbb0c4bf603e59b2bcd5d009a8f21276",
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-26-session-stage-progress"
+    },
+    {
+      "anchor": "FR-01",
+      "row_id": "2026-10-26-session-stage-progress:task-05:acc-0-eb04719c",
+      "tests": [
+        "backend/app/modules/agent/tests/test_agent_session_model.py",
+        "backend/app/modules/agent/tests/test_cleanup_stale_runs_error_code.py",
+        "backend/app/modules/agent/tests/test_coordinator_approval_signal.py",
+        "backend/app/modules/agent/tests/test_finalizer.py",
+        "backend/app/modules/agent/tests/test_group_chat_models.py",
+        "backend/app/modules/agent/tests/test_mcp_tools.py",
+        "backend/app/modules/agent/tests/test_orchestrator.py",
+        "backend/app/modules/agent/tests/test_placement_borrow_integration.py",
+        "backend/app/modules/agent/tests/test_profile_router.py",
+        "backend/app/modules/agent/tests/test_provider_caps_alignment.py",
+        "backend/app/modules/agent/tests/test_worktree_integration.py",
+        "backend/app/modules/change/tests/test_assets.py",
+        "backend/app/modules/change/tests/test_dispatch_execute_team_mode.py",
+        "backend/app/modules/change/tests/test_files_refresh_sync.py",
+        "backend/app/modules/change/tests/test_files_router.py",
+        "backend/app/modules/change/tests/test_parser.py",
+        "backend/app/modules/change/tests/test_session_changes_endpoint.py",
+        "backend/app/modules/change/tests/test_spec_binding.py",
+        "backend/app/modules/change/tests/test_step_progress.py",
+        "backend/app/modules/change/tests/test_timeline.py"
+      ],
+      "reason": "spec",
+      "state": "active",
+      "discovery": "machine",
+      "confirmed_by": "agent",
+      "confirmed_at": "b377bb75bbb0c4bf603e59b2bcd5d009a8f21276",
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-26-session-stage-progress"
+    },
+    {
+      "anchor": "FR-01",
+      "row_id": "2026-10-26-session-stage-progress:task-05:acc-2-2757ebe1",
+      "tests": [
+        "backend/app/modules/agent/tests/test_agent_session_model.py",
+        "backend/app/modules/agent/tests/test_cleanup_stale_runs_error_code.py",
+        "backend/app/modules/agent/tests/test_coordinator_approval_signal.py",
+        "backend/app/modules/agent/tests/test_finalizer.py",
+        "backend/app/modules/agent/tests/test_group_chat_models.py",
+        "backend/app/modules/agent/tests/test_mcp_tools.py",
+        "backend/app/modules/agent/tests/test_orchestrator.py",
+        "backend/app/modules/agent/tests/test_placement_borrow_integration.py",
+        "backend/app/modules/agent/tests/test_profile_router.py",
+        "backend/app/modules/agent/tests/test_provider_caps_alignment.py",
+        "backend/app/modules/agent/tests/test_worktree_integration.py",
+        "backend/app/modules/change/tests/test_assets.py",
+        "backend/app/modules/change/tests/test_dispatch_execute_team_mode.py",
+        "backend/app/modules/change/tests/test_files_refresh_sync.py",
+        "backend/app/modules/change/tests/test_files_router.py",
+        "backend/app/modules/change/tests/test_parser.py",
+        "backend/app/modules/change/tests/test_session_changes_endpoint.py",
+        "backend/app/modules/change/tests/test_spec_binding.py",
+        "backend/app/modules/change/tests/test_step_progress.py",
+        "backend/app/modules/change/tests/test_timeline.py"
+      ],
+      "reason": "spec",
+      "state": "active",
+      "discovery": "machine",
+      "confirmed_by": "agent",
+      "confirmed_at": "b377bb75bbb0c4bf603e59b2bcd5d009a8f21276",
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-26-session-stage-progress"
+    },
+    {
+      "anchor": "FR-07",
+      "row_id": "2026-10-26-session-stage-progress:task-06:acc-0-7491724d",
+      "tests": [
+        "backend/tests/modules/agent/test_stale_run_recheck.py"
+      ],
+      "reason": "spec",
+      "state": "active",
+      "discovery": "machine",
+      "confirmed_by": "agent",
+      "confirmed_at": "b377bb75bbb0c4bf603e59b2bcd5d009a8f21276",
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-26-session-stage-progress"
+    },
+    {
+      "anchor": "FR-07",
+      "row_id": "2026-10-26-session-stage-progress:task-06:acc-1-d012cca6",
+      "tests": [
+        "backend/tests/modules/agent/test_stale_run_recheck.py"
+      ],
+      "reason": "spec",
+      "state": "active",
+      "discovery": "machine",
+      "confirmed_by": "agent",
+      "confirmed_at": "b377bb75bbb0c4bf603e59b2bcd5d009a8f21276",
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-26-session-stage-progress"
+    },
+    {
+      "anchor": "FR-07",
+      "row_id": "2026-10-26-session-stage-progress:task-06:acc-2-bd2be69e",
+      "tests": [
+        "backend/tests/modules/agent/test_stale_run_recheck.py"
+      ],
+      "reason": "spec",
+      "state": "active",
+      "discovery": "machine",
+      "confirmed_by": "agent",
+      "confirmed_at": "b377bb75bbb0c4bf603e59b2bcd5d009a8f21276",
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-26-session-stage-progress"
+    }
+  ]
+}

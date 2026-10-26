@@ -55,6 +55,13 @@
 | frontend | `frontend/src/components/daemon/__tests__/turn-status-bar-phase.test.tsx` | 新增（测试） | 否 |
 | frontend | `frontend/src/lib/daemon/__tests__/session-stream-turn-phase.test.ts` | 新增（测试） | 否 |
 
+## execute 已落地追加（2026-10-26 task-06，异常可见增补 FR-07/D-014）
+
+| 模块 | 变更文件 | 影响类型 | 需 review | 实际状态 |
+|---|---|---|---|---|
+| backend | `backend/app/modules/agent/service.py` | 逻辑变更（`_recheck_deferred_runs` 判死路径前插 `_run_awaiting_user_input` 豁免 + 两处 docstring 同步；函数签名零变化） | 是（判活语义，D-014） | 已落地（worktree 7ef1acb1，pytest 19/19 + ruff/mypy 绿） |
+| backend | `backend/tests/modules/agent/test_stale_run_recheck.py` | 测试增补（`_add_log` 扩 channel/tool_kind 可选参数 + askwait 三用例：豁免/24h 超龄/已回答判死） | 否 | 已落地（同 commit） |
+
 ## 影响类型说明
 
 逻辑变更 / 数据结构变更 / 接口变更 / 调用关系变更 / 配置变更 / 新增；不确定的影响标 needs review。

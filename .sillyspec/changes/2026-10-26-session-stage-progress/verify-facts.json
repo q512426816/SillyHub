@@ -1,0 +1,142 @@
+{
+  "schemaVersion": 2,
+  "change": "2026-10-26-session-stage-progress",
+  "generatedAt": "2026-10-26T02:41:29.666Z",
+  "probes": {
+    "probe1": {
+      "command": "sillyspec verify-probes --change 2026-10-26-session-stage-progress",
+      "metrics": {
+        "matches": 0,
+        "skippedFiles": 0,
+        "worktreeHits": 4,
+        "globEntries": 0
+      }
+    },
+    "probe3": {
+      "command": "sillyspec verify-probes --change 2026-10-26-session-stage-progress",
+      "metrics": {
+        "tasks": 6,
+        "hasTest": 6
+      }
+    },
+    "probe5": {
+      "command": "sillyspec verify-probes --change 2026-10-26-session-stage-progress",
+      "metrics": {
+        "backendEndpoints": 3775,
+        "frontendCalls": 2
+      }
+    },
+    "probe6": {
+      "command": "sillyspec verify-probes --change 2026-10-26-session-stage-progress",
+      "metrics": {
+        "deletions": 0,
+        "unavailable": false
+      }
+    },
+    "probe8": {
+      "command": "sillyspec verify-probes --change 2026-10-26-session-stage-progress",
+      "metrics": {
+        "mispairs": 0,
+        "feOnly": 0,
+        "missingNotNull": 0,
+        "contractCount": 0,
+        "contractOrphans": 0,
+        "missingRequired": 0,
+        "feKeys": 0,
+        "backendFields": 0
+      }
+    },
+    "probe9": {
+      "command": "sillyspec verify-probes --change 2026-10-26-session-stage-progress",
+      "metrics": {
+        "javaFileCount": 0,
+        "groupCount": 0,
+        "inconsistentGroups": 0
+      }
+    },
+    "probe10": {
+      "command": "sillyspec verify-probes --change 2026-10-26-session-stage-progress",
+      "metrics": {
+        "checkedFiles": 7,
+        "unclearedFiles": 0
+      }
+    }
+  },
+  "apiFace": {
+    "endpoints": [
+      {
+        "method": "POST",
+        "path": "/api/daemon/sessions/{session_id}/turn-phase",
+        "rowIdx": 1
+      },
+      {
+        "method": "POST",
+        "path": "/api/daemon/sessions/{session_id}/turn-phase",
+        "rowIdx": 1
+      }
+    ],
+    "declared": null,
+    "writeEndpoints": [
+      {
+        "method": "POST",
+        "path": "/api/daemon/sessions/{session_id}/turn-phase",
+        "rowIdx": 1
+      },
+      {
+        "method": "POST",
+        "path": "/api/daemon/sessions/{session_id}/turn-phase",
+        "rowIdx": 1
+      }
+    ]
+  },
+  "conclusion": "PASS WITH NOTES",
+  "handover": {
+    "count": 2,
+    "items": [
+      {
+        "type": "manual-acceptance",
+        "item": "task-02 冷启动五阶段逐边界调用序（skills_sync→spec_sync/mcp_prefetch→spawning→ready 事件序列）生产冒烟",
+        "condition": "部署三端同版后新建会话首轮，订阅 agent_session:{id} 频道（或看前端状态条）观察 turn_phase 五阶段事件完整到达；单测兜底=helper 拦截分支+两发射点（`sillyhub-daemon/tests/turn-phase-report.test.ts` ②③）",
+        "severity": "advisory"
+      },
+      {
+        "type": "other",
+        "item": "探针 5 两条 missing（hub-client.ts:2688/2707 模板字符串 URL）",
+        "condition": "无需复跑——静态解析噪音：该两行为 fetch 包装的模板字符串拼接（turn-phase 实际走 this._request 已由 `backend/app/modules/daemon/tests/test_turn_phase_events.py` 端到端锁定 401/404/200/422/键名），解析器无法展开模板字符串，非真实契约缺口",
+        "severity": "advisory"
+      }
+    ]
+  },
+  "dbScriptDeclarations": [],
+  "runtimeEndpointExcluded": false,
+  "integrationRan": "ran",
+  "matrixPartialRows": 1,
+  "consumerHints": {
+    "script": [
+      "backend/app/modules/daemon/tests/test_turn_phase_events.py",
+      "sillyhub-daemon/tests/turn-phase-report.test.ts",
+      "backend/tests/modules/agent/test_stale_run_recheck.py",
+      "frontend/scripts/prototype-build.mjs"
+    ]
+  },
+  "smokeRan": "not-configured",
+  "factsConsistency": {
+    "checked": [
+      "probe1",
+      "probe3",
+      "probe5",
+      "probe6",
+      "probe8",
+      "probe9"
+    ],
+    "verdict": "match",
+    "detail": null
+  },
+  "tests": {
+    "command": "module[]+deps(py1+jsx1)",
+    "exitCode": 0,
+    "strategy": "dynamic-subset",
+    "failedRemaining": [],
+    "passedAt": "2026-10-26T02:54:01.761Z"
+  }
+}

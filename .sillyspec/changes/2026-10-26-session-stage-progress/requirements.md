@@ -44,6 +44,11 @@ Given `TurnPhaseReportRequest` DTO 进入 OpenAPI
 When 后端 schema 变更落库
 Then 同一变更内跑 `pnpm gen:types` 与 `pnpm -C sillyhub-daemon gen:types` 并提交两处 api-types；前端 SSE 信封 `SessionEventKind` 增加 `"turn_phase"` + `phase`/`detail` 可选字段（`timestamp` 复用既有字段名，三键与 payload 逐字对齐 D-012；手写信封，不走 OpenAPI）
 
+### FR-07: 等待交互轮判死豁免（backend 复扫链，2026-10-26 生产实证补录）
+Given 运行中轮的 `agent_run_logs` 最后信号为 AskUserQuestion 类 ask 信号（`channel='pending_input'` 或 `channel='tool_call' AND tool_kind='ask'`）且晚于最后 `user_input`（等待用户回答中），且距最后 ask 未超 24h 豁免上限（D-014）
+When 复扫链 `_recheck_deferred_runs` 对该轮执行判死评估（日志停滞超宽限窗，且 daemon 活性门为 False 或 None——含生产实证的无 lease 注入轮形态）
+Then 豁免判死，保持 running 并继续追踪等待真终态；超 24h 上限或无 askwait 信号的轮回落既有判死路径（SERVICE_RESTART_INTERRUPTED，错误文案与回正兜底不变）；启动清理路径既有豁免语义零改动
+
 ## 非功能需求
 - 兼容性：老版本 daemon 不上报冷启动段时，backend 派发段照发、前端回退现状文案（部分生效而非报错）；未知 phase 值显示原始字符串兜底；既有端点/事件/表结构零改动（零 migration）。
 - 性能：阶段事件每边界一次（低频），复用既有 Redis 发布通道；前端超时判定复用状态条既有每秒 tick，不新增定时器。
@@ -65,12 +70,14 @@ Then 同一变更内跑 `pnpm gen:types` 与 `pnpm -C sillyhub-daemon gen:types`
 | D-011@v1 | FR-01 | delivered 挂 ack 回执点（Grill 阻断①修复） |
 | D-012@v1 | FR-04, FR-06 | SSE 键名三端逐字对齐 phase/detail/timestamp（Grill 阻断②修复） |
 | D-013@v1 | FR-02, FR-03, FR-04 | 精度包：at 时钟源/run_id 必填/终态清理/防重键/并行边界（Grill 阻断③+gap 修复） |
+| D-014@v1 | FR-07 | 复扫链豁免等待交互轮（复用启动清理 askwait 判定 + 24h 上限；生产实证 388bb823 误杀修复） |
 
 ## 测试绑定（每条 FR 至少一行：`FR-NN: test/路径「用例名」`；不适用要写理由；flow done 空行拒收）
 
-FR-01: （待填——哪个测试文件/用例覆盖这条 FR；无测试面写「不适用：理由」）
-FR-02: （待填——哪个测试文件/用例覆盖这条 FR；无测试面写「不适用：理由」）
-FR-03: （待填——哪个测试文件/用例覆盖这条 FR；无测试面写「不适用：理由」）
-FR-04: （待填——哪个测试文件/用例覆盖这条 FR；无测试面写「不适用：理由」）
-FR-05: （待填——哪个测试文件/用例覆盖这条 FR；无测试面写「不适用：理由」）
-FR-06: （待填——哪个测试文件/用例覆盖这条 FR；无测试面写「不适用：理由」）
+FR-01: backend/app/modules/daemon/tests/test_turn_phase_events.py「TestControlCommandTurnPhase」（dispatched 下发成功/待补拉两路径 + delivered 仅 ack 回执点 mark_delivered 负向 + payload 反查失败跳过）+「TestTurnPhasePublishSwallow」（Redis 异常吞噬三态）
+FR-02: sillyhub-daemon/tests/turn-phase-report.test.ts「① hub-client notifyTurnPhase」（端点 URL/body 构造/detail 守卫/非 2xx 透传）+「② daemon.onTurnMessage 拦截」（控制标记转 HTTP 不进日志轨）——五冷启动边界点由实现侧 reportTurnPhase 统一 helper 承载（单 helper 测试覆盖拦截分支即全覆盖）
+FR-03: sillyhub-daemon/tests/turn-phase-report.test.ts「② first_event 防重键」（同 run 至多一次/新 run 重置/reject 不抛）+「③ 发射点」（inject push 后 inject_received/push 抛错不发；onMessage first_event/currentRunId 空跳过）
+FR-04: frontend/src/lib/daemon/__tests__/session-stream-turn-phase.test.ts「stream 层三态」（透传/白名单拦截/keepalive）+「applyTurnPhase 六态」；frontend/src/components/daemon/__tests__/turn-status-bar-phase.test.tsx「PHASE_LABEL 词表逐字/退位/零回归/未知值」
+FR-05: frontend/src/components/daemon/__tests__/turn-status-bar-phase.test.tsx「阶段超时警示」（≥30s 警示样式+已等待秒数/30s 内不警示/退位后不警示）
+FR-06: backend/app/modules/daemon/tests/test_turn_phase_events.py「test_turn_phase_report_request_shape」（DTO 钉子）+ 双端 api-types 同提交（task-01 commit 4366823c，gen:types 幂等复跑零 diff）+ frontend session-stream-turn-phase「① 键名透传」（D-012 载荷契约）
+FR-07: backend/tests/modules/agent/test_stale_run_recheck.py「askwait 豁免用例组」（2026-10-26 增补：ask 信号+无 lease+日志停滞不判死 / 24h 超龄回落判死 / user_input 晚于 ask 判死照旧）

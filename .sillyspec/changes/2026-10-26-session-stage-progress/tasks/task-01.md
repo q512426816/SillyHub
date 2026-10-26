@@ -13,26 +13,34 @@ decision_ids: [D-004@v1, D-011@v1, D-012@v1, D-009@v1]
 allowed_paths:
   - backend/app/modules/daemon/schema.py
   - backend/app/modules/daemon/router/notify.py
+  - backend/app/modules/daemon/router/__init__.py
   - backend/app/modules/daemon/run_sync/service/publish.py
+  - backend/app/modules/daemon/run_sync/service/__init__.py
   - backend/app/modules/daemon/control_commands.py
   - backend/app/modules/daemon/tests/test_turn_phase_events.py
   - backend/openapi.json
+  - frontend/src/lib/api-types.ts
+  - sillyhub-daemon/src/api-types.ts
 target_files:
   - backend/app/modules/daemon/schema.py
   - backend/app/modules/daemon/router/notify.py
+  - backend/app/modules/daemon/router/__init__.py
   - backend/app/modules/daemon/run_sync/service/publish.py
+  - backend/app/modules/daemon/run_sync/service/__init__.py
   - backend/app/modules/daemon/control_commands.py
   - NEW:backend/app/modules/daemon/tests/test_turn_phase_events.py
   - backend/openapi.json
+  - frontend/src/lib/api-types.ts
+  - sillyhub-daemon/src/api-types.ts
 goal: >
   backend 侧 turn_phase 协议与发布全集：DTO 进 OpenAPI、发布 helper、上报端点、
   控制指令状态机两翻转点发布 dispatched/delivered——W1 协议定稿，三端据此并行。
 provides:
-  - turn-phase 端点契约: "POST /api/daemon/sessions/{session_id}/turn-phase（X-API-Key daemon 鉴权）；body=TurnPhaseReportRequest{run_id: uuid 必填, phase: 7 值枚举, detail?: str}；响应 {ok: true}"
+  - turn-phase 端点契约: "POST /api/daemon/sessions/{session_id}/turn-phase（X-API-Key daemon 鉴权）；body 为 TurnPhaseReportRequest（run_id 必填 uuid、phase 7 值枚举、detail 可选 str）；响应 ok=true"
   - sse 载荷契约: "agent_session:{id} 频道 turn_phase 事件，payload 键 phase/detail/timestamp（ISO 8601 UTC，与事件名 event 同级）"
 implementation:
-  - backend/app/modules/daemon/schema.py 新增 TurnPhaseReportRequest（run_id: uuid 必填；phase: Literal["skills_sync","spec_sync","mcp_prefetch","spawning","ready","inject_received","first_event"]；detail: str | None = None）
-  - backend/app/modules/daemon/run_sync/service/publish.py 新增 publish_turn_phase_event(session_id, run_id, phase, detail=None)——组装 {"event":"turn_phase","session_id","run_id","phase","detail","timestamp": iso-now} 经既有 publish_json_event 底座发布到 agent_session:{session_id}（异常吞噬+warning，对齐 publish_session_event 结构）
+  - backend/app/modules/daemon/schema.py 新增 TurnPhaseReportRequest——run_id 必填 uuid；phase 为 Literal 枚举（skills_sync/spec_sync/mcp_prefetch/spawning/ready/inject_received/first_event 七值）；detail 可选 str 默认 None
+  - backend/app/modules/daemon/run_sync/service/publish.py 新增 publish_turn_phase_event(session_id, run_id, phase, detail=None)——组装 event=turn_phase 与 session_id/run_id/phase/detail/timestamp（ISO now）键值载荷经既有 publish_json_event 底座发布到 agent_session 频道（异常吞噬+warning，对齐 publish_session_event 结构）
   - backend/app/modules/daemon/router/notify.py 新增 POST /sessions/{session_id}/turn-phase 端点，结构照抄同文件 notify_bash_status：daemon 鉴权依赖 → 会话归属校验（404 同款口径）→ 调 helper → 返回 {"ok": true}
   - backend/app/modules/daemon/control_commands.py：enqueue_and_push 下发成功点发布 phase=dispatched（WS push 成功与待补拉两路径都发——待补拉时 delivered=False 语义兼容）；daemon ack 回执处理点发布 phase=delivered（D-011：非 mark_delivered 的 push 成功点；ack 处理需从控制指令 payload 反查 session_id/run_id）。两处发布均 try/except 吞噬，失败不阻断状态机主流程
   - 新增 backend/app/modules/daemon/tests/test_turn_phase_events.py：①端点无凭据 401 / 跨会话 404 / 正常 200 且 Redis 收到 turn_phase 事件（断言键名 phase/detail/timestamp 逐字）；②enqueue 下发成功点发布 dispatched 断言 + ack 回执点发布 delivered 断言（mark_delivered push 成功点不发布——负向断言）；③发布 helper 注入 Redis 异常不抛出、状态机照常流转

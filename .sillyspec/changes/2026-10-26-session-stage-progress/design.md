@@ -30,6 +30,7 @@ scale: large  # 跨 backend/daemon/frontend 三端 10+ 文件，事件协议定�
 3. 单阶段停留 ≥30s 时状态条切警示样式并显示已等待秒数，区分「正常慢」与「卡死了」。
 4. AI 干活期间（思考/工具/输出间隙）统一纳入同一文案体系（客户端从已有事件映射，不新增事件）。
 5. 阶段展示为纯增强：任何上报/展示失败都不影响会话主流程，无信号的轮与现状展示完全一致（零回归）。
+6. （2026-10-26 异常可见增补）等待用户回答提问的轮次不被平台判死机制误杀——异常态（判停/注入无响应/提问失效）在阶段轴与错误卡上可见、原因可读（D-014 + FR-07 + 「异常可见」节）。
 
 ## 非目标
 
@@ -87,6 +88,18 @@ scale: large  # 跨 backend/daemon/frontend 三端 10+ 文件，事件协议定�
 
 skills/spec/MCP 三步在 `_startInteractiveSession` 内 `Promise.all` 并行（`daemon.ts:10018`），事件到达顺序与词表串行轴可能交错，覆盖式刷新会亚秒级跳动。裁决：**保持三阶段独立上报、前端覆盖式刷新原样展示**——跳动是亚秒级真实进度，聚合文案（如「正在准备执行环境」）会引入前端合并逻辑复杂度，违背轻量形态；spec_step SWR 命中跳过时不发 `spec_sync`（Phase 2 已定），词表轴自然缩短。
 
+### 异常可见（2026-10-26 增补，FR-07 / D-014）
+
+生产实证（2026-10-26 会话 388bb823，用户「进度如何了」「啥情况啊」两条消息石沉大海）暴露三个异常态缺陷，本节把异常态纳入本变更覆盖：
+
+**缺陷① 等待交互轮被复扫链误杀（本变更修复，task-06）**——run 在 AskUserQuestion 等待用户回答期间（21:41 提问）被后端延迟复扫在 21:59 判死（`SERVICE_RESTART_INTERRUPTED`），pending 提问联动取消，daemon 侧 agent 进程成僵尸等待；用户后续消息按 busy 入队永不消费，会话楔死。根因与修复方案见 D-014：复扫链 `_recheck_deferred_runs` 判死路径前插入启动清理同款 `_run_awaiting_user_input` 豁免（ask 信号 + 24h 上限，同函数复用零新语义）；该 run 无 daemon_task_leases 记录（对话轮 lease 为会话级绑定 agent_run_id=NULL，inject 注入轮按 run 维度查无 lease），`_run_daemon_alive` 返回 None 退回纯日志 recency 判死——2026-10-10 lease-freshness 只覆盖有 lease 形态，2026-10-12 askwait fix 只加在启动清理路径，两线交错留下复扫盲区。测试三态断言：ask 信号+无 lease+日志停滞→不判死；24h 超龄→判死照旧；user_input 晚于 ask（已回答后续静默）→判死照旧。
+
+**缺陷② 判停后 daemon 侧 agent 僵尸等待（展示面承接，不修）**——平台侧取消 dialog 后 daemon 侧进程未同步打断。修复需新增 backend→daemon 反向控制指令（interrupt 传播），超出本变更「零新增 WS 消息类型」边界（D-004）；登记为后续独立变更，**承接落点：task-05 模块文档登记（agent/daemon 模块文档「已知限制」条目）**，防归档时蒸发。异常可见承接：判停轮的提问卡片由既有 `cancel_pending_dialogs_for_run` 联动关闭（permission_resolved 流程既有），用户可见「提问已关闭」而非无限等待——展示链路已存在，本变更确认不改动。
+
+**缺陷③ 注入假成功（阶段轴天然覆盖，零新代码）**——inject 返回 201 但 daemon 侧会话未就绪（后端 `session_ready_timeout` 仅落日志）。本变更的阶段轴使该形态可见：daemon 正常路径上报 `inject_received`（消息已送达 AI）；若执行器侧会话未就绪无后续事件，`inject_received` 停留 ≥30s 触发 D-007 超时警示（「已等待 N 秒」）——「假成功」从无感知变为可感知。daemon 完全离线时 `dispatched`/`delivered`（backend 自产）后断档，同样由超时警示兜底。
+
+判停轮原因可读链路（既有，2026-10-12-stale-run-askwait-fix 已建，本变更确认复用）：`output_redacted` 中文文案（「平台服务重启，本轮执行被中断；会话上下文已保留，可重新发送继续。」）→ `SessionRunRead.failure_summary` → 前端错误卡 `SYSTEM_ERROR_CODE_META`「服务重启中断」中文卡；轮终态清 `currentPhase`（D-013③）保证错误卡与阶段轴不双写矛盾信息。
+
 ### 原型（已产出并经用户确认）
 
 `prototype-session-stage-progress.html`（变更目录，真码管线产物：源 `frontend/src/components/prototype/session-stage-progress-view.tsx` + `frontend/scripts/prototype-build.mjs` VIEWS 注册，`pnpm prototype:build` 编译；素材来源：生产 token `themes.ts`、状态条 DOM 对齐 `frontend/src/components/daemon/turn-status-bar.tsx:414`、`.sh-typing-dots` 生产 utility；双击离线可看，含三主题切换）。execute 阶段按批准稿接线，不重新翻译。
@@ -106,6 +119,8 @@ skills/spec/MCP 三步在 `_startInteractiveSession` 内 `Promise.all` 并行（
 | 修改 | sillyhub-daemon/src/interactive/session-manager/events.ts | onMessage 首事件（撤看门狗处）上报 `first_event`，每轮一次（turn 级标志位防重） |
 | 修改 | sillyhub-daemon/src/api-types.ts | `pnpm -C sillyhub-daemon gen:types` 重生成（新端点 DTO 进 OpenAPI；仓库规则 21 同变更义务） |
 | 新增 | NEW:sillyhub-daemon/tests/turn-phase-report.test.ts | 各上报点调用断言 + 失败静默（不抛出）断言 |
+| 修改 | backend/app/modules/agent/service.py | `_recheck_deferred_runs` 判死路径前插入 `_run_awaiting_user_input` 豁免（FR-07 / D-014，复用启动清理同函数+24h 上限；豁免命中记 `stale_run_recheck_deferred_awaiting_user`） |
+| 修改 | backend/tests/modules/agent/test_stale_run_recheck.py | askwait 豁免用例组：ask 信号+无 lease+日志停滞→不判死 / 24h 超龄→判死 / user_input 晚于 ask（已回答后续静默）→判死照旧 |
 | 修改 | frontend/src/lib/daemon/session-sse.ts | `SessionEventKind` 加 `"turn_phase"`；`SessionStreamEnvelope` 加可选 `phase`/`detail`（`timestamp` 复用既有字段名——三键与 payload 逐字对齐；producer=backend Redis 发布 → SSE 透传 → consumer=`session-stream.ts` 分发） |
 | 修改 | frontend/src/lib/daemon/session-stream.ts | switch 加 `turn_phase` case：解析后写入轮状态 `currentPhase={phase, at: Date.now()}`（本地到达时刻）；缺失/null run_id 防御性丢弃 |
 | 修改 | frontend/src/components/daemon/session-panel/turn-state.ts | 轮状态类型加 `currentPhase?: { phase: string; at: number } \| null`（占位轮创建/`replacePlaceholderTurn`/attach 对账路径透传；**turn_completed/failed/killed 终态分支清空 currentPhase**——防断线场景假超时警示） |
@@ -210,6 +225,7 @@ payload 键名前后端**逐字一致**（SSE 透传层原样转发不改名—�
 | D-011@v1 | 词表 delivered 行 + 生命周期契约表：挂 **ack 回执点**（非 mark_delivered push 成功点）——Grill 阻断①修复 | 已覆盖 |
 | D-012@v1 | 接口定义 + Phase 3 第 1 条：SSE 键名三端逐字对齐（`phase`/`detail`/`timestamp`）——Grill 阻断②修复 | 已覆盖 |
 | D-013@v1 | Phase 3 第 2/3 条：`at`=本地到达时刻、run_id 必填+防御丢弃、轮终态清 currentPhase、first_event 防重键 (session_id, run_id)、并行阶段边界——Grill 阻断③+四 gap 修复 | 已覆盖 |
+| D-014@v1 | 设计目标 6；「异常可见」节缺陷①修复方案（复扫链 askwait 豁免，复用 `_run_awaiting_user_input`+24h 上限）；文件清单 service.py/test_stale_run_recheck.py 两行 | 已覆盖 |
 
 无未解决决策。多裁定组合推演：D-003（超时警示）×D-008（退位规则）×D-010（断线回退）×D-013（终态清理）组合状态——超时仅作用于「有 phase 且未到 first_event」窗口，退位后超时计时器随之失效，断线回退与轮终态清空 phase 互斥可达、无死锁格（Phase 3 实现顺序：先判 phase 存在性 → 再判退位 → 再判超时；终态清空在轮状态层先行，状态条不感知终态后 phase）。
 
@@ -217,8 +233,9 @@ payload 键名前后端**逐字一致**（SSE 透传层原样转发不改名—�
 
 - [x] 章节齐全（背景/设计目标/非目标/拆分判断/总体方案/文件变更清单/接口定义/生命周期契约表/数据模型/兼容策略/风险登记/非功能生命周期/决策追踪/自审）
 - [x] frontmatter 字段齐全（author/created_at/scale=large 附 Wave 证据）
-- [x] 引用所有当前版本 D-001@v1~D-013@v1（决策追踪表逐行覆盖）
+- [x] 引用所有当前版本 D-001@v1~D-014@v1（决策追踪表逐行覆盖；D-014 为 2026-10-26 异常可见增补）
 - [x] 涉及生命周期关键词（session/daemon/lease）→ 含「生命周期契约表」（三事件，观测性事件定性，必需字段与 DTO 对账）
 - [x] UI 原型分级：必须生成档 → 真码管线产物 `prototype-session-stage-progress.html` 已落变更目录（源 `frontend/src/components/prototype/session-stage-progress-view.tsx`，`pnpm prototype:build` 编译，素材来源已声明，用户已确认）
-- [x] 文件清单路径已逐一核验存在（15 个已有文件 OK；新建 4 个带 NEW: 前缀）
+- [x] 文件清单路径已逐一核验存在（含 2026-10-26 异常可见增补 2 项：agent/service.py 与 tests/modules/agent/test_stale_run_recheck.py 均为已有文件；新建 4 个带 NEW: 前缀）
+- [x] 异常可见增补（FR-07/D-014）：生产实证三缺陷归属清晰——缺陷①本变更修复（复扫豁免+三态测试），缺陷②登记后续独立变更（超 D-004 边界），缺陷③阶段轴天然覆盖；不动既有判死路径语义，启动清理豁免零改动
 - [x] 不确定的问题：无「⚠️ 自审存疑」项——全部设计点均有 D-xxx 裁决或调研实证支撑

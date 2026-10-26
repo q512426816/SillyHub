@@ -9,15 +9,18 @@ execution_mode: main  # 缺省 main 直写（R7/R8 对撞实证派发税 3.6×�
 
 不需要——技术方案零不确定性底座：全部机制（SSE 透传/HTTP 上报/状态机翻转点/endStep 钩子）均经 Grill 两轮源码实证（D-004/D-011/D-012/D-013 锚点）。
 
-## Wave 1（协议层，串行）
+## Wave 1（并行，无依赖）
 - task-01
+- task-06
 
-## Wave 2（三端并行，依赖 W1 契约；main 模式下按序直写——**拓扑定序：task-04 先于 task-03**（task-03 透传 currentPhase prop 前 TurnStatusBar 须已有该 prop，否则 tsc 红；plan review G1））
+## Wave 2（依赖前序 Wave）
 - task-02
 - task-04
+
+## Wave 3（依赖前序 Wave）
 - task-03
 
-## Wave 3（收尾）
+## Wave 4（依赖前序 Wave）
 - task-05
 
 ## 任务总表
@@ -25,9 +28,10 @@ execution_mode: main  # 缺省 main 直写（R7/R8 对撞实证派发税 3.6×�
 |---|---|---|---|---|---|---|
 | task-01 | backend 协议与发布全集 | W1 | P0 | — | FR-01, FR-06, D-004, D-011, D-012 | DTO+helper+端点+状态机发布点+聚焦测试+openapi 导出（backend 全部文件） |
 | task-02 | daemon 信号源全集 | W2 | P0 | task-01 | FR-02, FR-03, D-009, D-013 | notifyTurnPhase+五冷启动阶段+inject_received+first_event 防重+聚焦测试+daemon gen:types |
-| task-03 | frontend 数据层与接线 | W2 | P0 | task-01, task-04 | FR-04, FR-06, D-008, D-010, D-012, D-013 | sse 信封+stream 分发/白名单+turn-state 终态清理+双面板 handler+timeline 透传+聚焦测试+frontend gen:types |
+| task-03 | frontend 数据层与接线 | W3 | P0 | task-01, task-04 | FR-04, FR-06, D-008, D-010, D-012, D-013 | sse 信封+stream 分发/白名单+turn-state 终态清理+双面板 handler+timeline 透传+聚焦测试+frontend gen:types |
 | task-04 | frontend 状态条展示 | W2 | P0 | task-01 | FR-04, FR-05, D-001, D-003, D-007, D-008 | PHASE_LABEL 词表+超时警示+first_event 退位+零回归分支+聚焦测试 |
-| task-05 | 收尾验收与文档同步 | W3 | P1 | task-02, task-03, task-04 | 全 FR | design 成功标准逐条验收+模块文档登记+原型同源提交 |
+| task-05 | 收尾验收与文档同步 | W4 | P1 | task-02, task-03, task-04, task-06 | 全 FR | design 成功标准逐条验收+模块文档登记+原型同源提交 |
+| task-06 | backend 复扫链 askwait 豁免（生产误杀修复） | W1 | P0 | — | FR-07, D-014 | `_recheck_deferred_runs` 判死前豁免等待交互轮（复用 `_run_awaiting_user_input`+24h 上限）+ test_stale_run_recheck.py 三态用例（2026-10-26 异常可见增补，与 task-01 不同模块文件可并行） |
 
 ## 关键路径
 task-01 → task-04 → task-03 → task-05（协议定稿 → 状态条 prop → 数据层接线 → 收尾；task-02 与前端两任务文件正交可插空）
@@ -60,6 +64,7 @@ task-01 → task-04 → task-03 → task-05（协议定稿 → 状态条 prop �
 | 3 | 用户切走会话再切回（面板重挂载，SSE 未断） | currentPhase 从轮状态重读不丢失（状态在 turn 对象，非组件局部） | task-03（currentPhase 挂 turn-state 而非组件 state，验收含重挂载） |
 | 4 | `first_event` 丢失（daemon 在首个事件前崩溃重启） | 轮恢复后 first_event 补报或活动摘要自然接管，标签不卡「已就绪·等待 AI 响应」 | task-02（run 级防重键=崩溃重启后新 run 重置）、task-04（first_event 退位与活动摘要互斥可达） |
 | 5 | SSE keepalive 帧与 turn_phase 事件交错（25-30s keepalive） | keepalive 非 JSON 信号不触发 onTurnPhase；游标 lastLogTs 不受 phase 事件污染 | task-03（仅 log 事件推进游标，既有逻辑零改动） |
+| 6 | askwait 豁免后的复扫驻留（豁免 run 保持追踪，存活期最长延至 ~24h；期间 pending dialog 保持可答） | 复扫每宽限窗重判，退出条件完备（终态出列 / 24h 超龄判死 / 错误预算）；豁免分支不调 cancel_pending_dialogs_for_run（提问不被联动取消） | task-06（三态断言含 24h 超龄回落与已回答判死两出口） |
 
 ## 覆盖矩阵（如存在 decisions.md）
 | ID | 覆盖任务 | 验收证据 |
@@ -77,3 +82,4 @@ task-01 → task-04 → task-03 → task-05（协议定稿 → 状态条 prop �
 | D-011@v1 | task-01 | delivered 挂 ack 回执点 |
 | D-012@v1 | task-01/03 | 键名逐字对齐三处 |
 | D-013@v1 | task-02/03 | at 时钟源/终态清理/防重键/并行边界 |
+| D-014@v1 | task-06 | 复扫链 askwait 豁免（生产误杀修复，2026-10-26 增补） |

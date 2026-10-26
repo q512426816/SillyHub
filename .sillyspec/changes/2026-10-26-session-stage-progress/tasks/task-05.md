@@ -11,20 +11,20 @@ blocks: []
 requirement_ids: [FR-01, FR-02, FR-03, FR-04, FR-05, FR-06]
 decision_ids: [D-001@v1, D-002@v1, D-003@v1, D-004@v1]
 allowed_paths:
-  - .sillyspec/docs/SillyHub/modules/backend.md
-  - .sillyspec/docs/SillyHub/modules/sillyhub-daemon.md
-  - .sillyspec/docs/SillyHub/modules/frontend.md
+  - .sillyspec/docs/multi-agent-platform/modules/backend.md
+  - .sillyspec/docs/multi-agent-platform/modules/sillyhub-daemon.md
+  - .sillyspec/docs/multi-agent-platform/modules/frontend.md
   - .sillyspec/changes/2026-10-26-session-stage-progress/
-target_files:
-  - .sillyspec/docs/SillyHub/modules/backend.md
-  - .sillyspec/docs/SillyHub/modules/sillyhub-daemon.md
-  - .sillyspec/docs/SillyHub/modules/frontend.md
+  - frontend/src/components/prototype/session-stage-progress-view.tsx
+  - frontend/scripts/prototype-build.mjs
+  - frontend/prototype-dist/session-stage-progress.html
+target_files: []  # 模块卡登记属主仓文档义务（CLI 铁律：模块卡一律写主仓，worktree 副本随 cleanup 蒸发）——target_files 对账口径只看 worktree diff，主仓路径结构性 missing；登记事实由 module-impact.md 更新结果表 + verify-result.md 任务完成度承载（constraints 原文授权「以 module-impact 为准更正 target_files」）
 goal: >
   收尾：design.md 成功标准逐条对账 + 三端模块文档登记 + 原型产物与源码同源提交核对。
 implementation:
   - 对照 design.md「成功标准」（proposal.md 可验证条目）逐条核验，结果记入变更目录 verify 清单（结论由 verify 阶段 verify-result.md 承载，本任务只做执行侧对账）
-  - 三端模块文档 main_symbols/最近变更登记：backend.md（TurnPhaseReportRequest/turn-phase 端点/publish_turn_phase_event）、sillyhub-daemon.md（notifyTurnPhase/五阶段上报）、frontend.md（PHASE_LABEL/TurnStatusBar 阶段文案）——路径以 module-impact.md 实际解析为准
-  - 原型对账：frontend/src/components/prototype/session-stage-progress-view.tsx 与 frontend/prototype-dist/session-stage-progress.html 及变更目录 prototype-session-stage-progress.html 三处同源（重编译后 git diff 为空）
+  - 三端模块文档 main_symbols/最近变更登记：backend.md（TurnPhaseReportRequest/turn-phase 端点/publish_turn_phase_event）、sillyhub-daemon.md（notifyTurnPhase/五阶段上报）、frontend.md（PHASE_LABEL/TurnStatusBar 阶段文案）——模块文档实际路径 .sillyspec/docs/multi-agent-platform/modules/（postcheck 拦出的幻觉路径已更正，daemon 模块文档名是 daemon.md）
+  - 原型对账：frontend/src/components/prototype/session-stage-progress-view.tsx 与 frontend/prototype-dist/session-stage-progress.html 及变更目录 prototype-session-stage-progress.html 三处同源（重编译后 git diff 为空；design 清单原型两文件由本卡覆盖收口）
 acceptance:
   - design 成功标准全部有对账结论（或显式记录偏差与理由）
   - 三端模块文档各含本变更符号登记

@@ -180,3 +180,19 @@ created_at: 2026-10-26 03:23:30
 - 退役判据: 无——精度规则跟随轮生命周期语义。
 - 锚点: frontend/src/components/daemon/session-panel/turn-state.ts、sillyhub-daemon/src/interactive/session-manager/events.ts
 - 模块域: [backend, frontend, sillyhub-daemon]
+
+## D-014@v1: 复扫链豁免等待交互轮——修复生产误杀（2026-10-26 异常可见增补）
+
+- type: correctness
+- priority: P0
+- status: accepted
+- source: code
+- question: 启动清理已有 askwait 豁免（2026-10-12-stale-run-askwait-fix），但生产实证会话 388bb823（run 3b601319）ask 信号齐全（最后 ask 21:41:03 晚于最后 user_input 19:54:05）仍在 21:59:06 被 `stale_run_recheck_cleaned` 判死（daemon_alive=null）——复扫链如何对齐豁免语义？
+- answer: 我的判断：把启动清理同款 `_run_awaiting_user_input` 豁免（ask 信号判定 + 24h 上限 `_ASKWAIT_EXEMPT_MAX_AGE`，同一函数复用零新语义）插入复扫链 `_recheck_deferred_runs` 的判死路径——位置在 daemon 活性门判定之后、FOR UPDATE 判死之前；`daemon_alive=True` 已放行不动；活性门 False/None 且 askwait 命中 → 保持追踪等真终态；其余（无 ask 信号 / 24h 超龄）照旧判死。根因：生产实证该 run 无 daemon_task_leases 记录（inject 注入轮无 lease），`_run_daemon_alive` 链路不可解析返回 None，复扫按「None 退回纯日志 recency 语义」判死——2026-10-10-recheck-lease-freshness 只覆盖「有 lease 但续约停滞」形态，2026-10-12 askwait fix 只加在启动清理路径，两线交错后复扫链成为豁免盲区。
+- normalized_requirement: 复扫链判死前必须先做 askwait 豁免判定（与启动清理同函数同上限）；豁免命中事件记 `stale_run_recheck_deferred_awaiting_user` 日志；测试须覆盖「ask 信号+无 lease+日志停滞→不判死」「24h 超龄→判死」「user_input 晚于 ask（已回答后续静默）→判死照旧」三态。
+- impacts: [FR-07, task-06]
+- evidence: 生产实证 2026-10-26 会话 388bb823 / run 3b601319（agent_run_logs ask 2 行 + user_input 1 行；daemon_task_leases 0 行；后端日志 stale_run_recheck_cleaned@21:59:06 daemon_alive=null）；代码锚点 backend/app/modules/agent/service.py:2482（_run_awaiting_user_input）、:2590（启动清理豁免点）、:2747-2754（复扫三级判现状）
+- 故障面: 豁免依赖 agent_run_logs 的 ask 信号行落库——daemon 上报形态若变（渠道/tool_kind 改名）判定即失效，须同步；24h 内 daemon 真死 + 提问未答的轮保持 running 至超龄（与启动清理同款权衡，_ASKWAIT_EXEMPT_MAX_AGE 注释已登记）。
+- 退役判据: daemon 侧对等待交互轮持续续约 lease（活性门天然 True）或判活改为会话级信号时，本豁免可由 v2 收编。
+- 锚点: backend/app/modules/agent/service.py（_recheck_deferred_runs / _run_awaiting_user_input）、backend/tests/modules/agent/test_stale_run_recheck.py
+- 模块域: [backend]
