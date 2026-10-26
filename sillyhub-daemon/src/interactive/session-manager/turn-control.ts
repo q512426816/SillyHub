@@ -21,6 +21,11 @@ import {
   SessionNotActiveError,
 } from '../types.js';
 import type { SessionInjectAttachment } from '../../protocol.js';
+// 2026-10-26-turn-phase-prod-fix task-02：上报链路观测（FR-03）。
+import {
+  notePhaseEmit,
+  warnOncePhaseFailure,
+} from '../../turn-phase-observability.js';
 import { SessionQueueClosedError } from '../input-queue.js';
 import type {
   InteractiveDriverHandle,
@@ -358,15 +363,22 @@ export async function inject(
   // 送达 AI 队列（InputQueue.push 成功后）。fire-and-forget 走 deps.onTurnMessage
   // 桥（daemon 层按 type='turn_phase_report' 拦截转 notifyTurnPhase，不进日志轨；
   // 同 _emitSessionHeaderReport 先例），失败静默（D-009：不阻塞注入主流程）。
+  // 2026-10-26-turn-phase-prod-fix task-02：补观测——发出点到达记点（TRACE 时
+  // info）+ 调用/拒绝异常首警 warn（FR-03；生产实证断链零线索，见变更背景）。
+  notePhaseEmit('turn_control_inject', sessionId, runId, 'inject_received');
   try {
     void Promise.resolve(
       mgr.deps.onTurnMessage(sessionId, runId, {
         type: 'turn_phase_report',
         phase: 'inject_received',
       }),
-    ).catch(() => undefined);
-  } catch {
-    // 同步抛（测试 mock 形态）兜底吞掉：上报绝不反向打断注入路径。
+    ).catch((e: unknown) => {
+      warnOncePhaseFailure('turn_control_inject', sessionId, runId, 'inject_received', e);
+    });
+  } catch (e) {
+    // 同步抛（测试 mock 形态/桥未挂）兜底吞掉：上报绝不反向打断注入路径——
+    // 但必须首警留痕（此前纯吞 = 生产黑盒根因之一）。
+    warnOncePhaseFailure('turn_control_inject', sessionId, runId, 'inject_received', e);
   }
   state.currentRunId = runId;
   state.status = 'running';

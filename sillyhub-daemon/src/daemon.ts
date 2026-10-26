@@ -80,6 +80,8 @@ import type { DetectedAgent } from './agent-detector.js';
 // 2026-10-23-session-network-context task-02：心跳网卡清单采集（FR-02）。
 import { collectNetworkInterfaces } from './network-info.js';
 import type { NetworkInterfaceInfo } from './network-info.js';
+// 2026-10-26-turn-phase-prod-fix task-02：turn_phase 上报观测（FR-03）。
+import { notePhaseEmit, warnOncePhaseFailure } from './turn-phase-observability.js';
 import { extractCause, HubHttpError } from './hub-client.js';
 // 2026-08-31-machine-sillyspec-version task-05：register/heartbeat 追加的 sillyspec
 // 参数形状（键存在性语义见 hub-client.ts D-002@v1 注释），daemon 组装快照时用。
@@ -4844,6 +4846,16 @@ export class Daemon {
     // 上报失败仅 debug（D-009：不阻塞消息主链路）。
     if (fwdMsg['type'] === 'turn_phase_report') {
       const phase = typeof fwdMsg['phase'] === 'string' ? fwdMsg['phase'] : '';
+      // 2026-10-26-turn-phase-prod-fix task-02（FR-03 定位分界点）：桥消息到达
+      // daemon 层——与 session-manager 侧发出记点（turn_control_inject /
+      // events_first_event）配对，两点间缺一即锁定断链环节。
+      notePhaseEmit(
+        `daemon_bridge_${phase || 'unknown'}`,
+        sessionId,
+        runId,
+        phase,
+        (event, kv) => this._logger.info(event, kv),
+      );
       if (phase === 'first_event') {
         const firstEventKey = `${sessionId}:${runId}`;
         if (this._turnPhaseFirstEventReported.has(firstEventKey)) {
@@ -9461,9 +9473,17 @@ export class Daemon {
     // || !prompt)` 非空守卫之后（D-013②：run_id 恒带）；SWR 命中跳过的步骤不发
     // （design Phase 2）。
     const reportTurnPhase = (phase: TurnPhaseValue, detail?: string): void => {
+      // 2026-10-26-turn-phase-prod-fix task-02（FR-03）：五步上报观测——TRACE 时
+      // 成功 info + 失败首警 warn（原 debug 在 info 级日志下不可见 = 生产黑盒）。
+      notePhaseEmit(phase, sessionId, firstRunId, phase, (event, kv) =>
+        this._logger.info(event, kv),
+      );
       this._client
         .notifyTurnPhase(sessionId, firstRunId, phase, detail)
         .catch((e: unknown) => {
+          warnOncePhaseFailure(phase, sessionId, firstRunId, phase, e, (event, kv) =>
+            this._logger.warn(event, kv),
+          );
           this._logger.debug('turn_phase_report_failed', {
             session_id: sessionId,
             run_id: firstRunId,

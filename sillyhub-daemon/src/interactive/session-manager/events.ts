@@ -16,6 +16,8 @@
 
 import type { AgentEvent } from '../../types.js';
 import type { SessionEventForBackend, SessionState } from '../types.js';
+// 2026-10-26-turn-phase-prod-fix task-02：上报链路观测（FR-03）。
+import { notePhaseEmit, warnOncePhaseFailure } from '../../turn-phase-observability.js';
 import type {
   InteractiveDriverResult,
   TurnMessageEnvelope,
@@ -273,15 +275,21 @@ export async function onMessage(
   // 上报——first_event 语义绑定 run，无 run 无可归属阶段。
   const firstEventRunId = state.currentRunId;
   if (firstEventRunId) {
+    // 2026-10-26-turn-phase-prod-fix task-02：补观测（FR-03）——到达记点（TRACE
+    // 时 info）+ 失败首警 warn（此前纯吞 = 生产黑盒）。
+    notePhaseEmit('events_first_event', state.sessionId, firstEventRunId, 'first_event');
     try {
       void Promise.resolve(
         mgr.deps.onTurnMessage(state.sessionId, firstEventRunId, {
           type: 'turn_phase_report',
           phase: 'first_event',
         }),
-      ).catch(() => undefined);
-    } catch {
-      // 同步抛（测试 mock 形态）兜底吞掉：上报绝不反向打断事件主链路。
+      ).catch((e: unknown) => {
+        warnOncePhaseFailure('events_first_event', state.sessionId, firstEventRunId, 'first_event', e);
+      });
+    } catch (e) {
+      // 同步抛（测试 mock 形态/桥未挂）兜底吞掉：上报绝不反向打断事件主链路。
+      warnOncePhaseFailure('events_first_event', state.sessionId, firstEventRunId, 'first_event', e);
     }
   }
   // 2026-10-23-watchdog-steering-guard FR-02/FR-03：envelope 到达即轮内活动——
