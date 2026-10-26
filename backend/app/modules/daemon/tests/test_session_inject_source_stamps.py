@@ -67,6 +67,8 @@ class TestInjectPathStamps:
 
         log = await _last_user_input_log(db_session, result.agent_run.id)
         assert log is not None
+        # 2026-10-26 提交门既有红修复：metadata_ 可空收窄（mypy index 报错；断言语义不变——原 None 时本就 TypeError 失败）
+        assert log.metadata_ is not None
         assert log.metadata_["turn_trigger"] == "team_brief"
 
     async def test_plain_user_turn_not_stamped(self, db_session, mocked_hub, mocked_redis) -> None:
@@ -93,6 +95,8 @@ class TestInjectPathStamps:
 
         log = await _last_user_input_log(db_session, result.agent_run.id)
         assert log is not None
+        # 2026-10-26 提交门既有红修复：metadata_ 可空收窄（mypy index 报错；断言语义不变——原 None 时本就 TypeError 失败）
+        assert log.metadata_ is not None
         assert log.metadata_["turn_trigger"] == "agent_notice"
 
 
@@ -115,6 +119,8 @@ class TestCreatePathStamps:
 
         log = await _last_user_input_log(db_session, created.agent_run.id)
         assert log is not None
+        # 2026-10-26 提交门既有红修复：metadata_ 可空收窄（mypy index 报错；断言语义不变——原 None 时本就 TypeError 失败）
+        assert log.metadata_ is not None
         assert log.metadata_["turn_trigger"] == "worker_dispatch"
 
     async def test_team_mission_first_turn_stamped_team_brief(
@@ -138,6 +144,8 @@ class TestCreatePathStamps:
 
         log = await _last_user_input_log(db_session, created.agent_run.id)
         assert log is not None
+        # 2026-10-26 提交门既有红修复：metadata_ 可空收窄（mypy index 报错；断言语义不变——原 None 时本就 TypeError 失败）
+        assert log.metadata_ is not None
         assert log.metadata_["turn_trigger"] == "team_brief"
 
     async def test_plain_create_not_stamped(self, db_session, mocked_hub, mocked_redis) -> None:
