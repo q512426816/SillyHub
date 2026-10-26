@@ -14,3 +14,4 @@ created_at: 2026-10-26T15:08:59.742Z
 - [x] task-08: daemon 第二轮 CI 实测收尾——status-root mock 补 clearStatusProbeEviction（5 用例）+ kind-dispatch 技能库 fixture 注入 SILLYHUB_DAEMON_DIR（2 用例）（验证：两文件本地 33/33 绿；provider-session-dir ×1 为 Windows 偶发单跑绿不阻塞）
 - [x] task-09: e2e-ci runner 钉 ubuntu-24.04——ubuntu-latest 已滚 26.04，Playwright 1.60 --with-deps 无 26.04 依赖包（验证：yml diff 仅 runs-on 行+注释）
 - [x] task-10: frontend CI 满载兜底——vitest config CI 条件 retry:2（backend --reruns 同款先例），sessions-portal 经门闩修复 CI 实测转绿（426 文件仅剩 4 个 CI 独有失败）（验证：本地 retry=0 全绿不受影响；CI 实跑留痕）
+- [x] task-11: 第三轮 CI 实测收尾——git-status expandDir 补「子行渲染完成」等待（fetch 已发≠DOM 已出，CI 竞态三连挂）；e2e proto-file-card 三层对齐现组件形态（数字断言改 header innerText containment；补 file-changes-other-toggle 点击步骤：agent 分组起 shell 归因收折叠区段，1+7/93+7 行数口径）——e2e-ci 被 pgvector 阻塞 10 天修复后连环暴露 spec 陈旧，逐轮 archaeology 收敛（验证：git-status 文件本地 8/8 绿；e2e 各轮 CI 实跑逐步收敛留痕）
