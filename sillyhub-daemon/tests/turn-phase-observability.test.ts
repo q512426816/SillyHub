@@ -22,6 +22,8 @@ afterEach(() => {
 
 describe('turnPhaseTraceEnabled', () => {
   it('缺省关 / =1 开', () => {
+    // 并发批次下其他测试文件可能残留同名 env——显式清零起点，不依赖外部干净态。
+    delete process.env.SILLYHUB_TURN_PHASE_TRACE;
     expect(turnPhaseTraceEnabled()).toBe(false);
     process.env.SILLYHUB_TURN_PHASE_TRACE = '1';
     expect(turnPhaseTraceEnabled()).toBe(true);
