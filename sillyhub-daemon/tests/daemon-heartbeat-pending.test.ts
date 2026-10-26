@@ -195,7 +195,7 @@ describe('task-05 Daemon._sendHeartbeatOnce 注入 pending_update', () => {
     await expect(h.sendHeartbeatOnce()).resolves.toBe(true);
     expect(h.heartbeatMock).toHaveBeenCalledTimes(1);
     const call = h.heartbeatMock.mock.calls[0]!;
-    expect(call.length).toBe(12); // task-02 machine-id 尾参 + 2026-10-23-session-network-context 网卡尾参（network_interfaces，11→12）（machineId undefined 占位）使平铺形态 10→11
+    expect(call.length).toBe(13); // task-07 thin-flows 尾参（12→13，2026-10-26-session-change-progress-hover）+ task-02 machine-id 尾参 + 网卡尾参（11→12）（machineId undefined 占位）使平铺形态 10→11
     // 剥掉 since 只传三字段（backend 首次落库盖 since，daemon 不上报）。
     expect(call[3]).toEqual({
       reason: 'server_command',

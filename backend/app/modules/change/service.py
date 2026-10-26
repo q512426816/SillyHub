@@ -58,8 +58,11 @@ from app.modules.change.schema import (
     ChangeRead,
     ChangeSummary,
     PendingReview,
+    StageProgressEntry,
     StepProgressSummary,
     StepTimelineEntry,
+    TaskProgressSummary,
+    ThinFlowProgress,
 )
 from app.modules.change.usage_service import ChangeUsageQueryService
 from app.modules.platform_sync.model import PlatformChangeProgressORM
@@ -2335,6 +2338,16 @@ class ChangeService:
         usage_map = await ChangeUsageQueryService(self._session).summarize_changes(
             changes[0].workspace_id, usage_ids
         )
+        # 2026-10-26-session-change-progress-hover task-03（FR-02 / D-005@v1）：
+        # execute 阶段任务进度批量聚合——tasks 表按 change_id IN 单查询（R-03 防
+        # N+1，usage_map 同款批量模式），内存聚合 done/total（done=status=="done"
+        # 计分子、total 排除 cancelled 计分母，backend/app/modules/task/model.py
+        # status 6 值）。口径=Task 表 n/m，不用 CLI execute 的 Wave 步骤数（D-005）。
+        task_progress_map = await self._aggregate_task_progress(usage_ids)
+        # 2026-10-26-session-change-progress-hover task-02：阶段进度行投影用时钟——
+        # 单次调用取一次统一注入（R-04：提取器纯函数不取 datetime.now 全局时钟，
+        # 同批各行耗时基准一致，测试可注入固定值保确定性）。
+        stage_now = datetime.now(UTC)
         summaries: list[ChangeSummary] = []
         for c in changes:
             summary = ChangeSummary.model_validate(c)
@@ -2346,6 +2359,15 @@ class ChangeService:
                 continue
             # task-03：批量 usage 映射填充（map 无该行 = 无关联执行 → None）。
             summary.usage = usage_map.get(c.id)
+            # task-03（2026-10-26-session-change-progress-hover）：任务进度映射填充
+            # （map 无该行 = 该变更无 task 行 → None，前端 execute 圈旁不显示任务计数）。
+            summary.task_progress = task_progress_map.get(c.id)
+            # task-04（FR-03/FR-07 / D-008@v2）：thin_flow 读侧投影——changes.stages
+            # JSON 的 thin_flow 子键（写侧=heartbeat thin_flows 行锁落库 task-05）经
+            # pydantic 校验投影；缺键/坏结构 try/except → None（R-01 fail-open，前端
+            # 降级现状渲染）。纯读投影：不写 stages、不刷 updated_at（读写分离）；
+            # deleted 行上方已 continue 天然不投影。
+            summary.thin_flow = self._project_thin_flow(c.stages)
             stage_info = projected.get((c.workspace_id, c.change_key))
             if stage_info is not None:
                 stage, completed, latest_progress, last_pushed_at = stage_info
@@ -2373,6 +2395,14 @@ class ChangeService:
                 # 赋值处截 200（列表性能契约不动，两层分离）。
                 step_summary, _ = self._extract_step_progress(latest_progress)
                 summary.step_progress = step_summary
+                # 2026-10-26-session-change-progress-hover task-02（FR-01）：主线
+                # 阶段进度行投影——stages[]×steps[] 分组计数+耗时秒数，latest_progress
+                # 已在手零新增查询（constraints）；畸形 fail-open → None（R-01，前端
+                # 该项降级现状渲染）；archived 行照算投影（design 兼容策略：有数据就带，
+                # 归档组前端不渲染 D-009@v1，后端口径不动）。
+                summary.stage_progress = self._extract_stage_progress(
+                    latest_progress, now=stage_now
+                )
             # 2026-09-27-change-list-is-thin：出身标识投影（终态覆盖后的 current_stage
             # 参与判定——归档 thin 翻 archived 后仍靠 steps 兜底命中；stage_info 不命中
             # 处用 row 现值判分支①②）。
@@ -3015,6 +3045,162 @@ class ChangeService:
             ),  # 列表摘要专用截断（Phase 2.4 两层分离：明细 output 已全量，~200B/行契约不动）
         )
         return summary, timeline
+
+    @staticmethod
+    def _calc_stage_duration_seconds(
+        started_at: str | None, completed_at: str | None, *, now: datetime
+    ) -> int | None:
+        """阶段耗时秒数（2026-10-26-session-change-progress-hover task-02 / R-04）。
+
+        口径：已完成=completed−started；completed 缺失/不可解析=进行中 → 注入
+        ``now``−started；started 缺失/不可解析 → None（不算耗时）。输入为
+        ``_normalize_completed_at`` 归一化后的 ISO 串（zh-CN 墙钟已转 UTC aware；
+        归一化失败保留的原串经 ``_parse_iso_or_none`` 不可解析 → None，R-01 fail-open）。
+        naive/aware 混型相减（无时区标记的原串）TypeError → None 不抛。
+        """
+        started_dt = ChangeService._parse_iso_or_none(started_at)
+        if started_dt is None:
+            return None
+        end_dt = ChangeService._parse_iso_or_none(completed_at)
+        if end_dt is None:
+            end_dt = now
+        try:
+            return int((end_dt - started_dt).total_seconds())
+        except TypeError:
+            return None
+
+    @staticmethod
+    def _project_thin_flow(stages: dict | None) -> ThinFlowProgress | None:
+        """thin_flow 读侧投影（task-04 / FR-03 / R-01 fail-open）。
+
+        stages JSON 含 thin_flow 子键时经 ThinFlowProgress 校验投影（结构异常
+        → None 不抛）；缺键/None stages → None。phase 等字段原值透传（归一在
+        写侧 task-05 完成，读侧不重复归一）。
+        """
+        if not isinstance(stages, dict):
+            return None
+        raw = stages.get("thin_flow")
+        if not isinstance(raw, dict):
+            return None
+        try:
+            return ThinFlowProgress.model_validate(raw)
+        except Exception:
+            return None
+
+    async def _aggregate_task_progress(
+        self, change_ids: list[uuid.UUID]
+    ) -> dict[uuid.UUID, TaskProgressSummary]:
+        """execute 阶段任务进度批量聚合（task-03 / FR-02 / D-005@v1）。
+
+        单条 SELECT change_id, status FROM tasks WHERE change_id IN (...)（R-03
+        防 N+1——禁止逐 change_id 循环查询），内存聚合输出 {change_id: 任务进度}：
+        done=status=="done" 计分子；total 排除 status=="cancelled"（D-005@v1——
+        取消任务不占分母，前端显示面 total=0 时显 — 不除零，plan 盲区#2）。
+        空列表零查询；无 task 行的变更不进 map（填充处 .get() → None 降级）。
+        """
+        if not change_ids:
+            return {}
+        # 局部 import：task.service 顶部 import 本模块（ChangeService），顶部静态
+        # import Task 会成环（partially initialized）——方法内运行时导入，此时
+        # 模块已初始化完毕（与 daemon/runtime/service.py 的 Change 局部 import
+        # 同款反环范式）。
+        from app.modules.task.model import Task
+
+        result = await self._session.execute(
+            select(Task.change_id, Task.status).where(Task.change_id.in_(change_ids))
+        )
+        rows = result.all()
+        done: dict[uuid.UUID, int] = {}
+        total: dict[uuid.UUID, int] = {}
+        seen: set[uuid.UUID] = set()
+        for change_id, status in rows:
+            seen.add(change_id)
+            if status == "cancelled":
+                continue  # 不计分母（D-005@v1）
+            total[change_id] = total.get(change_id, 0) + 1
+            if status == "done":
+                done[change_id] = done.get(change_id, 0) + 1
+        # 有 task 行的变更恒进 map（全 cancelled → {total:0, done:0}，前端显 —
+        # 不除零，plan 盲区#2）；无 task 行的变更不进（.get() → None=不显示计数）。
+        return {
+            cid: TaskProgressSummary(total=total.get(cid, 0), done=done.get(cid, 0)) for cid in seen
+        }
+
+    @staticmethod
+    def _extract_stage_progress(
+        latest_progress: dict | None,
+        *,
+        now: datetime,
+    ) -> list[StageProgressEntry] | None:
+        """从 ``latest_progress.stages[]``×``steps[]`` 提取主线各阶段进度行（task-02）。
+
+        数据源=CLI ``serializeForSync`` 六表 stages 表行（spike 实证顶层数组，元素
+        字段 stage/status/started_at/completed_at/revision/stale_reason）×steps 表行
+        按 stage 分组计数——steps_total 含 waiting/blocked 全计数、steps_completed
+        只计 status='completed'；status CLI 原值透传不归一（constraints：未知新枚举
+        由前端白名单外兜底）。防御 isinstance 逐层判型（对齐 ``_extract_step_progress``
+        范式，R-01）：latest_progress 非 dict / stages 缺失/非 list / 无一有效行 →
+        None 不抛（前端该项降级现状渲染，FR-07）；steps 缺失/空 → 各阶段计数 0
+        （盲区#1：stages 行在而 steps 无明细 → 空圈不除零，计数字段照常输出）。
+
+        耗时秒数走 ``_calc_stage_duration_seconds``（进行中用注入 ``now``，R-04）；
+        started_at/completed_at 经 ``_normalize_completed_at`` 归一化（zh-CN 旧格式
+        容错同款口径）。排序同 ``_stage_group_order``（主线 5 阶段定序，跨平台稳定）。
+        """
+        if not isinstance(latest_progress, dict):
+            return None
+        stages = latest_progress.get("stages")
+        if not isinstance(stages, list):
+            return None
+
+        # steps 按 stage 分组计数：行非 dict / stage 非 str → 跳过（无法归属阶段，
+        # 对齐 _extract_step_progress 丢行口径）；status 异常仍计入 total 不计 completed。
+        steps_total_by_stage: dict[str, int] = {}
+        steps_done_by_stage: dict[str, int] = {}
+        steps = latest_progress.get("steps")
+        if isinstance(steps, list):
+            for item in steps:
+                if not isinstance(item, dict):
+                    continue
+                step_stage = item.get("stage")
+                if not isinstance(step_stage, str) or not step_stage:
+                    continue
+                steps_total_by_stage[step_stage] = steps_total_by_stage.get(step_stage, 0) + 1
+                if item.get("status") == "completed":
+                    steps_done_by_stage[step_stage] = steps_done_by_stage.get(step_stage, 0) + 1
+
+        entries: list[StageProgressEntry] = []
+        for item in stages:
+            if not isinstance(item, dict):
+                continue
+            stage = item.get("stage")
+            status = item.get("status")
+            # 身份字段（stage/status）缺失/类型异常 → 丢行（同 _extract_step_progress）。
+            if not (isinstance(stage, str) and stage and isinstance(status, str) and status):
+                continue
+            revision = item.get("revision")
+            if not isinstance(revision, int) or isinstance(revision, bool):
+                revision = None  # 缺失/类型异常（含 bool 伪 int）→ None
+            started_at = ChangeService._normalize_completed_at(item.get("started_at"))
+            completed_at = ChangeService._normalize_completed_at(item.get("completed_at"))
+            entries.append(
+                StageProgressEntry(
+                    stage=stage,
+                    status=status,
+                    steps_total=steps_total_by_stage.get(stage, 0),
+                    steps_completed=steps_done_by_stage.get(stage, 0),
+                    started_at=started_at,
+                    completed_at=completed_at,
+                    duration_seconds=ChangeService._calc_stage_duration_seconds(
+                        started_at, completed_at, now=now
+                    ),
+                    revision=revision,
+                )
+            )
+        if not entries:
+            return None
+        entries.sort(key=lambda e: ChangeService._stage_group_order(e.stage))
+        return entries
 
     @staticmethod
     def _build_change(

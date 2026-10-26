@@ -15084,6 +15084,10 @@ export interface components {
             /** Last Pushed At */
             last_pushed_at?: string | null;
             usage?: components["schemas"]["UsageSummaryRead"] | null;
+            /** Stage Progress */
+            stage_progress?: components["schemas"]["StageProgressEntry"][] | null;
+            task_progress?: components["schemas"]["TaskProgressSummary"] | null;
+            thin_flow?: components["schemas"]["ThinFlowProgress"] | null;
             /**
              * Updated At
              * Format: date-time
@@ -15958,6 +15962,8 @@ export interface components {
             changes?: components["schemas"]["DaemonHeartbeatSillySpecChange"][] | null;
             /** Pending Conflicts */
             pending_conflicts?: components["schemas"]["DaemonHeartbeatSillySpecConflict"][] | null;
+            /** Thin Flows */
+            thin_flows?: components["schemas"]["DaemonHeartbeatThinFlow"][] | null;
         };
         /**
          * DaemonHeartbeatSillySpecStatusError
@@ -16022,6 +16028,88 @@ export interface components {
             workspace_id: string;
             /** Spec Version */
             spec_version: number;
+        };
+        /**
+         * DaemonHeartbeatThinFlow
+         * @description 心跳 sillyspec_status.thin_flows[] 单项（2026-10-26-session-change-progress-hover task-05 / FR-06 / D-008@v2）.
+         *
+         *     daemon ``flow status --json`` 白名单透传条目（字段清单=design §接口定义）。
+         *     首键 workspace_id：sillyspec_status 是 daemon 实例级全局键（多工作区总览已
+         *     status_map 级化），无工作区维度无法定位 changes 行——每条目自带定位键。
+         *     phase 为 CLI 原文文案透传（如 ``'② 执行（已批准·写代码跑测试）'``），daemon
+         *     不归一，四枚举归一在 backend 消费侧（runtime/service.py _normalize_thin_phase，
+         *     按结构字段重算不解析文案）。
+         *
+         *     类型收紧为标量（区别本文件 sillyspec_status 族的 ``| None`` 全宽松）：条目由
+         *     daemon 代码按固定白名单组装（非 envelope 自由结构），类型漂移面小；但全字段
+         *     仍带缺省——CLI flow status --json 条件省略键（legacyFallback 仅 true 时输出，
+         *     flow.js:3337）缺键按 falsy 缺省参与归一，不让缺键 422 整条心跳（宁宽勿断）。
+         *     坏条目（workspace_id 非 UUID / change 空 / phase 空串）由消费侧单条丢弃整批
+         *     不拒（生命周期契约表事件 3）。
+         */
+        DaemonHeartbeatThinFlow: {
+            /**
+             * Workspace Id
+             * @default
+             */
+            workspace_id: string;
+            /**
+             * Change
+             * @default
+             */
+            change: string;
+            /**
+             * Phase
+             * @default
+             */
+            phase: string;
+            /**
+             * Design Filled
+             * @default false
+             */
+            design_filled: boolean;
+            /**
+             * Fr Filled
+             * @default false
+             */
+            fr_filled: boolean;
+            /**
+             * Bindings Total
+             * @default 0
+             */
+            bindings_total: number;
+            /**
+             * Bindings Filled
+             * @default 0
+             */
+            bindings_filled: number;
+            /**
+             * Tasks Total
+             * @default 0
+             */
+            tasks_total: number;
+            /**
+             * Tasks Checked
+             * @default 0
+             */
+            tasks_checked: number;
+            /** Substeps */
+            substeps?: string[];
+            /**
+             * Spec Approved
+             * @default false
+             */
+            spec_approved: boolean;
+            /**
+             * Autopilot
+             * @default false
+             */
+            autopilot: boolean;
+            /**
+             * Legacy Fallback
+             * @default false
+             */
+            legacy_fallback: boolean;
         };
         /**
          * DaemonInstanceProviderItem
@@ -27500,6 +27588,35 @@ export interface components {
             completed_at?: string | null;
         };
         /**
+         * StageProgressEntry
+         * @description 主线单阶段进度项（计算投影，非 changes 表列，零 migration）。
+         *
+         *     数据源=platform_change_progress.latest_progress 的 stages[]（含
+         *     started_at/completed_at/revision）×steps[]（status 分组计数）；由
+         *     service._extract_stage_progress（task-02 领地）提取，enrich_summaries
+         *     填充 ChangeSummary.stage_progress。CLI 状态原值透传不归一（未知新枚举
+         *     由前端白名单外兜底，design 盲区#10）；畸形 latest_progress 整体
+         *     fail-open → stage_progress=None（R-01）。
+         */
+        StageProgressEntry: {
+            /** Stage */
+            stage: string;
+            /** Status */
+            status: string;
+            /** Steps Total */
+            steps_total: number;
+            /** Steps Completed */
+            steps_completed: number;
+            /** Started At */
+            started_at: string | null;
+            /** Completed At */
+            completed_at: string | null;
+            /** Duration Seconds */
+            duration_seconds: number | null;
+            /** Revision */
+            revision: number | null;
+        };
+        /**
          * StageStep
          * @description A single step within a stage.
          */
@@ -28110,6 +28227,20 @@ export interface components {
             /** Task Key */
             task_key?: string | null;
         };
+        /**
+         * TaskProgressSummary
+         * @description execute 阶段任务进度（计算投影，非 changes 表列，零 migration）。
+         *
+         *     数据源=tasks 表按 change_id IN 单查询批量聚合（task-03 领地，R-03 防
+         *     N+1）；done=status=="done" 计分子，total 排除 status=="cancelled"。
+         *     口径=Task 表 n/m（D-005@v1），不用 CLI execute 的 Wave 步骤数。
+         */
+        TaskProgressSummary: {
+            /** Total */
+            total: number;
+            /** Done */
+            done: number;
+        };
         /** TaskRead */
         TaskRead: {
             /**
@@ -28503,6 +28634,36 @@ export interface components {
             id: string;
             /** Name */
             name?: string | null;
+        };
+        /**
+         * ThinFlowProgress
+         * @description 轻量变更（thin/flow）相位进度（计算投影，非 changes 表列，零 migration）。
+         *
+         *     数据源=daemon flow status --json 采集（task-06/07）经 heartbeat
+         *     sillyspec_status.thin_flows 上行（条目含 workspace_id，D-008@v2），由
+         *     backend 消费侧归一 phase 四枚举后行锁落 changes.stages["thin_flow"]
+         *     （task-05 领地，不刷 updated_at——D-014@v1）；enrich_summaries 读侧
+         *     投影（task-04 领地）。旧 daemon 无该键 → None（前端降级现状，FR-07）。
+         */
+        ThinFlowProgress: {
+            /** Phase */
+            phase: string;
+            /** Approved */
+            approved: boolean;
+            /** Autopilot */
+            autopilot: boolean;
+            /** Tasks Total */
+            tasks_total: number;
+            /** Tasks Done */
+            tasks_done: number;
+            /** Substeps Done */
+            substeps_done: number;
+            /** Substeps Total */
+            substeps_total: number;
+            /** Upgraded */
+            upgraded: boolean;
+            /** Adopted From */
+            adopted_from: string | null;
         };
         /**
          * TimelineEvent

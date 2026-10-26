@@ -1,0 +1,100 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-26-session-change-progress-hover",
+  "appliedAt": "2026-10-26T14:04:35.645Z",
+  "baseHash": "fdab6a598a78d62c48faaba0cdbea179fd83abf2",
+  "files": [
+    {
+      "path": "backend/app/modules/change/schema.py",
+      "sha256": "0eab5e5b9f904dc76955f34cd9aafe2c1b6b92c873c4bfb1b281fe7c74fcf518"
+    },
+    {
+      "path": "backend/app/modules/change/service.py",
+      "sha256": "5536e89e04ced62bba4756f031e26d180047505322609d7b99135985f5ee3311"
+    },
+    {
+      "path": "backend/app/modules/daemon/router/heartbeat.py",
+      "sha256": "caacd6145db2b09a1f4005500ccd1036b1fbbf99c78e640918273450753532ee"
+    },
+    {
+      "path": "backend/app/modules/daemon/runtime/service.py",
+      "sha256": "a852901e3fc61035499d2d785478fbc2b9c1110fafda72a1b1a2b28b6a6e1ccf"
+    },
+    {
+      "path": "backend/openapi.json",
+      "sha256": "6388ed5a5e1518d07425bb2c85b8d2e91968e023cc4d3ed011f6d44de3c5c4d5"
+    },
+    {
+      "path": "frontend/src/components/daemon/__tests__/session-change-files-hover.test.tsx",
+      "sha256": "3fead8d59b5bb9e1809520abd9596825ccbbcdb22a0d5422e4626e39638a2505"
+    },
+    {
+      "path": "frontend/src/components/daemon/session-change-files-hover.tsx",
+      "sha256": "fa463394e6127640d50f25b825a8e13117b8f380356aca30cad2db620f87ff16"
+    },
+    {
+      "path": "frontend/src/lib/api-types.ts",
+      "sha256": "49b4f68fc723bef7ab937d09552869ec9120965c0310d9b105fec83c0a6c9728"
+    },
+    {
+      "path": "sillyhub-daemon/src/api-types.ts",
+      "sha256": "49b4f68fc723bef7ab937d09552869ec9120965c0310d9b105fec83c0a6c9728"
+    },
+    {
+      "path": "sillyhub-daemon/src/daemon.ts",
+      "sha256": "d2d87306b5b6d57cebe674fa943169414c43f7376753b0ccda19e95369f820c9"
+    },
+    {
+      "path": "sillyhub-daemon/src/hub-client.ts",
+      "sha256": "9df74c56293da8454cf2e7367d58b32225a805a176c0069145ae58c9d8c97cc7"
+    },
+    {
+      "path": "sillyhub-daemon/src/sillyspec-manager.ts",
+      "sha256": "0ecee65dd9205eab0b8bd463252a8516edd9cf44d4343f6e39cae274f7ea6d60"
+    },
+    {
+      "path": "sillyhub-daemon/tests/daemon-heartbeat-pending.test.ts",
+      "sha256": "5e0b660228b70fd65c3395e80cef32a7e91c781027c04bfa7c46054ef4b44e3d"
+    },
+    {
+      "path": "sillyhub-daemon/tests/daemon-heartbeat-sillyspec.test.ts",
+      "sha256": "3db93326db0bcba0a8551eb0dfb29cd7d9707d3a45d02939ba54ce13a76e7327"
+    },
+    {
+      "path": "sillyhub-daemon/tests/integration/selfupdate-scenarios.test.ts",
+      "sha256": "ddd409f4385dfe388e5386031609a565f9f764a8608b3aa221e45a05a10ee576"
+    },
+    {
+      "path": "sillyhub-daemon/tests/sillyspec-platform-command.test.ts",
+      "sha256": "05ef9bb23ac785c0a3262271151d2c6a2350dcf2117a9304a00fc2fbba9068b2"
+    },
+    {
+      "path": "backend/app/modules/change/tests/test_progress_projection_ext.py",
+      "sha256": "6ff4df589294e0907e9a2fecc67323202ca390f387be94eeefea9dcfb9200aae"
+    },
+    {
+      "path": "backend/app/modules/daemon/tests/test_heartbeat_thin_flows.py",
+      "sha256": "5360a9a8007c905d9cd783ddfeb2bfbca04735dc4f6e33b4462fa539f31f6ab7"
+    },
+    {
+      "path": "frontend/src/components/daemon/__tests__/change-progress-row.test.tsx",
+      "sha256": "29fa7731c278af9c9588c2e7f09f3ca46fb30e2382f39e1c8a98fa7ef92e74c8"
+    },
+    {
+      "path": "frontend/src/components/daemon/__tests__/change-total-progress-ring.test.tsx",
+      "sha256": "58b33146fcf816e29738c063d834182f6550ba336235e1c88084dd757739c01b"
+    },
+    {
+      "path": "frontend/src/components/daemon/change-progress-row.tsx",
+      "sha256": "35ef6e22022e4a9389b225b04c51f254361889818cc7b03220abac8a86df89aa"
+    },
+    {
+      "path": "frontend/src/components/daemon/change-total-progress-ring.tsx",
+      "sha256": "f23238a1b881590ac44bfe41702d14c3b247f33515f4834d9002b00f1301d9f2"
+    },
+    {
+      "path": "sillyhub-daemon/tests/sillyspec-flow-status-collector.test.ts",
+      "sha256": "91918e00a38bb3c914040dbd397468bccb378220135d45a02c778ba372641a16"
+    }
+  ]
+}

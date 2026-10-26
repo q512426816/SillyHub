@@ -122,6 +122,39 @@ class DaemonHeartbeatSillySpecConflict(BaseModel):
     ql_id: str | None = None
 
 
+class DaemonHeartbeatThinFlow(BaseModel):
+    """心跳 sillyspec_status.thin_flows[] 单项（2026-10-26-session-change-progress-hover task-05 / FR-06 / D-008@v2）.
+
+    daemon ``flow status --json`` 白名单透传条目（字段清单=design §接口定义）。
+    首键 workspace_id：sillyspec_status 是 daemon 实例级全局键（多工作区总览已
+    status_map 级化），无工作区维度无法定位 changes 行——每条目自带定位键。
+    phase 为 CLI 原文文案透传（如 ``'② 执行（已批准·写代码跑测试）'``），daemon
+    不归一，四枚举归一在 backend 消费侧（runtime/service.py _normalize_thin_phase，
+    按结构字段重算不解析文案）。
+
+    类型收紧为标量（区别本文件 sillyspec_status 族的 ``| None`` 全宽松）：条目由
+    daemon 代码按固定白名单组装（非 envelope 自由结构），类型漂移面小；但全字段
+    仍带缺省——CLI flow status --json 条件省略键（legacyFallback 仅 true 时输出，
+    flow.js:3337）缺键按 falsy 缺省参与归一，不让缺键 422 整条心跳（宁宽勿断）。
+    坏条目（workspace_id 非 UUID / change 空 / phase 空串）由消费侧单条丢弃整批
+    不拒（生命周期契约表事件 3）。
+    """
+
+    workspace_id: str = Field(default="")
+    change: str = Field(default="")
+    phase: str = Field(default="")
+    design_filled: bool = False
+    fr_filled: bool = False
+    bindings_total: int = 0
+    bindings_filled: int = 0
+    tasks_total: int = 0
+    tasks_checked: int = 0
+    substeps: list[str] = Field(default_factory=list)
+    spec_approved: bool = False
+    autopilot: bool = False
+    legacy_fallback: bool = False
+
+
 class DaemonHeartbeatSillySpecStatus(BaseModel):
     """心跳 sillyspec_status 载荷（2026-09-02-changes-overview-card FR-05 / Grill B1）.
 
@@ -146,6 +179,15 @@ class DaemonHeartbeatSillySpecStatus(BaseModel):
     conflict_types: dict[str, int] | None = None
     changes: list[DaemonHeartbeatSillySpecChange] | None = None
     pending_conflicts: list[DaemonHeartbeatSillySpecConflict] | None = None
+    # 逐活跃 thin 变更 flow status 摘要（2026-10-26-session-change-progress-hover
+    # task-05 / D-008@v2）：与上方 envelope 摘要字段同包上行，但**消费路径不同**——
+    # envelope 摘要整包直写 daemon_instances 快照列（语义边界，零改动），thin_flows
+    # 在 backend 消费侧走新增逐变更写入路径（行锁 read-merge-write
+    # changes.stages["thin_flow"]，runtime/service.py _merge_thin_flows）。旧
+    # daemon 无该键（default=None 零影响，FR-07）；daemon 侧空槽时省略键不发
+    # （task-07 口径）。仅实例级 sillyspec_status 键消费（status_map 值同形校验
+    # 但不消费——条目自带 workspace_id 定位，D-008@v2 只定义该一条上行面）。
+    thin_flows: list[DaemonHeartbeatThinFlow] | None = Field(default=None)
 
 
 class DaemonHeartbeatSillySpecStatusError(BaseModel):
@@ -373,6 +415,18 @@ async def daemon_heartbeat(
         # upsert 概念，dict 契约同 providers/pending_update 先例）。
         sillyspec_status=(
             data.sillyspec_status.model_dump() if data.sillyspec_status is not None else None
+        ),
+        # 2026-10-26-session-change-progress-hover task-05（FR-03/FR-06 / D-008@v2）：
+        # thin_flows 与上方 sillyspec_status 整包直写是两条独立路径——条目不随快照
+        # 落 daemon_instances，单独交服务层新逐变更写入路径（行锁 read-merge-write
+        # changes.stages["thin_flow"]，_merge_thin_flows）。dict 契约同 providers
+        # 先例（model_dump 后交服务层）；缺省/空（旧 daemon 或无活跃 thin）= None
+        # 零动作。仅取实例级 sillyspec_status 键（status_map 值不消费，DTO 注释
+        # 同口径）。
+        thin_flows=(
+            [item.model_dump() for item in data.sillyspec_status.thin_flows]
+            if data.sillyspec_status is not None and data.sillyspec_status.thin_flows
+            else None
         ),
         # 2026-09-08（temp 投毒排障衍生）：采集失败状态走 sillyspec_status 同款
         # 语义（None=清除置 NULL）。model_dump 后交服务层整包直写（detail 截断

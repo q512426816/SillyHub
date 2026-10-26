@@ -428,6 +428,7 @@ class RuntimeService:
         sillyspec_command_result: dict | None = None,
         network_interfaces: list[dict] | None = None,
         observed_ip: str | None = None,
+        thin_flows: list[dict] | None = None,
         *,
         actor_user_id: uuid.UUID | None = None,
     ) -> DaemonInstance:
@@ -606,6 +607,15 @@ class RuntimeService:
         # 整包直写（非状态机无 since/upsert，backend 不增删改写；32KB 预算与
         # N=50 截断在 daemon 侧执行，design §4）。
         instance.sillyspec_status = sillyspec_status
+        # ── thin_flows 逐变更写入（2026-10-26-session-change-progress-hover
+        # task-05 / FR-03/FR-06 / D-008@v2）────────────────────────────────────
+        # 与上方 sillyspec_status 整包快照直写是两条独立路径：条目按 workspace_id+
+        # change_key 定位 changes 行，行锁 read-merge-write stages["thin_flow"] 子键。
+        # 缺省/None/空列表（旧 daemon 或无活跃 thin）零动作；坏条目单条丢弃整批
+        # 不拒（生命周期契约表事件 3）。写入失败不应拖垮心跳本体——逐条 try/except
+        # 吞噬记日志（下跳自愈，R-07）。
+        if thin_flows:
+            await self._merge_thin_flows(thin_flows)
         # sillyspec_status_error（2026-09-08，temp 投毒排障衍生）：语义同
         # sillyspec_status 两态——None 即置 NULL 清除（采集正常/能力缺失②均清）；
         # 非 None dict 整包直写，detail 截 200 双保险（截断与 sillyspec_update.error
@@ -684,6 +694,112 @@ class RuntimeService:
         await self._session.commit()
         await self._session.refresh(instance)
         return instance
+
+    # ── thin_flows 逐变更写入路径（2026-10-26-session-change-progress-hover
+    # task-05 / D-008@v2）───────────────────────────────────────────────────────
+
+    @staticmethod
+    def _normalize_thin_phase(item: dict) -> str:
+        """thin 相位归一（四枚举 spec/awaiting_approval/executing/closing）。
+
+        与 sillyspec CLI flow.js:3284-3296 的 phase 推断逐字同口径（按结构字段
+        重算，不解析 CLI 文案——daemon 透传原始字段，文案变化不破坏链路）：
+
+        - substeps 含 'ledger' → closing（flow done 收口首子步，一经完成恒 closing）；
+        - docs 齐（design_filled && fr_filled && bindings_total>0 且
+          bindings_filled>=bindings_total）且（spec_approved || autopilot）→ executing；
+        - docs 齐而未批准 → awaiting_approval（①位的「→ 待用户批准」子态）；
+        - 否则 → spec。
+        """
+        substeps = item.get("substeps")
+        substeps = substeps if isinstance(substeps, list) else []
+        if "ledger" in substeps:
+            return "closing"
+        docs_ready = (
+            bool(item.get("design_filled"))
+            and bool(item.get("fr_filled"))
+            and isinstance(item.get("bindings_total"), int)
+            and item["bindings_total"] > 0
+            and isinstance(item.get("bindings_filled"), int)
+            and item["bindings_filled"] >= item["bindings_total"]
+        )
+        if not docs_ready:
+            return "spec"
+        if item.get("spec_approved") or item.get("autopilot"):
+            return "executing"
+        return "awaiting_approval"
+
+    async def _merge_thin_flows(self, thin_flows: list[dict]) -> None:
+        """heartbeat thin_flows 条目逐变更落 changes.stages["thin_flow"]（D-008@v2）。
+
+        全新写入路径（区别既有 sillyspec_status 整包快照直写 daemon_instances——
+        backend 从不逐条改写 changes 表，本方法是首个例外且范围仅 stages JSON 的
+        thin_flow 子键）：
+
+        - 定位：workspace_id（UUID 解析失败丢弃）+ change_key（空丢弃）匹配
+          changes 行（ux_changes_workspace_key 唯一）；行缺失或 location='deleted'
+          静默跳过不建行（生命周期表事件 3 / 盲区#3）；
+        - 并发：SELECT ... FOR UPDATE 行锁读 stages → dict 合并 thin_flow 键 →
+          UPDATE 只 set stages 列（Core update 语句，绕开 ORM 脏检查对 updated_at
+          的潜在触碰——D-014@v1 不刷 changes.updated_at，防入口圈系统性偏向
+          轻量变更）；reparse 全量重建 stages 丢键由下一跳心跳自愈（≤1 心跳
+          周期，R-07）；
+        - 落库结构 = schema.py ThinFlowProgress 同构 dict（读侧投影 task-04 直接
+          消费）；upgraded=legacy_fallback（CLI flow status 仅升厚时输出该键，
+          缺省 False）；adopted_from 平台侧无数据源恒 None（flow status --json
+          不输出该字段，如实缺省——前端「自头脑风暴转入」标注待 CLI 补字段）。
+        """
+        # 局部 import：change 模型只在写入路径需要，避免 daemon→change 静态
+        # import 在模块加载期引入潜在环（change.service 已 import platform_sync 等）。
+        from app.modules.change.model import Change
+
+        for item in thin_flows:
+            try:
+                if not isinstance(item, dict):
+                    continue
+                raw_ws = item.get("workspace_id") or ""
+                change_key = (item.get("change") or "").strip()
+                try:
+                    ws_id = uuid.UUID(str(raw_ws))
+                except (ValueError, AttributeError):
+                    continue
+                if not change_key:
+                    continue
+                # 行锁读（FOR UPDATE）：与 reparse/sync 的 read-modify-write 竞态
+                # 由此串行化（R-07）。
+                result = await self._session.execute(
+                    select(Change)
+                    .where(Change.workspace_id == ws_id, Change.change_key == change_key)
+                    .with_for_update()
+                )
+                row = result.scalar_one_or_none()
+                if row is None or row.location == "deleted":
+                    continue
+                stages = dict(row.stages) if isinstance(row.stages, dict) else {}
+                stages["thin_flow"] = {
+                    "phase": self._normalize_thin_phase(item),
+                    "approved": bool(item.get("spec_approved") or item.get("autopilot")),
+                    "autopilot": bool(item.get("autopilot")),
+                    "tasks_total": int(item.get("tasks_total") or 0),
+                    "tasks_done": int(item.get("tasks_checked") or 0),
+                    "substeps_done": len(
+                        [s for s in (item.get("substeps") or []) if isinstance(s, str)]
+                    )
+                    if isinstance(item.get("substeps"), list)
+                    else 0,
+                    "substeps_total": 8,  # sillyspec SUBSTEPS 定长
+                    "upgraded": bool(item.get("legacy_fallback")),
+                    "adopted_from": None,
+                }
+                # 只 set stages 列（Core update；D-014 不刷 updated_at）。
+                await self._session.execute(
+                    update(Change).where(Change.id == row.id).values(stages=stages)
+                )
+            except Exception:
+                log.warning(
+                    "thin_flow_merge_item_skipped",
+                    change=str(item.get("change")) if isinstance(item, dict) else None,
+                )
 
     async def count_pending_control_commands(self, daemon_instance_id: uuid.UUID) -> int:
         """该 daemon 全部 runtime 名下 pending 控制指令计数（task-04 / design A2）。

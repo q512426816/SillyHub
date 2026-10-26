@@ -391,7 +391,7 @@ describe('task-08 SELF_UPDATE 安全层四路径集成回归', () => {
       await expect(h.sendHeartbeatOnce()).resolves.toBe(true);
       expect(h.heartbeatMock).toHaveBeenCalledTimes(1);
       const first = h.heartbeatMock.mock.calls[0]!;
-      expect(first.length).toBe(12); // task-02 machine-id 尾参 + 2026-10-23-session-network-context 网卡尾参（network_interfaces，11→12）使平铺形态 10→11（d6fabf408）
+      expect(first.length).toBe(13); // task-07 thin-flows 尾参（12→13，2026-10-26-session-change-progress-hover）+ machine-id/网卡尾参 10→12（d6fabf408）
       expect(first[3]).toEqual({
         reason: 'disk_change',
         current_version: 'cur-p4',
@@ -408,7 +408,7 @@ describe('task-08 SELF_UPDATE 安全层四路径集成回归', () => {
       expect(await h.daemon.readPendingUpdate()).toBeNull();
       await expect(h.sendHeartbeatOnce()).resolves.toBe(true);
       const second = h.heartbeatMock.mock.calls[1]!;
-      expect(second.length).toBe(12); // task-02 machine-id 尾参 + 2026-10-23-session-network-context 网卡尾参（network_interfaces，11→12）（machineId undefined 占位）使平铺形态 10→11（d6fabf408，daemon-heartbeat 先例同款）
+      expect(second.length).toBe(13); // task-07 thin-flows 尾参（12→13，2026-10-26-session-change-progress-hover）; // task-02 machine-id 尾参 + 2026-10-23-session-network-context 网卡尾参（network_interfaces，11→12）（machineId undefined 占位）使平铺形态 10→11（d6fabf408，daemon-heartbeat 先例同款）
       expect(second[3]).toBeUndefined();
     });
   });

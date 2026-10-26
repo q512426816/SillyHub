@@ -1,0 +1,1 @@
+- change 2026-10-26-session-change-progress-hover | api-types 再生成：StageProgressEntry/TaskProgressSummary/ThinFlowProgress 三 DTO 入 components/schemas（ChangeSummary 三新 optional 字段 :15088-15090），daemon 侧 api-types 同步再生成（双义务同变更提交，断言面闸门⑨口径）；前端组件经 components["schemas"] 别名消费生成类型（手写过渡类型已删）。

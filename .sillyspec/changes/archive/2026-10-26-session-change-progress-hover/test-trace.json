@@ -1,0 +1,262 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-26-session-change-progress-hover",
+  "rows": [
+    {
+      "anchor": "FR-01",
+      "row_id": "2026-10-26-session-change-progress-hover:task-01:acc-0-6ecd5d6a",
+      "tests": [
+        "backend/app/modules/change/tests/test_progress_projection_ext.py",
+        "backend/app/modules/daemon/tests/test_heartbeat_thin_flows.py",
+        "frontend/src/components/daemon/__tests__/change-progress-row.test.tsx",
+        "frontend/src/components/daemon/__tests__/change-total-progress-ring.test.tsx",
+        "sillyhub-daemon/tests/sillyspec-flow-status-collector.test.ts"
+      ],
+      "reason": "spec",
+      "state": "active",
+      "discovery": "machine",
+      "confirmed_by": "agent",
+      "confirmed_at": "33f4154a35f79bd897d99fd134e3c588242f56bd",
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-26-session-change-progress-hover"
+    },
+    {
+      "anchor": "FR-01",
+      "row_id": "2026-10-26-session-change-progress-hover:task-01:acc-1-1a18e89f",
+      "tests": [
+        "backend/app/modules/change/tests/test_progress_projection_ext.py",
+        "backend/app/modules/daemon/tests/test_heartbeat_thin_flows.py",
+        "frontend/src/components/daemon/__tests__/change-progress-row.test.tsx",
+        "frontend/src/components/daemon/__tests__/change-total-progress-ring.test.tsx",
+        "sillyhub-daemon/tests/sillyspec-flow-status-collector.test.ts"
+      ],
+      "reason": "spec",
+      "state": "active",
+      "discovery": "machine",
+      "confirmed_by": "agent",
+      "confirmed_at": "33f4154a35f79bd897d99fd134e3c588242f56bd",
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-26-session-change-progress-hover"
+    },
+    {
+      "anchor": "FR-01",
+      "row_id": "2026-10-26-session-change-progress-hover:task-02:acc-0-cf266b7a",
+      "tests": [
+        "backend/app/modules/change/tests/test_progress_projection_ext.py"
+      ],
+      "reason": "spec",
+      "state": "active",
+      "discovery": "machine",
+      "confirmed_by": "agent",
+      "confirmed_at": "33f4154a35f79bd897d99fd134e3c588242f56bd",
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-26-session-change-progress-hover"
+    },
+    {
+      "anchor": "FR-01",
+      "row_id": "2026-10-26-session-change-progress-hover:task-02:acc-1-84fdd23a",
+      "tests": [
+        "backend/app/modules/change/tests/test_progress_projection_ext.py"
+      ],
+      "reason": "spec",
+      "state": "active",
+      "discovery": "machine",
+      "confirmed_by": "agent",
+      "confirmed_at": "33f4154a35f79bd897d99fd134e3c588242f56bd",
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-26-session-change-progress-hover"
+    },
+    {
+      "anchor": "FR-02",
+      "row_id": "2026-10-26-session-change-progress-hover:task-03:acc-0-dfcc92f2",
+      "tests": [
+        "backend/app/modules/change/tests/test_progress_projection_ext.py"
+      ],
+      "reason": "spec",
+      "state": "active",
+      "discovery": "machine",
+      "confirmed_by": "agent",
+      "confirmed_at": "33f4154a35f79bd897d99fd134e3c588242f56bd",
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-26-session-change-progress-hover"
+    },
+    {
+      "anchor": "FR-03",
+      "row_id": "2026-10-26-session-change-progress-hover:task-04:acc-0-740078d6",
+      "tests": [
+        "backend/app/modules/change/tests/test_progress_projection_ext.py"
+      ],
+      "reason": "spec",
+      "state": "active",
+      "discovery": "machine",
+      "confirmed_by": "agent",
+      "confirmed_at": "33f4154a35f79bd897d99fd134e3c588242f56bd",
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-26-session-change-progress-hover"
+    },
+    {
+      "anchor": "FR-03",
+      "row_id": "2026-10-26-session-change-progress-hover:task-05:acc-0-0bc12beb",
+      "tests": [
+        "backend/app/modules/daemon/tests/test_heartbeat_thin_flows.py"
+      ],
+      "reason": "spec",
+      "state": "active",
+      "discovery": "machine",
+      "confirmed_by": "agent",
+      "confirmed_at": "33f4154a35f79bd897d99fd134e3c588242f56bd",
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-26-session-change-progress-hover"
+    },
+    {
+      "anchor": "FR-03",
+      "row_id": "2026-10-26-session-change-progress-hover:task-06:acc-0-d22f1e66",
+      "tests": [
+        "sillyhub-daemon/tests/sillyspec-flow-status-collector.test.ts"
+      ],
+      "reason": "spec",
+      "state": "active",
+      "discovery": "machine",
+      "confirmed_by": "agent",
+      "confirmed_at": "33f4154a35f79bd897d99fd134e3c588242f56bd",
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-26-session-change-progress-hover"
+    },
+    {
+      "anchor": "FR-03",
+      "row_id": "2026-10-26-session-change-progress-hover:task-07:acc-0-3cf6023c",
+      "tests": [
+        "sillyhub-daemon/tests/sillyspec-flow-status-collector.test.ts"
+      ],
+      "reason": "spec",
+      "state": "active",
+      "discovery": "machine",
+      "confirmed_by": "agent",
+      "confirmed_at": "33f4154a35f79bd897d99fd134e3c588242f56bd",
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-26-session-change-progress-hover"
+    },
+    {
+      "anchor": "FR-01",
+      "row_id": "2026-10-26-session-change-progress-hover:task-08:acc-0-08118443",
+      "tests": [
+        "frontend/src/components/daemon/__tests__/session-change-files-hover.test.tsx"
+      ],
+      "reason": "spec",
+      "state": "active",
+      "discovery": "machine",
+      "confirmed_by": "agent",
+      "confirmed_at": "33f4154a35f79bd897d99fd134e3c588242f56bd",
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-26-session-change-progress-hover"
+    },
+    {
+      "anchor": "FR-05",
+      "row_id": "2026-10-26-session-change-progress-hover:task-09:acc-0-0cf2a32a",
+      "tests": [
+        "frontend/src/components/daemon/__tests__/session-change-files-hover.test.tsx"
+      ],
+      "reason": "spec",
+      "state": "active",
+      "discovery": "machine",
+      "confirmed_by": "agent",
+      "confirmed_at": "33f4154a35f79bd897d99fd134e3c588242f56bd",
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-26-session-change-progress-hover"
+    },
+    {
+      "anchor": "FR-05",
+      "row_id": "2026-10-26-session-change-progress-hover:task-10:acc-0-011ce0f2",
+      "tests": [
+        "frontend/src/components/daemon/__tests__/session-change-files-hover.test.tsx"
+      ],
+      "reason": "spec",
+      "state": "active",
+      "discovery": "machine",
+      "confirmed_by": "agent",
+      "confirmed_at": "33f4154a35f79bd897d99fd134e3c588242f56bd",
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-26-session-change-progress-hover"
+    },
+    {
+      "anchor": "FR-06",
+      "row_id": "2026-10-26-session-change-progress-hover:task-11:acc-0-bf562f7e",
+      "tests": [
+        "backend/app/modules/agent/tests/test_agent_session_model.py",
+        "backend/app/modules/agent/tests/test_cleanup_stale_runs_error_code.py",
+        "backend/app/modules/agent/tests/test_coordinator_approval_signal.py",
+        "backend/app/modules/agent/tests/test_finalizer.py",
+        "backend/app/modules/agent/tests/test_group_chat_models.py",
+        "backend/app/modules/agent/tests/test_mcp_tools.py",
+        "backend/app/modules/agent/tests/test_orchestrator.py",
+        "backend/app/modules/agent/tests/test_placement_borrow_integration.py",
+        "backend/app/modules/agent/tests/test_profile_router.py",
+        "backend/app/modules/agent/tests/test_provider_caps_alignment.py",
+        "backend/app/modules/agent/tests/test_worktree_integration.py",
+        "backend/app/modules/change/tests/test_assets.py",
+        "backend/app/modules/change/tests/test_change_lineage_filter.py",
+        "backend/app/modules/change/tests/test_change_session_binding.py",
+        "backend/app/modules/change/tests/test_dispatch.py",
+        "backend/app/modules/change/tests/test_dispatch_execute_team_mode.py",
+        "backend/app/modules/change/tests/test_files_refresh_sync.py",
+        "backend/app/modules/change/tests/test_files_router.py",
+        "backend/app/modules/change/tests/test_parser.py",
+        "backend/app/modules/change/tests/test_rename_title.py"
+      ],
+      "reason": "spec",
+      "state": "active",
+      "discovery": "machine",
+      "confirmed_by": "agent",
+      "confirmed_at": "33f4154a35f79bd897d99fd134e3c588242f56bd",
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-26-session-change-progress-hover"
+    },
+    {
+      "anchor": "FR-01",
+      "row_id": "2026-10-26-session-change-progress-hover:task-12:acc-0-41fa578c",
+      "tests": [
+        "backend/app/modules/agent/tests/test_agent_session_model.py",
+        "backend/app/modules/agent/tests/test_cleanup_stale_runs_error_code.py",
+        "backend/app/modules/agent/tests/test_coordinator_approval_signal.py",
+        "backend/app/modules/agent/tests/test_finalizer.py",
+        "backend/app/modules/agent/tests/test_group_chat_models.py",
+        "backend/app/modules/agent/tests/test_mcp_tools.py",
+        "backend/app/modules/agent/tests/test_orchestrator.py",
+        "backend/app/modules/agent/tests/test_placement_borrow_integration.py",
+        "backend/app/modules/agent/tests/test_profile_router.py",
+        "backend/app/modules/agent/tests/test_provider_caps_alignment.py",
+        "backend/app/modules/agent/tests/test_worktree_integration.py",
+        "backend/app/modules/change/tests/test_assets.py",
+        "backend/app/modules/change/tests/test_change_lineage_filter.py",
+        "backend/app/modules/change/tests/test_change_session_binding.py",
+        "backend/app/modules/change/tests/test_dispatch.py",
+        "backend/app/modules/change/tests/test_dispatch_execute_team_mode.py",
+        "backend/app/modules/change/tests/test_files_refresh_sync.py",
+        "backend/app/modules/change/tests/test_files_router.py",
+        "backend/app/modules/change/tests/test_parser.py",
+        "backend/app/modules/change/tests/test_rename_title.py"
+      ],
+      "reason": "spec",
+      "state": "active",
+      "discovery": "machine",
+      "confirmed_by": "agent",
+      "confirmed_at": "33f4154a35f79bd897d99fd134e3c588242f56bd",
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-26-session-change-progress-hover"
+    }
+  ]
+}

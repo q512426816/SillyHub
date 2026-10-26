@@ -46,7 +46,11 @@ import type { SillySpecUpdateState } from './sillyspec-manager.js';
 
 // 2026-09-02-changes-overview-card task-02：heartbeat sillyspec_status 键的载荷
 // 形状（progress show --json envelope 摘要），复用 manager 导出类型不重复声明。
-import type { SillySpecStatusSummary, SillySpecStatusError } from './sillyspec-manager.js';
+import type {
+  SillySpecStatusSummary,
+  SillySpecStatusError,
+  ThinFlowSummary,
+} from './sillyspec-manager.js';
 
 // ── body 类型（字段名 snake_case 对齐 backend Pydantic 模型）──────────────────
 
@@ -186,7 +190,7 @@ export interface HeartbeatBody {
    *   - null → 键出现携带 null = 能力缺失（backend 置 NULL 清除）；
    *   - 摘要对象 = 最近快照（瞬态失败时 daemon 侧保留旧值照常携带）。
    */
-  sillyspec_status?: SillySpecStatusSummary | null;
+  sillyspec_status?: (SillySpecStatusSummary & { thin_flows?: ThinFlowSummary[] }) | null;
   /**
    * 2026-09-08（temp 投毒排障衍生）：总览采集三态③失败状态（{reason, detail,
    * since}）。两态：null → 键出现携带 null = 无失败/已恢复（backend 置 NULL
@@ -912,6 +916,16 @@ export class HubClient {
      * 12 参调用请求体逐字段不变（零破坏）。
      */
     networkInterfaces?: NetworkInterfaceInfo[],
+    /**
+     * 2026-10-26-session-change-progress-hover task-07（FR-03/FR-06 / D-008@v2）：
+     * thin flow 摘要清单（daemon._sendHeartbeatOnce 从 manager.getThinFlows()
+     * 读取）。可选追加末位——undefined/空数组时 sillyspec_status.thin_flows 键
+     * 不出现（旧 daemon 形态，backend 不写不清，FR-07）；非空数组 → 嵌挂进
+     * sillyspec_status 载荷（backend DTO DaemonHeartbeatSillySpecStatus.thin_flows
+     * 同构，条目含 workspace_id 定位键）。仅在 sillyspec_status 为摘要对象时携带
+     *（null 能力缺失清除态无载荷可嵌）。既有 12 参调用请求体逐字段不变（零破坏）。
+     */
+    thinFlows?: ThinFlowSummary[],
   ): Promise<HeartbeatResponse> {
     const body: HeartbeatBody = {
       daemon_local_id: daemonLocalId,
@@ -966,6 +980,14 @@ export class HubClient {
     // → 键不出现（旧 daemon，backend 保留）；数组（含空）→ 整包直写。
     if (networkInterfaces !== undefined) {
       body.network_interfaces = networkInterfaces;
+    }
+    // task-07（2026-10-26-session-change-progress-hover）：thin flow 摘要——
+    // 仅 sillyspec_status 为摘要对象（非 null/undefined）且清单非空时嵌挂
+    //（空槽/能力缺失态键不出现，backend 不写不清）；整包直写（latest-wins，
+    // backend 消费侧逐变更行锁落库）。类型收窄：body.sillyspec_status 此处已
+    // 排除 null/undefined（上方分支保证）。
+    if (thinFlows && thinFlows.length > 0 && body.sillyspec_status != null) {
+      body.sillyspec_status = { ...body.sillyspec_status, thin_flows: thinFlows };
     }
     return this._request<HeartbeatResponse>(
       'POST',

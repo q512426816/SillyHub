@@ -42827,6 +42827,40 @@
               }
             ]
           },
+          "stage_progress": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/StageProgressEntry"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Stage Progress"
+          },
+          "task_progress": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/TaskProgressSummary"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "thin_flow": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ThinFlowProgress"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "updated_at": {
             "type": "string",
             "format": "date-time",
@@ -44851,6 +44885,20 @@
               }
             ],
             "title": "Pending Conflicts"
+          },
+          "thin_flows": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/DaemonHeartbeatThinFlow"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Thin Flows"
           }
         },
         "type": "object",
@@ -44984,6 +45032,80 @@
         ],
         "title": "DaemonHeartbeatSpecCacheItem",
         "description": "心跳 ``spec_cache[]`` 单项（ql-20260907-010：spec 拉取工作区级化）.\n\ndaemon 上报本机已有的 spec 缓存（``~/.sillyhub/daemon/specs/{ws}``）版本，\nbackend 在响应 ``spec_versions`` 里回服务器权威 ``spec_workspaces.spec_version``，\ndaemon 据此对「版本落后且无活跃会话」的工作区后台预取——把全量 bundle 下载\n挪出会话创建关键路径（实机 47MB 树 / ~0.4MB/s 链路下创建被拖 40s+）。"
+      },
+      "DaemonHeartbeatThinFlow": {
+        "properties": {
+          "workspace_id": {
+            "type": "string",
+            "title": "Workspace Id",
+            "default": ""
+          },
+          "change": {
+            "type": "string",
+            "title": "Change",
+            "default": ""
+          },
+          "phase": {
+            "type": "string",
+            "title": "Phase",
+            "default": ""
+          },
+          "design_filled": {
+            "type": "boolean",
+            "title": "Design Filled",
+            "default": false
+          },
+          "fr_filled": {
+            "type": "boolean",
+            "title": "Fr Filled",
+            "default": false
+          },
+          "bindings_total": {
+            "type": "integer",
+            "title": "Bindings Total",
+            "default": 0
+          },
+          "bindings_filled": {
+            "type": "integer",
+            "title": "Bindings Filled",
+            "default": 0
+          },
+          "tasks_total": {
+            "type": "integer",
+            "title": "Tasks Total",
+            "default": 0
+          },
+          "tasks_checked": {
+            "type": "integer",
+            "title": "Tasks Checked",
+            "default": 0
+          },
+          "substeps": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Substeps"
+          },
+          "spec_approved": {
+            "type": "boolean",
+            "title": "Spec Approved",
+            "default": false
+          },
+          "autopilot": {
+            "type": "boolean",
+            "title": "Autopilot",
+            "default": false
+          },
+          "legacy_fallback": {
+            "type": "boolean",
+            "title": "Legacy Fallback",
+            "default": false
+          }
+        },
+        "type": "object",
+        "title": "DaemonHeartbeatThinFlow",
+        "description": "心跳 sillyspec_status.thin_flows[] 单项（2026-10-26-session-change-progress-hover task-05 / FR-06 / D-008@v2）.\n\ndaemon ``flow status --json`` 白名单透传条目（字段清单=design §接口定义）。\n首键 workspace_id：sillyspec_status 是 daemon 实例级全局键（多工作区总览已\nstatus_map 级化），无工作区维度无法定位 changes 行——每条目自带定位键。\nphase 为 CLI 原文文案透传（如 ``'② 执行（已批准·写代码跑测试）'``），daemon\n不归一，四枚举归一在 backend 消费侧（runtime/service.py _normalize_thin_phase，\n按结构字段重算不解析文案）。\n\n类型收紧为标量（区别本文件 sillyspec_status 族的 ``| None`` 全宽松）：条目由\ndaemon 代码按固定白名单组装（非 envelope 自由结构），类型漂移面小；但全字段\n仍带缺省——CLI flow status --json 条件省略键（legacyFallback 仅 true 时输出，\nflow.js:3337）缺键按 falsy 缺省参与归一，不让缺键 422 整条心跳（宁宽勿断）。\n坏条目（workspace_id 非 UUID / change 空 / phase 空串）由消费侧单条丢弃整批\n不拒（生命周期契约表事件 3）。"
       },
       "DaemonInstanceProviderItem": {
         "properties": {
@@ -74279,6 +74401,83 @@
         "title": "StageProgress",
         "description": "Progress for one pipeline stage."
       },
+      "StageProgressEntry": {
+        "properties": {
+          "stage": {
+            "type": "string",
+            "title": "Stage"
+          },
+          "status": {
+            "type": "string",
+            "title": "Status"
+          },
+          "steps_total": {
+            "type": "integer",
+            "title": "Steps Total"
+          },
+          "steps_completed": {
+            "type": "integer",
+            "title": "Steps Completed"
+          },
+          "started_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Started At"
+          },
+          "completed_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Completed At"
+          },
+          "duration_seconds": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Duration Seconds"
+          },
+          "revision": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Revision"
+          }
+        },
+        "type": "object",
+        "required": [
+          "stage",
+          "status",
+          "steps_total",
+          "steps_completed",
+          "started_at",
+          "completed_at",
+          "duration_seconds",
+          "revision"
+        ],
+        "title": "StageProgressEntry",
+        "description": "主线单阶段进度项（计算投影，非 changes 表列，零 migration）。\n\n数据源=platform_change_progress.latest_progress 的 stages[]（含\nstarted_at/completed_at/revision）×steps[]（status 分组计数）；由\nservice._extract_stage_progress（task-02 领地）提取，enrich_summaries\n填充 ChangeSummary.stage_progress。CLI 状态原值透传不归一（未知新枚举\n由前端白名单外兜底，design 盲区#10）；畸形 latest_progress 整体\nfail-open → stage_progress=None（R-01）。"
+      },
       "StageStep": {
         "properties": {
           "name": {
@@ -76014,6 +76213,25 @@
         ],
         "title": "TaskParseWarning"
       },
+      "TaskProgressSummary": {
+        "properties": {
+          "total": {
+            "type": "integer",
+            "title": "Total"
+          },
+          "done": {
+            "type": "integer",
+            "title": "Done"
+          }
+        },
+        "type": "object",
+        "required": [
+          "total",
+          "done"
+        ],
+        "title": "TaskProgressSummary",
+        "description": "execute 阶段任务进度（计算投影，非 changes 表列，零 migration）。\n\n数据源=tasks 表按 change_id IN 单查询批量聚合（task-03 领地，R-03 防\nN+1）；done=status==\"done\" 计分子，total 排除 status==\"cancelled\"。\n口径=Task 表 n/m（D-005@v1），不用 CLI execute 的 Wave 步骤数。"
+      },
       "TaskRead": {
         "properties": {
           "id": {
@@ -76940,6 +77158,67 @@
         ],
         "title": "TeamWorkspaceRef",
         "description": "TeamMissionSummary.scope_workspaces 单项——scope 工作区 id+名称。\n\nql-20260825-003：范围徽标名称化（前端只拿 id 时回落 #<id8> 原始徽标）。\nname 查无 Workspace 行时为 None（前端回落 id 徽标）。"
+      },
+      "ThinFlowProgress": {
+        "properties": {
+          "phase": {
+            "type": "string",
+            "title": "Phase"
+          },
+          "approved": {
+            "type": "boolean",
+            "title": "Approved"
+          },
+          "autopilot": {
+            "type": "boolean",
+            "title": "Autopilot"
+          },
+          "tasks_total": {
+            "type": "integer",
+            "title": "Tasks Total"
+          },
+          "tasks_done": {
+            "type": "integer",
+            "title": "Tasks Done"
+          },
+          "substeps_done": {
+            "type": "integer",
+            "title": "Substeps Done"
+          },
+          "substeps_total": {
+            "type": "integer",
+            "title": "Substeps Total"
+          },
+          "upgraded": {
+            "type": "boolean",
+            "title": "Upgraded"
+          },
+          "adopted_from": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Adopted From"
+          }
+        },
+        "type": "object",
+        "required": [
+          "phase",
+          "approved",
+          "autopilot",
+          "tasks_total",
+          "tasks_done",
+          "substeps_done",
+          "substeps_total",
+          "upgraded",
+          "adopted_from"
+        ],
+        "title": "ThinFlowProgress",
+        "description": "轻量变更（thin/flow）相位进度（计算投影，非 changes 表列，零 migration）。\n\n数据源=daemon flow status --json 采集（task-06/07）经 heartbeat\nsillyspec_status.thin_flows 上行（条目含 workspace_id，D-008@v2），由\nbackend 消费侧归一 phase 四枚举后行锁落 changes.stages[\"thin_flow\"]\n（task-05 领地，不刷 updated_at——D-014@v1）；enrich_summaries 读侧\n投影（task-04 领地）。旧 daemon 无该键 → None（前端降级现状，FR-07）。"
       },
       "TimelineEvent": {
         "properties": {

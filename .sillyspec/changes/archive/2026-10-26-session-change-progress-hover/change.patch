@@ -1,0 +1,4061 @@
+diff --git a/backend/app/modules/change/schema.py b/backend/app/modules/change/schema.py
+index 6a53bb51b..b266fb7a2 100644
+--- a/backend/app/modules/change/schema.py
++++ b/backend/app/modules/change/schema.py
+@@ -42,6 +42,64 @@ class StepProgressSummary(BaseModel):
+     )  # 当前步 output 截断 200（列表摘要专用；明细全量，Phase 2.4 两层分离）
+ 
+ 
++# ── Progress projection DTOs（2026-10-26-session-change-progress-hover task-01，
++#    design 接口定义——会话悬浮框进度展示数据契约，三端按此对齐）──
++
++
++class StageProgressEntry(BaseModel):
++    """主线单阶段进度项（计算投影，非 changes 表列，零 migration）。
++
++    数据源=platform_change_progress.latest_progress 的 stages[]（含
++    started_at/completed_at/revision）×steps[]（status 分组计数）；由
++    service._extract_stage_progress（task-02 领地）提取，enrich_summaries
++    填充 ChangeSummary.stage_progress。CLI 状态原值透传不归一（未知新枚举
++    由前端白名单外兜底，design 盲区#10）；畸形 latest_progress 整体
++    fail-open → stage_progress=None（R-01）。
++    """
++
++    stage: str  # brainstorm|plan|execute|verify|archive（主线 5 阶段）
++    status: str  # CLI 原值：pending|in-progress|completed|failed|blocked|revising|stale
++    steps_total: int  # 该阶段 steps[] 计数（含 waiting/blocked；阶段未初始化为 0）
++    steps_completed: int  # status=completed 计数
++    started_at: str | None  # ISO 原文透传（解析失败保留原串）
++    completed_at: str | None
++    duration_seconds: int | None  # 已完成=completed−started；进行中=服务端注入 now−started（R-04 时钟注入）；无 started_at→None
++    revision: int | None  # revising 修订轮次（CLI stages.revision）
++
++
++class TaskProgressSummary(BaseModel):
++    """execute 阶段任务进度（计算投影，非 changes 表列，零 migration）。
++
++    数据源=tasks 表按 change_id IN 单查询批量聚合（task-03 领地，R-03 防
++    N+1）；done=status=="done" 计分子，total 排除 status=="cancelled"。
++    口径=Task 表 n/m（D-005@v1），不用 CLI execute 的 Wave 步骤数。
++    """
++
++    total: int  # 该变更 tasks 行数（排除 cancelled；全 cancelled 为 0，前端显示 — 不除零）
++    done: int  # status=done 计数
++
++
++class ThinFlowProgress(BaseModel):
++    """轻量变更（thin/flow）相位进度（计算投影，非 changes 表列，零 migration）。
++
++    数据源=daemon flow status --json 采集（task-06/07）经 heartbeat
++    sillyspec_status.thin_flows 上行（条目含 workspace_id，D-008@v2），由
++    backend 消费侧归一 phase 四枚举后行锁落 changes.stages["thin_flow"]
++    （task-05 领地，不刷 updated_at——D-014@v1）；enrich_summaries 读侧
++    投影（task-04 领地）。旧 daemon 无该键 → None（前端降级现状，FR-07）。
++    """
++
++    phase: str  # 归一枚举：spec|awaiting_approval|executing|closing（写侧归一，读侧透传）
++    approved: bool  # spec_approved 或 autopilot 任一
++    autopilot: bool  # 用户显式豁免（未批准但可动码）
++    tasks_total: int  # flow status tasksTotal（thin 任务勾选，不依赖 reparse/Task 表）
++    tasks_done: int  # flow status tasksChecked
++    substeps_done: int  # flow status substeps 已 done 计数
++    substeps_total: int  # 恒 8（sillyspec SUBSTEPS 定长：artifacts/ledger/patch/review/probes/distill/archive/events）
++    upgraded: bool  # tier=thick 或 legacy_fallback（升厚→前端切全量渲染，D-007@v1）
++    adopted_from: str | None  # 'brainstorm' 分流出身（前端"自头脑风暴转入"标注，D-006@v1）
++
++
+ class StepTimelineEntry(BaseModel):
+     """step 级时间线明细项（计算投影，非表列）。
+ 
+@@ -165,6 +223,17 @@ class ChangeSummary(BaseModel):
+     # created_at 生命周期口径）。填充逻辑是 task-02/03 领地，本处仅落契约。
+     # optional default None（brownfield 安全，旧客户端不读不受影响）。
+     usage: UsageSummaryRead | None = None
++    # 2026-10-26-session-change-progress-hover task-01（design FR-01~FR-06）：列表项
++    # 携带三组进度投影。均为计算字段（DTO 层），非 changes 表列（零 migration）；
++    # producer：stage_progress=service._extract_stage_progress 从 latest_progress
++    # stages[]×steps[] 提取（task-02）、task_progress=tasks 表 IN 单查询聚合
++    # （task-03）、thin_flow=change.stages JSON 的 thin_flow 子键读侧投影（task-04，
++    # 写侧=heartbeat thin_flows 行锁落库 task-05）；consumer=前端悬浮框进度行/
++    # 入口总圈（api-types 生成物）。全部 optional default None（brownfield 安全，
++    # 缺失时前端降级现状渲染，FR-07）。填充逻辑是 task-02/03/04 领地，本处仅落契约。
++    stage_progress: list[StageProgressEntry] | None = None
++    task_progress: TaskProgressSummary | None = None
++    thin_flow: ThinFlowProgress | None = None
+     updated_at: datetime
+ 
+ 
+diff --git a/backend/app/modules/change/service.py b/backend/app/modules/change/service.py
+index bed9e4db3..4450bccac 100644
+--- a/backend/app/modules/change/service.py
++++ b/backend/app/modules/change/service.py
+@@ -58,8 +58,11 @@ from app.modules.change.schema import (
+     ChangeRead,
+     ChangeSummary,
+     PendingReview,
++    StageProgressEntry,
+     StepProgressSummary,
+     StepTimelineEntry,
++    TaskProgressSummary,
++    ThinFlowProgress,
+ )
+ from app.modules.change.usage_service import ChangeUsageQueryService
+ from app.modules.platform_sync.model import PlatformChangeProgressORM
+@@ -2335,6 +2338,16 @@ class ChangeService:
+         usage_map = await ChangeUsageQueryService(self._session).summarize_changes(
+             changes[0].workspace_id, usage_ids
+         )
++        # 2026-10-26-session-change-progress-hover task-03（FR-02 / D-005@v1）：
++        # execute 阶段任务进度批量聚合——tasks 表按 change_id IN 单查询（R-03 防
++        # N+1，usage_map 同款批量模式），内存聚合 done/total（done=status=="done"
++        # 计分子、total 排除 cancelled 计分母，backend/app/modules/task/model.py
++        # status 6 值）。口径=Task 表 n/m，不用 CLI execute 的 Wave 步骤数（D-005）。
++        task_progress_map = await self._aggregate_task_progress(usage_ids)
++        # 2026-10-26-session-change-progress-hover task-02：阶段进度行投影用时钟——
++        # 单次调用取一次统一注入（R-04：提取器纯函数不取 datetime.now 全局时钟，
++        # 同批各行耗时基准一致，测试可注入固定值保确定性）。
++        stage_now = datetime.now(UTC)
+         summaries: list[ChangeSummary] = []
+         for c in changes:
+             summary = ChangeSummary.model_validate(c)
+@@ -2346,6 +2359,15 @@ class ChangeService:
+                 continue
+             # task-03：批量 usage 映射填充（map 无该行 = 无关联执行 → None）。
+             summary.usage = usage_map.get(c.id)
++            # task-03（2026-10-26-session-change-progress-hover）：任务进度映射填充
++            #（map 无该行 = 该变更无 task 行 → None，前端 execute 圈旁不显示任务计数）。
++            summary.task_progress = task_progress_map.get(c.id)
++            # task-04（FR-03/FR-07 / D-008@v2）：thin_flow 读侧投影——changes.stages
++            # JSON 的 thin_flow 子键（写侧=heartbeat thin_flows 行锁落库 task-05）经
++            # pydantic 校验投影；缺键/坏结构 try/except → None（R-01 fail-open，前端
++            # 降级现状渲染）。纯读投影：不写 stages、不刷 updated_at（读写分离）；
++            # deleted 行上方已 continue 天然不投影。
++            summary.thin_flow = self._project_thin_flow(c.stages)
+             stage_info = projected.get((c.workspace_id, c.change_key))
+             if stage_info is not None:
+                 stage, completed, latest_progress, last_pushed_at = stage_info
+@@ -2373,6 +2395,14 @@ class ChangeService:
+                 # 赋值处截 200（列表性能契约不动，两层分离）。
+                 step_summary, _ = self._extract_step_progress(latest_progress)
+                 summary.step_progress = step_summary
++                # 2026-10-26-session-change-progress-hover task-02（FR-01）：主线
++                # 阶段进度行投影——stages[]×steps[] 分组计数+耗时秒数，latest_progress
++                # 已在手零新增查询（constraints）；畸形 fail-open → None（R-01，前端
++                # 该项降级现状渲染）；archived 行照算投影（design 兼容策略：有数据就带，
++                # 归档组前端不渲染 D-009@v1，后端口径不动）。
++                summary.stage_progress = self._extract_stage_progress(
++                    latest_progress, now=stage_now
++                )
+             # 2026-09-27-change-list-is-thin：出身标识投影（终态覆盖后的 current_stage
+             # 参与判定——归档 thin 翻 archived 后仍靠 steps 兜底命中；stage_info 不命中
+             # 处用 row 现值判分支①②）。
+@@ -3016,6 +3046,163 @@ class ChangeService:
+         )
+         return summary, timeline
+ 
++    @staticmethod
++    def _calc_stage_duration_seconds(
++        started_at: str | None, completed_at: str | None, *, now: datetime
++    ) -> int | None:
++        """阶段耗时秒数（2026-10-26-session-change-progress-hover task-02 / R-04）。
++
++        口径：已完成=completed−started；completed 缺失/不可解析=进行中 → 注入
++        ``now``−started；started 缺失/不可解析 → None（不算耗时）。输入为
++        ``_normalize_completed_at`` 归一化后的 ISO 串（zh-CN 墙钟已转 UTC aware；
++        归一化失败保留的原串经 ``_parse_iso_or_none`` 不可解析 → None，R-01 fail-open）。
++        naive/aware 混型相减（无时区标记的原串）TypeError → None 不抛。
++        """
++        started_dt = ChangeService._parse_iso_or_none(started_at)
++        if started_dt is None:
++            return None
++        end_dt = ChangeService._parse_iso_or_none(completed_at)
++        if end_dt is None:
++            end_dt = now
++        try:
++            return int((end_dt - started_dt).total_seconds())
++        except TypeError:
++            return None
++
++    @staticmethod
++    def _project_thin_flow(stages: dict | None) -> ThinFlowProgress | None:
++        """thin_flow 读侧投影（task-04 / FR-03 / R-01 fail-open）。
++
++        stages JSON 含 thin_flow 子键时经 ThinFlowProgress 校验投影（结构异常
++        → None 不抛）；缺键/None stages → None。phase 等字段原值透传（归一在
++        写侧 task-05 完成，读侧不重复归一）。
++        """
++        if not isinstance(stages, dict):
++            return None
++        raw = stages.get("thin_flow")
++        if not isinstance(raw, dict):
++            return None
++        try:
++            return ThinFlowProgress.model_validate(raw)
++        except Exception:  # noqa: BLE001 —— 坏结构降级 None（R-01），不阻塞列表
++            return None
++
++    async def _aggregate_task_progress(
++        self, change_ids: list[uuid.UUID]
++    ) -> dict[uuid.UUID, TaskProgressSummary]:
++        """execute 阶段任务进度批量聚合（task-03 / FR-02 / D-005@v1）。
++
++        单条 SELECT change_id, status FROM tasks WHERE change_id IN (...)（R-03
++        防 N+1——禁止逐 change_id 循环查询），内存聚合输出 {change_id: 任务进度}：
++        done=status=="done" 计分子；total 排除 status=="cancelled"（D-005@v1——
++        取消任务不占分母，前端显示面 total=0 时显 — 不除零，plan 盲区#2）。
++        空列表零查询；无 task 行的变更不进 map（填充处 .get() → None 降级）。
++        """
++        if not change_ids:
++            return {}
++        # 局部 import：task.service 顶部 import 本模块（ChangeService），顶部静态
++        # import Task 会成环（partially initialized）——方法内运行时导入，此时
++        # 模块已初始化完毕（与 daemon/runtime/service.py 的 Change 局部 import
++        # 同款反环范式）。
++        from app.modules.task.model import Task
++
++        result = await self._session.execute(
++            select(Task.change_id, Task.status).where(Task.change_id.in_(change_ids))
++        )
++        rows = result.all()
++        done: dict[uuid.UUID, int] = {}
++        total: dict[uuid.UUID, int] = {}
++        seen: set[uuid.UUID] = set()
++        for change_id, status in rows:
++            seen.add(change_id)
++            if status == "cancelled":
++                continue  # 不计分母（D-005@v1）
++            total[change_id] = total.get(change_id, 0) + 1
++            if status == "done":
++                done[change_id] = done.get(change_id, 0) + 1
++        # 有 task 行的变更恒进 map（全 cancelled → {total:0, done:0}，前端显 —
++        # 不除零，plan 盲区#2）；无 task 行的变更不进（.get() → None=不显示计数）。
++        return {
++            cid: TaskProgressSummary(total=total.get(cid, 0), done=done.get(cid, 0))
++            for cid in seen
++        }
++
++    @staticmethod
++    def _extract_stage_progress(
++        latest_progress: dict | None,
++        *,
++        now: datetime,
++    ) -> list[StageProgressEntry] | None:
++        """从 ``latest_progress.stages[]``×``steps[]`` 提取主线各阶段进度行（task-02）。
++
++        数据源=CLI ``serializeForSync`` 六表 stages 表行（spike 实证顶层数组，元素
++        字段 stage/status/started_at/completed_at/revision/stale_reason）×steps 表行
++        按 stage 分组计数——steps_total 含 waiting/blocked 全计数、steps_completed
++        只计 status='completed'；status CLI 原值透传不归一（constraints：未知新枚举
++        由前端白名单外兜底）。防御 isinstance 逐层判型（对齐 ``_extract_step_progress``
++        范式，R-01）：latest_progress 非 dict / stages 缺失/非 list / 无一有效行 →
++        None 不抛（前端该项降级现状渲染，FR-07）；steps 缺失/空 → 各阶段计数 0
++        （盲区#1：stages 行在而 steps 无明细 → 空圈不除零，计数字段照常输出）。
++
++        耗时秒数走 ``_calc_stage_duration_seconds``（进行中用注入 ``now``，R-04）；
++        started_at/completed_at 经 ``_normalize_completed_at`` 归一化（zh-CN 旧格式
++        容错同款口径）。排序同 ``_stage_group_order``（主线 5 阶段定序，跨平台稳定）。
++        """
++        if not isinstance(latest_progress, dict):
++            return None
++        stages = latest_progress.get("stages")
++        if not isinstance(stages, list):
++            return None
++
++        # steps 按 stage 分组计数：行非 dict / stage 非 str → 跳过（无法归属阶段，
++        # 对齐 _extract_step_progress 丢行口径）；status 异常仍计入 total 不计 completed。
++        steps_total_by_stage: dict[str, int] = {}
++        steps_done_by_stage: dict[str, int] = {}
++        steps = latest_progress.get("steps")
++        if isinstance(steps, list):
++            for item in steps:
++                if not isinstance(item, dict):
++                    continue
++                step_stage = item.get("stage")
++                if not isinstance(step_stage, str) or not step_stage:
++                    continue
++                steps_total_by_stage[step_stage] = steps_total_by_stage.get(step_stage, 0) + 1
++                if item.get("status") == "completed":
++                    steps_done_by_stage[step_stage] = steps_done_by_stage.get(step_stage, 0) + 1
++
++        entries: list[StageProgressEntry] = []
++        for item in stages:
++            if not isinstance(item, dict):
++                continue
++            stage = item.get("stage")
++            status = item.get("status")
++            # 身份字段（stage/status）缺失/类型异常 → 丢行（同 _extract_step_progress）。
++            if not (isinstance(stage, str) and stage and isinstance(status, str) and status):
++                continue
++            revision = item.get("revision")
++            if not isinstance(revision, int) or isinstance(revision, bool):
++                revision = None  # 缺失/类型异常（含 bool 伪 int）→ None
++            started_at = ChangeService._normalize_completed_at(item.get("started_at"))
++            completed_at = ChangeService._normalize_completed_at(item.get("completed_at"))
++            entries.append(
++                StageProgressEntry(
++                    stage=stage,
++                    status=status,
++                    steps_total=steps_total_by_stage.get(stage, 0),
++                    steps_completed=steps_done_by_stage.get(stage, 0),
++                    started_at=started_at,
++                    completed_at=completed_at,
++                    duration_seconds=ChangeService._calc_stage_duration_seconds(
++                        started_at, completed_at, now=now
++                    ),
++                    revision=revision,
++                )
++            )
++        if not entries:
++            return None
++        entries.sort(key=lambda e: ChangeService._stage_group_order(e.stage))
++        return entries
++
+     @staticmethod
+     def _build_change(
+         parsed: ParsedChange,
+diff --git a/backend/app/modules/daemon/router/heartbeat.py b/backend/app/modules/daemon/router/heartbeat.py
+index bfa71bbd0..5ec935202 100644
+--- a/backend/app/modules/daemon/router/heartbeat.py
++++ b/backend/app/modules/daemon/router/heartbeat.py
+@@ -122,6 +122,39 @@ class DaemonHeartbeatSillySpecConflict(BaseModel):
+     ql_id: str | None = None
+ 
+ 
++class DaemonHeartbeatThinFlow(BaseModel):
++    """心跳 sillyspec_status.thin_flows[] 单项（2026-10-26-session-change-progress-hover task-05 / FR-06 / D-008@v2）.
++
++    daemon ``flow status --json`` 白名单透传条目（字段清单=design §接口定义）。
++    首键 workspace_id：sillyspec_status 是 daemon 实例级全局键（多工作区总览已
++    status_map 级化），无工作区维度无法定位 changes 行——每条目自带定位键。
++    phase 为 CLI 原文文案透传（如 ``'② 执行（已批准·写代码跑测试）'``），daemon
++    不归一，四枚举归一在 backend 消费侧（runtime/service.py _normalize_thin_phase，
++    按结构字段重算不解析文案）。
++
++    类型收紧为标量（区别本文件 sillyspec_status 族的 ``| None`` 全宽松）：条目由
++    daemon 代码按固定白名单组装（非 envelope 自由结构），类型漂移面小；但全字段
++    仍带缺省——CLI flow status --json 条件省略键（legacyFallback 仅 true 时输出，
++    flow.js:3337）缺键按 falsy 缺省参与归一，不让缺键 422 整条心跳（宁宽勿断）。
++    坏条目（workspace_id 非 UUID / change 空 / phase 空串）由消费侧单条丢弃整批
++    不拒（生命周期契约表事件 3）。
++    """
++
++    workspace_id: str = Field(default="")
++    change: str = Field(default="")
++    phase: str = Field(default="")
++    design_filled: bool = False
++    fr_filled: bool = False
++    bindings_total: int = 0
++    bindings_filled: int = 0
++    tasks_total: int = 0
++    tasks_checked: int = 0
++    substeps: list[str] = Field(default_factory=list)
++    spec_approved: bool = False
++    autopilot: bool = False
++    legacy_fallback: bool = False
++
++
+ class DaemonHeartbeatSillySpecStatus(BaseModel):
+     """心跳 sillyspec_status 载荷（2026-09-02-changes-overview-card FR-05 / Grill B1）.
+ 
+@@ -146,6 +179,15 @@ class DaemonHeartbeatSillySpecStatus(BaseModel):
+     conflict_types: dict[str, int] | None = None
+     changes: list[DaemonHeartbeatSillySpecChange] | None = None
+     pending_conflicts: list[DaemonHeartbeatSillySpecConflict] | None = None
++    # 逐活跃 thin 变更 flow status 摘要（2026-10-26-session-change-progress-hover
++    # task-05 / D-008@v2）：与上方 envelope 摘要字段同包上行，但**消费路径不同**——
++    # envelope 摘要整包直写 daemon_instances 快照列（语义边界，零改动），thin_flows
++    # 在 backend 消费侧走新增逐变更写入路径（行锁 read-merge-write
++    # changes.stages["thin_flow"]，runtime/service.py _merge_thin_flows）。旧
++    # daemon 无该键（default=None 零影响，FR-07）；daemon 侧空槽时省略键不发
++    # （task-07 口径）。仅实例级 sillyspec_status 键消费（status_map 值同形校验
++    # 但不消费——条目自带 workspace_id 定位，D-008@v2 只定义该一条上行面）。
++    thin_flows: list[DaemonHeartbeatThinFlow] | None = Field(default=None)
+ 
+ 
+ class DaemonHeartbeatSillySpecStatusError(BaseModel):
+@@ -374,6 +416,18 @@ async def daemon_heartbeat(
+         sillyspec_status=(
+             data.sillyspec_status.model_dump() if data.sillyspec_status is not None else None
+         ),
++        # 2026-10-26-session-change-progress-hover task-05（FR-03/FR-06 / D-008@v2）：
++        # thin_flows 与上方 sillyspec_status 整包直写是两条独立路径——条目不随快照
++        # 落 daemon_instances，单独交服务层新逐变更写入路径（行锁 read-merge-write
++        # changes.stages["thin_flow"]，_merge_thin_flows）。dict 契约同 providers
++        # 先例（model_dump 后交服务层）；缺省/空（旧 daemon 或无活跃 thin）= None
++        # 零动作。仅取实例级 sillyspec_status 键（status_map 值不消费，DTO 注释
++        # 同口径）。
++        thin_flows=(
++            [item.model_dump() for item in data.sillyspec_status.thin_flows]
++            if data.sillyspec_status is not None and data.sillyspec_status.thin_flows
++            else None
++        ),
+         # 2026-09-08（temp 投毒排障衍生）：采集失败状态走 sillyspec_status 同款
+         # 语义（None=清除置 NULL）。model_dump 后交服务层整包直写（detail 截断
+         # 在服务层一处实现）。
+diff --git a/backend/app/modules/daemon/runtime/service.py b/backend/app/modules/daemon/runtime/service.py
+index fd8498e2e..edf5a167b 100644
+--- a/backend/app/modules/daemon/runtime/service.py
++++ b/backend/app/modules/daemon/runtime/service.py
+@@ -428,6 +428,7 @@ class RuntimeService:
+         sillyspec_command_result: dict | None = None,
+         network_interfaces: list[dict] | None = None,
+         observed_ip: str | None = None,
++        thin_flows: list[dict] | None = None,
+         *,
+         actor_user_id: uuid.UUID | None = None,
+     ) -> DaemonInstance:
+@@ -606,6 +607,15 @@ class RuntimeService:
+         # 整包直写（非状态机无 since/upsert，backend 不增删改写；32KB 预算与
+         # N=50 截断在 daemon 侧执行，design §4）。
+         instance.sillyspec_status = sillyspec_status
++        # ── thin_flows 逐变更写入（2026-10-26-session-change-progress-hover
++        # task-05 / FR-03/FR-06 / D-008@v2）────────────────────────────────────
++        # 与上方 sillyspec_status 整包快照直写是两条独立路径：条目按 workspace_id+
++        # change_key 定位 changes 行，行锁 read-merge-write stages["thin_flow"] 子键。
++        # 缺省/None/空列表（旧 daemon 或无活跃 thin）零动作；坏条目单条丢弃整批
++        # 不拒（生命周期契约表事件 3）。写入失败不应拖垮心跳本体——逐条 try/except
++        # 吞噬记日志（下跳自愈，R-07）。
++        if thin_flows:
++            await self._merge_thin_flows(thin_flows)
+         # sillyspec_status_error（2026-09-08，temp 投毒排障衍生）：语义同
+         # sillyspec_status 两态——None 即置 NULL 清除（采集正常/能力缺失②均清）；
+         # 非 None dict 整包直写，detail 截 200 双保险（截断与 sillyspec_update.error
+@@ -685,6 +695,112 @@ class RuntimeService:
+         await self._session.refresh(instance)
+         return instance
+ 
++    # ── thin_flows 逐变更写入路径（2026-10-26-session-change-progress-hover
++    # task-05 / D-008@v2）───────────────────────────────────────────────────────
++
++    @staticmethod
++    def _normalize_thin_phase(item: dict) -> str:
++        """thin 相位归一（四枚举 spec/awaiting_approval/executing/closing）。
++
++        与 sillyspec CLI flow.js:3284-3296 的 phase 推断逐字同口径（按结构字段
++        重算，不解析 CLI 文案——daemon 透传原始字段，文案变化不破坏链路）：
++
++        - substeps 含 'ledger' → closing（flow done 收口首子步，一经完成恒 closing）；
++        - docs 齐（design_filled && fr_filled && bindings_total>0 且
++          bindings_filled>=bindings_total）且（spec_approved || autopilot）→ executing；
++        - docs 齐而未批准 → awaiting_approval（①位的「→ 待用户批准」子态）；
++        - 否则 → spec。
++        """
++        substeps = item.get("substeps")
++        substeps = substeps if isinstance(substeps, list) else []
++        if "ledger" in substeps:
++            return "closing"
++        docs_ready = (
++            bool(item.get("design_filled"))
++            and bool(item.get("fr_filled"))
++            and isinstance(item.get("bindings_total"), int)
++            and item["bindings_total"] > 0
++            and isinstance(item.get("bindings_filled"), int)
++            and item["bindings_filled"] >= item["bindings_total"]
++        )
++        if not docs_ready:
++            return "spec"
++        if item.get("spec_approved") or item.get("autopilot"):
++            return "executing"
++        return "awaiting_approval"
++
++    async def _merge_thin_flows(self, thin_flows: list[dict]) -> None:
++        """heartbeat thin_flows 条目逐变更落 changes.stages["thin_flow"]（D-008@v2）。
++
++        全新写入路径（区别既有 sillyspec_status 整包快照直写 daemon_instances——
++        backend 从不逐条改写 changes 表，本方法是首个例外且范围仅 stages JSON 的
++        thin_flow 子键）：
++
++        - 定位：workspace_id（UUID 解析失败丢弃）+ change_key（空丢弃）匹配
++          changes 行（ux_changes_workspace_key 唯一）；行缺失或 location='deleted'
++          静默跳过不建行（生命周期表事件 3 / 盲区#3）；
++        - 并发：SELECT ... FOR UPDATE 行锁读 stages → dict 合并 thin_flow 键 →
++          UPDATE 只 set stages 列（Core update 语句，绕开 ORM 脏检查对 updated_at
++          的潜在触碰——D-014@v1 不刷 changes.updated_at，防入口圈系统性偏向
++          轻量变更）；reparse 全量重建 stages 丢键由下一跳心跳自愈（≤1 心跳
++          周期，R-07）；
++        - 落库结构 = schema.py ThinFlowProgress 同构 dict（读侧投影 task-04 直接
++          消费）；upgraded=legacy_fallback（CLI flow status 仅升厚时输出该键，
++          缺省 False）；adopted_from 平台侧无数据源恒 None（flow status --json
++          不输出该字段，如实缺省——前端「自头脑风暴转入」标注待 CLI 补字段）。
++        """
++        # 局部 import：change 模型只在写入路径需要，避免 daemon→change 静态
++        # import 在模块加载期引入潜在环（change.service 已 import platform_sync 等）。
++        from app.modules.change.model import Change
++
++        for item in thin_flows:
++            try:
++                if not isinstance(item, dict):
++                    continue
++                raw_ws = item.get("workspace_id") or ""
++                change_key = (item.get("change") or "").strip()
++                try:
++                    ws_id = uuid.UUID(str(raw_ws))
++                except (ValueError, AttributeError):
++                    continue
++                if not change_key:
++                    continue
++                # 行锁读（FOR UPDATE）：与 reparse/sync 的 read-modify-write 竞态
++                # 由此串行化（R-07）。
++                result = await self._session.execute(
++                    select(Change)
++                    .where(Change.workspace_id == ws_id, Change.change_key == change_key)
++                    .with_for_update()
++                )
++                row = result.scalar_one_or_none()
++                if row is None or row.location == "deleted":
++                    continue
++                stages = dict(row.stages) if isinstance(row.stages, dict) else {}
++                stages["thin_flow"] = {
++                    "phase": self._normalize_thin_phase(item),
++                    "approved": bool(item.get("spec_approved") or item.get("autopilot")),
++                    "autopilot": bool(item.get("autopilot")),
++                    "tasks_total": int(item.get("tasks_total") or 0),
++                    "tasks_done": int(item.get("tasks_checked") or 0),
++                    "substeps_done": len(
++                        [s for s in (item.get("substeps") or []) if isinstance(s, str)]
++                    )
++                    if isinstance(item.get("substeps"), list)
++                    else 0,
++                    "substeps_total": 8,  # sillyspec SUBSTEPS 定长
++                    "upgraded": bool(item.get("legacy_fallback")),
++                    "adopted_from": None,
++                }
++                # 只 set stages 列（Core update；D-014 不刷 updated_at）。
++                await self._session.execute(
++                    update(Change).where(Change.id == row.id).values(stages=stages)
++                )
++            except Exception:
++                log.warning(
++                    "thin_flow_merge_item_skipped",
++                    change=str(item.get("change")) if isinstance(item, dict) else None,
++                )
++
+     async def count_pending_control_commands(self, daemon_instance_id: uuid.UUID) -> int:
+         """该 daemon 全部 runtime 名下 pending 控制指令计数（task-04 / design A2）。
+ 
+diff --git a/backend/openapi.json b/backend/openapi.json
+index 8bb9b091c..19e97ce6b 100644
+--- a/backend/openapi.json
++++ b/backend/openapi.json
+@@ -42827,6 +42827,40 @@
+               }
+             ]
+           },
++          "stage_progress": {
++            "anyOf": [
++              {
++                "items": {
++                  "$ref": "#/components/schemas/StageProgressEntry"
++                },
++                "type": "array"
++              },
++              {
++                "type": "null"
++              }
++            ],
++            "title": "Stage Progress"
++          },
++          "task_progress": {
++            "anyOf": [
++              {
++                "$ref": "#/components/schemas/TaskProgressSummary"
++              },
++              {
++                "type": "null"
++              }
++            ]
++          },
++          "thin_flow": {
++            "anyOf": [
++              {
++                "$ref": "#/components/schemas/ThinFlowProgress"
++              },
++              {
++                "type": "null"
++              }
++            ]
++          },
+           "updated_at": {
+             "type": "string",
+             "format": "date-time",
+@@ -44851,6 +44885,20 @@
+               }
+             ],
+             "title": "Pending Conflicts"
++          },
++          "thin_flows": {
++            "anyOf": [
++              {
++                "items": {
++                  "$ref": "#/components/schemas/DaemonHeartbeatThinFlow"
++                },
++                "type": "array"
++              },
++              {
++                "type": "null"
++              }
++            ],
++            "title": "Thin Flows"
+           }
+         },
+         "type": "object",
+@@ -44985,6 +45033,80 @@
+         "title": "DaemonHeartbeatSpecCacheItem",
+         "description": "心跳 ``spec_cache[]`` 单项（ql-20260907-010：spec 拉取工作区级化）.\n\ndaemon 上报本机已有的 spec 缓存（``~/.sillyhub/daemon/specs/{ws}``）版本，\nbackend 在响应 ``spec_versions`` 里回服务器权威 ``spec_workspaces.spec_version``，\ndaemon 据此对「版本落后且无活跃会话」的工作区后台预取——把全量 bundle 下载\n挪出会话创建关键路径（实机 47MB 树 / ~0.4MB/s 链路下创建被拖 40s+）。"
+       },
++      "DaemonHeartbeatThinFlow": {
++        "properties": {
++          "workspace_id": {
++            "type": "string",
++            "title": "Workspace Id",
++            "default": ""
++          },
++          "change": {
++            "type": "string",
++            "title": "Change",
++            "default": ""
++          },
++          "phase": {
++            "type": "string",
++            "title": "Phase",
++            "default": ""
++          },
++          "design_filled": {
++            "type": "boolean",
++            "title": "Design Filled",
++            "default": false
++          },
++          "fr_filled": {
++            "type": "boolean",
++            "title": "Fr Filled",
++            "default": false
++          },
++          "bindings_total": {
++            "type": "integer",
++            "title": "Bindings Total",
++            "default": 0
++          },
++          "bindings_filled": {
++            "type": "integer",
++            "title": "Bindings Filled",
++            "default": 0
++          },
++          "tasks_total": {
++            "type": "integer",
++            "title": "Tasks Total",
++            "default": 0
++          },
++          "tasks_checked": {
++            "type": "integer",
++            "title": "Tasks Checked",
++            "default": 0
++          },
++          "substeps": {
++            "items": {
++              "type": "string"
++            },
++            "type": "array",
++            "title": "Substeps"
++          },
++          "spec_approved": {
++            "type": "boolean",
++            "title": "Spec Approved",
++            "default": false
++          },
++          "autopilot": {
++            "type": "boolean",
++            "title": "Autopilot",
++            "default": false
++          },
++          "legacy_fallback": {
++            "type": "boolean",
++            "title": "Legacy Fallback",
++            "default": false
++          }
++        },
++        "type": "object",
++        "title": "DaemonHeartbeatThinFlow",
++        "description": "心跳 sillyspec_status.thin_flows[] 单项（2026-10-26-session-change-progress-hover task-05 / FR-06 / D-008@v2）.\n\ndaemon ``flow status --json`` 白名单透传条目（字段清单=design §接口定义）。\n首键 workspace_id：sillyspec_status 是 daemon 实例级全局键（多工作区总览已\nstatus_map 级化），无工作区维度无法定位 changes 行——每条目自带定位键。\nphase 为 CLI 原文文案透传（如 ``'② 执行（已批准·写代码跑测试）'``），daemon\n不归一，四枚举归一在 backend 消费侧（runtime/service.py _normalize_thin_phase，\n按结构字段重算不解析文案）。\n\n类型收紧为标量（区别本文件 sillyspec_status 族的 ``| None`` 全宽松）：条目由\ndaemon 代码按固定白名单组装（非 envelope 自由结构），类型漂移面小；但全字段\n仍带缺省——CLI flow status --json 条件省略键（legacyFallback 仅 true 时输出，\nflow.js:3337）缺键按 falsy 缺省参与归一，不让缺键 422 整条心跳（宁宽勿断）。\n坏条目（workspace_id 非 UUID / change 空 / phase 空串）由消费侧单条丢弃整批\n不拒（生命周期契约表事件 3）。"
++      },
+       "DaemonInstanceProviderItem": {
+         "properties": {
+           "provider": {
+@@ -74279,6 +74401,83 @@
+         "title": "StageProgress",
+         "description": "Progress for one pipeline stage."
+       },
++      "StageProgressEntry": {
++        "properties": {
++          "stage": {
++            "type": "string",
++            "title": "Stage"
++          },
++          "status": {
++            "type": "string",
++            "title": "Status"
++          },
++          "steps_total": {
++            "type": "integer",
++            "title": "Steps Total"
++          },
++          "steps_completed": {
++            "type": "integer",
++            "title": "Steps Completed"
++          },
++          "started_at": {
++            "anyOf": [
++              {
++                "type": "string"
++              },
++              {
++                "type": "null"
++              }
++            ],
++            "title": "Started At"
++          },
++          "completed_at": {
++            "anyOf": [
++              {
++                "type": "string"
++              },
++              {
++                "type": "null"
++              }
++            ],
++            "title": "Completed At"
++          },
++          "duration_seconds": {
++            "anyOf": [
++              {
++                "type": "integer"
++              },
++              {
++                "type": "null"
++              }
++            ],
++            "title": "Duration Seconds"
++          },
++          "revision": {
++            "anyOf": [
++              {
++                "type": "integer"
++              },
++              {
++                "type": "null"
++              }
++            ],
++            "title": "Revision"
++          }
++        },
++        "type": "object",
++        "required": [
++          "stage",
++          "status",
++          "steps_total",
++          "steps_completed",
++          "started_at",
++          "completed_at",
++          "duration_seconds",
++          "revision"
++        ],
++        "title": "StageProgressEntry",
++        "description": "主线单阶段进度项（计算投影，非 changes 表列，零 migration）。\n\n数据源=platform_change_progress.latest_progress 的 stages[]（含\nstarted_at/completed_at/revision）×steps[]（status 分组计数）；由\nservice._extract_stage_progress（task-02 领地）提取，enrich_summaries\n填充 ChangeSummary.stage_progress。CLI 状态原值透传不归一（未知新枚举\n由前端白名单外兜底，design 盲区#10）；畸形 latest_progress 整体\nfail-open → stage_progress=None（R-01）。"
++      },
+       "StageStep": {
+         "properties": {
+           "name": {
+@@ -76014,6 +76213,25 @@
+         ],
+         "title": "TaskParseWarning"
+       },
++      "TaskProgressSummary": {
++        "properties": {
++          "total": {
++            "type": "integer",
++            "title": "Total"
++          },
++          "done": {
++            "type": "integer",
++            "title": "Done"
++          }
++        },
++        "type": "object",
++        "required": [
++          "total",
++          "done"
++        ],
++        "title": "TaskProgressSummary",
++        "description": "execute 阶段任务进度（计算投影，非 changes 表列，零 migration）。\n\n数据源=tasks 表按 change_id IN 单查询批量聚合（task-03 领地，R-03 防\nN+1）；done=status==\"done\" 计分子，total 排除 status==\"cancelled\"。\n口径=Task 表 n/m（D-005@v1），不用 CLI execute 的 Wave 步骤数。"
++      },
+       "TaskRead": {
+         "properties": {
+           "id": {
+@@ -76941,6 +77159,67 @@
+         "title": "TeamWorkspaceRef",
+         "description": "TeamMissionSummary.scope_workspaces 单项——scope 工作区 id+名称。\n\nql-20260825-003：范围徽标名称化（前端只拿 id 时回落 #<id8> 原始徽标）。\nname 查无 Workspace 行时为 None（前端回落 id 徽标）。"
+       },
++      "ThinFlowProgress": {
++        "properties": {
++          "phase": {
++            "type": "string",
++            "title": "Phase"
++          },
++          "approved": {
++            "type": "boolean",
++            "title": "Approved"
++          },
++          "autopilot": {
++            "type": "boolean",
++            "title": "Autopilot"
++          },
++          "tasks_total": {
++            "type": "integer",
++            "title": "Tasks Total"
++          },
++          "tasks_done": {
++            "type": "integer",
++            "title": "Tasks Done"
++          },
++          "substeps_done": {
++            "type": "integer",
++            "title": "Substeps Done"
++          },
++          "substeps_total": {
++            "type": "integer",
++            "title": "Substeps Total"
++          },
++          "upgraded": {
++            "type": "boolean",
++            "title": "Upgraded"
++          },
++          "adopted_from": {
++            "anyOf": [
++              {
++                "type": "string"
++              },
++              {
++                "type": "null"
++              }
++            ],
++            "title": "Adopted From"
++          }
++        },
++        "type": "object",
++        "required": [
++          "phase",
++          "approved",
++          "autopilot",
++          "tasks_total",
++          "tasks_done",
++          "substeps_done",
++          "substeps_total",
++          "upgraded",
++          "adopted_from"
++        ],
++        "title": "ThinFlowProgress",
++        "description": "轻量变更（thin/flow）相位进度（计算投影，非 changes 表列，零 migration）。\n\n数据源=daemon flow status --json 采集（task-06/07）经 heartbeat\nsillyspec_status.thin_flows 上行（条目含 workspace_id，D-008@v2），由\nbackend 消费侧归一 phase 四枚举后行锁落 changes.stages[\"thin_flow\"]\n（task-05 领地，不刷 updated_at——D-014@v1）；enrich_summaries 读侧\n投影（task-04 领地）。旧 daemon 无该键 → None（前端降级现状，FR-07）。"
++      },
+       "TimelineEvent": {
+         "properties": {
+           "ts": {
+diff --git a/frontend/src/components/daemon/__tests__/session-change-files-hover.test.tsx b/frontend/src/components/daemon/__tests__/session-change-files-hover.test.tsx
+index 8d2ca8308..b525b4a1c 100644
+--- a/frontend/src/components/daemon/__tests__/session-change-files-hover.test.tsx
++++ b/frontend/src/components/daemon/__tests__/session-change-files-hover.test.tsx
+@@ -269,3 +269,75 @@ describe("SessionChangeFilesHover（2026-10-13-session-change-files-hover task-0
+     expect(screen.getByTestId("session-change-count").textContent).toBe("1");
+   });
+ });
++
++// ── 2026-10-26-session-change-progress-hover task-10：进度展示接线 ───────────
++
++describe("进度展示接线（task-10 / FR-01~05 / FR-08）", () => {
++  it("active 项内嵌进度行（stage_progress 在场渲染全量 5 圈行）；归档项不挂（D-009）", () => {
++    const withProgress = change({
++      id: "c-p1",
++      change_key: "2026-10-26-prog-full",
++      stage_progress: [
++        { stage: "brainstorm", status: "completed", steps_total: 8, steps_completed: 8, started_at: null, completed_at: null, duration_seconds: 120, revision: null },
++        { stage: "plan", status: "in-progress", steps_total: 4, steps_completed: 2, started_at: null, completed_at: null, duration_seconds: 60, revision: null },
++      ],
++      task_progress: { total: 11, done: 8 },
++    } as unknown as ChangeSummary);
++    const archived = change({
++      id: "c-p2",
++      change_key: "2026-10-26-prog-arch",
++      status: "archived",
++      updated_at: "2026-10-13T12:00:00Z",
++    });
++    mockData([withProgress, archived]);
++
++    render(<SessionChangeFilesHover workspaceId="ws-1" sessionId="s-1" />);
++    // 下拉受控默认收起：先点入口展开（既有用例同款交互）
++    fireEvent.click(screen.getByRole("button", { name: "查看会话关联的变更文件" }));
++    // active 项：进度行渲染（全量变体 + execute 任务计数）
++    const row = screen.getByTestId("change-progress-row");
++    expect(row.dataset.variant).toBe("full");
++    expect(screen.getByTestId("progress-task-count").textContent).toBe("8/11 任务");
++    // 归档项：默认折叠，展开后也无进度行
++    fireEvent.click(screen.getByTestId("session-change-archive-toggle"));
++    expect(screen.getAllByTestId(/session-change-item-/)).toHaveLength(2);
++    expect(screen.queryAllByTestId("change-progress-row")).toHaveLength(1);
++  });
++
++  it("计数徽标双态：active>0 蓝（D-012@v2 blue 固定阶）；全归档保持绿", () => {
++    mockData([activeThin]);
++    const { unmount } = render(
++      <SessionChangeFilesHover workspaceId="ws-1" sessionId="s-1" />,
++    );
++    expect(screen.getByTestId("session-change-count").className).toContain("bg-blue-600");
++    unmount();
++
++    const archivedOnly = change({ id: "c-a1", change_key: "arch-only", status: "archived" });
++    mockData([archivedOnly]);
++    render(<SessionChangeFilesHover workspaceId="ws-1" sessionId="s-1" />);
++    expect(screen.getByTestId("session-change-count").className).toContain("bg-emerald-600");
++    expect(screen.getByTestId("session-change-count").className).not.toContain("bg-blue-600");
++  });
++
++  it("入口总圈：多变更 updated_at 显式重排选取（D-013）；数据缺失环不渲染", () => {
++    const withRatio = change({
++      id: "c-r1",
++      change_key: "2026-10-26-ring-a",
++      updated_at: "2026-10-26T10:00:00Z", // 列表序在前但 updated_at 更旧
++      step_progress: { step_total: 10, steps_completed: 5 },
++    } as unknown as ChangeSummary);
++    const newerNoData = change({
++      id: "c-r2",
++      change_key: "2026-10-26-ring-b",
++      updated_at: "2026-10-26T11:00:00Z", // 最新但无进度数据 → 环不渲染
++    });
++    mockData([withRatio, newerNoData]);
++    const { container } = render(
++      <SessionChangeFilesHover workspaceId="ws-1" sessionId="s-1" />,
++    );
++    // 最新者（ring-b）无口径数据 → 环不渲染（FR-05 降级，按钮区不受影响）
++    expect(screen.queryByTestId("change-total-progress-ring")).toBeNull();
++    expect(screen.getByTestId("session-change-count").textContent).toBe("2");
++    void container;
++  });
++});
+diff --git a/frontend/src/components/daemon/session-change-files-hover.tsx b/frontend/src/components/daemon/session-change-files-hover.tsx
+index f2e7f24e0..a3e636b69 100644
+--- a/frontend/src/components/daemon/session-change-files-hover.tsx
++++ b/frontend/src/components/daemon/session-change-files-hover.tsx
+@@ -6,6 +6,14 @@ import { Popover, Select } from "antd";
+ 
+ import { ChangeFileTree } from "@/components/change-file-tree";
+ import { WORKFLOW_STAGE_LABELS } from "@/components/changes/detail/change-stage-header";
++import {
++  ChangeProgressRow,
++  type ChangeSummaryWithProgress,
++} from "@/components/daemon/change-progress-row";
++import {
++  ChangeTotalProgressRing,
++  pickLatestActive,
++} from "@/components/daemon/change-total-progress-ring";
+ import { Button } from "@/components/ui/button";
+ import {
+   Dialog,
+@@ -150,6 +158,9 @@ export function SessionChangeFilesHover({
+         </span>
+         <span className="ml-auto">{shortTime(c.updated_at)}</span>
+       </div>
++      {/* task-10（FR-01~04）：非归档项内嵌进度行（全量 5 圈/轻量相位双分支；
++          数据缺失组件自降级 null）。归档项不挂（D-009@v1 终态无信息量）。 */}
++      {!isArchivedChange(c) && <ChangeProgressRow change={c as ChangeSummaryWithProgress} />}
+     </button>
+   );
+ 
+@@ -210,12 +221,20 @@ export function SessionChangeFilesHover({
+           变更
+           <span
+             data-testid="session-change-count"
+-            className={`rounded-full bg-emerald-600 px-1.5 text-[10px] font-bold leading-4 text-white ${
+-              running && active.length > 0 ? "animate-pulse" : ""
+-            }`}
++            className={`rounded-full px-1.5 text-[10px] font-bold leading-4 text-white ${
++              active.length > 0
++                ? "bg-blue-600"
++                : "bg-emerald-600"
++            } ${running && active.length > 0 ? "animate-pulse" : ""}`}
+           >
+             {active.length}
+           </span>
++          {/* task-10（FR-05 / D-013@v1）：入口旁单个总进度圈——最新进行中一个
++              （updated_at 显式重排选取），数据缺失环不渲染（按钮区不受影响）。 */}
++          {(() => {
++            const ringTarget = pickLatestActive(active as ChangeSummaryWithProgress[]);
++            return ringTarget ? <ChangeTotalProgressRing change={ringTarget} /> : null;
++          })()}
+         </Button>
+       </Popover>
+ 
+diff --git a/frontend/src/lib/api-types.ts b/frontend/src/lib/api-types.ts
+index 795d64d57..688e6bcc4 100644
+--- a/frontend/src/lib/api-types.ts
++++ b/frontend/src/lib/api-types.ts
+@@ -15084,6 +15084,10 @@ export interface components {
+             /** Last Pushed At */
+             last_pushed_at?: string | null;
+             usage?: components["schemas"]["UsageSummaryRead"] | null;
++            /** Stage Progress */
++            stage_progress?: components["schemas"]["StageProgressEntry"][] | null;
++            task_progress?: components["schemas"]["TaskProgressSummary"] | null;
++            thin_flow?: components["schemas"]["ThinFlowProgress"] | null;
+             /**
+              * Updated At
+              * Format: date-time
+@@ -15958,6 +15962,8 @@ export interface components {
+             changes?: components["schemas"]["DaemonHeartbeatSillySpecChange"][] | null;
+             /** Pending Conflicts */
+             pending_conflicts?: components["schemas"]["DaemonHeartbeatSillySpecConflict"][] | null;
++            /** Thin Flows */
++            thin_flows?: components["schemas"]["DaemonHeartbeatThinFlow"][] | null;
+         };
+         /**
+          * DaemonHeartbeatSillySpecStatusError
+@@ -16023,6 +16029,88 @@ export interface components {
+             /** Spec Version */
+             spec_version: number;
+         };
++        /**
++         * DaemonHeartbeatThinFlow
++         * @description 心跳 sillyspec_status.thin_flows[] 单项（2026-10-26-session-change-progress-hover task-05 / FR-06 / D-008@v2）.
++         *
++         *     daemon ``flow status --json`` 白名单透传条目（字段清单=design §接口定义）。
++         *     首键 workspace_id：sillyspec_status 是 daemon 实例级全局键（多工作区总览已
++         *     status_map 级化），无工作区维度无法定位 changes 行——每条目自带定位键。
++         *     phase 为 CLI 原文文案透传（如 ``'② 执行（已批准·写代码跑测试）'``），daemon
++         *     不归一，四枚举归一在 backend 消费侧（runtime/service.py _normalize_thin_phase，
++         *     按结构字段重算不解析文案）。
++         *
++         *     类型收紧为标量（区别本文件 sillyspec_status 族的 ``| None`` 全宽松）：条目由
++         *     daemon 代码按固定白名单组装（非 envelope 自由结构），类型漂移面小；但全字段
++         *     仍带缺省——CLI flow status --json 条件省略键（legacyFallback 仅 true 时输出，
++         *     flow.js:3337）缺键按 falsy 缺省参与归一，不让缺键 422 整条心跳（宁宽勿断）。
++         *     坏条目（workspace_id 非 UUID / change 空 / phase 空串）由消费侧单条丢弃整批
++         *     不拒（生命周期契约表事件 3）。
++         */
++        DaemonHeartbeatThinFlow: {
++            /**
++             * Workspace Id
++             * @default
++             */
++            workspace_id: string;
++            /**
++             * Change
++             * @default
++             */
++            change: string;
++            /**
++             * Phase
++             * @default
++             */
++            phase: string;
++            /**
++             * Design Filled
++             * @default false
++             */
++            design_filled: boolean;
++            /**
++             * Fr Filled
++             * @default false
++             */
++            fr_filled: boolean;
++            /**
++             * Bindings Total
++             * @default 0
++             */
++            bindings_total: number;
++            /**
++             * Bindings Filled
++             * @default 0
++             */
++            bindings_filled: number;
++            /**
++             * Tasks Total
++             * @default 0
++             */
++            tasks_total: number;
++            /**
++             * Tasks Checked
++             * @default 0
++             */
++            tasks_checked: number;
++            /** Substeps */
++            substeps?: string[];
++            /**
++             * Spec Approved
++             * @default false
++             */
++            spec_approved: boolean;
++            /**
++             * Autopilot
++             * @default false
++             */
++            autopilot: boolean;
++            /**
++             * Legacy Fallback
++             * @default false
++             */
++            legacy_fallback: boolean;
++        };
+         /**
+          * DaemonInstanceProviderItem
+          * @description A single provider runtime nested under a daemon instance.
+@@ -27499,6 +27587,35 @@ export interface components {
+             /** Completed At */
+             completed_at?: string | null;
+         };
++        /**
++         * StageProgressEntry
++         * @description 主线单阶段进度项（计算投影，非 changes 表列，零 migration）。
++         *
++         *     数据源=platform_change_progress.latest_progress 的 stages[]（含
++         *     started_at/completed_at/revision）×steps[]（status 分组计数）；由
++         *     service._extract_stage_progress（task-02 领地）提取，enrich_summaries
++         *     填充 ChangeSummary.stage_progress。CLI 状态原值透传不归一（未知新枚举
++         *     由前端白名单外兜底，design 盲区#10）；畸形 latest_progress 整体
++         *     fail-open → stage_progress=None（R-01）。
++         */
++        StageProgressEntry: {
++            /** Stage */
++            stage: string;
++            /** Status */
++            status: string;
++            /** Steps Total */
++            steps_total: number;
++            /** Steps Completed */
++            steps_completed: number;
++            /** Started At */
++            started_at: string | null;
++            /** Completed At */
++            completed_at: string | null;
++            /** Duration Seconds */
++            duration_seconds: number | null;
++            /** Revision */
++            revision: number | null;
++        };
+         /**
+          * StageStep
+          * @description A single step within a stage.
+@@ -28110,6 +28227,20 @@ export interface components {
+             /** Task Key */
+             task_key?: string | null;
+         };
++        /**
++         * TaskProgressSummary
++         * @description execute 阶段任务进度（计算投影，非 changes 表列，零 migration）。
++         *
++         *     数据源=tasks 表按 change_id IN 单查询批量聚合（task-03 领地，R-03 防
++         *     N+1）；done=status=="done" 计分子，total 排除 status=="cancelled"。
++         *     口径=Task 表 n/m（D-005@v1），不用 CLI execute 的 Wave 步骤数。
++         */
++        TaskProgressSummary: {
++            /** Total */
++            total: number;
++            /** Done */
++            done: number;
++        };
+         /** TaskRead */
+         TaskRead: {
+             /**
+@@ -28504,6 +28635,36 @@ export interface components {
+             /** Name */
+             name?: string | null;
+         };
++        /**
++         * ThinFlowProgress
++         * @description 轻量变更（thin/flow）相位进度（计算投影，非 changes 表列，零 migration）。
++         *
++         *     数据源=daemon flow status --json 采集（task-06/07）经 heartbeat
++         *     sillyspec_status.thin_flows 上行（条目含 workspace_id，D-008@v2），由
++         *     backend 消费侧归一 phase 四枚举后行锁落 changes.stages["thin_flow"]
++         *     （task-05 领地，不刷 updated_at——D-014@v1）；enrich_summaries 读侧
++         *     投影（task-04 领地）。旧 daemon 无该键 → None（前端降级现状，FR-07）。
++         */
++        ThinFlowProgress: {
++            /** Phase */
++            phase: string;
++            /** Approved */
++            approved: boolean;
++            /** Autopilot */
++            autopilot: boolean;
++            /** Tasks Total */
++            tasks_total: number;
++            /** Tasks Done */
++            tasks_done: number;
++            /** Substeps Done */
++            substeps_done: number;
++            /** Substeps Total */
++            substeps_total: number;
++            /** Upgraded */
++            upgraded: boolean;
++            /** Adopted From */
++            adopted_from: string | null;
++        };
+         /**
+          * TimelineEvent
+          * @description 事件轴单条（platform_change_events 正序投影 + 提交标题增强）。
+diff --git a/sillyhub-daemon/src/api-types.ts b/sillyhub-daemon/src/api-types.ts
+index 795d64d57..688e6bcc4 100644
+--- a/sillyhub-daemon/src/api-types.ts
++++ b/sillyhub-daemon/src/api-types.ts
+@@ -15084,6 +15084,10 @@ export interface components {
+             /** Last Pushed At */
+             last_pushed_at?: string | null;
+             usage?: components["schemas"]["UsageSummaryRead"] | null;
++            /** Stage Progress */
++            stage_progress?: components["schemas"]["StageProgressEntry"][] | null;
++            task_progress?: components["schemas"]["TaskProgressSummary"] | null;
++            thin_flow?: components["schemas"]["ThinFlowProgress"] | null;
+             /**
+              * Updated At
+              * Format: date-time
+@@ -15958,6 +15962,8 @@ export interface components {
+             changes?: components["schemas"]["DaemonHeartbeatSillySpecChange"][] | null;
+             /** Pending Conflicts */
+             pending_conflicts?: components["schemas"]["DaemonHeartbeatSillySpecConflict"][] | null;
++            /** Thin Flows */
++            thin_flows?: components["schemas"]["DaemonHeartbeatThinFlow"][] | null;
+         };
+         /**
+          * DaemonHeartbeatSillySpecStatusError
+@@ -16023,6 +16029,88 @@ export interface components {
+             /** Spec Version */
+             spec_version: number;
+         };
++        /**
++         * DaemonHeartbeatThinFlow
++         * @description 心跳 sillyspec_status.thin_flows[] 单项（2026-10-26-session-change-progress-hover task-05 / FR-06 / D-008@v2）.
++         *
++         *     daemon ``flow status --json`` 白名单透传条目（字段清单=design §接口定义）。
++         *     首键 workspace_id：sillyspec_status 是 daemon 实例级全局键（多工作区总览已
++         *     status_map 级化），无工作区维度无法定位 changes 行——每条目自带定位键。
++         *     phase 为 CLI 原文文案透传（如 ``'② 执行（已批准·写代码跑测试）'``），daemon
++         *     不归一，四枚举归一在 backend 消费侧（runtime/service.py _normalize_thin_phase，
++         *     按结构字段重算不解析文案）。
++         *
++         *     类型收紧为标量（区别本文件 sillyspec_status 族的 ``| None`` 全宽松）：条目由
++         *     daemon 代码按固定白名单组装（非 envelope 自由结构），类型漂移面小；但全字段
++         *     仍带缺省——CLI flow status --json 条件省略键（legacyFallback 仅 true 时输出，
++         *     flow.js:3337）缺键按 falsy 缺省参与归一，不让缺键 422 整条心跳（宁宽勿断）。
++         *     坏条目（workspace_id 非 UUID / change 空 / phase 空串）由消费侧单条丢弃整批
++         *     不拒（生命周期契约表事件 3）。
++         */
++        DaemonHeartbeatThinFlow: {
++            /**
++             * Workspace Id
++             * @default
++             */
++            workspace_id: string;
++            /**
++             * Change
++             * @default
++             */
++            change: string;
++            /**
++             * Phase
++             * @default
++             */
++            phase: string;
++            /**
++             * Design Filled
++             * @default false
++             */
++            design_filled: boolean;
++            /**
++             * Fr Filled
++             * @default false
++             */
++            fr_filled: boolean;
++            /**
++             * Bindings Total
++             * @default 0
++             */
++            bindings_total: number;
++            /**
++             * Bindings Filled
++             * @default 0
++             */
++            bindings_filled: number;
++            /**
++             * Tasks Total
++             * @default 0
++             */
++            tasks_total: number;
++            /**
++             * Tasks Checked
++             * @default 0
++             */
++            tasks_checked: number;
++            /** Substeps */
++            substeps?: string[];
++            /**
++             * Spec Approved
++             * @default false
++             */
++            spec_approved: boolean;
++            /**
++             * Autopilot
++             * @default false
++             */
++            autopilot: boolean;
++            /**
++             * Legacy Fallback
++             * @default false
++             */
++            legacy_fallback: boolean;
++        };
+         /**
+          * DaemonInstanceProviderItem
+          * @description A single provider runtime nested under a daemon instance.
+@@ -27499,6 +27587,35 @@ export interface components {
+             /** Completed At */
+             completed_at?: string | null;
+         };
++        /**
++         * StageProgressEntry
++         * @description 主线单阶段进度项（计算投影，非 changes 表列，零 migration）。
++         *
++         *     数据源=platform_change_progress.latest_progress 的 stages[]（含
++         *     started_at/completed_at/revision）×steps[]（status 分组计数）；由
++         *     service._extract_stage_progress（task-02 领地）提取，enrich_summaries
++         *     填充 ChangeSummary.stage_progress。CLI 状态原值透传不归一（未知新枚举
++         *     由前端白名单外兜底，design 盲区#10）；畸形 latest_progress 整体
++         *     fail-open → stage_progress=None（R-01）。
++         */
++        StageProgressEntry: {
++            /** Stage */
++            stage: string;
++            /** Status */
++            status: string;
++            /** Steps Total */
++            steps_total: number;
++            /** Steps Completed */
++            steps_completed: number;
++            /** Started At */
++            started_at: string | null;
++            /** Completed At */
++            completed_at: string | null;
++            /** Duration Seconds */
++            duration_seconds: number | null;
++            /** Revision */
++            revision: number | null;
++        };
+         /**
+          * StageStep
+          * @description A single step within a stage.
+@@ -28110,6 +28227,20 @@ export interface components {
+             /** Task Key */
+             task_key?: string | null;
+         };
++        /**
++         * TaskProgressSummary
++         * @description execute 阶段任务进度（计算投影，非 changes 表列，零 migration）。
++         *
++         *     数据源=tasks 表按 change_id IN 单查询批量聚合（task-03 领地，R-03 防
++         *     N+1）；done=status=="done" 计分子，total 排除 status=="cancelled"。
++         *     口径=Task 表 n/m（D-005@v1），不用 CLI execute 的 Wave 步骤数。
++         */
++        TaskProgressSummary: {
++            /** Total */
++            total: number;
++            /** Done */
++            done: number;
++        };
+         /** TaskRead */
+         TaskRead: {
+             /**
+@@ -28504,6 +28635,36 @@ export interface components {
+             /** Name */
+             name?: string | null;
+         };
++        /**
++         * ThinFlowProgress
++         * @description 轻量变更（thin/flow）相位进度（计算投影，非 changes 表列，零 migration）。
++         *
++         *     数据源=daemon flow status --json 采集（task-06/07）经 heartbeat
++         *     sillyspec_status.thin_flows 上行（条目含 workspace_id，D-008@v2），由
++         *     backend 消费侧归一 phase 四枚举后行锁落 changes.stages["thin_flow"]
++         *     （task-05 领地，不刷 updated_at——D-014@v1）；enrich_summaries 读侧
++         *     投影（task-04 领地）。旧 daemon 无该键 → None（前端降级现状，FR-07）。
++         */
++        ThinFlowProgress: {
++            /** Phase */
++            phase: string;
++            /** Approved */
++            approved: boolean;
++            /** Autopilot */
++            autopilot: boolean;
++            /** Tasks Total */
++            tasks_total: number;
++            /** Tasks Done */
++            tasks_done: number;
++            /** Substeps Done */
++            substeps_done: number;
++            /** Substeps Total */
++            substeps_total: number;
++            /** Upgraded */
++            upgraded: boolean;
++            /** Adopted From */
++            adopted_from: string | null;
++        };
+         /**
+          * TimelineEvent
+          * @description 事件轴单条（platform_change_events 正序投影 + 提交标题增强）。
+diff --git a/sillyhub-daemon/src/daemon.ts b/sillyhub-daemon/src/daemon.ts
+index f4e91809e..8723ee86e 100644
+--- a/sillyhub-daemon/src/daemon.ts
++++ b/sillyhub-daemon/src/daemon.ts
+@@ -167,7 +167,11 @@ import { runLinkedReposSnapshot } from './linked-repos-snapshot.js';
+ 
+ // 2026-09-02-changes-overview-card task-02：heartbeat sillyspec_status 键的载荷
+ // 形状（progress 总览摘要），组装时从 manager.getStatusSnapshot() 取。
+-import type { SillySpecStatusSummary, SillySpecStatusError } from './sillyspec-manager.js';
++import type {
++  SillySpecStatusSummary,
++  SillySpecStatusError,
++  ThinFlowSummary,
++} from './sillyspec-manager.js';
+ // 2026-10-13-change-files-refresh-sync task-02：sillyspec.sync_change RPC 同步
+ // 回执通道的执行器返回结构（type-only，manager 不反向依赖 daemon 无环）。
+ import type { SillySpecSyncChangeResult } from './sillyspec-manager.js';
+@@ -1061,6 +1065,13 @@ interface ClientLike {
+      * 保留）；数组（含空）=整包直写。
+      */
+     networkInterfaces?: NetworkInterfaceInfo[],
++    /**
++     * 2026-10-26-session-change-progress-hover task-07（FR-03 / D-008@v2）：thin
++     * flow 摘要清单（对齐 hub-client heartbeat 末位参数）。undefined/空数组=
++     * sillyspec_status.thin_flows 键不出现（backend 不写不清，FR-07）；非空
++     * 数组=嵌挂 sillyspec_status 载荷（backend 逐变更行锁落库）。
++     */
++    thinFlows?: ThinFlowSummary[],
+   ): Promise<unknown>;
+   markOffline?(runtimeId: string): Promise<unknown>;
+   /**
+@@ -6294,6 +6305,16 @@ export class Daemon {
+         //（testing-gotchas「共享断言面」②）。
+         this._machineId ?? undefined,
+         collectNetworkInterfaces(),
++        // 第 13 参（2026-10-26-session-change-progress-hover task-07 / FR-03 /
++        // D-008@v2）：thin flow 摘要清单——manager 内存槽拍平（wsId+change 键控
++        // latest-wins，progress 采集同拍维护）。空槽/typeof 探测兜底（旧测试假
++        // manager 缺该方法）→ undefined（sillyspec_status.thin_flows 键不出现，
++        // backend 不写不清，FR-07）。共享断言面：参长 12→13 已同步四处 length 钉
++        //（daemon-heartbeat-pending / daemon-heartbeat-sillyspec /
++        // sillyspec-platform-command / integration/selfupdate-scenarios×2）。
++        typeof this._sillyspecManager.getThinFlows === 'function'
++          ? this._sillyspecManager.getThinFlows()
++          : undefined,
+       );
+       // task-05（FR-03）→ task-07 per-daemon：成功 → 清断连计数 + 告警标记。
+       // task-06（2026-08-30-daemon-self-heal / D-001）：重置前先捕获降级起点，
+diff --git a/sillyhub-daemon/src/hub-client.ts b/sillyhub-daemon/src/hub-client.ts
+index 423a67e25..a6cb4cafd 100644
+--- a/sillyhub-daemon/src/hub-client.ts
++++ b/sillyhub-daemon/src/hub-client.ts
+@@ -46,7 +46,11 @@ import type { SillySpecUpdateState } from './sillyspec-manager.js';
+ 
+ // 2026-09-02-changes-overview-card task-02：heartbeat sillyspec_status 键的载荷
+ // 形状（progress show --json envelope 摘要），复用 manager 导出类型不重复声明。
+-import type { SillySpecStatusSummary, SillySpecStatusError } from './sillyspec-manager.js';
++import type {
++  SillySpecStatusSummary,
++  SillySpecStatusError,
++  ThinFlowSummary,
++} from './sillyspec-manager.js';
+ 
+ // ── body 类型（字段名 snake_case 对齐 backend Pydantic 模型）──────────────────
+ 
+@@ -186,7 +190,7 @@ export interface HeartbeatBody {
+    *   - null → 键出现携带 null = 能力缺失（backend 置 NULL 清除）；
+    *   - 摘要对象 = 最近快照（瞬态失败时 daemon 侧保留旧值照常携带）。
+    */
+-  sillyspec_status?: SillySpecStatusSummary | null;
++  sillyspec_status?: (SillySpecStatusSummary & { thin_flows?: ThinFlowSummary[] }) | null;
+   /**
+    * 2026-09-08（temp 投毒排障衍生）：总览采集三态③失败状态（{reason, detail,
+    * since}）。两态：null → 键出现携带 null = 无失败/已恢复（backend 置 NULL
+@@ -912,6 +916,16 @@ export class HubClient {
+      * 12 参调用请求体逐字段不变（零破坏）。
+      */
+     networkInterfaces?: NetworkInterfaceInfo[],
++    /**
++     * 2026-10-26-session-change-progress-hover task-07（FR-03/FR-06 / D-008@v2）：
++     * thin flow 摘要清单（daemon._sendHeartbeatOnce 从 manager.getThinFlows()
++     * 读取）。可选追加末位——undefined/空数组时 sillyspec_status.thin_flows 键
++     * 不出现（旧 daemon 形态，backend 不写不清，FR-07）；非空数组 → 嵌挂进
++     * sillyspec_status 载荷（backend DTO DaemonHeartbeatSillySpecStatus.thin_flows
++     * 同构，条目含 workspace_id 定位键）。仅在 sillyspec_status 为摘要对象时携带
++     *（null 能力缺失清除态无载荷可嵌）。既有 12 参调用请求体逐字段不变（零破坏）。
++     */
++    thinFlows?: ThinFlowSummary[],
+   ): Promise<HeartbeatResponse> {
+     const body: HeartbeatBody = {
+       daemon_local_id: daemonLocalId,
+@@ -967,6 +981,14 @@ export class HubClient {
+     if (networkInterfaces !== undefined) {
+       body.network_interfaces = networkInterfaces;
+     }
++    // task-07（2026-10-26-session-change-progress-hover）：thin flow 摘要——
++    // 仅 sillyspec_status 为摘要对象（非 null/undefined）且清单非空时嵌挂
++    //（空槽/能力缺失态键不出现，backend 不写不清）；整包直写（latest-wins，
++    // backend 消费侧逐变更行锁落库）。类型收窄：body.sillyspec_status 此处已
++    // 排除 null/undefined（上方分支保证）。
++    if (thinFlows && thinFlows.length > 0 && body.sillyspec_status != null) {
++      body.sillyspec_status = { ...body.sillyspec_status, thin_flows: thinFlows };
++    }
+     return this._request<HeartbeatResponse>(
+       'POST',
+       `${REST_PREFIX}/heartbeat`,
+diff --git a/sillyhub-daemon/src/sillyspec-manager.ts b/sillyhub-daemon/src/sillyspec-manager.ts
+index fcbc3ef99..d4fc64ff8 100644
+--- a/sillyhub-daemon/src/sillyspec-manager.ts
++++ b/sillyhub-daemon/src/sillyspec-manager.ts
+@@ -33,6 +33,16 @@
+  * guard.json；collectStatusOnce 心跳后处理对 quick-* 冲突条补 ql_id（buildSillySpec
+  * StatusSummary 保持纯函数不落 fs）。
+  *
++ * 2026-10-26-session-change-progress-hover task-06 扩展：thin flow 采集执行器
++ * （design 线 2 / D-008@v2）——progress 采集①成功同拍，对 envelope 名单中的活跃
++ * thin 变更（current_stage='thin'，CLI 按行 active + flow-state tier=thin 覆写，
++ * 升厚/归档天然不进名单）逐个跑 `flow status --json --change <名>`，白名单摘要
++ * （原始字段透传不归一）写内存槽 _thinFlows（wsId+change 键控 latest-wins），
++ * 供 hub-client（task-07）组装心跳 sillyspec_status.thin_flows 载荷取用。三态
++ * 矩阵同款：ok 更新槽 / inactive（归档竞态）清槽 / error（CLI 缺 flow 命令
++ * exit 非零、超时、非 JSON）静默降级保留旧值——绝不影响 progress 采集与
++ * heartbeat 其他载荷（FR-07）。
++ *
+  * 状态机（内存态，daemon 重启即回 idle——重启后 preflight 启动检查已保证最新）：
+  *
+  *   idle ──requestUpgrade（空闲）──▶ running ──成功──▶ success ─┐
+@@ -169,6 +179,13 @@ export function shouldSkipStatusCollect(
+ /** 心跳摘要 changes 列表截断上限（N=50，design §4 / Grill B2）。 */
+ export const SILLYSPEC_STATUS_CHANGES_MAX = 50;
+ 
++/**
++ * thin flow 单目标采集名单上限（task-06）：防异常膨胀名单（脏数据/极端多变更）
++ * 拖垮心跳拍——每目标最多逐变更 spawn N 次 flow status，超出截断（debug 一笔）。
++ * 正常活跃 thin 变更数个位数；50 与 progress changes 截断同量级。
++ */
++export const THIN_FLOW_COLLECT_MAX = 50;
++
+ /**
+  * 官方 npm 源地址（ql-20260907-001 版本门仲裁直查用）。镜像滞后时以官方源
+  * 为权威信源；官方源不可达的内网机器由仲裁静默回退本地源。
+@@ -313,6 +330,31 @@ export interface SillySpecStatusError {
+   since: string;
+ }
+ 
++/**
++ * thin flow 采集摘要（2026-10-26-session-change-progress-hover task-06 / FR-03 /
++ * D-008@v2）：`flow status --json --change <名>` 输出的白名单透传条目（原始字段
++ * 不归一——CLI 文案变化不破坏链路，phase 四枚举归一在 backend 消费侧）。字段名
++ * 与 CLI JSON 输出逐字对齐（flow.js:3330-3338）；workspace_id 是 daemon 侧补的
++ * 定位键（CLI 输出无此字段——sillyspec_status 是实例级全局键，backend 逐变更
++ * 写入按 ws+change 定位，D-008@v2）。hub-client（task-07）组装心跳
++ * sillyspec_status.thin_flows 载荷时直接取本结构。
++ */
++export interface ThinFlowSummary {
++  workspace_id: string;
++  change: string;
++  phase: string;
++  design_filled: boolean;
++  fr_filled: boolean;
++  bindings_total: number;
++  bindings_filled: number;
++  tasks_total: number;
++  tasks_checked: number;
++  substeps: string[];
++  spec_approved: boolean;
++  autopilot: boolean;
++  legacy_fallback: boolean;
++}
++
+ /**
+  * 采集目标（2026-09-08 总览工作区级化）：workspaceId + 主仓根。workspaceId=null
+  * =旧单槽位形态（仅喂 legacy sillyspec_status，不进 per-workspace map）。daemon 侧
+@@ -768,6 +810,15 @@ export class SillySpecManager {
+    */
+   private readonly _statusSummariesByWs = new Map<string, SillySpecStatusSummary>();
+ 
++  /**
++   * thin flow 摘要槽（task-06 / D-008@v2）：`${wsId}:${change}` 键控 latest-wins。
++   * 名单驱动清理——progress ①成功拍对 envelope 名单重算：不在活跃 thin 名单的键
++   * 删除（归档/升厚竞态自愈），单变更采集 error 保留旧值（三态③同款）。内存态，
++   * 进程重启即失（下拍 progress 成功即重建）。legacy 单槽位形态（workspaceId=
++   * null）不采集——backend 逐变更写入需要 workspace_id 定位键（D-008@v2）。
++   */
++  private readonly _thinFlows = new Map<string, ThinFlowSummary>();
++
+   // ── FR-03/FR-04（2026-10-21-daemon-sync-hardening）：退避与跨仓跳过状态 ──────
+ 
+   /** 全局采集轮次（从 1 计；退避取模基准）。内存态，重启回零（宁可多采不可漏采）。 */
+@@ -1202,9 +1253,93 @@ export class SillySpecManager {
+       ghost_count: summary.ghost_count,
+       conflict_count: summary.conflict_count,
+     });
++    // task-06（2026-10-26-session-change-progress-hover）：progress ①成功同拍，
++    // 对名单中的活跃 thin 变更逐个采集 flow status（失败静默不影响本方法结果）。
++    await this._collectThinFlowsForTarget(workspaceId, cwd, summary);
+     return true;
+   }
+ 
++  // ── task-06（2026-10-26-session-change-progress-hover）：thin flow 采集 ──────
++
++  /**
++   * 单目标 thin flow 采集（design 线 2 / D-008@v2）：progress envelope 名单中
++   * current_stage='thin' 的变更（CLI 覆写口径——行 active + flow-state tier=thin
++   * 才显 thin，升厚/归档天然不进名单）逐个跑 `flow status --json --change <名>`。
++   *
++   * 三态（progress 采集同款矩阵，独立于其结果——本方法任何失败都不影响
++   * _collectOneTarget 的返回）：
++   *   ok（exit 0 + 合法 JSON + status=active）→ 白名单摘要落槽（latest-wins）；
++   *   inactive（archived/dir-no-state 形态）→ 清该键（名单驱动清理的一部分）；
++   *   error（CLI 缺 flow 命令 exit 非零/超时/非 JSON）→ 静默保留旧值（debug 一笔）。
++   *
++   * 名单驱动清理：本目标槽中不在新名单的键删除（归档竞态自愈）；legacy 单槽位
++   * （workspaceId=null）整体跳过——backend 逐变更写入需要 workspace_id 定位。
++   * 逐变更 spawn 有量（名单 N 个 = N 次 CLI）；上限护栏 THIN_FLOW_COLLECT_MAX
++   * 截断（debug 一笔），异常膨胀名单不拖垮心跳拍。
++   */
++  private async _collectThinFlowsForTarget(
++    workspaceId: string | null,
++    cwd: string,
++    summary: SillySpecStatusSummary,
++  ): Promise<void> {
++    if (workspaceId === null) return; // legacy 形态无定位键，不采集（D-008@v2）
++    const thinNames = summary.changes
++      .filter((c) => c.current_stage === 'thin' && !c.ghost)
++      .map((c) => c.name)
++      .slice(0, THIN_FLOW_COLLECT_MAX);
++    const liveKeys = new Set<string>();
++    for (const name of thinNames) {
++      const key = `${workspaceId}:${name}`;
++      liveKeys.add(key);
++      const bin = this._resolveSillySpecBin();
++      if (bin === null) return; // 机器级 CLI 缺失：整目标放弃（progress 已判②）
++      let outcome: SillySpecProgressOutcome;
++      try {
++        outcome = await this._runProgressJson(
++          process.execPath,
++          [bin, 'flow', 'status', '--json', '--change', name],
++          { cwd, timeoutMs: this._statusTimeoutMs, maxBufferBytes: SILLYSPEC_STATUS_MAX_BUFFER },
++        );
++      } catch {
++        continue; // 注入实现防御：error 态保留旧值
++      }
++      if (outcome.timedOut || outcome.code === null || outcome.code !== 0) {
++        // error 态（含旧版 CLI「未知命令: flow」exit 非零）：静默保留旧值
++        this._log('debug', 'thin_flow_collect_error', {
++          change: name,
++          exit_code: outcome.code,
++          timed_out: outcome.timedOut,
++        });
++        continue;
++      }
++      let parsed: unknown;
++      try {
++        const text = outcome.stdout;
++        parsed = JSON.parse(text.charCodeAt(0) === 0xfeff ? text.slice(1) : text);
++      } catch {
++        this._log('debug', 'thin_flow_collect_bad_json', { change: name });
++        continue;
++      }
++      const item = buildThinFlowSummary(workspaceId, parsed);
++      if (item === null) continue; // 非 active 形态（archived/dir-no-state）→ 键不落槽
++      this._thinFlows.set(key, item);
++    }
++    // 名单驱动清理：本 ws 槽中不在活跃名单的键删除（归档/升厚竞态自愈）
++    for (const key of this._thinFlows.keys()) {
++      if (key.startsWith(`${workspaceId}:`) && !liveKeys.has(key)) {
++        this._thinFlows.delete(key);
++      }
++    }
++  }
++
++  /**
++   * thin flow 摘要槽快照（hub-client task-07 组装心跳载荷取用）：全部工作区拍平。
++   * 空槽返回 []（心跳 thin_flows 键省略不发，backend 不写不清——FR-07）。
++   */
++  getThinFlows(): ThinFlowSummary[] {
++    return [...this._thinFlows.values()];
++  }
++
+   /**
+    * 采集失败状态（纯同步零 spawn，_sendHeartbeatOnce 组装用）：null=无失败
+    * （①成功/②能力缺失/未采集），对象=三态③持续失败中（latest-wins 每跳携带，
+@@ -2767,6 +2902,44 @@ function parseProgressEnvelopeCodes(stdout: string): string[] {
+   }
+ }
+ 
++/**
++ * thin flow 单条摘要构造（task-06 纯函数，导出供测试直测——对齐本文件
++ * buildSillySpecStatusSummary 纯函数导出先例）：解析 `flow status --json`
++ * 输出，status==='active' 才产出白名单条目（archived/dir-no-state 形态 →
++ * null=键不落槽，归档竞态由名单驱动清理兜底）；字段逐个类型防御（CLI 版本
++ * 演进缺键按 falsy 缺省参与 backend 归一，不丢条目——与 DaemonHeartbeatThinFlow
++ * 的「宁宽勿断」口径一致）。
++ */
++export function buildThinFlowSummary(
++  workspaceId: string,
++  parsed: unknown,
++): ThinFlowSummary | null {
++  if (parsed === null || typeof parsed !== 'object') return null;
++  const o = parsed as Record<string, unknown>;
++  if (o.status !== 'active') return null; // archived / dir-no-state / 其他形态
++  if (typeof o.change !== 'string' || o.change === '') return null;
++  const bool = (v: unknown): boolean => v === true;
++  const num = (v: unknown): number => (typeof v === 'number' && Number.isFinite(v) ? v : 0);
++  const substeps = Array.isArray(o.substeps)
++    ? o.substeps.filter((s): s is string => typeof s === 'string')
++    : [];
++  return {
++    workspace_id: workspaceId,
++    change: o.change,
++    phase: typeof o.phase === 'string' ? o.phase : '',
++    design_filled: bool(o.designFilled),
++    fr_filled: bool(o.frFilled),
++    bindings_total: num(o.bindingsTotal),
++    bindings_filled: num(o.bindingsFilled),
++    tasks_total: num(o.tasksTotal),
++    tasks_checked: num(o.tasksChecked),
++    substeps,
++    spec_approved: bool(o.specApproved),
++    autopilot: bool(o.autopilot),
++    legacy_fallback: bool(o.legacyFallback),
++  };
++}
++
+ /**
+  * 默认采集执行器：node child_process execFile（数组形参，无 shell 依赖，NFR-02；
+  * Windows 路径空格安全）。错误映射：err=null → code=0；ExecApiError 的数字 code =
+diff --git a/sillyhub-daemon/tests/daemon-heartbeat-pending.test.ts b/sillyhub-daemon/tests/daemon-heartbeat-pending.test.ts
+index 5f576640f..7b0a645e9 100644
+--- a/sillyhub-daemon/tests/daemon-heartbeat-pending.test.ts
++++ b/sillyhub-daemon/tests/daemon-heartbeat-pending.test.ts
+@@ -195,7 +195,7 @@ describe('task-05 Daemon._sendHeartbeatOnce 注入 pending_update', () => {
+     await expect(h.sendHeartbeatOnce()).resolves.toBe(true);
+     expect(h.heartbeatMock).toHaveBeenCalledTimes(1);
+     const call = h.heartbeatMock.mock.calls[0]!;
+-    expect(call.length).toBe(12); // task-02 machine-id 尾参 + 2026-10-23-session-network-context 网卡尾参（network_interfaces，11→12）（machineId undefined 占位）使平铺形态 10→11
++    expect(call.length).toBe(13); // task-07 thin-flows 尾参（12→13，2026-10-26-session-change-progress-hover）+ task-02 machine-id 尾参 + 网卡尾参（11→12）（machineId undefined 占位）使平铺形态 10→11
+     // 剥掉 since 只传三字段（backend 首次落库盖 since，daemon 不上报）。
+     expect(call[3]).toEqual({
+       reason: 'server_command',
+diff --git a/sillyhub-daemon/tests/daemon-heartbeat-sillyspec.test.ts b/sillyhub-daemon/tests/daemon-heartbeat-sillyspec.test.ts
+index fa548b0d1..ca888e3d2 100644
+--- a/sillyhub-daemon/tests/daemon-heartbeat-sillyspec.test.ts
++++ b/sillyhub-daemon/tests/daemon-heartbeat-sillyspec.test.ts
+@@ -510,7 +510,7 @@ describe('task-05 Daemon._sendHeartbeatOnce 注入 sillyspec 快照', () => {
+     await expect(h.sendHeartbeatOnce()).resolves.toBe(true);
+     expect(h.heartbeatMock).toHaveBeenCalledTimes(1);
+     const call = h.heartbeatMock.mock.calls[0]!;
+-    expect(call.length).toBe(12); // task-02 machine-id 尾参 + 2026-10-23-session-network-context 网卡尾参（network_interfaces，11→12）（machineId undefined 占位）使平铺形态 10→11
++    expect(call.length).toBe(13); // task-07 thin-flows 尾参（12→13，2026-10-26-session-change-progress-hover）+ task-02 machine-id 尾参 + 网卡尾参（11→12）（machineId undefined 占位）使平铺形态 10→11
+     expect(call[4]).toEqual({
+       version: '3.26.15',
+       latest_version: '3.27.11',
+@@ -531,7 +531,7 @@ describe('task-05 Daemon._sendHeartbeatOnce 注入 sillyspec 快照', () => {
+     });
+     await expect(h.sendHeartbeatOnce()).resolves.toBe(true);
+     const call = h.heartbeatMock.mock.calls[0]!;
+-    expect(call.length).toBe(12); // task-02 machine-id 尾参 + 2026-10-23-session-network-context 网卡尾参（network_interfaces，11→12）（machineId undefined 占位）使平铺形态 10→11
++    expect(call.length).toBe(13); // task-07 thin-flows 尾参（12→13，2026-10-26-session-change-progress-hover）+ task-02 machine-id 尾参 + 网卡尾参（11→12）（machineId undefined 占位）使平铺形态 10→11
+     expect(call[4]).toEqual({ version: '3.26.15' });
+     expect('update' in (call[4] as object)).toBe(false);
+     expect('latest_version' in (call[4] as object)).toBe(false);
+@@ -545,7 +545,7 @@ describe('task-05 Daemon._sendHeartbeatOnce 注入 sillyspec 快照', () => {
+     });
+     await expect(h.sendHeartbeatOnce()).resolves.toBe(true);
+     const call = h.heartbeatMock.mock.calls[0]!;
+-    expect(call.length).toBe(12); // task-02 machine-id 尾参 + 2026-10-23-session-network-context 网卡尾参（network_interfaces，11→12）（machineId undefined 占位）使平铺形态 10→11
++    expect(call.length).toBe(13); // task-07 thin-flows 尾参（12→13，2026-10-26-session-change-progress-hover）+ task-02 machine-id 尾参 + 网卡尾参（11→12）（machineId undefined 占位）使平铺形态 10→11
+     expect(call[3]).toBeUndefined();
+     expect(call[4]).toBeUndefined();
+   });
+@@ -741,7 +741,7 @@ describe('task-02 Daemon._sendHeartbeatOnce 注入 sillyspec_status', () => {
+     );
+     await expect(h.sendHeartbeatOnce()).resolves.toBe(true);
+     const call = h.heartbeatMock.mock.calls[0]!;
+-    expect(call.length).toBe(12); // task-02 machine-id 尾参 + 2026-10-23-session-network-context 网卡尾参（network_interfaces，11→12）（machineId undefined 占位）使平铺形态 10→11
++    expect(call.length).toBe(13); // task-07 thin-flows 尾参（12→13，2026-10-26-session-change-progress-hover）+ task-02 machine-id 尾参 + 网卡尾参（11→12）（machineId undefined 占位）使平铺形态 10→11
+     expect(call[5]).toEqual(STATUS_SUMMARY);
+     expect(call[3]).toBeUndefined();
+     expect(call[4]).toBeUndefined();
+@@ -759,7 +759,7 @@ describe('task-02 Daemon._sendHeartbeatOnce 注入 sillyspec_status', () => {
+     );
+     await expect(h.sendHeartbeatOnce()).resolves.toBe(true);
+     const call = h.heartbeatMock.mock.calls[0]!;
+-    expect(call.length).toBe(12); // task-02 machine-id 尾参 + 2026-10-23-session-network-context 网卡尾参（network_interfaces，11→12）（machineId undefined 占位）使平铺形态 10→11
++    expect(call.length).toBe(13); // task-07 thin-flows 尾参（12→13，2026-10-26-session-change-progress-hover）+ task-02 machine-id 尾参 + 网卡尾参（11→12）（machineId undefined 占位）使平铺形态 10→11
+     expect(call[5]).toBeNull();
+   });
+ 
+@@ -774,7 +774,7 @@ describe('task-02 Daemon._sendHeartbeatOnce 注入 sillyspec_status', () => {
+     );
+     await expect(h.sendHeartbeatOnce()).resolves.toBe(true);
+     const call = h.heartbeatMock.mock.calls[0]!;
+-    expect(call.length).toBe(12); // task-02 machine-id 尾参 + 2026-10-23-session-network-context 网卡尾参（network_interfaces，11→12）（machineId undefined 占位）使平铺形态 10→11
++    expect(call.length).toBe(13); // task-07 thin-flows 尾参（12→13，2026-10-26-session-change-progress-hover）+ task-02 machine-id 尾参 + 网卡尾参（11→12）（machineId undefined 占位）使平铺形态 10→11
+     expect(call[4]).toBeUndefined();
+   });
+ 
+@@ -788,7 +788,7 @@ describe('task-02 Daemon._sendHeartbeatOnce 注入 sillyspec_status', () => {
+     await expect(h.sendHeartbeatOnce()).resolves.toBe(true);
+     expect(h.manager.getStatusSnapshot).not.toHaveBeenCalled();
+     expect(h.manager.getStatusError).not.toHaveBeenCalled();
+-    expect(h.heartbeatMock.mock.calls[0]!.length).toBe(12); // task-02 machine-id 尾参 + 2026-10-23-session-network-context 网卡尾参（network_interfaces，11→12）
++    expect(h.heartbeatMock.mock.calls[0]!.length).toBe(13); // task-07 thin-flows 尾参（12→13，2026-10-26-session-change-progress-hover）; // task-02 machine-id 尾参 + 2026-10-23-session-network-context 网卡尾参（network_interfaces，11→12）
+   });
+ 
+   // ── 2026-09-08（temp 投毒排障衍生）：第 9 参 sillyspec_status_error 装配 ──
+@@ -828,7 +828,7 @@ describe('task-02 Daemon._sendHeartbeatOnce 注入 sillyspec_status', () => {
+     );
+     await expect(h.sendHeartbeatOnce()).resolves.toBe(true);
+     const call = h.heartbeatMock.mock.calls[0]!;
+-    expect(call.length).toBe(12); // task-02 machine-id 尾参 + 2026-10-23-session-network-context 网卡尾参（network_interfaces，11→12）（machineId undefined 占位）使平铺形态 10→11
++    expect(call.length).toBe(13); // task-07 thin-flows 尾参（12→13，2026-10-26-session-change-progress-hover）+ task-02 machine-id 尾参 + 网卡尾参（11→12）（machineId undefined 占位）使平铺形态 10→11
+     expect(call[8]).toBeUndefined();
+   });
+ 
+diff --git a/sillyhub-daemon/tests/integration/selfupdate-scenarios.test.ts b/sillyhub-daemon/tests/integration/selfupdate-scenarios.test.ts
+index 837e9ea65..5bd5ced9b 100644
+--- a/sillyhub-daemon/tests/integration/selfupdate-scenarios.test.ts
++++ b/sillyhub-daemon/tests/integration/selfupdate-scenarios.test.ts
+@@ -391,7 +391,7 @@ describe('task-08 SELF_UPDATE 安全层四路径集成回归', () => {
+       await expect(h.sendHeartbeatOnce()).resolves.toBe(true);
+       expect(h.heartbeatMock).toHaveBeenCalledTimes(1);
+       const first = h.heartbeatMock.mock.calls[0]!;
+-      expect(first.length).toBe(12); // task-02 machine-id 尾参 + 2026-10-23-session-network-context 网卡尾参（network_interfaces，11→12）使平铺形态 10→11（d6fabf408）
++      expect(first.length).toBe(13); // task-07 thin-flows 尾参（12→13，2026-10-26-session-change-progress-hover）+ machine-id/网卡尾参 10→12（d6fabf408）
+       expect(first[3]).toEqual({
+         reason: 'disk_change',
+         current_version: 'cur-p4',
+@@ -408,7 +408,7 @@ describe('task-08 SELF_UPDATE 安全层四路径集成回归', () => {
+       expect(await h.daemon.readPendingUpdate()).toBeNull();
+       await expect(h.sendHeartbeatOnce()).resolves.toBe(true);
+       const second = h.heartbeatMock.mock.calls[1]!;
+-      expect(second.length).toBe(12); // task-02 machine-id 尾参 + 2026-10-23-session-network-context 网卡尾参（network_interfaces，11→12）（machineId undefined 占位）使平铺形态 10→11（d6fabf408，daemon-heartbeat 先例同款）
++      expect(second.length).toBe(13); // task-07 thin-flows 尾参（12→13，2026-10-26-session-change-progress-hover）; // task-02 machine-id 尾参 + 2026-10-23-session-network-context 网卡尾参（network_interfaces，11→12）（machineId undefined 占位）使平铺形态 10→11（d6fabf408，daemon-heartbeat 先例同款）
+       expect(second[3]).toBeUndefined();
+     });
+   });
+diff --git a/sillyhub-daemon/tests/sillyspec-platform-command.test.ts b/sillyhub-daemon/tests/sillyspec-platform-command.test.ts
+index 7c694f4f9..1fe383dcd 100644
+--- a/sillyhub-daemon/tests/sillyspec-platform-command.test.ts
++++ b/sillyhub-daemon/tests/sillyspec-platform-command.test.ts
+@@ -884,10 +884,10 @@ describe('task-07 心跳携带：终态窗口内每跳携带、过期后键不
+     // statusError / 10 status_map，2026-09-08 总览工作区级化；第 11 machineId，
+     // d6fabf408 tool-report task-02 尾参）——length 断言从 7/4 时代更新；
+     // commandResult 仍第 7 参（index 6）。
+-    expect(h.heartbeatMock.mock.calls[0]!.length).toBe(12); // task-02 machine-id 尾参 + 2026-10-23-session-network-context 网卡尾参（network_interfaces，11→12）（machineId undefined 占位）使平铺形态 10→11（d6fabf408，daemon-heartbeat 先例同款）
++    expect(h.heartbeatMock.mock.calls[0]!.length).toBe(13); // task-07 thin-flows 尾参（12→13，2026-10-26-session-change-progress-hover）; // task-02 machine-id 尾参 + 2026-10-23-session-network-context 网卡尾参（network_interfaces，11→12）（machineId undefined 占位）使平铺形态 10→11（d6fabf408，daemon-heartbeat 先例同款）
+     expect(h.heartbeatMock.mock.calls[0]![6]).toEqual(expected);
+     // 窗口内每跳都携带（latest-wins 单槽重复发送）。
+-    expect(h.heartbeatMock.mock.calls[1]!.length).toBe(12); // task-02 machine-id 尾参 + 2026-10-23-session-network-context 网卡尾参（network_interfaces，11→12）（machineId undefined 占位）使平铺形态 10→11（d6fabf408，daemon-heartbeat 先例同款）
++    expect(h.heartbeatMock.mock.calls[1]!.length).toBe(13); // task-07 thin-flows 尾参（12→13，2026-10-26-session-change-progress-hover）; // task-02 machine-id 尾参 + 2026-10-23-session-network-context 网卡尾参（network_interfaces，11→12）（machineId undefined 占位）使平铺形态 10→11（d6fabf408，daemon-heartbeat 先例同款）
+     expect(h.heartbeatMock.mock.calls[1]![6]).toEqual(expected);
+   });
+ 
+@@ -895,11 +895,11 @@ describe('task-07 心跳携带：终态窗口内每跳携带、过期后键不
+     const h = makeHeartbeatCommandHarness();
+     await h.manager.runGhostCleanup();
+     await expect(h.sendHeartbeatOnce()).resolves.toBe(true);
+-    expect(h.heartbeatMock.mock.calls[0]!.length).toBe(12); // task-02 machine-id 尾参 + 2026-10-23-session-network-context 网卡尾参（network_interfaces，11→12）（machineId undefined 占位）使平铺形态 10→11（d6fabf408，daemon-heartbeat 先例同款）
++    expect(h.heartbeatMock.mock.calls[0]!.length).toBe(13); // task-07 thin-flows 尾参（12→13，2026-10-26-session-change-progress-hover）; // task-02 machine-id 尾参 + 2026-10-23-session-network-context 网卡尾参（network_interfaces，11→12）（machineId undefined 占位）使平铺形态 10→11（d6fabf408，daemon-heartbeat 先例同款）
+     h.advance(SILLYSPEC_TERMINAL_WINDOW_MS); // 时钟注入过 10min（不真等）
+     await expect(h.sendHeartbeatOnce()).resolves.toBe(true);
+     const call = h.heartbeatMock.mock.calls[1]!;
+-    expect(call.length).toBe(12); // task-02 machine-id 尾参 + 2026-10-23-session-network-context 网卡尾参（network_interfaces，11→12）（machineId undefined 占位）使平铺形态 10→11（d6fabf408，daemon-heartbeat 先例同款）
++    expect(call.length).toBe(13); // task-07 thin-flows 尾参（12→13，2026-10-26-session-change-progress-hover）; // task-02 machine-id 尾参 + 2026-10-23-session-network-context 网卡尾参（network_interfaces，11→12）（machineId undefined 占位）使平铺形态 10→11（d6fabf408，daemon-heartbeat 先例同款）
+     expect(call[4]).toBeUndefined();
+     expect(call[5]).toBeUndefined();
+     expect(call[6]).toBeUndefined();
+@@ -909,7 +909,7 @@ describe('task-07 心跳携带：终态窗口内每跳携带、过期后键不
+     const h = makeHeartbeatCommandHarness();
+     await expect(h.sendHeartbeatOnce()).resolves.toBe(true);
+     const call = h.heartbeatMock.mock.calls[0]!;
+-    expect(call.length).toBe(12); // task-02 machine-id 尾参 + 2026-10-23-session-network-context 网卡尾参（network_interfaces，11→12）（machineId undefined 占位）使平铺形态 10→11（d6fabf408，daemon-heartbeat 先例同款）
++    expect(call.length).toBe(13); // task-07 thin-flows 尾参（12→13，2026-10-26-session-change-progress-hover）; // task-02 machine-id 尾参 + 2026-10-23-session-network-context 网卡尾参（network_interfaces，11→12）（machineId undefined 占位）使平铺形态 10→11（d6fabf408，daemon-heartbeat 先例同款）
+     expect(call[6]).toBeUndefined();
+   });
+ });
+@@ -968,7 +968,7 @@ describe('ql-20260911-024 结果落槽即补发心跳：命令完成不等 15s 
+     // waitFor 收敛微任务链后心跳恰一次（15s 循环在测试 config 拉满下不会掺入）。
+     await vi.waitFor(() => expect(h.heartbeatMock).toHaveBeenCalledTimes(1));
+     const call = h.heartbeatMock.mock.calls[0]!;
+-    expect(call.length).toBe(12); // task-02 machine-id 尾参 + 2026-10-23-session-network-context 网卡尾参（network_interfaces，11→12）（machineId undefined 占位）使平铺形态 10→11（d6fabf408，daemon-heartbeat 先例同款）
++    expect(call.length).toBe(13); // task-07 thin-flows 尾参（12→13，2026-10-26-session-change-progress-hover）; // task-02 machine-id 尾参 + 2026-10-23-session-network-context 网卡尾参（network_interfaces，11→12）（machineId undefined 占位）使平铺形态 10→11（d6fabf408，daemon-heartbeat 先例同款）
+     expect(call[6]).toEqual({
+       action: 'resolve',
+       change: 'c1',
+diff --git a/backend/app/modules/change/tests/test_progress_projection_ext.py b/backend/app/modules/change/tests/test_progress_projection_ext.py
+new file mode 100644
+--- /dev/null
++++ b/backend/app/modules/change/tests/test_progress_projection_ext.py
+@@ -0,0 +1,543 @@
++"""Tests for 阶段进度投影扩展（2026-10-26-session-change-progress-hover task-02）。
++
++覆盖 acceptance：
++- _extract_stage_progress 主路径：5 阶段 stages[]×steps[] 分组计数 + 起止时间
++  zh-CN→ISO UTC 归一化 + 耗时秒数（固定 now 注入断言，R-04）+ revision 透传；
++- 盲区#1：stages 行在而 steps 空/缺失 → steps_total=0 计数字段照常输出（不除零）；
++- 畸形样本 fail-open（R-01）：latest_progress 非 dict / stages 缺失/非 list / 行
++  非 dict / 身份字段缺失 → None 或丢行不抛；zh-CN 旧格式时间戳归一化、缺
++  started_at / 坏时间戳串 → duration_seconds=None；
++- enrich_summaries 挂载：命中投影 → stage_progress 填充；未命中 / deleted 行 →
++  None（防复活口径）；platform_change_progress 查询恒 1 次（零新增查询锚定）。
++
++fixture 范式参照 test_step_progress.py（conftest 注册 platform_change_progress 表）。
++"""
++
++from __future__ import annotations
++
++import uuid
++from datetime import UTC, datetime
++from types import SimpleNamespace
++from typing import Any
++
++import pytest
++from sqlalchemy.ext.asyncio import AsyncSession
++
++import app.modules.change.service as service_module
++from app.modules.change.model import Change
++from app.modules.change.schema import ChangeSummary, StageProgressEntry
++from app.modules.change.service import ChangeService
++from app.modules.platform_sync.model import PlatformChangeProgressORM
++from app.modules.workspace.model import Workspace
++
++# 固定注入时钟（R-04：提取器纯函数不取全局时钟，测试确定性由注入保证）。
++_NOW = datetime(2026, 10, 26, 12, 0, 0, tzinfo=UTC)
++
++
++def _fix_cli_tz(monkeypatch: pytest.MonkeyPatch, tz: str = "Asia/Shanghai") -> None:
++    """固定 _normalize_completed_at 的解释时区（默认 Asia/Shanghai 与生产一致）。"""
++    monkeypatch.setattr(
++        service_module, "get_settings", lambda: SimpleNamespace(cli_progress_timezone=tz)
++    )
++
++
++def _stage_row(
++    stage: str,
++    status: str,
++    *,
++    started_at: str | None = None,
++    completed_at: str | None = None,
++    revision: Any = None,
++) -> dict:
++    """stages 表行镜像（CLI serializeForSync 六表；started/completed 为 zh-CN 墙钟）。"""
++    return {
++        "change_name": "demo",
++        "stage": stage,
++        "status": status,
++        "started_at": started_at,
++        "completed_at": completed_at,
++        "revision": revision,
++    }
++
++
++def _step_row(stage: str, name: str, *, status: str = "completed", ordering: int = 0) -> dict:
++    return {
++        "change_name": "demo",
++        "stage": stage,
++        "name": name,
++        "status": status,
++        "output": None,
++        "completed_at": None,
++        "ordering": ordering,
++        "wait_reason": None,
++    }
++
++
++def _payload(
++    stages: list[dict] | Any,
++    steps: list[dict] | Any | None = None,
++    *,
++    current_stage: str = "execute",
++) -> dict:
++    """latest_progress 镜像（对齐 CLI serializeForSync 六表：stages/steps 均顶层数组）。"""
++    return {
++        "project": {"name": "demo"},
++        "changes": [{"name": "demo", "current_stage": current_stage, "status": "in_progress"}],
++        "stages": stages,
++        "steps": steps if steps is not None else [],
++        "batch_progress": [],
++        "approvals": [],
++    }
++
++
++def _full_stage_payload() -> dict:
++    """主线 5 阶段乱序 stages + 分组 steps：brainstorm 2/2 全完、plan 3/2（blocked 计
++    total 不计 completed）、execute 2/1 进行中（revising+revision）、verify/archive
++    未启动（无 steps 行 → 0/0 空圈）；另含 ghost 未知 stage 行与非 dict 畸形行。"""
++    stages = [
++        _stage_row("verify", "pending"),
++        _stage_row("brainstorm", "completed", started_at="2026/10/26 08:00:00", completed_at="2026/10/26 09:00:00"),
++        _stage_row("archive", "pending"),
++        _stage_row("plan", "completed", started_at="2026/10/26 09:00:00", completed_at="2026/10/26 10:30:00"),
++        _stage_row("execute", "revising", started_at="2026/10/26 11:00:00", revision=1),
++    ]
++    steps = [
++        _step_row("brainstorm", "b1", ordering=1),
++        _step_row("brainstorm", "b2", ordering=2),
++        _step_row("plan", "p1", ordering=1),
++        _step_row("plan", "p2", ordering=2),
++        _step_row("plan", "p3", status="blocked", ordering=3),
++        _step_row("execute", "e1", ordering=1),
++        _step_row("execute", "e2", status="in-progress", ordering=2),
++        _step_row("ghost", "x", ordering=1),  # 无对应 stages 行 → 不映射任何阶段不崩
++        "not-a-dict",  # 畸形 steps 行 → 跳过
++    ]
++    return _payload(stages, steps)
++
++
++# ── 提取器单测（纯函数，无 DB 依赖）──
++
++
++def test_extract_full_five_stages_counts_duration_revision(
++    monkeypatch: pytest.MonkeyPatch,
++) -> None:
++    """主路径：stages+steps 明细 → 5 阶段 entries（STAGE_ORDER 定序 / 分组计数 /
++    zh-CN→ISO UTC 起止 / 固定 now 耗时 / revision 透传，acceptance 条 1）。"""
++    _fix_cli_tz(monkeypatch)
++    entries = ChangeService._extract_stage_progress(_full_stage_payload(), now=_NOW)
++    assert entries is not None
++    assert [e.stage for e in entries] == ["brainstorm", "plan", "execute", "verify", "archive"]
++
++    brainstorm, plan, execute, verify, archive = entries
++    # 已完成阶段：起止归一化（北京 08:00→UTC 00:00）+ 耗时=completed−started。
++    assert brainstorm.status == "completed"
++    assert brainstorm.steps_total == 2
++    assert brainstorm.steps_completed == 2
++    assert brainstorm.started_at == "2026-10-26T00:00:00+00:00"
++    assert brainstorm.completed_at == "2026-10-26T01:00:00+00:00"
++    assert brainstorm.duration_seconds == 3600
++    assert brainstorm.revision is None
++    # blocked 计 total 不计 completed（steps_total 含 waiting/blocked 全计数）。
++    assert (plan.steps_total, plan.steps_completed) == (3, 2)
++    assert plan.duration_seconds == 5400  # 09:00→10:30 CST = 01:00Z→02:30Z
++    # 进行中（revising）：CLI 原值 status 透传不归一 + revision + now−started 耗时。
++    assert execute.status == "revising"
++    assert (execute.steps_total, execute.steps_completed) == (2, 1)
++    assert execute.completed_at is None
++    assert execute.duration_seconds == 32400  # 11:00 CST=03:00Z → now 12:00Z 共 9h
++    assert execute.revision == 1
++    # 未启动阶段：无 steps 行 0/0 空圈不除零；无 started_at → duration None。
++    for pending in (verify, archive):
++        assert (pending.steps_total, pending.steps_completed) == (0, 0)
++        assert pending.started_at is None
++        assert pending.duration_seconds is None
++        assert pending.revision is None
++
++
++def test_extract_iso_timestamps_passthrough(monkeypatch: pytest.MonkeyPatch) -> None:
++    """ISO 原串（带时区）与 zh-CN 墙钟双格式兼容：ISO 直接可用，耗时照算。"""
++    _fix_cli_tz(monkeypatch)
++    payload = _payload(
++        [
++            _stage_row(
++                "execute",
++                "in-progress",
++                started_at="2026-10-26T04:00:00+00:00",
++                completed_at="2026-10-26T05:30:00+00:00",
++            )
++        ]
++    )
++    entries = ChangeService._extract_stage_progress(payload, now=_NOW)
++    assert entries is not None and len(entries) == 1
++    assert entries[0].started_at == "2026-10-26T04:00:00+00:00"
++    assert entries[0].duration_seconds == 5400
++
++
++def test_extract_steps_missing_zero_counts_not_none(monkeypatch: pytest.MonkeyPatch) -> None:
++    """盲区#1：stages 行在而 steps 空/键缺失 → 各阶段 0/0 计数照常输出（entries 非
++    None，前端空圈不除零）；steps 非 list → 同样不崩。"""
++    _fix_cli_tz(monkeypatch)
++    stages = [
++        _stage_row("brainstorm", "completed", started_at="2026/10/26 08:00:00", completed_at="2026/10/26 09:00:00"),
++        _stage_row("execute", "in-progress", started_at="2026/10/26 11:00:00"),
++    ]
++    for steps in ([], None, "not-a-list"):
++        payload = _payload(stages, steps)
++        if steps is None:
++            del payload["steps"]  # 键整缺失（存量无 steps 明细）
++        entries = ChangeService._extract_stage_progress(payload, now=_NOW)
++        assert entries is not None and len(entries) == 2
++        assert all(e.steps_total == 0 and e.steps_completed == 0 for e in entries)
++        # 计数缺位不影响耗时口径（completed 阶段 completed−started 仍可算）。
++        assert entries[0].duration_seconds == 3600
++
++
++def test_extract_malformed_fail_open_to_none(monkeypatch: pytest.MonkeyPatch) -> None:
++    """畸形样本 fail-open（R-01 / acceptance 条 2）：latest_progress 非 dict /
++    stages 缺失 / 非 list / 无一有效行 → None 不抛。"""
++    _fix_cli_tz(monkeypatch)
++    assert ChangeService._extract_stage_progress(None, now=_NOW) is None
++    assert ChangeService._extract_stage_progress("junk", now=_NOW) is None
++    assert ChangeService._extract_stage_progress(_payload(None, []), now=_NOW) is None  # stages=None
++    no_stages = _payload([], [])
++    del no_stages["stages"]
++    assert ChangeService._extract_stage_progress(no_stages, now=_NOW) is None
++    assert ChangeService._extract_stage_progress(_payload("not-a-list", []), now=_NOW) is None
++    # 行全无效（非 dict / 缺身份字段）→ None。
++    assert ChangeService._extract_stage_progress(_payload(["junk", 123], []), now=_NOW) is None
++    # stage/status 任一缺失均丢行 → 无一有效行 → None。
++    all_invalid = _payload([{"stage": "plan"}, {"status": "in-progress"}], [])
++    assert ChangeService._extract_stage_progress(all_invalid, now=_NOW) is None
++
++
++def test_extract_mixed_rows_drop_invalid_keep_valid(monkeypatch: pytest.MonkeyPatch) -> None:
++    """行级畸形混排：非 dict 行 / 身份字段缺失行丢弃，有效行保留（对齐
++    _extract_step_progress 丢行口径，不因单行畸形整体失败）。"""
++    _fix_cli_tz(monkeypatch)
++    payload = _payload(
++        [
++            "not-a-dict",  # 跳过
++            {"stage": "plan"},  # 缺 status → 跳过
++            _stage_row("brainstorm", "completed", started_at="2026/10/26 08:00:00", completed_at="2026/10/26 09:00:00"),
++            {"stage": "execute", "status": None},  # status 非 str → 跳过
++        ],
++        [_step_row("brainstorm", "b1")],
++    )
++    entries = ChangeService._extract_stage_progress(payload, now=_NOW)
++    assert entries is not None
++    assert [e.stage for e in entries] == ["brainstorm"]
++    assert (entries[0].steps_total, entries[0].steps_completed) == (1, 1)
++
++
++def test_extract_bad_timestamps_and_revision_degrade(monkeypatch: pytest.MonkeyPatch) -> None:
++    """时间戳/revision 畸形降级不抛：坏串原样保留且 duration=None（缺 started_at 同）；
++    revision 非 int（str/bool）→ None；zh-CN 墙钟与 naive ISO 混型不抛。"""
++    _fix_cli_tz(monkeypatch)
++    payload = _payload(
++        [
++            # started_at 坏串：归一化保留原串 → 不可解析 → duration None。
++            _stage_row("plan", "completed", started_at="15/8/2026", completed_at="2026/10/26 09:00:00"),
++            # 缺 started_at（未启动/数据缺列）→ duration None。
++            _stage_row("verify", "pending", completed_at="2026/10/26 09:00:00"),
++            # revision 畸形（str / bool 伪 int）→ None。
++            _stage_row("archive", "revising", started_at="2026/10/26 11:00:00", revision="2"),
++            _stage_row("execute", "revising", started_at="2026/10/26 11:00:00", revision=True),
++        ]
++    )
++    entries = ChangeService._extract_stage_progress(payload, now=_NOW)
++    assert entries is not None
++    by_stage = {e.stage: e for e in entries}
++    assert by_stage["plan"].started_at == "15/8/2026"  # 非法串原样保留（Grill #18 口径）
++    assert by_stage["plan"].duration_seconds is None
++    assert by_stage["verify"].duration_seconds is None  # 无 started_at → 不算耗时
++    assert by_stage["archive"].revision is None
++    assert by_stage["execute"].revision is None
++    # naive ISO（无时区标记）与注入 aware now 混型相减 TypeError → None 不抛。
++    naive = _payload(
++        [_stage_row("brainstorm", "in-progress", started_at="2026-10-26T03:00:00")]
++    )
++    entries_naive = ChangeService._extract_stage_progress(naive, now=_NOW)
++    assert entries_naive is not None
++    assert entries_naive[0].duration_seconds is None
++
++
++# ── enrich_summaries 集成（DB）──
++
++
++async def _make_workspace(session: AsyncSession) -> Workspace:
++    ws = Workspace(
++        id=uuid.uuid4(),
++        name=f"ws-{uuid.uuid4().hex[:6]}",
++        slug=f"ws-{uuid.uuid4().hex[:6]}",
++        root_path=f"/tmp/ws-{uuid.uuid4().hex[:8]}",
++        status="active",
++    )
++    session.add(ws)
++    await session.commit()
++    await session.refresh(ws)
++    return ws
++
++
++async def _make_change(
++    session: AsyncSession,
++    workspace_id: uuid.UUID,
++    change_key: str,
++    *,
++    stage: str = "plan",
++    location: str = "active",
++) -> Change:
++    change = Change(
++        id=uuid.uuid4(),
++        workspace_id=workspace_id,
++        change_key=change_key,
++        title=change_key,
++        status="active",
++        location=location,
++        path=f"changes/{change_key}",
++        current_stage=stage,
++        owner_id=None,
++    )
++    session.add(change)
++    await session.commit()
++    await session.refresh(change)
++    return change
++
++
++async def _make_progress_row(
++    session: AsyncSession,
++    workspace_id: uuid.UUID,
++    change_name: str,
++    latest_progress: dict,
++) -> None:
++    session.add(
++        PlatformChangeProgressORM(
++            workspace_id=workspace_id,
++            change_name=change_name,
++            latest_progress=latest_progress,
++            last_pushed_at="2026-10-26T00:00:00Z",
++            last_pusher="agent",
++        )
++    )
++    await session.commit()
++
++
++@pytest.mark.asyncio
++async def test_enrich_summaries_fills_stage_progress(
++    db_session: AsyncSession,
++) -> None:
++    """列表路径：命中投影 → stage_progress 填充（计数/revision 与纯函数一致）；
++    未命中行（无 progress 行）→ None（fallback 前端降级）。"""
++    ws = await _make_workspace(db_session)
++    c_hit = await _make_change(db_session, ws.id, "sp2-hit")
++    c_miss = await _make_change(db_session, ws.id, "sp2-miss")
++    await _make_progress_row(db_session, ws.id, "sp2-hit", _full_stage_payload())
++
++    summaries = await ChangeService(db_session).enrich_summaries([c_hit, c_miss])
++    by_key = {s.change_key: s for s in summaries}
++    hit = by_key["sp2-hit"]
++    assert isinstance(hit, ChangeSummary)
++    assert hit.stage_progress is not None
++    assert [e.stage for e in hit.stage_progress] == [
++        "brainstorm", "plan", "execute", "verify", "archive",
++    ]
++    execute = next(e for e in hit.stage_progress if e.stage == "execute")
++    assert isinstance(execute, StageProgressEntry)
++    assert (execute.steps_total, execute.steps_completed) == (2, 1)
++    assert execute.revision == 1
++    assert execute.duration_seconds is not None and execute.duration_seconds >= 0  # 真时钟注入
++    assert by_key["sp2-miss"].stage_progress is None
++
++
++@pytest.mark.asyncio
++async def test_enrich_summaries_deleted_row_no_stage_projection(
++    db_session: AsyncSession,
++) -> None:
++    """deleted 行不投影 stage_progress（对齐 task-06 防复活口径：残留 progress 行
++    不得把已删行投影回显）——即使 progress 行仍在。"""
++    ws = await _make_workspace(db_session)
++    c_del = await _make_change(db_session, ws.id, "sp2-del", location="deleted")
++    await _make_progress_row(db_session, ws.id, "sp2-del", _full_stage_payload())
++
++    (summary,) = await ChangeService(db_session).enrich_summaries([c_del])
++    assert summary.stage_progress is None
++    assert summary.current_stage == "plan"  # row 现值原样返回不被覆盖
++
++
++@pytest.mark.asyncio
++async def test_enrich_summaries_progress_query_anchored_single(
++    db_session: AsyncSession, monkeypatch: pytest.MonkeyPatch
++) -> None:
++    """零新增查询锚定（constraints）：stage_progress 挂载只消费 in-手
++    latest_progress——N change 命中投影，platform_change_progress 表查询恒 1 次
++    （projection 批量 IN），提取器自身零 SQL。"""
++    _fix_cli_tz(monkeypatch)
++    ws = await _make_workspace(db_session)
++    changes = []
++    for i in range(3):
++        key = f"sp2-qc-{i}"
++        changes.append(await _make_change(db_session, ws.id, key))
++        await _make_progress_row(db_session, ws.id, key, _full_stage_payload())
++
++    counts = {"platform_change_progress": 0}
++    real_execute = db_session.execute
++
++    async def counting_execute(*args: Any, **kwargs: Any) -> Any:
++        sql = str(args[0] if args else kwargs.get("statement"))
++        if "platform_change_progress" in sql:
++            counts["platform_change_progress"] += 1
++        return await real_execute(*args, **kwargs)
++
++    monkeypatch.setattr(db_session, "execute", counting_execute)
++    summaries = await ChangeService(db_session).enrich_summaries(changes)
++    monkeypatch.undo()
++
++    assert counts["platform_change_progress"] == 1
++    assert all(s.stage_progress is not None for s in summaries)
++
++
++# ── task-03：task_progress 批量聚合（FR-02 / D-005@v1）────────────────────────
++
++
++async def _make_task_row(
++    session: AsyncSession,
++    change_id: uuid.UUID,
++    workspace_id: uuid.UUID,
++    task_key: str,
++    *,
++    status: str = "draft",
++) -> None:
++    """最小 tasks 行（Task 表 status 6 值：draft/ready/in_progress/review/done/cancelled）。"""
++    from app.modules.task.model import Task as TaskRow
++
++    session.add(
++        TaskRow(
++            workspace_id=workspace_id,
++            change_id=change_id,
++            task_key=task_key,
++            title=task_key,
++            status=status,
++        )
++    )
++
++
++@pytest.mark.asyncio
++async def test_task_progress_aggregate_excludes_cancelled(
++    db_session: AsyncSession,
++) -> None:
++    """主路径：12 行 task（8 done / 1 cancelled / 3 draft）→ {total: 11, done: 8}。"""
++    ws = await _make_workspace(db_session)
++    change = await _make_change(db_session, ws.id, "tp-agg-a")
++    # 8 done + 3 draft + 1 cancelled = 12 行；cancelled 不计分母 → total 11
++    for i in range(8):
++        await _make_task_row(db_session, change.id, ws.id, f"task-{i:02d}", status="done")
++    for i in range(3):
++        await _make_task_row(db_session, change.id, ws.id, f"task-1{i}", status="draft")
++    await _make_task_row(db_session, change.id, ws.id, "task-cancelled", status="cancelled")
++    await db_session.commit()
++
++    summaries = await ChangeService(db_session).enrich_summaries([change])
++    assert summaries[0].task_progress is not None
++    assert summaries[0].task_progress.total == 11
++    assert summaries[0].task_progress.done == 8
++
++
++@pytest.mark.asyncio
++async def test_task_progress_all_cancelled_total_zero(
++    db_session: AsyncSession,
++) -> None:
++    """盲区#2：全 cancelled → total=0（显示面 — 不除零，归前端处理）。"""
++    ws = await _make_workspace(db_session)
++    change = await _make_change(db_session, ws.id, "tp-agg-b")
++    for i in range(3):
++        await _make_task_row(db_session, change.id, ws.id, f"task-{i}", status="cancelled")
++    await db_session.commit()
++
++    summaries = await ChangeService(db_session).enrich_summaries([change])
++    assert summaries[0].task_progress is not None
++    assert summaries[0].task_progress.total == 0
++    assert summaries[0].task_progress.done == 0
++
++
++@pytest.mark.asyncio
++async def test_task_progress_no_rows_none_and_single_query(
++    db_session: AsyncSession, monkeypatch: pytest.MonkeyPatch
++) -> None:
++    """无 task 行 → None 降级；多变更聚合单条 IN 查询（R-03 无 N+1 断言）。"""
++    _fix_cli_tz(monkeypatch)
++    ws = await _make_workspace(db_session)
++    changes = []
++    for i in range(3):
++        key = f"tp-agg-q-{i}"
++        changes.append(await _make_change(db_session, ws.id, key))
++        await _make_progress_row(db_session, ws.id, key, _full_stage_payload())
++    await _make_task_row(db_session, changes[0].id, ws.id, "task-00", status="done")
++    await db_session.commit()
++
++    counts = {"tasks": 0}
++    real_execute = db_session.execute
++
++    async def counting_execute(*args: Any, **kwargs: Any) -> Any:
++        sql = str(args[0] if args else kwargs.get("statement"))
++        if "FROM tasks" in sql:
++            counts["tasks"] += 1
++        return await real_execute(*args, **kwargs)
++
++    monkeypatch.setattr(db_session, "execute", counting_execute)
++    summaries = await ChangeService(db_session).enrich_summaries(changes)
++    monkeypatch.undo()
++
++    # 无 task 行的变更 → None；有行的 → {total:1, done:1}
++    assert summaries[0].task_progress is not None
++    assert summaries[1].task_progress is None
++    assert summaries[2].task_progress is None
++    # tasks 表聚合恒 1 查询（批量 IN，R-03）
++    assert counts["tasks"] == 1
++
++
++# ── task-04：thin_flow 读侧投影（FR-03/FR-07 / D-008@v2）──────────────────────
++
++
++@pytest.mark.asyncio
++async def test_thin_flow_projection_passthrough(db_session: AsyncSession) -> None:
++    """主路径：stages.thin_flow 在场且结构合法 → 逐字段透传。"""
++    ws = await _make_workspace(db_session)
++    thin_payload = {
++        "phase": "executing",
++        "approved": True,
++        "autopilot": False,
++        "tasks_total": 12,
++        "tasks_done": 4,
++        "substeps_done": 0,
++        "substeps_total": 8,
++        "upgraded": False,
++        "adopted_from": None,
++    }
++    change = await _make_change(db_session, ws.id, "tf-proj-a", stage="thin")
++    change.stages = {"thin_flow": thin_payload, "other_key": 1}
++    db_session.add(change)
++    await db_session.commit()
++
++    summaries = await ChangeService(db_session).enrich_summaries([change])
++    tf = summaries[0].thin_flow
++    assert tf is not None
++    assert tf.phase == "executing"
++    assert tf.approved is True
++    assert tf.tasks_done == 4
++    assert tf.substeps_total == 8
++    assert tf.upgraded is False
++
++
++@pytest.mark.asyncio
++async def test_thin_flow_projection_fail_open(db_session: AsyncSession) -> None:
++    """缺键 / 坏 JSON 结构 / stages 非 dict → None 不抛（R-01 / 盲区#5）。"""
++    ws = await _make_workspace(db_session)
++    missing = await _make_change(db_session, ws.id, "tf-proj-b", stage="thin")
++    missing.stages = {"team_worker_preset": {"workers": 2}}  # 无 thin_flow 键
++    bad = await _make_change(db_session, ws.id, "tf-proj-c", stage="thin")
++    bad.stages = {"thin_flow": {"phase": 123, "tasks_total": "not-int"}}  # 坏结构
++    db_session.add_all([missing, bad])
++    await db_session.commit()
++
++    summaries = await ChangeService(db_session).enrich_summaries([missing, bad])
++    assert summaries[0].thin_flow is None
++    assert summaries[1].thin_flow is None
+
+diff --git a/backend/app/modules/daemon/tests/test_heartbeat_thin_flows.py b/backend/app/modules/daemon/tests/test_heartbeat_thin_flows.py
+new file mode 100644
+--- /dev/null
++++ b/backend/app/modules/daemon/tests/test_heartbeat_thin_flows.py
+@@ -0,0 +1,347 @@
++"""heartbeat thin_flows 逐变更写入测试（2026-10-26-session-change-progress-hover
++task-05 / FR-03/FR-06 / D-008@v2 / D-014@v1）。
++
++覆盖（design 生命周期契约表事件 3 + plan 盲区清单 #3）：
++
++* 主路径：executing/closing/awaiting_approval/spec 四相位归一落库
++  （stages["thin_flow"] 结构=ThinFlowProgress 同构 dict）；
++* D-014@v1：写入只 set stages 列，changes.updated_at 不变（防入口圈偏向轻量）；
++* 坏条目（workspace_id 非 UUID / change 空 / 非 dict）单条丢弃整批不拒；
++* 未知变更（change_key 无行）静默跳过不建行（盲区#3）；
++* legacy_fallback → upgraded=True；location='deleted' 行跳过；
++* 既有 stages 键保留（reparse 投影键不被覆盖，merge 语义）。
++
++归一口径与 sillyspec flow.js:3284-3296 逐字对齐（service._normalize_thin_phase
++docstring 锚定）。SQLite in-memory（db_session fixture），FK 不强制故无需 seed
++workspace 行（test_heartbeat_spec_cache 同款口径）。
++
++⚠ 测试范式注意：heartbeat_daemon 末尾 commit 会 expire 全部 ORM 实例，之后
++同步访问 ``change.<attr>`` 触发 lazy refresh IO（async session 下 MissingGreenlet）
++——所有 heartbeat 之后的断言经 ``_reload_by_key``（change_key 字符串查询）取
++新鲜行，key 在 heartbeat 前抓取。
++"""
++
++from __future__ import annotations
++
++import uuid
++from datetime import timedelta
++
++import pytest
++from sqlalchemy import select
++from sqlalchemy.ext.asyncio import AsyncSession
++
++from app.modules.auth.model import User
++from app.modules.change.model import Change
++from app.modules.daemon.model import DaemonInstance
++from app.modules.daemon.runtime.service import RuntimeService
++
++
++async def _seed_user(db_session: AsyncSession) -> uuid.UUID:
++    user = User(
++        id=uuid.uuid4(),
++        email=f"u-{uuid.uuid4()}@example.com",
++        password_hash="x",
++        display_name="u",
++        status="active",
++    )
++    db_session.add(user)
++    await db_session.commit()
++    return user.id
++
++
++async def _seed_daemon(db_session: AsyncSession, user_id: uuid.UUID) -> uuid.UUID:
++    """最小 daemon_instances 行（heartbeat_daemon 前置）。"""
++    daemon_id = uuid.uuid4()
++    db_session.add(
++        DaemonInstance(
++            id=daemon_id,
++            user_id=user_id,
++            hostname=f"h-{daemon_id.hex[:8]}",
++            server_url="http://localhost:1",
++        )
++    )
++    await db_session.commit()
++    return daemon_id
++
++
++async def _seed_change(
++    db_session: AsyncSession,
++    *,
++    change_key: str,
++    stages: dict | None = None,
++    location: str = "active",
++) -> Change:
++    """最小 changes 行（workspace_id 随机 UUID——SQLite 不强制 FK）。"""
++    ws_id = uuid.uuid4()
++    change = Change(
++        id=uuid.uuid4(),
++        workspace_id=ws_id,
++        change_key=change_key,
++        title=change_key,
++        status="active",
++        location=location,
++        path=f"changes/{change_key}",
++        current_stage="thin",
++        owner_id=None,
++        change_type="feature",
++        **({"stages": stages} if stages is not None else {}),
++    )
++    db_session.add(change)
++    await db_session.commit()
++    await db_session.refresh(change)
++    return change
++
++
++def _flow_item(
++    ws_id: uuid.UUID,
++    change_key: str,
++    *,
++    substeps: list[str] | None = None,
++    design_filled: bool = True,
++    fr_filled: bool = True,
++    bindings_total: int = 2,
++    bindings_filled: int = 2,
++    spec_approved: bool = True,
++    autopilot: bool = False,
++    tasks_total: int = 12,
++    tasks_checked: int = 4,
++    legacy_fallback: bool = False,
++) -> dict:
++    """daemon 白名单透传条目（DaemonHeartbeatThinFlow.model_dump 同构）。"""
++    return {
++        "workspace_id": str(ws_id),
++        "change": change_key,
++        "phase": "② 执行（已批准·写代码跑测试）",  # CLI 文案——归一按结构字段重算
++        "design_filled": design_filled,
++        "fr_filled": fr_filled,
++        "bindings_total": bindings_total,
++        "bindings_filled": bindings_filled,
++        "tasks_total": tasks_total,
++        "tasks_checked": tasks_checked,
++        "substeps": substeps or [],
++        "spec_approved": spec_approved,
++        "autopilot": autopilot,
++        "legacy_fallback": legacy_fallback,
++    }
++
++
++async def _heartbeat(
++    db_session: AsyncSession, daemon_id: uuid.UUID, thin_flows: list[dict] | None
++) -> None:
++    svc = RuntimeService(db_session)
++    await svc.heartbeat_daemon(
++        daemon_id, providers=None, thin_flows=thin_flows, actor_user_id=None
++    )
++
++
++async def _reload_by_key(db_session: AsyncSession, change_key: str) -> Change:
++    """按 change_key 查新鲜行（heartbeat commit 已 expire 既有实例，勿触其属性）。"""
++    result = await db_session.execute(
++        select(Change).where(Change.change_key == change_key)
++    )
++    return result.scalar_one()
++
++
++class TestThinFlowMerge:
++    @pytest.mark.asyncio
++    async def test_executing_phase_lands_in_stages(self, db_session: AsyncSession) -> None:
++        """docs 齐 + 已批准 → executing；结构字段全落库（FR-03 主路径）。"""
++        uid = await _seed_user(db_session)
++        daemon_id = await _seed_daemon(db_session, uid)
++        change = await _seed_change(db_session, change_key="2026-10-26-thin-a")
++        key, ws_id = change.change_key, change.workspace_id  # expire 前抓取
++
++        await _heartbeat(db_session, daemon_id, [_flow_item(ws_id, key)])
++
++        tf = (await _reload_by_key(db_session, key)).stages["thin_flow"]
++        assert tf["phase"] == "executing"
++        assert tf["approved"] is True
++        assert tf["autopilot"] is False
++        assert tf["tasks_total"] == 12
++        assert tf["tasks_done"] == 4
++        assert tf["substeps_done"] == 0
++        assert tf["substeps_total"] == 8
++        assert tf["upgraded"] is False
++        assert tf["adopted_from"] is None
++
++    @pytest.mark.asyncio
++    async def test_closing_phase_by_ledger_substep(self, db_session: AsyncSession) -> None:
++        """substeps 含 ledger（5 done）→ closing（flow.js:3296 同口径）。"""
++        uid = await _seed_user(db_session)
++        daemon_id = await _seed_daemon(db_session, uid)
++        change = await _seed_change(db_session, change_key="2026-10-26-thin-b")
++        key, ws_id = change.change_key, change.workspace_id
++
++        await _heartbeat(
++            db_session,
++            daemon_id,
++            [
++                _flow_item(
++                    ws_id,
++                    key,
++                    substeps=["artifacts", "ledger", "patch", "review", "probes"],
++                )
++            ],
++        )
++
++        tf = (await _reload_by_key(db_session, key)).stages["thin_flow"]
++        assert tf["phase"] == "closing"
++        assert tf["substeps_done"] == 5
++
++    @pytest.mark.asyncio
++    async def test_awaiting_approval_and_spec_phases(self, db_session: AsyncSession) -> None:
++        """docs 齐未批准 → awaiting_approval；docs 不齐 → spec。"""
++        uid = await _seed_user(db_session)
++        daemon_id = await _seed_daemon(db_session, uid)
++        a = await _seed_change(db_session, change_key="2026-10-26-thin-c")
++        b = await _seed_change(db_session, change_key="2026-10-26-thin-d")
++        key_a, ws_a = a.change_key, a.workspace_id
++        key_b, ws_b = b.change_key, b.workspace_id
++
++        await _heartbeat(
++            db_session,
++            daemon_id,
++            [
++                _flow_item(ws_a, key_a, spec_approved=False, autopilot=False),
++                _flow_item(ws_b, key_b, design_filled=False, spec_approved=False),
++            ],
++        )
++
++        tf_a = (await _reload_by_key(db_session, key_a)).stages["thin_flow"]
++        assert tf_a["phase"] == "awaiting_approval"
++        assert tf_a["approved"] is False
++        tf_b = (await _reload_by_key(db_session, key_b)).stages["thin_flow"]
++        assert tf_b["phase"] == "spec"
++
++    @pytest.mark.asyncio
++    async def test_autopilot_counts_as_executing(self, db_session: AsyncSession) -> None:
++        """autopilot 豁免 → executing + approved=True（flow.js 豁免语义）。"""
++        uid = await _seed_user(db_session)
++        daemon_id = await _seed_daemon(db_session, uid)
++        change = await _seed_change(db_session, change_key="2026-10-26-thin-e")
++        key, ws_id = change.change_key, change.workspace_id
++
++        await _heartbeat(
++            db_session,
++            daemon_id,
++            [_flow_item(ws_id, key, spec_approved=False, autopilot=True)],
++        )
++
++        tf = (await _reload_by_key(db_session, key)).stages["thin_flow"]
++        assert tf["phase"] == "executing"
++        assert tf["approved"] is True
++        assert tf["autopilot"] is True
++
++    @pytest.mark.asyncio
++    async def test_updated_at_not_touched(self, db_session: AsyncSession) -> None:
++        """D-014@v1：写入只 set stages 列，changes.updated_at 不变。"""
++        uid = await _seed_user(db_session)
++        daemon_id = await _seed_daemon(db_session, uid)
++        change = await _seed_change(db_session, change_key="2026-10-26-thin-f")
++        key, ws_id = change.change_key, change.workspace_id
++        # 制造可观测时间差（SQLite 秒级精度下同秒写会掩盖差异）
++        stale_before = (change.updated_at.replace(tzinfo=None)) - timedelta(seconds=5)
++        await db_session.execute(
++            Change.__table__.update()
++            .where(Change.id == change.id)
++            .values(updated_at=stale_before)
++        )
++        await db_session.commit()
++        db_session.expire_all()
++
++        await _heartbeat(db_session, daemon_id, [_flow_item(ws_id, key)])
++
++        row = await _reload_by_key(db_session, key)
++        after = row.updated_at.replace(tzinfo=None) if row.updated_at else None
++        assert after == stale_before, "thin_flow 写入不得刷 changes.updated_at（D-014@v1）"
++        assert "thin_flow" in row.stages
++
++    @pytest.mark.asyncio
++    async def test_bad_items_dropped_batch_not_rejected(
++        self, db_session: AsyncSession
++    ) -> None:
++        """坏条目（workspace_id 非 UUID / change 空 / 非 dict）单条丢弃，好条目照落，不抛。"""
++        uid = await _seed_user(db_session)
++        daemon_id = await _seed_daemon(db_session, uid)
++        good = await _seed_change(db_session, change_key="2026-10-26-thin-g")
++        key, ws_id = good.change_key, good.workspace_id
++
++        await _heartbeat(
++            db_session,
++            daemon_id,
++            [
++                {"workspace_id": "not-a-uuid", "change": "x"},
++                {"workspace_id": str(ws_id), "change": ""},  # change 空
++                "not-even-a-dict",  # 非 dict 条目
++                _flow_item(ws_id, key),  # 好条目
++            ],
++        )
++
++        assert "thin_flow" in (await _reload_by_key(db_session, key)).stages
++
++    @pytest.mark.asyncio
++    async def test_unknown_change_skipped_no_row_created(
++        self, db_session: AsyncSession
++    ) -> None:
++        """盲区#3：change_key 无行静默跳过，不建行不抛。"""
++        uid = await _seed_user(db_session)
++        daemon_id = await _seed_daemon(db_session, uid)
++
++        await _heartbeat(
++            db_session,
++            daemon_id,
++            [_flow_item(uuid.uuid4(), "2026-10-26-ghost")],
++        )
++
++        rows = (await db_session.execute(select(Change))).scalars().all()
++        assert rows == []
++
++    @pytest.mark.asyncio
++    async def test_legacy_fallback_marks_upgraded(self, db_session: AsyncSession) -> None:
++        """legacy_fallback=True → upgraded=True（升厚标注数据源，D-007@v1）。"""
++        uid = await _seed_user(db_session)
++        daemon_id = await _seed_daemon(db_session, uid)
++        change = await _seed_change(db_session, change_key="2026-10-26-thin-h")
++        key, ws_id = change.change_key, change.workspace_id
++
++        await _heartbeat(
++            db_session,
++            daemon_id,
++            [_flow_item(ws_id, key, legacy_fallback=True)],
++        )
++
++        assert (await _reload_by_key(db_session, key)).stages["thin_flow"]["upgraded"] is True
++
++    @pytest.mark.asyncio
++    async def test_existing_stage_keys_preserved(self, db_session: AsyncSession) -> None:
++        """merge 语义：既有 stages 键（reparse 投影键）保留不被覆盖。"""
++        uid = await _seed_user(db_session)
++        daemon_id = await _seed_daemon(db_session, uid)
++        change = await _seed_change(
++            db_session,
++            change_key="2026-10-26-thin-i",
++            stages={"team_worker_preset": {"workers": 2}, "old": 1},
++        )
++        key, ws_id = change.change_key, change.workspace_id
++
++        await _heartbeat(db_session, daemon_id, [_flow_item(ws_id, key)])
++
++        stages = (await _reload_by_key(db_session, key)).stages
++        assert stages["team_worker_preset"] == {"workers": 2}
++        assert stages["old"] == 1
++        assert "thin_flow" in stages
++
++    @pytest.mark.asyncio
++    async def test_deleted_location_row_skipped(self, db_session: AsyncSession) -> None:
++        """location='deleted' 行跳过（软删不复活，防复活口径）。"""
++        uid = await _seed_user(db_session)
++        daemon_id = await _seed_daemon(db_session, uid)
++        change = await _seed_change(
++            db_session, change_key="2026-10-26-thin-j", location="deleted"
++        )
++        key, ws_id = change.change_key, change.workspace_id
++
++        await _heartbeat(db_session, daemon_id, [_flow_item(ws_id, key)])
++
++        stages = (await _reload_by_key(db_session, key)).stages or {}
++        assert "thin_flow" not in stages
+
+diff --git a/frontend/src/components/daemon/__tests__/change-progress-row.test.tsx b/frontend/src/components/daemon/__tests__/change-progress-row.test.tsx
+new file mode 100644
+--- /dev/null
++++ b/frontend/src/components/daemon/__tests__/change-progress-row.test.tsx
+@@ -0,0 +1,237 @@
++/**
++ * ChangeProgressRow 测试（2026-10-26-session-change-progress-hover task-08）。
++ * 覆盖：双分支主路径 / 异常态映射（D-002）/ 升厚切换（D-007）/ 分流标注（D-006）/
++ * 三分降级（FR-07）/ 盲区 #1 #2 #8 #9 #10（plan Review Focus）。
++ */
++import { describe, expect, it } from "vitest";
++import { render, screen } from "@testing-library/react";
++
++import {
++  ChangeProgressRow,
++  formatDurationSeconds,
++  type ChangeSummaryWithProgress,
++} from "@/components/daemon/change-progress-row";
++import type { ChangeSummary } from "@/lib/changes";
++
++function makeChange(over: Partial<ChangeSummaryWithProgress>): ChangeSummaryWithProgress {
++  return {
++    change_key: "2026-10-26-demo",
++    is_thin: false,
++    updated_at: "2026-10-26T12:00:00Z",
++    change_type: "feature",
++    ...over,
++  } as ChangeSummaryWithProgress;
++}
++
++const stageEntry = (stage: string, status: string, extra = {}) => ({
++  stage,
++  status,
++  steps_total: 4,
++  steps_completed: 0,
++  started_at: null,
++  completed_at: null,
++  duration_seconds: null,
++  revision: null,
++  ...extra,
++});
++
++describe("全量支（FR-01/FR-02）", () => {
++  it("主路径：完成打勾 / 进行中占比 / pending 空圈 / execute 任务 n/m / 耗时文案", () => {
++    render(
++      <ChangeProgressRow
++        change={makeChange({
++          stage_progress: [
++            stageEntry("brainstorm", "completed", { steps_completed: 8, duration_seconds: 1920 }),
++            stageEntry("plan", "in-progress", { steps_completed: 2, duration_seconds: 3600 }),
++            stageEntry("execute", "in-progress", { steps_completed: 1 }),
++            stageEntry("verify", "pending"),
++            stageEntry("archive", "pending"),
++          ],
++          task_progress: { total: 12, done: 8 },
++        })}
++      />,
++    );
++    expect(screen.getByTestId("change-progress-row").dataset.variant).toBe("full");
++    // brainstorm 完成打勾；plan 圈带 2/4 占比锚；execute 旁任务计数
++    expect(screen.getByTestId("progress-circle-brainstorm").textContent).toBe("✓");
++    expect(screen.getByTestId("progress-circle-plan").dataset.progress).toBe("2/4");
++    expect(screen.getByTestId("progress-task-count").textContent).toBe("8/12 任务");
++    expect(screen.getByTestId("progress-duration-brainstorm").textContent).toBe("32分");
++    expect(screen.getByTestId("progress-duration-plan").textContent).toBe("1.0时");
++  });
++
++  it("异常态映射（D-002）：waiting/revising=warning 文案、failed=error 文案，revising 带 revision", () => {
++    render(
++      <ChangeProgressRow
++        change={makeChange({
++          stage_progress: [
++            stageEntry("brainstorm", "completed"),
++            stageEntry("plan", "completed"),
++            stageEntry("execute", "waiting"),
++            stageEntry("verify", "revising", { revision: 2 }),
++            stageEntry("archive", "failed"),
++          ],
++        })}
++      />,
++    );
++    expect(screen.getByTestId("progress-status-execute").textContent).toBe("等待中");
++    expect(screen.getByTestId("progress-status-verify").textContent).toBe("修订2");
++    expect(screen.getByTestId("progress-status-archive").textContent).toBe("失败");
++  });
++
++  it("盲区#1：阶段行在而 steps 空（steps_total=0）→ 占比锚为 0 不除零", () => {
++    render(
++      <ChangeProgressRow
++        change={makeChange({
++          stage_progress: [stageEntry("brainstorm", "in-progress", { steps_total: 0, steps_completed: 0 })],
++        })}
++      />,
++    );
++    expect(screen.getByTestId("progress-circle-brainstorm").dataset.progress).toBe("0");
++  });
++
++  it("盲区#2：task_progress.total=0（全 cancelled）→ 任务位显 —", () => {
++    render(
++      <ChangeProgressRow
++        change={makeChange({
++          stage_progress: [stageEntry("execute", "in-progress")],
++          task_progress: { total: 0, done: 0 },
++        })}
++      />,
++    );
++    expect(screen.getByTestId("progress-task-count").textContent).toBe("—");
++  });
++
++  it("盲区#10：未知 stage 状态新枚举 → 灰圈 + 原值文字，不崩", () => {
++    render(
++      <ChangeProgressRow
++        change={makeChange({ stage_progress: [stageEntry("plan", "quarantined")] })}
++      />,
++    );
++    expect(screen.getByTestId("progress-circle-plan").dataset.unknown).toBe("quarantined");
++    expect(screen.getByTestId("progress-status-plan").textContent).toBe("quarantined");
++  });
++});
++
++describe("轻量支（FR-03/FR-04）", () => {
++  const thin = (over = {}) => ({
++    phase: "executing",
++    approved: true,
++    autopilot: false,
++    tasks_total: 12,
++    tasks_done: 4,
++    substeps_done: 0,
++    substeps_total: 8,
++    upgraded: false,
++    adopted_from: null,
++    ...over,
++  });
++
++  it("主路径：executing 相位高亮 + 已批准徽标 + 任务 n/m + 总时长", () => {
++    render(
++      <ChangeProgressRow
++        change={makeChange({ is_thin: true, thin_flow: thin() })}
++        createdAt="2026-10-26T09:00:00Z"
++      />,
++    );
++    const row = screen.getByTestId("change-progress-row");
++    expect(row.dataset.variant).toBe("thin");
++    expect(screen.getByTestId("progress-thin-phase-executing").className).toContain("font-semibold");
++    expect(screen.getByTestId("progress-thin-approval").textContent).toBe("已批准");
++    expect(screen.getByTestId("progress-thin-tasks").textContent).toBe("任务 4/12");
++    expect(screen.getByTestId("progress-thin-duration").textContent).toBe("总时长 3.0时");
++  });
++
++  it("awaiting_approval 子态：①位高亮带待批准字样 + 未批准徽标", () => {
++    render(
++      <ChangeProgressRow
++        change={makeChange({ is_thin: true, thin_flow: thin({ phase: "awaiting_approval", approved: false }) })}
++      />,
++    );
++    expect(screen.getByTestId("progress-thin-phase-spec").textContent).toContain("待批准");
++    expect(screen.getByTestId("progress-thin-approval").textContent).toBe("未批准");
++  });
++
++  it("closing 相位：③高亮 + 子步 n/8；盲区#8 executing 且 tasks_total=0 不显任务", () => {
++    const { rerender } = render(
++      <ChangeProgressRow
++        change={makeChange({
++          is_thin: true,
++          thin_flow: thin({ phase: "executing", tasks_total: 0, tasks_done: 0 }),
++        })}
++      />,
++    );
++    expect(screen.queryByTestId("progress-thin-tasks")).toBeNull();
++    rerender(
++      <ChangeProgressRow
++        change={makeChange({ is_thin: true, thin_flow: thin({ phase: "closing", substeps_done: 5 }) })}
++      />,
++    );
++    expect(screen.getByTestId("progress-thin-phase-closing").className).toContain("font-semibold");
++    expect(screen.getByTestId("progress-thin-substeps").textContent).toBe("子步 5/8");
++  });
++
++  it("盲区#9 升厚（D-007）：upgraded=true → 走全量支 + 已升厚标注，忽略 thin 相位", () => {
++    render(
++      <ChangeProgressRow
++        change={makeChange({
++          is_thin: true,
++          thin_flow: thin({ upgraded: true, phase: "closing", substeps_done: 7 }),
++          stage_progress: [stageEntry("brainstorm", "completed"), stageEntry("plan", "in-progress")],
++        })}
++      />,
++    );
++    expect(screen.getByTestId("change-progress-row").dataset.variant).toBe("full");
++    expect(screen.getByTestId("progress-upgraded-tag").textContent).toBe("已升厚→走全量");
++    expect(screen.queryByTestId("progress-thin-substeps")).toBeNull();
++  });
++
++  it("分流标注（D-006）：adopted_from=brainstorm → 自头脑风暴转入小字", () => {
++    render(
++      <ChangeProgressRow
++        change={makeChange({ is_thin: true, thin_flow: thin({ adopted_from: "brainstorm" }) })}
++      />,
++    );
++    expect(screen.getByTestId("progress-thin-adopted").textContent).toBe("自头脑风暴转入");
++  });
++
++  it("change_type=quick 存量出身独立判 thin 场景 → 强制全量支", () => {
++    render(
++      <ChangeProgressRow
++        change={makeChange({
++          is_thin: true,
++          change_type: "quick",
++          thin_flow: thin(),
++          stage_progress: [stageEntry("brainstorm", "in-progress")],
++        })}
++      />,
++    );
++    expect(screen.getByTestId("change-progress-row").dataset.variant).toBe("full");
++  });
++});
++
++describe("降级（FR-07）", () => {
++  it("盲区#5：is_thin=true 但 thin_flow 缺失（旧 daemon）→ 不渲染", () => {
++    const { container } = render(<ChangeProgressRow change={makeChange({ is_thin: true })} />);
++    expect(container.firstChild).toBeNull();
++  });
++
++  it("全量支 stage_progress 缺失/空数组 → 不渲染", () => {
++    const { container } = render(<ChangeProgressRow change={makeChange({})} />);
++    expect(container.firstChild).toBeNull();
++    const { container: c2 } = render(
++      <ChangeProgressRow change={makeChange({ stage_progress: [] })} />,
++    );
++    expect(c2.firstChild).toBeNull();
++  });
++});
++
++describe("formatDurationSeconds", () => {
++  it("秒/分/时自适应与畸形输入", () => {
++    expect(formatDurationSeconds(45)).toBe("45秒");
++    expect(formatDurationSeconds(1920)).toBe("32分");
++    expect(formatDurationSeconds(3600)).toBe("1.0时");
++    expect(formatDurationSeconds(null)).toBe("");
++    expect(formatDurationSeconds(-1)).toBe("");
++  });
++});
+
+diff --git a/frontend/src/components/daemon/__tests__/change-total-progress-ring.test.tsx b/frontend/src/components/daemon/__tests__/change-total-progress-ring.test.tsx
+new file mode 100644
+--- /dev/null
++++ b/frontend/src/components/daemon/__tests__/change-total-progress-ring.test.tsx
+@@ -0,0 +1,215 @@
++import { describe, it, expect } from "vitest";
++import { render, screen } from "@testing-library/react";
++
++import {
++  ChangeTotalProgressRing,
++  computeTotalRatio,
++  pickLatestActive,
++  type TotalProgressChange,
++} from "@/components/daemon/change-total-progress-ring";
++
++// ── 测试数据构造 ──────────────────────────────────────────────────────────
++// TotalProgressChange 是本组件的手写最小结构视图（api-types 生成版
++// ChangeSummary 待 task-11 gen:types；task-10 悬浮框接线时结构子类型兼容）。
++
++function thinFlow(partial: Partial<NonNullable<TotalProgressChange["thin_flow"]>> = {}) {
++  // as 断言收口：默认对象已含全字段（生成物 ThinFlowProgress 全必填——backend
++  // pydantic 无 default），Partial 展开后 TS 无法静态证明完整性。
++  return {
++    phase: "executing",
++    approved: true,
++    autopilot: false,
++    adopted_from: null,
++    tasks_total: 0,
++    tasks_done: 0,
++    substeps_done: 0,
++    substeps_total: 8,
++    upgraded: false,
++    ...partial,
++  } as NonNullable<TotalProgressChange["thin_flow"]>;
++}
++
++function stepProgress(
++  step_total: number,
++  steps_completed: number,
++): NonNullable<TotalProgressChange["step_progress"]> {
++  return { step_total, steps_completed };
++}
++
++function changeLike(partial: Partial<TotalProgressChange>): TotalProgressChange {
++  return {
++    change_key: "2026-10-26-demo-change",
++    updated_at: "2026-10-26T12:00:00Z",
++    is_thin: false,
++    step_progress: null,
++    thin_flow: null,
++    ...partial,
++  };
++}
++
++// ── computeTotalRatio（口径函数单源，design FR-05）────────────────────────
++
++describe("computeTotalRatio（全量口径：steps_completed/step_total）", () => {
++  it("非 thin 变更按 step_progress 步数比计算", () => {
++    const c = changeLike({ step_progress: stepProgress(24, 10) });
++    expect(computeTotalRatio(c)).toBeCloseTo(10 / 24, 5);
++  });
++
++  it("step_progress 缺失（旧数据/六表未上行）→ null（环不渲染，FR-07 降级）", () => {
++    expect(computeTotalRatio(changeLike({ step_progress: null }))).toBeNull();
++  });
++
++  it("step_total=0（除零防御）→ null", () => {
++    expect(computeTotalRatio(changeLike({ step_progress: stepProgress(0, 0) }))).toBeNull();
++  });
++
++  it("steps_completed 超过 step_total（异常数据）→ 钳制 1，不出 >100%", () => {
++    const c = changeLike({ step_progress: stepProgress(24, 30) });
++    expect(computeTotalRatio(c)).toBe(1);
++  });
++});
++
++describe("computeTotalRatio（轻量口径：相位加权，design 接口定义）", () => {
++  it("spec 相位 → 0.1", () => {
++    const c = changeLike({ is_thin: true, thin_flow: thinFlow({ phase: "spec" }) });
++    expect(computeTotalRatio(c)).toBeCloseTo(0.1, 5);
++  });
++
++  it("awaiting_approval 相位 → 0.15", () => {
++    const c = changeLike({
++      is_thin: true,
++      thin_flow: thinFlow({ phase: "awaiting_approval" }),
++    });
++    expect(computeTotalRatio(c)).toBeCloseTo(0.15, 5);
++  });
++
++  it("executing 相位 → 0.33 + 0.34×tasks_done/tasks_total", () => {
++    const c = changeLike({
++      is_thin: true,
++      thin_flow: thinFlow({ phase: "executing", tasks_done: 2, tasks_total: 5 }),
++    });
++    expect(computeTotalRatio(c)).toBeCloseTo(0.33 + 0.34 * (2 / 5), 5);
++  });
++
++  it("executing tasks_total=0 → 分母 max(,1) 兜底，不除零（盲区口径）", () => {
++    const c = changeLike({
++      is_thin: true,
++      thin_flow: thinFlow({ phase: "executing", tasks_done: 0, tasks_total: 0 }),
++    });
++    expect(computeTotalRatio(c)).toBeCloseTo(0.33, 5);
++  });
++
++  it("closing 相位 → 0.67 + 0.33×substeps_done/8", () => {
++    const c = changeLike({
++      is_thin: true,
++      thin_flow: thinFlow({ phase: "closing", substeps_done: 4 }),
++    });
++    expect(computeTotalRatio(c)).toBeCloseTo(0.67 + 0.33 * (4 / 8), 5);
++  });
++
++  it("is_thin 但 thin_flow 缺失（旧 daemon 无新键）→ null（环不渲染）", () => {
++    expect(computeTotalRatio(changeLike({ is_thin: true, thin_flow: null }))).toBeNull();
++  });
++
++  it("未知 phase（backend 归一枚举外透传值）→ null", () => {
++    const c = changeLike({ is_thin: true, thin_flow: thinFlow({ phase: "weird" }) });
++    expect(computeTotalRatio(c)).toBeNull();
++  });
++
++  it("升厚（thin_flow.upgraded）→ 切全量口径读 step_progress（FR-04 分支优先级单源）", () => {
++    const c = changeLike({
++      is_thin: true,
++      thin_flow: thinFlow({ phase: "executing", upgraded: true }),
++      step_progress: stepProgress(24, 10),
++    });
++    expect(computeTotalRatio(c)).toBeCloseTo(10 / 24, 5);
++  });
++
++  it("executing 加权超 1（异常勾选数据）→ 钳制 1", () => {
++    const c = changeLike({
++      is_thin: true,
++      thin_flow: thinFlow({ phase: "executing", tasks_done: 5, tasks_total: 2 }),
++    });
++    expect(computeTotalRatio(c)).toBe(1);
++  });
++});
++
++// ── pickLatestActive（updated_at 显式重排选取，D-013@v1 / 盲区#6）────────
++
++describe("pickLatestActive（updated_at 显式重排，禁用后端列表序）", () => {
++  // 后端列表序 = 未归档优先 + created_at desc（session-change-files-hover.tsx:63
++  // 注释）——构造「created 晚（后端排前）但 updated_at 早」与相反的 A/B 对，
++  // 证明取首项 ≠ updated_at 最新，必须显式重排（D-013@v1）。
++  const createdLateUpdatedEarly = changeLike({
++    change_key: "2026-10-25-a",
++    updated_at: "2026-10-26T10:00:00Z",
++  });
++  const createdEarlyUpdatedLate = changeLike({
++    change_key: "2026-10-20-b",
++    updated_at: "2026-10-26T12:00:00Z",
++  });
++
++  it("后端序取首不成立的场景：选 updated_at 最新（与输入顺序无关）", () => {
++    expect(pickLatestActive([createdLateUpdatedEarly, createdEarlyUpdatedLate])).toBe(
++      createdEarlyUpdatedLate,
++    );
++    expect(pickLatestActive([createdEarlyUpdatedLate, createdLateUpdatedEarly])).toBe(
++      createdEarlyUpdatedLate,
++    );
++  });
++
++  it("并列 updated_at 回退 change_key 码点序（结果与输入顺序无关，盲区#6）", () => {
++    const keyB = changeLike({ change_key: "2026-10-26-b", updated_at: "2026-10-26T12:00:00Z" });
++    const keyA = changeLike({ change_key: "2026-10-26-a", updated_at: "2026-10-26T12:00:00Z" });
++    expect(pickLatestActive([keyB, keyA])).toBe(keyA);
++    expect(pickLatestActive([keyA, keyB])).toBe(keyA);
++  });
++
++  it("空数组 → null", () => {
++    expect(pickLatestActive([])).toBeNull();
++  });
++
++  it("updated_at 非法串（数据异常）排最后，不 NaN 崩溃", () => {
++    const bad = changeLike({ change_key: "2026-10-26-bad", updated_at: "not-a-date" });
++    const good = changeLike({ change_key: "2026-10-26-good", updated_at: "2026-01-01T00:00:00Z" });
++    expect(pickLatestActive([bad, good])).toBe(good);
++  });
++});
++
++// ── ChangeTotalProgressRing（组件渲染）────────────────────────────────────
++
++describe("ChangeTotalProgressRing（入口总进度圈渲染）", () => {
++  it("全量口径渲染：环容器 + 中心百分比文字 + aria-label 文本化（R-05）", () => {
++    const c = changeLike({ step_progress: stepProgress(24, 10) });
++    render(<ChangeTotalProgressRing change={c} />);
++    // 10/24 = 41.67% → round 42
++    expect(screen.getByTestId("change-total-progress-ring")).toBeTruthy();
++    expect(screen.getByTestId("change-total-progress-ring-percent").textContent).toBe("42%");
++    expect(screen.getByRole("img", { name: "变更总进度 42%" })).toBeTruthy();
++  });
++
++  it("进度弧 stroke-dasharray 按比值填充圆周（2πr×ratio）", () => {
++    const c = changeLike({ step_progress: stepProgress(24, 10) });
++    render(<ChangeTotalProgressRing change={c} />);
++    const arc = screen.getByTestId("change-total-progress-ring-arc");
++    const dash = Number(arc.getAttribute("stroke-dasharray")!.split(" ")[0]);
++    expect(dash).toBeCloseTo(2 * Math.PI * 10 * (10 / 24), 3);
++  });
++
++  it("轻量口径渲染：executing 相位 2/5 任务 → 47%", () => {
++    const c = changeLike({
++      is_thin: true,
++      thin_flow: thinFlow({ phase: "executing", tasks_done: 2, tasks_total: 5 }),
++    });
++    render(<ChangeTotalProgressRing change={c} />);
++    // 0.33 + 0.34×0.4 = 0.466 → round 47
++    expect(screen.getByTestId("change-total-progress-ring-percent").textContent).toBe("47%");
++  });
++
++  it("ratio null（数据缺失）→ 不渲染（FR-05 降级，入口按钮区不受影响）", () => {
++    const c = changeLike({ is_thin: true, thin_flow: null, step_progress: null });
++    const { container } = render(<ChangeTotalProgressRing change={c} />);
++    expect(container.innerHTML).toBe("");
++    expect(screen.queryByTestId("change-total-progress-ring")).toBeNull();
++  });
++});
+
+diff --git a/frontend/src/components/daemon/change-progress-row.tsx b/frontend/src/components/daemon/change-progress-row.tsx
+new file mode 100644
+--- /dev/null
++++ b/frontend/src/components/daemon/change-progress-row.tsx
+@@ -0,0 +1,265 @@
++"use client";
++
++/**
++ * 会话悬浮变更面板·下拉项进度行（2026-10-26-session-change-progress-hover
++ * task-08 / FR-01~FR-04）。双分支单源规则（FR-04）：
++ *   is_thin && !upgraded && change_type!=='quick' → 轻量 ①②③ 相位行；
++ *   否则（含升厚 D-007——忽略 thin_flow 残留相位值；change_type==='quick' 存量
++ *   出身独立判 thin 场景，backend _is_thin_lineage 分支②）→ 全量 5 圈行。
++ * 降级（FR-07）：分支数据缺失（轻量无 thin_flow / 全量无 stage_progress）→
++ * 返回 null 不渲染（现状保底不报错）；归档项挂载由消费方控制（D-009）。
++ * 色阶铁律（FRONTEND_PAGE_STYLE §0.5 / R-05）：全走主题 CSS 变量，无裸 hex；
++ * 圈为 conic-gradient 占比填充的 h-2.5 w-2.5 紧凑小圈。
++ */
++
++import {
++  WORKFLOW_STAGES,
++  WORKFLOW_STAGE_LABELS,
++} from "@/components/changes/detail/change-stage-header";
++import type { components } from "@/lib/api-types";
++import type { ChangeSummary } from "@/lib/changes";
++
++// ── 类型（task-11 gen:types 落地后）：三 DTO 切生成物（components["schemas"]，
++// 与 backend schema.py 逐字对齐，生成物 15088-15090 行 ChangeSummary 已含三新
++// 字段）；导出名保留手写期形态，既有消费方（hover/ring/测试）import 面零变化。──
++
++/** 主线单阶段进度项（生成物 StageProgressEntry）。status 为 CLI 原值透传不归一。 */
++export type StageProgressEntry = components["schemas"]["StageProgressEntry"];
++
++/** execute 阶段任务进度（生成物 TaskProgressSummary；Task 表口径 D-005@v1）。 */
++export type TaskProgressSummary = components["schemas"]["TaskProgressSummary"];
++
++/** 轻量变更相位进度（生成物 ThinFlowProgress；phase 归一四枚举）。 */
++export type ThinFlowProgress = components["schemas"]["ThinFlowProgress"];
++
++/** ChangeSummary + 三新字段（生成版已含三字段；别名保住既有 import 面）。 */
++export type ChangeSummaryWithProgress = ChangeSummary;
++
++export interface ChangeProgressRowProps {
++  change: ChangeSummaryWithProgress;
++  /** 轻量总时长起点（FR-03 created_at→updated_at）。ChangeSummary 后端 DTO
++   * 不返回 created_at，消费方无来源时省略 → 总时长段不渲染（fail-open）。 */
++  createdAt?: string | null;
++}
++
++/** 耗时人性化（m/h 自适应）：秒级显秒 / 分钟级显分 / 小时级一位小数。 */
++export function formatDurationSeconds(
++  seconds: number | null | undefined,
++): string {
++  if (seconds == null || !Number.isFinite(seconds) || seconds < 0) return "";
++  if (seconds < 60) return `${Math.round(seconds)}秒`;
++  if (seconds < 3600) return `${Math.round(seconds / 60)}分`;
++  return `${(seconds / 3600).toFixed(1)}时`;
++}
++
++// ── 全量支（FR-01/FR-02）────────────────────────────────────────────────────
++
++/** 异常态映射（D-002@v1）：waiting/stale/revising=warning、blocked/failed=error；revising 带 revision 轮次。 */
++const ABNORMAL_STATUSES: Record<
++  string,
++  { label: (e: StageProgressEntry) => string; tone: "warning" | "error" }
++> = {
++  waiting: { label: () => "等待中", tone: "warning" },
++  stale: { label: () => "过期", tone: "warning" },
++  revising: {
++    label: (e) => (e.revision != null ? `修订${e.revision}` : "修订中"),
++    tone: "warning",
++  },
++  blocked: { label: () => "阻塞", tone: "error" },
++  failed: { label: () => "失败", tone: "error" },
++};
++
++/** 单阶段小圈：completed=绿勾 / in-progress=conic 占比 / 异常态=warning·error
++ *  实色 / pending=空圈 / 未知值（盲区#10）=灰态。 */
++function StageDot({ entry, testid }: { entry: StageProgressEntry | undefined; testid: string }) {
++  const status = entry?.status ?? "pending";
++  const abnormal = ABNORMAL_STATUSES[status];
++  if (status === "completed") {
++    return (
++      <span data-testid={testid} className="text-[11px] font-bold leading-none text-success">✓</span>
++    );
++  }
++  if (abnormal) {
++    return (
++      <span data-testid={testid} aria-hidden className={`h-2.5 w-2.5 shrink-0 rounded-full ${
++        abnormal.tone === "error" ? "bg-error" : "bg-warning"
++      }`} />
++    );
++  }
++  if (status === "in-progress") {
++    // 盲区#1：steps 空（阶段未初始化）steps_total=0 → 0% 填充不除零
++    const total = entry?.steps_total ?? 0;
++    const done = entry?.steps_completed ?? 0;
++    const deg = total > 0 ? Math.round((done / total) * 360) : 0;
++    return (
++      <span data-testid={testid} data-progress={total > 0 ? `${done}/${total}` : "0"} aria-hidden
++        className="h-2.5 w-2.5 shrink-0 rounded-full"
++        style={{ background: `conic-gradient(hsl(var(--primary)) ${deg}deg, hsl(var(--border)) 0deg)` }} />
++    );
++  }
++  // pending=空圈；CLI 新枚举未知值（盲区#10）=灰态圈（原值文字由外层单元渲染）
++  const isPending = status === "pending";
++  return (
++    <span data-testid={testid} data-unknown={isPending ? undefined : status} aria-hidden
++      className={`h-2.5 w-2.5 shrink-0 rounded-full ${isPending ? "border-2 border-border" : "bg-muted-foreground"}`} />
++  );
++}
++
++/** 全量 5 圈行。stage_progress 缺行按 pending 空圈补位（WORKFLOW_STAGES 序）。 */
++function FullStageRow({ entries, taskProgress, upgraded }: {
++  entries: StageProgressEntry[];
++  taskProgress: TaskProgressSummary | null;
++  upgraded: boolean;
++}) {
++  const byStage = new Map(entries.map((e) => [e.stage, e]));
++  // 盲区#2：total=0（全 cancelled）显 —，不用 0/0
++  const taskText = !taskProgress
++    ? null
++    : taskProgress.total > 0
++      ? `${taskProgress.done}/${taskProgress.total} 任务`
++      : "—";
++
++  const ariaText = WORKFLOW_STAGES.map((s) => {
++    const e = byStage.get(s);
++    const status = e?.status ?? "pending";
++    const label = WORKFLOW_STAGE_LABELS[s];
++    const abnormal = ABNORMAL_STATUSES[status];
++    if (status === "completed") return `${label}已完成`;
++    if (status === "in-progress") {
++      const stepInfo = e && e.steps_total > 0 ? `，${e.steps_completed}/${e.steps_total}步` : "";
++      return `${label}进行中${stepInfo}`;
++    }
++    if (abnormal && e) return `${label}${abnormal.label(e)}`;
++    if (status === "pending") return `${label}未开始`;
++    return `${label}${status}`; // 盲区#10：未知值原样文本化
++  }).join("，");
++
++  return (
++    <div data-testid="change-progress-row" data-variant="full"
++      aria-label={`变更进度：${ariaText}${taskText ? `，任务${taskText}` : ""}`}
++      className="mt-1 flex flex-wrap items-start gap-x-2 gap-y-0.5">
++      {WORKFLOW_STAGES.map((stage) => {
++        const e = byStage.get(stage);
++        const abnormal = e ? ABNORMAL_STATUSES[e.status] : undefined;
++        const isUnknown = !!e && !abnormal && !["completed", "in-progress", "pending"].includes(e.status);
++        const sideText = abnormal && e ? abnormal.label(e) : isUnknown && e ? e.status : null;
++        const sideClass = abnormal && abnormal.tone === "error" ? "text-error" : abnormal ? "text-warning" : "text-muted-foreground";
++        return (
++          <div key={stage} className="flex min-w-0 flex-col items-center gap-0.5">
++            <div className="flex items-center gap-1">
++              <StageDot entry={e} testid={`progress-circle-${stage}`} />
++              {stage === "execute" && taskText && (
++                <span data-testid="progress-task-count" className="text-[10px] leading-3 text-muted-foreground">{taskText}</span>
++              )}
++              {sideText && (
++                <span data-testid={`progress-status-${stage}`} className={`text-[10px] leading-3 ${sideClass}`}>{sideText}</span>
++              )}
++            </div>
++            <span data-testid={`progress-duration-${stage}`} className="text-[9px] leading-3 text-muted-foreground">
++              {formatDurationSeconds(e?.duration_seconds) || " "}
++            </span>
++          </div>
++        );
++      })}
++      {upgraded && (
++        <span data-testid="progress-upgraded-tag" className="text-[10px] leading-3 text-warning">已升厚→走全量</span>
++      )}
++    </div>
++  );
++}
++
++// ── 轻量支：①②③ 相位行（FR-03/FR-04）───────────────────────────────────────
++
++const THIN_PHASE_STEPS = [
++  { key: "spec", label: "①规格" },
++  { key: "executing", label: "②执行" },
++  { key: "closing", label: "③归档" },
++] as const;
++
++const THIN_PHASE_ARIA: Record<string, string> = {
++  spec: "规格",
++  awaiting_approval: "规格待批准",
++  executing: "执行",
++  closing: "收口",
++};
++
++function ThinPhaseRow({ thin, updatedAt, createdAt }: {
++  thin: ThinFlowProgress;
++  updatedAt: string;
++  createdAt: string | null;
++}) {
++  // awaiting_approval 是 spec 位的待批准子态（design FR-03）
++  const phasePos = thin.phase === "awaiting_approval" ? "spec" : thin.phase;
++  const approvalText = thin.autopilot ? "autopilot 豁免" : thin.approved ? "已批准" : "未批准";
++  const approvalClass = thin.autopilot ? "text-info" : thin.approved ? "text-success" : "text-muted-foreground";
++  // 盲区#8：spec 阶段未建任务 tasks_total=0 → 不显「任务 0/0」
++  const tasksText = thin.phase === "executing" && thin.tasks_total > 0
++    ? `任务 ${thin.tasks_done}/${thin.tasks_total}` : null;
++  const substepsText = thin.phase === "closing"
++    ? `子步 ${thin.substeps_done}/${thin.substeps_total || 8}` : null;
++  // 总时长（D-001@v1）：created→updated；缺 created / 畸形时间 → 不显
++  let durationText = "";
++  if (createdAt) {
++    const ms = new Date(updatedAt).getTime() - new Date(createdAt).getTime();
++    if (Number.isFinite(ms) && ms >= 0) durationText = formatDurationSeconds(ms / 1000);
++  }
++  const adoptedText = thin.adopted_from === "brainstorm" ? "自头脑风暴转入" : "";
++  const chips: Array<[string, string, string]> = [
++    ["progress-thin-approval", approvalText, approvalClass],
++    ...(tasksText
++      ? ([["progress-thin-tasks", tasksText, "text-muted-foreground"]] as Array<[string, string, string]>) : []),
++    ...(substepsText
++      ? ([["progress-thin-substeps", substepsText, "text-muted-foreground"]] as Array<[string, string, string]>) : []),
++    ...(durationText
++      ? ([["progress-thin-duration", `总时长 ${durationText}`, "text-muted-foreground"]] as Array<[string, string, string]>) : []),
++    ...(adoptedText
++      ? ([["progress-thin-adopted", adoptedText, "text-muted-foreground"]] as Array<[string, string, string]>) : []),
++  ];
++  const aria = `轻量进度：${THIN_PHASE_ARIA[thin.phase] ?? thin.phase}；${chips.map(([, text]) => text).join("；")}`;
++
++  return (
++    <div data-testid="change-progress-row" data-variant="thin" aria-label={aria}
++      className="mt-1 flex flex-wrap items-center gap-x-1.5 gap-y-0.5 text-[10px] leading-4">
++      {THIN_PHASE_STEPS.map((p, i) => {
++        const active = phasePos === p.key;
++        const pendingApproval = active && thin.phase === "awaiting_approval";
++        return (
++          <span key={p.key} className="flex items-center gap-1.5">
++            <span data-testid={`progress-thin-phase-${p.key}`}
++              className={pendingApproval ? "font-semibold text-warning" : active ? "font-semibold text-brand-600" : "text-muted-foreground"}>
++              {p.label}{pendingApproval ? "·待批准" : ""}
++            </span>
++            {i < THIN_PHASE_STEPS.length - 1 && (
++              <span aria-hidden className="text-muted-foreground">→</span>
++            )}
++          </span>
++        );
++      })}
++      {chips.map(([testid, text, cls]) => (
++        <span key={testid} data-testid={testid} className={cls}>{text}</span>
++      ))}
++    </div>
++  );
++}
++
++/**
++ * 进度行入口。归档变更不应挂载本组件（D-009 非目标，消费方 task-10 控制）；
++ * 升厚变更走全量支并保留「已升厚」标注（thin_flow 残留相位值不展示，盲区#9）。
++ */
++export function ChangeProgressRow({ change, createdAt }: ChangeProgressRowProps) {
++  const thin = change.thin_flow ?? null;
++  const upgraded = thin?.upgraded ?? false;
++  const useThinBranch = change.is_thin && !upgraded && change.change_type !== "quick";
++
++  if (useThinBranch) {
++    // 降级（FR-07/盲区#5）：旧 daemon 无 thin_flows 键 → 不渲染（现状保底）
++    if (!thin) return null;
++    return <ThinPhaseRow thin={thin} updatedAt={change.updated_at} createdAt={createdAt ?? null} />;
++  }
++  // 降级（FR-01 场景：畸形 latest_progress fail-open → null / 空数组）同样不渲染
++  const stages = change.stage_progress;
++  if (!stages || stages.length === 0) return null;
++  return (
++    <FullStageRow entries={stages} taskProgress={change.task_progress ?? null} upgraded={upgraded} />
++  );
++}
+
+diff --git a/frontend/src/components/daemon/change-total-progress-ring.tsx b/frontend/src/components/daemon/change-total-progress-ring.tsx
+new file mode 100644
+--- /dev/null
++++ b/frontend/src/components/daemon/change-total-progress-ring.tsx
+@@ -0,0 +1,188 @@
++"use client";
++
++/**
++ * 入口总进度圈（2026-10-26-session-change-progress-hover task-09 / FR-05 /
++ * D-003@v1 / D-013@v1）：悬浮框「变更」按钮旁仅露单个总进度圆环 + 中心百分比，
++ * 展示最新进行中（updated_at 最新非归档）变更的总完成度。
++ *
++ * - 双口径单源（design「接口定义·入口总进度圈口径」，两纯函数导出不散落）：
++ *   全量 = step_progress.steps_completed / step_total；
++ *   轻量 = 相位加权 spec=0.1 / awaiting_approval=0.15 /
++ *          executing=0.33 + 0.34×tasks_done/max(tasks_total,1) /
++ *          closing=0.67 + 0.33×substeps_done/8；
++ *   数据缺失（口径数据源缺失）→ null → 环不渲染（FR-07 降级，按钮区不受影响）。
++ * - 选取：pickLatestActive（纯函数导出，task-10 悬浮框侧调用）对 active 显式
++ *   updated_at 重排取最新——禁用后端列表序直接取首（后端序=未归档优先+
++ *   created_at desc，session-change-files-hover.tsx:63 注释，active[0] ≠
++ *   updated_at 最新，D-013@v1）；并列 updated_at 回退 change_key 码点序，
++ *   结果与输入顺序无关（盲区#6）。
++ * - 类型：task-01 契约已落 backend（backend/app/modules/change/schema.py
++ *   ThinFlowProgress / StepProgressSummary），api-types.ts 待 task-11
++ *   gen:types 再生成——生成前本组件手写最小结构视图（TotalProgressChange），
++ *   task-10 接线时传生成版 ChangeSummary 结构子类型兼容，task-11 落盘后
++ *   可切换为生成类型并删除本段手写视图。
++ * - 主题：色阶走语义 token 类（stroke-brand-500 / text-brand-600 / stroke-border
++ *   随 html data-theme 换肤），无裸 hex（FRONTEND_PAGE_STYLE §0.5 多主题铁律）。
++ */
++
++/**
++ * 轻量变更相位进度（task-11 gen:types 落地后切生成物——与 task-08 进度行
++ * 的 ThinFlowProgress 同源（生成物 components["schemas"]）；最小视图时期的
++ * 导出名保留，既有消费方 import 面零变化）。
++ */
++export type ThinFlowProgressLike = import("../daemon/change-progress-row").ThinFlowProgress;
++
++/**
++ * 总进度圈消费的变更最小结构视图（api-types 生成版 ChangeSummary 的结构
++ * 子类型；task-11 gen:types 落盘后调用方可直接传生成版类型）。
++ */
++export interface TotalProgressChange {
++  change_key: string;
++  updated_at: string;
++  is_thin: boolean;
++  /** 全量口径数据源（StepProgressSummary 消费子集） */
++  step_progress?: { step_total: number; steps_completed: number } | null;
++  /** 轻量口径数据源（旧 daemon 无该键 → null，环不渲染） */
++  thin_flow?: ThinFlowProgressLike | null;
++}
++
++/** 比值钳制 [0,1]——异常计数（completed>total / done>total）不出 >100% 或负值。 */
++function clamp01(v: number): number {
++  return Math.min(1, Math.max(0, v));
++}
++
++/**
++ * 总进度口径函数（单源导出，design FR-05）：
++ *
++ * - 分支优先级单源（FR-04 同款规则）：is_thin && thin_flow 存在且未升厚 →
++ *   轻量相位加权；否则（含升厚 upgraded）→ 全量步数比；
++ * - 全量：step_progress.steps_completed / step_total（缺失或 step_total=0 → null）；
++ * - 轻量：spec=0.1 / awaiting_approval=0.15 /
++ *   executing=0.33 + 0.34×tasks_done/max(tasks_total,1) /
++ *   closing=0.67 + 0.33×substeps_done/8（substeps_total 恒 8 定长）；
++ *   thin_flow 缺失（旧 daemon）或 phase 在归一枚举外 → null。
++ */
++export function computeTotalRatio(change: TotalProgressChange): number | null {
++  const thin = change.thin_flow ?? null;
++  // 轻量支：is_thin 且有 thin_flow 数据且未升厚（升厚走全量流程，D-007@v1）
++  if (change.is_thin && thin && !thin.upgraded) {
++    switch (thin.phase) {
++      case "spec":
++        return 0.1;
++      case "awaiting_approval":
++        return 0.15;
++      case "executing": {
++        // tasks_total=0 不除零：分母 max(,1) 兜底（0 勾选 → 0.33 相位基线）
++        const denom = Math.max(thin.tasks_total, 1);
++        return clamp01(0.33 + 0.34 * (thin.tasks_done / denom));
++      }
++      case "closing":
++        // SUBSTEPS 定长 8（sillyspec flow 收口子步），按契约公式字面分母
++        return clamp01(0.67 + 0.33 * (thin.substeps_done / 8));
++      default:
++        // backend 归一枚举外的透传值（fail-open）：无口径可算 → 不渲染
++        return null;
++    }
++  }
++  // 全量支（非 thin / thin 但缺数据 / 已升厚）
++  const sp = change.step_progress ?? null;
++  if (!sp || sp.step_total <= 0) return null;
++  return clamp01(sp.steps_completed / sp.step_total);
++}
++
++/** updated_at 解析（非法/缺失串 → 0 排最后，数据异常不崩排序）。 */
++function parseUpdatedTs(iso: string | null | undefined): number {
++  if (!iso) return 0;
++  const t = Date.parse(iso);
++  return Number.isNaN(t) ? 0 : t;
++}
++
++/**
++ * 目标变更选取函数（纯函数导出，D-013@v1）：active（非归档）中 updated_at
++ * 最新一个。显式 [...active].sort 重排，不信任后端返回序（未归档优先+
++ * created_at desc ≠ updated_at 最新）；并列 updated_at 次序键回退 change_key
++ * 码点升序（不用 localeCompare——避免 ICU/locale 差异引入平台不确定性），
++ * 保证选取结果与输入顺序无关（盲区#6）。空数组 → null。
++ */
++export function pickLatestActive<T extends TotalProgressChange>(
++  active: readonly T[],
++): T | null {
++  if (active.length === 0) return null;
++  const sorted = [...active].sort((a, b) => {
++    const ta = parseUpdatedTs(a.updated_at);
++    const tb = parseUpdatedTs(b.updated_at);
++    if (ta !== tb) return tb - ta; // updated_at desc（最新在前）
++    if (a.change_key !== b.change_key) {
++      // 并列回退：change_key 码点升序（确定性，与输入顺序无关）
++      return a.change_key < b.change_key ? -1 : 1;
++    }
++    return 0;
++  });
++  return sorted[0] ?? null;
++}
++
++/** 圆环几何常量：viewBox 24×24、r=10、strokeWidth=3（紧凑 h-6 w-6 级）。 */
++const RING_RADIUS = 10;
++const RING_CIRCUMFERENCE = 2 * Math.PI * RING_RADIUS;
++
++export interface ChangeTotalProgressRingProps {
++  /** 目标变更（task-10 悬浮框侧经 pickLatestActive 选取后传入） */
++  change: TotalProgressChange;
++}
++
++/**
++ * 单个总进度圆环 + 中心百分比（紧凑尺寸，挂悬浮按钮旁）。
++ * ratio 经 computeTotalRatio 得 null（数据缺失）→ 返回 null 不渲染（FR-05
++ * 降级：入口按钮与计数徽标照常，环位不占空间）。进度文本化进 aria-label
++ * （R-05 无障碍），中心文字对读屏隐藏避免重复播报。
++ */
++export function ChangeTotalProgressRing({ change }: ChangeTotalProgressRingProps) {
++  const ratio = computeTotalRatio(change);
++  if (ratio === null) return null;
++
++  const pct = Math.round(ratio * 100);
++  const dash = RING_CIRCUMFERENCE * ratio;
++
++  return (
++    <span
++      data-testid="change-total-progress-ring"
++      role="img"
++      aria-label={`变更总进度 ${pct}%`}
++      title={`${change.change_key} 总进度 ${pct}%`}
++      className="relative inline-flex h-6 w-6 shrink-0 items-center justify-center"
++    >
++      {/* -rotate-90：dasharray 默认 3 点方向起笔，转 12 点方向顺时针填充 */}
++      <svg viewBox="0 0 24 24" className="h-6 w-6 -rotate-90" aria-hidden="true">
++        {/* 轨道底环（border 语义 token，随主题换肤） */}
++        <circle
++          cx="12"
++          cy="12"
++          r={RING_RADIUS}
++          fill="none"
++          strokeWidth="3"
++          className="stroke-border"
++        />
++        {/* 进度弧（brand 语义阶主色环，随主题换肤） */}
++        <circle
++          data-testid="change-total-progress-ring-arc"
++          cx="12"
++          cy="12"
++          r={RING_RADIUS}
++          fill="none"
++          strokeWidth="3"
++          strokeLinecap="round"
++          strokeDasharray={`${dash} ${RING_CIRCUMFERENCE}`}
++          className="stroke-brand-500"
++        />
++      </svg>
++      {/* 中心百分比文字（叠环中心；tabular-nums 防跳宽；读屏由容器 aria-label 承担） */}
++      <span
++        data-testid="change-total-progress-ring-percent"
++        aria-hidden="true"
++        className="absolute inset-0 flex items-center justify-center text-[8px] font-bold leading-none tabular-nums text-brand-600 dark:text-brand-300"
++      >
++        {pct}%
++      </span>
++    </span>
++  );
++}
+
+diff --git a/sillyhub-daemon/tests/sillyspec-flow-status-collector.test.ts b/sillyhub-daemon/tests/sillyspec-flow-status-collector.test.ts
+new file mode 100644
+--- /dev/null
++++ b/sillyhub-daemon/tests/sillyspec-flow-status-collector.test.ts
+@@ -0,0 +1,330 @@
++// tests/sillyspec-flow-status-collector.test.ts
++// thin flow 采集测试（2026-10-26-session-change-progress-hover task-06 / FR-03 /
++// D-008@v2）。覆盖：buildThinFlowSummary 纯函数（active 形态白名单/非 active 形态
++// null/类型防御）+ _collectThinFlowsForTarget 三态（ok 落槽 / error 保留旧值 /
++// 名单驱动清理 / legacy 单槽位跳过）+ getThinFlows 拍平。
++//
++// ⚠ 落位说明（工程现实）：daemon vitest include 只扫 tests/**——TaskCard 写的
++// src/__tests__/ 路径不会被拾取，按 include 现实落 tests/（task-06 卡内偏差，
++// 组装断言（task-07）同文件追加）。
++
++import { describe, it, expect, vi, afterEach } from 'vitest';
++
++import {
++  buildThinFlowSummary,
++  type SillySpecManagerDeps,
++  SillySpecManager,
++  type SillySpecProgressOutcome,
++  type SillySpecStatusSummary,
++} from '../src/sillyspec-manager';
++
++// ── buildThinFlowSummary（纯函数）────────────────────────────────────────────
++
++describe('buildThinFlowSummary', () => {
++  it('active 形态：白名单字段全透传（CLI JSON 键名 camelCase）', () => {
++    const item = buildThinFlowSummary('ws-1', {
++      change: '2026-10-26-thin-a',
++      status: 'active',
++      phase: '② 执行（已批准·写代码跑测试）',
++      designFilled: true,
++      frFilled: true,
++      bindingsFilled: 2,
++      bindingsTotal: 2,
++      tasksChecked: 4,
++      tasksTotal: 12,
++      substeps: ['artifacts', 'ledger'],
++      specApproved: true,
++      autopilot: false,
++    });
++    expect(item).toEqual({
++      workspace_id: 'ws-1',
++      change: '2026-10-26-thin-a',
++      phase: '② 执行（已批准·写代码跑测试）',
++      design_filled: true,
++      fr_filled: true,
++      bindings_total: 2,
++      bindings_filled: 2,
++      tasks_total: 12,
++      tasks_checked: 4,
++      substeps: ['artifacts', 'ledger'],
++      spec_approved: true,
++      autopilot: false,
++      legacy_fallback: false,
++    });
++  });
++
++  it('非 active 形态（archived/dir-no-state）→ null（键不落槽）', () => {
++    expect(buildThinFlowSummary('ws-1', { change: 'x', status: 'archived' })).toBeNull();
++    expect(buildThinFlowSummary('ws-1', { change: 'x', status: 'dir-no-state' })).toBeNull();
++  });
++
++  it('类型防御：缺键按 falsy 缺省（宁宽勿断）；legacyFallback 仅 true 才透', () => {
++    const item = buildThinFlowSummary('ws-1', {
++      change: '2026-10-26-thin-b',
++      status: 'active',
++      legacyFallback: true,
++    });
++    expect(item).not.toBeNull();
++    expect(item!.design_filled).toBe(false);
++    expect(item!.tasks_total).toBe(0);
++    expect(item!.substeps).toEqual([]);
++    expect(item!.legacy_fallback).toBe(true);
++  });
++
++  it('change 非字符串/空 → null；非对象输入 → null', () => {
++    expect(buildThinFlowSummary('ws-1', { change: 123, status: 'active' })).toBeNull();
++    expect(buildThinFlowSummary('ws-1', { change: '', status: 'active' })).toBeNull();
++    expect(buildThinFlowSummary('ws-1', null)).toBeNull();
++    expect(buildThinFlowSummary('ws-1', 'str')).toBeNull();
++  });
++});
++
++// ── _collectThinFlowsForTarget 三态（经 collectStatusOnce 集成驱动）─────────
++
++const FLOW_JSON_OK = JSON.stringify({
++  change: '2026-10-26-thin-a',
++  status: 'active',
++  phase: '② 执行（已批准·写代码跑测试）',
++  designFilled: true,
++  frFilled: true,
++  bindingsFilled: 2,
++  bindingsTotal: 2,
++  tasksChecked: 4,
++  tasksTotal: 12,
++  substeps: [],
++  specApproved: true,
++});
++
++const PROGRESS_ENVELOPE = (stages: Record<string, string>) => ({
++  // machine-interface envelope 包装层（buildSillySpecStatusSummary 读 env.data.changes）
++  generated_at: '2026-10-26T12:00:00Z',
++  data: {
++    project: 'p',
++    active_changes: Object.keys(stages).length,
++    changes: Object.entries(stages).map(([name, current_stage]) => ({
++      name,
++      ghost: false,
++      current_stage,
++      stage_label: current_stage,
++      last_active: '2026-10-26T12:00:00Z',
++      stages: {},
++      steps: { total: 0, completed: 0 },
++    })),
++    pending_conflicts: [],
++  },
++});
++
++function summaryFrom(stages: Record<string, string>): SillySpecStatusSummary {
++  const env = PROGRESS_ENVELOPE(stages);
++  return {
++    ok: true,
++    errors_count: 0,
++    warnings_count: 0,
++    generated_at: '2026-10-26T12:00:00Z',
++    active_changes: env.data.active_changes,
++    healthy_count: env.data.active_changes,
++    ghost_count: 0,
++    conflict_count: 0,
++    conflict_types: {},
++    changes: env.data.changes as SillySpecStatusSummary['changes'],
++    pending_conflicts: [],
++  };
++}
++
++interface RunnerSpec {
++  /** 命令片段匹配（如 'progress show' / 'flow status'）→ 出参。 */
++  match: string;
++  outcome: SillySpecProgressOutcome;
++}
++
++function makeManager(runnerSpecs: RunnerSpec[]): {
++  mgr: SillySpecManager;
++} {
++  const deps: Partial<SillySpecManagerDeps> = {
++    runProgressJson: (async (_file: string, args: string[]) => {
++      const joined = args.join(' ');
++      for (const spec of runnerSpecs) {
++        if (joined.includes(spec.match)) return spec.outcome;
++      }
++      return { code: 0, stdout: '', timedOut: false };
++    }) as SillySpecManagerDeps['runProgressJson'],
++    resolveSillySpecBin: () => 'C:/fake/sillyspec.js',
++    statusTargets: () => [{ workspaceId: 'ws-1', rootPath: 'C:/fake/root' }],
++    log: () => {},
++  };
++  return { mgr: new SillySpecManager(deps as SillySpecManagerDeps) };
++}
++
++describe('thin flow 采集三态（collectStatusOnce 集成）', () => {
++  it('ok：progress 成功 + 名单含 thin → flow status 落槽，getThinFlows 拍平', async () => {
++    const { mgr } = makeManager([
++      {
++        match: 'progress show',
++        outcome: { code: 0, stdout: JSON.stringify(PROGRESS_ENVELOPE({ '2026-10-26-thin-a': 'thin' })), timedOut: false },
++      },
++      { match: 'flow status', outcome: { code: 0, stdout: FLOW_JSON_OK, timedOut: false } },
++    ]);
++    await mgr.collectStatusOnce();
++    const flows = mgr.getThinFlows();
++    expect(flows).toHaveLength(1);
++    expect(flows[0]).toMatchObject({
++      workspace_id: 'ws-1',
++      change: '2026-10-26-thin-a',
++      spec_approved: true,
++      tasks_checked: 4,
++    });
++  });
++
++  it('error：CLI 缺 flow 命令（exit 非零）静默保留旧值，progress 采集不受影响', async () => {
++    const errOutcome: SillySpecProgressOutcome = { code: 1, stdout: '', timedOut: false, stderr: '未知命令: flow' };
++    // 第一拍成功落槽 → 第二拍 flow 失败 → 槽保留旧值
++    const { mgr } = makeManager([]);
++    // 用原型替换法注入两拍不同行为
++    let call = 0;
++    const deps = mgr as unknown as { _runProgressJson: unknown };
++    void deps;
++    const mgrAny = mgr as unknown as {
++      _runProgressJson: (f: string, a: string[], o: unknown) => Promise<SillySpecProgressOutcome>;
++      _collectThinFlowsForTarget: (ws: string | null, cwd: string, s: SillySpecStatusSummary) => Promise<void>;
++    };
++    mgrAny._runProgressJson = async (_f, args) => {
++      const joined = args.join(' ');
++      call += 1;
++      if (joined.includes('progress show')) {
++        return { code: 0, stdout: JSON.stringify(PROGRESS_ENVELOPE({ '2026-10-26-thin-a': 'thin' })), timedOut: false };
++      }
++      // flow status：第一拍 ok，第二拍 exit 1
++      return call <= 2 || joined.includes('progress')
++        ? { code: 0, stdout: FLOW_JSON_OK, timedOut: false }
++        : errOutcome;
++    };
++    const summary = summaryFrom({ '2026-10-26-thin-a': 'thin' });
++    await mgrAny._collectThinFlowsForTarget('ws-1', 'C:/fake/root', summary);
++    expect(mgr.getThinFlows()).toHaveLength(1);
++    // 第二拍：flow 失败 → 保留
++    call = 10;
++    await mgrAny._collectThinFlowsForTarget('ws-1', 'C:/fake/root', summary);
++    expect(mgr.getThinFlows()).toHaveLength(1);
++  });
++
++  it('名单驱动清理：变更不再活跃 thin（current_stage 翻转）→ 槽删除', async () => {
++    const { mgr } = makeManager([]);
++    const mgrAny = mgr as unknown as {
++      _runProgressJson: (f: string, a: string[], o: unknown) => Promise<SillySpecProgressOutcome>;
++      _collectThinFlowsForTarget: (ws: string | null, cwd: string, s: SillySpecStatusSummary) => Promise<void>;
++    };
++    mgrAny._runProgressJson = async (_f, args) =>
++      args.join(' ').includes('flow status')
++        ? { code: 0, stdout: FLOW_JSON_OK, timedOut: false }
++        : { code: 0, stdout: '', timedOut: false };
++    // 第一拍：thin 在名单 → 落槽
++    await mgrAny._collectThinFlowsForTarget('ws-1', 'C:/fake/root', summaryFrom({ '2026-10-26-thin-a': 'thin' }));
++    expect(mgr.getThinFlows()).toHaveLength(1);
++    // 第二拍：名单里该变更 current_stage 已非 thin → 键清理
++    await mgrAny._collectThinFlowsForTarget('ws-1', 'C:/fake/root', summaryFrom({ '2026-10-26-thin-a': 'execute' }));
++    expect(mgr.getThinFlows()).toHaveLength(0);
++  });
++
++  it('legacy 单槽位（workspaceId=null）跳过采集；非 thin 变更不触发 flow status', async () => {
++    const { mgr } = makeManager([]);
++    let flowCalls = 0;
++    const mgrAny = mgr as unknown as {
++      _runProgressJson: (f: string, a: string[], o: unknown) => Promise<SillySpecProgressOutcome>;
++      _collectThinFlowsForTarget: (ws: string | null, cwd: string, s: SillySpecStatusSummary) => Promise<void>;
++    };
++    mgrAny._runProgressJson = async (_f, args) => {
++      if (args.join(' ').includes('flow status')) flowCalls += 1;
++      return { code: 0, stdout: FLOW_JSON_OK, timedOut: false };
++    };
++    await mgrAny._collectThinFlowsForTarget(null, 'C:/fake/root', summaryFrom({ a: 'thin' }));
++    expect(flowCalls).toBe(0); // legacy 无定位键
++    await mgrAny._collectThinFlowsForTarget('ws-1', 'C:/fake/root', summaryFrom({ b: 'brainstorm' }));
++    expect(flowCalls).toBe(0); // 非 thin 名单不采
++  });
++});
++
++// ── task-07：hub-client 心跳载荷组装（thin_flows 嵌挂 sillyspec_status）────
++
++/** 组装用例的清单条目类型视图（= ThinFlowSummary，顶部已 import）。 */
++type ThinFlowSummaryLike = import('../src/sillyspec-manager').ThinFlowSummary;
++
++describe('hub-client thin_flows 载荷组装（task-07）', () => {
++  const emptySummary = summaryFrom({});
++
++  afterEach(() => {
++    vi.unstubAllGlobals();
++  });
++
++  function mockFetchCapture(): { lastBody: () => Record<string, unknown> } {
++    let body: Record<string, unknown> | null = null;
++    vi.stubGlobal(
++      'fetch',
++      (async (_url: unknown, init?: RequestInit) => {
++        body = init?.body ? (JSON.parse(String(init.body)) as Record<string, unknown>) : null;
++        return new Response(JSON.stringify({ daemon_instance_id: 'x', status: 'online' }), {
++          status: 200,
++        });
++      }) as unknown as typeof fetch,
++    );
++    return { lastBody: () => body as Record<string, unknown> };
++  }
++
++  it('非空清单 + 摘要对象 → body.sillyspec_status.thin_flows 携带（条目字段齐全）', async () => {
++    const cap = mockFetchCapture();
++    const { HubClient } = await import('../src/hub-client');
++    const c = new HubClient('http://x:8000');
++    const flows: ThinFlowSummaryLike[] = [
++      {
++        workspace_id: 'ws-1',
++        change: '2026-10-26-thin-a',
++        phase: '② 执行（已批准·写代码跑测试）',
++        design_filled: true,
++        fr_filled: true,
++        bindings_total: 2,
++        bindings_filled: 2,
++        tasks_total: 12,
++        tasks_checked: 4,
++        substeps: [],
++        spec_approved: true,
++        autopilot: false,
++        legacy_fallback: false,
++      },
++    ];
++    // 平铺 13 参：前 12 参最小形态（machineId/网卡 undefined），第 13 参 thinFlows
++    await c.heartbeat(
++      'rt-1',
++      [],
++      null,
++      undefined,
++      undefined,
++      emptySummary,
++      undefined,
++      undefined,
++      undefined,
++      undefined,
++      undefined,
++      undefined,
++      flows as never,
++    );
++    const body = cap.lastBody();
++    const status = body.sillyspec_status as Record<string, unknown>;
++    expect(Array.isArray(status.thin_flows)).toBe(true);
++    expect((status.thin_flows as Array<Record<string, unknown>>)[0]).toMatchObject({
++      workspace_id: 'ws-1',
++      change: '2026-10-26-thin-a',
++      tasks_checked: 4,
++    });
++  });
++
++  it('空槽（undefined）或能力缺失态（status=null）→ thin_flows 键不出现（FR-07）', async () => {
++    const cap = mockFetchCapture();
++    const { HubClient } = await import('../src/hub-client');
++    const c = new HubClient('http://x:8000');
++    // 空数组：键不出现
++    await c.heartbeat('rt-1', [], null, undefined, undefined, emptySummary, undefined, undefined, undefined, undefined, undefined, undefined, []);
++    expect((cap.lastBody().sillyspec_status as Record<string, unknown>).thin_flows).toBeUndefined();
++    // 能力缺失态（status=null）：无载荷可嵌
++    await c.heartbeat('rt-1', [], null, undefined, undefined, null, undefined, undefined, undefined, undefined, undefined, undefined, [{ change: 'x' } as never]);
++    expect(cap.lastBody().sillyspec_status).toBeNull();
++  });
++});

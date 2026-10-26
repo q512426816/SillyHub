@@ -1,0 +1,249 @@
+{
+  "change": "2026-10-26-session-change-progress-hover",
+  "baseline": "fdab6a598a78d62c48faaba0cdbea179fd83abf2",
+  "head": "5eca947cd15ca5a45a62ff94e1600fdc8e968ec3",
+  "files": [
+    "backend/app/modules/change/schema.py",
+    "backend/app/modules/change/service.py",
+    "backend/app/modules/daemon/router/heartbeat.py",
+    "backend/app/modules/daemon/runtime/service.py",
+    "backend/openapi.json",
+    "frontend/src/components/daemon/__tests__/session-change-files-hover.test.tsx",
+    "frontend/src/components/daemon/session-change-files-hover.tsx",
+    "frontend/src/lib/api-types.ts",
+    "sillyhub-daemon/src/api-types.ts",
+    "sillyhub-daemon/src/daemon.ts",
+    "sillyhub-daemon/src/hub-client.ts",
+    "sillyhub-daemon/src/sillyspec-manager.ts",
+    "sillyhub-daemon/tests/daemon-heartbeat-pending.test.ts",
+    "sillyhub-daemon/tests/daemon-heartbeat-sillyspec.test.ts",
+    "sillyhub-daemon/tests/integration/selfupdate-scenarios.test.ts",
+    "sillyhub-daemon/tests/sillyspec-platform-command.test.ts",
+    "backend/app/modules/change/tests/test_progress_projection_ext.py",
+    "backend/app/modules/daemon/tests/test_heartbeat_thin_flows.py",
+    "frontend/src/components/daemon/__tests__/change-progress-row.test.tsx",
+    "frontend/src/components/daemon/__tests__/change-total-progress-ring.test.tsx",
+    "frontend/src/components/daemon/change-progress-row.tsx",
+    "frontend/src/components/daemon/change-total-progress-ring.tsx",
+    "sillyhub-daemon/tests/sillyspec-flow-status-collector.test.ts"
+  ],
+  "totals": {
+    "files": 23,
+    "additions": 3482,
+    "deletions": 23
+  },
+  "savedAt": "2026-10-26T13:11:52.608Z",
+  "note": "execute --done 时点冻结（沉淀资产面：主仓实改行投影——thin flow done 对等；治理工件目录与其后 verify/archive 演进不在内）",
+  "scopeAudit": {
+    "mode": "full-flow",
+    "ok": true,
+    "degradedReason": null,
+    "baseAnchor": "fdab6a598a78d62c48faaba0cdbea179fd83abf2",
+    "totals": {
+      "files": 24,
+      "additions": 3482,
+      "deletions": 23
+    },
+    "rows": [
+      {
+        "path": "backend/app/modules/change/schema.py",
+        "additions": 69,
+        "deletions": 0,
+        "kind": "modified",
+        "planned": "修改",
+        "verdict": "planned"
+      },
+      {
+        "path": "backend/app/modules/change/service.py",
+        "additions": 187,
+        "deletions": 0,
+        "kind": "modified",
+        "planned": "修改",
+        "verdict": "planned"
+      },
+      {
+        "path": "backend/app/modules/daemon/router/heartbeat.py",
+        "additions": 54,
+        "deletions": 0,
+        "kind": "modified",
+        "planned": "修改",
+        "verdict": "planned"
+      },
+      {
+        "path": "backend/app/modules/daemon/runtime/service.py",
+        "additions": 116,
+        "deletions": 0,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": "backend/openapi.json",
+        "additions": 279,
+        "deletions": 0,
+        "kind": "modified",
+        "planned": "修改",
+        "verdict": "planned"
+      },
+      {
+        "path": "frontend/src/components/daemon/__tests__/session-change-files-hover.test.tsx",
+        "additions": 72,
+        "deletions": 0,
+        "kind": "modified",
+        "planned": "修改",
+        "verdict": "planned"
+      },
+      {
+        "path": "frontend/src/components/daemon/session-change-files-hover.tsx",
+        "additions": 22,
+        "deletions": 3,
+        "kind": "modified",
+        "planned": "修改",
+        "verdict": "planned"
+      },
+      {
+        "path": "frontend/src/lib/api-types.ts",
+        "additions": 161,
+        "deletions": 0,
+        "kind": "modified",
+        "planned": "修改",
+        "verdict": "planned"
+      },
+      {
+        "path": "sillyhub-daemon/src/api-types.ts",
+        "additions": 161,
+        "deletions": 0,
+        "kind": "modified",
+        "planned": "修改",
+        "verdict": "planned"
+      },
+      {
+        "path": "sillyhub-daemon/src/daemon.ts",
+        "additions": 22,
+        "deletions": 1,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": "sillyhub-daemon/src/hub-client.ts",
+        "additions": 24,
+        "deletions": 2,
+        "kind": "modified",
+        "planned": "修改",
+        "verdict": "planned"
+      },
+      {
+        "path": "sillyhub-daemon/src/sillyspec-manager.ts",
+        "additions": 173,
+        "deletions": 0,
+        "kind": "modified",
+        "planned": "修改",
+        "verdict": "planned"
+      },
+      {
+        "path": "sillyhub-daemon/tests/daemon-heartbeat-pending.test.ts",
+        "additions": 1,
+        "deletions": 1,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": "sillyhub-daemon/tests/daemon-heartbeat-sillyspec.test.ts",
+        "additions": 8,
+        "deletions": 8,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": "sillyhub-daemon/tests/integration/selfupdate-scenarios.test.ts",
+        "additions": 2,
+        "deletions": 2,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": "sillyhub-daemon/tests/sillyspec-platform-command.test.ts",
+        "additions": 6,
+        "deletions": 6,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": "backend/app/modules/change/tests/test_progress_projection_ext.py",
+        "additions": 543,
+        "deletions": 0,
+        "kind": "new",
+        "planned": "新增",
+        "verdict": "planned"
+      },
+      {
+        "path": "backend/app/modules/daemon/tests/test_heartbeat_thin_flows.py",
+        "additions": 347,
+        "deletions": 0,
+        "kind": "new",
+        "planned": "新增",
+        "verdict": "planned"
+      },
+      {
+        "path": "frontend/src/components/daemon/__tests__/change-progress-row.test.tsx",
+        "additions": 237,
+        "deletions": 0,
+        "kind": "new",
+        "planned": "新增",
+        "verdict": "planned"
+      },
+      {
+        "path": "frontend/src/components/daemon/__tests__/change-total-progress-ring.test.tsx",
+        "additions": 215,
+        "deletions": 0,
+        "kind": "new",
+        "planned": "新增",
+        "verdict": "planned"
+      },
+      {
+        "path": "frontend/src/components/daemon/change-progress-row.tsx",
+        "additions": 265,
+        "deletions": 0,
+        "kind": "new",
+        "planned": "新增",
+        "verdict": "planned"
+      },
+      {
+        "path": "frontend/src/components/daemon/change-total-progress-ring.tsx",
+        "additions": 188,
+        "deletions": 0,
+        "kind": "new",
+        "planned": "新增",
+        "verdict": "planned"
+      },
+      {
+        "path": "sillyhub-daemon/tests/sillyspec-flow-status-collector.test.ts",
+        "additions": 330,
+        "deletions": 0,
+        "kind": "new",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": "NEW:sillyhub-daemon/src/__tests__/sillyspec-flow-status-collector.test.ts",
+        "planned": "新增",
+        "additions": 0,
+        "deletions": 0,
+        "kind": "modified",
+        "verdict": "untouched"
+      }
+    ],
+    "excluded": {
+      "foreignDeclared": []
+    },
+    "note": "execute --done 时点冻结（本文件落盘时采集）",
+    "closedBy": "execute --done"
+  },
+  "patchSha256": "2651861b04478005064701ce0c2c457df1c8f99a1666a4ea773de47c3eea5b9d",
+  "patchStatus": "ok"
+}

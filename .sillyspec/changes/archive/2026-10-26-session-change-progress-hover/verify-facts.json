@@ -1,0 +1,125 @@
+{
+  "apiFace": {
+    "endpoints": [],
+    "declared": 0,
+    "writeEndpoints": []
+  },
+  "schemaVersion": 2,
+  "change": "2026-10-26-session-change-progress-hover",
+  "generatedAt": "2026-10-26T13:34:37.545Z",
+  "probes": {
+    "probe1": {
+      "command": "sillyspec verify-probes --change 2026-10-26-session-change-progress-hover",
+      "metrics": {
+        "matches": 0,
+        "skippedFiles": 0,
+        "worktreeHits": 7,
+        "globEntries": 0
+      }
+    },
+    "probe3": {
+      "command": "sillyspec verify-probes --change 2026-10-26-session-change-progress-hover",
+      "metrics": {
+        "tasks": 12,
+        "hasTest": 12
+      }
+    },
+    "probe5": {
+      "command": "sillyspec verify-probes --change 2026-10-26-session-change-progress-hover",
+      "metrics": {
+        "backendEndpoints": 3775,
+        "frontendCalls": 2
+      }
+    },
+    "probe6": {
+      "command": "sillyspec verify-probes --change 2026-10-26-session-change-progress-hover",
+      "metrics": {
+        "deletions": 0,
+        "unavailable": false
+      }
+    },
+    "probe8": {
+      "command": "sillyspec verify-probes --change 2026-10-26-session-change-progress-hover",
+      "metrics": {
+        "mispairs": 0,
+        "feOnly": 0,
+        "missingNotNull": 0,
+        "contractCount": 0,
+        "contractOrphans": 0,
+        "missingRequired": 0,
+        "feKeys": 0,
+        "backendFields": 0
+      }
+    },
+    "probe9": {
+      "command": "sillyspec verify-probes --change 2026-10-26-session-change-progress-hover",
+      "metrics": {
+        "javaFileCount": 0,
+        "groupCount": 0,
+        "inconsistentGroups": 0
+      }
+    },
+    "probe10": {
+      "command": "sillyspec verify-probes --change 2026-10-26-session-change-progress-hover",
+      "metrics": {
+        "checkedFiles": 13,
+        "unclearedFiles": 0
+      }
+    }
+  },
+  "conclusion": "PASS WITH NOTES",
+  "handover": {
+    "count": 3,
+    "items": [
+      {
+        "type": "manual-acceptance",
+        "item": "三端联动集成冒烟：daemon 采集 flow status → heartbeat thin_flows 上行 → backend 行锁落库 → 前端悬浮框渲染（单测各自锁环节，端到端冒烟需起 daemon+backend 实环境）",
+        "condition": "起本地 daemon+backend，跑一个轻量变更（flow start），打开会话悬浮框观察 ①②③ 相位行与入口总圈实时翻动；坏条目/旧 daemon 降级各验一次",
+        "severity": "advisory"
+      },
+      {
+        "type": "other",
+        "item": "thin adopted_from 平台侧无数据源（CLI flow status --json 不输出该字段，「自头脑风暴转入」标注暂不会出现，D-006@v1 注释在案）",
+        "condition": "待 sillyspec CLI 补字段后自动生效，无需平台侧改动",
+        "severity": "advisory"
+      },
+      {
+        "type": "other",
+        "item": "轻量相位级耗时（D-001@v1 非目标）",
+        "condition": "CLI flow-state 补相位时间戳后另立变更",
+        "severity": "advisory"
+      }
+    ]
+  },
+  "dbScriptDeclarations": [],
+  "runtimeEndpointExcluded": false,
+  "integrationRan": "ran",
+  "matrixPartialRows": 0,
+  "consumerHints": {
+    "script": [
+      "backend/app/modules/change/tests/test_progress_projection_ext.py",
+      "backend/app/modules/daemon/tests/test_heartbeat_thin_flows.py",
+      "sillyhub-daemon/tests/sillyspec-flow-status-collector.test.ts"
+    ]
+  },
+  "smokeRan": "not-configured",
+  "factsConsistency": {
+    "checked": [
+      "probe1",
+      "probe3",
+      "probe5",
+      "probe6",
+      "probe8",
+      "probe9"
+    ],
+    "verdict": "match",
+    "detail": null
+  },
+  "tests": {
+    "command": "module[]+deps(jsx4+jsx4)",
+    "exitCode": 0,
+    "strategy": "dynamic-subset",
+    "failedRemaining": [],
+    "passedAt": "2026-10-26T13:39:15.734Z"
+  }
+}

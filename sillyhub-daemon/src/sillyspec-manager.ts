@@ -33,6 +33,16 @@
  * guard.json；collectStatusOnce 心跳后处理对 quick-* 冲突条补 ql_id（buildSillySpec
  * StatusSummary 保持纯函数不落 fs）。
  *
+ * 2026-10-26-session-change-progress-hover task-06 扩展：thin flow 采集执行器
+ * （design 线 2 / D-008@v2）——progress 采集①成功同拍，对 envelope 名单中的活跃
+ * thin 变更（current_stage='thin'，CLI 按行 active + flow-state tier=thin 覆写，
+ * 升厚/归档天然不进名单）逐个跑 `flow status --json --change <名>`，白名单摘要
+ * （原始字段透传不归一）写内存槽 _thinFlows（wsId+change 键控 latest-wins），
+ * 供 hub-client（task-07）组装心跳 sillyspec_status.thin_flows 载荷取用。三态
+ * 矩阵同款：ok 更新槽 / inactive（归档竞态）清槽 / error（CLI 缺 flow 命令
+ * exit 非零、超时、非 JSON）静默降级保留旧值——绝不影响 progress 采集与
+ * heartbeat 其他载荷（FR-07）。
+ *
  * 状态机（内存态，daemon 重启即回 idle——重启后 preflight 启动检查已保证最新）：
  *
  *   idle ──requestUpgrade（空闲）──▶ running ──成功──▶ success ─┐
@@ -168,6 +178,13 @@ export function shouldSkipStatusCollect(
 
 /** 心跳摘要 changes 列表截断上限（N=50，design §4 / Grill B2）。 */
 export const SILLYSPEC_STATUS_CHANGES_MAX = 50;
+
+/**
+ * thin flow 单目标采集名单上限（task-06）：防异常膨胀名单（脏数据/极端多变更）
+ * 拖垮心跳拍——每目标最多逐变更 spawn N 次 flow status，超出截断（debug 一笔）。
+ * 正常活跃 thin 变更数个位数；50 与 progress changes 截断同量级。
+ */
+export const THIN_FLOW_COLLECT_MAX = 50;
 
 /**
  * 官方 npm 源地址（ql-20260907-001 版本门仲裁直查用）。镜像滞后时以官方源
@@ -311,6 +328,31 @@ export interface SillySpecStatusError {
   reason: 'collect_timeout' | 'nonzero_exit' | 'spawn_failed' | 'runner_error';
   detail: string;
   since: string;
+}
+
+/**
+ * thin flow 采集摘要（2026-10-26-session-change-progress-hover task-06 / FR-03 /
+ * D-008@v2）：`flow status --json --change <名>` 输出的白名单透传条目（原始字段
+ * 不归一——CLI 文案变化不破坏链路，phase 四枚举归一在 backend 消费侧）。字段名
+ * 与 CLI JSON 输出逐字对齐（flow.js:3330-3338）；workspace_id 是 daemon 侧补的
+ * 定位键（CLI 输出无此字段——sillyspec_status 是实例级全局键，backend 逐变更
+ * 写入按 ws+change 定位，D-008@v2）。hub-client（task-07）组装心跳
+ * sillyspec_status.thin_flows 载荷时直接取本结构。
+ */
+export interface ThinFlowSummary {
+  workspace_id: string;
+  change: string;
+  phase: string;
+  design_filled: boolean;
+  fr_filled: boolean;
+  bindings_total: number;
+  bindings_filled: number;
+  tasks_total: number;
+  tasks_checked: number;
+  substeps: string[];
+  spec_approved: boolean;
+  autopilot: boolean;
+  legacy_fallback: boolean;
 }
 
 /**
@@ -768,6 +810,15 @@ export class SillySpecManager {
    */
   private readonly _statusSummariesByWs = new Map<string, SillySpecStatusSummary>();
 
+  /**
+   * thin flow 摘要槽（task-06 / D-008@v2）：`${wsId}:${change}` 键控 latest-wins。
+   * 名单驱动清理——progress ①成功拍对 envelope 名单重算：不在活跃 thin 名单的键
+   * 删除（归档/升厚竞态自愈），单变更采集 error 保留旧值（三态③同款）。内存态，
+   * 进程重启即失（下拍 progress 成功即重建）。legacy 单槽位形态（workspaceId=
+   * null）不采集——backend 逐变更写入需要 workspace_id 定位键（D-008@v2）。
+   */
+  private readonly _thinFlows = new Map<string, ThinFlowSummary>();
+
   // ── FR-03/FR-04（2026-10-21-daemon-sync-hardening）：退避与跨仓跳过状态 ──────
 
   /** 全局采集轮次（从 1 计；退避取模基准）。内存态，重启回零（宁可多采不可漏采）。 */
@@ -1202,7 +1253,91 @@ export class SillySpecManager {
       ghost_count: summary.ghost_count,
       conflict_count: summary.conflict_count,
     });
+    // task-06（2026-10-26-session-change-progress-hover）：progress ①成功同拍，
+    // 对名单中的活跃 thin 变更逐个采集 flow status（失败静默不影响本方法结果）。
+    await this._collectThinFlowsForTarget(workspaceId, cwd, summary);
     return true;
+  }
+
+  // ── task-06（2026-10-26-session-change-progress-hover）：thin flow 采集 ──────
+
+  /**
+   * 单目标 thin flow 采集（design 线 2 / D-008@v2）：progress envelope 名单中
+   * current_stage='thin' 的变更（CLI 覆写口径——行 active + flow-state tier=thin
+   * 才显 thin，升厚/归档天然不进名单）逐个跑 `flow status --json --change <名>`。
+   *
+   * 三态（progress 采集同款矩阵，独立于其结果——本方法任何失败都不影响
+   * _collectOneTarget 的返回）：
+   *   ok（exit 0 + 合法 JSON + status=active）→ 白名单摘要落槽（latest-wins）；
+   *   inactive（archived/dir-no-state 形态）→ 清该键（名单驱动清理的一部分）；
+   *   error（CLI 缺 flow 命令 exit 非零/超时/非 JSON）→ 静默保留旧值（debug 一笔）。
+   *
+   * 名单驱动清理：本目标槽中不在新名单的键删除（归档竞态自愈）；legacy 单槽位
+   * （workspaceId=null）整体跳过——backend 逐变更写入需要 workspace_id 定位。
+   * 逐变更 spawn 有量（名单 N 个 = N 次 CLI）；上限护栏 THIN_FLOW_COLLECT_MAX
+   * 截断（debug 一笔），异常膨胀名单不拖垮心跳拍。
+   */
+  private async _collectThinFlowsForTarget(
+    workspaceId: string | null,
+    cwd: string,
+    summary: SillySpecStatusSummary,
+  ): Promise<void> {
+    if (workspaceId === null) return; // legacy 形态无定位键，不采集（D-008@v2）
+    const thinNames = summary.changes
+      .filter((c) => c.current_stage === 'thin' && !c.ghost)
+      .map((c) => c.name)
+      .slice(0, THIN_FLOW_COLLECT_MAX);
+    const liveKeys = new Set<string>();
+    for (const name of thinNames) {
+      const key = `${workspaceId}:${name}`;
+      liveKeys.add(key);
+      const bin = this._resolveSillySpecBin();
+      if (bin === null) return; // 机器级 CLI 缺失：整目标放弃（progress 已判②）
+      let outcome: SillySpecProgressOutcome;
+      try {
+        outcome = await this._runProgressJson(
+          process.execPath,
+          [bin, 'flow', 'status', '--json', '--change', name],
+          { cwd, timeoutMs: this._statusTimeoutMs, maxBufferBytes: SILLYSPEC_STATUS_MAX_BUFFER },
+        );
+      } catch {
+        continue; // 注入实现防御：error 态保留旧值
+      }
+      if (outcome.timedOut || outcome.code === null || outcome.code !== 0) {
+        // error 态（含旧版 CLI「未知命令: flow」exit 非零）：静默保留旧值
+        this._log('debug', 'thin_flow_collect_error', {
+          change: name,
+          exit_code: outcome.code,
+          timed_out: outcome.timedOut,
+        });
+        continue;
+      }
+      let parsed: unknown;
+      try {
+        const text = outcome.stdout;
+        parsed = JSON.parse(text.charCodeAt(0) === 0xfeff ? text.slice(1) : text);
+      } catch {
+        this._log('debug', 'thin_flow_collect_bad_json', { change: name });
+        continue;
+      }
+      const item = buildThinFlowSummary(workspaceId, parsed);
+      if (item === null) continue; // 非 active 形态（archived/dir-no-state）→ 键不落槽
+      this._thinFlows.set(key, item);
+    }
+    // 名单驱动清理：本 ws 槽中不在活跃名单的键删除（归档/升厚竞态自愈）
+    for (const key of this._thinFlows.keys()) {
+      if (key.startsWith(`${workspaceId}:`) && !liveKeys.has(key)) {
+        this._thinFlows.delete(key);
+      }
+    }
+  }
+
+  /**
+   * thin flow 摘要槽快照（hub-client task-07 组装心跳载荷取用）：全部工作区拍平。
+   * 空槽返回 []（心跳 thin_flows 键省略不发，backend 不写不清——FR-07）。
+   */
+  getThinFlows(): ThinFlowSummary[] {
+    return [...this._thinFlows.values()];
   }
 
   /**
@@ -2765,6 +2900,44 @@ function parseProgressEnvelopeCodes(stdout: string): string[] {
   } catch {
     return [];
   }
+}
+
+/**
+ * thin flow 单条摘要构造（task-06 纯函数，导出供测试直测——对齐本文件
+ * buildSillySpecStatusSummary 纯函数导出先例）：解析 `flow status --json`
+ * 输出，status==='active' 才产出白名单条目（archived/dir-no-state 形态 →
+ * null=键不落槽，归档竞态由名单驱动清理兜底）；字段逐个类型防御（CLI 版本
+ * 演进缺键按 falsy 缺省参与 backend 归一，不丢条目——与 DaemonHeartbeatThinFlow
+ * 的「宁宽勿断」口径一致）。
+ */
+export function buildThinFlowSummary(
+  workspaceId: string,
+  parsed: unknown,
+): ThinFlowSummary | null {
+  if (parsed === null || typeof parsed !== 'object') return null;
+  const o = parsed as Record<string, unknown>;
+  if (o.status !== 'active') return null; // archived / dir-no-state / 其他形态
+  if (typeof o.change !== 'string' || o.change === '') return null;
+  const bool = (v: unknown): boolean => v === true;
+  const num = (v: unknown): number => (typeof v === 'number' && Number.isFinite(v) ? v : 0);
+  const substeps = Array.isArray(o.substeps)
+    ? o.substeps.filter((s): s is string => typeof s === 'string')
+    : [];
+  return {
+    workspace_id: workspaceId,
+    change: o.change,
+    phase: typeof o.phase === 'string' ? o.phase : '',
+    design_filled: bool(o.designFilled),
+    fr_filled: bool(o.frFilled),
+    bindings_total: num(o.bindingsTotal),
+    bindings_filled: num(o.bindingsFilled),
+    tasks_total: num(o.tasksTotal),
+    tasks_checked: num(o.tasksChecked),
+    substeps,
+    spec_approved: bool(o.specApproved),
+    autopilot: bool(o.autopilot),
+    legacy_fallback: bool(o.legacyFallback),
+  };
 }
 
 /**

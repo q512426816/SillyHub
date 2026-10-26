@@ -641,3 +641,207 @@ created_at: 2026-10-02T02:55:12.745Z
   confirmed_at: null
   source_change: 2026-10-19-cross-repo-patch-slicing
   status: active
+
+## FR-change-036 全量变更下拉项内嵌 5 阶段进度圈行
+变更：2026-10-26-session-change-progress-hover
+状态：active
+摘要：主路径；降级
+依据决策：D-002@v1
+全文：.sillyspec/changes/archive/2026-10-26-session-change-progress-hover/requirements.md#FR-01
+最近确认：33f4154a3
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-26-session-change-progress-hover:task-01:acc-0-6ecd5d6a
+  tests: backend/app/modules/change/tests/test_progress_projection_ext.py | backend/app/modules/daemon/tests/test_heartbeat_thin_flows.py | frontend/src/components/daemon/__tests__/change-progress-row.test.tsx | frontend/src/components/daemon/__tests__/change-total-progress-ring.test.tsx | sillyhub-daemon/tests/sillyspec-flow-status-collector.test.ts
+  reason: spec
+  state: active
+  discovery: machine
+  confirmed_by: agent
+  confirmed_at: 33f4154a35f79bd897d99fd134e3c588242f56bd
+  source_change: 2026-10-26-session-change-progress-hover
+  status: active
+- row: 2026-10-26-session-change-progress-hover:task-01:acc-1-1a18e89f
+  tests: backend/app/modules/change/tests/test_progress_projection_ext.py | backend/app/modules/daemon/tests/test_heartbeat_thin_flows.py | frontend/src/components/daemon/__tests__/change-progress-row.test.tsx | frontend/src/components/daemon/__tests__/change-total-progress-ring.test.tsx | sillyhub-daemon/tests/sillyspec-flow-status-collector.test.ts
+  reason: spec
+  state: active
+  discovery: machine
+  confirmed_by: agent
+  confirmed_at: 33f4154a35f79bd897d99fd134e3c588242f56bd
+  source_change: 2026-10-26-session-change-progress-hover
+  status: active
+- row: 2026-10-26-session-change-progress-hover:task-02:acc-0-cf266b7a
+  tests: backend/app/modules/change/tests/test_progress_projection_ext.py
+  reason: spec
+  state: active
+  discovery: machine
+  confirmed_by: agent
+  confirmed_at: 33f4154a35f79bd897d99fd134e3c588242f56bd
+  source_change: 2026-10-26-session-change-progress-hover
+  status: active
+- row: 2026-10-26-session-change-progress-hover:task-02:acc-1-84fdd23a
+  tests: backend/app/modules/change/tests/test_progress_projection_ext.py
+  reason: spec
+  state: active
+  discovery: machine
+  confirmed_by: agent
+  confirmed_at: 33f4154a35f79bd897d99fd134e3c588242f56bd
+  source_change: 2026-10-26-session-change-progress-hover
+  status: active
+- row: 2026-10-26-session-change-progress-hover:task-08:acc-0-08118443
+  tests: frontend/src/components/daemon/__tests__/session-change-files-hover.test.tsx
+  reason: spec
+  state: active
+  discovery: machine
+  confirmed_by: agent
+  confirmed_at: 33f4154a35f79bd897d99fd134e3c588242f56bd
+  source_change: 2026-10-26-session-change-progress-hover
+  status: active
+- row: 2026-10-26-session-change-progress-hover:task-12:acc-0-41fa578c
+  tests: backend/app/modules/agent/tests/test_agent_session_model.py | backend/app/modules/agent/tests/test_cleanup_stale_runs_error_code.py | backend/app/modules/agent/tests/test_coordinator_approval_signal.py | backend/app/modules/agent/tests/test_finalizer.py | backend/app/modules/agent/tests/test_group_chat_models.py | backend/app/modules/agent/tests/test_mcp_tools.py | backend/app/modules/agent/tests/test_orchestrator.py | backend/app/modules/agent/tests/test_placement_borrow_integration.py | backend/app/modules/agent/tests/test_profile_router.py | backend/app/modules/agent/tests/test_provider_caps_alignment.py | backend/app/modules/agent/tests/test_worktree_integration.py | backend/app/modules/change/tests/test_assets.py | backend/app/modules/change/tests/test_change_lineage_filter.py | backend/app/modules/change/tests/test_change_session_binding.py | backend/app/modules/change/tests/test_dispatch.py | backend/app/modules/change/tests/test_dispatch_execute_team_mode.py | backend/app/modules/change/tests/test_files_refresh_sync.py | backend/app/modules/change/tests/test_files_router.py | backend/app/modules/change/tests/test_parser.py | backend/app/modules/change/tests/test_rename_title.py
+  reason: spec
+  state: active
+  discovery: machine
+  confirmed_by: agent
+  confirmed_at: 33f4154a35f79bd897d99fd134e3c588242f56bd
+  source_change: 2026-10-26-session-change-progress-hover
+  status: active
+
+## FR-change-037 execute 圈按 Task 表 n/m 展示任务进度
+变更：2026-10-26-session-change-progress-hover
+状态：active
+摘要：主路径；批量无 N+1
+依据决策：D-005@v1
+全文：.sillyspec/changes/archive/2026-10-26-session-change-progress-hover/requirements.md#FR-02
+最近确认：33f4154a3
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-26-session-change-progress-hover:task-03:acc-0-dfcc92f2
+  tests: backend/app/modules/change/tests/test_progress_projection_ext.py
+  reason: spec
+  state: active
+  discovery: machine
+  confirmed_by: agent
+  confirmed_at: 33f4154a35f79bd897d99fd134e3c588242f56bd
+  source_change: 2026-10-26-session-change-progress-hover
+  status: active
+
+## FR-change-038 轻量变更下拉项内嵌 ①→②→③ 相位行
+变更：2026-10-26-session-change-progress-hover
+状态：active
+摘要：主路径；收口阶段；降级
+依据决策：D-001@v1
+全文：.sillyspec/changes/archive/2026-10-26-session-change-progress-hover/requirements.md#FR-03
+最近确认：33f4154a3
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-26-session-change-progress-hover:task-04:acc-0-740078d6
+  tests: backend/app/modules/change/tests/test_progress_projection_ext.py
+  reason: spec
+  state: active
+  discovery: machine
+  confirmed_by: agent
+  confirmed_at: 33f4154a35f79bd897d99fd134e3c588242f56bd
+  source_change: 2026-10-26-session-change-progress-hover
+  status: active
+- row: 2026-10-26-session-change-progress-hover:task-05:acc-0-0bc12beb
+  tests: backend/app/modules/daemon/tests/test_heartbeat_thin_flows.py
+  reason: spec
+  state: active
+  discovery: machine
+  confirmed_by: agent
+  confirmed_at: 33f4154a35f79bd897d99fd134e3c588242f56bd
+  source_change: 2026-10-26-session-change-progress-hover
+  status: active
+- row: 2026-10-26-session-change-progress-hover:task-06:acc-0-d22f1e66
+  tests: sillyhub-daemon/tests/sillyspec-flow-status-collector.test.ts
+  reason: spec
+  state: active
+  discovery: machine
+  confirmed_by: agent
+  confirmed_at: 33f4154a35f79bd897d99fd134e3c588242f56bd
+  source_change: 2026-10-26-session-change-progress-hover
+  status: active
+- row: 2026-10-26-session-change-progress-hover:task-07:acc-0-3cf6023c
+  tests: sillyhub-daemon/tests/sillyspec-flow-status-collector.test.ts
+  reason: spec
+  state: active
+  discovery: machine
+  confirmed_by: agent
+  confirmed_at: 33f4154a35f79bd897d99fd134e3c588242f56bd
+  source_change: 2026-10-26-session-change-progress-hover
+  status: active
+
+## FR-change-039 升厚与 brainstorm→thin 分流的渲染归属
+变更：2026-10-26-session-change-progress-hover
+状态：active
+摘要：升厚切换；分流标注
+依据决策：D-006@v1、D-007@v1
+全文：.sillyspec/changes/archive/2026-10-26-session-change-progress-hover/requirements.md#FR-04
+最近确认：33f4154a3
+
+## FR-change-040 入口旁单个总进度圈（最新进行中一个）
+变更：2026-10-26-session-change-progress-hover
+状态：active
+摘要：多变更只显一个；数据缺失
+依据决策：D-003@v1、D-013@v1
+全文：.sillyspec/changes/archive/2026-10-26-session-change-progress-hover/requirements.md#FR-05
+最近确认：33f4154a3
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-26-session-change-progress-hover:task-09:acc-0-0cf2a32a
+  tests: frontend/src/components/daemon/__tests__/session-change-files-hover.test.tsx
+  reason: spec
+  state: active
+  discovery: machine
+  confirmed_by: agent
+  confirmed_at: 33f4154a35f79bd897d99fd134e3c588242f56bd
+  source_change: 2026-10-26-session-change-progress-hover
+  status: active
+- row: 2026-10-26-session-change-progress-hover:task-10:acc-0-011ce0f2
+  tests: frontend/src/components/daemon/__tests__/session-change-files-hover.test.tsx
+  reason: spec
+  state: active
+  discovery: machine
+  confirmed_by: agent
+  confirmed_at: 33f4154a35f79bd897d99fd134e3c588242f56bd
+  source_change: 2026-10-26-session-change-progress-hover
+  status: active
+
+## FR-change-041 数据链路三线落地（方案 A）
+变更：2026-10-26-session-change-progress-hover
+状态：active
+摘要：heartbeat 坏条目；采集失败
+依据决策：D-004@v1
+全文：.sillyspec/changes/archive/2026-10-26-session-change-progress-hover/requirements.md#FR-06
+最近确认：33f4154a3
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-26-session-change-progress-hover:task-11:acc-0-bf562f7e
+  tests: backend/app/modules/agent/tests/test_agent_session_model.py | backend/app/modules/agent/tests/test_cleanup_stale_runs_error_code.py | backend/app/modules/agent/tests/test_coordinator_approval_signal.py | backend/app/modules/agent/tests/test_finalizer.py | backend/app/modules/agent/tests/test_group_chat_models.py | backend/app/modules/agent/tests/test_mcp_tools.py | backend/app/modules/agent/tests/test_orchestrator.py | backend/app/modules/agent/tests/test_placement_borrow_integration.py | backend/app/modules/agent/tests/test_profile_router.py | backend/app/modules/agent/tests/test_provider_caps_alignment.py | backend/app/modules/agent/tests/test_worktree_integration.py | backend/app/modules/change/tests/test_assets.py | backend/app/modules/change/tests/test_change_lineage_filter.py | backend/app/modules/change/tests/test_change_session_binding.py | backend/app/modules/change/tests/test_dispatch.py | backend/app/modules/change/tests/test_dispatch_execute_team_mode.py | backend/app/modules/change/tests/test_files_refresh_sync.py | backend/app/modules/change/tests/test_files_router.py | backend/app/modules/change/tests/test_parser.py | backend/app/modules/change/tests/test_rename_title.py
+  reason: spec
+  state: active
+  discovery: machine
+  confirmed_by: agent
+  confirmed_at: 33f4154a35f79bd897d99fd134e3c588242f56bd
+  source_change: 2026-10-26-session-change-progress-hover
+  status: active
+
+## FR-change-042 全链路 fail-open 兼容降级
+变更：2026-10-26-session-change-progress-hover
+状态：active
+摘要：旧 daemon
+全文：.sillyspec/changes/archive/2026-10-26-session-change-progress-hover/requirements.md#FR-07
+最近确认：33f4154a3
+
+## FR-change-043 计数徽标双色
+变更：2026-10-26-session-change-progress-hover
+状态：active
+摘要：双态断言
+依据决策：D-012@v2
+全文：.sillyspec/changes/archive/2026-10-26-session-change-progress-hover/requirements.md#FR-08
+最近确认：33f4154a3

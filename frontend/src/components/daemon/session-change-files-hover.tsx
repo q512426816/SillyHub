@@ -6,6 +6,14 @@ import { Popover, Select } from "antd";
 
 import { ChangeFileTree } from "@/components/change-file-tree";
 import { WORKFLOW_STAGE_LABELS } from "@/components/changes/detail/change-stage-header";
+import {
+  ChangeProgressRow,
+  type ChangeSummaryWithProgress,
+} from "@/components/daemon/change-progress-row";
+import {
+  ChangeTotalProgressRing,
+  pickLatestActive,
+} from "@/components/daemon/change-total-progress-ring";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -150,6 +158,9 @@ export function SessionChangeFilesHover({
         </span>
         <span className="ml-auto">{shortTime(c.updated_at)}</span>
       </div>
+      {/* task-10（FR-01~04）：非归档项内嵌进度行（全量 5 圈/轻量相位双分支；
+          数据缺失组件自降级 null）。归档项不挂（D-009@v1 终态无信息量）。 */}
+      {!isArchivedChange(c) && <ChangeProgressRow change={c as ChangeSummaryWithProgress} />}
     </button>
   );
 
@@ -210,12 +221,20 @@ export function SessionChangeFilesHover({
           变更
           <span
             data-testid="session-change-count"
-            className={`rounded-full bg-emerald-600 px-1.5 text-[10px] font-bold leading-4 text-white ${
-              running && active.length > 0 ? "animate-pulse" : ""
-            }`}
+            className={`rounded-full px-1.5 text-[10px] font-bold leading-4 text-white ${
+              active.length > 0
+                ? "bg-blue-600"
+                : "bg-emerald-600"
+            } ${running && active.length > 0 ? "animate-pulse" : ""}`}
           >
             {active.length}
           </span>
+          {/* task-10（FR-05 / D-013@v1）：入口旁单个总进度圈——最新进行中一个
+              （updated_at 显式重排选取），数据缺失环不渲染（按钮区不受影响）。 */}
+          {(() => {
+            const ringTarget = pickLatestActive(active as ChangeSummaryWithProgress[]);
+            return ringTarget ? <ChangeTotalProgressRing change={ringTarget} /> : null;
+          })()}
         </Button>
       </Popover>
 

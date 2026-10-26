@@ -884,10 +884,10 @@ describe('task-07 心跳携带：终态窗口内每跳携带、过期后键不�
     // statusError / 10 status_map，2026-09-08 总览工作区级化；第 11 machineId，
     // d6fabf408 tool-report task-02 尾参）——length 断言从 7/4 时代更新；
     // commandResult 仍第 7 参（index 6）。
-    expect(h.heartbeatMock.mock.calls[0]!.length).toBe(12); // task-02 machine-id 尾参 + 2026-10-23-session-network-context 网卡尾参（network_interfaces，11→12）（machineId undefined 占位）使平铺形态 10→11（d6fabf408，daemon-heartbeat 先例同款）
+    expect(h.heartbeatMock.mock.calls[0]!.length).toBe(13); // task-07 thin-flows 尾参（12→13，2026-10-26-session-change-progress-hover）; // task-02 machine-id 尾参 + 2026-10-23-session-network-context 网卡尾参（network_interfaces，11→12）（machineId undefined 占位）使平铺形态 10→11（d6fabf408，daemon-heartbeat 先例同款）
     expect(h.heartbeatMock.mock.calls[0]![6]).toEqual(expected);
     // 窗口内每跳都携带（latest-wins 单槽重复发送）。
-    expect(h.heartbeatMock.mock.calls[1]!.length).toBe(12); // task-02 machine-id 尾参 + 2026-10-23-session-network-context 网卡尾参（network_interfaces，11→12）（machineId undefined 占位）使平铺形态 10→11（d6fabf408，daemon-heartbeat 先例同款）
+    expect(h.heartbeatMock.mock.calls[1]!.length).toBe(13); // task-07 thin-flows 尾参（12→13，2026-10-26-session-change-progress-hover）; // task-02 machine-id 尾参 + 2026-10-23-session-network-context 网卡尾参（network_interfaces，11→12）（machineId undefined 占位）使平铺形态 10→11（d6fabf408，daemon-heartbeat 先例同款）
     expect(h.heartbeatMock.mock.calls[1]![6]).toEqual(expected);
   });
 
@@ -895,11 +895,11 @@ describe('task-07 心跳携带：终态窗口内每跳携带、过期后键不�
     const h = makeHeartbeatCommandHarness();
     await h.manager.runGhostCleanup();
     await expect(h.sendHeartbeatOnce()).resolves.toBe(true);
-    expect(h.heartbeatMock.mock.calls[0]!.length).toBe(12); // task-02 machine-id 尾参 + 2026-10-23-session-network-context 网卡尾参（network_interfaces，11→12）（machineId undefined 占位）使平铺形态 10→11（d6fabf408，daemon-heartbeat 先例同款）
+    expect(h.heartbeatMock.mock.calls[0]!.length).toBe(13); // task-07 thin-flows 尾参（12→13，2026-10-26-session-change-progress-hover）; // task-02 machine-id 尾参 + 2026-10-23-session-network-context 网卡尾参（network_interfaces，11→12）（machineId undefined 占位）使平铺形态 10→11（d6fabf408，daemon-heartbeat 先例同款）
     h.advance(SILLYSPEC_TERMINAL_WINDOW_MS); // 时钟注入过 10min（不真等）
     await expect(h.sendHeartbeatOnce()).resolves.toBe(true);
     const call = h.heartbeatMock.mock.calls[1]!;
-    expect(call.length).toBe(12); // task-02 machine-id 尾参 + 2026-10-23-session-network-context 网卡尾参（network_interfaces，11→12）（machineId undefined 占位）使平铺形态 10→11（d6fabf408，daemon-heartbeat 先例同款）
+    expect(call.length).toBe(13); // task-07 thin-flows 尾参（12→13，2026-10-26-session-change-progress-hover）; // task-02 machine-id 尾参 + 2026-10-23-session-network-context 网卡尾参（network_interfaces，11→12）（machineId undefined 占位）使平铺形态 10→11（d6fabf408，daemon-heartbeat 先例同款）
     expect(call[4]).toBeUndefined();
     expect(call[5]).toBeUndefined();
     expect(call[6]).toBeUndefined();
@@ -909,7 +909,7 @@ describe('task-07 心跳携带：终态窗口内每跳携带、过期后键不�
     const h = makeHeartbeatCommandHarness();
     await expect(h.sendHeartbeatOnce()).resolves.toBe(true);
     const call = h.heartbeatMock.mock.calls[0]!;
-    expect(call.length).toBe(12); // task-02 machine-id 尾参 + 2026-10-23-session-network-context 网卡尾参（network_interfaces，11→12）（machineId undefined 占位）使平铺形态 10→11（d6fabf408，daemon-heartbeat 先例同款）
+    expect(call.length).toBe(13); // task-07 thin-flows 尾参（12→13，2026-10-26-session-change-progress-hover）; // task-02 machine-id 尾参 + 2026-10-23-session-network-context 网卡尾参（network_interfaces，11→12）（machineId undefined 占位）使平铺形态 10→11（d6fabf408，daemon-heartbeat 先例同款）
     expect(call[6]).toBeUndefined();
   });
 });
@@ -968,7 +968,7 @@ describe('ql-20260911-024 结果落槽即补发心跳：命令完成不等 15s �
     // waitFor 收敛微任务链后心跳恰一次（15s 循环在测试 config 拉满下不会掺入）。
     await vi.waitFor(() => expect(h.heartbeatMock).toHaveBeenCalledTimes(1));
     const call = h.heartbeatMock.mock.calls[0]!;
-    expect(call.length).toBe(12); // task-02 machine-id 尾参 + 2026-10-23-session-network-context 网卡尾参（network_interfaces，11→12）（machineId undefined 占位）使平铺形态 10→11（d6fabf408，daemon-heartbeat 先例同款）
+    expect(call.length).toBe(13); // task-07 thin-flows 尾参（12→13，2026-10-26-session-change-progress-hover）; // task-02 machine-id 尾参 + 2026-10-23-session-network-context 网卡尾参（network_interfaces，11→12）（machineId undefined 占位）使平铺形态 10→11（d6fabf408，daemon-heartbeat 先例同款）
     expect(call[6]).toEqual({
       action: 'resolve',
       change: 'c1',

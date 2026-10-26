@@ -193,6 +193,7 @@
 - sillyspec-manager → [decisions/sillyspec-manager.md](decisions/sillyspec-manager.md)
 - app-admin-pages → [decisions/app-admin-pages.md](decisions/app-admin-pages.md)
 - unmapped → [decisions/unmapped.md](decisions/unmapped.md)
+- components-daemon → [decisions/components-daemon.md](decisions/components-daemon.md)
 
 ## FR 需求索引
 - host-fs-handler → [fr/host-fs-handler.md](fr/host-fs-handler.md)

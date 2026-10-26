@@ -42,6 +42,66 @@ class StepProgressSummary(BaseModel):
     )  # 当前步 output 截断 200（列表摘要专用；明细全量，Phase 2.4 两层分离）
 
 
+# ── Progress projection DTOs（2026-10-26-session-change-progress-hover task-01，
+#    design 接口定义——会话悬浮框进度展示数据契约，三端按此对齐）──
+
+
+class StageProgressEntry(BaseModel):
+    """主线单阶段进度项（计算投影，非 changes 表列，零 migration）。
+
+    数据源=platform_change_progress.latest_progress 的 stages[]（含
+    started_at/completed_at/revision）×steps[]（status 分组计数）；由
+    service._extract_stage_progress（task-02 领地）提取，enrich_summaries
+    填充 ChangeSummary.stage_progress。CLI 状态原值透传不归一（未知新枚举
+    由前端白名单外兜底，design 盲区#10）；畸形 latest_progress 整体
+    fail-open → stage_progress=None（R-01）。
+    """
+
+    stage: str  # brainstorm|plan|execute|verify|archive（主线 5 阶段）
+    status: str  # CLI 原值：pending|in-progress|completed|failed|blocked|revising|stale
+    steps_total: int  # 该阶段 steps[] 计数（含 waiting/blocked；阶段未初始化为 0）
+    steps_completed: int  # status=completed 计数
+    started_at: str | None  # ISO 原文透传（解析失败保留原串）
+    completed_at: str | None
+    duration_seconds: (
+        int | None
+    )  # 已完成=completed−started；进行中=服务端注入 now−started（R-04 时钟注入）；无 started_at→None
+    revision: int | None  # revising 修订轮次（CLI stages.revision）
+
+
+class TaskProgressSummary(BaseModel):
+    """execute 阶段任务进度（计算投影，非 changes 表列，零 migration）。
+
+    数据源=tasks 表按 change_id IN 单查询批量聚合（task-03 领地，R-03 防
+    N+1）；done=status=="done" 计分子，total 排除 status=="cancelled"。
+    口径=Task 表 n/m（D-005@v1），不用 CLI execute 的 Wave 步骤数。
+    """
+
+    total: int  # 该变更 tasks 行数（排除 cancelled；全 cancelled 为 0，前端显示 — 不除零）
+    done: int  # status=done 计数
+
+
+class ThinFlowProgress(BaseModel):
+    """轻量变更（thin/flow）相位进度（计算投影，非 changes 表列，零 migration）。
+
+    数据源=daemon flow status --json 采集（task-06/07）经 heartbeat
+    sillyspec_status.thin_flows 上行（条目含 workspace_id，D-008@v2），由
+    backend 消费侧归一 phase 四枚举后行锁落 changes.stages["thin_flow"]
+    （task-05 领地，不刷 updated_at——D-014@v1）；enrich_summaries 读侧
+    投影（task-04 领地）。旧 daemon 无该键 → None（前端降级现状，FR-07）。
+    """
+
+    phase: str  # 归一枚举：spec|awaiting_approval|executing|closing（写侧归一，读侧透传）
+    approved: bool  # spec_approved 或 autopilot 任一
+    autopilot: bool  # 用户显式豁免（未批准但可动码）
+    tasks_total: int  # flow status tasksTotal（thin 任务勾选，不依赖 reparse/Task 表）
+    tasks_done: int  # flow status tasksChecked
+    substeps_done: int  # flow status substeps 已 done 计数
+    substeps_total: int  # 恒 8（sillyspec SUBSTEPS 定长：artifacts/ledger/patch/review/probes/distill/archive/events）
+    upgraded: bool  # tier=thick 或 legacy_fallback（升厚→前端切全量渲染，D-007@v1）
+    adopted_from: str | None  # 'brainstorm' 分流出身（前端"自头脑风暴转入"标注，D-006@v1）
+
+
 class StepTimelineEntry(BaseModel):
     """step 级时间线明细项（计算投影，非表列）。
 
@@ -165,6 +225,17 @@ class ChangeSummary(BaseModel):
     # created_at 生命周期口径）。填充逻辑是 task-02/03 领地，本处仅落契约。
     # optional default None（brownfield 安全，旧客户端不读不受影响）。
     usage: UsageSummaryRead | None = None
+    # 2026-10-26-session-change-progress-hover task-01（design FR-01~FR-06）：列表项
+    # 携带三组进度投影。均为计算字段（DTO 层），非 changes 表列（零 migration）；
+    # producer：stage_progress=service._extract_stage_progress 从 latest_progress
+    # stages[]×steps[] 提取（task-02）、task_progress=tasks 表 IN 单查询聚合
+    # （task-03）、thin_flow=change.stages JSON 的 thin_flow 子键读侧投影（task-04，
+    # 写侧=heartbeat thin_flows 行锁落库 task-05）；consumer=前端悬浮框进度行/
+    # 入口总圈（api-types 生成物）。全部 optional default None（brownfield 安全，
+    # 缺失时前端降级现状渲染，FR-07）。填充逻辑是 task-02/03/04 领地，本处仅落契约。
+    stage_progress: list[StageProgressEntry] | None = None
+    task_progress: TaskProgressSummary | None = None
+    thin_flow: ThinFlowProgress | None = None
     updated_at: datetime
 
 

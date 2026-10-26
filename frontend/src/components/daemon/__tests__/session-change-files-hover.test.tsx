@@ -269,3 +269,75 @@ describe("SessionChangeFilesHover（2026-10-13-session-change-files-hover task-0
     expect(screen.getByTestId("session-change-count").textContent).toBe("1");
   });
 });
+
+// ── 2026-10-26-session-change-progress-hover task-10：进度展示接线 ───────────
+
+describe("进度展示接线（task-10 / FR-01~05 / FR-08）", () => {
+  it("active 项内嵌进度行（stage_progress 在场渲染全量 5 圈行）；归档项不挂（D-009）", () => {
+    const withProgress = change({
+      id: "c-p1",
+      change_key: "2026-10-26-prog-full",
+      stage_progress: [
+        { stage: "brainstorm", status: "completed", steps_total: 8, steps_completed: 8, started_at: null, completed_at: null, duration_seconds: 120, revision: null },
+        { stage: "plan", status: "in-progress", steps_total: 4, steps_completed: 2, started_at: null, completed_at: null, duration_seconds: 60, revision: null },
+      ],
+      task_progress: { total: 11, done: 8 },
+    } as unknown as ChangeSummary);
+    const archived = change({
+      id: "c-p2",
+      change_key: "2026-10-26-prog-arch",
+      status: "archived",
+      updated_at: "2026-10-13T12:00:00Z",
+    });
+    mockData([withProgress, archived]);
+
+    render(<SessionChangeFilesHover workspaceId="ws-1" sessionId="s-1" />);
+    // 下拉受控默认收起：先点入口展开（既有用例同款交互）
+    fireEvent.click(screen.getByRole("button", { name: "查看会话关联的变更文件" }));
+    // active 项：进度行渲染（全量变体 + execute 任务计数）
+    const row = screen.getByTestId("change-progress-row");
+    expect(row.dataset.variant).toBe("full");
+    expect(screen.getByTestId("progress-task-count").textContent).toBe("8/11 任务");
+    // 归档项：默认折叠，展开后也无进度行
+    fireEvent.click(screen.getByTestId("session-change-archive-toggle"));
+    expect(screen.getAllByTestId(/session-change-item-/)).toHaveLength(2);
+    expect(screen.queryAllByTestId("change-progress-row")).toHaveLength(1);
+  });
+
+  it("计数徽标双态：active>0 蓝（D-012@v2 blue 固定阶）；全归档保持绿", () => {
+    mockData([activeThin]);
+    const { unmount } = render(
+      <SessionChangeFilesHover workspaceId="ws-1" sessionId="s-1" />,
+    );
+    expect(screen.getByTestId("session-change-count").className).toContain("bg-blue-600");
+    unmount();
+
+    const archivedOnly = change({ id: "c-a1", change_key: "arch-only", status: "archived" });
+    mockData([archivedOnly]);
+    render(<SessionChangeFilesHover workspaceId="ws-1" sessionId="s-1" />);
+    expect(screen.getByTestId("session-change-count").className).toContain("bg-emerald-600");
+    expect(screen.getByTestId("session-change-count").className).not.toContain("bg-blue-600");
+  });
+
+  it("入口总圈：多变更 updated_at 显式重排选取（D-013）；数据缺失环不渲染", () => {
+    const withRatio = change({
+      id: "c-r1",
+      change_key: "2026-10-26-ring-a",
+      updated_at: "2026-10-26T10:00:00Z", // 列表序在前但 updated_at 更旧
+      step_progress: { step_total: 10, steps_completed: 5 },
+    } as unknown as ChangeSummary);
+    const newerNoData = change({
+      id: "c-r2",
+      change_key: "2026-10-26-ring-b",
+      updated_at: "2026-10-26T11:00:00Z", // 最新但无进度数据 → 环不渲染
+    });
+    mockData([withRatio, newerNoData]);
+    const { container } = render(
+      <SessionChangeFilesHover workspaceId="ws-1" sessionId="s-1" />,
+    );
+    // 最新者（ring-b）无口径数据 → 环不渲染（FR-05 降级，按钮区不受影响）
+    expect(screen.queryByTestId("change-total-progress-ring")).toBeNull();
+    expect(screen.getByTestId("session-change-count").textContent).toBe("2");
+    void container;
+  });
+});

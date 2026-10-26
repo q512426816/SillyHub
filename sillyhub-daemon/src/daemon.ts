@@ -167,7 +167,11 @@ import { runLinkedReposSnapshot } from './linked-repos-snapshot.js';
 
 // 2026-09-02-changes-overview-card task-02：heartbeat sillyspec_status 键的载荷
 // 形状（progress 总览摘要），组装时从 manager.getStatusSnapshot() 取。
-import type { SillySpecStatusSummary, SillySpecStatusError } from './sillyspec-manager.js';
+import type {
+  SillySpecStatusSummary,
+  SillySpecStatusError,
+  ThinFlowSummary,
+} from './sillyspec-manager.js';
 // 2026-10-13-change-files-refresh-sync task-02：sillyspec.sync_change RPC 同步
 // 回执通道的执行器返回结构（type-only，manager 不反向依赖 daemon 无环）。
 import type { SillySpecSyncChangeResult } from './sillyspec-manager.js';
@@ -1061,6 +1065,13 @@ interface ClientLike {
      * 保留）；数组（含空）=整包直写。
      */
     networkInterfaces?: NetworkInterfaceInfo[],
+    /**
+     * 2026-10-26-session-change-progress-hover task-07（FR-03 / D-008@v2）：thin
+     * flow 摘要清单（对齐 hub-client heartbeat 末位参数）。undefined/空数组=
+     * sillyspec_status.thin_flows 键不出现（backend 不写不清，FR-07）；非空
+     * 数组=嵌挂 sillyspec_status 载荷（backend 逐变更行锁落库）。
+     */
+    thinFlows?: ThinFlowSummary[],
   ): Promise<unknown>;
   markOffline?(runtimeId: string): Promise<unknown>;
   /**
@@ -6294,6 +6305,16 @@ export class Daemon {
         //（testing-gotchas「共享断言面」②）。
         this._machineId ?? undefined,
         collectNetworkInterfaces(),
+        // 第 13 参（2026-10-26-session-change-progress-hover task-07 / FR-03 /
+        // D-008@v2）：thin flow 摘要清单——manager 内存槽拍平（wsId+change 键控
+        // latest-wins，progress 采集同拍维护）。空槽/typeof 探测兜底（旧测试假
+        // manager 缺该方法）→ undefined（sillyspec_status.thin_flows 键不出现，
+        // backend 不写不清，FR-07）。共享断言面：参长 12→13 已同步四处 length 钉
+        //（daemon-heartbeat-pending / daemon-heartbeat-sillyspec /
+        // sillyspec-platform-command / integration/selfupdate-scenarios×2）。
+        typeof this._sillyspecManager.getThinFlows === 'function'
+          ? this._sillyspecManager.getThinFlows()
+          : undefined,
       );
       // task-05（FR-03）→ task-07 per-daemon：成功 → 清断连计数 + 告警标记。
       // task-06（2026-08-30-daemon-self-heal / D-001）：重置前先捕获降级起点，

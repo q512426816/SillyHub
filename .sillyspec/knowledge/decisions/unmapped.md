@@ -2133,3 +2133,118 @@ supersedes：D-003@v1
 锚点：未记录
 最近确认：5eca947cd15ca5a45a62ff94e1600fdc8e968ec3
 理由：- 风险：①悬挂 Map 在 asAssembled 收窄视图构造点若漏 transfer 会断链（悬挂后恰逢收窄再回填的窗口）——实现时 transferAssemblerInternals 必须同步携带（改动点已列）；②tool_use 建段点有两处（顶层新建 + stub 合并）漏一处则该路径悬挂不回填——测试覆盖 stub 先于 TASK 行形态。③进程退出导致的真僵尸任务（daemon 无终态信号，快照表无记录）本变更**不治**——卡片将统一显示"后台运行中"走秒（一致但仍在走），终态补写属 daemon 侧独立缺陷，建议另立变更（生产 06:22:43 进程退出实证）。 - 放弃方案一：治 DB 排序（backend 落库加二级排序键 seq）——动后端且存量行已乱序，历史数据救不回，前端防御普适，弃。 - 放弃方案二：tool_result 配对处加 taskAsync 豁免（不翻终态）——元数据回填后 metaStatus 优先级已压住显示，配对层再加豁免会让"真完成（同步 Agent）"与"回执（async）"歧义化（回执文本判定脆弱），收益低风险高，弃（endedAt 污染由 FR-02 显示优先级兜住）。 - 放弃方案三：一并修 [TOOL_USE] stdout 行与 tool_call 行双段并存（tool:uuid 孤儿段）——独立缺陷（显示为普通工具行，非本诉求主因），改动面涉及双行合并语义，超 thin 范围，弃（design 记录在案，后续另立）。
+
+## D-unmapped-269@v1 轻量变更耗时口径=总时长
+状态：implemented
+变更：2026-10-26-session-change-progress-hover
+原编号：D-001@v1
+锚点：未记录
+最近确认：33f4154a3
+理由：显示总时长（创建 → 最后活跃），本次不做相位级耗时。
+
+## D-unmapped-270@v1 全量异常态=异色圈+状态字
+状态：implemented
+变更：2026-10-26-session-change-progress-hover
+原编号：D-002@v1
+锚点：未记录
+最近确认：33f4154a3
+理由：异常态圈变警示色 + 小字状态标注（如「等输入」「修订中 r2」「已失效」「阻断」「失败」），已完成占比退居其次。
+
+## D-unmapped-271@v1 进度展示位置=下拉项内嵌+入口旁单个总进度圈
+状态：implemented
+变更：2026-10-26-session-change-progress-hover
+原编号：D-003@v1
+锚点：未记录
+最近确认：33f4154a3
+理由：下拉列表每项内嵌进度行（全量 5 圈横排/轻量 ①②③ 相位行）+ 悬浮框「变更」按钮旁仅露**单个总进度圈**——只展示最新进行中（updated_at 最新非归档）的一个变更；全量与轻量统一为总进度圈口径（全量=总步骤完成占比，轻量=按相位/任务归一的总完成度）。
+故障面：入口圈依赖 active 列表排序，列表查询失败时圈不渲染（降级现状计数徽标，无遮蔽性故障）
+退役判据：用户反馈入口圈信息冗余（与计数徽标重复）时可移除，下拉项内嵌进度行不受影响
+
+## D-unmapped-272@v1 数据链路=方案A后端投影扩展
+状态：implemented
+变更：2026-10-26-session-change-progress-hover
+原编号：D-004@v1
+锚点：未记录
+最近确认：33f4154a3
+理由：方案 A：全量细度在 backend enrich_summaries 从 latest_progress 提取（每阶段步骤分组+耗时）；轻量由 daemon 补采集 flow status --json 经 heartbeat 上行后投影进 ChangeSummary；前端单点消费现有 15s 轮询。
+故障面：latest_progress 畸形/缺字段时投影 fail-open（R-01），新增失败模式仅为「进度字段空导致前端降级」，不触及既有列表渲染路径
+退役判据：若后续平台改为事件驱动进度（SSE/WebSocket 推送），本投影提取器可整体下线，DTO 字段保持 optional 兼容
+
+## D-unmapped-273@v1 execute 阶段圈口径=Task 表 n/m
+状态：implemented
+变更：2026-10-26-session-change-progress-hover
+原编号：D-005@v1
+锚点：未记录
+最近确认：33f4154a3
+理由：execute 圈按 Task 表聚合 done/total 展示「n/m 任务」，不用 Wave 步骤数。
+
+## D-unmapped-274@v1 brainstorm→thin 分流态归轻量渲染
+状态：implemented
+变更：2026-10-26-session-change-progress-hover
+原编号：D-006@v1
+锚点：未记录
+最近确认：33f4154a3
+理由：归轻量渲染（①②③ 相位行）+ 小字「自头脑风暴转入」标注；不走全量 5 圈。
+
+## D-unmapped-275@v1 升厚变更切换全量渲染+标注
+状态：implemented
+变更：2026-10-26-session-change-progress-hover
+原编号：D-007@v1
+锚点：未记录
+最近确认：33f4154a3
+理由：显示「已升厚→走全量」标注并切换为全量 5 阶段圈渲染。
+
+## D-unmapped-276@v2 轻量数据通道=daemon heartbeat 载荷扩展+条目 workspace 维度+backend 全新逐变更写入路径
+状态：implemented
+变更：2026-10-26-session-change-progress-hover
+原编号：D-008@v2
+锚点：未记录
+最近确认：33f4154a3
+理由：①载荷条目加 workspace_id 键（sillyspec_status 是 daemon 实例级全局键、多工作区 status_map 级化，无 workspace 维度无法定位）；②backend 新增逐变更写入路径（既有语义是整包快照直写 daemon_instances，不逐条改 changes 表）：行锁事务 SELECT FOR UPDATE→merge stages["thin_flow"]→UPDATE；③reparse 重建 stages 丢键由下跳 heartbeat 自愈。
+supersedes：D-008@v1
+故障面：行锁事务防 read-modify-write 竞态；自愈窗口 ≤1 心跳周期内 thin_flow 显示为 None（前端降级现状）；新增失败模式无遮蔽性故障
+退役判据：同 D-008@v1（CLI 六表并入协议后整链可移除）
+
+## D-unmapped-277@v1 入口圈选取=前端显式 updated_at 重排
+状态：implemented
+变更：2026-10-26-session-change-progress-hover
+原编号：D-013@v1
+锚点：未记录
+最近确认：33f4154a3
+理由：不可用——前端显式按 updated_at 取 max 重排选取，禁用列表序直接取首。
+
+## D-unmapped-278@v1 heartbeat thin_flow 写入不刷 changes.updated_at
+状态：implemented
+变更：2026-10-26-session-change-progress-hover
+原编号：D-014@v1
+锚点：未记录
+最近确认：33f4154a3
+理由：写 stages["thin_flow"] 不刷 changes.updated_at——updated_at 语义保持"最后变更元数据变更"。
+
+## D-unmapped-279@v1 已归档项不渲染进度行
+状态：implemented
+变更：2026-10-26-session-change-progress-hover
+原编号：D-009@v1
+锚点：未记录
+最近确认：33f4154a3
+理由：不渲染——终态无信息量，保持现状名称+时间。
+
+## D-unmapped-280@v1 落选方案B（前端按需拉详情）
+状态：rejected
+变更：2026-10-26-session-change-progress-hover
+原编号：D-010@v1
+锚点：未记录
+最近确认：33f4154a3
+理由：否决。
+否决理由：下拉 N 个变更项=N+1 请求，15s 轮询下放大；悬浮框紧凑场景逐项延迟可见；数据口径散在两端。
+复潮条件：变更列表项数百级、ChangeSummary 载荷成为瓶颈时重新评估。
+
+## D-unmapped-281@v1 落选方案C（daemon SSE 实时推）
+状态：rejected
+变更：2026-10-26-session-change-progress-hover
+原编号：D-011@v1
+锚点：未记录
+最近确认：33f4154a3
+理由：否决。
+否决理由：会话 SSE 是会话域事件流，混入变更进度域语义膨胀；daemon 离线时前端无数据；15s 轮询对进度展示足够。
+复潮条件：用户对进度实时性提出秒级要求且接受通道语义扩展时重议。
