@@ -915,7 +915,14 @@ export function SessionPanelDialog(props: SessionPanelProps) {
               if (!event.run_id || !event.phase) return;
               setView((prev) => ({
                 ...prev,
-                turns: applyTurnPhase(prev.turns, event.run_id, event.phase ?? ""),
+                turns: applyTurnPhase(
+                  prev.turns,
+                  event.run_id,
+                  event.phase ?? "",
+                  // 2026-10-26-turn-phase-orphan-fallback FR-01：竞态回退——事件
+                  // 先于占位轮替换到达时写当前活跃轮。
+                  prev.currentRunId,
+                ),
               }));
             },
           }),

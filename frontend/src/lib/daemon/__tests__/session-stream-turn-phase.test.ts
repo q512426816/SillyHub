@@ -16,6 +16,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import {
   applyTurnPhase,
   clearTurnPhase,
+  replacePlaceholderTurn,
 } from "@/components/daemon/session-panel/turn-state";
 import type { SessionTurnView } from "@/components/daemon/turn-timeline";
 import type { FetchSseConnection } from "@/lib/fetch-sse";
@@ -195,6 +196,57 @@ describe("applyTurnPhase（FR-04 / D-013①②）", () => {
     const turns = [makeTurn("run-1")];
     expect(applyTurnPhase(turns, null, "ready")).toBe(turns);
     expect(applyTurnPhase(turns, undefined, "ready")).toBe(turns);
+  });
+});
+
+// ── orphan-fallback（2026-10-26-turn-phase-orphan-fallback FR-01/02/04）──────
+
+describe("applyTurnPhase 竞态回退（事件跑赢占位轮替换）", () => {
+  it("FR-01 未命中 run_id 时回退写入 currentRunId 指向的活跃轮", () => {
+    // 生产实证形态：占位轮 ph-1（currentRunId 指向）尚未换真实 run_id，
+    // daemon 事件（run-real）先到——原设计丢弃 = 卡「执行器已接收」根因。
+    const turns = [makeTurn("ph-1", { status: "pending" }), makeTurn("run-old")];
+    const next = applyTurnPhase(turns, "run-real", "first_event", "ph-1");
+    expect(next[0]!.currentPhase?.phase).toBe("first_event");
+    expect(next[1]!.currentPhase).toBeUndefined(); // 只写活跃轮，不波及他轮
+  });
+
+  it("FR-01 精确命中优先——回退仅未命中时生效", () => {
+    const turns = [makeTurn("run-active"), makeTurn("ph-1")];
+    const next = applyTurnPhase(turns, "ph-1", "ready", "run-active");
+    expect(next[1]!.currentPhase?.phase).toBe("ready"); // ph-1 精确命中
+    expect(next[0]!.currentPhase).toBeUndefined(); // 回退未触发
+  });
+
+  it("FR-02 无活跃轮（currentRunId 空）维持丢弃不建幽灵轮", () => {
+    const turns = [makeTurn("run-done", { status: "completed" })];
+    const next = applyTurnPhase(turns, "run-late", "ready", null);
+    expect(next).toBe(turns);
+  });
+
+  it("FR-02 currentRunId 指向轮已不在列表（终态清理后）维持丢弃", () => {
+    const turns = [makeTurn("run-1")];
+    const next = applyTurnPhase(turns, "run-late", "ready", "run-gone");
+    expect(next).toBe(turns);
+  });
+
+  it("FR-04 排队轮不接回退——事件只写活跃轮，不建排队轮", () => {
+    // 排队消息（未来 run-q）派发前不是轮：回退只落 currentRunId（run-active）。
+    const turns = [makeTurn("run-active")];
+    const next = applyTurnPhase(turns, "run-q", "inject_received", "run-active");
+    expect(next).toHaveLength(1);
+    expect(next[0]!.currentPhase?.phase).toBe("inject_received");
+  });
+
+  it("FR-03 竞态全链：回退写占位轮 → replacePlaceholderTurn 换真实 id 后 phase 保留", () => {
+    let turns = [makeTurn("ph-1", { status: "pending", prompt: "你好" })];
+    turns = applyTurnPhase(turns, "run-real", "first_event", "ph-1");
+    turns = replacePlaceholderTurn(turns, "ph-1", "run-real", "running");
+    expect(turns[0]!.runId).toBe("run-real");
+    expect(turns[0]!.currentPhase?.phase).toBe("first_event"); // spread 保留
+    // 后续事件按真实 id 精确命中，last-write-wins 继续生效。
+    turns = applyTurnPhase(turns, "run-real", "first_event", "run-real");
+    expect(turns[0]!.currentPhase?.phase).toBe("first_event");
   });
 });
 

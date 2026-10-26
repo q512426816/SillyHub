@@ -1,0 +1,36 @@
+tier: thin
+legacy_fallback: false
+substeps: {}
+born_face: thin
+with_tasks: false
+review_force: null
+input: >-
+  阶段事件竞态丢弃修复:turn_phase 事件按 run_id 精确匹配未命中时改为回退归属到当前唯一活跃轮(占位轮)。背景:生产实证(会话 221ac351/1f0836a1)daemon 每轮正常上报(TRACE
+  记点成对铁证),但前端 applyTurnPhase 在事件跑赢 HTTP 响应(占位轮尚未换成真实 run_id)时按设计丢弃孤 phase→间歇性永远卡「执行器已接收」超时警示;本机 daemon
+  事件路径快,竞态高发。已与用户确认方案:回退活跃轮(借平台单会话单活跃 run 不变式,零缓存零 TTL),否决暂存池方案(补丁性质,TTL/补写钩子复杂度)。
+
+
+  成功标准：
+
+  - applyTurnPhase 未命中 run_id 时必须回退写入当前唯一 pending/running/interrupting 轮(currentRunId 指向),禁止静默丢弃该事件
+
+  - 无活跃轮时(断线重连迟到事件等)必须维持丢弃,禁止创建幽灵轮(原设计不变)
+
+  - replacePlaceholderTurn 换真实 run_id 时 currentPhase 必须保留(spread 已保留,测试锁定)
+
+  - 排队轮(非活跃)必须不接回退事件
+
+  - 竞态用例(事件先于 HTTP 响应到达)与既有 turn_phase 前端单测全绿
+autopilot: false
+prestage_ack: true
+baseline_commit: f8d6db60af6d40416709c57f4719802dbc28ace5
+updatedAt: '2026-10-26T07:09:15.016Z'
+cross_baselines:
+  sillyspec: 67e50bcca2adb9ecd502d12086c0ac8cb994da84
+baseline_sha256: 316dee67e0cfd97f6c7e52c3144f4b19a42ecc21bb3dbaa1879f1fad9cff3d50
+spec_approved: true
+spec_approved_at: '2026-10-26T07:09:15.016Z'
+spec_approved_by: anon@DESKTOP-HJ0AM09
+spec_approved_channel: user-confirmed
+spec_attested_by: anon@DESKTOP-HJ0AM09
+

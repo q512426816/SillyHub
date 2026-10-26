@@ -93,13 +93,22 @@ export interface TurnPhaseState {
 /**
  * turn_phase 事件 → 轮状态 currentPhase 写入（last-write-wins，乱序到达按事件
  * 序覆盖）；按 runId 归属路由（含 realRunId 匹配），未命中既有轮时**不建轮**
- * （phase 不是轮存在性信号——轮由 turn_started/log 创建，孤 phase 丢弃）。
- * 返回新数组（不可变更新）；未命中/无 runId 原样返回。
+ * （phase 不是轮存在性信号——轮由 turn_started/log 创建）。
+ *
+ * 2026-10-26-turn-phase-orphan-fallback FR-01/02/04：未命中时不再静默丢弃——
+ * 若 currentRunId 指向活跃轮（发送后 HTTP 响应未回、占位轮尚未换真实 run_id
+ * 的竞态窗口——事件跑赢响应被丢弃 = 生产实证卡「执行器已接收」超时的根因），
+ * 回退写入该活跃轮；无活跃轮回退不命中时维持原丢弃（断线重连迟到事件，防
+ * 幽灵轮原语义不变）。回退只认 currentRunId（单会话单活跃 run 不变式，
+ * decisions D-001 反例排查：子代理/团队/steering/排队均不构成多活跃轮），不
+ * 做模糊匹配。replacePlaceholderTurn 以对象展开保留 currentPhase（FR-03）。
+ * 返回新数组（不可变更新）；无 runId / 全程未命中原样返回。
  */
 export function applyTurnPhase(
   turns: SessionTurnView[],
   runId: string | null | undefined,
   phase: string,
+  currentRunId?: string | null,
 ): SessionTurnView[] {
   if (!runId) return turns;
   const at = Date.now();
@@ -111,7 +120,22 @@ export function applyTurnPhase(
     }
     return t;
   });
-  return hit ? next : turns;
+  if (hit) return next;
+  // FR-01 竞态回退：事件带真实 run_id 先于占位轮替换到达 → 写当前活跃轮。
+  // FR-04：排队轮不在 currentRunId 指向内（它尚未建轮），天然不接回退事件。
+  if (currentRunId) {
+    let fallbackHit = false;
+    const fallback = turns.map((t) => {
+      if (t.runId === currentRunId) {
+        fallbackHit = true;
+        return { ...t, currentPhase: { phase, at } };
+      }
+      return t;
+    });
+    if (fallbackHit) return fallback;
+  }
+  // FR-02：无活跃轮（断线重连迟到事件等）维持丢弃，不建幽灵轮。
+  return turns;
 }
 
 /**
