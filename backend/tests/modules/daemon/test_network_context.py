@@ -330,6 +330,40 @@ def test_render_no_network_data_wording():
     assert "大概率可直连" not in text  # 无数据不得输出可达性推断（指引行不算）
 
 
+def test_render_nat_form_no_unavailable_claim():
+    """2026-10-26-turn-phase-prod-fix FR-04 回归锁（生产实证形态）：
+    observed=公网出口 IP、网卡全内网（NAT）→ 低置信标注与地址候选并存，
+    禁止出现「拼地址信息不可用」（与地址建议自相矛盾）。"""
+    from app.modules.daemon.session.network_context import MachineNetworkInfo
+
+    machine = MachineNetworkInfo(
+        daemon_id="d-nat",
+        name="平台源码本地服务器",
+        online=True,
+        observed_ip="112.2.37.34",  # 公网出口（NAT 后）
+        interfaces=[
+            {"name": "eth0", "ip": "10.10.128.145", "cidr": "10.10.128.145/16", "family": "IPv4"},
+            {
+                "name": "vEthernet",
+                "ip": "172.23.144.1",
+                "cidr": "172.23.144.1/20",
+                "family": "IPv4",
+            },
+        ],
+    )
+    text = _render("112.2.37.34", [machine])  # 用户同 NAT 出口
+    assert "低置信" in text  # 观测 IP 不在任何网卡段 → 近似判定保留低置信
+    assert "疑似经路由器 NAT 出口" in text
+    assert "访问地址建议用 10.10.128.145" in text  # 候选照常给
+    assert "拼地址信息不可用" not in text  # FR-04：与建议并存时禁止断言不可用
+
+
+def test_render_no_nics_keeps_unavailable_claim():
+    """FR-04 反向锁：interfaces 为空（真无网卡数据）→ 「拼地址信息不可用」保留。"""
+    text = _render("192.168.1.23", [_machine(observed="192.168.1.10", ips=())])
+    assert "拼地址信息不可用" in text
+
+
 def test_render_low_confidence_without_interfaces():
     """FR-05：机器无网卡数据 → /24 与 /16 双档近似 + 低置信标注。"""
     text = _render("192.168.0.7", [_machine(observed="192.168.1.10", ips=())])

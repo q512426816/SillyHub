@@ -164,7 +164,16 @@ def _machine_line(machine: MachineNetworkInfo, user_ip: str | None) -> str:
             "与用户同网段，大概率可直连该机服务" if same else "与用户不同网段，用户浏览器无法直连"
         )
         if low_conf:
-            verdict += "（低置信：仅观测 IP 判定，无网卡掩码，按默认掩码近似；拼地址信息不可用）"
+            # 2026-10-26-turn-phase-prod-fix FR-04：低置信两态拆分——「拼地址信息
+            # 不可用」在且仅在无网卡数据时出现；NAT 形态（观测 IP 不属于任何网卡
+            # 网段，如家用路由器出口公网 IP + 内网网卡）与地址候选并存时禁止断言
+            # 不可用（生产实证自相矛盾：说不可用又给建议，agent 无所适从）。
+            if machine.interfaces:
+                verdict += "（低置信：观测 IP 与网卡网段不匹配（疑似经路由器 NAT 出口），按默认掩码近似判定）"
+            else:
+                verdict += (
+                    "（低置信：仅观测 IP 判定，无网卡数据，按默认掩码近似；拼地址信息不可用）"
+                )
     else:
         verdict = "用户来源 IP 非 IPv4 或缺失，无法判定网段关系"
     addr, note = _pick_address(machine)
