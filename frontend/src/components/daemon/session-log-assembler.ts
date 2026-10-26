@@ -1458,7 +1458,15 @@ export function applyLogToSegments(
       turnStartedAt: turn.turnStartedAt,
       seenLogIds: recordSeenLogId(turn.seenLogIds, input.logId),
     };
-    attachInternals(next, cell, idIndex, superseded);
+    // 2026-10-26-subagent-task-meta-restore：override 分支同为主路径式字面量构造，
+    // 悬挂表显式携带（断链防御一致性——所有 attachInternals 点都带全 internals）。
+    attachInternals(
+      next,
+      cell,
+      idIndex,
+      superseded,
+      (turn as AssembledTurn & AssemblerInternalsCarrier)[PENDING_TASK_METAS] ?? null,
+    );
     if (input.logId) applyResultMemo.set(turn.seenLogIds, { logId: input.logId, next });
     return next;
   }
@@ -1505,7 +1513,15 @@ export function applyLogToSegments(
         turnStartedAt: turn.turnStartedAt ?? parseLogTs(input.timestamp),
         seenLogIds: recordSeenLogId(turn.seenLogIds, input.logId),
       };
-      attachInternals(nextTurn, cell, idIndex);
+      // 2026-10-26-subagent-task-meta-restore：即时命中分支字面量构造，悬挂表
+      // 显式携带——两子代理交错排列实证（A 的即时 TASK 行处理后丢 B 的悬挂）。
+      attachInternals(
+        nextTurn,
+        cell,
+        idIndex,
+        (turn as AssembledTurn & AssemblerInternalsCarrier)[SUPERSEDED_SEG_IDS] ?? null,
+        (turn as AssembledTurn & AssemblerInternalsCarrier)[PENDING_TASK_METAS] ?? null,
+      );
       if (input.logId) {
         applyResultMemo.set(turn.seenLogIds, { logId: input.logId, next: nextTurn });
       }
@@ -1872,6 +1888,10 @@ export function applyLogToSegments(
     cell,
     idIndex,
     (turn as AssembledTurn & AssemblerInternalsCarrier)[SUPERSEDED_SEG_IDS] ?? null,
+    // 2026-10-26-subagent-task-meta-restore：主路径 next 为字面量构造（spread 之外的
+    // 显式字段），悬挂表同 superseded 一样须经 attachInternals 显式携带——漏传
+    // 即悬挂跨行断链（排列 task→result→call 实证：result 行处理后 Map 丢失）。
+    (turn as AssembledTurn & AssemblerInternalsCarrier)[PENDING_TASK_METAS] ?? null,
   );
   if (input.logId) applyResultMemo.set(turn.seenLogIds, { logId: input.logId, next });
   return next;

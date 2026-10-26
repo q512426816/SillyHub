@@ -93,6 +93,14 @@ const DISPATCH_RAW_GHOST = JSON.stringify({
   success: true,
 });
 
+/** 同上：第三个派发段（tool_use_id = tu_bg2，两子代理交错排列用例）。 */
+const DISPATCH_RAW_B2 = JSON.stringify({
+  tool: "Task",
+  args: { description: "并行调研 B" },
+  tool_use_id: "tu_bg2",
+  success: true,
+});
+
 const T0 = "2026-08-27T09:00:00.000Z";
 const T1 = "2026-08-27T09:00:01.000Z";
 const T2 = "2026-08-27T09:00:02.000Z";
@@ -393,6 +401,104 @@ describe("[TASK_*] 孤儿行丢弃（task-11：找不到段不崩，不建 stub 
     expect(toolById(turn.segments, "tu_bg")).toMatchObject({
       taskStatus: "stopped",
       taskElapsedMs: 7000,
+    });
+  });
+});
+
+/* ───────── 5a. 同毫秒乱序排列（2026-10-26-subagent-task-meta-restore） ───────── */
+
+/**
+ * 生产实证（会话 83a96b92，2026-10-26 06:18 UTC）：daemon 同一毫秒批量落库
+ * tool_call JSON / [TASK_STARTED] / [TOOL_RESULT]（async 回执），DB 无二级排序键，
+ * 历史回放喂入顺序不定——TASK 行先于 tool_call 段建立时原实现直接丢弃，段元数据
+ * 永久丢失 + async 回执按"桶内最近未配对段"配对翻成假终态（生产复现：三段
+ * taskStatus=null / durationText "00:08"）。本组用例锁定悬挂回填后**任意排列
+ * 均收敛到同一元数据终态**（排列不变性）。
+ */
+describe("[TASK_*] 同毫秒乱序排列（悬挂回填，2026-10-26-subagent-task-meta-restore）", () => {
+  const SAME_TS = "2026-10-26T06:18:11.800Z";
+
+  function ghostLogs(order: string[]): AssembledTurn {
+    const rows: Record<string, AssemblerLogInput> = {
+      call: makeLog("g1", "tool_call", DISPATCH_RAW_GHOST, { timestamp: SAME_TS }),
+      task: makeLog("g2", "stdout", '[TASK_STARTED] {"task_id":"bg-g","async":true}', {
+        parentToolUseId: "tu_ghost",
+        timestamp: SAME_TS,
+      }),
+      result: makeLog("g3", "stdout", "Async agent launched successfully", {
+        parentToolUseId: "tu_ghost",
+        timestamp: SAME_TS,
+      }),
+    };
+    return applyAll(order.map((k) => rows[k]!));
+  }
+
+  /** 元数据终态口径（排列无关的收敛断言目标）。 */
+  function metaOf(turn: AssembledTurn): Pick<
+    ToolTurnSegment,
+    "taskStatus" | "taskAsync" | "taskTaskId" | "status" | "endedAt"
+  > {
+    const seg = toolById(turn.segments, "tu_ghost");
+    return {
+      taskStatus: seg.taskStatus,
+      taskAsync: seg.taskAsync,
+      taskTaskId: seg.taskTaskId,
+      status: seg.status,
+      endedAt: seg.endedAt,
+    };
+  }
+
+  it("TASK_STARTED 先于 tool_call 段建立 → 悬挂回填：元数据在段上（running/async）", () => {
+    const turn = ghostLogs(["task", "call", "result"]);
+    expect(metaOf(turn)).toMatchObject({
+      taskStatus: "running",
+      taskAsync: true,
+      taskTaskId: "bg-g",
+    });
+  });
+
+  it("常态排列（call → task → result）零回归：即时路径元数据同值", () => {
+    const turn = ghostLogs(["call", "task", "result"]);
+    expect(metaOf(turn)).toMatchObject({
+      taskStatus: "running",
+      taskAsync: true,
+      taskTaskId: "bg-g",
+    });
+  });
+
+  it("排列不变性：三排列的段元数据终态逐字段一致（悬挂消费后悬挂表清空）", () => {
+    const canonical = metaOf(ghostLogs(["call", "task", "result"]));
+    for (const order of [
+      ["task", "call", "result"],
+      ["call", "result", "task"],
+      ["task", "result", "call"],
+    ]) {
+      expect(metaOf(ghostLogs(order))).toStrictEqual(canonical);
+    }
+  });
+
+  it("两子代理交错排列（并行派发生产形态）：各段元数据互不串桶", () => {
+    const turn = applyAll([
+      makeLog("a1", "tool_call", DISPATCH_RAW, { timestamp: SAME_TS }),
+      // B 的 STARTED 先到（B 段未建 → 悬挂）
+      makeLog("b2", "stdout", '[TASK_STARTED] {"task_id":"bg-b","async":true}', {
+        parentToolUseId: "tu_bg2",
+        timestamp: SAME_TS,
+      }),
+      makeLog("a3", "stdout", '[TASK_STARTED] {"task_id":"bg-a","async":true}', {
+        parentToolUseId: "tu_bg",
+        timestamp: SAME_TS,
+      }),
+      // B 的 tool_call 到达 → 悬挂回填
+      makeLog("b4", "tool_call", DISPATCH_RAW_B2, { timestamp: SAME_TS }),
+    ]);
+    expect(toolById(turn.segments, "tu_bg")).toMatchObject({
+      taskStatus: "running",
+      taskTaskId: "bg-a",
+    });
+    expect(toolById(turn.segments, "tu_bg2")).toMatchObject({
+      taskStatus: "running",
+      taskTaskId: "bg-b",
     });
   });
 });
