@@ -1,0 +1,51 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-26-subagent-card-width-unify",
+  "rows": [
+    {
+      "anchor": "FR-01",
+      "row_id": "2026-10-26-subagent-card-width-unify:flow:测试绑定FR-01",
+      "tests": [
+        "frontend/src/components/daemon/__tests__/turn-segment-views.test.tsx「子代理卡与团队分身卡根容器限宽断言（max-w-[calc(100%-120px)] + self-start）」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-26-subagent-card-width-unify"
+    },
+    {
+      "anchor": "FR-02",
+      "row_id": "2026-10-26-subagent-card-width-unify:flow:测试绑定FR-02",
+      "tests": [
+        "frontend/src/components/daemon/__tests__/turn-segment-views.test.tsx「工具/思考/警告行根容器限宽断言（max-w-[calc(100%-120px)]）」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-26-subagent-card-width-unify"
+    },
+    {
+      "anchor": "FR-03",
+      "row_id": "2026-10-26-subagent-card-width-unify:flow:测试绑定FR-03",
+      "tests": [
+        "frontend/src/components/daemon/__tests__/turn-segment-views.test.tsx「套件全绿（vitest run 该文件 + 既有断言零冲突）」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-26-subagent-card-width-unify"
+    }
+  ]
+}

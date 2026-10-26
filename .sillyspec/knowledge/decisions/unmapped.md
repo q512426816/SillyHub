@@ -2117,3 +2117,11 @@ supersedes：D-003@v1
 锚点：未记录
 最近确认：65081d429e74019db614c9b39035464c74bd4be2
 理由：前提=平台「单会话单活跃 run」硬不变式。反例逐一排查：①跨轮子代理——parent_tool_use_id 归属派生轮，是轮内事件不建轮，不产生 turn_phase；②团队分身——parent_session_id 独立会话树，事件按 agent_session:{id} 频道各自路由；③忙轮守卫——已有活跃轮时后端拒绝新 run（DaemonSessionTurnConflict）或转排队（排队消息非活跃轮，派发建轮才活跃）；④steering 中途注入——沿用活跃 run 不建新轮；⑤自动续跑——前轮终态后才建新轮。实现侧保险：回退只写 currentRunId 指向的轮（现有状态机维护，只指向 pending/running/interrupting），不做模糊匹配。
+
+## D-unmapped-267@v1 设计期风险与放弃方案（底稿）
+状态：implemented
+变更：2026-10-26-subagent-card-width-unify
+原编号：D-001@v1
+锚点：未记录
+最近确认：79ceac488b490ddecf30feb415b76ef4788d59bf
+理由：- 风险：既有测试若有锁定 `w-full self-stretch` 全宽形态的断言会假红（预计无——宽度断言只锁 TextSegmentView 的 calc 限宽）；视觉上子代理卡右缘留白变化属统一预期。 - 放弃方案一：连 TurnLiveMarquee bar 变体（`w-[min(100%,52rem)]` 胶囊条）一并统一——它是独立胶囊形态非信息块，用户未点名，避免面扩大，弃（如需另行变更）。 - 放弃方案二：限宽类抽公共常量（如 SEG_MAX_W）——Tailwind JIT 扫描需要完整类名字面量，抽常量会丢样式，必须保持字面量类名，弃。

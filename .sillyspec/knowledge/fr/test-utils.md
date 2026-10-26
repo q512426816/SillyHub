@@ -1762,3 +1762,60 @@ created_at: 2026-10-16T01:30:35.950Z
 摘要：（无场景名）
 全文：.sillyspec/changes/archive/2026-10-26-turn-phase-orphan-fallback/requirements.md#FR-05
 最近确认：65081d429e74019db614c9b39035464c74bd4be2
+
+## FR-test-utils-093 SubagentBlockView 两分支根容器（panel 紧凑卡片与纯展示）限宽统一为 max-w-[calc(100%-120px)]，不再铺满整行
+变更：2026-10-26-subagent-card-width-unify
+状态：active
+摘要：子代理卡不铺满；团队分身卡同步
+全文：.sillyspec/changes/archive/2026-10-26-subagent-card-width-unify/requirements.md#FR-01
+最近确认：79ceac488b490ddecf30feb415b76ef4788d59bf
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-26-subagent-card-width-unify:flow:测试绑定FR-01
+  tests: frontend/src/components/daemon/__tests__/turn-segment-views.test.tsx「子代理卡与团队分身卡根容器限宽断言（max-w-[calc(100%-120px)] + self-start）」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-26-subagent-card-width-unify
+  status: active
+
+## FR-test-utils-094 进度视图工具调用卡（工具段容器）等 agent 侧信息块同步限宽，与文本段左对齐
+变更：2026-10-26-subagent-card-width-unify
+状态：active
+摘要：工具行限宽
+全文：.sillyspec/changes/archive/2026-10-26-subagent-card-width-unify/requirements.md#FR-02
+最近确认：79ceac488b490ddecf30feb415b76ef4788d59bf
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-26-subagent-card-width-unify:flow:测试绑定FR-02
+  tests: frontend/src/components/daemon/__tests__/turn-segment-views.test.tsx「工具/思考/警告行根容器限宽断言（max-w-[calc(100%-120px)]）」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-26-subagent-card-width-unify
+  status: active
+
+## FR-test-utils-095 既有相关测试全绿，宽度断言同步更新
+变更：2026-10-26-subagent-card-width-unify
+状态：active
+摘要：断言锁定
+全文：.sillyspec/changes/archive/2026-10-26-subagent-card-width-unify/requirements.md#FR-03
+最近确认：79ceac488b490ddecf30feb415b76ef4788d59bf
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-26-subagent-card-width-unify:flow:测试绑定FR-03
+  tests: frontend/src/components/daemon/__tests__/turn-segment-views.test.tsx「套件全绿（vitest run 该文件 + 既有断言零冲突）」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-26-subagent-card-width-unify
+  status: active

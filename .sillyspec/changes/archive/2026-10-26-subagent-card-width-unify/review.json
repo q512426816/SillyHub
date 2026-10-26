@@ -1,0 +1,23 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-26-subagent-card-width-unify",
+  "reviewer": "subagent",
+  "verdict": "PASS",
+  "reviewedAgainst": "79ceac488b490ddecf30feb415b76ef4788d59bf",
+  "findings": [
+    {
+      "severity": "P3",
+      "status": "accepted",
+      "title": "测试提交 35891397a 混入另一变更 2026-10-26-turn-phase-prod-fix 的归档暂存件与 spec 文档库更新（18 个非本变更文件）",
+      "evidence": "git show 35891397a --stat 显示除本变更交付面（turn-segment-views.test.tsx + 本变更 tasks.md/task-ticks.jsonl）外还带入 .sillyspec/changes/archive/2026-10-26-turn-phase-prod-fix/ 全套归档件及 .sillyspec/docs、.sillyspec/knowledge 文档——机理为并行会话 git add 留在 index 的内容随本变更 commit 连带落库；混入件全部位于 .sillyspec/ 下，零代码文件（非 .sillyspec 路径仅本变更测试文件本身），不触及 frontend/backend 代码，不影响本变更交付正确性，故记 P3 accepted",
+      "location": ".sillyspec/changes/archive/2026-10-26-turn-phase-prod-fix/ (commit 35891397a)"
+    }
+  ],
+  "dimensionNotes": {
+    "乱序": "ok",
+    "并发": "ok",
+    "切换": "ok",
+    "作用域": "ok"
+  },
+  "reviewedAt": "2026-10-26T15:51:20+08:00"
+}
