@@ -393,9 +393,12 @@ export function SessionPanelDialog(props: SessionPanelProps) {
   // 无 runtime 维度，仅按 workspaceId 区分入口；未传 workspaceId 的消费方回落
   // '-'（同一消费方内部共享，跨工作区不再串台）。真会话（view.sessionId 非空）
   // preScope 被忽略，键仍按 sessionId 组装。
-  const draftHydratedRef = useRef(false);
+  // 写抑制门闩（同 page 模式 2026-10-26-ci-red-to-green 修法）：抑制窗口精确
+  // 等于恢复 commit 本身，由声明序更靠后的第三个 effect 同 commit 放行——原
+  // rAF 放行在高负载下迟到，放行前的首次输入持久化被静默跳过（草稿丢失实证）。
+  const draftRestorePendingRef = useRef(true);
   useEffect(() => {
-    draftHydratedRef.current = false;
+    draftRestorePendingRef.current = true;
     // 2026-10-23-pre-session-draft-persist / FR-01：idle 态（无会话）回读入口
     // 隔离键 __pre__:<workspaceId|'-'> 的未发送草稿（本卡显式反转上一卡
     // session-dialog-input-align 的「恒空白」裁决——用户要求与 page 同步：
@@ -403,20 +406,20 @@ export function SessionPanelDialog(props: SessionPanelProps) {
     // 落 "" 保证）。回读源与真会话键 <sessionId> 无交集，前序「串台」报障
     // 不复潮；真会话（view.sessionId 非空）回读语义零变化。
     setInput(readSessionDraft(view.sessionId, workspaceId ?? '-'));
-    const raf = requestAnimationFrame(() => {
-      draftHydratedRef.current = true;
-    });
-    return () => cancelAnimationFrame(raf);
     // workspaceId 有意不入依赖：prop 在 dialog 生命周期内不变（宿主挂载即定），
     // 入依赖会让 scope 翻转触发额外回读（当前输入被另一 scope 的草稿覆盖）。
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [view.sessionId]);
   useEffect(() => {
-    if (!draftHydratedRef.current) return;
+    if (draftRestorePendingRef.current) return;
     writeSessionDraft(view.sessionId ?? null, input, workspaceId ?? '-');
     // 同上：workspaceId 不入依赖（生命周期内不变；真会话态 preScope 被忽略）。
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [view.sessionId, input]);
+  // 恢复 commit 完成 → 放行写入（声明序在写 effect 之后，效果同 page 模式）。
+  useEffect(() => {
+    draftRestorePendingRef.current = false;
+  }, [view.sessionId]);
 
   /**
    * 2026-10-23-session-dialog-input-align / FR-01 + FR-03：发送受理即清（对齐 page

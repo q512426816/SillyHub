@@ -914,12 +914,16 @@ export function SessionPanelPage({
   // ── ql-20260825-011：输入框草稿持久化（刷新/切换会话不丢）──────────────────
   // 回读：挂载 + sessionId 变化（预会话态无 id 用入口隔离键 __pre__:<scope>，
   // task-01 / D-001——A 入口的未发送内容不再带入 B 入口）。
-  // hydrated 门闩防「回读前先写空串」冲掉已存草稿：restore 先 setInput，rAF 后
-  // 才放行持久化 effect（该 commit 内 input 仍是旧会话的值，不写新会话键）。
+  // 写抑制门闩防「回读前先写旧值串」冲掉已存草稿：restore 先 setInput，写抑制
+  // 仅覆盖恢复 commit 本身（同 commit 内 input 仍是旧会话的值，不写新会话键），
+  // 由声明序更靠后的第三个 effect 同 commit 放行。2026-10-26-ci-red-to-green：
+  // 原实现用 rAF 放行——rAF 是 16ms 定时器，高负载（CI 2 核满载/慢设备流式
+  // 渲染）下迟到，用户/测试在放行前输入的首次持久化被静默跳过（本地 5 文件
+  // 同跑+CI 双轮实证：__pre__:scope 键从未落 AAA，二次挂载回读恒空）。
   // 缺陷修复收口（A-1）：切会话时清 @ 联想选中残留——草稿换装（setInput 非
   // 空新草稿）不触发组件归空复位，会话 A 的绑定会随会话 B 的消息错绑；
   // R-7 语义（草稿只存文本、绑定需重选）在切会话边界同样成立。
-  const draftHydratedRef = useRef(false);
+  const draftRestorePendingRef = useRef(true);
   // task-01（D-001）：预会话草稿入口标识串 = workspaceId 缺省 '-' + runtimeId
   //（形如 "ws-1:rt-claude"）；真会话（sessionId 非空）下 read/writeSessionDraft
   // 忽略该值，键仍按 sessionId 组装。
@@ -927,7 +931,7 @@ export function SessionPanelPage({
     ? `${preContext.workspaceId ?? '-'}:${preContext.runtimeId}`
     : null;
   useEffect(() => {
-    draftHydratedRef.current = false;
+    draftRestorePendingRef.current = true;
     // 2026-10-23-pre-session-draft-persist / FR-01：预会话回读入口隔离键草稿。
     // （本卡显式反转 2026-10-23-session-input-clear-fix 的「恒空白」裁决——
     // 用户实测后要求：未发送的 AAA 切走/刷新再新建要原样显示；清空后重进要为
@@ -937,20 +941,21 @@ export function SessionPanelPage({
     // session-panel-dialog.tsx 同步改读（同卡 FR-01）。
     setInput(readSessionDraft(sessionId, preDraftScope));
     setPendingMentions({});
-    const raf = requestAnimationFrame(() => {
-      draftHydratedRef.current = true;
-    });
-    return () => cancelAnimationFrame(raf);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sessionId]);
   useEffect(() => {
-    if (!draftHydratedRef.current) return;
+    if (draftRestorePendingRef.current) return;
     writeSessionDraft(sessionId, input, preDraftScope);
     // preDraftScope 有意不入依赖：preContext 变化时宿主随 sessionId 重挂载
     //（key 契约），入依赖会引入额外写触发——旧入口输入被迁移写进新入口键，
     // 恰是 D-001 要消除的跨入口串台。
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sessionId, input]);
+  // 恢复 commit 完成 → 放行写入（声明序在本文件写 effect 之后，同一 commit 内
+  // 写 effect 已被上方门闩跳过；效果：写抑制窗口精确等于恢复 commit 本身）。
+  useEffect(() => {
+    draftRestorePendingRef.current = false;
+  }, [sessionId]);
 
   /**
    * 2026-10-23-session-input-clear-fix / FR-01 + FR-03：发送受理即清。
