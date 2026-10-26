@@ -52,6 +52,47 @@ if TYPE_CHECKING:
 
 log = get_logger(__name__)
 
+
+# ── 2026-10-26-session-stage-progress task-01（FR-01 / D-011 / D-009）────────
+# turn_phase 派发段发布：dispatched 挂 enqueue_and_push 下发成功点（WS push
+# 成功与待补拉两路径都发——「已发送·等待执行器领取」语义兼容 pending-for-pull），
+# delivered 挂 ack 回执点（daemon 真实确认，非 mark_delivered 的 WS push 成功
+# 点——两者是状态机不同时刻，daemon 离线补拉时差可达分钟级，D-011）。
+# 发布为纯增强（D-009）：publish_turn_phase_event 内部已吞噬（publish_json_event
+# 底座），await 直发时序确定、测试可断言；payload 反查 session_id/run_id 失败
+# （非轮推进指令/手工造数/旧形状缺键）静默跳过，对齐 gc 联动的防御风格。
+
+
+async def _emit_turn_phase(payload: dict[str, Any] | None, phase: str) -> None:
+    """从控制指令 payload 反查 session_id/run_id 并发布 turn_phase（尽力而为）。
+
+    无 session_id/run_id（permission_response 等非轮推进指令）或形状异常 →
+    跳过不发；发布链路（publish_turn_phase_event → publish_json_event）内部
+    吞噬，异常不外溢，指令状态机时序零影响。
+    """
+    raw_sid = (payload or {}).get("session_id")
+    raw_rid = (payload or {}).get("run_id")
+    try:
+        session_id = uuid.UUID(str(raw_sid))
+        run_id = uuid.UUID(str(raw_rid))
+    except (ValueError, TypeError, AttributeError):
+        log.debug("control_command_turn_phase_skipped_no_ids", phase=phase)
+        return
+    try:
+        from app.modules.daemon.run_sync.service import publish_turn_phase_event
+
+        await publish_turn_phase_event(session_id, run_id, phase)
+    except Exception:
+        # D-009 双保险：helper 内部已吞噬，此处防 import 层面等罕见异常外溢。
+        log.warning(
+            "control_command_turn_phase_publish_failed",
+            session_id=str(session_id),
+            run_id=str(run_id),
+            phase=phase,
+            exc_info=True,
+        )
+
+
 # ── kind 词表（design A2；enqueue 缺省 expires_at 亦按 kind 取值）──────────
 KIND_SESSION_INJECT = "session_inject"
 KIND_SESSION_INTERRUPT = "session_interrupt"
@@ -213,6 +254,11 @@ class ControlCommandService:
         command_id = uuid.uuid4()
         enriched = {**(payload or {}), "command_id": str(command_id)}
         row = await self.enqueue(runtime_id, kind, enriched, command_id=command_id)
+        # turn_phase=dispatched（2026-10-26-session-stage-progress FR-01）：指令
+        # 已落库待发/已发出即「已发送·等待执行器领取」——push 成败都发（待补拉
+        # 照发，词表语义兼容 pending-for-pull）；发布失败不阻断（D-009，helper
+        # 内部吞噬）。
+        await _emit_turn_phase(enriched, "dispatched")
 
         delivered = False
         try:
@@ -349,6 +395,15 @@ class ControlCommandService:
         ]
         if runtime_id is not None:
             conditions.append(col(DaemonControlCommand.runtime_id) == runtime_id)
+        # 快照候选（id+payload）：bulk UPDATE 拿不到行级命中，先取「翻转前仍
+        # pending/delivered」的行，UPDATE 后对快照行发 turn_phase=delivered。
+        # SELECT 与 UPDATE 之间被并发 ack 的行（0 翻转）会多发一次 delivered——
+        # 事件幂等（前端 last-write-wins）可接受，不为对账加第二轮查询。
+        snapshot = (
+            await self._session.execute(
+                select(DaemonControlCommand.id, DaemonControlCommand.payload).where(*conditions)
+            )
+        ).all()
         stmt = (
             update(DaemonControlCommand)
             .where(*conditions)
@@ -359,6 +414,9 @@ class ControlCommandService:
         )
         result = await self._session.execute(stmt)
         await self._session.commit()
+        for _cid, snap_payload in snapshot:
+            # daemon 真实确认点（D-011）：ack 回执 ≠ mark_delivered 的 push 成功。
+            await _emit_turn_phase(snap_payload, "delivered")
         return int(result.rowcount or 0)
 
     async def gc(self, now: datetime) -> ControlCommandGcResult:

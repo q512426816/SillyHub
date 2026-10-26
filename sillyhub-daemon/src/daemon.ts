@@ -113,9 +113,15 @@ import {
   fetchRegisteredAgentLogs,
   pushAgentLogStates,
   type LivenessPushTargetMeta,
+  type TurnPhaseValue,
 } from './hub-client.js';
 import { findTopLevelSectionRange } from './local-yaml-writer.js';
 import { JsonSessionPersistence } from './interactive/session-store-persistence.js';
+
+// 2026-10-26-session-stage-progress task-02（D-013④）：first_event 防重键集合
+// 上限（FIFO 驱逐）——活跃会话数 × 每 run 一键，512 覆盖高频会话场景绰绰有余；
+// 超限驱逐最老键后同 run 重发为幂等事件（前端 last-write-wins），无正确性影响。
+const TURN_PHASE_FIRST_EVENT_MAX = 512;
 // 2026-08-28-fix-cross-machine-worker-dispatch task-05/06（FR-05 / D-004@v1）：
 // interactive 会话 cwd 守卫纯函数——白名单终检 + 存在性判定，daemon.ts 认领段只接线。
 import { checkWorkspaceBoundCwd } from './interactive-cwd-guard.js';
@@ -1165,6 +1171,19 @@ interface ClientLike {
    */
   notifySessionReady(sessionId: string): Promise<void>;
   /**
+   * 2026-10-26-session-stage-progress task-02（FR-02/FR-03）：轮阶段上报。
+   * 运行时真实 _client 为 HubClient 实例（hub-client.ts notifyTurnPhase 已实现，
+   * 与 notifySessionReady 同款 best-effort 语义：失败 HubHttpError/网络异常透传，
+   * 由调用方 reportTurnPhase helper / onTurnMessage 拦截分支 catch 吞噬）。
+   * ClientLike 为 daemon 内部鸭子类型——additive 声明（对齐 getSpecBundle 先例）。
+   */
+  notifyTurnPhase(
+    sessionId: string,
+    runId: string,
+    phase: TurnPhaseValue,
+    detail?: string,
+  ): Promise<Record<string, unknown>>;
+  /**
    * task-06（session-reopen-resume / DS-3 / FR-03）：reopen 恢复成功后向
    * backend 确认 reconnecting → active。可选方法（? 有 markOffline 先例）：
    * reopen 路径经 _routeSessionResume 调用，opts 显式透传 payload 的
@@ -1934,6 +1953,13 @@ export class Daemon {
    * Map 跟随 daemon 实例生命周期（重启即清零，只影响本次终态上报，不落盘）。
    */
   private readonly _assistantMsgCountByRun = new Map<string, number>();
+
+  /**
+   * 2026-10-26-session-stage-progress task-02（D-013④）：first_event 已上报的
+   * (session_id, run_id) 防重键集合（有界 FIFO，防长生命周期进程内存增长；
+   * 超限驱逐最老键——同 run 二次驱逐后的重发为幂等 last-write-wins，无害）。
+   */
+  private readonly _turnPhaseFirstEventReported = new Set<string>();
   /**
    * ql-20260911-028：会话级最后一条完整 assistant 全文（延迟兜底代报数据源）。
    * 写入点两处：onTurnMessage 完整 text 事件（override 晚到场景的唯一来源）+
@@ -4808,6 +4834,46 @@ export class Daemon {
       return;
     }
     const fwdMsg = msg;
+    // 2026-10-26-session-stage-progress task-02（FR-03 / D-009 / D-013④）：turn_phase
+    // 轮内上报桥——session-manager 层（turn-control inject / events onMessage）无
+    // HubClient 访问权，经 deps.onTurnMessage 通道发 ``{type:'turn_phase_report',
+    // phase, detail?}`` 控制标记，daemon 层在此拦截转 notifyTurnPhase（不进
+    // submitMessages 日志轨；同 _emitSessionHeaderReport 走 onTurnMessage 桥先例，
+    // 控制标记与事件轨/flat 消息特征零撞车）。first_event 防重键 (session_id,
+    // run_id) 每 run 至多一次（D-013④，daemon 进程级有界 Set，新 run 天然重置）；
+    // 上报失败仅 debug（D-009：不阻塞消息主链路）。
+    if (fwdMsg['type'] === 'turn_phase_report') {
+      const phase = typeof fwdMsg['phase'] === 'string' ? fwdMsg['phase'] : '';
+      if (phase === 'first_event') {
+        const firstEventKey = `${sessionId}:${runId}`;
+        if (this._turnPhaseFirstEventReported.has(firstEventKey)) {
+          return;
+        }
+        this._turnPhaseFirstEventReported.add(firstEventKey);
+        if (this._turnPhaseFirstEventReported.size > TURN_PHASE_FIRST_EVENT_MAX) {
+          const oldest = this._turnPhaseFirstEventReported.values().next().value;
+          if (oldest !== undefined) this._turnPhaseFirstEventReported.delete(oldest);
+        }
+      }
+      if (phase !== '') {
+        this._client
+          .notifyTurnPhase(
+            sessionId,
+            runId,
+            phase as TurnPhaseValue,
+            typeof fwdMsg['detail'] === 'string' ? fwdMsg['detail'] : undefined,
+          )
+          .catch((e: unknown) => {
+            this._logger.debug('turn_phase_report_failed', {
+              session_id: sessionId,
+              run_id: runId,
+              phase,
+              error: e instanceof Error ? e.message : String(e),
+            });
+          });
+      }
+      return;
+    }
     // task-09：事件轨 dict 识别。_eventToReportDict 恒产 event_type + type 同值 +
     // seq 数字；legacy flat（[TASK_*] 行 / budget_exceeded / Codex flat）无
     // type+seq 对，raw SDK 消息无 event_type/seq——特征不撞车，识别零歧义。
@@ -9387,6 +9453,26 @@ export class Daemon {
       });
     };
 
+    // 2026-10-26-session-stage-progress task-02（FR-02 / D-009 / R-07）：轮阶段
+    // 上报统一 helper——把既有 endStep 计时边界「顺便」发到 backend
+    // （notifyTurnPhase → POST turn-phase → SSE turn_phase 事件）。fire-and-forget
+    // + catch 吞噬（D-009：上报失败仅 debug，不阻塞会话创建主流程；fetch 内部
+    // 非拓扑异常也不外溢）。所有调用点都在本函数下方 `if (!sessionId || !firstRunId
+    // || !prompt)` 非空守卫之后（D-013②：run_id 恒带）；SWR 命中跳过的步骤不发
+    // （design Phase 2）。
+    const reportTurnPhase = (phase: TurnPhaseValue, detail?: string): void => {
+      this._client
+        .notifyTurnPhase(sessionId, firstRunId, phase, detail)
+        .catch((e: unknown) => {
+          this._logger.debug('turn_phase_report_failed', {
+            session_id: sessionId,
+            run_id: firstRunId,
+            phase,
+            error: e instanceof Error ? e.message : String(e),
+          });
+        });
+    };
+
     // 路径映射：backend 在 Docker 容器内跑，spec_root 用容器内路径（如
     // /data/spec-workspaces/{id}）；daemon 跑在宿主机上（Windows/Mac），本地无 /data。
     // spec_root_map 格式 "from:to"，如 "/data/spec-workspaces:C:/data/spec-workspaces"。
@@ -9768,6 +9854,8 @@ export class Daemon {
     // <cwd>/.claude/skills/——不接线则交互式会话看不到技能）。失败仅 warn。
     const skillsStep = async (): Promise<void> => {
       const skillsStart = Date.now();
+      // turn_phase=skills_sync（FR-02）：技能环境准备段发起信号（endStep 处自然收尾）。
+      reportTurnPhase('skills_sync');
       try {
         await linkSkillsToWorkdir(cwd, (level, msg, data) => {
           this._logger[level](msg, data);
@@ -9904,6 +9992,10 @@ export class Daemon {
             // 签名（additive），运行时真实 _client 为 HubClient 实例（main.ts
             // 注入），duck-type 安全（task-06 §4.1/边界 11）——该断言已收进
             // _pullSpecShared，此处不再直调 pullSpecBundle。
+            // turn_phase=spec_sync（FR-02）：仅真拉取分支发——版本新鲜跳过
+            // （skipPullDueToVersion）与 SWR 旧缓存放行（serveStaleSpec）均为
+            // 瞬间完成，无用户可感知阶段（design Phase 2 裁决）。
+            reportTurnPhase('spec_sync');
             const specDir = await this._pullSpecShared(workspaceId, {
               strategy: specStrategy,
               rootPath: specRootPath,
@@ -9970,6 +10062,9 @@ export class Daemon {
             // platform ∪ user 渲染注入集（lease 归属强校验，D-010）。
             // undefined（旧 backend / 归属无法解析）→ 不带参数，端点回落
             // platform only，行为与现状一致（向后兼容）。
+            // turn_phase=mcp_prefetch（FR-02）：仅实际预取分支发（无 workspaceId
+            // 的 quick-chat 空过不发——瞬间完成无用户可感知阶段）。
+            reportTurnPhase('mcp_prefetch');
             const bundle = await fetchMcpBundle(
               this._config.server_url,
               this._config.token,
@@ -10024,6 +10119,9 @@ export class Daemon {
 
     const createStepStart = Date.now();
     try {
+      // turn_phase=spawning（FR-02）：AI 进程启动前信号（SessionManager.create
+      // 调用前——driver spawn 在 create 内同步发生）。
+      reportTurnPhase('spawning');
       await this._sessionManager.create({
         sessionId,
         leaseId,
@@ -10126,6 +10224,8 @@ export class Daemon {
       // /model 空白的时序竞态）。best-effort：notifySessionReady 自身失败 warn 不抛
       //（hub-client.ts 实现），调用点无需 try/catch；catch 块（create 失败）改为
       // 主动回传 run failed（见下方 P2b），不再依赖 backend 兜底。
+      // turn_phase=ready（FR-02）：notifySessionReady 同点位——进程就绪、等待 AI 响应。
+      reportTurnPhase('ready');
       await this._client.notifySessionReady(sessionId);
       // quick-c1ac3c85（SWR）：specStep 挂起的旧缓存后台再验证在此 fire——
       // 会话已确认启动、ready 通知已发（首响关键路径走完），~40s 拉取全程后台。

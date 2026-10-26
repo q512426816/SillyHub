@@ -43,11 +43,19 @@ def _make_running_run() -> AgentRun:
     )
 
 
-async def _add_log(db_session: AsyncSession, run_id: uuid.UUID, age: timedelta) -> None:
+async def _add_log(
+    db_session: AsyncSession,
+    run_id: uuid.UUID,
+    age: timedelta,
+    *,
+    channel: str = "stdout",
+    tool_kind: str | None = None,
+) -> None:
     db_session.add(
         AgentRunLog(
             run_id=run_id,
-            channel="stdout",
+            channel=channel,
+            tool_kind=tool_kind,
             timestamp=datetime.now(UTC) - age,
             content_redacted="[TOOL_USE] bash: echo hi",
         )
@@ -256,6 +264,98 @@ async def test_recheck_unresolvable_daemon_falls_back_to_recency(
     assert refreshed.error_code == "SERVICE_RESTART_INTERRUPTED"
 
 
+# ── 2026-10-26-session-stage-progress task-06（FR-07 / D-014）askwait 豁免 ──
+
+
+@pytest.mark.asyncio
+async def test_recheck_pardons_awaiting_user_input_run_without_lease(
+    db_session: AsyncSession,
+) -> None:
+    """生产实证复刻（会话 388bb823 / run 3b601319）：AskUserQuestion 等待用户
+    回答的轮（最后 ask 信号晚于最后 user_input）+ 无 lease（对话轮 lease 为
+    会话级绑定，inject 注入轮按 run 维度查无 lease，活性门返回 None）+ 日志
+    停滞超宽限窗 → 豁免判死，保持追踪等真终态。与启动清理 askwait 豁免
+    （2026-10-12-stale-run-askwait-fix）同函数同上限，补齐复扫链盲区。"""
+    run = _make_running_run()
+    db_session.add(run)
+    await db_session.commit()
+    # 用户发消息（-2h）→ agent 提问后等待回答（-18min，停滞 18 分钟 > 宽限窗 10 分钟）
+    await _add_log(db_session, run.id, timedelta(hours=2), channel="user_input")
+    await _add_log(
+        db_session,
+        run.id,
+        STALE_RUN_ACTIVE_GRACE + timedelta(minutes=8),
+        channel="tool_call",
+        tool_kind="ask",
+    )
+
+    still = await agent_service._recheck_deferred_runs(db_session, {run.id})
+
+    assert still == {run.id}
+    refreshed = await db_session.get(AgentRun, run.id)
+    assert refreshed is not None
+    assert refreshed.status == "running"
+    assert refreshed.error_code is None
+    assert refreshed.finished_at is None
+
+
+@pytest.mark.asyncio
+async def test_recheck_still_kills_awaiting_user_input_past_24h(
+    db_session: AsyncSession,
+) -> None:
+    """askwait 豁免受 24h 上限约束（_ASKWAIT_EXEMPT_MAX_AGE）：最后 ask 距今
+    超龄 → 回落既有判死路径（防 daemon 真死 + 提问未答 run 永卡 running，
+    与启动清理同款权衡）。"""
+    run = _make_running_run()
+    db_session.add(run)
+    await db_session.commit()
+    # ask 距今 24h5m（超 24h 上限），user_input 更早（-25h）
+    await _add_log(db_session, run.id, timedelta(hours=25), channel="user_input")
+    await _add_log(
+        db_session,
+        run.id,
+        timedelta(hours=24, minutes=5),
+        channel="tool_call",
+        tool_kind="ask",
+    )
+
+    still = await agent_service._recheck_deferred_runs(db_session, {run.id})
+
+    assert still == set()
+    refreshed = await db_session.get(AgentRun, run.id)
+    assert refreshed is not None
+    assert refreshed.status == "failed"
+    assert refreshed.error_code == "SERVICE_RESTART_INTERRUPTED"
+
+
+@pytest.mark.asyncio
+async def test_recheck_still_kills_when_user_input_after_ask(
+    db_session: AsyncSession,
+) -> None:
+    """最后 user_input 晚于最后 ask（用户已回答、回答后静默）→ askwait 不命中，
+    判死照旧——豁免只保护「未回答的等待」，不保护已回答后的真死静默。"""
+    run = _make_running_run()
+    db_session.add(run)
+    await db_session.commit()
+    # agent 提问（-30min）→ 用户回答（-15min，最后日志，停滞 15 分钟 > 宽限窗）
+    await _add_log(
+        db_session,
+        run.id,
+        STALE_RUN_ACTIVE_GRACE + timedelta(minutes=20),
+        channel="tool_call",
+        tool_kind="ask",
+    )
+    await _add_log(db_session, run.id, timedelta(minutes=15), channel="user_input")
+
+    still = await agent_service._recheck_deferred_runs(db_session, {run.id})
+
+    assert still == set()
+    refreshed = await db_session.get(AgentRun, run.id)
+    assert refreshed is not None
+    assert refreshed.status == "failed"
+    assert refreshed.error_code == "SERVICE_RESTART_INTERRUPTED"
+
+
 # ── FR-03 循环韧性 ────────────────────────────────────────────────────────
 
 
@@ -324,11 +424,14 @@ async def test_cleanup_skips_recent_run_without_lock(db_session: AsyncSession) -
             select_statements.append(statement)
         return await original_execute(statement, *args, **kwargs)
 
-    db_session.execute = _spy_execute  # type: ignore[method-assign]
+    # 2026-10-26 提交门既有红修复：两处 type: ignore 在单文件显式传参 mypy 下判
+    # unused（_spy_execute 全 object 签名对 execute 重载天然兼容）——删除；全仓
+    # mypy app 不扫 tests/ 故此前未暴露，CI/hook 单文件面才报。
+    db_session.execute = _spy_execute
     try:
         cleaned = await agent_service._cleanup_stale_runs_impl(db_session)
     finally:
-        del db_session.execute  # type: ignore[attr-defined]
+        del db_session.execute
 
     assert cleaned == 1
     locked_selects = [

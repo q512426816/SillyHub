@@ -5979,6 +5979,35 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/daemon/sessions/{session_id}/turn-phase": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Notify Turn Phase
+         * @description Receive daemon turn-phase report and forward to frontend SSE (FR-02/FR-03).
+         *
+         *     2026-10-26-session-stage-progress task-01：daemon 启动准备段/轮内段边界
+         *     上报（notifyTurnPhase）→ ``publish_turn_phase_event`` 发布 turn_phase 事件
+         *     （payload 键 phase/detail/timestamp 与前端信封逐字对齐，D-012）。
+         *     dispatched/delivered 不收上报——由 backend 控制指令状态机翻转点自产
+         *     （FR-01），phase 枚举在 DTO 层已封闭。
+         *
+         *     越权防护（2026-08-25 P1）：同 notify_bash_status，发布前做 runtime
+         *     归属校验（404 不泄露存在性）。
+         */
+        post: operations["notify_turn_phase_api_daemon_sessions__session_id__turn_phase_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/daemon/sessions/{session_id}/bash-status": {
         parameters: {
             query?: never;
@@ -29015,6 +29044,34 @@ export interface components {
             answer_summary?: string | null;
         };
         /**
+         * TurnPhaseReportRequest
+         * @description daemon 轮阶段上报（2026-10-26-session-stage-progress FR-02/FR-03）。
+         *
+         *     daemon 在启动准备段/轮内段边界上报（``notifyTurnPhase``）→ backend 校验后
+         *     经 ``publish_turn_phase_event`` 发布 ``turn_phase`` 事件到
+         *     ``agent_session:{id}`` 频道，前端 SSE 状态条按词表展示当前阶段。
+         *
+         *     - ``run_id`` **必填**（daemon 恒带 firstRunId，daemon.ts:9522 守卫后必非空；
+         *       前端对缺失 run_id 的 phase 事件防御丢弃，D-013②）；
+         *     - ``phase`` 7 值封闭枚举——``dispatched``/``delivered`` 由 backend 自产
+         *       （控制指令状态机翻转点），不收 daemon 上报；
+         *     - session_id 走路径参数（端点层归属校验），DTO 不带。
+         */
+        TurnPhaseReportRequest: {
+            /**
+             * Run Id
+             * Format: uuid
+             */
+            run_id: string;
+            /**
+             * Phase
+             * @enum {string}
+             */
+            phase: "skills_sync" | "spec_sync" | "mcp_prefetch" | "spawning" | "ready" | "inject_received" | "first_event";
+            /** Detail */
+            detail?: string | null;
+        };
+        /**
          * TurnTimingSnapshot
          * @description 一轮模型调用时序（``GET /sessions/{id}/runs`` 的 ``timing``）。
          *
@@ -40390,6 +40447,43 @@ export interface operations {
         requestBody: {
             content: {
                 "application/json": components["schemas"]["PlanModeEnteredEvent"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: boolean;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    notify_turn_phase_api_daemon_sessions__session_id__turn_phase_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                session_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["TurnPhaseReportRequest"];
             };
         };
         responses: {

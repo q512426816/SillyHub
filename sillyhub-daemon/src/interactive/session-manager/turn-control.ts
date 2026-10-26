@@ -354,6 +354,20 @@ export async function inject(
     }
     throw err;
   }
+  // turn_phase=inject_received（2026-10-26-session-stage-progress FR-03）：消息已
+  // 送达 AI 队列（InputQueue.push 成功后）。fire-and-forget 走 deps.onTurnMessage
+  // 桥（daemon 层按 type='turn_phase_report' 拦截转 notifyTurnPhase，不进日志轨；
+  // 同 _emitSessionHeaderReport 先例），失败静默（D-009：不阻塞注入主流程）。
+  try {
+    void Promise.resolve(
+      mgr.deps.onTurnMessage(sessionId, runId, {
+        type: 'turn_phase_report',
+        phase: 'inject_received',
+      }),
+    ).catch(() => undefined);
+  } catch {
+    // 同步抛（测试 mock 形态）兜底吞掉：上报绝不反向打断注入路径。
+  }
   state.currentRunId = runId;
   state.status = 'running';
   state.lastActiveAt = Date.now();

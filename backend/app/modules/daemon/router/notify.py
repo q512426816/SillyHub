@@ -35,6 +35,7 @@ from app.modules.daemon.router import SessionDep, TaskRunAgentUser, router
 from app.modules.daemon.run_sync.service import (
     publish_bash_chunk_event,
     publish_session_event,
+    publish_turn_phase_event,
 )
 from app.modules.daemon.schema import (
     AgentTaskStatusEvent,
@@ -42,6 +43,7 @@ from app.modules.daemon.schema import (
     BashStatusEvent,
     PlanModeEnteredEvent,
     PlanResponseRequest,
+    TurnPhaseReportRequest,
 )
 from app.modules.daemon.service import DaemonRuntimeNotFound, DaemonService
 from app.modules.daemon.session.service import SessionService
@@ -319,6 +321,32 @@ async def notify_plan_mode_entered(
         )
     await SessionService(session).get_session_for_runtime_owner(session_id, user.id)
     await publish_session_event(session_id, data)
+    return {"ok": True}
+
+
+@router.post(
+    "/sessions/{session_id}/turn-phase",
+    response_model=dict[str, bool],
+)
+async def notify_turn_phase(
+    session_id: uuid.UUID,
+    data: TurnPhaseReportRequest,
+    session: SessionDep,
+    user: Annotated[User, Depends(get_current_principal)],
+) -> dict[str, bool]:
+    """Receive daemon turn-phase report and forward to frontend SSE (FR-02/FR-03).
+
+    2026-10-26-session-stage-progress task-01：daemon 启动准备段/轮内段边界
+    上报（notifyTurnPhase）→ ``publish_turn_phase_event`` 发布 turn_phase 事件
+    （payload 键 phase/detail/timestamp 与前端信封逐字对齐，D-012）。
+    dispatched/delivered 不收上报——由 backend 控制指令状态机翻转点自产
+    （FR-01），phase 枚举在 DTO 层已封闭。
+
+    越权防护（2026-08-25 P1）：同 notify_bash_status，发布前做 runtime
+    归属校验（404 不泄露存在性）。
+    """
+    await SessionService(session).get_session_for_runtime_owner(session_id, user.id)
+    await publish_turn_phase_event(session_id, data.run_id, data.phase, data.detail)
     return {"ok": True}
 
 

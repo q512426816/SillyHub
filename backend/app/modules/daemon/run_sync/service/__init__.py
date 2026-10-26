@@ -101,6 +101,7 @@ from .publish import (  # noqa: E402
     publish_bash_chunk_event,
     publish_session_event,
     publish_submitted_messages,
+    publish_turn_phase_event,
 )
 from .sdk_pipeline import (  # noqa: E402
     _TOOL_USE_RUN_LRU_CAPACITY,
@@ -140,6 +141,7 @@ __all__ = [
     "publish_session_event",
     "publish_sessions_changed",
     "publish_submitted_messages",
+    "publish_turn_phase_event",
     "resolve_group_member_identity",
 ]
 

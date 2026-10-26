@@ -2722,15 +2722,20 @@ async def _run_daemon_alive(session: AsyncSession, run_id: uuid.UUID) -> bool | 
 
 
 async def _recheck_deferred_runs(session: AsyncSession, tracked: set[uuid.UUID]) -> set[uuid.UUID]:
-    """单轮复扫：对仍 running 的追踪项做「日志 recency → daemon 活性 → 锁定重读」三级判。
+    """单轮复扫：对仍 running 的追踪项做「日志 recency → daemon 活性 → askwait 豁免 → 锁定重读」分级判。
 
     - 已非 running（正常收口/其它路径终态化）→ 出列停止追踪；
     - 日志宽限窗内（daemon 仍在报）→ 保持追踪；
     - 日志停滞 + daemon 活性门 True（健康 daemon 上的长静默轮：等待用户
       应答/长工具调用；在线实例须 lease 续约新鲜——停滞即 daemon 重启丢态
       放弃此 run，活性门回 False）→ 不判死，保持追踪等真终态；
-    - 日志停滞 + 活性门 False/None（daemon 确死或链路不可解析）→ 行锁重读
-      后判死（None 退回纯 recency 语义，防永卡兜底不缩小）。
+    - 日志停滞 + 活性门 False/None + askwait 豁免命中（最后 ask 信号晚于
+      最后 user_input 且未超 24h 上限——等待用户回答提问的轮，与启动清理
+      2026-10-12-stale-run-askwait-fix 同函数同上限；生产实证会话 388bb823
+      run 3b601319 无 lease 注入轮活性门不可解析返回 None 后被纯 recency
+      判死的补丁）→ 不判死，保持追踪等真终态；
+    - 其余（活性门 False/None 且非等待交互）→ 行锁重读后判死（None 退回
+      纯 recency 语义，防永卡兜底不缩小）。
     """
     # ql-20260815-003：late import 防 agent ↔ daemon 循环依赖（daemon.service 引 agent 模型）。
     from app.modules.daemon.permission_service import cancel_pending_dialogs_for_run
@@ -2750,6 +2755,21 @@ async def _recheck_deferred_runs(session: AsyncSession, tracked: set[uuid.UUID])
         daemon_alive = await _run_daemon_alive(session, run_id)
         if daemon_alive is True:
             log.info("stale_run_recheck_daemon_alive", run_id=str(run_id))
+            still_tracked.add(run_id)
+            continue
+        # 2026-10-26-session-stage-progress task-06（FR-07 / D-014）：等待用户
+        # 回答提问的轮豁免判死——生产实证会话 388bb823（run 3b601319）：
+        # AskUserQuestion 等待回答期间 daemon_alive=None（对话轮 lease 为会话
+        # 级绑定 agent_run_id=NULL，inject 注入轮按 run 维度查无 lease），日志
+        # 停滞即被复扫判死（stale_run_recheck_cleaned@21:59:06），pending 提问
+        # 联动取消、daemon 侧 agent 成僵尸等待、用户后续消息按 busy 入队永不
+        # 消费、会话楔死。与启动清理 askwait 豁免同函数同上限（24h）纯复用；
+        # 豁免分支不调 cancel_pending_dialogs_for_run——提问保持可答。
+        if await _run_awaiting_user_input(session, run_id, now):
+            log.info(
+                "stale_run_recheck_deferred_awaiting_user",
+                run_id=str(run_id),
+            )
             still_tracked.add(run_id)
             continue
         # 判死路径：先无锁判定已过，仅此处 FOR UPDATE 重读（锁粒度收窄）。
@@ -2785,11 +2805,12 @@ async def _recheck_stale_runs_loop(deferred_run_ids: list[uuid.UUID]) -> None:
     """延迟复扫链（FR-01 兜底）：只追踪启动清理的宽限跳过项，集合清空即退出。
 
     睡满宽限窗复扫一轮（``_recheck_deferred_runs``）：正常收口的项自动出列；
-    daemon 死亡且日志停滞的项判 failed；daemon 仍在线/仍在上报的项保持追踪
-    等真终态。2026-10-09-stale-recheck-scope 两处收窄：追踪面=启动快照（新
-    开轮不进判死面，长期僵尸归还 patrol）；判死前叠加 daemon 活性门。单次
-    迭代异常不终止整链（连续失败超 ``_RECHECK_MAX_CONSECUTIVE_ERRORS`` 才
-    放弃留 error 痕）。
+    daemon 死亡且日志停滞且非等待交互（askwait 未命中）的项判 failed；daemon
+    仍在线/仍在上报/等待用户回答提问（askwait 豁免，2026-10-26 task-06 与
+    启动清理对齐）的项保持追踪等真终态。2026-10-09-stale-recheck-scope 两处
+    收窄：追踪面=启动快照（新开轮不进判死面，长期僵尸归还 patrol）；判死前
+    叠加 daemon 活性门。单次迭代异常不终止整链（连续失败超
+    ``_RECHECK_MAX_CONSECUTIVE_ERRORS`` 才放弃留 error 痕）。
     """
     tracked = set(deferred_run_ids)
     consecutive_errors = 0

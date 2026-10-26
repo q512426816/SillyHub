@@ -285,6 +285,8 @@ export function streamSession(
     // turn / plan / bash / agent_task 类事件必须有 run_id（缺 run_id 的畸形
     // payload 事件丢弃——否则 run_id: String(undefined) 归一成字符串 "undefined"
     // 挂到不存在的 run 上）。agent_task_status 2026-08-25 补入白名单。
+    // turn_phase 2026-10-26-session-stage-progress 补入（D-013②防御丢弃实现点：
+    // phase 语义绑定 run，缺 run_id 无可归属轮）。
     if (
       (kind === "turn_started" ||
         kind === "log" ||
@@ -293,7 +295,8 @@ export function streamSession(
         kind === "plan_mode_entered" ||
         kind === "bash_status" ||
         kind === "bash_chunk" ||
-        kind === "agent_task_status") &&
+        kind === "agent_task_status" ||
+        kind === "turn_phase") &&
       !env.run_id
     ) {
       handlers.onError(new Error(`Missing run_id on ${kind} event`));
@@ -336,6 +339,12 @@ export function streamSession(
         break;
       case "agent_task_status":
         handlers.onAgentTaskStatus?.(parseAgentTaskStatusEvent(parsed, sessionId));
+        break;
+      case "turn_phase":
+        // 2026-10-26-session-stage-progress（FR-04 / D-013②）：run_id 白名单已
+        // 在上方拦截缺失事件；phase/detail 原样透传（词表外值不丢弃——兜底展示
+        // 由 TurnStatusBar PHASE_LABEL 缺省分支承接）。
+        handlers.onTurnPhase?.(envelope);
         break;
       case "queue_changed":
         // 2026-08-31-session-queue-ux FR-03：会话级队列变更事件——无 run_id，

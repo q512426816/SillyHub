@@ -79,6 +79,55 @@ export interface TurnState {
 export const INITIAL_TURN_STATE: TurnState = { turns: [], currentRunId: null };
 
 /**
+ * 当前阶段（2026-10-26-session-stage-progress FR-04 / D-013①③）。
+ * phase 为 turn_phase 事件词表值（词表外值透传原始字符串，兜底展示由
+ * TurnStatusBar PHASE_LABEL 缺省分支承接）；at = 客户端本地到达时刻
+ * Date.now()（事件到达时刻，规避服务端/客户端时钟偏移，D-013①）。
+ * task-04 的 currentPhase prop 与本类型同构。
+ */
+export interface TurnPhaseState {
+  phase: string;
+  at: number;
+}
+
+/**
+ * turn_phase 事件 → 轮状态 currentPhase 写入（last-write-wins，乱序到达按事件
+ * 序覆盖）；按 runId 归属路由（含 realRunId 匹配），未命中既有轮时**不建轮**
+ * （phase 不是轮存在性信号——轮由 turn_started/log 创建，孤 phase 丢弃）。
+ * 返回新数组（不可变更新）；未命中/无 runId 原样返回。
+ */
+export function applyTurnPhase(
+  turns: SessionTurnView[],
+  runId: string | null | undefined,
+  phase: string,
+): SessionTurnView[] {
+  if (!runId) return turns;
+  const at = Date.now();
+  let hit = false;
+  const next = turns.map((t) => {
+    if (t.runId === runId || t.realRunId === runId) {
+      hit = true;
+      return { ...t, currentPhase: { phase, at } };
+    }
+    return t;
+  });
+  return hit ? next : turns;
+}
+
+/**
+ * 轮终态清空 currentPhase（D-013③ / R-01「不显示陈旧值」兑现点）：
+ * turn_completed/failed/killed 终态分支消费——防断线错过 first_event 的轮在
+ * 终态后仍挂「正在启动 AI 进程 · 已等待 N 秒」假警示。泛型签名兼容 page
+ * （SessionTurnView）与 dialog（DialogTurnView，segments 可选旧形状）双轮型。
+ */
+export function clearTurnPhase<T extends { currentPhase?: TurnPhaseState | null }>(
+  turn: T,
+): T {
+  if (turn.currentPhase == null) return turn;
+  return { ...turn, currentPhase: null };
+}
+
+/**
  * ql-20260918-003：直发占位轮 → 真实 run_id 的合并替换（page/dialog 发送路径共用）。
  *
  * 常态：占位轮原位改名（runId=realRunId + status=nextStatus）。

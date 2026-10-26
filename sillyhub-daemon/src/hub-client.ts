@@ -322,6 +322,29 @@ export interface NotifyBashChunkBody {
 }
 
 /**
+ * 轮阶段上报值词表（2026-10-26-session-stage-progress FR-02/FR-03）。
+ *
+ * 仅 daemon 侧可上报的 7 值——dispatched/delivered 由 backend 控制指令状态机
+ * 自产（task-01），不在此列（对齐 backend TurnPhaseReportRequest.phase Literal）。
+ */
+export type TurnPhaseValue =
+  | 'skills_sync'
+  | 'spec_sync'
+  | 'mcp_prefetch'
+  | 'spawning'
+  | 'ready'
+  | 'inject_received'
+  | 'first_event';
+
+/** 轮阶段事件上报体（对齐 backend TurnPhaseReportRequest / task-01 DTO）。 */
+export interface NotifyTurnPhaseBody {
+  session_id: string;
+  run_id: string;
+  phase: TurnPhaseValue;
+  detail?: string;
+}
+
+/**
  * task-02（2026-08-27-background-subagent-progress / design §8）：Agent 任务状态
  * 事件扩展可选字段（契约冻结，snake_case 对齐 backend AgentTaskStatusEvent 新字段）。
  *
@@ -1467,6 +1490,38 @@ export class HubClient {
         run_id: runId,
         summary,
       } satisfies NotifyPlanModeEnteredBody,
+    );
+  }
+
+  /**
+   * 轮阶段事件上报（2026-10-26-session-stage-progress FR-02/FR-03）。
+   *
+   * 端点：POST {REST_PREFIX}/sessions/{sessionId}/turn-phase
+   * body（snake_case，对齐 backend TurnPhaseReportRequest / task-01 DTO）：
+   *   { session_id, run_id, phase, detail? }
+   *
+   * run_id 恒带（D-013②：冷启动段用 firstRunId——daemon _startInteractiveSession
+   * 的 sessionId/firstRunId 非空守卫之后才调 reportTurnPhase，必非空）。
+   * 失败语义（对齐 _request）：非 2xx → HubHttpError；网络/超时透传。
+   * 调用方（daemon.ts / turn-control.ts / events.ts）负责 try-catch 吞噬
+   * （D-009：上报失败仅记日志，不阻塞会话创建/注入主流程）。
+   */
+  async notifyTurnPhase(
+    sessionId: string,
+    runId: string,
+    phase: TurnPhaseValue,
+    detail?: string,
+  ): Promise<Record<string, unknown>> {
+    const body: NotifyTurnPhaseBody = {
+      session_id: sessionId,
+      run_id: runId,
+      phase,
+    };
+    if (detail !== undefined) body.detail = detail;
+    return this._request<Record<string, unknown>>(
+      'POST',
+      `${REST_PREFIX}/sessions/${encodeURIComponent(sessionId)}/turn-phase`,
+      body,
     );
   }
 

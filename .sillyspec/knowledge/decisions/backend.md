@@ -774,3 +774,53 @@ supersedes：D-006@v1
 理由：用户选定方案 A——daemon 新增「改动文件清单」（porcelain v2 文件行 + ignored --directory 聚合 + numstat）与「工作区单文件 vs HEAD diff」两个平名 RPC，backend 暴露两个只读端点；前端一次拉清单建 path→status 映射，explorer 树着色与 Git 日志页修改集合同源消费
 故障面：状态清单为拉取式快照，daemon 侧文件变动后页面不自动变色——需手动刷新或重新进页
 退役判据：出现「多端同改工作区需秒级感知」的真实场景时重议推送（见 D-009）
+
+## D-backend-036@v1 覆盖范围=盲区补齐 + 轮内统一阶段轴
+状态：implemented
+变更：2026-10-26-session-stage-progress
+原编号：D-002@v1
+锚点：`backend/app/modules/daemon/control_commands.py`、`sillyhub-daemon/src/daemon.ts`
+最近确认：cf17c6a9f
+理由：盲区+统一阶段轴——静默盲区（平台转发→执行器领取→启动准备→等待首响）补齐信号，并把 AI 干活期间已有信号（执行命令/工具调用/输出间隙）统一映射到同一阶段文案体系。
+故障面：统一阶段轴依赖三端词表同步——任一端词表漂移（新增 phase 未同步前端映射）会显示原始英文 phase 值；已由兼容策略「未知 phase 显示原始字符串兜底」覆盖。
+退役判据：若阶段体系演进为服务端驱动的通用任务阶段模型（跨会话/任务类型复用），本词表并入更大模型后本决策由 v2 收编。
+
+## D-backend-037@v1 实现方案=方案 A 阶段事件推送（新增 turn_phase 事件 kind）
+状态：implemented
+变更：2026-10-26-session-stage-progress
+原编号：D-004@v1
+锚点：`backend/app/modules/daemon/router/notify.py`、`sillyhub-daemon/src/daemon.ts`、`frontend/src/lib/daemon/session-sse.ts`
+最近确认：cf17c6a9f
+理由：方案 A——新增会话 SSE 事件 kind `turn_phase`。启动准备各步骤边界由 daemon 经既有 endStep 钩子新增 HTTP 上报端点发出（照抄 notify_bash_status 已验证模式）；平台转发段由 backend 在控制指令状态机翻转点（delivered/acked）直接发布（零 daemon 改动）；轮内阶段由已有事件映射。前端 SessionEventKind 加 kind、分发器加 case、状态条消费。
+故障面：SSE 无历史（Redis pub/sub 无持久化），断线/刷新期间错过的阶段事件不可回放，重连后只能显示最新已知阶段或回退兜底文案——属轻量形态（D-001）可接受范围。
+退役判据：若后续引入会话事件持久化回放（可查询历史阶段轨迹），单行实时文案可升级为轨迹回看而不废弃事件本身。
+
+## D-backend-038@v1 delivered 阶段挂 ack 回执点（非 mark_delivered push 成功点）
+状态：implemented
+变更：2026-10-26-session-stage-progress
+原编号：D-011@v1
+锚点：backend/app/modules/daemon/control_commands.py:331
+最近确认：cf17c6a9f
+理由：我的判断：挂 **ack 回执点**——「执行器已接收」以 daemon 真实确认为准；mark_delivered（control_commands.py:233）与 ack（:331）是状态机两个不同时刻，daemon 离线补拉时差可达分钟级，挂 push 成功点会在离线场景显示假「已接收」。
+故障面：ack 回执路径需能拿到 session_id/run_id（控制指令 payload 反查），若 ack 处理缺上下文需补传递。
+退役判据：无——挂点跟随状态机语义，状态机不变则不变。
+
+## D-backend-039@v1 SSE 键名三端逐字对齐（phase/detail/timestamp）
+状态：implemented
+变更：2026-10-26-session-stage-progress
+原编号：D-012@v1
+锚点：backend/app/modules/daemon/run_sync/service/publish.py、frontend/src/lib/daemon/session-sse.ts:160
+最近确认：cf17c6a9f
+理由：我的判断：以发布侧组装为单一事实源，三端逐字对齐为 `phase` / `detail` / `timestamp`（timestamp 复用前端信封既有字段名）——SSE 透传层原样转发不改名（agent/service.py transparent passthrough 实证），键名不一致字段必丢且无映射层。
+故障面：后续新增 phase 事件字段时同样必须三端同提交（与 WS 消息类型双侧契约同性质）。
+退役判据：无——键名契约长期有效。
+
+## D-backend-040@v1 阶段展示精度包——at 时钟源/run_id 必填/轮终态清理/防重键/并行边界
+状态：implemented
+变更：2026-10-26-session-stage-progress
+原编号：D-013@v1
+锚点：frontend/src/components/daemon/session-panel/turn-state.ts、sillyhub-daemon/src/interactive/session-manager/events.ts
+最近确认：cf17c6a9f
+理由：我的判断：① at=客户端本地 Date.now()（事件到达时刻，规避时钟偏移）；② run_id 必填（daemon 恒带 firstRunId，daemon.ts:9522 守卫后必非空——「create 前 run 未定」原假设与代码不符），前端对缺失 run_id 的 phase 事件防御丢弃；③ turn_completed/failed/killed 终态分支清空 currentPhase（兑现 R-01「不显示陈旧值」，防断线场景假超时警示）；④ first_event 防重键=(session_id, run_id)（run 级标志，新 AgentRun 自然重置）；⑤ 冷启动三步 Promise.all 并行保持独立上报+覆盖式刷新（跳动亚秒级真实，聚合文案违背轻量）；SWR 跳过步不发事件。
+故障面：终态清理若漏接（如新增终态类型未清 phase）会复现假警示——测试断言面需覆盖全部终态枚举。
+退役判据：无——精度规则跟随轮生命周期语义。

@@ -1661,6 +1661,33 @@ class PlanModeEnteredEvent(BaseModel):
     requested_at: str  # ISO 8601 UTC
 
 
+class TurnPhaseReportRequest(BaseModel):
+    """daemon 轮阶段上报（2026-10-26-session-stage-progress FR-02/FR-03）。
+
+    daemon 在启动准备段/轮内段边界上报（``notifyTurnPhase``）→ backend 校验后
+    经 ``publish_turn_phase_event`` 发布 ``turn_phase`` 事件到
+    ``agent_session:{id}`` 频道，前端 SSE 状态条按词表展示当前阶段。
+
+    - ``run_id`` **必填**（daemon 恒带 firstRunId，daemon.ts:9522 守卫后必非空；
+      前端对缺失 run_id 的 phase 事件防御丢弃，D-013②）；
+    - ``phase`` 7 值封闭枚举——``dispatched``/``delivered`` 由 backend 自产
+      （控制指令状态机翻转点），不收 daemon 上报；
+    - session_id 走路径参数（端点层归属校验），DTO 不带。
+    """
+
+    run_id: uuid.UUID
+    phase: Literal[
+        "skills_sync",
+        "spec_sync",
+        "mcp_prefetch",
+        "spawning",
+        "ready",
+        "inject_received",
+        "first_event",
+    ]
+    detail: str | None = None
+
+
 class BashStatusEvent(BaseModel):
     """``bash_status`` 事件——Bash 命令开始/结束状态（FR-02）。
 

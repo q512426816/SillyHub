@@ -16,6 +16,7 @@ import json
 import time
 import uuid
 from dataclasses import dataclass, field
+from datetime import UTC, datetime
 from uuid import UUID
 
 from pydantic import BaseModel
@@ -342,6 +343,44 @@ async def publish_session_event(session_id: uuid.UUID, payload: dict | BaseModel
         failure_event="session_event_redis_publish_failed",
         session_id=str(session_id),
         event_type=payload.get("event") if isinstance(payload, dict) else None,
+    )
+
+
+async def publish_turn_phase_event(
+    session_id: uuid.UUID,
+    run_id: uuid.UUID,
+    phase: str,
+    detail: str | None = None,
+) -> None:
+    """发布 ``turn_phase`` 事件到 ``agent_session:{session_id}`` 频道。
+
+    2026-10-26-session-stage-progress task-01（FR-01/FR-06 / D-004 / D-012）：
+    轮阶段事件的统一发布出口——backend 自产（控制指令状态机两翻转点
+    dispatched/delivered）与 daemon 上报转发（turn-phase 端点七个上报值）
+    共用本 helper。
+
+    payload 键名 ``phase`` / ``detail`` / ``timestamp`` 与前端 SSE 信封
+    **逐字对齐**（D-012：SSE 透传层原样转发不改名，键名不一致字段必丢）；
+    ``timestamp`` 为 ISO 8601 UTC（发布时刻）。异常吞噬 + warning（D-009：
+    阶段展示为纯增强，发布失败不阻断控制指令状态机与上报主流程），底座
+    ``publish_json_event`` 已兜，本层不再包 try——调用方语义即"尽力发布"。
+    """
+    payload: dict = {
+        "event": "turn_phase",
+        "session_id": str(session_id),
+        "run_id": str(run_id),
+        "phase": phase,
+        "detail": detail,
+        "timestamp": datetime.now(UTC).isoformat(),
+    }
+    await publish_json_event(
+        redis_getter=_rsvc.get_redis,
+        channel=f"agent_session:{session_id}",
+        payload=payload,
+        log=_rsvc.log,
+        failure_event="turn_phase_redis_publish_failed",
+        session_id=str(session_id),
+        event_type="turn_phase",
     )
 
 

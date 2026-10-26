@@ -82,7 +82,8 @@ export type SessionEventKind =
   | "bash_status"
   | "bash_chunk"
   | "agent_task_status"
-  | "queue_changed";
+  | "queue_changed"
+  | "turn_phase";
 
 /** Plan 模式摘要（plan_mode_entered 事件 payload）。 */
 export interface PlanSummary {
@@ -176,6 +177,14 @@ export interface SessionStreamEnvelope {
    * （已中止）而非 failed（轮次失败）。其它事件 / 老 backend 事件为 null。
    */
   error_code?: string | null;
+  /**
+   * 2026-10-26-session-stage-progress（FR-04 / D-012）：turn_phase 事件携带的
+   * 阶段词表值与补充说明。payload 键名与 backend 发布侧**逐字对齐**（SSE 透传
+   * 层原样转发不改名，键名不一致字段必丢）；timestamp 复用信封既有字段名。
+   * 其它事件为 undefined。
+   */
+  phase?: string | null;
+  detail?: string | null;
   /**
    * task-05 / 2026-08-24-platform-session-feedback-fix：plan 模式进入事件携带的
    * 计划摘要与请求时间。
@@ -334,6 +343,13 @@ export interface SessionStreamHandlers {
    * total_tokens / tool_uses / async（全可选，旧 daemon 事件为 null）。
    */
   onAgentTaskStatus?(event: AgentTaskStatusEvent): void;
+  /**
+   * 2026-10-26-session-stage-progress（FR-04 / D-013②）：turn_phase 事件——轮
+   * 阶段词表值（envelope.phase，detail/envelope.detail 补充说明）。消费方经
+   * applyTurnPhase 写入轮状态 currentPhase（at=本地到达时刻），缺失 run_id 的
+   * 事件已在 stream 层白名单拦截丢弃（不会到达本回调）。
+   */
+  onTurnPhase?(event: SessionStreamEnvelope): void;
   /**
    * task-09 / design A6（2026-08-29-daemon-platform-resilience）：连接状态回调
    * （可选，不传不影响既有退避 / resync 行为）。进入退避重连上报

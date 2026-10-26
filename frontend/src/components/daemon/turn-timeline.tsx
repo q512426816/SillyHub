@@ -76,6 +76,8 @@ import {
 // 2026-09-09-sessions-visual-refresh task-05/06（D-003@v1）：消息角色化共享构件
 import { ChatMessageAvatar, RoundDivider } from "@/components/chat";
 import { TurnStatusBar } from "@/components/daemon/turn-status-bar";
+// 2026-10-26-session-stage-progress（FR-04）：currentPhase 类型（turn-state 单源）。
+import type { TurnPhaseState } from "@/components/daemon/session-panel/turn-state";
 import {
   TurnLiveMarquee,
   deriveLiveMarqueeEntries,
@@ -325,6 +327,14 @@ export interface SessionTurnView {
    * null/缺省（老 daemon / 无采样 / 运行中）→ 保持近似空档并标「近似」。
    */
   timing?: TurnTimingSnapshot | null;
+  /**
+   * 2026-10-26-session-stage-progress（FR-04 / D-013①③）：当前阶段（turn_phase
+   * 事件写入，applyTurnPhase last-write-wins；轮终态 clearTurnPhase 清空）。
+   * 挂轮状态（非组件局部 state）——面板重挂载不丢失（Review Focus #3）。
+   * 缺省/undefined = 无 phase 信号（老 daemon / 断线 / 已清理）→ 状态条走现状
+   * 渲染路径（零回归，D-010）。
+   */
+  currentPhase?: TurnPhaseState | null;
   /**
    * 2026-07-29-model-error-visibility / FR-04：turn 终态=failed 时拉取的结构化错误
    * 详情（GET /sessions/{id}/runs 的 error_detail 经 buildErrorLogItem 映射）。
@@ -1135,6 +1145,9 @@ const TurnRow = memo(function TurnRow({
                       ? { input: turn.inputTokens, output: turn.outputTokens }
                       : null
                   }
+                  // 2026-10-26-session-stage-progress（FR-04）：轮当前阶段透传
+                  // 状态条（缺省 undefined → 状态条现状分支，零回归）。
+                  currentPhase={turn.currentPhase}
                   />
                 </>
               ) : (
@@ -2255,6 +2268,7 @@ function SegmentedTurnBody({
   markerAnswered,
   onMarkerSubmit,
   turnTokens,
+  currentPhase,
 }: {
   segments: TurnSegment[];
   turnStatus: TurnUiStatus;
@@ -2269,6 +2283,8 @@ function SegmentedTurnBody({
   onMarkerSubmit: (_prompt: string) => void;
   /** 2026-10-25-marquee-awaiting-real-data：轮级累计 token（tokens 事件实时更新）。 */
   turnTokens?: { input: number | null; output: number | null } | null;
+  /** 2026-10-26-session-stage-progress（FR-04）：轮当前阶段（turn 对象透传）。 */
+  currentPhase?: TurnPhaseState | null;
 }) {
   const turnDialogs = useMemo(
     () => dialogHistory.filter((d) => d.run_id === runKey),
@@ -2367,7 +2383,12 @@ function SegmentedTurnBody({
           段时间线之前，全宽。 */}
       {(turnStatus === "pending" || turnStatus === "running" || turnStatus === "interrupting") &&
         turnStartedAt != null && (
-          <TurnStatusBar turnStartedAt={turnStartedAt} turnStatus={turnStatus} segments={segments} />
+          <TurnStatusBar
+            turnStartedAt={turnStartedAt}
+            turnStatus={turnStatus}
+            segments={segments}
+            currentPhase={currentPhase ?? null}
+          />
         )}
       {/* 「全部（进度）」：完整段时间线（段 + AskUser 按时间戳穿插）。空轮不渲染空容器。 */}
       {timeline != null && timeline.length > 0 && (

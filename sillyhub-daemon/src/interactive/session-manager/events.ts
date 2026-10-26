@@ -264,6 +264,26 @@ export async function onMessage(
   // 入口，偶发「无关事件误撤防」由 backend pending run 启动超时清扫兜底
   // （300s），不在事件流里做 run 归属精细判定的成本权衡。
   mgr._disarmTurnStartWatchdog(state.sessionId);
+  // turn_phase=first_event（2026-10-26-session-stage-progress FR-03）：AI 首个
+  // 事件到达（撤看门狗同点位）。防重键 (session_id, run_id) 的判定在 daemon 层
+  // 拦截分支（D-013④，daemon 进程级有界 Set——本层每 envelope 无状态直发，主
+  // envelope 流量大不在本层做 Map 记账）。fire-and-forget 走 deps.onTurnMessage
+  // 桥（daemon 层拦截转 notifyTurnPhase，不进日志轨），失败静默（D-009）。
+  // currentRunId 类型为 string | undefined：无 run 的 envelope（收尾窗口）跳过
+  // 上报——first_event 语义绑定 run，无 run 无可归属阶段。
+  const firstEventRunId = state.currentRunId;
+  if (firstEventRunId) {
+    try {
+      void Promise.resolve(
+        mgr.deps.onTurnMessage(state.sessionId, firstEventRunId, {
+          type: 'turn_phase_report',
+          phase: 'first_event',
+        }),
+      ).catch(() => undefined);
+    } catch {
+      // 同步抛（测试 mock 形态）兜底吞掉：上报绝不反向打断事件主链路。
+    }
+  }
   // 2026-10-23-watchdog-steering-guard FR-02/FR-03：envelope 到达即轮内活动——
   // 刷新 stale 判定基准（lastTurnEventAt），并登记当前 run 为「已启动」。
   state.lastTurnEventAt = Date.now();

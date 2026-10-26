@@ -125,7 +125,8 @@ import { cn } from "@/lib/utils";
 import {
   HISTORY_PAGE_SIZE, INITIAL_TURN_STATE, MAX_PROMPT_LEN,
   SUSPENDED_SESSION_REFETCH_MS, TERMINAL_TURN_STATUSES, TurnState, applyBashStatusEvent,
-  appendBashChunk, applyEnvelopeToTurn, asAssembled, BashProgressState, deriveTurnTerminalStatus,
+  appendBashChunk, applyEnvelopeToTurn, applyTurnPhase, asAssembled, BashProgressState,
+  clearTurnPhase, deriveTurnTerminalStatus,
   findSegmentById, mentionBindOptions, parseRunStartedAt, readPersistedViewMode,
   readSessionDraft, replacePlaceholderTurn, subagentBlockNameOf, upsertTurn, writePersistedViewMode, writeSessionDraft,
 } from "./turn-state";
@@ -1858,9 +1859,11 @@ export function SessionPanelPage({
                 (turn) => {
                   // task-09：finishTurn 清全部 text/thinking 段 streaming 标记
                   // （流式光标收起，段级状态随终态收敛）；终态与 token 照旧页面胶水写入。
+                  // 2026-10-26-session-stage-progress D-013③：终态同时清 currentPhase
+                  // （clearTurnPhase；防断线错过 first_event 的轮挂假超时警示）。
                   const finished = finishTurn(asAssembled(turn));
                   return {
-                    ...turn,
+                    ...clearTurnPhase(turn),
                     segments: finished.segments,
                     output: finished.output,
                     processItems: finished.processItems,
@@ -2057,6 +2060,17 @@ export function SessionPanelPage({
             // AgentTaskCard 链路行为不变；追加经 ref 注入任务执行面板（组件内
             // useSessionTasks 按 session_id 守卫 + task_id upsert 归并任务清单）。
             taskPanelRef.current?.applyEvent(event);
+          },
+          // 2026-10-26-session-stage-progress（FR-04 / D-013②）：phase 事件按 run
+          // 归属写入轮 currentPhase（at=本地到达时刻，applyTurnPhase 内取）；缺失
+          // run_id / phase 的事件已在 stream 层白名单拦截，此处双守卫；未知 run
+          // 不建轮（phase 非轮存在性信号）。
+          onTurnPhase: (event) => {
+            if (!event.run_id || !event.phase) return;
+            setTurnState((prev) => ({
+              ...prev,
+              turns: applyTurnPhase(prev.turns, event.run_id, event.phase ?? ""),
+            }));
           },
         }),
         { cursor: streamCursor, initialSync, runsSnapshot },

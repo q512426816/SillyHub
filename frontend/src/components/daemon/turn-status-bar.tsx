@@ -32,6 +32,8 @@
 
 import { memo, useContext, useEffect, useMemo, useState } from "react";
 
+import { cn } from "@/lib/utils";
+
 import type { ToolTurnSegment, TurnSegment } from "./session-log-assembler";
 import { SubagentTaskLookupContext } from "./turn-segment-views";
 import type { SubagentTaskLookup } from "./turn-segment-views";
@@ -122,9 +124,7 @@ function segmentTs(seg: TurnSegment): number {
 
 /** 单行摘要归一：折叠空白（多行命令/长 JSON 不撑破单行）+ 截断（同装配器 raw 120 字符惯例）。 */
 function summarizeText(text: string | null | undefined): string | null {
-  const t = (text ?? "")
-    .replace(/\s+/g, " ")
-    .trim();
+  const t = (text ?? "").replace(/\s+/g, " ").trim();
   return t ? t.slice(0, 120) : null;
 }
 
@@ -137,14 +137,21 @@ function toolSummary(tool: ToolTurnSegment): string {
 
 /** 子代理展示名（task-07 契约：primary ?? toolName ?? subagentType ?? 「子代理」）。 */
 function subagentDisplayName(tool: ToolTurnSegment): string {
-  return summarizeText(tool.primary) ?? tool.toolName ?? tool.subagentType ?? "子代理";
+  return (
+    summarizeText(tool.primary) ??
+    tool.toolName ??
+    tool.subagentType ??
+    "子代理"
+  );
 }
 
 /**
  * 树内最新 running 工具段（DFS，ts 最大；同 ts 取 DFS 后到者 = 文档序更晚）。
  * 容器（tool / subagent_stub）的 children 一并搜索——嵌套子代理内部工具同样候选。
  */
-function findLatestRunningTool(segments: TurnSegment[]): ToolTurnSegment | null {
+function findLatestRunningTool(
+  segments: TurnSegment[],
+): ToolTurnSegment | null {
   let best: ToolTurnSegment | null = null;
   let bestTs = Number.NEGATIVE_INFINITY;
   const walk = (list: TurnSegment[]) => {
@@ -183,7 +190,11 @@ function latestStreamingSummary(segments: TurnSegment[]): string | null {
     }
   };
   walk(segments);
-  return best === "text" ? "正在输出文本" : best === "thinking" ? "正在思考" : null;
+  return best === "text"
+    ? "正在输出文本"
+    : best === "thinking"
+      ? "正在思考"
+      : null;
 }
 
 /**
@@ -263,13 +274,18 @@ function collectSubagents(
         const snap =
           lookup == null
             ? null
-            : lookup.byToolUseId.get(s.id) ??
+            : (lookup.byToolUseId.get(s.id) ??
               (s.taskTaskId ? lookup.byTaskId.get(s.taskTaskId) : undefined) ??
-              null;
+              null);
         const converged =
-          s.taskStatus === "running" && snap != null && snap.status !== "running";
-        const effMetaStatus = converged ? snap.status : (s.taskStatus ?? "running");
-        const metaDriven = s.taskStatus !== undefined || s.taskAsync !== undefined;
+          s.taskStatus === "running" &&
+          snap != null &&
+          snap.status !== "running";
+        const effMetaStatus = converged
+          ? snap.status
+          : (s.taskStatus ?? "running");
+        const metaDriven =
+          s.taskStatus !== undefined || s.taskAsync !== undefined;
         const effElapsedMs = converged
           ? (snap?.elapsedMs ?? s.taskElapsedMs)
           : s.taskElapsedMs;
@@ -288,10 +304,16 @@ function collectSubagents(
           endedAt: s.endedAt,
           latestActivity: latestActivityWithin(s.children),
           ...(s.taskStatus !== undefined ? { taskStatus: effMetaStatus } : {}),
-          ...(effElapsedMs !== undefined ? { taskElapsedMs: effElapsedMs } : {}),
+          ...(effElapsedMs !== undefined
+            ? { taskElapsedMs: effElapsedMs }
+            : {}),
           ...(s.taskAsync !== undefined ? { taskAsync: s.taskAsync } : {}),
-          ...(s.taskSummary !== undefined ? { taskSummary: s.taskSummary } : {}),
-          ...(s.taskToolName !== undefined ? { taskToolName: s.taskToolName } : {}),
+          ...(s.taskSummary !== undefined
+            ? { taskSummary: s.taskSummary }
+            : {}),
+          ...(s.taskToolName !== undefined
+            ? { taskToolName: s.taskToolName }
+            : {}),
         });
       }
       collectSubagents(s.children, out, lookup);
@@ -331,7 +353,9 @@ export function deriveTurnActivity(
     toolCount: countTools(segments),
     subagents,
     currentActivity:
-      segments.length === 0 ? null : (latestActivityWithin(segments) ?? "思考中"),
+      segments.length === 0
+        ? null
+        : (latestActivityWithin(segments) ?? "思考中"),
   };
 }
 
@@ -347,6 +371,13 @@ export interface TurnStatusBarProps {
   segments: TurnSegment[];
   /** 轮次状态（仅非终态渲染本组件，终态由消费方不挂载）。 */
   turnStatus: "pending" | "running" | "interrupting";
+  /**
+   * 当前阶段（2026-10-26-session-stage-progress FR-04/FR-05，task-03 写入轮状态）：
+   * phase 为 turn_phase 事件词表值、at 为前端本地到达时刻（D-013①）。
+   * undefined/null = 无 phase 信号（老 daemon / 断线 / 轮终态已清理）→ 渲染路径
+   * 与现状完全一致（零回归，D-010）。
+   */
+  currentPhase?: { phase: string; at: number } | null;
 }
 
 const STATUS_LABEL: Record<TurnStatusBarProps["turnStatus"], string> = {
@@ -354,6 +385,26 @@ const STATUS_LABEL: Record<TurnStatusBarProps["turnStatus"], string> = {
   running: "执行中",
   interrupting: "打断中",
 };
+
+/**
+ * 阶段词表中文文案（2026-10-26-session-stage-progress design 阶段词表 9 值，
+ * 三端共同契约——backend dispatched/delivered 自产 + daemon 七值上报；文案与
+ * design.md 词表逐字一致，测试锚定本导出）。
+ */
+export const PHASE_LABEL: Record<string, string> = {
+  dispatched: "已发送 · 等待执行器领取",
+  delivered: "执行器已接收",
+  skills_sync: "正在准备技能环境",
+  spec_sync: "正在同步规范文件",
+  mcp_prefetch: "正在加载工具配置",
+  spawning: "正在启动 AI 进程",
+  ready: "已就绪 · 等待 AI 响应",
+  inject_received: "消息已送达 AI",
+  first_event: "AI 开始响应",
+};
+
+/** 阶段超时警示阈值（D-007：前端常量不做配置项）。 */
+export const PHASE_TIMEOUT_MS = 30_000;
 
 /** 具体秒数显示门槛（对齐 deepseek TurnStatus：前 15 秒保持简洁只显文案）。 */
 export const TURN_STATUS_ELAPSED_MIN_MS = 15_000;
@@ -375,6 +426,7 @@ export const TurnStatusBar = memo(function TurnStatusBar({
   turnStartedAt,
   segments,
   turnStatus,
+  currentPhase,
 }: TurnStatusBarProps) {
   // 每秒 tick：仅组件内部 state（卸载清理）；同一 tick 同时驱动轮计时与（task-08 消费
   // deriveTurnActivity.startedAt 时的）子代理运行时长，展示侧各自 (now - 锚点) 派生。
@@ -396,9 +448,11 @@ export const TurnStatusBar = memo(function TurnStatusBar({
     [activity],
   );
 
-  const elapsedMs = turnStartedAt != null ? Math.max(0, now - turnStartedAt) : null;
+  const elapsedMs =
+    turnStartedAt != null ? Math.max(0, now - turnStartedAt) : null;
   // 前 15 秒不显具体秒数（deepseek TurnStatus 对齐），≥15s 才显示 mm:ss。
-  const showElapsed = elapsedMs != null && elapsedMs >= TURN_STATUS_ELAPSED_MIN_MS;
+  const showElapsed =
+    elapsedMs != null && elapsedMs >= TURN_STATUS_ELAPSED_MIN_MS;
   // quick-3c85b05e（2026-09-15 轮次时间三段显示）：运行中补开始时刻（HH:MM:SS，
   // 锚点存在即显示——与走秒的 ≥15s 门槛解耦，开始时间一秒内也有信息量）。
   const startClock =
@@ -410,13 +464,47 @@ export const TurnStatusBar = memo(function TurnStatusBar({
         })()
       : null;
 
+  // ── 2026-10-26-session-stage-progress（FR-04/FR-05 / D-001/D-003/D-007/D-008）──
+  // 阶段展示判定序（design 组合推演定序：先 phase 存在性 → 退位 → 超时 → 正常）：
+  //   1. currentPhase 缺省（undefined/null）→ 全部现状分支（零回归锚点）；
+  //   2. phase === "first_event" → 退位：标签位回退 STATUS_LABEL[turnStatus]，
+  //      右侧活动摘要接管（D-008；退位后超时计时随之失效——不警示）；
+  //   3. 停留 ≥ PHASE_TIMEOUT_MS → 整条切警示样式（warning token）+「已等待 N 秒」；
+  //   4. 其余 → PHASE_LABEL[phase]，未知值显示原始字符串（兼容策略兜底）。
+  const phaseRetired = currentPhase?.phase === "first_event";
+  const phaseElapsedMs =
+    currentPhase && !phaseRetired ? Math.max(0, now - currentPhase.at) : null;
+  const phaseTimedOut =
+    phaseElapsedMs != null && phaseElapsedMs >= PHASE_TIMEOUT_MS;
+  const statusLabel =
+    currentPhase && !phaseRetired
+      ? (PHASE_LABEL[currentPhase.phase] ?? currentPhase.phase)
+      : STATUS_LABEL[turnStatus];
+
   return (
-    <div className="flex items-center gap-2.5 rounded-md border border-primary/[0.18] bg-primary/[0.06] px-3 py-1.5 text-xs">
+    <div
+      className={cn(
+        "flex items-center gap-2.5 rounded-md border px-3 py-1.5 text-xs",
+        phaseTimedOut
+          ? "border-warning/40 bg-warning/10"
+          : "border-primary/[0.18] bg-primary/[0.06]",
+      )}
+    >
       <span
         aria-hidden
         className="h-3 w-3 shrink-0 animate-spin rounded-full border-2 border-primary/25 border-t-primary"
       />
-      <span className="shrink-0 text-muted-foreground">{STATUS_LABEL[turnStatus]}</span>
+      <span
+        className={cn(
+          "shrink-0",
+          phaseTimedOut ? "text-warning" : "text-muted-foreground",
+        )}
+      >
+        {statusLabel}
+        {phaseTimedOut && phaseElapsedMs != null && (
+          <> · 已等待 {Math.floor(phaseElapsedMs / 1000)} 秒</>
+        )}
+      </span>
       {startClock && (
         <span className="shrink-0 text-muted-foreground" title="本轮开始时间">
           开始 {startClock}
@@ -433,7 +521,10 @@ export const TurnStatusBar = memo(function TurnStatusBar({
             |
           </span>
           <span className="shrink-0 text-muted-foreground">
-            工具 <span className="font-medium text-foreground">{activity.toolCount}</span>
+            工具{" "}
+            <span className="font-medium text-foreground">
+              {activity.toolCount}
+            </span>
           </span>
         </>
       )}
@@ -443,7 +534,11 @@ export const TurnStatusBar = memo(function TurnStatusBar({
             |
           </span>
           <span className="shrink-0 text-muted-foreground">
-            子代理 <span className="font-medium text-foreground">{runningSubagents}</span> 运行中
+            子代理{" "}
+            <span className="font-medium text-foreground">
+              {runningSubagents}
+            </span>{" "}
+            运行中
           </span>
         </>
       )}

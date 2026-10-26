@@ -1,0 +1,112 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-26-session-stage-progress",
+  "appliedAt": "2026-10-26T02:58:16.310Z",
+  "baseHash": "17ca47de8fcf0a1b68d5cb8e48aa640636245281",
+  "files": [
+    {
+      "path": "backend/app/modules/agent/service.py",
+      "sha256": "0ae833f40544ba0cf3f4008acd240967f98ee8e403e663ffa21d2728f8131f16"
+    },
+    {
+      "path": "backend/app/modules/daemon/control_commands.py",
+      "sha256": "2cd8714b468e98e32924f5558d089f4163dd86d9a01a83d6dc2ceb8028ce84c8"
+    },
+    {
+      "path": "backend/app/modules/daemon/router/__init__.py",
+      "sha256": "e5b943bf205656e971998faa99799da205479bee1c5d7bf4c78276a510ce55d3"
+    },
+    {
+      "path": "backend/app/modules/daemon/router/notify.py",
+      "sha256": "a93463340c7f15d5d6d5a6a4e8c1c24143e26f53c95aa95e8cc137aeaa3b2942"
+    },
+    {
+      "path": "backend/app/modules/daemon/run_sync/service/__init__.py",
+      "sha256": "f64c4ce7499b8f618baa267cdbcc71f1265cbeaf64575c39127e1f09e623284f"
+    },
+    {
+      "path": "backend/app/modules/daemon/run_sync/service/publish.py",
+      "sha256": "0fc5d47f9b475579309adf46e666ff9b0ffeebc59771876722a3060c6730ebba"
+    },
+    {
+      "path": "backend/app/modules/daemon/schema.py",
+      "sha256": "7b67eb9bfa5b0ead7e1c117248e6561d775f8e94796df8fe0440499b3f470db7"
+    },
+    {
+      "path": "backend/app/modules/daemon/tests/test_turn_phase_events.py",
+      "sha256": "aae10ffb3d841b7f451434638c1570118afddf3b27c77613d1ac9b31add2c52d"
+    },
+    {
+      "path": "backend/openapi.json",
+      "sha256": "1fc42a7053b0e7f9b6e6085c09f3d30b0b94b784c695f24eb68c0a4faa93512c"
+    },
+    {
+      "path": "backend/tests/modules/agent/test_stale_run_recheck.py",
+      "sha256": "330f25776c5dce52472d607dd4400d2868975e486d29df5131866648da3c1d37"
+    },
+    {
+      "path": "frontend/src/components/daemon/__tests__/turn-status-bar-phase.test.tsx",
+      "sha256": "1a67661338cde072464683c9ec6b9a0b9670656cc72666163ccb571f33d2cd91"
+    },
+    {
+      "path": "frontend/src/components/daemon/session-panel/session-panel-dialog.tsx",
+      "sha256": "daa72ec440635e1cde8c3d496bc1b59bcd2cb0e6d9e017e5255769a1968d3110"
+    },
+    {
+      "path": "frontend/src/components/daemon/session-panel/session-panel-page.tsx",
+      "sha256": "6f6793aac1f1804af444a6fb4a6979eeff6d3c9546e497c8b96ca5ff1ccab36b"
+    },
+    {
+      "path": "frontend/src/components/daemon/session-panel/turn-state.ts",
+      "sha256": "731736de2aa8db8113ad79b4df3fa5d2d5a3a3f53a09f79f56fee758da081d24"
+    },
+    {
+      "path": "frontend/src/components/daemon/turn-status-bar.tsx",
+      "sha256": "0a8f324e399d4a1b5a0a140f7cf9b0ab10f2bb4d67f167a2142804bb099a960f"
+    },
+    {
+      "path": "frontend/src/components/daemon/turn-timeline.tsx",
+      "sha256": "893f7dc4485e58cc121c615b4512ecdec07d12f3e083d67edaaad945b0acae8e"
+    },
+    {
+      "path": "frontend/src/lib/api-types.ts",
+      "sha256": "5b2b1a39e5f3628d69a343ab91327dff215471514284e0e471e7565b0c78c024"
+    },
+    {
+      "path": "frontend/src/lib/daemon/__tests__/session-stream-turn-phase.test.ts",
+      "sha256": "e595d165d6c934046cdaa05aeca2c750f0d74dd9c374a25670b2b5a4299e3256"
+    },
+    {
+      "path": "frontend/src/lib/daemon/session-sse.ts",
+      "sha256": "6a325fdb3e2169aa2530f0d80deb5b6bb2e0eaf9ec098e9d39f42cfbb4446010"
+    },
+    {
+      "path": "frontend/src/lib/daemon/session-stream.ts",
+      "sha256": "adadd5915e3fc6399f4cb6f5e316eb8c64e9c4d5e29820de1d8b9a41da2dab88"
+    },
+    {
+      "path": "sillyhub-daemon/src/api-types.ts",
+      "sha256": "5b2b1a39e5f3628d69a343ab91327dff215471514284e0e471e7565b0c78c024"
+    },
+    {
+      "path": "sillyhub-daemon/src/daemon.ts",
+      "sha256": "29ab519fedf47d68a64b9a082c68c6a7976ddd4148c125866ef3e891722f4571"
+    },
+    {
+      "path": "sillyhub-daemon/src/hub-client.ts",
+      "sha256": "0136835008f0c555cca53746cb40fda8346835a6c9a0e32c0e88717a7fbe7a75"
+    },
+    {
+      "path": "sillyhub-daemon/src/interactive/session-manager/events.ts",
+      "sha256": "e409aed2a3bbc4085fa0bf43f967138b1c82ed2190d298cb869497efbde8451f"
+    },
+    {
+      "path": "sillyhub-daemon/src/interactive/session-manager/turn-control.ts",
+      "sha256": "f44a1bb11ab78fc071c5b98767ac62723616cfdca13b2edbf754c75c58f89ac3"
+    },
+    {
+      "path": "sillyhub-daemon/tests/turn-phase-report.test.ts",
+      "sha256": "1725d138323e936c922e6ed7f918156418ba4dec85950c888011d42bc25c79c5"
+    }
+  ]
+}

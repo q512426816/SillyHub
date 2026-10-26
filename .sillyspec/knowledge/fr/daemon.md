@@ -8002,3 +8002,274 @@
   confirmed_at: 3615228c11a82dc5cb5689c5157e95ccf015cca9
   source_change: 2026-10-25-explorer-git-status
   status: active
+
+## FR-daemon-293 转发段阶段发布（backend 自产，零 daemon 依赖）
+变更：2026-10-26-session-stage-progress
+状态：active
+摘要：默认场景
+依据决策：D-011@v1
+场景正文：
+- 场景：默认场景 — Given 用户在会话发送消息（create/inject 均适用），backend 已创建控制指令；When 控制指令下发 WS 成功（dispatched）/ daemon ack 回执到达（delivered——以 daemon 真实确认为准，非 mark_deli；Then backend 分别向 `agent_session:{id}` 发布 `phase=dispatched` / `phase=delivered` 的 `tu
+全文：.sillyspec/changes/archive/2026-10-26-session-stage-progress/requirements.md#FR-01
+最近确认：cf17c6a9f
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-26-session-stage-progress:task-01:acc-0-5a1412ca
+  tests: backend/app/modules/daemon/tests/test_turn_phase_events.py
+  reason: spec
+  state: active
+  discovery: machine
+  confirmed_by: agent
+  confirmed_at: b377bb75bbb0c4bf603e59b2bcd5d009a8f21276
+  source_change: 2026-10-26-session-stage-progress
+  status: active
+- row: 2026-10-26-session-stage-progress:task-01:acc-1-d20a55b0
+  tests: backend/app/modules/daemon/tests/test_turn_phase_events.py
+  reason: spec
+  state: active
+  discovery: machine
+  confirmed_by: agent
+  confirmed_at: b377bb75bbb0c4bf603e59b2bcd5d009a8f21276
+  source_change: 2026-10-26-session-stage-progress
+  status: active
+- row: 2026-10-26-session-stage-progress:task-01:acc-2-bdca2a72
+  tests: backend/app/modules/daemon/tests/test_turn_phase_events.py
+  reason: spec
+  state: active
+  discovery: machine
+  confirmed_by: agent
+  confirmed_at: b377bb75bbb0c4bf603e59b2bcd5d009a8f21276
+  source_change: 2026-10-26-session-stage-progress
+  status: active
+- row: 2026-10-26-session-stage-progress:task-01:acc-3-1ed8f1d6
+  tests: backend/app/modules/daemon/tests/test_turn_phase_events.py
+  reason: spec
+  state: active
+  discovery: machine
+  confirmed_by: agent
+  confirmed_at: b377bb75bbb0c4bf603e59b2bcd5d009a8f21276
+  source_change: 2026-10-26-session-stage-progress
+  status: active
+- row: 2026-10-26-session-stage-progress:task-05:acc-0-eb04719c
+  tests: backend/app/modules/agent/tests/test_agent_session_model.py | backend/app/modules/agent/tests/test_cleanup_stale_runs_error_code.py | backend/app/modules/agent/tests/test_coordinator_approval_signal.py | backend/app/modules/agent/tests/test_finalizer.py | backend/app/modules/agent/tests/test_group_chat_models.py | backend/app/modules/agent/tests/test_mcp_tools.py | backend/app/modules/agent/tests/test_orchestrator.py | backend/app/modules/agent/tests/test_placement_borrow_integration.py | backend/app/modules/agent/tests/test_profile_router.py | backend/app/modules/agent/tests/test_provider_caps_alignment.py | backend/app/modules/agent/tests/test_worktree_integration.py | backend/app/modules/change/tests/test_assets.py | backend/app/modules/change/tests/test_dispatch_execute_team_mode.py | backend/app/modules/change/tests/test_files_refresh_sync.py | backend/app/modules/change/tests/test_files_router.py | backend/app/modules/change/tests/test_parser.py | backend/app/modules/change/tests/test_session_changes_endpoint.py | backend/app/modules/change/tests/test_spec_binding.py | backend/app/modules/change/tests/test_step_progress.py | backend/app/modules/change/tests/test_timeline.py
+  reason: spec
+  state: active
+  discovery: machine
+  confirmed_by: agent
+  confirmed_at: b377bb75bbb0c4bf603e59b2bcd5d009a8f21276
+  source_change: 2026-10-26-session-stage-progress
+  status: active
+- row: 2026-10-26-session-stage-progress:task-05:acc-2-2757ebe1
+  tests: backend/app/modules/agent/tests/test_agent_session_model.py | backend/app/modules/agent/tests/test_cleanup_stale_runs_error_code.py | backend/app/modules/agent/tests/test_coordinator_approval_signal.py | backend/app/modules/agent/tests/test_finalizer.py | backend/app/modules/agent/tests/test_group_chat_models.py | backend/app/modules/agent/tests/test_mcp_tools.py | backend/app/modules/agent/tests/test_orchestrator.py | backend/app/modules/agent/tests/test_placement_borrow_integration.py | backend/app/modules/agent/tests/test_profile_router.py | backend/app/modules/agent/tests/test_provider_caps_alignment.py | backend/app/modules/agent/tests/test_worktree_integration.py | backend/app/modules/change/tests/test_assets.py | backend/app/modules/change/tests/test_dispatch_execute_team_mode.py | backend/app/modules/change/tests/test_files_refresh_sync.py | backend/app/modules/change/tests/test_files_router.py | backend/app/modules/change/tests/test_parser.py | backend/app/modules/change/tests/test_session_changes_endpoint.py | backend/app/modules/change/tests/test_spec_binding.py | backend/app/modules/change/tests/test_step_progress.py | backend/app/modules/change/tests/test_timeline.py
+  reason: spec
+  state: active
+  discovery: machine
+  confirmed_by: agent
+  confirmed_at: b377bb75bbb0c4bf603e59b2bcd5d009a8f21276
+  source_change: 2026-10-26-session-stage-progress
+  status: active
+
+## FR-daemon-294 启动准备段阶段上报（daemon → backend 新端点）
+变更：2026-10-26-session-stage-progress
+状态：active
+摘要：默认场景
+依据决策：D-013@v1
+场景正文：
+- 场景：默认场景 — Given daemon 领取租约开始创建交互式会话（新会话首轮），run_id 已定（firstRunId 恒非空）；When skills 链接 / spec 拉取 / MCP 预取 / AI 进程启动 / 就绪五个步骤边界到达（SWR 命中跳过的步骤不发事件）；Then daemon 经 `POST /api/daemon/sessions/{session_id}/turn-phase` 上报（run_id 必填）；任一上报失
+全文：.sillyspec/changes/archive/2026-10-26-session-stage-progress/requirements.md#FR-02
+最近确认：cf17c6a9f
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-26-session-stage-progress:task-02:acc-0-932bc7f4
+  tests: sillyhub-daemon/tests/turn-phase-report.test.ts
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-26-session-stage-progress
+  status: active
+- row: 2026-10-26-session-stage-progress:task-02:acc-1-616d9f08
+  tests: sillyhub-daemon/tests/turn-phase-report.test.ts
+  reason: spec
+  state: active
+  discovery: machine
+  confirmed_by: agent
+  confirmed_at: b377bb75bbb0c4bf603e59b2bcd5d009a8f21276
+  source_change: 2026-10-26-session-stage-progress
+  status: active
+- row: 2026-10-26-session-stage-progress:task-02:acc-2-3c5a1c25
+  tests: sillyhub-daemon/tests/turn-phase-report.test.ts
+  reason: spec
+  state: active
+  discovery: machine
+  confirmed_by: agent
+  confirmed_at: b377bb75bbb0c4bf603e59b2bcd5d009a8f21276
+  source_change: 2026-10-26-session-stage-progress
+  status: active
+- row: 2026-10-26-session-stage-progress:task-02:acc-3-ac91886b
+  tests: sillyhub-daemon/tests/turn-phase-report.test.ts
+  reason: spec
+  state: active
+  discovery: machine
+  confirmed_by: agent
+  confirmed_at: b377bb75bbb0c4bf603e59b2bcd5d009a8f21276
+  source_change: 2026-10-26-session-stage-progress
+  status: active
+
+## FR-daemon-295 轮内段阶段上报（daemon）
+变更：2026-10-26-session-stage-progress
+状态：active
+摘要：默认场景
+依据决策：D-013@v1
+场景正文：
+- 场景：默认场景 — Given 消息注入既有会话（追问轮）或 AI 产出首个事件；When InputQueue push 完成 / onMessage 撤看门狗处；Then daemon 分别上报 `inject_received` / `first_event`；`first_event` 每轮至多一次（防重键 `(session
+全文：.sillyspec/changes/archive/2026-10-26-session-stage-progress/requirements.md#FR-03
+最近确认：cf17c6a9f
+
+## FR-daemon-296 状态条阶段文案（frontend 消费与展示）
+变更：2026-10-26-session-stage-progress
+状态：active
+摘要：默认场景
+依据决策：D-001@v1、D-008@v1、D-010@v1、D-012@v1、D-013@v1
+场景正文：
+- 场景：默认场景 — Given 会话面板运行中轮收到 `turn_phase` 事件（词表 9 值，含 backend 发布的 `dispatched`/`delivered`；payload；When 事件按 run 归属路由到当前轮（缺失/null run_id 的事件防御性丢弃；at=本地到达时刻 Date.now()）；Then 状态条状态标签位显示词表对应中文文案（`PHASE_LABEL` 映射），替代笼统「排队中/执行中」；`first_event` 之后标签退位、右侧活动摘要接管
+全文：.sillyspec/changes/archive/2026-10-26-session-stage-progress/requirements.md#FR-04
+最近确认：cf17c6a9f
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-26-session-stage-progress:task-03:acc-0-fa612601
+  tests: sillyhub-daemon/tests/protocol-session-contract.test.ts
+  reason: spec
+  state: active
+  discovery: machine
+  confirmed_by: agent
+  confirmed_at: b377bb75bbb0c4bf603e59b2bcd5d009a8f21276
+  source_change: 2026-10-26-session-stage-progress
+  status: active
+- row: 2026-10-26-session-stage-progress:task-03:acc-1-b2df4660
+  tests: sillyhub-daemon/tests/protocol-session-contract.test.ts
+  reason: spec
+  state: active
+  discovery: machine
+  confirmed_by: agent
+  confirmed_at: b377bb75bbb0c4bf603e59b2bcd5d009a8f21276
+  source_change: 2026-10-26-session-stage-progress
+  status: active
+- row: 2026-10-26-session-stage-progress:task-03:acc-2-d7e99587
+  tests: sillyhub-daemon/tests/protocol-session-contract.test.ts
+  reason: spec
+  state: active
+  discovery: machine
+  confirmed_by: agent
+  confirmed_at: b377bb75bbb0c4bf603e59b2bcd5d009a8f21276
+  source_change: 2026-10-26-session-stage-progress
+  status: active
+- row: 2026-10-26-session-stage-progress:task-03:acc-3-ae31b33b
+  tests: sillyhub-daemon/tests/protocol-session-contract.test.ts
+  reason: spec
+  state: active
+  discovery: machine
+  confirmed_by: agent
+  confirmed_at: b377bb75bbb0c4bf603e59b2bcd5d009a8f21276
+  source_change: 2026-10-26-session-stage-progress
+  status: active
+- row: 2026-10-26-session-stage-progress:task-04:acc-0-80d4f0e3
+  tests: frontend/src/components/daemon/__tests__/turn-time-display.test.tsx
+  reason: spec
+  state: active
+  discovery: machine
+  confirmed_by: agent
+  confirmed_at: b377bb75bbb0c4bf603e59b2bcd5d009a8f21276
+  source_change: 2026-10-26-session-stage-progress
+  status: active
+- row: 2026-10-26-session-stage-progress:task-04:acc-1-c0c2a91a
+  tests: frontend/src/components/daemon/__tests__/turn-time-display.test.tsx
+  reason: spec
+  state: active
+  discovery: machine
+  confirmed_by: agent
+  confirmed_at: b377bb75bbb0c4bf603e59b2bcd5d009a8f21276
+  source_change: 2026-10-26-session-stage-progress
+  status: active
+- row: 2026-10-26-session-stage-progress:task-04:acc-2-22a10eeb
+  tests: frontend/src/components/daemon/__tests__/turn-time-display.test.tsx
+  reason: spec
+  state: active
+  discovery: machine
+  confirmed_by: agent
+  confirmed_at: b377bb75bbb0c4bf603e59b2bcd5d009a8f21276
+  source_change: 2026-10-26-session-stage-progress
+  status: active
+- row: 2026-10-26-session-stage-progress:task-04:acc-3-f6a78f98
+  tests: frontend/src/components/daemon/__tests__/turn-time-display.test.tsx
+  reason: spec
+  state: active
+  discovery: machine
+  confirmed_by: agent
+  confirmed_at: b377bb75bbb0c4bf603e59b2bcd5d009a8f21276
+  source_change: 2026-10-26-session-stage-progress
+  status: active
+
+## FR-daemon-297 阶段超时警示（frontend 本地计时）
+变更：2026-10-26-session-stage-progress
+状态：active
+摘要：默认场景
+依据决策：D-003@v1、D-007@v1
+场景正文：
+- 场景：默认场景 — Given 当前轮存在 `currentPhase` 且未到 `first_event` 退位；When 当前阶段停留时长 ≥ 30 秒（前端常量，每秒 tick 判定）；Then 状态条整条切警示样式（warning token 边框/底色/文字）并追加「已等待 N 秒」；不弹窗、不阻断正常阶段推进展示
+全文：.sillyspec/changes/archive/2026-10-26-session-stage-progress/requirements.md#FR-05
+最近确认：cf17c6a9f
+
+## FR-daemon-298 事件协议与类型同步
+变更：2026-10-26-session-stage-progress
+状态：active
+摘要：默认场景
+依据决策：D-012@v1
+场景正文：
+- 场景：默认场景 — Given `TurnPhaseReportRequest` DTO 进入 OpenAPI；When 后端 schema 变更落库；Then 同一变更内跑 `pnpm gen:types` 与 `pnpm -C sillyhub-daemon gen:types` 并提交两处 api-types；前端
+全文：.sillyspec/changes/archive/2026-10-26-session-stage-progress/requirements.md#FR-06
+最近确认：cf17c6a9f
+
+## FR-daemon-299 等待交互轮判死豁免（backend 复扫链，2026-10-26 生产实证补录）
+变更：2026-10-26-session-stage-progress
+状态：active
+摘要：默认场景
+依据决策：D-014@v1
+场景正文：
+- 场景：默认场景 — When 复扫链 `_recheck_deferred_runs` 对该轮执行判死评估（日志停滞超宽限窗，且 daemon 活性门为 False 或 None——含生产实；Then 豁免判死，保持 running 并继续追踪等待真终态；超 24h 上限或无 askwait 信号的轮回落既有判死路径（SERVICE_RESTART_INTER
+全文：.sillyspec/changes/archive/2026-10-26-session-stage-progress/requirements.md#FR-07
+最近确认：cf17c6a9f
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-26-session-stage-progress:task-06:acc-0-7491724d
+  tests: backend/tests/modules/agent/test_stale_run_recheck.py
+  reason: spec
+  state: active
+  discovery: machine
+  confirmed_by: agent
+  confirmed_at: b377bb75bbb0c4bf603e59b2bcd5d009a8f21276
+  source_change: 2026-10-26-session-stage-progress
+  status: active
+- row: 2026-10-26-session-stage-progress:task-06:acc-1-d012cca6
+  tests: backend/tests/modules/agent/test_stale_run_recheck.py
+  reason: spec
+  state: active
+  discovery: machine
+  confirmed_by: agent
+  confirmed_at: b377bb75bbb0c4bf603e59b2bcd5d009a8f21276
+  source_change: 2026-10-26-session-stage-progress
+  status: active
+- row: 2026-10-26-session-stage-progress:task-06:acc-2-bd2be69e
+  tests: backend/tests/modules/agent/test_stale_run_recheck.py
+  reason: spec
+  state: active
+  discovery: machine
+  confirmed_by: agent
+  confirmed_at: b377bb75bbb0c4bf603e59b2bcd5d009a8f21276
+  source_change: 2026-10-26-session-stage-progress
+  status: active
