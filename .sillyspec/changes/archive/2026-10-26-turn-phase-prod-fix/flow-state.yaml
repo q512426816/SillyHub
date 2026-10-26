@@ -1,0 +1,46 @@
+tier: thin
+legacy_fallback: false
+substeps:
+  artifacts: done
+  ledger: done
+  patch: done
+  review: done
+  probes: done
+  distill: done
+born_face: thin
+with_tasks: false
+review_force: null
+input: >-
+  阶段上报生产断链修复与观测补盲。背景:阶段化进度功能(2026-10-26-session-stage-progress)已上线,生产实证会话 221ac351 卡在「执行器已接收」超时,手动凭证上报 200 OK 证明
+  backend/SSE/前端全通,断点在 daemon 侧自动上报——但源码/bundle/进程/链路静态排查全部正常,需运行时可观测性定位;且上报 fire-and-forget 失败仅 debug 级(info
+  级日志不落盘)造成生产完全黑盒。顺带修 backend 网络环境 NAT 场景文案自相矛盾(低置信标注说「拼地址信息不可用」后面又给地址建议)。
+
+
+  成功标准：
+
+  - 生产会话轮内 inject_received/first_event 阶段事件实际到达前端(生产会话验证,状态条翻动)
+
+  - 断点根因定位并修复(有代码修复,非仅绕过)
+
+  - 上报可观测:失败首次 warn 留痕(不再静默黑盒),成功路径可通过配置观测
+
+  - backend 网络环境 NAT 场景(observed IP 不在任何网卡网段)文案不再自相矛盾:低置信标注与地址建议并存时删「拼地址信息不可用」断言,该断言仅在真无网卡数据时出现
+
+  - daemon/backend 聚焦测试全绿,既有断言面钉子零回归
+autopilot: false
+prestage_ack: true
+baseline_commit: 0ef3dc975ed0391ffbb2a1fdb604443085b6f43c
+updatedAt: '2026-10-26T06:52:55.102Z'
+cross_baselines:
+  sillyspec: 67e50bcca2adb9ecd502d12086c0ac8cb994da84
+baseline_sha256: b464489dc4d23cb284a7209b9d13cece81e833257fdb3ca85e4d359fc9eb23a4
+spec_approved: true
+spec_approved_at: '2026-10-26T06:00:08.214Z'
+spec_approved_by: anon@DESKTOP-HJ0AM09
+spec_approved_channel: user-confirmed
+spec_attested_by: anon@DESKTOP-HJ0AM09
+gate_summary: >-
+  test: passed ← module[]+deps(py1+jsx1)（18.8s）
+  结果：C:\Users\qinyi\IdeaProjects\multi-agent-platform\.sillyspec\.runtime\verify-runs\20261026064608\test-result.json｜lint:
+  skipped — 跳过原因：local.yaml 未配置 commands.lint（或标记 unavailable）。｜门文件 8 个
+

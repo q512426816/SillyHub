@@ -8273,3 +8273,75 @@
   confirmed_at: b377bb75bbb0c4bf603e59b2bcd5d009a8f21276
   source_change: 2026-10-26-session-stage-progress
   status: active
+
+## FR-daemon-300 生产会话轮内 inject_received/first_event 阶段事件实际到达前端(生产会话验证,状态条翻动)
+变更：2026-10-26-turn-phase-prod-fix
+状态：active
+摘要：恢复会话后续轮（生产实证形态）
+场景正文：
+- 场景：恢复会话后续轮（生产实证形态） — Given 一个经 daemon 重启恢复的活跃会话（生产会话 221ac351 同形态）；When 用户发送一条新消息；Then 状态条必须在合理时延内离开「执行器已接收」档（经 inject_received/first_event 推进或退位到活动摘要），agent 日志流照常（主消息
+全文：.sillyspec/changes/archive/2026-10-26-turn-phase-prod-fix/requirements.md#FR-01
+最近确认：f8d6db60af6d40416709c57f4719802dbc28ace5
+
+## FR-daemon-301 断点根因定位并修复(有代码修复,非仅绕过)
+变更：2026-10-26-turn-phase-prod-fix
+状态：active
+摘要：（无场景名）
+全文：.sillyspec/changes/archive/2026-10-26-turn-phase-prod-fix/requirements.md#FR-02
+最近确认：f8d6db60af6d40416709c57f4719802dbc28ace5
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-26-turn-phase-prod-fix:flow:测试绑定FR-02
+  tests: sillyhub-daemon/tests/turn-phase-observability.test.ts「上报链路触发」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-26-turn-phase-prod-fix
+  status: active
+
+## FR-daemon-302 上报可观测:失败首次 warn 留痕(不再静默黑盒),成功路径可通过配置观测
+变更：2026-10-26-turn-phase-prod-fix
+状态：active
+摘要：上报失败；观测开关
+场景正文：
+- 场景：上报失败 — Given daemon POST turn-phase 收到非 2xx 或网络异常；When 上报失败首次发生；Then 必须记 warn 一条；同 session+phase 的再次失败禁止重复 warn
+- 场景：观测开关 — Given 环境变量 SILLYHUB_TURN_PHASE_TRACE=1；When 阶段上报成功；Then 必须记 info（phase+run_id）；开关关闭时成功必须零日志（现状保持）
+全文：.sillyspec/changes/archive/2026-10-26-turn-phase-prod-fix/requirements.md#FR-03
+最近确认：f8d6db60af6d40416709c57f4719802dbc28ace5
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-26-turn-phase-prod-fix:flow:测试绑定FR-03
+  tests: sillyhub-daemon/tests/turn-phase-observability.test.ts「失败首次 warn+去重/TRACE 开关 info/默认成功静默」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-26-turn-phase-prod-fix
+  status: active
+
+## FR-daemon-303 backend 网络环境 NAT 场景(observed IP 不在任何网卡网段)文案不再自相矛盾:低置信标注与地址建议并存时删「拼地址信息不可用」断言,该断言仅在真无网卡数据时出现
+变更：2026-10-26-turn-phase-prod-fix
+状态：active
+摘要：NAT 出口（生产实证形态：observed=112.2.37.34 公网、网卡=10.10.128.145/172.23.144.1 内网）；无网卡数据（保持现状）
+场景正文：
+- 场景：NAT 出口（生产实证形态：observed=112.2.37.34 公网、网卡=10.10.128.145/172.23.144.1 内网） — Given 机器 observed_ip 为公网地址且 interfaces 非空、无一网卡网段包含 observed_ip；When 渲染【网络环境】段该机器行；Then 必须含低置信标注与「访问地址建议用 …（多网卡未定，候选：…）」；禁止出现「拼地址信息不可用」
+- 场景：无网卡数据（保持现状） — Given 机器 interfaces 为空；When 渲染该机器行；Then 「无可用 IPv4 地址」/信息不足类断言必须保留（不得因本变更丢失）
+全文：.sillyspec/changes/archive/2026-10-26-turn-phase-prod-fix/requirements.md#FR-04
+最近确认：f8d6db60af6d40416709c57f4719802dbc28ace5
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-26-turn-phase-prod-fix:flow:测试绑定FR-04
+  tests: backend/tests/modules/daemon/test_network_context.py「NAT 场景禁『拼地址信息不可用』+候选在/无网卡数据态断言保留」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-26-turn-phase-prod-fix
+  status: active

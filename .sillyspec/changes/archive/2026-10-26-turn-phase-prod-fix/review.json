@@ -1,0 +1,24 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-26-turn-phase-prod-fix",
+  "reviewer": "subagent",
+  "verdict": "PASS",
+  "reviewedAgainst": "f8d6db60af6d40416709c57f4719802dbc28ace5",
+  "findings": [
+    {
+      "severity": "P3",
+      "status": "resolved-as-accepted",
+      "title": "FR-02 字面承诺「有代码修复,非仅绕过」未以代码缺陷修复形态兑现——实际交付=观测层落地+重部署（无代码缺陷可修）",
+      "evidence": "证据链（静态五项排除+旧 bundle 验尸完整+出生记录指向手动替换+新进程 28736 对照全链路打通）支持「断链载体=旧进程 43940 进程级异常、无 daemon 逻辑缺陷」结论；FR-02 反绕过条款（禁手动补发/前端兜底/摘除功能）无一违反；FR-01 生产验收独立通过；偏差已在 evidence §根因定性如实披露而非隐瞒，裁决可接受。requirements.md FR-02 原文未回填改写，建议归档时以 evidence-task04.md 作为 FR-02 正式收口依据",
+      "location": ".sillyspec/changes/2026-10-26-turn-phase-prod-fix/evidence-task04.md:15-18"
+    }
+  ],
+  "dimensionNotes": {
+    "乱序": "ok",
+    "并发": "ok",
+    "切换": "ok",
+    "作用域": "ok"
+  },
+  "reviewerNotes": "逐项核验：(1) FR-03 三态实现与测试三方一致——warnOncePhaseFailure 键 session_id:phase 首警去重+512 有界逐出最旧（Set 迭代序=插入序，实现与测试锁定一致）；notePhaseEmit 逐次读 env、默认静默/TRACE=1 记 info（kv 含 point/phase/run_id）；三接点接线齐备（turn-control.ts L368-382 inject_received、events.ts L280-293 first_event、daemon.ts L9478-9493 reportTurnPhase 五步 helper + L4852-4857 桥到达记点 daemon_bridge_*）。FR-04 两态兑现——network_context.py L171-176 interfaces 非空走 NAT 文案（无「不可用」）、空保留断言，_same_subnet_by_cidr 回退序未动；测试正反双向锁定（test_render_nat_form_no_unavailable_claim / test_render_no_nics_keeps_unavailable_claim）。FR-01 生产证据（TRACE 522 条记点、events_first_event 与 daemon_bridge_first_event 成对、状态条翻动）支撑「实际到达前端」。FR-02 见 findings（形态偏差，已披露）。(2) 盲维四问与代码实态一致——记点只读不拦截不短路；warn-once Set 模块级、JS 单线程内同步 has/add/delete 无竞态；daemon 重启集合清零、TRACE 运行期生效；键不含 run_id 跨会话隔离（同 session 同 phase 跨 run 后续失败静默=FR-03 明文防刷屏，非缺陷）。(3) 边界裁决：①旧进程精确机理不可回溯（观测盲区）=可接受——旧进程无观测且已消亡客观不可取证，替代证据链已收敛结论，且观测层落地保证下次断链一轮内现形，不可回溯性被系统性补救；②FR-02 修复形态=观测+重部署而非代码修复=可接受（有保留）——证据链支持无缺陷结论、无绕过行为、FR-01 独立过验收，保留点为 requirements 原文未回填（见 finding）；③first_event 同 run 重复记点=可接受——防重由 daemon 层 _turnPhaseFirstEventReported（session:run 有界 Set，daemon.ts L4859-4862）承担，POST 不重复，重复仅存在于 TRACE 日志层（定位开关默认关），无害。(4) 防护真实——三接点均为 void Promise.resolve().catch(warn) 异步包 + try/catch 同步抛兜底，观测 helper 自身不抛（Set 操作+字符串拼接，唯一抛点为 logger 委托，与原 .catch 内 debug 路径同等假设非本次引入），fire-and-forget 语义不变。(5) 生成物判断成立——FR-04 仅动 _machine_line 运行时渲染文案（纯函数返回 str 注入 prompt），无 schema/DTO/端点变更，backend/openapi.json 内容零变化（git diff 空，仅 CRLF 状态噪声），无需再生成。工作区交付 7 文件与 HEAD 一致。未重跑测试（预消化回执：daemon 31 passed / backend 26 passed，抽验代码面与回执声明的用例集吻合）。",
+  "reviewedAt": "2026-10-26T06:51:31Z"
+}

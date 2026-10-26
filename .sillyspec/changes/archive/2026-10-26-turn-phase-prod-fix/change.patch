@@ -1,0 +1,375 @@
+diff --git a/backend/app/modules/daemon/session/network_context.py b/backend/app/modules/daemon/session/network_context.py
+index 0ed615b6c..35ecdcad1 100644
+--- a/backend/app/modules/daemon/session/network_context.py
++++ b/backend/app/modules/daemon/session/network_context.py
+@@ -164,7 +164,16 @@ def _machine_line(machine: MachineNetworkInfo, user_ip: str | None) -> str:
+             "与用户同网段，大概率可直连该机服务" if same else "与用户不同网段，用户浏览器无法直连"
+         )
+         if low_conf:
+-            verdict += "（低置信：仅观测 IP 判定，无网卡掩码，按默认掩码近似；拼地址信息不可用）"
++            # 2026-10-26-turn-phase-prod-fix FR-04：低置信两态拆分——「拼地址信息
++            # 不可用」在且仅在无网卡数据时出现；NAT 形态（观测 IP 不属于任何网卡
++            # 网段，如家用路由器出口公网 IP + 内网网卡）与地址候选并存时禁止断言
++            # 不可用（生产实证自相矛盾：说不可用又给建议，agent 无所适从）。
++            if machine.interfaces:
++                verdict += "（低置信：观测 IP 与网卡网段不匹配（疑似经路由器 NAT 出口），按默认掩码近似判定）"
++            else:
++                verdict += (
++                    "（低置信：仅观测 IP 判定，无网卡数据，按默认掩码近似；拼地址信息不可用）"
++                )
+     else:
+         verdict = "用户来源 IP 非 IPv4 或缺失，无法判定网段关系"
+     addr, note = _pick_address(machine)
+diff --git a/backend/tests/modules/daemon/test_network_context.py b/backend/tests/modules/daemon/test_network_context.py
+index e9078a103..4a9217d7f 100644
+--- a/backend/tests/modules/daemon/test_network_context.py
++++ b/backend/tests/modules/daemon/test_network_context.py
+@@ -330,6 +330,40 @@ def test_render_no_network_data_wording():
+     assert "大概率可直连" not in text  # 无数据不得输出可达性推断（指引行不算）
+ 
+ 
++def test_render_nat_form_no_unavailable_claim():
++    """2026-10-26-turn-phase-prod-fix FR-04 回归锁（生产实证形态）：
++    observed=公网出口 IP、网卡全内网（NAT）→ 低置信标注与地址候选并存，
++    禁止出现「拼地址信息不可用」（与地址建议自相矛盾）。"""
++    from app.modules.daemon.session.network_context import MachineNetworkInfo
++
++    machine = MachineNetworkInfo(
++        daemon_id="d-nat",
++        name="平台源码本地服务器",
++        online=True,
++        observed_ip="112.2.37.34",  # 公网出口（NAT 后）
++        interfaces=[
++            {"name": "eth0", "ip": "10.10.128.145", "cidr": "10.10.128.145/16", "family": "IPv4"},
++            {
++                "name": "vEthernet",
++                "ip": "172.23.144.1",
++                "cidr": "172.23.144.1/20",
++                "family": "IPv4",
++            },
++        ],
++    )
++    text = _render("112.2.37.34", [machine])  # 用户同 NAT 出口
++    assert "低置信" in text  # 观测 IP 不在任何网卡段 → 近似判定保留低置信
++    assert "疑似经路由器 NAT 出口" in text
++    assert "访问地址建议用 10.10.128.145" in text  # 候选照常给
++    assert "拼地址信息不可用" not in text  # FR-04：与建议并存时禁止断言不可用
++
++
++def test_render_no_nics_keeps_unavailable_claim():
++    """FR-04 反向锁：interfaces 为空（真无网卡数据）→ 「拼地址信息不可用」保留。"""
++    text = _render("192.168.1.23", [_machine(observed="192.168.1.10", ips=())])
++    assert "拼地址信息不可用" in text
++
++
+ def test_render_low_confidence_without_interfaces():
+     """FR-05：机器无网卡数据 → /24 与 /16 双档近似 + 低置信标注。"""
+     text = _render("192.168.0.7", [_machine(observed="192.168.1.10", ips=())])
+diff --git a/sillyhub-daemon/src/daemon.ts b/sillyhub-daemon/src/daemon.ts
+index b4fb45c1a..f4e91809e 100644
+--- a/sillyhub-daemon/src/daemon.ts
++++ b/sillyhub-daemon/src/daemon.ts
+@@ -80,6 +80,8 @@ import type { DetectedAgent } from './agent-detector.js';
+ // 2026-10-23-session-network-context task-02：心跳网卡清单采集（FR-02）。
+ import { collectNetworkInterfaces } from './network-info.js';
+ import type { NetworkInterfaceInfo } from './network-info.js';
++// 2026-10-26-turn-phase-prod-fix task-02：turn_phase 上报观测（FR-03）。
++import { notePhaseEmit, warnOncePhaseFailure } from './turn-phase-observability.js';
+ import { extractCause, HubHttpError } from './hub-client.js';
+ // 2026-08-31-machine-sillyspec-version task-05：register/heartbeat 追加的 sillyspec
+ // 参数形状（键存在性语义见 hub-client.ts D-002@v1 注释），daemon 组装快照时用。
+@@ -4844,6 +4846,16 @@ export class Daemon {
+     // 上报失败仅 debug（D-009：不阻塞消息主链路）。
+     if (fwdMsg['type'] === 'turn_phase_report') {
+       const phase = typeof fwdMsg['phase'] === 'string' ? fwdMsg['phase'] : '';
++      // 2026-10-26-turn-phase-prod-fix task-02（FR-03 定位分界点）：桥消息到达
++      // daemon 层——与 session-manager 侧发出记点（turn_control_inject /
++      // events_first_event）配对，两点间缺一即锁定断链环节。
++      notePhaseEmit(
++        `daemon_bridge_${phase || 'unknown'}`,
++        sessionId,
++        runId,
++        phase,
++        (event, kv) => this._logger.info(event, kv),
++      );
+       if (phase === 'first_event') {
+         const firstEventKey = `${sessionId}:${runId}`;
+         if (this._turnPhaseFirstEventReported.has(firstEventKey)) {
+@@ -9461,9 +9473,17 @@ export class Daemon {
+     // || !prompt)` 非空守卫之后（D-013②：run_id 恒带）；SWR 命中跳过的步骤不发
+     // （design Phase 2）。
+     const reportTurnPhase = (phase: TurnPhaseValue, detail?: string): void => {
++      // 2026-10-26-turn-phase-prod-fix task-02（FR-03）：五步上报观测——TRACE 时
++      // 成功 info + 失败首警 warn（原 debug 在 info 级日志下不可见 = 生产黑盒）。
++      notePhaseEmit(phase, sessionId, firstRunId, phase, (event, kv) =>
++        this._logger.info(event, kv),
++      );
+       this._client
+         .notifyTurnPhase(sessionId, firstRunId, phase, detail)
+         .catch((e: unknown) => {
++          warnOncePhaseFailure(phase, sessionId, firstRunId, phase, e, (event, kv) =>
++            this._logger.warn(event, kv),
++          );
+           this._logger.debug('turn_phase_report_failed', {
+             session_id: sessionId,
+             run_id: firstRunId,
+diff --git a/sillyhub-daemon/src/interactive/session-manager/events.ts b/sillyhub-daemon/src/interactive/session-manager/events.ts
+index 0b89e3f0c..2fba1b471 100644
+--- a/sillyhub-daemon/src/interactive/session-manager/events.ts
++++ b/sillyhub-daemon/src/interactive/session-manager/events.ts
+@@ -16,6 +16,8 @@
+ 
+ import type { AgentEvent } from '../../types.js';
+ import type { SessionEventForBackend, SessionState } from '../types.js';
++// 2026-10-26-turn-phase-prod-fix task-02：上报链路观测（FR-03）。
++import { notePhaseEmit, warnOncePhaseFailure } from '../../turn-phase-observability.js';
+ import type {
+   InteractiveDriverResult,
+   TurnMessageEnvelope,
+@@ -273,15 +275,21 @@ export async function onMessage(
+   // 上报——first_event 语义绑定 run，无 run 无可归属阶段。
+   const firstEventRunId = state.currentRunId;
+   if (firstEventRunId) {
++    // 2026-10-26-turn-phase-prod-fix task-02：补观测（FR-03）——到达记点（TRACE
++    // 时 info）+ 失败首警 warn（此前纯吞 = 生产黑盒）。
++    notePhaseEmit('events_first_event', state.sessionId, firstEventRunId, 'first_event');
+     try {
+       void Promise.resolve(
+         mgr.deps.onTurnMessage(state.sessionId, firstEventRunId, {
+           type: 'turn_phase_report',
+           phase: 'first_event',
+         }),
+-      ).catch(() => undefined);
+-    } catch {
+-      // 同步抛（测试 mock 形态）兜底吞掉：上报绝不反向打断事件主链路。
++      ).catch((e: unknown) => {
++        warnOncePhaseFailure('events_first_event', state.sessionId, firstEventRunId, 'first_event', e);
++      });
++    } catch (e) {
++      // 同步抛（测试 mock 形态/桥未挂）兜底吞掉：上报绝不反向打断事件主链路。
++      warnOncePhaseFailure('events_first_event', state.sessionId, firstEventRunId, 'first_event', e);
+     }
+   }
+   // 2026-10-23-watchdog-steering-guard FR-02/FR-03：envelope 到达即轮内活动——
+diff --git a/sillyhub-daemon/src/interactive/session-manager/turn-control.ts b/sillyhub-daemon/src/interactive/session-manager/turn-control.ts
+index 509863a2b..43eb4b8a4 100644
+--- a/sillyhub-daemon/src/interactive/session-manager/turn-control.ts
++++ b/sillyhub-daemon/src/interactive/session-manager/turn-control.ts
+@@ -21,6 +21,11 @@ import {
+   SessionNotActiveError,
+ } from '../types.js';
+ import type { SessionInjectAttachment } from '../../protocol.js';
++// 2026-10-26-turn-phase-prod-fix task-02：上报链路观测（FR-03）。
++import {
++  notePhaseEmit,
++  warnOncePhaseFailure,
++} from '../../turn-phase-observability.js';
+ import { SessionQueueClosedError } from '../input-queue.js';
+ import type {
+   InteractiveDriverHandle,
+@@ -358,15 +363,22 @@ export async function inject(
+   // 送达 AI 队列（InputQueue.push 成功后）。fire-and-forget 走 deps.onTurnMessage
+   // 桥（daemon 层按 type='turn_phase_report' 拦截转 notifyTurnPhase，不进日志轨；
+   // 同 _emitSessionHeaderReport 先例），失败静默（D-009：不阻塞注入主流程）。
++  // 2026-10-26-turn-phase-prod-fix task-02：补观测——发出点到达记点（TRACE 时
++  // info）+ 调用/拒绝异常首警 warn（FR-03；生产实证断链零线索，见变更背景）。
++  notePhaseEmit('turn_control_inject', sessionId, runId, 'inject_received');
+   try {
+     void Promise.resolve(
+       mgr.deps.onTurnMessage(sessionId, runId, {
+         type: 'turn_phase_report',
+         phase: 'inject_received',
+       }),
+-    ).catch(() => undefined);
+-  } catch {
+-    // 同步抛（测试 mock 形态）兜底吞掉：上报绝不反向打断注入路径。
++    ).catch((e: unknown) => {
++      warnOncePhaseFailure('turn_control_inject', sessionId, runId, 'inject_received', e);
++    });
++  } catch (e) {
++    // 同步抛（测试 mock 形态/桥未挂）兜底吞掉：上报绝不反向打断注入路径——
++    // 但必须首警留痕（此前纯吞 = 生产黑盒根因之一）。
++    warnOncePhaseFailure('turn_control_inject', sessionId, runId, 'inject_received', e);
+   }
+   state.currentRunId = runId;
+   state.status = 'running';
+diff --git a/sillyhub-daemon/src/turn-phase-observability.ts b/sillyhub-daemon/src/turn-phase-observability.ts
+new file mode 100644
+index 000000000..adc742fb4
+--- /dev/null
++++ b/sillyhub-daemon/src/turn-phase-observability.ts
+@@ -0,0 +1,86 @@
++/**
++ * turn_phase 上报链路观测（2026-10-26-turn-phase-prod-fix FR-03）。
++ *
++ * 背景：阶段上报（2026-10-26-session-stage-progress）为 fire-and-forget——
++ * 成功静默、失败仅 debug，生产 info 级日志下完全黑盒，实证会话 221ac351
++ * 断链后零线索可查。本模块补观测三态：
++ *
++ * - 失败首警：同一 (session_id, phase) 首次失败记 warn（含 run_id 与错误摘要），
++ *   后续失败静默去重（防刷屏）；集合有界 512 逐出最旧（对齐 daemon.ts
++ *   _turnPhaseFirstEventReported 防重 Set 惯例）。
++ * - 成功默认静默（现状保持，不加日志成本）。
++ * - 追踪开关：env SILLYHUB_TURN_PHASE_TRACE=1 时成功也记 info（定位用；
++ *   逐次读取对齐 turnStartWatchdogMs 惯例，运行期改 env 即生效、测试可覆写）。
++ *
++ * 全部记点只读不拦截、不抛——观测不得改变 fire-and-forget 语义。
++ *
++ * 日志形态：daemon Logger 是 (event, kv) 双参（daemon.ts createLogger，输出经
++ * 进程 stdout 落 daemon.log）；session-manager 侧无 logger 注入，缺省走带
++ * `[turn-phase]` 前缀的 console（daemon.log 实证收纳 [session-manager] 前缀
++ * console 行，同链路）。两侧统一 (event, kv) 形态。
++ */
++
++/** 与 daemon.ts Logger 同形的单方法形态（info/warn 各一）。 */
++export type PhaseLogFn = (event: string, kv?: Record<string, unknown>) => void;
++
++/** 去重键上限（超限逐出最旧，防长跑进程无界膨胀）。 */
++const WARN_ONCE_MAX = 512;
++
++const warnedKeys = new Set<string>();
++
++/** 观测开关（逐次读取——运行期生效/测试可覆写，对齐 turnStartWatchdogMs）。 */
++export function turnPhaseTraceEnabled(): boolean {
++  return process.env.SILLYHUB_TURN_PHASE_TRACE === '1';
++}
++
++/** 缺省 console 适配（session-manager 侧用；[turn-phase] 前缀对齐 [session-manager] 惯例）。 */
++const consoleInfo: PhaseLogFn = (event, kv) => {
++  // eslint-disable-next-line no-console
++  console.info('[turn-phase]', `[${event}]`, ...(kv ? Object.entries(kv).map(([k, v]) => `${k}=${v}`) : []));
++};
++const consoleWarn: PhaseLogFn = (event, kv) => {
++  // eslint-disable-next-line no-console
++  console.warn('[turn-phase]', `[${event}]`, ...(kv ? Object.entries(kv).map(([k, v]) => `${k}=${v}`) : []));
++};
++
++/** 发出点到达记点：TRACE 开时 info（默认静默）。 */
++export function notePhaseEmit(
++  point: string,
++  sessionId: string,
++  runId: string,
++  phase: string,
++  log: PhaseLogFn = consoleInfo,
++): void {
++  if (!turnPhaseTraceEnabled()) return;
++  log('turn_phase_emit', { point, session_id: sessionId, run_id: runId, phase });
++}
++
++/** 失败首警：同 (session_id, phase) 首次 warn，后续去重。 */
++export function warnOncePhaseFailure(
++  point: string,
++  sessionId: string,
++  runId: string,
++  phase: string,
++  error: unknown,
++  log: PhaseLogFn = consoleWarn,
++): void {
++  const key = `${sessionId}:${phase}`;
++  if (warnedKeys.has(key)) return;
++  warnedKeys.add(key);
++  if (warnedKeys.size > WARN_ONCE_MAX) {
++    const oldest = warnedKeys.values().next().value;
++    if (oldest !== undefined) warnedKeys.delete(oldest);
++  }
++  log('turn_phase_report_failed_once', {
++    point,
++    session_id: sessionId,
++    run_id: runId,
++    phase,
++    error: error instanceof Error ? error.message : String(error),
++  });
++}
++
++/** 测试清理（生产不调用——daemon 重启集合自然清零）。 */
++export function resetTurnPhaseObservabilityForTest(): void {
++  warnedKeys.clear();
++}
+diff --git a/sillyhub-daemon/tests/turn-phase-observability.test.ts b/sillyhub-daemon/tests/turn-phase-observability.test.ts
+new file mode 100644
+index 000000000..281164465
+--- /dev/null
++++ b/sillyhub-daemon/tests/turn-phase-observability.test.ts
+@@ -0,0 +1,82 @@
++import { afterEach, describe, expect, it, vi } from 'vitest';
++
++// 2026-10-26-turn-phase-prod-fix task-01：观测三态单测（FR-03）。
++// (event, kv) 形态对齐 daemon Logger；注入 log fn 断言（缺省 console 形态由
++// daemon.log 实证收纳，不在单测里跑真 console）。
++
++const {
++  notePhaseEmit,
++  warnOncePhaseFailure,
++  resetTurnPhaseObservabilityForTest,
++  turnPhaseTraceEnabled,
++} = await import('../src/turn-phase-observability.js');
++
++function makeLog(): ReturnType<typeof vi.fn> {
++  return vi.fn();
++}
++
++afterEach(() => {
++  resetTurnPhaseObservabilityForTest();
++  delete process.env.SILLYHUB_TURN_PHASE_TRACE;
++});
++
++describe('turnPhaseTraceEnabled', () => {
++  it('缺省关 / =1 开', () => {
++    // 并发批次下其他测试文件可能残留同名 env——显式清零起点，不依赖外部干净态。
++    delete process.env.SILLYHUB_TURN_PHASE_TRACE;
++    expect(turnPhaseTraceEnabled()).toBe(false);
++    process.env.SILLYHUB_TURN_PHASE_TRACE = '1';
++    expect(turnPhaseTraceEnabled()).toBe(true);
++  });
++});
++
++describe('notePhaseEmit（成功观测）', () => {
++  it('默认静默（现状保持）', () => {
++    const log = makeLog();
++    notePhaseEmit('turn_control_inject', 's1', 'r1', 'inject_received', log);
++    expect(log).not.toHaveBeenCalled();
++  });
++
++  it('TRACE=1 时记 info（(event, kv) 形态，含 point/phase/run_id）', () => {
++    process.env.SILLYHUB_TURN_PHASE_TRACE = '1';
++    const log = makeLog();
++    notePhaseEmit('events', 's1', 'r1', 'first_event', log);
++    expect(log).toHaveBeenCalledTimes(1);
++    const [event, kv] = log.mock.calls[0]!;
++    expect(event).toBe('turn_phase_emit');
++    expect(kv).toMatchObject({ point: 'events', phase: 'first_event', run_id: 'r1' });
++  });
++});
++
++describe('warnOncePhaseFailure（失败首警去重）', () => {
++  it('首次 warn，同 session+phase 后续去重', () => {
++    const log = makeLog();
++    warnOncePhaseFailure('daemon', 's1', 'r1', 'inject_received', new Error('HTTP 502'), log);
++    warnOncePhaseFailure('daemon', 's1', 'r2', 'inject_received', new Error('HTTP 503'), log);
++    expect(log).toHaveBeenCalledTimes(1);
++    const [event, kv] = log.mock.calls[0]!;
++    expect(event).toBe('turn_phase_report_failed_once');
++    expect(kv).toMatchObject({ phase: 'inject_received', error: 'HTTP 502' });
++  });
++
++  it('不同 phase 各自首警；Error 之外的错误形态转字符串', () => {
++    const log = makeLog();
++    warnOncePhaseFailure('daemon', 's1', 'r1', 'inject_received', 'boom', log);
++    warnOncePhaseFailure('daemon', 's1', 'r1', 'first_event', { weird: true }, log);
++    expect(log).toHaveBeenCalledTimes(2);
++    expect(log.mock.calls[0]![1]).toMatchObject({ error: 'boom' });
++    expect(log.mock.calls[1]![1]).toMatchObject({ phase: 'first_event' });
++  });
++
++  it('有界：超 512 键逐出最旧（被逐键可再警）', () => {
++    const log = makeLog();
++    for (let i = 0; i < 512; i++) {
++      warnOncePhaseFailure('daemon', `s${i}`, 'r', 'p', 'e', log);
++    }
++    expect(log).toHaveBeenCalledTimes(512);
++    warnOncePhaseFailure('daemon', 's0', 'r', 'p', 'e', log); // 已在集合 → 静默
++    expect(log).toHaveBeenCalledTimes(512);
++    warnOncePhaseFailure('daemon', 's_new', 'r', 'p', 'e', log); // 逐出 s0 后新键入集
++    expect(log).toHaveBeenCalledTimes(513);
++  });
++});

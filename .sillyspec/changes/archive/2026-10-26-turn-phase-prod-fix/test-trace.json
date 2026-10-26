@@ -1,0 +1,51 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-26-turn-phase-prod-fix",
+  "rows": [
+    {
+      "anchor": "FR-02",
+      "row_id": "2026-10-26-turn-phase-prod-fix:flow:测试绑定FR-02",
+      "tests": [
+        "sillyhub-daemon/tests/turn-phase-observability.test.ts「上报链路触发」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-26-turn-phase-prod-fix"
+    },
+    {
+      "anchor": "FR-03",
+      "row_id": "2026-10-26-turn-phase-prod-fix:flow:测试绑定FR-03",
+      "tests": [
+        "sillyhub-daemon/tests/turn-phase-observability.test.ts「失败首次 warn+去重/TRACE 开关 info/默认成功静默」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-26-turn-phase-prod-fix"
+    },
+    {
+      "anchor": "FR-04",
+      "row_id": "2026-10-26-turn-phase-prod-fix:flow:测试绑定FR-04",
+      "tests": [
+        "backend/tests/modules/daemon/test_network_context.py「NAT 场景禁『拼地址信息不可用』+候选在/无网卡数据态断言保留」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-26-turn-phase-prod-fix"
+    }
+  ]
+}

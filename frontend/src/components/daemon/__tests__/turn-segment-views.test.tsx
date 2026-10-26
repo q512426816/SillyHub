@@ -1976,3 +1976,81 @@ describe("deriveTurnActivity 快照终态收敛（turn-live-visibility FR-02）"
     expect(act.subagents[0]?.taskElapsedMs).toBe(4_000); // 元数据终态时长不被快照覆盖
   });
 });
+
+/* ───────── 9. 过程信息块限宽统一（2026-10-26-subagent-card-width-unify） ───────── */
+
+/**
+ * 2026-10-25-session-tab-visual-unify 漏网的过程类组件补漏断言——子代理卡
+ * （两分支）/团队分身卡/工具行/思考行/警告行根容器统一限宽
+ * max-w-[calc(100%-120px)]（整行宽度 − 120px，随容器自适应），与文本段
+ * （TextSegmentView，见「无框形态」用例）同口径；卡片类另断言
+ * self-start（原 self-stretch 在 flex-col 父容器里全宽拉伸，为限宽反噬源）。
+ */
+describe("过程信息块限宽统一（2026-10-26-subagent-card-width-unify）", () => {
+  const MAX_W = "max-w-[calc(100%-120px)]";
+
+  it("SubagentBlockView 无 Provider 纯展示分支：根容器限宽 + self-start", () => {
+    const seg = makeToolSeg({
+      id: "call_w1",
+      toolName: "Agent",
+      primary: "宽度纯展示",
+      subagentType: "research",
+      children: [],
+    });
+    const { container } = render(<SubagentBlockView segment={seg} />);
+    const root = container.firstChild as HTMLElement;
+    expect(root.className).toContain(MAX_W);
+    expect(root.className).toContain("self-start");
+    expect(root.className).not.toContain("self-stretch");
+  });
+
+  it("SubagentBlockView panel 紧凑卡片分支：根容器限宽 + self-start（data-segment-id 锚不变）", () => {
+    const seg = makeToolSeg({
+      id: "call_w2",
+      toolName: "Agent",
+      primary: "宽度紧凑卡",
+      subagentType: "research",
+      children: [],
+    });
+    const value: SubagentPanelContextValue = {
+      openSubagent: vi.fn(),
+      closeSubagent: vi.fn(),
+      activeId: null,
+    };
+    const { container } = render(
+      <SubagentPanelContext.Provider value={value}>
+        <SubagentBlockView segment={seg} />
+      </SubagentPanelContext.Provider>,
+    );
+    const root = container.firstChild as HTMLElement;
+    expect(root).toHaveAttribute("data-segment-id", "call_w2");
+    expect(root.className).toContain(MAX_W);
+    expect(root.className).toContain("self-start");
+    expect(root.className).not.toContain("self-stretch");
+  });
+
+  it("TeamWorkerBlockView 团队分身卡：根容器限宽 + self-start", () => {
+    const { container } = render(
+      <TeamWorkerBlockView role="impl" status="completed" objective="目标" durationMs={1_000} />,
+    );
+    const root = container.firstChild as HTMLElement;
+    expect(root.className).toContain(MAX_W);
+    expect(root.className).toContain("self-start");
+    expect(root.className).not.toContain("self-stretch");
+  });
+
+  it("ToolRowView 工具行与 ThinkingRowView 思考行：根容器限宽", () => {
+    const { container: toolC } = render(<ToolRowView segment={makeToolSeg()} />);
+    const toolRoot = toolC.firstChild as HTMLElement;
+    expect(toolRoot.className).toContain(MAX_W);
+    const { container: thinkC } = render(<ThinkingRowView segment={makeThinkingSeg()} />);
+    const thinkRoot = thinkC.firstChild as HTMLElement;
+    expect(thinkRoot.className).toContain(MAX_W);
+  });
+
+  it("StderrRowView 警告行：根容器限宽", () => {
+    const { container } = render(<StderrRowView segment={makeStderrSeg()} />);
+    const root = container.firstChild as HTMLElement;
+    expect(root.className).toContain(MAX_W);
+  });
+});
