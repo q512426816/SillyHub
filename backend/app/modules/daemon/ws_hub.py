@@ -156,6 +156,18 @@ class DaemonWsHub:
                 return False
             self._connections.pop(daemon_id, None)
 
+        # 2026-10-26-ws-evict-close：逐出必须对旧 socket 主动 close。仅从路由
+        # 表 pop 时 daemon 侧 TCP 连接仍在（其 ping/pong 正常），daemon 永不感
+        # 知、永不重连，路由表缺口会一直持续到 backend 重启（2026-10-26 生产
+        # 事故实证：15min 内该 daemon 全部 session_inject 判死）。close(4000)
+        # 触发 daemon 既有 close→退避重连路径，路由表秒级自愈；与 connect()
+        # 替换路径的 close(code=4000, "replaced") 同款语义。best-effort：socket
+        # 已死时 close 抛错吞掉，不影响逐出结果。
+        try:
+            await ws.close(code=4000, reason="evicted")
+        except Exception:
+            pass
+
         # 真正逐出旧连接：取消该 daemon 在途 RPC（awaiters 收 DaemonRuntimeOffline，
         # 仅本 daemon 的调用——ql-20260903-015 绑定语义）。
         await self.cancel_pending_for_daemon(daemon_id)

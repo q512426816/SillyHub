@@ -1,0 +1,30 @@
+tier: thin
+legacy_fallback: false
+substeps: {}
+born_face: thin
+with_tasks: false
+review_force: null
+input: >-
+  修复WS逐出不关socket致daemon假活不重连
+
+
+  动机与背景：2026-10-26 晚生产事故实证——backend ws_hub send 超时/异常时 _evict_stale 仅从路由表移除连接、不关闭 socket，daemon 侧 TCP 连接仍在、ping/pong
+  正常，永不触发重连；backend 路由表查无此 daemon，后续所有 session_inject 推送失败，15 分钟内两个会话 5 轮消息全部判死（interactive_inject_send_failed），直到
+  backend 容器重建才恢复。
+
+
+  成功标准：
+
+  - send 超时逐出与异常逐出路径均对旧 socket 主动 close（code=4000），daemon 侧可感知断线并重连
+
+  - 逐出 close 仅作用于被逐出的旧连接对象，不误伤并发重连的新连接（对象身份校验）
+
+  - 现有 ws_hub 相关测试全绿
+autopilot: true
+prestage_ack: true
+baseline_commit: cd905dca496076797ab775029b212e19cebeb955
+updatedAt: '2026-10-26T14:58:57.277Z'
+cross_baselines:
+  sillyspec: 67e50bcca2adb9ecd502d12086c0ac8cb994da84
+baseline_sha256: eaf1a4cd545711e0c7d2bc3dc1936c5ba909533d177dc601936370a5dcddc822
+
