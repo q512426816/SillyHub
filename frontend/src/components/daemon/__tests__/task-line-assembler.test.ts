@@ -84,6 +84,15 @@ const DISPATCH_RAW = JSON.stringify({
   success: true,
 });
 
+/** 2026-10-26-subagent-task-meta-restore：第二个派发段（tool_use_id = tu_ghost，
+ * 悬挂回填用例——[TASK_STARTED] 先到悬挂、本行建段时消费回填）。 */
+const DISPATCH_RAW_GHOST = JSON.stringify({
+  tool: "Task",
+  args: { description: "幽灵派发" },
+  tool_use_id: "tu_ghost",
+  success: true,
+});
+
 const T0 = "2026-08-27T09:00:00.000Z";
 const T1 = "2026-08-27T09:00:01.000Z";
 const T2 = "2026-08-27T09:00:02.000Z";
@@ -329,37 +338,61 @@ describe("[TASK_*] 孤儿行丢弃（task-11：找不到段不崩，不建 stub 
     expect(toolById(after.segments, "tu_bg").taskStatus).toBeUndefined();
   });
 
-  it("parent 指向不存在的 tool_use_id → 丢弃原引用返回", () => {
+  it("parent 指向不存在的 tool_use_id → 悬挂暂存（不建 stub）；段随后建立时回填（2026-10-26-subagent-task-meta-restore）", () => {
     const turn = applyAll([makeLog("1", "tool_call", DISPATCH_RAW)]);
     const after = applyLogToSegments(
       turn,
       makeLog("2", "stdout", '[TASK_STARTED] {"async":true}', { parentToolUseId: "tu_ghost" }),
     );
-    expect(after).toBe(turn);
+    // 悬挂分支：返回新对象记 logId 去重，但 segments 原引用（信号非内容）
+    expect(after).not.toBe(turn);
+    expect(after.segments).toBe(turn.segments);
     // 不为 [TASK_*] 行建 subagent_stub 兜底段（取更安全者）
     expect(after.segments).toHaveLength(1);
+    // 悬挂条目在 tu_ghost 段建立时回填（孤儿段建立即消费）
+    const filled = applyAll([
+      makeLog("1", "tool_call", DISPATCH_RAW),
+      makeLog("2", "stdout", '[TASK_STARTED] {"async":true}', { parentToolUseId: "tu_ghost" }),
+      makeLog("3", "tool_call", DISPATCH_RAW_GHOST),
+    ]);
+    expect(toolById(filled.segments, "tu_ghost")).toMatchObject({
+      taskStatus: "running",
+      taskAsync: true,
+    });
   });
 
-  it("parent 仅为 stub 的极端时序（子消息先到、tool_call JSON 未到）→ 丢弃；tool 段到达后后续行补写成功", () => {
+  it("parent 仅为 stub 的极端时序（子消息先到、tool_call JSON 未到）→ 悬挂；tool 段到达时悬挂回填 + 后续行补写成功", () => {
     let turn = applyAll([
       makeLog("1", "stdout", "子消息先到", { parentToolUseId: "tu_bg", subagentType: "researcher" }),
     ]);
-    // stub 无元数据槽 → 行丢弃（原引用返回）
-    const dropped = applyLogToSegments(
+    // stub 无元数据槽 → 悬挂暂存（新对象记 logId；segment 树不动）
+    const hung = applyLogToSegments(
       turn,
       taskLine("TASK_STARTED", '{"async":true}'),
     );
-    expect(dropped).toBe(turn);
-    // tool_call JSON 到达合并 stub 后，后续 [TASK_*] 行补写元数据
+    expect(hung).not.toBe(turn);
+    expect(hung.segments).toBe(turn.segments);
+    // tool_call JSON 到达合并 stub：悬挂的 STARTED 自动回填（async 元数据在段上）
     turn = applyAll([
       ...[makeLog("1", "stdout", "子消息先到", { parentToolUseId: "tu_bg", subagentType: "researcher" })],
+      taskLine("TASK_STARTED", '{"async":true}'),
+      makeLog("2", "tool_call", DISPATCH_RAW),
+    ]);
+    expect(toolById(turn.segments, "tu_bg")).toMatchObject({
+      taskStatus: "running",
+      taskAsync: true,
+      subagentType: "researcher", // stub 的 children / subagentType 随迁不受影响
+    });
+    // 后续 [TASK_*] 行继续按既有路径补写终态
+    turn = applyAll([
+      makeLog("1", "stdout", "子消息先到", { parentToolUseId: "tu_bg", subagentType: "researcher" }),
+      taskLine("TASK_STARTED", '{"async":true}'),
       makeLog("2", "tool_call", DISPATCH_RAW),
       taskLine("TASK_NOTIFICATION", '{"status":"stopped","elapsed_ms":7000}'),
     ]);
     expect(toolById(turn.segments, "tu_bg")).toMatchObject({
       taskStatus: "stopped",
       taskElapsedMs: 7000,
-      subagentType: "researcher", // stub 的 children / subagentType 随迁不受影响
     });
   });
 });

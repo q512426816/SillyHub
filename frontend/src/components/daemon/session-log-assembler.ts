@@ -823,11 +823,19 @@ const SEGMENT_ID_INDEX: unique symbol = Symbol("assemblerSegmentIds");
  * Set（语义同 seenLogIds：对象展开随行、原地记入）。
  */
 const SUPERSEDED_SEG_IDS: unique symbol = Symbol("assemblerSupersededSegIds");
+/**
+ * 2026-10-26-subagent-task-meta-restore：悬挂 [TASK_*] 元数据表——parent 在场但
+ * 派发 tool 段未建（同毫秒乱序竞态，生产 83a96b92 实证 [TASK_STARTED] 先于
+ * tool_call 行处理）时暂存，tool_use 段建立时回填并删条目。挂载/流转模式同
+ * SUPERSEDED_SEG_IDS：enumerable symbol 键随对象展开流转，链内共享可变 Map。
+ */
+const PENDING_TASK_METAS: unique symbol = Symbol("assemblerPendingTaskMetas");
 
 interface AssemblerInternalsCarrier {
   [LEGACY_CELL]?: LegacyCell;
   [SEGMENT_ID_INDEX]?: Set<string>;
   [SUPERSEDED_SEG_IDS]?: Set<string>;
+  [PENDING_TASK_METAS]?: Map<string, TaskLineMeta[]>;
 }
 
 /**
@@ -877,12 +885,13 @@ function buildLegacyCell(segments: TurnSegment[]): LegacyCell {
   };
 }
 
-/** 把 cell / id 索引 / 封存集合以 enumerable symbol 键挂到 target（对象展开自动随行）。 */
+/** 把 cell / id 索引 / 封存集合 / 悬挂任务元数据表以 enumerable symbol 键挂到 target（对象展开自动随行）。 */
 function attachInternals(
   target: AssembledTurn,
   cell: LegacyCell,
   idIndex: Set<string> | null,
   superseded: Set<string> | null = null,
+  pendingTaskMetas: Map<string, TaskLineMeta[]> | null = null,
 ): void {
   Object.defineProperty(target, LEGACY_CELL, {
     value: cell,
@@ -901,6 +910,16 @@ function attachInternals(
   if (superseded) {
     Object.defineProperty(target, SUPERSEDED_SEG_IDS, {
       value: superseded,
+      enumerable: true,
+      writable: true,
+      configurable: true,
+    });
+  }
+  // 2026-10-26-subagent-task-meta-restore：悬挂表随 internals 转移（asAssembled
+  // 收窄视图等字面量构造点不丢悬挂——设计风险①的兑现点）。
+  if (pendingTaskMetas) {
+    Object.defineProperty(target, PENDING_TASK_METAS, {
+      value: pendingTaskMetas,
       enumerable: true,
       writable: true,
       configurable: true,
@@ -925,6 +944,45 @@ function supersededSegIdsOf(turn: AssembledTurn): Set<string> {
 }
 
 /**
+ * 惰性取 / 建 turn 链共享的悬挂任务元数据表（2026-10-26-subagent-task-meta-restore）。
+ * Map 键 = 派发 tool_use_id，值 = 该段悬挂的 [TASK_*] 行解析产物（到达序）。
+ */
+function pendingTaskMetasOf(turn: AssembledTurn): Map<string, TaskLineMeta[]> {
+  const carrier = turn as AssembledTurn & AssemblerInternalsCarrier;
+  let map = carrier[PENDING_TASK_METAS];
+  if (!map) {
+    map = new Map<string, TaskLineMeta[]>();
+    Object.defineProperty(turn, PENDING_TASK_METAS, {
+      value: map,
+      enumerable: true,
+      writable: true,
+      configurable: true,
+    });
+  }
+  return map;
+}
+
+/**
+ * tool_use 段建立时消费悬挂元数据（2026-10-26-subagent-task-meta-restore）：
+ * 按到达序逐条 applyTaskMeta 回填（STARTED 的 running → PROGRESS → 终态，
+ * 与即时路径同一合并函数同一语义），消费即删条目；无悬挂原段返回。
+ */
+function drainPendingTaskMetas(
+  turn: AssembledTurn,
+  toolUseId: string,
+  seg: ToolTurnSegment,
+): ToolTurnSegment {
+  const pending = (turn as AssembledTurn & AssemblerInternalsCarrier)[PENDING_TASK_METAS];
+  if (!pending) return seg;
+  const list = pending.get(toolUseId);
+  if (!list || list.length === 0) return seg;
+  pending.delete(toolUseId);
+  let out = seg;
+  for (const meta of list) out = applyTaskMeta(out, meta);
+  return out;
+}
+
+/**
  * 把 source 携带的装配器内部状态（投影 cell / 段 id 索引）转移到 segments 同源的
  * target——消费方（session-panel asAssembled / assembledViewOf）构造收窄视图时
  * 调用，保持增量链不断（symbol 键 enumerable，对象展开自动随行，直传视图除外）。
@@ -934,7 +992,15 @@ export function transferAssemblerInternals(target: AssembledTurn, source: Assemb
   const carrier = source as AssembledTurn & AssemblerInternalsCarrier;
   const cell = carrier[LEGACY_CELL];
   const index = carrier[SEGMENT_ID_INDEX];
-  if (cell) attachInternals(target, cell, index ?? null, carrier[SUPERSEDED_SEG_IDS] ?? null);
+  if (cell) {
+    attachInternals(
+      target,
+      cell,
+      index ?? null,
+      carrier[SUPERSEDED_SEG_IDS] ?? null,
+      carrier[PENDING_TASK_METAS] ?? null,
+    );
+  }
 }
 
 /**
@@ -1445,6 +1511,26 @@ export function applyLogToSegments(
       }
       return nextTurn;
     }
+    // 2026-10-26-subagent-task-meta-restore：parent 在场但派发段未建（同毫秒
+    // 乱序竞态——生产实证 [TASK_STARTED] 行先于 tool_call 行处理，原丢弃导致
+    // 段元数据永久丢失 + async 回执假终态配对）→ 悬挂暂存，待 tool_use 段建立
+    // 时回填（drainPendingTaskMetas）。无 parent（孤儿行无归属键）维持原丢弃。
+    if (parent) {
+      const pending = pendingTaskMetasOf(turn);
+      const list = pending.get(parent);
+      if (list) list.push(seg);
+      else pending.set(parent, [seg]);
+      const nextTurn: AssembledTurn = {
+        ...turn,
+        // 计时锚点兜底同上；segments/output 原引用复用（信号非内容，投影不变）。
+        turnStartedAt: turn.turnStartedAt ?? parseLogTs(input.timestamp),
+        seenLogIds: recordSeenLogId(turn.seenLogIds, input.logId),
+      };
+      if (input.logId) {
+        applyResultMemo.set(turn.seenLogIds, { logId: input.logId, next: nextTurn });
+      }
+      return nextTurn;
+    }
     return turn;
   }
 
@@ -1562,27 +1648,32 @@ export function applyLogToSegments(
       const toolSegId =
         resolvedToolUseId ?? makeUniqueSegmentId(ids(), segmentIdBase(input, "tool", ts));
       if (resolvedToolUseId) ids().add(resolvedToolUseId);
+      const baseSeg: ToolTurnSegment = {
+        kind: "tool",
+        // 段 id = tool_use_id（result 配对 + 子代理路由 key）；解析失败用
+        // logId 等兜底（toolName=null，渲染原样显示 raw，R-07）。
+        id: toolSegId,
+        raw: seg.text,
+        // 初始状态取 tool_call JSON 的 success（权威源）；running 靠后续
+        // result 配对兜底（statusFromToolUseRaw 注）。
+        status: statusFromToolUseRaw(seg.text),
+        toolName: (parsedTool && parsedTool.toolName) || null,
+        primary: parsedTool ? parsedTool.primary : null,
+        startedAt: ts,
+        endedAt: null,
+        children: adoptedChildren,
+        subagentType: adoptedSubagentType,
+        // FR-07 slim 全文回填键：构造 raw 的源行 log id + 截断标记。
+        ...(input.logId ? { sourceLogId: input.logId } : {}),
+        ...(input.contentTruncated === true ? { contentTruncated: true } : {}),
+      };
       segments = applyToBucket(segments, bucketId, routeSubagentType, (children) => [
         ...children,
-        {
-          kind: "tool",
-          // 段 id = tool_use_id（result 配对 + 子代理路由 key）；解析失败用
-          // logId 等兜底（toolName=null，渲染原样显示 raw，R-07）。
-          id: toolSegId,
-          raw: seg.text,
-          // 初始状态取 tool_call JSON 的 success（权威源）；running 靠后续
-          // result 配对兜底（statusFromToolUseRaw 注）。
-          status: statusFromToolUseRaw(seg.text),
-          toolName: (parsedTool && parsedTool.toolName) || null,
-          primary: parsedTool ? parsedTool.primary : null,
-          startedAt: ts,
-          endedAt: null,
-          children: adoptedChildren,
-          subagentType: adoptedSubagentType,
-          // FR-07 slim 全文回填键：构造 raw 的源行 log id + 截断标记。
-          ...(input.logId ? { sourceLogId: input.logId } : {}),
-          ...(input.contentTruncated === true ? { contentTruncated: true } : {}),
-        },
+        // 2026-10-26-subagent-task-meta-restore：悬挂回填——乱序先到的 [TASK_*]
+        // 行（TASK_STARTED 早于本段建立）在此按到达序回填元数据并清悬挂条目；
+        // stub 合并路径（步骤 1 adoptedChildren）同经此处（设计"两处建段点"
+        // 收敛于本 case 一个回填点）。无悬挂/无配对键原段返回。
+        resolvedToolUseId ? drainPendingTaskMetas(turn, resolvedToolUseId, baseSeg) : baseSeg,
       ]);
       break;
     }

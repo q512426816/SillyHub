@@ -2109,3 +2109,11 @@ supersedes：D-003@v1
 锚点：未记录
 最近确认：f8d6db60af6d40416709c57f4719802dbc28ace5
 理由：最大风险：观测部署后证据指向的根因超出 daemon 仓（如 backend SSE 某条件下丢弃）——静态证据已基本排除该向（delivered 可显示证明同信封类型可通），若仍发生则范围扩至 backend 转发链，任务面相应扩。放弃的方案：①盲改可疑点（静态五项排除后命中率低且不可证伪）；②前端超时兜底假阶段（掩盖问题，违反 FR-02 禁绕过）；③上报改同步阻塞换可见性（违反不阻塞主链路语义）。
+
+## D-unmapped-266@v1 回退安全性前提=单会话单活跃 run 不变式(反例排查)
+状态：implemented
+变更：2026-10-26-turn-phase-orphan-fallback
+原编号：D-001@v1
+锚点：未记录
+最近确认：65081d429e74019db614c9b39035464c74bd4be2
+理由：前提=平台「单会话单活跃 run」硬不变式。反例逐一排查：①跨轮子代理——parent_tool_use_id 归属派生轮，是轮内事件不建轮，不产生 turn_phase；②团队分身——parent_session_id 独立会话树，事件按 agent_session:{id} 频道各自路由；③忙轮守卫——已有活跃轮时后端拒绝新 run（DaemonSessionTurnConflict）或转排队（排队消息非活跃轮，派发建轮才活跃）；④steering 中途注入——沿用活跃 run 不建新轮；⑤自动续跑——前轮终态后才建新轮。实现侧保险：回退只写 currentRunId 指向的轮（现有状态机维护，只指向 pending/running/interrupting），不做模糊匹配。

@@ -1675,3 +1675,90 @@ created_at: 2026-10-16T01:30:35.950Z
   confirmed_at: null
   source_change: 2026-10-26-config-staged-all-states
   status: active
+
+## FR-test-utils-088 applyTurnPhase 未命中 run_id 时必须回退写入当前唯一 pending/running/interrupting 轮(currentRunId 指向),禁止静默丢弃该事件
+变更：2026-10-26-turn-phase-orphan-fallback
+状态：active
+摘要：竞态（生产实证形态——事件跑赢 HTTP 响应）
+场景正文：
+- 场景：竞态（生产实证形态——事件跑赢 HTTP 响应） — Given 用户发送消息→前端插入本地占位轮（临时 id）→HTTP 响应未回、真实 run_id 未替换；When daemon 侧 inject_received/first_event 阶段事件（带真实 run_id）先于 HTTP 响应到达；Then 事件必须写入占位轮（currentRunId 指向）；随后 replacePlaceholderTurn 换真实 id 时 phase 保留（FR-03）；状态
+全文：.sillyspec/changes/archive/2026-10-26-turn-phase-orphan-fallback/requirements.md#FR-01
+最近确认：65081d429e74019db614c9b39035464c74bd4be2
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-26-turn-phase-orphan-fallback:flow:测试绑定FR-01
+  tests: frontend/src/lib/daemon/__tests__/session-stream-turn-phase.test.ts「未命中 run_id 回退写 currentRunId 轮/竞态事件先于替换」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-26-turn-phase-orphan-fallback
+  status: active
+
+## FR-test-utils-089 无活跃轮时(断线重连迟到事件等)必须维持丢弃,禁止创建幽灵轮(原设计不变)
+变更：2026-10-26-turn-phase-orphan-fallback
+状态：active
+摘要：断线重连迟到事件
+场景正文：
+- 场景：断线重连迟到事件 — Given 会话无进行中轮（上一轮已终态、无排队派发中的占位轮）；When 迟到的 turn_phase 事件到达（SSE 重连后补推等）；Then 状态必须原样返回，不建轮、不写入任何历史轮
+全文：.sillyspec/changes/archive/2026-10-26-turn-phase-orphan-fallback/requirements.md#FR-02
+最近确认：65081d429e74019db614c9b39035464c74bd4be2
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-26-turn-phase-orphan-fallback:flow:测试绑定FR-02
+  tests: frontend/src/lib/daemon/__tests__/session-stream-turn-phase.test.ts「无活跃轮丢弃不建轮不写历史轮」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-26-turn-phase-orphan-fallback
+  status: active
+
+## FR-test-utils-090 replacePlaceholderTurn 换真实 run_id 时 currentPhase 必须保留(spread 已保留,测试锁定)
+变更：2026-10-26-turn-phase-orphan-fallback
+状态：active
+摘要：（无场景名）
+全文：.sillyspec/changes/archive/2026-10-26-turn-phase-orphan-fallback/requirements.md#FR-03
+最近确认：65081d429e74019db614c9b39035464c74bd4be2
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-26-turn-phase-orphan-fallback:flow:测试绑定FR-03
+  tests: frontend/src/lib/daemon/__tests__/session-stream-turn-phase.test.ts「竞态全链：回退写占位轮→replacePlaceholderTurn 换真实 id 后 phase 保留」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-26-turn-phase-orphan-fallback
+  status: active
+
+## FR-test-utils-091 排队轮(非活跃)必须不接回退事件
+变更：2026-10-26-turn-phase-orphan-fallback
+状态：active
+摘要：（无场景名）
+全文：.sillyspec/changes/archive/2026-10-26-turn-phase-orphan-fallback/requirements.md#FR-04
+最近确认：65081d429e74019db614c9b39035464c74bd4be2
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-26-turn-phase-orphan-fallback:flow:测试绑定FR-04
+  tests: frontend/src/lib/daemon/__tests__/session-stream-turn-phase.test.ts「排队轮不接回退事件」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-26-turn-phase-orphan-fallback
+  status: active
+
+## FR-test-utils-092 回退安全性前提=单会话单活跃 run 不变式(显式记录,反例排查)
+变更：2026-10-26-turn-phase-orphan-fallback
+状态：active
+摘要：（无场景名）
+全文：.sillyspec/changes/archive/2026-10-26-turn-phase-orphan-fallback/requirements.md#FR-05
+最近确认：65081d429e74019db614c9b39035464c74bd4be2
