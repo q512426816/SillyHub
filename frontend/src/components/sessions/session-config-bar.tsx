@@ -556,10 +556,21 @@ export function SessionConfigBar({
 
   // ── task-10（FR-03-2/5 / D-002@v1）：供应商+模型级联 ──────────────────────
 
+  /**
+   * 显示层供应商 id（2026-10-26-config-staged-all-states FR-02）：暂存供应商
+   * 优先——模型子下拉的显示条件与候选列表必须跟随暂存值（会话真值在发送前
+   * 不变，直接用真值会让「暂存供应商后模型框不出现/候选不跟随」）；取消暂存
+   * （staged 键删除）自然回退真值。provisional 不受影响（无 staged）。
+   */
+  const displayProviderId =
+    staged?.llm_provider_id !== undefined
+      ? staged.llm_provider_id
+      : llmProviderId;
+
   /** 当前选中供应商行（「不指定」/列表未含该 id → null，模型子下拉随之隐藏）。 */
   const selectedProvider = useMemo(
-    () => providers.find((p) => p.id === llmProviderId) ?? null,
-    [providers, llmProviderId],
+    () => providers.find((p) => p.id === displayProviderId) ?? null,
+    [providers, displayProviderId],
   );
 
   /**
@@ -738,8 +749,13 @@ export function SessionConfigBar({
   // 按钮 openKind 语义）；菜单照 theme-toggle 先例 selectable + selectedKeys
   // 高亮当前档，placement=topLeft 对齐 ConfigDropdown bottom-full 上弹方向。
   const [thinkingOpen, setThinkingOpen] = useState(false);
+  // 2026-10-26-config-staged-all-states FR-01：stagedMode 下不再叠
+  // thinkingLevel.disabled（=running）——暂存点选不发请求，运行中禁用的理由
+  // 消失（D-002「档位切换仅空闲」约束的是端点 RPC，发送时先调已满足）；
+  // 仅 ended/离线（!canSwitch）与旧调用面（非 stagedMode）保持原禁用。
   const thinkingCtrlDisabled =
-    !canSwitch || (!provisional && (thinkingLevel?.disabled ?? false));
+    !canSwitch ||
+    (!provisional && !stagedMode && (thinkingLevel?.disabled ?? false));
   const thinkingCtrlValue = provisional
     ? provisionalThinkingDisplay
     : (stagedThinkingLevel ?? (currentThinkingLevel || ""));
@@ -766,12 +782,13 @@ export function SessionConfigBar({
     if (provisional) {
       setProvisionalThinkingLevel(v);
       onProvisionalThinkingLevelSwitch?.(v);
-    } else if (stagedMode && !running) {
-      // 2026-10-25-session-config-deferred-switch：会话态暂存模式（仅空闲——
-      // running 保持 POST 忙轮排队现状，对齐供应商/模型/档案同款分流）——点选
-      // 仅上抛暂存（不 POST setSessionThinkingLevel，不即时改引擎档位），随面板
-      // 下一条消息发送时先调端点生效；选回当前档 = 取消暂存。D-001：静默（控件
-      // 值变化即反馈，不弹 toast），切换结果由发送后的时间线切换信息行呈现。
+    } else if (stagedMode) {
+      // 2026-10-25-session-config-deferred-switch：会话态暂存模式——点选仅上抛
+      // 暂存（不 POST setSessionThinkingLevel，不即时改引擎档位），随面板下一条
+      // 消息发送时先调端点生效；选回当前档 = 取消暂存。D-001：静默（控件值
+      // 变化即反馈，不弹 toast），切换结果由发送后的时间线切换信息行呈现。
+      // 2026-10-26-config-staged-all-states FR-01：去掉 !running 条件——运行中
+      // 点选同样仅暂存（四控件全状态统一，端点调用收敛到发送时）。
       const cancel = effectiveValues.thinking_level === v;
       onStagedSwitch({
         field: "thinking_level",
@@ -819,9 +836,12 @@ export function SessionConfigBar({
   /** ql-20260817-010：点选即**静默**切换——prompt 发空串（后端静默切换契约：
    * 有切换字段允许空 prompt；daemon 收到空 prompt 只 reload 配置不喂消息，
    * 切换轮无用户消息/模型回应）。switchPrompt 传入时仍作为切换轮消息发出。
-   * 2026-10-25-session-config-deferred-switch：空闲暂存模式（stagedMode 且非
-   * running）点选改为仅上抛暂存——不再发请求建空切换轮，随面板下一条消息一并
-   * 生效；运行中不走本分支（忙轮排队原语义）。 */
+   * 2026-10-25-session-config-deferred-switch：暂存模式（stagedMode）点选改为
+   * 仅上抛暂存——不发请求建空切换轮，随面板下一条消息一并生效。
+   * 2026-10-26-config-staged-all-states FR-01：去掉 !running 条件——运行中
+   * 点选同样仅暂存（旧行为「运行中即时 inject 忙轮排队」撤销：排队条目派发
+   * 会建静默切换轮，用户实测看到新轮次；现统一四控件全状态点选=暂存，
+   * 配置随下一条消息（含排队路径）生效，后端建带消息的正常轮）。 */
   const executeSwitch = async (p: PendingSwitch) => {
     if (submitting) return;
     const what = switchFieldWhat(p.field);
@@ -829,7 +849,7 @@ export function SessionConfigBar({
       p.field === "llm_provider_id" && p.value === SWITCH_NO_PROVIDER_VALUE
         ? "本机默认"
         : p.label;
-    if (stagedMode && !running) {
+    if (stagedMode) {
       setOpenKind(null);
       const cancel = effectiveValues[p.field] === p.value;
       // 暂存供应商（非取消）级联重置模型暂存——候选随供应商变，旧模型对新供应
@@ -982,7 +1002,7 @@ export function SessionConfigBar({
                 ? "当前引擎不支持会话级供应商切换"
                 : ended
                   ? "会话已结束或机器离线，不可切换供应商"
-                  : running
+                  : running && !stagedMode
                     ? "运行中可切换，将于本轮结束后生效"
                     : "供应商（不选=本机默认配置）",
             <ConfigDropdown
@@ -1038,7 +1058,7 @@ export function SessionConfigBar({
               title={
                 !canSwitch
                   ? "会话已结束或机器离线，不可切换模型"
-                  : running
+                  : running && !stagedMode
                     ? "运行中可切换，将于本轮结束后生效"
                     : "模型（默认=跟随供应商配置）"
               }
@@ -1103,7 +1123,7 @@ export function SessionConfigBar({
                   ? ended
                     ? "会话已结束或机器离线，不可切换思考级别"
                     : "思考级别切换不可用"
-                  : running && !provisional
+                  : running && !provisional && !stagedMode
                     ? "运行中可切换，将于本轮结束后生效"
                     : "思考级别（默认=引擎默认档位，语义随引擎不同见「默认」项说明）"
               }
@@ -1143,7 +1163,7 @@ export function SessionConfigBar({
             // ql-20260909-005：同供应商按钮——禁用态 title 说明原因。
             ended
               ? "会话已结束或机器离线，不可切换档案"
-              : running
+              : running && !stagedMode
                 ? "运行中可切换，将于本轮结束后生效"
                 : "智能体档案",
           <ConfigDropdown

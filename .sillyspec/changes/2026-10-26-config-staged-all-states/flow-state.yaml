@@ -1,0 +1,40 @@
+tier: thin
+legacy_fallback: false
+substeps: {}
+born_face: thin
+with_tasks: false
+review_force: null
+input: >-
+  配置切换暂存全状态覆盖与模型下拉跟随修复
+
+  动机:上一变更(2026-10-25-session-config-deferred-switch)实measure:轮运行中点选供应商/模型/档案仍走旧路径立即
+  injectSession(忙轮排队派发后建静默切换轮,用户看到新轮次);暂存供应商后模型子下拉不显示(渲染条件用会话真值供应商,未跟随暂存值,需再操作一次才出现)。用户定调:四个控件全部、任何状态点选都只暂存,绝不触发请求与新轮次。
+
+  方案:①组件 stagedMode 分支去掉 !running 条件——运行中点选同样仅暂存(发送时随排队消息一并生效,后端建正常消息轮非静默切换轮);档位控件在暂存模式下不再因 running
+  禁用;②模型子下拉渲染与候选改按暂存供应商优先(staged.llm_provider_id 存在时用它找 selectedProvider)派生。
+
+
+  成功标准：
+
+  - 轮运行中点选供应商/模型/档案/思考级别不发任何网络请求(不 inject 不 POST),仅暂存
+
+  - 暂存供应商后模型子下拉立即显示,候选为暂存供应商的模型列表
+
+  - 发送消息时(含运行中排队路径)暂存配置随消息一并生效,不产生静默切换轮
+
+  - 空闲态行为与上一变更一致(零回归)
+
+  - 相关单测更新并通过
+autopilot: false
+prestage_ack: false
+baseline_commit: cbafb2965535b77f34e3bbcb161c2420df3a12c3
+updatedAt: '2026-10-26T05:17:59.156Z'
+cross_baselines:
+  sillyspec: 67e50bcca2adb9ecd502d12086c0ac8cb994da84
+baseline_sha256: 742ea421dc801b52da8bb2b006848fab86bb8ac9066fd6f16c879becba01471a
+spec_approved: true
+spec_approved_at: '2026-10-26T05:17:59.156Z'
+spec_approved_by: anon@DESKTOP-HJ0AM09
+spec_approved_channel: user-confirmed
+spec_attested_by: anon@DESKTOP-HJ0AM09
+

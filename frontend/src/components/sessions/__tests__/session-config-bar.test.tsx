@@ -775,6 +775,37 @@ describe("SessionConfigBar 供应商+模型级联（task-10）", () => {
     await waitFor(() => expect(select.value).toBe("glm-4.5-air"));
   });
 
+  // 2026-10-26-config-staged-all-states FR-02：模型子下拉显示与候选跟随暂存供应商
+  //（会话真值无供应商时模型下拉隐藏，暂存供应商后必须立即出现且候选正确）。
+  it("暂存供应商后模型下拉立即显示，候选=暂存供应商模型；取消暂存回退真值隐藏", async () => {
+    mocks.listProviders.mockResolvedValue([GLM_PROVIDER] as never);
+    // 真值无供应商 → 初始模型下拉隐藏
+    const { patches } = renderBarControlled({ llmProviderId: null });
+    expect(
+      screen.queryByRole("combobox", { name: "配置-模型" }),
+    ).not.toBeInTheDocument();
+    // 暂存供应商 → 模型下拉立即出现，候选 = GLM 三模型
+    openCtrl("配置-供应商");
+    fireEvent.click(await screen.findByRole("button", { name: "选择 GLM 平台" }));
+    const select = (await screen.findByRole("combobox", {
+      name: "配置-模型",
+    })) as HTMLSelectElement;
+    const values = Array.from(select.options).map((o) => o.value);
+    expect(values).toEqual(["", "glm-4.7", "glm-4.6", "glm-4.5-air"]);
+    // 选回「不指定（本机默认）」= 真值(null) → cancel 暂存 → 模型下拉回退隐藏
+    openCtrl("配置-供应商");
+    fireEvent.click(
+      await screen.findByRole("button", { name: "选择 不指定（本机默认）" }),
+    );
+    const lastPatch = patches.at(-1) as any;
+    expect(lastPatch.cancel).toBe(true);
+    await waitFor(() =>
+      expect(
+        screen.queryByRole("combobox", { name: "配置-模型" }),
+      ).not.toBeInTheDocument(),
+    );
+  });
+
   // 兼容锚：未挂 onStagedSwitch（存量调用面）保持切模型同请求带供应商旧行为。
   it("未传 onStagedSwitch（兼容）→ 选模型 injectSession 同请求带 llm_provider_id + model", async () => {
     mocks.listProviders.mockResolvedValue([GLM_PROVIDER] as never);
@@ -1407,6 +1438,29 @@ describe("SessionConfigBar 会话态档位切换控件（task-06 / FR-06 / R-04�
     ).toBe(true);
   });
 
+  // 2026-10-26-config-staged-all-states FR-01：stagedMode 下 running 不再禁用档位
+  // 控件（点选仅暂存不发请求，禁用理由消失）；点选照常暂存上抛。
+  it("暂存模式 running 档位控件可点且点选仅暂存（不 POST）", async () => {
+    const { patches } = renderBarControlled({
+      running: true,
+      thinkingLevel: { disabled: true },
+    });
+    const trigger = (await screen.findByTestId(
+      "config-thinking-select",
+    )) as HTMLButtonElement;
+    // stagedMode 解除 running 禁用
+    expect(trigger.disabled).toBe(false);
+    fireEvent.click(trigger);
+    fireEvent.click(await screen.findByRole("menuitem", { name: "高" }));
+    expect(mocks.setSessionThinkingLevel).not.toHaveBeenCalled();
+    expect(patches[0]).toEqual({
+      field: "thinking_level",
+      value: "high",
+      label: "高",
+      cancel: undefined,
+    });
+  });
+
   // 2026-10-25-session-config-deferred-switch（D-001）：暂存模式档位点选仅上抛
   // 暂存（不 POST 不即时改引擎档位），随下一条消息发送时先调端点生效。
   it("暂存模式点选档位 → onStagedSwitch 上抛（不 POST 无 toast），控件直接显示暂存档", async () => {
@@ -1507,19 +1561,33 @@ describe("SessionConfigBar 会话态档位切换控件（task-06 / FR-06 / R-04�
     );
   });
 
-  // 2026-10-25：暂存模式 running 点选不受暂存影响——仍走 inject 忙轮排队（FR-04）。
-  it("暂存模式 running 点选供应商/档位 → 照常走忙轮排队（不走暂存上抛）", async () => {
-    const onStagedSwitch = vi.fn();
-    renderBar({
+  // 2026-10-26-config-staged-all-states FR-01：暂存模式 running 点选同样仅暂存——
+  // 四控件全状态统一（旧行为「运行中即时 inject 忙轮排队」撤销：排队条目派发
+  // 会建静默切换轮，用户实测看到新轮次）。
+  it("暂存模式 running 点选供应商/模型/档案 → 仅暂存上抛，不 inject", async () => {
+    mocks.listProviders.mockResolvedValue([
+      { id: "prov-glm", name: "GLM 平台", models: [{ name: "glm-4.7", roles: ["sonnet"] }], agent_kinds: ["claude"] },
+    ] as never);
+    const { patches } = renderBarControlled({
       running: true,
       llmProviderId: "prov-kimi",
-      thinkingLevel: {},
-      onStagedSwitch,
     });
+    // 供应商：running 态点选 → 暂存上抛（级联 model 重置 + provider）
     openCtrl("配置-供应商");
     fireEvent.click(await screen.findByRole("button", { name: "选择 GLM 平台" }));
-    await waitFor(() => expect(mocks.injectSession).toHaveBeenCalledTimes(1));
-    expect(onStagedSwitch).not.toHaveBeenCalled();
+    expect(mocks.injectSession).not.toHaveBeenCalled();
+    expect(patches.some((p: any) => p.field === "llm_provider_id" && p.value === "prov-glm")).toBe(true);
+    // 模型：running 态切模型 → 同样暂存
+    const select = (await screen.findByRole("combobox", {
+      name: "配置-模型",
+    })) as HTMLSelectElement;
+    fireEvent.change(select, { target: { value: "glm-4.7" } });
+    expect(mocks.injectSession).not.toHaveBeenCalled();
+    // 档案：running 态点选 → 同样暂存
+    openCtrl("配置-档案");
+    fireEvent.click(screen.getByRole("button", { name: "选择 严肃代码审查员" }));
+    expect(mocks.injectSession).not.toHaveBeenCalled();
+    expect(patches.some((p: any) => p.field === "agent_profile_id" && p.value === "prof-2")).toBe(true);
   });
 
   it("200 结构化失败（ok=false + error）→ notify error 带 error 原文（如旧 daemon 升级提示）", async () => {
