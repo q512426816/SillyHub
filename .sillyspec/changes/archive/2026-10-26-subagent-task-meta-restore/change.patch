@@ -1,0 +1,879 @@
+diff --git a/.sillyspec/docs/SillyHub/modules/daemon.changelog.md b/.sillyspec/docs/SillyHub/modules/daemon.changelog.md
+index 2a9d1d56b..bb31a7130 100644
+--- a/.sillyspec/docs/SillyHub/modules/daemon.changelog.md
++++ b/.sillyspec/docs/SillyHub/modules/daemon.changelog.md
+@@ -103,3 +103,4 @@ created_at: 2026-08-27 14:32:24
+ - 2026-10-22-trajectory-context-jump | 轨迹视图两处体验缺口（对照 dsh）：1) processItems 里的 system_event…
+ - 2026-10-25-trajectory-source-model | 2026-10-25-trajectory-source-model
+ - 2026-10-25-session-git-worktree-root | 会话 git 分支指示项感知 sillyspec 工作树
++- 2026-10-26-turn-phase-prod-fix | 阶段上报生产断链修复与观测补盲。背景:阶段化进度功能(2026-10-26-session-stag…
+diff --git a/.sillyspec/docs/SillyHub/modules/frontend_components.changelog.md b/.sillyspec/docs/SillyHub/modules/frontend_components.changelog.md
+index 660632fbc..da87f9d42 100644
+--- a/.sillyspec/docs/SillyHub/modules/frontend_components.changelog.md
++++ b/.sillyspec/docs/SillyHub/modules/frontend_components.changelog.md
+@@ -165,3 +165,5 @@ created_at: 2026-08-30 22:23:33
+ | 2026-10-25 | 2026-10-25-fe-build-unblock | 修复前端构建红态两处类型错误 |
+ | 2026-10-26 | 2026-10-26-worktree-group-collapse | 用户反馈（功能上线后实测）：Git 日志页「工作区更改」卡的三个分组标题（更改/未纳入版本管理/已忽… |
+ | 2026-10-26 | 2026-10-26-config-staged-all-states | 配置切换暂存全状态覆盖与模型下拉跟随修复 |
++| 2026-10-26 | 2026-10-26-turn-phase-orphan-fallback | 阶段事件竞态丢弃修复:turn_phase 事件按 run_id 精确匹配未命中时改为回退归属到当前… |
++| 2026-10-26 | 2026-10-26-subagent-card-width-unify | 子代理卡片与工具卡限宽统一补漏 |
+diff --git a/.sillyspec/docs/SillyHub/modules/frontend_lib.changelog.md b/.sillyspec/docs/SillyHub/modules/frontend_lib.changelog.md
+index 62ba0519e..afed36688 100644
+--- a/.sillyspec/docs/SillyHub/modules/frontend_lib.changelog.md
++++ b/.sillyspec/docs/SillyHub/modules/frontend_lib.changelog.md
+@@ -42,3 +42,5 @@ created_at: 2026-10-16 16:40:00
+ - 2026-10-23-knowledge-scope-maintenance | 知识注入作用域维护面板
+ - 2026-10-25-trajectory-source-model | 2026-10-25-trajectory-source-model
+ - 2026-10-25-session-git-worktree-root | 会话 git 分支指示项感知 sillyspec 工作树
++- 2026-10-26-turn-phase-orphan-fallback | 阶段事件竞态丢弃修复:turn_phase 事件按 run_id 精确匹配未命中时改为回退归属到当前…
++- 2026-10-26-subagent-card-width-unify | 子代理卡片与工具卡限宽统一补漏
+diff --git a/.sillyspec/docs/backend/modules/daemon.changelog.md b/.sillyspec/docs/backend/modules/daemon.changelog.md
+index 22ce9d192..b9a5ec381 100644
+--- a/.sillyspec/docs/backend/modules/daemon.changelog.md
++++ b/.sillyspec/docs/backend/modules/daemon.changelog.md
+@@ -75,3 +75,4 @@ created_at: 2026-08-29 22:56:30
+ | 2026-10-24 | 2026-10-22-trajectory-context-jump | 轨迹视图两处体验缺口（对照 dsh）：1) processItems 里的 system_event… |
+ | 2026-10-25 | 2026-10-25-trajectory-source-model | 2026-10-25-trajectory-source-model |
+ | 2026-10-25 | 2026-10-25-session-git-worktree-root | 会话 git 分支指示项感知 sillyspec 工作树 |
++| 2026-10-26 | 2026-10-26-turn-phase-prod-fix | 阶段上报生产断链修复与观测补盲。背景:阶段化进度功能(2026-10-26-session-stag… |
+diff --git a/.sillyspec/docs/multi-agent-platform/modules/backend.changelog.md b/.sillyspec/docs/multi-agent-platform/modules/backend.changelog.md
+index 308716a28..294e03b46 100644
+--- a/.sillyspec/docs/multi-agent-platform/modules/backend.changelog.md
++++ b/.sillyspec/docs/multi-agent-platform/modules/backend.changelog.md
+@@ -109,3 +109,4 @@
+ - 2026-10-22-trajectory-context-jump | 轨迹视图两处体验缺口（对照 dsh）：1) processItems 里的 system_event…
+ - 2026-10-25-trajectory-source-model | 2026-10-25-trajectory-source-model
+ - 2026-10-25-session-git-worktree-root | 会话 git 分支指示项感知 sillyspec 工作树
++- 2026-10-26-turn-phase-prod-fix | 阶段上报生产断链修复与观测补盲。背景:阶段化进度功能(2026-10-26-session-stag…
+diff --git a/.sillyspec/docs/multi-agent-platform/modules/frontend.changelog.md b/.sillyspec/docs/multi-agent-platform/modules/frontend.changelog.md
+index bf3f08773..0ba7d9782 100644
+--- a/.sillyspec/docs/multi-agent-platform/modules/frontend.changelog.md
++++ b/.sillyspec/docs/multi-agent-platform/modules/frontend.changelog.md
+@@ -214,3 +214,5 @@
+ | 2026-10-25 | 2026-10-25-fe-build-unblock | 修复前端构建红态两处类型错误 |
+ | 2026-10-26 | 2026-10-26-worktree-group-collapse | 用户反馈（功能上线后实测）：Git 日志页「工作区更改」卡的三个分组标题（更改/未纳入版本管理/已忽… |
+ | 2026-10-26 | 2026-10-26-config-staged-all-states | 配置切换暂存全状态覆盖与模型下拉跟随修复 |
++| 2026-10-26 | 2026-10-26-turn-phase-orphan-fallback | 阶段事件竞态丢弃修复:turn_phase 事件按 run_id 精确匹配未命中时改为回退归属到当前… |
++| 2026-10-26 | 2026-10-26-subagent-card-width-unify | 子代理卡片与工具卡限宽统一补漏 |
+diff --git a/.sillyspec/docs/multi-agent-platform/modules/sillyhub-daemon.changelog.md b/.sillyspec/docs/multi-agent-platform/modules/sillyhub-daemon.changelog.md
+index a89ff220c..84f528838 100644
+--- a/.sillyspec/docs/multi-agent-platform/modules/sillyhub-daemon.changelog.md
++++ b/.sillyspec/docs/multi-agent-platform/modules/sillyhub-daemon.changelog.md
+@@ -47,3 +47,4 @@
+ - 2026-10-22-trajectory-context-jump | 轨迹视图两处体验缺口（对照 dsh）：1) processItems 里的 system_event…
+ - 2026-10-25-trajectory-source-model | 2026-10-25-trajectory-source-model
+ - 2026-10-25-session-git-worktree-root | 会话 git 分支指示项感知 sillyspec 工作树
++- 2026-10-26-turn-phase-prod-fix | 阶段上报生产断链修复与观测补盲。背景:阶段化进度功能(2026-10-26-session-stag…
+diff --git a/frontend/src/components/daemon/__tests__/task-line-assembler.test.ts b/frontend/src/components/daemon/__tests__/task-line-assembler.test.ts
+index b10842e7f..eb75ead3f 100644
+--- a/frontend/src/components/daemon/__tests__/task-line-assembler.test.ts
++++ b/frontend/src/components/daemon/__tests__/task-line-assembler.test.ts
+@@ -84,6 +84,23 @@ const DISPATCH_RAW = JSON.stringify({
+   success: true,
+ });
+ 
++/** 2026-10-26-subagent-task-meta-restore：第二个派发段（tool_use_id = tu_ghost，
++ * 悬挂回填用例——[TASK_STARTED] 先到悬挂、本行建段时消费回填）。 */
++const DISPATCH_RAW_GHOST = JSON.stringify({
++  tool: "Task",
++  args: { description: "幽灵派发" },
++  tool_use_id: "tu_ghost",
++  success: true,
++});
++
++/** 同上：第三个派发段（tool_use_id = tu_bg2，两子代理交错排列用例）。 */
++const DISPATCH_RAW_B2 = JSON.stringify({
++  tool: "Task",
++  args: { description: "并行调研 B" },
++  tool_use_id: "tu_bg2",
++  success: true,
++});
++
+ const T0 = "2026-08-27T09:00:00.000Z";
+ const T1 = "2026-08-27T09:00:01.000Z";
+ const T2 = "2026-08-27T09:00:02.000Z";
+@@ -329,37 +346,159 @@ describe("[TASK_*] 孤儿行丢弃（task-11：找不到段不崩，不建 stub
+     expect(toolById(after.segments, "tu_bg").taskStatus).toBeUndefined();
+   });
+ 
+-  it("parent 指向不存在的 tool_use_id → 丢弃原引用返回", () => {
++  it("parent 指向不存在的 tool_use_id → 悬挂暂存（不建 stub）；段随后建立时回填（2026-10-26-subagent-task-meta-restore）", () => {
+     const turn = applyAll([makeLog("1", "tool_call", DISPATCH_RAW)]);
+     const after = applyLogToSegments(
+       turn,
+       makeLog("2", "stdout", '[TASK_STARTED] {"async":true}', { parentToolUseId: "tu_ghost" }),
+     );
+-    expect(after).toBe(turn);
++    // 悬挂分支：返回新对象记 logId 去重，但 segments 原引用（信号非内容）
++    expect(after).not.toBe(turn);
++    expect(after.segments).toBe(turn.segments);
+     // 不为 [TASK_*] 行建 subagent_stub 兜底段（取更安全者）
+     expect(after.segments).toHaveLength(1);
++    // 悬挂条目在 tu_ghost 段建立时回填（孤儿段建立即消费）
++    const filled = applyAll([
++      makeLog("1", "tool_call", DISPATCH_RAW),
++      makeLog("2", "stdout", '[TASK_STARTED] {"async":true}', { parentToolUseId: "tu_ghost" }),
++      makeLog("3", "tool_call", DISPATCH_RAW_GHOST),
++    ]);
++    expect(toolById(filled.segments, "tu_ghost")).toMatchObject({
++      taskStatus: "running",
++      taskAsync: true,
++    });
+   });
+ 
+-  it("parent 仅为 stub 的极端时序（子消息先到、tool_call JSON 未到）→ 丢弃；tool 段到达后后续行补写成功", () => {
++  it("parent 仅为 stub 的极端时序（子消息先到、tool_call JSON 未到）→ 悬挂；tool 段到达时悬挂回填 + 后续行补写成功", () => {
+     let turn = applyAll([
+       makeLog("1", "stdout", "子消息先到", { parentToolUseId: "tu_bg", subagentType: "researcher" }),
+     ]);
+-    // stub 无元数据槽 → 行丢弃（原引用返回）
+-    const dropped = applyLogToSegments(
++    // stub 无元数据槽 → 悬挂暂存（新对象记 logId；segment 树不动）
++    const hung = applyLogToSegments(
+       turn,
+       taskLine("TASK_STARTED", '{"async":true}'),
+     );
+-    expect(dropped).toBe(turn);
+-    // tool_call JSON 到达合并 stub 后，后续 [TASK_*] 行补写元数据
++    expect(hung).not.toBe(turn);
++    expect(hung.segments).toBe(turn.segments);
++    // tool_call JSON 到达合并 stub：悬挂的 STARTED 自动回填（async 元数据在段上）
+     turn = applyAll([
+       ...[makeLog("1", "stdout", "子消息先到", { parentToolUseId: "tu_bg", subagentType: "researcher" })],
++      taskLine("TASK_STARTED", '{"async":true}'),
++      makeLog("2", "tool_call", DISPATCH_RAW),
++    ]);
++    expect(toolById(turn.segments, "tu_bg")).toMatchObject({
++      taskStatus: "running",
++      taskAsync: true,
++      subagentType: "researcher", // stub 的 children / subagentType 随迁不受影响
++    });
++    // 后续 [TASK_*] 行继续按既有路径补写终态
++    turn = applyAll([
++      makeLog("1", "stdout", "子消息先到", { parentToolUseId: "tu_bg", subagentType: "researcher" }),
++      taskLine("TASK_STARTED", '{"async":true}'),
+       makeLog("2", "tool_call", DISPATCH_RAW),
+       taskLine("TASK_NOTIFICATION", '{"status":"stopped","elapsed_ms":7000}'),
+     ]);
+     expect(toolById(turn.segments, "tu_bg")).toMatchObject({
+       taskStatus: "stopped",
+       taskElapsedMs: 7000,
+-      subagentType: "researcher", // stub 的 children / subagentType 随迁不受影响
++    });
++  });
++});
++
++/* ───────── 5a. 同毫秒乱序排列（2026-10-26-subagent-task-meta-restore） ───────── */
++
++/**
++ * 生产实证（会话 83a96b92，2026-10-26 06:18 UTC）：daemon 同一毫秒批量落库
++ * tool_call JSON / [TASK_STARTED] / [TOOL_RESULT]（async 回执），DB 无二级排序键，
++ * 历史回放喂入顺序不定——TASK 行先于 tool_call 段建立时原实现直接丢弃，段元数据
++ * 永久丢失 + async 回执按"桶内最近未配对段"配对翻成假终态（生产复现：三段
++ * taskStatus=null / durationText "00:08"）。本组用例锁定悬挂回填后**任意排列
++ * 均收敛到同一元数据终态**（排列不变性）。
++ */
++describe("[TASK_*] 同毫秒乱序排列（悬挂回填，2026-10-26-subagent-task-meta-restore）", () => {
++  const SAME_TS = "2026-10-26T06:18:11.800Z";
++
++  function ghostLogs(order: string[]): AssembledTurn {
++    const rows: Record<string, AssemblerLogInput> = {
++      call: makeLog("g1", "tool_call", DISPATCH_RAW_GHOST, { timestamp: SAME_TS }),
++      task: makeLog("g2", "stdout", '[TASK_STARTED] {"task_id":"bg-g","async":true}', {
++        parentToolUseId: "tu_ghost",
++        timestamp: SAME_TS,
++      }),
++      result: makeLog("g3", "stdout", "Async agent launched successfully", {
++        parentToolUseId: "tu_ghost",
++        timestamp: SAME_TS,
++      }),
++    };
++    return applyAll(order.map((k) => rows[k]!));
++  }
++
++  /** 元数据终态口径（排列无关的收敛断言目标）。 */
++  function metaOf(turn: AssembledTurn): Pick<
++    ToolTurnSegment,
++    "taskStatus" | "taskAsync" | "taskTaskId" | "status" | "endedAt"
++  > {
++    const seg = toolById(turn.segments, "tu_ghost");
++    return {
++      taskStatus: seg.taskStatus,
++      taskAsync: seg.taskAsync,
++      taskTaskId: seg.taskTaskId,
++      status: seg.status,
++      endedAt: seg.endedAt,
++    };
++  }
++
++  it("TASK_STARTED 先于 tool_call 段建立 → 悬挂回填：元数据在段上（running/async）", () => {
++    const turn = ghostLogs(["task", "call", "result"]);
++    expect(metaOf(turn)).toMatchObject({
++      taskStatus: "running",
++      taskAsync: true,
++      taskTaskId: "bg-g",
++    });
++  });
++
++  it("常态排列（call → task → result）零回归：即时路径元数据同值", () => {
++    const turn = ghostLogs(["call", "task", "result"]);
++    expect(metaOf(turn)).toMatchObject({
++      taskStatus: "running",
++      taskAsync: true,
++      taskTaskId: "bg-g",
++    });
++  });
++
++  it("排列不变性：三排列的段元数据终态逐字段一致（悬挂消费后悬挂表清空）", () => {
++    const canonical = metaOf(ghostLogs(["call", "task", "result"]));
++    for (const order of [
++      ["task", "call", "result"],
++      ["call", "result", "task"],
++      ["task", "result", "call"],
++    ]) {
++      expect(metaOf(ghostLogs(order))).toStrictEqual(canonical);
++    }
++  });
++
++  it("两子代理交错排列（并行派发生产形态）：各段元数据互不串桶", () => {
++    const turn = applyAll([
++      makeLog("a1", "tool_call", DISPATCH_RAW, { timestamp: SAME_TS }),
++      // B 的 STARTED 先到（B 段未建 → 悬挂）
++      makeLog("b2", "stdout", '[TASK_STARTED] {"task_id":"bg-b","async":true}', {
++        parentToolUseId: "tu_bg2",
++        timestamp: SAME_TS,
++      }),
++      makeLog("a3", "stdout", '[TASK_STARTED] {"task_id":"bg-a","async":true}', {
++        parentToolUseId: "tu_bg",
++        timestamp: SAME_TS,
++      }),
++      // B 的 tool_call 到达 → 悬挂回填
++      makeLog("b4", "tool_call", DISPATCH_RAW_B2, { timestamp: SAME_TS }),
++    ]);
++    expect(toolById(turn.segments, "tu_bg")).toMatchObject({
++      taskStatus: "running",
++      taskTaskId: "bg-a",
++    });
++    expect(toolById(turn.segments, "tu_bg2")).toMatchObject({
++      taskStatus: "running",
++      taskTaskId: "bg-b",
+     });
+   });
+ });
+diff --git a/frontend/src/components/daemon/__tests__/turn-segment-views.test.tsx b/frontend/src/components/daemon/__tests__/turn-segment-views.test.tsx
+index 16703c7bb..63d831c21 100644
+--- a/frontend/src/components/daemon/__tests__/turn-segment-views.test.tsx
++++ b/frontend/src/components/daemon/__tests__/turn-segment-views.test.tsx
+@@ -43,6 +43,7 @@ import {
+   TeamWorkerBlockView,
+   SubagentTaskLookupContext,
+   parseTaskOutputWait,
++  subagentHeaderOf,
+ } from "../turn-segment-views";
+ import type {
+   TextTurnSegment,
+@@ -1976,3 +1977,136 @@ describe("deriveTurnActivity 快照终态收敛（turn-live-visibility FR-02）"
+     expect(act.subagents[0]?.taskElapsedMs).toBe(4_000); // 元数据终态时长不被快照覆盖
+   });
+ });
++
++/* ───────── 9. 过程信息块限宽统一（2026-10-26-subagent-card-width-unify） ───────── */
++
++/**
++ * 2026-10-25-session-tab-visual-unify 漏网的过程类组件补漏断言——子代理卡
++ * （两分支）/团队分身卡/工具行/思考行/警告行根容器统一限宽
++ * max-w-[calc(100%-120px)]（整行宽度 − 120px，随容器自适应），与文本段
++ * （TextSegmentView，见「无框形态」用例）同口径；卡片类另断言
++ * self-start（原 self-stretch 在 flex-col 父容器里全宽拉伸，为限宽反噬源）。
++ */
++describe("过程信息块限宽统一（2026-10-26-subagent-card-width-unify）", () => {
++  const MAX_W = "max-w-[calc(100%-120px)]";
++
++  it("SubagentBlockView 无 Provider 纯展示分支：根容器限宽 + self-start", () => {
++    const seg = makeToolSeg({
++      id: "call_w1",
++      toolName: "Agent",
++      primary: "宽度纯展示",
++      subagentType: "research",
++      children: [],
++    });
++    const { container } = render(<SubagentBlockView segment={seg} />);
++    const root = container.firstChild as HTMLElement;
++    expect(root.className).toContain(MAX_W);
++    expect(root.className).toContain("self-start");
++    expect(root.className).not.toContain("self-stretch");
++  });
++
++  it("SubagentBlockView panel 紧凑卡片分支：根容器限宽 + self-start（data-segment-id 锚不变）", () => {
++    const seg = makeToolSeg({
++      id: "call_w2",
++      toolName: "Agent",
++      primary: "宽度紧凑卡",
++      subagentType: "research",
++      children: [],
++    });
++    const value: SubagentPanelContextValue = {
++      openSubagent: vi.fn(),
++      closeSubagent: vi.fn(),
++      activeId: null,
++    };
++    const { container } = render(
++      <SubagentPanelContext.Provider value={value}>
++        <SubagentBlockView segment={seg} />
++      </SubagentPanelContext.Provider>,
++    );
++    const root = container.firstChild as HTMLElement;
++    expect(root).toHaveAttribute("data-segment-id", "call_w2");
++    expect(root.className).toContain(MAX_W);
++    expect(root.className).toContain("self-start");
++    expect(root.className).not.toContain("self-stretch");
++  });
++
++  it("TeamWorkerBlockView 团队分身卡：根容器限宽 + self-start", () => {
++    const { container } = render(
++      <TeamWorkerBlockView role="impl" status="completed" objective="目标" durationMs={1_000} />,
++    );
++    const root = container.firstChild as HTMLElement;
++    expect(root.className).toContain(MAX_W);
++    expect(root.className).toContain("self-start");
++    expect(root.className).not.toContain("self-stretch");
++  });
++
++  it("ToolRowView 工具行与 ThinkingRowView 思考行：根容器限宽", () => {
++    const { container: toolC } = render(<ToolRowView segment={makeToolSeg()} />);
++    const toolRoot = toolC.firstChild as HTMLElement;
++    expect(toolRoot.className).toContain(MAX_W);
++    const { container: thinkC } = render(<ThinkingRowView segment={makeThinkingSeg()} />);
++    const thinkRoot = thinkC.firstChild as HTMLElement;
++    expect(thinkRoot.className).toContain(MAX_W);
++  });
++
++  it("StderrRowView 警告行：根容器限宽", () => {
++    const { container } = render(<StderrRowView segment={makeStderrSeg()} />);
++    const root = container.firstChild as HTMLElement;
++    expect(root.className).toContain(MAX_W);
++  });
++});
++
++/* ───────── 10. 回填元数据压回执假终态（2026-10-26-subagent-task-meta-restore） ───────── */
++
++/**
++ * 生产实证（会话 83a96b92）：daemon 同毫秒落库四行无二级排序键，[TASK_STARTED]
++ * 先于 tool_call 段建立时元数据丢失 → async 回执按 8~11 秒差值配对假终态（复现
++ * taskStatus=null / durationText "00:08"）。悬挂回填后 metaStatus=running 在位，
++ * subagentHeaderOf 既有「元数据 > 段三态」优先级自然压住假终态显示——本组用例
++ * 锁定该显示契约（FR-02 验收，显示层零改动的前提验证）。
++ */
++describe("回填元数据压回执假终态（2026-10-26-subagent-task-meta-restore）", () => {
++  it("taskStatus=running 回填后：段三态 ok（回执假终态）不影响头部派生——徽章/走秒锚取元数据", () => {
++    const T0 = Date.parse("2026-10-26T06:18:11.800Z");
++    const seg = makeToolSeg({
++      id: "call_meta",
++      toolName: "Agent",
++      primary: "填 backend 投影簇卡片",
++      subagentType: "general-purpose",
++      // async 回执配对的假终态（生产 8 秒差值实证）。
++      status: "ok",
++      startedAt: T0,
++      endedAt: T0 + 8_000,
++      // 悬挂回填的 [TASK_STARTED] 元数据（running + async + 真实进度校准值）。
++      taskStatus: "running",
++      taskAsync: true,
++      taskElapsedMs: 271_842,
++    });
++    const header = subagentHeaderOf(seg, T0 + 60_000, null);
++    // 元数据优先：状态 running（非段三态 ok 假完成），徽章「后台运行中」。
++    expect(header.status).toBe("running");
++    expect(header.metaStatus).toBe("running");
++    expect(header.badge?.label).toBe("后台运行中");
++    // 走秒锚 = 段 startedAt（派发时刻），非回执 8 秒差值（假时长 00:08 不再出现）。
++    expect(header.durationText).toBe("01:00");
++  });
++
++  it("终态元数据回填（TASK_NOTIFICATION 后到）：显示终态与服务端权威时长", () => {
++    const T0 = Date.parse("2026-10-26T06:18:11.800Z");
++    const seg = makeToolSeg({
++      id: "call_meta2",
++      toolName: "Agent",
++      primary: "填卡终态",
++      status: "ok",
++      startedAt: T0,
++      endedAt: T0 + 8_000,
++      taskStatus: "completed",
++      taskAsync: true,
++      taskElapsedMs: 271_842, // 服务端权威 4:31（真实运行时长）
++    });
++    const header = subagentHeaderOf(seg, T0 + 600_000, null);
++    expect(header.status).toBe("completed");
++    expect(header.badge?.label).toBe("已完成");
++    expect(header.durationText).toBe("04:32"); // 权威时长（271842ms→round 272s），非回执差值 00:08
++  });
++});
+diff --git a/frontend/src/components/daemon/session-log-assembler.ts b/frontend/src/components/daemon/session-log-assembler.ts
+index 51d25fea3..8d3c41d52 100644
+--- a/frontend/src/components/daemon/session-log-assembler.ts
++++ b/frontend/src/components/daemon/session-log-assembler.ts
+@@ -823,11 +823,19 @@ const SEGMENT_ID_INDEX: unique symbol = Symbol("assemblerSegmentIds");
+  * Set（语义同 seenLogIds：对象展开随行、原地记入）。
+  */
+ const SUPERSEDED_SEG_IDS: unique symbol = Symbol("assemblerSupersededSegIds");
++/**
++ * 2026-10-26-subagent-task-meta-restore：悬挂 [TASK_*] 元数据表——parent 在场但
++ * 派发 tool 段未建（同毫秒乱序竞态，生产 83a96b92 实证 [TASK_STARTED] 先于
++ * tool_call 行处理）时暂存，tool_use 段建立时回填并删条目。挂载/流转模式同
++ * SUPERSEDED_SEG_IDS：enumerable symbol 键随对象展开流转，链内共享可变 Map。
++ */
++const PENDING_TASK_METAS: unique symbol = Symbol("assemblerPendingTaskMetas");
+ 
+ interface AssemblerInternalsCarrier {
+   [LEGACY_CELL]?: LegacyCell;
+   [SEGMENT_ID_INDEX]?: Set<string>;
+   [SUPERSEDED_SEG_IDS]?: Set<string>;
++  [PENDING_TASK_METAS]?: Map<string, TaskLineMeta[]>;
+ }
+ 
+ /**
+@@ -877,12 +885,13 @@ function buildLegacyCell(segments: TurnSegment[]): LegacyCell {
+   };
+ }
+ 
+-/** 把 cell / id 索引 / 封存集合以 enumerable symbol 键挂到 target（对象展开自动随行）。 */
++/** 把 cell / id 索引 / 封存集合 / 悬挂任务元数据表以 enumerable symbol 键挂到 target（对象展开自动随行）。 */
+ function attachInternals(
+   target: AssembledTurn,
+   cell: LegacyCell,
+   idIndex: Set<string> | null,
+   superseded: Set<string> | null = null,
++  pendingTaskMetas: Map<string, TaskLineMeta[]> | null = null,
+ ): void {
+   Object.defineProperty(target, LEGACY_CELL, {
+     value: cell,
+@@ -906,6 +915,16 @@ function attachInternals(
+       configurable: true,
+     });
+   }
++  // 2026-10-26-subagent-task-meta-restore：悬挂表随 internals 转移（asAssembled
++  // 收窄视图等字面量构造点不丢悬挂——设计风险①的兑现点）。
++  if (pendingTaskMetas) {
++    Object.defineProperty(target, PENDING_TASK_METAS, {
++      value: pendingTaskMetas,
++      enumerable: true,
++      writable: true,
++      configurable: true,
++    });
++  }
+ }
+ 
+ /** 惰性取 / 建 turn 链共享的封存 segmentId 集合（quick-9f86d2c3）。 */
+@@ -924,6 +943,45 @@ function supersededSegIdsOf(turn: AssembledTurn): Set<string> {
+   return set;
+ }
+ 
++/**
++ * 惰性取 / 建 turn 链共享的悬挂任务元数据表（2026-10-26-subagent-task-meta-restore）。
++ * Map 键 = 派发 tool_use_id，值 = 该段悬挂的 [TASK_*] 行解析产物（到达序）。
++ */
++function pendingTaskMetasOf(turn: AssembledTurn): Map<string, TaskLineMeta[]> {
++  const carrier = turn as AssembledTurn & AssemblerInternalsCarrier;
++  let map = carrier[PENDING_TASK_METAS];
++  if (!map) {
++    map = new Map<string, TaskLineMeta[]>();
++    Object.defineProperty(turn, PENDING_TASK_METAS, {
++      value: map,
++      enumerable: true,
++      writable: true,
++      configurable: true,
++    });
++  }
++  return map;
++}
++
++/**
++ * tool_use 段建立时消费悬挂元数据（2026-10-26-subagent-task-meta-restore）：
++ * 按到达序逐条 applyTaskMeta 回填（STARTED 的 running → PROGRESS → 终态，
++ * 与即时路径同一合并函数同一语义），消费即删条目；无悬挂原段返回。
++ */
++function drainPendingTaskMetas(
++  turn: AssembledTurn,
++  toolUseId: string,
++  seg: ToolTurnSegment,
++): ToolTurnSegment {
++  const pending = (turn as AssembledTurn & AssemblerInternalsCarrier)[PENDING_TASK_METAS];
++  if (!pending) return seg;
++  const list = pending.get(toolUseId);
++  if (!list || list.length === 0) return seg;
++  pending.delete(toolUseId);
++  let out = seg;
++  for (const meta of list) out = applyTaskMeta(out, meta);
++  return out;
++}
++
+ /**
+  * 把 source 携带的装配器内部状态（投影 cell / 段 id 索引）转移到 segments 同源的
+  * target——消费方（session-panel asAssembled / assembledViewOf）构造收窄视图时
+@@ -934,7 +992,15 @@ export function transferAssemblerInternals(target: AssembledTurn, source: Assemb
+   const carrier = source as AssembledTurn & AssemblerInternalsCarrier;
+   const cell = carrier[LEGACY_CELL];
+   const index = carrier[SEGMENT_ID_INDEX];
+-  if (cell) attachInternals(target, cell, index ?? null, carrier[SUPERSEDED_SEG_IDS] ?? null);
++  if (cell) {
++    attachInternals(
++      target,
++      cell,
++      index ?? null,
++      carrier[SUPERSEDED_SEG_IDS] ?? null,
++      carrier[PENDING_TASK_METAS] ?? null,
++    );
++  }
+ }
+ 
+ /**
+@@ -1392,7 +1458,15 @@ export function applyLogToSegments(
+       turnStartedAt: turn.turnStartedAt,
+       seenLogIds: recordSeenLogId(turn.seenLogIds, input.logId),
+     };
+-    attachInternals(next, cell, idIndex, superseded);
++    // 2026-10-26-subagent-task-meta-restore：override 分支同为主路径式字面量构造，
++    // 悬挂表显式携带（断链防御一致性——所有 attachInternals 点都带全 internals）。
++    attachInternals(
++      next,
++      cell,
++      idIndex,
++      superseded,
++      (turn as AssembledTurn & AssemblerInternalsCarrier)[PENDING_TASK_METAS] ?? null,
++    );
+     if (input.logId) applyResultMemo.set(turn.seenLogIds, { logId: input.logId, next });
+     return next;
+   }
+@@ -1439,7 +1513,35 @@ export function applyLogToSegments(
+         turnStartedAt: turn.turnStartedAt ?? parseLogTs(input.timestamp),
+         seenLogIds: recordSeenLogId(turn.seenLogIds, input.logId),
+       };
+-      attachInternals(nextTurn, cell, idIndex);
++      // 2026-10-26-subagent-task-meta-restore：即时命中分支字面量构造，悬挂表
++      // 显式携带——两子代理交错排列实证（A 的即时 TASK 行处理后丢 B 的悬挂）。
++      attachInternals(
++        nextTurn,
++        cell,
++        idIndex,
++        (turn as AssembledTurn & AssemblerInternalsCarrier)[SUPERSEDED_SEG_IDS] ?? null,
++        (turn as AssembledTurn & AssemblerInternalsCarrier)[PENDING_TASK_METAS] ?? null,
++      );
++      if (input.logId) {
++        applyResultMemo.set(turn.seenLogIds, { logId: input.logId, next: nextTurn });
++      }
++      return nextTurn;
++    }
++    // 2026-10-26-subagent-task-meta-restore：parent 在场但派发段未建（同毫秒
++    // 乱序竞态——生产实证 [TASK_STARTED] 行先于 tool_call 行处理，原丢弃导致
++    // 段元数据永久丢失 + async 回执假终态配对）→ 悬挂暂存，待 tool_use 段建立
++    // 时回填（drainPendingTaskMetas）。无 parent（孤儿行无归属键）维持原丢弃。
++    if (parent) {
++      const pending = pendingTaskMetasOf(turn);
++      const list = pending.get(parent);
++      if (list) list.push(seg);
++      else pending.set(parent, [seg]);
++      const nextTurn: AssembledTurn = {
++        ...turn,
++        // 计时锚点兜底同上；segments/output 原引用复用（信号非内容，投影不变）。
++        turnStartedAt: turn.turnStartedAt ?? parseLogTs(input.timestamp),
++        seenLogIds: recordSeenLogId(turn.seenLogIds, input.logId),
++      };
+       if (input.logId) {
+         applyResultMemo.set(turn.seenLogIds, { logId: input.logId, next: nextTurn });
+       }
+@@ -1562,27 +1664,32 @@ export function applyLogToSegments(
+       const toolSegId =
+         resolvedToolUseId ?? makeUniqueSegmentId(ids(), segmentIdBase(input, "tool", ts));
+       if (resolvedToolUseId) ids().add(resolvedToolUseId);
++      const baseSeg: ToolTurnSegment = {
++        kind: "tool",
++        // 段 id = tool_use_id（result 配对 + 子代理路由 key）；解析失败用
++        // logId 等兜底（toolName=null，渲染原样显示 raw，R-07）。
++        id: toolSegId,
++        raw: seg.text,
++        // 初始状态取 tool_call JSON 的 success（权威源）；running 靠后续
++        // result 配对兜底（statusFromToolUseRaw 注）。
++        status: statusFromToolUseRaw(seg.text),
++        toolName: (parsedTool && parsedTool.toolName) || null,
++        primary: parsedTool ? parsedTool.primary : null,
++        startedAt: ts,
++        endedAt: null,
++        children: adoptedChildren,
++        subagentType: adoptedSubagentType,
++        // FR-07 slim 全文回填键：构造 raw 的源行 log id + 截断标记。
++        ...(input.logId ? { sourceLogId: input.logId } : {}),
++        ...(input.contentTruncated === true ? { contentTruncated: true } : {}),
++      };
+       segments = applyToBucket(segments, bucketId, routeSubagentType, (children) => [
+         ...children,
+-        {
+-          kind: "tool",
+-          // 段 id = tool_use_id（result 配对 + 子代理路由 key）；解析失败用
+-          // logId 等兜底（toolName=null，渲染原样显示 raw，R-07）。
+-          id: toolSegId,
+-          raw: seg.text,
+-          // 初始状态取 tool_call JSON 的 success（权威源）；running 靠后续
+-          // result 配对兜底（statusFromToolUseRaw 注）。
+-          status: statusFromToolUseRaw(seg.text),
+-          toolName: (parsedTool && parsedTool.toolName) || null,
+-          primary: parsedTool ? parsedTool.primary : null,
+-          startedAt: ts,
+-          endedAt: null,
+-          children: adoptedChildren,
+-          subagentType: adoptedSubagentType,
+-          // FR-07 slim 全文回填键：构造 raw 的源行 log id + 截断标记。
+-          ...(input.logId ? { sourceLogId: input.logId } : {}),
+-          ...(input.contentTruncated === true ? { contentTruncated: true } : {}),
+-        },
++        // 2026-10-26-subagent-task-meta-restore：悬挂回填——乱序先到的 [TASK_*]
++        // 行（TASK_STARTED 早于本段建立）在此按到达序回填元数据并清悬挂条目；
++        // stub 合并路径（步骤 1 adoptedChildren）同经此处（设计"两处建段点"
++        // 收敛于本 case 一个回填点）。无悬挂/无配对键原段返回。
++        resolvedToolUseId ? drainPendingTaskMetas(turn, resolvedToolUseId, baseSeg) : baseSeg,
+       ]);
+       break;
+     }
+@@ -1781,6 +1888,10 @@ export function applyLogToSegments(
+     cell,
+     idIndex,
+     (turn as AssembledTurn & AssemblerInternalsCarrier)[SUPERSEDED_SEG_IDS] ?? null,
++    // 2026-10-26-subagent-task-meta-restore：主路径 next 为字面量构造（spread 之外的
++    // 显式字段），悬挂表同 superseded 一样须经 attachInternals 显式携带——漏传
++    // 即悬挂跨行断链（排列 task→result→call 实证：result 行处理后 Map 丢失）。
++    (turn as AssembledTurn & AssemblerInternalsCarrier)[PENDING_TASK_METAS] ?? null,
+   );
+   if (input.logId) applyResultMemo.set(turn.seenLogIds, { logId: input.logId, next });
+   return next;
+diff --git a/frontend/src/components/daemon/session-panel/session-panel-dialog.tsx b/frontend/src/components/daemon/session-panel/session-panel-dialog.tsx
+index 811aa1ce3..624fd156c 100644
+--- a/frontend/src/components/daemon/session-panel/session-panel-dialog.tsx
++++ b/frontend/src/components/daemon/session-panel/session-panel-dialog.tsx
+@@ -915,7 +915,14 @@ export function SessionPanelDialog(props: SessionPanelProps) {
+               if (!event.run_id || !event.phase) return;
+               setView((prev) => ({
+                 ...prev,
+-                turns: applyTurnPhase(prev.turns, event.run_id, event.phase ?? ""),
++                turns: applyTurnPhase(
++                  prev.turns,
++                  event.run_id,
++                  event.phase ?? "",
++                  // 2026-10-26-turn-phase-orphan-fallback FR-01：竞态回退——事件
++                  // 先于占位轮替换到达时写当前活跃轮。
++                  prev.currentRunId,
++                ),
+               }));
+             },
+           }),
+diff --git a/frontend/src/components/daemon/session-panel/session-panel-page.tsx b/frontend/src/components/daemon/session-panel/session-panel-page.tsx
+index 47afcc63e..3447fa53d 100644
+--- a/frontend/src/components/daemon/session-panel/session-panel-page.tsx
++++ b/frontend/src/components/daemon/session-panel/session-panel-page.tsx
+@@ -2069,7 +2069,14 @@ export function SessionPanelPage({
+             if (!event.run_id || !event.phase) return;
+             setTurnState((prev) => ({
+               ...prev,
+-              turns: applyTurnPhase(prev.turns, event.run_id, event.phase ?? ""),
++              turns: applyTurnPhase(
++                prev.turns,
++                event.run_id,
++                event.phase ?? "",
++                // 2026-10-26-turn-phase-orphan-fallback FR-01：竞态回退——事件
++                // 先于占位轮替换到达时写当前活跃轮。
++                prev.currentRunId,
++              ),
+             }));
+           },
+         }),
+diff --git a/frontend/src/components/daemon/session-panel/turn-state.ts b/frontend/src/components/daemon/session-panel/turn-state.ts
+index 79e2082fe..3749e9b19 100644
+--- a/frontend/src/components/daemon/session-panel/turn-state.ts
++++ b/frontend/src/components/daemon/session-panel/turn-state.ts
+@@ -93,13 +93,22 @@ export interface TurnPhaseState {
+ /**
+  * turn_phase 事件 → 轮状态 currentPhase 写入（last-write-wins，乱序到达按事件
+  * 序覆盖）；按 runId 归属路由（含 realRunId 匹配），未命中既有轮时**不建轮**
+- * （phase 不是轮存在性信号——轮由 turn_started/log 创建，孤 phase 丢弃）。
+- * 返回新数组（不可变更新）；未命中/无 runId 原样返回。
++ * （phase 不是轮存在性信号——轮由 turn_started/log 创建）。
++ *
++ * 2026-10-26-turn-phase-orphan-fallback FR-01/02/04：未命中时不再静默丢弃——
++ * 若 currentRunId 指向活跃轮（发送后 HTTP 响应未回、占位轮尚未换真实 run_id
++ * 的竞态窗口——事件跑赢响应被丢弃 = 生产实证卡「执行器已接收」超时的根因），
++ * 回退写入该活跃轮；无活跃轮回退不命中时维持原丢弃（断线重连迟到事件，防
++ * 幽灵轮原语义不变）。回退只认 currentRunId（单会话单活跃 run 不变式，
++ * decisions D-001 反例排查：子代理/团队/steering/排队均不构成多活跃轮），不
++ * 做模糊匹配。replacePlaceholderTurn 以对象展开保留 currentPhase（FR-03）。
++ * 返回新数组（不可变更新）；无 runId / 全程未命中原样返回。
+  */
+ export function applyTurnPhase(
+   turns: SessionTurnView[],
+   runId: string | null | undefined,
+   phase: string,
++  currentRunId?: string | null,
+ ): SessionTurnView[] {
+   if (!runId) return turns;
+   const at = Date.now();
+@@ -111,7 +120,22 @@ export function applyTurnPhase(
+     }
+     return t;
+   });
+-  return hit ? next : turns;
++  if (hit) return next;
++  // FR-01 竞态回退：事件带真实 run_id 先于占位轮替换到达 → 写当前活跃轮。
++  // FR-04：排队轮不在 currentRunId 指向内（它尚未建轮），天然不接回退事件。
++  if (currentRunId) {
++    let fallbackHit = false;
++    const fallback = turns.map((t) => {
++      if (t.runId === currentRunId) {
++        fallbackHit = true;
++        return { ...t, currentPhase: { phase, at } };
++      }
++      return t;
++    });
++    if (fallbackHit) return fallback;
++  }
++  // FR-02：无活跃轮（断线重连迟到事件等）维持丢弃，不建幽灵轮。
++  return turns;
+ }
+ 
+ /**
+diff --git a/frontend/src/components/daemon/turn-segment-views.tsx b/frontend/src/components/daemon/turn-segment-views.tsx
+index e291ccb99..c65dc30c0 100644
+--- a/frontend/src/components/daemon/turn-segment-views.tsx
++++ b/frontend/src/components/daemon/turn-segment-views.tsx
+@@ -675,7 +675,9 @@ export const ThinkingRowView = memo(function ThinkingRowView({ segment }: Thinki
+   const summary = useThinkingSummary(segment.text, segment.streaming);
+   const label = processLabel("thinking");
+   return (
+-    <div className="w-full">
++    // 2026-10-26-subagent-card-width-unify：过程行限宽统一（整行-120px，随容器
++    // 自适应）——与文本段/文件段同口径，思考行不再铺满整行。
++    <div className="w-full max-w-[calc(100%-120px)]">
+       <button
+         type="button"
+         onClick={() => {
+@@ -796,7 +798,9 @@ export const ToolRowView = memo(function ToolRowView({ segment }: ToolRowViewPro
+       : "等待后台任务输出"
+     : (teamSummary ?? segment.primary ?? (segment.raw || null));
+   return (
+-    <div className="w-full">
++    // 2026-10-26-subagent-card-width-unify：工具调用行限宽统一（整行-120px）——
++    // 用户实证进度视图工具卡铺满整行，与 2026-10-25 宽度统一规范补齐。
++    <div className="w-full max-w-[calc(100%-120px)]">
+       <div
+         role="button"
+         tabIndex={0}
+@@ -1055,7 +1059,9 @@ export const SubagentBlockView = memo(function SubagentBlockView({
+       <div
+         data-segment-id={segment.id}
+         className={cn(
+-          "w-full self-stretch overflow-hidden rounded-[10px] border border-indigo-200 bg-indigo-50",
++          // 2026-10-26-subagent-card-width-unify：子代理卡限宽统一（整行-120px，
++          // self-stretch→self-start 防 flex 父容器 stretch 反噬，对齐 file 段先例）。
++          "w-full max-w-[calc(100%-120px)] self-start overflow-hidden rounded-[10px] border border-indigo-200 bg-indigo-50",
+           active && "ring-1 ring-brand-300",
+         )}
+       >
+@@ -1085,7 +1091,9 @@ export const SubagentBlockView = memo(function SubagentBlockView({
+   // 助手等无 Provider 宿主）——同款头部纯展示：不可点击、无展开语义；完整
+   // 内部过程由「进度」视图或具备面板能力的宿主承载。
+   return (
+-    <div className="w-full self-stretch overflow-hidden rounded-[10px] border border-indigo-200 bg-indigo-50">
++    // 2026-10-26-subagent-card-width-unify：无 Provider 纯展示分支同款限宽（与
++    // panel 紧凑卡片分支同口径，两分支视觉一致）。
++    <div className="w-full max-w-[calc(100%-120px)] self-start overflow-hidden rounded-[10px] border border-indigo-200 bg-indigo-50">
+       <div
+         className={cn(
+           "relative flex select-text items-center gap-2 overflow-hidden px-3.5 py-[7px] text-xs",
+@@ -1105,7 +1113,9 @@ export const SubagentBlockView = memo(function SubagentBlockView({
+  */
+ export const StderrRowView = memo(function StderrRowView({ segment }: StderrRowViewProps) {
+   return (
+-    <div className="flex items-start gap-1.5 px-1 py-0.5 text-[11px] text-amber-700">
++    // 2026-10-26-subagent-card-width-unify：警告行限宽统一（原无 w-full 但在
++    // flex-col 父容器被 stretch 铺满，加 max-w 收口；弹性容器无需 self-start）。
++    <div className="flex max-w-[calc(100%-120px)] items-start gap-1.5 px-1 py-0.5 text-[11px] text-amber-700">
+       <span aria-hidden className="shrink-0">
+         ⚠
+       </span>
+@@ -1474,7 +1484,8 @@ export const TeamWorkerBlockView = memo(function TeamWorkerBlockView({
+ 
+   const hasWs = Boolean(workspaceName || workspaceId);
+   return (
+-    <div className="w-full self-stretch overflow-hidden rounded-[10px] border border-brand-200 bg-brand-50">
++    // 2026-10-26-subagent-card-width-unify：团队分身卡限宽统一（与子代理卡同口径）。
++    <div className="w-full max-w-[calc(100%-120px)] self-start overflow-hidden rounded-[10px] border border-brand-200 bg-brand-50">
+       <div
+         role="button"
+         tabIndex={0}
+diff --git a/frontend/src/lib/daemon/__tests__/session-stream-turn-phase.test.ts b/frontend/src/lib/daemon/__tests__/session-stream-turn-phase.test.ts
+index 457e0158b..8bc49d629 100644
+--- a/frontend/src/lib/daemon/__tests__/session-stream-turn-phase.test.ts
++++ b/frontend/src/lib/daemon/__tests__/session-stream-turn-phase.test.ts
+@@ -16,6 +16,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
+ import {
+   applyTurnPhase,
+   clearTurnPhase,
++  replacePlaceholderTurn,
+ } from "@/components/daemon/session-panel/turn-state";
+ import type { SessionTurnView } from "@/components/daemon/turn-timeline";
+ import type { FetchSseConnection } from "@/lib/fetch-sse";
+@@ -198,6 +199,57 @@ describe("applyTurnPhase（FR-04 / D-013①②）", () => {
+   });
+ });
+ 
++// ── orphan-fallback（2026-10-26-turn-phase-orphan-fallback FR-01/02/04）──────
++
++describe("applyTurnPhase 竞态回退（事件跑赢占位轮替换）", () => {
++  it("FR-01 未命中 run_id 时回退写入 currentRunId 指向的活跃轮", () => {
++    // 生产实证形态：占位轮 ph-1（currentRunId 指向）尚未换真实 run_id，
++    // daemon 事件（run-real）先到——原设计丢弃 = 卡「执行器已接收」根因。
++    const turns = [makeTurn("ph-1", { status: "pending" }), makeTurn("run-old")];
++    const next = applyTurnPhase(turns, "run-real", "first_event", "ph-1");
++    expect(next[0]!.currentPhase?.phase).toBe("first_event");
++    expect(next[1]!.currentPhase).toBeUndefined(); // 只写活跃轮，不波及他轮
++  });
++
++  it("FR-01 精确命中优先——回退仅未命中时生效", () => {
++    const turns = [makeTurn("run-active"), makeTurn("ph-1")];
++    const next = applyTurnPhase(turns, "ph-1", "ready", "run-active");
++    expect(next[1]!.currentPhase?.phase).toBe("ready"); // ph-1 精确命中
++    expect(next[0]!.currentPhase).toBeUndefined(); // 回退未触发
++  });
++
++  it("FR-02 无活跃轮（currentRunId 空）维持丢弃不建幽灵轮", () => {
++    const turns = [makeTurn("run-done", { status: "completed" })];
++    const next = applyTurnPhase(turns, "run-late", "ready", null);
++    expect(next).toBe(turns);
++  });
++
++  it("FR-02 currentRunId 指向轮已不在列表（终态清理后）维持丢弃", () => {
++    const turns = [makeTurn("run-1")];
++    const next = applyTurnPhase(turns, "run-late", "ready", "run-gone");
++    expect(next).toBe(turns);
++  });
++
++  it("FR-04 排队轮不接回退——事件只写活跃轮，不建排队轮", () => {
++    // 排队消息（未来 run-q）派发前不是轮：回退只落 currentRunId（run-active）。
++    const turns = [makeTurn("run-active")];
++    const next = applyTurnPhase(turns, "run-q", "inject_received", "run-active");
++    expect(next).toHaveLength(1);
++    expect(next[0]!.currentPhase?.phase).toBe("inject_received");
++  });
++
++  it("FR-03 竞态全链：回退写占位轮 → replacePlaceholderTurn 换真实 id 后 phase 保留", () => {
++    let turns = [makeTurn("ph-1", { status: "pending", prompt: "你好" })];
++    turns = applyTurnPhase(turns, "run-real", "first_event", "ph-1");
++    turns = replacePlaceholderTurn(turns, "ph-1", "run-real", "running");
++    expect(turns[0]!.runId).toBe("run-real");
++    expect(turns[0]!.currentPhase?.phase).toBe("first_event"); // spread 保留
++    // 后续事件按真实 id 精确命中，last-write-wins 继续生效。
++    turns = applyTurnPhase(turns, "run-real", "first_event", "run-real");
++    expect(turns[0]!.currentPhase?.phase).toBe("first_event");
++  });
++});
++
+ describe("clearTurnPhase（D-013③ 终态清理）", () => {
+   it("有值清 null；null/undefined 幂等原样返回", () => {
+     const withPhase = makeTurn("run-1", {

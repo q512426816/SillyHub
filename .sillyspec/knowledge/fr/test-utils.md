@@ -1819,3 +1819,60 @@ created_at: 2026-10-16T01:30:35.950Z
   confirmed_at: null
   source_change: 2026-10-26-subagent-card-width-unify
   status: active
+
+## FR-test-utils-096 [TASK_*] 行悬挂暂存与派发段建立时回填
+变更：2026-10-26-subagent-task-meta-restore
+状态：active
+摘要：同毫秒批量行乱序装配（生产复现形态）；既有顺序零回归
+全文：.sillyspec/changes/archive/2026-10-26-subagent-task-meta-restore/requirements.md#FR-01
+最近确认：5eca947cd15ca5a45a62ff94e1600fdc8e968ec3
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-26-subagent-task-meta-restore:flow:测试绑定FR-01
+  tests: frontend/src/components/daemon/__tests__/task-line-assembler.test.ts「同毫秒四行乱序装配——悬挂暂存与段建立回填（含悬挂表清空断言）」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-26-subagent-task-meta-restore
+  status: active
+
+## FR-test-utils-097 元数据恢复压住 async 回执假终态
+变更：2026-10-26-subagent-task-meta-restore
+状态：active
+摘要：假完成消除
+全文：.sillyspec/changes/archive/2026-10-26-subagent-task-meta-restore/requirements.md#FR-02
+最近确认：5eca947cd15ca5a45a62ff94e1600fdc8e968ec3
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-26-subagent-task-meta-restore:flow:测试绑定FR-02
+  tests: frontend/src/components/daemon/__tests__/turn-segment-views.test.tsx「回填后 subagentHeaderOf 元数据优先压回执假终态（running 徽章+走秒锚）」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-26-subagent-task-meta-restore
+  status: active
+
+## FR-test-utils-098 乱序回归测试与既有套件全绿
+变更：2026-10-26-subagent-task-meta-restore
+状态：active
+摘要：套件回归
+全文：.sillyspec/changes/archive/2026-10-26-subagent-task-meta-restore/requirements.md#FR-03
+最近确认：5eca947cd15ca5a45a62ff94e1600fdc8e968ec3
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-26-subagent-task-meta-restore:flow:测试绑定FR-03
+  tests: frontend/src/components/daemon/__tests__/session-log-assembler.test.ts「既有套件全绿 + 无 parent 行丢弃零回归」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-26-subagent-task-meta-restore
+  status: active

@@ -1,0 +1,37 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-26-subagent-task-meta-restore",
+  "reviewer": "subagent",
+  "verdict": "PASS",
+  "reviewedAgainst": "5eca947cd15ca5a45a62ff94e1600fdc8e968ec3",
+  "findings": [
+    {
+      "severity": "P3",
+      "status": "open",
+      "title": "排列不变性用例标题承诺的「悬挂表清空」无对应断言",
+      "evidence": "task-line-assembler.test.ts:469 的 it 标题写「悬挂消费后悬挂表清空」（requirements FR-01 亦要求『悬挂表无残留』），但用例体仅断言段元数据 metaOf toStrictEqual——PENDING_TASK_METAS symbol 未导出，测试无法触达悬挂表；清空仅由 drainPendingTaskMetas 内 pending.delete 实现，无任何直接或间接可观察断言。实际风险极低：悬挂残留无观察面（同 id 段不会二次建立；applyTaskMeta latest-wins 同值覆盖使重复回填幂等；条目随 turn 链淘汰），属标题/需求字面与断言覆盖不匹配。",
+      "location": "frontend/src/components/daemon/__tests__/task-line-assembler.test.ts:469-478"
+    },
+    {
+      "severity": "P3",
+      "status": "open",
+      "title": "task-01 交付提交夹带上一变更（turn-phase-orphan-fallback）的滞后文档落库",
+      "evidence": "85f55567f 中 frontend.changelog.md / frontend_lib.changelog.md / frontend_components.changelog.md 各 +1 行与 knowledge/decisions/unmapped.md +8 行内容全部归属 2026-10-26-turn-phase-orphan-fallback（其归档提交 1170d5332 漏提交这些产物，被本变更首个代码提交捎带）；knowledge/fr/test-utils.md +87 行为 fr-index 机器生成文件，与本变更无关。代码面无夹带（diff 仅 session-log-assembler.ts + 两个测试文件），不影响正确性，属提交内容与变更语义不对应的流程卫生问题。",
+      "location": ".sillyspec/changes 提交 85f55567f（.sillyspec/docs/*/frontend*.changelog.md、.sillyspec/knowledge/decisions/unmapped.md、.sillyspec/knowledge/fr/test-utils.md）"
+    },
+    {
+      "severity": "P3",
+      "status": "open",
+      "title": "乱序排列用例的 result 行以 stdout 文本近似生产 [TOOL_RESULT] 回执形态",
+      "evidence": "FR-01 生产场景四行中的回执行为 tool_result（async 回执按桶内最近未配对段配对翻假终态——本缺陷的假终态来源），但 ghostLogs 的 result 行构造为 stdout 文本（task-line-assembler.test.ts:428-431），不触发 tool_result 配对路径，排列不变性未覆盖『回执配对翻假终态后再回填』的装配层交互；该路径由 turn-segment-views.test.tsx 直接构造 status=ok+endedAt 假终态段验收显示层弥补（FR-02 分层合理），但装配层对回执 kind 的排列口径与 FR-01 场景字面存在近似。",
+      "location": "frontend/src/components/daemon/__tests__/task-line-assembler.test.ts:421-434"
+    }
+  ],
+  "dimensionNotes": {
+    "乱序": "ok",
+    "并发": "ok",
+    "切换": "ok",
+    "作用域": "ok"
+  },
+  "reviewedAt": "2026-10-26T13:36:00+08:00"
+}
