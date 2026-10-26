@@ -1,0 +1,35 @@
+tier: thin
+legacy_fallback: false
+substeps: {}
+born_face: thin
+with_tasks: false
+review_force: null
+input: >-
+  修复四条CI工作流失败转绿
+
+  动机：main 分支 frontend-ci/daemon-ci/e2e-ci 自 10-25 起持续红，backend-ci Pytest 步骤疑似挂死。已定位：e2e-ci.yml 的 PG service 用
+  postgres:16-alpine，pgvector 迁移 20261015200000 fail-closed 中止；frontend-ci 稳定失败 5
+  个测试文件（sessions-portal/session-history-scroll/session-panel-load-earlier-full-turn/file-explorer-git-status/session-panel-history-race）；daemon-ci
+  失败于 session-thinking-level、task-lifecycle、daemon-interactive-spec-sync 三组测试。
+
+
+  成功标准：
+
+  - e2e-ci workflow PG service 镜像换 pgvector/pgvector:pg16，alembic 迁移可通过
+
+  - frontend 5 个失败测试文件与 daemon 失败测试在本地复现并修复，本地测试跑绿
+
+  - 推送后 GitHub Actions 四条 workflow 全绿
+autopilot: false
+prestage_ack: true
+baseline_commit: f1e476a90cfedcb734965cf7087d678a2fb01280
+updatedAt: '2026-10-26T15:20:08.704Z'
+cross_baselines:
+  sillyspec: 67e50bcca2adb9ecd502d12086c0ac8cb994da84
+baseline_sha256: 97885f03907888b7db19d6a4c28cb08414f86fd2025efe95b49ba84e6530a128
+spec_approved: true
+spec_approved_at: '2026-10-26T15:20:08.704Z'
+spec_approved_by: zcode-ci-fix-20261026
+spec_approved_channel: agent-self
+spec_attested_by: zcode-ci-fix-20261026
+

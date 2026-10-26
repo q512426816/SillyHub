@@ -21,7 +21,10 @@ jobs:
     # GH Actions services 容器映射到 job 容器网络，backend 用 localhost 直连。
     services:
       postgres:
-        image: postgres:16-alpine
+        # pgvector 扩展镜像（2026-10-15-knowledge-search-pgvector）：迁移
+        # 20261015200000 内 CREATE EXTENSION vector，纯 postgres 镜像 fail-closed
+        # 中止（e2e-ci 10-23 起全红实证）；对齐 deploy/docker-compose.yml 口径。
+        image: pgvector/pgvector:pg16
         env:
           POSTGRES_PASSWORD: postgres
         ports:
