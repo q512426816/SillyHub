@@ -1,0 +1,34 @@
+tier: thin
+legacy_fallback: false
+substeps:
+  artifacts: done
+born_face: thin
+with_tasks: false
+review_force: null
+input: >-
+  用户真机复验 seq44 部署后反馈：会话页 agent 回复内容希望手机端占满一行,字体和间隔收小,一屏显示更多内容(第三轮密度回调——ql-20260915-009 放大 16px→ql-20260915-013 回调
+  14px→本轮再收紧)。
+
+
+  成功标准：
+
+  - agent 回复气泡手机端限宽 94%→100% 占满一行,时间线滚动区左右留白 12px→8px 让宽
+
+  - 手机端正文字号 14px→13px(不低于 12px 紧凑档),行高 1.7→1.6、气泡行高 24px→21px,标题同比降一档
+
+  - 改动仅限 globals.css [data-variant=mobile] 排版块,desktop/悬浮窗零变化
+
+  - 相关测试面零回归(session-panel-variant 等既有套件全绿)
+autopilot: false
+prestage_ack: true
+baseline_commit: a78ee44f9f4aabfe98de68976b7e57a02d0f91b3
+updatedAt: '2026-10-27T00:21:18.451Z'
+cross_baselines:
+  sillyspec: 67e50bcca2adb9ecd502d12086c0ac8cb994da84
+baseline_sha256: f9ba8e7fd5f9721b7c897e6db6e40bc35b9d52d322c4444c6f9dbcbd46606bb8
+spec_approved: true
+spec_approved_at: '2026-10-27T00:21:17.863Z'
+spec_approved_by: anon@DESKTOP-HJ0AM09
+spec_approved_channel: user-confirmed
+spec_attested_by: anon@DESKTOP-HJ0AM09
+
