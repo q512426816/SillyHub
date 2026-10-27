@@ -177,3 +177,5 @@ created_at: 2026-08-30 22:23:33
 | 2026-10-27 | 2026-10-27-mobile-chat-visual-round3 | 用户真机三轮反馈：轮次信息折行难看要单行；会话页顶部加返回会话列表按钮；会话列表卡加 PC 端同款状… |
 | 2026-10-27 | 2026-10-27-session-input-spacing-tighten | 会话页输入区与消息流底部留白过大——用户在浏览器开发者工具审查发现 pt-3/pt-1/pb-4/p… |
 | 2026-10-27 | 2026-10-27-turn-phase-stall-honest-ui | 会话忙时用户消息在 backend 排队/派发链路滞留（生产实证 2026-10-27 会话 7ef… |
+| 2026-10-27 | 2026-10-27-archive-reparse-oom-governance | 2026-10-27-archive-reparse-oom-governance |
+| 2026-10-27 | 2026-10-27-mobile-chat-visual-round4 | 用户四轮反馈：子代理卡/进度视图过程块(运行命令等)仍不满宽(8 处 calc(100%-120px… |

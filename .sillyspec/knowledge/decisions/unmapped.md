@@ -2320,3 +2320,102 @@ supersedes：D-008@v1
 锚点：未记录
 最近确认：644631ac24e0d0e40c35d12fe5ab1bc0dca19dd5
 理由：最大风险：@联想浮层与 textarea 垂直对齐漂移——已通过 overlayClassName 镜像同步改消除，并由 draft-scope 回归用例兜底。试过放弃：按用户片段字面把 py-2/py-5 上下全删——会让消息顶行贴边/输入框过扁，按用户片段「只有下内边距」的口径改为只去下保上（pt-5/pt-2），更贴近其真实意图（收紧消息区与输入区之间的空隙）。
+
+## D-unmapped-291@v1 治本目标定为增量方案（又快又稳）
+状态：implemented
+变更：2026-10-27-archive-reparse-oom-governance
+原编号：D-001@v1
+锚点：未记录
+最近确认：0069bb234ffa70ccfba04426ca885095484926fc
+理由：用户确认「增量方案：又快又稳」——结构性事件（归档/删除）秒级~1 分钟内可见、普通文档推送 ≤2 分钟、内存峰值大降不再 OOM；若调研后发现增量方案有安全隐患，退回合并窗方案并回来找用户重新拍板
+故障面：增量判定漏路径时部分变更不收敛（需全量兜底通道与对账探针）
+退役判据：变更树规模长期 ≤50 且无并发归档场景时可回退合并窗简化版
+
+## D-unmapped-292@v1 mem_limit 再上调只作方案附录建议，不在本次实施
+状态：implemented
+变更：2026-10-27-archive-reparse-oom-governance
+原编号：D-002@v1
+锚点：未记录
+最近确认：0069bb234ffa70ccfba04426ca885095484926fc
+理由：用户选「只做治本评估，不动线上」——mem_limit 调整作为治本方案的配套运维建议写入附录供后续单独决策，本变更不动任何线上配置
+
+## D-unmapped-293@v1 治本方案选定方案C（scoped 增量承接归档 + 探针对账兜底）
+状态：implemented
+变更：2026-10-27-archive-reparse-oom-governance
+原编号：D-004@v1
+锚点：未记录
+最近确认：0069bb234ffa70ccfba04426ca885095484926fc
+理由：用户选方案C——归档移动从 archive_hit→全量 reparse 改为 scoped=[归档名] 定向重扫（parser 三区按 name 匹配既有能力，backend/app/modules/change/parser.py:143-202 三区 iterdir 均带 scope_set 过滤，遍历成本 ∝ scope 不 ∝ 全树）；全量 reparse 退位为手动端点/异常兜底（不做常态化全量对账，尊重 knowledge decisions 拒C 先例）；配套漂移探针 + bundle gzip 构建串行化/按需化 + 内存水位日志
+故障面：scoped 语义边界外漏路径（同窗既有删除+归档交错）时部分行不收敛——由漂移探针+手动全量兜底
+退役判据：变更树回归百级以下且无并发归档时可选回退合并窗简化版
+
+## D-unmapped-294@v1 方案A（免 reparse 靶向改库）落选
+状态：rejected
+变更：2026-10-27-archive-reparse-oom-governance
+原编号：D-005@v1
+锚点：未记录
+最近确认：0069bb234ffa70ccfba04426ca885095484926fc
+理由：落选——归档 ops 直翻行状态绕开 parser 建第二真相写径，与知识库既有架构决策「平台以镜像文件树为唯一权威、经 reparse 收敛」（knowledge/decisions/backend.md 2026-08-29 变更 D-005 家族）正面冲突；ops 流缺失/乱序时行与磁盘漂移且无自愈通道
+否决理由：第二真相写径破坏单一权威架构，漂移无自愈
+复潮条件：平台改为「ops 流为权威、文件树为投影」的整体架构重构时
+
+## D-unmapped-295@v1 方案B（全量合并窗治理）落选
+状态：rejected
+变更：2026-10-27-archive-reparse-oom-governance
+原编号：D-006@v1
+锚点：未记录
+最近确认：0069bb234ffa70ccfba04426ca885095484926fc
+理由：落选——时效回落分钟级违反 D-001「又快又稳」用户目标；全量遍历成本仍随变更总数线性增长，治标不治本（470→2000 变更规模时再爆）
+否决理由：违反 D-001 时效目标且峰值随规模线性涨
+复潮条件：scoped 增量方案论证发现不可消解安全隐患（退回保守路线时按 D-001 预案回访用户）
+
+## D-unmapped-296@v1 双通道时效分档（结构性立即 / 普通推送 2 分钟合并窗）
+状态：implemented
+变更：2026-10-27-archive-reparse-oom-governance
+原编号：D-007@v1
+锚点：未记录
+最近确认：0069bb234ffa70ccfba04426ca885095484926fc
+理由：设计确认轮用户确认——结构性事件（归档/删除）走立即 single-flight 通道（≤60s 收敛），普通文档推送维持既有 120s 合并窗（≤120s 收敛）；single-flight（同 workspace 同时仅一个 reparse）两通道共享不破
+故障面：结构性事件风暴（短窗大量归档）时立即通道产生密集 scoped reparse——成本∝单变更，可承受；保底 single-flight 串行
+
+## D-unmapped-297@v1 漂移探针只告警不自动修复
+状态：implemented
+变更：2026-10-27-archive-reparse-oom-governance
+原编号：D-008@v1
+锚点：未记录
+最近确认：0069bb234ffa70ccfba04426ca885095484926fc
+理由：设计确认轮用户确认——探针周期抽样核对（DB 行 location vs 磁盘目录形态），发现漂移仅告警日志；修复通道=人工调既有手动 reparse 端点。依据：知识库已否决「全量对账常态化」（Windows stat 断崖+全量 93s 超时史），自动修复即变相常态化
+退役判据：手动兜底频率过高（周级多次）时重议自动化
+
+## D-unmapped-298@v1 bundle gzip 构建加同版本 single-flight
+状态：implemented
+变更：2026-10-27-archive-reparse-oom-governance
+原编号：D-009@v1
+锚点：未记录
+最近确认：0069bb234ffa70ccfba04426ca885095484926fc
+理由：设计确认轮用户确认——同 (workspace, spec_version) 在建期间其余请求等待复用产物，不重复构建（当前可能并发重复打包白耗内存/CPU）
+
+## D-unmapped-299@v1 structural 触发撞在途 reparse 时尾随改「完成回调即时补发」
+状态：implemented
+变更：2026-10-27-archive-reparse-oom-governance
+原编号：D-010@v1
+锚点：未记录
+最近确认：0069bb234ffa70ccfba04426ca885095484926fc
+理由：我的判断（评审核证采纳）：structural 触发遇 in-flight 时不入 120s 定时尾随，改挂「当前 reparse 完成回调」即时补发（完成即重算 scope 执行）；非结构尾随维持 120s 合并窗不变。承诺保持 ≤60s
+故障面：完成回调链异常需兜底（回调丢失时退化为下轮触发兜底，探针可发现）
+
+## D-unmapped-300@v1 bundle 等待者 Future 失败传播 + 降级自建
+状态：implemented
+变更：2026-10-27-archive-reparse-oom-governance
+原编号：D-011@v1
+锚点：未记录
+最近确认：0069bb234ffa70ccfba04426ca885095484926fc
+理由：我的判断（评审核证采纳）：single-flight Future 携带成功/失败双态——构建方异常/断连时 Future 置失败并传播，等待者捕获后降级为自建（各自构建，失败不传染不悬挂）
+
+## D-unmapped-301@v1 设计期风险与放弃方案（底稿）
+状态：implemented
+变更：2026-10-27-mobile-chat-visual-round4
+原编号：D-001@v1
+锚点：未记录
+最近确认：0069bb234ffa70ccfba04426ca885095484926fc
+理由：最大风险：seg-width-cap 类被未来新块遗忘挂载（回到散装限宽）——已由测试断言锚（6 用例锚 seg-width-cap）+ globals.css 注释声明单一源约束。放弃的方案：①13 处逐个加 mobile prop 分支（组件改动 13 处×两行 vs 一次类替换+CSS 两行）；②all 视图保留 TurnStatusBadge 仅调样式近似（用户明确「统一用对话的」，两套组件近似必再漂移，正解是删旧用同组件）。

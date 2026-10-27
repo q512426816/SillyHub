@@ -1,0 +1,81 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-27-archive-reparse-oom-governance",
+  "rows": [
+    {
+      "anchor": "FR-01",
+      "row_id": "2026-10-27-archive-reparse-oom-governance:flow:测试绑定FR-01",
+      "tests": [
+        "backend/app/modules/spec_workspace/tests/test_archive_scoped_reparse.py「归档推送触发 scoped 定向重扫（非全量）且结构性行 location/文档路径正确翻转」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-27-archive-reparse-oom-governance"
+    },
+    {
+      "anchor": "FR-02",
+      "row_id": "2026-10-27-archive-reparse-oom-governance:flow:测试绑定FR-02",
+      "tests": [
+        "backend/app/modules/spec_workspace/tests/test_archive_scoped_reparse.py「普通文档推送维持 120s 合并窗（节流零回归）」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-27-archive-reparse-oom-governance"
+    },
+    {
+      "anchor": "FR-03",
+      "row_id": "2026-10-27-archive-reparse-oom-governance:flow:测试绑定FR-03",
+      "tests": [
+        "backend/app/modules/spec_workspace/tests/test_archive_scoped_reparse.py「同版本 bundle 并发只构建一次 + 构建失败等待者降级自建不悬挂」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-27-archive-reparse-oom-governance"
+    },
+    {
+      "anchor": "FR-04",
+      "row_id": "2026-10-27-archive-reparse-oom-governance:flow:测试绑定FR-04",
+      "tests": [
+        "backend/app/modules/spec_workspace/tests/test_archive_scoped_reparse.py「探针只读只告警（零写路径断言）+ 水位日志形态 + 无 cgraph 环境静默跳过」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-27-archive-reparse-oom-governance"
+    },
+    {
+      "anchor": "FR-05",
+      "row_id": "2026-10-27-archive-reparse-oom-governance:flow:测试绑定FR-05",
+      "tests": [
+        "backend/app/modules/spec_workspace/tests/test_archive_scoped_reparse.py「reparse_converged 统计日志（scope 数/耗时/通道）」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-27-archive-reparse-oom-governance"
+    }
+  ]
+}

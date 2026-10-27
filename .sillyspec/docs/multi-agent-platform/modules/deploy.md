@@ -44,12 +44,14 @@ multi-agent-platform 的一体化部署编排组件，用 Docker Compose 把 bac
 - backend 连 minio 必须走容器服务名 `http://minio:9000`（compose backend environment 默认值已设）；`config.py` 的 `s3_endpoint` 默认 `http://localhost:9000` 仅给本机 native run 用，容器内用 localhost 连不通兄弟 minio 容器（`EndpointConnectionError` → 上传 500）。
 - **LiteLLM 网关（openai 格式供应商，change 2026-08-08）**：openai 格式供应商经 LiteLLM 做 Anthropic↔OpenAI 转换（**D-012 转换外包**，平台代码不实现转换）。端到端链路：openai 供应商 set-default → 后端 register 到 LiteLLM（model_name=`usr-<uid>-<pid>`，litellm_params.model=`openai/<model>`）→ lease 下发 openai 形态 provider_config（6 字段，**不含上游 api_key**）→ daemon 注入 `ANTHROPIC_BASE_URL`=litellm_base_url + `ANTHROPIC_AUTH_TOKEN`=litellm_master_key + `ANTHROPIC_MODEL`=`usr-<uid>-<pid>` → Claude Code 发 Anthropic `/v1/messages` → LiteLLM 按 model_name 路由转 OpenAI 打上游。上游 api_key 只注册在 LiteLLM（master key 加密），不下发 daemon（D-003/NFR-01）。`LITELLM_MASTER_KEY` 须替换占位（`.env.example` 不可直接生产用）。
 - **知识搜索嵌入部署实证（2026-10-15-knowledge-search-pgvector）**：生产服务器（阿里云 2 核 1.6G）无外网拉不到 fastembed 模型——须预置模型缓存挂载 `./models/fastembed_cache`；容器内全量嵌入不可行（mem_limit 800→1100m，建库改本机 20 核 + `ssh -L 15432:<PG容器IP>:5432` 隧道直写生产库，228.7s/6712 chunks）；PG 容器端口未映射宿主，隧道目标须写容器 IP 而非 127.0.0.1。
+- **生产秒级监控 Netdata（2026-10-27-netdata-prod-monitoring）**：腾讯云生产机（124.222.127.242，服务器规格已升 4 核/7.5G/59G——build-and-save.sh 头注释「2 核」为过时信息）宿主机装有 Netdata（stable 通道、遥测关闭、systemd 开机自启），供性能问题秒级现场排查（瞬时抖动/OOM/单容器资源打满）。访问：本机开 SSH 隧道 `ssh -i ~/.ssh/tencent_deploy -L 19999:127.0.0.1:19999 ubuntu@124.222.127.242`，浏览器开 `http://localhost:19999`；逐容器（backend/frontend/postgres/redis/minio）CPU/内存/磁盘/网络曲线在面板 Containers 分区（cgroups 自动识别，无需配置）。安全红线：面板无密码认证、Web 仅绑 `127.0.0.1:19999`（`/etc/netdata/netdata.conf` `[web] bind to`）——**禁止在腾讯云安全组放行 19999**；改配置后 `sudo systemctl restart netdata` 生效；数据默认落本机分层库、不接 Netdata Cloud（不出网）。
 
 ## 人工备注
 <!-- MANUAL_NOTES_START -->
 <!-- MANUAL_NOTES_END -->
 
 ## 变更索引
+- 2026-10-27-netdata-prod-monitoring | 生产机（124.222.127.242）宿主装 Netdata 秒级监控（stable/关遥测/绑回环），deploy.md 补排查条目（SSH 隧道访问+容器指标入口+安全红线：禁安全组放行 19999）
 - 2026-10-16-backend-mem-polling task-09/10 | 配额去超卖+OOM 保护+构建稳定性（0279cd175/f62065e2f）：compose redis 128m→64m、minio 256m→128m、frontend 400m→300m（backend 1100m+postgres 256m 保持，总 2.14G→1.85G）；backend 服务级 oom_score_adj:-500（注意：当前 compose 版本忽略该键——inspect OomScoreAdj=0，entrypoint try-best 写 /proc 亦 EPERM，保护缺失=改造前现状非回归，升 compose 后生效）；backend Dockerfile ENV UV_HTTP_TIMEOUT=300（wheel 下载 30s 默认超时国内网络抖动挂构建，filelock 实证）。2026-10-16 部署腾讯轻量（124.222.127.242）四指标实测达标（RSS 211MiB/迁移 20261016100000 回填 1128 行/列表 0.5ms/idle-txn 归零）；回滚 tag backup-20261016-1253。
 - ql-20260722-012-dddb | 补 backend environment S3 配置（默认 `http://minio:9000`）+ `.env.example` 同步，修复容器内连不通 minio 致平台文件中心上传 500
 - change 2026-08-08-llm-provider-openai-format | deploy 加 litellm + litellm-db 服务（OpenAI↔Anthropic 转换网关，D-012 外包）+ `LITELLM_MASTER_KEY`/`STORE_MODEL_IN_DB` env + `.env.example` 占位 + openai 端到端链路说明

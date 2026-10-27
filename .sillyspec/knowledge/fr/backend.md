@@ -7603,3 +7603,156 @@ superseded_by：FR-auth-003
   confirmed_at: null
   source_change: 2026-10-23-semantic-color-scale-fix
   status: active
+
+## FR-backend-032 归档推送触发 scoped 定向重扫（非全量）且结构性事件立即收敛
+变更：2026-10-27-archive-reparse-oom-governance
+状态：active
+摘要：默认场景；并行多变更同窗归档
+依据决策：D-004@v1、D-010@v1
+场景正文：
+- 场景：默认场景 — Given 一个已存在的活跃变更目录 `changes/<name>/` 与其 DB 行（location=active）；When spec-sync 推送该变更的归档移动（`changes/<name>/*` → `changes/archive/<name>/*` 的 rename/de；Then `_compute_reparse_scope` 产出 scoped=[name] 且 structural=True、不置 archive_hit；`_tri
+全文：.sillyspec/changes/archive/2026-10-27-archive-reparse-oom-governance/requirements.md#FR-01
+最近确认：0069bb234ffa70ccfba04426ca885095484926fc
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-27-archive-reparse-oom-governance:flow:测试绑定FR-01
+  tests: backend/app/modules/spec_workspace/tests/test_archive_scoped_reparse.py「归档推送触发 scoped 定向重扫（非全量）且结构性行 location/文档路径正确翻转」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-27-archive-reparse-oom-governance
+  status: active
+
+## FR-backend-033 普通文档推送维持 120s 合并窗收敛
+变更：2026-10-27-archive-reparse-oom-governance
+状态：active
+摘要：默认场景
+场景正文：
+- 场景：默认场景 — Given 工作区 W 在 120s 窗内已执行过一次 reparse；When 又一次非结构性 scope 触发到达（普通 add/update 文档推送）；Then 该触发入尾随合并（不立即执行），窗到点合并补发——既有节流语义零回归。
+全文：.sillyspec/changes/archive/2026-10-27-archive-reparse-oom-governance/requirements.md#FR-02
+最近确认：0069bb234ffa70ccfba04426ca885095484926fc
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-27-archive-reparse-oom-governance:flow:测试绑定FR-02
+  tests: backend/app/modules/spec_workspace/tests/test_archive_scoped_reparse.py「普通文档推送维持 120s 合并窗（节流零回归）」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-27-archive-reparse-oom-governance
+  status: active
+
+## FR-backend-034 bundle gzip 同版本单次构建
+变更：2026-10-27-archive-reparse-oom-governance
+状态：active
+摘要：默认场景
+依据决策：D-009@v1、D-011@v1
+场景正文：
+- 场景：默认场景 — Given 两个并发请求命中同一 (workspace, spec_version) 的 bundle gzip 且缓存未热；When 两请求同时到达；Then 仅发生一次构建，另一请求等待并复用同一产物（无重复构建）。
+全文：.sillyspec/changes/archive/2026-10-27-archive-reparse-oom-governance/requirements.md#FR-03
+最近确认：0069bb234ffa70ccfba04426ca885095484926fc
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-27-archive-reparse-oom-governance:flow:测试绑定FR-03
+  tests: backend/app/modules/spec_workspace/tests/test_archive_scoped_reparse.py「同版本 bundle 并发只构建一次 + 构建失败等待者降级自建不悬挂」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-27-archive-reparse-oom-governance
+  status: active
+
+## FR-backend-035 漂移探针与内存水位（只读只告警）
+变更：2026-10-27-archive-reparse-oom-governance
+状态：active
+摘要：默认场景
+依据决策：D-008@v1
+场景正文：
+- 场景：默认场景 — Given 后端运行中，lifespan 已挂载 drift_probe_loop；When 每轮探针执行；Then ①抽样核对（≤50 行/轮）DB 行 location 与磁盘目录形态，不一致仅 log.warning（零写操作、不触发任何 reparse）；②cgroup
+全文：.sillyspec/changes/archive/2026-10-27-archive-reparse-oom-governance/requirements.md#FR-04
+最近确认：0069bb234ffa70ccfba04426ca885095484926fc
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-27-archive-reparse-oom-governance:flow:测试绑定FR-04
+  tests: backend/app/modules/spec_workspace/tests/test_archive_scoped_reparse.py「探针只读只告警（零写路径断言）+ 水位日志形态 + 无 cgraph 环境静默跳过」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-27-archive-reparse-oom-governance
+  status: active
+
+## FR-backend-036 收敛可观测
+变更：2026-10-27-archive-reparse-oom-governance
+状态：active
+摘要：默认场景
+场景正文：
+- 场景：默认场景 — When 每次 reparse 完成；Then 落 `reparse_converged` 日志（scope 数/耗时/触发通道 structural|coalesced），可归因可统计。
+全文：.sillyspec/changes/archive/2026-10-27-archive-reparse-oom-governance/requirements.md#FR-05
+最近确认：0069bb234ffa70ccfba04426ca885095484926fc
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-27-archive-reparse-oom-governance:flow:测试绑定FR-05
+  tests: backend/app/modules/spec_workspace/tests/test_archive_scoped_reparse.py「reparse_converged 统计日志（scope 数/耗时/通道）」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-27-archive-reparse-oom-governance
+  status: active
+
+## FR-backend-037 turn-segment-views 8 处 max-w-[calc(100%-120px)] 收敛为语义类 seg-width-cap,限宽改由 globals.css 单点定义(PC calc(100%-120px) 等价/mobile 100% 满宽),mobile 子代理卡/过程块/团队卡/警告行全满宽,desktop 限宽原样
+变更：2026-10-27-mobile-chat-visual-round4
+状态：active
+摘要：主路径
+全文：.sillyspec/changes/archive/2026-10-27-mobile-chat-visual-round4/requirements.md#FR-01
+最近确认：0069bb234ffa70ccfba04426ca885095484926fc
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-27-mobile-chat-visual-round4:flow:测试绑定FR-01
+  tests: frontend/src/components/daemon/__tests__/turn-segment-views.test.tsx「过程信息块限宽统一」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-27-mobile-chat-visual-round4
+  status: active
+
+## FR-backend-038 all(进度)视图轮尾统一用 RoundDivider(与对话视图同款同构,含 meta/detail/mobile 透传),TurnStatusBadge 形态与函数退役,自动续跑徽标保留在统一行内
+变更：2026-10-27-mobile-chat-visual-round4
+状态：active
+摘要：主路径
+全文：.sillyspec/changes/archive/2026-10-27-mobile-chat-visual-round4/requirements.md#FR-02
+最近确认：0069bb234ffa70ccfba04426ca885095484926fc
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-27-mobile-chat-visual-round4:flow:测试绑定FR-02
+  tests: frontend/src/components/daemon/__tests__/turn-timeline-auto-resume-badge.test.tsx | frontend/src/components/daemon/__tests__/turn-timeline-token-speed.test.tsx
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-27-mobile-chat-visual-round4
+  status: active
+
+## FR-backend-039 相关测试面全绿(token-speed all 视图用例按统一后契约更新)
+变更：2026-10-27-mobile-chat-visual-round4
+状态：active
+摘要：主路径
+全文：.sillyspec/changes/archive/2026-10-27-mobile-chat-visual-round4/requirements.md#FR-03
+最近确认：0069bb234ffa70ccfba04426ca885095484926fc
