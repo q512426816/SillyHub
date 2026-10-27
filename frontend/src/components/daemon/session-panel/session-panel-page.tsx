@@ -5064,7 +5064,7 @@ export function SessionPanelPage({
         {/* 空时间线（同构容器类名 + 原型 .empty-hint 文案）。 */}
         <div
           data-testid="turn-timeline-scroll"
-          className="min-h-0 flex-1 overflow-y-auto bg-background px-5 py-5"
+          className="min-h-0 flex-1 overflow-y-auto bg-background px-5 pt-5"
         >
           <div className="flex h-full min-h-[260px] flex-col items-center justify-center text-center">
             <p className="text-sm font-medium text-foreground">
@@ -5078,7 +5078,7 @@ export function SessionPanelPage({
 
         {/* 输入区（同构）：输入框 + 配置条（ql-20260909-006：ctx 用量行收进
             配置条行尾插槽，输入区顶部间距由容器 pt-3 保持）。 */}
-        <div className="flex shrink-0 flex-col bg-card pt-3">
+        <div className="flex shrink-0 flex-col bg-card">
           {/* task-13（FR-05/D-009@v2）：预会话团队触发行解禁——门控与真会话
               同构（claude 引擎 + 所选机器在线）；弹层确认后 payload 暂存
               （handlePreTeamTrigger，含主 agent 选择器的 orchestrator_workspace_id），
@@ -5158,7 +5158,7 @@ export function SessionPanelPage({
           />
           {/* ql-20260823-008：配置控件条同构挂载（provisional 暂存模式）——
               供应商/档案可选暂存随首句生效（task-09 起配置条仅此两块）。 */}
-          <div className="px-5 pb-3">
+          <div className="px-5">
             {/* 2026-10-19-shared-agent-onboarding-hint：无自有/共享机器用户的
                 共享智能体引导条——仅当选中值确为共享智能体时渲染（用户手动改选
                 其它档案即自然消失，不依赖 touchedRef）。 */}
@@ -6200,7 +6200,7 @@ export function SessionPanelPage({
       {/* 输入区：输入框 + 配置控件条（原型 .input-zone）。ql-20260909-006：
           ctx 用量行（圆环+额度胶囊）自输入框上方独占行收进配置条行尾插槽
           （trailing），不再独占一行；输入区顶部间距由容器 pt-3 保持。 */}
-      <div className="flex shrink-0 flex-col bg-card pt-3">
+      <div className="flex shrink-0 flex-col bg-card">
         {/* task-03（design §3.2）：排队消息条——输入框上方水平 chips（空队列组件
             自返回 null 不占位）。onRemove 顺带清理附件元数据镜像（D-004），防
             删除条目后残留；onRetry 仅用户触发（D-003，hook 内 failed→pending 后
@@ -6387,7 +6387,7 @@ export function SessionPanelPage({
           }}
         />
         )}
-        <div ref={configBarWrapRef} className="px-5 pb-3">
+        <div ref={configBarWrapRef} className="px-5">
           <SessionConfigBar
             sessionId={sessionId}
             running={running}

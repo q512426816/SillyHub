@@ -836,7 +836,7 @@ export function SessionInputBar({
   };
 
   return (
-    <footer className="shrink-0 bg-card px-5 pb-4 pt-1">
+    <footer className="shrink-0 bg-card px-5">
       {/* 附件区：chips + 降级提示条（task-12）。 */}
       {(attachments.length > 0 || uploading > 0 || uploadError) && (
         <div className="mb-2 space-y-1.5">
@@ -914,7 +914,7 @@ export function SessionInputBar({
           ql-20260909-009：常态 shadow-sm 微浮、聚焦升 shadow-md。
           2026-09-09-sessions-visual-refresh task-11（D-009@v1）：聚焦环柔化——
           ring-4 ring-brand-100（dark 下霓虹圈游戏感）改 3px 品牌色 10% 柔环。 */}
-      <div className="relative flex items-end gap-2 rounded-2xl border border-border bg-muted/40 px-2.5 py-2 shadow-sm transition-all focus-within:border-brand-400/45 focus-within:bg-card focus-within:shadow-md focus-within:ring-[3px] focus-within:ring-brand-500/10">
+      <div className="relative flex items-end gap-2 rounded-2xl border border-border bg-muted/40 px-2.5 pt-2 shadow-sm transition-all focus-within:border-brand-400/45 focus-within:bg-card focus-within:shadow-md focus-within:ring-[3px] focus-within:ring-brand-500/10">
         {/* task-03：联想数据桥（首次聚焦挂载，见 MentionSourcesBridge 注释；
             task-06：ppmScope 状态口径透传——切开关换键重拉 PPM 两分组）。 */}
         {mentionSourcesMounted && (
@@ -1150,7 +1150,7 @@ export function SessionInputBar({
             value={value}
             tokens={allRefTokens}
             onRemoveToken={removeAttRefOnce}
-            overlayClassName="min-h-11 px-1 py-2 text-sm leading-5"
+            overlayClassName="min-h-11 px-1 pt-2 text-sm leading-5"
             overlayStyle={inputHeight != null ? { height: inputHeight } : undefined}
             visibleBadgeIndex={hoveredRefOcc}
             containerRef={attOverlayRef}
@@ -1162,7 +1162,7 @@ export function SessionInputBar({
           <textarea
             ref={textareaRef}
             value={value}
-            className="relative z-10 min-h-11 w-full resize-none bg-transparent px-1 py-2 text-sm leading-5 outline-none placeholder:text-muted-foreground disabled:cursor-not-allowed disabled:opacity-60"
+            className="relative z-10 min-h-11 w-full resize-none bg-transparent px-1 pt-2 text-sm leading-5 outline-none placeholder:text-muted-foreground disabled:cursor-not-allowed disabled:opacity-60"
             rows={2}
             disabled={disabled}
             style={inputHeight != null ? { height: inputHeight } : undefined}
