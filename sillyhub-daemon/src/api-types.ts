@@ -2047,6 +2047,34 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/workspaces/{workspace_id}/changes/{change_id}/hits-sync": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Sync Change Hits
+         * @description 知识遥测补数：触发绑定 daemon 强制上行一轮本地命中遥测（2026-10-27-knowledge-hits-flush-button）。
+         *
+         *     变更详情页沉淀资产卡「同步变更」按钮的后端入口——daemon 侧 ``sillyspec_hits_flush``
+         *     RPC 读 state/ 新路径遥测文件增量上行（「知识触达」分组数据源 knowledge_hits
+         *     因此补齐）。变更实体先取（404 语义与其余变更端点一致）；触发链路照
+         *     ``_sync_change_via_daemon`` 降级铁律：未绑定 / 离线 / 超时 / 远端错误（含老
+         *     daemon method not found）任何失败路均 HTTP 200 携带回执不抛——补数是展示面
+         *     增强动作，失败事实如实带回由前端提示。补数为全工作区全量增量（不按变更名
+         *     过滤行）：行级 sha256 幂等使多余行零成本，效果覆盖触发按钮的变更。
+         */
+        post: operations["sync_change_hits_api_workspaces__workspace_id__changes__change_id__hits_sync_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/workspaces/{workspace_id}/changes/{change_id}/sessions": {
         parameters: {
             query?: never;
@@ -14797,6 +14825,27 @@ export interface components {
             status?: string | null;
             /** File */
             file: string;
+        };
+        /**
+         * ChangeHitsSyncResult
+         * @description POST /changes/{id}/hits-sync 知识遥测补数回执（2026-10-27-knowledge-hits-flush-button）。
+         *
+         *     「知识触达」分组数据源 knowledge_hits 断流后（CLI 2026-10-18 迁移遥测文件
+         *     而 daemon 读旧路径），变更详情页「同步变更」按钮触发绑定 daemon 强制上行
+         *     一轮本地遥测（sillyspec_hits_flush RPC）的执行回执。``triggered=False``：
+         *     RPC 未发出，``reason`` ∈ no_binding / daemon_offline；``ok`` 三态——
+         *     True=daemon 上行完成（含 in-flight 去重秒回，``reason``=in_flight）；
+         *     False=上行失败或超时（``reason`` 机读短码：rpc_timeout / rpc_remote_error /
+         *     runtime_offline / exception / upload_failed——rpc_remote_error 含老 daemon
+         *     未注册 method 的 method not found）；None=未触发。
+         */
+        ChangeHitsSyncResult: {
+            /** Triggered */
+            triggered: boolean;
+            /** Ok */
+            ok?: boolean | null;
+            /** Reason */
+            reason?: string | null;
         };
         /**
          * ChangeKnowledgeTouch
@@ -34370,6 +34419,38 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ChangeFileList"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    sync_change_hits_api_workspaces__workspace_id__changes__change_id__hits_sync_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                workspace_id: string;
+                change_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ChangeHitsSyncResult"];
                 };
             };
             /** @description Validation Error */

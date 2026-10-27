@@ -794,6 +794,25 @@ export function getChangeAssets(
   );
 }
 
+/** 知识遥测补数回执（POST /changes/{cid}/hits-sync；api-types 生成版）。 */
+export type ChangeHitsSyncResultResponse = components["schemas"]["ChangeHitsSyncResult"];
+
+/**
+ * 知识遥测补数（2026-10-27-knowledge-hits-flush-button / FR-04）：触发绑定
+ * daemon 强制上行一轮本机注入命中遥测（sillyspec_hits_flush RPC）——「知识
+ * 触达」分组数据源 knowledge_hits 由此补齐。所有失败路均降级为结构化回执
+ * （triggered/ok/reason，HTTP 恒 200）：失败不抛 ApiError，前端按回执提示。
+ */
+export function syncChangeHits(
+  workspaceId: string,
+  changeId: string,
+): Promise<ChangeHitsSyncResultResponse> {
+  return apiFetch<ChangeHitsSyncResultResponse>(
+    `/api/workspaces/${workspaceId}/changes/${changeId}/hits-sync`,
+    { method: "POST" },
+  );
+}
+
 // ── 合成时间线（2026-09-26-change-real-timeline，复刻 CLI watcher timeline）──
 
 /** 合成时间线聚合响应（GET /changes/{cid}/timeline；api-types 生成版）。 */

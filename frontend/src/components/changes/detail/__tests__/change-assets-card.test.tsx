@@ -14,16 +14,33 @@
 import { render, screen, fireEvent, waitFor, within } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+import { message } from "antd";
 
 import { ChangeAssetsCard } from "@/components/changes/detail/change-assets-card";
-import { getChangeAssets, getChangePatchFile } from "@/lib/changes";
+import { getChangeAssets, getChangePatchFile, syncChangeHits } from "@/lib/changes";
 import { fetchSearch } from "@/lib/explorer";
 import { getKnowledge } from "@/lib/knowledge";
 
 vi.mock("@/lib/changes", () => ({
   getChangeAssets: vi.fn(),
   getChangePatchFile: vi.fn(),
+  syncChangeHits: vi.fn(),
 }));
+
+// antd message 部分替换（2026-10-27-knowledge-hits-flush-button / FR-04）：同步按钮
+// 的回执提示断言面；其余 antd 导出透传真实实现（EntryCardList 等子组件在用）。
+vi.mock("antd", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("antd")>();
+  return {
+    ...actual,
+    message: {
+      success: vi.fn(),
+      error: vi.fn(),
+      warning: vi.fn(),
+      info: vi.fn(),
+    },
+  };
+});
 
 // 路径解析兜底（2026-09-26-assets-testfile-path-resolve）：TestFileBody 打开时
 // 按文件名调 explorer search。默认给与 FULL fixture 等值命中（backend/app/x.py），
@@ -983,5 +1000,92 @@ describe("跨仓冻结面", () => {
     await screen.findByTestId("change-assets-audit");
     expect(screen.queryByTestId("change-assets-cross-repos")).toBeNull();
     expect(screen.queryByText(/主仓 patch/)).toBeNull();
+  });
+});
+
+// ── 同步变更按钮（2026-10-27-knowledge-hits-flush-button / FR-04）──────────────
+// 点击 → syncChangeHits → 回执三态提示（成功含 in_flight 去重秒回 / 未触发
+// warning / 失败 error）+ 成功后 invalidate 主查询（getChangeAssets 被再次调用）；
+// 请求期间按钮禁用防连点。
+
+describe("ChangeAssetsCard：同步变更按钮", () => {
+  const mockSync = vi.mocked(syncChangeHits);
+  const mockMessage = vi.mocked(message);
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it("成功回执 → success 提示 + invalidate 刷新资产查询（getChangeAssets 再次被调）", async () => {
+    mockGet.mockResolvedValue(FULL);
+    mockSync.mockResolvedValue({ triggered: true, ok: true, reason: null });
+    renderCard();
+    await screen.findByTestId("change-assets-audit");
+    expect(mockGet).toHaveBeenCalledTimes(1);
+
+    fireEvent.click(screen.getByTestId("change-assets-hits-sync"));
+    await waitFor(() => expect(mockMessage.success).toHaveBeenCalled());
+    expect(mockSync).toHaveBeenCalledWith("ws-1", "c-1");
+    // invalidate 生效：active changeAssets query 被 refetch。
+    await waitFor(() => expect(mockGet).toHaveBeenCalledTimes(2));
+    expect(mockMessage.error).not.toHaveBeenCalled();
+  });
+
+  it("in_flight 去重秒回 → 仍 success（完成语义）且文案区分", async () => {
+    mockGet.mockResolvedValue(FULL);
+    mockSync.mockResolvedValue({ triggered: true, ok: true, reason: "in_flight" });
+    renderCard();
+    await screen.findByTestId("change-assets-audit");
+    fireEvent.click(screen.getByTestId("change-assets-hits-sync"));
+    await waitFor(() =>
+      expect(mockMessage.success).toHaveBeenCalledWith("同步已在进行中（已防重复触发）"),
+    );
+  });
+
+  it("未触发（daemon 离线）→ warning 带原因文案，不 invalidate", async () => {
+    mockGet.mockResolvedValue(FULL);
+    mockSync.mockResolvedValue({ triggered: false, ok: null, reason: "daemon_offline" });
+    renderCard();
+    await screen.findByTestId("change-assets-audit");
+    fireEvent.click(screen.getByTestId("change-assets-hits-sync"));
+    await waitFor(() =>
+      expect(mockMessage.warning).toHaveBeenCalledWith(
+        "绑定的机器不在线，开机联网后重试",
+      ),
+    );
+    expect(mockGet).toHaveBeenCalledTimes(1);
+  });
+
+  it("触发但失败（upload_failed）→ error 带原因文案", async () => {
+    mockGet.mockResolvedValue(FULL);
+    mockSync.mockResolvedValue({ triggered: true, ok: false, reason: "upload_failed" });
+    renderCard();
+    await screen.findByTestId("change-assets-audit");
+    fireEvent.click(screen.getByTestId("change-assets-hits-sync"));
+    await waitFor(() =>
+      expect(mockMessage.error).toHaveBeenCalledWith(
+        "本机上行失败（详情见 daemon 日志），稍后重试",
+      ),
+    );
+    expect(mockGet).toHaveBeenCalledTimes(1);
+  });
+
+  it("请求进行中按钮禁用防连点", async () => {
+    mockGet.mockResolvedValue(FULL);
+    let resolveSync!: (v: { triggered: boolean; ok: boolean; reason: string | null }) => void;
+    mockSync.mockReturnValue(
+      new Promise((resolve) => {
+        resolveSync = resolve;
+      }) as ReturnType<typeof mockSync>,
+    );
+    renderCard();
+    await screen.findByTestId("change-assets-audit");
+    const btn = screen.getByTestId("change-assets-hits-sync");
+    fireEvent.click(btn);
+    expect(btn).toBeDisabled();
+    expect(screen.getByText("同步中…")).toBeInTheDocument();
+    resolveSync({ triggered: true, ok: true, reason: null });
+    await waitFor(() => expect(mockMessage.success).toHaveBeenCalled());
+    expect(btn).not.toBeDisabled();
   });
 });

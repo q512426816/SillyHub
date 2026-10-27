@@ -2,7 +2,8 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
-import { useQuery } from "@tanstack/react-query";
+import { message } from "antd";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 
 import { FilePreview } from "@/components/explorer/file-preview";
 import { DiffView, ScopeAuditRepoSeg } from "@/components/files/structured-views";
@@ -14,7 +15,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import { getChangeAssets, getChangePatchFile } from "@/lib/changes";
+import { getChangeAssets, getChangePatchFile, syncChangeHits } from "@/lib/changes";
 import { fetchSearch } from "@/lib/explorer";
 import { getKnowledge, normalizeKnowledgeFileParam } from "@/lib/knowledge";
 
@@ -152,6 +153,22 @@ export function resolveTestFilePath(
 /** 每组默认直接显示的行数上限（超出折叠，见 GroupToggle）。 */
 const GROUP_VISIBLE_LIMIT = 5;
 
+/**
+ * hits-sync 回执 reason → 用户可读文案（2026-10-27-knowledge-hits-flush-button /
+ * FR-04）。机读短码对齐 backend ChangeHitsSyncResult docstring 口径；in_flight
+ * 单列（ok=true 的去重秒回，提示而非报错语义）。
+ */
+const HITS_SYNC_REASON_TEXT: Record<string, string> = {
+  no_binding: "本工作区未绑定机器，无法读取本机遥测数据",
+  daemon_offline: "绑定的机器不在线，开机联网后重试",
+  rpc_timeout: "机器响应超时，可稍后重试",
+  rpc_remote_error: "机器上的 daemon 版本过旧（不支持遥测同步），更新 daemon 后重试",
+  runtime_offline: "机器运行时不在线，稍后重试",
+  upload_failed: "本机上行失败（详情见 daemon 日志），稍后重试",
+  bad_receipt: "机器返回了无法识别的回执",
+  exception: "同步过程出现未知错误",
+};
+
 /** 分组折叠开关：超出上限时给「展开全部 N 条」，展开后给「收起」。 */
 function GroupToggle({
   total,
@@ -231,6 +248,42 @@ export function ChangeAssetsCard({
     retry: false,
     refetchOnWindowFocus: false,
   });
+
+  // 「同步变更」按钮（2026-10-27-knowledge-hits-flush-button / FR-04）：触发绑定
+  // daemon 强制上行一轮本机注入命中遥测（sillyspec_hits_flush）——「知识触达」
+  // 数据源 knowledge_hits 断流后的手动补数入口。回执全形态结构化（HTTP 恒 200），
+  // 网络层异常才走 catch；成功后 invalidate 与主查询同 key，沉淀资产卡整体刷新。
+  const queryClient = useQueryClient();
+  const [hitsSyncing, setHitsSyncing] = useState(false);
+  const onSyncHits = async () => {
+    if (hitsSyncing) return;
+    setHitsSyncing(true);
+    try {
+      const r = await syncChangeHits(workspaceId, changeId);
+      if (r.triggered && r.ok) {
+        message.success(
+          r.reason === "in_flight"
+            ? "同步已在进行中（已防重复触发）"
+            : "同步完成：本机知识遥测已上报，沉淀资产已刷新",
+        );
+        await queryClient.invalidateQueries({
+          queryKey: ["changeAssets", workspaceId, changeId],
+        });
+      } else if (r.triggered) {
+        message.error(
+          HITS_SYNC_REASON_TEXT[r.reason ?? ""] ?? `同步失败：${r.reason ?? "未知原因"}`,
+        );
+      } else {
+        message.warning(
+          HITS_SYNC_REASON_TEXT[r.reason ?? ""] ?? `未触发同步：${r.reason ?? "未知原因"}`,
+        );
+      }
+    } catch (e) {
+      message.error(e instanceof Error ? e.message : "同步请求失败");
+    } finally {
+      setHitsSyncing(false);
+    }
+  };
 
   // 2026-10-15-change-detail-redesign / D-016@v1（Grill B-3）：主查询失败不再整卡
   // `return null`（那会让归档态的降级路径「产出 → 归档留档」无解释地断掉），改为
@@ -327,9 +380,26 @@ export function ChangeAssetsCard({
       </button>
 
       {open && (
-        /* 2026-09-28-change-ux-detail-batch：分组改网格（md 两列对齐）+ 每组
+        <>
+        {/* 同步变更操作行（2026-10-27-knowledge-hits-flush-button / FR-04）：
+            卡头整块是折叠按钮（button 不能嵌 button），操作位落展开区顶部
+            右对齐独立行——知识触达断流时的手动补数入口，常驻不随分组空态
+            隐藏（归档变更 total>0 但知识触达空的断流形态无空态文案可挂）。 */}
+        <div className="flex justify-end px-3 pt-2">
+          <button
+            type="button"
+            onClick={() => void onSyncHits()}
+            disabled={hitsSyncing}
+            data-testid="change-assets-hits-sync"
+            title="把本机执行期的知识注入命中遥测上报平台，补齐「知识触达」（需绑定的机器在线）"
+            className="shrink-0 rounded-full border border-border/60 px-2.5 py-0.5 text-[10px] text-muted-foreground hover:border-brand-300 hover:bg-brand-50/60 disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            {hitsSyncing ? "同步中…" : "同步变更"}
+          </button>
+        </div>
+        {/* 2026-09-28-change-ux-detail-batch：分组改网格（md 两列对齐）+ 每组
            固定高度 h-64（超出组内滚动）——主栏宽列下的可扫读形态，替代侧栏
-           窄列的纵向长堆叠。空态段跨满两列。 */
+           窄列的纵向长堆叠。空态段跨满两列。 */}
         <div className="grid grid-cols-1 gap-2 px-3 py-2 md:grid-cols-2">
           {/* 知识图谱已改由「产出」面板独立挂载（2026-10-15-change-detail-redesign /
               D-003@v1：图谱脱离资产卡内嵌，画布高度不再受卡内网格挤压）。 */}
@@ -757,6 +827,7 @@ export function ChangeAssetsCard({
             </div>
           ) : null}
         </div>
+        </>
       )}
 
       {/* 测试文件预览弹窗（FR-03）：explorer 取数（仓库文件），与变更文件树同款只读预览。
