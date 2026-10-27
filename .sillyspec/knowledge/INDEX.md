@@ -260,3 +260,4 @@
 - platform_sync → [fr/platform_sync.md](fr/platform_sync.md)
 - app-sessions-pages → [fr/app-sessions-pages.md](fr/app-sessions-pages.md)
 - auto-claude|claude → [fr/auto-claude.md](fr/auto-claude.md)
+- components-mobile → [fr/components-mobile.md](fr/components-mobile.md)
