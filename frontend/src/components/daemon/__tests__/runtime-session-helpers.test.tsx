@@ -702,7 +702,7 @@ describe("logsToTurns 系统通知开轮占位槽（2026-10-10-system-opened-tur
 
   it("系统通知开轮 + 中途消息：prompt 保持空，消息转 user_msg 段按 ts 插入输出之间", () => {
     const turns = logsToTurns([
-      makeLog("n1", "run-1", "user_input", "[后台任务通知] 以下 1 个后台子代理任务已全部结束", { timestamp: TS(0) }),
+      makeLog("n1", "run-1", "user_input", "[后台任务通知] 以下 1 个后台任务已全部结束（本批次均已终止）", { timestamp: TS(0) }),
       makeLog("o1", "run-1", "stdout", "输出甲", { timestamp: TS(60) }),
       makeLog("t1", "run-1", "tool_call", "Read src/a.ts", { timestamp: TS(90) }),
       makeLog("u1", "run-1", "user_input", "国际销售合同 不要动！", { timestamp: TS(120) }),
@@ -740,7 +740,7 @@ describe("logsToTurns 系统通知开轮占位槽（2026-10-10-system-opened-tur
     // 段模型——进度视图不显示「上下文注入（N 字，已随消息发送）」卡（该文案
     // 对纯系统通知本就不符）；真实前导（【影子直聊】等）仍照旧建段（上方用例）。
     const turns = logsToTurns([
-      makeLog("n1", "run-1", "user_input", "[后台任务通知] 以下 1 个后台子代理任务已全部结束", { timestamp: TS(0) }),
+      makeLog("n1", "run-1", "user_input", "[后台任务通知] 以下 1 个后台任务已全部结束（本批次均已终止）", { timestamp: TS(0) }),
       makeLog("o1", "run-1", "stdout", "正文", { timestamp: TS(30) }),
     ]);
     const turn = turns[0]!;
@@ -775,7 +775,7 @@ describe("logsToTurns 轮触发溯源段（2026-10-22-turn-trigger-generalize）
         "n1",
         "run-1",
         "user_input",
-        "[后台任务通知] 以下 1 个后台子代理任务已全部结束（列表中的每一个都已终止，没有仍在运行的任务）：\n- 任务「调研 sgm」已完成（用时 06:26）。结果摘要：调研完成（task_id: t1，如需完整输出可调用 TaskOutput 查询，block=false）",
+        "[后台任务通知] 以下 1 个后台任务已全部结束（本批次均已终止）：\n- 任务「调研 sgm」已完成（用时 06:26）。结果摘要：调研完成（task_id: t1，如需完整输出可调用 TaskOutput 查询，block=false）",
         { timestamp: TS(0) },
       ),
       makeLog("o1", "run-1", "stdout", "汇报正文", { timestamp: TS(30) }),

@@ -8410,3 +8410,93 @@
   confirmed_at: null
   source_change: 2026-10-26-ws-evict-close
   status: active
+
+## FR-daemon-307 agent 正文手机端真满宽：.seg-text-body 限宽 mobile 100%(globals.css 压 calc(100%-120px))，轮过程区缩进 mobile 36+14px→12+8px，desktop 阅读限宽原样保留
+变更：2026-10-27-mobile-chat-visual-round2
+状态：active
+摘要：主路径
+全文：.sillyspec/changes/archive/2026-10-27-mobile-chat-visual-round2/requirements.md#FR-01
+最近确认：a758f2707ab5d0ddade35f7fdd7bb1de93dbb25d
+
+## FR-daemon-308 轮次分隔 mobile 轻量化：去胶囊框(边框/底色/阴影/毛玻璃)改纯文字+两侧细线，desktop 形态不变
+变更：2026-10-27-mobile-chat-visual-round2
+状态：active
+摘要：主路径
+全文：.sillyspec/changes/archive/2026-10-27-mobile-chat-visual-round2/requirements.md#FR-02
+最近确认：a758f2707ab5d0ddade35f7fdd7bb1de93dbb25d
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-27-mobile-chat-visual-round2:flow:测试绑定FR-02
+  tests: frontend/src/components/chat/__tests__/round-divider.test.tsx「mobile=true：胶囊允许收缩折行（去 shrink-0/nowrap）」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-27-mobile-chat-visual-round2
+  status: active
+
+## FR-daemon-309 输入区 mobile 收纳：行尾用量徽章(CtxUsageBar 插槽)mobile 不渲染(功能仍在头部 ⋯ 菜单 ql-20260915-011)，desktop 照旧
+变更：2026-10-27-mobile-chat-visual-round2
+状态：active
+摘要：主路径
+全文：.sillyspec/changes/archive/2026-10-27-mobile-chat-visual-round2/requirements.md#FR-03
+最近确认：a758f2707ab5d0ddade35f7fdd7bb1de93dbb25d
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-27-mobile-chat-visual-round2:flow:测试绑定FR-03
+  tests: frontend/src/components/sessions/__tests__/session-config-bar.test.tsx
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-27-mobile-chat-visual-round2
+  status: active
+
+## FR-daemon-310 悬浮元素玻璃化：TabBar 胶囊/FAB/移动顶栏 bg-card/75+backdrop-blur-md，PC 端同步=会话悬浮窗体(session-panel-page 输入区外框除外——非悬浮层无穿行内容)玻璃化——用户原话授权 PC 同步
+变更：2026-10-27-mobile-chat-visual-round2
+状态：active
+摘要：主路径
+全文：.sillyspec/changes/archive/2026-10-27-mobile-chat-visual-round2/requirements.md#FR-04
+最近确认：a758f2707ab5d0ddade35f7fdd7bb1de93dbb25d
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-27-mobile-chat-visual-round2:flow:测试绑定FR-04
+  tests: frontend/src/components/mobile/mobile-tab-bar.test.tsx「悬浮胶囊形态（quick-a4939946 + visual-round2 玻璃效果）：胶囊容器圆角+玻璃半透明+离底占位」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-27-mobile-chat-visual-round2
+  status: active
+
+## FR-daemon-311 顶部执行信息与本地 Agent 日志 mobile 收进 ⋯ 菜单（用户原话「参考 pc 端，放进按钮里点击再显示」）：两面板默认不渲染，菜单开关控制，开即挂载
+变更：2026-10-27-mobile-chat-visual-round2
+状态：active
+摘要：主路径
+全文：.sillyspec/changes/archive/2026-10-27-mobile-chat-visual-round2/requirements.md#FR-05
+最近确认：a758f2707ab5d0ddade35f7fdd7bb1de93dbb25d
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-27-mobile-chat-visual-round2:flow:测试绑定FR-05
+  tests: frontend/src/components/daemon/__tests__/session-panel-variant.test.tsx
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-27-mobile-chat-visual-round2
+  status: active
+
+## FR-daemon-312 相关测试面全绿(tab-bar 玻璃契约用例更新/round-divider/session-config-bar/session-panel-variant/page.m-session-chat 零回归)
+变更：2026-10-27-mobile-chat-visual-round2
+状态：active
+摘要：主路径
+全文：.sillyspec/changes/archive/2026-10-27-mobile-chat-visual-round2/requirements.md#FR-06
+最近确认：a758f2707ab5d0ddade35f7fdd7bb1de93dbb25d

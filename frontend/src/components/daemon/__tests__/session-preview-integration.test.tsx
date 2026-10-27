@@ -194,7 +194,7 @@ describe("消息流预览卡集成（FR-01 / FR-03 / FR-04）", () => {
       session_id: "s1",
       total_turns: 2,
       items: [
-        { run_id: "run-x", seq: 1, created_at: "2026-08-26T10:00:00.0Z", started_at: "2026-08-26T10:00:00.0Z", status: "failed", error_code: "provider_quota_exceeded", prompt_summary: "[后台任务通知] 以下 2 个后台子代理任务已全部结束" },
+        { run_id: "run-x", seq: 1, created_at: "2026-08-26T10:00:00.0Z", started_at: "2026-08-26T10:00:00.0Z", status: "failed", error_code: "provider_quota_exceeded", prompt_summary: "[后台任务通知] 以下 2 个后台任务已全部结束（本批次均已终止）" },
         { run_id: "run-c", seq: 2, created_at: "2026-08-26T10:10:00.0Z", started_at: "2026-08-26T10:10:00.0Z", status: "completed", prompt_summary: "第三轮提问摘要" },
       ],
     });
@@ -209,7 +209,7 @@ describe("消息流预览卡集成（FR-01 / FR-03 / FR-04）", () => {
           // logsToTurns 产出 prompt/segments/output 三空（旧口径被判零正文 →
           // 点击无反应；新口径 outline failed 放行 → 空块 + 失败卡）。
           return [
-            { id: "log-run-x-u", run_id: "run-x", timestamp: "2026-08-26T10:00:30.0Z", channel: "user_input", content_redacted: "[后台任务通知] 以下 2 个后台子代理任务已全部结束（列表中的每一个都已终止）" },
+            { id: "log-run-x-u", run_id: "run-x", timestamp: "2026-08-26T10:00:30.0Z", channel: "user_input", content_redacted: "[后台任务通知] 以下 2 个后台任务已全部结束（本批次均已终止）" },
             { id: "log-run-x-e", run_id: "run-x", timestamp: "2026-08-26T10:01:00.0Z", channel: "stderr", content_redacted: "[ASSISTANT] API Error: Request rejected (429) · 已达到 5 小时的使用上限" },
           ];
         }

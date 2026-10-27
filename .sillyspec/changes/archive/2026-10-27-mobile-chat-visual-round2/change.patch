@@ -1,0 +1,1472 @@
+diff --git a/backend/app/modules/daemon/session/service/helpers.py b/backend/app/modules/daemon/session/service/helpers.py
+index b870c3c36..d0c32ab1c 100644
+--- a/backend/app/modules/daemon/session/service/helpers.py
++++ b/backend/app/modules/daemon/session/service/helpers.py
+@@ -77,7 +77,10 @@ TASK_WAKEUP_QUEUE_ORIGIN = "task_wakeup"
+ # 与 task_wakeup 同族服务身份标记（scheduled_send 服务身份写入，浏览器
+ # Bearer 用户无 HTTP 入口可写），前端时间线「⏰ 定时消息到点」触发行溯源锚。
+ SCHEDULE_QUEUE_ORIGIN = "schedule"
+-_TASK_WAKEUP_HEADER_COUNT_RE = re.compile(r"以下 \d+ 个后台子代理任务已全部结束")
++# 2026-10-27-task-wakeup-precision-fix FR-05：daemon prompt 头部「后台子代理任务」
++# 改「后台任务」——合并正则取兼容形（新文案优先命中，旧文案存量排队行在
++# 新旧混排窗口内同样命中，计数改写不退化为全文拼接）。
++_TASK_WAKEUP_HEADER_COUNT_RE = re.compile(r"以下 \d+ 个后台(?:子代理)?任务已全部结束")
+ _TASK_WAKEUP_TRAILER_COUNT_RE = re.compile(r"（共 \d+ 个）")
+ 
+ 
+@@ -132,7 +135,10 @@ def _merge_task_wakeup_prompt(old: str, new: str) -> str:
+         if not line.startswith("- ")
+     ]
+     header = _TASK_WAKEUP_HEADER_COUNT_RE.sub(
+-        f"以下 {len(old_bullets) + len(new_bullets)} 个后台子代理任务已全部结束",
++        # 2026-10-27-task-wakeup-precision-fix FR-05：重写模板同步新文案（与 daemon
++        # scheduleTaskWakeup 头部同值——跨语言常量同步义务，见前端
++        # TASK_WAKEUP_PROMPT_PREFIX 注释同款约束）。
++        f"以下 {len(old_bullets) + len(new_bullets)} 个后台任务已全部结束",
+         old_lines[0],
+     )
+     return "\n".join([header, *old_bullets, *new_bullets, *trailer_lines])
+diff --git a/backend/app/modules/daemon/tests/test_session_queue.py b/backend/app/modules/daemon/tests/test_session_queue.py
+index 803301528..04d328753 100644
+--- a/backend/app/modules/daemon/tests/test_session_queue.py
++++ b/backend/app/modules/daemon/tests/test_session_queue.py
+@@ -531,7 +531,26 @@ class TestQueueManagement:
+ 
+ 
+ def _wakeup_prompt(task_name: str, task_id: str) -> str:
+-    """构造 daemon _scheduleTaskWakeup 同款通知 prompt（单生产者模板对齐）。"""
++    """构造 daemon _scheduleTaskWakeup 同款通知 prompt（单生产者模板对齐）。
++
++    2026-10-27-task-wakeup-precision-fix FR-05：头部同步新文案（「后台任务」+
++    「本批次均已终止」）；旧文案模板见 test_merge_old_daemon_header_compat
++    （新旧 daemon 混排窗口的兼容面回归）。
++    """
++    return (
++        "[后台任务通知] 以下 1 个后台任务已全部结束"
++        "（本批次均已终止）：\n"
++        f"- 任务「{task_name}」已完成（用时 00:01）（task_id: {task_id}，"
++        "如需完整输出可调用 TaskOutput 查询，block=false）\n"
++        "请逐条核对上述每个任务（共 1 个）的名称与结果，一次性向用户完整汇报"
++        "（综合归纳，不要逐字照抄，不要遗漏任何一个任务）；"
++        "禁止声称仍在等待任何任务；汇报完即结束本轮；不要重复执行这些任务；"
++        "此消息为系统通知，无需向用户复述本通知本身。"
++    )
++
++
++def _old_wakeup_prompt(task_name: str, task_id: str) -> str:
++    """2026-10-27 前旧 daemon 文案（「后台子代理任务」）——存量排队行兼容面。"""
+     return (
+         "[后台任务通知] 以下 1 个后台子代理任务已全部结束"
+         "（列表中的每一个都已终止，没有仍在运行的任务）：\n"
+@@ -625,15 +644,51 @@ class TestTaskWakeupMerge:
+         assert "任务「伪造」" not in merged
+ 
+         merged = rows[0].prompt or ""
+-        # 两个任务行都在，头/尾计数改写为 2。
++        # 两个任务行都在，头/尾计数改写为 2（2026-10-27 起新文案）。
+         assert "任务「查依赖」" in merged
+         assert "任务「生成类文件」" in merged
+-        assert "以下 2 个后台子代理任务已全部结束" in merged
++        assert "以下 2 个后台任务已全部结束" in merged
+         assert "（共 2 个）" in merged
+         assert "以下 1 个" not in merged
+         # 汇报指令尾行保留（只出现一次）。
+         assert merged.count("请逐条核对上述每个任务") == 1
+ 
++    @pytest.mark.asyncio
++    async def test_merge_old_daemon_header_compat(
++        self, db_session, mocked_hub, mocked_redis
++    ) -> None:
++        """2026-10-27-task-wakeup-precision-fix FR-05：旧 daemon 文案（后台子
++        代理任务）存量排队行 + 新文案通知合并——兼容正则命中并改写计数为
++        新文案，不退化为全文拼接（新旧 daemon 混排部署窗口）。"""
++        svc, uid, session_id, _run = await _setup_busy_session(db_session)
++
++        await svc.inject_session(
++            session_id,
++            uid,
++            prompt=_old_wakeup_prompt("旧任务", "t-old"),
++            queue_when_busy=True,
++            task_wakeup=True,
++        )
++        await svc.inject_session(
++            session_id,
++            uid,
++            prompt=_wakeup_prompt("新任务", "t-new"),
++            queue_when_busy=True,
++            task_wakeup=True,
++        )
++
++        rows = await _queue_rows(db_session, session_id)
++        assert len(rows) == 1
++        merged = rows[0].prompt or ""
++        # 头部计数改写为新文案、总数=2；两条任务行齐备（兼容正则生效，
++        # 未退化为「旧全文 + 新任务行整段拼接」）。
++        assert "以下 2 个后台任务已全部结束" in merged
++        assert "后台子代理任务" not in merged
++        assert "任务「旧任务」" in merged
++        assert "任务「新任务」" in merged
++        assert "（共 2 个）" in merged
++        assert merged.count("请逐条核对上述每个任务") == 1
++
+     @pytest.mark.asyncio
+     async def test_normal_messages_not_merged(self, db_session, mocked_hub, mocked_redis) -> None:
+         svc, uid, session_id, _run = await _setup_busy_session(db_session)
+diff --git a/frontend/src/app/globals.css b/frontend/src/app/globals.css
+index 250b003e7..d8e8d5099 100644
+--- a/frontend/src/app/globals.css
++++ b/frontend/src/app/globals.css
+@@ -918,6 +918,20 @@
+   padding-left: 8px;
+   padding-right: 8px;
+ }
++/* agent 正文真满宽(2026-10-27-mobile-chat-visual-round2 / 用户实测二轮反馈)：
++   段模型正文组件类 max-w-[calc(100%-120px)] 是 PC 阅读限宽(2026-10-25-unify
++   「整行-120px」防 PC 一行过长)——430pt 视口被吃近 30%,上一轮只放宽 .turn-bubble
++   没盖到它。mobile 限宽 100%(特异度 (0,2,0) 压组件单类 (0,1,0),v2/旧路径两处
++   挂点一次覆盖);desktop 阅读限宽原样保留。 */
++[data-variant="mobile"] .seg-text-body {
++  max-width: 100%;
++}
++/* 轮过程区缩进收敛(ml-9 36px+pl-3.5 14px→12+8px)——缩进是 PC 头像层级感,
++   手机上白吃 50px 宽;保留 border-l 竖线层级指示。 */
++[data-variant="mobile"] [data-testid="turn-progress-column"] {
++  margin-left: 12px;
++  padding-left: 8px;
++}
+ 
+ 
+ /* ---- 扩展色族批有意豁免清单(非 dark 残留,留档备查) ----
+diff --git a/frontend/src/app/m/workspaces/[id]/sessions/page.tsx b/frontend/src/app/m/workspaces/[id]/sessions/page.tsx
+index b84043918..13a155d09 100644
+--- a/frontend/src/app/m/workspaces/[id]/sessions/page.tsx
++++ b/frontend/src/app/m/workspaces/[id]/sessions/page.tsx
+@@ -292,7 +292,8 @@ export default function MobileWorkspaceSessionsPage() {
+         onClick={() => setPickerOpen(true)}
+         aria-label="新建会话"
+         data-testid="m-sessions-fab"
+-        className="fixed bottom-24 right-4 z-30 inline-flex h-[52px] w-[52px] items-center justify-center rounded-full bg-primary text-primary-foreground shadow-[var(--shadow-lg)] transition-transform active:scale-95"
++        // 玻璃效果（visual-round2 / 用户指定）：主色 85% 透明+中模糊,悬浮件轻量化
++        className="fixed bottom-24 right-4 z-30 inline-flex h-[52px] w-[52px] items-center justify-center rounded-full bg-primary/85 text-primary-foreground shadow-[var(--shadow-lg)] backdrop-blur-md transition-transform active:scale-95"
+       >
+         <Plus className="h-6 w-6" aria-hidden />
+       </button>
+diff --git a/frontend/src/components/chat/round-divider.tsx b/frontend/src/components/chat/round-divider.tsx
+index 11773d190..3bdc4e5ba 100644
+--- a/frontend/src/components/chat/round-divider.tsx
++++ b/frontend/src/components/chat/round-divider.tsx
+@@ -119,9 +119,12 @@ export const RoundDivider = memo(function RoundDivider({
+       <span
+         className={cn(
+           "inline-flex items-center gap-1.5 rounded-full border border-border/60 bg-card/80 px-3 py-0.5 text-[10.5px] text-muted-foreground shadow-sm backdrop-blur-sm",
+-          // mobile（FR-02）：允许收缩与折行（长 meta 在 430pt 视口内换行不溢出）；
+-          // desktop 缺省保持 shrink-0 + nowrap 单行（零变化）。
+-          mobile ? "min-w-0 shrink whitespace-normal" : "shrink-0 whitespace-nowrap",
++          // mobile（FR-02 + visual-round2）：去胶囊框纯文字（边框/底色/阴影/内距
++          // 全去——手机上轮次分隔要轻不抢正文视觉）；允许收缩折行（长 meta 在
++          // 430pt 视口内换行不溢出）。desktop 缺省保持胶囊+shrink-0 单行（零变化）。
++          mobile
++            ? "min-w-0 shrink whitespace-normal border-none bg-transparent px-0 py-0 shadow-none backdrop-blur-none"
++            : "shrink-0 whitespace-nowrap",
+         )}
+       >
+         <span className="tracking-wide">{label}</span>
+diff --git a/frontend/src/components/daemon/__tests__/session-panel-dialog-scheduled-attachments.test.tsx b/frontend/src/components/daemon/__tests__/session-panel-dialog-scheduled-attachments.test.tsx
+new file mode 100644
+index 000000000..e19ff62bc
+--- /dev/null
++++ b/frontend/src/components/daemon/__tests__/session-panel-dialog-scheduled-attachments.test.tsx
+@@ -0,0 +1,405 @@
++// 2026-10-27-scheduled-send-attachments：dialog 模式定时消息携带附件测试。
++//
++// 背景：用户报障定时消息发送后 agent 收不到附件。排查确认后端全链路已支持
++// （ScheduledMessageCreateRequest.attachment_ids → 落库快照 → 到点 sweeper 派发
++// 重放走 inject 附件管线），缺口在前端——confirmSchedCreate 只组装
++// prompt+dispatch_at，附件被静默丢弃；且创建成功只清文本不清附件 chips（残留
++// 误导重复发送）。
++//
++// 本文件覆盖 dialog 模式修复后的行为（page 模式 confirmSchedCreate 与 dialog
++// 逐字对齐，展示面由 dialog 侧代表）：
++//   - FR-03：定时弹窗展示附件预览行（图标+文件名），无附件不渲染；
++//   - FR-01：创建请求携带 attachment_ids；无附件请求形态与现状一致（零回归）；
++//   - FR-02：创建成功清附件 chips + 元数据镜像；失败保留现场；
++//   - FR-04：带附件空文本可创建（D-7 看图说话），空文本且无附件仍禁用确认。
++//
++// mock 结构沿用 session-panel-dialog-attachments.test.tsx（lib/daemon + 弹层数据
++// 源 + 假 SSE 连接工厂 + 附件上传模块级 mock），另补 createScheduledMessage /
++// listScheduledMessages 两个定时域函数。
++
++import { describe, it, expect, beforeEach, vi } from "vitest";
++import {
++  render,
++  screen,
++  fireEvent,
++  waitFor,
++  act,
++} from "@testing-library/react";
++
++import { SessionPanel } from "../session-panel";
++import type { SessionStreamConnection } from "@/lib/daemon";
++import {
++  uploadSessionAttachment,
++  type AttachmentRead,
++} from "@/lib/api/session-attachments";
++
++vi.mock("@/components/ui/markdown-text", () => ({
++  MarkdownText: ({ content }: { content: string }) => (
++    <div data-testid="markdown-text">{content}</div>
++  ),
++}));
++
++// 附件上传模块级 mock（上传不打真 fetch）。
++vi.mock("@/lib/api/session-attachments", () => ({
++  uploadSessionAttachment: vi.fn(),
++  removeSessionAttachment: vi.fn(),
++  fetchAttachmentObjectUrl: vi.fn(),
++  fetchAttachmentBlob: vi.fn(async () => new Blob(["x"])),
++}));
++
++// useNotify spy（测试环境无 <AntApp> 包裹，不起 message DOM——照
++// scheduled-messages-bar.test.tsx 先例；errMessage 保真用真实现）。
++vi.mock("@/lib/errors", async (importOriginal) => {
++  const actual = await importOriginal<typeof import("@/lib/errors")>();
++  return {
++    errMessage: actual.errMessage,
++    useNotify: () => ({ success: vi.fn(), warning: vi.fn(), error: vi.fn() }),
++  };
++});
++
++/* ----- mock lib/daemon（同 dialog 附件测试） ----- */
++
++const sessionApi = vi.hoisted(() => ({
++  getSessionUsage: vi.fn().mockResolvedValue(null),
++  listSessionTasks: vi.fn().mockResolvedValue([]),
++  listScheduledMessages: vi.fn().mockResolvedValue([]),
++  createScheduledMessage: vi.fn(),
++  createSession: vi.fn(),
++  injectSession: vi.fn(),
++  interruptSession: vi.fn(),
++  endSession: vi.fn(),
++  streamSession: vi.fn(),
++  getAgentSession: vi.fn().mockResolvedValue(null),
++  listSessionRuns: vi.fn().mockResolvedValue([]),
++  getAgentSessionLogs: vi.fn(),
++  fetchSessionTurnOutline: vi.fn(),
++  fetchPendingDialogs: vi.fn(),
++  fetchSessionDialogHistory: vi.fn(),
++  listSessionTeamMissions: vi.fn(),
++  triggerSessionTeamMission: vi.fn(),
++  fetchSessionQueue: vi.fn(),
++  deleteSessionQueueEntry: vi.fn(),
++  retrySessionQueueEntry: vi.fn(),
++  reorderSessionQueue: vi.fn(),
++  updateSessionQueueEntry: vi.fn(),
++  dispatchNowSessionQueueEntry: vi.fn(),
++}));
++
++const popoverApi = vi.hoisted(() => ({
++  listProjects: vi.fn(),
++  listProjectWorkspaces: vi.fn(),
++}));
++
++vi.mock("@/lib/daemon", async () => {
++  const actual = await vi.importActual<typeof import("@/lib/daemon")>("@/lib/daemon");
++  return {
++    ...actual,
++    getSessionUsage: sessionApi.getSessionUsage,
++    listSessionTasks: sessionApi.listSessionTasks,
++    // 定时消息域（ScheduledMessagesBar 挂载即取数 + 本文件被测的创建入口）。
++    listScheduledMessages: sessionApi.listScheduledMessages,
++    createScheduledMessage: sessionApi.createScheduledMessage,
++    createSession: sessionApi.createSession,
++    injectSession: sessionApi.injectSession,
++    interruptSession: sessionApi.interruptSession,
++    endSession: sessionApi.endSession,
++    streamSession: sessionApi.streamSession,
++    getAgentSession: sessionApi.getAgentSession,
++    listSessionRuns: sessionApi.listSessionRuns,
++    getAgentSessionLogs: sessionApi.getAgentSessionLogs,
++    fetchSessionTurnOutline: sessionApi.fetchSessionTurnOutline,
++    fetchPendingDialogs: sessionApi.fetchPendingDialogs,
++    fetchSessionDialogHistory: sessionApi.fetchSessionDialogHistory,
++    listSessionTeamMissions: sessionApi.listSessionTeamMissions,
++    triggerSessionTeamMission: sessionApi.triggerSessionTeamMission,
++    fetchSessionQueue: sessionApi.fetchSessionQueue,
++    deleteSessionQueueEntry: sessionApi.deleteSessionQueueEntry,
++    retrySessionQueueEntry: sessionApi.retrySessionQueueEntry,
++    reorderSessionQueue: sessionApi.reorderSessionQueue,
++    updateSessionQueueEntry: sessionApi.updateSessionQueueEntry,
++    dispatchNowSessionQueueEntry: sessionApi.dispatchNowSessionQueueEntry,
++  };
++});
++
++vi.mock("@/lib/ppm/project", async () => {
++  const actual = await vi.importActual<typeof import("@/lib/ppm/project")>(
++    "@/lib/ppm/project",
++  );
++  return { ...actual, listProjects: popoverApi.listProjects };
++});
++
++vi.mock("@/lib/workspace", async () => {
++  const actual = await vi.importActual<typeof import("@/lib/workspace")>(
++    "@/lib/workspace",
++  );
++  return { ...actual, listProjectWorkspaces: popoverApi.listProjectWorkspaces };
++});
++
++/* ----- fake SSE connection（同 dialog 附件测试） ----- */
++
++interface FakeConn extends SessionStreamConnection {
++  handlers: {
++    route: (env: any, cursor?: string | null) => void;
++  };
++  closeSpy: ReturnType<typeof vi.fn>;
++}
++
++function makeStreamMock(): { conn: FakeConn; factory: ReturnType<typeof vi.fn> } {
++  let captured: FakeConn | null = null;
++  const factory = vi.fn((sessionId: string, handlers: any): FakeConn => {
++    const closeSpy = vi.fn();
++    captured = {
++      close: closeSpy,
++      getLastEventId: () => null,
++      closeSpy,
++      handlers: {
++        route: (env: any, cursor?: string | null) => {
++          switch (env.event) {
++            case "turn_started": handlers.onTurnStarted(env); break;
++            case "log": handlers.onLog(env, cursor ?? null); break;
++            case "turn_completed": handlers.onTurnCompleted(env); break;
++            case "session_ended": handlers.onSessionEnded(env); break;
++            case "queue_changed": handlers.onQueueChanged?.(env); break;
++            case "permission_request": handlers.onPermissionRequest?.(env); break;
++            case "permission_resolved": handlers.onPermissionResolved?.(env); break;
++          }
++        },
++      },
++    };
++    return captured;
++  });
++  return {
++    get conn() { return captured!; },
++    factory,
++  };
++}
++
++function makeEnvelope(event: string, overrides: Record<string, any> = {}): any {
++  return {
++    event,
++    session_id: "sess-1",
++    run_id: null,
++    turn: null,
++    log_id: null,
++    timestamp: "t",
++    channel: null,
++    content: null,
++    status: null,
++    exit_code: null,
++    reason: null,
++    ...overrides,
++  };
++}
++
++function setupPanel(overrides: Record<string, any> = {}) {
++  const props = {
++    providers: ["claude", "codex"],
++    defaultProvider: "claude",
++    model: null,
++    onModelChange: vi.fn(),
++    hasOnlineProvider: true,
++    ...overrides,
++  };
++  return render(<SessionPanel mode="dialog" sessionId={null} {...(props as any)} />);
++}
++
++function makeAtt(id: string, name: string, kind: "image" | "file"): AttachmentRead {
++  return {
++    id,
++    kind,
++    media_type: kind === "image" ? "image/png" : "text/plain",
++    bytes: 2048,
++    name,
++    created_at: "2026-08-25T00:00:00Z",
++  };
++}
++
++/** 粘贴文件到输入框（同 dialog 附件测试——📎/粘贴同一上传管线）。 */
++function pasteFile(input: Element, att: AttachmentRead) {
++  const file = new File(["xx"], att.name, {
++    type: att.kind === "image" ? "image/png" : "text/plain",
++  });
++  vi.mocked(uploadSessionAttachment).mockResolvedValue(att);
++  return fireEvent.paste(input, {
++    clipboardData: { files: [file], getData: () => "" },
++  });
++}
++
++describe("SessionPanel（dialog）定时消息携带附件（2026-10-27-scheduled-send-attachments）", () => {
++  let stream: ReturnType<typeof makeStreamMock>;
++
++  beforeEach(() => {
++    vi.clearAllMocks();
++    sessionApi.fetchSessionQueue.mockResolvedValue([]);
++    sessionApi.fetchPendingDialogs.mockResolvedValue([]);
++    sessionApi.fetchSessionDialogHistory.mockResolvedValue([]);
++    sessionApi.getAgentSessionLogs.mockResolvedValue([]);
++    sessionApi.fetchSessionTurnOutline.mockResolvedValue({ session_id: "s-1", total_turns: 0, items: [] });
++    sessionApi.listSessionTeamMissions.mockResolvedValue([]);
++    sessionApi.triggerSessionTeamMission.mockResolvedValue({
++      mission_id: "m-team-1",
++      status: "planning",
++      objective: null,
++      scope_workspace_ids: [],
++      budget_usd: null,
++      workers: [],
++    });
++    sessionApi.listScheduledMessages.mockResolvedValue([]);
++    // 创建成功默认响应（ScheduledMessageRead 形态，本文件只断言入参）。
++    sessionApi.createScheduledMessage.mockResolvedValue({
++      id: "sched-1",
++      agent_session_id: "sess-1",
++      sender_user_id: "u-1",
++      prompt: "",
++      attachment_ids: null,
++      agent_profile_id: null,
++      llm_provider_id: null,
++      dispatch_at: "2026-10-27T12:00:00Z",
++      status: "pending",
++      error_code: null,
++      error_message: null,
++      dispatched_at: null,
++      cancelled_at: null,
++      created_at: "2026-10-27T00:00:00Z",
++      updated_at: null,
++    });
++    popoverApi.listProjects.mockResolvedValue([]);
++    popoverApi.listProjectWorkspaces.mockResolvedValue([]);
++    sessionApi.createSession.mockResolvedValue({
++      session_id: "sess-1",
++      run_id: "run-1",
++      lease_id: "lease-1",
++      status: "active",
++      stream_url: "",
++    });
++    stream = makeStreamMock();
++    sessionApi.streamSession.mockImplementation(stream.factory);
++  });
++
++  /** 首发建会话并推进到 active-idle（首轮完成，追问输入可用）。 */
++  async function reachActiveIdle() {
++    setupPanel();
++    const input = screen.getByPlaceholderText(/输入首条消息创建会话.*\/ 唤起技能 · @ 关联变更/) as HTMLTextAreaElement;
++    fireEvent.change(input, { target: { value: "first" } });
++    fireEvent.click(screen.getByTitle("发送"));
++    await waitFor(() => expect(sessionApi.createSession).toHaveBeenCalled());
++    const conn = stream.conn;
++    act(() => {
++      conn.handlers.route(makeEnvelope("turn_started", { run_id: "run-1", turn: 1 }));
++    });
++    act(() => {
++      conn.handlers.route(
++        makeEnvelope("turn_completed", { run_id: "run-1", status: "completed" }),
++      );
++    });
++    return input;
++  }
++
++  /** 上传两个附件（图 + 文件）并等 chips 到位，返回追问输入框。 */
++  async function attachTwoFiles() {
++    const input = screen.getByPlaceholderText(/继续追问.*\/ 唤起技能 · @ 关联变更/) as HTMLTextAreaElement;
++    pasteFile(input, makeAtt("att-img", "shot.png", "image"));
++    pasteFile(input, makeAtt("att-doc", "note.md", "file"));
++    await screen.findByTitle("shot.png · 2KB（点击在线预览 / 右击插入正文引用）");
++    await screen.findByTitle("note.md · 2KB（点击在线预览 / 右击插入正文引用）");
++    return input;
++  }
++
++  it("FR-03：定时弹窗展示附件预览列表（图标+文件名）", async () => {
++    await reachActiveIdle();
++    await attachTwoFiles();
++    fireEvent.click(screen.getByRole("button", { name: "定时发送" }));
++
++    const previews = await screen.findAllByTestId("scheduled-attachment-preview");
++    expect(previews).toHaveLength(2);
++    const previewText = previews.map((p) => p.textContent ?? "").join("|");
++    expect(previewText).toContain("shot.png");
++    expect(previewText).toContain("note.md");
++  });
++
++  it("FR-01：定时创建请求携带附件 id；创建成功后附件 chips 清空（FR-02）", async () => {
++    await reachActiveIdle();
++    await attachTwoFiles();
++    const input = screen.getByPlaceholderText(/继续追问.*\/ 唤起技能 · @ 关联变更/) as HTMLTextAreaElement;
++    fireEvent.change(input, { target: { value: "看下这两份材料" } });
++    fireEvent.click(screen.getByRole("button", { name: "定时发送" }));
++
++    fireEvent.click(await screen.findByRole("button", { name: "创建定时消息" }));
++
++    await waitFor(() => expect(sessionApi.createScheduledMessage).toHaveBeenCalledTimes(1));
++    const [sid, body] = sessionApi.createScheduledMessage.mock.calls[0] ?? [];
++    expect(sid).toBe("sess-1");
++    expect(body.prompt).toBe("看下这两份材料");
++    expect(typeof body.dispatch_at).toBe("string");
++    // FR-01 核心断言：附件 id 随请求体携带。
++    expect(body.attachment_ids).toEqual(["att-img", "att-doc"]);
++
++    // FR-02：创建成功 → 附件 chips 全部消失（输入区不再有待发附件）。
++    await waitFor(() => {
++      expect(screen.queryByTitle("shot.png · 2KB（点击在线预览 / 右击插入正文引用）")).toBeNull();
++    });
++    expect(screen.queryByTitle("note.md · 2KB（点击在线预览 / 右击插入正文引用）")).toBeNull();
++    // 文本草稿同步清空（既有口径不回归）。
++    expect(input.value).toBe("");
++  });
++
++  it("FR-01 零回归：无附件创建请求体保持既有形态（不携带 attachment_ids 键）", async () => {
++    await reachActiveIdle();
++    const input = screen.getByPlaceholderText(/继续追问.*\/ 唤起技能 · @ 关联变更/) as HTMLTextAreaElement;
++    fireEvent.change(input, { target: { value: "纯文本定时" } });
++    fireEvent.click(screen.getByRole("button", { name: "定时发送" }));
++
++    fireEvent.click(await screen.findByRole("button", { name: "创建定时消息" }));
++
++    await waitFor(() => expect(sessionApi.createScheduledMessage).toHaveBeenCalledTimes(1));
++    const [, body] = sessionApi.createScheduledMessage.mock.calls[0] ?? [];
++    // 严格相等：请求体仅 prompt + dispatch_at，无空数组占位键。
++    expect(Object.keys(body).sort()).toEqual(["dispatch_at", "prompt"]);
++  });
++
++  it("FR-04：带附件空文本可创建（看图说话），请求 prompt 空串 + 附件携带", async () => {
++    await reachActiveIdle();
++    await attachTwoFiles();
++    // 不输入文本直接开弹窗。
++    fireEvent.click(screen.getByRole("button", { name: "定时发送" }));
++
++    // 附件豁免空文本：确认按钮可用（空文本且无附件才禁用）。
++    const confirm = (await screen.findByRole("button", { name: "创建定时消息" })) as HTMLButtonElement;
++    expect(confirm.disabled).toBe(false);
++    fireEvent.click(confirm);
++
++    await waitFor(() => expect(sessionApi.createScheduledMessage).toHaveBeenCalledTimes(1));
++    const [, body] = sessionApi.createScheduledMessage.mock.calls[0] ?? [];
++    expect(body.prompt).toBe("");
++    expect(body.attachment_ids).toEqual(["att-img", "att-doc"]);
++  });
++
++  it("FR-04 兜底：空文本且无附件仍禁用确认（现状行为不变）", async () => {
++    await reachActiveIdle();
++    fireEvent.click(screen.getByRole("button", { name: "定时发送" }));
++
++    const confirm = (await screen.findByRole("button", { name: "创建定时消息" })) as HTMLButtonElement;
++    expect(confirm.disabled).toBe(true);
++    // 空态提示文案仍在。
++    expect(screen.getByText(/输入内容为空，无法创建定时消息/)).toBeInTheDocument();
++  });
++
++  it("FR-02 失败路径：创建失败附件 chips 原地保留可重试", async () => {
++    await reachActiveIdle();
++    await attachTwoFiles();
++    const input = screen.getByPlaceholderText(/继续追问.*\/ 唤起技能 · @ 关联变更/) as HTMLTextAreaElement;
++    fireEvent.change(input, { target: { value: "定时带附件" } });
++    sessionApi.createScheduledMessage.mockRejectedValueOnce(
++      Object.assign(new Error("定时发送时间必须至少在 60 秒之后。"), { status: 422 }),
++    );
++    fireEvent.click(screen.getByRole("button", { name: "定时发送" }));
++    fireEvent.click(await screen.findByRole("button", { name: "创建定时消息" }));
++
++    await waitFor(() => expect(sessionApi.createScheduledMessage).toHaveBeenCalledTimes(1));
++    // 失败：附件 chips 与文本保留，弹窗保持打开可改后重试。
++    expect(screen.getByTitle("shot.png · 2KB（点击在线预览 / 右击插入正文引用）")).toBeInTheDocument();
++    expect(screen.getByTitle("note.md · 2KB（点击在线预览 / 右击插入正文引用）")).toBeInTheDocument();
++    expect(input.value).toBe("定时带附件");
++    expect(screen.getByRole("button", { name: "创建定时消息" })).toBeInTheDocument();
++  });
++});
+diff --git a/frontend/src/components/daemon/session-panel/scheduled-send.tsx b/frontend/src/components/daemon/session-panel/scheduled-send.tsx
+index 2ef2e086d..984febf42 100644
+--- a/frontend/src/components/daemon/session-panel/scheduled-send.tsx
++++ b/frontend/src/components/daemon/session-panel/scheduled-send.tsx
+@@ -11,7 +11,7 @@
+  */
+ 
+ import dayjs, { type Dayjs } from "dayjs";
+-import { Clock } from "lucide-react";
++import { Clock, FileText, Image as ImageIcon } from "lucide-react";
+ import { Button, DatePicker, Modal } from "antd";
+ 
+ /**
+@@ -55,6 +55,13 @@ interface ScheduledSendModalProps {
+   open: boolean;
+   /** 当前输入框草稿（内容预览 + 确认按钮空态禁用）。 */
+   draft: string;
++  /**
++   * 本次将随定时消息携带的附件（2026-10-27-scheduled-send-attachments FR-03/04）：
++   * 非空时「将发送的内容」区块下渲染附件预览行，且空文本豁免可创建（对齐普通
++   * 发送 D-7 看图说话口径）；不传或空数组 = 行为与既有形态一致（预览不渲染、
++   * 空文本禁用确认）。
++   */
++  attachments?: Array<{ id: string; kind: string; name: string }>;
+   /** 选定发送时间（Dayjs 本地时间，分钟级）。 */
+   value: Dayjs | null;
+   /** 创建请求在途（提交按钮 loading + 防重复）。 */
+@@ -65,22 +72,24 @@ interface ScheduledSendModalProps {
+ }
+ 
+ /**
+- * 定时发送弹窗（原型 .mask/.modal 区块）：说明行 + 草稿预览 + 分钟级 DatePicker
+- * （disabledDate 禁选今天之前的日期；≥ now+60s 的精细校验由后端兜底 422 →
+- * toast）+ 快捷项 chips（30 分钟后 / 1 小时后 / 明早 9 点）。空草稿禁用确认并
+- * 行内提示（后端空 prompt 422 的前端前置拦截，附件豁免口径不适用——定时入口
+- * 不携带附件）。
++ * 定时发送弹窗（原型 .mask/.modal 区块）：说明行 + 草稿预览（带附件时附预览
++ * 行）+ 分钟级 DatePicker（disabledDate 禁选今天之前的日期；≥ now+60s 的精细
++ * 校验由后端兜底 422 → toast）+ 快捷项 chips（30 分钟后 / 1 小时后 / 明早 9 点）。
++ * 空草稿且无附件时禁用确认并 行内提示（后端空 prompt 422 的前端前置拦截；
++ * 带附件时空文本豁免——后端 create_scheduled_message 校验一同口径）。
+  */
+ export function ScheduledSendModal({
+   open,
+   draft,
++  attachments,
+   value,
+   submitting,
+   onChange,
+   onCancel,
+   onConfirm,
+ }: ScheduledSendModalProps) {
+-  const empty = !draft.trim();
++  const pendingAttachments = attachments ?? [];
++  const empty = !draft.trim() && pendingAttachments.length === 0;
+   return (
+     <Modal
+       open={open}
+@@ -107,8 +116,32 @@ export function ScheduledSendModal({
+       <div className="mt-3 rounded-lg border border-border bg-muted/30 px-3 py-2">
+         <div className="text-[11px] text-muted-foreground">将发送的内容</div>
+         <div className="mt-1 max-h-32 overflow-y-auto whitespace-pre-wrap break-all text-[13px] leading-5">
+-          {draft.trim() ? draft : "（空）"}
++          {draft.trim()
++            ? draft
++            : pendingAttachments.length > 0
++              ? "（空文本，仅发送附件）"
++              : "（空）"}
+         </div>
++        {/* 2026-10-27-scheduled-send-attachments FR-03：附件预览行（图标+文件名，
++            与输入栏 chips 同款 image/kind 判定）；无附件不渲染不占位。 */}
++        {pendingAttachments.length > 0 && (
++          <div className="mt-2 space-y-1 border-t border-border/60 pt-2">
++            {pendingAttachments.map((att) => (
++              <div
++                key={att.id}
++                className="flex items-center gap-1.5 text-[12px] leading-4"
++                data-testid="scheduled-attachment-preview"
++              >
++                {att.kind === "image" ? (
++                  <ImageIcon aria-hidden className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
++                ) : (
++                  <FileText aria-hidden className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
++                )}
++                <span className="break-all">{att.name}</span>
++              </div>
++            ))}
++          </div>
++        )}
+       </div>
+       <div className="mt-3">
+         <DatePicker
+diff --git a/frontend/src/components/daemon/session-panel/session-panel-dialog.tsx b/frontend/src/components/daemon/session-panel/session-panel-dialog.tsx
+index 7e59bc421..01f5e1900 100644
+--- a/frontend/src/components/daemon/session-panel/session-panel-dialog.tsx
++++ b/frontend/src/components/daemon/session-panel/session-panel-dialog.tsx
+@@ -338,24 +338,44 @@ export function SessionPanelDialog(props: SessionPanelProps) {
+   const confirmSchedCreate = useCallback(async () => {
+     const sid = view.sessionId;
+     const rawPrompt = input.trim();
++    // 2026-10-27-scheduled-send-attachments FR-01：随定时消息携带的附件 id——
++    // 此前缺口：创建只组装 prompt+dispatch_at，已上传附件被静默丢弃（后端
++    // ScheduledMessageCreateRequest.attachment_ids 与到点派发重放链路既有支持）。
++    const attachmentIds = pendingAttachments.map((a) => a.id);
+     // task-04（D-003）：定时路径同样置换引用 token；摘要/清空比对用原文。
+     // task-07（FR-06/D-008@v2）：工作区 token 同点位串联置换。
+     const prompt = substituteWsRefsForSend(
+       substituteAttRefsForSend(rawPrompt, attTokenMap, pendingAttachments),
+       wsRefTokens,
+     );
+-    if (!sid || !schedAt || !rawPrompt || schedSubmitting) return;
++    // FR-04：空文本+附件豁免可创建（对齐普通发送 D-7 看图说话，后端校验一
++    // 同口径）；空文本且无附件仍早退（弹窗确认按钮已禁用，此处兜底）。
++    if (!sid || !schedAt || schedSubmitting) return;
++    if (!rawPrompt && attachmentIds.length === 0) return;
+     setSchedSubmitting(true);
+     try {
+       await createScheduledMessage(sid, {
+         prompt,
+         dispatch_at: schedAt.toISOString(),
++        // 非空才带——无附件保持既有请求形态逐字节一致（零回归）。
++        ...(attachmentIds.length > 0 ? { attachment_ids: attachmentIds } : {}),
+       });
+       setSchedOpen(false);
+       setInput((prev) => (prev.trim() === rawPrompt ? "" : prev));
++      // FR-02：创建成功清附件（onSendSettled 同口径——按 id 精确过滤 chips、
++      // 调输入栏清空句柄、逐 id 删元数据镜像），防残留误导重复发送。
++      setPendingAttachments((prev) =>
++        attachmentIds.length === 0 ? prev : prev.filter((a) => !attachmentIds.includes(a.id)),
++      );
++      if (attachmentIds.length > 0) clearAttachmentsRef.current?.();
++      for (const id of attachmentIds) attachmentMetaRef.current.delete(id);
+       setSchedHints((prev) => [
+         ...prev,
+-        `已创建定时消息：${formatScheduledTime(schedAt.toISOString())} 发送「${summarizeScheduledPrompt(rawPrompt)}」`,
++        `已创建定时消息：${formatScheduledTime(schedAt.toISOString())} 发送「${
++          rawPrompt
++            ? summarizeScheduledPrompt(rawPrompt)
++            : `附件 ×${attachmentIds.length}`
++        }」`,
+       ]);
+       setSchedRefresh((n) => n + 1);
+       notify.success("已创建定时消息");
+@@ -2448,10 +2468,12 @@ export function SessionPanelDialog(props: SessionPanelProps) {
+         />
+       )}
+ 
+-      {/* task-08（FR-04）：定时发送弹窗（同 page 模式，dialog 侧状态源 view.sessionId）。 */}
++      {/* task-08（FR-04）：定时发送弹窗（同 page 模式，dialog 侧状态源 view.sessionId）。
++          2026-10-27-scheduled-send-attachments：传待发附件做预览 + 空文本豁免判定。 */}
+       <ScheduledSendModal
+         open={schedOpen}
+         draft={input}
++        attachments={pendingAttachments.map((a) => ({ id: a.id, kind: a.kind, name: a.name }))}
+         value={schedAt}
+         submitting={schedSubmitting}
+         onChange={setSchedAt}
+diff --git a/frontend/src/components/daemon/session-panel/session-panel-page.tsx b/frontend/src/components/daemon/session-panel/session-panel-page.tsx
+index 7ee5a5cf6..bf50cda05 100644
+--- a/frontend/src/components/daemon/session-panel/session-panel-page.tsx
++++ b/frontend/src/components/daemon/session-panel/session-panel-page.tsx
+@@ -6,7 +6,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } fro
+ import { useQuery, useQueryClient } from "@tanstack/react-query";
+ import dayjs, { type Dayjs } from "dayjs";
+ import {
+-  Ban, Bot, ClipboardList, FolderOpen, Info, ListOrdered, Lock, Monitor, MoreHorizontal, PauseCircle,
++  Ban, Bot, ClipboardList, FileText, FolderOpen, Info, ListOrdered, ListTodo, Lock, Monitor, MoreHorizontal, PauseCircle,
+   Puzzle, Search, TriangleAlert, X, Zap,
+ } from "lucide-react";
+ import { Badge, Button, Drawer, Input, Spin } from "antd";
+@@ -1028,23 +1028,44 @@ export function SessionPanelPage({
+   const confirmSchedCreate = useCallback(async () => {
+     const sid = sessionId;
+     const rawPrompt = input.trim();
++    // 2026-10-27-scheduled-send-attachments FR-01：随定时消息携带的附件 id——
++    // 此前缺口：创建只组装 prompt+dispatch_at，已上传附件被静默丢弃（后端
++    // ScheduledMessageCreateRequest.attachment_ids 与到点派发重放链路既有支持）。
++    // 与 dialog 模式口径逐字对齐（两处 confirmSchedCreate 成对复制维护）。
++    const attachmentIds = pendingAttachments.map((a) => a.id);
+     // task-04（D-003）：定时路径同样置换引用 token；摘要/清空比对用原文。
+     const prompt = substituteWsRefsForSend(
+       substituteAttRefsForSend(rawPrompt, attTokenMap, pendingAttachments),
+       wsRefTokens,
+     );
+-    if (!sid || !schedAt || !rawPrompt || schedSubmitting) return;
++    // FR-04：空文本+附件豁免可创建（对齐普通发送 D-7 看图说话，后端校验一
++    // 同口径）；空文本且无附件仍早退（弹窗确认按钮已禁用，此处兜底）。
++    if (!sid || !schedAt || schedSubmitting) return;
++    if (!rawPrompt && attachmentIds.length === 0) return;
+     setSchedSubmitting(true);
+     try {
+       await createScheduledMessage(sid, {
+         prompt,
+         dispatch_at: schedAt.toISOString(),
++        // 非空才带——无附件保持既有请求形态逐字节一致（零回归）。
++        ...(attachmentIds.length > 0 ? { attachment_ids: attachmentIds } : {}),
+       });
+       setSchedOpen(false);
+       setInput((prev) => (prev.trim() === rawPrompt ? "" : prev));
++      // FR-02：创建成功清附件（onSendSettled 同口径——按 id 精确过滤 chips、
++      // 调输入栏清空句柄、逐 id 删元数据镜像），防残留误导重复发送。
++      setPendingAttachments((prev) =>
++        attachmentIds.length === 0 ? prev : prev.filter((a) => !attachmentIds.includes(a.id)),
++      );
++      if (attachmentIds.length > 0) clearAttachmentsRef.current?.();
++      for (const id of attachmentIds) attachmentMetaRef.current.delete(id);
+       setSchedHints((prev) => [
+         ...prev,
+-        `已创建定时消息：${formatScheduledTime(schedAt.toISOString())} 发送「${summarizeScheduledPrompt(rawPrompt)}」`,
++        `已创建定时消息：${formatScheduledTime(schedAt.toISOString())} 发送「${
++          rawPrompt
++            ? summarizeScheduledPrompt(rawPrompt)
++            : `附件 ×${attachmentIds.length}`
++        }」`,
+       ]);
+       setSchedRefresh((n) => n + 1);
+       notify.success("已创建定时消息");
+@@ -1274,6 +1295,14 @@ export function SessionPanelPage({
+   // task-14（design §5.4）：mobile 头部 ⋯ 菜单开关（次要 chrome 收纳容器）。
+   // hook 无条件声明（desktop 渲染层不读它），variant 保持在渲染层。
+   const [mobileMoreOpen, setMobileMoreOpen] = useState(false);
++  // 2026-10-27-mobile-chat-visual-round2（用户反馈「顶部执行信息+本地 agent
++  // 隐藏，参考 PC 端收进按钮」）：mobile 两面板默认不渲染，⋯ 菜单开关控制——
++  // 开才挂载（对齐 ql-20260915-011 用量收纳先例：开才取数数据恒新鲜）。
++  // TaskExecutionPanel 数据自恢复：任务行来自 useSessionTasks 快照轮询 +
++  // runningTasks 内存态 props，重开即拉；关面板期间 SSE 事件经 taskPanelRef
++  // 注入跳过（ref=null），快照轮询兜底不丢终态。
++  const [mobileExecPanelOpen, setMobileExecPanelOpen] = useState(false);
++  const [mobileAgentLogOpen, setMobileAgentLogOpen] = useState(false);
+   // task-06（2026-09-08-session-turn-nav / FR-04 / AC-06）：mobile 轮次导航
+   // Drawer 开合（⋯ 菜单「轮次导航」项触发；点击行选中即关）。
+   const [turnNavOpen, setTurnNavOpen] = useState(false);
+@@ -5801,6 +5830,29 @@ export function SessionPanelPage({
+                       <ListOrdered aria-hidden className="h-3.5 w-3.5" />
+                       轮次导航
+                     </button>
++                    {/* visual-round2（用户反馈「顶部执行信息+本地 agent 隐藏，收进
++                        按钮点击再显示」）：两面板 mobile 开关——开即挂载（数据自
++                        恢复：快照轮询+内存态，见 state 声明处注释）。 */}
++                    <button
++                      type="button"
++                      aria-pressed={mobileExecPanelOpen}
++                      data-testid="session-mobile-exec-toggle"
++                      onClick={() => setMobileExecPanelOpen((v) => !v)}
++                      className="flex w-full shrink-0 cursor-pointer items-center gap-2 rounded px-1 py-1 text-[11px] text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
++                    >
++                      <ListTodo aria-hidden className="h-3.5 w-3.5" />
++                      执行信息{mobileExecPanelOpen ? "（开）" : ""}
++                    </button>
++                    <button
++                      type="button"
++                      aria-pressed={mobileAgentLogOpen}
++                      data-testid="session-mobile-agentlog-toggle"
++                      onClick={() => setMobileAgentLogOpen((v) => !v)}
++                      className="flex w-full shrink-0 cursor-pointer items-center gap-2 rounded px-1 py-1 text-[11px] text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
++                    >
++                      <FileText aria-hidden className="h-3.5 w-3.5" />
++                      本地 Agent 日志{mobileAgentLogOpen ? "（开）" : ""}
++                    </button>
+                     <ActivityCatalog
+                       bashProgress={bashProgress}
+                       agentTasks={agentTasks}
+@@ -5989,7 +6041,9 @@ export function SessionPanelPage({
+           点击展开明细，不再挤占聊天窗口（同 ql-20260826-010 后台目录收纳
+           动机）。无上报时组件返回 null 不占位；纯 tool_report 主体
+           （AgentReplayBody 即会话主体）不重复挂载。 */}
+-      {!isToolReportBody && (
++      {/* visual-round2：mobile 默认不挂（⋯ 菜单「本地 Agent 日志」开关控制），
++          desktop 照旧常驻折叠栏。 */}
++      {!isToolReportBody && (!mobile || mobileAgentLogOpen) && (
+         <AgentLogCard sessionId={session.id} mobile={mobile} />
+       )}
+ 
+@@ -6001,7 +6055,10 @@ export function SessionPanelPage({
+           同源（agentTasks / bashProgress / teamMissions 既有内存态，不新建
+           state / SSE）；实时事件经 taskPanelRef 由上方 onAgentTaskStatus
+           分发注入——desktop 迁移后 ref 仍指向同一组件实例，注入链路不变。 */}
+-      {mobile && (
++      {/* visual-round2：mobile 默认不挂（⋯ 菜单「执行信息」开关控制——用户反馈
++          顶部执行信息常驻占位大；开即挂载，任务行经快照轮询自恢复）。desktop
++          挂载点在右列 detailColumn（5508），不受本门控影响。 */}
++      {mobile && mobileExecPanelOpen && (
+         <TaskExecutionPanel
+           ref={taskPanelRef}
+           mobile={mobile}
+@@ -6520,10 +6577,12 @@ export function SessionPanelPage({
+         />
+       )}
+ 
+-      {/* task-08（FR-04）：定时发送弹窗（⏰ 入口打开；确认走 confirmSchedCreate）。 */}
++      {/* task-08（FR-04）：定时发送弹窗（⏰ 入口打开；确认走 confirmSchedCreate）。
++          2026-10-27-scheduled-send-attachments：传待发附件做预览 + 空文本豁免判定。 */}
+       <ScheduledSendModal
+         open={schedOpen}
+         draft={input}
++        attachments={pendingAttachments.map((a) => ({ id: a.id, kind: a.kind, name: a.name }))}
+         value={schedAt}
+         submitting={schedSubmitting}
+         onChange={setSchedAt}
+diff --git a/frontend/src/components/floating/floating-session-host.tsx b/frontend/src/components/floating/floating-session-host.tsx
+index a0398de3e..a58739e74 100644
+--- a/frontend/src/components/floating/floating-session-host.tsx
++++ b/frontend/src/components/floating/floating-session-host.tsx
+@@ -1088,7 +1088,10 @@ export function FloatingSessionHost() {
+           data-open={open ? "true" : "false"}
+           data-side={side}
+           className={cn(
+-            "fixed inset-y-0 z-50 flex w-[min(960px,92vw)] flex-col bg-card shadow-lg transition-transform duration-300",
++            // 玻璃窗体（2026-10-27-mobile-chat-visual-round2 / 用户指定「玻璃效果
++            // PC 端可同步」）：悬浮窗浮于页面内容之上（fixed z-50），bg-card/85+
++            // blur-md 让背后页面内容呈朦胧玻璃质感而非生硬实底遮挡。
++            "fixed inset-y-0 z-50 flex w-[min(960px,92vw)] flex-col bg-card/85 shadow-lg backdrop-blur-md transition-transform duration-300",
+             side === "right"
+               ? cn("right-0 border-l border-border", open ? "translate-x-0" : "translate-x-full")
+               : cn("left-0 border-r border-border", open ? "translate-x-0" : "-translate-x-full"),
+diff --git a/frontend/src/components/mobile/mobile-tab-bar.test.tsx b/frontend/src/components/mobile/mobile-tab-bar.test.tsx
+index e9e8596ef..71dcbe67a 100644
+--- a/frontend/src/components/mobile/mobile-tab-bar.test.tsx
++++ b/frontend/src/components/mobile/mobile-tab-bar.test.tsx
+@@ -69,20 +69,20 @@ describe("MobileTabBar 渲染", () => {
+     expect(MOBILE_TABS).toHaveLength(5);
+   });
+ 
+-  it("悬浮胶囊形态（quick-a4939946 + task-01 遮挡治理）：胶囊容器圆角+实底不透明+离底占位", () => {
++  it("悬浮胶囊形态（quick-a4939946 + visual-round2 玻璃效果）：胶囊容器圆角+玻璃半透明+离底占位", () => {
+     render(<MobileTabBar />);
+     const nav = screen.getByTestId("mobile-tab-bar");
+     // 外层 nav：离底 12px + 安全区占位（不再贴底通栏）
+     expect(nav.className).toContain("bottom-0");
+     expect(nav.className).toContain("px-3");
+     expect(nav.className).toContain("pb-[calc(env(safe-area-inset-bottom)+12px)]");
+-    // 内层 ul：圆角胶囊 + 实底不透明（task-01：bg-card/95+毛玻璃滚动透字，改实底）
++    // 内层 ul：圆角胶囊 + 玻璃形态（visual-round2 用户指定「小透明+玻璃感」：
++    // bg-card/75+blur-md——中模糊下穿行内容呈朦胧块；task-01 实底契约作废）
+     const ul = nav.querySelector("ul");
+     expect(ul).not.toBeNull();
+     expect(ul?.className).toContain("rounded-[var(--radius-lg)]");
+-    expect(ul?.className).toContain("bg-card");
+-    expect(ul?.className).not.toContain("bg-card/95");
+-    expect(ul?.className).not.toContain("backdrop-blur");
++    expect(ul?.className).toContain("bg-card/75");
++    expect(ul?.className).toContain("backdrop-blur-md");
+     expect(ul?.className).toContain("max-w-[432px]");
+   });
+ 
+diff --git a/frontend/src/components/mobile/mobile-tab-bar.tsx b/frontend/src/components/mobile/mobile-tab-bar.tsx
+index db37856ac..ee1058c1e 100644
+--- a/frontend/src/components/mobile/mobile-tab-bar.tsx
++++ b/frontend/src/components/mobile/mobile-tab-bar.tsx
+@@ -114,11 +114,13 @@ export function MobileTabBar({ activeTab }: MobileTabBarProps) {
+       // 悬浮胶囊（quick-a4939946，对齐用户参考效果图）：贴底通栏边框式改为
+       // 离底 12px 的圆角胶囊，内容从胶囊下方穿行（外壳 main 底部避让预留占位，
+       // 2026-10-26-mobile-four-page-layout-fix task-01 起为 calc(76px+safe-area)）；
+-      // bottom 安全区只作间距不再撑背景。胶囊底色实底不透明（task-01：原 bg-card/95
+-      // + 毛玻璃在长列表滚动时透字，遮挡观感差；全不透明后 blur 无视觉意义一并移除）。
++      // bottom 安全区只作间距不再撑背景。
++      // 玻璃效果（2026-10-27-mobile-chat-visual-round2 / 用户指定「小透明+玻璃感」）：
++      // task-01 曾因透字改实底——本轮按用户新取向回玻璃形态，bg-card/75+blur-md
++      // （中模糊下穿行内容呈朦胧块而非清晰透字，透明度与模糊度的平衡点）。
+       className="fixed inset-x-0 bottom-0 z-40 px-3 pb-[calc(env(safe-area-inset-bottom)+12px)]"
+     >
+-      <ul className="mx-auto flex w-full max-w-[432px] items-stretch rounded-[var(--radius-lg)] border border-border bg-card shadow-[var(--shadow-lg)]">
++      <ul className="mx-auto flex w-full max-w-[432px] items-stretch rounded-[var(--radius-lg)] border border-border bg-card/75 shadow-[var(--shadow-lg)] backdrop-blur-md">
+         {MOBILE_TABS.map((tab) => {
+           const active = activeTab ? activeTab === tab.key : isTabActive(tab, pathname);
+           const Icon = tab.icon;
+diff --git a/frontend/src/components/mobile/mobile-top-bar.tsx b/frontend/src/components/mobile/mobile-top-bar.tsx
+index 8b0eaff3c..99264625e 100644
+--- a/frontend/src/components/mobile/mobile-top-bar.tsx
++++ b/frontend/src/components/mobile/mobile-top-bar.tsx
+@@ -40,7 +40,9 @@ export function MobileTopBar({ title, onBack, actions }: MobileTopBarProps) {
+   return (
+     <header
+       data-testid="mobile-top-bar"
+-      className="sticky top-0 z-30 flex min-h-[44px] shrink-0 items-center gap-1 border-b border-border bg-card px-1 pt-[env(safe-area-inset-top)] shadow-[var(--shadow-sm)]"
++      // 玻璃顶栏（2026-10-27-mobile-chat-visual-round2 / 用户指定悬浮件玻璃化）：
++      // bg-card/75+blur-md——内容上滑穿行时顶栏呈玻璃朦胧而非生硬实底。
++      className="sticky top-0 z-30 flex min-h-[44px] shrink-0 items-center gap-1 border-b border-border bg-card/75 px-1 pt-[env(safe-area-inset-top)] shadow-[var(--shadow-sm)] backdrop-blur-md"
+     >
+       {onBack !== undefined && (
+         <button
+diff --git a/frontend/src/components/sessions/session-config-bar.tsx b/frontend/src/components/sessions/session-config-bar.tsx
+index 6073167d1..7b248ff37 100644
+--- a/frontend/src/components/sessions/session-config-bar.tsx
++++ b/frontend/src/components/sessions/session-config-bar.tsx
+@@ -1254,8 +1254,11 @@ export function SessionConfigBar({
+             设置
+           </button>
+         )}
+-        {/* ql-20260909-006：行尾插槽（CtxUsageBar 圆环+额度胶囊挪此处；不传零占位）。 */}
+-        {trailing != null ? (
++        {/* ql-20260909-006：行尾插槽（CtxUsageBar 圆环+额度胶囊挪此处；不传零占位）。
++            mobile 不渲染（2026-10-27-mobile-chat-visual-round2 / 用户反馈输入区按钮
++            拥挤）——用量功能仍在头部 ⋯ 菜单「会话用量」区（ql-20260915-011 先例），
++            行尾徽章在手机上与供应商/模型/设置挤一行是主要拥挤源。desktop 照旧。 */}
++        {trailing != null && !mobile ? (
+           <span className="inline-flex shrink-0 items-center">{trailing}</span>
+         ) : null}
+       </div>
+diff --git a/sillyhub-daemon/src/interactive/session-manager.ts b/sillyhub-daemon/src/interactive/session-manager.ts
+index 9897b0c7e..5e20e0365 100644
+--- a/sillyhub-daemon/src/interactive/session-manager.ts
++++ b/sillyhub-daemon/src/interactive/session-manager.ts
+@@ -608,14 +608,21 @@ export class SessionManager {
+   /**
+    * task-03（design §5 P1.2）：主 agent Task/Agent tool_use 元数据登记。
+    *
+-   * key = tool_use_id，value = { sessionId, taskName, subagentType? }。assistant
+-   * tool_use 到达时写入，供异步回执兜底把提取的 agentId 关联回该 tool_use 的
+-   * description / subagent_type（回执文本自身不带任务名）。仅内存态；会话终态
+-   * 时与任务表同点位清理。
++   * key = tool_use_id，value = { sessionId, taskName, subagentType?, isBackground? }。
++   * assistant tool_use 到达时写入，供异步回执兜底把提取的 agentId 关联回该
++   * tool_use 的 description / subagent_type（回执文本自身不带任务名）。
++   * 2026-10-27-task-wakeup-precision-fix FR-02：登记面扩至 Bash，新增
++   * isBackground（run_in_background）——终态唤醒前后台判定的主判据锚。
++   * 仅内存态；会话终态时与任务表同点位清理。
+    */
+   private readonly _agentToolUseMeta = new Map<
+     string,
+-    { sessionId: string; taskName: string; subagentType?: string }
++    {
++      sessionId: string;
++      taskName: string;
++      subagentType?: string;
++      isBackground?: boolean;
++    }
+   >();
+ 
+   /* ── task-09（1b）：每轮工作区快照（E1 累加器 / (runId) 快照缓存 / 上报出口）── */
+diff --git a/sillyhub-daemon/src/interactive/session-manager/background-tasks.ts b/sillyhub-daemon/src/interactive/session-manager/background-tasks.ts
+index b34143a22..420c3defb 100644
+--- a/sillyhub-daemon/src/interactive/session-manager/background-tasks.ts
++++ b/sillyhub-daemon/src/interactive/session-manager/background-tasks.ts
+@@ -117,6 +117,12 @@ export async function handleAgentTaskStatusEvent(
+     // running + 未注册：注册 + emit + [TASK_STARTED] 行。
+     const taskName = strOf(meta?.['task_name']) || '后台任务';
+     const subagentType = strOf(meta?.['subagent_type']) || undefined;
++    // 2026-10-27-task-wakeup-precision-fix FR-02：从 tool_use 元数据带入前后台
++    // 声明（task_started 帧自身不带 run_in_background；meta 未登记时保持
++    // undefined——终态唤醒判定走时长阈值兜底，不误判前台）。
++    const metaInfo = toolUseId
++      ? mgr._agentToolUseMeta.get(toolUseId)
++      : undefined;
+     // 捕获派发 runId（task_notification 常在本 turn 收尾后到达，届时
+     // currentRunId 已清空——注册表是唯一带 runId 的地方）。
+     const runId = state.currentRunId;
+@@ -124,6 +130,9 @@ export async function handleAgentTaskStatusEvent(
+       ...(toolUseId ? { toolUseId } : {}),
+       taskName,
+       ...(subagentType ? { subagentType } : {}),
++      ...(metaInfo?.isBackground !== undefined
++        ? { isBackground: metaInfo.isBackground }
++        : {}),
+       async: true,
+       startedAt: Date.now(),
+       ...(runId ? { runId } : {}),
+@@ -325,32 +334,126 @@ export async function handleTaskNotificationEvent(
+   // 2026-10-21-task-wakeup-restore：completed/failed 触发主代理唤醒（stopped
+   // 多为用户/系统主动停止，结果无需汇报，不唤醒防噪）。放在别名补发之后：
+   // 短任务门槛的提前 return 不得跳过补发。
++  //
++  // 2026-10-27-task-wakeup-precision-fix：判据反转——主判据从「时长 ≥ 静默
++  // 阈值」改为 tool_use 的 run_in_background 前后台声明（时长只是相关性代理，
++  // 两头误伤：61s 前台命令误唤醒冗余汇报轮、59s 真后台任务漏唤醒停摆）。
++  // 三态：true → 完成即唤醒（真后台结果只在通知里；防灌屏职责由前台免唤醒
++  // 承担——实证灌屏源是前台孙命令）；false → 免唤醒（前台结果必然同轮返回，
++  // 注入即冗余）；undefined → 旧逻辑兜底（时长阈值防噪阀 + fail-open）。
+   if (rawStatus === 'completed' || rawStatus === 'failed') {
+-    // 总关闭阀（FR-03）：阈值配置 0 时一律不注入（引擎原生自续跑出现双轮时的
+-    // 止血开关）——durationMs < 0 恒假拦不住，须显式分支。
+-    const quietMs = taskWakeupQuietThresholdMs();
+-    if (quietMs <= 0) return;
+-    // 门槛判定（FR-02）：info 已从注册表注销但局部引用仍在，startedAt 可读；
+-    // 双缺失（重启窗口孤儿终态）durationMs=undefined → fail-open 放行唤醒。
++    // 时长判定值 + 来源：显示（FR-01）与门槛（FR-03 兜底）与日志（FR-04）同源。
+     const durationMs =
+       elapsedMs !== undefined
+         ? elapsedMs
+         : info?.startedAt !== undefined
+           ? Date.now() - info.startedAt
+           : undefined;
++    const durationSource: 'sdk-frame' | 'registry' | 'unknown' =
++      elapsedMs !== undefined
++        ? 'sdk-frame'
++        : info?.startedAt !== undefined
++          ? 'registry'
++          : 'unknown';
++    // 前后台判定链：注册条目 > 别名条目 > tool_use 元数据（均缺 = 信息不足）。
++    const bg = resolveWakeupBackground(mgr, info, aliases, effectiveToolUseId);
++    const gate = {
++      task_id: taskId,
++      task_name: taskName,
++      status: rawStatus,
++      duration_ms: durationMs,
++      duration_source: durationSource,
++      background: bg.isBackground,
++      background_source: bg.source,
++    };
++    // 总关闭阀（FR-03）：阈值配置 0 时一律不注入（引擎原生自续跑出现双轮时的
++    // 止血开关）——全局生效，先于三态判定。
++    const quietMs = taskWakeupQuietThresholdMs();
++    if (quietMs <= 0) {
++      console.info(
++        '[session-manager] task wakeup gate: disabled (SILLYHUB_TASK_WAKEUP_QUIET_MS=0)',
++        gate,
++      );
++      return;
++    }
++    if (bg.isBackground === false) {
++      // 前台免唤醒（FR-02）：终态 emit / [TASK_NOTIFICATION] 落行不受影响
++      //（本分支只收敛注入面）。
++      console.info(
++        '[session-manager] task wakeup skipped: foreground task',
++        gate,
++      );
++      return;
++    }
++    if (bg.isBackground === true) {
++      // 真后台：完成即唤醒，不受时长阈值限制（短后台任务漏唤醒即停摆）。
++      console.info(
++        '[session-manager] task wakeup scheduled: background task terminal',
++        gate,
++      );
++      scheduleTaskWakeup(mgr, state.sessionId, {
++        taskId,
++        taskName,
++        status: rawStatus,
++        elapsedMs: durationMs,
++        summary,
++      });
++      return;
++    }
++    // undefined：信息不足兜底——时长阈值防噪阀 + 双缺失 fail-open（旧行为）。
+     if (durationMs !== undefined && durationMs < quietMs) {
++      console.info(
++        '[session-manager] task wakeup skipped: below quiet threshold (no background marker)',
++        gate,
++      );
+       return;
+     }
++    console.warn(
++      '[session-manager] task wakeup fallback pass: no background marker',
++      gate,
++    );
+     scheduleTaskWakeup(mgr, state.sessionId, {
+       taskId,
+       taskName,
+       status: rawStatus,
+-      elapsedMs,
++      elapsedMs: durationMs,
+       summary,
+     });
+   }
+ }
+ 
++/**
++ * 2026-10-27-task-wakeup-precision-fix FR-02：终态唤醒的前后台判定链。
++ *
++ * 优先级：注册条目 isBackground（task_started 注册时从 meta 带入 / 回执路径
++ * 恒 true）> 别名条目（tool_use 派生懒注册同键）> tool_use 元数据
++ * （registerAgentToolUseMeta 登记）。三处均缺 → undefined（信息不足，调用方
++ * 走时长阈值兜底，不误判前台）。source 供结构化日志归因（FR-04）。
++ */
++function resolveWakeupBackground(
++  mgr: SessionManagerCore,
++  info: BackgroundTaskInfo | undefined,
++  aliases: Array<[string, BackgroundTaskInfo]>,
++  toolUseId: string | undefined,
++): {
++  isBackground: boolean | undefined;
++  source: 'registry-entry' | 'alias' | 'tool-use-meta' | 'missing';
++} {
++  if (info?.isBackground !== undefined) {
++    return { isBackground: info.isBackground, source: 'registry-entry' };
++  }
++  for (const [, aliasInfo] of aliases) {
++    if (aliasInfo.isBackground !== undefined) {
++      return { isBackground: aliasInfo.isBackground, source: 'alias' };
++    }
++  }
++  const meta = toolUseId ? mgr._agentToolUseMeta.get(toolUseId) : undefined;
++  if (meta?.isBackground !== undefined) {
++    return { isBackground: meta.isBackground, source: 'tool-use-meta' };
++  }
++  return { isBackground: undefined, source: 'missing' };
++}
++
+ /**
+  * 2026-10-21-task-wakeup-restore（自 f889832d1^ 恢复，ql-20260827-007 原型）：
+  * 后台任务终态唤醒调度——2s debounce 合并同会话多条通知后，经
+@@ -390,9 +493,14 @@ export function scheduleTaskWakeup(
+       if (!e || e.lines.length === 0) return;
+       // ql-20260827-008：头部明示总数+全部结束、尾部强制逐条核对——实证主代理
+       // 曾只读第一行漏报后续任务、并凭历史执念声称"仍在等待"（会话 2fe664d9）。
++      // 2026-10-27-task-wakeup-precision-fix FR-05：「后台子代理任务」改「后台
++      // 任务」（通知对前台 Bash 命令同样触发，「子代理」失实）；「没有仍在运行
++      // 的任务」改「本批次均已终止」（旧文案与会话任务面板「运行中 N」字面
++      // 冲突——指本批次，非全会话）。backend _merge_task_wakeup_prompt 合并
++      // 正则同步兼容形，前端识别锚 [后台任务通知] 前缀不变。
+       const prompt =
+-        `[后台任务通知] 以下 ${e.lines.length} 个后台子代理任务已全部结束` +
+-        '（列表中的每一个都已终止，没有仍在运行的任务）：\n' +
++        `[后台任务通知] 以下 ${e.lines.length} 个后台任务已全部结束` +
++        '（本批次均已终止）：\n' +
+         e.lines.join('\n') +
+         `\n请逐条核对上述每个任务（共 ${e.lines.length} 个）的名称与结果，一次性向用户完整汇报（综合归纳，不要逐字照抄，不要遗漏任何一个任务）；` +
+         '禁止声称仍在等待任何任务；汇报完即结束本轮；不要重复执行这些任务；此消息为系统通知，无需向用户复述本通知本身。';
+@@ -447,6 +555,9 @@ export async function registerAsyncReceiptTask(
+     toolUseId,
+     taskName,
+     ...(meta?.subagentType ? { subagentType: meta.subagentType } : {}),
++    // 2026-10-27-task-wakeup-precision-fix FR-02：异步启动回执恒后台——回执
++    // 本身即「派发后不等待、结果经通知回传」的证据。
++    isBackground: true,
+     async: true,
+     startedAt: Date.now(),
+     ...(runId ? { runId } : {}),
+diff --git a/sillyhub-daemon/src/interactive/session-manager/events.ts b/sillyhub-daemon/src/interactive/session-manager/events.ts
+index 2fba1b471..a9692868d 100644
+--- a/sillyhub-daemon/src/interactive/session-manager/events.ts
++++ b/sillyhub-daemon/src/interactive/session-manager/events.ts
+@@ -538,13 +538,24 @@ export async function dispatchStatusEvent(
+  * 对象，对齐旧 toolInput 非对象守卫）。关联键 = call_id（= 旧 tool_use.id）。
+  * agent_task_status(running) 的 emit 由归一化器产事件、_dispatchStatusEvent
+  * 转发，此处不再 emit（防双发）。
++ *
++ * 2026-10-27-task-wakeup-precision-fix FR-02：登记面扩至 Bash（前台长命令
++ * 同样有 task 生命周期帧——bsal4e1x9 前台 pnpm install 70s 实证），并解析
++ * run_in_background 存 isBackground——终态唤醒前后台判定的主判据锚。恒登记
++ * 布尔值（三态判定依赖：undefined 保留给「tool_use 事件未到达」场景走兜底）。
+  */
+ export function registerAgentToolUseMeta(
+   mgr: SessionManagerCore,
+   state: SessionState,
+   ev: AgentEvent,
+ ): void {
+-  if (ev.tool_name !== 'Task' && ev.tool_name !== 'Agent') return;
++  if (
++    ev.tool_name !== 'Task' &&
++    ev.tool_name !== 'Agent' &&
++    ev.tool_name !== 'Bash'
++  ) {
++    return;
++  }
+   const callId = ev.call_id;
+   if (typeof callId !== 'string' || !callId) return;
+   let input: Record<string, unknown> = {};
+@@ -562,10 +573,14 @@ export function registerAgentToolUseMeta(
+     typeof rawSubagentType === 'string' && rawSubagentType
+       ? rawSubagentType
+       : undefined;
++  // 工具契约层前后台声明：无 run_in_background 参数的调用结果必然同轮返回
++  // 主代理（前台）——缺省即 false，非 unknown。
++  const isBackground = input['run_in_background'] === true;
+   mgr._agentToolUseMeta.set(callId, {
+     sessionId: state.sessionId,
+     taskName,
+     ...(subagentType ? { subagentType } : {}),
++    isBackground,
+   });
+ }
+ 
+diff --git a/sillyhub-daemon/src/interactive/session-manager/types.ts b/sillyhub-daemon/src/interactive/session-manager/types.ts
+index 773b407f1..62efc5c3c 100644
+--- a/sillyhub-daemon/src/interactive/session-manager/types.ts
++++ b/sillyhub-daemon/src/interactive/session-manager/types.ts
+@@ -428,6 +428,14 @@ export interface BackgroundTaskInfo {
+   subagentType?: string;
+   /** 异步派发标记（回执路径恒 true；task_started 路径按 true 记——SDK 任务生命周期系统即后台机制，见 _handleTaskStarted 注释）。 */
+   async: boolean;
++  /**
++   * 2026-10-27-task-wakeup-precision-fix FR-02：前后台声明（tool_use 的
++   * run_in_background 参数——无该参数的命令结果必然同轮返回主代理）。
++   * true = 真后台（结果只在通知里）→ 终态完成即唤醒；false = 前台 → 免唤醒；
++   * undefined = 标记缺失（meta 未登记/task_started 丢失）→ 唤醒判定走时长
++   * 阈值兜底。回执路径恒 true（回执本身即后台证据）。
++   */
++  isBackground?: boolean;
+   /** 注册时刻 epoch ms（task_updated 轻量事件的观察口径，非权威时长）。 */
+   startedAt: number;
+   /** 最近一次 task_progress 到达时刻（「最后活跃」观察口径，本层仅记录）。 */
+@@ -548,7 +556,13 @@ export interface SessionManagerCore {
+   >;
+   readonly _agentToolUseMeta: Map<
+     string,
+-    { sessionId: string; taskName: string; subagentType?: string }
++    {
++      sessionId: string;
++      taskName: string;
++      subagentType?: string;
++      /** 2026-10-27-task-wakeup-precision-fix FR-02：run_in_background 前后台声明（恒登记布尔——缺省参数即前台）。 */
++      isBackground?: boolean;
++    }
+   >;
+   readonly _sessionBudgetTokens: Map<string, number>;
+   readonly _overBudgetSessions: Set<string>;
+diff --git a/sillyhub-daemon/tests/interactive/task-lifecycle.test.ts b/sillyhub-daemon/tests/interactive/task-lifecycle.test.ts
+index 23269ad8b..5f0c51548 100644
+--- a/sillyhub-daemon/tests/interactive/task-lifecycle.test.ts
++++ b/sillyhub-daemon/tests/interactive/task-lifecycle.test.ts
+@@ -740,7 +740,9 @@ describe('task 终态注入唤醒（2026-10-21-task-wakeup-restore）', () => {
+       expect(wakeup).toHaveBeenCalledTimes(1);
+       const prompt = String(wakeup.mock.calls[0]![1] as string);
+       expect(prompt.startsWith('[后台任务通知]')).toBe(true);
+-      expect(prompt).toContain('以下 1 个后台子代理任务已全部结束');
++      expect(prompt).toContain('以下 1 个后台任务已全部结束');
++      expect(prompt).toContain('（本批次均已终止）');
++      expect(prompt).not.toContain('后台子代理任务');
+       expect(prompt).toContain('任务「调研 sgm 隐患排查任务生成」已完成');
+       expect(prompt).toContain('（用时 06:26）');
+       expect(prompt).toContain('结果摘要：调研完成。核心是周期性自定义检查模块');
+@@ -768,7 +770,7 @@ describe('task 终态注入唤醒（2026-10-21-task-wakeup-restore）', () => {
+       await vi.advanceTimersByTimeAsync(3000);
+       expect(wakeup).toHaveBeenCalledTimes(1);
+       const prompt = String(wakeup.mock.calls[0]![1] as string);
+-      expect(prompt).toContain('以下 2 个后台子代理任务已全部结束');
++      expect(prompt).toContain('以下 2 个后台任务已全部结束');
+       expect(prompt).toContain('任务「子代理A」已完成');
+       expect(prompt).toContain('任务「子代理B」已完成');
+       expect(prompt).toContain('共 2 个');
+@@ -827,6 +829,166 @@ describe('task 终态注入唤醒（2026-10-21-task-wakeup-restore）', () => {
+     }
+   });
+ 
++  // ── 2026-10-27-task-wakeup-precision-fix ──────────────────────────────────
++
++  it('FR-01（precision-fix）：elapsed_ms 缺失时通知行显示注册表兜底时长，不再 00:00', async () => {
++    vi.useFakeTimers();
++    try {
++      const { depsExtra, wakeup } = withWakeupDeps();
++      const h = await createHarness('sess-pf1', 'run-pf1', depsExtra);
++      // 复现 bsal4e1x9 形态：task_started 注册（startedAt=t0）+ 终态帧无
++      // usage.duration_ms——判定走注册表兜底，显示必须同源。
++      await h.emitMessage(msgTaskStarted({ taskId: 'task-d1', toolUseId: 'call-d1', description: '强制重装 frontend 依赖修 node_modules' }));
++      await vi.advanceTimersByTimeAsync(61_000);
++      await h.emitMessage(msgTaskNotification({ taskId: 'task-d1', status: 'completed', summary: 'Done in 1m 7s' }));
++      await vi.advanceTimersByTimeAsync(3000);
++      expect(wakeup).toHaveBeenCalledTimes(1);
++      const prompt = String(wakeup.mock.calls[0]![1] as string);
++      // 61s 注册表兜底 → 01:01（旧实现此处显示 00:00）。
++      expect(prompt).toContain('（用时 01:01）');
++      expect(prompt).not.toContain('（用时 00:00）');
++    } finally {
++      vi.useRealTimers();
++    }
++  });
++
++  /** 2026-10-27 FR-02：tool_use 事件构造（registerAgentToolUseMeta 的输入轨）。 */
++  function msgToolUse(o: {
++    toolName: string;
++    callId: string;
++    input: Record<string, unknown>;
++  }): Record<string, unknown> {
++    return {
++      events: [
++        {
++          type: 'tool_use',
++          tool_name: o.toolName,
++          call_id: o.callId,
++          content: JSON.stringify(o.input),
++        },
++      ],
++    };
++  }
++
++  it('FR-02（precision-fix）：前台 Bash（run_in_background 缺省）终态免唤醒，终态 emit/[TASK_NOTIFICATION] 照常', async () => {
++    vi.useFakeTimers();
++    try {
++      const { depsExtra, wakeup } = withWakeupDeps();
++      const h = await createHarness('sess-pf2', 'run-pf2', depsExtra);
++      // bsal4e1x9 同款形态：前台 Bash（无 run_in_background）+ 70s 终态——
++      // 旧判据下（≥60s）会误注入冗余汇报轮，新判据下免唤醒。
++      await h.emitMessage(
++        msgToolUse({
++          toolName: 'Bash',
++          callId: 'call-fg',
++          input: { command: 'pnpm install --force', description: '强制重装 frontend 依赖修 node_modules', timeout: 600000 },
++        }),
++      );
++      await h.emitMessage(msgTaskStarted({ taskId: 'task-fg', toolUseId: 'call-fg', description: '强制重装 frontend 依赖修 node_modules' }));
++      await h.emitMessage(msgTaskNotification({ taskId: 'task-fg', status: 'completed', summary: 'Done in 1m 7s', durationMs: 70000 }));
++      await vi.advanceTimersByTimeAsync(3000);
++      expect(wakeup).not.toHaveBeenCalled();
++      // 免唤醒只收敛注入面：终态信号照常（emit + 落行）。
++      expect(taskEventCalls(h).some(([, , e]) => (e as { status?: string }).status === 'completed')).toBe(true);
++      const notifLine = h.deps.onTurnMessage.mock.calls
++        .map((c) => String((c[2] as { content?: string })?.content ?? ''))
++        .find((s) => s.startsWith('[TASK_NOTIFICATION]'));
++      expect(notifLine).toBeDefined();
++      expect(notifLine).toContain('"task_id":"task-fg"');
++    } finally {
++      vi.useRealTimers();
++    }
++  });
++
++  it('FR-02（precision-fix）：后台标记 true 完成即唤醒——30s 短任务不再受 60s 阈值限制', async () => {
++    vi.useFakeTimers();
++    try {
++      const { depsExtra, wakeup } = withWakeupDeps();
++      const h = await createHarness('sess-pf3', 'run-pf3', depsExtra);
++      await h.emitMessage(
++        msgToolUse({ toolName: 'Bash', callId: 'call-bg', input: { command: 'npm run build', run_in_background: true } }),
++      );
++      await h.emitMessage(msgTaskStarted({ taskId: 'task-bg', toolUseId: 'call-bg', description: '后台构建' }));
++      await h.emitMessage(msgTaskNotification({ taskId: 'task-bg', status: 'completed', summary: '构建完成', durationMs: 30000 }));
++      await vi.advanceTimersByTimeAsync(3000);
++      expect(wakeup).toHaveBeenCalledTimes(1);
++      const prompt = String(wakeup.mock.calls[0]![1] as string);
++      expect(prompt).toContain('任务「后台构建」已完成（用时 00:30）');
++    } finally {
++      vi.useRealTimers();
++    }
++  });
++
++  it('FR-03（precision-fix）：三无孤儿终态兜底放行并打 WARN（时长来源 unknown）', async () => {
++    vi.useFakeTimers();
++    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
++    try {
++      const { depsExtra, wakeup } = withWakeupDeps();
++      const h = await createHarness('sess-pf4', 'run-pf4', depsExtra);
++      // 无 tool_use 元数据、无注册条目、无 elapsed_ms——信息不足兜底 fail-open。
++      await h.emitMessage(msgTaskNotification({ taskId: 'task-orp', toolUseId: 'call-orp', status: 'failed', summary: '孤儿终态' }));
++      await vi.advanceTimersByTimeAsync(3000);
++      expect(wakeup).toHaveBeenCalledTimes(1);
++      expect(warnSpy).toHaveBeenCalledWith(
++        '[session-manager] task wakeup fallback pass: no background marker',
++        expect.objectContaining({
++          task_id: 'task-orp',
++          duration_source: 'unknown',
++          background_source: 'missing',
++        }),
++      );
++    } finally {
++      warnSpy.mockRestore();
++      vi.useRealTimers();
++    }
++  });
++
++  it('FR-04（precision-fix）：判定出口结构化日志字段齐备（前台跳过/后台放行）', async () => {
++    vi.useFakeTimers();
++    const infoSpy = vi.spyOn(console, 'info').mockImplementation(() => {});
++    try {
++      const { depsExtra, wakeup } = withWakeupDeps();
++      const h = await createHarness('sess-pf5', 'run-pf5', depsExtra);
++      // 前台跳过出口（sdk-frame 时长 + registry-entry 判定来源）。
++      await h.emitMessage(msgToolUse({ toolName: 'Bash', callId: 'call-fg2', input: { command: 'ls', description: '列目录' } }));
++      await h.emitMessage(msgTaskStarted({ taskId: 'task-fg2', toolUseId: 'call-fg2', description: '列目录' }));
++      await h.emitMessage(msgTaskNotification({ taskId: 'task-fg2', status: 'completed', durationMs: 70000 }));
++      // 后台放行出口（Task 工具 run_in_background=true）。
++      await h.emitMessage(
++        msgToolUse({ toolName: 'Task', callId: 'call-bg2', input: { description: '后台调研', subagent_type: 'Explore', run_in_background: true } }),
++      );
++      await h.emitMessage(msgTaskStarted({ taskId: 'task-bg2', toolUseId: 'call-bg2', description: '后台调研', subagentType: 'Explore' }));
++      await h.emitMessage(msgTaskNotification({ taskId: 'task-bg2', status: 'completed', durationMs: 30000 }));
++      await vi.advanceTimersByTimeAsync(3000);
++      // 仅后台任务注入（前台跳过）。
++      expect(wakeup).toHaveBeenCalledTimes(1);
++      const fgCall = infoSpy.mock.calls.find((c) =>
++        String(c[0]).includes('foreground task'),
++      );
++      expect(fgCall).toBeDefined();
++      expect(fgCall![1]).toMatchObject({
++        task_id: 'task-fg2',
++        status: 'completed',
++        duration_ms: 70000,
++        duration_source: 'sdk-frame',
++        background: false,
++        background_source: 'registry-entry',
++      });
++      const bgCall = infoSpy.mock.calls.find((c) =>
++        String(c[0]).includes('background task terminal'),
++      );
++      expect(bgCall).toBeDefined();
++      expect(bgCall![1]).toMatchObject({
++        task_id: 'task-bg2',
++        background: true,
++        duration_ms: 30000,
++      });
++    } finally {
++      infoSpy.mockRestore();
++      vi.useRealTimers();
++    }
++  });
++
+   it('FR-03：阈值 env 可配——120000 拦 90s、0 关闭阀拦 61s、非法值回落默认', async () => {
+     vi.useFakeTimers();
+     try {

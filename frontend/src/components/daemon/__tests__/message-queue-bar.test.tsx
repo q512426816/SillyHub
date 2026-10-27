@@ -580,8 +580,8 @@ describe("MessageQueueBar 队列三操作（task-10 / FR-04 FR-05 FR-06）", () 
         entries={[
           makeEntry({
             id: "mq-wake",
-            prompt: "[后台任务通知] 以下 1 个后台子代理任务已全部结束",
-            displayPrompt: "[后台任务通知] 以下 1 个后台子代理任务已全部结束",
+            prompt: "[后台任务通知] 以下 1 个后台任务已全部结束（本批次均已终止）",
+            displayPrompt: "[后台任务通知] 以下 1 个后台任务已全部结束（本批次均已终止）",
           }),
         ]}
         onRemove={vi.fn()}
@@ -589,11 +589,11 @@ describe("MessageQueueBar 队列三操作（task-10 / FR-04 FR-05 FR-06）", () 
       />,
     );
     // 折叠摘要：正文原样（<40 字不截断），无前缀。
-    expect(screen.getByText("以下 1 个后台子代理任务已全部结束")).toBeTruthy();
+    expect(screen.getByText("以下 1 个后台任务已全部结束（本批次均已终止）")).toBeTruthy();
     expect(screen.queryByText(/\[后台任务通知\]/)).toBeNull();
     // 展开正文：同样无前缀（点击 chip 主体切换展开态）。
     fireEvent.click(screen.getByRole("button", { name: /^等待中，/ }));
-    expect(screen.getByText("以下 1 个后台子代理任务已全部结束")).toBeTruthy();
+    expect(screen.getByText("以下 1 个后台任务已全部结束（本批次均已终止）")).toBeTruthy();
     expect(screen.queryByText(/\[后台任务通知\]/)).toBeNull();
   });
 
@@ -623,7 +623,7 @@ describe("MessageQueueBar 唤醒条目事件行（2026-10-21-task-wakeup-event-q
   });
 
   const WAKEUP_PROMPT =
-    "[后台任务通知] 以下 4 个后台子代理任务已全部结束（列表中的每一个都已终止，没有仍在运行的任务）：\n- 任务「下载翻译模型」已失败（用时 00:00）\n- 任务「生产检查告警」已完成（用时 00:00）\n- 任务「宿主机与公网健康检查」已完成（用时 00:00）\n- 任务「宿主机与公网健康检查」已完成（用时 00:00）\n请逐条核对上述每个任务";
+    "[后台任务通知] 以下 4 个后台任务已全部结束（本批次均已终止）：\n- 任务「下载翻译模型」已失败（用时 00:00）\n- 任务「生产检查告警」已完成（用时 00:00）\n- 任务「宿主机与公网健康检查」已完成（用时 00:00）\n- 任务「宿主机与公网健康检查」已完成（用时 00:00）\n请逐条核对上述每个任务";
 
   function makeWakeupEntry(overrides: Partial<QueueEntry> = {}): QueueEntry {
     return makeEntry({
@@ -663,7 +663,7 @@ describe("MessageQueueBar 唤醒条目事件行（2026-10-21-task-wakeup-event-q
         onRetry={vi.fn()}
       />,
     );
-    expect(screen.queryByText(/以下 4 个后台子代理任务已全部结束/)).toBeNull();
+    expect(screen.queryByText(/以下 4 个后台任务已全部结束/)).toBeNull();
     fireEvent.click(screen.getByText("收到任务消息"));
     const wakeupBody = WAKEUP_PROMPT.replace(/^\[后台任务通知\]\s*/, "");
     expect(

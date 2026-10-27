@@ -1,0 +1,66 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-27-mobile-chat-visual-round2",
+  "rows": [
+    {
+      "anchor": "FR-02",
+      "row_id": "2026-10-27-mobile-chat-visual-round2:flow:测试绑定FR-02",
+      "tests": [
+        "frontend/src/components/chat/__tests__/round-divider.test.tsx「mobile=true：胶囊允许收缩折行（去 shrink-0/nowrap）」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-27-mobile-chat-visual-round2"
+    },
+    {
+      "anchor": "FR-03",
+      "row_id": "2026-10-27-mobile-chat-visual-round2:flow:测试绑定FR-03",
+      "tests": [
+        "frontend/src/components/sessions/__tests__/session-config-bar.test.tsx"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-27-mobile-chat-visual-round2"
+    },
+    {
+      "anchor": "FR-04",
+      "row_id": "2026-10-27-mobile-chat-visual-round2:flow:测试绑定FR-04",
+      "tests": [
+        "frontend/src/components/mobile/mobile-tab-bar.test.tsx「悬浮胶囊形态（quick-a4939946 + visual-round2 玻璃效果）：胶囊容器圆角+玻璃半透明+离底占位」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-27-mobile-chat-visual-round2"
+    },
+    {
+      "anchor": "FR-05",
+      "row_id": "2026-10-27-mobile-chat-visual-round2:flow:测试绑定FR-05",
+      "tests": [
+        "frontend/src/components/daemon/__tests__/session-panel-variant.test.tsx"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-27-mobile-chat-visual-round2"
+    }
+  ]
+}

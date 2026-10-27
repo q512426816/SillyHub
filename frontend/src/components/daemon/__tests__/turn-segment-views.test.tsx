@@ -1726,7 +1726,7 @@ describe("CompactSegmentView / CompactStatusRowView / CompactNoticeChip（ql-202
 // 2026-10-22-turn-trigger-generalize：轮触发溯源行（原 TaskWakeupNoticeView 泛化）。
 describe("TurnTriggerView（2026-10-22-turn-trigger-generalize）", () => {
   const WAKEUP_TEXT =
-    "[后台任务通知] 以下 1 个后台子代理任务已全部结束（列表中的每一个都已终止，没有仍在运行的任务）：\n- 任务「调研 sgm」已完成（用时 06:26）。结果摘要：调研完成（task_id: t1，如需完整输出可调用 TaskOutput 查询，block=false）";
+    "[后台任务通知] 以下 1 个后台任务已全部结束（本批次均已终止）：\n- 任务「调研 sgm」已完成（用时 06:26）。结果摘要：调研完成（task_id: t1，如需完整输出可调用 TaskOutput 查询，block=false）";
 
   const wakeupSeg: Extract<TurnSegment, { kind: "turn_trigger" }> = {
     kind: "turn_trigger",

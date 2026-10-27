@@ -169,3 +169,4 @@ created_at: 2026-08-30 22:23:33
 | 2026-10-26 | 2026-10-26-subagent-card-width-unify | 子代理卡片与工具卡限宽统一补漏 |
 | 2026-10-26 | 2026-10-26-subagent-task-meta-restore | 子代理任务元数据装配竞态修复 |
 | 2026-10-26 | 2026-10-26-ci-red-to-green | 修复四条CI工作流失败转绿 |
+| 2026-10-27 | 2026-10-27-mobile-chat-visual-round2 | 用户真机第二轮反馈(截图)：agent 回复仍未占满一行(真凶=PC 阅读限宽 max-w-[cal… |

@@ -1247,6 +1247,10 @@ describe("extractPreambleText", () => {
 // ── 2026-10-13-session-taskwakeup-hide：TASK_WAKEUP 注入判定（单一谓词源）──
 describe("isTaskWakeupInjection（2026-10-13-session-taskwakeup-hide）", () => {
   it("[后台任务通知] 前缀（含前导空白）→ true；普通消息与真实前导 → false", () => {
+    // 2026-10-27-task-wakeup-precision-fix 后新文案（后台任务/本批次均已终止）。
+    expect(isTaskWakeupInjection("[后台任务通知] 以下 1 个后台任务已全部结束（本批次均已终止）")).toBe(true);
+    // 旧 daemon 文案（2026-10-27 前「后台子代理任务」）存量历史行同样识别——
+    // 判定锚是 [后台任务通知] 前缀，头部文案新旧不敏感。
     expect(isTaskWakeupInjection("[后台任务通知] 以下 1 个后台子代理任务已全部结束")).toBe(true);
     expect(isTaskWakeupInjection("  [后台任务通知] 空白容忍")).toBe(true);
     expect(isTaskWakeupInjection("帮我修下登录页")).toBe(false);
