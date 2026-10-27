@@ -80,6 +80,18 @@ export interface AgentSessionListParams {
   limit?: number;
   offset?: number;
   status?: AgentSessionStatus;
+  /**
+   * 在线三态聚合过滤（2026-10-27-sessions-total-and-status-filter FR-02）：
+   * "ongoing" = pending+active+reconnecting（与后端 status_group 同名 Literal）；
+   * 与 status 互斥（同传后端 422）——「在线」筛选档的服务端口径。
+   */
+  status_group?: "ongoing";
+  /**
+   * 在线三态聚合过滤（2026-10-27-sessions-total-and-status-filter FR-02）：
+   * "ongoing" = pending+active+reconnecting（与后端 status_group 同名 Literal）；
+   * 与 status 互斥（同传后端 422）——「在线」筛选档的服务端口径。
+   */
+  status_group?: "ongoing";
   /** 按运行时（=机器+智能体组合）过滤。 */
   runtime_id?: string;
   /** 按机器（daemon instance）过滤（后端 join daemon_runtimes）。 */
@@ -128,6 +140,12 @@ export async function listAgentSessions(
   if (options?.limit !== undefined) query.limit = options.limit;
   if (options?.offset !== undefined) query.offset = options.offset;
   if (options?.status) query.status = options.status;
+  // 2026-10-27-sessions-total-and-status-filter FR-02：在线三态聚合过滤参
+  // （对齐 status 先例：真值才下发，缺省零回归）。
+  if (options?.status_group) query.status_group = options.status_group;
+  // 2026-10-27-sessions-total-and-status-filter FR-02：在线三态聚合过滤参
+  // （对齐 status 先例：真值才下发，缺省零回归）。
+  if (options?.status_group) query.status_group = options.status_group;
   if (options?.runtime_id) query.runtime_id = options.runtime_id;
   if (options?.machine_id) query.machine_id = options.machine_id;
   if (options?.provider) query.provider = options.provider;
