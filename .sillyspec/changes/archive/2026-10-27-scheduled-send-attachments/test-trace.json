@@ -1,0 +1,81 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-27-scheduled-send-attachments",
+  "rows": [
+    {
+      "anchor": "FR-01",
+      "row_id": "2026-10-27-scheduled-send-attachments:flow:测试绑定FR-01",
+      "tests": [
+        "frontend/src/components/daemon/__tests__/session-panel-dialog-scheduled-attachments.test.tsx「定时创建请求携带附件 id」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-27-scheduled-send-attachments"
+    },
+    {
+      "anchor": "FR-02",
+      "row_id": "2026-10-27-scheduled-send-attachments:flow:测试绑定FR-02",
+      "tests": [
+        "frontend/src/components/daemon/__tests__/session-panel-dialog-scheduled-attachments.test.tsx「定时创建成功后清空附件 chips 与元数据镜像」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-27-scheduled-send-attachments"
+    },
+    {
+      "anchor": "FR-03",
+      "row_id": "2026-10-27-scheduled-send-attachments:flow:测试绑定FR-03",
+      "tests": [
+        "frontend/src/components/daemon/__tests__/session-panel-dialog-scheduled-attachments.test.tsx「定时弹窗展示附件预览列表」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-27-scheduled-send-attachments"
+    },
+    {
+      "anchor": "FR-04",
+      "row_id": "2026-10-27-scheduled-send-attachments:flow:测试绑定FR-04",
+      "tests": [
+        "frontend/src/components/daemon/__tests__/session-panel-dialog-scheduled-attachments.test.tsx「带附件空文本可创建定时消息」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-27-scheduled-send-attachments"
+    },
+    {
+      "anchor": "FR-05",
+      "row_id": "2026-10-27-scheduled-send-attachments:flow:测试绑定FR-05",
+      "tests": [
+        "frontend/src/components/daemon/__tests__/session-panel-dialog-scheduled-attachments.test.tsx"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-27-scheduled-send-attachments"
+    }
+  ]
+}

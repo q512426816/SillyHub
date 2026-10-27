@@ -1,0 +1,47 @@
+tier: thin
+legacy_fallback: false
+substeps:
+  artifacts: done
+  ledger: done
+  patch: done
+  review: done
+  probes: done
+  distill: done
+  archive: done
+  events: done
+born_face: thin
+with_tasks: false
+review_force: null
+input: >-
+  用户反馈定时消息发送后 agent 收不到附件。排查确认：后端定时消息全链路（schema/落库/到点派发重放）均支持 attachment_ids，缺口在前端——会话面板 dialog/page 两模式
+  confirmSchedCreate 创建定时消息时只传 prompt+dispatch_at，不传附件 id，且创建成功后附件 chips 残留输入框（用户误以为已随消息发出）。排队消息与立即发送（引导注入）链路前后端附件完整，不动。
+
+
+  成功标准：
+
+  - 会话面板 dialog 与 page 两模式创建定时消息时，输入框已上传附件的 id 随请求体 attachment_ids 携带
+
+  - 定时消息创建成功后，输入框附件 chips 与附件元数据镜像同步清空（与文本草稿清空同口径）
+
+  - 定时发送弹窗在携带附件时展示附件预览列表，让用户可见附件将随消息发送
+
+  - 带附件时允许空文本创建定时消息（对齐普通发送 D-7 看图说话口径），空文本且无附件仍禁用确认
+
+  - 更新/新增前端测试覆盖定时创建携带附件断言，相关测试与 lint 通过
+autopilot: false
+prestage_ack: false
+baseline_commit: e113b1b80ccfb8c5e8db7f1816f3e056ab2db166
+updatedAt: '2026-10-27T01:01:02.419Z'
+cross_baselines:
+  sillyspec: 67e50bcca2adb9ecd502d12086c0ac8cb994da84
+baseline_sha256: 26508230a687de47f35bec5c9dab72ffc033832b731db754ed165a6ede686a6a
+spec_approved: true
+spec_approved_at: '2026-10-27T00:45:16.776Z'
+spec_approved_by: anon@DESKTOP-HJ0AM09
+spec_approved_channel: user-confirmed
+spec_attested_by: anon@DESKTOP-HJ0AM09
+gate_summary: >-
+  test: passed ← module[]+deps(py1+jsx2+jsx1)（44.9s）
+  结果：C:\Users\qinyi\IdeaProjects\multi-agent-platform\.sillyspec\.runtime\verify-runs\20261027005602\test-result.json｜lint:
+  skipped — 跳过原因：local.yaml 未配置 commands.lint（或标记 unavailable）。｜门文件 23 个
+

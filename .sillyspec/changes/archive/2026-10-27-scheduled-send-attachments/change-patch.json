@@ -1,0 +1,227 @@
+{
+  "change": "2026-10-27-scheduled-send-attachments",
+  "baseline": "e113b1b80ccfb8c5e8db7f1816f3e056ab2db166",
+  "head": "a758f2707ab5d0ddade35f7fdd7bb1de93dbb25d",
+  "files": [
+    "backend/app/modules/daemon/session/service/helpers.py",
+    "backend/app/modules/daemon/tests/test_session_queue.py",
+    "frontend/src/app/globals.css",
+    "frontend/src/app/m/workspaces/[id]/sessions/page.tsx",
+    "frontend/src/components/chat/round-divider.tsx",
+    "frontend/src/components/daemon/__tests__/session-panel-dialog-scheduled-attachments.test.tsx",
+    "frontend/src/components/daemon/session-panel/scheduled-send.tsx",
+    "frontend/src/components/daemon/session-panel/session-panel-dialog.tsx",
+    "frontend/src/components/daemon/session-panel/session-panel-page.tsx",
+    "frontend/src/components/floating/floating-session-host.tsx",
+    "frontend/src/components/mobile/mobile-tab-bar.test.tsx",
+    "frontend/src/components/mobile/mobile-tab-bar.tsx",
+    "frontend/src/components/mobile/mobile-top-bar.tsx",
+    "frontend/src/components/sessions/session-config-bar.tsx",
+    "sillyhub-daemon/src/interactive/session-manager.ts",
+    "sillyhub-daemon/src/interactive/session-manager/background-tasks.ts",
+    "sillyhub-daemon/src/interactive/session-manager/events.ts",
+    "sillyhub-daemon/src/interactive/session-manager/types.ts",
+    "sillyhub-daemon/tests/interactive/task-lifecycle.test.ts"
+  ],
+  "totals": {
+    "files": 19,
+    "additions": 973,
+    "deletions": 56
+  },
+  "savedAt": "2026-10-27T00:56:39.774Z",
+  "note": "flow done 时点冻结（本变更可归属交付面：baseline..HEAD 提交面过滤 .sillyspec/ 只留 .sillyspec/docs/ 交付文档 + 独占树未提交交付；治理工件目录不入冻结——2026-10-12-close-trace-freeze-integrity FR-01）",
+  "modules": [
+    {
+      "id": "daemon",
+      "files": 2,
+      "doc": "docs/backend/modules/daemon.md",
+      "docTouched": false,
+      "docMissing": false
+    },
+    {
+      "id": "backend",
+      "files": 2,
+      "doc": "docs/multi-agent-platform/modules/backend.md",
+      "docTouched": false,
+      "docMissing": false
+    },
+    {
+      "id": "frontend",
+      "files": 12,
+      "doc": "docs/multi-agent-platform/modules/frontend.md",
+      "docTouched": false,
+      "docMissing": false
+    },
+    {
+      "id": "sillyhub-daemon",
+      "files": 5,
+      "doc": "docs/multi-agent-platform/modules/sillyhub-daemon.md",
+      "docTouched": false,
+      "docMissing": false
+    },
+    {
+      "id": "daemon",
+      "files": 7,
+      "doc": "docs/SillyHub/modules/daemon.md",
+      "docTouched": false,
+      "docMissing": false
+    },
+    {
+      "id": "frontend_app",
+      "files": 2,
+      "doc": "docs/SillyHub/modules/frontend_app.md",
+      "docTouched": false,
+      "docMissing": false
+    },
+    {
+      "id": "frontend_components",
+      "files": 10,
+      "doc": "docs/SillyHub/modules/frontend_components.md",
+      "docTouched": false,
+      "docMissing": false
+    }
+  ],
+  "uncoveredDirs": [],
+  "moduleMaps": [
+    "docs/backend/modules/_module-map.yaml",
+    "docs/frontend/modules/_module-map.yaml",
+    "docs/multi-agent-platform/modules/_module-map.yaml",
+    "docs/SillyHub/modules/_module-map.yaml",
+    "docs/sillyhub-daemon/modules/_module-map.yaml"
+  ],
+  "acceptedDirtyGap": 9,
+  "scopeAudit": {
+    "mode": "full-flow",
+    "ok": true,
+    "degradedReason": null,
+    "baseAnchor": "e113b1b80ccfb8c5e8db7f1816f3e056ab2db166",
+    "totals": {
+      "files": 19,
+      "additions": 973,
+      "deletions": 56
+    },
+    "rows": [
+      {
+        "path": "backend/app/modules/daemon/session/service/helpers.py",
+        "additions": 8,
+        "deletions": 2,
+        "kind": "modified"
+      },
+      {
+        "path": "backend/app/modules/daemon/tests/test_session_queue.py",
+        "additions": 58,
+        "deletions": 3,
+        "kind": "modified"
+      },
+      {
+        "path": "frontend/src/app/globals.css",
+        "additions": 14,
+        "deletions": 0,
+        "kind": "modified"
+      },
+      {
+        "path": "frontend/src/app/m/workspaces/[id]/sessions/page.tsx",
+        "additions": 2,
+        "deletions": 1,
+        "kind": "modified"
+      },
+      {
+        "path": "frontend/src/components/chat/round-divider.tsx",
+        "additions": 6,
+        "deletions": 3,
+        "kind": "modified"
+      },
+      {
+        "path": "frontend/src/components/daemon/__tests__/session-panel-dialog-scheduled-attachments.test.tsx",
+        "additions": 405,
+        "deletions": 0,
+        "kind": "new"
+      },
+      {
+        "path": "frontend/src/components/daemon/session-panel/scheduled-send.tsx",
+        "additions": 41,
+        "deletions": 8,
+        "kind": "modified"
+      },
+      {
+        "path": "frontend/src/components/daemon/session-panel/session-panel-dialog.tsx",
+        "additions": 25,
+        "deletions": 3,
+        "kind": "modified"
+      },
+      {
+        "path": "frontend/src/components/daemon/session-panel/session-panel-page.tsx",
+        "additions": 65,
+        "deletions": 6,
+        "kind": "modified"
+      },
+      {
+        "path": "frontend/src/components/floating/floating-session-host.tsx",
+        "additions": 4,
+        "deletions": 1,
+        "kind": "modified"
+      },
+      {
+        "path": "frontend/src/components/mobile/mobile-tab-bar.test.tsx",
+        "additions": 5,
+        "deletions": 5,
+        "kind": "modified"
+      },
+      {
+        "path": "frontend/src/components/mobile/mobile-tab-bar.tsx",
+        "additions": 5,
+        "deletions": 3,
+        "kind": "modified"
+      },
+      {
+        "path": "frontend/src/components/mobile/mobile-top-bar.tsx",
+        "additions": 3,
+        "deletions": 1,
+        "kind": "modified"
+      },
+      {
+        "path": "frontend/src/components/sessions/session-config-bar.tsx",
+        "additions": 5,
+        "deletions": 2,
+        "kind": "modified"
+      },
+      {
+        "path": "sillyhub-daemon/src/interactive/session-manager.ts",
+        "additions": 12,
+        "deletions": 5,
+        "kind": "modified"
+      },
+      {
+        "path": "sillyhub-daemon/src/interactive/session-manager/background-tasks.ts",
+        "additions": 120,
+        "deletions": 9,
+        "kind": "modified"
+      },
+      {
+        "path": "sillyhub-daemon/src/interactive/session-manager/events.ts",
+        "additions": 16,
+        "deletions": 1,
+        "kind": "modified"
+      },
+      {
+        "path": "sillyhub-daemon/src/interactive/session-manager/types.ts",
+        "additions": 15,
+        "deletions": 1,
+        "kind": "modified"
+      },
+      {
+        "path": "sillyhub-daemon/tests/interactive/task-lifecycle.test.ts",
+        "additions": 164,
+        "deletions": 2,
+        "kind": "modified"
+      }
+    ],
+    "excluded": {
+      "foreignDeclared": []
+    },
+    "note": "flow done 时点冻结（本文件落盘时采集）",
+    "closedBy": "flow done"
+  },
+  "patchSha256": "7ddc93e5bd858db0d02735b79c89fedc4158ebe69c7c8682cc79acf88c604f33",
+  "patchStatus": "ok"
+}

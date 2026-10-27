@@ -1,0 +1,76 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-27-scheduled-send-attachments",
+  "reviewer": "subagent",
+  "verdict": "PASS",
+  "reviewedAgainst": "a758f2707ab5d0ddade35f7fdd7bb1de93dbb25d",
+  "findings": [
+    {
+      "severity": "P3",
+      "status": "accepted",
+      "title": "design.md 风险节承诺的「部分删除后只清剩余」测试用例未交付",
+      "evidence": "design.md:46 明言「新增测试断言『部分删除后只清剩余』」，交付 6 用例中无此场景；行为本身由代码构造保证（捕获 attachmentIds 集合做 prev.filter 精确过滤 + clearAttachmentsRef 与 onSendSettled 同一消费点），风险低但设计承诺与测试交付不符。",
+      "location": ".sillyspec/changes/2026-10-27-scheduled-send-attachments/design.md:46"
+    },
+    {
+      "severity": "P3",
+      "status": "accepted",
+      "title": "FR-02/FR-04 测试绑定名与实际用例题名不精确对应，且 attachmentMetaRef 镜像删除无断言",
+      "evidence": "requirements.md 绑定 FR-02「定时创建成功后清空附件 chips 与元数据镜像」实际合并进用例「FR-01：定时创建请求携带附件 id；创建成功后附件 chips 清空（FR-02）」（无该绑定名）；FR-04 绑定「带附件空文本可创建定时消息」实际题名为「带附件空文本可创建（看图说话）…」；attachmentMetaRef 为 useRef 内部态不可 DOM 观测，全文件无任何镜像删除断言。行为已实现（dialog/page 两处 for..delete 循环），仅绑定追溯性弱化，非行为缺陷。",
+      "location": "frontend/src/components/daemon/__tests__/session-panel-dialog-scheduled-attachments.test.tsx:499"
+    },
+    {
+      "severity": "P3",
+      "status": "accepted",
+      "title": "交付提交 cd99ffcf5 的 session-panel-page.tsx 混入并行变更 visual-round2 的 4 个 hunk",
+      "evidence": "cd99ffcf5 中 page.tsx 除本变更的 @@1028/@@6520 两 hunk 外，还带入 mobileExecPanelOpen/mobileAgentLogOpen 状态声明、⋯ 菜单「执行信息/本地 Agent 日志」两按钮、AgentLogCard 与 TaskExecutionPanel 的 mobile 门控（属 2026-10-27-mobile-chat-visual-round2）；change.patch 冻结件同样全量混入 backend helpers.py 与 sillyhub-daemon task-wakeup hunk。行为无影响（visual-round2 后以 a758f2707 独立交付），系并行同仓 patch 快照机制已知形态，仅交付面大于冻结声明面。",
+      "location": "frontend/src/components/daemon/session-panel/session-panel-page.tsx:1295"
+    },
+    {
+      "severity": "P3",
+      "status": "accepted",
+      "title": "在途窗口期新上传附件会被 clearAttachmentsRef 全清误伤，「按 id 精确过滤不误伤」仅对删除场景成立",
+      "evidence": "session-input-bar.tsx:780-786 注册的清空句柄是全清（setAttachments([]) + onAttachmentsChange([]) + token map 复位），创建成功路径调用它会连带清掉在途亚秒窗口内新上传的附件；此形态与普通发送 onSendSettled（page 3883 / dialog 499）逐字一致，非本变更引入，单次 POST 窗口极短，接受为既有口径。",
+      "location": "frontend/src/components/daemon/session-panel/session-panel-dialog.tsx:370"
+    }
+  ],
+  "dimensionNotes": {
+    "乱序": "ok——schedSubmitting 三层防重复（入口早退 + 确认按钮 loading 禁用 + 取消按钮在途禁用），单次 POST 无流式竞态；文本清理走 trim 比对防覆盖在途新输入，与 onSendSettled 口径一致。唯一残余是在途新增附件被全清句柄连带清掉（finding 4，与普通发送同口径）。",
+    "并发": "ok——setPendingAttachments 走函数式更新（prev.filter）React 批处理串行；attachmentMetaRef 逐 id delete 不触碰其它条目；clearAttachmentsRef 调输入栏既有一键清空句柄，消费点与 onSendSettled 同一（session-input-bar.tsx:780）。无跨组件并发写面。",
+    "切换": "ok——切会话 effect 关弹窗清提示（dialog:325/page:1013 既有）；sid 在入口捕获，在途切换后创建仍落原会话（正确目标）；成功清理 setInput 走 trim 比对不会误清新会话草稿，附件按捕获 id 过滤与 onSendSettled 同口径。",
+    "作用域": "ok——只透传本会话输入框 pendingAttachments 的 id，附件上传时已绑定上传者 user_id，归属校验由后端到点 inject 管线执行；不复制附件数据不跨会话引用；dialog/page 各持独立 state。"
+  },
+  "boundaryRulings": [
+    {
+      "boundary": "定时窗口内附件失效（被删/会话删除）不做前端预检，由后端到点派发校验兜底（failed 留档可见）",
+      "ruling": "可接受",
+      "reason": "后端 sweeper 锁内校验既有兜底且失败态在定时条可见留档，前端预检属重复建设且存在 TOCTOU 无法真正消除。"
+    },
+    {
+      "boundary": "创建成功清理按本次携带 id 精确过滤（chips filter + meta 逐 id delete），全清句柄仅在有附件时调用",
+      "ruling": "可接受",
+      "reason": "与 onSendSettled 同一消费点同口径逐字对齐，删除场景精确不误伤；在途新增附件的连带全清是普通发送既有形态（亚秒窗口，finding 4 已记录）。"
+    },
+    {
+      "boundary": "空文本+附件放宽允许创建定时消息（FR-04），空文本且无附件仍双重拦截（按钮禁用+函数早退兜底）",
+      "ruling": "可接受",
+      "reason": "backend scheduled_messages.py:113「not prompt.strip() and not attachment_ids」豁免口径逐字对齐，与普通发送 D-7 看图说话及忙轮排队一致，无口径分裂。"
+    },
+    {
+      "boundary": "空态提示文案仅在「空文本且无附件」时出现（带附件空文本不再显示 amber 提示）",
+      "ruling": "可接受",
+      "reason": "提示语义随门控放宽同步收敛，避免「可创建却提示无法创建」的自相矛盾 UI。"
+    },
+    {
+      "boundary": "放弃方案：定时弹窗内做独立附件上传入口",
+      "ruling": "可接受",
+      "reason": "与弹窗「把输入框现有内容定时发出去」的交互叙事冲突，且上传管线与 UI 重复建设。"
+    },
+    {
+      "boundary": "放弃方案：只修 page 模式——dialog/page 两处 confirmSchedCreate 成对复制必须同修",
+      "ruling": "可接受",
+      "reason": "两处历史上即成对复制维护，单修必致双模式口径分裂。"
+    }
+  ],
+  "reviewedAt": "2026-10-27T09:00:29+08:00"
+}

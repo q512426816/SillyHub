@@ -8500,3 +8500,98 @@
 摘要：主路径
 全文：.sillyspec/changes/archive/2026-10-27-mobile-chat-visual-round2/requirements.md#FR-06
 最近确认：a758f2707ab5d0ddade35f7fdd7bb1de93dbb25d
+
+## FR-daemon-313 会话面板 dialog 与 page 两模式创建定时消息时，输入框已上传附件的 id 随请求体 attachment_ids 携带
+变更：2026-10-27-scheduled-send-attachments
+状态：active
+摘要：带附件创建定时消息；无附件创建定时消息（零回归）
+全文：.sillyspec/changes/archive/2026-10-27-scheduled-send-attachments/requirements.md#FR-01
+最近确认：c2d6111ec3d0c98ee7bd96054eaa91fc0a24f734
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-27-scheduled-send-attachments:flow:测试绑定FR-01
+  tests: frontend/src/components/daemon/__tests__/session-panel-dialog-scheduled-attachments.test.tsx「定时创建请求携带附件 id」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-27-scheduled-send-attachments
+  status: active
+
+## FR-daemon-314 定时消息创建成功后，输入框附件 chips 与附件元数据镜像同步清空（与文本草稿清空同口径）
+变更：2026-10-27-scheduled-send-attachments
+状态：active
+摘要：创建成功清附件；创建失败保留现场
+全文：.sillyspec/changes/archive/2026-10-27-scheduled-send-attachments/requirements.md#FR-02
+最近确认：c2d6111ec3d0c98ee7bd96054eaa91fc0a24f734
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-27-scheduled-send-attachments:flow:测试绑定FR-02
+  tests: frontend/src/components/daemon/__tests__/session-panel-dialog-scheduled-attachments.test.tsx「定时创建成功后清空附件 chips 与元数据镜像」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-27-scheduled-send-attachments
+  status: active
+
+## FR-daemon-315 定时发送弹窗在携带附件时展示附件预览列表，让用户可见附件将随消息发送
+变更：2026-10-27-scheduled-send-attachments
+状态：active
+摘要：弹窗附件预览；无附件弹窗不占位
+全文：.sillyspec/changes/archive/2026-10-27-scheduled-send-attachments/requirements.md#FR-03
+最近确认：c2d6111ec3d0c98ee7bd96054eaa91fc0a24f734
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-27-scheduled-send-attachments:flow:测试绑定FR-03
+  tests: frontend/src/components/daemon/__tests__/session-panel-dialog-scheduled-attachments.test.tsx「定时弹窗展示附件预览列表」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-27-scheduled-send-attachments
+  status: active
+
+## FR-daemon-316 带附件时允许空文本创建定时消息（对齐普通发送 D-7 看图说话口径），空文本且无附件仍禁用确认
+变更：2026-10-27-scheduled-send-attachments
+状态：active
+摘要：附件豁免空文本；空文本无附件仍禁用
+全文：.sillyspec/changes/archive/2026-10-27-scheduled-send-attachments/requirements.md#FR-04
+最近确认：c2d6111ec3d0c98ee7bd96054eaa91fc0a24f734
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-27-scheduled-send-attachments:flow:测试绑定FR-04
+  tests: frontend/src/components/daemon/__tests__/session-panel-dialog-scheduled-attachments.test.tsx「带附件空文本可创建定时消息」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-27-scheduled-send-attachments
+  status: active
+
+## FR-daemon-317 更新/新增前端测试覆盖定时创建携带附件断言，相关测试与 lint 通过
+变更：2026-10-27-scheduled-send-attachments
+状态：active
+摘要：测试与 lint 全绿
+全文：.sillyspec/changes/archive/2026-10-27-scheduled-send-attachments/requirements.md#FR-05
+最近确认：c2d6111ec3d0c98ee7bd96054eaa91fc0a24f734
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-27-scheduled-send-attachments:flow:测试绑定FR-05
+  tests: frontend/src/components/daemon/__tests__/session-panel-dialog-scheduled-attachments.test.tsx
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-27-scheduled-send-attachments
+  status: active
