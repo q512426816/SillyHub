@@ -1,0 +1,79 @@
+{
+  "change": "2026-10-27-task-parser-md-check-fallback",
+  "baseline": "393363f3f6df431b567bbf53717b6323f0c35a79",
+  "head": "4816e3611244550fc2e97be15e7049d7dbf10665",
+  "files": [
+    "backend/app/modules/task/parser.py",
+    "backend/app/modules/task/tests/test_parser.py"
+  ],
+  "totals": {
+    "files": 2,
+    "additions": 127,
+    "deletions": 30
+  },
+  "savedAt": "2026-10-27T07:23:53.845Z",
+  "note": "flow done 时点冻结（本变更可归属交付面：baseline..HEAD 提交面过滤 .sillyspec/ 只留 .sillyspec/docs/ 交付文档 + 独占树未提交交付；治理工件目录不入冻结——2026-10-12-close-trace-freeze-integrity FR-01）",
+  "modules": [
+    {
+      "id": "task",
+      "files": 2,
+      "doc": "docs/backend/modules/task.md",
+      "docTouched": false,
+      "docMissing": false
+    },
+    {
+      "id": "backend",
+      "files": 2,
+      "doc": "docs/multi-agent-platform/modules/backend.md",
+      "docTouched": false,
+      "docMissing": false
+    },
+    {
+      "id": "task",
+      "files": 2,
+      "doc": "docs/SillyHub/modules/task.md",
+      "docTouched": false,
+      "docMissing": false
+    }
+  ],
+  "uncoveredDirs": [],
+  "moduleMaps": [
+    "docs/backend/modules/_module-map.yaml",
+    "docs/frontend/modules/_module-map.yaml",
+    "docs/multi-agent-platform/modules/_module-map.yaml",
+    "docs/SillyHub/modules/_module-map.yaml",
+    "docs/sillyhub-daemon/modules/_module-map.yaml"
+  ],
+  "scopeAudit": {
+    "mode": "full-flow",
+    "ok": true,
+    "degradedReason": null,
+    "baseAnchor": "393363f3f6df431b567bbf53717b6323f0c35a79",
+    "totals": {
+      "files": 2,
+      "additions": 127,
+      "deletions": 30
+    },
+    "rows": [
+      {
+        "path": "backend/app/modules/task/parser.py",
+        "additions": 59,
+        "deletions": 30,
+        "kind": "modified"
+      },
+      {
+        "path": "backend/app/modules/task/tests/test_parser.py",
+        "additions": 68,
+        "deletions": 0,
+        "kind": "modified"
+      }
+    ],
+    "excluded": {
+      "foreignDeclared": []
+    },
+    "note": "flow done 时点冻结（本文件落盘时采集）",
+    "closedBy": "flow done"
+  },
+  "patchSha256": "7822801ced382888ec3315166e8985d9525e32c36d8ebe88f2659259977ab0c8",
+  "patchStatus": "ok"
+}

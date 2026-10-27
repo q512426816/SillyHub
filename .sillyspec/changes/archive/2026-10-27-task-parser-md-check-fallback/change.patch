@@ -1,0 +1,220 @@
+diff --git a/backend/app/modules/task/parser.py b/backend/app/modules/task/parser.py
+index b54485e1a..20bd77f82 100644
+--- a/backend/app/modules/task/parser.py
++++ b/backend/app/modules/task/parser.py
+@@ -82,6 +82,33 @@ class TaskParser:
+         result = TaskParserResult()
+         tasks_dir = sillyspec_root / change_rel_path / "tasks"
+ 
++        # tasks.md 注册表勾选态先读（2026-10-27-task-parser-md-check-fallback）：
++        # 厚档变更勾选协议活在 tasks.md（CLI task-tick 改 checkbox，TaskCard
++        # frontmatter 不写 status），「卡片优先」若只跳过注册表行会让厚档任务
++        # 恒 draft（2026-10-28-bg-task-status-report 实证 7/7 全勾解析全 draft，
++        # 平台 execute 任务计数恒 0/N）。此处建 key→勾选映射供卡片 status 回退
++        # （卡片 frontmatter **显式** status 仍优先——富信息面不被勾选态覆盖语义
++        # 不变）；下方注册表行循环仍只补卡片未覆盖的 key（thin 单源零回归）。
++        tasks_md = sillyspec_root / change_rel_path / "tasks.md"
++        tasks_md_text = ""
++        md_checked: dict[str, bool] = {}
++        if tasks_md.is_file():
++            try:
++                tasks_md_text = tasks_md.read_text(encoding="utf-8", errors="replace")
++            except OSError as exc:
++                result.warnings.append(
++                    TaskParseWarning(
++                        code="TASKS_MD_UNREADABLE",
++                        detail=f"Cannot read tasks.md: {exc}",
++                    )
++                )
++                tasks_md_text = ""
++            for line in tasks_md_text.splitlines():
++                m = _TASKS_MD_LINE_RE.match(line)
++                if not m:
++                    continue
++                md_checked[m.group("key")] = m.group("checked").lower() == "x"
++
+         seen_keys: set[str] = set()
+ 
+         if tasks_dir.is_dir():
+@@ -117,6 +144,7 @@ class TaskParser:
+                 parsed = self._parse_task_file(
+                     md_file,
+                     rel_path=f"{change_rel_path}/tasks/{md_file.name}",
++                    md_checked=md_checked.get(task_key),
+                 )
+                 result.tasks.append(parsed)
+                 if parsed.status not in VALID_STATUSES:
+@@ -129,34 +157,23 @@ class TaskParser:
+                     )
+ 
+         # tasks.md 注册表行（thin 任务面）——卡片优先，只补未见 key
+-        tasks_md = sillyspec_root / change_rel_path / "tasks.md"
+-        if tasks_md.is_file():
+-            try:
+-                text = tasks_md.read_text(encoding="utf-8", errors="replace")
+-            except OSError as exc:
+-                result.warnings.append(
+-                    TaskParseWarning(
+-                        code="TASKS_MD_UNREADABLE",
+-                        detail=f"Cannot read tasks.md: {exc}",
+-                    )
+-                )
+-                text = ""
+-            for line in text.splitlines():
+-                m = _TASKS_MD_LINE_RE.match(line)
+-                if not m:
+-                    continue
+-                task_key = m.group("key")
+-                if task_key in seen_keys:
+-                    continue  # 卡片优先（docstring 声明）：厚档同 key 不覆盖
+-                seen_keys.add(task_key)
+-                result.tasks.append(
+-                    ParsedTask(
+-                        task_key=task_key,
+-                        title=m.group("title")[:500] or None,
+-                        status="done" if m.group("checked").lower() == "x" else "draft",
+-                        path=f"{change_rel_path}/tasks.md",
+-                    )
++        # （text 已在上方预读；厚档同 key 卡片已消费勾选映射，此处天然跳过）。
++        for line in tasks_md_text.splitlines():
++            m = _TASKS_MD_LINE_RE.match(line)
++            if not m:
++                continue
++            task_key = m.group("key")
++            if task_key in seen_keys:
++                continue  # 卡片优先（docstring 声明）：厚档同 key 不覆盖
++            seen_keys.add(task_key)
++            result.tasks.append(
++                ParsedTask(
++                    task_key=task_key,
++                    title=m.group("title")[:500] or None,
++                    status="done" if m.group("checked").lower() == "x" else "draft",
++                    path=f"{change_rel_path}/tasks.md",
+                 )
++            )
+ 
+         return result
+ 
+@@ -164,6 +181,7 @@ class TaskParser:
+         self,
+         md_file: Path,
+         rel_path: str,
++        md_checked: bool | None = None,
+     ) -> ParsedTask:
+         """Parse a single task-xx.md file."""
+         task_key = md_file.stem
+@@ -202,10 +220,21 @@ class TaskParser:
+                 except (ValueError, TypeError):
+                     est_hours = None
+ 
++            # status 优先级（2026-10-27-task-parser-md-check-fallback）：frontmatter
++            # **显式** status 键 > tasks.md 同 key 勾选态 > draft 缺省——厚档勾选
++            # 协议在 tasks.md checkbox（TaskCard 模板无 status 键），缺省 draft 与
++            # 显式 draft 靠键存在性区分。
++            if "status" in meta and meta.get("status") is not None:
++                status = str(meta["status"])
++            elif md_checked is not None:
++                status = "done" if md_checked else "draft"
++            else:
++                status = "draft"
++
+             return ParsedTask(
+                 task_key=meta.get("id", task_key) if isinstance(meta.get("id"), str) else task_key,
+                 title=str(title),
+-                status=str(meta.get("status", "draft")),
++                status=status,
+                 phase=meta.get("phase"),
+                 priority=meta.get("priority"),
+                 owner_key=meta.get("owner"),
+@@ -218,13 +247,13 @@ class TaskParser:
+                 content=post.content,
+             )
+ 
+-        # No frontmatter: extract from content
++        # No frontmatter: extract from content（status 回退同上：tasks.md 勾选态优先于 draft 缺省）
+         body = raw
+         title = self._extract_h1(body) or fallback_title
+         return ParsedTask(
+             task_key=task_key,
+             title=title,
+-            status="draft",
++            status="done" if md_checked is True else "draft",
+             path=rel_path,
+             content=body,
+         )
+diff --git a/backend/app/modules/task/tests/test_parser.py b/backend/app/modules/task/tests/test_parser.py
+index 6b2e45577..20d818582 100644
+--- a/backend/app/modules/task/tests/test_parser.py
++++ b/backend/app/modules/task/tests/test_parser.py
+@@ -187,3 +187,71 @@ class TestTasksMdRegistryLines:
+         root, rel_path = workspace_root
+         result = parser.parse_tasks(root, rel_path)
+         assert {t.task_key for t in result.tasks} == {"task-01", "task-02", "task-03"}
++
++
++class TestMdCheckFallback:
++    """厚档双源勾选回退（2026-10-27-task-parser-md-check-fallback）。
++
++    实证根因：2026-10-28-bg-task-status-report tasks.md 7/7 全勾但 TaskCard
++    frontmatter 无 status 键 → 旧逻辑「卡片优先跳过注册表行」解析恒 draft，
++    平台 execute 任务计数恒 0/N。修复：卡片无显式 status 时回退 tasks.md
++    同 key 勾选态（[x]→done / [ ]→draft / 无行→draft）；显式 status 优先。
++    """
++
++    @staticmethod
++    def _make_change(
++        tmp_path: Path,
++        *,
++        card_status: str | None,
++        md_line: str | None,
++    ) -> tuple[Path, str]:
++        """构造单卡变更：tasks/task-01.md（frontmatter 可含/不含 status）+ tasks.md（可含/不含行）。"""
++        change_dir = tmp_path / ".sillyspec" / "changes" / "change" / "thick-demo"
++        (change_dir / "tasks").mkdir(parents=True)
++        status_line = f"status: {card_status}\n" if card_status is not None else ""
++        (change_dir / "tasks" / "task-01.md").write_text(
++            f"---\nid: task-01\ntitle: 卡片任务\n{status_line}---\n\n正文\n",
++            encoding="utf-8",
++        )
++        if md_line is not None:
++            (change_dir / "tasks.md").write_text(f"# 任务\n\n{md_line}\n", encoding="utf-8")
++        return tmp_path, ".sillyspec/changes/change/thick-demo"
++
++    def test_card_no_status_md_checked_done(self, parser: TaskParser, tmp_path: Path) -> None:
++        """卡无 status + md 勾选 [x] → done（主路径，修复目标）。"""
++        root, rel = self._make_change(tmp_path, card_status=None, md_line="- [x] task-01: 描述")
++        result = parser.parse_tasks(root, rel)
++        assert len(result.tasks) == 1
++        assert result.tasks[0].status == "done"
++        # 富信息面保留：title/内容仍来自卡片，path 锚卡片文件
++        assert result.tasks[0].title == "卡片任务"
++        assert result.tasks[0].path.endswith("tasks/task-01.md")
++
++    def test_card_no_status_md_unchecked_draft(self, parser: TaskParser, tmp_path: Path) -> None:
++        """卡无 status + md 未勾 [ ] → draft。"""
++        root, rel = self._make_change(tmp_path, card_status=None, md_line="- [ ] task-01: 描述")
++        result = parser.parse_tasks(root, rel)
++        assert result.tasks[0].status == "draft"
++
++    def test_card_explicit_status_wins(self, parser: TaskParser, tmp_path: Path) -> None:
++        """卡显式 status（in_progress）优先，不被 md 勾选覆盖。"""
++        root, rel = self._make_change(
++            tmp_path, card_status="in_progress", md_line="- [x] task-01: 描述"
++        )
++        result = parser.parse_tasks(root, rel)
++        assert result.tasks[0].status == "in_progress"
++
++    def test_card_no_status_no_md_line_draft(self, parser: TaskParser, tmp_path: Path) -> None:
++        """卡无 status 且 md 无该 key 行 → draft（缺省不变）。"""
++        root, rel = self._make_change(tmp_path, card_status=None, md_line=None)
++        result = parser.parse_tasks(root, rel)
++        assert result.tasks[0].status == "draft"
++
++    def test_card_no_frontmatter_md_checked_done(self, parser: TaskParser, tmp_path: Path) -> None:
++        """卡无 frontmatter（裸 markdown）+ md 勾选 → done（无 frontmatter 分支同款回退）。"""
++        change_dir = tmp_path / ".sillyspec" / "changes" / "change" / "bare"
++        (change_dir / "tasks").mkdir(parents=True)
++        (change_dir / "tasks" / "task-01.md").write_text("# 裸卡\n正文\n", encoding="utf-8")
++        (change_dir / "tasks.md").write_text("- [x] task-01: 描述\n", encoding="utf-8")
++        result = parser.parse_tasks(tmp_path, ".sillyspec/changes/change/bare")
++        assert result.tasks[0].status == "done"

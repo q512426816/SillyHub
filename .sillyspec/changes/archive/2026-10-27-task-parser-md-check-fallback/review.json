@@ -1,0 +1,30 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-27-task-parser-md-check-fallback",
+  "reviewer": "inline-self（主会话代行自审——修复即本会话产出，无独立子代理通道）",
+  "verdict": "PASS",
+  "reviewedAgainst": "4816e3611244550fc2e97be15e7049d7dbf10665",
+  "findings": [
+    {
+      "severity": "P3",
+      "status": "accepted",
+      "title": "OSError 早退分支（读卡失败）不走勾选回退",
+      "evidence": "parser.py _parse_task_file 读文件 OSError 时直接 return ParsedTask(status 缺省 draft) 未带 md_checked——读失败本身无卡片信息可言，draft 缺省合理且与修复前行为一致，接受",
+      "location": "backend/app/modules/task/parser.py:192-198"
+    },
+    {
+      "severity": "P3",
+      "status": "resolved",
+      "title": "卡片显式 status 与勾选冲突的语义边界",
+      "evidence": "键存在性区分（'status' in meta）保显式优先；test_card_explicit_status_wins 锁定 in_progress+勾选场景",
+      "location": "backend/app/modules/task/parser.py:223-231"
+    }
+  ],
+  "dimensionNotes": {
+    "乱序": "ok",
+    "并发": "ok",
+    "切换": "ok",
+    "作用域": "ok"
+  },
+  "reviewedAt": "2026-10-27T15:25:00+08:00"
+}

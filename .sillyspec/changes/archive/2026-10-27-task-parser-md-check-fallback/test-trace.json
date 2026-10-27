@@ -1,0 +1,54 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-27-task-parser-md-check-fallback",
+  "rows": [
+    {
+      "anchor": "FR-01",
+      "row_id": "2026-10-27-task-parser-md-check-fallback:flow:测试绑定FR-01",
+      "tests": [
+        "backend/app/modules/task/tests/test_parser.py「test_card_explicit_status_wins」",
+        "backend/app/modules/task/tests/test_parser.py「test_card_no_frontmatter_md_checked_done」",
+        "backend/app/modules/task/tests/test_parser.py「test_card_no_status_md_checked_done」",
+        "backend/app/modules/task/tests/test_parser.py「test_card_no_status_md_unchecked_draft」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-27-task-parser-md-check-fallback"
+    },
+    {
+      "anchor": "FR-02",
+      "row_id": "2026-10-27-task-parser-md-check-fallback:flow:测试绑定FR-02",
+      "tests": [
+        "backend/app/modules/task/tests/test_parser.py「test_parse_three_tasks」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-27-task-parser-md-check-fallback"
+    },
+    {
+      "anchor": "FR-03",
+      "row_id": "2026-10-27-task-parser-md-check-fallback:flow:测试绑定FR-03",
+      "tests": [
+        "backend/app/modules/task/tests/test_parser.py「TestMdCheckFallback（五用例）」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-27-task-parser-md-check-fallback"
+    }
+  ]
+}
