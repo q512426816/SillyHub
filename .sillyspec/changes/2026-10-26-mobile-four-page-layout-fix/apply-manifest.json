@@ -1,0 +1,92 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-26-mobile-four-page-layout-fix",
+  "appliedAt": "2026-10-26T23:43:59.101Z",
+  "baseHash": "3cddcf1f74853cf031512a70aedc1ce593d2e597",
+  "files": [
+    {
+      "path": "frontend/src/app/(dashboard)/sessions/__tests__/page.test.tsx",
+      "sha256": "79fd2749eac61cc993b7fc6279cfc14fd058ca60728d438232b6b1c9354064c3"
+    },
+    {
+      "path": "frontend/src/app/globals.css",
+      "sha256": "79e036f87444f3f678d88d3986df9354cfec24f144ea421f5c1f991aea2e7d19"
+    },
+    {
+      "path": "frontend/src/app/m/workspaces/[id]/changes/page.tsx",
+      "sha256": "353c4df84ab67f4863b866dd00b7357473adabdebdd8779ac109d9cbc984957b"
+    },
+    {
+      "path": "frontend/src/app/m/workspaces/[id]/sessions/page.tsx",
+      "sha256": "72f7bd3f2b32d833de74b7b16c8caf9a5174a3306f7a9b7e4e76f71b11a96543"
+    },
+    {
+      "path": "frontend/src/app/m/workspaces/page.tsx",
+      "sha256": "1dcfc6a457c10d8ac1b37306d9857f7cc80f3a5a27e559cc3511854ba9581589"
+    },
+    {
+      "path": "frontend/src/components/changes/__tests__/platform-sync-section.test.tsx",
+      "sha256": "d62ea4fca1055338dc592103273deb2e026c00807105ace669e869ae200f3a3a"
+    },
+    {
+      "path": "frontend/src/components/changes/platform-sync-section.tsx",
+      "sha256": "4048996dee795df7d5a8a318480a4e3c63fa6d825db2abca06967ea79bc5f2c6"
+    },
+    {
+      "path": "frontend/src/components/chat/__tests__/round-divider.test.tsx",
+      "sha256": "66f1f1a4a1e2dedb70ad01c627df244f81c1779d91e98a20747831b6ae8d75a9"
+    },
+    {
+      "path": "frontend/src/components/chat/round-divider.tsx",
+      "sha256": "8e70534afd92d63b5cd41b5690afd9eb5392d7ddb3d0aa8fb8c4aa57348f57f4"
+    },
+    {
+      "path": "frontend/src/components/daemon/__tests__/turn-live-marquee.test.tsx",
+      "sha256": "73b1acb6e26c700f227fbb8b8bba34fd490ad47dbc8b556a56a23b42bc6e71b1"
+    },
+    {
+      "path": "frontend/src/components/daemon/__tests__/turn-timeline-token-speed.test.tsx",
+      "sha256": "282267d15aa39fa8b7526b6333d07f9e5030acaf92cfc0cb75480b7f8b32e1a7"
+    },
+    {
+      "path": "frontend/src/components/daemon/session-panel/page-helpers.tsx",
+      "sha256": "b5cb753724312bd8de446a6c3702cb63f84211babf28318045041d65d80b5c4c"
+    },
+    {
+      "path": "frontend/src/components/daemon/turn-live-marquee.tsx",
+      "sha256": "0c5da7e3b71f1457a89619800c8e48a8b25233a429ad087be63e5a63ace0aaa7"
+    },
+    {
+      "path": "frontend/src/components/daemon/turn-timeline.tsx",
+      "sha256": "bf2e6b6dfb7bfa7659d27a7f9c0540c4a2fa62050d28b4bb7863174a0dd347fb"
+    },
+    {
+      "path": "frontend/src/components/mobile/mobile-app-shell.tsx",
+      "sha256": "73cd1f9182d2f4c0a581520c74bfb7c40f2666efef964f21cd57d531a5e1ba48"
+    },
+    {
+      "path": "frontend/src/components/mobile/mobile-tab-bar.test.tsx",
+      "sha256": "1d10a7d75716df44f4f5743b9bab0270b65380074f7e47cbe17d0d26aee55562"
+    },
+    {
+      "path": "frontend/src/components/mobile/mobile-tab-bar.tsx",
+      "sha256": "ebf18cbc86c46e4433216a40eaba4eaa3f072e77d1ecb84bd6b259e0739c0e69"
+    },
+    {
+      "path": "frontend/src/components/mobile/mobile-workspace-header.tsx",
+      "sha256": "57fd6ca95d781589cf4465eb65c71b9006eeaca2ff0c5da8aa300257eba866b1"
+    },
+    {
+      "path": "frontend/src/components/sessions/__tests__/session-config-bar.test.tsx",
+      "sha256": "a3163c87c60af84cdbf34b107346202223374145c3cc0f367ad2413a2ba8ed2c"
+    },
+    {
+      "path": "frontend/src/components/sessions/session-config-bar.tsx",
+      "sha256": "3d5c86ab97ae0c01e0aa62d59c9b48adfba3e79fc385106b09fbd741457afb9a"
+    },
+    {
+      "path": "frontend/src/components/daemon/session-panel/session-panel-page.tsx",
+      "sha256": "c3248943212d71e476709f9fd299529c66d7fed7acaae3491fb7213e750263b2"
+    }
+  ]
+}

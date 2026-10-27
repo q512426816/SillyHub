@@ -1,0 +1,137 @@
+{
+  "schemaVersion": 2,
+  "change": "2026-10-26-mobile-four-page-layout-fix",
+  "generatedAt": "2026-10-26T23:54:28.891Z",
+  "probes": {
+    "probe1": {
+      "command": "sillyspec verify-probes --change 2026-10-26-mobile-four-page-layout-fix",
+      "metrics": {
+        "matches": 0,
+        "skippedFiles": 0,
+        "worktreeHits": 0,
+        "globEntries": 4
+      }
+    },
+    "probe3": {
+      "command": "sillyspec verify-probes --change 2026-10-26-mobile-four-page-layout-fix",
+      "metrics": {
+        "tasks": 11,
+        "hasTest": 11
+      }
+    },
+    "probe5": {
+      "command": "sillyspec verify-probes --change 2026-10-26-mobile-four-page-layout-fix",
+      "metrics": {
+        "backendEndpoints": 662,
+        "frontendCalls": 0
+      }
+    },
+    "probe6": {
+      "command": "sillyspec verify-probes --change 2026-10-26-mobile-four-page-layout-fix",
+      "metrics": {
+        "deletions": 0,
+        "unavailable": false
+      }
+    },
+    "probe8": {
+      "command": "sillyspec verify-probes --change 2026-10-26-mobile-four-page-layout-fix",
+      "metrics": {
+        "mispairs": 0,
+        "feOnly": 0,
+        "missingNotNull": 0,
+        "contractCount": 0,
+        "contractOrphans": 0,
+        "missingRequired": 0,
+        "feKeys": 0,
+        "backendFields": 0
+      }
+    },
+    "probe9": {
+      "command": "sillyspec verify-probes --change 2026-10-26-mobile-four-page-layout-fix",
+      "metrics": {
+        "javaFileCount": 0,
+        "groupCount": 0,
+        "inconsistentGroups": 0
+      }
+    },
+    "probe10": {
+      "command": "sillyspec verify-probes --change 2026-10-26-mobile-four-page-layout-fix",
+      "metrics": {
+        "checkedFiles": 12,
+        "unclearedFiles": 0
+      }
+    }
+  },
+  "apiFace": {
+    "endpoints": [],
+    "declared": 0,
+    "writeEndpoints": []
+  },
+  "conclusion": "PASS WITH NOTES",
+  "handover": {
+    "count": 6,
+    "items": [
+      {
+        "type": "visual-verify",
+        "item": "task-01 避让 calc 布局效果（safe-area 真机形态）：列表末项滚动到底完整可见",
+        "condition": "用户真机复验（NFR-03，visual-evidence 清单 1）——不满意按页迭代",
+        "severity": "blocking"
+      },
+      {
+        "type": "visual-verify",
+        "item": "task-02 .m-app 密度变量块作用域与观感（36px/12px 基准松紧）",
+        "condition": "用户真机复验（清单 4）；需调参改 globals.css .m-app 变量块一处",
+        "severity": "blocking"
+      },
+      {
+        "type": "visual-verify",
+        "item": "task-09 搜索框 w-full 布局效果：placeholder「搜索 Key / 标题 / 描述 / 组件…」完整可见",
+        "condition": "用户真机复验（清单 3 变更中心）",
+        "severity": "blocking"
+      },
+      {
+        "type": "visual-verify",
+        "item": "task-10 工作区页单屏 ≥3 卡视觉密度（量纲推导 3~4 卡）",
+        "condition": "用户真机复验（清单 4）",
+        "severity": "blocking"
+      },
+      {
+        "type": "visual-verify",
+        "item": "task-10 slug/负责人合并行 truncate 超长形态",
+        "condition": "用户真机复验（超长路径工作区样例）",
+        "severity": "blocking"
+      },
+      {
+        "type": "visual-verify",
+        "item": "task-11 FAB 让位 spacer：滚动到底最后会话卡片不被「+」压字",
+        "condition": "用户真机复验（清单 1/2）",
+        "severity": "blocking"
+      }
+    ]
+  },
+  "dbScriptDeclarations": [],
+  "runtimeEndpointExcluded": false,
+  "integrationRan": "ran",
+  "matrixPartialRows": 6,
+  "consumerHints": {},
+  "smokeRan": "not-configured",
+  "factsConsistency": {
+    "checked": [
+      "probe1",
+      "probe3",
+      "probe5",
+      "probe6",
+      "probe8",
+      "probe9"
+    ],
+    "verdict": "match",
+    "detail": null
+  },
+  "tests": {
+    "command": "module[]+deps(jsx7)",
+    "exitCode": 0,
+    "strategy": "dynamic-subset",
+    "failedRemaining": [],
+    "passedAt": "2026-10-26T23:59:52.940Z"
+  }
+}

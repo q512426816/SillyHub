@@ -1,0 +1,895 @@
+diff --git a/frontend/src/app/(dashboard)/sessions/__tests__/page.test.tsx b/frontend/src/app/(dashboard)/sessions/__tests__/page.test.tsx
+index ba9d34834..36b3b7080 100644
+--- a/frontend/src/app/(dashboard)/sessions/__tests__/page.test.tsx
++++ b/frontend/src/app/(dashboard)/sessions/__tests__/page.test.tsx
+@@ -62,6 +62,7 @@ import type {
+   SessionRunRead,
+ } from "@/lib/daemon";
+ import { closestAntdSelect, queryAntdSelectZone } from "@/test/dom-queries";
++import { deriveSessionPlaceholder } from "@/components/daemon/session-panel/page-helpers";
+ 
+ // ── hoisted mock 状态 ─────────────────────────────────────────────────────
+ 
+@@ -3140,3 +3141,28 @@ describe("2026-10-15-dsh-engine-acp task-07：dsh 单聊引擎边界钉（FR-08
+     expect(wizardSrc).not.toContain('GROUP_SUPPORTED_PROVIDERS = new Set(["claude", "codex", "pi", "dsh"])');
+   });
+ });
++
++describe("deriveSessionPlaceholder 排队态 mobile 短句（2026-10-26-mobile-four-page-layout-fix task-07 / FR-03）", () => {
++  const BASE = {
++    sessionWorkspaceArchived: false,
++    ended: false,
++    suspended: false,
++    machineOnline: true,
++    isToolReportBody: false,
++    isQueueFull: false,
++    restoring: false,
++    running: true,
++  };
++
++  it("running+mobile → 短句「已排队，结束后自动发送…」（≤14 字，430pt 输入框不截断）", () => {
++    const text = deriveSessionPlaceholder({ ...BASE, mobile: true });
++    expect(text).toBe("已排队，结束后自动发送…");
++    expect([...text].length).toBeLessThanOrEqual(14);
++  });
++
++  it("desktop 锚：running 缺省占位「消息将排队，等待本轮完成后自动发送…」逐字符不变", () => {
++    expect(deriveSessionPlaceholder({ ...BASE })).toBe(
++      "消息将排队，等待本轮完成后自动发送…",
++    );
++  });
++});
+diff --git a/frontend/src/app/globals.css b/frontend/src/app/globals.css
+index 77c5c5805..ece8f2f19 100644
+--- a/frontend/src/app/globals.css
++++ b/frontend/src/app/globals.css
+@@ -383,6 +383,17 @@
+     font-size: 16px;
+   }
+ 
++  /* /m/ 壳内密度规约（2026-10-26-mobile-four-page-layout-fix task-02）：手机端
++     控件密度基准一处定义，/m/ 页面以 var() 引用（如 h-[var(--m-ctl-h)]、
++     p-[var(--m-card-pad)]），避免逐页散调。只定义变量不强改元素——antd 组件内部
++     布局不经此处强设（组件色/形走 ConfigProvider token，尺寸同理不在此劫持）；
++     页面按需引用，局部覆盖权保留。desktop 不在 .m-app 内，零波及。 */
++  .m-app {
++    --m-ctl-h: 36px; /* 控件高度基准（按钮/输入/筛选器一档） */
++    --m-card-pad: 12px; /* 卡片内距基准 */
++    --m-row-min-h: 44px; /* 列表行触控最小高（触屏可达性下限，只升不降） */
++  }
++
+   h1 {
+     @apply text-xl font-semibold tracking-tight text-foreground;
+   }
+diff --git a/frontend/src/app/m/workspaces/[id]/changes/page.tsx b/frontend/src/app/m/workspaces/[id]/changes/page.tsx
+index dc2d5ac0e..fd3cbd808 100644
+--- a/frontend/src/app/m/workspaces/[id]/changes/page.tsx
++++ b/frontend/src/app/m/workspaces/[id]/changes/page.tsx
+@@ -975,7 +975,7 @@ export default function MobileChangesPage() {
+           changes 页「解析警告」卡后同位镜像（task-03 起上方有重新扫描反馈区，
+           置于反馈区后、Tab 前）；compact 紧凑布局（行纵向堆叠 + 44px 触摸热区）。
+           无绑定或无 sillyspec_status 时组件自渲染 null，页面行为与现状一致 */}
+-      <PlatformSyncSection workspaceId={workspaceId} compact />
++      <PlatformSyncSection workspaceId={workspaceId} compact mobile />
+ 
+       {/* 双 Tab + 计数徽标（tabTotals 独立 useQuery，不随筛选变化）；quicklog
+           tab 已隐藏（2026-10-07-hide-quicklog-tab），存量视图经深链进下方条件区 */}
+@@ -1018,7 +1018,10 @@ export default function MobileChangesPage() {
+         //    （FR-04）起挂独立筛选抽屉（状态/作者/空壳占位，与主列表抽屉分离）；
+         //    卡片点击 MobileDetailSheet 全屏详情 ─────────────────────────────────
+         <>
+-          <div className="flex items-center gap-2">
++          {/* 工具栏两行化（2026-10-26-mobile-four-page-layout-fix task-09 / FR-06）：
++              搜索框 w-full 独占一行（placeholder 完整可见），搜索/筛选/重扫折到
++              第二行——四控件挤一行时 430pt 视口搜索框被压到裁切的根因修复。 */}
++          <div className="flex flex-wrap items-center gap-2">
+             <input
+               value={searchInput}
+               onChange={(e) => setSearchInput(e.target.value)}
+@@ -1028,7 +1031,7 @@ export default function MobileChangesPage() {
+               placeholder="搜索标题 / 正文全文…"
+               aria-label="搜索快速修复"
+               data-testid="m-quicklog-search-input"
+-              className="min-h-[44px] min-w-0 flex-1 rounded-[var(--radius-md)] border border-border bg-card px-3 text-[14px] text-foreground outline-none placeholder:text-muted-foreground focus:border-primary/50"
++              className="min-h-[44px] w-full rounded-[var(--radius-md)] border border-border bg-card px-3 text-[14px] text-foreground outline-none placeholder:text-muted-foreground focus:border-primary/50"
+             />
+             <button
+               type="button"
+@@ -1171,8 +1174,9 @@ export default function MobileChangesPage() {
+         </>
+       ) : (
+         <>
+-          {/* 工具栏：搜索框 + 筛选抽屉入口（阶段 / 排序 / 只看待我处理收进抽屉） */}
+-          <div className="flex items-center gap-2">
++          {/* 工具栏：搜索框 + 筛选抽屉入口（阶段 / 排序 / 只看待我处理收进抽屉）。
++              两行化同 quicklog tab（task-09 / FR-06）：搜索框独占一行，按钮第二行。 */}
++          <div className="flex flex-wrap items-center gap-2">
+             <input
+               value={searchInput}
+               onChange={(e) => setSearchInput(e.target.value)}
+@@ -1182,7 +1186,7 @@ export default function MobileChangesPage() {
+               placeholder="搜索 Key / 标题 / 描述 / 组件…"
+               aria-label="搜索变更"
+               data-testid="m-changes-search-input"
+-              className="min-h-[44px] min-w-0 flex-1 rounded-[var(--radius-md)] border border-border bg-card px-3 text-[14px] text-foreground outline-none placeholder:text-muted-foreground focus:border-primary/50"
++              className="min-h-[44px] w-full rounded-[var(--radius-md)] border border-border bg-card px-3 text-[14px] text-foreground outline-none placeholder:text-muted-foreground focus:border-primary/50"
+             />
+             <button
+               type="button"
+diff --git a/frontend/src/app/m/workspaces/[id]/sessions/page.tsx b/frontend/src/app/m/workspaces/[id]/sessions/page.tsx
+index 621c54a93..b84043918 100644
+--- a/frontend/src/app/m/workspaces/[id]/sessions/page.tsx
++++ b/frontend/src/app/m/workspaces/[id]/sessions/page.tsx
+@@ -282,7 +282,11 @@ export default function MobileWorkspaceSessionsPage() {
+         onNewGroup={() => setGroupWizardOpen(true)}
+       />
+ 
+-      {/* ＋ 新建会话（原型 .fab：悬浮右下、底部 Tab 上方留白；触摸热区 ≥44px） */}
++      {/* ＋ 新建会话（原型 .fab：悬浮右下、底部 Tab 上方留白；触摸热区 ≥44px）。
++          FAB 占位区间 = 视口底 96~148px（bottom-24 + 高 52）；外壳 main 底部避让
++          （76px+safe-area）只覆盖 TabBar——列表滚动到底时最后一张卡片底边落在
++          76px 处，仍与 FAB 重叠 ~72px（截图③「+」压卡片文字根因）。列表末尾
++          h-20 spacer 让最后内容底边抬到 ≥148px，滚动到底完整可见（盲区④）。 */}
+       <button
+         type="button"
+         onClick={() => setPickerOpen(true)}
+@@ -292,6 +296,8 @@ export default function MobileWorkspaceSessionsPage() {
+       >
+         <Plus className="h-6 w-6" aria-hidden />
+       </button>
++      {/* FAB 让位 spacer（task-11 / FR-09）：80px 保守覆盖 72px 净距 + safe-area 余量 */}
++      <div aria-hidden className="h-20" />
+ 
+       {/* 新建两步浮层（贴底抽屉形态；machines 同源注入，两步逻辑零分叉）。
+           2026-10-15-workspace-session-agent-only：有绑定机器时转绑定模式
+diff --git a/frontend/src/app/m/workspaces/page.tsx b/frontend/src/app/m/workspaces/page.tsx
+index 1c6451061..1e8cdd62d 100644
+--- a/frontend/src/app/m/workspaces/page.tsx
++++ b/frontend/src/app/m/workspaces/page.tsx
+@@ -93,9 +93,10 @@ const SPEC_STRATEGY_OPTIONS: Array<{
+   { value: "repo-native", shortLabel: "源项目即真理", label: "源项目即真理（软链接，扫描直接写源项目）" },
+ ];
+ 
+-// 页内内联筛选控件统一样式（≥44px 触摸热区、≥14px 正文，R-04）。
++// 页内内联筛选控件统一样式（2026-10-26-mobile-four-page-layout-fix task-10 / FR-08
++// 密度降档：44→36px 对齐 m-app 密度基座 var(--m-ctl-h)，全宽触控足够；≥14px 正文）。
+ const FILTER_CONTROL_CLASS =
+-  "h-11 w-full rounded-[var(--radius-md)] border border-border bg-card px-3 text-[14px] text-foreground";
++  "h-9 w-full rounded-[var(--radius-md)] border border-border bg-card px-3 text-[14px] text-foreground";
+ 
+ export default function WorkspacesMobilePage() {
+   const router = useRouter();
+@@ -279,11 +280,13 @@ export default function WorkspacesMobilePage() {
+               type="button"
+               data-testid="mobile-workspace-create"
+               onClick={() => setCreateOpen(true)}
+-              className="inline-flex min-h-[44px] w-full items-center justify-center rounded-[var(--radius-md)] bg-primary px-3 text-[14px] font-medium text-primary-foreground transition-colors hover:opacity-90"
++              className="inline-flex h-[var(--m-ctl-h)] w-full items-center justify-center rounded-[var(--radius-md)] bg-primary px-3 text-[14px] font-medium text-primary-foreground transition-colors hover:opacity-90"
+             >
+               + 创建工作区
+             </button>
+-            {/* 筛选 q/type/status/owner（页内内联控件，对齐桌面 page.tsx） */}
++            {/* 筛选 q/type/status/owner（页内内联控件，对齐桌面 page.tsx）。
++                task-10 / FR-08 密度收敛：类型/状态/人员三筛选压一行（flex-1 均分，
++                原两行 grid 省一行高）。 */}
+             <input
+               aria-label="搜索工作区"
+               placeholder="搜索别名/名称/slug/路径"
+@@ -291,7 +294,7 @@ export default function WorkspacesMobilePage() {
+               onChange={(e) => updateFilter(setQuery)(e.target.value)}
+               className={FILTER_CONTROL_CLASS}
+             />
+-            <div className="grid w-full grid-cols-2 gap-2">
++            <div className="flex w-full gap-2">
+               <select
+                 aria-label="筛选类型"
+                 value={typeFilter ?? ""}
+@@ -304,7 +307,7 @@ export default function WorkspacesMobilePage() {
+                         : (e.target.value as WorkspaceType),
+                   )
+                 }
+-                className={cn(FILTER_CONTROL_CLASS, "px-2")}
++                className={cn(FILTER_CONTROL_CLASS, "min-w-0 flex-1 px-2")}
+               >
+                 <option value="">全部类型</option>
+                 {WORKSPACE_TYPE_OPTIONS.map((o) => (
+@@ -318,7 +321,7 @@ export default function WorkspacesMobilePage() {
+                 aria-label="筛选状态"
+                 value={statusFilter}
+                 onChange={(e) => updateFilter(setStatusFilter)(e.target.value)}
+-                className={cn(FILTER_CONTROL_CLASS, "px-2")}
++                className={cn(FILTER_CONTROL_CLASS, "min-w-0 flex-1 px-2")}
+               >
+                 {STATUS_FILTER_OPTIONS.map((o) => (
+                   <option key={o.value} value={o.value}>
+@@ -326,22 +329,22 @@ export default function WorkspacesMobilePage() {
+                   </option>
+                 ))}
+               </select>
++              {isPlatformAdmin ? (
++                <select
++                  aria-label="筛选人员"
++                  value={ownerUserId ?? ""}
++                  onChange={(e) => updateFilter(setOwnerUserId)(e.target.value || null)}
++                  className={cn(FILTER_CONTROL_CLASS, "min-w-0 flex-1 px-2")}
++                >
++                  <option value="">全部人员</option>
++                  {userOptions.map((u) => (
++                    <option key={u.id} value={u.id}>
++                      {u.display_name ?? u.email ?? u.username}
++                    </option>
++                  ))}
++                </select>
++              ) : null}
+             </div>
+-            {isPlatformAdmin ? (
+-              <select
+-                aria-label="筛选人员"
+-                value={ownerUserId ?? ""}
+-                onChange={(e) => updateFilter(setOwnerUserId)(e.target.value || null)}
+-                className={cn(FILTER_CONTROL_CLASS, "px-2")}
+-              >
+-                <option value="">全部人员</option>
+-                {userOptions.map((u) => (
+-                  <option key={u.id} value={u.id}>
+-                    {u.display_name ?? u.email ?? u.username}
+-                  </option>
+-                ))}
+-              </select>
+-            ) : null}
+           </>
+         }
+         renderCard={(w) => (
+@@ -447,18 +450,16 @@ function WorkspaceMobileCard({
+         ) : null}
+       </div>
+ 
+-      {/* 行 3：slug（等宽） */}
+-      <p
+-        className="truncate font-mono text-[12px] text-muted-foreground"
+-        title={w.slug}
+-      >
+-        {w.slug}
+-      </p>
+-
+-      {/* 行 4：负责人（未绑定态由徽标展示，配置入口在概览页，不再做进门引导） */}
+-      {ownerName ? (
+-        <p className="text-[12px] text-muted-foreground">负责人：{ownerName}</p>
+-      ) : null}
++      {/* 行 3：slug（等宽，truncate 单行）+ 负责人同行右置（task-10 / FR-08 密度
++          收敛：原 slug/负责人两行合并单行——盲区⑤ 超长路径 truncate 防溢出撑高） */}
++      <div className="flex min-w-0 items-center gap-2 text-[12px] text-muted-foreground">
++        <span className="min-w-0 truncate font-mono" title={w.slug}>
++          {w.slug}
++        </span>
++        {ownerName ? (
++          <span className="shrink-0 whitespace-nowrap">负责人：{ownerName}</span>
++        ) : null}
++      </div>
+     </div>
+   );
+ }
+diff --git a/frontend/src/components/changes/__tests__/platform-sync-section.test.tsx b/frontend/src/components/changes/__tests__/platform-sync-section.test.tsx
+index fe689874a..7dc8bb027 100644
+--- a/frontend/src/components/changes/__tests__/platform-sync-section.test.tsx
++++ b/frontend/src/components/changes/__tests__/platform-sync-section.test.tsx
+@@ -270,7 +270,7 @@ type BindingFixture = {
+ };
+ 
+ function renderSection(
+-  props: { compact?: boolean } = {},
++  props: { compact?: boolean; mobile?: boolean } = {},
+   bindingOverride: Partial<BindingFixture> = {},
+ ) {
+   queryClient = new QueryClient({
+@@ -1051,3 +1051,21 @@ describe("PlatformSyncSection（task-09 落地 + task-06 行改造适配）", ()
+     expect(screen.queryByTestId("platform-sync-mark-resolved")).not.toBeInTheDocument();
+   });
+ });
++
++describe("PlatformSyncSection 手机端窄视口分支（2026-10-26-mobile-four-page-layout-fix / FR-05）", () => {
++  it("mobile=true：卡头统计块纵向堆叠（flex-col）——不再横向挤占标题空间", async () => {
++    setupMachine(makeMachine(makeStatus()));
++    renderSection({ compact: true, mobile: true });
++    const meta = await screen.findByTestId("platform-sync-head-meta");
++    expect(meta.className).toContain("flex-col");
++    expect(meta.className).not.toContain("flex-wrap");
++  });
++
++  it("desktop 锚：缺省统计块保持横向 flex-wrap 排布（逐类名不变）", async () => {
++    setupMachine(makeMachine(makeStatus()));
++    renderSection();
++    const meta = await screen.findByTestId("platform-sync-head-meta");
++    expect(meta.className).toContain("flex-wrap");
++    expect(meta.className).not.toContain("flex-col");
++  });
++});
+diff --git a/frontend/src/components/changes/platform-sync-section.tsx b/frontend/src/components/changes/platform-sync-section.tsx
+index a56aba116..33f1a0cc8 100644
+--- a/frontend/src/components/changes/platform-sync-section.tsx
++++ b/frontend/src/components/changes/platform-sync-section.tsx
+@@ -218,6 +218,12 @@ export interface PlatformSyncSectionProps {
+   workspaceId: string;
+   /** 移动端紧凑布局：冲突行纵向堆叠 + 按钮铺满 44px 触摸热区（m/ 页适配模式）。 */
+   compact?: boolean;
++  /**
++   * 手机端窄视口分支（2026-10-26-mobile-four-page-layout-fix / FR-05，默认 false）：
++   * true 时卡头 extra 统计块改纵向堆叠——不再横向挤占标题空间（修复「平台同步」
++   * 被挤成两行竖排）；缺省 desktop 零变化。
++   */
++  mobile?: boolean;
+   className?: string;
+   /** 2026-09-28-change-ux-detail-batch：抽屉承载模式——无绑定数据源（原本
+    * return null）时渲染中性提示而非空白，避免点开按钮见空抽屉。 */
+@@ -227,6 +233,7 @@ export interface PlatformSyncSectionProps {
+ export function PlatformSyncSection({
+   workspaceId,
+   compact = false,
++  mobile = false,
+   className,
+   drawerHint = false,
+ }: PlatformSyncSectionProps) {
+@@ -731,9 +738,17 @@ export function PlatformSyncSection({
+       title="平台同步"
+       bodyPadding="p-0"
+       className={className}
+-      // 卡头摘要（原型 .card-head）：未决冲突/ghost 计数 + 数据源机器与新鲜度
++      // 卡头摘要（原型 .card-head）：未决冲突/ghost 计数 + 数据源机器与新鲜度。
++      // mobile（FR-05）：统计块纵向堆叠——横向排布的「数据源机器：…」长串会把
++      // SectionCard 头部的标题挤到 min-content 宽（「平台同步」竖排成两行的根因）。
+       extra={
+-        <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground">
++        <div
++          data-testid="platform-sync-head-meta"
++          className={cn(
++            "flex items-center text-xs text-muted-foreground",
++            mobile ? "flex-col items-start gap-y-0.5" : "flex-wrap gap-x-3 gap-y-1",
++          )}
++        >
+           <span>
+             未决冲突{" "}
+             <b className={cn(renderRows.length > 0 && "text-error")}>
+diff --git a/frontend/src/components/chat/__tests__/round-divider.test.tsx b/frontend/src/components/chat/__tests__/round-divider.test.tsx
+index 79ddef428..04af8f755 100644
+--- a/frontend/src/components/chat/__tests__/round-divider.test.tsx
++++ b/frontend/src/components/chat/__tests__/round-divider.test.tsx
+@@ -5,7 +5,7 @@
+ import { render, screen } from "@testing-library/react";
+ import { describe, expect, it } from "vitest";
+ 
+-import { RoundDivider, type RoundDividerStatus } from "../round-divider";
++import { abbreviateCount, RoundDivider, type RoundDividerStatus } from "../round-divider";
+ 
+ describe("RoundDivider", () => {
+   it.each<[RoundDividerStatus, string, string]>([
+@@ -47,3 +47,43 @@ describe("RoundDivider", () => {
+     expect(el.querySelectorAll(".h-px.flex-1").length).toBe(2);
+   });
+ });
++
++describe("RoundDivider 手机端窄视口分支（2026-10-26-mobile-four-page-layout-fix / FR-02）", () => {
++  it("abbreviateCount 缩写边界：9999 原样 / 10000 起缩 k / 99999→100.0k", () => {
++    expect(abbreviateCount(9999)).toBe("9,999");
++    expect(abbreviateCount(10000)).toBe("10.0k");
++    expect(abbreviateCount(78489)).toBe("78.5k");
++    expect(abbreviateCount(99999)).toBe("100.0k");
++    expect(abbreviateCount(2170)).toBe("2,170");
++  });
++
++  it("mobile=true：meta 中 ↑/↓ 大数缩写（78,489→78.5k），小数与文字段不动", () => {
++    const { getByTestId } = render(
++      <RoundDivider label="第 1 轮" status="running" meta="↑78,489 ↓2,170 · 53 tok/s" mobile />,
++    );
++    const divider = getByTestId("round-divider");
++    expect(divider.textContent).toContain("↑78.5k");
++    expect(divider.textContent).toContain("↓2,170");
++    expect(divider.textContent).toContain("53 tok/s");
++  });
++
++  it("mobile=true：胶囊允许收缩折行（去 shrink-0/nowrap）", () => {
++    const { getByTestId } = render(<RoundDivider label="第 1 轮" meta="↑78,489" mobile />);
++    const pill = getByTestId("round-divider").children[1] as HTMLElement;
++    expect(pill.className).toContain("whitespace-normal");
++    expect(pill.className).toContain("min-w-0");
++    expect(pill.className).not.toContain("whitespace-nowrap");
++  });
++
++  it("desktop 锚：缺省（不传 mobile）meta 原样不缩写、胶囊保持 shrink-0 单行", () => {
++    const { getByTestId } = render(
++      <RoundDivider label="第 1 轮" status="running" meta="↑78,489 ↓2,170 · 53 tok/s" />,
++    );
++    const divider = getByTestId("round-divider");
++    expect(divider.textContent).toContain("↑78,489");
++    expect(divider.textContent).not.toContain("78.5k");
++    const pill = divider.children[1] as HTMLElement;
++    expect(pill.className).toContain("shrink-0");
++    expect(pill.className).toContain("whitespace-nowrap");
++  });
++});
+diff --git a/frontend/src/components/chat/round-divider.tsx b/frontend/src/components/chat/round-divider.tsx
+index bf8a83e69..11773d190 100644
+--- a/frontend/src/components/chat/round-divider.tsx
++++ b/frontend/src/components/chat/round-divider.tsx
+@@ -52,6 +52,26 @@ const STATUS_PREFIX: Record<RoundDividerStatus, string> = {
+   killed: "✗",
+ };
+ 
++/**
++ * 大数缩写（2026-10-26-mobile-four-page-layout-fix / FR-02）：≥10000 的整数
++ * 缩写为 k 单位一位小数（78,489→78.5k，99,999→100.0k 可接受）；<10000 原样
++ * 返回千分位串。口径全局统一（plan 盲区③），desktop 永不缩写。
++ */
++export function abbreviateCount(n: number): string {
++  if (!Number.isFinite(n) || Math.abs(n) < 10000) {
++    return n.toLocaleString("en-US");
++  }
++  return `${(n / 1000).toFixed(1)}k`;
++}
++
++/** meta 串中的 ↑/↓ 计数段缩写（mobile 分支用）：仅命中 ↑/↓ 后的千分位数字段。 */
++function abbreviateMeta(meta: string): string {
++  return meta.replace(/([↑↓])\s?([\d,]+)/g, (_m, arrow: string, digits: string) => {
++    const n = Number.parseInt(digits.replace(/,/g, ""), 10);
++    return Number.isNaN(n) ? `${arrow}${digits}` : `${arrow}${abbreviateCount(n)}`;
++  });
++}
++
+ export interface RoundDividerProps {
+   /** 主标签，如「第 2 轮」 */
+   label: string;
+@@ -59,6 +79,12 @@ export interface RoundDividerProps {
+   status?: RoundDividerStatus;
+   /** 右侧 meta（token/时间等自由文本，等宽数字） */
+   meta?: string;
++  /**
++   * 手机端窄视口分支（2026-10-26-mobile-four-page-layout-fix / FR-02，默认 false）：
++   * true 时胶囊允许收缩折行 + meta 中 ↑/↓ 大数缩写；缺省 desktop 零变化
++   * （shrink-0 + whitespace-nowrap 原样）。
++   */
++  mobile?: boolean;
+   /**
+    * 2026-10-20-session-page-dsh-alignment（FR-01 / D-016① / D-015@v2）：轮元信息
+    * 合并成**一行**——原「开始 · 结束 · 历时」独立行与轮尾状态胶囊重复，本 prop
+@@ -78,6 +104,7 @@ export const RoundDivider = memo(function RoundDivider({
+   status,
+   meta,
+   detail,
++  mobile = false,
+ }: RoundDividerProps) {
+   return (
+     <div
+@@ -89,7 +116,14 @@ export const RoundDivider = memo(function RoundDivider({
+         aria-hidden
+         className="h-px flex-1 bg-gradient-to-r from-transparent via-border to-border"
+       />
+-      <span className="inline-flex shrink-0 items-center gap-1.5 whitespace-nowrap rounded-full border border-border/60 bg-card/80 px-3 py-0.5 text-[10.5px] text-muted-foreground shadow-sm backdrop-blur-sm">
++      <span
++        className={cn(
++          "inline-flex items-center gap-1.5 rounded-full border border-border/60 bg-card/80 px-3 py-0.5 text-[10.5px] text-muted-foreground shadow-sm backdrop-blur-sm",
++          // mobile（FR-02）：允许收缩与折行（长 meta 在 430pt 视口内换行不溢出）；
++          // desktop 缺省保持 shrink-0 + nowrap 单行（零变化）。
++          mobile ? "min-w-0 shrink whitespace-normal" : "shrink-0 whitespace-nowrap",
++        )}
++      >
+         <span className="tracking-wide">{label}</span>
+         {status && (
+           <>
+@@ -103,7 +137,9 @@ export const RoundDivider = memo(function RoundDivider({
+         {meta && (
+           <>
+             <span aria-hidden>·</span>
+-            <span className="font-mono tabular-nums opacity-80">{meta}</span>
++            <span className="font-mono tabular-nums opacity-80">
++              {mobile ? abbreviateMeta(meta) : meta}
++            </span>
+           </>
+         )}
+       </span>
+diff --git a/frontend/src/components/daemon/__tests__/turn-live-marquee.test.tsx b/frontend/src/components/daemon/__tests__/turn-live-marquee.test.tsx
+index ad85264f1..8d74d3338 100644
+--- a/frontend/src/components/daemon/__tests__/turn-live-marquee.test.tsx
++++ b/frontend/src/components/daemon/__tests__/turn-live-marquee.test.tsx
+@@ -611,3 +611,25 @@ describe("TurnTimeline 接入门控（FR-01 / FR-04）", () => {
+     expect(queryByTestId("turn-live-marquee")).toBeNull();
+   });
+ });
++
++describe("TurnLiveMarquee 手机端窄视口分支（2026-10-26-mobile-four-page-layout-fix / FR-01）", () => {
++  const entries = deriveLiveMarqueeEntries([thinking("t1", "分析登录链路")]);
++
++  it("mobile=true 隐藏右缘 LIVE 徽标——480px 视口省宽给轨道", () => {
++    const { queryByText } = render(<TurnLiveMarquee entries={entries} mobile />);
++    expect(queryByText("LIVE")).toBeNull();
++  });
++
++  it("desktop 锚：缺省（不传 mobile）LIVE 徽标照旧渲染", () => {
++    const { getByText } = render(<TurnLiveMarquee entries={entries} />);
++    expect(getByText("LIVE")).not.toBeNull();
++  });
++
++  it("宽度基准扣自身 ml-9——修复胶囊右缘恒溢出 36px（结构性修复，desktop/mobile 通用）", () => {
++    const { getByTestId } = render(<TurnLiveMarquee entries={entries} />);
++    const root = getByTestId("turn-live-marquee");
++    expect(root.className).toContain("ml-9");
++    expect(root.className).toContain("w-[min(calc(100%-2.25rem),52rem)]");
++    expect(root.className).not.toContain("w-[min(100%,52rem)]");
++  });
++});
+diff --git a/frontend/src/components/daemon/__tests__/turn-timeline-token-speed.test.tsx b/frontend/src/components/daemon/__tests__/turn-timeline-token-speed.test.tsx
+index 85c116a31..8793edd61 100644
+--- a/frontend/src/components/daemon/__tests__/turn-timeline-token-speed.test.tsx
++++ b/frontend/src/components/daemon/__tests__/turn-timeline-token-speed.test.tsx
+@@ -37,11 +37,13 @@ function makeTurn(over: Partial<SessionTurnView> = {}): SessionTurnView {
+ function renderTimeline(
+   turns: SessionTurnView[],
+   viewMode: "all" | "conversation" = "all",
++  variant?: "desktop" | "mobile",
+ ) {
+   return render(
+     <TurnTimeline
+       turns={turns}
+       viewMode={viewMode}
++      variant={variant}
+       errorMsg={null}
+       sessionStatus="active"
+       dialogHistory={[]}
+@@ -88,3 +90,27 @@ describe("turn-timeline 轮尾 token 速度（FR-03/FR-04）", () => {
+     expect(container.textContent).toContain("↓1,250 · 100 tok/s");
+   });
+ });
++
++describe("variant 透传链端到端（2026-10-26-mobile-four-page-layout-fix task-05 / FR-02）", () => {
++  afterEach(() => cleanup());
++
++  it("variant=mobile 端到端：conversation 视图 RoundDivider meta 大数缩写真实生效（78,489→78.5k）", () => {
++    const { container } = renderTimeline(
++      [makeTurn({ status: "completed", inputTokens: 78489, outputTokens: 2170 })],
++      "conversation",
++      "mobile",
++    );
++    expect(container.textContent).toContain("↑78.5k");
++    expect(container.textContent).toContain("↓2,170");
++    expect(container.textContent).not.toContain("↑78,489");
++  });
++
++  it("desktop 锚：不传 variant（PC 会话页/dialog/悬浮宿主形态）meta 原样千分位不缩写", () => {
++    const { container } = renderTimeline(
++      [makeTurn({ status: "completed", inputTokens: 78489, outputTokens: 2170 })],
++      "conversation",
++    );
++    expect(container.textContent).toContain("↑78,489");
++    expect(container.textContent).not.toContain("78.5k");
++  });
++});
+diff --git a/frontend/src/components/daemon/session-panel/page-helpers.tsx b/frontend/src/components/daemon/session-panel/page-helpers.tsx
+index f5271b4a2..bbede089c 100644
+--- a/frontend/src/components/daemon/session-panel/page-helpers.tsx
++++ b/frontend/src/components/daemon/session-panel/page-helpers.tsx
+@@ -784,7 +784,10 @@ export function deriveSessionPlaceholder(o: {
+                 : "恢复会话中，消息将排队等待恢复完成后自动发送…"
+               : running
+                 ? mobile
+-                  ? "排队中，本轮结束后自动发送…"
++                  ? // 2026-10-26-mobile-four-page-layout-fix task-07 / FR-03：原
++                    // 「排队中，本轮结束后自动发送…」在 430pt 输入框内被截断，收紧为
++                    // 等长短句（保留「排队 + 自动发送」两个关键语义）。
++                    "已排队，结束后自动发送…"
+                   : "消息将排队，等待本轮完成后自动发送…"
+                 : mobile
+                   ? "继续追问…"
+diff --git a/frontend/src/components/daemon/session-panel/session-panel-page.tsx b/frontend/src/components/daemon/session-panel/session-panel-page.tsx
+index 3447fa53d..c47caeb12 100644
+--- a/frontend/src/components/daemon/session-panel/session-panel-page.tsx
++++ b/frontend/src/components/daemon/session-panel/session-panel-page.tsx
+@@ -5318,6 +5318,10 @@ export function SessionPanelPage({
+           key 强制重挂载：全部滚动状态归零，恢复初始贴底语义。 */}
+       <TurnTimeline
+         key={sessionId ?? "pre"}
++        // 2026-10-26-mobile-four-page-layout-fix task-05 / FR-01/02：视口变体
++        // 透传——mobile 下轮尾 marquee 隐藏 LIVE、轮次胶囊收缩折行+大数缩写；
++        // desktop/dialog/悬浮宿主走缺省零变化。
++        variant={variant}
+         // 2026-10-23-turn-file-diff-dialog / FR-01：接线轮文件变更卡行点击弹窗的
+         // 取数归属（会话级单轮日志 API 按本轮 runId 拉 edit_patch）。
+         sessionId={sessionId}
+diff --git a/frontend/src/components/daemon/turn-live-marquee.tsx b/frontend/src/components/daemon/turn-live-marquee.tsx
+index b168d3b75..6e6b25d0c 100644
+--- a/frontend/src/components/daemon/turn-live-marquee.tsx
++++ b/frontend/src/components/daemon/turn-live-marquee.tsx
+@@ -603,6 +603,12 @@ export interface TurnLiveMarqueeProps {
+    *   - inline：子代理卡片内嵌（w-full / 更低矮 / 贴卡片 indigo 底色）。
+    */
+   layout?: "bar" | "inline";
++  /**
++   * 手机端窄视口分支（2026-10-26-mobile-four-page-layout-fix / FR-01，默认 false）。
++   * true 时隐藏右缘 LIVE 徽标（480px 视口省 ~30px 宽给轨道）；缺省 desktop 零变化。
++   * 宽度基准修正（ml-9 与 w 的 100% 基准叠加溢出 36px）不分支——desktop 窄窗口同受益。
++   */
++  mobile?: boolean;
+   /** 根节点 data-testid（缺省 turn-live-marquee；inline 场景用独立 id 消歧）。 */
+   testId?: string;
+   /**
+@@ -634,6 +640,7 @@ export const TurnLiveMarquee = memo(function TurnLiveMarquee({
+   entries,
+   reducedMotion,
+   layout = "bar",
++  mobile = false,
+   testId,
+   active = true,
+   lastEventAt,
+@@ -930,7 +937,9 @@ export const TurnLiveMarquee = memo(function TurnLiveMarquee({
+         "sh-live-marquee flex items-center gap-2 overflow-hidden text-[12px] leading-none text-muted-foreground",
+         layout === "inline"
+           ? "h-7 w-full rounded-md border border-indigo-200/60 bg-card/70 px-2.5 text-[11px]"
+-          : "ml-9 h-8 w-[min(100%,52rem)] rounded-full border border-border/70 bg-card px-3 shadow-sm",
++          // 宽度基准扣自身 ml-9（2.25rem）——原 min(100%,52rem) 的 100% 未扣左边距，
++          // 右缘恒溢出 36px（手机端整条被裁的根因；desktop 窄窗口同受益）。
++          : "ml-9 h-8 w-[min(calc(100%-2.25rem),52rem)] rounded-full border border-border/70 bg-card px-3 shadow-sm",
+       )}
+     >
+       {/* 运行状态点：运行中脉冲（reduced-motion 时静止）。等待态（合成条目
+@@ -991,12 +1000,15 @@ export const TurnLiveMarquee = memo(function TurnLiveMarquee({
+         </div>
+       )}
+ 
+-      <span
+-        aria-hidden
+-        className="relative z-10 shrink-0 text-[9px] tracking-[0.12em] text-muted-foreground/50"
+-      >
+-        LIVE
+-      </span>
++      {/* 右缘 LIVE 徽标：mobile 分支隐藏（窄视口省宽给轨道，FR-01）；desktop 照旧。 */}
++      {!mobile && (
++        <span
++          aria-hidden
++          className="relative z-10 shrink-0 text-[9px] tracking-[0.12em] text-muted-foreground/50"
++        >
++          LIVE
++        </span>
++      )}
+     </div>
+   );
+ });
+diff --git a/frontend/src/components/daemon/turn-timeline.tsx b/frontend/src/components/daemon/turn-timeline.tsx
+index fe3664294..03ea8d14d 100644
+--- a/frontend/src/components/daemon/turn-timeline.tsx
++++ b/frontend/src/components/daemon/turn-timeline.tsx
+@@ -454,6 +454,13 @@ export type SessionViewMode = "conversation" | "all" | "trajectory";
+ export interface TurnTimelineProps {
+   turns: SessionTurnView[];
+   viewMode: SessionViewMode;
++  /**
++   * 视口样式变体（2026-10-26-mobile-four-page-layout-fix task-05 / FR-01/02，
++   * 默认 "desktop"）：mobile 时向轮尾 TurnLiveMarquee（隐藏 LIVE 徽标）与
++   * RoundDivider（胶囊收缩折行 + meta 大数缩写）下传 mobile 分支；缺省 desktop
++   * 既有宿主（PC 会话页 / dialog / 悬浮宿主）零变化。
++   */
++  variant?: "desktop" | "mobile";
+   /**
+    * 2026-10-22-trajectory-context-jump（FR-02）：轮次导航 → 轨迹视图的跳转信号。
+    * `{ turnKey, nonce }`——nonce 自增驱动重复点击；仅轨迹视图消费，其它视图零影响；
+@@ -771,6 +778,7 @@ function TurnLiveElapsedText({ startedAtMs }: { startedAtMs: number }) {
+ const TurnRow = memo(function TurnRow({
+   turn,
+   viewMode,
++  mobile = false,
+   isHighlighted,
+   hasLaterUserMessage,
+   dialogHistory,
+@@ -788,6 +796,12 @@ const TurnRow = memo(function TurnRow({
+ }: {
+   turn: SessionTurnView;
+   viewMode: SessionViewMode;
++  /**
++   * 手机端窄视口布尔（2026-10-26-mobile-four-page-layout-fix task-05，默认 false）：
++   * 父级 TurnTimeline 由 variant 派生（memo 友好基元），下传轮尾 marquee
++   * （隐藏 LIVE）与 RoundDivider（收缩折行+大数缩写）；缺省 desktop 零变化。
++   */
++  mobile?: boolean;
+   /** task-01：父级派生的 per-row 高亮布尔（命中行加 ring+浅底，R-07 防击穿）。 */
+   isHighlighted: boolean;
+   /** task-07：该轮之后是否已存在用户消息（marker 提问卡已答态 best-effort 判定）。 */
+@@ -1135,6 +1149,7 @@ const TurnRow = memo(function TurnRow({
+                   turnStartedAt={turn.turnStartedAt}
+                   viewMode={viewMode}
+                   runKey={turn.realRunId ?? turn.runId}
++                  mobile={mobile}
+                   dialogHistory={dialogHistory}
+                   markerAnswered={hasLaterUserMessage}
+                   onMarkerSubmit={onResend}
+@@ -1283,6 +1298,7 @@ const TurnRow = memo(function TurnRow({
+                     <RoundDivider
+                       label={turn.turn != null ? `第 ${turn.turn} 轮` : "轮次"}
+                       status={turn.status}
++                      mobile={mobile}
+                       detail={metaDetail ?? undefined}
+                       meta={
+                         // ql-20260831-010 语义保持：运行中输入 null 显示「↑执行中…」
+@@ -1529,6 +1545,7 @@ function TrajectoryPane({
+ export function TurnTimeline({
+   turns,
+   viewMode,
++  variant = "desktop",
+   trajectoryJump,
+   errorMsg,
+   daemonRestartedHint,
+@@ -2021,6 +2038,9 @@ export function TurnTimeline({
+               onResend={onResend}
+               onSwitchProvider={onSwitchProvider}
+               daemonRestartedHint={daemonRestartedHint}
++              /* task-05（2026-10-26-mobile-four-page-layout-fix / R-07）：mobile
++                 布尔基元下传（variant 派生，memo 友好）；desktop 宿主恒 false 零变化。 */
++              mobile={variant === "mobile"}
+             autoResumeEntries={autoResumeEntries}
+               /* task-08（session-fork / FR-01 / R-07）：分叉入口 per-row 基元派生
+                  （provider 字符串 / anchor string|null / seq number / 稳定回调），
+@@ -2269,6 +2289,7 @@ function SegmentedTurnBody({
+   onMarkerSubmit,
+   turnTokens,
+   currentPhase,
++  mobile = false,
+ }: {
+   segments: TurnSegment[];
+   turnStatus: TurnUiStatus;
+@@ -2276,6 +2297,9 @@ function SegmentedTurnBody({
+   viewMode: SessionViewMode;
+   /** AskUser 提问历史按 run_id 过滤键（realRunId ?? runId，同旧路径）。 */
+   runKey: string;
++  /** 手机端窄视口布尔（2026-10-26-mobile-four-page-layout-fix task-05，默认 false）：
++   *  下传轮尾 marquee 隐藏 LIVE；缺省 desktop 零变化。 */
++  mobile?: boolean;
+   dialogHistory: SessionDialogRead[];
+   /** task-07：marker 提问卡已答态 best-effort（该轮之后已存在用户消息）。 */
+   markerAnswered: boolean;
+@@ -2484,6 +2508,7 @@ function SegmentedTurnBody({
+       {liveEntries.length > 0 && (
+         <TurnLiveMarquee
+           entries={liveEntries}
++          mobile={mobile}
+           lastEventAt={liveLastEventAt}
+           turnTokens={turnTokens}
+         />
+diff --git a/frontend/src/components/mobile/mobile-app-shell.tsx b/frontend/src/components/mobile/mobile-app-shell.tsx
+index 6f667072e..ef3b15762 100644
+--- a/frontend/src/components/mobile/mobile-app-shell.tsx
++++ b/frontend/src/components/mobile/mobile-app-shell.tsx
+@@ -49,9 +49,11 @@ export function MobileAppShell({
+         onBack={onBack}
+         actions={actions === undefined ? <ThemeToggle /> : actions}
+       />
+-      {/* pb-28：避让悬浮胶囊 TabBar（quick-a4939946：TabBar 贴底改悬浮后
+-          占位 = 胶囊高 56px + 底距 12px + 安全区，原 pb-20 不够露馅） */}
+-      <main className="min-w-0 flex-1 overflow-y-auto px-4 py-3 pb-28 text-[14px] text-foreground">
++      {/* 底部避让（2026-10-26-mobile-four-page-layout-fix task-01）：悬浮胶囊 TabBar
++          占位 = 胶囊高 56px + 底距 12px + 安全区 + 缓冲 8px，原固定 pb-28 在带 home
++          indicator 的真机上被 safe-area 吃掉余量致列表末项被遮。env() 带 0px fallback，
++          桌面浏览器移动模拟（safe-area 恒 0）退化为基础 76px 仍够避让。 */}
++      <main className="min-w-0 flex-1 overflow-y-auto px-4 py-3 pb-[calc(76px+env(safe-area-inset-bottom,0px))] text-[14px] text-foreground">
+         {children}
+       </main>
+       <MobileTabBar activeTab={activeTab} />
+diff --git a/frontend/src/components/mobile/mobile-tab-bar.test.tsx b/frontend/src/components/mobile/mobile-tab-bar.test.tsx
+index 9ea14c997..e9e8596ef 100644
+--- a/frontend/src/components/mobile/mobile-tab-bar.test.tsx
++++ b/frontend/src/components/mobile/mobile-tab-bar.test.tsx
+@@ -69,18 +69,20 @@ describe("MobileTabBar 渲染", () => {
+     expect(MOBILE_TABS).toHaveLength(5);
+   });
+ 
+-  it("悬浮胶囊形态（quick-a4939946）：胶囊容器圆角+毛玻璃+离底占位", () => {
++  it("悬浮胶囊形态（quick-a4939946 + task-01 遮挡治理）：胶囊容器圆角+实底不透明+离底占位", () => {
+     render(<MobileTabBar />);
+     const nav = screen.getByTestId("mobile-tab-bar");
+     // 外层 nav：离底 12px + 安全区占位（不再贴底通栏）
+     expect(nav.className).toContain("bottom-0");
+     expect(nav.className).toContain("px-3");
+     expect(nav.className).toContain("pb-[calc(env(safe-area-inset-bottom)+12px)]");
+-    // 内层 ul：圆角胶囊 + 毛玻璃 + 上限 432px
++    // 内层 ul：圆角胶囊 + 实底不透明（task-01：bg-card/95+毛玻璃滚动透字，改实底）
+     const ul = nav.querySelector("ul");
+     expect(ul).not.toBeNull();
+     expect(ul?.className).toContain("rounded-[var(--radius-lg)]");
+-    expect(ul?.className).toContain("backdrop-blur");
++    expect(ul?.className).toContain("bg-card");
++    expect(ul?.className).not.toContain("bg-card/95");
++    expect(ul?.className).not.toContain("backdrop-blur");
+     expect(ul?.className).toContain("max-w-[432px]");
+   });
+ 
+diff --git a/frontend/src/components/mobile/mobile-tab-bar.tsx b/frontend/src/components/mobile/mobile-tab-bar.tsx
+index f90d6f725..db37856ac 100644
+--- a/frontend/src/components/mobile/mobile-tab-bar.tsx
++++ b/frontend/src/components/mobile/mobile-tab-bar.tsx
+@@ -112,11 +112,13 @@ export function MobileTabBar({ activeTab }: MobileTabBarProps) {
+       aria-label="移动端主导航"
+       data-testid="mobile-tab-bar"
+       // 悬浮胶囊（quick-a4939946，对齐用户参考效果图）：贴底通栏边框式改为
+-      // 离底 12px 的圆角胶囊 + 毛玻璃，内容从胶囊下方穿行（外壳 main pb-28
+-      // 预留占位）；bottom 安全区只作间距不再撑背景，视觉轻、不压内容。
++      // 离底 12px 的圆角胶囊，内容从胶囊下方穿行（外壳 main 底部避让预留占位，
++      // 2026-10-26-mobile-four-page-layout-fix task-01 起为 calc(76px+safe-area)）；
++      // bottom 安全区只作间距不再撑背景。胶囊底色实底不透明（task-01：原 bg-card/95
++      // + 毛玻璃在长列表滚动时透字，遮挡观感差；全不透明后 blur 无视觉意义一并移除）。
+       className="fixed inset-x-0 bottom-0 z-40 px-3 pb-[calc(env(safe-area-inset-bottom)+12px)]"
+     >
+-      <ul className="mx-auto flex w-full max-w-[432px] items-stretch rounded-[var(--radius-lg)] border border-border bg-card/95 shadow-[var(--shadow-lg)] backdrop-blur">
++      <ul className="mx-auto flex w-full max-w-[432px] items-stretch rounded-[var(--radius-lg)] border border-border bg-card shadow-[var(--shadow-lg)]">
+         {MOBILE_TABS.map((tab) => {
+           const active = activeTab ? activeTab === tab.key : isTabActive(tab, pathname);
+           const Icon = tab.icon;
+diff --git a/frontend/src/components/mobile/mobile-workspace-header.tsx b/frontend/src/components/mobile/mobile-workspace-header.tsx
+index 94134b974..4d8b285a8 100644
+--- a/frontend/src/components/mobile/mobile-workspace-header.tsx
++++ b/frontend/src/components/mobile/mobile-workspace-header.tsx
+@@ -65,7 +65,7 @@ export function MobileWorkspaceHeader({
+         >
+           <ChevronLeft className="h-5 w-5" aria-hidden />
+         </button>
+-        <div className="min-w-0 flex-1 py-1 pl-1">
++        <div className="min-w-0 flex-1 py-0.5 pl-1">
+           <h1 className="truncate text-base font-medium text-foreground">
+             {title}
+           </h1>
+@@ -80,7 +80,9 @@ export function MobileWorkspaceHeader({
+         role="tablist"
+         aria-label="工作区视图切换"
+         data-testid="mobile-workspace-header-tabs"
+-        className="flex gap-1 px-2 pb-2"
++        /* task-11 / FR-09：pb-2→pb-1 微收（触摸热区 min-h-[44px] 触控下限不动——
++           降高度与触控可达性冲突，按约束保留；title 行 py-1 同步微收） */
++        className="flex gap-1 px-2 pb-1"
+       >
+         {WORKSPACE_TABS.map((t) => {
+           const selected = t.key === tab;
+diff --git a/frontend/src/components/sessions/__tests__/session-config-bar.test.tsx b/frontend/src/components/sessions/__tests__/session-config-bar.test.tsx
+index ba8a27d2b..cde94d100 100644
+--- a/frontend/src/components/sessions/__tests__/session-config-bar.test.tsx
++++ b/frontend/src/components/sessions/__tests__/session-config-bar.test.tsx
+@@ -1906,3 +1906,30 @@ describe("SessionConfigBar git 指示项工作树标识（2026-10-25-session-git
+     expect(screen.queryByTestId("session-git-worktree-tag")).not.toBeInTheDocument();
+   });
+ });
++
++describe("SessionConfigBar 模型名截断放宽（2026-10-26-mobile-four-page-layout-fix task-06 / FR-04）", () => {
++  const RENDER_OVERRIDES = {
++    llmProviderId: "prov-kimi",
++    agentProfileId: "prof-1",
++    thinkingLevel: {},
++  };
++
++  it("mobile 下模型 select 宽度放宽至 150px（原 110px 截断「glm-5.3-fla…」观感差）", async () => {
++    renderBar({ variant: "mobile", ...RENDER_OVERRIDES });
++    expect(
++      await screen.findByRole("button", { name: "配置-供应商 Kimi 中转" }),
++    ).toBeInTheDocument();
++    const select = screen.getByTestId("config-model-select") as HTMLSelectElement;
++    expect(select.className).toContain("max-w-[150px]");
++    expect(select.className).not.toContain("max-w-[110px]");
++  });
++
++  it("desktop 锚：模型 select 宽度保持 150px 不变", async () => {
++    renderBar({ ...RENDER_OVERRIDES });
++    expect(
++      await screen.findByRole("button", { name: "配置-供应商 Kimi 中转" }),
++    ).toBeInTheDocument();
++    const select = screen.getByTestId("config-model-select") as HTMLSelectElement;
++    expect(select.className).toContain("max-w-[150px]");
++  });
++});
+diff --git a/frontend/src/components/sessions/session-config-bar.tsx b/frontend/src/components/sessions/session-config-bar.tsx
+index 5dc15ead8..6073167d1 100644
+--- a/frontend/src/components/sessions/session-config-bar.tsx
++++ b/frontend/src/components/sessions/session-config-bar.tsx
+@@ -1068,7 +1068,11 @@ export function SessionConfigBar({
+               }}
+               className={cn(
+                 "h-6 cursor-pointer truncate rounded-md border border-border bg-card px-1 text-xs transition-colors hover:bg-muted",
+-                mobile ? "max-w-[110px]" : "max-w-[150px]",
++                // mobile 原 max-w-[110px] 放宽到与 desktop 同为 150px
++                // （2026-10-26-mobile-four-page-layout-fix task-06 / FR-04）：110px 下
++                // 「glm-5.3-fla…」截断观感差；放不下时由外层 flex-wrap 自然折行，
++                // 信息完整优先于单行。
++                "max-w-[150px]",
+                 !canSwitch &&
+                   "cursor-not-allowed text-muted-foreground/60 hover:bg-card",
+               )}

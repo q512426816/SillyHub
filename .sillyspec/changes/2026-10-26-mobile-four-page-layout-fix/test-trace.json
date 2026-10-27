@@ -1,0 +1,424 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-26-mobile-four-page-layout-fix",
+  "rows": [
+    {
+      "anchor": "FR-07",
+      "row_id": "2026-10-26-mobile-four-page-layout-fix:task-01:acc-0-3e013cf2",
+      "tests": [
+        "frontend/src/components/mobile/mobile-tab-bar.test.tsx"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-26-mobile-four-page-layout-fix"
+    },
+    {
+      "anchor": "FR-07",
+      "row_id": "2026-10-26-mobile-four-page-layout-fix:task-01:acc-1-04c78547",
+      "tests": [
+        "frontend/src/components/mobile/mobile-tab-bar.test.tsx"
+      ],
+      "reason": "spec",
+      "state": "active",
+      "discovery": "machine",
+      "confirmed_by": "agent",
+      "confirmed_at": "a5d11efcfb4cffd6f810b3f3f542685ab8fa5c57",
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-26-mobile-four-page-layout-fix"
+    },
+    {
+      "anchor": "FR-07",
+      "row_id": "2026-10-26-mobile-four-page-layout-fix:task-01:acc-2-c2cd04fe",
+      "tests": [
+        "frontend/src/components/mobile/mobile-tab-bar.test.tsx"
+      ],
+      "reason": "spec",
+      "state": "active",
+      "discovery": "machine",
+      "confirmed_by": "agent",
+      "confirmed_at": "a5d11efcfb4cffd6f810b3f3f542685ab8fa5c57",
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-26-mobile-four-page-layout-fix"
+    },
+    {
+      "anchor": "FR-08",
+      "row_id": "2026-10-26-mobile-four-page-layout-fix:task-02:acc-0-4b397416",
+      "tests": [
+        "frontend/src/app/m/workspaces/[id]/sessions/__tests__/page.m-sessions.test.tsx",
+        "frontend/src/app/m/workspaces/__tests__/page.m-workspaces.test.tsx",
+        "frontend/src/components/mobile/mobile-workspace-header.test.tsx"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-26-mobile-four-page-layout-fix"
+    },
+    {
+      "anchor": "FR-08",
+      "row_id": "2026-10-26-mobile-four-page-layout-fix:task-02:acc-1-bf696da3",
+      "tests": [
+        "frontend/src/app/m/workspaces/[id]/sessions/__tests__/page.m-sessions.test.tsx",
+        "frontend/src/app/m/workspaces/__tests__/page.m-workspaces.test.tsx",
+        "frontend/src/components/mobile/mobile-workspace-header.test.tsx"
+      ],
+      "reason": "spec",
+      "state": "active",
+      "discovery": "machine",
+      "confirmed_by": "agent",
+      "confirmed_at": "a5d11efcfb4cffd6f810b3f3f542685ab8fa5c57",
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-26-mobile-four-page-layout-fix"
+    },
+    {
+      "anchor": "FR-01",
+      "row_id": "2026-10-26-mobile-four-page-layout-fix:task-03:acc-0-c9fd775c",
+      "tests": [
+        "frontend/src/components/daemon/__tests__/session-panel-variant.test.tsx",
+        "frontend/src/components/daemon/__tests__/turn-live-marquee.test.tsx",
+        "frontend/src/components/daemon/__tests__/turn-segment-views.test.tsx",
+        "frontend/src/components/daemon/__tests__/turn-timeline-token-speed.test.tsx"
+      ],
+      "reason": "spec",
+      "state": "active",
+      "discovery": "machine",
+      "confirmed_by": "agent",
+      "confirmed_at": "a5d11efcfb4cffd6f810b3f3f542685ab8fa5c57",
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-26-mobile-four-page-layout-fix"
+    },
+    {
+      "anchor": "FR-01",
+      "row_id": "2026-10-26-mobile-four-page-layout-fix:task-03:acc-1-cd96ea59",
+      "tests": [
+        "frontend/src/components/daemon/__tests__/session-panel-variant.test.tsx",
+        "frontend/src/components/daemon/__tests__/turn-live-marquee.test.tsx",
+        "frontend/src/components/daemon/__tests__/turn-segment-views.test.tsx",
+        "frontend/src/components/daemon/__tests__/turn-timeline-token-speed.test.tsx"
+      ],
+      "reason": "spec",
+      "state": "active",
+      "discovery": "machine",
+      "confirmed_by": "agent",
+      "confirmed_at": "a5d11efcfb4cffd6f810b3f3f542685ab8fa5c57",
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-26-mobile-four-page-layout-fix"
+    },
+    {
+      "anchor": "FR-01",
+      "row_id": "2026-10-26-mobile-four-page-layout-fix:task-03:acc-2-a6faaaa7",
+      "tests": [
+        "frontend/src/components/daemon/__tests__/session-panel-variant.test.tsx",
+        "frontend/src/components/daemon/__tests__/turn-live-marquee.test.tsx",
+        "frontend/src/components/daemon/__tests__/turn-segment-views.test.tsx",
+        "frontend/src/components/daemon/__tests__/turn-timeline-token-speed.test.tsx"
+      ],
+      "reason": "spec",
+      "state": "active",
+      "discovery": "machine",
+      "confirmed_by": "agent",
+      "confirmed_at": "a5d11efcfb4cffd6f810b3f3f542685ab8fa5c57",
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-26-mobile-four-page-layout-fix"
+    },
+    {
+      "anchor": "FR-02",
+      "row_id": "2026-10-26-mobile-four-page-layout-fix:task-04:acc-0-4fef5775",
+      "tests": [
+        "frontend/src/components/chat/__tests__/round-divider.test.tsx",
+        "frontend/src/components/daemon/__tests__/session-panel-variant.test.tsx",
+        "frontend/src/components/daemon/__tests__/turn-segment-views.test.tsx",
+        "frontend/src/components/daemon/__tests__/turn-timeline-token-speed.test.tsx"
+      ],
+      "reason": "spec",
+      "state": "active",
+      "discovery": "machine",
+      "confirmed_by": "agent",
+      "confirmed_at": "a5d11efcfb4cffd6f810b3f3f542685ab8fa5c57",
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-26-mobile-four-page-layout-fix"
+    },
+    {
+      "anchor": "FR-02",
+      "row_id": "2026-10-26-mobile-four-page-layout-fix:task-04:acc-1-b7064ad3",
+      "tests": [
+        "frontend/src/components/chat/__tests__/round-divider.test.tsx",
+        "frontend/src/components/daemon/__tests__/session-panel-variant.test.tsx",
+        "frontend/src/components/daemon/__tests__/turn-segment-views.test.tsx",
+        "frontend/src/components/daemon/__tests__/turn-timeline-token-speed.test.tsx"
+      ],
+      "reason": "spec",
+      "state": "active",
+      "discovery": "machine",
+      "confirmed_by": "agent",
+      "confirmed_at": "a5d11efcfb4cffd6f810b3f3f542685ab8fa5c57",
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-26-mobile-four-page-layout-fix"
+    },
+    {
+      "anchor": "FR-01",
+      "row_id": "2026-10-26-mobile-four-page-layout-fix:task-05:acc-0-284325e1",
+      "tests": [
+        "frontend/src/components/daemon/__tests__/session-panel-variant.test.tsx",
+        "frontend/src/components/daemon/__tests__/turn-segment-views.test.tsx",
+        "frontend/src/components/daemon/__tests__/turn-timeline-token-speed.test.tsx"
+      ],
+      "reason": "spec",
+      "state": "active",
+      "discovery": "machine",
+      "confirmed_by": "agent",
+      "confirmed_at": "a5d11efcfb4cffd6f810b3f3f542685ab8fa5c57",
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-26-mobile-four-page-layout-fix"
+    },
+    {
+      "anchor": "FR-01",
+      "row_id": "2026-10-26-mobile-four-page-layout-fix:task-05:acc-1-1b9964ee",
+      "tests": [
+        "frontend/src/components/daemon/__tests__/session-panel-variant.test.tsx",
+        "frontend/src/components/daemon/__tests__/turn-segment-views.test.tsx",
+        "frontend/src/components/daemon/__tests__/turn-timeline-token-speed.test.tsx"
+      ],
+      "reason": "spec",
+      "state": "active",
+      "discovery": "machine",
+      "confirmed_by": "agent",
+      "confirmed_at": "a5d11efcfb4cffd6f810b3f3f542685ab8fa5c57",
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-26-mobile-four-page-layout-fix"
+    },
+    {
+      "anchor": "FR-04",
+      "row_id": "2026-10-26-mobile-four-page-layout-fix:task-06:acc-0-b7cb864b",
+      "tests": [
+        "frontend/src/components/sessions/__tests__/session-config-bar.test.tsx"
+      ],
+      "reason": "spec",
+      "state": "active",
+      "discovery": "machine",
+      "confirmed_by": "agent",
+      "confirmed_at": "a5d11efcfb4cffd6f810b3f3f542685ab8fa5c57",
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-26-mobile-four-page-layout-fix"
+    },
+    {
+      "anchor": "FR-04",
+      "row_id": "2026-10-26-mobile-four-page-layout-fix:task-06:acc-1-34708287",
+      "tests": [
+        "frontend/src/components/sessions/__tests__/session-config-bar.test.tsx"
+      ],
+      "reason": "spec",
+      "state": "active",
+      "discovery": "machine",
+      "confirmed_by": "agent",
+      "confirmed_at": "a5d11efcfb4cffd6f810b3f3f542685ab8fa5c57",
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-26-mobile-four-page-layout-fix"
+    },
+    {
+      "anchor": "FR-03",
+      "row_id": "2026-10-26-mobile-four-page-layout-fix:task-07:acc-0-722c2346",
+      "tests": [
+        "frontend/src/app/(dashboard)/sessions/__tests__/page.test.tsx"
+      ],
+      "reason": "spec",
+      "state": "active",
+      "discovery": "machine",
+      "confirmed_by": "agent",
+      "confirmed_at": "a5d11efcfb4cffd6f810b3f3f542685ab8fa5c57",
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-26-mobile-four-page-layout-fix"
+    },
+    {
+      "anchor": "FR-03",
+      "row_id": "2026-10-26-mobile-four-page-layout-fix:task-07:acc-1-9d34895f",
+      "tests": [
+        "frontend/src/app/(dashboard)/sessions/__tests__/page.test.tsx"
+      ],
+      "reason": "spec",
+      "state": "active",
+      "discovery": "machine",
+      "confirmed_by": "agent",
+      "confirmed_at": "a5d11efcfb4cffd6f810b3f3f542685ab8fa5c57",
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-26-mobile-four-page-layout-fix"
+    },
+    {
+      "anchor": "FR-05",
+      "row_id": "2026-10-26-mobile-four-page-layout-fix:task-08:acc-0-b1da385a",
+      "tests": [
+        "frontend/src/app/m/workspaces/[id]/changes/__tests__/page.test.tsx",
+        "frontend/src/components/changes/__tests__/platform-sync-section.test.tsx"
+      ],
+      "reason": "spec",
+      "state": "active",
+      "discovery": "machine",
+      "confirmed_by": "agent",
+      "confirmed_at": "a5d11efcfb4cffd6f810b3f3f542685ab8fa5c57",
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-26-mobile-four-page-layout-fix"
+    },
+    {
+      "anchor": "FR-05",
+      "row_id": "2026-10-26-mobile-four-page-layout-fix:task-08:acc-1-cdf01e31",
+      "tests": [
+        "frontend/src/app/m/workspaces/[id]/changes/__tests__/page.test.tsx",
+        "frontend/src/components/changes/__tests__/platform-sync-section.test.tsx"
+      ],
+      "reason": "spec",
+      "state": "active",
+      "discovery": "machine",
+      "confirmed_by": "agent",
+      "confirmed_at": "a5d11efcfb4cffd6f810b3f3f542685ab8fa5c57",
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-26-mobile-four-page-layout-fix"
+    },
+    {
+      "anchor": "FR-06",
+      "row_id": "2026-10-26-mobile-four-page-layout-fix:task-09:acc-0-167a75ec",
+      "tests": [
+        "frontend/src/app/m/workspaces/[id]/changes/__tests__/page.test.tsx"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-26-mobile-four-page-layout-fix"
+    },
+    {
+      "anchor": "FR-06",
+      "row_id": "2026-10-26-mobile-four-page-layout-fix:task-09:acc-1-167ef197",
+      "tests": [
+        "frontend/src/app/m/workspaces/[id]/changes/__tests__/page.test.tsx"
+      ],
+      "reason": "spec",
+      "state": "active",
+      "discovery": "machine",
+      "confirmed_by": "agent",
+      "confirmed_at": "a5d11efcfb4cffd6f810b3f3f542685ab8fa5c57",
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-26-mobile-four-page-layout-fix"
+    },
+    {
+      "anchor": "FR-08",
+      "row_id": "2026-10-26-mobile-four-page-layout-fix:task-10:acc-0-5852a071",
+      "tests": [
+        "frontend/src/app/m/workspaces/__tests__/page.m-workspaces.test.tsx"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-26-mobile-four-page-layout-fix"
+    },
+    {
+      "anchor": "FR-08",
+      "row_id": "2026-10-26-mobile-four-page-layout-fix:task-10:acc-1-25f61ab0",
+      "tests": [
+        "frontend/src/app/m/workspaces/__tests__/page.m-workspaces.test.tsx"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-26-mobile-four-page-layout-fix"
+    },
+    {
+      "anchor": "FR-08",
+      "row_id": "2026-10-26-mobile-four-page-layout-fix:task-10:acc-2-b335b8d0",
+      "tests": [
+        "frontend/src/app/m/workspaces/__tests__/page.m-workspaces.test.tsx"
+      ],
+      "reason": "spec",
+      "state": "active",
+      "discovery": "machine",
+      "confirmed_by": "agent",
+      "confirmed_at": "a5d11efcfb4cffd6f810b3f3f542685ab8fa5c57",
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-26-mobile-four-page-layout-fix"
+    },
+    {
+      "anchor": "FR-09",
+      "row_id": "2026-10-26-mobile-four-page-layout-fix:task-11:acc-0-8d8a86b7",
+      "tests": [
+        "frontend/src/app/m/workspaces/[id]/sessions/__tests__/page.m-sessions.test.tsx",
+        "frontend/src/components/mobile/mobile-workspace-header.test.tsx"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-26-mobile-four-page-layout-fix"
+    },
+    {
+      "anchor": "FR-09",
+      "row_id": "2026-10-26-mobile-four-page-layout-fix:task-11:acc-1-ce198647",
+      "tests": [
+        "frontend/src/app/m/workspaces/[id]/sessions/__tests__/page.m-sessions.test.tsx",
+        "frontend/src/components/mobile/mobile-workspace-header.test.tsx"
+      ],
+      "reason": "spec",
+      "state": "active",
+      "discovery": "machine",
+      "confirmed_by": "agent",
+      "confirmed_at": "a5d11efcfb4cffd6f810b3f3f542685ab8fa5c57",
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-26-mobile-four-page-layout-fix"
+    },
+    {
+      "anchor": "FR-09",
+      "row_id": "2026-10-26-mobile-four-page-layout-fix:task-11:acc-2-b335b8d0",
+      "tests": [
+        "frontend/src/app/m/workspaces/[id]/sessions/__tests__/page.m-sessions.test.tsx",
+        "frontend/src/components/mobile/mobile-workspace-header.test.tsx"
+      ],
+      "reason": "spec",
+      "state": "active",
+      "discovery": "machine",
+      "confirmed_by": "agent",
+      "confirmed_at": "a5d11efcfb4cffd6f810b3f3f542685ab8fa5c57",
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-26-mobile-four-page-layout-fix"
+    }
+  ]
+}
