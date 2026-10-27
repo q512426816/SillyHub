@@ -27,6 +27,8 @@ export type PhaseLogFn = (event: string, kv?: Record<string, unknown>) => void;
 const WARN_ONCE_MAX = 512;
 
 const warnedKeys = new Set<string>();
+// 2026-10-27-task-wakeup-inject-retry：notePhaseEmit 防重键（同上限同惯例）。
+const notedKeys = new Set<string>();
 
 /** 观测开关（逐次读取——运行期生效/测试可覆写，对齐 turnStartWatchdogMs）。 */
 export function turnPhaseTraceEnabled(): boolean {
@@ -43,7 +45,15 @@ const consoleWarn: PhaseLogFn = (event, kv) => {
   console.warn('[turn-phase]', `[${event}]`, ...(kv ? Object.entries(kv).map(([k, v]) => `${k}=${v}`) : []));
 };
 
-/** 发出点到达记点：TRACE 开时 info（默认静默）。 */
+/**
+ * 发出点到达记点：TRACE 开时 info（默认静默）。
+ *
+ * 2026-10-27-task-wakeup-inject-retry：per (point, sessionId, runId) 防重——
+ * session-manager 侧每 envelope 无状态直发（D-013④ 设计，防重在 daemon 层只拦
+ * notify），TRACE 开启时记点曾随 envelope 数同秒刷 30+ 行（daemon.log
+ * 323219-323256 实证）。断链定位配对只需首记（两点间缺一即锁定断链环节），
+ * 同键后续静默；集合有界 512 逐出最旧（对齐 warnOncePhaseFailure 惯例）。
+ */
 export function notePhaseEmit(
   point: string,
   sessionId: string,
@@ -52,6 +62,13 @@ export function notePhaseEmit(
   log: PhaseLogFn = consoleInfo,
 ): void {
   if (!turnPhaseTraceEnabled()) return;
+  const key = `${point}:${sessionId}:${runId}`;
+  if (notedKeys.has(key)) return;
+  notedKeys.add(key);
+  if (notedKeys.size > WARN_ONCE_MAX) {
+    const oldest = notedKeys.values().next().value;
+    if (oldest !== undefined) notedKeys.delete(oldest);
+  }
   log('turn_phase_emit', { point, session_id: sessionId, run_id: runId, phase });
 }
 
@@ -83,4 +100,5 @@ export function warnOncePhaseFailure(
 /** 测试清理（生产不调用——daemon 重启集合自然清零）。 */
 export function resetTurnPhaseObservabilityForTest(): void {
   warnedKeys.clear();
+  notedKeys.clear();
 }

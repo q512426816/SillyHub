@@ -1553,6 +1553,35 @@ export function taskWakeupQuietThresholdMs(): number {
   return Number.isFinite(v) && v >= 0 ? v : DEFAULT_TASK_WAKEUP_QUIET_MS;
 }
 
+// 2026-10-27-task-wakeup-inject-retry：唤醒注入失败退避重试计划。原实现单发即弃
+// （catch 仅 console.error），撞后端短暂不可用窗（部署重建 502/504——2026-10-26
+// 会话 e132e9bf 实证 inject 504 DAEMON_RUNTIME_OFFLINE + 心跳 502，活跃坑
+// task-wakeup-inject-backend-relay-single-shot）即 interactive_inject_send_failed
+// 永久丢失，会话楔死至用户手动来消息。总窗 530s≈9.3min：盖住生产 compose 重建
+// （35s）至 WS 重连 reconcile（分钟级）的完整窗口。重试幂等性：backend 忙轮排队
+// 合并（_merge_task_wakeup_prompt 恒≤1 条）+ prompt 自带「不要重复执行」指令。
+// 部署级进程行为，沿 SILLYHUB_* env 阀面不落 local.yaml（对齐上方 QUIET_MS 惯例）。
+export const DEFAULT_TASK_WAKEUP_RETRY_DELAYS_MS: readonly number[] = [
+  5_000, 15_000, 30_000, 60_000, 120_000, 300_000,
+];
+
+/**
+ * 读取唤醒注入退避重试计划（env SILLYHUB_TASK_WAKEUP_RETRY_DELAYS_MS，逗号分隔
+ * 毫秒列表）。未设→默认计划；`0`/空串→`[]` 完全禁用（单发即弃旧行为，止血开关
+ * ——对齐 QUIET_MS 总关闭阀惯例）；逐项 parseInt，非正整数项忽略；全非法→默认。
+ * 逐次读取便于测试覆写与运行期生效。
+ */
+export function taskWakeupRetryDelaysMs(): number[] {
+  const raw = process.env.SILLYHUB_TASK_WAKEUP_RETRY_DELAYS_MS;
+  if (raw === undefined) return [...DEFAULT_TASK_WAKEUP_RETRY_DELAYS_MS];
+  if (raw === '' || raw.trim() === '0') return [];
+  const parsed = raw
+    .split(',')
+    .map((item) => Number.parseInt(item.trim(), 10))
+    .filter((v) => Number.isFinite(v) && v > 0);
+  return parsed.length > 0 ? parsed : [...DEFAULT_TASK_WAKEUP_RETRY_DELAYS_MS];
+}
+
 // ── task-08（design A5 / FR-04）：recover 网络类失败重试退避 + 超龄清理常量 ────
 //
 // _recoverOneSession 遇 recover HTTP 网络类失败（请求未达/超时/5xx——HubHttpError

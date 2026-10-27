@@ -20,7 +20,7 @@
 
 import type { AgentEvent } from '../../types.js';
 import type { SessionState } from '../types.js';
-import { taskWakeupQuietThresholdMs } from '../../daemon.js';
+import { taskWakeupQuietThresholdMs, taskWakeupRetryDelaysMs } from '../../daemon.js';
 import { eventMetaOf, numOf, strOf } from './helpers.js';
 import type { BackgroundTaskInfo, SessionManagerCore } from './types.js';
 
@@ -504,14 +504,52 @@ export function scheduleTaskWakeup(
         e.lines.join('\n') +
         `\n请逐条核对上述每个任务（共 ${e.lines.length} 个）的名称与结果，一次性向用户完整汇报（综合归纳，不要逐字照抄，不要遗漏任何一个任务）；` +
         '禁止声称仍在等待任何任务；汇报完即结束本轮；不要重复执行这些任务；此消息为系统通知，无需向用户复述本通知本身。';
+      // 2026-10-27-task-wakeup-inject-retry：注入单发即弃改退避重试——原实现
+      // catch 仅 console.error，撞后端短暂不可用窗（部署重建 502/504，e132e9bf
+      // 实证 inject 504 DAEMON_RUNTIME_OFFLINE）即 interactive_inject_send_failed
+      // 永久丢失，会话楔死至用户手动来消息（活跃坑
+      // task-wakeup-inject-backend-relay-single-shot）。重试计划见
+      // taskWakeupRetryDelaysMs（默认 6 档总窗约 9.3min；env 0/空=禁用回单发）。
+      // 成功（含 queue_when_busy 排队）即止；退避等待后发现会话已从 _store 消失
+      // （终态清理 lifecycle.ts _store.delete）即中止——不对已终态会话注入；
+      // 耗尽 error 留痕放弃。fire-and-forget 语义不变（循环整体不抛）。
       void (async () => {
-        try {
-          await cb(sessionId, prompt);
-        } catch (err) {
-          console.error('[session-manager] task wakeup inject failed', {
-            sessionId,
-            error: err instanceof Error ? err.message : String(err),
-          });
+        const delays = taskWakeupRetryDelaysMs();
+        for (let attempt = 1; ; attempt++) {
+          try {
+            await cb(sessionId, prompt);
+            return;
+          } catch (err) {
+            const errText = err instanceof Error ? err.message : String(err);
+            const retryIndex = attempt - 1;
+            if (retryIndex >= delays.length) {
+              console.error(
+                '[session-manager] task wakeup inject failed (retries exhausted)',
+                { sessionId, attempts: attempt, error: errText },
+              );
+              return;
+            }
+            const waitMs = delays[retryIndex]!;
+            console.warn('[session-manager] task wakeup inject failed, retry scheduled', {
+              sessionId,
+              attempt,
+              next_retry_in_ms: waitMs,
+              error: errText,
+            });
+            await new Promise<void>((resolve) => {
+              const t = setTimeout(resolve, waitMs);
+              t.unref?.();
+            });
+            // 退避等待后、发起下一次注入前查会话存活（FR-02）——终态清理路径
+            // 已 _store.delete，此时注入只会在 backend 侧撞已终态会话空转重试。
+            if (!mgr._store.has(sessionId)) {
+              console.warn(
+                '[session-manager] task wakeup inject retry aborted: session gone',
+                { sessionId, attempts: attempt },
+              );
+              return;
+            }
+          }
         }
       })();
     }, 2000);
