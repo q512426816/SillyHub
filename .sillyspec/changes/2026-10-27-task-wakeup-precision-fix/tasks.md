@@ -9,4 +9,4 @@ created_at: 2026-10-27T00:39:56.644Z
 - [x] task-03: daemon 结构化日志——唤醒判定四出口（放行/前台跳过/兜底放行/阈值0关闭）各打结构化日志（task_id/task_name/status/durationMs/duration_source/background+来源）；console spy 用例断言字段并跑绿
 - [x] task-04: 文案同步——daemon prompt 头部改「以下 N 个后台任务已全部结束（本批次均已终止）：」；backend helpers.py _TASK_WAKEUP_HEADER_COUNT_RE 改兼容形 后台(?:子代理)?任务、重写模板同步；更新 daemon 文案断言用例 + backend test_session_queue.py 合并用例并分别跑绿（pytest 仅跑 -k task_wakeup 相关）
 - [x] task-05: frontend fixture 同步——相关测试中旧文案字符串「后台子代理任务」同步为新文案（识别锚前缀不动、零源码改动），跑 frontend 相关测试文件绿（仅 task_wakeup/message-queue-bar/turn-segment-views 相关）
-- [ ] task-06: 显式 pathspec 提交全部交付文件（含 tasks.md 勾选，消息带 task-01..task-05），核对 git log HEAD 移动
+- [x] task-06: 显式 pathspec 提交全部交付文件（含 tasks.md 勾选，消息带 task-01..task-05），核对 git log HEAD 移动
