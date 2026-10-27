@@ -512,3 +512,55 @@ superseded_by：FR-app-workspace-pages-002
 摘要：原型核验
 全文：.sillyspec/changes/archive/2026-10-23-marquee-thinking-fulltext/requirements.md#FR-05
 最近确认：092618dd5c0095a13d5e2646e92c1a5a826d42f7
+
+## FR-styles-030 agent 回复气泡手机端限宽 94%→100% 占满一行,时间线滚动区左右留白 12px→8px 让宽
+变更：2026-10-27-mobile-chat-dense
+状态：active
+摘要：主路径
+全文：.sillyspec/changes/archive/2026-10-27-mobile-chat-dense/requirements.md#FR-01
+最近确认：a4987c1728d6233de670f91f7d87214d28de3811
+
+## FR-styles-031 手机端正文字号 14px→13px(不低于 12px 紧凑档),行高 1.7→1.6、气泡行高 24px→21px,标题同比降一档
+变更：2026-10-27-mobile-chat-dense
+状态：active
+摘要：主路径
+全文：.sillyspec/changes/archive/2026-10-27-mobile-chat-dense/requirements.md#FR-02
+最近确认：a4987c1728d6233de670f91f7d87214d28de3811
+
+## FR-styles-032 改动仅限 globals.css [data-variant=mobile] 排版块,desktop/悬浮窗零变化
+变更：2026-10-27-mobile-chat-dense
+状态：active
+摘要：主路径
+全文：.sillyspec/changes/archive/2026-10-27-mobile-chat-dense/requirements.md#FR-03
+最近确认：a4987c1728d6233de670f91f7d87214d28de3811
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-27-mobile-chat-dense:flow:测试绑定FR-03
+  tests: frontend/src/components/daemon/__tests__/session-panel-variant.test.tsx
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-27-mobile-chat-dense
+  status: active
+
+## FR-styles-033 相关测试面零回归(session-panel-variant 等既有套件全绿)
+变更：2026-10-27-mobile-chat-dense
+状态：active
+摘要：主路径
+全文：.sillyspec/changes/archive/2026-10-27-mobile-chat-dense/requirements.md#FR-04
+最近确认：a4987c1728d6233de670f91f7d87214d28de3811
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-27-mobile-chat-dense:flow:测试绑定FR-04
+  tests: frontend/src/app/m/workspaces/[id]/sessions/[sid]/__tests__/page.m-session-chat.test.tsx | frontend/src/components/daemon/__tests__/session-panel-variant.test.tsx | frontend/src/components/daemon/__tests__/turn-timeline-token-speed.test.tsx
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-27-mobile-chat-dense
+  status: active

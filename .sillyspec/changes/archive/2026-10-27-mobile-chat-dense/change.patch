@@ -1,0 +1,76 @@
+diff --git a/frontend/src/app/globals.css b/frontend/src/app/globals.css
+index ece8f2f19..250b003e7 100644
+--- a/frontend/src/app/globals.css
++++ b/frontend/src/app/globals.css
+@@ -875,46 +875,48 @@
+   font-size: 13px !important;
+ }
+ 
+-/* ---- 手机端会话正文排版(ql-20260915-009 初版放大,ql-20260915-013 用户反馈
+-   16px 过大回调 14px——桌面同字号,仅保住「不低于 12px 紧凑档」与宽度放宽) ----
+-   用户反馈手机会话页重点内容太小:气泡正文实际字号由 MarkdownText compact 的
+-   !text-xs(12px)决定。手机端经面板根 data-variant 元素级规则调版——
+-   MarkdownText 侧带 !important,靠特异度 (0,3,0) 压其 (0,2,0)(双 important 下
+-   特异度高者胜);气泡/滚动容器侧无 important,特异度 (0,2,0) 自然压过单类工具
+-   类。desktop / 悬浮窗(dialog 无 data-variant="mobile")不进规则,零变化。 */
++/* ---- 手机端会话正文排版(密度三轮:ql-20260915-009 放大 16px→ql-20260915-013
++   回调 14px→2026-10-27-mobile-chat-dense 用户反馈「占满一行+字体间隔收小显
++   更多内容」再收紧 13px/1.6,气泡 94%→100%,滚动区留白 12→8px——仍守住
++   「不低于 12px 紧凑档」) ----
++   气泡正文实际字号由 MarkdownText compact 的 !text-xs(12px)决定。手机端经面板根
++   data-variant 元素级规则调版——MarkdownText 侧带 !important,靠特异度 (0,3,0)
++   压其 (0,2,0)(双 important 下特异度高者胜);气泡/滚动容器侧无 important,特异度
++   (0,2,0) 自然压过单类工具类。desktop / 悬浮窗(dialog 无 data-variant="mobile")
++   不进规则,零变化。 */
+ [data-variant="mobile"] .markdown-text .wmde-markdown {
+-  font-size: 14px !important;
+-  line-height: 1.7 !important;
++  font-size: 13px !important;
++  line-height: 1.6 !important;
+ }
+ [data-variant="mobile"] .markdown-text .wmde-markdown h1,
+ [data-variant="mobile"] .markdown-text .wmde-markdown h2 {
+-  font-size: 16px !important;
++  font-size: 15px !important;
+ }
+ [data-variant="mobile"] .markdown-text .wmde-markdown h3,
+ [data-variant="mobile"] .markdown-text .wmde-markdown h4 {
+-  font-size: 14px !important;
++  font-size: 13px !important;
+ }
+ [data-variant="mobile"] .markdown-text .wmde-markdown code {
+-  font-size: 13px !important;
++  font-size: 12.5px !important;
+ }
+-/* 手机端字号/行高放大。.turn-bubble=用户气泡(turn-timeline,纯文本路径/流式光标
+-   继承字号)+限宽放宽(80/82%→94%,窄屏少折行)；.seg-text-body=agent 无框正文
+-   (段模型 turn-segment-views+旧路径 turn-timeline),阅读限宽由组件内
+-   max-w-[min(100%,48rem)] 统一承担——此处不带 max-width 覆盖,防高优先级
+-   规则压掉组件限宽,mobile 仅放大字号行高。 */
++/* 手机端字号/行高收紧+气泡占满一行(94%→100%)。.turn-bubble=用户气泡
++   (turn-timeline,纯文本路径/流式光标继承字号)——同款回复气泡同享满宽；
++   .seg-text-body=agent 无框正文(段模型 turn-segment-views+旧路径
++   turn-timeline),阅读限宽由组件内 max-w-[min(100%,48rem)] 统一承担——此处
++   不带 max-width 覆盖,防高优先级规则压掉组件限宽,mobile 仅收字号行高。 */
+ [data-variant="mobile"] .turn-bubble {
+-  font-size: 14px;
+-  line-height: 24px;
+-  max-width: 94%;
++  font-size: 13px;
++  line-height: 21px;
++  max-width: 100%;
+ }
+ [data-variant="mobile"] .seg-text-body {
+-  font-size: 14px;
+-  line-height: 24px;
++  font-size: 13px;
++  line-height: 21px;
+ }
+-/* 时间线左右留白收敛(px-5→px-3),窄屏给正文让宽度 */
++/* 时间线左右留白收敛(12px→8px),窄屏给正文让宽度 */
+ [data-variant="mobile"] [data-testid="turn-timeline-scroll"] {
+-  padding-left: 12px;
+-  padding-right: 12px;
++  padding-left: 8px;
++  padding-right: 8px;
+ }

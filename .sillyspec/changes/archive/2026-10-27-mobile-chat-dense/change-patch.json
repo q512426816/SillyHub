@@ -1,0 +1,66 @@
+{
+  "change": "2026-10-27-mobile-chat-dense",
+  "baseline": "a78ee44f9f4aabfe98de68976b7e57a02d0f91b3",
+  "head": "a4987c1728d6233de670f91f7d87214d28de3811",
+  "files": [
+    "frontend/src/app/globals.css"
+  ],
+  "totals": {
+    "files": 1,
+    "additions": 27,
+    "deletions": 25
+  },
+  "savedAt": "2026-10-27T00:22:15.835Z",
+  "note": "flow done 时点冻结（本变更可归属交付面：baseline..HEAD 提交面过滤 .sillyspec/ 只留 .sillyspec/docs/ 交付文档 + 独占树未提交交付；治理工件目录不入冻结——2026-10-12-close-trace-freeze-integrity FR-01）",
+  "modules": [
+    {
+      "id": "frontend",
+      "files": 1,
+      "doc": "docs/multi-agent-platform/modules/frontend.md",
+      "docTouched": false,
+      "docMissing": false
+    },
+    {
+      "id": "frontend_app",
+      "files": 1,
+      "doc": "docs/SillyHub/modules/frontend_app.md",
+      "docTouched": false,
+      "docMissing": false
+    }
+  ],
+  "uncoveredDirs": [],
+  "moduleMaps": [
+    "docs/backend/modules/_module-map.yaml",
+    "docs/frontend/modules/_module-map.yaml",
+    "docs/multi-agent-platform/modules/_module-map.yaml",
+    "docs/SillyHub/modules/_module-map.yaml",
+    "docs/sillyhub-daemon/modules/_module-map.yaml"
+  ],
+  "acceptedDirtyGap": 3,
+  "scopeAudit": {
+    "mode": "full-flow",
+    "ok": true,
+    "degradedReason": null,
+    "baseAnchor": "a78ee44f9f4aabfe98de68976b7e57a02d0f91b3",
+    "totals": {
+      "files": 1,
+      "additions": 27,
+      "deletions": 25
+    },
+    "rows": [
+      {
+        "path": "frontend/src/app/globals.css",
+        "additions": 27,
+        "deletions": 25,
+        "kind": "modified"
+      }
+    ],
+    "excluded": {
+      "foreignDeclared": []
+    },
+    "note": "flow done 时点冻结（本文件落盘时采集）",
+    "closedBy": "flow done"
+  },
+  "patchSha256": "a78d769f21fc168dd81d5112850eebd40241941a37717c8452d1cdbf45a99dc3",
+  "patchStatus": "ok"
+}

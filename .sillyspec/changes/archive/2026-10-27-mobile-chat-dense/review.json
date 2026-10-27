@@ -1,0 +1,24 @@
+{
+  "schemaVersion": 1,
+  "reviewType": "self-review",
+  "change": "2026-10-27-mobile-chat-dense",
+  "reviewer": "qinyi（agent 自查，用户批准方案后落码）",
+  "summary": "纯 CSS 数值变更自查：改动全部锁 [data-variant=\"mobile\"] 块（手机端会话页根独有属性），desktop/dialog/悬浮宿主零命中；数值守住 12px 可读底线；session-panel-variant 13 用例（mobile/desktop 形态隔离断言）+ page.m-session-chat 10 用例 + token-speed 7 用例全绿实证零回归。",
+  "findings": [
+    {
+      "severity": "P3",
+      "status": "accepted",
+      "title": "13px 为保守回调一档，真机观感可能仍偏大或偏小",
+      "evidence": "用户原话仅「小点」无量化目标——13px 相对 14px 降一档是推断值；参数集中于 globals.css mobile 排版块一处，回调成本一行",
+      "location": "frontend/src/app/globals.css:884-925"
+    }
+  ],
+  "dimensionNotes": {
+    "乱序": "n/a",
+    "并发": "n/a",
+    "切换": "n/a",
+    "作用域": "ok"
+  },
+  "reviewedAt": "2026-10-27T00:25:00.000Z",
+  "verdict": "PASS"
+}

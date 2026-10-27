@@ -2,6 +2,13 @@ tier: thin
 legacy_fallback: false
 substeps:
   artifacts: done
+  ledger: done
+  patch: done
+  review: done
+  probes: done
+  distill: done
+  archive: done
+  events: done
 born_face: thin
 with_tasks: false
 review_force: null
@@ -22,7 +29,7 @@ input: >-
 autopilot: false
 prestage_ack: true
 baseline_commit: a78ee44f9f4aabfe98de68976b7e57a02d0f91b3
-updatedAt: '2026-10-27T00:21:18.451Z'
+updatedAt: '2026-10-27T00:23:24.492Z'
 cross_baselines:
   sillyspec: 67e50bcca2adb9ecd502d12086c0ac8cb994da84
 baseline_sha256: f9ba8e7fd5f9721b7c897e6db6e40bc35b9d52d322c4444c6f9dbcbd46606bb8
@@ -31,4 +38,10 @@ spec_approved_at: '2026-10-27T00:21:17.863Z'
 spec_approved_by: anon@DESKTOP-HJ0AM09
 spec_approved_channel: user-confirmed
 spec_attested_by: anon@DESKTOP-HJ0AM09
+batch_ticked: true
+gate_summary: >-
+  test: skipped
+  结果：C:\Users\qinyi\IdeaProjects\multi-agent-platform\.sillyspec\.runtime\verify-runs\20261027002205\test-result.json —
+  跳过原因：变更与测试面零关系（5 个变更文件无自身测试、无 import 依赖测试、FR 关联回归层被 fr_regress_cap 跳过（绑定 15 个未跑，归 pre-push/CI
+  门））——动态子集空，不硬跑全量（防超时/预存失败面）。｜lint: skipped — 跳过原因：local.yaml 未配置 commands.lint（或标记 unavailable）。｜门文件 5 个
 
