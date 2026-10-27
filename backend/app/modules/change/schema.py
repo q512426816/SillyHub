@@ -328,6 +328,24 @@ class ChangeFileSyncResult(BaseModel):
     stderr_tail: str | None = None
 
 
+class ChangeHitsSyncResult(BaseModel):
+    """POST /changes/{id}/hits-sync 知识遥测补数回执（2026-10-27-knowledge-hits-flush-button）。
+
+    「知识触达」分组数据源 knowledge_hits 断流后（CLI 2026-10-18 迁移遥测文件
+    而 daemon 读旧路径），变更详情页「同步变更」按钮触发绑定 daemon 强制上行
+    一轮本地遥测（sillyspec_hits_flush RPC）的执行回执。``triggered=False``：
+    RPC 未发出，``reason`` ∈ no_binding / daemon_offline；``ok`` 三态——
+    True=daemon 上行完成（含 in-flight 去重秒回，``reason``=in_flight）；
+    False=上行失败或超时（``reason`` 机读短码：rpc_timeout / rpc_remote_error /
+    runtime_offline / exception / upload_failed——rpc_remote_error 含老 daemon
+    未注册 method 的 method not found）；None=未触发。
+    """
+
+    triggered: bool
+    ok: bool | None = None
+    reason: str | None = None
+
+
 class ChangeFileList(BaseModel):
     change_id: uuid.UUID
     items: list[ChangeFileEntry]

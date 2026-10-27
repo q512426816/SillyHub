@@ -41,6 +41,7 @@ from app.modules.change.schema import (
     ChangeFileSyncResult,
     ChangeFileWriteRequest,
     ChangeFileWriteResponse,
+    ChangeHitsSyncResult,
     ChangeList,
     ChangePatchFileRead,
     ChangeRead,
@@ -282,6 +283,133 @@ async def _sync_change_via_daemon(
             "change.files_refresh_sync_failed",
             workspace_id=str(workspace_id),
             change_id=str(change.id),
+            reason="exception",
+            error=f"{type(exc).__name__}: {exc}",
+        )
+    return result
+
+
+# hits-sync RPC 预算（2026-10-27-knowledge-hits-flush-button）：flush 是本地文件
+# 读取 + 行级增量批上行（量级秒内），15s 对齐 _FILES_REFRESH_SYNC_RPC_TIMEOUT_S
+# 先例留足余量；超时降级不抛（铁律同族）。
+_HITS_SYNC_RPC_TIMEOUT_S = 15.0
+
+
+async def _flush_hits_via_daemon(
+    session: AsyncSession,
+    workspace_id: uuid.UUID,
+    user_id: uuid.UUID,
+) -> dict[str, Any]:
+    """POST hits-sync 执行体：绑定 daemon 在线则触发 sillyspec_hits_flush RPC。
+
+    2026-10-27-knowledge-hits-flush-button task-03：照 ``_sync_change_via_daemon``
+    降级铁律（D-003@v1 同族）——未绑定 / 离线 / DaemonRpcTimeout /
+    DaemonRpcRemoteError（含老 daemon 未注册 method 的 method not found）各路
+    均不抛，结构化回执（triggered/ok/reason）如实带回。daemon 回执
+    ``{ok, reason?}``：ok=false 透传 reason（upload_failed）；reason=in_flight
+    是去重秒回（ok=true 维持完成语义）。
+    """
+    result: dict[str, Any] = {"triggered": False, "ok": None, "reason": None}
+    try:
+        from app.modules.daemon.ws_hub import get_daemon_ws_hub
+        from app.modules.workspace.member_runtimes.queries import (
+            query_daemon_online_by_id,
+        )
+        from app.modules.workspace.member_runtimes.resolver import (
+            MemberBindingResolver,
+        )
+
+        # 懒导入防循环依赖（对齐 _sync_change_via_daemon 同款惯例）。
+        binding = await MemberBindingResolver.resolve_member_binding_or_none(
+            session, workspace_id, user_id
+        )
+        if binding is None or binding.daemon_id is None:
+            result["reason"] = "no_binding"
+            log.info(
+                "change.hits_sync_skipped",
+                workspace_id=str(workspace_id),
+                reason="no_binding",
+            )
+            return result
+        daemon_id = (
+            binding.daemon_id
+            if isinstance(binding.daemon_id, uuid.UUID)
+            else uuid.UUID(str(binding.daemon_id))
+        )
+        if await query_daemon_online_by_id(session, daemon_id, user_id) is None:
+            result["reason"] = "daemon_offline"
+            log.info(
+                "change.hits_sync_skipped",
+                workspace_id=str(workspace_id),
+                daemon_id=str(daemon_id),
+                reason="daemon_offline",
+            )
+            return result
+
+        hub = get_daemon_ws_hub()
+        result["triggered"] = True
+        rpc_result = await hub.send_rpc(
+            daemon_id,
+            "sillyspec_hits_flush",
+            {"workspace_id": str(workspace_id)},
+            timeout=_HITS_SYNC_RPC_TIMEOUT_S,
+        )
+        # daemon 回执消费：{ok, reason?}——ok:true 含 in_flight 秒回（reason 透传
+        # 供前端展示去重事实）；ok:false 透传 upload_failed；非 dict 形态视为坏回执。
+        if isinstance(rpc_result, dict):
+            result["ok"] = rpc_result.get("ok") is True
+            reason = rpc_result.get("reason")
+            result["reason"] = str(reason) if reason else None
+        else:
+            result["ok"] = False
+            result["reason"] = "bad_receipt"
+        if result["ok"] is False:
+            log.warning(
+                "change.hits_sync_failed",
+                workspace_id=str(workspace_id),
+                daemon_id=str(daemon_id),
+                reason=result["reason"],
+            )
+        else:
+            log.info(
+                "change.hits_sync_done",
+                workspace_id=str(workspace_id),
+                daemon_id=str(daemon_id),
+                reason=result["reason"],
+            )
+    except DaemonRpcTimeout as exc:
+        result["ok"] = False
+        result["reason"] = "rpc_timeout"
+        log.warning(
+            "change.hits_sync_failed",
+            workspace_id=str(workspace_id),
+            reason="rpc_timeout",
+            error=f"{type(exc).__name__}: {exc}",
+        )
+    except DaemonRpcRemoteError as exc:
+        result["ok"] = False
+        result["reason"] = "rpc_remote_error"
+        log.warning(
+            "change.hits_sync_failed",
+            workspace_id=str(workspace_id),
+            reason="rpc_remote_error",
+            error=f"{type(exc).__name__}: {exc}",
+        )
+    except DaemonRuntimeOffline as exc:
+        result["ok"] = False
+        result["reason"] = "runtime_offline"
+        log.warning(
+            "change.hits_sync_failed",
+            workspace_id=str(workspace_id),
+            reason="runtime_offline",
+            error=f"{type(exc).__name__}: {exc}",
+        )
+    except Exception as exc:  # 降级收口：补数失败绝不阻断端点（D-003@v1 同族）
+        result["ok"] = False
+        result["reason"] = "exception"
+        log.warning(
+            "change.hits_sync_failed",
+            workspace_id=str(workspace_id),
             reason="exception",
             error=f"{type(exc).__name__}: {exc}",
         )
@@ -636,6 +764,32 @@ async def list_change_files(
         items=[ChangeFileEntry(**it) for it in items],
         sync_result=ChangeFileSyncResult(**sync_result) if sync_result else None,
     )
+
+
+@router.post(
+    "/changes/{change_id}/hits-sync",
+    response_model=ChangeHitsSyncResult,
+)
+async def sync_change_hits(
+    workspace_id: uuid.UUID,
+    change_id: uuid.UUID,
+    session: SessionDep,
+    user: Annotated[User, Depends(require_permission(Permission.CHANGE_READ))],
+) -> ChangeHitsSyncResult:
+    """知识遥测补数：触发绑定 daemon 强制上行一轮本地命中遥测（2026-10-27-knowledge-hits-flush-button）。
+
+    变更详情页沉淀资产卡「同步变更」按钮的后端入口——daemon 侧 ``sillyspec_hits_flush``
+    RPC 读 state/ 新路径遥测文件增量上行（「知识触达」分组数据源 knowledge_hits
+    因此补齐）。变更实体先取（404 语义与其余变更端点一致）；触发链路照
+    ``_sync_change_via_daemon`` 降级铁律：未绑定 / 离线 / 超时 / 远端错误（含老
+    daemon method not found）任何失败路均 HTTP 200 携带回执不抛——补数是展示面
+    增强动作，失败事实如实带回由前端提示。补数为全工作区全量增量（不按变更名
+    过滤行）：行级 sha256 幂等使多余行零成本，效果覆盖触发按钮的变更。
+    """
+    service = ChangeService(session)
+    await service.get(workspace_id, change_id)
+    result = await _flush_hits_via_daemon(session, workspace_id, user.id)
+    return ChangeHitsSyncResult(**result)
 
 
 async def _fetch_session_titles(
