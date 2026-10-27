@@ -549,3 +549,36 @@ async def test_include_ended_default_limit_bounds_query(client, db_session, tmp_
     )
     assert resp.status_code == 200
     assert len(resp.json()) == 3
+
+
+# ---- 2026-10-28-change-detail-sessions-source-fix FR-04：附件标题剥离 --------
+
+
+async def test_title_strips_attachment_markers(client, db_session, tmp_path):
+    """附件开局 user_input → 标题剥附件标记取正文；纯附件回退附件 name。"""
+    owner, ws = await _seed_workspace(db_session, tmp_path)
+    att = uuid.uuid4()
+    _add_session(
+        db_session,
+        ws_id=ws.id,
+        owner=owner,
+        status="ended",
+        user_log=f"[附件:{att}|image|IMG_2038.png]\r\n\r\n移动端四个页面布局乱了",
+    )
+    _add_session(
+        db_session,
+        ws_id=ws.id,
+        owner=owner,
+        status="ended",
+        created_at=datetime.now(UTC) - timedelta(minutes=1),
+        user_log=f"[附件:{uuid.uuid4()}|file|需求文档.pdf]",
+    )
+    await db_session.commit()
+
+    resp = await client.get(
+        f"/api/workspaces/{ws.id}/agent-sessions?include_ended=true",
+        headers=_auth(_token(owner)),
+    )
+    assert resp.status_code == 200, resp.text
+    titles = sorted(str(item["title"]) for item in resp.json())
+    assert titles == ["移动端四个页面布局乱了", "需求文档.pdf"]

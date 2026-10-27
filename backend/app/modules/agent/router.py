@@ -49,6 +49,7 @@ from app.modules.daemon.model import DaemonTaskLease
 from app.modules.daemon.permission_service import WorkspaceDialogRead
 from app.modules.daemon.router import PermissionServiceDep
 from app.modules.daemon.schema import AgentSessionListItem, ChangeSessionAuthor
+from app.modules.session_attachment.service import session_display_title
 from app.modules.workspace.model import AgentRunWorkspace, Workspace
 from app.modules.workspace.service import resolve_root_path_for_daemon
 
@@ -663,8 +664,11 @@ async def _assemble_workspace_session_items(
     # 几百会话×上百轮时单次列表请求额外扫数万行大文本。窗口函数 PG/SQLite
     # 双方言支持（SQLite ≥3.25），每会话恒 1 行出参。
     # 2026-09-09 阿里云 slow.query 实测：摘要只取前 30 字（消费方 [:30]），
-    # SQL 内 substr 截到 64 字符，免把单行均值 33KB 的 TOAST 全文解压拉回——
-    # substr 双方言均为字符语义，64 > 30 保证截断后派生零回归。
+    # SQL 内 substr 截断免把单行均值 33KB 的 TOAST 全文解压拉回（substr 双方
+    # 言均为字符语义）。2026-10-28-change-detail-sessions-source-fix：64 → 512，
+    # 附件标记行每条约 60 字符，64 字内可能全是标记（剥离后无正文可选）；
+    # 标题口径换共享 helper session_display_title（剥附件标记，与 change/
+    # daemon router 三处同源）。
     rn = (
         func.row_number()
         .over(
@@ -676,7 +680,7 @@ async def _assemble_workspace_session_items(
     title_subq = (
         select(
             AgentRun.agent_session_id.label("session_id"),
-            func.substr(AgentRunLog.content_redacted, 1, 64).label("content"),
+            func.substr(AgentRunLog.content_redacted, 1, 512).label("content"),
             rn,
         )
         .join(AgentRunLog, AgentRunLog.run_id == AgentRun.id)
@@ -691,8 +695,8 @@ async def _assemble_workspace_session_items(
             select(title_subq.c.session_id, title_subq.c.content).where(title_subq.c.rn == 1)
         )
     ).all()
-    content_by_session: dict[uuid.UUID, str] = {
-        row.session_id: (row.content or "") for row in title_rows
+    content_by_session: dict[uuid.UUID, str | None] = {
+        row.session_id: session_display_title(row.content) for row in title_rows
     }
 
     return [
@@ -707,7 +711,7 @@ async def _assemble_workspace_session_items(
                 display_name=user_name_map.get(s.user_id),
             ),
             last_active_at=s.last_active_at,
-            title=(content_by_session.get(s.id, "") or "")[:30] or None,
+            title=content_by_session.get(s.id),
         )
         for s in sessions
     ]
