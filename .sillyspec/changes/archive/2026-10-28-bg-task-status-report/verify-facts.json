@@ -1,0 +1,154 @@
+{
+  "apiFace": {
+    "endpoints": [
+      {
+        "method": "POST",
+        "path": "/api/daemon/sessions/{session_id}/bg-task-final",
+        "rowIdx": 1
+      },
+      {
+        "method": "POST",
+        "path": "/api/daemon/sessions/{session_id}/bg-task-final",
+        "rowIdx": 1
+      }
+    ],
+    "declared": 0,
+    "writeEndpoints": [
+      {
+        "method": "POST",
+        "path": "/api/daemon/sessions/{session_id}/bg-task-final",
+        "rowIdx": 1
+      },
+      {
+        "method": "POST",
+        "path": "/api/daemon/sessions/{session_id}/bg-task-final",
+        "rowIdx": 1
+      }
+    ]
+  },
+  "schemaVersion": 2,
+  "change": "2026-10-28-bg-task-status-report",
+  "generatedAt": "2026-10-27T08:23:14.527Z",
+  "probes": {
+    "probe1": {
+      "command": "sillyspec verify-probes --change 2026-10-28-bg-task-status-report",
+      "metrics": {
+        "matches": 0,
+        "skippedFiles": 0,
+        "worktreeHits": 0,
+        "globEntries": 0
+      }
+    },
+    "probe3": {
+      "command": "sillyspec verify-probes --change 2026-10-28-bg-task-status-report",
+      "metrics": {
+        "tasks": 7,
+        "hasTest": 7
+      }
+    },
+    "probe5": {
+      "command": "sillyspec verify-probes --change 2026-10-28-bg-task-status-report",
+      "metrics": {
+        "backendEndpoints": 1113,
+        "frontendCalls": 0
+      }
+    },
+    "probe6": {
+      "command": "sillyspec verify-probes --change 2026-10-28-bg-task-status-report",
+      "metrics": {
+        "deletions": 0,
+        "unavailable": false
+      }
+    },
+    "probe8": {
+      "command": "sillyspec verify-probes --change 2026-10-28-bg-task-status-report",
+      "metrics": {
+        "mispairs": 0,
+        "feOnly": 0,
+        "missingNotNull": 0,
+        "contractCount": 0,
+        "contractOrphans": 0,
+        "missingRequired": 0,
+        "feKeys": 0,
+        "backendFields": 0
+      }
+    },
+    "probe9": {
+      "command": "sillyspec verify-probes --change 2026-10-28-bg-task-status-report",
+      "metrics": {
+        "javaFileCount": 0,
+        "groupCount": 0,
+        "inconsistentGroups": 0
+      }
+    },
+    "probe10": {
+      "command": "sillyspec verify-probes --change 2026-10-28-bg-task-status-report",
+      "metrics": {
+        "checkedFiles": 8,
+        "unclearedFiles": 0
+      }
+    }
+  },
+  "handover": {
+    "count": 4,
+    "items": [
+      {
+        "type": "deferred",
+        "item": "FR-04 运行中计数（D-007：启动事件源缺失）",
+        "condition": "立独立变更（先建启动事件源）",
+        "severity": "blocking"
+      },
+      {
+        "type": "visual-verify",
+        "item": "平台运行冒烟：部署后启动后台任务→≤2 分钟条目翻终态",
+        "condition": "生产部署后实测（NFR-03）",
+        "severity": "blocking"
+      },
+      {
+        "type": "known-limit",
+        "item": "数组 content 形态 task-notification 不附着（实证纯字符串）",
+        "condition": "CLI 格式漂移时扩解析",
+        "severity": "blocking"
+      },
+      {
+        "type": "known-limit",
+        "item": "stopped 归二元 ✗（既有 StatusBadge 词表所限）",
+        "condition": "状态标三态化另立",
+        "severity": "blocking"
+      }
+    ]
+  },
+  "dbScriptDeclarations": [],
+  "runtimeEndpointExcluded": false,
+  "integrationRan": "not-ran",
+  "matrixPartialRows": 13,
+  "consumerHints": {
+    "script": [
+      "sillyhub-daemon/tests/agent-log/parse-task-notification.test.ts"
+    ]
+  },
+  "smokeRan": "not-configured",
+  "factsConsistency": {
+    "checked": [
+      "probe5"
+    ],
+    "verdict": "mismatch",
+    "detail": [
+      {
+        "probe": "probe5",
+        "snapshot": 1113,
+        "rerun": 1114,
+        "severity": "warning",
+        "note": "facts 快照 backend 端点数与重跑不符（扫描根口径环境敏感，WARNING）"
+      }
+    ]
+  },
+  "conclusion": "PASS WITH NOTES",
+  "tests": {
+    "command": "module[]+deps(py1+jsx2+jsx1)",
+    "exitCode": 0,
+    "strategy": "dynamic-subset",
+    "failedRemaining": [],
+    "passedAt": "2026-10-27T13:01:42.231Z"
+  }
+}

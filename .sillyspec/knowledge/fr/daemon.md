@@ -8678,3 +8678,215 @@
 摘要：主路径
 全文：.sillyspec/changes/archive/2026-10-27-sessions-total-and-status-filter/requirements.md#FR-05
 最近确认：9c86c078c5c3d91ea63cd439d1137a079a07a6a7
+
+## FR-daemon-323 daemon 解析后台任务终态信号并上报
+变更：2026-10-28-bg-task-status-report
+状态：active
+摘要：主路径；格式漂移降级
+全文：.sillyspec/changes/archive/2026-10-28-bg-task-status-report/requirements.md#FR-01
+最近确认：af1edd441
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-28-bg-task-status-report:task-01:acc-0-fd0e499f
+  tests: backend/app/modules/agent/tests/test_agent_session_model.py | backend/app/modules/agent/tests/test_cleanup_stale_runs_error_code.py | backend/app/modules/agent/tests/test_coordinator_approval_signal.py | backend/app/modules/agent/tests/test_finalizer.py | backend/app/modules/agent/tests/test_group_chat_models.py | backend/app/modules/agent/tests/test_mcp_tools.py | backend/app/modules/agent/tests/test_orchestrator.py | backend/app/modules/agent/tests/test_placement_borrow_integration.py | backend/app/modules/agent/tests/test_profile_router.py | backend/app/modules/agent/tests/test_provider_caps_alignment.py | backend/app/modules/agent/tests/test_worktree_integration.py | backend/app/modules/change/tests/test_assets.py | backend/app/modules/change/tests/test_dispatch_execute_team_mode.py | backend/app/modules/change/tests/test_files_refresh_sync.py | backend/app/modules/change/tests/test_files_router.py | backend/app/modules/change/tests/test_parser.py | backend/app/modules/change/tests/test_session_changes_endpoint.py | backend/app/modules/change/tests/test_spec_binding.py | backend/app/modules/change/tests/test_step_progress.py | backend/app/modules/change/tests/test_timeline.py
+  reason: spec
+  state: active
+  discovery: machine
+  confirmed_by: agent
+  confirmed_at: af1edd44187856b8fe330d398bba246225796c4c
+  source_change: 2026-10-28-bg-task-status-report
+  status: active
+- row: 2026-10-28-bg-task-status-report:task-01:acc-1-e07dcbf3
+  tests: backend/app/modules/agent/tests/test_agent_session_model.py | backend/app/modules/agent/tests/test_cleanup_stale_runs_error_code.py | backend/app/modules/agent/tests/test_coordinator_approval_signal.py | backend/app/modules/agent/tests/test_finalizer.py | backend/app/modules/agent/tests/test_group_chat_models.py | backend/app/modules/agent/tests/test_mcp_tools.py | backend/app/modules/agent/tests/test_orchestrator.py | backend/app/modules/agent/tests/test_placement_borrow_integration.py | backend/app/modules/agent/tests/test_profile_router.py | backend/app/modules/agent/tests/test_provider_caps_alignment.py | backend/app/modules/agent/tests/test_worktree_integration.py | backend/app/modules/change/tests/test_assets.py | backend/app/modules/change/tests/test_dispatch_execute_team_mode.py | backend/app/modules/change/tests/test_files_refresh_sync.py | backend/app/modules/change/tests/test_files_router.py | backend/app/modules/change/tests/test_parser.py | backend/app/modules/change/tests/test_session_changes_endpoint.py | backend/app/modules/change/tests/test_spec_binding.py | backend/app/modules/change/tests/test_step_progress.py | backend/app/modules/change/tests/test_timeline.py
+  reason: spec
+  state: active
+  discovery: machine
+  confirmed_by: agent
+  confirmed_at: af1edd44187856b8fe330d398bba246225796c4c
+  source_change: 2026-10-28-bg-task-status-report
+  status: active
+- row: 2026-10-28-bg-task-status-report:task-02:acc-0-08ae6b7e
+  tests: sillyhub-daemon/tests/agent-log/parse-claude-code-jsonl.test.ts
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-28-bg-task-status-report
+  status: active
+- row: 2026-10-28-bg-task-status-report:task-02:acc-1-fa1f4184
+  tests: sillyhub-daemon/tests/agent-log/parse-claude-code-jsonl.test.ts
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-28-bg-task-status-report
+  status: active
+- row: 2026-10-28-bg-task-status-report:task-02:acc-2-cc0beb2f
+  tests: sillyhub-daemon/tests/agent-log/parse-claude-code-jsonl.test.ts
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-28-bg-task-status-report
+  status: active
+- row: 2026-10-28-bg-task-status-report:task-03:acc-0-dac009a5
+  tests: sillyhub-daemon/tests/agent-log/parse-claude-code-jsonl.test.ts
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-28-bg-task-status-report
+  status: active
+- row: 2026-10-28-bg-task-status-report:task-03:acc-1-26c7a293
+  tests: sillyhub-daemon/tests/agent-log/parse-claude-code-jsonl.test.ts
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-28-bg-task-status-report
+  status: active
+- row: 2026-10-28-bg-task-status-report:task-03:acc-2-23d66a4b
+  tests: sillyhub-daemon/tests/agent-log/parse-claude-code-jsonl.test.ts
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-28-bg-task-status-report
+  status: active
+
+## FR-daemon-324 backend 事件模型扩展与 SSE 透传
+变更：2026-10-28-bg-task-status-report
+状态：active
+摘要：主路径
+全文：.sillyspec/changes/archive/2026-10-28-bg-task-status-report/requirements.md#FR-02
+最近确认：af1edd441
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-28-bg-task-status-report:task-04:acc-0-271e34c6
+  tests: backend/app/modules/daemon/tests/test_session_bg_task_final.py
+  reason: spec
+  state: active
+  discovery: machine
+  confirmed_by: agent
+  confirmed_at: af1edd44187856b8fe330d398bba246225796c4c
+  source_change: 2026-10-28-bg-task-status-report
+  status: active
+- row: 2026-10-28-bg-task-status-report:task-04:acc-1-a9889c7e
+  tests: backend/app/modules/daemon/tests/test_session_bg_task_final.py
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-28-bg-task-status-report
+  status: active
+- row: 2026-10-28-bg-task-status-report:task-04:acc-2-f84f3f92
+  tests: backend/app/modules/daemon/tests/test_session_bg_task_final.py
+  reason: spec
+  state: active
+  discovery: machine
+  confirmed_by: agent
+  confirmed_at: af1edd44187856b8fe330d398bba246225796c4c
+  source_change: 2026-10-28-bg-task-status-report
+  status: active
+
+## FR-daemon-325 前端条目终态翻转
+变更：2026-10-28-bg-task-status-report
+状态：active
+摘要：主路径；旧 daemon 兼容
+全文：.sillyspec/changes/archive/2026-10-28-bg-task-status-report/requirements.md#FR-03
+最近确认：af1edd441
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-28-bg-task-status-report:task-05:acc-0-2a84e0ee
+  tests: frontend/src/components/agent-log/__tests__/bg-task-final.test.ts
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-28-bg-task-status-report
+  status: active
+- row: 2026-10-28-bg-task-status-report:task-05:acc-1-a6c3938e
+  tests: frontend/src/components/agent-log/__tests__/bg-task-final.test.ts
+  reason: spec
+  state: active
+  discovery: machine
+  confirmed_by: agent
+  confirmed_at: af1edd44187856b8fe330d398bba246225796c4c
+  source_change: 2026-10-28-bg-task-status-report
+  status: active
+- row: 2026-10-28-bg-task-status-report:task-05:acc-2-40093977
+  tests: frontend/src/components/agent-log/__tests__/bg-task-final.test.ts
+  reason: spec
+  state: active
+  discovery: machine
+  confirmed_by: agent
+  confirmed_at: af1edd44187856b8fe330d398bba246225796c4c
+  source_change: 2026-10-28-bg-task-status-report
+  status: active
+
+## FR-daemon-326 会话空闲期后台任务运行中计数
+变更：2026-10-28-bg-task-status-report
+状态：active
+摘要：主路径
+全文：.sillyspec/changes/archive/2026-10-28-bg-task-status-report/requirements.md#FR-04
+最近确认：af1edd441
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-28-bg-task-status-report:task-06:acc-0-ceb65083
+  tests: frontend/src/components/agent-log/__tests__/bg-task-final.test.ts
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-28-bg-task-status-report
+  status: active
+- row: 2026-10-28-bg-task-status-report:task-06:acc-1-818389cf
+  tests: frontend/src/components/agent-log/__tests__/bg-task-final.test.ts
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-28-bg-task-status-report
+  status: active
+- row: 2026-10-28-bg-task-status-report:task-06:acc-2-fcce7941
+  tests: frontend/src/components/agent-log/__tests__/bg-task-final.test.ts
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-28-bg-task-status-report
+  status: active
+
+## FR-daemon-327 三侧测试与兼容零回归
+变更：2026-10-28-bg-task-status-report
+状态：active
+摘要：（无场景名）
+全文：.sillyspec/changes/archive/2026-10-28-bg-task-status-report/requirements.md#FR-05
+最近确认：af1edd441
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-28-bg-task-status-report:task-07:acc-0-6ad601bb
+  tests: backend/app/modules/agent/tests/test_agent_session_model.py | backend/app/modules/agent/tests/test_cleanup_stale_runs_error_code.py | backend/app/modules/agent/tests/test_coordinator_approval_signal.py | backend/app/modules/agent/tests/test_finalizer.py | backend/app/modules/agent/tests/test_group_chat_models.py | backend/app/modules/agent/tests/test_mcp_tools.py | backend/app/modules/agent/tests/test_orchestrator.py | backend/app/modules/agent/tests/test_placement_borrow_integration.py | backend/app/modules/agent/tests/test_profile_router.py | backend/app/modules/agent/tests/test_provider_caps_alignment.py | backend/app/modules/agent/tests/test_worktree_integration.py | backend/app/modules/change/tests/test_assets.py | backend/app/modules/change/tests/test_dispatch_execute_team_mode.py | backend/app/modules/change/tests/test_files_refresh_sync.py | backend/app/modules/change/tests/test_files_router.py | backend/app/modules/change/tests/test_parser.py | backend/app/modules/change/tests/test_session_changes_endpoint.py | backend/app/modules/change/tests/test_spec_binding.py | backend/app/modules/change/tests/test_step_progress.py | backend/app/modules/change/tests/test_timeline.py
+  reason: spec
+  state: active
+  discovery: machine
+  confirmed_by: agent
+  confirmed_at: af1edd44187856b8fe330d398bba246225796c4c
+  source_change: 2026-10-28-bg-task-status-report
+  status: active

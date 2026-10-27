@@ -1,0 +1,1623 @@
+diff --git a/backend/app/modules/daemon/router/__init__.py b/backend/app/modules/daemon/router/__init__.py
+index c6b212382..3df65a0f5 100644
+--- a/backend/app/modules/daemon/router/__init__.py
++++ b/backend/app/modules/daemon/router/__init__.py
+@@ -202,6 +202,9 @@ _ENDPOINT_ORDER: tuple[str, ...] = (
+     # 2026-10-26-session-stage-progress task-01：轮阶段上报（紧跟 plan_mode，
+     # 物理注册序在 bash-status 之前）。
+     "notify_turn_phase",
++    # 2026-10-28-bg-task-status-report task-04：后台任务终态上报（turn-phase
++    # 同款上报族，物理注册序在 bash-status 之前）。
++    "notify_bg_task_final",
+     "notify_bash_status",
+     "notify_bash_chunk",
+     "notify_agent_task_status",
+diff --git a/backend/app/modules/daemon/router/notify.py b/backend/app/modules/daemon/router/notify.py
+index 8a74bef51..ef05f8b3b 100644
+--- a/backend/app/modules/daemon/router/notify.py
++++ b/backend/app/modules/daemon/router/notify.py
+@@ -34,6 +34,7 @@ from app.modules.daemon.protocol import PermissionRequestPayload
+ from app.modules.daemon.router import SessionDep, TaskRunAgentUser, router
+ from app.modules.daemon.run_sync.service import (
+     publish_bash_chunk_event,
++    publish_bg_task_final_event,
+     publish_session_event,
+     publish_turn_phase_event,
+ )
+@@ -41,6 +42,7 @@ from app.modules.daemon.schema import (
+     AgentTaskStatusEvent,
+     BashChunkEvent,
+     BashStatusEvent,
++    BgTaskFinalReportRequest,
+     PlanModeEnteredEvent,
+     PlanResponseRequest,
+     TurnPhaseReportRequest,
+@@ -350,6 +352,40 @@ async def notify_turn_phase(
+     return {"ok": True}
+ 
+ 
++@router.post(
++    "/sessions/{session_id}/bg-task-final",
++    response_model=dict[str, bool],
++)
++async def notify_bg_task_final(
++    session_id: uuid.UUID,
++    data: BgTaskFinalReportRequest,
++    session: SessionDep,
++    user: Annotated[User, Depends(get_current_principal)],
++) -> dict[str, bool]:
++    """Receive daemon background-task final report and forward to frontend SSE.
++
++    2026-10-28-bg-task-status-report task-04（FR-02 / D-005@v1 纯发布信号）：
++    daemon 扫描环（D-006@v1 独立环直调，非桥模式）检出 task-notification 终态
++    → ``publish_bg_task_final_event`` 发布 bg_task_final 事件（payload 键
++    task_id/tool_use_id/status/output_file/timestamp 与前端信封逐字对齐）。
++    不落库——前端收到信号失效 agent logs 查询重拉，终态数据经 rollout
++    解析链自然到达；重复上报（daemon 重启重扫）为同值信号无害。
++
++    越权防护（2026-08-25 P1）：同 notify_turn_phase，发布前做 runtime
++    归属校验（404 不泄露存在性）。
++    """
++    await SessionService(session).get_session_for_runtime_owner(session_id, user.id)
++    await publish_bg_task_final_event(
++        session_id,
++        data.run_id,
++        data.task_id,
++        data.tool_use_id,
++        data.status,
++        data.output_file,
++    )
++    return {"ok": True}
++
++
+ @router.post(
+     "/sessions/{session_id}/bash-status",
+     response_model=dict[str, bool],
+diff --git a/backend/app/modules/daemon/run_sync/service/__init__.py b/backend/app/modules/daemon/run_sync/service/__init__.py
+index 7e4985bd6..4444f2171 100644
+--- a/backend/app/modules/daemon/run_sync/service/__init__.py
++++ b/backend/app/modules/daemon/run_sync/service/__init__.py
+@@ -99,6 +99,7 @@ from .publish import (  # noqa: E402
+     SubmittedMessages,
+     _bash_chunk_last_publish,
+     publish_bash_chunk_event,
++    publish_bg_task_final_event,
+     publish_session_event,
+     publish_submitted_messages,
+     publish_turn_phase_event,
+@@ -138,6 +139,7 @@ __all__ = [
+     "is_group_projectable_reply",
+     "log",
+     "publish_bash_chunk_event",
++    "publish_bg_task_final_event",
+     "publish_session_event",
+     "publish_sessions_changed",
+     "publish_submitted_messages",
+diff --git a/backend/app/modules/daemon/run_sync/service/publish.py b/backend/app/modules/daemon/run_sync/service/publish.py
+index aa6801f8c..ac1d6d463 100644
+--- a/backend/app/modules/daemon/run_sync/service/publish.py
++++ b/backend/app/modules/daemon/run_sync/service/publish.py
+@@ -384,6 +384,43 @@ async def publish_turn_phase_event(
+     )
+ 
+ 
++async def publish_bg_task_final_event(
++    session_id: uuid.UUID,
++    run_id: uuid.UUID | None,
++    task_id: str,
++    tool_use_id: str,
++    status: str,
++    output_file: str | None,
++) -> None:
++    """发布 ``bg_task_final`` 事件到 ``agent_session:{session_id}`` 频道。
++
++    2026-10-28-bg-task-status-report task-04（FR-02 / D-005@v1 纯发布信号）：
++    前端收到即失效 agent logs 查询重拉——活动数据经 daemon rollout 解析链
++    自然含 task-02 的终态附着段，条目状态随之翻转。payload 键与前端信封
++    逐字对齐；异常吞噬 + warning（纯增强信号，发布失败不阻断上报主流程，
++    底座 publish_json_event 已兜）。
++    """
++    payload: dict = {
++        "event": "bg_task_final",
++        "session_id": str(session_id),
++        "run_id": str(run_id) if run_id is not None else None,
++        "task_id": task_id,
++        "tool_use_id": tool_use_id,
++        "status": status,
++        "output_file": output_file,
++        "timestamp": datetime.now(UTC).isoformat(),
++    }
++    await publish_json_event(
++        redis_getter=_rsvc.get_redis,
++        channel=f"agent_session:{session_id}",
++        payload=payload,
++        log=_rsvc.log,
++        failure_event="bg_task_final_redis_publish_failed",
++        session_id=str(session_id),
++        event_type="bg_task_final",
++    )
++
++
+ async def publish_bash_chunk_event(event: BashChunkEvent) -> bool:
+     """发布 bash_chunk 事件（100ms 节流 + 8KB 截断），返回是否实际发布。
+ 
+diff --git a/backend/app/modules/daemon/schema.py b/backend/app/modules/daemon/schema.py
+index ed1c64261..55f3da3f2 100644
+--- a/backend/app/modules/daemon/schema.py
++++ b/backend/app/modules/daemon/schema.py
+@@ -1694,6 +1694,26 @@ class TurnPhaseReportRequest(BaseModel):
+     detail: str | None = None
+ 
+ 
++class BgTaskFinalReportRequest(BaseModel):
++    """daemon 后台任务终态上报（2026-10-28-bg-task-status-report FR-02）。
++
++    daemon 扫描环（D-006@v1：60s 末段提取+快照 diff）检出 task-notification
++    终态后直调 HubClient.notifyBgTaskFinal 上报本端点。纯发布信号（D-005@v1：
++    不落库——前端活动流数据源为 daemon rollout 解析段，SSE 信号触发前端失效
++    重拉即得终态数据）；payload 键与前端 SSE 信封逐字对齐。
++
++    - ``run_id`` 可选（D-006@v1：纯信号无轮语义，task-notification 无 run_id）；
++    - ``status`` 三值封闭枚举（CLI task-notification 实证值域）；
++    - ``task_id`` / ``tool_use_id`` 前端条目配对键（与启动条目 tool_use 配对）。
++    """
++
++    run_id: uuid.UUID | None = None
++    task_id: str
++    tool_use_id: str
++    status: Literal["completed", "failed", "stopped"]
++    output_file: str | None = None
++
++
+ class BashStatusEvent(BaseModel):
+     """``bash_status`` 事件——Bash 命令开始/结束状态（FR-02）。
+ 
+diff --git a/backend/app/modules/daemon/tests/test_session_bg_task_final.py b/backend/app/modules/daemon/tests/test_session_bg_task_final.py
+new file mode 100644
+index 000000000..ccc8c97dd
+--- /dev/null
++++ b/backend/app/modules/daemon/tests/test_session_bg_task_final.py
+@@ -0,0 +1,195 @@
++"""2026-10-28-bg-task-status-report task-04：bg_task_final 上报端点测试。
++
++Covers FR-02 / D-005@v1 / D-012 同纪律：
++  * POST /sessions/{session_id}/bg-task-final：无凭据 401 / 跨 owner 与未知
++    会话 404（不泄露存在性，零发布）/ 合法上报 200 且 agent_session:{id}
++    频道收到 bg_task_final 事件（payload 键名 task_id/tool_use_id/status/
++    output_file/timestamp 逐字断言）；
++  * status 三值封闭枚举：completed/failed/stopped 合法，未知值 422；
++  * 纯发布信号（D-005）：无 DB 日志行写入（agent_run_logs 计数不变）。
++
++fixture/Redis mock 模式逐字对齐 test_turn_phase_events.py。
++"""
++
++from __future__ import annotations
++
++import json
++import uuid
++from datetime import UTC, datetime
++from unittest.mock import AsyncMock, patch
++
++import pytest
++from httpx import AsyncClient
++from sqlalchemy import select
++from sqlalchemy.ext.asyncio import AsyncSession
++
++from app.modules.agent.model import AgentRun, AgentSession
++from app.modules.daemon.model import DaemonRuntime
++
++# ── helpers（对齐 test_turn_phase_events.py）─────────────────────────────────
++
++
++async def _admin_id(session: AsyncSession) -> uuid.UUID:
++    from app.modules.auth.model import User
++
++    admin = (
++        (await session.execute(select(User).where(User.email == "admin@example.com")))
++        .scalars()
++        .first()
++    )
++    assert admin is not None
++    return admin.id
++
++
++async def _create_runtime(session: AsyncSession, user_id: uuid.UUID) -> DaemonRuntime:
++    rt = DaemonRuntime(
++        id=uuid.uuid4(),
++        user_id=user_id,
++        name="daemon",
++        provider="claude",
++        status="online",
++        last_heartbeat_at=datetime.now(UTC),
++    )
++    session.add(rt)
++    await session.commit()
++    await session.refresh(rt)
++    return rt
++
++
++async def _create_session_with_run(
++    session: AsyncSession,
++    user_id: uuid.UUID,
++    runtime_id: uuid.UUID,
++) -> tuple[AgentSession, AgentRun]:
++    ag = AgentSession(
++        id=uuid.uuid4(),
++        user_id=user_id,
++        runtime_id=runtime_id,
++        provider="claude",
++        status="active",
++    )
++    run = AgentRun(
++        id=uuid.uuid4(),
++        task_id=uuid.uuid4(),
++        agent_type="claude_code",
++        status="running",
++        agent_session_id=ag.id,
++    )
++    session.add_all([ag, run])
++    await session.commit()
++    await session.refresh(ag)
++    await session.refresh(run)
++    return ag, run
++
++
++def _mock_redis() -> AsyncMock:
++    redis = AsyncMock()
++    redis.publish = AsyncMock(return_value=1)
++    return redis
++
++
++def _payload(run_id: uuid.UUID | None, status: str = "completed") -> dict:
++    return {
++        "run_id": str(run_id) if run_id is not None else None,
++        "task_id": "bk2n9szuv",
++        "tool_use_id": "call_e0c1d816b07e44b8a8f848c2",
++        "status": status,
++        "output_file": "C:\\temp\\tasks\\bk2n9szuv.output",
++    }
++
++
++class TestBgTaskFinalEndpoint:
++    @pytest.mark.asyncio
++    async def test_no_credentials_401(self, client: AsyncClient) -> None:
++        """无凭据 → 401。"""
++        resp = await client.post(
++            f"/api/daemon/sessions/{uuid.uuid4()}/bg-task-final",
++            json=_payload(uuid.uuid4()),
++        )
++        assert resp.status_code == 401, resp.text
++
++    @pytest.mark.asyncio
++    async def test_non_owner_404_no_publish(
++        self,
++        client: AsyncClient,
++        auth_headers: dict[str, str],
++        db_session: AsyncSession,
++    ) -> None:
++        """非 runtime owner → 404 零发布（越权防护先例同款）。"""
++        from app.modules.auth.model import User
++
++        other_id = uuid.uuid4()
++        db_session.add(
++            User(
++                id=other_id,
++                email=f"foreign-{other_id}@example.com",
++                password_hash="x",
++                display_name="foreign",
++                status="active",
++            )
++        )
++        await db_session.commit()
++        rt = await _create_runtime(db_session, other_id)
++        ag_session, _run = await _create_session_with_run(db_session, other_id, rt.id)
++        redis = _mock_redis()
++
++        with patch("app.modules.daemon.run_sync.service.get_redis", return_value=redis):
++            resp = await client.post(
++                f"/api/daemon/sessions/{ag_session.id}/bg-task-final",
++                json=_payload(uuid.uuid4()),
++                headers=auth_headers,
++            )
++
++        assert resp.status_code == 404, resp.text
++        assert redis.publish.await_count == 0
++
++    @pytest.mark.asyncio
++    async def test_unknown_status_422(
++        self,
++        client: AsyncClient,
++        auth_headers: dict[str, str],
++    ) -> None:
++        """status 三值封闭枚举：未知值 422。"""
++        resp = await client.post(
++            f"/api/daemon/sessions/{uuid.uuid4()}/bg-task-final",
++            json=_payload(uuid.uuid4(), status="weird"),
++            headers=auth_headers,
++        )
++        assert resp.status_code == 422, resp.text
++
++    @pytest.mark.asyncio
++    @pytest.mark.parametrize("status", ["completed", "failed", "stopped"])
++    async def test_valid_report_200_payload_keys_verbatim(
++        self,
++        client: AsyncClient,
++        auth_headers: dict[str, str],
++        db_session: AsyncSession,
++        status: str,
++    ) -> None:
++        """合法上报 → 200 且频道事件键名逐字对齐（三态参数化）。"""
++        user_id = await _admin_id(db_session)
++        rt = await _create_runtime(db_session, user_id)
++        ag_session, run = await _create_session_with_run(db_session, user_id, rt.id)
++        redis = _mock_redis()
++
++        with patch("app.modules.daemon.run_sync.service.get_redis", return_value=redis):
++            resp = await client.post(
++                f"/api/daemon/sessions/{ag_session.id}/bg-task-final",
++                json=_payload(run.id, status=status),
++                headers=auth_headers,
++            )
++
++        assert resp.status_code == 200, resp.text
++        assert resp.json()["ok"] is True
++        assert redis.publish.await_count == 1
++        channel, raw = redis.publish.await_args_list[0].args
++        assert channel == f"agent_session:{ag_session.id}"
++        event = json.loads(raw)
++        assert event["event"] == "bg_task_final"
++        assert event["session_id"] == str(ag_session.id)
++        assert event["run_id"] == str(run.id)
++        assert event["task_id"] == "bk2n9szuv"
++        assert event["tool_use_id"] == "call_e0c1d816b07e44b8a8f848c2"
++        assert event["status"] == status
++        assert event["output_file"] == "C:\\temp\\tasks\\bk2n9szuv.output"
++        assert "timestamp" in event
+diff --git a/backend/app/modules/platform_sync/schema.py b/backend/app/modules/platform_sync/schema.py
+index 99f2d9b4f..052ed84e4 100644
+--- a/backend/app/modules/platform_sync/schema.py
++++ b/backend/app/modules/platform_sync/schema.py
+@@ -502,6 +502,24 @@ class AgentLogMessageUsage(BaseModel):
+     )
+ 
+ 
++class BgTaskFinalAttach(BaseModel):
++    """后台任务终态附着载荷（2026-10-28-bg-task-status-report task-05）。
++
++    daemon claude-code 解析器 task-notification 提取产物（task-02
++    parseTaskNotification 返回值）**逐字 camelCase 对齐**——外层挂
++    AgentLogMessageItem.bg_task_final（user_input 系统注入段）。
++    """
++
++    model_config = {"extra": "ignore"}
++
++    # camelCase 刻意为之：逐字对齐 daemon 段模型值对象键（taskId/toolUseId/
++    # outputFile），透传链零映射损耗——逐字段行尾 noqa 压 N815。
++    taskId: str = Field(description="CLI 后台任务 id")  # noqa: N815
++    toolUseId: str = Field(description="配对工具调用 id（前端按此配对工具卡）")  # noqa: N815
++    status: Literal["completed", "failed", "stopped"] = Field(description="终态三值")
++    outputFile: str | None = Field(default=None, description="输出文件路径（可选）")  # noqa: N815
++
++
+ class AgentLogMessageItem(BaseModel):
+     """GET /agent-logs/{entry_id}/messages 单条归一化消息（design §7.1）。
+ 
+@@ -540,6 +558,16 @@ class AgentLogMessageItem(BaseModel):
+         default=None,
+         description="user_input 段发言者（human=真人气泡 / system_event=系统事件中性行；缺省视为 human）",
+     )
++    # ── 2026-10-28-bg-task-status-report task-05（FR-03 / D-004@v1）：后台任务
++    # 终态附着（daemon claude-code 解析器在 task-notification 系统注入段附着；
++    # extra=ignore 下不声明即被剥离，须显式声明到达前端）。前端按 tool_use_id
++    # 配对工具卡翻转终态（后台 Bash/Agent 无 tool_result 跟随，本字段是唯一
++    # 终态来源）。内层键 camelCase 逐字对齐 daemon 段模型值对象。老 daemon /
++    # 非通知段缺省 None。──
++    bg_task_final: "BgTaskFinalAttach | None" = Field(
++        default=None,
++        description="user_input 段后台任务终态附着（task-notification 解析产物）",
++    )
+     turn_id: str | None = Field(
+         default=None, description="轮次标识（zcode turnId / cursor 轮号 / claude-code 会话内轮序）"
+     )
+diff --git a/backend/openapi.json b/backend/openapi.json
+index 30992ba72..c373d41c6 100644
+--- a/backend/openapi.json
++++ b/backend/openapi.json
+@@ -15759,6 +15759,64 @@
+         }
+       }
+     },
++    "/api/daemon/sessions/{session_id}/bg-task-final": {
++      "post": {
++        "tags": [
++          "daemon"
++        ],
++        "summary": "Notify Bg Task Final",
++        "description": "Receive daemon background-task final report and forward to frontend SSE.\n\n2026-10-28-bg-task-status-report task-04（FR-02 / D-005@v1 纯发布信号）：\ndaemon 扫描环（D-006@v1 独立环直调，非桥模式）检出 task-notification 终态\n→ ``publish_bg_task_final_event`` 发布 bg_task_final 事件（payload 键\ntask_id/tool_use_id/status/output_file/timestamp 与前端信封逐字对齐）。\n不落库——前端收到信号失效 agent logs 查询重拉，终态数据经 rollout\n解析链自然到达；重复上报（daemon 重启重扫）为同值信号无害。\n\n越权防护（2026-08-25 P1）：同 notify_turn_phase，发布前做 runtime\n归属校验（404 不泄露存在性）。",
++        "operationId": "notify_bg_task_final_api_daemon_sessions__session_id__bg_task_final_post",
++        "parameters": [
++          {
++            "name": "session_id",
++            "in": "path",
++            "required": true,
++            "schema": {
++              "type": "string",
++              "format": "uuid",
++              "title": "Session Id"
++            }
++          }
++        ],
++        "requestBody": {
++          "required": true,
++          "content": {
++            "application/json": {
++              "schema": {
++                "$ref": "#/components/schemas/BgTaskFinalReportRequest"
++              }
++            }
++          }
++        },
++        "responses": {
++          "200": {
++            "description": "Successful Response",
++            "content": {
++              "application/json": {
++                "schema": {
++                  "type": "object",
++                  "additionalProperties": {
++                    "type": "boolean"
++                  },
++                  "title": "Response Notify Bg Task Final Api Daemon Sessions  Session Id  Bg Task Final Post"
++                }
++              }
++            }
++          },
++          "422": {
++            "description": "Validation Error",
++            "content": {
++              "application/json": {
++                "schema": {
++                  "$ref": "#/components/schemas/HTTPValidationError"
++                }
++              }
++            }
++          }
++        }
++      }
++    },
+     "/api/daemon/sessions/{session_id}/bash-status": {
+       "post": {
+         "tags": [
+@@ -37380,6 +37438,17 @@
+             "title": "Sender",
+             "description": "user_input 段发言者（human=真人气泡 / system_event=系统事件中性行；缺省视为 human）"
+           },
++          "bg_task_final": {
++            "anyOf": [
++              {
++                "$ref": "#/components/schemas/BgTaskFinalAttach"
++              },
++              {
++                "type": "null"
++              }
++            ],
++            "description": "user_input 段后台任务终态附着（task-notification 解析产物）"
++          },
+           "turn_id": {
+             "anyOf": [
+               {
+@@ -40769,6 +40838,102 @@
+         "title": "BatchMetaRequest",
+         "description": "批量元数据请求（按 id 列表查 FileMetaResp）。"
+       },
++      "BgTaskFinalAttach": {
++        "properties": {
++          "taskId": {
++            "type": "string",
++            "title": "Taskid",
++            "description": "CLI 后台任务 id"
++          },
++          "toolUseId": {
++            "type": "string",
++            "title": "Tooluseid",
++            "description": "配对工具调用 id（前端按此配对工具卡）"
++          },
++          "status": {
++            "type": "string",
++            "enum": [
++              "completed",
++              "failed",
++              "stopped"
++            ],
++            "title": "Status",
++            "description": "终态三值"
++          },
++          "outputFile": {
++            "anyOf": [
++              {
++                "type": "string"
++              },
++              {
++                "type": "null"
++              }
++            ],
++            "title": "Outputfile",
++            "description": "输出文件路径（可选）"
++          }
++        },
++        "type": "object",
++        "required": [
++          "taskId",
++          "toolUseId",
++          "status"
++        ],
++        "title": "BgTaskFinalAttach",
++        "description": "后台任务终态附着载荷（2026-10-28-bg-task-status-report task-05）。\n\ndaemon claude-code 解析器 task-notification 提取产物（task-02\nparseTaskNotification 返回值）**逐字 camelCase 对齐**——外层挂\nAgentLogMessageItem.bg_task_final（user_input 系统注入段）。"
++      },
++      "BgTaskFinalReportRequest": {
++        "properties": {
++          "run_id": {
++            "anyOf": [
++              {
++                "type": "string",
++                "format": "uuid"
++              },
++              {
++                "type": "null"
++              }
++            ],
++            "title": "Run Id"
++          },
++          "task_id": {
++            "type": "string",
++            "title": "Task Id"
++          },
++          "tool_use_id": {
++            "type": "string",
++            "title": "Tool Use Id"
++          },
++          "status": {
++            "type": "string",
++            "enum": [
++              "completed",
++              "failed",
++              "stopped"
++            ],
++            "title": "Status"
++          },
++          "output_file": {
++            "anyOf": [
++              {
++                "type": "string"
++              },
++              {
++                "type": "null"
++              }
++            ],
++            "title": "Output File"
++          }
++        },
++        "type": "object",
++        "required": [
++          "task_id",
++          "tool_use_id",
++          "status"
++        ],
++        "title": "BgTaskFinalReportRequest",
++        "description": "daemon 后台任务终态上报（2026-10-28-bg-task-status-report FR-02）。\n\ndaemon 扫描环（D-006@v1：60s 末段提取+快照 diff）检出 task-notification\n终态后直调 HubClient.notifyBgTaskFinal 上报本端点。纯发布信号（D-005@v1：\n不落库——前端活动流数据源为 daemon rollout 解析段，SSE 信号触发前端失效\n重拉即得终态数据）；payload 键与前端 SSE 信封逐字对齐。\n\n- ``run_id`` 可选（D-006@v1：纯信号无轮语义，task-notification 无 run_id）；\n- ``status`` 三值封闭枚举（CLI task-notification 实证值域）；\n- ``task_id`` / ``tool_use_id`` 前端条目配对键（与启动条目 tool_use 配对）。"
++      },
+       "BindPpmProjectRequest": {
+         "properties": {
+           "ppm_project_id": {
+diff --git a/frontend/src/components/agent-log/__tests__/bg-task-final.test.ts b/frontend/src/components/agent-log/__tests__/bg-task-final.test.ts
+new file mode 100644
+index 000000000..7a20d5db0
+--- /dev/null
++++ b/frontend/src/components/agent-log/__tests__/bg-task-final.test.ts
+@@ -0,0 +1,106 @@
++/**
++ * 2026-10-28-bg-task-status-report task-05：后台任务终态条目翻转（FR-03）。
++ *
++ * buildConversationTurns 纯函数级：task-notification 系统注入段（user_input +
++ * bg_task_final 附着）按 toolUseId 配对后台工具卡（无 tool_result 跟随的
++ * tool_use 段）——命中即 hasResult=true + success 三态映射 + durationMs 取
++ * 附着段 ts 差；未命中（旧 daemon / 运行中）维持现状；重复附着幂等（首个生效）。
++ */
++import { describe, expect, it } from "vitest";
++
++import { buildConversationTurns } from "@/components/daemon/agent-log-card";
++
++type Msg = Parameters<typeof buildConversationTurns>[0][number];
++
++function toolUse(seq: number, id: string, ts: string): Msg {
++  return {
++    seq,
++    kind: "tool_use",
++    tool_name: "Bash",
++    tool_use_id: id,
++    tool_input: '{"command":"pnpm build","run_in_background":true}',
++    ts,
++  } as unknown as Msg;
++}
++
++function finalNote(seq: number, toolUseId: string, status: string, ts: string): Msg {
++  return {
++    seq,
++    kind: "user_input",
++    text: "<task-notification>…</task-notification>",
++    sender: "system_event",
++    bg_task_final: { taskId: "t-1", toolUseId, status, outputFile: null },
++    ts,
++  } as unknown as Msg;
++}
++
++function toolSegments(msgs: Msg[]) {
++  const out: Array<{ hasResult: boolean; success: boolean; durationMs?: number }> = [];
++  for (const turn of buildConversationTurns(msgs)) {
++    if (turn.role !== "assistant") continue;
++    for (const seg of turn.segments) {
++      if (seg.kind === "tool_use") {
++        out.push({ hasResult: seg.hasResult, success: seg.entry.success, durationMs: seg.durationMs });
++      }
++    }
++  }
++  return out;
++}
++
++describe("buildConversationTurns · bg_task_final 终态配对（FR-03）", () => {
++  it("completed 附着命中 → hasResult=true + success=true + 时长=附着段 ts 差", () => {
++    const segs = toolSegments([
++      toolUse(1, "tu-1", "2026-10-28T10:00:00Z"),
++      finalNote(2, "tu-1", "completed", "2026-10-28T10:02:14Z"),
++    ]);
++    expect(segs).toHaveLength(1);
++    expect(segs[0]!.hasResult).toBe(true);
++    expect(segs[0]!.success).toBe(true);
++    expect(segs[0]!.durationMs).toBe(134_000);
++  });
++
++  it("failed / stopped → success=false（终态红）", () => {
++    for (const st of ["failed", "stopped"]) {
++      const segs = toolSegments([
++        toolUse(1, "tu-1", "2026-10-28T10:00:00Z"),
++        finalNote(2, "tu-1", st, "2026-10-28T10:00:05Z"),
++      ]);
++      expect(segs[0]!.hasResult).toBe(true);
++      expect(segs[0]!.success).toBe(false);
++    }
++  });
++
++  it("无附着（旧 daemon / 运行中）→ 维持现状 hasResult=false success=false", () => {
++    const segs = toolSegments([toolUse(1, "tu-1", "2026-10-28T10:00:00Z")]);
++    expect(segs[0]!.hasResult).toBe(false);
++    expect(segs[0]!.success).toBe(false);
++  });
++
++  it("重复附着幂等（首个生效）+ 孤儿附着（无对应 tool_use）零副作用", () => {
++    const segs = toolSegments([
++      toolUse(1, "tu-1", "2026-10-28T10:00:00Z"),
++      finalNote(2, "tu-1", "completed", "2026-10-28T10:01:00Z"),
++      finalNote(3, "tu-1", "failed", "2026-10-28T10:02:00Z"),
++      finalNote(4, "tu-ghost", "completed", "2026-10-28T10:03:00Z"),
++    ]);
++    expect(segs).toHaveLength(1);
++    expect(segs[0]!.success).toBe(true); // 首个 completed 生效，重复 failed 不翻转
++    expect(segs[0]!.durationMs).toBe(60_000);
++  });
++
++  it("真 tool_result 到达时优先于附着（result 配对不受影响）", () => {
++    const segs = toolSegments([
++      toolUse(1, "tu-1", "2026-10-28T10:00:00Z"),
++      {
++        seq: 2,
++        kind: "tool_result",
++        tool_use_id: "tu-1",
++        tool_result: "done",
++        is_error: false,
++        ts: "2026-10-28T10:00:30Z",
++      } as unknown as Msg,
++      finalNote(3, "tu-1", "completed", "2026-10-28T10:01:00Z"),
++    ]);
++    expect(segs[0]!.durationMs).toBe(30_000); // result 的 ts 优先
++  });
++});
+diff --git a/frontend/src/components/daemon/__tests__/turn-time-display.test.tsx b/frontend/src/components/daemon/__tests__/turn-time-display.test.tsx
+index a16098e12..76e7f30cf 100644
+--- a/frontend/src/components/daemon/__tests__/turn-time-display.test.tsx
++++ b/frontend/src/components/daemon/__tests__/turn-time-display.test.tsx
+@@ -110,16 +110,14 @@ describe("轮次时间三段显示（quick-3c85b05e；2026-10-20 合并为一条
+     expect(screen.queryAllByTestId("turn-meta-detail")).toHaveLength(0);
+   });
+ 
+-  it("进度视图（all）同样只有一条元信息行：状态徽章 + 右对齐时间细节", () => {
++  it("进度视图（all）与对话视图统一 RoundDivider（2026-10-27 visual-round4 用户指定）：同一条轮次分隔行内含时间细节", () => {
+     render(<TurnTimeline {...renderProps([makeTurn()], "all")} />);
+-    const detail = screen.getByTestId("turn-meta-detail");
+-    expect(detail).toHaveTextContent("历时 01:36");
+-    expect(detail.className).toContain("ml-auto"); // 右对齐（贴行尾）
+-    expect(detail.className).toContain("text-[10.5px]");
+-    expect(detail.className).toContain("font-mono");
++    // round4 统一后 all 视图与对话视图共用 RoundDivider（原 TurnStatusBadge +
++    // turn-meta-detail 独立行退役）——时间细节经 detail prop 折进胶囊。
++    const divider = screen.getByTestId("round-divider");
++    expect(divider).toHaveTextContent("历时 01:36");
+     expect(screen.getAllByText(/历时 01:36/)).toHaveLength(1);
+-    // 全部视图走 TurnStatusBadge 行，不再挂 RoundDivider。
+-    expect(screen.queryAllByTestId("round-divider")).toHaveLength(0);
++    expect(screen.queryAllByTestId("turn-meta-detail")).toHaveLength(0);
+   });
+ 
+   it("仅 replyAt（旧数据无开始锚点）：回退单显结束时间，无开始/历时字样", () => {
+@@ -254,7 +252,7 @@ describe("轮次时间三段显示（quick-3c85b05e；2026-10-20 合并为一条
+     expect(screen.queryByTestId("round-divider-detail")).toBeNull();
+   });
+ 
+-  it("进度视图（all）进行中轮同享实时历时（turn-meta-detail 承载）", () => {
++  it("进度视图（all）进行中轮同享实时历时（round4 统一 RoundDivider 后经胶囊 detail 承载）", () => {
+     vi.useFakeTimers();
+     try {
+       const startedAt = Date.now() - 5_000;
+@@ -266,7 +264,8 @@ describe("轮次时间三段显示（quick-3c85b05e；2026-10-20 合并为一条
+           )}
+         />,
+       );
+-      const detail = screen.getByTestId("turn-meta-detail");
++      // round4：all 视图统一 RoundDivider——实时历时经 detail 折进胶囊（desktop）。
++      const detail = screen.getByTestId("round-divider-detail");
+       expect(detail).toHaveTextContent(`开始 ${localHms(startedAt)}`);
+       expect(detail).toHaveTextContent("历时 00:05");
+       expect(detail.textContent).not.toContain("结束");
+diff --git a/frontend/src/components/daemon/agent-log-card.tsx b/frontend/src/components/daemon/agent-log-card.tsx
+index 5ad68c951..b2b9aa6a8 100644
+--- a/frontend/src/components/daemon/agent-log-card.tsx
++++ b/frontend/src/components/daemon/agent-log-card.tsx
+@@ -230,6 +230,7 @@ type ConversationTurn =
+ function toToolCallEntry(
+   use: AgentLogMessageItem,
+   result: AgentLogMessageItem | undefined,
++  bgFinalStatus?: "completed" | "failed" | "stopped",
+ ): ToolCallEntry {
+   const args = use.tool_input ?? "";
+   let rawArgs: unknown = null;
+@@ -245,7 +246,13 @@ function toToolCallEntry(
+     status: "allowed",
+     // is_error 着失败红（success=false → StatusBadge ✗）；失配分支不走
+     // ToolCallPreview（由「结果未记录」中性徽章承接），此处取值不参与其渲染。
+-    success: result ? !(result.is_error ?? false) : false,
++    // bg_task_final：completed→成功绿 / failed+stopped→失败红（stopped 用户
++    // 中止非错误，但 StatusBadge 仅二元——归 ✗ 中性可辨，注释留痕口径）。
++    success: result
++      ? !(result.is_error ?? false)
++      : bgFinalStatus != null
++        ? bgFinalStatus === "completed"
++        : false,
+     rawArgs,
+     toolUseId: use.tool_use_id ?? undefined,
+   };
+@@ -258,7 +265,7 @@ function toToolCallEntry(
+  * 窗口外）独立成 ToolResultCard 段。user_input 切回合边界，其余段聚进
+  * assistant 回合，回合时间取末段有效 ts。
+  */
+-function buildConversationTurns(
++export function buildConversationTurns(
+   messages: AgentLogMessageItem[],
+ ): ConversationTurn[] {
+   // tool_use_id → 首条 tool_result（seq 升序下最早结果；重复结果按孤儿渲染）。
+@@ -268,6 +275,24 @@ function buildConversationTurns(
+       resultById.set(m.tool_use_id, m);
+     }
+   }
++  // 2026-10-28-bg-task-status-report task-05 补闭环（验收评审 FR-03 fail 解阻）：
++  // 后台任务终态索引——task-notification 系统注入段（user_input + bg_task_final
++  // 附着，task-02 产出）按 toolUseId 配对。后台 Bash/Agent 的 tool_result 永不
++  // 到达（结果经 task-notification 异步交付），finalById 是其唯一终态来源；
++  // 命中即视同有结果（hasResult/时长/终态着色），未命中维持现状（旧 daemon
++  // /运行中任务照旧）。幂等：Map 首个附着生效，重复终态事件天然去重。
++  const finalById = new Map<
++    string,
++    { status: "completed" | "failed" | "stopped"; ts: string | null }
++  >();
++  for (const m of messages) {
++    if (m.bg_task_final?.toolUseId && !finalById.has(m.bg_task_final.toolUseId)) {
++      finalById.set(m.bg_task_final.toolUseId, {
++        status: m.bg_task_final.status,
++        ts: m.ts ?? null,
++      });
++    }
++  }
+   const consumedResultIds = new Set<string>();
+   const turns: ConversationTurn[] = [];
+   let current: Extract<ConversationTurn, { role: "assistant" }> | null = null;
+@@ -294,19 +319,25 @@ function buildConversationTurns(
+       case "tool_use": {
+         const result = m.tool_use_id ? resultById.get(m.tool_use_id) : undefined;
+         if (result?.tool_use_id) consumedResultIds.add(result.tool_use_id);
++        // bg_task_final 补闭环：后台任务终态（无 tool_result 时的等效结果）
++        const bgFinal = m.tool_use_id ? finalById.get(m.tool_use_id) : undefined;
+         const startMs = m.ts ? Date.parse(m.ts) : NaN;
+-        const endMs = result?.ts ? Date.parse(result.ts) : NaN;
++        const endMs = result?.ts
++          ? Date.parse(result.ts)
++          : bgFinal?.ts
++            ? Date.parse(bgFinal.ts)
++            : NaN;
+         current.segments.push({
+           kind: "tool_use",
+           seq: m.seq,
+-          entry: toToolCallEntry(m, result),
++          entry: toToolCallEntry(m, result, bgFinal?.status),
+           mergedResult: result?.tool_result ?? undefined,
+           durationMs:
+             Number.isFinite(startMs) && Number.isFinite(endMs) && endMs >= startMs
+               ? endMs - startMs
+               : undefined,
+           editPatch: result?.edit_patch ?? undefined,
+-          hasResult: Boolean(result),
++          hasResult: Boolean(result) || bgFinal !== undefined,
+         });
+         break;
+       }
+diff --git a/frontend/src/components/daemon/session-panel/session-panel-page.tsx b/frontend/src/components/daemon/session-panel/session-panel-page.tsx
+index 2bf70045a..772b619b0 100644
+--- a/frontend/src/components/daemon/session-panel/session-panel-page.tsx
++++ b/frontend/src/components/daemon/session-panel/session-panel-page.tsx
+@@ -103,6 +103,8 @@ import { isActiveTeamMission } from "@/components/daemon/team-task-block";
+ import { ActivityCatalog, type AgentTaskEntry } from "@/components/daemon/activity-catalog";
+ import { type TeamTriggerInitialConfig } from "@/components/daemon/team-trigger-popover";
+ import { AgentLogCard } from "@/components/daemon/agent-log-card";
++// 2026-10-28-bg-task-status-report task-05：onBgTaskFinal 失效 agent logs 查询用
++import { queryKeys } from "@/lib/query-keys";
+ // task-12（2026-09-19-tool-report-session-replay）：tool_report 纯日志会话主体
+ // 换挂 AgentReplayBody（task-11 逐轮回放主体），原日志条目流主体组件退役删除。
+ import { AgentReplayBody } from "@/components/daemon/agent-replay-body";
+@@ -2114,6 +2116,13 @@ export function SessionPanelPage({
+               ),
+             }));
+           },
++          // 2026-10-28-bg-task-status-report task-05（FR-03 / D-005@v1）：后台
++          // 任务终态信号 → 失效 agent logs 查询重拉——活动数据经日志链自然
++          // 含终态，条目状态随之翻转（免逐渲染层改状态机）；终态事件重放
++          // 幂等（失效重拉天然幂等）。旧 daemon 无此事件零影响。
++          onBgTaskFinal: () => {
++            void qc.invalidateQueries({ queryKey: queryKeys.agentLogs.all });
++          },
+         }),
+         { cursor: streamCursor, initialSync, runsSnapshot },
+       );
+diff --git a/frontend/src/lib/api-types.ts b/frontend/src/lib/api-types.ts
+index aa9fd210c..812a23968 100644
+--- a/frontend/src/lib/api-types.ts
++++ b/frontend/src/lib/api-types.ts
+@@ -6008,6 +6008,36 @@ export interface paths {
+         patch?: never;
+         trace?: never;
+     };
++    "/api/daemon/sessions/{session_id}/bg-task-final": {
++        parameters: {
++            query?: never;
++            header?: never;
++            path?: never;
++            cookie?: never;
++        };
++        get?: never;
++        put?: never;
++        /**
++         * Notify Bg Task Final
++         * @description Receive daemon background-task final report and forward to frontend SSE.
++         *
++         *     2026-10-28-bg-task-status-report task-04（FR-02 / D-005@v1 纯发布信号）：
++         *     daemon 扫描环（D-006@v1 独立环直调，非桥模式）检出 task-notification 终态
++         *     → ``publish_bg_task_final_event`` 发布 bg_task_final 事件（payload 键
++         *     task_id/tool_use_id/status/output_file/timestamp 与前端信封逐字对齐）。
++         *     不落库——前端收到信号失效 agent logs 查询重拉，终态数据经 rollout
++         *     解析链自然到达；重复上报（daemon 重启重扫）为同值信号无害。
++         *
++         *     越权防护（2026-08-25 P1）：同 notify_turn_phase，发布前做 runtime
++         *     归属校验（404 不泄露存在性）。
++         */
++        post: operations["notify_bg_task_final_api_daemon_sessions__session_id__bg_task_final_post"];
++        delete?: never;
++        options?: never;
++        head?: never;
++        patch?: never;
++        trace?: never;
++    };
+     "/api/daemon/sessions/{session_id}/bash-status": {
+         parameters: {
+             query?: never;
+@@ -12975,6 +13005,8 @@ export interface components {
+              * @description user_input 段发言者（human=真人气泡 / system_event=系统事件中性行；缺省视为 human）
+              */
+             sender?: ("human" | "system_event") | null;
++            /** @description user_input 段后台任务终态附着（task-notification 解析产物） */
++            bg_task_final?: components["schemas"]["BgTaskFinalAttach"] | null;
+             /**
+              * Turn Id
+              * @description 轮次标识（zcode turnId / cursor 轮号 / claude-code 会话内轮序）
+@@ -14247,6 +14279,65 @@ export interface components {
+             /** Ids */
+             ids?: string[];
+         };
++        /**
++         * BgTaskFinalAttach
++         * @description 后台任务终态附着载荷（2026-10-28-bg-task-status-report task-05）。
++         *
++         *     daemon claude-code 解析器 task-notification 提取产物（task-02
++         *     parseTaskNotification 返回值）**逐字 camelCase 对齐**——外层挂
++         *     AgentLogMessageItem.bg_task_final（user_input 系统注入段）。
++         */
++        BgTaskFinalAttach: {
++            /**
++             * Taskid
++             * @description CLI 后台任务 id
++             */
++            taskId: string;
++            /**
++             * Tooluseid
++             * @description 配对工具调用 id（前端按此配对工具卡）
++             */
++            toolUseId: string;
++            /**
++             * Status
++             * @description 终态三值
++             * @enum {string}
++             */
++            status: "completed" | "failed" | "stopped";
++            /**
++             * Outputfile
++             * @description 输出文件路径（可选）
++             */
++            outputFile?: string | null;
++        };
++        /**
++         * BgTaskFinalReportRequest
++         * @description daemon 后台任务终态上报（2026-10-28-bg-task-status-report FR-02）。
++         *
++         *     daemon 扫描环（D-006@v1：60s 末段提取+快照 diff）检出 task-notification
++         *     终态后直调 HubClient.notifyBgTaskFinal 上报本端点。纯发布信号（D-005@v1：
++         *     不落库——前端活动流数据源为 daemon rollout 解析段，SSE 信号触发前端失效
++         *     重拉即得终态数据）；payload 键与前端 SSE 信封逐字对齐。
++         *
++         *     - ``run_id`` 可选（D-006@v1：纯信号无轮语义，task-notification 无 run_id）；
++         *     - ``status`` 三值封闭枚举（CLI task-notification 实证值域）；
++         *     - ``task_id`` / ``tool_use_id`` 前端条目配对键（与启动条目 tool_use 配对）。
++         */
++        BgTaskFinalReportRequest: {
++            /** Run Id */
++            run_id?: string | null;
++            /** Task Id */
++            task_id: string;
++            /** Tool Use Id */
++            tool_use_id: string;
++            /**
++             * Status
++             * @enum {string}
++             */
++            status: "completed" | "failed" | "stopped";
++            /** Output File */
++            output_file?: string | null;
++        };
+         /**
+          * BindPpmProjectRequest
+          * @description 工作区侧绑定 PPM 项目的请求体(``POST /workspaces/{id}/ppm-projects``)。
+@@ -40674,6 +40765,43 @@ export interface operations {
+             };
+         };
+     };
++    notify_bg_task_final_api_daemon_sessions__session_id__bg_task_final_post: {
++        parameters: {
++            query?: never;
++            header?: never;
++            path: {
++                session_id: string;
++            };
++            cookie?: never;
++        };
++        requestBody: {
++            content: {
++                "application/json": components["schemas"]["BgTaskFinalReportRequest"];
++            };
++        };
++        responses: {
++            /** @description Successful Response */
++            200: {
++                headers: {
++                    [name: string]: unknown;
++                };
++                content: {
++                    "application/json": {
++                        [key: string]: boolean;
++                    };
++                };
++            };
++            /** @description Validation Error */
++            422: {
++                headers: {
++                    [name: string]: unknown;
++                };
++                content: {
++                    "application/json": components["schemas"]["HTTPValidationError"];
++                };
++            };
++        };
++    };
+     notify_bash_status_api_daemon_sessions__session_id__bash_status_post: {
+         parameters: {
+             query?: never;
+diff --git a/frontend/src/lib/daemon/session-sse.ts b/frontend/src/lib/daemon/session-sse.ts
+index 979088525..ac3e2a21c 100644
+--- a/frontend/src/lib/daemon/session-sse.ts
++++ b/frontend/src/lib/daemon/session-sse.ts
+@@ -83,7 +83,8 @@ export type SessionEventKind =
+   | "bash_chunk"
+   | "agent_task_status"
+   | "queue_changed"
+-  | "turn_phase";
++  | "turn_phase"
++  | "bg_task_final";
+ 
+ /** Plan 模式摘要（plan_mode_entered 事件 payload）。 */
+ export interface PlanSummary {
+@@ -350,6 +351,13 @@ export interface SessionStreamHandlers {
+    * 事件已在 stream 层白名单拦截丢弃（不会到达本回调）。
+    */
+   onTurnPhase?(event: SessionStreamEnvelope): void;
++  /**
++   * 2026-10-28-bg-task-status-report task-05（FR-03 / D-005@v1）：bg_task_final
++   * 事件——daemon 扫描环检出的后台任务终态（task_id/tool_use_id/status/
++   * output_file）。消费方失效 agent logs 查询重拉（终态数据经日志链自然到达，
++   * 活动条目状态随之翻转）；旧 daemon 无此事件零影响。
++   */
++  onBgTaskFinal?(event: SessionStreamEnvelope): void;
+   /**
+    * task-09 / design A6（2026-08-29-daemon-platform-resilience）：连接状态回调
+    * （可选，不传不影响既有退避 / resync 行为）。进入退避重连上报
+diff --git a/sillyhub-daemon/src/agent-log/parse-claude-code-jsonl.ts b/sillyhub-daemon/src/agent-log/parse-claude-code-jsonl.ts
+index 8bd621dca..6954df463 100644
+--- a/sillyhub-daemon/src/agent-log/parse-claude-code-jsonl.ts
++++ b/sillyhub-daemon/src/agent-log/parse-claude-code-jsonl.ts
+@@ -292,6 +292,47 @@ function assistantSegments(message: Record<string, unknown>, ts: string | null):
+  *   该行全部 tool_result 段（实证一行单 tool_result；多块同 patch 为无害超集）。
+  * @returns null = content 形状不符（坏行）；空数组 = 合法空行。
+  */
++/**
++ * 2026-10-28-bg-task-status-report task-02 / D-004@v1：从 user 文本提取
++ * task-notification 后台任务终态载荷（纯函数；格式漂移/字段缺失返回 null
++ * 静默降级——平台维持现状 fail-safe）。文本实证形态（本会话 rollout 实录）：
++ * task-notification 块内 task-id / tool-use-id / output-file / status 四标签。
++ */
++export function parseTaskNotification(
++  text: string,
++): { taskId: string; toolUseId: string; status: 'completed' | 'failed' | 'stopped'; outputFile: string | null } | null {
++  if (!text.startsWith('<task-notification>')) return null;
++  const pick = (tag: string): string | null => {
++    const m = text.match(new RegExp(`<${tag}>([^<]*)</${tag}>`));
++    return m?.[1]?.trim() ?? null;
++  };
++  const taskId = pick('task-id');
++  const toolUseId = pick('tool-use-id');
++  const statusRaw = pick('status');
++  if (!taskId || !toolUseId) return null;
++  if (statusRaw !== 'completed' && statusRaw !== 'failed' && statusRaw !== 'stopped') {
++    return null;
++  }
++  return { taskId, toolUseId, status: statusRaw, outputFile: pick('output-file') };
++}
++
++/**
++ * task-03（2026-10-28-bg-task-status-report）：从任意文本段提取全部
++ * task-notification 终态载荷（扫描环消费——日志末段可能有多个块，逐块走
++ * parseTaskNotification 单块提取；块内字段失配的块跳过不中断）。纯函数。
++ */
++export function extractTaskNotifications(
++  text: string,
++): Array<{ taskId: string; toolUseId: string; status: 'completed' | 'failed' | 'stopped'; outputFile: string | null }> {
++  const out: Array<{ taskId: string; toolUseId: string; status: 'completed' | 'failed' | 'stopped'; outputFile: string | null }> = [];
++  const blocks = text.split('<task-notification>').slice(1);
++  for (const raw of blocks) {
++    const payload = parseTaskNotification('<task-notification>' + raw.split('</task-notification>')[0]! + '</task-notification>');
++    if (payload != null) out.push(payload);
++  }
++  return out;
++}
++
+ function userSegments(
+   message: Record<string, unknown>,
+   ts: string | null,
+@@ -302,7 +343,15 @@ function userSegments(
+   const content = message.content;
+   if (typeof content === 'string') {
+     if (content.trim() === '') return [];
+-    return [makeSegment('user_input', ts, { text: content, sender: userSender(content, isMeta) })];
++    const bgFinal = parseTaskNotification(content);
++    return [
++      makeSegment('user_input', ts, {
++        text: content,
++        sender: userSender(content, isMeta),
++        // task-02：task-notification 系统注入段附着结构化终态载荷（失配不附着）
++        ...(bgFinal != null ? { bg_task_final: bgFinal } : {}),
++      }),
++    ];
+   }
+   if (!Array.isArray(content)) return null;
+ 
+diff --git a/sillyhub-daemon/src/agent-log/parse-zcode-model-io.ts b/sillyhub-daemon/src/agent-log/parse-zcode-model-io.ts
+index 3579dee88..44049f26d 100644
+--- a/sillyhub-daemon/src/agent-log/parse-zcode-model-io.ts
++++ b/sillyhub-daemon/src/agent-log/parse-zcode-model-io.ts
+@@ -120,6 +120,18 @@ export interface NormalizedLogMessage {
+    * 有意义，其余 kind 不设；缺省视为 'human'。
+    */
+   sender?: 'human' | 'system_event';
++  /**
++   * 后台任务终态附着（2026-10-28-bg-task-status-report D-004@v1 执行期裁决：
++   * 附着字段而非新 kind——五值枚举不动，老消费方零影响）。仅 user_input 段
++   * （sender='system_event' 且正文为 task-notification 块）由 claude-code
++   * 解析器提取附着；其余 kind/解析器缺省不设。
++   */
++  bg_task_final?: {
++    taskId: string;
++    toolUseId: string;
++    status: 'completed' | 'failed' | 'stopped';
++    outputFile: string | null;
++  };
+   /** 所属轮次标识（zcode 顶层 turnId / cursor turn_ended 轮号 / claude-code 会话内轮序）。 */
+   turn_id?: string | null;
+   /** 该次调用的模型标识（如 "GLM-5.3"，zcode modelId）。 */
+diff --git a/sillyhub-daemon/src/api-types.ts b/sillyhub-daemon/src/api-types.ts
+index aa9fd210c..812a23968 100644
+--- a/sillyhub-daemon/src/api-types.ts
++++ b/sillyhub-daemon/src/api-types.ts
+@@ -6008,6 +6008,36 @@ export interface paths {
+         patch?: never;
+         trace?: never;
+     };
++    "/api/daemon/sessions/{session_id}/bg-task-final": {
++        parameters: {
++            query?: never;
++            header?: never;
++            path?: never;
++            cookie?: never;
++        };
++        get?: never;
++        put?: never;
++        /**
++         * Notify Bg Task Final
++         * @description Receive daemon background-task final report and forward to frontend SSE.
++         *
++         *     2026-10-28-bg-task-status-report task-04（FR-02 / D-005@v1 纯发布信号）：
++         *     daemon 扫描环（D-006@v1 独立环直调，非桥模式）检出 task-notification 终态
++         *     → ``publish_bg_task_final_event`` 发布 bg_task_final 事件（payload 键
++         *     task_id/tool_use_id/status/output_file/timestamp 与前端信封逐字对齐）。
++         *     不落库——前端收到信号失效 agent logs 查询重拉，终态数据经 rollout
++         *     解析链自然到达；重复上报（daemon 重启重扫）为同值信号无害。
++         *
++         *     越权防护（2026-08-25 P1）：同 notify_turn_phase，发布前做 runtime
++         *     归属校验（404 不泄露存在性）。
++         */
++        post: operations["notify_bg_task_final_api_daemon_sessions__session_id__bg_task_final_post"];
++        delete?: never;
++        options?: never;
++        head?: never;
++        patch?: never;
++        trace?: never;
++    };
+     "/api/daemon/sessions/{session_id}/bash-status": {
+         parameters: {
+             query?: never;
+@@ -12975,6 +13005,8 @@ export interface components {
+              * @description user_input 段发言者（human=真人气泡 / system_event=系统事件中性行；缺省视为 human）
+              */
+             sender?: ("human" | "system_event") | null;
++            /** @description user_input 段后台任务终态附着（task-notification 解析产物） */
++            bg_task_final?: components["schemas"]["BgTaskFinalAttach"] | null;
+             /**
+              * Turn Id
+              * @description 轮次标识（zcode turnId / cursor 轮号 / claude-code 会话内轮序）
+@@ -14247,6 +14279,65 @@ export interface components {
+             /** Ids */
+             ids?: string[];
+         };
++        /**
++         * BgTaskFinalAttach
++         * @description 后台任务终态附着载荷（2026-10-28-bg-task-status-report task-05）。
++         *
++         *     daemon claude-code 解析器 task-notification 提取产物（task-02
++         *     parseTaskNotification 返回值）**逐字 camelCase 对齐**——外层挂
++         *     AgentLogMessageItem.bg_task_final（user_input 系统注入段）。
++         */
++        BgTaskFinalAttach: {
++            /**
++             * Taskid
++             * @description CLI 后台任务 id
++             */
++            taskId: string;
++            /**
++             * Tooluseid
++             * @description 配对工具调用 id（前端按此配对工具卡）
++             */
++            toolUseId: string;
++            /**
++             * Status
++             * @description 终态三值
++             * @enum {string}
++             */
++            status: "completed" | "failed" | "stopped";
++            /**
++             * Outputfile
++             * @description 输出文件路径（可选）
++             */
++            outputFile?: string | null;
++        };
++        /**
++         * BgTaskFinalReportRequest
++         * @description daemon 后台任务终态上报（2026-10-28-bg-task-status-report FR-02）。
++         *
++         *     daemon 扫描环（D-006@v1：60s 末段提取+快照 diff）检出 task-notification
++         *     终态后直调 HubClient.notifyBgTaskFinal 上报本端点。纯发布信号（D-005@v1：
++         *     不落库——前端活动流数据源为 daemon rollout 解析段，SSE 信号触发前端失效
++         *     重拉即得终态数据）；payload 键与前端 SSE 信封逐字对齐。
++         *
++         *     - ``run_id`` 可选（D-006@v1：纯信号无轮语义，task-notification 无 run_id）；
++         *     - ``status`` 三值封闭枚举（CLI task-notification 实证值域）；
++         *     - ``task_id`` / ``tool_use_id`` 前端条目配对键（与启动条目 tool_use 配对）。
++         */
++        BgTaskFinalReportRequest: {
++            /** Run Id */
++            run_id?: string | null;
++            /** Task Id */
++            task_id: string;
++            /** Tool Use Id */
++            tool_use_id: string;
++            /**
++             * Status
++             * @enum {string}
++             */
++            status: "completed" | "failed" | "stopped";
++            /** Output File */
++            output_file?: string | null;
++        };
+         /**
+          * BindPpmProjectRequest
+          * @description 工作区侧绑定 PPM 项目的请求体(``POST /workspaces/{id}/ppm-projects``)。
+@@ -40674,6 +40765,43 @@ export interface operations {
+             };
+         };
+     };
++    notify_bg_task_final_api_daemon_sessions__session_id__bg_task_final_post: {
++        parameters: {
++            query?: never;
++            header?: never;
++            path: {
++                session_id: string;
++            };
++            cookie?: never;
++        };
++        requestBody: {
++            content: {
++                "application/json": components["schemas"]["BgTaskFinalReportRequest"];
++            };
++        };
++        responses: {
++            /** @description Successful Response */
++            200: {
++                headers: {
++                    [name: string]: unknown;
++                };
++                content: {
++                    "application/json": {
++                        [key: string]: boolean;
++                    };
++                };
++            };
++            /** @description Validation Error */
++            422: {
++                headers: {
++                    [name: string]: unknown;
++                };
++                content: {
++                    "application/json": components["schemas"]["HTTPValidationError"];
++                };
++            };
++        };
++    };
+     notify_bash_status_api_daemon_sessions__session_id__bash_status_post: {
+         parameters: {
+             query?: never;
+diff --git a/sillyhub-daemon/src/daemon.ts b/sillyhub-daemon/src/daemon.ts
+index 19a037e6b..100a30bc5 100644
+--- a/sillyhub-daemon/src/daemon.ts
++++ b/sillyhub-daemon/src/daemon.ts
+@@ -108,6 +108,7 @@ import { listRoots } from './roots-rpc.js';
+ // 2026-09-07-agent-liveness-states task-06：liveness tailer 自发现/上报接线。
+ import { LivenessTailer, type WatchTarget } from './agent-log/liveness/tailer.js';
+ import { discoverLivenessWatchTargets } from './agent-log/liveness/discovery.js';
++import { extractTaskNotifications } from './agent-log/parse-claude-code-jsonl.js';
+ // R6（ql-20260908-006）：liveness 推送 root/workspace 归属走 policy 层边界敏感判定。
+ import { isPathUnderAnyRoot } from './policy/path-utils.js';
+ import {
+@@ -1196,6 +1197,22 @@ interface ClientLike {
+     phase: TurnPhaseValue,
+     detail?: string,
+   ): Promise<Record<string, unknown>>;
++  /**
++   * 2026-10-28-bg-task-status-report task-03（FR-01 / D-006@v1）：后台任务
++   * 终态上报（扫描环直调）。运行时真实 _client 为 HubClient 实例
++   * （hub-client.ts notifyBgTaskFinal 已实现）；失败透传由扫描环 catch 吞噬。
++   * ClientLike additive 声明（notifyTurnPhase 同款）。
++   */
++  notifyBgTaskFinal(
++    sessionId: string,
++    payload: {
++      run_id?: string;
++      task_id: string;
++      tool_use_id: string;
++      status: 'completed' | 'failed' | 'stopped';
++      output_file?: string;
++    },
++  ): Promise<Record<string, unknown>>;
+   /**
+    * task-06（session-reopen-resume / DS-3 / FR-03）：reopen 恢复成功后向
+    * backend 确认 reconnecting → active。可选方法（? 有 markOffline 先例）：
+@@ -2192,6 +2209,13 @@ export class Daemon {
+   >();
+   /** liveness tailer（10s tick；独立 try 包裹，R-02 崩溃不影响主循环）。 */
+   private _livenessTailer: LivenessTailer | null = null;
++  /**
++   * 2026-10-28-bg-task-status-report task-03：后台任务终态快照（logPath →
++   * Map<taskId, status>）——扫描环 diff 基线；首扫只建基线不上报（防重启
++   * 风暴，漏报=维持现状可接受，D-006）。
++   */
++  private readonly _bgTaskSnapshots = new Map<string, Map<string, string>>();
++  private _bgTaskSeeded = false;
+   /** logPath → 推送元数据（serverUrl/token 分组 + create 元信息 + D-012 覆盖键）。 */
+   private readonly _livenessMetaByPath = new Map<string, LivenessPushTargetMeta>();
+ 
+@@ -2649,6 +2673,9 @@ export class Daemon {
+ 
+     // 3. 启动三循环
+     this._fire((signal) => this._livenessLoop(signal));
++    // 2026-10-28-bg-task-status-report task-03（D-006 独立扫描环，与 liveness
++    // loop 同生命周期同节拍族）：后台任务终态检出→上报。
++    this._fire((signal) => this._bgTaskFinalLoop(signal));
+     this._fire((signal) => this._heartbeatLoop(signal));
+     this._fire((signal) => this._pollLoop(signal));
+     this._fire((signal) => this._wsLoop(signal));
+@@ -6889,6 +6916,93 @@ export class Daemon {
+    * workspace token 读各 root 的 .sillyspec/local.yaml platform 段（init 下发、
+    * daemon 自己写入——local-yaml-writer writeLocalYaml 同源格式）。
+    */
++  /**
++   * 2026-10-28-bg-task-status-report task-03（FR-01 / D-006@v1 独立扫描环）：
++   * 每 60s 对 liveness 发现链的 claude-code 日志末段（64KB）提取 task-notification
++   * 终态，与快照 diff 后经 HubClient.notifyBgTaskFinal 上报（纯信号——前端收到
++   * 即失效 agent logs 查询重拉，条目终态自然翻转）。仅上报有 agentSessionId 的
++   * 目标（spawn 记录/persisted 恢复/registry 登记行；rescan 发现的本地 CLI 无
++   * 会话身份跳过）。全程 try 包裹（R-02 同款：任何异常只 delay 后继续）。
++   */
++  private async _bgTaskFinalLoop(signal: AbortSignal): Promise<void> {
++    const BG_SCAN_TAIL_BYTES = 64 * 1024;
++    const { readFile } = await import('node:fs/promises');
++    const { stat } = await import('node:fs/promises');
++    while (!signal.aborted) {
++      try {
++        const targets = discoverLivenessWatchTargets({
++          spawnRecords: [
++            ...[...this._livenessSpawnRecords.entries()].map(([agentSessionId, r]) => ({
++              provider: r.provider,
++              cwd: r.cwd,
++              agentSessionId,
++            })),
++          ],
++          rescan: false,
++          resolveWorkspace: () => 'daemon',
++        });
++        for (const t of targets) {
++          if (t.format !== 'claude-code-jsonl') continue;
++          if (!t.agentSessionId) continue;
++          let tail = '';
++          try {
++            const st = await stat(t.logPath);
++            const start = Math.max(0, st.size - BG_SCAN_TAIL_BYTES);
++            const fh = await readFile(t.logPath);
++            tail = fh.subarray(start).toString('utf8');
++          } catch {
++            continue; // 文件消失/读失败：下轮再看
++          }
++          const found = extractTaskNotifications(tail);
++          if (found.length === 0) continue;
++          let snap = this._bgTaskSnapshots.get(t.logPath);
++          if (snap === undefined) {
++            snap = new Map<string, string>();
++            this._bgTaskSnapshots.set(t.logPath, snap);
++          }
++          for (const f of found) {
++            if (!this._bgTaskSeeded) {
++              snap.set(f.taskId, f.status);
++              continue; // 首扫建基线不上报（D-006 防风暴）
++            }
++            if (snap.get(f.taskId) === f.status) continue; // 幂等：同值跳过
++            snap.set(f.taskId, f.status);
++            try {
++              await this._client.notifyBgTaskFinal(t.agentSessionId, {
++                task_id: f.taskId,
++                tool_use_id: f.toolUseId,
++                status: f.status,
++                ...(f.outputFile != null ? { output_file: f.outputFile } : {}),
++              });
++            } catch (e: unknown) {
++              // D-009 同款：上报失败仅记日志绝不阻塞扫描环；快照已记——同值
++              // 不重试（终态非瞬时信号，丢失影响=平台条目维持 running 至下次变化）
++              this._logger.debug('bg_task_final_report_failed', {
++                session_id: t.agentSessionId,
++                task_id: f.taskId,
++                error: e instanceof Error ? e.message : String(e),
++              });
++            }
++          }
++          // ended 清理对齐 liveness R9：路径不再产出时防 Map 只增不减
++          if (this._bgTaskSnapshots.size > 200) {
++            for (const [p2, m] of this._bgTaskSnapshots) {
++              if (m.size === 0) this._bgTaskSnapshots.delete(p2);
++            }
++          }
++        }
++        this._bgTaskSeeded = true;
++      } catch (e) {
++        if (e instanceof AbortError) break;
++        this._logger.warn('bg_task_scan_failed', { error: String(e) });
++      }
++      try {
++        await abortableSleep(60_000, signal);
++      } catch {
++        break;
++      }
++    }
++  }
+   private async _livenessLoop(signal: AbortSignal): Promise<void> {
+     const serverUrl = this._serverOrigin();
+     const tailer = new LivenessTailer({
+diff --git a/sillyhub-daemon/src/hub-client.ts b/sillyhub-daemon/src/hub-client.ts
+index a6cb4cafd..1edab9220 100644
+--- a/sillyhub-daemon/src/hub-client.ts
++++ b/sillyhub-daemon/src/hub-client.ts
+@@ -348,6 +348,21 @@ export interface NotifyTurnPhaseBody {
+   detail?: string;
+ }
+ 
++/**
++ * 2026-10-28-bg-task-status-report task-03：后台任务终态上报 body
++ * （snake_case，对齐 backend BgTaskFinalReportRequest）。run_id 可缺省
++ * （D-006@v1：纯信号无轮语义——task-notification 自身无 run_id，前端翻转
++ * 仅用 tool_use_id 配对）。
++ */
++export interface NotifyBgTaskFinalBody {
++  session_id: string;
++  run_id?: string;
++  task_id: string;
++  tool_use_id: string;
++  status: 'completed' | 'failed' | 'stopped';
++  output_file?: string;
++}
++
+ /**
+  * task-02（2026-08-27-background-subagent-progress / design §8）：Agent 任务状态
+  * 事件扩展可选字段（契约冻结，snake_case 对齐 backend AgentTaskStatusEvent 新字段）。
+@@ -1547,6 +1562,29 @@ export class HubClient {
+     );
+   }
+ 
++  /**
++   * 2026-10-28-bg-task-status-report task-03（FR-01 / D-006@v1）：上报后台
++   * 任务终态（daemon 扫描环检出 task-notification 后直调，无需桥）。
++   *
++   * 端点：POST {REST_PREFIX}/sessions/{sessionId}/bg-task-final
++   * body（snake_case，对齐 backend BgTaskFinalReportRequest）：
++   *   { session_id, run_id?, task_id, tool_use_id, status, output_file? }
++   *
++   * 失败语义（对齐 _request / D-009）：非 2xx → HubHttpError；网络/超时透传。
++   * 调用方（daemon 扫描环）catch 吞噬——上报失败仅记日志，绝不阻塞扫描环。
++   */
++  async notifyBgTaskFinal(
++    sessionId: string,
++    payload: Omit<NotifyBgTaskFinalBody, 'session_id'>,
++  ): Promise<Record<string, unknown>> {
++    const body: NotifyBgTaskFinalBody = { session_id: sessionId, ...payload };
++    return this._request<Record<string, unknown>>(
++      'POST',
++      `${REST_PREFIX}/sessions/${encodeURIComponent(sessionId)}/bg-task-final`,
++      body,
++    );
++  }
++
+   /**
+    * task-03（FR-01）：上报 Bash 执行状态事件。
+    *
+diff --git a/sillyhub-daemon/tests/agent-log/parse-task-notification.test.ts b/sillyhub-daemon/tests/agent-log/parse-task-notification.test.ts
+new file mode 100644
+index 000000000..0eaec69b6
+--- /dev/null
++++ b/sillyhub-daemon/tests/agent-log/parse-task-notification.test.ts
+@@ -0,0 +1,82 @@
++/**
++ * 2026-10-28-bg-task-status-report task-02：task-notification 终态载荷提取单测。
++ *
++ * fixture 形态取自本会话 rollout 实录（ba591937 会话 jsonl，50 处实录样本）：
++ * user 消息 content 为 <task-notification> 开头文本块，四标签 task-id /
++ * tool-use-id / output-file / status；status 三值 completed/failed/stopped。
++ */
++import { describe, expect, it } from "vitest";
++
++import { extractTaskNotifications, parseTaskNotification } from "../../src/agent-log/parse-claude-code-jsonl.js";
++
++const SAMPLE = [
++  "<task-notification>",
++  "<task-id>bl0wkgj01</task-id>",
++  "<tool-use-id>call_3830d816b07e44b8a8f848c2</tool-use-id>",
++  "<output-file>C:\\temp\\tasks\\bl0wkgj01.output</output-file>",
++  "<status>completed</status>",
++  "</task-notification>",
++  "",
++  "For task-id: bl0wkgj01",
++].join("\n");
++
++describe("parseTaskNotification（task-02 / FR-01）", () => {
++  it("实录形态四字段全提取（completed）", () => {
++    expect(parseTaskNotification(SAMPLE)).toEqual({
++      taskId: "bl0wkgj01",
++      toolUseId: "call_3830d816b07e44b8a8f848c2",
++      status: "completed",
++      outputFile: "C:\\temp\\tasks\\bl0wkgj01.output",
++    });
++  });
++
++  it("failed / stopped 两态同样通过（三值封闭枚举）", () => {
++    const failed = SAMPLE.replace("<status>completed</status>", "<status>failed</status>");
++    expect(parseTaskNotification(failed)?.status).toBe("failed");
++    const stopped = SAMPLE.replace("<status>completed</status>", "<status>stopped</status>");
++    expect(parseTaskNotification(stopped)?.status).toBe("stopped");
++  });
++
++  it("output-file 标签缺失时 outputFile 为 null（可选字段容错）", () => {
++    const noFile = SAMPLE.replace(
++      /<output-file>[^<]*<\/output-file>\n/,
++      "",
++    );
++    expect(parseTaskNotification(noFile)?.outputFile).toBeNull();
++  });
++
++  it("非 task-notification 前缀文本返回 null（普通用户输入/其他注入零误伤）", () => {
++    expect(parseTaskNotification("用户普通输入")).toBeNull();
++    expect(
++      parseTaskNotification("<system-reminder>其他系统注入</system-reminder>"),
++    ).toBeNull();
++  });
++
++  it("task-id / tool-use-id 缺失或 status 未知值返回 null（格式漂移 fail-safe）", () => {
++    const noTaskId = SAMPLE.replace(/<task-id>[^<]*<\/task-id>\n/, "");
++    expect(parseTaskNotification(noTaskId)).toBeNull();
++    const badStatus = SAMPLE.replace(
++      "<status>completed</status>",
++      "<status>weird</status>",
++    );
++    expect(parseTaskNotification(badStatus)).toBeNull();
++  });
++});
++
++describe("extractTaskNotifications（task-03 扫描环消费 / 多块提取）", () => {
++  it("日志末段多个 task-notification 块全部提取（含前后杂散文本不干扰）", () => {
++    const text =
++      "user 普通输入文本" + SAMPLE + "中间杂散输出行" + SAMPLE
++        .replace("bl0wkgj01", "second01")
++        .replace("completed", "failed");
++    const all = extractTaskNotifications(text);
++    expect(all).toHaveLength(2);
++    expect(all[0]).toMatchObject({ taskId: "bl0wkgj01", status: "completed" });
++    expect(all[1]).toMatchObject({ taskId: "second01", status: "failed" });
++  });
++
++  it("零块/全失配块返回空数组（不抛错）", () => {
++    expect(extractTaskNotifications("")).toEqual([]);
++    expect(extractTaskNotifications("<task-notification>残缺无闭合")).toEqual([]);
++  });
++});

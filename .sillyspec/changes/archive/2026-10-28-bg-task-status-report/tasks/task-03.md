@@ -1,37 +1,40 @@
 ---
-id: task-02
-title: 'daemon 解析 task-notification 产 bg_task_final 段（纯函数+fixture 单测）（FR-01）'
-title_zh: 'daemon 解析 task-notification 产 bg_task_final 段（纯函数+fixture 单测）（FR-01）'
+id: task-03
+title: 'daemon 事件上报接线+幂等去重（FR-01）'
+title_zh: 'daemon 事件上报接线+幂等去重（FR-01）'
 author: 'qinyi'
 generated_by: sillyspec-taskcard
 created_at: 2026-10-27 13:02:37
 priority: P0
-depends_on: []
+depends_on: ["task-01", "task-02"]
 blocks: []
 requirement_ids: [FR-01]
 decision_ids: [D-001@v1]
 allowed_paths:
-  - sillyhub-daemon/src/agent-log/parse-claude-code-jsonl.ts
-  - sillyhub-daemon/src/agent-event-schema.ts
+  - sillyhub-daemon/src/daemon.ts
+  - sillyhub-daemon/src/hub-client.ts
   - sillyhub-daemon/tests/agent-log/parse-claude-code-jsonl.test.ts
 target_files:
-  - sillyhub-daemon/src/agent-log/parse-claude-code-jsonl.ts
-  - sillyhub-daemon/src/agent-event-schema.ts
+  - sillyhub-daemon/src/daemon.ts
+  - sillyhub-daemon/src/hub-client.ts
 goal: >
-  daemon 解析 rollout user 消息内嵌 task-notification 文本块（四字段提取）产 bg_task_final 段——纯函数+本会话实录 fixture 单测；格式漂移返回 null 静默降级。
+  上报链接线：session-manager 消费 bg_task_final 段→onTurnMessage 桥发控制标记（turn_phase_report 同款）→daemon 层拦截→HubClient 新方法 notifyBgTaskFinal POST 新端点；daemon 进程级 Set 幂等（有界，first_event 先例）。
 implementation:
-  - 解析函数：user content 文本中 task-notification 前缀匹配+XML 字段提取（task-id/tool-use-id/status/output-file），容错（混排文本不吞正文、失配 null）
-  - 段类型 bg_task_final 注册（agent-event-schema/解析器段模型）
-  - 单测：实录 fixture（本会话 rollout 含 50 处 task-notification）+混排/失配/重复边界
+  - events.ts：bg_task_final 段消费发桥标记 type=bg_task_report
+  - daemon.ts：桥拦截分支（turn_phase_report 拦截同款位）转 _client.notifyBgTaskFinal
+  - hub-client.ts：notifyBgTaskFinal 方法（notifyTurnPhase 同款形态，camel→snake 映射）
+  - 幂等：daemon 层有界 Set 按 task_id 去重
+  - 测试：桥标记+拦截+幂等用例
 acceptance:
-  - 四字段提取正确（fixture 断言）
-  - 失配静默 null 不产段
-  - 既有解析测试零回归
+  - 端到端：解析产出→桥→拦截→client 调用（单测链路断言）
+  - 重复终态只上报一次
+  - 上报失败不阻塞消息主链路（catch 吞噬 debug，D-009 同款）
 verify:
-  - cd sillyhub-daemon && pnpm vitest run tests/agent-log/parse-claude-code-jsonl.test.ts
+  - cd sillyhub-daemon && pnpm vitest run tests/ 相关面
+  - cd sillyhub-daemon && pnpm typecheck
 constraints:
-  - 纯函数无 IO；不改既有段类型语义
-  - 文本混排时只提取不修改原文本段产出
+  - 不进 submitMessages 日志轨（控制标记零撞车，先例约束）
+  - 上报失败绝不阻塞主链路
 ---
 
 <!-- 骨架由 sillyspec taskcard 生成（LF 行尾 + frontmatter 已闭合 + 硬校验 9 字段齐全）。

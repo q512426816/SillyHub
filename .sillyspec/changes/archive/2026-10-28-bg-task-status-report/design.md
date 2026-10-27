@@ -46,10 +46,10 @@ scale: large  # 见「拆分判断」Wave 证据
 2. `publish_bg_task_final_event` 发布 `bg_task_final` 事件到 agent_session:{id} Redis 频道（publish_turn_phase_event 同款）；前端 SSE 信封键与 payload 逐字对齐（2026-10-26-session-stage-progress 变更 D-012@v1 同纪律——键名逐字对齐防信封失配）。
 3. HTTP 端点 1 个新增 + HubClient RPC 方法 1 个新增（daemon 侧 notifyBgTaskFinal）。
 
-### Wave 3 — frontend：条目翻转与运行中计数
+### Wave 3 — frontend：条目翻转与运行中计数（task-01 定位收口后的落地形态）
 
-1. 活动流消费（会话日志渲染组件群，精确消费组件 plan 阶段定位——候选 frontend/src/components/agent-log/ 渲染群）：收到 `bg_task_final` → 按 tool_use_id 配对「后台任务 · 运行中」条目翻转为终态（三态着色同既有状态标词表）。
-2. 运行中计数：由活动流事件（run_in_background 启动 ∪ bg_task_final 终态）配对推导运行中集合；会话空闲态状态区显示「后台任务 N 个运行中」（N=0 不显示）。
+1. 定位结论（task-01 产出）：活动条目渲染=agent-log 渲染群（tool-renderers.tsx BashToolPreview/AgentToolPreview 含 run_in_background 标注）+ entry 层 normalize.ts（tool_use_id 已在提取链）；「运行中」态源自无 tool_result 跟随的后台调用。落地采用**查询失效收敛**：session-sse.ts 信封新增 bg_task_final 类型 → 消费点失效 agent logs 查询重拉（daemon 已落库终态行，活动流自然显示终态，免逐渲染层改状态机）——比逐条目 patch 更简单可靠。
+2. 运行中计数：由重拉后活动数据推导（含 run_in_background 且无终态配对的条目集合）——派生纯函数+单测；会话空闲态状态区显示「后台任务 N 个运行中」（N=0 不显示）。
 3. 旧 daemon 兼容：无终态事件时条目维持「运行中」现状（不误翻）。
 4. 双显示防御：前端既有 task-notification 文本归一逻辑（turn-timeline.tsx:251 剥离注入文本）与 bg_task_final 事件是同一信号的两个视图（文本剥离=消息流侧、事件=状态侧）——事件消费不改文本归一行为，无双显示（状态翻转作用于既有条目，不新增渲染行）。
 
@@ -72,6 +72,14 @@ scale: large  # 见「拆分判断」Wave 证据
 | 修改 | frontend/src/components/daemon/turn-timeline.tsx | task-notification 文本归一所在（plan 评审提示 R-03 定位候选之二；终态翻转若落此文件须与文本归一双视图协调） |
 | 修改 | frontend/src/lib/daemon/session-sse.ts | 事件类型消费（Wave 3） |
 | 修改 | 各侧 __tests__ 对应测试文件 | 单测/契约测试（各 Wave 内同卡） |
+| 修改 | backend/app/modules/daemon/run_sync/service/__init__.py | 发布函数导出桶注册（Wave 2，task-04 实施补录） |
+| 修改 | backend/app/modules/daemon/run_sync/service/publish.py | publish_bg_task_final_event（Wave 2，task-04——review 声明补录） |
+| 修改 | sillyhub-daemon/tests/agent-log/parse-task-notification.test.ts | 解析/批量提取单测（Wave 1，task-02/03） |
+| 修改 | backend/app/modules/daemon/router/__init__.py | 端点序表注册（Wave 2，task-04 实施补录） |
+| 修改 | backend/app/modules/platform_sync/schema.py | BgTaskFinalAttach 透传模型（Wave 3，task-05 闭环补全补录） |
+| 修改 | frontend/src/components/daemon/agent-log-card.tsx | 装配层终态配对翻转（Wave 3，task-05 闭环补全补录——task-01 定位产出落点） |
+| 修改 | frontend/src/components/daemon/session-panel/session-panel-page.tsx | onBgTaskFinal 失效查询接线（Wave 3，task-05 补录） |
+| 修改 | frontend/src/components/daemon/__tests__/turn-time-display.test.tsx | round4 存量债顺手修（task-05 提交面） |
 
 ## 接口定义
 

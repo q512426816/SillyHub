@@ -1,0 +1,88 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-28-bg-task-status-report",
+  "appliedAt": "2026-10-27T08:20:30.783Z",
+  "baseHash": "393363f3f6df431b567bbf53717b6323f0c35a79",
+  "files": [
+    {
+      "path": "backend/app/modules/daemon/router/__init__.py",
+      "sha256": "d38094b9ee7f21e4b4f76758b1c7b90bb90dad59d760babb6e5edbed000ef19a"
+    },
+    {
+      "path": "backend/app/modules/daemon/router/notify.py",
+      "sha256": "031f48bf6135b83957c0194092b52934a7a9bfeb20a5709d8867299ba152ce62"
+    },
+    {
+      "path": "backend/app/modules/daemon/run_sync/service/__init__.py",
+      "sha256": "d28c1245949b4d831238563e0ad08becb93906e18e3fab9cd3f33f86d007267d"
+    },
+    {
+      "path": "backend/app/modules/daemon/run_sync/service/publish.py",
+      "sha256": "72a5d9835ad477fc4f6327532181384538066a2ea02885c0be915fd74b21980a"
+    },
+    {
+      "path": "backend/app/modules/daemon/schema.py",
+      "sha256": "d8fd3787629ec9ffc23d492d2c6fa5d46ce267c509c071b1cf15fc787513b1fe"
+    },
+    {
+      "path": "backend/app/modules/daemon/tests/test_session_bg_task_final.py",
+      "sha256": "bee243d6dd612857182c5be31adc6600f90f74aa5a3aaf35f1ae0104f4b5be78"
+    },
+    {
+      "path": "backend/app/modules/platform_sync/schema.py",
+      "sha256": "dc30ccbcd887406d00c7c885bd3a71fc954bc02db3def6c8bb2ff4802502af79"
+    },
+    {
+      "path": "backend/openapi.json",
+      "sha256": "62493465c9d48ab28abed7284136595b0c1d90857da11cc81f371f82c3821670"
+    },
+    {
+      "path": "frontend/src/components/agent-log/__tests__/bg-task-final.test.ts",
+      "sha256": "0d898d6beb0c1f9877fb5bbafa64445cc912c117317d8d0a9456d6115c6e4ea5"
+    },
+    {
+      "path": "frontend/src/components/daemon/__tests__/turn-time-display.test.tsx",
+      "sha256": "b48543328f4bc337dda71084689276e63037d36958bf2e78ee6c7386af90fe47"
+    },
+    {
+      "path": "frontend/src/components/daemon/agent-log-card.tsx",
+      "sha256": "3cc49822db9c6fbed03fbe121da8a1286a5ee36fbb27a7fd4c6034e6bd8b59d2"
+    },
+    {
+      "path": "frontend/src/components/daemon/session-panel/session-panel-page.tsx",
+      "sha256": "e7518657831905f62d85e53571b4c266bb6c4def17fa94dca1d47ee34623be71"
+    },
+    {
+      "path": "frontend/src/lib/api-types.ts",
+      "sha256": "d4b4a5d25d984239761943841aa8594d9119088b8051ad7c9a151c3a10b396e7"
+    },
+    {
+      "path": "frontend/src/lib/daemon/session-sse.ts",
+      "sha256": "06aa0191af7358b5e2a11a8965259df9b3906513de3af063a6641accf6e15a2d"
+    },
+    {
+      "path": "sillyhub-daemon/src/agent-log/parse-claude-code-jsonl.ts",
+      "sha256": "a37a0ccb49dd60facb3c172ab11a37f6b92b4687e75ef4fc9a6f71ac74d37e56"
+    },
+    {
+      "path": "sillyhub-daemon/src/agent-log/parse-zcode-model-io.ts",
+      "sha256": "cef8e1ad0e94e4d10cb963582e55735b00916ebf240067647aa18ad96fa03c35"
+    },
+    {
+      "path": "sillyhub-daemon/src/api-types.ts",
+      "sha256": "d4b4a5d25d984239761943841aa8594d9119088b8051ad7c9a151c3a10b396e7"
+    },
+    {
+      "path": "sillyhub-daemon/src/daemon.ts",
+      "sha256": "6c0fe25da7c918a49bdd2f52fa2b95398d74183780f0d11f553182168d32c3f6"
+    },
+    {
+      "path": "sillyhub-daemon/src/hub-client.ts",
+      "sha256": "261379963a0ab94a27857779e8579c501da1b4185175411ece2207d5ce74270b"
+    },
+    {
+      "path": "sillyhub-daemon/tests/agent-log/parse-task-notification.test.ts",
+      "sha256": "b9db3638d4da80a2c4aff45e9444935945b7512a9804b3b070d3f8b830680c74"
+    }
+  ]
+}

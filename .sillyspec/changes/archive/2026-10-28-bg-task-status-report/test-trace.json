@@ -1,0 +1,333 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-28-bg-task-status-report",
+  "rows": [
+    {
+      "anchor": "FR-01",
+      "row_id": "2026-10-28-bg-task-status-report:task-01:acc-0-fd0e499f",
+      "tests": [
+        "backend/app/modules/agent/tests/test_agent_session_model.py",
+        "backend/app/modules/agent/tests/test_cleanup_stale_runs_error_code.py",
+        "backend/app/modules/agent/tests/test_coordinator_approval_signal.py",
+        "backend/app/modules/agent/tests/test_finalizer.py",
+        "backend/app/modules/agent/tests/test_group_chat_models.py",
+        "backend/app/modules/agent/tests/test_mcp_tools.py",
+        "backend/app/modules/agent/tests/test_orchestrator.py",
+        "backend/app/modules/agent/tests/test_placement_borrow_integration.py",
+        "backend/app/modules/agent/tests/test_profile_router.py",
+        "backend/app/modules/agent/tests/test_provider_caps_alignment.py",
+        "backend/app/modules/agent/tests/test_worktree_integration.py",
+        "backend/app/modules/change/tests/test_assets.py",
+        "backend/app/modules/change/tests/test_dispatch_execute_team_mode.py",
+        "backend/app/modules/change/tests/test_files_refresh_sync.py",
+        "backend/app/modules/change/tests/test_files_router.py",
+        "backend/app/modules/change/tests/test_parser.py",
+        "backend/app/modules/change/tests/test_session_changes_endpoint.py",
+        "backend/app/modules/change/tests/test_spec_binding.py",
+        "backend/app/modules/change/tests/test_step_progress.py",
+        "backend/app/modules/change/tests/test_timeline.py"
+      ],
+      "reason": "spec",
+      "state": "active",
+      "discovery": "machine",
+      "confirmed_by": "agent",
+      "confirmed_at": "af1edd44187856b8fe330d398bba246225796c4c",
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-28-bg-task-status-report"
+    },
+    {
+      "anchor": "FR-01",
+      "row_id": "2026-10-28-bg-task-status-report:task-01:acc-1-e07dcbf3",
+      "tests": [
+        "backend/app/modules/agent/tests/test_agent_session_model.py",
+        "backend/app/modules/agent/tests/test_cleanup_stale_runs_error_code.py",
+        "backend/app/modules/agent/tests/test_coordinator_approval_signal.py",
+        "backend/app/modules/agent/tests/test_finalizer.py",
+        "backend/app/modules/agent/tests/test_group_chat_models.py",
+        "backend/app/modules/agent/tests/test_mcp_tools.py",
+        "backend/app/modules/agent/tests/test_orchestrator.py",
+        "backend/app/modules/agent/tests/test_placement_borrow_integration.py",
+        "backend/app/modules/agent/tests/test_profile_router.py",
+        "backend/app/modules/agent/tests/test_provider_caps_alignment.py",
+        "backend/app/modules/agent/tests/test_worktree_integration.py",
+        "backend/app/modules/change/tests/test_assets.py",
+        "backend/app/modules/change/tests/test_dispatch_execute_team_mode.py",
+        "backend/app/modules/change/tests/test_files_refresh_sync.py",
+        "backend/app/modules/change/tests/test_files_router.py",
+        "backend/app/modules/change/tests/test_parser.py",
+        "backend/app/modules/change/tests/test_session_changes_endpoint.py",
+        "backend/app/modules/change/tests/test_spec_binding.py",
+        "backend/app/modules/change/tests/test_step_progress.py",
+        "backend/app/modules/change/tests/test_timeline.py"
+      ],
+      "reason": "spec",
+      "state": "active",
+      "discovery": "machine",
+      "confirmed_by": "agent",
+      "confirmed_at": "af1edd44187856b8fe330d398bba246225796c4c",
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-28-bg-task-status-report"
+    },
+    {
+      "anchor": "FR-01",
+      "row_id": "2026-10-28-bg-task-status-report:task-02:acc-0-08ae6b7e",
+      "tests": [
+        "sillyhub-daemon/tests/agent-log/parse-claude-code-jsonl.test.ts"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-28-bg-task-status-report"
+    },
+    {
+      "anchor": "FR-01",
+      "row_id": "2026-10-28-bg-task-status-report:task-02:acc-1-fa1f4184",
+      "tests": [
+        "sillyhub-daemon/tests/agent-log/parse-claude-code-jsonl.test.ts"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-28-bg-task-status-report"
+    },
+    {
+      "anchor": "FR-01",
+      "row_id": "2026-10-28-bg-task-status-report:task-02:acc-2-cc0beb2f",
+      "tests": [
+        "sillyhub-daemon/tests/agent-log/parse-claude-code-jsonl.test.ts"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-28-bg-task-status-report"
+    },
+    {
+      "anchor": "FR-01",
+      "row_id": "2026-10-28-bg-task-status-report:task-03:acc-0-dac009a5",
+      "tests": [
+        "sillyhub-daemon/tests/agent-log/parse-claude-code-jsonl.test.ts"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-28-bg-task-status-report"
+    },
+    {
+      "anchor": "FR-01",
+      "row_id": "2026-10-28-bg-task-status-report:task-03:acc-1-26c7a293",
+      "tests": [
+        "sillyhub-daemon/tests/agent-log/parse-claude-code-jsonl.test.ts"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-28-bg-task-status-report"
+    },
+    {
+      "anchor": "FR-01",
+      "row_id": "2026-10-28-bg-task-status-report:task-03:acc-2-23d66a4b",
+      "tests": [
+        "sillyhub-daemon/tests/agent-log/parse-claude-code-jsonl.test.ts"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-28-bg-task-status-report"
+    },
+    {
+      "anchor": "FR-02",
+      "row_id": "2026-10-28-bg-task-status-report:task-04:acc-0-271e34c6",
+      "tests": [
+        "backend/app/modules/daemon/tests/test_session_bg_task_final.py"
+      ],
+      "reason": "spec",
+      "state": "active",
+      "discovery": "machine",
+      "confirmed_by": "agent",
+      "confirmed_at": "af1edd44187856b8fe330d398bba246225796c4c",
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-28-bg-task-status-report"
+    },
+    {
+      "anchor": "FR-02",
+      "row_id": "2026-10-28-bg-task-status-report:task-04:acc-1-a9889c7e",
+      "tests": [
+        "backend/app/modules/daemon/tests/test_session_bg_task_final.py"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-28-bg-task-status-report"
+    },
+    {
+      "anchor": "FR-02",
+      "row_id": "2026-10-28-bg-task-status-report:task-04:acc-2-f84f3f92",
+      "tests": [
+        "backend/app/modules/daemon/tests/test_session_bg_task_final.py"
+      ],
+      "reason": "spec",
+      "state": "active",
+      "discovery": "machine",
+      "confirmed_by": "agent",
+      "confirmed_at": "af1edd44187856b8fe330d398bba246225796c4c",
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-28-bg-task-status-report"
+    },
+    {
+      "anchor": "FR-03",
+      "row_id": "2026-10-28-bg-task-status-report:task-05:acc-0-2a84e0ee",
+      "tests": [
+        "frontend/src/components/agent-log/__tests__/bg-task-final.test.ts"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-28-bg-task-status-report"
+    },
+    {
+      "anchor": "FR-03",
+      "row_id": "2026-10-28-bg-task-status-report:task-05:acc-1-a6c3938e",
+      "tests": [
+        "frontend/src/components/agent-log/__tests__/bg-task-final.test.ts"
+      ],
+      "reason": "spec",
+      "state": "active",
+      "discovery": "machine",
+      "confirmed_by": "agent",
+      "confirmed_at": "af1edd44187856b8fe330d398bba246225796c4c",
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-28-bg-task-status-report"
+    },
+    {
+      "anchor": "FR-03",
+      "row_id": "2026-10-28-bg-task-status-report:task-05:acc-2-40093977",
+      "tests": [
+        "frontend/src/components/agent-log/__tests__/bg-task-final.test.ts"
+      ],
+      "reason": "spec",
+      "state": "active",
+      "discovery": "machine",
+      "confirmed_by": "agent",
+      "confirmed_at": "af1edd44187856b8fe330d398bba246225796c4c",
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-28-bg-task-status-report"
+    },
+    {
+      "anchor": "FR-04",
+      "row_id": "2026-10-28-bg-task-status-report:task-06:acc-0-ceb65083",
+      "tests": [
+        "frontend/src/components/agent-log/__tests__/bg-task-final.test.ts"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-28-bg-task-status-report"
+    },
+    {
+      "anchor": "FR-04",
+      "row_id": "2026-10-28-bg-task-status-report:task-06:acc-1-818389cf",
+      "tests": [
+        "frontend/src/components/agent-log/__tests__/bg-task-final.test.ts"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-28-bg-task-status-report"
+    },
+    {
+      "anchor": "FR-04",
+      "row_id": "2026-10-28-bg-task-status-report:task-06:acc-2-fcce7941",
+      "tests": [
+        "frontend/src/components/agent-log/__tests__/bg-task-final.test.ts"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-28-bg-task-status-report"
+    },
+    {
+      "anchor": "FR-05",
+      "row_id": "2026-10-28-bg-task-status-report:task-07:acc-0-6ad601bb",
+      "tests": [
+        "backend/app/modules/agent/tests/test_agent_session_model.py",
+        "backend/app/modules/agent/tests/test_cleanup_stale_runs_error_code.py",
+        "backend/app/modules/agent/tests/test_coordinator_approval_signal.py",
+        "backend/app/modules/agent/tests/test_finalizer.py",
+        "backend/app/modules/agent/tests/test_group_chat_models.py",
+        "backend/app/modules/agent/tests/test_mcp_tools.py",
+        "backend/app/modules/agent/tests/test_orchestrator.py",
+        "backend/app/modules/agent/tests/test_placement_borrow_integration.py",
+        "backend/app/modules/agent/tests/test_profile_router.py",
+        "backend/app/modules/agent/tests/test_provider_caps_alignment.py",
+        "backend/app/modules/agent/tests/test_worktree_integration.py",
+        "backend/app/modules/change/tests/test_assets.py",
+        "backend/app/modules/change/tests/test_dispatch_execute_team_mode.py",
+        "backend/app/modules/change/tests/test_files_refresh_sync.py",
+        "backend/app/modules/change/tests/test_files_router.py",
+        "backend/app/modules/change/tests/test_parser.py",
+        "backend/app/modules/change/tests/test_session_changes_endpoint.py",
+        "backend/app/modules/change/tests/test_spec_binding.py",
+        "backend/app/modules/change/tests/test_step_progress.py",
+        "backend/app/modules/change/tests/test_timeline.py"
+      ],
+      "reason": "spec",
+      "state": "active",
+      "discovery": "machine",
+      "confirmed_by": "agent",
+      "confirmed_at": "af1edd44187856b8fe330d398bba246225796c4c",
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-28-bg-task-status-report"
+    }
+  ]
+}
