@@ -19,6 +19,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { Daemon } from "../src/daemon.js";
 import { HubClient, HubHttpError } from "../src/hub-client.js";
 import { REST_PREFIX } from "../src/protocol.js";
+import { resetTurnPhaseObservabilityForTest } from "../src/turn-phase-observability.js";
 import { onMessage } from "../src/interactive/session-manager/events.js";
 import { inject as injectTurn } from "../src/interactive/session-manager/turn-control.js";
 import type { SessionState } from "../src/interactive/types.js";
@@ -182,6 +183,42 @@ describe("② daemon.onTurnMessage turn_phase_report 拦截", () => {
         phase: "first_event",
       }),
     ).resolves.toBeUndefined();
+  });
+
+  // 2026-10-27-turn-phase-observability-monotonic FR-01：桥层失败首警——生产实证
+  // （会话 7eff99e1 first_event 丢失）桥层纯 debug 在 info 级日志下不可见，对齐
+  // 创建链 reportTurnPhase（daemon.ts:9537）的 warnOncePhaseFailure 首警惯例。
+  it("notifyTurnPhase reject → 首警 warn 一次（同 session+phase 去重），debug 明细保留", async () => {
+    resetTurnPhaseObservabilityForTest();
+    const { daemon, client } = buildDaemon(defaultStateMap());
+    const warn = vi.fn();
+    const debug = vi.fn();
+    (daemon as unknown as { _logger: unknown })._logger = {
+      info: vi.fn(),
+      warn,
+      debug,
+    };
+    client.notifyTurnPhase = vi.fn(async () => {
+      throw new Error("post failed");
+    });
+
+    const marker = { type: "turn_phase_report", phase: "inject_received" };
+    await daemon.onTurnMessage("sess-1", "run-1", marker);
+    await daemon.onTurnMessage("sess-1", "run-1", marker);
+    await daemon.onTurnMessage("sess-1", "run-2", marker);
+
+    // 首警去重键 (session_id, phase)：sess-1 首次 warn、第二次静默；run-2 同
+    // session+phase 不再警；每轮失败 debug 明细各留一条。
+    expect(warn).toHaveBeenCalledTimes(1);
+    expect(warn).toHaveBeenCalledWith(
+      "turn_phase_report_failed_once",
+      expect.objectContaining({
+        session_id: "sess-1",
+        phase: "inject_received",
+        error: "post failed",
+      }),
+    );
+    expect(debug).toHaveBeenCalledTimes(3);
   });
 
   it("非控制标记消息照常走 submitMessages（零回归）", async () => {

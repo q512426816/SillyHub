@@ -4911,6 +4911,12 @@ export class Daemon {
         // try 包同步抛（2026-10-26-ci-red-to-green：client 缺 notifyTurnPhase 方法
         // 时属性访问在 .catch 挂上前抛 TypeError——D-009 要求上报失败不阻塞消息
         // 主链路，异步失败走下方 catch、同步失败走此处，口径一致）。
+        // 2026-10-27-turn-phase-observability-monotonic FR-01：失败首警 warn（同
+        // (session_id, phase) 去重）——桥层是 inject_received/first_event 等运行时
+        // phase 的必经路，原纯 debug 在 info 级日志下不可见（生产实证会话 7eff99e1
+        // first_event 丢失零线索），对齐创建链 reportTurnPhase 的首警惯例；debug
+        // 明细并存（逐次留痕），成功仍静默。
+        const bridgePoint = `daemon_bridge_${phase}`;
         try {
           this._client
             .notifyTurnPhase(
@@ -4920,6 +4926,14 @@ export class Daemon {
               typeof fwdMsg['detail'] === 'string' ? fwdMsg['detail'] : undefined,
             )
             .catch((e: unknown) => {
+              warnOncePhaseFailure(
+                bridgePoint,
+                sessionId,
+                runId,
+                phase,
+                e,
+                (event, kv) => this._logger.warn(event, kv),
+              );
               this._logger.debug('turn_phase_report_failed', {
                 session_id: sessionId,
                 run_id: runId,
@@ -4928,6 +4942,14 @@ export class Daemon {
               });
             });
         } catch (e) {
+          warnOncePhaseFailure(
+            bridgePoint,
+            sessionId,
+            runId,
+            phase,
+            e,
+            (event, kv) => this._logger.warn(event, kv),
+          );
           this._logger.debug('turn_phase_report_failed', {
             session_id: sessionId,
             run_id: runId,

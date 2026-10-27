@@ -91,6 +91,34 @@ export interface TurnPhaseState {
 }
 
 /**
+ * 阶段词表序（2026-10-27-turn-phase-observability-monotonic）：九值推进链定序，
+ * 词表外值不参与（透传兼容策略不变）。投递段（dispatched/delivered）＜ 执行段
+ * （skills_sync…ready）＜ 送达/首响段（inject_received/first_event）。
+ */
+const PHASE_ORDER: Readonly<Record<string, number>> = {
+  dispatched: 0,
+  delivered: 1,
+  skills_sync: 2,
+  spec_sync: 3,
+  mcp_prefetch: 4,
+  spawning: 5,
+  ready: 6,
+  inject_received: 7,
+  first_event: 8,
+};
+
+/**
+ * 单调写入判定（FR-02）：新 phase 与现值均在词表内且新序 < 现序 → 回退写，
+ * 丢弃。任一词表外 → 维持 last-write-wins 透传（兼容策略零回归）。
+ */
+function isPhaseRegression(current: string | undefined | null, next: string): boolean {
+  if (current == null) return false;
+  const cur = PHASE_ORDER[current];
+  const nxt = PHASE_ORDER[next];
+  return cur !== undefined && nxt !== undefined && nxt < cur;
+}
+
+/**
  * turn_phase 事件 → 轮状态 currentPhase 写入（last-write-wins，乱序到达按事件
  * 序覆盖）；按 runId 归属路由（含 realRunId 匹配），未命中既有轮时**不建轮**
  * （phase 不是轮存在性信号——轮由 turn_started/log 创建）。
@@ -103,6 +131,11 @@ export interface TurnPhaseState {
  * decisions D-001 反例排查：子代理/团队/steering/排队均不构成多活跃轮），不
  * 做模糊匹配。replacePlaceholderTurn 以对象展开保留 currentPhase（FR-03）。
  * 返回新数组（不可变更新）；无 runId / 全程未命中原样返回。
+ *
+ * 2026-10-27-turn-phase-observability-monotonic FR-02：写入加词表序单调守卫——
+ * 回退写（如 steering 忙轮注入的 dispatched/delivered 回执覆盖已 first_event/
+ * 执行段的轮）静默丢弃，防显示从「执行中」退化回投递段卡住（first_event 每
+ * run 防重不会重发，退化后无自愈信号）；正常推进/前跳/词表外值不受影响。
  */
 export function applyTurnPhase(
   turns: SessionTurnView[],
@@ -116,6 +149,7 @@ export function applyTurnPhase(
   const next = turns.map((t) => {
     if (t.runId === runId || t.realRunId === runId) {
       hit = true;
+      if (isPhaseRegression(t.currentPhase?.phase, phase)) return t;
       return { ...t, currentPhase: { phase, at } };
     }
     return t;
@@ -128,6 +162,7 @@ export function applyTurnPhase(
     const fallback = turns.map((t) => {
       if (t.runId === currentRunId) {
         fallbackHit = true;
+        if (isPhaseRegression(t.currentPhase?.phase, phase)) return t;
         return { ...t, currentPhase: { phase, at } };
       }
       return t;
@@ -152,18 +187,26 @@ export function clearTurnPhase<T extends { currentPhase?: TurnPhaseState | null 
 }
 
 /**
- * 投递阶段词表（2026-10-27-turn-phase-stall-honest-ui）：backend 自产的
- * dispatched/delivered 表示「消息已下发/已领取」，尚不代表执行器开始处理。
+ * 投递/送达阶段词表（2026-10-27-turn-phase-stall-honest-ui；FR-03 扩展于
+ * 2026-10-27-turn-phase-observability-monotonic）：dispatched/delivered 表示
+ * 「消息已下发/已领取」，inject_received 表示「消息已送达 AI」——三者都只
+ * 描述消息搬运态，不描述执行进展。
  */
-const DELIVERY_PHASES: ReadonlySet<string> = new Set(["dispatched", "delivered"]);
+const DELIVERY_PHASES: ReadonlySet<string> = new Set([
+  "dispatched",
+  "delivered",
+  "inject_received",
+]);
 
 /**
- * log 到达退位投递阶段（2026-10-27-turn-phase-stall-honest-ui）：轮收到真实
- * 输出（log 事件有 DB 兜底必达）时，仍挂着的 dispatched/delivered 已失去展示
- * 意义（消息显然已被处理），清 null 让状态条退位回轮状态文案。只清投递两
- * 阶段——执行期阶段（skills_sync/spawning/…）可能与 log 并行推进，不越权。
+ * log 到达退位投递/送达阶段（2026-10-27-turn-phase-stall-honest-ui）：轮收到
+ * 真实输出（log 事件有 DB 兜底必达）时，仍挂着的 dispatched/delivered 已失去
+ * 展示意义（消息显然已被处理），清 null 让状态条退位回轮状态文案。只清搬运
+ * 段——执行期阶段（skills_sync/spawning/…）可能与 log 并行推进，不越权。
  * 与 clearTurnPhase（终态全清）并列；生产实证：会话忙时消息在 backend 排队
  * 滞留 9 分钟，前端唯一 phase=delivered 无限计时（2026-10-27 会话 7eff99e1）。
+ * FR-03（observability-monotonic）：集合扩展 inject_received——AI 已输出的
+ * 场合「消息已送达 AI」同样失去展示意义。
  */
 export function retireDeliveryPhase<
   T extends { currentPhase?: TurnPhaseState | null },

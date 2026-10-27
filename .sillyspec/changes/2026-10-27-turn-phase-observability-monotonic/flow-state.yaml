@@ -1,0 +1,39 @@
+tier: thin
+legacy_fallback: false
+substeps: {}
+born_face: thin
+with_tasks: false
+review_force: null
+input: >-
+  生产实证（2026-10-27 会话 7eff99e1，run 4f2e2cdd）：first_event 信号丢失后前端 phase 停 delivered 干等 141 秒，而 daemon 上报是
+  fire-and-forget——POST 失败仅 debug 日志（生产 info 级不可见），排障只能靠打点推断；另评估确认 steering 忙轮注入的 dispatched/delivered 会覆盖已推进
+  phase（last-write-wins 无阶段序），显示退化真实存在。本次两项：daemon 上报失败提为首警 warn；前端 applyTurnPhase 加阶段单调守卫（投递段不覆盖执行段/first_event）并扩展 log
+  退位集合。
+
+
+  成功标准：
+
+  - daemon 层 turn_phase POST 失败从 debug 提为首警 warn（复用 turn-phase-observability 的 warnOncePhaseFailure 同 session+phase
+  去重惯例），成功仍静默
+
+  - 前端 applyTurnPhase 单调守卫：dispatched/delivered 不覆盖已是执行期阶段（skills_sync 至 inject_received）或 first_event 的
+  currentPhase（回退写静默丢弃，正常推进与乱序前跳不受影响）
+
+  - log 到达退位集合从 {dispatched, delivered} 扩展含 inject_received（AI 已输出的场合送达信号同样失去展示意义）
+
+  - 既有相关测试全绿，新增用例覆盖上述三项行为
+
+  - 后端 backend 代码零改动（daemon 与 frontend 各自范围内）
+autopilot: false
+prestage_ack: false
+baseline_commit: 9b33461733ece7d17dd5becad05889d0bf9f9012
+updatedAt: '2026-10-27T04:55:06.442Z'
+cross_baselines:
+  sillyspec: 67e50bcca2adb9ecd502d12086c0ac8cb994da84
+baseline_sha256: 6e5cc78d0a009489c065a1f887b61f8bea96916087df322b1ca6244140f6f6f2
+spec_approved: true
+spec_approved_at: '2026-10-27T04:55:06.442Z'
+spec_approved_by: anon@DESKTOP-HJ0AM09
+spec_approved_channel: user-confirmed
+spec_attested_by: anon@DESKTOP-HJ0AM09
+

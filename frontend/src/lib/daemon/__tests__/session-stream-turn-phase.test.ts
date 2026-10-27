@@ -252,6 +252,71 @@ describe("applyTurnPhase 竞态回退（事件跑赢占位轮替换）", () => {
   });
 });
 
+// ── 2026-10-27-turn-phase-observability-monotonic：阶段序单调守卫 ─────────────
+
+describe("applyTurnPhase 单调守卫（词表内回退写丢弃）", () => {
+  it("delivered 不覆盖 first_event（steering 忙轮注入回执退化防护）", () => {
+    // 生产场景：活跃轮已 first_event（显示已退位「执行中」），steering 新消息的
+    // backend 回执 dispatched/delivered 到达——无守卫会把显示退化回投递段。
+    let turns = [makeTurn("run-1")];
+    turns = applyTurnPhase(turns, "run-1", "first_event");
+    turns = applyTurnPhase(turns, "run-1", "delivered");
+    expect(turns[0]!.currentPhase?.phase).toBe("first_event");
+    turns = applyTurnPhase(turns, "run-1", "dispatched");
+    expect(turns[0]!.currentPhase?.phase).toBe("first_event");
+  });
+
+  it("delivered 不覆盖执行期阶段（skills_sync / spawning / inject_received）", () => {
+    for (const execPhase of ["skills_sync", "spawning", "inject_received"] as const) {
+      let turns = [makeTurn("run-1")];
+      turns = applyTurnPhase(turns, "run-1", execPhase);
+      turns = applyTurnPhase(turns, "run-1", "delivered");
+      expect(turns[0]!.currentPhase?.phase).toBe(execPhase);
+    }
+  });
+
+  it("迟到 dispatched 不覆盖 delivered（乱序前跳修正）", () => {
+    let turns = [makeTurn("run-1")];
+    turns = applyTurnPhase(turns, "run-1", "delivered");
+    turns = applyTurnPhase(turns, "run-1", "dispatched");
+    expect(turns[0]!.currentPhase?.phase).toBe("delivered");
+  });
+
+  it("正常推进链顺写不受守卫影响（dispatched→…→first_event 全链）", () => {
+    const chain = [
+      "dispatched",
+      "delivered",
+      "skills_sync",
+      "spawning",
+      "ready",
+      "inject_received",
+      "first_event",
+    ] as const;
+    let turns = [makeTurn("run-1")];
+    for (const p of chain) turns = applyTurnPhase(turns, "run-1", p);
+    expect(turns[0]!.currentPhase?.phase).toBe("first_event");
+  });
+
+  it("词表外值不参与守卫照常覆盖（兼容策略零回归）", () => {
+    // 任一方词表外 → 维持 last-write-wins 透传（2026-10-26-session-stage-progress 兼容策略）。
+    let turns = [makeTurn("run-1")];
+    turns = applyTurnPhase(turns, "run-1", "first_event");
+    turns = applyTurnPhase(turns, "run-1", "future_phase_x");
+    expect(turns[0]!.currentPhase?.phase).toBe("future_phase_x");
+
+    let turns2 = [makeTurn("run-2")];
+    turns2 = applyTurnPhase(turns2, "run-2", "future_phase_x");
+    turns2 = applyTurnPhase(turns2, "run-2", "delivered");
+    expect(turns2[0]!.currentPhase?.phase).toBe("delivered");
+  });
+
+  it("orphan-fallback 回退写同样受守卫（delivered 回退不写入活跃轮）", () => {
+    const turns = [makeTurn("run-active", { currentPhase: { phase: "first_event", at: Date.now() } })];
+    const next = applyTurnPhase(turns, "run-real", "delivered", "run-active");
+    expect(next[0]!.currentPhase?.phase).toBe("first_event");
+  });
+});
+
 describe("clearTurnPhase（D-013③ 终态清理）", () => {
   it("有值清 null；null/undefined 幂等原样返回", () => {
     const withPhase = makeTurn("run-1", {
@@ -308,6 +373,20 @@ describe("retireDeliveryPhase（log 兜底退位）", () => {
     const withoutPhase = makeTurn("run-1");
     expect(retireDeliveryPhase(withoutPhase)).toBe(withoutPhase);
   });
+
+  // 2026-10-27-turn-phase-observability-monotonic FR-03：集合扩展 inject_received
+  // ——AI 已输出（log 必达）的场合「消息已送达 AI」同样失去展示意义。
+  it("inject_received 清 null；ready 等执行期阶段保留（FR-03 集合扩展）", () => {
+    const injected = makeTurn("run-1", {
+      currentPhase: { phase: "inject_received", at: Date.now() },
+    });
+    expect(retireDeliveryPhase(injected).currentPhase).toBeNull();
+
+    const ready = makeTurn("run-1", {
+      currentPhase: { phase: "ready", at: Date.now() },
+    });
+    expect(retireDeliveryPhase(ready)).toBe(ready);
+  });
 });
 
 describe("upsertTurn log 事件投递阶段退位（page/dialog 共用单点）", () => {
@@ -329,6 +408,16 @@ describe("upsertTurn log 事件投递阶段退位（page/dialog 共用单点）"
     const env = makeEnv({ run_id: "run-1", log_id: "l1", channel: "text", content: "x" });
     const next = upsertTurn(prev, env, (t) => t, {});
     expect(next.turns[0]!.currentPhase?.phase).toBe("spawning");
+  });
+
+  it("log 到达时轮挂 inject_received → 清除（FR-03 集成）", () => {
+    const prev = {
+      turns: [makeTurn("run-1", { currentPhase: { phase: "inject_received", at: Date.now() } })],
+      currentRunId: "run-1",
+    };
+    const env = makeEnv({ run_id: "run-1", log_id: "l1", channel: "text", content: "x" });
+    const next = upsertTurn(prev, env, (t) => t, {});
+    expect(next.turns[0]!.currentPhase).toBeNull();
   });
 
   it("非 log 事件（turn_completed）不触发退位——delivered 清除只认 log", () => {
