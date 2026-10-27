@@ -68,10 +68,14 @@ const archivedOne = change({
   location: "archive",
 });
 
+// refetch 缺省补 noop（2026-10-27-ghost-spec-binding-fix 评审 P2）：组件打开沿
+// 会 void refetch()，mock 缺该键 → 未捕获 TypeError（用例仍过但 vitest 退出码 1，
+// CI 红）。显式传入时用调用方的 spy（FR-09 断言 refetch 次数）。
 function mockData(data: ChangeSummary[] | undefined, refetch?: ReturnType<typeof vi.fn>) {
-  mockedHook.mockReturnValue({ data, refetch } as unknown as ReturnType<
-    typeof useSessionChanges
-  >);
+  mockedHook.mockReturnValue({
+    data,
+    refetch: refetch ?? vi.fn().mockResolvedValue(undefined),
+  } as unknown as ReturnType<typeof useSessionChanges>);
 }
 
 /** 打开下拉：2026-10-16-session-pill-dock-drag 起 click 触发（hover 不再弹）。 */
