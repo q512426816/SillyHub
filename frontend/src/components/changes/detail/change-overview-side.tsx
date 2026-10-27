@@ -38,6 +38,16 @@ interface Row {
 
 const DASH = "—";
 
+// 会话状态中文标签（2026-10-28-change-detail-sessions-source-fix FR-03：状态列
+// 不裸显英文枚举；映射同 change-stage-actions.tsx / quicklog-sessions-card.tsx）。
+const SESSION_STATUS_LABELS: Record<string, string> = {
+  pending: "等待中",
+  active: "进行中",
+  reconnecting: "重连中",
+  ended: "已结束",
+  failed: "已失败",
+};
+
 // 2026-10-18-change-list-type-filter：类型标签抽公共件（列表行/详情侧栏同源），
 // 本文件改从公共组件导入（样式与映射随组件走，两处渲染口径恒一致）。
 
@@ -201,7 +211,9 @@ export function ChangeOverviewSide({
               >
                 {s.title?.trim() || s.id.slice(0, 8)}
               </Link>
-              <span className="shrink-0 text-muted-foreground">{s.status}</span>
+              <span className="shrink-0 text-muted-foreground">
+                {SESSION_STATUS_LABELS[s.status] ?? s.status}
+              </span>
             </div>
           ))
         )}

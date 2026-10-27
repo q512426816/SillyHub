@@ -164,6 +164,36 @@ describe("ChangeOverviewSide", () => {
     expect(screen.getByText("打开会话工作台 →")).toBeInTheDocument();
   });
 
+  it("会话组：状态列显示中文标签（active→进行中 / ended→已结束，FR-03）", () => {
+    renderSide();
+    const sessionsSection = screen.getByText("会话").closest("div");
+    expect(sessionsSection).toHaveTextContent("进行中");
+    expect(sessionsSection).toHaveTextContent("已结束");
+    // 不再裸显英文枚举
+    expect(within(sessionsSection!).queryByText("active")).not.toBeInTheDocument();
+    expect(within(sessionsSection!).queryByText("ended")).not.toBeInTheDocument();
+  });
+
+  it("会话组：未知状态值回退显示原文（不误吞）", () => {
+    cleanup();
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    render(
+      <QueryClientProvider client={client}>
+        <ChangeOverviewSide
+          change={CHANGE as ChangeRead}
+          workspaceId="ws-1"
+          changeId="c-1"
+          archived={false}
+          sessions={[
+            { id: "sess-x1", title: "未知态会话", status: "hibernating" } as AgentSessionListItem,
+          ]}
+        />
+      </QueryClientProvider>,
+    );
+    const sessionsSection = screen.getByText("会话").closest("div");
+    expect(sessionsSection).toHaveTextContent("hibernating");
+  });
+
   it("范围对账计数取信封 repos[].totals 合计（单一源）", async () => {
     renderSide();
     expect(await screen.findByText("计划内")).toBeInTheDocument();
