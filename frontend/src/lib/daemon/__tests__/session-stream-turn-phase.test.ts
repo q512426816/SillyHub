@@ -17,6 +17,8 @@ import {
   applyTurnPhase,
   clearTurnPhase,
   replacePlaceholderTurn,
+  retireDeliveryPhase,
+  upsertTurn,
 } from "@/components/daemon/session-panel/turn-state";
 import type { SessionTurnView } from "@/components/daemon/turn-timeline";
 import type { FetchSseConnection } from "@/lib/fetch-sse";
@@ -263,5 +265,80 @@ describe("clearTurnPhase（D-013③ 终态清理）", () => {
 
     const nullPhase = makeTurn("run-1", { currentPhase: null });
     expect(clearTurnPhase(nullPhase)).toBe(nullPhase);
+  });
+});
+
+// ── 2026-10-27-turn-phase-stall-honest-ui：log 到达退位投递阶段 ────────────────
+
+function makeEnv(overrides: Partial<SessionStreamEnvelope>): SessionStreamEnvelope {
+  return {
+    event: "log",
+    session_id: "sess-1",
+    run_id: null,
+    turn: null,
+    log_id: null,
+    timestamp: "2026-10-27T02:00:00Z",
+    channel: null,
+    content: null,
+    status: null,
+    exit_code: null,
+    reason: null,
+    ...overrides,
+  } as SessionStreamEnvelope;
+}
+
+describe("retireDeliveryPhase（log 兜底退位）", () => {
+  it("delivered / dispatched 清 null；非投递阶段与无值原样返回（引用不变）", () => {
+    const delivered = makeTurn("run-1", {
+      currentPhase: { phase: "delivered", at: Date.now() },
+    });
+    expect(retireDeliveryPhase(delivered).currentPhase).toBeNull();
+
+    const dispatched = makeTurn("run-1", {
+      currentPhase: { phase: "dispatched", at: Date.now() },
+    });
+    expect(retireDeliveryPhase(dispatched).currentPhase).toBeNull();
+
+    // 非投递阶段：轮已在执行期（如 spawning），log 到达不代表该信号过期。
+    const spawning = makeTurn("run-1", {
+      currentPhase: { phase: "spawning", at: Date.now() },
+    });
+    expect(retireDeliveryPhase(spawning)).toBe(spawning);
+
+    const withoutPhase = makeTurn("run-1");
+    expect(retireDeliveryPhase(withoutPhase)).toBe(withoutPhase);
+  });
+});
+
+describe("upsertTurn log 事件投递阶段退位（page/dialog 共用单点）", () => {
+  it("log 到达时轮仍挂 delivered → currentPhase 被清除", () => {
+    const prev = {
+      turns: [makeTurn("run-1", { currentPhase: { phase: "delivered", at: Date.now() } })],
+      currentRunId: "run-1",
+    };
+    const env = makeEnv({ run_id: "run-1", log_id: "l1", channel: "text", content: "x" });
+    const next = upsertTurn(prev, env, (t) => t, {});
+    expect(next.turns[0]!.currentPhase).toBeNull();
+  });
+
+  it("log 到达时轮挂非投递阶段（spawning）→ 保留", () => {
+    const prev = {
+      turns: [makeTurn("run-1", { currentPhase: { phase: "spawning", at: Date.now() } })],
+      currentRunId: "run-1",
+    };
+    const env = makeEnv({ run_id: "run-1", log_id: "l1", channel: "text", content: "x" });
+    const next = upsertTurn(prev, env, (t) => t, {});
+    expect(next.turns[0]!.currentPhase?.phase).toBe("spawning");
+  });
+
+  it("非 log 事件（turn_completed）不触发退位——delivered 清除只认 log", () => {
+    const prev = {
+      turns: [makeTurn("run-1", { currentPhase: { phase: "delivered", at: Date.now() } })],
+      currentRunId: "run-1",
+    };
+    const env = makeEnv({ event: "turn_completed", run_id: "run-1", status: "completed" });
+    const next = upsertTurn(prev, env, (t) => t, {});
+    // 终态清理由消费方 clearTurnPhase 负责（D-013③），upsertTurn 不越权。
+    expect(next.turns[0]!.currentPhase?.phase).toBe("delivered");
   });
 });

@@ -152,6 +152,28 @@ export function clearTurnPhase<T extends { currentPhase?: TurnPhaseState | null 
 }
 
 /**
+ * 投递阶段词表（2026-10-27-turn-phase-stall-honest-ui）：backend 自产的
+ * dispatched/delivered 表示「消息已下发/已领取」，尚不代表执行器开始处理。
+ */
+const DELIVERY_PHASES: ReadonlySet<string> = new Set(["dispatched", "delivered"]);
+
+/**
+ * log 到达退位投递阶段（2026-10-27-turn-phase-stall-honest-ui）：轮收到真实
+ * 输出（log 事件有 DB 兜底必达）时，仍挂着的 dispatched/delivered 已失去展示
+ * 意义（消息显然已被处理），清 null 让状态条退位回轮状态文案。只清投递两
+ * 阶段——执行期阶段（skills_sync/spawning/…）可能与 log 并行推进，不越权。
+ * 与 clearTurnPhase（终态全清）并列；生产实证：会话忙时消息在 backend 排队
+ * 滞留 9 分钟，前端唯一 phase=delivered 无限计时（2026-10-27 会话 7eff99e1）。
+ */
+export function retireDeliveryPhase<
+  T extends { currentPhase?: TurnPhaseState | null },
+>(turn: T): T {
+  const phase = turn.currentPhase?.phase;
+  if (phase == null || !DELIVERY_PHASES.has(phase)) return turn;
+  return { ...turn, currentPhase: null };
+}
+
+/**
  * ql-20260918-003：直发占位轮 → 真实 run_id 的合并替换（page/dialog 发送路径共用）。
  *
  * 常态：占位轮原位改名（runId=realRunId + status=nextStatus）。
@@ -219,6 +241,12 @@ export function upsertTurn(
 ): TurnState {
   const runId = env.run_id;
   if (!runId) return prev;
+  // 2026-10-27-turn-phase-stall-honest-ui：log 事件的目标轮在 apply 后退位仍挂
+  // 的投递阶段（dispatched/delivered）——真实输出已到达（log 有 DB 兜底必达），
+  // 投递信号失去展示意义；page/dialog 双模式共用本函数，单点兜底。非 log 事件
+  // 走原 apply 零变化。
+  const applyRetiringDelivery = (t: SessionTurnView): SessionTurnView =>
+    env.event === "log" ? retireDeliveryPhase(apply(t)) : apply(t);
   // 父归属优先跨轮路由（2026-09-15-subagent-three-pane-display 用户验收返工）：
   // 后台子代理的终态信号（[TASK_NOTIFICATION]）与内容行常经**后续 run** 上报
   // （daemon 任务注册表丢失时 writeTaskLine 回退 currentRunId，DB 实证：通知行
@@ -235,7 +263,10 @@ export function upsertTurn(
         // 只更新父段所在轮：apply（段元数据/children 追加），不 healToRunning
         // （后台通知到达时派发轮可能已完成——不把终态轮翻回 running），也不
         // 新建/合并 run_id 轮。倒序找最末命中（同 id 多轮仅极端重放场景）。
-        const turns = prev.turns.map((t, idx) => (idx === i ? apply(t) : t));
+        // （本分支已限定 env.event === "log"，applyRetiringDelivery 同步退位。）
+        const turns = prev.turns.map((t, idx) =>
+          idx === i ? applyRetiringDelivery(t) : t,
+        );
         return { ...prev, turns };
       }
     }
@@ -284,7 +315,7 @@ export function upsertTurn(
       segments: empty.segments,
       turnStartedAt: empty.turnStartedAt,
     };
-    turns = [...prev.turns, apply(newTurn)];
+    turns = [...prev.turns, applyRetiringDelivery(newTurn)];
   } else {
     // attach 竞态修复（ql-20260820-007）防御分支：主修正位于历史回灌处；若某条
     // 路径仍漏改（当前 run 的日志持续流入而轮卡终态），log 分支自愈翻回 running。
@@ -293,7 +324,7 @@ export function upsertTurn(
     turns = prev.turns.map((t, i) => {
       if (i !== idx) return t;
       if (env.event !== "log" && TERMINAL_TURN_STATUSES.has(t.status)) return t;
-      const next = apply(t);
+      const next = applyRetiringDelivery(t);
       if (healToRunning && TERMINAL_TURN_STATUSES.has(next.status)) {
         return { ...next, status: "running" };
       }

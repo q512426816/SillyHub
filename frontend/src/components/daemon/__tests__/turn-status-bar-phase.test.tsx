@@ -17,6 +17,7 @@ import { describe, it, expect, vi, afterEach } from "vitest";
 import { act, render, screen } from "@testing-library/react";
 
 import {
+  DELIVERY_STALL_LABEL,
   PHASE_LABEL,
   PHASE_TIMEOUT_MS,
   TurnStatusBar,
@@ -110,6 +111,57 @@ describe("first_event 退位（D-008）", () => {
     expect(container.firstElementChild?.className).toContain(
       "border-primary/[0.18]",
     );
+  });
+});
+
+describe("投递阶段停滞文案（2026-10-27-turn-phase-stall-honest-ui）", () => {
+  // 超时态 span 内多文本节点（标签 + 「· 已等待 N 秒」），字符串精确匹配
+  // 匹不到前缀节点——统一前缀正则（锚定 DELIVERY_STALL_LABEL 常量）。
+  const stallLabelRe = () => new RegExp(`^${DELIVERY_STALL_LABEL}`);
+
+  it("delivered 停留 ≥30s → 排队语义文案 + 警示样式 + 已等待秒数", async () => {
+    vi.useFakeTimers();
+    const at = Date.now();
+    const { container } = renderBar({
+      currentPhase: { phase: "delivered", at },
+    });
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(PHASE_TIMEOUT_MS + 1_000);
+    });
+    expect(screen.getByText(stallLabelRe())).toBeInTheDocument();
+    expect(screen.getByText(/已等待 31 秒/)).toBeInTheDocument();
+    expect(container.firstElementChild?.className).toContain("border-warning/40");
+  });
+
+  it("dispatched 停留 ≥30s → 同款排队语义文案", async () => {
+    vi.useFakeTimers();
+    const at = Date.now();
+    renderBar({ currentPhase: { phase: "dispatched", at } });
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(PHASE_TIMEOUT_MS + 1_000);
+    });
+    expect(screen.getByText(stallLabelRe())).toBeInTheDocument();
+  });
+
+  it("delivered 30s 内仍显词表文案（不提前切排队语义）", () => {
+    vi.useFakeTimers();
+    renderBar({
+      currentPhase: { phase: "delivered", at: Date.now() - 5_000 },
+    });
+    expect(screen.getByText("执行器已接收")).toBeInTheDocument();
+    expect(screen.queryByText(stallLabelRe())).not.toBeInTheDocument();
+  });
+
+  it("执行期阶段（spawning）停滞 ≥30s 仍显词表文案——排队语义只限投递两阶段", async () => {
+    vi.useFakeTimers();
+    const at = Date.now();
+    renderBar({ currentPhase: { phase: "spawning", at } });
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(PHASE_TIMEOUT_MS + 1_000);
+    });
+    expect(screen.getByText(/正在启动 AI 进程/)).toBeInTheDocument();
+    expect(screen.getByText(/已等待 31 秒/)).toBeInTheDocument();
+    expect(screen.queryByText(stallLabelRe())).not.toBeInTheDocument();
   });
 });
 

@@ -406,6 +406,15 @@ export const PHASE_LABEL: Record<string, string> = {
 /** 阶段超时警示阈值（D-007：前端常量不做配置项）。 */
 export const PHASE_TIMEOUT_MS = 30_000;
 
+/**
+ * 投递阶段停滞文案（2026-10-27-turn-phase-stall-honest-ui）：dispatched/
+ * delivered 停留超阈值时切换——「执行器已接收 · 已等待 N 秒」会让用户误以为
+ * 卡死（生产实证：会话忙时消息在 backend 排队滞留 9 分钟，前端唯一信号
+ * delivered 无限计时），改显排队语义告知「执行器尚未开始处理，可能在排队」。
+ * 执行期阶段（spawning/…）停滞仍显词表文案（零回归）。
+ */
+export const DELIVERY_STALL_LABEL = "等待执行器开始处理";
+
 /** 具体秒数显示门槛（对齐 deepseek TurnStatus：前 15 秒保持简洁只显文案）。 */
 export const TURN_STATUS_ELAPSED_MIN_MS = 15_000;
 
@@ -470,14 +479,22 @@ export const TurnStatusBar = memo(function TurnStatusBar({
   //   2. phase === "first_event" → 退位：标签位回退 STATUS_LABEL[turnStatus]，
   //      右侧活动摘要接管（D-008；退位后超时计时随之失效——不警示）；
   //   3. 停留 ≥ PHASE_TIMEOUT_MS → 整条切警示样式（warning token）+「已等待 N 秒」；
+  //      3a. 超时且 phase ∈ {dispatched, delivered} → 标签切 DELIVERY_STALL_LABEL
+  //          排队语义（2026-10-27-turn-phase-stall-honest-ui，见常量 docblock）；
   //   4. 其余 → PHASE_LABEL[phase]，未知值显示原始字符串（兼容策略兜底）。
   const phaseRetired = currentPhase?.phase === "first_event";
   const phaseElapsedMs =
     currentPhase && !phaseRetired ? Math.max(0, now - currentPhase.at) : null;
   const phaseTimedOut =
     phaseElapsedMs != null && phaseElapsedMs >= PHASE_TIMEOUT_MS;
-  const statusLabel =
-    currentPhase && !phaseRetired
+  // 投递阶段停滞（2026-10-27-turn-phase-stall-honest-ui）：超时即切排队语义
+  // 文案——滞留可能持续数分钟（backend 排队/补拉），干等计时有误导性。
+  const stalledDelivery =
+    phaseTimedOut &&
+    (currentPhase?.phase === "dispatched" || currentPhase?.phase === "delivered");
+  const statusLabel = stalledDelivery
+    ? DELIVERY_STALL_LABEL
+    : currentPhase && !phaseRetired
       ? (PHASE_LABEL[currentPhase.phase] ?? currentPhase.phase)
       : STATUS_LABEL[turnStatus];
 
