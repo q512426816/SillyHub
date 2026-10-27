@@ -1,0 +1,51 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-27-mobile-chat-visual-round3",
+  "rows": [
+    {
+      "anchor": "FR-01",
+      "row_id": "2026-10-27-mobile-chat-visual-round3:flow:测试绑定FR-01",
+      "tests": [
+        "frontend/src/components/chat/__tests__/round-divider.test.tsx「mobile=true：单行不折行（nowrap+truncate）+ detail 不渲染」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-27-mobile-chat-visual-round3"
+    },
+    {
+      "anchor": "FR-02",
+      "row_id": "2026-10-27-mobile-chat-visual-round3:flow:测试绑定FR-02",
+      "tests": [
+        "frontend/src/app/m/workspaces/[id]/sessions/[sid]/__tests__/page.m-session-chat.test.tsx"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-27-mobile-chat-visual-round3"
+    },
+    {
+      "anchor": "FR-03",
+      "row_id": "2026-10-27-mobile-chat-visual-round3:flow:测试绑定FR-03",
+      "tests": [
+        "frontend/src/components/mobile/mobile-session-list.test.tsx"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-27-mobile-chat-visual-round3"
+    }
+  ]
+}

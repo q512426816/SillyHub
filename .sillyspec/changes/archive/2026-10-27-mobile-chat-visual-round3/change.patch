@@ -1,0 +1,298 @@
+diff --git a/frontend/src/app/m/workspaces/[id]/sessions/[sid]/__tests__/page.m-session-chat.test.tsx b/frontend/src/app/m/workspaces/[id]/sessions/[sid]/__tests__/page.m-session-chat.test.tsx
+index 337fb28a7..879ff2752 100644
+--- a/frontend/src/app/m/workspaces/[id]/sessions/[sid]/__tests__/page.m-session-chat.test.tsx
++++ b/frontend/src/app/m/workspaces/[id]/sessions/[sid]/__tests__/page.m-session-chat.test.tsx
+@@ -26,9 +26,12 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+ // ── next/navigation mock：useParams 可变 holder（sid 变化 rerender 用） ───────
+ const nav = vi.hoisted(() => ({
+   params: { id: "ws-1", sid: "s-1" } as { id: string; sid: string },
++  push: vi.fn(),
+ }));
+ vi.mock("next/navigation", () => ({
+   useParams: () => nav.params,
++  // visual-round3：页面 onBack 装配（返回会话列表）引入 useRouter——mock 之
++  useRouter: () => ({ push: nav.push }),
+ }));
+ 
+ // ── SessionPanel 桩：捕获 props + 挂载日志（key={sid} 重挂载断言佐证） ────────
+diff --git a/frontend/src/app/m/workspaces/[id]/sessions/[sid]/page.tsx b/frontend/src/app/m/workspaces/[id]/sessions/[sid]/page.tsx
+index bcd86b95d..b52254c10 100644
+--- a/frontend/src/app/m/workspaces/[id]/sessions/[sid]/page.tsx
++++ b/frontend/src/app/m/workspaces/[id]/sessions/[sid]/page.tsx
+@@ -19,7 +19,7 @@
+  *    零重复请求）。
+  */
+ import { useMemo } from "react";
+-import { useParams } from "next/navigation";
++import { useParams, useRouter } from "next/navigation";
+ import { useQuery, useQueryClient } from "@tanstack/react-query";
+ 
+ import { SessionPanel } from "@/components/daemon/session-panel";
+@@ -28,6 +28,7 @@ import { useDaemonMachines } from "@/lib/use-daemon-machines";
+ 
+ export default function MobileSessionChatPage() {
+   const params = useParams<{ id: string; sid: string }>();
++  const router = useRouter();
+   const sid = params.sid;
+   const qc = useQueryClient();
+ 
+@@ -60,6 +61,9 @@ export default function MobileSessionChatPage() {
+         key={sid}
+         mode="page"
+         variant="mobile"
++        // visual-round3（用户需求「会话顶部加返回会话列表按钮」）：显式路由回
++        // 当前工作区会话列表（深链进入时 router.back 不可靠，显式 push 恒可达）。
++        onBack={() => router.push(`/m/workspaces/${params.id}/sessions`)}
+         sessionId={sid}
+         machines={machines}
+         llmProviders={providers}
+diff --git a/frontend/src/components/chat/__tests__/round-divider.test.tsx b/frontend/src/components/chat/__tests__/round-divider.test.tsx
+index 04af8f755..29e269db7 100644
+--- a/frontend/src/components/chat/__tests__/round-divider.test.tsx
++++ b/frontend/src/components/chat/__tests__/round-divider.test.tsx
+@@ -67,12 +67,17 @@ describe("RoundDivider 手机端窄视口分支（2026-10-26-mobile-four-page-la
+     expect(divider.textContent).toContain("53 tok/s");
+   });
+ 
+-  it("mobile=true：胶囊允许收缩折行（去 shrink-0/nowrap）", () => {
+-    const { getByTestId } = render(<RoundDivider label="第 1 轮" meta="↑78,489" mobile />);
+-    const pill = getByTestId("round-divider").children[1] as HTMLElement;
+-    expect(pill.className).toContain("whitespace-normal");
+-    expect(pill.className).toContain("min-w-0");
+-    expect(pill.className).not.toContain("whitespace-nowrap");
++  it("mobile=true：单行不折行（nowrap+truncate 超长省略，visual-round3 折行观感差回改）+ detail 不渲染", () => {
++    const { getByTestId } = render(
++      <RoundDivider label="第 1 轮" status="running" meta="↑78,489" detail="开始 20:13" mobile />,
++    );
++    const divider = getByTestId("round-divider");
++    const pill = divider.children[1] as HTMLElement;
++    expect(pill.className).toContain("whitespace-nowrap");
++    expect(pill.className).toContain("truncate");
++    expect(pill.className).not.toContain("whitespace-normal");
++    // detail（开始时刻/历时）mobile 不渲染——单行让宽
++    expect(divider.querySelector('[data-testid="round-divider-detail"]')).toBeNull();
+   });
+ 
+   it("desktop 锚：缺省（不传 mobile）meta 原样不缩写、胶囊保持 shrink-0 单行", () => {
+diff --git a/frontend/src/components/chat/round-divider.tsx b/frontend/src/components/chat/round-divider.tsx
+index 3bdc4e5ba..db078deea 100644
+--- a/frontend/src/components/chat/round-divider.tsx
++++ b/frontend/src/components/chat/round-divider.tsx
+@@ -119,11 +119,12 @@ export const RoundDivider = memo(function RoundDivider({
+       <span
+         className={cn(
+           "inline-flex items-center gap-1.5 rounded-full border border-border/60 bg-card/80 px-3 py-0.5 text-[10.5px] text-muted-foreground shadow-sm backdrop-blur-sm",
+-          // mobile（FR-02 + visual-round2）：去胶囊框纯文字（边框/底色/阴影/内距
+-          // 全去——手机上轮次分隔要轻不抢正文视觉）；允许收缩折行（长 meta 在
+-          // 430pt 视口内换行不溢出）。desktop 缺省保持胶囊+shrink-0 单行（零变化）。
++          // mobile（FR-02 + visual-round3 单行化）：去胶囊框纯文字 + 单行不折行
++          // （round2 折行在长 meta 下两行居中观感差，用户三轮反馈）——nowrap +
++          // min-w-0 flex-1 truncate 超长省略；detail（开始/历时）mobile 不渲染
++          // （最次要信息，省出单行宽度）。desktop 缺省胶囊+shrink-0 单行零变化。
+           mobile
+-            ? "min-w-0 shrink whitespace-normal border-none bg-transparent px-0 py-0 shadow-none backdrop-blur-none"
++            ? "min-w-0 shrink truncate whitespace-nowrap border-none bg-transparent px-0 py-0 shadow-none backdrop-blur-none"
+             : "shrink-0 whitespace-nowrap",
+         )}
+       >
+@@ -155,7 +156,9 @@ export const RoundDivider = memo(function RoundDivider({
+           aria-hidden
+           className="h-px flex-1 bg-gradient-to-l from-transparent via-border to-border"
+         />
+-        {detail && (
++        {/* detail（开始时刻/历时）：mobile 不渲染（visual-round3 单行化让宽，
++            最次要信息）；desktop 原位原样。 */}
++        {!mobile && detail && (
+           <span
+             data-testid="round-divider-detail"
+             className="shrink-0 whitespace-nowrap font-mono text-[10.5px] tabular-nums text-muted-foreground"
+diff --git a/frontend/src/components/daemon/session-panel/index.tsx b/frontend/src/components/daemon/session-panel/index.tsx
+index 647594675..416fd5775 100644
+--- a/frontend/src/components/daemon/session-panel/index.tsx
++++ b/frontend/src/components/daemon/session-panel/index.tsx
+@@ -270,6 +270,13 @@ export interface SessionPanelProps {
+   onOpenSubagent?: (segmentId: string) => void;
+   /** page 可选：右栏 ✕ / 段失效自动关闭上抛（门户清槽位）。〔prop〕 */
+   onSubagentPanelClose?: () => void;
++  /**
++   * mobile 可选：头部返回按钮（2026-10-27-mobile-chat-visual-round3 / 用户
++   * 需求「会话顶部加返回会话列表按钮」）。仅 variant="mobile" 且传入时渲染
++   * ChevronLeft 钮；desktop/dialog/悬浮宿主不传零渲染零变化。〔prop〕宿主
++   * 装配路由行为（组件自身不感知 next/navigation）。
++   */
++  onBack?: () => void;
+ 
+   // ── 工作区引用插入槽位（2026-10-10-workspace-ref-intake task-06/07 / FR-01
+   //    通道——portal 右键入口 → 输入区光标处插入标签）──────────────────
+@@ -310,6 +317,7 @@ export function SessionPanel(props: SessionPanelProps) {
+         openSubagentId={props.openSubagentId}
+         onOpenSubagent={props.onOpenSubagent}
+         onSubagentPanelClose={props.onSubagentPanelClose}
++        onBack={props.onBack}
+         // 2026-10-10-workspace-ref-intake task-07（D-012 裁决）：工作区引用插入
+         // 槽位透传（仅门户 page 装配传入；未传内部视为 null 零回归）。
+         pendingWsRefInsert={props.pendingWsRefInsert}
+diff --git a/frontend/src/components/daemon/session-panel/page-helpers.tsx b/frontend/src/components/daemon/session-panel/page-helpers.tsx
+index bbede089c..1b915d296 100644
+--- a/frontend/src/components/daemon/session-panel/page-helpers.tsx
++++ b/frontend/src/components/daemon/session-panel/page-helpers.tsx
+@@ -135,6 +135,13 @@ export interface SessionPanelPageProps {
+   /** task-14（2026-08-26-mobile-workspace-page）：视口样式变体——分发函数已归一
+    *  （外层 ?? "desktop"），仅渲染层消费（见 SessionPanelProps.variant 注释）。 */
+   variant: "desktop" | "mobile";
++  /**
++   * mobile 可选：头部返回按钮（2026-10-27-mobile-chat-visual-round3 / 用户需求
++   * 「会话顶部加返回会话列表按钮」）。仅 variant="mobile" 且传入时渲染
++   * ChevronLeft 钮；desktop/dialog/悬浮宿主不传零渲染。〔prop〕宿主装配路由
++   * 行为（组件自身不感知 next/navigation，保持纯 props 驱动）。
++   */
++  onBack?: () => void;
+ }
+ 
+ /**
+diff --git a/frontend/src/components/daemon/session-panel/session-panel-page.tsx b/frontend/src/components/daemon/session-panel/session-panel-page.tsx
+index bf50cda05..c162a38fb 100644
+--- a/frontend/src/components/daemon/session-panel/session-panel-page.tsx
++++ b/frontend/src/components/daemon/session-panel/session-panel-page.tsx
+@@ -6,7 +6,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } fro
+ import { useQuery, useQueryClient } from "@tanstack/react-query";
+ import dayjs, { type Dayjs } from "dayjs";
+ import {
+-  Ban, Bot, ClipboardList, FileText, FolderOpen, Info, ListOrdered, ListTodo, Lock, Monitor, MoreHorizontal, PauseCircle,
++  Ban, Bot, ChevronLeft, ClipboardList, FileText, FolderOpen, Info, ListOrdered, ListTodo, Lock, Monitor, MoreHorizontal, PauseCircle,
+   Puzzle, Search, TriangleAlert, X, Zap,
+ } from "lucide-react";
+ import { Badge, Button, Drawer, Input, Spin } from "antd";
+@@ -653,6 +653,7 @@ export function SessionPanelPage({
+   onPreSessionCreated,
+   pageContextOverride,
+   variant,
++  onBack,
+   openSubagentId,
+   onOpenSubagent,
+   onSubagentPanelClose,
+@@ -5600,6 +5601,20 @@ export function SessionPanelPage({
+           )}
+         >
+           <div className="flex min-w-0 items-center gap-2">
++            {/* visual-round3（用户需求「会话顶部加返回会话列表按钮」）：mobile
++                且宿主接线时标题左侧渲染返回钮——宿主装配路由行为（onBack prop），
++                desktop/dialog/悬浮宿主零渲染。 */}
++            {mobile && onBack && (
++              <button
++                type="button"
++                aria-label="返回会话列表"
++                data-testid="session-mobile-back"
++                onClick={onBack}
++                className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-md border border-border text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
++              >
++                <ChevronLeft aria-hidden className="h-4 w-4" />
++              </button>
++            )}
+             {title && (
+               <span className="truncate text-sm font-semibold text-foreground">
+                 {title}
+diff --git a/frontend/src/components/mobile/mobile-session-list.tsx b/frontend/src/components/mobile/mobile-session-list.tsx
+index b0f60bccb..f9631cd30 100644
+--- a/frontend/src/components/mobile/mobile-session-list.tsx
++++ b/frontend/src/components/mobile/mobile-session-list.tsx
+@@ -48,7 +48,7 @@
+ import { useMemo, useState } from "react";
+ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+ import { Modal } from "antd";
+-import { MoreVertical, Plus, Users } from "lucide-react";
++import { Loader2, MoreVertical, Plus, Users } from "lucide-react";
+ 
+ import { formatRelativeTime } from "@/components/daemon/runtime-card-helpers";
+ import { MemberFacepile } from "@/components/group-chat/create-group-wizard";
+@@ -69,6 +69,10 @@ import {
+   type GroupChatListItemRead,
+ } from "@/lib/daemon";
+ import { isGroupMentionUnread, readGroupLastOpen } from "@/lib/group-unread";
++// visual-round3（用户需求「会话列表加 PC 端同款状态提示标」）：行首状态标识
++// 直接消费 session-list-panel 导出的单一源纯函数（红点失败/绿点完成/问号待答/
++// 转圈执行/琥珀等你——五态语义与 PC 会话列表逐字同款，不另造词表）。
++import { sessionStatusIndicator } from "@/components/sessions/session-list-panel";
+ import { cn } from "@/lib/utils";
+ 
+ /* ────────────── 纯辅助（组件外，便于单测推理；语义对齐 session-list-panel） ────────────── */
+@@ -87,6 +91,58 @@ function statusLabel(status: AgentSessionStatus): string {
+   return SESSION_STATUS_LABELS[status] ?? status;
+ }
+ 
++/**
++ * visual-round3：会话卡行首状态槽——sessionStatusIndicator（PC 单一源）三形态
++ * 移动端渲染：dot=彩色圆点（h-2 w-2 + title 提示）/ spinner=Loader2 转圈 /
++ * question=问号圆标（在等你回答）。liveness 活性 mobile 列表不拉（无 agent-logs
++ * 链路），传 null——status + currentRunStatus + pendingDialog_kind 三输入已覆盖
++ * 五态核心（终态权威 + run 实时 + 待回答），与 PC 端「同款」按用户原话对齐。
++ */
++function SessionStatusMark({
++  session,
++}: {
++  session: AgentSessionRead;
++}) {
++  const indicator = sessionStatusIndicator(
++    session.status as AgentSessionStatus,
++    null,
++    false,
++    session.current_run_status ?? null,
++    session.pending_dialog_kind ?? null,
++  );
++  if (indicator == null) return null;
++  if (indicator.kind === "spinner") {
++    return (
++      <span
++        aria-label={indicator.label}
++        title={indicator.label}
++        className="inline-flex shrink-0"
++      >
++        <Loader2 className="h-3.5 w-3.5 animate-spin text-info" />
++      </span>
++    );
++  }
++  if (indicator.kind === "question") {
++    return (
++      <span
++        aria-label={indicator.label}
++        title={indicator.label}
++        className="inline-flex h-4 w-4 shrink-0 items-center justify-center rounded-full border border-info/60 bg-info/10 text-[10px] font-bold leading-none text-info"
++      >
++        ?
++      </span>
++    );
++  }
++  return (
++    <span
++      aria-label={indicator.label}
++      title={indicator.label}
++      aria-hidden
++      className={cn("inline-block h-2 w-2 shrink-0 rounded-full", indicator.cls)}
++    />
++  );
++}
++
+ /**
+  * 「进行中」判定（状态 Tab 客户端过滤口径）：非 ended/failed 即视为进行中
+  * （聊天/排队/恢复中），逐字对齐 session-list-panel sessionListPollInterval
+@@ -525,11 +581,15 @@ export function MobileSessionList({
+                     aria-label={`打开会话 ${name}`}
+                     className="flex min-h-[44px] min-w-0 flex-1 flex-col gap-1 p-3 text-left transition-colors active:bg-muted/50"
+                   >
+-                    <span
+-                      className="truncate text-[14px] font-medium text-foreground"
+-                      title={name}
+-                    >
+-                      {name}
++                    <span className="flex min-w-0 items-center gap-1.5">
++                      {/* visual-round3：行首 PC 同款状态标 */}
++                      <SessionStatusMark session={s} />
++                      <span
++                        className="truncate text-[14px] font-medium text-foreground"
++                        title={name}
++                      >
++                        {name}
++                      </span>
+                     </span>
+                     {/* 引擎 · 状态 · 最后活动相对时间（原型 .ses-sub） */}
+                     <span className="truncate text-xs text-muted-foreground">

@@ -1,0 +1,60 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-27-archive-reparse-oom-governance",
+  "reviewer": "subagent",
+  "verdict": "PASS",
+  "findings": [
+    {
+      "severity": "P2",
+      "title": "D-007 结构性立即通道撞 single-flight 时退回硬 120s 尾随定时器，≤60s 收敛承诺在该边角失守",
+      "evidence": "_enqueue_trailing_reparse 的 _fire 是 asyncio.sleep(_REPARSE_MIN_INTERVAL_SECONDS=120s) 后才回流 _trigger_change_reparse（service.py:3265/3270），不是「in-flight 完成即补发」；设计明确说 structural 撞 in-flight 时『入尾随队列照旧』（design.md:39），故结构性归档事件若恰逢任一 reparse 在途（含非结构 scoped，事故场景六会话同窗正是并发叠加），收敛时延≈满 120s+，超出 FR-01/D-001 的 ≤60s。主路径（无在途重叠）承诺可兑现，且严格优于现状，非结构性矛盾；但设计应对该边角二选一：弱化承诺表述，或规定 structural 入尾随后按 in-flight 完成回调即时补发/用短定时器",
+      "location": "backend/app/modules/spec_workspace/service.py:3263-3270"
+    },
+    {
+      "severity": "P2",
+      "title": "D-009 等待 Future 的失败传播未设计：首请求半包断连不回填缓存时等待者可能悬挂",
+      "evidence": "现行缓存 put 只在流被完整消费后发生（service.py:282 包裹在流消费循环内，1193 行注释明言『断连半包不入缓存』），get(220)/put(230) 为分离临界区故同版本并发重复构建竞态属实、改造点描述准确；但 R-04 应对策略写『等待共享同版本 Future，构建完成即返回』——若 Future 以缓存回填为完成信号，首个消费者断连则 Future 永不 resolve，等待者无限等；设计需补：Future 失败/放弃时传播异常并让等待者降级自建",
+      "location": "backend/app/modules/spec_workspace/service.py:280-282"
+    },
+    {
+      "severity": "P3",
+      "title": "『遍历成本 ∝ scope 不 ∝ 全树』表述过强：scoped 模式仍全量 iterdir+sort 三区目录",
+      "evidence": "parser.py 三区均为 sorted(iterdir()) 先枚举全部条目再按 scope_set 过滤（143/168/199 行），readdir+排序成本 ∝ 目录条目总数；真正 ∝ scope 的是解析/文件 IO/内存峰值（即 FR-02 关心的维度，该维度承诺成立）。条目数百~千级时无实际影响，仅措辞精度问题，建议改为『解析与内存峰值 ∝ scope（目录名枚举 ∝ 条目数，量级可忽略）』",
+      "location": "backend/app/modules/change/parser.py:143"
+    }
+  ],
+  "checklistAnswers": [
+    {
+      "item": "交叉点① D-004 假设 × parser 真实能力",
+      "verdict": "ok",
+      "note": "archive 区 entry.name 与 scope 集同名命中（parser.py:171 过滤→177-184 以 location='archive' 解析），且现行生产已走同一机制（service.py:3046-3052 archive add/update op 即 scoped 同名更新，ql-20260818-009 起），假设有代码+生产双重来源"
+    },
+    {
+      "item": "交叉点② D-007 双通道 × 现行节流结构",
+      "verdict": "finding",
+      "note": "可实现且不破坏尾随语义：改 3153 接三元组+3163-3165 单条件即可，尾随 fire 回流 _trigger_change_reparse(3270) 会重算 structural；但定时器硬 sleep 120s（3265）使 structural 撞 in-flight 时 ≤60s 失守（见 P2-1）"
+    },
+    {
+      "item": "交叉点③ 安全四问消解 × 写回环真实语义",
+      "verdict": "ok",
+      "note": "四问锚点全部与源码相符：seen_keys(1652)+_apply_parsed(1657)+location 翻转守卫仅豁免墓碑(3334-3335)、删除环 R-08 收窄『key∈scope 且 ∉seen 才删』(1710-1716)、孤儿候选=existing∖parsed 限 scope(1610-1618) 归档 key∈parsed 不进候选、清理(2865)先于触发(2896)证实"
+    },
+    {
+      "item": "交叉点④ D-009 bundle single-flight × _bundle_gzip_cache 现行结构",
+      "verdict": "finding",
+      "note": "竞态真实：dict+threading.Lock(197-198) 只护 get(220)/put(230) 两个短临界区，build/流消费在锁外，同版本并发 miss→双建→双 put；改造点描述准确，唯首请求断连不回填时等待者 Future 失败传播未设计（见 P2-2）"
+    },
+    {
+      "item": "交叉点⑤ D-008 探针只读 × knowledge 拒C 先例边界",
+      "verdict": "ok",
+      "note": "拒C 先例（knowledge/decisions/backend.md:30）否决理由是全量扫描的性能断崖（Windows stat 断崖+93s 超时史）；探针抽样上限 N=50/轮+零写+不自动触发 reparse，字面（非全量）与精神（不常态化重扫）均未越界，D-008 且显式引用该先例自限"
+    }
+  ],
+  "dimensionNotes": {
+    "乱序": "ok",
+    "并发": "finding",
+    "切换": "ok",
+    "作用域": "ok"
+  },
+  "reviewedAt": "2026-10-27T10:46:28+08:00"
+}

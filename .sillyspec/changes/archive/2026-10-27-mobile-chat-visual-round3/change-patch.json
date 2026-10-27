@@ -1,0 +1,122 @@
+{
+  "change": "2026-10-27-mobile-chat-visual-round3",
+  "baseline": "c6655ba7440d750705afa5acf4dd9973b3374940",
+  "head": "3266725e5f931c7b00101b1d1bff2c36ceaf6fa1",
+  "files": [
+    "frontend/src/app/m/workspaces/[id]/sessions/[sid]/__tests__/page.m-session-chat.test.tsx",
+    "frontend/src/app/m/workspaces/[id]/sessions/[sid]/page.tsx",
+    "frontend/src/components/chat/__tests__/round-divider.test.tsx",
+    "frontend/src/components/chat/round-divider.tsx",
+    "frontend/src/components/daemon/session-panel/index.tsx",
+    "frontend/src/components/daemon/session-panel/page-helpers.tsx",
+    "frontend/src/components/daemon/session-panel/session-panel-page.tsx",
+    "frontend/src/components/mobile/mobile-session-list.tsx"
+  ],
+  "totals": {
+    "files": 8,
+    "additions": 124,
+    "deletions": 19
+  },
+  "savedAt": "2026-10-27T02:56:30.351Z",
+  "note": "flow done 时点冻结（本变更可归属交付面：baseline..HEAD 提交面过滤 .sillyspec/ 只留 .sillyspec/docs/ 交付文档 + 独占树未提交交付；治理工件目录不入冻结——2026-10-12-close-trace-freeze-integrity FR-01）",
+  "modules": [
+    {
+      "id": "frontend",
+      "files": 8,
+      "doc": "docs/multi-agent-platform/modules/frontend.md",
+      "docTouched": false,
+      "docMissing": false
+    },
+    {
+      "id": "frontend_app",
+      "files": 2,
+      "doc": "docs/SillyHub/modules/frontend_app.md",
+      "docTouched": false,
+      "docMissing": false
+    },
+    {
+      "id": "frontend_components",
+      "files": 6,
+      "doc": "docs/SillyHub/modules/frontend_components.md",
+      "docTouched": false,
+      "docMissing": false
+    }
+  ],
+  "uncoveredDirs": [],
+  "moduleMaps": [
+    "docs/backend/modules/_module-map.yaml",
+    "docs/frontend/modules/_module-map.yaml",
+    "docs/multi-agent-platform/modules/_module-map.yaml",
+    "docs/SillyHub/modules/_module-map.yaml",
+    "docs/sillyhub-daemon/modules/_module-map.yaml"
+  ],
+  "acceptedDirtyGap": 1,
+  "scopeAudit": {
+    "mode": "full-flow",
+    "ok": true,
+    "degradedReason": null,
+    "baseAnchor": "c6655ba7440d750705afa5acf4dd9973b3374940",
+    "totals": {
+      "files": 8,
+      "additions": 124,
+      "deletions": 19
+    },
+    "rows": [
+      {
+        "path": "frontend/src/app/m/workspaces/[id]/sessions/[sid]/__tests__/page.m-session-chat.test.tsx",
+        "additions": 3,
+        "deletions": 0,
+        "kind": "modified"
+      },
+      {
+        "path": "frontend/src/app/m/workspaces/[id]/sessions/[sid]/page.tsx",
+        "additions": 5,
+        "deletions": 1,
+        "kind": "modified"
+      },
+      {
+        "path": "frontend/src/components/chat/__tests__/round-divider.test.tsx",
+        "additions": 11,
+        "deletions": 6,
+        "kind": "modified"
+      },
+      {
+        "path": "frontend/src/components/chat/round-divider.tsx",
+        "additions": 8,
+        "deletions": 5,
+        "kind": "modified"
+      },
+      {
+        "path": "frontend/src/components/daemon/session-panel/index.tsx",
+        "additions": 8,
+        "deletions": 0,
+        "kind": "modified"
+      },
+      {
+        "path": "frontend/src/components/daemon/session-panel/page-helpers.tsx",
+        "additions": 7,
+        "deletions": 0,
+        "kind": "modified"
+      },
+      {
+        "path": "frontend/src/components/daemon/session-panel/session-panel-page.tsx",
+        "additions": 16,
+        "deletions": 1,
+        "kind": "modified"
+      },
+      {
+        "path": "frontend/src/components/mobile/mobile-session-list.tsx",
+        "additions": 66,
+        "deletions": 6,
+        "kind": "modified"
+      }
+    ],
+    "excluded": {
+      "foreignDeclared": []
+    },
+    "note": "flow done 时点冻结（本文件落盘时采集）",
+    "closedBy": "flow done"
+  },
+  "patchSha256": "aceda9a998f70a4c6a2eec8ca37da4b9dbfbb25848f6e49cc1020dc756b14884",
+  "patchStatus": "ok"
+}

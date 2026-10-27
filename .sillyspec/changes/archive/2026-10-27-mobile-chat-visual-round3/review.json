@@ -1,0 +1,26 @@
+{
+  "schemaVersion": 1,
+  "reviewType": "self-review",
+  "change": "2026-10-27-mobile-chat-visual-round3",
+  "reviewer": "qinyi（agent 自查，用户批准方案后落码）",
+  "verdict": "PASS",
+  "summary": "三项渲染层改动自查：①轮次单行化（nowrap+truncate+detail mobile 隐藏——round2 折行观感差回改，desktop 胶囊+detail 原位不变）；②onBack 可选 prop 链（SessionPanel→Page 双接口+mobile 头部按钮，缺省零渲染，宿主显式路由防深链 back 失效）；③状态标直接消费 PC sessionStatusIndicator 单一源纯函数（五态语义同款不另造词表，liveness 传 null 已注明口径）。59 用例全绿（round-divider 契约更新+m-session-chat 补 useRouter mock 属有意变更面）+ tsc 0 + lint 0。",
+  "findings": [
+    {
+      "severity": "P3",
+      "status": "accepted",
+      "title": "truncate 极端长 meta 尾部省略会截断 tok/s 段",
+      "evidence": "已通过 mobile 隐藏 detail 优先省宽；极端长省略属可接受降级（完整信息轮内可见）",
+      "location": "frontend/src/components/chat/round-divider.tsx:122"
+    },
+    {
+      "severity": "P3",
+      "status": "accepted",
+      "title": "状态标 liveness 输入传 null（mobile 无 agent-logs 活性链路）",
+      "evidence": "status+currentRunStatus+pendingDialogKind 三输入覆盖五态核心；liveness 兜底层（本地 CLI 会话）mobile 暂缺，终态权威优先不受影响",
+      "location": "frontend/src/components/mobile/mobile-session-list.tsx:98"
+    }
+  ],
+  "dimensionNotes": { "乱序": "n/a", "并发": "n/a", "切换": "ok", "作用域": "ok" },
+  "reviewedAt": "2026-10-27T14:24:00.000Z"
+}
