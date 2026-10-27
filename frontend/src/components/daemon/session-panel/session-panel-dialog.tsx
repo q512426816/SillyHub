@@ -338,24 +338,44 @@ export function SessionPanelDialog(props: SessionPanelProps) {
   const confirmSchedCreate = useCallback(async () => {
     const sid = view.sessionId;
     const rawPrompt = input.trim();
+    // 2026-10-27-scheduled-send-attachments FR-01：随定时消息携带的附件 id——
+    // 此前缺口：创建只组装 prompt+dispatch_at，已上传附件被静默丢弃（后端
+    // ScheduledMessageCreateRequest.attachment_ids 与到点派发重放链路既有支持）。
+    const attachmentIds = pendingAttachments.map((a) => a.id);
     // task-04（D-003）：定时路径同样置换引用 token；摘要/清空比对用原文。
     // task-07（FR-06/D-008@v2）：工作区 token 同点位串联置换。
     const prompt = substituteWsRefsForSend(
       substituteAttRefsForSend(rawPrompt, attTokenMap, pendingAttachments),
       wsRefTokens,
     );
-    if (!sid || !schedAt || !rawPrompt || schedSubmitting) return;
+    // FR-04：空文本+附件豁免可创建（对齐普通发送 D-7 看图说话，后端校验一
+    // 同口径）；空文本且无附件仍早退（弹窗确认按钮已禁用，此处兜底）。
+    if (!sid || !schedAt || schedSubmitting) return;
+    if (!rawPrompt && attachmentIds.length === 0) return;
     setSchedSubmitting(true);
     try {
       await createScheduledMessage(sid, {
         prompt,
         dispatch_at: schedAt.toISOString(),
+        // 非空才带——无附件保持既有请求形态逐字节一致（零回归）。
+        ...(attachmentIds.length > 0 ? { attachment_ids: attachmentIds } : {}),
       });
       setSchedOpen(false);
       setInput((prev) => (prev.trim() === rawPrompt ? "" : prev));
+      // FR-02：创建成功清附件（onSendSettled 同口径——按 id 精确过滤 chips、
+      // 调输入栏清空句柄、逐 id 删元数据镜像），防残留误导重复发送。
+      setPendingAttachments((prev) =>
+        attachmentIds.length === 0 ? prev : prev.filter((a) => !attachmentIds.includes(a.id)),
+      );
+      if (attachmentIds.length > 0) clearAttachmentsRef.current?.();
+      for (const id of attachmentIds) attachmentMetaRef.current.delete(id);
       setSchedHints((prev) => [
         ...prev,
-        `已创建定时消息：${formatScheduledTime(schedAt.toISOString())} 发送「${summarizeScheduledPrompt(rawPrompt)}」`,
+        `已创建定时消息：${formatScheduledTime(schedAt.toISOString())} 发送「${
+          rawPrompt
+            ? summarizeScheduledPrompt(rawPrompt)
+            : `附件 ×${attachmentIds.length}`
+        }」`,
       ]);
       setSchedRefresh((n) => n + 1);
       notify.success("已创建定时消息");
@@ -2448,10 +2468,12 @@ export function SessionPanelDialog(props: SessionPanelProps) {
         />
       )}
 
-      {/* task-08（FR-04）：定时发送弹窗（同 page 模式，dialog 侧状态源 view.sessionId）。 */}
+      {/* task-08（FR-04）：定时发送弹窗（同 page 模式，dialog 侧状态源 view.sessionId）。
+          2026-10-27-scheduled-send-attachments：传待发附件做预览 + 空文本豁免判定。 */}
       <ScheduledSendModal
         open={schedOpen}
         draft={input}
+        attachments={pendingAttachments.map((a) => ({ id: a.id, kind: a.kind, name: a.name }))}
         value={schedAt}
         submitting={schedSubmitting}
         onChange={setSchedAt}

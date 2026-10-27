@@ -6,7 +6,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } fro
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import dayjs, { type Dayjs } from "dayjs";
 import {
-  Ban, Bot, ClipboardList, FolderOpen, Info, ListOrdered, Lock, Monitor, MoreHorizontal, PauseCircle,
+  Ban, Bot, ClipboardList, FileText, FolderOpen, Info, ListOrdered, ListTodo, Lock, Monitor, MoreHorizontal, PauseCircle,
   Puzzle, Search, TriangleAlert, X, Zap,
 } from "lucide-react";
 import { Badge, Button, Drawer, Input, Spin } from "antd";
@@ -1028,23 +1028,44 @@ export function SessionPanelPage({
   const confirmSchedCreate = useCallback(async () => {
     const sid = sessionId;
     const rawPrompt = input.trim();
+    // 2026-10-27-scheduled-send-attachments FR-01：随定时消息携带的附件 id——
+    // 此前缺口：创建只组装 prompt+dispatch_at，已上传附件被静默丢弃（后端
+    // ScheduledMessageCreateRequest.attachment_ids 与到点派发重放链路既有支持）。
+    // 与 dialog 模式口径逐字对齐（两处 confirmSchedCreate 成对复制维护）。
+    const attachmentIds = pendingAttachments.map((a) => a.id);
     // task-04（D-003）：定时路径同样置换引用 token；摘要/清空比对用原文。
     const prompt = substituteWsRefsForSend(
       substituteAttRefsForSend(rawPrompt, attTokenMap, pendingAttachments),
       wsRefTokens,
     );
-    if (!sid || !schedAt || !rawPrompt || schedSubmitting) return;
+    // FR-04：空文本+附件豁免可创建（对齐普通发送 D-7 看图说话，后端校验一
+    // 同口径）；空文本且无附件仍早退（弹窗确认按钮已禁用，此处兜底）。
+    if (!sid || !schedAt || schedSubmitting) return;
+    if (!rawPrompt && attachmentIds.length === 0) return;
     setSchedSubmitting(true);
     try {
       await createScheduledMessage(sid, {
         prompt,
         dispatch_at: schedAt.toISOString(),
+        // 非空才带——无附件保持既有请求形态逐字节一致（零回归）。
+        ...(attachmentIds.length > 0 ? { attachment_ids: attachmentIds } : {}),
       });
       setSchedOpen(false);
       setInput((prev) => (prev.trim() === rawPrompt ? "" : prev));
+      // FR-02：创建成功清附件（onSendSettled 同口径——按 id 精确过滤 chips、
+      // 调输入栏清空句柄、逐 id 删元数据镜像），防残留误导重复发送。
+      setPendingAttachments((prev) =>
+        attachmentIds.length === 0 ? prev : prev.filter((a) => !attachmentIds.includes(a.id)),
+      );
+      if (attachmentIds.length > 0) clearAttachmentsRef.current?.();
+      for (const id of attachmentIds) attachmentMetaRef.current.delete(id);
       setSchedHints((prev) => [
         ...prev,
-        `已创建定时消息：${formatScheduledTime(schedAt.toISOString())} 发送「${summarizeScheduledPrompt(rawPrompt)}」`,
+        `已创建定时消息：${formatScheduledTime(schedAt.toISOString())} 发送「${
+          rawPrompt
+            ? summarizeScheduledPrompt(rawPrompt)
+            : `附件 ×${attachmentIds.length}`
+        }」`,
       ]);
       setSchedRefresh((n) => n + 1);
       notify.success("已创建定时消息");
@@ -1274,6 +1295,14 @@ export function SessionPanelPage({
   // task-14（design §5.4）：mobile 头部 ⋯ 菜单开关（次要 chrome 收纳容器）。
   // hook 无条件声明（desktop 渲染层不读它），variant 保持在渲染层。
   const [mobileMoreOpen, setMobileMoreOpen] = useState(false);
+  // 2026-10-27-mobile-chat-visual-round2（用户反馈「顶部执行信息+本地 agent
+  // 隐藏，参考 PC 端收进按钮」）：mobile 两面板默认不渲染，⋯ 菜单开关控制——
+  // 开才挂载（对齐 ql-20260915-011 用量收纳先例：开才取数数据恒新鲜）。
+  // TaskExecutionPanel 数据自恢复：任务行来自 useSessionTasks 快照轮询 +
+  // runningTasks 内存态 props，重开即拉；关面板期间 SSE 事件经 taskPanelRef
+  // 注入跳过（ref=null），快照轮询兜底不丢终态。
+  const [mobileExecPanelOpen, setMobileExecPanelOpen] = useState(false);
+  const [mobileAgentLogOpen, setMobileAgentLogOpen] = useState(false);
   // task-06（2026-09-08-session-turn-nav / FR-04 / AC-06）：mobile 轮次导航
   // Drawer 开合（⋯ 菜单「轮次导航」项触发；点击行选中即关）。
   const [turnNavOpen, setTurnNavOpen] = useState(false);
@@ -5801,6 +5830,29 @@ export function SessionPanelPage({
                       <ListOrdered aria-hidden className="h-3.5 w-3.5" />
                       轮次导航
                     </button>
+                    {/* visual-round2（用户反馈「顶部执行信息+本地 agent 隐藏，收进
+                        按钮点击再显示」）：两面板 mobile 开关——开即挂载（数据自
+                        恢复：快照轮询+内存态，见 state 声明处注释）。 */}
+                    <button
+                      type="button"
+                      aria-pressed={mobileExecPanelOpen}
+                      data-testid="session-mobile-exec-toggle"
+                      onClick={() => setMobileExecPanelOpen((v) => !v)}
+                      className="flex w-full shrink-0 cursor-pointer items-center gap-2 rounded px-1 py-1 text-[11px] text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+                    >
+                      <ListTodo aria-hidden className="h-3.5 w-3.5" />
+                      执行信息{mobileExecPanelOpen ? "（开）" : ""}
+                    </button>
+                    <button
+                      type="button"
+                      aria-pressed={mobileAgentLogOpen}
+                      data-testid="session-mobile-agentlog-toggle"
+                      onClick={() => setMobileAgentLogOpen((v) => !v)}
+                      className="flex w-full shrink-0 cursor-pointer items-center gap-2 rounded px-1 py-1 text-[11px] text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+                    >
+                      <FileText aria-hidden className="h-3.5 w-3.5" />
+                      本地 Agent 日志{mobileAgentLogOpen ? "（开）" : ""}
+                    </button>
                     <ActivityCatalog
                       bashProgress={bashProgress}
                       agentTasks={agentTasks}
@@ -5989,7 +6041,9 @@ export function SessionPanelPage({
           点击展开明细，不再挤占聊天窗口（同 ql-20260826-010 后台目录收纳
           动机）。无上报时组件返回 null 不占位；纯 tool_report 主体
           （AgentReplayBody 即会话主体）不重复挂载。 */}
-      {!isToolReportBody && (
+      {/* visual-round2：mobile 默认不挂（⋯ 菜单「本地 Agent 日志」开关控制），
+          desktop 照旧常驻折叠栏。 */}
+      {!isToolReportBody && (!mobile || mobileAgentLogOpen) && (
         <AgentLogCard sessionId={session.id} mobile={mobile} />
       )}
 
@@ -6001,7 +6055,10 @@ export function SessionPanelPage({
           同源（agentTasks / bashProgress / teamMissions 既有内存态，不新建
           state / SSE）；实时事件经 taskPanelRef 由上方 onAgentTaskStatus
           分发注入——desktop 迁移后 ref 仍指向同一组件实例，注入链路不变。 */}
-      {mobile && (
+      {/* visual-round2：mobile 默认不挂（⋯ 菜单「执行信息」开关控制——用户反馈
+          顶部执行信息常驻占位大；开即挂载，任务行经快照轮询自恢复）。desktop
+          挂载点在右列 detailColumn（5508），不受本门控影响。 */}
+      {mobile && mobileExecPanelOpen && (
         <TaskExecutionPanel
           ref={taskPanelRef}
           mobile={mobile}
@@ -6520,10 +6577,12 @@ export function SessionPanelPage({
         />
       )}
 
-      {/* task-08（FR-04）：定时发送弹窗（⏰ 入口打开；确认走 confirmSchedCreate）。 */}
+      {/* task-08（FR-04）：定时发送弹窗（⏰ 入口打开；确认走 confirmSchedCreate）。
+          2026-10-27-scheduled-send-attachments：传待发附件做预览 + 空文本豁免判定。 */}
       <ScheduledSendModal
         open={schedOpen}
         draft={input}
+        attachments={pendingAttachments.map((a) => ({ id: a.id, kind: a.kind, name: a.name }))}
         value={schedAt}
         submitting={schedSubmitting}
         onChange={setSchedAt}

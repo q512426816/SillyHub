@@ -11,7 +11,7 @@
  */
 
 import dayjs, { type Dayjs } from "dayjs";
-import { Clock } from "lucide-react";
+import { Clock, FileText, Image as ImageIcon } from "lucide-react";
 import { Button, DatePicker, Modal } from "antd";
 
 /**
@@ -55,6 +55,13 @@ interface ScheduledSendModalProps {
   open: boolean;
   /** 当前输入框草稿（内容预览 + 确认按钮空态禁用）。 */
   draft: string;
+  /**
+   * 本次将随定时消息携带的附件（2026-10-27-scheduled-send-attachments FR-03/04）：
+   * 非空时「将发送的内容」区块下渲染附件预览行，且空文本豁免可创建（对齐普通
+   * 发送 D-7 看图说话口径）；不传或空数组 = 行为与既有形态一致（预览不渲染、
+   * 空文本禁用确认）。
+   */
+  attachments?: Array<{ id: string; kind: string; name: string }>;
   /** 选定发送时间（Dayjs 本地时间，分钟级）。 */
   value: Dayjs | null;
   /** 创建请求在途（提交按钮 loading + 防重复）。 */
@@ -65,22 +72,24 @@ interface ScheduledSendModalProps {
 }
 
 /**
- * 定时发送弹窗（原型 .mask/.modal 区块）：说明行 + 草稿预览 + 分钟级 DatePicker
- * （disabledDate 禁选今天之前的日期；≥ now+60s 的精细校验由后端兜底 422 →
- * toast）+ 快捷项 chips（30 分钟后 / 1 小时后 / 明早 9 点）。空草稿禁用确认并
- * 行内提示（后端空 prompt 422 的前端前置拦截，附件豁免口径不适用——定时入口
- * 不携带附件）。
+ * 定时发送弹窗（原型 .mask/.modal 区块）：说明行 + 草稿预览（带附件时附预览
+ * 行）+ 分钟级 DatePicker（disabledDate 禁选今天之前的日期；≥ now+60s 的精细
+ * 校验由后端兜底 422 → toast）+ 快捷项 chips（30 分钟后 / 1 小时后 / 明早 9 点）。
+ * 空草稿且无附件时禁用确认并 行内提示（后端空 prompt 422 的前端前置拦截；
+ * 带附件时空文本豁免——后端 create_scheduled_message 校验一同口径）。
  */
 export function ScheduledSendModal({
   open,
   draft,
+  attachments,
   value,
   submitting,
   onChange,
   onCancel,
   onConfirm,
 }: ScheduledSendModalProps) {
-  const empty = !draft.trim();
+  const pendingAttachments = attachments ?? [];
+  const empty = !draft.trim() && pendingAttachments.length === 0;
   return (
     <Modal
       open={open}
@@ -107,8 +116,32 @@ export function ScheduledSendModal({
       <div className="mt-3 rounded-lg border border-border bg-muted/30 px-3 py-2">
         <div className="text-[11px] text-muted-foreground">将发送的内容</div>
         <div className="mt-1 max-h-32 overflow-y-auto whitespace-pre-wrap break-all text-[13px] leading-5">
-          {draft.trim() ? draft : "（空）"}
+          {draft.trim()
+            ? draft
+            : pendingAttachments.length > 0
+              ? "（空文本，仅发送附件）"
+              : "（空）"}
         </div>
+        {/* 2026-10-27-scheduled-send-attachments FR-03：附件预览行（图标+文件名，
+            与输入栏 chips 同款 image/kind 判定）；无附件不渲染不占位。 */}
+        {pendingAttachments.length > 0 && (
+          <div className="mt-2 space-y-1 border-t border-border/60 pt-2">
+            {pendingAttachments.map((att) => (
+              <div
+                key={att.id}
+                className="flex items-center gap-1.5 text-[12px] leading-4"
+                data-testid="scheduled-attachment-preview"
+              >
+                {att.kind === "image" ? (
+                  <ImageIcon aria-hidden className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+                ) : (
+                  <FileText aria-hidden className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+                )}
+                <span className="break-all">{att.name}</span>
+              </div>
+            ))}
+          </div>
+        )}
       </div>
       <div className="mt-3">
         <DatePicker
