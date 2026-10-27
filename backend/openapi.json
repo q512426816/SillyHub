@@ -35975,6 +35975,49 @@
         }
       }
     },
+    "/api/changes/-/hits-sync": {
+      "post": {
+        "tags": [
+          "platform-sync",
+          "platform-sync"
+        ],
+        "summary": "Push Knowledge Hits Cli",
+        "description": "POST 知识命中遥测 CLI 直报（2026-10-28-knowledge-hits-cli-direct FR-01/02）。\n\nCLI 写完本地 ``.runtime/state/knowledge-hits.jsonl`` 后的增量直报主通道\n（daemon 上行 / flush 按钮为兜底——行 sha256 幂等使多通道并存重报零重复，\n承 2026-10-27-knowledge-hits-flush-button D-001 三通道并存裁决）。CLI 只持有\nshpsync_ 同步令牌（workspace 编在令牌里、无显式 id 可传），故鉴权同\nspec-sync（``require_platform_sync_write``，仅 shpsync_——四轨分轨铁律，\nJWT/shk_live_ 凭据有效也 403）；workspace 从令牌派生，无归属 403\nfail-closed。请求/响应 schema 与 ``POST /knowledge/hits/batch``（daemon\n通道）完全同构，落库复用 ``HitsService.ingest_batch``——双通道行为零分叉、\nUSAGE_TYPES 聚合同源；``daemon_local_id`` 原样落库（CLI 传 ``cli-<user>``\n形态与 daemon 实例 id 可区分，数据层留通道归属）。\n\n路由顺序硬约束（R-06 同款）：本字面量 ``-`` 段路由必须注册在\n``/changes/{name}/...`` 参数路由之前——留在字面量端点块内，勿挪文件尾。",
+        "operationId": "push_knowledge_hits_cli_api_changes___hits_sync_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/HitsBatchIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HitsBatchOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/changes/-/spec-bundle": {
       "get": {
         "tags": [

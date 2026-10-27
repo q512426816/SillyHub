@@ -47,6 +47,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.db import get_session
 from app.modules.auth.model import User
+
+# 2026-10-28-knowledge-hits-cli-direct：CLI 直报接收端点的请求/响应 schema 复用
+# knowledge 模块（与 daemon 通道 POST /knowledge/hits/batch 完全同构）。knowledge
+# 模块对 platform_sync 无反向依赖，模块级 import 无环。
+from app.modules.knowledge.schema import HitsBatchIn, HitsBatchOut
 from app.modules.platform_sync.auth import (
     PlatformSyncAuthScope,
     require_platform_sync,
@@ -279,6 +284,43 @@ async def push_spec_sync(
         server_versions=result["server_versions"],
         # 审计 A6：透出被平台墓碑拒绝的路径列表（CLI 区分墓碑拒绝与版本冲突）
         platform_deleted=result["platform_deleted"],
+    )
+
+
+@router.post("/changes/-/hits-sync", response_model=HitsBatchOut)
+async def push_knowledge_hits_cli(
+    body: HitsBatchIn,
+    session: Annotated[AsyncSession, Depends(get_session)],
+    auth: _write_auth,
+) -> HitsBatchOut:
+    """POST 知识命中遥测 CLI 直报（2026-10-28-knowledge-hits-cli-direct FR-01/02）。
+
+    CLI 写完本地 ``.runtime/state/knowledge-hits.jsonl`` 后的增量直报主通道
+    （daemon 上行 / flush 按钮为兜底——行 sha256 幂等使多通道并存重报零重复，
+    承 2026-10-27-knowledge-hits-flush-button D-001 三通道并存裁决）。CLI 只持有
+    shpsync_ 同步令牌（workspace 编在令牌里、无显式 id 可传），故鉴权同
+    spec-sync（``require_platform_sync_write``，仅 shpsync_——四轨分轨铁律，
+    JWT/shk_live_ 凭据有效也 403）；workspace 从令牌派生，无归属 403
+    fail-closed。请求/响应 schema 与 ``POST /knowledge/hits/batch``（daemon
+    通道）完全同构，落库复用 ``HitsService.ingest_batch``——双通道行为零分叉、
+    USAGE_TYPES 聚合同源；``daemon_local_id`` 原样落库（CLI 传 ``cli-<user>``
+    形态与 daemon 实例 id 可区分，数据层留通道归属）。
+
+    路由顺序硬约束（R-06 同款）：本字面量 ``-`` 段路由必须注册在
+    ``/changes/{name}/...`` 参数路由之前——留在字面量端点块内，勿挪文件尾。
+    """
+    from app.modules.knowledge.hits import HitsService  # service 层懒导入防环惯例
+
+    _user, scope = auth
+    if scope.workspace_id is None:
+        # 防御：require_platform_sync_write 的 shpsync_ 通道恒派生 workspace；到达此
+        # 分支即凭据形态异常，403 关闭通道（fail-closed，对齐 spec-sync 同款分支）。
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="缺少工作区归属")
+    service = HitsService(session)
+    return await service.ingest_batch(
+        scope.workspace_id,
+        body.lines,
+        daemon_local_id=body.daemon_local_id,
     )
 
 

@@ -12335,6 +12335,40 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/changes/-/hits-sync": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Push Knowledge Hits Cli
+         * @description POST 知识命中遥测 CLI 直报（2026-10-28-knowledge-hits-cli-direct FR-01/02）。
+         *
+         *     CLI 写完本地 ``.runtime/state/knowledge-hits.jsonl`` 后的增量直报主通道
+         *     （daemon 上行 / flush 按钮为兜底——行 sha256 幂等使多通道并存重报零重复，
+         *     承 2026-10-27-knowledge-hits-flush-button D-001 三通道并存裁决）。CLI 只持有
+         *     shpsync_ 同步令牌（workspace 编在令牌里、无显式 id 可传），故鉴权同
+         *     spec-sync（``require_platform_sync_write``，仅 shpsync_——四轨分轨铁律，
+         *     JWT/shk_live_ 凭据有效也 403）；workspace 从令牌派生，无归属 403
+         *     fail-closed。请求/响应 schema 与 ``POST /knowledge/hits/batch``（daemon
+         *     通道）完全同构，落库复用 ``HitsService.ingest_batch``——双通道行为零分叉、
+         *     USAGE_TYPES 聚合同源；``daemon_local_id`` 原样落库（CLI 传 ``cli-<user>``
+         *     形态与 daemon 实例 id 可区分，数据层留通道归属）。
+         *
+         *     路由顺序硬约束（R-06 同款）：本字面量 ``-`` 段路由必须注册在
+         *     ``/changes/{name}/...`` 参数路由之前——留在字面量端点块内，勿挪文件尾。
+         */
+        post: operations["push_knowledge_hits_cli_api_changes___hits_sync_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/changes/-/spec-bundle": {
         parameters: {
             query?: never;
@@ -52555,6 +52589,39 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["app__modules__platform_sync__schema__SpecSyncResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    push_knowledge_hits_cli_api_changes___hits_sync_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["HitsBatchIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HitsBatchOut"];
                 };
             };
             /** @description Validation Error */
