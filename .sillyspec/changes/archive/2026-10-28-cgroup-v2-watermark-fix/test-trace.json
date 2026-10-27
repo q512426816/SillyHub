@@ -1,0 +1,51 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-28-cgroup-v2-watermark-fix",
+  "rows": [
+    {
+      "anchor": "FR-01",
+      "row_id": "2026-10-28-cgroup-v2-watermark-fix:flow:测试绑定FR-01",
+      "tests": [
+        "backend/app/modules/spec_workspace/tests/test_memory_watermark.py「test_v2_limit_read_returns_ratio」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-28-cgroup-v2-watermark-fix"
+    },
+    {
+      "anchor": "FR-02",
+      "row_id": "2026-10-28-cgroup-v2-watermark-fix:flow:测试绑定FR-02",
+      "tests": [
+        "backend/app/modules/spec_workspace/tests/test_memory_watermark.py「test_v2_max_literal_skips_watermark」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-28-cgroup-v2-watermark-fix"
+    },
+    {
+      "anchor": "FR-03",
+      "row_id": "2026-10-28-cgroup-v2-watermark-fix:flow:测试绑定FR-03",
+      "tests": [
+        "backend/app/modules/spec_workspace/tests/test_memory_watermark.py「test_v2_ratio_above_threshold_warns」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-28-cgroup-v2-watermark-fix"
+    }
+  ]
+}

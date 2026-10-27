@@ -1,0 +1,83 @@
+{
+  "change": "2026-10-28-cgroup-v2-watermark-fix",
+  "baseline": "e110c991d2524f91f68c52b32d8a8f6015138434",
+  "head": "19b14831150ba84a4e522925f5223fe05507323e",
+  "files": [
+    "backend/app/modules/spec_workspace/drift_probe.py",
+    "backend/app/modules/spec_workspace/tests/test_memory_watermark.py"
+  ],
+  "totals": {
+    "files": 2,
+    "additions": 98,
+    "deletions": 2
+  },
+  "savedAt": "2026-10-27T23:40:06.407Z",
+  "note": "flow done 时点冻结（本变更可归属交付面：baseline..HEAD 提交面过滤 .sillyspec/ 只留 .sillyspec/docs/ 交付文档 + 独占树未提交交付；治理工件目录不入冻结——2026-10-12-close-trace-freeze-integrity FR-01）",
+  "modules": [
+    {
+      "id": "spec_workspace",
+      "files": 2,
+      "doc": "docs/backend/modules/spec_workspace.md",
+      "docTouched": false,
+      "docMissing": false
+    },
+    {
+      "id": "backend",
+      "files": 2,
+      "doc": "docs/multi-agent-platform/modules/backend.md",
+      "docTouched": false,
+      "docMissing": false
+    },
+    {
+      "id": "spec_workspace",
+      "files": 2,
+      "doc": "docs/SillyHub/modules/spec_workspace.md",
+      "docTouched": false,
+      "docMissing": false
+    }
+  ],
+  "uncoveredDirs": [],
+  "moduleMaps": [
+    "docs/backend/modules/_module-map.yaml",
+    "docs/frontend/modules/_module-map.yaml",
+    "docs/multi-agent-platform/modules/_module-map.yaml",
+    "docs/SillyHub/modules/_module-map.yaml",
+    "docs/sillyhub-daemon/modules/_module-map.yaml"
+  ],
+  "scopeAudit": {
+    "mode": "full-flow",
+    "ok": true,
+    "degradedReason": null,
+    "baseAnchor": "e110c991d2524f91f68c52b32d8a8f6015138434",
+    "totals": {
+      "files": 2,
+      "additions": 98,
+      "deletions": 2
+    },
+    "rows": [
+      {
+        "path": "backend/app/modules/spec_workspace/drift_probe.py",
+        "additions": 6,
+        "deletions": 2,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "planned"
+      },
+      {
+        "path": "backend/app/modules/spec_workspace/tests/test_memory_watermark.py",
+        "additions": 92,
+        "deletions": 0,
+        "kind": "new",
+        "planned": null,
+        "verdict": "planned"
+      }
+    ],
+    "excluded": {
+      "foreignDeclared": []
+    },
+    "note": "flow done 时点冻结（本文件落盘时采集）",
+    "closedBy": "flow done"
+  },
+  "patchSha256": "508749512e6b7195527991240052a7fa134b97c21b2addba076345db1451f47d",
+  "patchStatus": "ok"
+}

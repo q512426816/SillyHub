@@ -263,3 +263,4 @@
 - components-mobile → [fr/components-mobile.md](fr/components-mobile.md)
 - app-mobile-pages → [fr/app-mobile-pages.md](fr/app-mobile-pages.md)
 - task → [fr/task.md](fr/task.md)
+- spec_workspace → [fr/spec_workspace.md](fr/spec_workspace.md)
