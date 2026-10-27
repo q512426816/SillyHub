@@ -31,7 +31,6 @@ import { readFile, mkdir } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
 import { createHash } from 'node:crypto';
 import { join, dirname } from 'node:path';
-import type { HubClient } from './hub-client.js';
 import { daemonStateDir } from './config.js';
 import { writeFileAtomic } from './atomic-write.js';
 
@@ -187,12 +186,14 @@ export function splitCompleteLines(raw: string): string[] {
  * **不抛**（同步主流程不受影响，R-05）；offset 只在批成功后前进，失败批下轮重试，
  * 服务端 (workspace_id, line_hash) 去重兜底幂等（D-007）。
  *
- * @param client  HubClient（或 duck-type 最小替身；缺 postKnowledgeHitsBatch 即 no-op）
+ * @param client  HubClient 或 duck-type 替身（2026-10-27-knowledge-hits-flush-button：
+ *                签名放宽为 unknown——daemon 持 ClientLike、测试注入最小替身，本函数
+ *                只探测 postKnowledgeHitsBatch 存在性，从不依赖 HubClient 完整面）
  * @param wsId    workspace id（同时是状态文件名段；含路径分隔符时防御性拒绝）
  * @param specDir 本地 spec 目录（resolveSpecDir(wsId)；repo-native junction 同样适用）
  */
 export async function uploadKnowledgeHitsIfNeeded(
-  client: HubClient,
+  client: unknown,
   wsId: string,
   specDir: string,
 ): Promise<boolean> {

@@ -233,6 +233,7 @@ import { isValidPlatformLevel } from './interactive/thinking-levels.js';
 // instanceof 分支用，value import）。
 import { SessionBusyError } from './interactive/types.js';
 import { KnowledgeHitsPeriodicUploader } from './knowledge-hits-periodic.js';
+import { uploadKnowledgeHitsIfNeeded } from './knowledge-hits-upload.js';
 // 2026-10-20-session-page-dsh-alignment task-09（1b）：快照上报带 daemon 版本
 //（侧表 daemon_version 列 / 发版门控读侧，单一来源 package.json → daemon-version）。
 import { DAEMON_VERSION } from './daemon-version.js';
@@ -2207,6 +2208,15 @@ export class Daemon {
     string,
     { inFlight: true } | { inFlight: false; ts: number }
   >();
+
+  /**
+   * sillyspec_hits_flush in-flight 去重（2026-10-27-knowledge-hits-flush-button
+   * task-02）：workspaceId → 执行中标记。flush 是显式用户动作（变更详情页按钮），
+   * 只防并发重入（执行中的重复请求秒回 ok=true, reason='in_flight'）、不做 TTL
+   * 防抖（对齐 _syncChangeDebounce 的 inFlight 语义，但无 done 态——上行幂等
+   * 由服务端行 hash 去重兜底，重复触发零成本）。进程内存态，daemon 重启清零。
+   */
+  private readonly _hitsFlushInFlight = new Set<string>();
   /** liveness tailer（10s tick；独立 try 包裹，R-02 崩溃不影响主循环）。 */
   private _livenessTailer: LivenessTailer | null = null;
   /**
@@ -7961,6 +7971,68 @@ export class Daemon {
       }
       return this._runSyncChangeWithDebounce(change, workspaceId);
     });
+    // 2026-10-27-knowledge-hits-flush-button task-02：知识遥测按需补数——backend
+    // 变更详情页「同步变更」按钮触发（POST /changes/{id}/hits-sync → send_rpc）。
+    // 直接调上行器对该工作区强制跑一轮增量上行（上行器本身无短路——mtime 短路在
+    // 周期器 stamp 层，flush 天然绕过）；读路径 state/ 新路径优先（task-01）。
+    // 参数守卫在本入口（UUID 形态，sillyspec_sync_change 同款），并发重入去重在
+    // _runHitsFlush（in-flight 秒回，上行幂等由服务端行 hash 去重兜底）。
+    ws.registerRpcHandler('sillyspec_hits_flush', async (params) => {
+      const workspaceId =
+        typeof params.workspace_id === 'string' ? params.workspace_id : '';
+      if (!isWorkspaceIdShape(workspaceId)) {
+        throw new RpcError('invalid_params', 'workspace_id 必须为合法 UUID 形态');
+      }
+      return this._runHitsFlush(workspaceId);
+    });
+  }
+
+  /**
+   * sillyspec_hits_flush 执行体（2026-10-27-knowledge-hits-flush-button task-02）：
+   * in-flight 去重 + 调上行器强制上行一轮，回执 `{ok, reason?}`。
+   * 上行器自身全程 try/catch 不抛（best-effort R-05，失败回 false）——回执把
+   * false 转成 `ok:false, reason:'upload_failed'`（endpoint 失败细节已由上行器
+   * warn 落日志）；catch 层仅防御意外异常路径，不向 RPC 层抛（backend 降级铁律
+   * 期望结构化回执而非远端错误）。flush 全量增量而非按变更过滤行——行级幂等使
+   * 多余行零成本，效果覆盖触发按钮的变更。
+   */
+  private async _runHitsFlush(
+    workspaceId: string,
+  ): Promise<{ ok: boolean; reason?: string }> {
+    if (this._hitsFlushInFlight.has(workspaceId)) {
+      this._logger.info('sillyspec_hits_flush_skipped', {
+        workspace_id: workspaceId,
+        skipped: 'in_flight',
+      });
+      return { ok: true, reason: 'in_flight' };
+    }
+    this._hitsFlushInFlight.add(workspaceId);
+    try {
+      const ok = await uploadKnowledgeHitsIfNeeded(
+        this._client,
+        workspaceId,
+        resolveSpecDir(workspaceId),
+      );
+      if (!ok) {
+        this._logger.warn('sillyspec_hits_flush_failed', {
+          workspace_id: workspaceId,
+        });
+        return { ok: false, reason: 'upload_failed' };
+      }
+      this._logger.info('sillyspec_hits_flush_done', {
+        workspace_id: workspaceId,
+      });
+      return { ok: true };
+    } catch (e) {
+      // 防御性兜底（预期不达此层）：意外异常也转结构化回执，不向 RPC 层抛。
+      this._logger.warn('sillyspec_hits_flush_error', {
+        workspace_id: workspaceId,
+        error: String(e),
+      });
+      return { ok: false, reason: 'upload_failed' };
+    } finally {
+      this._hitsFlushInFlight.delete(workspaceId);
+    }
   }
 
   /**
