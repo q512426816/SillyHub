@@ -1948,3 +1948,60 @@ created_at: 2026-10-16T01:30:35.950Z
 - 场景：主路径 — Given 变更收口 / When 检查 git diff 文件清单 / Then 改动仅限 frontend 四文件。
 全文：.sillyspec/changes/archive/2026-10-27-turn-phase-stall-honest-ui/requirements.md#FR-04
 最近确认：49fec81cd184c7617a6de53856c9e13391a63c64
+
+## FR-test-utils-103 sessions-portal-panes 容器 className 删除 gap-3（其余类 flex min-h-0 flex-1 overflow-hidden 保持）
+变更：2026-10-27-sessions-panes-gap-remove
+状态：active
+摘要：主路径
+全文：.sillyspec/changes/archive/2026-10-27-sessions-panes-gap-remove/requirements.md#FR-01
+最近确认：9b33461733ece7d17dd5becad05889d0bf9f9012
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-27-sessions-panes-gap-remove:flow:测试绑定FR-01
+  tests: frontend/src/components/sessions/__tests__/sessions-portal.test.tsx「panes 容器类名断言（gap-3 移除后 flex min-h-0 flex-1 overflow-hidden）」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-27-sessions-panes-gap-remove
+  status: active
+
+## FR-test-utils-104 左把手/右把手（PanelResizer）渲染与拖拽功能零回归（自身 w-1.5 在场）
+变更：2026-10-27-sessions-panes-gap-remove
+状态：active
+摘要：主路径
+全文：.sillyspec/changes/archive/2026-10-27-sessions-panes-gap-remove/requirements.md#FR-02
+最近确认：9b33461733ece7d17dd5becad05889d0bf9f9012
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-27-sessions-panes-gap-remove:flow:测试绑定FR-02
+  tests: frontend/src/components/sessions/__tests__/sessions-portal.test.tsx
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-27-sessions-panes-gap-remove
+  status: active
+
+## FR-test-utils-105 sessions-portal 相关测试与 lint 通过
+变更：2026-10-27-sessions-panes-gap-remove
+状态：active
+摘要：主路径
+全文：.sillyspec/changes/archive/2026-10-27-sessions-panes-gap-remove/requirements.md#FR-03
+最近确认：9b33461733ece7d17dd5becad05889d0bf9f9012
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-27-sessions-panes-gap-remove:flow:测试绑定FR-03
+  tests: frontend/src/components/sessions/__tests__/sessions-portal.test.tsx
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-27-sessions-panes-gap-remove
+  status: active

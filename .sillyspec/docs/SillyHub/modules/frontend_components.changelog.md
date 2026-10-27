@@ -180,3 +180,4 @@ created_at: 2026-08-30 22:23:33
 | 2026-10-27 | 2026-10-27-archive-reparse-oom-governance | 2026-10-27-archive-reparse-oom-governance |
 | 2026-10-27 | 2026-10-27-mobile-chat-visual-round4 | 用户四轮反馈：子代理卡/进度视图过程块(运行命令等)仍不满宽(8 处 calc(100%-120px… |
 | 2026-10-27 | 2026-10-27-netdata-prod-monitoring | 腾讯云生产机部署 Netdata 秒级监控 |
+| 2026-10-27 | 2026-10-27-sessions-panes-gap-remove | 用户追点：会话页双栏容器 sessions-portal-panes 的 gap-3（栏间横向空隙，… |
