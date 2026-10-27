@@ -46,6 +46,36 @@ describe('notePhaseEmit（成功观测）', () => {
     expect(event).toBe('turn_phase_emit');
     expect(kv).toMatchObject({ point: 'events', phase: 'first_event', run_id: 'r1' });
   });
+
+  // 2026-10-27-task-wakeup-inject-retry FR-05：per(point,session,run) 防重——
+  // session-manager 侧每 envelope 无状态直发（D-013④），TRACE 开启时同 run 记点
+  // 曾随 envelope 数刷 30+ 行（daemon.log 323219-323256 实证）；首记保留断链
+  // 配对能力，同键后续静默。
+  it('同 (point,session,run) 键防重仅首记输出；不同 run 各自首记', () => {
+    process.env.SILLYHUB_TURN_PHASE_TRACE = '1';
+    const log = makeLog();
+    notePhaseEmit('events_first_event', 's1', 'r1', 'first_event', log);
+    notePhaseEmit('events_first_event', 's1', 'r1', 'first_event', log);
+    notePhaseEmit('events_first_event', 's1', 'r1', 'first_event', log);
+    expect(log).toHaveBeenCalledTimes(1);
+    // 不同 run / 不同 point 不受影响（新键首记）。
+    notePhaseEmit('events_first_event', 's1', 'r2', 'first_event', log);
+    notePhaseEmit('daemon_bridge_first_event', 's1', 'r1', 'first_event', log);
+    expect(log).toHaveBeenCalledTimes(3);
+  });
+
+  it('有界：超 512 键逐出最旧（被逐键可再记）', () => {
+    process.env.SILLYHUB_TURN_PHASE_TRACE = '1';
+    const log = makeLog();
+    for (let i = 0; i < 512; i++) {
+      notePhaseEmit('p', `s${i}`, 'r', 'first_event', log);
+    }
+    expect(log).toHaveBeenCalledTimes(512);
+    notePhaseEmit('p', 's0', 'r', 'first_event', log); // 已在集合 → 静默
+    expect(log).toHaveBeenCalledTimes(512);
+    notePhaseEmit('p', 's_new', 'r', 'first_event', log); // 逐出 s0 后新键入集
+    expect(log).toHaveBeenCalledTimes(513);
+  });
 });
 
 describe('warnOncePhaseFailure（失败首警去重）', () => {

@@ -1059,6 +1059,138 @@ describe('task 终态注入唤醒（2026-10-21-task-wakeup-restore）', () => {
       vi.useRealTimers();
     }
   });
+
+  // ── 2026-10-27-task-wakeup-inject-retry：注入单发即弃改退避重试 ────────────
+
+  /** 重试用便捷包装：注入回调 + console warn/error 静默间谍。 */
+  function withRetrySpies(): {
+    warnSpy: ReturnType<typeof vi.spyOn>;
+    errSpy: ReturnType<typeof vi.spyOn>;
+  } {
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const errSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    return { warnSpy, errSpy };
+  }
+
+  it('FR-01（retry）：首败（504 形态）后按退避计划重试至成功，恰两次注入后不再调度', async () => {
+    vi.useFakeTimers();
+    const { warnSpy, errSpy } = withRetrySpies();
+    try {
+      const { depsExtra, wakeup } = withWakeupDeps();
+      // e132e9bf 实证形态：首次注入撞 HTTP 504 DAEMON_RUNTIME_OFFLINE。
+      wakeup.mockRejectedValueOnce(
+        new Error('HTTP 504 POST https://crrcdt.ppdmq.top/api/daemon/sessions/x/inject: DAEMON_RUNTIME_OFFLINE'),
+      );
+      const h = await createHarness('sess-wr1', 'run-wr1', depsExtra);
+      await h.emitMessage(msgTaskNotification({ taskId: 'task-r1', status: 'completed', summary: '后台完成', durationMs: 61000 }));
+      // 2s debounce → 首发（失败，warn 记点 + 排 5s 退避）。
+      await vi.advanceTimersByTimeAsync(3000);
+      expect(wakeup).toHaveBeenCalledTimes(1);
+      const retryLog = warnSpy.mock.calls.find((c) => String(c[0]).includes('retry scheduled'));
+      expect(retryLog).toBeDefined();
+      expect(retryLog![1]).toMatchObject({ sessionId: 'sess-wr1', attempt: 1, next_retry_in_ms: 5000 });
+      // 5s 后第二次注入成功（store 会话仍在）→ 链终止。
+      await vi.advanceTimersByTimeAsync(5000);
+      expect(wakeup).toHaveBeenCalledTimes(2);
+      // 再前进 60s 无第三次调度（成功即止）。
+      await vi.advanceTimersByTimeAsync(60_000);
+      expect(wakeup).toHaveBeenCalledTimes(2);
+      expect(errSpy).not.toHaveBeenCalled();
+    } finally {
+      warnSpy.mockRestore();
+      errSpy.mockRestore();
+      vi.useRealTimers();
+    }
+  });
+
+  it('FR-01（retry）：恒败全重试耗尽——恰 7 次调用（首发+6 档）后 error 留痕放弃', async () => {
+    vi.useFakeTimers();
+    const { warnSpy, errSpy } = withRetrySpies();
+    try {
+      const { depsExtra, wakeup } = withWakeupDeps();
+      wakeup.mockRejectedValue(new Error('HTTP 502 Bad Gateway'));
+      const h = await createHarness('sess-wr2', 'run-wr2', depsExtra);
+      await h.emitMessage(msgTaskNotification({ taskId: 'task-r2', status: 'completed', summary: '后台完成', durationMs: 61000 }));
+      // 走完全部退避档：2s debounce + 5+15+30+60+120+300=530s。
+      await vi.advanceTimersByTimeAsync(3000);
+      await vi.advanceTimersByTimeAsync(5_000);
+      await vi.advanceTimersByTimeAsync(15_000);
+      await vi.advanceTimersByTimeAsync(30_000);
+      await vi.advanceTimersByTimeAsync(60_000);
+      await vi.advanceTimersByTimeAsync(120_000);
+      await vi.advanceTimersByTimeAsync(300_000);
+      expect(wakeup).toHaveBeenCalledTimes(7);
+      const exhaustLog = errSpy.mock.calls.find((c) => String(c[0]).includes('retries exhausted'));
+      expect(exhaustLog).toBeDefined();
+      expect(exhaustLog![1]).toMatchObject({ sessionId: 'sess-wr2', attempts: 7 });
+      // 耗尽后不再调度。
+      await vi.advanceTimersByTimeAsync(600_000);
+      expect(wakeup).toHaveBeenCalledTimes(7);
+      // 期间每档失败都有 warn 记点（6 档重试排程日志）。
+      expect(warnSpy.mock.calls.filter((c) => String(c[0]).includes('retry scheduled'))).toHaveLength(6);
+    } finally {
+      warnSpy.mockRestore();
+      errSpy.mockRestore();
+      vi.useRealTimers();
+    }
+  });
+
+  it('FR-02（retry）：重试等待期会话终态（store 删除）——退避后中止注入并留日志', async () => {
+    vi.useFakeTimers();
+    const { warnSpy } = withRetrySpies();
+    try {
+      const { depsExtra, wakeup } = withWakeupDeps();
+      wakeup.mockRejectedValueOnce(new Error('HTTP 504 inject'));
+      const h = await createHarness('sess-wr3', 'run-wr3', depsExtra);
+      await h.emitMessage(msgTaskNotification({ taskId: 'task-r3', status: 'completed', summary: '后台完成', durationMs: 61000 }));
+      await vi.advanceTimersByTimeAsync(3000);
+      expect(wakeup).toHaveBeenCalledTimes(1);
+      // 模拟会话终态清理路径（lifecycle _store.delete）。
+      (h.sm as unknown as { _store: Map<string, unknown> })._store.delete('sess-wr3');
+      // 5s 退避到点：等待结束发现 store 无条目 → 中止，不发起第二次注入。
+      await vi.advanceTimersByTimeAsync(5000);
+      expect(wakeup).toHaveBeenCalledTimes(1);
+      const abortLog = warnSpy.mock.calls.find((c) => String(c[0]).includes('session gone'));
+      expect(abortLog).toBeDefined();
+      expect(abortLog![1]).toMatchObject({ sessionId: 'sess-wr3', attempts: 1 });
+      await vi.advanceTimersByTimeAsync(600_000);
+      expect(wakeup).toHaveBeenCalledTimes(1);
+    } finally {
+      warnSpy.mockRestore();
+      vi.useRealTimers();
+    }
+  });
+
+  it('FR-03（retry）：SILLYHUB_TASK_WAKEUP_RETRY_DELAYS_MS=0 禁用重试回单发旧行为', async () => {
+    vi.useFakeTimers();
+    const { warnSpy, errSpy } = withRetrySpies();
+    try {
+      const prev = process.env.SILLYHUB_TASK_WAKEUP_RETRY_DELAYS_MS;
+      process.env.SILLYHUB_TASK_WAKEUP_RETRY_DELAYS_MS = '0';
+      try {
+        const { depsExtra, wakeup } = withWakeupDeps();
+        wakeup.mockRejectedValue(new Error('HTTP 504 inject'));
+        const h = await createHarness('sess-wr4', 'run-wr4', depsExtra);
+        await h.emitMessage(msgTaskNotification({ taskId: 'task-r4', status: 'completed', summary: '后台完成', durationMs: 61000 }));
+        await vi.advanceTimersByTimeAsync(3000);
+        // 单发即弃：恰一次调用、无重试排程日志、直接 error 留痕（attempts=1）。
+        expect(wakeup).toHaveBeenCalledTimes(1);
+        expect(warnSpy.mock.calls.filter((c) => String(c[0]).includes('retry scheduled'))).toHaveLength(0);
+        const exhaustLog = errSpy.mock.calls.find((c) => String(c[0]).includes('retries exhausted'));
+        expect(exhaustLog).toBeDefined();
+        expect(exhaustLog![1]).toMatchObject({ attempts: 1 });
+        await vi.advanceTimersByTimeAsync(600_000);
+        expect(wakeup).toHaveBeenCalledTimes(1);
+      } finally {
+        if (prev === undefined) delete process.env.SILLYHUB_TASK_WAKEUP_RETRY_DELAYS_MS;
+        else process.env.SILLYHUB_TASK_WAKEUP_RETRY_DELAYS_MS = prev;
+      }
+    } finally {
+      warnSpy.mockRestore();
+      errSpy.mockRestore();
+      vi.useRealTimers();
+    }
+  });
 });
 
 // ── 2026-10-13-agent-task-stuck-running FR-01：别名条目注销/补发 + 三无 WARN ──
