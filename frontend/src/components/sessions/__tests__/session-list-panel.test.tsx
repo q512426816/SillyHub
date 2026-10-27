@@ -1106,21 +1106,38 @@ describe("SessionListPanel 组头回调与截断", () => {
     });
   });
 
-  it("组内超 50 截断 + 「显示全部」（R-03）", async () => {
+  it("组内默认收敛（最新 10 ∪ 在线全显）+ 「显示全部」（R-03 起 / FR-03）", async () => {
     setWorkspaces([makeWorkspace({ id: "ws-1", name: "SillyHub" })]);
-    const many = Array.from({ length: 60 }, (_, i) =>
-      makeSession({ id: `s-${i}`, workspace_id: "ws-1", title: `批量会话${i}` }),
-    );
+    // 12 条已结束在前 + 5 条在线在后（服务端序）：默认 = 前 10 + 尾部在线
+    // 全显 = 15 行；「显示全部（共 17 条）」展开后全量。
+    const many = [
+      ...Array.from({ length: 12 }, (_, i) =>
+        makeSession({
+          id: `s-e-${i}`,
+          workspace_id: "ws-1",
+          title: `历史会话${i}`,
+          status: "ended",
+        }),
+      ),
+      ...Array.from({ length: 5 }, (_, i) =>
+        makeSession({
+          id: `s-a-${i}`,
+          workspace_id: "ws-1",
+          title: `在线会话${i}`,
+          status: "active",
+        }),
+      ),
+    ];
     mocks.listAgentSessions.mockResolvedValue(listResponse(many));
     renderPanel(<SessionListPanel />);
     await openGroup("SillyHub");
 
-    await waitFor(() => expect(sessionRows().length).toBe(50));
+    await waitFor(() => expect(sessionRows().length).toBe(15));
     const moreBtn = screen.getByRole("button", { name: /显示全部/ });
-    expect(moreBtn.textContent).toContain("共 60 条");
+    expect(moreBtn.textContent).toContain("共 17 条");
 
     fireEvent.click(moreBtn);
-    await waitFor(() => expect(sessionRows().length).toBe(60));
+    await waitFor(() => expect(sessionRows().length).toBe(17));
   });
 });
 
@@ -2442,8 +2459,9 @@ describe("SessionListPanel 分身子会话折叠分组（P3）", () => {
     expect(await screen.findByText("分身甲")).toBeVisible();
 
     // 切状态筛选（filterEpoch 变化）→ openParents 重置 → 折叠回收起。
-    // fixtures 默认 status=active，选「活跃」保持数据可见（纯验证重置副作用）。
-    await chooseAntdOptionByText("slp-status", "活跃");
+    // fixtures 默认 status=active，选「在线」（FR-02 更名+三态口径，active
+    // 命中）保持数据可见（纯验证重置副作用）。
+    await chooseAntdOptionByText("slp-status", "在线");
     await waitFor(() => {
       expect(screen.queryByText("分身甲")).toBeNull();
     });

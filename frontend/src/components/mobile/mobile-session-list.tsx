@@ -16,9 +16,12 @@
  *   AGENT_SESSIONS_TREE_FETCH_LIMIT（daemon.ts 导出），禁止写死。
  *
  * UI（对齐原型会话列表屏）：
- * - 状态 Tab：全部 / 进行中（客户端 status 过滤：非 ended/failed，口径对齐
- *   sessionListPollInterval 的「进行中」判定）/ 已归档（isArchivedView 切 key
- *   自动重拉服务端归档数据）。
+ * - 统计行 + 状态 Tab（2026-10-27-sessions-total-and-status-filter）：
+ *   统计行「会话总数 N 条」与四档 chips（全部/在线/已结束/失败）计数均消费
+ *   服务端 status_counts（忽略状态维度的 scope 全量口径，切档不漂移、不受
+ *   拉取上限截断）；档位过滤走服务端（在线=status_group=ongoing 三态聚合、
+ *   已结束/失败=status 单值，queryKey 第五槽）；已归档视图档保留（服务端
+ *   archived=true）。默认展示收敛：最新 10 条 ∪ 在线全显 + 「显示全部 N 条」。
  * - 机器分组：useDaemonMachines({limit:100})（与桌面树同源同参在线态）；
  *   runtime_id → 机器映射缺席时回退 config_snapshot.machine_name（按离线），
  *   再缺 → 「未知机器」；在线组在前、离线组在后（组内保持首次出现序）。
@@ -144,12 +147,46 @@ function SessionStatusMark({
 }
 
 /**
- * 「进行中」判定（状态 Tab 客户端过滤口径）：非 ended/failed 即视为进行中
- * （聊天/排队/恢复中），逐字对齐 session-list-panel sessionListPollInterval
- * 的 hasOngoing 判定。
+ * 「进行中」判定（2026-10-27-sessions-total-and-status-filter 前为状态 Tab
+ * 客户端过滤口径，现仅用于「在线会话全显豁免」）：非 ended/failed 即视为
+ * 在线（pending/active/reconnecting 三态，与后端 status_group=ongoing、
+ * session-list-panel sessionListPollInterval 的 hasOngoing 判定同口径）。
  */
 function isOngoingSession(s: AgentSessionRead): boolean {
   return s.status !== "ended" && s.status !== "failed";
+}
+
+/**
+ * 服务端 status_counts → 四档 chips 计数（FR-01/FR-02）：全部 = 五态之和，
+ * 在线 = pending+active+reconnecting，已结束/失败单键。缺键按 0 兜底
+ * （后端只返回有命中的态）。
+ */
+function chipsCounts(statusCounts: Record<string, number> | undefined): {
+  all: number;
+  ongoing: number;
+  ended: number;
+  failed: number;
+} {
+  const c = statusCounts ?? {};
+  return {
+    all: Object.values(c).reduce((sum, n) => sum + n, 0),
+    ongoing: (c.pending ?? 0) + (c.active ?? 0) + (c.reconnecting ?? 0),
+    ended: c.ended ?? 0,
+    failed: c.failed ?? 0,
+  };
+}
+
+/**
+ * 默认展示收敛（FR-03）：最新 DEFAULT_VISIBLE 条 ∪ 全部在线会话（在线的
+ * 不管多老都显示），保持服务端返回序（置顶优先 + 最近活跃倒序）。
+ */
+const DEFAULT_VISIBLE = 10;
+
+function defaultVisibleSessions(sessions: AgentSessionRead[]): AgentSessionRead[] {
+  const head = sessions.slice(0, DEFAULT_VISIBLE);
+  const rest = sessions.slice(DEFAULT_VISIBLE);
+  const online = rest.filter(isOngoingSession);
+  return [...head, ...online];
 }
 
 /** 机器显示名（与 session-list-panel machineLabel 同语义：别名优先）。 */
@@ -216,8 +253,10 @@ function engineLabel(s: AgentSessionRead): string {
 
 /* ────────────── 组件 ────────────── */
 
-/** 状态 Tab key（已归档 = isArchivedView 服务端切换；其余客户端过滤）。 */
-export type MobileSessionTabKey = "all" | "ongoing" | "archived";
+/** 状态 Tab key（2026-10-27-sessions-total-and-status-filter FR-02：全部/在线/
+ * 已结束/失败四档服务端过滤——ongoing 走 status_group，ended/failed 走
+ * status 单值；archived = 服务端 archived=true 视图）。 */
+export type MobileSessionTabKey = "all" | "ongoing" | "ended" | "failed" | "archived";
 
 export interface MobileSessionListProps {
   /** 工作区 id（scope + listAgentSessions workspace_id 过滤参）。 */
@@ -237,10 +276,12 @@ export interface MobileSessionListProps {
   onNewGroup?: () => void;
 }
 
-/** 状态 Tab 配置（顺序即渲染顺序，对齐原型 .list-tabs）。 */
+/** 状态 Tab 配置（FR-02 四档 + 已归档视图档；顺序即渲染顺序）。 */
 const SESSION_TABS: { key: MobileSessionTabKey; label: string }[] = [
   { key: "all", label: "全部" },
-  { key: "ongoing", label: "进行中" },
+  { key: "ongoing", label: "在线" },
+  { key: "ended", label: "已结束" },
+  { key: "failed", label: "失败" },
   { key: "archived", label: "已归档" },
 ];
 
@@ -253,17 +294,33 @@ export function MobileSessionList({
 }: MobileSessionListProps) {
   const [tab, setTab] = useState<MobileSessionTabKey>("all");
   const [menuSession, setMenuSession] = useState<AgentSessionRead | null>(null);
+  // FR-03「显示全部」展开态：切档即重置（不留跨档残留展开）。
+  const [showAll, setShowAll] = useState(false);
   const isArchivedView = tab === "archived";
   const queryClient = useQueryClient();
 
   // X-04 / C-08：scope 槽位 + 参数对象槽位逐字对齐桌面（assoc 恒 null——移动
-  // 端无关联筛选；key 变化（archived 翻转）即自动重拉，无需手动 refetch）。
+  // 端无关联筛选；key 变化（档位/archived 翻转）即自动重拉，无需手动 refetch）。
+  // FR-02：状态档走服务端过滤（第五槽 statusFilter 变体——桌面第四槽 key
+  // 形态不变，互不干扰）：ongoing → status_group=ongoing（在线三态聚合）；
+  // ended/failed → status 单值。
   const scope = useMemo(
     () => ({ kind: "workspace" as const, workspaceId }),
     [workspaceId],
   );
+  const statusFilterParam =
+    tab === "ongoing"
+      ? ({ status_group: "ongoing" } as const)
+      : tab === "ended"
+        ? ({ status: "ended" } as const)
+        : tab === "failed"
+          ? ({ status: "failed" } as const)
+          : null;
 
   const sessionsQuery = useQuery<AgentSessionListResponse, ApiError>({
+    // 默认/归档档 key 与桌面门户逐字一致（4 槽，共享缓存不被档位拆散）；
+    // 状态档（在线/已结束/失败）追加第五槽变体——同一前缀下 invalidate
+    // ["agentSessions"] 仍全覆盖。
     queryKey: [
       "agentSessions",
       "sessionsPortal",
@@ -273,6 +330,7 @@ export function MobileSessionList({
         archived: isArchivedView,
         assoc: null,
       },
+      ...(statusFilterParam ? [statusFilterParam] : []),
     ],
     queryFn: () =>
       listAgentSessions({
@@ -281,6 +339,7 @@ export function MobileSessionList({
         // 移动端默认视图保持只看未归档（显式 false），归档 tab 传 true。
         archived: isArchivedView ? true : false,
         workspace_id: workspaceId,
+        ...(statusFilterParam ?? {}),
       }),
   });
 
@@ -331,10 +390,10 @@ export function MobileSessionList({
     return map;
   }, [machines]);
 
-  /** Tab 过滤（全部/进行中客户端按 status；已归档已由服务端 key 切换）→ 机器分组。 */
+  /** 机器分组（FR-02：状态过滤已由服务端完成，直接分组；FR-03：默认展示
+   *  收敛 = 最新 10 条 ∪ 在线全显，「显示全部」展开全量）。 */
   const groups = useMemo<MachineGroup[]>(() => {
-    const visible =
-      tab === "ongoing" ? sessions.filter(isOngoingSession) : sessions;
+    const visible = showAll ? sessions : defaultVisibleSessions(sessions);
     const order: MachineGroup[] = [];
     const byKey = new Map<string, MachineGroup>();
     for (const s of visible) {
@@ -349,7 +408,7 @@ export function MobileSessionList({
     }
     // 在线组在前、离线组在后；Array#sort 稳定（ES2019+）保首次出现序。
     return order.sort((a, b) => Number(b.online) - Number(a.online));
-  }, [sessions, tab, runtimeToMachine]);
+  }, [sessions, showAll, runtimeToMachine]);
 
   // 三操作 mutation：成功后 invalidate ["agentSessions"] 前缀（与门户同前缀，
   // 同时覆盖桌面与移动两份同 key 查询；错误不阻断列表——对齐门户
@@ -412,16 +471,23 @@ export function MobileSessionList({
     },
   ];
 
-  const ongoingCount = useMemo(
-    () => sessions.filter(isOngoingSession).length,
-    [sessions],
+  // FR-01/FR-02：chips 计数单一源——服务端 status_counts（与当前档位/拉取
+  // 条数无关，切档不漂移）；统计行总数同源（归档视图下为归档集分组之和）。
+  const counts = useMemo(
+    () => chipsCounts(sessionsQuery.data?.status_counts),
+    [sessionsQuery.data],
   );
+  const totalCount = counts.all;
 
   const emptyText = isArchivedView
     ? "暂无已归档会话"
     : tab === "ongoing"
-      ? "暂无进行中会话"
-      : "暂无会话";
+      ? "暂无在线会话"
+      : tab === "ended"
+        ? "暂无已结束会话"
+        : tab === "failed"
+          ? "暂无失败会话"
+          : "暂无会话";
 
   return (
     <div
@@ -477,7 +543,17 @@ export function MobileSessionList({
         </section>
       )}
 
-      {/* 状态 Tab（pill 段控，对齐原型 .list-tabs；全部/进行中带计数） */}
+      {/* 统计行（FR-01）：会话总数 = 服务端 status_counts 五态之和（归档视图
+          下为归档集分组之和）——不受单次拉取上限截断，515 条如实显示 515。 */}
+      <p
+        data-testid="mobile-session-total"
+        className="px-1 text-xs text-muted-foreground"
+      >
+        会话总数 {totalCount} 条
+      </p>
+
+      {/* 状态 Tab（pill 段控，FR-02 四档 + 已归档；计数 = 服务端 status_counts，
+          切档不重拉计数、不漂移；已归档档为视图切换不带计数） */}
       <div role="tablist" aria-label="会话状态筛选" className="flex gap-2">
         {SESSION_TABS.map((t) => {
           const selected = tab === t.key;
@@ -488,7 +564,10 @@ export function MobileSessionList({
               role="tab"
               aria-selected={selected}
               data-testid={`mobile-session-tab-${t.key}`}
-              onClick={() => setTab(t.key)}
+              onClick={() => {
+                setTab(t.key);
+                setShowAll(false);
+              }}
               className={cn(
                 "inline-flex min-h-[44px] items-center gap-1 rounded-full border px-3 text-[14px] transition-colors",
                 selected
@@ -497,11 +576,8 @@ export function MobileSessionList({
               )}
             >
               {t.label}
-              {t.key === "all" && (
-                <span className="text-xs opacity-80">{sessions.length}</span>
-              )}
-              {t.key === "ongoing" && (
-                <span className="text-xs opacity-80">{ongoingCount}</span>
+              {t.key !== "archived" && (
+                <span className="text-xs opacity-80">{counts[t.key]}</span>
               )}
             </button>
           );
@@ -613,6 +689,23 @@ export function MobileSessionList({
           </section>
         ))
       )}
+
+      {/* 显示全部（FR-03）：默认收敛（最新 10 ∪ 在线全显）截断了列表时展开
+          全量；在线会话已全显，故只统计被折叠的非在线条目场景。 */}
+      {!sessionsQuery.isLoading &&
+        !sessionsQuery.isError &&
+        !showAll &&
+        sessions.length > 0 &&
+        defaultVisibleSessions(sessions).length < sessions.length && (
+          <button
+            type="button"
+            onClick={() => setShowAll(true)}
+            data-testid="mobile-session-show-all"
+            className="mx-1 min-h-[44px] w-[calc(100%-8px)] rounded-[var(--radius-md)] border border-border bg-card text-[14px] text-muted-foreground transition-colors active:bg-muted/50"
+          >
+            显示全部 {sessions.length} 条
+          </button>
+        )}
 
       {/* ⋯ 菜单（MobileActionMenu 底部 ActionSheet；关闭即清目标会话） */}
       <MobileActionMenu

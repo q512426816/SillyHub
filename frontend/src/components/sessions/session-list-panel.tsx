@@ -87,7 +87,7 @@
  *     - 组内「本地 Agent」合并小节（ql-20260824-001）：origin=tool_report
  *       （SillySpec CLI 自动上报）会话不进机器分桶，统一合并进组内末尾专属
  *       小节，默认折叠（选中会话在其中 → 展开）；筛选变化随组级 R-05 重置
- *     - 组内超 50 截断 + 「显示全部」（R-03）
+ *     - 组内默认收敛 + 「显示全部」（R-03 起；FR-03 收紧为最新 10 ∪ 在线全显）
  *   条目（D-006 紧凑两行沿用）：第一行 = 状态点 + 标题 + 相对时间；第二行 =
  *     chips（引擎/创建人/档案/供应商/轮数——树形态下工作区/机器信息由组头与
  *     小节承载，chips 不再重复）；创建人 chip 读 owner_name（D-108@v2，任务
@@ -230,10 +230,12 @@ export type SessionListScope =
   | RuntimeScope
   | QuicklogScope;
 
-/** 状态下拉选项（active/ended/failed；空串=不过滤）。 */
+/** 状态下拉选项（空串=不过滤）。2026-10-27-sessions-total-and-status-filter
+ * FR-02：「活跃」档更名「在线」并扩为三态聚合（哨兵值 __ongoing__，对齐
+ * __archived__ 先例——单值比较不适用于 pending+active+reconnecting 聚合）。 */
 const STATUS_OPTIONS = [
   { label: "全部状态", value: "" },
-  { label: "活跃", value: "active" },
+  { label: "在线", value: "__ongoing__" },
   { label: "已结束", value: "ended" },
   { label: "已失败", value: "failed" },
   { label: "已归档会话", value: "__archived__" },
@@ -274,8 +276,24 @@ function confirmIcon(Icon: LucideIcon, colorCls: string) {
   );
 }
 
-/** 组内截断阈值 + 「显示全部」（R-03）。 */
-const GROUP_ITEM_LIMIT = 50;
+/** 组内截断阈值 + 「显示全部」（R-03）。2026-10-27-sessions-total-and-status-filter
+ * FR-03：默认展示收敛 50 → 最新 10 条 ∪ 在线全显（与移动端同口径；GROUP_ITEM_LIMIT
+ * 语义化为「默认可见基线数」，展开仍显全量）。 */
+const GROUP_ITEM_LIMIT = 10;
+
+/**
+ * 组内默认可见集（FR-03）：最新 GROUP_ITEM_LIMIT 条 ∪ 全部在线会话（在线 =
+ * 非 ended/failed 三态，不管多老都显示），保持服务端返回序（置顶优先 +
+ * 最近活跃倒序）——与 mobile-session-list defaultVisibleSessions 同口径。
+ */
+function defaultVisibleGroupSessions(
+  sessions: AgentSessionRead[],
+): AgentSessionRead[] {
+  const head = sessions.slice(0, GROUP_ITEM_LIMIT);
+  const rest = sessions.slice(GROUP_ITEM_LIMIT);
+  const online = rest.filter((s) => s.status !== "ended" && s.status !== "failed");
+  return [...head, ...online];
+}
 
 /**
  * 重命名标题长度上限（task-07 / 2026-09-07-session-pin-rename-scheduled-send
@@ -842,7 +860,7 @@ function WorkspaceTreeList({
   const [batchGroupId, setBatchGroupId] = useState<string | null>(null);
   const [checkedIds, setCheckedIds] = useState<Set<string>>(new Set());
   const [deleting, setDeleting] = useState(false);
-  // 组内超 50 截断（R-03）的「显示全部」展开集合。
+  // 组内默认收敛（R-03/FR-03）的「显示全部」展开集合。
   const [showAllGroupIds, setShowAllGroupIds] = useState<Set<string>>(new Set());
   // X-009「关联」筛选下拉（task-10 / FR-05）：选中值编码 kind:id
   //（change:<uuid> / quicklog:<ql_id>；task-06 PPM 为三段 ppm:<kind>:<uuid>），
@@ -1300,7 +1318,16 @@ function WorkspaceTreeList({
         if (filterAgent && engineValueOf(s) !== filterAgent) return false;
       }
       // 2026-08-24：归档视图下跳过客户端 status 过滤（服务端已按 archived 过滤）。
-      if (!isArchivedView && status && s.status !== status) return false;
+      // 2026-10-27-sessions-total-and-status-filter FR-02：「在线」档（哨兵
+      // __ongoing__）= pending+active+reconnecting 三态聚合（非 ended/failed），
+      // 其余档保持单值精确匹配。
+      if (!isArchivedView && status) {
+        if (status === "__ongoing__") {
+          if (s.status === "ended" || s.status === "failed") return false;
+        } else if (s.status !== status) {
+          return false;
+        }
+      }
       if (q && !(s.title ?? "").toLowerCase().includes(q)) return false;
       return true;
     });
@@ -2526,12 +2553,15 @@ function WorkspaceGroupNode({
   archivedWorkspaceIds?: Set<string>;
   livenessBySessionId?: Map<string, AgentLogListItem>;
 }) {
-  // 组内超 50 截断（R-03）：截断作用于分组（跨机器小节），小节由可见条目派生。
-  const truncated = !showAll && visibleSessions.length > GROUP_ITEM_LIMIT;
+  // 组内默认展示收敛（R-03 起，FR-03 收紧 50→10+在线全显）：截断作用于分组
+  //（跨机器小节），小节由可见条目派生；在线会话不受默认基线限制全显。
+  const truncated =
+    !showAll &&
+    defaultVisibleGroupSessions(visibleSessions).length < visibleSessions.length;
   // 审计修复 F2（2026-08-26）：截断 slice 移入 useMemo——原 render 内联生成新数组，
   // 引用不稳致 subGrouping/sections 每渲染重算（10s 轮询与任意 state 变化均触发）。
   const shownSessions = useMemo(
-    () => (truncated ? visibleSessions.slice(0, GROUP_ITEM_LIMIT) : visibleSessions),
+    () => (truncated ? defaultVisibleGroupSessions(visibleSessions) : visibleSessions),
     [truncated, visibleSessions],
   );
 
@@ -2544,7 +2574,7 @@ function WorkspaceGroupNode({
   // 当前列表时）；父不可见（分页边界/筛选）的落孤儿小节兜底，绝不丢行。
   const subGrouping = useMemo(() => {
     // 审计修复 F5+F7（2026-08-26）：byParent 按**全量** visibleSessions 聚合——
-    // 「分身 N」计数不被组内 50 截断切小，且截断边界漂移（轮询新增行）时
+    // 「分身 N」计数不被组内默认收敛切小，且截断边界漂移（轮询新增行）时
     // 父行附属归属稳定不闪跳；orphans 按 shownSessions 判定——只有父不在
     // **已渲染**主行集合的子会话才进孤儿小节（父在但被截断不显示时，
     // 其子会话本就不渲染，无需孤儿兜底）。

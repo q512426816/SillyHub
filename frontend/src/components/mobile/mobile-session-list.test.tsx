@@ -113,8 +113,15 @@ function makeMachine(overrides: Partial<DaemonMachineRead> = {}): DaemonMachineR
   } as unknown as DaemonMachineRead;
 }
 
-function makeResp(items: AgentSessionRead[]): AgentSessionListResponse {
-  return { items, total: items.length } as unknown as AgentSessionListResponse;
+function makeResp(
+  items: AgentSessionRead[],
+  statusCounts?: Record<string, number>,
+): AgentSessionListResponse {
+  return {
+    items,
+    total: items.length,
+    status_counts: statusCounts ?? { active: items.length },
+  } as unknown as AgentSessionListResponse;
 }
 
 /**
@@ -399,41 +406,9 @@ describe("MobileSessionList 机器分组", () => {
   });
 });
 
-/* ────────────── 状态 Tab 过滤 ────────────── */
+/* ────────────── 状态 Tab 过滤（旧块收编：见上「统计与状态档」+「默认展示收敛」） ────────────── */
 
 describe("MobileSessionList 状态 Tab", () => {
-  it("全部：显示全部会话；进行中：客户端过滤仅非 ended/failed", async () => {
-    daemonApi.listAgentSessions.mockResolvedValue(
-      makeResp([
-        makeSession({ id: "s-active", title: "活跃会话", status: "active" }),
-        makeSession({ id: "s-pending", title: "排队会话", status: "pending" }),
-        makeSession({ id: "s-ended", title: "结束会话", status: "ended" }),
-        makeSession({ id: "s-failed", title: "失败会话", status: "failed" }),
-      ]),
-    );
-    renderList();
-
-    await waitFor(() => {
-      expect(screen.getByText("结束会话")).toBeInTheDocument();
-    });
-    // 全部 Tab：4 张卡
-    expect(screen.getAllByTestId("mobile-session-card")).toHaveLength(4);
-    // Tab 计数：全部 4 / 进行中 2
-    expect(screen.getByTestId("mobile-session-tab-all").textContent).toContain("4");
-    expect(screen.getByTestId("mobile-session-tab-ongoing").textContent).toContain("2");
-
-    // 切「进行中」：仅 active/pending（ended/failed 客户端滤除）
-    fireEvent.click(screen.getByTestId("mobile-session-tab-ongoing"));
-    await waitFor(() => {
-      expect(screen.queryByText("结束会话")).not.toBeInTheDocument();
-    });
-    expect(screen.queryByText("失败会话")).not.toBeInTheDocument();
-    expect(screen.getByText("活跃会话")).toBeInTheDocument();
-    expect(screen.getByText("排队会话")).toBeInTheDocument();
-    // 客户端过滤：不换 queryKey、不发第二次请求
-    expect(daemonApi.listAgentSessions).toHaveBeenCalledTimes(1);
-  });
-
   it("空态：非归档视图渲染「新建会话」引导，归档视图无引导按钮", async () => {
     daemonApi.listAgentSessions.mockResolvedValue(makeResp([]));
     renderList();
@@ -448,6 +423,120 @@ describe("MobileSessionList 状态 Tab", () => {
       expect(screen.getByText("暂无已归档会话")).toBeInTheDocument();
     });
     expect(screen.queryByTestId("mobile-session-list-new")).not.toBeInTheDocument();
+  });
+});
+
+/* ────────────── 统计行 + 四档状态筛选（2026-10-27-sessions-total-and-status-filter） ────────────── */
+
+describe("MobileSessionList 统计与状态档（FR-01/FR-02）", () => {
+  it("统计行与四 chips 计数消费服务端 status_counts（与拉回 items 条数脱钩，全部 503 如实显示）", async () => {
+    // 场景：真实总数 503（>拉取上限 500），拉回 items 仅 2 条——统计行与
+    // chips 计数必须用 status_counts（503），不得用 items.length（2）。
+    daemonApi.listAgentSessions.mockResolvedValue(
+      makeResp(
+        [makeSession({ id: "s-1" }), makeSession({ id: "s-2" })],
+        { pending: 1, active: 2, reconnecting: 0, ended: 496, failed: 4 },
+      ),
+    );
+    renderList();
+
+    await waitFor(() => {
+      expect(screen.getByTestId("mobile-session-total").textContent).toBe(
+        "会话总数 503 条",
+      );
+    });
+    // 四 chips：全部 503 / 在线 3（1+2+0）/ 已结束 496 / 失败 4
+    expect(screen.getByTestId("mobile-session-tab-all").textContent).toContain("503");
+    expect(screen.getByTestId("mobile-session-tab-ongoing").textContent).toContain("在线");
+    expect(screen.getByTestId("mobile-session-tab-ongoing").textContent).toContain("3");
+    expect(screen.getByTestId("mobile-session-tab-ended").textContent).toContain("496");
+    expect(screen.getByTestId("mobile-session-tab-failed").textContent).toContain("4");
+    // 已归档档保留且不带计数
+    expect(screen.getByTestId("mobile-session-tab-archived").textContent).not.toContain("503");
+  });
+
+  it("切「在线」档带 status_group=ongoing 重拉、切「已结束」档带 status=ended；chips 计数不随档位漂移", async () => {
+    const counts = { active: 2, ended: 5, failed: 1 };
+    daemonApi.listAgentSessions.mockResolvedValue(
+      makeResp([makeSession({ id: "s-1", status: "active" })], counts),
+    );
+    renderList();
+    await waitFor(() => {
+      expect(screen.getByText("主控会话")).toBeInTheDocument();
+    });
+
+    // 切「在线」：服务端档——新 queryKey + status_group=ongoing 参数
+    daemonApi.listAgentSessions.mockResolvedValue(
+      makeResp([makeSession({ id: "s-on", title: "在线会话", status: "active" })], counts),
+    );
+    fireEvent.click(screen.getByTestId("mobile-session-tab-ongoing"));
+    await waitFor(() => {
+      expect(daemonApi.listAgentSessions).toHaveBeenLastCalledWith({
+        limit: 500,
+        archived: false,
+        workspace_id: "ws-1",
+        status_group: "ongoing",
+      });
+    });
+    await waitFor(() => {
+      expect(screen.getByText("在线会话")).toBeInTheDocument();
+    });
+
+    // 切「已结束」：status=ended 单值档
+    daemonApi.listAgentSessions.mockResolvedValue(
+      makeResp([makeSession({ id: "s-end", title: "结束会话", status: "ended" })], counts),
+    );
+    fireEvent.click(screen.getByTestId("mobile-session-tab-ended"));
+    await waitFor(() => {
+      expect(daemonApi.listAgentSessions).toHaveBeenLastCalledWith({
+        limit: 500,
+        archived: false,
+        workspace_id: "ws-1",
+        status: "ended",
+      });
+    });
+    await waitFor(() => {
+      expect(screen.getByText("结束会话")).toBeInTheDocument();
+    });
+    // 计数不漂移：仍是全部 8 / 在线 2 / 已结束 5 / 失败 1（status_counts 恒全量口径）
+    expect(screen.getByTestId("mobile-session-tab-all").textContent).toContain("8");
+    expect(screen.getByTestId("mobile-session-tab-ongoing").textContent).toContain("2");
+    expect(screen.getByTestId("mobile-session-tab-ended").textContent).toContain("5");
+    expect(screen.getByTestId("mobile-session-tab-failed").textContent).toContain("1");
+  });
+});
+
+/* ────────────── 默认展示收敛（FR-03：最新 10 ∪ 在线全显 + 显示全部） ────────────── */
+
+describe("MobileSessionList 默认展示收敛", () => {
+  it("默认仅最新 10 条 ∪ 在线全显；「显示全部 N 条」展开后全量可见", async () => {
+    // 场景：12 条已结束在前 + 5 条在线在后（服务端序）——默认 = 前 10 条
+    // （ended）+ 尾部 5 条在线全显 = 15 卡；展开后 17 卡全量。
+    const items = [
+      ...Array.from({ length: 12 }, (_, i) =>
+        makeSession({ id: `s-e-${i}`, title: `历史会话${i}`, status: "ended" }),
+      ),
+      ...Array.from({ length: 5 }, (_, i) =>
+        makeSession({ id: `s-a-${i}`, title: `在线会话${i}`, status: "active" }),
+      ),
+    ];
+    daemonApi.listAgentSessions.mockResolvedValue(
+      makeResp(items, { active: 5, ended: 12 }),
+    );
+    renderList();
+
+    await waitFor(() => {
+      expect(screen.getByText("在线会话4")).toBeInTheDocument();
+    });
+    expect(screen.getAllByTestId("mobile-session-card")).toHaveLength(15);
+    // 收敛提示在場：折叠了 2 条非在线条目
+    expect(screen.getByTestId("mobile-session-show-all").textContent).toContain("17");
+
+    fireEvent.click(screen.getByTestId("mobile-session-show-all"));
+    await waitFor(() => {
+      expect(screen.getAllByTestId("mobile-session-card")).toHaveLength(17);
+    });
+    expect(screen.queryByTestId("mobile-session-show-all")).not.toBeInTheDocument();
   });
 });
 
