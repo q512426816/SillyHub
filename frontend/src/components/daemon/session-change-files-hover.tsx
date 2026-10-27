@@ -212,7 +212,10 @@ export function SessionChangeFilesHover({
         <Button
           variant="outline"
           size="sm"
-          className="gap-1.5 rounded-lg shadow-sm"
+          // 玻璃效果（2026-10-27-mobile-chat-visual-round2 / 用户指定「变更/决策两块
+          // 悬浮玻璃化」）：bg-card/75+blur-md 覆盖 outline 变体实底——pill 悬浮于
+          // 聊天时间线上，背后消息滚动呈朦胧玻璃质感。
+          className="gap-1.5 rounded-lg bg-card/75 shadow-sm backdrop-blur-md"
           aria-label="查看会话关联的变更文件"
         >
           <FolderGit2 className="h-3.5 w-3.5" aria-hidden />
