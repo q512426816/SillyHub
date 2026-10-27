@@ -1088,7 +1088,10 @@ export function FloatingSessionHost() {
           data-open={open ? "true" : "false"}
           data-side={side}
           className={cn(
-            "fixed inset-y-0 z-50 flex w-[min(960px,92vw)] flex-col bg-card shadow-lg transition-transform duration-300",
+            // 玻璃窗体（2026-10-27-mobile-chat-visual-round2 / 用户指定「玻璃效果
+            // PC 端可同步」）：悬浮窗浮于页面内容之上（fixed z-50），bg-card/85+
+            // blur-md 让背后页面内容呈朦胧玻璃质感而非生硬实底遮挡。
+            "fixed inset-y-0 z-50 flex w-[min(960px,92vw)] flex-col bg-card/85 shadow-lg backdrop-blur-md transition-transform duration-300",
             side === "right"
               ? cn("right-0 border-l border-border", open ? "translate-x-0" : "translate-x-full")
               : cn("left-0 border-r border-border", open ? "translate-x-0" : "-translate-x-full"),

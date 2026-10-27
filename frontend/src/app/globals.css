@@ -918,6 +918,20 @@
   padding-left: 8px;
   padding-right: 8px;
 }
+/* agent 正文真满宽(2026-10-27-mobile-chat-visual-round2 / 用户实测二轮反馈)：
+   段模型正文组件类 max-w-[calc(100%-120px)] 是 PC 阅读限宽(2026-10-25-unify
+   「整行-120px」防 PC 一行过长)——430pt 视口被吃近 30%,上一轮只放宽 .turn-bubble
+   没盖到它。mobile 限宽 100%(特异度 (0,2,0) 压组件单类 (0,1,0),v2/旧路径两处
+   挂点一次覆盖);desktop 阅读限宽原样保留。 */
+[data-variant="mobile"] .seg-text-body {
+  max-width: 100%;
+}
+/* 轮过程区缩进收敛(ml-9 36px+pl-3.5 14px→12+8px)——缩进是 PC 头像层级感,
+   手机上白吃 50px 宽;保留 border-l 竖线层级指示。 */
+[data-variant="mobile"] [data-testid="turn-progress-column"] {
+  margin-left: 12px;
+  padding-left: 8px;
+}
 
 
 /* ---- 扩展色族批有意豁免清单(非 dark 残留,留档备查) ----

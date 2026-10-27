@@ -292,7 +292,8 @@ export default function MobileWorkspaceSessionsPage() {
         onClick={() => setPickerOpen(true)}
         aria-label="新建会话"
         data-testid="m-sessions-fab"
-        className="fixed bottom-24 right-4 z-30 inline-flex h-[52px] w-[52px] items-center justify-center rounded-full bg-primary text-primary-foreground shadow-[var(--shadow-lg)] transition-transform active:scale-95"
+        // 玻璃效果（visual-round2 / 用户指定）：主色 85% 透明+中模糊,悬浮件轻量化
+        className="fixed bottom-24 right-4 z-30 inline-flex h-[52px] w-[52px] items-center justify-center rounded-full bg-primary/85 text-primary-foreground shadow-[var(--shadow-lg)] backdrop-blur-md transition-transform active:scale-95"
       >
         <Plus className="h-6 w-6" aria-hidden />
       </button>

@@ -114,11 +114,13 @@ export function MobileTabBar({ activeTab }: MobileTabBarProps) {
       // 悬浮胶囊（quick-a4939946，对齐用户参考效果图）：贴底通栏边框式改为
       // 离底 12px 的圆角胶囊，内容从胶囊下方穿行（外壳 main 底部避让预留占位，
       // 2026-10-26-mobile-four-page-layout-fix task-01 起为 calc(76px+safe-area)）；
-      // bottom 安全区只作间距不再撑背景。胶囊底色实底不透明（task-01：原 bg-card/95
-      // + 毛玻璃在长列表滚动时透字，遮挡观感差；全不透明后 blur 无视觉意义一并移除）。
+      // bottom 安全区只作间距不再撑背景。
+      // 玻璃效果（2026-10-27-mobile-chat-visual-round2 / 用户指定「小透明+玻璃感」）：
+      // task-01 曾因透字改实底——本轮按用户新取向回玻璃形态，bg-card/75+blur-md
+      // （中模糊下穿行内容呈朦胧块而非清晰透字，透明度与模糊度的平衡点）。
       className="fixed inset-x-0 bottom-0 z-40 px-3 pb-[calc(env(safe-area-inset-bottom)+12px)]"
     >
-      <ul className="mx-auto flex w-full max-w-[432px] items-stretch rounded-[var(--radius-lg)] border border-border bg-card shadow-[var(--shadow-lg)]">
+      <ul className="mx-auto flex w-full max-w-[432px] items-stretch rounded-[var(--radius-lg)] border border-border bg-card/75 shadow-[var(--shadow-lg)] backdrop-blur-md">
         {MOBILE_TABS.map((tab) => {
           const active = activeTab ? activeTab === tab.key : isTabActive(tab, pathname);
           const Icon = tab.icon;

@@ -119,9 +119,12 @@ export const RoundDivider = memo(function RoundDivider({
       <span
         className={cn(
           "inline-flex items-center gap-1.5 rounded-full border border-border/60 bg-card/80 px-3 py-0.5 text-[10.5px] text-muted-foreground shadow-sm backdrop-blur-sm",
-          // mobile（FR-02）：允许收缩与折行（长 meta 在 430pt 视口内换行不溢出）；
-          // desktop 缺省保持 shrink-0 + nowrap 单行（零变化）。
-          mobile ? "min-w-0 shrink whitespace-normal" : "shrink-0 whitespace-nowrap",
+          // mobile（FR-02 + visual-round2）：去胶囊框纯文字（边框/底色/阴影/内距
+          // 全去——手机上轮次分隔要轻不抢正文视觉）；允许收缩折行（长 meta 在
+          // 430pt 视口内换行不溢出）。desktop 缺省保持胶囊+shrink-0 单行（零变化）。
+          mobile
+            ? "min-w-0 shrink whitespace-normal border-none bg-transparent px-0 py-0 shadow-none backdrop-blur-none"
+            : "shrink-0 whitespace-nowrap",
         )}
       >
         <span className="tracking-wide">{label}</span>

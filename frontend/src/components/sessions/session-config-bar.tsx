@@ -1254,8 +1254,11 @@ export function SessionConfigBar({
             设置
           </button>
         )}
-        {/* ql-20260909-006：行尾插槽（CtxUsageBar 圆环+额度胶囊挪此处；不传零占位）。 */}
-        {trailing != null ? (
+        {/* ql-20260909-006：行尾插槽（CtxUsageBar 圆环+额度胶囊挪此处；不传零占位）。
+            mobile 不渲染（2026-10-27-mobile-chat-visual-round2 / 用户反馈输入区按钮
+            拥挤）——用量功能仍在头部 ⋯ 菜单「会话用量」区（ql-20260915-011 先例），
+            行尾徽章在手机上与供应商/模型/设置挤一行是主要拥挤源。desktop 照旧。 */}
+        {trailing != null && !mobile ? (
           <span className="inline-flex shrink-0 items-center">{trailing}</span>
         ) : null}
       </div>

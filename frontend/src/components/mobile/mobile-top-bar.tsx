@@ -40,7 +40,9 @@ export function MobileTopBar({ title, onBack, actions }: MobileTopBarProps) {
   return (
     <header
       data-testid="mobile-top-bar"
-      className="sticky top-0 z-30 flex min-h-[44px] shrink-0 items-center gap-1 border-b border-border bg-card px-1 pt-[env(safe-area-inset-top)] shadow-[var(--shadow-sm)]"
+      // 玻璃顶栏（2026-10-27-mobile-chat-visual-round2 / 用户指定悬浮件玻璃化）：
+      // bg-card/75+blur-md——内容上滑穿行时顶栏呈玻璃朦胧而非生硬实底。
+      className="sticky top-0 z-30 flex min-h-[44px] shrink-0 items-center gap-1 border-b border-border bg-card/75 px-1 pt-[env(safe-area-inset-top)] shadow-[var(--shadow-sm)] backdrop-blur-md"
     >
       {onBack !== undefined && (
         <button
