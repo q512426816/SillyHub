@@ -28,6 +28,174 @@ from app.modules.ppm.common.session_binding import PpmItemKind, PpmItemSessionLi
 
 from .errors import DaemonSessionNotFound
 
+# 2026-10-27-sessions-total-and-status-filter FR-02：status_group='ongoing'
+# 展开的三态集合（在线 = pending/active/reconnecting；ended/failed 为终态）。
+ONGOING_SESSION_STATUSES: tuple[str, ...] = ("pending", "active", "reconnecting")
+
+
+def _build_session_filters(
+    user_id: uuid.UUID,
+    *,
+    status_filter: str | None = None,
+    status_group: str | None = None,
+    runtime_id: uuid.UUID | None = None,
+    machine_id: uuid.UUID | None = None,
+    provider: str | None = None,
+    q: str | None = None,
+    workspace_id: uuid.UUID | None = None,
+    change_id: uuid.UUID | None = None,
+    ql_id: str | None = None,
+    ppm_item_kind: PpmItemKind | None = None,
+    ppm_item_id: uuid.UUID | None = None,
+    archived: bool | None = False,
+    session_kind: str | None = "chat",
+    exclude_origin: str | None = DISTILL_SESSION_ORIGIN,
+) -> list:
+    """组装 AgentSession 列表过滤谓词（list_agent_sessions 的 base_filters
+    单一源提取，2026-10-27-sessions-total-and-status-filter）。
+
+    列表查询与分组计数查询共用本函数，保证两个口径除状态维度外逐谓词
+    一致（杜绝两处组装漂移）。各过滤参语义/注释见 list_agent_sessions
+    docstring——此处不重复。
+    """
+    from sqlalchemy import exists
+
+    filters = [
+        AgentSession.user_id == user_id,
+        AgentSession.deleted_at.is_(None),  # FR-07 软删过滤
+    ]
+    # 2026-08-24：archived 过滤（False=未归档，True=已归档）。
+    # ql-20260831-015：三态化——None=不过滤（全部，含已归档），供 HTTP 层
+    # 「全部状态」视图用；service 层默认保持 False，内部调用（facade/测试）
+    # 零回归。
+    if archived is True:
+        filters.append(AgentSession.archived_at.isnot(None))
+    elif archived is False:
+        filters.append(AgentSession.archived_at.is_(None))
+    # 2026-09-01-session-group-chat task-02 / design §5.3：会话形态谓词
+    # （ix_agent_sessions_session_kind 查询键；默认 'chat' 存量口径——
+    # 群会话与 group_member 影子会话不进普通列表）。
+    if session_kind is not None:
+        filters.append(AgentSession.session_kind == session_kind)
+    # D-010④：默认排除蒸馏会话（exclude_origin=None 时显式不过滤）。
+    if exclude_origin is not None:
+        filters.append(AgentSession.origin != exclude_origin)
+    # 状态维度：status（单值）与 status_group（聚合，FR-02 ongoing 三态）
+    # 互斥——同传由 router 层 422，此处若同时出现以 status_filter 优先
+    # （防御性顺序，不构成对外契约）。
+    if status_filter is not None:
+        filters.append(AgentSession.status == status_filter)
+    elif status_group is not None:
+        filters.append(AgentSession.status.in_(ONGOING_SESSION_STATUSES))
+    if runtime_id is not None:
+        filters.append(AgentSession.runtime_id == runtime_id)
+    # 2026-08-22-workspace-sessions-portal / D-003@v2：scope 精确匹配过滤。
+    if workspace_id is not None:
+        filters.append(AgentSession.workspace_id == workspace_id)
+    if change_id is not None:
+        # 2026-08-25-session-spec-binding task-04 / D-002@v1 / design
+        # §5.W3.3：change_id 从单 FK 精确匹配升级为 M:N 子查询命中——
+        # links 表是变更↔会话关联的唯一真相，存量单 FK 已播种为 link 行
+        # （§9：原命中集是新命中集的子集，参数名/类型不变向后兼容）。
+        filters.append(
+            AgentSession.id.in_(
+                select(ChangeSessionLink.session_id).where(ChangeSessionLink.change_id == change_id)
+            )
+        )
+    if ql_id is not None:
+        # 2026-08-25-session-spec-binding task-04 / FR-05 / D-001@v1：按
+        # links 表 (workspace_id, ql_id) 双条件命中，防跨工作区同 ql_id
+        # 串扰（R-05）。workspace_id 筛选参数非空 → 收紧到该工作区；为空
+        # → 按 ql_id 全工作区命中（owner-scoped 列表，串扰面已受限）。
+        ql_filters = [QuicklogSessionLink.ql_id == ql_id]
+        if workspace_id is not None:
+            ql_filters.append(QuicklogSessionLink.workspace_id == workspace_id)
+        filters.append(
+            AgentSession.id.in_(select(QuicklogSessionLink.session_id).where(*ql_filters))
+        )
+    if ppm_item_kind is not None and ppm_item_id is not None:
+        # task-02（2026-08-28-session-ppm-task-binding / FR-05 / D-005@v1）：
+        # PPM 条目级关联筛选——照 change_id 分支模式走 ppm_item_session_links
+        # 子查询命中。item_id 为 UUID 全局唯一（kind+item_id 定位唯一条目），
+        # 无跨工作区串扰，不叠 workspace 条件（区别于 ql_id 双条件）。
+        filters.append(
+            AgentSession.id.in_(
+                select(PpmItemSessionLink.session_id).where(
+                    PpmItemSessionLink.kind == ppm_item_kind,
+                    PpmItemSessionLink.item_id == ppm_item_id,
+                )
+            )
+        )
+    if machine_id is not None:
+        filters.append(
+            exists().where(
+                DaemonRuntime.id == AgentSession.runtime_id,
+                DaemonRuntime.daemon_instance_id == machine_id,
+            )
+        )
+    if provider is not None:
+        filters.append(AgentSession.provider == provider)
+    if q:
+        escaped = q.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+        filters.append(
+            exists().where(
+                AgentRun.agent_session_id == AgentSession.id,
+                AgentRunLog.run_id == AgentRun.id,
+                AgentRunLog.channel == "user_input",
+                AgentRunLog.content_redacted.ilike(f"%{escaped}%", escape="\\"),
+            )
+        )
+    return filters
+
+
+async def list_agent_session_status_counts(
+    svc,
+    user_id: uuid.UUID,
+    *,
+    runtime_id: uuid.UUID | None = None,
+    machine_id: uuid.UUID | None = None,
+    provider: str | None = None,
+    q: str | None = None,
+    workspace_id: uuid.UUID | None = None,
+    change_id: uuid.UUID | None = None,
+    ql_id: str | None = None,
+    ppm_item_kind: PpmItemKind | None = None,
+    ppm_item_id: uuid.UUID | None = None,
+    archived: bool | None = False,
+    session_kind: str | None = "chat",
+    exclude_origin: str | None = DISTILL_SESSION_ORIGIN,
+) -> dict[str, int]:
+    """按 status 分组的会话计数（2026-10-27-sessions-total-and-status-filter
+    FR-01/FR-04）。
+
+    口径 = 与 list_agent_sessions **除状态维度外逐谓词相同**的过滤
+    （_build_session_filters 不传 status/status_group）——供列表端点的
+    ``status_counts`` 字段：筛选 chips 的「全部/在线/已结束/失败」计数
+    恒为当前 scope 的全量分组计数，不随单次拉取 limit 或当前状态档位
+    漂移（在线 = ONGOING_SESSION_STATUSES 三态之和，前端聚合）。
+    owner-scoped + 软删过滤与列表一致（同一过滤组装函数产出）。
+    """
+    from sqlalchemy import func
+
+    filters = _build_session_filters(
+        user_id,
+        runtime_id=runtime_id,
+        machine_id=machine_id,
+        provider=provider,
+        q=q,
+        workspace_id=workspace_id,
+        change_id=change_id,
+        ql_id=ql_id,
+        ppm_item_kind=ppm_item_kind,
+        ppm_item_id=ppm_item_id,
+        archived=archived,
+        session_kind=session_kind,
+        exclude_origin=exclude_origin,
+    )
+    stmt = select(AgentSession.status, func.count()).where(*filters).group_by(AgentSession.status)
+    rows = (await svc._session.execute(stmt)).all()
+    return {str(status): int(count) for status, count in rows}
+
 
 async def list_agent_sessions(
     svc,
@@ -36,6 +204,10 @@ async def list_agent_sessions(
     limit: int,
     offset: int,
     status_filter: str | None = None,
+    # 2026-10-27-sessions-total-and-status-filter FR-02：在线三态聚合过滤
+    # （'ongoing' → pending+active+reconnecting，与 status_filter 互斥——
+    # 同传由 router 层 422，本层不重复校验）。
+    status_group: str | None = None,
     runtime_id: uuid.UUID | None = None,
     machine_id: uuid.UUID | None = None,
     provider: str | None = None,
@@ -115,88 +287,25 @@ async def list_agent_sessions(
       workspace 条件；与其余筛选 AND 交集组合。成对约束由 router 层
       校验（只传其一 422），service 层双 None 时零分支进入。
     """
-    from sqlalchemy import exists, func
+    from sqlalchemy import func
 
-    base_filters = [
-        AgentSession.user_id == user_id,
-        AgentSession.deleted_at.is_(None),  # FR-07 软删过滤
-    ]
-    # 2026-08-24：archived 过滤（False=未归档，True=已归档）。
-    # ql-20260831-015：三态化——None=不过滤（全部，含已归档），供 HTTP 层
-    # 「全部状态」视图用；service 层默认保持 False，内部调用（facade/测试）
-    # 零回归。
-    if archived is True:
-        base_filters.append(AgentSession.archived_at.isnot(None))
-    elif archived is False:
-        base_filters.append(AgentSession.archived_at.is_(None))
-    # 2026-09-01-session-group-chat task-02 / design §5.3：会话形态谓词
-    # （ix_agent_sessions_session_kind 查询键；默认 'chat' 存量口径——
-    # 群会话与 group_member 影子会话不进普通列表）。
-    if session_kind is not None:
-        base_filters.append(AgentSession.session_kind == session_kind)
-    # D-010④：默认排除蒸馏会话（exclude_origin=None 时显式不过滤）。
-    if exclude_origin is not None:
-        base_filters.append(AgentSession.origin != exclude_origin)
-    if status_filter is not None:
-        base_filters.append(AgentSession.status == status_filter)
-    if runtime_id is not None:
-        base_filters.append(AgentSession.runtime_id == runtime_id)
-    # 2026-08-22-workspace-sessions-portal / D-003@v2：scope 精确匹配过滤。
-    if workspace_id is not None:
-        base_filters.append(AgentSession.workspace_id == workspace_id)
-    if change_id is not None:
-        # 2026-08-25-session-spec-binding task-04 / D-002@v1 / design
-        # §5.W3.3：change_id 从单 FK 精确匹配升级为 M:N 子查询命中——
-        # links 表是变更↔会话关联的唯一真相，存量单 FK 已播种为 link 行
-        # （§9：原命中集是新命中集的子集，参数名/类型不变向后兼容）。
-        base_filters.append(
-            AgentSession.id.in_(
-                select(ChangeSessionLink.session_id).where(ChangeSessionLink.change_id == change_id)
-            )
-        )
-    if ql_id is not None:
-        # 2026-08-25-session-spec-binding task-04 / FR-05 / D-001@v1：按
-        # links 表 (workspace_id, ql_id) 双条件命中，防跨工作区同 ql_id
-        # 串扰（R-05）。workspace_id 筛选参数非空 → 收紧到该工作区；为空
-        # → 按 ql_id 全工作区命中（owner-scoped 列表，串扰面已受限）。
-        ql_filters = [QuicklogSessionLink.ql_id == ql_id]
-        if workspace_id is not None:
-            ql_filters.append(QuicklogSessionLink.workspace_id == workspace_id)
-        base_filters.append(
-            AgentSession.id.in_(select(QuicklogSessionLink.session_id).where(*ql_filters))
-        )
-    if ppm_item_kind is not None and ppm_item_id is not None:
-        # task-02（2026-08-28-session-ppm-task-binding / FR-05 / D-005@v1）：
-        # PPM 条目级关联筛选——照 change_id 分支模式走 ppm_item_session_links
-        # 子查询命中。item_id 为 UUID 全局唯一（kind+item_id 定位唯一条目），
-        # 无跨工作区串扰，不叠 workspace 条件（区别于 ql_id 双条件）。
-        base_filters.append(
-            AgentSession.id.in_(
-                select(PpmItemSessionLink.session_id).where(
-                    PpmItemSessionLink.kind == ppm_item_kind,
-                    PpmItemSessionLink.item_id == ppm_item_id,
-                )
-            )
-        )
-    if machine_id is not None:
-        base_filters.append(
-            exists().where(
-                DaemonRuntime.id == AgentSession.runtime_id,
-                DaemonRuntime.daemon_instance_id == machine_id,
-            )
-        )
-    if provider is not None:
-        base_filters.append(AgentSession.provider == provider)
-    if q:
-        escaped = q.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
-        base_filters.append(
-            exists().where(
-                AgentRun.agent_session_id == AgentSession.id,
-                AgentRunLog.run_id == AgentRun.id,
-                AgentRunLog.channel == "user_input",
-                AgentRunLog.content_redacted.ilike(f"%{escaped}%", escape="\\"),
-            )
-        )
+    base_filters = _build_session_filters(
+        user_id,
+        status_filter=status_filter,
+        status_group=status_group,
+        runtime_id=runtime_id,
+        machine_id=machine_id,
+        provider=provider,
+        q=q,
+        workspace_id=workspace_id,
+        change_id=change_id,
+        ql_id=ql_id,
+        ppm_item_kind=ppm_item_kind,
+        ppm_item_id=ppm_item_id,
+        archived=archived,
+        session_kind=session_kind,
+        exclude_origin=exclude_origin,
+    )
 
     count_stmt = select(func.count()).select_from(AgentSession).where(*base_filters)
     total = int((await svc._session.execute(count_stmt)).scalar() or 0)

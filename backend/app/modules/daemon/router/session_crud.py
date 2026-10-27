@@ -162,6 +162,10 @@ async def list_sessions(
     limit: int = Query(default=20, ge=1, le=500),
     offset: int = Query(default=0, ge=0),
     status: _SessionStatusQuery | None = Query(default=None),
+    # 2026-10-27-sessions-total-and-status-filter FR-02：在线三态聚合过滤
+    # （'ongoing' → pending+active+reconnecting）；与 status 互斥，同传 422
+    # （见下方手工校验，对齐 ppm_item 成对校验先例）。未知值 Literal 422。
+    status_group: Literal["ongoing"] | None = Query(default=None),
     runtime_id: uuid.UUID | None = Query(default=None),
     machine_id: uuid.UUID | None = Query(default=None),
     provider: _SessionProviderQuery | None = Query(default=None),
@@ -223,6 +227,14 @@ async def list_sessions(
             # 与 SessionCreateRequest._require_ppm_item_pair 同口径（用户可见 422 文案中文化）。
             detail="ppm_item_kind 与 ppm_item_id 必须成对提供。",
         )
+    # 2026-10-27-sessions-total-and-status-filter FR-02：status（单值）与
+    # status_group（聚合）互斥——同传语义不明，fail-explicit 422（用户可见
+    # 文案中文化，对齐上方成对校验先例）。
+    if status is not None and status_group is not None:
+        raise HTTPException(
+            status_code=422,
+            detail="status 与 status_group 互斥，不能同时提供。",
+        )
     from app.modules.agent.model import ACTIVE_RUN_STATUSES, AgentRun, AgentRunLog
 
     svc = DaemonService(session)
@@ -236,6 +248,7 @@ async def list_sessions(
         limit=limit,
         offset=offset,
         status_filter=status,
+        status_group=status_group,
         runtime_id=runtime_id,
         machine_id=machine_id,
         provider=provider,
@@ -429,11 +442,29 @@ async def list_sessions(
             # 哨兵 ''/None 均保持 title=None（与旧零输入语义一致）
             fb = (fallback_map.get(r.id) or "")[:30]
             r.title = session_titles.get(r.id) or (fb or None)
+    # 2026-10-27-sessions-total-and-status-filter FR-01/FR-04：分组状态计数
+    # （忽略状态维度的当前 scope 全量口径——chips「全部/在线/已结束/失败」
+    # 计数不随 limit 截短或当前状态档位漂移）。
+    status_counts = await svc._sess.list_agent_session_status_counts(
+        user.id,
+        runtime_id=runtime_id,
+        machine_id=machine_id,
+        provider=provider,
+        q=q,
+        workspace_id=workspace_id,
+        change_id=change_id,
+        ql_id=ql_id,
+        ppm_item_kind=ppm_item_kind,
+        ppm_item_id=ppm_item_id,
+        archived=archived,
+        session_kind=session_kind,
+    )
     return AgentSessionListResponse(
         items=reads,
         total=total,
         limit=limit,
         offset=offset,
+        status_counts=status_counts,
     )
 
 

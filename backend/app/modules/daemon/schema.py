@@ -129,6 +129,12 @@ class AgentSessionListResponse(BaseModel):
     total: int
     limit: int
     offset: int
+    # 2026-10-27-sessions-total-and-status-filter FR-01/FR-04：按 status 分组
+    # 计数（键 = pending/active/reconnecting/ended/failed，无命中态键缺省）。
+    # 口径 = 与列表过滤除状态维度外逐谓词相同（忽略 status/status_group），
+    # 不受 limit/当前状态档位影响——筛选 chips「全部/在线/已结束/失败」的
+    # 真实计数源（在线 = pending+active+reconnecting 之和，前端聚合）。
+    status_counts: dict[str, int] = Field(default_factory=dict)
 
 
 # ── 会话级 git 状态 DTO（2026-10-21-session-git-branch / FR-01..03）────────────

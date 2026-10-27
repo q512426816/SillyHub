@@ -195,6 +195,96 @@ class TestListSessions:
         assert body["total"] == 1
         assert body["items"][0]["status"] == "ended"
 
+    async def test_status_counts_beyond_fetch_limit(
+        self,
+        client: AsyncClient,
+        auth_headers: dict[str, str],
+        db_session: AsyncSession,
+    ) -> None:
+        """2026-10-27-sessions-total-and-status-filter FR-01/FR-04：status_counts
+        为忽略状态维度的服务端分组计数——limit 截短 items/total 时计数仍全量，
+        且带 status 过滤时计数口径不变（chips 计数不随档位漂移）。"""
+        admin = (
+            (await db_session.execute(select(User).where(User.email == "admin@example.com")))
+            .scalars()
+            .first()
+        )
+        assert admin is not None
+        rt = await _make_runtime(db_session, admin.id)
+        await _make_session(db_session, admin.id, rt.id, status="ended")
+        await _make_session(db_session, admin.id, rt.id, status="active")
+        await _make_session(db_session, admin.id, rt.id, status="failed")
+
+        # limit=2 < total=3：items 被截短，但 status_counts 仍是全量三态计数。
+        resp = await client.get("/api/daemon/sessions?limit=2", headers=auth_headers)
+        assert resp.status_code == 200, resp.text
+        body = resp.json()
+        assert body["total"] == 3
+        assert len(body["items"]) == 2
+        assert body["status_counts"]["ended"] == 1
+        assert body["status_counts"]["active"] == 1
+        assert body["status_counts"]["failed"] == 1
+
+        # 带 status=ended 过滤：total 收敛为 1，status_counts 口径不变（全量）。
+        resp2 = await client.get("/api/daemon/sessions?status=ended", headers=auth_headers)
+        assert resp2.status_code == 200, resp2.text
+        body2 = resp2.json()
+        assert body2["total"] == 1
+        assert body2["status_counts"]["ended"] == 1
+        assert body2["status_counts"]["active"] == 1
+        assert body2["status_counts"]["failed"] == 1
+
+    async def test_status_group_ongoing_filter(
+        self,
+        client: AsyncClient,
+        auth_headers: dict[str, str],
+        db_session: AsyncSession,
+    ) -> None:
+        """2026-10-27-sessions-total-and-status-filter FR-02：status_group=ongoing
+        一次查询命中在线三态（pending/active/reconnecting），ended/failed 排除。"""
+        admin = (
+            (await db_session.execute(select(User).where(User.email == "admin@example.com")))
+            .scalars()
+            .first()
+        )
+        assert admin is not None
+        rt = await _make_runtime(db_session, admin.id)
+        await _make_session(db_session, admin.id, rt.id, status="pending")
+        await _make_session(db_session, admin.id, rt.id, status="active")
+        await _make_session(db_session, admin.id, rt.id, status="reconnecting")
+        await _make_session(db_session, admin.id, rt.id, status="ended")
+        await _make_session(db_session, admin.id, rt.id, status="failed")
+
+        resp = await client.get("/api/daemon/sessions?status_group=ongoing", headers=auth_headers)
+        assert resp.status_code == 200, resp.text
+        body = resp.json()
+        assert body["total"] == 3
+        assert {item["status"] for item in body["items"]} == {
+            "pending",
+            "active",
+            "reconnecting",
+        }
+        # 计数仍是忽略状态维度的全量口径（五态各 1）。
+        assert body["status_counts"]["pending"] == 1
+        assert body["status_counts"]["reconnecting"] == 1
+        assert body["status_counts"]["ended"] == 1
+
+    async def test_status_and_status_group_mutual_exclusion_422(
+        self,
+        client: AsyncClient,
+        auth_headers: dict[str, str],
+    ) -> None:
+        """2026-10-27-sessions-total-and-status-filter FR-02/FR-04：status 与
+        status_group 同传 422（中文文案）；status_group 非法值 Literal 422。"""
+        r = await client.get(
+            "/api/daemon/sessions?status=active&status_group=ongoing",
+            headers=auth_headers,
+        )
+        assert r.status_code == 422
+        assert "互斥" in r.text or "同时" in r.text
+        r2 = await client.get("/api/daemon/sessions?status_group=bogus", headers=auth_headers)
+        assert r2.status_code == 422
+
     async def test_invalid_status_422(
         self,
         client: AsyncClient,

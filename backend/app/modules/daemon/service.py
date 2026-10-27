@@ -975,6 +975,9 @@ class DaemonService:
         limit: int,
         offset: int,
         status_filter: str | None = None,
+        # 2026-10-27-sessions-total-and-status-filter FR-02：在线三态聚合
+        # 过滤透传（facade 签名与 SessionService 同步，缺省会 500）。
+        status_group: str | None = None,
         runtime_id: uuid.UUID | None = None,
         machine_id: uuid.UUID | None = None,
         provider: str | None = None,
@@ -998,6 +1001,38 @@ class DaemonService:
             limit=limit,
             offset=offset,
             status_filter=status_filter,
+            status_group=status_group,
+            runtime_id=runtime_id,
+            machine_id=machine_id,
+            provider=provider,
+            q=q,
+            workspace_id=workspace_id,
+            change_id=change_id,
+            ql_id=ql_id,
+            ppm_item_kind=ppm_item_kind,
+            ppm_item_id=ppm_item_id,
+            archived=archived,
+        )
+
+    async def list_agent_session_status_counts(
+        self,
+        user_id: uuid.UUID,
+        *,
+        runtime_id: uuid.UUID | None = None,
+        machine_id: uuid.UUID | None = None,
+        provider: str | None = None,
+        q: str | None = None,
+        workspace_id: uuid.UUID | None = None,
+        change_id: uuid.UUID | None = None,
+        ql_id: str | None = None,
+        ppm_item_kind: str | None = None,
+        ppm_item_id: uuid.UUID | None = None,
+        archived: bool | None = False,
+    ) -> dict[str, int]:
+        """按 status 分组计数（2026-10-27-sessions-total-and-status-filter
+        FR-04，透传 SessionService 同名函数——口径与列表除状态维度外一致）。"""
+        return await self._sess.list_agent_session_status_counts(
+            user_id,
             runtime_id=runtime_id,
             machine_id=machine_id,
             provider=provider,
