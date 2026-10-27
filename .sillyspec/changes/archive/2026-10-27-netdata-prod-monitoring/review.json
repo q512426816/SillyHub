@@ -1,0 +1,30 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-27-netdata-prod-monitoring",
+  "reviewer": "subagent",
+  "verdict": "PASS",
+  "reviewedAgainst": "089bc22e66afdf4baaa3f8036510f98e4c82b116",
+  "findings": [
+    {
+      "severity": "P3",
+      "status": "open",
+      "title": "change.patch 冻结件混入 17 个非本变更文件，归档留档将误导交付面回读",
+      "evidence": "design 文件变更清单仅 deploy.md + tasks.md，实际交付为 ef7e1f36d..089bc22e6 四提交（安装/回环绑定/公网探测/deploy.md 条目）；patch 中 backend/app/modules/spec_workspace/{drift_probe.py,service.py,tests/test_archive_scoped_reparse.py} 与 frontend turn 视图等 17 文件属并行变更工作区 diff 被 CLI 全量冻结收编（archive-reparse-oom-governance 已独立归档于 4d3b57dcf，turn-phase-stall-honest-ui 与 mobile-chat-visual-round4 活跃中）——本评审已将其剔除出评审面，以 git log 四提交链为交付事实；建议归档时在说明中注明实际交付面",
+      "location": ".sillyspec/changes/2026-10-27-netdata-prod-monitoring/change.patch:109+"
+    },
+    {
+      "severity": "P3",
+      "status": "resolved-as-accepted",
+      "title": "design 声明边界逐条裁决：全部可接受（无 P1/P2 级违反）",
+      "evidence": "① 不接 Netdata Cloud/指标不出网——与自托管零出网安全诉求一致，可接受；② 面板无密码认证、依赖回环绑定+SSH 隧道——应用层兜底 [web] bind to=127.0.0.1（dec20471e ss 实测仅回环监听）+ 公网探测不可达（8cc2e22c5 TcpTestSucceeded=False）双防护均已兑现留证，即使安全组误放行也不暴露，可接受；③ 选型放弃项（apt 老版/Cloud/安全组限源 IP/Prometheus+Grafana）均附明确理由（版本老旧/指标出网/家宽 IP 漂移维护成本/单机场景过重），可接受；④ 资源占用取舍（约 1~5% 单核 + 100~400MB 内存、磁盘分层库 1~2G）有余量 5.9G 内存/41G 盘口径支撑，可接受",
+      "location": ".sillyspec/changes/2026-10-27-netdata-prod-monitoring/design.md:41"
+    }
+  ],
+  "dimensionNotes": {
+    "乱序": "n/a",
+    "并发": "n/a",
+    "切换": "n/a",
+    "作用域": "n/a"
+  },
+  "reviewedAt": "2026-10-27T04:03:52Z"
+}

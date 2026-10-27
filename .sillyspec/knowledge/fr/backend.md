@@ -7756,3 +7756,24 @@ superseded_by：FR-auth-003
 摘要：主路径
 全文：.sillyspec/changes/archive/2026-10-27-mobile-chat-visual-round4/requirements.md#FR-03
 最近确认：0069bb234ffa70ccfba04426ca885095484926fc
+
+## FR-backend-040 腾讯云生产服务器上 Netdata 以 systemd 服务稳定运行（stable 通道、遥测关闭）
+变更：2026-10-27-netdata-prod-monitoring
+状态：active
+摘要：主路径
+全文：.sillyspec/changes/archive/2026-10-27-netdata-prod-monitoring/requirements.md#FR-01
+最近确认：089bc22e66afdf4baaa3f8036510f98e4c82b116
+
+## FR-backend-041 Netdata Web 仅绑定 127.0.0.1，公网 19999 端口实测不可达
+变更：2026-10-27-netdata-prod-monitoring
+状态：active
+摘要：公网探测兜底
+全文：.sillyspec/changes/archive/2026-10-27-netdata-prod-monitoring/requirements.md#FR-02
+最近确认：089bc22e66afdf4baaa3f8036510f98e4c82b116
+
+## FR-backend-042 deploy.md 模块文档补充 Netdata 排查条目（SSH 隧道访问命令、容器级指标入口、安全边界）
+变更：2026-10-27-netdata-prod-monitoring
+状态：active
+摘要：后续会话排查生产问题
+全文：.sillyspec/changes/archive/2026-10-27-netdata-prod-monitoring/requirements.md#FR-03
+最近确认：089bc22e66afdf4baaa3f8036510f98e4c82b116

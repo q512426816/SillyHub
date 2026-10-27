@@ -1,0 +1,1601 @@
+diff --git a/.sillyspec/docs/SillyHub/modules/frontend_app.changelog.md b/.sillyspec/docs/SillyHub/modules/frontend_app.changelog.md
+index 3c7cbb4cc..8d12191d0 100644
+--- a/.sillyspec/docs/SillyHub/modules/frontend_app.changelog.md
++++ b/.sillyspec/docs/SillyHub/modules/frontend_app.changelog.md
+@@ -64,3 +64,5 @@ created_at: 2026-09-03 14:49:48
+ - 2026-10-27-ghost-spec-binding-fix | 失败命令不再生成幽灵变更占位并过滤存量
+ - 2026-10-27-task-wakeup-inject-retry | 后台任务终态唤醒注入经后端中转单发无重试，撞后端短暂不可用窗（部署重建/502/504）即 inte…
+ - 2026-10-27-mobile-chat-visual-round3 | 用户真机三轮反馈：轮次信息折行难看要单行；会话页顶部加返回会话列表按钮；会话列表卡加 PC 端同款状…
++- 2026-10-27-archive-reparse-oom-governance | 2026-10-27-archive-reparse-oom-governance
++- 2026-10-27-mobile-chat-visual-round4 | 用户四轮反馈：子代理卡/进度视图过程块(运行命令等)仍不满宽(8 处 calc(100%-120px…
+diff --git a/.sillyspec/docs/SillyHub/modules/frontend_components.changelog.md b/.sillyspec/docs/SillyHub/modules/frontend_components.changelog.md
+index 084f7e66e..28bf6a606 100644
+--- a/.sillyspec/docs/SillyHub/modules/frontend_components.changelog.md
++++ b/.sillyspec/docs/SillyHub/modules/frontend_components.changelog.md
+@@ -177,3 +177,5 @@ created_at: 2026-08-30 22:23:33
+ | 2026-10-27 | 2026-10-27-mobile-chat-visual-round3 | 用户真机三轮反馈：轮次信息折行难看要单行；会话页顶部加返回会话列表按钮；会话列表卡加 PC 端同款状… |
+ | 2026-10-27 | 2026-10-27-session-input-spacing-tighten | 会话页输入区与消息流底部留白过大——用户在浏览器开发者工具审查发现 pt-3/pt-1/pb-4/p… |
+ | 2026-10-27 | 2026-10-27-turn-phase-stall-honest-ui | 会话忙时用户消息在 backend 排队/派发链路滞留（生产实证 2026-10-27 会话 7ef… |
++| 2026-10-27 | 2026-10-27-archive-reparse-oom-governance | 2026-10-27-archive-reparse-oom-governance |
++| 2026-10-27 | 2026-10-27-mobile-chat-visual-round4 | 用户四轮反馈：子代理卡/进度视图过程块(运行命令等)仍不满宽(8 处 calc(100%-120px… |
+diff --git a/.sillyspec/docs/SillyHub/modules/frontend_lib.changelog.md b/.sillyspec/docs/SillyHub/modules/frontend_lib.changelog.md
+index 799afdb0e..5bd4d8ecc 100644
+--- a/.sillyspec/docs/SillyHub/modules/frontend_lib.changelog.md
++++ b/.sillyspec/docs/SillyHub/modules/frontend_lib.changelog.md
+@@ -49,3 +49,4 @@ created_at: 2026-10-16 16:40:00
+ - 2026-10-27-ghost-spec-binding-fix | 失败命令不再生成幽灵变更占位并过滤存量
+ - 2026-10-27-task-wakeup-inject-retry | 后台任务终态唤醒注入经后端中转单发无重试，撞后端短暂不可用窗（部署重建/502/504）即 inte…
+ - 2026-10-27-turn-phase-stall-honest-ui | 会话忙时用户消息在 backend 排队/派发链路滞留（生产实证 2026-10-27 会话 7ef…
++- 2026-10-27-mobile-chat-visual-round4 | 用户四轮反馈：子代理卡/进度视图过程块(运行命令等)仍不满宽(8 处 calc(100%-120px…
+diff --git a/.sillyspec/docs/frontend/modules/components-daemon.changelog.md b/.sillyspec/docs/frontend/modules/components-daemon.changelog.md
+index f018e0779..d229e4720 100644
+--- a/.sillyspec/docs/frontend/modules/components-daemon.changelog.md
++++ b/.sillyspec/docs/frontend/modules/components-daemon.changelog.md
+@@ -12,3 +12,4 @@ created_at: 2026-09-04 13:58:00
+ - ql-20260916-013-c032 | /runs 扇出线上根治（快照播种替代日志窗口播种）+ 翻页覆盖（HISTORY_PAGE_SIZE 50→400）+ prepend 锚点竞态（高度未增不消费+空页清锚）——浏览器实测定位三问题（20ms 36+ 条并发/1.1 万条日志滚 220 页/滚顶弹回）。dedup 6/6 + session-panel 全套 212 + scroll/race 9/9 绿，tsc 0
+ - ql-20260916-014-c032 | 翻页游标块序错位根治（初始+翻页游标取时间最旧行，修重复拉取/留洞致孤儿空壳）+ 跳转 hit 要求内容行（空壳命中不翻页）+ 跳转循环 rAF→setTimeout（后台标签页卡死 suppress）。浏览器实测：6400 请求 3217 深度→12 页 12 次无重复，32 轮附近四轮内容全出。session-panel 218 用例绿，tsc 0
+ - ql-20260917-cbe014d9 | 24h 风险审查三缺陷修复——①翻页空页守卫（older.reduce 空数组 TypeError 被静默，400 整数倍会话翻页永久死循环，对齐初始加载关闸写法）；②prepend 锚 effect cleanup（流式提交无界堆积 watch interval，anchor.until 延期+apply 恒真钉死自清）；③看门狗心跳语义拆分（lastEventRef 只计真实事件 + 300s 安静门兜底丢终态，心跳不重置轮次/轮活动；停表后新真实事件经 watchdogRearmRef 重启）。新增回归 5 用例先红后绿（修复前全失败），两测试文件 24/24 + 相邻面 101 用例绿，tsc 0，eslint 0 错误
++- 2026-10-27-archive-reparse-oom-governance | (见该变更 quicklog/归档)
+diff --git a/.sillyspec/docs/frontend/modules/components-daemon.md b/.sillyspec/docs/frontend/modules/components-daemon.md
+index 732ce1cf5..9c07702d5 100644
+--- a/.sillyspec/docs/frontend/modules/components-daemon.md
++++ b/.sillyspec/docs/frontend/modules/components-daemon.md
+@@ -4,7 +4,7 @@ doc_type: module-card
+ module_id: components-daemon
+ author: qinyi
+ created_at: 2026-08-18 01:45:00
+-updated_at: 2026-09-16 17:30:00
++updated_at: 2026-10-27T03:52:38.559Z
+ ---
+ 
+ # Daemon 运行时交互组件（components-daemon）
+diff --git a/.sillyspec/docs/frontend/modules/styles.changelog.md b/.sillyspec/docs/frontend/modules/styles.changelog.md
+new file mode 100644
+index 000000000..cd6700439
+--- /dev/null
++++ b/.sillyspec/docs/frontend/modules/styles.changelog.md
+@@ -0,0 +1,3 @@
++# styles 变更索引
++
++- 2026-10-27-archive-reparse-oom-governance | (见该变更 quicklog/归档)
+diff --git a/.sillyspec/docs/frontend/modules/test-utils.changelog.md b/.sillyspec/docs/frontend/modules/test-utils.changelog.md
+index 14c61d834..6fe6bf0a1 100644
+--- a/.sillyspec/docs/frontend/modules/test-utils.changelog.md
++++ b/.sillyspec/docs/frontend/modules/test-utils.changelog.md
+@@ -6,3 +6,4 @@
+ 
+ - ql-20260921-008-b962 | 第三方结构查询收口 dom-queries.ts + 样式断言审计结论：新建 src/test/dom-queries.ts（antd Modal.confirm/Select/Tree/Spin/Segmented/Badge/Image + echarts 容器 + animate-spin 加载态，17 个导出），codemod 迁移 22 个测试文件约 95 处 `.ant-*`/`.echarts-for-react` 字面量查询——antd/echarts 升级的测试爆炸面收拢到单文件；scan-docs-page 与 pre-session-picker 因并行会话改动暂缓。样式断言逐处审计后**零删除**：全部为有意契约守卫（bg-brand-600 主题语义阶、min-h-[44px] 触摸热区、R-01 单行槽位、原型对齐配色、tabular-nums 用例本体等）。验证：22 文件 513 用例全过、tsc 干净、eslint 0 error（13 warning 全存量）。
+ - ql-20260921-006-2095 | 覆盖率工具接入（详见根 ci.changelog）：vitest coverage 段落归本卡测试语义管辖，text+html 双报告、不设 thresholds。
++- 2026-10-27-archive-reparse-oom-governance | (见该变更 quicklog/归档)
+diff --git a/.sillyspec/docs/multi-agent-platform/modules/backend.changelog.md b/.sillyspec/docs/multi-agent-platform/modules/backend.changelog.md
+index aaaa0e119..a2a84b699 100644
+--- a/.sillyspec/docs/multi-agent-platform/modules/backend.changelog.md
++++ b/.sillyspec/docs/multi-agent-platform/modules/backend.changelog.md
+@@ -117,3 +117,5 @@
+ - 2026-10-27-task-wakeup-precision-fix | 修复任务唤醒判据与通知四处缺陷
+ - 2026-10-27-ghost-spec-binding-fix | 失败命令不再生成幽灵变更占位并过滤存量
+ - 2026-10-27-task-wakeup-inject-retry | 后台任务终态唤醒注入经后端中转单发无重试，撞后端短暂不可用窗（部署重建/502/504）即 inte…
++- 2026-10-27-archive-reparse-oom-governance | (见该变更 quicklog/归档)
++- 2026-10-27-mobile-chat-visual-round4 | 用户四轮反馈：子代理卡/进度视图过程块(运行命令等)仍不满宽(8 处 calc(100%-120px…
+diff --git a/.sillyspec/docs/multi-agent-platform/modules/deploy.md b/.sillyspec/docs/multi-agent-platform/modules/deploy.md
+index 4e5aec064..d6a1abca1 100644
+--- a/.sillyspec/docs/multi-agent-platform/modules/deploy.md
++++ b/.sillyspec/docs/multi-agent-platform/modules/deploy.md
+@@ -44,12 +44,14 @@ multi-agent-platform 的一体化部署编排组件，用 Docker Compose 把 bac
+ - backend 连 minio 必须走容器服务名 `http://minio:9000`（compose backend environment 默认值已设）；`config.py` 的 `s3_endpoint` 默认 `http://localhost:9000` 仅给本机 native run 用，容器内用 localhost 连不通兄弟 minio 容器（`EndpointConnectionError` → 上传 500）。
+ - **LiteLLM 网关（openai 格式供应商，change 2026-08-08）**：openai 格式供应商经 LiteLLM 做 Anthropic↔OpenAI 转换（**D-012 转换外包**，平台代码不实现转换）。端到端链路：openai 供应商 set-default → 后端 register 到 LiteLLM（model_name=`usr-<uid>-<pid>`，litellm_params.model=`openai/<model>`）→ lease 下发 openai 形态 provider_config（6 字段，**不含上游 api_key**）→ daemon 注入 `ANTHROPIC_BASE_URL`=litellm_base_url + `ANTHROPIC_AUTH_TOKEN`=litellm_master_key + `ANTHROPIC_MODEL`=`usr-<uid>-<pid>` → Claude Code 发 Anthropic `/v1/messages` → LiteLLM 按 model_name 路由转 OpenAI 打上游。上游 api_key 只注册在 LiteLLM（master key 加密），不下发 daemon（D-003/NFR-01）。`LITELLM_MASTER_KEY` 须替换占位（`.env.example` 不可直接生产用）。
+ - **知识搜索嵌入部署实证（2026-10-15-knowledge-search-pgvector）**：生产服务器（阿里云 2 核 1.6G）无外网拉不到 fastembed 模型——须预置模型缓存挂载 `./models/fastembed_cache`；容器内全量嵌入不可行（mem_limit 800→1100m，建库改本机 20 核 + `ssh -L 15432:<PG容器IP>:5432` 隧道直写生产库，228.7s/6712 chunks）；PG 容器端口未映射宿主，隧道目标须写容器 IP 而非 127.0.0.1。
++- **生产秒级监控 Netdata（2026-10-27-netdata-prod-monitoring）**：腾讯云生产机（124.222.127.242，服务器规格已升 4 核/7.5G/59G——build-and-save.sh 头注释「2 核」为过时信息）宿主机装有 Netdata（stable 通道、遥测关闭、systemd 开机自启），供性能问题秒级现场排查（瞬时抖动/OOM/单容器资源打满）。访问：本机开 SSH 隧道 `ssh -i ~/.ssh/tencent_deploy -L 19999:127.0.0.1:19999 ubuntu@124.222.127.242`，浏览器开 `http://localhost:19999`；逐容器（backend/frontend/postgres/redis/minio）CPU/内存/磁盘/网络曲线在面板 Containers 分区（cgroups 自动识别，无需配置）。安全红线：面板无密码认证、Web 仅绑 `127.0.0.1:19999`（`/etc/netdata/netdata.conf` `[web] bind to`）——**禁止在腾讯云安全组放行 19999**；改配置后 `sudo systemctl restart netdata` 生效；数据默认落本机分层库、不接 Netdata Cloud（不出网）。
+ 
+ ## 人工备注
+ <!-- MANUAL_NOTES_START -->
+ <!-- MANUAL_NOTES_END -->
+ 
+ ## 变更索引
++- 2026-10-27-netdata-prod-monitoring | 生产机（124.222.127.242）宿主装 Netdata 秒级监控（stable/关遥测/绑回环），deploy.md 补排查条目（SSH 隧道访问+容器指标入口+安全红线：禁安全组放行 19999）
+ - 2026-10-16-backend-mem-polling task-09/10 | 配额去超卖+OOM 保护+构建稳定性（0279cd175/f62065e2f）：compose redis 128m→64m、minio 256m→128m、frontend 400m→300m（backend 1100m+postgres 256m 保持，总 2.14G→1.85G）；backend 服务级 oom_score_adj:-500（注意：当前 compose 版本忽略该键——inspect OomScoreAdj=0，entrypoint try-best 写 /proc 亦 EPERM，保护缺失=改造前现状非回归，升 compose 后生效）；backend Dockerfile ENV UV_HTTP_TIMEOUT=300（wheel 下载 30s 默认超时国内网络抖动挂构建，filelock 实证）。2026-10-16 部署腾讯轻量（124.222.127.242）四指标实测达标（RSS 211MiB/迁移 20261016100000 回填 1128 行/列表 0.5ms/idle-txn 归零）；回滚 tag backup-20261016-1253。
+ - ql-20260722-012-dddb | 补 backend environment S3 配置（默认 `http://minio:9000`）+ `.env.example` 同步，修复容器内连不通 minio 致平台文件中心上传 500
+ - change 2026-08-08-llm-provider-openai-format | deploy 加 litellm + litellm-db 服务（OpenAI↔Anthropic 转换网关，D-012 外包）+ `LITELLM_MASTER_KEY`/`STORE_MODEL_IN_DB` env + `.env.example` 占位 + openai 端到端链路说明
+diff --git a/.sillyspec/docs/multi-agent-platform/modules/frontend.changelog.md b/.sillyspec/docs/multi-agent-platform/modules/frontend.changelog.md
+index ba587c1b5..4a0ef1816 100644
+--- a/.sillyspec/docs/multi-agent-platform/modules/frontend.changelog.md
++++ b/.sillyspec/docs/multi-agent-platform/modules/frontend.changelog.md
+@@ -227,3 +227,5 @@
+ | 2026-10-27 | 2026-10-27-mobile-chat-visual-round3 | 用户真机三轮反馈：轮次信息折行难看要单行；会话页顶部加返回会话列表按钮；会话列表卡加 PC 端同款状… |
+ | 2026-10-27 | 2026-10-27-session-input-spacing-tighten | 会话页输入区与消息流底部留白过大——用户在浏览器开发者工具审查发现 pt-3/pt-1/pb-4/p… |
+ | 2026-10-27 | 2026-10-27-turn-phase-stall-honest-ui | 会话忙时用户消息在 backend 排队/派发链路滞留（生产实证 2026-10-27 会话 7ef… |
++| 2026-10-27 | 2026-10-27-archive-reparse-oom-governance | 2026-10-27-archive-reparse-oom-governance |
++| 2026-10-27 | 2026-10-27-mobile-chat-visual-round4 | 用户四轮反馈：子代理卡/进度视图过程块(运行命令等)仍不满宽(8 处 calc(100%-120px… |
+diff --git a/backend/app/main.py b/backend/app/main.py
+index 1c7bdfedb..339c2c8e6 100644
+--- a/backend/app/main.py
++++ b/backend/app/main.py
+@@ -144,6 +144,10 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
+     # 走 finally 时不会因未定义而掩盖原始异常（对齐上方三协程注释）。
+     scheduled_send_task: asyncio.Task[None] | None = None
+     consensus_sweep_task: asyncio.Task[None] | None = None
++    # 2026-10-27-archive-reparse-oom-governance task-06：漂移探针任务（先声明
++    # 后赋值——创建点在 try 内，异常提前退出时 finally 引用不 NameError，
++    # 对齐上方 patrol_task 同款防御注释）。
++    drift_probe_task: asyncio.Task[None] | None = None
+     try:
+         # Bootstrap auth once the DB connection pool exists.
+         from app.core.db import get_engine, get_session_factory
+@@ -322,6 +326,15 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
+             consensus_sweeper_loop(), name="consensus-sweeper"
+         )
+         log.info("consensus_sweeper_started")
++        # 2026-10-27-archive-reparse-oom-governance task-06（FR-04 / D-008）：
++        # 漂移探针 + 容器内存水位常驻协程——5min 周期只读抽样核对（行 location
++        # vs 磁盘目录）仅告警不自愈；cgroup 水位超 80% 告警（OOM 前可预警，
++        # 2026-10-27 生产实证被杀前零信号）。关停契约同 scheduled_send_sweeper
++        # （cancel + await gather；sleep 处 CancelledError 透传）。
++        from app.modules.spec_workspace.drift_probe import drift_probe_loop
++
++        drift_probe_task = asyncio.create_task(drift_probe_loop(), name="spec-drift-probe")
++        log.info("drift_probe_started")
+         # 2026-08-06-public-mcp-server task-05 / spike-A 坑 2（P0）：MCP session
+         # manager 必须在 app 服务期间常驻。streamable_http_app() 返回的子 app
+         # 虽自带 lifespan=lambda app: self.session_manager.run()，但 Starlette
+@@ -375,6 +388,12 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
+         if consensus_sweep_task is not None:
+             consensus_sweep_task.cancel()
+             await asyncio.gather(consensus_sweep_task, return_exceptions=True)
++        # 2026-10-27-archive-reparse-oom-governance task-06：漂移探针关停——
++        # 同上 cancel 后 await gather 落地（探针轮只读 + 水位读文件，无 DB 写
++        # 在途风险，取消即走）。
++        if drift_probe_task is not None:
++            drift_probe_task.cancel()
++            await asyncio.gather(drift_probe_task, return_exceptions=True)
+         # ql-20260910-005：spec_workspace reparse 后台任务排空——巡检类协程
+         # 是「取消即走」，reparse 任务不同：每步是独立短事务（取消会回滚到
+         # 上一致投影，但截断中的事务退出路径不可控），且尾随节流窗内的补发
+diff --git a/backend/app/modules/spec_workspace/drift_probe.py b/backend/app/modules/spec_workspace/drift_probe.py
+new file mode 100644
+index 000000000..cd18a671f
+--- /dev/null
++++ b/backend/app/modules/spec_workspace/drift_probe.py
+@@ -0,0 +1,180 @@
++"""漂移探针 + 容器内存水位周期任务（2026-10-27-archive-reparse-oom-governance
++task-05 / FR-04 / D-008）。
++
++- :func:`check_drift_once`：抽样核对 changes 行 location 与磁盘 spec 镜像目录
++  形态一致性（active → ``spec_root/changes/<key>`` 在场；archive →
++  ``spec_root/changes/archive/<key>`` 在场）。**只读只告警**（D-008）：发现
++  不一致仅 ``log.warning``，零写操作、不自动触发任何 reparse——修复通道是
++  人工调既有手动 reparse 端点（D-006 rejected 边界：不做定时全量对账/自动
++  修复，尊重 knowledge「拒全量对账常态化」先例——Windows bind mount stat
++  断崖 + 全量 93s 超时史）。
++- :func:`log_memory_watermark`：读 cgroup 内存水位（v2 ``memory.current`` /
++  ``memory.limit``，v1 ``memory.usage_in_bytes`` / ``memory.limit_in_bytes``）
++  周期落日志，超 ``_WATERMARK_HIGH_RATIO``（0.8）告警——OOM 前可预警
++  （2026-10-27 生产实证：anon-rss≈2.37G 顶爆 2500m memcg 被杀前零信号）。
++  无 cgroup 环境（本地 dev/Windows）静默跳过（debug 一次），不报错。
++- :func:`drift_probe_loop`：常驻循环（main.py lifespan create_task 挂载），
++  模式与关停契约同 ``scheduled_send_sweeper``——每轮独立短 session、单轮异常
++  ``log.exception`` 吞掉不崩循环、``asyncio.sleep`` 处 CancelledError 透传。
++
++自灭条件（非功能生命周期面，design 风险登记 R-03/R-06）：唯一常驻资源 =
++asyncio task，随 lifespan cancel + await gather 死；无文件锁/子进程/句柄。
++"""
++
++from __future__ import annotations
++
++import asyncio
++from pathlib import Path
++
++from sqlalchemy import select
++from sqlalchemy.ext.asyncio import AsyncSession
++
++from app.core.logging import get_logger
++
++log = get_logger(__name__)
++
++# 探针周期（秒）。抽样核对 + 水位各一轮内顺跑；5 分钟粒度平衡「漂移发现
++# 时效」与「只读探针自身开销」（每轮 ≤50 行 SELECT + ≤50 次 stat）。
++DRIFT_PROBE_INTERVAL_SEC = 300.0
++# 单轮抽样上限（FR-04：≤50 行/轮——按 updated_at 倒序取最新活动面，覆盖最
++# 可能漂移的近期变更；全量核对属 D-006 rejected 的「全量对账常态化」禁区）。
++DRIFT_SAMPLE_LIMIT = 50
++# 水位告警阈值（current/limit 比例，超 0.8 告警——留 20% 缓冲给打包/重扫峰）。
++_WATERMARK_HIGH_RATIO = 0.8
++
++# cgroup 文件候选（v2 在前、v1 兜底；均缺失 = 无 cgroup 环境静默跳过）。
++_CGROUP_CURRENT_FILES = (
++    "/sys/fs/cgroup/memory.current",
++    "/sys/fs/cgroup/memory/memory.usage_in_bytes",
++)
++_CGROUP_LIMIT_FILES = (
++    "/sys/fs/cgroup/memory.limit",
++    "/sys/fs/cgroup/memory/memory.limit_in_bytes",
++)
++
++_watermark_env_missing_logged = False
++
++
++def _read_first_existing(paths: tuple[str, ...]) -> int | None:
++    for p in paths:
++        try:
++            text = Path(p).read_text(encoding="utf-8").strip()
++            return int(text)
++        except (OSError, ValueError):
++            continue
++    return None
++
++
++async def check_drift_once(db: AsyncSession) -> int:
++    """抽样核对行 location vs 磁盘目录形态（只读），返回发现的漂移行数。
++
++    漂移定义（最常见两类）：location='active' 但活跃目录不在场（归档未收敛/
++    目录误删）；location='archive' 但归档目录不在场（un-archive 未收敛/目录
++    误删）。软删行（location='deleted'，平台删除锚点保活）与无 spec_root 的
++    工作区跳过。stat 走 ``asyncio.to_thread``（Windows bind mount stat 慢的
++    先例——不占事件循环）。
++    """
++    from app.modules.change.model import Change
++    from app.modules.spec_workspace.model import SpecWorkspace
++
++    rows = (
++        await db.execute(
++            select(Change.change_key, Change.location, Change.workspace_id)
++            .where(Change.location.in_(("active", "archive")))
++            .order_by(Change.updated_at.desc())
++            .limit(DRIFT_SAMPLE_LIMIT)
++        )
++    ).all()
++    if not rows:
++        return 0
++    spec_roots: dict = {}
++    ws_rows = (await db.execute(select(SpecWorkspace.workspace_id, SpecWorkspace.spec_root))).all()
++    for ws_id, root in ws_rows:
++        if root:
++            spec_roots[ws_id] = Path(root)
++
++    # 逐工作区批量 stat 入线程（一批一次性投递，避免逐行 to_thread 往返）。
++    def _check_all() -> list[tuple[str, str, str]]:
++        findings: list[tuple[str, str, str]] = []
++        for key, location, ws_id in rows:
++            root = spec_roots.get(ws_id)
++            if root is None:
++                continue
++            expected = (
++                root / "changes" / "archive" / key
++                if location == "archive"
++                else root / "changes" / key
++            )
++            if not expected.is_dir():
++                findings.append((key, location, str(ws_id)))
++        return findings
++
++    drifts = await asyncio.to_thread(_check_all)
++    for key, location, ws_id in drifts:
++        log.warning(
++            "spec_workspace.drift_detected",
++            change_key=key,
++            location=location,
++            workspace_id=ws_id,
++            hint="行 location 与磁盘目录不一致——人工核对后可调手动 reparse 端点收敛（探针只告警不自愈，D-008）",
++        )
++    return len(drifts)
++
++
++def log_memory_watermark() -> float | None:
++    """读 cgroup 内存水位落日志；返回使用比例（无 cgroup 环境 None）。
++
++    超 ``_WATERMARK_HIGH_RATIO`` 告警（warning），否则周期性 info（可观测基线）；
++    无 cgroup 环境仅首次 debug 提示后静默（本地 dev/Windows 兼容，R-05）。
++    """
++    global _watermark_env_missing_logged
++    current = _read_first_existing(_CGROUP_CURRENT_FILES)
++    limit = _read_first_existing(_CGROUP_LIMIT_FILES)
++    if current is None or limit is None or limit <= 0:
++        if not _watermark_env_missing_logged:
++            _watermark_env_missing_logged = True
++            log.debug("spec_workspace.watermark_env_missing", current=current, limit=limit)
++        return None
++    ratio = current / limit
++    if ratio > _WATERMARK_HIGH_RATIO:
++        log.warning(
++            "spec_workspace.memory_watermark_high",
++            ratio=round(ratio, 3),
++            current_mb=round(current / 1024 / 1024, 1),
++            limit_mb=round(limit / 1024 / 1024, 1),
++        )
++    else:
++        log.info(
++            "spec_workspace.memory_watermark",
++            ratio=round(ratio, 3),
++            current_mb=round(current / 1024 / 1024, 1),
++            limit_mb=round(limit / 1024 / 1024, 1),
++        )
++    return ratio
++
++
++async def drift_probe_loop(interval: float = DRIFT_PROBE_INTERVAL_SEC) -> None:
++    """常驻探针循环（main.py lifespan ``create_task`` 消费）。
++
++    仿 ``scheduled_send_sweeper``：每轮独立短 session（轮间不占连接池）、
++    单轮异常 ``log.exception`` 吞掉不崩循环、``asyncio.sleep`` 处
++    CancelledError 透传保证 lifespan 的 cancel + await gather 干净落地。
++    """
++    from app.core.db import get_session_factory
++
++    session_factory = get_session_factory()
++    while True:
++        try:
++            async with session_factory() as db:
++                drifts = await check_drift_once(db)
++                if drifts:
++                    log.info("spec_workspace.drift_probe_round", drifts=drifts)
++            log_memory_watermark()
++        except asyncio.CancelledError:
++            raise
++        except Exception:
++            log.exception("spec_workspace.drift_probe_round_failed")
++        try:
++            await asyncio.sleep(interval)
++        except asyncio.CancelledError:
++            raise
+diff --git a/backend/app/modules/spec_workspace/service.py b/backend/app/modules/spec_workspace/service.py
+index 1c2746024..34ccd7bc6 100644
+--- a/backend/app/modules/spec_workspace/service.py
++++ b/backend/app/modules/spec_workspace/service.py
+@@ -58,6 +58,11 @@ _reparse_last_run: dict[uuid.UUID, float] = {}
+ _reparse_inflight: set[uuid.UUID] = set()
+ _reparse_pending: dict[uuid.UUID, tuple[list[str], list[FileOp]]] = {}
+ _reparse_trailing_timers: set[uuid.UUID] = set()
++# 2026-10-27-archive-reparse-oom-governance（D-010）：结构性触发（归档/跨根移动/
++# 删除）撞在途 reparse 时的待补发输入——由 _spawn_bg_reparse 的完成回调**即时**
++# 补发（非 120s 硬定时尾随），保住结构性收敛 ≤60s 承诺（事故场景六会话同窗归档
++# 恰是 in-flight 重叠态，硬等满窗会突破承诺——Grill P2-1）。
++_reparse_structural_pending: dict[uuid.UUID, tuple[list[str], list[FileOp]]] = {}
+ _reparse_bg_tasks: set["asyncio.Task[object]"] = set()
+ 
+ 
+@@ -78,6 +83,7 @@ def reset_reparse_scheduler() -> None:
+     _reparse_inflight.clear()
+     _reparse_pending.clear()
+     _reparse_trailing_timers.clear()
++    _reparse_structural_pending.clear()
+ 
+ 
+ async def drain_reparse_workers(*, timeout_seconds: float = 15.0) -> bool:
+@@ -197,6 +203,28 @@ _BUNDLE_CACHE_VERSIONS_PER_WS = 2
+ _bundle_gzip_cache: dict[tuple[uuid.UUID, int], bytes] = {}
+ _bundle_gzip_cache_lock = threading.Lock()
+ 
++# 2026-10-27-archive-reparse-oom-governance（D-009/D-011）：gzip 变体同版本
++# single-flight——同 (workspace, spec_version) 并发请求只产生一次构建，其余
++# 等待复用产物（旧形态并发双建白耗内存/CPU）。等待带失败传播（D-011）：现行
++# 缓存回填只在流**完整消费**后发生（断连半包不入缓存），构建方异常/断连时
++# entry 置失败，等待者捕获后降级自建——失败不传染、等待者永不悬挂；等待超时
++# （_BUNDLE_INFLIGHT_WAIT_SECONDS，构建方消费端卡死防御）同样降级自建。
++_BUNDLE_INFLIGHT_WAIT_SECONDS = 120.0
++
++
++class _BundleInflightEntry:
++    """同版本在建登记：event 由构建方完成/失败时置位，等待方阻塞在其上。"""
++
++    __slots__ = ("data", "event", "failed")
++
++    def __init__(self) -> None:
++        self.event = threading.Event()
++        self.data: bytes | None = None
++        self.failed = False
++
++
++_bundle_gzip_inflight: dict[tuple[uuid.UUID, int], _BundleInflightEntry] = {}
++
+ 
+ def _bundle_cache_max_bytes() -> int:
+     """全局字节帽（settings.spec_bundle_cache_max_bytes，默认 128MB）。"""
+@@ -267,27 +295,94 @@ class _CachingBundleIterator:
+ 
+     消费端提前关闭（断连）→ 生成器在 yield 处废弃，不回填（防半包入缓存）。
+     属性委托内层（``_cancelled``/``_thread`` 测试钩子照常可用）。
++
++    2026-10-27-archive-reparse-oom-governance D-009/D-011：可选 ``entry`` 挂同
++    版本在建登记——成功回填后把产物交给等待方复用；提前关闭/废弃时置失败，
++    等待方降级自建（失败传播，不悬挂）。
+     """
+ 
+-    def __init__(self, inner: "_BundleTarStream", key: tuple[uuid.UUID, int]) -> None:
++    def __init__(
++        self,
++        inner: "_BundleTarStream",
++        key: tuple[uuid.UUID, int],
++        entry: "_BundleInflightEntry | None" = None,
++    ) -> None:
+         self._inner = inner
+         self._key = key
++        self._entry = entry
++        self._completed = False
+ 
+     def __iter__(self) -> "Iterator[bytes]":
+         buf = bytearray()
+-        for chunk in self._inner:
+-            buf.extend(chunk)
+-            yield chunk
++        try:
++            for chunk in self._inner:
++                buf.extend(chunk)
++                yield chunk
++        except GeneratorExit:
++            # 消费端废弃生成器（GC/断连）：失败传播给等待方 + 关内层资源后透传。
++            if self._entry is not None and not self._completed:
++                self._entry.failed = True
++                self._finish_entry()
++            self._inner.close()
++            raise
+         if buf:
+-            _bundle_gzip_cache_put(self._key, bytes(buf))
++            data = bytes(buf)
++            _bundle_gzip_cache_put(self._key, data)
++            self._completed = True
++            if self._entry is not None:
++                self._entry.data = data
++                self._finish_entry()
+ 
+     def close(self) -> None:
+-        self._inner.close()
++        try:
++            self._inner.close()
++        finally:
++            if self._entry is not None and not self._completed:
++                self._entry.failed = True
++                self._finish_entry()
++
++    def _finish_entry(self) -> None:
++        self._entry.event.set()
++        with _bundle_gzip_cache_lock:
++            if _bundle_gzip_inflight.get(self._key) is self._entry:
++                _bundle_gzip_inflight.pop(self._key, None)
+ 
+     def __getattr__(self, name: str) -> object:
+         return getattr(self._inner, name)
+ 
+ 
++class _WaitingBundleStream:
++    """同版本在建等待流（D-009）：等构建方 entry 完成后重放其产物。
++
++    失败/超时/半包断连（D-011）→ 降级自建（独立流式构建 + 消费完回填缓存，
++    不再登记 inflight——避免与原构建方生命周期纠缠）。阻塞发生在消费线程
++    （iter_bundle_stream 的线程侧），不占事件循环。
++    """
++
++    def __init__(
++        self,
++        entry: _BundleInflightEntry,
++        produce: "Callable[[_QueueBackedTarWriter], None]",
++        cache_key: tuple[uuid.UUID, int],
++    ) -> None:
++        self._entry = entry
++        self._produce = produce
++        self._cache_key = cache_key
++
++    def __iter__(self) -> "Iterator[bytes]":
++        ok = self._entry.event.wait(_BUNDLE_INFLIGHT_WAIT_SECONDS)
++        if ok and not self._entry.failed and self._entry.data is not None:
++            data = self._entry.data
++            for i in range(0, len(data), _BUNDLE_CHUNK_BYTES):
++                yield data[i : i + _BUNDLE_CHUNK_BYTES]
++            return
++        # 超时/失败传播 → 降级自建。
++        yield from iter(_CachingBundleIterator(_BundleTarStream(self._produce), self._cache_key))
++
++    def close(self) -> None:
++        pass
++
++
+ class _TarStreamCancelled(Exception):
+     """内部：消费端提前关闭 bundle 流——写线程据此退出（非错误）。"""
+ 
+@@ -1190,16 +1285,33 @@ class SpecWorkspaceService:
+             return spec_root_abs, spec_version, _BundleTarStream(_produce)
+ 
+         # gzip 变体：命中缓存整包直吐（零打包零 mount 读）；未命中流式构建 +
+-        # 完整消费后回填缓存（断连半包不入缓存）。
++        # 完整消费后回填缓存（断连半包不入缓存）。同版本并发（D-009）只建一次：
++        # 先到者构建并登记 inflight，后到者等 entry（成功重放产物 / 失败或超时
++        # 降级自建，D-011）。
+         cache_key = (workspace_id, spec_version)
+         cached = _bundle_gzip_cache_get(cache_key)
+         if cached is not None:
+             return spec_root_abs, spec_version, _ReplayBundleStream(cached)
+ 
++        with _bundle_gzip_cache_lock:
++            entry = _bundle_gzip_inflight.get(cache_key)
++            if entry is None:
++                entry = _BundleInflightEntry()
++                _bundle_gzip_inflight[cache_key] = entry
++                is_builder = True
++            else:
++                is_builder = False
++
++        if is_builder:
++            return (
++                spec_root_abs,
++                spec_version,
++                _CachingBundleIterator(_BundleTarStream(_produce), cache_key, entry=entry),
++            )
+         return (
+             spec_root_abs,
+             spec_version,
+-            _CachingBundleIterator(_BundleTarStream(_produce), cache_key),
++            _WaitingBundleStream(entry, _produce, cache_key),
+         )
+ 
+     @staticmethod
+@@ -3031,30 +3143,39 @@ class SpecWorkspaceService:
+     def _compute_reparse_scope(
+         change_dirs: list[str],
+         ops: list[FileOp],
+-    ) -> tuple[list[str] | None, bool]:
+-        """计算 change reparse 范围 → ``(scope, archive_hit)``。
++    ) -> tuple[list[str] | None, bool, bool]:
++        """计算 change reparse 范围 → ``(scope, archive_hit, structural)``。
+ 
+         （change 2026-08-14-change-center-conversation-driven / D-005@v1；
+-        ql-20260818-009 收窄 archive_hit）：
++        ql-20260818-009 收窄 archive_hit；2026-10-27-archive-reparse-oom-governance
++        D-004/D-007 三元组化——归档移动改 scoped+structural，详见 ops 扫描段注释）：
++        - 有标注（``change_dirs`` 非空）：取非归档 name 进 scoped 集；归档前缀
++          （``changes/archive/<name>``）剥前缀取 name 同样进 scoped——标注不带
++          op 类型，是否需要全量由下方 ops 扫描裁决。
++        - 无标注（旧 daemon）：扫本次 ops 路径中 ``changes/`` 前缀者取 name 兜底。
+         - 有标注（``change_dirs`` 非空）：取非归档 name 进 scoped 集；归档前缀
+           （``changes/archive/<name>``）剥前缀取 name 同样进 scoped——标注不带
+           op 类型，是否需要全量由下方 ops 扫描裁决。
+         - 无标注（旧 daemon）：扫本次 ops 路径中 ``changes/`` 前缀者取 name 兜底。
+         - **archive_hit 仅在 archive 路径的 op 是 delete/rename 时置位**
+-          （ql-20260818-009）：归档=目录跨根移动，只有 delete/rename 会改变磁盘
+-          变更树形状（scoped 零删除语义处理不了 → 全量 reparse，design §9 /
+-          R-08）；纯 add/update archive 文件（daemon 陈旧缓存重推已归档文件）
+-          不改树形状 → 走 scoped（parser 三区按 name 统一匹配，archive 区条目
+-          同样 create/update），不再触发全量重扫（2026-08-18 03:01Z spec-sync
+-          93s/82s 超 CLI 30s 超时根因②）。daemon 侧归档移动 hash 不变 → 恒发
+-          rename op（spec-sync.js rename 检测），真归档仍走全量；残余风险仅
+-          「归档同时改内容 → rename 退化为 delete+add」的陈旧行残留，留待下次
+-          全量/手动重扫收敛（与 scoped 零删除红线同哲学）。
++          （ql-20260818-009，**2026-10-27 D-004 废止该口径**）：旧口径「归档=
++          跨根移动 → scoped 零删除语义处理不了 → 全量 reparse」是保守裁决；
++          parser 三区按 name 统一匹配（archive 区条目同名解析、``_apply_parsed``
++          原地翻 location），scoped 定向重扫足以承接归档移动，「scoped 零删除
++          红线」天然保持（归档 key 在 archive 区被 seen，不进删除环）。生产
++          实证（2026-10-27 六会话同窗归档 OOM）全量重扫是内存峰值主源——归档
++          移动改 **scoped + structural**（立即通道，≤60s 收敛，D-007）。全量
++          reparse 退位为手动端点/异常兜底（D-006 rejected 边界：不做定时全量）。
++        - **structural 置位判据**（改变「变更列表形状」的 op，立即通道）：跨根
++          rename（恰一侧 archive 前缀——归档/un-archive 移动）/ delete（活跃区
++          目录消失=平台删除，或归档区条目删除）。同根文件 rename / add / update
++          不置位（普通文档推送，维持 120s 合并窗）。
+ 
+         返回语义：
+-        - ``(None, True)``：全量 reparse（scope=None 含 delete）。
+-        - ``(scope, False)``：scoped reparse（scope 非空，零 delete）。
+-        - ``(None, False)``：无 changes 相关路径，**零触发**（R-01）。
++        - ``(None, True, False)``：全量 reparse（scope=None 含 delete，退化兜底）。
++        - ``(scope, False, structural)``：scoped reparse（scope 非空，零 delete）；
++          structural=真走立即通道、假走 120s 合并窗。
++        - ``(None, False, False)``：无 changes 相关路径，**零触发**（R-01）。
+         """
+ 
+         def _archive_name(norm: str) -> str | None:
+@@ -3067,6 +3188,7 @@ class SpecWorkspaceService:
+ 
+         names: list[str] = []
+         archive_hit = False
++        structural = False
+ 
+         for cd in change_dirs:
+             norm = str(cd).replace("\\", "/")
+@@ -3089,8 +3211,9 @@ class SpecWorkspaceService:
+                 names.append(norm)
+ 
+         for op in ops:
+-            # ql-20260818-009：仅 delete/rename（改变磁盘变更树形状）命中 archive
+-            # 路径才要求全量；add/update 一律 scoped。
++            # ql-20260818-009 旧口径（archive 树形 op → 全量）已废止；2026-10-27
++            # D-004/D-007：跨根移动/删除 → scoped + structural（立即通道），仅
++            # changes/archive 根级 op（无名可解析）保留全量兜底。
+             tree_shape_op = op.op in ("delete", "rename")
+             for path in (op.path, op.new_path):
+                 if not path:
+@@ -3098,11 +3221,15 @@ class SpecWorkspaceService:
+                 norm = path.replace("\\", "/")
+                 seg = _archive_name(norm)
+                 if seg is not None:
+-                    if not seg or tree_shape_op:
+-                        # 无名字段（恰为 changes/archive 根，理论不可达）或跨根移动 → 全量
++                    if not seg:
++                        # 无名字段（恰为 changes/archive 根，理论不可达）→ 全量兜底
+                         archive_hit = True
+-                    else:
+-                        names.append(seg)
++                        continue
++                    names.append(seg)
++                    if tree_shape_op:
++                        # 归档移动（跨根 rename）/ 归档区 delete：scoped 承接 +
++                        # structural（立即通道）——D-004/D-007。
++                        structural = True
+                     continue
+                 if norm.startswith("changes/"):
+                     rest = norm[len("changes/") :]
+@@ -3110,6 +3237,15 @@ class SpecWorkspaceService:
+                         first = rest.split("/", 1)[0]
+                         if first:
+                             names.append(first)
++                            if op.op == "delete" or (
++                                op.op == "rename"
++                                and (op.new_path or "")
++                                .replace("\\", "/")
++                                .startswith("changes/archive/")
++                            ):
++                                # 活跃区 delete（平台删除/目录消失）或跨根移出
++                                # （rename 旧侧活跃区、新侧归档区）→ 结构性。
++                                structural = True
+ 
+         # 去重保序
+         dedup: list[str] = []
+@@ -3118,8 +3254,8 @@ class SpecWorkspaceService:
+                 dedup.append(n)
+ 
+         if archive_hit:
+-            return None, True
+-        return dedup, False
++            return None, True, False
++        return dedup, False, structural
+ 
+     async def _trigger_change_reparse(
+         self,
+@@ -3149,8 +3285,15 @@ class SpecWorkspaceService:
+         scope 计算见 ``_compute_reparse_scope``；无 changes 相关路径零触发
+         （R-01）。测试确定性见 :func:`drain_reparse_workers`（断言前排空
+         后台任务；节流间隔模块常量可 monkeypatch）。
++
++        双通道（2026-10-27-archive-reparse-oom-governance D-007）：**结构性事件**
++        （归档/跨根移动/删除，scope 计算置 structural）绕过 120s 节流窗**立即**
++        调度（≤60s 收敛承诺）；撞在途 reparse 时入 ``_reparse_structural_pending``
++        由完成回调即时补发（D-010，非 120s 硬定时尾随）。非结构 scope 维持既有
++        节流 + 尾随合并语义零回归。single-flight（同 workspace 同时仅一个
++        reparse）两通道共享不破。
+         """
+-        scope, archive_hit = self._compute_reparse_scope(change_dirs, ops)
++        scope, archive_hit, structural = self._compute_reparse_scope(change_dirs, ops)
+         if not archive_hit and not scope:
+             return  # 零触发
+ 
+@@ -3160,22 +3303,43 @@ class SpecWorkspaceService:
+ 
+         now = time.monotonic()
+         last = _reparse_last_run.get(workspace_id)
+-        if workspace_id in _reparse_inflight or (
+-            last is not None and now - last < _REPARSE_MIN_INTERVAL_SECONDS
+-        ):
+-            self._enqueue_trailing_reparse(workspace_id, change_dirs, ops)
++        if workspace_id in _reparse_inflight:
++            if structural:
++                # D-010：结构性撞在途——登记完成回调即时补发（不睡 120s 窗）。
++                _reparse_structural_pending[workspace_id] = (
++                    list(change_dirs),
++                    list(ops),
++                )
++            else:
++                self._enqueue_trailing_reparse(workspace_id, change_dirs, ops)
+             return
+-        _reparse_last_run[workspace_id] = now
+-        self._spawn_bg_reparse(workspace_id, archive_hit, scope)
++        if structural or last is None or (now - last) >= _REPARSE_MIN_INTERVAL_SECONDS:
++            _reparse_last_run[workspace_id] = now
++            self._spawn_bg_reparse(workspace_id, archive_hit, scope, structural=structural)
++        else:
++            self._enqueue_trailing_reparse(workspace_id, change_dirs, ops)
+ 
+     def _spawn_bg_reparse(
+-        self, workspace_id: uuid.UUID, archive_hit: bool, scope: list[str]
++        self,
++        workspace_id: uuid.UUID,
++        archive_hit: bool,
++        scope: list[str],
++        *,
++        structural: bool = False,
+     ) -> None:
+-        """起后台 reparse 任务（single-flight 标记在 finally 复位）。"""
++        """起后台 reparse 任务（single-flight 标记在 finally 复位）。
++
++        2026-10-27-archive-reparse-oom-governance D-010：finally 复位后检查
++        ``_reparse_structural_pending``——结构性触发曾在在途期间到达时，**完成
++        即时补发**（重走调度入口，此刻 inflight 已清、structural 分支立即执行，
++        不经 120s 窗）。补发输入取最新登记（后到覆盖先到，与尾随合并同哲学）。
++        """
+ 
+         async def _runner() -> None:
+             try:
+-                await self._run_reparse_once(workspace_id, archive_hit, scope)
++                await self._run_reparse_once(
++                    workspace_id, archive_hit, scope, structural=structural
++                )
+             except Exception as exc:
+                 log.warning(
+                     "spec_workspace.reparse_bg_failed",
+@@ -3184,6 +3348,9 @@ class SpecWorkspaceService:
+                 )
+             finally:
+                 _reparse_inflight.discard(workspace_id)
++                pending = _reparse_structural_pending.pop(workspace_id, None)
++                if pending is not None:
++                    await self._trigger_change_reparse(workspace_id, pending[0], pending[1])
+ 
+         _reparse_inflight.add(workspace_id)
+         task = asyncio.create_task(_runner())
+@@ -3191,12 +3358,23 @@ class SpecWorkspaceService:
+         task.add_done_callback(_reparse_bg_tasks.discard)
+ 
+     async def _run_reparse_once(
+-        self, workspace_id: uuid.UUID, archive_hit: bool, scope: list[str]
++        self,
++        workspace_id: uuid.UUID,
++        archive_hit: bool,
++        scope: list[str],
++        *,
++        structural: bool = False,
+     ) -> None:
+-        """单次 reparse 执行体（inline 直通 / 后台 runner 共用）。"""
++        """单次 reparse 执行体（inline 直通 / 后台 runner 共用）。
++
++        2026-10-27-archive-reparse-oom-governance task-03：完成日志改名
++        ``reparse_converged`` 并补 duration_ms / scope_count / channel
++        （structural=立即通道 | coalesced=120s 合并窗补发）——可观测可归因。
++        """
+         from app.core.db import get_session_factory
+         from app.modules.change.service import ChangeService
+ 
++        started = time.monotonic()
+         async with get_session_factory()() as reparse_session:
+             stats, _ = await ChangeService(reparse_session).reparse(
+                 workspace_id,
+@@ -3234,10 +3412,13 @@ class SpecWorkspaceService:
+                     error=str(exc),
+                 )
+         log.info(
+-            "spec_workspace.reparse_triggered",
++            "spec_workspace.reparse_converged",
+             workspace_id=str(workspace_id),
+             scoped=not archive_hit,
+             scope=scope,
++            scope_count=len(scope) if scope else 0,
++            channel="structural" if structural else "coalesced",
++            duration_ms=round((time.monotonic() - started) * 1000, 1),
+             stats=stats,
+             task_stats=task_totals,
+             deferred=not _REPARSE_INLINE,
+diff --git a/backend/app/modules/spec_workspace/tests/test_archive_scoped_reparse.py b/backend/app/modules/spec_workspace/tests/test_archive_scoped_reparse.py
+new file mode 100644
+index 000000000..ce33e70c1
+--- /dev/null
++++ b/backend/app/modules/spec_workspace/tests/test_archive_scoped_reparse.py
+@@ -0,0 +1,477 @@
++"""归档 scoped 定向重扫 + 双通道调度测试（2026-10-27-archive-reparse-oom-governance
++task-07 / FR-01..05）。
++
++生产背景（2026-10-27 六会话同窗归档 OOM）：旧口径归档移动 → archive_hit 全量
++reparse（遍历 ~470 变更树），并行叠加顶爆 2500m memcg。本文件锁定新语义：
++
++- FR-01 归档 op → scoped（非全量）+ structural；归档后行 location 经 scoped
++  reparse 原地翻转（active→archive），scope 外行零动作；
++- FR-01/D-007 双通道：structural 绕过 120s 节流窗立即执行；非结构维持节流
++  + 尾随合并（既有语义零回归）；
++- D-010 structural 撞在途 reparse：完成回调即时补发（不等满 120s 窗）；
++- FR-03/D-009/D-011 bundle gzip 同版本并发只构建一次；构建方断连失败传播，
++  等待者降级自建不悬挂；
++- FR-04/D-008 漂移探针只读只告警（不触发 reparse）；水位无 cgroup 环境静默。
++
++author: qinyi
++created_at: 2026-10-27
++"""
++
++from __future__ import annotations
++
++import asyncio
++import uuid
++from pathlib import Path
++
++import pytest
++from sqlalchemy.ext.asyncio import AsyncSession
++
++import app.modules.spec_workspace.service as sw_service
++from app.modules.spec_workspace.schema import FileOp
++from app.modules.spec_workspace.service import (
++    SpecWorkspaceService,
++    drain_reparse_workers,
++)
++from app.modules.workspace.model import Workspace
++
++
++def _op(op: str, path: str, new_path: str | None = None) -> FileOp:
++    return FileOp(op=op, path=path, new_path=new_path, base_version=0)
++
++
++@pytest.fixture()
++def bg_reparse(monkeypatch: pytest.MonkeyPatch) -> None:
++    """后台调度模式（覆盖 conftest inline 直通）+ 清模块级调度状态。"""
++    monkeypatch.setattr(sw_service, "_REPARSE_INLINE", False)
++    sw_service.reset_reparse_scheduler()
++
++
++# ── FR-01：scope 计算（纯函数，无 IO）────────────────────────────────────
++
++
++class TestComputeReparseScope:
++    def test_archive_rename_is_scoped_structural_not_full(self) -> None:
++        """归档移动（跨根 rename）→ scoped=[name] + structural，不再全量。"""
++        svc = SpecWorkspaceService(None)
++        scope, archive_hit, structural = svc._compute_reparse_scope(
++            [],
++            [_op("rename", "changes/x/design.md", "changes/archive/x/design.md")],
++        )
++        assert archive_hit is False
++        assert scope == ["x"]
++        assert structural is True
++
++    def test_archive_delete_is_scoped_structural(self) -> None:
++        scope, archive_hit, structural = SpecWorkspaceService(None)._compute_reparse_scope(
++            [], [_op("delete", "changes/archive/x/tasks.md")]
++        )
++        assert archive_hit is False
++        assert scope == ["x"]
++        assert structural is True
++
++    def test_archive_add_update_scoped_non_structural(self) -> None:
++        """归档区 add/update（daemon 陈旧缓存重推）→ scoped 非结构（旧语义）。"""
++        scope, archive_hit, structural = SpecWorkspaceService(None)._compute_reparse_scope(
++            [], [_op("add", "changes/archive/x/new-file.md")]
++        )
++        assert archive_hit is False
++        assert scope == ["x"]
++        assert structural is False
++
++    def test_active_delete_is_structural(self) -> None:
++        """活跃区 delete（平台删除/目录消失）→ scoped + structural。"""
++        scope, archive_hit, structural = SpecWorkspaceService(None)._compute_reparse_scope(
++            [], [_op("delete", "changes/x/requirements.md")]
++        )
++        assert archive_hit is False
++        assert scope == ["x"]
++        assert structural is True
++
++    def test_plain_update_scoped_non_structural(self) -> None:
++        """普通文档推送 → scoped 非结构（维持 120s 合并窗口径）。"""
++        scope, archive_hit, structural = SpecWorkspaceService(None)._compute_reparse_scope(
++            [], [_op("update", "changes/x/design.md")]
++        )
++        assert archive_hit is False
++        assert scope == ["x"]
++        assert structural is False
++
++    def test_same_root_rename_non_structural(self) -> None:
++        """同根文件 rename（变更目录内文件改名）→ 非结构。"""
++        scope, _, structural = SpecWorkspaceService(None)._compute_reparse_scope(
++            [], [_op("rename", "changes/x/a.md", "changes/x/b.md")]
++        )
++        assert scope == ["x"]
++        assert structural is False
++
++    def test_archive_root_op_keeps_full_fallback(self) -> None:
++        """恰命中 changes/archive 根（无名可解析）→ 保留全量兜底。"""
++        scope, archive_hit, _ = SpecWorkspaceService(None)._compute_reparse_scope(
++            [], [_op("delete", "changes/archive")]
++        )
++        assert archive_hit is True
++        assert scope is None
++
++    def test_unarchive_rename_structural(self) -> None:
++        """un-archive（归档区 → 活跃区跨根 rename）→ scoped + structural。"""
++        scope, archive_hit, structural = SpecWorkspaceService(None)._compute_reparse_scope(
++            [], [_op("rename", "changes/archive/x/design.md", "changes/x/design.md")]
++        )
++        assert archive_hit is False
++        assert scope == ["x"]
++        assert structural is True
++
++
++# ── FR-01/D-007：双通道调度（真实 reparse 打桩计数）─────────────────────
++
++
++async def _trigger_ops(ws: uuid.UUID, ops: list[FileOp]) -> None:
++    await SpecWorkspaceService(None)._trigger_change_reparse(ws, [], ops)
++
++
++async def test_structural_bypasses_throttle_window(
++    db_session: AsyncSession, monkeypatch: pytest.MonkeyPatch, bg_reparse: None
++) -> None:
++    """节流窗内（设超大窗）structural 触发仍立即执行；非结构维持跳过。"""
++    monkeypatch.setattr(sw_service, "_REPARSE_MIN_INTERVAL_SECONDS", 3600.0)
++    scopes: list[list[str] | None] = []
++
++    async def fake_reparse(self, workspace_id, scope=None):
++        scopes.append(scope)
++        return {"parsed": 0}, None
++
++    monkeypatch.setattr("app.modules.change.service.ChangeService.reparse", fake_reparse)
++    ws = uuid.uuid4()
++
++    # 窗基线：一次普通触发跑掉首额
++    await _trigger_ops(ws, [_op("update", "changes/x/design.md")])
++    await drain_reparse_workers()
++    assert len(scopes) == 1
++
++    # 巨窗内：非结构触发被节流（不执行）
++    await _trigger_ops(ws, [_op("update", "changes/y/design.md")])
++    await asyncio.sleep(0)
++    assert len(scopes) == 1
++
++    # 巨窗内：结构触发（归档移动）绕窗立即执行——FR-01 ≤60s 承诺的调度面
++    await _trigger_ops(ws, [_op("rename", "changes/x/design.md", "changes/archive/x/design.md")])
++    await drain_reparse_workers()
++    assert len(scopes) == 2
++    assert scopes[1] == ["x"]
++
++
++async def test_structural_inflight_completes_via_callback_not_window(
++    db_session: AsyncSession, monkeypatch: pytest.MonkeyPatch, bg_reparse: None
++) -> None:
++    """D-010：structural 撞在途 reparse → 完成回调即时补发（不等 120s 窗）。"""
++    monkeypatch.setattr(sw_service, "_REPARSE_MIN_INTERVAL_SECONDS", 3600.0)
++    started = asyncio.Event()
++    release = asyncio.Event()
++    calls: list[list[str] | None] = []
++
++    async def slow_reparse(self, workspace_id, scope=None):
++        calls.append(scope)
++        started.set()
++        await release.wait()
++        return {"parsed": 0}, None
++
++    monkeypatch.setattr("app.modules.change.service.ChangeService.reparse", slow_reparse)
++    ws = uuid.uuid4()
++
++    # 首发普通触发占住 inflight
++    await _trigger_ops(ws, [_op("update", "changes/x/design.md")])
++    await started.wait()
++
++    # 在途期间 structural 触发到达（巨窗下非结构会睡满窗，structural 不该）
++    await _trigger_ops(ws, [_op("rename", "changes/x/design.md", "changes/archive/x/design.md")])
++    await asyncio.sleep(0)
++    assert len(calls) == 1  # single-flight：未并发
++    assert ws in sw_service._reparse_structural_pending  # 登记待补发
++
++    # 在途完成 → 回调即时补发（drain 排空即达，无需 sleep 满窗）
++    release.set()
++    await drain_reparse_workers()
++    assert len(calls) == 2
++    assert calls[1] == ["x"]
++    assert ws not in sw_service._reparse_structural_pending
++
++
++async def test_non_structural_inflight_keeps_trailing_timer(
++    db_session: AsyncSession, monkeypatch: pytest.MonkeyPatch, bg_reparse: None
++) -> None:
++    """非结构撞在途：维持 120s 尾随定时器语义（不进 structural 回调通道）。"""
++    monkeypatch.setattr(sw_service, "_REPARSE_MIN_INTERVAL_SECONDS", 0.05)
++    started = asyncio.Event()
++    release = asyncio.Event()
++
++    async def slow_reparse(self, workspace_id, scope=None):
++        started.set()
++        await release.wait()
++        return {"parsed": 0}, None
++
++    monkeypatch.setattr("app.modules.change.service.ChangeService.reparse", slow_reparse)
++    ws = uuid.uuid4()
++    await _trigger_ops(ws, [_op("update", "changes/x/design.md")])
++    await started.wait()
++
++    await _trigger_ops(ws, [_op("update", "changes/y/design.md")])
++    await asyncio.sleep(0)
++    assert ws not in sw_service._reparse_structural_pending  # 未走结构通道
++    assert ws in sw_service._reparse_pending  # 走既有尾随合并
++
++    release.set()
++    await drain_reparse_workers()
++    assert ws not in sw_service._reparse_pending
++
++
++# ── FR-01 主路径：scoped reparse 翻转归档行（真解析器 + 真库）───────────
++
++
++async def _make_ws_with_spec_root(db_session: AsyncSession, tmp_path: Path) -> uuid.UUID:
++    from app.modules.spec_workspace.model import SpecWorkspace
++
++    ws = Workspace(
++        id=uuid.uuid4(),
++        name="archive-scoped ws",
++        slug=f"as-{uuid.uuid4().hex[:8]}",
++        root_path=str(tmp_path),
++        status="active",
++        component_key=None,
++    )
++    db_session.add(ws)
++    await db_session.flush()
++    spec_root = tmp_path / "spec"
++    spec_root.mkdir(parents=True, exist_ok=True)
++    (spec_root / "changes" / "archive").mkdir(parents=True, exist_ok=True)
++    db_session.add(
++        SpecWorkspace(
++            id=uuid.uuid4(),
++            workspace_id=ws.id,
++            spec_root=str(spec_root),
++            strategy="platform-managed",
++            sync_status="clean",
++        )
++    )
++    await db_session.commit()
++    return ws.id
++
++
++async def test_scoped_reparse_flips_row_location_on_archive(
++    db_session: AsyncSession, tmp_path: Path
++) -> None:
++    """归档目录在场 + 行 location=active → scoped reparse 原地翻 archive；
++    scope 外行零动作（R-08 零删除红线同源语义）。"""
++    from app.modules.change.model import Change
++    from app.modules.change.service import ChangeService
++
++    ws_id = await _make_ws_with_spec_root(db_session, tmp_path)
++    spec_root = tmp_path / "spec"
++
++    def _row(key: str, location: str) -> Change:
++        return Change(
++            id=uuid.uuid4(),
++            workspace_id=ws_id,
++            change_key=key,
++            title=key,
++            location=location,
++            path=f"changes/{key}",
++            status="draft",
++        )
++
++    archived_key, bystander_key = "2026-10-27-x", "2026-10-27-bystander"
++    # 磁盘：x 已在归档区（目录级移动后形态）；bystander 在活跃区。
++    x_dir = spec_root / "changes" / "archive" / archived_key
++    x_dir.mkdir(parents=True)
++    (x_dir / "tasks.md").write_text("# t\n- [ ] a\n", encoding="utf-8")
++    (x_dir / "design.md").write_text("# d\n", encoding="utf-8")
++    b_dir = spec_root / "changes" / bystander_key
++    b_dir.mkdir(parents=True)
++    (b_dir / "tasks.md").write_text("# t\n- [ ] b\n", encoding="utf-8")
++
++    db_session.add(_row(archived_key, "active"))
++    db_session.add(_row(bystander_key, "active"))
++    await db_session.commit()
++
++    await ChangeService(db_session).reparse(ws_id, scope=[archived_key])
++
++    from sqlalchemy import select
++
++    rows = {
++        r.change_key: r
++        for r in (
++            await db_session.execute(select(Change).where(Change.workspace_id == ws_id))
++        ).scalars()
++    }
++    assert rows[archived_key].location == "archive"  # 原地翻转（非删重建）
++    assert rows[bystander_key].location == "active"  # scope 外零动作
++
++
++# ── FR-03/D-009/D-011：bundle gzip 同版本 single-flight───────────────────
++
++
++def _consume(stream) -> bytes:
++    buf = bytearray()
++    for chunk in stream:
++        buf.extend(chunk)
++    return bytes(buf)
++
++
++async def test_bundle_same_version_single_flight_builds_once(
++    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
++) -> None:
++    """同 (ws, version) 并发两请求：只产生一次底层构建，等待者复用同产物。"""
++    from app.modules.spec_workspace.service import _bundle_gzip_inflight
++
++    builds: list[int] = []
++    real_stream = sw_service._BundleTarStream
++
++    class CountingStream(real_stream):  # type: ignore[misc, valid-type]
++        def __init__(self, produce):
++            builds.append(1)
++            super().__init__(produce)
++
++    monkeypatch.setattr(sw_service, "_BundleTarStream", CountingStream)
++    sw_service._bundle_gzip_cache.clear()
++    _bundle_gzip_inflight.clear()
++
++    produce_calls: list[int] = []
++
++    def _produce(writer) -> None:
++        produce_calls.append(1)
++        import io as _io
++        import tarfile as _tarfile
++
++        with _tarfile.open(fileobj=writer, mode="w|gz", bufsize=64 * 1024) as tar:
++            info = _tarfile.TarInfo(name="a.txt")
++            payload = b"hello-bundle"
++            info.size = len(payload)
++            tar.addfile(info, _io.BytesIO(payload))
++
++    key = (uuid.uuid4(), 1)
++    entry = sw_service._BundleInflightEntry()
++    _bundle_gzip_inflight[key] = entry
++    builder = sw_service._CachingBundleIterator(CountingStream(_produce), key, entry=entry)
++    waiter = sw_service._WaitingBundleStream(entry, _produce, key)
++
++    data_builder: bytes = b""
++    data_waiter: bytes = b""
++
++    def _run_builder():
++        nonlocal data_builder
++        data_builder = _consume(builder)
++
++    import threading
++
++    t = threading.Thread(target=_run_builder)
++    t.start()
++    # 等待方在另一线程消费（重放构建方产物）。
++    t.join(timeout=30)
++    data_waiter = _consume(waiter)
++
++    assert data_builder and data_waiter == data_builder  # 等待者复用同产物
++    assert len(builds) == 1  # 底层构建只发生一次（D-009）
++    assert entry.data is not None and not entry.failed
++    _bundle_gzip_inflight.clear()
++
++
++def test_bundle_waiter_degrades_on_builder_abort(
++    monkeypatch: pytest.MonkeyPatch,
++) -> None:
++    """D-011：构建方半途关闭（断连）→ entry 失败传播，等待者降级自建不悬挂。"""
++    from app.modules.spec_workspace.service import _bundle_gzip_inflight
++
++    monkeypatch.setattr(sw_service, "_BUNDLE_INFLIGHT_WAIT_SECONDS", 2.0)
++    sw_service._bundle_gzip_cache.clear()
++    _bundle_gzip_inflight.clear()
++
++    def _produce(writer) -> None:
++        import io as _io
++        import tarfile as _tarfile
++
++        with _tarfile.open(fileobj=writer, mode="w|gz", bufsize=64 * 1024) as tar:
++            info = _tarfile.TarInfo(name="a.txt")
++            payload = b"degraded-build"
++            info.size = len(payload)
++            tar.addfile(info, _io.BytesIO(payload))
++
++    key = (uuid.uuid4(), 2)
++    entry = sw_service._BundleInflightEntry()
++    _bundle_gzip_inflight[key] = entry
++    builder = sw_service._CachingBundleIterator(
++        sw_service._BundleTarStream(_produce), key, entry=entry
++    )
++    it = iter(builder)
++    next(it)  # 拉一块（进入生成器）
++    builder.close()  # 构建方断连：close 未完成 → 失败传播
++
++    assert entry.failed is True
++    assert entry.event.is_set()
++
++    waiter = sw_service._WaitingBundleStream(entry, _produce, key)
++    data = _consume(waiter)  # 降级自建：能拿到完整产物，不悬挂
++    assert data
++    _bundle_gzip_inflight.clear()
++
++
++# ── FR-04/D-008：探针只读只告警─────────────────────────────────────────
++
++
++async def test_drift_probe_readonly_warns_never_reparses(
++    db_session: AsyncSession, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
++) -> None:
++    """行 location 与磁盘不一致 → 探针仅告警计数；ChangeService.reparse 禁止被调。"""
++    from app.modules.change.model import Change
++    from app.modules.spec_workspace.drift_probe import check_drift_once
++
++    ws_id = await _make_ws_with_spec_root(db_session, tmp_path)
++    spec_root = tmp_path / "spec"
++    # 磁盘：active 行的目录不在场（漂移）；archive 行的归档目录在场（一致）。
++    ok_dir = spec_root / "changes" / "archive" / "ok-archived"
++    ok_dir.mkdir(parents=True)
++
++    db_session.add_all(
++        [
++            Change(
++                id=uuid.uuid4(),
++                workspace_id=ws_id,
++                change_key="drifted-active",
++                title="d",
++                location="active",
++                path="changes/drifted-active",
++                status="draft",
++            ),
++            Change(
++                id=uuid.uuid4(),
++                workspace_id=ws_id,
++                change_key="ok-archived",
++                title="o",
++                location="archive",
++                path="changes/archive/ok-archived",
++                status="draft",
++            ),
++        ]
++    )
++    await db_session.commit()
++
++    reparse_called = []
++
++    async def _must_not_run(self, workspace_id, scope=None):
++        reparse_called.append(scope)
++        return {"parsed": 0}, None
++
++    monkeypatch.setattr("app.modules.change.service.ChangeService.reparse", _must_not_run)
++
++    drifts = await check_drift_once(db_session)
++    assert drifts == 1  # 仅 drifted-active 告警
++    assert reparse_called == []  # D-008：探针零写零 reparse
++
++
++def test_watermark_silent_without_cgroup(
++    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
++) -> None:
++    """无 cgroup 环境（本地 dev/Windows）：返回 None 不抛错（R-05）。"""
++    from app.modules.spec_workspace import drift_probe
++
++    monkeypatch.setattr(drift_probe, "_CGROUP_CURRENT_FILES", ("/nonexistent/current",))
++    monkeypatch.setattr(drift_probe, "_CGROUP_LIMIT_FILES", ("/nonexistent/limit",))
++    assert drift_probe.log_memory_watermark() is None
+diff --git a/frontend/src/app/globals.css b/frontend/src/app/globals.css
+index d8e8d5099..2b6ee9c34 100644
+--- a/frontend/src/app/globals.css
++++ b/frontend/src/app/globals.css
+@@ -918,11 +918,19 @@
+   padding-left: 8px;
+   padding-right: 8px;
+ }
+-/* agent 正文真满宽(2026-10-27-mobile-chat-visual-round2 / 用户实测二轮反馈)：
+-   段模型正文组件类 max-w-[calc(100%-120px)] 是 PC 阅读限宽(2026-10-25-unify
+-   「整行-120px」防 PC 一行过长)——430pt 视口被吃近 30%,上一轮只放宽 .turn-bubble
+-   没盖到它。mobile 限宽 100%(特异度 (0,2,0) 压组件单类 (0,1,0),v2/旧路径两处
+-   挂点一次覆盖);desktop 阅读限宽原样保留。 */
++/* ── 会话过程块阅读限宽单点（2026-10-27-mobile-chat-visual-round4）─────────
++   turn-segment-views 13 处容器(正文/过程块/子代理卡两分支/团队卡/警告行)原各自
++   挂 max-w-[calc(100%-120px)](2026-10-25 统一限宽)——PC 防「一行过长」合理,
++   430pt 手机被吃近 30%(用户四轮反馈子代理卡/运行命令块不满宽)。收敛为语义类
++   seg-width-cap,限宽规则单点在此;mobile 覆盖 100% 满宽。desktop 等价原值。 */
++.seg-width-cap {
++  max-width: calc(100% - 120px);
++}
++[data-variant="mobile"] .seg-width-cap {
++  max-width: 100%;
++}
++/* mobile 正文满宽(round2 引入;正文容器 round4 起也挂 seg-width-cap,本规则
++   并存冗余无害——留作 .seg-text-body 未挂 cap 路径的兜底覆盖)。 */
+ [data-variant="mobile"] .seg-text-body {
+   max-width: 100%;
+ }
+diff --git a/frontend/src/components/daemon/__tests__/turn-segment-views.test.tsx b/frontend/src/components/daemon/__tests__/turn-segment-views.test.tsx
+index 8dd1ecfc2..854162dd6 100644
+--- a/frontend/src/components/daemon/__tests__/turn-segment-views.test.tsx
++++ b/frontend/src/components/daemon/__tests__/turn-segment-views.test.tsx
+@@ -224,7 +224,7 @@ describe("TextSegmentView 文本段", () => {
+     expect(container).not.toBeNull();
+     expect(container?.className).toContain("seg-text-body");
+     expect(container?.className).toContain("w-full");
+-    expect(container?.className).toContain("max-w-[calc(100%-120px)]");
++    expect(container?.className).toContain("seg-width-cap");
+     for (const legacy of ["border", "bg-card", "shadow-sm", "rounded-2xl", "px-4"]) {
+       expect(container?.className).not.toContain(legacy);
+     }
+@@ -1983,12 +1983,14 @@ describe("deriveTurnActivity 快照终态收敛（turn-live-visibility FR-02）"
+ /**
+  * 2026-10-25-session-tab-visual-unify 漏网的过程类组件补漏断言——子代理卡
+  * （两分支）/团队分身卡/工具行/思考行/警告行根容器统一限宽
+- * max-w-[calc(100%-120px)]（整行宽度 − 120px，随容器自适应），与文本段
++ * seg-width-cap（限宽单点类——2026-10-27-mobile-chat-visual-round4 起 13 处容器
++ * 收敛为语义类，实际值 globals.css 定义：desktop calc(100% - 120px) 等价原值、
++ * mobile 100% 满宽），与文本段
+  * （TextSegmentView，见「无框形态」用例）同口径；卡片类另断言
+  * self-start（原 self-stretch 在 flex-col 父容器里全宽拉伸，为限宽反噬源）。
+  */
+ describe("过程信息块限宽统一（2026-10-26-subagent-card-width-unify）", () => {
+-  const MAX_W = "max-w-[calc(100%-120px)]";
++  const MAX_W = "seg-width-cap";
+ 
+   it("SubagentBlockView 无 Provider 纯展示分支：根容器限宽 + self-start", () => {
+     const seg = makeToolSeg({
+diff --git a/frontend/src/components/daemon/turn-segment-views.tsx b/frontend/src/components/daemon/turn-segment-views.tsx
+index c65dc30c0..bcb9ed01f 100644
+--- a/frontend/src/components/daemon/turn-segment-views.tsx
++++ b/frontend/src/components/daemon/turn-segment-views.tsx
+@@ -640,10 +640,10 @@ export const TextSegmentView = memo(function TextSegmentView({ segment }: TextSe
+     // 由 globals.css 的 `.seg-text-body` 元素级规则承担（MarkdownText compact 的
+     // !text-xs 带 !important，容器类挂 font-size 压不住它，故不在此写死字号）。
+     // 2026-10-25-session-tab-visual-unify：阅读限宽统一为「整行宽度-120px」
+-    // （max-w-[calc(100%-120px)]，随容器自适应）——原 48rem→52rem 限宽与其它
++    // （seg-width-cap，随容器自适应）——原 48rem→52rem 限宽与其它
+     // agent 信息块的 86% 限宽并存导致两视图宽度不齐（用户实测反馈），agent 侧
+     // 信息块全部收口同一限宽（用户侧气泡 56%/80% 不在此列）。
+-    <div className="seg-text-body group relative w-full max-w-[calc(100%-120px)] self-start">
++    <div className="seg-text-body group relative w-full seg-width-cap self-start">
+       <MarkdownText content={segment.text} />
+       {segment.streaming && (
+         <span
+@@ -677,7 +677,7 @@ export const ThinkingRowView = memo(function ThinkingRowView({ segment }: Thinki
+   return (
+     // 2026-10-26-subagent-card-width-unify：过程行限宽统一（整行-120px，随容器
+     // 自适应）——与文本段/文件段同口径，思考行不再铺满整行。
+-    <div className="w-full max-w-[calc(100%-120px)]">
++    <div className="w-full seg-width-cap">
+       <button
+         type="button"
+         onClick={() => {
+@@ -800,7 +800,7 @@ export const ToolRowView = memo(function ToolRowView({ segment }: ToolRowViewPro
+   return (
+     // 2026-10-26-subagent-card-width-unify：工具调用行限宽统一（整行-120px）——
+     // 用户实证进度视图工具卡铺满整行，与 2026-10-25 宽度统一规范补齐。
+-    <div className="w-full max-w-[calc(100%-120px)]">
++    <div className="w-full seg-width-cap">
+       <div
+         role="button"
+         tabIndex={0}
+@@ -1061,7 +1061,7 @@ export const SubagentBlockView = memo(function SubagentBlockView({
+         className={cn(
+           // 2026-10-26-subagent-card-width-unify：子代理卡限宽统一（整行-120px，
+           // self-stretch→self-start 防 flex 父容器 stretch 反噬，对齐 file 段先例）。
+-          "w-full max-w-[calc(100%-120px)] self-start overflow-hidden rounded-[10px] border border-indigo-200 bg-indigo-50",
++          "w-full seg-width-cap self-start overflow-hidden rounded-[10px] border border-indigo-200 bg-indigo-50",
+           active && "ring-1 ring-brand-300",
+         )}
+       >
+@@ -1093,7 +1093,7 @@ export const SubagentBlockView = memo(function SubagentBlockView({
+   return (
+     // 2026-10-26-subagent-card-width-unify：无 Provider 纯展示分支同款限宽（与
+     // panel 紧凑卡片分支同口径，两分支视觉一致）。
+-    <div className="w-full max-w-[calc(100%-120px)] self-start overflow-hidden rounded-[10px] border border-indigo-200 bg-indigo-50">
++    <div className="w-full seg-width-cap self-start overflow-hidden rounded-[10px] border border-indigo-200 bg-indigo-50">
+       <div
+         className={cn(
+           "relative flex select-text items-center gap-2 overflow-hidden px-3.5 py-[7px] text-xs",
+@@ -1115,7 +1115,7 @@ export const StderrRowView = memo(function StderrRowView({ segment }: StderrRowV
+   return (
+     // 2026-10-26-subagent-card-width-unify：警告行限宽统一（原无 w-full 但在
+     // flex-col 父容器被 stretch 铺满，加 max-w 收口；弹性容器无需 self-start）。
+-    <div className="flex max-w-[calc(100%-120px)] items-start gap-1.5 px-1 py-0.5 text-[11px] text-amber-700">
++    <div className="flex seg-width-cap items-start gap-1.5 px-1 py-0.5 text-[11px] text-amber-700">
+       <span aria-hidden className="shrink-0">
+         ⚠
+       </span>
+@@ -1136,7 +1136,7 @@ export const PreambleSegmentView = memo(function PreambleSegmentView({
+   const [open, setOpen] = useState(false);
+   const charCount = segment.text.length;
+   return (
+-    <div className="flex w-full max-w-[calc(100%-120px)] flex-col gap-1 self-start">
++    <div className="flex w-full seg-width-cap flex-col gap-1 self-start">
+       <button
+         type="button"
+         onClick={() => {
+@@ -1180,7 +1180,7 @@ export const CompactSegmentView = memo(function CompactSegmentView({
+   const [open, setOpen] = useState(false);
+   const charCount = segment.text.length;
+   return (
+-    <div className="flex w-full max-w-[calc(100%-120px)] flex-col gap-1 self-start">
++    <div className="flex w-full seg-width-cap flex-col gap-1 self-start">
+       <button
+         type="button"
+         onClick={() => {
+@@ -1250,7 +1250,7 @@ export const TurnTriggerView = memo(function TurnTriggerView({
+   if (!meta.contentHidden) {
+     // 来源标注源：纯行，无展开（正文在 prompt 气泡照常可见）。
+     return (
+-      <div className="flex w-full max-w-[calc(100%-120px)] flex-col gap-1 self-start">
++      <div className="flex w-full seg-width-cap flex-col gap-1 self-start">
+         <span
+           aria-label={`${meta.label}（来源标注）`}
+           className="flex w-fit select-text items-center gap-[7px] rounded-md px-1.5 py-[3px] text-[11px] text-muted-foreground"
+@@ -1264,7 +1264,7 @@ export const TurnTriggerView = memo(function TurnTriggerView({
+     );
+   }
+   return (
+-    <div className="flex w-full max-w-[calc(100%-120px)] flex-col gap-1 self-start">
++    <div className="flex w-full seg-width-cap flex-col gap-1 self-start">
+       <button
+         type="button"
+         onClick={() => {
+@@ -1485,7 +1485,7 @@ export const TeamWorkerBlockView = memo(function TeamWorkerBlockView({
+   const hasWs = Boolean(workspaceName || workspaceId);
+   return (
+     // 2026-10-26-subagent-card-width-unify：团队分身卡限宽统一（与子代理卡同口径）。
+-    <div className="w-full max-w-[calc(100%-120px)] self-start overflow-hidden rounded-[10px] border border-brand-200 bg-brand-50">
++    <div className="w-full seg-width-cap self-start overflow-hidden rounded-[10px] border border-brand-200 bg-brand-50">
+       <div
+         role="button"
+         tabIndex={0}
+@@ -1740,7 +1740,7 @@ export const SegmentView = memo(function SegmentView({ segment }: SegmentViewPro
+       // 卡两形态，antd 仅经其间接使用）；本层只加「agent 上传了文件」标注行
+       // （原型 .file-msg .who），卡片本体在 task-09 产出文件区可原样复用。
+       return (
+-        <div className="flex w-full max-w-[calc(100%-120px)] flex-col gap-1 self-start">
++        <div className="flex w-full seg-width-cap flex-col gap-1 self-start">
+           <span className="select-none pl-0.5 text-[11px] text-muted-foreground">
+             agent 上传了文件
+           </span>
+diff --git a/frontend/src/components/daemon/turn-timeline.tsx b/frontend/src/components/daemon/turn-timeline.tsx
+index 0cc65adc6..5e6f606ee 100644
+--- a/frontend/src/components/daemon/turn-timeline.tsx
++++ b/frontend/src/components/daemon/turn-timeline.tsx
+@@ -22,7 +22,7 @@
+  *     段组件族），AskUser 记录按 ts 与段合并排序穿插（merged 逻辑平移）；
+  *   - turn.segments === undefined（孤儿 turn 构造 / 旧数据）→ 旧渲染路径回退：
+  *     output 单气泡 + processItems TurnDetailsList（§9.3 过渡期双路径，保留不删）；
+- *   - whoLine / sender / errorDetail / 孤儿 turn 紧凑标记 / TurnStatusBadge / 空态 /
++ *   - whoLine / sender / errorDetail / 孤儿 turn 紧凑标记 / 轮次分隔 / 空态 /
+  *     滚动到底等现有特性两路径共享不动。
+  *
+  * task-13（2026-08-20-frontend-ai-native-style / FR-05 / D-004@v1）：会话页 AI
+@@ -1284,10 +1284,13 @@ const TurnRow = memo(function TurnRow({
+                   </div>
+                 </div>
+               )}
+-              {/* 2026-09-09-sessions-visual-refresh task-06（FR-04/D-010@v1）：
+-                  对话视图轮尾改共享 RoundDivider 胶囊分隔（细线+居中胶囊，六态着色）；
+-                  「全部」视图保留原 TurnStatusBadge 小字（进度视图信息密度优先，Grill G-03）。 */}
+-              {viewMode !== "all" ? (
++              {/* 2026-09-09-sessions-visual-refresh task-06 → 2026-10-27-mobile-chat-
++                  visual-round4（用户指定「对话/进度两 tab 统一用对话形态」）：原「全部」
++                  视图 TurnStatusBadge 分支退役，两视图共用下方 RoundDivider（Grill G-03
++                  分档作废）；meta/detail 同源同构，mobile 透传同款。
++                  task-08（session-fork / FR-01）：轮容器行加 group——TurnForkEntry
++                  常驻隐藏、hover 本行浮出。入口挂轮尾分隔行（「第 N 轮」行）。 */}
++              {(
+                 /* task-08（session-fork / FR-01）：轮容器行加 group——TurnForkEntry
+                     常驻隐藏、hover 本行浮出（task-07 纯 CSS 方案的挂载方义务；
+                     行级 group 不上提整轮根，防轮内 CopyButton 的 group-hover 被
+@@ -1303,7 +1306,7 @@ const TurnRow = memo(function TurnRow({
+                       meta={
+                         // ql-20260831-010 语义保持：运行中输入 null 显示「↑执行中…」
+                         // 不显示假 ↑0；终态 null（旧 daemon 无数据）按 ↑0 降级（与
+-                        // TurnStatusBadge 同口径）。
++                        // 旧 TurnStatusBadge 同口径，已统一）。
+                         turn.inputTokens != null || turn.outputTokens != null
+                           ? (() => {
+                               const live =
+@@ -1336,29 +1339,9 @@ const TurnRow = memo(function TurnRow({
+                       }
+                     />
+                   </div>
+-                  {forkProvider != null && onForkTurn != null && (
+-                    <TurnForkEntry
+-                      provider={forkProvider}
+-                      runStatus={turn.status}
+-                      engineAnchor={forkAnchor}
+-                      onFork={() =>
+-                        onForkTurn(turn.realRunId ?? turn.runId, forkSeq ?? 1)
+-                      }
+-                    />
+-                  )}
+-                </div>
+-              ) : (
+-                <div className="group flex items-center gap-1.5 pl-9 text-[10px] text-muted-foreground">
+-                  <TurnStatusBadge
+-                    status={turn.status}
+-                    turn={turn.turn}
+-                    inputTokens={turn.inputTokens}
+-                    outputTokens={turn.outputTokens}
+-                    apiDurationMs={turn.apiDurationMs}
+-                  />
+                   {turn.autoResumeOf != null && (
+                     <span
+-                      className="rounded-full border border-brand-300 bg-brand-100 px-1.5 py-px text-[9.5px] text-brand-700"
++                      className="shrink-0 rounded-full border border-brand-300 bg-brand-100 px-1.5 py-px text-[9.5px] text-brand-700"
+                       title={`自动续跑：daemon 重启中断后自动继续的轮次（源轮 ${turn.autoResumeOf.slice(0, 8)}…）`}
+                       data-testid="turn-auto-resume-badge"
+                     >
+@@ -1375,20 +1358,7 @@ const TurnRow = memo(function TurnRow({
+                       }
+                     />
+                   )}
+-                  {/* 2026-10-20-session-page-dsh-alignment（FR-01 / D-016①）：
+-                      「全部」视图同享合并行——开始/结束/历时右对齐贴到本行尾
+-                      （等宽 / muted / 10.5px），与对话视图 RoundDivider.detail
+-                      同源同文案；原先轮尾的独立时间行已删除，一轮只有这一条元信息行。 */}
+-                  {metaDetail && (
+-                    <span
+-                      data-testid="turn-meta-detail"
+-                      className="ml-auto shrink-0 whitespace-nowrap font-mono text-[10.5px] tabular-nums text-muted-foreground"
+-                    >
+-                      {metaDetail}
+-                    </span>
+-                  )}
+-                </div>
+-              )}
++              </div>)}
+               {/* task-11（2026-10-20-session-page-dsh-alignment / FR-14 / D-023@v1）：
+                   轮级文件变更卡——挂在轮尾状态行**之后**（两视图同位置）。
+                   `toFileChangesCardProps` 返回 null 时**不渲染任何占位**；该 null 现在
+@@ -2800,78 +2770,3 @@ function parseToolRaw(
+   }
+ }
+ 
+-function TurnStatusBadge({
+-  status,
+-  turn,
+-  inputTokens,
+-  outputTokens,
+-  apiDurationMs,
+-}: {
+-  status: TurnUiStatus;
+-  turn: number | null;
+-  inputTokens: number | null;
+-  outputTokens: number | null;
+-  /** 2026-10-10-session-turn-token-speed：tok/s 生成速度分母（可选，旧形状不带）。 */
+-  apiDurationMs?: number | null;
+-}) {
+-  const label =
+-    turn != null ? `第 ${turn} 轮` : "轮次";
+-  const statusLabel: Record<TurnUiStatus, string> = {
+-    pending: "排队中",
+-    running: "运行中",
+-    interrupting: "打断中",
+-    completed: "已完成",
+-    failed: "失败",
+-    killed: "已中止",
+-  };
+-  // 2026-08-22-session-panel-unify task-03（FR-04 / D-003@v1）：状态色从自写 tone
+-  // 彩色 span 胶囊换 antd Badge status 语义档（色经 ConfigProvider token 随双主题
+-  // 换肤，不手写色值）。映射固定四档：running/interrupting→processing、
+-  // completed→success、failed/killed→error、pending 及其余中性态→default。
+-  const badgeStatus: Record<
+-    TurnUiStatus,
+-    "default" | "processing" | "success" | "error"
+-  > = {
+-    pending: "default",
+-    running: "processing",
+-    interrupting: "processing",
+-    completed: "success",
+-    failed: "error",
+-    killed: "error",
+-  };
+-  // ql-20260621：token 显示。执行中（running/pending）有累积值时显示数值，
+-  // 未收到（null）显示「执行中…」表明实时统计进行中；终态显示完整「↑in ↓out」
+-  //（终态 null=旧 daemon 无数据，与输出侧同口径降级「↑0 / ↓0」）。两者皆 null
+-  // 时不渲染。ql-20260831-010：输入侧 null 运行中不再显示假「↑0」（GLM 流式
+-  // 期间 message_start 不携带输入，误导用户以为输入为 0），对齐输出侧「执行中…」。
+-  // 规范化 undefined → null，防御上游 env.input_tokens / turn.inputTokens 缺失。
+-  const inTokens = inputTokens ?? null;
+-  const outTokens = outputTokens ?? null;
+-  const showTokens = inTokens !== null || outTokens !== null;
+-  const isLive = status === "running" || status === "pending" || status === "interrupting";
+-  // 2026-10-10-session-turn-token-speed FR-03/04：终态轮速度段（output ÷ API
+-  // 时长）；运行中 / 无数据 null 不渲染（与 RoundDivider meta 同口径）。
+-  const speed = turnTokenSpeedText(outTokens, apiDurationMs, status);
+-  return (
+-    <span className="font-mono">
+-      {label} · <Badge status={badgeStatus[status]} text={statusLabel[status]} />
+-      {showTokens && (
+-        <span className="ml-1.5 text-muted-foreground/80">
+-          {" · "}
+-          {inTokens !== null
+-            ? `↑${inTokens.toLocaleString("zh-CN")}`
+-            : isLive
+-              ? "↑执行中…"
+-              : "↑0"}
+-          {" "}
+-          {outTokens !== null
+-            ? `↓${outTokens.toLocaleString("zh-CN")}`
+-            : isLive
+-              ? "↓执行中…"
+-              : "↓0"}
+-          {speed && ` · ${speed}`}
+-        </span>
+-      )}
+-    </span>
+-  );
+-}
