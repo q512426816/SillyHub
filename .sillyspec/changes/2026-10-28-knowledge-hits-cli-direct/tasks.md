@@ -11,3 +11,4 @@ created_at: 2026-10-27T20:44:33.086Z
 - [x] task-05: backend schema 改动同变更内跑前端与 daemon 的 pnpm gen:types 并提交三件
 
 > 执行留痕（2026-10-27）：task-01~05 单次连续会话完成——端点（platform_sync/router.py 字面量块内，注册序前置）+ 测试 6 例全绿（test_hits_cli_direct.py）+ gen:types 三件。共享仓既有红留痕：test_agent_log_push.py 6 failed 经 stash 归属判别为并行变更 2026-10-28-change-detail-sessions-source-fix 的 session 域中间态（移除本变更 router.py 改动后失败依旧），非本变更引入，不阻断。
+> 交付提交索引：752e6fcc5（task-01/02/03/04/05 全量交付——端点+测试+gen:types 三件一次落库；首提交 f9f4f7095 因混入并行变更暂存文件已 soft reset 重做为纯净提交，备份分支 rescue-20261028-hits-mix）。
