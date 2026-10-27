@@ -419,7 +419,12 @@ async def list_sessions(
                     )
                 )
             ).all()
-            healed = {row.session_id: (row.content or "") for row in title_rows}
+            # 回写截 64 字符对齐列宽（agent_sessions.title_fallback String(64)，
+            # 迁移 20261016100000 同宽）：substr 放宽到 512 后 healed 可能超宽，
+            # PG varchar(64) 直接报错使 GET 列表 500（评审 P1）。列存维持 64 源
+            # 语义（与迁移回填口径一致），显示剥离/回退由读侧 session_display_title
+            # 保证（超窗部分属声明边界：极端长附件 name 拿不全时前端回退 id 前 8 位）。
+            healed = {row.session_id: (row.content or "")[:64] for row in title_rows}
             for sid in missing:
                 fallback_map[sid] = healed.get(sid, "")
             # 自愈回写（列或哨兵 ''）——之后该会话永不再触发收窄查询；

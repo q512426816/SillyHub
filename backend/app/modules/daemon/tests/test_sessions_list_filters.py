@@ -1136,3 +1136,49 @@ async def test_title_fallback_attachment_markers_cleaned_on_read(
     by_id = {item["id"]: item.get("title") for item in resp.json()["items"]}
     assert by_id[str(mixed.id)] == "移动端布局修复"
     assert by_id[str(pure.id)] == "IMG_2037.png"
+
+
+async def test_title_fallback_selfheal_write_capped_to_column_width(
+    client: AsyncClient, auth_headers: dict[str, str], db_session: AsyncSession
+) -> None:
+    """评审 P1 防回归：自愈回写值必须截 64 对齐列宽 String(64)。
+
+    substr 窗口放宽 512 后 healed 原样回写会在 PG varchar(64) 报错（GET 列表
+    500）；SQLite 不限宽测不出异常，但写回值长度断言可在两方言下都抓回归。
+    """
+    from sqlalchemy import select as sa_select
+
+    admin = await _get_admin(db_session)
+    long_first_input = "这句话超过六十四个字符用于触发自愈回写宽度路径" + "补" * 50
+    assert len(long_first_input) > 64
+    sess = await _make_session(db_session, admin.id, None, status="ended")
+    sess.title_fallback = None  # 强制走自愈路径
+    from app.modules.agent.model import AgentRun, AgentRunLog
+
+    run = AgentRun(
+        id=uuid.uuid4(),
+        agent_type="claude_code",
+        provider="claude",
+        status="completed",
+        agent_session_id=sess.id,
+        started_at=datetime.now(UTC),
+    )
+    log = AgentRunLog(
+        id=uuid.uuid4(),
+        run_id=run.id,
+        timestamp=datetime.now(UTC),
+        channel="user_input",
+        content_redacted=long_first_input,
+    )
+    db_session.add_all([run, log])
+    await db_session.commit()
+
+    resp = await client.get("/api/daemon/sessions", headers=auth_headers)
+    assert resp.status_code == 200, resp.text
+
+    stored = (
+        await db_session.execute(
+            sa_select(AgentSession.title_fallback).where(AgentSession.id == sess.id)
+        )
+    ).scalar_one()
+    assert stored is not None and len(stored) <= 64
