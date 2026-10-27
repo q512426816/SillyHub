@@ -640,10 +640,10 @@ export const TextSegmentView = memo(function TextSegmentView({ segment }: TextSe
     // 由 globals.css 的 `.seg-text-body` 元素级规则承担（MarkdownText compact 的
     // !text-xs 带 !important，容器类挂 font-size 压不住它，故不在此写死字号）。
     // 2026-10-25-session-tab-visual-unify：阅读限宽统一为「整行宽度-120px」
-    // （max-w-[calc(100%-120px)]，随容器自适应）——原 48rem→52rem 限宽与其它
+    // （seg-width-cap，随容器自适应）——原 48rem→52rem 限宽与其它
     // agent 信息块的 86% 限宽并存导致两视图宽度不齐（用户实测反馈），agent 侧
     // 信息块全部收口同一限宽（用户侧气泡 56%/80% 不在此列）。
-    <div className="seg-text-body group relative w-full max-w-[calc(100%-120px)] self-start">
+    <div className="seg-text-body group relative w-full seg-width-cap self-start">
       <MarkdownText content={segment.text} />
       {segment.streaming && (
         <span
@@ -677,7 +677,7 @@ export const ThinkingRowView = memo(function ThinkingRowView({ segment }: Thinki
   return (
     // 2026-10-26-subagent-card-width-unify：过程行限宽统一（整行-120px，随容器
     // 自适应）——与文本段/文件段同口径，思考行不再铺满整行。
-    <div className="w-full max-w-[calc(100%-120px)]">
+    <div className="w-full seg-width-cap">
       <button
         type="button"
         onClick={() => {
@@ -800,7 +800,7 @@ export const ToolRowView = memo(function ToolRowView({ segment }: ToolRowViewPro
   return (
     // 2026-10-26-subagent-card-width-unify：工具调用行限宽统一（整行-120px）——
     // 用户实证进度视图工具卡铺满整行，与 2026-10-25 宽度统一规范补齐。
-    <div className="w-full max-w-[calc(100%-120px)]">
+    <div className="w-full seg-width-cap">
       <div
         role="button"
         tabIndex={0}
@@ -1061,7 +1061,7 @@ export const SubagentBlockView = memo(function SubagentBlockView({
         className={cn(
           // 2026-10-26-subagent-card-width-unify：子代理卡限宽统一（整行-120px，
           // self-stretch→self-start 防 flex 父容器 stretch 反噬，对齐 file 段先例）。
-          "w-full max-w-[calc(100%-120px)] self-start overflow-hidden rounded-[10px] border border-indigo-200 bg-indigo-50",
+          "w-full seg-width-cap self-start overflow-hidden rounded-[10px] border border-indigo-200 bg-indigo-50",
           active && "ring-1 ring-brand-300",
         )}
       >
@@ -1093,7 +1093,7 @@ export const SubagentBlockView = memo(function SubagentBlockView({
   return (
     // 2026-10-26-subagent-card-width-unify：无 Provider 纯展示分支同款限宽（与
     // panel 紧凑卡片分支同口径，两分支视觉一致）。
-    <div className="w-full max-w-[calc(100%-120px)] self-start overflow-hidden rounded-[10px] border border-indigo-200 bg-indigo-50">
+    <div className="w-full seg-width-cap self-start overflow-hidden rounded-[10px] border border-indigo-200 bg-indigo-50">
       <div
         className={cn(
           "relative flex select-text items-center gap-2 overflow-hidden px-3.5 py-[7px] text-xs",
@@ -1115,7 +1115,7 @@ export const StderrRowView = memo(function StderrRowView({ segment }: StderrRowV
   return (
     // 2026-10-26-subagent-card-width-unify：警告行限宽统一（原无 w-full 但在
     // flex-col 父容器被 stretch 铺满，加 max-w 收口；弹性容器无需 self-start）。
-    <div className="flex max-w-[calc(100%-120px)] items-start gap-1.5 px-1 py-0.5 text-[11px] text-amber-700">
+    <div className="flex seg-width-cap items-start gap-1.5 px-1 py-0.5 text-[11px] text-amber-700">
       <span aria-hidden className="shrink-0">
         ⚠
       </span>
@@ -1136,7 +1136,7 @@ export const PreambleSegmentView = memo(function PreambleSegmentView({
   const [open, setOpen] = useState(false);
   const charCount = segment.text.length;
   return (
-    <div className="flex w-full max-w-[calc(100%-120px)] flex-col gap-1 self-start">
+    <div className="flex w-full seg-width-cap flex-col gap-1 self-start">
       <button
         type="button"
         onClick={() => {
@@ -1180,7 +1180,7 @@ export const CompactSegmentView = memo(function CompactSegmentView({
   const [open, setOpen] = useState(false);
   const charCount = segment.text.length;
   return (
-    <div className="flex w-full max-w-[calc(100%-120px)] flex-col gap-1 self-start">
+    <div className="flex w-full seg-width-cap flex-col gap-1 self-start">
       <button
         type="button"
         onClick={() => {
@@ -1250,7 +1250,7 @@ export const TurnTriggerView = memo(function TurnTriggerView({
   if (!meta.contentHidden) {
     // 来源标注源：纯行，无展开（正文在 prompt 气泡照常可见）。
     return (
-      <div className="flex w-full max-w-[calc(100%-120px)] flex-col gap-1 self-start">
+      <div className="flex w-full seg-width-cap flex-col gap-1 self-start">
         <span
           aria-label={`${meta.label}（来源标注）`}
           className="flex w-fit select-text items-center gap-[7px] rounded-md px-1.5 py-[3px] text-[11px] text-muted-foreground"
@@ -1264,7 +1264,7 @@ export const TurnTriggerView = memo(function TurnTriggerView({
     );
   }
   return (
-    <div className="flex w-full max-w-[calc(100%-120px)] flex-col gap-1 self-start">
+    <div className="flex w-full seg-width-cap flex-col gap-1 self-start">
       <button
         type="button"
         onClick={() => {
@@ -1485,7 +1485,7 @@ export const TeamWorkerBlockView = memo(function TeamWorkerBlockView({
   const hasWs = Boolean(workspaceName || workspaceId);
   return (
     // 2026-10-26-subagent-card-width-unify：团队分身卡限宽统一（与子代理卡同口径）。
-    <div className="w-full max-w-[calc(100%-120px)] self-start overflow-hidden rounded-[10px] border border-brand-200 bg-brand-50">
+    <div className="w-full seg-width-cap self-start overflow-hidden rounded-[10px] border border-brand-200 bg-brand-50">
       <div
         role="button"
         tabIndex={0}
@@ -1740,7 +1740,7 @@ export const SegmentView = memo(function SegmentView({ segment }: SegmentViewPro
       // 卡两形态，antd 仅经其间接使用）；本层只加「agent 上传了文件」标注行
       // （原型 .file-msg .who），卡片本体在 task-09 产出文件区可原样复用。
       return (
-        <div className="flex w-full max-w-[calc(100%-120px)] flex-col gap-1 self-start">
+        <div className="flex w-full seg-width-cap flex-col gap-1 self-start">
           <span className="select-none pl-0.5 text-[11px] text-muted-foreground">
             agent 上传了文件
           </span>

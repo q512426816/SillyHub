@@ -22,7 +22,7 @@
  *     段组件族），AskUser 记录按 ts 与段合并排序穿插（merged 逻辑平移）；
  *   - turn.segments === undefined（孤儿 turn 构造 / 旧数据）→ 旧渲染路径回退：
  *     output 单气泡 + processItems TurnDetailsList（§9.3 过渡期双路径，保留不删）；
- *   - whoLine / sender / errorDetail / 孤儿 turn 紧凑标记 / TurnStatusBadge / 空态 /
+ *   - whoLine / sender / errorDetail / 孤儿 turn 紧凑标记 / 轮次分隔 / 空态 /
  *     滚动到底等现有特性两路径共享不动。
  *
  * task-13（2026-08-20-frontend-ai-native-style / FR-05 / D-004@v1）：会话页 AI
@@ -1284,10 +1284,13 @@ const TurnRow = memo(function TurnRow({
                   </div>
                 </div>
               )}
-              {/* 2026-09-09-sessions-visual-refresh task-06（FR-04/D-010@v1）：
-                  对话视图轮尾改共享 RoundDivider 胶囊分隔（细线+居中胶囊，六态着色）；
-                  「全部」视图保留原 TurnStatusBadge 小字（进度视图信息密度优先，Grill G-03）。 */}
-              {viewMode !== "all" ? (
+              {/* 2026-09-09-sessions-visual-refresh task-06 → 2026-10-27-mobile-chat-
+                  visual-round4（用户指定「对话/进度两 tab 统一用对话形态」）：原「全部」
+                  视图 TurnStatusBadge 分支退役，两视图共用下方 RoundDivider（Grill G-03
+                  分档作废）；meta/detail 同源同构，mobile 透传同款。
+                  task-08（session-fork / FR-01）：轮容器行加 group——TurnForkEntry
+                  常驻隐藏、hover 本行浮出。入口挂轮尾分隔行（「第 N 轮」行）。 */}
+              {(
                 /* task-08（session-fork / FR-01）：轮容器行加 group——TurnForkEntry
                     常驻隐藏、hover 本行浮出（task-07 纯 CSS 方案的挂载方义务；
                     行级 group 不上提整轮根，防轮内 CopyButton 的 group-hover 被
@@ -1303,7 +1306,7 @@ const TurnRow = memo(function TurnRow({
                       meta={
                         // ql-20260831-010 语义保持：运行中输入 null 显示「↑执行中…」
                         // 不显示假 ↑0；终态 null（旧 daemon 无数据）按 ↑0 降级（与
-                        // TurnStatusBadge 同口径）。
+                        // 旧 TurnStatusBadge 同口径，已统一）。
                         turn.inputTokens != null || turn.outputTokens != null
                           ? (() => {
                               const live =
@@ -1336,29 +1339,9 @@ const TurnRow = memo(function TurnRow({
                       }
                     />
                   </div>
-                  {forkProvider != null && onForkTurn != null && (
-                    <TurnForkEntry
-                      provider={forkProvider}
-                      runStatus={turn.status}
-                      engineAnchor={forkAnchor}
-                      onFork={() =>
-                        onForkTurn(turn.realRunId ?? turn.runId, forkSeq ?? 1)
-                      }
-                    />
-                  )}
-                </div>
-              ) : (
-                <div className="group flex items-center gap-1.5 pl-9 text-[10px] text-muted-foreground">
-                  <TurnStatusBadge
-                    status={turn.status}
-                    turn={turn.turn}
-                    inputTokens={turn.inputTokens}
-                    outputTokens={turn.outputTokens}
-                    apiDurationMs={turn.apiDurationMs}
-                  />
                   {turn.autoResumeOf != null && (
                     <span
-                      className="rounded-full border border-brand-300 bg-brand-100 px-1.5 py-px text-[9.5px] text-brand-700"
+                      className="shrink-0 rounded-full border border-brand-300 bg-brand-100 px-1.5 py-px text-[9.5px] text-brand-700"
                       title={`自动续跑：daemon 重启中断后自动继续的轮次（源轮 ${turn.autoResumeOf.slice(0, 8)}…）`}
                       data-testid="turn-auto-resume-badge"
                     >
@@ -1375,20 +1358,7 @@ const TurnRow = memo(function TurnRow({
                       }
                     />
                   )}
-                  {/* 2026-10-20-session-page-dsh-alignment（FR-01 / D-016①）：
-                      「全部」视图同享合并行——开始/结束/历时右对齐贴到本行尾
-                      （等宽 / muted / 10.5px），与对话视图 RoundDivider.detail
-                      同源同文案；原先轮尾的独立时间行已删除，一轮只有这一条元信息行。 */}
-                  {metaDetail && (
-                    <span
-                      data-testid="turn-meta-detail"
-                      className="ml-auto shrink-0 whitespace-nowrap font-mono text-[10.5px] tabular-nums text-muted-foreground"
-                    >
-                      {metaDetail}
-                    </span>
-                  )}
-                </div>
-              )}
+              </div>)}
               {/* task-11（2026-10-20-session-page-dsh-alignment / FR-14 / D-023@v1）：
                   轮级文件变更卡——挂在轮尾状态行**之后**（两视图同位置）。
                   `toFileChangesCardProps` 返回 null 时**不渲染任何占位**；该 null 现在
@@ -2800,78 +2770,3 @@ function parseToolRaw(
   }
 }
 
-function TurnStatusBadge({
-  status,
-  turn,
-  inputTokens,
-  outputTokens,
-  apiDurationMs,
-}: {
-  status: TurnUiStatus;
-  turn: number | null;
-  inputTokens: number | null;
-  outputTokens: number | null;
-  /** 2026-10-10-session-turn-token-speed：tok/s 生成速度分母（可选，旧形状不带）。 */
-  apiDurationMs?: number | null;
-}) {
-  const label =
-    turn != null ? `第 ${turn} 轮` : "轮次";
-  const statusLabel: Record<TurnUiStatus, string> = {
-    pending: "排队中",
-    running: "运行中",
-    interrupting: "打断中",
-    completed: "已完成",
-    failed: "失败",
-    killed: "已中止",
-  };
-  // 2026-08-22-session-panel-unify task-03（FR-04 / D-003@v1）：状态色从自写 tone
-  // 彩色 span 胶囊换 antd Badge status 语义档（色经 ConfigProvider token 随双主题
-  // 换肤，不手写色值）。映射固定四档：running/interrupting→processing、
-  // completed→success、failed/killed→error、pending 及其余中性态→default。
-  const badgeStatus: Record<
-    TurnUiStatus,
-    "default" | "processing" | "success" | "error"
-  > = {
-    pending: "default",
-    running: "processing",
-    interrupting: "processing",
-    completed: "success",
-    failed: "error",
-    killed: "error",
-  };
-  // ql-20260621：token 显示。执行中（running/pending）有累积值时显示数值，
-  // 未收到（null）显示「执行中…」表明实时统计进行中；终态显示完整「↑in ↓out」
-  //（终态 null=旧 daemon 无数据，与输出侧同口径降级「↑0 / ↓0」）。两者皆 null
-  // 时不渲染。ql-20260831-010：输入侧 null 运行中不再显示假「↑0」（GLM 流式
-  // 期间 message_start 不携带输入，误导用户以为输入为 0），对齐输出侧「执行中…」。
-  // 规范化 undefined → null，防御上游 env.input_tokens / turn.inputTokens 缺失。
-  const inTokens = inputTokens ?? null;
-  const outTokens = outputTokens ?? null;
-  const showTokens = inTokens !== null || outTokens !== null;
-  const isLive = status === "running" || status === "pending" || status === "interrupting";
-  // 2026-10-10-session-turn-token-speed FR-03/04：终态轮速度段（output ÷ API
-  // 时长）；运行中 / 无数据 null 不渲染（与 RoundDivider meta 同口径）。
-  const speed = turnTokenSpeedText(outTokens, apiDurationMs, status);
-  return (
-    <span className="font-mono">
-      {label} · <Badge status={badgeStatus[status]} text={statusLabel[status]} />
-      {showTokens && (
-        <span className="ml-1.5 text-muted-foreground/80">
-          {" · "}
-          {inTokens !== null
-            ? `↑${inTokens.toLocaleString("zh-CN")}`
-            : isLive
-              ? "↑执行中…"
-              : "↑0"}
-          {" "}
-          {outTokens !== null
-            ? `↓${outTokens.toLocaleString("zh-CN")}`
-            : isLive
-              ? "↓执行中…"
-              : "↓0"}
-          {speed && ` · ${speed}`}
-        </span>
-      )}
-    </span>
-  );
-}

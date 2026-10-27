@@ -918,11 +918,19 @@
   padding-left: 8px;
   padding-right: 8px;
 }
-/* agent 正文真满宽(2026-10-27-mobile-chat-visual-round2 / 用户实测二轮反馈)：
-   段模型正文组件类 max-w-[calc(100%-120px)] 是 PC 阅读限宽(2026-10-25-unify
-   「整行-120px」防 PC 一行过长)——430pt 视口被吃近 30%,上一轮只放宽 .turn-bubble
-   没盖到它。mobile 限宽 100%(特异度 (0,2,0) 压组件单类 (0,1,0),v2/旧路径两处
-   挂点一次覆盖);desktop 阅读限宽原样保留。 */
+/* ── 会话过程块阅读限宽单点（2026-10-27-mobile-chat-visual-round4）─────────
+   turn-segment-views 13 处容器(正文/过程块/子代理卡两分支/团队卡/警告行)原各自
+   挂 max-w-[calc(100%-120px)](2026-10-25 统一限宽)——PC 防「一行过长」合理,
+   430pt 手机被吃近 30%(用户四轮反馈子代理卡/运行命令块不满宽)。收敛为语义类
+   seg-width-cap,限宽规则单点在此;mobile 覆盖 100% 满宽。desktop 等价原值。 */
+.seg-width-cap {
+  max-width: calc(100% - 120px);
+}
+[data-variant="mobile"] .seg-width-cap {
+  max-width: 100%;
+}
+/* mobile 正文满宽(round2 引入;正文容器 round4 起也挂 seg-width-cap,本规则
+   并存冗余无害——留作 .seg-text-body 未挂 cap 路径的兜底覆盖)。 */
 [data-variant="mobile"] .seg-text-body {
   max-width: 100%;
 }

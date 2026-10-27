@@ -224,7 +224,7 @@ describe("TextSegmentView 文本段", () => {
     expect(container).not.toBeNull();
     expect(container?.className).toContain("seg-text-body");
     expect(container?.className).toContain("w-full");
-    expect(container?.className).toContain("max-w-[calc(100%-120px)]");
+    expect(container?.className).toContain("seg-width-cap");
     for (const legacy of ["border", "bg-card", "shadow-sm", "rounded-2xl", "px-4"]) {
       expect(container?.className).not.toContain(legacy);
     }
@@ -1983,12 +1983,14 @@ describe("deriveTurnActivity 快照终态收敛（turn-live-visibility FR-02）"
 /**
  * 2026-10-25-session-tab-visual-unify 漏网的过程类组件补漏断言——子代理卡
  * （两分支）/团队分身卡/工具行/思考行/警告行根容器统一限宽
- * max-w-[calc(100%-120px)]（整行宽度 − 120px，随容器自适应），与文本段
+ * seg-width-cap（限宽单点类——2026-10-27-mobile-chat-visual-round4 起 13 处容器
+ * 收敛为语义类，实际值 globals.css 定义：desktop calc(100% - 120px) 等价原值、
+ * mobile 100% 满宽），与文本段
  * （TextSegmentView，见「无框形态」用例）同口径；卡片类另断言
  * self-start（原 self-stretch 在 flex-col 父容器里全宽拉伸，为限宽反噬源）。
  */
 describe("过程信息块限宽统一（2026-10-26-subagent-card-width-unify）", () => {
-  const MAX_W = "max-w-[calc(100%-120px)]";
+  const MAX_W = "seg-width-cap";
 
   it("SubagentBlockView 无 Provider 纯展示分支：根容器限宽 + self-start", () => {
     const seg = makeToolSeg({

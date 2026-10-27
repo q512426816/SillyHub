@@ -1,0 +1,19 @@
+{
+  "schemaVersion": 1,
+  "reviewType": "self-review",
+  "change": "2026-10-27-mobile-chat-visual-round4",
+  "reviewer": "qinyi（agent 自查，用户批准方案后落码）",
+  "verdict": "PASS",
+  "summary": "两项渲染层改动自查：①13 处 max-w-[calc(100%-120px)] 一次收敛为语义类 seg-width-cap（globals.css 单点定义，desktop calc 同值等价/mobile 100% 满宽）——CSS 值等价经 globals.css 注释与测试断言锚双重锁定；②all 视图轮尾统一 RoundDivider（viewMode 条件删除，同一 JSX 块两视图共用），TurnStatusBadge 函数退役删除（tsc 证零残留引用），自动续跑徽标并入统一行（testid 保留）。125 用例全绿（segment-views 限宽锚更新 6 处/token-speed all 视图原断言全过——meta 同源）+ tsc 0。",
+  "findings": [
+    {
+      "severity": "P3",
+      "status": "accepted",
+      "title": "seg-width-cap 语义类依赖约定防未来漂移（新块可能再挂 arbitrary 类）",
+      "evidence": "globals.css 注释已声明单一源约束 + 6 用例锚定 seg-width-cap；未来新块加限宽时 grep 该类即见规约",
+      "location": "frontend/src/app/globals.css"
+    }
+  ],
+  "dimensionNotes": { "乱序": "n/a", "并发": "n/a", "切换": "ok", "作用域": "ok" },
+  "reviewedAt": "2026-10-27T15:29:00.000Z"
+}
