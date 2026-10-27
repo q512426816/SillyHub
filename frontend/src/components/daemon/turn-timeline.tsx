@@ -1970,7 +1970,7 @@ export function TurnTimeline({
       ref={scrollRef}
       onScroll={handleScroll}
       data-testid="turn-timeline-scroll"
-      className="min-h-0 flex-1 overflow-y-auto bg-background px-5 py-5"
+      className="min-h-0 flex-1 overflow-y-auto bg-background px-5 pt-5"
       style={{ overflowAnchor: "none" }}
     >
       {errorMsg && (

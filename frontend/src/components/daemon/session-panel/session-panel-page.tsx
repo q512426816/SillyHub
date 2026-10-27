@@ -5077,7 +5077,7 @@ export function SessionPanelPage({
         </div>
 
         {/* 输入区（同构）：输入框 + 配置条（ql-20260909-006：ctx 用量行收进
-            配置条行尾插槽，输入区顶部间距由容器 pt-3 保持）。 */}
+            配置条行尾插槽，输入区顶部间距已随 2026-10-27-session-input-spacing-tighten 收紧移除）。 */}
         <div className="flex shrink-0 flex-col bg-card">
           {/* task-13（FR-05/D-009@v2）：预会话团队触发行解禁——门控与真会话
               同构（claude 引擎 + 所选机器在线）；弹层确认后 payload 暂存
@@ -6199,7 +6199,7 @@ export function SessionPanelPage({
 
       {/* 输入区：输入框 + 配置控件条（原型 .input-zone）。ql-20260909-006：
           ctx 用量行（圆环+额度胶囊）自输入框上方独占行收进配置条行尾插槽
-          （trailing），不再独占一行；输入区顶部间距由容器 pt-3 保持。 */}
+          （trailing），不再独占一行；输入区顶部间距已随 2026-10-27-session-input-spacing-tighten 收紧移除。 */}
       <div className="flex shrink-0 flex-col bg-card">
         {/* task-03（design §3.2）：排队消息条——输入框上方水平 chips（空队列组件
             自返回 null 不占位）。onRemove 顺带清理附件元数据镜像（D-004），防

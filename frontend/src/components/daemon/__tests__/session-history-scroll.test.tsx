@@ -80,6 +80,20 @@ beforeEach(() => {
 });
 
 describe("scroll-up history integration", () => {
+  it("真会话滚动容器留白收紧：px-5 pt-5（无 py-5 下内边距，2026-10-27-session-input-spacing-tighten FR-01）", async () => {
+    sessionApi.getAgentSessionLogs.mockImplementation(async () => makePage("t", 5, 0));
+    render(<Host sessionId="s-1" />);
+    const el = await waitFor(() => {
+      const node = document.querySelector('[data-testid="turn-timeline-scroll"]');
+      expect(node).toBeTruthy();
+      return node as HTMLElement;
+    });
+    expect(el.className).toContain("px-5");
+    expect(el.className).toContain("pt-5");
+    // py-5 已拆为 pt-5（去下保上）——底部与输入区之间不再双重留白。
+    expect(el.className).not.toContain("py-5");
+  });
+
   it("scroll to top triggers loadEarlier with before cursor, older content prepends", async () => {
     sessionApi.getAgentSessionLogs.mockImplementation(
       async (_sid: string, opts?: { before?: string }) => {
