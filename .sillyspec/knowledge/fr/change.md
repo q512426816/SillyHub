@@ -947,3 +947,212 @@ created_at: 2026-10-02T02:55:12.745Z
 摘要：相关测试全绿
 全文：.sillyspec/changes/archive/2026-10-27-task-wakeup-precision-fix/requirements.md#FR-06
 最近确认：4dc531554f19e0cb3ed0561f06e4d4c979375f8f
+
+## FR-change-050 bind_session_to_change 在 changes 表无该 change_key 行且名字不匹配 YYYY-MM-DD- 日期前缀格式时，跳过建 placeholder 与 link（log.warning 记录），返回 None
+变更：2026-10-27-ghost-spec-binding-fix
+状态：active
+摘要：无前缀新名被拒
+全文：.sillyspec/changes/archive/2026-10-27-ghost-spec-binding-fix/requirements.md#FR-01
+最近确认：02cdde5d3066ceeba038e9138853900a40d315a1
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-27-ghost-spec-binding-fix:flow:测试绑定FR-01
+  tests: backend/app/modules/change/tests/test_spec_binding.py「test_bind_change_rejects_undated_new_key_no_placeholder」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-27-ghost-spec-binding-fix
+  status: active
+
+## FR-change-051 名字带日期前缀但行不存在时维持现状建 placeholder（真实 flow start 场景零回退）
+变更：2026-10-27-ghost-spec-binding-fix
+状态：active
+摘要：带前缀新名照常占位
+全文：.sillyspec/changes/archive/2026-10-27-ghost-spec-binding-fix/requirements.md#FR-02
+最近确认：02cdde5d3066ceeba038e9138853900a40d315a1
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-27-ghost-spec-binding-fix:flow:测试绑定FR-02
+  tests: backend/app/modules/change/tests/test_spec_binding.py「test_bind_change_creates_placeholder_with_ensure_defaults」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-27-ghost-spec-binding-fix
+  status: active
+
+## FR-change-052 库中已存在同 key 行（含历史旧格式名）时正常建 link，行为不变
+变更：2026-10-27-ghost-spec-binding-fix
+状态：active
+摘要：旧格式名已有行正常绑定
+全文：.sillyspec/changes/archive/2026-10-27-ghost-spec-binding-fix/requirements.md#FR-03
+最近确认：02cdde5d3066ceeba038e9138853900a40d315a1
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-27-ghost-spec-binding-fix:flow:测试绑定FR-03
+  tests: backend/app/modules/change/tests/test_spec_binding.py「test_bind_change_binds_existing_undated_row_without_placeholder」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-27-ghost-spec-binding-fix
+  status: active
+
+## FR-change-053 list_changes_for_session 过滤幽灵占位行：status=draft 且 location=active 且无 change_documents 且 created_at 距今超过 30 分钟的行不出现在返回结果
+变更：2026-10-27-ghost-spec-binding-fix
+状态：active
+摘要：超龄无文档 draft 行被滤
+全文：.sillyspec/changes/archive/2026-10-27-ghost-spec-binding-fix/requirements.md#FR-04
+最近确认：02cdde5d3066ceeba038e9138853900a40d315a1
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-27-ghost-spec-binding-fix:flow:测试绑定FR-04
+  tests: backend/app/modules/change/tests/test_session_changes_endpoint.py「test_ghost_placeholder_filtered_after_ttl」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-27-ghost-spec-binding-fix
+  status: active
+
+## FR-change-054 刚创建（30 分钟内）的 draft 无文档行不过滤（镜像同步延迟窗口不受影响）
+变更：2026-10-27-ghost-spec-binding-fix
+状态：active
+摘要：新鲜占位行保留
+全文：.sillyspec/changes/archive/2026-10-27-ghost-spec-binding-fix/requirements.md#FR-05
+最近确认：02cdde5d3066ceeba038e9138853900a40d315a1
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-27-ghost-spec-binding-fix:flow:测试绑定FR-05
+  tests: backend/app/modules/change/tests/test_session_changes_endpoint.py「test_fresh_placeholder_not_filtered」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-27-ghost-spec-binding-fix
+  status: active
+
+## FR-change-055 有文档的 draft 行、归档行、status 非 draft 的行均不过滤（零误伤）
+变更：2026-10-27-ghost-spec-binding-fix
+状态：active
+摘要：三条件缺一均保留
+全文：.sillyspec/changes/archive/2026-10-27-ghost-spec-binding-fix/requirements.md#FR-06
+最近确认：02cdde5d3066ceeba038e9138853900a40d315a1
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-27-ghost-spec-binding-fix:flow:测试绑定FR-06
+  tests: backend/app/modules/change/tests/test_session_changes_endpoint.py「test_documented_archived_non_draft_rows_not_filtered」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-27-ghost-spec-binding-fix
+  status: active
+
+## FR-change-056 backend 相关单元测试新增并通过（binding 校验 + 会话列表过滤两组）
+变更：2026-10-27-ghost-spec-binding-fix
+状态：active
+摘要：相关测试绿
+全文：.sillyspec/changes/archive/2026-10-27-ghost-spec-binding-fix/requirements.md#FR-07
+最近确认：02cdde5d3066ceeba038e9138853900a40d315a1
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-27-ghost-spec-binding-fix:flow:测试绑定FR-07
+  tests: backend/app/modules/change/tests/test_spec_binding.py
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-27-ghost-spec-binding-fix
+  status: active
+
+## FR-change-057 弹窗未打开时列表低频轮询（30 秒）保底新鲜度——新变更创建/失效变更归档后无需刷新页面即可回显正确值（D-001@v1）
+变更：2026-10-27-ghost-spec-binding-fix
+状态：active
+摘要：关闭态数据自动保鲜
+全文：.sillyspec/changes/archive/2026-10-27-ghost-spec-binding-fix/requirements.md#FR-08
+最近确认：02cdde5d3066ceeba038e9138853900a40d315a1
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-27-ghost-spec-binding-fix:flow:测试绑定FR-08
+  tests: frontend/src/components/daemon/__tests__/session-change-files-hover.test.tsx「useSessionChanges 关闭态 30s 轮询」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-27-ghost-spec-binding-fix
+  status: active
+
+## FR-change-058 打开下拉或详情弹窗时立即 refetch——打开瞬间所见即最新，禁止先用超过 staleTime 的缓存旧值（D-001@v1）
+变更：2026-10-27-ghost-spec-binding-fix
+状态：active
+摘要：打开瞬间拉新
+全文：.sillyspec/changes/archive/2026-10-27-ghost-spec-binding-fix/requirements.md#FR-09
+最近确认：02cdde5d3066ceeba038e9138853900a40d315a1
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-27-ghost-spec-binding-fix:flow:测试绑定FR-09
+  tests: frontend/src/components/daemon/__tests__/session-change-files-hover.test.tsx「打开下拉立即 refetch」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-27-ghost-spec-binding-fix
+  status: active
+
+## FR-change-059 前端相关测试新增并通过（轮询策略 + 打开即拉新）
+变更：2026-10-27-ghost-spec-binding-fix
+状态：active
+摘要：前端相关测试绿
+全文：.sillyspec/changes/archive/2026-10-27-ghost-spec-binding-fix/requirements.md#FR-10
+最近确认：02cdde5d3066ceeba038e9138853900a40d315a1
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-27-ghost-spec-binding-fix:flow:测试绑定FR-10
+  tests: frontend/src/components/daemon/__tests__/session-change-files-hover.test.tsx「相关用例全绿」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-27-ghost-spec-binding-fix
+  status: active
+
+## FR-change-060 extract_spec_bindings 的 sillyspec 命令定位收紧为段首（或紧随 exec）——引号字符串内的示例命令文本不再产出绑定（D-002@v1）
+变更：2026-10-27-ghost-spec-binding-fix
+状态：active
+摘要：--input 引号内嵌示例命令不产生绑定；包装残留 exec 仍命中
+全文：.sillyspec/changes/archive/2026-10-27-ghost-spec-binding-fix/requirements.md#FR-11
+最近确认：02cdde5d3066ceeba038e9138853900a40d315a1
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-27-ghost-spec-binding-fix:flow:测试绑定FR-11
+  tests: backend/app/modules/change/tests/test_spec_binding.py「test_extract_spec_bindings_quoted_text_not_binding」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-27-ghost-spec-binding-fix
+  status: active

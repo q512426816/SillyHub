@@ -172,3 +172,4 @@ created_at: 2026-08-30 22:23:33
 | 2026-10-27 | 2026-10-27-mobile-chat-visual-round2 | 用户真机第二轮反馈(截图)：agent 回复仍未占满一行(真凶=PC 阅读限宽 max-w-[cal… |
 | 2026-10-27 | 2026-10-27-scheduled-send-attachments | 用户反馈定时消息发送后 agent 收不到附件。排查确认：后端定时消息全链路（schema/落库/到… |
 | 2026-10-27 | 2026-10-27-task-wakeup-precision-fix | 修复任务唤醒判据与通知四处缺陷 |
+| 2026-10-27 | 2026-10-27-ghost-spec-binding-fix | 失败命令不再生成幽灵变更占位并过滤存量 |

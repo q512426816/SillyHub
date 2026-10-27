@@ -28,3 +28,4 @@
 - 2026-10-23-diff-dialog-pairing-fix | 轮文件变更弹窗(turn-file-diff-dialog)在补丁行缺 tool_use_id 时走…
 - 2026-10-25-session-config-deferred-switch | 会话配置点选改暂存随下条消息生效
 - 2026-10-26-ci-red-to-green | 修复四条CI工作流失败转绿
+- 2026-10-27-ghost-spec-binding-fix | 失败命令不再生成幽灵变更占位并过滤存量

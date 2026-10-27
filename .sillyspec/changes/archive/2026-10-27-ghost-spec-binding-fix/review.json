@@ -1,0 +1,37 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-27-ghost-spec-binding-fix",
+  "reviewer": "subagent",
+  "verdict": "PASS",
+  "reviewedAgainst": "02cdde5d3066ceeba038e9138853900a40d315a1",
+  "findings": [
+    {
+      "severity": "P2",
+      "status": "resolved",
+      "title": "前端相关测试命令在 HEAD 态 vitest exit 1：9 个 uncaught \"refetch is not a function\"（既有用例 mock 缺 refetch），「假败/重跑全绿」声明与实测不符",
+      "evidence": "c6d95491e 将 hover 测试 mockData 第二参 refetch 设为可选但无默认值，既有用例单参调用使 mock 返回 refetch=undefined，而组件新版在 Popover 打开沿（session-change-files-hover.tsx:128）与 openDialog（:139）执行 void refetch() 抛 TypeError——React guarded handler 吞掉故 18 用例全过，但 vitest 报 9 errors 且退出码 1（评审员在 4597eab86 两次实测 2 passed files/18 passed tests/9 errors/EXIT_CODE:1，vitest.config.ts 无 dangerouslyIgnoreUnhandledErrors）；pnpm test=vitest run 全量同理 exit 1，frontend-ci 将红。9 errors 与既有用例打开沿次数吻合，ledger 首轮 9×TypeError 非 stash 假败，「重跑全绿」声明不成立。生产代码无恙（真实 useQuery 恒提供 refetch），非数据正确性风险，故不判 P1。【已修复：commit d8a6a5a69——mockData 缺省补 refetch ?? vi.fn().mockResolvedValue(undefined)（显式传参仍用调用方 spy，FR-09 两用例断言语义不变）；增量复审实证（2026-10-27T10:05+08:00，修复后 HEAD 态、涉案四文件自修复起零 drift）抽跑同两组文件：18 用例全过、零 refetch 错误、EXIT_CODE:0；协调者 8 文件重放 314 用例全绿/exit 0 与此一致】",
+      "location": "frontend/src/components/daemon/__tests__/session-change-files-hover.test.tsx:71"
+    },
+    {
+      "severity": "P3",
+      "status": "accepted",
+      "title": "文档滞后：requirements 测试绑定 FR-08 行指向 hover 测试文件（实际双档轮询用例在新文件 session-changes-query.test.tsx）；design 文件变更清单漏列该新测试文件",
+      "evidence": "FR-08 双档轮询用例实落于 frontend/src/lib/__tests__/session-changes-query.test.tsx（FR-09 用例确在 hover 文件），工具实测面（回执重放清单）已动态正确含该文件，仅 spec 文本与清单未回写",
+      "location": ".sillyspec/changes/2026-10-27-ghost-spec-binding-fix/requirements.md:132"
+    },
+    {
+      "severity": "P3",
+      "status": "open",
+      "title": "FR-01 场景 Then 四项中 log.warning（change.spec_binding_rejected_invalid_name）未被用例断言",
+      "evidence": "test_bind_change_rejects_undated_new_key_no_placeholder 断言了返回 None/changes 空/links 空三项核心行为（数据正确性已锁），观测面 warning 记录未验；代码实证存在（binding.py:221-226），缺断言仅覆盖深度小缺口",
+      "location": "backend/app/modules/change/tests/test_spec_binding.py:294"
+    }
+  ],
+  "dimensionNotes": {
+    "乱序": "ok（30min TTL 为镜像同步延迟窗口设计，FR-05 用例锁 5 分钟不滤；段首收紧纯命令文本解析与到达时序无关；边界已裁决：可接受——daemon 长期离线时真实变更被暂时隐藏、文档到达即恢复，动态投影不落库无永久误伤）",
+    "并发": "ok（拒绝分支在 begin_nested savepoint 内正常 return，无写入即无脏数据；link 幂等 + unique 兜底语义未触碰；读侧过滤纯读投影无写竞态）",
+    "切换": "ok（拒绝返回 None 后 submit_commit.py:364-366 bound_change_id is not None 守卫实证跳过回写、不清空既有 current_change_id；存量幽灵行留库仅读侧不投影，删除环口径不变）",
+    "作用域": "ok（过滤仅在 list_changes_for_session 单会话查询内部，变更中心/归档 tab/usage 读路径不受影响；iter_command_segments 与 tool_kind 打标零改动（段首判定语义未变）；前端 hook 消费面仅 hover 组件，session-decisions-hover 独立实现不消费该 hook；queryKey 按 workspaceId+sessionId 隔离）"
+  },
+  "reviewedAt": "2026-10-27T10:09:54+08:00"
+}
