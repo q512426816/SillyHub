@@ -1,0 +1,81 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-28-knowledge-hits-cli-direct",
+  "rows": [
+    {
+      "anchor": "FR-01",
+      "row_id": "2026-10-28-knowledge-hits-cli-direct:flow:测试绑定FR-01",
+      "tests": [
+        "backend/app/modules/platform_sync/tests/test_hits_cli_direct.py「shpsync_ 直报行落令牌派生工作区」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-28-knowledge-hits-cli-direct"
+    },
+    {
+      "anchor": "FR-01",
+      "row_id": "2026-10-28-knowledge-hits-cli-direct:flow:测试绑定FR-01",
+      "tests": [
+        "backend/app/modules/platform_sync/tests/test_hits_cli_direct.py「无工作区归属令牌 403 fail-closed」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-28-knowledge-hits-cli-direct"
+    },
+    {
+      "anchor": "FR-02",
+      "row_id": "2026-10-28-knowledge-hits-cli-direct:flow:测试绑定FR-02",
+      "tests": [
+        "backend/app/modules/platform_sync/tests/test_hits_cli_direct.py「daemon_local_id 通道标识原样落库」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-28-knowledge-hits-cli-direct"
+    },
+    {
+      "anchor": "FR-03",
+      "row_id": "2026-10-28-knowledge-hits-cli-direct:flow:测试绑定FR-03",
+      "tests": [
+        "backend/app/modules/platform_sync/tests/test_hits_cli_direct.py「重复行幂等与坏行宽容计数同既有 ingest 语义」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-28-knowledge-hits-cli-direct"
+    },
+    {
+      "anchor": "FR-04",
+      "row_id": "2026-10-28-knowledge-hits-cli-direct:flow:测试绑定FR-04",
+      "tests": [
+        "backend/app/modules/platform_sync/tests/test_hits_cli_direct.py「JWT/shk_live_ 凭据 403（四轨分轨）」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-28-knowledge-hits-cli-direct"
+    }
+  ]
+}

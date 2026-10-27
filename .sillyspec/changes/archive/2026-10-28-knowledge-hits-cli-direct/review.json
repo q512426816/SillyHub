@@ -1,0 +1,23 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-28-knowledge-hits-cli-direct",
+  "reviewer": "subagent",
+  "verdict": "PASS",
+  "reviewedAgainst": "70b3e7cc55583dd4f3aa89145efdba925fbd3321",
+  "findings": [
+    {
+      "severity": "P3",
+      "status": "accepted",
+      "title": "路由注册序注释/FR 表述与实际注册序存在字面偏差（行为无缺陷，与先例块形态一致）",
+      "evidence": "FR-01 与端点 docstring 声称字面量路由「必须注册在 /changes/{name}/... 参数路由之前」，实际文件首个参数路由 POST /changes/{name}/progress 在 :123 注册、先于本端点(:290)。行为正确性不依赖注册序：Starlette 单段参数 {name} 的路径正则不匹配三段路径 /changes/-/hits-sync（尾段 'hits-sync'≠'progress'），仓内亦无 /changes/{name}/hits-sync 或 /changes/{name}/{x} 形状路由；实测 test_cli_push_lands_in_token_workspace POST /api/changes/-/hits-sync 200 落库正确。且 spec-manifest(:214)/spec-sync(:253)/spec-bundle(:327) 先例同样注册在 :123 之后——本变更位置与先例完全一致，注释口径是继承先例的防御性表述，非本变更引入的缺陷。",
+      "location": "backend/app/modules/platform_sync/router.py:290"
+    }
+  ],
+  "dimensionNotes": {
+    "乱序": "ok",
+    "并发": "ok",
+    "切换": "ok",
+    "作用域": "ok"
+  },
+  "reviewedAt": "2026-10-28T05:21:22+08:00"
+}

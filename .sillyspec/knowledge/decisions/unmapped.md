@@ -2451,3 +2451,11 @@ supersedes：D-008@v1
 锚点：未记录
 最近确认：4816e3611244550fc2e97be15e7049d7dbf10665
 理由：最大风险：卡片 frontmatter 显式写了 `status: draft`（人工想强制 draft）的场景会被误回退为 done——已靠键存在性区分（显式 draft 优先于勾选态）消除；残留面是极旧的卡写了 status 但语义与勾选冲突（未见实例，reparse 幂等可观察）。放弃方案：①改 CLI 让 task-tick 同步写 TaskCard frontmatter status——跨工具改动（sillyspec CLI），平台侧修不动上游，且 TaskCard 是执行卡非状态源的模板约定会被打破；②reparse 后置覆盖（先解析卡再用 tasks.md 覆盖同 key）——与「卡片富信息优先」docstring 声明正面冲突且丢显式 status 语义，不如解析内回退干净。
+
+## D-unmapped-306@v1 设计期风险与放弃方案（底稿）
+状态：implemented
+变更：2026-10-28-knowledge-hits-cli-direct
+原编号：D-001@v1
+锚点：未记录
+最近确认：21104e0be0f0336e046643a4253d49a138840e52
+理由：最大风险：**shpsync_ 令牌的写面扩大**——此前 shpsync_ 只开放 spec 同步族端点，本变更新增一个遥测接收端点。缓解：端点只写不读（不返回任何既有数据，回执仅计数）、复用 ingest 宽容语义（坏行跳过不炸）、且遥测数据本就来自令牌持有方自己的仓库执行期——伪造收益仅污染自己 workspace 的遥测统计。次风险：CLI 侧（另仓变更）直报失败的静默面——由 best-effort 语义 + 本地文件必写 + daemon 兜底三层覆盖（前序变更 D-001）。 试过但放弃的方案： - **扩展现有 hits/batch 端点兼容 shpsync_**（require_permission 加分轨分支）：破坏四轨分轨铁律（patterns.md#四轨鉴权——shpsync_ 与用户轨混开鉴权分支正是分轨设计要防的形态），且该端点 query 显式 workspace_id 与令牌派生两来源冲突； - **CLI 走用户 JWT**（platform.token 换用户令牌）：platform connect 发的就是 shpsync_ 同步令牌（绑定 workspace 的长寿命令牌），CLI 无用户登录态可持有，改造成本远超新增端点； - **daemon 代转**（CLI 不直报、等 daemon 周期上行）：即维持现状断流形态，已被用户拍板否决（要实时性主通道）。

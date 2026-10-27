@@ -950,3 +950,86 @@ created_at: 2026-10-14T02:51:35.432Z
 - 场景：主路径 — Given 变更落盘；When 跑三端相关测试与类型检查；Then 全部通过。
 全文：.sillyspec/changes/archive/2026-10-25-trajectory-source-model/requirements.md#FR-06
 最近确认：024af1a9d8d16d48a68fa1dfe07103c16afd049c
+
+## FR-agent-052 backend 新增 POST /changes/-/hits-sync（platform_sync 命名空间，字面量路由注册序先例同 spec-sync）：require_platform_sync_write 鉴权，workspace_id 从 shpsync_ 令牌派生，无归属 403 fail-closed
+变更：2026-10-28-knowledge-hits-cli-direct
+状态：active
+摘要：shpsync_ 直报落库；无工作区归属令牌
+全文：.sillyspec/changes/archive/2026-10-28-knowledge-hits-cli-direct/requirements.md#FR-01
+最近确认：21104e0be0f0336e046643a4253d49a138840e52
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-28-knowledge-hits-cli-direct:flow:测试绑定FR-01
+  tests: backend/app/modules/platform_sync/tests/test_hits_cli_direct.py「无工作区归属令牌 403 fail-closed」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-28-knowledge-hits-cli-direct
+  status: active
+
+## FR-agent-053 请求体 HitsBatchIn / 响应 HitsBatchOut 与现有 hits/batch 完全同构，落库复用 HitsService.ingest_batch（行 hash 幂等去重语义不变），daemon_local_id 落调用方标识（CLI 传 cli-<user> 或缺省）
+变更：2026-10-28-knowledge-hits-cli-direct
+状态：active
+摘要：CLI 通道标识
+全文：.sillyspec/changes/archive/2026-10-28-knowledge-hits-cli-direct/requirements.md#FR-02
+最近确认：21104e0be0f0336e046643a4253d49a138840e52
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-28-knowledge-hits-cli-direct:flow:测试绑定FR-02
+  tests: backend/app/modules/platform_sync/tests/test_hits_cli_direct.py「daemon_local_id 通道标识原样落库」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-28-knowledge-hits-cli-direct
+  status: active
+
+## FR-agent-054 daemon_local_id 与既有通道行可区分（数据层留归属，统计口径不受影响——USAGE_TYPES 聚合同源）
+变更：2026-10-28-knowledge-hits-cli-direct
+状态：active
+摘要：双通道行同源
+全文：.sillyspec/changes/archive/2026-10-28-knowledge-hits-cli-direct/requirements.md#FR-03
+最近确认：21104e0be0f0336e046643a4253d49a138840e52
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-28-knowledge-hits-cli-direct:flow:测试绑定FR-03
+  tests: backend/app/modules/platform_sync/tests/test_hits_cli_direct.py「重复行幂等与坏行宽容计数同既有 ingest 语义」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-28-knowledge-hits-cli-direct
+  status: active
+
+## FR-agent-055 相关单测通过：shpsync_ 鉴权派生落库路 / 无归属 403 / 坏行宽容计数与既有 ingest 语义一致
+变更：2026-10-28-knowledge-hits-cli-direct
+状态：active
+摘要：收口实测
+全文：.sillyspec/changes/archive/2026-10-28-knowledge-hits-cli-direct/requirements.md#FR-04
+最近确认：21104e0be0f0336e046643a4253d49a138840e52
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-28-knowledge-hits-cli-direct:flow:测试绑定FR-04
+  tests: backend/app/modules/platform_sync/tests/test_hits_cli_direct.py「JWT/shk_live_ 凭据 403（四轨分轨）」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-28-knowledge-hits-cli-direct
+  status: active
+
+## FR-agent-056 backend schema 改动同变更内跑前端与 daemon 的 pnpm gen:types 并提交三件
+变更：2026-10-28-knowledge-hits-cli-direct
+状态：active
+摘要：schema 变更即再生成
+全文：.sillyspec/changes/archive/2026-10-28-knowledge-hits-cli-direct/requirements.md#FR-05
+最近确认：21104e0be0f0336e046643a4253d49a138840e52
