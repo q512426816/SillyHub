@@ -1,0 +1,35 @@
+tier: thin
+legacy_fallback: false
+substeps: {}
+born_face: thin
+with_tasks: false
+review_force: null
+input: >-
+  内存水位预警补 cgroup v2 限制文件兼容
+
+
+  动机：2026-10-27-archive-reparse-oom-governance（60629d2bb）落地的内存水位预警在 cgroup v2 宿主上静默失效——drift_probe.py
+  _CGROUP_LIMIT_FILES 首候选 /sys/fs/cgroup/memory.limit 在 v2 统一层级不存在（v2 实为 memory.max），生产容器为 v2 形态：current 可读而
+  limit=None，水位告警一次不发，且与「无 cgroup 环境」不可区分。来源：2026-10-28 只读风险审查高置信发现 1；用户按审查报告指示修复。
+
+
+  成功标准：
+
+  - _CGROUP_LIMIT_FILES 候选补 /sys/fs/cgroup/memory.max（v2 在前、v1 兜底保留），模块 docstring 的 v2 文件名同步修正
+
+  - memory.max 内容为字面量 "max"（无限制）时安全跳过：不抛错、不误告警、返回 None
+
+  - 新增 pytest 用例覆盖四形态：v2 正常读取算出比例、超 0.8 阈值出告警、"max" 字面量跳过、无 cgroup 环境跳过；spec_workspace 相关测试全绿
+autopilot: false
+prestage_ack: true
+baseline_commit: e110c991d2524f91f68c52b32d8a8f6015138434
+updatedAt: '2026-10-27T23:35:00.838Z'
+cross_baselines:
+  sillyspec: e6b1fb4128f4d5aa662bf8b9a2ab13f26cb9863d
+baseline_sha256: 57162e66cd052bf5fb6c349bd3d633075b232b95b0b7ffa0fca61bf8f1930e17
+spec_approved: true
+spec_approved_at: '2026-10-27T23:35:00.838Z'
+spec_approved_by: zcode-riskfix-20261028
+spec_approved_channel: agent-self
+spec_attested_by: zcode-riskfix-20261028
+

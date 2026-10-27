@@ -9,7 +9,7 @@ task-05 / FR-04 / D-008）。
   修复，尊重 knowledge「拒全量对账常态化」先例——Windows bind mount stat
   断崖 + 全量 93s 超时史）。
 - :func:`log_memory_watermark`：读 cgroup 内存水位（v2 ``memory.current`` /
-  ``memory.limit``，v1 ``memory.usage_in_bytes`` / ``memory.limit_in_bytes``）
+  ``memory.max``，v1 ``memory.usage_in_bytes`` / ``memory.limit_in_bytes``）
   周期落日志，超 ``_WATERMARK_HIGH_RATIO``（0.8）告警——OOM 前可预警
   （2026-10-27 生产实证：anon-rss≈2.37G 顶爆 2500m memcg 被杀前零信号）。
   无 cgroup 环境（本地 dev/Windows）静默跳过（debug 一次），不报错。
@@ -48,7 +48,11 @@ _CGROUP_CURRENT_FILES = (
     "/sys/fs/cgroup/memory/memory.usage_in_bytes",
 )
 _CGROUP_LIMIT_FILES = (
-    "/sys/fs/cgroup/memory.limit",
+    # v2 限制文件是 memory.max（统一层级无 memory.limit——2026-10-28-cgroup-v2-
+    # watermark-fix 修正：此前误写 memory.limit 致 v2 宿主 limit 恒 None、告警
+    # 静默失效）。无限制时内容为字面量 "max"，int() 抛 ValueError 被捕获 →
+    # 按「候选不可用」落回 v1 兜底，v1 亦无则 None 静默跳过（无限制即无水位）。
+    "/sys/fs/cgroup/memory.max",
     "/sys/fs/cgroup/memory/memory.limit_in_bytes",
 )
 
