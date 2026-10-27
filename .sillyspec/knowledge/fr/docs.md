@@ -1098,3 +1098,112 @@ created_at: 2026-10-15T16:16:15.707Z
   confirmed_at: null
   source_change: 2026-10-25-session-config-deferred-switch
   status: active
+
+## FR-docs-065 消息滚动区 py-5 改 pt-5（去下内边距保留上）
+变更：2026-10-27-session-input-spacing-tighten
+状态：active
+摘要：主路径
+全文：.sillyspec/changes/archive/2026-10-27-session-input-spacing-tighten/requirements.md#FR-01
+最近确认：644631ac24e0d0e40c35d12fe5ab1bc0dca19dd5
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-27-session-input-spacing-tighten:flow:测试绑定FR-01
+  tests: frontend/src/components/daemon/__tests__/session-panel-dialog.test.tsx
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-27-session-input-spacing-tighten
+  status: active
+
+## FR-docs-066 输入区容器两处挂载点删除 pt-3
+变更：2026-10-27-session-input-spacing-tighten
+状态：active
+摘要：主路径
+全文：.sillyspec/changes/archive/2026-10-27-session-input-spacing-tighten/requirements.md#FR-02
+最近确认：644631ac24e0d0e40c35d12fe5ab1bc0dca19dd5
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-27-session-input-spacing-tighten:flow:测试绑定FR-02
+  tests: frontend/src/components/daemon/__tests__/session-panel-dialog.test.tsx
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-27-session-input-spacing-tighten
+  status: active
+
+## FR-docs-067 输入栏主体删除 pt-1 与 pb-4
+变更：2026-10-27-session-input-spacing-tighten
+状态：active
+摘要：主路径
+全文：.sillyspec/changes/archive/2026-10-27-session-input-spacing-tighten/requirements.md#FR-03
+最近确认：644631ac24e0d0e40c35d12fe5ab1bc0dca19dd5
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-27-session-input-spacing-tighten:flow:测试绑定FR-03
+  tests: frontend/src/components/daemon/__tests__/session-panel-dialog-attachments.test.tsx
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-27-session-input-spacing-tighten
+  status: active
+
+## FR-docs-068 输入框圆角容器与 textarea 的 py-2 改 pt-2
+变更：2026-10-27-session-input-spacing-tighten
+状态：active
+摘要：主路径
+全文：.sillyspec/changes/archive/2026-10-27-session-input-spacing-tighten/requirements.md#FR-04
+最近确认：644631ac24e0d0e40c35d12fe5ab1bc0dca19dd5
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-27-session-input-spacing-tighten:flow:测试绑定FR-04
+  tests: frontend/src/components/daemon/__tests__/session-panel-draft-scope.test.tsx
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-27-session-input-spacing-tighten
+  status: active
+
+## FR-docs-069 输入区底部两处删除 pb-3
+变更：2026-10-27-session-input-spacing-tighten
+状态：active
+摘要：主路径
+全文：.sillyspec/changes/archive/2026-10-27-session-input-spacing-tighten/requirements.md#FR-05
+最近确认：644631ac24e0d0e40c35d12fe5ab1bc0dca19dd5
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-27-session-input-spacing-tighten:flow:测试绑定FR-05
+  tests: frontend/src/app/m/workspaces/[id]/sessions/__tests__/page.m-sessions.test.tsx
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-27-session-input-spacing-tighten
+  status: active
+
+## FR-docs-070 dialog 模式同链路位置对齐（如有）
+变更：2026-10-27-session-input-spacing-tighten
+状态：active
+摘要：排查结论
+全文：.sillyspec/changes/archive/2026-10-27-session-input-spacing-tighten/requirements.md#FR-06
+最近确认：644631ac24e0d0e40c35d12fe5ab1bc0dca19dd5
+
+## FR-docs-071 触及组件相关测试与 lint 通过
+变更：2026-10-27-session-input-spacing-tighten
+状态：active
+摘要：主路径
+全文：.sillyspec/changes/archive/2026-10-27-session-input-spacing-tighten/requirements.md#FR-07
+最近确认：644631ac24e0d0e40c35d12fe5ab1bc0dca19dd5

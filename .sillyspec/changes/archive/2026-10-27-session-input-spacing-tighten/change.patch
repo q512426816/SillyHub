@@ -1,0 +1,168 @@
+diff --git a/docs/releases/2026-10-27-004-7ee3e33e8.md b/docs/releases/2026-10-27-004-7ee3e33e8.md
+new file mode 100644
+index 000000000..ffe4fb54c
+--- /dev/null
++++ b/docs/releases/2026-10-27-004-7ee3e33e8.md
+@@ -0,0 +1,31 @@
++---
++seq: 47
++deployed_at: "2026-10-27 22:30:30"
++status: success
++commit_from: 4597eab86
++commit_to: 7ee3e33e8
++summary: 会话视觉三轮上线——轮次单行化/会话页返回列表钮/会话列表 PC 同款五态状态标;随行归档治理变更
++agent: claude-code
++commits:
++  - sha: 7ee3e33e8
++    message: "chore(archive): 2026-10-27-mobile-chat-visual-round3 归档留档"
++    author: qinyi
++  - sha: 3266725e5
++    message: "feat(mobile): 会话视觉三轮——轮次单行化/会话页返回列表钮(onBack prop 宿主装配)/会话列表行首 PC 同款五态状态标 (task-01~04, 2026-10-27-mobile-chat-visual-round3)"
++    author: qinyi
++---
++
++## 🆕 新增
++
++- **会话页返回列表按钮（用户需求）**：mobile 会话头部标题左侧「←」钮（data-testid session-mobile-back），显式路由回当前工作区会话列表（深链进入 router.back 不可靠）；onBack 可选 prop 宿主装配（组件保持纯 props），desktop/dialog/悬浮宿主零渲染。
++- **会话列表 PC 同款状态标（用户需求）**：mobile 会话卡行首直接消费 session-list-panel 导出的 sessionStatusIndicator 单一源纯函数（五态语义与 PC 逐字同款不另造词表）：红点失败/绿点完成/问号待答/转圈执行/琥珀等你。
++
++## 🔧 修复
++
++- **轮次分隔单行化（用户反馈折行难看）**：round2 的 flex-wrap 在长 meta 下两行居中观感差，回改 nowrap+truncate 超长省略；mobile 不再渲染 detail（开始时刻/历时，最次要信息让宽）；desktop 胶囊+detail 原位不变。
++
++## 📝 部署验证
++
++- `/api/health` 双口径一致：服务器本机与公网均回显 `commit_sha=7ee3e33e8`——与打包锚一致；backend 日志错误计数 0；5 容器 healthy；备份锚 `backup-20261027-2240`。
++- 测试面：round-divider（契约更新：折行→单行）/mobile-session-list/session-panel-variant/page.m-sessions/page.m-session-chat（补 useRouter mock）五套件 59 用例全绿；tsc 0；lint 0。
++- 待用户真机复验：轮次单行效果/会话页返回钮/列表状态标五态。
+diff --git a/frontend/src/components/daemon/__tests__/session-history-scroll.test.tsx b/frontend/src/components/daemon/__tests__/session-history-scroll.test.tsx
+index afd6aac0c..01b9c3a69 100644
+--- a/frontend/src/components/daemon/__tests__/session-history-scroll.test.tsx
++++ b/frontend/src/components/daemon/__tests__/session-history-scroll.test.tsx
+@@ -80,6 +80,20 @@ beforeEach(() => {
+ });
+ 
+ describe("scroll-up history integration", () => {
++  it("真会话滚动容器留白收紧：px-5 pt-5（无 py-5 下内边距，2026-10-27-session-input-spacing-tighten FR-01）", async () => {
++    sessionApi.getAgentSessionLogs.mockImplementation(async () => makePage("t", 5, 0));
++    render(<Host sessionId="s-1" />);
++    const el = await waitFor(() => {
++      const node = document.querySelector('[data-testid="turn-timeline-scroll"]');
++      expect(node).toBeTruthy();
++      return node as HTMLElement;
++    });
++    expect(el.className).toContain("px-5");
++    expect(el.className).toContain("pt-5");
++    // py-5 已拆为 pt-5（去下保上）——底部与输入区之间不再双重留白。
++    expect(el.className).not.toContain("py-5");
++  });
++
+   it("scroll to top triggers loadEarlier with before cursor, older content prepends", async () => {
+     sessionApi.getAgentSessionLogs.mockImplementation(
+       async (_sid: string, opts?: { before?: string }) => {
+diff --git a/frontend/src/components/daemon/session-input-bar.tsx b/frontend/src/components/daemon/session-input-bar.tsx
+index af16a6669..878bf6795 100644
+--- a/frontend/src/components/daemon/session-input-bar.tsx
++++ b/frontend/src/components/daemon/session-input-bar.tsx
+@@ -836,7 +836,7 @@ export function SessionInputBar({
+   };
+ 
+   return (
+-    <footer className="shrink-0 bg-card px-5 pb-4 pt-1">
++    <footer className="shrink-0 bg-card px-5">
+       {/* 附件区：chips + 降级提示条（task-12）。 */}
+       {(attachments.length > 0 || uploading > 0 || uploadError) && (
+         <div className="mb-2 space-y-1.5">
+@@ -914,7 +914,7 @@ export function SessionInputBar({
+           ql-20260909-009：常态 shadow-sm 微浮、聚焦升 shadow-md。
+           2026-09-09-sessions-visual-refresh task-11（D-009@v1）：聚焦环柔化——
+           ring-4 ring-brand-100（dark 下霓虹圈游戏感）改 3px 品牌色 10% 柔环。 */}
+-      <div className="relative flex items-end gap-2 rounded-2xl border border-border bg-muted/40 px-2.5 py-2 shadow-sm transition-all focus-within:border-brand-400/45 focus-within:bg-card focus-within:shadow-md focus-within:ring-[3px] focus-within:ring-brand-500/10">
++      <div className="relative flex items-end gap-2 rounded-2xl border border-border bg-muted/40 px-2.5 pt-2 shadow-sm transition-all focus-within:border-brand-400/45 focus-within:bg-card focus-within:shadow-md focus-within:ring-[3px] focus-within:ring-brand-500/10">
+         {/* task-03：联想数据桥（首次聚焦挂载，见 MentionSourcesBridge 注释；
+             task-06：ppmScope 状态口径透传——切开关换键重拉 PPM 两分组）。 */}
+         {mentionSourcesMounted && (
+@@ -1150,7 +1150,7 @@ export function SessionInputBar({
+             value={value}
+             tokens={allRefTokens}
+             onRemoveToken={removeAttRefOnce}
+-            overlayClassName="min-h-11 px-1 py-2 text-sm leading-5"
++            overlayClassName="min-h-11 px-1 pt-2 text-sm leading-5"
+             overlayStyle={inputHeight != null ? { height: inputHeight } : undefined}
+             visibleBadgeIndex={hoveredRefOcc}
+             containerRef={attOverlayRef}
+@@ -1162,7 +1162,7 @@ export function SessionInputBar({
+           <textarea
+             ref={textareaRef}
+             value={value}
+-            className="relative z-10 min-h-11 w-full resize-none bg-transparent px-1 py-2 text-sm leading-5 outline-none placeholder:text-muted-foreground disabled:cursor-not-allowed disabled:opacity-60"
++            className="relative z-10 min-h-11 w-full resize-none bg-transparent px-1 pt-2 text-sm leading-5 outline-none placeholder:text-muted-foreground disabled:cursor-not-allowed disabled:opacity-60"
+             rows={2}
+             disabled={disabled}
+             style={inputHeight != null ? { height: inputHeight } : undefined}
+diff --git a/frontend/src/components/daemon/session-panel/session-panel-page.tsx b/frontend/src/components/daemon/session-panel/session-panel-page.tsx
+index c162a38fb..2bf70045a 100644
+--- a/frontend/src/components/daemon/session-panel/session-panel-page.tsx
++++ b/frontend/src/components/daemon/session-panel/session-panel-page.tsx
+@@ -5064,7 +5064,7 @@ export function SessionPanelPage({
+         {/* 空时间线（同构容器类名 + 原型 .empty-hint 文案）。 */}
+         <div
+           data-testid="turn-timeline-scroll"
+-          className="min-h-0 flex-1 overflow-y-auto bg-background px-5 py-5"
++          className="min-h-0 flex-1 overflow-y-auto bg-background px-5 pt-5"
+         >
+           <div className="flex h-full min-h-[260px] flex-col items-center justify-center text-center">
+             <p className="text-sm font-medium text-foreground">
+@@ -5077,8 +5077,8 @@ export function SessionPanelPage({
+         </div>
+ 
+         {/* 输入区（同构）：输入框 + 配置条（ql-20260909-006：ctx 用量行收进
+-            配置条行尾插槽，输入区顶部间距由容器 pt-3 保持）。 */}
+-        <div className="flex shrink-0 flex-col bg-card pt-3">
++            配置条行尾插槽，输入区顶部间距已随 2026-10-27-session-input-spacing-tighten 收紧移除）。 */}
++        <div className="flex shrink-0 flex-col bg-card">
+           {/* task-13（FR-05/D-009@v2）：预会话团队触发行解禁——门控与真会话
+               同构（claude 引擎 + 所选机器在线）；弹层确认后 payload 暂存
+               （handlePreTeamTrigger，含主 agent 选择器的 orchestrator_workspace_id），
+@@ -5158,7 +5158,7 @@ export function SessionPanelPage({
+           />
+           {/* ql-20260823-008：配置控件条同构挂载（provisional 暂存模式）——
+               供应商/档案可选暂存随首句生效（task-09 起配置条仅此两块）。 */}
+-          <div className="px-5 pb-3">
++          <div className="px-5">
+             {/* 2026-10-19-shared-agent-onboarding-hint：无自有/共享机器用户的
+                 共享智能体引导条——仅当选中值确为共享智能体时渲染（用户手动改选
+                 其它档案即自然消失，不依赖 touchedRef）。 */}
+@@ -6199,8 +6199,8 @@ export function SessionPanelPage({
+ 
+       {/* 输入区：输入框 + 配置控件条（原型 .input-zone）。ql-20260909-006：
+           ctx 用量行（圆环+额度胶囊）自输入框上方独占行收进配置条行尾插槽
+-          （trailing），不再独占一行；输入区顶部间距由容器 pt-3 保持。 */}
+-      <div className="flex shrink-0 flex-col bg-card pt-3">
++          （trailing），不再独占一行；输入区顶部间距已随 2026-10-27-session-input-spacing-tighten 收紧移除。 */}
++      <div className="flex shrink-0 flex-col bg-card">
+         {/* task-03（design §3.2）：排队消息条——输入框上方水平 chips（空队列组件
+             自返回 null 不占位）。onRemove 顺带清理附件元数据镜像（D-004），防
+             删除条目后残留；onRetry 仅用户触发（D-003，hook 内 failed→pending 后
+@@ -6387,7 +6387,7 @@ export function SessionPanelPage({
+           }}
+         />
+         )}
+-        <div ref={configBarWrapRef} className="px-5 pb-3">
++        <div ref={configBarWrapRef} className="px-5">
+           <SessionConfigBar
+             sessionId={sessionId}
+             running={running}
+diff --git a/frontend/src/components/daemon/turn-timeline.tsx b/frontend/src/components/daemon/turn-timeline.tsx
+index 03ea8d14d..0cc65adc6 100644
+--- a/frontend/src/components/daemon/turn-timeline.tsx
++++ b/frontend/src/components/daemon/turn-timeline.tsx
+@@ -1970,7 +1970,7 @@ export function TurnTimeline({
+       ref={scrollRef}
+       onScroll={handleScroll}
+       data-testid="turn-timeline-scroll"
+-      className="min-h-0 flex-1 overflow-y-auto bg-background px-5 py-5"
++      className="min-h-0 flex-1 overflow-y-auto bg-background px-5 pt-5"
+       style={{ overflowAnchor: "none" }}
+     >
+       {errorMsg && (

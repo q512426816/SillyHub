@@ -1,0 +1,52 @@
+tier: thin
+legacy_fallback: false
+substeps:
+  artifacts: done
+  ledger: done
+  patch: done
+  review: done
+  probes: done
+  distill: done
+  archive: done
+  events: done
+born_face: thin
+with_tasks: false
+review_force: null
+input: >-
+  会话页输入区与消息流底部留白过大——用户在浏览器开发者工具审查发现 pt-3/pt-1/pb-4/py-2/pb-3/py-5
+  在桌面版会话页输入区链上层层叠加。按用户确认清单收紧：仅剔除点名的内边距，类上其余样式（背景/横向内边距/圆角/边框）保留；py-2/py-5 按用户片段口径只去下保留上；gap-3 不在输入区链上不动；手机版会话页无此聚集不动。
+
+
+  成功标准：
+
+  - 消息滚动区 py-5 改 pt-5（去下内边距保留上）
+
+  - 输入区容器两处挂载点删除 pt-3
+
+  - 输入栏主体删除 pt-1 与 pb-4
+
+  - 输入框圆角容器与 textarea 的 py-2 改 pt-2
+
+  - 输入区底部两处删除 pb-3
+
+  - dialog 模式同链路位置对齐（如有）
+
+  - 触及组件相关测试与 lint 通过
+autopilot: false
+prestage_ack: false
+baseline_commit: 7ee3e33e848f97c349082de12ce503ed6c75fa07
+updatedAt: '2026-10-27T03:27:20.476Z'
+cross_baselines:
+  sillyspec: 67e50bcca2adb9ecd502d12086c0ac8cb994da84
+baseline_sha256: d0e2a5ed224ba5c7f3fdf171b589b5c786decdb294d297eaeababf0f78dd6a7b
+spec_approved: true
+spec_approved_at: '2026-10-27T03:12:48.325Z'
+spec_approved_by: anon@DESKTOP-HJ0AM09
+spec_approved_channel: user-confirmed
+spec_attested_by: anon@DESKTOP-HJ0AM09
+gate_summary: >-
+  test: skipped
+  结果：C:\Users\qinyi\IdeaProjects\multi-agent-platform\.sillyspec\.runtime\verify-runs\20261027031339\test-result.json —
+  跳过原因：变更与测试面零关系（4 个变更文件无自身测试、无 import 依赖测试、FR 关联回归层被 fr_regress_cap 跳过（绑定 43 个未跑，归 pre-push/CI
+  门））——动态子集空，不硬跑全量（防超时/预存失败面）。｜lint: skipped — 跳过原因：local.yaml 未配置 commands.lint（或标记 unavailable）。｜门文件 4 个
+

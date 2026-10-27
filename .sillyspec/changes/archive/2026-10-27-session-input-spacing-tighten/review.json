@@ -1,0 +1,51 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-27-session-input-spacing-tighten",
+  "reviewer": "subagent",
+  "verdict": "PASS",
+  "reviewedAgainst": "644631ac2（增量复审基线；首评基线 c848d9be1）",
+  "findings": [
+    {
+      "severity": "P1",
+      "status": "resolved",
+      "title": "FR-01 漏改真会话消息滚动容器：turn-timeline.tsx:1973 仍为 px-5 py-5，主路径留白收紧未达成",
+      "evidence": "全仓 grep data-testid=\"turn-timeline-scroll\" 的 DOM 挂点有两处：session-panel-page.tsx:5066（预会话/空时间线，首轮已改 pt-5）与 turn-timeline.tsx:1972（真会话消息滚动容器，onScroll=handleScroll 承载 load-earlier，session-history-scroll 等测试均 query 此 testid）。后者 className 仍为 'min-h-0 flex-1 overflow-y-auto bg-background px-5 py-5'，未在交付提交 7ae772fad 触及。FR-01 明文『消息滚动区（turn-timeline-scroll）必须只保留上内边距（pt-5），禁止保留下内边距』且场景为『桌面/手机会话页渲染』——用户实际使用的有消息会话正是 turn-timeline.tsx 渲染路径，py-5 的下半（pb-5=20px）仍在，消息区与输入区之间的下留白收紧目标落空一半；同 testid 两挂点样式分叉（空态 pt-5 / 常态 py-5）。session-panel-page.tsx:5064 注释『空时间线（同构容器类名）』本身即提示另一处同款存在，执行时未追。design『作用域』问答亦漏盘此第三挂点。【已解决：修复提交 644631ac2 将 turn-timeline.tsx:1973 改为 'min-h-0 flex-1 overflow-y-auto bg-background px-5 pt-5'，真会话主路径与预会话空时间线同口径，FR-01 双挂点闭合；本轮增量复审直接读源码逐字核实，className 为 \"min-h-0 flex-1 overflow-y-auto bg-background px-5 pt-5\"，无 py-5。】",
+      "location": "frontend/src/components/daemon/turn-timeline.tsx:1973"
+    },
+    {
+      "severity": "P3",
+      "status": "resolved",
+      "title": "两处注释与实现脱钩：仍称『输入区顶部间距由容器 pt-3 保持』而 pt-3 已删",
+      "evidence": "session-panel-page.tsx:5079-5080 与 6200-6202 的注释在首轮 diff 中未随 pt-3 删除而更新，注释所述机制（容器 pt-3 保持顶部间距）已不存在，误导后续维护者；违反项目 CLAUDE.md 规则 18『注释和实现不一致是万恶之源』。【已解决：修复提交 644631ac2 将两处注释同步改为『输入区顶部间距已随 2026-10-27-session-input-spacing-tighten 收紧移除』；本轮增量复审直接读源码核实 5080 行与 6202 行均为该新表述，不再称『由容器 pt-3 保持』。】",
+      "location": "frontend/src/components/daemon/session-panel/session-panel-page.tsx:5080"
+    },
+    {
+      "severity": "P3",
+      "status": "resolved",
+      "title": "测试绑定均为渲染回归弱绑定，无类名断言，无法拦截本类漏改（P1 即因此逃逸）",
+      "evidence": "requirements 测试绑定自述『类名无断言冲突，全套通过即覆盖』——四个绑定套件（session-panel-dialog / dialog-attachments / draft-scope / m-sessions，文件均实存）只验渲染不验间距类名，py-5 与 pt-5 对它们不可区分；且 dialog 套件渲染的是 dialog/空态路径，对真会话滚动容器（turn-timeline.tsx）无覆盖。task-07 的 118 用例全绿为真但证明力限于零回归。【已解决：修复提交 644631ac2 在 session-history-scroll.test.tsx 新增用例——mock getAgentSessionLogs 返回 5 条渲染真会话路径，querySelector turn-timeline-scroll 后断言 className 含 px-5/pt-5 且不含 py-5，正面覆盖首轮逃逸面（用例逻辑核对无误，pt-5 不含子串 py-5，断言不互斥冲突）；commit 回执 12 用例全过 + tsc + eslint 干净，按评审口径采信未重跑。】",
+      "location": "frontend/src/components/daemon/__tests__/session-history-scroll.test.tsx:83"
+    },
+    {
+      "severity": "P3",
+      "status": "accepted",
+      "title": "输入区底部 pb-4/pb-3 全删后无容器兜底，配置条与页面底边零间隙",
+      "evidence": "footer 删 pb-4、配置条包装两处删 pb-3 后，SessionPanelPage 外层无底部 padding 兜底（mobile 亦无 safe-area 竖向兜底，globals.css:917 的 mobile 覆盖仅横向 padding-left/right 8px）。此为用户 DevTools 点名的有意删除（收紧目标本身），非缺陷；仅建议人工目验桌面+手机两态下配置条贴底的视觉可接受度。增量复审维持 accepted，不属阻断项。",
+      "location": "frontend/src/components/daemon/session-input-bar.tsx:839"
+    },
+    {
+      "severity": "P3",
+      "status": "resolved",
+      "title": "增量复审：首轮阻断项 1 条（P1）+ 弱绑定 2 条——修复提交 644631ac2 核验通过",
+      "evidence": "两处滚动容器均 px-5 pt-5；注释已同步；类名断言用例在场",
+      "location": "frontend/src/components/daemon/turn-timeline.tsx:1973"
+    }
+  ],
+  "dimensionNotes": {
+    "乱序": "n/a",
+    "并发": "n/a",
+    "切换": "ok",
+    "作用域": "ok"
+  },
+  "reviewedAt": "2026-10-27T11:26:23+08:00"
+}

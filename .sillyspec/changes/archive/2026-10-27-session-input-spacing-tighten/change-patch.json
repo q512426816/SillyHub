@@ -1,0 +1,101 @@
+{
+  "change": "2026-10-27-session-input-spacing-tighten",
+  "baseline": "7ee3e33e848f97c349082de12ce503ed6c75fa07",
+  "head": "644631ac24e0d0e40c35d12fe5ab1bc0dca19dd5",
+  "files": [
+    "docs/releases/2026-10-27-004-7ee3e33e8.md",
+    "frontend/src/components/daemon/__tests__/session-history-scroll.test.tsx",
+    "frontend/src/components/daemon/session-input-bar.tsx",
+    "frontend/src/components/daemon/session-panel/session-panel-page.tsx",
+    "frontend/src/components/daemon/turn-timeline.tsx"
+  ],
+  "totals": {
+    "files": 5,
+    "additions": 64,
+    "deletions": 16
+  },
+  "savedAt": "2026-10-27T03:27:18.453Z",
+  "note": "flow done 时点冻结（本变更可归属交付面：baseline..HEAD 提交面过滤 .sillyspec/ 只留 .sillyspec/docs/ 交付文档 + 独占树未提交交付；治理工件目录不入冻结——2026-10-12-close-trace-freeze-integrity FR-01）",
+  "modules": [
+    {
+      "id": "frontend",
+      "files": 4,
+      "doc": "docs/multi-agent-platform/modules/frontend.md",
+      "docTouched": false,
+      "docMissing": false
+    },
+    {
+      "id": "docs",
+      "files": 1,
+      "doc": "docs/multi-agent-platform/modules/docs.md",
+      "docTouched": false,
+      "docMissing": false
+    },
+    {
+      "id": "frontend_components",
+      "files": 4,
+      "doc": "docs/SillyHub/modules/frontend_components.md",
+      "docTouched": false,
+      "docMissing": false
+    }
+  ],
+  "uncoveredDirs": [],
+  "moduleMaps": [
+    "docs/backend/modules/_module-map.yaml",
+    "docs/frontend/modules/_module-map.yaml",
+    "docs/multi-agent-platform/modules/_module-map.yaml",
+    "docs/SillyHub/modules/_module-map.yaml",
+    "docs/sillyhub-daemon/modules/_module-map.yaml"
+  ],
+  "acceptedDirtyGap": 7,
+  "scopeAudit": {
+    "mode": "full-flow",
+    "ok": true,
+    "degradedReason": null,
+    "baseAnchor": "7ee3e33e848f97c349082de12ce503ed6c75fa07",
+    "totals": {
+      "files": 5,
+      "additions": 64,
+      "deletions": 16
+    },
+    "rows": [
+      {
+        "path": "docs/releases/2026-10-27-004-7ee3e33e8.md",
+        "additions": 31,
+        "deletions": 0,
+        "kind": "new"
+      },
+      {
+        "path": "frontend/src/components/daemon/__tests__/session-history-scroll.test.tsx",
+        "additions": 14,
+        "deletions": 0,
+        "kind": "modified"
+      },
+      {
+        "path": "frontend/src/components/daemon/session-input-bar.tsx",
+        "additions": 4,
+        "deletions": 4,
+        "kind": "modified"
+      },
+      {
+        "path": "frontend/src/components/daemon/session-panel/session-panel-page.tsx",
+        "additions": 7,
+        "deletions": 7,
+        "kind": "modified"
+      },
+      {
+        "path": "frontend/src/components/daemon/turn-timeline.tsx",
+        "additions": 8,
+        "deletions": 5,
+        "kind": "modified"
+      }
+    ],
+    "excluded": {
+      "foreignDeclared": []
+    },
+    "note": "flow done 时点冻结（本文件落盘时采集）",
+    "closedBy": "flow done"
+  },
+  "patchSha256": "0b2691732bb5a9e6a19b82c68dd7ead1b937854b9f5f9d852f9a7b7bd7701b0c",
+  "patchStatus": "ok"
+}
