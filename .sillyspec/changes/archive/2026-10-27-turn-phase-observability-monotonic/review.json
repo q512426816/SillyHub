@@ -1,0 +1,31 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-27-turn-phase-observability-monotonic",
+  "reviewer": "inline-self（主会话代行自审——变更面 4 文件且全程同一作者，检查单逐条作答留痕）",
+  "verdict": "PASS",
+  "reviewedAgainst": "38656992777af5c16d135235ce71f55efd29ecc4",
+  "findings": [
+    {
+      "severity": "P3",
+      "status": "resolved-as-accepted",
+      "title": "单调守卫吞掉 steering 新消息的送达反馈（dispatched/delivered 丢弃后显示停在旧 phase）",
+      "evidence": "design 风险节已声明并裁决：与「退化回已接收卡住」相比是净改善——新消息的 inject_received 同序(7)覆盖可推进，且 30 秒停滞文案兜底仍在；测试锚定推进链不受守卫影响",
+      "location": "frontend/src/components/daemon/session-panel/turn-state.ts:107"
+    },
+    {
+      "severity": "P3",
+      "status": "resolved-as-accepted",
+      "title": "终态轮迟到 phase 写回问题不在本次修复范围（clearTurnPhase 后迟到事件可再写入）",
+      "evidence": "design 风险节已声明：涉及消费方终态幂等链，超出两点收敛原则；消费方 applyTurnPhase 调用点均在活跃轮上下文，终态轮命中面窄，留待实证后再立项",
+      "location": "frontend/src/components/daemon/session-panel/turn-state.ts:150"
+    }
+  ],
+  "dimensionNotes": {
+    "乱序": "ok（词表序守卫：回退丢弃、前跳顺写、词表外透传——测试 6 用例锚定含乱序前跳修正）",
+    "并发": "ok（daemon 模块级 Set 有界 512 逐出既有惯例；前端纯 reducer 串行链）",
+    "切换": "ok（守卫只改写入判定，清除路径职责不变；warnedKeys 进程重启清零）",
+    "作用域": "ok（daemon 按 session+phase 键、前端按轮内单值判定，无跨工作区数据面）"
+  },
+  "reviewNotes": "检查单作答：①FR↔实现↔测试三方一致——FR-01 首警去重（warn 恰 1 次/debug 3 次断言）、FR-02 六用例（退化防护/执行段保留/乱序修正/推进链/词表外双向/orphan 回退受守卫）、FR-03 纯函数+upsertTurn 集成双用例；daemon 19 用例、前端 44 用例全绿，双侧 tsc 通过、frontend eslint 干净（daemon 仓无 eslint 配置，tsc 即门）；②盲维四问均实答无『不适用』；③声明边界两条均已裁决可接受（见 findings）；④防护声明核实——warnOncePhaseFailure 有界 512 逐出（turn-phase-observability 既有实现）、守卫词表外双向透传有测试锚定；⑤生成物——backend/SSE 协议/词表零改动，无 gen:types 义务（api-types 无关）。",
+  "reviewedAt": "2026-10-27T05:02:00Z"
+}

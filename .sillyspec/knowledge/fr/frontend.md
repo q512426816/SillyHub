@@ -8121,3 +8121,96 @@ superseded_by：FR-app-workspace-pages-002
   confirmed_at: null
   source_change: 2026-10-26-worktree-group-collapse
   status: active
+
+## FR-frontend-080 daemon 层 turn_phase POST 失败从 debug 提为首警 warn（复用 turn-phase-observability 的 warnOncePhaseFailure 同 session+phase 去重惯例），成功仍静默
+变更：2026-10-27-turn-phase-observability-monotonic
+状态：active
+摘要：主路径
+场景正文：
+- 场景：主路径 — Given 桥层收到 phase 上报桥消息 / When notifyTurnPhase reject（网络故障）/ Then 不抛出且 logger.warn 恰好一次
+全文：.sillyspec/changes/archive/2026-10-27-turn-phase-observability-monotonic/requirements.md#FR-01
+最近确认：38656992777af5c16d135235ce71f55efd29ecc4
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-27-turn-phase-observability-monotonic:flow:测试绑定FR-01
+  tests: test/sillyhub-daemon/tests/turn-phase-report.test.ts「② daemon.onTurnMessage turn_phase_report 拦截 > notifyTurnPhase reject → 首警 warn 一次（同 session+phase 去重）」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-27-turn-phase-observability-monotonic
+  status: active
+
+## FR-frontend-081 前端 applyTurnPhase 单调守卫：dispatched/delivered 不覆盖已是执行期阶段（skills_sync 至 inject_received）或 first_event 的 currentPhase（回退写静默丢弃，正常推进与乱序前跳不受影响）
+变更：2026-10-27-turn-phase-observability-monotonic
+状态：active
+摘要：主路径
+场景正文：
+- 场景：主路径 — Given 轮 currentPhase=first_event（或 spawning/inject_received）/ When delivered 事件（steeri
+全文：.sillyspec/changes/archive/2026-10-27-turn-phase-observability-monotonic/requirements.md#FR-02
+最近确认：38656992777af5c16d135235ce71f55efd29ecc4
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-27-turn-phase-observability-monotonic:flow:测试绑定FR-02
+  tests: test/frontend/src/lib/daemon/__tests__/session-stream-turn-phase.test.ts「applyTurnPhase 单调守卫 > 词表外值不参与守卫照常覆盖（兼容零回归）」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-27-turn-phase-observability-monotonic
+  status: active
+
+## FR-frontend-082 log 到达退位集合从 {dispatched, delivered} 扩展含 inject_received（AI 已输出的场合送达信号同样失去展示意义）
+变更：2026-10-27-turn-phase-observability-monotonic
+状态：active
+摘要：主路径
+场景正文：
+- 场景：主路径 — Given 轮 currentPhase={phase:"inject_received"} / When 该轮 log 信封经 upsertTurn / Then cur
+全文：.sillyspec/changes/archive/2026-10-27-turn-phase-observability-monotonic/requirements.md#FR-03
+最近确认：38656992777af5c16d135235ce71f55efd29ecc4
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-27-turn-phase-observability-monotonic:flow:测试绑定FR-03
+  tests: test/frontend/src/lib/daemon/__tests__/session-stream-turn-phase.test.ts「retireDeliveryPhase（log 兜底退位）> inject_received 清 null / ready 保留」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-27-turn-phase-observability-monotonic
+  status: active
+
+## FR-frontend-083 既有相关测试全绿，新增用例覆盖上述三项行为
+变更：2026-10-27-turn-phase-observability-monotonic
+状态：active
+摘要：主路径
+场景正文：
+- 场景：主路径 — Given 本次改动 / When 跑相关测试文件 / Then 全绿且新增用例覆盖三项行为与对照场景。
+全文：.sillyspec/changes/archive/2026-10-27-turn-phase-observability-monotonic/requirements.md#FR-04
+最近确认：38656992777af5c16d135235ce71f55efd29ecc4
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-27-turn-phase-observability-monotonic:flow:测试绑定FR-04
+  tests: test/sillyhub-daemon/tests/turn-phase-report.test.ts「（既有 ①②③ 段全量回归）」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-27-turn-phase-observability-monotonic
+  status: active
+
+## FR-frontend-084 后端 backend 代码零改动（daemon 与 frontend 各自范围内）
+变更：2026-10-27-turn-phase-observability-monotonic
+状态：active
+摘要：主路径
+场景正文：
+- 场景：主路径 — Given 变更收口 / When 检查 git diff 文件清单 / Then 改动仅限 daemon 1 文件 + frontend 2 文件 + 两侧测试文件。
+全文：.sillyspec/changes/archive/2026-10-27-turn-phase-observability-monotonic/requirements.md#FR-05
+最近确认：38656992777af5c16d135235ce71f55efd29ecc4

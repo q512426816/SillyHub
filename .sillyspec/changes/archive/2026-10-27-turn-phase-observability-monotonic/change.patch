@@ -1,0 +1,334 @@
+diff --git a/.sillyspec/docs/SillyHub/modules/frontend_components.changelog.md b/.sillyspec/docs/SillyHub/modules/frontend_components.changelog.md
+index d0b979c6d..f7b62fdb5 100644
+--- a/.sillyspec/docs/SillyHub/modules/frontend_components.changelog.md
++++ b/.sillyspec/docs/SillyHub/modules/frontend_components.changelog.md
+@@ -180,3 +180,4 @@ created_at: 2026-08-30 22:23:33
+ | 2026-10-27 | 2026-10-27-archive-reparse-oom-governance | 2026-10-27-archive-reparse-oom-governance |
+ | 2026-10-27 | 2026-10-27-mobile-chat-visual-round4 | 用户四轮反馈：子代理卡/进度视图过程块(运行命令等)仍不满宽(8 处 calc(100%-120px… |
+ | 2026-10-27 | 2026-10-27-netdata-prod-monitoring | 腾讯云生产机部署 Netdata 秒级监控 |
++| 2026-10-27 | 2026-10-27-sessions-panes-gap-remove | 用户追点：会话页双栏容器 sessions-portal-panes 的 gap-3（栏间横向空隙，… |
+diff --git a/.sillyspec/docs/multi-agent-platform/modules/frontend.changelog.md b/.sillyspec/docs/multi-agent-platform/modules/frontend.changelog.md
+index d8ef887a7..bb04699be 100644
+--- a/.sillyspec/docs/multi-agent-platform/modules/frontend.changelog.md
++++ b/.sillyspec/docs/multi-agent-platform/modules/frontend.changelog.md
+@@ -230,3 +230,4 @@
+ | 2026-10-27 | 2026-10-27-archive-reparse-oom-governance | 2026-10-27-archive-reparse-oom-governance |
+ | 2026-10-27 | 2026-10-27-mobile-chat-visual-round4 | 用户四轮反馈：子代理卡/进度视图过程块(运行命令等)仍不满宽(8 处 calc(100%-120px… |
+ | 2026-10-27 | 2026-10-27-netdata-prod-monitoring | 腾讯云生产机部署 Netdata 秒级监控 |
++| 2026-10-27 | 2026-10-27-sessions-panes-gap-remove | 用户追点：会话页双栏容器 sessions-portal-panes 的 gap-3（栏间横向空隙，… |
+diff --git a/frontend/src/components/daemon/session-panel/turn-state.ts b/frontend/src/components/daemon/session-panel/turn-state.ts
+index eacc6f2d6..880ca18d5 100644
+--- a/frontend/src/components/daemon/session-panel/turn-state.ts
++++ b/frontend/src/components/daemon/session-panel/turn-state.ts
+@@ -90,6 +90,34 @@ export interface TurnPhaseState {
+   at: number;
+ }
+ 
++/**
++ * 阶段词表序（2026-10-27-turn-phase-observability-monotonic）：九值推进链定序，
++ * 词表外值不参与（透传兼容策略不变）。投递段（dispatched/delivered）＜ 执行段
++ * （skills_sync…ready）＜ 送达/首响段（inject_received/first_event）。
++ */
++const PHASE_ORDER: Readonly<Record<string, number>> = {
++  dispatched: 0,
++  delivered: 1,
++  skills_sync: 2,
++  spec_sync: 3,
++  mcp_prefetch: 4,
++  spawning: 5,
++  ready: 6,
++  inject_received: 7,
++  first_event: 8,
++};
++
++/**
++ * 单调写入判定（FR-02）：新 phase 与现值均在词表内且新序 < 现序 → 回退写，
++ * 丢弃。任一词表外 → 维持 last-write-wins 透传（兼容策略零回归）。
++ */
++function isPhaseRegression(current: string | undefined | null, next: string): boolean {
++  if (current == null) return false;
++  const cur = PHASE_ORDER[current];
++  const nxt = PHASE_ORDER[next];
++  return cur !== undefined && nxt !== undefined && nxt < cur;
++}
++
+ /**
+  * turn_phase 事件 → 轮状态 currentPhase 写入（last-write-wins，乱序到达按事件
+  * 序覆盖）；按 runId 归属路由（含 realRunId 匹配），未命中既有轮时**不建轮**
+@@ -103,6 +131,11 @@ export interface TurnPhaseState {
+  * decisions D-001 反例排查：子代理/团队/steering/排队均不构成多活跃轮），不
+  * 做模糊匹配。replacePlaceholderTurn 以对象展开保留 currentPhase（FR-03）。
+  * 返回新数组（不可变更新）；无 runId / 全程未命中原样返回。
++ *
++ * 2026-10-27-turn-phase-observability-monotonic FR-02：写入加词表序单调守卫——
++ * 回退写（如 steering 忙轮注入的 dispatched/delivered 回执覆盖已 first_event/
++ * 执行段的轮）静默丢弃，防显示从「执行中」退化回投递段卡住（first_event 每
++ * run 防重不会重发，退化后无自愈信号）；正常推进/前跳/词表外值不受影响。
+  */
+ export function applyTurnPhase(
+   turns: SessionTurnView[],
+@@ -116,6 +149,7 @@ export function applyTurnPhase(
+   const next = turns.map((t) => {
+     if (t.runId === runId || t.realRunId === runId) {
+       hit = true;
++      if (isPhaseRegression(t.currentPhase?.phase, phase)) return t;
+       return { ...t, currentPhase: { phase, at } };
+     }
+     return t;
+@@ -128,6 +162,7 @@ export function applyTurnPhase(
+     const fallback = turns.map((t) => {
+       if (t.runId === currentRunId) {
+         fallbackHit = true;
++        if (isPhaseRegression(t.currentPhase?.phase, phase)) return t;
+         return { ...t, currentPhase: { phase, at } };
+       }
+       return t;
+@@ -152,18 +187,26 @@ export function clearTurnPhase<T extends { currentPhase?: TurnPhaseState | null
+ }
+ 
+ /**
+- * 投递阶段词表（2026-10-27-turn-phase-stall-honest-ui）：backend 自产的
+- * dispatched/delivered 表示「消息已下发/已领取」，尚不代表执行器开始处理。
++ * 投递/送达阶段词表（2026-10-27-turn-phase-stall-honest-ui；FR-03 扩展于
++ * 2026-10-27-turn-phase-observability-monotonic）：dispatched/delivered 表示
++ * 「消息已下发/已领取」，inject_received 表示「消息已送达 AI」——三者都只
++ * 描述消息搬运态，不描述执行进展。
+  */
+-const DELIVERY_PHASES: ReadonlySet<string> = new Set(["dispatched", "delivered"]);
++const DELIVERY_PHASES: ReadonlySet<string> = new Set([
++  "dispatched",
++  "delivered",
++  "inject_received",
++]);
+ 
+ /**
+- * log 到达退位投递阶段（2026-10-27-turn-phase-stall-honest-ui）：轮收到真实
+- * 输出（log 事件有 DB 兜底必达）时，仍挂着的 dispatched/delivered 已失去展示
+- * 意义（消息显然已被处理），清 null 让状态条退位回轮状态文案。只清投递两
+- * 阶段——执行期阶段（skills_sync/spawning/…）可能与 log 并行推进，不越权。
++ * log 到达退位投递/送达阶段（2026-10-27-turn-phase-stall-honest-ui）：轮收到
++ * 真实输出（log 事件有 DB 兜底必达）时，仍挂着的 dispatched/delivered 已失去
++ * 展示意义（消息显然已被处理），清 null 让状态条退位回轮状态文案。只清搬运
++ * 段——执行期阶段（skills_sync/spawning/…）可能与 log 并行推进，不越权。
+  * 与 clearTurnPhase（终态全清）并列；生产实证：会话忙时消息在 backend 排队
+  * 滞留 9 分钟，前端唯一 phase=delivered 无限计时（2026-10-27 会话 7eff99e1）。
++ * FR-03（observability-monotonic）：集合扩展 inject_received——AI 已输出的
++ * 场合「消息已送达 AI」同样失去展示意义。
+  */
+ export function retireDeliveryPhase<
+   T extends { currentPhase?: TurnPhaseState | null },
+diff --git a/frontend/src/lib/daemon/__tests__/session-stream-turn-phase.test.ts b/frontend/src/lib/daemon/__tests__/session-stream-turn-phase.test.ts
+index b9a2db714..882bc4a21 100644
+--- a/frontend/src/lib/daemon/__tests__/session-stream-turn-phase.test.ts
++++ b/frontend/src/lib/daemon/__tests__/session-stream-turn-phase.test.ts
+@@ -252,6 +252,71 @@ describe("applyTurnPhase 竞态回退（事件跑赢占位轮替换）", () => {
+   });
+ });
+ 
++// ── 2026-10-27-turn-phase-observability-monotonic：阶段序单调守卫 ─────────────
++
++describe("applyTurnPhase 单调守卫（词表内回退写丢弃）", () => {
++  it("delivered 不覆盖 first_event（steering 忙轮注入回执退化防护）", () => {
++    // 生产场景：活跃轮已 first_event（显示已退位「执行中」），steering 新消息的
++    // backend 回执 dispatched/delivered 到达——无守卫会把显示退化回投递段。
++    let turns = [makeTurn("run-1")];
++    turns = applyTurnPhase(turns, "run-1", "first_event");
++    turns = applyTurnPhase(turns, "run-1", "delivered");
++    expect(turns[0]!.currentPhase?.phase).toBe("first_event");
++    turns = applyTurnPhase(turns, "run-1", "dispatched");
++    expect(turns[0]!.currentPhase?.phase).toBe("first_event");
++  });
++
++  it("delivered 不覆盖执行期阶段（skills_sync / spawning / inject_received）", () => {
++    for (const execPhase of ["skills_sync", "spawning", "inject_received"] as const) {
++      let turns = [makeTurn("run-1")];
++      turns = applyTurnPhase(turns, "run-1", execPhase);
++      turns = applyTurnPhase(turns, "run-1", "delivered");
++      expect(turns[0]!.currentPhase?.phase).toBe(execPhase);
++    }
++  });
++
++  it("迟到 dispatched 不覆盖 delivered（乱序前跳修正）", () => {
++    let turns = [makeTurn("run-1")];
++    turns = applyTurnPhase(turns, "run-1", "delivered");
++    turns = applyTurnPhase(turns, "run-1", "dispatched");
++    expect(turns[0]!.currentPhase?.phase).toBe("delivered");
++  });
++
++  it("正常推进链顺写不受守卫影响（dispatched→…→first_event 全链）", () => {
++    const chain = [
++      "dispatched",
++      "delivered",
++      "skills_sync",
++      "spawning",
++      "ready",
++      "inject_received",
++      "first_event",
++    ] as const;
++    let turns = [makeTurn("run-1")];
++    for (const p of chain) turns = applyTurnPhase(turns, "run-1", p);
++    expect(turns[0]!.currentPhase?.phase).toBe("first_event");
++  });
++
++  it("词表外值不参与守卫照常覆盖（兼容策略零回归）", () => {
++    // 任一方词表外 → 维持 last-write-wins 透传（2026-10-26-session-stage-progress 兼容策略）。
++    let turns = [makeTurn("run-1")];
++    turns = applyTurnPhase(turns, "run-1", "first_event");
++    turns = applyTurnPhase(turns, "run-1", "future_phase_x");
++    expect(turns[0]!.currentPhase?.phase).toBe("future_phase_x");
++
++    let turns2 = [makeTurn("run-2")];
++    turns2 = applyTurnPhase(turns2, "run-2", "future_phase_x");
++    turns2 = applyTurnPhase(turns2, "run-2", "delivered");
++    expect(turns2[0]!.currentPhase?.phase).toBe("delivered");
++  });
++
++  it("orphan-fallback 回退写同样受守卫（delivered 回退不写入活跃轮）", () => {
++    const turns = [makeTurn("run-active", { currentPhase: { phase: "first_event", at: Date.now() } })];
++    const next = applyTurnPhase(turns, "run-real", "delivered", "run-active");
++    expect(next[0]!.currentPhase?.phase).toBe("first_event");
++  });
++});
++
+ describe("clearTurnPhase（D-013③ 终态清理）", () => {
+   it("有值清 null；null/undefined 幂等原样返回", () => {
+     const withPhase = makeTurn("run-1", {
+@@ -308,6 +373,20 @@ describe("retireDeliveryPhase（log 兜底退位）", () => {
+     const withoutPhase = makeTurn("run-1");
+     expect(retireDeliveryPhase(withoutPhase)).toBe(withoutPhase);
+   });
++
++  // 2026-10-27-turn-phase-observability-monotonic FR-03：集合扩展 inject_received
++  // ——AI 已输出（log 必达）的场合「消息已送达 AI」同样失去展示意义。
++  it("inject_received 清 null；ready 等执行期阶段保留（FR-03 集合扩展）", () => {
++    const injected = makeTurn("run-1", {
++      currentPhase: { phase: "inject_received", at: Date.now() },
++    });
++    expect(retireDeliveryPhase(injected).currentPhase).toBeNull();
++
++    const ready = makeTurn("run-1", {
++      currentPhase: { phase: "ready", at: Date.now() },
++    });
++    expect(retireDeliveryPhase(ready)).toBe(ready);
++  });
+ });
+ 
+ describe("upsertTurn log 事件投递阶段退位（page/dialog 共用单点）", () => {
+@@ -331,6 +410,16 @@ describe("upsertTurn log 事件投递阶段退位（page/dialog 共用单点）"
+     expect(next.turns[0]!.currentPhase?.phase).toBe("spawning");
+   });
+ 
++  it("log 到达时轮挂 inject_received → 清除（FR-03 集成）", () => {
++    const prev = {
++      turns: [makeTurn("run-1", { currentPhase: { phase: "inject_received", at: Date.now() } })],
++      currentRunId: "run-1",
++    };
++    const env = makeEnv({ run_id: "run-1", log_id: "l1", channel: "text", content: "x" });
++    const next = upsertTurn(prev, env, (t) => t, {});
++    expect(next.turns[0]!.currentPhase).toBeNull();
++  });
++
+   it("非 log 事件（turn_completed）不触发退位——delivered 清除只认 log", () => {
+     const prev = {
+       turns: [makeTurn("run-1", { currentPhase: { phase: "delivered", at: Date.now() } })],
+diff --git a/sillyhub-daemon/src/daemon.ts b/sillyhub-daemon/src/daemon.ts
+index 8e1d50c2a..19a037e6b 100644
+--- a/sillyhub-daemon/src/daemon.ts
++++ b/sillyhub-daemon/src/daemon.ts
+@@ -4911,6 +4911,12 @@ export class Daemon {
+         // try 包同步抛（2026-10-26-ci-red-to-green：client 缺 notifyTurnPhase 方法
+         // 时属性访问在 .catch 挂上前抛 TypeError——D-009 要求上报失败不阻塞消息
+         // 主链路，异步失败走下方 catch、同步失败走此处，口径一致）。
++        // 2026-10-27-turn-phase-observability-monotonic FR-01：失败首警 warn（同
++        // (session_id, phase) 去重）——桥层是 inject_received/first_event 等运行时
++        // phase 的必经路，原纯 debug 在 info 级日志下不可见（生产实证会话 7eff99e1
++        // first_event 丢失零线索），对齐创建链 reportTurnPhase 的首警惯例；debug
++        // 明细并存（逐次留痕），成功仍静默。
++        const bridgePoint = `daemon_bridge_${phase}`;
+         try {
+           this._client
+             .notifyTurnPhase(
+@@ -4920,6 +4926,14 @@ export class Daemon {
+               typeof fwdMsg['detail'] === 'string' ? fwdMsg['detail'] : undefined,
+             )
+             .catch((e: unknown) => {
++              warnOncePhaseFailure(
++                bridgePoint,
++                sessionId,
++                runId,
++                phase,
++                e,
++                (event, kv) => this._logger.warn(event, kv),
++              );
+               this._logger.debug('turn_phase_report_failed', {
+                 session_id: sessionId,
+                 run_id: runId,
+@@ -4928,6 +4942,14 @@ export class Daemon {
+               });
+             });
+         } catch (e) {
++          warnOncePhaseFailure(
++            bridgePoint,
++            sessionId,
++            runId,
++            phase,
++            e,
++            (event, kv) => this._logger.warn(event, kv),
++          );
+           this._logger.debug('turn_phase_report_failed', {
+             session_id: sessionId,
+             run_id: runId,
+diff --git a/sillyhub-daemon/tests/turn-phase-report.test.ts b/sillyhub-daemon/tests/turn-phase-report.test.ts
+index 52da5bcb9..186607764 100644
+--- a/sillyhub-daemon/tests/turn-phase-report.test.ts
++++ b/sillyhub-daemon/tests/turn-phase-report.test.ts
+@@ -19,6 +19,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+ import { Daemon } from "../src/daemon.js";
+ import { HubClient, HubHttpError } from "../src/hub-client.js";
+ import { REST_PREFIX } from "../src/protocol.js";
++import { resetTurnPhaseObservabilityForTest } from "../src/turn-phase-observability.js";
+ import { onMessage } from "../src/interactive/session-manager/events.js";
+ import { inject as injectTurn } from "../src/interactive/session-manager/turn-control.js";
+ import type { SessionState } from "../src/interactive/types.js";
+@@ -184,6 +185,42 @@ describe("② daemon.onTurnMessage turn_phase_report 拦截", () => {
+     ).resolves.toBeUndefined();
+   });
+ 
++  // 2026-10-27-turn-phase-observability-monotonic FR-01：桥层失败首警——生产实证
++  // （会话 7eff99e1 first_event 丢失）桥层纯 debug 在 info 级日志下不可见，对齐
++  // 创建链 reportTurnPhase（daemon.ts:9537）的 warnOncePhaseFailure 首警惯例。
++  it("notifyTurnPhase reject → 首警 warn 一次（同 session+phase 去重），debug 明细保留", async () => {
++    resetTurnPhaseObservabilityForTest();
++    const { daemon, client } = buildDaemon(defaultStateMap());
++    const warn = vi.fn();
++    const debug = vi.fn();
++    (daemon as unknown as { _logger: unknown })._logger = {
++      info: vi.fn(),
++      warn,
++      debug,
++    };
++    client.notifyTurnPhase = vi.fn(async () => {
++      throw new Error("post failed");
++    });
++
++    const marker = { type: "turn_phase_report", phase: "inject_received" };
++    await daemon.onTurnMessage("sess-1", "run-1", marker);
++    await daemon.onTurnMessage("sess-1", "run-1", marker);
++    await daemon.onTurnMessage("sess-1", "run-2", marker);
++
++    // 首警去重键 (session_id, phase)：sess-1 首次 warn、第二次静默；run-2 同
++    // session+phase 不再警；每轮失败 debug 明细各留一条。
++    expect(warn).toHaveBeenCalledTimes(1);
++    expect(warn).toHaveBeenCalledWith(
++      "turn_phase_report_failed_once",
++      expect.objectContaining({
++        session_id: "sess-1",
++        phase: "inject_received",
++        error: "post failed",
++      }),
++    );
++    expect(debug).toHaveBeenCalledTimes(3);
++  });
++
+   it("非控制标记消息照常走 submitMessages（零回归）", async () => {
+     const { daemon, client } = buildDaemon(defaultStateMap());

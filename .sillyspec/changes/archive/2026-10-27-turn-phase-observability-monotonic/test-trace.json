@@ -1,0 +1,96 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-27-turn-phase-observability-monotonic",
+  "rows": [
+    {
+      "anchor": "FR-01",
+      "row_id": "2026-10-27-turn-phase-observability-monotonic:flow:测试绑定FR-01",
+      "tests": [
+        "test/sillyhub-daemon/tests/turn-phase-report.test.ts「② daemon.onTurnMessage turn_phase_report 拦截 > notifyTurnPhase reject → 首警 warn 一次（同 session+phase 去重）」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-27-turn-phase-observability-monotonic"
+    },
+    {
+      "anchor": "FR-02",
+      "row_id": "2026-10-27-turn-phase-observability-monotonic:flow:测试绑定FR-02",
+      "tests": [
+        "test/frontend/src/lib/daemon/__tests__/session-stream-turn-phase.test.ts「applyTurnPhase 单调守卫 > delivered 不覆盖 first_event（steering 注入回执退化防护）」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-27-turn-phase-observability-monotonic"
+    },
+    {
+      "anchor": "FR-02",
+      "row_id": "2026-10-27-turn-phase-observability-monotonic:flow:测试绑定FR-02",
+      "tests": [
+        "test/frontend/src/lib/daemon/__tests__/session-stream-turn-phase.test.ts「applyTurnPhase 单调守卫 > 迟到 dispatched 不覆盖 delivered（乱序前跳修正）」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-27-turn-phase-observability-monotonic"
+    },
+    {
+      "anchor": "FR-02",
+      "row_id": "2026-10-27-turn-phase-observability-monotonic:flow:测试绑定FR-02",
+      "tests": [
+        "test/frontend/src/lib/daemon/__tests__/session-stream-turn-phase.test.ts「applyTurnPhase 单调守卫 > 词表外值不参与守卫照常覆盖（兼容零回归）」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-27-turn-phase-observability-monotonic"
+    },
+    {
+      "anchor": "FR-03",
+      "row_id": "2026-10-27-turn-phase-observability-monotonic:flow:测试绑定FR-03",
+      "tests": [
+        "test/frontend/src/lib/daemon/__tests__/session-stream-turn-phase.test.ts「retireDeliveryPhase（log 兜底退位）> inject_received 清 null / ready 保留」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-27-turn-phase-observability-monotonic"
+    },
+    {
+      "anchor": "FR-04",
+      "row_id": "2026-10-27-turn-phase-observability-monotonic:flow:测试绑定FR-04",
+      "tests": [
+        "test/sillyhub-daemon/tests/turn-phase-report.test.ts「（既有 ①②③ 段全量回归）」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-27-turn-phase-observability-monotonic"
+    }
+  ]
+}
