@@ -187,3 +187,71 @@ class TestTasksMdRegistryLines:
         root, rel_path = workspace_root
         result = parser.parse_tasks(root, rel_path)
         assert {t.task_key for t in result.tasks} == {"task-01", "task-02", "task-03"}
+
+
+class TestMdCheckFallback:
+    """厚档双源勾选回退（2026-10-27-task-parser-md-check-fallback）。
+
+    实证根因：2026-10-28-bg-task-status-report tasks.md 7/7 全勾但 TaskCard
+    frontmatter 无 status 键 → 旧逻辑「卡片优先跳过注册表行」解析恒 draft，
+    平台 execute 任务计数恒 0/N。修复：卡片无显式 status 时回退 tasks.md
+    同 key 勾选态（[x]→done / [ ]→draft / 无行→draft）；显式 status 优先。
+    """
+
+    @staticmethod
+    def _make_change(
+        tmp_path: Path,
+        *,
+        card_status: str | None,
+        md_line: str | None,
+    ) -> tuple[Path, str]:
+        """构造单卡变更：tasks/task-01.md（frontmatter 可含/不含 status）+ tasks.md（可含/不含行）。"""
+        change_dir = tmp_path / ".sillyspec" / "changes" / "change" / "thick-demo"
+        (change_dir / "tasks").mkdir(parents=True)
+        status_line = f"status: {card_status}\n" if card_status is not None else ""
+        (change_dir / "tasks" / "task-01.md").write_text(
+            f"---\nid: task-01\ntitle: 卡片任务\n{status_line}---\n\n正文\n",
+            encoding="utf-8",
+        )
+        if md_line is not None:
+            (change_dir / "tasks.md").write_text(f"# 任务\n\n{md_line}\n", encoding="utf-8")
+        return tmp_path, ".sillyspec/changes/change/thick-demo"
+
+    def test_card_no_status_md_checked_done(self, parser: TaskParser, tmp_path: Path) -> None:
+        """卡无 status + md 勾选 [x] → done（主路径，修复目标）。"""
+        root, rel = self._make_change(tmp_path, card_status=None, md_line="- [x] task-01: 描述")
+        result = parser.parse_tasks(root, rel)
+        assert len(result.tasks) == 1
+        assert result.tasks[0].status == "done"
+        # 富信息面保留：title/内容仍来自卡片，path 锚卡片文件
+        assert result.tasks[0].title == "卡片任务"
+        assert result.tasks[0].path.endswith("tasks/task-01.md")
+
+    def test_card_no_status_md_unchecked_draft(self, parser: TaskParser, tmp_path: Path) -> None:
+        """卡无 status + md 未勾 [ ] → draft。"""
+        root, rel = self._make_change(tmp_path, card_status=None, md_line="- [ ] task-01: 描述")
+        result = parser.parse_tasks(root, rel)
+        assert result.tasks[0].status == "draft"
+
+    def test_card_explicit_status_wins(self, parser: TaskParser, tmp_path: Path) -> None:
+        """卡显式 status（in_progress）优先，不被 md 勾选覆盖。"""
+        root, rel = self._make_change(
+            tmp_path, card_status="in_progress", md_line="- [x] task-01: 描述"
+        )
+        result = parser.parse_tasks(root, rel)
+        assert result.tasks[0].status == "in_progress"
+
+    def test_card_no_status_no_md_line_draft(self, parser: TaskParser, tmp_path: Path) -> None:
+        """卡无 status 且 md 无该 key 行 → draft（缺省不变）。"""
+        root, rel = self._make_change(tmp_path, card_status=None, md_line=None)
+        result = parser.parse_tasks(root, rel)
+        assert result.tasks[0].status == "draft"
+
+    def test_card_no_frontmatter_md_checked_done(self, parser: TaskParser, tmp_path: Path) -> None:
+        """卡无 frontmatter（裸 markdown）+ md 勾选 → done（无 frontmatter 分支同款回退）。"""
+        change_dir = tmp_path / ".sillyspec" / "changes" / "change" / "bare"
+        (change_dir / "tasks").mkdir(parents=True)
+        (change_dir / "tasks" / "task-01.md").write_text("# 裸卡\n正文\n", encoding="utf-8")
+        (change_dir / "tasks.md").write_text("- [x] task-01: 描述\n", encoding="utf-8")
+        result = parser.parse_tasks(tmp_path, ".sillyspec/changes/change/bare")
+        assert result.tasks[0].status == "done"
