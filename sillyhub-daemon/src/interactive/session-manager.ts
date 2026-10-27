@@ -608,14 +608,21 @@ export class SessionManager {
   /**
    * task-03（design §5 P1.2）：主 agent Task/Agent tool_use 元数据登记。
    *
-   * key = tool_use_id，value = { sessionId, taskName, subagentType? }。assistant
-   * tool_use 到达时写入，供异步回执兜底把提取的 agentId 关联回该 tool_use 的
-   * description / subagent_type（回执文本自身不带任务名）。仅内存态；会话终态
-   * 时与任务表同点位清理。
+   * key = tool_use_id，value = { sessionId, taskName, subagentType?, isBackground? }。
+   * assistant tool_use 到达时写入，供异步回执兜底把提取的 agentId 关联回该
+   * tool_use 的 description / subagent_type（回执文本自身不带任务名）。
+   * 2026-10-27-task-wakeup-precision-fix FR-02：登记面扩至 Bash，新增
+   * isBackground（run_in_background）——终态唤醒前后台判定的主判据锚。
+   * 仅内存态；会话终态时与任务表同点位清理。
    */
   private readonly _agentToolUseMeta = new Map<
     string,
-    { sessionId: string; taskName: string; subagentType?: string }
+    {
+      sessionId: string;
+      taskName: string;
+      subagentType?: string;
+      isBackground?: boolean;
+    }
   >();
 
   /* ── task-09（1b）：每轮工作区快照（E1 累加器 / (runId) 快照缓存 / 上报出口）── */

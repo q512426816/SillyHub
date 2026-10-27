@@ -117,6 +117,12 @@ export async function handleAgentTaskStatusEvent(
     // running + 未注册：注册 + emit + [TASK_STARTED] 行。
     const taskName = strOf(meta?.['task_name']) || '后台任务';
     const subagentType = strOf(meta?.['subagent_type']) || undefined;
+    // 2026-10-27-task-wakeup-precision-fix FR-02：从 tool_use 元数据带入前后台
+    // 声明（task_started 帧自身不带 run_in_background；meta 未登记时保持
+    // undefined——终态唤醒判定走时长阈值兜底，不误判前台）。
+    const metaInfo = toolUseId
+      ? mgr._agentToolUseMeta.get(toolUseId)
+      : undefined;
     // 捕获派发 runId（task_notification 常在本 turn 收尾后到达，届时
     // currentRunId 已清空——注册表是唯一带 runId 的地方）。
     const runId = state.currentRunId;
@@ -124,6 +130,9 @@ export async function handleAgentTaskStatusEvent(
       ...(toolUseId ? { toolUseId } : {}),
       taskName,
       ...(subagentType ? { subagentType } : {}),
+      ...(metaInfo?.isBackground !== undefined
+        ? { isBackground: metaInfo.isBackground }
+        : {}),
       async: true,
       startedAt: Date.now(),
       ...(runId ? { runId } : {}),
@@ -325,35 +334,124 @@ export async function handleTaskNotificationEvent(
   // 2026-10-21-task-wakeup-restore：completed/failed 触发主代理唤醒（stopped
   // 多为用户/系统主动停止，结果无需汇报，不唤醒防噪）。放在别名补发之后：
   // 短任务门槛的提前 return 不得跳过补发。
+  //
+  // 2026-10-27-task-wakeup-precision-fix：判据反转——主判据从「时长 ≥ 静默
+  // 阈值」改为 tool_use 的 run_in_background 前后台声明（时长只是相关性代理，
+  // 两头误伤：61s 前台命令误唤醒冗余汇报轮、59s 真后台任务漏唤醒停摆）。
+  // 三态：true → 完成即唤醒（真后台结果只在通知里；防灌屏职责由前台免唤醒
+  // 承担——实证灌屏源是前台孙命令）；false → 免唤醒（前台结果必然同轮返回，
+  // 注入即冗余）；undefined → 旧逻辑兜底（时长阈值防噪阀 + fail-open）。
   if (rawStatus === 'completed' || rawStatus === 'failed') {
-    // 总关闭阀（FR-03）：阈值配置 0 时一律不注入（引擎原生自续跑出现双轮时的
-    // 止血开关）——durationMs < 0 恒假拦不住，须显式分支。
-    const quietMs = taskWakeupQuietThresholdMs();
-    if (quietMs <= 0) return;
-    // 门槛判定（FR-02）：info 已从注册表注销但局部引用仍在，startedAt 可读；
-    // 双缺失（重启窗口孤儿终态）durationMs=undefined → fail-open 放行唤醒。
+    // 时长判定值 + 来源：显示（FR-01）与门槛（FR-03 兜底）与日志（FR-04）同源。
     const durationMs =
       elapsedMs !== undefined
         ? elapsedMs
         : info?.startedAt !== undefined
           ? Date.now() - info.startedAt
           : undefined;
-    if (durationMs !== undefined && durationMs < quietMs) {
+    const durationSource: 'sdk-frame' | 'registry' | 'unknown' =
+      elapsedMs !== undefined
+        ? 'sdk-frame'
+        : info?.startedAt !== undefined
+          ? 'registry'
+          : 'unknown';
+    // 前后台判定链：注册条目 > 别名条目 > tool_use 元数据（均缺 = 信息不足）。
+    const bg = resolveWakeupBackground(mgr, info, aliases, effectiveToolUseId);
+    const gate = {
+      task_id: taskId,
+      task_name: taskName,
+      status: rawStatus,
+      duration_ms: durationMs,
+      duration_source: durationSource,
+      background: bg.isBackground,
+      background_source: bg.source,
+    };
+    // 总关闭阀（FR-03）：阈值配置 0 时一律不注入（引擎原生自续跑出现双轮时的
+    // 止血开关）——全局生效，先于三态判定。
+    const quietMs = taskWakeupQuietThresholdMs();
+    if (quietMs <= 0) {
+      console.info(
+        '[session-manager] task wakeup gate: disabled (SILLYHUB_TASK_WAKEUP_QUIET_MS=0)',
+        gate,
+      );
       return;
     }
+    if (bg.isBackground === false) {
+      // 前台免唤醒（FR-02）：终态 emit / [TASK_NOTIFICATION] 落行不受影响
+      //（本分支只收敛注入面）。
+      console.info(
+        '[session-manager] task wakeup skipped: foreground task',
+        gate,
+      );
+      return;
+    }
+    if (bg.isBackground === true) {
+      // 真后台：完成即唤醒，不受时长阈值限制（短后台任务漏唤醒即停摆）。
+      console.info(
+        '[session-manager] task wakeup scheduled: background task terminal',
+        gate,
+      );
+      scheduleTaskWakeup(mgr, state.sessionId, {
+        taskId,
+        taskName,
+        status: rawStatus,
+        elapsedMs: durationMs,
+        summary,
+      });
+      return;
+    }
+    // undefined：信息不足兜底——时长阈值防噪阀 + 双缺失 fail-open（旧行为）。
+    if (durationMs !== undefined && durationMs < quietMs) {
+      console.info(
+        '[session-manager] task wakeup skipped: below quiet threshold (no background marker)',
+        gate,
+      );
+      return;
+    }
+    console.warn(
+      '[session-manager] task wakeup fallback pass: no background marker',
+      gate,
+    );
     scheduleTaskWakeup(mgr, state.sessionId, {
       taskId,
       taskName,
       status: rawStatus,
-      // 2026-10-27-task-wakeup-precision-fix FR-01：显示与判定同源——通知行
-      // 「用时」改用门槛判定值（帧值优先，注册表 startedAt 兜底；此前裸传
-      // elapsedMs，帧缺失时判定已用注册表兜底放行、显示却回退 00:00——
-      // bsal4e1x9 前台 pnpm install 70s 显示 00:00 实证）。双缺失仍 undefined
-      // → 显示层保持 00:00，不虚构时长。
       elapsedMs: durationMs,
       summary,
     });
   }
+}
+
+/**
+ * 2026-10-27-task-wakeup-precision-fix FR-02：终态唤醒的前后台判定链。
+ *
+ * 优先级：注册条目 isBackground（task_started 注册时从 meta 带入 / 回执路径
+ * 恒 true）> 别名条目（tool_use 派生懒注册同键）> tool_use 元数据
+ * （registerAgentToolUseMeta 登记）。三处均缺 → undefined（信息不足，调用方
+ * 走时长阈值兜底，不误判前台）。source 供结构化日志归因（FR-04）。
+ */
+function resolveWakeupBackground(
+  mgr: SessionManagerCore,
+  info: BackgroundTaskInfo | undefined,
+  aliases: Array<[string, BackgroundTaskInfo]>,
+  toolUseId: string | undefined,
+): {
+  isBackground: boolean | undefined;
+  source: 'registry-entry' | 'alias' | 'tool-use-meta' | 'missing';
+} {
+  if (info?.isBackground !== undefined) {
+    return { isBackground: info.isBackground, source: 'registry-entry' };
+  }
+  for (const [, aliasInfo] of aliases) {
+    if (aliasInfo.isBackground !== undefined) {
+      return { isBackground: aliasInfo.isBackground, source: 'alias' };
+    }
+  }
+  const meta = toolUseId ? mgr._agentToolUseMeta.get(toolUseId) : undefined;
+  if (meta?.isBackground !== undefined) {
+    return { isBackground: meta.isBackground, source: 'tool-use-meta' };
+  }
+  return { isBackground: undefined, source: 'missing' };
 }
 
 /**
@@ -452,6 +550,9 @@ export async function registerAsyncReceiptTask(
     toolUseId,
     taskName,
     ...(meta?.subagentType ? { subagentType: meta.subagentType } : {}),
+    // 2026-10-27-task-wakeup-precision-fix FR-02：异步启动回执恒后台——回执
+    // 本身即「派发后不等待、结果经通知回传」的证据。
+    isBackground: true,
     async: true,
     startedAt: Date.now(),
     ...(runId ? { runId } : {}),

@@ -850,6 +850,143 @@ describe('task 终态注入唤醒（2026-10-21-task-wakeup-restore）', () => {
     }
   });
 
+  /** 2026-10-27 FR-02：tool_use 事件构造（registerAgentToolUseMeta 的输入轨）。 */
+  function msgToolUse(o: {
+    toolName: string;
+    callId: string;
+    input: Record<string, unknown>;
+  }): Record<string, unknown> {
+    return {
+      events: [
+        {
+          type: 'tool_use',
+          tool_name: o.toolName,
+          call_id: o.callId,
+          content: JSON.stringify(o.input),
+        },
+      ],
+    };
+  }
+
+  it('FR-02（precision-fix）：前台 Bash（run_in_background 缺省）终态免唤醒，终态 emit/[TASK_NOTIFICATION] 照常', async () => {
+    vi.useFakeTimers();
+    try {
+      const { depsExtra, wakeup } = withWakeupDeps();
+      const h = await createHarness('sess-pf2', 'run-pf2', depsExtra);
+      // bsal4e1x9 同款形态：前台 Bash（无 run_in_background）+ 70s 终态——
+      // 旧判据下（≥60s）会误注入冗余汇报轮，新判据下免唤醒。
+      await h.emitMessage(
+        msgToolUse({
+          toolName: 'Bash',
+          callId: 'call-fg',
+          input: { command: 'pnpm install --force', description: '强制重装 frontend 依赖修 node_modules', timeout: 600000 },
+        }),
+      );
+      await h.emitMessage(msgTaskStarted({ taskId: 'task-fg', toolUseId: 'call-fg', description: '强制重装 frontend 依赖修 node_modules' }));
+      await h.emitMessage(msgTaskNotification({ taskId: 'task-fg', status: 'completed', summary: 'Done in 1m 7s', durationMs: 70000 }));
+      await vi.advanceTimersByTimeAsync(3000);
+      expect(wakeup).not.toHaveBeenCalled();
+      // 免唤醒只收敛注入面：终态信号照常（emit + 落行）。
+      expect(taskEventCalls(h).some(([, , e]) => (e as { status?: string }).status === 'completed')).toBe(true);
+      const notifLine = h.deps.onTurnMessage.mock.calls
+        .map((c) => String((c[2] as { content?: string })?.content ?? ''))
+        .find((s) => s.startsWith('[TASK_NOTIFICATION]'));
+      expect(notifLine).toBeDefined();
+      expect(notifLine).toContain('"task_id":"task-fg"');
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('FR-02（precision-fix）：后台标记 true 完成即唤醒——30s 短任务不再受 60s 阈值限制', async () => {
+    vi.useFakeTimers();
+    try {
+      const { depsExtra, wakeup } = withWakeupDeps();
+      const h = await createHarness('sess-pf3', 'run-pf3', depsExtra);
+      await h.emitMessage(
+        msgToolUse({ toolName: 'Bash', callId: 'call-bg', input: { command: 'npm run build', run_in_background: true } }),
+      );
+      await h.emitMessage(msgTaskStarted({ taskId: 'task-bg', toolUseId: 'call-bg', description: '后台构建' }));
+      await h.emitMessage(msgTaskNotification({ taskId: 'task-bg', status: 'completed', summary: '构建完成', durationMs: 30000 }));
+      await vi.advanceTimersByTimeAsync(3000);
+      expect(wakeup).toHaveBeenCalledTimes(1);
+      const prompt = String(wakeup.mock.calls[0]![1] as string);
+      expect(prompt).toContain('任务「后台构建」已完成（用时 00:30）');
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('FR-03（precision-fix）：三无孤儿终态兜底放行并打 WARN（时长来源 unknown）', async () => {
+    vi.useFakeTimers();
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    try {
+      const { depsExtra, wakeup } = withWakeupDeps();
+      const h = await createHarness('sess-pf4', 'run-pf4', depsExtra);
+      // 无 tool_use 元数据、无注册条目、无 elapsed_ms——信息不足兜底 fail-open。
+      await h.emitMessage(msgTaskNotification({ taskId: 'task-orp', toolUseId: 'call-orp', status: 'failed', summary: '孤儿终态' }));
+      await vi.advanceTimersByTimeAsync(3000);
+      expect(wakeup).toHaveBeenCalledTimes(1);
+      expect(warnSpy).toHaveBeenCalledWith(
+        '[session-manager] task wakeup fallback pass: no background marker',
+        expect.objectContaining({
+          task_id: 'task-orp',
+          duration_source: 'unknown',
+          background_source: 'missing',
+        }),
+      );
+    } finally {
+      warnSpy.mockRestore();
+      vi.useRealTimers();
+    }
+  });
+
+  it('FR-04（precision-fix）：判定出口结构化日志字段齐备（前台跳过/后台放行）', async () => {
+    vi.useFakeTimers();
+    const infoSpy = vi.spyOn(console, 'info').mockImplementation(() => {});
+    try {
+      const { depsExtra, wakeup } = withWakeupDeps();
+      const h = await createHarness('sess-pf5', 'run-pf5', depsExtra);
+      // 前台跳过出口（sdk-frame 时长 + registry-entry 判定来源）。
+      await h.emitMessage(msgToolUse({ toolName: 'Bash', callId: 'call-fg2', input: { command: 'ls', description: '列目录' } }));
+      await h.emitMessage(msgTaskStarted({ taskId: 'task-fg2', toolUseId: 'call-fg2', description: '列目录' }));
+      await h.emitMessage(msgTaskNotification({ taskId: 'task-fg2', status: 'completed', durationMs: 70000 }));
+      // 后台放行出口（Task 工具 run_in_background=true）。
+      await h.emitMessage(
+        msgToolUse({ toolName: 'Task', callId: 'call-bg2', input: { description: '后台调研', subagent_type: 'Explore', run_in_background: true } }),
+      );
+      await h.emitMessage(msgTaskStarted({ taskId: 'task-bg2', toolUseId: 'call-bg2', description: '后台调研', subagentType: 'Explore' }));
+      await h.emitMessage(msgTaskNotification({ taskId: 'task-bg2', status: 'completed', durationMs: 30000 }));
+      await vi.advanceTimersByTimeAsync(3000);
+      // 仅后台任务注入（前台跳过）。
+      expect(wakeup).toHaveBeenCalledTimes(1);
+      const fgCall = infoSpy.mock.calls.find((c) =>
+        String(c[0]).includes('foreground task'),
+      );
+      expect(fgCall).toBeDefined();
+      expect(fgCall![1]).toMatchObject({
+        task_id: 'task-fg2',
+        status: 'completed',
+        duration_ms: 70000,
+        duration_source: 'sdk-frame',
+        background: false,
+        background_source: 'registry-entry',
+      });
+      const bgCall = infoSpy.mock.calls.find((c) =>
+        String(c[0]).includes('background task terminal'),
+      );
+      expect(bgCall).toBeDefined();
+      expect(bgCall![1]).toMatchObject({
+        task_id: 'task-bg2',
+        background: true,
+        duration_ms: 30000,
+      });
+    } finally {
+      infoSpy.mockRestore();
+      vi.useRealTimers();
+    }
+  });
+
   it('FR-03：阈值 env 可配——120000 拦 90s、0 关闭阀拦 61s、非法值回落默认', async () => {
     vi.useFakeTimers();
     try {

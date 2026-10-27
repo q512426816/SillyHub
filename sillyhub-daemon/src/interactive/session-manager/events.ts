@@ -538,13 +538,24 @@ export async function dispatchStatusEvent(
  * 对象，对齐旧 toolInput 非对象守卫）。关联键 = call_id（= 旧 tool_use.id）。
  * agent_task_status(running) 的 emit 由归一化器产事件、_dispatchStatusEvent
  * 转发，此处不再 emit（防双发）。
+ *
+ * 2026-10-27-task-wakeup-precision-fix FR-02：登记面扩至 Bash（前台长命令
+ * 同样有 task 生命周期帧——bsal4e1x9 前台 pnpm install 70s 实证），并解析
+ * run_in_background 存 isBackground——终态唤醒前后台判定的主判据锚。恒登记
+ * 布尔值（三态判定依赖：undefined 保留给「tool_use 事件未到达」场景走兜底）。
  */
 export function registerAgentToolUseMeta(
   mgr: SessionManagerCore,
   state: SessionState,
   ev: AgentEvent,
 ): void {
-  if (ev.tool_name !== 'Task' && ev.tool_name !== 'Agent') return;
+  if (
+    ev.tool_name !== 'Task' &&
+    ev.tool_name !== 'Agent' &&
+    ev.tool_name !== 'Bash'
+  ) {
+    return;
+  }
   const callId = ev.call_id;
   if (typeof callId !== 'string' || !callId) return;
   let input: Record<string, unknown> = {};
@@ -562,10 +573,14 @@ export function registerAgentToolUseMeta(
     typeof rawSubagentType === 'string' && rawSubagentType
       ? rawSubagentType
       : undefined;
+  // 工具契约层前后台声明：无 run_in_background 参数的调用结果必然同轮返回
+  // 主代理（前台）——缺省即 false，非 unknown。
+  const isBackground = input['run_in_background'] === true;
   mgr._agentToolUseMeta.set(callId, {
     sessionId: state.sessionId,
     taskName,
     ...(subagentType ? { subagentType } : {}),
+    isBackground,
   });
 }
 

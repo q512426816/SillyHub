@@ -428,6 +428,14 @@ export interface BackgroundTaskInfo {
   subagentType?: string;
   /** 异步派发标记（回执路径恒 true；task_started 路径按 true 记——SDK 任务生命周期系统即后台机制，见 _handleTaskStarted 注释）。 */
   async: boolean;
+  /**
+   * 2026-10-27-task-wakeup-precision-fix FR-02：前后台声明（tool_use 的
+   * run_in_background 参数——无该参数的命令结果必然同轮返回主代理）。
+   * true = 真后台（结果只在通知里）→ 终态完成即唤醒；false = 前台 → 免唤醒；
+   * undefined = 标记缺失（meta 未登记/task_started 丢失）→ 唤醒判定走时长
+   * 阈值兜底。回执路径恒 true（回执本身即后台证据）。
+   */
+  isBackground?: boolean;
   /** 注册时刻 epoch ms（task_updated 轻量事件的观察口径，非权威时长）。 */
   startedAt: number;
   /** 最近一次 task_progress 到达时刻（「最后活跃」观察口径，本层仅记录）。 */
@@ -548,7 +556,13 @@ export interface SessionManagerCore {
   >;
   readonly _agentToolUseMeta: Map<
     string,
-    { sessionId: string; taskName: string; subagentType?: string }
+    {
+      sessionId: string;
+      taskName: string;
+      subagentType?: string;
+      /** 2026-10-27-task-wakeup-precision-fix FR-02：run_in_background 前后台声明（恒登记布尔——缺省参数即前台）。 */
+      isBackground?: boolean;
+    }
   >;
   readonly _sessionBudgetTokens: Map<string, number>;
   readonly _overBudgetSessions: Set<string>;
