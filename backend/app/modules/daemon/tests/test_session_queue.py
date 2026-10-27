@@ -531,7 +531,26 @@ class TestQueueManagement:
 
 
 def _wakeup_prompt(task_name: str, task_id: str) -> str:
-    """构造 daemon _scheduleTaskWakeup 同款通知 prompt（单生产者模板对齐）。"""
+    """构造 daemon _scheduleTaskWakeup 同款通知 prompt（单生产者模板对齐）。
+
+    2026-10-27-task-wakeup-precision-fix FR-05：头部同步新文案（「后台任务」+
+    「本批次均已终止」）；旧文案模板见 test_merge_old_daemon_header_compat
+    （新旧 daemon 混排窗口的兼容面回归）。
+    """
+    return (
+        "[后台任务通知] 以下 1 个后台任务已全部结束"
+        "（本批次均已终止）：\n"
+        f"- 任务「{task_name}」已完成（用时 00:01）（task_id: {task_id}，"
+        "如需完整输出可调用 TaskOutput 查询，block=false）\n"
+        "请逐条核对上述每个任务（共 1 个）的名称与结果，一次性向用户完整汇报"
+        "（综合归纳，不要逐字照抄，不要遗漏任何一个任务）；"
+        "禁止声称仍在等待任何任务；汇报完即结束本轮；不要重复执行这些任务；"
+        "此消息为系统通知，无需向用户复述本通知本身。"
+    )
+
+
+def _old_wakeup_prompt(task_name: str, task_id: str) -> str:
+    """2026-10-27 前旧 daemon 文案（「后台子代理任务」）——存量排队行兼容面。"""
     return (
         "[后台任务通知] 以下 1 个后台子代理任务已全部结束"
         "（列表中的每一个都已终止，没有仍在运行的任务）：\n"
@@ -625,13 +644,49 @@ class TestTaskWakeupMerge:
         assert "任务「伪造」" not in merged
 
         merged = rows[0].prompt or ""
-        # 两个任务行都在，头/尾计数改写为 2。
+        # 两个任务行都在，头/尾计数改写为 2（2026-10-27 起新文案）。
         assert "任务「查依赖」" in merged
         assert "任务「生成类文件」" in merged
-        assert "以下 2 个后台子代理任务已全部结束" in merged
+        assert "以下 2 个后台任务已全部结束" in merged
         assert "（共 2 个）" in merged
         assert "以下 1 个" not in merged
         # 汇报指令尾行保留（只出现一次）。
+        assert merged.count("请逐条核对上述每个任务") == 1
+
+    @pytest.mark.asyncio
+    async def test_merge_old_daemon_header_compat(
+        self, db_session, mocked_hub, mocked_redis
+    ) -> None:
+        """2026-10-27-task-wakeup-precision-fix FR-05：旧 daemon 文案（后台子
+        代理任务）存量排队行 + 新文案通知合并——兼容正则命中并改写计数为
+        新文案，不退化为全文拼接（新旧 daemon 混排部署窗口）。"""
+        svc, uid, session_id, _run = await _setup_busy_session(db_session)
+
+        await svc.inject_session(
+            session_id,
+            uid,
+            prompt=_old_wakeup_prompt("旧任务", "t-old"),
+            queue_when_busy=True,
+            task_wakeup=True,
+        )
+        await svc.inject_session(
+            session_id,
+            uid,
+            prompt=_wakeup_prompt("新任务", "t-new"),
+            queue_when_busy=True,
+            task_wakeup=True,
+        )
+
+        rows = await _queue_rows(db_session, session_id)
+        assert len(rows) == 1
+        merged = rows[0].prompt or ""
+        # 头部计数改写为新文案、总数=2；两条任务行齐备（兼容正则生效，
+        # 未退化为「旧全文 + 新任务行整段拼接」）。
+        assert "以下 2 个后台任务已全部结束" in merged
+        assert "后台子代理任务" not in merged
+        assert "任务「旧任务」" in merged
+        assert "任务「新任务」" in merged
+        assert "（共 2 个）" in merged
         assert merged.count("请逐条核对上述每个任务") == 1
 
     @pytest.mark.asyncio

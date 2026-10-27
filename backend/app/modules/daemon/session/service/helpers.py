@@ -77,7 +77,10 @@ TASK_WAKEUP_QUEUE_ORIGIN = "task_wakeup"
 # 与 task_wakeup 同族服务身份标记（scheduled_send 服务身份写入，浏览器
 # Bearer 用户无 HTTP 入口可写），前端时间线「⏰ 定时消息到点」触发行溯源锚。
 SCHEDULE_QUEUE_ORIGIN = "schedule"
-_TASK_WAKEUP_HEADER_COUNT_RE = re.compile(r"以下 \d+ 个后台子代理任务已全部结束")
+# 2026-10-27-task-wakeup-precision-fix FR-05：daemon prompt 头部「后台子代理任务」
+# 改「后台任务」——合并正则取兼容形（新文案优先命中，旧文案存量排队行在
+# 新旧混排窗口内同样命中，计数改写不退化为全文拼接）。
+_TASK_WAKEUP_HEADER_COUNT_RE = re.compile(r"以下 \d+ 个后台(?:子代理)?任务已全部结束")
 _TASK_WAKEUP_TRAILER_COUNT_RE = re.compile(r"（共 \d+ 个）")
 
 
@@ -132,7 +135,10 @@ def _merge_task_wakeup_prompt(old: str, new: str) -> str:
         if not line.startswith("- ")
     ]
     header = _TASK_WAKEUP_HEADER_COUNT_RE.sub(
-        f"以下 {len(old_bullets) + len(new_bullets)} 个后台子代理任务已全部结束",
+        # 2026-10-27-task-wakeup-precision-fix FR-05：重写模板同步新文案（与 daemon
+        # scheduleTaskWakeup 头部同值——跨语言常量同步义务，见前端
+        # TASK_WAKEUP_PROMPT_PREFIX 注释同款约束）。
+        f"以下 {len(old_bullets) + len(new_bullets)} 个后台任务已全部结束",
         old_lines[0],
     )
     return "\n".join([header, *old_bullets, *new_bullets, *trailer_lines])

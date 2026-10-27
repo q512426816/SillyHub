@@ -740,7 +740,9 @@ describe('task 终态注入唤醒（2026-10-21-task-wakeup-restore）', () => {
       expect(wakeup).toHaveBeenCalledTimes(1);
       const prompt = String(wakeup.mock.calls[0]![1] as string);
       expect(prompt.startsWith('[后台任务通知]')).toBe(true);
-      expect(prompt).toContain('以下 1 个后台子代理任务已全部结束');
+      expect(prompt).toContain('以下 1 个后台任务已全部结束');
+      expect(prompt).toContain('（本批次均已终止）');
+      expect(prompt).not.toContain('后台子代理任务');
       expect(prompt).toContain('任务「调研 sgm 隐患排查任务生成」已完成');
       expect(prompt).toContain('（用时 06:26）');
       expect(prompt).toContain('结果摘要：调研完成。核心是周期性自定义检查模块');
@@ -768,7 +770,7 @@ describe('task 终态注入唤醒（2026-10-21-task-wakeup-restore）', () => {
       await vi.advanceTimersByTimeAsync(3000);
       expect(wakeup).toHaveBeenCalledTimes(1);
       const prompt = String(wakeup.mock.calls[0]![1] as string);
-      expect(prompt).toContain('以下 2 个后台子代理任务已全部结束');
+      expect(prompt).toContain('以下 2 个后台任务已全部结束');
       expect(prompt).toContain('任务「子代理A」已完成');
       expect(prompt).toContain('任务「子代理B」已完成');
       expect(prompt).toContain('共 2 个');
