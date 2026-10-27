@@ -1,0 +1,35 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-27-task-wakeup-precision-fix",
+  "reviewer": "subagent",
+  "verdict": "PASS",
+  "reviewedAgainst": "b81725785ce4f6cf6f5bd7c9b6d6bbe183189c14",
+  "findings": [
+    {
+      "severity": "P3",
+      "status": "open",
+      "title": "FR-01 场景2「双缺失保持 00:00」无显式测试断言",
+      "evidence": "requirements FR-01 场景2 声称孤儿终态（注册表与 elapsed_ms 双缺失）通知行用时保持 00:00；FR-03 用例（task-lifecycle.test.ts:922）走同一双缺失路径但只断言 wakeup 放行与 WARN 字段，未断言 prompt 中「用时 00:00」。行为本身代码走查正确：durationMs=undefined → scheduleTaskWakeup elapsedMs=undefined → dur='00:00'（background-tasks.ts scheduleTaskWakeup 的 info.elapsedMs ?? 0），不虚构数值。仅测试绑定比 requirements 场景声明少一条显式断言，不构成行为缺陷。",
+      "location": "sillyhub-daemon/tests/interactive/task-lifecycle.test.ts:922"
+    },
+    {
+      "severity": "P3",
+      "status": "accepted",
+      "title": "change.patch 冻结面混入并行变更文件，冻结补丁 ≠ 本变更交付面",
+      "evidence": "change.patch（1472 行）除本变更 9 个交付文件外，还混入 mobile-chat-visual-round2（globals.css/mobile 组件等）与 scheduled-send-attachments（scheduled-send.tsx/session-panel 等）约 15+ 无关文件——冻结生成时抓的是当时工作树全量 diff（并行变更未提交内容）。本变更核心文件的补丁 hunk 与 b81725785 态逐一比对一致，未造成评审失真；但补丁作为「冻结交付面」的对应关系失真，后续回读需按材料路径清单人工剥离。属材料卫生问题，非代码缺陷。",
+      "location": ".sillyspec/changes/2026-10-27-task-wakeup-precision-fix/change.patch"
+    }
+  ],
+  "dimensionNotes": {
+    "乱序": "ok",
+    "并发": "ok",
+    "切换": "ok",
+    "作用域": "ok",
+    "边界已裁决": "四条声明边界均可接受：a) meta 缺失维持旧行为 fail-open——可接受，保守兼容使历史会话/重启窗口/tool_use 丢失场景零回退，兜底路径有 WARN 可观测，误报窗口与修复前一致无回归；b) 旧 backend+新 daemon 部署窗口合并退化拼接但信息不丢——可接受，这是 helpers.py _merge_task_wakeup_prompt docstring 明示的既有设计退化路径（模板漂移自然退化），仅格式退化信息无损，且常见部署顺序（backend 先行）不受影响；c) 前端对旧文案历史行靠 [后台任务通知] 前缀识别——可接受，识别锚本就是前缀而非头部文案，session-log-assembler.test.ts 显式断言新旧文案均识别（兼容面有回归锁定）；d) 60s 阈值语义降级为兜底防噪阀（env 名/缺省/0 关闭阀/非法回落均不变）——可接受，env 契约零变化，语义收敛只作用于无标记场景，既有阈值用例（120000 拦 90s、0 拦 61s、非法回落）保留锁定。无其他声明边界之外的新发现边界。",
+    "防护声明核验": "全部真实生效：env=0 总关闭阀在 bg.isBackground 三态判定之前（quietMs<=0 分支带 disabled 日志先 return）；前台免唤醒只收敛注入面——emit 与 [TASK_NOTIFICATION] 落行在唤醒判定之前完成，前台分支仅 return（FR-02 测试断言 notifLine 与 completed emit 照常）；durationMs 与 gate.duration_ms、scheduleTaskWakeup elapsedMs 同一变量（显示/判定/日志三同源）；gate 日志七字段不含 summary（严于「禁止超过 200 字符截断全文」——直接不含）。",
+    "FR三方一致": "FR-01/02/03/04/05 实现与测试绑定全部兑现（FR-01 用时 01:01 断言、FR-02 前台免唤醒+终态信号不变+后台 30s 即唤醒、FR-03 三无 WARN+duration_source unknown、FR-04 console spy 断言 fg/bg 出口字段含 duration_source/background_source、FR-05 新文案+test_merge_old_daemon_header_compat 兼容用例均存在且断言到位）；FR-06 执行约束以回执基线（passed exit=0 32s）+本次抽验（daemon task-lifecycle 28P、backend -k 'wakeup or merge' 15P）双证通过。",
+    "生成物同步": "无该面：本变更四个 commit（0dbbdad43/20d94e9a2/6fe9c7ff2/474a99549）文件清单均不含 openapi.json 与两侧 api-types.ts；helpers.py 仅改模块内部正则常量与合并模板字符串，无 DTO/端点/schema 变化，无 gen:types 义务。前端源码零改动（仅 fixture），与声明一致。",
+    "评审时序备注": "评审期间并行会话已将 HEAD 推进至 4dc531554（ghost-spec-binding-fix 与 task-wakeup-inject-retry 两变更落库）；本评审以显式 sha b81725785 重新锚定核验（判定链 resolveWakeupBackground/四出口日志在该 sha 齐备、无 retry 代码），b81725785..HEAD 对 background-tasks.ts 的 54 行增量全部属 retry 变更的 scheduleTaskWakeup 注入循环与 import 行，不触及本变更判定链/文案/结构化日志；daemon 抽验跑于混合态（含在途 retry 已提交态）28P 全绿，本变更用例含于其中。"
+  },
+  "reviewedAt": "2026-10-27T09:12:26+08:00"
+}

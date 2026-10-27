@@ -1,0 +1,82 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-27-task-wakeup-precision-fix",
+  "rows": [
+    {
+      "anchor": "FR-01",
+      "row_id": "2026-10-27-task-wakeup-precision-fix:flow:测试绑定FR-01",
+      "tests": [
+        "sillyhub-daemon/tests/interactive/task-lifecycle.test.ts「唤醒用时与判定同源：elapsed_ms 缺失显示注册表兜底时长」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-27-task-wakeup-precision-fix"
+    },
+    {
+      "anchor": "FR-02",
+      "row_id": "2026-10-27-task-wakeup-precision-fix:flow:测试绑定FR-02",
+      "tests": [
+        "sillyhub-daemon/tests/interactive/task-lifecycle.test.ts「前台 Bash（run_in_background 缺省）终态不注入唤醒且终态信号不变」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-27-task-wakeup-precision-fix"
+    },
+    {
+      "anchor": "FR-03",
+      "row_id": "2026-10-27-task-wakeup-precision-fix:flow:测试绑定FR-03",
+      "tests": [
+        "sillyhub-daemon/tests/interactive/task-lifecycle.test.ts「三无孤儿终态兜底放行并打 WARN」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-27-task-wakeup-precision-fix"
+    },
+    {
+      "anchor": "FR-04",
+      "row_id": "2026-10-27-task-wakeup-precision-fix:flow:测试绑定FR-04",
+      "tests": [
+        "sillyhub-daemon/tests/interactive/task-lifecycle.test.ts「唤醒判定出口结构化日志字段齐备」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-27-task-wakeup-precision-fix"
+    },
+    {
+      "anchor": "FR-05",
+      "row_id": "2026-10-27-task-wakeup-precision-fix:flow:测试绑定FR-05",
+      "tests": [
+        "backend/app/modules/daemon/tests/test_session_queue.py「merge_task_wakeup_prompt 新旧头部兼容」",
+        "sillyhub-daemon/tests/interactive/task-lifecycle.test.ts「prompt 头部新文案与合并计数」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-27-task-wakeup-precision-fix"
+    }
+  ]
+}

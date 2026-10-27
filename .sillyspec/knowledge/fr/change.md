@@ -845,3 +845,105 @@ created_at: 2026-10-02T02:55:12.745Z
 依据决策：D-012@v2
 全文：.sillyspec/changes/archive/2026-10-26-session-change-progress-hover/requirements.md#FR-08
 最近确认：33f4154a3
+
+## FR-change-044 通知行「用时」与唤醒判定同源：elapsed_ms 缺失时用注册表 startedAt 兜底时长显示 MM:SS，不再出现误导性 00:00
+变更：2026-10-27-task-wakeup-precision-fix
+状态：active
+摘要：帧缺失时显示注册表兜底时长；双缺失保持 00:00
+全文：.sillyspec/changes/archive/2026-10-27-task-wakeup-precision-fix/requirements.md#FR-01
+最近确认：4dc531554f19e0cb3ed0561f06e4d4c979375f8f
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-27-task-wakeup-precision-fix:flow:测试绑定FR-01
+  tests: sillyhub-daemon/tests/interactive/task-lifecycle.test.ts「唤醒用时与判定同源：elapsed_ms 缺失显示注册表兜底时长」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-27-task-wakeup-precision-fix
+  status: active
+
+## FR-change-045 前台命令免唤醒：tool_use 元数据登记 run_in_background 标记（Task/Agent/Bash 三类工具），判定为前台的任务终态不注入唤醒；终态 emit 与 [TASK_NOTIFICATION] 落行行为不变
+变更：2026-10-27-task-wakeup-precision-fix
+状态：active
+摘要：前台 Bash 长命令不再触发唤醒；后台 Bash/Agent 完成即唤醒（不受时长阈值限制）
+全文：.sillyspec/changes/archive/2026-10-27-task-wakeup-precision-fix/requirements.md#FR-02
+最近确认：4dc531554f19e0cb3ed0561f06e4d4c979375f8f
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-27-task-wakeup-precision-fix:flow:测试绑定FR-02
+  tests: sillyhub-daemon/tests/interactive/task-lifecycle.test.ts「前台 Bash（run_in_background 缺省）终态不注入唤醒且终态信号不变」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-27-task-wakeup-precision-fix
+  status: active
+
+## FR-change-046 后台标记缺失（task_started 丢失且无回执兜底）时保留旧时长阈值兜底唤醒并打 WARN；SILLYHUB_TASK_WAKEUP_QUIET_MS env 与缺省 60000 不变，语义改为兜底场景防噪阀
+变更：2026-10-27-task-wakeup-precision-fix
+状态：active
+摘要：三无孤儿终态维持旧行为；阈值 0 总关闭阀不变
+全文：.sillyspec/changes/archive/2026-10-27-task-wakeup-precision-fix/requirements.md#FR-03
+最近确认：4dc531554f19e0cb3ed0561f06e4d4c979375f8f
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-27-task-wakeup-precision-fix:flow:测试绑定FR-03
+  tests: sillyhub-daemon/tests/interactive/task-lifecycle.test.ts「三无孤儿终态兜底放行并打 WARN」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-27-task-wakeup-precision-fix
+  status: active
+
+## FR-change-047 唤醒判定补结构化日志：task_id/task_name/status/时长/时长来源（sdk-frame|registry|unknown）/后台判定结果，前台跳过与兜底放行均可观测
+变更：2026-10-27-task-wakeup-precision-fix
+状态：active
+摘要：三出口均可观测
+全文：.sillyspec/changes/archive/2026-10-27-task-wakeup-precision-fix/requirements.md#FR-04
+最近确认：4dc531554f19e0cb3ed0561f06e4d4c979375f8f
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-27-task-wakeup-precision-fix:flow:测试绑定FR-04
+  tests: sillyhub-daemon/tests/interactive/task-lifecycle.test.ts「唤醒判定出口结构化日志字段齐备」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-27-task-wakeup-precision-fix
+  status: active
+
+## FR-change-048 文案修正：daemon prompt「后台子代理任务」改「后台任务」、「（列表中的每一个都已终止，没有仍在运行的任务）」改「（本批次均已终止）」，backend helpers.py 合并正则与拼接模板同步改，前端识别锚 [后台任务通知] 前缀不变零改动
+变更：2026-10-27-task-wakeup-precision-fix
+状态：active
+摘要：合并计数在新文案下正确；backend 合并兼容旧头部
+全文：.sillyspec/changes/archive/2026-10-27-task-wakeup-precision-fix/requirements.md#FR-05
+最近确认：4dc531554f19e0cb3ed0561f06e4d4c979375f8f
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-27-task-wakeup-precision-fix:flow:测试绑定FR-05
+  tests: backend/app/modules/daemon/tests/test_session_queue.py「merge_task_wakeup_prompt 新旧头部兼容」 | sillyhub-daemon/tests/interactive/task-lifecycle.test.ts「prompt 头部新文案与合并计数」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-27-task-wakeup-precision-fix
+  status: active
+
+## FR-change-049 daemon/backend/frontend 三侧仅跑与本改动相关的测试并通过
+变更：2026-10-27-task-wakeup-precision-fix
+状态：active
+摘要：相关测试全绿
+全文：.sillyspec/changes/archive/2026-10-27-task-wakeup-precision-fix/requirements.md#FR-06
+最近确认：4dc531554f19e0cb3ed0561f06e4d4c979375f8f
