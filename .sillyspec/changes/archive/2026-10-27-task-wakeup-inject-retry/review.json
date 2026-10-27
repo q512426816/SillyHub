@@ -1,0 +1,15 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-27-task-wakeup-inject-retry",
+  "reviewer": "subagent",
+  "verdict": "PASS",
+  "reviewedAgainst": "41c8d228b7f4e1cd6fffa667deaa9316cab005fa",
+  "findings": [],
+  "dimensionNotes": {
+    "乱序": "ok",
+    "并发": "ok",
+    "切换": "ok",
+    "作用域": "ok"
+  },
+  "reviewedAt": "2026-10-27T02:20:37Z"
+}

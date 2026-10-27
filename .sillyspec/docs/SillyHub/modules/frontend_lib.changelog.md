@@ -47,3 +47,4 @@ created_at: 2026-10-16 16:40:00
 - 2026-10-26-subagent-task-meta-restore | 子代理任务元数据装配竞态修复
 - 2026-10-27-task-wakeup-precision-fix | 修复任务唤醒判据与通知四处缺陷
 - 2026-10-27-ghost-spec-binding-fix | 失败命令不再生成幽灵变更占位并过滤存量
+- 2026-10-27-task-wakeup-inject-retry | 后台任务终态唤醒注入经后端中转单发无重试，撞后端短暂不可用窗（部署重建/502/504）即 inte…

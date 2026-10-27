@@ -1,0 +1,1767 @@
+diff --git a/.sillyspec/docs/SillyHub/modules/daemon.changelog.md b/.sillyspec/docs/SillyHub/modules/daemon.changelog.md
+index 66438e5c7..191afd3ba 100644
+--- a/.sillyspec/docs/SillyHub/modules/daemon.changelog.md
++++ b/.sillyspec/docs/SillyHub/modules/daemon.changelog.md
+@@ -106,3 +106,7 @@ created_at: 2026-08-27 14:32:24
+ - 2026-10-26-turn-phase-prod-fix | 阶段上报生产断链修复与观测补盲。背景:阶段化进度功能(2026-10-26-session-stag…
+ - 2026-10-26-ws-evict-close | 修复WS逐出不关socket致daemon假活不重连
+ - 2026-10-26-ci-red-to-green | 修复四条CI工作流失败转绿
++- 2026-10-27-mobile-chat-visual-round2 | 用户真机第二轮反馈(截图)：agent 回复仍未占满一行(真凶=PC 阅读限宽 max-w-[cal…
++- 2026-10-27-scheduled-send-attachments | 用户反馈定时消息发送后 agent 收不到附件。排查确认：后端定时消息全链路（schema/落库/到…
++- 2026-10-27-task-wakeup-precision-fix | 修复任务唤醒判据与通知四处缺陷
++- 2026-10-27-ghost-spec-binding-fix | 失败命令不再生成幽灵变更占位并过滤存量
+diff --git a/.sillyspec/docs/SillyHub/modules/frontend_app.changelog.md b/.sillyspec/docs/SillyHub/modules/frontend_app.changelog.md
+index 88e3afe2f..26f9c15ee 100644
+--- a/.sillyspec/docs/SillyHub/modules/frontend_app.changelog.md
++++ b/.sillyspec/docs/SillyHub/modules/frontend_app.changelog.md
+@@ -58,3 +58,7 @@ created_at: 2026-09-03 14:49:48
+ - 2026-10-25-subagent-card-unify-panel | 子代理卡片统一为紧凑卡片+详情栏
+ - 2026-10-25-trajectory-source-model | 2026-10-25-trajectory-source-model
+ - 2026-10-27-mobile-chat-dense | 用户真机复验 seq44 部署后反馈：会话页 agent 回复内容希望手机端占满一行,字体和间隔收小…
++- 2026-10-27-mobile-chat-visual-round2 | 用户真机第二轮反馈(截图)：agent 回复仍未占满一行(真凶=PC 阅读限宽 max-w-[cal…
++- 2026-10-27-scheduled-send-attachments | 用户反馈定时消息发送后 agent 收不到附件。排查确认：后端定时消息全链路（schema/落库/到…
++- 2026-10-27-task-wakeup-precision-fix | 修复任务唤醒判据与通知四处缺陷
++- 2026-10-27-ghost-spec-binding-fix | 失败命令不再生成幽灵变更占位并过滤存量
+diff --git a/.sillyspec/docs/SillyHub/modules/frontend_components.changelog.md b/.sillyspec/docs/SillyHub/modules/frontend_components.changelog.md
+index 74b438e07..d60dc9943 100644
+--- a/.sillyspec/docs/SillyHub/modules/frontend_components.changelog.md
++++ b/.sillyspec/docs/SillyHub/modules/frontend_components.changelog.md
+@@ -169,3 +169,7 @@ created_at: 2026-08-30 22:23:33
+ | 2026-10-26 | 2026-10-26-subagent-card-width-unify | 子代理卡片与工具卡限宽统一补漏 |
+ | 2026-10-26 | 2026-10-26-subagent-task-meta-restore | 子代理任务元数据装配竞态修复 |
+ | 2026-10-26 | 2026-10-26-ci-red-to-green | 修复四条CI工作流失败转绿 |
++| 2026-10-27 | 2026-10-27-mobile-chat-visual-round2 | 用户真机第二轮反馈(截图)：agent 回复仍未占满一行(真凶=PC 阅读限宽 max-w-[cal… |
++| 2026-10-27 | 2026-10-27-scheduled-send-attachments | 用户反馈定时消息发送后 agent 收不到附件。排查确认：后端定时消息全链路（schema/落库/到… |
++| 2026-10-27 | 2026-10-27-task-wakeup-precision-fix | 修复任务唤醒判据与通知四处缺陷 |
++| 2026-10-27 | 2026-10-27-ghost-spec-binding-fix | 失败命令不再生成幽灵变更占位并过滤存量 |
+diff --git a/.sillyspec/docs/SillyHub/modules/frontend_lib.changelog.md b/.sillyspec/docs/SillyHub/modules/frontend_lib.changelog.md
+index 7c0dc6fb1..4f8e2e7a6 100644
+--- a/.sillyspec/docs/SillyHub/modules/frontend_lib.changelog.md
++++ b/.sillyspec/docs/SillyHub/modules/frontend_lib.changelog.md
+@@ -45,3 +45,5 @@ created_at: 2026-10-16 16:40:00
+ - 2026-10-26-turn-phase-orphan-fallback | 阶段事件竞态丢弃修复:turn_phase 事件按 run_id 精确匹配未命中时改为回退归属到当前…
+ - 2026-10-26-subagent-card-width-unify | 子代理卡片与工具卡限宽统一补漏
+ - 2026-10-26-subagent-task-meta-restore | 子代理任务元数据装配竞态修复
++- 2026-10-27-task-wakeup-precision-fix | 修复任务唤醒判据与通知四处缺陷
++- 2026-10-27-ghost-spec-binding-fix | 失败命令不再生成幽灵变更占位并过滤存量
+diff --git a/.sillyspec/docs/backend/modules/change.changelog.md b/.sillyspec/docs/backend/modules/change.changelog.md
+index 3c368f188..368abb115 100644
+--- a/.sillyspec/docs/backend/modules/change.changelog.md
++++ b/.sillyspec/docs/backend/modules/change.changelog.md
+@@ -32,3 +32,5 @@ created_at: 2026-08-29 22:56:30
+ - 2026-10-19-change-assets-cross-repo-repos | 变更资产卡展示跨仓冻结面
+ - 2026-10-19-cross-repo-patch-slicing | 资产卡跨仓单文件 diff 切片
+ - 2026-10-22-change-delete-session-history-fix | 变更删除不再级联删会话轮次并恢复丢失轮次
++- 2026-10-27-task-wakeup-precision-fix | 修复任务唤醒判据与通知四处缺陷
++- 2026-10-27-ghost-spec-binding-fix | 失败命令不再生成幽灵变更占位并过滤存量
+diff --git a/.sillyspec/docs/backend/modules/daemon.changelog.md b/.sillyspec/docs/backend/modules/daemon.changelog.md
+index edb84fcbd..00d0b809d 100644
+--- a/.sillyspec/docs/backend/modules/daemon.changelog.md
++++ b/.sillyspec/docs/backend/modules/daemon.changelog.md
+@@ -78,3 +78,7 @@ created_at: 2026-08-29 22:56:30
+ | 2026-10-26 | 2026-10-26-turn-phase-prod-fix | 阶段上报生产断链修复与观测补盲。背景:阶段化进度功能(2026-10-26-session-stag… |
+ | 2026-10-26 | 2026-10-26-ws-evict-close | 修复WS逐出不关socket致daemon假活不重连 |
+ | 2026-10-26 | 2026-10-26-ci-red-to-green | 修复四条CI工作流失败转绿 |
++| 2026-10-27 | 2026-10-27-mobile-chat-visual-round2 | 用户真机第二轮反馈(截图)：agent 回复仍未占满一行(真凶=PC 阅读限宽 max-w-[cal… |
++| 2026-10-27 | 2026-10-27-scheduled-send-attachments | 用户反馈定时消息发送后 agent 收不到附件。排查确认：后端定时消息全链路（schema/落库/到… |
++| 2026-10-27 | 2026-10-27-task-wakeup-precision-fix | 修复任务唤醒判据与通知四处缺陷 |
++| 2026-10-27 | 2026-10-27-ghost-spec-binding-fix | 失败命令不再生成幽灵变更占位并过滤存量 |
+diff --git a/.sillyspec/docs/multi-agent-platform/modules/backend.changelog.md b/.sillyspec/docs/multi-agent-platform/modules/backend.changelog.md
+index 5feef6d9c..bcc9a43f0 100644
+--- a/.sillyspec/docs/multi-agent-platform/modules/backend.changelog.md
++++ b/.sillyspec/docs/multi-agent-platform/modules/backend.changelog.md
+@@ -112,3 +112,7 @@
+ - 2026-10-26-turn-phase-prod-fix | 阶段上报生产断链修复与观测补盲。背景:阶段化进度功能(2026-10-26-session-stag…
+ - 2026-10-26-ws-evict-close | 修复WS逐出不关socket致daemon假活不重连
+ - 2026-10-26-ci-red-to-green | 修复四条CI工作流失败转绿
++- 2026-10-27-mobile-chat-visual-round2 | 用户真机第二轮反馈(截图)：agent 回复仍未占满一行(真凶=PC 阅读限宽 max-w-[cal…
++- 2026-10-27-scheduled-send-attachments | 用户反馈定时消息发送后 agent 收不到附件。排查确认：后端定时消息全链路（schema/落库/到…
++- 2026-10-27-task-wakeup-precision-fix | 修复任务唤醒判据与通知四处缺陷
++- 2026-10-27-ghost-spec-binding-fix | 失败命令不再生成幽灵变更占位并过滤存量
+diff --git a/.sillyspec/docs/multi-agent-platform/modules/docs.changelog.md b/.sillyspec/docs/multi-agent-platform/modules/docs.changelog.md
+index c4f7384c3..e2fa40b27 100644
+--- a/.sillyspec/docs/multi-agent-platform/modules/docs.changelog.md
++++ b/.sillyspec/docs/multi-agent-platform/modules/docs.changelog.md
+@@ -28,3 +28,4 @@
+ - 2026-10-23-diff-dialog-pairing-fix | 轮文件变更弹窗(turn-file-diff-dialog)在补丁行缺 tool_use_id 时走…
+ - 2026-10-25-session-config-deferred-switch | 会话配置点选改暂存随下条消息生效
+ - 2026-10-26-ci-red-to-green | 修复四条CI工作流失败转绿
++- 2026-10-27-ghost-spec-binding-fix | 失败命令不再生成幽灵变更占位并过滤存量
+diff --git a/.sillyspec/docs/multi-agent-platform/modules/frontend.changelog.md b/.sillyspec/docs/multi-agent-platform/modules/frontend.changelog.md
+index 9f65dd69d..1c9a4dd10 100644
+--- a/.sillyspec/docs/multi-agent-platform/modules/frontend.changelog.md
++++ b/.sillyspec/docs/multi-agent-platform/modules/frontend.changelog.md
+@@ -219,3 +219,7 @@
+ | 2026-10-26 | 2026-10-26-subagent-task-meta-restore | 子代理任务元数据装配竞态修复 |
+ | 2026-10-26 | 2026-10-26-ci-red-to-green | 修复四条CI工作流失败转绿 |
+ | 2026-10-27 | 2026-10-27-mobile-chat-dense | 用户真机复验 seq44 部署后反馈：会话页 agent 回复内容希望手机端占满一行,字体和间隔收小… |
++| 2026-10-27 | 2026-10-27-mobile-chat-visual-round2 | 用户真机第二轮反馈(截图)：agent 回复仍未占满一行(真凶=PC 阅读限宽 max-w-[cal… |
++| 2026-10-27 | 2026-10-27-scheduled-send-attachments | 用户反馈定时消息发送后 agent 收不到附件。排查确认：后端定时消息全链路（schema/落库/到… |
++| 2026-10-27 | 2026-10-27-task-wakeup-precision-fix | 修复任务唤醒判据与通知四处缺陷 |
++| 2026-10-27 | 2026-10-27-ghost-spec-binding-fix | 失败命令不再生成幽灵变更占位并过滤存量 |
+diff --git a/.sillyspec/docs/multi-agent-platform/modules/sillyhub-daemon.changelog.md b/.sillyspec/docs/multi-agent-platform/modules/sillyhub-daemon.changelog.md
+index 9027cf18f..a3cf6448e 100644
+--- a/.sillyspec/docs/multi-agent-platform/modules/sillyhub-daemon.changelog.md
++++ b/.sillyspec/docs/multi-agent-platform/modules/sillyhub-daemon.changelog.md
+@@ -49,3 +49,7 @@
+ - 2026-10-25-session-git-worktree-root | 会话 git 分支指示项感知 sillyspec 工作树
+ - 2026-10-26-turn-phase-prod-fix | 阶段上报生产断链修复与观测补盲。背景:阶段化进度功能(2026-10-26-session-stag…
+ - 2026-10-26-ci-red-to-green | 修复四条CI工作流失败转绿
++- 2026-10-27-mobile-chat-visual-round2 | 用户真机第二轮反馈(截图)：agent 回复仍未占满一行(真凶=PC 阅读限宽 max-w-[cal…
++- 2026-10-27-scheduled-send-attachments | 用户反馈定时消息发送后 agent 收不到附件。排查确认：后端定时消息全链路（schema/落库/到…
++- 2026-10-27-task-wakeup-precision-fix | 修复任务唤醒判据与通知四处缺陷
++- 2026-10-27-ghost-spec-binding-fix | 失败命令不再生成幽灵变更占位并过滤存量
+diff --git a/backend/app/modules/change/binding.py b/backend/app/modules/change/binding.py
+index 566d11803..302d8ae44 100644
+--- a/backend/app/modules/change/binding.py
++++ b/backend/app/modules/change/binding.py
+@@ -19,6 +19,7 @@ bind 函数，供 W2 检测写入口（run_sync 命令解析 / platform_sync age
+ 
+ from __future__ import annotations
+ 
++import re
+ import uuid
+ from dataclasses import dataclass
+ from datetime import UTC, datetime
+@@ -37,6 +38,19 @@ log = get_logger(__name__)
+ # bind_session_to_change 内部双道守卫统一跳过。
+ DEFAULT_CHANGE_KEY = "default"
+ 
++# 2026-10-27-ghost-spec-binding-fix：CLI 对新变更名强制日期前缀（flow start 入口
++# 校验，缺前缀 exit 2 拒绝——「新变更名必须形如 YYYY-MM-DD-<简短描述>」，已存在
++# 的旧名变更不受影响）。查库未命中且名字不带此前缀 = 命令必被 CLI 拒绝，绑定通道
++# 禁止为其建 placeholder（幽灵占位根因防护：失败命令的占位行永远无文件接管，
++# 会话弹窗「进行中」长期残留实证）。校验放 bind 函数而非解析函数：纯解析查不了
++# 库，无法区分「旧名已有行（合法绑定）」与「无前缀必被拒」。
++_DATED_CHANGE_KEY_RE = re.compile(r"^\d{4}-\d{2}-\d{2}-")
++
++# 段首收紧（D-002@v1）后允许 sillyspec 前置的中缀 token：iter_command_segments
++# 剥包装前缀（pnpm/npx/yarn/sudo/node）后残留 ``exec`` 的合法形态（pnpm exec
++# sillyspec …）。其余段中位置（引号内字面量被切段后的中文描述段等）不命中。
++_ALLOWED_SPEC_INFIX = frozenset({"exec"})
++
+ # flow 命令族中携带 --change <变更名> 的子命令（2026-09-25-change-center-thin-flow
+ # task-04）：thin 派发会话的 2 调用协议命令。progress/status 等只读子命令无
+ # --change，不在其列。
+@@ -60,8 +74,10 @@ def extract_spec_bindings(command: str) -> list[SpecCommandBinding]:
+ 
+     对 :func:`iter_command_segments` 产出的每个裸命令段判定：
+ 
+-    - 定位 ``sillyspec run`` token 序列（段首为主；包装剥除后残留 ``exec`` 等
+-      中缀时同样命中，与 tool_kind 打标的主命令判定同源自洽）。
++    - 定位 ``sillyspec run`` token 序列。段首收紧（D-002@v1）：``sillyspec``
++      必须是段首 token，或紧随 ``exec``（包装剥除后的合法中缀形态，与
++      tool_kind 打标的主命令判定同源自洽）——段中其它位置不命中（引号字符串
++      内的字面文本被分段后不再误解析出绑定，会话 5f088f10 幽灵实证）。
+     - 紧随 ``run`` 的子命令是 ``quick`` → 无产出：quick 的 ``--change`` 值是
+       CLI 内部 quick 会话 id（``quick-<hex>`` / ``default``），不作变更绑定
+       （D-004@v1）。
+@@ -70,10 +86,10 @@ def extract_spec_bindings(command: str) -> list[SpecCommandBinding]:
+       （以 ``-`` 开头视为选项 → 无值不产出）。
+     - ``名 == "default"`` 跳过（D-005@v2 解析层第一道，函数内还有兜底）。
+     - **flow 命令族**（2026-09-25-change-center-thin-flow task-04）：定位
+-      ``sillyspec flow <start|done|amend-draft>`` token 序列，在其后 token 里
+-      同规则找 ``--change <名>`` —— thin 派发会话执行 2 调用协议
+-      （``flow start`` → 干活 → ``flow done``），变更绑定**唯一**依靠本命令
+-      解析通道；``名 == "default"`` 同样跳过。flow 其它子命令
++      ``sillyspec flow <start|done|amend-draft>`` token 序列（段首收紧同 run
++      族），在其后 token 里同规则找 ``--change <名>`` —— thin 派发会话执行
++      2 调用协议（``flow start`` → 干活 → ``flow done``），变更绑定**唯一**
++      依靠本命令解析通道；``名 == "default"`` 同样跳过。flow 其它子命令
+       （progress/status 等）无 ``--change`` 自然无产出。
+     - run 与 flow 命中其一即处理（一段命令只属一族，先查 run 再查 flow）。
+ 
+@@ -85,11 +101,7 @@ def extract_spec_bindings(command: str) -> list[SpecCommandBinding]:
+     for segment in iter_command_segments(command):
+         tokens = segment.split()
+         # ── 族一：sillyspec run（quick 子命令跳过）──
+-        run_idx: int | None = None
+-        for i in range(len(tokens) - 1):
+-            if tokens[i] == "sillyspec" and tokens[i + 1] == "run":
+-                run_idx = i
+-                break
++        run_idx = _locate_sillyspec_subcommand(tokens, "run")
+         if run_idx is not None:
+             if run_idx + 2 < len(tokens) and tokens[run_idx + 2] == "quick":
+                 # D-004@v1：quick 子命令的 --change 是 CLI quick 会话 id，跳过。
+@@ -100,13 +112,9 @@ def extract_spec_bindings(command: str) -> list[SpecCommandBinding]:
+             continue
+         # ── 族二：sillyspec flow start|done|amend-draft（thin 2 调用协议）──
+         flow_idx: int | None = None
+-        for i in range(len(tokens) - 2):
+-            if (
+-                tokens[i] == "sillyspec"
+-                and tokens[i + 1] == "flow"
+-                and tokens[i + 2] in _FLOW_CHANGE_SUBCOMMANDS
+-            ):
+-                flow_idx = i
++        for sub in _FLOW_CHANGE_SUBCOMMANDS:
++            flow_idx = _locate_sillyspec_subcommand(tokens, "flow", sub)
++            if flow_idx is not None:
+                 break
+         if flow_idx is None:
+             # 既非 run 也非 flow 命令族（含 progress/status/archive 等子命令、
+@@ -119,6 +127,35 @@ def extract_spec_bindings(command: str) -> list[SpecCommandBinding]:
+     return bindings
+ 
+ 
++def _locate_sillyspec_subcommand(
++    tokens: list[str], subcommand: str, sub_subcommand: str | None = None
++) -> int | None:
++    """定位 ``sillyspec <subcommand> [sub_subcommand]`` 的 sillyspec token 下标。
++
++    段首收紧（D-002@v1，2026-10-27-ghost-spec-binding-fix）：``sillyspec`` 必须
++    是段首 token，或紧随 ``exec``（iter_command_segments 剥包装前缀后残留
++    ``exec`` 的合法中缀形态）。原实现允许 token 序列出现在段中任意位置——
++    引号字符串内的字面文本（如 flow start ``--input`` 长文本引用的示例命令
++    「sillyspec flow start --change xxx」）被分段函数切成独立段后，段首是中文
++    描述 token、序列悬在段中，曾被误解析出幽灵绑定（会话 5f088f10 实证）。
++
++    返回 sillyspec 的下标；未命中返回 None。``sub_subcommand`` 为 None 时只匹配
++    两 token（run 族，quick 跳过判定由调用方做）；给出时三 token 须连续命中
++    （flow 族的 start/done/amend-draft 区分）。
++    """
++    for i in range(len(tokens)):
++        if tokens[i] != "sillyspec":
++            continue
++        if i != 0 and tokens[i - 1] not in _ALLOWED_SPEC_INFIX:
++            continue
++        if i + 1 >= len(tokens) or tokens[i + 1] != subcommand:
++            continue
++        if sub_subcommand is not None and (i + 2 >= len(tokens) or tokens[i + 2] != sub_subcommand):
++            continue
++        return i
++    return None
++
++
+ def _parse_change_key(tokens: list[str], start: int) -> str | None:
+     """自 ``start`` 起找 ``--change <名>`` / ``--change=<名>``，返回名（无则 None）。
+ 
+@@ -148,6 +185,10 @@ async def bind_session_to_change(
+ 
+     - ``change_key == "default"`` 直接返回 None（D-005@v2 函数内兜底：命令解析与
+       agent-logs 两写通道统一受保护，无 placeholder 行、无 link 行）。
++    - 查库未命中且名字不带日期前缀 → 拒绝建 placeholder（FR-01，2026-10-27-
++      ghost-spec-binding-fix）：CLI 对新变更名强制日期前缀，此类命令必被 CLI
++      exit 2 拒绝，为它建占位行只会产生永远无文件接管的幽灵（会话弹窗「进行中」
++      残留实证）。已有行（含历史旧格式名）不受影响，照常幂等绑 link（FR-03）。
+     - 按 ``(workspace_id, change_key)`` 查 Change，不存在则建 placeholder 行
+       （defaults 对齐 ``platform_sync/service.py:_ensure_change_row``：
+       status="draft" / location="active" / path=f"changes/{名}" / title=名），
+@@ -174,6 +215,16 @@ async def bind_session_to_change(
+                 )
+             ).scalar_one_or_none()
+             if change is None:
++                if not _DATED_CHANGE_KEY_RE.match(change_key):
++                    # FR-01：无行 + 无日期前缀 = CLI 必拒的失败命令，不建占位。
++                    # 返回 None 在 savepoint 内正常返回（无脏数据）。
++                    log.warning(
++                        "change.spec_binding_rejected_invalid_name",
++                        workspace_id=str(workspace_id),
++                        change_key=change_key,
++                        session_id=str(session_id),
++                    )
++                    return None
+                 change = Change(
+                     id=uuid.uuid4(),
+                     workspace_id=workspace_id,
+diff --git a/backend/app/modules/change/service.py b/backend/app/modules/change/service.py
+index 174bc3fd2..36b395286 100644
+--- a/backend/app/modules/change/service.py
++++ b/backend/app/modules/change/service.py
+@@ -90,6 +90,20 @@ PLACEHOLDER_PROTECT_WINDOW_DAYS = 7
+ # router._CHANGE_SESSIONS_MAX=200 惯例，100 覆盖会话页面悬浮面板全量展示）。
+ _SESSION_CHANGES_MAX = 100
+ 
++# 2026-10-27-ghost-spec-binding-fix FR-04/05：幽灵占位过滤的年龄阈值。真实
++# flow start 命令解析建占位（秒级）先于镜像文档同步（daemon 同步周期）到达，
++# 30 分钟窗口护栏：窗口内不过滤（镜像同步延迟不误伤），超窗仍无文档的 draft
++# active 行判为失败命令残留（写侧拒绝分支是防新增，本阈值兜存量幽灵）。
++_GHOST_PLACEHOLDER_MIN_AGE = timedelta(minutes=30)
++
++
++def _as_utc(dt: datetime) -> datetime:
++    """naive datetime 按 UTC 解释（SQLite 列落库丢 tzinfo，写入端值即 UTC 墙钟；
++    PG timezone=True 读出为 aware）。跨库年龄比较统一成 aware，防 naive/aware
++    相减 TypeError（Windows 本地 SQLite 与生产 PG 行为一致）。"""
++    return dt if dt.tzinfo is not None else dt.replace(tzinfo=UTC)
++
++
+ # 2026-08-29-approval-notify-push task-05（D-007@v1 / design §7.3②）：审批结果
+ # 通知 owner 的门中文名映射（title 文案常量集中于此，勿散落触发点）。
+ # 四个审核门 + 旧版 approve/reject（approval）。
+@@ -2425,6 +2439,14 @@ class ChangeService:
+         （router.list_change_sessions），本方法补反向查询。
+ 
+         - 软删变更（``location='deleted'``）排除——与变更中心读侧口径一致；
++        - **幽灵占位过滤**（2026-10-27-ghost-spec-binding-fix FR-04/05/06）：
++          status=draft 且 location=active 且名下无 change_documents 且
++          created_at 距今超 ``_GHOST_PLACEHOLDER_MIN_AGE``（30 分钟）的行不返回
++          ——失败命令占位残留（写侧拒绝分支是防新增，本过滤兜存量：CLI 强制
++          日期前缀前旧版本、带前缀但 --input 不合规被拒等写侧拦不住的残留）。
++          30 分钟窗口为真实 flow start 命令解析（秒级建占位）先于镜像文档同步
++          （daemon 同步周期）的延迟护栏；文档到达后四条件自然不满足，行自动
++          恢复显示，无永久误伤；
+         - 取数窗口 ``created_at desc + limit``（对齐 router._CHANGE_SESSIONS_MAX=200
+           惯例；会话挂的变更数远低于上限）；
+         - 复用 ``enrich_summaries`` 批量投影（is_thin/last_pushed_at/pending_review
+@@ -2450,11 +2472,48 @@ class ChangeService:
+             .scalars()
+             .all()
+         )
++        changes = await self._filter_ghost_placeholders(list(changes))
+         summaries = await self.enrich_summaries(list(changes))
+         # 稳定排序：未归档（False=0）沉底归档（True=1），组内序保持取数序。
+         summaries.sort(key=lambda s: s.location == "archive")
+         return summaries
+ 
++    async def _filter_ghost_placeholders(self, changes: list[Change]) -> list[Change]:
++        """滤掉幽灵占位行（FR-04/05/06，docstring 见 list_changes_for_session）。
++
++        候选先行收窄（status/location/年龄三条件内存判定，零 SQL 成本），仅对
++        候选做一次批量 IN 文档存在性查询（R-03 禁 N+1）；无候选零查询。判定是
++        动态投影（不落库打标）——文档一旦同步到达，行即恢复参与返回。
++        """
++        if not changes:
++            return changes
++        now = datetime.now(UTC)
++        candidates = [
++            c
++            for c in changes
++            if c.status == "draft"
++            and c.location == "active"
++            and c.created_at is not None
++            and now - _as_utc(c.created_at) > _GHOST_PLACEHOLDER_MIN_AGE
++        ]
++        if not candidates:
++            return changes
++        documented_ids: set[uuid.UUID] = set(
++            (
++                await self._session.execute(
++                    select(ChangeDocument.change_id).where(
++                        ChangeDocument.change_id.in_([c.id for c in candidates])
++                    )
++                )
++            )
++            .scalars()
++            .all()
++        )
++        ghosts = {c.id for c in candidates if c.id not in documented_ids}
++        if not ghosts:
++            return changes
++        return [c for c in changes if c.id not in ghosts]
++
+     # ── owner_name 批量投影 + 时间线事件合成（2026-08-16-change-owner-from-token
+     #    task-04，design §5 Phase 2.1/2.2/2.4；R-03/R-06 两次批量 IN 禁 N+1）──
+ 
+diff --git a/backend/app/modules/change/tests/test_session_changes_endpoint.py b/backend/app/modules/change/tests/test_session_changes_endpoint.py
+index 66d328313..9b94939cd 100644
+--- a/backend/app/modules/change/tests/test_session_changes_endpoint.py
++++ b/backend/app/modules/change/tests/test_session_changes_endpoint.py
+@@ -33,7 +33,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
+ 
+ from app.modules.agent.model import AgentSession
+ from app.modules.auth.model import User
+-from app.modules.change.model import Change, ChangeSessionLink
++from app.modules.change.model import Change, ChangeDocument, ChangeSessionLink
+ from app.modules.daemon.model import DaemonRuntime
+ from app.modules.workspace.model import Workspace
+ 
+@@ -115,6 +115,7 @@ async def _make_change(
+     location: str = "active",
+     created_at: datetime | None = None,
+     change_type: str | None = None,
++    status: str | None = None,
+ ) -> Change:
+     change = Change(
+         id=uuid.uuid4(),
+@@ -124,6 +125,7 @@ async def _make_change(
+         location=location,
+         path=f".sillyspec/changes/{change_key}",
+         change_type=change_type,
++        status=status,  # None 走模型默认 draft（placeholder 出身形态）
+         created_at=created_at or datetime.now(UTC),
+     )
+     db_session.add(change)
+@@ -132,6 +134,24 @@ async def _make_change(
+     return change
+ 
+ 
++async def _make_doc(
++    db_session: AsyncSession,
++    *,
++    change_id: uuid.UUID,
++    doc_type: str = "design",
++) -> None:
++    """造 change_documents 行（幽灵判定「无文档」条件的对照组）。"""
++    db_session.add(
++        ChangeDocument(
++            id=uuid.uuid4(),
++            change_id=change_id,
++            doc_type=doc_type,
++            path=f"changes/{change_id}/{doc_type}.md",
++        )
++    )
++    await db_session.commit()
++
++
+ async def _make_link(
+     db_session: AsyncSession,
+     *,
+@@ -173,8 +193,14 @@ class TestListSessionChanges:
+ 
+         base = datetime.now(UTC) - timedelta(hours=3)
+         # 造序：归档最新 → active 较旧 → active 最旧。期望返回序反转 active 在前。
++        # status="active"（非 draft）：造数不踩幽灵占位判定（FR-04 滤 draft+无文档
++        # +超龄行）——本用例测排序，不测幽灵形态（2026-10-27-ghost-spec-binding-fix）。
+         c_active_old = await _make_change(
+-            db_session, workspace_id=ws.id, change_key="active-old", created_at=base
++            db_session,
++            workspace_id=ws.id,
++            change_key="active-old",
++            created_at=base,
++            status="active",
+         )
+         c_active_new = await _make_change(
+             db_session,
+@@ -182,6 +208,7 @@ class TestListSessionChanges:
+             change_key="active-new",
+             created_at=base + timedelta(minutes=10),
+             change_type="quick",  # 分流窗内 quick → is_thin True（三分支②）
++            status="active",
+         )
+         c_archived = await _make_change(
+             db_session,
+@@ -325,3 +352,120 @@ class TestListSessionChanges:
+         )
+         assert resp.status_code == 200, resp.text
+         assert resp.json() == []
++
++    # ── 幽灵占位过滤（2026-10-27-ghost-spec-binding-fix FR-04/05/06）─────────
++
++    async def test_ghost_placeholder_filtered_after_ttl(
++        self,
++        client: AsyncClient,
++        auth_headers: dict[str, str],
++        db_session: AsyncSession,
++        tmp_path: Path,
++    ) -> None:
++        """FR-04：draft + active + 无文档 + created_at 超 30 分钟 → 幽灵占位行
++        不出现（失败命令占位残留，2026-10-27 会话 9d190177/5f088f10 实证形态）。"""
++        admin = await _make_admin(db_session)
++        rt = await _make_runtime(db_session, admin.id)
++        ws = await _make_workspace(db_session, root_path=str(tmp_path))
++        sess = await _make_session(
++            db_session, user_id=admin.id, runtime_id=rt.id, workspace_id=ws.id
++        )
++        ghost = await _make_change(
++            db_session,
++            workspace_id=ws.id,
++            change_key="task-wakeup-precision-fix",
++            created_at=datetime.now(UTC) - timedelta(minutes=41),
++        )
++        real = await _make_change(
++            db_session,
++            workspace_id=ws.id,
++            change_key="2026-10-27-real-change",
++            created_at=datetime.now(UTC) - timedelta(minutes=40),
++        )
++        # 真实变更超龄后必已被 reparse 接管（文档在库）——不满足幽灵「无文档」条件。
++        await _make_doc(db_session, change_id=real.id)
++        for c in (ghost, real):
++            await _make_link(db_session, change_id=c.id, session_id=sess.id)
++
++        resp = await client.get(
++            f"/api/workspaces/{ws.id}/changes/-/by-session/{sess.id}",
++            headers=auth_headers,
++        )
++        assert resp.status_code == 200, resp.text
++        assert [i["change_key"] for i in resp.json()] == ["2026-10-27-real-change"]
++
++    async def test_fresh_placeholder_not_filtered(
++        self,
++        client: AsyncClient,
++        auth_headers: dict[str, str],
++        db_session: AsyncSession,
++        tmp_path: Path,
++    ) -> None:
++        """FR-05：draft + active + 无文档但 created_at 在 30 分钟窗口内 → 保留
++        （真实 flow start 命令解析先于镜像文档同步的延迟窗口，不得提前过滤）。"""
++        admin = await _make_admin(db_session)
++        rt = await _make_runtime(db_session, admin.id)
++        ws = await _make_workspace(db_session, root_path=str(tmp_path))
++        sess = await _make_session(
++            db_session, user_id=admin.id, runtime_id=rt.id, workspace_id=ws.id
++        )
++        fresh = await _make_change(
++            db_session,
++            workspace_id=ws.id,
++            change_key="2026-10-27-fresh-flow",
++            created_at=datetime.now(UTC) - timedelta(minutes=5),
++        )
++        await _make_link(db_session, change_id=fresh.id, session_id=sess.id)
++
++        resp = await client.get(
++            f"/api/workspaces/{ws.id}/changes/-/by-session/{sess.id}",
++            headers=auth_headers,
++        )
++        assert resp.status_code == 200, resp.text
++        assert [i["change_key"] for i in resp.json()] == ["2026-10-27-fresh-flow"]
++
++    async def test_documented_archived_non_draft_rows_not_filtered(
++        self,
++        client: AsyncClient,
++        auth_headers: dict[str, str],
++        db_session: AsyncSession,
++        tmp_path: Path,
++    ) -> None:
++        """FR-06：幽灵四条件缺一均保留——①有文档的超龄 draft 行（正常在建）；
++        ②归档无文档超龄行（终态）；③status=active 无文档超龄行（真实生命周期
++        态）。三变体全部原样返回（零误伤）。"""
++        admin = await _make_admin(db_session)
++        rt = await _make_runtime(db_session, admin.id)
++        ws = await _make_workspace(db_session, root_path=str(tmp_path))
++        sess = await _make_session(
++            db_session, user_id=admin.id, runtime_id=rt.id, workspace_id=ws.id
++        )
++        old = datetime.now(UTC) - timedelta(minutes=60)
++        c_documented = await _make_change(
++            db_session, workspace_id=ws.id, change_key="drafted-with-docs", created_at=old
++        )
++        await _make_doc(db_session, change_id=c_documented.id)
++        c_archived = await _make_change(
++            db_session,
++            workspace_id=ws.id,
++            change_key="archived-no-docs",
++            location="archive",
++            created_at=old,
++        )
++        c_active_status = await _make_change(
++            db_session,
++            workspace_id=ws.id,
++            change_key="active-status-no-docs",
++            status="active",
++            created_at=old,
++        )
++        for c in (c_documented, c_archived, c_active_status):
++            await _make_link(db_session, change_id=c.id, session_id=sess.id)
++
++        resp = await client.get(
++            f"/api/workspaces/{ws.id}/changes/-/by-session/{sess.id}",
++            headers=auth_headers,
++        )
++        assert resp.status_code == 200, resp.text
++        keys = {i["change_key"] for i in resp.json()}
++        assert keys == {"drafted-with-docs", "archived-no-docs", "active-status-no-docs"}
+diff --git a/backend/app/modules/change/tests/test_spec_binding.py b/backend/app/modules/change/tests/test_spec_binding.py
+index b6e692d3c..6cf113b0f 100644
+--- a/backend/app/modules/change/tests/test_spec_binding.py
++++ b/backend/app/modules/change/tests/test_spec_binding.py
+@@ -106,6 +106,20 @@ PARSE_CASES: list[tuple[str, list[str]]] = [
+         "sillyspec flow done --change after-quick-key",
+         ["after-quick-key"],
+     ),
++    # --- 段首收紧（D-002@v1）：--input 引号长文本内的示例命令字样不产出绑定。
++    # 引号内换行被 iter_command_segments 切成独立段（分段不感知引号），段中
++    # sillyspec token 序列（段首是中文描述 token、前一 token 非 exec）不命中。
++    (
++        'cd /repo && sillyspec flow start --change 2026-10-27-real-change --input "标题\n'
++        "\n"
++        "动机：agent 执行 sillyspec flow start --change task-wakeup-precision-fix 被拒\n"
++        "\n"
++        "成功标准：\n"
++        '- 标准 一"',
++        ["2026-10-27-real-change"],
++    ),
++    # 段中 sillyspec（前一 token 为普通词）无产出——run 族同规则。
++    ("echo 执行 sillyspec run plan --change mid-token-key", []),
+ ]
+ 
+ 
+@@ -132,6 +146,24 @@ def test_extract_spec_bindings_quick_after_wrapper_still_skipped() -> None:
+     )
+ 
+ 
++def test_extract_spec_bindings_quoted_text_not_binding() -> None:
++    """D-002@v1 完整重现（2026-10-27 会话 5f088f10 实证）：flow start --input
++    引号长文本内引用「sillyspec flow start --change <名>」示例字样，引号内换行
++    被分段函数切成独立段，段中序列不得产出绑定——只产出真实命令段的绑定。"""
++    command = (
++        'cd "C:/repo" && sillyspec flow start --change 2026-10-27-real-change --input "失败命令不再生成幽灵变更占位并过滤存量\n'
++        "\n"
++        "动机与背景：2026-10-27 会话实证——agent 执行 sillyspec flow start --change task-wakeup-precision-fix"
++        "（缺日期前缀）被 CLI exit 2 拒绝，但绑定通道不看执行结果仍建占位。\n"
++        "\n"
++        "成功标准：\n"
++        "- bind 在无行且名字不带日期前缀时跳过建占位\n"
++        '- 读侧过滤超龄无文档 draft 行"'
++    )
++    bindings = extract_spec_bindings(command)
++    assert [b.change_key for b in bindings] == ["2026-10-27-real-change"]
++
++
+ # ===========================================================================
+ # bind_session_to_change（DB）
+ # ===========================================================================
+@@ -202,6 +234,18 @@ async def _change_links(db_session, change_id: uuid.UUID) -> list[ChangeSessionL
+     )
+ 
+ 
++async def _change_links_of_session(db_session, session_id: uuid.UUID) -> list[ChangeSessionLink]:
++    return list(
++        (
++            await db_session.execute(
++                select(ChangeSessionLink).where(ChangeSessionLink.session_id == session_id)
++            )
++        )
++        .scalars()
++        .all()
++    )
++
++
+ async def test_bind_change_default_guard_creates_nothing(db_session):
+     """D-005@v2 函数内兜底：default 伪键不建 Change 行、不建 link 行。"""
+     user = await _make_user(db_session)
+@@ -247,6 +291,49 @@ async def test_bind_change_creates_placeholder_with_ensure_defaults(db_session):
+     assert links[0].session_id == s.id
+ 
+ 
++async def test_bind_change_rejects_undated_new_key_no_placeholder(db_session):
++    """FR-01（2026-10-27-ghost-spec-binding-fix）：查库未命中 + 名字不带日期前缀
++    （CLI 强制规则，必被 exit 2 拒绝——失败命令）→ 不建 placeholder、不建 link、
++    返回 None。幽灵占位根因写侧防护。"""
++    user = await _make_user(db_session)
++    ws = await _make_ws(db_session)
++    s = await _make_session(db_session, workspace_id=ws.id, user_id=user.id)
++
++    result = await bind_session_to_change(db_session, ws.id, "task-wakeup-precision-fix", s.id)
++
++    assert result is None
++    assert await _changes_in_ws(db_session, ws.id) == []
++    assert await _change_links_of_session(db_session, s.id) == []
++
++
++async def test_bind_change_binds_existing_undated_row_without_placeholder(db_session):
++    """FR-03：库中已有同 key 行（历史旧格式名合法存在）→ 跳过格式校验走幂等
++    link 路径，不建第二行、不误拒——CLI「已存在的旧名变更不受影响」口径。"""
++    user = await _make_user(db_session)
++    ws = await _make_ws(db_session)
++    s = await _make_session(db_session, workspace_id=ws.id, user_id=user.id)
++    key = "legacy-undated-name"
++    existing = Change(
++        id=uuid.uuid4(),
++        workspace_id=ws.id,
++        change_key=key,
++        title="历史旧格式名变更",
++        status="active",
++        location="active",
++        path=f"changes/{key}",
++    )
++    db_session.add(existing)
++    await db_session.commit()
++
++    bound = await bind_session_to_change(db_session, ws.id, key, s.id)
++
++    assert bound == existing.id
++    changes = await _changes_in_ws(db_session, ws.id)
++    assert [c.id for c in changes] == [existing.id]  # 不建第二行
++    links = await _change_links(db_session, existing.id)
++    assert len(links) == 1 and links[0].session_id == s.id
++
++
+ async def test_bind_change_reuses_existing_row_and_is_idempotent(db_session):
+     """幂等：已有 Change 行直接复用（不建第二行）；二次调用不重复建 link。"""
+     user = await _make_user(db_session)
+diff --git a/backend/app/modules/daemon/session/service/helpers.py b/backend/app/modules/daemon/session/service/helpers.py
+index b870c3c36..d0c32ab1c 100644
+--- a/backend/app/modules/daemon/session/service/helpers.py
++++ b/backend/app/modules/daemon/session/service/helpers.py
+@@ -77,7 +77,10 @@ TASK_WAKEUP_QUEUE_ORIGIN = "task_wakeup"
+ # 与 task_wakeup 同族服务身份标记（scheduled_send 服务身份写入，浏览器
+ # Bearer 用户无 HTTP 入口可写），前端时间线「⏰ 定时消息到点」触发行溯源锚。
+ SCHEDULE_QUEUE_ORIGIN = "schedule"
+-_TASK_WAKEUP_HEADER_COUNT_RE = re.compile(r"以下 \d+ 个后台子代理任务已全部结束")
++# 2026-10-27-task-wakeup-precision-fix FR-05：daemon prompt 头部「后台子代理任务」
++# 改「后台任务」——合并正则取兼容形（新文案优先命中，旧文案存量排队行在
++# 新旧混排窗口内同样命中，计数改写不退化为全文拼接）。
++_TASK_WAKEUP_HEADER_COUNT_RE = re.compile(r"以下 \d+ 个后台(?:子代理)?任务已全部结束")
+ _TASK_WAKEUP_TRAILER_COUNT_RE = re.compile(r"（共 \d+ 个）")
+ 
+ 
+@@ -132,7 +135,10 @@ def _merge_task_wakeup_prompt(old: str, new: str) -> str:
+         if not line.startswith("- ")
+     ]
+     header = _TASK_WAKEUP_HEADER_COUNT_RE.sub(
+-        f"以下 {len(old_bullets) + len(new_bullets)} 个后台子代理任务已全部结束",
++        # 2026-10-27-task-wakeup-precision-fix FR-05：重写模板同步新文案（与 daemon
++        # scheduleTaskWakeup 头部同值——跨语言常量同步义务，见前端
++        # TASK_WAKEUP_PROMPT_PREFIX 注释同款约束）。
++        f"以下 {len(old_bullets) + len(new_bullets)} 个后台任务已全部结束",
+         old_lines[0],
+     )
+     return "\n".join([header, *old_bullets, *new_bullets, *trailer_lines])
+diff --git a/backend/app/modules/daemon/tests/test_session_queue.py b/backend/app/modules/daemon/tests/test_session_queue.py
+index 803301528..04d328753 100644
+--- a/backend/app/modules/daemon/tests/test_session_queue.py
++++ b/backend/app/modules/daemon/tests/test_session_queue.py
+@@ -531,7 +531,26 @@ class TestQueueManagement:
+ 
+ 
+ def _wakeup_prompt(task_name: str, task_id: str) -> str:
+-    """构造 daemon _scheduleTaskWakeup 同款通知 prompt（单生产者模板对齐）。"""
++    """构造 daemon _scheduleTaskWakeup 同款通知 prompt（单生产者模板对齐）。
++
++    2026-10-27-task-wakeup-precision-fix FR-05：头部同步新文案（「后台任务」+
++    「本批次均已终止」）；旧文案模板见 test_merge_old_daemon_header_compat
++    （新旧 daemon 混排窗口的兼容面回归）。
++    """
++    return (
++        "[后台任务通知] 以下 1 个后台任务已全部结束"
++        "（本批次均已终止）：\n"
++        f"- 任务「{task_name}」已完成（用时 00:01）（task_id: {task_id}，"
++        "如需完整输出可调用 TaskOutput 查询，block=false）\n"
++        "请逐条核对上述每个任务（共 1 个）的名称与结果，一次性向用户完整汇报"
++        "（综合归纳，不要逐字照抄，不要遗漏任何一个任务）；"
++        "禁止声称仍在等待任何任务；汇报完即结束本轮；不要重复执行这些任务；"
++        "此消息为系统通知，无需向用户复述本通知本身。"
++    )
++
++
++def _old_wakeup_prompt(task_name: str, task_id: str) -> str:
++    """2026-10-27 前旧 daemon 文案（「后台子代理任务」）——存量排队行兼容面。"""
+     return (
+         "[后台任务通知] 以下 1 个后台子代理任务已全部结束"
+         "（列表中的每一个都已终止，没有仍在运行的任务）：\n"
+@@ -625,15 +644,51 @@ class TestTaskWakeupMerge:
+         assert "任务「伪造」" not in merged
+ 
+         merged = rows[0].prompt or ""
+-        # 两个任务行都在，头/尾计数改写为 2。
++        # 两个任务行都在，头/尾计数改写为 2（2026-10-27 起新文案）。
+         assert "任务「查依赖」" in merged
+         assert "任务「生成类文件」" in merged
+-        assert "以下 2 个后台子代理任务已全部结束" in merged
++        assert "以下 2 个后台任务已全部结束" in merged
+         assert "（共 2 个）" in merged
+         assert "以下 1 个" not in merged
+         # 汇报指令尾行保留（只出现一次）。
+         assert merged.count("请逐条核对上述每个任务") == 1
+ 
++    @pytest.mark.asyncio
++    async def test_merge_old_daemon_header_compat(
++        self, db_session, mocked_hub, mocked_redis
++    ) -> None:
++        """2026-10-27-task-wakeup-precision-fix FR-05：旧 daemon 文案（后台子
++        代理任务）存量排队行 + 新文案通知合并——兼容正则命中并改写计数为
++        新文案，不退化为全文拼接（新旧 daemon 混排部署窗口）。"""
++        svc, uid, session_id, _run = await _setup_busy_session(db_session)
++
++        await svc.inject_session(
++            session_id,
++            uid,
++            prompt=_old_wakeup_prompt("旧任务", "t-old"),
++            queue_when_busy=True,
++            task_wakeup=True,
++        )
++        await svc.inject_session(
++            session_id,
++            uid,
++            prompt=_wakeup_prompt("新任务", "t-new"),
++            queue_when_busy=True,
++            task_wakeup=True,
++        )
++
++        rows = await _queue_rows(db_session, session_id)
++        assert len(rows) == 1
++        merged = rows[0].prompt or ""
++        # 头部计数改写为新文案、总数=2；两条任务行齐备（兼容正则生效，
++        # 未退化为「旧全文 + 新任务行整段拼接」）。
++        assert "以下 2 个后台任务已全部结束" in merged
++        assert "后台子代理任务" not in merged
++        assert "任务「旧任务」" in merged
++        assert "任务「新任务」" in merged
++        assert "（共 2 个）" in merged
++        assert merged.count("请逐条核对上述每个任务") == 1
++
+     @pytest.mark.asyncio
+     async def test_normal_messages_not_merged(self, db_session, mocked_hub, mocked_redis) -> None:
+         svc, uid, session_id, _run = await _setup_busy_session(db_session)
+diff --git a/docs/releases/2026-10-27-003-4597eab86.md b/docs/releases/2026-10-27-003-4597eab86.md
+new file mode 100644
+index 000000000..ae694223f
+--- /dev/null
++++ b/docs/releases/2026-10-27-003-4597eab86.md
+@@ -0,0 +1,50 @@
++---
++seq: 46
++deployed_at: "2026-10-27 10:00:24"
++status: success
++commit_from: 1ff6a0bec
++commit_to: 4597eab86
++summary: task_wakeup 唤醒链四缺陷修复上线（判据反转/用时同源/结构化日志/文案）+唤醒注入退避重试+定时附件+幽灵绑定修复+会话视觉二轮——五变更批量
++agent: claude-code
++commits:
++  - sha: 4597eab86
++    message: "chore(archive): 2026-10-27-task-wakeup-precision-fix 归档留档"
++    author: qinyi
++  - sha: 576655812
++    message: "feat(daemon): 唤醒注入单发即弃改退避重试——六档总窗9.3min,env 可配 (task-01/02/03, 2026-10-27-task-wakeup-inject-retry)"
++    author: qinyi
++  - sha: 1015aa22f
++    message: "fix(change): 幽灵占位双层修复——绑定通道拒无前缀新名+读侧滤超龄 (task-01..05, 2026-10-27-ghost-spec-binding-fix)"
++    author: qinyi
++  - sha: cd99ffcf5
++    message: "fix(daemon): 定时消息携带附件 (task-01..04, 2026-10-27-scheduled-send-attachments)"
++    author: qinyi
++  - sha: a758f2707
++    message: "feat(mobile): 会话页视觉二轮 (task-01..06, 2026-10-27-mobile-chat-visual-round2)"
++    author: qinyi
++  - sha: 0dbbdad43
++    message: "fix(daemon): task_wakeup 通知行用时与判定同源 (task-01, 2026-10-27-task-wakeup-precision-fix)"
++    author: qinyi
++  - sha: 20d94e9a2
++    message: "fix(daemon): task_wakeup 唤醒判据反转——run_in_background 三态判定 (task-02/03, 2026-10-27-task-wakeup-precision-fix)"
++    author: qinyi
++  - sha: 6fe9c7ff2
++    message: "fix(daemon,backend): task_wakeup 通知文案修正+backend 合并正则兼容 (task-04, 2026-10-27-task-wakeup-precision-fix)"
++    author: qinyi
++---
++
++## 🔧 修复（主菜：task_wakeup 唤醒链四缺陷——2026-10-26 会话实证驱动）
++
++- **唤醒判据反转**：主判据从「时长 ≥ 60s」改为 tool_use 的 `run_in_background` 三态——前台命令（如 70s 的 pnpm install）免唤醒（消冗余汇报轮）；真后台完成即唤醒（短后台任务漏唤醒即停摆的洞同修）；信息不足走旧时长阈值兜底+WARN。`SILLYHUB_TASK_WAKEUP_QUIET_MS` env 与缺省不变（语义降级为兜底防噪阀，0=总关闭阀全局生效）。
++- **通知行用时与判定同源**：elapsed_ms 帧缺失时显示注册表 startedAt 兜底时长，不再出现误导性 00:00。
++- **唤醒判定四出口结构化日志**（放行/前台跳过/兜底放行/阈值0关闭）：task_id/时长来源/后台判定+判定来源——唤醒链从零日志黑盒变可归因。
++- **文案修正**：「后台子代理任务」→「后台任务」、「没有仍在运行的任务」→「本批次均已终止」（消与任务面板「运行中 N」的字面冲突）；backend 合并正则兼容新旧头部（混排部署窗口不退化）。
++- 附带同批上线：唤醒注入单发即弃改六档退避重试（总窗 9.3min，env 可配 0 禁用）；定时消息携带附件；变更幽灵占位双层修复；会话页视觉二轮。
++
++## 📝 部署验证
++
++- 轻量变更 2026-10-27-task-wakeup-precision-fix 全流程闭环（flow start→批准[user-confirmed]→逐任务提交→flow done 八子步→独立评审 PASS→归档 4597eab86）。
++- `/api/health` 回显 `commit_sha=4597eab86` 与打包锚一致；5 容器全 healthy；SPEC_MIRROR_WRITE_OK；备份锚 `backup-20261027-0959`（回滚用）。
++- 测试面：daemon task-lifecycle 24 + 收口 ledger 亲测 36 全绿；backend 合并/唤醒 17；frontend 相关 286；tsc 零错。
++- ⚠️ 生效边界：backend/frontend 即时生效；**daemon 侧修复需各机器 daemon 更新 bundle 后生效**（旧 daemon 的通知仍显示旧文案/00:00——本会话收到的通知即为例证）。
++- 兼容面：旧 daemon 产出的存量通知行，新 backend 合并正则兼容（test_merge_old_daemon_header_compat 覆盖）；前端识别锚 `[后台任务通知]` 前缀对新旧文案均识别。
+diff --git a/docs/sillyspec/finished/target-files-worktree-docs-mismatch.md b/docs/sillyspec/finished/target-files-worktree-docs-mismatch.md
+new file mode 100644
+index 000000000..7bd06684d
+--- /dev/null
++++ b/docs/sillyspec/finished/target-files-worktree-docs-mismatch.md
+@@ -0,0 +1,33 @@
++# target_files 主仓文档路径 × worktree 对账口径结构性错配
++
++- **发现**：2026-10-26-session-stage-progress verify 门（target_files 对账）。
++- **现象**：task-05 卡 target_files 声明模块卡路径（`.sillyspec/docs/multi-agent-platform/modules/*.md`，CLI 铁律明令"模块卡一律写主仓，绝不写 worktree 副本"）→ 对账口径 `actual=worktree:diff-base..HEAD + worktree:status-porcelain` 永远判 missing（「声明未做」②类），而产物真实存在于主仓（未提交或已提交均在主仓面）。两规则打架：写 worktree=产物蒸发；写主仓=对账 missing。
++- **影响**：凡 target_files 含主仓 `.sillyspec` 文档路径的任务（收尾/文档类 task 常见）verify 门必拦，只能靠"改声明 + 注释说明"绕行——声明与事实脱节，且注释口径各 agent 自由发挥。
++- **建议**：对账面把主仓 `.sillyspec/` 前缀路径单独处理（如读主仓 status/diff，或该前缀行不计 missing 仅提示），或在卡 schema 增 `repo: main-docs` 类显式声明。
++- **绕行**（本变更采用）：task-05 target_files 置 `[]` + 行内注释说明主仓义务与承载面（module-impact 更新结果表 + verify-result 任务完成度），constraints 原文「以 module-impact 为准更正 target_files」为授权依据。
++
++## 处置记录（2026-10-27 定时收口：已修——建议①落地，关闭归档）
++
++- **根因锐化**：worktree 形态的 actual 面只收集 **worktree 侧** diff 与 porcelain
++  （`resolveVerifyChangedFiles` 的 wtFiles/committedFiles 两源；主仓 porcelain 从不进面，
++  主仓已提交面也只在 wt-commit 补齐并集里部分可见）——「治理文档一律写主仓」铁律的承载面
++  （主仓 `.sillyspec/`）结构性不可见。`resolveVerifyChangedFiles` 2026-09-07 P1 修复保留的
++  `.sillyspec/docs/**` 是 **worktree 副本侧**的 docs——产物按铁律不落那边，恒 miss 是结构性的。
++- **已修**（sillyspec 仓 src/verify-postcheck.js `reconcileTargetFiles`）：**主仓治理文档救赎**
++  ——worktree 形态下，声明路径剥 `NEW:` 前缀后以 `.sillyspec/` 开头者，单独对主仓
++  `status --porcelain --untracked-files=all -- .sillyspec/`（未提交臂——`-uall` 防「新建模块卡
++  被折叠成目录条目」对不上文件级声明，首版即踩此坑）∪ `baseline..HEAD diff -- .sillyspec/`
++  （已提交臂，锚=actual.baseAnchor）匹配；命中则入 actualKeySet 并 notes 披露
++  「主仓治理文档救赎：N 个 .sillyspec/ 声明经主仓实际改动面命中」。**只救赎「声明而 missing」
++  的主仓治理路径，不扩 undeclared 面**（与 R9/R11 窗口救赎同语义）；fail-open：主仓读取
++  失败走既有 missing 判定。主仓侧无改动时不虚造 matched（missing 如实在场）。
++- **建议②（卡 schema 增 repo: main-docs 显式声明）不采**：建议①已按路径前缀无感覆盖，
++  显式声明只增填写成本不增判别力。
++- **测试**：test/target-files-main-docs-rescue.test.mjs 4/4（①真 linked worktree + 主仓未提交
++  模块卡 → missing 清零+notes 披露+undeclared 不扩；②主仓已提交臂 baseline..HEAD 命中；
++  ③主仓无改动不虚造；④test:core 驻留断言）；reconcile 族回归（feedback-batch2/ir-strict/
++  foreign-own-priority/cross-repo-probe7/design-coverage）52/52 零回归；lint 1086 文件绿；
++  docs gate 23≤60；doc-ref-check 93/93。
++- **绕行形态退役**：修复后 task 卡可直接声明主仓模块卡真实路径——「target_files: [] + 行内
++  注释」的声明与事实脱节形态不再必要。
++- 处置结论：结构性错配在对账层收口，本文件移入 finished/。
+diff --git a/frontend/src/app/globals.css b/frontend/src/app/globals.css
+index 250b003e7..d8e8d5099 100644
+--- a/frontend/src/app/globals.css
++++ b/frontend/src/app/globals.css
+@@ -918,6 +918,20 @@
+   padding-left: 8px;
+   padding-right: 8px;
+ }
++/* agent 正文真满宽(2026-10-27-mobile-chat-visual-round2 / 用户实测二轮反馈)：
++   段模型正文组件类 max-w-[calc(100%-120px)] 是 PC 阅读限宽(2026-10-25-unify
++   「整行-120px」防 PC 一行过长)——430pt 视口被吃近 30%,上一轮只放宽 .turn-bubble
++   没盖到它。mobile 限宽 100%(特异度 (0,2,0) 压组件单类 (0,1,0),v2/旧路径两处
++   挂点一次覆盖);desktop 阅读限宽原样保留。 */
++[data-variant="mobile"] .seg-text-body {
++  max-width: 100%;
++}
++/* 轮过程区缩进收敛(ml-9 36px+pl-3.5 14px→12+8px)——缩进是 PC 头像层级感,
++   手机上白吃 50px 宽;保留 border-l 竖线层级指示。 */
++[data-variant="mobile"] [data-testid="turn-progress-column"] {
++  margin-left: 12px;
++  padding-left: 8px;
++}
+ 
+ 
+ /* ---- 扩展色族批有意豁免清单(非 dark 残留,留档备查) ----
+diff --git a/frontend/src/app/m/workspaces/[id]/sessions/page.tsx b/frontend/src/app/m/workspaces/[id]/sessions/page.tsx
+index b84043918..13a155d09 100644
+--- a/frontend/src/app/m/workspaces/[id]/sessions/page.tsx
++++ b/frontend/src/app/m/workspaces/[id]/sessions/page.tsx
+@@ -292,7 +292,8 @@ export default function MobileWorkspaceSessionsPage() {
+         onClick={() => setPickerOpen(true)}
+         aria-label="新建会话"
+         data-testid="m-sessions-fab"
+-        className="fixed bottom-24 right-4 z-30 inline-flex h-[52px] w-[52px] items-center justify-center rounded-full bg-primary text-primary-foreground shadow-[var(--shadow-lg)] transition-transform active:scale-95"
++        // 玻璃效果（visual-round2 / 用户指定）：主色 85% 透明+中模糊,悬浮件轻量化
++        className="fixed bottom-24 right-4 z-30 inline-flex h-[52px] w-[52px] items-center justify-center rounded-full bg-primary/85 text-primary-foreground shadow-[var(--shadow-lg)] backdrop-blur-md transition-transform active:scale-95"
+       >
+         <Plus className="h-6 w-6" aria-hidden />
+       </button>
+diff --git a/frontend/src/components/chat/round-divider.tsx b/frontend/src/components/chat/round-divider.tsx
+index 11773d190..3bdc4e5ba 100644
+--- a/frontend/src/components/chat/round-divider.tsx
++++ b/frontend/src/components/chat/round-divider.tsx
+@@ -119,9 +119,12 @@ export const RoundDivider = memo(function RoundDivider({
+       <span
+         className={cn(
+           "inline-flex items-center gap-1.5 rounded-full border border-border/60 bg-card/80 px-3 py-0.5 text-[10.5px] text-muted-foreground shadow-sm backdrop-blur-sm",
+-          // mobile（FR-02）：允许收缩与折行（长 meta 在 430pt 视口内换行不溢出）；
+-          // desktop 缺省保持 shrink-0 + nowrap 单行（零变化）。
+-          mobile ? "min-w-0 shrink whitespace-normal" : "shrink-0 whitespace-nowrap",
++          // mobile（FR-02 + visual-round2）：去胶囊框纯文字（边框/底色/阴影/内距
++          // 全去——手机上轮次分隔要轻不抢正文视觉）；允许收缩折行（长 meta 在
++          // 430pt 视口内换行不溢出）。desktop 缺省保持胶囊+shrink-0 单行（零变化）。
++          mobile
++            ? "min-w-0 shrink whitespace-normal border-none bg-transparent px-0 py-0 shadow-none backdrop-blur-none"
++            : "shrink-0 whitespace-nowrap",
+         )}
+       >
+         <span className="tracking-wide">{label}</span>
+diff --git a/frontend/src/components/daemon/__tests__/message-queue-bar.test.tsx b/frontend/src/components/daemon/__tests__/message-queue-bar.test.tsx
+index fd57b4604..7db6f24f3 100644
+--- a/frontend/src/components/daemon/__tests__/message-queue-bar.test.tsx
++++ b/frontend/src/components/daemon/__tests__/message-queue-bar.test.tsx
+@@ -580,8 +580,8 @@ describe("MessageQueueBar 队列三操作（task-10 / FR-04 FR-05 FR-06）", ()
+         entries={[
+           makeEntry({
+             id: "mq-wake",
+-            prompt: "[后台任务通知] 以下 1 个后台子代理任务已全部结束",
+-            displayPrompt: "[后台任务通知] 以下 1 个后台子代理任务已全部结束",
++            prompt: "[后台任务通知] 以下 1 个后台任务已全部结束（本批次均已终止）",
++            displayPrompt: "[后台任务通知] 以下 1 个后台任务已全部结束（本批次均已终止）",
+           }),
+         ]}
+         onRemove={vi.fn()}
+@@ -589,11 +589,11 @@ describe("MessageQueueBar 队列三操作（task-10 / FR-04 FR-05 FR-06）", ()
+       />,
+     );
+     // 折叠摘要：正文原样（<40 字不截断），无前缀。
+-    expect(screen.getByText("以下 1 个后台子代理任务已全部结束")).toBeTruthy();
++    expect(screen.getByText("以下 1 个后台任务已全部结束（本批次均已终止）")).toBeTruthy();
+     expect(screen.queryByText(/\[后台任务通知\]/)).toBeNull();
+     // 展开正文：同样无前缀（点击 chip 主体切换展开态）。
+     fireEvent.click(screen.getByRole("button", { name: /^等待中，/ }));
+-    expect(screen.getByText("以下 1 个后台子代理任务已全部结束")).toBeTruthy();
++    expect(screen.getByText("以下 1 个后台任务已全部结束（本批次均已终止）")).toBeTruthy();
+     expect(screen.queryByText(/\[后台任务通知\]/)).toBeNull();
+   });
+ 
+@@ -623,7 +623,7 @@ describe("MessageQueueBar 唤醒条目事件行（2026-10-21-task-wakeup-event-q
+   });
+ 
+   const WAKEUP_PROMPT =
+-    "[后台任务通知] 以下 4 个后台子代理任务已全部结束（列表中的每一个都已终止，没有仍在运行的任务）：\n- 任务「下载翻译模型」已失败（用时 00:00）\n- 任务「生产检查告警」已完成（用时 00:00）\n- 任务「宿主机与公网健康检查」已完成（用时 00:00）\n- 任务「宿主机与公网健康检查」已完成（用时 00:00）\n请逐条核对上述每个任务";
++    "[后台任务通知] 以下 4 个后台任务已全部结束（本批次均已终止）：\n- 任务「下载翻译模型」已失败（用时 00:00）\n- 任务「生产检查告警」已完成（用时 00:00）\n- 任务「宿主机与公网健康检查」已完成（用时 00:00）\n- 任务「宿主机与公网健康检查」已完成（用时 00:00）\n请逐条核对上述每个任务";
+ 
+   function makeWakeupEntry(overrides: Partial<QueueEntry> = {}): QueueEntry {
+     return makeEntry({
+@@ -663,7 +663,7 @@ describe("MessageQueueBar 唤醒条目事件行（2026-10-21-task-wakeup-event-q
+         onRetry={vi.fn()}
+       />,
+     );
+-    expect(screen.queryByText(/以下 4 个后台子代理任务已全部结束/)).toBeNull();
++    expect(screen.queryByText(/以下 4 个后台任务已全部结束/)).toBeNull();
+     fireEvent.click(screen.getByText("收到任务消息"));
+     const wakeupBody = WAKEUP_PROMPT.replace(/^\[后台任务通知\]\s*/, "");
+     expect(
+diff --git a/frontend/src/components/daemon/__tests__/runtime-session-helpers.test.tsx b/frontend/src/components/daemon/__tests__/runtime-session-helpers.test.tsx
+index 01b6847b1..caeabbd9e 100644
+--- a/frontend/src/components/daemon/__tests__/runtime-session-helpers.test.tsx
++++ b/frontend/src/components/daemon/__tests__/runtime-session-helpers.test.tsx
+@@ -702,7 +702,7 @@ describe("logsToTurns 系统通知开轮占位槽（2026-10-10-system-opened-tur
+ 
+   it("系统通知开轮 + 中途消息：prompt 保持空，消息转 user_msg 段按 ts 插入输出之间", () => {
+     const turns = logsToTurns([
+-      makeLog("n1", "run-1", "user_input", "[后台任务通知] 以下 1 个后台子代理任务已全部结束", { timestamp: TS(0) }),
++      makeLog("n1", "run-1", "user_input", "[后台任务通知] 以下 1 个后台任务已全部结束（本批次均已终止）", { timestamp: TS(0) }),
+       makeLog("o1", "run-1", "stdout", "输出甲", { timestamp: TS(60) }),
+       makeLog("t1", "run-1", "tool_call", "Read src/a.ts", { timestamp: TS(90) }),
+       makeLog("u1", "run-1", "user_input", "国际销售合同 不要动！", { timestamp: TS(120) }),
+@@ -740,7 +740,7 @@ describe("logsToTurns 系统通知开轮占位槽（2026-10-10-system-opened-tur
+     // 段模型——进度视图不显示「上下文注入（N 字，已随消息发送）」卡（该文案
+     // 对纯系统通知本就不符）；真实前导（【影子直聊】等）仍照旧建段（上方用例）。
+     const turns = logsToTurns([
+-      makeLog("n1", "run-1", "user_input", "[后台任务通知] 以下 1 个后台子代理任务已全部结束", { timestamp: TS(0) }),
++      makeLog("n1", "run-1", "user_input", "[后台任务通知] 以下 1 个后台任务已全部结束（本批次均已终止）", { timestamp: TS(0) }),
+       makeLog("o1", "run-1", "stdout", "正文", { timestamp: TS(30) }),
+     ]);
+     const turn = turns[0]!;
+@@ -775,7 +775,7 @@ describe("logsToTurns 轮触发溯源段（2026-10-22-turn-trigger-generalize）
+         "n1",
+         "run-1",
+         "user_input",
+-        "[后台任务通知] 以下 1 个后台子代理任务已全部结束（列表中的每一个都已终止，没有仍在运行的任务）：\n- 任务「调研 sgm」已完成（用时 06:26）。结果摘要：调研完成（task_id: t1，如需完整输出可调用 TaskOutput 查询，block=false）",
++        "[后台任务通知] 以下 1 个后台任务已全部结束（本批次均已终止）：\n- 任务「调研 sgm」已完成（用时 06:26）。结果摘要：调研完成（task_id: t1，如需完整输出可调用 TaskOutput 查询，block=false）",
+         { timestamp: TS(0) },
+       ),
+       makeLog("o1", "run-1", "stdout", "汇报正文", { timestamp: TS(30) }),
+diff --git a/frontend/src/components/daemon/__tests__/session-change-files-hover.test.tsx b/frontend/src/components/daemon/__tests__/session-change-files-hover.test.tsx
+index b525b4a1c..6cd185c25 100644
+--- a/frontend/src/components/daemon/__tests__/session-change-files-hover.test.tsx
++++ b/frontend/src/components/daemon/__tests__/session-change-files-hover.test.tsx
+@@ -68,8 +68,14 @@ const archivedOne = change({
+   location: "archive",
+ });
+ 
+-function mockData(data: ChangeSummary[] | undefined) {
+-  mockedHook.mockReturnValue({ data } as ReturnType<typeof useSessionChanges>);
++// refetch 缺省补 noop（2026-10-27-ghost-spec-binding-fix 评审 P2）：组件打开沿
++// 会 void refetch()，mock 缺该键 → 未捕获 TypeError（用例仍过但 vitest 退出码 1，
++// CI 红）。显式传入时用调用方的 spy（FR-09 断言 refetch 次数）。
++function mockData(data: ChangeSummary[] | undefined, refetch?: ReturnType<typeof vi.fn>) {
++  mockedHook.mockReturnValue({
++    data,
++    refetch: refetch ?? vi.fn().mockResolvedValue(undefined),
++  } as unknown as ReturnType<typeof useSessionChanges>);
+ }
+ 
+ /** 打开下拉：2026-10-16-session-pill-dock-drag 起 click 触发（hover 不再弹）。 */
+@@ -268,6 +274,34 @@ describe("SessionChangeFilesHover（2026-10-13-session-change-files-hover task-0
+     // 徽标计数 = 进行中变更数
+     expect(screen.getByTestId("session-change-count").textContent).toBe("1");
+   });
++
++  // ── FR-09（2026-10-27-ghost-spec-binding-fix）：打开沿立即 refetch ─────────
++
++  it("打开下拉时立即 refetch（staleTime 窗口内缓存旧值也强制拉新）", async () => {
++    const refetch = vi.fn().mockResolvedValue(undefined);
++    mockData([activeThin], refetch);
++    render(<SessionChangeFilesHover workspaceId="ws-1" sessionId="s-1" />);
++    expect(refetch).not.toHaveBeenCalled();
++
++    await openPopover();
++    expect(refetch).toHaveBeenCalledTimes(1);
++  });
++
++  it("点列表项打开详情弹窗时立即 refetch；关闭下拉（收起沿）不触发", async () => {
++    const refetch = vi.fn().mockResolvedValue(undefined);
++    mockData([activeThin, archivedOne], refetch);
++    render(<SessionChangeFilesHover workspaceId="ws-1" sessionId="s-1" />);
++    await openPopover();
++    expect(refetch).toHaveBeenCalledTimes(1); // 下拉打开沿
++
++    fireEvent.click(screen.getByTestId("session-change-item-2026-10-13-hover-demo"));
++    await screen.findByTestId("change-file-tree-c-1");
++    expect(refetch).toHaveBeenCalledTimes(2); // 弹窗打开沿
++
++    // 收起沿：关闭弹窗后仅此前的 2 次，无额外触发
++    fireEvent.keyDown(document, { key: "Escape" });
++    expect(refetch).toHaveBeenCalledTimes(2);
++  });
+ });
+ 
+ // ── 2026-10-26-session-change-progress-hover task-10：进度展示接线 ───────────
+diff --git a/frontend/src/components/daemon/__tests__/session-log-assembler.test.ts b/frontend/src/components/daemon/__tests__/session-log-assembler.test.ts
+index 92083c319..66439bca6 100644
+--- a/frontend/src/components/daemon/__tests__/session-log-assembler.test.ts
++++ b/frontend/src/components/daemon/__tests__/session-log-assembler.test.ts
+@@ -1247,6 +1247,10 @@ describe("extractPreambleText", () => {
+ // ── 2026-10-13-session-taskwakeup-hide：TASK_WAKEUP 注入判定（单一谓词源）──
+ describe("isTaskWakeupInjection（2026-10-13-session-taskwakeup-hide）", () => {
+   it("[后台任务通知] 前缀（含前导空白）→ true；普通消息与真实前导 → false", () => {
++    // 2026-10-27-task-wakeup-precision-fix 后新文案（后台任务/本批次均已终止）。
++    expect(isTaskWakeupInjection("[后台任务通知] 以下 1 个后台任务已全部结束（本批次均已终止）")).toBe(true);
++    // 旧 daemon 文案（2026-10-27 前「后台子代理任务」）存量历史行同样识别——
++    // 判定锚是 [后台任务通知] 前缀，头部文案新旧不敏感。
+     expect(isTaskWakeupInjection("[后台任务通知] 以下 1 个后台子代理任务已全部结束")).toBe(true);
+     expect(isTaskWakeupInjection("  [后台任务通知] 空白容忍")).toBe(true);
+     expect(isTaskWakeupInjection("帮我修下登录页")).toBe(false);
+diff --git a/frontend/src/components/daemon/__tests__/session-preview-integration.test.tsx b/frontend/src/components/daemon/__tests__/session-preview-integration.test.tsx
+index 340178bfa..6af0a2b13 100644
+--- a/frontend/src/components/daemon/__tests__/session-preview-integration.test.tsx
++++ b/frontend/src/components/daemon/__tests__/session-preview-integration.test.tsx
+@@ -194,7 +194,7 @@ describe("消息流预览卡集成（FR-01 / FR-03 / FR-04）", () => {
+       session_id: "s1",
+       total_turns: 2,
+       items: [
+-        { run_id: "run-x", seq: 1, created_at: "2026-08-26T10:00:00.0Z", started_at: "2026-08-26T10:00:00.0Z", status: "failed", error_code: "provider_quota_exceeded", prompt_summary: "[后台任务通知] 以下 2 个后台子代理任务已全部结束" },
++        { run_id: "run-x", seq: 1, created_at: "2026-08-26T10:00:00.0Z", started_at: "2026-08-26T10:00:00.0Z", status: "failed", error_code: "provider_quota_exceeded", prompt_summary: "[后台任务通知] 以下 2 个后台任务已全部结束（本批次均已终止）" },
+         { run_id: "run-c", seq: 2, created_at: "2026-08-26T10:10:00.0Z", started_at: "2026-08-26T10:10:00.0Z", status: "completed", prompt_summary: "第三轮提问摘要" },
+       ],
+     });
+@@ -209,7 +209,7 @@ describe("消息流预览卡集成（FR-01 / FR-03 / FR-04）", () => {
+           // logsToTurns 产出 prompt/segments/output 三空（旧口径被判零正文 →
+           // 点击无反应；新口径 outline failed 放行 → 空块 + 失败卡）。
+           return [
+-            { id: "log-run-x-u", run_id: "run-x", timestamp: "2026-08-26T10:00:30.0Z", channel: "user_input", content_redacted: "[后台任务通知] 以下 2 个后台子代理任务已全部结束（列表中的每一个都已终止）" },
++            { id: "log-run-x-u", run_id: "run-x", timestamp: "2026-08-26T10:00:30.0Z", channel: "user_input", content_redacted: "[后台任务通知] 以下 2 个后台任务已全部结束（本批次均已终止）" },
+             { id: "log-run-x-e", run_id: "run-x", timestamp: "2026-08-26T10:01:00.0Z", channel: "stderr", content_redacted: "[ASSISTANT] API Error: Request rejected (429) · 已达到 5 小时的使用上限" },
+           ];
+         }
+diff --git a/frontend/src/components/daemon/__tests__/turn-segment-views.test.tsx b/frontend/src/components/daemon/__tests__/turn-segment-views.test.tsx
+index 63d831c21..8dd1ecfc2 100644
+--- a/frontend/src/components/daemon/__tests__/turn-segment-views.test.tsx
++++ b/frontend/src/components/daemon/__tests__/turn-segment-views.test.tsx
+@@ -1726,7 +1726,7 @@ describe("CompactSegmentView / CompactStatusRowView / CompactNoticeChip（ql-202
+ // 2026-10-22-turn-trigger-generalize：轮触发溯源行（原 TaskWakeupNoticeView 泛化）。
+ describe("TurnTriggerView（2026-10-22-turn-trigger-generalize）", () => {
+   const WAKEUP_TEXT =
+-    "[后台任务通知] 以下 1 个后台子代理任务已全部结束（列表中的每一个都已终止，没有仍在运行的任务）：\n- 任务「调研 sgm」已完成（用时 06:26）。结果摘要：调研完成（task_id: t1，如需完整输出可调用 TaskOutput 查询，block=false）";
++    "[后台任务通知] 以下 1 个后台任务已全部结束（本批次均已终止）：\n- 任务「调研 sgm」已完成（用时 06:26）。结果摘要：调研完成（task_id: t1，如需完整输出可调用 TaskOutput 查询，block=false）";
+ 
+   const wakeupSeg: Extract<TurnSegment, { kind: "turn_trigger" }> = {
+     kind: "turn_trigger",
+diff --git a/frontend/src/components/daemon/session-change-files-hover.tsx b/frontend/src/components/daemon/session-change-files-hover.tsx
+index a3e636b69..e77f22086 100644
+--- a/frontend/src/components/daemon/session-change-files-hover.tsx
++++ b/frontend/src/components/daemon/session-change-files-hover.tsx
+@@ -116,10 +116,18 @@ export function SessionChangeFilesHover({
+   const [archiveExpanded, setArchiveExpanded] = useState(false);
+   const [dialogChangeId, setDialogChangeId] = useState<string | null>(null);
+ 
+-  const { data } = useSessionChanges(workspaceId, sessionId, {
++  // FR-09（2026-10-27-ghost-spec-binding-fix，用户实测「打开还显示旧数据」）：
++  // 打开沿立即 refetch——staleTime 窗口内的缓存旧值也强制拉新（interval 档位
++  // 切换要等下一个 tick 才首跳，不能依赖）。下拉与详情弹窗两个打开入口都拉。
++  const { data, refetch } = useSessionChanges(workspaceId, sessionId, {
+     active: popoverOpen || dialogChangeId !== null,
+   });
+ 
++  const reopenWithFreshData = (open: boolean) => {
++    setPopoverOpen(open);
++    if (open) void refetch();
++  };
++
+   const { active, archived } = useMemo(() => splitByArchive(data ?? []), [data]);
+ 
+   // 查询未就绪（undefined）或确无关联变更：不渲染入口，不占位（FR-02）。
+@@ -128,6 +136,7 @@ export function SessionChangeFilesHover({
+   const openDialog = (changeId: string) => {
+     setPopoverOpen(false);
+     setDialogChangeId(changeId);
++    void refetch();
+   };
+ 
+   const renderItem = (c: ChangeSummary) => (
+@@ -203,7 +212,7 @@ export function SessionChangeFilesHover({
+     <div data-testid="session-change-files-hover">
+       <Popover
+         open={popoverOpen}
+-        onOpenChange={setPopoverOpen}
++        onOpenChange={reopenWithFreshData}
+         trigger="click"
+         placement="topRight"
+         content={popoverContent}
+@@ -212,7 +221,10 @@ export function SessionChangeFilesHover({
+         <Button
+           variant="outline"
+           size="sm"
+-          className="gap-1.5 rounded-lg shadow-sm"
++          // 玻璃效果（2026-10-27-mobile-chat-visual-round2 / 用户指定「变更/决策两块
++          // 悬浮玻璃化」）：bg-card/75+blur-md 覆盖 outline 变体实底——pill 悬浮于
++          // 聊天时间线上，背后消息滚动呈朦胧玻璃质感。
++          className="gap-1.5 rounded-lg bg-card/75 shadow-sm backdrop-blur-md"
+           aria-label="查看会话关联的变更文件"
+         >
+           <FolderGit2 className="h-3.5 w-3.5" aria-hidden />
+diff --git a/frontend/src/components/floating/floating-session-host.tsx b/frontend/src/components/floating/floating-session-host.tsx
+index a0398de3e..a58739e74 100644
+--- a/frontend/src/components/floating/floating-session-host.tsx
++++ b/frontend/src/components/floating/floating-session-host.tsx
+@@ -1088,7 +1088,10 @@ export function FloatingSessionHost() {
+           data-open={open ? "true" : "false"}
+           data-side={side}
+           className={cn(
+-            "fixed inset-y-0 z-50 flex w-[min(960px,92vw)] flex-col bg-card shadow-lg transition-transform duration-300",
++            // 玻璃窗体（2026-10-27-mobile-chat-visual-round2 / 用户指定「玻璃效果
++            // PC 端可同步」）：悬浮窗浮于页面内容之上（fixed z-50），bg-card/85+
++            // blur-md 让背后页面内容呈朦胧玻璃质感而非生硬实底遮挡。
++            "fixed inset-y-0 z-50 flex w-[min(960px,92vw)] flex-col bg-card/85 shadow-lg backdrop-blur-md transition-transform duration-300",
+             side === "right"
+               ? cn("right-0 border-l border-border", open ? "translate-x-0" : "translate-x-full")
+               : cn("left-0 border-r border-border", open ? "translate-x-0" : "-translate-x-full"),
+diff --git a/frontend/src/components/mobile/mobile-tab-bar.test.tsx b/frontend/src/components/mobile/mobile-tab-bar.test.tsx
+index e9e8596ef..71dcbe67a 100644
+--- a/frontend/src/components/mobile/mobile-tab-bar.test.tsx
++++ b/frontend/src/components/mobile/mobile-tab-bar.test.tsx
+@@ -69,20 +69,20 @@ describe("MobileTabBar 渲染", () => {
+     expect(MOBILE_TABS).toHaveLength(5);
+   });
+ 
+-  it("悬浮胶囊形态（quick-a4939946 + task-01 遮挡治理）：胶囊容器圆角+实底不透明+离底占位", () => {
++  it("悬浮胶囊形态（quick-a4939946 + visual-round2 玻璃效果）：胶囊容器圆角+玻璃半透明+离底占位", () => {
+     render(<MobileTabBar />);
+     const nav = screen.getByTestId("mobile-tab-bar");
+     // 外层 nav：离底 12px + 安全区占位（不再贴底通栏）
+     expect(nav.className).toContain("bottom-0");
+     expect(nav.className).toContain("px-3");
+     expect(nav.className).toContain("pb-[calc(env(safe-area-inset-bottom)+12px)]");
+-    // 内层 ul：圆角胶囊 + 实底不透明（task-01：bg-card/95+毛玻璃滚动透字，改实底）
++    // 内层 ul：圆角胶囊 + 玻璃形态（visual-round2 用户指定「小透明+玻璃感」：
++    // bg-card/75+blur-md——中模糊下穿行内容呈朦胧块；task-01 实底契约作废）
+     const ul = nav.querySelector("ul");
+     expect(ul).not.toBeNull();
+     expect(ul?.className).toContain("rounded-[var(--radius-lg)]");
+-    expect(ul?.className).toContain("bg-card");
+-    expect(ul?.className).not.toContain("bg-card/95");
+-    expect(ul?.className).not.toContain("backdrop-blur");
++    expect(ul?.className).toContain("bg-card/75");
++    expect(ul?.className).toContain("backdrop-blur-md");
+     expect(ul?.className).toContain("max-w-[432px]");
+   });
+ 
+diff --git a/frontend/src/components/mobile/mobile-tab-bar.tsx b/frontend/src/components/mobile/mobile-tab-bar.tsx
+index db37856ac..ee1058c1e 100644
+--- a/frontend/src/components/mobile/mobile-tab-bar.tsx
++++ b/frontend/src/components/mobile/mobile-tab-bar.tsx
+@@ -114,11 +114,13 @@ export function MobileTabBar({ activeTab }: MobileTabBarProps) {
+       // 悬浮胶囊（quick-a4939946，对齐用户参考效果图）：贴底通栏边框式改为
+       // 离底 12px 的圆角胶囊，内容从胶囊下方穿行（外壳 main 底部避让预留占位，
+       // 2026-10-26-mobile-four-page-layout-fix task-01 起为 calc(76px+safe-area)）；
+-      // bottom 安全区只作间距不再撑背景。胶囊底色实底不透明（task-01：原 bg-card/95
+-      // + 毛玻璃在长列表滚动时透字，遮挡观感差；全不透明后 blur 无视觉意义一并移除）。
++      // bottom 安全区只作间距不再撑背景。
++      // 玻璃效果（2026-10-27-mobile-chat-visual-round2 / 用户指定「小透明+玻璃感」）：
++      // task-01 曾因透字改实底——本轮按用户新取向回玻璃形态，bg-card/75+blur-md
++      // （中模糊下穿行内容呈朦胧块而非清晰透字，透明度与模糊度的平衡点）。
+       className="fixed inset-x-0 bottom-0 z-40 px-3 pb-[calc(env(safe-area-inset-bottom)+12px)]"
+     >
+-      <ul className="mx-auto flex w-full max-w-[432px] items-stretch rounded-[var(--radius-lg)] border border-border bg-card shadow-[var(--shadow-lg)]">
++      <ul className="mx-auto flex w-full max-w-[432px] items-stretch rounded-[var(--radius-lg)] border border-border bg-card/75 shadow-[var(--shadow-lg)] backdrop-blur-md">
+         {MOBILE_TABS.map((tab) => {
+           const active = activeTab ? activeTab === tab.key : isTabActive(tab, pathname);
+           const Icon = tab.icon;
+diff --git a/frontend/src/components/mobile/mobile-top-bar.tsx b/frontend/src/components/mobile/mobile-top-bar.tsx
+index 8b0eaff3c..99264625e 100644
+--- a/frontend/src/components/mobile/mobile-top-bar.tsx
++++ b/frontend/src/components/mobile/mobile-top-bar.tsx
+@@ -40,7 +40,9 @@ export function MobileTopBar({ title, onBack, actions }: MobileTopBarProps) {
+   return (
+     <header
+       data-testid="mobile-top-bar"
+-      className="sticky top-0 z-30 flex min-h-[44px] shrink-0 items-center gap-1 border-b border-border bg-card px-1 pt-[env(safe-area-inset-top)] shadow-[var(--shadow-sm)]"
++      // 玻璃顶栏（2026-10-27-mobile-chat-visual-round2 / 用户指定悬浮件玻璃化）：
++      // bg-card/75+blur-md——内容上滑穿行时顶栏呈玻璃朦胧而非生硬实底。
++      className="sticky top-0 z-30 flex min-h-[44px] shrink-0 items-center gap-1 border-b border-border bg-card/75 px-1 pt-[env(safe-area-inset-top)] shadow-[var(--shadow-sm)] backdrop-blur-md"
+     >
+       {onBack !== undefined && (
+         <button
+diff --git a/frontend/src/components/sessions/session-config-bar.tsx b/frontend/src/components/sessions/session-config-bar.tsx
+index 6073167d1..7b248ff37 100644
+--- a/frontend/src/components/sessions/session-config-bar.tsx
++++ b/frontend/src/components/sessions/session-config-bar.tsx
+@@ -1254,8 +1254,11 @@ export function SessionConfigBar({
+             设置
+           </button>
+         )}
+-        {/* ql-20260909-006：行尾插槽（CtxUsageBar 圆环+额度胶囊挪此处；不传零占位）。 */}
+-        {trailing != null ? (
++        {/* ql-20260909-006：行尾插槽（CtxUsageBar 圆环+额度胶囊挪此处；不传零占位）。
++            mobile 不渲染（2026-10-27-mobile-chat-visual-round2 / 用户反馈输入区按钮
++            拥挤）——用量功能仍在头部 ⋯ 菜单「会话用量」区（ql-20260915-011 先例），
++            行尾徽章在手机上与供应商/模型/设置挤一行是主要拥挤源。desktop 照旧。 */}
++        {trailing != null && !mobile ? (
+           <span className="inline-flex shrink-0 items-center">{trailing}</span>
+         ) : null}
+       </div>
+diff --git a/frontend/src/lib/__tests__/session-changes-query.test.tsx b/frontend/src/lib/__tests__/session-changes-query.test.tsx
+new file mode 100644
+index 000000000..e5be134ad
+--- /dev/null
++++ b/frontend/src/lib/__tests__/session-changes-query.test.tsx
+@@ -0,0 +1,73 @@
++/**
++ * useSessionChanges 轮询策略单测
++ * （2026-10-27-ghost-spec-binding-fix FR-08：弹窗实时性——用户实测反馈「真实
++ * 变更创建/失效后入口徽标不更新、要刷新页面才回显」的根因是关闭态 0 轮询）。
++ *
++ * 覆盖：
++ *   1. 关闭态（active 缺省）30s 慢档轮询——15s 不触发、30s 触发第二次拉取；
++ *   2. 打开态（active: true）15s 快档轮询——15s 即触发第二次拉取。
++ *
++ * 打开沿「立即 refetch」（FR-09）是组件层接线（staleTime 缓存窗口内强制拉新），
++ * 在 session-change-files-hover.test.tsx 以 refetch spy 断言，不在此重复。
++ */
++import { describe, expect, it, vi, beforeEach, afterEach } from "vitest";
++import { renderHook } from "@testing-library/react";
++import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
++import type { ReactNode } from "react";
++
++import { useSessionChanges } from "@/lib/changes";
++
++const apiMock = vi.hoisted(() => ({ fetch: vi.fn() }));
++vi.mock("@/lib/api", () => ({
++  ApiError: class extends Error {},
++  apiFetch: (...args: unknown[]) => apiMock.fetch(...args),
++}));
++
++function setup() {
++  const client = new QueryClient({
++    defaultOptions: { queries: { retry: false } },
++  });
++  const wrapper = ({ children }: { children: ReactNode }) => (
++    <QueryClientProvider client={client}>{children}</QueryClientProvider>
++  );
++  return { wrapper };
++}
++
++beforeEach(() => {
++  vi.useFakeTimers();
++  apiMock.fetch.mockReset();
++  apiMock.fetch.mockResolvedValue([]);
++});
++
++afterEach(() => {
++  vi.useRealTimers();
++});
++
++describe("useSessionChanges 轮询双档（FR-08）", () => {
++  it("关闭态 30s 慢档：15s 不触发，35s 内触发第二次拉取", async () => {
++    const { wrapper } = setup();
++    renderHook(() => useSessionChanges("ws-1", "s-1"), { wrapper });
++
++    // advanceTimersByTimeAsync 自带微任务 flush（首拉 fetch resolve → state 更新）。
++    // 不用 waitFor：其内部也依赖 timer，与 fake timers 互相等待会死锁。
++    await vi.advanceTimersByTimeAsync(0);
++    expect(apiMock.fetch).toHaveBeenCalledTimes(1);
++
++    await vi.advanceTimersByTimeAsync(15_000);
++    expect(apiMock.fetch).toHaveBeenCalledTimes(1); // 15s 未到慢档
++
++    await vi.advanceTimersByTimeAsync(20_000); // 累计 35s（interval 自 fetch 完成起算，留余量）
++    expect(apiMock.fetch).toHaveBeenCalledTimes(2);
++  });
++
++  it("打开态 15s 快档：15s 即触发第二次拉取", async () => {
++    const { wrapper } = setup();
++    renderHook(() => useSessionChanges("ws-1", "s-1", { active: true }), { wrapper });
++
++    await vi.advanceTimersByTimeAsync(0);
++    expect(apiMock.fetch).toHaveBeenCalledTimes(1);
++
++    await vi.advanceTimersByTimeAsync(20_000); // > 快档 15s
++    expect(apiMock.fetch).toHaveBeenCalledTimes(2);
++  });
++});
+diff --git a/frontend/src/lib/changes.ts b/frontend/src/lib/changes.ts
+index ba26c597f..fb7c68c2c 100644
+--- a/frontend/src/lib/changes.ts
++++ b/frontend/src/lib/changes.ts
+@@ -143,8 +143,13 @@ export function listSessionChanges(workspaceId: string, sessionId: string) {
+ /**
+  * 会话关联变更列表 hook（悬浮面板消费）。
+  *
+- * - `active` 为真（悬浮下拉/弹窗打开）时 15s 轮询刷新（FR-05——跑动中的变更
+- *   状态迁移/新增变更低频变化），关闭即停（不后台空转）；
++ * - 轮询双档（2026-10-27-ghost-spec-binding-fix FR-08，用户实测反馈：真实变更
++ *   创建/失效后入口徽标不更新、要刷新页面才回显——关闭态 0 轮询滞留旧值）：
++ *   `active` 为真（悬浮下拉/弹窗打开）15s 快档（跑动中变更状态迁移较频繁）；
++ *   关闭态 30s 慢档保底（挂载面单实例 + limit 100 轻 JOIN 接口，请求量可忽略）
++ *   ——CLI 侧新建/归档变更后最迟 30s 自动回显，无需刷新页面；
++ * - 打开瞬间的「所见即最新」由组件层 refetch 承担（FR-09：staleTime 窗口内
++ *   缓存也强制拉新，interval 档位切换不触发即时请求）；
+  * - staleTime 10s：入口显隐/徽标数需要较新数据但不必秒级；
+  * - placeholderData 保上次数据：列表短暂 refetch 不闪空。
+  */
+@@ -157,7 +162,7 @@ export function useSessionChanges(
+     queryKey: queryKeys.sessionChanges.list(workspaceId, sessionId),
+     queryFn: () => listSessionChanges(workspaceId, sessionId),
+     staleTime: 10_000,
+-    refetchInterval: options?.active ? 15_000 : false,
++    refetchInterval: options?.active ? 15_000 : 30_000,
+     placeholderData: (prev) => prev,
+   });
+ }
+diff --git a/sillyhub-daemon/src/daemon.ts b/sillyhub-daemon/src/daemon.ts
+index b81ba5a52..8e1d50c2a 100644
+--- a/sillyhub-daemon/src/daemon.ts
++++ b/sillyhub-daemon/src/daemon.ts
+@@ -1553,6 +1553,35 @@ export function taskWakeupQuietThresholdMs(): number {
+   return Number.isFinite(v) && v >= 0 ? v : DEFAULT_TASK_WAKEUP_QUIET_MS;
+ }
+ 
++// 2026-10-27-task-wakeup-inject-retry：唤醒注入失败退避重试计划。原实现单发即弃
++// （catch 仅 console.error），撞后端短暂不可用窗（部署重建 502/504——2026-10-26
++// 会话 e132e9bf 实证 inject 504 DAEMON_RUNTIME_OFFLINE + 心跳 502，活跃坑
++// task-wakeup-inject-backend-relay-single-shot）即 interactive_inject_send_failed
++// 永久丢失，会话楔死至用户手动来消息。总窗 530s≈9.3min：盖住生产 compose 重建
++// （35s）至 WS 重连 reconcile（分钟级）的完整窗口。重试幂等性：backend 忙轮排队
++// 合并（_merge_task_wakeup_prompt 恒≤1 条）+ prompt 自带「不要重复执行」指令。
++// 部署级进程行为，沿 SILLYHUB_* env 阀面不落 local.yaml（对齐上方 QUIET_MS 惯例）。
++export const DEFAULT_TASK_WAKEUP_RETRY_DELAYS_MS: readonly number[] = [
++  5_000, 15_000, 30_000, 60_000, 120_000, 300_000,
++];
++
++/**
++ * 读取唤醒注入退避重试计划（env SILLYHUB_TASK_WAKEUP_RETRY_DELAYS_MS，逗号分隔
++ * 毫秒列表）。未设→默认计划；`0`/空串→`[]` 完全禁用（单发即弃旧行为，止血开关
++ * ——对齐 QUIET_MS 总关闭阀惯例）；逐项 parseInt，非正整数项忽略；全非法→默认。
++ * 逐次读取便于测试覆写与运行期生效。
++ */
++export function taskWakeupRetryDelaysMs(): number[] {
++  const raw = process.env.SILLYHUB_TASK_WAKEUP_RETRY_DELAYS_MS;
++  if (raw === undefined) return [...DEFAULT_TASK_WAKEUP_RETRY_DELAYS_MS];
++  if (raw === '' || raw.trim() === '0') return [];
++  const parsed = raw
++    .split(',')
++    .map((item) => Number.parseInt(item.trim(), 10))
++    .filter((v) => Number.isFinite(v) && v > 0);
++  return parsed.length > 0 ? parsed : [...DEFAULT_TASK_WAKEUP_RETRY_DELAYS_MS];
++}
++
+ // ── task-08（design A5 / FR-04）：recover 网络类失败重试退避 + 超龄清理常量 ────
+ //
+ // _recoverOneSession 遇 recover HTTP 网络类失败（请求未达/超时/5xx——HubHttpError
+diff --git a/sillyhub-daemon/src/interactive/session-manager/background-tasks.ts b/sillyhub-daemon/src/interactive/session-manager/background-tasks.ts
+index 28545f440..e5645cd26 100644
+--- a/sillyhub-daemon/src/interactive/session-manager/background-tasks.ts
++++ b/sillyhub-daemon/src/interactive/session-manager/background-tasks.ts
+@@ -20,7 +20,7 @@
+ 
+ import type { AgentEvent } from '../../types.js';
+ import type { SessionState } from '../types.js';
+-import { taskWakeupQuietThresholdMs } from '../../daemon.js';
++import { taskWakeupQuietThresholdMs, taskWakeupRetryDelaysMs } from '../../daemon.js';
+ import { eventMetaOf, numOf, strOf } from './helpers.js';
+ import type { BackgroundTaskInfo, SessionManagerCore } from './types.js';
+ 
+@@ -493,20 +493,63 @@ export function scheduleTaskWakeup(
+       if (!e || e.lines.length === 0) return;
+       // ql-20260827-008：头部明示总数+全部结束、尾部强制逐条核对——实证主代理
+       // 曾只读第一行漏报后续任务、并凭历史执念声称"仍在等待"（会话 2fe664d9）。
++      // 2026-10-27-task-wakeup-precision-fix FR-05：「后台子代理任务」改「后台
++      // 任务」（通知对前台 Bash 命令同样触发，「子代理」失实）；「没有仍在运行
++      // 的任务」改「本批次均已终止」（旧文案与会话任务面板「运行中 N」字面
++      // 冲突——指本批次，非全会话）。backend _merge_task_wakeup_prompt 合并
++      // 正则同步兼容形，前端识别锚 [后台任务通知] 前缀不变。
+       const prompt =
+-        `[后台任务通知] 以下 ${e.lines.length} 个后台子代理任务已全部结束` +
+-        '（列表中的每一个都已终止，没有仍在运行的任务）：\n' +
++        `[后台任务通知] 以下 ${e.lines.length} 个后台任务已全部结束` +
++        '（本批次均已终止）：\n' +
+         e.lines.join('\n') +
+         `\n请逐条核对上述每个任务（共 ${e.lines.length} 个）的名称与结果，一次性向用户完整汇报（综合归纳，不要逐字照抄，不要遗漏任何一个任务）；` +
+         '禁止声称仍在等待任何任务；汇报完即结束本轮；不要重复执行这些任务；此消息为系统通知，无需向用户复述本通知本身。';
++      // 2026-10-27-task-wakeup-inject-retry：注入单发即弃改退避重试——原实现
++      // catch 仅 console.error，撞后端短暂不可用窗（部署重建 502/504，e132e9bf
++      // 实证 inject 504 DAEMON_RUNTIME_OFFLINE）即 interactive_inject_send_failed
++      // 永久丢失，会话楔死至用户手动来消息（活跃坑
++      // task-wakeup-inject-backend-relay-single-shot）。重试计划见
++      // taskWakeupRetryDelaysMs（默认 6 档总窗约 9.3min；env 0/空=禁用回单发）。
++      // 成功（含 queue_when_busy 排队）即止；退避等待后发现会话已从 _store 消失
++      // （终态清理 lifecycle.ts _store.delete）即中止——不对已终态会话注入；
++      // 耗尽 error 留痕放弃。fire-and-forget 语义不变（循环整体不抛）。
+       void (async () => {
+-        try {
+-          await cb(sessionId, prompt);
+-        } catch (err) {
+-          console.error('[session-manager] task wakeup inject failed', {
+-            sessionId,
+-            error: err instanceof Error ? err.message : String(err),
+-          });
++        const delays = taskWakeupRetryDelaysMs();
++        for (let attempt = 1; ; attempt++) {
++          try {
++            await cb(sessionId, prompt);
++            return;
++          } catch (err) {
++            const errText = err instanceof Error ? err.message : String(err);
++            const retryIndex = attempt - 1;
++            if (retryIndex >= delays.length) {
++              console.error(
++                '[session-manager] task wakeup inject failed (retries exhausted)',
++                { sessionId, attempts: attempt, error: errText },
++              );
++              return;
++            }
++            const waitMs = delays[retryIndex]!;
++            console.warn('[session-manager] task wakeup inject failed, retry scheduled', {
++              sessionId,
++              attempt,
++              next_retry_in_ms: waitMs,
++              error: errText,
++            });
++            await new Promise<void>((resolve) => {
++              const t = setTimeout(resolve, waitMs);
++              t.unref?.();
++            });
++            // 退避等待后、发起下一次注入前查会话存活（FR-02）——终态清理路径
++            // 已 _store.delete，此时注入只会在 backend 侧撞已终态会话空转重试。
++            if (!mgr._store.has(sessionId)) {
++              console.warn(
++                '[session-manager] task wakeup inject retry aborted: session gone',
++                { sessionId, attempts: attempt },
++              );
++              return;
++            }
++          }
+         }
+       })();
+     }, 2000);
+diff --git a/sillyhub-daemon/src/turn-phase-observability.ts b/sillyhub-daemon/src/turn-phase-observability.ts
+index adc742fb4..67f160d68 100644
+--- a/sillyhub-daemon/src/turn-phase-observability.ts
++++ b/sillyhub-daemon/src/turn-phase-observability.ts
+@@ -27,6 +27,8 @@ export type PhaseLogFn = (event: string, kv?: Record<string, unknown>) => void;
+ const WARN_ONCE_MAX = 512;
+ 
+ const warnedKeys = new Set<string>();
++// 2026-10-27-task-wakeup-inject-retry：notePhaseEmit 防重键（同上限同惯例）。
++const notedKeys = new Set<string>();
+ 
+ /** 观测开关（逐次读取——运行期生效/测试可覆写，对齐 turnStartWatchdogMs）。 */
+ export function turnPhaseTraceEnabled(): boolean {
+@@ -43,7 +45,15 @@ const consoleWarn: PhaseLogFn = (event, kv) => {
+   console.warn('[turn-phase]', `[${event}]`, ...(kv ? Object.entries(kv).map(([k, v]) => `${k}=${v}`) : []));
+ };
+ 
+-/** 发出点到达记点：TRACE 开时 info（默认静默）。 */
++/**
++ * 发出点到达记点：TRACE 开时 info（默认静默）。
++ *
++ * 2026-10-27-task-wakeup-inject-retry：per (point, sessionId, runId) 防重——
++ * session-manager 侧每 envelope 无状态直发（D-013④ 设计，防重在 daemon 层只拦
++ * notify），TRACE 开启时记点曾随 envelope 数同秒刷 30+ 行（daemon.log
++ * 323219-323256 实证）。断链定位配对只需首记（两点间缺一即锁定断链环节），
++ * 同键后续静默；集合有界 512 逐出最旧（对齐 warnOncePhaseFailure 惯例）。
++ */
+ export function notePhaseEmit(
+   point: string,
+   sessionId: string,
+@@ -52,6 +62,13 @@ export function notePhaseEmit(
+   log: PhaseLogFn = consoleInfo,
+ ): void {
+   if (!turnPhaseTraceEnabled()) return;
++  const key = `${point}:${sessionId}:${runId}`;
++  if (notedKeys.has(key)) return;
++  notedKeys.add(key);
++  if (notedKeys.size > WARN_ONCE_MAX) {
++    const oldest = notedKeys.values().next().value;
++    if (oldest !== undefined) notedKeys.delete(oldest);
++  }
+   log('turn_phase_emit', { point, session_id: sessionId, run_id: runId, phase });
+ }
+ 
+@@ -83,4 +100,5 @@ export function warnOncePhaseFailure(
+ /** 测试清理（生产不调用——daemon 重启集合自然清零）。 */
+ export function resetTurnPhaseObservabilityForTest(): void {
+   warnedKeys.clear();
++  notedKeys.clear();
+ }
+diff --git a/sillyhub-daemon/tests/interactive/task-lifecycle.test.ts b/sillyhub-daemon/tests/interactive/task-lifecycle.test.ts
+index ca5f03763..4ba1ce091 100644
+--- a/sillyhub-daemon/tests/interactive/task-lifecycle.test.ts
++++ b/sillyhub-daemon/tests/interactive/task-lifecycle.test.ts
+@@ -740,7 +740,9 @@ describe('task 终态注入唤醒（2026-10-21-task-wakeup-restore）', () => {
+       expect(wakeup).toHaveBeenCalledTimes(1);
+       const prompt = String(wakeup.mock.calls[0]![1] as string);
+       expect(prompt.startsWith('[后台任务通知]')).toBe(true);
+-      expect(prompt).toContain('以下 1 个后台子代理任务已全部结束');
++      expect(prompt).toContain('以下 1 个后台任务已全部结束');
++      expect(prompt).toContain('（本批次均已终止）');
++      expect(prompt).not.toContain('后台子代理任务');
+       expect(prompt).toContain('任务「调研 sgm 隐患排查任务生成」已完成');
+       expect(prompt).toContain('（用时 06:26）');
+       expect(prompt).toContain('结果摘要：调研完成。核心是周期性自定义检查模块');
+@@ -768,7 +770,7 @@ describe('task 终态注入唤醒（2026-10-21-task-wakeup-restore）', () => {
+       await vi.advanceTimersByTimeAsync(3000);
+       expect(wakeup).toHaveBeenCalledTimes(1);
+       const prompt = String(wakeup.mock.calls[0]![1] as string);
+-      expect(prompt).toContain('以下 2 个后台子代理任务已全部结束');
++      expect(prompt).toContain('以下 2 个后台任务已全部结束');
+       expect(prompt).toContain('任务「子代理A」已完成');
+       expect(prompt).toContain('任务「子代理B」已完成');
+       expect(prompt).toContain('共 2 个');
+@@ -1057,6 +1059,138 @@ describe('task 终态注入唤醒（2026-10-21-task-wakeup-restore）', () => {
+       vi.useRealTimers();
+     }
+   });
++
++  // ── 2026-10-27-task-wakeup-inject-retry：注入单发即弃改退避重试 ────────────
++
++  /** 重试用便捷包装：注入回调 + console warn/error 静默间谍。 */
++  function withRetrySpies(): {
++    warnSpy: ReturnType<typeof vi.spyOn>;
++    errSpy: ReturnType<typeof vi.spyOn>;
++  } {
++    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
++    const errSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
++    return { warnSpy, errSpy };
++  }
++
++  it('FR-01（retry）：首败（504 形态）后按退避计划重试至成功，恰两次注入后不再调度', async () => {
++    vi.useFakeTimers();
++    const { warnSpy, errSpy } = withRetrySpies();
++    try {
++      const { depsExtra, wakeup } = withWakeupDeps();
++      // e132e9bf 实证形态：首次注入撞 HTTP 504 DAEMON_RUNTIME_OFFLINE。
++      wakeup.mockRejectedValueOnce(
++        new Error('HTTP 504 POST https://crrcdt.ppdmq.top/api/daemon/sessions/x/inject: DAEMON_RUNTIME_OFFLINE'),
++      );
++      const h = await createHarness('sess-wr1', 'run-wr1', depsExtra);
++      await h.emitMessage(msgTaskNotification({ taskId: 'task-r1', status: 'completed', summary: '后台完成', durationMs: 61000 }));
++      // 2s debounce → 首发（失败，warn 记点 + 排 5s 退避）。
++      await vi.advanceTimersByTimeAsync(3000);
++      expect(wakeup).toHaveBeenCalledTimes(1);
++      const retryLog = warnSpy.mock.calls.find((c) => String(c[0]).includes('retry scheduled'));
++      expect(retryLog).toBeDefined();
++      expect(retryLog![1]).toMatchObject({ sessionId: 'sess-wr1', attempt: 1, next_retry_in_ms: 5000 });
++      // 5s 后第二次注入成功（store 会话仍在）→ 链终止。
++      await vi.advanceTimersByTimeAsync(5000);
++      expect(wakeup).toHaveBeenCalledTimes(2);
++      // 再前进 60s 无第三次调度（成功即止）。
++      await vi.advanceTimersByTimeAsync(60_000);
++      expect(wakeup).toHaveBeenCalledTimes(2);
++      expect(errSpy).not.toHaveBeenCalled();
++    } finally {
++      warnSpy.mockRestore();
++      errSpy.mockRestore();
++      vi.useRealTimers();
++    }
++  });
++
++  it('FR-01（retry）：恒败全重试耗尽——恰 7 次调用（首发+6 档）后 error 留痕放弃', async () => {
++    vi.useFakeTimers();
++    const { warnSpy, errSpy } = withRetrySpies();
++    try {
++      const { depsExtra, wakeup } = withWakeupDeps();
++      wakeup.mockRejectedValue(new Error('HTTP 502 Bad Gateway'));
++      const h = await createHarness('sess-wr2', 'run-wr2', depsExtra);
++      await h.emitMessage(msgTaskNotification({ taskId: 'task-r2', status: 'completed', summary: '后台完成', durationMs: 61000 }));
++      // 走完全部退避档：2s debounce + 5+15+30+60+120+300=530s。
++      await vi.advanceTimersByTimeAsync(3000);
++      await vi.advanceTimersByTimeAsync(5_000);
++      await vi.advanceTimersByTimeAsync(15_000);
++      await vi.advanceTimersByTimeAsync(30_000);
++      await vi.advanceTimersByTimeAsync(60_000);
++      await vi.advanceTimersByTimeAsync(120_000);
++      await vi.advanceTimersByTimeAsync(300_000);
++      expect(wakeup).toHaveBeenCalledTimes(7);
++      const exhaustLog = errSpy.mock.calls.find((c) => String(c[0]).includes('retries exhausted'));
++      expect(exhaustLog).toBeDefined();
++      expect(exhaustLog![1]).toMatchObject({ sessionId: 'sess-wr2', attempts: 7 });
++      // 耗尽后不再调度。
++      await vi.advanceTimersByTimeAsync(600_000);
++      expect(wakeup).toHaveBeenCalledTimes(7);
++      // 期间每档失败都有 warn 记点（6 档重试排程日志）。
++      expect(warnSpy.mock.calls.filter((c) => String(c[0]).includes('retry scheduled'))).toHaveLength(6);
++    } finally {
++      warnSpy.mockRestore();
++      errSpy.mockRestore();
++      vi.useRealTimers();
++    }
++  });
++
++  it('FR-02（retry）：重试等待期会话终态（store 删除）——退避后中止注入并留日志', async () => {
++    vi.useFakeTimers();
++    const { warnSpy } = withRetrySpies();
++    try {
++      const { depsExtra, wakeup } = withWakeupDeps();
++      wakeup.mockRejectedValueOnce(new Error('HTTP 504 inject'));
++      const h = await createHarness('sess-wr3', 'run-wr3', depsExtra);
++      await h.emitMessage(msgTaskNotification({ taskId: 'task-r3', status: 'completed', summary: '后台完成', durationMs: 61000 }));
++      await vi.advanceTimersByTimeAsync(3000);
++      expect(wakeup).toHaveBeenCalledTimes(1);
++      // 模拟会话终态清理路径（lifecycle _store.delete）。
++      (h.sm as unknown as { _store: Map<string, unknown> })._store.delete('sess-wr3');
++      // 5s 退避到点：等待结束发现 store 无条目 → 中止，不发起第二次注入。
++      await vi.advanceTimersByTimeAsync(5000);
++      expect(wakeup).toHaveBeenCalledTimes(1);
++      const abortLog = warnSpy.mock.calls.find((c) => String(c[0]).includes('session gone'));
++      expect(abortLog).toBeDefined();
++      expect(abortLog![1]).toMatchObject({ sessionId: 'sess-wr3', attempts: 1 });
++      await vi.advanceTimersByTimeAsync(600_000);
++      expect(wakeup).toHaveBeenCalledTimes(1);
++    } finally {
++      warnSpy.mockRestore();
++      vi.useRealTimers();
++    }
++  });
++
++  it('FR-03（retry）：SILLYHUB_TASK_WAKEUP_RETRY_DELAYS_MS=0 禁用重试回单发旧行为', async () => {
++    vi.useFakeTimers();
++    const { warnSpy, errSpy } = withRetrySpies();
++    try {
++      const prev = process.env.SILLYHUB_TASK_WAKEUP_RETRY_DELAYS_MS;
++      process.env.SILLYHUB_TASK_WAKEUP_RETRY_DELAYS_MS = '0';
++      try {
++        const { depsExtra, wakeup } = withWakeupDeps();
++        wakeup.mockRejectedValue(new Error('HTTP 504 inject'));
++        const h = await createHarness('sess-wr4', 'run-wr4', depsExtra);
++        await h.emitMessage(msgTaskNotification({ taskId: 'task-r4', status: 'completed', summary: '后台完成', durationMs: 61000 }));
++        await vi.advanceTimersByTimeAsync(3000);
++        // 单发即弃：恰一次调用、无重试排程日志、直接 error 留痕（attempts=1）。
++        expect(wakeup).toHaveBeenCalledTimes(1);
++        expect(warnSpy.mock.calls.filter((c) => String(c[0]).includes('retry scheduled'))).toHaveLength(0);
++        const exhaustLog = errSpy.mock.calls.find((c) => String(c[0]).includes('retries exhausted'));
++        expect(exhaustLog).toBeDefined();
++        expect(exhaustLog![1]).toMatchObject({ attempts: 1 });
++        await vi.advanceTimersByTimeAsync(600_000);
++        expect(wakeup).toHaveBeenCalledTimes(1);
++      } finally {
++        if (prev === undefined) delete process.env.SILLYHUB_TASK_WAKEUP_RETRY_DELAYS_MS;
++        else process.env.SILLYHUB_TASK_WAKEUP_RETRY_DELAYS_MS = prev;
++      }
++    } finally {
++      warnSpy.mockRestore();
++      errSpy.mockRestore();
++      vi.useRealTimers();
++    }
++  });
+ });
+ 
+ // ── 2026-10-13-agent-task-stuck-running FR-01：别名条目注销/补发 + 三无 WARN ──
+diff --git a/sillyhub-daemon/tests/turn-phase-observability.test.ts b/sillyhub-daemon/tests/turn-phase-observability.test.ts
+index 281164465..d12e86778 100644
+--- a/sillyhub-daemon/tests/turn-phase-observability.test.ts
++++ b/sillyhub-daemon/tests/turn-phase-observability.test.ts
+@@ -46,6 +46,36 @@ describe('notePhaseEmit（成功观测）', () => {
+     expect(event).toBe('turn_phase_emit');
+     expect(kv).toMatchObject({ point: 'events', phase: 'first_event', run_id: 'r1' });
+   });
++
++  // 2026-10-27-task-wakeup-inject-retry FR-05：per(point,session,run) 防重——
++  // session-manager 侧每 envelope 无状态直发（D-013④），TRACE 开启时同 run 记点
++  // 曾随 envelope 数刷 30+ 行（daemon.log 323219-323256 实证）；首记保留断链
++  // 配对能力，同键后续静默。
++  it('同 (point,session,run) 键防重仅首记输出；不同 run 各自首记', () => {
++    process.env.SILLYHUB_TURN_PHASE_TRACE = '1';
++    const log = makeLog();
++    notePhaseEmit('events_first_event', 's1', 'r1', 'first_event', log);
++    notePhaseEmit('events_first_event', 's1', 'r1', 'first_event', log);
++    notePhaseEmit('events_first_event', 's1', 'r1', 'first_event', log);
++    expect(log).toHaveBeenCalledTimes(1);
++    // 不同 run / 不同 point 不受影响（新键首记）。
++    notePhaseEmit('events_first_event', 's1', 'r2', 'first_event', log);
++    notePhaseEmit('daemon_bridge_first_event', 's1', 'r1', 'first_event', log);
++    expect(log).toHaveBeenCalledTimes(3);
++  });
++
++  it('有界：超 512 键逐出最旧（被逐键可再记）', () => {
++    process.env.SILLYHUB_TURN_PHASE_TRACE = '1';
++    const log = makeLog();
++    for (let i = 0; i < 512; i++) {
++      notePhaseEmit('p', `s${i}`, 'r', 'first_event', log);
++    }
++    expect(log).toHaveBeenCalledTimes(512);
++    notePhaseEmit('p', 's0', 'r', 'first_event', log); // 已在集合 → 静默
++    expect(log).toHaveBeenCalledTimes(512);
++    notePhaseEmit('p', 's_new', 'r', 'first_event', log); // 逐出 s0 后新键入集
++    expect(log).toHaveBeenCalledTimes(513);
++  });
+ });
+ 
+ describe('warnOncePhaseFailure（失败首警去重）', () => {

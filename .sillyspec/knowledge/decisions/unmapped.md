@@ -2296,3 +2296,11 @@ supersedes：D-008@v1
 锚点：未记录
 最近确认：4dc531554f19e0cb3ed0561f06e4d4c979375f8f
 理由：- 最大风险：**既有测试与生产行为的隐性依赖**——现有唤醒用例（如「61s completed 注入恰一次」）的 task_started 构造不带 tool_use 元数据，新判据下走「信息不足兜底」路径，行为恰好不变；但若未来有用例显式构造 meta 而期望旧行为，会静默走新分支。缓解：新增用例显式覆盖三态（true/false/undefined），并在 WARN 日志中标注判定来源，行为可观测可归因。 - 次要风险：Bash 纳入 meta 登记后 `[TASK_STARTED]` 的 task_name 兜底路径变化（meta.taskName 对 Bash = description，与帧 description 同值）——无行为差异，但 `[TASK_STARTED]` 落行量不变（仅 meta Map 增条目），内存开销可忽略（会话终态清理）。 - 试过放弃的方案：①以「tool_result 同轮配对」为判据（最本质）——需跨事件流追踪 result 与轮次绑定关系，改动面与回归面远超本变更体量，放弃；②以「任务名/命令特征」启发式判断——脆弱且不可解释，放弃；③backend 正则只认新文案——混版本窗口功能退化，改为兼容双文案。
+
+## D-unmapped-288@v1 设计期风险与放弃方案（底稿）
+状态：implemented
+变更：2026-10-27-task-wakeup-inject-retry
+原编号：D-001@v1
+锚点：未记录
+最近确认：41c8d228b7f4e1cd6fffa667deaa9316cab005fa
+理由：- **最大风险**：重试造成的重复唤醒轮（首注入实际成功但响应丢失时）。缓解：后端忙轮合并恒≤1 条 + prompt 防重执行指令；空闲期重复轮为纯汇报轮，成本可容忍。 - **次风险**：env 覆写错误计划（如全 0 列表）导致重试风暴——解析层非正整数项忽略、默认计划兜底；止血开关 `=0` 一键回旧行为。 - **放弃的方案**：B/C 两方向（理由见上问评估）；「WS onConnected 立即重试一轮」（recover 链先例）——需挂 WS 连接回调穿层接线，收益（最快场景省 ≤5s）不配复杂度，退避首档 5s 已够短；TRACE 刷屏曾考虑在 daemon.ts 拦截点把 `notePhaseEmit` 挪到 first_event 防重 Set 判定之后——只治桥侧半边，emit 侧（events.ts 每 envelope）仍刷，防重做进 helper 一处治两侧。

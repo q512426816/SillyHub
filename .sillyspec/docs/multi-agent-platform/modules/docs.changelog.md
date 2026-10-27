@@ -29,3 +29,4 @@
 - 2026-10-25-session-config-deferred-switch | 会话配置点选改暂存随下条消息生效
 - 2026-10-26-ci-red-to-green | 修复四条CI工作流失败转绿
 - 2026-10-27-ghost-spec-binding-fix | 失败命令不再生成幽灵变更占位并过滤存量
+- 2026-10-27-task-wakeup-inject-retry | 后台任务终态唤醒注入经后端中转单发无重试，撞后端短暂不可用窗（部署重建/502/504）即 inte…

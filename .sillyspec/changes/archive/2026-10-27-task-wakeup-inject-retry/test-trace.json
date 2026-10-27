@@ -1,0 +1,67 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-27-task-wakeup-inject-retry",
+  "rows": [
+    {
+      "anchor": "FR-01",
+      "row_id": "2026-10-27-task-wakeup-inject-retry:flow:测试绑定FR-01",
+      "tests": [
+        "test/sillyhub-daemon/tests/interactive/task-lifecycle.test.ts「唤醒注入全重试耗尽后以 error 留痕放弃」",
+        "test/sillyhub-daemon/tests/interactive/task-lifecycle.test.ts「唤醒注入首败后按退避计划重试至成功（504 形态）」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-27-task-wakeup-inject-retry"
+    },
+    {
+      "anchor": "FR-02",
+      "row_id": "2026-10-27-task-wakeup-inject-retry:flow:测试绑定FR-02",
+      "tests": [
+        "test/sillyhub-daemon/tests/interactive/task-lifecycle.test.ts「重试等待期会话终态（store 删除）中止后续重试」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-27-task-wakeup-inject-retry"
+    },
+    {
+      "anchor": "FR-03",
+      "row_id": "2026-10-27-task-wakeup-inject-retry:flow:测试绑定FR-03",
+      "tests": [
+        "test/sillyhub-daemon/tests/interactive/task-lifecycle.test.ts「SILLYHUB_TASK_WAKEUP_RETRY_DELAYS_MS=0 禁用重试回单发行为」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-27-task-wakeup-inject-retry"
+    },
+    {
+      "anchor": "FR-05",
+      "row_id": "2026-10-27-task-wakeup-inject-retry:flow:测试绑定FR-05",
+      "tests": [
+        "test/sillyhub-daemon/tests/turn-phase-observability.test.ts「notePhaseEmit 同 (point,session,run) 键防重仅首记输出」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-27-task-wakeup-inject-retry"
+    }
+  ]
+}

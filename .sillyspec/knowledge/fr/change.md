@@ -1156,3 +1156,93 @@ created_at: 2026-10-02T02:55:12.745Z
   confirmed_at: null
   source_change: 2026-10-27-ghost-spec-binding-fix
   status: active
+
+## FR-change-061 唤醒注入失败后按退避计划重试（默认 5s/15s/30s/60s/120s/300s，总窗约 9.3 分钟盖住部署重建窗），注入成功即止
+变更：2026-10-27-task-wakeup-inject-retry
+状态：active
+摘要：首败重试成功（e132e9bf 实证形态）；全部重试耗尽
+全文：.sillyspec/changes/archive/2026-10-27-task-wakeup-inject-retry/requirements.md#FR-01
+最近确认：41c8d228b7f4e1cd6fffa667deaa9316cab005fa
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-27-task-wakeup-inject-retry:flow:测试绑定FR-01
+  tests: test/sillyhub-daemon/tests/interactive/task-lifecycle.test.ts「唤醒注入全重试耗尽后以 error 留痕放弃」 | test/sillyhub-daemon/tests/interactive/task-lifecycle.test.ts「唤醒注入首败后按退避计划重试至成功（504 形态）」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-27-task-wakeup-inject-retry
+  status: active
+
+## FR-change-062 重试等待期间会话已从 store 消失（终态/清理）时中止后续重试并留日志
+变更：2026-10-27-task-wakeup-inject-retry
+状态：active
+摘要：重试中途会话终态
+全文：.sillyspec/changes/archive/2026-10-27-task-wakeup-inject-retry/requirements.md#FR-02
+最近确认：41c8d228b7f4e1cd6fffa667deaa9316cab005fa
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-27-task-wakeup-inject-retry:flow:测试绑定FR-02
+  tests: test/sillyhub-daemon/tests/interactive/task-lifecycle.test.ts「重试等待期会话终态（store 删除）中止后续重试」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-27-task-wakeup-inject-retry
+  status: active
+
+## FR-change-063 重试计划 env 可配可禁用（SILLYHUB_TASK_WAKEUP_RETRY_DELAYS_MS 逗号列表，空/0=禁用回单发行为——对齐 SILLYHUB_TASK_WAKEUP_QUIET_MS 惯例）
+变更：2026-10-27-task-wakeup-inject-retry
+状态：active
+摘要：禁用开关
+全文：.sillyspec/changes/archive/2026-10-27-task-wakeup-inject-retry/requirements.md#FR-03
+最近确认：41c8d228b7f4e1cd6fffa667deaa9316cab005fa
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-27-task-wakeup-inject-retry:flow:测试绑定FR-03
+  tests: test/sillyhub-daemon/tests/interactive/task-lifecycle.test.ts「SILLYHUB_TASK_WAKEUP_RETRY_DELAYS_MS=0 禁用重试回单发行为」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-27-task-wakeup-inject-retry
+  status: active
+
+## FR-change-064 三方向评估结论落档：择退避重试（B 成功才清锚点不解决唤醒缺失；C 本地直投绕不开后端建 run 落库）；重试幂等性依据=后端忙轮排队合并恒≤1条
+变更：2026-10-27-task-wakeup-inject-retry
+状态：active
+摘要：（无场景名）
+全文：.sillyspec/changes/archive/2026-10-27-task-wakeup-inject-retry/requirements.md#FR-04
+最近确认：41c8d228b7f4e1cd6fffa667deaa9316cab005fa
+
+## FR-change-065 附带修复：turn_phase 观测记点 notePhaseEmit 增 per(point,session,run) 防重（有界512），TRACE 开启不再随 envelope 刷屏（daemon.log 323219-323256 同秒30+行实证）
+变更：2026-10-27-task-wakeup-inject-retry
+状态：active
+摘要：同 run 多 envelope 记点去重
+全文：.sillyspec/changes/archive/2026-10-27-task-wakeup-inject-retry/requirements.md#FR-05
+最近确认：41c8d228b7f4e1cd6fffa667deaa9316cab005fa
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-27-task-wakeup-inject-retry:flow:测试绑定FR-05
+  tests: test/sillyhub-daemon/tests/turn-phase-observability.test.ts「notePhaseEmit 同 (point,session,run) 键防重仅首记输出」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-27-task-wakeup-inject-retry
+  status: active
+
+## FR-change-066 既有唤醒用例（task-lifecycle.test.ts）与观测用例（turn-phase-observability.test.ts）全绿不回归
+变更：2026-10-27-task-wakeup-inject-retry
+状态：active
+摘要：（无场景名）
+全文：.sillyspec/changes/archive/2026-10-27-task-wakeup-inject-retry/requirements.md#FR-06
+最近确认：41c8d228b7f4e1cd6fffa667deaa9316cab005fa

@@ -34,3 +34,4 @@ created_at: 2026-08-29 22:56:30
 - 2026-10-22-change-delete-session-history-fix | 变更删除不再级联删会话轮次并恢复丢失轮次
 - 2026-10-27-task-wakeup-precision-fix | 修复任务唤醒判据与通知四处缺陷
 - 2026-10-27-ghost-spec-binding-fix | 失败命令不再生成幽灵变更占位并过滤存量
+- 2026-10-27-task-wakeup-inject-retry | 后台任务终态唤醒注入经后端中转单发无重试，撞后端短暂不可用窗（部署重建/502/504）即 inte…
