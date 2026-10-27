@@ -58,6 +58,11 @@ _reparse_last_run: dict[uuid.UUID, float] = {}
 _reparse_inflight: set[uuid.UUID] = set()
 _reparse_pending: dict[uuid.UUID, tuple[list[str], list[FileOp]]] = {}
 _reparse_trailing_timers: set[uuid.UUID] = set()
+# 2026-10-27-archive-reparse-oom-governance（D-010）：结构性触发（归档/跨根移动/
+# 删除）撞在途 reparse 时的待补发输入——由 _spawn_bg_reparse 的完成回调**即时**
+# 补发（非 120s 硬定时尾随），保住结构性收敛 ≤60s 承诺（事故场景六会话同窗归档
+# 恰是 in-flight 重叠态，硬等满窗会突破承诺——Grill P2-1）。
+_reparse_structural_pending: dict[uuid.UUID, tuple[list[str], list[FileOp]]] = {}
 _reparse_bg_tasks: set["asyncio.Task[object]"] = set()
 
 
@@ -78,6 +83,7 @@ def reset_reparse_scheduler() -> None:
     _reparse_inflight.clear()
     _reparse_pending.clear()
     _reparse_trailing_timers.clear()
+    _reparse_structural_pending.clear()
 
 
 async def drain_reparse_workers(*, timeout_seconds: float = 15.0) -> bool:
@@ -197,6 +203,28 @@ _BUNDLE_CACHE_VERSIONS_PER_WS = 2
 _bundle_gzip_cache: dict[tuple[uuid.UUID, int], bytes] = {}
 _bundle_gzip_cache_lock = threading.Lock()
 
+# 2026-10-27-archive-reparse-oom-governance（D-009/D-011）：gzip 变体同版本
+# single-flight——同 (workspace, spec_version) 并发请求只产生一次构建，其余
+# 等待复用产物（旧形态并发双建白耗内存/CPU）。等待带失败传播（D-011）：现行
+# 缓存回填只在流**完整消费**后发生（断连半包不入缓存），构建方异常/断连时
+# entry 置失败，等待者捕获后降级自建——失败不传染、等待者永不悬挂；等待超时
+# （_BUNDLE_INFLIGHT_WAIT_SECONDS，构建方消费端卡死防御）同样降级自建。
+_BUNDLE_INFLIGHT_WAIT_SECONDS = 120.0
+
+
+class _BundleInflightEntry:
+    """同版本在建登记：event 由构建方完成/失败时置位，等待方阻塞在其上。"""
+
+    __slots__ = ("data", "event", "failed")
+
+    def __init__(self) -> None:
+        self.event = threading.Event()
+        self.data: bytes | None = None
+        self.failed = False
+
+
+_bundle_gzip_inflight: dict[tuple[uuid.UUID, int], _BundleInflightEntry] = {}
+
 
 def _bundle_cache_max_bytes() -> int:
     """全局字节帽（settings.spec_bundle_cache_max_bytes，默认 128MB）。"""
@@ -267,25 +295,92 @@ class _CachingBundleIterator:
 
     消费端提前关闭（断连）→ 生成器在 yield 处废弃，不回填（防半包入缓存）。
     属性委托内层（``_cancelled``/``_thread`` 测试钩子照常可用）。
+
+    2026-10-27-archive-reparse-oom-governance D-009/D-011：可选 ``entry`` 挂同
+    版本在建登记——成功回填后把产物交给等待方复用；提前关闭/废弃时置失败，
+    等待方降级自建（失败传播，不悬挂）。
     """
 
-    def __init__(self, inner: "_BundleTarStream", key: tuple[uuid.UUID, int]) -> None:
+    def __init__(
+        self,
+        inner: "_BundleTarStream",
+        key: tuple[uuid.UUID, int],
+        entry: "_BundleInflightEntry | None" = None,
+    ) -> None:
         self._inner = inner
         self._key = key
+        self._entry = entry
+        self._completed = False
 
     def __iter__(self) -> "Iterator[bytes]":
         buf = bytearray()
-        for chunk in self._inner:
-            buf.extend(chunk)
-            yield chunk
+        try:
+            for chunk in self._inner:
+                buf.extend(chunk)
+                yield chunk
+        except GeneratorExit:
+            # 消费端废弃生成器（GC/断连）：失败传播给等待方 + 关内层资源后透传。
+            if self._entry is not None and not self._completed:
+                self._entry.failed = True
+                self._finish_entry()
+            self._inner.close()
+            raise
         if buf:
-            _bundle_gzip_cache_put(self._key, bytes(buf))
+            data = bytes(buf)
+            _bundle_gzip_cache_put(self._key, data)
+            self._completed = True
+            if self._entry is not None:
+                self._entry.data = data
+                self._finish_entry()
 
     def close(self) -> None:
-        self._inner.close()
+        try:
+            self._inner.close()
+        finally:
+            if self._entry is not None and not self._completed:
+                self._entry.failed = True
+                self._finish_entry()
+
+    def _finish_entry(self) -> None:
+        self._entry.event.set()
+        with _bundle_gzip_cache_lock:
+            if _bundle_gzip_inflight.get(self._key) is self._entry:
+                _bundle_gzip_inflight.pop(self._key, None)
 
     def __getattr__(self, name: str) -> object:
         return getattr(self._inner, name)
+
+
+class _WaitingBundleStream:
+    """同版本在建等待流（D-009）：等构建方 entry 完成后重放其产物。
+
+    失败/超时/半包断连（D-011）→ 降级自建（独立流式构建 + 消费完回填缓存，
+    不再登记 inflight——避免与原构建方生命周期纠缠）。阻塞发生在消费线程
+    （iter_bundle_stream 的线程侧），不占事件循环。
+    """
+
+    def __init__(
+        self,
+        entry: _BundleInflightEntry,
+        produce: "Callable[[_QueueBackedTarWriter], None]",
+        cache_key: tuple[uuid.UUID, int],
+    ) -> None:
+        self._entry = entry
+        self._produce = produce
+        self._cache_key = cache_key
+
+    def __iter__(self) -> "Iterator[bytes]":
+        ok = self._entry.event.wait(_BUNDLE_INFLIGHT_WAIT_SECONDS)
+        if ok and not self._entry.failed and self._entry.data is not None:
+            data = self._entry.data
+            for i in range(0, len(data), _BUNDLE_CHUNK_BYTES):
+                yield data[i : i + _BUNDLE_CHUNK_BYTES]
+            return
+        # 超时/失败传播 → 降级自建。
+        yield from iter(_CachingBundleIterator(_BundleTarStream(self._produce), self._cache_key))
+
+    def close(self) -> None:
+        pass
 
 
 class _TarStreamCancelled(Exception):
@@ -1190,16 +1285,33 @@ class SpecWorkspaceService:
             return spec_root_abs, spec_version, _BundleTarStream(_produce)
 
         # gzip 变体：命中缓存整包直吐（零打包零 mount 读）；未命中流式构建 +
-        # 完整消费后回填缓存（断连半包不入缓存）。
+        # 完整消费后回填缓存（断连半包不入缓存）。同版本并发（D-009）只建一次：
+        # 先到者构建并登记 inflight，后到者等 entry（成功重放产物 / 失败或超时
+        # 降级自建，D-011）。
         cache_key = (workspace_id, spec_version)
         cached = _bundle_gzip_cache_get(cache_key)
         if cached is not None:
             return spec_root_abs, spec_version, _ReplayBundleStream(cached)
 
+        with _bundle_gzip_cache_lock:
+            entry = _bundle_gzip_inflight.get(cache_key)
+            if entry is None:
+                entry = _BundleInflightEntry()
+                _bundle_gzip_inflight[cache_key] = entry
+                is_builder = True
+            else:
+                is_builder = False
+
+        if is_builder:
+            return (
+                spec_root_abs,
+                spec_version,
+                _CachingBundleIterator(_BundleTarStream(_produce), cache_key, entry=entry),
+            )
         return (
             spec_root_abs,
             spec_version,
-            _CachingBundleIterator(_BundleTarStream(_produce), cache_key),
+            _WaitingBundleStream(entry, _produce, cache_key),
         )
 
     @staticmethod
@@ -3031,30 +3143,39 @@ class SpecWorkspaceService:
     def _compute_reparse_scope(
         change_dirs: list[str],
         ops: list[FileOp],
-    ) -> tuple[list[str] | None, bool]:
-        """计算 change reparse 范围 → ``(scope, archive_hit)``。
+    ) -> tuple[list[str] | None, bool, bool]:
+        """计算 change reparse 范围 → ``(scope, archive_hit, structural)``。
 
         （change 2026-08-14-change-center-conversation-driven / D-005@v1；
-        ql-20260818-009 收窄 archive_hit）：
+        ql-20260818-009 收窄 archive_hit；2026-10-27-archive-reparse-oom-governance
+        D-004/D-007 三元组化——归档移动改 scoped+structural，详见 ops 扫描段注释）：
+        - 有标注（``change_dirs`` 非空）：取非归档 name 进 scoped 集；归档前缀
+          （``changes/archive/<name>``）剥前缀取 name 同样进 scoped——标注不带
+          op 类型，是否需要全量由下方 ops 扫描裁决。
+        - 无标注（旧 daemon）：扫本次 ops 路径中 ``changes/`` 前缀者取 name 兜底。
         - 有标注（``change_dirs`` 非空）：取非归档 name 进 scoped 集；归档前缀
           （``changes/archive/<name>``）剥前缀取 name 同样进 scoped——标注不带
           op 类型，是否需要全量由下方 ops 扫描裁决。
         - 无标注（旧 daemon）：扫本次 ops 路径中 ``changes/`` 前缀者取 name 兜底。
         - **archive_hit 仅在 archive 路径的 op 是 delete/rename 时置位**
-          （ql-20260818-009）：归档=目录跨根移动，只有 delete/rename 会改变磁盘
-          变更树形状（scoped 零删除语义处理不了 → 全量 reparse，design §9 /
-          R-08）；纯 add/update archive 文件（daemon 陈旧缓存重推已归档文件）
-          不改树形状 → 走 scoped（parser 三区按 name 统一匹配，archive 区条目
-          同样 create/update），不再触发全量重扫（2026-08-18 03:01Z spec-sync
-          93s/82s 超 CLI 30s 超时根因②）。daemon 侧归档移动 hash 不变 → 恒发
-          rename op（spec-sync.js rename 检测），真归档仍走全量；残余风险仅
-          「归档同时改内容 → rename 退化为 delete+add」的陈旧行残留，留待下次
-          全量/手动重扫收敛（与 scoped 零删除红线同哲学）。
+          （ql-20260818-009，**2026-10-27 D-004 废止该口径**）：旧口径「归档=
+          跨根移动 → scoped 零删除语义处理不了 → 全量 reparse」是保守裁决；
+          parser 三区按 name 统一匹配（archive 区条目同名解析、``_apply_parsed``
+          原地翻 location），scoped 定向重扫足以承接归档移动，「scoped 零删除
+          红线」天然保持（归档 key 在 archive 区被 seen，不进删除环）。生产
+          实证（2026-10-27 六会话同窗归档 OOM）全量重扫是内存峰值主源——归档
+          移动改 **scoped + structural**（立即通道，≤60s 收敛，D-007）。全量
+          reparse 退位为手动端点/异常兜底（D-006 rejected 边界：不做定时全量）。
+        - **structural 置位判据**（改变「变更列表形状」的 op，立即通道）：跨根
+          rename（恰一侧 archive 前缀——归档/un-archive 移动）/ delete（活跃区
+          目录消失=平台删除，或归档区条目删除）。同根文件 rename / add / update
+          不置位（普通文档推送，维持 120s 合并窗）。
 
         返回语义：
-        - ``(None, True)``：全量 reparse（scope=None 含 delete）。
-        - ``(scope, False)``：scoped reparse（scope 非空，零 delete）。
-        - ``(None, False)``：无 changes 相关路径，**零触发**（R-01）。
+        - ``(None, True, False)``：全量 reparse（scope=None 含 delete，退化兜底）。
+        - ``(scope, False, structural)``：scoped reparse（scope 非空，零 delete）；
+          structural=真走立即通道、假走 120s 合并窗。
+        - ``(None, False, False)``：无 changes 相关路径，**零触发**（R-01）。
         """
 
         def _archive_name(norm: str) -> str | None:
@@ -3067,6 +3188,7 @@ class SpecWorkspaceService:
 
         names: list[str] = []
         archive_hit = False
+        structural = False
 
         for cd in change_dirs:
             norm = str(cd).replace("\\", "/")
@@ -3089,8 +3211,9 @@ class SpecWorkspaceService:
                 names.append(norm)
 
         for op in ops:
-            # ql-20260818-009：仅 delete/rename（改变磁盘变更树形状）命中 archive
-            # 路径才要求全量；add/update 一律 scoped。
+            # ql-20260818-009 旧口径（archive 树形 op → 全量）已废止；2026-10-27
+            # D-004/D-007：跨根移动/删除 → scoped + structural（立即通道），仅
+            # changes/archive 根级 op（无名可解析）保留全量兜底。
             tree_shape_op = op.op in ("delete", "rename")
             for path in (op.path, op.new_path):
                 if not path:
@@ -3098,11 +3221,15 @@ class SpecWorkspaceService:
                 norm = path.replace("\\", "/")
                 seg = _archive_name(norm)
                 if seg is not None:
-                    if not seg or tree_shape_op:
-                        # 无名字段（恰为 changes/archive 根，理论不可达）或跨根移动 → 全量
+                    if not seg:
+                        # 无名字段（恰为 changes/archive 根，理论不可达）→ 全量兜底
                         archive_hit = True
-                    else:
-                        names.append(seg)
+                        continue
+                    names.append(seg)
+                    if tree_shape_op:
+                        # 归档移动（跨根 rename）/ 归档区 delete：scoped 承接 +
+                        # structural（立即通道）——D-004/D-007。
+                        structural = True
                     continue
                 if norm.startswith("changes/"):
                     rest = norm[len("changes/") :]
@@ -3110,6 +3237,15 @@ class SpecWorkspaceService:
                         first = rest.split("/", 1)[0]
                         if first:
                             names.append(first)
+                            if op.op == "delete" or (
+                                op.op == "rename"
+                                and (op.new_path or "")
+                                .replace("\\", "/")
+                                .startswith("changes/archive/")
+                            ):
+                                # 活跃区 delete（平台删除/目录消失）或跨根移出
+                                # （rename 旧侧活跃区、新侧归档区）→ 结构性。
+                                structural = True
 
         # 去重保序
         dedup: list[str] = []
@@ -3118,8 +3254,8 @@ class SpecWorkspaceService:
                 dedup.append(n)
 
         if archive_hit:
-            return None, True
-        return dedup, False
+            return None, True, False
+        return dedup, False, structural
 
     async def _trigger_change_reparse(
         self,
@@ -3149,8 +3285,15 @@ class SpecWorkspaceService:
         scope 计算见 ``_compute_reparse_scope``；无 changes 相关路径零触发
         （R-01）。测试确定性见 :func:`drain_reparse_workers`（断言前排空
         后台任务；节流间隔模块常量可 monkeypatch）。
+
+        双通道（2026-10-27-archive-reparse-oom-governance D-007）：**结构性事件**
+        （归档/跨根移动/删除，scope 计算置 structural）绕过 120s 节流窗**立即**
+        调度（≤60s 收敛承诺）；撞在途 reparse 时入 ``_reparse_structural_pending``
+        由完成回调即时补发（D-010，非 120s 硬定时尾随）。非结构 scope 维持既有
+        节流 + 尾随合并语义零回归。single-flight（同 workspace 同时仅一个
+        reparse）两通道共享不破。
         """
-        scope, archive_hit = self._compute_reparse_scope(change_dirs, ops)
+        scope, archive_hit, structural = self._compute_reparse_scope(change_dirs, ops)
         if not archive_hit and not scope:
             return  # 零触发
 
@@ -3160,22 +3303,43 @@ class SpecWorkspaceService:
 
         now = time.monotonic()
         last = _reparse_last_run.get(workspace_id)
-        if workspace_id in _reparse_inflight or (
-            last is not None and now - last < _REPARSE_MIN_INTERVAL_SECONDS
-        ):
-            self._enqueue_trailing_reparse(workspace_id, change_dirs, ops)
+        if workspace_id in _reparse_inflight:
+            if structural:
+                # D-010：结构性撞在途——登记完成回调即时补发（不睡 120s 窗）。
+                _reparse_structural_pending[workspace_id] = (
+                    list(change_dirs),
+                    list(ops),
+                )
+            else:
+                self._enqueue_trailing_reparse(workspace_id, change_dirs, ops)
             return
-        _reparse_last_run[workspace_id] = now
-        self._spawn_bg_reparse(workspace_id, archive_hit, scope)
+        if structural or last is None or (now - last) >= _REPARSE_MIN_INTERVAL_SECONDS:
+            _reparse_last_run[workspace_id] = now
+            self._spawn_bg_reparse(workspace_id, archive_hit, scope, structural=structural)
+        else:
+            self._enqueue_trailing_reparse(workspace_id, change_dirs, ops)
 
     def _spawn_bg_reparse(
-        self, workspace_id: uuid.UUID, archive_hit: bool, scope: list[str]
+        self,
+        workspace_id: uuid.UUID,
+        archive_hit: bool,
+        scope: list[str],
+        *,
+        structural: bool = False,
     ) -> None:
-        """起后台 reparse 任务（single-flight 标记在 finally 复位）。"""
+        """起后台 reparse 任务（single-flight 标记在 finally 复位）。
+
+        2026-10-27-archive-reparse-oom-governance D-010：finally 复位后检查
+        ``_reparse_structural_pending``——结构性触发曾在在途期间到达时，**完成
+        即时补发**（重走调度入口，此刻 inflight 已清、structural 分支立即执行，
+        不经 120s 窗）。补发输入取最新登记（后到覆盖先到，与尾随合并同哲学）。
+        """
 
         async def _runner() -> None:
             try:
-                await self._run_reparse_once(workspace_id, archive_hit, scope)
+                await self._run_reparse_once(
+                    workspace_id, archive_hit, scope, structural=structural
+                )
             except Exception as exc:
                 log.warning(
                     "spec_workspace.reparse_bg_failed",
@@ -3184,6 +3348,9 @@ class SpecWorkspaceService:
                 )
             finally:
                 _reparse_inflight.discard(workspace_id)
+                pending = _reparse_structural_pending.pop(workspace_id, None)
+                if pending is not None:
+                    await self._trigger_change_reparse(workspace_id, pending[0], pending[1])
 
         _reparse_inflight.add(workspace_id)
         task = asyncio.create_task(_runner())
@@ -3191,12 +3358,23 @@ class SpecWorkspaceService:
         task.add_done_callback(_reparse_bg_tasks.discard)
 
     async def _run_reparse_once(
-        self, workspace_id: uuid.UUID, archive_hit: bool, scope: list[str]
+        self,
+        workspace_id: uuid.UUID,
+        archive_hit: bool,
+        scope: list[str],
+        *,
+        structural: bool = False,
     ) -> None:
-        """单次 reparse 执行体（inline 直通 / 后台 runner 共用）。"""
+        """单次 reparse 执行体（inline 直通 / 后台 runner 共用）。
+
+        2026-10-27-archive-reparse-oom-governance task-03：完成日志改名
+        ``reparse_converged`` 并补 duration_ms / scope_count / channel
+        （structural=立即通道 | coalesced=120s 合并窗补发）——可观测可归因。
+        """
         from app.core.db import get_session_factory
         from app.modules.change.service import ChangeService
 
+        started = time.monotonic()
         async with get_session_factory()() as reparse_session:
             stats, _ = await ChangeService(reparse_session).reparse(
                 workspace_id,
@@ -3234,10 +3412,13 @@ class SpecWorkspaceService:
                     error=str(exc),
                 )
         log.info(
-            "spec_workspace.reparse_triggered",
+            "spec_workspace.reparse_converged",
             workspace_id=str(workspace_id),
             scoped=not archive_hit,
             scope=scope,
+            scope_count=len(scope) if scope else 0,
+            channel="structural" if structural else "coalesced",
+            duration_ms=round((time.monotonic() - started) * 1000, 1),
             stats=stats,
             task_stats=task_totals,
             deferred=not _REPARSE_INLINE,

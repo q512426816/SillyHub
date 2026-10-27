@@ -144,6 +144,10 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
     # 走 finally 时不会因未定义而掩盖原始异常（对齐上方三协程注释）。
     scheduled_send_task: asyncio.Task[None] | None = None
     consensus_sweep_task: asyncio.Task[None] | None = None
+    # 2026-10-27-archive-reparse-oom-governance task-06：漂移探针任务（先声明
+    # 后赋值——创建点在 try 内，异常提前退出时 finally 引用不 NameError，
+    # 对齐上方 patrol_task 同款防御注释）。
+    drift_probe_task: asyncio.Task[None] | None = None
     try:
         # Bootstrap auth once the DB connection pool exists.
         from app.core.db import get_engine, get_session_factory
@@ -322,6 +326,15 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
             consensus_sweeper_loop(), name="consensus-sweeper"
         )
         log.info("consensus_sweeper_started")
+        # 2026-10-27-archive-reparse-oom-governance task-06（FR-04 / D-008）：
+        # 漂移探针 + 容器内存水位常驻协程——5min 周期只读抽样核对（行 location
+        # vs 磁盘目录）仅告警不自愈；cgroup 水位超 80% 告警（OOM 前可预警，
+        # 2026-10-27 生产实证被杀前零信号）。关停契约同 scheduled_send_sweeper
+        # （cancel + await gather；sleep 处 CancelledError 透传）。
+        from app.modules.spec_workspace.drift_probe import drift_probe_loop
+
+        drift_probe_task = asyncio.create_task(drift_probe_loop(), name="spec-drift-probe")
+        log.info("drift_probe_started")
         # 2026-08-06-public-mcp-server task-05 / spike-A 坑 2（P0）：MCP session
         # manager 必须在 app 服务期间常驻。streamable_http_app() 返回的子 app
         # 虽自带 lifespan=lambda app: self.session_manager.run()，但 Starlette
@@ -375,6 +388,12 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
         if consensus_sweep_task is not None:
             consensus_sweep_task.cancel()
             await asyncio.gather(consensus_sweep_task, return_exceptions=True)
+        # 2026-10-27-archive-reparse-oom-governance task-06：漂移探针关停——
+        # 同上 cancel 后 await gather 落地（探针轮只读 + 水位读文件，无 DB 写
+        # 在途风险，取消即走）。
+        if drift_probe_task is not None:
+            drift_probe_task.cancel()
+            await asyncio.gather(drift_probe_task, return_exceptions=True)
         # ql-20260910-005：spec_workspace reparse 后台任务排空——巡检类协程
         # 是「取消即走」，reparse 任务不同：每步是独立短事务（取消会回滚到
         # 上一致投影，但截断中的事务退出路径不可控），且尾随节流窗内的补发
