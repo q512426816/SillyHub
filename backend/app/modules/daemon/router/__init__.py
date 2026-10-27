@@ -202,6 +202,9 @@ _ENDPOINT_ORDER: tuple[str, ...] = (
     # 2026-10-26-session-stage-progress task-01：轮阶段上报（紧跟 plan_mode，
     # 物理注册序在 bash-status 之前）。
     "notify_turn_phase",
+    # 2026-10-28-bg-task-status-report task-04：后台任务终态上报（turn-phase
+    # 同款上报族，物理注册序在 bash-status 之前）。
+    "notify_bg_task_final",
     "notify_bash_status",
     "notify_bash_chunk",
     "notify_agent_task_status",

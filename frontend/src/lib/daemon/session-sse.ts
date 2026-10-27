@@ -83,7 +83,8 @@ export type SessionEventKind =
   | "bash_chunk"
   | "agent_task_status"
   | "queue_changed"
-  | "turn_phase";
+  | "turn_phase"
+  | "bg_task_final";
 
 /** Plan 模式摘要（plan_mode_entered 事件 payload）。 */
 export interface PlanSummary {
@@ -350,6 +351,13 @@ export interface SessionStreamHandlers {
    * 事件已在 stream 层白名单拦截丢弃（不会到达本回调）。
    */
   onTurnPhase?(event: SessionStreamEnvelope): void;
+  /**
+   * 2026-10-28-bg-task-status-report task-05（FR-03 / D-005@v1）：bg_task_final
+   * 事件——daemon 扫描环检出的后台任务终态（task_id/tool_use_id/status/
+   * output_file）。消费方失效 agent logs 查询重拉（终态数据经日志链自然到达，
+   * 活动条目状态随之翻转）；旧 daemon 无此事件零影响。
+   */
+  onBgTaskFinal?(event: SessionStreamEnvelope): void;
   /**
    * task-09 / design A6（2026-08-29-daemon-platform-resilience）：连接状态回调
    * （可选，不传不影响既有退避 / resync 行为）。进入退避重连上报

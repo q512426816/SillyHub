@@ -110,16 +110,14 @@ describe("轮次时间三段显示（quick-3c85b05e；2026-10-20 合并为一条
     expect(screen.queryAllByTestId("turn-meta-detail")).toHaveLength(0);
   });
 
-  it("进度视图（all）同样只有一条元信息行：状态徽章 + 右对齐时间细节", () => {
+  it("进度视图（all）与对话视图统一 RoundDivider（2026-10-27 visual-round4 用户指定）：同一条轮次分隔行内含时间细节", () => {
     render(<TurnTimeline {...renderProps([makeTurn()], "all")} />);
-    const detail = screen.getByTestId("turn-meta-detail");
-    expect(detail).toHaveTextContent("历时 01:36");
-    expect(detail.className).toContain("ml-auto"); // 右对齐（贴行尾）
-    expect(detail.className).toContain("text-[10.5px]");
-    expect(detail.className).toContain("font-mono");
+    // round4 统一后 all 视图与对话视图共用 RoundDivider（原 TurnStatusBadge +
+    // turn-meta-detail 独立行退役）——时间细节经 detail prop 折进胶囊。
+    const divider = screen.getByTestId("round-divider");
+    expect(divider).toHaveTextContent("历时 01:36");
     expect(screen.getAllByText(/历时 01:36/)).toHaveLength(1);
-    // 全部视图走 TurnStatusBadge 行，不再挂 RoundDivider。
-    expect(screen.queryAllByTestId("round-divider")).toHaveLength(0);
+    expect(screen.queryAllByTestId("turn-meta-detail")).toHaveLength(0);
   });
 
   it("仅 replyAt（旧数据无开始锚点）：回退单显结束时间，无开始/历时字样", () => {
@@ -254,7 +252,7 @@ describe("轮次时间三段显示（quick-3c85b05e；2026-10-20 合并为一条
     expect(screen.queryByTestId("round-divider-detail")).toBeNull();
   });
 
-  it("进度视图（all）进行中轮同享实时历时（turn-meta-detail 承载）", () => {
+  it("进度视图（all）进行中轮同享实时历时（round4 统一 RoundDivider 后经胶囊 detail 承载）", () => {
     vi.useFakeTimers();
     try {
       const startedAt = Date.now() - 5_000;
@@ -266,7 +264,8 @@ describe("轮次时间三段显示（quick-3c85b05e；2026-10-20 合并为一条
           )}
         />,
       );
-      const detail = screen.getByTestId("turn-meta-detail");
+      // round4：all 视图统一 RoundDivider——实时历时经 detail 折进胶囊（desktop）。
+      const detail = screen.getByTestId("round-divider-detail");
       expect(detail).toHaveTextContent(`开始 ${localHms(startedAt)}`);
       expect(detail).toHaveTextContent("历时 00:05");
       expect(detail.textContent).not.toContain("结束");

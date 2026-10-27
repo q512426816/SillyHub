@@ -502,6 +502,24 @@ class AgentLogMessageUsage(BaseModel):
     )
 
 
+class BgTaskFinalAttach(BaseModel):
+    """后台任务终态附着载荷（2026-10-28-bg-task-status-report task-05）。
+
+    daemon claude-code 解析器 task-notification 提取产物（task-02
+    parseTaskNotification 返回值）**逐字 camelCase 对齐**——外层挂
+    AgentLogMessageItem.bg_task_final（user_input 系统注入段）。
+    """
+
+    model_config = {"extra": "ignore"}
+
+    # camelCase 刻意为之：逐字对齐 daemon 段模型值对象键（taskId/toolUseId/
+    # outputFile），透传链零映射损耗——逐字段行尾 noqa 压 N815。
+    taskId: str = Field(description="CLI 后台任务 id")  # noqa: N815
+    toolUseId: str = Field(description="配对工具调用 id（前端按此配对工具卡）")  # noqa: N815
+    status: Literal["completed", "failed", "stopped"] = Field(description="终态三值")
+    outputFile: str | None = Field(default=None, description="输出文件路径（可选）")  # noqa: N815
+
+
 class AgentLogMessageItem(BaseModel):
     """GET /agent-logs/{entry_id}/messages 单条归一化消息（design §7.1）。
 
@@ -539,6 +557,16 @@ class AgentLogMessageItem(BaseModel):
     sender: Literal["human", "system_event"] | None = Field(
         default=None,
         description="user_input 段发言者（human=真人气泡 / system_event=系统事件中性行；缺省视为 human）",
+    )
+    # ── 2026-10-28-bg-task-status-report task-05（FR-03 / D-004@v1）：后台任务
+    # 终态附着（daemon claude-code 解析器在 task-notification 系统注入段附着；
+    # extra=ignore 下不声明即被剥离，须显式声明到达前端）。前端按 tool_use_id
+    # 配对工具卡翻转终态（后台 Bash/Agent 无 tool_result 跟随，本字段是唯一
+    # 终态来源）。内层键 camelCase 逐字对齐 daemon 段模型值对象。老 daemon /
+    # 非通知段缺省 None。──
+    bg_task_final: "BgTaskFinalAttach | None" = Field(
+        default=None,
+        description="user_input 段后台任务终态附着（task-notification 解析产物）",
     )
     turn_id: str | None = Field(
         default=None, description="轮次标识（zcode turnId / cursor 轮号 / claude-code 会话内轮序）"

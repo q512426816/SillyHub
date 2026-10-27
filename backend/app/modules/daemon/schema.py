@@ -1694,6 +1694,26 @@ class TurnPhaseReportRequest(BaseModel):
     detail: str | None = None
 
 
+class BgTaskFinalReportRequest(BaseModel):
+    """daemon 后台任务终态上报（2026-10-28-bg-task-status-report FR-02）。
+
+    daemon 扫描环（D-006@v1：60s 末段提取+快照 diff）检出 task-notification
+    终态后直调 HubClient.notifyBgTaskFinal 上报本端点。纯发布信号（D-005@v1：
+    不落库——前端活动流数据源为 daemon rollout 解析段，SSE 信号触发前端失效
+    重拉即得终态数据）；payload 键与前端 SSE 信封逐字对齐。
+
+    - ``run_id`` 可选（D-006@v1：纯信号无轮语义，task-notification 无 run_id）；
+    - ``status`` 三值封闭枚举（CLI task-notification 实证值域）；
+    - ``task_id`` / ``tool_use_id`` 前端条目配对键（与启动条目 tool_use 配对）。
+    """
+
+    run_id: uuid.UUID | None = None
+    task_id: str
+    tool_use_id: str
+    status: Literal["completed", "failed", "stopped"]
+    output_file: str | None = None
+
+
 class BashStatusEvent(BaseModel):
     """``bash_status`` 事件——Bash 命令开始/结束状态（FR-02）。
 

@@ -6008,6 +6008,36 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/daemon/sessions/{session_id}/bg-task-final": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Notify Bg Task Final
+         * @description Receive daemon background-task final report and forward to frontend SSE.
+         *
+         *     2026-10-28-bg-task-status-report task-04（FR-02 / D-005@v1 纯发布信号）：
+         *     daemon 扫描环（D-006@v1 独立环直调，非桥模式）检出 task-notification 终态
+         *     → ``publish_bg_task_final_event`` 发布 bg_task_final 事件（payload 键
+         *     task_id/tool_use_id/status/output_file/timestamp 与前端信封逐字对齐）。
+         *     不落库——前端收到信号失效 agent logs 查询重拉，终态数据经 rollout
+         *     解析链自然到达；重复上报（daemon 重启重扫）为同值信号无害。
+         *
+         *     越权防护（2026-08-25 P1）：同 notify_turn_phase，发布前做 runtime
+         *     归属校验（404 不泄露存在性）。
+         */
+        post: operations["notify_bg_task_final_api_daemon_sessions__session_id__bg_task_final_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/daemon/sessions/{session_id}/bash-status": {
         parameters: {
             query?: never;
@@ -12975,6 +13005,8 @@ export interface components {
              * @description user_input 段发言者（human=真人气泡 / system_event=系统事件中性行；缺省视为 human）
              */
             sender?: ("human" | "system_event") | null;
+            /** @description user_input 段后台任务终态附着（task-notification 解析产物） */
+            bg_task_final?: components["schemas"]["BgTaskFinalAttach"] | null;
             /**
              * Turn Id
              * @description 轮次标识（zcode turnId / cursor 轮号 / claude-code 会话内轮序）
@@ -14246,6 +14278,65 @@ export interface components {
         BatchMetaRequest: {
             /** Ids */
             ids?: string[];
+        };
+        /**
+         * BgTaskFinalAttach
+         * @description 后台任务终态附着载荷（2026-10-28-bg-task-status-report task-05）。
+         *
+         *     daemon claude-code 解析器 task-notification 提取产物（task-02
+         *     parseTaskNotification 返回值）**逐字 camelCase 对齐**——外层挂
+         *     AgentLogMessageItem.bg_task_final（user_input 系统注入段）。
+         */
+        BgTaskFinalAttach: {
+            /**
+             * Taskid
+             * @description CLI 后台任务 id
+             */
+            taskId: string;
+            /**
+             * Tooluseid
+             * @description 配对工具调用 id（前端按此配对工具卡）
+             */
+            toolUseId: string;
+            /**
+             * Status
+             * @description 终态三值
+             * @enum {string}
+             */
+            status: "completed" | "failed" | "stopped";
+            /**
+             * Outputfile
+             * @description 输出文件路径（可选）
+             */
+            outputFile?: string | null;
+        };
+        /**
+         * BgTaskFinalReportRequest
+         * @description daemon 后台任务终态上报（2026-10-28-bg-task-status-report FR-02）。
+         *
+         *     daemon 扫描环（D-006@v1：60s 末段提取+快照 diff）检出 task-notification
+         *     终态后直调 HubClient.notifyBgTaskFinal 上报本端点。纯发布信号（D-005@v1：
+         *     不落库——前端活动流数据源为 daemon rollout 解析段，SSE 信号触发前端失效
+         *     重拉即得终态数据）；payload 键与前端 SSE 信封逐字对齐。
+         *
+         *     - ``run_id`` 可选（D-006@v1：纯信号无轮语义，task-notification 无 run_id）；
+         *     - ``status`` 三值封闭枚举（CLI task-notification 实证值域）；
+         *     - ``task_id`` / ``tool_use_id`` 前端条目配对键（与启动条目 tool_use 配对）。
+         */
+        BgTaskFinalReportRequest: {
+            /** Run Id */
+            run_id?: string | null;
+            /** Task Id */
+            task_id: string;
+            /** Tool Use Id */
+            tool_use_id: string;
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "completed" | "failed" | "stopped";
+            /** Output File */
+            output_file?: string | null;
         };
         /**
          * BindPpmProjectRequest
@@ -40649,6 +40740,43 @@ export interface operations {
         requestBody: {
             content: {
                 "application/json": components["schemas"]["TurnPhaseReportRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: boolean;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    notify_bg_task_final_api_daemon_sessions__session_id__bg_task_final_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                session_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["BgTaskFinalReportRequest"];
             };
         };
         responses: {

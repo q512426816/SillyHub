@@ -108,6 +108,7 @@ import { listRoots } from './roots-rpc.js';
 // 2026-09-07-agent-liveness-states task-06：liveness tailer 自发现/上报接线。
 import { LivenessTailer, type WatchTarget } from './agent-log/liveness/tailer.js';
 import { discoverLivenessWatchTargets } from './agent-log/liveness/discovery.js';
+import { extractTaskNotifications } from './agent-log/parse-claude-code-jsonl.js';
 // R6（ql-20260908-006）：liveness 推送 root/workspace 归属走 policy 层边界敏感判定。
 import { isPathUnderAnyRoot } from './policy/path-utils.js';
 import {
@@ -1197,6 +1198,22 @@ interface ClientLike {
     detail?: string,
   ): Promise<Record<string, unknown>>;
   /**
+   * 2026-10-28-bg-task-status-report task-03（FR-01 / D-006@v1）：后台任务
+   * 终态上报（扫描环直调）。运行时真实 _client 为 HubClient 实例
+   * （hub-client.ts notifyBgTaskFinal 已实现）；失败透传由扫描环 catch 吞噬。
+   * ClientLike additive 声明（notifyTurnPhase 同款）。
+   */
+  notifyBgTaskFinal(
+    sessionId: string,
+    payload: {
+      run_id?: string;
+      task_id: string;
+      tool_use_id: string;
+      status: 'completed' | 'failed' | 'stopped';
+      output_file?: string;
+    },
+  ): Promise<Record<string, unknown>>;
+  /**
    * task-06（session-reopen-resume / DS-3 / FR-03）：reopen 恢复成功后向
    * backend 确认 reconnecting → active。可选方法（? 有 markOffline 先例）：
    * reopen 路径经 _routeSessionResume 调用，opts 显式透传 payload 的
@@ -2192,6 +2209,13 @@ export class Daemon {
   >();
   /** liveness tailer（10s tick；独立 try 包裹，R-02 崩溃不影响主循环）。 */
   private _livenessTailer: LivenessTailer | null = null;
+  /**
+   * 2026-10-28-bg-task-status-report task-03：后台任务终态快照（logPath →
+   * Map<taskId, status>）——扫描环 diff 基线；首扫只建基线不上报（防重启
+   * 风暴，漏报=维持现状可接受，D-006）。
+   */
+  private readonly _bgTaskSnapshots = new Map<string, Map<string, string>>();
+  private _bgTaskSeeded = false;
   /** logPath → 推送元数据（serverUrl/token 分组 + create 元信息 + D-012 覆盖键）。 */
   private readonly _livenessMetaByPath = new Map<string, LivenessPushTargetMeta>();
 
@@ -2649,6 +2673,9 @@ export class Daemon {
 
     // 3. 启动三循环
     this._fire((signal) => this._livenessLoop(signal));
+    // 2026-10-28-bg-task-status-report task-03（D-006 独立扫描环，与 liveness
+    // loop 同生命周期同节拍族）：后台任务终态检出→上报。
+    this._fire((signal) => this._bgTaskFinalLoop(signal));
     this._fire((signal) => this._heartbeatLoop(signal));
     this._fire((signal) => this._pollLoop(signal));
     this._fire((signal) => this._wsLoop(signal));
@@ -6889,6 +6916,93 @@ export class Daemon {
    * workspace token 读各 root 的 .sillyspec/local.yaml platform 段（init 下发、
    * daemon 自己写入——local-yaml-writer writeLocalYaml 同源格式）。
    */
+  /**
+   * 2026-10-28-bg-task-status-report task-03（FR-01 / D-006@v1 独立扫描环）：
+   * 每 60s 对 liveness 发现链的 claude-code 日志末段（64KB）提取 task-notification
+   * 终态，与快照 diff 后经 HubClient.notifyBgTaskFinal 上报（纯信号——前端收到
+   * 即失效 agent logs 查询重拉，条目终态自然翻转）。仅上报有 agentSessionId 的
+   * 目标（spawn 记录/persisted 恢复/registry 登记行；rescan 发现的本地 CLI 无
+   * 会话身份跳过）。全程 try 包裹（R-02 同款：任何异常只 delay 后继续）。
+   */
+  private async _bgTaskFinalLoop(signal: AbortSignal): Promise<void> {
+    const BG_SCAN_TAIL_BYTES = 64 * 1024;
+    const { readFile } = await import('node:fs/promises');
+    const { stat } = await import('node:fs/promises');
+    while (!signal.aborted) {
+      try {
+        const targets = discoverLivenessWatchTargets({
+          spawnRecords: [
+            ...[...this._livenessSpawnRecords.entries()].map(([agentSessionId, r]) => ({
+              provider: r.provider,
+              cwd: r.cwd,
+              agentSessionId,
+            })),
+          ],
+          rescan: false,
+          resolveWorkspace: () => 'daemon',
+        });
+        for (const t of targets) {
+          if (t.format !== 'claude-code-jsonl') continue;
+          if (!t.agentSessionId) continue;
+          let tail = '';
+          try {
+            const st = await stat(t.logPath);
+            const start = Math.max(0, st.size - BG_SCAN_TAIL_BYTES);
+            const fh = await readFile(t.logPath);
+            tail = fh.subarray(start).toString('utf8');
+          } catch {
+            continue; // 文件消失/读失败：下轮再看
+          }
+          const found = extractTaskNotifications(tail);
+          if (found.length === 0) continue;
+          let snap = this._bgTaskSnapshots.get(t.logPath);
+          if (snap === undefined) {
+            snap = new Map<string, string>();
+            this._bgTaskSnapshots.set(t.logPath, snap);
+          }
+          for (const f of found) {
+            if (!this._bgTaskSeeded) {
+              snap.set(f.taskId, f.status);
+              continue; // 首扫建基线不上报（D-006 防风暴）
+            }
+            if (snap.get(f.taskId) === f.status) continue; // 幂等：同值跳过
+            snap.set(f.taskId, f.status);
+            try {
+              await this._client.notifyBgTaskFinal(t.agentSessionId, {
+                task_id: f.taskId,
+                tool_use_id: f.toolUseId,
+                status: f.status,
+                ...(f.outputFile != null ? { output_file: f.outputFile } : {}),
+              });
+            } catch (e: unknown) {
+              // D-009 同款：上报失败仅记日志绝不阻塞扫描环；快照已记——同值
+              // 不重试（终态非瞬时信号，丢失影响=平台条目维持 running 至下次变化）
+              this._logger.debug('bg_task_final_report_failed', {
+                session_id: t.agentSessionId,
+                task_id: f.taskId,
+                error: e instanceof Error ? e.message : String(e),
+              });
+            }
+          }
+          // ended 清理对齐 liveness R9：路径不再产出时防 Map 只增不减
+          if (this._bgTaskSnapshots.size > 200) {
+            for (const [p2, m] of this._bgTaskSnapshots) {
+              if (m.size === 0) this._bgTaskSnapshots.delete(p2);
+            }
+          }
+        }
+        this._bgTaskSeeded = true;
+      } catch (e) {
+        if (e instanceof AbortError) break;
+        this._logger.warn('bg_task_scan_failed', { error: String(e) });
+      }
+      try {
+        await abortableSleep(60_000, signal);
+      } catch {
+        break;
+      }
+    }
+  }
   private async _livenessLoop(signal: AbortSignal): Promise<void> {
     const serverUrl = this._serverOrigin();
     const tailer = new LivenessTailer({

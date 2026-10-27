@@ -34,6 +34,7 @@ from app.modules.daemon.protocol import PermissionRequestPayload
 from app.modules.daemon.router import SessionDep, TaskRunAgentUser, router
 from app.modules.daemon.run_sync.service import (
     publish_bash_chunk_event,
+    publish_bg_task_final_event,
     publish_session_event,
     publish_turn_phase_event,
 )
@@ -41,6 +42,7 @@ from app.modules.daemon.schema import (
     AgentTaskStatusEvent,
     BashChunkEvent,
     BashStatusEvent,
+    BgTaskFinalReportRequest,
     PlanModeEnteredEvent,
     PlanResponseRequest,
     TurnPhaseReportRequest,
@@ -347,6 +349,40 @@ async def notify_turn_phase(
     """
     await SessionService(session).get_session_for_runtime_owner(session_id, user.id)
     await publish_turn_phase_event(session_id, data.run_id, data.phase, data.detail)
+    return {"ok": True}
+
+
+@router.post(
+    "/sessions/{session_id}/bg-task-final",
+    response_model=dict[str, bool],
+)
+async def notify_bg_task_final(
+    session_id: uuid.UUID,
+    data: BgTaskFinalReportRequest,
+    session: SessionDep,
+    user: Annotated[User, Depends(get_current_principal)],
+) -> dict[str, bool]:
+    """Receive daemon background-task final report and forward to frontend SSE.
+
+    2026-10-28-bg-task-status-report task-04（FR-02 / D-005@v1 纯发布信号）：
+    daemon 扫描环（D-006@v1 独立环直调，非桥模式）检出 task-notification 终态
+    → ``publish_bg_task_final_event`` 发布 bg_task_final 事件（payload 键
+    task_id/tool_use_id/status/output_file/timestamp 与前端信封逐字对齐）。
+    不落库——前端收到信号失效 agent logs 查询重拉，终态数据经 rollout
+    解析链自然到达；重复上报（daemon 重启重扫）为同值信号无害。
+
+    越权防护（2026-08-25 P1）：同 notify_turn_phase，发布前做 runtime
+    归属校验（404 不泄露存在性）。
+    """
+    await SessionService(session).get_session_for_runtime_owner(session_id, user.id)
+    await publish_bg_task_final_event(
+        session_id,
+        data.run_id,
+        data.task_id,
+        data.tool_use_id,
+        data.status,
+        data.output_file,
+    )
     return {"ok": True}
 
 

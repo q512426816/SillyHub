@@ -15759,6 +15759,64 @@
         }
       }
     },
+    "/api/daemon/sessions/{session_id}/bg-task-final": {
+      "post": {
+        "tags": [
+          "daemon"
+        ],
+        "summary": "Notify Bg Task Final",
+        "description": "Receive daemon background-task final report and forward to frontend SSE.\n\n2026-10-28-bg-task-status-report task-04（FR-02 / D-005@v1 纯发布信号）：\ndaemon 扫描环（D-006@v1 独立环直调，非桥模式）检出 task-notification 终态\n→ ``publish_bg_task_final_event`` 发布 bg_task_final 事件（payload 键\ntask_id/tool_use_id/status/output_file/timestamp 与前端信封逐字对齐）。\n不落库——前端收到信号失效 agent logs 查询重拉，终态数据经 rollout\n解析链自然到达；重复上报（daemon 重启重扫）为同值信号无害。\n\n越权防护（2026-08-25 P1）：同 notify_turn_phase，发布前做 runtime\n归属校验（404 不泄露存在性）。",
+        "operationId": "notify_bg_task_final_api_daemon_sessions__session_id__bg_task_final_post",
+        "parameters": [
+          {
+            "name": "session_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Session Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BgTaskFinalReportRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": {
+                    "type": "boolean"
+                  },
+                  "title": "Response Notify Bg Task Final Api Daemon Sessions  Session Id  Bg Task Final Post"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/daemon/sessions/{session_id}/bash-status": {
       "post": {
         "tags": [
@@ -37380,6 +37438,17 @@
             "title": "Sender",
             "description": "user_input 段发言者（human=真人气泡 / system_event=系统事件中性行；缺省视为 human）"
           },
+          "bg_task_final": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/BgTaskFinalAttach"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "user_input 段后台任务终态附着（task-notification 解析产物）"
+          },
           "turn_id": {
             "anyOf": [
               {
@@ -40768,6 +40837,102 @@
         "type": "object",
         "title": "BatchMetaRequest",
         "description": "批量元数据请求（按 id 列表查 FileMetaResp）。"
+      },
+      "BgTaskFinalAttach": {
+        "properties": {
+          "taskId": {
+            "type": "string",
+            "title": "Taskid",
+            "description": "CLI 后台任务 id"
+          },
+          "toolUseId": {
+            "type": "string",
+            "title": "Tooluseid",
+            "description": "配对工具调用 id（前端按此配对工具卡）"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "completed",
+              "failed",
+              "stopped"
+            ],
+            "title": "Status",
+            "description": "终态三值"
+          },
+          "outputFile": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Outputfile",
+            "description": "输出文件路径（可选）"
+          }
+        },
+        "type": "object",
+        "required": [
+          "taskId",
+          "toolUseId",
+          "status"
+        ],
+        "title": "BgTaskFinalAttach",
+        "description": "后台任务终态附着载荷（2026-10-28-bg-task-status-report task-05）。\n\ndaemon claude-code 解析器 task-notification 提取产物（task-02\nparseTaskNotification 返回值）**逐字 camelCase 对齐**——外层挂\nAgentLogMessageItem.bg_task_final（user_input 系统注入段）。"
+      },
+      "BgTaskFinalReportRequest": {
+        "properties": {
+          "run_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Run Id"
+          },
+          "task_id": {
+            "type": "string",
+            "title": "Task Id"
+          },
+          "tool_use_id": {
+            "type": "string",
+            "title": "Tool Use Id"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "completed",
+              "failed",
+              "stopped"
+            ],
+            "title": "Status"
+          },
+          "output_file": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Output File"
+          }
+        },
+        "type": "object",
+        "required": [
+          "task_id",
+          "tool_use_id",
+          "status"
+        ],
+        "title": "BgTaskFinalReportRequest",
+        "description": "daemon 后台任务终态上报（2026-10-28-bg-task-status-report FR-02）。\n\ndaemon 扫描环（D-006@v1：60s 末段提取+快照 diff）检出 task-notification\n终态后直调 HubClient.notifyBgTaskFinal 上报本端点。纯发布信号（D-005@v1：\n不落库——前端活动流数据源为 daemon rollout 解析段，SSE 信号触发前端失效\n重拉即得终态数据）；payload 键与前端 SSE 信封逐字对齐。\n\n- ``run_id`` 可选（D-006@v1：纯信号无轮语义，task-notification 无 run_id）；\n- ``status`` 三值封闭枚举（CLI task-notification 实证值域）；\n- ``task_id`` / ``tool_use_id`` 前端条目配对键（与启动条目 tool_use 配对）。"
       },
       "BindPpmProjectRequest": {
         "properties": {

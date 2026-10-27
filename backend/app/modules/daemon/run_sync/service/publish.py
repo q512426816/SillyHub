@@ -384,6 +384,43 @@ async def publish_turn_phase_event(
     )
 
 
+async def publish_bg_task_final_event(
+    session_id: uuid.UUID,
+    run_id: uuid.UUID | None,
+    task_id: str,
+    tool_use_id: str,
+    status: str,
+    output_file: str | None,
+) -> None:
+    """发布 ``bg_task_final`` 事件到 ``agent_session:{session_id}`` 频道。
+
+    2026-10-28-bg-task-status-report task-04（FR-02 / D-005@v1 纯发布信号）：
+    前端收到即失效 agent logs 查询重拉——活动数据经 daemon rollout 解析链
+    自然含 task-02 的终态附着段，条目状态随之翻转。payload 键与前端信封
+    逐字对齐；异常吞噬 + warning（纯增强信号，发布失败不阻断上报主流程，
+    底座 publish_json_event 已兜）。
+    """
+    payload: dict = {
+        "event": "bg_task_final",
+        "session_id": str(session_id),
+        "run_id": str(run_id) if run_id is not None else None,
+        "task_id": task_id,
+        "tool_use_id": tool_use_id,
+        "status": status,
+        "output_file": output_file,
+        "timestamp": datetime.now(UTC).isoformat(),
+    }
+    await publish_json_event(
+        redis_getter=_rsvc.get_redis,
+        channel=f"agent_session:{session_id}",
+        payload=payload,
+        log=_rsvc.log,
+        failure_event="bg_task_final_redis_publish_failed",
+        session_id=str(session_id),
+        event_type="bg_task_final",
+    )
+
+
 async def publish_bash_chunk_event(event: BashChunkEvent) -> bool:
     """发布 bash_chunk 事件（100ms 节流 + 8KB 截断），返回是否实际发布。
 

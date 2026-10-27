@@ -230,6 +230,7 @@ type ConversationTurn =
 function toToolCallEntry(
   use: AgentLogMessageItem,
   result: AgentLogMessageItem | undefined,
+  bgFinalStatus?: "completed" | "failed" | "stopped",
 ): ToolCallEntry {
   const args = use.tool_input ?? "";
   let rawArgs: unknown = null;
@@ -245,7 +246,13 @@ function toToolCallEntry(
     status: "allowed",
     // is_error 着失败红（success=false → StatusBadge ✗）；失配分支不走
     // ToolCallPreview（由「结果未记录」中性徽章承接），此处取值不参与其渲染。
-    success: result ? !(result.is_error ?? false) : false,
+    // bg_task_final：completed→成功绿 / failed+stopped→失败红（stopped 用户
+    // 中止非错误，但 StatusBadge 仅二元——归 ✗ 中性可辨，注释留痕口径）。
+    success: result
+      ? !(result.is_error ?? false)
+      : bgFinalStatus != null
+        ? bgFinalStatus === "completed"
+        : false,
     rawArgs,
     toolUseId: use.tool_use_id ?? undefined,
   };
@@ -258,7 +265,7 @@ function toToolCallEntry(
  * 窗口外）独立成 ToolResultCard 段。user_input 切回合边界，其余段聚进
  * assistant 回合，回合时间取末段有效 ts。
  */
-function buildConversationTurns(
+export function buildConversationTurns(
   messages: AgentLogMessageItem[],
 ): ConversationTurn[] {
   // tool_use_id → 首条 tool_result（seq 升序下最早结果；重复结果按孤儿渲染）。
@@ -266,6 +273,24 @@ function buildConversationTurns(
   for (const m of messages) {
     if (m.kind === "tool_result" && m.tool_use_id && !resultById.has(m.tool_use_id)) {
       resultById.set(m.tool_use_id, m);
+    }
+  }
+  // 2026-10-28-bg-task-status-report task-05 补闭环（验收评审 FR-03 fail 解阻）：
+  // 后台任务终态索引——task-notification 系统注入段（user_input + bg_task_final
+  // 附着，task-02 产出）按 toolUseId 配对。后台 Bash/Agent 的 tool_result 永不
+  // 到达（结果经 task-notification 异步交付），finalById 是其唯一终态来源；
+  // 命中即视同有结果（hasResult/时长/终态着色），未命中维持现状（旧 daemon
+  // /运行中任务照旧）。幂等：Map 首个附着生效，重复终态事件天然去重。
+  const finalById = new Map<
+    string,
+    { status: "completed" | "failed" | "stopped"; ts: string | null }
+  >();
+  for (const m of messages) {
+    if (m.bg_task_final?.toolUseId && !finalById.has(m.bg_task_final.toolUseId)) {
+      finalById.set(m.bg_task_final.toolUseId, {
+        status: m.bg_task_final.status,
+        ts: m.ts ?? null,
+      });
     }
   }
   const consumedResultIds = new Set<string>();
@@ -294,19 +319,25 @@ function buildConversationTurns(
       case "tool_use": {
         const result = m.tool_use_id ? resultById.get(m.tool_use_id) : undefined;
         if (result?.tool_use_id) consumedResultIds.add(result.tool_use_id);
+        // bg_task_final 补闭环：后台任务终态（无 tool_result 时的等效结果）
+        const bgFinal = m.tool_use_id ? finalById.get(m.tool_use_id) : undefined;
         const startMs = m.ts ? Date.parse(m.ts) : NaN;
-        const endMs = result?.ts ? Date.parse(result.ts) : NaN;
+        const endMs = result?.ts
+          ? Date.parse(result.ts)
+          : bgFinal?.ts
+            ? Date.parse(bgFinal.ts)
+            : NaN;
         current.segments.push({
           kind: "tool_use",
           seq: m.seq,
-          entry: toToolCallEntry(m, result),
+          entry: toToolCallEntry(m, result, bgFinal?.status),
           mergedResult: result?.tool_result ?? undefined,
           durationMs:
             Number.isFinite(startMs) && Number.isFinite(endMs) && endMs >= startMs
               ? endMs - startMs
               : undefined,
           editPatch: result?.edit_patch ?? undefined,
-          hasResult: Boolean(result),
+          hasResult: Boolean(result) || bgFinal !== undefined,
         });
         break;
       }

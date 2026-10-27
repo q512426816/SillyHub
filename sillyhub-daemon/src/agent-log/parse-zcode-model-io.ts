@@ -120,6 +120,18 @@ export interface NormalizedLogMessage {
    * 有意义，其余 kind 不设；缺省视为 'human'。
    */
   sender?: 'human' | 'system_event';
+  /**
+   * 后台任务终态附着（2026-10-28-bg-task-status-report D-004@v1 执行期裁决：
+   * 附着字段而非新 kind——五值枚举不动，老消费方零影响）。仅 user_input 段
+   * （sender='system_event' 且正文为 task-notification 块）由 claude-code
+   * 解析器提取附着；其余 kind/解析器缺省不设。
+   */
+  bg_task_final?: {
+    taskId: string;
+    toolUseId: string;
+    status: 'completed' | 'failed' | 'stopped';
+    outputFile: string | null;
+  };
   /** 所属轮次标识（zcode 顶层 turnId / cursor turn_ended 轮号 / claude-code 会话内轮序）。 */
   turn_id?: string | null;
   /** 该次调用的模型标识（如 "GLM-5.3"，zcode modelId）。 */

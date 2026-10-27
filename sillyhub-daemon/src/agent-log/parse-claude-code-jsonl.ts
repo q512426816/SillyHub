@@ -292,6 +292,47 @@ function assistantSegments(message: Record<string, unknown>, ts: string | null):
  *   该行全部 tool_result 段（实证一行单 tool_result；多块同 patch 为无害超集）。
  * @returns null = content 形状不符（坏行）；空数组 = 合法空行。
  */
+/**
+ * 2026-10-28-bg-task-status-report task-02 / D-004@v1：从 user 文本提取
+ * task-notification 后台任务终态载荷（纯函数；格式漂移/字段缺失返回 null
+ * 静默降级——平台维持现状 fail-safe）。文本实证形态（本会话 rollout 实录）：
+ * task-notification 块内 task-id / tool-use-id / output-file / status 四标签。
+ */
+export function parseTaskNotification(
+  text: string,
+): { taskId: string; toolUseId: string; status: 'completed' | 'failed' | 'stopped'; outputFile: string | null } | null {
+  if (!text.startsWith('<task-notification>')) return null;
+  const pick = (tag: string): string | null => {
+    const m = text.match(new RegExp(`<${tag}>([^<]*)</${tag}>`));
+    return m?.[1]?.trim() ?? null;
+  };
+  const taskId = pick('task-id');
+  const toolUseId = pick('tool-use-id');
+  const statusRaw = pick('status');
+  if (!taskId || !toolUseId) return null;
+  if (statusRaw !== 'completed' && statusRaw !== 'failed' && statusRaw !== 'stopped') {
+    return null;
+  }
+  return { taskId, toolUseId, status: statusRaw, outputFile: pick('output-file') };
+}
+
+/**
+ * task-03（2026-10-28-bg-task-status-report）：从任意文本段提取全部
+ * task-notification 终态载荷（扫描环消费——日志末段可能有多个块，逐块走
+ * parseTaskNotification 单块提取；块内字段失配的块跳过不中断）。纯函数。
+ */
+export function extractTaskNotifications(
+  text: string,
+): Array<{ taskId: string; toolUseId: string; status: 'completed' | 'failed' | 'stopped'; outputFile: string | null }> {
+  const out: Array<{ taskId: string; toolUseId: string; status: 'completed' | 'failed' | 'stopped'; outputFile: string | null }> = [];
+  const blocks = text.split('<task-notification>').slice(1);
+  for (const raw of blocks) {
+    const payload = parseTaskNotification('<task-notification>' + raw.split('</task-notification>')[0]! + '</task-notification>');
+    if (payload != null) out.push(payload);
+  }
+  return out;
+}
+
 function userSegments(
   message: Record<string, unknown>,
   ts: string | null,
@@ -302,7 +343,15 @@ function userSegments(
   const content = message.content;
   if (typeof content === 'string') {
     if (content.trim() === '') return [];
-    return [makeSegment('user_input', ts, { text: content, sender: userSender(content, isMeta) })];
+    const bgFinal = parseTaskNotification(content);
+    return [
+      makeSegment('user_input', ts, {
+        text: content,
+        sender: userSender(content, isMeta),
+        // task-02：task-notification 系统注入段附着结构化终态载荷（失配不附着）
+        ...(bgFinal != null ? { bg_task_final: bgFinal } : {}),
+      }),
+    ];
   }
   if (!Array.isArray(content)) return null;
 

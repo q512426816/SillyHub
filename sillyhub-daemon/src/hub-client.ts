@@ -349,6 +349,21 @@ export interface NotifyTurnPhaseBody {
 }
 
 /**
+ * 2026-10-28-bg-task-status-report task-03：后台任务终态上报 body
+ * （snake_case，对齐 backend BgTaskFinalReportRequest）。run_id 可缺省
+ * （D-006@v1：纯信号无轮语义——task-notification 自身无 run_id，前端翻转
+ * 仅用 tool_use_id 配对）。
+ */
+export interface NotifyBgTaskFinalBody {
+  session_id: string;
+  run_id?: string;
+  task_id: string;
+  tool_use_id: string;
+  status: 'completed' | 'failed' | 'stopped';
+  output_file?: string;
+}
+
+/**
  * task-02（2026-08-27-background-subagent-progress / design §8）：Agent 任务状态
  * 事件扩展可选字段（契约冻结，snake_case 对齐 backend AgentTaskStatusEvent 新字段）。
  *
@@ -1543,6 +1558,29 @@ export class HubClient {
     return this._request<Record<string, unknown>>(
       'POST',
       `${REST_PREFIX}/sessions/${encodeURIComponent(sessionId)}/turn-phase`,
+      body,
+    );
+  }
+
+  /**
+   * 2026-10-28-bg-task-status-report task-03（FR-01 / D-006@v1）：上报后台
+   * 任务终态（daemon 扫描环检出 task-notification 后直调，无需桥）。
+   *
+   * 端点：POST {REST_PREFIX}/sessions/{sessionId}/bg-task-final
+   * body（snake_case，对齐 backend BgTaskFinalReportRequest）：
+   *   { session_id, run_id?, task_id, tool_use_id, status, output_file? }
+   *
+   * 失败语义（对齐 _request / D-009）：非 2xx → HubHttpError；网络/超时透传。
+   * 调用方（daemon 扫描环）catch 吞噬——上报失败仅记日志，绝不阻塞扫描环。
+   */
+  async notifyBgTaskFinal(
+    sessionId: string,
+    payload: Omit<NotifyBgTaskFinalBody, 'session_id'>,
+  ): Promise<Record<string, unknown>> {
+    const body: NotifyBgTaskFinalBody = { session_id: sessionId, ...payload };
+    return this._request<Record<string, unknown>>(
+      'POST',
+      `${REST_PREFIX}/sessions/${encodeURIComponent(sessionId)}/bg-task-final`,
       body,
     );
   }

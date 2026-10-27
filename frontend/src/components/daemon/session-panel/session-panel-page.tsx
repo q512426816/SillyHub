@@ -103,6 +103,8 @@ import { isActiveTeamMission } from "@/components/daemon/team-task-block";
 import { ActivityCatalog, type AgentTaskEntry } from "@/components/daemon/activity-catalog";
 import { type TeamTriggerInitialConfig } from "@/components/daemon/team-trigger-popover";
 import { AgentLogCard } from "@/components/daemon/agent-log-card";
+// 2026-10-28-bg-task-status-report task-05：onBgTaskFinal 失效 agent logs 查询用
+import { queryKeys } from "@/lib/query-keys";
 // task-12（2026-09-19-tool-report-session-replay）：tool_report 纯日志会话主体
 // 换挂 AgentReplayBody（task-11 逐轮回放主体），原日志条目流主体组件退役删除。
 import { AgentReplayBody } from "@/components/daemon/agent-replay-body";
@@ -2113,6 +2115,13 @@ export function SessionPanelPage({
                 prev.currentRunId,
               ),
             }));
+          },
+          // 2026-10-28-bg-task-status-report task-05（FR-03 / D-005@v1）：后台
+          // 任务终态信号 → 失效 agent logs 查询重拉——活动数据经日志链自然
+          // 含终态，条目状态随之翻转（免逐渲染层改状态机）；终态事件重放
+          // 幂等（失效重拉天然幂等）。旧 daemon 无此事件零影响。
+          onBgTaskFinal: () => {
+            void qc.invalidateQueries({ queryKey: queryKeys.agentLogs.all });
           },
         }),
         { cursor: streamCursor, initialSync, runsSnapshot },
