@@ -10,6 +10,7 @@
 from __future__ import annotations
 
 import io
+import re
 import uuid
 from pathlib import PurePosixPath, PureWindowsPath
 
@@ -143,6 +144,59 @@ def _is_multimodal_media(media_type: str) -> bool:
 def attachment_marker_line(row: SessionAttachment) -> str:
     """D-3 标记行：[附件:id|kind|name]（kind 取 DB 原始值，供前端回显缩略图）。"""
     return f"[附件:{row.id}|{row.kind}|{row.name}]"
+
+
+# ── 会话展示标题剥离（2026-10-28-change-detail-sessions-source-fix）─────────
+# 完整标记行（与 attachment_marker_line 同格式权威）：uuid 前缀口径对齐
+# daemon/session/service/auto_resume.py（宁可多拦：任何 [附件:<uuid36>| 前缀行）。
+_ATTACHMENT_MARKER_LINE_RE = re.compile(
+    r"^\[附件:[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-"
+    r"[0-9a-fA-F]{12}\|"
+)
+# name 段贪婪到行尾 ]（name 可含 |，文件名合法字符）；仅完整标记行可提取。
+_ATTACHMENT_MARKER_NAME_RE = re.compile(
+    r"^\[附件:[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-"
+    r"[0-9a-fA-F]{12}\|[^|]*\|(.+)\]$"
+)
+
+
+def session_display_title(content: str | None) -> str | None:
+    """首条 user_input 原文 → 会话展示标题（change/agent/daemon 三端点同源消费）。
+
+    - 无任何附件标记行：``content[:30]``（与旧口径逐字节一致，零回归——含换行
+      原样保留，不做 strip）；
+    - 含标记行：剥全部标记行后取首个非空文本行（strip 后）前 30 字；以
+      ``[附件:`` 开头但不完整的行是 substr 截断残骸，同样丢弃；
+    - 纯附件（剥离后无剩余文本）：回退首个附件的 name 段（如 IMG_2038.png）；
+    - 空文本 / 全部丢弃：None（调用方回退既有 id 前 8 位展示）。
+    """
+    if not content:
+        return None
+    has_marker = False
+    first_attachment_name: str | None = None
+    text_line: str | None = None
+    for line in content.splitlines():
+        stripped = line.strip()
+        if not stripped:
+            continue
+        if _ATTACHMENT_MARKER_LINE_RE.match(stripped):
+            has_marker = True
+            if first_attachment_name is None:
+                name_match = _ATTACHMENT_MARKER_NAME_RE.match(stripped)
+                if name_match:
+                    first_attachment_name = name_match.group(1)
+            continue
+        if stripped.startswith("[附件:"):
+            # 截断残骸（substr 窗口内 uuid/闭合 ] 未写全）——无信息量，丢弃。
+            has_marker = True
+            continue
+        if text_line is None:
+            text_line = stripped
+    if not has_marker:
+        return content[:30] or None
+    if text_line is not None:
+        return text_line[:30]
+    return (first_attachment_name or "")[:30] or None
 
 
 async def assemble_inject_attachments(

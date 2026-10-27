@@ -116,3 +116,50 @@ async def test_assemble_inline_downgrade_and_pullback() -> None:
 def test_marker_line_format() -> None:
     row = _row()
     assert attachment_marker_line(row) == f"[附件:{row.id}|image|a.png]"
+
+
+def test_session_display_title_strips_attachment_markers() -> None:
+    """2026-10-28-change-detail-sessions-source-fix FR-04：标题剥离附件标记。
+
+    混合（附件标记 + 正文）→ 首个非空文本行前 30 字；截断残骸行同样丢弃。
+    """
+    from app.modules.session_attachment.service import session_display_title
+
+    att1 = uuid.uuid4()
+    att2 = uuid.uuid4()
+    content = (
+        f"[附件:{att1}|image|IMG_2038.png]\r\n"
+        f"[附件:{att2}|image|IMG_2037.png]\r\n"
+        "\r\n移动端四个页面布局乱了，帮我修一下"
+    )
+    assert session_display_title(content) == "移动端四个页面布局乱了，帮我修一下"
+
+    # 截断残骸（uuid 未写全）不进标题
+    assert session_display_title("[附件:02d8fdc9-023b-4e31-a787-6\n正文在这里") == "正文在这里"
+
+
+def test_session_display_title_pure_attachment_falls_back_to_name() -> None:
+    """FR-04：纯附件消息回退首个附件 name 段。"""
+    from app.modules.session_attachment.service import session_display_title
+
+    att = uuid.uuid4()
+    assert session_display_title(f"[附件:{att}|image|IMG_2038.png]") == "IMG_2038.png"
+    # 多附件取首个；name 含 | 时贪婪取到行尾 ]
+    a1, a2 = uuid.uuid4(), uuid.uuid4()
+    content = f"[附件:{a1}|file|报告|v2.pdf]\n[附件:{a2}|image|b.png]"
+    assert session_display_title(content) == "报告|v2.pdf"
+
+
+def test_session_display_title_plain_text_zero_regression() -> None:
+    """FR-04：无附件标记的纯文本与旧口径逐字节一致（不 strip、含换行原样）。"""
+    from app.modules.session_attachment.service import session_display_title
+
+    plain = "普通会话首条消息"
+    assert session_display_title(plain) == plain
+    # 多行正文：整串前 30 字（含换行），与旧实现 (content or "")[:30] 逐字节一致
+    multiline = "第一行\n第二行"
+    assert session_display_title(multiline) == multiline[:30]
+    # 前导空白保留（不 strip）；空文本归一 None
+    assert session_display_title("  缩进开头") == "  缩进开头"
+    assert session_display_title("") is None
+    assert session_display_title(None) is None
