@@ -76,6 +76,7 @@ from app.modules.daemon.session.service.thinking_level import (
     set_session_thinking_level as _set_thinking_level_svc,
 )
 from app.modules.daemon.session_events import SESSIONS_CHANGED_CHANNEL
+from app.modules.session_attachment.service import session_display_title
 
 log = get_logger("app.modules.daemon.router")
 
@@ -401,7 +402,7 @@ async def list_sessions(
             title_subq = (
                 sa_select(
                     AgentRun.agent_session_id.label("session_id"),
-                    sa_func.substr(AgentRunLog.content_redacted, 1, 64).label("content"),
+                    sa_func.substr(AgentRunLog.content_redacted, 1, 512).label("content"),
                     rn,
                 )
                 .join(AgentRunLog, AgentRunLog.run_id == AgentRun.id)
@@ -438,10 +439,13 @@ async def list_sessions(
             await session.commit()
         session_titles: dict[uuid.UUID, str | None] = {item.id: item.title for item in items}
         for r in reads:
-            # title 优先；回退展示截 30 字（列存 64 源、消费口径与旧路径逐字节一致），
-            # 哨兵 ''/None 均保持 title=None（与旧零输入语义一致）
-            fb = (fallback_map.get(r.id) or "")[:30]
-            r.title = session_titles.get(r.id) or (fb or None)
+            # title 优先；回退展示过 session_display_title（2026-10-28-change-detail-
+            # sessions-source-fix FR-04：剥附件标记取正文/纯附件回退 name，与
+            # change/agent router 三处同源）。存量列 64 源截断残骸被 helper 丢弃
+            # （极端无 name 可取时归 None，前端回退 id 前 8 位）；哨兵 ''/None
+            # 均保持 title=None（与旧零输入语义一致）。
+            fb = session_display_title(fallback_map.get(r.id))
+            r.title = session_titles.get(r.id) or fb
     # 2026-10-27-sessions-total-and-status-filter FR-01/FR-04：分组状态计数
     # （忽略状态维度的当前 scope 全量口径——chips「全部/在线/已结束/失败」
     # 计数不随 limit 截短或当前状态档位漂移）。

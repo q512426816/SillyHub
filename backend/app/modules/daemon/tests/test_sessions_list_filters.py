@@ -1108,3 +1108,31 @@ class TestPpmItemFilter:
         body = resp.json()
         assert body["total"] == 1
         assert [i["id"] for i in body["items"]] == [str(s_both.id)]
+
+
+# ---- 2026-10-28-change-detail-sessions-source-fix FR-04：读侧附件标记清洗 ----
+
+
+async def test_title_fallback_attachment_markers_cleaned_on_read(
+    client: AsyncClient, auth_headers: dict[str, str], db_session: AsyncSession
+) -> None:
+    """存量 title_fallback 列的附件标记串在读展示时过 session_display_title。
+
+    附件标记 + 正文 → 标题取正文；纯附件 → 回退附件 name——存量列零迁移，
+    三端点（change/agent/daemon）显示口径一致。
+    """
+    admin = await _get_admin(db_session)
+    att = uuid.uuid4()
+    mixed = await _make_session(db_session, admin.id, None, status="ended")
+    pure = await _make_session(db_session, admin.id, None, status="ended")
+    # 模拟迁移 20261016100000 旧口径回填的存量列值（64 源原样，未剥标记）
+    mixed.title_fallback = f"[附件:{att}|image|IMG_2038.png]\n移动端布局修复"
+    pure.title_fallback = f"[附件:{uuid.uuid4()}|image|IMG_2037.png]"
+    db_session.add_all([mixed, pure])
+    await db_session.commit()
+
+    resp = await client.get("/api/daemon/sessions", headers=auth_headers)
+    assert resp.status_code == 200, resp.text
+    by_id = {item["id"]: item.get("title") for item in resp.json()["items"]}
+    assert by_id[str(mixed.id)] == "移动端布局修复"
+    assert by_id[str(pure.id)] == "IMG_2037.png"
