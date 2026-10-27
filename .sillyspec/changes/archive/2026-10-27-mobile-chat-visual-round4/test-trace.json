@@ -1,0 +1,37 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-27-mobile-chat-visual-round4",
+  "rows": [
+    {
+      "anchor": "FR-01",
+      "row_id": "2026-10-27-mobile-chat-visual-round4:flow:测试绑定FR-01",
+      "tests": [
+        "frontend/src/components/daemon/__tests__/turn-segment-views.test.tsx「过程信息块限宽统一」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-27-mobile-chat-visual-round4"
+    },
+    {
+      "anchor": "FR-02",
+      "row_id": "2026-10-27-mobile-chat-visual-round4:flow:测试绑定FR-02",
+      "tests": [
+        "frontend/src/components/daemon/__tests__/turn-timeline-auto-resume-badge.test.tsx",
+        "frontend/src/components/daemon/__tests__/turn-timeline-token-speed.test.tsx"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-27-mobile-chat-visual-round4"
+    }
+  ]
+}

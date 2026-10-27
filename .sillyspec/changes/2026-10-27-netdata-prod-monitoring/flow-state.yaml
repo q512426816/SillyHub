@@ -1,0 +1,27 @@
+tier: thin
+legacy_fallback: false
+substeps: {}
+born_face: thin
+with_tasks: false
+review_force: null
+input: |-
+  腾讯云生产机部署 Netdata 秒级监控
+  腾讯云生产服务器 124.222.127.242 目前无实时监控，出问题只能靠 docker stats 与日志事后翻，缺秒级现场（瞬时抖动、OOM、单容器资源打满）。
+
+  成功标准：
+  - 腾讯云生产服务器上 Netdata 以 systemd 服务稳定运行（stable 通道、遥测关闭）
+  - Netdata Web 仅绑定 127.0.0.1，公网 19999 端口实测不可达
+  - deploy.md 模块文档补充 Netdata 排查条目（SSH 隧道访问命令、容器级指标入口、安全边界）
+autopilot: false
+prestage_ack: false
+baseline_commit: 8bedb71a05aedf96881d783ab6af7d5eb73274a4
+updatedAt: '2026-10-27T03:49:30.181Z'
+cross_baselines:
+  sillyspec: 67e50bcca2adb9ecd502d12086c0ac8cb994da84
+baseline_sha256: 967515b03607e21d42f93ffb4d2a9116ac87d666937e30ff17bef09f69a36070
+spec_approved: true
+spec_approved_at: '2026-10-27T03:49:30.181Z'
+spec_approved_by: anon@DESKTOP-HJ0AM09
+spec_approved_channel: user-confirmed
+spec_attested_by: anon@DESKTOP-HJ0AM09
+
