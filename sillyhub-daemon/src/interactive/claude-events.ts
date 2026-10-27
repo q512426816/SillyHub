@@ -619,6 +619,8 @@ export class ClaudeEventNormalizer {
    *   - thinking_tokens → status/thinking_tokens（D-005@v1 契约补遗）。
    *   - status（SDKStatusMessage：status='compacting' 或带 compact_result）→
    *     status/context_compacting（ql-20260917-006；此前静默丢弃）。
+   *   - api_retry（SDKAPIRetryMessage）→ status/api_retry
+   *     （2026-10-28-model-retry-visible；重试风暴逐次信号，此前静默丢弃）。
    *   - 其余（status=requesting、compact_boundary、local_command 等）→ 静默丢弃。
    */
   private _normalizeSystemMessage(
@@ -716,6 +718,32 @@ export class ClaudeEventNormalizer {
         ];
       }
       return [];
+    }
+
+    // 2026-10-28-model-retry-visible：SDKAPIRetryMessage（sdk.d.ts:3068-3080）——
+    // 模型 API 可重试错误（429 限流/连接超时）的逐次重试信号，重试风暴期间此前
+    // 静默丢弃（平台零事件 → 前端恒显「思考中」）。事件化为 status/api_retry，
+    // metadata 携带 attempt/max_retries/retry_delay_ms/error_status/error 摘要；
+    // 消费侧 session-manager/events.ts 落 [MODEL_RETRY] 协议行（对齐
+    // [COMPACT_STATUS] 先例）。数值字段仅在帧字段为 number 时写入（缺字段不伪造）；
+    // error_status 连接类为 null 必须原样保留；error 非字符串（对象形态漂移防御）
+    // 时 JSON.stringify 后截断。
+    if (subtype === 'api_retry') {
+      const metadata: Record<string, unknown> = {};
+      if (typeof record['attempt'] === 'number') metadata['attempt'] = record['attempt'];
+      if (typeof record['max_retries'] === 'number') metadata['max_retries'] = record['max_retries'];
+      if (typeof record['retry_delay_ms'] === 'number') {
+        metadata['retry_delay_ms'] = record['retry_delay_ms'];
+      }
+      if (record['error_status'] === null || typeof record['error_status'] === 'number') {
+        metadata['error_status'] = record['error_status'];
+      }
+      const rawError = record['error'];
+      if (rawError !== undefined && rawError !== null) {
+        const errText = typeof rawError === 'string' ? rawError : JSON.stringify(rawError);
+        if (errText) metadata['error'] = errText.slice(0, 200);
+      }
+      return [{ type: 'status', subtype: 'api_retry', content: '', metadata }];
     }
     return [];
   }

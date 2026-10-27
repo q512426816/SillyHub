@@ -770,6 +770,100 @@ describe('status 会话信号（session-init-status）', () => {
     }
     norm.dispose();
   });
+
+  it('2026-10-28-model-retry-visible：system/api_retry 帧 → status/api_retry 事件（此前静默丢弃）', () => {
+    const norm = makeNormalizer([]);
+    // SDK SDKAPIRetryMessage 形状（sdk.d.ts:3068-3080）：重试风暴期间逐次发出，
+    // 携带 attempt/max_retries/retry_delay_ms/error_status/error 全套可观测字段。
+    const retry = {
+      type: 'system',
+      subtype: 'api_retry',
+      attempt: 3,
+      max_retries: 10,
+      retry_delay_ms: 8000,
+      error_status: 429,
+      error: 'Request rejected (429) · [1311][当前订阅套餐暂未开放GLM-5.3]',
+      uuid: 'u-r1',
+      session_id: 's1',
+    } as unknown as SDKMessage;
+    expect(norm.normalizeMessage(retry)).toEqual([
+      {
+        type: 'status',
+        subtype: 'api_retry',
+        content: '',
+        metadata: {
+          attempt: 3,
+          max_retries: 10,
+          retry_delay_ms: 8000,
+          error_status: 429,
+          error: 'Request rejected (429) · [1311][当前订阅套餐暂未开放GLM-5.3]',
+        },
+      },
+    ]);
+    expect(safeParseAgentEvent(norm.normalizeMessage(retry)[0]!).success).toBe(true);
+    norm.dispose();
+  });
+
+  it('2026-10-28-model-retry-visible：api_retry 连接类（error_status=null）保留 null、缺字段不伪造、error 对象截断', () => {
+    const norm = makeNormalizer([]);
+    // 连接类重试：error_status=null（无 HTTP 响应），null 必须原样保留。
+    const connRetry = {
+      type: 'system',
+      subtype: 'api_retry',
+      attempt: 1,
+      max_retries: 10,
+      retry_delay_ms: 500,
+      error_status: null,
+      error: 'Connection error',
+      uuid: 'u-r2',
+      session_id: 's1',
+    } as unknown as SDKMessage;
+    expect(norm.normalizeMessage(connRetry)).toEqual([
+      {
+        type: 'status',
+        subtype: 'api_retry',
+        content: '',
+        metadata: {
+          attempt: 1,
+          max_retries: 10,
+          retry_delay_ms: 500,
+          error_status: null,
+          error: 'Connection error',
+        },
+      },
+    ]);
+    // 缺字段容错：只带 attempt 时 metadata 只含 attempt（不伪造其余键）。
+    const partialRetry = {
+      type: 'system',
+      subtype: 'api_retry',
+      attempt: 2,
+      uuid: 'u-r3',
+      session_id: 's1',
+    } as unknown as SDKMessage;
+    expect(norm.normalizeMessage(partialRetry)).toEqual([
+      {
+        type: 'status',
+        subtype: 'api_retry',
+        content: '',
+        metadata: { attempt: 2 },
+      },
+    ]);
+    // error 非字符串（对象形态漂移防御）：JSON.stringify + 截断 200。
+    const longObj = { message: 'x'.repeat(500) };
+    const objErrorRetry = {
+      type: 'system',
+      subtype: 'api_retry',
+      attempt: 4,
+      error: longObj,
+      uuid: 'u-r4',
+      session_id: 's1',
+    } as unknown as SDKMessage;
+    const objEvents = norm.normalizeMessage(objErrorRetry);
+    const meta = (objEvents[0] as { metadata?: Record<string, unknown> }).metadata;
+    expect(typeof meta?.['error']).toBe('string');
+    expect((meta?.['error'] as string).length).toBeLessThanOrEqual(200);
+    norm.dispose();
+  });
 });
 
 // ─────────────────────────────────────────────────────────────────────────────

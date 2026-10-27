@@ -77,7 +77,16 @@ export type AgentStatusSubtype =
    * 载 phase（compacting/success/failed）与可选 error；消费侧落
    * [COMPACT_STATUS] 协议行（session-manager/events.ts）。
    */
-  | 'context_compacting';
+  | 'context_compacting'
+  /**
+   * 模型 API 重试过程信号（2026-10-28-model-retry-visible）：Claude SDK
+   * system/api_retry 帧（SDKAPIRetryMessage）的事件化——此前静默丢弃，重试
+   * 风暴（如 429 限流指数退避约 3 分钟）期间平台零事件，前端只能恒显「思考中」，
+   * 用户无法区分正常慢与卡死。metadata 载 attempt/max_retries/retry_delay_ms/
+   * error_status（连接类为 null）/error 摘要；消费侧落 [MODEL_RETRY] 协议行
+   * （session-manager/events.ts，形态对齐 [COMPACT_STATUS] 先例）。
+   */
+  | 'api_retry';
 
 /**
  * token 用量（v2，design.md §7）。字段全可选 number。

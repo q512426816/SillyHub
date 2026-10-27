@@ -42,6 +42,7 @@ const AGENT_STATUS_SUBTYPES = [
   'task_notification',
   'thinking_tokens',
   'context_compacting',
+  'api_retry',
 ] as const;
 
 /** usage 子对象 schema（与 types.ts AgentEventUsage 对齐，字段全可选）。
