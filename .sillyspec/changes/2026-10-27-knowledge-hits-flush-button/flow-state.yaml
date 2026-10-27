@@ -1,0 +1,38 @@
+tier: thin
+legacy_fallback: false
+substeps: {}
+born_face: thin
+with_tasks: false
+review_force: null
+input: >-
+  知识遥测断流根因：sillyspec CLI 2026-10-18 把遥测文件迁至 .runtime/state/knowledge-hits.jsonl，daemon 仍读旧路径
+  .runtime/knowledge-hits.jsonl 致 10-17 后全平台零上行、变更详情「知识触达」恒空。用户拍板方案：CLI 直报为主（另仓变更）+ 平台按钮经 daemon 按需补数。本变更落平台仓三件：daemon
+  读新路径并注册 flush RPC、backend 触发端点、变更详情页同步按钮。
+
+
+  成功标准：
+
+  - daemon hits 读取路径优先 .runtime/state/knowledge-hits.jsonl、旧路径回退，周期器对新路径恢复增量上行（本仓实测积压行补进 knowledge_hits 表）
+
+  - daemon 注册 sillyspec_hits_flush RPC：收到指令即对该工作区强制执行一次上行（绕过 mtime 短路）并回执
+
+  - backend 新端点照 _sync_change_via_daemon 降级铁律：daemon 在线触发 RPC 返回结构化回执（triggered/ok/reason），未绑定/离线/超时均不抛
+
+  - 变更详情页新增「同步变更」按钮：点击调新端点、按回执提示成败原因、成功后刷新沉淀资产卡
+
+  - backend schema 有改动时同变更内跑前端与 daemon 的 pnpm gen:types 并提交
+
+  - 相关单测通过（backend 端点降级路、daemon 路径回退与 flush、frontend 按钮交互）
+autopilot: false
+prestage_ack: false
+baseline_commit: e32570e6545316b97e93e473d9052225c3db0b4a
+updatedAt: '2026-10-27T08:21:26.524Z'
+cross_baselines:
+  sillyspec: 67e50bcca2adb9ecd502d12086c0ac8cb994da84
+baseline_sha256: e666a517ac109c84dc54d4f14ce68dc1873c94022db7adb98d896fb3b22fa340
+spec_approved: true
+spec_approved_at: '2026-10-27T08:21:26.523Z'
+spec_approved_by: anon@DESKTOP-HJ0AM09
+spec_approved_channel: user-confirmed
+spec_attested_by: anon@DESKTOP-HJ0AM09
+

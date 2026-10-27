@@ -339,6 +339,66 @@ describe('uploadKnowledgeHitsIfNeeded', () => {
       createHash('sha256').update('{"n":2}', 'utf8').digest('hex'),
     );
   });
+
+  // ── 双路径解析（2026-10-27-knowledge-hits-flush-button task-01）──────────────
+  // CLI 2026-10-18 把 hits 文件迁到 .runtime/state/——读取 state/ 优先、旧路径回退。
+
+  it('state/ 新路径优先：两处文件并存时读 state/ 的（旧文件同时在场也不读）', async () => {
+    const wsId = 'ws-state-first';
+    const specDir = join(FAKE_HOME, 'specs-tmp', wsId, `d-${Date.now()}-dual`);
+    await mkdir(join(specDir, '.runtime', 'state'), { recursive: true });
+    await writeFile(
+      join(specDir, '.runtime', 'state', 'knowledge-hits.jsonl'),
+      '{"from":"state"}\n',
+      'utf-8',
+    );
+    await writeFile(
+      join(specDir, '.runtime', 'knowledge-hits.jsonl'),
+      '{"from":"legacy"}\n',
+      'utf-8',
+    );
+    const client = makePosterClient();
+    await uploadKnowledgeHitsIfNeeded(client as never, wsId, specDir);
+    expect(client.postKnowledgeHitsBatch).toHaveBeenCalledWith(wsId, ['{"from":"state"}']);
+  });
+
+  it('迁移连续性（本仓断流场景回归）：旧路径已上行 offset，文件被挪到 state/ 并 append 后增量续走不重报', async () => {
+    const wsId = 'ws-migrated';
+    const specDir = await makeSpecDirWithHits(wsId, '{"n":1}\n{"n":2}\n');
+    const client = makePosterClient();
+    // 首轮：旧路径报 2 行（模拟 10-17 前的最后一次上行，offset=2+指纹）。
+    await uploadKnowledgeHitsIfNeeded(client as never, wsId, specDir);
+    expect(client.postKnowledgeHitsBatch).toHaveBeenCalledWith(wsId, [
+      '{"n":1}',
+      '{"n":2}',
+    ]);
+    // 模拟 CLI 迁移：同内容挪到 state/（旧文件删除）+ 期间 append 了 1 行。
+    const { rename } = await import('node:fs/promises');
+    await mkdir(join(specDir, '.runtime', 'state'), { recursive: true });
+    await rename(
+      join(specDir, '.runtime', 'knowledge-hits.jsonl'),
+      join(specDir, '.runtime', 'state', 'knowledge-hits.jsonl'),
+    );
+    await writeFile(
+      join(specDir, '.runtime', 'state', 'knowledge-hits.jsonl'),
+      '{"n":1}\n{"n":2}\n{"n":3}\n',
+      'utf-8',
+    );
+    client.postKnowledgeHitsBatch.mockClear();
+    await uploadKnowledgeHitsIfNeeded(client as never, wsId, specDir);
+    // 指纹比对通过（前 2 行未变）→ 只报迁移期间新增的第 3 行，不整文件重报。
+    expect(client.postKnowledgeHitsBatch).toHaveBeenCalledTimes(1);
+    expect(client.postKnowledgeHitsBatch).toHaveBeenCalledWith(wsId, ['{"n":3}']);
+    expect(await readState(wsId)).toEqual(expect.objectContaining({ uploadedLines: 3 }));
+  });
+
+  it('旧路径回退：state/ 无文件时读 .runtime/knowledge-hits.jsonl（既有全部用例的隐式口径，显式钉一条）', async () => {
+    const wsId = 'ws-legacy-fallback';
+    const specDir = await makeSpecDirWithHits(wsId, '{"from":"legacy"}\n');
+    const client = makePosterClient();
+    await uploadKnowledgeHitsIfNeeded(client as never, wsId, specDir);
+    expect(client.postKnowledgeHitsBatch).toHaveBeenCalledWith(wsId, ['{"from":"legacy"}']);
+  });
 });
 
 describe('postSpecSync 成功汇聚点挂点（task-02 / R-05）', () => {

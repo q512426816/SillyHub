@@ -19,7 +19,7 @@ import { join } from 'path';
 // 注入——uploadKnowledgeHitsIfNeeded 自身按方法存在性探测，此处无需收紧类型。
 type HitsPosterClient = unknown;
 import { daemonStateDir } from './config.js';
-import { uploadKnowledgeHitsIfNeeded } from './knowledge-hits-upload.js';
+import { uploadKnowledgeHitsIfNeeded, resolveHitsPath } from './knowledge-hits-upload.js';
 
 export const HITS_PERIODIC_INTERVAL_MS = 5 * 60 * 1000;
 
@@ -53,8 +53,12 @@ export class KnowledgeHitsPeriodicUploader {
       if (!/^[0-9a-f-]{36}$/i.test(wsId)) continue; // UUID 形态守卫（防杂名进端点）
       let stamp: string | null = null;
       try {
-        const st = statSync(join(this._stateDir, 'specs', wsId, '.runtime', 'knowledge-hits.jsonl'));
-        stamp = `${st.mtimeMs}:${st.size}`;
+        // 双路径探测（2026-10-27-knowledge-hits-flush-button）：state/ 新路径优先、
+        // 旧路径回退（resolveHitsPath 与读盘方同一判定）；stamp 键带来源前缀，防
+        // 新旧文件恰好同 mtime+size 时跨来源误短路。
+        const hits = resolveHitsPath(join(this._stateDir, 'specs', wsId));
+        const st = statSync(hits.path);
+        stamp = `${hits.origin}:${st.mtimeMs}:${st.size}`;
       } catch {
         stamp = null; // 无 hits 文件：记空印（下轮文件出现即变化触发）
       }

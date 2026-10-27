@@ -28,14 +28,39 @@
 // !== 'function'` 先例，不产日志噪音）。
 
 import { readFile, mkdir } from 'node:fs/promises';
+import { existsSync } from 'node:fs';
 import { createHash } from 'node:crypto';
 import { join, dirname } from 'node:path';
 import type { HubClient } from './hub-client.js';
 import { daemonStateDir } from './config.js';
 import { writeFileAtomic } from './atomic-write.js';
 
-/** hits 遥测文件相对 spec 目录路径（CLI append 端点，只读不改）。 */
-const HITS_REL_PATH = join('.runtime', 'knowledge-hits.jsonl');
+/**
+ * hits 遥测文件相对 spec 目录路径（CLI append 端点，只读不改）。
+ *
+ * 2026-10-27-knowledge-hits-flush-button：sillyspec CLI 2026-10-18「runtime 布局
+ * 分层」把遥测文件一次性迁移到 ``.runtime/state/`` 子目录（rename 保留内容——
+ * 已上行 offset/行指纹对新文件前段天然有效，增量直接续走）。读取改为 state/
+ * 新路径优先、旧路径回退（迁移前/旧 CLI 形态）；两处皆无时回退旧路径形态，
+ * 由调用方 readFile ENOENT 走「无数据静默 no-op」常态路径（语义不变）。
+ */
+const HITS_REL_PATH_STATE = join('.runtime', 'state', 'knowledge-hits.jsonl');
+const HITS_REL_PATH_LEGACY = join('.runtime', 'knowledge-hits.jsonl');
+
+/** hits 路径解析结果：path=实际读取路径，origin=来源（周期器 stamp 键带来源
+ * 前缀用——防止新旧文件同 mtime+size 时跨来源误短路）。 */
+export interface HitsPathResolution {
+  path: string;
+  origin: 'state' | 'legacy';
+}
+
+/** 解析 hits 文件实际路径：state/ 新路径存在即用；否则回退旧路径。导出供
+ * 周期器 stamp 探测与读盘方共用同一判定（单一源，防两处漂移）。 */
+export function resolveHitsPath(specDir: string): HitsPathResolution {
+  const statePath = join(specDir, HITS_REL_PATH_STATE);
+  if (existsSync(statePath)) return { path: statePath, origin: 'state' };
+  return { path: join(specDir, HITS_REL_PATH_LEGACY), origin: 'legacy' };
+}
 
 /** 单批最大行数（backend HitsBatchIn 上限同值，422 越界由服务端兜底校验）。 */
 const HITS_BATCH_MAX_LINES = 2000;
@@ -182,10 +207,11 @@ export async function uploadKnowledgeHitsIfNeeded(
       return false; // 非法 wsId：重试同样非法，但让调用方感知（下轮守卫再拦）
     }
 
-    // 读 hits 文件；不存在 → 静默 no-op（常态路径，零噪音）。
+    // 读 hits 文件（state/ 新路径优先、旧路径回退——resolveHitsPath 单一源）；
+    // 两处皆无 → 静默 no-op（常态路径，零噪音）。
     let raw: string;
     try {
-      raw = await readFile(join(specDir, HITS_REL_PATH), 'utf-8');
+      raw = await readFile(resolveHitsPath(specDir).path, 'utf-8');
     } catch {
       return true; // 无文件=无事可做（记印防空转）
     }
