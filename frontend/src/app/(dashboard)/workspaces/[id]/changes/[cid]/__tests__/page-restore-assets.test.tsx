@@ -20,7 +20,7 @@ import type { ChangeRead } from "@/lib/changes";
 
 const mocks = vi.hoisted(() => ({
   getChange: vi.fn(),
-  listWorkspaceAgentSessions: vi.fn(),
+  listChangeSessions: vi.fn(),
   listQuicklogEntries: vi.fn(),
 }));
 
@@ -49,7 +49,7 @@ vi.mock("@/lib/changes", () => ({
 }));
 
 vi.mock("@/lib/daemon", () => ({
-  listWorkspaceAgentSessions: mocks.listWorkspaceAgentSessions,
+  listChangeSessions: mocks.listChangeSessions,
 }));
 
 vi.mock("@/lib/quicklog", () => ({
@@ -121,7 +121,7 @@ async function renderPage() {
 beforeEach(() => {
   vi.clearAllMocks();
   navMocks.searchParams = new URLSearchParams();
-  mocks.listWorkspaceAgentSessions.mockResolvedValue([]);
+  mocks.listChangeSessions.mockResolvedValue([]);
   mocks.listQuicklogEntries.mockResolvedValue({ items: [], total: 0 });
 });
 

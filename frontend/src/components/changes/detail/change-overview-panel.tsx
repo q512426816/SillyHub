@@ -88,7 +88,7 @@ export interface OverviewPanelProps {
   recentRows: UnifiedRow[];
   /** 任务进度（tasks[] 勾选比；与「过程」tab 的任务清单同源）。 */
   taskSummary: { checked: number; total: number };
-  /** 工作区最近会话（信息栏显示最近 3 条）。 */
+  /** 变更关联会话（listChangeSessions；信息栏显示最近 3 条）。 */
   sessions: AgentSessionListItem[];
   /** 待办卡透传（语义与分支全在 `ChangeStageActions` 内，本面板不做判断）。 */
   boundSession: AgentSessionListItem | null;

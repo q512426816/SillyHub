@@ -45,7 +45,7 @@ const mocks = vi.hoisted(() => ({
   getChange: vi.fn(),
   getAgentStatus: vi.fn(),
   submitStageReview: vi.fn(),
-  listWorkspaceAgentSessions: vi.fn(),
+  listChangeSessions: vi.fn(),
   listQuicklogEntries: vi.fn(),
 }));
 
@@ -59,7 +59,7 @@ vi.mock("@/lib/changes", () => ({
 }));
 
 vi.mock("@/lib/daemon", () => ({
-  listWorkspaceAgentSessions: mocks.listWorkspaceAgentSessions,
+  listChangeSessions: mocks.listChangeSessions,
 }));
 
 vi.mock("@/lib/quicklog", () => ({
@@ -135,7 +135,7 @@ function setup(opts: { change?: ChangeRead } = {}) {
     config_enabled: false,
     last_dispatch: null,
   } as unknown as DispatchResponse);
-  mocks.listWorkspaceAgentSessions.mockResolvedValue([makeSession()]);
+  mocks.listChangeSessions.mockResolvedValue([makeSession()]);
   mocks.listQuicklogEntries.mockResolvedValue({ items: [], total: 0 });
 }
 

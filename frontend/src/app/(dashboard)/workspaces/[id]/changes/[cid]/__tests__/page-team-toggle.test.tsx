@@ -55,7 +55,7 @@ const mocks = vi.hoisted(() => ({
   getChange: vi.fn(),
   getAgentStatus: vi.fn(),
   submitStageReview: vi.fn(),
-  listWorkspaceAgentSessions: vi.fn(),
+  listChangeSessions: vi.fn(),
   listQuicklogEntries: vi.fn(),
 }));
 
@@ -74,7 +74,7 @@ vi.mock("@/lib/changes", () => ({
 }));
 
 vi.mock("@/lib/daemon", () => ({
-  listWorkspaceAgentSessions: mocks.listWorkspaceAgentSessions,
+  listChangeSessions: mocks.listChangeSessions,
 }));
 
 // task-10（FR-07）：关联快速任务卡 mock（默认空列表——卡片渲染「暂无关联快速任务」）
@@ -186,7 +186,7 @@ function setup(opts: {
     config_enabled: false,
     last_dispatch: null,
   } as unknown as DispatchResponse);
-  mocks.listWorkspaceAgentSessions.mockResolvedValue([makeSession()]);
+  mocks.listChangeSessions.mockResolvedValue([makeSession()]);
   // task-10：关联快速任务默认空
   mocks.listQuicklogEntries.mockResolvedValue({ items: [], total: 0 });
   mocks.submitStageReview.mockResolvedValue({

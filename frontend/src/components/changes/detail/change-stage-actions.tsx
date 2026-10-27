@@ -79,7 +79,7 @@ export type NotifyResult = {
 
 export interface ChangeStageActionsProps {
   change: ChangeRead;
-  /** 绑定会话（change_session_links 最新；前端取工作区最近活跃会话近似展示，可空）。 */
+  /** 绑定会话（页面层取 listChangeSessions 首条＝links 最新活跃会话，与后端注入目标同源；可空）。 */
   boundSession: AgentSessionListItem | null;
   gateComment: string;
   onGateCommentChange: (_v: string) => void;
@@ -183,7 +183,7 @@ export function ChangeStageActions({
         <p className="text-xs text-muted-foreground">{gatePanel.description}</p>
       </div>
 
-      {/* 绑定会话只读展示（change_session_links 最新；前端取工作区最近活跃会话近似） */}
+      {/* 绑定会话只读展示（listChangeSessions 首条＝links 最新活跃会话） */}
       {boundSession ? (
         <div className="rounded border bg-background px-3 py-2">
           <p className="text-[11px] text-muted-foreground">

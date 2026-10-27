@@ -44,7 +44,7 @@ vi.mock("next/link", () => ({
 
 const mocks = vi.hoisted(() => ({
   getChange: vi.fn(),
-  listWorkspaceAgentSessions: vi.fn(),
+  listChangeSessions: vi.fn(),
   listQuicklogEntries: vi.fn(),
   deleteChange: vi.fn(),
 }));
@@ -61,7 +61,7 @@ vi.mock("@/lib/changes", () => ({
 }));
 
 vi.mock("@/lib/daemon", () => ({
-  listWorkspaceAgentSessions: mocks.listWorkspaceAgentSessions,
+  listChangeSessions: mocks.listChangeSessions,
 }));
 
 vi.mock("@/lib/quicklog", () => ({
@@ -131,7 +131,7 @@ describe("详情页返回列表入口（2026-10-16-change-center-back-keeps-list
   beforeEach(() => {
     navMocks.searchParams = new URLSearchParams();
     mocks.getChange.mockResolvedValue(makeChange());
-    mocks.listWorkspaceAgentSessions.mockResolvedValue([]);
+    mocks.listChangeSessions.mockResolvedValue([]);
     mocks.listQuicklogEntries.mockResolvedValue({ items: [], total: 0 });
   });
   afterEach(() => {
@@ -166,7 +166,7 @@ describe("详情页删除成功后返回列表（2026-10-16-change-center-delete
   beforeEach(() => {
     navMocks.searchParams = new URLSearchParams();
     mocks.getChange.mockResolvedValue(makeChange());
-    mocks.listWorkspaceAgentSessions.mockResolvedValue([]);
+    mocks.listChangeSessions.mockResolvedValue([]);
     mocks.listQuicklogEntries.mockResolvedValue({ items: [], total: 0 });
     mocks.deleteChange.mockResolvedValue({});
     accessMock.value = { userId: null, isPlatformAdmin: true, workspaceRole: null };

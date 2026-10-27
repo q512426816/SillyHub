@@ -71,7 +71,7 @@ export interface ChangeOverviewSideProps {
   workspaceId: string;
   changeId: string;
   archived: boolean;
-  /** 工作区最近会话（页面层已取；本栏显示最近 3 条）。 */
+  /** 变更关联会话（页面层经 listChangeSessions 已取；本栏显示最近 3 条）。 */
   sessions: AgentSessionListItem[];
 }
 

@@ -63,7 +63,7 @@ import {
 } from "@/lib/changes";
 import { useNotify } from "@/lib/errors";
 import {
-  listWorkspaceAgentSessions,
+  listChangeSessions,
   type AgentSessionListItem,
 } from "@/lib/daemon";
 
@@ -258,17 +258,18 @@ export default function ChangeDetailPage({ params }: Props) {
     notified_session: boolean;
     notify_error: string | null;
   } | null>(null);
-  /** 工作区最近活跃会话（近似口径；概览信息栏显示最近 3 条）。 */
+  /** 变更关联会话（change_session_links 真实关联；概览信息栏最近 3 条 + 绑定会话）。 */
   const [sessions, setSessions] = useState<AgentSessionListItem[]>([]);
 
-  // ── 辅助数据（绑定会话近似）：一次性加载，不随详情轮询 ──────────────────
+  // ── 辅助数据（变更关联会话）：一次性加载，不随详情轮询 ──────────────────
+  // 2026-10-28-change-detail-sessions-source-fix FR-01/FR-02：数据源从
+  // listWorkspaceAgentSessions（工作区全量近似）改为 listChangeSessions
+  // （GET /changes/{id}/sessions，与后端 _notify_bound_session 注入目标同源）。
   useEffect(() => {
     let cancelled = false;
     setPageError(null);
     const loadSide = async () => {
-      const list = await listWorkspaceAgentSessions(workspaceId, {
-        include_ended: true,
-      }).catch(() => []);
+      const list = await listChangeSessions(workspaceId, changeId).catch(() => []);
       if (cancelled) return;
       setSessions(list ?? []);
     };

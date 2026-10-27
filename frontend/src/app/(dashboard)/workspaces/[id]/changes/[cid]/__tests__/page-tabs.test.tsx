@@ -10,7 +10,7 @@ import type { ChangeRead } from "@/lib/changes";
 
 const mocks = vi.hoisted(() => ({
   getChange: vi.fn(),
-  listWorkspaceAgentSessions: vi.fn(),
+  listChangeSessions: vi.fn(),
   listQuicklogEntries: vi.fn(),
 }));
 const navMocks = vi.hoisted(() => ({
@@ -37,7 +37,7 @@ vi.mock("@/lib/changes", () => ({
   getScopeAudit: vi.fn().mockRejectedValue(new Error("no-audit")),
 }));
 vi.mock("@/lib/daemon", () => ({
-  listWorkspaceAgentSessions: mocks.listWorkspaceAgentSessions,
+  listChangeSessions: mocks.listChangeSessions,
 }));
 vi.mock("@/lib/quicklog", () => ({ listQuicklogEntries: mocks.listQuicklogEntries }));
 
@@ -97,7 +97,7 @@ async function renderAt(search: string, change: ChangeRead) {
 
 beforeEach(() => {
   vi.clearAllMocks();
-  mocks.listWorkspaceAgentSessions.mockResolvedValue([]);
+  mocks.listChangeSessions.mockResolvedValue([]);
   mocks.listQuicklogEntries.mockResolvedValue({ items: [], total: 0 });
 });
 afterEach(cleanup);

@@ -44,7 +44,7 @@ vi.mock("next/link", () => ({
 const mocks = vi.hoisted(() => ({
   getChange: vi.fn(),
   renameChangeTitle: vi.fn(),
-  listWorkspaceAgentSessions: vi.fn(),
+  listChangeSessions: vi.fn(),
   listQuicklogEntries: vi.fn(),
   /** 权限三元组（useChangeDeleteAccess mock 返回值；用例内改写控制可见性）。 */
   access: { userId: null as string | null, isPlatformAdmin: false, workspaceRole: null as string | null },
@@ -62,7 +62,7 @@ vi.mock("@/lib/changes", () => ({
 }));
 
 vi.mock("@/lib/daemon", () => ({
-  listWorkspaceAgentSessions: mocks.listWorkspaceAgentSessions,
+  listChangeSessions: mocks.listChangeSessions,
 }));
 
 vi.mock("@/lib/quicklog", () => ({
@@ -125,7 +125,7 @@ describe("详情页改名入口（2026-10-16-change-title-condense-backfill FR-0
   beforeEach(() => {
     navMocks.searchParams = new URLSearchParams();
     mocks.getChange.mockResolvedValue(makeChange());
-    mocks.listWorkspaceAgentSessions.mockResolvedValue([]);
+    mocks.listChangeSessions.mockResolvedValue([]);
     mocks.listQuicklogEntries.mockResolvedValue({ items: [], total: 0 });
     mocks.access = { userId: null, isPlatformAdmin: false, workspaceRole: null };
   });
