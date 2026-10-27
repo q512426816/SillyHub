@@ -135,6 +135,13 @@ export interface SessionPanelPageProps {
   /** task-14（2026-08-26-mobile-workspace-page）：视口样式变体——分发函数已归一
    *  （外层 ?? "desktop"），仅渲染层消费（见 SessionPanelProps.variant 注释）。 */
   variant: "desktop" | "mobile";
+  /**
+   * mobile 可选：头部返回按钮（2026-10-27-mobile-chat-visual-round3 / 用户需求
+   * 「会话顶部加返回会话列表按钮」）。仅 variant="mobile" 且传入时渲染
+   * ChevronLeft 钮；desktop/dialog/悬浮宿主不传零渲染。〔prop〕宿主装配路由
+   * 行为（组件自身不感知 next/navigation，保持纯 props 驱动）。
+   */
+  onBack?: () => void;
 }
 
 /**

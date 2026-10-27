@@ -119,11 +119,12 @@ export const RoundDivider = memo(function RoundDivider({
       <span
         className={cn(
           "inline-flex items-center gap-1.5 rounded-full border border-border/60 bg-card/80 px-3 py-0.5 text-[10.5px] text-muted-foreground shadow-sm backdrop-blur-sm",
-          // mobile（FR-02 + visual-round2）：去胶囊框纯文字（边框/底色/阴影/内距
-          // 全去——手机上轮次分隔要轻不抢正文视觉）；允许收缩折行（长 meta 在
-          // 430pt 视口内换行不溢出）。desktop 缺省保持胶囊+shrink-0 单行（零变化）。
+          // mobile（FR-02 + visual-round3 单行化）：去胶囊框纯文字 + 单行不折行
+          // （round2 折行在长 meta 下两行居中观感差，用户三轮反馈）——nowrap +
+          // min-w-0 flex-1 truncate 超长省略；detail（开始/历时）mobile 不渲染
+          // （最次要信息，省出单行宽度）。desktop 缺省胶囊+shrink-0 单行零变化。
           mobile
-            ? "min-w-0 shrink whitespace-normal border-none bg-transparent px-0 py-0 shadow-none backdrop-blur-none"
+            ? "min-w-0 shrink truncate whitespace-nowrap border-none bg-transparent px-0 py-0 shadow-none backdrop-blur-none"
             : "shrink-0 whitespace-nowrap",
         )}
       >
@@ -155,7 +156,9 @@ export const RoundDivider = memo(function RoundDivider({
           aria-hidden
           className="h-px flex-1 bg-gradient-to-l from-transparent via-border to-border"
         />
-        {detail && (
+        {/* detail（开始时刻/历时）：mobile 不渲染（visual-round3 单行化让宽，
+            最次要信息）；desktop 原位原样。 */}
+        {!mobile && detail && (
           <span
             data-testid="round-divider-detail"
             className="shrink-0 whitespace-nowrap font-mono text-[10.5px] tabular-nums text-muted-foreground"

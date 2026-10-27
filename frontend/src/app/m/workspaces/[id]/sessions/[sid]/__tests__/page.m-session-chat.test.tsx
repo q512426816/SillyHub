@@ -26,9 +26,12 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 // ── next/navigation mock：useParams 可变 holder（sid 变化 rerender 用） ───────
 const nav = vi.hoisted(() => ({
   params: { id: "ws-1", sid: "s-1" } as { id: string; sid: string },
+  push: vi.fn(),
 }));
 vi.mock("next/navigation", () => ({
   useParams: () => nav.params,
+  // visual-round3：页面 onBack 装配（返回会话列表）引入 useRouter——mock 之
+  useRouter: () => ({ push: nav.push }),
 }));
 
 // ── SessionPanel 桩：捕获 props + 挂载日志（key={sid} 重挂载断言佐证） ────────

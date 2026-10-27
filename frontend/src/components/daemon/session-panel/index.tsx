@@ -270,6 +270,13 @@ export interface SessionPanelProps {
   onOpenSubagent?: (segmentId: string) => void;
   /** page 可选：右栏 ✕ / 段失效自动关闭上抛（门户清槽位）。〔prop〕 */
   onSubagentPanelClose?: () => void;
+  /**
+   * mobile 可选：头部返回按钮（2026-10-27-mobile-chat-visual-round3 / 用户
+   * 需求「会话顶部加返回会话列表按钮」）。仅 variant="mobile" 且传入时渲染
+   * ChevronLeft 钮；desktop/dialog/悬浮宿主不传零渲染零变化。〔prop〕宿主
+   * 装配路由行为（组件自身不感知 next/navigation）。
+   */
+  onBack?: () => void;
 
   // ── 工作区引用插入槽位（2026-10-10-workspace-ref-intake task-06/07 / FR-01
   //    通道——portal 右键入口 → 输入区光标处插入标签）──────────────────
@@ -310,6 +317,7 @@ export function SessionPanel(props: SessionPanelProps) {
         openSubagentId={props.openSubagentId}
         onOpenSubagent={props.onOpenSubagent}
         onSubagentPanelClose={props.onSubagentPanelClose}
+        onBack={props.onBack}
         // 2026-10-10-workspace-ref-intake task-07（D-012 裁决）：工作区引用插入
         // 槽位透传（仅门户 page 装配传入；未传内部视为 null 零回归）。
         pendingWsRefInsert={props.pendingWsRefInsert}

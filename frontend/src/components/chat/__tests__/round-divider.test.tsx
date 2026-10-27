@@ -67,12 +67,17 @@ describe("RoundDivider 手机端窄视口分支（2026-10-26-mobile-four-page-la
     expect(divider.textContent).toContain("53 tok/s");
   });
 
-  it("mobile=true：胶囊允许收缩折行（去 shrink-0/nowrap）", () => {
-    const { getByTestId } = render(<RoundDivider label="第 1 轮" meta="↑78,489" mobile />);
-    const pill = getByTestId("round-divider").children[1] as HTMLElement;
-    expect(pill.className).toContain("whitespace-normal");
-    expect(pill.className).toContain("min-w-0");
-    expect(pill.className).not.toContain("whitespace-nowrap");
+  it("mobile=true：单行不折行（nowrap+truncate 超长省略，visual-round3 折行观感差回改）+ detail 不渲染", () => {
+    const { getByTestId } = render(
+      <RoundDivider label="第 1 轮" status="running" meta="↑78,489" detail="开始 20:13" mobile />,
+    );
+    const divider = getByTestId("round-divider");
+    const pill = divider.children[1] as HTMLElement;
+    expect(pill.className).toContain("whitespace-nowrap");
+    expect(pill.className).toContain("truncate");
+    expect(pill.className).not.toContain("whitespace-normal");
+    // detail（开始时刻/历时）mobile 不渲染——单行让宽
+    expect(divider.querySelector('[data-testid="round-divider-detail"]')).toBeNull();
   });
 
   it("desktop 锚：缺省（不传 mobile）meta 原样不缩写、胶囊保持 shrink-0 单行", () => {

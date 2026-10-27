@@ -6,7 +6,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } fro
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import dayjs, { type Dayjs } from "dayjs";
 import {
-  Ban, Bot, ClipboardList, FileText, FolderOpen, Info, ListOrdered, ListTodo, Lock, Monitor, MoreHorizontal, PauseCircle,
+  Ban, Bot, ChevronLeft, ClipboardList, FileText, FolderOpen, Info, ListOrdered, ListTodo, Lock, Monitor, MoreHorizontal, PauseCircle,
   Puzzle, Search, TriangleAlert, X, Zap,
 } from "lucide-react";
 import { Badge, Button, Drawer, Input, Spin } from "antd";
@@ -653,6 +653,7 @@ export function SessionPanelPage({
   onPreSessionCreated,
   pageContextOverride,
   variant,
+  onBack,
   openSubagentId,
   onOpenSubagent,
   onSubagentPanelClose,
@@ -5600,6 +5601,20 @@ export function SessionPanelPage({
           )}
         >
           <div className="flex min-w-0 items-center gap-2">
+            {/* visual-round3（用户需求「会话顶部加返回会话列表按钮」）：mobile
+                且宿主接线时标题左侧渲染返回钮——宿主装配路由行为（onBack prop），
+                desktop/dialog/悬浮宿主零渲染。 */}
+            {mobile && onBack && (
+              <button
+                type="button"
+                aria-label="返回会话列表"
+                data-testid="session-mobile-back"
+                onClick={onBack}
+                className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-md border border-border text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+              >
+                <ChevronLeft aria-hidden className="h-4 w-4" />
+              </button>
+            )}
             {title && (
               <span className="truncate text-sm font-semibold text-foreground">
                 {title}

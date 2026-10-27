@@ -1,0 +1,34 @@
+tier: thin
+legacy_fallback: false
+substeps: {}
+born_face: thin
+with_tasks: false
+review_force: null
+input: >-
+  用户真机三轮反馈：轮次信息折行难看要单行；会话页顶部加返回会话列表按钮；会话列表卡加 PC 端同款状态提示标。
+
+
+  成功标准：
+
+  - RoundDivider mobile 单行不折行：mobile 分支不渲染 detail(开始时刻/历时,最次要)且胶囊 nowrap+truncate 超长省略,desktop 形态不变
+
+  - SessionPanel mobile 头部标题左侧加返回按钮(ChevronLeft)：有 workspace_id 跳 /m/workspaces/{wid}/sessions,无则
+  /m/workspaces;desktop/dialog/悬浮宿主零变化
+
+  - mobile 会话列表卡行首加 PC 同款状态标：消费 session-list-panel 导出纯函数 sessionStatusIndicator(status,liveness null,completedUnread
+  false,runStatus undefined,pendingDialogKind=pending_requests[0].kind)——红点失败/绿点完成/问号待答/其余留白,与 PC 单一源同款
+
+  - 相关测试面全绿(round-divider/session-panel-variant/page.m-sessions/mobile-session-list 零回归)
+autopilot: false
+prestage_ack: true
+baseline_commit: c6655ba7440d750705afa5acf4dd9973b3374940
+updatedAt: '2026-10-27T02:55:12.635Z'
+cross_baselines:
+  sillyspec: 67e50bcca2adb9ecd502d12086c0ac8cb994da84
+baseline_sha256: fe924e349da40093fe1a17b939e2112d309f33e7f67c70fcc1ad4caede9a832c
+spec_approved: true
+spec_approved_at: '2026-10-27T02:55:12.635Z'
+spec_approved_by: anon@DESKTOP-HJ0AM09
+spec_approved_channel: user-confirmed
+spec_attested_by: anon@DESKTOP-HJ0AM09
+

@@ -48,7 +48,7 @@
 import { useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Modal } from "antd";
-import { MoreVertical, Plus, Users } from "lucide-react";
+import { Loader2, MoreVertical, Plus, Users } from "lucide-react";
 
 import { formatRelativeTime } from "@/components/daemon/runtime-card-helpers";
 import { MemberFacepile } from "@/components/group-chat/create-group-wizard";
@@ -69,6 +69,10 @@ import {
   type GroupChatListItemRead,
 } from "@/lib/daemon";
 import { isGroupMentionUnread, readGroupLastOpen } from "@/lib/group-unread";
+// visual-round3（用户需求「会话列表加 PC 端同款状态提示标」）：行首状态标识
+// 直接消费 session-list-panel 导出的单一源纯函数（红点失败/绿点完成/问号待答/
+// 转圈执行/琥珀等你——五态语义与 PC 会话列表逐字同款，不另造词表）。
+import { sessionStatusIndicator } from "@/components/sessions/session-list-panel";
 import { cn } from "@/lib/utils";
 
 /* ────────────── 纯辅助（组件外，便于单测推理；语义对齐 session-list-panel） ────────────── */
@@ -85,6 +89,58 @@ const SESSION_STATUS_LABELS: Record<AgentSessionStatus, string> = {
 
 function statusLabel(status: AgentSessionStatus): string {
   return SESSION_STATUS_LABELS[status] ?? status;
+}
+
+/**
+ * visual-round3：会话卡行首状态槽——sessionStatusIndicator（PC 单一源）三形态
+ * 移动端渲染：dot=彩色圆点（h-2 w-2 + title 提示）/ spinner=Loader2 转圈 /
+ * question=问号圆标（在等你回答）。liveness 活性 mobile 列表不拉（无 agent-logs
+ * 链路），传 null——status + currentRunStatus + pendingDialog_kind 三输入已覆盖
+ * 五态核心（终态权威 + run 实时 + 待回答），与 PC 端「同款」按用户原话对齐。
+ */
+function SessionStatusMark({
+  session,
+}: {
+  session: AgentSessionRead;
+}) {
+  const indicator = sessionStatusIndicator(
+    session.status as AgentSessionStatus,
+    null,
+    false,
+    session.current_run_status ?? null,
+    session.pending_dialog_kind ?? null,
+  );
+  if (indicator == null) return null;
+  if (indicator.kind === "spinner") {
+    return (
+      <span
+        aria-label={indicator.label}
+        title={indicator.label}
+        className="inline-flex shrink-0"
+      >
+        <Loader2 className="h-3.5 w-3.5 animate-spin text-info" />
+      </span>
+    );
+  }
+  if (indicator.kind === "question") {
+    return (
+      <span
+        aria-label={indicator.label}
+        title={indicator.label}
+        className="inline-flex h-4 w-4 shrink-0 items-center justify-center rounded-full border border-info/60 bg-info/10 text-[10px] font-bold leading-none text-info"
+      >
+        ?
+      </span>
+    );
+  }
+  return (
+    <span
+      aria-label={indicator.label}
+      title={indicator.label}
+      aria-hidden
+      className={cn("inline-block h-2 w-2 shrink-0 rounded-full", indicator.cls)}
+    />
+  );
 }
 
 /**
@@ -525,11 +581,15 @@ export function MobileSessionList({
                     aria-label={`打开会话 ${name}`}
                     className="flex min-h-[44px] min-w-0 flex-1 flex-col gap-1 p-3 text-left transition-colors active:bg-muted/50"
                   >
-                    <span
-                      className="truncate text-[14px] font-medium text-foreground"
-                      title={name}
-                    >
-                      {name}
+                    <span className="flex min-w-0 items-center gap-1.5">
+                      {/* visual-round3：行首 PC 同款状态标 */}
+                      <SessionStatusMark session={s} />
+                      <span
+                        className="truncate text-[14px] font-medium text-foreground"
+                        title={name}
+                      >
+                        {name}
+                      </span>
                     </span>
                     {/* 引擎 · 状态 · 最后活动相对时间（原型 .ses-sub） */}
                     <span className="truncate text-xs text-muted-foreground">

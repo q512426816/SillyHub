@@ -19,7 +19,7 @@
  *    零重复请求）。
  */
 import { useMemo } from "react";
-import { useParams } from "next/navigation";
+import { useParams, useRouter } from "next/navigation";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 
 import { SessionPanel } from "@/components/daemon/session-panel";
@@ -28,6 +28,7 @@ import { useDaemonMachines } from "@/lib/use-daemon-machines";
 
 export default function MobileSessionChatPage() {
   const params = useParams<{ id: string; sid: string }>();
+  const router = useRouter();
   const sid = params.sid;
   const qc = useQueryClient();
 
@@ -60,6 +61,9 @@ export default function MobileSessionChatPage() {
         key={sid}
         mode="page"
         variant="mobile"
+        // visual-round3（用户需求「会话顶部加返回会话列表按钮」）：显式路由回
+        // 当前工作区会话列表（深链进入时 router.back 不可靠，显式 push 恒可达）。
+        onBack={() => router.push(`/m/workspaces/${params.id}/sessions`)}
         sessionId={sid}
         machines={machines}
         llmProviders={providers}
