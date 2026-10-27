@@ -13609,6 +13609,10 @@ export interface components {
             limit: number;
             /** Offset */
             offset: number;
+            /** Status Counts */
+            status_counts?: {
+                [key: string]: number;
+            };
         };
         /** AgentSessionRead */
         AgentSessionRead: {
@@ -41050,6 +41054,7 @@ export interface operations {
                 limit?: number;
                 offset?: number;
                 status?: ("pending" | "active" | "reconnecting" | "ended" | "failed") | null;
+                status_group?: "ongoing" | null;
                 runtime_id?: string | null;
                 machine_id?: string | null;
                 provider?: ("claude" | "codex") | null;

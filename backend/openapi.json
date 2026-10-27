@@ -16408,6 +16408,23 @@
             }
           },
           {
+            "name": "status_group",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "const": "ongoing",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Status Group"
+            }
+          },
+          {
             "name": "runtime_id",
             "in": "query",
             "required": false,
@@ -39227,6 +39244,13 @@
           "offset": {
             "type": "integer",
             "title": "Offset"
+          },
+          "status_counts": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "type": "object",
+            "title": "Status Counts"
           }
         },
         "type": "object",
