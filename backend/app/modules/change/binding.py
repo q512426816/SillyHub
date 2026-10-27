@@ -19,6 +19,7 @@ bind 函数，供 W2 检测写入口（run_sync 命令解析 / platform_sync age
 
 from __future__ import annotations
 
+import re
 import uuid
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -36,6 +37,19 @@ log = get_logger(__name__)
 # D-005@v2：CLI 无名操作伪键。绑定会污染变更列表（placeholder 行），解析层与
 # bind_session_to_change 内部双道守卫统一跳过。
 DEFAULT_CHANGE_KEY = "default"
+
+# 2026-10-27-ghost-spec-binding-fix：CLI 对新变更名强制日期前缀（flow start 入口
+# 校验，缺前缀 exit 2 拒绝——「新变更名必须形如 YYYY-MM-DD-<简短描述>」，已存在
+# 的旧名变更不受影响）。查库未命中且名字不带此前缀 = 命令必被 CLI 拒绝，绑定通道
+# 禁止为其建 placeholder（幽灵占位根因防护：失败命令的占位行永远无文件接管，
+# 会话弹窗「进行中」长期残留实证）。校验放 bind 函数而非解析函数：纯解析查不了
+# 库，无法区分「旧名已有行（合法绑定）」与「无前缀必被拒」。
+_DATED_CHANGE_KEY_RE = re.compile(r"^\d{4}-\d{2}-\d{2}-")
+
+# 段首收紧（D-002@v1）后允许 sillyspec 前置的中缀 token：iter_command_segments
+# 剥包装前缀（pnpm/npx/yarn/sudo/node）后残留 ``exec`` 的合法形态（pnpm exec
+# sillyspec …）。其余段中位置（引号内字面量被切段后的中文描述段等）不命中。
+_ALLOWED_SPEC_INFIX = frozenset({"exec"})
 
 # flow 命令族中携带 --change <变更名> 的子命令（2026-09-25-change-center-thin-flow
 # task-04）：thin 派发会话的 2 调用协议命令。progress/status 等只读子命令无
@@ -60,8 +74,10 @@ def extract_spec_bindings(command: str) -> list[SpecCommandBinding]:
 
     对 :func:`iter_command_segments` 产出的每个裸命令段判定：
 
-    - 定位 ``sillyspec run`` token 序列（段首为主；包装剥除后残留 ``exec`` 等
-      中缀时同样命中，与 tool_kind 打标的主命令判定同源自洽）。
+    - 定位 ``sillyspec run`` token 序列。段首收紧（D-002@v1）：``sillyspec``
+      必须是段首 token，或紧随 ``exec``（包装剥除后的合法中缀形态，与
+      tool_kind 打标的主命令判定同源自洽）——段中其它位置不命中（引号字符串
+      内的字面文本被分段后不再误解析出绑定，会话 5f088f10 幽灵实证）。
     - 紧随 ``run`` 的子命令是 ``quick`` → 无产出：quick 的 ``--change`` 值是
       CLI 内部 quick 会话 id（``quick-<hex>`` / ``default``），不作变更绑定
       （D-004@v1）。
@@ -70,10 +86,10 @@ def extract_spec_bindings(command: str) -> list[SpecCommandBinding]:
       （以 ``-`` 开头视为选项 → 无值不产出）。
     - ``名 == "default"`` 跳过（D-005@v2 解析层第一道，函数内还有兜底）。
     - **flow 命令族**（2026-09-25-change-center-thin-flow task-04）：定位
-      ``sillyspec flow <start|done|amend-draft>`` token 序列，在其后 token 里
-      同规则找 ``--change <名>`` —— thin 派发会话执行 2 调用协议
-      （``flow start`` → 干活 → ``flow done``），变更绑定**唯一**依靠本命令
-      解析通道；``名 == "default"`` 同样跳过。flow 其它子命令
+      ``sillyspec flow <start|done|amend-draft>`` token 序列（段首收紧同 run
+      族），在其后 token 里同规则找 ``--change <名>`` —— thin 派发会话执行
+      2 调用协议（``flow start`` → 干活 → ``flow done``），变更绑定**唯一**
+      依靠本命令解析通道；``名 == "default"`` 同样跳过。flow 其它子命令
       （progress/status 等）无 ``--change`` 自然无产出。
     - run 与 flow 命中其一即处理（一段命令只属一族，先查 run 再查 flow）。
 
@@ -85,11 +101,7 @@ def extract_spec_bindings(command: str) -> list[SpecCommandBinding]:
     for segment in iter_command_segments(command):
         tokens = segment.split()
         # ── 族一：sillyspec run（quick 子命令跳过）──
-        run_idx: int | None = None
-        for i in range(len(tokens) - 1):
-            if tokens[i] == "sillyspec" and tokens[i + 1] == "run":
-                run_idx = i
-                break
+        run_idx = _locate_sillyspec_subcommand(tokens, "run")
         if run_idx is not None:
             if run_idx + 2 < len(tokens) and tokens[run_idx + 2] == "quick":
                 # D-004@v1：quick 子命令的 --change 是 CLI quick 会话 id，跳过。
@@ -100,13 +112,9 @@ def extract_spec_bindings(command: str) -> list[SpecCommandBinding]:
             continue
         # ── 族二：sillyspec flow start|done|amend-draft（thin 2 调用协议）──
         flow_idx: int | None = None
-        for i in range(len(tokens) - 2):
-            if (
-                tokens[i] == "sillyspec"
-                and tokens[i + 1] == "flow"
-                and tokens[i + 2] in _FLOW_CHANGE_SUBCOMMANDS
-            ):
-                flow_idx = i
+        for sub in _FLOW_CHANGE_SUBCOMMANDS:
+            flow_idx = _locate_sillyspec_subcommand(tokens, "flow", sub)
+            if flow_idx is not None:
                 break
         if flow_idx is None:
             # 既非 run 也非 flow 命令族（含 progress/status/archive 等子命令、
@@ -117,6 +125,35 @@ def extract_spec_bindings(command: str) -> list[SpecCommandBinding]:
             continue
         bindings.append(SpecCommandBinding(kind="change", change_key=change_key))
     return bindings
+
+
+def _locate_sillyspec_subcommand(
+    tokens: list[str], subcommand: str, sub_subcommand: str | None = None
+) -> int | None:
+    """定位 ``sillyspec <subcommand> [sub_subcommand]`` 的 sillyspec token 下标。
+
+    段首收紧（D-002@v1，2026-10-27-ghost-spec-binding-fix）：``sillyspec`` 必须
+    是段首 token，或紧随 ``exec``（iter_command_segments 剥包装前缀后残留
+    ``exec`` 的合法中缀形态）。原实现允许 token 序列出现在段中任意位置——
+    引号字符串内的字面文本（如 flow start ``--input`` 长文本引用的示例命令
+    「sillyspec flow start --change xxx」）被分段函数切成独立段后，段首是中文
+    描述 token、序列悬在段中，曾被误解析出幽灵绑定（会话 5f088f10 实证）。
+
+    返回 sillyspec 的下标；未命中返回 None。``sub_subcommand`` 为 None 时只匹配
+    两 token（run 族，quick 跳过判定由调用方做）；给出时三 token 须连续命中
+    （flow 族的 start/done/amend-draft 区分）。
+    """
+    for i in range(len(tokens)):
+        if tokens[i] != "sillyspec":
+            continue
+        if i != 0 and tokens[i - 1] not in _ALLOWED_SPEC_INFIX:
+            continue
+        if i + 1 >= len(tokens) or tokens[i + 1] != subcommand:
+            continue
+        if sub_subcommand is not None and (i + 2 >= len(tokens) or tokens[i + 2] != sub_subcommand):
+            continue
+        return i
+    return None
 
 
 def _parse_change_key(tokens: list[str], start: int) -> str | None:
@@ -148,6 +185,10 @@ async def bind_session_to_change(
 
     - ``change_key == "default"`` 直接返回 None（D-005@v2 函数内兜底：命令解析与
       agent-logs 两写通道统一受保护，无 placeholder 行、无 link 行）。
+    - 查库未命中且名字不带日期前缀 → 拒绝建 placeholder（FR-01，2026-10-27-
+      ghost-spec-binding-fix）：CLI 对新变更名强制日期前缀，此类命令必被 CLI
+      exit 2 拒绝，为它建占位行只会产生永远无文件接管的幽灵（会话弹窗「进行中」
+      残留实证）。已有行（含历史旧格式名）不受影响，照常幂等绑 link（FR-03）。
     - 按 ``(workspace_id, change_key)`` 查 Change，不存在则建 placeholder 行
       （defaults 对齐 ``platform_sync/service.py:_ensure_change_row``：
       status="draft" / location="active" / path=f"changes/{名}" / title=名），
@@ -174,6 +215,16 @@ async def bind_session_to_change(
                 )
             ).scalar_one_or_none()
             if change is None:
+                if not _DATED_CHANGE_KEY_RE.match(change_key):
+                    # FR-01：无行 + 无日期前缀 = CLI 必拒的失败命令，不建占位。
+                    # 返回 None 在 savepoint 内正常返回（无脏数据）。
+                    log.warning(
+                        "change.spec_binding_rejected_invalid_name",
+                        workspace_id=str(workspace_id),
+                        change_key=change_key,
+                        session_id=str(session_id),
+                    )
+                    return None
                 change = Change(
                     id=uuid.uuid4(),
                     workspace_id=workspace_id,

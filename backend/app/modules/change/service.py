@@ -90,6 +90,20 @@ PLACEHOLDER_PROTECT_WINDOW_DAYS = 7
 # router._CHANGE_SESSIONS_MAX=200 惯例，100 覆盖会话页面悬浮面板全量展示）。
 _SESSION_CHANGES_MAX = 100
 
+# 2026-10-27-ghost-spec-binding-fix FR-04/05：幽灵占位过滤的年龄阈值。真实
+# flow start 命令解析建占位（秒级）先于镜像文档同步（daemon 同步周期）到达，
+# 30 分钟窗口护栏：窗口内不过滤（镜像同步延迟不误伤），超窗仍无文档的 draft
+# active 行判为失败命令残留（写侧拒绝分支是防新增，本阈值兜存量幽灵）。
+_GHOST_PLACEHOLDER_MIN_AGE = timedelta(minutes=30)
+
+
+def _as_utc(dt: datetime) -> datetime:
+    """naive datetime 按 UTC 解释（SQLite 列落库丢 tzinfo，写入端值即 UTC 墙钟；
+    PG timezone=True 读出为 aware）。跨库年龄比较统一成 aware，防 naive/aware
+    相减 TypeError（Windows 本地 SQLite 与生产 PG 行为一致）。"""
+    return dt if dt.tzinfo is not None else dt.replace(tzinfo=UTC)
+
+
 # 2026-08-29-approval-notify-push task-05（D-007@v1 / design §7.3②）：审批结果
 # 通知 owner 的门中文名映射（title 文案常量集中于此，勿散落触发点）。
 # 四个审核门 + 旧版 approve/reject（approval）。
@@ -2425,6 +2439,14 @@ class ChangeService:
         （router.list_change_sessions），本方法补反向查询。
 
         - 软删变更（``location='deleted'``）排除——与变更中心读侧口径一致；
+        - **幽灵占位过滤**（2026-10-27-ghost-spec-binding-fix FR-04/05/06）：
+          status=draft 且 location=active 且名下无 change_documents 且
+          created_at 距今超 ``_GHOST_PLACEHOLDER_MIN_AGE``（30 分钟）的行不返回
+          ——失败命令占位残留（写侧拒绝分支是防新增，本过滤兜存量：CLI 强制
+          日期前缀前旧版本、带前缀但 --input 不合规被拒等写侧拦不住的残留）。
+          30 分钟窗口为真实 flow start 命令解析（秒级建占位）先于镜像文档同步
+          （daemon 同步周期）的延迟护栏；文档到达后四条件自然不满足，行自动
+          恢复显示，无永久误伤；
         - 取数窗口 ``created_at desc + limit``（对齐 router._CHANGE_SESSIONS_MAX=200
           惯例；会话挂的变更数远低于上限）；
         - 复用 ``enrich_summaries`` 批量投影（is_thin/last_pushed_at/pending_review
@@ -2450,10 +2472,47 @@ class ChangeService:
             .scalars()
             .all()
         )
+        changes = await self._filter_ghost_placeholders(list(changes))
         summaries = await self.enrich_summaries(list(changes))
         # 稳定排序：未归档（False=0）沉底归档（True=1），组内序保持取数序。
         summaries.sort(key=lambda s: s.location == "archive")
         return summaries
+
+    async def _filter_ghost_placeholders(self, changes: list[Change]) -> list[Change]:
+        """滤掉幽灵占位行（FR-04/05/06，docstring 见 list_changes_for_session）。
+
+        候选先行收窄（status/location/年龄三条件内存判定，零 SQL 成本），仅对
+        候选做一次批量 IN 文档存在性查询（R-03 禁 N+1）；无候选零查询。判定是
+        动态投影（不落库打标）——文档一旦同步到达，行即恢复参与返回。
+        """
+        if not changes:
+            return changes
+        now = datetime.now(UTC)
+        candidates = [
+            c
+            for c in changes
+            if c.status == "draft"
+            and c.location == "active"
+            and c.created_at is not None
+            and now - _as_utc(c.created_at) > _GHOST_PLACEHOLDER_MIN_AGE
+        ]
+        if not candidates:
+            return changes
+        documented_ids: set[uuid.UUID] = set(
+            (
+                await self._session.execute(
+                    select(ChangeDocument.change_id).where(
+                        ChangeDocument.change_id.in_([c.id for c in candidates])
+                    )
+                )
+            )
+            .scalars()
+            .all()
+        )
+        ghosts = {c.id for c in candidates if c.id not in documented_ids}
+        if not ghosts:
+            return changes
+        return [c for c in changes if c.id not in ghosts]
 
     # ── owner_name 批量投影 + 时间线事件合成（2026-08-16-change-owner-from-token
     #    task-04，design §5 Phase 2.1/2.2/2.4；R-03/R-06 两次批量 IN 禁 N+1）──

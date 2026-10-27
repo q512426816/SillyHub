@@ -1,0 +1,45 @@
+tier: thin
+legacy_fallback: false
+substeps: {}
+born_face: thin
+with_tasks: false
+review_force: null
+input: >-
+  失败命令不再生成幽灵变更占位并过滤存量
+
+
+  动机与背景：2026-10-27 会话 9d190177 实证——agent 执行 sillyspec flow start --change task-wakeup-precision-fix（缺日期前缀）被 CLI exit 2
+  拒绝，但平台命令解析绑定通道不看命令成败，仍为该名字建出 placeholder 变更行（draft/active/无文档）并挂会话链接；该名字永远不会有文件系统目录，reparse
+  永不接管，会话变更弹窗「进行中（2）」长期显示一条全量·未开始的幽灵变更。本地库 2026-07-07 的 default 行是同类历史残留。
+
+
+  成功标准：
+
+  - bind_session_to_change 在 changes 表无该 change_key 行且名字不匹配 YYYY-MM-DD- 日期前缀格式时，跳过建 placeholder 与 link（log.warning
+  记录），返回 None
+
+  - 名字带日期前缀但行不存在时维持现状建 placeholder（真实 flow start 场景零回退）
+
+  - 库中已存在同 key 行（含历史旧格式名）时正常建 link，行为不变
+
+  - list_changes_for_session 过滤幽灵占位行：status=draft 且 location=active 且无 change_documents 且 created_at 距今超过 30
+  分钟的行不出现在返回结果
+
+  - 刚创建（30 分钟内）的 draft 无文档行不过滤（镜像同步延迟窗口不受影响）
+
+  - 有文档的 draft 行、归档行、status 非 draft 的行均不过滤（零误伤）
+
+  - backend 相关单元测试新增并通过（binding 校验 + 会话列表过滤两组）
+autopilot: false
+prestage_ack: false
+baseline_commit: 0dbbdad432fdb050631c0a1d7143a0707a9b59ae
+updatedAt: '2026-10-27T00:58:02.692Z'
+cross_baselines:
+  sillyspec: 67e50bcca2adb9ecd502d12086c0ac8cb994da84
+baseline_sha256: 473a890311e17da01bafdf4df7afcacfea10ab63b94312481381c822e3b471c8
+spec_approved: true
+spec_approved_at: '2026-10-27T00:58:02.691Z'
+spec_approved_by: anon@DESKTOP-HJ0AM09
+spec_approved_channel: user-confirmed
+spec_attested_by: anon@DESKTOP-HJ0AM09
+

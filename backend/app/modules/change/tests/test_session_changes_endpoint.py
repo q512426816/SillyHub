@@ -33,7 +33,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.modules.agent.model import AgentSession
 from app.modules.auth.model import User
-from app.modules.change.model import Change, ChangeSessionLink
+from app.modules.change.model import Change, ChangeDocument, ChangeSessionLink
 from app.modules.daemon.model import DaemonRuntime
 from app.modules.workspace.model import Workspace
 
@@ -115,6 +115,7 @@ async def _make_change(
     location: str = "active",
     created_at: datetime | None = None,
     change_type: str | None = None,
+    status: str | None = None,
 ) -> Change:
     change = Change(
         id=uuid.uuid4(),
@@ -124,12 +125,31 @@ async def _make_change(
         location=location,
         path=f".sillyspec/changes/{change_key}",
         change_type=change_type,
+        status=status,  # None 走模型默认 draft（placeholder 出身形态）
         created_at=created_at or datetime.now(UTC),
     )
     db_session.add(change)
     await db_session.commit()
     await db_session.refresh(change)
     return change
+
+
+async def _make_doc(
+    db_session: AsyncSession,
+    *,
+    change_id: uuid.UUID,
+    doc_type: str = "design",
+) -> None:
+    """造 change_documents 行（幽灵判定「无文档」条件的对照组）。"""
+    db_session.add(
+        ChangeDocument(
+            id=uuid.uuid4(),
+            change_id=change_id,
+            doc_type=doc_type,
+            path=f"changes/{change_id}/{doc_type}.md",
+        )
+    )
+    await db_session.commit()
 
 
 async def _make_link(
@@ -173,8 +193,14 @@ class TestListSessionChanges:
 
         base = datetime.now(UTC) - timedelta(hours=3)
         # 造序：归档最新 → active 较旧 → active 最旧。期望返回序反转 active 在前。
+        # status="active"（非 draft）：造数不踩幽灵占位判定（FR-04 滤 draft+无文档
+        # +超龄行）——本用例测排序，不测幽灵形态（2026-10-27-ghost-spec-binding-fix）。
         c_active_old = await _make_change(
-            db_session, workspace_id=ws.id, change_key="active-old", created_at=base
+            db_session,
+            workspace_id=ws.id,
+            change_key="active-old",
+            created_at=base,
+            status="active",
         )
         c_active_new = await _make_change(
             db_session,
@@ -182,6 +208,7 @@ class TestListSessionChanges:
             change_key="active-new",
             created_at=base + timedelta(minutes=10),
             change_type="quick",  # 分流窗内 quick → is_thin True（三分支②）
+            status="active",
         )
         c_archived = await _make_change(
             db_session,
@@ -325,3 +352,120 @@ class TestListSessionChanges:
         )
         assert resp.status_code == 200, resp.text
         assert resp.json() == []
+
+    # ── 幽灵占位过滤（2026-10-27-ghost-spec-binding-fix FR-04/05/06）─────────
+
+    async def test_ghost_placeholder_filtered_after_ttl(
+        self,
+        client: AsyncClient,
+        auth_headers: dict[str, str],
+        db_session: AsyncSession,
+        tmp_path: Path,
+    ) -> None:
+        """FR-04：draft + active + 无文档 + created_at 超 30 分钟 → 幽灵占位行
+        不出现（失败命令占位残留，2026-10-27 会话 9d190177/5f088f10 实证形态）。"""
+        admin = await _make_admin(db_session)
+        rt = await _make_runtime(db_session, admin.id)
+        ws = await _make_workspace(db_session, root_path=str(tmp_path))
+        sess = await _make_session(
+            db_session, user_id=admin.id, runtime_id=rt.id, workspace_id=ws.id
+        )
+        ghost = await _make_change(
+            db_session,
+            workspace_id=ws.id,
+            change_key="task-wakeup-precision-fix",
+            created_at=datetime.now(UTC) - timedelta(minutes=41),
+        )
+        real = await _make_change(
+            db_session,
+            workspace_id=ws.id,
+            change_key="2026-10-27-real-change",
+            created_at=datetime.now(UTC) - timedelta(minutes=40),
+        )
+        # 真实变更超龄后必已被 reparse 接管（文档在库）——不满足幽灵「无文档」条件。
+        await _make_doc(db_session, change_id=real.id)
+        for c in (ghost, real):
+            await _make_link(db_session, change_id=c.id, session_id=sess.id)
+
+        resp = await client.get(
+            f"/api/workspaces/{ws.id}/changes/-/by-session/{sess.id}",
+            headers=auth_headers,
+        )
+        assert resp.status_code == 200, resp.text
+        assert [i["change_key"] for i in resp.json()] == ["2026-10-27-real-change"]
+
+    async def test_fresh_placeholder_not_filtered(
+        self,
+        client: AsyncClient,
+        auth_headers: dict[str, str],
+        db_session: AsyncSession,
+        tmp_path: Path,
+    ) -> None:
+        """FR-05：draft + active + 无文档但 created_at 在 30 分钟窗口内 → 保留
+        （真实 flow start 命令解析先于镜像文档同步的延迟窗口，不得提前过滤）。"""
+        admin = await _make_admin(db_session)
+        rt = await _make_runtime(db_session, admin.id)
+        ws = await _make_workspace(db_session, root_path=str(tmp_path))
+        sess = await _make_session(
+            db_session, user_id=admin.id, runtime_id=rt.id, workspace_id=ws.id
+        )
+        fresh = await _make_change(
+            db_session,
+            workspace_id=ws.id,
+            change_key="2026-10-27-fresh-flow",
+            created_at=datetime.now(UTC) - timedelta(minutes=5),
+        )
+        await _make_link(db_session, change_id=fresh.id, session_id=sess.id)
+
+        resp = await client.get(
+            f"/api/workspaces/{ws.id}/changes/-/by-session/{sess.id}",
+            headers=auth_headers,
+        )
+        assert resp.status_code == 200, resp.text
+        assert [i["change_key"] for i in resp.json()] == ["2026-10-27-fresh-flow"]
+
+    async def test_documented_archived_non_draft_rows_not_filtered(
+        self,
+        client: AsyncClient,
+        auth_headers: dict[str, str],
+        db_session: AsyncSession,
+        tmp_path: Path,
+    ) -> None:
+        """FR-06：幽灵四条件缺一均保留——①有文档的超龄 draft 行（正常在建）；
+        ②归档无文档超龄行（终态）；③status=active 无文档超龄行（真实生命周期
+        态）。三变体全部原样返回（零误伤）。"""
+        admin = await _make_admin(db_session)
+        rt = await _make_runtime(db_session, admin.id)
+        ws = await _make_workspace(db_session, root_path=str(tmp_path))
+        sess = await _make_session(
+            db_session, user_id=admin.id, runtime_id=rt.id, workspace_id=ws.id
+        )
+        old = datetime.now(UTC) - timedelta(minutes=60)
+        c_documented = await _make_change(
+            db_session, workspace_id=ws.id, change_key="drafted-with-docs", created_at=old
+        )
+        await _make_doc(db_session, change_id=c_documented.id)
+        c_archived = await _make_change(
+            db_session,
+            workspace_id=ws.id,
+            change_key="archived-no-docs",
+            location="archive",
+            created_at=old,
+        )
+        c_active_status = await _make_change(
+            db_session,
+            workspace_id=ws.id,
+            change_key="active-status-no-docs",
+            status="active",
+            created_at=old,
+        )
+        for c in (c_documented, c_archived, c_active_status):
+            await _make_link(db_session, change_id=c.id, session_id=sess.id)
+
+        resp = await client.get(
+            f"/api/workspaces/{ws.id}/changes/-/by-session/{sess.id}",
+            headers=auth_headers,
+        )
+        assert resp.status_code == 200, resp.text
+        keys = {i["change_key"] for i in resp.json()}
+        assert keys == {"drafted-with-docs", "archived-no-docs", "active-status-no-docs"}

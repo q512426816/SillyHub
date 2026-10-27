@@ -106,6 +106,20 @@ PARSE_CASES: list[tuple[str, list[str]]] = [
         "sillyspec flow done --change after-quick-key",
         ["after-quick-key"],
     ),
+    # --- 段首收紧（D-002@v1）：--input 引号长文本内的示例命令字样不产出绑定。
+    # 引号内换行被 iter_command_segments 切成独立段（分段不感知引号），段中
+    # sillyspec token 序列（段首是中文描述 token、前一 token 非 exec）不命中。
+    (
+        'cd /repo && sillyspec flow start --change 2026-10-27-real-change --input "标题\n'
+        "\n"
+        "动机：agent 执行 sillyspec flow start --change task-wakeup-precision-fix 被拒\n"
+        "\n"
+        "成功标准：\n"
+        '- 标准 一"',
+        ["2026-10-27-real-change"],
+    ),
+    # 段中 sillyspec（前一 token 为普通词）无产出——run 族同规则。
+    ("echo 执行 sillyspec run plan --change mid-token-key", []),
 ]
 
 
@@ -130,6 +144,24 @@ def test_extract_spec_bindings_quick_after_wrapper_still_skipped() -> None:
     assert (
         extract_spec_bindings("pnpm exec sillyspec run quick --done --change quick-990f8c09") == []
     )
+
+
+def test_extract_spec_bindings_quoted_text_not_binding() -> None:
+    """D-002@v1 完整重现（2026-10-27 会话 5f088f10 实证）：flow start --input
+    引号长文本内引用「sillyspec flow start --change <名>」示例字样，引号内换行
+    被分段函数切成独立段，段中序列不得产出绑定——只产出真实命令段的绑定。"""
+    command = (
+        'cd "C:/repo" && sillyspec flow start --change 2026-10-27-real-change --input "失败命令不再生成幽灵变更占位并过滤存量\n'
+        "\n"
+        "动机与背景：2026-10-27 会话实证——agent 执行 sillyspec flow start --change task-wakeup-precision-fix"
+        "（缺日期前缀）被 CLI exit 2 拒绝，但绑定通道不看执行结果仍建占位。\n"
+        "\n"
+        "成功标准：\n"
+        "- bind 在无行且名字不带日期前缀时跳过建占位\n"
+        '- 读侧过滤超龄无文档 draft 行"'
+    )
+    bindings = extract_spec_bindings(command)
+    assert [b.change_key for b in bindings] == ["2026-10-27-real-change"]
 
 
 # ===========================================================================
@@ -202,6 +234,18 @@ async def _change_links(db_session, change_id: uuid.UUID) -> list[ChangeSessionL
     )
 
 
+async def _change_links_of_session(db_session, session_id: uuid.UUID) -> list[ChangeSessionLink]:
+    return list(
+        (
+            await db_session.execute(
+                select(ChangeSessionLink).where(ChangeSessionLink.session_id == session_id)
+            )
+        )
+        .scalars()
+        .all()
+    )
+
+
 async def test_bind_change_default_guard_creates_nothing(db_session):
     """D-005@v2 函数内兜底：default 伪键不建 Change 行、不建 link 行。"""
     user = await _make_user(db_session)
@@ -245,6 +289,49 @@ async def test_bind_change_creates_placeholder_with_ensure_defaults(db_session):
     links = await _change_links(db_session, change.id)
     assert len(links) == 1
     assert links[0].session_id == s.id
+
+
+async def test_bind_change_rejects_undated_new_key_no_placeholder(db_session):
+    """FR-01（2026-10-27-ghost-spec-binding-fix）：查库未命中 + 名字不带日期前缀
+    （CLI 强制规则，必被 exit 2 拒绝——失败命令）→ 不建 placeholder、不建 link、
+    返回 None。幽灵占位根因写侧防护。"""
+    user = await _make_user(db_session)
+    ws = await _make_ws(db_session)
+    s = await _make_session(db_session, workspace_id=ws.id, user_id=user.id)
+
+    result = await bind_session_to_change(db_session, ws.id, "task-wakeup-precision-fix", s.id)
+
+    assert result is None
+    assert await _changes_in_ws(db_session, ws.id) == []
+    assert await _change_links_of_session(db_session, s.id) == []
+
+
+async def test_bind_change_binds_existing_undated_row_without_placeholder(db_session):
+    """FR-03：库中已有同 key 行（历史旧格式名合法存在）→ 跳过格式校验走幂等
+    link 路径，不建第二行、不误拒——CLI「已存在的旧名变更不受影响」口径。"""
+    user = await _make_user(db_session)
+    ws = await _make_ws(db_session)
+    s = await _make_session(db_session, workspace_id=ws.id, user_id=user.id)
+    key = "legacy-undated-name"
+    existing = Change(
+        id=uuid.uuid4(),
+        workspace_id=ws.id,
+        change_key=key,
+        title="历史旧格式名变更",
+        status="active",
+        location="active",
+        path=f"changes/{key}",
+    )
+    db_session.add(existing)
+    await db_session.commit()
+
+    bound = await bind_session_to_change(db_session, ws.id, key, s.id)
+
+    assert bound == existing.id
+    changes = await _changes_in_ws(db_session, ws.id)
+    assert [c.id for c in changes] == [existing.id]  # 不建第二行
+    links = await _change_links(db_session, existing.id)
+    assert len(links) == 1 and links[0].session_id == s.id
 
 
 async def test_bind_change_reuses_existing_row_and_is_idempotent(db_session):
