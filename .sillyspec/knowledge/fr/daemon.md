@@ -8595,3 +8595,86 @@
   confirmed_at: null
   source_change: 2026-10-27-scheduled-send-attachments
   status: active
+
+## FR-daemon-318 会话列表统计显示服务端真实总数（total），不再被 500 拉取上限截断
+变更：2026-10-27-sessions-total-and-status-filter
+状态：active
+摘要：总数超过拉取上限
+全文：.sillyspec/changes/archive/2026-10-27-sessions-total-and-status-filter/requirements.md#FR-01
+最近确认：9c86c078c5c3d91ea63cd439d1137a079a07a6a7
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-27-sessions-total-and-status-filter:flow:测试绑定FR-01
+  tests: backend/app/modules/daemon/tests/test_session_history.py「status_counts 五态之和 = 真实总数（>limit 拉取上限场景）」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-27-sessions-total-and-status-filter
+  status: active
+
+## FR-daemon-319 状态筛选统一为四档：全部/在线（原运行中·活跃）/已结束/失败，各档带真实计数（服务端口径）
+变更：2026-10-27-sessions-total-and-status-filter
+状态：active
+摘要：chips 计数不受当前档位影响；在线档过滤为三态聚合
+全文：.sillyspec/changes/archive/2026-10-27-sessions-total-and-status-filter/requirements.md#FR-02
+最近确认：9c86c078c5c3d91ea63cd439d1137a079a07a6a7
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-27-sessions-total-and-status-filter:flow:测试绑定FR-02
+  tests: backend/app/modules/daemon/tests/test_session_history.py「status_group=ongoing 三态命中 + status 与 status_group 同传 422」 | frontend/src/components/mobile/mobile-session-list.test.tsx「四 chips 渲染服务端计数且切档计数不漂移」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-27-sessions-total-and-status-filter
+  status: active
+
+## FR-daemon-320 手机端默认只展示最新 10 条会话，且所有在线会话不限 10 条全部展示
+变更：2026-10-27-sessions-total-and-status-filter
+状态：active
+摘要：在线会话超出默认条数
+全文：.sillyspec/changes/archive/2026-10-27-sessions-total-and-status-filter/requirements.md#FR-03
+最近确认：9c86c078c5c3d91ea63cd439d1137a079a07a6a7
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-27-sessions-total-and-status-filter:flow:测试绑定FR-03
+  tests: frontend/src/components/mobile/mobile-session-list.test.tsx「默认 10 条 + 在线全显 + 显示全部展开」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-27-sessions-total-and-status-filter
+  status: active
+
+## FR-daemon-321 后端 list_sessions 响应附 status_counts 分状态计数（与 total 同口径），前端与 daemon 类型同步再生成
+变更：2026-10-27-sessions-total-and-status-filter
+状态：active
+摘要：status 与 status_group 互斥
+全文：.sillyspec/changes/archive/2026-10-27-sessions-total-and-status-filter/requirements.md#FR-04
+最近确认：9c86c078c5c3d91ea63cd439d1137a079a07a6a7
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-27-sessions-total-and-status-filter:flow:测试绑定FR-04
+  tests: backend/app/modules/daemon/tests/test_session_history.py | frontend/src/components/mobile/mobile-session-list.test.tsx「消费再生成类型渲染统计行」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-27-sessions-total-and-status-filter
+  status: active
+
+## FR-daemon-322 触及 src/test 的改动相关单测通过且 lint 无新增错误
+变更：2026-10-27-sessions-total-and-status-filter
+状态：active
+摘要：主路径
+全文：.sillyspec/changes/archive/2026-10-27-sessions-total-and-status-filter/requirements.md#FR-05
+最近确认：9c86c078c5c3d91ea63cd439d1137a079a07a6a7

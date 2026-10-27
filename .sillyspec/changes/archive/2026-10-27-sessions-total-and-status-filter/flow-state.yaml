@@ -1,0 +1,40 @@
+tier: thin
+legacy_fallback: false
+substeps:
+  artifacts: done
+  ledger: done
+  patch: done
+  review: done
+  probes: done
+  distill: done
+  archive: done
+  events: done
+born_face: thin
+with_tasks: false
+review_force: null
+input: |-
+  会话列表数据统计修正：用户手机/PC 会话页总数被前端拉取上限截断在 500（实际 515），状态筛选命名与默认展示不符合预期。
+
+  成功标准：
+  - 会话列表统计显示服务端真实总数（total），不再被 500 拉取上限截断
+  - 状态筛选统一为四档：全部/在线（原运行中·活跃）/已结束/失败，各档带真实计数（服务端口径）
+  - 手机端默认只展示最新 10 条会话，且所有在线会话不限 10 条全部展示
+  - 后端 list_sessions 响应附 status_counts 分状态计数（与 total 同口径），前端与 daemon 类型同步再生成
+  - 触及 src/test 的改动相关单测通过且 lint 无新增错误
+autopilot: false
+prestage_ack: true
+baseline_commit: 2c6fe653d8a9b03c98768958f64fc50baea5c42a
+updatedAt: '2026-10-27T05:31:18.215Z'
+cross_baselines:
+  sillyspec: 67e50bcca2adb9ecd502d12086c0ac8cb994da84
+baseline_sha256: 70f8a4e0541dbda310585ef8f67cd6b1ae1fff28502384a5bd766bdf7b26b91d
+spec_approved: true
+spec_approved_at: '2026-10-27T05:05:24.927Z'
+spec_approved_by: anon@DESKTOP-HJ0AM09
+spec_approved_channel: user-confirmed
+spec_attested_by: anon@DESKTOP-HJ0AM09
+gate_summary: >-
+  test: passed ← module[]+deps(py1+jsx3+jsx1)（30.2s）
+  结果：C:\Users\qinyi\IdeaProjects\multi-agent-platform\.sillyspec\.runtime\verify-runs\20261027052353\test-result.json｜lint:
+  skipped — 跳过原因：local.yaml 未配置 commands.lint（或标记 unavailable）。｜门文件 18 个
+

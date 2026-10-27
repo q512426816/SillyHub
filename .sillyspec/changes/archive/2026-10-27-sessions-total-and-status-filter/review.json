@@ -1,0 +1,68 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-27-sessions-total-and-status-filter",
+  "reviewer": "subagent",
+  "verdict": "PASS",
+  "reviewedAgainst": "9c86c078c5c3d91ea63cd439d1137a079a07a6a7",
+  "reviewedAt": "2026-10-27T13:30:04+08:00",
+  "summary": "五条 FR 全覆盖且实证复现：后端 status_counts（忽略状态维度口径）+status_group=ongoing（Literal 校验+与 status 互斥 422）落地，_build_session_filters 单一源提取使列表与计数共用过滤组装；类型三件（openapi.json/frontend api-types/sillyhub-daemon api-types）同提交同步（671093f9d）；手机端统计行+四档 chips（服务端计数切档不漂移）+默认 10∪在线全显+显示全部；PC 端在线档更名三态口径+组内 50→10∪在线全显。抽验测试 backend 20 passed / mobile 19 passed / PC panel 119 passed，与 verify-notes.md 回执一致。发现 4 条 P3 建议级事项，无 P1/P2。",
+  "findings": [
+    {
+      "severity": "P3",
+      "status": "open",
+      "title": "PC 端「显示全部」展开态（showAllGroupIds）不随筛选档位切换重置，design 盲维 3「展开态切档重置」在 PC 端未兑现",
+      "evidence": "design.md 边界与并发第 3 问答「展开态 keyed by 档位切档重置，不留陈旧展开态跨档残留」。移动端兑现（mobile-session-list.tsx 切档 onClick 内 setShowAll(false)）；PC 端 showAllGroupIds 为独立 state，filterEpoch 变化触发的重置 effect（setOpenParents/setSubOrphanOpen/setOpenForkSources）不含它——用户在「全部状态」档对某组点过「显示全部」后切档，该组仍全量显示不回落到 10 条收敛。属既有 R-03 机制照搬（50 截断时代即如此），非本变更新回归，行为无害（用户主动展开过的组），故定 P3。",
+      "location": "frontend/src/components/sessions/session-list-panel.tsx:864（showAllGroupIds state 定义）；session-list-panel.tsx:2706-2710（filterEpoch 重置 effect 未包含该 state）"
+    },
+    {
+      "severity": "P3",
+      "status": "open",
+      "title": "design/FR-02 措辞「查询口径扩为 status_group=ongoing」在 PC 端实为纯客户端三态过滤，且 PC 在线档可见集受先截 500 再过滤的边界约束，文档未区分两端路径",
+      "evidence": "PC 端主查询 queryFn（listAgentSessions({limit, archived, workspace_id...})）不带任何状态参，__ongoing__ 哨兵仅在客户端过滤分支生效（非 ended/failed 即显示），从不下发服务端；「在线」三态口径的功能效果达成（与手机端/后端 status_group=ongoing 同集合），FR-02 也无 PC 服务端下发的验收场景。但 design §做法概述与 FR-02 均写「查询口径从单值 active 扩为 status_group=ongoing」，按字面读会以为 PC 端走服务端参数；实际边界差异：PC 先截 500 再客户端过滤（在线会话排在第 500 名之外时 PC 在线档漏显），手机端先服务端过滤再限 500（在线命中集本身 ≤500）——design「遗留已知边界」只描述了手机端口径。建议 design 补一句 PC 客户端过滤路径的说明，避免后续维护者误判。",
+      "location": ".sillyspec/changes/2026-10-27-sessions-total-and-status-filter/design.md（§做法概述第 3 条）；frontend/src/components/sessions/session-list-panel.tsx:1030-1050（主查询无状态参）、1324-1330（__ongoing__ 客户端过滤分支）"
+    },
+    {
+      "severity": "P3",
+      "status": "open",
+      "title": "service 层 _build_session_filters 不校验 status_group 值域，任意非 None 值一律按 ongoing 三态处理",
+      "evidence": "status_group 参数类型为 str | None，分支 elif status_group is not None 即套 ONGOING_SESSION_STATUSES——内部调用方若传 \"ended\"/\"finished\" 等错值不会报错而是静默得到 ongoing 结果。HTTP 面由 router Literal[\"ongoing\"] 校验兜底（非法值 422 已测），且注释明示「本层不重复校验」为有意决策，故仅备忘：建议后续将 service 层签名收敛为 Literal 类型或加防御断言。",
+      "location": "backend/app/modules/daemon/session/service/read_model.py:100-103（status_group 分支）；read_model.py:33-38（参数签名）"
+    },
+    {
+      "severity": "P3",
+      "status": "open",
+      "title": "DaemonService facade 的 list_agent_session_status_counts 签名缺 session_kind 参数，与 SessionService 层不对称",
+      "evidence": "session/service/__init__.py 的同名函数带 session_kind: str | None = \"chat\"，而 daemon/service.py 外层 facade 无该参数（也不透传）。router 通过 svc._sess 直达内层规避了缺口（与 list_agent_sessions 同款穿透先例，注释已说明），现状无调用方受影响；若未来经 DaemonService 调用 counts 且需覆盖 session_kind（如 admin debug 查群会话计数）会拿不到。建议后续补齐透传。",
+      "location": "backend/app/modules/daemon/service.py:1004-1017（facade 签名无 session_kind）；backend/app/modules/daemon/session/service/__init__.py:966-981（内层签名带 session_kind）"
+    }
+  ],
+  "dimensionNotes": {
+    "乱序": {
+      "verdict": "ok",
+      "note": "实现为同一请求内两条独立查询（列表 total+items 两条 + status_counts 一条，无单事务快照包裹），会话状态迁移时计数与列表可有瞬时 1 条级偏差——与 design 答案一致（承认偏差可接受），SSE 变更信号 invalidate [\"agentSessions\"] 前缀重拉自愈；测试断言带 status 过滤时 status_counts 仍为全量口径（档位间不漂移）。"
+    },
+    "并发": {
+      "verdict": "ok",
+      "note": "status_counts 为纯读 GROUP BY（select(status, count).group_by），无写面；与列表查询共用 _build_session_filters 纯函数组装（提取自原 base_filters，逐谓词搬移无语义改动，既有 17 用例零回归佐证），无共享可变状态。"
+    },
+    "切换": {
+      "verdict": "finding",
+      "note": "移动端切档走 queryKey 变体自动重拉（默认/归档档 4 槽与桌面逐字一致含 limit:500 第四槽，状态档追加第五槽，invalidate 前缀全覆盖）且显式 setShowAll(false) 重置展开态——兑现 design；PC 端 showAllGroupIds 不随 filterEpoch 重置（见 findings 第 1 条），design「展开态 keyed by 档位切档重置」未在 PC 端全兑现，属既有机制照搬、行为无害，降为 P3。"
+    },
+    "作用域": {
+      "verdict": "ok",
+      "note": "status_counts 与列表严格同口径：router 装配处传入与列表完全相同的过滤参集合（runtime_id/machine_id/provider/q/workspace_id/change_id/ql_id/ppm 对/archived/session_kind），仅不传 status/status_group；两条查询走同一 _build_session_filters 产出，owner-scoped（user_id+软删）+scope 谓词逐项一致，不跨工作区串台；PC 与手机端共用端点与再生成类型，两端口径单一源。"
+    }
+  },
+  "review": {
+    "frCoverage": {
+      "FR-01": "覆盖——后端 status_counts 为忽略 limit 的全量分组计数（test_status_counts_beyond_fetch_limit：limit=2 时 counts 仍全量）；移动端统计行=五态之和，组件测试断言真实总数 503 如实显示（拉回仅 2 条不冒充）。",
+      "FR-02": "覆盖——后端 status_group=ongoing 三态命中+非法值 Literal 422+与 status 同传 422 中文文案（三用例齐）；移动端四 chips 服务端计数切档不漂移（组件测试断言切档后 counts 不变）；PC「活跃」→「在线」三态口径达成（客户端过滤路径，见 findings 第 2 条措辞偏差）。",
+      "FR-03": "覆盖——移动端 defaultVisibleSessions=前 10∪尾部在线全显+「显示全部 N 条」展开（测试断言 15/17 卡）；PC 端 GROUP_ITEM_LIMIT 50→10+defaultVisibleGroupSessions 同口径（测试断言 15/17 行），两端语义一致。",
+      "FR-04": "覆盖——响应新增 status_counts: dict[str,int]（default_factory=dict 向后兼容）；类型三件 backend/openapi.json+frontend/src/lib/api-types.ts+sillyhub-daemon/src/api-types.ts 同提交（671093f9d）同步再生成。",
+      "FR-05": "覆盖——本次评审独立抽验复现：backend test_session_history.py 20 passed、mobile-session-list.test.tsx 19 passed、session-list-panel.test.tsx 119 passed，与 verify-notes.md 回执一致；lint 回执 0 新增错误。"
+    },
+    "commitFace": "本变更 6 提交中 946f8ac1d（后端）、671093f9d（类型三件）、69cc0aa65（session-lists.ts 参数面，混入的 2026-10-28-bg-task-status-report 14 个文档按评审指示排除，verify-notes 已如实留痕）、0381eaece（两端组件+测试，含 session-lists.ts 并行恢复叠加去重修复）、d0463f8cf/9c86c078c（治理工件）；diff 中 turn-state.ts 与 session-stream-turn-phase.test.ts 属并行变更 386569927，不在本变更评审面。",
+    "testEvidence": "backend 20 passed（2026-10-27 13:28 本机复跑）；frontend mobile 19 passed / PC panel 119 passed（13:29 本机复跑），均与 verify-notes.md 回执一致。"
+  }
+}

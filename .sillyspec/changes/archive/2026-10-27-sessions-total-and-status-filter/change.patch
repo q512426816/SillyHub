@@ -1,0 +1,1700 @@
+diff --git a/.sillyspec/docs/SillyHub/modules/daemon.changelog.md b/.sillyspec/docs/SillyHub/modules/daemon.changelog.md
+index a4a605cf2..bcd46027d 100644
+--- a/.sillyspec/docs/SillyHub/modules/daemon.changelog.md
++++ b/.sillyspec/docs/SillyHub/modules/daemon.changelog.md
+@@ -111,3 +111,4 @@ created_at: 2026-08-27 14:32:24
+ - 2026-10-27-task-wakeup-precision-fix | 修复任务唤醒判据与通知四处缺陷
+ - 2026-10-27-ghost-spec-binding-fix | 失败命令不再生成幽灵变更占位并过滤存量
+ - 2026-10-27-task-wakeup-inject-retry | 后台任务终态唤醒注入经后端中转单发无重试，撞后端短暂不可用窗（部署重建/502/504）即 inte…
++- 2026-10-27-turn-phase-observability-monotonic | 生产实证（2026-10-27 会话 7eff99e1，run 4f2e2cdd）：first_ev…
+diff --git a/.sillyspec/docs/SillyHub/modules/frontend_components.changelog.md b/.sillyspec/docs/SillyHub/modules/frontend_components.changelog.md
+index f7b62fdb5..6c3a7d200 100644
+--- a/.sillyspec/docs/SillyHub/modules/frontend_components.changelog.md
++++ b/.sillyspec/docs/SillyHub/modules/frontend_components.changelog.md
+@@ -181,3 +181,4 @@ created_at: 2026-08-30 22:23:33
+ | 2026-10-27 | 2026-10-27-mobile-chat-visual-round4 | 用户四轮反馈：子代理卡/进度视图过程块(运行命令等)仍不满宽(8 处 calc(100%-120px… |
+ | 2026-10-27 | 2026-10-27-netdata-prod-monitoring | 腾讯云生产机部署 Netdata 秒级监控 |
+ | 2026-10-27 | 2026-10-27-sessions-panes-gap-remove | 用户追点：会话页双栏容器 sessions-portal-panes 的 gap-3（栏间横向空隙，… |
++| 2026-10-27 | 2026-10-27-turn-phase-observability-monotonic | 生产实证（2026-10-27 会话 7eff99e1，run 4f2e2cdd）：first_ev… |
+diff --git a/.sillyspec/docs/SillyHub/modules/frontend_lib.changelog.md b/.sillyspec/docs/SillyHub/modules/frontend_lib.changelog.md
+index 5bd4d8ecc..580bf95d5 100644
+--- a/.sillyspec/docs/SillyHub/modules/frontend_lib.changelog.md
++++ b/.sillyspec/docs/SillyHub/modules/frontend_lib.changelog.md
+@@ -50,3 +50,4 @@ created_at: 2026-10-16 16:40:00
+ - 2026-10-27-task-wakeup-inject-retry | 后台任务终态唤醒注入经后端中转单发无重试，撞后端短暂不可用窗（部署重建/502/504）即 inte…
+ - 2026-10-27-turn-phase-stall-honest-ui | 会话忙时用户消息在 backend 排队/派发链路滞留（生产实证 2026-10-27 会话 7ef…
+ - 2026-10-27-mobile-chat-visual-round4 | 用户四轮反馈：子代理卡/进度视图过程块(运行命令等)仍不满宽(8 处 calc(100%-120px…
++- 2026-10-27-turn-phase-observability-monotonic | 生产实证（2026-10-27 会话 7eff99e1，run 4f2e2cdd）：first_ev…
+diff --git a/.sillyspec/docs/multi-agent-platform/modules/frontend.changelog.md b/.sillyspec/docs/multi-agent-platform/modules/frontend.changelog.md
+index bb04699be..e191095d4 100644
+--- a/.sillyspec/docs/multi-agent-platform/modules/frontend.changelog.md
++++ b/.sillyspec/docs/multi-agent-platform/modules/frontend.changelog.md
+@@ -231,3 +231,4 @@
+ | 2026-10-27 | 2026-10-27-mobile-chat-visual-round4 | 用户四轮反馈：子代理卡/进度视图过程块(运行命令等)仍不满宽(8 处 calc(100%-120px… |
+ | 2026-10-27 | 2026-10-27-netdata-prod-monitoring | 腾讯云生产机部署 Netdata 秒级监控 |
+ | 2026-10-27 | 2026-10-27-sessions-panes-gap-remove | 用户追点：会话页双栏容器 sessions-portal-panes 的 gap-3（栏间横向空隙，… |
++| 2026-10-27 | 2026-10-27-turn-phase-observability-monotonic | 生产实证（2026-10-27 会话 7eff99e1，run 4f2e2cdd）：first_ev… |
+diff --git a/.sillyspec/docs/multi-agent-platform/modules/sillyhub-daemon.changelog.md b/.sillyspec/docs/multi-agent-platform/modules/sillyhub-daemon.changelog.md
+index c07eccc01..1fba826ba 100644
+--- a/.sillyspec/docs/multi-agent-platform/modules/sillyhub-daemon.changelog.md
++++ b/.sillyspec/docs/multi-agent-platform/modules/sillyhub-daemon.changelog.md
+@@ -54,3 +54,4 @@
+ - 2026-10-27-task-wakeup-precision-fix | 修复任务唤醒判据与通知四处缺陷
+ - 2026-10-27-ghost-spec-binding-fix | 失败命令不再生成幽灵变更占位并过滤存量
+ - 2026-10-27-task-wakeup-inject-retry | 后台任务终态唤醒注入经后端中转单发无重试，撞后端短暂不可用窗（部署重建/502/504）即 inte…
++- 2026-10-27-turn-phase-observability-monotonic | 生产实证（2026-10-27 会话 7eff99e1，run 4f2e2cdd）：first_ev…
+diff --git a/backend/app/modules/daemon/router/session_crud.py b/backend/app/modules/daemon/router/session_crud.py
+index 87ed98eee..acbdb8f46 100644
+--- a/backend/app/modules/daemon/router/session_crud.py
++++ b/backend/app/modules/daemon/router/session_crud.py
+@@ -162,6 +162,10 @@ async def list_sessions(
+     limit: int = Query(default=20, ge=1, le=500),
+     offset: int = Query(default=0, ge=0),
+     status: _SessionStatusQuery | None = Query(default=None),
++    # 2026-10-27-sessions-total-and-status-filter FR-02：在线三态聚合过滤
++    # （'ongoing' → pending+active+reconnecting）；与 status 互斥，同传 422
++    # （见下方手工校验，对齐 ppm_item 成对校验先例）。未知值 Literal 422。
++    status_group: Literal["ongoing"] | None = Query(default=None),
+     runtime_id: uuid.UUID | None = Query(default=None),
+     machine_id: uuid.UUID | None = Query(default=None),
+     provider: _SessionProviderQuery | None = Query(default=None),
+@@ -223,6 +227,14 @@ async def list_sessions(
+             # 与 SessionCreateRequest._require_ppm_item_pair 同口径（用户可见 422 文案中文化）。
+             detail="ppm_item_kind 与 ppm_item_id 必须成对提供。",
+         )
++    # 2026-10-27-sessions-total-and-status-filter FR-02：status（单值）与
++    # status_group（聚合）互斥——同传语义不明，fail-explicit 422（用户可见
++    # 文案中文化，对齐上方成对校验先例）。
++    if status is not None and status_group is not None:
++        raise HTTPException(
++            status_code=422,
++            detail="status 与 status_group 互斥，不能同时提供。",
++        )
+     from app.modules.agent.model import ACTIVE_RUN_STATUSES, AgentRun, AgentRunLog
+ 
+     svc = DaemonService(session)
+@@ -236,6 +248,7 @@ async def list_sessions(
+         limit=limit,
+         offset=offset,
+         status_filter=status,
++        status_group=status_group,
+         runtime_id=runtime_id,
+         machine_id=machine_id,
+         provider=provider,
+@@ -429,11 +442,29 @@ async def list_sessions(
+             # 哨兵 ''/None 均保持 title=None（与旧零输入语义一致）
+             fb = (fallback_map.get(r.id) or "")[:30]
+             r.title = session_titles.get(r.id) or (fb or None)
++    # 2026-10-27-sessions-total-and-status-filter FR-01/FR-04：分组状态计数
++    # （忽略状态维度的当前 scope 全量口径——chips「全部/在线/已结束/失败」
++    # 计数不随 limit 截短或当前状态档位漂移）。
++    status_counts = await svc._sess.list_agent_session_status_counts(
++        user.id,
++        runtime_id=runtime_id,
++        machine_id=machine_id,
++        provider=provider,
++        q=q,
++        workspace_id=workspace_id,
++        change_id=change_id,
++        ql_id=ql_id,
++        ppm_item_kind=ppm_item_kind,
++        ppm_item_id=ppm_item_id,
++        archived=archived,
++        session_kind=session_kind,
++    )
+     return AgentSessionListResponse(
+         items=reads,
+         total=total,
+         limit=limit,
+         offset=offset,
++        status_counts=status_counts,
+     )
+ 
+ 
+diff --git a/backend/app/modules/daemon/schema.py b/backend/app/modules/daemon/schema.py
+index 248e592f0..ed1c64261 100644
+--- a/backend/app/modules/daemon/schema.py
++++ b/backend/app/modules/daemon/schema.py
+@@ -129,6 +129,12 @@ class AgentSessionListResponse(BaseModel):
+     total: int
+     limit: int
+     offset: int
++    # 2026-10-27-sessions-total-and-status-filter FR-01/FR-04：按 status 分组
++    # 计数（键 = pending/active/reconnecting/ended/failed，无命中态键缺省）。
++    # 口径 = 与列表过滤除状态维度外逐谓词相同（忽略 status/status_group），
++    # 不受 limit/当前状态档位影响——筛选 chips「全部/在线/已结束/失败」的
++    # 真实计数源（在线 = pending+active+reconnecting 之和，前端聚合）。
++    status_counts: dict[str, int] = Field(default_factory=dict)
+ 
+ 
+ # ── 会话级 git 状态 DTO（2026-10-21-session-git-branch / FR-01..03）────────────
+diff --git a/backend/app/modules/daemon/service.py b/backend/app/modules/daemon/service.py
+index 80617d349..a9253e4fc 100644
+--- a/backend/app/modules/daemon/service.py
++++ b/backend/app/modules/daemon/service.py
+@@ -975,6 +975,9 @@ class DaemonService:
+         limit: int,
+         offset: int,
+         status_filter: str | None = None,
++        # 2026-10-27-sessions-total-and-status-filter FR-02：在线三态聚合
++        # 过滤透传（facade 签名与 SessionService 同步，缺省会 500）。
++        status_group: str | None = None,
+         runtime_id: uuid.UUID | None = None,
+         machine_id: uuid.UUID | None = None,
+         provider: str | None = None,
+@@ -998,6 +1001,38 @@ class DaemonService:
+             limit=limit,
+             offset=offset,
+             status_filter=status_filter,
++            status_group=status_group,
++            runtime_id=runtime_id,
++            machine_id=machine_id,
++            provider=provider,
++            q=q,
++            workspace_id=workspace_id,
++            change_id=change_id,
++            ql_id=ql_id,
++            ppm_item_kind=ppm_item_kind,
++            ppm_item_id=ppm_item_id,
++            archived=archived,
++        )
++
++    async def list_agent_session_status_counts(
++        self,
++        user_id: uuid.UUID,
++        *,
++        runtime_id: uuid.UUID | None = None,
++        machine_id: uuid.UUID | None = None,
++        provider: str | None = None,
++        q: str | None = None,
++        workspace_id: uuid.UUID | None = None,
++        change_id: uuid.UUID | None = None,
++        ql_id: str | None = None,
++        ppm_item_kind: str | None = None,
++        ppm_item_id: uuid.UUID | None = None,
++        archived: bool | None = False,
++    ) -> dict[str, int]:
++        """按 status 分组计数（2026-10-27-sessions-total-and-status-filter
++        FR-04，透传 SessionService 同名函数——口径与列表除状态维度外一致）。"""
++        return await self._sess.list_agent_session_status_counts(
++            user_id,
+             runtime_id=runtime_id,
+             machine_id=machine_id,
+             provider=provider,
+diff --git a/backend/app/modules/daemon/session/service/__init__.py b/backend/app/modules/daemon/session/service/__init__.py
+index aaf5dae0a..662c5c216 100644
+--- a/backend/app/modules/daemon/session/service/__init__.py
++++ b/backend/app/modules/daemon/session/service/__init__.py
+@@ -941,6 +941,9 @@ class SessionService(BackgroundTaskMixin):
+         limit: int,
+         offset: int,
+         status_filter: str | None = None,
++        # 2026-10-27-sessions-total-and-status-filter FR-02：在线三态聚合
++        # 过滤透传（与 status_filter 互斥，router 层 422）。
++        status_group: str | None = None,
+         runtime_id: uuid.UUID | None = None,
+         machine_id: uuid.UUID | None = None,
+         provider: str | None = None,
+@@ -959,6 +962,41 @@ class SessionService(BackgroundTaskMixin):
+             limit=limit,
+             offset=offset,
+             status_filter=status_filter,
++            status_group=status_group,
++            runtime_id=runtime_id,
++            machine_id=machine_id,
++            provider=provider,
++            q=q,
++            workspace_id=workspace_id,
++            change_id=change_id,
++            ql_id=ql_id,
++            ppm_item_kind=ppm_item_kind,
++            ppm_item_id=ppm_item_id,
++            archived=archived,
++            session_kind=session_kind,
++        )
++
++    async def list_agent_session_status_counts(
++        self,
++        user_id: uuid.UUID,
++        *,
++        runtime_id: uuid.UUID | None = None,
++        machine_id: uuid.UUID | None = None,
++        provider: str | None = None,
++        q: str | None = None,
++        workspace_id: uuid.UUID | None = None,
++        change_id: uuid.UUID | None = None,
++        ql_id: str | None = None,
++        ppm_item_kind: PpmItemKind | None = None,
++        ppm_item_id: uuid.UUID | None = None,
++        archived: bool | None = False,
++        session_kind: str | None = "chat",
++    ) -> dict[str, int]:
++        """按 status 分组计数（2026-10-27-sessions-total-and-status-filter
++        FR-04，透传 _read_model 同名函数——口径与列表除状态维度外一致）。"""
++        return await _read_model.list_agent_session_status_counts(
++            self,
++            user_id=user_id,
+             runtime_id=runtime_id,
+             machine_id=machine_id,
+             provider=provider,
+diff --git a/backend/app/modules/daemon/session/service/read_model.py b/backend/app/modules/daemon/session/service/read_model.py
+index 26e0cf899..f32d6ea7a 100644
+--- a/backend/app/modules/daemon/session/service/read_model.py
++++ b/backend/app/modules/daemon/session/service/read_model.py
+@@ -28,6 +28,174 @@ from app.modules.ppm.common.session_binding import PpmItemKind, PpmItemSessionLi
+ 
+ from .errors import DaemonSessionNotFound
+ 
++# 2026-10-27-sessions-total-and-status-filter FR-02：status_group='ongoing'
++# 展开的三态集合（在线 = pending/active/reconnecting；ended/failed 为终态）。
++ONGOING_SESSION_STATUSES: tuple[str, ...] = ("pending", "active", "reconnecting")
++
++
++def _build_session_filters(
++    user_id: uuid.UUID,
++    *,
++    status_filter: str | None = None,
++    status_group: str | None = None,
++    runtime_id: uuid.UUID | None = None,
++    machine_id: uuid.UUID | None = None,
++    provider: str | None = None,
++    q: str | None = None,
++    workspace_id: uuid.UUID | None = None,
++    change_id: uuid.UUID | None = None,
++    ql_id: str | None = None,
++    ppm_item_kind: PpmItemKind | None = None,
++    ppm_item_id: uuid.UUID | None = None,
++    archived: bool | None = False,
++    session_kind: str | None = "chat",
++    exclude_origin: str | None = DISTILL_SESSION_ORIGIN,
++) -> list:
++    """组装 AgentSession 列表过滤谓词（list_agent_sessions 的 base_filters
++    单一源提取，2026-10-27-sessions-total-and-status-filter）。
++
++    列表查询与分组计数查询共用本函数，保证两个口径除状态维度外逐谓词
++    一致（杜绝两处组装漂移）。各过滤参语义/注释见 list_agent_sessions
++    docstring——此处不重复。
++    """
++    from sqlalchemy import exists
++
++    filters = [
++        AgentSession.user_id == user_id,
++        AgentSession.deleted_at.is_(None),  # FR-07 软删过滤
++    ]
++    # 2026-08-24：archived 过滤（False=未归档，True=已归档）。
++    # ql-20260831-015：三态化——None=不过滤（全部，含已归档），供 HTTP 层
++    # 「全部状态」视图用；service 层默认保持 False，内部调用（facade/测试）
++    # 零回归。
++    if archived is True:
++        filters.append(AgentSession.archived_at.isnot(None))
++    elif archived is False:
++        filters.append(AgentSession.archived_at.is_(None))
++    # 2026-09-01-session-group-chat task-02 / design §5.3：会话形态谓词
++    # （ix_agent_sessions_session_kind 查询键；默认 'chat' 存量口径——
++    # 群会话与 group_member 影子会话不进普通列表）。
++    if session_kind is not None:
++        filters.append(AgentSession.session_kind == session_kind)
++    # D-010④：默认排除蒸馏会话（exclude_origin=None 时显式不过滤）。
++    if exclude_origin is not None:
++        filters.append(AgentSession.origin != exclude_origin)
++    # 状态维度：status（单值）与 status_group（聚合，FR-02 ongoing 三态）
++    # 互斥——同传由 router 层 422，此处若同时出现以 status_filter 优先
++    # （防御性顺序，不构成对外契约）。
++    if status_filter is not None:
++        filters.append(AgentSession.status == status_filter)
++    elif status_group is not None:
++        filters.append(AgentSession.status.in_(ONGOING_SESSION_STATUSES))
++    if runtime_id is not None:
++        filters.append(AgentSession.runtime_id == runtime_id)
++    # 2026-08-22-workspace-sessions-portal / D-003@v2：scope 精确匹配过滤。
++    if workspace_id is not None:
++        filters.append(AgentSession.workspace_id == workspace_id)
++    if change_id is not None:
++        # 2026-08-25-session-spec-binding task-04 / D-002@v1 / design
++        # §5.W3.3：change_id 从单 FK 精确匹配升级为 M:N 子查询命中——
++        # links 表是变更↔会话关联的唯一真相，存量单 FK 已播种为 link 行
++        # （§9：原命中集是新命中集的子集，参数名/类型不变向后兼容）。
++        filters.append(
++            AgentSession.id.in_(
++                select(ChangeSessionLink.session_id).where(ChangeSessionLink.change_id == change_id)
++            )
++        )
++    if ql_id is not None:
++        # 2026-08-25-session-spec-binding task-04 / FR-05 / D-001@v1：按
++        # links 表 (workspace_id, ql_id) 双条件命中，防跨工作区同 ql_id
++        # 串扰（R-05）。workspace_id 筛选参数非空 → 收紧到该工作区；为空
++        # → 按 ql_id 全工作区命中（owner-scoped 列表，串扰面已受限）。
++        ql_filters = [QuicklogSessionLink.ql_id == ql_id]
++        if workspace_id is not None:
++            ql_filters.append(QuicklogSessionLink.workspace_id == workspace_id)
++        filters.append(
++            AgentSession.id.in_(select(QuicklogSessionLink.session_id).where(*ql_filters))
++        )
++    if ppm_item_kind is not None and ppm_item_id is not None:
++        # task-02（2026-08-28-session-ppm-task-binding / FR-05 / D-005@v1）：
++        # PPM 条目级关联筛选——照 change_id 分支模式走 ppm_item_session_links
++        # 子查询命中。item_id 为 UUID 全局唯一（kind+item_id 定位唯一条目），
++        # 无跨工作区串扰，不叠 workspace 条件（区别于 ql_id 双条件）。
++        filters.append(
++            AgentSession.id.in_(
++                select(PpmItemSessionLink.session_id).where(
++                    PpmItemSessionLink.kind == ppm_item_kind,
++                    PpmItemSessionLink.item_id == ppm_item_id,
++                )
++            )
++        )
++    if machine_id is not None:
++        filters.append(
++            exists().where(
++                DaemonRuntime.id == AgentSession.runtime_id,
++                DaemonRuntime.daemon_instance_id == machine_id,
++            )
++        )
++    if provider is not None:
++        filters.append(AgentSession.provider == provider)
++    if q:
++        escaped = q.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
++        filters.append(
++            exists().where(
++                AgentRun.agent_session_id == AgentSession.id,
++                AgentRunLog.run_id == AgentRun.id,
++                AgentRunLog.channel == "user_input",
++                AgentRunLog.content_redacted.ilike(f"%{escaped}%", escape="\\"),
++            )
++        )
++    return filters
++
++
++async def list_agent_session_status_counts(
++    svc,
++    user_id: uuid.UUID,
++    *,
++    runtime_id: uuid.UUID | None = None,
++    machine_id: uuid.UUID | None = None,
++    provider: str | None = None,
++    q: str | None = None,
++    workspace_id: uuid.UUID | None = None,
++    change_id: uuid.UUID | None = None,
++    ql_id: str | None = None,
++    ppm_item_kind: PpmItemKind | None = None,
++    ppm_item_id: uuid.UUID | None = None,
++    archived: bool | None = False,
++    session_kind: str | None = "chat",
++    exclude_origin: str | None = DISTILL_SESSION_ORIGIN,
++) -> dict[str, int]:
++    """按 status 分组的会话计数（2026-10-27-sessions-total-and-status-filter
++    FR-01/FR-04）。
++
++    口径 = 与 list_agent_sessions **除状态维度外逐谓词相同**的过滤
++    （_build_session_filters 不传 status/status_group）——供列表端点的
++    ``status_counts`` 字段：筛选 chips 的「全部/在线/已结束/失败」计数
++    恒为当前 scope 的全量分组计数，不随单次拉取 limit 或当前状态档位
++    漂移（在线 = ONGOING_SESSION_STATUSES 三态之和，前端聚合）。
++    owner-scoped + 软删过滤与列表一致（同一过滤组装函数产出）。
++    """
++    from sqlalchemy import func
++
++    filters = _build_session_filters(
++        user_id,
++        runtime_id=runtime_id,
++        machine_id=machine_id,
++        provider=provider,
++        q=q,
++        workspace_id=workspace_id,
++        change_id=change_id,
++        ql_id=ql_id,
++        ppm_item_kind=ppm_item_kind,
++        ppm_item_id=ppm_item_id,
++        archived=archived,
++        session_kind=session_kind,
++        exclude_origin=exclude_origin,
++    )
++    stmt = select(AgentSession.status, func.count()).where(*filters).group_by(AgentSession.status)
++    rows = (await svc._session.execute(stmt)).all()
++    return {str(status): int(count) for status, count in rows}
++
+ 
+ async def list_agent_sessions(
+     svc,
+@@ -36,6 +204,10 @@ async def list_agent_sessions(
+     limit: int,
+     offset: int,
+     status_filter: str | None = None,
++    # 2026-10-27-sessions-total-and-status-filter FR-02：在线三态聚合过滤
++    # （'ongoing' → pending+active+reconnecting，与 status_filter 互斥——
++    # 同传由 router 层 422，本层不重复校验）。
++    status_group: str | None = None,
+     runtime_id: uuid.UUID | None = None,
+     machine_id: uuid.UUID | None = None,
+     provider: str | None = None,
+@@ -115,88 +287,25 @@ async def list_agent_sessions(
+       workspace 条件；与其余筛选 AND 交集组合。成对约束由 router 层
+       校验（只传其一 422），service 层双 None 时零分支进入。
+     """
+-    from sqlalchemy import exists, func
++    from sqlalchemy import func
+ 
+-    base_filters = [
+-        AgentSession.user_id == user_id,
+-        AgentSession.deleted_at.is_(None),  # FR-07 软删过滤
+-    ]
+-    # 2026-08-24：archived 过滤（False=未归档，True=已归档）。
+-    # ql-20260831-015：三态化——None=不过滤（全部，含已归档），供 HTTP 层
+-    # 「全部状态」视图用；service 层默认保持 False，内部调用（facade/测试）
+-    # 零回归。
+-    if archived is True:
+-        base_filters.append(AgentSession.archived_at.isnot(None))
+-    elif archived is False:
+-        base_filters.append(AgentSession.archived_at.is_(None))
+-    # 2026-09-01-session-group-chat task-02 / design §5.3：会话形态谓词
+-    # （ix_agent_sessions_session_kind 查询键；默认 'chat' 存量口径——
+-    # 群会话与 group_member 影子会话不进普通列表）。
+-    if session_kind is not None:
+-        base_filters.append(AgentSession.session_kind == session_kind)
+-    # D-010④：默认排除蒸馏会话（exclude_origin=None 时显式不过滤）。
+-    if exclude_origin is not None:
+-        base_filters.append(AgentSession.origin != exclude_origin)
+-    if status_filter is not None:
+-        base_filters.append(AgentSession.status == status_filter)
+-    if runtime_id is not None:
+-        base_filters.append(AgentSession.runtime_id == runtime_id)
+-    # 2026-08-22-workspace-sessions-portal / D-003@v2：scope 精确匹配过滤。
+-    if workspace_id is not None:
+-        base_filters.append(AgentSession.workspace_id == workspace_id)
+-    if change_id is not None:
+-        # 2026-08-25-session-spec-binding task-04 / D-002@v1 / design
+-        # §5.W3.3：change_id 从单 FK 精确匹配升级为 M:N 子查询命中——
+-        # links 表是变更↔会话关联的唯一真相，存量单 FK 已播种为 link 行
+-        # （§9：原命中集是新命中集的子集，参数名/类型不变向后兼容）。
+-        base_filters.append(
+-            AgentSession.id.in_(
+-                select(ChangeSessionLink.session_id).where(ChangeSessionLink.change_id == change_id)
+-            )
+-        )
+-    if ql_id is not None:
+-        # 2026-08-25-session-spec-binding task-04 / FR-05 / D-001@v1：按
+-        # links 表 (workspace_id, ql_id) 双条件命中，防跨工作区同 ql_id
+-        # 串扰（R-05）。workspace_id 筛选参数非空 → 收紧到该工作区；为空
+-        # → 按 ql_id 全工作区命中（owner-scoped 列表，串扰面已受限）。
+-        ql_filters = [QuicklogSessionLink.ql_id == ql_id]
+-        if workspace_id is not None:
+-            ql_filters.append(QuicklogSessionLink.workspace_id == workspace_id)
+-        base_filters.append(
+-            AgentSession.id.in_(select(QuicklogSessionLink.session_id).where(*ql_filters))
+-        )
+-    if ppm_item_kind is not None and ppm_item_id is not None:
+-        # task-02（2026-08-28-session-ppm-task-binding / FR-05 / D-005@v1）：
+-        # PPM 条目级关联筛选——照 change_id 分支模式走 ppm_item_session_links
+-        # 子查询命中。item_id 为 UUID 全局唯一（kind+item_id 定位唯一条目），
+-        # 无跨工作区串扰，不叠 workspace 条件（区别于 ql_id 双条件）。
+-        base_filters.append(
+-            AgentSession.id.in_(
+-                select(PpmItemSessionLink.session_id).where(
+-                    PpmItemSessionLink.kind == ppm_item_kind,
+-                    PpmItemSessionLink.item_id == ppm_item_id,
+-                )
+-            )
+-        )
+-    if machine_id is not None:
+-        base_filters.append(
+-            exists().where(
+-                DaemonRuntime.id == AgentSession.runtime_id,
+-                DaemonRuntime.daemon_instance_id == machine_id,
+-            )
+-        )
+-    if provider is not None:
+-        base_filters.append(AgentSession.provider == provider)
+-    if q:
+-        escaped = q.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+-        base_filters.append(
+-            exists().where(
+-                AgentRun.agent_session_id == AgentSession.id,
+-                AgentRunLog.run_id == AgentRun.id,
+-                AgentRunLog.channel == "user_input",
+-                AgentRunLog.content_redacted.ilike(f"%{escaped}%", escape="\\"),
+-            )
+-        )
++    base_filters = _build_session_filters(
++        user_id,
++        status_filter=status_filter,
++        status_group=status_group,
++        runtime_id=runtime_id,
++        machine_id=machine_id,
++        provider=provider,
++        q=q,
++        workspace_id=workspace_id,
++        change_id=change_id,
++        ql_id=ql_id,
++        ppm_item_kind=ppm_item_kind,
++        ppm_item_id=ppm_item_id,
++        archived=archived,
++        session_kind=session_kind,
++        exclude_origin=exclude_origin,
++    )
+ 
+     count_stmt = select(func.count()).select_from(AgentSession).where(*base_filters)
+     total = int((await svc._session.execute(count_stmt)).scalar() or 0)
+diff --git a/backend/app/modules/daemon/tests/test_session_history.py b/backend/app/modules/daemon/tests/test_session_history.py
+index 166bb8a21..c3457270b 100644
+--- a/backend/app/modules/daemon/tests/test_session_history.py
++++ b/backend/app/modules/daemon/tests/test_session_history.py
+@@ -195,6 +195,96 @@ class TestListSessions:
+         assert body["total"] == 1
+         assert body["items"][0]["status"] == "ended"
+ 
++    async def test_status_counts_beyond_fetch_limit(
++        self,
++        client: AsyncClient,
++        auth_headers: dict[str, str],
++        db_session: AsyncSession,
++    ) -> None:
++        """2026-10-27-sessions-total-and-status-filter FR-01/FR-04：status_counts
++        为忽略状态维度的服务端分组计数——limit 截短 items/total 时计数仍全量，
++        且带 status 过滤时计数口径不变（chips 计数不随档位漂移）。"""
++        admin = (
++            (await db_session.execute(select(User).where(User.email == "admin@example.com")))
++            .scalars()
++            .first()
++        )
++        assert admin is not None
++        rt = await _make_runtime(db_session, admin.id)
++        await _make_session(db_session, admin.id, rt.id, status="ended")
++        await _make_session(db_session, admin.id, rt.id, status="active")
++        await _make_session(db_session, admin.id, rt.id, status="failed")
++
++        # limit=2 < total=3：items 被截短，但 status_counts 仍是全量三态计数。
++        resp = await client.get("/api/daemon/sessions?limit=2", headers=auth_headers)
++        assert resp.status_code == 200, resp.text
++        body = resp.json()
++        assert body["total"] == 3
++        assert len(body["items"]) == 2
++        assert body["status_counts"]["ended"] == 1
++        assert body["status_counts"]["active"] == 1
++        assert body["status_counts"]["failed"] == 1
++
++        # 带 status=ended 过滤：total 收敛为 1，status_counts 口径不变（全量）。
++        resp2 = await client.get("/api/daemon/sessions?status=ended", headers=auth_headers)
++        assert resp2.status_code == 200, resp2.text
++        body2 = resp2.json()
++        assert body2["total"] == 1
++        assert body2["status_counts"]["ended"] == 1
++        assert body2["status_counts"]["active"] == 1
++        assert body2["status_counts"]["failed"] == 1
++
++    async def test_status_group_ongoing_filter(
++        self,
++        client: AsyncClient,
++        auth_headers: dict[str, str],
++        db_session: AsyncSession,
++    ) -> None:
++        """2026-10-27-sessions-total-and-status-filter FR-02：status_group=ongoing
++        一次查询命中在线三态（pending/active/reconnecting），ended/failed 排除。"""
++        admin = (
++            (await db_session.execute(select(User).where(User.email == "admin@example.com")))
++            .scalars()
++            .first()
++        )
++        assert admin is not None
++        rt = await _make_runtime(db_session, admin.id)
++        await _make_session(db_session, admin.id, rt.id, status="pending")
++        await _make_session(db_session, admin.id, rt.id, status="active")
++        await _make_session(db_session, admin.id, rt.id, status="reconnecting")
++        await _make_session(db_session, admin.id, rt.id, status="ended")
++        await _make_session(db_session, admin.id, rt.id, status="failed")
++
++        resp = await client.get("/api/daemon/sessions?status_group=ongoing", headers=auth_headers)
++        assert resp.status_code == 200, resp.text
++        body = resp.json()
++        assert body["total"] == 3
++        assert {item["status"] for item in body["items"]} == {
++            "pending",
++            "active",
++            "reconnecting",
++        }
++        # 计数仍是忽略状态维度的全量口径（五态各 1）。
++        assert body["status_counts"]["pending"] == 1
++        assert body["status_counts"]["reconnecting"] == 1
++        assert body["status_counts"]["ended"] == 1
++
++    async def test_status_and_status_group_mutual_exclusion_422(
++        self,
++        client: AsyncClient,
++        auth_headers: dict[str, str],
++    ) -> None:
++        """2026-10-27-sessions-total-and-status-filter FR-02/FR-04：status 与
++        status_group 同传 422（中文文案）；status_group 非法值 Literal 422。"""
++        r = await client.get(
++            "/api/daemon/sessions?status=active&status_group=ongoing",
++            headers=auth_headers,
++        )
++        assert r.status_code == 422
++        assert "互斥" in r.text or "同时" in r.text
++        r2 = await client.get("/api/daemon/sessions?status_group=bogus", headers=auth_headers)
++        assert r2.status_code == 422
++
+     async def test_invalid_status_422(
+         self,
+         client: AsyncClient,
+diff --git a/backend/openapi.json b/backend/openapi.json
+index 19e97ce6b..30992ba72 100644
+--- a/backend/openapi.json
++++ b/backend/openapi.json
+@@ -16407,6 +16407,23 @@
+               "title": "Status"
+             }
+           },
++          {
++            "name": "status_group",
++            "in": "query",
++            "required": false,
++            "schema": {
++              "anyOf": [
++                {
++                  "const": "ongoing",
++                  "type": "string"
++                },
++                {
++                  "type": "null"
++                }
++              ],
++              "title": "Status Group"
++            }
++          },
+           {
+             "name": "runtime_id",
+             "in": "query",
+@@ -39227,6 +39244,13 @@
+           "offset": {
+             "type": "integer",
+             "title": "Offset"
++          },
++          "status_counts": {
++            "additionalProperties": {
++              "type": "integer"
++            },
++            "type": "object",
++            "title": "Status Counts"
+           }
+         },
+         "type": "object",
+diff --git a/frontend/src/components/daemon/session-panel/turn-state.ts b/frontend/src/components/daemon/session-panel/turn-state.ts
+index eacc6f2d6..880ca18d5 100644
+--- a/frontend/src/components/daemon/session-panel/turn-state.ts
++++ b/frontend/src/components/daemon/session-panel/turn-state.ts
+@@ -90,6 +90,34 @@ export interface TurnPhaseState {
+   at: number;
+ }
+ 
++/**
++ * 阶段词表序（2026-10-27-turn-phase-observability-monotonic）：九值推进链定序，
++ * 词表外值不参与（透传兼容策略不变）。投递段（dispatched/delivered）＜ 执行段
++ * （skills_sync…ready）＜ 送达/首响段（inject_received/first_event）。
++ */
++const PHASE_ORDER: Readonly<Record<string, number>> = {
++  dispatched: 0,
++  delivered: 1,
++  skills_sync: 2,
++  spec_sync: 3,
++  mcp_prefetch: 4,
++  spawning: 5,
++  ready: 6,
++  inject_received: 7,
++  first_event: 8,
++};
++
++/**
++ * 单调写入判定（FR-02）：新 phase 与现值均在词表内且新序 < 现序 → 回退写，
++ * 丢弃。任一词表外 → 维持 last-write-wins 透传（兼容策略零回归）。
++ */
++function isPhaseRegression(current: string | undefined | null, next: string): boolean {
++  if (current == null) return false;
++  const cur = PHASE_ORDER[current];
++  const nxt = PHASE_ORDER[next];
++  return cur !== undefined && nxt !== undefined && nxt < cur;
++}
++
+ /**
+  * turn_phase 事件 → 轮状态 currentPhase 写入（last-write-wins，乱序到达按事件
+  * 序覆盖）；按 runId 归属路由（含 realRunId 匹配），未命中既有轮时**不建轮**
+@@ -103,6 +131,11 @@ export interface TurnPhaseState {
+  * decisions D-001 反例排查：子代理/团队/steering/排队均不构成多活跃轮），不
+  * 做模糊匹配。replacePlaceholderTurn 以对象展开保留 currentPhase（FR-03）。
+  * 返回新数组（不可变更新）；无 runId / 全程未命中原样返回。
++ *
++ * 2026-10-27-turn-phase-observability-monotonic FR-02：写入加词表序单调守卫——
++ * 回退写（如 steering 忙轮注入的 dispatched/delivered 回执覆盖已 first_event/
++ * 执行段的轮）静默丢弃，防显示从「执行中」退化回投递段卡住（first_event 每
++ * run 防重不会重发，退化后无自愈信号）；正常推进/前跳/词表外值不受影响。
+  */
+ export function applyTurnPhase(
+   turns: SessionTurnView[],
+@@ -116,6 +149,7 @@ export function applyTurnPhase(
+   const next = turns.map((t) => {
+     if (t.runId === runId || t.realRunId === runId) {
+       hit = true;
++      if (isPhaseRegression(t.currentPhase?.phase, phase)) return t;
+       return { ...t, currentPhase: { phase, at } };
+     }
+     return t;
+@@ -128,6 +162,7 @@ export function applyTurnPhase(
+     const fallback = turns.map((t) => {
+       if (t.runId === currentRunId) {
+         fallbackHit = true;
++        if (isPhaseRegression(t.currentPhase?.phase, phase)) return t;
+         return { ...t, currentPhase: { phase, at } };
+       }
+       return t;
+@@ -152,18 +187,26 @@ export function clearTurnPhase<T extends { currentPhase?: TurnPhaseState | null
+ }
+ 
+ /**
+- * 投递阶段词表（2026-10-27-turn-phase-stall-honest-ui）：backend 自产的
+- * dispatched/delivered 表示「消息已下发/已领取」，尚不代表执行器开始处理。
++ * 投递/送达阶段词表（2026-10-27-turn-phase-stall-honest-ui；FR-03 扩展于
++ * 2026-10-27-turn-phase-observability-monotonic）：dispatched/delivered 表示
++ * 「消息已下发/已领取」，inject_received 表示「消息已送达 AI」——三者都只
++ * 描述消息搬运态，不描述执行进展。
+  */
+-const DELIVERY_PHASES: ReadonlySet<string> = new Set(["dispatched", "delivered"]);
++const DELIVERY_PHASES: ReadonlySet<string> = new Set([
++  "dispatched",
++  "delivered",
++  "inject_received",
++]);
+ 
+ /**
+- * log 到达退位投递阶段（2026-10-27-turn-phase-stall-honest-ui）：轮收到真实
+- * 输出（log 事件有 DB 兜底必达）时，仍挂着的 dispatched/delivered 已失去展示
+- * 意义（消息显然已被处理），清 null 让状态条退位回轮状态文案。只清投递两
+- * 阶段——执行期阶段（skills_sync/spawning/…）可能与 log 并行推进，不越权。
++ * log 到达退位投递/送达阶段（2026-10-27-turn-phase-stall-honest-ui）：轮收到
++ * 真实输出（log 事件有 DB 兜底必达）时，仍挂着的 dispatched/delivered 已失去
++ * 展示意义（消息显然已被处理），清 null 让状态条退位回轮状态文案。只清搬运
++ * 段——执行期阶段（skills_sync/spawning/…）可能与 log 并行推进，不越权。
+  * 与 clearTurnPhase（终态全清）并列；生产实证：会话忙时消息在 backend 排队
+  * 滞留 9 分钟，前端唯一 phase=delivered 无限计时（2026-10-27 会话 7eff99e1）。
++ * FR-03（observability-monotonic）：集合扩展 inject_received——AI 已输出的
++ * 场合「消息已送达 AI」同样失去展示意义。
+  */
+ export function retireDeliveryPhase<
+   T extends { currentPhase?: TurnPhaseState | null },
+diff --git a/frontend/src/components/mobile/mobile-session-list.test.tsx b/frontend/src/components/mobile/mobile-session-list.test.tsx
+index f349f5889..0a2c24ab6 100644
+--- a/frontend/src/components/mobile/mobile-session-list.test.tsx
++++ b/frontend/src/components/mobile/mobile-session-list.test.tsx
+@@ -113,8 +113,15 @@ function makeMachine(overrides: Partial<DaemonMachineRead> = {}): DaemonMachineR
+   } as unknown as DaemonMachineRead;
+ }
+ 
+-function makeResp(items: AgentSessionRead[]): AgentSessionListResponse {
+-  return { items, total: items.length } as unknown as AgentSessionListResponse;
++function makeResp(
++  items: AgentSessionRead[],
++  statusCounts?: Record<string, number>,
++): AgentSessionListResponse {
++  return {
++    items,
++    total: items.length,
++    status_counts: statusCounts ?? { active: items.length },
++  } as unknown as AgentSessionListResponse;
+ }
+ 
+ /**
+@@ -399,55 +406,137 @@ describe("MobileSessionList 机器分组", () => {
+   });
+ });
+ 
+-/* ────────────── 状态 Tab 过滤 ────────────── */
++/* ────────────── 状态 Tab 过滤（旧块收编：见上「统计与状态档」+「默认展示收敛」） ────────────── */
+ 
+ describe("MobileSessionList 状态 Tab", () => {
+-  it("全部：显示全部会话；进行中：客户端过滤仅非 ended/failed", async () => {
++  it("空态：非归档视图渲染「新建会话」引导，归档视图无引导按钮", async () => {
++    daemonApi.listAgentSessions.mockResolvedValue(makeResp([]));
++    renderList();
++
++    await waitFor(() => {
++      expect(screen.getByTestId("mobile-session-list-empty")).toBeInTheDocument();
++    });
++    expect(screen.getByText("暂无会话")).toBeInTheDocument();
++
++    fireEvent.click(screen.getByTestId("mobile-session-tab-archived"));
++    await waitFor(() => {
++      expect(screen.getByText("暂无已归档会话")).toBeInTheDocument();
++    });
++    expect(screen.queryByTestId("mobile-session-list-new")).not.toBeInTheDocument();
++  });
++});
++
++/* ────────────── 统计行 + 四档状态筛选（2026-10-27-sessions-total-and-status-filter） ────────────── */
++
++describe("MobileSessionList 统计与状态档（FR-01/FR-02）", () => {
++  it("统计行与四 chips 计数消费服务端 status_counts（与拉回 items 条数脱钩，全部 503 如实显示）", async () => {
++    // 场景：真实总数 503（>拉取上限 500），拉回 items 仅 2 条——统计行与
++    // chips 计数必须用 status_counts（503），不得用 items.length（2）。
+     daemonApi.listAgentSessions.mockResolvedValue(
+-      makeResp([
+-        makeSession({ id: "s-active", title: "活跃会话", status: "active" }),
+-        makeSession({ id: "s-pending", title: "排队会话", status: "pending" }),
+-        makeSession({ id: "s-ended", title: "结束会话", status: "ended" }),
+-        makeSession({ id: "s-failed", title: "失败会话", status: "failed" }),
+-      ]),
++      makeResp(
++        [makeSession({ id: "s-1" }), makeSession({ id: "s-2" })],
++        { pending: 1, active: 2, reconnecting: 0, ended: 496, failed: 4 },
++      ),
+     );
+     renderList();
+ 
+     await waitFor(() => {
+-      expect(screen.getByText("结束会话")).toBeInTheDocument();
++      expect(screen.getByTestId("mobile-session-total").textContent).toBe(
++        "会话总数 503 条",
++      );
+     });
+-    // 全部 Tab：4 张卡
+-    expect(screen.getAllByTestId("mobile-session-card")).toHaveLength(4);
+-    // Tab 计数：全部 4 / 进行中 2
+-    expect(screen.getByTestId("mobile-session-tab-all").textContent).toContain("4");
+-    expect(screen.getByTestId("mobile-session-tab-ongoing").textContent).toContain("2");
++    // 四 chips：全部 503 / 在线 3（1+2+0）/ 已结束 496 / 失败 4
++    expect(screen.getByTestId("mobile-session-tab-all").textContent).toContain("503");
++    expect(screen.getByTestId("mobile-session-tab-ongoing").textContent).toContain("在线");
++    expect(screen.getByTestId("mobile-session-tab-ongoing").textContent).toContain("3");
++    expect(screen.getByTestId("mobile-session-tab-ended").textContent).toContain("496");
++    expect(screen.getByTestId("mobile-session-tab-failed").textContent).toContain("4");
++    // 已归档档保留且不带计数
++    expect(screen.getByTestId("mobile-session-tab-archived").textContent).not.toContain("503");
++  });
+ 
+-    // 切「进行中」：仅 active/pending（ended/failed 客户端滤除）
++  it("切「在线」档带 status_group=ongoing 重拉、切「已结束」档带 status=ended；chips 计数不随档位漂移", async () => {
++    const counts = { active: 2, ended: 5, failed: 1 };
++    daemonApi.listAgentSessions.mockResolvedValue(
++      makeResp([makeSession({ id: "s-1", status: "active" })], counts),
++    );
++    renderList();
++    await waitFor(() => {
++      expect(screen.getByText("主控会话")).toBeInTheDocument();
++    });
++
++    // 切「在线」：服务端档——新 queryKey + status_group=ongoing 参数
++    daemonApi.listAgentSessions.mockResolvedValue(
++      makeResp([makeSession({ id: "s-on", title: "在线会话", status: "active" })], counts),
++    );
+     fireEvent.click(screen.getByTestId("mobile-session-tab-ongoing"));
+     await waitFor(() => {
+-      expect(screen.queryByText("结束会话")).not.toBeInTheDocument();
++      expect(daemonApi.listAgentSessions).toHaveBeenLastCalledWith({
++        limit: 500,
++        archived: false,
++        workspace_id: "ws-1",
++        status_group: "ongoing",
++      });
+     });
+-    expect(screen.queryByText("失败会话")).not.toBeInTheDocument();
+-    expect(screen.getByText("活跃会话")).toBeInTheDocument();
+-    expect(screen.getByText("排队会话")).toBeInTheDocument();
+-    // 客户端过滤：不换 queryKey、不发第二次请求
+-    expect(daemonApi.listAgentSessions).toHaveBeenCalledTimes(1);
++    await waitFor(() => {
++      expect(screen.getByText("在线会话")).toBeInTheDocument();
++    });
++
++    // 切「已结束」：status=ended 单值档
++    daemonApi.listAgentSessions.mockResolvedValue(
++      makeResp([makeSession({ id: "s-end", title: "结束会话", status: "ended" })], counts),
++    );
++    fireEvent.click(screen.getByTestId("mobile-session-tab-ended"));
++    await waitFor(() => {
++      expect(daemonApi.listAgentSessions).toHaveBeenLastCalledWith({
++        limit: 500,
++        archived: false,
++        workspace_id: "ws-1",
++        status: "ended",
++      });
++    });
++    await waitFor(() => {
++      expect(screen.getByText("结束会话")).toBeInTheDocument();
++    });
++    // 计数不漂移：仍是全部 8 / 在线 2 / 已结束 5 / 失败 1（status_counts 恒全量口径）
++    expect(screen.getByTestId("mobile-session-tab-all").textContent).toContain("8");
++    expect(screen.getByTestId("mobile-session-tab-ongoing").textContent).toContain("2");
++    expect(screen.getByTestId("mobile-session-tab-ended").textContent).toContain("5");
++    expect(screen.getByTestId("mobile-session-tab-failed").textContent).toContain("1");
+   });
++});
+ 
+-  it("空态：非归档视图渲染「新建会话」引导，归档视图无引导按钮", async () => {
+-    daemonApi.listAgentSessions.mockResolvedValue(makeResp([]));
++/* ────────────── 默认展示收敛（FR-03：最新 10 ∪ 在线全显 + 显示全部） ────────────── */
++
++describe("MobileSessionList 默认展示收敛", () => {
++  it("默认仅最新 10 条 ∪ 在线全显；「显示全部 N 条」展开后全量可见", async () => {
++    // 场景：12 条已结束在前 + 5 条在线在后（服务端序）——默认 = 前 10 条
++    // （ended）+ 尾部 5 条在线全显 = 15 卡；展开后 17 卡全量。
++    const items = [
++      ...Array.from({ length: 12 }, (_, i) =>
++        makeSession({ id: `s-e-${i}`, title: `历史会话${i}`, status: "ended" }),
++      ),
++      ...Array.from({ length: 5 }, (_, i) =>
++        makeSession({ id: `s-a-${i}`, title: `在线会话${i}`, status: "active" }),
++      ),
++    ];
++    daemonApi.listAgentSessions.mockResolvedValue(
++      makeResp(items, { active: 5, ended: 12 }),
++    );
+     renderList();
+ 
+     await waitFor(() => {
+-      expect(screen.getByTestId("mobile-session-list-empty")).toBeInTheDocument();
++      expect(screen.getByText("在线会话4")).toBeInTheDocument();
+     });
+-    expect(screen.getByText("暂无会话")).toBeInTheDocument();
++    expect(screen.getAllByTestId("mobile-session-card")).toHaveLength(15);
++    // 收敛提示在場：折叠了 2 条非在线条目
++    expect(screen.getByTestId("mobile-session-show-all").textContent).toContain("17");
+ 
+-    fireEvent.click(screen.getByTestId("mobile-session-tab-archived"));
++    fireEvent.click(screen.getByTestId("mobile-session-show-all"));
+     await waitFor(() => {
+-      expect(screen.getByText("暂无已归档会话")).toBeInTheDocument();
++      expect(screen.getAllByTestId("mobile-session-card")).toHaveLength(17);
+     });
+-    expect(screen.queryByTestId("mobile-session-list-new")).not.toBeInTheDocument();
++    expect(screen.queryByTestId("mobile-session-show-all")).not.toBeInTheDocument();
+   });
+ });
+ 
+diff --git a/frontend/src/components/mobile/mobile-session-list.tsx b/frontend/src/components/mobile/mobile-session-list.tsx
+index f9631cd30..f77660ca8 100644
+--- a/frontend/src/components/mobile/mobile-session-list.tsx
++++ b/frontend/src/components/mobile/mobile-session-list.tsx
+@@ -16,9 +16,12 @@
+  *   AGENT_SESSIONS_TREE_FETCH_LIMIT（daemon.ts 导出），禁止写死。
+  *
+  * UI（对齐原型会话列表屏）：
+- * - 状态 Tab：全部 / 进行中（客户端 status 过滤：非 ended/failed，口径对齐
+- *   sessionListPollInterval 的「进行中」判定）/ 已归档（isArchivedView 切 key
+- *   自动重拉服务端归档数据）。
++ * - 统计行 + 状态 Tab（2026-10-27-sessions-total-and-status-filter）：
++ *   统计行「会话总数 N 条」与四档 chips（全部/在线/已结束/失败）计数均消费
++ *   服务端 status_counts（忽略状态维度的 scope 全量口径，切档不漂移、不受
++ *   拉取上限截断）；档位过滤走服务端（在线=status_group=ongoing 三态聚合、
++ *   已结束/失败=status 单值，queryKey 第五槽）；已归档视图档保留（服务端
++ *   archived=true）。默认展示收敛：最新 10 条 ∪ 在线全显 + 「显示全部 N 条」。
+  * - 机器分组：useDaemonMachines({limit:100})（与桌面树同源同参在线态）；
+  *   runtime_id → 机器映射缺席时回退 config_snapshot.machine_name（按离线），
+  *   再缺 → 「未知机器」；在线组在前、离线组在后（组内保持首次出现序）。
+@@ -144,14 +147,48 @@ function SessionStatusMark({
+ }
+ 
+ /**
+- * 「进行中」判定（状态 Tab 客户端过滤口径）：非 ended/failed 即视为进行中
+- * （聊天/排队/恢复中），逐字对齐 session-list-panel sessionListPollInterval
+- * 的 hasOngoing 判定。
++ * 「进行中」判定（2026-10-27-sessions-total-and-status-filter 前为状态 Tab
++ * 客户端过滤口径，现仅用于「在线会话全显豁免」）：非 ended/failed 即视为
++ * 在线（pending/active/reconnecting 三态，与后端 status_group=ongoing、
++ * session-list-panel sessionListPollInterval 的 hasOngoing 判定同口径）。
+  */
+ function isOngoingSession(s: AgentSessionRead): boolean {
+   return s.status !== "ended" && s.status !== "failed";
+ }
+ 
++/**
++ * 服务端 status_counts → 四档 chips 计数（FR-01/FR-02）：全部 = 五态之和，
++ * 在线 = pending+active+reconnecting，已结束/失败单键。缺键按 0 兜底
++ * （后端只返回有命中的态）。
++ */
++function chipsCounts(statusCounts: Record<string, number> | undefined): {
++  all: number;
++  ongoing: number;
++  ended: number;
++  failed: number;
++} {
++  const c = statusCounts ?? {};
++  return {
++    all: Object.values(c).reduce((sum, n) => sum + n, 0),
++    ongoing: (c.pending ?? 0) + (c.active ?? 0) + (c.reconnecting ?? 0),
++    ended: c.ended ?? 0,
++    failed: c.failed ?? 0,
++  };
++}
++
++/**
++ * 默认展示收敛（FR-03）：最新 DEFAULT_VISIBLE 条 ∪ 全部在线会话（在线的
++ * 不管多老都显示），保持服务端返回序（置顶优先 + 最近活跃倒序）。
++ */
++const DEFAULT_VISIBLE = 10;
++
++function defaultVisibleSessions(sessions: AgentSessionRead[]): AgentSessionRead[] {
++  const head = sessions.slice(0, DEFAULT_VISIBLE);
++  const rest = sessions.slice(DEFAULT_VISIBLE);
++  const online = rest.filter(isOngoingSession);
++  return [...head, ...online];
++}
++
+ /** 机器显示名（与 session-list-panel machineLabel 同语义：别名优先）。 */
+ function machineLabel(m: DaemonMachineRead): string {
+   return m.display_alias?.trim() || m.hostname;
+@@ -216,8 +253,10 @@ function engineLabel(s: AgentSessionRead): string {
+ 
+ /* ────────────── 组件 ────────────── */
+ 
+-/** 状态 Tab key（已归档 = isArchivedView 服务端切换；其余客户端过滤）。 */
+-export type MobileSessionTabKey = "all" | "ongoing" | "archived";
++/** 状态 Tab key（2026-10-27-sessions-total-and-status-filter FR-02：全部/在线/
++ * 已结束/失败四档服务端过滤——ongoing 走 status_group，ended/failed 走
++ * status 单值；archived = 服务端 archived=true 视图）。 */
++export type MobileSessionTabKey = "all" | "ongoing" | "ended" | "failed" | "archived";
+ 
+ export interface MobileSessionListProps {
+   /** 工作区 id（scope + listAgentSessions workspace_id 过滤参）。 */
+@@ -237,10 +276,12 @@ export interface MobileSessionListProps {
+   onNewGroup?: () => void;
+ }
+ 
+-/** 状态 Tab 配置（顺序即渲染顺序，对齐原型 .list-tabs）。 */
++/** 状态 Tab 配置（FR-02 四档 + 已归档视图档；顺序即渲染顺序）。 */
+ const SESSION_TABS: { key: MobileSessionTabKey; label: string }[] = [
+   { key: "all", label: "全部" },
+-  { key: "ongoing", label: "进行中" },
++  { key: "ongoing", label: "在线" },
++  { key: "ended", label: "已结束" },
++  { key: "failed", label: "失败" },
+   { key: "archived", label: "已归档" },
+ ];
+ 
+@@ -253,17 +294,33 @@ export function MobileSessionList({
+ }: MobileSessionListProps) {
+   const [tab, setTab] = useState<MobileSessionTabKey>("all");
+   const [menuSession, setMenuSession] = useState<AgentSessionRead | null>(null);
++  // FR-03「显示全部」展开态：切档即重置（不留跨档残留展开）。
++  const [showAll, setShowAll] = useState(false);
+   const isArchivedView = tab === "archived";
+   const queryClient = useQueryClient();
+ 
+   // X-04 / C-08：scope 槽位 + 参数对象槽位逐字对齐桌面（assoc 恒 null——移动
+-  // 端无关联筛选；key 变化（archived 翻转）即自动重拉，无需手动 refetch）。
++  // 端无关联筛选；key 变化（档位/archived 翻转）即自动重拉，无需手动 refetch）。
++  // FR-02：状态档走服务端过滤（第五槽 statusFilter 变体——桌面第四槽 key
++  // 形态不变，互不干扰）：ongoing → status_group=ongoing（在线三态聚合）；
++  // ended/failed → status 单值。
+   const scope = useMemo(
+     () => ({ kind: "workspace" as const, workspaceId }),
+     [workspaceId],
+   );
++  const statusFilterParam =
++    tab === "ongoing"
++      ? ({ status_group: "ongoing" } as const)
++      : tab === "ended"
++        ? ({ status: "ended" } as const)
++        : tab === "failed"
++          ? ({ status: "failed" } as const)
++          : null;
+ 
+   const sessionsQuery = useQuery<AgentSessionListResponse, ApiError>({
++    // 默认/归档档 key 与桌面门户逐字一致（4 槽，共享缓存不被档位拆散）；
++    // 状态档（在线/已结束/失败）追加第五槽变体——同一前缀下 invalidate
++    // ["agentSessions"] 仍全覆盖。
+     queryKey: [
+       "agentSessions",
+       "sessionsPortal",
+@@ -273,6 +330,7 @@ export function MobileSessionList({
+         archived: isArchivedView,
+         assoc: null,
+       },
++      ...(statusFilterParam ? [statusFilterParam] : []),
+     ],
+     queryFn: () =>
+       listAgentSessions({
+@@ -281,6 +339,7 @@ export function MobileSessionList({
+         // 移动端默认视图保持只看未归档（显式 false），归档 tab 传 true。
+         archived: isArchivedView ? true : false,
+         workspace_id: workspaceId,
++        ...(statusFilterParam ?? {}),
+       }),
+   });
+ 
+@@ -331,10 +390,10 @@ export function MobileSessionList({
+     return map;
+   }, [machines]);
+ 
+-  /** Tab 过滤（全部/进行中客户端按 status；已归档已由服务端 key 切换）→ 机器分组。 */
++  /** 机器分组（FR-02：状态过滤已由服务端完成，直接分组；FR-03：默认展示
++   *  收敛 = 最新 10 条 ∪ 在线全显，「显示全部」展开全量）。 */
+   const groups = useMemo<MachineGroup[]>(() => {
+-    const visible =
+-      tab === "ongoing" ? sessions.filter(isOngoingSession) : sessions;
++    const visible = showAll ? sessions : defaultVisibleSessions(sessions);
+     const order: MachineGroup[] = [];
+     const byKey = new Map<string, MachineGroup>();
+     for (const s of visible) {
+@@ -349,7 +408,7 @@ export function MobileSessionList({
+     }
+     // 在线组在前、离线组在后；Array#sort 稳定（ES2019+）保首次出现序。
+     return order.sort((a, b) => Number(b.online) - Number(a.online));
+-  }, [sessions, tab, runtimeToMachine]);
++  }, [sessions, showAll, runtimeToMachine]);
+ 
+   // 三操作 mutation：成功后 invalidate ["agentSessions"] 前缀（与门户同前缀，
+   // 同时覆盖桌面与移动两份同 key 查询；错误不阻断列表——对齐门户
+@@ -412,16 +471,23 @@ export function MobileSessionList({
+     },
+   ];
+ 
+-  const ongoingCount = useMemo(
+-    () => sessions.filter(isOngoingSession).length,
+-    [sessions],
++  // FR-01/FR-02：chips 计数单一源——服务端 status_counts（与当前档位/拉取
++  // 条数无关，切档不漂移）；统计行总数同源（归档视图下为归档集分组之和）。
++  const counts = useMemo(
++    () => chipsCounts(sessionsQuery.data?.status_counts),
++    [sessionsQuery.data],
+   );
++  const totalCount = counts.all;
+ 
+   const emptyText = isArchivedView
+     ? "暂无已归档会话"
+     : tab === "ongoing"
+-      ? "暂无进行中会话"
+-      : "暂无会话";
++      ? "暂无在线会话"
++      : tab === "ended"
++        ? "暂无已结束会话"
++        : tab === "failed"
++          ? "暂无失败会话"
++          : "暂无会话";
+ 
+   return (
+     <div
+@@ -477,7 +543,17 @@ export function MobileSessionList({
+         </section>
+       )}
+ 
+-      {/* 状态 Tab（pill 段控，对齐原型 .list-tabs；全部/进行中带计数） */}
++      {/* 统计行（FR-01）：会话总数 = 服务端 status_counts 五态之和（归档视图
++          下为归档集分组之和）——不受单次拉取上限截断，515 条如实显示 515。 */}
++      <p
++        data-testid="mobile-session-total"
++        className="px-1 text-xs text-muted-foreground"
++      >
++        会话总数 {totalCount} 条
++      </p>
++
++      {/* 状态 Tab（pill 段控，FR-02 四档 + 已归档；计数 = 服务端 status_counts，
++          切档不重拉计数、不漂移；已归档档为视图切换不带计数） */}
+       <div role="tablist" aria-label="会话状态筛选" className="flex gap-2">
+         {SESSION_TABS.map((t) => {
+           const selected = tab === t.key;
+@@ -488,7 +564,10 @@ export function MobileSessionList({
+               role="tab"
+               aria-selected={selected}
+               data-testid={`mobile-session-tab-${t.key}`}
+-              onClick={() => setTab(t.key)}
++              onClick={() => {
++                setTab(t.key);
++                setShowAll(false);
++              }}
+               className={cn(
+                 "inline-flex min-h-[44px] items-center gap-1 rounded-full border px-3 text-[14px] transition-colors",
+                 selected
+@@ -497,11 +576,8 @@ export function MobileSessionList({
+               )}
+             >
+               {t.label}
+-              {t.key === "all" && (
+-                <span className="text-xs opacity-80">{sessions.length}</span>
+-              )}
+-              {t.key === "ongoing" && (
+-                <span className="text-xs opacity-80">{ongoingCount}</span>
++              {t.key !== "archived" && (
++                <span className="text-xs opacity-80">{counts[t.key]}</span>
+               )}
+             </button>
+           );
+@@ -614,6 +690,23 @@ export function MobileSessionList({
+         ))
+       )}
+ 
++      {/* 显示全部（FR-03）：默认收敛（最新 10 ∪ 在线全显）截断了列表时展开
++          全量；在线会话已全显，故只统计被折叠的非在线条目场景。 */}
++      {!sessionsQuery.isLoading &&
++        !sessionsQuery.isError &&
++        !showAll &&
++        sessions.length > 0 &&
++        defaultVisibleSessions(sessions).length < sessions.length && (
++          <button
++            type="button"
++            onClick={() => setShowAll(true)}
++            data-testid="mobile-session-show-all"
++            className="mx-1 min-h-[44px] w-[calc(100%-8px)] rounded-[var(--radius-md)] border border-border bg-card text-[14px] text-muted-foreground transition-colors active:bg-muted/50"
++          >
++            显示全部 {sessions.length} 条
++          </button>
++        )}
++
+       {/* ⋯ 菜单（MobileActionMenu 底部 ActionSheet；关闭即清目标会话） */}
+       <MobileActionMenu
+         open={menuSession !== null}
+diff --git a/frontend/src/components/sessions/__tests__/session-list-panel.test.tsx b/frontend/src/components/sessions/__tests__/session-list-panel.test.tsx
+index 273ee42d4..7a3eb3bef 100644
+--- a/frontend/src/components/sessions/__tests__/session-list-panel.test.tsx
++++ b/frontend/src/components/sessions/__tests__/session-list-panel.test.tsx
+@@ -1106,21 +1106,38 @@ describe("SessionListPanel 组头回调与截断", () => {
+     });
+   });
+ 
+-  it("组内超 50 截断 + 「显示全部」（R-03）", async () => {
++  it("组内默认收敛（最新 10 ∪ 在线全显）+ 「显示全部」（R-03 起 / FR-03）", async () => {
+     setWorkspaces([makeWorkspace({ id: "ws-1", name: "SillyHub" })]);
+-    const many = Array.from({ length: 60 }, (_, i) =>
+-      makeSession({ id: `s-${i}`, workspace_id: "ws-1", title: `批量会话${i}` }),
+-    );
++    // 12 条已结束在前 + 5 条在线在后（服务端序）：默认 = 前 10 + 尾部在线
++    // 全显 = 15 行；「显示全部（共 17 条）」展开后全量。
++    const many = [
++      ...Array.from({ length: 12 }, (_, i) =>
++        makeSession({
++          id: `s-e-${i}`,
++          workspace_id: "ws-1",
++          title: `历史会话${i}`,
++          status: "ended",
++        }),
++      ),
++      ...Array.from({ length: 5 }, (_, i) =>
++        makeSession({
++          id: `s-a-${i}`,
++          workspace_id: "ws-1",
++          title: `在线会话${i}`,
++          status: "active",
++        }),
++      ),
++    ];
+     mocks.listAgentSessions.mockResolvedValue(listResponse(many));
+     renderPanel(<SessionListPanel />);
+     await openGroup("SillyHub");
+ 
+-    await waitFor(() => expect(sessionRows().length).toBe(50));
++    await waitFor(() => expect(sessionRows().length).toBe(15));
+     const moreBtn = screen.getByRole("button", { name: /显示全部/ });
+-    expect(moreBtn.textContent).toContain("共 60 条");
++    expect(moreBtn.textContent).toContain("共 17 条");
+ 
+     fireEvent.click(moreBtn);
+-    await waitFor(() => expect(sessionRows().length).toBe(60));
++    await waitFor(() => expect(sessionRows().length).toBe(17));
+   });
+ });
+ 
+@@ -2442,8 +2459,9 @@ describe("SessionListPanel 分身子会话折叠分组（P3）", () => {
+     expect(await screen.findByText("分身甲")).toBeVisible();
+ 
+     // 切状态筛选（filterEpoch 变化）→ openParents 重置 → 折叠回收起。
+-    // fixtures 默认 status=active，选「活跃」保持数据可见（纯验证重置副作用）。
+-    await chooseAntdOptionByText("slp-status", "活跃");
++    // fixtures 默认 status=active，选「在线」（FR-02 更名+三态口径，active
++    // 命中）保持数据可见（纯验证重置副作用）。
++    await chooseAntdOptionByText("slp-status", "在线");
+     await waitFor(() => {
+       expect(screen.queryByText("分身甲")).toBeNull();
+     });
+diff --git a/frontend/src/components/sessions/session-list-panel.tsx b/frontend/src/components/sessions/session-list-panel.tsx
+index 1ed71d1cc..5f830bc6e 100644
+--- a/frontend/src/components/sessions/session-list-panel.tsx
++++ b/frontend/src/components/sessions/session-list-panel.tsx
+@@ -87,7 +87,7 @@
+  *     - 组内「本地 Agent」合并小节（ql-20260824-001）：origin=tool_report
+  *       （SillySpec CLI 自动上报）会话不进机器分桶，统一合并进组内末尾专属
+  *       小节，默认折叠（选中会话在其中 → 展开）；筛选变化随组级 R-05 重置
+- *     - 组内超 50 截断 + 「显示全部」（R-03）
++ *     - 组内默认收敛 + 「显示全部」（R-03 起；FR-03 收紧为最新 10 ∪ 在线全显）
+  *   条目（D-006 紧凑两行沿用）：第一行 = 状态点 + 标题 + 相对时间；第二行 =
+  *     chips（引擎/创建人/档案/供应商/轮数——树形态下工作区/机器信息由组头与
+  *     小节承载，chips 不再重复）；创建人 chip 读 owner_name（D-108@v2，任务
+@@ -230,10 +230,12 @@ export type SessionListScope =
+   | RuntimeScope
+   | QuicklogScope;
+ 
+-/** 状态下拉选项（active/ended/failed；空串=不过滤）。 */
++/** 状态下拉选项（空串=不过滤）。2026-10-27-sessions-total-and-status-filter
++ * FR-02：「活跃」档更名「在线」并扩为三态聚合（哨兵值 __ongoing__，对齐
++ * __archived__ 先例——单值比较不适用于 pending+active+reconnecting 聚合）。 */
+ const STATUS_OPTIONS = [
+   { label: "全部状态", value: "" },
+-  { label: "活跃", value: "active" },
++  { label: "在线", value: "__ongoing__" },
+   { label: "已结束", value: "ended" },
+   { label: "已失败", value: "failed" },
+   { label: "已归档会话", value: "__archived__" },
+@@ -274,8 +276,24 @@ function confirmIcon(Icon: LucideIcon, colorCls: string) {
+   );
+ }
+ 
+-/** 组内截断阈值 + 「显示全部」（R-03）。 */
+-const GROUP_ITEM_LIMIT = 50;
++/** 组内截断阈值 + 「显示全部」（R-03）。2026-10-27-sessions-total-and-status-filter
++ * FR-03：默认展示收敛 50 → 最新 10 条 ∪ 在线全显（与移动端同口径；GROUP_ITEM_LIMIT
++ * 语义化为「默认可见基线数」，展开仍显全量）。 */
++const GROUP_ITEM_LIMIT = 10;
++
++/**
++ * 组内默认可见集（FR-03）：最新 GROUP_ITEM_LIMIT 条 ∪ 全部在线会话（在线 =
++ * 非 ended/failed 三态，不管多老都显示），保持服务端返回序（置顶优先 +
++ * 最近活跃倒序）——与 mobile-session-list defaultVisibleSessions 同口径。
++ */
++function defaultVisibleGroupSessions(
++  sessions: AgentSessionRead[],
++): AgentSessionRead[] {
++  const head = sessions.slice(0, GROUP_ITEM_LIMIT);
++  const rest = sessions.slice(GROUP_ITEM_LIMIT);
++  const online = rest.filter((s) => s.status !== "ended" && s.status !== "failed");
++  return [...head, ...online];
++}
+ 
+ /**
+  * 重命名标题长度上限（task-07 / 2026-09-07-session-pin-rename-scheduled-send
+@@ -842,7 +860,7 @@ function WorkspaceTreeList({
+   const [batchGroupId, setBatchGroupId] = useState<string | null>(null);
+   const [checkedIds, setCheckedIds] = useState<Set<string>>(new Set());
+   const [deleting, setDeleting] = useState(false);
+-  // 组内超 50 截断（R-03）的「显示全部」展开集合。
++  // 组内默认收敛（R-03/FR-03）的「显示全部」展开集合。
+   const [showAllGroupIds, setShowAllGroupIds] = useState<Set<string>>(new Set());
+   // X-009「关联」筛选下拉（task-10 / FR-05）：选中值编码 kind:id
+   //（change:<uuid> / quicklog:<ql_id>；task-06 PPM 为三段 ppm:<kind>:<uuid>），
+@@ -1300,7 +1318,16 @@ function WorkspaceTreeList({
+         if (filterAgent && engineValueOf(s) !== filterAgent) return false;
+       }
+       // 2026-08-24：归档视图下跳过客户端 status 过滤（服务端已按 archived 过滤）。
+-      if (!isArchivedView && status && s.status !== status) return false;
++      // 2026-10-27-sessions-total-and-status-filter FR-02：「在线」档（哨兵
++      // __ongoing__）= pending+active+reconnecting 三态聚合（非 ended/failed），
++      // 其余档保持单值精确匹配。
++      if (!isArchivedView && status) {
++        if (status === "__ongoing__") {
++          if (s.status === "ended" || s.status === "failed") return false;
++        } else if (s.status !== status) {
++          return false;
++        }
++      }
+       if (q && !(s.title ?? "").toLowerCase().includes(q)) return false;
+       return true;
+     });
+@@ -2526,12 +2553,15 @@ function WorkspaceGroupNode({
+   archivedWorkspaceIds?: Set<string>;
+   livenessBySessionId?: Map<string, AgentLogListItem>;
+ }) {
+-  // 组内超 50 截断（R-03）：截断作用于分组（跨机器小节），小节由可见条目派生。
+-  const truncated = !showAll && visibleSessions.length > GROUP_ITEM_LIMIT;
++  // 组内默认展示收敛（R-03 起，FR-03 收紧 50→10+在线全显）：截断作用于分组
++  //（跨机器小节），小节由可见条目派生；在线会话不受默认基线限制全显。
++  const truncated =
++    !showAll &&
++    defaultVisibleGroupSessions(visibleSessions).length < visibleSessions.length;
+   // 审计修复 F2（2026-08-26）：截断 slice 移入 useMemo——原 render 内联生成新数组，
+   // 引用不稳致 subGrouping/sections 每渲染重算（10s 轮询与任意 state 变化均触发）。
+   const shownSessions = useMemo(
+-    () => (truncated ? visibleSessions.slice(0, GROUP_ITEM_LIMIT) : visibleSessions),
++    () => (truncated ? defaultVisibleGroupSessions(visibleSessions) : visibleSessions),
+     [truncated, visibleSessions],
+   );
+ 
+@@ -2544,7 +2574,7 @@ function WorkspaceGroupNode({
+   // 当前列表时）；父不可见（分页边界/筛选）的落孤儿小节兜底，绝不丢行。
+   const subGrouping = useMemo(() => {
+     // 审计修复 F5+F7（2026-08-26）：byParent 按**全量** visibleSessions 聚合——
+-    // 「分身 N」计数不被组内 50 截断切小，且截断边界漂移（轮询新增行）时
++    // 「分身 N」计数不被组内默认收敛切小，且截断边界漂移（轮询新增行）时
+     // 父行附属归属稳定不闪跳；orphans 按 shownSessions 判定——只有父不在
+     // **已渲染**主行集合的子会话才进孤儿小节（父在但被截断不显示时，
+     // 其子会话本就不渲染，无需孤儿兜底）。
+diff --git a/frontend/src/lib/api-types.ts b/frontend/src/lib/api-types.ts
+index 688e6bcc4..aa9fd210c 100644
+--- a/frontend/src/lib/api-types.ts
++++ b/frontend/src/lib/api-types.ts
+@@ -13609,6 +13609,10 @@ export interface components {
+             limit: number;
+             /** Offset */
+             offset: number;
++            /** Status Counts */
++            status_counts?: {
++                [key: string]: number;
++            };
+         };
+         /** AgentSessionRead */
+         AgentSessionRead: {
+@@ -41050,6 +41054,7 @@ export interface operations {
+                 limit?: number;
+                 offset?: number;
+                 status?: ("pending" | "active" | "reconnecting" | "ended" | "failed") | null;
++                status_group?: "ongoing" | null;
+                 runtime_id?: string | null;
+                 machine_id?: string | null;
+                 provider?: ("claude" | "codex") | null;
+diff --git a/frontend/src/lib/daemon/__tests__/session-stream-turn-phase.test.ts b/frontend/src/lib/daemon/__tests__/session-stream-turn-phase.test.ts
+index b9a2db714..882bc4a21 100644
+--- a/frontend/src/lib/daemon/__tests__/session-stream-turn-phase.test.ts
++++ b/frontend/src/lib/daemon/__tests__/session-stream-turn-phase.test.ts
+@@ -252,6 +252,71 @@ describe("applyTurnPhase 竞态回退（事件跑赢占位轮替换）", () => {
+   });
+ });
+ 
++// ── 2026-10-27-turn-phase-observability-monotonic：阶段序单调守卫 ─────────────
++
++describe("applyTurnPhase 单调守卫（词表内回退写丢弃）", () => {
++  it("delivered 不覆盖 first_event（steering 忙轮注入回执退化防护）", () => {
++    // 生产场景：活跃轮已 first_event（显示已退位「执行中」），steering 新消息的
++    // backend 回执 dispatched/delivered 到达——无守卫会把显示退化回投递段。
++    let turns = [makeTurn("run-1")];
++    turns = applyTurnPhase(turns, "run-1", "first_event");
++    turns = applyTurnPhase(turns, "run-1", "delivered");
++    expect(turns[0]!.currentPhase?.phase).toBe("first_event");
++    turns = applyTurnPhase(turns, "run-1", "dispatched");
++    expect(turns[0]!.currentPhase?.phase).toBe("first_event");
++  });
++
++  it("delivered 不覆盖执行期阶段（skills_sync / spawning / inject_received）", () => {
++    for (const execPhase of ["skills_sync", "spawning", "inject_received"] as const) {
++      let turns = [makeTurn("run-1")];
++      turns = applyTurnPhase(turns, "run-1", execPhase);
++      turns = applyTurnPhase(turns, "run-1", "delivered");
++      expect(turns[0]!.currentPhase?.phase).toBe(execPhase);
++    }
++  });
++
++  it("迟到 dispatched 不覆盖 delivered（乱序前跳修正）", () => {
++    let turns = [makeTurn("run-1")];
++    turns = applyTurnPhase(turns, "run-1", "delivered");
++    turns = applyTurnPhase(turns, "run-1", "dispatched");
++    expect(turns[0]!.currentPhase?.phase).toBe("delivered");
++  });
++
++  it("正常推进链顺写不受守卫影响（dispatched→…→first_event 全链）", () => {
++    const chain = [
++      "dispatched",
++      "delivered",
++      "skills_sync",
++      "spawning",
++      "ready",
++      "inject_received",
++      "first_event",
++    ] as const;
++    let turns = [makeTurn("run-1")];
++    for (const p of chain) turns = applyTurnPhase(turns, "run-1", p);
++    expect(turns[0]!.currentPhase?.phase).toBe("first_event");
++  });
++
++  it("词表外值不参与守卫照常覆盖（兼容策略零回归）", () => {
++    // 任一方词表外 → 维持 last-write-wins 透传（2026-10-26-session-stage-progress 兼容策略）。
++    let turns = [makeTurn("run-1")];
++    turns = applyTurnPhase(turns, "run-1", "first_event");
++    turns = applyTurnPhase(turns, "run-1", "future_phase_x");
++    expect(turns[0]!.currentPhase?.phase).toBe("future_phase_x");
++
++    let turns2 = [makeTurn("run-2")];
++    turns2 = applyTurnPhase(turns2, "run-2", "future_phase_x");
++    turns2 = applyTurnPhase(turns2, "run-2", "delivered");
++    expect(turns2[0]!.currentPhase?.phase).toBe("delivered");
++  });
++
++  it("orphan-fallback 回退写同样受守卫（delivered 回退不写入活跃轮）", () => {
++    const turns = [makeTurn("run-active", { currentPhase: { phase: "first_event", at: Date.now() } })];
++    const next = applyTurnPhase(turns, "run-real", "delivered", "run-active");
++    expect(next[0]!.currentPhase?.phase).toBe("first_event");
++  });
++});
++
+ describe("clearTurnPhase（D-013③ 终态清理）", () => {
+   it("有值清 null；null/undefined 幂等原样返回", () => {
+     const withPhase = makeTurn("run-1", {
+@@ -308,6 +373,20 @@ describe("retireDeliveryPhase（log 兜底退位）", () => {
+     const withoutPhase = makeTurn("run-1");
+     expect(retireDeliveryPhase(withoutPhase)).toBe(withoutPhase);
+   });
++
++  // 2026-10-27-turn-phase-observability-monotonic FR-03：集合扩展 inject_received
++  // ——AI 已输出（log 必达）的场合「消息已送达 AI」同样失去展示意义。
++  it("inject_received 清 null；ready 等执行期阶段保留（FR-03 集合扩展）", () => {
++    const injected = makeTurn("run-1", {
++      currentPhase: { phase: "inject_received", at: Date.now() },
++    });
++    expect(retireDeliveryPhase(injected).currentPhase).toBeNull();
++
++    const ready = makeTurn("run-1", {
++      currentPhase: { phase: "ready", at: Date.now() },
++    });
++    expect(retireDeliveryPhase(ready)).toBe(ready);
++  });
+ });
+ 
+ describe("upsertTurn log 事件投递阶段退位（page/dialog 共用单点）", () => {
+@@ -331,6 +410,16 @@ describe("upsertTurn log 事件投递阶段退位（page/dialog 共用单点）"
+     expect(next.turns[0]!.currentPhase?.phase).toBe("spawning");
+   });
+ 
++  it("log 到达时轮挂 inject_received → 清除（FR-03 集成）", () => {
++    const prev = {
++      turns: [makeTurn("run-1", { currentPhase: { phase: "inject_received", at: Date.now() } })],
++      currentRunId: "run-1",
++    };
++    const env = makeEnv({ run_id: "run-1", log_id: "l1", channel: "text", content: "x" });
++    const next = upsertTurn(prev, env, (t) => t, {});
++    expect(next.turns[0]!.currentPhase).toBeNull();
++  });
++
+   it("非 log 事件（turn_completed）不触发退位——delivered 清除只认 log", () => {
+     const prev = {
+       turns: [makeTurn("run-1", { currentPhase: { phase: "delivered", at: Date.now() } })],
+diff --git a/frontend/src/lib/daemon/session-lists.ts b/frontend/src/lib/daemon/session-lists.ts
+index 24131115a..7cbd76e41 100644
+--- a/frontend/src/lib/daemon/session-lists.ts
++++ b/frontend/src/lib/daemon/session-lists.ts
+@@ -80,6 +80,12 @@ export interface AgentSessionListParams {
+   limit?: number;
+   offset?: number;
+   status?: AgentSessionStatus;
++  /**
++   * 在线三态聚合过滤（2026-10-27-sessions-total-and-status-filter FR-02）：
++   * "ongoing" = pending+active+reconnecting（与后端 status_group 同名 Literal）；
++   * 与 status 互斥（同传后端 422）——「在线」筛选档的服务端口径。
++   */
++  status_group?: "ongoing";
+   /** 按运行时（=机器+智能体组合）过滤。 */
+   runtime_id?: string;
+   /** 按机器（daemon instance）过滤（后端 join daemon_runtimes）。 */
+@@ -128,6 +134,9 @@ export async function listAgentSessions(
+   if (options?.limit !== undefined) query.limit = options.limit;
+   if (options?.offset !== undefined) query.offset = options.offset;
+   if (options?.status) query.status = options.status;
++  // 2026-10-27-sessions-total-and-status-filter FR-02：在线三态聚合过滤参
++  // （对齐 status 先例：真值才下发，缺省零回归）。
++  if (options?.status_group) query.status_group = options.status_group;
+   if (options?.runtime_id) query.runtime_id = options.runtime_id;
+   if (options?.machine_id) query.machine_id = options.machine_id;
+   if (options?.provider) query.provider = options.provider;
+diff --git a/sillyhub-daemon/src/api-types.ts b/sillyhub-daemon/src/api-types.ts
+index 688e6bcc4..aa9fd210c 100644
+--- a/sillyhub-daemon/src/api-types.ts
++++ b/sillyhub-daemon/src/api-types.ts
+@@ -13609,6 +13609,10 @@ export interface components {
+             limit: number;
+             /** Offset */
+             offset: number;
++            /** Status Counts */
++            status_counts?: {
++                [key: string]: number;
++            };
+         };
+         /** AgentSessionRead */
+         AgentSessionRead: {
+@@ -41050,6 +41054,7 @@ export interface operations {
+                 limit?: number;
+                 offset?: number;
+                 status?: ("pending" | "active" | "reconnecting" | "ended" | "failed") | null;
++                status_group?: "ongoing" | null;
+                 runtime_id?: string | null;
+                 machine_id?: string | null;
+                 provider?: ("claude" | "codex") | null;
+diff --git a/sillyhub-daemon/src/daemon.ts b/sillyhub-daemon/src/daemon.ts
+index 8e1d50c2a..19a037e6b 100644
+--- a/sillyhub-daemon/src/daemon.ts
++++ b/sillyhub-daemon/src/daemon.ts
+@@ -4911,6 +4911,12 @@ export class Daemon {
+         // try 包同步抛（2026-10-26-ci-red-to-green：client 缺 notifyTurnPhase 方法
+         // 时属性访问在 .catch 挂上前抛 TypeError——D-009 要求上报失败不阻塞消息
+         // 主链路，异步失败走下方 catch、同步失败走此处，口径一致）。
++        // 2026-10-27-turn-phase-observability-monotonic FR-01：失败首警 warn（同
++        // (session_id, phase) 去重）——桥层是 inject_received/first_event 等运行时
++        // phase 的必经路，原纯 debug 在 info 级日志下不可见（生产实证会话 7eff99e1
++        // first_event 丢失零线索），对齐创建链 reportTurnPhase 的首警惯例；debug
++        // 明细并存（逐次留痕），成功仍静默。
++        const bridgePoint = `daemon_bridge_${phase}`;
+         try {
+           this._client
+             .notifyTurnPhase(
+@@ -4920,6 +4926,14 @@ export class Daemon {
+               typeof fwdMsg['detail'] === 'string' ? fwdMsg['detail'] : undefined,
+             )
+             .catch((e: unknown) => {
++              warnOncePhaseFailure(
++                bridgePoint,
++                sessionId,
++                runId,
++                phase,
++                e,
++                (event, kv) => this._logger.warn(event, kv),
++              );
+               this._logger.debug('turn_phase_report_failed', {
+                 session_id: sessionId,
+                 run_id: runId,
+@@ -4928,6 +4942,14 @@ export class Daemon {
+               });
+             });
+         } catch (e) {
++          warnOncePhaseFailure(
++            bridgePoint,
++            sessionId,
++            runId,
++            phase,
++            e,
++            (event, kv) => this._logger.warn(event, kv),
++          );
+           this._logger.debug('turn_phase_report_failed', {
+             session_id: sessionId,
+             run_id: runId,
+diff --git a/sillyhub-daemon/tests/turn-phase-report.test.ts b/sillyhub-daemon/tests/turn-phase-report.test.ts
+index 52da5bcb9..186607764 100644
+--- a/sillyhub-daemon/tests/turn-phase-report.test.ts
++++ b/sillyhub-daemon/tests/turn-phase-report.test.ts
+@@ -19,6 +19,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+ import { Daemon } from "../src/daemon.js";
+ import { HubClient, HubHttpError } from "../src/hub-client.js";
+ import { REST_PREFIX } from "../src/protocol.js";
++import { resetTurnPhaseObservabilityForTest } from "../src/turn-phase-observability.js";
+ import { onMessage } from "../src/interactive/session-manager/events.js";
+ import { inject as injectTurn } from "../src/interactive/session-manager/turn-control.js";
+ import type { SessionState } from "../src/interactive/types.js";
+@@ -184,6 +185,42 @@ describe("② daemon.onTurnMessage turn_phase_report 拦截", () => {
+     ).resolves.toBeUndefined();
+   });
+ 
++  // 2026-10-27-turn-phase-observability-monotonic FR-01：桥层失败首警——生产实证
++  // （会话 7eff99e1 first_event 丢失）桥层纯 debug 在 info 级日志下不可见，对齐
++  // 创建链 reportTurnPhase（daemon.ts:9537）的 warnOncePhaseFailure 首警惯例。
++  it("notifyTurnPhase reject → 首警 warn 一次（同 session+phase 去重），debug 明细保留", async () => {
++    resetTurnPhaseObservabilityForTest();
++    const { daemon, client } = buildDaemon(defaultStateMap());
++    const warn = vi.fn();
++    const debug = vi.fn();
++    (daemon as unknown as { _logger: unknown })._logger = {
++      info: vi.fn(),
++      warn,
++      debug,
++    };
++    client.notifyTurnPhase = vi.fn(async () => {
++      throw new Error("post failed");
++    });
++
++    const marker = { type: "turn_phase_report", phase: "inject_received" };
++    await daemon.onTurnMessage("sess-1", "run-1", marker);
++    await daemon.onTurnMessage("sess-1", "run-1", marker);
++    await daemon.onTurnMessage("sess-1", "run-2", marker);
++
++    // 首警去重键 (session_id, phase)：sess-1 首次 warn、第二次静默；run-2 同
++    // session+phase 不再警；每轮失败 debug 明细各留一条。
++    expect(warn).toHaveBeenCalledTimes(1);
++    expect(warn).toHaveBeenCalledWith(
++      "turn_phase_report_failed_once",
++      expect.objectContaining({
++        session_id: "sess-1",
++        phase: "inject_received",
++        error: "post failed",
++      }),
++    );
++    expect(debug).toHaveBeenCalledTimes(3);
++  });
++
+   it("非控制标记消息照常走 submitMessages（零回归）", async () => {
+     const { daemon, client } = buildDaemon(defaultStateMap());

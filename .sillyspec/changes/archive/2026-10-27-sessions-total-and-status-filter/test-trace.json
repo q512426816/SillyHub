@@ -1,0 +1,68 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-27-sessions-total-and-status-filter",
+  "rows": [
+    {
+      "anchor": "FR-01",
+      "row_id": "2026-10-27-sessions-total-and-status-filter:flow:测试绑定FR-01",
+      "tests": [
+        "backend/app/modules/daemon/tests/test_session_history.py「status_counts 五态之和 = 真实总数（>limit 拉取上限场景）」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-27-sessions-total-and-status-filter"
+    },
+    {
+      "anchor": "FR-02",
+      "row_id": "2026-10-27-sessions-total-and-status-filter:flow:测试绑定FR-02",
+      "tests": [
+        "backend/app/modules/daemon/tests/test_session_history.py「status_group=ongoing 三态命中 + status 与 status_group 同传 422」",
+        "frontend/src/components/mobile/mobile-session-list.test.tsx「四 chips 渲染服务端计数且切档计数不漂移」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-27-sessions-total-and-status-filter"
+    },
+    {
+      "anchor": "FR-03",
+      "row_id": "2026-10-27-sessions-total-and-status-filter:flow:测试绑定FR-03",
+      "tests": [
+        "frontend/src/components/mobile/mobile-session-list.test.tsx「默认 10 条 + 在线全显 + 显示全部展开」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-27-sessions-total-and-status-filter"
+    },
+    {
+      "anchor": "FR-04",
+      "row_id": "2026-10-27-sessions-total-and-status-filter:flow:测试绑定FR-04",
+      "tests": [
+        "backend/app/modules/daemon/tests/test_session_history.py",
+        "frontend/src/components/mobile/mobile-session-list.test.tsx「消费再生成类型渲染统计行」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-27-sessions-total-and-status-filter"
+    }
+  ]
+}
