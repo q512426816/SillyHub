@@ -143,8 +143,13 @@ export function listSessionChanges(workspaceId: string, sessionId: string) {
 /**
  * 会话关联变更列表 hook（悬浮面板消费）。
  *
- * - `active` 为真（悬浮下拉/弹窗打开）时 15s 轮询刷新（FR-05——跑动中的变更
- *   状态迁移/新增变更低频变化），关闭即停（不后台空转）；
+ * - 轮询双档（2026-10-27-ghost-spec-binding-fix FR-08，用户实测反馈：真实变更
+ *   创建/失效后入口徽标不更新、要刷新页面才回显——关闭态 0 轮询滞留旧值）：
+ *   `active` 为真（悬浮下拉/弹窗打开）15s 快档（跑动中变更状态迁移较频繁）；
+ *   关闭态 30s 慢档保底（挂载面单实例 + limit 100 轻 JOIN 接口，请求量可忽略）
+ *   ——CLI 侧新建/归档变更后最迟 30s 自动回显，无需刷新页面；
+ * - 打开瞬间的「所见即最新」由组件层 refetch 承担（FR-09：staleTime 窗口内
+ *   缓存也强制拉新，interval 档位切换不触发即时请求）；
  * - staleTime 10s：入口显隐/徽标数需要较新数据但不必秒级；
  * - placeholderData 保上次数据：列表短暂 refetch 不闪空。
  */
@@ -157,7 +162,7 @@ export function useSessionChanges(
     queryKey: queryKeys.sessionChanges.list(workspaceId, sessionId),
     queryFn: () => listSessionChanges(workspaceId, sessionId),
     staleTime: 10_000,
-    refetchInterval: options?.active ? 15_000 : false,
+    refetchInterval: options?.active ? 15_000 : 30_000,
     placeholderData: (prev) => prev,
   });
 }

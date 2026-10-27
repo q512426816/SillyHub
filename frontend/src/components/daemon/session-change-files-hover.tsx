@@ -116,9 +116,17 @@ export function SessionChangeFilesHover({
   const [archiveExpanded, setArchiveExpanded] = useState(false);
   const [dialogChangeId, setDialogChangeId] = useState<string | null>(null);
 
-  const { data } = useSessionChanges(workspaceId, sessionId, {
+  // FR-09（2026-10-27-ghost-spec-binding-fix，用户实测「打开还显示旧数据」）：
+  // 打开沿立即 refetch——staleTime 窗口内的缓存旧值也强制拉新（interval 档位
+  // 切换要等下一个 tick 才首跳，不能依赖）。下拉与详情弹窗两个打开入口都拉。
+  const { data, refetch } = useSessionChanges(workspaceId, sessionId, {
     active: popoverOpen || dialogChangeId !== null,
   });
+
+  const reopenWithFreshData = (open: boolean) => {
+    setPopoverOpen(open);
+    if (open) void refetch();
+  };
 
   const { active, archived } = useMemo(() => splitByArchive(data ?? []), [data]);
 
@@ -128,6 +136,7 @@ export function SessionChangeFilesHover({
   const openDialog = (changeId: string) => {
     setPopoverOpen(false);
     setDialogChangeId(changeId);
+    void refetch();
   };
 
   const renderItem = (c: ChangeSummary) => (
@@ -203,7 +212,7 @@ export function SessionChangeFilesHover({
     <div data-testid="session-change-files-hover">
       <Popover
         open={popoverOpen}
-        onOpenChange={setPopoverOpen}
+        onOpenChange={reopenWithFreshData}
         trigger="click"
         placement="topRight"
         content={popoverContent}

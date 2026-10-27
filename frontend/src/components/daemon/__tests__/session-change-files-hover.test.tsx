@@ -68,8 +68,10 @@ const archivedOne = change({
   location: "archive",
 });
 
-function mockData(data: ChangeSummary[] | undefined) {
-  mockedHook.mockReturnValue({ data } as ReturnType<typeof useSessionChanges>);
+function mockData(data: ChangeSummary[] | undefined, refetch?: ReturnType<typeof vi.fn>) {
+  mockedHook.mockReturnValue({ data, refetch } as unknown as ReturnType<
+    typeof useSessionChanges
+  >);
 }
 
 /** 打开下拉：2026-10-16-session-pill-dock-drag 起 click 触发（hover 不再弹）。 */
@@ -267,6 +269,34 @@ describe("SessionChangeFilesHover（2026-10-13-session-change-files-hover task-0
     expect(screen.getByTestId("session-change-count").className).not.toContain("animate-pulse");
     // 徽标计数 = 进行中变更数
     expect(screen.getByTestId("session-change-count").textContent).toBe("1");
+  });
+
+  // ── FR-09（2026-10-27-ghost-spec-binding-fix）：打开沿立即 refetch ─────────
+
+  it("打开下拉时立即 refetch（staleTime 窗口内缓存旧值也强制拉新）", async () => {
+    const refetch = vi.fn().mockResolvedValue(undefined);
+    mockData([activeThin], refetch);
+    render(<SessionChangeFilesHover workspaceId="ws-1" sessionId="s-1" />);
+    expect(refetch).not.toHaveBeenCalled();
+
+    await openPopover();
+    expect(refetch).toHaveBeenCalledTimes(1);
+  });
+
+  it("点列表项打开详情弹窗时立即 refetch；关闭下拉（收起沿）不触发", async () => {
+    const refetch = vi.fn().mockResolvedValue(undefined);
+    mockData([activeThin, archivedOne], refetch);
+    render(<SessionChangeFilesHover workspaceId="ws-1" sessionId="s-1" />);
+    await openPopover();
+    expect(refetch).toHaveBeenCalledTimes(1); // 下拉打开沿
+
+    fireEvent.click(screen.getByTestId("session-change-item-2026-10-13-hover-demo"));
+    await screen.findByTestId("change-file-tree-c-1");
+    expect(refetch).toHaveBeenCalledTimes(2); // 弹窗打开沿
+
+    // 收起沿：关闭弹窗后仅此前的 2 次，无额外触发
+    fireEvent.keyDown(document, { key: "Escape" });
+    expect(refetch).toHaveBeenCalledTimes(2);
   });
 });
 
