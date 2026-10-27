@@ -827,6 +827,29 @@ describe('task 终态注入唤醒（2026-10-21-task-wakeup-restore）', () => {
     }
   });
 
+  // ── 2026-10-27-task-wakeup-precision-fix ──────────────────────────────────
+
+  it('FR-01（precision-fix）：elapsed_ms 缺失时通知行显示注册表兜底时长，不再 00:00', async () => {
+    vi.useFakeTimers();
+    try {
+      const { depsExtra, wakeup } = withWakeupDeps();
+      const h = await createHarness('sess-pf1', 'run-pf1', depsExtra);
+      // 复现 bsal4e1x9 形态：task_started 注册（startedAt=t0）+ 终态帧无
+      // usage.duration_ms——判定走注册表兜底，显示必须同源。
+      await h.emitMessage(msgTaskStarted({ taskId: 'task-d1', toolUseId: 'call-d1', description: '强制重装 frontend 依赖修 node_modules' }));
+      await vi.advanceTimersByTimeAsync(61_000);
+      await h.emitMessage(msgTaskNotification({ taskId: 'task-d1', status: 'completed', summary: 'Done in 1m 7s' }));
+      await vi.advanceTimersByTimeAsync(3000);
+      expect(wakeup).toHaveBeenCalledTimes(1);
+      const prompt = String(wakeup.mock.calls[0]![1] as string);
+      // 61s 注册表兜底 → 01:01（旧实现此处显示 00:00）。
+      expect(prompt).toContain('（用时 01:01）');
+      expect(prompt).not.toContain('（用时 00:00）');
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('FR-03：阈值 env 可配——120000 拦 90s、0 关闭阀拦 61s、非法值回落默认', async () => {
     vi.useFakeTimers();
     try {

@@ -345,7 +345,12 @@ export async function handleTaskNotificationEvent(
       taskId,
       taskName,
       status: rawStatus,
-      elapsedMs,
+      // 2026-10-27-task-wakeup-precision-fix FR-01：显示与判定同源——通知行
+      // 「用时」改用门槛判定值（帧值优先，注册表 startedAt 兜底；此前裸传
+      // elapsedMs，帧缺失时判定已用注册表兜底放行、显示却回退 00:00——
+      // bsal4e1x9 前台 pnpm install 70s 显示 00:00 实证）。双缺失仍 undefined
+      // → 显示层保持 00:00，不虚构时长。
+      elapsedMs: durationMs,
       summary,
     });
   }
