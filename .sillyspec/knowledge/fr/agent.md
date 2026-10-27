@@ -1033,3 +1033,67 @@ created_at: 2026-10-14T02:51:35.432Z
 摘要：schema 变更即再生成
 全文：.sillyspec/changes/archive/2026-10-28-knowledge-hits-cli-direct/requirements.md#FR-05
 最近确认：21104e0be0f0336e046643a4253d49a138840e52
+
+## FR-agent-057 桌面变更详情概览「会话」区数据源改为 GET /changes/{id}/sessions（change_session_links 真实关联），不再取工作区全量会话
+变更：2026-10-28-change-detail-sessions-source-fix
+状态：active
+摘要：工作区存在与变更无关的活跃会话；变更无任何绑定会话
+全文：.sillyspec/changes/archive/2026-10-28-change-detail-sessions-source-fix/requirements.md#FR-01
+最近确认：849706364deefb92a01024ae3ea2f72abdc6fde9
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-28-change-detail-sessions-source-fix:flow:测试绑定FR-01
+  tests: frontend/src/components/changes/detail/__tests__/change-overview-side.test.tsx「仅渲染注入的变更关联会话（slice 前 3）」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-28-change-detail-sessions-source-fix
+  status: active
+
+## FR-agent-058 「绑定会话（审批结果将通知此会话）」显示同一关联源最新会话，与后端 _notify_bound_session 注入目标同源
+变更：2026-10-28-change-detail-sessions-source-fix
+状态：active
+摘要：审批时绑定会话展示
+全文：.sillyspec/changes/archive/2026-10-28-change-detail-sessions-source-fix/requirements.md#FR-02
+最近确认：849706364deefb92a01024ae3ea2f72abdc6fde9
+
+## FR-agent-059 会话区状态列显示中文标签（进行中/已结束等），不再裸显英文 active/completed
+变更：2026-10-28-change-detail-sessions-source-fix
+状态：active
+摘要：active 会话显示中文
+全文：.sillyspec/changes/archive/2026-10-28-change-detail-sessions-source-fix/requirements.md#FR-03
+最近确认：849706364deefb92a01024ae3ea2f72abdc6fde9
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-28-change-detail-sessions-source-fix:flow:测试绑定FR-03
+  tests: frontend/src/components/changes/detail/__tests__/change-overview-side.test.tsx「状态列显示中文标签（active→进行中）」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-28-change-detail-sessions-source-fix
+  status: active
+
+## FR-agent-060 附件开局会话标题剥离 [附件:...] 内联标记，三处标题提取端点口径一致
+变更：2026-10-28-change-detail-sessions-source-fix
+状态：active
+摘要：附件+正文混合首条输入；纯附件首条输入；常规纯文本首条输入
+全文：.sillyspec/changes/archive/2026-10-28-change-detail-sessions-source-fix/requirements.md#FR-04
+最近确认：849706364deefb92a01024ae3ea2f72abdc6fde9
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-28-change-detail-sessions-source-fix:flow:测试绑定FR-04
+  tests: backend/app/modules/change/tests/test_change_sessions_cap.py「附件开局标题剥离」 | backend/app/modules/session_attachment/tests/test_capability.py「session_display_title 剥离附件标记/纯附件回退 name/纯文本零回归」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-28-change-detail-sessions-source-fix
+  status: active

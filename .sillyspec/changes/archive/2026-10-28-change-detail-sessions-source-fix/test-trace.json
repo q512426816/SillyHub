@@ -1,0 +1,52 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-28-change-detail-sessions-source-fix",
+  "rows": [
+    {
+      "anchor": "FR-01",
+      "row_id": "2026-10-28-change-detail-sessions-source-fix:flow:测试绑定FR-01",
+      "tests": [
+        "frontend/src/components/changes/detail/__tests__/change-overview-side.test.tsx「仅渲染注入的变更关联会话（slice 前 3）」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-28-change-detail-sessions-source-fix"
+    },
+    {
+      "anchor": "FR-03",
+      "row_id": "2026-10-28-change-detail-sessions-source-fix:flow:测试绑定FR-03",
+      "tests": [
+        "frontend/src/components/changes/detail/__tests__/change-overview-side.test.tsx「状态列显示中文标签（active→进行中）」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-28-change-detail-sessions-source-fix"
+    },
+    {
+      "anchor": "FR-04",
+      "row_id": "2026-10-28-change-detail-sessions-source-fix:flow:测试绑定FR-04",
+      "tests": [
+        "backend/app/modules/change/tests/test_change_sessions_cap.py「附件开局标题剥离」",
+        "backend/app/modules/session_attachment/tests/test_capability.py「session_display_title 剥离附件标记/纯附件回退 name/纯文本零回归」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-28-change-detail-sessions-source-fix"
+    }
+  ]
+}

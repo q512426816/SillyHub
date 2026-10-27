@@ -2459,3 +2459,11 @@ supersedes：D-008@v1
 锚点：未记录
 最近确认：21104e0be0f0336e046643a4253d49a138840e52
 理由：最大风险：**shpsync_ 令牌的写面扩大**——此前 shpsync_ 只开放 spec 同步族端点，本变更新增一个遥测接收端点。缓解：端点只写不读（不返回任何既有数据，回执仅计数）、复用 ingest 宽容语义（坏行跳过不炸）、且遥测数据本就来自令牌持有方自己的仓库执行期——伪造收益仅污染自己 workspace 的遥测统计。次风险：CLI 侧（另仓变更）直报失败的静默面——由 best-effort 语义 + 本地文件必写 + daemon 兜底三层覆盖（前序变更 D-001）。 试过但放弃的方案： - **扩展现有 hits/batch 端点兼容 shpsync_**（require_permission 加分轨分支）：破坏四轨分轨铁律（patterns.md#四轨鉴权——shpsync_ 与用户轨混开鉴权分支正是分轨设计要防的形态），且该端点 query 显式 workspace_id 与令牌派生两来源冲突； - **CLI 走用户 JWT**（platform.token 换用户令牌）：platform connect 发的就是 shpsync_ 同步令牌（绑定 workspace 的长寿命令牌），CLI 无用户登录态可持有，改造成本远超新增端点； - **daemon 代转**（CLI 不直报、等 daemon 周期上行）：即维持现状断流形态，已被用户拍板否决（要实时性主通道）。
+
+## D-unmapped-307@v1 设计期风险与放弃方案（底稿）
+状态：implemented
+变更：2026-10-28-change-detail-sessions-source-fix
+原编号：D-001@v1
+锚点：未记录
+最近确认：849706364deefb92a01024ae3ea2f72abdc6fde9
+理由：最大风险：substr 64→512 放宽后单行拉回字节量增大（数百会话列表请求时放大），但 512B×N 远小于原 TOAST 全文口径，且仅标题子查询路径。评审 P1（已修复）：daemon 自愈回写 healed 原样超 title_fallback 列宽 String(64) 会使 PG 列表 500——回写截 [:64] 对齐列宽，防回归测试钉死（写回值长度断言双方言可判）。已放弃方案：① SQL 侧正则剥离（PG regexp_replace 与 SQLite 方言分叉，违反双方言约束）；② 重算存量 title_fallback 列（需迁移+回填，把小修复撑大，读侧清洗可达同显示效果）。

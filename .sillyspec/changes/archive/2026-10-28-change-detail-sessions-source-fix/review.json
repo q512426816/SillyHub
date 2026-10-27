@@ -1,0 +1,44 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-28-change-detail-sessions-source-fix",
+  "reviewer": "subagent",
+  "verdict": "PASS",
+  "reviewedAgainst": "849706364deefb92a01024ae3ea2f72abdc6fde9",
+  "findings": [
+    {
+      "severity": "P1",
+      "status": "resolved",
+      "title": "daemon 自愈回写将 substr 512 源原文落入 String(64) 的 title_fallback 列，PG 生产超长报错致 GET /api/daemon/sessions 500",
+      "evidence": "原缺陷（评审于 5c3fa5a0a）：substr 1,64→1,512 后 healed 原样回写 varchar(64) 列（agent/model.py:887、迁移 20261016100000 同宽），首条 user_input >64 字符时 PG 报 value too long 使列表 500，SQLite 方言不限长测不出。已由修复提交 849706364 消除：session_crud.py:426 healed 截 [:64] 对齐列宽，唯一运行时写点的 case 值域（列存量 ≤64 / healed ≤64 / 哨兵空串）全部不超宽，PG 溢出路径闭合；机理注释登记在代码内。防回归测试 test_title_fallback_selfheal_write_capped_to_column_width（强制走自愈 + >64 字首条输入前置自检 + 直接断言落库值长度 ≤64）双方言可判，复跑该文件 31 passed。",
+      "location": "backend/app/modules/daemon/router/session_crud.py:426"
+    },
+    {
+      "severity": "P3",
+      "status": "resolved",
+      "title": "list_change_sessions 未校验 change 与路径 workspace_id 归属，design 作用域声明与代码不符（既有端点行为，非本变更引入）",
+      "evidence": "原缺陷（评审于 5c3fa5a0a）：design 作用域作答「服务端按 workspace 归属过滤」与代码不符——查询仅 ChangeSessionLink.change_id==change_id JOIN + 软删过滤（router.py:877-893），workspace_id 路径参数不参与查询；端点自 2026-07-09 即如此，非本变更引入。已由修复提交 849706364 解决：design.md 盲维四问作用域答案如实改写（明示查询不带 workspace_id 过滤、属 2026-07-09 既有端点行为、CHANGE_READ 鉴权 + UUID 不可猜测 + 换源后相比工作区全量反而收窄）。声明与实现不再失配；端点归属校验缺失本身留作既有技术债，不计入本变更。",
+      "location": "backend/app/modules/change/router.py:877"
+    },
+    {
+      "severity": "P3",
+      "status": "accepted",
+      "title": "FR-02 绑定会话展示（last_active_at 最新）与后端 _notify_bound_session 注入目标（link created_at 最新）排序维度不同，极端场景可分叉",
+      "evidence": "前端 boundSession=sessions[0] 取 list_change_sessions 的 last_active_at 倒序首条（router.py:887/923），_notify_bound_session 取 links created_at DESC LIMIT 1（change/service.py:3690）；当最新创建的 link 恰对应 last_active_at 较早的会话时两者指向不同会话。FR-02 验收口径自身定义为「listChangeSessions 首条」，代码达成；「与注入目标同源」实为关联表同源而非行选择同源，属可接受的口径近似。",
+      "location": "backend/app/modules/change/service.py:3690"
+    },
+    {
+      "severity": "P3",
+      "status": "resolved-as-accepted",
+      "title": "design 声明边界裁决：substr 64→512 读路径字节量增大与两个放弃方案均合理，但放宽未评估写路径落库宽度（已由 P1 修复收口）",
+      "evidence": "读路径（change:834/agent:683 的标题子查询）512B×N 远小于 TOAST 全文口径，可接受；放弃 SQL 正则剥离（PG/SQLite regexp 方言分叉）与放弃重算存量列（需迁移回填、读侧清洗同效）均有代码层依据且 daemon 读侧清洗已测试钉死。原遗漏（daemon 自愈回写共享同一 substr 源，放宽后落库宽度与列宽失配）已由修复提交 849706364 落实回写截断并在 design 风险节登记（「评审 P1（已修复）」），对应 P1 条目已 resolved。",
+      "location": "backend/app/modules/daemon/router/session_crud.py:426"
+    }
+  ],
+  "dimensionNotes": {
+    "乱序": "ok",
+    "并发": "ok",
+    "切换": "ok",
+    "作用域": "ok"
+  },
+  "reviewedAt": "2026-10-28T05:33:12+08:00"
+}

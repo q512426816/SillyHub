@@ -1,0 +1,42 @@
+tier: thin
+legacy_fallback: false
+substeps:
+  artifacts: done
+  ledger: done
+  patch: done
+  review: done
+  probes: done
+  distill: done
+  archive: done
+  events: done
+born_face: thin
+with_tasks: false
+review_force: null
+input: |-
+  变更详情会话区数据源错挂与附件标题修复：概览「会话」区实际取工作区全量最近会话而非该变更关联会话，用户看到无关会话以为是乱关联；附件开局会话标题显示 [附件:uuid 串不可读。
+
+  成功标准：
+  - 桌面变更详情概览「会话」区数据源改为 GET /changes/{id}/sessions（change_session_links 真实关联），不再取工作区全量会话
+  - 「绑定会话（审批结果将通知此会话）」显示同一关联源最新会话，与后端 _notify_bound_session 注入目标同源
+  - 会话区状态列显示中文标签（进行中/已结束等），不再裸显英文 active/completed
+  - 附件开局会话标题剥离 [附件:...] 内联标记后取首个非空文本，纯附件消息回退可读文案，不再显示 [附件:uuid 前缀
+  - 标题剥离在 change/agent/daemon 三处标题提取端点同步落地，口径一致
+  - 触及文件的相关测试通过（前端组件测试 + 后端三处标题测试），无 schema 改动故无需 gen:types
+autopilot: true
+prestage_ack: false
+baseline_commit: fbaf5bcfe811d2fcf09b73994c7c6db5589e2387
+updatedAt: '2026-10-27T21:34:05.916Z'
+cross_baselines:
+  sillyspec: 67e50bcca2adb9ecd502d12086c0ac8cb994da84
+baseline_sha256: 1c85810342989a013ea6eaa97a260428c4246f0874ab832e77d26326df9ffc5f
+spec_approved: true
+spec_approved_at: '2026-10-27T21:01:56.303Z'
+spec_approved_by: anon@DESKTOP-HJ0AM09
+spec_approved_channel: user-confirmed
+spec_attested_by: anon@DESKTOP-HJ0AM09
+batch_ticked: true
+gate_summary: >-
+  test: passed ← module[]+deps(py5+jsx8)（31.1s）
+  结果：C:\Users\qinyi\IdeaProjects\multi-agent-platform\.sillyspec\.runtime\verify-runs\20261027212420\test-result.json｜lint:
+  skipped — 跳过原因：local.yaml 未配置 commands.lint（或标记 unavailable）。｜门文件 25 个
+

@@ -1,0 +1,1489 @@
+diff --git a/.sillyspec/docs/SillyHub/modules/daemon.changelog.md b/.sillyspec/docs/SillyHub/modules/daemon.changelog.md
+index 7a040dd7c..cb93a36af 100644
+--- a/.sillyspec/docs/SillyHub/modules/daemon.changelog.md
++++ b/.sillyspec/docs/SillyHub/modules/daemon.changelog.md
+@@ -114,3 +114,4 @@ created_at: 2026-08-27 14:32:24
+ - 2026-10-27-turn-phase-observability-monotonic | 生产实证（2026-10-27 会话 7eff99e1，run 4f2e2cdd）：first_ev…
+ - 2026-10-27-sessions-total-and-status-filter | 会话列表数据统计修正：用户手机/PC 会话页总数被前端拉取上限截断在 500（实际 515），状态筛…
+ - 2026-10-27-knowledge-hits-flush-button | 知识遥测断流根因：sillyspec CLI 2026-10-18 把遥测文件迁至 .runtime…
++- 2026-10-28-knowledge-hits-cli-direct | CLI 直报主通道的接收侧（用户拍板方案收尾）：CLI 侧只持有 shpsync_ 平台令牌（wor…
+diff --git a/.sillyspec/docs/SillyHub/modules/frontend_lib.changelog.md b/.sillyspec/docs/SillyHub/modules/frontend_lib.changelog.md
+index 9ae01ee5b..a0e0b0632 100644
+--- a/.sillyspec/docs/SillyHub/modules/frontend_lib.changelog.md
++++ b/.sillyspec/docs/SillyHub/modules/frontend_lib.changelog.md
+@@ -53,3 +53,4 @@ created_at: 2026-10-16 16:40:00
+ - 2026-10-27-turn-phase-observability-monotonic | 生产实证（2026-10-27 会话 7eff99e1，run 4f2e2cdd）：first_ev…
+ - 2026-10-27-sessions-total-and-status-filter | 会话列表数据统计修正：用户手机/PC 会话页总数被前端拉取上限截断在 500（实际 515），状态筛…
+ - 2026-10-27-knowledge-hits-flush-button | 知识遥测断流根因：sillyspec CLI 2026-10-18 把遥测文件迁至 .runtime…
++- 2026-10-28-knowledge-hits-cli-direct | CLI 直报主通道的接收侧（用户拍板方案收尾）：CLI 侧只持有 shpsync_ 平台令牌（wor…
+diff --git a/.sillyspec/docs/backend/modules/change.changelog.md b/.sillyspec/docs/backend/modules/change.changelog.md
+index dc9e88d8a..7c76f9111 100644
+--- a/.sillyspec/docs/backend/modules/change.changelog.md
++++ b/.sillyspec/docs/backend/modules/change.changelog.md
+@@ -36,3 +36,4 @@ created_at: 2026-08-29 22:56:30
+ - 2026-10-27-ghost-spec-binding-fix | 失败命令不再生成幽灵变更占位并过滤存量
+ - 2026-10-27-task-wakeup-inject-retry | 后台任务终态唤醒注入经后端中转单发无重试，撞后端短暂不可用窗（部署重建/502/504）即 inte…
+ - 2026-10-27-knowledge-hits-flush-button | 知识遥测断流根因：sillyspec CLI 2026-10-18 把遥测文件迁至 .runtime…
++- 2026-10-28-knowledge-hits-cli-direct | CLI 直报主通道的接收侧（用户拍板方案收尾）：CLI 侧只持有 shpsync_ 平台令牌（wor…
+diff --git a/.sillyspec/docs/backend/modules/daemon.changelog.md b/.sillyspec/docs/backend/modules/daemon.changelog.md
+index bcc8a771e..6b13fd38e 100644
+--- a/.sillyspec/docs/backend/modules/daemon.changelog.md
++++ b/.sillyspec/docs/backend/modules/daemon.changelog.md
+@@ -85,3 +85,4 @@ created_at: 2026-08-29 22:56:30
+ | 2026-10-27 | 2026-10-27-task-wakeup-inject-retry | 后台任务终态唤醒注入经后端中转单发无重试，撞后端短暂不可用窗（部署重建/502/504）即 inte… |
+ | 2026-10-27 | 2026-10-27-sessions-total-and-status-filter | 会话列表数据统计修正：用户手机/PC 会话页总数被前端拉取上限截断在 500（实际 515），状态筛… |
+ | 2026-10-27 | 2026-10-27-knowledge-hits-flush-button | 知识遥测断流根因：sillyspec CLI 2026-10-18 把遥测文件迁至 .runtime… |
++| 2026-10-27 | 2026-10-28-knowledge-hits-cli-direct | CLI 直报主通道的接收侧（用户拍板方案收尾）：CLI 侧只持有 shpsync_ 平台令牌（wor… |
+diff --git a/.sillyspec/docs/backend/modules/platform_sync.changelog.md b/.sillyspec/docs/backend/modules/platform_sync.changelog.md
+index ff05ff2fa..97478ac3a 100644
+--- a/.sillyspec/docs/backend/modules/platform_sync.changelog.md
++++ b/.sillyspec/docs/backend/modules/platform_sync.changelog.md
+@@ -23,3 +23,4 @@ created_at: 2026-08-29 22:56:30
+ - 2026-10-21-spec-manifest-incremental | spec-manifest 增量游标同步
+ - 2026-10-22-agent-profiles-page-restyle | 智能体档案列表页重设计
+ - 2026-10-27-knowledge-hits-flush-button | 知识遥测断流根因：sillyspec CLI 2026-10-18 把遥测文件迁至 .runtime…
++- 2026-10-28-knowledge-hits-cli-direct | CLI 直报主通道的接收侧（用户拍板方案收尾）：CLI 侧只持有 shpsync_ 平台令牌（wor…
+diff --git a/.sillyspec/docs/multi-agent-platform/modules/backend.changelog.md b/.sillyspec/docs/multi-agent-platform/modules/backend.changelog.md
+index e7db357a5..e9b923dc5 100644
+--- a/.sillyspec/docs/multi-agent-platform/modules/backend.changelog.md
++++ b/.sillyspec/docs/multi-agent-platform/modules/backend.changelog.md
+@@ -123,3 +123,4 @@
+ - 2026-10-27-sessions-total-and-status-filter | 会话列表数据统计修正：用户手机/PC 会话页总数被前端拉取上限截断在 500（实际 515），状态筛…
+ - 2026-10-27-task-parser-md-check-fallback | 修 Task parser 厚档变更任务进度恒 0/N bug：tasks.md 勾选被「卡片优先」…
+ - 2026-10-27-knowledge-hits-flush-button | 知识遥测断流根因：sillyspec CLI 2026-10-18 把遥测文件迁至 .runtime…
++- 2026-10-28-knowledge-hits-cli-direct | CLI 直报主通道的接收侧（用户拍板方案收尾）：CLI 侧只持有 shpsync_ 平台令牌（wor…
+diff --git a/.sillyspec/docs/multi-agent-platform/modules/frontend.changelog.md b/.sillyspec/docs/multi-agent-platform/modules/frontend.changelog.md
+index ffd94fc66..a4b0eeeb1 100644
+--- a/.sillyspec/docs/multi-agent-platform/modules/frontend.changelog.md
++++ b/.sillyspec/docs/multi-agent-platform/modules/frontend.changelog.md
+@@ -234,3 +234,4 @@
+ | 2026-10-27 | 2026-10-27-turn-phase-observability-monotonic | 生产实证（2026-10-27 会话 7eff99e1，run 4f2e2cdd）：first_ev… |
+ | 2026-10-27 | 2026-10-27-sessions-total-and-status-filter | 会话列表数据统计修正：用户手机/PC 会话页总数被前端拉取上限截断在 500（实际 515），状态筛… |
+ | 2026-10-27 | 2026-10-27-knowledge-hits-flush-button | 知识遥测断流根因：sillyspec CLI 2026-10-18 把遥测文件迁至 .runtime… |
++| 2026-10-27 | 2026-10-28-knowledge-hits-cli-direct | CLI 直报主通道的接收侧（用户拍板方案收尾）：CLI 侧只持有 shpsync_ 平台令牌（wor… |
+diff --git a/.sillyspec/docs/multi-agent-platform/modules/sillyhub-daemon.changelog.md b/.sillyspec/docs/multi-agent-platform/modules/sillyhub-daemon.changelog.md
+index 6f9ec1c1b..3ca6a9db2 100644
+--- a/.sillyspec/docs/multi-agent-platform/modules/sillyhub-daemon.changelog.md
++++ b/.sillyspec/docs/multi-agent-platform/modules/sillyhub-daemon.changelog.md
+@@ -57,3 +57,4 @@
+ - 2026-10-27-turn-phase-observability-monotonic | 生产实证（2026-10-27 会话 7eff99e1，run 4f2e2cdd）：first_ev…
+ - 2026-10-27-sessions-total-and-status-filter | 会话列表数据统计修正：用户手机/PC 会话页总数被前端拉取上限截断在 500（实际 515），状态筛…
+ - 2026-10-27-knowledge-hits-flush-button | 知识遥测断流根因：sillyspec CLI 2026-10-18 把遥测文件迁至 .runtime…
++- 2026-10-28-knowledge-hits-cli-direct | CLI 直报主通道的接收侧（用户拍板方案收尾）：CLI 侧只持有 shpsync_ 平台令牌（wor…
+diff --git a/backend/app/modules/agent/router.py b/backend/app/modules/agent/router.py
+index 98634b044..11b46f6f5 100644
+--- a/backend/app/modules/agent/router.py
++++ b/backend/app/modules/agent/router.py
+@@ -49,6 +49,7 @@ from app.modules.daemon.model import DaemonTaskLease
+ from app.modules.daemon.permission_service import WorkspaceDialogRead
+ from app.modules.daemon.router import PermissionServiceDep
+ from app.modules.daemon.schema import AgentSessionListItem, ChangeSessionAuthor
++from app.modules.session_attachment.service import session_display_title
+ from app.modules.workspace.model import AgentRunWorkspace, Workspace
+ from app.modules.workspace.service import resolve_root_path_for_daemon
+ 
+@@ -663,8 +664,11 @@ async def _assemble_workspace_session_items(
+     # 几百会话×上百轮时单次列表请求额外扫数万行大文本。窗口函数 PG/SQLite
+     # 双方言支持（SQLite ≥3.25），每会话恒 1 行出参。
+     # 2026-09-09 阿里云 slow.query 实测：摘要只取前 30 字（消费方 [:30]），
+-    # SQL 内 substr 截到 64 字符，免把单行均值 33KB 的 TOAST 全文解压拉回——
+-    # substr 双方言均为字符语义，64 > 30 保证截断后派生零回归。
++    # SQL 内 substr 截断免把单行均值 33KB 的 TOAST 全文解压拉回（substr 双方
++    # 言均为字符语义）。2026-10-28-change-detail-sessions-source-fix：64 → 512，
++    # 附件标记行每条约 60 字符，64 字内可能全是标记（剥离后无正文可选）；
++    # 标题口径换共享 helper session_display_title（剥附件标记，与 change/
++    # daemon router 三处同源）。
+     rn = (
+         func.row_number()
+         .over(
+@@ -676,7 +680,7 @@ async def _assemble_workspace_session_items(
+     title_subq = (
+         select(
+             AgentRun.agent_session_id.label("session_id"),
+-            func.substr(AgentRunLog.content_redacted, 1, 64).label("content"),
++            func.substr(AgentRunLog.content_redacted, 1, 512).label("content"),
+             rn,
+         )
+         .join(AgentRunLog, AgentRunLog.run_id == AgentRun.id)
+@@ -691,8 +695,8 @@ async def _assemble_workspace_session_items(
+             select(title_subq.c.session_id, title_subq.c.content).where(title_subq.c.rn == 1)
+         )
+     ).all()
+-    content_by_session: dict[uuid.UUID, str] = {
+-        row.session_id: (row.content or "") for row in title_rows
++    content_by_session: dict[uuid.UUID, str | None] = {
++        row.session_id: session_display_title(row.content) for row in title_rows
+     }
+ 
+     return [
+@@ -707,7 +711,7 @@ async def _assemble_workspace_session_items(
+                 display_name=user_name_map.get(s.user_id),
+             ),
+             last_active_at=s.last_active_at,
+-            title=(content_by_session.get(s.id, "") or "")[:30] or None,
++            title=content_by_session.get(s.id),
+         )
+         for s in sessions
+     ]
+diff --git a/backend/app/modules/agent/tests/test_agent_sessions_include_ended.py b/backend/app/modules/agent/tests/test_agent_sessions_include_ended.py
+index 2a7f773f4..be5fa749a 100644
+--- a/backend/app/modules/agent/tests/test_agent_sessions_include_ended.py
++++ b/backend/app/modules/agent/tests/test_agent_sessions_include_ended.py
+@@ -549,3 +549,36 @@ async def test_include_ended_default_limit_bounds_query(client, db_session, tmp_
+     )
+     assert resp.status_code == 200
+     assert len(resp.json()) == 3
++
++
++# ---- 2026-10-28-change-detail-sessions-source-fix FR-04：附件标题剥离 --------
++
++
++async def test_title_strips_attachment_markers(client, db_session, tmp_path):
++    """附件开局 user_input → 标题剥附件标记取正文；纯附件回退附件 name。"""
++    owner, ws = await _seed_workspace(db_session, tmp_path)
++    att = uuid.uuid4()
++    _add_session(
++        db_session,
++        ws_id=ws.id,
++        owner=owner,
++        status="ended",
++        user_log=f"[附件:{att}|image|IMG_2038.png]\r\n\r\n移动端四个页面布局乱了",
++    )
++    _add_session(
++        db_session,
++        ws_id=ws.id,
++        owner=owner,
++        status="ended",
++        created_at=datetime.now(UTC) - timedelta(minutes=1),
++        user_log=f"[附件:{uuid.uuid4()}|file|需求文档.pdf]",
++    )
++    await db_session.commit()
++
++    resp = await client.get(
++        f"/api/workspaces/{ws.id}/agent-sessions?include_ended=true",
++        headers=_auth(_token(owner)),
++    )
++    assert resp.status_code == 200, resp.text
++    titles = sorted(str(item["title"]) for item in resp.json())
++    assert titles == ["移动端四个页面布局乱了", "需求文档.pdf"]
+diff --git a/backend/app/modules/change/router.py b/backend/app/modules/change/router.py
+index 18799c9fa..c152187a6 100644
+--- a/backend/app/modules/change/router.py
++++ b/backend/app/modules/change/router.py
+@@ -92,6 +92,7 @@ from app.modules.daemon.runtime.service import (
+     DaemonRuntimeOffline,
+ )
+ from app.modules.daemon.schema import AgentSessionListItem, ChangeSessionAuthor
++from app.modules.session_attachment.service import session_display_title
+ from app.modules.workspace.service import WorkspaceService
+ 
+ router = APIRouter(prefix="/workspaces/{workspace_id}", tags=["change"])
+@@ -803,9 +804,11 @@ async def _fetch_session_titles(
+     同源。窗口函数 ROW_NUMBER 分区取首条（P5 2026-08-24 会话审查，与 agent/
+     daemon router 同步）——拉全部 user_input 行 Python 取最早会随轮数线性放大。
+ 
+-    返回映射只含命中的会话（值已按前 30 字截断；空文本归一为 None）；未命中
+-    会话不出现在映射，调用方 ``get`` 默认 None，与旧实现
+-    ``(content or "")[:30] or None`` 语义一致。
++    返回映射只含命中的会话；未命中会话不出现在映射，调用方 ``get`` 默认 None。
++    2026-10-28-change-detail-sessions-source-fix FR-04：标题口径换共享 helper
++    ``session_display_title``——剥附件标记行（``[附件:id|kind|name]``）取首个
++    非空文本前 30 字，纯附件回退附件 name（附件开局会话不再显示 ``[附件:uuid``
++    前缀）；无标记文本逐字节同旧口径。与 agent/daemon router 三处同源。
+     """
+     if not session_ids:
+         return {}
+@@ -820,11 +823,12 @@ async def _fetch_session_titles(
+     title_subq = (
+         select(
+             AgentRun.agent_session_id.label("session_id"),
+-            # 2026-09-09 阿里云 slow.query 实测：摘要只取前 30 字（返回值 [:30]），
+-            # SQL 内 substr 截到 64 字符，免把单行均值 33KB 的 TOAST 全文解压拉回
+-            # （substr 双方言语符语义，64 > 30 保证派生零回归；与 agent/daemon
+-            # router 同款优化三处同步）。
+-            func.substr(AgentRunLog.content_redacted, 1, 64).label("content"),
++            # 2026-09-09 阿里云 slow.query 实测：摘要只取前 30 字，SQL 内 substr
++            # 截断免把单行均值 33KB 的 TOAST 全文解压拉回（substr 双方言语符语义）。
++            # 2026-10-28：64 → 512——附件标记行每条约 60 字符（最多 10 附件），
++            # 64 字内可能全是标记，剥离后无正文可选；512 仍远小于 TOAST 均值，
++            # 性能口径可接受（与 agent/daemon router 同步）。
++            func.substr(AgentRunLog.content_redacted, 1, 512).label("content"),
+             rn,
+         )
+         .join(AgentRunLog, AgentRunLog.run_id == AgentRun.id)
+@@ -839,7 +843,7 @@ async def _fetch_session_titles(
+             select(title_subq.c.session_id, title_subq.c.content).where(title_subq.c.rn == 1)
+         )
+     ).all()
+-    return {row.session_id: (row.content or "")[:30] or None for row in title_rows}
++    return {row.session_id: session_display_title(row.content) for row in title_rows}
+ 
+ 
+ @router.get(
+diff --git a/backend/app/modules/change/tests/test_change_sessions_cap.py b/backend/app/modules/change/tests/test_change_sessions_cap.py
+index 289d7b070..cb7a7a23b 100644
+--- a/backend/app/modules/change/tests/test_change_sessions_cap.py
++++ b/backend/app/modules/change/tests/test_change_sessions_cap.py
+@@ -127,3 +127,65 @@ async def test_change_sessions_capped_to_latest(
+         )
+     ]
+     assert [it["id"] for it in items] == expected_ids, "应返回 last_active_at 最新的 3 个会话"
++
++
++@pytest.mark.asyncio
++async def test_change_sessions_title_strips_attachment_markers(
++    client, db_session: AsyncSession, tmp_path: Path
++) -> None:
++    """2026-10-28-change-detail-sessions-source-fix FR-04：附件开局标题剥离。
++
++    首条 user_input 为附件标记行 + 正文 → 标题取正文前 30 字，不出现
++    ``[附件:`` 片段；纯附件会话回退首个附件 name。
++    """
++    from sqlalchemy import select
++
++    from app.modules.agent.model import AgentRun, AgentRunLog
++    from app.modules.auth.model import User
++
++    ws_id, change_id, token = await _seed(db_session, tmp_path)
++
++    async def _add_session(first_input: str) -> uuid.UUID:
++        sess = AgentSession(
++            id=uuid.uuid4(),
++            user_id=(await db_session.execute(select(User.id))).scalar_one(),
++            provider="claude",
++            status="active",
++            last_active_at=datetime.now(UTC),
++        )
++        run = AgentRun(
++            id=uuid.uuid4(),
++            agent_type="claude_code",
++            provider="claude",
++            status="completed",
++            agent_session_id=sess.id,
++            session_id=None,
++            started_at=datetime.now(UTC),
++        )
++        log = AgentRunLog(
++            id=uuid.uuid4(),
++            run_id=run.id,
++            timestamp=datetime.now(UTC),
++            channel="user_input",
++            content_redacted=first_input,
++        )
++        db_session.add_all(
++            [sess, run, log, ChangeSessionLink(change_id=change_id, session_id=sess.id)]
++        )
++        return sess.id
++
++    att = uuid.uuid4()
++    mixed_id = await _add_session(
++        f"[附件:{att}|image|IMG_2038.png]\r\n\r\n移动端四个页面布局乱了，帮我修一下"
++    )
++    pure_id = await _add_session(f"[附件:{uuid.uuid4()}|file|需求文档.pdf]")
++    await db_session.commit()
++
++    resp = await client.get(
++        f"/api/workspaces/{ws_id}/changes/{change_id}/sessions",
++        headers={"Authorization": f"Bearer {token}"},
++    )
++    assert resp.status_code == 200, resp.text
++    titles = {it["id"]: it["title"] for it in resp.json()}
++    assert titles[str(mixed_id)] == "移动端四个页面布局乱了，帮我修一下"
++    assert titles[str(pure_id)] == "需求文档.pdf"
+diff --git a/backend/app/modules/daemon/router/session_crud.py b/backend/app/modules/daemon/router/session_crud.py
+index acbdb8f46..366dca980 100644
+--- a/backend/app/modules/daemon/router/session_crud.py
++++ b/backend/app/modules/daemon/router/session_crud.py
+@@ -76,6 +76,7 @@ from app.modules.daemon.session.service.thinking_level import (
+     set_session_thinking_level as _set_thinking_level_svc,
+ )
+ from app.modules.daemon.session_events import SESSIONS_CHANGED_CHANNEL
++from app.modules.session_attachment.service import session_display_title
+ 
+ log = get_logger("app.modules.daemon.router")
+ 
+@@ -401,7 +402,7 @@ async def list_sessions(
+             title_subq = (
+                 sa_select(
+                     AgentRun.agent_session_id.label("session_id"),
+-                    sa_func.substr(AgentRunLog.content_redacted, 1, 64).label("content"),
++                    sa_func.substr(AgentRunLog.content_redacted, 1, 512).label("content"),
+                     rn,
+                 )
+                 .join(AgentRunLog, AgentRunLog.run_id == AgentRun.id)
+@@ -418,7 +419,12 @@ async def list_sessions(
+                     )
+                 )
+             ).all()
+-            healed = {row.session_id: (row.content or "") for row in title_rows}
++            # 回写截 64 字符对齐列宽（agent_sessions.title_fallback String(64)，
++            # 迁移 20261016100000 同宽）：substr 放宽到 512 后 healed 可能超宽，
++            # PG varchar(64) 直接报错使 GET 列表 500（评审 P1）。列存维持 64 源
++            # 语义（与迁移回填口径一致），显示剥离/回退由读侧 session_display_title
++            # 保证（超窗部分属声明边界：极端长附件 name 拿不全时前端回退 id 前 8 位）。
++            healed = {row.session_id: (row.content or "")[:64] for row in title_rows}
+             for sid in missing:
+                 fallback_map[sid] = healed.get(sid, "")
+             # 自愈回写（列或哨兵 ''）——之后该会话永不再触发收窄查询；
+@@ -438,10 +444,13 @@ async def list_sessions(
+             await session.commit()
+         session_titles: dict[uuid.UUID, str | None] = {item.id: item.title for item in items}
+         for r in reads:
+-            # title 优先；回退展示截 30 字（列存 64 源、消费口径与旧路径逐字节一致），
+-            # 哨兵 ''/None 均保持 title=None（与旧零输入语义一致）
+-            fb = (fallback_map.get(r.id) or "")[:30]
+-            r.title = session_titles.get(r.id) or (fb or None)
++            # title 优先；回退展示过 session_display_title（2026-10-28-change-detail-
++            # sessions-source-fix FR-04：剥附件标记取正文/纯附件回退 name，与
++            # change/agent router 三处同源）。存量列 64 源截断残骸被 helper 丢弃
++            # （极端无 name 可取时归 None，前端回退 id 前 8 位）；哨兵 ''/None
++            # 均保持 title=None（与旧零输入语义一致）。
++            fb = session_display_title(fallback_map.get(r.id))
++            r.title = session_titles.get(r.id) or fb
+     # 2026-10-27-sessions-total-and-status-filter FR-01/FR-04：分组状态计数
+     # （忽略状态维度的当前 scope 全量口径——chips「全部/在线/已结束/失败」
+     # 计数不随 limit 截短或当前状态档位漂移）。
+diff --git a/backend/app/modules/daemon/tests/test_sessions_list_filters.py b/backend/app/modules/daemon/tests/test_sessions_list_filters.py
+index bfae616c4..25040611c 100644
+--- a/backend/app/modules/daemon/tests/test_sessions_list_filters.py
++++ b/backend/app/modules/daemon/tests/test_sessions_list_filters.py
+@@ -1108,3 +1108,77 @@ class TestPpmItemFilter:
+         body = resp.json()
+         assert body["total"] == 1
+         assert [i["id"] for i in body["items"]] == [str(s_both.id)]
++
++
++# ---- 2026-10-28-change-detail-sessions-source-fix FR-04：读侧附件标记清洗 ----
++
++
++async def test_title_fallback_attachment_markers_cleaned_on_read(
++    client: AsyncClient, auth_headers: dict[str, str], db_session: AsyncSession
++) -> None:
++    """存量 title_fallback 列的附件标记串在读展示时过 session_display_title。
++
++    附件标记 + 正文 → 标题取正文；纯附件 → 回退附件 name——存量列零迁移，
++    三端点（change/agent/daemon）显示口径一致。
++    """
++    admin = await _get_admin(db_session)
++    att = uuid.uuid4()
++    mixed = await _make_session(db_session, admin.id, None, status="ended")
++    pure = await _make_session(db_session, admin.id, None, status="ended")
++    # 模拟迁移 20261016100000 旧口径回填的存量列值（64 源原样，未剥标记）
++    mixed.title_fallback = f"[附件:{att}|image|IMG_2038.png]\n移动端布局修复"
++    pure.title_fallback = f"[附件:{uuid.uuid4()}|image|IMG_2037.png]"
++    db_session.add_all([mixed, pure])
++    await db_session.commit()
++
++    resp = await client.get("/api/daemon/sessions", headers=auth_headers)
++    assert resp.status_code == 200, resp.text
++    by_id = {item["id"]: item.get("title") for item in resp.json()["items"]}
++    assert by_id[str(mixed.id)] == "移动端布局修复"
++    assert by_id[str(pure.id)] == "IMG_2037.png"
++
++
++async def test_title_fallback_selfheal_write_capped_to_column_width(
++    client: AsyncClient, auth_headers: dict[str, str], db_session: AsyncSession
++) -> None:
++    """评审 P1 防回归：自愈回写值必须截 64 对齐列宽 String(64)。
++
++    substr 窗口放宽 512 后 healed 原样回写会在 PG varchar(64) 报错（GET 列表
++    500）；SQLite 不限宽测不出异常，但写回值长度断言可在两方言下都抓回归。
++    """
++    from sqlalchemy import select as sa_select
++
++    admin = await _get_admin(db_session)
++    long_first_input = "这句话超过六十四个字符用于触发自愈回写宽度路径" + "补" * 50
++    assert len(long_first_input) > 64
++    sess = await _make_session(db_session, admin.id, None, status="ended")
++    sess.title_fallback = None  # 强制走自愈路径
++    from app.modules.agent.model import AgentRun, AgentRunLog
++
++    run = AgentRun(
++        id=uuid.uuid4(),
++        agent_type="claude_code",
++        provider="claude",
++        status="completed",
++        agent_session_id=sess.id,
++        started_at=datetime.now(UTC),
++    )
++    log = AgentRunLog(
++        id=uuid.uuid4(),
++        run_id=run.id,
++        timestamp=datetime.now(UTC),
++        channel="user_input",
++        content_redacted=long_first_input,
++    )
++    db_session.add_all([run, log])
++    await db_session.commit()
++
++    resp = await client.get("/api/daemon/sessions", headers=auth_headers)
++    assert resp.status_code == 200, resp.text
++
++    stored = (
++        await db_session.execute(
++            sa_select(AgentSession.title_fallback).where(AgentSession.id == sess.id)
++        )
++    ).scalar_one()
++    assert stored is not None and len(stored) <= 64
+diff --git a/backend/app/modules/platform_sync/router.py b/backend/app/modules/platform_sync/router.py
+index 611647e43..6565bdbdd 100644
+--- a/backend/app/modules/platform_sync/router.py
++++ b/backend/app/modules/platform_sync/router.py
+@@ -47,6 +47,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
+ 
+ from app.core.db import get_session
+ from app.modules.auth.model import User
++
++# 2026-10-28-knowledge-hits-cli-direct：CLI 直报接收端点的请求/响应 schema 复用
++# knowledge 模块（与 daemon 通道 POST /knowledge/hits/batch 完全同构）。knowledge
++# 模块对 platform_sync 无反向依赖，模块级 import 无环。
++from app.modules.knowledge.schema import HitsBatchIn, HitsBatchOut
+ from app.modules.platform_sync.auth import (
+     PlatformSyncAuthScope,
+     require_platform_sync,
+@@ -282,6 +287,43 @@ async def push_spec_sync(
+     )
+ 
+ 
++@router.post("/changes/-/hits-sync", response_model=HitsBatchOut)
++async def push_knowledge_hits_cli(
++    body: HitsBatchIn,
++    session: Annotated[AsyncSession, Depends(get_session)],
++    auth: _write_auth,
++) -> HitsBatchOut:
++    """POST 知识命中遥测 CLI 直报（2026-10-28-knowledge-hits-cli-direct FR-01/02）。
++
++    CLI 写完本地 ``.runtime/state/knowledge-hits.jsonl`` 后的增量直报主通道
++    （daemon 上行 / flush 按钮为兜底——行 sha256 幂等使多通道并存重报零重复，
++    承 2026-10-27-knowledge-hits-flush-button D-001 三通道并存裁决）。CLI 只持有
++    shpsync_ 同步令牌（workspace 编在令牌里、无显式 id 可传），故鉴权同
++    spec-sync（``require_platform_sync_write``，仅 shpsync_——四轨分轨铁律，
++    JWT/shk_live_ 凭据有效也 403）；workspace 从令牌派生，无归属 403
++    fail-closed。请求/响应 schema 与 ``POST /knowledge/hits/batch``（daemon
++    通道）完全同构，落库复用 ``HitsService.ingest_batch``——双通道行为零分叉、
++    USAGE_TYPES 聚合同源；``daemon_local_id`` 原样落库（CLI 传 ``cli-<user>``
++    形态与 daemon 实例 id 可区分，数据层留通道归属）。
++
++    路由顺序硬约束（R-06 同款）：本字面量 ``-`` 段路由必须注册在
++    ``/changes/{name}/...`` 参数路由之前——留在字面量端点块内，勿挪文件尾。
++    """
++    from app.modules.knowledge.hits import HitsService  # service 层懒导入防环惯例
++
++    _user, scope = auth
++    if scope.workspace_id is None:
++        # 防御：require_platform_sync_write 的 shpsync_ 通道恒派生 workspace；到达此
++        # 分支即凭据形态异常，403 关闭通道（fail-closed，对齐 spec-sync 同款分支）。
++        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="缺少工作区归属")
++    service = HitsService(session)
++    return await service.ingest_batch(
++        scope.workspace_id,
++        body.lines,
++        daemon_local_id=body.daemon_local_id,
++    )
++
++
+ @router.get("/changes/-/spec-bundle")
+ async def get_spec_bundle(
+     request: Request,
+diff --git a/backend/app/modules/platform_sync/tests/test_hits_cli_direct.py b/backend/app/modules/platform_sync/tests/test_hits_cli_direct.py
+new file mode 100644
+index 000000000..5c9ed54d9
+--- /dev/null
++++ b/backend/app/modules/platform_sync/tests/test_hits_cli_direct.py
+@@ -0,0 +1,129 @@
++"""POST /changes/-/hits-sync 知识遥测 CLI 直报端点测试（2026-10-28-knowledge-hits-cli-direct）。
++
++覆盖：鉴权矩阵（无凭据 401 / shk_live_ 403 / JWT 403 / shpsync_ 200——四轨分轨
++铁律）、行落令牌派生 workspace + daemon_local_id 通道标识、重复行 duplicates 幂等
++与坏行 skipped_bad 宽容计数（与既有 ingest 语义同源）、令牌无归属 403
++fail-closed（dependency_overrides 注入无归属 scope——防御分支正常流量不可达）。
++fixture 复用本 conftest 的 shpsync_headers（建 workspace + 签发 shpsync_ token）。
++"""
++
++from __future__ import annotations
++
++from typing import Any
++
++import pytest
++from httpx import AsyncClient
++from sqlalchemy import select
++
++from app.modules.knowledge.hits import KnowledgeHit
++
++LINE_1 = '{"type":"inject","change":"2026-10-28-demo","matchedFiles":["fr/backend.md#条目一"],"at":"2026-10-28T12:00:00Z"}'
++LINE_2 = '{"type":"fr-inject","change":"2026-10-28-demo","matchedFiles":["decisions/backend.md#D-001@v1"],"at":"2026-10-28T12:01:00Z"}'
++
++
++async def _hit_rows(db_session: Any, workspace_id: Any) -> list[KnowledgeHit]:
++    res = await db_session.execute(
++        select(KnowledgeHit).where(KnowledgeHit.workspace_id == workspace_id)
++    )
++    return list(res.scalars().all())
++
++
++async def test_cli_push_lands_in_token_workspace(
++    client: AsyncClient, db_session: Any, shpsync_headers: tuple[Any, dict[str, str]]
++) -> None:
++    """shpsync_ 直报：行落令牌派生 workspace，daemon_local_id 通道标识原样落库。"""
++    ws_id, headers = shpsync_headers
++    resp = await client.post(
++        "/api/changes/-/hits-sync",
++        json={"lines": [LINE_1, LINE_2], "daemon_local_id": "cli-alice"},
++        headers=headers,
++    )
++    assert resp.status_code == 200, resp.text
++    body = resp.json()
++    assert body == {"ingested": 2, "skipped_bad": 0, "duplicates": 0}
++
++    rows = await _hit_rows(db_session, ws_id)
++    assert len(rows) == 2
++    # 通道标识与行内容（matched_anchors 原样数组、type、change_name）。
++    assert all(r.daemon_local_id == "cli-alice" for r in rows)
++    by_change = {r.change_name: r for r in rows}
++    assert set(by_change) == {"2026-10-28-demo"}
++    inject = next(r for r in rows if r.type == "inject")
++    assert inject.matched_anchors == ["fr/backend.md#条目一"]
++
++
++async def test_cli_push_no_auth_401(client: AsyncClient) -> None:
++    """无凭据 401（鉴权矩阵）。"""
++    resp = await client.post("/api/changes/-/hits-sync", json={"lines": [LINE_1]})
++    assert resp.status_code == 401
++
++
++async def test_cli_push_apikey_403(client: AsyncClient, apikey_headers: dict[str, str]) -> None:
++    """shk_live_ 凭据有效也 403——写通道仅 shpsync_（四轨分轨，quicklog-entries 同款）。"""
++    resp = await client.post(
++        "/api/changes/-/hits-sync",
++        json={"lines": [LINE_1]},
++        headers=apikey_headers,
++    )
++    assert resp.status_code == 403
++
++
++async def test_cli_push_jwt_403(client: AsyncClient, auth_headers: dict[str, str]) -> None:
++    """JWT 凭据有效也 403——CLI 直报端点不混开用户轨（四轨分轨）。"""
++    resp = await client.post(
++        "/api/changes/-/hits-sync",
++        json={"lines": [LINE_1]},
++        headers=auth_headers,
++    )
++    assert resp.status_code == 403
++
++
++async def test_cli_push_duplicate_and_bad_lines(
++    client: AsyncClient, db_session: Any, shpsync_headers: tuple[Any, dict[str, str]]
++) -> None:
++    """重复行 duplicates 幂等 + 坏行 skipped_bad 宽容——与既有 ingest 语义同源（FR-03）。
++
++    同批行重报零新增入库（行 sha256 幂等）；非 JSON 坏行跳过计数不炸批。
++    """
++    ws_id, headers = shpsync_headers
++    first = await client.post(
++        "/api/changes/-/hits-sync",
++        json={"lines": [LINE_1, LINE_2]},
++        headers=headers,
++    )
++    assert first.json()["ingested"] == 2
++
++    second = await client.post(
++        "/api/changes/-/hits-sync",
++        json={"lines": [LINE_1, LINE_2, "not-json{{{"]},
++        headers=headers,
++    )
++    assert second.status_code == 200
++    assert second.json() == {"ingested": 0, "skipped_bad": 1, "duplicates": 2}
++
++    rows = await _hit_rows(db_session, ws_id)
++    assert len(rows) == 2  # 重报零新增（FR-03 幂等）
++
++
++async def test_cli_push_no_workspace_scope_403(
++    client: AsyncClient, db_session: Any, shpsync_headers: tuple[Any, dict[str, str]]
++) -> None:
++    """令牌无工作区归属 → 403 fail-closed（防御分支；dependency_overrides 注入）。"""
++    from fastapi import HTTPException
++
++    from app.modules.knowledge.schema import HitsBatchIn as KnowledgeHitsBatchIn
++    from app.modules.platform_sync.auth import PlatformSyncAuthScope
++    from app.modules.platform_sync.router import push_knowledge_hits_cli
++
++    _ws_id, _headers = shpsync_headers  # 复用 fixture 建用户（scope 本身被覆写）
++    from app.modules.auth.model import User
++
++    user = (await db_session.execute(select(User).limit(1))).scalars().first()
++    scope = PlatformSyncAuthScope(workspace_id=None)
++    with pytest.raises(HTTPException) as exc_info:
++        await push_knowledge_hits_cli(
++            KnowledgeHitsBatchIn(lines=[LINE_1], daemon_local_id=None),
++            db_session,
++            (user, scope),
++        )
++    assert exc_info.value.status_code == 403
+diff --git a/backend/app/modules/session_attachment/service.py b/backend/app/modules/session_attachment/service.py
+index 9068250c4..cbe4a9543 100644
+--- a/backend/app/modules/session_attachment/service.py
++++ b/backend/app/modules/session_attachment/service.py
+@@ -10,6 +10,7 @@
+ from __future__ import annotations
+ 
+ import io
++import re
+ import uuid
+ from pathlib import PurePosixPath, PureWindowsPath
+ 
+@@ -145,6 +146,59 @@ def attachment_marker_line(row: SessionAttachment) -> str:
+     return f"[附件:{row.id}|{row.kind}|{row.name}]"
+ 
+ 
++# ── 会话展示标题剥离（2026-10-28-change-detail-sessions-source-fix）─────────
++# 完整标记行（与 attachment_marker_line 同格式权威）：uuid 前缀口径对齐
++# daemon/session/service/auto_resume.py（宁可多拦：任何 [附件:<uuid36>| 前缀行）。
++_ATTACHMENT_MARKER_LINE_RE = re.compile(
++    r"^\[附件:[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-"
++    r"[0-9a-fA-F]{12}\|"
++)
++# name 段贪婪到行尾 ]（name 可含 |，文件名合法字符）；仅完整标记行可提取。
++_ATTACHMENT_MARKER_NAME_RE = re.compile(
++    r"^\[附件:[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-"
++    r"[0-9a-fA-F]{12}\|[^|]*\|(.+)\]$"
++)
++
++
++def session_display_title(content: str | None) -> str | None:
++    """首条 user_input 原文 → 会话展示标题（change/agent/daemon 三端点同源消费）。
++
++    - 无任何附件标记行：``content[:30]``（与旧口径逐字节一致，零回归——含换行
++      原样保留，不做 strip）；
++    - 含标记行：剥全部标记行后取首个非空文本行（strip 后）前 30 字；以
++      ``[附件:`` 开头但不完整的行是 substr 截断残骸，同样丢弃；
++    - 纯附件（剥离后无剩余文本）：回退首个附件的 name 段（如 IMG_2038.png）；
++    - 空文本 / 全部丢弃：None（调用方回退既有 id 前 8 位展示）。
++    """
++    if not content:
++        return None
++    has_marker = False
++    first_attachment_name: str | None = None
++    text_line: str | None = None
++    for line in content.splitlines():
++        stripped = line.strip()
++        if not stripped:
++            continue
++        if _ATTACHMENT_MARKER_LINE_RE.match(stripped):
++            has_marker = True
++            if first_attachment_name is None:
++                name_match = _ATTACHMENT_MARKER_NAME_RE.match(stripped)
++                if name_match:
++                    first_attachment_name = name_match.group(1)
++            continue
++        if stripped.startswith("[附件:"):
++            # 截断残骸（substr 窗口内 uuid/闭合 ] 未写全）——无信息量，丢弃。
++            has_marker = True
++            continue
++        if text_line is None:
++            text_line = stripped
++    if not has_marker:
++        return content[:30] or None
++    if text_line is not None:
++        return text_line[:30]
++    return (first_attachment_name or "")[:30] or None
++
++
+ async def assemble_inject_attachments(
+     rows: list[SessionAttachment],
+     *,
+diff --git a/backend/app/modules/session_attachment/tests/test_capability.py b/backend/app/modules/session_attachment/tests/test_capability.py
+index d6e707de4..2c57b23b4 100644
+--- a/backend/app/modules/session_attachment/tests/test_capability.py
++++ b/backend/app/modules/session_attachment/tests/test_capability.py
+@@ -116,3 +116,50 @@ async def test_assemble_inline_downgrade_and_pullback() -> None:
+ def test_marker_line_format() -> None:
+     row = _row()
+     assert attachment_marker_line(row) == f"[附件:{row.id}|image|a.png]"
++
++
++def test_session_display_title_strips_attachment_markers() -> None:
++    """2026-10-28-change-detail-sessions-source-fix FR-04：标题剥离附件标记。
++
++    混合（附件标记 + 正文）→ 首个非空文本行前 30 字；截断残骸行同样丢弃。
++    """
++    from app.modules.session_attachment.service import session_display_title
++
++    att1 = uuid.uuid4()
++    att2 = uuid.uuid4()
++    content = (
++        f"[附件:{att1}|image|IMG_2038.png]\r\n"
++        f"[附件:{att2}|image|IMG_2037.png]\r\n"
++        "\r\n移动端四个页面布局乱了，帮我修一下"
++    )
++    assert session_display_title(content) == "移动端四个页面布局乱了，帮我修一下"
++
++    # 截断残骸（uuid 未写全）不进标题
++    assert session_display_title("[附件:02d8fdc9-023b-4e31-a787-6\n正文在这里") == "正文在这里"
++
++
++def test_session_display_title_pure_attachment_falls_back_to_name() -> None:
++    """FR-04：纯附件消息回退首个附件 name 段。"""
++    from app.modules.session_attachment.service import session_display_title
++
++    att = uuid.uuid4()
++    assert session_display_title(f"[附件:{att}|image|IMG_2038.png]") == "IMG_2038.png"
++    # 多附件取首个；name 含 | 时贪婪取到行尾 ]
++    a1, a2 = uuid.uuid4(), uuid.uuid4()
++    content = f"[附件:{a1}|file|报告|v2.pdf]\n[附件:{a2}|image|b.png]"
++    assert session_display_title(content) == "报告|v2.pdf"
++
++
++def test_session_display_title_plain_text_zero_regression() -> None:
++    """FR-04：无附件标记的纯文本与旧口径逐字节一致（不 strip、含换行原样）。"""
++    from app.modules.session_attachment.service import session_display_title
++
++    plain = "普通会话首条消息"
++    assert session_display_title(plain) == plain
++    # 多行正文：整串前 30 字（含换行），与旧实现 (content or "")[:30] 逐字节一致
++    multiline = "第一行\n第二行"
++    assert session_display_title(multiline) == multiline[:30]
++    # 前导空白保留（不 strip）；空文本归一 None
++    assert session_display_title("  缩进开头") == "  缩进开头"
++    assert session_display_title("") is None
++    assert session_display_title(None) is None
+diff --git a/backend/openapi.json b/backend/openapi.json
+index f611947a7..d1bfd9f59 100644
+--- a/backend/openapi.json
++++ b/backend/openapi.json
+@@ -35975,6 +35975,49 @@
+         }
+       }
+     },
++    "/api/changes/-/hits-sync": {
++      "post": {
++        "tags": [
++          "platform-sync",
++          "platform-sync"
++        ],
++        "summary": "Push Knowledge Hits Cli",
++        "description": "POST 知识命中遥测 CLI 直报（2026-10-28-knowledge-hits-cli-direct FR-01/02）。\n\nCLI 写完本地 ``.runtime/state/knowledge-hits.jsonl`` 后的增量直报主通道\n（daemon 上行 / flush 按钮为兜底——行 sha256 幂等使多通道并存重报零重复，\n承 2026-10-27-knowledge-hits-flush-button D-001 三通道并存裁决）。CLI 只持有\nshpsync_ 同步令牌（workspace 编在令牌里、无显式 id 可传），故鉴权同\nspec-sync（``require_platform_sync_write``，仅 shpsync_——四轨分轨铁律，\nJWT/shk_live_ 凭据有效也 403）；workspace 从令牌派生，无归属 403\nfail-closed。请求/响应 schema 与 ``POST /knowledge/hits/batch``（daemon\n通道）完全同构，落库复用 ``HitsService.ingest_batch``——双通道行为零分叉、\nUSAGE_TYPES 聚合同源；``daemon_local_id`` 原样落库（CLI 传 ``cli-<user>``\n形态与 daemon 实例 id 可区分，数据层留通道归属）。\n\n路由顺序硬约束（R-06 同款）：本字面量 ``-`` 段路由必须注册在\n``/changes/{name}/...`` 参数路由之前——留在字面量端点块内，勿挪文件尾。",
++        "operationId": "push_knowledge_hits_cli_api_changes___hits_sync_post",
++        "requestBody": {
++          "content": {
++            "application/json": {
++              "schema": {
++                "$ref": "#/components/schemas/HitsBatchIn"
++              }
++            }
++          },
++          "required": true
++        },
++        "responses": {
++          "200": {
++            "description": "Successful Response",
++            "content": {
++              "application/json": {
++                "schema": {
++                  "$ref": "#/components/schemas/HitsBatchOut"
++                }
++              }
++            }
++          },
++          "422": {
++            "description": "Validation Error",
++            "content": {
++              "application/json": {
++                "schema": {
++                  "$ref": "#/components/schemas/HTTPValidationError"
++                }
++              }
++            }
++          }
++        }
++      }
++    },
+     "/api/changes/-/spec-bundle": {
+       "get": {
+         "tags": [
+diff --git a/frontend/src/app/(dashboard)/workspaces/[id]/changes/[cid]/__tests__/page-back-to-list.test.tsx b/frontend/src/app/(dashboard)/workspaces/[id]/changes/[cid]/__tests__/page-back-to-list.test.tsx
+index 184db8212..d7d4f25d1 100644
+--- a/frontend/src/app/(dashboard)/workspaces/[id]/changes/[cid]/__tests__/page-back-to-list.test.tsx
++++ b/frontend/src/app/(dashboard)/workspaces/[id]/changes/[cid]/__tests__/page-back-to-list.test.tsx
+@@ -44,7 +44,7 @@ vi.mock("next/link", () => ({
+ 
+ const mocks = vi.hoisted(() => ({
+   getChange: vi.fn(),
+-  listWorkspaceAgentSessions: vi.fn(),
++  listChangeSessions: vi.fn(),
+   listQuicklogEntries: vi.fn(),
+   deleteChange: vi.fn(),
+ }));
+@@ -61,7 +61,7 @@ vi.mock("@/lib/changes", () => ({
+ }));
+ 
+ vi.mock("@/lib/daemon", () => ({
+-  listWorkspaceAgentSessions: mocks.listWorkspaceAgentSessions,
++  listChangeSessions: mocks.listChangeSessions,
+ }));
+ 
+ vi.mock("@/lib/quicklog", () => ({
+@@ -131,7 +131,7 @@ describe("详情页返回列表入口（2026-10-16-change-center-back-keeps-list
+   beforeEach(() => {
+     navMocks.searchParams = new URLSearchParams();
+     mocks.getChange.mockResolvedValue(makeChange());
+-    mocks.listWorkspaceAgentSessions.mockResolvedValue([]);
++    mocks.listChangeSessions.mockResolvedValue([]);
+     mocks.listQuicklogEntries.mockResolvedValue({ items: [], total: 0 });
+   });
+   afterEach(() => {
+@@ -166,7 +166,7 @@ describe("详情页删除成功后返回列表（2026-10-16-change-center-delete
+   beforeEach(() => {
+     navMocks.searchParams = new URLSearchParams();
+     mocks.getChange.mockResolvedValue(makeChange());
+-    mocks.listWorkspaceAgentSessions.mockResolvedValue([]);
++    mocks.listChangeSessions.mockResolvedValue([]);
+     mocks.listQuicklogEntries.mockResolvedValue({ items: [], total: 0 });
+     mocks.deleteChange.mockResolvedValue({});
+     accessMock.value = { userId: null, isPlatformAdmin: true, workspaceRole: null };
+diff --git a/frontend/src/app/(dashboard)/workspaces/[id]/changes/[cid]/__tests__/page-last-signal.test.tsx b/frontend/src/app/(dashboard)/workspaces/[id]/changes/[cid]/__tests__/page-last-signal.test.tsx
+index 8b4ada151..f6ae265bf 100644
+--- a/frontend/src/app/(dashboard)/workspaces/[id]/changes/[cid]/__tests__/page-last-signal.test.tsx
++++ b/frontend/src/app/(dashboard)/workspaces/[id]/changes/[cid]/__tests__/page-last-signal.test.tsx
+@@ -45,7 +45,7 @@ const mocks = vi.hoisted(() => ({
+   getChange: vi.fn(),
+   getAgentStatus: vi.fn(),
+   submitStageReview: vi.fn(),
+-  listWorkspaceAgentSessions: vi.fn(),
++  listChangeSessions: vi.fn(),
+   listQuicklogEntries: vi.fn(),
+ }));
+ 
+@@ -59,7 +59,7 @@ vi.mock("@/lib/changes", () => ({
+ }));
+ 
+ vi.mock("@/lib/daemon", () => ({
+-  listWorkspaceAgentSessions: mocks.listWorkspaceAgentSessions,
++  listChangeSessions: mocks.listChangeSessions,
+ }));
+ 
+ vi.mock("@/lib/quicklog", () => ({
+@@ -135,7 +135,7 @@ function setup(opts: { change?: ChangeRead } = {}) {
+     config_enabled: false,
+     last_dispatch: null,
+   } as unknown as DispatchResponse);
+-  mocks.listWorkspaceAgentSessions.mockResolvedValue([makeSession()]);
++  mocks.listChangeSessions.mockResolvedValue([makeSession()]);
+   mocks.listQuicklogEntries.mockResolvedValue({ items: [], total: 0 });
+ }
+ 
+diff --git a/frontend/src/app/(dashboard)/workspaces/[id]/changes/[cid]/__tests__/page-rename-title.test.tsx b/frontend/src/app/(dashboard)/workspaces/[id]/changes/[cid]/__tests__/page-rename-title.test.tsx
+index 456870d76..a233a6b0e 100644
+--- a/frontend/src/app/(dashboard)/workspaces/[id]/changes/[cid]/__tests__/page-rename-title.test.tsx
++++ b/frontend/src/app/(dashboard)/workspaces/[id]/changes/[cid]/__tests__/page-rename-title.test.tsx
+@@ -44,7 +44,7 @@ vi.mock("next/link", () => ({
+ const mocks = vi.hoisted(() => ({
+   getChange: vi.fn(),
+   renameChangeTitle: vi.fn(),
+-  listWorkspaceAgentSessions: vi.fn(),
++  listChangeSessions: vi.fn(),
+   listQuicklogEntries: vi.fn(),
+   /** 权限三元组（useChangeDeleteAccess mock 返回值；用例内改写控制可见性）。 */
+   access: { userId: null as string | null, isPlatformAdmin: false, workspaceRole: null as string | null },
+@@ -62,7 +62,7 @@ vi.mock("@/lib/changes", () => ({
+ }));
+ 
+ vi.mock("@/lib/daemon", () => ({
+-  listWorkspaceAgentSessions: mocks.listWorkspaceAgentSessions,
++  listChangeSessions: mocks.listChangeSessions,
+ }));
+ 
+ vi.mock("@/lib/quicklog", () => ({
+@@ -125,7 +125,7 @@ describe("详情页改名入口（2026-10-16-change-title-condense-backfill FR-0
+   beforeEach(() => {
+     navMocks.searchParams = new URLSearchParams();
+     mocks.getChange.mockResolvedValue(makeChange());
+-    mocks.listWorkspaceAgentSessions.mockResolvedValue([]);
++    mocks.listChangeSessions.mockResolvedValue([]);
+     mocks.listQuicklogEntries.mockResolvedValue({ items: [], total: 0 });
+     mocks.access = { userId: null, isPlatformAdmin: false, workspaceRole: null };
+   });
+diff --git a/frontend/src/app/(dashboard)/workspaces/[id]/changes/[cid]/__tests__/page-restore-assets.test.tsx b/frontend/src/app/(dashboard)/workspaces/[id]/changes/[cid]/__tests__/page-restore-assets.test.tsx
+index 416e866a9..1cbc06b6f 100644
+--- a/frontend/src/app/(dashboard)/workspaces/[id]/changes/[cid]/__tests__/page-restore-assets.test.tsx
++++ b/frontend/src/app/(dashboard)/workspaces/[id]/changes/[cid]/__tests__/page-restore-assets.test.tsx
+@@ -20,7 +20,7 @@ import type { ChangeRead } from "@/lib/changes";
+ 
+ const mocks = vi.hoisted(() => ({
+   getChange: vi.fn(),
+-  listWorkspaceAgentSessions: vi.fn(),
++  listChangeSessions: vi.fn(),
+   listQuicklogEntries: vi.fn(),
+ }));
+ 
+@@ -49,7 +49,7 @@ vi.mock("@/lib/changes", () => ({
+ }));
+ 
+ vi.mock("@/lib/daemon", () => ({
+-  listWorkspaceAgentSessions: mocks.listWorkspaceAgentSessions,
++  listChangeSessions: mocks.listChangeSessions,
+ }));
+ 
+ vi.mock("@/lib/quicklog", () => ({
+@@ -121,7 +121,7 @@ async function renderPage() {
+ beforeEach(() => {
+   vi.clearAllMocks();
+   navMocks.searchParams = new URLSearchParams();
+-  mocks.listWorkspaceAgentSessions.mockResolvedValue([]);
++  mocks.listChangeSessions.mockResolvedValue([]);
+   mocks.listQuicklogEntries.mockResolvedValue({ items: [], total: 0 });
+ });
+ 
+diff --git a/frontend/src/app/(dashboard)/workspaces/[id]/changes/[cid]/__tests__/page-sessions-source.test.tsx b/frontend/src/app/(dashboard)/workspaces/[id]/changes/[cid]/__tests__/page-sessions-source.test.tsx
+new file mode 100644
+index 000000000..e75dc5360
+--- /dev/null
++++ b/frontend/src/app/(dashboard)/workspaces/[id]/changes/[cid]/__tests__/page-sessions-source.test.tsx
+@@ -0,0 +1,161 @@
++/**
++ * 2026-10-28-change-detail-sessions-source-fix FR-01/FR-02：详情页会话数据源。
++ *
++ * 页面层辅助会话数据源必须是 listChangeSessions(workspaceId, changeId)
++ * （GET /changes/{id}/sessions，change_session_links 真实关联），不再取
++ * listWorkspaceAgentSessions（工作区全量近似）——概览「会话」区与审批卡
++ * 「绑定会话」都消费这一关联源（与后端 _notify_bound_session 注入目标同源）。
++ *
++ * mock 范式照 page-last-signal.test.tsx：lib mock + 只读卡片 stub。
++ */
++import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
++import { cleanup, render, screen, waitFor } from "@testing-library/react";
++import { afterEach, describe, expect, it, vi } from "vitest";
++
++import ChangeDetailPage from "@/app/(dashboard)/workspaces/[id]/changes/[cid]/page";
++
++const navMocks = vi.hoisted(() => ({
++  push: vi.fn(),
++  replace: vi.fn(),
++  searchParams: new URLSearchParams(),
++}));
++vi.mock("next/navigation", () => ({
++  useRouter: () => ({ push: navMocks.push, replace: navMocks.replace }),
++  useSearchParams: () => navMocks.searchParams,
++}));
++
++import type { ChangeRead, DispatchResponse } from "@/lib/changes";
++import type { AgentSessionListItem } from "@/lib/daemon";
++
++const mocks = vi.hoisted(() => ({
++  getChange: vi.fn(),
++  getAgentStatus: vi.fn(),
++  submitStageReview: vi.fn(),
++  listChangeSessions: vi.fn(),
++  listQuicklogEntries: vi.fn(),
++}));
++
++vi.mock("@/lib/changes", () => ({
++  getChange: mocks.getChange,
++  getAgentStatus: mocks.getAgentStatus,
++  submitStageReview: mocks.submitStageReview,
++  getChangeTimeline: vi.fn().mockRejectedValue(new Error("no-timeline-in-page-tests")),
++}));
++
++vi.mock("@/lib/daemon", () => ({
++  listChangeSessions: mocks.listChangeSessions,
++}));
++
++vi.mock("@/lib/quicklog", () => ({
++  listQuicklogEntries: mocks.listQuicklogEntries,
++}));
++
++vi.mock("@/components/changes/detail/change-agent-run-log", () => ({
++  ChangeAgentRunLog: () => <div data-testid="change-agent-run-log" />,
++}));
++vi.mock("@/components/changes/detail/change-files-card", () => ({
++  ChangeFilesCard: () => <div data-testid="change-files-card" />,
++}));
++vi.mock("@/components/changes/detail/change-sessions-card", () => ({
++  ChangeSessionsCard: () => <div data-testid="change-sessions-card" />,
++}));
++vi.mock("@/components/changes/detail/change-step-timeline", () => ({
++  ChangeStepTimeline: () => <div data-testid="change-step-timeline" />,
++}));
++
++function makeChange(): ChangeRead {
++  return {
++    id: "ch-1",
++    change_key: "2026-10-28-test-change",
++    title: "测试变更",
++    current_stage: "execute",
++    pending_review: "proposal_review",
++    status: "in_progress",
++    location: "active",
++    change_type: null,
++    is_thin: false,
++    affected_components: ["frontend"],
++    updated_at: "2026-10-28T10:00:00Z",
++    stages: {},
++    steps: null,
++  } as unknown as ChangeRead;
++}
++
++function makeSession(over: Partial<AgentSessionListItem> = {}): AgentSessionListItem {
++  return {
++    id: "sess-bound0001",
++    provider: "claude",
++    status: "active",
++    turn_count: 3,
++    mode: null,
++    author: { user_id: "u1", display_name: "小明" },
++    last_active_at: "2026-10-28T09:00:00Z",
++    title: "真实关联会话一号",
++    ...over,
++  };
++}
++
++async function renderPage() {
++  const client = new QueryClient({
++    defaultOptions: {
++      queries: { retry: false, gcTime: 0, refetchInterval: false },
++      mutations: { retry: false },
++    },
++  });
++  render(
++    <QueryClientProvider client={client}>
++      <ChangeDetailPage params={{ id: "ws-1", cid: "ch-1" }} />
++    </QueryClientProvider>,
++  );
++  await waitFor(() => expect(screen.getByText(/测试变更/)).toBeInTheDocument());
++}
++
++describe("详情页会话数据源（2026-10-28-change-detail-sessions-source-fix FR-01/02）", () => {
++  afterEach(() => {
++    vi.clearAllMocks();
++    cleanup();
++  });
++
++  it("数据源调 listChangeSessions(workspaceId, changeId)，概览会话区显示关联会话", async () => {
++    mocks.getChange.mockResolvedValue(makeChange());
++    mocks.getAgentStatus.mockResolvedValue({
++      change_id: "ch-1",
++      current_stage: "execute",
++      has_active_run: false,
++      config_enabled: false,
++      last_dispatch: null,
++    } as unknown as DispatchResponse);
++    mocks.listChangeSessions.mockResolvedValue([makeSession()]);
++    mocks.listQuicklogEntries.mockResolvedValue({ items: [], total: 0 });
++
++    await renderPage();
++
++    // FR-01：以 (workspaceId, changeId) 调变更关联端点
++    expect(mocks.listChangeSessions).toHaveBeenCalledWith("ws-1", "ch-1");
++    // 概览「会话」区显示注入的关联会话标题（slice 前 3 条之一；审批卡
++    // 「绑定会话」也展示同一会话 → 多处出现，getAllByText 至少命中）。
++    await waitFor(() =>
++      expect(screen.getAllByText("真实关联会话一号").length).toBeGreaterThanOrEqual(1),
++    );
++    // FR-02：审批卡「绑定会话」展示同一关联源首条
++    expect(screen.getByText(/绑定会话（审批结果将通知此会话）/)).toBeInTheDocument();
++  });
++
++  it("变更零关联会话 → 概览显示「暂无会话」空态，不回退工作区列表", async () => {
++    mocks.getChange.mockResolvedValue(makeChange());
++    mocks.getAgentStatus.mockResolvedValue({
++      change_id: "ch-1",
++      current_stage: "execute",
++      has_active_run: false,
++      config_enabled: false,
++      last_dispatch: null,
++    } as unknown as DispatchResponse);
++    mocks.listChangeSessions.mockResolvedValue([]);
++    mocks.listQuicklogEntries.mockResolvedValue({ items: [], total: 0 });
++
++    await renderPage();
++
++    expect(mocks.listChangeSessions).toHaveBeenCalledWith("ws-1", "ch-1");
++    await waitFor(() => expect(screen.getByText("暂无会话")).toBeInTheDocument());
++  });
++});
+diff --git a/frontend/src/app/(dashboard)/workspaces/[id]/changes/[cid]/__tests__/page-tabs.test.tsx b/frontend/src/app/(dashboard)/workspaces/[id]/changes/[cid]/__tests__/page-tabs.test.tsx
+index a594f504f..a4b415a88 100644
+--- a/frontend/src/app/(dashboard)/workspaces/[id]/changes/[cid]/__tests__/page-tabs.test.tsx
++++ b/frontend/src/app/(dashboard)/workspaces/[id]/changes/[cid]/__tests__/page-tabs.test.tsx
+@@ -10,7 +10,7 @@ import type { ChangeRead } from "@/lib/changes";
+ 
+ const mocks = vi.hoisted(() => ({
+   getChange: vi.fn(),
+-  listWorkspaceAgentSessions: vi.fn(),
++  listChangeSessions: vi.fn(),
+   listQuicklogEntries: vi.fn(),
+ }));
+ const navMocks = vi.hoisted(() => ({
+@@ -37,7 +37,7 @@ vi.mock("@/lib/changes", () => ({
+   getScopeAudit: vi.fn().mockRejectedValue(new Error("no-audit")),
+ }));
+ vi.mock("@/lib/daemon", () => ({
+-  listWorkspaceAgentSessions: mocks.listWorkspaceAgentSessions,
++  listChangeSessions: mocks.listChangeSessions,
+ }));
+ vi.mock("@/lib/quicklog", () => ({ listQuicklogEntries: mocks.listQuicklogEntries }));
+ 
+@@ -97,7 +97,7 @@ async function renderAt(search: string, change: ChangeRead) {
+ 
+ beforeEach(() => {
+   vi.clearAllMocks();
+-  mocks.listWorkspaceAgentSessions.mockResolvedValue([]);
++  mocks.listChangeSessions.mockResolvedValue([]);
+   mocks.listQuicklogEntries.mockResolvedValue({ items: [], total: 0 });
+ });
+ afterEach(cleanup);
+diff --git a/frontend/src/app/(dashboard)/workspaces/[id]/changes/[cid]/__tests__/page-team-toggle.test.tsx b/frontend/src/app/(dashboard)/workspaces/[id]/changes/[cid]/__tests__/page-team-toggle.test.tsx
+index 2ee16bfaf..7f241f88a 100644
+--- a/frontend/src/app/(dashboard)/workspaces/[id]/changes/[cid]/__tests__/page-team-toggle.test.tsx
++++ b/frontend/src/app/(dashboard)/workspaces/[id]/changes/[cid]/__tests__/page-team-toggle.test.tsx
+@@ -55,7 +55,7 @@ const mocks = vi.hoisted(() => ({
+   getChange: vi.fn(),
+   getAgentStatus: vi.fn(),
+   submitStageReview: vi.fn(),
+-  listWorkspaceAgentSessions: vi.fn(),
++  listChangeSessions: vi.fn(),
+   listQuicklogEntries: vi.fn(),
+ }));
+ 
+@@ -74,7 +74,7 @@ vi.mock("@/lib/changes", () => ({
+ }));
+ 
+ vi.mock("@/lib/daemon", () => ({
+-  listWorkspaceAgentSessions: mocks.listWorkspaceAgentSessions,
++  listChangeSessions: mocks.listChangeSessions,
+ }));
+ 
+ // task-10（FR-07）：关联快速任务卡 mock（默认空列表——卡片渲染「暂无关联快速任务」）
+@@ -186,7 +186,7 @@ function setup(opts: {
+     config_enabled: false,
+     last_dispatch: null,
+   } as unknown as DispatchResponse);
+-  mocks.listWorkspaceAgentSessions.mockResolvedValue([makeSession()]);
++  mocks.listChangeSessions.mockResolvedValue([makeSession()]);
+   // task-10：关联快速任务默认空
+   mocks.listQuicklogEntries.mockResolvedValue({ items: [], total: 0 });
+   mocks.submitStageReview.mockResolvedValue({
+diff --git a/frontend/src/app/(dashboard)/workspaces/[id]/changes/[cid]/page.tsx b/frontend/src/app/(dashboard)/workspaces/[id]/changes/[cid]/page.tsx
+index f31d4a268..98db8f561 100644
+--- a/frontend/src/app/(dashboard)/workspaces/[id]/changes/[cid]/page.tsx
++++ b/frontend/src/app/(dashboard)/workspaces/[id]/changes/[cid]/page.tsx
+@@ -63,7 +63,7 @@ import {
+ } from "@/lib/changes";
+ import { useNotify } from "@/lib/errors";
+ import {
+-  listWorkspaceAgentSessions,
++  listChangeSessions,
+   type AgentSessionListItem,
+ } from "@/lib/daemon";
+ 
+@@ -258,17 +258,18 @@ export default function ChangeDetailPage({ params }: Props) {
+     notified_session: boolean;
+     notify_error: string | null;
+   } | null>(null);
+-  /** 工作区最近活跃会话（近似口径；概览信息栏显示最近 3 条）。 */
++  /** 变更关联会话（change_session_links 真实关联；概览信息栏最近 3 条 + 绑定会话）。 */
+   const [sessions, setSessions] = useState<AgentSessionListItem[]>([]);
+ 
+-  // ── 辅助数据（绑定会话近似）：一次性加载，不随详情轮询 ──────────────────
++  // ── 辅助数据（变更关联会话）：一次性加载，不随详情轮询 ──────────────────
++  // 2026-10-28-change-detail-sessions-source-fix FR-01/FR-02：数据源从
++  // listWorkspaceAgentSessions（工作区全量近似）改为 listChangeSessions
++  // （GET /changes/{id}/sessions，与后端 _notify_bound_session 注入目标同源）。
+   useEffect(() => {
+     let cancelled = false;
+     setPageError(null);
+     const loadSide = async () => {
+-      const list = await listWorkspaceAgentSessions(workspaceId, {
+-        include_ended: true,
+-      }).catch(() => []);
++      const list = await listChangeSessions(workspaceId, changeId).catch(() => []);
+       if (cancelled) return;
+       setSessions(list ?? []);
+     };
+diff --git a/frontend/src/components/changes/detail/__tests__/change-overview-side.test.tsx b/frontend/src/components/changes/detail/__tests__/change-overview-side.test.tsx
+index 5999444c3..d5816742b 100644
+--- a/frontend/src/components/changes/detail/__tests__/change-overview-side.test.tsx
++++ b/frontend/src/components/changes/detail/__tests__/change-overview-side.test.tsx
+@@ -164,6 +164,36 @@ describe("ChangeOverviewSide", () => {
+     expect(screen.getByText("打开会话工作台 →")).toBeInTheDocument();
+   });
+ 
++  it("会话组：状态列显示中文标签（active→进行中 / ended→已结束，FR-03）", () => {
++    renderSide();
++    const sessionsSection = screen.getByText("会话").closest("div");
++    expect(sessionsSection).toHaveTextContent("进行中");
++    expect(sessionsSection).toHaveTextContent("已结束");
++    // 不再裸显英文枚举
++    expect(within(sessionsSection!).queryByText("active")).not.toBeInTheDocument();
++    expect(within(sessionsSection!).queryByText("ended")).not.toBeInTheDocument();
++  });
++
++  it("会话组：未知状态值回退显示原文（不误吞）", () => {
++    cleanup();
++    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
++    render(
++      <QueryClientProvider client={client}>
++        <ChangeOverviewSide
++          change={CHANGE as ChangeRead}
++          workspaceId="ws-1"
++          changeId="c-1"
++          archived={false}
++          sessions={[
++            { id: "sess-x1", title: "未知态会话", status: "hibernating" } as AgentSessionListItem,
++          ]}
++        />
++      </QueryClientProvider>,
++    );
++    const sessionsSection = screen.getByText("会话").closest("div");
++    expect(sessionsSection).toHaveTextContent("hibernating");
++  });
++
+   it("范围对账计数取信封 repos[].totals 合计（单一源）", async () => {
+     renderSide();
+     expect(await screen.findByText("计划内")).toBeInTheDocument();
+diff --git a/frontend/src/components/changes/detail/change-overview-panel.tsx b/frontend/src/components/changes/detail/change-overview-panel.tsx
+index acfb8d001..2fb166afc 100644
+--- a/frontend/src/components/changes/detail/change-overview-panel.tsx
++++ b/frontend/src/components/changes/detail/change-overview-panel.tsx
+@@ -88,7 +88,7 @@ export interface OverviewPanelProps {
+   recentRows: UnifiedRow[];
+   /** 任务进度（tasks[] 勾选比；与「过程」tab 的任务清单同源）。 */
+   taskSummary: { checked: number; total: number };
+-  /** 工作区最近会话（信息栏显示最近 3 条）。 */
++  /** 变更关联会话（listChangeSessions；信息栏显示最近 3 条）。 */
+   sessions: AgentSessionListItem[];
+   /** 待办卡透传（语义与分支全在 `ChangeStageActions` 内，本面板不做判断）。 */
+   boundSession: AgentSessionListItem | null;
+diff --git a/frontend/src/components/changes/detail/change-overview-side.tsx b/frontend/src/components/changes/detail/change-overview-side.tsx
+index d0e2835d5..faabd5872 100644
+--- a/frontend/src/components/changes/detail/change-overview-side.tsx
++++ b/frontend/src/components/changes/detail/change-overview-side.tsx
+@@ -38,6 +38,16 @@ interface Row {
+ 
+ const DASH = "—";
+ 
++// 会话状态中文标签（2026-10-28-change-detail-sessions-source-fix FR-03：状态列
++// 不裸显英文枚举；映射同 change-stage-actions.tsx / quicklog-sessions-card.tsx）。
++const SESSION_STATUS_LABELS: Record<string, string> = {
++  pending: "等待中",
++  active: "进行中",
++  reconnecting: "重连中",
++  ended: "已结束",
++  failed: "已失败",
++};
++
+ // 2026-10-18-change-list-type-filter：类型标签抽公共件（列表行/详情侧栏同源），
+ // 本文件改从公共组件导入（样式与映射随组件走，两处渲染口径恒一致）。
+ 
+@@ -71,7 +81,7 @@ export interface ChangeOverviewSideProps {
+   workspaceId: string;
+   changeId: string;
+   archived: boolean;
+-  /** 工作区最近会话（页面层已取；本栏显示最近 3 条）。 */
++  /** 变更关联会话（页面层经 listChangeSessions 已取；本栏显示最近 3 条）。 */
+   sessions: AgentSessionListItem[];
+ }
+ 
+@@ -201,7 +211,9 @@ export function ChangeOverviewSide({
+               >
+                 {s.title?.trim() || s.id.slice(0, 8)}
+               </Link>
+-              <span className="shrink-0 text-muted-foreground">{s.status}</span>
++              <span className="shrink-0 text-muted-foreground">
++                {SESSION_STATUS_LABELS[s.status] ?? s.status}
++              </span>
+             </div>
+           ))
+         )}
+diff --git a/frontend/src/components/changes/detail/change-stage-actions.tsx b/frontend/src/components/changes/detail/change-stage-actions.tsx
+index 446f81b64..d3c256e72 100644
+--- a/frontend/src/components/changes/detail/change-stage-actions.tsx
++++ b/frontend/src/components/changes/detail/change-stage-actions.tsx
+@@ -79,7 +79,7 @@ export type NotifyResult = {
+ 
+ export interface ChangeStageActionsProps {
+   change: ChangeRead;
+-  /** 绑定会话（change_session_links 最新；前端取工作区最近活跃会话近似展示，可空）。 */
++  /** 绑定会话（页面层取 listChangeSessions 首条＝links 最新活跃会话，与后端注入目标同源；可空）。 */
+   boundSession: AgentSessionListItem | null;
+   gateComment: string;
+   onGateCommentChange: (_v: string) => void;
+@@ -183,7 +183,7 @@ export function ChangeStageActions({
+         <p className="text-xs text-muted-foreground">{gatePanel.description}</p>
+       </div>
+ 
+-      {/* 绑定会话只读展示（change_session_links 最新；前端取工作区最近活跃会话近似） */}
++      {/* 绑定会话只读展示（listChangeSessions 首条＝links 最新活跃会话） */}
+       {boundSession ? (
+         <div className="rounded border bg-background px-3 py-2">
+           <p className="text-[11px] text-muted-foreground">
+diff --git a/frontend/src/lib/api-types.ts b/frontend/src/lib/api-types.ts
+index 966e00060..7f8a76e15 100644
+--- a/frontend/src/lib/api-types.ts
++++ b/frontend/src/lib/api-types.ts
+@@ -12335,6 +12335,40 @@ export interface paths {
+         patch?: never;
+         trace?: never;
+     };
++    "/api/changes/-/hits-sync": {
++        parameters: {
++            query?: never;
++            header?: never;
++            path?: never;
++            cookie?: never;
++        };
++        get?: never;
++        put?: never;
++        /**
++         * Push Knowledge Hits Cli
++         * @description POST 知识命中遥测 CLI 直报（2026-10-28-knowledge-hits-cli-direct FR-01/02）。
++         *
++         *     CLI 写完本地 ``.runtime/state/knowledge-hits.jsonl`` 后的增量直报主通道
++         *     （daemon 上行 / flush 按钮为兜底——行 sha256 幂等使多通道并存重报零重复，
++         *     承 2026-10-27-knowledge-hits-flush-button D-001 三通道并存裁决）。CLI 只持有
++         *     shpsync_ 同步令牌（workspace 编在令牌里、无显式 id 可传），故鉴权同
++         *     spec-sync（``require_platform_sync_write``，仅 shpsync_——四轨分轨铁律，
++         *     JWT/shk_live_ 凭据有效也 403）；workspace 从令牌派生，无归属 403
++         *     fail-closed。请求/响应 schema 与 ``POST /knowledge/hits/batch``（daemon
++         *     通道）完全同构，落库复用 ``HitsService.ingest_batch``——双通道行为零分叉、
++         *     USAGE_TYPES 聚合同源；``daemon_local_id`` 原样落库（CLI 传 ``cli-<user>``
++         *     形态与 daemon 实例 id 可区分，数据层留通道归属）。
++         *
++         *     路由顺序硬约束（R-06 同款）：本字面量 ``-`` 段路由必须注册在
++         *     ``/changes/{name}/...`` 参数路由之前——留在字面量端点块内，勿挪文件尾。
++         */
++        post: operations["push_knowledge_hits_cli_api_changes___hits_sync_post"];
++        delete?: never;
++        options?: never;
++        head?: never;
++        patch?: never;
++        trace?: never;
++    };
+     "/api/changes/-/spec-bundle": {
+         parameters: {
+             query?: never;
+@@ -52568,6 +52602,39 @@ export interface operations {
+             };
+         };
+     };
++    push_knowledge_hits_cli_api_changes___hits_sync_post: {
++        parameters: {
++            query?: never;
++            header?: never;
++            path?: never;
++            cookie?: never;
++        };
++        requestBody: {
++            content: {
++                "application/json": components["schemas"]["HitsBatchIn"];
++            };
++        };
++        responses: {
++            /** @description Successful Response */
++            200: {
++                headers: {
++                    [name: string]: unknown;
++                };
++                content: {
++                    "application/json": components["schemas"]["HitsBatchOut"];
++                };
++            };
++            /** @description Validation Error */
++            422: {
++                headers: {
++                    [name: string]: unknown;
++                };
++                content: {
++                    "application/json": components["schemas"]["HTTPValidationError"];
++                };
++            };
++        };
++    };
+     get_spec_bundle_api_changes___spec_bundle_get: {
+         parameters: {
+             query?: never;
+diff --git a/sillyhub-daemon/src/api-types.ts b/sillyhub-daemon/src/api-types.ts
+index 966e00060..7f8a76e15 100644
+--- a/sillyhub-daemon/src/api-types.ts
++++ b/sillyhub-daemon/src/api-types.ts
+@@ -12335,6 +12335,40 @@ export interface paths {
+         patch?: never;
+         trace?: never;
+     };
++    "/api/changes/-/hits-sync": {
++        parameters: {
++            query?: never;
++            header?: never;
++            path?: never;
++            cookie?: never;
++        };
++        get?: never;
++        put?: never;
++        /**
++         * Push Knowledge Hits Cli
++         * @description POST 知识命中遥测 CLI 直报（2026-10-28-knowledge-hits-cli-direct FR-01/02）。
++         *
++         *     CLI 写完本地 ``.runtime/state/knowledge-hits.jsonl`` 后的增量直报主通道
++         *     （daemon 上行 / flush 按钮为兜底——行 sha256 幂等使多通道并存重报零重复，
++         *     承 2026-10-27-knowledge-hits-flush-button D-001 三通道并存裁决）。CLI 只持有
++         *     shpsync_ 同步令牌（workspace 编在令牌里、无显式 id 可传），故鉴权同
++         *     spec-sync（``require_platform_sync_write``，仅 shpsync_——四轨分轨铁律，
++         *     JWT/shk_live_ 凭据有效也 403）；workspace 从令牌派生，无归属 403
++         *     fail-closed。请求/响应 schema 与 ``POST /knowledge/hits/batch``（daemon
++         *     通道）完全同构，落库复用 ``HitsService.ingest_batch``——双通道行为零分叉、
++         *     USAGE_TYPES 聚合同源；``daemon_local_id`` 原样落库（CLI 传 ``cli-<user>``
++         *     形态与 daemon 实例 id 可区分，数据层留通道归属）。
++         *
++         *     路由顺序硬约束（R-06 同款）：本字面量 ``-`` 段路由必须注册在
++         *     ``/changes/{name}/...`` 参数路由之前——留在字面量端点块内，勿挪文件尾。
++         */
++        post: operations["push_knowledge_hits_cli_api_changes___hits_sync_post"];
++        delete?: never;
++        options?: never;
++        head?: never;
++        patch?: never;
++        trace?: never;
++    };
+     "/api/changes/-/spec-bundle": {
+         parameters: {
+             query?: never;
+@@ -52568,6 +52602,39 @@ export interface operations {
+             };
+         };
+     };
++    push_knowledge_hits_cli_api_changes___hits_sync_post: {
++        parameters: {
++            query?: never;
++            header?: never;
++            path?: never;
++            cookie?: never;
++        };
++        requestBody: {
++            content: {
++                "application/json": components["schemas"]["HitsBatchIn"];
++            };
++        };
++        responses: {
++            /** @description Successful Response */
++            200: {
++                headers: {
++                    [name: string]: unknown;
++                };
++                content: {
++                    "application/json": components["schemas"]["HitsBatchOut"];
++                };
++            };
++            /** @description Validation Error */
++            422: {
++                headers: {
++                    [name: string]: unknown;
++                };
++                content: {
++                    "application/json": components["schemas"]["HTTPValidationError"];
++                };
++            };
++        };
++    };
+     get_spec_bundle_api_changes___spec_bundle_get: {
+         parameters: {
+             query?: never;
