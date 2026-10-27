@@ -22,3 +22,4 @@ created_at: 2026-08-29 22:56:30
 - 2026-10-16-change-title-condense-backfill | 变更中心标题提炼与存量回填
 - 2026-10-21-spec-manifest-incremental | spec-manifest 增量游标同步
 - 2026-10-22-agent-profiles-page-restyle | 智能体档案列表页重设计
+- 2026-10-27-knowledge-hits-flush-button | 知识遥测断流根因：sillyspec CLI 2026-10-18 把遥测文件迁至 .runtime…

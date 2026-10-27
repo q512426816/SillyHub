@@ -1,0 +1,44 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-27-knowledge-hits-flush-button",
+  "reviewer": "subagent",
+  "verdict": "PASS",
+  "reviewedAgainst": "f41327e7eeb1a5bbcbf20c6318daad0d7bca6736",
+  "findings": [
+    {
+      "severity": "P3",
+      "status": "accepted",
+      "title": "design.md/requirements.md 测试文件路径笔误：test/ 单数应为 tests/ 复数",
+      "evidence": "design「文件变更清单」与 requirements「测试绑定」两处写 sillyhub-daemon/test/knowledge-hits-flush.test.ts 与 test/knowledge-hits-upload.test.ts，实际文件与提交（992481d80/d8f894e98，带本变更 task 标记）均在 sillyhub-daemon/tests/ 目录；纯文档笔误，行为覆盖与测试实存性无损。",
+      "location": ".sillyspec/changes/2026-10-27-knowledge-hits-flush-button/design.md:66"
+    },
+    {
+      "severity": "P3",
+      "status": "accepted",
+      "title": "测试绑定行用例名与实际测试标题措辞不逐字一致（语义对应存在）",
+      "evidence": "如绑定行「新路径优先：state/knowledge-hits.jsonl 被读取上行」对应实际标题「state/ 新路径优先：两处文件并存时读 state/ 的（旧文件同时在场也不读）」（tests/knowledge-hits-upload.test.ts:346），且另有「迁移连续性」用例（:365）覆盖断流回归；backend/frontend 绑定行为概称对应 8/5 个具名用例。行为覆盖确凿，仅标题非逐字，评审接受。",
+      "location": ".sillyspec/changes/2026-10-27-knowledge-hits-flush-button/requirements.md:119"
+    },
+    {
+      "severity": "P3",
+      "status": "accepted",
+      "title": "冻结面 30 文件中 16 个属并行变更 2026-10-28-bg-task-status-report 混入",
+      "evidence": "change-patch.json 冻结面（baseline e32570e654→head）含 backend/app/modules/daemon/**、platform_sync/schema.py、frontend agent-log/daemon 组件、sillyhub-daemon agent-log/hub-client 等 16 个声明外文件，git log 逐个核实最后触达提交均为 cdcb97fdb（2026-10-28-bg-task-status-report，task 标记在提交面）——并行变更基线区间重叠所致，非本变更越权改动；另 2 个（tests/knowledge-hits-flush.test.ts、tests/knowledge-hits-upload.test.ts）实属本变更，即上条 test/ 笔误的对应实体。",
+      "location": ".sillyspec/changes/2026-10-27-knowledge-hits-flush-button/change-patch.json:files"
+    }
+  ],
+  "dimensionNotes": {
+    "乱序": "ok",
+    "并发": "ok",
+    "切换": "ok",
+    "作用域": "ok"
+  },
+  "reviewedAt": "2026-10-27T20:41:29Z",
+  "reviewNotes": {
+    "FR对账": "FR-01~06 逐条兑现：FR-01 resolveHitsPath 双路径（state 优先 existsSync/legacy 回退/两处皆无 readFile ENOENT 静默 no-op）+ periodic.ts stamp 带来源前缀（origin:mtimeMs:size），offset/指纹/分批语义未动（knowledge-hits-upload.ts:195-272）；FR-02 daemon.ts 注册 sillyspec_hits_flush（isWorkspaceIdShape 守卫抛 RpcError invalid_params；直调 uploadKnowledgeHitsIfNeeded 天然绕过周期器 mtime 短路；_hitsFlushInFlight Set 并发秒回 ok:true reason:in_flight；catch 兜底不向 RPC 层抛）；FR-03 router.py _flush_hits_via_daemon 四路降级（no_binding/daemon_offline/DaemonRpcTimeout/DaemonRpcRemoteError+Exception 兜底）全 HTTP 200 不抛，triggered 在 send_rpc 前置位使超时路回 triggered:true,ok:false 与 FR 场景一致；FR-04 按钮 disabled 防连点+三态 message（in_flight 单列完成语义文案）+成功 invalidate [changeAssets,ws,cid]；FR-05 三件同步；FR-06 三面测试实测全过。",
+    "测试实测": "backend test_hits_sync.py 8 passed（7.79s）；daemon knowledge-hits-flush.test.ts 5 + knowledge-hits-upload.test.ts 20 = 25 passed（1.22s）；frontend change-assets-card.test.tsx 41 passed（8.44s，含同步按钮组 5 新例）。",
+    "生成物同步": "backend/openapi.json 含路径 /api/workspaces/{workspace_id}/changes/{change_id}/hits-sync（仅 post，resp200 $ref ChangeHitsSyncResult）；frontend 与 sillyhub-daemon 的 api-types.ts 均含 ChangeHitsSyncResult（triggered 必填 bool、ok boolean|null、reason string|null）与 backend schema 逐字段一致。",
+    "运行时佐证": "b97f8231 工作区状态文件 ~/.sillyhub/daemon/.hits-upload-state-b97f8231-*.json uploadedLines=11364（updated_at 2026-10-27T20:40:19Z），与宣称的补报 10070→11363 时间线吻合（其后又续报 1 行），断流修复实测属实。",
+    "披露边界裁决": "①D-001 周期器保留不停用：可接受——三通道（周期器/flush/CLI 直报另仓）靠 uq_knowledge_hits_ws_hash 行级幂等并存零冲突，保留为无 TOKEN 环境兜底，停用反增本变更体积，决策已落 decisions.md；②flush 全量增量不按变更过滤行：可接受——效果是超集且行级幂等使多余行零成本，按变更过滤需 daemon 加行过滤参数与全读开销，负收益；③老 daemon 无 flush RPC：可接受——DaemonRpcRemoteError 降级路回 ok:false reason:rpc_remote_error，前端文案人话可读，无新增失败形态；④CLI 直报另仓：可接受——轻量变更单仓边界。"
+  }
+}

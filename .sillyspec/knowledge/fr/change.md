@@ -1246,3 +1246,93 @@ created_at: 2026-10-02T02:55:12.745Z
 摘要：（无场景名）
 全文：.sillyspec/changes/archive/2026-10-27-task-wakeup-inject-retry/requirements.md#FR-06
 最近确认：41c8d228b7f4e1cd6fffa667deaa9316cab005fa
+
+## FR-change-067 daemon hits 读取路径优先 .runtime/state/knowledge-hits.jsonl、旧路径回退，周期器对新路径恢复增量上行（本仓实测积压行补进 knowledge_hits 表）
+变更：2026-10-27-knowledge-hits-flush-button
+状态：active
+摘要：新布局主路径；旧布局回退；两处皆无
+全文：.sillyspec/changes/archive/2026-10-27-knowledge-hits-flush-button/requirements.md#FR-01
+最近确认：f41327e7eeb1a5bbcbf20c6318daad0d7bca6736
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-27-knowledge-hits-flush-button:flow:测试绑定FR-01
+  tests: sillyhub-daemon/test/knowledge-hits-upload.test.ts
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-27-knowledge-hits-flush-button
+  status: active
+
+## FR-change-068 daemon 注册 sillyspec_hits_flush RPC：收到指令即对该工作区强制执行一次上行（绕过 mtime 短路）并回执
+变更：2026-10-27-knowledge-hits-flush-button
+状态：active
+摘要：有积压行；无新行；非法参数
+全文：.sillyspec/changes/archive/2026-10-27-knowledge-hits-flush-button/requirements.md#FR-02
+最近确认：f41327e7eeb1a5bbcbf20c6318daad0d7bca6736
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-27-knowledge-hits-flush-button:flow:测试绑定FR-02
+  tests: sillyhub-daemon/test/knowledge-hits-flush.test.ts「非法 workspace_id 抛 invalid_params」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-27-knowledge-hits-flush-button
+  status: active
+
+## FR-change-069 backend 新端点照 _sync_change_via_daemon 降级铁律：daemon 在线触发 RPC 返回结构化回执（triggered/ok/reason），未绑定/离线/超时均不抛
+变更：2026-10-27-knowledge-hits-flush-button
+状态：active
+摘要：在线成功；未绑定；daemon 离线；RPC 超时/远端错误
+全文：.sillyspec/changes/archive/2026-10-27-knowledge-hits-flush-button/requirements.md#FR-03
+最近确认：f41327e7eeb1a5bbcbf20c6318daad0d7bca6736
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-27-knowledge-hits-flush-button:flow:测试绑定FR-03
+  tests: backend/app/modules/change/tests/test_hits_sync.py「未绑定/离线/超时各降级回执不抛」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-27-knowledge-hits-flush-button
+  status: active
+
+## FR-change-070 变更详情页新增「同步变更」按钮：点击调新端点、按回执提示成败原因、成功后刷新沉淀资产卡
+变更：2026-10-27-knowledge-hits-flush-button
+状态：active
+摘要：成功补数；daemon 离线
+全文：.sillyspec/changes/archive/2026-10-27-knowledge-hits-flush-button/requirements.md#FR-04
+最近确认：f41327e7eeb1a5bbcbf20c6318daad0d7bca6736
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-27-knowledge-hits-flush-button:flow:测试绑定FR-04
+  tests: frontend/src/components/changes/detail/__tests__/change-assets-card.test.tsx「同步按钮：点击请求→回执提示→成功后刷新资产查询」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-27-knowledge-hits-flush-button
+  status: active
+
+## FR-change-071 backend schema 有改动时同变更内跑前端与 daemon 的 pnpm gen:types 并提交
+变更：2026-10-27-knowledge-hits-flush-button
+状态：active
+摘要：schema 变更即再生成
+全文：.sillyspec/changes/archive/2026-10-27-knowledge-hits-flush-button/requirements.md#FR-05
+最近确认：f41327e7eeb1a5bbcbf20c6318daad0d7bca6736
+
+## FR-change-072 相关单测通过（backend 端点降级路、daemon 路径回退与 flush、frontend 按钮交互）
+变更：2026-10-27-knowledge-hits-flush-button
+状态：active
+摘要：收口实测
+全文：.sillyspec/changes/archive/2026-10-27-knowledge-hits-flush-button/requirements.md#FR-06
+最近确认：f41327e7eeb1a5bbcbf20c6318daad0d7bca6736

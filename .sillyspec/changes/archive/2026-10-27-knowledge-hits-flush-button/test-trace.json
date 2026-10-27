@@ -1,0 +1,96 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-27-knowledge-hits-flush-button",
+  "rows": [
+    {
+      "anchor": "FR-01",
+      "row_id": "2026-10-27-knowledge-hits-flush-button:flow:测试绑定FR-01",
+      "tests": [
+        "sillyhub-daemon/test/knowledge-hits-upload.test.ts"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-27-knowledge-hits-flush-button"
+    },
+    {
+      "anchor": "FR-01",
+      "row_id": "2026-10-27-knowledge-hits-flush-button:flow:测试绑定FR-01",
+      "tests": [
+        "sillyhub-daemon/test/knowledge-hits-upload.test.ts"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-27-knowledge-hits-flush-button"
+    },
+    {
+      "anchor": "FR-02",
+      "row_id": "2026-10-27-knowledge-hits-flush-button:flow:测试绑定FR-02",
+      "tests": [
+        "sillyhub-daemon/test/knowledge-hits-flush.test.ts「flush 指令强制上行并回执 ok」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-27-knowledge-hits-flush-button"
+    },
+    {
+      "anchor": "FR-02",
+      "row_id": "2026-10-27-knowledge-hits-flush-button:flow:测试绑定FR-02",
+      "tests": [
+        "sillyhub-daemon/test/knowledge-hits-flush.test.ts「非法 workspace_id 抛 invalid_params」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-27-knowledge-hits-flush-button"
+    },
+    {
+      "anchor": "FR-03",
+      "row_id": "2026-10-27-knowledge-hits-flush-button:flow:测试绑定FR-03",
+      "tests": [
+        "backend/app/modules/change/tests/test_hits_sync.py「未绑定/离线/超时各降级回执不抛」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-27-knowledge-hits-flush-button"
+    },
+    {
+      "anchor": "FR-04",
+      "row_id": "2026-10-27-knowledge-hits-flush-button:flow:测试绑定FR-04",
+      "tests": [
+        "frontend/src/components/changes/detail/__tests__/change-assets-card.test.tsx「同步按钮：点击请求→回执提示→成功后刷新资产查询」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-27-knowledge-hits-flush-button"
+    }
+  ]
+}
