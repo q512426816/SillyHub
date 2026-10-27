@@ -976,6 +976,9 @@ describe("SessionsPortal 三 scope 渲染", () => {
     const panes = screen.getByTestId("sessions-portal-panes");
     expect(panes.className).toContain("flex-1");
     expect(panes.className).toContain("min-h-0");
+    // 2026-10-27-sessions-panes-gap-remove FR-01：栏间 gap-3 已移除（用户点名
+    // 收紧，栏间分隔由 PanelResizer 自身 w-1.5 把手条承担）。
+    expect(panes.className).not.toContain("gap-3");
   });
 
   it("ql-20260910-002 门户带 includeSessions 拉取 + 继续最近会话直达选中并落工作区快照", async () => {

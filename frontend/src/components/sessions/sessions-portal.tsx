@@ -806,7 +806,7 @@ export function SessionsPortal({ scope }: SessionsPortalProps) {
           三栏总宽溢出（R-03，用户可拖窄/关列）。 */}
       <div
         data-testid="sessions-portal-panes"
-        className="flex min-h-0 flex-1 gap-3 overflow-hidden"
+        className="flex min-h-0 flex-1 overflow-hidden"
       >
         {/* 左栏：leftMode 二模（D-003 files 模式卸载 SessionListPanel，宽度两模
             共用同一 usePanelWidth 状态）。 */}
