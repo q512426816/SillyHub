@@ -1,0 +1,111 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-27-turn-phase-stall-honest-ui",
+  "rows": [
+    {
+      "anchor": "FR-01",
+      "row_id": "2026-10-27-turn-phase-stall-honest-ui:flow:测试绑定FR-01",
+      "tests": [
+        "test/frontend/src/components/daemon/__tests__/turn-status-bar-phase.test.tsx「投递阶段停滞文案 > delivered 停留 ≥30s → 排队语义文案 + 警示样式 + 已等待秒数」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-27-turn-phase-stall-honest-ui"
+    },
+    {
+      "anchor": "FR-01",
+      "row_id": "2026-10-27-turn-phase-stall-honest-ui:flow:测试绑定FR-01",
+      "tests": [
+        "test/frontend/src/components/daemon/__tests__/turn-status-bar-phase.test.tsx「投递阶段停滞文案 > dispatched 停留 ≥30s → 同款排队语义文案」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-27-turn-phase-stall-honest-ui"
+    },
+    {
+      "anchor": "FR-01",
+      "row_id": "2026-10-27-turn-phase-stall-honest-ui:flow:测试绑定FR-01",
+      "tests": [
+        "test/frontend/src/components/daemon/__tests__/turn-status-bar-phase.test.tsx「投递阶段停滞文案 > 执行期阶段（spawning）停滞 ≥30s 仍显词表文案——排队语义只限投递两阶段」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-27-turn-phase-stall-honest-ui"
+    },
+    {
+      "anchor": "FR-02",
+      "row_id": "2026-10-27-turn-phase-stall-honest-ui:flow:测试绑定FR-02",
+      "tests": [
+        "test/frontend/src/lib/daemon/__tests__/session-stream-turn-phase.test.ts「upsertTurn log 事件投递阶段退位 > log 到达时轮仍挂 delivered → currentPhase 被清除」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-27-turn-phase-stall-honest-ui"
+    },
+    {
+      "anchor": "FR-02",
+      "row_id": "2026-10-27-turn-phase-stall-honest-ui:flow:测试绑定FR-02",
+      "tests": [
+        "test/frontend/src/lib/daemon/__tests__/session-stream-turn-phase.test.ts「upsertTurn log 事件投递阶段退位 > log 到达时轮挂非投递阶段（spawning）→ 保留」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-27-turn-phase-stall-honest-ui"
+    },
+    {
+      "anchor": "FR-02",
+      "row_id": "2026-10-27-turn-phase-stall-honest-ui:flow:测试绑定FR-02",
+      "tests": [
+        "test/frontend/src/lib/daemon/__tests__/session-stream-turn-phase.test.ts「upsertTurn log 事件投递阶段退位 > 非 log 事件（turn_completed）不触发退位——delivered 清除只认 log」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-27-turn-phase-stall-honest-ui"
+    },
+    {
+      "anchor": "FR-03",
+      "row_id": "2026-10-27-turn-phase-stall-honest-ui:flow:测试绑定FR-03",
+      "tests": [
+        "test/frontend/src/components/daemon/__tests__/turn-state-subagent-routing.test.ts「（upsertTurn 既有 36 项回归全绿）」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-27-turn-phase-stall-honest-ui"
+    }
+  ]
+}

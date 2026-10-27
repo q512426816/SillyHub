@@ -1,0 +1,46 @@
+tier: thin
+legacy_fallback: false
+substeps:
+  artifacts: done
+  ledger: done
+  patch: done
+  review: done
+  probes: done
+  distill: done
+  archive: done
+  events: done
+born_face: thin
+with_tasks: false
+review_force: null
+input: >-
+  会话忙时用户消息在 backend 排队/派发链路滞留（生产实证 2026-10-27 会话 7eff99e1：消息 10:38 发出、10:47:36 才注入 daemon），期间前端轮状态条唯一 phase=delivered
+  无限计时且无排队语义，用户误以为卡死（等待 141 秒截图求助）；且该轮一旦有真实输出，停滞的 delivered 也不自动退位。本次为纯前端显示层兜底修复。
+
+
+  成功标准：
+
+  - 轮状态条对 dispatched/delivered 阶段停留超时（沿用 30 秒阈值）的展示改为排队语义文案（保留已等待秒数），其余阶段超时行为零变化
+
+  - 当轮收到任意 log 事件且 currentPhase 仍为 dispatched 或 delivered 时，立即清除该 phase，状态条退位回轮状态文案
+
+  - frontend 既有 turn-phase 相关测试全部通过，并新增测试覆盖上述两个行为
+
+  - 不改动后端与 daemon 代码
+autopilot: false
+prestage_ack: false
+baseline_commit: c848d9be14523061a21b0c804b46abe8b3c9cb64
+updatedAt: '2026-10-27T03:32:10.929Z'
+cross_baselines:
+  sillyspec: 67e50bcca2adb9ecd502d12086c0ac8cb994da84
+baseline_sha256: cf4976b476777f49b0dfa39bf6683760539e52f44aa61cf8150fab3693add96d
+spec_approved: true
+spec_approved_at: '2026-10-27T03:27:29.323Z'
+spec_approved_by: anon@DESKTOP-HJ0AM09
+spec_approved_channel: user-confirmed
+spec_attested_by: anon@DESKTOP-HJ0AM09
+batch_ticked: true
+gate_summary: >-
+  test: passed ← module[]+deps(jsx2)（7.5s）
+  结果：C:\Users\qinyi\IdeaProjects\multi-agent-platform\.sillyspec\.runtime\verify-runs\20261027033009\test-result.json｜lint:
+  skipped — 跳过原因：local.yaml 未配置 commands.lint（或标记 unavailable）。｜门文件 6 个
+

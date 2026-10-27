@@ -1876,3 +1876,75 @@ created_at: 2026-10-16T01:30:35.950Z
   confirmed_at: null
   source_change: 2026-10-26-subagent-task-meta-restore
   status: active
+
+## FR-test-utils-099 轮状态条对 dispatched/delivered 阶段停留超时（沿用 30 秒阈值）的展示改为排队语义文案（保留已等待秒数），其余阶段超时行为零变化
+变更：2026-10-27-turn-phase-stall-honest-ui
+状态：active
+摘要：主路径
+场景正文：
+- 场景：主路径 — Given 轮运行中且 currentPhase={phase: "delivered"} / When 停留推进 ≥30 秒 / Then 标签显「等待执行器开始处理」+
+全文：.sillyspec/changes/archive/2026-10-27-turn-phase-stall-honest-ui/requirements.md#FR-01
+最近确认：49fec81cd184c7617a6de53856c9e13391a63c64
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-27-turn-phase-stall-honest-ui:flow:测试绑定FR-01
+  tests: test/frontend/src/components/daemon/__tests__/turn-status-bar-phase.test.tsx「投递阶段停滞文案 > 执行期阶段（spawning）停滞 ≥30s 仍显词表文案——排队语义只限投递两阶段」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-27-turn-phase-stall-honest-ui
+  status: active
+
+## FR-test-utils-100 当轮收到任意 log 事件且 currentPhase 仍为 dispatched 或 delivered 时，立即清除该 phase，状态条退位回轮状态文案
+变更：2026-10-27-turn-phase-stall-honest-ui
+状态：active
+摘要：主路径
+场景正文：
+- 场景：主路径 — Given 轮 currentPhase={phase:"delivered"} / When 该轮 log 信封经 upsertTurn / Then currentPh
+全文：.sillyspec/changes/archive/2026-10-27-turn-phase-stall-honest-ui/requirements.md#FR-02
+最近确认：49fec81cd184c7617a6de53856c9e13391a63c64
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-27-turn-phase-stall-honest-ui:flow:测试绑定FR-02
+  tests: test/frontend/src/lib/daemon/__tests__/session-stream-turn-phase.test.ts「upsertTurn log 事件投递阶段退位 > 非 log 事件（turn_completed）不触发退位——delivered 清除只认 log」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-27-turn-phase-stall-honest-ui
+  status: active
+
+## FR-test-utils-101 frontend 既有 turn-phase 相关测试全部通过，并新增测试覆盖上述两个行为
+变更：2026-10-27-turn-phase-stall-honest-ui
+状态：active
+摘要：主路径
+场景正文：
+- 场景：主路径 — Given 本次改动 / When 跑相关测试文件 / Then 全绿且新增用例覆盖 FR-01/FR-02 行为与对照场景。
+全文：.sillyspec/changes/archive/2026-10-27-turn-phase-stall-honest-ui/requirements.md#FR-03
+最近确认：49fec81cd184c7617a6de53856c9e13391a63c64
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-27-turn-phase-stall-honest-ui:flow:测试绑定FR-03
+  tests: test/frontend/src/components/daemon/__tests__/turn-state-subagent-routing.test.ts「（upsertTurn 既有 36 项回归全绿）」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-27-turn-phase-stall-honest-ui
+  status: active
+
+## FR-test-utils-102 不改动后端与 daemon 代码
+变更：2026-10-27-turn-phase-stall-honest-ui
+状态：active
+摘要：主路径
+场景正文：
+- 场景：主路径 — Given 变更收口 / When 检查 git diff 文件清单 / Then 改动仅限 frontend 四文件。
+全文：.sillyspec/changes/archive/2026-10-27-turn-phase-stall-honest-ui/requirements.md#FR-04
+最近确认：49fec81cd184c7617a6de53856c9e13391a63c64

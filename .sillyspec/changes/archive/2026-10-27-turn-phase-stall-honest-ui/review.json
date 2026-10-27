@@ -1,0 +1,31 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-27-turn-phase-stall-honest-ui",
+  "reviewer": "inline-self（主会话代行自审——变更面 4 文件且实现/测试同作者，检查单逐条作答留痕）",
+  "verdict": "PASS",
+  "reviewedAgainst": "49fec81cd184c7617a6de53856c9e13391a63c64",
+  "findings": [
+    {
+      "severity": "P3",
+      "status": "resolved-as-accepted",
+      "title": "停滞文案语义近似：排队/补拉/重试多种滞留成因无法区分告知",
+      "evidence": "DELIVERY_STALL_LABEL 单一文案覆盖 backend 排队、WS 补拉、重试等全部滞留形态（turn-status-bar.tsx 常量段）——纯前端单侧可见性固有限制，精确区分需 backend 补排队态信号（decisions D-001 已记后续变更）",
+      "location": "frontend/src/components/daemon/turn-status-bar.tsx:420"
+    },
+    {
+      "severity": "P3",
+      "status": "resolved-as-accepted",
+      "title": "log 先到清 delivered 后、迟到的 delivered phase 事件会重写 currentPhase",
+      "evidence": "applyTurnPhase last-write-wins 既有语义下窄窗口重写；即使重写，停滞文案兜底 30 秒后再次生效自愈（design 边界四问 1）",
+      "location": "frontend/src/components/daemon/session-panel/turn-state.ts:128"
+    }
+  ],
+  "dimensionNotes": {
+    "乱序": "ok",
+    "并发": "ok",
+    "切换": "ok",
+    "作用域": "ok"
+  },
+  "reviewNotes": "检查单作答：①FR↔实现↔测试三方一致——FR-01 stalledDelivery 分支+4 用例（含 spawning 零回归对照与 <30s 不变）、FR-02 retireDeliveryPhase+upsertTurn 三 apply 点+3 用例（含非 log 不清）、FR-03 8 文件 240 项全绿（vitest 实测）、FR-04 提交 49fec81cd 清单仅 frontend 4 文件+变更目录；②盲维四问均实答无『不适用』；③披露边界两条均已裁决可接受（见 findings P3×2，理由：单侧可见性固有限制/窄窗口自愈）；④防护声明真实——DELIVERY_PHASES 仅两值、非 log 走原 apply（测试断言在案）；⑤生成物同步 n/a——零后端 schema 改动，api-types 无 diff 义务。",
+  "reviewedAt": "2026-10-27T03:33:00Z"
+}

@@ -1,0 +1,310 @@
+diff --git a/.sillyspec/docs/SillyHub/modules/frontend_components.changelog.md b/.sillyspec/docs/SillyHub/modules/frontend_components.changelog.md
+index 668ae6c00..7ba3d6c41 100644
+--- a/.sillyspec/docs/SillyHub/modules/frontend_components.changelog.md
++++ b/.sillyspec/docs/SillyHub/modules/frontend_components.changelog.md
+@@ -175,3 +175,4 @@ created_at: 2026-08-30 22:23:33
+ | 2026-10-27 | 2026-10-27-ghost-spec-binding-fix | 失败命令不再生成幽灵变更占位并过滤存量 |
+ | 2026-10-27 | 2026-10-27-task-wakeup-inject-retry | 后台任务终态唤醒注入经后端中转单发无重试，撞后端短暂不可用窗（部署重建/502/504）即 inte… |
+ | 2026-10-27 | 2026-10-27-mobile-chat-visual-round3 | 用户真机三轮反馈：轮次信息折行难看要单行；会话页顶部加返回会话列表按钮；会话列表卡加 PC 端同款状… |
++| 2026-10-27 | 2026-10-27-session-input-spacing-tighten | 会话页输入区与消息流底部留白过大——用户在浏览器开发者工具审查发现 pt-3/pt-1/pb-4/p… |
+diff --git a/.sillyspec/docs/multi-agent-platform/modules/docs.changelog.md b/.sillyspec/docs/multi-agent-platform/modules/docs.changelog.md
+index 4d19dc7ea..013e3f23e 100644
+--- a/.sillyspec/docs/multi-agent-platform/modules/docs.changelog.md
++++ b/.sillyspec/docs/multi-agent-platform/modules/docs.changelog.md
+@@ -30,3 +30,4 @@
+ - 2026-10-26-ci-red-to-green | 修复四条CI工作流失败转绿
+ - 2026-10-27-ghost-spec-binding-fix | 失败命令不再生成幽灵变更占位并过滤存量
+ - 2026-10-27-task-wakeup-inject-retry | 后台任务终态唤醒注入经后端中转单发无重试，撞后端短暂不可用窗（部署重建/502/504）即 inte…
++- 2026-10-27-session-input-spacing-tighten | 会话页输入区与消息流底部留白过大——用户在浏览器开发者工具审查发现 pt-3/pt-1/pb-4/p…
+diff --git a/.sillyspec/docs/multi-agent-platform/modules/frontend.changelog.md b/.sillyspec/docs/multi-agent-platform/modules/frontend.changelog.md
+index 8a0fff67b..001420c40 100644
+--- a/.sillyspec/docs/multi-agent-platform/modules/frontend.changelog.md
++++ b/.sillyspec/docs/multi-agent-platform/modules/frontend.changelog.md
+@@ -225,3 +225,4 @@
+ | 2026-10-27 | 2026-10-27-ghost-spec-binding-fix | 失败命令不再生成幽灵变更占位并过滤存量 |
+ | 2026-10-27 | 2026-10-27-task-wakeup-inject-retry | 后台任务终态唤醒注入经后端中转单发无重试，撞后端短暂不可用窗（部署重建/502/504）即 inte… |
+ | 2026-10-27 | 2026-10-27-mobile-chat-visual-round3 | 用户真机三轮反馈：轮次信息折行难看要单行；会话页顶部加返回会话列表按钮；会话列表卡加 PC 端同款状… |
++| 2026-10-27 | 2026-10-27-session-input-spacing-tighten | 会话页输入区与消息流底部留白过大——用户在浏览器开发者工具审查发现 pt-3/pt-1/pb-4/p… |
+diff --git a/frontend/src/components/daemon/__tests__/turn-status-bar-phase.test.tsx b/frontend/src/components/daemon/__tests__/turn-status-bar-phase.test.tsx
+index 319fae8dc..b697d7723 100644
+--- a/frontend/src/components/daemon/__tests__/turn-status-bar-phase.test.tsx
++++ b/frontend/src/components/daemon/__tests__/turn-status-bar-phase.test.tsx
+@@ -17,6 +17,7 @@ import { describe, it, expect, vi, afterEach } from "vitest";
+ import { act, render, screen } from "@testing-library/react";
+ 
+ import {
++  DELIVERY_STALL_LABEL,
+   PHASE_LABEL,
+   PHASE_TIMEOUT_MS,
+   TurnStatusBar,
+@@ -113,6 +114,57 @@ describe("first_event 退位（D-008）", () => {
+   });
+ });
+ 
++describe("投递阶段停滞文案（2026-10-27-turn-phase-stall-honest-ui）", () => {
++  // 超时态 span 内多文本节点（标签 + 「· 已等待 N 秒」），字符串精确匹配
++  // 匹不到前缀节点——统一前缀正则（锚定 DELIVERY_STALL_LABEL 常量）。
++  const stallLabelRe = () => new RegExp(`^${DELIVERY_STALL_LABEL}`);
++
++  it("delivered 停留 ≥30s → 排队语义文案 + 警示样式 + 已等待秒数", async () => {
++    vi.useFakeTimers();
++    const at = Date.now();
++    const { container } = renderBar({
++      currentPhase: { phase: "delivered", at },
++    });
++    await act(async () => {
++      await vi.advanceTimersByTimeAsync(PHASE_TIMEOUT_MS + 1_000);
++    });
++    expect(screen.getByText(stallLabelRe())).toBeInTheDocument();
++    expect(screen.getByText(/已等待 31 秒/)).toBeInTheDocument();
++    expect(container.firstElementChild?.className).toContain("border-warning/40");
++  });
++
++  it("dispatched 停留 ≥30s → 同款排队语义文案", async () => {
++    vi.useFakeTimers();
++    const at = Date.now();
++    renderBar({ currentPhase: { phase: "dispatched", at } });
++    await act(async () => {
++      await vi.advanceTimersByTimeAsync(PHASE_TIMEOUT_MS + 1_000);
++    });
++    expect(screen.getByText(stallLabelRe())).toBeInTheDocument();
++  });
++
++  it("delivered 30s 内仍显词表文案（不提前切排队语义）", () => {
++    vi.useFakeTimers();
++    renderBar({
++      currentPhase: { phase: "delivered", at: Date.now() - 5_000 },
++    });
++    expect(screen.getByText("执行器已接收")).toBeInTheDocument();
++    expect(screen.queryByText(stallLabelRe())).not.toBeInTheDocument();
++  });
++
++  it("执行期阶段（spawning）停滞 ≥30s 仍显词表文案——排队语义只限投递两阶段", async () => {
++    vi.useFakeTimers();
++    const at = Date.now();
++    renderBar({ currentPhase: { phase: "spawning", at } });
++    await act(async () => {
++      await vi.advanceTimersByTimeAsync(PHASE_TIMEOUT_MS + 1_000);
++    });
++    expect(screen.getByText(/正在启动 AI 进程/)).toBeInTheDocument();
++    expect(screen.getByText(/已等待 31 秒/)).toBeInTheDocument();
++    expect(screen.queryByText(stallLabelRe())).not.toBeInTheDocument();
++  });
++});
++
+ describe("零回归锚定（D-010）与未知值兜底", () => {
+   it("无 currentPhase 渲染与现状一致（STATUS_LABEL + 主色样式）", () => {
+     vi.useFakeTimers();
+diff --git a/frontend/src/components/daemon/session-panel/turn-state.ts b/frontend/src/components/daemon/session-panel/turn-state.ts
+index 3749e9b19..eacc6f2d6 100644
+--- a/frontend/src/components/daemon/session-panel/turn-state.ts
++++ b/frontend/src/components/daemon/session-panel/turn-state.ts
+@@ -151,6 +151,28 @@ export function clearTurnPhase<T extends { currentPhase?: TurnPhaseState | null
+   return { ...turn, currentPhase: null };
+ }
+ 
++/**
++ * 投递阶段词表（2026-10-27-turn-phase-stall-honest-ui）：backend 自产的
++ * dispatched/delivered 表示「消息已下发/已领取」，尚不代表执行器开始处理。
++ */
++const DELIVERY_PHASES: ReadonlySet<string> = new Set(["dispatched", "delivered"]);
++
++/**
++ * log 到达退位投递阶段（2026-10-27-turn-phase-stall-honest-ui）：轮收到真实
++ * 输出（log 事件有 DB 兜底必达）时，仍挂着的 dispatched/delivered 已失去展示
++ * 意义（消息显然已被处理），清 null 让状态条退位回轮状态文案。只清投递两
++ * 阶段——执行期阶段（skills_sync/spawning/…）可能与 log 并行推进，不越权。
++ * 与 clearTurnPhase（终态全清）并列；生产实证：会话忙时消息在 backend 排队
++ * 滞留 9 分钟，前端唯一 phase=delivered 无限计时（2026-10-27 会话 7eff99e1）。
++ */
++export function retireDeliveryPhase<
++  T extends { currentPhase?: TurnPhaseState | null },
++>(turn: T): T {
++  const phase = turn.currentPhase?.phase;
++  if (phase == null || !DELIVERY_PHASES.has(phase)) return turn;
++  return { ...turn, currentPhase: null };
++}
++
+ /**
+  * ql-20260918-003：直发占位轮 → 真实 run_id 的合并替换（page/dialog 发送路径共用）。
+  *
+@@ -219,6 +241,12 @@ export function upsertTurn(
+ ): TurnState {
+   const runId = env.run_id;
+   if (!runId) return prev;
++  // 2026-10-27-turn-phase-stall-honest-ui：log 事件的目标轮在 apply 后退位仍挂
++  // 的投递阶段（dispatched/delivered）——真实输出已到达（log 有 DB 兜底必达），
++  // 投递信号失去展示意义；page/dialog 双模式共用本函数，单点兜底。非 log 事件
++  // 走原 apply 零变化。
++  const applyRetiringDelivery = (t: SessionTurnView): SessionTurnView =>
++    env.event === "log" ? retireDeliveryPhase(apply(t)) : apply(t);
+   // 父归属优先跨轮路由（2026-09-15-subagent-three-pane-display 用户验收返工）：
+   // 后台子代理的终态信号（[TASK_NOTIFICATION]）与内容行常经**后续 run** 上报
+   // （daemon 任务注册表丢失时 writeTaskLine 回退 currentRunId，DB 实证：通知行
+@@ -235,7 +263,10 @@ export function upsertTurn(
+         // 只更新父段所在轮：apply（段元数据/children 追加），不 healToRunning
+         // （后台通知到达时派发轮可能已完成——不把终态轮翻回 running），也不
+         // 新建/合并 run_id 轮。倒序找最末命中（同 id 多轮仅极端重放场景）。
+-        const turns = prev.turns.map((t, idx) => (idx === i ? apply(t) : t));
++        // （本分支已限定 env.event === "log"，applyRetiringDelivery 同步退位。）
++        const turns = prev.turns.map((t, idx) =>
++          idx === i ? applyRetiringDelivery(t) : t,
++        );
+         return { ...prev, turns };
+       }
+     }
+@@ -284,7 +315,7 @@ export function upsertTurn(
+       segments: empty.segments,
+       turnStartedAt: empty.turnStartedAt,
+     };
+-    turns = [...prev.turns, apply(newTurn)];
++    turns = [...prev.turns, applyRetiringDelivery(newTurn)];
+   } else {
+     // attach 竞态修复（ql-20260820-007）防御分支：主修正位于历史回灌处；若某条
+     // 路径仍漏改（当前 run 的日志持续流入而轮卡终态），log 分支自愈翻回 running。
+@@ -293,7 +324,7 @@ export function upsertTurn(
+     turns = prev.turns.map((t, i) => {
+       if (i !== idx) return t;
+       if (env.event !== "log" && TERMINAL_TURN_STATUSES.has(t.status)) return t;
+-      const next = apply(t);
++      const next = applyRetiringDelivery(t);
+       if (healToRunning && TERMINAL_TURN_STATUSES.has(next.status)) {
+         return { ...next, status: "running" };
+       }
+diff --git a/frontend/src/components/daemon/turn-status-bar.tsx b/frontend/src/components/daemon/turn-status-bar.tsx
+index 1f196a4c0..7fab45566 100644
+--- a/frontend/src/components/daemon/turn-status-bar.tsx
++++ b/frontend/src/components/daemon/turn-status-bar.tsx
+@@ -406,6 +406,15 @@ export const PHASE_LABEL: Record<string, string> = {
+ /** 阶段超时警示阈值（D-007：前端常量不做配置项）。 */
+ export const PHASE_TIMEOUT_MS = 30_000;
+ 
++/**
++ * 投递阶段停滞文案（2026-10-27-turn-phase-stall-honest-ui）：dispatched/
++ * delivered 停留超阈值时切换——「执行器已接收 · 已等待 N 秒」会让用户误以为
++ * 卡死（生产实证：会话忙时消息在 backend 排队滞留 9 分钟，前端唯一信号
++ * delivered 无限计时），改显排队语义告知「执行器尚未开始处理，可能在排队」。
++ * 执行期阶段（spawning/…）停滞仍显词表文案（零回归）。
++ */
++export const DELIVERY_STALL_LABEL = "等待执行器开始处理";
++
+ /** 具体秒数显示门槛（对齐 deepseek TurnStatus：前 15 秒保持简洁只显文案）。 */
+ export const TURN_STATUS_ELAPSED_MIN_MS = 15_000;
+ 
+@@ -470,14 +479,22 @@ export const TurnStatusBar = memo(function TurnStatusBar({
+   //   2. phase === "first_event" → 退位：标签位回退 STATUS_LABEL[turnStatus]，
+   //      右侧活动摘要接管（D-008；退位后超时计时随之失效——不警示）；
+   //   3. 停留 ≥ PHASE_TIMEOUT_MS → 整条切警示样式（warning token）+「已等待 N 秒」；
++  //      3a. 超时且 phase ∈ {dispatched, delivered} → 标签切 DELIVERY_STALL_LABEL
++  //          排队语义（2026-10-27-turn-phase-stall-honest-ui，见常量 docblock）；
+   //   4. 其余 → PHASE_LABEL[phase]，未知值显示原始字符串（兼容策略兜底）。
+   const phaseRetired = currentPhase?.phase === "first_event";
+   const phaseElapsedMs =
+     currentPhase && !phaseRetired ? Math.max(0, now - currentPhase.at) : null;
+   const phaseTimedOut =
+     phaseElapsedMs != null && phaseElapsedMs >= PHASE_TIMEOUT_MS;
+-  const statusLabel =
+-    currentPhase && !phaseRetired
++  // 投递阶段停滞（2026-10-27-turn-phase-stall-honest-ui）：超时即切排队语义
++  // 文案——滞留可能持续数分钟（backend 排队/补拉），干等计时有误导性。
++  const stalledDelivery =
++    phaseTimedOut &&
++    (currentPhase?.phase === "dispatched" || currentPhase?.phase === "delivered");
++  const statusLabel = stalledDelivery
++    ? DELIVERY_STALL_LABEL
++    : currentPhase && !phaseRetired
+       ? (PHASE_LABEL[currentPhase.phase] ?? currentPhase.phase)
+       : STATUS_LABEL[turnStatus];
+ 
+diff --git a/frontend/src/lib/daemon/__tests__/session-stream-turn-phase.test.ts b/frontend/src/lib/daemon/__tests__/session-stream-turn-phase.test.ts
+index 8bc49d629..b9a2db714 100644
+--- a/frontend/src/lib/daemon/__tests__/session-stream-turn-phase.test.ts
++++ b/frontend/src/lib/daemon/__tests__/session-stream-turn-phase.test.ts
+@@ -17,6 +17,8 @@ import {
+   applyTurnPhase,
+   clearTurnPhase,
+   replacePlaceholderTurn,
++  retireDeliveryPhase,
++  upsertTurn,
+ } from "@/components/daemon/session-panel/turn-state";
+ import type { SessionTurnView } from "@/components/daemon/turn-timeline";
+ import type { FetchSseConnection } from "@/lib/fetch-sse";
+@@ -265,3 +267,78 @@ describe("clearTurnPhase（D-013③ 终态清理）", () => {
+     expect(clearTurnPhase(nullPhase)).toBe(nullPhase);
+   });
+ });
++
++// ── 2026-10-27-turn-phase-stall-honest-ui：log 到达退位投递阶段 ────────────────
++
++function makeEnv(overrides: Partial<SessionStreamEnvelope>): SessionStreamEnvelope {
++  return {
++    event: "log",
++    session_id: "sess-1",
++    run_id: null,
++    turn: null,
++    log_id: null,
++    timestamp: "2026-10-27T02:00:00Z",
++    channel: null,
++    content: null,
++    status: null,
++    exit_code: null,
++    reason: null,
++    ...overrides,
++  } as SessionStreamEnvelope;
++}
++
++describe("retireDeliveryPhase（log 兜底退位）", () => {
++  it("delivered / dispatched 清 null；非投递阶段与无值原样返回（引用不变）", () => {
++    const delivered = makeTurn("run-1", {
++      currentPhase: { phase: "delivered", at: Date.now() },
++    });
++    expect(retireDeliveryPhase(delivered).currentPhase).toBeNull();
++
++    const dispatched = makeTurn("run-1", {
++      currentPhase: { phase: "dispatched", at: Date.now() },
++    });
++    expect(retireDeliveryPhase(dispatched).currentPhase).toBeNull();
++
++    // 非投递阶段：轮已在执行期（如 spawning），log 到达不代表该信号过期。
++    const spawning = makeTurn("run-1", {
++      currentPhase: { phase: "spawning", at: Date.now() },
++    });
++    expect(retireDeliveryPhase(spawning)).toBe(spawning);
++
++    const withoutPhase = makeTurn("run-1");
++    expect(retireDeliveryPhase(withoutPhase)).toBe(withoutPhase);
++  });
++});
++
++describe("upsertTurn log 事件投递阶段退位（page/dialog 共用单点）", () => {
++  it("log 到达时轮仍挂 delivered → currentPhase 被清除", () => {
++    const prev = {
++      turns: [makeTurn("run-1", { currentPhase: { phase: "delivered", at: Date.now() } })],
++      currentRunId: "run-1",
++    };
++    const env = makeEnv({ run_id: "run-1", log_id: "l1", channel: "text", content: "x" });
++    const next = upsertTurn(prev, env, (t) => t, {});
++    expect(next.turns[0]!.currentPhase).toBeNull();
++  });
++
++  it("log 到达时轮挂非投递阶段（spawning）→ 保留", () => {
++    const prev = {
++      turns: [makeTurn("run-1", { currentPhase: { phase: "spawning", at: Date.now() } })],
++      currentRunId: "run-1",
++    };
++    const env = makeEnv({ run_id: "run-1", log_id: "l1", channel: "text", content: "x" });
++    const next = upsertTurn(prev, env, (t) => t, {});
++    expect(next.turns[0]!.currentPhase?.phase).toBe("spawning");
++  });
++
++  it("非 log 事件（turn_completed）不触发退位——delivered 清除只认 log", () => {
++    const prev = {
++      turns: [makeTurn("run-1", { currentPhase: { phase: "delivered", at: Date.now() } })],
++      currentRunId: "run-1",
++    };
++    const env = makeEnv({ event: "turn_completed", run_id: "run-1", status: "completed" });
++    const next = upsertTurn(prev, env, (t) => t, {});
++    // 终态清理由消费方 clearTurnPhase 负责（D-013③），upsertTurn 不越权。
++    expect(next.turns[0]!.currentPhase?.phase).toBe("delivered");
++  });
++});
