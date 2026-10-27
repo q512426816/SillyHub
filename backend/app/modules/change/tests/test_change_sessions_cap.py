@@ -127,3 +127,65 @@ async def test_change_sessions_capped_to_latest(
         )
     ]
     assert [it["id"] for it in items] == expected_ids, "应返回 last_active_at 最新的 3 个会话"
+
+
+@pytest.mark.asyncio
+async def test_change_sessions_title_strips_attachment_markers(
+    client, db_session: AsyncSession, tmp_path: Path
+) -> None:
+    """2026-10-28-change-detail-sessions-source-fix FR-04：附件开局标题剥离。
+
+    首条 user_input 为附件标记行 + 正文 → 标题取正文前 30 字，不出现
+    ``[附件:`` 片段；纯附件会话回退首个附件 name。
+    """
+    from sqlalchemy import select
+
+    from app.modules.agent.model import AgentRun, AgentRunLog
+    from app.modules.auth.model import User
+
+    ws_id, change_id, token = await _seed(db_session, tmp_path)
+
+    async def _add_session(first_input: str) -> uuid.UUID:
+        sess = AgentSession(
+            id=uuid.uuid4(),
+            user_id=(await db_session.execute(select(User.id))).scalar_one(),
+            provider="claude",
+            status="active",
+            last_active_at=datetime.now(UTC),
+        )
+        run = AgentRun(
+            id=uuid.uuid4(),
+            agent_type="claude_code",
+            provider="claude",
+            status="completed",
+            agent_session_id=sess.id,
+            session_id=None,
+            started_at=datetime.now(UTC),
+        )
+        log = AgentRunLog(
+            id=uuid.uuid4(),
+            run_id=run.id,
+            timestamp=datetime.now(UTC),
+            channel="user_input",
+            content_redacted=first_input,
+        )
+        db_session.add_all(
+            [sess, run, log, ChangeSessionLink(change_id=change_id, session_id=sess.id)]
+        )
+        return sess.id
+
+    att = uuid.uuid4()
+    mixed_id = await _add_session(
+        f"[附件:{att}|image|IMG_2038.png]\r\n\r\n移动端四个页面布局乱了，帮我修一下"
+    )
+    pure_id = await _add_session(f"[附件:{uuid.uuid4()}|file|需求文档.pdf]")
+    await db_session.commit()
+
+    resp = await client.get(
+        f"/api/workspaces/{ws_id}/changes/{change_id}/sessions",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert resp.status_code == 200, resp.text
+    titles = {it["id"]: it["title"] for it in resp.json()}
+    assert titles[str(mixed_id)] == "移动端四个页面布局乱了，帮我修一下"
+    assert titles[str(pure_id)] == "需求文档.pdf"

@@ -92,6 +92,7 @@ from app.modules.daemon.runtime.service import (
     DaemonRuntimeOffline,
 )
 from app.modules.daemon.schema import AgentSessionListItem, ChangeSessionAuthor
+from app.modules.session_attachment.service import session_display_title
 from app.modules.workspace.service import WorkspaceService
 
 router = APIRouter(prefix="/workspaces/{workspace_id}", tags=["change"])
@@ -803,9 +804,11 @@ async def _fetch_session_titles(
     同源。窗口函数 ROW_NUMBER 分区取首条（P5 2026-08-24 会话审查，与 agent/
     daemon router 同步）——拉全部 user_input 行 Python 取最早会随轮数线性放大。
 
-    返回映射只含命中的会话（值已按前 30 字截断；空文本归一为 None）；未命中
-    会话不出现在映射，调用方 ``get`` 默认 None，与旧实现
-    ``(content or "")[:30] or None`` 语义一致。
+    返回映射只含命中的会话；未命中会话不出现在映射，调用方 ``get`` 默认 None。
+    2026-10-28-change-detail-sessions-source-fix FR-04：标题口径换共享 helper
+    ``session_display_title``——剥附件标记行（``[附件:id|kind|name]``）取首个
+    非空文本前 30 字，纯附件回退附件 name（附件开局会话不再显示 ``[附件:uuid``
+    前缀）；无标记文本逐字节同旧口径。与 agent/daemon router 三处同源。
     """
     if not session_ids:
         return {}
@@ -820,11 +823,12 @@ async def _fetch_session_titles(
     title_subq = (
         select(
             AgentRun.agent_session_id.label("session_id"),
-            # 2026-09-09 阿里云 slow.query 实测：摘要只取前 30 字（返回值 [:30]），
-            # SQL 内 substr 截到 64 字符，免把单行均值 33KB 的 TOAST 全文解压拉回
-            # （substr 双方言语符语义，64 > 30 保证派生零回归；与 agent/daemon
-            # router 同款优化三处同步）。
-            func.substr(AgentRunLog.content_redacted, 1, 64).label("content"),
+            # 2026-09-09 阿里云 slow.query 实测：摘要只取前 30 字，SQL 内 substr
+            # 截断免把单行均值 33KB 的 TOAST 全文解压拉回（substr 双方言语符语义）。
+            # 2026-10-28：64 → 512——附件标记行每条约 60 字符（最多 10 附件），
+            # 64 字内可能全是标记，剥离后无正文可选；512 仍远小于 TOAST 均值，
+            # 性能口径可接受（与 agent/daemon router 同步）。
+            func.substr(AgentRunLog.content_redacted, 1, 512).label("content"),
             rn,
         )
         .join(AgentRunLog, AgentRunLog.run_id == AgentRun.id)
@@ -839,7 +843,7 @@ async def _fetch_session_titles(
             select(title_subq.c.session_id, title_subq.c.content).where(title_subq.c.rn == 1)
         )
     ).all()
-    return {row.session_id: (row.content or "")[:30] or None for row in title_rows}
+    return {row.session_id: session_display_title(row.content) for row in title_rows}
 
 
 @router.get(
