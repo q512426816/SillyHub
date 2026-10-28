@@ -523,6 +523,36 @@ export async function dispatchStatusEvent(
       });
       return;
     }
+    case 'api_retry': {
+      // 2026-10-28-model-retry-visible：模型 API 重试过程信号 → [MODEL_RETRY]
+      // 协议行（形态对齐 ql-20260917-006 [COMPACT_STATUS]：legacy flat 文本行
+      // 直接经 onTurnMessage，backend 按 stdout 文本行持久 + SSE 推送，前端
+      // 分类器识别前缀在运行中轮实时显示「模型限流重试中 第N/M次」）。
+      // 无 active turn（runId 空）丢弃——重试状态只在轮内产生，口径同 compact。
+      // error_status 连接类为 null 原样保留（不伪造 0 不省略键）；error 截断 200。
+      const runId = state.currentRunId;
+      if (!runId) return;
+      const meta = eventMetaOf(ev);
+      const payload: Record<string, unknown> = {};
+      const attempt = numOf(meta?.['attempt']);
+      if (attempt !== undefined) payload['attempt'] = attempt;
+      const maxRetries = numOf(meta?.['max_retries']);
+      if (maxRetries !== undefined) payload['max_retries'] = maxRetries;
+      const delayMs = numOf(meta?.['retry_delay_ms']);
+      if (delayMs !== undefined) payload['retry_delay_ms'] = delayMs;
+      const errorStatus = meta?.['error_status'];
+      if (errorStatus === null || typeof errorStatus === 'number') {
+        payload['error_status'] = errorStatus;
+      }
+      const errorText = strOf(meta?.['error']);
+      if (errorText) payload['error'] = errorText.slice(0, 200);
+      await mgr.deps.onTurnMessage(state.sessionId, runId, {
+        event_type: 'text',
+        content: `[MODEL_RETRY] ${JSON.stringify(payload)}`,
+        channel: 'stdout',
+      });
+      return;
+    }
     default:
       // 未知 subtype 防御丢弃（schema 闭合枚举外的运行时漂移）。
       return;
