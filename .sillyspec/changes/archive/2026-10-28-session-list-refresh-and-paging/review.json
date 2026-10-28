@@ -1,0 +1,31 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-28-session-list-refresh-and-paging",
+  "reviewer": "inline-self（环境无已注册子代理，主会话代行）",
+  "verdict": "PASS",
+  "reviewedAgainst": "da29cb7d40179e133302e053901ad0413de2a827",
+  "findings": [
+    {
+      "severity": "P3",
+      "status": "accepted",
+      "title": "数据层附加段不参与轮询（声明边界，非缺陷）",
+      "evidence": "extraItems 为组件 state，sessionsQuery 轮询只刷首屏 500 条；design 边界3 已声明可接受——500 条外老会话状态低频变化，组内行级活性灯/完成检测对附加段条目仍生效（消费组合集 sessions）",
+      "location": "frontend/src/components/sessions/session-list-panel.tsx:1063"
+    },
+    {
+      "severity": "P3",
+      "status": "accepted",
+      "title": "offset 翻页排序漂移窗口（声明边界）",
+      "evidence": "置顶/活跃排序键在翻页窗口变化时 offset 页与首屏可能重叠或漏行；重叠经 id 去重收敛（append 两处去重：组合 memo + setExtraItems），漏行用户再点一次加载自然补齐；design 边界1 已裁决可接受",
+      "location": "frontend/src/components/sessions/session-list-panel.tsx:1120"
+    }
+  ],
+  "dimensionNotes": {
+    "乱序": "ok",
+    "并发": "ok",
+    "切换": "ok",
+    "作用域": "ok"
+  },
+  "reviewNotes": "逐条核对：①FR-01 settleStagedAfterSend 补 onSessionListRefresh（与 onSwitched 等 8 个既有点位同款；dialog 未传 prop 天然跳过）——测试正例（暂存供应商→发送→断言回调）+负例（无暂存发送不触发）双锚；②FR-02 总数常显行 totalFromServer>0 恒渲染、已加载不足附计数，零回归锚（总数=已加载时无后缀无入口）；③FR-03 visibleGroupSessionsWithExtra(10+extra ∪ 在线全显)递增语义，12→31→35 用例验证步长 20 与按钮消失，defaultVisibleGroupSessions 保留为 extra=0 路径（移动端共用不受影响）；④FR-04 offset=组合集长度续拉、同筛选参复用 listParamsBase 单一来源、双处 id 去重、extraLoading in-flight 守卫；⑤FR-05 scope/isArchivedView/assocFilter 变化 effect 清附加段 + resetExpansionForFilter 清组内递增（两层筛选为客户端过滤只清递增不清数据，口径正确）；⑥FR-06 实测 session-list-panel 124+staged 2+portal/layout 85 全绿、tsc --noEmit 零错、触达四文件 eslint 0 error（3 warning 均为既有行）。移动端 mobile-session-list 未触碰（grep 验证 showAll 残留全在 mobile/conflict-compare 独立实现）。声明边界两条 P3 accepted（见 findings）。生成物同步：无后端 schema 改动，gen:types 无义务。",
+  "reviewedAt": "2026-10-28T04:48:10.000Z"
+}

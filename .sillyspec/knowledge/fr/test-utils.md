@@ -2068,3 +2068,45 @@ created_at: 2026-10-16T01:30:35.950Z
   confirmed_at: null
   source_change: 2026-10-28-bg-scan-tailread-eviction
   status: active
+
+## FR-test-utils-109 会话内暂存切换（供应商/模型/档案）随消息发送生效后，左侧会话列表对应条目的配置 chips 立即刷新（不依赖轮询兜底）
+变更：2026-10-28-session-list-refresh-and-paging
+状态：active
+摘要：主路径
+全文：.sillyspec/changes/archive/2026-10-28-session-list-refresh-and-paging/requirements.md#FR-01
+最近确认：da29cb7d40179e133302e053901ad0413de2a827
+
+## FR-test-utils-110 会话列表常显总数（按当前筛选口径的服务端 total，筛选/视图切换随之更新）
+变更：2026-10-28-session-list-refresh-and-paging
+状态：active
+摘要：主路径
+全文：.sillyspec/changes/archive/2026-10-28-session-list-refresh-and-paging/requirements.md#FR-02
+最近确认：da29cb7d40179e133302e053901ad0413de2a827
+
+## FR-test-utils-111 组内默认展示最新 10 条∪在线会话（既有语义不变），「加载更多」每次递增 20 条直至组内全部显示，全部显示后不再出现按钮
+变更：2026-10-28-session-list-refresh-and-paging
+状态：active
+摘要：主路径
+全文：.sillyspec/changes/archive/2026-10-28-session-list-refresh-and-paging/requirements.md#FR-03
+最近确认：da29cb7d40179e133302e053901ad0413de2a827
+
+## FR-test-utils-112 已加载数 < 总数时提供数据层加载更多入口，点击按相同筛选参 offset 续拉（突破单次 500 上限），附加段按 id 去重防排序漂移重复
+变更：2026-10-28-session-list-refresh-and-paging
+状态：active
+摘要：主路径
+全文：.sillyspec/changes/archive/2026-10-28-session-list-refresh-and-paging/requirements.md#FR-04
+最近确认：da29cb7d40179e133302e053901ad0413de2a827
+
+## FR-test-utils-113 筛选/视图/scope 切换后组内递增计数与附加段自动重置
+变更：2026-10-28-session-list-refresh-and-paging
+状态：active
+摘要：主路径
+全文：.sillyspec/changes/archive/2026-10-28-session-list-refresh-and-paging/requirements.md#FR-05
+最近确认：da29cb7d40179e133302e053901ad0413de2a827
+
+## FR-test-utils-114 触达测试文件全绿，新增用例覆盖上述各点；移动端列表（mobile-session-list）本次不动、口径差异在 design 声明
+变更：2026-10-28-session-list-refresh-and-paging
+状态：active
+摘要：主路径
+全文：.sillyspec/changes/archive/2026-10-28-session-list-refresh-and-paging/requirements.md#FR-06
+最近确认：da29cb7d40179e133302e053901ad0413de2a827

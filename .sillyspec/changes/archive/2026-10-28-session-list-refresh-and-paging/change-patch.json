@@ -1,0 +1,87 @@
+{
+  "change": "2026-10-28-session-list-refresh-and-paging",
+  "baseline": "f3dafab3cb82bfca2a23b0b44f7ec5627ce02cee",
+  "head": "da29cb7d40179e133302e053901ad0413de2a827",
+  "files": [
+    "frontend/src/components/daemon/__tests__/session-panel-staged-list-refresh.test.tsx",
+    "frontend/src/components/daemon/session-panel/session-panel-page.tsx",
+    "frontend/src/components/sessions/__tests__/session-list-panel.test.tsx",
+    "frontend/src/components/sessions/session-list-panel.tsx"
+  ],
+  "totals": {
+    "files": 4,
+    "additions": 559,
+    "deletions": 49
+  },
+  "savedAt": "2026-10-28T04:47:05.059Z",
+  "note": "flow done 时点冻结（本变更可归属交付面：baseline..HEAD 提交面过滤 .sillyspec/ 只留 .sillyspec/docs/ 交付文档 + 独占树未提交交付；治理工件目录不入冻结——2026-10-12-close-trace-freeze-integrity FR-01）",
+  "modules": [
+    {
+      "id": "frontend",
+      "files": 4,
+      "doc": "docs/multi-agent-platform/modules/frontend.md",
+      "docTouched": false,
+      "docMissing": false
+    },
+    {
+      "id": "frontend_components",
+      "files": 4,
+      "doc": "docs/SillyHub/modules/frontend_components.md",
+      "docTouched": false,
+      "docMissing": false
+    }
+  ],
+  "uncoveredDirs": [],
+  "moduleMaps": [
+    "docs/backend/modules/_module-map.yaml",
+    "docs/frontend/modules/_module-map.yaml",
+    "docs/multi-agent-platform/modules/_module-map.yaml",
+    "docs/SillyHub/modules/_module-map.yaml",
+    "docs/sillyhub-daemon/modules/_module-map.yaml"
+  ],
+  "acceptedDirtyGap": 1,
+  "scopeAudit": {
+    "mode": "full-flow",
+    "ok": true,
+    "degradedReason": null,
+    "baseAnchor": "f3dafab3cb82bfca2a23b0b44f7ec5627ce02cee",
+    "totals": {
+      "files": 4,
+      "additions": 559,
+      "deletions": 49
+    },
+    "rows": [
+      {
+        "path": "frontend/src/components/daemon/__tests__/session-panel-staged-list-refresh.test.tsx",
+        "additions": 266,
+        "deletions": 0,
+        "kind": "new"
+      },
+      {
+        "path": "frontend/src/components/daemon/session-panel/session-panel-page.tsx",
+        "additions": 6,
+        "deletions": 1,
+        "kind": "modified"
+      },
+      {
+        "path": "frontend/src/components/sessions/__tests__/session-list-panel.test.tsx",
+        "additions": 142,
+        "deletions": 4,
+        "kind": "modified"
+      },
+      {
+        "path": "frontend/src/components/sessions/session-list-panel.tsx",
+        "additions": 145,
+        "deletions": 44,
+        "kind": "modified"
+      }
+    ],
+    "excluded": {
+      "foreignDeclared": []
+    },
+    "note": "flow done 时点冻结（本文件落盘时采集）",
+    "closedBy": "flow done"
+  },
+  "patchSha256": "d8c3d83c50d44944b4f29596e0a43973acc54171b798fa80d486d5d7b10baadd",
+  "patchStatus": "ok"
+}

@@ -1,0 +1,769 @@
+diff --git a/frontend/src/components/daemon/__tests__/session-panel-staged-list-refresh.test.tsx b/frontend/src/components/daemon/__tests__/session-panel-staged-list-refresh.test.tsx
+new file mode 100644
+index 000000000..254bf5d37
+--- /dev/null
++++ b/frontend/src/components/daemon/__tests__/session-panel-staged-list-refresh.test.tsx
+@@ -0,0 +1,266 @@
++// 2026-10-28-session-list-refresh-and-paging FR-01：暂存切换随消息发送生效后
++// 左栏列表立即刷新——settleStagedAfterSend 补 onSessionListRefresh（此前该路径
++// 漏调，仅能等 10s/30s 轮询兜底，用户看到的一直是新建时配置）。
++//
++// 覆盖：
++//   1. 正例：配置条暂存供应商 → 发送消息受理成功 → onSessionListRefresh 被调
++//      （列表 chips 即时刷新，不依赖轮询）；
++//   2. 负例（零回归锚）：无暂存发送 → settle 早退，不触发列表刷新。
++//
++// mock 模板 = session-panel-approval-list-refresh.test.tsx（page 模式网络层全
++// mock + QueryClientProvider；listProviders mock 换供应商 fixture 供暂存交互）。
++
++import { describe, it, expect, beforeEach, vi } from "vitest";
++import { render, screen, waitFor, fireEvent } from "@testing-library/react";
++import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
++
++import { SessionPanel } from "../session-panel";
++import type {
++  SessionStreamConnection,
++  SessionStreamHandlers,
++} from "@/lib/daemon";
++
++vi.mock("@/components/ui/markdown-text", () => ({
++  MarkdownText: ({ content }: { content: string }) => (
++    <div data-testid="markdown-text">{content}</div>
++  ),
++}));
++
++/* ----- mock 网络层（approval 模板） ----- */
++
++const sessionApi = vi.hoisted(() => ({
++  getSessionUsage: vi.fn().mockResolvedValue(null),
++  createSession: vi.fn(),
++  injectSession: vi.fn(),
++  interruptSession: vi.fn(),
++  endSession: vi.fn(),
++  streamSession: vi.fn(),
++  getAgentSession: vi.fn(),
++  getAgentSessionLogs: vi.fn(),
++  fetchSessionTurnOutline: vi.fn(),
++  fetchPendingDialogs: vi.fn(),
++  fetchSessionDialogHistory: vi.fn(),
++  listSessionRuns: vi.fn(),
++  listSessionTasks: vi.fn().mockResolvedValue([]),
++  listSessionTeamMissions: vi.fn(),
++  triggerSessionTeamMission: vi.fn(),
++  fetchSessionQueue: vi.fn(),
++  deleteSessionQueueEntry: vi.fn(),
++  retrySessionQueueEntry: vi.fn(),
++}));
++
++vi.mock("@/lib/daemon", async () => {
++  const actual = await vi.importActual<typeof import("@/lib/daemon")>("@/lib/daemon");
++  return {
++    ...actual,
++    getSessionUsage: sessionApi.getSessionUsage,
++    createSession: sessionApi.createSession,
++    injectSession: sessionApi.injectSession,
++    interruptSession: sessionApi.interruptSession,
++    endSession: sessionApi.endSession,
++    streamSession: sessionApi.streamSession,
++    getAgentSession: sessionApi.getAgentSession,
++    getAgentSessionLogs: sessionApi.getAgentSessionLogs,
++    fetchSessionTurnOutline: sessionApi.fetchSessionTurnOutline,
++    fetchPendingDialogs: sessionApi.fetchPendingDialogs,
++    fetchSessionDialogHistory: sessionApi.fetchSessionDialogHistory,
++    listSessionRuns: sessionApi.listSessionRuns,
++    listSessionTasks: sessionApi.listSessionTasks,
++    listSessionTeamMissions: sessionApi.listSessionTeamMissions,
++    triggerSessionTeamMission: sessionApi.triggerSessionTeamMission,
++    fetchSessionQueue: sessionApi.fetchSessionQueue,
++    deleteSessionQueueEntry: sessionApi.deleteSessionQueueEntry,
++    retrySessionQueueEntry: sessionApi.retrySessionQueueEntry,
++  };
++});
++
++const workspaceApi = vi.hoisted(() => ({
++  listWorkspaces: vi.fn(),
++  listProjects: vi.fn(),
++  listProjectWorkspaces: vi.fn(),
++}));
++
++vi.mock("@/lib/workspaces", async () => {
++  const actual = await vi.importActual<typeof import("@/lib/workspaces")>(
++    "@/lib/workspaces",
++  );
++  return { ...actual, listWorkspaces: workspaceApi.listWorkspaces };
++});
++
++vi.mock("@/lib/ppm/project", async () => {
++  const actual = await vi.importActual<typeof import("@/lib/ppm/project")>(
++    "@/lib/ppm/project",
++  );
++  return { ...actual, listProjects: workspaceApi.listProjects };
++});
++
++vi.mock("@/lib/workspace", async () => {
++  const actual = await vi.importActual<typeof import("@/lib/workspace")>(
++    "@/lib/workspace",
++  );
++  return { ...actual, listProjectWorkspaces: workspaceApi.listProjectWorkspaces };
++});
++
++vi.mock("@/lib/use-daemon-machines", () => ({
++  useDaemonMachines: () => ({ items: [] }),
++}));
++vi.mock("@/lib/agent-profiles", async () => {
++  const actual = await vi.importActual<typeof import("@/lib/agent-profiles")>(
++    "@/lib/agent-profiles",
++  );
++  return { ...actual, useMineAgentProfiles: () => ({ profiles: [] }) };
++});
++
++/** FR-01：暂存交互需要一个可选供应商（listProviders 内部查询数据源）。
++ * fixture 内联进 mock 工厂（vi.mock hoisting：顶层变量不可引用）。 */
++vi.mock("@/lib/api/llm-providers", async () => {
++  const actual = await vi.importActual<typeof import("@/lib/api/llm-providers")>(
++    "@/lib/api/llm-providers",
++  );
++  return {
++    ...actual,
++    listProviders: vi.fn().mockResolvedValue([
++      { id: "prov-glm", name: "GLM 平台", models: [], agent_kinds: ["claude"], is_default: false },
++    ]),
++  };
++});
++
++/* ----- fake SSE connection（approval 模板极简：无事件路由需求） ----- */
++
++interface FakeConn extends SessionStreamConnection {
++  close: ReturnType<typeof vi.fn>;
++}
++
++function makeStreamMock(): { conn: FakeConn | null; factory: ReturnType<typeof vi.fn> } {
++  let captured: FakeConn | null = null;
++  const factory = vi.fn(
++    (_sessionId: string, _handlers: SessionStreamHandlers): FakeConn => {
++      captured = {
++        close: vi.fn(),
++        getLastEventId: () => null,
++      };
++      return captured;
++    },
++  );
++  return {
++    get conn() {
++      return captured;
++    },
++    factory,
++  };
++}
++
++function makeDetail() {
++  return {
++    id: "sess-staged",
++    runtime_id: null,
++    lease_id: null,
++    provider: "claude",
++    status: "active",
++    agent_session_id: "ag-1",
++    config: null,
++    turn_count: 1,
++    created_at: "t",
++    last_active_at: null,
++    ended_at: null,
++    current_run_id: null,
++    workspace_id: null,
++    llm_provider_id: null,
++    agent_profile_id: null,
++    title: "暂存切换会话",
++    config_snapshot: null,
++  };
++}
++
++function setupPage(onSessionListRefresh: ReturnType<typeof vi.fn>) {
++  const qc = new QueryClient({
++    defaultOptions: { queries: { retry: false } },
++  });
++  return render(
++    <QueryClientProvider client={qc}>
++      <SessionPanel
++        mode="page"
++        sessionId="sess-staged"
++        machines={[]}
++        llmProviders={[]}
++        onSessionListRefresh={onSessionListRefresh}
++      />
++    </QueryClientProvider>,
++  );
++}
++
++beforeEach(() => {
++  vi.clearAllMocks();
++  sessionApi.fetchSessionQueue.mockResolvedValue([]);
++  sessionApi.deleteSessionQueueEntry.mockResolvedValue(undefined);
++  sessionApi.retrySessionQueueEntry.mockResolvedValue({
++    id: "entry-1",
++    prompt: "",
++    attachment_ids: [],
++    agent_profile_id: null,
++    llm_provider_id: null,
++    status: "pending",
++    error_msg: null,
++    created_at: "2026-10-28T10:00:00Z",
++  });
++  sessionApi.getAgentSession.mockResolvedValue(makeDetail());
++  sessionApi.getAgentSessionLogs.mockResolvedValue([]);
++  sessionApi.fetchSessionTurnOutline.mockResolvedValue({
++    session_id: "s-1",
++    total_turns: 0,
++    items: [],
++  });
++  sessionApi.listSessionRuns.mockResolvedValue([]);
++  sessionApi.fetchPendingDialogs.mockResolvedValue([]);
++  sessionApi.fetchSessionDialogHistory.mockResolvedValue([]);
++  sessionApi.listSessionTeamMissions.mockResolvedValue([]);
++  sessionApi.injectSession.mockResolvedValue({
++    session_id: "sess-staged",
++    run_id: "run-2",
++    status: "pending",
++    queued: false,
++  });
++  workspaceApi.listWorkspaces.mockResolvedValue({ items: [] });
++  workspaceApi.listProjects.mockResolvedValue([]);
++  workspaceApi.listProjectWorkspaces.mockResolvedValue([]);
++});
++
++describe("暂存切换随消息生效 → 左栏列表立即刷新（FR-01）", () => {
++  it("正例：暂存供应商 → 发送受理成功 → onSessionListRefresh 被调（不等轮询）", async () => {
++    const stream = makeStreamMock();
++    sessionApi.streamSession.mockImplementation(stream.factory);
++    const onSessionListRefresh = vi.fn();
++    setupPage(onSessionListRefresh);
++
++    // 配置条供应商按钮就绪（providers 查询到位）→ 点开 → 暂存选 GLM 平台。
++    const providerBtn = await screen.findByRole("button", {
++      name: /^配置-供应商/,
++    });
++    fireEvent.click(providerBtn);
++    fireEvent.click(await screen.findByRole("button", { name: "选择 GLM 平台" }));
++
++    // 输入消息并发送（空闲直发路径 → settleStagedAfterSend）。
++    const input = await screen.findByRole("textbox");
++    fireEvent.change(input, { target: { value: "继续" } });
++    fireEvent.click(screen.getByTitle("发送"));
++
++    await waitFor(() => expect(sessionApi.injectSession).toHaveBeenCalled());
++    // FR-01：发送受理成功即触发列表刷新（chips 即时更新）。
++    await waitFor(() => expect(onSessionListRefresh).toHaveBeenCalled());
++  });
++
++  it("负例（零回归锚）：无暂存发送 → 不触发列表刷新（settle 早退）", async () => {
++    const stream = makeStreamMock();
++    sessionApi.streamSession.mockImplementation(stream.factory);
++    const onSessionListRefresh = vi.fn();
++    setupPage(onSessionListRefresh);
++
++    const input = await screen.findByRole("textbox");
++    fireEvent.change(input, { target: { value: "普通追问" } });
++    fireEvent.click(screen.getByTitle("发送"));
++
++    await waitFor(() => expect(sessionApi.injectSession).toHaveBeenCalled());
++    // 无暂存：settleStagedAfterSend 早退（stagedConfig 空），不刷列表。
++    expect(onSessionListRefresh).not.toHaveBeenCalled();
++  });
++});
+diff --git a/frontend/src/components/daemon/session-panel/session-panel-page.tsx b/frontend/src/components/daemon/session-panel/session-panel-page.tsx
+index 772b619b0..dbff7fe27 100644
+--- a/frontend/src/components/daemon/session-panel/session-panel-page.tsx
++++ b/frontend/src/components/daemon/session-panel/session-panel-page.tsx
+@@ -1171,6 +1171,10 @@ export function SessionPanelPage({
+   /**
+    * 2026-10-25：发送受理成功后的暂存收敛——清空暂存 + 刷新会话详情（配置条
+    * 回显新生效值）。档位失败时保留档位暂存（其余字段照清）。
++   * 2026-10-28-session-list-refresh-and-paging FR-01：补列表刷新回调——暂存
++   * 供应商/模型/档案随消息生效后，左侧列表条目 chips 同步刷新（此前该路径
++   * 漏调，仅能等 10s/30s 轮询兜底，用户看到的一直是新建时配置；与 onSwitched
++   * /打断/重置等既有点位同款回调；dialog 模式未传该 prop 天然跳过零回归）。
+    */
+   const settleStagedAfterSend = useCallback(
+     (thinkingApplied: boolean) => {
+@@ -1180,9 +1184,10 @@ export function SessionPanelPage({
+       );
+       if (sessionId) {
+         void qc.invalidateQueries({ queryKey: ["agentSessionDetail", sessionId] });
++        onSessionListRefresh?.();
+       }
+     },
+-    [stagedConfig, sessionId, qc],
++    [stagedConfig, sessionId, qc, onSessionListRefresh],
+   );
+ 
+   /**
+diff --git a/frontend/src/components/sessions/__tests__/session-list-panel.test.tsx b/frontend/src/components/sessions/__tests__/session-list-panel.test.tsx
+index 7a3eb3bef..7b83c1c74 100644
+--- a/frontend/src/components/sessions/__tests__/session-list-panel.test.tsx
++++ b/frontend/src/components/sessions/__tests__/session-list-panel.test.tsx
+@@ -1106,10 +1106,10 @@ describe("SessionListPanel 组头回调与截断", () => {
+     });
+   });
+ 
+-  it("组内默认收敛（最新 10 ∪ 在线全显）+ 「显示全部」（R-03 起 / FR-03）", async () => {
++  it("组内默认收敛（最新 10 ∪ 在线全显）+ 递增加载（每次 +20 覆盖全量后按钮消失）（R-03/FR-03；2026-10-28 递增语义改写）", async () => {
+     setWorkspaces([makeWorkspace({ id: "ws-1", name: "SillyHub" })]);
+     // 12 条已结束在前 + 5 条在线在后（服务端序）：默认 = 前 10 + 尾部在线
+-    // 全显 = 15 行；「显示全部（共 17 条）」展开后全量。
++    // 全显 = 15 行；「加载更多」+20 覆盖 10+20≥17 → 全量 17 行且按钮消失。
+     const many = [
+       ...Array.from({ length: 12 }, (_, i) =>
+         makeSession({
+@@ -1133,11 +1133,149 @@ describe("SessionListPanel 组头回调与截断", () => {
+     await openGroup("SillyHub");
+ 
+     await waitFor(() => expect(sessionRows().length).toBe(15));
+-    const moreBtn = screen.getByRole("button", { name: /显示全部/ });
+-    expect(moreBtn.textContent).toContain("共 17 条");
++    const moreBtn = screen.getByRole("button", { name: /加载更多/ });
++    expect(moreBtn.textContent).toContain("还有 2 条");
+ 
+     fireEvent.click(moreBtn);
+     await waitFor(() => expect(sessionRows().length).toBe(17));
++    // 全量覆盖后按钮消失（FR-03）。
++    expect(
++      screen.queryByRole("button", { name: /加载更多（还有/ }),
++    ).not.toBeInTheDocument();
++  });
++
++  it("组内 35 条（在线 2 条在第 20/30 位）：加载更多两次 10+20→30→全量（FR-03 递增步长 20）", async () => {
++    setWorkspaces([makeWorkspace({ id: "ws-1", name: "SillyHub" })]);
++    const many = Array.from({ length: 35 }, (_, i) =>
++      makeSession({
++        id: `s-${i}`,
++        workspace_id: "ws-1",
++        title: `会话${i}`,
++        status: i === 20 || i === 30 ? "active" : "ended",
++      }),
++    );
++    mocks.listAgentSessions.mockResolvedValue(listResponse(many));
++    renderPanel(<SessionListPanel />);
++    await openGroup("SillyHub");
++
++    // 默认 = 最新 10 ∪ 在线 2（第 21/31 位）= 12 行。
++    await waitFor(() => expect(sessionRows().length).toBe(12));
++    // +20 → 最新 30 ∪ 在线（第 31 位补入）= 31 行。
++    fireEvent.click(screen.getByRole("button", { name: /加载更多/ }));
++    await waitFor(() => expect(sessionRows().length).toBe(31));
++    // 再 +20 → 覆盖全量 35，按钮消失。
++    fireEvent.click(screen.getByRole("button", { name: /加载更多/ }));
++    await waitFor(() => expect(sessionRows().length).toBe(35));
++    expect(
++      screen.queryByRole("button", { name: /加载更多（还有/ }),
++    ).not.toBeInTheDocument();
++  });
++});
++
++// ── 2026-10-28-session-list-refresh-and-paging：总数常显 / 数据层续拉 / 重置 ──
++
++describe("SessionListPanel 总数常显与数据层加载更多（session-list-refresh-and-paging）", () => {
++  it("FR-02：总数常显「共 N 条会话」；已加载不足时附已加载计数 + FR-04 数据层入口在场", async () => {
++    setWorkspaces([makeWorkspace({ id: "ws-1", name: "SillyHub" })]);
++    const loaded = Array.from({ length: 3 }, (_, i) =>
++      makeSession({ id: `s-${i}`, workspace_id: "ws-1", title: `会话${i}` }),
++    );
++    mocks.listAgentSessions.mockResolvedValue(
++      listResponse(loaded, { total: 800 }),
++    );
++    renderPanel(<SessionListPanel />);
++    await openGroup("SillyHub");
++
++    await waitFor(() =>
++      expect(screen.getByText(/共 800 条会话/)).toBeInTheDocument(),
++    );
++    expect(screen.getByText(/已加载 3 条/)).toBeInTheDocument();
++    expect(
++      screen.getByRole("button", { name: "加载更多会话" }),
++    ).toBeInTheDocument();
++  });
++
++  it("FR-02 零回归锚：已加载 = 总数时只显总数（无已加载计数、无数据层入口）", async () => {
++    setWorkspaces([makeWorkspace({ id: "ws-1", name: "SillyHub" })]);
++    mocks.listAgentSessions.mockResolvedValue(
++      listResponse([
++        makeSession({ id: "s-1", workspace_id: "ws-1", title: "会话A" }),
++      ]),
++    );
++    renderPanel(<SessionListPanel />);
++    await openGroup("SillyHub");
++
++    await waitFor(() =>
++      expect(screen.getByText(/共 1 条会话$/)).toBeInTheDocument(),
++    );
++    expect(screen.queryByText(/已加载/)).not.toBeInTheDocument();
++    expect(
++      screen.queryByRole("button", { name: "加载更多会话" }),
++    ).not.toBeInTheDocument();
++  });
++
++  it("FR-04：点「加载更多会话」→ offset 续拉（同筛选参）+ 附加段去重后追加展示", async () => {
++    setWorkspaces([makeWorkspace({ id: "ws-1", name: "SillyHub" })]);
++    const first = Array.from({ length: 2 }, (_, i) =>
++      makeSession({ id: `s-${i}`, workspace_id: "ws-1", title: `会话${i}` }),
++    );
++    // 续拉页：1 条与首屏重叠（排序漂移模拟）+ 2 条新会话 → 去重后 +2。
++    const second = [
++      makeSession({ id: "s-0", workspace_id: "ws-1", title: "会话0" }),
++      makeSession({ id: "s-10", workspace_id: "ws-1", title: "新会话10" }),
++      makeSession({ id: "s-11", workspace_id: "ws-1", title: "新会话11" }),
++    ];
++    mocks.listAgentSessions
++      .mockResolvedValueOnce(listResponse(first, { total: 4 }))
++      .mockResolvedValueOnce(listResponse(second, { total: 4 }));
++    renderPanel(<SessionListPanel />);
++    await openGroup("SillyHub");
++    await waitFor(() => expect(sessionRows().length).toBe(2));
++
++    fireEvent.click(screen.getByRole("button", { name: "加载更多会话" }));
++    await waitFor(() => expect(sessionRows().length).toBe(4));
++    // 续拉请求带 offset=首屏已加载数（同筛选参透传断言）。
++    const secondCall = mocks.listAgentSessions.mock.calls[1]![0] as Record<
++      string,
++      unknown
++    >;
++    expect(secondCall.offset).toBe(2);
++    expect(secondCall.limit).toBeGreaterThan(0);
++    // 去重后已加载 = 4 = total → 数据层入口消失。
++    await waitFor(() =>
++      expect(
++        screen.queryByRole("button", { name: "加载更多会话" }),
++      ).not.toBeInTheDocument(),
++    );
++  });
++
++  it("FR-05：两层筛选切换 → 组内递增计数重置回默认基线", async () => {
++    setMachines({ items: [makeMachine()] });
++    setWorkspaces([makeWorkspace({ id: "ws-1", name: "SillyHub" })]);
++    // 15 条 ended（无在线）→ 默认 10，加载一次 +20 → 15 全量。
++    const many = Array.from({ length: 15 }, (_, i) =>
++      makeSession({
++        id: `s-${i}`,
++        workspace_id: "ws-1",
++        title: `会话${i}`,
++        status: "ended",
++      }),
++    );
++    mocks.listAgentSessions.mockResolvedValue(listResponse(many));
++    renderPanel(<SessionListPanel />);
++    await openGroup("SillyHub");
++    await waitFor(() => expect(sessionRows().length).toBe(10));
++    fireEvent.click(screen.getByRole("button", { name: /加载更多/ }));
++    await waitFor(() => expect(sessionRows().length).toBe(15));
++
++    // 切换机器筛选 → resetExpansionForFilter → 组内递增清零 + 组折叠收纳
++    // （R-05 重置语义），重新展开组后回默认 10 行。
++    await chooseAntdOptionByText("slp-machine", "machine-1");
++    await openGroup("SillyHub");
++    await waitFor(() => expect(sessionRows().length).toBe(10));
++    expect(
++      screen.getByRole("button", { name: /加载更多/ }),
++    ).toBeInTheDocument();
+   });
+ });
+ 
+diff --git a/frontend/src/components/sessions/session-list-panel.tsx b/frontend/src/components/sessions/session-list-panel.tsx
+index 5f830bc6e..3bcc1771c 100644
+--- a/frontend/src/components/sessions/session-list-panel.tsx
++++ b/frontend/src/components/sessions/session-list-panel.tsx
+@@ -115,7 +115,7 @@
+  * 悬停卡/未读红角标并入行首槽（SessionStatusSlot 单一标识位）；新增执行
+  * 完成通知（非终态→ended 且不在该会话上 → 绿角标，点击进入后消失）。
+  */
+-import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
++import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+ import { useQuery } from "@tanstack/react-query";
+ import {
+   Button,
+@@ -276,11 +276,15 @@ function confirmIcon(Icon: LucideIcon, colorCls: string) {
+   );
+ }
+ 
+-/** 组内截断阈值 + 「显示全部」（R-03）。2026-10-27-sessions-total-and-status-filter
++/** 组内截断阈值 + 「加载更多」（R-03）。2026-10-27-sessions-total-and-status-filter
+  * FR-03：默认展示收敛 50 → 最新 10 条 ∪ 在线全显（与移动端同口径；GROUP_ITEM_LIMIT
+- * 语义化为「默认可见基线数」，展开仍显全量）。 */
++ * 语义化为「默认可见基线数」）。2026-10-28-session-list-refresh-and-paging FR-03：
++ * 二态「显示全部」退役 → 递增加载（GROUP_LOAD_MORE_STEP/次，用户拍板）。 */
+ const GROUP_ITEM_LIMIT = 10;
+ 
++/** 组内「加载更多」每次递增条数（FR-03，用户拍板 20）。 */
++export const GROUP_LOAD_MORE_STEP = 20;
++
+ /**
+  * 组内默认可见集（FR-03）：最新 GROUP_ITEM_LIMIT 条 ∪ 全部在线会话（在线 =
+  * 非 ended/failed 三态，不管多老都显示），保持服务端返回序（置顶优先 +
+@@ -295,6 +299,24 @@ function defaultVisibleGroupSessions(
+   return [...head, ...online];
+ }
+ 
++/**
++ * 组内展示集（2026-10-28-session-list-refresh-and-paging FR-03）：最新
++ * (GROUP_ITEM_LIMIT + extra) 条 ∪ 在线全显，保持服务端返回序。extra=0 即既有
++ * 默认基线（10∪在线，defaultVisibleGroupSessions 语义不变）；extra 递增来自
++ * 组底「加载更多」点击（每次 +GROUP_LOAD_MORE_STEP），展示集覆盖组内全量时
++ * 调用方收敛（按钮消失）。
++ */
++export function visibleGroupSessionsWithExtra(
++  sessions: AgentSessionRead[],
++  extra: number,
++): AgentSessionRead[] {
++  if (extra <= 0) return defaultVisibleGroupSessions(sessions);
++  const head = sessions.slice(0, GROUP_ITEM_LIMIT + extra);
++  const rest = sessions.slice(GROUP_ITEM_LIMIT + extra);
++  const online = rest.filter((s) => s.status !== "ended" && s.status !== "failed");
++  return [...head, ...online];
++}
++
+ /**
+  * 重命名标题长度上限（task-07 / 2026-09-07-session-pin-rename-scheduled-send
+  * / FR-02）：与后端 rename 校验同源（strip 后非空 ≤255，超出 422）——输入框
+@@ -860,8 +882,16 @@ function WorkspaceTreeList({
+   const [batchGroupId, setBatchGroupId] = useState<string | null>(null);
+   const [checkedIds, setCheckedIds] = useState<Set<string>>(new Set());
+   const [deleting, setDeleting] = useState(false);
+-  // 组内默认收敛（R-03/FR-03）的「显示全部」展开集合。
+-  const [showAllGroupIds, setShowAllGroupIds] = useState<Set<string>>(new Set());
++  // 组内递增加载计数（2026-10-28-session-list-refresh-and-paging FR-03）：
++  // groupId → 已额外展开条数（默认缺省 = 0 条额外，即 10∪在线基线）；组底
++  // 「加载更多」每次 +GROUP_LOAD_MORE_STEP。取代原「显示全部」二态集合。
++  const [groupExtraCount, setGroupExtraCount] = useState<Map<string, number>>(
++    () => new Map(),
++  );
++  // ── FR-04：数据层续拉（突破单次 500 上限）──首屏 useQuery 之外的附加段
++  // （组件 state，不参与轮询——500 条外老会话低频变化，接受陈旧，design 边界3）。
++  const [extraItems, setExtraItems] = useState<AgentSessionRead[]>([]);
++  const [extraLoading, setExtraLoading] = useState(false);
+   // X-009「关联」筛选下拉（task-10 / FR-05）：选中值编码 kind:id
+   //（change:<uuid> / quicklog:<ql_id>；task-06 PPM 为三段 ppm:<kind>:<uuid>），
+   // undefined = 未筛。仅 workspace scope 渲染下拉与发起选项查询（门控谓词显式
+@@ -1027,6 +1057,28 @@ function WorkspaceTreeList({
+   // 门户软删后按前缀 ["agentSessions"] invalidate 继续全覆盖。
+   // ql-20260824-004：函数式条件轮询（间隔按最近一次数据推导，先例
+   // quicklog-table quicklogPollInterval）——聊天中 10s / 静默 30s。
++  // 2026-10-28-session-list-refresh-and-paging FR-04：服务端筛选参抽出
++  // listParamsBase（首屏 queryFn 与数据层续拉共用同一口径，防两处拼参漂移）。
++  const listParamsBase = useMemo(
++    () => ({
++      limit: AGENT_SESSIONS_TREE_FETCH_LIMIT,
++      archived: isArchivedView ? true : false,
++      // workspace/change/quicklog scope 透传 workspace_id（RuntimeScope 无此字段，跳过）。
++      ...(scope && "workspaceId" in scope && scope.workspaceId
++        ? { workspace_id: scope.workspaceId }
++        : {}),
++      // ql-20260823-003：change 树化后端点过滤参随树透传（D-003@v2）。
++      ...(scope?.kind === "change" ? { change_id: scope.changeId } : {}),
++      // task-10（FR-04 / X-008 消费点一）：quicklog 树化端点过滤参
++      //（task-09 已落 ql_id，M:N 命中含播种行）。
++      ...(scope?.kind === "quicklog" ? { ql_id: scope.qlId } : {}),
++      // FR-02：runtime scope 端点过滤（lib/daemon.ts:1669 既有 runtime_id 参）。
++      ...(scope?.kind === "runtime" ? { runtime_id: scope.runtimeId } : {}),
++      // X-009：「关联」筛选（仅 workspace scope 有值）服务端过滤参透传。
++      ...assocParams,
++    }),
++    [isArchivedView, scope, assocParams],
++  );
+   const sessionsQuery = useQuery<AgentSessionListResponse, ApiError>({
+     queryKey: [
+       "agentSessions",
+@@ -1038,34 +1090,58 @@ function WorkspaceTreeList({
+         assoc: assocFilter ?? null,
+       },
+     ],
+-    queryFn: () =>
+-      listAgentSessions({
+-        limit: AGENT_SESSIONS_TREE_FETCH_LIMIT,
+-        archived: isArchivedView ? true : false,
+-        // workspace/change/quicklog scope 透传 workspace_id（RuntimeScope 无此字段，跳过）。
+-        ...(scope && "workspaceId" in scope && scope.workspaceId
+-          ? { workspace_id: scope.workspaceId }
+-          : {}),
+-        // ql-20260823-003：change 树化后端点过滤参随树透传（D-003@v2）。
+-        ...(scope?.kind === "change" ? { change_id: scope.changeId } : {}),
+-        // task-10（FR-04 / X-008 消费点一）：quicklog 树化端点过滤参
+-        //（task-09 已落 ql_id，M:N 命中含播种行）。
+-        ...(scope?.kind === "quicklog" ? { ql_id: scope.qlId } : {}),
+-        // FR-02：runtime scope 端点过滤（lib/daemon.ts:1669 既有 runtime_id 参）。
+-        ...(scope?.kind === "runtime" ? { runtime_id: scope.runtimeId } : {}),
+-        // X-009：「关联」筛选（仅 workspace scope 有值）服务端过滤参透传。
+-        ...assocParams,
+-      }),
++    queryFn: () => listAgentSessions(listParamsBase),
+     refetchInterval: (query) =>
+       sessionListPollInterval(query.state.data?.items),
+   });
+ 
+-  const sessions = useMemo(
+-    () => sessionsQuery.data?.items ?? [],
+-    [sessionsQuery.data],
+-  );
++  // FR-04：首屏 + 附加段组合（附加段按 id 去重——翻页窗口排序漂移防御：
++  // 置顶/活跃排序键变化时 offset 页与首屏重叠）。下游分组/两层筛选/活性/
++  // 完成检测全链路消费组合集（sessions 命名不变，消费点零改动）。
++  const sessions = useMemo(() => {
++    const base = sessionsQuery.data?.items ?? [];
++    if (extraItems.length === 0) return base;
++    const seen = new Set(base.map((s) => s.id));
++    return [...base, ...extraItems.filter((s) => !seen.has(s.id))];
++  }, [sessionsQuery.data, extraItems]);
+   const totalFromServer = sessionsQuery.data?.total ?? 0;
+ 
++  /**
++   * FR-04：数据层「加载更多会话」——以与首屏完全相同的服务端筛选参 +
++   * offset=已加载数 续拉下一页（limit=500 单请求上限内），附加段 append 按
++   * id 去重；in-flight 守卫防连续点击双拉；失败静默（按钮可重点）。附加段
++   * 携带相同筛选参 + 筛选/scope/视图切换重置（见 resetExpansionForFilter
++   * 与 scope 重置 effect），旧口径数据不泄漏进新视图。
++   */
++  const loadMoreSessions = useCallback(async () => {
++    if (extraLoading) return;
++    setExtraLoading(true);
++    try {
++      const resp = await listAgentSessions({
++        ...listParamsBase,
++        offset: sessions.length,
++      });
++      setExtraItems((prev) => {
++        const seen = new Set([
++          ...(sessionsQuery.data?.items ?? []).map((s) => s.id),
++          ...prev.map((s) => s.id),
++        ]);
++        return [...prev, ...resp.items.filter((s) => !seen.has(s.id))];
++      });
++    } catch {
++      /* 失败静默：按钮可重试（总数行与入口仍按现状渲染） */
++    } finally {
++      setExtraLoading(false);
++    }
++  }, [extraLoading, listParamsBase, sessions.length, sessionsQuery.data]);
++
++  // FR-05：服务端筛选口径（scope / 归档视图 / 关联筛选）变化 → 附加段清空
++  // （数据口径变了，旧附加段不再适用）。两层筛选（机器/引擎 tab）与状态/搜索
++  // 是客户端过滤，不清附加段，但组内递增计数经 resetExpansionForFilter 重置。
++  useEffect(() => {
++    setExtraItems([]);
++  }, [scope, isArchivedView, assocFilter]);
++
+   // ── 2026-09-08-session-list-liveness-dot task-02 / FR-01 / D-001@v2 ─────
+   // 活性数据源：useSessionLiveness 固定 all 槽 30s 轮询。本面板调一次建 map，
+   // 经 WorkspaceGroupNode → SessionRow props 链按 session.id 命中下发（map 未
+@@ -1410,9 +1486,10 @@ function WorkspaceTreeList({
+     });
+   }, [selectedSessionId, currentGroupId]);
+ 
+-  /** R-05：筛选变化重置展开态（除当前组）与组内「显示全部」。 */
++  /** R-05：筛选变化重置展开态（除当前组）与组内递增加载计数（FR-05：附加段
++   * 由 scope/assoc/archived 重置 effect 单独清——两层筛选是客户端过滤不清数据）。 */
+   const resetExpansionForFilter = () => {
+-    setShowAllGroupIds(new Set());
++    setGroupExtraCount(new Map());
+     setCollapsedIds(
+       new Set(groupIds.filter((id) => id !== currentGroupId)),
+     );
+@@ -2086,12 +2163,11 @@ function WorkspaceTreeList({
+                     : undefined
+                 }
+                 exporting={exporting}
+-                showAll={showAllGroupIds.has(group.id)}
++                groupExtra={groupExtraCount.get(group.id) ?? 0}
+                 onToggleShowAll={() =>
+-                  setShowAllGroupIds((prev) => {
+-                    const next = new Set(prev);
+-                    if (next.has(group.id)) next.delete(group.id);
+-                    else next.add(group.id);
++                  setGroupExtraCount((prev) => {
++                    const next = new Map(prev);
++                    next.set(group.id, (prev.get(group.id) ?? 0) + GROUP_LOAD_MORE_STEP);
+                     return next;
+                   })
+                 }
+@@ -2110,10 +2186,27 @@ function WorkspaceTreeList({
+               没有符合条件的会话
+             </div>
+           )}
+-          {/* R-03 提示：一次拉取上限外的余量（个人使用评估 <200，极端兜底可见） */}
+-          {totalFromServer > sessions.length && (
++          {/* 2026-10-28-session-list-refresh-and-paging FR-02：总数常显（服务端
++              total = 当前服务端筛选口径总数，随筛选/视图切换更新）；已加载不足
++              时附已加载计数。FR-04：数据层加载更多入口（突破单次 500 上限）——
++              offset 续拉与首屏同筛选参，附加段 id 去重。 */}
++          {totalFromServer > 0 && (
+             <div className="px-2 pb-1 text-center text-[11px] text-muted-foreground">
+-              仅显示最近 {sessions.length} 条（共 {totalFromServer} 条）
++              共 {totalFromServer} 条会话
++              {sessions.length < totalFromServer
++                ? `（已加载 ${sessions.length} 条）`
++                : ""}
++            </div>
++          )}
++          {totalFromServer > sessions.length && (
++            <div className="px-2 pb-2 pt-1 text-center">
++              <Button
++                size="small"
++                loading={extraLoading}
++                onClick={() => void loadMoreSessions()}
++              >
++                加载更多会话
++              </Button>
+             </div>
+           )}
+           </>
+@@ -2492,7 +2585,7 @@ function WorkspaceGroupNode({
+   onUnpin,
+   onRename,
+   onExport,
+-  showAll,
++  groupExtra,
+   onToggleShowAll,
+   hideMachineTitles,
+   hideEngineChip,
+@@ -2541,7 +2634,8 @@ function WorkspaceGroupNode({
+   onRename?: (_id: string, _oldTitle: string, _newTitle: string) => void;
+   /** task-06（2026-09-14-session-export）：行级导出（未传零按钮，照 onArchive 透传）。 */
+   onExport?: (_id: string, _tier: SessionExportTier) => void;
+-  showAll: boolean;
++  /** 组内已额外展开条数（FR-03 递增加载，0 = 默认基线 10∪在线）。 */
++  groupExtra: number;
+   onToggleShowAll: () => void;
+   /** 筛选态隐藏机器小节标题（FR-02：已隐含——条目按机器过滤后小节名冗余）。 */
+   hideMachineTitles: boolean;
+@@ -2555,14 +2649,19 @@ function WorkspaceGroupNode({
+ }) {
+   // 组内默认展示收敛（R-03 起，FR-03 收紧 50→10+在线全显）：截断作用于分组
+   //（跨机器小节），小节由可见条目派生；在线会话不受默认基线限制全显。
++  // 2026-10-28-session-list-refresh-and-paging FR-03：二态「显示全部」→ 递增
++  // 展示集（最新 10+extra ∪ 在线全显，visibleGroupSessionsWithExtra）。
+   const truncated =
+-    !showAll &&
+-    defaultVisibleGroupSessions(visibleSessions).length < visibleSessions.length;
++    visibleGroupSessionsWithExtra(visibleSessions, groupExtra).length <
++    visibleSessions.length;
+   // 审计修复 F2（2026-08-26）：截断 slice 移入 useMemo——原 render 内联生成新数组，
+   // 引用不稳致 subGrouping/sections 每渲染重算（10s 轮询与任意 state 变化均触发）。
+   const shownSessions = useMemo(
+-    () => (truncated ? defaultVisibleGroupSessions(visibleSessions) : visibleSessions),
+-    [truncated, visibleSessions],
++    () =>
++      truncated
++        ? visibleGroupSessionsWithExtra(visibleSessions, groupExtra)
++        : visibleSessions,
++    [truncated, visibleSessions, groupExtra],
+   );
+ 
+   // 机器小节：首现序分桶（后端按最近活跃倒序 → 最近活跃的机器排前）。
+@@ -3206,8 +3305,10 @@ function WorkspaceGroupNode({
+           )}
+           {truncated && (
+             <div className="border-t border-border px-3 py-1.5 text-center">
++              {/* FR-03：递增加载——每次 +20（GROUP_LOAD_MORE_STEP），展示集
++                  覆盖全量后 truncated=false 按钮自然消失。 */}
+               <Button size="small" onClick={onToggleShowAll}>
+-                显示全部（共 {visibleSessions.length} 条）
++                加载更多（还有 {visibleSessions.length - shownSessions.length} 条）
+               </Button>
+             </div>
+           )}
