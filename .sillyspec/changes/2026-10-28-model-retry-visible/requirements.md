@@ -81,8 +81,9 @@ created_at: 2026-10-27T23:39:20.199Z
 FR-01: sillyhub-daemon/tests/interactive/claude-events.test.ts「api_retry 帧归一化为 status 事件」
 FR-01: sillyhub-daemon/tests/interactive/session-manager-status-dispatch.test.ts「api_retry 落 [MODEL_RETRY] 协议行」
 FR-02: frontend/src/components/daemon/__tests__/session-log-assembler.test.ts「MODEL_RETRY 行分类为 model_retry 段」
-FR-02: frontend/src/components/daemon/__tests__/turn-segment-views.test.tsx「运行中轮渲染重试提示、终态轮不渲染」
+FR-02: frontend/src/components/daemon/__tests__/turn-segment-views.test.tsx「运行中轮渲染重试提示（SegmentView 分发与行内文案）」
+FR-02: frontend/src/components/daemon/__tests__/turn-timeline-model-retry-gating.test.tsx「运行中轮渲染重试提示、终态轮不渲染、全部视图保留」
 FR-02: frontend/src/components/daemon/__tests__/turn-status-bar-phase.test.tsx「重试段纳入 currentActivity 回退链」
 FR-03: 不适用：纯约束性 FR（禁改面），验证手段=FR-04 既有套件零回归 + 交付 diff 无 backend 文件，无可执行断言
 FR-04: sillyhub-daemon/tests/interactive/claude-events.test.ts「api_retry 缺字段与 error_status=null 容错」
-FR-04: frontend/src/components/daemon/__tests__/session-log-assembler.test.ts「MODEL_RETRY 载荷解析失败中性兜底」
+FR-04: frontend/src/components/daemon/__tests__/turn-segment-views.test.tsx「MODEL_RETRY 载荷解析失败中性兜底（坏 JSON → 模型重试中…）」
