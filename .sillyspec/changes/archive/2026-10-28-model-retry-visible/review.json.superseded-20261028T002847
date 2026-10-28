@@ -1,0 +1,48 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-28-model-retry-visible",
+  "reviewer": "subagent-general-purpose（独立子代理评审）",
+  "verdict": "PASS",
+  "reviewedAgainst": "a58aec5c75cb43e34919fdf32ad101a1c6188e62",
+  "findings": [
+    {
+      "severity": "P3",
+      "status": "resolved",
+      "title": "requirements 测试绑定表两处指针与实际用例文件错位（行为覆盖真实，无缺口）",
+      "evidence": "FR-04 绑定「MODEL_RETRY 载荷解析失败中性兜底」标注在 session-log-assembler.test.ts，该文件 4 个新用例均不解析载荷（装配器层只做前缀分类、text 保留 JSON 原文，无从测解析兜底）；该行为实际由 turn-segment-views.test.tsx「连接类…坏 JSON → 「模型重试中…」中性兜底」用例断言。同型错位：FR-02 绑定的「终态轮不渲染」断言实际在新增文件 turn-timeline-model-retry-gating.test.tsx（turn-segment-views.test.tsx 为组件级渲染测试，不含轮状态门控）。实现与测试真实存在且全绿，仅绑定表文件/用例名失准，后续按绑定表核对者会被误导。主会话已修正绑定指针，复核一致：FR-02 新增行指向 turn-timeline-model-retry-gating.test.tsx 三用例（运行中渲染/终态不渲染/全部视图保留）逐一对应，turn-segment-views.test.tsx 行改为「SegmentView 分发与行内文案」与该文件分发及文案用例对应，FR-04「载荷解析失败中性兜底」改指 turn-segment-views.test.tsx 的坏 JSON 兜底用例——三处指针现与实际用例文件一致。",
+      "location": ".sillyspec/changes/2026-10-28-model-retry-visible/requirements.md:88"
+    }
+  ],
+  "dimensionNotes": {
+    "乱序": "ok — api_retry 行只增不改，前端 latestModelRetrySummary 按 ts 取最新（ts >= bestTs），终态轮迟到的重试行被 isLiveTurn 门控+isConversationSegment 排除双保险拦在对话正文外；turn-timeline-model-retry-gating.test.tsx 三用例锁定。",
+    "并发": "ok — 协议行走 onTurnMessage 既有串行链（driver consume 循环逐 envelope await，与 COMPACT_STATUS 同通道同形态，session-manager/events.ts api_retry case 结构与 context_compacting case 逐句同构），daemon 侧无新增并发写面。",
+    "切换": "ok — events.ts api_retry case 首行 `if (!runId) return;` 空守卫真实存在；reloadWithProvider 先换 query 再 close 旧 query + isAuthoritative orphan 谓词，切换期残留帧不会落新轮；轮终态后迟到帧再被前端门控兜住。",
+    "作用域": "ok — 协议行经 onTurnMessage(sessionId, runId, …) 按会话/run 既有归属落库，无跨区共享面；[MODEL_RETRY] 前缀分类在 session-log-assembler.ts 中先于 isAssistantApiErrorText 丢弃规则与 reply 兜底（代码位序+「载荷含 Request rejected 不被吞」用例双重证实），与 [COMPACT_STATUS] 等既有前缀互斥。"
+  },
+  "reviewedAt": "2026-10-28T08:26:28+08:00",
+  "appendix": {
+    "frTraceability": {
+      "FR-01": "claude-events.ts:722-747 归一化（数值字段仅 typeof number 写入、error_status null/number 原样保留、error 非字符串 JSON.stringify 后 slice(0,200)）+ events.ts:526-555 分发（runId 空守卫、[MODEL_RETRY] +单行 JSON、stdout、error 再截断 200、best-effort 由 claude-sdk-driver.ts:772-783 onMessageEnvelopeCb try/catch「iteration continues」保证——与 COMPACT_STATUS 同级语义）。测试 6 用例全对准：claude-events.test.ts 2 例（429 全字段+schema safeParse；null 保留/缺字段不伪造/对象 error 截断）、session-manager-status-dispatch.test.ts 4 例（落行载荷逐键断言/null/空 runId 丢弃/截断 200+缺键省略）。",
+      "FR-02": "assembler kind=model_retry 判定位先于 API Error 丢弃与 reply 兜底（session-log-assembler.ts:410-418，用例证「Request rejected」载荷不被整行吞）；ModelRetryRowView 渲染「模型限流重试中 第N/M次…」+80 字摘要+title 全文、error_status=null 走「模型连接异常重试中」、坏 JSON 退「模型重试中…」不抛错；终态轮对话正文不渲染（isConversationSegment 不含 model_retry + turn-timeline.tsx:2296-2305 isLiveTurn(turnStatus) 门控）；turn-status-bar.tsx latestModelRetrySummary 纳入 currentActivity 回退链且更新 streaming 文本（ts 更晚）不被遮蔽。",
+      "FR-03": "五个本变更提交（0567ff048/2d74159a4/ec64bfcf1/bf392f820/6239db230）逐一核对文件面：零 backend 文件（区间内 backend 2 文件 diff 全部来自并行变更 19b148311 cgroup-v2-watermark-fix）；daemon 重试/退避/is_error→failed/error_detail 链路零触碰。",
+      "FR-04": "daemon 6 新用例 + 前端 13 新用例全部真实存在且断言所述行为（逐文件读断言核实，非看名）；抽验复跑全绿（daemon 29/29、frontend 222/222）。绑定表指针错位见 findings P3。"
+    },
+    "disclosedBoundariesAdjudication": [
+      { "boundary": "终态轮对话正文不渲染重试段（失败由 RunErrorItem 失败卡承担）", "verdict": "accepted", "reason": "防重复噪声且进度/全部视图保留全过程行，与 compact_status 先例同构，gating 测试三态锁定。" },
+      { "boundary": "重试风暴约 10 行协议行的过程行噪声", "verdict": "accepted", "reason": "行数被 max_retries 上界约束（~10），对话视图已门控，全部视图量级与 thinking 分段相当。" },
+      { "boundary": "坏 JSON 载荷中性兜底「模型重试中…」", "verdict": "accepted", "reason": "try/catch 不抛错、最坏退化为无计数提示行，渲染层与状态条两处同口径，有用例锁定。" },
+      { "boundary": "CLI error 字段形态漂移防御（非字符串 JSON.stringify + 两层各截断 200）", "verdict": "accepted", "reason": "归一化与落行两处独立防御，对象 error 用例实测 ≤200 字符，最坏不可读摘要不崩溃。" },
+      { "boundary": "落行 best-effort（失败不得中断会话主流程）", "verdict": "accepted", "reason": "实现在 driver 层既有 try/catch（iteration continues）内，与 COMPACT_STATUS 完全同通道，未新增未验证的容错假设。" }
+    ],
+    "protectionsVerified": {
+      "errorTruncationBothLayers": "claude-events.ts errText.slice(0,200) + events.ts errorText.slice(0,200) 两处均在",
+      "parseFailureFallback": "ModelRetryRowView 与 latestModelRetrySummary 均有 try/catch → 中性文案",
+      "turnStatusGating": "turn-timeline.tsx SegmentedTurnBody textSegments 过滤 isLiveTurn(turnStatus) && (compact_status || model_retry) 真实存在",
+      "enumAlignment": "AGENT_STATUS_SUBTYPES（agent-event-schema.ts）与 AgentStatusSubtype（types.ts）9 值逐字面逐序对齐，均含 'api_retry'"
+    },
+    "spotCheckRuns": [
+      { "command": "cd sillyhub-daemon && npx vitest run tests/interactive/claude-events.test.ts tests/interactive/session-manager-status-dispatch.test.ts", "result": "Test Files 2 passed (2), Tests 29 passed (29)" },
+      { "command": "cd frontend && npx vitest run src/components/daemon/__tests__/session-log-assembler.test.ts src/components/daemon/__tests__/turn-segment-views.test.tsx src/components/daemon/__tests__/turn-status-bar-phase.test.tsx src/components/daemon/__tests__/turn-timeline-model-retry-gating.test.tsx", "result": "Test Files 4 passed (4), Tests 222 passed (222)" }
+    ]
+  }
+}

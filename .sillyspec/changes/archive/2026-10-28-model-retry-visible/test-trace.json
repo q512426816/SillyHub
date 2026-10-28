@@ -1,0 +1,126 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-28-model-retry-visible",
+  "rows": [
+    {
+      "anchor": "FR-01",
+      "row_id": "2026-10-28-model-retry-visible:flow:测试绑定FR-01",
+      "tests": [
+        "sillyhub-daemon/tests/interactive/claude-events.test.ts「api_retry 帧归一化为 status 事件」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-28-model-retry-visible"
+    },
+    {
+      "anchor": "FR-01",
+      "row_id": "2026-10-28-model-retry-visible:flow:测试绑定FR-01",
+      "tests": [
+        "sillyhub-daemon/tests/interactive/session-manager-status-dispatch.test.ts「api_retry 落 [MODEL_RETRY] 协议行」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-28-model-retry-visible"
+    },
+    {
+      "anchor": "FR-02",
+      "row_id": "2026-10-28-model-retry-visible:flow:测试绑定FR-02",
+      "tests": [
+        "frontend/src/components/daemon/__tests__/session-log-assembler.test.ts「MODEL_RETRY 行分类为 model_retry 段」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-28-model-retry-visible"
+    },
+    {
+      "anchor": "FR-02",
+      "row_id": "2026-10-28-model-retry-visible:flow:测试绑定FR-02",
+      "tests": [
+        "frontend/src/components/daemon/__tests__/turn-segment-views.test.tsx「运行中轮渲染重试提示（SegmentView 分发与行内文案）」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-28-model-retry-visible"
+    },
+    {
+      "anchor": "FR-02",
+      "row_id": "2026-10-28-model-retry-visible:flow:测试绑定FR-02",
+      "tests": [
+        "frontend/src/components/daemon/__tests__/turn-timeline-model-retry-gating.test.tsx「运行中轮渲染重试提示、终态轮不渲染、全部视图保留」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-28-model-retry-visible"
+    },
+    {
+      "anchor": "FR-02",
+      "row_id": "2026-10-28-model-retry-visible:flow:测试绑定FR-02",
+      "tests": [
+        "frontend/src/components/daemon/__tests__/turn-status-bar-phase.test.tsx「重试段纳入 currentActivity 回退链」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-28-model-retry-visible"
+    },
+    {
+      "anchor": "FR-04",
+      "row_id": "2026-10-28-model-retry-visible:flow:测试绑定FR-04",
+      "tests": [
+        "sillyhub-daemon/tests/interactive/claude-events.test.ts「api_retry 缺字段与 error_status=null 容错」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-28-model-retry-visible"
+    },
+    {
+      "anchor": "FR-04",
+      "row_id": "2026-10-28-model-retry-visible:flow:测试绑定FR-04",
+      "tests": [
+        "frontend/src/components/daemon/__tests__/turn-segment-views.test.tsx「MODEL_RETRY 载荷解析失败中性兜底（坏 JSON → 模型重试中…）」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-28-model-retry-visible"
+    }
+  ]
+}

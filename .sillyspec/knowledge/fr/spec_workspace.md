@@ -62,3 +62,31 @@ created_at: 2026-10-27T23:43:41.822Z
 - 场景：回归全绿 — Given 测试文件按新契约更新完成；When 运行 spec_workspace 测试目录；Then 本文件 19 用例全绿且既有契约测试零失败
 全文：.sillyspec/changes/archive/2026-10-28-reparse-trigger-tests-realign/requirements.md#FR-03
 最近确认：00df74b42338c5d02a9cb23a385ce07761fe66e8
+
+## FR-spec_workspace-001 daemon 归一化器把 system/api_retry 帧转为 status 事件（metadata 含 attempt/max_retries/retry_delay_ms/error_status/error 摘要），session-manager 分发为新 case，经 onTurnMessage 落 [MODEL_RETRY] 单行 JSON 协议行（对齐 COMPACT_STATUS 形态；error 文本截断防超长）
+变更：2026-10-28-model-retry-visible
+状态：active
+摘要：429 限流重试帧透传；连接类重试（无 HTTP 状态）；无活动轮时丢弃
+全文：.sillyspec/changes/archive/2026-10-28-model-retry-visible/requirements.md#FR-01
+最近确认：265543056ebc5d72193ead562b28dec0f8d38671
+
+## FR-spec_workspace-002 前端 session-log-assembler 新增 kind=model_retry 分类；运行中轮时间线实时显示「模型限流重试中 第N/M次」类提示（含错误摘要可读文案），终态轮不在对话正文渲染
+变更：2026-10-28-model-retry-visible
+状态：active
+摘要：运行中轮实时可见；终态轮不渲染重试段；载荷异常兜底
+全文：.sillyspec/changes/archive/2026-10-28-model-retry-visible/requirements.md#FR-02
+最近确认：265543056ebc5d72193ead562b28dec0f8d38671
+
+## FR-spec_workspace-003 纯可观测性透传：不改变 CLI/daemon 重试行为本身，不改 backend 表结构
+变更：2026-10-28-model-retry-visible
+状态：active
+摘要：backend 零改动验证
+全文：.sillyspec/changes/archive/2026-10-28-model-retry-visible/requirements.md#FR-03
+最近确认：265543056ebc5d72193ead562b28dec0f8d38671
+
+## FR-spec_workspace-004 daemon 与前端新增单测覆盖：归一化 api_retry 帧、分发落行、前端分类与渲染；相关既有测试不回归
+变更：2026-10-28-model-retry-visible
+状态：active
+摘要：交付自证
+全文：.sillyspec/changes/archive/2026-10-28-model-retry-visible/requirements.md#FR-04
+最近确认：265543056ebc5d72193ead562b28dec0f8d38671
