@@ -1,0 +1,35 @@
+tier: thin
+legacy_fallback: false
+substeps: {}
+born_face: thin
+with_tasks: false
+review_force: null
+input: >-
+  变更详情页两处展示调整（用户裁决）：①右侧基本信息栏的「范围对账」「产出速览」两组区块整组移除（弱信息占据侧栏，明细入口已有专属 tab
+  承接）；②「产出」面板沉淀资产卡内各组卡片（需求规则/决策蒸馏/知识触达/测试绑定/模块触达/归档留档）设固定最大高度，内容超出隐藏并出滚动条——现「自然高度+5行+展开全部」形态在条目多时把页面拉得过长。
+
+
+  成功标准：
+
+  - 变更详情右侧信息栏不再渲染「范围对账」与「产出速览」两组区块及其取数请求（getScopeAudit/getChangeAssets 两 query 随区块一并移除）
+
+  - 沉淀资产卡全部六组卡片内容区设统一最大高度，超出部分隐藏并显示纵向滚动条
+
+  - 「展开全部/收起」按钮固定在卡片底部不被滚动带走
+
+  - 既有分组交互（点击弹窗预览/展开全部）行为不回归
+
+  - 相关前端测试通过，tsc 与 eslint 0 error
+autopilot: false
+prestage_ack: false
+baseline_commit: c2ed9f3284c85d154dd5a2a77a5930e139832de6
+updatedAt: '2026-10-28T06:54:30.314Z'
+cross_baselines:
+  sillyspec: 0b34188834916634fd1de60a3163bec1ee53577b
+baseline_sha256: 351e06ce4b21cea304ed2828095ced6ba5143dd1d22db0c2117b1b07b88b443a
+spec_approved: true
+spec_approved_at: '2026-10-28T06:54:30.314Z'
+spec_approved_by: anon@DESKTOP-HJ0AM09
+spec_approved_channel: user-confirmed
+spec_attested_by: anon@DESKTOP-HJ0AM09
+

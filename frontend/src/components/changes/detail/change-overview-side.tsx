@@ -3,20 +3,20 @@
 /**
  * 概览右侧信息栏（2026-10-15-change-detail-redesign / FR-08 / D-006@v1 / D-016@v1）。
  *
- * primer `MetaPanel` 五组压缩承载元信息：基本信息 / 执行用量 / 会话 / 范围对账计数 /
- * 产出速览——原「执行用量全宽卡」与「会话卡」的位置由本栏承接，首屏不再被三行全宽
- * 弱信息占据（D-001）。
+ * primer `MetaPanel` 三组压缩承载元信息：基本信息 / 执行用量 / 会话——原「执行
+ * 用量全宽卡」与「会话卡」的位置由本栏承接，首屏不再被三行全宽弱信息占据（D-001）。
  *
  * 取数纪律（D-016@v1 Q-4）：用量走 `useChangeUsage`（与 `ChangeUsageCard` **同一实现**
- * 与同一 queryKey）；范围对账与产出计数**复用**各自卡片既有 queryKey（`["scope-audit-card",
- * "audit", …]` / `["changeAssets", …]`）——同 key 命中 react-query 缓存，零额外请求，
- * 也天然与卡片保持单一数据源。本文件 MUST NOT 另写取数/格式化实现。
+ * 与同一 queryKey）；本文件 MUST NOT 另写取数/格式化实现。
  *
- * 归档态两处契约（Phase 4）：用量区标题改「执行用量（合计）」且 MUST NOT 提供「按模型
- * 明细」展开；范围对账入口改指「产出 · 归档留档」（MUST NOT 指向已隐藏的「文件与对账」tab）。
+ * 归档态契约（Phase 4）：用量区标题改「执行用量（合计）」且 MUST NOT 提供「按模型
+ * 明细」展开。
+ *
+ * 2026-10-28-change-detail-side-assets-scroll（用户裁决）：移除「范围对账」「产出
+ * 速览」两组区块及其取数（getScopeAudit / getChangeAssets 两 query）——弱信息占据
+ * 侧栏，明细入口由「文件与对账」「产出」两个专属 tab 承接，侧栏不再重复摘要。
  */
 import Link from "next/link";
-import { useQuery } from "@tanstack/react-query";
 
 import { MetaPanel, MetaPanelSection } from "@/components/primer";
 import { CommitTypeChip } from "@/components/changes/commit-type-chip";
@@ -28,7 +28,7 @@ import {
   hasNoExecution,
   useChangeUsage,
 } from "@/components/changes/detail/change-usage-card";
-import { getChangeAssets, getScopeAudit, type ChangeRead } from "@/lib/changes";
+import type { ChangeRead } from "@/lib/changes";
 import type { AgentSessionListItem } from "@/lib/daemon";
 
 interface Row {
@@ -93,61 +93,10 @@ export function ChangeOverviewSide({
   sessions,
 }: ChangeOverviewSideProps) {
   // 复用卡片既有 queryKey（零额外请求；同一数据源）。
-  const changeKey = change.change_key;
   const usageQ = useChangeUsage("change", workspaceId, changeId);
-  const auditQ = useQuery({
-    queryKey: ["scope-audit-card", "audit", workspaceId, changeKey],
-    queryFn: () => getScopeAudit(workspaceId, changeKey),
-    refetchOnWindowFocus: false,
-  });
-  const assetsQ = useQuery({
-    queryKey: ["changeAssets", workspaceId, changeId],
-    queryFn: () => getChangeAssets(workspaceId, changeId),
-    retry: false,
-    refetchOnWindowFocus: false,
-  });
 
   const usage = usageQ.data;
   const usageEmpty = usage == null || hasNoExecution(usage);
-
-  // 范围对账计数：分组形态取信封 repos[].totals 合计（单一源）；单段形态按行 verdict 计数。
-  const audit = auditQ.data;
-  const auditCounts = (() => {
-    if (!audit) return null;
-    const repos = Array.isArray(audit.repos) ? audit.repos : [];
-    if (repos.length > 0) {
-      return repos.reduce(
-        (acc, r) => {
-          const t = (r.totals ?? {}) as Record<string, number>;
-          acc.planned += t.planned ?? 0;
-          acc.unplanned += t.unplanned ?? 0;
-          acc.untouched += t.untouched ?? 0;
-          return acc;
-        },
-        { planned: 0, unplanned: 0, untouched: 0 },
-      );
-    }
-    const rows = audit.rows ?? [];
-    if (rows.length === 0) return null;
-    return rows.reduce(
-      (acc, r) => {
-        const v = audit.mode === "quick" ? r.attribution : r.verdict;
-        if (v === "planned") acc.planned += 1;
-        else if (v === "unplanned") acc.unplanned += 1;
-        else if (v === "untouched") acc.untouched += 1;
-        return acc;
-      },
-      { planned: 0, unplanned: 0, untouched: 0 },
-    );
-  })();
-
-  const assets = assetsQ.data;
-  const assetCounts = {
-    fr: assets?.fr_entries?.length ?? 0,
-    decisions: assets?.decisions?.length ?? 0,
-    touch: assets?.knowledge_touch?.length ?? 0,
-    files: assets?.patch?.files ?? 0,
-  };
 
   const recentSessions = sessions.slice(0, 3);
 
@@ -224,33 +173,6 @@ export function ChangeOverviewSide({
           >
             打开会话工作台 →
           </Link>
-        </div>
-      </MetaPanelSection>
-
-      <MetaPanelSection title="范围对账">
-        {auditCounts === null ? (
-          <p className="text-[11px] text-muted-foreground">暂无对账数据</p>
-        ) : (
-          <>
-            <RowView k="计划内" v={String(auditCounts.planned)} />
-            <RowView k="计划外" v={String(auditCounts.unplanned)} />
-            <RowView k="计划未动" v={String(auditCounts.untouched)} />
-          </>
-        )}
-        <div className="pt-1">
-          {/* 2026-10-16-archived-files-tab / D-019@v1：归档态恢复「文件与对账」tab，
-              两态入口同指该 tab（不再指路「产出 · 归档留档」）。 */}
-          <span className="text-xs text-muted-foreground">明细见「文件与对账」</span>
-        </div>
-      </MetaPanelSection>
-
-      <MetaPanelSection title="产出速览">
-        <RowView k="需求规则" v={String(assetCounts.fr)} />
-        <RowView k="决策蒸馏" v={String(assetCounts.decisions)} />
-        <RowView k="知识触达" v={String(assetCounts.touch)} />
-        <RowView k="改动文件" v={assetCounts.files === 0 ? DASH : String(assetCounts.files)} />
-        <div className="pt-1">
-          <span className="text-xs text-muted-foreground">明细见「产出」</span>
         </div>
       </MetaPanelSection>
       </MetaPanel>

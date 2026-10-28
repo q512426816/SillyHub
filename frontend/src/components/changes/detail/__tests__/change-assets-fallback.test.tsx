@@ -137,21 +137,29 @@ describe("ChangeAssetsCard 降级与分组形态（task-03）", () => {
     expect(screen.getAllByText(/^FR-auto-x-00/)).toHaveLength(5);
   });
 
-  it("分组自然高度：不再使用固定高度 + 组内滚动容器", async () => {
+  it("分组限高滚动：卡片最大高度固定 + 组内滚动容器（2026-10-28-change-detail-side-assets-scroll 用户裁决，推翻 2026-10-15 自然高度口径）", async () => {
     mockGet.mockResolvedValue(
       fullFixture({
         archived: false,
-        fr_entries: [
-          { id: "FR-auto-x-001", title: "条目一", status: "active", file: "knowledge/fr/x.md" },
-        ],
+        // 8 条：触发「展开全部」按钮渲染（≤5 条无按钮，滚动区外断言无从验）。
+        fr_entries: Array.from({ length: 8 }, (_, i) => ({
+          id: `FR-auto-x-00${i + 1}`,
+          title: `条目${i + 1}`,
+          status: "active",
+          file: "knowledge/fr/x.md",
+        })),
         patch: null,
         delta: null,
       }),
     );
     const { container } = renderCard();
     const group = await screen.findByTestId("change-assets-fr");
-    expect(group.className).not.toContain("h-64");
-    expect(group.className).not.toContain("overflow-hidden");
-    expect(container.querySelectorAll(".overflow-y-auto")).toHaveLength(0);
+    // 卡片限高（max-h-64）+ 内容区滚动容器在场。
+    expect(group.className).toContain("max-h-64");
+    expect(container.querySelectorAll(".overflow-y-auto").length).toBeGreaterThan(0);
+    // 展开按钮钉在滚动区外（卡片层直接子级，不被滚动带走）。
+    const toggle = container.querySelector('[data-testid="change-assets-group-toggle"]');
+    expect(toggle).not.toBeNull();
+    expect(toggle!.closest(".overflow-y-auto")).toBeNull();
   });
 });

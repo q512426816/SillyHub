@@ -154,6 +154,17 @@ export function resolveTestFilePath(
 const GROUP_VISIBLE_LIMIT = 5;
 
 /**
+ * 分组卡片统一限高容器（2026-10-28-change-detail-side-assets-scroll / 用户裁决）：
+ * 各组卡片固定最大高度（h-64=256px，2026-10-15-change-detail-redesign 改造前的
+ * 历史高度值），内容超出在组内滚动——替代「自然高度 + 5 行 + 展开全部」把页面
+ * 拉长的形态；标题行与展开按钮 shrink-0 钉在卡片上下边缘，仅中间列表滚动。
+ */
+const GROUP_CARD_CLS = "flex max-h-64 flex-col rounded border border-border/60 p-2";
+
+/** 分组内容滚动区（与 GROUP_CARD_CLS 配套）：min-h-0 + flex-1 让滚动只发生在本区。 */
+const GROUP_BODY_CLS = "mt-1 min-h-0 flex-1 overflow-y-auto pr-0.5";
+
+/**
  * hits-sync 回执 reason → 用户可读文案（2026-10-27-knowledge-hits-flush-button /
  * FR-04）。机读短码对齐 backend ChangeHitsSyncResult docstring 口径；in_flight
  * 单列（ok=true 的去重秒回，提示而非报错语义）。
@@ -420,12 +431,12 @@ export function ChangeAssetsCard({
           ) : null}
 
           {frCount > 0 ? (
-            <div className="flex flex-col rounded border border-border/60 p-2" data-testid="change-assets-fr">
+            <div className={GROUP_CARD_CLS} data-testid="change-assets-fr">
               <div className="flex shrink-0 items-center justify-between text-[11px] font-medium text-muted-foreground">
                 <span>需求规则（FR 索引）</span>
                 <span className="text-[10px] text-muted-foreground/70">knowledge/fr</span>
               </div>
-              <div className="mt-1">
+              <div className={GROUP_BODY_CLS}>
               {cap(data?.fr_entries, "fr").map((e) => (
                 <button
                   key={e.id}
@@ -445,24 +456,24 @@ export function ChangeAssetsCard({
                   ) : null}
                 </button>
               ))}
+              </div>
               <GroupToggle
                 total={frCount}
                 expanded={isExpanded("fr")}
                 onToggle={() => toggleGroup("fr")}
               />
-              </div>
             </div>
           ) : null}
 
           {decCount > 0 ? (
-            <div className="flex flex-col rounded border border-border/60 p-2" data-testid="change-assets-decisions">
+            <div className={GROUP_CARD_CLS} data-testid="change-assets-decisions">
               <div className="flex shrink-0 items-center justify-between text-[11px] font-medium text-muted-foreground">
                 <span>决策蒸馏</span>
                 <span className="text-[10px] text-muted-foreground/70">
                   knowledge/decisions
                 </span>
               </div>
-              <div className="mt-1">
+              <div className={GROUP_BODY_CLS}>
               {cap(data?.decisions, "decisions").map((d) => (
                 <button
                   key={d.id}
@@ -482,12 +493,12 @@ export function ChangeAssetsCard({
                   ) : null}
                 </button>
               ))}
+              </div>
               <GroupToggle
                 total={decCount}
                 expanded={isExpanded("decisions")}
                 onToggle={() => toggleGroup("decisions")}
               />
-              </div>
             </div>
           ) : null}
 
@@ -498,7 +509,7 @@ export function ChangeAssetsCard({
               文件分组；行点击弹窗预览条目内容（2026-10-14-assets-knowledge-popup-
               preview），弹窗内可再跳知识库。 */}
           {touchList.length > 0 ? (
-            <div className="flex flex-col rounded border border-border/60 p-2" data-testid="change-assets-knowledge-touch">
+            <div className={GROUP_CARD_CLS} data-testid="change-assets-knowledge-touch">
               <div className="flex shrink-0 items-center justify-between text-[11px] font-medium text-muted-foreground">
                 <span title="本变更执行期 CLI 知识注入的命中留痕：在途变更随执行增长，归档后定格（唯一口径——注入命中即留痕，不另设标记复核面）">
                   知识触达（本变更注入命中的知识）
@@ -507,7 +518,7 @@ export function ChangeAssetsCard({
                   {touchList.length} 条
                 </span>
               </div>
-              <div className="mt-1">
+              <div className={GROUP_BODY_CLS}>
                 {touchFileChips.length > 0 ? (
                   <div className="flex flex-wrap items-baseline gap-x-1.5 gap-y-1 border-b border-dashed pb-1.5">
                     <span className="text-[10px] text-muted-foreground/70">整文件</span>
@@ -564,23 +575,23 @@ export function ChangeAssetsCard({
                     ))}
                   </div>
                 ))}
+              </div>
               <GroupToggle
                 total={touchGroups.length}
                 expanded={isExpanded("touch")}
                 onToggle={() => toggleGroup("touch")}
                 unit="个文件分组"
               />
-              </div>
             </div>
           ) : null}
 
           {rowCount > 0 ? (
-            <div className="flex flex-col rounded border border-border/60 p-2" data-testid="change-assets-tests">
+            <div className={GROUP_CARD_CLS} data-testid="change-assets-tests">
               <div className="flex shrink-0 items-center justify-between text-[11px] font-medium text-muted-foreground">
                 <span>测试绑定</span>
                 <span className="text-[10px] text-muted-foreground/70">test-trace</span>
               </div>
-              <div className="mt-1">
+              <div className={GROUP_BODY_CLS}>
               {cap(data?.test_rows, "tests").map((r) => (
                 <div
                   key={r.row_id}
@@ -634,26 +645,26 @@ export function ChangeAssetsCard({
                   ) : null}
                 </div>
               ))}
+              </div>
               <GroupToggle
                 total={rowCount}
                 expanded={isExpanded("tests")}
                 onToggle={() => toggleGroup("tests")}
               />
-              </div>
             </div>
           ) : null}
 
           {/* 模块触达（FR-02）：交付文件清单 × 镜像模块图匹配的模块；chip 点击
               打开模块文档预览（explorer 读仓库文件，路径确定不走搜索解析）。 */}
           {moduleList.length > 0 ? (
-            <div className="flex flex-col rounded border border-border/60 p-2" data-testid="change-assets-touched-modules">
+            <div className={GROUP_CARD_CLS} data-testid="change-assets-touched-modules">
               <div className="flex shrink-0 items-center justify-between text-[11px] font-medium text-muted-foreground">
                 <span>模块触达</span>
                 <span className="text-[10px] text-muted-foreground/70">
                   {moduleList.length} 个模块
                 </span>
               </div>
-              <div className="mt-1 flex flex-wrap content-start gap-1.5">
+              <div className={`${GROUP_BODY_CLS} flex flex-wrap content-start gap-1.5`}>
                 {cap(moduleList, "modules").map((m) => (
                   <button
                     key={`${m.project}/${m.id}`}
@@ -669,18 +680,18 @@ export function ChangeAssetsCard({
                     </span>
                   </button>
                 ))}
+              </div>
               <GroupToggle
                 total={moduleList.length}
                 expanded={isExpanded("modules")}
                 onToggle={() => toggleGroup("modules")}
                 unit="个模块"
               />
-              </div>
             </div>
           ) : null}
 
           {hasAudit && data && isArchived ? (
-            <div className="flex flex-col rounded border border-border/60 p-2 text-[11px] text-muted-foreground" data-testid="change-assets-audit">
+            <div className={`${GROUP_CARD_CLS} text-[11px] text-muted-foreground`} data-testid="change-assets-audit">
               <div className="shrink-0 text-[11px] font-medium">归档留档</div>
               <div className="mt-1 flex shrink-0 flex-wrap gap-x-3 gap-y-1">
                 {data.patch ? (
@@ -703,6 +714,9 @@ export function ChangeAssetsCard({
                   </span>
                 ) : null}
               </div>
+              {/* 限高滚动区（2026-10-28-change-detail-side-assets-scroll）：跨仓
+                  区与文件清单一并滚，标题与统计行钉在卡片上部。 */}
+              <div className="min-h-0 flex-1 overflow-y-auto pr-0.5">
               {crossRepos.length > 0 ? (
                 <div
                   className="mt-1.5 flex flex-col gap-1.5 border-t border-dashed pt-1.5"
@@ -824,6 +838,7 @@ export function ChangeAssetsCard({
                   />
                 </div>
               ) : null}
+              </div>
             </div>
           ) : null}
         </div>
