@@ -242,3 +242,4 @@
 | 2026-10-28 | 2026-10-28-session-list-refresh-and-paging | 会话列表两个缺陷：①会话内暂存切换供应商/模型/档案随消息生效后，左侧列表条目 chips 仍显示新… |
 | 2026-10-28 | 2026-10-28-session-list-loadmore-fetch | 上一变更（2026-10-28-session-list-refresh-and-paging）的「… |
 | 2026-10-28 | 2026-10-28-change-detail-side-assets-scroll | 变更详情页两处展示调整（用户裁决）：①右侧基本信息栏的「范围对账」「产出速览」两组区块整组移除（弱信… |
+| 2026-10-28 | 2026-10-29-floating-scope-loadmore-fix | 悬浮面板加载更多附加段误清修复 |

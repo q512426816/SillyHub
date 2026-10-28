@@ -1,0 +1,23 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-29-floating-scope-loadmore-fix",
+  "reviewer": "subagent",
+  "verdict": "PASS",
+  "reviewedAgainst": "43ac7dba92d02e2eb927bcea86cf41a7fb28d09b",
+  "findings": [
+    {
+      "severity": "P3",
+      "status": "accepted",
+      "title": "防护声明「联合加字段时 tsc 收窄立即暴露」对新增字段/新增分支情形过度声明",
+      "evidence": "session-list-panel.tsx:246-254 的 in 守卫链对联合『删除/改名既有字段』确会 tsc 报错（scope.changeId 不存在），但『新增标识字段或新增分支 kind』时函数照常编译且键静默漏拼（如新增 org 分支带 orgId → 键恒为 \"org||||\"，不同 orgId 键相同 → 漏清），纯函数用例也只钉当前四分支。同文件同居与 JSDoc 提示真实存在、当前四分支行为正确，残余为未来维护性风险而非现行缺陷，接受。",
+      "location": "frontend/src/components/sessions/session-list-panel.tsx:239-256"
+    }
+  ],
+  "dimensionNotes": {
+    "乱序": "ok",
+    "并发": "ok",
+    "切换": "ok",
+    "作用域": "ok"
+  },
+  "reviewedAt": "2026-10-29T07:32:30+08:00"
+}

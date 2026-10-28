@@ -2193,3 +2193,60 @@ created_at: 2026-10-16T01:30:35.950Z
   confirmed_at: null
   source_change: 2026-10-28-session-list-loadmore-fetch
   status: active
+
+## FR-test-utils-120 清理 effect 的 scope 依赖改为口径稳定键（kind+标识字段标量），同值新引用 scope 重渲染不再清附加段/复位游标（组件级用例固化：rerender 传同值新对象 scope 后已加载条目不回跳）
+变更：2026-10-29-floating-scope-loadmore-fix
+状态：active
+摘要：同值新引用重渲染
+全文：.sillyspec/changes/archive/2026-10-29-floating-scope-loadmore-fix/requirements.md#FR-01
+最近确认：43ac7dba92d02e2eb927bcea86cf41a7fb28d09b
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-29-floating-scope-loadmore-fix:flow:测试绑定FR-01
+  tests: frontend/src/components/sessions/__tests__/session-list-panel.test.tsx「FR-01：scope 同值新引用重渲染不清附加段不复游标」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-29-floating-scope-loadmore-fix
+  status: active
+
+## FR-test-utils-121 scope 口径真实变化（kind 或标识 id 变化）时附加段仍正确清空（既有口径语义零回归，用例固化）
+变更：2026-10-29-floating-scope-loadmore-fix
+状态：active
+摘要：同 kind 换 id
+全文：.sillyspec/changes/archive/2026-10-29-floating-scope-loadmore-fix/requirements.md#FR-02
+最近确认：43ac7dba92d02e2eb927bcea86cf41a7fb28d09b
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-29-floating-scope-loadmore-fix:flow:测试绑定FR-02
+  tests: frontend/src/components/sessions/__tests__/session-list-panel.test.tsx「FR-02：scope 口径真实变化（同 kind 换 id）清附加段+游标复位」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-29-floating-scope-loadmore-fix
+  status: active
+
+## FR-test-utils-122 会话列表现有测试套件全绿，tsc/eslint 0 error
+变更：2026-10-29-floating-scope-loadmore-fix
+状态：active
+摘要：主路径
+全文：.sillyspec/changes/archive/2026-10-29-floating-scope-loadmore-fix/requirements.md#FR-03
+最近确认：43ac7dba92d02e2eb927bcea86cf41a7fb28d09b
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-29-floating-scope-loadmore-fix:flow:测试绑定FR-03
+  tests: frontend/src/components/sessions/__tests__/session-list-panel.test.tsx「套件全量 + tsc/eslint 0 error（收口实测）」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-29-floating-scope-loadmore-fix
+  status: active

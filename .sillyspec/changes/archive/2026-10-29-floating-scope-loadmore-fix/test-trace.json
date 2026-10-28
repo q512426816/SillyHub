@@ -1,0 +1,51 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-29-floating-scope-loadmore-fix",
+  "rows": [
+    {
+      "anchor": "FR-01",
+      "row_id": "2026-10-29-floating-scope-loadmore-fix:flow:测试绑定FR-01",
+      "tests": [
+        "frontend/src/components/sessions/__tests__/session-list-panel.test.tsx「FR-01：scope 同值新引用重渲染不清附加段不复游标」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-29-floating-scope-loadmore-fix"
+    },
+    {
+      "anchor": "FR-02",
+      "row_id": "2026-10-29-floating-scope-loadmore-fix:flow:测试绑定FR-02",
+      "tests": [
+        "frontend/src/components/sessions/__tests__/session-list-panel.test.tsx「FR-02：scope 口径真实变化（同 kind 换 id）清附加段+游标复位」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-29-floating-scope-loadmore-fix"
+    },
+    {
+      "anchor": "FR-03",
+      "row_id": "2026-10-29-floating-scope-loadmore-fix:flow:测试绑定FR-03",
+      "tests": [
+        "frontend/src/components/sessions/__tests__/session-list-panel.test.tsx「套件全量 + tsc/eslint 0 error（收口实测）」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-29-floating-scope-loadmore-fix"
+    }
+  ]
+}
