@@ -1,0 +1,86 @@
+{
+  "change": "2026-10-28-change-detail-side-assets-scroll",
+  "baseline": "c2ed9f3284c85d154dd5a2a77a5930e139832de6",
+  "head": "1c284302f17b3561362dd04f2d262a1b2cd64a61",
+  "files": [
+    "frontend/src/components/changes/detail/__tests__/change-assets-fallback.test.tsx",
+    "frontend/src/components/changes/detail/__tests__/change-overview-side.test.tsx",
+    "frontend/src/components/changes/detail/change-assets-card.tsx",
+    "frontend/src/components/changes/detail/change-overview-side.tsx"
+  ],
+  "totals": {
+    "files": 4,
+    "additions": 71,
+    "deletions": 180
+  },
+  "savedAt": "2026-10-28T06:55:45.784Z",
+  "note": "flow done 时点冻结（本变更可归属交付面：baseline..HEAD 提交面过滤 .sillyspec/ 只留 .sillyspec/docs/ 交付文档 + 独占树未提交交付；治理工件目录不入冻结——2026-10-12-close-trace-freeze-integrity FR-01）",
+  "modules": [
+    {
+      "id": "frontend",
+      "files": 4,
+      "doc": "docs/multi-agent-platform/modules/frontend.md",
+      "docTouched": false,
+      "docMissing": false
+    },
+    {
+      "id": "frontend_components",
+      "files": 4,
+      "doc": "docs/SillyHub/modules/frontend_components.md",
+      "docTouched": false,
+      "docMissing": false
+    }
+  ],
+  "uncoveredDirs": [],
+  "moduleMaps": [
+    "docs/backend/modules/_module-map.yaml",
+    "docs/frontend/modules/_module-map.yaml",
+    "docs/multi-agent-platform/modules/_module-map.yaml",
+    "docs/SillyHub/modules/_module-map.yaml",
+    "docs/sillyhub-daemon/modules/_module-map.yaml"
+  ],
+  "scopeAudit": {
+    "mode": "full-flow",
+    "ok": true,
+    "degradedReason": null,
+    "baseAnchor": "c2ed9f3284c85d154dd5a2a77a5930e139832de6",
+    "totals": {
+      "files": 4,
+      "additions": 71,
+      "deletions": 180
+    },
+    "rows": [
+      {
+        "path": "frontend/src/components/changes/detail/__tests__/change-assets-fallback.test.tsx",
+        "additions": 15,
+        "deletions": 7,
+        "kind": "modified"
+      },
+      {
+        "path": "frontend/src/components/changes/detail/__tests__/change-overview-side.test.tsx",
+        "additions": 15,
+        "deletions": 69,
+        "kind": "modified"
+      },
+      {
+        "path": "frontend/src/components/changes/detail/change-assets-card.tsx",
+        "additions": 31,
+        "deletions": 16,
+        "kind": "modified"
+      },
+      {
+        "path": "frontend/src/components/changes/detail/change-overview-side.tsx",
+        "additions": 10,
+        "deletions": 88,
+        "kind": "modified"
+      }
+    ],
+    "excluded": {
+      "foreignDeclared": []
+    },
+    "note": "flow done 时点冻结（本文件落盘时采集）",
+    "closedBy": "flow done"
+  },
+  "patchSha256": "04e501d1351d75f28aff63d563e9f9dfb30815a6fd992c6a2a68d19d68ed0439",
+  "patchStatus": "ok"
+}

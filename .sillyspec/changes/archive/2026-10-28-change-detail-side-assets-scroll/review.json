@@ -1,0 +1,30 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-28-change-detail-side-assets-scroll",
+  "reviewer": "inline-self（环境无已注册子代理，主会话代行）",
+  "verdict": "PASS",
+  "reviewedAgainst": "1c284302f17b3561362dd04f2d262a1b2cd64a61",
+  "findings": [
+    {
+      "severity": "P3",
+      "status": "accepted",
+      "title": "max-h-64 对知识触达组条目多时可视行数偏少",
+      "evidence": "知识触达组含 chip 行 + 文件分组双层结构，256px 内可视行数少于其它组；高度值收口在 GROUP_CARD_CLS 单常量，用户嫌小时一处改全局（design.md 风险节已声明）",
+      "location": "frontend/src/components/changes/detail/change-assets-card.tsx:GROUP_CARD_CLS"
+    },
+    {
+      "severity": "P3",
+      "status": "accepted",
+      "title": "audit 组嵌套 overflow-hidden 与外层滚动并存",
+      "evidence": "归档留档组文件清单区原有 min-h-0 flex-1 overflow-hidden 结构保留，包进新滚动容器后内层无自身高度约束不产生第二滚动条（滚动全落外层），行为一致但极端长清单需目验",
+      "location": "frontend/src/components/changes/detail/change-assets-card.tsx:change-assets-audit"
+    }
+  ],
+  "dimensionNotes": {
+    "乱序": "n/a",
+    "并发": "n/a",
+    "切换": "ok",
+    "作用域": "n/a"
+  },
+  "reviewedAt": "2026-10-28T06:56:00.000Z"
+}

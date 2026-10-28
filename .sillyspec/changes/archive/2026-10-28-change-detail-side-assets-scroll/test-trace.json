@@ -1,0 +1,66 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-28-change-detail-side-assets-scroll",
+  "rows": [
+    {
+      "anchor": "FR-01",
+      "row_id": "2026-10-28-change-detail-side-assets-scroll:flow:测试绑定FR-01",
+      "tests": [
+        "test/frontend/src/components/changes/detail/__tests__/change-overview-side.test.tsx「三组渲染：基本信息 / 执行用量 / 会话（范围对账与产出速览已移除）」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-28-change-detail-side-assets-scroll"
+    },
+    {
+      "anchor": "FR-02",
+      "row_id": "2026-10-28-change-detail-side-assets-scroll:flow:测试绑定FR-02",
+      "tests": [
+        "test/frontend/src/components/changes/detail/__tests__/change-assets-fallback.test.tsx「分组限高滚动：卡片最大高度固定 + 组内滚动容器（2026-10-28-change-detail-side-assets-scroll 用户裁决，推翻 2026-10-15 自然高度口径）」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-28-change-detail-side-assets-scroll"
+    },
+    {
+      "anchor": "FR-03",
+      "row_id": "2026-10-28-change-detail-side-assets-scroll:flow:测试绑定FR-03",
+      "tests": [
+        "test/frontend/src/components/changes/detail/__tests__/change-assets-fallback.test.tsx「分组限高滚动…」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-28-change-detail-side-assets-scroll"
+    },
+    {
+      "anchor": "FR-04",
+      "row_id": "2026-10-28-change-detail-side-assets-scroll:flow:测试绑定FR-04",
+      "tests": [
+        "frontend/src/components/changes/detail/__tests__/change-assets-card.test.tsx"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-28-change-detail-side-assets-scroll"
+    }
+  ]
+}

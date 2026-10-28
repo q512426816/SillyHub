@@ -8214,3 +8214,86 @@ superseded_by：FR-app-workspace-pages-002
 - 场景：主路径 — Given 变更收口 / When 检查 git diff 文件清单 / Then 改动仅限 daemon 1 文件 + frontend 2 文件 + 两侧测试文件。
 全文：.sillyspec/changes/archive/2026-10-27-turn-phase-observability-monotonic/requirements.md#FR-05
 最近确认：38656992777af5c16d135235ce71f55efd29ecc4
+
+## FR-frontend-085 变更详情右侧信息栏不再渲染「范围对账」与「产出速览」两组区块及其取数请求（getScopeAudit/getChangeAssets 两 query 随区块一并移除）
+变更：2026-10-28-change-detail-side-assets-scroll
+状态：active
+摘要：侧栏三组形态
+全文：.sillyspec/changes/archive/2026-10-28-change-detail-side-assets-scroll/requirements.md#FR-01
+最近确认：1c284302f17b3561362dd04f2d262a1b2cd64a61
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-28-change-detail-side-assets-scroll:flow:测试绑定FR-01
+  tests: test/frontend/src/components/changes/detail/__tests__/change-overview-side.test.tsx「三组渲染：基本信息 / 执行用量 / 会话（范围对账与产出速览已移除）」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-28-change-detail-side-assets-scroll
+  status: active
+
+## FR-frontend-086 沉淀资产卡全部六组卡片内容区设统一最大高度，超出部分隐藏并显示纵向滚动条
+变更：2026-10-28-change-detail-side-assets-scroll
+状态：active
+摘要：条目多时组内滚动
+全文：.sillyspec/changes/archive/2026-10-28-change-detail-side-assets-scroll/requirements.md#FR-02
+最近确认：1c284302f17b3561362dd04f2d262a1b2cd64a61
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-28-change-detail-side-assets-scroll:flow:测试绑定FR-02
+  tests: test/frontend/src/components/changes/detail/__tests__/change-assets-fallback.test.tsx「分组限高滚动：卡片最大高度固定 + 组内滚动容器（2026-10-28-change-detail-side-assets-scroll 用户裁决，推翻 2026-10-15 自然高度口径）」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-28-change-detail-side-assets-scroll
+  status: active
+
+## FR-frontend-087 「展开全部/收起」按钮固定在卡片底部不被滚动带走
+变更：2026-10-28-change-detail-side-assets-scroll
+状态：active
+摘要：展开按钮可达性
+全文：.sillyspec/changes/archive/2026-10-28-change-detail-side-assets-scroll/requirements.md#FR-03
+最近确认：1c284302f17b3561362dd04f2d262a1b2cd64a61
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-28-change-detail-side-assets-scroll:flow:测试绑定FR-03
+  tests: test/frontend/src/components/changes/detail/__tests__/change-assets-fallback.test.tsx「分组限高滚动…」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-28-change-detail-side-assets-scroll
+  status: active
+
+## FR-frontend-088 既有分组交互（点击弹窗预览/展开全部）行为不回归
+变更：2026-10-28-change-detail-side-assets-scroll
+状态：active
+摘要：展开收起往返
+全文：.sillyspec/changes/archive/2026-10-28-change-detail-side-assets-scroll/requirements.md#FR-04
+最近确认：1c284302f17b3561362dd04f2d262a1b2cd64a61
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-28-change-detail-side-assets-scroll:flow:测试绑定FR-04
+  tests: frontend/src/components/changes/detail/__tests__/change-assets-card.test.tsx
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-28-change-detail-side-assets-scroll
+  status: active
+
+## FR-frontend-089 相关前端测试通过，tsc 与 eslint 0 error
+变更：2026-10-28-change-detail-side-assets-scroll
+状态：active
+摘要：验证面
+全文：.sillyspec/changes/archive/2026-10-28-change-detail-side-assets-scroll/requirements.md#FR-05
+最近确认：1c284302f17b3561362dd04f2d262a1b2cd64a61

@@ -1,0 +1,508 @@
+diff --git a/frontend/src/components/changes/detail/__tests__/change-assets-fallback.test.tsx b/frontend/src/components/changes/detail/__tests__/change-assets-fallback.test.tsx
+index 34798ae45..625c4a138 100644
+--- a/frontend/src/components/changes/detail/__tests__/change-assets-fallback.test.tsx
++++ b/frontend/src/components/changes/detail/__tests__/change-assets-fallback.test.tsx
+@@ -137,21 +137,29 @@ describe("ChangeAssetsCard 降级与分组形态（task-03）", () => {
+     expect(screen.getAllByText(/^FR-auto-x-00/)).toHaveLength(5);
+   });
+ 
+-  it("分组自然高度：不再使用固定高度 + 组内滚动容器", async () => {
++  it("分组限高滚动：卡片最大高度固定 + 组内滚动容器（2026-10-28-change-detail-side-assets-scroll 用户裁决，推翻 2026-10-15 自然高度口径）", async () => {
+     mockGet.mockResolvedValue(
+       fullFixture({
+         archived: false,
+-        fr_entries: [
+-          { id: "FR-auto-x-001", title: "条目一", status: "active", file: "knowledge/fr/x.md" },
+-        ],
++        // 8 条：触发「展开全部」按钮渲染（≤5 条无按钮，滚动区外断言无从验）。
++        fr_entries: Array.from({ length: 8 }, (_, i) => ({
++          id: `FR-auto-x-00${i + 1}`,
++          title: `条目${i + 1}`,
++          status: "active",
++          file: "knowledge/fr/x.md",
++        })),
+         patch: null,
+         delta: null,
+       }),
+     );
+     const { container } = renderCard();
+     const group = await screen.findByTestId("change-assets-fr");
+-    expect(group.className).not.toContain("h-64");
+-    expect(group.className).not.toContain("overflow-hidden");
+-    expect(container.querySelectorAll(".overflow-y-auto")).toHaveLength(0);
++    // 卡片限高（max-h-64）+ 内容区滚动容器在场。
++    expect(group.className).toContain("max-h-64");
++    expect(container.querySelectorAll(".overflow-y-auto").length).toBeGreaterThan(0);
++    // 展开按钮钉在滚动区外（卡片层直接子级，不被滚动带走）。
++    const toggle = container.querySelector('[data-testid="change-assets-group-toggle"]');
++    expect(toggle).not.toBeNull();
++    expect(toggle!.closest(".overflow-y-auto")).toBeNull();
+   });
+ });
+diff --git a/frontend/src/components/changes/detail/__tests__/change-overview-side.test.tsx b/frontend/src/components/changes/detail/__tests__/change-overview-side.test.tsx
+index d5816742b..0967f06fd 100644
+--- a/frontend/src/components/changes/detail/__tests__/change-overview-side.test.tsx
++++ b/frontend/src/components/changes/detail/__tests__/change-overview-side.test.tsx
+@@ -1,25 +1,23 @@
+ // 2026-10-15-change-detail-redesign / task-06（FR-08 / D-006@v1 / D-016@v1）：
+-// 概览右侧信息栏测试——五组渲染（基本信息/执行用量/会话/范围对账/产出速览）、
+-// 用量取数复用（同一 hook 与 queryKey）、归档态用量形态（标题「执行用量（合计）」+
+-// MUST NOT 提供按模型明细入口）、范围对账入口在两态下的指向（归档不留死链）。
++// 概览右侧信息栏测试——三组渲染（基本信息/执行用量/会话）、用量取数复用（同一
++// hook 与 queryKey）、归档态用量形态（标题「执行用量（合计）」+ MUST NOT 提供按
++// 模型明细入口）。
++// 2026-10-28-change-detail-side-assets-scroll：「范围对账」「产出速览」两组已移除
++// （用户裁决——明细入口由专属 tab 承接），相关断言与 mock 一并撤除。
+ import { cleanup, render, screen, within } from "@testing-library/react";
+ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+ import { beforeEach, describe, expect, it, vi } from "vitest";
+ 
+ import { ChangeOverviewSide } from "@/components/changes/detail/change-overview-side";
+-import { getChangeAssets, getChangeUsage, getScopeAudit } from "@/lib/changes";
++import { getChangeUsage } from "@/lib/changes";
+ import type { ChangeRead } from "@/lib/changes";
+ import type { AgentSessionListItem } from "@/lib/daemon";
+ 
+ vi.mock("@/lib/changes", () => ({
+-  getChangeAssets: vi.fn(),
+   getChangeUsage: vi.fn(),
+-  getScopeAudit: vi.fn(),
+ }));
+ 
+-const mockAssets = vi.mocked(getChangeAssets);
+ const mockUsage = vi.mocked(getChangeUsage);
+-const mockAudit = vi.mocked(getScopeAudit);
+ 
+ const CHANGE = {
+   id: "c-1",
+@@ -68,47 +66,19 @@ describe("ChangeOverviewSide", () => {
+       },
+       by_model: [],
+     } as never);
+-    mockAudit.mockResolvedValue({
+-      ok: true,
+-      mode: "full-flow",
+-      rows: [],
+-      repos: [
+-        { repo: "main", anchor: "a1b2c3d", totals: { planned: 10, unplanned: 1, untouched: 1 } },
+-        { repo: "docs", anchor: "7f8e9a0", totals: { planned: 2, unplanned: 0, untouched: 1 } },
+-      ],
+-    } as never);
+-    mockAssets.mockResolvedValue({
+-      change_key: "2026-10-15-demo",
+-      archived: true,
+-      fr_entries: [{ id: "FR-01", title: "t", status: "active", file: "f.md" }],
+-      decisions: [
+-        { id: "D-001@v1", title: "d", status: "implemented", file: "d.md" },
+-      ],
+-      test_rows: [],
+-      patch: {
+-        files: 26,
+-        additions: 1,
+-        deletions: 2,
+-        patch_status: "ok",
+-        saved_at: null,
+-        file_list: [],
+-        files_truncated: false,
+-      },
+-      delta: null,
+-      knowledge_touch: [
+-        { id: "k1", title: "t", file: "f1.md" },
+-        { id: "k2", title: "t", file: "f2.md" },
+-      ],
+-      touched_modules: [],
+-    } as never);
+   });
+ 
+-  it("五组渲染：基本信息 / 执行用量 / 会话 / 范围对账 / 产出速览", async () => {
++  it("三组渲染：基本信息 / 执行用量 / 会话（范围对账与产出速览已移除）", async () => {
+     renderSide();
+     expect(screen.getByTestId("change-overview-side")).toBeInTheDocument();
+-    for (const title of ["基本信息", "执行用量", "会话", "范围对账", "产出速览"]) {
++    for (const title of ["基本信息", "执行用量", "会话"]) {
+       expect(screen.getByText(title)).toBeInTheDocument();
+     }
++    // 移除的两组不再渲染（2026-10-28-change-detail-side-assets-scroll）。
++    expect(screen.queryByText("范围对账")).not.toBeInTheDocument();
++    expect(screen.queryByText("产出速览")).not.toBeInTheDocument();
++    expect(screen.queryByText("明细见「文件与对账」")).not.toBeInTheDocument();
++    expect(screen.queryByText("明细见「产出」")).not.toBeInTheDocument();
+     expect(screen.getByText("2026-10-15-demo")).toBeInTheDocument();
+     expect(screen.getByText("qinyi")).toBeInTheDocument();
+   });
+@@ -194,40 +164,16 @@ describe("ChangeOverviewSide", () => {
+     expect(sessionsSection).toHaveTextContent("hibernating");
+   });
+ 
+-  it("范围对账计数取信封 repos[].totals 合计（单一源）", async () => {
+-    renderSide();
+-    expect(await screen.findByText("计划内")).toBeInTheDocument();
+-    const labeled = (label: string) =>
+-      screen.getByText(label).parentElement?.textContent ?? "";
+-    expect(labeled("计划内")).toContain("12"); // 10 + 2
+-    expect(labeled("计划外")).toContain("1"); // 1 + 0
+-    expect(labeled("计划未动")).toContain("2"); // 1 + 1
+-  });
+-
+-  it("产出速览计数与资产卡同源（FR/决策/知识触达/改动文件）", async () => {
+-    renderSide();
+-    expect(await screen.findByText("需求规则")).toBeInTheDocument();
+-    expect(screen.getByText("决策蒸馏")).toBeInTheDocument();
+-    expect(screen.getByText("知识触达")).toBeInTheDocument();
+-    expect(
+-      await screen.findByText("改动文件", { selector: "span" }),
+-    ).toBeInTheDocument();
+-    const filesRow = screen.getByText("改动文件").parentElement?.textContent ?? "";
+-    expect(filesRow).toContain("26");
+-  });
+-
+-  it("在途态：提供「按模型明细」入口 + 对账入口指向「文件与对账」", async () => {
++  it("在途态：提供「按模型明细」入口（用量区为唯一可展开入口）", async () => {
+     renderSide(false);
+     expect(await screen.findByText("按模型明细 →")).toBeInTheDocument();
+-    expect(screen.getByText("明细见「文件与对账」")).toBeInTheDocument();
+     expect(screen.queryByText(/执行用量（合计）/)).not.toBeInTheDocument();
+   });
+ 
+-  it("归档态：用量标题改「合计」且 MUST NOT 提供按模型明细；对账入口同指「文件与对账」（D-019@v1）", async () => {
++  it("归档态：用量标题改「合计」且 MUST NOT 提供按模型明细（Phase 4 契约）", async () => {
+     renderSide(true);
+     expect(screen.getByText("执行用量（合计）")).toBeInTheDocument();
+     expect(await screen.findByText("耗时")).toBeInTheDocument(); // 等用量数据落定再断言入口缺席
+     expect(screen.queryByText("按模型明细 →")).not.toBeInTheDocument();
+-    expect(screen.getByText("明细见「文件与对账」")).toBeInTheDocument();
+   });
+ });
+diff --git a/frontend/src/components/changes/detail/change-assets-card.tsx b/frontend/src/components/changes/detail/change-assets-card.tsx
+index 6c63aa578..d07f628e6 100644
+--- a/frontend/src/components/changes/detail/change-assets-card.tsx
++++ b/frontend/src/components/changes/detail/change-assets-card.tsx
+@@ -153,6 +153,17 @@ export function resolveTestFilePath(
+ /** 每组默认直接显示的行数上限（超出折叠，见 GroupToggle）。 */
+ const GROUP_VISIBLE_LIMIT = 5;
+ 
++/**
++ * 分组卡片统一限高容器（2026-10-28-change-detail-side-assets-scroll / 用户裁决）：
++ * 各组卡片固定最大高度（h-64=256px，2026-10-15-change-detail-redesign 改造前的
++ * 历史高度值），内容超出在组内滚动——替代「自然高度 + 5 行 + 展开全部」把页面
++ * 拉长的形态；标题行与展开按钮 shrink-0 钉在卡片上下边缘，仅中间列表滚动。
++ */
++const GROUP_CARD_CLS = "flex max-h-64 flex-col rounded border border-border/60 p-2";
++
++/** 分组内容滚动区（与 GROUP_CARD_CLS 配套）：min-h-0 + flex-1 让滚动只发生在本区。 */
++const GROUP_BODY_CLS = "mt-1 min-h-0 flex-1 overflow-y-auto pr-0.5";
++
+ /**
+  * hits-sync 回执 reason → 用户可读文案（2026-10-27-knowledge-hits-flush-button /
+  * FR-04）。机读短码对齐 backend ChangeHitsSyncResult docstring 口径；in_flight
+@@ -420,12 +431,12 @@ export function ChangeAssetsCard({
+           ) : null}
+ 
+           {frCount > 0 ? (
+-            <div className="flex flex-col rounded border border-border/60 p-2" data-testid="change-assets-fr">
++            <div className={GROUP_CARD_CLS} data-testid="change-assets-fr">
+               <div className="flex shrink-0 items-center justify-between text-[11px] font-medium text-muted-foreground">
+                 <span>需求规则（FR 索引）</span>
+                 <span className="text-[10px] text-muted-foreground/70">knowledge/fr</span>
+               </div>
+-              <div className="mt-1">
++              <div className={GROUP_BODY_CLS}>
+               {cap(data?.fr_entries, "fr").map((e) => (
+                 <button
+                   key={e.id}
+@@ -445,24 +456,24 @@ export function ChangeAssetsCard({
+                   ) : null}
+                 </button>
+               ))}
++              </div>
+               <GroupToggle
+                 total={frCount}
+                 expanded={isExpanded("fr")}
+                 onToggle={() => toggleGroup("fr")}
+               />
+-              </div>
+             </div>
+           ) : null}
+ 
+           {decCount > 0 ? (
+-            <div className="flex flex-col rounded border border-border/60 p-2" data-testid="change-assets-decisions">
++            <div className={GROUP_CARD_CLS} data-testid="change-assets-decisions">
+               <div className="flex shrink-0 items-center justify-between text-[11px] font-medium text-muted-foreground">
+                 <span>决策蒸馏</span>
+                 <span className="text-[10px] text-muted-foreground/70">
+                   knowledge/decisions
+                 </span>
+               </div>
+-              <div className="mt-1">
++              <div className={GROUP_BODY_CLS}>
+               {cap(data?.decisions, "decisions").map((d) => (
+                 <button
+                   key={d.id}
+@@ -482,12 +493,12 @@ export function ChangeAssetsCard({
+                   ) : null}
+                 </button>
+               ))}
++              </div>
+               <GroupToggle
+                 total={decCount}
+                 expanded={isExpanded("decisions")}
+                 onToggle={() => toggleGroup("decisions")}
+               />
+-              </div>
+             </div>
+           ) : null}
+ 
+@@ -498,7 +509,7 @@ export function ChangeAssetsCard({
+               文件分组；行点击弹窗预览条目内容（2026-10-14-assets-knowledge-popup-
+               preview），弹窗内可再跳知识库。 */}
+           {touchList.length > 0 ? (
+-            <div className="flex flex-col rounded border border-border/60 p-2" data-testid="change-assets-knowledge-touch">
++            <div className={GROUP_CARD_CLS} data-testid="change-assets-knowledge-touch">
+               <div className="flex shrink-0 items-center justify-between text-[11px] font-medium text-muted-foreground">
+                 <span title="本变更执行期 CLI 知识注入的命中留痕：在途变更随执行增长，归档后定格（唯一口径——注入命中即留痕，不另设标记复核面）">
+                   知识触达（本变更注入命中的知识）
+@@ -507,7 +518,7 @@ export function ChangeAssetsCard({
+                   {touchList.length} 条
+                 </span>
+               </div>
+-              <div className="mt-1">
++              <div className={GROUP_BODY_CLS}>
+                 {touchFileChips.length > 0 ? (
+                   <div className="flex flex-wrap items-baseline gap-x-1.5 gap-y-1 border-b border-dashed pb-1.5">
+                     <span className="text-[10px] text-muted-foreground/70">整文件</span>
+@@ -564,23 +575,23 @@ export function ChangeAssetsCard({
+                     ))}
+                   </div>
+                 ))}
++              </div>
+               <GroupToggle
+                 total={touchGroups.length}
+                 expanded={isExpanded("touch")}
+                 onToggle={() => toggleGroup("touch")}
+                 unit="个文件分组"
+               />
+-              </div>
+             </div>
+           ) : null}
+ 
+           {rowCount > 0 ? (
+-            <div className="flex flex-col rounded border border-border/60 p-2" data-testid="change-assets-tests">
++            <div className={GROUP_CARD_CLS} data-testid="change-assets-tests">
+               <div className="flex shrink-0 items-center justify-between text-[11px] font-medium text-muted-foreground">
+                 <span>测试绑定</span>
+                 <span className="text-[10px] text-muted-foreground/70">test-trace</span>
+               </div>
+-              <div className="mt-1">
++              <div className={GROUP_BODY_CLS}>
+               {cap(data?.test_rows, "tests").map((r) => (
+                 <div
+                   key={r.row_id}
+@@ -634,26 +645,26 @@ export function ChangeAssetsCard({
+                   ) : null}
+                 </div>
+               ))}
++              </div>
+               <GroupToggle
+                 total={rowCount}
+                 expanded={isExpanded("tests")}
+                 onToggle={() => toggleGroup("tests")}
+               />
+-              </div>
+             </div>
+           ) : null}
+ 
+           {/* 模块触达（FR-02）：交付文件清单 × 镜像模块图匹配的模块；chip 点击
+               打开模块文档预览（explorer 读仓库文件，路径确定不走搜索解析）。 */}
+           {moduleList.length > 0 ? (
+-            <div className="flex flex-col rounded border border-border/60 p-2" data-testid="change-assets-touched-modules">
++            <div className={GROUP_CARD_CLS} data-testid="change-assets-touched-modules">
+               <div className="flex shrink-0 items-center justify-between text-[11px] font-medium text-muted-foreground">
+                 <span>模块触达</span>
+                 <span className="text-[10px] text-muted-foreground/70">
+                   {moduleList.length} 个模块
+                 </span>
+               </div>
+-              <div className="mt-1 flex flex-wrap content-start gap-1.5">
++              <div className={`${GROUP_BODY_CLS} flex flex-wrap content-start gap-1.5`}>
+                 {cap(moduleList, "modules").map((m) => (
+                   <button
+                     key={`${m.project}/${m.id}`}
+@@ -669,18 +680,18 @@ export function ChangeAssetsCard({
+                     </span>
+                   </button>
+                 ))}
++              </div>
+               <GroupToggle
+                 total={moduleList.length}
+                 expanded={isExpanded("modules")}
+                 onToggle={() => toggleGroup("modules")}
+                 unit="个模块"
+               />
+-              </div>
+             </div>
+           ) : null}
+ 
+           {hasAudit && data && isArchived ? (
+-            <div className="flex flex-col rounded border border-border/60 p-2 text-[11px] text-muted-foreground" data-testid="change-assets-audit">
++            <div className={`${GROUP_CARD_CLS} text-[11px] text-muted-foreground`} data-testid="change-assets-audit">
+               <div className="shrink-0 text-[11px] font-medium">归档留档</div>
+               <div className="mt-1 flex shrink-0 flex-wrap gap-x-3 gap-y-1">
+                 {data.patch ? (
+@@ -703,6 +714,9 @@ export function ChangeAssetsCard({
+                   </span>
+                 ) : null}
+               </div>
++              {/* 限高滚动区（2026-10-28-change-detail-side-assets-scroll）：跨仓
++                  区与文件清单一并滚，标题与统计行钉在卡片上部。 */}
++              <div className="min-h-0 flex-1 overflow-y-auto pr-0.5">
+               {crossRepos.length > 0 ? (
+                 <div
+                   className="mt-1.5 flex flex-col gap-1.5 border-t border-dashed pt-1.5"
+@@ -824,6 +838,7 @@ export function ChangeAssetsCard({
+                   />
+                 </div>
+               ) : null}
++              </div>
+             </div>
+           ) : null}
+         </div>
+diff --git a/frontend/src/components/changes/detail/change-overview-side.tsx b/frontend/src/components/changes/detail/change-overview-side.tsx
+index faabd5872..a91e682fb 100644
+--- a/frontend/src/components/changes/detail/change-overview-side.tsx
++++ b/frontend/src/components/changes/detail/change-overview-side.tsx
+@@ -3,20 +3,20 @@
+ /**
+  * 概览右侧信息栏（2026-10-15-change-detail-redesign / FR-08 / D-006@v1 / D-016@v1）。
+  *
+- * primer `MetaPanel` 五组压缩承载元信息：基本信息 / 执行用量 / 会话 / 范围对账计数 /
+- * 产出速览——原「执行用量全宽卡」与「会话卡」的位置由本栏承接，首屏不再被三行全宽
+- * 弱信息占据（D-001）。
++ * primer `MetaPanel` 三组压缩承载元信息：基本信息 / 执行用量 / 会话——原「执行
++ * 用量全宽卡」与「会话卡」的位置由本栏承接，首屏不再被三行全宽弱信息占据（D-001）。
+  *
+  * 取数纪律（D-016@v1 Q-4）：用量走 `useChangeUsage`（与 `ChangeUsageCard` **同一实现**
+- * 与同一 queryKey）；范围对账与产出计数**复用**各自卡片既有 queryKey（`["scope-audit-card",
+- * "audit", …]` / `["changeAssets", …]`）——同 key 命中 react-query 缓存，零额外请求，
+- * 也天然与卡片保持单一数据源。本文件 MUST NOT 另写取数/格式化实现。
++ * 与同一 queryKey）；本文件 MUST NOT 另写取数/格式化实现。
+  *
+- * 归档态两处契约（Phase 4）：用量区标题改「执行用量（合计）」且 MUST NOT 提供「按模型
+- * 明细」展开；范围对账入口改指「产出 · 归档留档」（MUST NOT 指向已隐藏的「文件与对账」tab）。
++ * 归档态契约（Phase 4）：用量区标题改「执行用量（合计）」且 MUST NOT 提供「按模型
++ * 明细」展开。
++ *
++ * 2026-10-28-change-detail-side-assets-scroll（用户裁决）：移除「范围对账」「产出
++ * 速览」两组区块及其取数（getScopeAudit / getChangeAssets 两 query）——弱信息占据
++ * 侧栏，明细入口由「文件与对账」「产出」两个专属 tab 承接，侧栏不再重复摘要。
+  */
+ import Link from "next/link";
+-import { useQuery } from "@tanstack/react-query";
+ 
+ import { MetaPanel, MetaPanelSection } from "@/components/primer";
+ import { CommitTypeChip } from "@/components/changes/commit-type-chip";
+@@ -28,7 +28,7 @@ import {
+   hasNoExecution,
+   useChangeUsage,
+ } from "@/components/changes/detail/change-usage-card";
+-import { getChangeAssets, getScopeAudit, type ChangeRead } from "@/lib/changes";
++import type { ChangeRead } from "@/lib/changes";
+ import type { AgentSessionListItem } from "@/lib/daemon";
+ 
+ interface Row {
+@@ -93,62 +93,11 @@ export function ChangeOverviewSide({
+   sessions,
+ }: ChangeOverviewSideProps) {
+   // 复用卡片既有 queryKey（零额外请求；同一数据源）。
+-  const changeKey = change.change_key;
+   const usageQ = useChangeUsage("change", workspaceId, changeId);
+-  const auditQ = useQuery({
+-    queryKey: ["scope-audit-card", "audit", workspaceId, changeKey],
+-    queryFn: () => getScopeAudit(workspaceId, changeKey),
+-    refetchOnWindowFocus: false,
+-  });
+-  const assetsQ = useQuery({
+-    queryKey: ["changeAssets", workspaceId, changeId],
+-    queryFn: () => getChangeAssets(workspaceId, changeId),
+-    retry: false,
+-    refetchOnWindowFocus: false,
+-  });
+ 
+   const usage = usageQ.data;
+   const usageEmpty = usage == null || hasNoExecution(usage);
+ 
+-  // 范围对账计数：分组形态取信封 repos[].totals 合计（单一源）；单段形态按行 verdict 计数。
+-  const audit = auditQ.data;
+-  const auditCounts = (() => {
+-    if (!audit) return null;
+-    const repos = Array.isArray(audit.repos) ? audit.repos : [];
+-    if (repos.length > 0) {
+-      return repos.reduce(
+-        (acc, r) => {
+-          const t = (r.totals ?? {}) as Record<string, number>;
+-          acc.planned += t.planned ?? 0;
+-          acc.unplanned += t.unplanned ?? 0;
+-          acc.untouched += t.untouched ?? 0;
+-          return acc;
+-        },
+-        { planned: 0, unplanned: 0, untouched: 0 },
+-      );
+-    }
+-    const rows = audit.rows ?? [];
+-    if (rows.length === 0) return null;
+-    return rows.reduce(
+-      (acc, r) => {
+-        const v = audit.mode === "quick" ? r.attribution : r.verdict;
+-        if (v === "planned") acc.planned += 1;
+-        else if (v === "unplanned") acc.unplanned += 1;
+-        else if (v === "untouched") acc.untouched += 1;
+-        return acc;
+-      },
+-      { planned: 0, unplanned: 0, untouched: 0 },
+-    );
+-  })();
+-
+-  const assets = assetsQ.data;
+-  const assetCounts = {
+-    fr: assets?.fr_entries?.length ?? 0,
+-    decisions: assets?.decisions?.length ?? 0,
+-    touch: assets?.knowledge_touch?.length ?? 0,
+-    files: assets?.patch?.files ?? 0,
+-  };
+-
+   const recentSessions = sessions.slice(0, 3);
+ 
+   return (
+@@ -226,33 +175,6 @@ export function ChangeOverviewSide({
+           </Link>
+         </div>
+       </MetaPanelSection>
+-
+-      <MetaPanelSection title="范围对账">
+-        {auditCounts === null ? (
+-          <p className="text-[11px] text-muted-foreground">暂无对账数据</p>
+-        ) : (
+-          <>
+-            <RowView k="计划内" v={String(auditCounts.planned)} />
+-            <RowView k="计划外" v={String(auditCounts.unplanned)} />
+-            <RowView k="计划未动" v={String(auditCounts.untouched)} />
+-          </>
+-        )}
+-        <div className="pt-1">
+-          {/* 2026-10-16-archived-files-tab / D-019@v1：归档态恢复「文件与对账」tab，
+-              两态入口同指该 tab（不再指路「产出 · 归档留档」）。 */}
+-          <span className="text-xs text-muted-foreground">明细见「文件与对账」</span>
+-        </div>
+-      </MetaPanelSection>
+-
+-      <MetaPanelSection title="产出速览">
+-        <RowView k="需求规则" v={String(assetCounts.fr)} />
+-        <RowView k="决策蒸馏" v={String(assetCounts.decisions)} />
+-        <RowView k="知识触达" v={String(assetCounts.touch)} />
+-        <RowView k="改动文件" v={assetCounts.files === 0 ? DASH : String(assetCounts.files)} />
+-        <div className="pt-1">
+-          <span className="text-xs text-muted-foreground">明细见「产出」</span>
+-        </div>
+-      </MetaPanelSection>
+       </MetaPanel>
+     </div>
+   );
