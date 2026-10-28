@@ -230,6 +230,28 @@ export type SessionListScope =
   | RuntimeScope
   | QuicklogScope;
 
+/**
+ * scope 口径稳定键（2026-10-29-floating-scope-loadmore-fix）：kind + 全部
+ * 标识字段拼标量串。调用方（floating-session-host lockedRuntime 分支）以内联
+ * 对象传 scope，宿主每次重渲染产生**同值新引用**——清理 effect 若以对象为依赖
+ * （Object.is 引用比较）会误判「口径变化」清附加段/复位续拉游标；react-query
+ * queryKey 走结构化哈希不受引用影响，全仓唯一落坑点即该 effect。同值新引用 →
+ * 键相等；kind 或任一标识字段变化 → 键变。类型判别联合与键构造同居本文件：
+ * 联合加字段时 tsc 收窄在此处立即暴露，防漏拼字段漏清口径。
+ */
+export function sessionScopeStableKey(
+  scope: SessionListScope | undefined | null,
+): string | null {
+  if (!scope) return null;
+  return [
+    scope.kind,
+    "workspaceId" in scope ? scope.workspaceId : "",
+    "changeId" in scope ? scope.changeId : "",
+    "runtimeId" in scope ? scope.runtimeId : "",
+    "qlId" in scope ? scope.qlId : "",
+  ].join("|");
+}
+
 /** 状态下拉选项（空串=不过滤）。2026-10-27-sessions-total-and-status-filter
  * FR-02：「活跃」档更名「在线」并扩为三态聚合（哨兵值 __ongoing__，对齐
  * __archived__ 先例——单值比较不适用于 pending+active+reconnecting 聚合）。 */
@@ -1165,11 +1187,15 @@ function WorkspaceTreeList({
   // FR-05：服务端筛选口径（scope / 归档视图 / 关联筛选）变化 → 附加段清空 +
   // 续拉游标归零（数据口径变了，旧附加段不再适用）。两层筛选（机器/引擎 tab）
   // 与状态/搜索是客户端过滤，不清附加段，但组内递增计数经
-  // resetExpansionForFilter 重置。
+  // resetExpansionForFilter 重置。2026-10-29-floating-scope-loadmore-fix：
+  // scope 依赖改口径稳定键（sessionScopeStableKey）——调用方内联对象同值新
+  // 引用（floating-host lockedRuntime 分支）不再误清；口径真实变化（kind 或
+  // 任一标识字段变）照旧清空复位。
+  const scopeStableKey = sessionScopeStableKey(scope);
   useEffect(() => {
     setExtraItems([]);
     extraOffsetRef.current = null;
-  }, [scope, isArchivedView, assocFilter]);
+  }, [scopeStableKey, isArchivedView, assocFilter]);
 
   // ── 2026-09-08-session-list-liveness-dot task-02 / FR-01 / D-001@v2 ─────
   // 活性数据源：useSessionLiveness 固定 all 槽 30s 轮询。本面板调一次建 map，

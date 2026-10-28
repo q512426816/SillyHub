@@ -67,6 +67,7 @@ import {
   SESSION_TREE_FILTER_LS_KEY,
   GROUP_SECTION_COLLAPSED_LS_KEY,
   sessionListPollInterval,
+  sessionScopeStableKey,
   type SessionListScope,
 } from "@/components/sessions/session-list-panel";
 import type {
@@ -1330,6 +1331,203 @@ describe("SessionListPanel 总数常显与数据层加载更多（session-list-r
     expect(
       screen.getByRole("button", { name: /加载更多/ }),
     ).toBeInTheDocument();
+  });
+
+  // ── 2026-10-29-floating-scope-loadmore-fix ──────────────────────────────
+  // floating-session-host lockedRuntime 分支内联对象传 scope，宿主重渲染产生
+  // 同值新引用；清理 effect 旧以 scope 对象为依赖（Object.is 引用比较）误判
+  // 「口径变化」清附加段/复位游标。FR-01/FR-02 固化稳定键口径语义。
+
+  it("FR-01：scope 同值新引用重渲染不清附加段不复游标（floating-host lockedRuntime 内联对象防回归）", async () => {
+    setWorkspaces([makeWorkspace({ id: "ws-1", name: "SillyHub" })]);
+    // 首屏 2 条 + 续拉两页各 3 条（total 8 全程）：游标断言需要三段响应。
+    const first = [
+      makeSession({ id: "s-0", workspace_id: "ws-1", title: "会话0" }),
+      makeSession({ id: "s-1", workspace_id: "ws-1", title: "会话1" }),
+    ];
+    const second = [
+      makeSession({ id: "s-10", workspace_id: "ws-1", title: "新会话10" }),
+      makeSession({ id: "s-11", workspace_id: "ws-1", title: "新会话11" }),
+      makeSession({ id: "s-12", workspace_id: "ws-1", title: "新会话12" }),
+    ];
+    const third = [
+      makeSession({ id: "s-20", workspace_id: "ws-1", title: "再拉会话20" }),
+      makeSession({ id: "s-21", workspace_id: "ws-1", title: "再拉会话21" }),
+      makeSession({ id: "s-22", workspace_id: "ws-1", title: "再拉会话22" }),
+    ];
+    mocks.listAgentSessions
+      .mockResolvedValueOnce(listResponse(first, { total: 8 }))
+      .mockResolvedValueOnce(listResponse(second, { total: 8 }))
+      .mockResolvedValueOnce(listResponse(third, { total: 8 }));
+    // rerender 需同 client 重包 provider（renderPanel 不返回 client），照
+    // renderPanelWithClient 先例自建。
+    const client = new QueryClient({
+      defaultOptions: {
+        queries: { retry: false, gcTime: 0, refetchInterval: false },
+        mutations: { retry: false },
+      },
+    });
+    const { rerender } = render(
+      <QueryClientProvider client={client}>
+        <SessionListPanel scope={{ kind: "workspace", workspaceId: "ws-1" }} />
+      </QueryClientProvider>,
+    );
+    await openGroup("SillyHub");
+    await waitFor(() => expect(sessionRows().length).toBe(2));
+
+    // 首次续拉：offset=首屏 2、limit=20；附加段 3 条进入（在线全显）。
+    fireEvent.click(screen.getByRole("button", { name: "加载更多会话" }));
+    await waitFor(() => expect(sessionRows().length).toBe(5));
+    const secondCall = mocks.listAgentSessions.mock.calls[1]![0] as Record<
+      string,
+      unknown
+    >;
+    expect(secondCall.offset).toBe(2);
+
+    // 宿主重渲染模拟：传**内容相同、引用不同**的 scope 对象字面量。
+    rerender(
+      <QueryClientProvider client={client}>
+        <SessionListPanel scope={{ kind: "workspace", workspaceId: "ws-1" }} />
+      </QueryClientProvider>,
+    );
+    // 附加段保留（若误清行数回 2）；queryKey 结构化哈希同值不重拉（仍 2 次）。
+    await waitFor(() => expect(sessionRows().length).toBe(5));
+    expect(mocks.listAgentSessions).toHaveBeenCalledTimes(2);
+
+    // 再点续拉：offset=2+3=5（游标延续，未复位为首屏 2）。
+    fireEvent.click(screen.getByRole("button", { name: "加载更多会话" }));
+    await waitFor(() => expect(sessionRows().length).toBe(8));
+    const thirdCall = mocks.listAgentSessions.mock.calls[2]![0] as Record<
+      string,
+      unknown
+    >;
+    expect(thirdCall.offset).toBe(5);
+  });
+
+  it("FR-02：scope 口径真实变化（同 kind 换 id）清附加段+游标复位", async () => {
+    setWorkspaces([
+      makeWorkspace({ id: "ws-1", name: "SillyHub" }),
+      makeWorkspace({ id: "ws-2", name: "工作区B" }),
+    ]);
+    const ws1First = [
+      makeSession({ id: "s-0", workspace_id: "ws-1", title: "甲会话0" }),
+      makeSession({ id: "s-1", workspace_id: "ws-1", title: "甲会话1" }),
+    ];
+    const ws1Second = [
+      makeSession({ id: "s-10", workspace_id: "ws-1", title: "甲新会话10" }),
+      makeSession({ id: "s-11", workspace_id: "ws-1", title: "甲新会话11" }),
+      makeSession({ id: "s-12", workspace_id: "ws-1", title: "甲新会话12" }),
+    ];
+    const ws2First = [
+      makeSession({ id: "t-0", workspace_id: "ws-2", title: "乙会话0" }),
+    ];
+    const ws2Second = [
+      makeSession({ id: "t-10", workspace_id: "ws-2", title: "乙新会话10" }),
+      makeSession({ id: "t-11", workspace_id: "ws-2", title: "乙新会话11" }),
+    ];
+    mocks.listAgentSessions
+      .mockResolvedValueOnce(listResponse(ws1First, { total: 8 }))
+      .mockResolvedValueOnce(listResponse(ws1Second, { total: 8 }))
+      .mockResolvedValueOnce(listResponse(ws2First, { total: 3 }))
+      .mockResolvedValueOnce(listResponse(ws2Second, { total: 3 }));
+    const client = new QueryClient({
+      defaultOptions: {
+        queries: { retry: false, gcTime: 0, refetchInterval: false },
+        mutations: { retry: false },
+      },
+    });
+    const { rerender } = render(
+      <QueryClientProvider client={client}>
+        <SessionListPanel scope={{ kind: "workspace", workspaceId: "ws-1" }} />
+      </QueryClientProvider>,
+    );
+    await openGroup("SillyHub");
+    await waitFor(() => expect(sessionRows().length).toBe(2));
+
+    // ws-1 续拉 3 条（游标 5）——旧口径附加段在场。
+    fireEvent.click(screen.getByRole("button", { name: "加载更多会话" }));
+    await waitFor(() => expect(sessionRows().length).toBe(5));
+
+    // 换 workspaceId（同 kind 不同 id）：queryKey 变触发 ws-2 首屏 refetch，
+    // 稳定键变 → 附加段清 + 游标 null。先等 refetch 落地再展开组（组随数据
+    // 重建，重建前点击展开会被冲掉）。
+    rerender(
+      <QueryClientProvider client={client}>
+        <SessionListPanel scope={{ kind: "workspace", workspaceId: "ws-2" }} />
+      </QueryClientProvider>,
+    );
+    await waitFor(() => expect(mocks.listAgentSessions).toHaveBeenCalledTimes(3));
+    // ws-1 阶段交互后 collapsedIds 已接管（空集=全展开），ws-2 组可能默认
+    // 展开——按组头实际态决定是否点击（盲点会把它折上）。
+    const head2 = await screen.findByRole("button", {
+      name: "工作区分组 工作区B",
+    });
+    if (head2.getAttribute("aria-expanded") !== "true") {
+      fireEvent.click(head2);
+    }
+    // ws-2 首屏 1 条（ws-1 首屏与附加段全清——旧行不残留）。
+    await waitFor(() => expect(sessionRows().length).toBe(1));
+    expect(screen.queryByRole("button", { name: /会话 甲/ })).toBeNull();
+
+    // ws-2 续拉：offset=1（= ws-2 首屏长度，游标已复位而非沿用 5）。
+    fireEvent.click(screen.getByRole("button", { name: "加载更多会话" }));
+    await waitFor(() => expect(sessionRows().length).toBe(3));
+    const ws2FetchCall = mocks.listAgentSessions.mock.calls[3]![0] as Record<
+      string,
+      unknown
+    >;
+    expect(ws2FetchCall.offset).toBe(1);
+  });
+
+  it("sessionScopeStableKey：四分支键唯一、同值新引用等键、任一标识字段变化键变、null 入参返回 null", () => {
+    const wsKey = sessionScopeStableKey({
+      kind: "workspace",
+      workspaceId: "ws-1",
+    });
+    // 同值新引用（内联字面量各自新建）→ 键相等（引用不稳定免疫正是本修复）。
+    expect(
+      sessionScopeStableKey({ kind: "workspace", workspaceId: "ws-1" }),
+    ).toBe(wsKey);
+    // 同 kind 换 id → 键变（FR-02 清空语义依赖）。
+    expect(
+      sessionScopeStableKey({ kind: "workspace", workspaceId: "ws-2" }),
+    ).not.toBe(wsKey);
+    // 四分支互不相等（kind 前缀区分）。
+    const changeKey = sessionScopeStableKey({
+      kind: "change",
+      workspaceId: "ws-1",
+      changeId: "c-1",
+    });
+    const runtimeKey = sessionScopeStableKey({
+      kind: "runtime",
+      runtimeId: "rt-1",
+    });
+    const qlKey = sessionScopeStableKey({
+      kind: "quicklog",
+      workspaceId: "ws-1",
+      qlId: "ql-20260101-001-x",
+    });
+    expect(new Set([wsKey, changeKey, runtimeKey, qlKey]).size).toBe(4);
+    // 各分支次级标识字段变化 → 键变（漏拼字段即漏清，钉死）。
+    expect(
+      sessionScopeStableKey({
+        kind: "change",
+        workspaceId: "ws-1",
+        changeId: "c-2",
+      }),
+    ).not.toBe(changeKey);
+    expect(
+      sessionScopeStableKey({ kind: "runtime", runtimeId: "rt-2" }),
+    ).not.toBe(runtimeKey);
+    expect(
+      sessionScopeStableKey({
+        kind: "quicklog",
+        workspaceId: "ws-1",
+        qlId: "ql-20260101-002-y",
+      }),
+    ).not.toBe(qlKey);
+    // 空入参（全局门户缺省 scope）→ null（与 effect 依赖 null 稳定）。
+    expect(sessionScopeStableKey(undefined)).toBeNull();
   });
 });
 
