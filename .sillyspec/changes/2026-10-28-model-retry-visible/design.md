@@ -62,8 +62,10 @@ created_at: 2026-10-27T23:39:20.199Z
 | 新增 | sillyhub-daemon/tests/interactive/session-manager-status-dispatch.test.ts | api_retry 分发落行/runId 空丢弃/error 截断单测 |
 | 修改 | sillyhub-daemon/tests/interactive/claude-events.test.ts | api_retry 归一化单测（含 error_status=null 与缺字段容错） |
 | 修改 | frontend/src/components/daemon/session-log-assembler.ts | kind=model_retry 分类（先于 reply 兜底） |
+| 修改 | frontend/src/components/daemon/turn-timeline.tsx | 对话视图过滤门控（仅运行中轮挂载 model_retry）+ segmentTsOf 补 case |
 | 修改 | frontend/src/components/daemon/turn-segment-views.tsx | model_retry 段渲染（运行中提示/终态不渲染/兜底） |
 | 修改 | frontend/src/components/daemon/turn-status-bar.tsx | currentActivity 回退链纳入 model_retry 段 |
+| 新增 | frontend/src/components/daemon/__tests__/turn-timeline-model-retry-gating.test.tsx | 运行中渲染/终态不渲染/全部视图保留的轮状态门控单测 |
 | 修改 | frontend/src/components/daemon/__tests__/session-log-assembler.test.ts | model_retry 分类与解析失败兜底单测 |
 | 修改 | frontend/src/components/daemon/__tests__/turn-segment-views.test.tsx | 运行中渲染/终态不渲染单测 |
 | 修改 | frontend/src/components/daemon/__tests__/turn-status-bar-phase.test.tsx | 重试文案纳入回退链单测 |
