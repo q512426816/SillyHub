@@ -240,3 +240,4 @@
 | 2026-10-28 | 2026-10-28-model-retry-visible | 模型限流重试过程实时可见——复用COMPACT_STATUS协议行通道透传api_retry |
 | 2026-10-28 | 2026-10-28-session-config-default-provider-fix | 会话配置条默认供应商显示与模型联动缺陷：pi 等引擎会话显示了不匹配引擎的默认供应商名（兜底查找未按… |
 | 2026-10-28 | 2026-10-28-session-list-refresh-and-paging | 会话列表两个缺陷：①会话内暂存切换供应商/模型/档案随消息生效后，左侧列表条目 chips 仍显示新… |
+| 2026-10-28 | 2026-10-28-session-list-loadmore-fetch | 上一变更（2026-10-28-session-list-refresh-and-paging）的「… |

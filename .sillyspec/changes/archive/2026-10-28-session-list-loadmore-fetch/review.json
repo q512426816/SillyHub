@@ -1,0 +1,24 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-28-session-list-loadmore-fetch",
+  "reviewer": "inline-self（环境无已注册子代理，主会话代行）",
+  "verdict": "PASS",
+  "reviewedAgainst": "b9949cdbf7ab26e95b30b7016ce90fb6c4f3390d",
+  "findings": [
+    {
+      "severity": "P3",
+      "status": "accepted",
+      "title": "组内触网拉回的 20 条可能不属于该组（声明边界）",
+      "evidence": "续拉按全局 offset（跨组全量筛选结果），新条目进各自组——点击组只见本地展开行；与无限加载心智一致（列表整体生长、按钮可重点），design 风险节已裁决可接受",
+      "location": "frontend/src/components/sessions/session-list-panel.tsx:2100"
+    }
+  ],
+  "dimensionNotes": {
+    "乱序": "ok",
+    "并发": "ok",
+    "切换": "ok",
+    "作用域": "ok"
+  },
+  "reviewNotes": "逐条核对：①FR-01 visibleGroupSessionsWithExtra 改 filter 预算计数（非默认条目按序消耗 extra）——35 条用例实证 12→32（恰好 +20，还剩 3）→35（按钮消失）；extra=0 走 defaultVisibleGroupSessions 原函数逐字节一致（默认态零漂移）；②FR-02 组内点击 sessions.length<totalFromServer 即 void loadMoreSessions()，新用例断言第 2 次调用 offset=12（首屏条数游标基线）limit=20、续拉 2 条进组后 14=total 按钮消失且无第三次请求；③FR-03 EXTRA_PAGE_LIMIT=20 常量导出，数据层用例断言 limit===20，树底部入口同函数（loadMoreSessions 单一来源）；④FR-04 offset 游标 extraOffsetRef（已请求累计，防去重后组合集长度偏小导致重复拉取段）、append 双 Set 去重保持、重置 effect 同步归 null；⑤FR-06 实测 125 passed + tsc --noEmit 零错 + eslint 触达两文件零输出。声明边界一条 P3 accepted（见 findings）。生成物同步：无后端 schema 改动，gen:types 无义务。上轮变更（refresh-and-paging）的 FR-03 语义被本变更修订，其归档件不动（历史如实）。",
+  "reviewedAt": "2026-10-28T05:28:40.000Z"
+}

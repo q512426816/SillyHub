@@ -2110,3 +2110,86 @@ created_at: 2026-10-16T01:30:35.950Z
 摘要：主路径
 全文：.sillyspec/changes/archive/2026-10-28-session-list-refresh-and-paging/requirements.md#FR-06
 最近确认：da29cb7d40179e133302e053901ad0413de2a827
+
+## FR-test-utils-115 组内「加载更多」每次点击新增恰好 20 条此前未显示的可见行（跳过已显示计数，不被在线全显吞并），全组显示后按钮消失
+变更：2026-10-28-session-list-loadmore-fetch
+状态：active
+摘要：主路径
+全文：.sillyspec/changes/archive/2026-10-28-session-list-loadmore-fetch/requirements.md#FR-01
+最近确认：b9949cdbf7ab26e95b30b7016ce90fb6c4f3390d
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-28-session-list-loadmore-fetch:flow:测试绑定FR-01
+  tests: frontend/src/components/sessions/__tests__/session-list-panel.test.tsx「组内 35 条（在线 2 条在第 21/31 位）：加载更多两次 +20 恰好新增 20 行至全量（改写）」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-28-session-list-loadmore-fetch
+  status: active
+
+## FR-test-utils-116 组内「加载更多」点击时若服务端总数 > 已加载数，立即触发后端接口按相同筛选参 offset 续拉 20 条（每次点击真拉取，全部拉完为止不再请求）
+变更：2026-10-28-session-list-loadmore-fetch
+状态：active
+摘要：主路径
+全文：.sillyspec/changes/archive/2026-10-28-session-list-loadmore-fetch/requirements.md#FR-02
+最近确认：b9949cdbf7ab26e95b30b7016ce90fb6c4f3390d
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-28-session-list-loadmore-fetch:flow:测试绑定FR-02
+  tests: frontend/src/components/sessions/__tests__/session-list-panel.test.tsx「组内点击触发数据层续拉（offset=已加载 limit=20）+ 拉完不再请求（新增）」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-28-session-list-loadmore-fetch
+  status: active
+
+## FR-test-utils-117 树底部「加载更多会话」同样每次拉 20 条（与组内入口同一数据层函数）
+变更：2026-10-28-session-list-loadmore-fetch
+状态：active
+摘要：主路径
+全文：.sillyspec/changes/archive/2026-10-28-session-list-loadmore-fetch/requirements.md#FR-03
+最近确认：b9949cdbf7ab26e95b30b7016ce90fb6c4f3390d
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-28-session-list-loadmore-fetch:flow:测试绑定FR-03
+  tests: frontend/src/components/sessions/__tests__/session-list-panel.test.tsx「点『加载更多会话』→ offset 续拉（同筛选参）+ 附加段去重后追加展示（改写，limit 断言 20）」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-28-session-list-loadmore-fetch
+  status: active
+
+## FR-test-utils-118 附加段追加仍按 id 去重；筛选/scope/视图切换重置语义不变
+变更：2026-10-28-session-list-loadmore-fetch
+状态：active
+摘要：主路径
+全文：.sillyspec/changes/archive/2026-10-28-session-list-loadmore-fetch/requirements.md#FR-04
+最近确认：b9949cdbf7ab26e95b30b7016ce90fb6c4f3390d
+
+## FR-test-utils-119 触达测试全绿，既有递增用例改写为新语义并新增触网断言用例
+变更：2026-10-28-session-list-loadmore-fetch
+状态：active
+摘要：主路径
+全文：.sillyspec/changes/archive/2026-10-28-session-list-loadmore-fetch/requirements.md#FR-05
+最近确认：b9949cdbf7ab26e95b30b7016ce90fb6c4f3390d
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-28-session-list-loadmore-fetch:flow:测试绑定FR-05
+  tests: frontend/src/components/sessions/__tests__/session-list-panel.test.tsx
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-28-session-list-loadmore-fetch
+  status: active

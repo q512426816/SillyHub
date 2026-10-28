@@ -1,0 +1,72 @@
+{
+  "change": "2026-10-28-session-list-loadmore-fetch",
+  "baseline": "c86a3f6f9e16149042e8639aefa6b7c40958c635",
+  "head": "b9949cdbf7ab26e95b30b7016ce90fb6c4f3390d",
+  "files": [
+    "frontend/src/components/sessions/__tests__/session-list-panel.test.tsx",
+    "frontend/src/components/sessions/session-list-panel.tsx"
+  ],
+  "totals": {
+    "files": 2,
+    "additions": 119,
+    "deletions": 29
+  },
+  "savedAt": "2026-10-28T05:23:19.413Z",
+  "note": "flow done 时点冻结（本变更可归属交付面：baseline..HEAD 提交面过滤 .sillyspec/ 只留 .sillyspec/docs/ 交付文档 + 独占树未提交交付；治理工件目录不入冻结——2026-10-12-close-trace-freeze-integrity FR-01）",
+  "modules": [
+    {
+      "id": "frontend",
+      "files": 2,
+      "doc": "docs/multi-agent-platform/modules/frontend.md",
+      "docTouched": false,
+      "docMissing": false
+    },
+    {
+      "id": "frontend_components",
+      "files": 2,
+      "doc": "docs/SillyHub/modules/frontend_components.md",
+      "docTouched": false,
+      "docMissing": false
+    }
+  ],
+  "uncoveredDirs": [],
+  "moduleMaps": [
+    "docs/backend/modules/_module-map.yaml",
+    "docs/frontend/modules/_module-map.yaml",
+    "docs/multi-agent-platform/modules/_module-map.yaml",
+    "docs/SillyHub/modules/_module-map.yaml",
+    "docs/sillyhub-daemon/modules/_module-map.yaml"
+  ],
+  "scopeAudit": {
+    "mode": "full-flow",
+    "ok": true,
+    "degradedReason": null,
+    "baseAnchor": "c86a3f6f9e16149042e8639aefa6b7c40958c635",
+    "totals": {
+      "files": 2,
+      "additions": 119,
+      "deletions": 29
+    },
+    "rows": [
+      {
+        "path": "frontend/src/components/sessions/__tests__/session-list-panel.test.tsx",
+        "additions": 61,
+        "deletions": 7,
+        "kind": "modified"
+      },
+      {
+        "path": "frontend/src/components/sessions/session-list-panel.tsx",
+        "additions": 58,
+        "deletions": 22,
+        "kind": "modified"
+      }
+    ],
+    "excluded": {
+      "foreignDeclared": []
+    },
+    "note": "flow done 时点冻结（本文件落盘时采集）",
+    "closedBy": "flow done"
+  },
+  "patchSha256": "1ab1fe25f8752c865d3ad5e8c397a1593a45ec7d6983954afe76c0076ccd477a",
+  "patchStatus": "ok"
+}

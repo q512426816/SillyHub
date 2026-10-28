@@ -1,0 +1,66 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-28-session-list-loadmore-fetch",
+  "rows": [
+    {
+      "anchor": "FR-01",
+      "row_id": "2026-10-28-session-list-loadmore-fetch:flow:测试绑定FR-01",
+      "tests": [
+        "frontend/src/components/sessions/__tests__/session-list-panel.test.tsx「组内 35 条（在线 2 条在第 21/31 位）：加载更多两次 +20 恰好新增 20 行至全量（改写）」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-28-session-list-loadmore-fetch"
+    },
+    {
+      "anchor": "FR-02",
+      "row_id": "2026-10-28-session-list-loadmore-fetch:flow:测试绑定FR-02",
+      "tests": [
+        "frontend/src/components/sessions/__tests__/session-list-panel.test.tsx「组内点击触发数据层续拉（offset=已加载 limit=20）+ 拉完不再请求（新增）」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-28-session-list-loadmore-fetch"
+    },
+    {
+      "anchor": "FR-03",
+      "row_id": "2026-10-28-session-list-loadmore-fetch:flow:测试绑定FR-03",
+      "tests": [
+        "frontend/src/components/sessions/__tests__/session-list-panel.test.tsx「点『加载更多会话』→ offset 续拉（同筛选参）+ 附加段去重后追加展示（改写，limit 断言 20）」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-28-session-list-loadmore-fetch"
+    },
+    {
+      "anchor": "FR-05",
+      "row_id": "2026-10-28-session-list-loadmore-fetch:flow:测试绑定FR-05",
+      "tests": [
+        "frontend/src/components/sessions/__tests__/session-list-panel.test.tsx"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-28-session-list-loadmore-fetch"
+    }
+  ]
+}
