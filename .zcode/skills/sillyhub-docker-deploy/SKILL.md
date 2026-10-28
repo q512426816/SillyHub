@@ -335,6 +335,11 @@ Get-NetFirewallProfile | Select-Object Name,Enabled
 
 ## 发布记录（每次部署必做，成功失败都写）
 
+> ⚠️ **本节只覆盖「写记录进本仓」。目标机是腾讯云生产机时，还有第二步「同步服务器镜像目录」——
+> 那一步在 `deploy-to-server` skill 的「发布记录」节**（含 mkdir/scp 命令与 backup tag 惯例）。
+> 生产部署漏掉该步 = 服务器 `/deploy-records` 页面看不到本次部署（2026-10-27~28 五次部署实证）。
+> 本 skill 定位是本机 Docker 部署；生产部署整体走 `deploy-to-server` skill。
+
 部署动作收尾前，必须写一份发布记录 md 到本仓库 `docs/releases/` 目录——
 这是 SillyHub 平台「发布记录」菜单（`/deploy-records`）的数据源，漏写 =
 平台上看不到本次部署。**部署失败的也写**（status: failed，正文写失败原因），

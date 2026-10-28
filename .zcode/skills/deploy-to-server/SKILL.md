@@ -179,18 +179,20 @@ SKILL.md，记录随代码一起 commit 推送。
 
 ### 2. 同步到服务器镜像目录（本 skill 专属步骤）
 
-服务器平台经 `/tmp`→`/host-projects` 挂载读记录，镜像目录固定为
-`/tmp/sillyhub-repos/multi-agent-platform/docs/releases/`（workspace
-「multi-agent-platform-镜像」指向它）——**2026-10-16 迁移后该目录在腾讯云生产机上**：
+服务器平台经 `/opt/sillyhub/repos`→`/host-projects` 挂载读记录，镜像目录固定为
+`/opt/sillyhub/repos/multi-agent-platform/docs/releases/`（workspace
+「multi-agent-platform-镜像」为活跃行指向它）——**2026-10-28 起从 /tmp 迁至该持久路径**
+（脱离 /tmp 重启即失的侥幸链，变更 2026-10-28-release-mirror-persist；旧 /tmp 目录已删除）：
 
 ```bash
 ssh -i ~/.ssh/tencent_deploy ubuntu@124.222.127.242 \
-  'mkdir -p /tmp/sillyhub-repos/multi-agent-platform/docs/releases'
+  'mkdir -p /opt/sillyhub/repos/multi-agent-platform/docs/releases'
 scp -i ~/.ssh/tencent_deploy docs/releases/*.md \
-  ubuntu@124.222.127.242:/tmp/sillyhub-repos/multi-agent-platform/docs/releases/
+  ubuntu@124.222.127.242:/opt/sillyhub/repos/multi-agent-platform/docs/releases/
 ```
 
-> /tmp 服务器重启可能被清——无所谓：每次部署本节都会全量重传，目录自愈。
+> 挂载由服务器 `/opt/sillyhub/deploy/deploy/.env` 的 `HOST_PROJECTS_DIR`/`HOST_PATH_PREFIX`
+> （=/opt/sillyhub/repos）驱动，compose 侧 `${HOST_PROJECTS_DIR}:/host-projects`，改路径须两处同步。
 > 平台上另有 workspace 记录的是本机路径（读不到），「multi-agent-platform-镜像」才是服务器
 > 侧发布记录数据源；其它仓库要用同款能力时照抄：mkdir + scp + 建一条指向该目录的 workspace。
 
