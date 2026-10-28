@@ -1,0 +1,51 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-28-release-mirror-persist",
+  "reviewer": "general-purpose-subagent",
+  "verdict": "PASS",
+  "reviewedAgainst": "1105efc2682cce5e8cbfe50ebf9137c44423011b",
+  "findings": [
+    {
+      "severity": "P3",
+      "status": "accepted",
+      "title": "边界裁决a：SQL 直改生产库（API 401 不可用，单行 UPDATE+窄条件 WHERE+旧值留痕）——可接受",
+      "evidence": "绕过应用层校验已在 design.md 风险节显式声明并说明 API 取 token 401 的不可行原因；防护实证于 fa5c09a44 提交消息（UPDATE 1、窄条件 WHERE 防误伤、旧值全量留痕 id=efd446cc…/deleted_at=2026-10-14 07:50:29.831031+00/旧 root_path），design.md:33 同步留痕，可回退",
+      "location": ".sillyspec/changes/2026-10-28-release-mirror-persist/design.md:43"
+    },
+    {
+      "severity": "P3",
+      "status": "accepted",
+      "title": "边界裁决b：删除 /tmp/sillyhub-repos 旧目录——可接受",
+      "evidence": "顺序正确：fa5c09a44 先 cp -a 迁移并 diff CONTENT_IDENTICAL（含最新 seq49）→ 切挂载与行指向 → 1105efc26 端到端核验通过后才 rm -rf；/tmp 本为易失面且 skill 既有全量重传自愈惯例，删除消双源歧义正是 FR-01 目标",
+      "location": ".sillyspec/changes/2026-10-28-release-mirror-persist/tasks.md:12"
+    },
+    {
+      "severity": "P3",
+      "status": "accepted",
+      "title": "边界裁决c：服务器 .env 直接 sed 修改（有 .env.bak-20261028-mirror-persist 备份）——可接受",
+      "evidence": ".env 不入版本库，直接修改是唯一途径；备份文件名留痕于 fa5c09a44 提交消息（.env 已备份 .env.bak-20261028-mirror-persist），改动仅两变量 HOST_PROJECTS_DIR/HOST_PATH_PREFIX，语义变化在 design.md 接口契约节显式声明",
+      "location": ".sillyspec/changes/2026-10-28-release-mirror-persist/design.md:19"
+    },
+    {
+      "severity": "P3",
+      "status": "accepted",
+      "title": "边界裁决d：compose 零改动、仅改 env 换挂载源——可接受",
+      "evidence": "deploy/docker-compose.yml:100 挂载确由 ${HOST_PROJECTS_DIR} 驱动、:122 HOST_PATH_PREFIX 喂路径改写，改 env 即一致换源；design 盲维第4问答与代码相符——服务器上该挂载唯一消费者即镜像数据源，其余 workspace 行 root_path 为本机路径前后均不可达返回空，本地开发用独立 .env 不受影响",
+      "location": "deploy/docker-compose.yml:100"
+    },
+    {
+      "severity": "P3",
+      "status": "accepted",
+      "title": "边界裁决e：/deploy-records 页面终验留给用户刷新——可接受",
+      "evidence": "1105efc26 提交消息与 task-06 显式披露「页面待用户刷新终验」，agent 端已验到数据链最远可达点（容器内数据源面 62 条含 seq49 + DB 行 ACTIVE 指新路径），页面渲染依赖用户浏览器会话属合理验证边界；提醒用户刷新即闭环",
+      "location": ".sillyspec/changes/2026-10-28-release-mirror-persist/tasks.md:12"
+    }
+  ],
+  "dimensionNotes": {
+    "乱序": "ok",
+    "并发": "ok",
+    "切换": "ok",
+    "作用域": "ok"
+  },
+  "reviewedAt": "2026-10-28T10:22:00+08:00"
+}

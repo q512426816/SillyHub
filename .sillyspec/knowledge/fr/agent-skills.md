@@ -256,3 +256,24 @@ created_at: 2026-10-19T02:55:25.079Z
 摘要：主路径
 全文：.sillyspec/changes/archive/2026-10-25-reset-agent-log-adjudication/requirements.md#FR-03
 最近确认：464b28fec5e3a5cc4fa9ea895de016a826f8adf8
+
+## FR-agent-skills-017 服务器发布记录数据源目录迁出 /tmp 至持久路径（/opt/sillyhub/repos/multi-agent-platform），backend 容器经挂载可读，/deploy-records 可见全部记录（含 seq49），服务器重启后数据仍在
+变更：2026-10-28-release-mirror-persist
+状态：active
+摘要：迁移后数据面完整；重启持久性
+全文：.sillyspec/changes/archive/2026-10-28-release-mirror-persist/requirements.md#FR-01
+最近确认：1105efc2682cce5e8cbfe50ebf9137c44423011b
+
+## FR-agent-skills-018 sillyhub-docker-deploy skill 发布记录节增加指向 deploy-to-server 的互链（生产部署含镜像目录同步），deploy-to-server 的镜像路径同步更新为新持久路径，两 skill 分工口径互认
+变更：2026-10-28-release-mirror-persist
+状态：active
+摘要：主路径
+全文：.sillyspec/changes/archive/2026-10-28-release-mirror-persist/requirements.md#FR-02
+最近确认：1105efc2682cce5e8cbfe50ebf9137c44423011b
+
+## FR-agent-skills-019 服务器侧 workspace 数据源行落为显式活跃行，不再依赖软删行
+变更：2026-10-28-release-mirror-persist
+状态：active
+摘要：主路径
+全文：.sillyspec/changes/archive/2026-10-28-release-mirror-persist/requirements.md#FR-03
+最近确认：1105efc2682cce5e8cbfe50ebf9137c44423011b

@@ -2499,3 +2499,11 @@ supersedes：D-008@v1
 锚点：daemon/schema.py
 最近确认：265543056ebc5d72193ead562b28dec0f8d38671
 理由：最大风险：CLI api_retry 帧的 `error` 字段形态漂移（SDK 类型为 SDKAssistantMessageError 对象，可能随版本变化）——防御：归一化与落行两处都做「非字符串则 JSON.stringify + 截断」，前端渲染对解析失败有中性兜底（FR-02 场景三），最坏退化为不可读摘要行而非报错。次要风险：重试风暴一次轮可产生约 10 行协议行，时间线行数增多——终态轮不渲染已兜住对话正文噪声，进度视图行数可接受（与 thinking 分段同量级）。 试过但放弃的方案：①notifyTurnPhase 新增 `model_retry` 阶段——TurnPhaseValue 七阶段语义均为轮启动阶段，backend schema（daemon/schema.py TurnPhase 枚举）与前端阶段状态条渲染面都要扩，改动面大于协议行方案且信息载量低（phase 无 attempt/error 载荷位）；②daemon 侧对 rate_limited 轮做自动延迟重注入——属行为变更，与 FR-03「纯可观测性透传」定位冲突，且掩盖供应商侧问题（用户应看到限流并决策换模型/稍后再试）；③仅改前端把「API Error」assistant 文本行实时显示——该文本只在轮终态合成一次（重试期间无 assistant 帧），解决不了重试风暴期间的可见性（本次问题的主诉）。
+
+## D-unmapped-312@v1 设计期风险与放弃方案（底稿）
+状态：implemented
+变更：2026-10-28-release-mirror-persist
+原编号：D-001@v1
+锚点：未记录
+最近确认：1105efc2682cce5e8cbfe50ebf9137c44423011b
+理由：答：最大风险是 SQL 直改生产库绕过应用层校验（API 取 token 不可行——bootstrap 密码已与实际不符，401）。对策：单行 UPDATE、新旧值留痕、改后立即容器视角核验；不做任何凭据重置。 放弃方案： - A（compose 增设专用挂载 /srv/releases）：要动共享 compose 文件且本地语义无增益——放弃，改 env 换源零 compose 改动。 - B（走 API 建改工作区）：管理密码 401 取不到 token，重置凭据超出本变更范围且引入安全面动作——放弃，走 SQL 单行 UPDATE。 - C（/tmp 旧目录双写过渡）：双源并存违反单一数据源目标，/tmp 侥幸链正是本变更要消灭的对象——放弃，验证通过后一次性删除旧目录。
