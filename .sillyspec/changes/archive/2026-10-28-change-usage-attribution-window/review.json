@@ -1,0 +1,37 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-28-change-usage-attribution-window",
+  "reviewer": "inline-self（环境无已注册子代理，主会话代行）",
+  "verdict": "PASS",
+  "reviewedAgainst": "81f085761e318561a5a30b27a6df62f588daee61",
+  "findings": [
+    {
+      "severity": "P3",
+      "status": "accepted",
+      "title": "存量 link.created_at 为落库时刻，下界漏计存量变更立项轮",
+      "evidence": "本变更上线前的存量 change_session_links.created_at 是命令落库时刻（晚于立项轮 started_at），窗口下界会把存量变更的立项轮排除——方向为少算一轮（安全侧），新数据经 effective_from 回填无此问题；design.md 风险节已声明",
+      "location": "backend/app/modules/change/usage_service.py:_link_window_predicates"
+    },
+    {
+      "severity": "P3",
+      "status": "accepted",
+      "title": "「最近绑定」NOT EXISTS 子查询无 session_id 前导索引",
+      "evidence": "change_session_links 仅有 (change_id, session_id) 前导索引，子查询按 session_id 过滤生产量级下可能全表扫；行数=绑定对数（量级小），先接受、性能留观",
+      "location": "backend/app/modules/change/usage_service.py:_link_window_predicates"
+    },
+    {
+      "severity": "P3",
+      "status": "accepted",
+      "title": "terminal 清锚依赖命令解析且 bind 异常时不清",
+      "evidence": "不带 --change 的归档命令（上下文模式）与顶层别名 sillyspec archive 不在解析范围（样例库既有契约防误归），清锚不触发；统计侧 archived_at 上界已兜底显示口径，decisions.md D-003 记录取舍",
+      "location": "backend/app/modules/daemon/run_sync/service/submit_commit.py:364-381"
+    }
+  ],
+  "dimensionNotes": {
+    "乱序": "ok",
+    "并发": "ok",
+    "切换": "ok",
+    "作用域": "ok"
+  },
+  "reviewedAt": "2026-10-28T06:20:00.000Z"
+}

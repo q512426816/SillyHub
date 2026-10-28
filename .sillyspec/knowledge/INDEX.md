@@ -264,3 +264,4 @@
 - app-mobile-pages → [fr/app-mobile-pages.md](fr/app-mobile-pages.md)
 - task → [fr/task.md](fr/task.md)
 - spec_workspace → [fr/spec_workspace.md](fr/spec_workspace.md)
+- auto-sillyspec|sillyspec → [fr/auto-sillyspec.md](fr/auto-sillyspec.md)

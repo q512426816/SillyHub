@@ -1,0 +1,126 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-28-change-usage-attribution-window",
+  "rows": [
+    {
+      "anchor": "FR-01",
+      "row_id": "2026-10-28-change-usage-attribution-window:flow:测试绑定FR-01",
+      "tests": [
+        "test/backend/app/modules/change/tests/test_usage_stats.py「TestAttributionWindow::test_history_runs_before_link_excluded」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-28-change-usage-attribution-window"
+    },
+    {
+      "anchor": "FR-02",
+      "row_id": "2026-10-28-change-usage-attribution-window:flow:测试绑定FR-02",
+      "tests": [
+        "test/backend/app/modules/change/tests/test_usage_stats.py「TestAttributionWindow::test_archived_upper_bound_linked」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-28-change-usage-attribution-window"
+    },
+    {
+      "anchor": "FR-03",
+      "row_id": "2026-10-28-change-usage-attribution-window:flow:测试绑定FR-03",
+      "tests": [
+        "test/backend/app/modules/change/tests/test_usage_stats.py「TestAttributionWindow::test_recent_binding_wins_no_double_count」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-28-change-usage-attribution-window"
+    },
+    {
+      "anchor": "FR-04",
+      "row_id": "2026-10-28-change-usage-attribution-window:flow:测试绑定FR-04",
+      "tests": [
+        "test/backend/app/modules/change/tests/test_usage_stats.py「TestAttributionWindow::test_multi_session_independent_windows」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-28-change-usage-attribution-window"
+    },
+    {
+      "anchor": "FR-05",
+      "row_id": "2026-10-28-change-usage-attribution-window:flow:测试绑定FR-05",
+      "tests": [
+        "test/backend/app/modules/change/tests/test_usage_stats.py「TestAttributionWindow::test_archived_upper_bound_dispatched」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-28-change-usage-attribution-window"
+    },
+    {
+      "anchor": "FR-06",
+      "row_id": "2026-10-28-change-usage-attribution-window:flow:测试绑定FR-06",
+      "tests": [
+        "test/backend/app/modules/change/tests/test_spec_binding.py「test_extract_spec_bindings_terminal_flag」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-28-change-usage-attribution-window"
+    },
+    {
+      "anchor": "FR-07",
+      "row_id": "2026-10-28-change-usage-attribution-window:flow:测试绑定FR-07",
+      "tests": [
+        "test/backend/app/modules/change/tests/test_usage_stats.py「TestAttributionWindow::test_summary_anchor_same_window_as_detail」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-28-change-usage-attribution-window"
+    },
+    {
+      "anchor": "FR-08",
+      "row_id": "2026-10-28-change-usage-attribution-window:flow:测试绑定FR-08",
+      "tests": [
+        "test/backend/app/modules/change/tests/test_usage_stats.py「TestAttributionWindow（全类 7 用例）」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-28-change-usage-attribution-window"
+    }
+  ]
+}
