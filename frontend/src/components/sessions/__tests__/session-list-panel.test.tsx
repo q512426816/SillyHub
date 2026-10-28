@@ -1144,7 +1144,7 @@ describe("SessionListPanel 组头回调与截断", () => {
     ).not.toBeInTheDocument();
   });
 
-  it("组内 35 条（在线 2 条在第 20/30 位）：加载更多两次 10+20→30→全量（FR-03 递增步长 20）", async () => {
+  it("组内 35 条（在线 2 条在第 21/31 位）：加载更多每次恰好 +20 条此前隐藏行至全量（loadmore-fetch 预算计数语义）", async () => {
     setWorkspaces([makeWorkspace({ id: "ws-1", name: "SillyHub" })]);
     const many = Array.from({ length: 35 }, (_, i) =>
       makeSession({
@@ -1158,11 +1158,15 @@ describe("SessionListPanel 组头回调与截断", () => {
     renderPanel(<SessionListPanel />);
     await openGroup("SillyHub");
 
-    // 默认 = 最新 10 ∪ 在线 2（第 21/31 位）= 12 行。
+    // 默认 = 最新 10 ∪ 在线 2 = 12 行。
     await waitFor(() => expect(sessionRows().length).toBe(12));
-    // +20 → 最新 30 ∪ 在线（第 31 位补入）= 31 行。
+    // +20（预算计数：非默认条目按序消耗，恰好新增 20 条隐藏行）→ 32 行，
+    // 仍隐藏 3 条（35-32）→ 按钮在场「还有 3 条」。
     fireEvent.click(screen.getByRole("button", { name: /加载更多/ }));
-    await waitFor(() => expect(sessionRows().length).toBe(31));
+    await waitFor(() => expect(sessionRows().length).toBe(32));
+    expect(screen.getByRole("button", { name: /加载更多/ }).textContent).toContain(
+      "还有 3 条",
+    );
     // 再 +20 → 覆盖全量 35，按钮消失。
     fireEvent.click(screen.getByRole("button", { name: /加载更多/ }));
     await waitFor(() => expect(sessionRows().length).toBe(35));
@@ -1214,7 +1218,7 @@ describe("SessionListPanel 总数常显与数据层加载更多（session-list-r
     ).not.toBeInTheDocument();
   });
 
-  it("FR-04：点「加载更多会话」→ offset 续拉（同筛选参）+ 附加段去重后追加展示", async () => {
+  it("FR-04/03：点「加载更多会话」→ offset 续拉（同筛选参，每次 20 条）+ 附加段去重后追加展示", async () => {
     setWorkspaces([makeWorkspace({ id: "ws-1", name: "SillyHub" })]);
     const first = Array.from({ length: 2 }, (_, i) =>
       makeSession({ id: `s-${i}`, workspace_id: "ws-1", title: `会话${i}` }),
@@ -1234,19 +1238,69 @@ describe("SessionListPanel 总数常显与数据层加载更多（session-list-r
 
     fireEvent.click(screen.getByRole("button", { name: "加载更多会话" }));
     await waitFor(() => expect(sessionRows().length).toBe(4));
-    // 续拉请求带 offset=首屏已加载数（同筛选参透传断言）。
+    // 续拉请求：offset=首屏已加载数（游标基线）、limit=20（每次 20 条，用户拍板）。
     const secondCall = mocks.listAgentSessions.mock.calls[1]![0] as Record<
       string,
       unknown
     >;
     expect(secondCall.offset).toBe(2);
-    expect(secondCall.limit).toBeGreaterThan(0);
+    expect(secondCall.limit).toBe(20);
     // 去重后已加载 = 4 = total → 数据层入口消失。
     await waitFor(() =>
       expect(
         screen.queryByRole("button", { name: "加载更多会话" }),
       ).not.toBeInTheDocument(),
     );
+  });
+
+  it("FR-02：组内「加载更多」点击并行触网续拉（offset=首屏条数 limit=20）；全部拉完后再点不再发请求", async () => {
+    setWorkspaces([makeWorkspace({ id: "ws-1", name: "SillyHub" })]);
+    // 首屏 3 条（10 基线内全显、组内无隐藏行）+ 服务端 total=5：组内本无
+    // 「加载更多」按钮（无隐藏），用数据层入口先触发？——不行，本用例要点
+    // **组内**按钮：改用首屏 12 条（2 条隐藏）+ total=14（续拉页 2 条新会话）。
+    const first = [
+      ...Array.from({ length: 12 }, (_, i) =>
+        makeSession({
+          id: `s-${i}`,
+          workspace_id: "ws-1",
+          title: `会话${i}`,
+          status: "ended",
+        }),
+      ),
+    ];
+    const secondPage = [
+      makeSession({ id: "s-20", workspace_id: "ws-1", title: "续拉会话20" }),
+      makeSession({ id: "s-21", workspace_id: "ws-1", title: "续拉会话21" }),
+    ];
+    mocks.listAgentSessions
+      .mockResolvedValueOnce(listResponse(first, { total: 14 }))
+      .mockResolvedValue(listResponse(secondPage, { total: 14 }));
+    renderPanel(<SessionListPanel />);
+    await openGroup("SillyHub");
+
+    // 默认 10 行、组内隐藏 2 条 → 按钮在场。
+    await waitFor(() => expect(sessionRows().length).toBe(10));
+    const groupMore = screen.getByRole("button", { name: /加载更多（还有/ });
+
+    // 点击：本地 +20 展开（12 全显）+ 并行触网（offset=首屏 12 条, limit=20）。
+    fireEvent.click(groupMore);
+    await waitFor(() => expect(sessionRows().length).toBe(12));
+    await waitFor(() => expect(mocks.listAgentSessions).toHaveBeenCalledTimes(2));
+    const fetchCall = mocks.listAgentSessions.mock.calls[1]![0] as Record<
+      string,
+      unknown
+    >;
+    expect(fetchCall.offset).toBe(12);
+    expect(fetchCall.limit).toBe(20);
+    // 续拉 2 条追加进组（10 基线外共 4 隐藏 → 已全显 12+2=14 = total）。
+    await waitFor(() => expect(sessionRows().length).toBe(14));
+
+    // 已加载 = total → 再点组内按钮（若在场）不再发请求；此处已全显按钮消失，
+    // 用调用次数稳定断言（无第三次请求）。
+    expect(mocks.listAgentSessions).toHaveBeenCalledTimes(2);
+    expect(
+      screen.queryByRole("button", { name: /加载更多（还有/ }),
+    ).not.toBeInTheDocument();
   });
 
   it("FR-05：两层筛选切换 → 组内递增计数重置回默认基线", async () => {

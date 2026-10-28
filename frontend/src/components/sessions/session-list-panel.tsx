@@ -286,6 +286,12 @@ const GROUP_ITEM_LIMIT = 10;
 export const GROUP_LOAD_MORE_STEP = 20;
 
 /**
+ * 数据层续拉每次条数（2026-10-28-session-list-loadmore-fetch FR-02/03，用户
+ * 拍板「每次点击加载更多在无限加载每次 20 条」——原 500 整页续拉废弃）。
+ */
+export const EXTRA_PAGE_LIMIT = 20;
+
+/**
  * 组内默认可见集（FR-03）：最新 GROUP_ITEM_LIMIT 条 ∪ 全部在线会话（在线 =
  * 非 ended/failed 三态，不管多老都显示），保持服务端返回序（置顶优先 +
  * 最近活跃倒序）——与 mobile-session-list defaultVisibleSessions 同口径。
@@ -300,21 +306,31 @@ function defaultVisibleGroupSessions(
 }
 
 /**
- * 组内展示集（2026-10-28-session-list-refresh-and-paging FR-03）：最新
- * (GROUP_ITEM_LIMIT + extra) 条 ∪ 在线全显，保持服务端返回序。extra=0 即既有
- * 默认基线（10∪在线，defaultVisibleGroupSessions 语义不变）；extra 递增来自
- * 组底「加载更多」点击（每次 +GROUP_LOAD_MORE_STEP），展示集覆盖组内全量时
- * 调用方收敛（按钮消失）。
+ * 组内展示集（2026-10-28-session-list-loadmore-fetch FR-01 语义修订）：默认
+ * 展示（前 GROUP_ITEM_LIMIT 条 ∪ 在线全显）之外的条目按服务端返回序给 extra
+ * 个预算——每次 +GROUP_LOAD_MORE_STEP **恰好新增 20 条此前未显示的行**。
+ * 原实现（refresh-and-paging 变更）「head=10+extra ∪ 在线」的 head 扩展区
+ * 被默认已显示的在线条目占据，净增可能只有 1（用户实证「还有 28 条→点一次
+ * 只多 1 条」）；预算计数保证新增行数与步长一致。extra=0 输出与
+ * defaultVisibleGroupSessions 逐字节一致（默认态零漂移）。
  */
 export function visibleGroupSessionsWithExtra(
   sessions: AgentSessionRead[],
   extra: number,
 ): AgentSessionRead[] {
   if (extra <= 0) return defaultVisibleGroupSessions(sessions);
-  const head = sessions.slice(0, GROUP_ITEM_LIMIT + extra);
-  const rest = sessions.slice(GROUP_ITEM_LIMIT + extra);
-  const online = rest.filter((s) => s.status !== "ended" && s.status !== "failed");
-  return [...head, ...online];
+  let budget = extra;
+  return sessions.filter((s, idx) => {
+    // 默认展示基线：前 10 条 ∪ 在线全显（保持服务端序输出）。
+    if (idx < GROUP_ITEM_LIMIT) return true;
+    if (s.status !== "ended" && s.status !== "failed") return true;
+    // 预算计数：非默认条目按序消耗 extra，恰好新增 extra 个此前隐藏行。
+    if (budget > 0) {
+      budget -= 1;
+      return true;
+    }
+    return false;
+  });
 }
 
 /**
@@ -892,6 +908,14 @@ function WorkspaceTreeList({
   // （组件 state，不参与轮询——500 条外老会话低频变化，接受陈旧，design 边界3）。
   const [extraItems, setExtraItems] = useState<AgentSessionRead[]>([]);
   const [extraLoading, setExtraLoading] = useState(false);
+  /**
+   * 续拉 offset 游标（2026-10-28-session-list-loadmore-fetch）：null = 未续拉
+   * 过（基线 = 首屏实际返回条数）；否则 = 已请求累计 offset（每次 += 响应
+   * 条数）。**不用组合集长度当 offset**——附加段 id 去重会丢重叠条目，组合集
+   * 长度 < 已请求条数，用它当 offset 会重复拉取已请求段（浪费请求）。重置
+   * effect 归 null。
+   */
+  const extraOffsetRef = useRef<number | null>(null);
   // X-009「关联」筛选下拉（task-10 / FR-05）：选中值编码 kind:id
   //（change:<uuid> / quicklog:<ql_id>；task-06 PPM 为三段 ppm:<kind>:<uuid>），
   // undefined = 未筛。仅 workspace scope 渲染下拉与发起选项查询（门控谓词显式
@@ -1107,20 +1131,23 @@ function WorkspaceTreeList({
   const totalFromServer = sessionsQuery.data?.total ?? 0;
 
   /**
-   * FR-04：数据层「加载更多会话」——以与首屏完全相同的服务端筛选参 +
-   * offset=已加载数 续拉下一页（limit=500 单请求上限内），附加段 append 按
-   * id 去重；in-flight 守卫防连续点击双拉；失败静默（按钮可重点）。附加段
-   * 携带相同筛选参 + 筛选/scope/视图切换重置（见 resetExpansionForFilter
-   * 与 scope 重置 effect），旧口径数据不泄漏进新视图。
+   * FR-02/03（2026-10-28-session-list-loadmore-fetch 修订）：数据层续拉——每次
+   * EXTRA_PAGE_LIMIT=20 条（用户拍板「每次点击加载更多在无限加载每次 20 条」），
+   * offset 用 extraOffsetRef 游标（非组合集长度，防去重后偏移重复拉取），附加段
+   * append 按 id 去重；in-flight 守卫防双拉；失败静默（按钮可重点）。组内
+   * 「加载更多」点击与树底部入口共用本函数。
    */
   const loadMoreSessions = useCallback(async () => {
     if (extraLoading) return;
     setExtraLoading(true);
     try {
+      const offset = extraOffsetRef.current ?? (sessionsQuery.data?.items ?? []).length;
       const resp = await listAgentSessions({
         ...listParamsBase,
-        offset: sessions.length,
+        offset,
+        limit: EXTRA_PAGE_LIMIT,
       });
+      extraOffsetRef.current = offset + resp.items.length;
       setExtraItems((prev) => {
         const seen = new Set([
           ...(sessionsQuery.data?.items ?? []).map((s) => s.id),
@@ -1133,13 +1160,15 @@ function WorkspaceTreeList({
     } finally {
       setExtraLoading(false);
     }
-  }, [extraLoading, listParamsBase, sessions.length, sessionsQuery.data]);
+  }, [extraLoading, listParamsBase, sessionsQuery.data]);
 
-  // FR-05：服务端筛选口径（scope / 归档视图 / 关联筛选）变化 → 附加段清空
-  // （数据口径变了，旧附加段不再适用）。两层筛选（机器/引擎 tab）与状态/搜索
-  // 是客户端过滤，不清附加段，但组内递增计数经 resetExpansionForFilter 重置。
+  // FR-05：服务端筛选口径（scope / 归档视图 / 关联筛选）变化 → 附加段清空 +
+  // 续拉游标归零（数据口径变了，旧附加段不再适用）。两层筛选（机器/引擎 tab）
+  // 与状态/搜索是客户端过滤，不清附加段，但组内递增计数经
+  // resetExpansionForFilter 重置。
   useEffect(() => {
     setExtraItems([]);
+    extraOffsetRef.current = null;
   }, [scope, isArchivedView, assocFilter]);
 
   // ── 2026-09-08-session-list-liveness-dot task-02 / FR-01 / D-001@v2 ─────
@@ -2164,13 +2193,20 @@ function WorkspaceTreeList({
                 }
                 exporting={exporting}
                 groupExtra={groupExtraCount.get(group.id) ?? 0}
-                onToggleShowAll={() =>
+                onToggleShowAll={() => {
+                  // FR-01：本地展开 +20（跳过已显示预算，恰好新增 20 行）。
                   setGroupExtraCount((prev) => {
                     const next = new Map(prev);
                     next.set(group.id, (prev.get(group.id) ?? 0) + GROUP_LOAD_MORE_STEP);
                     return next;
-                  })
-                }
+                  });
+                  // FR-02（loadmore-fetch 修订）：服务端还有未加载数据 → 并行
+                  // 触网续拉 20 条（用户期望点击即拉后端；in-flight 守卫在
+                  // loadMoreSessions 内，全部拉完（已加载=总数）后不再发请求）。
+                  if (sessions.length < totalFromServer) {
+                    void loadMoreSessions();
+                  }
+                }}
                 hideMachineTitles={filterMachineId !== ""}
                 hideEngineChip={filterAgent !== ""}
                 runtimeToMachine={runtimeToMachine}
