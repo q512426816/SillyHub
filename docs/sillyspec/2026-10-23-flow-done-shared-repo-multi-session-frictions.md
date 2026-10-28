@@ -33,6 +33,15 @@ brainstorm/archive 指引，没有任何 flow design 骨架（grep `MACHINE-DRAF
 - 共享主仓 dirty/committed 归属已有 `splitOwnVsForeignDiffFiles`，但 FR/文件面聚合仍
   未过同一把刀，建议统一。
 
+**追加实证（2026-10-28，2026-10-28-session-config-default-provider-fix）**：冻结面
+（change-patch.json files）混入了 baseline..HEAD 区间内并行会话两个提交
+（3ed6a5788/761e19ae9，release-record-generator 已归档变更）touch 的
+`deploy/scripts/gen-release-record.sh` 与 `.sillyspec/docs/multi-agent-platform/modules/deploy.md`
+——本变更显式 pathspec 提交面从未包含它们，但冻结/蒸馏把 docs 更新与 knowledge
+域一并路由进 deploy 域，归档 pathspec 随之带上并行变更的文档。代码正确性无损
+（提交面 pathspec 隔离），但审计归属面被污染、knowledge 源域路由漂移。与②同根：
+区间提交未按变更归属过滤。
+
 ## ③ 归档提交在共享暂存区竞态下打印了命令但未落库
 
 **现象**：flow done 末尾打印
