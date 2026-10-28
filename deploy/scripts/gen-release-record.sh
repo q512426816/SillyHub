@@ -118,7 +118,15 @@ while IFS='|' read -r sha author msg; do
   msg_escaped="$(printf '%s' "$msg" | sed -e 's/\\/\\\\/g' -e 's/"/\\"/g')"
   COMMITS_BLOCK+="  - sha: ${sha}"$'\n'"    message: \"${msg_escaped}\""$'\n'"    author: ${author}"$'\n'
 done < <(git log $RANGE --pretty=format:'%h|%an|%s' 2>/dev/null || true)
-[ -n "$COMMITS_BLOCK" ] || COMMITS_BLOCK="[]"$'\n'
+# 空 commits 区间（如锚点==HEAD 的同 commit 重部署）必须写行内流序列
+# `commits: []`——`commits:\n[]` 顶格 [] 是非法 YAML 块值，平台解析判 invalid
+# （2026-10-28 评审 P2 实证）。
+if [ -n "$COMMITS_BLOCK" ]; then
+  COMMITS_SECTION="commits:
+${COMMITS_BLOCK}"
+else
+  COMMITS_SECTION="commits: []"
+fi
 
 SUMMARY_ESCAPED="$(printf '%s' "$SUMMARY" | sed -e 's/\\/\\\\/g' -e 's/"/\\"/g')"
 
@@ -130,8 +138,7 @@ commit_from: ${ANCHOR}
 commit_to: ${HEAD_SHA}
 summary: \"${SUMMARY_ESCAPED}\"
 agent: ${AGENT}
-commits:
-${COMMITS_BLOCK}
+${COMMITS_SECTION}
 ---
 
 ## 🆕 新增
