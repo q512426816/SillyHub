@@ -115,7 +115,7 @@
  * 悬停卡/未读红角标并入行首槽（SessionStatusSlot 单一标识位）；新增执行
  * 完成通知（非终态→ended 且不在该会话上 → 绿角标，点击进入后消失）。
  */
-import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { useQuery } from "@tanstack/react-query";
 import {
   Button,
@@ -276,10 +276,14 @@ function confirmIcon(Icon: LucideIcon, colorCls: string) {
   );
 }
 
-/** 组内截断阈值 + 「显示全部」（R-03）。2026-10-27-sessions-total-and-status-filter
+/** 组内截断阈值 + 「加载更多」（R-03）。2026-10-27-sessions-total-and-status-filter
  * FR-03：默认展示收敛 50 → 最新 10 条 ∪ 在线全显（与移动端同口径；GROUP_ITEM_LIMIT
- * 语义化为「默认可见基线数」，展开仍显全量）。 */
+ * 语义化为「默认可见基线数」）。2026-10-28-session-list-refresh-and-paging FR-03：
+ * 二态「显示全部」退役 → 递增加载（GROUP_LOAD_MORE_STEP/次，用户拍板）。 */
 const GROUP_ITEM_LIMIT = 10;
+
+/** 组内「加载更多」每次递增条数（FR-03，用户拍板 20）。 */
+export const GROUP_LOAD_MORE_STEP = 20;
 
 /**
  * 组内默认可见集（FR-03）：最新 GROUP_ITEM_LIMIT 条 ∪ 全部在线会话（在线 =
@@ -291,6 +295,24 @@ function defaultVisibleGroupSessions(
 ): AgentSessionRead[] {
   const head = sessions.slice(0, GROUP_ITEM_LIMIT);
   const rest = sessions.slice(GROUP_ITEM_LIMIT);
+  const online = rest.filter((s) => s.status !== "ended" && s.status !== "failed");
+  return [...head, ...online];
+}
+
+/**
+ * 组内展示集（2026-10-28-session-list-refresh-and-paging FR-03）：最新
+ * (GROUP_ITEM_LIMIT + extra) 条 ∪ 在线全显，保持服务端返回序。extra=0 即既有
+ * 默认基线（10∪在线，defaultVisibleGroupSessions 语义不变）；extra 递增来自
+ * 组底「加载更多」点击（每次 +GROUP_LOAD_MORE_STEP），展示集覆盖组内全量时
+ * 调用方收敛（按钮消失）。
+ */
+export function visibleGroupSessionsWithExtra(
+  sessions: AgentSessionRead[],
+  extra: number,
+): AgentSessionRead[] {
+  if (extra <= 0) return defaultVisibleGroupSessions(sessions);
+  const head = sessions.slice(0, GROUP_ITEM_LIMIT + extra);
+  const rest = sessions.slice(GROUP_ITEM_LIMIT + extra);
   const online = rest.filter((s) => s.status !== "ended" && s.status !== "failed");
   return [...head, ...online];
 }
@@ -860,8 +882,16 @@ function WorkspaceTreeList({
   const [batchGroupId, setBatchGroupId] = useState<string | null>(null);
   const [checkedIds, setCheckedIds] = useState<Set<string>>(new Set());
   const [deleting, setDeleting] = useState(false);
-  // 组内默认收敛（R-03/FR-03）的「显示全部」展开集合。
-  const [showAllGroupIds, setShowAllGroupIds] = useState<Set<string>>(new Set());
+  // 组内递增加载计数（2026-10-28-session-list-refresh-and-paging FR-03）：
+  // groupId → 已额外展开条数（默认缺省 = 0 条额外，即 10∪在线基线）；组底
+  // 「加载更多」每次 +GROUP_LOAD_MORE_STEP。取代原「显示全部」二态集合。
+  const [groupExtraCount, setGroupExtraCount] = useState<Map<string, number>>(
+    () => new Map(),
+  );
+  // ── FR-04：数据层续拉（突破单次 500 上限）──首屏 useQuery 之外的附加段
+  // （组件 state，不参与轮询——500 条外老会话低频变化，接受陈旧，design 边界3）。
+  const [extraItems, setExtraItems] = useState<AgentSessionRead[]>([]);
+  const [extraLoading, setExtraLoading] = useState(false);
   // X-009「关联」筛选下拉（task-10 / FR-05）：选中值编码 kind:id
   //（change:<uuid> / quicklog:<ql_id>；task-06 PPM 为三段 ppm:<kind>:<uuid>），
   // undefined = 未筛。仅 workspace scope 渲染下拉与发起选项查询（门控谓词显式
@@ -1027,6 +1057,28 @@ function WorkspaceTreeList({
   // 门户软删后按前缀 ["agentSessions"] invalidate 继续全覆盖。
   // ql-20260824-004：函数式条件轮询（间隔按最近一次数据推导，先例
   // quicklog-table quicklogPollInterval）——聊天中 10s / 静默 30s。
+  // 2026-10-28-session-list-refresh-and-paging FR-04：服务端筛选参抽出
+  // listParamsBase（首屏 queryFn 与数据层续拉共用同一口径，防两处拼参漂移）。
+  const listParamsBase = useMemo(
+    () => ({
+      limit: AGENT_SESSIONS_TREE_FETCH_LIMIT,
+      archived: isArchivedView ? true : false,
+      // workspace/change/quicklog scope 透传 workspace_id（RuntimeScope 无此字段，跳过）。
+      ...(scope && "workspaceId" in scope && scope.workspaceId
+        ? { workspace_id: scope.workspaceId }
+        : {}),
+      // ql-20260823-003：change 树化后端点过滤参随树透传（D-003@v2）。
+      ...(scope?.kind === "change" ? { change_id: scope.changeId } : {}),
+      // task-10（FR-04 / X-008 消费点一）：quicklog 树化端点过滤参
+      //（task-09 已落 ql_id，M:N 命中含播种行）。
+      ...(scope?.kind === "quicklog" ? { ql_id: scope.qlId } : {}),
+      // FR-02：runtime scope 端点过滤（lib/daemon.ts:1669 既有 runtime_id 参）。
+      ...(scope?.kind === "runtime" ? { runtime_id: scope.runtimeId } : {}),
+      // X-009：「关联」筛选（仅 workspace scope 有值）服务端过滤参透传。
+      ...assocParams,
+    }),
+    [isArchivedView, scope, assocParams],
+  );
   const sessionsQuery = useQuery<AgentSessionListResponse, ApiError>({
     queryKey: [
       "agentSessions",
@@ -1038,33 +1090,57 @@ function WorkspaceTreeList({
         assoc: assocFilter ?? null,
       },
     ],
-    queryFn: () =>
-      listAgentSessions({
-        limit: AGENT_SESSIONS_TREE_FETCH_LIMIT,
-        archived: isArchivedView ? true : false,
-        // workspace/change/quicklog scope 透传 workspace_id（RuntimeScope 无此字段，跳过）。
-        ...(scope && "workspaceId" in scope && scope.workspaceId
-          ? { workspace_id: scope.workspaceId }
-          : {}),
-        // ql-20260823-003：change 树化后端点过滤参随树透传（D-003@v2）。
-        ...(scope?.kind === "change" ? { change_id: scope.changeId } : {}),
-        // task-10（FR-04 / X-008 消费点一）：quicklog 树化端点过滤参
-        //（task-09 已落 ql_id，M:N 命中含播种行）。
-        ...(scope?.kind === "quicklog" ? { ql_id: scope.qlId } : {}),
-        // FR-02：runtime scope 端点过滤（lib/daemon.ts:1669 既有 runtime_id 参）。
-        ...(scope?.kind === "runtime" ? { runtime_id: scope.runtimeId } : {}),
-        // X-009：「关联」筛选（仅 workspace scope 有值）服务端过滤参透传。
-        ...assocParams,
-      }),
+    queryFn: () => listAgentSessions(listParamsBase),
     refetchInterval: (query) =>
       sessionListPollInterval(query.state.data?.items),
   });
 
-  const sessions = useMemo(
-    () => sessionsQuery.data?.items ?? [],
-    [sessionsQuery.data],
-  );
+  // FR-04：首屏 + 附加段组合（附加段按 id 去重——翻页窗口排序漂移防御：
+  // 置顶/活跃排序键变化时 offset 页与首屏重叠）。下游分组/两层筛选/活性/
+  // 完成检测全链路消费组合集（sessions 命名不变，消费点零改动）。
+  const sessions = useMemo(() => {
+    const base = sessionsQuery.data?.items ?? [];
+    if (extraItems.length === 0) return base;
+    const seen = new Set(base.map((s) => s.id));
+    return [...base, ...extraItems.filter((s) => !seen.has(s.id))];
+  }, [sessionsQuery.data, extraItems]);
   const totalFromServer = sessionsQuery.data?.total ?? 0;
+
+  /**
+   * FR-04：数据层「加载更多会话」——以与首屏完全相同的服务端筛选参 +
+   * offset=已加载数 续拉下一页（limit=500 单请求上限内），附加段 append 按
+   * id 去重；in-flight 守卫防连续点击双拉；失败静默（按钮可重点）。附加段
+   * 携带相同筛选参 + 筛选/scope/视图切换重置（见 resetExpansionForFilter
+   * 与 scope 重置 effect），旧口径数据不泄漏进新视图。
+   */
+  const loadMoreSessions = useCallback(async () => {
+    if (extraLoading) return;
+    setExtraLoading(true);
+    try {
+      const resp = await listAgentSessions({
+        ...listParamsBase,
+        offset: sessions.length,
+      });
+      setExtraItems((prev) => {
+        const seen = new Set([
+          ...(sessionsQuery.data?.items ?? []).map((s) => s.id),
+          ...prev.map((s) => s.id),
+        ]);
+        return [...prev, ...resp.items.filter((s) => !seen.has(s.id))];
+      });
+    } catch {
+      /* 失败静默：按钮可重试（总数行与入口仍按现状渲染） */
+    } finally {
+      setExtraLoading(false);
+    }
+  }, [extraLoading, listParamsBase, sessions.length, sessionsQuery.data]);
+
+  // FR-05：服务端筛选口径（scope / 归档视图 / 关联筛选）变化 → 附加段清空
+  // （数据口径变了，旧附加段不再适用）。两层筛选（机器/引擎 tab）与状态/搜索
+  // 是客户端过滤，不清附加段，但组内递增计数经 resetExpansionForFilter 重置。
+  useEffect(() => {
+    setExtraItems([]);
+  }, [scope, isArchivedView, assocFilter]);
 
   // ── 2026-09-08-session-list-liveness-dot task-02 / FR-01 / D-001@v2 ─────
   // 活性数据源：useSessionLiveness 固定 all 槽 30s 轮询。本面板调一次建 map，
@@ -1410,9 +1486,10 @@ function WorkspaceTreeList({
     });
   }, [selectedSessionId, currentGroupId]);
 
-  /** R-05：筛选变化重置展开态（除当前组）与组内「显示全部」。 */
+  /** R-05：筛选变化重置展开态（除当前组）与组内递增加载计数（FR-05：附加段
+   * 由 scope/assoc/archived 重置 effect 单独清——两层筛选是客户端过滤不清数据）。 */
   const resetExpansionForFilter = () => {
-    setShowAllGroupIds(new Set());
+    setGroupExtraCount(new Map());
     setCollapsedIds(
       new Set(groupIds.filter((id) => id !== currentGroupId)),
     );
@@ -2086,12 +2163,11 @@ function WorkspaceTreeList({
                     : undefined
                 }
                 exporting={exporting}
-                showAll={showAllGroupIds.has(group.id)}
+                groupExtra={groupExtraCount.get(group.id) ?? 0}
                 onToggleShowAll={() =>
-                  setShowAllGroupIds((prev) => {
-                    const next = new Set(prev);
-                    if (next.has(group.id)) next.delete(group.id);
-                    else next.add(group.id);
+                  setGroupExtraCount((prev) => {
+                    const next = new Map(prev);
+                    next.set(group.id, (prev.get(group.id) ?? 0) + GROUP_LOAD_MORE_STEP);
                     return next;
                   })
                 }
@@ -2110,10 +2186,27 @@ function WorkspaceTreeList({
               没有符合条件的会话
             </div>
           )}
-          {/* R-03 提示：一次拉取上限外的余量（个人使用评估 <200，极端兜底可见） */}
-          {totalFromServer > sessions.length && (
+          {/* 2026-10-28-session-list-refresh-and-paging FR-02：总数常显（服务端
+              total = 当前服务端筛选口径总数，随筛选/视图切换更新）；已加载不足
+              时附已加载计数。FR-04：数据层加载更多入口（突破单次 500 上限）——
+              offset 续拉与首屏同筛选参，附加段 id 去重。 */}
+          {totalFromServer > 0 && (
             <div className="px-2 pb-1 text-center text-[11px] text-muted-foreground">
-              仅显示最近 {sessions.length} 条（共 {totalFromServer} 条）
+              共 {totalFromServer} 条会话
+              {sessions.length < totalFromServer
+                ? `（已加载 ${sessions.length} 条）`
+                : ""}
+            </div>
+          )}
+          {totalFromServer > sessions.length && (
+            <div className="px-2 pb-2 pt-1 text-center">
+              <Button
+                size="small"
+                loading={extraLoading}
+                onClick={() => void loadMoreSessions()}
+              >
+                加载更多会话
+              </Button>
             </div>
           )}
           </>
@@ -2492,7 +2585,7 @@ function WorkspaceGroupNode({
   onUnpin,
   onRename,
   onExport,
-  showAll,
+  groupExtra,
   onToggleShowAll,
   hideMachineTitles,
   hideEngineChip,
@@ -2541,7 +2634,8 @@ function WorkspaceGroupNode({
   onRename?: (_id: string, _oldTitle: string, _newTitle: string) => void;
   /** task-06（2026-09-14-session-export）：行级导出（未传零按钮，照 onArchive 透传）。 */
   onExport?: (_id: string, _tier: SessionExportTier) => void;
-  showAll: boolean;
+  /** 组内已额外展开条数（FR-03 递增加载，0 = 默认基线 10∪在线）。 */
+  groupExtra: number;
   onToggleShowAll: () => void;
   /** 筛选态隐藏机器小节标题（FR-02：已隐含——条目按机器过滤后小节名冗余）。 */
   hideMachineTitles: boolean;
@@ -2555,14 +2649,19 @@ function WorkspaceGroupNode({
 }) {
   // 组内默认展示收敛（R-03 起，FR-03 收紧 50→10+在线全显）：截断作用于分组
   //（跨机器小节），小节由可见条目派生；在线会话不受默认基线限制全显。
+  // 2026-10-28-session-list-refresh-and-paging FR-03：二态「显示全部」→ 递增
+  // 展示集（最新 10+extra ∪ 在线全显，visibleGroupSessionsWithExtra）。
   const truncated =
-    !showAll &&
-    defaultVisibleGroupSessions(visibleSessions).length < visibleSessions.length;
+    visibleGroupSessionsWithExtra(visibleSessions, groupExtra).length <
+    visibleSessions.length;
   // 审计修复 F2（2026-08-26）：截断 slice 移入 useMemo——原 render 内联生成新数组，
   // 引用不稳致 subGrouping/sections 每渲染重算（10s 轮询与任意 state 变化均触发）。
   const shownSessions = useMemo(
-    () => (truncated ? defaultVisibleGroupSessions(visibleSessions) : visibleSessions),
-    [truncated, visibleSessions],
+    () =>
+      truncated
+        ? visibleGroupSessionsWithExtra(visibleSessions, groupExtra)
+        : visibleSessions,
+    [truncated, visibleSessions, groupExtra],
   );
 
   // 机器小节：首现序分桶（后端按最近活跃倒序 → 最近活跃的机器排前）。
@@ -3206,8 +3305,10 @@ function WorkspaceGroupNode({
           )}
           {truncated && (
             <div className="border-t border-border px-3 py-1.5 text-center">
+              {/* FR-03：递增加载——每次 +20（GROUP_LOAD_MORE_STEP），展示集
+                  覆盖全量后 truncated=false 按钮自然消失。 */}
               <Button size="small" onClick={onToggleShowAll}>
-                显示全部（共 {visibleSessions.length} 条）
+                加载更多（还有 {visibleSessions.length - shownSessions.length} 条）
               </Button>
             </div>
           )}

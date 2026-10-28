@@ -1106,10 +1106,10 @@ describe("SessionListPanel 组头回调与截断", () => {
     });
   });
 
-  it("组内默认收敛（最新 10 ∪ 在线全显）+ 「显示全部」（R-03 起 / FR-03）", async () => {
+  it("组内默认收敛（最新 10 ∪ 在线全显）+ 递增加载（每次 +20 覆盖全量后按钮消失）（R-03/FR-03；2026-10-28 递增语义改写）", async () => {
     setWorkspaces([makeWorkspace({ id: "ws-1", name: "SillyHub" })]);
     // 12 条已结束在前 + 5 条在线在后（服务端序）：默认 = 前 10 + 尾部在线
-    // 全显 = 15 行；「显示全部（共 17 条）」展开后全量。
+    // 全显 = 15 行；「加载更多」+20 覆盖 10+20≥17 → 全量 17 行且按钮消失。
     const many = [
       ...Array.from({ length: 12 }, (_, i) =>
         makeSession({
@@ -1133,11 +1133,149 @@ describe("SessionListPanel 组头回调与截断", () => {
     await openGroup("SillyHub");
 
     await waitFor(() => expect(sessionRows().length).toBe(15));
-    const moreBtn = screen.getByRole("button", { name: /显示全部/ });
-    expect(moreBtn.textContent).toContain("共 17 条");
+    const moreBtn = screen.getByRole("button", { name: /加载更多/ });
+    expect(moreBtn.textContent).toContain("还有 2 条");
 
     fireEvent.click(moreBtn);
     await waitFor(() => expect(sessionRows().length).toBe(17));
+    // 全量覆盖后按钮消失（FR-03）。
+    expect(
+      screen.queryByRole("button", { name: /加载更多（还有/ }),
+    ).not.toBeInTheDocument();
+  });
+
+  it("组内 35 条（在线 2 条在第 20/30 位）：加载更多两次 10+20→30→全量（FR-03 递增步长 20）", async () => {
+    setWorkspaces([makeWorkspace({ id: "ws-1", name: "SillyHub" })]);
+    const many = Array.from({ length: 35 }, (_, i) =>
+      makeSession({
+        id: `s-${i}`,
+        workspace_id: "ws-1",
+        title: `会话${i}`,
+        status: i === 20 || i === 30 ? "active" : "ended",
+      }),
+    );
+    mocks.listAgentSessions.mockResolvedValue(listResponse(many));
+    renderPanel(<SessionListPanel />);
+    await openGroup("SillyHub");
+
+    // 默认 = 最新 10 ∪ 在线 2（第 21/31 位）= 12 行。
+    await waitFor(() => expect(sessionRows().length).toBe(12));
+    // +20 → 最新 30 ∪ 在线（第 31 位补入）= 31 行。
+    fireEvent.click(screen.getByRole("button", { name: /加载更多/ }));
+    await waitFor(() => expect(sessionRows().length).toBe(31));
+    // 再 +20 → 覆盖全量 35，按钮消失。
+    fireEvent.click(screen.getByRole("button", { name: /加载更多/ }));
+    await waitFor(() => expect(sessionRows().length).toBe(35));
+    expect(
+      screen.queryByRole("button", { name: /加载更多（还有/ }),
+    ).not.toBeInTheDocument();
+  });
+});
+
+// ── 2026-10-28-session-list-refresh-and-paging：总数常显 / 数据层续拉 / 重置 ──
+
+describe("SessionListPanel 总数常显与数据层加载更多（session-list-refresh-and-paging）", () => {
+  it("FR-02：总数常显「共 N 条会话」；已加载不足时附已加载计数 + FR-04 数据层入口在场", async () => {
+    setWorkspaces([makeWorkspace({ id: "ws-1", name: "SillyHub" })]);
+    const loaded = Array.from({ length: 3 }, (_, i) =>
+      makeSession({ id: `s-${i}`, workspace_id: "ws-1", title: `会话${i}` }),
+    );
+    mocks.listAgentSessions.mockResolvedValue(
+      listResponse(loaded, { total: 800 }),
+    );
+    renderPanel(<SessionListPanel />);
+    await openGroup("SillyHub");
+
+    await waitFor(() =>
+      expect(screen.getByText(/共 800 条会话/)).toBeInTheDocument(),
+    );
+    expect(screen.getByText(/已加载 3 条/)).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: "加载更多会话" }),
+    ).toBeInTheDocument();
+  });
+
+  it("FR-02 零回归锚：已加载 = 总数时只显总数（无已加载计数、无数据层入口）", async () => {
+    setWorkspaces([makeWorkspace({ id: "ws-1", name: "SillyHub" })]);
+    mocks.listAgentSessions.mockResolvedValue(
+      listResponse([
+        makeSession({ id: "s-1", workspace_id: "ws-1", title: "会话A" }),
+      ]),
+    );
+    renderPanel(<SessionListPanel />);
+    await openGroup("SillyHub");
+
+    await waitFor(() =>
+      expect(screen.getByText(/共 1 条会话$/)).toBeInTheDocument(),
+    );
+    expect(screen.queryByText(/已加载/)).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: "加载更多会话" }),
+    ).not.toBeInTheDocument();
+  });
+
+  it("FR-04：点「加载更多会话」→ offset 续拉（同筛选参）+ 附加段去重后追加展示", async () => {
+    setWorkspaces([makeWorkspace({ id: "ws-1", name: "SillyHub" })]);
+    const first = Array.from({ length: 2 }, (_, i) =>
+      makeSession({ id: `s-${i}`, workspace_id: "ws-1", title: `会话${i}` }),
+    );
+    // 续拉页：1 条与首屏重叠（排序漂移模拟）+ 2 条新会话 → 去重后 +2。
+    const second = [
+      makeSession({ id: "s-0", workspace_id: "ws-1", title: "会话0" }),
+      makeSession({ id: "s-10", workspace_id: "ws-1", title: "新会话10" }),
+      makeSession({ id: "s-11", workspace_id: "ws-1", title: "新会话11" }),
+    ];
+    mocks.listAgentSessions
+      .mockResolvedValueOnce(listResponse(first, { total: 4 }))
+      .mockResolvedValueOnce(listResponse(second, { total: 4 }));
+    renderPanel(<SessionListPanel />);
+    await openGroup("SillyHub");
+    await waitFor(() => expect(sessionRows().length).toBe(2));
+
+    fireEvent.click(screen.getByRole("button", { name: "加载更多会话" }));
+    await waitFor(() => expect(sessionRows().length).toBe(4));
+    // 续拉请求带 offset=首屏已加载数（同筛选参透传断言）。
+    const secondCall = mocks.listAgentSessions.mock.calls[1]![0] as Record<
+      string,
+      unknown
+    >;
+    expect(secondCall.offset).toBe(2);
+    expect(secondCall.limit).toBeGreaterThan(0);
+    // 去重后已加载 = 4 = total → 数据层入口消失。
+    await waitFor(() =>
+      expect(
+        screen.queryByRole("button", { name: "加载更多会话" }),
+      ).not.toBeInTheDocument(),
+    );
+  });
+
+  it("FR-05：两层筛选切换 → 组内递增计数重置回默认基线", async () => {
+    setMachines({ items: [makeMachine()] });
+    setWorkspaces([makeWorkspace({ id: "ws-1", name: "SillyHub" })]);
+    // 15 条 ended（无在线）→ 默认 10，加载一次 +20 → 15 全量。
+    const many = Array.from({ length: 15 }, (_, i) =>
+      makeSession({
+        id: `s-${i}`,
+        workspace_id: "ws-1",
+        title: `会话${i}`,
+        status: "ended",
+      }),
+    );
+    mocks.listAgentSessions.mockResolvedValue(listResponse(many));
+    renderPanel(<SessionListPanel />);
+    await openGroup("SillyHub");
+    await waitFor(() => expect(sessionRows().length).toBe(10));
+    fireEvent.click(screen.getByRole("button", { name: /加载更多/ }));
+    await waitFor(() => expect(sessionRows().length).toBe(15));
+
+    // 切换机器筛选 → resetExpansionForFilter → 组内递增清零 + 组折叠收纳
+    // （R-05 重置语义），重新展开组后回默认 10 行。
+    await chooseAntdOptionByText("slp-machine", "machine-1");
+    await openGroup("SillyHub");
+    await waitFor(() => expect(sessionRows().length).toBe(10));
+    expect(
+      screen.getByRole("button", { name: /加载更多/ }),
+    ).toBeInTheDocument();
   });
 });
 

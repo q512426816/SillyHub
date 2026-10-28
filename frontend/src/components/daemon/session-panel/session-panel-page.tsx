@@ -1171,6 +1171,10 @@ export function SessionPanelPage({
   /**
    * 2026-10-25：发送受理成功后的暂存收敛——清空暂存 + 刷新会话详情（配置条
    * 回显新生效值）。档位失败时保留档位暂存（其余字段照清）。
+   * 2026-10-28-session-list-refresh-and-paging FR-01：补列表刷新回调——暂存
+   * 供应商/模型/档案随消息生效后，左侧列表条目 chips 同步刷新（此前该路径
+   * 漏调，仅能等 10s/30s 轮询兜底，用户看到的一直是新建时配置；与 onSwitched
+   * /打断/重置等既有点位同款回调；dialog 模式未传该 prop 天然跳过零回归）。
    */
   const settleStagedAfterSend = useCallback(
     (thinkingApplied: boolean) => {
@@ -1180,9 +1184,10 @@ export function SessionPanelPage({
       );
       if (sessionId) {
         void qc.invalidateQueries({ queryKey: ["agentSessionDetail", sessionId] });
+        onSessionListRefresh?.();
       }
     },
-    [stagedConfig, sessionId, qc],
+    [stagedConfig, sessionId, qc, onSessionListRefresh],
   );
 
   /**

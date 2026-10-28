@@ -1,0 +1,37 @@
+tier: thin
+legacy_fallback: false
+substeps: {}
+born_face: thin
+with_tasks: false
+review_force: null
+input: >-
+  会话列表两个缺陷：①会话内暂存切换供应商/模型/档案随消息生效后，左侧列表条目 chips 仍显示新建时配置（settleStagedAfterSend 漏调列表刷新，仅靠 10s/30s
+  轮询兜底）；②列表分页交互不对——组内「显示全部」应改递增加载、总数应常显、数据层 500 条封顶应可续拉。
+
+
+  成功标准：
+
+  - 会话内暂存切换（供应商/模型/档案）随消息发送生效后，左侧会话列表对应条目的配置 chips 立即刷新（不依赖轮询兜底）
+
+  - 会话列表常显总数（按当前筛选口径的服务端 total，筛选/视图切换随之更新）
+
+  - 组内默认展示最新 10 条∪在线会话（既有语义不变），「加载更多」每次递增 20 条直至组内全部显示，全部显示后不再出现按钮
+
+  - 已加载数 < 总数时提供数据层加载更多入口，点击按相同筛选参 offset 续拉（突破单次 500 上限），附加段按 id 去重防排序漂移重复
+
+  - 筛选/视图/scope 切换后组内递增计数与附加段自动重置
+
+  - 触达测试文件全绿，新增用例覆盖上述各点；移动端列表（mobile-session-list）本次不动、口径差异在 design 声明
+autopilot: false
+prestage_ack: true
+baseline_commit: f3dafab3cb82bfca2a23b0b44f7ec5627ce02cee
+updatedAt: '2026-10-28T04:36:10.773Z'
+cross_baselines:
+  sillyspec: b195fe1faa7eb9a1cf6379a7b8a09df2549d4a4d
+baseline_sha256: e7a48d776d979fb0e9bfcc4b254214ec7f7a4a5328165ded14b3917da78317e7
+spec_approved: true
+spec_approved_at: '2026-10-28T04:36:10.773Z'
+spec_approved_by: anon@DESKTOP-HJ0AM09
+spec_approved_channel: user-confirmed
+spec_attested_by: anon@DESKTOP-HJ0AM09
+
