@@ -56,6 +56,13 @@ _ALLOWED_SPEC_INFIX = frozenset({"exec"})
 # --change，不在其列。
 _FLOW_CHANGE_SUBCOMMANDS: frozenset[str] = frozenset({"start", "done", "amend-draft"})
 
+# 终态子命令（2026-10-28-change-usage-attribution-window）：run 族 ``archive``
+# （全量流程归档）与 flow 族 ``done``（轻量 2 调用协议收口）触发时，会话
+# current_change_id 应清锚——此后同会话的轮不再打锚到已终态变更（执行用量
+# 归因截断的源头半边，统计侧时间窗是兜底半边）。
+_TERMINAL_RUN_SUBCOMMANDS: frozenset[str] = frozenset({"archive"})
+_TERMINAL_FLOW_SUBCOMMANDS: frozenset[str] = frozenset({"done"})
+
 
 @dataclass(frozen=True)
 class SpecCommandBinding:
@@ -63,10 +70,16 @@ class SpecCommandBinding:
 
     ``kind`` 仅 ``"change"``：quick 不经命令解析通道产出——ql_id 在命令时刻
     未知，quick 的绑定走 agent-logs 上报通道（D-004@v1）。
+
+    ``terminal``（2026-10-28-change-usage-attribution-window）：命令是否为变更
+    终态命令（run archive / flow done）。True 时调用方在绑定后**清**会话
+    current_change_id 而非游走到该变更——终态后新轮无锚，不再计入已终态
+    变更的执行用量。
     """
 
     kind: Literal["change"]
     change_key: str
+    terminal: bool = False
 
 
 def extract_spec_bindings(command: str) -> list[SpecCommandBinding]:
@@ -106,15 +119,26 @@ def extract_spec_bindings(command: str) -> list[SpecCommandBinding]:
             if run_idx + 2 < len(tokens) and tokens[run_idx + 2] == "quick":
                 # D-004@v1：quick 子命令的 --change 是 CLI quick 会话 id，跳过。
                 continue
+            # 终态判定（2026-10-28-change-usage-attribution-window）：archive
+            # 子命令照常产出绑定（幂等补 link），但标记 terminal 供调用方清锚。
+            run_sub = tokens[run_idx + 2] if run_idx + 2 < len(tokens) else None
             change_key = _parse_change_key(tokens, start=run_idx + 2)
             if change_key is not None and change_key != DEFAULT_CHANGE_KEY:
-                bindings.append(SpecCommandBinding(kind="change", change_key=change_key))
+                bindings.append(
+                    SpecCommandBinding(
+                        kind="change",
+                        change_key=change_key,
+                        terminal=run_sub in _TERMINAL_RUN_SUBCOMMANDS,
+                    )
+                )
             continue
         # ── 族二：sillyspec flow start|done|amend-draft（thin 2 调用协议）──
         flow_idx: int | None = None
+        matched_flow_sub: str | None = None
         for sub in _FLOW_CHANGE_SUBCOMMANDS:
             flow_idx = _locate_sillyspec_subcommand(tokens, "flow", sub)
             if flow_idx is not None:
+                matched_flow_sub = sub
                 break
         if flow_idx is None:
             # 既非 run 也非 flow 命令族（含 progress/status/archive 等子命令、
@@ -123,7 +147,14 @@ def extract_spec_bindings(command: str) -> list[SpecCommandBinding]:
         change_key = _parse_change_key(tokens, start=flow_idx + 3)
         if change_key is None or change_key == DEFAULT_CHANGE_KEY:
             continue
-        bindings.append(SpecCommandBinding(kind="change", change_key=change_key))
+        # 终态判定同 run 族：flow done 是轻量 2 调用协议的收口命令。
+        bindings.append(
+            SpecCommandBinding(
+                kind="change",
+                change_key=change_key,
+                terminal=matched_flow_sub in _TERMINAL_FLOW_SUBCOMMANDS,
+            )
+        )
     return bindings
 
 
@@ -180,6 +211,7 @@ async def bind_session_to_change(
     workspace_id: uuid.UUID,
     change_key: str,
     session_id: uuid.UUID,
+    effective_from: datetime | None = None,
 ) -> uuid.UUID | None:
     """把会话绑到变更（幂等 best-effort，design §5 W1.3 / §7）。
 
@@ -194,7 +226,12 @@ async def bind_session_to_change(
       status="draft" / location="active" / path=f"changes/{名}" / title=名），
       待镜像同步 + reparse 后由真实扫描结果接管。
     - upsert link：查 ``ChangeSessionLink(change_id, session_id)`` 存在即返回，
-      否则插入（unique 兜底并发）。
+      否则插入（unique 兜底并发）。``effective_from``
+      （2026-10-28-change-usage-attribution-window）：新插 link 的 created_at
+      取值——run_sync 命令解析通道传**本轮 run 的 started_at**（绑定自本轮起
+      生效：flow start 命令在轮内执行、轮开始早于命令落库，若用落库时刻 now，
+      用量归因窗口下界会误伤立项轮自身）；None（platform_sync agent-logs /
+      会话创建落绑定等无 run 上下文调用方）用当前时刻，行为不变。
     - 整体 savepoint + flush，不自行 commit；失败仅 ``log.warning`` 不抛。
     - 返回值（2026-10-12-run-level-change-attribution task-02 / FR-02）：绑定
       （或既有 link）对应的变更行 id，供 run_sync 交互通道回写会话「当前变更
@@ -260,6 +297,10 @@ async def bind_session_to_change(
                     id=uuid.uuid4(),
                     change_id=change.id,
                     session_id=session_id,
+                    # 绑定生效时刻（见 docstring）：run 通道传轮 started_at，
+                    # 无上下文调用方回落当前时刻（default_factory 同值，显式
+                    # 写防依赖隐式默认）。
+                    created_at=effective_from or datetime.now(UTC),
                 )
             )
             await db.flush()

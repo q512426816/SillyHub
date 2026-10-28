@@ -354,6 +354,11 @@ async def _submit_finalize(svc, st: _SubmitState) -> SubmittedMessages:
                                 binding_session_row.workspace_id,
                                 spec_binding.change_key,
                                 binding_session_row.id,
+                                # 绑定自本轮起生效（2026-10-28-change-usage-
+                                # attribution-window）：link.created_at 回填本轮
+                                # run 开始时刻，防归因窗口下界误伤执行绑定命令
+                                # 的立项轮自身（轮开始早于命令落库）。
+                                effective_from=st.agent_run.started_at,
                             )
                             # 2026-10-12-run-level-change-attribution task-02 /
                             # FR-01：绑定成功即回写会话「当前变更上下文」——同批
@@ -361,7 +366,19 @@ async def _submit_finalize(svc, st: _SubmitState) -> SubmittedMessages:
                             # 建轮据此给新 run.change_id 打锚（轮级归属拆分）。
                             # 列写入与 link 落库同事务（随本方法末尾 commit），
                             # 失败不抛（值不等才置 dirty，无谓 UPDATE 免掉）。
-                            if (
+                            #
+                            # 2026-10-28-change-usage-attribution-window：终态
+                            # 命令（run archive / flow done）改为**清锚**——
+                            # current_change_id 置 NULL，此后同会话新轮无锚，
+                            # 不再把无关用量打锚到已终态变更（执行用量归因
+                            # 截断的源头半边；bind 照常执行保 link 幂等完整）。
+                            # 同批「done X → start Y」按消息序最后一条生效，
+                            # 语义与游走一致。
+                            if spec_binding.terminal:
+                                if binding_session_row.current_change_id is not None:
+                                    binding_session_row.current_change_id = None
+                                    svc._session.add(binding_session_row)
+                            elif (
                                 bound_change_id is not None
                                 and binding_session_row.current_change_id != bound_change_id
                             ):

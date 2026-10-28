@@ -138,6 +138,36 @@ def test_extract_spec_bindings_returns_frozen_dataclass() -> None:
         binding.change_key = "mutated"  # type: ignore[misc]
 
 
+# ===========================================================================
+# 终态命令识别（2026-10-28-change-usage-attribution-window）
+# ===========================================================================
+
+# (command, 期望 terminal)：终态命令（run archive / flow done）标记 True，供
+# submit_commit 清锚；非终态绑定命令恒 False。顶层别名 ``sillyspec archive``
+# 不在解析范围（样例库既有契约，防误归）——无 --change 的归档命令无产出，
+# 清锚不触发，由统计侧 archived_at 上界兜底（见变更 decisions.md）。
+TERMINAL_CASES: list[tuple[str, bool]] = [
+    ("sillyspec run archive --change 2026-10-28-demo", True),
+    ("sillyspec run archive --done --confirm --change=eq-archive-key", True),
+    ("sillyspec flow done --change 2026-10-28-demo", True),
+    ("sillyspec flow done --change=eq-flow-key", True),
+    ("sillyspec run execute --change 2026-10-28-demo", False),
+    ("sillyspec run verify --change 2026-10-28-demo", False),
+    ("sillyspec run plan --change=eq-form-key", False),
+    ("sillyspec run brainstorm --change 2026-10-28-demo", False),
+    ("sillyspec flow start --change 2026-10-28-demo", False),
+    ("sillyspec flow amend-draft --change 2026-10-28-demo", False),
+]
+
+
+@pytest.mark.parametrize(("command", "expected_terminal"), TERMINAL_CASES)
+def test_extract_spec_bindings_terminal_flag(command: str, expected_terminal: bool) -> None:
+    """终态命令（run archive / flow done）解析出 terminal=True，其余绑定命令 False。"""
+    bindings = extract_spec_bindings(command)
+    assert len(bindings) == 1
+    assert bindings[0].terminal is expected_terminal
+
+
 def test_extract_spec_bindings_quick_after_wrapper_still_skipped() -> None:
     """包装剥除后 quick 守卫仍生效：``pnpm exec sillyspec run quick --change …``
     的 --change 是 quick 会话 id，同样无产出（D-004 对 exec 中缀场景的延伸）。"""
@@ -450,3 +480,66 @@ async def test_bind_quicklog_failure_is_best_effort_no_raise(db_session, monkeyp
     monkeypatch.setattr("app.modules.change.binding.QuicklogSessionLink", _boom)
 
     await bind_session_to_quicklog(db_session, ws.id, "ql-20260825-boom", s.id)
+
+
+# ===========================================================================
+# effective_from：link.created_at 绑定生效时刻（2026-10-28-change-usage-attribution-window）
+# ===========================================================================
+
+
+async def test_bind_change_effective_from_sets_link_created_at(db_session):
+    """run_sync 通道传轮 started_at → 新 link.created_at 即该时刻（绑定自本轮
+    起生效，防归因窗口下界误伤执行绑定命令的立项轮自身）。"""
+    user = await _make_user(db_session)
+    ws = await _make_ws(db_session)
+    s = await _make_session(db_session, workspace_id=ws.id, user_id=user.id)
+    round_started = datetime(2026, 10, 28, 5, 17, 40, tzinfo=UTC)
+
+    await bind_session_to_change(
+        db_session,
+        ws.id,
+        "2026-10-28-effective-from",
+        s.id,
+        effective_from=round_started,
+    )
+
+    links = await _change_links_of_session(db_session, s.id)
+    assert len(links) == 1
+    # SQLite 读回 naive：剥时区比较数值（同 test_usage_stats._naive 口径）。
+    assert links[0].created_at.replace(tzinfo=None) == round_started.replace(tzinfo=None)
+
+
+async def test_bind_change_effective_from_none_defaults_now(db_session):
+    """无 run 上下文调用方（platform_sync / 会话创建落绑定）不传 → 当前时刻
+    （行为与改动前一致）。"""
+    user = await _make_user(db_session)
+    ws = await _make_ws(db_session)
+    s = await _make_session(db_session, workspace_id=ws.id, user_id=user.id)
+    before = datetime.now(UTC)
+
+    await bind_session_to_change(db_session, ws.id, "2026-10-28-eff-none", s.id)
+
+    links = await _change_links_of_session(db_session, s.id)
+    assert len(links) == 1
+    created = links[0].created_at.replace(tzinfo=None)
+    assert created >= before.replace(tzinfo=None)
+
+
+async def test_bind_change_effective_from_idempotent_keeps_existing_link(db_session):
+    """幂等：link 已存在时 effective_from 不回写（首建时刻即绑定生效时刻，
+    重复绑定命令不改窗口起点）。"""
+    user = await _make_user(db_session)
+    ws = await _make_ws(db_session)
+    s = await _make_session(db_session, workspace_id=ws.id, user_id=user.id)
+    first_started = datetime(2026, 10, 28, 5, 0, 0, tzinfo=UTC)
+    await bind_session_to_change(
+        db_session, ws.id, "2026-10-28-eff-idem", s.id, effective_from=first_started
+    )
+    later_round = datetime(2026, 10, 28, 7, 30, 0, tzinfo=UTC)
+    await bind_session_to_change(
+        db_session, ws.id, "2026-10-28-eff-idem", s.id, effective_from=later_round
+    )
+
+    links = await _change_links_of_session(db_session, s.id)
+    assert len(links) == 1
+    assert links[0].created_at.replace(tzinfo=None) == first_started.replace(tzinfo=None)

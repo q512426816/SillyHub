@@ -136,7 +136,7 @@ async def test_hub_registered_ctx_local_cross_harness_attaches_hub_session(
                 _entry(
                     "pi",
                     "C:/Users/qinyi/.pi/sessions/hub-reg-pi.jsonl",
-                    change_key="change-hub-reg",
+                    change_key="2026-10-28-change-hub-reg",
                     last_seen_at=FRESH_LAST_SEEN,
                 )
             ],
@@ -149,7 +149,7 @@ async def test_hub_registered_ctx_local_cross_harness_attaches_hub_session(
         .scalars()
         .all()
     )
-    assert [c.change_key for c in changes] == ["change-hub-reg"]  # placeholder 登记
+    assert [c.change_key for c in changes] == ["2026-10-28-change-hub-reg"]  # placeholder 登记
     assert [(ln.change_id, ln.session_id) for ln in await _change_links(db_session)] == [
         (changes[0].id, hub.id)
     ]
@@ -163,7 +163,7 @@ async def test_hub_registered_ctx_local_cross_harness_attaches_hub_session(
                 _entry(
                     "zcode",
                     "C:/Users/qinyi/.zcode/cli/rollout/local-zcode.jsonl",
-                    change_key="change-hub-reg",
+                    change_key="2026-10-28-change-hub-reg",
                     last_seen_at=FRESH_LAST_SEEN,
                 )
             ],
@@ -203,7 +203,7 @@ async def test_level2_aggregation_key_fallback_attaches_existing_bucket(
         workspace_id=ws_id,
         provider="claude",
         origin="tool_report",
-        aggregation_key="orphan-ctx",  # 新值域：纯 ctx、无 harness 前缀
+        aggregation_key="2026-10-28-orphan-ctx",  # 新值域：纯 ctx、无 harness 前缀
         last_active_at=old_active_at,
     )
     db_session.add(orphan_bucket)
@@ -217,7 +217,7 @@ async def test_level2_aggregation_key_fallback_attaches_existing_bucket(
                 _entry(
                     "zcode",
                     "C:/Users/qinyi/.zcode/cli/rollout/orphan-zcode.jsonl",
-                    change_key="orphan-ctx",
+                    change_key="2026-10-28-orphan-ctx",
                     last_seen_at=FRESH_LAST_SEEN,
                 )
             ],
@@ -241,7 +241,7 @@ async def test_level2_aggregation_key_fallback_attaches_existing_bucket(
         .scalars()
         .all()
     )
-    assert [c.change_key for c in changes] == ["orphan-ctx"]
+    assert [c.change_key for c in changes] == ["2026-10-28-orphan-ctx"]
     assert [(ln.change_id, ln.session_id) for ln in await _change_links(db_session)] == [
         (changes[0].id, orphan_bucket.id)
     ]
@@ -351,7 +351,7 @@ async def test_same_ctx_repush_idempotent_single_owner(
             _entry(
                 "zcode",
                 "C:/Users/qinyi/.zcode/cli/rollout/repush-zk.jsonl",
-                change_key="repush-ctx",
+                change_key="2026-10-28-repush-ctx",
                 last_seen_at=FRESH_LAST_SEEN,
             )
         ],
@@ -372,7 +372,7 @@ async def test_same_ctx_repush_idempotent_single_owner(
             _entry(
                 "pi",
                 "C:/Users/qinyi/.pi/sessions/repush-pi.jsonl",
-                change_key="repush-ctx",
+                change_key="2026-10-28-repush-ctx",
                 last_seen_at=FRESH_LAST_SEEN,
             ),
         ],
@@ -429,11 +429,11 @@ async def test_legacy_dual_key_payload_groups_to_quick_owner(
     change_row = Change(
         id=_uuid.uuid4(),
         workspace_id=ws_id,
-        change_key="dual-change",
-        title="dual-change",
+        change_key="2026-10-28-dual-change",
+        title="2026-10-28-dual-change",
         status="draft",
         location="active",
-        path="changes/dual-change",
+        path="changes/2026-10-28-dual-change",
     )
     db_session.add_all(
         [
@@ -458,7 +458,7 @@ async def test_legacy_dual_key_payload_groups_to_quick_owner(
                 _entry(
                     "zcode",
                     "C:/Users/qinyi/.zcode/cli/rollout/dual-key.jsonl",
-                    change_key="dual-change",
+                    change_key="2026-10-28-dual-change",
                     quick_id="ql-dual",
                     last_seen_at=FRESH_LAST_SEEN,
                 )

@@ -31,6 +31,13 @@ quicklog 列表组装（task-03）→ 本服务 → ``ChangeUsageRead`` / ``Usag
 累加观察跨度）与请求次数（2026-10-03-local-usage-caliber-fix，轮次仍无来源
 恒 0）；摄取侧输入口径归一为非缓存输入（input − cache_read，ZCode 总输入
 口径 113/113 实证）。
+
+2026-10-28-change-usage-attribution-window：变更侧执行集合加**归因时间窗**
+——linked 分支只认领「link 建立后 ~ 变更归档前」且「轮时刻最近绑定」的无锚
+run（``_link_window_predicates`` 三道谓词），dispatched 分支加归档上界。修复
+「新变更背绑定前历史账」（2026-10-28-session-list-loadmore-fetch 实际 6.7
+分钟显示 3.3 小时/636 轮实证）与「归档后统计持续增长」（源头配套清锚见
+binding.py 终态命令识别 + submit_commit.py 清锚写入）。
 """
 
 from __future__ import annotations
@@ -39,9 +46,10 @@ import uuid
 from datetime import UTC, datetime
 from typing import Any
 
-from sqlalchemy import Subquery, case, exists, func, select, union
+from sqlalchemy import Subquery, case, exists, func, or_, select, union
 from sqlalchemy.engine import RowMapping
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import aliased
 from sqlmodel import col
 
 from app.core.errors import ChangeNotFound
@@ -193,6 +201,51 @@ class ChangeUsageQueryService:
     # ── 去重执行集合（子查询形态，两类口径共用）────────────────────────
 
     @staticmethod
+    def _link_window_predicates(change_alias: Any) -> list[Any]:
+        """会话链接分支的归因时间窗谓词（2026-10-28-change-usage-attribution-window）。
+
+        背景：link 摊派曾把「绑定前数小时的历史无锚 run」全量摊给新变更
+        （2026-10-28-session-list-loadmore-fetch 实际 6.7 分钟显示 3.3 小时/
+        636 轮实证——新变更背整个上午会话的历史账）。三道谓词收口：
+
+        1. **下界**：``run.started_at >= link.created_at``——只认领该
+           (change, session) 绑定建立后开始的轮；绑定前的历史轮不摊入。
+           ``started_at IS NULL``（时间缺失的老数据）放行——无法判定窗口时
+           保守计入，防存量丢数。
+        2. **归档上界**：``run.started_at <= change.archived_at``（未归档
+           NULL 放行）——归档后开始的轮不再计入（源头清锚漏网/异常路径的
+           统计侧兜底）。``change_alias`` 为调用分支已 join 的 Change 别名
+           （防裸类名形成第二表引用）。
+        3. **最近绑定防双计**：同会话存在**其它变更**的更新 link（晚于本
+           link 且不晚于轮开始）→ 轮已属于新变更的时段，不归本变更——单
+           会话先后多变更时无锚轮只归「轮时刻最近绑定的变更」。
+
+        带锚 run（dispatched 分支）不受 1/3 约束（明确归属，含 backfill
+        存量回填——run 时间早于变更/绑定属合法回填语义），仅受 2 归档上界。
+        """
+        newer_link = aliased(ChangeSessionLink, name="csl_newer")
+        return [
+            # 1. 下界：绑定建立后的轮（NULL 时间放行）。
+            or_(
+                col(AgentRun.started_at).is_(None),
+                col(AgentRun.started_at) >= col(ChangeSessionLink.created_at),
+            ),
+            # 2. 归档上界（分支需 join change_alias；未归档/时间缺失放行）。
+            or_(
+                col(change_alias.archived_at).is_(None),
+                col(AgentRun.started_at).is_(None),
+                col(AgentRun.started_at) <= col(change_alias.archived_at),
+            ),
+            # 3. 最近绑定防双计：更新绑定的变更接管其后的无锚轮。
+            ~exists().where(
+                col(newer_link.session_id) == col(AgentRun.agent_session_id),
+                col(newer_link.change_id) != col(ChangeSessionLink.change_id),
+                col(newer_link.created_at) > col(ChangeSessionLink.created_at),
+                col(newer_link.created_at) <= col(AgentRun.started_at),
+            ),
+        ]
+
+    @staticmethod
     def _change_run_ids(change_id: uuid.UUID) -> Subquery:
         """变更侧去重执行集合（D-002@v2 并集去重 + 轮级独占）：
 
@@ -204,22 +257,43 @@ class ChangeUsageQueryService:
         会话链接分支追加 ``AgentRun.change_id IS NULL`` 谓词——带锚 run 独占归
         其锚定变更，不再经共享会话重复摊给其它绑定变更（一个会话先后执行多个
         变更时各归各段）；无锚 run（存量/绑定命令前轮次）维持经链接认领的旧
-        口径，全部无锚的存量会话行为逐字节不变（防回归）。两锚点均经 change
-        定位（link 行挂 change、change 属 workspace），天然限定本工作区，无需
+        口径，全部无锚的存量会话行为逐字节不变（防回归）。
+
+        2026-10-28-change-usage-attribution-window：两分支加归因时间窗——
+        linked 分支三道窗口谓词见 :meth:`_link_window_predicates`（下界/归档
+        上界/最近绑定防双计）；dispatched 分支仅归档上界（带锚=明确归属，
+        时间早于创建的 backfill 存量回填仍计入）。两锚点均经 change 定位
+        （link 行挂 change、change 属 workspace），天然限定本工作区，无需
         额外 workspace join。不过滤 ``agent_sessions.deleted_at``（D-006@v1 软
         删计入）；无 ``agent_session_id`` 的孤儿 run 经派发锚点仍命中，不丢数。
         """
-        dispatched = select(AgentRun.id).where(col(AgentRun.change_id) == change_id)
+        change = aliased(Change, name="win_change")
+        dispatched = (
+            select(AgentRun.id)
+            .join(change, col(change.id) == col(AgentRun.change_id))
+            .where(
+                col(AgentRun.change_id) == change_id,
+                # 归档上界：归档后开始的打锚轮不再计入（清锚漏网兜底）。
+                or_(
+                    col(change.archived_at).is_(None),
+                    col(AgentRun.started_at).is_(None),
+                    col(AgentRun.started_at) <= col(change.archived_at),
+                ),
+            )
+        )
         linked = (
             select(AgentRun.id)
+            .select_from(AgentRun)
             .join(
                 ChangeSessionLink,
                 col(ChangeSessionLink.session_id) == col(AgentRun.agent_session_id),
             )
+            .join(change, col(change.id) == col(ChangeSessionLink.change_id))
             .where(
                 col(ChangeSessionLink.change_id) == change_id,
                 # 轮级独占（FR-03）：带锚 run 只走派发锚点分支。
                 col(AgentRun.change_id).is_(None),
+                *ChangeUsageQueryService._link_window_predicates(change),
             )
         )
         return union(dispatched, linked).subquery()
@@ -276,10 +350,24 @@ class ChangeUsageQueryService:
         不再经共享会话摊给其它绑定变更（列表摘要与详情口径一致）。UNION 整行
         去重等价 ``(锚点 change_id, run_id)`` 维度去重（run_id 决定其余 run 列，
         D-002@v2 同 run 双锚点只计一次）。
+
+        2026-10-28-change-usage-attribution-window：两分支加归因时间窗（与详情
+        ``_change_run_ids`` 同口径）——linked 三道窗口谓词（下界/归档上界/最近
+        绑定防双计），dispatched 仅归档上界（join Change 取 archived_at）。
         """
         cols = ChangeUsageQueryService._run_metric_columns()
-        dispatched = select(col(AgentRun.change_id).label("group_key"), *cols).where(
-            col(AgentRun.change_id).in_(change_ids)
+        win_change = aliased(Change, name="sum_win_change")
+        dispatched = (
+            select(col(AgentRun.change_id).label("group_key"), *cols)
+            .join(win_change, col(win_change.id) == col(AgentRun.change_id))
+            .where(
+                col(AgentRun.change_id).in_(change_ids),
+                or_(
+                    col(win_change.archived_at).is_(None),
+                    col(AgentRun.started_at).is_(None),
+                    col(AgentRun.started_at) <= col(win_change.archived_at),
+                ),
+            )
         )
         linked = (
             select(col(ChangeSessionLink.change_id).label("group_key"), *cols)
@@ -288,10 +376,12 @@ class ChangeUsageQueryService:
                 ChangeSessionLink,
                 col(ChangeSessionLink.session_id) == col(AgentRun.agent_session_id),
             )
+            .join(win_change, col(win_change.id) == col(ChangeSessionLink.change_id))
             .where(
                 col(ChangeSessionLink.change_id).in_(change_ids),
                 # 轮级独占（FR-03）：带锚 run 不经会话链接重复认领。
                 col(AgentRun.change_id).is_(None),
+                *ChangeUsageQueryService._link_window_predicates(win_change),
             )
         )
         return union(dispatched, linked).subquery()

@@ -57,6 +57,9 @@ from app.modules.workspace.model import Workspace
 # 固定种子时间（断言经 _naive 归一为 naive 墙钟：SQLite DateTime 读写丢时区，
 # 写入 aware UTC 读回 naive 墙钟值与原值数字一致）。
 _T10 = datetime(2026, 8, 30, 10, 0, 0, tzinfo=UTC)
+_T8 = datetime(2026, 8, 30, 8, 0, 0, tzinfo=UTC)
+_T9 = datetime(2026, 8, 30, 9, 0, 0, tzinfo=UTC)
+_T930 = datetime(2026, 8, 30, 9, 30, 0, tzinfo=UTC)
 _T1030 = datetime(2026, 8, 30, 10, 30, 0, tzinfo=UTC)
 _T1045 = datetime(2026, 8, 30, 10, 45, 0, tzinfo=UTC)
 _T11 = datetime(2026, 8, 30, 11, 0, 0, tzinfo=UTC)
@@ -109,8 +112,13 @@ async def _make_change(
     key: str,
     *,
     location: str = "active",
+    archived_at: datetime | None = None,
 ) -> Change:
-    """Change 行直写（对齐 test_enrich_projection._make_change 模式）。"""
+    """Change 行直写（对齐 test_enrich_projection._make_change 模式）。
+
+    ``archived_at``（2026-10-28-change-usage-attribution-window）：归档时刻，
+    归因窗口上界的测试输入。
+    """
     change = Change(
         id=uuid.uuid4(),
         workspace_id=workspace_id,
@@ -119,6 +127,7 @@ async def _make_change(
         status="active",
         location=location,
         path=f"changes/{key}",
+        archived_at=archived_at,
     )
     db_session.add(change)
     await db_session.commit()
@@ -221,9 +230,21 @@ async def _make_model_usage(
 
 
 async def _make_change_link(
-    db_session: AsyncSession, *, change_id: uuid.UUID, session_id: uuid.UUID
+    db_session: AsyncSession,
+    *,
+    change_id: uuid.UUID,
+    session_id: uuid.UUID,
+    created_at: datetime | None = None,
 ) -> ChangeSessionLink:
-    link = ChangeSessionLink(id=uuid.uuid4(), change_id=change_id, session_id=session_id)
+    """link 行直写；``created_at`` 可显式指定（2026-10-28-change-usage-
+    attribution-window 起归因窗口按 link 建立时刻开窗，跨时刻用例须表达时间序，
+    缺省当前时刻=测试实跑时刻）。"""
+    link = ChangeSessionLink(
+        id=uuid.uuid4(),
+        change_id=change_id,
+        session_id=session_id,
+        created_at=created_at or datetime.now(UTC),
+    )
     db_session.add(link)
     await db_session.commit()
     return link
@@ -1438,12 +1459,16 @@ class TestLocalCliSegment:
         assert usage.duration_ms is None
 
     async def test_dual_count_guard_run_authoritative(self, db_session: AsyncSession) -> None:
-        """15. 双计防护：同会话有 runs 也有快照 → 只计 run（NOT EXISTS，R-01）。"""
+        """15. 双计防护：同会话有 runs 也有快照 → 只计 run（NOT EXISTS，R-01）。
+
+        link created_at 显式早于 run started_at（归因窗口内；2026-10-28-change-
+        usage-attribution-window 起窗口按 link 时刻开窗）。
+        """
         uid = await _make_user(db_session)
         ws = await _make_workspace(db_session, root_path="C:/dual-count")
         change = await _make_change(db_session, ws.id, "2026-10-02-dual")
         sess = await _make_session(db_session, uid)
-        await _make_change_link(db_session, change_id=change.id, session_id=sess.id)
+        await _make_change_link(db_session, change_id=change.id, session_id=sess.id, created_at=_T9)
         await _make_run(
             db_session,
             agent_session_id=sess.id,
@@ -1516,7 +1541,12 @@ class TestLocalCliSegment:
         sess_run = await _make_session(db_session, uid)
         sess_local = await _make_session(db_session, uid)
         sess_pure = await _make_session(db_session, uid)
-        await _make_change_link(db_session, change_id=change_mixed.id, session_id=sess_run.id)
+        await _make_change_link(
+            db_session,
+            change_id=change_mixed.id,
+            session_id=sess_run.id,
+            created_at=_T9,
+        )
         await _make_change_link(db_session, change_id=change_mixed.id, session_id=sess_local.id)
         await _make_change_link(db_session, change_id=change_pure.id, session_id=sess_pure.id)
         await _make_run(
@@ -1560,7 +1590,9 @@ class TestLocalCliSegment:
         sess_local = await _make_session(db_session, uid)
         sess_run = await _make_session(db_session, uid)
         await _make_change_link(db_session, change_id=change.id, session_id=sess_local.id)
-        await _make_change_link(db_session, change_id=change.id, session_id=sess_run.id)
+        await _make_change_link(
+            db_session, change_id=change.id, session_id=sess_run.id, created_at=_T9
+        )
         # run 段：10:00→11:00 耗时 500ms 轮次 1。
         await _make_run(
             db_session,
@@ -1661,7 +1693,7 @@ class TestUsageSegmentation:
         ch_a = await _make_change(db_session, ws.id, change_keys[0])
         ch_b = await _make_change(db_session, ws.id, change_keys[1])
         sess = await _make_session(db_session, uid)
-        await _make_change_link(db_session, change_id=ch_a.id, session_id=sess.id)
+        await _make_change_link(db_session, change_id=ch_a.id, session_id=sess.id, created_at=_T9)
         row = AgentSessionLogORM(
             workspace_id=ws.id,
             log_path="C:/x/model-io-sess-seg.jsonl",
@@ -1933,3 +1965,151 @@ class TestUsageSegmentation:
         assert usage.totals.input_tokens == 90
         assert usage.totals.api_requests == 8
         assert usage.by_model[0].model == "本地 CLI"
+
+
+class TestAttributionWindow:
+    """归因时间窗（2026-10-28-change-usage-attribution-window）。
+
+    背景：link 摊派曾把绑定前数小时的历史无锚 run 全量摊给新变更
+    （2026-10-28-session-list-loadmore-fetch 实际 6.7 分钟显示 3.3 小时/636 轮）。
+    窗口语义：linked 分支只认领 [link.created_at, 归档时刻] 内且「轮时刻最近
+    绑定」的无锚 run；dispatched 分支仅归档上界。
+    """
+
+    async def test_history_runs_before_link_excluded(self, db_session: AsyncSession) -> None:
+        """W1 核心复刻：绑定前的历史无锚轮不摊入；绑定后的轮照常计入。
+
+        手算：历史轮(08:00) input=900 排除；绑定后轮(10:00) input=100 计入。
+        """
+        uid = await _make_user(db_session)
+        ws = await _make_workspace(db_session, root_path="C:/win-history")
+        change = await _make_change(db_session, ws.id, "2026-10-28-win-history")
+        sess = await _make_session(db_session, uid)
+        # 绑定发生于 09:00（run_sync 通道回填本轮 started_at 形态）。
+        await _make_change_link(db_session, change_id=change.id, session_id=sess.id, created_at=_T9)
+        await _make_run(db_session, agent_session_id=sess.id, input_tokens=900, started_at=_T8)
+        await _make_run(
+            db_session,
+            agent_session_id=sess.id,
+            input_tokens=100,
+            started_at=_T10,
+            model="win-model",
+        )
+
+        usage = await ChangeUsageQueryService(db_session).get_change_usage(ws.id, change.id)
+        assert usage.totals.input_tokens == 100
+        assert [i.model for i in usage.by_model] == ["win-model"]
+
+    async def test_archived_upper_bound_linked(self, db_session: AsyncSession) -> None:
+        """W2 归档上界（linked）：归档后开始的无锚轮不再计入。"""
+        uid = await _make_user(db_session)
+        ws = await _make_workspace(db_session, root_path="C:/win-arch-linked")
+        change = await _make_change(db_session, ws.id, "2026-10-28-win-arch-l", archived_at=_T1030)
+        sess = await _make_session(db_session, uid)
+        await _make_change_link(db_session, change_id=change.id, session_id=sess.id, created_at=_T9)
+        await _make_run(db_session, agent_session_id=sess.id, input_tokens=100, started_at=_T10)
+        await _make_run(db_session, agent_session_id=sess.id, input_tokens=700, started_at=_T1045)
+
+        usage = await ChangeUsageQueryService(db_session).get_change_usage(ws.id, change.id)
+        assert usage.totals.input_tokens == 100
+
+    async def test_archived_upper_bound_dispatched(self, db_session: AsyncSession) -> None:
+        """W3 归档上界（dispatched）：归档后开始的打锚轮不再计入；归档前照常。
+
+        含 backfill 存量语义回归：打锚 run 时间早于变更创建仍计入（锚=明确
+        归属，dispatched 分支无 created_at 下界）。
+        """
+        await _make_user(db_session)
+        ws = await _make_workspace(db_session, root_path="C:/win-arch-disp")
+        change = await _make_change(db_session, ws.id, "2026-10-28-win-arch-d", archived_at=_T1030)
+        await _make_run(
+            db_session,
+            change_id=change.id,
+            input_tokens=100,
+            started_at=_T10,
+            model="anchored-early",
+        )
+        await _make_run(
+            db_session,
+            change_id=change.id,
+            input_tokens=500,
+            started_at=_T1045,
+            model="anchored-late",
+        )
+
+        usage = await ChangeUsageQueryService(db_session).get_change_usage(ws.id, change.id)
+        assert usage.totals.input_tokens == 100
+        assert [i.model for i in usage.by_model] == ["anchored-early"]
+
+    async def test_recent_binding_wins_no_double_count(self, db_session: AsyncSession) -> None:
+        """W4 单会话先后两变更：无锚轮只归「轮时刻最近绑定的变更」。
+
+        X link 于 09:00、Y link 于 10:30；无锚轮 r1(10:00) 只归 X，
+        r2(11:00) 只归 Y（X 未归档也不吃 r2——防多变更双计）。
+        """
+        uid = await _make_user(db_session)
+        ws = await _make_workspace(db_session, root_path="C:/win-recent")
+        change_x = await _make_change(db_session, ws.id, "2026-10-28-win-x")
+        change_y = await _make_change(db_session, ws.id, "2026-10-28-win-y")
+        sess = await _make_session(db_session, uid)
+        await _make_change_link(
+            db_session, change_id=change_x.id, session_id=sess.id, created_at=_T9
+        )
+        await _make_change_link(
+            db_session, change_id=change_y.id, session_id=sess.id, created_at=_T1030
+        )
+        await _make_run(db_session, agent_session_id=sess.id, input_tokens=100, started_at=_T10)
+        await _make_run(db_session, agent_session_id=sess.id, input_tokens=40, started_at=_T11)
+
+        svc = ChangeUsageQueryService(db_session)
+        usage_x = await svc.get_change_usage(ws.id, change_x.id)
+        usage_y = await svc.get_change_usage(ws.id, change_y.id)
+        assert usage_x.totals.input_tokens == 100
+        assert usage_y.totals.input_tokens == 40
+
+    async def test_multi_session_independent_windows(self, db_session: AsyncSession) -> None:
+        """W5 一变更多会话：各 link 独立开窗（会话 B 晚绑定只认领其后轮）。"""
+        uid = await _make_user(db_session)
+        ws = await _make_workspace(db_session, root_path="C:/win-multi-sess")
+        change = await _make_change(db_session, ws.id, "2026-10-28-win-ms")
+        sess_a = await _make_session(db_session, uid)
+        sess_b = await _make_session(db_session, uid)
+        await _make_change_link(
+            db_session, change_id=change.id, session_id=sess_a.id, created_at=_T9
+        )
+        await _make_change_link(
+            db_session, change_id=change.id, session_id=sess_b.id, created_at=_T1030
+        )
+        # A 早绑定：其 10:00 轮计入；B 晚绑定：其 10:00 轮在 B 窗口外（排除），
+        # 10:45 轮在窗口内（计入）。
+        await _make_run(db_session, agent_session_id=sess_a.id, input_tokens=100, started_at=_T10)
+        await _make_run(db_session, agent_session_id=sess_b.id, input_tokens=200, started_at=_T10)
+        await _make_run(db_session, agent_session_id=sess_b.id, input_tokens=50, started_at=_T1045)
+
+        usage = await ChangeUsageQueryService(db_session).get_change_usage(ws.id, change.id)
+        assert usage.totals.input_tokens == 150
+
+    async def test_summary_anchor_same_window_as_detail(self, db_session: AsyncSession) -> None:
+        """W6 列表摘要与详情同口径：窗口在批量锚点上同样生效。"""
+        uid = await _make_user(db_session)
+        ws = await _make_workspace(db_session, root_path="C:/win-summary")
+        change = await _make_change(db_session, ws.id, "2026-10-28-win-sum")
+        sess = await _make_session(db_session, uid)
+        await _make_change_link(db_session, change_id=change.id, session_id=sess.id, created_at=_T9)
+        await _make_run(db_session, agent_session_id=sess.id, input_tokens=900, started_at=_T8)
+        await _make_run(db_session, agent_session_id=sess.id, input_tokens=100, started_at=_T10)
+
+        summary = await ChangeUsageQueryService(db_session).summarize_changes(ws.id, [change.id])
+        assert summary[change.id].totals.input_tokens == 100
+
+    async def test_null_started_at_run_still_counted(self, db_session: AsyncSession) -> None:
+        """W7 时间缺失放行：started_at NULL 的无锚轮仍计入（存量不丢数）。"""
+        uid = await _make_user(db_session)
+        ws = await _make_workspace(db_session, root_path="C:/win-null")
+        change = await _make_change(db_session, ws.id, "2026-10-28-win-null")
+        sess = await _make_session(db_session, uid)
+        await _make_change_link(db_session, change_id=change.id, session_id=sess.id, created_at=_T9)
+        await _make_run(db_session, agent_session_id=sess.id, input_tokens=70)
+
+        usage = await ChangeUsageQueryService(db_session).get_change_usage(ws.id, change.id)
+        assert usage.totals.input_tokens == 70
