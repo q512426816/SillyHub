@@ -110,6 +110,9 @@ function segmentTs(seg: TurnSegment): number {
       return seg.ts ?? Number.NEGATIVE_INFINITY;
     case "compact_status":
       return seg.ts ?? Number.NEGATIVE_INFINITY;
+    // 2026-10-28-model-retry-visible：模型重试过程段非 running 候选，取捕获 ts。
+    case "model_retry":
+      return seg.ts ?? Number.NEGATIVE_INFINITY;
     // ql-20260920-006（2026-09-18-single-chat-steering 修订）：轮内用户消息段
     //（引导注入留痕）非 running 候选，取捕获 ts（本行是 TurnSegment 新增 kind
     // 的 switch 详尽性编译补点，无行为变化）。
@@ -197,12 +200,104 @@ function latestStreamingSummary(segments: TurnSegment[]): string | null {
       : null;
 }
 
+/** 最新 streaming 段的捕获时刻（与 latestStreamingSummary 同一遍 DFS 的 ts 面）。 */
+function latestStreamingTs(segments: TurnSegment[]): number {
+  let bestTs = Number.NEGATIVE_INFINITY;
+  const walk = (list: TurnSegment[]) => {
+    for (const s of list) {
+      if (s.kind === "text" || s.kind === "thinking") {
+        const ts = segmentTs(s);
+        if (s.streaming && ts >= bestTs) bestTs = ts;
+      } else if (s.kind === "tool" || s.kind === "subagent_stub") {
+        walk(s.children);
+      }
+    }
+  };
+  walk(segments);
+  return bestTs;
+}
+
+/**
+ * 2026-10-28-model-retry-visible：树内最新 model_retry 段的活动文案——
+ * 「模型限流重试中 第N/M次…」（error_status=null 连接类为「模型连接异常重试中」；
+ * 载荷解析失败退「模型重试中…」）。无 model_retry 段返回 null。
+ * 解析容错与 ModelRetryRowView 同口径（坏 JSON 不抛错）。
+ */
+function latestModelRetrySummary(segments: TurnSegment[]): {
+  text: string;
+  ts: number;
+} | null {
+  let bestTs = Number.NEGATIVE_INFINITY;
+  let bestText: string | null = null;
+  const walk = (list: TurnSegment[]) => {
+    for (const s of list) {
+      if (s.kind === "model_retry") {
+        const ts = segmentTs(s);
+        if (ts >= bestTs) {
+          bestTs = ts;
+          let attempt: number | null = null;
+          let maxRetries: number | null = null;
+          let errorStatus: number | null | undefined;
+          let parseFailed = false;
+          try {
+            const parsed = JSON.parse(s.text) as {
+              attempt?: unknown;
+              max_retries?: unknown;
+              error_status?: unknown;
+            };
+            if (typeof parsed.attempt === "number" && Number.isFinite(parsed.attempt)) {
+              attempt = parsed.attempt;
+            }
+            if (
+              typeof parsed.max_retries === "number" &&
+              Number.isFinite(parsed.max_retries)
+            ) {
+              maxRetries = parsed.max_retries;
+            }
+            if (
+              parsed.error_status === null ||
+              typeof parsed.error_status === "number"
+            ) {
+              errorStatus = parsed.error_status;
+            }
+          } catch {
+            parseFailed = true;
+          }
+          bestText = parseFailed
+            ? "模型重试中…"
+            : errorStatus === null
+              ? `模型连接异常重试中${
+                  attempt != null && maxRetries != null
+                    ? ` 第${attempt}/${maxRetries}次`
+                    : attempt != null
+                      ? ` 第${attempt}次`
+                      : ""
+                }…`
+              : `模型限流重试中${
+                  attempt != null && maxRetries != null
+                    ? ` 第${attempt}/${maxRetries}次`
+                    : attempt != null
+                      ? ` 第${attempt}次`
+                      : ""
+                }…`;
+        }
+      } else if (s.kind === "tool" || s.kind === "subagent_stub") {
+        walk(s.children);
+      }
+    }
+  };
+  walk(segments);
+  return bestText != null ? { text: bestText, ts: bestTs } : null;
+}
+
 /**
  * 树内当前活动摘要（递归）：
  *   - 有 running 工具段：普通工具 → 「工具名 主参数」；子代理容器（有 children）→
  *     「子代理『名』内部活动」，内部活动递归 children（嵌套子代理继续前缀），内部
  *     无任何 running / streaming 段时退「执行中」；
- *   - 无 running 工具段：最新 streaming 段 → 「正在输出文本 / 正在思考」；
+ *   - 无 running 工具段：最新 streaming 段 → 「正在输出文本 / 正在思考」；最新
+ *     model_retry 段更新（ts 更晚）→ 「模型限流重试中 第N/M次…」（2026-10-28-
+ *     model-retry-visible：重试风暴期间替代恒「思考中」，用户可区分正常慢与卡死）；
  *   - 都无 → null。
  */
 function latestActivityWithin(segments: TurnSegment[]): string | null {
@@ -213,6 +308,10 @@ function latestActivityWithin(segments: TurnSegment[]): string | null {
       return `子代理「${subagentDisplayName(tool)}」${inner ?? "执行中"}`;
     }
     return toolSummary(tool);
+  }
+  const retry = latestModelRetrySummary(segments);
+  if (retry && retry.ts >= latestStreamingTs(segments)) {
+    return retry.text;
   }
   return latestStreamingSummary(segments);
 }

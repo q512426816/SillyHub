@@ -2135,6 +2135,9 @@ function segmentTsOf(seg: TurnSegment): number | null {
       return seg.ts;
     case "compact_status":
       return seg.ts;
+    // 2026-10-28-model-retry-visible：模型重试过程段取捕获时刻（同 compact_status）。
+    case "model_retry":
+      return seg.ts;
     // 2026-08-25-unified-floating-session task-11：前导段取捕获时刻。
     case "preamble":
       return seg.ts;
@@ -2293,7 +2296,13 @@ function SegmentedTurnBody({
             // 「上下文正在重新压缩」提示）；终态轮不显示（成功后紧随的
             // compact 摘要段已是「已重新压缩」标记，失败态经「全部」
             // 视图 amber 行可见）。
-            (s) => isConversationSegment(s) || (isLiveTurn(turnStatus) && s.kind === "compact_status"),
+            // 2026-10-28-model-retry-visible：model_retry 同款门控——仅运行中
+            // 轮进对话流（实时「模型限流重试中」提示）；终态轮对话正文不渲染
+            // （失败原因由 RunErrorItem 失败卡承担），「全部」视图保留过程行。
+            (s) =>
+              isConversationSegment(s) ||
+              (isLiveTurn(turnStatus) &&
+                (s.kind === "compact_status" || s.kind === "model_retry")),
           ),
     [viewMode, segments, turnStatus],
   );

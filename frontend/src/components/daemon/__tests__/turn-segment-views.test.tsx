@@ -34,6 +34,7 @@ import { join } from "node:path";
 import {
   CompactNoticeChip,
   CompactStatusRowView,
+  ModelRetryRowView,
   SegmentView,
   TextSegmentView,
   ThinkingRowView,
@@ -2110,5 +2111,78 @@ describe("回填元数据压回执假终态（2026-10-26-subagent-task-meta-rest
     expect(header.status).toBe("completed");
     expect(header.badge?.label).toBe("已完成");
     expect(header.durationText).toBe("04:32"); // 权威时长（271842ms→round 272s），非回执差值 00:08
+  });
+});
+
+/* ───────── 模型重试过程段（2026-10-28-model-retry-visible） ───────── */
+
+describe("ModelRetryRowView / SegmentView 分发 / deriveTurnActivity 回退链（2026-10-28-model-retry-visible）", () => {
+  const retrySeg = (overrides?: Partial<Extract<TurnSegment, { kind: "model_retry" }>>):
+    Extract<TurnSegment, { kind: "model_retry" }> => ({
+      kind: "model_retry",
+      id: "seg:mr1",
+      text: JSON.stringify({
+        attempt: 3,
+        max_retries: 10,
+        retry_delay_ms: 8000,
+        error_status: 429,
+        error: "Request rejected (429) · [1311][当前订阅套餐暂未开放GLM-5.3]",
+      }),
+      ts: 2_000,
+      ...overrides,
+    });
+
+  it("ModelRetryRowView：429 限流载荷 → 「模型限流重试中 第3/10次…」+ 错误摘要（title 悬停全文）", () => {
+    render(<ModelRetryRowView segment={retrySeg()} />);
+    const row = screen.getByTestId("model-retry-row");
+    expect(row).toHaveTextContent("模型限流重试中 第3/10次…");
+    expect(row).toHaveTextContent("Request rejected (429)");
+    expect(row).toHaveAttribute("title", expect.stringContaining("Request rejected (429)"));
+  });
+
+  it("连接类（error_status=null）→ 「模型连接异常重试中」口径；坏 JSON → 「模型重试中…」中性兜底", () => {
+    const { unmount } = render(
+      <ModelRetryRowView
+        segment={retrySeg({
+          text: JSON.stringify({ attempt: 1, max_retries: 10, error_status: null }),
+        })}
+      />,
+    );
+    expect(screen.getByTestId("model-retry-row")).toHaveTextContent("模型连接异常重试中 第1/10次…");
+    unmount();
+    render(<ModelRetryRowView segment={retrySeg({ text: "{not-json" })} />);
+    expect(screen.getByTestId("model-retry-row")).toHaveTextContent("模型重试中…");
+  });
+
+  it("SegmentView 按 kind 分发到重试行；deriveTurnActivity 回退链消费（无 streaming 段时显示重试文案）", () => {
+    render(<SegmentView segment={retrySeg()} />);
+    expect(screen.getByTestId("model-retry-row")).toBeInTheDocument();
+    const summary = deriveTurnActivity([retrySeg()]);
+    expect(summary.currentActivity).toBe("模型限流重试中 第3/10次…");
+  });
+
+  it("回退链优先级：更新 streaming 文本段（ts 更晚）盖过重试段；重试段更新时反超「正在思考」", () => {
+    // streaming text 段 ts 更晚（3000 > 2000）→ 显示「正在输出文本」。
+    const textSeg: TurnSegment = {
+      kind: "text",
+      id: "seg:t1",
+      text: "正文",
+      streaming: true,
+      startedAt: 3_000,
+    };
+    expect(deriveTurnActivity([retrySeg(), textSeg]).currentActivity).toBe("正在输出文本");
+    // 重试段 ts 更晚（4000 > 3000）→ 重试文案盖过「正在思考」（重试风暴期间主诉求）。
+    const thinkingSeg: TurnSegment = {
+      kind: "thinking",
+      id: "seg:th1",
+      text: "推理",
+      streaming: true,
+      ts: 3_000,
+    };
+    expect(
+      deriveTurnActivity([thinkingSeg, retrySeg({ ts: 4_000 })]).currentActivity,
+    ).toBe("模型限流重试中 第3/10次…");
+    // 恒挂回归锚：只有 streaming thinking（无重试段）仍是「正在思考」。
+    expect(deriveTurnActivity([thinkingSeg]).currentActivity).toBe("正在思考");
   });
 });

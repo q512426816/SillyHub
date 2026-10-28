@@ -191,3 +191,69 @@ describe("零回归锚定（D-010）与未知值兜底", () => {
     expect(screen.getByText("future_phase_x")).toBeInTheDocument();
   });
 });
+
+/* ───────── 模型重试活动文案（2026-10-28-model-retry-visible） ───────── */
+
+describe("TurnStatusBar × model_retry 段（2026-10-28-model-retry-visible）", () => {
+  it("最新段为 model_retry（无 streaming 段）时活动位显示重试文案，替代恒「思考中」", () => {
+    vi.useFakeTimers();
+    const segments: TurnSegment[] = [
+      {
+        kind: "model_retry",
+        id: "seg:mr-status",
+        text: JSON.stringify({
+          attempt: 3,
+          max_retries: 10,
+          retry_delay_ms: 8000,
+          error_status: 429,
+          error: "Request rejected (429) · [1311]",
+        }),
+        ts: 1_000,
+      },
+    ];
+    render(
+      <TurnStatusBar
+        turnStartedAt={1_000}
+        segments={segments}
+        turnStatus="running"
+      />,
+    );
+    act(() => {
+      void vi.advanceTimersByTimeAsync(0);
+    });
+    expect(screen.getByTitle("模型限流重试中 第3/10次…")).toBeInTheDocument();
+    expect(screen.getByText("模型限流重试中 第3/10次…")).toBeInTheDocument();
+    vi.useRealTimers();
+  });
+
+  it("流式文本段更新（ts 更晚）时回退「正在输出文本」（重试行不遮蔽真实输出活动）", () => {
+    vi.useFakeTimers();
+    const segments: TurnSegment[] = [
+      {
+        kind: "model_retry",
+        id: "seg:mr-status2",
+        text: JSON.stringify({ attempt: 5, max_retries: 10, error_status: 429 }),
+        ts: 1_000,
+      },
+      {
+        kind: "text",
+        id: "seg:tx-status",
+        text: "恢复输出",
+        streaming: true,
+        startedAt: 2_000,
+      },
+    ];
+    render(
+      <TurnStatusBar
+        turnStartedAt={1_000}
+        segments={segments}
+        turnStatus="running"
+      />,
+    );
+    act(() => {
+      void vi.advanceTimersByTimeAsync(0);
+    });
+    expect(screen.getByTitle("正在输出文本")).toBeInTheDocument();
+    vi.useRealTimers();
+  });
+});

@@ -252,6 +252,10 @@ export interface CompactSegmentViewProps {
 export interface CompactStatusRowViewProps {
   segment: Extract<TurnSegment, { kind: "compact_status" }>;
 }
+/** 2026-10-28-model-retry-visible：模型重试过程段（[MODEL_RETRY] 协议行，渲染层解析载荷）。 */
+export interface ModelRetryRowViewProps {
+  segment: Extract<TurnSegment, { kind: "model_retry" }>;
+}
 /** ql-20260920-006：轮内用户消息段（引导注入留痕，三态右对齐用户气泡）。 */
 export interface UserMsgSegmentViewProps {
   segment: Extract<TurnSegment, { kind: "user_msg" }>;
@@ -1346,6 +1350,76 @@ export const CompactStatusRowView = memo(function CompactStatusRowView({
   );
 });
 
+/**
+ * 模型 API 重试过程行（2026-10-28-model-retry-visible）：daemon [MODEL_RETRY]
+ * 协议行的渲染——载荷 attempt/max_retries 显示「模型限流重试中 第N/M次」+
+ * 错误摘要（title 悬停看全文）；error_status=null（连接类）显示「连接异常重试中」
+ * 口径；坏 JSON / 字段缺失退中性「模型重试中…」（容错不抛错，FR-02 场景三）。
+ * 对话视图仅运行中轮挂载（turn-timeline textSegments 过滤门控）；「全部（进度）」
+ * 视图保留过程行。
+ */
+export const ModelRetryRowView = memo(function ModelRetryRowView({
+  segment,
+}: ModelRetryRowViewProps) {
+  let attempt: number | null = null;
+  let maxRetries: number | null = null;
+  let errorStatus: number | null | undefined;
+  let error: string | undefined;
+  let parseFailed = false;
+  try {
+    const parsed = JSON.parse(segment.text) as {
+      attempt?: unknown;
+      max_retries?: unknown;
+      error_status?: unknown;
+      error?: unknown;
+    };
+    if (typeof parsed.attempt === "number" && Number.isFinite(parsed.attempt)) {
+      attempt = parsed.attempt;
+    }
+    if (
+      typeof parsed.max_retries === "number" &&
+      Number.isFinite(parsed.max_retries)
+    ) {
+      maxRetries = parsed.max_retries;
+    }
+    if (parsed.error_status === null || typeof parsed.error_status === "number") {
+      errorStatus = parsed.error_status;
+    }
+    if (typeof parsed.error === "string" && parsed.error) error = parsed.error;
+  } catch {
+    parseFailed = true;
+  }
+  const countText =
+    attempt != null && maxRetries != null
+      ? ` 第${attempt}/${maxRetries}次`
+      : attempt != null
+        ? ` 第${attempt}次`
+        : "";
+  const summary = error ? summaryOf(error, 80) : undefined;
+  return (
+    <div
+      data-testid="model-retry-row"
+      className="flex select-none items-center gap-1.5 px-1 py-0.5 text-[11px] text-muted-foreground"
+      title={error || undefined}
+    >
+      <span
+        aria-hidden
+        className="h-2.5 w-2.5 shrink-0 animate-spin rounded-full border-[1.5px] border-muted-foreground/30 border-t-muted-foreground"
+      />
+      <span className="min-w-0">
+        {parseFailed
+          ? "模型重试中…"
+          : errorStatus === null
+            ? `模型连接异常重试中${countText}…`
+            : `模型限流重试中${countText}…`}
+        {summary ? (
+          <span className="ml-1 text-muted-foreground/70">（{summary}）</span>
+        ) : null}
+      </span>
+    </div>
+  );
+});
+
 /* ────────────── 轮内用户消息段（ql-20260920-006 / 2026-09-18-single-chat-steering 修订） ────────────── */
 
 /**
@@ -1729,6 +1803,11 @@ export const SegmentView = memo(function SegmentView({ segment }: SegmentViewPro
       // ql-20260917-006：压缩过程状态行——compacting 实时提示 / failed 警示 /
       // success 静默（compact 摘要段已是完成标记）。
       return <CompactStatusRowView segment={segment} />;
+    case "model_retry":
+      // 2026-10-28-model-retry-visible：模型重试过程行——「模型限流重试中
+      // 第N/M次」实时提示（对话视图仅运行中轮挂载，timeline 过滤门控；
+      // 「全部」视图保留过程行）。
+      return <ModelRetryRowView segment={segment} />;
     case "preamble":
       // 2026-08-25-unified-floating-session task-11（FR-7）：上下文前导卡——
       // 「全部（进度）」视图显示首轮注入的【变更/页面上下文】【团队任务简报】
