@@ -343,7 +343,9 @@ Get-NetFirewallProfile | Select-Object Name,Enabled
 部署动作收尾前，必须写一份发布记录 md 到本仓库 `docs/releases/` 目录——
 这是 SillyHub 平台「发布记录」菜单（`/deploy-records`）的数据源，漏写 =
 平台上看不到本次部署。**部署失败的也写**（status: failed，正文写失败原因），
-失败留痕同样是部署历史的一部分。
+失败留痕同样是部署历史的一部分。推荐用生成器产出（seq/锚点/frontmatter 全自动、
+自带防漏指引）：`bash deploy/scripts/gen-release-record.sh --summary "<一句概括>"`；
+`--validate` 可校验既有记录（2026-10-28 seq49 漏闭合 `---` 致页面不可见的事故防线）。
 
 ### 步骤
 

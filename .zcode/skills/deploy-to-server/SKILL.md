@@ -166,6 +166,11 @@ ssh -i ~/.ssh/tencent_deploy ubuntu@124.222.127.242 '
 
 ### 1. 写记录 md（契约与 sillyhub-docker-deploy skill 的「发布记录」节完全一致）
 
+> ✅ **推荐用生成器**（2026-10-28-release-record-generator 起）：
+> `bash deploy/scripts/gen-release-record.sh --summary "<一句概括>"`
+> ——seq/锚点/文件名/frontmatter 成对标记全自动，产出即合规，输出末尾自带防漏指引；
+> `--validate` 可扫历史坏件。下方手工口径保留为备选（生成器不可用时）。
+
 取锚点：`commit_from` 取 `GET https://<域名>/api/deploy-records`（需登录 token）最近一条的
 `commit_to`（不可达则看本地 `docs/releases/` 最大日期记录）；**`seq` 一律取号器**
 `bash deploy/scripts/next-release-seq.sh`（全局最大 frontmatter seq + 1，2026-10-18 修
