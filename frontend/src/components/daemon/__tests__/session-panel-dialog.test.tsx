@@ -336,6 +336,46 @@ describe("SessionPanel（dialog）", () => {
     expect(sessionApi.streamSession.mock.calls[0]![1]).toEqual(expect.any(Object));
   });
 
+  // 2026-10-28-session-config-default-provider-fix：顶部「智能体模型」覆盖值随
+  // 首句上送——quick-e09c48e1 在 page 路径修过的同款漏转（model 只进展示不进
+  // 请求体，用户填了模型发送后静默丢失），dialog 路径补齐。
+  it("首句创建时携带「智能体模型」覆盖值（model prop 非空随 createSession 上送）", async () => {
+    const stream = makeStreamMock();
+    sessionApi.streamSession.mockImplementation(stream.factory);
+    sessionApi.createSession.mockResolvedValue({
+      session_id: "sess-1", run_id: "run-1", lease_id: "lease-1",
+      status: "active", stream_url: "/api/daemon/sessions/sess-1/stream",
+    });
+
+    setupPanel({ model: "glm-4.7" });
+    const input = screen.getByPlaceholderText(/输入首条消息创建会话.*\/ 唤起技能 · @ 关联变更/) as HTMLTextAreaElement;
+    fireEvent.change(input, { target: { value: "hello" } });
+    fireEvent.click(screen.getByTitle("发送"));
+
+    await waitFor(() => expect(sessionApi.createSession).toHaveBeenCalledTimes(1));
+    expect(sessionApi.createSession).toHaveBeenCalledWith(
+      expect.objectContaining({ provider: "claude", prompt: "hello", model: "glm-4.7" }),
+    );
+  });
+
+  it("model prop 为 null → createSession 载荷不带 model 键（空值零回归）", async () => {
+    const stream = makeStreamMock();
+    sessionApi.streamSession.mockImplementation(stream.factory);
+    sessionApi.createSession.mockResolvedValue({
+      session_id: "sess-1", run_id: "run-1", lease_id: "lease-1",
+      status: "active", stream_url: "/api/daemon/sessions/sess-1/stream",
+    });
+
+    setupPanel({ model: null });
+    const input = screen.getByPlaceholderText(/输入首条消息创建会话.*\/ 唤起技能 · @ 关联变更/) as HTMLTextAreaElement;
+    fireEvent.change(input, { target: { value: "hello" } });
+    fireEvent.click(screen.getByTitle("发送"));
+
+    await waitFor(() => expect(sessionApi.createSession).toHaveBeenCalledTimes(1));
+    const payload = sessionApi.createSession.mock.calls[0]![0] as Record<string, unknown>;
+    expect(payload).not.toHaveProperty("model");
+  });
+
   it("AC-11-02 turn_started/log/turn_completed 渲染，turn_completed 不 close SSE", async () => {
     const stream = makeStreamMock();
     sessionApi.streamSession.mockImplementation(stream.factory);

@@ -1622,6 +1622,13 @@ export function SessionPanelDialog(props: SessionPanelProps) {
           prompt: prompt,
           manual_approval: true,
           ask_user_only: true,
+          // 2026-10-28-session-config-default-provider-fix：顶部「智能体模型」覆盖值
+          // 随首句上送——quick-e09c48e1 在 page 路径修过的「UI 有值但 body 组装漏
+          // 转发」同款缺陷在 dialog 路径存在（model prop 此前只进展示、从未进请求
+          // 体，用户填了模型发送后静默丢失）。有值才带，null/空零回归；模型可独立
+          // 于 llm_provider_id（create 无 inject 的 model_requires_provider 守卫，
+          // 后端默认供应商链以会话所选覆盖主模型派生）。
+          ...(model ? { model } : {}),
           ...(createChangeId ? { change_id: createChangeId } : {}),
           ...(workspaceId ? { workspace_id: workspaceId } : {}),
           // task-05（FR-05）：@ 快速修复选中随首句上送 quicklog_id（对齐 page
@@ -1692,7 +1699,7 @@ export function SessionPanelDialog(props: SessionPanelProps) {
       // FR-02：追问失败（网络/后端拒绝）→ 原文回填可原地重试。
       restoreRejectedSend(rawPrompt);
     }
-  }, [input, hasOnlineProvider, offlineReadOnly, view.status, view.suspended, view.sessionId, view.currentRunId, isQueueFull, notify, provider, changeId, workspaceId, pendingMentions, establishStream, onSessionCreated, sendToServerQueue, submitFollowup, openTeamPopover, pendingAttachments, attTokenMap, wsRefTokens, teamMissions, clearInputAccepted, restoreRejectedSend]);
+  }, [input, hasOnlineProvider, offlineReadOnly, view.status, view.suspended, view.sessionId, view.currentRunId, isQueueFull, notify, provider, model, changeId, workspaceId, pendingMentions, establishStream, onSessionCreated, sendToServerQueue, submitFollowup, openTeamPopover, pendingAttachments, attTokenMap, wsRefTokens, teamMissions, clearInputAccepted, restoreRejectedSend]);
 
   // 失败轮次「重新发送」——复用 submitFollowup 重新提交该 turn 的 prompt。受
   // turn 级串行 / active / 在线守卫；ql-20260904-010 起 RunErrorItem 对所有失败

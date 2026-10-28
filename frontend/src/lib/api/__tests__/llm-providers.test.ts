@@ -337,4 +337,17 @@ describe("noProviderLabel — 兜底文案按用户默认供应商动态化", ()
     expect(noProviderLabel([])).toBe("不指定（本机默认）");
     expect(noProviderLabel(null)).toBe("不指定（本机默认）");
   });
+
+  // 2026-10-28-session-config-default-provider-fix：engine 参数——默认供应商仅
+  // 在 agent_kinds 覆盖该引擎时进文案（与 claim 默认链过滤同口径）。
+  it("engine 参数：默认供应商覆盖引擎 → 其名；不覆盖（跨引擎默认）→ 「不指定（本机默认）」", () => {
+    const providers = [
+      { id: "b", name: "GLM 平台", is_default: true, agent_kinds: ["claude", "codex"] },
+    ] as unknown as Parameters<typeof noProviderLabel>[0];
+    expect(noProviderLabel(providers, "claude")).toBe("不指定（默认：GLM 平台）");
+    // pi 会话不被注入 claude/codex 默认 → 文案退本机默认（防误示）。
+    expect(noProviderLabel(providers, "pi")).toBe("不指定（本机默认）");
+    // 缺省 engine（旧调用面）不过滤引擎，行为不变。
+    expect(noProviderLabel(providers)).toBe("不指定（默认：GLM 平台）");
+  });
 });

@@ -1753,6 +1753,103 @@ describe("SessionConfigBar 不指定兜底文案（provider-default-ui-hint）",
   });
 });
 
+// ── 2026-10-28-session-config-default-provider-fix：默认供应商引擎匹配 ──────
+
+describe("SessionConfigBar 默认供应商引擎匹配（session-config-default-provider-fix）", () => {
+  it("pi 会话 + 默认供应商不覆盖 pi（agent_kinds=[claude,codex]）→ 按钮显示「本机默认」，不误示该供应商名", async () => {
+    mocks.listProviders.mockReset().mockResolvedValue([
+      {
+        id: "prov-glm",
+        name: "GLM 平台",
+        models: [{ name: "glm-4.7" }],
+        agent_kinds: ["claude", "codex"],
+        is_default: true,
+      },
+    ]);
+    renderBar({
+      engine: "pi",
+      configSnapshot: { machine_name: "m", agent_name: "PI", engine: "pi" },
+    });
+    expect(
+      await screen.findByRole("button", { name: "配置-供应商 本机默认" }),
+    ).toBeInTheDocument();
+    openCtrl("配置-供应商");
+    // 兜底文案同样不跨引擎——claim 默认链不会把 claude/codex 默认注入 pi 会话。
+    expect(screen.getByText("不指定（本机默认）")).toBeInTheDocument();
+  });
+
+  it("pi 会话 + 默认供应商覆盖 pi（agent_kinds 含 pi）→ 按钮显示该供应商名 + 模型下拉渲染且候选跟随", async () => {
+    mocks.listProviders.mockReset().mockResolvedValue([
+      {
+        id: "prov-glm",
+        name: "GLM 平台",
+        models: [
+          { name: "glm-4.7", roles: ["sonnet"] },
+          { name: "glm-4.6", roles: [] },
+        ],
+        agent_kinds: ["pi"],
+        is_default: true,
+      },
+    ]);
+    renderBar({
+      engine: "pi",
+      configSnapshot: { machine_name: "m", agent_name: "PI", engine: "pi" },
+    });
+    expect(
+      await screen.findByRole("button", { name: "配置-供应商 GLM 平台" }),
+    ).toBeInTheDocument();
+    // 模型下拉随显示层回退渲染（即将注入的默认供应商），候选=其模型列表。
+    const select = (await screen.findByRole("combobox", {
+      name: "配置-模型",
+    })) as HTMLSelectElement;
+    const values = Array.from(select.options).map((o) => o.value);
+    expect(values).toEqual(["", "glm-4.7", "glm-4.6"]);
+    expect(select.value).toBe("");
+  });
+
+  it("claude 会话未显式选供应商 + 引擎匹配默认存在 → 模型下拉渲染，「不指定」项保持当前高亮（显示层回退不改选择语义）", async () => {
+    mocks.listProviders.mockReset().mockResolvedValue([
+      {
+        id: "prov-glm",
+        name: "GLM 平台",
+        models: [{ name: "glm-4.7" }],
+        agent_kinds: ["claude"],
+        is_default: true,
+      },
+    ]);
+    renderBar({ llmProviderId: null });
+    expect(
+      await screen.findByRole("combobox", { name: "配置-模型" }),
+    ).toBeInTheDocument();
+    openCtrl("配置-供应商");
+    // 未显式选择 → 「不指定（默认：…）」项仍是当前项（✓ 高亮）。
+    const noItem = await screen.findByRole("button", {
+      name: "选择 不指定（默认：GLM 平台）",
+    });
+    expect(noItem.textContent).toContain("✓");
+  });
+
+  it("provisional（预会话）未选供应商 + 引擎匹配默认存在 → 模型下拉渲染，候选跟随默认供应商（此前「显示将用默认却不给选模型」）", async () => {
+    mocks.listProviders.mockReset().mockResolvedValue([
+      {
+        id: "prov-glm",
+        name: "GLM 平台",
+        models: [{ name: "glm-4.7" }],
+        agent_kinds: ["claude"],
+        is_default: true,
+      },
+    ]);
+    renderBar({ provisional: true, engine: "claude" });
+    const select = (await screen.findByRole("combobox", {
+      name: "配置-模型",
+    })) as HTMLSelectElement;
+    expect(Array.from(select.options).map((o) => o.value)).toEqual([
+      "",
+      "glm-4.7",
+    ]);
+  });
+});
+
 // ── 2026-10-21-profile-default-prehint：预会话档案显示对齐默认 ───────────────
 
 describe("SessionConfigBar 档案默认预示（profile-default-prehint）", () => {

@@ -487,10 +487,17 @@ export function SessionConfigBar({
     staleTime: 30_000,
   });
   const providers = useMemo(() => providersQ.data ?? [], [providersQ.data]);
+  // 引擎解析上移（2026-10-28-session-config-default-provider-fix）：默认供应商的
+  // 引擎匹配派生（engineDefaultProvider / 兜底文案）需要先于原声明点（原在
+  // providerLocked 前定义）拿到 effectiveEngine——纯派生表达式，上移零行为漂移。
+  const effectiveEngine = engine ?? configSnapshot?.engine ?? null;
   // 2026-10-21-provider-default-ui-hint：兜底项文案按用户默认供应商动态化。
+  // 2026-10-28-session-config-default-provider-fix：默认供应商按引擎（agent_kinds）
+  // 匹配——不覆盖当前引擎的默认行不再进兜底文案（pi 会话显示 claude-only 默认名
+  // 误导），无引擎匹配默认退「不指定（本机默认）」（与 claim 默认链过滤同口径）。
   const noProviderFallbackLabel = useMemo(
-    () => noProviderLabel(providers),
-    [providers],
+    () => noProviderLabel(providers, effectiveEngine),
+    [providers, effectiveEngine],
   );
   // 2026-10-21-profile-default-prehint：档案兜底项——provisional 且有默认时
   // 实际效果是「创建时用默认档案」；运行中切不指定=本会话无人格（保持原文案）。
@@ -531,7 +538,6 @@ export function SessionConfigBar({
     };
   }, [openKind]);
 
-  const effectiveEngine = engine ?? configSnapshot?.engine ?? null;
   // ql-20260917-008：running 不再锁切换——canSwitch 仅排除 ended/failed；
   // 运行中点选即受理（后端忙轮排队/覆盖合并，本轮结束后生效），提示行见底部。
   const canSwitch = !ended;
@@ -557,15 +563,36 @@ export function SessionConfigBar({
   // ── task-10（FR-03-2/5 / D-002@v1）：供应商+模型级联 ──────────────────────
 
   /**
+   * 引擎匹配的用户默认供应商行（2026-10-28-session-config-default-provider-fix）：
+   * is_default 且 agent_kinds 含当前引擎；引擎未定（null，悬浮助手形态创建时才
+   * 定）不过滤（与 providerCandidates 过滤口径互补）。无命中 null。后端 claim
+   * 默认注入同口径（lease/context.py：agent_kind ∈ agent_kinds 命中才构造
+   * config），此派生保证界面展示的「默认」与后端实际注入是同一家。
+   */
+  const engineDefaultProvider = useMemo(
+    () =>
+      providers.find(
+        (p) =>
+          p.is_default &&
+          (effectiveEngine == null || p.agent_kinds.includes(effectiveEngine)),
+      ) ?? null,
+    [providers, effectiveEngine],
+  );
+
+  /**
    * 显示层供应商 id（2026-10-26-config-staged-all-states FR-02）：暂存供应商
    * 优先——模型子下拉的显示条件与候选列表必须跟随暂存值（会话真值在发送前
    * 不变，直接用真值会让「暂存供应商后模型框不出现/候选不跟随」）；取消暂存
    * （staged 键删除）自然回退真值。provisional 不受影响（无 staged）。
+   * 2026-10-28-session-config-default-provider-fix：真值未显式选择（null）时回退
+   * 「引擎匹配的默认供应商」——控件显示即将实际注入的默认供应商、模型子下拉
+   * 随之渲染且候选跟随；仅显示层回退，显式选择/暂存与请求载荷不变（创建/发送
+   * 仍不带 llm_provider_id，后端默认链注入同一家）。
    */
   const displayProviderId =
     staged?.llm_provider_id !== undefined
       ? staged.llm_provider_id
-      : llmProviderId;
+      : (llmProviderId ?? engineDefaultProvider?.id ?? null);
 
   /** 当前选中供应商行（「不指定」/列表未含该 id → null，模型子下拉随之隐藏）。 */
   const selectedProvider = useMemo(
@@ -829,9 +856,11 @@ export function SessionConfigBar({
         ? providers.find((p) => p.id === llmProviderId)?.name ??
           configSnapshot?.provider_name ??
           llmProviderId
-        : // 未显式选 → 用户默认供应商名（claim 链实际注入它）；无默认回落本机默认
-          //（2026-10-21-provider-default-ui-hint，与下拉兜底项同源）。
-          providers.find((p) => p.is_default)?.name ?? "本机默认";
+        : // 未显式选 → 引擎匹配的用户默认供应商名（claim 链实际注入它）；无引擎
+          // 匹配默认回落本机默认（2026-10-21-provider-default-ui-hint 起显示默认
+          // 供应商名，2026-10-28-session-config-default-provider-fix 补引擎过滤——
+          // 跨引擎默认行不显示，防 pi 会话误示 claude/codex 默认供应商）。
+          engineDefaultProvider?.name ?? "本机默认";
 
   /** ql-20260817-010：点选即**静默**切换——prompt 发空串（后端静默切换契约：
    * 有切换字段允许空 prompt；daemon 收到空 prompt 只 reload 配置不喂消息，

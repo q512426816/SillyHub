@@ -202,11 +202,18 @@ export const NO_PROVIDER_FALLBACK_LABEL = "不指定（本机默认）";
  * 供应商下拉「不指定」兜底项文案（2026-10-21-provider-default-ui-hint）：
  * 用户设了默认供应商 → 「不指定（默认：{name}）」（claim 链会注入它）；
  * 未设 / 列表未到位 → 现状「不指定（本机默认）」。单源收敛防四处文案漂移。
+ *
+ * 2026-10-28-session-config-default-provider-fix：可选 engine 参数——默认供应商
+ * 仅在 agent_kinds 覆盖该引擎时才进文案（claim 默认链同口径：pi 会话不会被注入
+ * claude-only 默认行，文案不能先误导）；缺省不过滤引擎（旧调用面零回归）。
  */
 export function noProviderLabel(
   providers: LlmProviderRead[] | null | undefined,
+  engine?: string | null,
 ): string {
-  const def = (providers ?? []).find((p) => p.is_default);
+  const def = (providers ?? []).find(
+    (p) => p.is_default && (engine == null || p.agent_kinds.includes(engine)),
+  );
   return def ? `不指定（默认：${def.name}）` : NO_PROVIDER_FALLBACK_LABEL;
 }
 
