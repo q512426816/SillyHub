@@ -1,0 +1,129 @@
+{
+  "change": "2026-10-28-session-config-default-provider-fix",
+  "baseline": "56c1f37d8202bd2a488933c831094e88472c9ceb",
+  "head": "04d4ae8d7a510ebb8293790905b49dcce63d4fb3",
+  "files": [
+    ".sillyspec/docs/multi-agent-platform/modules/deploy.md",
+    "deploy/scripts/gen-release-record.sh",
+    "frontend/src/components/daemon/__tests__/session-panel-dialog.test.tsx",
+    "frontend/src/components/daemon/session-panel/session-panel-dialog.tsx",
+    "frontend/src/components/sessions/__tests__/session-config-bar.test.tsx",
+    "frontend/src/components/sessions/session-config-bar.tsx",
+    "frontend/src/lib/api/__tests__/llm-providers.test.ts",
+    "frontend/src/lib/api/llm-providers.ts"
+  ],
+  "totals": {
+    "files": 8,
+    "additions": 213,
+    "deletions": 12
+  },
+  "savedAt": "2026-10-28T03:33:32.129Z",
+  "note": "flow done 时点冻结（本变更可归属交付面：baseline..HEAD 提交面过滤 .sillyspec/ 只留 .sillyspec/docs/ 交付文档 + 独占树未提交交付；治理工件目录不入冻结——2026-10-12-close-trace-freeze-integrity FR-01）",
+  "modules": [
+    {
+      "id": "frontend",
+      "files": 6,
+      "doc": "docs/multi-agent-platform/modules/frontend.md",
+      "docTouched": false,
+      "docMissing": false
+    },
+    {
+      "id": "deploy",
+      "files": 1,
+      "doc": "docs/multi-agent-platform/modules/deploy.md",
+      "docTouched": true,
+      "docMissing": false
+    },
+    {
+      "id": "frontend_components",
+      "files": 4,
+      "doc": "docs/SillyHub/modules/frontend_components.md",
+      "docTouched": false,
+      "docMissing": false
+    },
+    {
+      "id": "frontend_lib",
+      "files": 2,
+      "doc": "docs/SillyHub/modules/frontend_lib.md",
+      "docTouched": false,
+      "docMissing": false
+    }
+  ],
+  "uncoveredDirs": [],
+  "moduleMaps": [
+    "docs/backend/modules/_module-map.yaml",
+    "docs/frontend/modules/_module-map.yaml",
+    "docs/multi-agent-platform/modules/_module-map.yaml",
+    "docs/SillyHub/modules/_module-map.yaml",
+    "docs/sillyhub-daemon/modules/_module-map.yaml"
+  ],
+  "acceptedDirtyGap": 1,
+  "scopeAudit": {
+    "mode": "full-flow",
+    "ok": true,
+    "degradedReason": null,
+    "baseAnchor": "56c1f37d8202bd2a488933c831094e88472c9ceb",
+    "totals": {
+      "files": 8,
+      "additions": 213,
+      "deletions": 12
+    },
+    "rows": [
+      {
+        "path": ".sillyspec/docs/multi-agent-platform/modules/deploy.md",
+        "additions": 1,
+        "deletions": 0,
+        "kind": "modified"
+      },
+      {
+        "path": "deploy/scripts/gen-release-record.sh",
+        "additions": 10,
+        "deletions": 3,
+        "kind": "modified"
+      },
+      {
+        "path": "frontend/src/components/daemon/__tests__/session-panel-dialog.test.tsx",
+        "additions": 40,
+        "deletions": 0,
+        "kind": "modified"
+      },
+      {
+        "path": "frontend/src/components/daemon/session-panel/session-panel-dialog.tsx",
+        "additions": 8,
+        "deletions": 1,
+        "kind": "modified"
+      },
+      {
+        "path": "frontend/src/components/sessions/__tests__/session-config-bar.test.tsx",
+        "additions": 97,
+        "deletions": 0,
+        "kind": "modified"
+      },
+      {
+        "path": "frontend/src/components/sessions/session-config-bar.tsx",
+        "additions": 36,
+        "deletions": 7,
+        "kind": "modified"
+      },
+      {
+        "path": "frontend/src/lib/api/__tests__/llm-providers.test.ts",
+        "additions": 13,
+        "deletions": 0,
+        "kind": "modified"
+      },
+      {
+        "path": "frontend/src/lib/api/llm-providers.ts",
+        "additions": 8,
+        "deletions": 1,
+        "kind": "modified"
+      }
+    ],
+    "excluded": {
+      "foreignDeclared": []
+    },
+    "note": "flow done 时点冻结（本文件落盘时采集）",
+    "closedBy": "flow done"
+  },
+  "patchSha256": "7a864a1d658dced317c5cb5992c1e4d901543f633c9ed6f24c89b3f8129c7d93",
+  "patchStatus": "ok"
+}

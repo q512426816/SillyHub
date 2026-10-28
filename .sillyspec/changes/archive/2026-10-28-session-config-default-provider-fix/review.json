@@ -1,0 +1,24 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-28-session-config-default-provider-fix",
+  "reviewer": "inline-self（环境无已注册子代理，主会话代行）",
+  "verdict": "PASS",
+  "reviewedAgainst": "04d4ae8d7a510ebb8293790905b49dcce63d4fb3",
+  "findings": [
+    {
+      "severity": "P3",
+      "status": "accepted",
+      "title": "冻结面混入并行变更文件（deploy.md / gen-release-record.sh）",
+      "evidence": "change-patch.json 的 files 含 baseline..HEAD 区间内并行会话提交（3ed6a5788/761e19ae9，release-record-generator 已归档变更）touch 的两个文件；冻结算法取区间提交面未按变更归属过滤，共享主仓并行竞态的已知局限",
+      "location": ".sillyspec/changes/2026-10-28-session-config-default-provider-fix/change-patch.json:files"
+    }
+  ],
+  "dimensionNotes": {
+    "乱序": "ok",
+    "并发": "ok",
+    "切换": "ok",
+    "作用域": "ok"
+  },
+  "reviewNotes": "逐条核对：①FR-01 engineDefaultProvider 过滤口径与后端 claim 链（lease/context.py agent_kind∈agent_kinds）一致，noProviderLabel 加可选 engine 且缺省不过滤（群聊三处调用面 grep 验证零回归）；②FR-02 displayProviderId 回退仅进 selectedProvider（模型下拉渲染/候选），grep 确认不进 executeSwitch/onProvisionalSwitch 任何请求载荷，providerLabel 分支判定仍用真值 llmProviderId；③FR-03 dialog createSession 条件展开 model（空值零回归）+ useCallback 依赖数组补 model；④FR-04 测试以 ledger 回执（gate_summary test passed 12.1s 变更面）+ 亲测 173 passed / eslint 0 error 为基线，未整体重跑（复跑口径）；⑤FR-05 queue-dispatch-audit.md 落档，本变更 patch 交付面无 backend/daemon 文件（deploy.md/gen-release-record.sh 为并行提交污染，见 finding）。生成物同步：无后端 schema 改动，gen:types 无义务（前后端类型面均未触碰）。声明边界裁决：design 盲维四问均已答且可接受（loading 缺省退本机默认非新态/纯前端派生无并发写面/回退不进载荷/按面板 engine 派生不串台）。",
+  "reviewedAt": "2026-10-28T03:36:30.000Z"
+}

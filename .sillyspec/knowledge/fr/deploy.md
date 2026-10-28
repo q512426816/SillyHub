@@ -71,3 +71,74 @@ created_at: 2026-10-15T08:08:39.731Z
 - 场景：主路径 — Given agent 复制 skill 的打包命令；When 执行该命令；Then 前端 build-arg 必须指向 crrcdt.ppdmq.top（而非失效的 192.168.0.143）
 全文：.sillyspec/changes/archive/2026-10-16-deploy-convergence-guard/requirements.md#FR-03
 最近确认：d581d40b43ea8078957e915ff68709fb9f082b94
+
+## FR-deploy-004 pi 会话/预会话下供应商控件显示按引擎（agent_kinds）过滤后的默认供应商名，无引擎匹配默认时显示「本机默认」而非 claude/codex 供应商名
+变更：2026-10-28-session-config-default-provider-fix
+状态：active
+摘要：主路径
+全文：.sillyspec/changes/archive/2026-10-28-session-config-default-provider-fix/requirements.md#FR-01
+最近确认：04d4ae8d7a510ebb8293790905b49dcce63d4fb3
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-28-session-config-default-provider-fix:flow:测试绑定FR-01
+  tests: frontend/src/lib/api/__tests__/llm-providers.test.ts「engine 参数：默认供应商覆盖引擎 → 其名；不覆盖（跨引擎默认）→ 『不指定（本机默认）』」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-28-session-config-default-provider-fix
+  status: active
+
+## FR-deploy-005 未显式选供应商但存在引擎匹配的默认供应商时模型下拉渲染且候选跟随该供应商模型列表，显式选择行为与请求载荷不变（不新增 llm_provider_id 上送）
+变更：2026-10-28-session-config-default-provider-fix
+状态：active
+摘要：主路径
+全文：.sillyspec/changes/archive/2026-10-28-session-config-default-provider-fix/requirements.md#FR-02
+最近确认：04d4ae8d7a510ebb8293790905b49dcce63d4fb3
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-28-session-config-default-provider-fix:flow:测试绑定FR-02
+  tests: frontend/src/components/sessions/__tests__/session-config-bar.test.tsx「claude 会话未显式选供应商 + 引擎匹配默认存在 → 模型下拉渲染，『不指定』项保持当前高亮（显示层回退不改选择语义）」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-28-session-config-default-provider-fix
+  status: active
+
+## FR-deploy-006 工作区弹窗（dialog 模式）新建会话首句携带用户填写的模型值（有值才带，空值零回归）
+变更：2026-10-28-session-config-default-provider-fix
+状态：active
+摘要：主路径
+全文：.sillyspec/changes/archive/2026-10-28-session-config-default-provider-fix/requirements.md#FR-03
+最近确认：04d4ae8d7a510ebb8293790905b49dcce63d4fb3
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-28-session-config-default-provider-fix:flow:测试绑定FR-03
+  tests: frontend/src/components/daemon/__tests__/session-panel-dialog.test.tsx「model prop 为 null → createSession 载荷不带 model 键（空值零回归）」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-28-session-config-default-provider-fix
+  status: active
+
+## FR-deploy-007 session-config-bar 与 session-panel-dialog 相关既有测试不回归，新增用例覆盖上述三点
+变更：2026-10-28-session-config-default-provider-fix
+状态：active
+摘要：主路径
+全文：.sillyspec/changes/archive/2026-10-28-session-config-default-provider-fix/requirements.md#FR-04
+最近确认：04d4ae8d7a510ebb8293790905b49dcce63d4fb3
+
+## FR-deploy-008 排队派发链路核查：运行中暂存配置随排队消息派发时生效（reloadWithConfig 先重载后喂消息），与用户期望「agent 接收到新消息时切换」一致，结论落档不改动切换时序
+变更：2026-10-28-session-config-default-provider-fix
+状态：active
+摘要：主路径
+全文：.sillyspec/changes/archive/2026-10-28-session-config-default-provider-fix/requirements.md#FR-05
+最近确认：04d4ae8d7a510ebb8293790905b49dcce63d4fb3

@@ -1,0 +1,111 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-28-session-config-default-provider-fix",
+  "rows": [
+    {
+      "anchor": "FR-01",
+      "row_id": "2026-10-28-session-config-default-provider-fix:flow:测试绑定FR-01",
+      "tests": [
+        "frontend/src/components/sessions/__tests__/session-config-bar.test.tsx「pi 会话 + 默认供应商不覆盖 pi（agent_kinds=[claude,codex]）→ 按钮显示『本机默认』，不误示该供应商名」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-28-session-config-default-provider-fix"
+    },
+    {
+      "anchor": "FR-01",
+      "row_id": "2026-10-28-session-config-default-provider-fix:flow:测试绑定FR-01",
+      "tests": [
+        "frontend/src/lib/api/__tests__/llm-providers.test.ts「engine 参数：默认供应商覆盖引擎 → 其名；不覆盖（跨引擎默认）→ 『不指定（本机默认）』」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-28-session-config-default-provider-fix"
+    },
+    {
+      "anchor": "FR-02",
+      "row_id": "2026-10-28-session-config-default-provider-fix:flow:测试绑定FR-02",
+      "tests": [
+        "frontend/src/components/sessions/__tests__/session-config-bar.test.tsx「pi 会话 + 默认供应商覆盖 pi（agent_kinds 含 pi）→ 按钮显示该供应商名 + 模型下拉渲染且候选跟随」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-28-session-config-default-provider-fix"
+    },
+    {
+      "anchor": "FR-02",
+      "row_id": "2026-10-28-session-config-default-provider-fix:flow:测试绑定FR-02",
+      "tests": [
+        "frontend/src/components/sessions/__tests__/session-config-bar.test.tsx「provisional（预会话）未选供应商 + 引擎匹配默认存在 → 模型下拉渲染，候选跟随默认供应商」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-28-session-config-default-provider-fix"
+    },
+    {
+      "anchor": "FR-02",
+      "row_id": "2026-10-28-session-config-default-provider-fix:flow:测试绑定FR-02",
+      "tests": [
+        "frontend/src/components/sessions/__tests__/session-config-bar.test.tsx「claude 会话未显式选供应商 + 引擎匹配默认存在 → 模型下拉渲染，『不指定』项保持当前高亮（显示层回退不改选择语义）」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-28-session-config-default-provider-fix"
+    },
+    {
+      "anchor": "FR-03",
+      "row_id": "2026-10-28-session-config-default-provider-fix:flow:测试绑定FR-03",
+      "tests": [
+        "frontend/src/components/daemon/__tests__/session-panel-dialog.test.tsx「首句创建时携带『智能体模型』覆盖值（model prop 非空随 createSession 上送）」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-28-session-config-default-provider-fix"
+    },
+    {
+      "anchor": "FR-03",
+      "row_id": "2026-10-28-session-config-default-provider-fix:flow:测试绑定FR-03",
+      "tests": [
+        "frontend/src/components/daemon/__tests__/session-panel-dialog.test.tsx「model prop 为 null → createSession 载荷不带 model 键（空值零回归）」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-28-session-config-default-provider-fix"
+    }
+  ]
+}

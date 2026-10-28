@@ -1,0 +1,357 @@
+diff --git a/.sillyspec/docs/multi-agent-platform/modules/deploy.md b/.sillyspec/docs/multi-agent-platform/modules/deploy.md
+index d6a1abca1..833c91372 100644
+--- a/.sillyspec/docs/multi-agent-platform/modules/deploy.md
++++ b/.sillyspec/docs/multi-agent-platform/modules/deploy.md
+@@ -65,3 +65,4 @@ multi-agent-platform 的一体化部署编排组件，用 Docker Compose 把 bac
+ - 2026-10-22-session-trajectory-third-view | 把会话轨迹从「进度」视图内的第二层呈现开关上移为与「对话 / 进度」并列的第三个顶层视图，同时修复轨…
+ - 2026-10-22-agent-profiles-page-restyle | 智能体档案列表页重设计
+ - 2026-10-24-backend-mem-limit-raise | 提升 backend 容器内存限额防 OOM
++- 2026-10-28-release-record-generator | 发布记录生成器脚本取号锚点与校验
+diff --git a/deploy/scripts/gen-release-record.sh b/deploy/scripts/gen-release-record.sh
+index dfd3f10a5..ced03c75f 100644
+--- a/deploy/scripts/gen-release-record.sh
++++ b/deploy/scripts/gen-release-record.sh
+@@ -118,7 +118,15 @@ while IFS='|' read -r sha author msg; do
+   msg_escaped="$(printf '%s' "$msg" | sed -e 's/\\/\\\\/g' -e 's/"/\\"/g')"
+   COMMITS_BLOCK+="  - sha: ${sha}"$'\n'"    message: \"${msg_escaped}\""$'\n'"    author: ${author}"$'\n'
+ done < <(git log $RANGE --pretty=format:'%h|%an|%s' 2>/dev/null || true)
+-[ -n "$COMMITS_BLOCK" ] || COMMITS_BLOCK="[]"$'\n'
++# 空 commits 区间（如锚点==HEAD 的同 commit 重部署）必须写行内流序列
++# `commits: []`——`commits:\n[]` 顶格 [] 是非法 YAML 块值，平台解析判 invalid
++# （2026-10-28 评审 P2 实证）。
++if [ -n "$COMMITS_BLOCK" ]; then
++  COMMITS_SECTION="commits:
++${COMMITS_BLOCK}"
++else
++  COMMITS_SECTION="commits: []"
++fi
+ 
+ SUMMARY_ESCAPED="$(printf '%s' "$SUMMARY" | sed -e 's/\\/\\\\/g' -e 's/"/\\"/g')"
+ 
+@@ -130,8 +138,7 @@ commit_from: ${ANCHOR}
+ commit_to: ${HEAD_SHA}
+ summary: \"${SUMMARY_ESCAPED}\"
+ agent: ${AGENT}
+-commits:
+-${COMMITS_BLOCK}
++${COMMITS_SECTION}
+ ---
+ 
+ ## 🆕 新增
+diff --git a/frontend/src/components/daemon/__tests__/session-panel-dialog.test.tsx b/frontend/src/components/daemon/__tests__/session-panel-dialog.test.tsx
+index a27cc2106..6f3e0e9a8 100644
+--- a/frontend/src/components/daemon/__tests__/session-panel-dialog.test.tsx
++++ b/frontend/src/components/daemon/__tests__/session-panel-dialog.test.tsx
+@@ -336,6 +336,46 @@ describe("SessionPanel（dialog）", () => {
+     expect(sessionApi.streamSession.mock.calls[0]![1]).toEqual(expect.any(Object));
+   });
+ 
++  // 2026-10-28-session-config-default-provider-fix：顶部「智能体模型」覆盖值随
++  // 首句上送——quick-e09c48e1 在 page 路径修过的同款漏转（model 只进展示不进
++  // 请求体，用户填了模型发送后静默丢失），dialog 路径补齐。
++  it("首句创建时携带「智能体模型」覆盖值（model prop 非空随 createSession 上送）", async () => {
++    const stream = makeStreamMock();
++    sessionApi.streamSession.mockImplementation(stream.factory);
++    sessionApi.createSession.mockResolvedValue({
++      session_id: "sess-1", run_id: "run-1", lease_id: "lease-1",
++      status: "active", stream_url: "/api/daemon/sessions/sess-1/stream",
++    });
++
++    setupPanel({ model: "glm-4.7" });
++    const input = screen.getByPlaceholderText(/输入首条消息创建会话.*\/ 唤起技能 · @ 关联变更/) as HTMLTextAreaElement;
++    fireEvent.change(input, { target: { value: "hello" } });
++    fireEvent.click(screen.getByTitle("发送"));
++
++    await waitFor(() => expect(sessionApi.createSession).toHaveBeenCalledTimes(1));
++    expect(sessionApi.createSession).toHaveBeenCalledWith(
++      expect.objectContaining({ provider: "claude", prompt: "hello", model: "glm-4.7" }),
++    );
++  });
++
++  it("model prop 为 null → createSession 载荷不带 model 键（空值零回归）", async () => {
++    const stream = makeStreamMock();
++    sessionApi.streamSession.mockImplementation(stream.factory);
++    sessionApi.createSession.mockResolvedValue({
++      session_id: "sess-1", run_id: "run-1", lease_id: "lease-1",
++      status: "active", stream_url: "/api/daemon/sessions/sess-1/stream",
++    });
++
++    setupPanel({ model: null });
++    const input = screen.getByPlaceholderText(/输入首条消息创建会话.*\/ 唤起技能 · @ 关联变更/) as HTMLTextAreaElement;
++    fireEvent.change(input, { target: { value: "hello" } });
++    fireEvent.click(screen.getByTitle("发送"));
++
++    await waitFor(() => expect(sessionApi.createSession).toHaveBeenCalledTimes(1));
++    const payload = sessionApi.createSession.mock.calls[0]![0] as Record<string, unknown>;
++    expect(payload).not.toHaveProperty("model");
++  });
++
+   it("AC-11-02 turn_started/log/turn_completed 渲染，turn_completed 不 close SSE", async () => {
+     const stream = makeStreamMock();
+     sessionApi.streamSession.mockImplementation(stream.factory);
+diff --git a/frontend/src/components/daemon/session-panel/session-panel-dialog.tsx b/frontend/src/components/daemon/session-panel/session-panel-dialog.tsx
+index 01f5e1900..98e256109 100644
+--- a/frontend/src/components/daemon/session-panel/session-panel-dialog.tsx
++++ b/frontend/src/components/daemon/session-panel/session-panel-dialog.tsx
+@@ -1622,6 +1622,13 @@ export function SessionPanelDialog(props: SessionPanelProps) {
+           prompt: prompt,
+           manual_approval: true,
+           ask_user_only: true,
++          // 2026-10-28-session-config-default-provider-fix：顶部「智能体模型」覆盖值
++          // 随首句上送——quick-e09c48e1 在 page 路径修过的「UI 有值但 body 组装漏
++          // 转发」同款缺陷在 dialog 路径存在（model prop 此前只进展示、从未进请求
++          // 体，用户填了模型发送后静默丢失）。有值才带，null/空零回归；模型可独立
++          // 于 llm_provider_id（create 无 inject 的 model_requires_provider 守卫，
++          // 后端默认供应商链以会话所选覆盖主模型派生）。
++          ...(model ? { model } : {}),
+           ...(createChangeId ? { change_id: createChangeId } : {}),
+           ...(workspaceId ? { workspace_id: workspaceId } : {}),
+           // task-05（FR-05）：@ 快速修复选中随首句上送 quicklog_id（对齐 page
+@@ -1692,7 +1699,7 @@ export function SessionPanelDialog(props: SessionPanelProps) {
+       // FR-02：追问失败（网络/后端拒绝）→ 原文回填可原地重试。
+       restoreRejectedSend(rawPrompt);
+     }
+-  }, [input, hasOnlineProvider, offlineReadOnly, view.status, view.suspended, view.sessionId, view.currentRunId, isQueueFull, notify, provider, changeId, workspaceId, pendingMentions, establishStream, onSessionCreated, sendToServerQueue, submitFollowup, openTeamPopover, pendingAttachments, attTokenMap, wsRefTokens, teamMissions, clearInputAccepted, restoreRejectedSend]);
++  }, [input, hasOnlineProvider, offlineReadOnly, view.status, view.suspended, view.sessionId, view.currentRunId, isQueueFull, notify, provider, model, changeId, workspaceId, pendingMentions, establishStream, onSessionCreated, sendToServerQueue, submitFollowup, openTeamPopover, pendingAttachments, attTokenMap, wsRefTokens, teamMissions, clearInputAccepted, restoreRejectedSend]);
+ 
+   // 失败轮次「重新发送」——复用 submitFollowup 重新提交该 turn 的 prompt。受
+   // turn 级串行 / active / 在线守卫；ql-20260904-010 起 RunErrorItem 对所有失败
+diff --git a/frontend/src/components/sessions/__tests__/session-config-bar.test.tsx b/frontend/src/components/sessions/__tests__/session-config-bar.test.tsx
+index cde94d100..3c1be4fbd 100644
+--- a/frontend/src/components/sessions/__tests__/session-config-bar.test.tsx
++++ b/frontend/src/components/sessions/__tests__/session-config-bar.test.tsx
+@@ -1753,6 +1753,103 @@ describe("SessionConfigBar 不指定兜底文案（provider-default-ui-hint）",
+   });
+ });
+ 
++// ── 2026-10-28-session-config-default-provider-fix：默认供应商引擎匹配 ──────
++
++describe("SessionConfigBar 默认供应商引擎匹配（session-config-default-provider-fix）", () => {
++  it("pi 会话 + 默认供应商不覆盖 pi（agent_kinds=[claude,codex]）→ 按钮显示「本机默认」，不误示该供应商名", async () => {
++    mocks.listProviders.mockReset().mockResolvedValue([
++      {
++        id: "prov-glm",
++        name: "GLM 平台",
++        models: [{ name: "glm-4.7" }],
++        agent_kinds: ["claude", "codex"],
++        is_default: true,
++      },
++    ]);
++    renderBar({
++      engine: "pi",
++      configSnapshot: { machine_name: "m", agent_name: "PI", engine: "pi" },
++    });
++    expect(
++      await screen.findByRole("button", { name: "配置-供应商 本机默认" }),
++    ).toBeInTheDocument();
++    openCtrl("配置-供应商");
++    // 兜底文案同样不跨引擎——claim 默认链不会把 claude/codex 默认注入 pi 会话。
++    expect(screen.getByText("不指定（本机默认）")).toBeInTheDocument();
++  });
++
++  it("pi 会话 + 默认供应商覆盖 pi（agent_kinds 含 pi）→ 按钮显示该供应商名 + 模型下拉渲染且候选跟随", async () => {
++    mocks.listProviders.mockReset().mockResolvedValue([
++      {
++        id: "prov-glm",
++        name: "GLM 平台",
++        models: [
++          { name: "glm-4.7", roles: ["sonnet"] },
++          { name: "glm-4.6", roles: [] },
++        ],
++        agent_kinds: ["pi"],
++        is_default: true,
++      },
++    ]);
++    renderBar({
++      engine: "pi",
++      configSnapshot: { machine_name: "m", agent_name: "PI", engine: "pi" },
++    });
++    expect(
++      await screen.findByRole("button", { name: "配置-供应商 GLM 平台" }),
++    ).toBeInTheDocument();
++    // 模型下拉随显示层回退渲染（即将注入的默认供应商），候选=其模型列表。
++    const select = (await screen.findByRole("combobox", {
++      name: "配置-模型",
++    })) as HTMLSelectElement;
++    const values = Array.from(select.options).map((o) => o.value);
++    expect(values).toEqual(["", "glm-4.7", "glm-4.6"]);
++    expect(select.value).toBe("");
++  });
++
++  it("claude 会话未显式选供应商 + 引擎匹配默认存在 → 模型下拉渲染，「不指定」项保持当前高亮（显示层回退不改选择语义）", async () => {
++    mocks.listProviders.mockReset().mockResolvedValue([
++      {
++        id: "prov-glm",
++        name: "GLM 平台",
++        models: [{ name: "glm-4.7" }],
++        agent_kinds: ["claude"],
++        is_default: true,
++      },
++    ]);
++    renderBar({ llmProviderId: null });
++    expect(
++      await screen.findByRole("combobox", { name: "配置-模型" }),
++    ).toBeInTheDocument();
++    openCtrl("配置-供应商");
++    // 未显式选择 → 「不指定（默认：…）」项仍是当前项（✓ 高亮）。
++    const noItem = await screen.findByRole("button", {
++      name: "选择 不指定（默认：GLM 平台）",
++    });
++    expect(noItem.textContent).toContain("✓");
++  });
++
++  it("provisional（预会话）未选供应商 + 引擎匹配默认存在 → 模型下拉渲染，候选跟随默认供应商（此前「显示将用默认却不给选模型」）", async () => {
++    mocks.listProviders.mockReset().mockResolvedValue([
++      {
++        id: "prov-glm",
++        name: "GLM 平台",
++        models: [{ name: "glm-4.7" }],
++        agent_kinds: ["claude"],
++        is_default: true,
++      },
++    ]);
++    renderBar({ provisional: true, engine: "claude" });
++    const select = (await screen.findByRole("combobox", {
++      name: "配置-模型",
++    })) as HTMLSelectElement;
++    expect(Array.from(select.options).map((o) => o.value)).toEqual([
++      "",
++      "glm-4.7",
++    ]);
++  });
++});
++
+ // ── 2026-10-21-profile-default-prehint：预会话档案显示对齐默认 ───────────────
+ 
+ describe("SessionConfigBar 档案默认预示（profile-default-prehint）", () => {
+diff --git a/frontend/src/components/sessions/session-config-bar.tsx b/frontend/src/components/sessions/session-config-bar.tsx
+index 7b248ff37..c20bf5dbe 100644
+--- a/frontend/src/components/sessions/session-config-bar.tsx
++++ b/frontend/src/components/sessions/session-config-bar.tsx
+@@ -487,10 +487,17 @@ export function SessionConfigBar({
+     staleTime: 30_000,
+   });
+   const providers = useMemo(() => providersQ.data ?? [], [providersQ.data]);
++  // 引擎解析上移（2026-10-28-session-config-default-provider-fix）：默认供应商的
++  // 引擎匹配派生（engineDefaultProvider / 兜底文案）需要先于原声明点（原在
++  // providerLocked 前定义）拿到 effectiveEngine——纯派生表达式，上移零行为漂移。
++  const effectiveEngine = engine ?? configSnapshot?.engine ?? null;
+   // 2026-10-21-provider-default-ui-hint：兜底项文案按用户默认供应商动态化。
++  // 2026-10-28-session-config-default-provider-fix：默认供应商按引擎（agent_kinds）
++  // 匹配——不覆盖当前引擎的默认行不再进兜底文案（pi 会话显示 claude-only 默认名
++  // 误导），无引擎匹配默认退「不指定（本机默认）」（与 claim 默认链过滤同口径）。
+   const noProviderFallbackLabel = useMemo(
+-    () => noProviderLabel(providers),
+-    [providers],
++    () => noProviderLabel(providers, effectiveEngine),
++    [providers, effectiveEngine],
+   );
+   // 2026-10-21-profile-default-prehint：档案兜底项——provisional 且有默认时
+   // 实际效果是「创建时用默认档案」；运行中切不指定=本会话无人格（保持原文案）。
+@@ -531,7 +538,6 @@ export function SessionConfigBar({
+     };
+   }, [openKind]);
+ 
+-  const effectiveEngine = engine ?? configSnapshot?.engine ?? null;
+   // ql-20260917-008：running 不再锁切换——canSwitch 仅排除 ended/failed；
+   // 运行中点选即受理（后端忙轮排队/覆盖合并，本轮结束后生效），提示行见底部。
+   const canSwitch = !ended;
+@@ -556,16 +562,37 @@ export function SessionConfigBar({
+ 
+   // ── task-10（FR-03-2/5 / D-002@v1）：供应商+模型级联 ──────────────────────
+ 
++  /**
++   * 引擎匹配的用户默认供应商行（2026-10-28-session-config-default-provider-fix）：
++   * is_default 且 agent_kinds 含当前引擎；引擎未定（null，悬浮助手形态创建时才
++   * 定）不过滤（与 providerCandidates 过滤口径互补）。无命中 null。后端 claim
++   * 默认注入同口径（lease/context.py：agent_kind ∈ agent_kinds 命中才构造
++   * config），此派生保证界面展示的「默认」与后端实际注入是同一家。
++   */
++  const engineDefaultProvider = useMemo(
++    () =>
++      providers.find(
++        (p) =>
++          p.is_default &&
++          (effectiveEngine == null || p.agent_kinds.includes(effectiveEngine)),
++      ) ?? null,
++    [providers, effectiveEngine],
++  );
++
+   /**
+    * 显示层供应商 id（2026-10-26-config-staged-all-states FR-02）：暂存供应商
+    * 优先——模型子下拉的显示条件与候选列表必须跟随暂存值（会话真值在发送前
+    * 不变，直接用真值会让「暂存供应商后模型框不出现/候选不跟随」）；取消暂存
+    * （staged 键删除）自然回退真值。provisional 不受影响（无 staged）。
++   * 2026-10-28-session-config-default-provider-fix：真值未显式选择（null）时回退
++   * 「引擎匹配的默认供应商」——控件显示即将实际注入的默认供应商、模型子下拉
++   * 随之渲染且候选跟随；仅显示层回退，显式选择/暂存与请求载荷不变（创建/发送
++   * 仍不带 llm_provider_id，后端默认链注入同一家）。
+    */
+   const displayProviderId =
+     staged?.llm_provider_id !== undefined
+       ? staged.llm_provider_id
+-      : llmProviderId;
++      : (llmProviderId ?? engineDefaultProvider?.id ?? null);
+ 
+   /** 当前选中供应商行（「不指定」/列表未含该 id → null，模型子下拉随之隐藏）。 */
+   const selectedProvider = useMemo(
+@@ -829,9 +856,11 @@ export function SessionConfigBar({
+         ? providers.find((p) => p.id === llmProviderId)?.name ??
+           configSnapshot?.provider_name ??
+           llmProviderId
+-        : // 未显式选 → 用户默认供应商名（claim 链实际注入它）；无默认回落本机默认
+-          //（2026-10-21-provider-default-ui-hint，与下拉兜底项同源）。
+-          providers.find((p) => p.is_default)?.name ?? "本机默认";
++        : // 未显式选 → 引擎匹配的用户默认供应商名（claim 链实际注入它）；无引擎
++          // 匹配默认回落本机默认（2026-10-21-provider-default-ui-hint 起显示默认
++          // 供应商名，2026-10-28-session-config-default-provider-fix 补引擎过滤——
++          // 跨引擎默认行不显示，防 pi 会话误示 claude/codex 默认供应商）。
++          engineDefaultProvider?.name ?? "本机默认";
+ 
+   /** ql-20260817-010：点选即**静默**切换——prompt 发空串（后端静默切换契约：
+    * 有切换字段允许空 prompt；daemon 收到空 prompt 只 reload 配置不喂消息，
+diff --git a/frontend/src/lib/api/__tests__/llm-providers.test.ts b/frontend/src/lib/api/__tests__/llm-providers.test.ts
+index 6a02b8668..ee110b513 100644
+--- a/frontend/src/lib/api/__tests__/llm-providers.test.ts
++++ b/frontend/src/lib/api/__tests__/llm-providers.test.ts
+@@ -337,4 +337,17 @@ describe("noProviderLabel — 兜底文案按用户默认供应商动态化", ()
+     expect(noProviderLabel([])).toBe("不指定（本机默认）");
+     expect(noProviderLabel(null)).toBe("不指定（本机默认）");
+   });
++
++  // 2026-10-28-session-config-default-provider-fix：engine 参数——默认供应商仅
++  // 在 agent_kinds 覆盖该引擎时进文案（与 claim 默认链过滤同口径）。
++  it("engine 参数：默认供应商覆盖引擎 → 其名；不覆盖（跨引擎默认）→ 「不指定（本机默认）」", () => {
++    const providers = [
++      { id: "b", name: "GLM 平台", is_default: true, agent_kinds: ["claude", "codex"] },
++    ] as unknown as Parameters<typeof noProviderLabel>[0];
++    expect(noProviderLabel(providers, "claude")).toBe("不指定（默认：GLM 平台）");
++    // pi 会话不被注入 claude/codex 默认 → 文案退本机默认（防误示）。
++    expect(noProviderLabel(providers, "pi")).toBe("不指定（本机默认）");
++    // 缺省 engine（旧调用面）不过滤引擎，行为不变。
++    expect(noProviderLabel(providers)).toBe("不指定（默认：GLM 平台）");
++  });
+ });
+diff --git a/frontend/src/lib/api/llm-providers.ts b/frontend/src/lib/api/llm-providers.ts
+index b73aa63dd..33d60ef63 100644
+--- a/frontend/src/lib/api/llm-providers.ts
++++ b/frontend/src/lib/api/llm-providers.ts
+@@ -202,11 +202,18 @@ export const NO_PROVIDER_FALLBACK_LABEL = "不指定（本机默认）";
+  * 供应商下拉「不指定」兜底项文案（2026-10-21-provider-default-ui-hint）：
+  * 用户设了默认供应商 → 「不指定（默认：{name}）」（claim 链会注入它）；
+  * 未设 / 列表未到位 → 现状「不指定（本机默认）」。单源收敛防四处文案漂移。
++ *
++ * 2026-10-28-session-config-default-provider-fix：可选 engine 参数——默认供应商
++ * 仅在 agent_kinds 覆盖该引擎时才进文案（claim 默认链同口径：pi 会话不会被注入
++ * claude-only 默认行，文案不能先误导）；缺省不过滤引擎（旧调用面零回归）。
+  */
+ export function noProviderLabel(
+   providers: LlmProviderRead[] | null | undefined,
++  engine?: string | null,
+ ): string {
+-  const def = (providers ?? []).find((p) => p.is_default);
++  const def = (providers ?? []).find(
++    (p) => p.is_default && (engine == null || p.agent_kinds.includes(engine)),
++  );
+   return def ? `不指定（默认：${def.name}）` : NO_PROVIDER_FALLBACK_LABEL;
+ }
