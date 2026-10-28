@@ -1,0 +1,1282 @@
+diff --git a/frontend/src/components/daemon/__tests__/session-log-assembler.test.ts b/frontend/src/components/daemon/__tests__/session-log-assembler.test.ts
+index 66439bca6..0449c676b 100644
+--- a/frontend/src/components/daemon/__tests__/session-log-assembler.test.ts
++++ b/frontend/src/components/daemon/__tests__/session-log-assembler.test.ts
+@@ -1567,6 +1567,56 @@ describe("压缩摘要与压缩状态协议行（ql-20260917-006）", () => {
+   });
+ });
+ 
++describe("模型重试协议行（2026-10-28-model-retry-visible）", () => {
++  const retryPayload = JSON.stringify({
++    attempt: 3,
++    max_retries: 10,
++    retry_delay_ms: 8000,
++    error_status: 429,
++    error: "Request rejected (429) · [1311][当前订阅套餐暂未开放GLM-5.3]",
++  });
++
++  it("[ASSISTANT] [MODEL_RETRY] 行 → kind=model_retry 段，JSON 载荷原文进 text（剥前缀）", () => {
++    const seg = classifySessionLog(
++      `[ASSISTANT] [MODEL_RETRY] ${retryPayload}`,
++      "stdout",
++      null,
++    );
++    expect(seg?.kind).toBe("model_retry");
++    expect(seg?.text).toBe(retryPayload);
++  });
++
++  it("判定位先于 reply 兜底与 API Error 丢弃规则：载荷含 Request rejected 字样不被吞", () => {
++    // 载荷 error 内含 "Request rejected (429)"——若分类晚于 isAssistantApiErrorText
++    // 会被整行丢弃（丢数据）；必须先命中 model_retry 分支。
++    const turn = applyAll([
++      makeLog("r1", "stdout", `[ASSISTANT] [MODEL_RETRY] ${retryPayload}`),
++    ]);
++    expect(turn.segments).toHaveLength(1);
++    expect(turn.segments[0]?.kind).toBe("model_retry");
++  });
++
++  it("独立过程段按序平铺：不进对话正文（output 空）与兼容投影（processItems 空）", () => {
++    const turn = applyAll([
++      makeLog("1", "stdout", "[ASSISTANT] 正常回复先到"),
++      makeLog("r1", "stdout", `[ASSISTANT] [MODEL_RETRY] ${retryPayload}`),
++    ]);
++    expect(turn.segments.map((s) => s.kind)).toEqual(["text", "model_retry"]);
++    expect(turn.output).toBe("正常回复先到");
++    expect(turn.processItems).toEqual([]);
++  });
++
++  it("历史批量路径 logsToSegments 与实时路径一致", () => {
++    const logs = [
++      makeLog("r1", "stdout", `[ASSISTANT] [MODEL_RETRY] ${retryPayload}`),
++    ];
++    const live = applyAll(logs);
++    const batch = logsToSegments(logs);
++    expect(batch.map((s) => s.kind)).toEqual(live.segments.map((s) => s.kind));
++    expect(batch[0]?.kind).toBe("model_retry");
++  });
++});
++
+ /* ───────── 2026-10-13-slim-subagent-false-running：slim 截断配对键回退 + 孤儿 stub ───────── */
+ 
+ describe("slim 截断行回退 toolUseId（2026-10-13-slim-subagent-false-running / FR-02）", () => {
+diff --git a/frontend/src/components/daemon/__tests__/turn-segment-views.test.tsx b/frontend/src/components/daemon/__tests__/turn-segment-views.test.tsx
+index 854162dd6..0cfa43e01 100644
+--- a/frontend/src/components/daemon/__tests__/turn-segment-views.test.tsx
++++ b/frontend/src/components/daemon/__tests__/turn-segment-views.test.tsx
+@@ -34,6 +34,7 @@ import { join } from "node:path";
+ import {
+   CompactNoticeChip,
+   CompactStatusRowView,
++  ModelRetryRowView,
+   SegmentView,
+   TextSegmentView,
+   ThinkingRowView,
+@@ -2112,3 +2113,76 @@ describe("回填元数据压回执假终态（2026-10-26-subagent-task-meta-rest
+     expect(header.durationText).toBe("04:32"); // 权威时长（271842ms→round 272s），非回执差值 00:08
+   });
+ });
++
++/* ───────── 模型重试过程段（2026-10-28-model-retry-visible） ───────── */
++
++describe("ModelRetryRowView / SegmentView 分发 / deriveTurnActivity 回退链（2026-10-28-model-retry-visible）", () => {
++  const retrySeg = (overrides?: Partial<Extract<TurnSegment, { kind: "model_retry" }>>):
++    Extract<TurnSegment, { kind: "model_retry" }> => ({
++      kind: "model_retry",
++      id: "seg:mr1",
++      text: JSON.stringify({
++        attempt: 3,
++        max_retries: 10,
++        retry_delay_ms: 8000,
++        error_status: 429,
++        error: "Request rejected (429) · [1311][当前订阅套餐暂未开放GLM-5.3]",
++      }),
++      ts: 2_000,
++      ...overrides,
++    });
++
++  it("ModelRetryRowView：429 限流载荷 → 「模型限流重试中 第3/10次…」+ 错误摘要（title 悬停全文）", () => {
++    render(<ModelRetryRowView segment={retrySeg()} />);
++    const row = screen.getByTestId("model-retry-row");
++    expect(row).toHaveTextContent("模型限流重试中 第3/10次…");
++    expect(row).toHaveTextContent("Request rejected (429)");
++    expect(row).toHaveAttribute("title", expect.stringContaining("Request rejected (429)"));
++  });
++
++  it("连接类（error_status=null）→ 「模型连接异常重试中」口径；坏 JSON → 「模型重试中…」中性兜底", () => {
++    const { unmount } = render(
++      <ModelRetryRowView
++        segment={retrySeg({
++          text: JSON.stringify({ attempt: 1, max_retries: 10, error_status: null }),
++        })}
++      />,
++    );
++    expect(screen.getByTestId("model-retry-row")).toHaveTextContent("模型连接异常重试中 第1/10次…");
++    unmount();
++    render(<ModelRetryRowView segment={retrySeg({ text: "{not-json" })} />);
++    expect(screen.getByTestId("model-retry-row")).toHaveTextContent("模型重试中…");
++  });
++
++  it("SegmentView 按 kind 分发到重试行；deriveTurnActivity 回退链消费（无 streaming 段时显示重试文案）", () => {
++    render(<SegmentView segment={retrySeg()} />);
++    expect(screen.getByTestId("model-retry-row")).toBeInTheDocument();
++    const summary = deriveTurnActivity([retrySeg()]);
++    expect(summary.currentActivity).toBe("模型限流重试中 第3/10次…");
++  });
++
++  it("回退链优先级：更新 streaming 文本段（ts 更晚）盖过重试段；重试段更新时反超「正在思考」", () => {
++    // streaming text 段 ts 更晚（3000 > 2000）→ 显示「正在输出文本」。
++    const textSeg: TurnSegment = {
++      kind: "text",
++      id: "seg:t1",
++      text: "正文",
++      streaming: true,
++      startedAt: 3_000,
++    };
++    expect(deriveTurnActivity([retrySeg(), textSeg]).currentActivity).toBe("正在输出文本");
++    // 重试段 ts 更晚（4000 > 3000）→ 重试文案盖过「正在思考」（重试风暴期间主诉求）。
++    const thinkingSeg: TurnSegment = {
++      kind: "thinking",
++      id: "seg:th1",
++      text: "推理",
++      streaming: true,
++      ts: 3_000,
++    };
++    expect(
++      deriveTurnActivity([thinkingSeg, retrySeg({ ts: 4_000 })]).currentActivity,
++    ).toBe("模型限流重试中 第3/10次…");
++    // 恒挂回归锚：只有 streaming thinking（无重试段）仍是「正在思考」。
++    expect(deriveTurnActivity([thinkingSeg]).currentActivity).toBe("正在思考");
++  });
++});
+diff --git a/frontend/src/components/daemon/__tests__/turn-status-bar-phase.test.tsx b/frontend/src/components/daemon/__tests__/turn-status-bar-phase.test.tsx
+index b697d7723..e80895541 100644
+--- a/frontend/src/components/daemon/__tests__/turn-status-bar-phase.test.tsx
++++ b/frontend/src/components/daemon/__tests__/turn-status-bar-phase.test.tsx
+@@ -191,3 +191,69 @@ describe("零回归锚定（D-010）与未知值兜底", () => {
+     expect(screen.getByText("future_phase_x")).toBeInTheDocument();
+   });
+ });
++
++/* ───────── 模型重试活动文案（2026-10-28-model-retry-visible） ───────── */
++
++describe("TurnStatusBar × model_retry 段（2026-10-28-model-retry-visible）", () => {
++  it("最新段为 model_retry（无 streaming 段）时活动位显示重试文案，替代恒「思考中」", () => {
++    vi.useFakeTimers();
++    const segments: TurnSegment[] = [
++      {
++        kind: "model_retry",
++        id: "seg:mr-status",
++        text: JSON.stringify({
++          attempt: 3,
++          max_retries: 10,
++          retry_delay_ms: 8000,
++          error_status: 429,
++          error: "Request rejected (429) · [1311]",
++        }),
++        ts: 1_000,
++      },
++    ];
++    render(
++      <TurnStatusBar
++        turnStartedAt={1_000}
++        segments={segments}
++        turnStatus="running"
++      />,
++    );
++    act(() => {
++      void vi.advanceTimersByTimeAsync(0);
++    });
++    expect(screen.getByTitle("模型限流重试中 第3/10次…")).toBeInTheDocument();
++    expect(screen.getByText("模型限流重试中 第3/10次…")).toBeInTheDocument();
++    vi.useRealTimers();
++  });
++
++  it("流式文本段更新（ts 更晚）时回退「正在输出文本」（重试行不遮蔽真实输出活动）", () => {
++    vi.useFakeTimers();
++    const segments: TurnSegment[] = [
++      {
++        kind: "model_retry",
++        id: "seg:mr-status2",
++        text: JSON.stringify({ attempt: 5, max_retries: 10, error_status: 429 }),
++        ts: 1_000,
++      },
++      {
++        kind: "text",
++        id: "seg:tx-status",
++        text: "恢复输出",
++        streaming: true,
++        startedAt: 2_000,
++      },
++    ];
++    render(
++      <TurnStatusBar
++        turnStartedAt={1_000}
++        segments={segments}
++        turnStatus="running"
++      />,
++    );
++    act(() => {
++      void vi.advanceTimersByTimeAsync(0);
++    });
++    expect(screen.getByTitle("正在输出文本")).toBeInTheDocument();
++    vi.useRealTimers();
++  });
++});
+diff --git a/frontend/src/components/daemon/__tests__/turn-timeline-model-retry-gating.test.tsx b/frontend/src/components/daemon/__tests__/turn-timeline-model-retry-gating.test.tsx
+new file mode 100644
+index 000000000..ba73e671b
+--- /dev/null
++++ b/frontend/src/components/daemon/__tests__/turn-timeline-model-retry-gating.test.tsx
+@@ -0,0 +1,92 @@
++/**
++ * 2026-10-28-model-retry-visible / FR-02：model_retry 段的对话视图轮状态门控。
++ *
++ * 锁定：
++ *   1. 运行中轮（status=running）对话视图渲染「模型限流重试中」实时提示行；
++ *   2. 终态轮（status=completed）对话视图不渲染重试行（对话正文干净；
++ *      失败原因由 RunErrorItem 失败卡承担——该卡为既有行为不在本测试面）；
++ *   3. 「全部（进度）」视图保留过程行（终态轮也可见，FR-02 允许面）。
++ *
++ * harness 复用 turn-timeline-auto-resume-badge.test.tsx 的 makeTurn/renderTimeline
++ * 范式（SessionTurnView 最小构造 + TurnTimeline 直render）。
++ */
++import { describe, it, expect, vi, afterEach } from "vitest";
++import { cleanup, render, screen } from "@testing-library/react";
++
++import { TurnTimeline, type SessionTurnView } from "@/components/daemon/turn-timeline";
++import type { TurnSegment } from "@/components/daemon/session-log-assembler";
++
++vi.mock("@/components/ui/markdown-text", () => ({
++  MarkdownText: ({ children }: { children: string }) => (
++    <div data-testid="markdown-text">{children}</div>
++  ),
++}));
++
++const RETRY_SEG: TurnSegment = {
++  kind: "model_retry",
++  id: "seg:mr-gate",
++  text: JSON.stringify({
++    attempt: 3,
++    max_retries: 10,
++    retry_delay_ms: 8000,
++    error_status: 429,
++    error: "Request rejected (429) · [1311][当前订阅套餐暂未开放GLM-5.3]",
++  }),
++  ts: 1_000,
++};
++
++function makeTurn(over: Partial<SessionTurnView> = {}): SessionTurnView {
++  return {
++    runId: "run-retry",
++    turn: 1,
++    prompt: "排查问题",
++    output: "",
++    status: "running",
++    seenLogIds: new Set<string>(),
++    inputTokens: null,
++    outputTokens: null,
++    ctxTokens: null,
++    errorDetail: null,
++    processItems: [],
++    segments: [RETRY_SEG],
++    turnStartedAt: 1_000,
++    ...over,
++  };
++}
++
++function renderTimeline(turns: SessionTurnView[], viewMode: "conversation" | "all") {
++  return render(
++    <TurnTimeline
++      turns={turns}
++      viewMode={viewMode}
++      errorMsg={null}
++      sessionStatus="active"
++      dialogHistory={[]}
++      onResend={vi.fn()}
++      onSwitchProvider={vi.fn()}
++      hasOnlineProvider
++      emptyProviderLabel="Claude"
++    />,
++  );
++}
++
++describe("model_retry 段对话视图轮状态门控（2026-10-28-model-retry-visible / FR-02）", () => {
++  afterEach(() => cleanup());
++
++  it("运行中轮 + 对话视图：渲染「模型限流重试中 第3/10次」实时提示行", () => {
++    renderTimeline([makeTurn({ status: "running" })], "conversation");
++    expect(screen.getByTestId("model-retry-row")).toHaveTextContent(
++      "模型限流重试中 第3/10次",
++    );
++  });
++
++  it("终态轮 + 对话视图：不渲染重试行（对话正文干净）", () => {
++    renderTimeline([makeTurn({ status: "completed" })], "conversation");
++    expect(screen.queryByTestId("model-retry-row")).toBeNull();
++  });
++
++  it("「全部（进度）」视图：终态轮保留重试过程行（FR-02 允许面）", () => {
++    renderTimeline([makeTurn({ status: "completed" })], "all");
++    expect(screen.getByTestId("model-retry-row")).toHaveTextContent("模型限流重试中");
++  });
++});
+diff --git a/frontend/src/components/daemon/session-log-assembler.ts b/frontend/src/components/daemon/session-log-assembler.ts
+index 8d3c41d52..21c962646 100644
+--- a/frontend/src/components/daemon/session-log-assembler.ts
++++ b/frontend/src/components/daemon/session-log-assembler.ts
+@@ -103,6 +103,10 @@ import { isAssistantApiErrorText } from "@/components/agent-log/normalize";
+  *   - kind=compact_status：[ASSISTANT] [COMPACT_STATUS] 前缀行（daemon 落库的压缩
+  *     过程状态协议行，phase=compacting/success/failed——运行中轮渲染实时
+  *     「上下文正在重新压缩」提示，终态轮不渲染）
++ *   - kind=model_retry：[ASSISTANT] [MODEL_RETRY] 前缀行（2026-10-28-model-retry-
++ *     visible：daemon 落库的模型 API 重试过程协议行，attempt/max_retries/
++ *     error_status/error 单行 JSON——运行中轮渲染「模型限流重试中 第N/M次」实时
++ *     提示，终态轮不渲染，失败原因由 RunErrorItem 失败卡承担）
+  *   - kind=stderr：channel=stderr
+  *   - kind=reply：其余（剥 [ASSISTANT]/[LOG:\w+] 前缀）
+  *
+@@ -117,6 +121,7 @@ export type SessionLogSegmentKind =
+   | "skill"
+   | "compact"
+   | "compact_status"
++  | "model_retry"
+   | "stderr"
+   | "override"
+   | "file"
+@@ -402,6 +407,18 @@ export function classifySessionLog(
+       text: trimmed.replace(/^\[ASSISTANT\]\s?\[COMPACT_STATUS\]\s?/, ""),
+     };
+   }
++  // 2026-10-28-model-retry-visible：daemon 落库的模型 API 重试过程协议行
++  // （[MODEL_RETRY] + 单行 JSON，attempt/max_retries/retry_delay_ms/error_status/
++  // error）——运行中轮渲染「模型限流重试中 第N/M次」实时提示；text 保留剥前缀
++  // 后的 JSON 原文供渲染层解析，不进对话正文与投影。判定位必须先于下方
++  // isAssistantApiErrorText 丢弃规则——载荷 error 常含 "Request rejected (429)"
++  // 字样，晚于丢弃规则会整行吞掉（丢数据）。
++  if (/^\[ASSISTANT\]\s*\[MODEL_RETRY\]/.test(trimmed)) {
++    return {
++      kind: "model_retry",
++      text: trimmed.replace(/^\[ASSISTANT\]\s?\[MODEL_RETRY\]\s?/, ""),
++    };
++  }
+   // ql-20260904-013：CLI 合成鉴权行（"[ASSISTANT] Not logged in · Please run
+   // /login"，CLI 把模型网关 401 误报为本地未登录）与模型网关错误行（"API Error:
+   // …" / "Request rejected"）不是 agent 答复——丢弃正文，展示由 turn.errorDetail
+@@ -635,6 +652,20 @@ export type TurnSegment =
+       text: string;
+       ts: number | null;
+     }
++  | {
++      /**
++       * 模型 API 重试过程段（2026-10-28-model-retry-visible）：daemon 落库的
++       * [MODEL_RETRY] 协议行（JSON 载荷 attempt/max_retries/retry_delay_ms/
++       * error_status/error）。运行中轮渲染「模型限流重试中 第N/M次」实时提示；
++       * 终态轮对话正文不渲染（失败原因由 RunErrorItem 失败卡承担），状态条
++       * currentActivity 回退链消费（替代重试风暴期间的恒「思考中」）。
++       */
++      kind: "model_retry";
++      id: string;
++      /** 剥前缀后的 JSON 原文（渲染层解析 attempt/max_retries/error）。 */
++      text: string;
++      ts: number | null;
++    }
+   | {
+       /**
+        * 文件段（task-08 / 2026-08-23-agent-file-upload-mcp / design §7.3 / D-001@v1）：
+@@ -1787,6 +1818,23 @@ export function applyLogToSegments(
+         ]);
+       }
+       break;
++    case "model_retry":
++      // 2026-10-28-model-retry-visible：模型重试过程协议行——同 compact_status
++      // 的独立过程段平铺形态（不进兼容投影；渲染/状态条消费见 turn-segment-views
++      // 与 turn-status-bar）。kind 提局部 const 同上（窄化不跨回调边界）。
++      {
++        const retryKind = seg.kind;
++        segments = applyToBucket(segments, bucketId, routeSubagentType, (children) => [
++          ...children,
++          {
++            kind: retryKind,
++            id: makeUniqueSegmentId(ids(), segmentIdBase(input, retryKind, ts)),
++            text: seg.text,
++            ts,
++          },
++        ]);
++      }
++      break;
+     case "stderr":
+       segments = applyToBucket(segments, bucketId, routeSubagentType, (children) => [
+         ...children,
+diff --git a/frontend/src/components/daemon/turn-segment-views.tsx b/frontend/src/components/daemon/turn-segment-views.tsx
+index bcb9ed01f..0098dbe17 100644
+--- a/frontend/src/components/daemon/turn-segment-views.tsx
++++ b/frontend/src/components/daemon/turn-segment-views.tsx
+@@ -252,6 +252,10 @@ export interface CompactSegmentViewProps {
+ export interface CompactStatusRowViewProps {
+   segment: Extract<TurnSegment, { kind: "compact_status" }>;
+ }
++/** 2026-10-28-model-retry-visible：模型重试过程段（[MODEL_RETRY] 协议行，渲染层解析载荷）。 */
++export interface ModelRetryRowViewProps {
++  segment: Extract<TurnSegment, { kind: "model_retry" }>;
++}
+ /** ql-20260920-006：轮内用户消息段（引导注入留痕，三态右对齐用户气泡）。 */
+ export interface UserMsgSegmentViewProps {
+   segment: Extract<TurnSegment, { kind: "user_msg" }>;
+@@ -1346,6 +1350,76 @@ export const CompactStatusRowView = memo(function CompactStatusRowView({
+   );
+ });
+ 
++/**
++ * 模型 API 重试过程行（2026-10-28-model-retry-visible）：daemon [MODEL_RETRY]
++ * 协议行的渲染——载荷 attempt/max_retries 显示「模型限流重试中 第N/M次」+
++ * 错误摘要（title 悬停看全文）；error_status=null（连接类）显示「连接异常重试中」
++ * 口径；坏 JSON / 字段缺失退中性「模型重试中…」（容错不抛错，FR-02 场景三）。
++ * 对话视图仅运行中轮挂载（turn-timeline textSegments 过滤门控）；「全部（进度）」
++ * 视图保留过程行。
++ */
++export const ModelRetryRowView = memo(function ModelRetryRowView({
++  segment,
++}: ModelRetryRowViewProps) {
++  let attempt: number | null = null;
++  let maxRetries: number | null = null;
++  let errorStatus: number | null | undefined;
++  let error: string | undefined;
++  let parseFailed = false;
++  try {
++    const parsed = JSON.parse(segment.text) as {
++      attempt?: unknown;
++      max_retries?: unknown;
++      error_status?: unknown;
++      error?: unknown;
++    };
++    if (typeof parsed.attempt === "number" && Number.isFinite(parsed.attempt)) {
++      attempt = parsed.attempt;
++    }
++    if (
++      typeof parsed.max_retries === "number" &&
++      Number.isFinite(parsed.max_retries)
++    ) {
++      maxRetries = parsed.max_retries;
++    }
++    if (parsed.error_status === null || typeof parsed.error_status === "number") {
++      errorStatus = parsed.error_status;
++    }
++    if (typeof parsed.error === "string" && parsed.error) error = parsed.error;
++  } catch {
++    parseFailed = true;
++  }
++  const countText =
++    attempt != null && maxRetries != null
++      ? ` 第${attempt}/${maxRetries}次`
++      : attempt != null
++        ? ` 第${attempt}次`
++        : "";
++  const summary = error ? summaryOf(error, 80) : undefined;
++  return (
++    <div
++      data-testid="model-retry-row"
++      className="flex select-none items-center gap-1.5 px-1 py-0.5 text-[11px] text-muted-foreground"
++      title={error || undefined}
++    >
++      <span
++        aria-hidden
++        className="h-2.5 w-2.5 shrink-0 animate-spin rounded-full border-[1.5px] border-muted-foreground/30 border-t-muted-foreground"
++      />
++      <span className="min-w-0">
++        {parseFailed
++          ? "模型重试中…"
++          : errorStatus === null
++            ? `模型连接异常重试中${countText}…`
++            : `模型限流重试中${countText}…`}
++        {summary ? (
++          <span className="ml-1 text-muted-foreground/70">（{summary}）</span>
++        ) : null}
++      </span>
++    </div>
++  );
++});
++
+ /* ────────────── 轮内用户消息段（ql-20260920-006 / 2026-09-18-single-chat-steering 修订） ────────────── */
+ 
+ /**
+@@ -1729,6 +1803,11 @@ export const SegmentView = memo(function SegmentView({ segment }: SegmentViewPro
+       // ql-20260917-006：压缩过程状态行——compacting 实时提示 / failed 警示 /
+       // success 静默（compact 摘要段已是完成标记）。
+       return <CompactStatusRowView segment={segment} />;
++    case "model_retry":
++      // 2026-10-28-model-retry-visible：模型重试过程行——「模型限流重试中
++      // 第N/M次」实时提示（对话视图仅运行中轮挂载，timeline 过滤门控；
++      // 「全部」视图保留过程行）。
++      return <ModelRetryRowView segment={segment} />;
+     case "preamble":
+       // 2026-08-25-unified-floating-session task-11（FR-7）：上下文前导卡——
+       // 「全部（进度）」视图显示首轮注入的【变更/页面上下文】【团队任务简报】
+diff --git a/frontend/src/components/daemon/turn-status-bar.tsx b/frontend/src/components/daemon/turn-status-bar.tsx
+index 7fab45566..60129b65b 100644
+--- a/frontend/src/components/daemon/turn-status-bar.tsx
++++ b/frontend/src/components/daemon/turn-status-bar.tsx
+@@ -110,6 +110,9 @@ function segmentTs(seg: TurnSegment): number {
+       return seg.ts ?? Number.NEGATIVE_INFINITY;
+     case "compact_status":
+       return seg.ts ?? Number.NEGATIVE_INFINITY;
++    // 2026-10-28-model-retry-visible：模型重试过程段非 running 候选，取捕获 ts。
++    case "model_retry":
++      return seg.ts ?? Number.NEGATIVE_INFINITY;
+     // ql-20260920-006（2026-09-18-single-chat-steering 修订）：轮内用户消息段
+     //（引导注入留痕）非 running 候选，取捕获 ts（本行是 TurnSegment 新增 kind
+     // 的 switch 详尽性编译补点，无行为变化）。
+@@ -197,12 +200,104 @@ function latestStreamingSummary(segments: TurnSegment[]): string | null {
+       : null;
+ }
+ 
++/** 最新 streaming 段的捕获时刻（与 latestStreamingSummary 同一遍 DFS 的 ts 面）。 */
++function latestStreamingTs(segments: TurnSegment[]): number {
++  let bestTs = Number.NEGATIVE_INFINITY;
++  const walk = (list: TurnSegment[]) => {
++    for (const s of list) {
++      if (s.kind === "text" || s.kind === "thinking") {
++        const ts = segmentTs(s);
++        if (s.streaming && ts >= bestTs) bestTs = ts;
++      } else if (s.kind === "tool" || s.kind === "subagent_stub") {
++        walk(s.children);
++      }
++    }
++  };
++  walk(segments);
++  return bestTs;
++}
++
++/**
++ * 2026-10-28-model-retry-visible：树内最新 model_retry 段的活动文案——
++ * 「模型限流重试中 第N/M次…」（error_status=null 连接类为「模型连接异常重试中」；
++ * 载荷解析失败退「模型重试中…」）。无 model_retry 段返回 null。
++ * 解析容错与 ModelRetryRowView 同口径（坏 JSON 不抛错）。
++ */
++function latestModelRetrySummary(segments: TurnSegment[]): {
++  text: string;
++  ts: number;
++} | null {
++  let bestTs = Number.NEGATIVE_INFINITY;
++  let bestText: string | null = null;
++  const walk = (list: TurnSegment[]) => {
++    for (const s of list) {
++      if (s.kind === "model_retry") {
++        const ts = segmentTs(s);
++        if (ts >= bestTs) {
++          bestTs = ts;
++          let attempt: number | null = null;
++          let maxRetries: number | null = null;
++          let errorStatus: number | null | undefined;
++          let parseFailed = false;
++          try {
++            const parsed = JSON.parse(s.text) as {
++              attempt?: unknown;
++              max_retries?: unknown;
++              error_status?: unknown;
++            };
++            if (typeof parsed.attempt === "number" && Number.isFinite(parsed.attempt)) {
++              attempt = parsed.attempt;
++            }
++            if (
++              typeof parsed.max_retries === "number" &&
++              Number.isFinite(parsed.max_retries)
++            ) {
++              maxRetries = parsed.max_retries;
++            }
++            if (
++              parsed.error_status === null ||
++              typeof parsed.error_status === "number"
++            ) {
++              errorStatus = parsed.error_status;
++            }
++          } catch {
++            parseFailed = true;
++          }
++          bestText = parseFailed
++            ? "模型重试中…"
++            : errorStatus === null
++              ? `模型连接异常重试中${
++                  attempt != null && maxRetries != null
++                    ? ` 第${attempt}/${maxRetries}次`
++                    : attempt != null
++                      ? ` 第${attempt}次`
++                      : ""
++                }…`
++              : `模型限流重试中${
++                  attempt != null && maxRetries != null
++                    ? ` 第${attempt}/${maxRetries}次`
++                    : attempt != null
++                      ? ` 第${attempt}次`
++                      : ""
++                }…`;
++        }
++      } else if (s.kind === "tool" || s.kind === "subagent_stub") {
++        walk(s.children);
++      }
++    }
++  };
++  walk(segments);
++  return bestText != null ? { text: bestText, ts: bestTs } : null;
++}
++
+ /**
+  * 树内当前活动摘要（递归）：
+  *   - 有 running 工具段：普通工具 → 「工具名 主参数」；子代理容器（有 children）→
+  *     「子代理『名』内部活动」，内部活动递归 children（嵌套子代理继续前缀），内部
+  *     无任何 running / streaming 段时退「执行中」；
+- *   - 无 running 工具段：最新 streaming 段 → 「正在输出文本 / 正在思考」；
++ *   - 无 running 工具段：最新 streaming 段 → 「正在输出文本 / 正在思考」；最新
++ *     model_retry 段更新（ts 更晚）→ 「模型限流重试中 第N/M次…」（2026-10-28-
++ *     model-retry-visible：重试风暴期间替代恒「思考中」，用户可区分正常慢与卡死）；
+  *   - 都无 → null。
+  */
+ function latestActivityWithin(segments: TurnSegment[]): string | null {
+@@ -214,6 +309,10 @@ function latestActivityWithin(segments: TurnSegment[]): string | null {
+     }
+     return toolSummary(tool);
+   }
++  const retry = latestModelRetrySummary(segments);
++  if (retry && retry.ts >= latestStreamingTs(segments)) {
++    return retry.text;
++  }
+   return latestStreamingSummary(segments);
+ }
+ 
+diff --git a/frontend/src/components/daemon/turn-timeline.tsx b/frontend/src/components/daemon/turn-timeline.tsx
+index 5e6f606ee..a710de2f4 100644
+--- a/frontend/src/components/daemon/turn-timeline.tsx
++++ b/frontend/src/components/daemon/turn-timeline.tsx
+@@ -2135,6 +2135,9 @@ function segmentTsOf(seg: TurnSegment): number | null {
+       return seg.ts;
+     case "compact_status":
+       return seg.ts;
++    // 2026-10-28-model-retry-visible：模型重试过程段取捕获时刻（同 compact_status）。
++    case "model_retry":
++      return seg.ts;
+     // 2026-08-25-unified-floating-session task-11：前导段取捕获时刻。
+     case "preamble":
+       return seg.ts;
+@@ -2293,7 +2296,13 @@ function SegmentedTurnBody({
+             // 「上下文正在重新压缩」提示）；终态轮不显示（成功后紧随的
+             // compact 摘要段已是「已重新压缩」标记，失败态经「全部」
+             // 视图 amber 行可见）。
+-            (s) => isConversationSegment(s) || (isLiveTurn(turnStatus) && s.kind === "compact_status"),
++            // 2026-10-28-model-retry-visible：model_retry 同款门控——仅运行中
++            // 轮进对话流（实时「模型限流重试中」提示）；终态轮对话正文不渲染
++            // （失败原因由 RunErrorItem 失败卡承担），「全部」视图保留过程行。
++            (s) =>
++              isConversationSegment(s) ||
++              (isLiveTurn(turnStatus) &&
++                (s.kind === "compact_status" || s.kind === "model_retry")),
+           ),
+     [viewMode, segments, turnStatus],
+   );
+diff --git a/sillyhub-daemon/src/agent-event-schema.ts b/sillyhub-daemon/src/agent-event-schema.ts
+index 06c019728..2fe3dd077 100644
+--- a/sillyhub-daemon/src/agent-event-schema.ts
++++ b/sillyhub-daemon/src/agent-event-schema.ts
+@@ -42,6 +42,7 @@ const AGENT_STATUS_SUBTYPES = [
+   'task_notification',
+   'thinking_tokens',
+   'context_compacting',
++  'api_retry',
+ ] as const;
+ 
+ /** usage 子对象 schema（与 types.ts AgentEventUsage 对齐，字段全可选）。
+diff --git a/sillyhub-daemon/src/bg-task-scan.ts b/sillyhub-daemon/src/bg-task-scan.ts
+new file mode 100644
+index 000000000..31043239c
+--- /dev/null
++++ b/sillyhub-daemon/src/bg-task-scan.ts
+@@ -0,0 +1,58 @@
++/**
++ * `bg-task-scan.ts` —— 后台任务终态扫描环的纯函数件（2026-10-28-bg-scan-
++ * tailread-eviction）。
++ *
++ * 从 daemon.ts `_bgTaskFinalLoop` 抽出的两个可单测原语：
++ * - `readFileTailBytes`：open + 按偏移 read 的尾窗读取——只把文件末尾至多
++ *   tailBytes 字节读进内存（对齐 agent-log/liveness/tailer.ts
++ *   DefaultFs.readRangeAsync 既有实践；修 readFile 全量读入再 subarray 切片
++ *   的内存峰值面）；
++ * - `evictUnseenSnapshotPaths`：终态快照表按本轮可见 logPath 集淘汰——内层
++ *   非空也可淘汰（修「只删空内层 Map」的空操作清理，消除只增不减）。
++ *
++ * @module
++ */
++
++/**
++ * 读取文件末尾至多 `tailBytes` 字节（utf-8 文本）；文件小于窗口时整读。
++ *
++ * 失败（文件缺失/IO 错误）抛出——由调用方（扫描环）既有 catch→continue
++ * 兜住，语义与旧 readFile 实现一致。句柄 try/finally 关闭。尾部截断可能切在
++ * 多字节 UTF-8 序列中间（与旧 subarray 切片同等语义，容忍）。
++ */
++export async function readFileTailBytes(
++  logPath: string,
++  tailBytes: number,
++): Promise<string> {
++  const { open } = await import('node:fs/promises');
++  const fh = await open(logPath, 'r');
++  try {
++    const size = (await fh.stat()).size;
++    const start = Math.max(0, size - tailBytes);
++    const len = size - start;
++    const buf = Buffer.alloc(len);
++    const { bytesRead } = await fh.read(buf, 0, len, start);
++    return buf.subarray(0, bytesRead).toString('utf8');
++  } finally {
++    await fh.close();
++  }
++}
++
++/**
++ * 快照表按本轮可见集淘汰：删除 `seenPaths` 之外的所有键（含内层非空者），
++ * 返回淘汰条数（供 debug 观测）。仍在可见集内的条目原样保留——幂等基线
++ * 不丢，首扫/同值跳过语义不受影响。
++ */
++export function evictUnseenSnapshotPaths(
++  snapshots: Map<string, Map<string, string>>,
++  seenPaths: ReadonlySet<string>,
++): number {
++  let evicted = 0;
++  for (const path of snapshots.keys()) {
++    if (!seenPaths.has(path)) {
++      snapshots.delete(path);
++      evicted += 1;
++    }
++  }
++  return evicted;
++}
+diff --git a/sillyhub-daemon/src/daemon.ts b/sillyhub-daemon/src/daemon.ts
+index 6a963c5a2..2b6d15db6 100644
+--- a/sillyhub-daemon/src/daemon.ts
++++ b/sillyhub-daemon/src/daemon.ts
+@@ -109,6 +109,11 @@ import { listRoots } from './roots-rpc.js';
+ import { LivenessTailer, type WatchTarget } from './agent-log/liveness/tailer.js';
+ import { discoverLivenessWatchTargets } from './agent-log/liveness/discovery.js';
+ import { extractTaskNotifications } from './agent-log/parse-claude-code-jsonl.js';
++// 2026-10-28-bg-scan-tailread-eviction：扫描环纯函数件（区间读 + 快照淘汰）。
++import {
++  evictUnseenSnapshotPaths,
++  readFileTailBytes,
++} from './bg-task-scan.js';
+ // R6（ql-20260908-006）：liveness 推送 root/workspace 归属走 policy 层边界敏感判定。
+ import { isPathUnderAnyRoot } from './policy/path-utils.js';
+ import {
+@@ -6936,8 +6941,6 @@ export class Daemon {
+    */
+   private async _bgTaskFinalLoop(signal: AbortSignal): Promise<void> {
+     const BG_SCAN_TAIL_BYTES = 64 * 1024;
+-    const { readFile } = await import('node:fs/promises');
+-    const { stat } = await import('node:fs/promises');
+     while (!signal.aborted) {
+       try {
+         const targets = discoverLivenessWatchTargets({
+@@ -6951,15 +6954,16 @@ export class Daemon {
+           rescan: false,
+           resolveWorkspace: () => 'daemon',
+         });
++        // 本轮可见集（2026-10-28-bg-scan-tailread-eviction）：淘汰的核对基准。
++        const seenPaths = new Set<string>();
+         for (const t of targets) {
+           if (t.format !== 'claude-code-jsonl') continue;
+           if (!t.agentSessionId) continue;
++          seenPaths.add(t.logPath);
+           let tail = '';
+           try {
+-            const st = await stat(t.logPath);
+-            const start = Math.max(0, st.size - BG_SCAN_TAIL_BYTES);
+-            const fh = await readFile(t.logPath);
+-            tail = fh.subarray(start).toString('utf8');
++            // 区间读只取尾窗（readFile 全量读入再切片的内存峰值面已修）
++            tail = await readFileTailBytes(t.logPath, BG_SCAN_TAIL_BYTES);
+           } catch {
+             continue; // 文件消失/读失败：下轮再看
+           }
+@@ -6994,12 +6998,16 @@ export class Daemon {
+               });
+             }
+           }
+-          // ended 清理对齐 liveness R9：路径不再产出时防 Map 只增不减
+-          if (this._bgTaskSnapshots.size > 200) {
+-            for (const [p2, m] of this._bgTaskSnapshots) {
+-              if (m.size === 0) this._bgTaskSnapshots.delete(p2);
+-            }
+-          }
++        }
++        // ended 清理对齐 liveness R9（2026-10-28-bg-scan-tailread-eviction 修实）：
++        // 按本轮可见集淘汰不再产出的 logPath——旧「只删空内层 Map」实为空操作
++        // （内层一旦有条目永不为空），Map 只增不减；可见集内条目原样保留。
++        const evicted = evictUnseenSnapshotPaths(this._bgTaskSnapshots, seenPaths);
++        if (evicted > 0) {
++          this._logger.debug('bg_task_snapshots_evicted', {
++            evicted,
++            kept: this._bgTaskSnapshots.size,
++          });
+         }
+         this._bgTaskSeeded = true;
+       } catch (e) {
+diff --git a/sillyhub-daemon/src/interactive/claude-events.ts b/sillyhub-daemon/src/interactive/claude-events.ts
+index 127668fef..69f9b313f 100644
+--- a/sillyhub-daemon/src/interactive/claude-events.ts
++++ b/sillyhub-daemon/src/interactive/claude-events.ts
+@@ -619,6 +619,8 @@ export class ClaudeEventNormalizer {
+    *   - thinking_tokens → status/thinking_tokens（D-005@v1 契约补遗）。
+    *   - status（SDKStatusMessage：status='compacting' 或带 compact_result）→
+    *     status/context_compacting（ql-20260917-006；此前静默丢弃）。
++   *   - api_retry（SDKAPIRetryMessage）→ status/api_retry
++   *     （2026-10-28-model-retry-visible；重试风暴逐次信号，此前静默丢弃）。
+    *   - 其余（status=requesting、compact_boundary、local_command 等）→ 静默丢弃。
+    */
+   private _normalizeSystemMessage(
+@@ -717,6 +719,32 @@ export class ClaudeEventNormalizer {
+       }
+       return [];
+     }
++
++    // 2026-10-28-model-retry-visible：SDKAPIRetryMessage（sdk.d.ts:3068-3080）——
++    // 模型 API 可重试错误（429 限流/连接超时）的逐次重试信号，重试风暴期间此前
++    // 静默丢弃（平台零事件 → 前端恒显「思考中」）。事件化为 status/api_retry，
++    // metadata 携带 attempt/max_retries/retry_delay_ms/error_status/error 摘要；
++    // 消费侧 session-manager/events.ts 落 [MODEL_RETRY] 协议行（对齐
++    // [COMPACT_STATUS] 先例）。数值字段仅在帧字段为 number 时写入（缺字段不伪造）；
++    // error_status 连接类为 null 必须原样保留；error 非字符串（对象形态漂移防御）
++    // 时 JSON.stringify 后截断。
++    if (subtype === 'api_retry') {
++      const metadata: Record<string, unknown> = {};
++      if (typeof record['attempt'] === 'number') metadata['attempt'] = record['attempt'];
++      if (typeof record['max_retries'] === 'number') metadata['max_retries'] = record['max_retries'];
++      if (typeof record['retry_delay_ms'] === 'number') {
++        metadata['retry_delay_ms'] = record['retry_delay_ms'];
++      }
++      if (record['error_status'] === null || typeof record['error_status'] === 'number') {
++        metadata['error_status'] = record['error_status'];
++      }
++      const rawError = record['error'];
++      if (rawError !== undefined && rawError !== null) {
++        const errText = typeof rawError === 'string' ? rawError : JSON.stringify(rawError);
++        if (errText) metadata['error'] = errText.slice(0, 200);
++      }
++      return [{ type: 'status', subtype: 'api_retry', content: '', metadata }];
++    }
+     return [];
+   }
+ 
+diff --git a/sillyhub-daemon/src/interactive/session-manager/events.ts b/sillyhub-daemon/src/interactive/session-manager/events.ts
+index a9692868d..0496245c2 100644
+--- a/sillyhub-daemon/src/interactive/session-manager/events.ts
++++ b/sillyhub-daemon/src/interactive/session-manager/events.ts
+@@ -523,6 +523,36 @@ export async function dispatchStatusEvent(
+       });
+       return;
+     }
++    case 'api_retry': {
++      // 2026-10-28-model-retry-visible：模型 API 重试过程信号 → [MODEL_RETRY]
++      // 协议行（形态对齐 ql-20260917-006 [COMPACT_STATUS]：legacy flat 文本行
++      // 直接经 onTurnMessage，backend 按 stdout 文本行持久 + SSE 推送，前端
++      // 分类器识别前缀在运行中轮实时显示「模型限流重试中 第N/M次」）。
++      // 无 active turn（runId 空）丢弃——重试状态只在轮内产生，口径同 compact。
++      // error_status 连接类为 null 原样保留（不伪造 0 不省略键）；error 截断 200。
++      const runId = state.currentRunId;
++      if (!runId) return;
++      const meta = eventMetaOf(ev);
++      const payload: Record<string, unknown> = {};
++      const attempt = numOf(meta?.['attempt']);
++      if (attempt !== undefined) payload['attempt'] = attempt;
++      const maxRetries = numOf(meta?.['max_retries']);
++      if (maxRetries !== undefined) payload['max_retries'] = maxRetries;
++      const delayMs = numOf(meta?.['retry_delay_ms']);
++      if (delayMs !== undefined) payload['retry_delay_ms'] = delayMs;
++      const errorStatus = meta?.['error_status'];
++      if (errorStatus === null || typeof errorStatus === 'number') {
++        payload['error_status'] = errorStatus;
++      }
++      const errorText = strOf(meta?.['error']);
++      if (errorText) payload['error'] = errorText.slice(0, 200);
++      await mgr.deps.onTurnMessage(state.sessionId, runId, {
++        event_type: 'text',
++        content: `[MODEL_RETRY] ${JSON.stringify(payload)}`,
++        channel: 'stdout',
++      });
++      return;
++    }
+     default:
+       // 未知 subtype 防御丢弃（schema 闭合枚举外的运行时漂移）。
+       return;
+diff --git a/sillyhub-daemon/src/types.ts b/sillyhub-daemon/src/types.ts
+index 47e457fd6..203676e58 100644
+--- a/sillyhub-daemon/src/types.ts
++++ b/sillyhub-daemon/src/types.ts
+@@ -77,7 +77,16 @@ export type AgentStatusSubtype =
+    * 载 phase（compacting/success/failed）与可选 error；消费侧落
+    * [COMPACT_STATUS] 协议行（session-manager/events.ts）。
+    */
+-  | 'context_compacting';
++  | 'context_compacting'
++  /**
++   * 模型 API 重试过程信号（2026-10-28-model-retry-visible）：Claude SDK
++   * system/api_retry 帧（SDKAPIRetryMessage）的事件化——此前静默丢弃，重试
++   * 风暴（如 429 限流指数退避约 3 分钟）期间平台零事件，前端只能恒显「思考中」，
++   * 用户无法区分正常慢与卡死。metadata 载 attempt/max_retries/retry_delay_ms/
++   * error_status（连接类为 null）/error 摘要；消费侧落 [MODEL_RETRY] 协议行
++   * （session-manager/events.ts，形态对齐 [COMPACT_STATUS] 先例）。
++   */
++  | 'api_retry';
+ 
+ /**
+  * token 用量（v2，design.md §7）。字段全可选 number。
+diff --git a/sillyhub-daemon/tests/bg-task-scan.test.ts b/sillyhub-daemon/tests/bg-task-scan.test.ts
+new file mode 100644
+index 000000000..c37bae0c8
+--- /dev/null
++++ b/sillyhub-daemon/tests/bg-task-scan.test.ts
+@@ -0,0 +1,100 @@
++// 2026-10-28-bg-scan-tailread-eviction：扫描环纯函数件单测。
++//
++// 背景：daemon.ts `_bgTaskFinalLoop`（cdcb97fdb）两缺陷——①readFile 全量读入
++// 再 subarray 取 64KB 尾段（内存峰值与日志全大小成正比，本仓有 OOM 前科）；
++// ②_bgTaskSnapshots 清理只删空内层 Map，而内层一旦有条目永不为空，实为空
++// 操作（Map 只增不减）。本文件对抽取的两纯函数各锁三形态：
++// - readFileTailBytes：大于窗口只取尾 / 小于窗口整读 / 缺失文件拒判（抛错，
++//   由扫描环 catch→continue 兜底语义）；
++// - evictUnseenSnapshotPaths：可见集外移除（含非空内层）/ 全不可见清空 /
++//   可见集内全保留。
++
++import { afterEach, describe, expect, it } from 'vitest';
++import { mkdtemp, rm, writeFile } from 'node:fs/promises';
++import { tmpdir } from 'node:os';
++import { join } from 'node:path';
++
++import {
++  evictUnseenSnapshotPaths,
++  readFileTailBytes,
++} from '../src/bg-task-scan.js';
++
++let dir: string;
++
++async function freshDir(): Promise<string> {
++  dir = await mkdtemp(join(tmpdir(), 'bg-task-scan-'));
++  return dir;
++}
++
++afterEach(async () => {
++  if (dir) await rm(dir, { recursive: true, force: true });
++});
++
++describe('readFileTailBytes', () => {
++  it('文件大于窗口时只取末尾窗口字节', async () => {
++    const d = await freshDir();
++    const marker = 'TAIL-MARKER-42';
++    const body = 'a'.repeat(200_000) + marker;
++    const p = join(d, 'big.jsonl');
++    await writeFile(p, body, 'utf8');
++    const tail = await readFileTailBytes(p, 1024);
++    expect(tail.length).toBe(1024);
++    expect(tail.endsWith(marker)).toBe(true);
++  });
++
++  it('文件小于窗口时整读', async () => {
++    const d = await freshDir();
++    const body = '短文件内容-short';
++    const p = join(d, 'small.jsonl');
++    await writeFile(p, body, 'utf8');
++    const tail = await readFileTailBytes(p, 64 * 1024);
++    expect(tail).toBe(body);
++  });
++
++  it('文件缺失时抛错（调用方 catch→continue 兜底）', async () => {
++    const d = await freshDir();
++    const p = join(d, 'missing.jsonl');
++    await expect(readFileTailBytes(p, 1024)).rejects.toThrow();
++  });
++});
++
++describe('evictUnseenSnapshotPaths', () => {
++  it('移除可见集外条目（含内层非空者）并返回计数', () => {
++    const snapshots = new Map<string, Map<string, string>>([
++      ['/logs/a.jsonl', new Map([['t1', 'completed']])],
++      ['/logs/b.jsonl', new Map([['t2', 'failed']])],
++      ['/logs/c.jsonl', new Map()],
++    ]);
++    const evicted = evictUnseenSnapshotPaths(
++      snapshots,
++      new Set(['/logs/a.jsonl']),
++    );
++    expect(evicted).toBe(2);
++    expect([...snapshots.keys()]).toEqual(['/logs/a.jsonl']);
++    expect(snapshots.get('/logs/a.jsonl')?.get('t1')).toBe('completed');
++  });
++
++  it('全部不可见时清空', () => {
++    const snapshots = new Map<string, Map<string, string>>([
++      ['/logs/a.jsonl', new Map([['t1', 'completed']])],
++      ['/logs/b.jsonl', new Map([['t2', 'stopped']])],
++    ]);
++    const evicted = evictUnseenSnapshotPaths(snapshots, new Set());
++    expect(evicted).toBe(2);
++    expect(snapshots.size).toBe(0);
++  });
++
++  it('可见集内条目全保留', () => {
++    const snapshots = new Map<string, Map<string, string>>([
++      ['/logs/a.jsonl', new Map([['t1', 'completed']])],
++      ['/logs/b.jsonl', new Map([['t2', 'failed']])],
++    ]);
++    const evicted = evictUnseenSnapshotPaths(
++      snapshots,
++      new Set(['/logs/a.jsonl', '/logs/b.jsonl']),
++    );
++    expect(evicted).toBe(0);
++    expect(snapshots.size).toBe(2);
++    expect(snapshots.get('/logs/b.jsonl')?.get('t2')).toBe('failed');
++  });
++});
+diff --git a/sillyhub-daemon/tests/interactive/claude-events.test.ts b/sillyhub-daemon/tests/interactive/claude-events.test.ts
+index f48b65f9e..b6dab7404 100644
+--- a/sillyhub-daemon/tests/interactive/claude-events.test.ts
++++ b/sillyhub-daemon/tests/interactive/claude-events.test.ts
+@@ -770,6 +770,100 @@ describe('status 会话信号（session-init-status）', () => {
+     }
+     norm.dispose();
+   });
++
++  it('2026-10-28-model-retry-visible：system/api_retry 帧 → status/api_retry 事件（此前静默丢弃）', () => {
++    const norm = makeNormalizer([]);
++    // SDK SDKAPIRetryMessage 形状（sdk.d.ts:3068-3080）：重试风暴期间逐次发出，
++    // 携带 attempt/max_retries/retry_delay_ms/error_status/error 全套可观测字段。
++    const retry = {
++      type: 'system',
++      subtype: 'api_retry',
++      attempt: 3,
++      max_retries: 10,
++      retry_delay_ms: 8000,
++      error_status: 429,
++      error: 'Request rejected (429) · [1311][当前订阅套餐暂未开放GLM-5.3]',
++      uuid: 'u-r1',
++      session_id: 's1',
++    } as unknown as SDKMessage;
++    expect(norm.normalizeMessage(retry)).toEqual([
++      {
++        type: 'status',
++        subtype: 'api_retry',
++        content: '',
++        metadata: {
++          attempt: 3,
++          max_retries: 10,
++          retry_delay_ms: 8000,
++          error_status: 429,
++          error: 'Request rejected (429) · [1311][当前订阅套餐暂未开放GLM-5.3]',
++        },
++      },
++    ]);
++    expect(safeParseAgentEvent(norm.normalizeMessage(retry)[0]!).success).toBe(true);
++    norm.dispose();
++  });
++
++  it('2026-10-28-model-retry-visible：api_retry 连接类（error_status=null）保留 null、缺字段不伪造、error 对象截断', () => {
++    const norm = makeNormalizer([]);
++    // 连接类重试：error_status=null（无 HTTP 响应），null 必须原样保留。
++    const connRetry = {
++      type: 'system',
++      subtype: 'api_retry',
++      attempt: 1,
++      max_retries: 10,
++      retry_delay_ms: 500,
++      error_status: null,
++      error: 'Connection error',
++      uuid: 'u-r2',
++      session_id: 's1',
++    } as unknown as SDKMessage;
++    expect(norm.normalizeMessage(connRetry)).toEqual([
++      {
++        type: 'status',
++        subtype: 'api_retry',
++        content: '',
++        metadata: {
++          attempt: 1,
++          max_retries: 10,
++          retry_delay_ms: 500,
++          error_status: null,
++          error: 'Connection error',
++        },
++      },
++    ]);
++    // 缺字段容错：只带 attempt 时 metadata 只含 attempt（不伪造其余键）。
++    const partialRetry = {
++      type: 'system',
++      subtype: 'api_retry',
++      attempt: 2,
++      uuid: 'u-r3',
++      session_id: 's1',
++    } as unknown as SDKMessage;
++    expect(norm.normalizeMessage(partialRetry)).toEqual([
++      {
++        type: 'status',
++        subtype: 'api_retry',
++        content: '',
++        metadata: { attempt: 2 },
++      },
++    ]);
++    // error 非字符串（对象形态漂移防御）：JSON.stringify + 截断 200。
++    const longObj = { message: 'x'.repeat(500) };
++    const objErrorRetry = {
++      type: 'system',
++      subtype: 'api_retry',
++      attempt: 4,
++      error: longObj,
++      uuid: 'u-r4',
++      session_id: 's1',
++    } as unknown as SDKMessage;
++    const objEvents = norm.normalizeMessage(objErrorRetry);
++    const meta = (objEvents[0] as { metadata?: Record<string, unknown> }).metadata;
++    expect(typeof meta?.['error']).toBe('string');
++    expect((meta?.['error'] as string).length).toBeLessThanOrEqual(200);
++    norm.dispose();
++  });
+ });
+ 
+ // ─────────────────────────────────────────────────────────────────────────────
+diff --git a/sillyhub-daemon/tests/interactive/session-manager-status-dispatch.test.ts b/sillyhub-daemon/tests/interactive/session-manager-status-dispatch.test.ts
+new file mode 100644
+index 000000000..5e0edf27e
+--- /dev/null
++++ b/sillyhub-daemon/tests/interactive/session-manager-status-dispatch.test.ts
+@@ -0,0 +1,138 @@
++// 2026-10-28-model-retry-visible task-02：api_retry status 事件分发单测。
++//
++// 证明链路：claude-events 归一化器产出 status/api_retry 事件（task-01）→
++// session-manager dispatchStatusEvent 新增 case → 落 [MODEL_RETRY] 单行 JSON
++// stdout 协议行（形态对齐 ql-20260917-006 [COMPACT_STATUS] 先例，经
++// deps.onTurnMessage 透传 backend 文本行落库 + SSE）。
++//
++// 直调 dispatchStatusEvent（跳过 SessionManager 全量 harness）：case 内仅消费
++// mgr.deps.onTurnMessage / state.currentRunId / state.sessionId / ev.metadata，
++// duck-type 最小替身即可（对齐 knowledge-hits-upload.ts 测试的最小替身惯例）。
++
++import { describe, it, expect, vi } from 'vitest';
++
++import { dispatchStatusEvent } from '../../src/interactive/session-manager/events.js';
++import type { AgentEvent } from '../../src/types.js';
++
++type OnTurnMessageReport = Record<string, unknown>;
++
++/** 捕获 onTurnMessage 的最小 mgr 替身（本 case 消费面仅 deps.onTurnMessage）。 */
++function makeMgr(captured: OnTurnMessageReport[]) {
++  return {
++    deps: {
++      onTurnMessage: vi.fn(
++        async (
++          _sessionId: string,
++          _runId: string,
++          report: OnTurnMessageReport,
++        ) => {
++          captured.push(report);
++        },
++      ),
++    },
++  } as unknown as Parameters<typeof dispatchStatusEvent>[0];
++}
++
++/** 最小 state 替身（本 case 消费面仅 sessionId / currentRunId）。 */
++function makeState(runId: string | undefined) {
++  return {
++    sessionId: 'sess-retry',
++    currentRunId: runId,
++  } as unknown as Parameters<typeof dispatchStatusEvent>[1];
++}
++
++function retryEvent(metadata: Record<string, unknown>): AgentEvent {
++  return {
++    type: 'status',
++    subtype: 'api_retry',
++    content: '',
++    metadata,
++  } as AgentEvent;
++}
++
++describe('dispatchStatusEvent — api_retry（2026-10-28-model-retry-visible）', () => {
++  it('429 重试事件落 [MODEL_RETRY] 单行 JSON stdout 协议行（对齐 COMPACT_STATUS 形态）', async () => {
++    const captured: OnTurnMessageReport[] = [];
++    const mgr = makeMgr(captured);
++    await dispatchStatusEvent(
++      mgr,
++      makeState('run-1'),
++      retryEvent({
++        attempt: 3,
++        max_retries: 10,
++        retry_delay_ms: 8000,
++        error_status: 429,
++        error: 'Request rejected (429) · [1311][当前订阅套餐暂未开放GLM-5.3]',
++      }),
++      false,
++    );
++    expect(captured).toHaveLength(1);
++    expect(mgr.deps.onTurnMessage).toHaveBeenCalledWith(
++      'sess-retry',
++      'run-1',
++      expect.anything(),
++    );
++    const report = captured[0]!;
++    expect(report['event_type']).toBe('text');
++    expect(report['channel']).toBe('stdout');
++    const content = report['content'] as string;
++    expect(content.startsWith('[MODEL_RETRY] ')).toBe(true);
++    const payload = JSON.parse(content.slice('[MODEL_RETRY] '.length)) as Record<
++      string,
++      unknown
++    >;
++    expect(payload).toEqual({
++      attempt: 3,
++      max_retries: 10,
++      retry_delay_ms: 8000,
++      error_status: 429,
++      error: 'Request rejected (429) · [1311][当前订阅套餐暂未开放GLM-5.3]',
++    });
++  });
++
++  it('连接类重试 error_status=null 原样保留（不伪造 0、不省略键）', async () => {
++    const captured: OnTurnMessageReport[] = [];
++    await dispatchStatusEvent(
++      makeMgr(captured),
++      makeState('run-1'),
++      retryEvent({ attempt: 1, max_retries: 10, retry_delay_ms: 500, error_status: null }),
++      false,
++    );
++    const payload = JSON.parse(
++      (captured[0]!['content'] as string).slice('[MODEL_RETRY] '.length),
++    ) as Record<string, unknown>;
++    expect(payload['error_status']).toBeNull();
++    expect('error' in payload).toBe(false);
++  });
++
++  it('无活动轮（currentRunId 空）丢弃——不落行不报错（同 compact runId 空守卫口径）', async () => {
++    const captured: OnTurnMessageReport[] = [];
++    const mgr = makeMgr(captured);
++    await dispatchStatusEvent(
++      mgr,
++      makeState(undefined),
++      retryEvent({ attempt: 1 }),
++      false,
++    );
++    expect(captured).toHaveLength(0);
++    expect(mgr.deps.onTurnMessage).not.toHaveBeenCalled();
++  });
++
++  it('error 超 200 字符截断；缺字段键缺省不伪造', async () => {
++    const captured: OnTurnMessageReport[] = [];
++    await dispatchStatusEvent(
++      makeMgr(captured),
++      makeState('run-1'),
++      retryEvent({ attempt: 2, error: 'y'.repeat(500) }),
++      false,
++    );
++    const payload = JSON.parse(
++      (captured[0]!['content'] as string).slice('[MODEL_RETRY] '.length),
++    ) as Record<string, unknown>;
++    expect(payload['attempt']).toBe(2);
++    expect(payload['error']).toBe('y'.repeat(200));
++    expect('max_retries' in payload).toBe(false);
++    expect('retry_delay_ms' in payload).toBe(false);
++    expect('error_status' in payload).toBe(false);
++  });
++});

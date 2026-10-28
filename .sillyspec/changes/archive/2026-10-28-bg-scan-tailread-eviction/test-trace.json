@@ -1,0 +1,56 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-28-bg-scan-tailread-eviction",
+  "rows": [
+    {
+      "anchor": "FR-01",
+      "row_id": "2026-10-28-bg-scan-tailread-eviction:flow:测试绑定FR-01",
+      "tests": [
+        "sillyhub-daemon/tests/bg-task-scan.test.ts「readFileTailBytes 文件小于窗口整读」",
+        "sillyhub-daemon/tests/bg-task-scan.test.ts「readFileTailBytes 文件缺失拒判」",
+        "sillyhub-daemon/tests/bg-task-scan.test.ts「readFileTailBytes 读大于窗口文件只取尾段」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-28-bg-scan-tailread-eviction"
+    },
+    {
+      "anchor": "FR-02",
+      "row_id": "2026-10-28-bg-scan-tailread-eviction:flow:测试绑定FR-02",
+      "tests": [
+        "sillyhub-daemon/tests/bg-task-scan.test.ts「evictUnseenSnapshotPaths 移除可见集外条目」",
+        "sillyhub-daemon/tests/bg-task-scan.test.ts「全不可见时清空」",
+        "sillyhub-daemon/tests/bg-task-scan.test.ts「可见集内条目全保留」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-28-bg-scan-tailread-eviction"
+    },
+    {
+      "anchor": "FR-03",
+      "row_id": "2026-10-28-bg-scan-tailread-eviction:flow:测试绑定FR-03",
+      "tests": [
+        "sillyhub-daemon/tests/bg-task-scan.test.ts「全文件六用例」",
+        "sillyhub-daemon/tests/knowledge-hits-flush.test.ts「既有回归」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-28-bg-scan-tailread-eviction"
+    }
+  ]
+}

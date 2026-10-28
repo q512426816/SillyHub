@@ -1,0 +1,30 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-28-bg-scan-tailread-eviction",
+  "reviewer": "subagent",
+  "verdict": "PASS",
+  "reviewedAgainst": "794725ca06115341f86812d92b09a73950135a05",
+  "findings": [
+    {
+      "severity": "P3",
+      "status": "accepted",
+      "title": "design 风险依据「rescan:false 完全由内存推导、无 fs 抖动面」与实现有出入：可见性仍受 fs.stat + 15min 新鲜度门",
+      "evidence": "discovery.ts:122-125 对每条 spawn 记录 fs.stat(exact)（失败返回 null 即静默丢弃目标）且要求 now-mtimeMs<=WINDOW_MS(15min, discovery.ts:64)——存活但静默超 15 分钟的会话日志会确定性掉出可见集→快照被淘汰→恢复写入后同值终态重报一次。后果已被 design 同节「backend 声明重复上报无害（同值信号，前端仅触发重拉）」裁决覆盖，旧实现该场景本就不产出新内容、无行为回归，故不影响 verdict；但依据表述应修正为「候选路径由内存 spawn 记录推导，可见性仍受 fs.stat 与 15min mtime 门」。",
+      "location": "sillyhub-daemon/src/agent-log/liveness/discovery.ts:122-125"
+    },
+    {
+      "severity": "P3",
+      "status": "accepted",
+      "title": "requirements.md 测试绑定用例名与实际测试标题措辞不逐字一致",
+      "evidence": "绑定写「readFileTailBytes 读大于窗口文件只取尾段」等，实际标题为「文件大于窗口时只取末尾窗口字节」等；两函数各三形态（大于窗口取尾/小于窗口整读/缺失拒判；集外移除/全不可见清空/可见全保留）逐一对应齐全且断言到位，绑定意图完整兑现，仅字符串层面漂移。",
+      "location": ".sillyspec/changes/2026-10-28-bg-scan-tailread-eviction/requirements.md:41-42"
+    }
+  ],
+  "dimensionNotes": {
+    "乱序": "ok",
+    "并发": "ok",
+    "切换": "ok",
+    "作用域": "ok"
+  },
+  "reviewedAt": "2026-10-28T08:18:24+08:00"
+}

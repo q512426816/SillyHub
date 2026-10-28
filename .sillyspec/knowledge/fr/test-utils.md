@@ -2005,3 +2005,66 @@ created_at: 2026-10-16T01:30:35.950Z
   confirmed_at: null
   source_change: 2026-10-27-sessions-panes-gap-remove
   status: active
+
+## FR-test-utils-106 _bgTaskFinalLoop 读日志改为 open+read 按区间读最后 64KB（文件小于窗口时整读），不再 readFile 全量进内存；读失败仍走既有 continue 下轮再看
+变更：2026-10-28-bg-scan-tailread-eviction
+状态：active
+摘要：大日志只读尾窗
+场景正文：
+- 场景：大日志只读尾窗 — Given 一个远大于 64KB 的 claude-code 日志；When 扫描环读取尾段；Then 仅末尾 64KB 字节进入内存（句柄 try/finally 关闭），提取逻辑与现状逐字等价
+全文：.sillyspec/changes/archive/2026-10-28-bg-scan-tailread-eviction/requirements.md#FR-01
+最近确认：6239db2300df4672b57ee50eb8da500d04ffd4b8
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-28-bg-scan-tailread-eviction:flow:测试绑定FR-01
+  tests: sillyhub-daemon/tests/bg-task-scan.test.ts「readFileTailBytes 文件小于窗口整读」 | sillyhub-daemon/tests/bg-task-scan.test.ts「readFileTailBytes 文件缺失拒判」 | sillyhub-daemon/tests/bg-task-scan.test.ts「readFileTailBytes 读大于窗口文件只取尾段」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-28-bg-scan-tailread-eviction
+  status: active
+
+## FR-test-utils-107 _bgTaskSnapshots 每轮按本轮 targets 可见集核对淘汰不再产出的 logPath（非空内层 Map 也可淘汰），消除只增不减
+变更：2026-10-28-bg-scan-tailread-eviction
+状态：active
+摘要：会话结束后路径淘汰
+场景正文：
+- 场景：会话结束后路径淘汰 — Given 快照表含 logPath A（内层有终态条目）且本轮 targets 已不含 A（会话终态 spawn 记录移除）；When 本轮扫描结束执行淘汰；Then A 被移除；本轮仍可见的 logPath B 全部保留、B 的终态基线不重报（首扫语义不变）
+全文：.sillyspec/changes/archive/2026-10-28-bg-scan-tailread-eviction/requirements.md#FR-02
+最近确认：6239db2300df4672b57ee50eb8da500d04ffd4b8
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-28-bg-scan-tailread-eviction:flow:测试绑定FR-02
+  tests: sillyhub-daemon/tests/bg-task-scan.test.ts「evictUnseenSnapshotPaths 移除可见集外条目」 | sillyhub-daemon/tests/bg-task-scan.test.ts「全不可见时清空」 | sillyhub-daemon/tests/bg-task-scan.test.ts「可见集内条目全保留」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-28-bg-scan-tailread-eviction
+  status: active
+
+## FR-test-utils-108 新增单测覆盖区间读（大于窗口取尾/小于窗口整读/文件缺失拒判）与淘汰（可见集外移除/全不可见清空/可见全保留）；daemon 相关既有测试回归零破坏
+变更：2026-10-28-bg-scan-tailread-eviction
+状态：active
+摘要：区间读与淘汰单测全绿
+场景正文：
+- 场景：区间读与淘汰单测全绿 — Given 新增 sillyhub-daemon/tests/bg-task-scan.test.ts；When 运行 vitest 该文件与相关既有测试；Then 全部通过
+全文：.sillyspec/changes/archive/2026-10-28-bg-scan-tailread-eviction/requirements.md#FR-03
+最近确认：6239db2300df4672b57ee50eb8da500d04ffd4b8
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-28-bg-scan-tailread-eviction:flow:测试绑定FR-03
+  tests: sillyhub-daemon/tests/bg-task-scan.test.ts「全文件六用例」 | sillyhub-daemon/tests/knowledge-hits-flush.test.ts「既有回归」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-28-bg-scan-tailread-eviction
+  status: active
