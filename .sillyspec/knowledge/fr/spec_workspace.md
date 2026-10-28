@@ -35,3 +35,30 @@ created_at: 2026-10-27T23:43:41.822Z
 - 场景：超阈值告警路径 — Given `memory.current` 写 1900、`memory.max` 写 2000（比例 0.95 > 0.8）；When 调用 `log_memory_watermark()`；Then 返回 0.95，log 符号发出 `spec_workspace.memory_watermark_high` warning
 全文：.sillyspec/changes/archive/2026-10-28-cgroup-v2-watermark-fix/requirements.md#FR-03
 最近确认：19b14831150ba84a4e522925f5223fe05507323e
+
+## FR-spec_workspace-001 TestComputeReparseScope 八用例改三元组解包并按新契约断言：rename/delete 入 changes/archive/<name> → (['<name>'], archive_hit=False, structural=True)；恰为 changes/archive 根 → (None, True, False) 兜底不变；纯标注/兜底/add 归档/零触发/混合去重语义不变仅改解包
+变更：2026-10-28-reparse-trigger-tests-realign
+状态：active
+摘要：rename 入归档走 scoped+structural
+场景正文：
+- 场景：rename 入归档走 scoped+structural — Given op=rename（旧侧活跃区、新侧 changes/archive/<name>）；When 调用 `_compute_reparse_scope([], [该 op])`；Then 返回 `(['<name>'], False, True)`——不再全量
+全文：.sillyspec/changes/archive/2026-10-28-reparse-trigger-tests-realign/requirements.md#FR-01
+最近确认：00df74b42338c5d02a9cb23a385ce07761fe66e8
+
+## FR-spec_workspace-002 TestArchivePathScoping 两用例（rename/delete 全量期望）改断言 scoped 列表；test_archive_full_reparse_still_deletes 仍过但机制描述与命名对齐 scoped 双名覆盖实际
+变更：2026-10-28-reparse-trigger-tests-realign
+状态：active
+摘要：sync 端到端 rename 入归档
+场景正文：
+- 场景：sync 端到端 rename 入归档 — Given 增量同步携带 rename op（活跃 → 归档）；When 同步完成 reparse 被调度；Then mock 收到 `scope == ["2026-08-13-old"]`（scoped 而非 None）
+全文：.sillyspec/changes/archive/2026-10-28-reparse-trigger-tests-realign/requirements.md#FR-02
+最近确认：00df74b42338c5d02a9cb23a385ce07761fe66e8
+
+## FR-spec_workspace-003 本文件 19 用例全绿；test_archive_scoped_reparse.py 既有契约测试回归零破坏；不改动任何 src 代码
+变更：2026-10-28-reparse-trigger-tests-realign
+状态：active
+摘要：回归全绿
+场景正文：
+- 场景：回归全绿 — Given 测试文件按新契约更新完成；When 运行 spec_workspace 测试目录；Then 本文件 19 用例全绿且既有契约测试零失败
+全文：.sillyspec/changes/archive/2026-10-28-reparse-trigger-tests-realign/requirements.md#FR-03
+最近确认：00df74b42338c5d02a9cb23a385ce07761fe66e8

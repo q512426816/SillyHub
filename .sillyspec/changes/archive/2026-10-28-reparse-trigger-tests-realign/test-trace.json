@@ -1,0 +1,52 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-28-reparse-trigger-tests-realign",
+  "rows": [
+    {
+      "anchor": "FR-01",
+      "row_id": "2026-10-28-reparse-trigger-tests-realign:flow:测试绑定FR-01",
+      "tests": [
+        "backend/app/modules/spec_workspace/tests/test_incremental_reparse_trigger.py「TestComputeReparseScope 八用例（更新后）」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-28-reparse-trigger-tests-realign"
+    },
+    {
+      "anchor": "FR-02",
+      "row_id": "2026-10-28-reparse-trigger-tests-realign:flow:测试绑定FR-02",
+      "tests": [
+        "backend/app/modules/spec_workspace/tests/test_incremental_reparse_trigger.py「TestArchivePathScoping rename/delete scoped 断言（更新后）」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-28-reparse-trigger-tests-realign"
+    },
+    {
+      "anchor": "FR-03",
+      "row_id": "2026-10-28-reparse-trigger-tests-realign:flow:测试绑定FR-03",
+      "tests": [
+        "backend/app/modules/spec_workspace/tests/test_archive_scoped_reparse.py「回归」",
+        "backend/app/modules/spec_workspace/tests/test_incremental_reparse_trigger.py「全文件」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-28-reparse-trigger-tests-realign"
+    }
+  ]
+}
