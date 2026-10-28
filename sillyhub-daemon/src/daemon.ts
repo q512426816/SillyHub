@@ -109,6 +109,11 @@ import { listRoots } from './roots-rpc.js';
 import { LivenessTailer, type WatchTarget } from './agent-log/liveness/tailer.js';
 import { discoverLivenessWatchTargets } from './agent-log/liveness/discovery.js';
 import { extractTaskNotifications } from './agent-log/parse-claude-code-jsonl.js';
+// 2026-10-28-bg-scan-tailread-eviction：扫描环纯函数件（区间读 + 快照淘汰）。
+import {
+  evictUnseenSnapshotPaths,
+  readFileTailBytes,
+} from './bg-task-scan.js';
 // R6（ql-20260908-006）：liveness 推送 root/workspace 归属走 policy 层边界敏感判定。
 import { isPathUnderAnyRoot } from './policy/path-utils.js';
 import {
@@ -6936,8 +6941,6 @@ export class Daemon {
    */
   private async _bgTaskFinalLoop(signal: AbortSignal): Promise<void> {
     const BG_SCAN_TAIL_BYTES = 64 * 1024;
-    const { readFile } = await import('node:fs/promises');
-    const { stat } = await import('node:fs/promises');
     while (!signal.aborted) {
       try {
         const targets = discoverLivenessWatchTargets({
@@ -6951,15 +6954,16 @@ export class Daemon {
           rescan: false,
           resolveWorkspace: () => 'daemon',
         });
+        // 本轮可见集（2026-10-28-bg-scan-tailread-eviction）：淘汰的核对基准。
+        const seenPaths = new Set<string>();
         for (const t of targets) {
           if (t.format !== 'claude-code-jsonl') continue;
           if (!t.agentSessionId) continue;
+          seenPaths.add(t.logPath);
           let tail = '';
           try {
-            const st = await stat(t.logPath);
-            const start = Math.max(0, st.size - BG_SCAN_TAIL_BYTES);
-            const fh = await readFile(t.logPath);
-            tail = fh.subarray(start).toString('utf8');
+            // 区间读只取尾窗（readFile 全量读入再切片的内存峰值面已修）
+            tail = await readFileTailBytes(t.logPath, BG_SCAN_TAIL_BYTES);
           } catch {
             continue; // 文件消失/读失败：下轮再看
           }
@@ -6994,12 +6998,16 @@ export class Daemon {
               });
             }
           }
-          // ended 清理对齐 liveness R9：路径不再产出时防 Map 只增不减
-          if (this._bgTaskSnapshots.size > 200) {
-            for (const [p2, m] of this._bgTaskSnapshots) {
-              if (m.size === 0) this._bgTaskSnapshots.delete(p2);
-            }
-          }
+        }
+        // ended 清理对齐 liveness R9（2026-10-28-bg-scan-tailread-eviction 修实）：
+        // 按本轮可见集淘汰不再产出的 logPath——旧「只删空内层 Map」实为空操作
+        // （内层一旦有条目永不为空），Map 只增不减；可见集内条目原样保留。
+        const evicted = evictUnseenSnapshotPaths(this._bgTaskSnapshots, seenPaths);
+        if (evicted > 0) {
+          this._logger.debug('bg_task_snapshots_evicted', {
+            evicted,
+            kept: this._bgTaskSnapshots.size,
+          });
         }
         this._bgTaskSeeded = true;
       } catch (e) {
