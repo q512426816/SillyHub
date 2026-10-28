@@ -103,6 +103,10 @@ import { isAssistantApiErrorText } from "@/components/agent-log/normalize";
  *   - kind=compact_status：[ASSISTANT] [COMPACT_STATUS] 前缀行（daemon 落库的压缩
  *     过程状态协议行，phase=compacting/success/failed——运行中轮渲染实时
  *     「上下文正在重新压缩」提示，终态轮不渲染）
+ *   - kind=model_retry：[ASSISTANT] [MODEL_RETRY] 前缀行（2026-10-28-model-retry-
+ *     visible：daemon 落库的模型 API 重试过程协议行，attempt/max_retries/
+ *     error_status/error 单行 JSON——运行中轮渲染「模型限流重试中 第N/M次」实时
+ *     提示，终态轮不渲染，失败原因由 RunErrorItem 失败卡承担）
  *   - kind=stderr：channel=stderr
  *   - kind=reply：其余（剥 [ASSISTANT]/[LOG:\w+] 前缀）
  *
@@ -117,6 +121,7 @@ export type SessionLogSegmentKind =
   | "skill"
   | "compact"
   | "compact_status"
+  | "model_retry"
   | "stderr"
   | "override"
   | "file"
@@ -402,6 +407,18 @@ export function classifySessionLog(
       text: trimmed.replace(/^\[ASSISTANT\]\s?\[COMPACT_STATUS\]\s?/, ""),
     };
   }
+  // 2026-10-28-model-retry-visible：daemon 落库的模型 API 重试过程协议行
+  // （[MODEL_RETRY] + 单行 JSON，attempt/max_retries/retry_delay_ms/error_status/
+  // error）——运行中轮渲染「模型限流重试中 第N/M次」实时提示；text 保留剥前缀
+  // 后的 JSON 原文供渲染层解析，不进对话正文与投影。判定位必须先于下方
+  // isAssistantApiErrorText 丢弃规则——载荷 error 常含 "Request rejected (429)"
+  // 字样，晚于丢弃规则会整行吞掉（丢数据）。
+  if (/^\[ASSISTANT\]\s*\[MODEL_RETRY\]/.test(trimmed)) {
+    return {
+      kind: "model_retry",
+      text: trimmed.replace(/^\[ASSISTANT\]\s?\[MODEL_RETRY\]\s?/, ""),
+    };
+  }
   // ql-20260904-013：CLI 合成鉴权行（"[ASSISTANT] Not logged in · Please run
   // /login"，CLI 把模型网关 401 误报为本地未登录）与模型网关错误行（"API Error:
   // …" / "Request rejected"）不是 agent 答复——丢弃正文，展示由 turn.errorDetail
@@ -632,6 +649,20 @@ export type TurnSegment =
       kind: "compact_status";
       id: string;
       /** 剥前缀后的 JSON 原文（渲染层解析 phase/error）。 */
+      text: string;
+      ts: number | null;
+    }
+  | {
+      /**
+       * 模型 API 重试过程段（2026-10-28-model-retry-visible）：daemon 落库的
+       * [MODEL_RETRY] 协议行（JSON 载荷 attempt/max_retries/retry_delay_ms/
+       * error_status/error）。运行中轮渲染「模型限流重试中 第N/M次」实时提示；
+       * 终态轮对话正文不渲染（失败原因由 RunErrorItem 失败卡承担），状态条
+       * currentActivity 回退链消费（替代重试风暴期间的恒「思考中」）。
+       */
+      kind: "model_retry";
+      id: string;
+      /** 剥前缀后的 JSON 原文（渲染层解析 attempt/max_retries/error）。 */
       text: string;
       ts: number | null;
     }
@@ -1781,6 +1812,23 @@ export function applyLogToSegments(
           {
             kind: compactKind,
             id: makeUniqueSegmentId(ids(), segmentIdBase(input, compactKind, ts)),
+            text: seg.text,
+            ts,
+          },
+        ]);
+      }
+      break;
+    case "model_retry":
+      // 2026-10-28-model-retry-visible：模型重试过程协议行——同 compact_status
+      // 的独立过程段平铺形态（不进兼容投影；渲染/状态条消费见 turn-segment-views
+      // 与 turn-status-bar）。kind 提局部 const 同上（窄化不跨回调边界）。
+      {
+        const retryKind = seg.kind;
+        segments = applyToBucket(segments, bucketId, routeSubagentType, (children) => [
+          ...children,
+          {
+            kind: retryKind,
+            id: makeUniqueSegmentId(ids(), segmentIdBase(input, retryKind, ts)),
             text: seg.text,
             ts,
           },

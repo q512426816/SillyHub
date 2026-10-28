@@ -1567,6 +1567,56 @@ describe("压缩摘要与压缩状态协议行（ql-20260917-006）", () => {
   });
 });
 
+describe("模型重试协议行（2026-10-28-model-retry-visible）", () => {
+  const retryPayload = JSON.stringify({
+    attempt: 3,
+    max_retries: 10,
+    retry_delay_ms: 8000,
+    error_status: 429,
+    error: "Request rejected (429) · [1311][当前订阅套餐暂未开放GLM-5.3]",
+  });
+
+  it("[ASSISTANT] [MODEL_RETRY] 行 → kind=model_retry 段，JSON 载荷原文进 text（剥前缀）", () => {
+    const seg = classifySessionLog(
+      `[ASSISTANT] [MODEL_RETRY] ${retryPayload}`,
+      "stdout",
+      null,
+    );
+    expect(seg?.kind).toBe("model_retry");
+    expect(seg?.text).toBe(retryPayload);
+  });
+
+  it("判定位先于 reply 兜底与 API Error 丢弃规则：载荷含 Request rejected 字样不被吞", () => {
+    // 载荷 error 内含 "Request rejected (429)"——若分类晚于 isAssistantApiErrorText
+    // 会被整行丢弃（丢数据）；必须先命中 model_retry 分支。
+    const turn = applyAll([
+      makeLog("r1", "stdout", `[ASSISTANT] [MODEL_RETRY] ${retryPayload}`),
+    ]);
+    expect(turn.segments).toHaveLength(1);
+    expect(turn.segments[0]?.kind).toBe("model_retry");
+  });
+
+  it("独立过程段按序平铺：不进对话正文（output 空）与兼容投影（processItems 空）", () => {
+    const turn = applyAll([
+      makeLog("1", "stdout", "[ASSISTANT] 正常回复先到"),
+      makeLog("r1", "stdout", `[ASSISTANT] [MODEL_RETRY] ${retryPayload}`),
+    ]);
+    expect(turn.segments.map((s) => s.kind)).toEqual(["text", "model_retry"]);
+    expect(turn.output).toBe("正常回复先到");
+    expect(turn.processItems).toEqual([]);
+  });
+
+  it("历史批量路径 logsToSegments 与实时路径一致", () => {
+    const logs = [
+      makeLog("r1", "stdout", `[ASSISTANT] [MODEL_RETRY] ${retryPayload}`),
+    ];
+    const live = applyAll(logs);
+    const batch = logsToSegments(logs);
+    expect(batch.map((s) => s.kind)).toEqual(live.segments.map((s) => s.kind));
+    expect(batch[0]?.kind).toBe("model_retry");
+  });
+});
+
 /* ───────── 2026-10-13-slim-subagent-false-running：slim 截断配对键回退 + 孤儿 stub ───────── */
 
 describe("slim 截断行回退 toolUseId（2026-10-13-slim-subagent-false-running / FR-02）", () => {
