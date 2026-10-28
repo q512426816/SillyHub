@@ -1,0 +1,34 @@
+{"ts":1793155581113,"kind":"file","stage":"proposal","detail":"proposal.md 出现","provisional":true}
+{"ts":1793155581113,"kind":"file","stage":"requirements","detail":"requirements.md 出现","provisional":true}
+{"ts":1793155581113,"kind":"file","stage":"design","detail":"design.md 出现","provisional":true}
+{"ts":1793155581113,"kind":"file","stage":"tasks","detail":"tasks.md 出现","provisional":true}
+{"ts":1793155713927,"kind":"file-update","stage":"requirements","detail":"requirements.md 内容变更","provisional":true}
+{"ts":1793155753847,"kind":"file-update","stage":"design","detail":"design.md 内容变更","provisional":true}
+{"ts":1793155786919,"kind":"file-update","stage":"tasks","detail":"tasks.md 内容变更","provisional":true}
+{"ts":1793156057580,"kind":"task-done","stage":"tasks","detail":"checked 0→1","provisional":true,"source":"task-tick"}
+{"ts":1793156060366,"kind":"file-update","stage":"tasks","detail":"tasks.md 内容变更","provisional":true}
+{"ts":1793156060366,"kind":"task-done","stage":"tasks","detail":"checked 0→1","provisional":true}
+{"ts":1793156074603,"kind":"task-done","stage":"tasks","detail":"checked 1→2","provisional":true,"source":"task-tick"}
+{"ts":1793156077476,"kind":"file-update","stage":"tasks","detail":"tasks.md 内容变更","provisional":true}
+{"ts":1793156077476,"kind":"task-done","stage":"tasks","detail":"checked 1→2","provisional":true}
+{"ts":1793156104442,"kind":"task-done","stage":"tasks","detail":"checked 2→3","provisional":true,"source":"task-tick"}
+{"ts":1793156104477,"kind":"file-update","stage":"tasks","detail":"tasks.md 内容变更","provisional":true}
+{"ts":1793156104477,"kind":"task-done","stage":"tasks","detail":"checked 2→3","provisional":true}
+{"ts":1793156168106,"kind":"warning","stage":null,"rule":"scope-drift","severity":"warning","detail":"声明面之外的代码文件被改：backend/openapi.json——范围漂移嫌疑（并行会话改动/越界，人判）","provisional":true}
+{"ts":1793156253085,"kind":"task-done","stage":"tasks","detail":"checked 3→4","provisional":true,"source":"task-tick"}
+{"ts":1793156253598,"kind":"file-update","stage":"tasks","detail":"tasks.md 内容变更","provisional":true}
+{"ts":1793156257113,"kind":"commit","stage":null,"detail":"085a19fa9","provisional":true}
+{"ts":1793156276959,"kind":"file-update","stage":"tasks","detail":"tasks.md 内容变更","provisional":true}
+{"ts":1793156276959,"kind":"task-done","stage":"tasks","detail":"checked 2→3","provisional":true}
+{"ts":1793156276959,"kind":"commit","stage":null,"detail":"a63af7f62","provisional":true}
+{"ts":1793156300489,"kind":"file-update","stage":"tasks","detail":"tasks.md 内容变更","provisional":true}
+{"ts":1793156300489,"kind":"task-done","stage":"tasks","detail":"checked 3→4","provisional":true}
+{"ts":1793156333859,"kind":"commit","stage":null,"detail":"56c1f37d8","provisional":true}
+{"ts":1793157202236,"kind":"file-update","stage":"design","detail":"design.md 内容变更","provisional":true}
+{"ts":1793157252123,"kind":"commit","stage":null,"detail":"5a38cc907","provisional":true}
+{"ts":1793157252540,"kind":"warning","stage":null,"rule":"scope-drift","severity":"warning","detail":"声明面之外的代码文件被改：frontend/src/lib/api/llm-providers.ts——范围漂移嫌疑（并行会话改动/越界，人判）","provisional":true}
+{"ts":1793157259890,"kind":"warning","stage":null,"rule":"scope-drift","severity":"warning","detail":"声明面之外的代码文件被改：frontend/src/components/sessions/session-config-bar.tsx——范围漂移嫌疑（并行会话改动/越界，人判）","provisional":true}
+{"ts":1793157303735,"kind":"warning","stage":null,"rule":"scope-drift","severity":"warning","detail":"声明面之外的代码文件被改：frontend/src/components/daemon/session-panel/session-panel-dialog.tsx——范围漂移嫌疑（并行会话改动/越界，人判）","provisional":true}
+{"ts":1793157407545,"kind":"warning","stage":null,"rule":"scope-drift","severity":"warning","detail":"声明面之外的代码文件被改：frontend/src/components/sessions/__tests__/session-config-bar.test.tsx——范围漂移嫌疑（并行会话改动/越界，人判）","provisional":true}
+{"ts":1793157431144,"kind":"warning","stage":null,"rule":"scope-drift","severity":"warning","detail":"声明面之外的代码文件被改：frontend/src/lib/api/__tests__/llm-providers.test.ts——范围漂移嫌疑（并行会话改动/越界，人判）","provisional":true}
+{"ts":1793157451049,"kind":"warning","stage":null,"rule":"scope-drift","severity":"warning","detail":"声明面之外的代码文件被改：frontend/src/components/daemon/__tests__/session-panel-dialog.test.tsx——范围漂移嫌疑（并行会话改动/越界，人判）","provisional":true}

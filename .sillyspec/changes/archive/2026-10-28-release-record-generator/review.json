@@ -1,0 +1,58 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-28-release-record-generator",
+  "reviewer": "general-purpose-subagent",
+  "verdict": "PASS",
+  "reviewedAgainst": "5a38cc907fba2b2f527a74f152c7fad83e7f7ed1",
+  "findings": [
+    {
+      "severity": "P2",
+      "status": "resolved",
+      "title": "空 commits 区间落 [] 致平台判 invalid：同 commit 重部署场景产出不合规文件，自检与 validate 双双漏检；skill「产出即合规」绝对化表述在该场景不成立（披露边界 e 裁决：不可接受，由本条承载）",
+      "evidence": "修复提交 761e19ae9：空集分支改写行内流序列 COMMITS_SECTION=\"commits: []\"（deploy/scripts/gen-release-record.sh:124-129，CONTENT 模板 141 行插值），diff 范围仅此分支+模板行。增量复审沙箱实测（mktemp -d，未触真目录）：--commit-from=$(git rev-parse --short=12 HEAD)（锚点==HEAD 空区间）生成文件第 9 行确为 `commits: []` 行内流序列；--validate 同沙箱退出码 0 坏件 0；pyyaml（平台同款解析器，backend/app/modules/deploy_records/service.py:21,100）解析 frontmatter 断言 commits==[] 且 seq 为 int（50）、8 字段齐。常规锚点路径回归（不带 --commit-from，锚 ce842447d）：commits 块仍为多行列表（9 条），validate 退出码 0，pyyaml 解析 OK（含 \\ 转义与消息内联 `---` 均无误，平台 _parse_frontmatter 按行找围栏不受消息内联 --- 影响，service.py:69-82）。捆绑的「产出即合规」声明（脚本头 line 5 + deploy-to-server/SKILL.md:171）现对全部生成路径（默认锚/--commit-from 覆盖含空区间/null 锚 -20）成立。",
+      "location": "deploy/scripts/gen-release-record.sh:124"
+    },
+    {
+      "severity": "P3",
+      "status": "resolved",
+      "title": "design 防线表述与代码不符：临时文件实际建在目标目录内（mktemp \"$TARGET_DIR/...\"），写失败/中断路径留隐藏残留，仅自检失败路径有 rm",
+      "evidence": "修复提交 5a38cc907：design.md 做法概述改为「临时文件由 mktemp 建在目标目录内（隐藏文件 .gen-release.*），自检失败即 rm、中断最坏残留隐藏临时件——无 .md 后缀，平台扫描与 --validate 均不受影响，目标目录不出现可见半成品」。与代码逐点核对一致：line 177 mktemp \"$TARGET_DIR/.gen-release.XXXXXX\" 确在目标目录内、隐藏、无 .md 后缀；line 179-181 自检失败 rm 后退出；printf 写失败（set -e 退出无 rm）与 mv 前中断对应「中断最坏残留隐藏临时件」；同目录 mv 原子性（line 183）不变；平台不可见有据（service.py:240 后缀过滤 + validate *.md glob）。注：design.md 此前未纳管，5a38cc907 首次提交落库，内容与首评所见一致，无行为变化。",
+      "location": ".sillyspec/changes/2026-10-28-release-record-generator/design.md:12"
+    },
+    {
+      "severity": "P3",
+      "status": "accepted",
+      "title": "边界已裁决：可接受——b) 锚点非 null 但 git 不可解析时回退 HEAD~20..HEAD（design 只声明了 null→-20 变体）；增量复审确认修复未触及该路径（lines 110-115 原样）",
+      "evidence": "lines 110-115：ANCHOR 非 null 但 rev-parse --verify 失败 → RANGE=HEAD~20..HEAD，行为与已声明的 null 锚 -20 等价（最近 20 条），属优雅降级而非错误路径；design.md:11 措辞未覆盖此变体，记一笔措辞缺口，行为本身接受。761e19ae9/5a38cc907 均未改动该分支。",
+      "location": "deploy/scripts/gen-release-record.sh:110"
+    },
+    {
+      "severity": "P3",
+      "status": "accepted",
+      "title": "边界已裁决：可接受——a) seq 全局语义固定随主仓 docs/releases，--dir 仅换校验/生成目标目录；增量复审确认修复未触及取号（line 76 原样）",
+      "evidence": "取号恒走 next-release-seq.sh（line 76），其内部硬编码扫主仓 docs/releases（next-release-seq.sh:17），--dir 不影响全局 seq；锚点扫描亦固定 $RELEASES_DIR（line 95，注释 line 92 明示）；design.md:37（盲维 Q4）已声明。沙箱产物借用的只是只读预览号，不写主仓（本次增量复审沙箱实测再次印证：seq=50 为预览号，主仓 docs/releases 无新文件）。",
+      "location": "deploy/scripts/gen-release-record.sh:76"
+    },
+    {
+      "severity": "P3",
+      "status": "accepted",
+      "title": "边界已裁决：可接受——c) NNN 当天序号按 --dir 目标目录计（沙箱产物 NNN=001）；增量复审实测一致（两沙箱均 001）",
+      "evidence": "lines 80-89：NNN_MAX 遍历 \"$TARGET_DIR\"/${TODAY}-*.md 取最大+1，沙箱空目录自然得 001；design.md:11（同日期前缀文件最大值+1）+ design.md:37（--dir 仅换生成目标目录）联合已声明，与 seq 全局语义分工正确。本次增量复审两个沙箱产物 NNN 均为 001，行为未变。",
+      "location": "deploy/scripts/gen-release-record.sh:82"
+    },
+    {
+      "severity": "P3",
+      "status": "accepted",
+      "title": "边界已裁决：可接受——d) 双会话并发生成同 seq/NNN 不设防，靠既有单部署收尾惯例；增量复审确认修复无并发面变化",
+      "evidence": "design.md:25/29 声明与手工现状同风险面、不引入新竞争面——核实属实：gen-release-record.sh 与 next-release-seq.sh 均无锁、无跨调用状态，seq/NNN 生成瞬间现算；文件名含 HEAD 短 sha，同 HEAD 并发写同内容后写覆盖，与手工口径一致。声明如实。761e19ae9 仅改字符串组装分支，不增任何共享状态。",
+      "location": ".sillyspec/changes/2026-10-28-release-record-generator/design.md:25"
+    }
+  ],
+  "dimensionNotes": {
+    "乱序": "ok",
+    "并发": "ok",
+    "切换": "ok",
+    "作用域": "ok"
+  },
+  "reviewedAt": "2026-10-28T11:21:29+08:00"
+}

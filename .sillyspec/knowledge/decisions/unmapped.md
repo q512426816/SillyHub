@@ -2507,3 +2507,11 @@ supersedes：D-008@v1
 锚点：未记录
 最近确认：1105efc2682cce5e8cbfe50ebf9137c44423011b
 理由：答：最大风险是 SQL 直改生产库绕过应用层校验（API 取 token 不可行——bootstrap 密码已与实际不符，401）。对策：单行 UPDATE、新旧值留痕、改后立即容器视角核验；不做任何凭据重置。 放弃方案： - A（compose 增设专用挂载 /srv/releases）：要动共享 compose 文件且本地语义无增益——放弃，改 env 换源零 compose 改动。 - B（走 API 建改工作区）：管理密码 401 取不到 token，重置凭据超出本变更范围且引入安全面动作——放弃，走 SQL 单行 UPDATE。 - C（/tmp 旧目录双写过渡）：双源并存违反单一数据源目标，/tmp 侥幸链正是本变更要消灭的对象——放弃，验证通过后一次性删除旧目录。
+
+## D-unmapped-313@v1 设计期风险与放弃方案（底稿）
+状态：implemented
+变更：2026-10-28-release-record-generator
+原编号：D-001@v1
+锚点：未记录
+最近确认：5a38cc907fba2b2f527a74f152c7fad83e7f7ed1
+理由：答：最大风险是脚本生成的 frontmatter 与平台解析器实际口径仍有隐性偏差（YAML 方言、字段类型）——对策：生成后自检 + 沙箱产物对照平台口径逐字段核对（task-03），并以 seq48（claude-code 手写、平台判 valid）作对照样本。 放弃方案： - A（脚本内自算 seq）：next-release-seq.sh 是 2026-10-18 固化的单一取号源，双实现必漂移——放弃，改为调用。 - B（走 API 取锚点）：生产 token 不可用（bootstrap 密码失配 401），且 skill 明文「不可达则看本地记录」——放弃 API 路径，本地文件推导为准。 - C（生成器直接 scp 同步服务器）：同步属部署收尾动作、依赖 ssh key 与时机，塞进生成器会让「写记录」与「部署收尾」耦合（本地流程也会被迫碰 ssh）——放弃，生成器只打印指引，同步仍由 deploy-to-server 流程执行。

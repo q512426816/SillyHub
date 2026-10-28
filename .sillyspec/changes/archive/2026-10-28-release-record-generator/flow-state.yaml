@@ -1,0 +1,46 @@
+tier: thin
+legacy_fallback: false
+substeps:
+  artifacts: done
+  ledger: done
+  patch: done
+  review: done
+  probes: done
+  distill: done
+  archive: done
+  events: done
+born_face: thin
+with_tasks: false
+review_force: null
+input: >-
+  发布记录生成器脚本取号锚点与校验
+
+  动机：发布记录两起页面不可见事故同源——手拼 frontmatter 漏闭合标记（seq49 与 10-25 两份），且取号/锚点靠手工多源拼接易错；deploy-to-server skill
+  已有多处口径（取号器单一源、锚点取法、镜像同步命令）。把生成收口成一个脚本：产出即合规、锚点自动推导、校验可扫历史，输出附带同步指引防漏步。
+
+
+  成功标准：
+
+  - 脚本执行后产出 docs/releases/YYYY-MM-DD-<当天序号>-<HEAD短sha>.md，frontmatter 成对 --- 标记 + 8 字段齐备，seq 取自
+  deploy/scripts/next-release-seq.sh（全局序号），平台解析口径可判 valid
+
+  - commit_from 锚点自动取本地最大 seq 记录的 commit_to（无记录写 null），调用方无需手工提供
+
+  - 生成后自检失败即非零退出不落半成品；--validate 模式扫描既有记录报告坏文件（支持 --dir 指定目录便于沙箱验证）
+
+  - 输出末尾打印镜像目录同步 scp 命令与提交 pathspec 提醒（防漏同步步骤）
+autopilot: false
+prestage_ack: true
+baseline_commit: 7840a3a9db5354ab53f739c6d58432c4faf6df4c
+updatedAt: '2026-10-28T03:23:01.377Z'
+cross_baselines:
+  sillyspec: b195fe1faa7eb9a1cf6379a7b8a09df2549d4a4d
+baseline_sha256: 52526674d6214ed8555d4761df4a37676da6bcc021a70772b2d08281e80b4a93
+spec_approved: true
+spec_approved_at: '2026-10-28T02:51:48.067Z'
+spec_approved_by: zcode-agent-release-record-generator
+spec_approved_channel: user-confirmed
+spec_attested_by: zcode-agent-release-record-generator
+batch_ticked: true
+gate_summary: 'test: —｜lint: —｜门文件 4 个'
+

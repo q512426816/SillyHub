@@ -65,3 +65,4 @@ multi-agent-platform 的一体化部署编排组件，用 Docker Compose 把 bac
 - 2026-10-22-session-trajectory-third-view | 把会话轨迹从「进度」视图内的第二层呈现开关上移为与「对话 / 进度」并列的第三个顶层视图，同时修复轨…
 - 2026-10-22-agent-profiles-page-restyle | 智能体档案列表页重设计
 - 2026-10-24-backend-mem-limit-raise | 提升 backend 容器内存限额防 OOM
+- 2026-10-28-release-record-generator | 发布记录生成器脚本取号锚点与校验

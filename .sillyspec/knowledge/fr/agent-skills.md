@@ -277,3 +277,31 @@ created_at: 2026-10-19T02:55:25.079Z
 摘要：主路径
 全文：.sillyspec/changes/archive/2026-10-28-release-mirror-persist/requirements.md#FR-03
 最近确认：1105efc2682cce5e8cbfe50ebf9137c44423011b
+
+## FR-agent-skills-020 脚本执行后产出 docs/releases/YYYY-MM-DD-<当天序号>-<HEAD短sha>.md，frontmatter 成对 --- 标记 + 8 字段齐备，seq 取自 deploy/scripts/next-release-seq.sh（全局序号），平台解析口径可判 valid
+变更：2026-10-28-release-record-generator
+状态：active
+摘要：主路径
+全文：.sillyspec/changes/archive/2026-10-28-release-record-generator/requirements.md#FR-01
+最近确认：5a38cc907fba2b2f527a74f152c7fad83e7f7ed1
+
+## FR-agent-skills-021 commit_from 锚点自动取本地最大 seq 记录的 commit_to（无记录写 null），调用方无需手工提供
+变更：2026-10-28-release-record-generator
+状态：active
+摘要：主路径
+全文：.sillyspec/changes/archive/2026-10-28-release-record-generator/requirements.md#FR-02
+最近确认：5a38cc907fba2b2f527a74f152c7fad83e7f7ed1
+
+## FR-agent-skills-022 生成后自检失败即非零退出不落半成品；--validate 模式扫描既有记录报告坏文件（支持 --dir 指定目录便于沙箱验证）
+变更：2026-10-28-release-record-generator
+状态：active
+摘要：坏件检出
+全文：.sillyspec/changes/archive/2026-10-28-release-record-generator/requirements.md#FR-03
+最近确认：5a38cc907fba2b2f527a74f152c7fad83e7f7ed1
+
+## FR-agent-skills-023 输出末尾打印镜像目录同步 scp 命令与提交 pathspec 提醒（防漏同步步骤）
+变更：2026-10-28-release-record-generator
+状态：active
+摘要：主路径
+全文：.sillyspec/changes/archive/2026-10-28-release-record-generator/requirements.md#FR-04
+最近确认：5a38cc907fba2b2f527a74f152c7fad83e7f7ed1

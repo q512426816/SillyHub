@@ -1,0 +1,77 @@
+{
+  "change": "2026-10-28-release-record-generator",
+  "baseline": "7840a3a9db5354ab53f739c6d58432c4faf6df4c",
+  "head": "5a38cc907fba2b2f527a74f152c7fad83e7f7ed1",
+  "files": [
+    "deploy/scripts/gen-release-record.sh"
+  ],
+  "totals": {
+    "files": 1,
+    "additions": 194,
+    "deletions": 0
+  },
+  "savedAt": "2026-10-28T03:14:46.151Z",
+  "note": "flow done 时点冻结（本变更可归属交付面：baseline..HEAD 提交面过滤 .sillyspec/ 只留 .sillyspec/docs/ 交付文档 + 独占树未提交交付；治理工件目录不入冻结——2026-10-12-close-trace-freeze-integrity FR-01）",
+  "modules": [
+    {
+      "id": "deploy",
+      "files": 1,
+      "doc": "docs/multi-agent-platform/modules/deploy.md",
+      "docTouched": false,
+      "docMissing": false
+    }
+  ],
+  "uncoveredDirs": [],
+  "moduleMaps": [
+    "docs/backend/modules/_module-map.yaml",
+    "docs/frontend/modules/_module-map.yaml",
+    "docs/multi-agent-platform/modules/_module-map.yaml",
+    "docs/SillyHub/modules/_module-map.yaml",
+    "docs/sillyhub-daemon/modules/_module-map.yaml"
+  ],
+  "acceptedDirtyGap": 2,
+  "scopeAudit": {
+    "mode": "full-flow",
+    "ok": true,
+    "degradedReason": null,
+    "baseAnchor": "7840a3a9db5354ab53f739c6d58432c4faf6df4c",
+    "totals": {
+      "files": 3,
+      "additions": 194,
+      "deletions": 0
+    },
+    "rows": [
+      {
+        "path": "deploy/scripts/gen-release-record.sh",
+        "additions": 194,
+        "deletions": 0,
+        "kind": "new",
+        "planned": "新增",
+        "verdict": "planned"
+      },
+      {
+        "path": ".zcode/skills/deploy-to-server/SKILL.md",
+        "planned": "修改",
+        "additions": 0,
+        "deletions": 0,
+        "kind": "modified",
+        "verdict": "untouched"
+      },
+      {
+        "path": ".zcode/skills/sillyhub-docker-deploy/SKILL.md",
+        "planned": "修改",
+        "additions": 0,
+        "deletions": 0,
+        "kind": "modified",
+        "verdict": "untouched"
+      }
+    ],
+    "excluded": {
+      "foreignDeclared": []
+    },
+    "note": "flow done 时点冻结（本文件落盘时采集）",
+    "closedBy": "flow done"
+  },
+  "patchSha256": "e6132075624434e1d55410356a7123d176b1725e61cbaa2f05346f10ebb599b9",
+  "patchStatus": "ok"
+}
