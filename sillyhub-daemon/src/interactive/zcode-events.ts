@@ -40,6 +40,18 @@ export interface ZcodeSessionEventParams {
   readonly payload?: Record<string, unknown>;
 }
 
+/**
+ * 心跳增量信号出参（2026-10-29-engine-live-perception / FR-01，spike 结论见
+ * change spike-notes.md）：`v4/telemetry/event` kind=tool_input_delta（工具参数
+ * 流式增量）的字符量——归一化器纯函数无状态，经 stateCarrier 出参透传，驱动
+ * 层累计节流后发 onHeartbeat。usage.delta 载荷形态未钉板（真机样本遗留），
+ * 本轮不消费——fail-soft 取不到字段即无信号，前端回落现状。
+ */
+export interface ZcodeHeartbeatDelta {
+  /** 本条 tool_input_delta 的字符增量（载荷宽松提取，字段缺失=无信号）。 */
+  chars: number;
+}
+
 /** state.updated 提取出的模型目录条目（getThinkingLevels/setModel 数据源）。 */
 export interface ZcodeModelCatalogEntry {
   readonly providerId: string;
@@ -64,12 +76,16 @@ export interface ZcodeStateSnapshot {
  * 归一化 session/event / state.updated 通知为 AgentEvent[]。
  *
  * @param notification 信封层解出的通知（method + params）
- * @param stateOut 可选出参：state.updated 提取的模型目录/状态写回此处（驱动缓存）
+ * @param stateOut 可选出参：state.updated 提取的模型目录/状态写回此处（驱动缓存）；
+ *   v4/telemetry tool_input_delta 的心跳字符增量写 `stateOut.heartbeatDelta`
  * @returns 0..N 个 AgentEvent（观察面通知产出 0 个）
  */
 export function normalizeZcodeNotification(
   notification: ZcodeNotification,
-  stateOut?: { snapshot?: ZcodeStateSnapshot },
+  stateOut?: {
+    snapshot?: ZcodeStateSnapshot;
+    heartbeatDelta?: ZcodeHeartbeatDelta;
+  },
 ): AgentEvent[] {
   const params = (notification.params ?? {}) as Record<string, unknown>;
 
@@ -81,9 +97,45 @@ export function normalizeZcodeNotification(
     if (stateOut) stateOut.snapshot = snapshot;
     return []; // 状态快照不产出消息事件（观察面）
   }
-  // v4/telemetry / computer-use / process/* 等遥测通道：内容不在其中（实测），
-  // turn 边界以 session/event 的 turn.completed 为权威——全部忽略。
+  if (notification.method === 'v4/telemetry/event') {
+    // 2026-10-29-engine-live-perception（FR-01）：kind=tool_input_delta（工具参数
+    // 流式增量，2026-10-15 四轮实测钉板的 kind 枚举成员）→ 心跳字符增量出参；
+    // 其余 kind（stream.chunk 文本/思考已有 session/event 内容流、tool_call/
+    // tool.lifecycle/usage.delta/turn.* 各有归属）不产出——不重复不伪造。
+    const payload = isRecord(params['payload']) ? params['payload'] : undefined;
+    const kind = payload ? String(payload['kind'] ?? '') : '';
+    if (kind === 'tool_input_delta' && payload) {
+      const chars = extractHeartbeatChars(payload);
+      if (chars > 0 && stateOut) {
+        stateOut.heartbeatDelta = { chars };
+      }
+    }
+    return [];
+  }
+  // computer-use / process/* 等其余遥测通道：内容不在其中（实测），
+  // turn 边界以 session/event 的 turn.completed 为权威——忽略。
   return [];
+}
+
+/** tool_input_delta 载荷宽松提取字符增量（候选字段名，取不到返回 0=无信号）。 */
+function extractHeartbeatChars(payload: Record<string, unknown>): number {
+  const candidates: unknown[] = [
+    payload['length'],
+    payload['chars'],
+    payload['inputLength'],
+    isRecord(payload['delta'])
+      ? (payload['delta'] as Record<string, unknown>)['length']
+      : undefined,
+  ];
+  for (const c of candidates) {
+    if (typeof c === 'number' && Number.isFinite(c) && c > 0) return c;
+  }
+  return 0;
+}
+
+/** Record 守卫（宽松收窄用）。 */
+function isRecord(v: unknown): v is Record<string, unknown> {
+  return typeof v === 'object' && v !== null;
 }
 
 // ---------------------------------------------------------------------------

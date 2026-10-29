@@ -296,3 +296,86 @@ describe('normalizeZcodeNotification：实测全序列（fixtures 钉映射）',
     expect(final.metadata?.response).toBe('乒乓');
   });
 });
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 2026-10-29-engine-live-perception FR-01：v4/telemetry tool_input_delta 心跳增量
+// （spike 结论：2026-10-15 四轮实测 kind 枚举含 tool_input_delta；归一化器经
+// stateCarrier.heartbeatDelta 出参透传，驱动层累计节流）
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe('normalizeZcodeNotification：v4/telemetry tool_input_delta 心跳（FR-01）', () => {
+  function telemetry(payload: Record<string, unknown>) {
+    return {
+      method: 'v4/telemetry/event',
+      params: { payload },
+    } as Parameters<typeof normalizeZcodeNotification>[0];
+  }
+
+  it('kind=tool_input_delta 带 length → heartbeatDelta 增量，事件流零产出', () => {
+    const state: { heartbeatDelta?: { chars: number } } = {};
+    const out = normalizeZcodeNotification(
+      telemetry({ kind: 'tool_input_delta', length: 128 }),
+      state,
+    );
+    expect(out).toEqual([]);
+    expect(state.heartbeatDelta).toEqual({ chars: 128 });
+  });
+
+  it('候选字段多形态：delta.length / chars / inputLength 均可提取', () => {
+    for (const payload of [
+      { kind: 'tool_input_delta', chars: 64 },
+      { kind: 'tool_input_delta', inputLength: 32 },
+      { kind: 'tool_input_delta', delta: { length: 16 } },
+    ]) {
+      const state: { heartbeatDelta?: { chars: number } } = {};
+      normalizeZcodeNotification(telemetry(payload), state);
+      expect(state.heartbeatDelta).toBeDefined();
+    }
+  });
+
+  it('字段缺失/零值 → 无信号（宽松 fail-soft，不伪造）', () => {
+    const state: { heartbeatDelta?: { chars: number } } = {};
+    normalizeZcodeNotification(
+      telemetry({ kind: 'tool_input_delta' }),
+      state,
+    );
+    expect(state.heartbeatDelta).toBeUndefined();
+    normalizeZcodeNotification(
+      telemetry({ kind: 'tool_input_delta', length: 0 }),
+      state,
+    );
+    expect(state.heartbeatDelta).toBeUndefined();
+  });
+
+  it('其他遥测 kind（stream.chunk/usage.delta/tool_call/turn.*）不产心跳信号', () => {
+    for (const kind of [
+      'stream.chunk',
+      'usage.delta',
+      'tool_call',
+      'tool.lifecycle',
+      'turn.started',
+      'turn.terminal',
+    ]) {
+      const state: { heartbeatDelta?: { chars: number } } = {};
+      const out = normalizeZcodeNotification(
+        telemetry({ kind, length: 999 }),
+        state,
+      );
+      expect(out).toEqual([]);
+      expect(state.heartbeatDelta).toBeUndefined();
+    }
+  });
+
+  it('载荷非对象 → 无信号不抛错', () => {
+    const state: { heartbeatDelta?: { chars: number } } = {};
+    expect(() =>
+      normalizeZcodeNotification(
+        { method: 'v4/telemetry/event', params: {} } as Parameters<
+          typeof normalizeZcodeNotification
+        >[0],
+        state,
+      ),
+    ).not.toThrow();
+    expect(state.heartbeatDelta).toBeUndefined();
+  });
+});

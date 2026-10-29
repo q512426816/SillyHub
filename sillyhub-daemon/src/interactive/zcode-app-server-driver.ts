@@ -44,6 +44,7 @@ import {
   normalizeZcodeNotification,
   type ZcodeModelCatalogEntry,
   type ZcodeStateSnapshot,
+  type ZcodeHeartbeatDelta,
 } from './zcode-events.js';
 import { mapPlatformLevelToEngine } from './thinking-levels.js';
 import type {
@@ -239,6 +240,29 @@ export class ZcodeAppServerDriver implements InteractiveDriver {
     let pendingTurnError: string | null = null;
     let currentTurnResolve: ((outcome: TurnOutcome) => void) | null = null;
 
+    // 2026-10-29-engine-live-perception（FR-01）：轮内心跳状态——tool_input_delta
+    // 字符累计 + 节流 1s（首条立即发）；beginTurn 清零（consume 会话级跨多 turn，
+    // 轮边界重置）。心跳经 callbacks.onHeartbeat 上行（SessionManager 统一转
+    // turn_heartbeat_report 鸭子消息，不进事件流）。
+    const onHeartbeat = callbacks.onHeartbeat;
+    let toolArgsChars = 0;
+    let lastHeartbeatAt: number | null = null;
+    const HEARTBEAT_THROTTLE_MS = 1_000;
+    const emitHeartbeat = (): void => {
+      if (!onHeartbeat) return;
+      try {
+        onHeartbeat({
+          kind: 'generating',
+          est_chars: toolArgsChars,
+          est_tokens: Math.round(toolArgsChars / 3.5),
+          precision: 'estimated',
+          source: 'zcode_telemetry',
+        });
+      } catch {
+        // fail-soft：心跳异常不崩通知分发（FR-01）。
+      }
+    };
+
     type TurnOutcome = {
       kind: 'success' | 'failed' | 'cancelled';
       usage?: InteractiveDriverResult['usage'];
@@ -250,6 +274,22 @@ export class ZcodeAppServerDriver implements InteractiveDriver {
       pendingTurnError = null;
       turnReported = false;
       h.turnInFlight = true;
+      // 2026-10-29-engine-live-perception（FR-01）：轮边界重置心跳计数 +
+      // 发等待首包单次信号（session/send 已发出、首帧未到——prefill 期前端切
+      // 「正在等待模型响应」态；内容流到达后自然接管，前端 5s 自清回落）。
+      toolArgsChars = 0;
+      lastHeartbeatAt = null;
+      if (onHeartbeat) {
+        try {
+          onHeartbeat({
+            kind: 'awaiting_first_token',
+            precision: 'estimated',
+            source: 'zcode_telemetry',
+          });
+        } catch {
+          // fail-soft：单次信号失败静默。
+        }
+      }
       // resolver 先于 session/send 注册：turn_result 早到（send 响应前）也不丢轮
       currentTurnPromise = new Promise<TurnOutcome>((resolve) => {
         currentTurnResolve = resolve;
@@ -313,9 +353,25 @@ export class ZcodeAppServerDriver implements InteractiveDriver {
         }
         return;
       }
-      const stateCarrier: { snapshot?: ZcodeStateSnapshot } = {};
+      const stateCarrier: {
+        snapshot?: ZcodeStateSnapshot;
+        heartbeatDelta?: ZcodeHeartbeatDelta;
+      } = {};
       const events = normalizeZcodeNotification(n, stateCarrier);
       if (stateCarrier.snapshot) h.stateSnapshot = stateCarrier.snapshot;
+      // 2026-10-29-engine-live-perception（FR-01）：tool_input_delta 心跳增量——
+      // 累计 + 节流 1s（首条立即发）；无增量（其他 kind/字段缺失）零动作。
+      if (stateCarrier.heartbeatDelta) {
+        toolArgsChars += stateCarrier.heartbeatDelta.chars;
+        const nowMs = Date.now();
+        if (
+          lastHeartbeatAt === null ||
+          nowMs - lastHeartbeatAt >= HEARTBEAT_THROTTLE_MS
+        ) {
+          lastHeartbeatAt = nowMs;
+          emitHeartbeat();
+        }
+      }
       if (events.length === 0) return;
       for (const ev of events) {
         if (ev.type === 'error') {
