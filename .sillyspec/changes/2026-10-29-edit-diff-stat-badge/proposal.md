@@ -1,0 +1,36 @@
+---
+author: flow-machine-draft
+created_at: 2026-10-29T02:11:51.669Z
+---
+# 提案书（Proposal）— 2026-10-29-edit-diff-stat-badge
+
+## 动机
+
+任务原话转写：用户反馈：agent 完成 Edit/Write 文件操作后，对话视图运行条（跑马灯）与进度视图命令行只显示工具名与耗时，看不出本次改动量；希望像 GitHub diff stat 一样在完成后尾部看到 +新增 -删除 统计（绿色/红色）。数据源已通：TurnSegment tool 段已携带 editPatch（structuredPatch JSON，Edit 与 Write 覆盖写均携带），前端已有 parseStructuredPatch 解析函数。
+
+成功标准：
+- Edit/Write 工具调用完成后，对话视图跑马灯「读写文件 · Edit/Write xxx」完成态条目尾部显示 diff 统计：绿色 +新增行数、红色 -删除行数（纯新增如 Write 只显示 +N，无删除时不显示 -0）
+- 进度视图（turn-segment-views）对应工具行尾部显示同款统计，两处口径一致
+- 统计仅从 editPatch（structuredPatch）解析，解析失败或无数据不显示（不伪造、不估数）
+- 运行中态不显示统计（结果未定），失败态不显示统计
+- 现有跑马灯与进度视图相关测试全部通过；新增统计纯函数用例与两处渲染用例
+- tsc / eslint 0 error
+
+## 变更范围
+
+按成功标准机械推导，共 6 条验收面：
+1. Edit/Write 工具调用完成后，对话视图跑马灯「读写文件 · Edit/Write xxx」完成态条目尾部显示 diff 统计：绿色 +新增行数、红色 -删除行数（纯新增如 Write 只显示 +N，无删除时不显示 -0）
+2. 进度视图（turn-segment-views）对应工具行尾部显示同款统计，两处口径一致
+3. 统计仅从 editPatch（structuredPatch）解析，解析失败或无数据不显示（不伪造、不估数）
+4. 运行中态不显示统计（结果未定），失败态不显示统计
+5. 现有跑马灯与进度视图相关测试全部通过；新增统计纯函数用例与两处渲染用例
+6. tsc / eslint 0 error
+
+## 成功标准（可验证）
+
+1. Edit/Write 工具调用完成后，对话视图跑马灯「读写文件 · Edit/Write xxx」完成态条目尾部显示 diff 统计：绿色 +新增行数、红色 -删除行数（纯新增如 Write 只显示 +N，无删除时不显示 -0）
+2. 进度视图（turn-segment-views）对应工具行尾部显示同款统计，两处口径一致
+3. 统计仅从 editPatch（structuredPatch）解析，解析失败或无数据不显示（不伪造、不估数）
+4. 运行中态不显示统计（结果未定），失败态不显示统计
+5. 现有跑马灯与进度视图相关测试全部通过；新增统计纯函数用例与两处渲染用例
+6. tsc / eslint 0 error

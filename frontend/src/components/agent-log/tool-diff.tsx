@@ -76,6 +76,28 @@ export function parseStructuredPatch(patchJson: string): DiffRow[] | null {
   return rows;
 }
 
+/**
+ * 2026-10-29-edit-diff-stat-badge：structuredPatch → diff stat 统计（跑马灯
+ * 完成态条目 / 进度视图工具行尾的 +N -M 徽标数据源）。复用 parseStructuredPatch
+ * 同一解析器数 add/del 行——徽标口径与展开区行级 diff 严格同源，永不自相矛盾。
+ * 解析失败 / 空 hunks / 零改动（0/0）→ null（调用方不渲染，不伪造不估数）。
+ */
+export function diffStatFromPatch(patchJson: string): {
+  added: number;
+  removed: number;
+} | null {
+  const rows = parseStructuredPatch(patchJson);
+  if (rows == null) return null;
+  let added = 0;
+  let removed = 0;
+  for (const row of rows) {
+    if (row.type === "add") added += 1;
+    else if (row.type === "del") removed += 1;
+  }
+  if (added === 0 && removed === 0) return null;
+  return { added, removed };
+}
+
 /** LCS 单元格上限（(n+1)*(m+1) dp 表内存/耗时护栏，1000×1000 行内可算）。 */
 const DIFF_MAX_CELLS = 1_000_000;
 
