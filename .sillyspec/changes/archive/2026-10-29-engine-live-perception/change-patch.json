@@ -1,7 +1,7 @@
 {
   "change": "2026-10-29-engine-live-perception",
   "baseline": "574c235a3d8b03152106eaa36abe10cdc1748406",
-  "head": "4f96a0c7c24d8b294f46e8ee98697fbeb8677fad",
+  "head": "de68b356befe540e0c77695de92216fb36c1a5e9",
   "files": [
     "backend/app/modules/daemon/router/__init__.py",
     "backend/app/modules/daemon/router/notify.py",
@@ -56,7 +56,7 @@
     "additions": 2496,
     "deletions": 29
   },
-  "savedAt": "2026-10-29T06:40:43.571Z",
+  "savedAt": "2026-10-29T06:44:36.074Z",
   "note": "flow done 时点冻结（本变更可归属交付面：baseline..HEAD 提交面过滤 .sillyspec/ 只留 .sillyspec/docs/ 交付文档 + 独占树未提交交付；治理工件目录不入冻结——2026-10-12-close-trace-freeze-integrity FR-01）",
   "modules": [
     {
@@ -123,7 +123,7 @@
     "degradedReason": null,
     "baseAnchor": "574c235a3d8b03152106eaa36abe10cdc1748406",
     "totals": {
-      "files": 48,
+      "files": 47,
       "additions": 2496,
       "deletions": 29
     },
@@ -309,8 +309,8 @@
         "additions": 92,
         "deletions": 0,
         "kind": "modified",
-        "planned": null,
-        "verdict": "unplanned"
+        "planned": "修改",
+        "verdict": "planned"
       },
       {
         "path": "frontend/src/components/daemon/session-panel/__tests__/turn-heartbeat-state.test.ts",
@@ -503,14 +503,6 @@
         "kind": "new",
         "planned": null,
         "verdict": "unplanned"
-      },
-      {
-        "path": "NEW:frontend/src/components/daemon/__tests__/turn-heartbeat-marquee.test.tsx",
-        "planned": "新增",
-        "additions": 0,
-        "deletions": 0,
-        "kind": "modified",
-        "verdict": "untouched"
       }
     ],
     "excluded": {

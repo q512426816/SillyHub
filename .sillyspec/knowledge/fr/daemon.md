@@ -8890,3 +8890,124 @@
   confirmed_at: af1edd44187856b8fe330d398bba246225796c4c
   source_change: 2026-10-28-bg-task-status-report
   status: active
+
+## FR-daemon-328 daemon 三引擎心跳源——长操作期间按引擎能力产出实时心跳
+变更：2026-10-29-engine-live-perception
+状态：active
+摘要：默认场景；Claude 大文件写入；zcode 遥测工具参数增量（spike 结论）
+场景正文：
+- 场景：默认场景 — Given 会话轮内模型正在生成工具参数（如写大文件）或等待首包；When Claude（input_json_delta 字符计数）/ codex（token_usage_updated 权威值）/ zcode（遥测 tool_inp；Then daemon **必须**节流 1s 产出一条 turn_heartbeat 心跳消息（kind ∈ awaiting_first_token/generati
+- 场景：Claude 大文件写入 — Given Claude 引擎模型正在流式生成 Edit 大参数（input_json_delta 持续到达）；Then 每秒至多一条心跳（kind=generating, estimated, est_chars 累计），轮结束清零
+- 场景：zcode 遥测工具参数增量（spike 结论） — Given spike 查实 2026-10-15 协议实测钉板的 v4/telemetry kind 枚举含 tool_input_delta（工具参数流式增量）；Then zcode 心跳直接消费该 kind 字符增量（estimated），原「chunkLength 折算 + 不覆盖则降级脉冲」构想废弃（信号不涨即无心跳，前端自
+全文：.sillyspec/changes/archive/2026-10-29-engine-live-perception/requirements.md#FR-01
+最近确认：de68b356befe540e0c77695de92216fb36c1a5e9
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-29-engine-live-perception:flow:测试绑定FR-01
+  tests: sillyhub-daemon/tests/interactive/claude-events.test.ts「input_json_delta 心跳计数/节流/轮收尾清零」 | sillyhub-daemon/tests/interactive/codex-app-server-driver.test.ts「token_usage_updated 桥接心跳」 | sillyhub-daemon/tests/interactive/zcode-events.test.ts「tool_input_delta 心跳增量与字段缺失无信号」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-29-engine-live-perception
+  status: active
+
+## FR-daemon-329 backend 心跳端点不落库直发 + 三端键名逐字对齐
+变更：2026-10-29-engine-live-perception
+状态：active
+摘要：默认场景；心跳不膨胀日志表
+场景正文：
+- 场景：默认场景 — Given daemon 经 onTurnMessage 鸭子消息上报 turn_heartbeat_report；When daemon.ts 拦截并 POST turn-heartbeat 端点（照抄 turn_phase 先例）；Then backend notify 端点（越权防护照抄 notify_turn_phase）**必须**经 Redis SSE 直发前端且**禁止**落库 Agent
+- 场景：心跳不膨胀日志表 — When 心跳以 1s/条持续 5 分钟（长会话）；Then AgentRunLog 表零新增行，SSE 正常收到每条心跳
+全文：.sillyspec/changes/archive/2026-10-29-engine-live-perception/requirements.md#FR-02
+最近确认：de68b356befe540e0c77695de92216fb36c1a5e9
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-29-engine-live-perception:flow:测试绑定FR-02
+  tests: backend/app/modules/daemon/tests/test_turn_heartbeat_events.py「turn_heartbeat SSE 直发不落库」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-29-engine-live-perception
+  status: active
+
+## FR-daemon-330 前端等待三态 + 估算补显 + main 优先选主
+变更：2026-10-29-engine-live-perception
+状态：active
+摘要：默认场景；估算与权威值区分；主/子代理并发
+场景正文：
+- 场景：默认场景 — Given 轮内跑马灯等待条目渲染（最新真实条目非 running）；When 心跳状态到达（main 心跳）或无心跳；Then 等待条目**必须**呈现三态——无心跳=「等待模型响应 · Ns」（现状不变）；awaiting_first_token=「正在等待模型响应 · 已发送上下文」
+- 场景：估算与权威值区分 — Given generating 心跳持续（est_tokens=12000）；Then 显示「已产出约 12,000 token」（灰），段落结束权威 ↓54,160 更新后估算补显消失
+- 场景：主/子代理并发 — Given 主 agent 与子代理同时长操作（两路心跳并发）；Then 主会话跑马灯只显示 main 心跳，子代理卡片显示子代理心跳，互不抖动
+全文：.sillyspec/changes/archive/2026-10-29-engine-live-perception/requirements.md#FR-03
+最近确认：de68b356befe540e0c77695de92216fb36c1a5e9
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-29-engine-live-perception:flow:测试绑定FR-03
+  tests: frontend/src/components/daemon/__tests__/turn-live-marquee.test.tsx「等待三态与估算补显（FR-03）」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-29-engine-live-perception
+  status: active
+
+## FR-daemon-331 估算值零污染聚合
+变更：2026-10-29-engine-live-perception
+状态：active
+摘要：默认场景；预算切断阈值不受心跳影响
+场景正文：
+- 场景：默认场景 — Given 心跳消息流经 daemon 事件通道与 backend；Then 估算值/心跳**禁止**进入 usage 台账（liftSessionUsage）、预算软切断、计费聚合、ctx 环与 tok/s 分子——既有 usage 消
+- 场景：预算切断阈值不受心跳影响 — Given 心跳持续产出 est_tokens 累计值；Then aggregateSessionUsage/checkBudgetCutoff 输入与无心跳时完全一致
+全文：.sillyspec/changes/archive/2026-10-29-engine-live-perception/requirements.md#FR-04
+最近确认：de68b356befe540e0c77695de92216fb36c1a5e9
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-29-engine-live-perception:flow:测试绑定FR-04
+  tests: sillyhub-daemon/tests/interactive/claude-events.test.ts「心跳消息不进 usage 台账聚合」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-29-engine-live-perception
+  status: active
+
+## FR-daemon-332 无心跳兼容回退（brownfield）
+变更：2026-10-29-engine-live-perception
+状态：active
+摘要：默认场景；旧 daemon 会话
+场景正文：
+- 场景：默认场景 — Given 旧 daemon / 历史会话 / 心跳链路任一环失败；Then 前端无心跳状态**必须**回落现状纯计时等待条目（FR-frontend-064 行为零回归）；心跳刷新 lastEventAt **禁止**（语义=最后真实内
+- 场景：旧 daemon 会话 — Given daemon 未升级（无 turn_heartbeat SSE 事件）；Then 等待条目行为与本变更前完全一致
+全文：.sillyspec/changes/archive/2026-10-29-engine-live-perception/requirements.md#FR-05
+最近确认：de68b356befe540e0c77695de92216fb36c1a5e9
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-29-engine-live-perception:flow:测试绑定FR-05
+  tests: frontend/src/components/daemon/__tests__/turn-live-marquee.test.tsx「无心跳 → 现状纯计时文案（零回归）」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-29-engine-live-perception
+  status: active
+
+## FR-daemon-333 测试与静态检查全绿
+变更：2026-10-29-engine-live-perception
+状态：active
+摘要：默认场景
+场景正文：
+- 场景：默认场景 — Given 本变更落地
+全文：.sillyspec/changes/archive/2026-10-29-engine-live-perception/requirements.md#FR-06
+最近确认：de68b356befe540e0c77695de92216fb36c1a5e9

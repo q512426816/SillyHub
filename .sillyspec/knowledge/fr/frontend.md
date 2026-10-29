@@ -7814,10 +7814,12 @@ superseded_by：FR-app-workspace-pages-002
 
 ## FR-frontend-064 最新条目非运行中时，追加「等待模型响应 · 耗时」合成条目：带转圈、计时每秒递增
 变更：2026-10-23-marquee-awaiting-indicator
-状态：active
+状态：superseded
+superseded_by：FR-daemon-330
+取代链：FR-frontend-064 ← FR-daemon-330（2026-10-29-engine-live-perception 承接）
 摘要：工具完成后的间隙；思考进行中
 全文：.sillyspec/changes/archive/2026-10-23-marquee-awaiting-indicator/requirements.md#FR-01
-最近确认：0fa5913d2e4444e1dc0f9a6f01469da91a958814
+最近确认：de68b356befe540e0c77695de92216fb36c1a5e9
 
 测试绑定：
 <!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
@@ -7829,7 +7831,7 @@ superseded_by：FR-app-workspace-pages-002
   confirmed_by: null
   confirmed_at: null
   source_change: 2026-10-23-marquee-awaiting-indicator
-  status: active
+  status: superseded
 
 ## FR-frontend-065 新事件到达或最新条目回到运行中时，等待条目立即消失；不进入事件队列、不影响窗口滑动
 变更：2026-10-23-marquee-awaiting-indicator

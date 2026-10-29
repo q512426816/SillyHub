@@ -243,3 +243,5 @@
 | 2026-10-28 | 2026-10-28-session-list-loadmore-fetch | 上一变更（2026-10-28-session-list-refresh-and-paging）的「… |
 | 2026-10-28 | 2026-10-28-change-detail-side-assets-scroll | 变更详情页两处展示调整（用户裁决）：①右侧基本信息栏的「范围对账」「产出速览」两组区块整组移除（弱信… |
 | 2026-10-28 | 2026-10-29-floating-scope-loadmore-fix | 悬浮面板加载更多附加段误清修复 |
+| 2026-10-29 | 2026-10-29-edit-diff-stat-badge | 用户反馈：agent 完成 Edit/Write 文件操作后，对话视图运行条（跑马灯）与进度视图命令… |
+| 2026-10-29 | 2026-10-29-engine-live-perception | 2026-10-29-engine-live-perception |

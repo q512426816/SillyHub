@@ -2539,3 +2539,23 @@ supersedes：D-008@v1
 锚点：未记录
 最近确认：5e89be8febddf3883db1e01c22bccb6ef5572af9
 理由：- 最大风险：大 patch（数千行）重复解析开销。缓解：跑马灯条目窗口上限 12 条、派生发生在 deriveLiveMarqueeEntries 纯函数内（段引用变化才重算，React memo 链既有）；ToolRowView 侧 useMemo 按 editPatch 字符串缓存。实测面量级（单文件 patch 数百行）无虞。 - 已放弃方案 a：用 hunk 头 oldLines/newLines 直接相加（省一轮遍历）——Write 覆盖写等场景 hunk 头与 lines 实际前缀可能不一致，且与展开区行级 diff（按行前缀渲染）不同源，会造成两处口径漂移。 - 已放弃方案 b：daemon 侧预计算统计随事件下发——多一层协议与 api-types 改动，前端已有全量数据，本变更不需要。 - 已知边界：zcode 引擎交互链路 edit_patch 暂缺（providers.ts 标记「structuredPatch 未验证」）→ 该引擎下按 FR-03 不伪造口径自然不显示徽标，引擎侧后续补齐数据后零改动自然点亮，不在本变更范围。
+
+## D-unmapped-317@v1 落选——估算并入既有 usage_update 通道
+状态：rejected
+变更：2026-10-29-engine-live-perception
+原编号：D-002@v1
+锚点：未记录
+最近确认：de68b356befe540e0c77695de92216fb36c1a5e9
+理由：不采用（用户选定方案二，本条为落选防复潮记录）。
+否决理由：usage 字段语义被估算值污染——预算软切断（liftSessionUsage/aggregateSessionUsage/checkBudgetCutoff）、计费聚合、ctx 环所有既有消费方都需防「估算混入聚合」，漏防一处即钱与切断阈值的事故面；与 2026-08-27「实时/终态口径必须同类」决策正面冲突（轮结束权威值落定必跳变）。
+复潮条件：usage 消费面收敛到单一展示用途且预算/计费全部改走独立聚合源时成本反转。
+
+## D-unmapped-318@v1 落选——纯前端等待态分级（不动 daemon）
+状态：rejected
+变更：2026-10-29-engine-live-perception
+原编号：D-003@v1
+锚点：未记录
+最近确认：de68b356befe540e0c77695de92216fb36c1a5e9
+理由：不采用（用户 P0 裁决 C 要求估算数字按引擎能力补显，纯文案不满足）。
+否决理由：token 数字全程不动只换文案，不满足用户 P0 裁决 C（估算补显），治标不治本。
+复潮条件：daemon 侧改动长期不可行（引擎面冻结）时可作为降级兜底单独启用。

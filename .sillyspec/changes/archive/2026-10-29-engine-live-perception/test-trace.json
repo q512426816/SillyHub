@@ -1,0 +1,83 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-29-engine-live-perception",
+  "rows": [
+    {
+      "anchor": "FR-01",
+      "row_id": "2026-10-29-engine-live-perception:flow:测试绑定FR-01",
+      "tests": [
+        "sillyhub-daemon/tests/interactive/claude-events.test.ts「input_json_delta 心跳计数/节流/轮收尾清零」",
+        "sillyhub-daemon/tests/interactive/codex-app-server-driver.test.ts「token_usage_updated 桥接心跳」",
+        "sillyhub-daemon/tests/interactive/zcode-events.test.ts「tool_input_delta 心跳增量与字段缺失无信号」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-29-engine-live-perception"
+    },
+    {
+      "anchor": "FR-02",
+      "row_id": "2026-10-29-engine-live-perception:flow:测试绑定FR-02",
+      "tests": [
+        "backend/app/modules/daemon/tests/test_turn_heartbeat_events.py「turn_heartbeat SSE 直发不落库」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-29-engine-live-perception"
+    },
+    {
+      "anchor": "FR-03",
+      "row_id": "2026-10-29-engine-live-perception:flow:测试绑定FR-03",
+      "tests": [
+        "frontend/src/components/daemon/__tests__/turn-live-marquee.test.tsx「等待三态与估算补显（FR-03）」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-29-engine-live-perception"
+    },
+    {
+      "anchor": "FR-04",
+      "row_id": "2026-10-29-engine-live-perception:flow:测试绑定FR-04",
+      "tests": [
+        "sillyhub-daemon/tests/interactive/claude-events.test.ts「心跳消息不进 usage 台账聚合」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-29-engine-live-perception"
+    },
+    {
+      "anchor": "FR-05",
+      "row_id": "2026-10-29-engine-live-perception:flow:测试绑定FR-05",
+      "tests": [
+        "frontend/src/components/daemon/__tests__/turn-live-marquee.test.tsx「无心跳 → 现状纯计时文案（零回归）」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-29-engine-live-perception"
+    }
+  ]
+}
