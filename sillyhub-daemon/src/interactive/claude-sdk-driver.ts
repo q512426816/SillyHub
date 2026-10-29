@@ -353,6 +353,15 @@ export interface ClaudeHeartbeatSink {
 }
 
 /**
+ * task-06：partial flush 事件 → onTurnMessage(envelope) 的可变转发桥。
+ * `forward` 为函数槽：start 占位 no-op，consume 绑定真实转发（见 ClaudeDriverHandle
+ * .partialSink JSDoc）。
+ */
+export interface ClaudePartialSink {
+  forward(envelope: TurnMessageEnvelope): void;
+}
+
+/**
  * task-03（D-009@v1）：UserTurnInput → SDKUserMessage 的 AsyncIterable 转换。
  *
  * 纯转换层，不缓冲、不丢消息：for-await 上游 input，逐条把 provider-neutral

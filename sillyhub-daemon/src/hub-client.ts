@@ -1563,6 +1563,51 @@ export class HubClient {
   }
 
   /**
+   * 2026-10-29-engine-live-perception（FR-02 / D-001@v1）：上报轮内实时心跳
+   *（daemon 层拦截 turn_heartbeat_report 桥消息后直调）。
+   *
+   * 端点：POST {REST_PREFIX}/sessions/{sessionId}/turn-heartbeat
+   * body（snake_case，键名 daemon/backend/frontend 三端逐字对齐——D-backend-039
+   * 铁律；对齐 backend TurnHeartbeatReportRequest）：
+   *   { session_id, run_id, kind, est_chars?, est_tokens?, precision, source,
+   *     parent_tool_use_id? }
+   *
+   * 失败语义（对齐 _request / D-009 同口径）：非 2xx → HubHttpError；网络/超时
+   * 透传。调用方（daemon 桥拦截）catch 吞噬——上报失败仅 debug 日志，绝不阻塞
+   * 消息主链路（心跳是瞬态展示信号，丢一条无功能损失）。
+   */
+  async notifyTurnHeartbeat(
+    sessionId: string,
+    runId: string,
+    sig: {
+      kind: 'awaiting_first_token' | 'generating';
+      est_chars?: number;
+      est_tokens?: number;
+      precision: 'estimated' | 'authoritative';
+      source: string;
+      parent_tool_use_id?: string;
+    },
+  ): Promise<Record<string, unknown>> {
+    const body: Record<string, unknown> = {
+      session_id: sessionId,
+      run_id: runId,
+      kind: sig.kind,
+      precision: sig.precision,
+      source: sig.source,
+    };
+    if (sig.est_chars !== undefined) body.est_chars = sig.est_chars;
+    if (sig.est_tokens !== undefined) body.est_tokens = sig.est_tokens;
+    if (sig.parent_tool_use_id !== undefined) {
+      body.parent_tool_use_id = sig.parent_tool_use_id;
+    }
+    return this._request<Record<string, unknown>>(
+      'POST',
+      `${REST_PREFIX}/sessions/${encodeURIComponent(sessionId)}/turn-heartbeat`,
+      body,
+    );
+  }
+
+  /**
    * 2026-10-28-bg-task-status-report task-03（FR-01 / D-006@v1）：上报后台
    * 任务终态（daemon 扫描环检出 task-notification 后直调，无需桥）。
    *

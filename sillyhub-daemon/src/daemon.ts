@@ -1204,6 +1204,24 @@ interface ClientLike {
     detail?: string,
   ): Promise<Record<string, unknown>>;
   /**
+   * 2026-10-29-engine-live-perception（FR-02 / D-001@v1）：轮内实时心跳上报
+   *（onTurnMessage 拦截分支直调）。运行时真实 _client 为 HubClient 实例
+   *（hub-client.ts notifyTurnHeartbeat 已实现）；失败透传由拦截分支 catch
+   * 吞噬（debug 日志）。ClientLike additive 声明（notifyTurnPhase 同款）。
+   */
+  notifyTurnHeartbeat(
+    sessionId: string,
+    runId: string,
+    sig: {
+      kind: 'awaiting_first_token' | 'generating';
+      est_chars?: number;
+      est_tokens?: number;
+      precision: 'estimated' | 'authoritative';
+      source: string;
+      parent_tool_use_id?: string;
+    },
+  ): Promise<Record<string, unknown>>;
+  /**
    * 2026-10-28-bg-task-status-report task-03（FR-01 / D-006@v1）：后台任务
    * 终态上报（扫描环直调）。运行时真实 _client 为 HubClient 实例
    * （hub-client.ts notifyBgTaskFinal 已实现）；失败透传由扫描环 catch 吞噬。
@@ -4996,6 +5014,60 @@ export class Daemon {
             session_id: sessionId,
             run_id: runId,
             phase,
+            error: e instanceof Error ? e.message : String(e),
+          });
+        }
+      }
+      return;
+    }
+    // 2026-10-29-engine-live-perception（FR-02 / D-001@v1）：轮内心跳上报桥——
+    // session-manager _runConsume 统一从驱动 onHeartbeat 转发 ``{type:
+    // 'turn_heartbeat_report', kind, est_chars?, est_tokens?, precision, source,
+    // parent_tool_use_id?}`` 鸭子消息（first_event 同款通道），daemon 层在此拦截
+    // 转 notifyTurnHeartbeat（不进 submitMessages 日志轨/usage 台账——心跳与
+    // 事件流彻底分道，FR-04）。上报失败仅 debug（D-009 同口径：瞬态展示信号，
+    // 丢一条无功能损失，绝不阻塞消息主链路）；success 静默（1s/条频率 info 级
+    // 会刷屏）。try 包同步抛（client 缺方法时属性访问抛 TypeError——2026-10-26
+    // ci-red-to-green 同坑预防）。
+    if (fwdMsg['type'] === 'turn_heartbeat_report') {
+      const kind = fwdMsg['kind'];
+      if (
+        (kind === 'awaiting_first_token' || kind === 'generating') &&
+        typeof fwdMsg['precision'] === 'string' &&
+        typeof fwdMsg['source'] === 'string'
+      ) {
+        try {
+          this._client
+            .notifyTurnHeartbeat(sessionId, runId, {
+              kind,
+              est_chars:
+                typeof fwdMsg['est_chars'] === 'number'
+                  ? fwdMsg['est_chars']
+                  : undefined,
+              est_tokens:
+                typeof fwdMsg['est_tokens'] === 'number'
+                  ? fwdMsg['est_tokens']
+                  : undefined,
+              precision: fwdMsg['precision'] as 'estimated' | 'authoritative',
+              source: fwdMsg['source'],
+              parent_tool_use_id:
+                typeof fwdMsg['parent_tool_use_id'] === 'string'
+                  ? fwdMsg['parent_tool_use_id']
+                  : undefined,
+            })
+            .catch((e: unknown) => {
+              this._logger.debug('turn_heartbeat_report_failed', {
+                session_id: sessionId,
+                run_id: runId,
+                kind,
+                error: e instanceof Error ? e.message : String(e),
+              });
+            });
+        } catch (e) {
+          this._logger.debug('turn_heartbeat_report_failed', {
+            session_id: sessionId,
+            run_id: runId,
+            kind,
             error: e instanceof Error ? e.message : String(e),
           });
         }
