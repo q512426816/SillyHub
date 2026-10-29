@@ -2186,3 +2186,50 @@ describe("ModelRetryRowView / SegmentView 分发 / deriveTurnActivity 回退链�
     expect(deriveTurnActivity([thinkingSeg]).currentActivity).toBe("正在思考");
   });
 });
+
+describe("2026-10-29-edit-diff-stat-badge: ToolRowView 完成态 diff 统计徽标", () => {
+  /** structuredPatch JSON（- 行 + + 行，hunk 形状与 SDK 透传一致）。 */
+  function pj(del: string[], add: string[]): string {
+    return JSON.stringify([
+      { oldStart: 1, newStart: 1, lines: [...del.map((s) => `-${s}`), ...add.map((s) => `+${s}`)] },
+    ]);
+  }
+
+  it("ok + editPatch → 行尾状态徽标后显示 +N -M（与跑马灯同款组件同口径）", () => {
+    const { getByTestId } = render(
+      <ToolRowView
+        segment={makeToolSeg({
+          toolName: "Edit",
+          editPatch: pj(["旧1"], ["新1", "新2"]),
+        })}
+      />,
+    );
+    const badge = getByTestId("diff-stat-badge");
+    expect(badge.textContent).toContain("+2");
+    expect(badge.textContent).toContain("-1");
+  });
+
+  it("running（结果未配对）→ 不显示统计徽标", () => {
+    const { queryByTestId } = render(<ToolRowView segment={makeBashRunningSeg()} />);
+    expect(queryByTestId("diff-stat-badge")).toBeNull();
+  });
+
+  it("ok 但无 editPatch（非 Edit/Write 工具）→ 不显示（不伪造）", () => {
+    const { queryByTestId } = render(<ToolRowView segment={makeToolSeg()} />);
+    expect(queryByTestId("diff-stat-badge")).toBeNull();
+  });
+
+  it("deny 失败态即使残留 editPatch 也不显示", () => {
+    const { queryByTestId } = render(
+      <ToolRowView
+        segment={makeToolSeg({
+          toolName: "Edit",
+          status: "deny",
+          result: "编辑被拒绝",
+          editPatch: pj(["旧"], ["新"]),
+        })}
+      />,
+    );
+    expect(queryByTestId("diff-stat-badge")).toBeNull();
+  });
+});

@@ -70,6 +70,8 @@ import type { ReactNode } from "react";
 import { MarkdownText } from "@/components/ui/markdown-text";
 import { processLabel } from "@/components/daemon/process-labels";
 import { CopyButton } from "@/components/daemon/copy-button";
+import { DiffStatBadge } from "@/components/daemon/diff-stat-badge";
+import { diffStatFromPatch } from "@/components/agent-log/tool-diff";
 import { FileMessageCard } from "@/components/daemon/file-message-card";
 import { useSubagentPanel } from "@/components/daemon/subagent-panel-context";
 // 2026-10-25-subagent-card-unify-panel（FR-05）：子代理卡片内嵌内部活动流动条
@@ -796,6 +798,18 @@ export const ToolRowView = memo(function ToolRowView({ segment }: ToolRowViewPro
     waitInfo && segment.startedAt != null
       ? formatClockDuration(Math.max(0, now - segment.startedAt))
       : null;
+  // 2026-10-29-edit-diff-stat-badge（FR-02~FR-04）：Edit/Write 完成态 diff 统计
+  // （+N/-M）——仅 status=ok 且段携带 editPatch（structuredPatch 随 result 配对
+  // 写入）时解析；运行中（未配对）与 deny 门控不出，解析失败/零改动归一 null
+  // 不渲染（与跑马灯同解析器同徽标组件，两处口径严格一致）。useMemo 按
+  // editPatch 字符串缓存，避免大 patch 逐渲染重算。
+  const diffStat = useMemo(
+    () =>
+      !running && segment.status === "ok" && segment.editPatch
+        ? diffStatFromPatch(segment.editPatch)
+        : null,
+    [running, segment.status, segment.editPatch],
+  );
   const desc = waitInfo
     ? waitedTaskName
       ? `等待后台任务：${waitedTaskName}`
@@ -867,6 +881,11 @@ export const ToolRowView = memo(function ToolRowView({ segment }: ToolRowViewPro
         >
           {badge.icon}
         </span>
+        {/* 2026-10-29-edit-diff-stat-badge（FR-02）：完成态 Edit/Write 行尾
+            diff 统计，位置在状态徽标之后、时长之前（与跑马灯条目同款）。 */}
+        {diffStat != null && (
+          <DiffStatBadge added={diffStat.added} removed={diffStat.removed} />
+        )}
         {waitElapsed && (
           <span
             className="shrink-0 font-mono text-[10.5px] text-brand-600"
