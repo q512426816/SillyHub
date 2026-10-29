@@ -34,20 +34,20 @@ scale: small  # 规模评估（Step 8 按定稿实质重判）：全链任务强
 
 ## 拆分判断
 
-单变更承载：daemon 三引擎心跳源 + backend 透传 + 前端消费是一个闭环契约（AgentEvent 新类型跨三层），拆开会出现「契约半悬空」的中间态（如只做 daemon 不做前端，事件无人消费）。Phase 划分（见总体方案）在变更内部组织顺序，不拆多变更。
+单变更承载：daemon 三引擎心跳源 + backend 透传 + 前端消费是一个闭环契约（心跳载荷跨三层），拆开会出现「契约半悬空」的中间态（如只做 daemon 不做前端，事件无人消费）。Phase 划分（见总体方案）在变更内部组织顺序，不拆多变更。
 
 ## 总体方案
 
 ### Phase A — daemon：turn_heartbeat 事件契约 + 三引擎心跳源
 
-**契约**（`sillyhub-daemon/src/types.ts`）：AgentEvent 联合新增 `turn_heartbeat` 类型，载荷字段：`kind`（`awaiting_first_token` 等待首字 / `generating` 正在生成——Grill 追问④收敛两值，正文细分见非目标）、`est_chars`（本次调用累计字符数，JS string.length 口径，可选）、`est_tokens`（估算值 = est_chars÷3.5 四舍五入，可选）、`precision`（`estimated` / `authoritative`）、`source`（`claude_input_json_delta` / `zcode_telemetry_chunk` / `codex_token_usage`）、`parent_tool_use_id`（子代理归属，缺省 main）。节流 1s/条；轮收尾（onTurnEnd/turn_result）停发并清计数器。
+**契约**（实现落点：`sillyhub-daemon/src/interactive/driver.ts` 的 `TurnHeartbeatSignal` + `InteractiveDriverCallbacks.onHeartbeat`——**daemon 内部契约，非 AgentEvent 联合成员**，不进归一化事件流/不落库；原稿写 types.ts AgentEvent 为设想形态，实现期修正为更干净的独立通道，语义与载荷不变）：载荷字段：`kind`（`awaiting_first_token` 等待首字 / `generating` 正在生成——Grill 追问④收敛两值，正文细分见非目标）、`est_chars`（本次调用累计字符数，JS string.length 口径，可选）、`est_tokens`（估算值 = est_chars÷3.5 四舍五入，可选）、`precision`（`estimated` / `authoritative`）、`source`（`claude_input_json_delta` / `zcode_telemetry` / `codex_token_usage`）、`parent_tool_use_id`（子代理归属，缺省 main）。节流 1s/条；轮收尾（onTurnEnd/turn_result）停发并清计数器。
 
 **三引擎源**：
 1. **Claude**：`claude-events.ts` partial 桶旁新增 tool-args 字符计数器——`content_block_delta` 的 `input_json_delta` 分支累计 `partial_json` 片段字符数（不缓冲内容本体，参数碎片不落任何持久面），节流发 `turn_heartbeat`(kind=generating, estimated)。请求发出→首包前（message_start 未到）由 `claude-sdk-driver.ts` 发 `awaiting_first_token` 心跳（驱动层知道请求已发出）。
 2. **zcode**：`zcode-events.ts` 解析 `v4/telemetry` 通知——spike（task-01，见 spike-notes.md）修正：直接消费专用 kind **`tool_input_delta`**（工具参数流式增量，字符计数 estimated 心跳）与 **`usage.delta`**（用量增量信号），替代原案 chunkLength 折算；「降级脉冲」分支删除（信号不涨即无心跳，前端自然回落 awaiting 态——运行时自适应）。`zcode-app-server-driver.ts` 把遥测通知接进归一化器（当前直接忽略）。载荷字段形态按宽松解析（fail-soft），task-03 以实测样本单测钉映射（D-003 先例）。
 3. **codex**：`codex-app-server-driver.ts` 既有 `token_usage_updated` 处理点转发一条 `turn_heartbeat`(kind=generating, precision=authoritative, est_tokens=本轮累计 output)——机制已有，只做归一化桥接。
 
-**转发链**：`session-manager.ts` 对 `turn_heartbeat` 放行转发（**不进** usage 台账 `liftSessionUsage`/`_turnUsageByParent`/budget 任何聚合）；`agent-event-schema.ts` 契约校验面加新类型。
+**转发链**：驱动 `onHeartbeat` → `session-manager.ts` `_runConsume` 统一转 `{type:'turn_heartbeat_report'}` 鸭子消息经 `deps.onTurnMessage` 上行（**不进** 事件流 / usage 台账 `liftSessionUsage`/`_turnUsageByParent`/budget 任何聚合——daemon.ts 在事件轨识别之前早返回）；`agent-event-schema.ts` **不动**（心跳非 AgentEvent，实现期修正）。
 
 ### Phase B — backend 透传（不落库直发，照抄 turn_phase 已验证模式）
 
@@ -72,7 +72,7 @@ scale: small  # 规模评估（Step 8 按定稿实质重判）：全链任务强
 |---|---|---|
 | 修改 | sillyhub-daemon/src/interactive/claude-events.ts | input_json_delta 字符计数器（不缓冲内容本体）+ 节流 1s 经 onPartialFlush 同款回调链发 turn_heartbeat_report 消息 + onTurnEnd 清零 |
 | 修改 | sillyhub-daemon/src/interactive/claude-sdk-driver.ts | 请求发出→首包前发 awaiting_first_token 心跳；首包到达即切 kind |
-| 修改 | sillyhub-daemon/src/interactive/zcode-events.ts | v4/telemetry stream.chunk 解析（chunkLength 累计）产 estimated 心跳 |
+| 修改 | sillyhub-daemon/src/interactive/zcode-events.ts | v4/telemetry tool_input_delta 解析（字符增量，spike 钉板 kind）产 estimated 心跳 |
 | 修改 | sillyhub-daemon/src/interactive/zcode-app-server-driver.ts | 遥测通知接入归一化器（当前忽略路径） |
 | 修改 | sillyhub-daemon/src/interactive/codex-app-server-driver.ts | token_usage_updated 处理点桥接 turn_heartbeat（authoritative） |
 | 修改 | sillyhub-daemon/src/daemon.ts | 拦截 turn_heartbeat_report 消息（daemon.ts:4929 turn_phase_report 同款形态）→ hub-client POST turn-heartbeat（fire-and-forget）。数据流：producer=三引擎心跳源（onTurnMessage 鸭子消息）→ daemon.ts 拦截 → hub-client POST → backend notify → Redis SSE → consumer=前端 session-sse.ts |
@@ -84,25 +84,25 @@ scale: small  # 规模评估（Step 8 按定稿实质重判）：全链任务强
 | 修改 | frontend/src/components/daemon/turn-live-marquee.tsx | awaiting 三态文案 + 估算补显（约/弱化/落定即隐）+ >30s 提示 + main 优先选主 |
 | 修改 | frontend/src/components/daemon/turn-timeline.tsx | 轮级心跳状态传递 marquee（turnTokens 同路） |
 | 新增 | NEW:frontend/src/components/prototype/engine-live-perception-view.tsx | 原型 view（生产组件 + 假心跳数据三态演示） |
-| 新增 | NEW:frontend/src/components/daemon/__tests__/turn-heartbeat-marquee.test.tsx | 前端三态/估算补显/落定即隐/超时提示用例 |
+| 修改 | frontend/src/components/daemon/__tests__/turn-live-marquee.test.tsx | 前端三态/估算补显/落定即隐/超时提示用例（独立文件复现模块初始化异常，并入跑马灯正家） |
 | 修改 | sillyhub-daemon/tests/interactive/claude-events.test.ts | 心跳计数/节流/轮收尾清理用例（input_json_delta 计数器面） |
-| 修改 | sillyhub-daemon/tests/interactive/zcode-events.test.ts | 遥测 chunkLength 累计/降级路径用例 |
+| 修改 | sillyhub-daemon/tests/interactive/zcode-events.test.ts | tool_input_delta 心跳增量/字段缺失无信号用例 |
 | 修改 | sillyhub-daemon/tests/interactive/codex-app-server-driver.test.ts | token_usage_updated 桥接心跳用例 |
 
 ## 接口定义
 
 ```ts
-// sillyhub-daemon/src/types.ts（AgentEvent 联合新增分支）
+// sillyhub-daemon/src/interactive/driver.ts（TurnHeartbeatSignal，daemon 内部契约）
 interface TurnHeartbeatPayload {
   // Grill 追问④钉板：kind 收敛两值——正文/思考已有可见流（对话流+跑马灯 thinking 流动），
   // 无需心跳补显，「生成正文」细分进非目标；codex token_usage 不分内容类型，统一 generating。
   kind: "awaiting_first_token" | "generating";
-  /** 本次 API 调用累计产出字符数（JS string.length 口径：claude partial_json 片段长 / zcode chunkLength 累计）；awaiting_first_token 无。 */
+  /** 本次 API 调用累计产出字符数（JS string.length 口径：claude partial_json 片段长 / zcode tool_input_delta 增量累计）；awaiting_first_token 无。 */
   est_chars?: number;
   /** 估算 token（est_chars ÷ 3.5 四舍五入）；codex authoritative 时为本轮累计 output 权威值。 */
   est_tokens?: number;
   precision: "estimated" | "authoritative";
-  source: "claude_input_json_delta" | "zcode_telemetry_chunk" | "codex_token_usage";
+  source: "claude_input_json_delta" | "zcode_telemetry" | "codex_token_usage";
   parent_tool_use_id?: string; // 缺省 main；非空=子代理心跳，前端路由子代理卡片（选主策略见 Phase C）
 }
 // AgentEvent = ... | ({ type: "turn_heartbeat" } & TurnHeartbeatPayload)

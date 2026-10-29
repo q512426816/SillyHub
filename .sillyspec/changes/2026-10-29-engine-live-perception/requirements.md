@@ -10,7 +10,7 @@ created_at: 2026-10-29T05:06:35.340Z
 
 覆盖决策：D-001@v1
 Given 会话轮内模型正在生成工具参数（如写大文件）或等待首包
-When Claude（input_json_delta 字符计数）/ codex（token_usage_updated 权威值）/ zcode（遥测 chunkLength，实测覆盖面不足则降级）各引擎中途信号到达
+When Claude（input_json_delta 字符计数）/ codex（token_usage_updated 权威值）/ zcode（遥测 tool_input_delta 工具参数增量，spike 已钉板 kind 枚举）各引擎中途信号到达
 Then daemon **必须**节流 1s 产出一条 turn_heartbeat 心跳消息（kind ∈ awaiting_first_token/generating，precision 标 estimated/authoritative，est_chars 字符口径 string.length，估算系数 3.5 字符/token），轮收尾**必须**停发并清零计数器（fail-soft：心跳源异常静默停发不影响轮次收敛）。
 
 #### 场景：Claude 大文件写入
@@ -18,10 +18,10 @@ Then daemon **必须**节流 1s 产出一条 turn_heartbeat 心跳消息（kind 
 Given Claude 引擎模型正在流式生成 Edit 大参数（input_json_delta 持续到达）
 Then 每秒至多一条心跳（kind=generating, estimated, est_chars 累计），轮结束清零
 
-#### 场景：zcode 遥测不覆盖工具参数流（降级）
+#### 场景：zcode 遥测工具参数增量（spike 结论）
 
-Given spike 实测 zcode stream.chunk 不覆盖工具参数生成期
-Then zcode 心跳降级为 awaiting_first_token 活跃脉冲（结论落 design 注记），通道契约不变
+Given spike 查实 2026-10-15 协议实测钉板的 v4/telemetry kind 枚举含 tool_input_delta（工具参数流式增量）
+Then zcode 心跳直接消费该 kind 字符增量（estimated），原「chunkLength 折算 + 不覆盖则降级脉冲」构想废弃（信号不涨即无心跳，前端自然回落 awaiting 态——运行时自适应）
 
 ### FR-02: backend 心跳端点不落库直发 + 三端键名逐字对齐
 
@@ -82,7 +82,7 @@ Then daemon 三引擎心跳源用例、backend 端点用例、前端三态/选�
 
 ## 测试绑定（每条 FR 至少一行——`FR-NN: test/路径「用例名」`）
 
-FR-01: sillyhub-daemon/tests/interactive/claude-events.test.ts「input_json_delta 心跳计数/节流/轮收尾清零」；sillyhub-daemon/tests/interactive/zcode-events.test.ts「遥测 chunkLength 累计与降级路径」；sillyhub-daemon/tests/interactive/codex-app-server-driver.test.ts「token_usage_updated 桥接心跳」
+FR-01: sillyhub-daemon/tests/interactive/claude-events.test.ts「input_json_delta 心跳计数/节流/轮收尾清零」；sillyhub-daemon/tests/interactive/zcode-events.test.ts「tool_input_delta 心跳增量与字段缺失无信号」；sillyhub-daemon/tests/interactive/codex-app-server-driver.test.ts「token_usage_updated 桥接心跳」
 FR-02: backend/app/modules/daemon/tests/test_turn_heartbeat_events.py「turn_heartbeat SSE 直发不落库」（端点测试实际落位于模块内 tests，对齐 test_turn_phase_events.py 先例）
 FR-03: frontend/src/components/daemon/__tests__/turn-live-marquee.test.tsx「等待三态与估算补显（FR-03）」（用例并入跑马灯测试正家；main 选主另由 session-panel/__tests__/turn-heartbeat-state.test.tsx 覆盖）
 FR-04: sillyhub-daemon/tests/interactive/claude-events.test.ts「心跳消息不进 usage 台账聚合」

@@ -1,0 +1,58 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-29-engine-live-perception",
+  "reviewer": "subagent",
+  "verdict": "PASS",
+  "reviewedAgainst": "4f96a0c7c24d8b294f46e8ee98697fbeb8677fad",
+  "findings": [
+    {
+      "severity": "P2",
+      "status": "accepted",
+      "title": "zcode tool_input_delta 字符字段名为候选式猜测，无实测样本钉板",
+      "evidence": "extractHeartbeatChars 依次尝试 payload.length / chars / inputLength / delta.length，取不到即 0=无信号。这是 spike-notes.md「遗留」明示的 fail-soft 兜底（真机样本后钉死单测），不是伪装成修复的吞错：取不到就完全不发心跳，前端回落纯计时，与无心跳路径同构，不存在伪造数据面。可接受，结转真机验证任务。",
+      "location": "sillyhub-daemon/src/interactive/zcode-events.ts:126"
+    },
+    {
+      "severity": "P3",
+      "status": "open",
+      "title": "心跳跨请求乱序时估算值可能短暂回退（无单调守卫）",
+      "evidence": "每次心跳是一条独立 POST（fire-and-forget），backend 各自 publish 到 Redis；HTTP 完成序不保证与产生序一致，旧心跳（est_tokens 较小）可能后到并覆盖新值，界面数字轻微回跳。仅影响展示（标「约」、不进任何聚合），5s 过期后自然收敛，无数据正确性风险。若追求平滑可在 applyTurnHeartbeat 加单调守卫（同 runId 且 kind=generating 时 est_tokens 只进不退）。",
+      "location": "frontend/src/components/daemon/session-panel/turn-state.ts:112"
+    },
+    {
+      "severity": "P3",
+      "status": "open",
+      "title": "design.md 接口定义的 source 枚举与实现不一致（zcode_telemetry_chunk vs zcode_telemetry）",
+      "evidence": "design.md 接口定义写 source: \"zcode_telemetry_chunk\"；实现与契约实际为 \"zcode_telemetry\"——backend schema.py Literal、daemon driver.ts TurnHeartbeatSignal、frontend session-sse.ts 三端一致都是 zcode_telemetry。三端实现正确且逐字对齐，仅设计文档文本滞后，属 CLAUDE.md 规则 18（注释/实现不一致）清理项，不构成代码缺陷。",
+      "location": ".sillyspec/changes/2026-10-29-engine-live-perception/design.md:105"
+    },
+    {
+      "severity": "P3",
+      "status": "open",
+      "title": "design.md 与 requirements.md 的 zcode 心跳方案文本停留在 spike 修正前版本",
+      "evidence": "design 文件变更清单仍写「v4/telemetry stream.chunk 解析（chunkLength 累计）」，Phase A 仍称消费 usage.delta；requirements FR-01 测试绑定行写「遥测 chunkLength 累计与降级路径」。实际实现（spike-notes 结论）只看 tool_input_delta 字符增量，「降级脉冲」分支已删除、usage.delta 未消费。归档前应把这两处文本同步到实现态，避免后续维护者按旧文本找不存在的代码。",
+      "location": ".sillyspec/changes/2026-10-29-engine-live-perception/requirements.md:85"
+    },
+    {
+      "severity": "P3",
+      "status": "open",
+      "title": "慢提示阈值口径是等待时长而非心跳态持续时长（与 design 措辞有偏差）",
+      "evidence": "slowHint 用 awaitingElapsedMs > 30_000（自上次真实内容事件起算）；design Phase C 写「任何心跳态持续 >30s」。用户观感一致（都只在等待条目上出现），偏差仅在文案触发起点的定义。可接受，若严格对齐需以首次观察心跳时刻为基准单独计时。",
+      "location": "frontend/src/components/daemon/turn-live-marquee.tsx:836"
+    }
+  ],
+  "dimensionNotes": {
+    "乱序": "finding",
+    "并发": "ok",
+    "切换": "ok",
+    "作用域": "ok"
+  },
+  "notes": {
+    "FR 对账": "FR-01 三源齐备且节流/清零双点（claude message_stop+onTurnEnd / zcode beginTurn）；FR-02 端点经 redis publish 直发且测试断言 AgentRunLog 零行；FR-03 三态/选主/落定即隐有 13 条新用例钉住；FR-04 拆链核验——turn_heartbeat_report 在 daemon.ts 事件轨识别之前 return，AgentEvent 联合与 agent-event-schema.ts 未改动，liftSessionUsage/预算/ctx 面零接触；FR-05 无心跳回落原文案有专门用例。",
+    "防护声明核实": "「不进 usage 台账」为结构级兑现（独立鸭子消息、早返回）；「三端键名逐字对齐」kind/est_chars/est_tokens/precision/source/parent_tool_use_id 在 daemon signal、backend schema+publish、frontend 信封三处一致；「越权 404」走 get_session_for_runtime_owner，测试含 401/404 且断言零发布。",
+    "生成物": "backend/openapi.json +134 行含 turn-heartbeat 端点与 TurnHeartbeatReportRequest；frontend/api-types.ts 与 sillyhub-daemon/api-types.ts 各 +114 行同源，双侧 gen:types 已跑。",
+    "吞错核验": "daemon.ts / claude-events.ts / claude-sdk-driver.ts 的 catch 均落在心跳回调最外层（fire-and-forget 语义正确），拦截分支的 try/catch 覆盖 client 缺方法的 TypeError，属防御而非掩盖；心跳失败不影响 turn_result 收敛路径。",
+    "复跑": "daemon 57 passed（claude-events 32 / zcode-events 19 / turn-heartbeat-report 6）；backend 8 passed；frontend 57 passed（marquee 50 / heartbeat-state 7）。"
+  },
+  "reviewedAt": "2026-10-29T14:45:00+08:00"
+}

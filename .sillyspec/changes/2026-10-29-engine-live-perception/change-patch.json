@@ -1,0 +1,524 @@
+{
+  "change": "2026-10-29-engine-live-perception",
+  "baseline": "574c235a3d8b03152106eaa36abe10cdc1748406",
+  "head": "4f96a0c7c24d8b294f46e8ee98697fbeb8677fad",
+  "files": [
+    "backend/app/modules/daemon/router/__init__.py",
+    "backend/app/modules/daemon/router/notify.py",
+    "backend/app/modules/daemon/run_sync/service/__init__.py",
+    "backend/app/modules/daemon/run_sync/service/publish.py",
+    "backend/app/modules/daemon/schema.py",
+    "backend/app/modules/daemon/tests/test_turn_heartbeat_events.py",
+    "backend/openapi.json",
+    "frontend/prototype-dist/change-center.html",
+    "frontend/prototype-dist/change-detail-v2.html",
+    "frontend/prototype-dist/change-detail.html",
+    "frontend/prototype-dist/conflict-sync-states.html",
+    "frontend/prototype-dist/engine-live-perception.html",
+    "frontend/prototype-dist/explorer-git-status.html",
+    "frontend/prototype-dist/index.html",
+    "frontend/prototype-dist/session-fold.html",
+    "frontend/prototype-dist/session-portal.html",
+    "frontend/prototype-dist/session-stage-progress.html",
+    "frontend/prototype-dist/sillyspec-flow.html",
+    "frontend/prototype-dist/trajectory-redesign.html",
+    "frontend/prototype-dist/workspace-list.html",
+    "frontend/prototype-dist/workspace-overview.html",
+    "frontend/scripts/prototype-build.mjs",
+    "frontend/src/components/daemon/__tests__/turn-live-marquee.test.tsx",
+    "frontend/src/components/daemon/session-panel/__tests__/turn-heartbeat-state.test.ts",
+    "frontend/src/components/daemon/session-panel/session-panel-dialog.tsx",
+    "frontend/src/components/daemon/session-panel/session-panel-page.tsx",
+    "frontend/src/components/daemon/session-panel/turn-state.ts",
+    "frontend/src/components/daemon/turn-live-marquee.tsx",
+    "frontend/src/components/daemon/turn-timeline.tsx",
+    "frontend/src/components/prototype/engine-live-perception-view.tsx",
+    "frontend/src/lib/api-types.ts",
+    "frontend/src/lib/daemon/session-sse.ts",
+    "frontend/src/lib/daemon/session-stream.ts",
+    "sillyhub-daemon/src/api-types.ts",
+    "sillyhub-daemon/src/daemon.ts",
+    "sillyhub-daemon/src/hub-client.ts",
+    "sillyhub-daemon/src/interactive/claude-events.ts",
+    "sillyhub-daemon/src/interactive/claude-sdk-driver.ts",
+    "sillyhub-daemon/src/interactive/codex-app-server-driver.ts",
+    "sillyhub-daemon/src/interactive/driver.ts",
+    "sillyhub-daemon/src/interactive/session-manager.ts",
+    "sillyhub-daemon/src/interactive/zcode-app-server-driver.ts",
+    "sillyhub-daemon/src/interactive/zcode-events.ts",
+    "sillyhub-daemon/tests/interactive/claude-events.test.ts",
+    "sillyhub-daemon/tests/interactive/codex-app-server-driver.test.ts",
+    "sillyhub-daemon/tests/interactive/zcode-events.test.ts",
+    "sillyhub-daemon/tests/turn-heartbeat-report.test.ts"
+  ],
+  "totals": {
+    "files": 47,
+    "additions": 2496,
+    "deletions": 29
+  },
+  "savedAt": "2026-10-29T06:40:43.571Z",
+  "note": "flow done 时点冻结（本变更可归属交付面：baseline..HEAD 提交面过滤 .sillyspec/ 只留 .sillyspec/docs/ 交付文档 + 独占树未提交交付；治理工件目录不入冻结——2026-10-12-close-trace-freeze-integrity FR-01）",
+  "modules": [
+    {
+      "id": "daemon",
+      "files": 6,
+      "doc": "docs/backend/modules/daemon.md",
+      "docTouched": false,
+      "docMissing": false
+    },
+    {
+      "id": "backend",
+      "files": 7,
+      "doc": "docs/multi-agent-platform/modules/backend.md",
+      "docTouched": false,
+      "docMissing": false
+    },
+    {
+      "id": "frontend",
+      "files": 26,
+      "doc": "docs/multi-agent-platform/modules/frontend.md",
+      "docTouched": false,
+      "docMissing": false
+    },
+    {
+      "id": "sillyhub-daemon",
+      "files": 14,
+      "doc": "docs/multi-agent-platform/modules/sillyhub-daemon.md",
+      "docTouched": false,
+      "docMissing": false
+    },
+    {
+      "id": "daemon",
+      "files": 20,
+      "doc": "docs/SillyHub/modules/daemon.md",
+      "docTouched": false,
+      "docMissing": false
+    },
+    {
+      "id": "frontend_components",
+      "files": 8,
+      "doc": "docs/SillyHub/modules/frontend_components.md",
+      "docTouched": false,
+      "docMissing": false
+    },
+    {
+      "id": "frontend_lib",
+      "files": 3,
+      "doc": "docs/SillyHub/modules/frontend_lib.md",
+      "docTouched": false,
+      "docMissing": false
+    }
+  ],
+  "uncoveredDirs": [],
+  "moduleMaps": [
+    "docs/backend/modules/_module-map.yaml",
+    "docs/frontend/modules/_module-map.yaml",
+    "docs/multi-agent-platform/modules/_module-map.yaml",
+    "docs/SillyHub/modules/_module-map.yaml",
+    "docs/sillyhub-daemon/modules/_module-map.yaml"
+  ],
+  "scopeAudit": {
+    "mode": "full-flow",
+    "ok": true,
+    "degradedReason": null,
+    "baseAnchor": "574c235a3d8b03152106eaa36abe10cdc1748406",
+    "totals": {
+      "files": 48,
+      "additions": 2496,
+      "deletions": 29
+    },
+    "rows": [
+      {
+        "path": "backend/app/modules/daemon/router/__init__.py",
+        "additions": 3,
+        "deletions": 0,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": "backend/app/modules/daemon/router/notify.py",
+        "additions": 39,
+        "deletions": 0,
+        "kind": "modified",
+        "planned": "修改",
+        "verdict": "planned"
+      },
+      {
+        "path": "backend/app/modules/daemon/run_sync/service/__init__.py",
+        "additions": 2,
+        "deletions": 0,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": "backend/app/modules/daemon/run_sync/service/publish.py",
+        "additions": 46,
+        "deletions": 0,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": "backend/app/modules/daemon/schema.py",
+        "additions": 27,
+        "deletions": 0,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": "backend/app/modules/daemon/tests/test_turn_heartbeat_events.py",
+        "additions": 280,
+        "deletions": 0,
+        "kind": "new",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": "backend/openapi.json",
+        "additions": 134,
+        "deletions": 0,
+        "kind": "modified",
+        "planned": "修改",
+        "verdict": "planned"
+      },
+      {
+        "path": "frontend/prototype-dist/change-center.html",
+        "additions": 1,
+        "deletions": 1,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": "frontend/prototype-dist/change-detail-v2.html",
+        "additions": 1,
+        "deletions": 1,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": "frontend/prototype-dist/change-detail.html",
+        "additions": 1,
+        "deletions": 1,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": "frontend/prototype-dist/conflict-sync-states.html",
+        "additions": 1,
+        "deletions": 1,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": "frontend/prototype-dist/engine-live-perception.html",
+        "additions": 86,
+        "deletions": 0,
+        "kind": "new",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": "frontend/prototype-dist/explorer-git-status.html",
+        "additions": 1,
+        "deletions": 1,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": "frontend/prototype-dist/index.html",
+        "additions": 5,
+        "deletions": 1,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": "frontend/prototype-dist/session-fold.html",
+        "additions": 1,
+        "deletions": 1,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": "frontend/prototype-dist/session-portal.html",
+        "additions": 1,
+        "deletions": 1,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": "frontend/prototype-dist/session-stage-progress.html",
+        "additions": 1,
+        "deletions": 1,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": "frontend/prototype-dist/sillyspec-flow.html",
+        "additions": 1,
+        "deletions": 1,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": "frontend/prototype-dist/trajectory-redesign.html",
+        "additions": 1,
+        "deletions": 1,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": "frontend/prototype-dist/workspace-list.html",
+        "additions": 1,
+        "deletions": 1,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": "frontend/prototype-dist/workspace-overview.html",
+        "additions": 1,
+        "deletions": 1,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": "frontend/scripts/prototype-build.mjs",
+        "additions": 5,
+        "deletions": 0,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": "frontend/src/components/daemon/__tests__/turn-live-marquee.test.tsx",
+        "additions": 92,
+        "deletions": 0,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": "frontend/src/components/daemon/session-panel/__tests__/turn-heartbeat-state.test.ts",
+        "additions": 129,
+        "deletions": 0,
+        "kind": "new",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": "frontend/src/components/daemon/session-panel/session-panel-dialog.tsx",
+        "additions": 22,
+        "deletions": 1,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": "frontend/src/components/daemon/session-panel/session-panel-page.tsx",
+        "additions": 24,
+        "deletions": 1,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": "frontend/src/components/daemon/session-panel/turn-state.ts",
+        "additions": 99,
+        "deletions": 5,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": "frontend/src/components/daemon/turn-live-marquee.tsx",
+        "additions": 50,
+        "deletions": 1,
+        "kind": "modified",
+        "planned": "修改",
+        "verdict": "planned"
+      },
+      {
+        "path": "frontend/src/components/daemon/turn-timeline.tsx",
+        "additions": 21,
+        "deletions": 1,
+        "kind": "modified",
+        "planned": "修改",
+        "verdict": "planned"
+      },
+      {
+        "path": "frontend/src/components/prototype/engine-live-perception-view.tsx",
+        "additions": 182,
+        "deletions": 0,
+        "kind": "new",
+        "planned": "新增",
+        "verdict": "planned"
+      },
+      {
+        "path": "frontend/src/lib/api-types.ts",
+        "additions": 114,
+        "deletions": 0,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": "frontend/src/lib/daemon/session-sse.ts",
+        "additions": 28,
+        "deletions": 0,
+        "kind": "modified",
+        "planned": "修改",
+        "verdict": "planned"
+      },
+      {
+        "path": "frontend/src/lib/daemon/session-stream.ts",
+        "additions": 8,
+        "deletions": 1,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": "sillyhub-daemon/src/api-types.ts",
+        "additions": 114,
+        "deletions": 0,
+        "kind": "modified",
+        "planned": "修改",
+        "verdict": "planned"
+      },
+      {
+        "path": "sillyhub-daemon/src/daemon.ts",
+        "additions": 72,
+        "deletions": 0,
+        "kind": "modified",
+        "planned": "修改",
+        "verdict": "planned"
+      },
+      {
+        "path": "sillyhub-daemon/src/hub-client.ts",
+        "additions": 45,
+        "deletions": 0,
+        "kind": "modified",
+        "planned": "修改",
+        "verdict": "planned"
+      },
+      {
+        "path": "sillyhub-daemon/src/interactive/claude-events.ts",
+        "additions": 64,
+        "deletions": 0,
+        "kind": "modified",
+        "planned": "修改",
+        "verdict": "planned"
+      },
+      {
+        "path": "sillyhub-daemon/src/interactive/claude-sdk-driver.ts",
+        "additions": 58,
+        "deletions": 0,
+        "kind": "modified",
+        "planned": "修改",
+        "verdict": "planned"
+      },
+      {
+        "path": "sillyhub-daemon/src/interactive/codex-app-server-driver.ts",
+        "additions": 19,
+        "deletions": 0,
+        "kind": "modified",
+        "planned": "修改",
+        "verdict": "planned"
+      },
+      {
+        "path": "sillyhub-daemon/src/interactive/driver.ts",
+        "additions": 34,
+        "deletions": 0,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": "sillyhub-daemon/src/interactive/session-manager.ts",
+        "additions": 25,
+        "deletions": 0,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": "sillyhub-daemon/src/interactive/zcode-app-server-driver.ts",
+        "additions": 57,
+        "deletions": 1,
+        "kind": "modified",
+        "planned": "修改",
+        "verdict": "planned"
+      },
+      {
+        "path": "sillyhub-daemon/src/interactive/zcode-events.ts",
+        "additions": 56,
+        "deletions": 4,
+        "kind": "modified",
+        "planned": "修改",
+        "verdict": "planned"
+      },
+      {
+        "path": "sillyhub-daemon/tests/interactive/claude-events.test.ts",
+        "additions": 121,
+        "deletions": 0,
+        "kind": "modified",
+        "planned": "修改",
+        "verdict": "planned"
+      },
+      {
+        "path": "sillyhub-daemon/tests/interactive/codex-app-server-driver.test.ts",
+        "additions": 109,
+        "deletions": 1,
+        "kind": "modified",
+        "planned": "修改",
+        "verdict": "planned"
+      },
+      {
+        "path": "sillyhub-daemon/tests/interactive/zcode-events.test.ts",
+        "additions": 83,
+        "deletions": 0,
+        "kind": "modified",
+        "planned": "修改",
+        "verdict": "planned"
+      },
+      {
+        "path": "sillyhub-daemon/tests/turn-heartbeat-report.test.ts",
+        "additions": 231,
+        "deletions": 0,
+        "kind": "new",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": "NEW:frontend/src/components/daemon/__tests__/turn-heartbeat-marquee.test.tsx",
+        "planned": "新增",
+        "additions": 0,
+        "deletions": 0,
+        "kind": "modified",
+        "verdict": "untouched"
+      }
+    ],
+    "excluded": {
+      "foreignDeclared": []
+    },
+    "note": "flow done 时点冻结（本文件落盘时采集）",
+    "closedBy": "flow done"
+  },
+  "patchSha256": "2d85a09cbd8450eb0f2f5e6aafbb80b47bedc9d59e0fce7636f56ab4885401bc",
+  "patchStatus": "ok"
+}
