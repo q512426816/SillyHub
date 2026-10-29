@@ -702,3 +702,95 @@ describe("2026-10-29-edit-diff-stat-badge: Edit/Write 完成态条目 diff 统�
     expect(queryByTestId("diff-stat-badge")).toBeNull();
   });
 });
+
+describe("2026-10-29-engine-live-perception: 等待三态与估算补显（FR-03）", () => {
+  /** 心跳状态构造（与 MarqueeHeartbeatState 同构）。 */
+  function hb(over: Partial<{
+    kind: "awaiting_first_token" | "generating";
+    est_chars: number | null;
+    est_tokens: number | null;
+    precision: "estimated" | "authoritative";
+    source: string;
+    at: number;
+  }> = {}) {
+    return {
+      kind: "generating" as const,
+      est_chars: 42000,
+      est_tokens: 12000,
+      precision: "estimated" as const,
+      source: "claude_input_json_delta",
+      at: Date.now(),
+      ...over,
+    };
+  }
+
+  function awaitText(props: {
+    heartbeat?: ReturnType<typeof hb> | null;
+    lastEventAt?: number;
+    turnTokens?: { input: number | null; output: number | null } | null;
+  }) {
+    const { getByTestId } = render(
+      <TurnLiveMarquee
+        entries={deriveLiveMarqueeEntries([tool("t1", { status: "ok" })])}
+        {...props}
+      />,
+    );
+    return getByTestId("marquee-awaiting").textContent ?? "";
+  }
+
+  it("无心跳 → 现状纯计时文案（零回归）", () => {
+    const text = awaitText({ lastEventAt: Date.now() - 2_000 });
+    expect(text).toContain("等待模型响应");
+    expect(text).not.toContain("正在生成大段内容");
+    expect(text).not.toContain("约");
+  });
+
+  it("generating 心跳（estimated）→ 正在生成大段内容 + 已产出约 N token", () => {
+    const text = awaitText({ heartbeat: hb(), lastEventAt: Date.now() - 2_000 });
+    expect(text).toContain("正在生成大段内容");
+    expect(text).toContain("已产出约 12,000 token");
+  });
+
+  it("awaiting_first_token 心跳 → 正在等待模型响应 · 已发送上下文", () => {
+    const text = awaitText({
+      heartbeat: hb({ kind: "awaiting_first_token", est_chars: null, est_tokens: null }),
+      lastEventAt: Date.now() - 2_000,
+    });
+    expect(text).toContain("正在等待模型响应");
+    expect(text).toContain("已发送上下文");
+  });
+
+  it("authoritative 心跳（codex）→ 权威值不带「约」", () => {
+    const text = awaitText({
+      heartbeat: hb({ precision: "authoritative", source: "codex_token_usage", est_tokens: 120 }),
+      lastEventAt: Date.now() - 2_000,
+    });
+    expect(text).toContain("已输出 120 token");
+    expect(text).not.toContain("约 120");
+  });
+
+  it("心跳过期（>5s 无新心跳）→ 回落现状纯计时（瞬态自清）", () => {
+    const text = awaitText({
+      heartbeat: hb({ at: Date.now() - 8_000 }),
+      lastEventAt: Date.now() - 2_000,
+    });
+    expect(text).toContain("等待模型响应");
+    expect(text).not.toContain("正在生成大段内容");
+  });
+
+  it("等待 >30s → 追加大内容慢提示（三态通用）", () => {
+    const text = awaitText({ heartbeat: hb(), lastEventAt: Date.now() - 40_000 });
+    expect(text).toContain("大内容可能需要几分钟");
+  });
+
+  it("估算补显与轮级权威 token 并存（约值 + ↑↓ 同屏）", () => {
+    const text = awaitText({
+      heartbeat: hb(),
+      lastEventAt: Date.now() - 2_000,
+      turnTokens: { input: 19415, output: 54160 },
+    });
+    expect(text).toContain("已产出约 12,000 token");
+    expect(text).toContain("↑19,415");
+    expect(text).toContain("↓54,160");
+  });
+});

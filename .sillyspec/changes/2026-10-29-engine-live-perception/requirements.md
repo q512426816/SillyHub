@@ -83,8 +83,8 @@ Then daemon 三引擎心跳源用例、backend 端点用例、前端三态/选�
 ## 测试绑定（每条 FR 至少一行——`FR-NN: test/路径「用例名」`）
 
 FR-01: sillyhub-daemon/tests/interactive/claude-events.test.ts「input_json_delta 心跳计数/节流/轮收尾清零」；sillyhub-daemon/tests/interactive/zcode-events.test.ts「遥测 chunkLength 累计与降级路径」；sillyhub-daemon/tests/interactive/codex-app-server-driver.test.ts「token_usage_updated 桥接心跳」
-FR-02: backend/tests/modules/daemon/test_event_publish.py「turn_heartbeat SSE 直发不落库」
-FR-03: frontend/src/components/daemon/__tests__/turn-heartbeat-marquee.test.tsx「三态文案/估算补显落定即隐/main 选主/超时提示」
+FR-02: backend/app/modules/daemon/tests/test_turn_heartbeat_events.py「turn_heartbeat SSE 直发不落库」（端点测试实际落位于模块内 tests，对齐 test_turn_phase_events.py 先例）
+FR-03: frontend/src/components/daemon/__tests__/turn-live-marquee.test.tsx「等待三态与估算补显（FR-03）」（用例并入跑马灯测试正家；main 选主另由 session-panel/__tests__/turn-heartbeat-state.test.tsx 覆盖）
 FR-04: sillyhub-daemon/tests/interactive/claude-events.test.ts「心跳消息不进 usage 台账聚合」
-FR-05: frontend/src/components/daemon/__tests__/turn-heartbeat-marquee.test.tsx「无心跳回落现状计时」
+FR-05: frontend/src/components/daemon/__tests__/turn-live-marquee.test.tsx「无心跳 → 现状纯计时文案（零回归）」
 FR-06: 不适用：静态检查为 tsc/eslint 命令面，聚合于收口实测

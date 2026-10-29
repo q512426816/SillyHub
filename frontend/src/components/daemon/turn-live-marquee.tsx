@@ -60,6 +60,23 @@ import { processLabel } from "./process-labels";
 import type { TurnSegment } from "./session-log-assembler";
 
 /**
+ * 轮内实时心跳状态（2026-10-29-engine-live-perception FR-03）。结构与
+ * session-panel/turn-state 的 TurnHeartbeatState 逐字段同构（duck-typing）——
+ * 此处内联声明而非 import：marquee 处于 turn-timeline → marquee → turn-state →
+ * session-log-assembler 依赖链上，多一跳 import 会引入模块初始化循环
+ * （ICON_COMPONENTS 在循环加载窗口未就绪，渲染 undefined 实证），组件 prop
+ * 类型自持消除该环。
+ */
+export interface MarqueeHeartbeatState {
+  kind: "awaiting_first_token" | "generating";
+  est_chars: number | null;
+  est_tokens: number | null;
+  precision: "estimated" | "authoritative";
+  source: string;
+  at: number;
+}
+
+/**
  * 轨道渲染队列上限（2026-10-23-marquee-queue-window）：只保留最近 12 条，
  * 更早的直接丢弃。12 条约 3 屏上下文，轨道总宽收敛在约 3.3k px——
  * 跑马灯定位是「感知」，完整过程由「进度」视图承担，无需保留长历史。
@@ -659,6 +676,15 @@ export interface TurnLiveMarqueeProps {
    * 等待条目回显「↑输入 ↓输出」；两值皆 null / 缺省不显示 token 段。
    */
   turnTokens?: { input: number | null; output: number | null } | null;
+  /**
+   * 2026-10-29-engine-live-perception（FR-03 / D-001@v1）：轮内实时心跳（轮状态
+   * heartbeat，main 选主后写入）。等待条目升级三态——无心跳/过期（>5s 无新
+   * 心跳）=现状纯计时；awaiting_first_token=「正在等待模型响应 · 已发送上下文」；
+   * generating=「正在生成大段内容 · 已产出约 N token」（estimated 标「约」，
+   * authoritative 权威值不带约）。估算值不进任何用量合计（FR-04）。缺省
+   * undefined = 无心跳（老 daemon）→ 现状渲染零回归。
+   */
+  heartbeat?: MarqueeHeartbeatState | null;
 }
 
 /**
@@ -676,6 +702,7 @@ export const TurnLiveMarquee = memo(function TurnLiveMarquee({
   active = true,
   lastEventAt,
   turnTokens,
+  heartbeat,
 }: TurnLiveMarqueeProps) {
   const prefersReduced = usePrefersReducedMotion();
   const reduced = reducedMotion ?? prefersReduced;
@@ -794,6 +821,28 @@ export const TurnLiveMarquee = memo(function TurnLiveMarquee({
     turnTokens != null && (turnTokens.input != null || turnTokens.output != null)
       ? ` · ↑${(turnTokens.input ?? 0).toLocaleString("zh-CN")} ↓${(turnTokens.output ?? 0).toLocaleString("zh-CN")}`
       : "";
+  // 2026-10-29-engine-live-perception（FR-03）：等待三态——有效心跳判定（>5s 无
+  // 新心跳视为过期回落纯计时；heartbeat.at 固定，awaitingElapsedMs 的秒级 tick
+  // 驱动重渲染时重评）；估算 token 标「约」（estimated），权威值（authoritative，
+  // codex）不带约；>30s 追加「大内容可能需要几分钟」。心跳刷新不进
+  // lastEventAt（语义=最后真实内容事件，Grill 追问③）——等待时长口径不变。
+  const liveHeartbeat =
+    heartbeat != null && Date.now() - heartbeat.at <= 5_000 ? heartbeat : null;
+  const estSuffix =
+    liveHeartbeat?.est_tokens != null
+      ? `${
+          liveHeartbeat.precision === "estimated" ? "已产出约" : "已输出"
+        } ${liveHeartbeat.est_tokens.toLocaleString("zh-CN")} token`
+      : "";
+  const slowHint =
+    awaitingMounted && awaitingElapsedMs > 30_000
+      ? " · 大内容可能需要几分钟"
+      : "";
+  const awaitingLabel = liveHeartbeat
+    ? liveHeartbeat.kind === "awaiting_first_token"
+      ? "正在等待模型响应 · 已发送上下文"
+      : "正在生成大段内容"
+    : "等待模型响应";
   const awaitingEntry: LiveMarqueeEntry | null =
     isAwaiting && latest != null
       ? {
@@ -801,7 +850,7 @@ export const TurnLiveMarquee = memo(function TurnLiveMarquee({
           icon: "awaiting",
           // 数值段挂载后渲染（awaitingMounted）：SSR 首帧骨架，客户端水合后填时长/token。
           text: awaitingMounted
-            ? `等待模型响应 · ${formatMarqueeDuration(awaitingElapsedMs)}${tokenSuffix}`
+            ? `${awaitingLabel} · ${formatMarqueeDuration(awaitingElapsedMs)}${estSuffix ? ` · ${estSuffix}` : ""}${tokenSuffix}${slowHint}`
             : "等待模型响应…",
           status: "running",
           startedAt: null,

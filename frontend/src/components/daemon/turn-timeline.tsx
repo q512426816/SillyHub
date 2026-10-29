@@ -1175,6 +1175,9 @@ const TurnRow = memo(function TurnRow({
                   // 2026-10-26-session-stage-progress（FR-04）：轮当前阶段透传
                   // 状态条（缺省 undefined → 状态条现状分支，零回归）。
                   currentPhase={turn.currentPhase}
+                  // 2026-10-29-engine-live-perception（FR-03）：轮内心跳透传
+                  // 跑马灯等待三态（缺省 undefined → 现状纯计时零回归）。
+                  heartbeat={turn.heartbeat}
                   />
                 </>
               ) : (
@@ -2274,6 +2277,7 @@ function SegmentedTurnBody({
   onMarkerSubmit,
   turnTokens,
   currentPhase,
+  heartbeat,
   mobile = false,
 }: {
   segments: TurnSegment[];
@@ -2294,6 +2298,9 @@ function SegmentedTurnBody({
   turnTokens?: { input: number | null; output: number | null } | null;
   /** 2026-10-26-session-stage-progress（FR-04）：轮当前阶段（turn 对象透传）。 */
   currentPhase?: TurnPhaseState | null;
+  /** 2026-10-29-engine-live-perception（FR-03）：轮内实时心跳（turn 对象透传，
+   *  下传跑马灯等待三态；缺省 undefined → 现状纯计时零回归）。 */
+  heartbeat?: TurnHeartbeatState | null;
 }) {
   const turnDialogs = useMemo(
     () => dialogHistory.filter((d) => d.run_id === runKey),
@@ -2502,6 +2509,7 @@ function SegmentedTurnBody({
           mobile={mobile}
           lastEventAt={liveLastEventAt}
           turnTokens={turnTokens}
+          heartbeat={heartbeat}
         />
       )}
       {/* 2026-10-20-session-page-dsh-alignment（FR-01 / D-016①）：原 quick-3c85b05e
