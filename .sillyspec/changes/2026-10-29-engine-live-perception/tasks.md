@@ -13,4 +13,4 @@ created_at: 2026-10-29T05:06:35.344Z
 - [x] task-07: 前端 session-sse.ts——SessionEventKind 加 turn_heartbeat + 分发 case + 轮级心跳状态（按 parent 分桶、main 优先、5s 无心跳自清、不进段树不刷 lastEventAt）——验证：类型与分发测试绿
 - [x] task-08: 前端 marquee 三态——turn-live-marquee.tsx 等待条目三态文案 + 估算补显（约/弱化/落定即隐）+ >30s 提示 + turn-timeline 传递——验证：NEW turn-heartbeat-marquee.test.tsx 用例绿（三态/选主/回落/落定即隐）
 - [x] task-09: 原型——NEW engine-live-perception-view.tsx（生产组件+假心跳三态演示）+ pnpm prototype:build + 复件 prototype-engine-live-perception.html 进变更目录 + visual-evidence.md——验证：build 产物可开、三态可视
-- [ ] task-10: 相关测试面全量回归（daemon 三测试 + backend publish + 前端 marquee/sse 相关）+ 前端 tsc/eslint 0 error + daemon/backend 静态检查——验证：全绿清单落收口汇报
+- [x] task-10: 相关测试面全量回归（daemon 三测试 + backend publish + 前端 marquee/sse 相关）+ 前端 tsc/eslint 0 error + daemon/backend 静态检查——验证：全绿清单落收口汇报
