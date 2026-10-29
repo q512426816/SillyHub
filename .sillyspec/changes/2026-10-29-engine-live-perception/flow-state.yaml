@@ -1,0 +1,15 @@
+tier: thin
+legacy_fallback: false
+substeps: {}
+born_face: thin
+adopted_from: brainstorm
+review_force: null
+baseline_commit: 574c235a3d8b03152106eaa36abe10cdc1748406
+updatedAt: '2026-10-29T05:10:48.373Z'
+baseline_sha256: a4d018e5e8ebb53a3173705cc14d6fd1559e29fe73cd39dc5e1490905507b024
+spec_approved: true
+spec_approved_at: '2026-10-29T05:10:48.372Z'
+spec_approved_by: anon@DESKTOP-HJ0AM09
+spec_approved_channel: user-confirmed
+spec_attested_by: anon@DESKTOP-HJ0AM09
+
