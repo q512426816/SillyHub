@@ -1694,6 +1694,33 @@ class TurnPhaseReportRequest(BaseModel):
     detail: str | None = None
 
 
+class TurnHeartbeatReportRequest(BaseModel):
+    """daemon 轮内实时心跳上报（2026-10-29-engine-live-perception FR-02）。
+
+    daemon 层拦截 ``turn_heartbeat_report`` 桥消息（SessionManager 统一从驱动
+    ``onHeartbeat`` 转发，三引擎归一）→ ``notifyTurnHeartbeat`` POST 本端点 →
+    ``publish_turn_heartbeat_event`` 发布 ``turn_heartbeat`` 事件到
+    ``agent_session:{id}`` 频道。**不落库**（瞬态展示信号，1s/条×长会话会撑爆
+    AgentRunLog；历史回放无心跳，前端回落现状纯计时——brownfield 兼容）。
+
+    - ``kind`` 两值：``awaiting_first_token``（请求已发出首包未到，daemon 单次）
+      / ``generating``（模型正在生成工具参数等不可见内容）；
+    - ``est_chars``/``est_tokens`` 估算值（precision=estimated，系数 3.5 字符/
+      token）或 codex 引擎权威值（authoritative）——**禁止**进 usage 台账/预算/
+      计费/ctx 环任何聚合（D-001@v1 分道决策）；
+    - payload 键名 daemon/backend/frontend 三端逐字对齐（D-backend-039 铁律）；
+    - session_id 走路径参数（端点层归属校验），DTO 不带。
+    """
+
+    run_id: uuid.UUID
+    kind: Literal["awaiting_first_token", "generating"]
+    precision: Literal["estimated", "authoritative"]
+    source: Literal["claude_input_json_delta", "zcode_telemetry", "codex_token_usage"]
+    est_chars: int | None = None
+    est_tokens: int | None = None
+    parent_tool_use_id: str | None = None
+
+
 class BgTaskFinalReportRequest(BaseModel):
     """daemon 后台任务终态上报（2026-10-28-bg-task-status-report FR-02）。
 

@@ -6036,6 +6036,37 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/daemon/sessions/{session_id}/turn-heartbeat": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Notify Turn Heartbeat
+         * @description Receive daemon turn-heartbeat report and forward to frontend SSE.
+         *
+         *     2026-10-29-engine-live-perception（FR-02 / D-001@v1）：daemon 层拦截
+         *     ``turn_heartbeat_report`` 桥消息（三引擎心跳源归一）→ 本端点 →
+         *     ``publish_turn_heartbeat_event`` 发布 ``turn_heartbeat`` 事件（payload 键
+         *     kind/est_chars/est_tokens/precision/source/parent_tool_use_id/timestamp 与
+         *     前端信封逐字对齐，D-backend-039）。**不落库**——瞬态展示信号（1s/条），
+         *     估算值与权威 usage 分道（禁止进预算/计费/ctx 环聚合）；历史回放无心跳，
+         *     前端回落现状纯计时（brownfield 兼容）。
+         *
+         *     越权防护（2026-08-25 P1）：同 notify_turn_phase，发布前做 runtime
+         *     归属校验（404 不泄露存在性）。
+         */
+        post: operations["notify_turn_heartbeat_api_daemon_sessions__session_id__turn_heartbeat_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/daemon/sessions/{session_id}/bg-task-final": {
         parameters: {
             query?: never;
@@ -29334,6 +29365,52 @@ export interface components {
             concurrentSessionsHint: true;
         };
         /**
+         * TurnHeartbeatReportRequest
+         * @description daemon 轮内实时心跳上报（2026-10-29-engine-live-perception FR-02）。
+         *
+         *     daemon 层拦截 ``turn_heartbeat_report`` 桥消息（SessionManager 统一从驱动
+         *     ``onHeartbeat`` 转发，三引擎归一）→ ``notifyTurnHeartbeat`` POST 本端点 →
+         *     ``publish_turn_heartbeat_event`` 发布 ``turn_heartbeat`` 事件到
+         *     ``agent_session:{id}`` 频道。**不落库**（瞬态展示信号，1s/条×长会话会撑爆
+         *     AgentRunLog；历史回放无心跳，前端回落现状纯计时——brownfield 兼容）。
+         *
+         *     - ``kind`` 两值：``awaiting_first_token``（请求已发出首包未到，daemon 单次）
+         *       / ``generating``（模型正在生成工具参数等不可见内容）；
+         *     - ``est_chars``/``est_tokens`` 估算值（precision=estimated，系数 3.5 字符/
+         *       token）或 codex 引擎权威值（authoritative）——**禁止**进 usage 台账/预算/
+         *       计费/ctx 环任何聚合（D-001@v1 分道决策）；
+         *     - payload 键名 daemon/backend/frontend 三端逐字对齐（D-backend-039 铁律）；
+         *     - session_id 走路径参数（端点层归属校验），DTO 不带。
+         */
+        TurnHeartbeatReportRequest: {
+            /**
+             * Run Id
+             * Format: uuid
+             */
+            run_id: string;
+            /**
+             * Kind
+             * @enum {string}
+             */
+            kind: "awaiting_first_token" | "generating";
+            /**
+             * Precision
+             * @enum {string}
+             */
+            precision: "estimated" | "authoritative";
+            /**
+             * Source
+             * @enum {string}
+             */
+            source: "claude_input_json_delta" | "zcode_telemetry" | "codex_token_usage";
+            /** Est Chars */
+            est_chars?: number | null;
+            /** Est Tokens */
+            est_tokens?: number | null;
+            /** Parent Tool Use Id */
+            parent_tool_use_id?: string | null;
+        };
+        /**
          * TurnOutlineItemRead
          * @description turn-outline 单轮摘要项（FR-01）。
          *
@@ -40855,6 +40932,43 @@ export interface operations {
         requestBody: {
             content: {
                 "application/json": components["schemas"]["TurnPhaseReportRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: boolean;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    notify_turn_heartbeat_api_daemon_sessions__session_id__turn_heartbeat_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                session_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["TurnHeartbeatReportRequest"];
             };
         };
         responses: {

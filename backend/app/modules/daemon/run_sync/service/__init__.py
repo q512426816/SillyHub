@@ -102,6 +102,7 @@ from .publish import (  # noqa: E402
     publish_bg_task_final_event,
     publish_session_event,
     publish_submitted_messages,
+    publish_turn_heartbeat_event,
     publish_turn_phase_event,
 )
 from .sdk_pipeline import (  # noqa: E402
@@ -143,6 +144,7 @@ __all__ = [
     "publish_session_event",
     "publish_sessions_changed",
     "publish_submitted_messages",
+    "publish_turn_heartbeat_event",
     "publish_turn_phase_event",
     "resolve_group_member_identity",
 ]

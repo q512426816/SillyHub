@@ -36,6 +36,7 @@ from app.modules.daemon.run_sync.service import (
     publish_bash_chunk_event,
     publish_bg_task_final_event,
     publish_session_event,
+    publish_turn_heartbeat_event,
     publish_turn_phase_event,
 )
 from app.modules.daemon.schema import (
@@ -45,6 +46,7 @@ from app.modules.daemon.schema import (
     BgTaskFinalReportRequest,
     PlanModeEnteredEvent,
     PlanResponseRequest,
+    TurnHeartbeatReportRequest,
     TurnPhaseReportRequest,
 )
 from app.modules.daemon.service import DaemonRuntimeNotFound, DaemonService
@@ -349,6 +351,43 @@ async def notify_turn_phase(
     """
     await SessionService(session).get_session_for_runtime_owner(session_id, user.id)
     await publish_turn_phase_event(session_id, data.run_id, data.phase, data.detail)
+    return {"ok": True}
+
+
+@router.post(
+    "/sessions/{session_id}/turn-heartbeat",
+    response_model=dict[str, bool],
+)
+async def notify_turn_heartbeat(
+    session_id: uuid.UUID,
+    data: TurnHeartbeatReportRequest,
+    session: SessionDep,
+    user: Annotated[User, Depends(get_current_principal)],
+) -> dict[str, bool]:
+    """Receive daemon turn-heartbeat report and forward to frontend SSE.
+
+    2026-10-29-engine-live-perception（FR-02 / D-001@v1）：daemon 层拦截
+    ``turn_heartbeat_report`` 桥消息（三引擎心跳源归一）→ 本端点 →
+    ``publish_turn_heartbeat_event`` 发布 ``turn_heartbeat`` 事件（payload 键
+    kind/est_chars/est_tokens/precision/source/parent_tool_use_id/timestamp 与
+    前端信封逐字对齐，D-backend-039）。**不落库**——瞬态展示信号（1s/条），
+    估算值与权威 usage 分道（禁止进预算/计费/ctx 环聚合）；历史回放无心跳，
+    前端回落现状纯计时（brownfield 兼容）。
+
+    越权防护（2026-08-25 P1）：同 notify_turn_phase，发布前做 runtime
+    归属校验（404 不泄露存在性）。
+    """
+    await SessionService(session).get_session_for_runtime_owner(session_id, user.id)
+    await publish_turn_heartbeat_event(
+        session_id,
+        data.run_id,
+        data.kind,
+        data.precision,
+        data.source,
+        data.est_chars,
+        data.est_tokens,
+        data.parent_tool_use_id,
+    )
     return {"ok": True}
 
 

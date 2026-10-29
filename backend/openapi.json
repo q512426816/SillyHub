@@ -15813,6 +15813,64 @@
         }
       }
     },
+    "/api/daemon/sessions/{session_id}/turn-heartbeat": {
+      "post": {
+        "tags": [
+          "daemon"
+        ],
+        "summary": "Notify Turn Heartbeat",
+        "description": "Receive daemon turn-heartbeat report and forward to frontend SSE.\n\n2026-10-29-engine-live-perception（FR-02 / D-001@v1）：daemon 层拦截\n``turn_heartbeat_report`` 桥消息（三引擎心跳源归一）→ 本端点 →\n``publish_turn_heartbeat_event`` 发布 ``turn_heartbeat`` 事件（payload 键\nkind/est_chars/est_tokens/precision/source/parent_tool_use_id/timestamp 与\n前端信封逐字对齐，D-backend-039）。**不落库**——瞬态展示信号（1s/条），\n估算值与权威 usage 分道（禁止进预算/计费/ctx 环聚合）；历史回放无心跳，\n前端回落现状纯计时（brownfield 兼容）。\n\n越权防护（2026-08-25 P1）：同 notify_turn_phase，发布前做 runtime\n归属校验（404 不泄露存在性）。",
+        "operationId": "notify_turn_heartbeat_api_daemon_sessions__session_id__turn_heartbeat_post",
+        "parameters": [
+          {
+            "name": "session_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Session Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TurnHeartbeatReportRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": {
+                    "type": "boolean"
+                  },
+                  "title": "Response Notify Turn Heartbeat Api Daemon Sessions  Session Id  Turn Heartbeat Post"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/daemon/sessions/{session_id}/bg-task-final": {
       "post": {
         "tags": [
@@ -78605,6 +78663,82 @@
         ],
         "title": "TurnFileChangesSnapshot",
         "description": "一轮工作区文件变更快照（``GET /sessions/{id}/runs`` 的 ``file_changes``）。"
+      },
+      "TurnHeartbeatReportRequest": {
+        "properties": {
+          "run_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Run Id"
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "awaiting_first_token",
+              "generating"
+            ],
+            "title": "Kind"
+          },
+          "precision": {
+            "type": "string",
+            "enum": [
+              "estimated",
+              "authoritative"
+            ],
+            "title": "Precision"
+          },
+          "source": {
+            "type": "string",
+            "enum": [
+              "claude_input_json_delta",
+              "zcode_telemetry",
+              "codex_token_usage"
+            ],
+            "title": "Source"
+          },
+          "est_chars": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Est Chars"
+          },
+          "est_tokens": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Est Tokens"
+          },
+          "parent_tool_use_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Parent Tool Use Id"
+          }
+        },
+        "type": "object",
+        "required": [
+          "run_id",
+          "kind",
+          "precision",
+          "source"
+        ],
+        "title": "TurnHeartbeatReportRequest",
+        "description": "daemon 轮内实时心跳上报（2026-10-29-engine-live-perception FR-02）。\n\ndaemon 层拦截 ``turn_heartbeat_report`` 桥消息（SessionManager 统一从驱动\n``onHeartbeat`` 转发，三引擎归一）→ ``notifyTurnHeartbeat`` POST 本端点 →\n``publish_turn_heartbeat_event`` 发布 ``turn_heartbeat`` 事件到\n``agent_session:{id}`` 频道。**不落库**（瞬态展示信号，1s/条×长会话会撑爆\nAgentRunLog；历史回放无心跳，前端回落现状纯计时——brownfield 兼容）。\n\n- ``kind`` 两值：``awaiting_first_token``（请求已发出首包未到，daemon 单次）\n  / ``generating``（模型正在生成工具参数等不可见内容）；\n- ``est_chars``/``est_tokens`` 估算值（precision=estimated，系数 3.5 字符/\n  token）或 codex 引擎权威值（authoritative）——**禁止**进 usage 台账/预算/\n  计费/ctx 环任何聚合（D-001@v1 分道决策）；\n- payload 键名 daemon/backend/frontend 三端逐字对齐（D-backend-039 铁律）；\n- session_id 走路径参数（端点层归属校验），DTO 不带。"
       },
       "TurnOutlineItemRead": {
         "properties": {

@@ -384,6 +384,52 @@ async def publish_turn_phase_event(
     )
 
 
+async def publish_turn_heartbeat_event(
+    session_id: uuid.UUID,
+    run_id: uuid.UUID,
+    kind: str,
+    precision: str,
+    source: str,
+    est_chars: int | None = None,
+    est_tokens: int | None = None,
+    parent_tool_use_id: str | None = None,
+) -> None:
+    """发布 ``turn_heartbeat`` 事件到 ``agent_session:{session_id}`` 频道。
+
+    2026-10-29-engine-live-perception（FR-02 / D-001@v1）：轮内实时心跳的统一
+    发布出口——daemon 三引擎心跳源（Claude input_json_delta 计数 / zcode 遥测
+    tool_input_delta / codex token_usage_updated 桥接）经 notify 端点转发。
+    **不落库**（瞬态展示信号；估算值与权威 usage 分道，禁止进任何聚合）。
+
+    payload 键名 ``kind`` / ``est_chars`` / ``est_tokens`` / ``precision`` /
+    ``source`` / ``parent_tool_use_id`` / ``timestamp`` 与前端 SSE 信封
+    **逐字对齐**（D-backend-039：SSE 透传层原样转发不改名，键名不一致字段必
+    丢）。异常吞噬 + warning（D-009 同口径：心跳为纯增强，发布失败不阻断上
+    报主流程），底座 ``publish_json_event`` 已兜，本层不再包 try。
+    """
+    payload: dict = {
+        "event": "turn_heartbeat",
+        "session_id": str(session_id),
+        "run_id": str(run_id),
+        "kind": kind,
+        "precision": precision,
+        "source": source,
+        "est_chars": est_chars,
+        "est_tokens": est_tokens,
+        "parent_tool_use_id": parent_tool_use_id,
+        "timestamp": datetime.now(UTC).isoformat(),
+    }
+    await publish_json_event(
+        redis_getter=_rsvc.get_redis,
+        channel=f"agent_session:{session_id}",
+        payload=payload,
+        log=_rsvc.log,
+        failure_event="turn_heartbeat_redis_publish_failed",
+        session_id=str(session_id),
+        event_type="turn_heartbeat",
+    )
+
+
 async def publish_bg_task_final_event(
     session_id: uuid.UUID,
     run_id: uuid.UUID | None,
