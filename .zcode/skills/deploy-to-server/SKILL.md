@@ -425,6 +425,9 @@ ssh -i ~/.ssh/tencent_deploy ubuntu@124.222.127.242 '
   验证：进容器 `touch` 某个已有工作区树的 `changes/.w` 不报 Permission denied。
   老阿里云机实证属主就是 999:999——每次迁移/搬数据后都要对齐（已加进「更新部署 §4 验证」探针）。
 - **不要碰 ppdmq-\***：服务器另有 `ppdmq-app/redis/mysql` 是别的项目，部署只动 `multi-agent-platform-*` 容器。
+- **容器内 backend 源码路径是 `/app/app/`**（不是 `/app/backend/`）：验证「新代码进容器」时 grep 口径为
+  `docker exec multi-agent-platform-backend-1 grep -rl <符号> /app/app/modules/...`（2026-10-29 实证，
+  首猜 `/app/backend/` 落空白跑一轮）。
 - **容器端口用 127.0.0.1**：本机 curl 验证服务器映射端口用 `127.0.0.1`（在服务器上 ssh 内执行），不要用 `localhost`（IPv6 解析问题）。
 - **`/daemon/` 别让 nginx 静态 alias**：宿主机 `/var/www/sillyhub/daemon/` 这类静态副本不随镜像更新，会吐旧 bundle/旧 install.ps1（无 BOM、`{{SERVER_URL}}` 未替换）。整段 `location /daemon/` 必须 `proxy_pass` 到后端。排障/部署后对比公网与后端 latest.json 版本是否一致。详见上方「nginx 路由」。
 - **`/mcp` 必须显式加 nginx location**：不配会落到前端 Next.js（308 → HTML），表现为远端 MCP gateway 未暴露；SSE 长连接还需 `proxy_buffering off` + 长 read timeout。详见上方「/mcp」节。
