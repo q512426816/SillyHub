@@ -72,6 +72,7 @@ import type {
   InteractiveDriverStartOptions,
   ThinkingLevelResult,
   ThinkingLevels,
+  TurnHeartbeatSignal,
   TurnMessageEnvelope,
   UserTurnInput,
 } from './driver.js';
@@ -1215,6 +1216,7 @@ export class CodexAppServerDriver implements InteractiveDriver {
         h,
         line,
         currentTurnResolve !== null ? onMessage : undefined,
+        currentTurnResolve !== null ? callbacks.onHeartbeat : undefined,
       );
 
       // D2（健壮性修复，2026-07-24）：parse 包 try/catch——畸形行让 adapter.parse 抛
@@ -1783,6 +1785,7 @@ export class CodexAppServerDriver implements InteractiveDriver {
     onMessage:
       | ((envelope: TurnMessageEnvelope) => void | Promise<void>)
       | undefined,
+    onHeartbeat?: (sig: TurnHeartbeatSignal) => void,
   ): void {
     if (!line.includes('"thread/tokenUsage/updated"')) return;
     let msg: {
@@ -1835,6 +1838,22 @@ export class CodexAppServerDriver implements InteractiveDriver {
     if (!onMessage || !h.threadId) return;
     const delta = this._usageDelta(h);
     if (!delta) return;
+    // 2026-10-29-engine-live-perception（FR-01/D-001@v1）：同一真源桥接轮内心跳
+    //（precision=authoritative——codex token_usage_updated 为引擎权威值，三引擎
+    // 唯一精确数字源）；est_tokens=本轮累计 output 差值（与 usage_update 同帧
+    // 同值，口径天然一致）。fire-and-forget，异常不反向打断通知主链路。
+    if (onHeartbeat) {
+      try {
+        onHeartbeat({
+          kind: 'generating',
+          est_tokens: delta.output_tokens,
+          precision: 'authoritative',
+          source: 'codex_token_usage',
+        });
+      } catch {
+        // fail-soft。
+      }
+    }
     onMessage({
       events: [
         toAgentEvent(

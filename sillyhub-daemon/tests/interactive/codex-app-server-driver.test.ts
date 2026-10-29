@@ -53,6 +53,7 @@ import {
 import { safeParseAgentEvent } from '../../src/agent-event-schema.js';
 import type {
   InteractiveDriverCallbacks,
+  TurnHeartbeatSignal,
   UserTurnInput,
 } from '../../src/interactive/driver.js';
 import {
@@ -73,7 +74,7 @@ function makeOpts(overrides: Partial<CodexStartOptions> = {}): CodexStartOptions
 }
 
 /** 构造 callbacks 收集器：onTurnMessage/onTurnResult/onTurnError 全记录。 */
-function makeCallbacks(): {
+function makeCallbacks(heartbeats?: TurnHeartbeatSignal[]): {
   cb: InteractiveDriverCallbacks;
   messages: Record<string, unknown>[];
   results: Record<string, unknown>[];
@@ -96,6 +97,9 @@ function makeCallbacks(): {
     onTurnError: (e) => {
       errors.push(e);
     },
+    // 2026-10-29-engine-live-perception：心跳收集（可选——不传时 onHeartbeat
+    // 缺省，覆盖「无心跳回调」兼容面）。
+    ...(heartbeats ? { onHeartbeat: (sig: TurnHeartbeatSignal) => heartbeats.push(sig) } : {}),
   };
   return { cb, messages, results, errors };
 }
@@ -3321,4 +3325,108 @@ describe('FR-02 生成窗口计时（api_duration_ms）', () => {
     vi.useRealTimers();
   });
 
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 2026-10-29-engine-live-perception FR-01：token_usage_updated 桥接轮内心跳
+// （precision=authoritative——三引擎唯一权威数字源；est_tokens 与 usage_update
+// 同帧同值）
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe('turn_heartbeat 桥接（FR-01）', () => {
+  it('轮内 token_usage_updated → onHeartbeat 收到 authoritative 心跳（est_tokens=本轮 output 差值递增）', async () => {
+    const child = createFakeChild();
+    vi.mocked(spawn).mockReturnValue(child as never);
+
+    const driver = new CodexAppServerDriver({ handshakeIntervalMs: 0 });
+    const { queue, push, close } = makeInputQueue();
+    const heartbeats: TurnHeartbeatSignal[] = [];
+    const { cb } = makeCallbacks(heartbeats);
+    const handle = (await driver.start(queue, makeOpts())) as CodexHandle;
+    const consumeP = driver.consume(handle, cb);
+
+    await new Promise<void>((r) => setTimeout(r, 50));
+    emitLines(child, [threadStartResponse('thr_hb')]);
+    await new Promise<void>((r) => setTimeout(r, 50));
+
+    push('hi');
+    await new Promise<void>((r) => setTimeout(r, 50));
+
+    emitLines(child, [
+      tokenUsageNotif('thr_hb', {
+        inputTokens: 10000,
+        cachedInputTokens: 9000,
+        cacheWriteInputTokens: 0,
+        outputTokens: 50,
+      }),
+    ]);
+    await new Promise<void>((r) => setTimeout(r, 30));
+    emitLines(child, [
+      tokenUsageNotif('thr_hb', {
+        inputTokens: 20000,
+        cachedInputTokens: 19000,
+        cacheWriteInputTokens: 100,
+        outputTokens: 120,
+      }),
+    ]);
+    await new Promise<void>((r) => setTimeout(r, 30));
+
+    expect(heartbeats).toEqual([
+      {
+        kind: 'generating',
+        est_tokens: 50,
+        precision: 'authoritative',
+        source: 'codex_token_usage',
+      },
+      {
+        kind: 'generating',
+        est_tokens: 120,
+        precision: 'authoritative',
+        source: 'codex_token_usage',
+      },
+    ]);
+
+    emitLines(child, [turnCompletedNotif('completed')]);
+    await new Promise<void>((r) => setTimeout(r, 50));
+    close();
+    child._emitExit(0);
+    await consumeP;
+  });
+
+  it('无 onHeartbeat 回调（旧消费方）→ usage_update 链路零变化（兼容面）', async () => {
+    const child = createFakeChild();
+    vi.mocked(spawn).mockReturnValue(child as never);
+
+    const driver = new CodexAppServerDriver({ handshakeIntervalMs: 0 });
+    const { queue, push, close } = makeInputQueue();
+    const { cb, messages } = makeCallbacks();
+    const handle = (await driver.start(queue, makeOpts())) as CodexHandle;
+    const consumeP = driver.consume(handle, cb);
+
+    await new Promise<void>((r) => setTimeout(r, 50));
+    emitLines(child, [threadStartResponse('thr_hb2')]);
+    await new Promise<void>((r) => setTimeout(r, 50));
+    push('hi');
+    await new Promise<void>((r) => setTimeout(r, 50));
+    emitLines(child, [
+      tokenUsageNotif('thr_hb2', {
+        inputTokens: 10000,
+        cachedInputTokens: 9000,
+        cacheWriteInputTokens: 0,
+        outputTokens: 50,
+      }),
+    ]);
+    await new Promise<void>((r) => setTimeout(r, 30));
+
+    const usageMsgs = messages.filter(
+      (m) => (m.metadata as { status?: string })?.status === 'usage_update',
+    );
+    expect(usageMsgs).toHaveLength(1);
+
+    emitLines(child, [turnCompletedNotif('completed')]);
+    await new Promise<void>((r) => setTimeout(r, 50));
+    close();
+    child._emitExit(0);
+    await consumeP;
+  });
 });
