@@ -47,6 +47,11 @@ const VIEWS = [
     title: "会话阶段化进度",
     desc: "状态条阶段文案（冷启动/复用序列）/ 超时警示态 / 现状对照 / 轮内既有能力（2026-10-26-session-stage-progress）",
   },
+  {
+    file: "engine-live-perception-view",
+    title: "长操作实时感知",
+    desc: "跑马灯等待条目三态（现状/等待首字/生成大段内容·估算/权威）+ 慢提示 + 心跳过期回落（2026-10-29-engine-live-perception）",
+  },
 ];
 
 function run(cmd, args) {
