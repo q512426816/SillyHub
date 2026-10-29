@@ -633,3 +633,72 @@ describe("TurnLiveMarquee 手机端窄视口分支（2026-10-26-mobile-four-page
     expect(root.className).not.toContain("w-[min(100%,52rem)]");
   });
 });
+
+describe("2026-10-29-edit-diff-stat-badge: Edit/Write 完成态条目 diff 统计徽标", () => {
+  /** structuredPatch JSON 构造器（- 行 + + 行，hunk 形状与 SDK 透传一致）。 */
+  function pj(del: string[], add: string[]): string {
+    return JSON.stringify([
+      { oldStart: 1, newStart: 1, lines: [...del.map((s) => `-${s}`), ...add.map((s) => `+${s}`)] },
+    ]);
+  }
+
+  it("派生：ok + editPatch → entry.diffStat 按行前缀计数", () => {
+    const entries = deriveLiveMarqueeEntries([
+      tool("e1", { toolName: "Edit", status: "ok", editPatch: pj(["旧1", "旧2"], ["新1"]) }),
+    ]);
+    expect(entries[0]!.diffStat).toEqual({ added: 1, removed: 2 });
+  });
+
+  it("派生：运行中（result 未配对）与 deny（失败）即使携带 editPatch 也不派生", () => {
+    const patch = pj(["旧"], ["新"]);
+    const entries = deriveLiveMarqueeEntries([
+      tool("e-run", { toolName: "Edit", status: "running", editPatch: patch }),
+      tool("e-deny", { toolName: "Edit", status: "deny", editPatch: patch }),
+    ]);
+    expect(entries[0]!.diffStat).toBeNull();
+    expect(entries[1]!.diffStat).toBeNull();
+  });
+
+  it("派生：无 editPatch（非 Edit/Write 工具）与非法 JSON → 不显示（不伪造）", () => {
+    const entries = deriveLiveMarqueeEntries([
+      tool("e-none", { toolName: "Bash", status: "ok" }),
+      tool("e-bad", { toolName: "Edit", status: "ok", editPatch: "{not-json" }),
+      tool("e-zero", { toolName: "Edit", status: "ok", editPatch: JSON.stringify([{ oldStart: 1, newStart: 1, lines: [" 不变"] }]) }),
+    ]);
+    expect(entries[0]!.diffStat).toBeNull();
+    expect(entries[1]!.diffStat).toBeNull();
+    expect(entries[2]!.diffStat).toBeNull();
+  });
+
+  it("渲染：完成态 Edit 条目显示 +N -M（绿/红 class），完成态工具名与统计同格", () => {
+    const entries = deriveLiveMarqueeEntries([
+      tool("e1", { toolName: "Edit", status: "ok", startedAt: 0, endedAt: 900, editPatch: pj(["旧1", "旧2", "旧3", "旧4", "旧5", "旧6", "旧7"], ["新1", "新2", "新3", "新4", "新5", "新6", "新7", "新8", "新9", "新10", "新11"]) }),
+    ]);
+    const { getByTestId } = render(<TurnLiveMarquee entries={entries} />);
+    const badge = getByTestId("diff-stat-badge");
+    expect(badge.textContent).toContain("+11");
+    expect(badge.textContent).toContain("-7");
+    // 绿/红语义色（与状态点 dotClass 同族）
+    expect(badge.querySelector(".text-emerald-600")?.textContent).toBe("+11");
+    expect(badge.querySelector(".text-destructive")?.textContent).toBe("-7");
+  });
+
+  it("渲染：Write 纯新增只显示 +N，不出现 -0", () => {
+    const entries = deriveLiveMarqueeEntries([
+      tool("w1", { toolName: "Write", status: "ok", editPatch: pj([], ["行1", "行2", "行3"]) }),
+    ]);
+    const { getByTestId } = render(<TurnLiveMarquee entries={entries} />);
+    const badge = getByTestId("diff-stat-badge");
+    expect(badge.textContent).toContain("+3");
+    expect(badge.textContent).not.toContain("-0");
+    expect(badge.querySelector(".text-destructive")).toBeNull();
+  });
+
+  it("渲染：运行中条目不渲染徽标（结果未定）", () => {
+    const entries = deriveLiveMarqueeEntries([
+      tool("e-run", { toolName: "Edit", status: "running", editPatch: pj(["旧"], ["新"]) }),
+    ]);
+    const { queryByTestId } = render(<TurnLiveMarquee entries={entries} />);
+    expect(queryByTestId("diff-stat-badge")).toBeNull();
+  });
+});

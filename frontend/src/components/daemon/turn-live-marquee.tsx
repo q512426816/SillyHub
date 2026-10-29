@@ -53,6 +53,9 @@ import { memo, useCallback, useEffect, useRef, useState } from "react";
 
 import { cn } from "@/lib/utils";
 
+import { diffStatFromPatch } from "@/components/agent-log/tool-diff";
+
+import { DiffStatBadge } from "./diff-stat-badge";
 import { processLabel } from "./process-labels";
 import type { TurnSegment } from "./session-log-assembler";
 
@@ -120,6 +123,13 @@ export interface LiveMarqueeEntry {
   endedAt: number | null;
   /** 服务端权威时长（仅 startedAt/endedAt 均可信时有值）。 */
   durationMs: number | null;
+  /**
+   * 2026-10-29-edit-diff-stat-badge（FR-01/FR-03）：Edit/Write 完成态条目的
+   * diff 统计（+新增/-删除行数）。仅 status=ok 且段携带 editPatch、解析出
+   * 非零统计时派生；其余（运行中/失败/无数据/解析失败）恒 null 不渲染。
+   * 可选字段：非 tool 分支（thinking/file 等条目）不构造，消费侧判空。
+   */
+  diffStat?: { added: number; removed: number } | null;
 }
 
 /** 项目 UI 图标（lucide 单色，禁止 emoji 字符串充数）。 */
@@ -240,6 +250,13 @@ function collectEntries(
         const isSubagent = seg.children.length > 0;
         const label = processLabel("tool", seg.toolName, seg.status);
         const primary = clip(seg.primary, 44);
+        // 2026-10-29-edit-diff-stat-badge（FR-03/FR-04）：仅完成（ok）且携带
+        // structuredPatch 的工具段派生统计；运行中（patch 未配对）与 deny 门控
+        // 不出，解析失败/零改动由 diffStatFromPatch 归一为 null（不伪造）。
+        const diffStat =
+          seg.status === "ok" && seg.editPatch
+            ? diffStatFromPatch(seg.editPatch)
+            : null;
         out.push({
           id: `${prefix}${seg.id}`,
           icon: isSubagent ? "subagent" : toolIconOf(label.label),
@@ -250,6 +267,7 @@ function collectEntries(
           startedAt: seg.startedAt,
           endedAt: seg.endedAt,
           durationMs: segmentDuration(seg.startedAt, seg.endedAt),
+          diffStat,
         });
         // 2026-10-25-marquee-subagent-outer-only（FR-01）：子代理内部消息不再
         // 进入外部轨道（用户裁决：外部只显示容器条目，内部消息留在对话流
@@ -577,15 +595,28 @@ function MarqueeItemView({
             </span>
           )}
         </span>
-      ) : durationMs != null ? (
-        <span
-          data-testid="marquee-duration"
-          className="flex shrink-0 items-center gap-0.5 text-[10.5px] text-muted-foreground"
-        >
-          <Timer aria-hidden className="h-3 w-3" />
-          <span className="tabular-nums">{formatMarqueeDuration(durationMs)}</span>
-        </span>
-      ) : null}
+      ) : (
+        <>
+          {/* 2026-10-29-edit-diff-stat-badge（FR-01）：Edit/Write 完成态条目
+              尾部 diff 统计（+N 绿/-M 红），位于耗时区之前；仅 ok 且解析出
+              非零统计的条目携带（派生层门控），其余条目不渲染。 */}
+          {entry.diffStat != null && (
+            <DiffStatBadge
+              added={entry.diffStat.added}
+              removed={entry.diffStat.removed}
+            />
+          )}
+          {durationMs != null && (
+            <span
+              data-testid="marquee-duration"
+              className="flex shrink-0 items-center gap-0.5 text-[10.5px] text-muted-foreground"
+            >
+              <Timer aria-hidden className="h-3 w-3" />
+              <span className="tabular-nums">{formatMarqueeDuration(durationMs)}</span>
+            </span>
+          )}
+        </>
+      )}
     </span>
   );
 }
