@@ -1,0 +1,411 @@
+diff --git a/frontend/src/components/agent-log/__tests__/tool-diff.test.tsx b/frontend/src/components/agent-log/__tests__/tool-diff.test.tsx
+new file mode 100644
+index 000000000..ff136768d
+--- /dev/null
++++ b/frontend/src/components/agent-log/__tests__/tool-diff.test.tsx
+@@ -0,0 +1,68 @@
++/**
++ * 2026-10-29-edit-diff-stat-badge（FR-03）：diffStatFromPatch 纯函数——
++ * structuredPatch JSON → {added, removed} 统计（跑马灯条目 / 进度视图工具行
++ * 的 diff stat 徽标数据源）。口径与 parseStructuredPatch 严格同源（同一解析
++ * 器数行，徽标数与展开区行级 diff 永不矛盾）；解析失败 / 空 hunks / 零改动
++ * → null（调用方不渲染，不伪造不估数）。
++ */
++import { describe, expect, it } from "vitest";
++
++import { diffStatFromPatch } from "@/components/agent-log/tool-diff";
++
++/** 单 hunk structuredPatch JSON 构造器（hunks 形状与 SDK 透传一致）。 */
++function patchOf(lines: string[]): string {
++  return JSON.stringify([{ oldStart: 1, newStart: 1, lines }]);
++}
++
++describe("2026-10-29-edit-diff-stat-badge: diffStatFromPatch 多 hunk 累计与行前缀计数", () => {
++  it("单 hunk：按行前缀计数（ctx 不计、- 计删、+ 计增、\\ 跳过）", () => {
++    const patch = patchOf([
++      " 上下文行",
++      "-删除行1",
++      "-删除行2",
++      "+新增行1",
++      "\\ No newline at end of file",
++    ]);
++    expect(diffStatFromPatch(patch)).toEqual({ added: 1, removed: 2 });
++  });
++
++  it("多 hunk 累计：两 hunk 各 +2 -1 → {added:4, removed:2}", () => {
++    const patch = JSON.stringify([
++      { oldStart: 10, newStart: 10, lines: ["-a", "+b", "+c"] },
++      { oldStart: 50, newStart: 52, lines: ["-d", "+e", "+f"] },
++    ]);
++    expect(diffStatFromPatch(patch)).toEqual({ added: 4, removed: 2 });
++  });
++
++  it("纯新增（Write 新建文件形态）：removed=0，added=行数", () => {
++    const patch = patchOf(["+第一行", "+第二行", "+第三行"]);
++    expect(diffStatFromPatch(patch)).toEqual({ added: 3, removed: 0 });
++  });
++
++  it("纯删除：added=0，removed=行数", () => {
++    const patch = patchOf(["-旧1", "-旧2"]);
++    expect(diffStatFromPatch(patch)).toEqual({ added: 0, removed: 2 });
++  });
++});
++
++describe("2026-10-29-edit-diff-stat-badge: 非法 JSON / 空 hunks / 零改动返回 null", () => {
++  it("非法 JSON → null", () => {
++    expect(diffStatFromPatch("{not-json")).toBeNull();
++  });
++
++  it("空 hunks 数组 → null", () => {
++    expect(diffStatFromPatch("[]")).toBeNull();
++  });
++
++  it("hunk 形状不符（缺 oldStart）→ null", () => {
++    expect(diffStatFromPatch(JSON.stringify([{ newStart: 1, lines: ["+x"] }]))).toBeNull();
++  });
++
++  it("全上下文行零改动 0/0 → null（无信息不显示）", () => {
++    expect(diffStatFromPatch(patchOf([" 不变1", " 不变2"]))).toBeNull();
++  });
++
++  it("空字符串 → null", () => {
++    expect(diffStatFromPatch("")).toBeNull();
++  });
++});
+diff --git a/frontend/src/components/agent-log/tool-diff.tsx b/frontend/src/components/agent-log/tool-diff.tsx
+index 69c87a05d..b5cc2a1e5 100644
+--- a/frontend/src/components/agent-log/tool-diff.tsx
++++ b/frontend/src/components/agent-log/tool-diff.tsx
+@@ -76,6 +76,28 @@ export function parseStructuredPatch(patchJson: string): DiffRow[] | null {
+   return rows;
+ }
+ 
++/**
++ * 2026-10-29-edit-diff-stat-badge：structuredPatch → diff stat 统计（跑马灯
++ * 完成态条目 / 进度视图工具行尾的 +N -M 徽标数据源）。复用 parseStructuredPatch
++ * 同一解析器数 add/del 行——徽标口径与展开区行级 diff 严格同源，永不自相矛盾。
++ * 解析失败 / 空 hunks / 零改动（0/0）→ null（调用方不渲染，不伪造不估数）。
++ */
++export function diffStatFromPatch(patchJson: string): {
++  added: number;
++  removed: number;
++} | null {
++  const rows = parseStructuredPatch(patchJson);
++  if (rows == null) return null;
++  let added = 0;
++  let removed = 0;
++  for (const row of rows) {
++    if (row.type === "add") added += 1;
++    else if (row.type === "del") removed += 1;
++  }
++  if (added === 0 && removed === 0) return null;
++  return { added, removed };
++}
++
+ /** LCS 单元格上限（(n+1)*(m+1) dp 表内存/耗时护栏，1000×1000 行内可算）。 */
+ const DIFF_MAX_CELLS = 1_000_000;
+ 
+diff --git a/frontend/src/components/daemon/__tests__/turn-live-marquee.test.tsx b/frontend/src/components/daemon/__tests__/turn-live-marquee.test.tsx
+index 8d74d3338..819a6ad2d 100644
+--- a/frontend/src/components/daemon/__tests__/turn-live-marquee.test.tsx
++++ b/frontend/src/components/daemon/__tests__/turn-live-marquee.test.tsx
+@@ -633,3 +633,72 @@ describe("TurnLiveMarquee 手机端窄视口分支（2026-10-26-mobile-four-page
+     expect(root.className).not.toContain("w-[min(100%,52rem)]");
+   });
+ });
++
++describe("2026-10-29-edit-diff-stat-badge: Edit/Write 完成态条目 diff 统计徽标", () => {
++  /** structuredPatch JSON 构造器（- 行 + + 行，hunk 形状与 SDK 透传一致）。 */
++  function pj(del: string[], add: string[]): string {
++    return JSON.stringify([
++      { oldStart: 1, newStart: 1, lines: [...del.map((s) => `-${s}`), ...add.map((s) => `+${s}`)] },
++    ]);
++  }
++
++  it("派生：ok + editPatch → entry.diffStat 按行前缀计数", () => {
++    const entries = deriveLiveMarqueeEntries([
++      tool("e1", { toolName: "Edit", status: "ok", editPatch: pj(["旧1", "旧2"], ["新1"]) }),
++    ]);
++    expect(entries[0]!.diffStat).toEqual({ added: 1, removed: 2 });
++  });
++
++  it("派生：运行中（result 未配对）与 deny（失败）即使携带 editPatch 也不派生", () => {
++    const patch = pj(["旧"], ["新"]);
++    const entries = deriveLiveMarqueeEntries([
++      tool("e-run", { toolName: "Edit", status: "running", editPatch: patch }),
++      tool("e-deny", { toolName: "Edit", status: "deny", editPatch: patch }),
++    ]);
++    expect(entries[0]!.diffStat).toBeNull();
++    expect(entries[1]!.diffStat).toBeNull();
++  });
++
++  it("派生：无 editPatch（非 Edit/Write 工具）与非法 JSON → 不显示（不伪造）", () => {
++    const entries = deriveLiveMarqueeEntries([
++      tool("e-none", { toolName: "Bash", status: "ok" }),
++      tool("e-bad", { toolName: "Edit", status: "ok", editPatch: "{not-json" }),
++      tool("e-zero", { toolName: "Edit", status: "ok", editPatch: JSON.stringify([{ oldStart: 1, newStart: 1, lines: [" 不变"] }]) }),
++    ]);
++    expect(entries[0]!.diffStat).toBeNull();
++    expect(entries[1]!.diffStat).toBeNull();
++    expect(entries[2]!.diffStat).toBeNull();
++  });
++
++  it("渲染：完成态 Edit 条目显示 +N -M（绿/红 class），完成态工具名与统计同格", () => {
++    const entries = deriveLiveMarqueeEntries([
++      tool("e1", { toolName: "Edit", status: "ok", startedAt: 0, endedAt: 900, editPatch: pj(["旧1", "旧2", "旧3", "旧4", "旧5", "旧6", "旧7"], ["新1", "新2", "新3", "新4", "新5", "新6", "新7", "新8", "新9", "新10", "新11"]) }),
++    ]);
++    const { getByTestId } = render(<TurnLiveMarquee entries={entries} />);
++    const badge = getByTestId("diff-stat-badge");
++    expect(badge.textContent).toContain("+11");
++    expect(badge.textContent).toContain("-7");
++    // 绿/红语义色（与状态点 dotClass 同族）
++    expect(badge.querySelector(".text-emerald-600")?.textContent).toBe("+11");
++    expect(badge.querySelector(".text-destructive")?.textContent).toBe("-7");
++  });
++
++  it("渲染：Write 纯新增只显示 +N，不出现 -0", () => {
++    const entries = deriveLiveMarqueeEntries([
++      tool("w1", { toolName: "Write", status: "ok", editPatch: pj([], ["行1", "行2", "行3"]) }),
++    ]);
++    const { getByTestId } = render(<TurnLiveMarquee entries={entries} />);
++    const badge = getByTestId("diff-stat-badge");
++    expect(badge.textContent).toContain("+3");
++    expect(badge.textContent).not.toContain("-0");
++    expect(badge.querySelector(".text-destructive")).toBeNull();
++  });
++
++  it("渲染：运行中条目不渲染徽标（结果未定）", () => {
++    const entries = deriveLiveMarqueeEntries([
++      tool("e-run", { toolName: "Edit", status: "running", editPatch: pj(["旧"], ["新"]) }),
++    ]);
++    const { queryByTestId } = render(<TurnLiveMarquee entries={entries} />);
++    expect(queryByTestId("diff-stat-badge")).toBeNull();
++  });
++});
+diff --git a/frontend/src/components/daemon/__tests__/turn-segment-views.test.tsx b/frontend/src/components/daemon/__tests__/turn-segment-views.test.tsx
+index 0cfa43e01..a49518d24 100644
+--- a/frontend/src/components/daemon/__tests__/turn-segment-views.test.tsx
++++ b/frontend/src/components/daemon/__tests__/turn-segment-views.test.tsx
+@@ -2186,3 +2186,50 @@ describe("ModelRetryRowView / SegmentView 分发 / deriveTurnActivity 回退链
+     expect(deriveTurnActivity([thinkingSeg]).currentActivity).toBe("正在思考");
+   });
+ });
++
++describe("2026-10-29-edit-diff-stat-badge: ToolRowView 完成态 diff 统计徽标", () => {
++  /** structuredPatch JSON（- 行 + + 行，hunk 形状与 SDK 透传一致）。 */
++  function pj(del: string[], add: string[]): string {
++    return JSON.stringify([
++      { oldStart: 1, newStart: 1, lines: [...del.map((s) => `-${s}`), ...add.map((s) => `+${s}`)] },
++    ]);
++  }
++
++  it("ok + editPatch → 行尾状态徽标后显示 +N -M（与跑马灯同款组件同口径）", () => {
++    const { getByTestId } = render(
++      <ToolRowView
++        segment={makeToolSeg({
++          toolName: "Edit",
++          editPatch: pj(["旧1"], ["新1", "新2"]),
++        })}
++      />,
++    );
++    const badge = getByTestId("diff-stat-badge");
++    expect(badge.textContent).toContain("+2");
++    expect(badge.textContent).toContain("-1");
++  });
++
++  it("running（结果未配对）→ 不显示统计徽标", () => {
++    const { queryByTestId } = render(<ToolRowView segment={makeBashRunningSeg()} />);
++    expect(queryByTestId("diff-stat-badge")).toBeNull();
++  });
++
++  it("ok 但无 editPatch（非 Edit/Write 工具）→ 不显示（不伪造）", () => {
++    const { queryByTestId } = render(<ToolRowView segment={makeToolSeg()} />);
++    expect(queryByTestId("diff-stat-badge")).toBeNull();
++  });
++
++  it("deny 失败态即使残留 editPatch 也不显示", () => {
++    const { queryByTestId } = render(
++      <ToolRowView
++        segment={makeToolSeg({
++          toolName: "Edit",
++          status: "deny",
++          result: "编辑被拒绝",
++          editPatch: pj(["旧"], ["新"]),
++        })}
++      />,
++    );
++    expect(queryByTestId("diff-stat-badge")).toBeNull();
++  });
++});
+diff --git a/frontend/src/components/daemon/diff-stat-badge.tsx b/frontend/src/components/daemon/diff-stat-badge.tsx
+new file mode 100644
+index 000000000..277ded0bd
+--- /dev/null
++++ b/frontend/src/components/daemon/diff-stat-badge.tsx
+@@ -0,0 +1,34 @@
++"use client";
++
++/**
++ * 2026-10-29-edit-diff-stat-badge（FR-01/FR-02）：Edit/Write 工具调用完成后
++ * 的 diff 统计徽标（GitHub diff stat 口径）——`+N`（绿）`-M`（红），removed=0
++ * 只显示 +N（不显示 -0）。跑马灯完成态条目与进度视图工具行尾共用本组件，
++ * 保证两处样式与口径一致；数据源统一为 diffStatFromPatch（agent-log/tool-diff，
++ * 与展开区行级 diff 同解析器）。
++ *
++ * 最小组件：无状态无副作用；颜色用 emerald/destructive 语义色（双主题安全，
++ * 与跑马灯状态点 dotClass 同族）。
++ */
++
++export interface DiffStatBadgeProps {
++  /** 新增行数（structuredPatch `+` 行计数）。 */
++  added: number;
++  /** 删除行数（structuredPatch `-` 行计数）；0 时只渲染 +N。 */
++  removed: number;
++  /** 根节点 data-testid（缺省 diff-stat-badge）。 */
++  testId?: string;
++}
++
++export function DiffStatBadge({ added, removed, testId }: DiffStatBadgeProps) {
++  return (
++    <span
++      data-testid={testId ?? "diff-stat-badge"}
++      title={`本次文件改动：新增 ${added} 行${removed > 0 ? `、删除 ${removed} 行` : ""}`}
++      className="flex shrink-0 items-center gap-1 font-mono tabular-nums leading-none"
++    >
++      <span className="text-emerald-600">+{added}</span>
++      {removed > 0 && <span className="text-destructive">-{removed}</span>}
++    </span>
++  );
++}
+diff --git a/frontend/src/components/daemon/turn-live-marquee.tsx b/frontend/src/components/daemon/turn-live-marquee.tsx
+index 6e6b25d0c..b11e867d8 100644
+--- a/frontend/src/components/daemon/turn-live-marquee.tsx
++++ b/frontend/src/components/daemon/turn-live-marquee.tsx
+@@ -53,6 +53,9 @@ import { memo, useCallback, useEffect, useRef, useState } from "react";
+ 
+ import { cn } from "@/lib/utils";
+ 
++import { diffStatFromPatch } from "@/components/agent-log/tool-diff";
++
++import { DiffStatBadge } from "./diff-stat-badge";
+ import { processLabel } from "./process-labels";
+ import type { TurnSegment } from "./session-log-assembler";
+ 
+@@ -120,6 +123,13 @@ export interface LiveMarqueeEntry {
+   endedAt: number | null;
+   /** 服务端权威时长（仅 startedAt/endedAt 均可信时有值）。 */
+   durationMs: number | null;
++  /**
++   * 2026-10-29-edit-diff-stat-badge（FR-01/FR-03）：Edit/Write 完成态条目的
++   * diff 统计（+新增/-删除行数）。仅 status=ok 且段携带 editPatch、解析出
++   * 非零统计时派生；其余（运行中/失败/无数据/解析失败）恒 null 不渲染。
++   * 可选字段：非 tool 分支（thinking/file 等条目）不构造，消费侧判空。
++   */
++  diffStat?: { added: number; removed: number } | null;
+ }
+ 
+ /** 项目 UI 图标（lucide 单色，禁止 emoji 字符串充数）。 */
+@@ -240,6 +250,13 @@ function collectEntries(
+         const isSubagent = seg.children.length > 0;
+         const label = processLabel("tool", seg.toolName, seg.status);
+         const primary = clip(seg.primary, 44);
++        // 2026-10-29-edit-diff-stat-badge（FR-03/FR-04）：仅完成（ok）且携带
++        // structuredPatch 的工具段派生统计；运行中（patch 未配对）与 deny 门控
++        // 不出，解析失败/零改动由 diffStatFromPatch 归一为 null（不伪造）。
++        const diffStat =
++          seg.status === "ok" && seg.editPatch
++            ? diffStatFromPatch(seg.editPatch)
++            : null;
+         out.push({
+           id: `${prefix}${seg.id}`,
+           icon: isSubagent ? "subagent" : toolIconOf(label.label),
+@@ -250,6 +267,7 @@ function collectEntries(
+           startedAt: seg.startedAt,
+           endedAt: seg.endedAt,
+           durationMs: segmentDuration(seg.startedAt, seg.endedAt),
++          diffStat,
+         });
+         // 2026-10-25-marquee-subagent-outer-only（FR-01）：子代理内部消息不再
+         // 进入外部轨道（用户裁决：外部只显示容器条目，内部消息留在对话流
+@@ -577,15 +595,28 @@ function MarqueeItemView({
+             </span>
+           )}
+         </span>
+-      ) : durationMs != null ? (
+-        <span
+-          data-testid="marquee-duration"
+-          className="flex shrink-0 items-center gap-0.5 text-[10.5px] text-muted-foreground"
+-        >
+-          <Timer aria-hidden className="h-3 w-3" />
+-          <span className="tabular-nums">{formatMarqueeDuration(durationMs)}</span>
+-        </span>
+-      ) : null}
++      ) : (
++        <>
++          {/* 2026-10-29-edit-diff-stat-badge（FR-01）：Edit/Write 完成态条目
++              尾部 diff 统计（+N 绿/-M 红），位于耗时区之前；仅 ok 且解析出
++              非零统计的条目携带（派生层门控），其余条目不渲染。 */}
++          {entry.diffStat != null && (
++            <DiffStatBadge
++              added={entry.diffStat.added}
++              removed={entry.diffStat.removed}
++            />
++          )}
++          {durationMs != null && (
++            <span
++              data-testid="marquee-duration"
++              className="flex shrink-0 items-center gap-0.5 text-[10.5px] text-muted-foreground"
++            >
++              <Timer aria-hidden className="h-3 w-3" />
++              <span className="tabular-nums">{formatMarqueeDuration(durationMs)}</span>
++            </span>
++          )}
++        </>
++      )}
+     </span>
+   );
+ }
+diff --git a/frontend/src/components/daemon/turn-segment-views.tsx b/frontend/src/components/daemon/turn-segment-views.tsx
+index 0098dbe17..7975fd2aa 100644
+--- a/frontend/src/components/daemon/turn-segment-views.tsx
++++ b/frontend/src/components/daemon/turn-segment-views.tsx
+@@ -70,6 +70,8 @@ import type { ReactNode } from "react";
+ import { MarkdownText } from "@/components/ui/markdown-text";
+ import { processLabel } from "@/components/daemon/process-labels";
+ import { CopyButton } from "@/components/daemon/copy-button";
++import { DiffStatBadge } from "@/components/daemon/diff-stat-badge";
++import { diffStatFromPatch } from "@/components/agent-log/tool-diff";
+ import { FileMessageCard } from "@/components/daemon/file-message-card";
+ import { useSubagentPanel } from "@/components/daemon/subagent-panel-context";
+ // 2026-10-25-subagent-card-unify-panel（FR-05）：子代理卡片内嵌内部活动流动条
+@@ -796,6 +798,18 @@ export const ToolRowView = memo(function ToolRowView({ segment }: ToolRowViewPro
+     waitInfo && segment.startedAt != null
+       ? formatClockDuration(Math.max(0, now - segment.startedAt))
+       : null;
++  // 2026-10-29-edit-diff-stat-badge（FR-02~FR-04）：Edit/Write 完成态 diff 统计
++  // （+N/-M）——仅 status=ok 且段携带 editPatch（structuredPatch 随 result 配对
++  // 写入）时解析；运行中（未配对）与 deny 门控不出，解析失败/零改动归一 null
++  // 不渲染（与跑马灯同解析器同徽标组件，两处口径严格一致）。useMemo 按
++  // editPatch 字符串缓存，避免大 patch 逐渲染重算。
++  const diffStat = useMemo(
++    () =>
++      !running && segment.status === "ok" && segment.editPatch
++        ? diffStatFromPatch(segment.editPatch)
++        : null,
++    [running, segment.status, segment.editPatch],
++  );
+   const desc = waitInfo
+     ? waitedTaskName
+       ? `等待后台任务：${waitedTaskName}`
+@@ -867,6 +881,11 @@ export const ToolRowView = memo(function ToolRowView({ segment }: ToolRowViewPro
+         >
+           {badge.icon}
+         </span>
++        {/* 2026-10-29-edit-diff-stat-badge（FR-02）：完成态 Edit/Write 行尾
++            diff 统计，位置在状态徽标之后、时长之前（与跑马灯条目同款）。 */}
++        {diffStat != null && (
++          <DiffStatBadge added={diffStat.added} removed={diffStat.removed} />
++        )}
+         {waitElapsed && (
+           <span
+             className="shrink-0 font-mono text-[10.5px] text-brand-600"

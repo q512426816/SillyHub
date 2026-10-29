@@ -2250,3 +2250,121 @@ created_at: 2026-10-16T01:30:35.950Z
   confirmed_at: null
   source_change: 2026-10-29-floating-scope-loadmore-fix
   status: active
+
+## FR-test-utils-123 Edit/Write 工具调用完成后，对话视图跑马灯「读写文件 · Edit/Write xxx」完成态条目尾部显示 diff 统计：绿色 +新增行数、红色 -删除行数（纯新增如 Write 只显示 +N，无删除时不显示 -0）
+变更：2026-10-29-edit-diff-stat-badge
+状态：active
+摘要：Edit 完成带 patch；Write 新文件全增；无 patch 的完成条目
+场景正文：
+- 场景：Edit 完成带 patch — Given 工具段 status=ok、editPatch 解析得新增 11 行删除 7 行；When 跑马灯渲染该完成态条目；Then 条目尾部显示 `+11`（绿）`-7`（红）
+- 场景：Write 新文件全增 — Given 工具段 status=ok、editPatch 解析得新增 120 行删除 0 行；When 跑马灯渲染该完成态条目；Then 条目尾部只显示 `+120`（绿），不出现 `-0`
+- 场景：无 patch 的完成条目 — Given 工具段 status=ok 但 editPatch 缺省（非 Edit/Write 工具）；Then 条目尾部不显示统计徽标（既有渲染零变化）
+全文：.sillyspec/changes/archive/2026-10-29-edit-diff-stat-badge/requirements.md#FR-01
+最近确认：5e89be8febddf3883db1e01c22bccb6ef5572af9
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-29-edit-diff-stat-badge:flow:测试绑定FR-01
+  tests: frontend/src/components/daemon/__tests__/turn-live-marquee.test.tsx「Write 全增只显示 +N 不显示 -0」 | frontend/src/components/daemon/__tests__/turn-live-marquee.test.tsx「完成态 Edit 条目显示 +N -M 统计徽标」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-29-edit-diff-stat-badge
+  status: active
+
+## FR-test-utils-124 进度视图（turn-segment-views）对应工具行尾部显示同款统计，两处口径一致
+变更：2026-10-29-edit-diff-stat-badge
+状态：active
+摘要：同段两视图一致
+场景正文：
+- 场景：同段两视图一致 — Given 同一工具段 status=ok、editPatch 新增 11 删除 7；When 对话视图跑马灯与进度视图 ToolRowView 分别渲染；Then 两处均显示 `+11 -7`，颜色与格式一致
+全文：.sillyspec/changes/archive/2026-10-29-edit-diff-stat-badge/requirements.md#FR-02
+最近确认：5e89be8febddf3883db1e01c22bccb6ef5572af9
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-29-edit-diff-stat-badge:flow:测试绑定FR-02
+  tests: frontend/src/components/daemon/__tests__/turn-segment-views.test.tsx「ToolRowView 完成态显示 diff 统计徽标」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-29-edit-diff-stat-badge
+  status: active
+
+## FR-test-utils-125 统计仅从 editPatch（structuredPatch）解析，解析失败或无数据不显示（不伪造、不估数）
+变更：2026-10-29-edit-diff-stat-badge
+状态：active
+摘要：非法 JSON；零改动 patch
+场景正文：
+- 场景：非法 JSON — Given editPatch 为非法 JSON 字符串；Then 不显示统计徽标，不抛错
+- 场景：零改动 patch — Given editPatch 解析成功但新增删除均为 0；Then 不显示统计徽标
+全文：.sillyspec/changes/archive/2026-10-29-edit-diff-stat-badge/requirements.md#FR-03
+最近确认：5e89be8febddf3883db1e01c22bccb6ef5572af9
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-29-edit-diff-stat-badge:flow:测试绑定FR-03
+  tests: frontend/src/components/agent-log/__tests__/tool-diff.test.tsx「diffStatFromPatch 多 hunk 累计与行前缀计数」 | frontend/src/components/agent-log/__tests__/tool-diff.test.tsx「非法 JSON / 空 hunks / 零改动返回 null」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-29-edit-diff-stat-badge
+  status: active
+
+## FR-test-utils-126 运行中态不显示统计（结果未定），失败态不显示统计
+变更：2026-10-29-edit-diff-stat-badge
+状态：active
+摘要：运行中；失败态带 patch
+场景正文：
+- 场景：运行中 — Given 工具段 status=running；Then 不显示统计徽标
+- 场景：失败态带 patch — Given 工具段 status=deny 且段上残留 editPatch；Then 不显示统计徽标
+全文：.sillyspec/changes/archive/2026-10-29-edit-diff-stat-badge/requirements.md#FR-04
+最近确认：5e89be8febddf3883db1e01c22bccb6ef5572af9
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-29-edit-diff-stat-badge:flow:测试绑定FR-04
+  tests: frontend/src/components/daemon/__tests__/turn-live-marquee.test.tsx「运行中与失败条目不显示统计徽标」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-29-edit-diff-stat-badge
+  status: active
+
+## FR-test-utils-127 现有跑马灯与进度视图相关测试全部通过；新增统计纯函数用例与两处渲染用例
+变更：2026-10-29-edit-diff-stat-badge
+状态：active
+摘要：回归
+场景正文：
+- 场景：回归 — When 运行 frontend 下 turn-live-marquee / turn-segment-views 相关测试；Then 既有用例全部通过，新增用例全部通过
+全文：.sillyspec/changes/archive/2026-10-29-edit-diff-stat-badge/requirements.md#FR-05
+最近确认：5e89be8febddf3883db1e01c22bccb6ef5572af9
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-29-edit-diff-stat-badge:flow:测试绑定FR-05
+  tests: frontend/src/components/daemon/__tests__/turn-live-marquee.test.tsx | frontend/src/components/daemon/__tests__/turn-segment-views.test.tsx「既有用例零回归」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-29-edit-diff-stat-badge
+  status: active
+
+## FR-test-utils-128 tsc / eslint 0 error
+变更：2026-10-29-edit-diff-stat-badge
+状态：active
+摘要：静态检查
+场景正文：
+- 场景：静态检查 — When 运行 tsc --noEmit 与 lint；Then 0 error
+全文：.sillyspec/changes/archive/2026-10-29-edit-diff-stat-badge/requirements.md#FR-06
+最近确认：5e89be8febddf3883db1e01c22bccb6ef5572af9

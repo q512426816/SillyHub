@@ -1,0 +1,23 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-29-edit-diff-stat-badge",
+  "reviewer": "subagent",
+  "verdict": "PASS",
+  "reviewedAgainst": "5e89be8febddf3883db1e01c22bccb6ef5572af9",
+  "findings": [
+    {
+      "severity": "P3",
+      "status": "accepted",
+      "title": "跑马灯 diff 统计派生发生在条目窗口截断之前，design 所列「窗口上限 12 条」缓解对解析次数实际无效",
+      "evidence": "collectEntries 递归遍历全段树、对每个 ok+editPatch 段调 diffStatFromPatch（JSON.parse+遍历），而 deriveLiveMarqueeEntries 的 LIVE_MARQUEE_MAX_ENTRIES 截断在 collectEntries 返回之后才执行——将被截断丢弃的旧条目也付出了解析成本；design「风险与死路」把窗口上限 12 列为重复解析的缓解，与实际机制有偏差。正确性零影响（截断只影响条目可见性），实测面量级无虞（单轮 Edit/Write 段数有限、单 patch 数百行，毫秒级，design 自评一致），接受现状不改。",
+      "location": "frontend/src/components/daemon/turn-live-marquee.tsx:256"
+    }
+  ],
+  "dimensionNotes": {
+    "乱序": "ok",
+    "并发": "ok",
+    "切换": "ok",
+    "作用域": "ok"
+  },
+  "reviewedAt": "2026-10-29T10:44:20+08:00"
+}

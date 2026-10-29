@@ -1,0 +1,122 @@
+{
+  "change": "2026-10-29-edit-diff-stat-badge",
+  "baseline": "0aceaf9316e08c92e209cdd674d542cb5dd2a456",
+  "head": "5e89be8febddf3883db1e01c22bccb6ef5572af9",
+  "files": [
+    "frontend/src/components/agent-log/__tests__/tool-diff.test.tsx",
+    "frontend/src/components/agent-log/tool-diff.tsx",
+    "frontend/src/components/daemon/__tests__/turn-live-marquee.test.tsx",
+    "frontend/src/components/daemon/__tests__/turn-segment-views.test.tsx",
+    "frontend/src/components/daemon/diff-stat-badge.tsx",
+    "frontend/src/components/daemon/turn-live-marquee.tsx",
+    "frontend/src/components/daemon/turn-segment-views.tsx"
+  ],
+  "totals": {
+    "files": 7,
+    "additions": 299,
+    "deletions": 9
+  },
+  "savedAt": "2026-10-29T02:37:38.643Z",
+  "note": "flow done 时点冻结（本变更可归属交付面：baseline..HEAD 提交面过滤 .sillyspec/ 只留 .sillyspec/docs/ 交付文档 + 独占树未提交交付；治理工件目录不入冻结——2026-10-12-close-trace-freeze-integrity FR-01）",
+  "modules": [
+    {
+      "id": "frontend",
+      "files": 7,
+      "doc": "docs/multi-agent-platform/modules/frontend.md",
+      "docTouched": false,
+      "docMissing": false
+    },
+    {
+      "id": "frontend_components",
+      "files": 7,
+      "doc": "docs/SillyHub/modules/frontend_components.md",
+      "docTouched": false,
+      "docMissing": false
+    }
+  ],
+  "uncoveredDirs": [],
+  "moduleMaps": [
+    "docs/backend/modules/_module-map.yaml",
+    "docs/frontend/modules/_module-map.yaml",
+    "docs/multi-agent-platform/modules/_module-map.yaml",
+    "docs/SillyHub/modules/_module-map.yaml",
+    "docs/sillyhub-daemon/modules/_module-map.yaml"
+  ],
+  "acceptedDirtyGap": 1,
+  "scopeAudit": {
+    "mode": "full-flow",
+    "ok": true,
+    "degradedReason": null,
+    "baseAnchor": "0aceaf9316e08c92e209cdd674d542cb5dd2a456",
+    "totals": {
+      "files": 7,
+      "additions": 299,
+      "deletions": 9
+    },
+    "rows": [
+      {
+        "path": "frontend/src/components/agent-log/__tests__/tool-diff.test.tsx",
+        "additions": 68,
+        "deletions": 0,
+        "kind": "new",
+        "planned": null,
+        "verdict": "planned"
+      },
+      {
+        "path": "frontend/src/components/agent-log/tool-diff.tsx",
+        "additions": 22,
+        "deletions": 0,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "planned"
+      },
+      {
+        "path": "frontend/src/components/daemon/__tests__/turn-live-marquee.test.tsx",
+        "additions": 69,
+        "deletions": 0,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "planned"
+      },
+      {
+        "path": "frontend/src/components/daemon/__tests__/turn-segment-views.test.tsx",
+        "additions": 47,
+        "deletions": 0,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "planned"
+      },
+      {
+        "path": "frontend/src/components/daemon/diff-stat-badge.tsx",
+        "additions": 34,
+        "deletions": 0,
+        "kind": "new",
+        "planned": null,
+        "verdict": "planned"
+      },
+      {
+        "path": "frontend/src/components/daemon/turn-live-marquee.tsx",
+        "additions": 40,
+        "deletions": 9,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "planned"
+      },
+      {
+        "path": "frontend/src/components/daemon/turn-segment-views.tsx",
+        "additions": 19,
+        "deletions": 0,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "planned"
+      }
+    ],
+    "excluded": {
+      "foreignDeclared": []
+    },
+    "note": "flow done 时点冻结（本文件落盘时采集）",
+    "closedBy": "flow done"
+  },
+  "patchSha256": "bf94de34d30c904559e0d87612f1b0014776dd80ed5fbc1d8189b21c4a930a05",
+  "patchStatus": "ok"
+}

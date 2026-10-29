@@ -1,0 +1,84 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-29-edit-diff-stat-badge",
+  "rows": [
+    {
+      "anchor": "FR-01",
+      "row_id": "2026-10-29-edit-diff-stat-badge:flow:测试绑定FR-01",
+      "tests": [
+        "frontend/src/components/daemon/__tests__/turn-live-marquee.test.tsx「Write 全增只显示 +N 不显示 -0」",
+        "frontend/src/components/daemon/__tests__/turn-live-marquee.test.tsx「完成态 Edit 条目显示 +N -M 统计徽标」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-29-edit-diff-stat-badge"
+    },
+    {
+      "anchor": "FR-02",
+      "row_id": "2026-10-29-edit-diff-stat-badge:flow:测试绑定FR-02",
+      "tests": [
+        "frontend/src/components/daemon/__tests__/turn-segment-views.test.tsx「ToolRowView 完成态显示 diff 统计徽标」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-29-edit-diff-stat-badge"
+    },
+    {
+      "anchor": "FR-03",
+      "row_id": "2026-10-29-edit-diff-stat-badge:flow:测试绑定FR-03",
+      "tests": [
+        "frontend/src/components/agent-log/__tests__/tool-diff.test.tsx「diffStatFromPatch 多 hunk 累计与行前缀计数」",
+        "frontend/src/components/agent-log/__tests__/tool-diff.test.tsx「非法 JSON / 空 hunks / 零改动返回 null」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-29-edit-diff-stat-badge"
+    },
+    {
+      "anchor": "FR-04",
+      "row_id": "2026-10-29-edit-diff-stat-badge:flow:测试绑定FR-04",
+      "tests": [
+        "frontend/src/components/daemon/__tests__/turn-live-marquee.test.tsx「运行中与失败条目不显示统计徽标」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-29-edit-diff-stat-badge"
+    },
+    {
+      "anchor": "FR-05",
+      "row_id": "2026-10-29-edit-diff-stat-badge:flow:测试绑定FR-05",
+      "tests": [
+        "frontend/src/components/daemon/__tests__/turn-live-marquee.test.tsx",
+        "frontend/src/components/daemon/__tests__/turn-segment-views.test.tsx「既有用例零回归」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-29-edit-diff-stat-badge"
+    }
+  ]
+}
