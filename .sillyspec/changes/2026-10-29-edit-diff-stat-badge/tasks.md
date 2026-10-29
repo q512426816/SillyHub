@@ -8,5 +8,5 @@ created_at: 2026-10-29T02:11:51.669Z
 - [x] task-02: 新建 daemon/diff-stat-badge.tsx 共享徽标组件（+N 绿 emerald、-M 红 destructive，removed=0 只显示 +N 不显示 -0）——组件最小、无状态
 - [x] task-03: 跑马灯接入：LiveMarqueeEntry 增 diffStat 可选字段 + collectEntries tool 分支派生（status=ok 且 editPatch 存在双门控）+ MarqueeItemView 完成态耗时区前渲染 + turn-live-marquee.test.tsx 用例（完成态显示 +N -M / Write 全增只 +N / 运行中与 deny 不显示 / 无 editPatch 不显示）——vitest 绿
 - [x] task-04: ToolRowView 接入：useMemo 按 editPatch 解析缓存 + 行尾状态徽标后时长前渲染同款徽标 + turn-segment-views.test.tsx 用例（完成态显示 / running 不显示）——vitest 绿
-- [ ] task-05: 相关测试面全量回归：turn-live-marquee / turn-segment-views / tool-diff 三个测试文件全绿（既有用例零回归）
-- [ ] task-06: frontend tsc --noEmit 0 error + eslint 触及文件 0 error
+- [x] task-05: 相关测试面全量回归：turn-live-marquee / turn-segment-views / tool-diff 三个测试文件全绿（既有用例零回归）
+- [x] task-06: frontend tsc --noEmit 0 error + eslint 触及文件 0 error
