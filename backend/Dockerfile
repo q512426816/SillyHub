@@ -83,11 +83,14 @@ RUN groupadd --system app && useradd --system --gid app --home /app app
 # Packages 大文件持续 500/502/EOF（InRelease/小文件正常，9.6MB 索引传输中断，重试无效），
 # 实测各国内源 http 形态同慢（≈80KB/s）；https://mirror.sjtu.edu.cn 独快且稳
 # （8MB/5s 复测），连协议一起换 https。apt 包集合与语义零变化，仅影响 build 阶段。
+# 2026-10-29（部署 seq52）：sjtu 同步中断——trixie-security Packages.xz 实服 269784 字节
+# vs Release 声明 269924，apt 报 Mirror sync in progress 连试两次失败；换 mirrors.aliyun.com
+# （实测 security/main 两索引 sha256 与 Release 声明逐字一致）。
 # trixie 用 DEB822 /etc/apt/sources.list.d/debian.sources，旧版用 sources.list，
 # find 覆盖两种格式；找不到文件时 -exec 不执行，退出码仍为 0，无副作用。
 RUN find /etc/apt -type f \( -name 'sources.list' -o -name '*.sources' \) \
-      -exec sed -i -e 's|http://deb.debian.org|https://mirror.sjtu.edu.cn|g' \
-                   -e 's|https://deb.debian.org|https://mirror.sjtu.edu.cn|g' {} + \
+      -exec sed -i -e 's|http://deb.debian.org|https://mirrors.aliyun.com|g' \
+                   -e 's|https://deb.debian.org|https://mirrors.aliyun.com|g' {} + \
  && apt-get update -o Acquire::Retries=3 \
  && apt-get install -y --no-install-recommends --fix-missing curl ca-certificates git libstdc++6 \
  && rm -rf /var/lib/apt/lists/*
