@@ -1,0 +1,226 @@
+{
+  "change": "2026-10-30-task-resume-revive-notify-retry",
+  "baseline": "19bcdcc69dfe206636db46107191ace0198cf29b",
+  "head": "fe76ef065bf68f74d521fccc6c1247973c1eed65",
+  "files": [
+    "backend/app/modules/daemon/agent_task_store.py",
+    "backend/app/modules/daemon/schema.py",
+    "backend/app/modules/daemon/tests/test_agent_session_tasks.py",
+    "backend/app/modules/daemon/tests/test_agent_task_status_payload.py",
+    "backend/openapi.json",
+    "frontend/src/components/daemon/__tests__/agent-task-card-lifecycle.test.tsx",
+    "frontend/src/components/daemon/agent-task-store.ts",
+    "frontend/src/lib/api-types.ts",
+    "frontend/src/lib/daemon/session-sse.ts",
+    "sillyhub-daemon/src/agent-task-notify-retry.ts",
+    "sillyhub-daemon/src/api-types.ts",
+    "sillyhub-daemon/src/cli.ts",
+    "sillyhub-daemon/src/hub-client.ts",
+    "sillyhub-daemon/src/interactive/session-manager.ts",
+    "sillyhub-daemon/src/interactive/session-manager/background-tasks.ts",
+    "sillyhub-daemon/src/interactive/session-manager/types.ts",
+    "sillyhub-daemon/src/interactive/types.ts",
+    "sillyhub-daemon/tests/agent-task-notify-retry.test.ts",
+    "sillyhub-daemon/tests/interactive/task-lifecycle.test.ts"
+  ],
+  "totals": {
+    "files": 19,
+    "additions": 599,
+    "deletions": 6
+  },
+  "savedAt": "2026-10-29T23:54:24.819Z",
+  "note": "flow done 时点冻结（本变更可归属交付面：baseline..HEAD 提交面过滤 .sillyspec/ 只留 .sillyspec/docs/ 交付文档 + 独占树未提交交付；治理工件目录不入冻结——2026-10-12-close-trace-freeze-integrity FR-01）",
+  "modules": [
+    {
+      "id": "daemon",
+      "files": 4,
+      "doc": "docs/backend/modules/daemon.md",
+      "docTouched": false,
+      "docMissing": false
+    },
+    {
+      "id": "backend",
+      "files": 5,
+      "doc": "docs/multi-agent-platform/modules/backend.md",
+      "docTouched": false,
+      "docMissing": false
+    },
+    {
+      "id": "frontend",
+      "files": 4,
+      "doc": "docs/multi-agent-platform/modules/frontend.md",
+      "docTouched": false,
+      "docMissing": false
+    },
+    {
+      "id": "sillyhub-daemon",
+      "files": 10,
+      "doc": "docs/multi-agent-platform/modules/sillyhub-daemon.md",
+      "docTouched": false,
+      "docMissing": false
+    },
+    {
+      "id": "daemon",
+      "files": 14,
+      "doc": "docs/SillyHub/modules/daemon.md",
+      "docTouched": false,
+      "docMissing": false
+    },
+    {
+      "id": "frontend_components",
+      "files": 2,
+      "doc": "docs/SillyHub/modules/frontend_components.md",
+      "docTouched": false,
+      "docMissing": false
+    },
+    {
+      "id": "frontend_lib",
+      "files": 2,
+      "doc": "docs/SillyHub/modules/frontend_lib.md",
+      "docTouched": false,
+      "docMissing": false
+    }
+  ],
+  "uncoveredDirs": [],
+  "moduleMaps": [
+    "docs/backend/modules/_module-map.yaml",
+    "docs/frontend/modules/_module-map.yaml",
+    "docs/multi-agent-platform/modules/_module-map.yaml",
+    "docs/SillyHub/modules/_module-map.yaml",
+    "docs/sillyhub-daemon/modules/_module-map.yaml"
+  ],
+  "scopeAudit": {
+    "mode": "full-flow",
+    "ok": true,
+    "degradedReason": null,
+    "baseAnchor": "19bcdcc69dfe206636db46107191ace0198cf29b",
+    "totals": {
+      "files": 19,
+      "additions": 599,
+      "deletions": 6
+    },
+    "rows": [
+      {
+        "path": "backend/app/modules/daemon/agent_task_store.py",
+        "additions": 14,
+        "deletions": 1,
+        "kind": "modified"
+      },
+      {
+        "path": "backend/app/modules/daemon/schema.py",
+        "additions": 6,
+        "deletions": 0,
+        "kind": "modified"
+      },
+      {
+        "path": "backend/app/modules/daemon/tests/test_agent_session_tasks.py",
+        "additions": 84,
+        "deletions": 0,
+        "kind": "modified"
+      },
+      {
+        "path": "backend/app/modules/daemon/tests/test_agent_task_status_payload.py",
+        "additions": 29,
+        "deletions": 0,
+        "kind": "modified"
+      },
+      {
+        "path": "backend/openapi.json",
+        "additions": 11,
+        "deletions": 0,
+        "kind": "modified"
+      },
+      {
+        "path": "frontend/src/components/daemon/__tests__/agent-task-card-lifecycle.test.tsx",
+        "additions": 63,
+        "deletions": 0,
+        "kind": "modified"
+      },
+      {
+        "path": "frontend/src/components/daemon/agent-task-store.ts",
+        "additions": 17,
+        "deletions": 2,
+        "kind": "modified"
+      },
+      {
+        "path": "frontend/src/lib/api-types.ts",
+        "additions": 2,
+        "deletions": 0,
+        "kind": "modified"
+      },
+      {
+        "path": "frontend/src/lib/daemon/session-sse.ts",
+        "additions": 7,
+        "deletions": 0,
+        "kind": "modified"
+      },
+      {
+        "path": "sillyhub-daemon/src/agent-task-notify-retry.ts",
+        "additions": 76,
+        "deletions": 0,
+        "kind": "new"
+      },
+      {
+        "path": "sillyhub-daemon/src/api-types.ts",
+        "additions": 2,
+        "deletions": 0,
+        "kind": "modified"
+      },
+      {
+        "path": "sillyhub-daemon/src/cli.ts",
+        "additions": 9,
+        "deletions": 2,
+        "kind": "modified"
+      },
+      {
+        "path": "sillyhub-daemon/src/hub-client.ts",
+        "additions": 9,
+        "deletions": 1,
+        "kind": "modified"
+      },
+      {
+        "path": "sillyhub-daemon/src/interactive/session-manager.ts",
+        "additions": 8,
+        "deletions": 0,
+        "kind": "modified"
+      },
+      {
+        "path": "sillyhub-daemon/src/interactive/session-manager/background-tasks.ts",
+        "additions": 53,
+        "deletions": 0,
+        "kind": "modified"
+      },
+      {
+        "path": "sillyhub-daemon/src/interactive/session-manager/types.ts",
+        "additions": 8,
+        "deletions": 0,
+        "kind": "modified"
+      },
+      {
+        "path": "sillyhub-daemon/src/interactive/types.ts",
+        "additions": 8,
+        "deletions": 0,
+        "kind": "modified"
+      },
+      {
+        "path": "sillyhub-daemon/tests/agent-task-notify-retry.test.ts",
+        "additions": 109,
+        "deletions": 0,
+        "kind": "new"
+      },
+      {
+        "path": "sillyhub-daemon/tests/interactive/task-lifecycle.test.ts",
+        "additions": 84,
+        "deletions": 0,
+        "kind": "modified"
+      }
+    ],
+    "excluded": {
+      "foreignDeclared": []
+    },
+    "note": "flow done 时点冻结（本文件落盘时采集）",
+    "closedBy": "flow done"
+  },
+  "patchSha256": "6a19820344d2a347071b9332f97cb77bb1a6a41a8e5cce6c28d61ee84181f2d6",
+  "patchStatus": "ok"
+}

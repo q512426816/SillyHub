@@ -55,6 +55,8 @@ _EXPECTED_PAYLOAD_KEYS = {
     "tool_uses",
     # async_ 字段按 alias 输出为契约名 "async"（by_alias 发布）
     "async",
+    # 2026-10-30-task-resume-revive-notify-retry：续唤复活信号（瞬态，缺省 None）
+    "resumed",
 }
 
 
@@ -245,3 +247,30 @@ class TestAgentTaskStatusLegacyPayloadCompatible:
         assert payload["total_tokens"] is None
         assert payload["tool_uses"] is None
         assert payload["async"] is None
+        # 2026-10-30-task-resume-revive-notify-retry：续唤复活信号缺省 None 透传
+        assert payload["resumed"] is None
+
+    @pytest.mark.asyncio
+    async def test_resumed_flag_published_true(
+        self,
+        client: AsyncClient,
+        auth_headers: dict[str, str],
+        db_session: AsyncSession,
+    ) -> None:
+        """续唤复活信号（resumed=true，daemon 注册表终态注销后同 task_id 重开
+        的 running 首帧）经端点原样发布进 SSE payload——前端归约据此放行复活。"""
+        status_code, body, publishes, _sid = await _notify(
+            client,
+            auth_headers,
+            db_session,
+            {
+                "run_id": str(uuid.uuid4()),
+                "task_id": "t-resume-flag",
+                "task_name": "续唤子代理",
+                "status": "running",
+                "resumed": True,
+            },
+        )
+
+        assert status_code == 200, body
+        assert publishes[0][1]["resumed"] is True

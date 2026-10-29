@@ -88,3 +88,4 @@ created_at: 2026-08-29 22:56:30
 | 2026-10-27 | 2026-10-28-knowledge-hits-cli-direct | CLI 直报主通道的接收侧（用户拍板方案收尾）：CLI 侧只持有 shpsync_ 平台令牌（wor… |
 | 2026-10-27 | 2026-10-28-change-detail-sessions-source-fix | 变更详情会话区数据源错挂与附件标题修复：概览「会话」区实际取工作区全量最近会话而非该变更关联会话，用… |
 | 2026-10-29 | 2026-10-29-engine-live-perception | 2026-10-29-engine-live-perception |
+| 2026-10-29 | 2026-10-30-task-resume-revive-notify-retry | 子代理续唤复活终态任务行+上报502重试 |

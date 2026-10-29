@@ -13950,6 +13950,8 @@ export interface components {
             tool_uses?: number | null;
             /** Async */
             async?: boolean | null;
+            /** Resumed */
+            resumed?: boolean | null;
         };
         /** ApiKeyCreateRequest */
         ApiKeyCreateRequest: {

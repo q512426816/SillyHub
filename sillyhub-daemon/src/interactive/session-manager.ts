@@ -597,6 +597,14 @@ export class SessionManager {
   >();
 
   /**
+   * 2026-10-30-task-resume-revive-notify-retry：会话级已终态 task_id 集合——
+   * task_notification 注销时登记，续唤重开 running 首帧取标打 resumed（一次性
+   * 移除），clearBackgroundTasks 一并清理（语义详见 session-manager/types.ts
+   * SessionManagerCore._terminalTaskIds 注释）。
+   */
+  private readonly _terminalTaskIds = new Map<string, Set<string>>();
+
+  /**
    * 2026-10-21-task-wakeup-restore：终态唤醒 debounce 窗口——sessionId →
    * { timer, lines }。2s 内多条终态合并为一条注入；fire 后自删，会话终态时
    * 由 lifecycle 取消（防悬挂 timer）。

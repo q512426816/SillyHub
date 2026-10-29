@@ -385,6 +385,13 @@ export interface AgentTaskStatusExtraFields {
   tool_uses?: number;
   /** 异步派发标记（回执兜底路径必发；缺省语义=前台）。 */
   async?: boolean;
+  /**
+   * 2026-10-30-task-resume-revive-notify-retry：续唤复活信号——daemon 任务
+   * 注册表终态注销后同 task_id 重开的 running 首帧携带 true（task-notification
+   * 语义是「本轮停止」，主代理续唤重跑）。backend upsert 语义②据此放行终态
+   * 行复活；缺省不发（迟到心跳被吸收，防线不变）。
+   */
+  resumed?: boolean;
 }
 
 /**
@@ -1704,7 +1711,7 @@ export class HubClient {
    * body（snake_case，对齐 backend AgentTaskStatusEvent / task-01 DTO + task-02 扩展）：
    *   { session_id, run_id, task_id, task_name, status, progress?, message?,
    *     tool_use_id?, summary?, last_tool_name?, elapsed_ms?, total_tokens?,
-   *     tool_uses?, async? }
+   *     tool_uses?, async?, resumed? }
    *
    * undefined 字段守卫写入（progress / message / extra.* 缺省时不传 → backend
    * 保留 None，向后兼容旧 daemon 上报行为）。
@@ -1765,6 +1772,7 @@ export class HubClient {
     }
     if (extra?.tool_uses !== undefined) body.tool_uses = extra.tool_uses;
     if (extra?.async !== undefined) body.async = extra.async;
+    if (extra?.resumed !== undefined) body.resumed = extra.resumed;
     return this._request<Record<string, unknown>>(
       'POST',
       `${REST_PREFIX}/sessions/${encodeURIComponent(sessionId)}/agent-task-status`,

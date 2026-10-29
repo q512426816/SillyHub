@@ -1266,3 +1266,87 @@ describe('task_notification 别名条目与无归属兜底（2026-10-13-agent-ta
     }
   });
 });
+
+// ── 2026-10-30-task-resume-revive-notify-retry FR-01：续唤复活打标 ─────────────
+// task-notification 语义是「本轮停止」：主代理续唤（重唤原 task_id）重跑的
+// running 首帧由已终态集合打标 resumed:true（一次性），平台终态行据此复活。
+
+describe('task-lifecycle 续唤复活打标（2026-10-30-task-resume-revive-notify-retry）', () => {
+  it('FR-01：终态注销后同 task_id 重开首帧带 resumed:true，第二帧不带（一次性）', async () => {
+    const h = await createHarness('sess-resume', 'run-resume');
+    // 首轮：started（无标）→ notification completed（登记已终态集合）。
+    await h.emitMessage(
+      msgTaskStarted({ taskId: 'task-R', toolUseId: 'toolu_R', description: '独立评审' }),
+    );
+    await h.emitMessage(
+      msgTaskNotification({ taskId: 'task-R', status: 'completed', summary: '本轮完成', toolUseId: 'toolu_R' }),
+    );
+    // 续唤重开：同 task_id 的 running 首帧（懒注册路径）→ resumed:true。
+    await h.emitMessage(
+      msgTaskStarted({ taskId: 'task-R', toolUseId: 'toolu_R', description: '独立评审' }),
+    );
+    // 第二帧 running（已注册进度路径）→ 不带标（一次性消耗）。
+    await h.emitMessage(msgTaskProgress({ taskId: 'task-R', lastToolName: 'Read' }));
+
+    const events = taskEventCalls(h);
+    const statuses = events.map(([, , e]) => (e as { status: string }).status);
+    expect(statuses).toEqual(['running', 'completed', 'running', 'running']);
+    // 首轮 started 无标（普通运行不打标）。
+    expect(events[0]![2]).not.toHaveProperty('resumed');
+    // 续唤首帧打标。
+    expect(events[2]![2]).toMatchObject({ task_id: 'task-R', status: 'running', resumed: true });
+    // 第二帧一次性后不带。
+    expect(events[3]![2]).not.toHaveProperty('resumed');
+  });
+
+  it('FR-01：二周期循环——续唤终态后再续唤，第二次重开首帧再打标', async () => {
+    const h = await createHarness('sess-resume2', 'run-resume2');
+    await h.emitMessage(
+      msgTaskStarted({ taskId: 'task-RR', toolUseId: 'toolu_RR', description: '复审' }),
+    );
+    await h.emitMessage(
+      msgTaskNotification({ taskId: 'task-RR', status: 'completed', summary: '第一轮', toolUseId: 'toolu_RR' }),
+    );
+    // 第二周期：重开 + 终态（notification 再登记集合）。
+    await h.emitMessage(
+      msgTaskStarted({ taskId: 'task-RR', toolUseId: 'toolu_RR', description: '复审' }),
+    );
+    await h.emitMessage(
+      msgTaskNotification({ taskId: 'task-RR', status: 'completed', summary: '第二轮', toolUseId: 'toolu_RR' }),
+    );
+    // 第三周期：重开首帧仍打标（一次性≠永久失效，每次终态重新登记）。
+    await h.emitMessage(
+      msgTaskStarted({ taskId: 'task-RR', toolUseId: 'toolu_RR', description: '复审' }),
+    );
+
+    const events = taskEventCalls(h);
+    const resumedFrames = events.filter(([, , e]) =>
+      Object.prototype.hasOwnProperty.call(e as object, 'resumed'),
+    );
+    expect(resumedFrames).toHaveLength(2); // 第二、三周期重开首帧各一次
+    expect((resumedFrames[0]![2] as { resumed?: boolean }).resumed).toBe(true);
+    expect((resumedFrames[1]![2] as { resumed?: boolean }).resumed).toBe(true);
+  });
+
+  it('FR-01：task_updated running 轻量信号路径同样打标（续唤重开走 updated 中间态）', async () => {
+    const h = await createHarness('sess-resume3', 'run-resume3');
+    await h.emitMessage(
+      msgTaskStarted({ taskId: 'task-U', toolUseId: 'toolu_U', description: '评审' }),
+    );
+    await h.emitMessage(
+      msgTaskNotification({ taskId: 'task-U', status: 'completed', summary: '完成', toolUseId: 'toolu_U' }),
+    );
+    // 续唤重开的首个信号是 task_updated running（patch.status 中间态，无
+    // task_name 键）——任务表已注销 → 懒注册路径，emit 应带 resumed:true。
+    await h.emitMessage(msgTaskUpdated({ taskId: 'task-U', patch: { status: 'running' } }));
+    // 第二帧 updated running（已注册轻量分支）——标记已消耗，无标。
+    await h.emitMessage(msgTaskUpdated({ taskId: 'task-U', patch: { status: 'running' } }));
+
+    const events = taskEventCalls(h);
+    const resumedFrames = events.filter(([, , e]) =>
+      Object.prototype.hasOwnProperty.call(e as object, 'resumed'),
+    );
+    expect(resumedFrames).toHaveLength(1);
+    expect((resumedFrames[0]![2] as { resumed?: boolean }).resumed).toBe(true);
+  });
+});

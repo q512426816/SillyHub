@@ -30,7 +30,15 @@ export function applyAgentTaskStatusEvent(
   const idx = prev.findIndex((t) => t.taskId === event.task_id);
   const existing = idx >= 0 ? (prev[idx] ?? null) : null;
   // 终态定格：已定格（completed / failed / stopped）的卡片忽略迟到 running 心跳。
-  if (existing && existing.status !== "running" && event.status === "running") {
+  // 2026-10-30-task-resume-revive-notify-retry 复活豁免：resumed === true 的
+  // running 是 daemon 注册表打标的「续唤重开」铁证（task-notification 语义是
+  // 「本轮停止」，主代理重唤原 task_id），放行翻回运行中；缺省维持定格。
+  if (
+    existing &&
+    existing.status !== "running" &&
+    event.status === "running" &&
+    event.resumed !== true
+  ) {
     return prev;
   }
   const next: AgentTaskEntry = {
@@ -55,7 +63,14 @@ export function applyAgentTaskStatusEvent(
     // 沉默；终态本身不触发警示）。
     lastActivityAt:
       event.status === "running" ? now : existing?.lastActivityAt ?? null,
-    terminalAt: event.status === "running" ? existing?.terminalAt ?? null : now,
+    // 续唤复活（resumed running）：terminalAt 清空回到在途（startedAt 保留——
+    // 同一任务实例跨续唤周期）；普通 running 维持旧值（终态前置时本为 null）。
+    terminalAt:
+      event.status === "running"
+        ? event.resumed === true
+          ? null
+          : (existing?.terminalAt ?? null)
+        : now,
   };
   if (idx === -1) return [...prev, next].slice(-6);
   const copy = [...prev];

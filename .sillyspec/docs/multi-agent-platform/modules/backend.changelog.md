@@ -129,3 +129,4 @@
 - 2026-10-28-reparse-trigger-tests-realign | 增量重扫触发测试对齐 scoped 新契约
 - 2026-10-28-model-retry-visible | 模型限流重试过程实时可见——复用COMPACT_STATUS协议行通道透传api_retry
 - 2026-10-29-engine-live-perception | 2026-10-29-engine-live-perception
+- 2026-10-30-task-resume-revive-notify-retry | 子代理续唤复活终态任务行+上报502重试

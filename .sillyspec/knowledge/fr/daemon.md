@@ -9011,3 +9011,93 @@
 - 场景：默认场景 — Given 本变更落地
 全文：.sillyspec/changes/archive/2026-10-29-engine-live-perception/requirements.md#FR-06
 最近确认：de68b356befe540e0c77695de92216fb36c1a5e9
+
+## FR-daemon-334 daemon 对「已终态注销后再收到同 task_id 的 running 帧」打 resumed=true 标记上报
+变更：2026-10-30-task-resume-revive-notify-retry
+状态：active
+摘要：主路径（续唤重跑首帧打标）；注册表内普通 running 不打标；会话清理不残留
+全文：.sillyspec/changes/archive/2026-10-30-task-resume-revive-notify-retry/requirements.md#FR-01
+最近确认：fe76ef065bf68f74d521fccc6c1247973c1eed65
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-30-task-resume-revive-notify-retry:flow:测试绑定FR-01
+  tests: sillyhub-daemon/tests/interactive/task-lifecycle.test.ts「续唤复活打标（2026-10-30-task-resume-revive-notify-retry）——重开首帧打标/一次性/二周期循环/updated 轻量路径」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-30-task-resume-revive-notify-retry
+  status: active
+
+## FR-daemon-335 backend AgentTaskStatusEvent 增可选 resumed 字段；upsert 终态行仅 resumed=true 放行复活
+变更：2026-10-30-task-resume-revive-notify-retry
+状态：active
+摘要：completed 行 + resumed running → 复活；completed 行 + 无标记 running → 吸收（迟到心跳防线保持）；清扫 stopped 行复活分支零回归
+全文：.sillyspec/changes/archive/2026-10-30-task-resume-revive-notify-retry/requirements.md#FR-02
+最近确认：fe76ef065bf68f74d521fccc6c1247973c1eed65
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-30-task-resume-revive-notify-retry:flow:测试绑定FR-02
+  tests: backend/app/modules/daemon/tests/test_agent_session_tasks.py「test_resumed_running_revives_terminal_row / test_resumed_false_explicit_still_absorbed + 既有吸收与清扫复活零回归」 | backend/app/modules/daemon/tests/test_agent_task_status_payload.py「test_resumed_flag_published_true + 键集含 resumed」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-30-task-resume-revive-notify-retry
+  status: active
+
+## FR-daemon-336 前端 SSE 类型与归约放行 resumed 复活
+变更：2026-10-30-task-resume-revive-notify-retry
+状态：active
+摘要：已定格卡片 + resumed running → 翻回运行中；已定格卡片 + 无标记 running → 维持定格
+全文：.sillyspec/changes/archive/2026-10-30-task-resume-revive-notify-retry/requirements.md#FR-03
+最近确认：fe76ef065bf68f74d521fccc6c1247973c1eed65
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-30-task-resume-revive-notify-retry:flow:测试绑定FR-03
+  tests: frontend/src/components/daemon/__tests__/agent-task-card-lifecycle.test.tsx「续唤复活：resumed running 翻回运行中（terminalAt 清空、startedAt 保留）/ 续唤复活防线：缺省与 false 维持定格」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-30-task-resume-revive-notify-retry
+  status: active
+
+## FR-daemon-337 daemon agent-task-status 上报失败有限重试
+变更：2026-10-30-task-resume-revive-notify-retry
+状态：active
+摘要：502 三连后成功；4xx 不重试；重试耗尽
+全文：.sillyspec/changes/archive/2026-10-30-task-resume-revive-notify-retry/requirements.md#FR-04
+最近确认：fe76ef065bf68f74d521fccc6c1247973c1eed65
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-30-task-resume-revive-notify-retry:flow:测试绑定FR-04
+  tests: sillyhub-daemon/tests/agent-task-notify-retry.test.ts「isRetryable 判定（5xx 可重试/4xx 不可）/ 502 两连后成功退避序列 / 4xx 单次即抛 / 重试耗尽抛最后一次 / 首次成功零退避」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-30-task-resume-revive-notify-retry
+  status: active
+
+## FR-daemon-338 schema 改动双端 gen:types 同步
+变更：2026-10-30-task-resume-revive-notify-retry
+状态：active
+摘要：三产物同步提交
+全文：.sillyspec/changes/archive/2026-10-30-task-resume-revive-notify-retry/requirements.md#FR-05
+最近确认：fe76ef065bf68f74d521fccc6c1247973c1eed65
+
+## FR-daemon-339 三侧新增单测通过且既有相关测试零回归
+变更：2026-10-30-task-resume-revive-notify-retry
+状态：active
+摘要：验收口径
+全文：.sillyspec/changes/archive/2026-10-30-task-resume-revive-notify-retry/requirements.md#FR-06
+最近确认：fe76ef065bf68f74d521fccc6c1247973c1eed65

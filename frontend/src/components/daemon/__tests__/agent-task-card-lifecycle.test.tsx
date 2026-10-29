@@ -386,6 +386,69 @@ describe("applyAgentTaskStatusEvent 归约（task-12 / FR-06）", () => {
     }
   });
 
+  it("续唤复活（2026-10-30-task-resume-revive-notify-retry）：resumed running 翻回运行中，terminalAt 清空、startedAt 保留", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-08-27T10:00:00Z"));
+    try {
+      let list = applyAgentTaskStatusEvent([], ev({}));
+      const started = list[0] as AgentTaskEntry;
+      vi.setSystemTime(new Date("2026-08-27T10:05:00Z"));
+      // 「本轮停止」终态定格（task-notification 语义）
+      list = applyAgentTaskStatusEvent(
+        list,
+        ev({ status: "completed", elapsed_ms: 300_000, summary: "本轮完成" }),
+      );
+      const done = list[0] as AgentTaskEntry;
+      expect(done.terminalAt).toBe(Date.now());
+      // 主代理续唤重跑：running 首帧带 resumed=true（daemon 注册表打标）→ 翻回运行中
+      vi.setSystemTime(new Date("2026-08-27T10:06:00Z"));
+      list = applyAgentTaskStatusEvent(
+        list,
+        ev({ resumed: true, last_tool_name: "SendMessage 后续唤重跑" }),
+      );
+      const revived = list[0] as AgentTaskEntry;
+      expect(revived.status).toBe("running");
+      expect(revived.terminalAt).toBeNull();
+      expect(revived.startedAt).toBe(started.startedAt); // 同一任务实例，首见锚点不动
+      expect(revived.lastActivityAt).toBe(Date.now()); // 心跳锚点恢复推进
+      // 复活后的普通 running 心跳（无标记）照常合并（行已在途，非终态吸收路径）
+      vi.setSystemTime(new Date("2026-08-27T10:07:00Z"));
+      list = applyAgentTaskStatusEvent(list, ev({ elapsed_ms: 420_000 }));
+      const beating = list[0] as AgentTaskEntry;
+      expect(beating.status).toBe("running");
+      expect(beating.elapsedMs).toBe(420_000);
+      // 二轮终态到达 → 重新定格（复活后的状态机周期自洽）
+      vi.setSystemTime(new Date("2026-08-27T10:10:00Z"));
+      list = applyAgentTaskStatusEvent(
+        list,
+        ev({ status: "completed", elapsed_ms: 600_000, summary: "二轮完成" }),
+      );
+      expect((list[0] as AgentTaskEntry).status).toBe("completed");
+      expect((list[0] as AgentTaskEntry).terminalAt).toBe(Date.now());
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("续唤复活防线：resumed 缺省（null / 不带）与 false 均维持定格", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-08-27T10:00:00Z"));
+    try {
+      let list = applyAgentTaskStatusEvent([], ev({}));
+      list = applyAgentTaskStatusEvent(list, ev({ status: "completed", elapsed_ms: 1_000 }));
+      const frozen = list;
+      vi.setSystemTime(new Date("2026-08-27T10:01:00Z"));
+      // 缺省（旧 daemon 不发字段）
+      expect(applyAgentTaskStatusEvent(list, ev({}))).toBe(frozen);
+      // 显式 false
+      expect(applyAgentTaskStatusEvent(list, ev({ resumed: false }))).toBe(frozen);
+      // 显式 null
+      expect(applyAgentTaskStatusEvent(list, ev({ resumed: null }))).toBe(frozen);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("最近 6 条截断：第 7 个新任务挤掉最旧一条（终态保留供回看）", () => {
     // 逐条喂 7 个不同 task_id 的事件 → 只留最近 6 条（bg-1 被挤掉）
     let list: AgentTaskEntry[] = [];

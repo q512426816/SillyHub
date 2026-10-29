@@ -1,0 +1,67 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-30-task-resume-revive-notify-retry",
+  "rows": [
+    {
+      "anchor": "FR-01",
+      "row_id": "2026-10-30-task-resume-revive-notify-retry:flow:测试绑定FR-01",
+      "tests": [
+        "sillyhub-daemon/tests/interactive/task-lifecycle.test.ts「续唤复活打标（2026-10-30-task-resume-revive-notify-retry）——重开首帧打标/一次性/二周期循环/updated 轻量路径」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-30-task-resume-revive-notify-retry"
+    },
+    {
+      "anchor": "FR-02",
+      "row_id": "2026-10-30-task-resume-revive-notify-retry:flow:测试绑定FR-02",
+      "tests": [
+        "backend/app/modules/daemon/tests/test_agent_session_tasks.py「test_resumed_running_revives_terminal_row / test_resumed_false_explicit_still_absorbed + 既有吸收与清扫复活零回归」",
+        "backend/app/modules/daemon/tests/test_agent_task_status_payload.py「test_resumed_flag_published_true + 键集含 resumed」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-30-task-resume-revive-notify-retry"
+    },
+    {
+      "anchor": "FR-03",
+      "row_id": "2026-10-30-task-resume-revive-notify-retry:flow:测试绑定FR-03",
+      "tests": [
+        "frontend/src/components/daemon/__tests__/agent-task-card-lifecycle.test.tsx「续唤复活：resumed running 翻回运行中（terminalAt 清空、startedAt 保留）/ 续唤复活防线：缺省与 false 维持定格」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-30-task-resume-revive-notify-retry"
+    },
+    {
+      "anchor": "FR-04",
+      "row_id": "2026-10-30-task-resume-revive-notify-retry:flow:测试绑定FR-04",
+      "tests": [
+        "sillyhub-daemon/tests/agent-task-notify-retry.test.ts「isRetryable 判定（5xx 可重试/4xx 不可）/ 502 两连后成功退避序列 / 4xx 单次即抛 / 重试耗尽抛最后一次 / 首次成功零退避」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-30-task-resume-revive-notify-retry"
+    }
+  ]
+}

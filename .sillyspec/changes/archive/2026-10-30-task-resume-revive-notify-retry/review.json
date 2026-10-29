@@ -1,0 +1,30 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-30-task-resume-revive-notify-retry",
+  "reviewer": "subagent",
+  "verdict": "PASS",
+  "reviewedAgainst": "fe76ef065bf68f74d521fccc6c1247973c1eed65",
+  "findings": [
+    {
+      "severity": "P3",
+      "status": "accepted",
+      "title": "重试乱序竞态：resumed 帧重试成功晚于同任务终态落库时复活终态行",
+      "evidence": "cli.ts onSessionEvent 桥为 void 即发即忘单事件单飞，resumed running 首帧上报 5xx 进入最长 1s+4s+16s 重试期间，同任务 task_notification 终态事件可先成功落库（终态行），随后 running 重试成功携带 resumed=True 走 agent_task_store.py:345 elif 复活分支翻回 running，此后 daemon 集合标记已消耗、任务表已注销、无后续帧 → 行卡 running。需 5xx 失败+21s 内终态先落+重试后到三条件叠加，概率极低；后果与 design 已声明边界「复活后卡 running 直到会话终态收口」完全同族，且该任务不在 daemon 注册表 → 确认制清扫不保活 → 既有清扫/会话终态收口兜底。边界已裁决：可接受。",
+      "location": "sillyhub-daemon/src/agent-task-notify-retry.ts:36-76; backend/app/modules/daemon/agent_task_store.py:345-350"
+    },
+    {
+      "severity": "P3",
+      "status": "accepted",
+      "title": "recordTerminalTaskId 无条件登记：乱序/重放的迟到 notification 可使后续 started 首帧误带 resumed",
+      "evidence": "background-tasks.ts:242 在 handleTaskNotificationEvent 注销后无条件登记（含任务从未注册的迟到 notification）——若 notification 乱序先于同 task_id 首个 started/progress 到达（或 daemon 重启后 SDK 重放历史 notification 再重放 started），该 running 首帧会被误打 resumed:true 使 backend 复活终态行。同一 stream 顺序处理下概率极低；backend 无行时仅插入新 running 行无实际伤害，有终态行时后果同样收敛到「复活后由会话终态收口」既有兜底，属 design 乱序节已声明的重放 started 边界同族（design「重启丢集合后任何帧都不带标」表述在重放 notification 重登记场景下不精确，但后果已在声明内）。边界已裁决：可接受。",
+      "location": "sillyhub-daemon/src/interactive/session-manager/background-tasks.ts:242"
+    }
+  ],
+  "dimensionNotes": {
+    "乱序": "ok",
+    "并发": "ok",
+    "切换": "ok",
+    "作用域": "ok"
+  },
+  "reviewedAt": "2026-10-30T07:58:06+08:00"
+}

@@ -374,6 +374,90 @@ class TestUpsertAgentTaskSemantics:
         assert row_after.summary is None  # 迟到事件的 summary 未写入
 
     @pytest.mark.asyncio
+    async def test_resumed_running_revives_terminal_row(
+        self, auth_headers: dict[str, str], db_session: AsyncSession
+    ) -> None:
+        """2026-10-30-task-resume-revive-notify-retry：终态行收 resumed=True 的
+        running → 放行复活（status 回 running、finished_at/message 清空、
+        started_at 保持首插值）——task-notification「本轮停止」后主代理续唤
+        重跑（daemon 注册表终态注销后同 task_id 重开）的显式复活信号。"""
+        # Arrange
+        user_id = await _admin_id(db_session)
+        rt = await _create_runtime(db_session, user_id)
+        ag_session, run = await _create_session_with_run(db_session, user_id, rt.id)
+        from app.modules.daemon.agent_task_store import upsert_agent_task
+
+        await upsert_agent_task(db_session, _event(ag_session.id, run.id, "t-resume", progress=10))
+        (started_row,) = await _task_rows(db_session, ag_session.id)
+        assert started_row.started_at is not None
+        # identity map 下同名行是同一 ORM 实例（后续 setattr 就地更新）——
+        # 快照拍照后比较（同 test_later_different_terminal_overrides 先例）。
+        started_snapshot = {
+            "started_at": started_row.started_at,
+            "updated_at": started_row.updated_at,
+        }
+        await upsert_agent_task(
+            db_session,
+            _event(ag_session.id, run.id, "t-resume", status="completed", message="本轮完成"),
+        )
+        await asyncio.sleep(0.02)
+
+        # Act：续唤重跑的 running 首帧（daemon 打标 resumed=True）
+        await upsert_agent_task(
+            db_session,
+            _event(
+                ag_session.id,
+                run.id,
+                "t-resume",
+                status="running",
+                progress=60,
+                resumed=True,
+            ),
+        )
+        (row_after,) = await _task_rows(db_session, ag_session.id)
+
+        # Assert：复活——在途形态（finished_at/message 清空），身份字段保旧
+        assert row_after.status == "running"
+        assert row_after.finished_at is None
+        assert row_after.message is None  # 终态遗留文案随复活清除
+        assert row_after.progress == 60  # 事件字段照常 latest-wins
+        assert _as_utc(row_after.started_at) == _as_utc(started_snapshot["started_at"])
+        assert _as_utc(row_after.updated_at) > _as_utc(started_snapshot["updated_at"])
+
+    @pytest.mark.asyncio
+    async def test_resumed_false_explicit_still_absorbed(
+        self, auth_headers: dict[str, str], db_session: AsyncSession
+    ) -> None:
+        """resumed=False（显式否定，等价缺省）不复活——吸收判据必须是
+        ``is True``，防实现漂移为「非 None 即复活」误放大迟到心跳面。"""
+        # Arrange
+        user_id = await _admin_id(db_session)
+        rt = await _create_runtime(db_session, user_id)
+        ag_session, run = await _create_session_with_run(db_session, user_id, rt.id)
+        from app.modules.daemon.agent_task_store import upsert_agent_task
+
+        await upsert_agent_task(
+            db_session,
+            _event(ag_session.id, run.id, "t-resume-f", status="completed"),
+        )
+        (terminal_row,) = await _task_rows(db_session, ag_session.id)
+        assert terminal_row.finished_at is not None
+        snapshot_updated = terminal_row.updated_at
+        await asyncio.sleep(0.02)
+
+        # Act：显式 resumed=False 的 running 心跳
+        await upsert_agent_task(
+            db_session,
+            _event(ag_session.id, run.id, "t-resume-f", status="running", resumed=False),
+        )
+        (row_after,) = await _task_rows(db_session, ag_session.id)
+
+        # Assert：维持吸收（整行未动）
+        assert row_after.status == "completed"
+        assert row_after.finished_at is not None
+        assert _as_utc(row_after.updated_at) == _as_utc(snapshot_updated)
+
+    @pytest.mark.asyncio
     async def test_later_different_terminal_overrides_with_new_finished_at(
         self, auth_headers: dict[str, str], db_session: AsyncSession
     ) -> None:

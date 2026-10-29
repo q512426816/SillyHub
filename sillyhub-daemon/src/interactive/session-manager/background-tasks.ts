@@ -91,6 +91,11 @@ export async function handleAgentTaskStatusEvent(
 
   const tasks = getOrCreateTaskMap(mgr, state.sessionId);
   const info = tasks.get(taskId);
+  // 2026-10-30-task-resume-revive-notify-retry：running 帧的续唤打标——task_id
+  // 在已终态集合（task_notification 注销过）即「注销后重开」铁证，emit 携带
+  // resumed:true（平台终态行据此复活）。取标在各分支 runId 判定之后、emit
+  // 之前（只在真正 emit 时消耗标记——提前 return 的极端时序不烧标，后续帧
+  // 仍可打标；一次性，首帧后同任务 running 不再带标）。
   // task_updated 判别：归一化器的 task_updated 事件 metadata 只带
   // {task_id, status, summary?}（不带 task_name 键）；task_started/task_progress
   // 恒带 task_name 键（description || '后台任务'）。据此区分 updated 轻量信号
@@ -103,6 +108,7 @@ export async function handleAgentTaskStatusEvent(
     const updatedRunId = info.runId ?? state.currentRunId;
     if (!updatedRunId) return;
     const updatedSummary = strOf(meta?.['summary']) || undefined;
+    const updatedResumed = takeResumedFlag(mgr, state.sessionId, taskId);
     mgr._emitSessionEvent(state.sessionId, updatedRunId, {
       kind: 'agent_task_status',
       task_id: taskId,
@@ -110,6 +116,7 @@ export async function handleAgentTaskStatusEvent(
       status: 'running',
       ...(info.toolUseId ? { tool_use_id: info.toolUseId } : {}),
       ...(updatedSummary ? { summary: updatedSummary } : {}),
+      ...(updatedResumed ? { resumed: true } : {}),
     });
     return;
   }
@@ -140,12 +147,14 @@ export async function handleAgentTaskStatusEvent(
     // 无 runId（极端时序）→ emit/落行双双跳过；注册表仍在，后续
     // progress/notification 用 info.runId ?? currentRunId 兜住。
     if (!runId) return;
+    const startedResumed = takeResumedFlag(mgr, state.sessionId, taskId);
     mgr._emitSessionEvent(state.sessionId, runId, {
       kind: 'agent_task_status',
       task_id: taskId,
       task_name: taskName,
       status: 'running',
       ...(toolUseId ? { tool_use_id: toolUseId } : {}),
+      ...(startedResumed ? { resumed: true } : {}),
     });
     await writeTaskLine(mgr, state.sessionId, runId, '[TASK_STARTED]', {
       task_id: taskId,
@@ -170,6 +179,7 @@ export async function handleAgentTaskStatusEvent(
   const elapsedMs = numOf(meta?.['elapsed_ms']);
   const totalTokens = numOf(meta?.['total_tokens']);
   const toolUses = numOf(meta?.['tool_uses']);
+  const progressResumed = takeResumedFlag(mgr, state.sessionId, taskId);
   // emit 不节流（SSE 实时精度优先；R-03 节流只作用于落行）。
   mgr._emitSessionEvent(state.sessionId, runId, {
     kind: 'agent_task_status',
@@ -182,6 +192,7 @@ export async function handleAgentTaskStatusEvent(
     ...(elapsedMs !== undefined ? { elapsed_ms: elapsedMs } : {}),
     ...(totalTokens !== undefined ? { total_tokens: totalTokens } : {}),
     ...(toolUses !== undefined ? { tool_uses: toolUses } : {}),
+    ...(progressResumed ? { resumed: true } : {}),
   });
   // R-03：[TASK_PROGRESS] 行同任务 ≥2000ms 节流合并；首行（lastLineAt 未设）必落。
   const now = Date.now();
@@ -226,6 +237,9 @@ export async function handleTaskNotificationEvent(
   // 任务表注销（终态即注销——先删后 emit，防重复消费；后续同
   // task_id 的迟到 progress 会走懒注册兜底而非挂死条目）。
   tasks.delete(taskId);
+  // 2026-10-30-task-resume-revive-notify-retry：登记已终态集合——此后同
+  // task_id 的 running 帧即续唤重开（takeResumedFlag 打标复活信号）。
+  recordTerminalTaskId(mgr, state.sessionId, taskId);
   // 2026-10-13-agent-task-stuck-running（FR-01）：tool_use 派生懒注册的别名
   // 条目（task_id=call id，toolUseId 同值）与真条目（SDK 帧 harness task_id）
   // 双 id 并存——真终态只到主 task_id，别名条目永卡 running。注销主条目后
@@ -664,6 +678,42 @@ export function getOrCreateTaskMap(
 }
 
 /**
+ * 2026-10-30-task-resume-revive-notify-retry：task_notification 终态注销时
+ * 登记已终态集合——此后同 task_id 的 running 帧即「注销后重开」（主代理
+ * 续唤）铁证。别名条目不登记（call-id 冒名行由真 task_id 终态收口，续唤
+ * 重开走真 id）。
+ */
+export function recordTerminalTaskId(
+  mgr: SessionManagerCore,
+  sessionId: string,
+  taskId: string,
+): void {
+  let set = mgr._terminalTaskIds.get(sessionId);
+  if (!set) {
+    set = new Set();
+    mgr._terminalTaskIds.set(sessionId, set);
+  }
+  set.add(taskId);
+}
+
+/**
+ * 2026-10-30-task-resume-revive-notify-retry：running 帧的续唤打标（一次性）
+ * ——task_id 在已终态集合内 → 返回 true 并即移除（后续同任务 running 帧不带
+ * 标，防长重跑期重复复活信号）；不在集合（普通运行/迟到帧）→ false。
+ */
+export function takeResumedFlag(
+  mgr: SessionManagerCore,
+  sessionId: string,
+  taskId: string,
+): boolean {
+  const set = mgr._terminalTaskIds.get(sessionId);
+  if (!set || !set.has(taskId)) return false;
+  set.delete(taskId);
+  if (set.size === 0) mgr._terminalTaskIds.delete(sessionId);
+  return true;
+}
+
+/**
  * 2026-10-11-task-sweep-daemon-truth：会话活跃后台任务只读快照——backend
  * `session_live_tasks` RPC 的数据源（死活判定唯一真相源；用户两轮指正废除了
  * 「run 终态即死」「超时无心跳即死」两类启发式）。只读 `.get`（不像
@@ -692,6 +742,9 @@ export function clearBackgroundTasks(
   sessionId: string,
 ): void {
   mgr._backgroundTasks.delete(sessionId);
+  // 2026-10-30-task-resume-revive-notify-retry：已终态集合同生命周期清理
+  //（SDK 进程已 kill 不会再有续唤重开帧；防 Map 泄漏同上）。
+  mgr._terminalTaskIds.delete(sessionId);
   const state = mgr._store.get(sessionId);
   if (state && state.status === 'active') {
     state.currentRunId = undefined;

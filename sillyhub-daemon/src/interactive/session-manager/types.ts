@@ -549,6 +549,14 @@ export interface SessionManagerCore {
     | undefined;
   readonly _borrowSandboxRoots: Map<string, string>;
   readonly _backgroundTasks: Map<string, Map<string, BackgroundTaskInfo>>;
+  /**
+   * 2026-10-30-task-resume-revive-notify-retry：会话级已终态 task_id 集合
+   * （key=sessionId）。task_notification 注销时登记；此后同 task_id 的 running
+   * 帧即「终态注销后重开」（主代理续唤）铁证，emit 携带 resumed:true（一次性
+   * ——takeResumedFlag 取标即移除）。与 _backgroundTasks 同生命周期
+   * （clearBackgroundTasks 一并清），仅内存态。
+   */
+  readonly _terminalTaskIds: Map<string, Set<string>>;
   /** 2026-10-21-task-wakeup-restore：终态唤醒 debounce 窗口（同会话单 timer 合并） */
   readonly _taskWakeupPending: Map<
     string,

@@ -126,6 +126,14 @@ export type SessionEventForBackend =
       tool_uses?: number;
       /** 异步派发标记（回执兜底路径必发；缺省语义=前台）。 */
       async?: boolean;
+      /**
+       * 2026-10-30-task-resume-revive-notify-retry：续唤复活信号——task-
+       * notification 语义是「本轮停止」，主代理续唤（重唤原 task_id）重跑的
+       * running 首帧由注册表打标（终态注销后同 task_id 重开铁证，区别于迟到
+       * 心跳）。backend upsert 语义②据此放行终态行复活；缺省不发（迟到心跳
+       * 被吸收，防线不变）。一次性：首帧带标后从终态集合移除。
+       */
+      resumed?: boolean;
     };
 
 /** session 生命周期状态。 */

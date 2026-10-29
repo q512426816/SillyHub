@@ -326,13 +326,26 @@ async def upsert_agent_task(session: AsyncSession, event: AgentTaskStatusEvent) 
         # 心跳 → 该任务实为跨轮次存活的后台任务被宽限误判收口，放行复活
         # （status 回 running、finished_at 清空、清扫标记清除），后续字段照常
         # latest-wins 累积。事件驱动的真实终态行（message 非本标记）维持吸收。
+        # 2026-10-30-task-resume-revive-notify-retry 复活例外二：event.resumed
+        # is True——task-notification 语义是「本轮停止」，主代理续唤（重唤原
+        # task_id）重跑的 running 首帧由 daemon 注册表打标（终态注销后重开铁证，
+        # 区别于迟到心跳），放行终态行复活；无标记维持吸收（防线不变）。
         if (
             row.status in _TERMINAL_STATUSES
             and event.status == "running"
-            and not (row.status == "stopped" and row.message == RUN_CLOSE_SWEEP_REASON)
+            and not (
+                event.resumed is True
+                or (row.status == "stopped" and row.message == RUN_CLOSE_SWEEP_REASON)
+            )
         ):
             return row
         if row.status == "stopped" and row.message == RUN_CLOSE_SWEEP_REASON:
+            row.finished_at = None
+            row.message = None
+        elif row.status in _TERMINAL_STATUSES and event.status == "running":
+            # resumed 复活路径（行非清扫标记的终态行）：与清扫复活同款收口——
+            # finished_at 清空回到在途；message 是终态行遗留（终态事件不带
+            # message 时保留的旧值），一并清掉防复活卡片挂着旧清扫/终态文案。
             row.finished_at = None
             row.message = None
         # 必填字段（run_id / task_name / status）latest-wins 逐次覆盖（与前端

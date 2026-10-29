@@ -81,6 +81,9 @@ import { ZcodeAppServerDriver } from './interactive/zcode-app-server-driver.js';
 import { SessionManager } from './interactive/session-manager.js';
 import { isMainAgentMcpCandidate } from './interactive/providers.js';
 import type { SessionEventForBackend } from './interactive/types.js';
+// 2026-10-30-task-resume-revive-notify-retry / FR-04：agent_task_status 上报
+// 有限退避重试（5xx/网络错误 1s/4s/16s；upsert 幂等保证重放安全）。
+import { notifyAgentTaskStatusWithRetry } from './agent-task-notify-retry.js';
 import { JsonSessionPersistence } from './interactive/session-store-persistence.js';
 import { DAEMON_VERSION } from './daemon-version.js';
 import { RuntimeLockManager } from './runtime-lock.js';
@@ -910,7 +913,10 @@ export async function startAction(opts: StartOptions): Promise<number> {
                 );
                 break;
               case 'agent_task_status':
-                await client.notifyAgentTaskStatus(
+                // 2026-10-30-task-resume-revive-notify-retry / FR-04：上报包
+                // 有限退避重试（5xx/网络错误，实测 502 网关故障时段事件丢失
+                // 根治）；resumed 续唤复活信号随扩展字段透传（FR-01 打标产物）。
+                await notifyAgentTaskStatusWithRetry(client, [
                   sessionId,
                   runId,
                   event.task_id,
@@ -929,8 +935,9 @@ export async function startAction(opts: StartOptions): Promise<number> {
                     total_tokens: event.total_tokens,
                     tool_uses: event.tool_uses,
                     async: event.async,
+                    resumed: event.resumed,
                   },
-                );
+                ]);
                 break;
               default:
                 // 其它 kind 不上报（约束：仅 plan/bash/agent_task）。

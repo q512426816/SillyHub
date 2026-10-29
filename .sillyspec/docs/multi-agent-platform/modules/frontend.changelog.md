@@ -245,3 +245,4 @@
 | 2026-10-28 | 2026-10-29-floating-scope-loadmore-fix | 悬浮面板加载更多附加段误清修复 |
 | 2026-10-29 | 2026-10-29-edit-diff-stat-badge | 用户反馈：agent 完成 Edit/Write 文件操作后，对话视图运行条（跑马灯）与进度视图命令… |
 | 2026-10-29 | 2026-10-29-engine-live-perception | 2026-10-29-engine-live-perception |
+| 2026-10-29 | 2026-10-30-task-resume-revive-notify-retry | 子代理续唤复活终态任务行+上报502重试 |

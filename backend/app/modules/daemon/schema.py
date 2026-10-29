@@ -1808,6 +1808,12 @@ class AgentTaskStatusEvent(BaseModel):
     tool_uses: int | None = None
     # 异步派发标记（回执兜底路径必发）；dump 时按 alias 输出为 "async"（契约名）
     async_: bool | None = Field(None, alias="async")
+    # 2026-10-30-task-resume-revive-notify-retry：续唤复活信号——daemon 任务
+    # 注册表终态注销后同 task_id 再收 running 帧（task-notification 语义是
+    # 「本轮停止」，主代理续唤重开）时首帧携带 true。upsert 语义②据此放行
+    # 终态行复活（status 回 running）；缺省 None 维持吸收（迟到心跳防线）。
+    # 瞬态信号不落库（复活后行即 running 态，AgentSessionTaskRead 无此字段）。
+    resumed: bool | None = None
 
 
 class AgentSessionTaskRead(BaseModel):

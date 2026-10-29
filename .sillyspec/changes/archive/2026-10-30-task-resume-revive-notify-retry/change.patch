@@ -1,0 +1,911 @@
+diff --git a/backend/app/modules/daemon/agent_task_store.py b/backend/app/modules/daemon/agent_task_store.py
+index 1f4533ec8..f74fa027e 100644
+--- a/backend/app/modules/daemon/agent_task_store.py
++++ b/backend/app/modules/daemon/agent_task_store.py
+@@ -326,15 +326,28 @@ async def upsert_agent_task(session: AsyncSession, event: AgentTaskStatusEvent)
+         # 心跳 → 该任务实为跨轮次存活的后台任务被宽限误判收口，放行复活
+         # （status 回 running、finished_at 清空、清扫标记清除），后续字段照常
+         # latest-wins 累积。事件驱动的真实终态行（message 非本标记）维持吸收。
++        # 2026-10-30-task-resume-revive-notify-retry 复活例外二：event.resumed
++        # is True——task-notification 语义是「本轮停止」，主代理续唤（重唤原
++        # task_id）重跑的 running 首帧由 daemon 注册表打标（终态注销后重开铁证，
++        # 区别于迟到心跳），放行终态行复活；无标记维持吸收（防线不变）。
+         if (
+             row.status in _TERMINAL_STATUSES
+             and event.status == "running"
+-            and not (row.status == "stopped" and row.message == RUN_CLOSE_SWEEP_REASON)
++            and not (
++                event.resumed is True
++                or (row.status == "stopped" and row.message == RUN_CLOSE_SWEEP_REASON)
++            )
+         ):
+             return row
+         if row.status == "stopped" and row.message == RUN_CLOSE_SWEEP_REASON:
+             row.finished_at = None
+             row.message = None
++        elif row.status in _TERMINAL_STATUSES and event.status == "running":
++            # resumed 复活路径（行非清扫标记的终态行）：与清扫复活同款收口——
++            # finished_at 清空回到在途；message 是终态行遗留（终态事件不带
++            # message 时保留的旧值），一并清掉防复活卡片挂着旧清扫/终态文案。
++            row.finished_at = None
++            row.message = None
+         # 必填字段（run_id / task_name / status）latest-wins 逐次覆盖（与前端
+         # taskName 逐次覆盖同构）；语义④ Optional 字段只在事件非 None 时覆盖。
+         row.run_id = event.run_id
+diff --git a/backend/app/modules/daemon/schema.py b/backend/app/modules/daemon/schema.py
+index 717bd9d09..5d0156796 100644
+--- a/backend/app/modules/daemon/schema.py
++++ b/backend/app/modules/daemon/schema.py
+@@ -1808,6 +1808,12 @@ class AgentTaskStatusEvent(BaseModel):
+     tool_uses: int | None = None
+     # 异步派发标记（回执兜底路径必发）；dump 时按 alias 输出为 "async"（契约名）
+     async_: bool | None = Field(None, alias="async")
++    # 2026-10-30-task-resume-revive-notify-retry：续唤复活信号——daemon 任务
++    # 注册表终态注销后同 task_id 再收 running 帧（task-notification 语义是
++    # 「本轮停止」，主代理续唤重开）时首帧携带 true。upsert 语义②据此放行
++    # 终态行复活（status 回 running）；缺省 None 维持吸收（迟到心跳防线）。
++    # 瞬态信号不落库（复活后行即 running 态，AgentSessionTaskRead 无此字段）。
++    resumed: bool | None = None
+ 
+ 
+ class AgentSessionTaskRead(BaseModel):
+diff --git a/backend/app/modules/daemon/tests/test_agent_session_tasks.py b/backend/app/modules/daemon/tests/test_agent_session_tasks.py
+index af7b7386a..2aaab437e 100644
+--- a/backend/app/modules/daemon/tests/test_agent_session_tasks.py
++++ b/backend/app/modules/daemon/tests/test_agent_session_tasks.py
+@@ -373,6 +373,90 @@ class TestUpsertAgentTaskSemantics:
+         assert row_after.message == "超时"
+         assert row_after.summary is None  # 迟到事件的 summary 未写入
+ 
++    @pytest.mark.asyncio
++    async def test_resumed_running_revives_terminal_row(
++        self, auth_headers: dict[str, str], db_session: AsyncSession
++    ) -> None:
++        """2026-10-30-task-resume-revive-notify-retry：终态行收 resumed=True 的
++        running → 放行复活（status 回 running、finished_at/message 清空、
++        started_at 保持首插值）——task-notification「本轮停止」后主代理续唤
++        重跑（daemon 注册表终态注销后同 task_id 重开）的显式复活信号。"""
++        # Arrange
++        user_id = await _admin_id(db_session)
++        rt = await _create_runtime(db_session, user_id)
++        ag_session, run = await _create_session_with_run(db_session, user_id, rt.id)
++        from app.modules.daemon.agent_task_store import upsert_agent_task
++
++        await upsert_agent_task(db_session, _event(ag_session.id, run.id, "t-resume", progress=10))
++        (started_row,) = await _task_rows(db_session, ag_session.id)
++        assert started_row.started_at is not None
++        # identity map 下同名行是同一 ORM 实例（后续 setattr 就地更新）——
++        # 快照拍照后比较（同 test_later_different_terminal_overrides 先例）。
++        started_snapshot = {
++            "started_at": started_row.started_at,
++            "updated_at": started_row.updated_at,
++        }
++        await upsert_agent_task(
++            db_session,
++            _event(ag_session.id, run.id, "t-resume", status="completed", message="本轮完成"),
++        )
++        await asyncio.sleep(0.02)
++
++        # Act：续唤重跑的 running 首帧（daemon 打标 resumed=True）
++        await upsert_agent_task(
++            db_session,
++            _event(
++                ag_session.id,
++                run.id,
++                "t-resume",
++                status="running",
++                progress=60,
++                resumed=True,
++            ),
++        )
++        (row_after,) = await _task_rows(db_session, ag_session.id)
++
++        # Assert：复活——在途形态（finished_at/message 清空），身份字段保旧
++        assert row_after.status == "running"
++        assert row_after.finished_at is None
++        assert row_after.message is None  # 终态遗留文案随复活清除
++        assert row_after.progress == 60  # 事件字段照常 latest-wins
++        assert _as_utc(row_after.started_at) == _as_utc(started_snapshot["started_at"])
++        assert _as_utc(row_after.updated_at) > _as_utc(started_snapshot["updated_at"])
++
++    @pytest.mark.asyncio
++    async def test_resumed_false_explicit_still_absorbed(
++        self, auth_headers: dict[str, str], db_session: AsyncSession
++    ) -> None:
++        """resumed=False（显式否定，等价缺省）不复活——吸收判据必须是
++        ``is True``，防实现漂移为「非 None 即复活」误放大迟到心跳面。"""
++        # Arrange
++        user_id = await _admin_id(db_session)
++        rt = await _create_runtime(db_session, user_id)
++        ag_session, run = await _create_session_with_run(db_session, user_id, rt.id)
++        from app.modules.daemon.agent_task_store import upsert_agent_task
++
++        await upsert_agent_task(
++            db_session,
++            _event(ag_session.id, run.id, "t-resume-f", status="completed"),
++        )
++        (terminal_row,) = await _task_rows(db_session, ag_session.id)
++        assert terminal_row.finished_at is not None
++        snapshot_updated = terminal_row.updated_at
++        await asyncio.sleep(0.02)
++
++        # Act：显式 resumed=False 的 running 心跳
++        await upsert_agent_task(
++            db_session,
++            _event(ag_session.id, run.id, "t-resume-f", status="running", resumed=False),
++        )
++        (row_after,) = await _task_rows(db_session, ag_session.id)
++
++        # Assert：维持吸收（整行未动）
++        assert row_after.status == "completed"
++        assert row_after.finished_at is not None
++        assert _as_utc(row_after.updated_at) == _as_utc(snapshot_updated)
++
+     @pytest.mark.asyncio
+     async def test_later_different_terminal_overrides_with_new_finished_at(
+         self, auth_headers: dict[str, str], db_session: AsyncSession
+diff --git a/backend/app/modules/daemon/tests/test_agent_task_status_payload.py b/backend/app/modules/daemon/tests/test_agent_task_status_payload.py
+index 75005a0a0..43157256b 100644
+--- a/backend/app/modules/daemon/tests/test_agent_task_status_payload.py
++++ b/backend/app/modules/daemon/tests/test_agent_task_status_payload.py
+@@ -55,6 +55,8 @@ _EXPECTED_PAYLOAD_KEYS = {
+     "tool_uses",
+     # async_ 字段按 alias 输出为契约名 "async"（by_alias 发布）
+     "async",
++    # 2026-10-30-task-resume-revive-notify-retry：续唤复活信号（瞬态，缺省 None）
++    "resumed",
+ }
+ 
+ 
+@@ -245,3 +247,30 @@ class TestAgentTaskStatusLegacyPayloadCompatible:
+         assert payload["total_tokens"] is None
+         assert payload["tool_uses"] is None
+         assert payload["async"] is None
++        # 2026-10-30-task-resume-revive-notify-retry：续唤复活信号缺省 None 透传
++        assert payload["resumed"] is None
++
++    @pytest.mark.asyncio
++    async def test_resumed_flag_published_true(
++        self,
++        client: AsyncClient,
++        auth_headers: dict[str, str],
++        db_session: AsyncSession,
++    ) -> None:
++        """续唤复活信号（resumed=true，daemon 注册表终态注销后同 task_id 重开
++        的 running 首帧）经端点原样发布进 SSE payload——前端归约据此放行复活。"""
++        status_code, body, publishes, _sid = await _notify(
++            client,
++            auth_headers,
++            db_session,
++            {
++                "run_id": str(uuid.uuid4()),
++                "task_id": "t-resume-flag",
++                "task_name": "续唤子代理",
++                "status": "running",
++                "resumed": True,
++            },
++        )
++
++        assert status_code == 200, body
++        assert publishes[0][1]["resumed"] is True
+diff --git a/backend/openapi.json b/backend/openapi.json
+index b76150fb5..125200167 100644
+--- a/backend/openapi.json
++++ b/backend/openapi.json
+@@ -40154,6 +40154,17 @@
+               }
+             ],
+             "title": "Async"
++          },
++          "resumed": {
++            "anyOf": [
++              {
++                "type": "boolean"
++              },
++              {
++                "type": "null"
++              }
++            ],
++            "title": "Resumed"
+           }
+         },
+         "type": "object",
+diff --git a/frontend/src/components/daemon/__tests__/agent-task-card-lifecycle.test.tsx b/frontend/src/components/daemon/__tests__/agent-task-card-lifecycle.test.tsx
+index bdc02f575..52d9d5a67 100644
+--- a/frontend/src/components/daemon/__tests__/agent-task-card-lifecycle.test.tsx
++++ b/frontend/src/components/daemon/__tests__/agent-task-card-lifecycle.test.tsx
+@@ -386,6 +386,69 @@ describe("applyAgentTaskStatusEvent 归约（task-12 / FR-06）", () => {
+     }
+   });
+ 
++  it("续唤复活（2026-10-30-task-resume-revive-notify-retry）：resumed running 翻回运行中，terminalAt 清空、startedAt 保留", () => {
++    vi.useFakeTimers();
++    vi.setSystemTime(new Date("2026-08-27T10:00:00Z"));
++    try {
++      let list = applyAgentTaskStatusEvent([], ev({}));
++      const started = list[0] as AgentTaskEntry;
++      vi.setSystemTime(new Date("2026-08-27T10:05:00Z"));
++      // 「本轮停止」终态定格（task-notification 语义）
++      list = applyAgentTaskStatusEvent(
++        list,
++        ev({ status: "completed", elapsed_ms: 300_000, summary: "本轮完成" }),
++      );
++      const done = list[0] as AgentTaskEntry;
++      expect(done.terminalAt).toBe(Date.now());
++      // 主代理续唤重跑：running 首帧带 resumed=true（daemon 注册表打标）→ 翻回运行中
++      vi.setSystemTime(new Date("2026-08-27T10:06:00Z"));
++      list = applyAgentTaskStatusEvent(
++        list,
++        ev({ resumed: true, last_tool_name: "SendMessage 后续唤重跑" }),
++      );
++      const revived = list[0] as AgentTaskEntry;
++      expect(revived.status).toBe("running");
++      expect(revived.terminalAt).toBeNull();
++      expect(revived.startedAt).toBe(started.startedAt); // 同一任务实例，首见锚点不动
++      expect(revived.lastActivityAt).toBe(Date.now()); // 心跳锚点恢复推进
++      // 复活后的普通 running 心跳（无标记）照常合并（行已在途，非终态吸收路径）
++      vi.setSystemTime(new Date("2026-08-27T10:07:00Z"));
++      list = applyAgentTaskStatusEvent(list, ev({ elapsed_ms: 420_000 }));
++      const beating = list[0] as AgentTaskEntry;
++      expect(beating.status).toBe("running");
++      expect(beating.elapsedMs).toBe(420_000);
++      // 二轮终态到达 → 重新定格（复活后的状态机周期自洽）
++      vi.setSystemTime(new Date("2026-08-27T10:10:00Z"));
++      list = applyAgentTaskStatusEvent(
++        list,
++        ev({ status: "completed", elapsed_ms: 600_000, summary: "二轮完成" }),
++      );
++      expect((list[0] as AgentTaskEntry).status).toBe("completed");
++      expect((list[0] as AgentTaskEntry).terminalAt).toBe(Date.now());
++    } finally {
++      vi.useRealTimers();
++    }
++  });
++
++  it("续唤复活防线：resumed 缺省（null / 不带）与 false 均维持定格", () => {
++    vi.useFakeTimers();
++    vi.setSystemTime(new Date("2026-08-27T10:00:00Z"));
++    try {
++      let list = applyAgentTaskStatusEvent([], ev({}));
++      list = applyAgentTaskStatusEvent(list, ev({ status: "completed", elapsed_ms: 1_000 }));
++      const frozen = list;
++      vi.setSystemTime(new Date("2026-08-27T10:01:00Z"));
++      // 缺省（旧 daemon 不发字段）
++      expect(applyAgentTaskStatusEvent(list, ev({}))).toBe(frozen);
++      // 显式 false
++      expect(applyAgentTaskStatusEvent(list, ev({ resumed: false }))).toBe(frozen);
++      // 显式 null
++      expect(applyAgentTaskStatusEvent(list, ev({ resumed: null }))).toBe(frozen);
++    } finally {
++      vi.useRealTimers();
++    }
++  });
++
+   it("最近 6 条截断：第 7 个新任务挤掉最旧一条（终态保留供回看）", () => {
+     // 逐条喂 7 个不同 task_id 的事件 → 只留最近 6 条（bg-1 被挤掉）
+     let list: AgentTaskEntry[] = [];
+diff --git a/frontend/src/components/daemon/agent-task-store.ts b/frontend/src/components/daemon/agent-task-store.ts
+index 956e23262..d8b41771f 100644
+--- a/frontend/src/components/daemon/agent-task-store.ts
++++ b/frontend/src/components/daemon/agent-task-store.ts
+@@ -30,7 +30,15 @@ export function applyAgentTaskStatusEvent(
+   const idx = prev.findIndex((t) => t.taskId === event.task_id);
+   const existing = idx >= 0 ? (prev[idx] ?? null) : null;
+   // 终态定格：已定格（completed / failed / stopped）的卡片忽略迟到 running 心跳。
+-  if (existing && existing.status !== "running" && event.status === "running") {
++  // 2026-10-30-task-resume-revive-notify-retry 复活豁免：resumed === true 的
++  // running 是 daemon 注册表打标的「续唤重开」铁证（task-notification 语义是
++  // 「本轮停止」，主代理重唤原 task_id），放行翻回运行中；缺省维持定格。
++  if (
++    existing &&
++    existing.status !== "running" &&
++    event.status === "running" &&
++    event.resumed !== true
++  ) {
+     return prev;
+   }
+   const next: AgentTaskEntry = {
+@@ -55,7 +63,14 @@ export function applyAgentTaskStatusEvent(
+     // 沉默；终态本身不触发警示）。
+     lastActivityAt:
+       event.status === "running" ? now : existing?.lastActivityAt ?? null,
+-    terminalAt: event.status === "running" ? existing?.terminalAt ?? null : now,
++    // 续唤复活（resumed running）：terminalAt 清空回到在途（startedAt 保留——
++    // 同一任务实例跨续唤周期）；普通 running 维持旧值（终态前置时本为 null）。
++    terminalAt:
++      event.status === "running"
++        ? event.resumed === true
++          ? null
++          : (existing?.terminalAt ?? null)
++        : now,
+   };
+   if (idx === -1) return [...prev, next].slice(-6);
+   const copy = [...prev];
+diff --git a/frontend/src/lib/api-types.ts b/frontend/src/lib/api-types.ts
+index 6b56b1704..593b3159c 100644
+--- a/frontend/src/lib/api-types.ts
++++ b/frontend/src/lib/api-types.ts
+@@ -13950,6 +13950,8 @@ export interface components {
+             tool_uses?: number | null;
+             /** Async */
+             async?: boolean | null;
++            /** Resumed */
++            resumed?: boolean | null;
+         };
+         /** ApiKeyCreateRequest */
+         ApiKeyCreateRequest: {
+diff --git a/frontend/src/lib/daemon/session-sse.ts b/frontend/src/lib/daemon/session-sse.ts
+index 1a4e66156..5129a1042 100644
+--- a/frontend/src/lib/daemon/session-sse.ts
++++ b/frontend/src/lib/daemon/session-sse.ts
+@@ -152,6 +152,13 @@ export interface AgentTaskStatusEvent {
+   tool_uses?: number | null;
+   /** 后端 DTO 字段名 async_ + alias async，daemon 下发键名为 async。 */
+   async?: boolean | null;
++  /**
++   * 2026-10-30-task-resume-revive-notify-retry：续唤复活信号——task-notification
++   * 语义是「本轮停止」，主代理续唤（重唤原 task_id）重跑的 running 首帧由
++   * daemon 注册表打标 true。归约据此放行终态卡片翻回运行中；缺省 null 的
++   * 迟到心跳维持定格（旧 daemon 不发该字段，双向兼容）。
++   */
++  resumed?: boolean | null;
+ }
+ 
+ export interface SessionStreamEnvelope {
+diff --git a/sillyhub-daemon/src/agent-task-notify-retry.ts b/sillyhub-daemon/src/agent-task-notify-retry.ts
+new file mode 100644
+index 000000000..3f2c573a8
+--- /dev/null
++++ b/sillyhub-daemon/src/agent-task-notify-retry.ts
+@@ -0,0 +1,76 @@
++/**
++ * agent-task-notify-retry —— agent_task_status 上报有限重试
++ * （2026-10-30-task-resume-revive-notify-retry / FR-04）。
++ *
++ * 背景：daemon→平台 agent-task-status HTTP 上报失败（生产实测多次 502——
++ * 平台网关故障时段，daemon.log `[cli] onSessionEvent notify failed`）原先仅
++ * console.error 即丢，状态事件永久丢失（平台任务卡不翻转）。本模块给
++ * cli.ts onSessionEvent 桥的 agent_task_status 分支加有限退避重试：
++ *
++ * - 触发面：HubHttpError 且 status ≥ 500（含实测 502）；非 HubHttpError 的
++ *   Error（传输层——fetch 连接失败/超时/连接重置；4xx 语义错误恒 HubHttpError
++ *   不入此列）。4xx 与其它非 Error 形态不重试（语义错误重试无益，直接抛出）。
++ * - 上限：AGENT_TASK_NOTIFY_RETRY_DELAYS_MS 共 3 次额外尝试（1s/4s/16s
++ *   指数退避），最坏 4 次请求/事件——多事件并发各退避，无聚合风暴面。
++ * - 幂等安全：backend upsert 幂等（running latest-wins / 终态重放刷
++ *   finished_at 均无害），重放安全。
++ * - sleep 可注入（单测 fake timers/记录退避序列）；模块纯函数零副作用，
++ *   独立于 cli.ts 入口（测试 import 不触发 CLI 装配）。
++ */
++
++import { HubHttpError, type HubClient } from './hub-client.js';
++
++/** 退避间隔（1s / 4s / 16s），长度即额外尝试次数。 */
++export const AGENT_TASK_NOTIFY_RETRY_DELAYS_MS: readonly number[] = [
++  1000,
++  4000,
++  16000,
++];
++
++/**
++ * 是否值得重试：5xx（含 502 网关故障）与传输层 Error 重试；4xx（HubHttpError
++ * status < 500，语义/权限错误）与非 Error 形态直接抛出。
++ */
++export function isRetryableAgentTaskNotifyError(err: unknown): boolean {
++  if (err instanceof HubHttpError) return err.status >= 500;
++  return err instanceof Error;
++}
++
++/** notifyAgentTaskStatus 的最小 client 面（结构化注入，测试替身零依赖）。 */
++export type AgentTaskNotifyClient = Pick<HubClient, 'notifyAgentTaskStatus'>;
++
++/**
++ * 带退避重试的 agent_task_status 上报。成功即返回；不可重试错误或重试耗尽
++ * 抛最后一次错误（调用方 catch 走既有 console.error 落日志，不阻塞主链路）。
++ */
++export async function notifyAgentTaskStatusWithRetry(
++  client: AgentTaskNotifyClient,
++  args: Parameters<HubClient['notifyAgentTaskStatus']>,
++  opts?: {
++    /** 退避 sleep 注入（缺省 setTimeout）；单测用 fake 记录序列。 */
++    sleep?: (ms: number) => Promise<void>;
++    /** 退避序列注入（缺省 AGENT_TASK_NOTIFY_RETRY_DELAYS_MS）。 */
++    delays?: readonly number[];
++  },
++): Promise<void> {
++  const sleep =
++    opts?.sleep ??
++    ((ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms)));
++  const delays = opts?.delays ?? AGENT_TASK_NOTIFY_RETRY_DELAYS_MS;
++  let lastErr: unknown;
++  for (let attempt = 0; attempt <= delays.length; attempt++) {
++    if (attempt > 0) {
++      await sleep(delays[attempt - 1]!);
++    }
++    try {
++      await client.notifyAgentTaskStatus(...args);
++      return;
++    } catch (err) {
++      lastErr = err;
++      if (!isRetryableAgentTaskNotifyError(err)) {
++        throw err;
++      }
++    }
++  }
++  throw lastErr;
++}
+diff --git a/sillyhub-daemon/src/api-types.ts b/sillyhub-daemon/src/api-types.ts
+index 6b56b1704..593b3159c 100644
+--- a/sillyhub-daemon/src/api-types.ts
++++ b/sillyhub-daemon/src/api-types.ts
+@@ -13950,6 +13950,8 @@ export interface components {
+             tool_uses?: number | null;
+             /** Async */
+             async?: boolean | null;
++            /** Resumed */
++            resumed?: boolean | null;
+         };
+         /** ApiKeyCreateRequest */
+         ApiKeyCreateRequest: {
+diff --git a/sillyhub-daemon/src/cli.ts b/sillyhub-daemon/src/cli.ts
+index 55b2a6797..fa373c521 100644
+--- a/sillyhub-daemon/src/cli.ts
++++ b/sillyhub-daemon/src/cli.ts
+@@ -81,6 +81,9 @@ import { ZcodeAppServerDriver } from './interactive/zcode-app-server-driver.js';
+ import { SessionManager } from './interactive/session-manager.js';
+ import { isMainAgentMcpCandidate } from './interactive/providers.js';
+ import type { SessionEventForBackend } from './interactive/types.js';
++// 2026-10-30-task-resume-revive-notify-retry / FR-04：agent_task_status 上报
++// 有限退避重试（5xx/网络错误 1s/4s/16s；upsert 幂等保证重放安全）。
++import { notifyAgentTaskStatusWithRetry } from './agent-task-notify-retry.js';
+ import { JsonSessionPersistence } from './interactive/session-store-persistence.js';
+ import { DAEMON_VERSION } from './daemon-version.js';
+ import { RuntimeLockManager } from './runtime-lock.js';
+@@ -910,7 +913,10 @@ export async function startAction(opts: StartOptions): Promise<number> {
+                 );
+                 break;
+               case 'agent_task_status':
+-                await client.notifyAgentTaskStatus(
++                // 2026-10-30-task-resume-revive-notify-retry / FR-04：上报包
++                // 有限退避重试（5xx/网络错误，实测 502 网关故障时段事件丢失
++                // 根治）；resumed 续唤复活信号随扩展字段透传（FR-01 打标产物）。
++                await notifyAgentTaskStatusWithRetry(client, [
+                   sessionId,
+                   runId,
+                   event.task_id,
+@@ -929,8 +935,9 @@ export async function startAction(opts: StartOptions): Promise<number> {
+                     total_tokens: event.total_tokens,
+                     tool_uses: event.tool_uses,
+                     async: event.async,
++                    resumed: event.resumed,
+                   },
+-                );
++                ]);
+                 break;
+               default:
+                 // 其它 kind 不上报（约束：仅 plan/bash/agent_task）。
+diff --git a/sillyhub-daemon/src/hub-client.ts b/sillyhub-daemon/src/hub-client.ts
+index 327bff239..6f4788bc8 100644
+--- a/sillyhub-daemon/src/hub-client.ts
++++ b/sillyhub-daemon/src/hub-client.ts
+@@ -385,6 +385,13 @@ export interface AgentTaskStatusExtraFields {
+   tool_uses?: number;
+   /** 异步派发标记（回执兜底路径必发；缺省语义=前台）。 */
+   async?: boolean;
++  /**
++   * 2026-10-30-task-resume-revive-notify-retry：续唤复活信号——daemon 任务
++   * 注册表终态注销后同 task_id 重开的 running 首帧携带 true（task-notification
++   * 语义是「本轮停止」，主代理续唤重跑）。backend upsert 语义②据此放行终态
++   * 行复活；缺省不发（迟到心跳被吸收，防线不变）。
++   */
++  resumed?: boolean;
+ }
+ 
+ /**
+@@ -1704,7 +1711,7 @@ export class HubClient {
+    * body（snake_case，对齐 backend AgentTaskStatusEvent / task-01 DTO + task-02 扩展）：
+    *   { session_id, run_id, task_id, task_name, status, progress?, message?,
+    *     tool_use_id?, summary?, last_tool_name?, elapsed_ms?, total_tokens?,
+-   *     tool_uses?, async? }
++   *     tool_uses?, async?, resumed? }
+    *
+    * undefined 字段守卫写入（progress / message / extra.* 缺省时不传 → backend
+    * 保留 None，向后兼容旧 daemon 上报行为）。
+@@ -1765,6 +1772,7 @@ export class HubClient {
+     }
+     if (extra?.tool_uses !== undefined) body.tool_uses = extra.tool_uses;
+     if (extra?.async !== undefined) body.async = extra.async;
++    if (extra?.resumed !== undefined) body.resumed = extra.resumed;
+     return this._request<Record<string, unknown>>(
+       'POST',
+       `${REST_PREFIX}/sessions/${encodeURIComponent(sessionId)}/agent-task-status`,
+diff --git a/sillyhub-daemon/src/interactive/session-manager.ts b/sillyhub-daemon/src/interactive/session-manager.ts
+index 8470e5dd4..f737afc1b 100644
+--- a/sillyhub-daemon/src/interactive/session-manager.ts
++++ b/sillyhub-daemon/src/interactive/session-manager.ts
+@@ -596,6 +596,14 @@ export class SessionManager {
+     Map<string, BackgroundTaskInfo>
+   >();
+ 
++  /**
++   * 2026-10-30-task-resume-revive-notify-retry：会话级已终态 task_id 集合——
++   * task_notification 注销时登记，续唤重开 running 首帧取标打 resumed（一次性
++   * 移除），clearBackgroundTasks 一并清理（语义详见 session-manager/types.ts
++   * SessionManagerCore._terminalTaskIds 注释）。
++   */
++  private readonly _terminalTaskIds = new Map<string, Set<string>>();
++
+   /**
+    * 2026-10-21-task-wakeup-restore：终态唤醒 debounce 窗口——sessionId →
+    * { timer, lines }。2s 内多条终态合并为一条注入；fire 后自删，会话终态时
+diff --git a/sillyhub-daemon/src/interactive/session-manager/background-tasks.ts b/sillyhub-daemon/src/interactive/session-manager/background-tasks.ts
+index e5645cd26..dea09a4a4 100644
+--- a/sillyhub-daemon/src/interactive/session-manager/background-tasks.ts
++++ b/sillyhub-daemon/src/interactive/session-manager/background-tasks.ts
+@@ -91,6 +91,11 @@ export async function handleAgentTaskStatusEvent(
+ 
+   const tasks = getOrCreateTaskMap(mgr, state.sessionId);
+   const info = tasks.get(taskId);
++  // 2026-10-30-task-resume-revive-notify-retry：running 帧的续唤打标——task_id
++  // 在已终态集合（task_notification 注销过）即「注销后重开」铁证，emit 携带
++  // resumed:true（平台终态行据此复活）。取标在各分支 runId 判定之后、emit
++  // 之前（只在真正 emit 时消耗标记——提前 return 的极端时序不烧标，后续帧
++  // 仍可打标；一次性，首帧后同任务 running 不再带标）。
+   // task_updated 判别：归一化器的 task_updated 事件 metadata 只带
+   // {task_id, status, summary?}（不带 task_name 键）；task_started/task_progress
+   // 恒带 task_name 键（description || '后台任务'）。据此区分 updated 轻量信号
+@@ -103,6 +108,7 @@ export async function handleAgentTaskStatusEvent(
+     const updatedRunId = info.runId ?? state.currentRunId;
+     if (!updatedRunId) return;
+     const updatedSummary = strOf(meta?.['summary']) || undefined;
++    const updatedResumed = takeResumedFlag(mgr, state.sessionId, taskId);
+     mgr._emitSessionEvent(state.sessionId, updatedRunId, {
+       kind: 'agent_task_status',
+       task_id: taskId,
+@@ -110,6 +116,7 @@ export async function handleAgentTaskStatusEvent(
+       status: 'running',
+       ...(info.toolUseId ? { tool_use_id: info.toolUseId } : {}),
+       ...(updatedSummary ? { summary: updatedSummary } : {}),
++      ...(updatedResumed ? { resumed: true } : {}),
+     });
+     return;
+   }
+@@ -140,12 +147,14 @@ export async function handleAgentTaskStatusEvent(
+     // 无 runId（极端时序）→ emit/落行双双跳过；注册表仍在，后续
+     // progress/notification 用 info.runId ?? currentRunId 兜住。
+     if (!runId) return;
++    const startedResumed = takeResumedFlag(mgr, state.sessionId, taskId);
+     mgr._emitSessionEvent(state.sessionId, runId, {
+       kind: 'agent_task_status',
+       task_id: taskId,
+       task_name: taskName,
+       status: 'running',
+       ...(toolUseId ? { tool_use_id: toolUseId } : {}),
++      ...(startedResumed ? { resumed: true } : {}),
+     });
+     await writeTaskLine(mgr, state.sessionId, runId, '[TASK_STARTED]', {
+       task_id: taskId,
+@@ -170,6 +179,7 @@ export async function handleAgentTaskStatusEvent(
+   const elapsedMs = numOf(meta?.['elapsed_ms']);
+   const totalTokens = numOf(meta?.['total_tokens']);
+   const toolUses = numOf(meta?.['tool_uses']);
++  const progressResumed = takeResumedFlag(mgr, state.sessionId, taskId);
+   // emit 不节流（SSE 实时精度优先；R-03 节流只作用于落行）。
+   mgr._emitSessionEvent(state.sessionId, runId, {
+     kind: 'agent_task_status',
+@@ -182,6 +192,7 @@ export async function handleAgentTaskStatusEvent(
+     ...(elapsedMs !== undefined ? { elapsed_ms: elapsedMs } : {}),
+     ...(totalTokens !== undefined ? { total_tokens: totalTokens } : {}),
+     ...(toolUses !== undefined ? { tool_uses: toolUses } : {}),
++    ...(progressResumed ? { resumed: true } : {}),
+   });
+   // R-03：[TASK_PROGRESS] 行同任务 ≥2000ms 节流合并；首行（lastLineAt 未设）必落。
+   const now = Date.now();
+@@ -226,6 +237,9 @@ export async function handleTaskNotificationEvent(
+   // 任务表注销（终态即注销——先删后 emit，防重复消费；后续同
+   // task_id 的迟到 progress 会走懒注册兜底而非挂死条目）。
+   tasks.delete(taskId);
++  // 2026-10-30-task-resume-revive-notify-retry：登记已终态集合——此后同
++  // task_id 的 running 帧即续唤重开（takeResumedFlag 打标复活信号）。
++  recordTerminalTaskId(mgr, state.sessionId, taskId);
+   // 2026-10-13-agent-task-stuck-running（FR-01）：tool_use 派生懒注册的别名
+   // 条目（task_id=call id，toolUseId 同值）与真条目（SDK 帧 harness task_id）
+   // 双 id 并存——真终态只到主 task_id，别名条目永卡 running。注销主条目后
+@@ -663,6 +677,42 @@ export function getOrCreateTaskMap(
+   return tasks;
+ }
+ 
++/**
++ * 2026-10-30-task-resume-revive-notify-retry：task_notification 终态注销时
++ * 登记已终态集合——此后同 task_id 的 running 帧即「注销后重开」（主代理
++ * 续唤）铁证。别名条目不登记（call-id 冒名行由真 task_id 终态收口，续唤
++ * 重开走真 id）。
++ */
++export function recordTerminalTaskId(
++  mgr: SessionManagerCore,
++  sessionId: string,
++  taskId: string,
++): void {
++  let set = mgr._terminalTaskIds.get(sessionId);
++  if (!set) {
++    set = new Set();
++    mgr._terminalTaskIds.set(sessionId, set);
++  }
++  set.add(taskId);
++}
++
++/**
++ * 2026-10-30-task-resume-revive-notify-retry：running 帧的续唤打标（一次性）
++ * ——task_id 在已终态集合内 → 返回 true 并即移除（后续同任务 running 帧不带
++ * 标，防长重跑期重复复活信号）；不在集合（普通运行/迟到帧）→ false。
++ */
++export function takeResumedFlag(
++  mgr: SessionManagerCore,
++  sessionId: string,
++  taskId: string,
++): boolean {
++  const set = mgr._terminalTaskIds.get(sessionId);
++  if (!set || !set.has(taskId)) return false;
++  set.delete(taskId);
++  if (set.size === 0) mgr._terminalTaskIds.delete(sessionId);
++  return true;
++}
++
+ /**
+  * 2026-10-11-task-sweep-daemon-truth：会话活跃后台任务只读快照——backend
+  * `session_live_tasks` RPC 的数据源（死活判定唯一真相源；用户两轮指正废除了
+@@ -692,6 +742,9 @@ export function clearBackgroundTasks(
+   sessionId: string,
+ ): void {
+   mgr._backgroundTasks.delete(sessionId);
++  // 2026-10-30-task-resume-revive-notify-retry：已终态集合同生命周期清理
++  //（SDK 进程已 kill 不会再有续唤重开帧；防 Map 泄漏同上）。
++  mgr._terminalTaskIds.delete(sessionId);
+   const state = mgr._store.get(sessionId);
+   if (state && state.status === 'active') {
+     state.currentRunId = undefined;
+diff --git a/sillyhub-daemon/src/interactive/session-manager/types.ts b/sillyhub-daemon/src/interactive/session-manager/types.ts
+index 62efc5c3c..138a77f17 100644
+--- a/sillyhub-daemon/src/interactive/session-manager/types.ts
++++ b/sillyhub-daemon/src/interactive/session-manager/types.ts
+@@ -549,6 +549,14 @@ export interface SessionManagerCore {
+     | undefined;
+   readonly _borrowSandboxRoots: Map<string, string>;
+   readonly _backgroundTasks: Map<string, Map<string, BackgroundTaskInfo>>;
++  /**
++   * 2026-10-30-task-resume-revive-notify-retry：会话级已终态 task_id 集合
++   * （key=sessionId）。task_notification 注销时登记；此后同 task_id 的 running
++   * 帧即「终态注销后重开」（主代理续唤）铁证，emit 携带 resumed:true（一次性
++   * ——takeResumedFlag 取标即移除）。与 _backgroundTasks 同生命周期
++   * （clearBackgroundTasks 一并清），仅内存态。
++   */
++  readonly _terminalTaskIds: Map<string, Set<string>>;
+   /** 2026-10-21-task-wakeup-restore：终态唤醒 debounce 窗口（同会话单 timer 合并） */
+   readonly _taskWakeupPending: Map<
+     string,
+diff --git a/sillyhub-daemon/src/interactive/types.ts b/sillyhub-daemon/src/interactive/types.ts
+index 6a84a553d..3b6c582aa 100644
+--- a/sillyhub-daemon/src/interactive/types.ts
++++ b/sillyhub-daemon/src/interactive/types.ts
+@@ -126,6 +126,14 @@ export type SessionEventForBackend =
+       tool_uses?: number;
+       /** 异步派发标记（回执兜底路径必发；缺省语义=前台）。 */
+       async?: boolean;
++      /**
++       * 2026-10-30-task-resume-revive-notify-retry：续唤复活信号——task-
++       * notification 语义是「本轮停止」，主代理续唤（重唤原 task_id）重跑的
++       * running 首帧由注册表打标（终态注销后同 task_id 重开铁证，区别于迟到
++       * 心跳）。backend upsert 语义②据此放行终态行复活；缺省不发（迟到心跳
++       * 被吸收，防线不变）。一次性：首帧带标后从终态集合移除。
++       */
++      resumed?: boolean;
+     };
+ 
+ /** session 生命周期状态。 */
+diff --git a/sillyhub-daemon/tests/agent-task-notify-retry.test.ts b/sillyhub-daemon/tests/agent-task-notify-retry.test.ts
+new file mode 100644
+index 000000000..8d61dfc69
+--- /dev/null
++++ b/sillyhub-daemon/tests/agent-task-notify-retry.test.ts
+@@ -0,0 +1,109 @@
++// tests/agent-task-notify-retry.test.ts
++// 2026-10-30-task-resume-revive-notify-retry FR-04：agent_task_status 上报
++// 有限退避重试单测——5xx/网络错误重试（1s/4s/16s）、4xx 不重试、重试耗尽
++// 抛最后一次错误（调用方 catch 落 console.error，不阻塞主链路）。
++//
++// 背景：生产实测 daemon→平台 agent-task-status 上报多次 HTTP 502（平台网关
++// 故障时段）事件永久丢失（cli.ts 桥仅 console.error）。重试安全性依据
++// backend upsert 幂等（running latest-wins / 终态重放刷 finished_at 无害）。
++
++import { describe, expect, it, vi } from 'vitest';
++
++import {
++  AGENT_TASK_NOTIFY_RETRY_DELAYS_MS,
++  isRetryableAgentTaskNotifyError,
++  notifyAgentTaskStatusWithRetry,
++} from '../src/agent-task-notify-retry.js';
++import { HubHttpError } from '../src/hub-client.js';
++
++function hubError(status: number): HubHttpError {
++  return new HubHttpError(status, '<html>', 'http://hub/api', 'POST');
++}
++
++describe('isRetryableAgentTaskNotifyError —— 重试判定', () => {
++  it('5xx（含实测 502）可重试，4xx 不可', () => {
++    expect(isRetryableAgentTaskNotifyError(hubError(502))).toBe(true);
++    expect(isRetryableAgentTaskNotifyError(hubError(503))).toBe(true);
++    expect(isRetryableAgentTaskNotifyError(hubError(500))).toBe(true);
++    expect(isRetryableAgentTaskNotifyError(hubError(422))).toBe(false);
++    expect(isRetryableAgentTaskNotifyError(hubError(404))).toBe(false);
++  });
++
++  it('传输层 Error（fetch TypeError 等）可重试；非 Error 形态不可', () => {
++    expect(isRetryableAgentTaskNotifyError(new TypeError('fetch failed'))).toBe(true);
++    expect(isRetryableAgentTaskNotifyError(new Error('connect ECONNRESET'))).toBe(true);
++    expect(isRetryableAgentTaskNotifyError('string error')).toBe(false);
++    expect(isRetryableAgentTaskNotifyError(undefined)).toBe(false);
++  });
++});
++
++describe('notifyAgentTaskStatusWithRetry —— 退避调度', () => {
++  function makeClient(script: Array<unknown>) {
++    let call = 0;
++    const notify = vi.fn(async () => {
++      const step = script[Math.min(call, script.length - 1)];
++      call++;
++      if (step instanceof Error) throw step;
++      return { ok: true };
++    });
++    const sleep = vi.fn(async (_ms: number) => {});
++    return { notify, sleep };
++  }
++
++  it('502 两连后第三次成功：共 3 次调用、退避 [1000, 4000]', async () => {
++    const { notify, sleep } = makeClient([hubError(502), hubError(502), null]);
++    await notifyAgentTaskStatusWithRetry(
++      { notifyAgentTaskStatus: notify } as never,
++      ['s1', 'r1', 't1', '任务', 'running'] as never,
++      { sleep },
++    );
++    expect(notify).toHaveBeenCalledTimes(3);
++    expect(sleep.mock.calls.map(([ms]) => ms)).toEqual([
++      AGENT_TASK_NOTIFY_RETRY_DELAYS_MS[0],
++      AGENT_TASK_NOTIFY_RETRY_DELAYS_MS[1],
++    ]);
++  });
++
++  it('4xx（422）不重试：单次调用即抛', async () => {
++    const err = hubError(422);
++    const { notify, sleep } = makeClient([err, err, err, err]);
++    await expect(
++      notifyAgentTaskStatusWithRetry(
++        { notifyAgentTaskStatus: notify } as never,
++        ['s1', 'r1', 't1', '任务', 'running'] as never,
++        { sleep },
++      ),
++    ).rejects.toThrow('HTTP 422');
++    expect(notify).toHaveBeenCalledTimes(1);
++    expect(sleep).not.toHaveBeenCalled();
++  });
++
++  it('重试耗尽：1+3 次尝试后抛最后一次错误，退避序列全走', async () => {
++    const { notify, sleep } = makeClient([new TypeError('fetch failed')]);
++    await expect(
++      notifyAgentTaskStatusWithRetry(
++        { notifyAgentTaskStatus: notify } as never,
++        ['s1', 'r1', 't1', '任务', 'completed'] as never,
++        { sleep },
++      ),
++    ).rejects.toThrow('fetch failed');
++    expect(notify).toHaveBeenCalledTimes(1 + AGENT_TASK_NOTIFY_RETRY_DELAYS_MS.length);
++    expect(sleep.mock.calls.map(([ms]) => ms)).toEqual([
++      ...AGENT_TASK_NOTIFY_RETRY_DELAYS_MS,
++    ]);
++  });
++
++  it('首次成功零退避；事件参数原样透传', async () => {
++    const notify = vi.fn(async () => ({ ok: true }));
++    const sleep = vi.fn(async () => {});
++    const args = ['sess-A', 'run-B', 'task-C', '续唤任务', 'running' as const];
++    await notifyAgentTaskStatusWithRetry(
++      { notifyAgentTaskStatus: notify } as never,
++      args as never,
++      { sleep },
++    );
++    expect(notify).toHaveBeenCalledTimes(1);
++    expect(notify).toHaveBeenCalledWith(...args);
++    expect(sleep).not.toHaveBeenCalled();
++  });
++});
+diff --git a/sillyhub-daemon/tests/interactive/task-lifecycle.test.ts b/sillyhub-daemon/tests/interactive/task-lifecycle.test.ts
+index 4ba1ce091..edd65d186 100644
+--- a/sillyhub-daemon/tests/interactive/task-lifecycle.test.ts
++++ b/sillyhub-daemon/tests/interactive/task-lifecycle.test.ts
+@@ -1266,3 +1266,87 @@ describe('task_notification 别名条目与无归属兜底（2026-10-13-agent-ta
+     }
+   });
+ });
++
++// ── 2026-10-30-task-resume-revive-notify-retry FR-01：续唤复活打标 ─────────────
++// task-notification 语义是「本轮停止」：主代理续唤（重唤原 task_id）重跑的
++// running 首帧由已终态集合打标 resumed:true（一次性），平台终态行据此复活。
++
++describe('task-lifecycle 续唤复活打标（2026-10-30-task-resume-revive-notify-retry）', () => {
++  it('FR-01：终态注销后同 task_id 重开首帧带 resumed:true，第二帧不带（一次性）', async () => {
++    const h = await createHarness('sess-resume', 'run-resume');
++    // 首轮：started（无标）→ notification completed（登记已终态集合）。
++    await h.emitMessage(
++      msgTaskStarted({ taskId: 'task-R', toolUseId: 'toolu_R', description: '独立评审' }),
++    );
++    await h.emitMessage(
++      msgTaskNotification({ taskId: 'task-R', status: 'completed', summary: '本轮完成', toolUseId: 'toolu_R' }),
++    );
++    // 续唤重开：同 task_id 的 running 首帧（懒注册路径）→ resumed:true。
++    await h.emitMessage(
++      msgTaskStarted({ taskId: 'task-R', toolUseId: 'toolu_R', description: '独立评审' }),
++    );
++    // 第二帧 running（已注册进度路径）→ 不带标（一次性消耗）。
++    await h.emitMessage(msgTaskProgress({ taskId: 'task-R', lastToolName: 'Read' }));
++
++    const events = taskEventCalls(h);
++    const statuses = events.map(([, , e]) => (e as { status: string }).status);
++    expect(statuses).toEqual(['running', 'completed', 'running', 'running']);
++    // 首轮 started 无标（普通运行不打标）。
++    expect(events[0]![2]).not.toHaveProperty('resumed');
++    // 续唤首帧打标。
++    expect(events[2]![2]).toMatchObject({ task_id: 'task-R', status: 'running', resumed: true });
++    // 第二帧一次性后不带。
++    expect(events[3]![2]).not.toHaveProperty('resumed');
++  });
++
++  it('FR-01：二周期循环——续唤终态后再续唤，第二次重开首帧再打标', async () => {
++    const h = await createHarness('sess-resume2', 'run-resume2');
++    await h.emitMessage(
++      msgTaskStarted({ taskId: 'task-RR', toolUseId: 'toolu_RR', description: '复审' }),
++    );
++    await h.emitMessage(
++      msgTaskNotification({ taskId: 'task-RR', status: 'completed', summary: '第一轮', toolUseId: 'toolu_RR' }),
++    );
++    // 第二周期：重开 + 终态（notification 再登记集合）。
++    await h.emitMessage(
++      msgTaskStarted({ taskId: 'task-RR', toolUseId: 'toolu_RR', description: '复审' }),
++    );
++    await h.emitMessage(
++      msgTaskNotification({ taskId: 'task-RR', status: 'completed', summary: '第二轮', toolUseId: 'toolu_RR' }),
++    );
++    // 第三周期：重开首帧仍打标（一次性≠永久失效，每次终态重新登记）。
++    await h.emitMessage(
++      msgTaskStarted({ taskId: 'task-RR', toolUseId: 'toolu_RR', description: '复审' }),
++    );
++
++    const events = taskEventCalls(h);
++    const resumedFrames = events.filter(([, , e]) =>
++      Object.prototype.hasOwnProperty.call(e as object, 'resumed'),
++    );
++    expect(resumedFrames).toHaveLength(2); // 第二、三周期重开首帧各一次
++    expect((resumedFrames[0]![2] as { resumed?: boolean }).resumed).toBe(true);
++    expect((resumedFrames[1]![2] as { resumed?: boolean }).resumed).toBe(true);
++  });
++
++  it('FR-01：task_updated running 轻量信号路径同样打标（续唤重开走 updated 中间态）', async () => {
++    const h = await createHarness('sess-resume3', 'run-resume3');
++    await h.emitMessage(
++      msgTaskStarted({ taskId: 'task-U', toolUseId: 'toolu_U', description: '评审' }),
++    );
++    await h.emitMessage(
++      msgTaskNotification({ taskId: 'task-U', status: 'completed', summary: '完成', toolUseId: 'toolu_U' }),
++    );
++    // 续唤重开的首个信号是 task_updated running（patch.status 中间态，无
++    // task_name 键）——任务表已注销 → 懒注册路径，emit 应带 resumed:true。
++    await h.emitMessage(msgTaskUpdated({ taskId: 'task-U', patch: { status: 'running' } }));
++    // 第二帧 updated running（已注册轻量分支）——标记已消耗，无标。
++    await h.emitMessage(msgTaskUpdated({ taskId: 'task-U', patch: { status: 'running' } }));
++
++    const events = taskEventCalls(h);
++    const resumedFrames = events.filter(([, , e]) =>
++      Object.prototype.hasOwnProperty.call(e as object, 'resumed'),
++    );
++    expect(resumedFrames).toHaveLength(1);
++    expect((resumedFrames[0]![2] as { resumed?: boolean }).resumed).toBe(true);
++  });
++});

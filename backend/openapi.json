@@ -40154,6 +40154,17 @@
               }
             ],
             "title": "Async"
+          },
+          "resumed": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Resumed"
           }
         },
         "type": "object",

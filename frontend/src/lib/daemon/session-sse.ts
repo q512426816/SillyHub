@@ -152,6 +152,13 @@ export interface AgentTaskStatusEvent {
   tool_uses?: number | null;
   /** 后端 DTO 字段名 async_ + alias async，daemon 下发键名为 async。 */
   async?: boolean | null;
+  /**
+   * 2026-10-30-task-resume-revive-notify-retry：续唤复活信号——task-notification
+   * 语义是「本轮停止」，主代理续唤（重唤原 task_id）重跑的 running 首帧由
+   * daemon 注册表打标 true。归约据此放行终态卡片翻回运行中；缺省 null 的
+   * 迟到心跳维持定格（旧 daemon 不发该字段，双向兼容）。
+   */
+  resumed?: boolean | null;
 }
 
 export interface SessionStreamEnvelope {
