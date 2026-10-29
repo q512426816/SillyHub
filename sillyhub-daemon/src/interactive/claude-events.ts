@@ -42,10 +42,21 @@ import type { SDKMessage } from '@anthropic-ai/claude-agent-sdk';
 
 import type { AgentEvent, AgentEventUsage } from '../types.js';
 import { classifyToolKind } from '../tool-kind.js';
+import type { TurnHeartbeatSignal } from './driver.js';
 import { ctxTokensFromNetInput } from './usage-ctx.js';
 
 /** partial flush 节流间隔默认值（ms）。照抄 session-manager.ts:786 PARTIAL_FLUSH_MS。 */
 const DEFAULT_PARTIAL_FLUSH_MS = 500;
+
+/**
+ * 心跳节流间隔（ms，2026-10-29-engine-live-perception / D-001@v1）：工具参数
+ * 流期间每秒至多一条 generating 心跳。首个 delta 立即发（lastHeartbeatAt=null），
+ * 之后窗口比较（无定时器——delta 到达驱动，空闲期天然无心跳）。
+ */
+const HEARTBEAT_THROTTLE_MS = 1_000;
+
+/** 估算系数（字符 ÷ 3.5 ≈ token，D-001@v1 agent 代定，用户核阅无异议）。 */
+const HEARTBEAT_CHARS_PER_TOKEN = 3.5;
 
 /**
  * thinking block 完整展开截断上限。移植自 service.py:3547（preview = text[:20000]
@@ -63,6 +74,11 @@ const TOOL_RESULT_MAX_CHARS = 100_000;
 export interface ClaudeEventNormalizerOptions {
   /** partial flush 回调（节流窗口到期 / 消息边界时同步调用）。 */
   onPartialFlush: (ev: AgentEvent) => void;
+  /**
+   * 轮内实时心跳回调（2026-10-29-engine-live-perception / FR-01）：input_json_delta
+   * 工具参数流计数节流 1s 触发。可选（缺省 no-op——纯函数测试面不受心跳影响）。
+   */
+  onHeartbeat?: (sig: TurnHeartbeatSignal) => void;
   /** 节流间隔 ms（默认 500，对齐 session-manager.ts:786）。禁止顺带调优（task 约束）。 */
   flushIntervalMs?: number;
   /** 可注入时钟（默认 Date.now）。bash elapsed_ms 等时长的唯一时间来源。 */
@@ -137,6 +153,14 @@ interface PartialBucket {
    * 同上 FR-01；onTurnEnd 归零（新轮从零，防跨轮残留）。
    */
   turnApiDurationMs: number;
+  /**
+   * 本次 API 调用 input_json_delta（工具参数流）累计字符数（2026-10-29-
+   * engine-live-perception / FR-01）：只计数不缓冲内容本体（参数碎片不落任何
+   * 持久面）；message_stop 清零（每次调用独立累计）、onTurnEnd 兜底清零。
+   */
+  toolArgsChars: number;
+  /** 上次心跳发出时刻 ms（null=本调用未发过——首个 delta 立即发）；与 toolArgsChars 同点位清零。 */
+  lastHeartbeatAt: number | null;
 }
 
 /** 运行中 Bash 命令索引条目（bash_chunk/bash_status 终态配对用）。session-manager.ts:816-819。 */
@@ -165,11 +189,13 @@ export class ClaudeEventNormalizer {
   private readonly buckets = new Map<string, PartialBucket>();
 
   private readonly onPartialFlush: (ev: AgentEvent) => void;
+  private readonly onHeartbeat: (sig: TurnHeartbeatSignal) => void;
   private readonly flushIntervalMs: number;
   private readonly now: () => number;
 
   constructor(opts: ClaudeEventNormalizerOptions) {
     this.onPartialFlush = opts.onPartialFlush;
+    this.onHeartbeat = opts.onHeartbeat ?? (() => {});
     this.flushIntervalMs = opts.flushIntervalMs ?? DEFAULT_PARTIAL_FLUSH_MS;
     this.now = opts.now ?? Date.now;
   }
@@ -273,6 +299,10 @@ export class ClaudeEventNormalizer {
         // duration_api_ms）。
         buf.callStartMs = null;
         buf.turnApiDurationMs = 0;
+        // 心跳停发（FR-01，2026-10-29-engine-live-perception）：轮收尾清计数
+        //（message_stop 缺失的退化流兜底——R-02 双点清理之一）。
+        buf.toolArgsChars = 0;
+        buf.lastHeartbeatAt = null;
       } else {
         if (buf.timer) {
           clearTimeout(buf.timer);
@@ -982,6 +1012,8 @@ export class ClaudeEventNormalizer {
         lastCallCacheCreationTokens: 0,
         callStartMs: null,
         turnApiDurationMs: 0,
+        toolArgsChars: 0,
+        lastHeartbeatAt: null,
       };
       this.buckets.set(parentKey, buf);
     }
@@ -1071,6 +1103,34 @@ export class ClaudeEventNormalizer {
           if (buf.completedSegments.has(segId)) return;
           buf.currentAssistantSegmentId = segId;
           buf.assistant += delta['text'];
+        } else if (
+          dtype === 'input_json_delta' &&
+          typeof delta['partial_json'] === 'string'
+        ) {
+          // 2026-10-29-engine-live-perception（FR-01）：工具参数流——此前无分支
+          // 直接丢弃（大文件写入期 daemon 对外完全静默的根因）。只计数不缓冲
+          // （参数碎片不落任何持久面），节流 1s 发 generating 心跳（首个 delta
+          // 立即发）；空闲期无 delta 天然无心跳，前端自然回落等待态。
+          buf.toolArgsChars += delta['partial_json'].length;
+          const nowMs = this.now();
+          if (
+            buf.lastHeartbeatAt === null ||
+            nowMs - buf.lastHeartbeatAt >= HEARTBEAT_THROTTLE_MS
+          ) {
+            buf.lastHeartbeatAt = nowMs;
+            try {
+              this.onHeartbeat({
+                kind: 'generating',
+                est_chars: buf.toolArgsChars,
+                est_tokens: Math.round(buf.toolArgsChars / HEARTBEAT_CHARS_PER_TOKEN),
+                precision: 'estimated',
+                source: 'claude_input_json_delta',
+                ...(buf.parentKey === 'main' ? {} : { parent_tool_use_id: buf.parentKey }),
+              });
+            } catch {
+              // 心跳回调异常不崩归一化器（fail-soft，对齐 partial flush 同口径）。
+            }
+          }
         }
       }
     } else if (evType === 'message_delta') {
@@ -1146,6 +1206,10 @@ export class ClaudeEventNormalizer {
         buf.turnApiDurationMs += Math.max(0, this.now() - buf.callStartMs);
         buf.callStartMs = null;
       }
+      // 心跳计数清零（FR-01）：est_chars 语义=「本次 API 调用累计」——调用边界
+      // 归零，下次调用首个工具参数 delta 重新立即发（2026-10-29-engine-live-perception）。
+      buf.toolArgsChars = 0;
+      buf.lastHeartbeatAt = null;
     }
 
     // 节流定时器（:5836-5852）：首个 partial 启动，flush 清引用后由下次 delta 重建。

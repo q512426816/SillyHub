@@ -52,6 +52,7 @@ import type {
   McpServerConfigForDriver,
   ThinkingLevelResult,
   ThinkingLevels,
+  TurnHeartbeatSignal,
   TurnMessageEnvelope,
   UserTurnInput,
 } from './driver.js';
@@ -1374,11 +1375,35 @@ export class SessionManager {
       if (!isAuthoritative()) return;
       void this.fail(state.sessionId).then(() => undefined, () => undefined);
     };
+    // 2026-10-29-engine-live-perception（FR-01/D-001@v1）：轮内心跳统一上行——
+    // 驱动 onHeartbeat → deps.onTurnMessage 鸭子消息 `{type:'turn_heartbeat_report'}`
+    //（events.ts first_event 同款通道；daemon 层拦截转 notify_turn_heartbeat，
+    // 不进事件流/日志轨/usage 台账）。fire-and-forget：失败静默（D-009 同口径），
+    // 心跳绝不反向打断消息主链路。orphan（reload 换 query）与无 run（无可归属）
+    // 均不上报。
+    const onHeartbeatCb = (sig: TurnHeartbeatSignal): void => {
+      if (!isAuthoritative()) return;
+      const runId = state.currentRunId;
+      if (!runId) return;
+      try {
+        void Promise.resolve(
+          this.deps.onTurnMessage(state.sessionId, runId, {
+            type: 'turn_heartbeat_report',
+            ...sig,
+          } as unknown as Parameters<
+            NonNullable<SessionManagerDeps['onTurnMessage']>
+          >[2]),
+        ).catch(() => undefined);
+      } catch {
+        // 同步抛（桥未挂/测试 mock 形态）兜底吞掉。
+      }
+    };
     // task-08：envelope-only（旧键 onResult/onMessage/onError 兜底分支已删）。
     const callbacks: InteractiveDriverCallbacks = {
       onTurnResult: onResultCb,
       onTurnMessage: onMessageCb,
       onTurnError: onError,
+      onHeartbeat: onHeartbeatCb,
     };
     try {
       await driver.consume(

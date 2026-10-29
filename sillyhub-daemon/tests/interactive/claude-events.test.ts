@@ -23,6 +23,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { ClaudeEventNormalizer } from '../../src/interactive/claude-events.js';
 import { safeParseAgentEvent } from '../../src/agent-event-schema.js';
 import type { AgentEvent } from '../../src/types.js';
+import type { TurnHeartbeatSignal } from '../../src/interactive/driver.js';
 import type { SDKMessage } from '@anthropic-ai/claude-agent-sdk';
 import { loadFixture } from '../helpers';
 
@@ -37,10 +38,14 @@ function loadMessages(name: string): SDKMessage[] {
 function makeNormalizer(
   partials: AgentEvent[],
   now?: () => number,
+  heartbeats?: TurnHeartbeatSignal[],
 ): ClaudeEventNormalizer {
   return new ClaudeEventNormalizer({
     onPartialFlush: (ev) => partials.push(ev),
     ...(now ? { now } : {}),
+    ...(heartbeats
+      ? { onHeartbeat: (sig) => heartbeats.push(sig) }
+      : {}),
   });
 }
 
@@ -1146,5 +1151,121 @@ describe('claude 桶逐调用计时（FR-01）', () => {
     const ev = flushOf(partials);
     expect(ev).toBeDefined();
     expect(ev!.usage!.api_duration_ms).toBe(500);
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 2026-10-29-engine-live-perception FR-01：input_json_delta 工具参数流心跳
+// （此前无分支被丢弃——大文件写入期静默根因；计数不缓冲内容本体）
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe('turn_heartbeat 工具参数流心跳（FR-01）', () => {
+  /** input_json_delta stream_event 构造器。 */
+  function toolArgDelta(json: string, parentToolUseId: string | null = null): SDKMessage {
+    return {
+      type: 'stream_event',
+      event: {
+        type: 'content_block_delta',
+        index: 1,
+        delta: { type: 'input_json_delta', partial_json: json },
+      },
+      ...(parentToolUseId ? { parent_tool_use_id: parentToolUseId } : {}),
+    } as unknown as SDKMessage;
+  }
+
+  it('首个 delta 立即发 generating 心跳（estimated，est_chars=片段长，est_tokens=chars/3.5）', () => {
+    let clock = 1000;
+    const partials: AgentEvent[] = [];
+    const heartbeats: TurnHeartbeatSignal[] = [];
+    const norm = makeNormalizer(partials, () => clock, heartbeats);
+    norm.normalizeMessage(toolArgDelta('{"command":"pnpm test","fi'));
+    expect(heartbeats).toEqual([
+      {
+        kind: 'generating',
+        est_chars: 26,
+        est_tokens: 7, // 26 / 3.5 = 7.43 → round 7
+        precision: 'estimated',
+        source: 'claude_input_json_delta',
+      },
+    ]);
+    // 心跳不进事件流（partial flush 零触发——心跳与事件轨彻底分道）。
+    expect(partials).toHaveLength(0);
+    norm.dispose();
+  });
+
+  it('节流 1s：窗口内第二个 delta 不发，跨窗口后发累计值', () => {
+    let clock = 1000;
+    const heartbeats: TurnHeartbeatSignal[] = [];
+    const norm = makeNormalizer([], () => clock, heartbeats);
+    norm.normalizeMessage(toolArgDelta('a'.repeat(10)));
+    clock = 1500; // 0.5s 后：窗口内，不发
+    norm.normalizeMessage(toolArgDelta('b'.repeat(10)));
+    expect(heartbeats).toHaveLength(1);
+    clock = 2100; // 跨过 1s 窗口：发累计（20 字符）
+    norm.normalizeMessage(toolArgDelta('c'.repeat(10)));
+    expect(heartbeats).toHaveLength(2);
+    expect(heartbeats[1]!.est_chars).toBe(30);
+    expect(heartbeats[1]!.est_tokens).toBe(9); // 30/3.5≈8.57 → 9
+    norm.dispose();
+  });
+
+  it('message_stop 调用边界清零：新调用首个 delta 立即发且 est_chars 重新计', () => {
+    let clock = 1000;
+    const heartbeats: TurnHeartbeatSignal[] = [];
+    const norm = makeNormalizer([], () => clock, heartbeats);
+    norm.normalizeMessage(toolArgDelta('x'.repeat(40)));
+    norm.normalizeMessage({ type: 'stream_event', event: { type: 'message_stop' } } as unknown as SDKMessage);
+    clock = 2000;
+    norm.normalizeMessage(toolArgDelta('y'.repeat(8)));
+    expect(heartbeats).toHaveLength(2);
+    expect(heartbeats[1]!.est_chars).toBe(8); // 新调用从零重新累计
+    norm.dispose();
+  });
+
+  it('onTurnEnd 轮收尾清零（R-02 双点清理兜底——message_stop 缺失的退化流）', () => {
+    let clock = 1000;
+    const heartbeats: TurnHeartbeatSignal[] = [];
+    const norm = makeNormalizer([], () => clock, heartbeats);
+    norm.normalizeMessage(toolArgDelta('x'.repeat(40)));
+    clock = 1500;
+    norm.onTurnEnd(); // 无 message_stop 的退化流：轮收尾兜底清零
+    clock = 2000; // 新轮 1s 内（<上发 1s+窗口？lastHeartbeatAt 已清 null → 立即发）
+    norm.normalizeMessage(toolArgDelta('z'.repeat(4)));
+    expect(heartbeats).toHaveLength(2);
+    expect(heartbeats[1]!.est_chars).toBe(4);
+    norm.dispose();
+  });
+
+  it('子代理桶：parent_tool_use_id 非空时心跳附带归属键', () => {
+    const heartbeats: TurnHeartbeatSignal[] = [];
+    const norm = makeNormalizer([], () => 1000, heartbeats);
+    norm.normalizeMessage(toolArgDelta('abc', 'toolu_sub_1'));
+    expect(heartbeats).toHaveLength(1);
+    expect(heartbeats[0]!.parent_tool_use_id).toBe('toolu_sub_1');
+    norm.dispose();
+  });
+
+  it('心跳回调异常 fail-soft：不崩归一化器（后续消息正常归一化）', () => {
+    const norm = new ClaudeEventNormalizer({
+      onPartialFlush: () => {},
+      onHeartbeat: () => {
+        throw new Error('sink broken');
+      },
+    });
+    expect(() =>
+      norm.normalizeMessage(toolArgDelta('abc')),
+    ).not.toThrow();
+    norm.dispose();
+  });
+
+  it('心跳不进 usage 台账通道（FR-04）：心跳载荷无 usage 字段，事件流零携带', () => {
+    const heartbeats: TurnHeartbeatSignal[] = [];
+    const norm = makeNormalizer([], () => 1000, heartbeats);
+    norm.normalizeMessage(toolArgDelta('abc'));
+    const evs = norm.normalizeMessage(toolArgDelta('de')); // 返回值也不含心跳
+    expect(evs).toEqual([]);
+    expect(heartbeats).toHaveLength(1);
+    expect('usage' in heartbeats[0]!).toBe(false);
+    norm.dispose();
   });
 });

@@ -59,6 +59,7 @@ import type {
   InteractiveDriverStartOptions,
   ThinkingLevelResult,
   ThinkingLevels,
+  TurnHeartbeatSignal,
   TurnMessageEnvelope,
   UserTurnInput,
 } from './driver.js';
@@ -336,15 +337,19 @@ export interface ClaudeDriverHandle extends InteractiveDriverHandle {
    * 触发时无对应消息帧，D-002@v1 调试通道语义不适用）。
    */
   readonly partialSink?: ClaudePartialSink;
+  /**
+   * 2026-10-29-engine-live-perception（FR-01）：轮内心跳 → callbacks.onHeartbeat
+   * 延迟绑定桥（partialSink 同款形态——start 占位 no-op，consume 绑定实际回调）。
+   * 手构 handle 不带本字段时心跳静默（旧测试面零影响）。
+   */
+  readonly heartbeatSink?: ClaudeHeartbeatSink;
 }
 
 /**
- * task-06：partial flush 事件 → onTurnMessage(envelope) 的可变转发桥。
- * `forward` 为函数槽：start 占位 no-op，consume 绑定真实转发（见 ClaudeDriverHandle
- * .partialSink JSDoc）。
+ * 2026-10-29-engine-live-perception：心跳信号可变转发桥（partialSink 同款）。
  */
-export interface ClaudePartialSink {
-  forward(envelope: TurnMessageEnvelope): void;
+export interface ClaudeHeartbeatSink {
+  forward(sig: TurnHeartbeatSignal): void;
 }
 
 /**
@@ -533,11 +538,17 @@ export class ClaudeSdkDriver implements InteractiveDriver {
     // session-manager.ts:786 PARTIAL_FLUSH_MS；任务约束禁止顺带调优）。时钟默认
     // Date.now（bash elapsed_ms 等；归一化器内可注入，driver 不注入）。
     const partialSink: ClaudePartialSink = { forward: () => {} };
+    // 2026-10-29-engine-live-perception（FR-01）：心跳桥（partialSink 同款延迟绑定
+    // 形态）——归一化器构造时 onHeartbeat 回调 consume 才有，经可变转发器桥接。
+    const heartbeatSink: ClaudeHeartbeatSink = { forward: () => {} };
     const normalizer = new ClaudeEventNormalizer({
       onPartialFlush: (ev: AgentEvent): void => {
         // partial 事件单事件成批（envelope{events:[单事件]}，不带 raw——节流定时器
         // 异步触发时无对应消息帧，见 ClaudeDriverHandle.partialSink JSDoc）。
         partialSink.forward({ events: [ev] });
+      },
+      onHeartbeat: (sig: TurnHeartbeatSignal): void => {
+        heartbeatSink.forward(sig);
       },
     });
 
@@ -553,6 +564,7 @@ export class ClaudeSdkDriver implements InteractiveDriver {
       },
       normalizer,
       partialSink,
+      heartbeatSink,
     };
   }
 
@@ -690,12 +702,18 @@ export class ClaudeSdkDriver implements InteractiveDriver {
     // 时懒建一次性实例（仅本次 consume 生命周期，不回写 handle）。
     let partialSink = h.partialSink;
     let normalizer = h.normalizer;
+    // 2026-10-29-engine-live-perception（FR-01）：心跳槽——handle 带（start 产出）
+    // 则用，手构 handle 缺省懒建一次性转发槽（不回写 handle，旧测试面零影响）。
+    const heartbeatSink = h.heartbeatSink ?? { forward: () => {} };
     if (!partialSink || !normalizer) {
       partialSink = { forward: () => {} };
       const lazySink = partialSink;
       normalizer = new ClaudeEventNormalizer({
         onPartialFlush: (ev: AgentEvent): void => {
           lazySink.forward({ events: [ev] });
+        },
+        onHeartbeat: (sig: TurnHeartbeatSignal): void => {
+          heartbeatSink.forward(sig);
         },
       });
     }
@@ -722,6 +740,37 @@ export class ClaudeSdkDriver implements InteractiveDriver {
         );
       }
     };
+
+    // 2026-10-29-engine-live-perception（FR-01）：心跳槽绑定——归一化器 onHeartbeat
+    // → callbacks.onHeartbeat（SessionManager 统一转鸭子消息上行）。fire-and-forget
+    // 同款防御（心跳回调异常只记日志，绝不反向打断消息主链路）。
+    const onHeartbeatCb = callbacks.onHeartbeat;
+    heartbeatSink.forward = (sig: TurnHeartbeatSignal): void => {
+      if (!onHeartbeatCb) return;
+      try {
+        onHeartbeatCb(sig);
+      } catch (err) {
+        // eslint-disable-next-line no-console
+        console.error(
+          '[claude-sdk-driver] onHeartbeat callback failed',
+          err,
+        );
+      }
+    };
+    // 等待首包单次信号（FR-01）：consume 进入（query 已发出、首帧未到）即发
+    // awaiting_first_token——大上下文 prefill 期前端切「正在等待模型响应」态；
+    // 首包到达后 thinking/text 流自然接管（心跳态由前端 5s 自清回落）。
+    if (onHeartbeatCb) {
+      try {
+        onHeartbeatCb({
+          kind: 'awaiting_first_token',
+          precision: 'estimated',
+          source: 'claude_input_json_delta',
+        });
+      } catch {
+        // fail-soft：单次信号失败静默（前端回落现状计时，无功能损失）。
+      }
+    }
 
     try {
       for await (const msg of q) {

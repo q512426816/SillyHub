@@ -362,6 +362,40 @@ export interface InteractiveDriverCallbacks {
   onTurnMessage?(envelope: TurnMessageEnvelope): void | Promise<void>;
   /** driver 异常（spawn 失败/进程退出/网络）→ session failed。可选。 */
   onTurnError?(err: unknown): void | Promise<void>;
+  /**
+   * 轮内实时心跳（2026-10-29-engine-live-perception / D-001@v1）→ SessionManager
+   * 统一转 `{type:'turn_heartbeat_report'}` 鸭子消息上行（daemon 层拦截转
+   * notify_turn_heartbeat，**不进事件流/日志轨/usage 台账**）。可选——引擎无
+   * 中途信号源（旧驱动/测试桩）时缺省静默，前端回落现状纯计时等待。
+   *
+   * 信号语义：kind=awaiting_first_token（请求已发出、首包未到，单次）/
+   * generating（模型正在产出工具参数等不可见内容）；est_* 为引擎侧累计估算
+   * （precision=estimated，系数 3.5 字符/token）或权威值（codex token_usage），
+   * **禁止**被任何 usage 聚合消费。
+   */
+  onHeartbeat?(sig: TurnHeartbeatSignal): void;
+}
+
+/**
+ * 轮内实时心跳信号（2026-10-29-engine-live-perception / D-001@v1）。
+ * daemon 内部契约（InteractiveDriverCallbacks.onHeartbeat 载荷 + 上行鸭子
+ * 消息字段），**不是** AgentEvent 联合成员——不进归一化事件流、不落库。
+ * SSE 端载荷键名与前端逐字对齐（D-backend-039 铁律）：kind/est_tokens/
+ * precision/source/parent_tool_use_id。
+ */
+export interface TurnHeartbeatSignal {
+  /** awaiting_first_token=等待首包（单次信号）；generating=正在生成工具参数等不可见内容。 */
+  kind: 'awaiting_first_token' | 'generating';
+  /** 本次 API 调用累计产出字符数（JS string.length 口径）；awaiting_first_token 无。 */
+  est_chars?: number;
+  /** 估算 token（est_chars ÷ 3.5 四舍五入）；codex authoritative 时为本轮累计 output 权威值。 */
+  est_tokens?: number;
+  /** estimated=引擎侧估算；authoritative=引擎权威值（codex token_usage_updated）。 */
+  precision: 'estimated' | 'authoritative';
+  /** 信号源（心跳溯源 + 前端展示精度标注）。 */
+  source: 'claude_input_json_delta' | 'zcode_telemetry' | 'codex_token_usage';
+  /** 子代理归属（该心跳产出桶的 parent_tool_use_id）；缺省=main。 */
+  parent_tool_use_id?: string;
 }
 
 /**
