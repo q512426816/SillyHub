@@ -91,6 +91,92 @@ export interface TurnPhaseState {
 }
 
 /**
+ * 轮内实时心跳（2026-10-29-engine-live-perception FR-03 / D-001@v1）。
+ * kind 两值（awaiting_first_token 等待首包 / generating 正在生成工具参数等
+ * 不可见内容）；est_* 为估算（precision=estimated，标「约」展示）或引擎权威
+ * 值（authoritative）；at = 客户端本地到达时刻（**不进** lastEventAt——其语义
+ * 为最后真实内容事件，心跳不刷新）。瞬态信号：消费侧 5s 无新心跳视为过期
+ * 回落等待态（渲染层判定，不改性态存储）。
+ */
+export interface TurnHeartbeatState {
+  kind: "awaiting_first_token" | "generating";
+  est_chars: number | null;
+  est_tokens: number | null;
+  precision: "estimated" | "authoritative";
+  source: string;
+  at: number;
+}
+
+/**
+ * turn_heartbeat 事件 → 轮状态 heartbeat 写入（2026-10-29-engine-live-perception
+ * FR-03，applyTurnPhase 同款路由形态）：按 runId 归属（含 realRunId 匹配），
+ * 未命中回退 currentRunId 活跃轮（同 FR-01 竞态回退语义），再未命中丢弃不建轮。
+ *
+ * 选主策略（Grill P1-b 修正 / design Phase C）：仅 main 心跳（parent_tool_use_id
+ * 空/缺省）入主轮状态——子代理心跳（非空）不入，主会话跑马灯不被子代理并发
+ * 心跳抖动（子代理卡片心跳为后续增强面，本期不渲染不算错）。
+ * 载荷守卫：kind/precision 非法值静默忽略（不伪造）；est_* 非有限数值归 null。
+ */
+export function applyTurnHeartbeat(
+  turns: SessionTurnView[],
+  runId: string | null | undefined,
+  hb: {
+    kind?: string | null;
+    est_chars?: number | null;
+    est_tokens?: number | null;
+    precision?: string | null;
+    source?: string | null;
+    parent_tool_use_id?: string | null;
+  },
+  currentRunId?: string | null,
+): SessionTurnView[] {
+  if (!runId) return turns;
+  // 选主：子代理心跳不入主轮状态（P1-b）。
+  if (typeof hb.parent_tool_use_id === "string" && hb.parent_tool_use_id) {
+    return turns;
+  }
+  // 载荷守卫：kind/precision 非法不伪造（stream 层已拦缺 run_id，此处拦畸形值）。
+  if (hb.kind !== "awaiting_first_token" && hb.kind !== "generating") return turns;
+  if (hb.precision !== "estimated" && hb.precision !== "authoritative") return turns;
+  const state: TurnHeartbeatState = {
+    kind: hb.kind,
+    est_chars:
+      typeof hb.est_chars === "number" && Number.isFinite(hb.est_chars)
+        ? hb.est_chars
+        : null,
+    est_tokens:
+      typeof hb.est_tokens === "number" && Number.isFinite(hb.est_tokens)
+        ? hb.est_tokens
+        : null,
+    precision: hb.precision,
+    source: hb.source ?? "",
+    at: Date.now(),
+  };
+  const write = (t: SessionTurnView): SessionTurnView => ({ ...t, heartbeat: state });
+  let hit = false;
+  const next = turns.map((t) => {
+    if (t.runId === runId || t.realRunId === runId) {
+      hit = true;
+      return write(t);
+    }
+    return t;
+  });
+  if (hit) return next;
+  if (currentRunId) {
+    let fallbackHit = false;
+    const fallback = turns.map((t) => {
+      if (t.runId === currentRunId) {
+        fallbackHit = true;
+        return write(t);
+      }
+      return t;
+    });
+    if (fallbackHit) return fallback;
+  }
+  return turns;
+}
+
+/**
  * 阶段词表序（2026-10-27-turn-phase-observability-monotonic）：九值推进链定序，
  * 词表外值不参与（透传兼容策略不变）。投递段（dispatched/delivered）＜ 执行段
  * （skills_sync…ready）＜ 送达/首响段（inject_received/first_event）。
@@ -178,12 +264,20 @@ export function applyTurnPhase(
  * turn_completed/failed/killed 终态分支消费——防断线错过 first_event 的轮在
  * 终态后仍挂「正在启动 AI 进程 · 已等待 N 秒」假警示。泛型签名兼容 page
  * （SessionTurnView）与 dialog（DialogTurnView，segments 可选旧形状）双轮型。
+ *
+ * 2026-10-29-engine-live-perception（FR-03）：终态一并清空 heartbeat——轮终态
+ * 权威 usage 随 turn_completed 到达，估算补显「落定即隐」的兜底兑现点（心跳
+ * 停发 5s 自清之外的强清路径）；heartbeat 为可选字段，旧轮型（DialogTurnView
+ * 无此字段）泛型兼容零影响。
  */
-export function clearTurnPhase<T extends { currentPhase?: TurnPhaseState | null }>(
-  turn: T,
-): T {
-  if (turn.currentPhase == null) return turn;
-  return { ...turn, currentPhase: null };
+export function clearTurnPhase<
+  T extends {
+    currentPhase?: TurnPhaseState | null;
+    heartbeat?: TurnHeartbeatState | null;
+  },
+>(turn: T): T {
+  if (turn.currentPhase == null && turn.heartbeat == null) return turn;
+  return { ...turn, currentPhase: null, heartbeat: null };
 }
 
 /**

@@ -83,7 +83,7 @@ import { getProviderCaps } from "@/lib/provider-caps";
 import { type SessionPanelProps } from "./index";
 import {
   HISTORY_PAGE_SIZE, MAX_PROMPT_LEN, MENTION_PLACEHOLDER_HINT, SUSPENDED_SESSION_REFETCH_MS,
-  TERMINAL_TURN_STATUSES, applyBashStatusEvent, appendBashChunk, applyTurnPhase, BashProgressState,
+  TERMINAL_TURN_STATUSES, applyBashStatusEvent, appendBashChunk, applyTurnHeartbeat, applyTurnPhase, BashProgressState,
   clearTurnPhase, deriveTurnTerminalStatus, mentionBindOptions, readSessionDraft, replacePlaceholderTurn, writeSessionDraft,
 } from "./turn-state";
 import {
@@ -944,6 +944,27 @@ export function SessionPanelDialog(props: SessionPanelProps) {
                   event.phase ?? "",
                   // 2026-10-26-turn-phase-orphan-fallback FR-01：竞态回退——事件
                   // 先于占位轮替换到达时写当前活跃轮。
+                  prev.currentRunId,
+                ),
+              }));
+            },
+            // 2026-10-29-engine-live-perception（FR-03）：轮内心跳 → 轮状态
+            // heartbeat（main 选主 + 载荷守卫内聚 applyTurnHeartbeat；page 同款）。
+            onTurnHeartbeat: (event) => {
+              if (!event.run_id) return;
+              setView((prev) => ({
+                ...prev,
+                turns: applyTurnHeartbeat(
+                  prev.turns,
+                  event.run_id,
+                  {
+                    kind: event.kind ?? null,
+                    est_chars: event.est_chars ?? null,
+                    est_tokens: event.est_tokens ?? null,
+                    precision: event.precision ?? null,
+                    source: event.source ?? null,
+                    parent_tool_use_id: event.parent_tool_use_id ?? null,
+                  },
                   prev.currentRunId,
                 ),
               }));

@@ -77,7 +77,10 @@ import {
 import { ChatMessageAvatar, RoundDivider } from "@/components/chat";
 import { TurnStatusBar } from "@/components/daemon/turn-status-bar";
 // 2026-10-26-session-stage-progress（FR-04）：currentPhase 类型（turn-state 单源）。
-import type { TurnPhaseState } from "@/components/daemon/session-panel/turn-state";
+import type {
+  TurnHeartbeatState,
+  TurnPhaseState,
+} from "@/components/daemon/session-panel/turn-state";
 import {
   TurnLiveMarquee,
   deriveLiveMarqueeEntries,
@@ -335,6 +338,15 @@ export interface SessionTurnView {
    * 渲染路径（零回归，D-010）。
    */
   currentPhase?: TurnPhaseState | null;
+  /**
+   * 2026-10-29-engine-live-perception（FR-03 / D-001@v1）：轮内实时心跳
+   * （turn_heartbeat 事件写入，applyTurnHeartbeat main 选主；轮终态清空）。
+   * 挂轮状态（非组件局部 state）——瞬态展示信号：估算值（estimated）标「约」
+   * 弱化灰、权威值落定（心跳停发）即隐；消费侧 5s 无新心跳视为过期回落等待
+   * 态。缺省/undefined = 无心跳（老 daemon / 断线 / 已清理 / 子代理）→ 跑马灯
+   * 等待条目走现状纯计时渲染（零回归，brownfield）。
+   */
+  heartbeat?: TurnHeartbeatState | null;
   /**
    * 2026-07-29-model-error-visibility / FR-04：turn 终态=failed 时拉取的结构化错误
    * 详情（GET /sessions/{id}/runs 的 error_detail 经 buildErrorLogItem 映射）。

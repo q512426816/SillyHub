@@ -127,7 +127,7 @@ import { cn } from "@/lib/utils";
 import {
   HISTORY_PAGE_SIZE, INITIAL_TURN_STATE, MAX_PROMPT_LEN,
   SUSPENDED_SESSION_REFETCH_MS, TERMINAL_TURN_STATUSES, TurnState, applyBashStatusEvent,
-  appendBashChunk, applyEnvelopeToTurn, applyTurnPhase, asAssembled, BashProgressState,
+  appendBashChunk, applyEnvelopeToTurn, applyTurnHeartbeat, applyTurnPhase, asAssembled, BashProgressState,
   clearTurnPhase, deriveTurnTerminalStatus,
   findSegmentById, mentionBindOptions, parseRunStartedAt, readPersistedViewMode,
   readSessionDraft, replacePlaceholderTurn, subagentBlockNameOf, upsertTurn, writePersistedViewMode, writeSessionDraft,
@@ -2117,6 +2117,29 @@ export function SessionPanelPage({
                 event.phase ?? "",
                 // 2026-10-26-turn-phase-orphan-fallback FR-01：竞态回退——事件
                 // 先于占位轮替换到达时写当前活跃轮。
+                prev.currentRunId,
+              ),
+            }));
+          },
+          // 2026-10-29-engine-live-perception（FR-03 / D-001@v1）：轮内心跳 →
+          // 轮状态 heartbeat（applyTurnHeartbeat main 选主 + 载荷守卫内聚；
+          // 竞态回退同 onTurnPhase 语义）。瞬态信号——轮终态 clearTurnPhase
+          // 一并清空（估算补显落定即隐）。
+          onTurnHeartbeat: (event) => {
+            if (!event.run_id) return;
+            setTurnState((prev) => ({
+              ...prev,
+              turns: applyTurnHeartbeat(
+                prev.turns,
+                event.run_id,
+                {
+                  kind: event.kind ?? null,
+                  est_chars: event.est_chars ?? null,
+                  est_tokens: event.est_tokens ?? null,
+                  precision: event.precision ?? null,
+                  source: event.source ?? null,
+                  parent_tool_use_id: event.parent_tool_use_id ?? null,
+                },
                 prev.currentRunId,
               ),
             }));

@@ -84,6 +84,7 @@ export type SessionEventKind =
   | "agent_task_status"
   | "queue_changed"
   | "turn_phase"
+  | "turn_heartbeat"
   | "bg_task_final";
 
 /** Plan 模式摘要（plan_mode_entered 事件 payload）。 */
@@ -186,6 +187,24 @@ export interface SessionStreamEnvelope {
    */
   phase?: string | null;
   detail?: string | null;
+  /**
+   * 2026-10-29-engine-live-perception（FR-03 / D-001@v1）：turn_heartbeat 事件
+   * 携带的轮内实时心跳。payload 键名与 backend 发布侧**逐字对齐**（D-backend-039：
+   * kind/est_chars/est_tokens/precision/source/parent_tool_use_id）；心跳是瞬态
+   * 展示信号（1s/条、不落库、无历史回放），估算值（precision=estimated）禁止进
+   * 任何用量合计。其它事件为 undefined。
+   */
+  kind?: "awaiting_first_token" | "generating" | null;
+  est_chars?: number | null;
+  est_tokens?: number | null;
+  precision?: "estimated" | "authoritative" | null;
+  source?:
+    | "claude_input_json_delta"
+    | "zcode_telemetry"
+    | "codex_token_usage"
+    | null;
+  // 注：parent_tool_use_id 复用信封既有归属字段（下文 2026-06-28 三字段组）——
+  // 心跳载荷键名与 backend 发布侧逐字对齐（D-backend-039），不重复声明。
   /**
    * task-05 / 2026-08-24-platform-session-feedback-fix：plan 模式进入事件携带的
    * 计划摘要与请求时间。
@@ -351,6 +370,15 @@ export interface SessionStreamHandlers {
    * 事件已在 stream 层白名单拦截丢弃（不会到达本回调）。
    */
   onTurnPhase?(event: SessionStreamEnvelope): void;
+  /**
+   * 2026-10-29-engine-live-perception（FR-03 / D-001@v1）：turn_heartbeat 事件
+   * ——轮内实时心跳（envelope.kind/est_chars/est_tokens/precision/source/
+   * parent_tool_use_id）。消费方 applyTurnHeartbeat 写轮状态（main 优先选主：
+   * parent_tool_use_id 非空的子代理心跳不入主轮状态，主会话跑马灯不被抖动）；
+   * 瞬态信号——前端 5s 无新心跳自清回落等待态，不进段树不刷 lastEventAt。
+   * 缺失 run_id 的事件已在 stream 层白名单拦截（不会到达本回调）。
+   */
+  onTurnHeartbeat?(event: SessionStreamEnvelope): void;
   /**
    * 2026-10-28-bg-task-status-report task-05（FR-03 / D-005@v1）：bg_task_final
    * 事件——daemon 扫描环检出的后台任务终态（task_id/tool_use_id/status/

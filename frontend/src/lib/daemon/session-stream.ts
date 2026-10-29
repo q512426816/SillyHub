@@ -296,7 +296,8 @@ export function streamSession(
         kind === "bash_status" ||
         kind === "bash_chunk" ||
         kind === "agent_task_status" ||
-        kind === "turn_phase") &&
+        kind === "turn_phase" ||
+        kind === "turn_heartbeat") &&
       !env.run_id
     ) {
       handlers.onError(new Error(`Missing run_id on ${kind} event`));
@@ -345,6 +346,12 @@ export function streamSession(
         // 在上方拦截缺失事件；phase/detail 原样透传（词表外值不丢弃——兜底展示
         // 由 TurnStatusBar PHASE_LABEL 缺省分支承接）。
         handlers.onTurnPhase?.(envelope);
+        break;
+      case "turn_heartbeat":
+        // 2026-10-29-engine-live-perception（FR-03 / D-001@v1）：轮内实时心跳
+        // ——run_id 白名单已拦截缺失；载荷原样透传（kind/est_* 守卫在消费方
+        // applyTurnHeartbeat，畸形载荷静默忽略不伪造）。
+        handlers.onTurnHeartbeat?.(envelope);
         break;
       case "queue_changed":
         // 2026-08-31-session-queue-ux FR-03：会话级队列变更事件——无 run_id，
