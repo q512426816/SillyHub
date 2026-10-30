@@ -1,0 +1,27 @@
+tier: thin
+legacy_fallback: false
+substeps: {}
+born_face: thin
+with_tasks: false
+review_force: null
+input: |-
+  会话页对话tab底部跑马灯的「等待模型响应 · 秒数 · token」合成条目：现行为一次滚到末尾即停且常伴末尾后空白；用户要求改为慢速无缝循环滚动（用户能看清的速度）。
+
+  成功标准：
+  - marquee-awaiting 条目文本区为双份文本无缝循环滚动：恒速慢速（72px/s 量级）、滚满一份宽度即回卷、任意时刻窗口不出现空白区段
+  - 循环滚动尊重 prefers-reduced-motion（静态截断）
+  - 其他 running 条目（thinking 流式等）保持现有单份一次滚行为不变
+  - turn-live-marquee 现有测试不回归，新增用例覆盖循环模式渲染与回卷纯函数
+autopilot: false
+prestage_ack: false
+baseline_commit: 3584d570b17411a8488ac888d7723bd3106203c6
+updatedAt: '2026-10-30T01:00:30.597Z'
+cross_baselines:
+  sillyspec: 05901a963032f87e9c0c0f40b6d94810413730c1
+baseline_sha256: 65e71cfa38c18289c47d3cf0ca99961e1ad762904cdc07359d2233f98be20b13
+spec_approved: true
+spec_approved_at: '2026-10-30T01:00:30.596Z'
+spec_approved_by: anon@DESKTOP-HJ0AM09
+spec_approved_channel: user-confirmed
+spec_attested_by: anon@DESKTOP-HJ0AM09
+
