@@ -92,6 +92,12 @@ export interface LlmProviderRead {
   api_key_masked: string | null;
   created_at: string;
   updated_at: string;
+  /**
+   * 2026-10-30-provider-user-share：/usable 端点对共享行置 true + 属主显示名；
+   * own-only 端点恒缺省。共享行 is_default 恒 false（不得冒充接收方默认）。
+   */
+  is_shared?: boolean;
+  shared_by_name?: string | null;
 }
 
 /** POST body。 */
@@ -172,6 +178,62 @@ export interface LlmProviderFormValues {
 export async function listProviders(): Promise<LlmProviderRead[]> {
   const resp = await apiFetch<LlmProviderList>("/api/llm-providers");
   return resp.items;
+}
+
+// ── 2026-10-30-provider-user-share：可用列表 + 共享 CRUD ──────────────────
+
+/**
+ * 会话页可用供应商 = 自己的 + 共享给自己的（共享行 is_shared / shared_by_name，
+ * is_default 由后端强制 false）。设置页仍用 listProviders（own-only）。
+ */
+export async function listUsableProviders(): Promise<LlmProviderRead[]> {
+  const resp = await apiFetch<LlmProviderList>("/api/llm-providers/usable");
+  return resp.items;
+}
+
+/** 共享记录（grantee 只读展示用）。 */
+export interface LlmProviderShareRead {
+  user_id: string;
+  username: string | null;
+  display_name: string | null;
+  created_at: string;
+}
+
+export interface LlmProviderShareList {
+  items: LlmProviderShareRead[];
+  total: number;
+}
+
+/** 列某供应商的共享（仅属主；非属主 404/403）。 */
+export async function listProviderShares(
+  providerId: string,
+): Promise<LlmProviderShareRead[]> {
+  const resp = await apiFetch<LlmProviderShareList>(
+    `/api/llm-providers/${encodeURIComponent(providerId)}/shares`,
+  );
+  return resp.items;
+}
+
+/** 按 username / email 精确共享（幂等）。 */
+export async function shareProvider(
+  providerId: string,
+  identifier: string,
+): Promise<LlmProviderShareRead> {
+  return apiFetch<LlmProviderShareRead>(
+    `/api/llm-providers/${encodeURIComponent(providerId)}/shares`,
+    { method: "POST", json: { identifier } },
+  );
+}
+
+/** 撤销共享（幂等 204）。 */
+export async function unshareProvider(
+  providerId: string,
+  granteeUserId: string,
+): Promise<void> {
+  await apiFetch<void>(
+    `/api/llm-providers/${encodeURIComponent(providerId)}/shares/${encodeURIComponent(granteeUserId)}`,
+    { method: "DELETE" },
+  );
 }
 
 /** 新建供应商（api_key 加密入库）。 */

@@ -1,13 +1,14 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { Plus, RefreshCw, Sparkles } from "lucide-react";
+import { Plus, RefreshCw, Share2, Sparkles } from "lucide-react";
 
 import { SectionCard } from "@/components/layout";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { EmptyState } from "@/components/ui/empty-state";
 import { errMessage, useNotify } from "@/lib/errors";
+import { ShareProviderDialog } from "./share-provider-dialog";
 import {
   createProvider,
   deleteProvider,
@@ -74,6 +75,10 @@ export function LlmProviderSection() {
   const [formMode, setFormMode] = useState<FormMode>(null);
   const [submitting, setSubmitting] = useState(false);
   const [switchingId, setSwitchingId] = useState<string | null>(null);
+  // 2026-10-30-provider-user-share：属主侧共享弹窗（null=关闭）。
+  const [sharingProvider, setSharingProvider] = useState<LlmProviderRead | null>(
+    null,
+  );
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -309,6 +314,15 @@ export function LlmProviderSection() {
                     <Button
                       variant="outline"
                       size="sm"
+                      className="h-7 gap-1 text-[11px]"
+                      onClick={() => setSharingProvider(p)}
+                    >
+                      <Share2 className="h-3 w-3" />
+                      共享
+                    </Button>
+                    <Button
+                      variant="outline"
+                      size="sm"
                       className="h-7 text-[11px]"
                       onClick={() =>
                         setFormMode({ kind: "edit", provider: p })
@@ -364,6 +378,13 @@ export function LlmProviderSection() {
           })}
         </div>
       )}
+
+      <ShareProviderDialog
+        provider={sharingProvider}
+        onOpenChange={(open) => {
+          if (!open) setSharingProvider(null);
+        }}
+      />
     </SectionCard>
   );
 }

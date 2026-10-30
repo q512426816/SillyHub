@@ -39,7 +39,7 @@
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { useState } from "react";
-import { cleanup, render, screen, fireEvent, waitFor } from "@testing-library/react";
+import { cleanup, render, screen, fireEvent, waitFor, within } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 
 import {
@@ -90,6 +90,9 @@ vi.mock("@/lib/api/llm-providers", async (importOriginal) => {
   return {
     ...actual,
     listProviders: (...args: unknown[]) => mocks.listProviders(...args),
+    // 2026-10-30-provider-user-share：配置条改读可用列表（own + shared），
+    // 既有用例仍以同一 fixture 驱动。
+    listUsableProviders: (...args: unknown[]) => mocks.listProviders(...args),
   };
 });
 
@@ -443,6 +446,35 @@ describe("SessionConfigBar 切换供应商", () => {
     });
     // 选回当前值不是切换动作，不级联重置模型暂存
     expect(onStagedSwitch).toHaveBeenCalledTimes(1);
+  });
+
+  it("共享供应商出现在候选并带共享标识，选择后按该 id 切换（2026-10-30-provider-user-share）", async () => {
+    mocks.listProviders.mockResolvedValue([
+      {
+        id: "prov-shared",
+        name: "别人共享的 GLM",
+        models: [{ name: "glm-4.7", roles: ["sonnet"] }],
+        agent_kinds: ["claude"],
+        is_shared: true,
+        shared_by_name: "张三",
+        is_default: false,
+      },
+    ]);
+    renderBar();
+    openCtrl("配置-供应商");
+    const item = await screen.findByRole("button", {
+      name: "选择 别人共享的 GLM",
+    });
+    expect(within(item).getByText("共享")).toBeInTheDocument();
+    expect(within(item).getByTitle(/共享自 张三/)).toBeInTheDocument();
+
+    fireEvent.click(item);
+    await waitFor(() =>
+      expect(mocks.injectSession).toHaveBeenCalledWith("sess-1", "", {
+        llm_provider_id: "prov-shared",
+        model: "",
+      }),
+    );
   });
 
   // 兼容锚：未挂 onStagedSwitch（存量调用面）保持点选即切换旧行为。

@@ -65,7 +65,7 @@ import { Brain, ChevronDown, Cloud, GitBranch, Settings2, User } from "lucide-re
 import { ApiError } from "@/lib/api";
 import type { components } from "@/lib/api-types";
 import { useMineAgentProfiles } from "@/lib/agent-profiles";
-import { listProviders, noProviderLabel } from "@/lib/api/llm-providers";
+import { listUsableProviders, noProviderLabel } from "@/lib/api/llm-providers";
 import { useNotify } from "@/lib/errors";
 import {
   fetchSessionGitStatus,
@@ -491,11 +491,11 @@ export function SessionConfigBar({
   }, [profiles, sharedProfileIds, provisional, agentProfileId]);
   const notify = useNotify();
   const qc = useQueryClient();
-  // quick（ql-20260916-006）：裸 listProviders() 统一 basic 键（与 sessions-portal
-  // 共享缓存，见该处注释——原场景名分键致会话页进入各发一次）。
+  // 2026-10-30-provider-user-share：会话页候选 = 自己的 + 共享给自己的
+  // （独立键，避免与 sessions-portal / 悬浮宿主的 own-only "basic" 缓存混用）。
   const providersQ = useQuery({
-    queryKey: ["llmProviders", "basic"],
-    queryFn: listProviders,
+    queryKey: ["llmProviders", "usable"],
+    queryFn: listUsableProviders,
     staleTime: 30_000,
   });
   const providers = useMemo(() => providersQ.data ?? [], [providersQ.data]);
@@ -1077,6 +1077,16 @@ export function SessionConfigBar({
                   key={p.id}
                   icon={<Cloud aria-hidden className="h-3 w-3" />}
                   label={p.name}
+                  tag={
+                    p.is_shared ? (
+                      <span
+                        title={`共享自 ${p.shared_by_name ?? "其他用户"}（只读，不可编辑）`}
+                        className="rounded border border-border px-1 text-[10px] text-muted-foreground"
+                      >
+                        共享
+                      </span>
+                    ) : undefined
+                  }
                   sub={
                     p.models?.find((m) => m.roles?.includes("sonnet"))?.name ??
                     p.models?.[0]?.name ?? undefined
