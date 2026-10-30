@@ -9146,3 +9146,86 @@
 摘要：线上核验
 全文：.sillyspec/changes/archive/2026-10-30-business-member-change-read/requirements.md#FR-03
 最近确认：18b93f19fdb14a2d921faa22ca33d0730de8975f
+
+## FR-daemon-343 后端收口时若上报 success 且最后一条 [ASSISTANT] 输出命中模型错误文本（API Error / Request rejected 等）且同时含 429 与额度关键词，则将该 run 落为 failed、error_code=interactive_failed、error_detail.type=quota_exceeded（保留 code/raw/reset_at）。
+变更：2026-10-30-quota-error-visible
+状态：active
+摘要：共享守护进程额度耗尽（生产实证 b696aa0c）
+全文：.sillyspec/changes/archive/2026-10-30-quota-error-visible/requirements.md#FR-01
+最近确认：fe96adb720f84d5d4273565f87343d8cdec5bb7b
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-30-quota-error-visible:flow:测试绑定FR-01
+  tests: backend/app/modules/daemon/tests/test_close_interactive_run_quota_log_fallback.py「test_success_result_with_quota_error_log_closed_as_failed」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-30-quota-error-visible
+  status: active
+
+## FR-daemon-344 错误行之后仍有正常 [ASSISTANT] 文本（CLI 自动重试成功）或最后一条是 [MODEL_RETRY] 协议行时不得误判，run 保持 completed 且 error_detail 为空。
+变更：2026-10-30-quota-error-visible
+状态：active
+摘要：CLI 自动重试后成功；重试协议行是最后一条
+全文：.sillyspec/changes/archive/2026-10-30-quota-error-visible/requirements.md#FR-02
+最近确认：fe96adb720f84d5d4273565f87343d8cdec5bb7b
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-30-quota-error-visible:flow:测试绑定FR-02
+  tests: backend/app/modules/daemon/tests/test_close_interactive_run_quota_log_fallback.py「test_model_retry_line_as_last_assistant_keeps_completed」 | backend/app/modules/daemon/tests/test_close_interactive_run_quota_log_fallback.py「test_quota_error_followed_by_normal_assistant_text_keeps_completed」 | backend/app/modules/daemon/tests/test_close_interactive_run_quota_log_fallback.py「test_same_timestamp_normal_answer_keeps_completed」 | frontend/src/components/daemon/__tests__/runtime-session-helpers.test.tsx「logsToTurns 同刻正常答复与额度错误并存 → 保守 completed（同刻组判定）」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-30-quota-error-visible
+  status: active
+
+## FR-daemon-345 前端会话页（历史回看与刷新恢复路径）对这类轮次渲染「额度耗尽」RunErrorItem 错误卡，含原始错误摘要与重发/切换供应商入口，不再整轮空白。
+变更：2026-10-30-quota-error-visible
+状态：active
+摘要：刷新后历史轮显示额度卡
+全文：.sillyspec/changes/archive/2026-10-30-quota-error-visible/requirements.md#FR-03
+最近确认：fe96adb720f84d5d4273565f87343d8cdec5bb7b
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-30-quota-error-visible:flow:测试绑定FR-03
+  tests: frontend/src/components/daemon/__tests__/runtime-session-helpers.test.tsx「logsToTurns 末条 [ASSISTANT] 额度错误文本回填 quota_exceeded 与 failed」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-30-quota-error-visible
+  status: active
+
+## FR-daemon-346 daemon 已回传 is_error=true 的既有失败轮错误卡行为零变化；成功且无错误文本的轮次零变化。
+变更：2026-10-30-quota-error-visible
+状态：active
+摘要：daemon 回传额度错误不被覆盖；普通成功轮零变化
+全文：.sillyspec/changes/archive/2026-10-30-quota-error-visible/requirements.md#FR-04
+最近确认：fe96adb720f84d5d4273565f87343d8cdec5bb7b
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-30-quota-error-visible:flow:测试绑定FR-04
+  tests: backend/app/modules/daemon/tests/test_close_interactive_run_quota_log_fallback.py「test_daemon_error_takes_precedence_over_log_inference」 | frontend/src/components/daemon/__tests__/page-helpers-error-visibility.test.ts「run 快照 error_detail 优先于 turn 日志兜底（2026-10-30 评审 P1）」 | frontend/src/components/daemon/__tests__/page-helpers-error-visibility.test.ts「run 快照无 error_detail 时保留 turn 日志兜底（额度卡）」 | frontend/src/components/daemon/__tests__/runtime-session-helpers.test.tsx「logsToTurns 正常成功轮不产生 errorDetail」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-30-quota-error-visible
+  status: active
+
+## FR-daemon-347 新增 backend 收口兜底用例与 frontend logsToTurns 兜底用例，相关测试全绿。
+变更：2026-10-30-quota-error-visible
+状态：active
+摘要：回归门
+全文：.sillyspec/changes/archive/2026-10-30-quota-error-visible/requirements.md#FR-05
+最近确认：fe96adb720f84d5d4273565f87343d8cdec5bb7b

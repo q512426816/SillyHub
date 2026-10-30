@@ -1,0 +1,72 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-30-quota-error-visible",
+  "rows": [
+    {
+      "anchor": "FR-01",
+      "row_id": "2026-10-30-quota-error-visible:flow:测试绑定FR-01",
+      "tests": [
+        "backend/app/modules/daemon/tests/test_close_interactive_run_quota_log_fallback.py「test_success_result_with_quota_error_log_closed_as_failed」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-30-quota-error-visible"
+    },
+    {
+      "anchor": "FR-02",
+      "row_id": "2026-10-30-quota-error-visible:flow:测试绑定FR-02",
+      "tests": [
+        "backend/app/modules/daemon/tests/test_close_interactive_run_quota_log_fallback.py「test_model_retry_line_as_last_assistant_keeps_completed」",
+        "backend/app/modules/daemon/tests/test_close_interactive_run_quota_log_fallback.py「test_quota_error_followed_by_normal_assistant_text_keeps_completed」",
+        "backend/app/modules/daemon/tests/test_close_interactive_run_quota_log_fallback.py「test_same_timestamp_normal_answer_keeps_completed」",
+        "frontend/src/components/daemon/__tests__/runtime-session-helpers.test.tsx「logsToTurns 同刻正常答复与额度错误并存 → 保守 completed（同刻组判定）」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-30-quota-error-visible"
+    },
+    {
+      "anchor": "FR-03",
+      "row_id": "2026-10-30-quota-error-visible:flow:测试绑定FR-03",
+      "tests": [
+        "frontend/src/components/daemon/__tests__/runtime-session-helpers.test.tsx「logsToTurns 末条 [ASSISTANT] 额度错误文本回填 quota_exceeded 与 failed」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-30-quota-error-visible"
+    },
+    {
+      "anchor": "FR-04",
+      "row_id": "2026-10-30-quota-error-visible:flow:测试绑定FR-04",
+      "tests": [
+        "backend/app/modules/daemon/tests/test_close_interactive_run_quota_log_fallback.py「test_daemon_error_takes_precedence_over_log_inference」",
+        "frontend/src/components/daemon/__tests__/page-helpers-error-visibility.test.ts「run 快照 error_detail 优先于 turn 日志兜底（2026-10-30 评审 P1）」",
+        "frontend/src/components/daemon/__tests__/page-helpers-error-visibility.test.ts「run 快照无 error_detail 时保留 turn 日志兜底（额度卡）」",
+        "frontend/src/components/daemon/__tests__/runtime-session-helpers.test.tsx「logsToTurns 正常成功轮不产生 errorDetail」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-30-quota-error-visible"
+    }
+  ]
+}

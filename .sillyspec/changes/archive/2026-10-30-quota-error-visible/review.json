@@ -1,0 +1,58 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-30-quota-error-visible",
+  "reviewer": "subagent",
+  "verdict": "PASS",
+  "reviewedAgainst": "fe96adb720f84d5d4273565f87343d8cdec5bb7b",
+  "findings": [
+    {
+      "severity": "P1",
+      "status": "resolved",
+      "title": "前端历史日志兜底覆盖 daemon 回传的 error_detail（FR-04 违反）",
+      "evidence": "logsToTurns 对所有 run 无条件回填日志推断的 quota errorDetail；enrichDisplayTurns 以 t.errorDetail ?? buildErrorLogItem(meta.error_detail) 合并，日志兜底因此压过 run 快照。",
+      "location": "frontend/src/components/daemon/session-panel/page-helpers.tsx:240"
+    },
+    {
+      "severity": "P2",
+      "status": "resolved",
+      "title": "同 timestamp 的末条判定依赖 uuid4 id，无法保证 FR-02 的先后语义",
+      "evidence": "后端按 timestamp.desc(), id.desc() 取末条，但 AgentRunLog.id 默认是 uuid4 随机值，不能代表插入/事件先后；同刻错误行与重试成功答复可能误判 failed。",
+      "location": "backend/app/modules/daemon/run_sync/service/close_run_steps.py:217"
+    },
+    {
+      "severity": "P3",
+      "status": "accepted",
+      "title": "边界裁决（可接受）：日志晚于 close 落库时退化为 completed",
+      "evidence": "daemon 正常先 flush 再 close，晚到批次属于既有竞态；最坏保持现状、不新增错误。",
+      "location": "design.md:28"
+    },
+    {
+      "severity": "P3",
+      "status": "accepted",
+      "title": "边界裁决（可接受）：仅推断额度类错误，其他模型错误维持既有路径",
+      "evidence": "FR-01/FR-03 只承诺 429+额度关键词形态；收窄推断面避免扩大误判。",
+      "location": "design.md:13"
+    },
+    {
+      "severity": "P3",
+      "status": "accepted",
+      "title": "边界裁决（可接受）：仅以末条 [ASSISTANT] 判定终态",
+      "evidence": "FR-02 明确规定只有末条具备终态语义；错误行后出现正常答复或 MODEL_RETRY 时保持 completed 是该边界的直接结果。",
+      "location": "design.md:28"
+    },
+    {
+      "severity": "P3",
+      "status": "accepted",
+      "title": "边界裁决（可接受）：同刻组内任一非错误文本即判成功（宁可漏报）",
+      "evidence": "同刻多行无法用随机 uuid4 表达先后；保守判成功避免误杀重试成功轮，代价是极窄窗口漏报额度错误，符合 FR-02 的禁止误判优先级。",
+      "location": "design.md:29"
+    }
+  ],
+  "dimensionNotes": {
+    "乱序": "ok",
+    "并发": "ok",
+    "切换": "ok",
+    "作用域": "ok"
+  },
+  "reviewedAt": "2026-10-30T08:29:43Z"
+}

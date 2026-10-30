@@ -1,0 +1,410 @@
+diff --git a/backend/app/modules/daemon/run_sync/service/close_run_steps.py b/backend/app/modules/daemon/run_sync/service/close_run_steps.py
+index 25904a073..020069f9f 100644
+--- a/backend/app/modules/daemon/run_sync/service/close_run_steps.py
++++ b/backend/app/modules/daemon/run_sync/service/close_run_steps.py
+@@ -93,6 +93,13 @@ _QUOTA_BRACKET_CODE_RE = re.compile(r"\[(\d+)\]")
+ _QUOTA_RESET_AT_RE = re.compile(
+     r"将[在于]\s*(\d{4})-(\d{2})-(\d{2})[ T](\d{2}):(\d{2}):(\d{2})\s*重置"
+ )
++# 2026-10-30-quota-error-visible：CLI 合成的模型错误行特征词（与前端
++# normalize.isAssistantApiErrorText / daemon classifier 同口径）。收口只认
++# 行首锚定——正文中段提到 API Error 的成功答复不得误判。
++_ASSISTANT_API_ERROR_PREFIX_RE = re.compile(
++    r"^(API\s*Error|Request\s+rejected|Not\s+logged\s+in|Please\s+run\s+/login)",
++    re.IGNORECASE,
++)
+ 
+ 
+ def _infer_quota_error(blob: str) -> ModelErrorDTO | None:
+@@ -180,6 +187,63 @@ async def _infer_quota_model_error_from_logs(
+     return inferred
+ 
+ 
++async def _infer_quota_error_from_last_assistant_output(
++    svc,
++    agent_run: AgentRun,
++) -> ModelErrorDTO | None:
++    """2026-10-30-quota-error-visible：success 轮的末条助手输出兜底。
++
++    畸形组合：CLI 把额度耗尽写成一条 synthetic assistant 消息（
++    `API Error: Request rejected (429) · [1308]...使用上限...`），却以
++    result.subtype=success / is_error=false 结束 turn（生产实证会话 b696aa0c，
++    2026-10-30）。旧收口只在 is_error=true 时做日志兜底，于是 run 落 completed、
++    error_detail=NULL；前端装配器又把该错误文本行丢弃（假定失败卡由
++    error_detail 承载）→ 会话页整轮空白。
++
++    只在**最后一条** `[ASSISTANT]` 日志上判定：CLI 自动重试成功的情形末条是正常
++    答复（或 [MODEL_RETRY] 协议行，不匹配错误特征词），必须保持 completed。
++    best-effort：异常仅 warn，不阻塞收口主链路。
++    """
++    try:
++        row = (
++            (
++                await svc._session.execute(
++                    select(AgentRunLog.content_redacted)
++                    .where(
++                        AgentRunLog.run_id == agent_run.id,
++                        AgentRunLog.channel == "stdout",
++                        AgentRunLog.content_redacted.like("[ASSISTANT]%"),
++                    )
++                    .order_by(AgentRunLog.timestamp.desc(), AgentRunLog.id.desc())
++                    .limit(1)
++                )
++            )
++            .scalars()
++            .first()
++        )
++    except Exception as exc:
++        _rsvc.log.warning(
++            "success_quota_log_fallback_query_failed",
++            run_id=str(agent_run.id),
++            error=str(exc),
++        )
++        return None
++    if not row:
++        return None
++    body = row[len("[ASSISTANT]") :].lstrip()
++    if not _ASSISTANT_API_ERROR_PREFIX_RE.match(body):
++        return None
++    inferred = _infer_quota_error(body)
++    if inferred is not None:
++        _rsvc.log.info(
++            "success_quota_log_fallback_inferred",
++            run_id=str(agent_run.id),
++            code=inferred.code,
++            reset_at=inferred.reset_at,
++        )
++    return inferred
++
++
+ async def close_interactive_run(
+     svc,
+     *,
+@@ -287,6 +351,13 @@ async def close_interactive_run(
+     # error 时绝不覆盖（FR-02：daemon 分类更全、raw 更准，后端兜底仅是降级面）。
+     if is_error and error is None:
+         error = await _infer_quota_model_error_from_logs(svc, agent_run, result_summary)
++    elif status == "success" and not is_error and error is None:
++        # 2026-10-30-quota-error-visible：success + 末条助手输出为额度错误（CLI
++        # synthetic API Error 却报 success）→ 按失败收口，避免页面整轮空白。
++        inferred = await _infer_quota_error_from_last_assistant_output(svc, agent_run)
++        if inferred is not None:
++            is_error = True
++            error = inferred
+     await _close_apply_terminal(
+         svc,
+         agent_run,
+diff --git a/backend/app/modules/daemon/tests/test_close_interactive_run_quota_log_fallback.py b/backend/app/modules/daemon/tests/test_close_interactive_run_quota_log_fallback.py
+index dbfe10ff2..d3158d08d 100644
+--- a/backend/app/modules/daemon/tests/test_close_interactive_run_quota_log_fallback.py
++++ b/backend/app/modules/daemon/tests/test_close_interactive_run_quota_log_fallback.py
+@@ -135,12 +135,17 @@ async def _seed_log_line(
+     db_session: AsyncSession,
+     run_id: uuid.UUID,
+     content: str,
++    *,
++    timestamp: datetime | None = None,
+ ) -> None:
+-    """种一条 stdout 日志行（对齐 daemon 落库形态：channel='stdout'）。"""
++    """种一条 stdout 日志行（对齐 daemon 落库形态：channel='stdout'）。
++
++    timestamp 可选：多条日志的末条判定用例用显式时序，防同毫秒排序抖动。
++    """
+     db_session.add(
+         AgentRunLog(
+             run_id=run_id,
+-            timestamp=datetime.now(UTC),
++            timestamp=timestamp or datetime.now(UTC),
+             channel="stdout",
+             content_redacted=content,
+         )
+@@ -290,3 +295,101 @@ async def test_no_api_error_log_keeps_legacy_behavior(
+     assert run.error_code == "interactive_failed"
+     assert run.error_detail is None
+     assert run.output_redacted == "本轮执行失败（执行端未回传详细原因）"
++
++
++# ── 2026-10-30-quota-error-visible：success 收口兜底 ──────────────────────────
++# 生产实证 b696aa0c（2026-10-30 15:24/15:28）：daemon 上报 status=success /
++# is_error=false，唯一助手输出是 429 额度错误文本；旧收口只对 is_error=true 做
++# 日志兜底，于是 run 落 completed + error_detail=NULL，前端又丢弃 API Error 文本
++# → 会话页整轮空白。以下用例锁定「末条 [ASSISTANT] 决定本轮终态」语义。
++
++
++SUCCESS_QUOTA_LOG_LINE = (
++    "[ASSISTANT] API Error: Request rejected (429) · [1308][已达到 5 小时的使用上限。"
++    "您的限额将在 2026-10-30 17:13:29 重置。][20261030152446a5c9169226a54dc6]"
++)
++
++
++@pytest.mark.asyncio
++async def test_success_result_with_quota_error_log_closed_as_failed(
++    db_session: AsyncSession, mocked_redis
++) -> None:
++    """FR-01：success + 末条 [ASSISTANT] 额度错误 → 收口为 failed + quota_exceeded。"""
++    lease_id, run_id, token, _ = await _seed_session_and_run(db_session)
++    await _seed_log_line(db_session, run_id, SUCCESS_QUOTA_LOG_LINE)
++    svc = DaemonService(db_session)
++    run = await svc.close_interactive_run(
++        lease_id,
++        run_id,
++        token,
++        status="success",
++        is_error=False,
++        error=None,
++        result_summary=None,
++    )
++    assert run.status == "failed"
++    assert run.exit_code == 1
++    assert run.error_code == "interactive_failed"
++    assert run.error_detail is not None
++    assert run.error_detail["type"] == "quota_exceeded"
++    assert run.error_detail["code"] == "1308"
++    assert run.error_detail["reset_at"] == "2026-10-30T17:13:29+08:00"
++    assert "使用上限" in run.error_detail["raw"]
++
++
++@pytest.mark.asyncio
++async def test_quota_error_followed_by_normal_assistant_text_keeps_completed(
++    db_session: AsyncSession, mocked_redis
++) -> None:
++    """FR-02：额度错误行之后还有正常 [ASSISTANT] 答复（CLI 重试成功）→ completed。"""
++    lease_id, run_id, token, _ = await _seed_session_and_run(db_session)
++    base = datetime(2026, 10, 30, 7, 24, 47, tzinfo=UTC)
++    await _seed_log_line(db_session, run_id, SUCCESS_QUOTA_LOG_LINE, timestamp=base)
++    await _seed_log_line(
++        db_session,
++        run_id,
++        "[ASSISTANT] 重试后正常答复：这个原型一共五个页面。",
++        timestamp=base.replace(second=48),
++    )
++    svc = DaemonService(db_session)
++    run = await svc.close_interactive_run(
++        lease_id,
++        run_id,
++        token,
++        status="success",
++        is_error=False,
++        error=None,
++        result_summary=None,
++    )
++    assert run.status == "completed"
++    assert run.exit_code == 0
++    assert run.error_detail is None
++
++
++@pytest.mark.asyncio
++async def test_model_retry_line_as_last_assistant_keeps_completed(
++    db_session: AsyncSession, mocked_redis
++) -> None:
++    """FR-02：末条是 [ASSISTANT] [MODEL_RETRY] 协议行（载荷含 429）→ 不误判。"""
++    lease_id, run_id, token, _ = await _seed_session_and_run(db_session)
++    base = datetime(2026, 10, 30, 7, 24, 47, tzinfo=UTC)
++    await _seed_log_line(db_session, run_id, SUCCESS_QUOTA_LOG_LINE, timestamp=base)
++    await _seed_log_line(
++        db_session,
++        run_id,
++        '[ASSISTANT] [MODEL_RETRY] {"attempt":2,"max_retries":5,"error_status":429}',
++        timestamp=base.replace(second=48),
++    )
++    svc = DaemonService(db_session)
++    run = await svc.close_interactive_run(
++        lease_id,
++        run_id,
++        token,
++        status="success",
++        is_error=False,
++        error=None,
++        result_summary=None,
++    )
++    assert run.status == "completed"
++    assert run.exit_code == 0
++    assert run.error_detail is None
+diff --git a/frontend/src/components/daemon/__tests__/runtime-session-helpers.test.tsx b/frontend/src/components/daemon/__tests__/runtime-session-helpers.test.tsx
+index caeabbd9e..be38b2cf4 100644
+--- a/frontend/src/components/daemon/__tests__/runtime-session-helpers.test.tsx
++++ b/frontend/src/components/daemon/__tests__/runtime-session-helpers.test.tsx
+@@ -931,3 +931,85 @@ describe("logsToTurns 轮触发溯源段（2026-10-22-turn-trigger-generalize）
+     expect((first as { trigger?: string }).trigger).toBe("task_wakeup");
+   });
+ });
++
++/**
++ * 2026-10-30-quota-error-visible：历史/刷新路径的额度耗尽兜底。
++ *
++ * 生产实证会话 b696aa0c：daemon 以 success 收口且唯一助手输出是 429 额度错误文本；
++ * 装配器按既有约定丢弃该文本（假定失败卡由 errorDetail 承载），而 run 无
++ * error_detail → 会话页整轮空白。logsToTurns 需按「末条 [ASSISTANT]」判定并回填
++ * quota_exceeded 失败卡；错误后仍有正常答复（CLI 重试成功）时不得误判。
++ */
++describe("logsToTurns 额度耗尽终态兜底（2026-10-30-quota-error-visible）", () => {
++  const TS = (sec: number) =>
++    new Date(Date.UTC(2026, 9, 30, 7, 24, sec)).toISOString();
++  const QUOTA_LINE =
++    "[ASSISTANT] API Error: Request rejected (429) · [1308][已达到 5 小时的使用上限。" +
++    "您的限额将在 2026-10-30 17:13:29 重置。][20261030152446a5c9169226a54dc6]";
++
++  it("logsToTurns 末条 [ASSISTANT] 额度错误文本回填 quota_exceeded 与 failed", () => {
++    const turns = logsToTurns([
++      makeLog("u1", "run-q", "user_input", "继续", { timestamp: TS(0) }),
++      makeLog("e1", "run-q", "stdout", QUOTA_LINE, { timestamp: TS(47) }),
++      // override 行与错误行同刻落库——必须被排除在「末条 [ASSISTANT]」之外。
++      makeLog("e2", "run-q", "stdout", "[ASSISTANT_OVERRIDE] main:abc:text", {
++        timestamp: TS(47),
++      }),
++    ]);
++
++    expect(turns).toHaveLength(1);
++    const turn = turns[0]!;
++    expect(turn.status).toBe("failed");
++    expect(turn.errorDetail).toMatchObject({
++      type: "quota_exceeded",
++      raw: expect.stringContaining("使用上限"),
++    });
++    // 文本仍不进正文（错误卡承担展示，避免「原文气泡 + 错误卡」双显）。
++    expect(turn.output).toBe("");
++  });
++
++  it("额度错误后仍有正常 [ASSISTANT] 答复 → completed 且无 errorDetail", () => {
++    const turns = logsToTurns([
++      makeLog("u1", "run-q", "user_input", "继续", { timestamp: TS(0) }),
++      makeLog("e1", "run-q", "stdout", QUOTA_LINE, { timestamp: TS(47) }),
++      makeLog("a1", "run-q", "stdout", "[ASSISTANT] 重试后正常答复", {
++        timestamp: TS(48),
++      }),
++    ]);
++
++    const turn = turns[0]!;
++    expect(turn.status).toBe("completed");
++    expect(turn.errorDetail).toBeUndefined();
++    expect(turn.output).toBe("重试后正常答复");
++  });
++
++  it("logsToTurns 末条为 [MODEL_RETRY] 协议行 → completed 且无 errorDetail", () => {
++    const turns = logsToTurns([
++      makeLog("u1", "run-q", "user_input", "继续", { timestamp: TS(0) }),
++      makeLog("e1", "run-q", "stdout", QUOTA_LINE, { timestamp: TS(47) }),
++      makeLog(
++        "r1",
++        "run-q",
++        "stdout",
++        '[ASSISTANT] [MODEL_RETRY] {"attempt":2,"max_retries":5,"error_status":429}',
++        { timestamp: TS(48) },
++      ),
++    ]);
++
++    const turn = turns[0]!;
++    expect(turn.status).toBe("completed");
++    expect(turn.errorDetail).toBeUndefined();
++  });
++
++  it("logsToTurns 正常成功轮不产生 errorDetail", () => {
++    const turns = logsToTurns([
++      makeLog("u1", "run-ok", "user_input", "问题", { timestamp: TS(0) }),
++      makeLog("a1", "run-ok", "stdout", "[ASSISTANT] 正常答复", {
++        timestamp: TS(30),
++      }),
++    ]);
++
++    expect(turns[0]!.status).toBe("completed");
++    expect(turns[0]!.errorDetail).toBeUndefined();
++  });
++});
+diff --git a/frontend/src/components/daemon/runtime-session-helpers.tsx b/frontend/src/components/daemon/runtime-session-helpers.tsx
+index 1f4a43522..7eaa6d244 100644
+--- a/frontend/src/components/daemon/runtime-session-helpers.tsx
++++ b/frontend/src/components/daemon/runtime-session-helpers.tsx
+@@ -26,6 +26,14 @@ import {
+   type UserMsgTurnSegment,
+ } from "@/components/daemon/session-log-assembler";
+ import { type AgentRunLogEntry } from "@/lib/agent";
++// 2026-10-30-quota-error-visible：历史轮末条模型错误兜底——复用 agent-log 既有
++// 识别/映射（isAssistantApiErrorText 行首锚定 + buildErrorLogItem 额度升级），
++// 保证与实时错误卡同一文案与类型口径。
++import {
++  buildErrorLogItem,
++  isAssistantApiErrorText,
++  type ErrorLogItem,
++} from "@/components/agent-log/normalize";
+ // 2026-10-22-session-composer-slim：标记行解析迁入纯函数库（展示层格式化共用同一实现），
+ // 本模块保持既有导出面，调用方零改动。
+ import {
+@@ -269,6 +277,45 @@ export function runTerminalTurnStatus(
+   return null;
+ }
+ 
++/**
++ * 2026-10-30-quota-error-visible：从该 run 的日志还原「末条助手输出」，
++ * 命中额度耗尽时产出结构化错误项（供 logsToTurns 回填失败卡）。
++ *
++ * 背景（生产实证会话 b696aa0c）：CLI 把额度耗尽写成 synthetic assistant 消息
++ * （`API Error: Request rejected (429) · [1308]...使用上限...`），却以
++ * result.subtype=success / is_error=false 结束 turn。后端新收口会兜底改判 failed；
++ * 本函数是旧数据与刷新/历史路径的前端兜底——装配器按既有约定丢弃该错误文本
++ * （避免与错误卡双显），若无本回填整轮就是空白。
++ *
++ * 判定只认**最后一条** `[ASSISTANT]` 行：CLI 自动重试成功时末条是正常答复，
++ * `[MODEL_RETRY]` 协议行（`[ASSISTANT] [MODEL_RETRY] {...}`）也不匹配错误特征词，
++ * 均保持成功语义。仅额度类错误回填（其余模型错误维持既有路径，避免扩大面）。
++ */
++export function terminalQuotaErrorFromEntries(
++  entries: AgentRunLogEntry[],
++): ErrorLogItem | null {
++  let lastBody: string | null = null;
++  let lastTs: number | null = null;
++  for (const entry of entries) {
++    if (entry.channel !== "stdout") continue;
++    const match = /^\[ASSISTANT\]\s*([\s\S]*)$/.exec(
++      (entry.content_redacted ?? "").trimStart(),
++    );
++    if (!match) continue;
++    const body = match[1] ?? "";
++    const parsed = entry.timestamp ? Date.parse(entry.timestamp) : Number.NaN;
++    const ts = Number.isFinite(parsed) ? parsed : null;
++    // 同一轮日志通常已按时间序；时间戳可解析时以时间为准，缺省保持数组序。
++    if (lastBody === null || ts === null || lastTs === null || ts >= lastTs) {
++      lastBody = body;
++      lastTs = ts;
++    }
++  }
++  if (lastBody === null || !isAssistantApiErrorText(lastBody)) return null;
++  const item = buildErrorLogItem({ type: "unknown", raw: lastBody });
++  return item && item.type === "quota_exceeded" ? item : null;
++}
++
+ /**
+  * task-11 logsToTurns：把历史日志按 run_id 分组，转成 attach 面板预填的 SessionTurnView。
+  *
+@@ -679,6 +726,9 @@ export function logsToTurns(logs: AgentRunLogEntry[]): SessionTurnView[] {
+     // 兼容投影（§9.4）：output / processItems 形状与改前手写路径等价（user_msg
+     // 段不进投影——正文气泡由渲染层 user_msg 分支承载）。
+     const legacy = segmentsToLegacy(segments);
++    // 2026-10-30-quota-error-visible：末条助手输出为额度错误时还原失败卡
++    // （装配器丢弃了该文本行；无此回填则整轮空白）。
++    const terminalQuotaError = terminalQuotaErrorFromEntries(entries);
+     turns.push({
+       runId: `__attach_history_${turnIndex}__`,
+       // ql-20260802-001：保留真实 run_id 供 AskUser 提问历史穿插到对应 turn（跟会话顺序）
+@@ -688,7 +738,8 @@ export function logsToTurns(logs: AgentRunLogEntry[]): SessionTurnView[] {
+       prompt: prompts[0] ?? "",
+       // ql-20260730-004：reply 流式 delta 直接 concat（投影按序拼接，语义同前）。
+       output: legacy.output,
+-      status: "completed",
++      status: terminalQuotaError ? "failed" : "completed",
++      errorDetail: terminalQuotaError ?? undefined,
+       seenLogIds: new Set(entries.map((e) => e.id)),
+       processItems: legacy.processItems,
+       segments: [
+diff --git a/frontend/src/components/daemon/turn-timeline.tsx b/frontend/src/components/daemon/turn-timeline.tsx
+index c151cca4e..c634a9e18 100644
+--- a/frontend/src/components/daemon/turn-timeline.tsx
++++ b/frontend/src/components/daemon/turn-timeline.tsx
+@@ -351,7 +351,8 @@ export interface SessionTurnView {
+    * 2026-07-29-model-error-visibility / FR-04：turn 终态=failed 时拉取的结构化错误
+    * 详情（GET /sessions/{id}/runs 的 error_detail 经 buildErrorLogItem 映射）。
+    * null/undefined（成功 turn / brownfield / attach 历史 turn）→ 不渲染 RunErrorItem。
+-   * 可选：外部 logsToTurns 构造的历史 turn 不带此字段（只读 import，不改其构造）。
++   * 2026-10-30-quota-error-visible：logsToTurns 对「末条 [ASSISTANT] 为额度错误」的
++   * 历史轮直接回填该字段（daemon 曾以 success 收口、run 侧无 error_detail）。
+    */
+   errorDetail?: ErrorLogItem | null;
