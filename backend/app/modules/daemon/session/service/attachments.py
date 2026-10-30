@@ -420,25 +420,34 @@ async def _finalize_inject_turn_writes(
             from app.modules.daemon.lease.context import (
                 resolve_session_provider_config,
             )
+            from app.modules.llm_provider.service import provider_usable_by
 
-            # 2026-10-30-provider-user-share：会话级 provider 走「会话属主 +
-            # 共享授权」解析（与 claim 下发同源），owner-only 的 bound 解析不再
-            # 适用于被共享供应商；None = 授权失效/契约破裂 → 显式报错不降级。
-            provider_config_payload = await resolve_session_provider_config(
-                svc._session,
-                {
-                    "session_llm_provider_id": str(effective_provider.id),
-                    "session_id": str(session.id),
-                },
-                session.provider,
-            )
-            if provider_config_payload is None:
-                # 上方已校验归属 + agent_kind，此处 None = 契约破裂（如
-                # 解析器口径漂移），显式报错不静默降级（铁律 1）。
-                raise DaemonSessionConfigInvalid(
-                    "Session provider config could not be resolved.",
-                    details={"llm_provider_id": str(effective_provider.id)},
+            # 2026-10-30-provider-user-share 评审 P2：若共享已被撤销/供应商已删除，
+            # 不能因为「存量会话还挂着该 provider」而把切档案/切模型硬拒——按 FR-05
+            # 回落默认链（不发 provider_config），daemon reload 后用本机默认。
+            if not await provider_usable_by(svc._session, effective_provider.id, session.user_id):
+                _svc.log.warning(
+                    "session_provider_unauthorized_fallback",
+                    session_id=str(session.id),
+                    llm_provider_id=str(effective_provider.id),
                 )
+                provider_config_payload = None
+            else:
+                # 会话级 provider 走「会话属主 + 共享授权」解析（与 claim 下发同源）；
+                # 授权通过但构造失败 = 契约破裂，显式报错不静默降级（铁律 1）。
+                provider_config_payload = await resolve_session_provider_config(
+                    svc._session,
+                    {
+                        "session_llm_provider_id": str(effective_provider.id),
+                        "session_id": str(session.id),
+                    },
+                    session.provider,
+                )
+                if provider_config_payload is None:
+                    raise DaemonSessionConfigInvalid(
+                        "Session provider config could not be resolved.",
+                        details={"llm_provider_id": str(effective_provider.id)},
+                    )
             # ── task-11 / R-07（design §4.2 兜底模型遮蔽规则）：会话级
             # 选模型时，快照同步 model 且 default_fallback_model=所选——
             # credential-injector 规则3 优先级 ``default_fallback_model ??

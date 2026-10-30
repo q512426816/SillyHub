@@ -8060,6 +8060,167 @@
         }
       }
     },
+    "/api/llm-providers/usable": {
+      "get": {
+        "tags": [
+          "llm_provider"
+        ],
+        "summary": "List Usable Providers",
+        "description": "2026-10-30-provider-user-share：会话页可用供应商（自己的 + 共享给自己的）。\n\n共享行 is_shared=true / shared_by_name=属主显示名 / is_default 强制 false；\napi_key 仍只回 masked（NFR-02）。设置页仍用 ``GET /llm-providers``（own-only），\n本端点不改变其语义。",
+        "operationId": "list_usable_providers_api_llm_providers_usable_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LlmProviderList"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/llm-providers/{provider_id}/shares": {
+      "get": {
+        "tags": [
+          "llm_provider"
+        ],
+        "summary": "List Provider Shares",
+        "description": "列共享（仅属主；非属主 404/403，不泄漏存在性）。",
+        "operationId": "list_provider_shares_api_llm_providers__provider_id__shares_get",
+        "parameters": [
+          {
+            "name": "provider_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Provider Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LlmProviderShareList"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "llm_provider"
+        ],
+        "summary": "Share Provider",
+        "description": "按 username/email 共享给指定用户（仅属主；幂等）。",
+        "operationId": "share_provider_api_llm_providers__provider_id__shares_post",
+        "parameters": [
+          {
+            "name": "provider_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Provider Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/LlmProviderShareCreate"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LlmProviderShareRead"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/llm-providers/{provider_id}/shares/{grantee_user_id}": {
+      "delete": {
+        "tags": [
+          "llm_provider"
+        ],
+        "summary": "Unshare Provider",
+        "description": "撤销共享（仅属主；记录不存在也返回 204 幂等）。",
+        "operationId": "unshare_provider_api_llm_providers__provider_id__shares__grantee_user_id__delete",
+        "parameters": [
+          {
+            "name": "provider_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Provider Id"
+            }
+          },
+          {
+            "name": "grantee_user_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Grantee User Id"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/llm-providers/fetch-models": {
       "post": {
         "tags": [
@@ -55173,6 +55334,22 @@
             "type": "string",
             "format": "date-time",
             "title": "Updated At"
+          },
+          "is_shared": {
+            "type": "boolean",
+            "title": "Is Shared",
+            "default": false
+          },
+          "shared_by_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Shared By Name"
           }
         },
         "type": "object",
@@ -55193,6 +55370,87 @@
           "updated_at"
         ],
         "title": "LlmProviderRead"
+      },
+      "LlmProviderShareCreate": {
+        "properties": {
+          "identifier": {
+            "type": "string",
+            "maxLength": 255,
+            "minLength": 1,
+            "title": "Identifier"
+          }
+        },
+        "type": "object",
+        "required": [
+          "identifier"
+        ],
+        "title": "LlmProviderShareCreate",
+        "description": "共享目标：username 或 email 精确匹配（不做模糊搜索/用户枚举）。"
+      },
+      "LlmProviderShareList": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/LlmProviderShareRead"
+            },
+            "type": "array",
+            "title": "Items"
+          },
+          "total": {
+            "type": "integer",
+            "title": "Total"
+          }
+        },
+        "type": "object",
+        "required": [
+          "items",
+          "total"
+        ],
+        "title": "LlmProviderShareList"
+      },
+      "LlmProviderShareRead": {
+        "properties": {
+          "user_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "User Id"
+          },
+          "username": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Username"
+          },
+          "display_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Display Name"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "user_id",
+          "username",
+          "display_name",
+          "created_at"
+        ],
+        "title": "LlmProviderShareRead"
       },
       "LlmProviderUpdate": {
         "properties": {

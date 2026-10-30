@@ -2991,6 +2991,74 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/llm-providers/usable": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Usable Providers
+         * @description 2026-10-30-provider-user-share：会话页可用供应商（自己的 + 共享给自己的）。
+         *
+         *     共享行 is_shared=true / shared_by_name=属主显示名 / is_default 强制 false；
+         *     api_key 仍只回 masked（NFR-02）。设置页仍用 ``GET /llm-providers``（own-only），
+         *     本端点不改变其语义。
+         */
+        get: operations["list_usable_providers_api_llm_providers_usable_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/llm-providers/{provider_id}/shares": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Provider Shares
+         * @description 列共享（仅属主；非属主 404/403，不泄漏存在性）。
+         */
+        get: operations["list_provider_shares_api_llm_providers__provider_id__shares_get"];
+        put?: never;
+        /**
+         * Share Provider
+         * @description 按 username/email 共享给指定用户（仅属主；幂等）。
+         */
+        post: operations["share_provider_api_llm_providers__provider_id__shares_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/llm-providers/{provider_id}/shares/{grantee_user_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * Unshare Provider
+         * @description 撤销共享（仅属主；记录不存在也返回 204 幂等）。
+         */
+        delete: operations["unshare_provider_api_llm_providers__provider_id__shares__grantee_user_id__delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/llm-providers/fetch-models": {
         parameters: {
             query?: never;
@@ -20512,6 +20580,45 @@ export interface components {
              * Format: date-time
              */
             updated_at: string;
+            /**
+             * Is Shared
+             * @default false
+             */
+            is_shared: boolean;
+            /** Shared By Name */
+            shared_by_name?: string | null;
+        };
+        /**
+         * LlmProviderShareCreate
+         * @description 共享目标：username 或 email 精确匹配（不做模糊搜索/用户枚举）。
+         */
+        LlmProviderShareCreate: {
+            /** Identifier */
+            identifier: string;
+        };
+        /** LlmProviderShareList */
+        LlmProviderShareList: {
+            /** Items */
+            items: components["schemas"]["LlmProviderShareRead"][];
+            /** Total */
+            total: number;
+        };
+        /** LlmProviderShareRead */
+        LlmProviderShareRead: {
+            /**
+             * User Id
+             * Format: uuid
+             */
+            user_id: string;
+            /** Username */
+            username: string | null;
+            /** Display Name */
+            display_name: string | null;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
         };
         /** LlmProviderUpdate */
         LlmProviderUpdate: {
@@ -36158,6 +36265,122 @@ export interface operations {
                 content: {
                     "application/json": components["schemas"]["LlmProviderRead"];
                 };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_usable_providers_api_llm_providers_usable_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LlmProviderList"];
+                };
+            };
+        };
+    };
+    list_provider_shares_api_llm_providers__provider_id__shares_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                provider_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LlmProviderShareList"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    share_provider_api_llm_providers__provider_id__shares_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                provider_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["LlmProviderShareCreate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LlmProviderShareRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    unshare_provider_api_llm_providers__provider_id__shares__grantee_user_id__delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                provider_id: string;
+                grantee_user_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
             /** @description Validation Error */
             422: {

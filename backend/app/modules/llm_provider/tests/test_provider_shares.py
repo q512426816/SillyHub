@@ -157,6 +157,10 @@ async def test_usable_list_marks_shared_and_clears_default(db_session: AsyncSess
     owner = await _create_user(db_session, label="owner-usable")
     grantee = await _create_user(db_session, label="grantee-usable")
     provider = await _create_provider(db_session, owner, name="owner-default", is_default=True)
+    # 属主自由配置里可能藏令牌（评审 P2）：共享 DTO 必须剔除。
+    provider.extra_env = {"CUSTOM_TOKEN": "secret-extra"}
+    provider.settings_config = {"env": {"SOME_TOKEN": "secret-settings"}}
+    await db_session.commit()
     svc = LlmProviderService(db_session)
     await svc.share(provider.id, owner, await _username(db_session, grantee))
 
@@ -168,7 +172,12 @@ async def test_usable_list_marks_shared_and_clears_default(db_session: AsyncSess
     assert read.shared_by_name == "Share owner-usable"
     assert read.is_default is False
     assert read.api_key_masked is not None
-    assert "sk-share-secret" not in str(read.model_dump())
+    assert read.extra_env is None
+    assert read.settings_config is None
+    dumped = str(read.model_dump())
+    assert "sk-share-secret" not in dumped
+    assert "secret-extra" not in dumped
+    assert "secret-settings" not in dumped
 
     own_only = await svc.list_(grantee)
     assert own_only == []
@@ -191,6 +200,8 @@ async def test_recipient_cannot_mutate_or_query_usage(db_session: AsyncSession) 
         await svc.delete(provider.id, grantee)
     with pytest.raises(PermissionDenied):
         await svc.set_default(provider.id, grantee)
+    with pytest.raises(PermissionDenied):
+        await svc.query_usage(provider.id, grantee)
     with pytest.raises(PermissionDenied):
         await svc.list_shares(provider.id, grantee)
     with pytest.raises(PermissionDenied):

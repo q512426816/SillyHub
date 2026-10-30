@@ -8,7 +8,7 @@ created_at: 2026-10-30T08:31:22.030Z
 
 本变更怎么解决问题？改哪里、为什么选这个方案（一两段）。
 
-新增 `llm_provider_shares`（provider_id + grantee_user_id 唯一）承载「按用户共享」；`LlmProviderService` 增加属主侧共享 CRUD、可用列表（own + shared）与模块级授权判定 `provider_usable_by(session, provider_id, user_id)`（属主或有效共享）。会话创建/切换的 provider 校验改调该判定；daemon claim 的会话级供应商解析新增 `resolve_session_provider_config`，以 **AgentSession.user_id（会话属主）** 为授权主体（共享守护进程下 runtime 属主可不同），通过后复用抽出的 `_provider_config_from_row` 构造配置。前端会话配置条改读 `/llm-providers/usable` 并给共享项打「共享」标识；设置页仍读 own-only 列表，供应商卡新增属主侧「共享」弹窗（按用户名/邮箱添加、列表、撤销），共享项在设置页完全不可见，从入口上保证只读。
+新增 `llm_provider_shares`（provider_id + grantee_user_id 唯一）承载「按用户共享」；`LlmProviderService` 增加属主侧共享 CRUD、可用列表（own + shared）与模块级授权判定 `provider_usable_by(session, provider_id, user_id)`（属主或有效共享）。会话创建/切换的 provider 校验改调该判定；daemon claim 的会话级供应商解析新增 `resolve_session_provider_config`，以 **AgentSession.user_id（会话属主）** 为授权主体（共享守护进程下 runtime 属主可不同），通过后复用抽出的 `_provider_config_from_row` 构造配置。前端会话配置条改读 `/llm-providers/usable` 并给共享项打「共享」标识；设置页仍读 own-only 列表，供应商卡新增属主侧「共享」弹窗（按用户名/邮箱添加、列表、撤销），共享项在设置页完全不可见，从入口上保证只读。评审 P2 修复：共享写入先取纯值再 commit/rollback（防 ORM expire 后 MissingGreenlet）；共享行 DTO 剔除 `settings_config`/`extra_env`（防自由配置里的手填令牌外泄）；存量会话在共享撤销后切档案/切模型时回落默认链而非硬拒。
 
 ## 接口契约
 
@@ -72,3 +72,6 @@ created_at: 2026-10-30T08:31:22.030Z
 | 新增 | frontend/src/components/llm-providers/__tests__/share-provider-dialog.test.tsx | 共享弹窗列表/添加/撤销用例 |
 | 修改 | frontend/src/components/llm-providers/llm-provider-list.tsx | 「共享」入口 |
 | 修改 | frontend/src/components/sessions/__tests__/session-config-bar.test.tsx | 共享候选展示用例 |
+| 修改 | backend/openapi.json | 重新生成：新增 usable/shares 端点与共享 DTO |
+| 修改 | frontend/src/lib/api-types.ts | 重新生成：与 openapi.json 同步 |
+| 修改 | sillyhub-daemon/src/api-types.ts | 重新生成：API 契约源配对生成物（共享断言面） |

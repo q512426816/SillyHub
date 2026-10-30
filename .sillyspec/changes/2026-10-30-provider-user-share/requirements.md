@@ -24,7 +24,7 @@ created_at: 2026-10-30T08:31:22.030Z
 
 ### FR-02: 被共享用户 GET 可用供应商列表（自己的 + 共享给自己的）可用于会话页；共享项带 shared_by 标识且只读；设置页仍只列自己的供应商，不提供编辑/共享入口。
 
-- **必须**新增可用列表端点返回「自己的 + 共享给自己的」供应商；共享项**必须**带 `is_shared=true` 与 `shared_by_name`，且**必须**将 `is_default` 置 false（不得让被共享方误以为共享供应商是自己的默认）；**禁止**返回明文 key（沿用 `api_key_masked`）。设置页**必须**继续只列自己的供应商（`GET /llm-providers` 行为不变），共享项不出现，因而无编辑/删除/设默认/共享入口。
+- **必须**新增可用列表端点返回「自己的 + 共享给自己的」供应商；共享项**必须**带 `is_shared=true` 与 `shared_by_name`，且**必须**将 `is_default` 置 false（不得让被共享方误以为共享供应商是自己的默认）；**禁止**返回明文 key（沿用 `api_key_masked`），共享行**禁止**回传属主的 `settings_config` / `extra_env`（自由配置可能含手填令牌）。设置页**必须**继续只列自己的供应商（`GET /llm-providers` 行为不变），共享项不出现，因而无编辑/删除/设默认/共享入口。
 
 #### 场景：共享项只读标识
 
@@ -54,7 +54,7 @@ created_at: 2026-10-30T08:31:22.030Z
 
 ### FR-05: 共享撤销后，新会话不再可见/不可选；已选会话下一轮回落默认链（不阻断），且不得泄漏已撤销供应商的 key。
 
-- 撤销共享后，被共享用户的 `GET /usable` **必须**立即不再返回该供应商，新会话选择该 id **必须**失败（404）；已选该供应商的存量会话在下一轮 claim 解析时**必须**因授权失败回落 bound/default 链（不阻断会话），且不得再把该供应商的 provider_config/api_key 下发。
+- 撤销共享后，被共享用户的 `GET /usable` **必须**立即不再返回该供应商，新会话选择该 id **必须**失败（404）；已选该供应商的存量会话在下一轮 claim 解析时**必须**因授权失败回落 bound/default 链（不阻断会话），且不得再把该供应商的 provider_config/api_key 下发；存量会话在撤销后执行**切档案/切模型**（provider 未变）时**禁止**硬拒——同样按默认链继续。
 
 #### 场景：撤销后的下一轮
 
@@ -78,5 +78,5 @@ FR-01: backend/app/modules/llm_provider/tests/test_provider_shares.py「test_sha
 FR-02: backend/app/modules/llm_provider/tests/test_provider_shares.py「test_usable_list_marks_shared_and_clears_default」；frontend/src/components/sessions/__tests__/session-config-bar.test.tsx「共享供应商出现在候选并带共享标识」
 FR-03: backend/app/modules/daemon/tests/test_lease_context_provider_share.py「test_session_provider_shared_with_session_owner_is_injected」；backend/app/modules/daemon/tests/test_session_switch_config.py「test_switch_to_shared_provider_allowed」
 FR-04: backend/app/modules/llm_provider/tests/test_provider_shares.py「test_recipient_cannot_mutate_or_query_usage」
-FR-05: backend/app/modules/daemon/tests/test_lease_context_provider_share.py「test_revoked_share_falls_back_to_default_chain」；backend/app/modules/llm_provider/tests/test_provider_shares.py「test_revoked_share_disappears_from_usable_list」
+FR-05: backend/app/modules/daemon/tests/test_lease_context_provider_share.py「test_revoked_share_falls_back_to_default_chain」；backend/app/modules/llm_provider/tests/test_provider_shares.py「test_revoked_share_disappears_from_usable_list」；backend/app/modules/daemon/tests/test_session_switch_config.py「test_revoked_share_profile_switch_falls_back」
 FR-06: 不适用：验收由 FR-01..FR-05 所列测试用例的执行结果承担（无独立可执行面）

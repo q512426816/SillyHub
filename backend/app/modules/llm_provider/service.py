@@ -590,12 +590,19 @@ class LlmProviderService:
         return items
 
     def to_usable_read(self, item: UsableProviderItem) -> LlmProviderRead:
-        """usable 列表 DTO：共享行强制 is_default=False（不得冒充接收方默认）。"""
+        """usable 列表 DTO：共享行强制 is_default=False（不得冒充接收方默认）。
+
+        2026-10-30 评审 P2：共享行**禁止**回传属主的 settings_config / extra_env
+        （两者是自由配置，用户可能在其中手填令牌）；接收方只需要 name/models/
+        agent_kinds/base_url 做选择与展示。
+        """
         read = self._to_read(item.provider)
         if item.shared_by_name is not None:
             read.is_shared = True
             read.shared_by_name = item.shared_by_name
             read.is_default = False
+            read.settings_config = None
+            read.extra_env = None
         return read
 
     async def list_shares(
@@ -645,12 +652,18 @@ class LlmProviderService:
             )
         if target.id == owner_id:
             raise LlmProviderShareSelfForbidden("不能共享给自己。")
+        # 2026-10-30 评审 P2：commit/rollback 会 expire ORM 实例，异步上下文里再访问
+        # provider.id / target.username 会触发同步懒加载（MissingGreenlet）。先取纯值。
+        provider_pk = provider.id
+        target_pk = target.id
+        target_username = target.username
+        target_display_name = target.display_name
         existing = (
             (
                 await self._session.execute(
                     select(LlmProviderShare).where(
-                        LlmProviderShare.provider_id == provider.id,
-                        LlmProviderShare.grantee_user_id == target.id,
+                        LlmProviderShare.provider_id == provider_pk,
+                        LlmProviderShare.grantee_user_id == target_pk,
                     )
                 )
             )
@@ -658,10 +671,10 @@ class LlmProviderService:
             .first()
         )
         if existing is not None:
-            return existing, target.username, target.display_name
+            return existing, target_username, target_display_name
         row = LlmProviderShare(
-            provider_id=provider.id,
-            grantee_user_id=target.id,
+            provider_id=provider_pk,
+            grantee_user_id=target_pk,
             shared_by_user_id=owner_id,
         )
         self._session.add(row)
@@ -673,8 +686,8 @@ class LlmProviderService:
                 (
                     await self._session.execute(
                         select(LlmProviderShare).where(
-                            LlmProviderShare.provider_id == provider.id,
-                            LlmProviderShare.grantee_user_id == target.id,
+                            LlmProviderShare.provider_id == provider_pk,
+                            LlmProviderShare.grantee_user_id == target_pk,
                         )
                     )
                 )
@@ -683,15 +696,15 @@ class LlmProviderService:
             )
             if row is None:
                 raise
-            return row, target.username, target.display_name
+            return row, target_username, target_display_name
         await self._session.refresh(row)
         log.info(
             "llm_provider.shared",
-            provider_id=str(provider.id),
-            grantee_user_id=str(target.id),
+            provider_id=str(provider_pk),
+            grantee_user_id=str(target_pk),
             shared_by=str(owner_id),
         )
-        return row, target.username, target.display_name
+        return row, target_username, target_display_name
 
     async def unshare(
         self,
