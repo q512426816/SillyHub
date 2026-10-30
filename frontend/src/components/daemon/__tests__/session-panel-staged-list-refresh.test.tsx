@@ -172,7 +172,10 @@ function makeDetail() {
   };
 }
 
-function setupPage(onSessionListRefresh: ReturnType<typeof vi.fn>) {
+function setupPage(
+  onSessionListRefresh: ReturnType<typeof vi.fn>,
+  sessionId = "sess-staged",
+) {
   const qc = new QueryClient({
     defaultOptions: { queries: { retry: false } },
   });
@@ -180,7 +183,7 @@ function setupPage(onSessionListRefresh: ReturnType<typeof vi.fn>) {
     <QueryClientProvider client={qc}>
       <SessionPanel
         mode="page"
-        sessionId="sess-staged"
+        sessionId={sessionId}
         machines={[]}
         llmProviders={[]}
         onSessionListRefresh={onSessionListRefresh}
@@ -191,6 +194,9 @@ function setupPage(onSessionListRefresh: ReturnType<typeof vi.fn>) {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  // 2026-10-30-askuser-config-pending：stagedConfig 持久化用例隔离（jsdom
+  // sessionStorage 跨用例存活，逐用例清空防串台）。
+  window.sessionStorage.clear();
   sessionApi.fetchSessionQueue.mockResolvedValue([]);
   sessionApi.deleteSessionQueueEntry.mockResolvedValue(undefined);
   sessionApi.retrySessionQueueEntry.mockResolvedValue({
@@ -262,5 +268,112 @@ describe("暂存切换随消息生效 → 左栏列表立即刷新（FR-01）", 
     await waitFor(() => expect(sessionApi.injectSession).toHaveBeenCalled());
     // 无暂存：settleStagedAfterSend 早退（stagedConfig 空），不刷列表。
     expect(onSessionListRefresh).not.toHaveBeenCalled();
+  });
+});
+
+// ── 2026-10-30-askuser-config-pending FR-02/FR-03：stagedConfig sessionStorage 持久化 ──
+// 写（实时，含 labels）/ 恢复（重挂载模拟刷新，按 sessionId 隔离）/ 清（发送成功
+// 收敛）/ 坏数据静默丢弃（D-005）。key 族 sh:config-staged:<sessionId>（D-004）。
+
+describe("stagedConfig sessionStorage 持久化（FR-02/FR-03）", () => {
+  const STAGED_KEY = "sh:config-staged:sess-staged";
+
+  /** 暂存供应商 GLM 的通用前置（providers 查询 + 点选）。 */
+  async function stageProvider() {
+    const providerBtn = await screen.findByRole("button", {
+      name: /^配置-供应商/,
+    });
+    fireEvent.click(providerBtn);
+    fireEvent.click(await screen.findByRole("button", { name: "选择 GLM 平台" }));
+  }
+
+  it("暂存变更实时写 sessionStorage（含供应商显示名 labels）", async () => {
+    const stream = makeStreamMock();
+    sessionApi.streamSession.mockImplementation(stream.factory);
+    setupPage(vi.fn());
+    await stageProvider();
+
+    await waitFor(() => {
+      const raw = window.sessionStorage.getItem(STAGED_KEY);
+      expect(raw).not.toBeNull();
+      expect(JSON.parse(raw as string)).toEqual({
+        config: expect.objectContaining({ llm_provider_id: "prov-glm" }),
+        labels: expect.objectContaining({ llm_provider_id: "GLM 平台" }),
+      });
+    });
+  });
+
+  it("刷新（重挂载）恢复暂存与高亮（供应商按钮显示暂存值+pending 态）", async () => {
+    const stream = makeStreamMock();
+    sessionApi.streamSession.mockImplementation(stream.factory);
+    const onSessionListRefresh = vi.fn();
+    const { unmount } = setupPage(onSessionListRefresh);
+    await stageProvider();
+    await waitFor(() =>
+      expect(window.sessionStorage.getItem(STAGED_KEY)).not.toBeNull(),
+    );
+
+    // 刷新 = 卸载重挂（同一 sessionStorage 副本）
+    unmount();
+    setupPage(onSessionListRefresh);
+    const providerBtn = await screen.findByRole("button", {
+      name: "配置-供应商 GLM 平台",
+    });
+    expect(providerBtn).toHaveAttribute("data-staged-pending", "true");
+  });
+
+  it("切换会话不串台：另一会话（sess-other）挂载不读本会话条目", async () => {
+    window.sessionStorage.setItem(
+      STAGED_KEY,
+      JSON.stringify({
+        config: { llm_provider_id: "prov-glm" },
+        labels: { llm_provider_id: "GLM 平台" },
+      }),
+    );
+    const stream = makeStreamMock();
+    sessionApi.streamSession.mockImplementation(stream.factory);
+    sessionApi.getAgentSession.mockImplementation(async (id: string) => ({
+      ...makeDetail(),
+      id,
+    }));
+    setupPage(vi.fn(), "sess-other");
+    // 恢复为空：供应商显示默认（未读 sess-staged 的暂存值）
+    const providerBtn = await screen.findByRole("button", {
+      name: /^配置-供应商/,
+    });
+    expect(providerBtn.textContent).not.toContain("GLM 平台");
+    expect(providerBtn).not.toHaveAttribute("data-staged-pending");
+    // 本会话 key 未被误写（sess-other 无暂存不建条目）
+    expect(window.sessionStorage.getItem("sh:config-staged:sess-other")).toBeNull();
+  });
+
+  it("坏 JSON 静默丢弃：条目清除、不抛错、按空暂存处理（D-005）", async () => {
+    window.sessionStorage.setItem(STAGED_KEY, "{not-json");
+    const stream = makeStreamMock();
+    sessionApi.streamSession.mockImplementation(stream.factory);
+    expect(() => setupPage(vi.fn())).not.toThrow();
+    await screen.findByRole("button", { name: /^配置-供应商/ });
+    // 坏条目已被清除
+    expect(window.sessionStorage.getItem(STAGED_KEY)).toBeNull();
+  });
+
+  it("发送成功后暂存清空 + sessionStorage 条目移除（FR-02）", async () => {
+    const stream = makeStreamMock();
+    sessionApi.streamSession.mockImplementation(stream.factory);
+    const onSessionListRefresh = vi.fn();
+    setupPage(onSessionListRefresh);
+    await stageProvider();
+    await waitFor(() =>
+      expect(window.sessionStorage.getItem(STAGED_KEY)).not.toBeNull(),
+    );
+
+    const input = await screen.findByRole("textbox");
+    fireEvent.change(input, { target: { value: "继续" } });
+    fireEvent.click(screen.getByTitle("发送"));
+    await waitFor(() => expect(sessionApi.injectSession).toHaveBeenCalled());
+    // 发送受理成功 → 暂存收敛 → 条目移除
+    await waitFor(() =>
+      expect(window.sessionStorage.getItem(STAGED_KEY)).toBeNull(),
+    );
   });
 });

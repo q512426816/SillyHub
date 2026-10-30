@@ -1,0 +1,86 @@
+{
+  "change": "2026-10-30-askuser-config-pending",
+  "baseline": "efaf4d9d5aff99a5818e7687b38cc086e4db7387",
+  "head": "efaf4d9d5aff99a5818e7687b38cc086e4db7387",
+  "files": [
+    "frontend/src/components/daemon/__tests__/session-panel-staged-list-refresh.test.tsx",
+    "frontend/src/components/daemon/session-panel/session-panel-page.tsx",
+    "frontend/src/components/sessions/__tests__/session-config-bar.test.tsx",
+    "frontend/src/components/sessions/session-config-bar.tsx"
+  ],
+  "totals": {
+    "files": 4,
+    "additions": 383,
+    "deletions": 17
+  },
+  "savedAt": "2026-10-30T04:22:17.993Z",
+  "note": "execute --done 时点冻结（沉淀资产面：主仓实改行投影——thin flow done 对等；治理工件目录与其后 verify/archive 演进不在内）",
+  "scopeAudit": {
+    "mode": "full-flow",
+    "ok": true,
+    "degradedReason": null,
+    "baseAnchor": "efaf4d9d5aff99a5818e7687b38cc086e4db7387",
+    "totals": {
+      "files": 6,
+      "additions": 383,
+      "deletions": 17
+    },
+    "rows": [
+      {
+        "path": "frontend/src/components/daemon/__tests__/session-panel-staged-list-refresh.test.tsx",
+        "additions": 115,
+        "deletions": 2,
+        "kind": "modified",
+        "planned": "修改",
+        "verdict": "planned"
+      },
+      {
+        "path": "frontend/src/components/daemon/session-panel/session-panel-page.tsx",
+        "additions": 94,
+        "deletions": 5,
+        "kind": "modified",
+        "planned": "修改",
+        "verdict": "planned"
+      },
+      {
+        "path": "frontend/src/components/sessions/__tests__/session-config-bar.test.tsx",
+        "additions": 117,
+        "deletions": 0,
+        "kind": "modified",
+        "planned": "修改",
+        "verdict": "planned"
+      },
+      {
+        "path": "frontend/src/components/sessions/session-config-bar.tsx",
+        "additions": 57,
+        "deletions": 10,
+        "kind": "modified",
+        "planned": "修改",
+        "verdict": "planned"
+      },
+      {
+        "path": "frontend/src/components/prototype/session-config-pending-view.tsx",
+        "planned": null,
+        "additions": 0,
+        "deletions": 0,
+        "kind": "modified",
+        "verdict": "untouched"
+      },
+      {
+        "path": "frontend/scripts/prototype-build.mjs",
+        "planned": null,
+        "additions": 0,
+        "deletions": 0,
+        "kind": "modified",
+        "verdict": "untouched"
+      }
+    ],
+    "excluded": {
+      "foreignDeclared": []
+    },
+    "note": "execute --done 时点冻结（本文件落盘时采集）",
+    "closedBy": "execute --done"
+  },
+  "patchSha256": "07b7f940b634841353fd8dbea20e07105345a1f1f2e63a97facd60926317b343",
+  "patchStatus": "ok"
+}

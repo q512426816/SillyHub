@@ -51,6 +51,11 @@
  * ql-20260922-001：思考档位控件 antd Dropdown 化——原生 select 换胶囊按钮触发
  * （类名同 ctrlButton，与供应商/档案按钮风格统一）+ antd 菜单上弹（theme-toggle
  * 先例 selectable 高亮当前档），行为契约（七档镜像/动态档/禁用态 title）不变。
+ * 2026-10-30-askuser-config-pending（FR-01 / D-001@v2，演进推翻 2026-10-25
+ * D-001@v1「暂存静默」）：四控件有暂存字段时亮**待生效高亮**——brand 描边+浅底
+ * （ring-1 ring-brand-400 + bg-brand-50，高亮本体即标记，无文字角标）+
+ * data-staged-pending 测试锚 + 悬停 title「已记住，将随下一条消息发送时生效」；
+ * 禁用态 title 优先（D-009）；正常会话与 askuser 待答场景统一。
  */
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
@@ -87,6 +92,13 @@ export const SWITCH_NO_PROVIDER_VALUE = "";
  * undefined=不切换）。
  */
 export const SWITCH_MODEL_DEFAULT_VALUE = "";
+
+/**
+ * 2026-10-30-askuser-config-pending（FR-01 / D-001@v2）：暂存待生效悬停文案——
+ * 生效语义载体（用户裁决「只逐控件标记」不加常驻汇总行，语义走悬停）。控件
+ * 有暂存且可点时替换默认 title；禁用态文案优先（D-009）。
+ */
+const STAGED_PENDING_TITLE = "已记住，将随下一条消息发送时生效";
 
 /* ────────── 2026-09-14-session-thinking-level task-06：思考档位（FR-06 / Grill P0-2 / P2-11）────────── */
 
@@ -968,18 +980,27 @@ export function SessionConfigBar({
   // ql-20260815-010：下拉浮层锚定各自控件——每个控件包一层 relative，
   // ConfigDropdown 的 absolute bottom-full left-0 相对控件（此前锚到整条
   // barRef 导致所有下拉都渲染在最左侧）。
+  // 2026-10-30-askuser-config-pending（FR-01 / D-001@v2）：pending 参数——该
+  // 控件存在暂存（staged 字段 !== undefined）时亮待生效态：brand 描边+浅底
+  // （高亮本体即标记，无文字角标）+ data-staged-pending 测试锚 + 悬停 title
+  // 切 pending 文案（禁用态文案优先，D-009）；下拉展开（openKind）与 pending
+  // 并存时 pending 底色优先（展开期间保持待生效视觉一致）。
   const ctrlButton = (
     kind: SessionConfigCtrlKind,
     icon: React.ReactNode,
     value: string,
     title: string,
     dropdown?: React.ReactNode,
+    pending = false,
   ) => (
     <span className="relative inline-flex">
       <button
         type="button"
         disabled={ctrlDisabled[kind]}
-        title={title}
+        title={
+          pending && !ctrlDisabled[kind] ? STAGED_PENDING_TITLE : title
+        }
+        data-staged-pending={pending ? "true" : undefined}
         aria-label={`配置-${labelOfCtrl(kind)} ${value}`}
         onClick={() => toggleCtrl(kind)}
         className={cn(
@@ -987,7 +1008,8 @@ export function SessionConfigBar({
           ctrlDisabled[kind]
             ? "cursor-not-allowed text-muted-foreground/60"
             : "cursor-pointer text-muted-foreground hover:bg-muted hover:text-foreground",
-          openKind === kind && "bg-muted text-primary",
+          pending && "bg-brand-50 text-foreground ring-1 ring-brand-400",
+          openKind === kind && !pending && "bg-muted text-primary",
         )}
       >
         <span aria-hidden className="shrink-0 text-brand-600">
@@ -1075,6 +1097,8 @@ export function SessionConfigBar({
                 </p>
               )}
             </ConfigDropdown>,
+              // 2026-10-30-askuser-config-pending FR-01：供应商有暂存 → 亮待生效态
+              staged?.llm_provider_id !== undefined,
           )}
           {selectedProvider && !providerLocked && (
             <select
@@ -1083,14 +1107,18 @@ export function SessionConfigBar({
               value={currentModel}
               disabled={!canSwitch}
               // ql-20260909-005：禁用态 title 说明原因（原恒默认说明，离线/结束
-              // 时点了没反应零解释）。
+              // 时点了没反应零解释）。2026-10-30-askuser-config-pending FR-01：
+              // 有模型暂存且可点 → title 切 pending 文案（禁用态优先，D-009）。
               title={
                 !canSwitch
                   ? "会话已结束或机器离线，不可切换模型"
-                  : running && !stagedMode
-                    ? "运行中可切换，将于本轮结束后生效"
-                    : "模型（默认=跟随供应商配置）"
+                  : staged?.model !== undefined
+                    ? STAGED_PENDING_TITLE
+                    : running && !stagedMode
+                      ? "运行中可切换，将于本轮结束后生效"
+                      : "模型（默认=跟随供应商配置）"
               }
+              data-staged-pending={staged?.model !== undefined ? "true" : undefined}
               onChange={(e) => {
                 const v = e.target.value;
                 executeSwitch({ field: "model", value: v, label: v || "默认" });
@@ -1102,6 +1130,10 @@ export function SessionConfigBar({
                 // 「glm-5.3-fla…」截断观感差；放不下时由外层 flex-wrap 自然折行，
                 // 信息完整优先于单行。
                 "max-w-[150px]",
+                // 2026-10-30-askuser-config-pending FR-01：模型暂存 → 亮待生效态
+                // （brand 描边+浅底，border-border 被覆盖为 brand 描边）。
+                staged?.model !== undefined &&
+                  "border-brand-400 bg-brand-50 ring-1 ring-brand-400",
                 !canSwitch &&
                   "cursor-not-allowed text-muted-foreground/60 hover:bg-card",
               )}
@@ -1151,21 +1183,34 @@ export function SessionConfigBar({
               disabled={thinkingCtrlDisabled}
               // ql-20260909-005 同款：禁用态 title 说明原因（ql-20260917-008：
               // 运行中不再禁用——仅 ended/providerLocked 禁）。
+              // 2026-10-30-askuser-config-pending FR-01：会话态有档位暂存且可点 →
+              // title 切 pending 文案（禁用态优先 D-009；provisional 无 staged）。
               title={
                 thinkingCtrlDisabled
                   ? ended
                     ? "会话已结束或机器离线，不可切换思考级别"
                     : "思考级别切换不可用"
-                  : running && !provisional && !stagedMode
-                    ? "运行中可切换，将于本轮结束后生效"
-                    : "思考级别（默认=引擎默认档位，语义随引擎不同见「默认」项说明）"
+                  : staged?.thinking_level !== undefined
+                    ? STAGED_PENDING_TITLE
+                    : running && !provisional && !stagedMode
+                      ? "运行中可切换，将于本轮结束后生效"
+                      : "思考级别（默认=引擎默认档位，语义随引擎不同见「默认」项说明）"
+              }
+              data-staged-pending={
+                staged?.thinking_level !== undefined ? "true" : undefined
               }
               className={cn(
                 "inline-flex items-center gap-1.5 rounded-md px-2 py-1 text-xs transition-colors",
                 thinkingCtrlDisabled
                   ? "cursor-not-allowed text-muted-foreground/60"
                   : "cursor-pointer text-muted-foreground hover:bg-muted hover:text-foreground",
-                thinkingOpen && "bg-muted text-primary",
+                // 2026-10-30-askuser-config-pending FR-01：档位暂存 → 亮待生效态；
+                // 菜单展开（thinkingOpen）与 pending 并存时 pending 底色优先。
+                staged?.thinking_level !== undefined &&
+                  "bg-brand-50 text-foreground ring-1 ring-brand-400",
+                thinkingOpen &&
+                  staged?.thinking_level === undefined &&
+                  "bg-muted text-primary",
               )}
             >
               <span aria-hidden className="shrink-0 text-brand-600">
@@ -1248,6 +1293,8 @@ export function SessionConfigBar({
               </p>
             )}
           </ConfigDropdown>,
+            // 2026-10-30-askuser-config-pending FR-01：档案有暂存 → 亮待生效态
+            staged?.agent_profile_id !== undefined,
         )}
         {/* 2026-10-21-session-git-branch / FR-01..03：会话当前 git 分支指示项
             （档案控件后）——组件内自取数（思考级别控件先例），mobile 与档案

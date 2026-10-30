@@ -613,6 +613,80 @@ export function claimPendingPlaceholderTurn(
   return turns;
 }
 
+/* ────────── 2026-10-30-askuser-config-pending FR-03：stagedConfig sessionStorage 持久化 ────────── */
+
+/** 持久化 key 前缀（族 sh:config-staged:<sessionId>，D-004 per-session 隔离）。 */
+const STAGED_CONFIG_STORAGE_PREFIX = "sh:config-staged:";
+
+/** 持久化载荷：config=暂存字段集，labels=暂存目标显示名（stagedLabelRef 快照）。 */
+interface StagedConfigStoragePayload {
+  config: SessionConfigStaged;
+  labels: Partial<Record<string, string>>;
+}
+
+/**
+ * 读回暂存持久化条目（D-005 坏数据静默丢弃）：JSON 非法 / 结构异常（config 非
+ * 对象）→ 清坏条目返回 null（不抛错不弹提示）；labels 非对象回退空。SSR 守卫：
+ * typeof window（Next 预渲染阶段零访问）。
+ */
+function readStagedConfigFromStorage(
+  sessionId: string,
+): StagedConfigStoragePayload | null {
+  if (typeof window === "undefined") return null;
+  const key = `${STAGED_CONFIG_STORAGE_PREFIX}${sessionId}`;
+  let raw: string | null = null;
+  try {
+    raw = window.sessionStorage.getItem(key);
+  } catch {
+    return null;
+  }
+  if (raw === null) return null;
+  try {
+    const parsed = JSON.parse(raw) as Partial<StagedConfigStoragePayload> | null;
+    if (
+      typeof parsed !== "object" ||
+      parsed === null ||
+      typeof parsed.config !== "object" ||
+      parsed.config === null
+    ) {
+      window.sessionStorage.removeItem(key);
+      return null;
+    }
+    return {
+      config: parsed.config,
+      labels:
+        typeof parsed.labels === "object" && parsed.labels !== null
+          ? parsed.labels
+          : {},
+    };
+  } catch {
+    window.sessionStorage.removeItem(key);
+    return null;
+  }
+}
+
+/**
+ * 写暂存持久化条目：暂存空 → 移除条目（发送成功收敛/全清后存储即净）；非空 →
+ * 写 {config, labels}。try-catch 静默（sessionStorage 满额/禁用不阻塞主流程）。
+ */
+function writeStagedConfigToStorage(
+  sessionId: string,
+  config: SessionConfigStaged,
+  labels: Partial<Record<string, string>>,
+): void {
+  if (typeof window === "undefined") return;
+  const key = `${STAGED_CONFIG_STORAGE_PREFIX}${sessionId}`;
+  try {
+    if (Object.keys(config).length === 0) {
+      window.sessionStorage.removeItem(key);
+      return;
+    }
+    window.sessionStorage.setItem(key, JSON.stringify({ config, labels }));
+  } catch {
+    // 静默：持久化是体验增强，失败不影响暂存主流程
+  }
+}
+
 
 /* ────────────────────── page 模式内部子组件（含 react-query，R4） ────────────────────── */
 
@@ -1100,17 +1174,32 @@ export function SessionPanelPage({
   // 空闲点选供应商/模型/档案/思考级别仅暂存于此（不发请求、不产生空切换轮），
   // 随下一条消息发送时一并生效（sendFromQueue / sendToServerQueue / handleResend
   // 三点位并入）。键存在 = 该字段有暂存（组件已按当前生效值判定 cancel/归一）。
-  // D-001：暂存静默（控件值变化即反馈）；发送成功后由时间线切换信息行呈现结果。
-  // 不落库：刷新页面即丢（暂存与发送通常秒级相邻，可接受）。
+  // D-001@v1 曾定暂存静默；2026-10-30-askuser-config-pending D-001@v2 演进：
+  // 组件层补逐控件待生效高亮（session-config-bar），生效语义走悬停。
   const [stagedConfig, setStagedConfig] = useState<SessionConfigStaged>({});
   // 暂存目标展示名（组件上抛 patch.label；实时切换说明行的「新值」名——面板无
   // 档案列表查询，档案名只能由组件侧解析上抛）。ref 不参与渲染，发送时读。
   const stagedLabelRef = useRef<Partial<Record<string, string>>>({});
-  // 会话切换（换会话/关面板）即清空，防跨会话串台。
+  // ── 2026-10-30-askuser-config-pending FR-03：stagedConfig sessionStorage 持久化 ──
+  // D-004：sessionStorage per-tab per-session（key 族 sh:config-staged:<sessionId>，
+  // 刷新保留/关标签页自清/多标签页天然隔离零写竞争）；labels 同存（刷新恢复后
+  // buildStagedChangeLine 与组件 label 回显不丢名）。D-005：坏数据 catch 静默
+  // 丢弃并清坏条目（不弹错，回退空暂存）；D-006：恢复不校验暂存值有效性（沿用
+  // 发送失败保留重试语义）。
   useEffect(() => {
-    setStagedConfig({});
-    stagedLabelRef.current = {};
+    if (!sessionId) return;
+    const restored = readStagedConfigFromStorage(sessionId);
+    setStagedConfig(restored?.config ?? {});
+    stagedLabelRef.current = restored?.labels ?? {};
+    // 会话切换（换会话/关面板）内存态即随本 effect 清空/恢复，防跨会话串台。
   }, [sessionId]);
+  // 实时写入（源=stagedConfig 单一真相）：暂存空 → 移除条目；非空 → 写
+  // {config, labels}（labels 取 ref 当下快照）。发送成功收敛（settleStaged
+  // AfterSend 置空/残留）与思考档位失败保留路径均经本 effect 自动同步存储。
+  useEffect(() => {
+    if (!sessionId) return;
+    writeStagedConfigToStorage(sessionId, stagedConfig, stagedLabelRef.current);
+  }, [stagedConfig, sessionId]);
   // 暂存合并/取消——组件 cancel flag 决定删除该字段（组件持当前生效值判定），
   // 非 cancel 直接设值；label 同步进 ref 供实时切换说明取名。
   const handleStagedSwitch = useCallback((patch: SessionConfigStagedPatch) => {

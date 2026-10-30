@@ -529,6 +529,123 @@ describe("SessionConfigBar 切换供应商", () => {
   });
 });
 
+// ── 3.9 待生效高亮（2026-10-30-askuser-config-pending FR-01 / D-001@v2 / D-009）──
+// 演进注：D-001@v1（2026-10-25）曾定「暂存静默无标记」，本变更 D-001@v2 推翻为
+// 「逐控件高亮本体即标记（ring+浅底，无文字角标）+ 悬停 pending 文案」；既有
+// config-staged-dot 不复活守护（411 行）不受影响（本标记非 dot 形态）。
+
+describe("SessionConfigBar 待生效高亮（FR-01 / D-001@v2）", () => {
+  const PENDING_TITLE = "已记住，将随下一条消息发送时生效";
+
+  it("暂存供应商 → 供应商控件亮待生效态（data-staged-pending+bg-brand-50+pending title），级联模型重置暂存同亮；未改的档案无标记", async () => {
+    renderBarControlled({ llmProviderId: "prov-kimi" });
+    openCtrl("配置-供应商");
+    fireEvent.click(await screen.findByRole("button", { name: "选择 GLM 平台" }));
+
+    const providerBtn = await waitFor(() => {
+      const btn = screen.getByRole("button", { name: "配置-供应商 GLM 平台" });
+      expect(btn).toHaveAttribute("data-staged-pending", "true");
+      return btn;
+    });
+    expect(providerBtn.getAttribute("title")).toBe(PENDING_TITLE);
+    expect(providerBtn.className).toContain("bg-brand-50");
+    // 级联 model 重置暂存（value=""）→ 模型子下拉（原生 select）同亮
+    const modelSelect = screen.getByRole("combobox");
+    expect(modelSelect).toHaveAttribute("data-staged-pending", "true");
+    // 未改的档案控件无标记、title 保持默认文案
+    const profileBtn = screen.getByRole("button", { name: "配置-档案 未指定" });
+    expect(profileBtn).not.toHaveAttribute("data-staged-pending");
+    expect(profileBtn.getAttribute("title")).not.toBe(PENDING_TITLE);
+  });
+
+  it("暂存档案 → 档案控件亮待生效态", async () => {
+    renderBarControlled({});
+    openCtrl("配置-档案");
+    fireEvent.click(
+      await screen.findByRole("button", { name: "选择 知识经理" }),
+    );
+    const profileBtn = await waitFor(() => {
+      const btn = screen.getByRole("button", { name: "配置-档案 知识经理" });
+      expect(btn).toHaveAttribute("data-staged-pending", "true");
+      return btn;
+    });
+    expect(profileBtn.getAttribute("title")).toBe(PENDING_TITLE);
+    expect(profileBtn.className).toContain("bg-brand-50");
+  });
+
+  it("暂存思考档位 → 档位控件亮待生效态", async () => {
+    renderBarControlled({ thinkingLevel: {} });
+    const trigger = (await screen.findByTestId(
+      "config-thinking-select",
+    )) as HTMLButtonElement;
+    await waitFor(() => expect(trigger.textContent).toBe("中"));
+    fireEvent.click(trigger);
+    fireEvent.click(await screen.findByRole("menuitem", { name: "高" }));
+    const stagedTrigger = await waitFor(() => {
+      const btn = screen.getByTestId("config-thinking-select");
+      expect(btn).toHaveAttribute("data-staged-pending", "true");
+      return btn;
+    });
+    expect(stagedTrigger.textContent).toBe("高");
+    expect(stagedTrigger.getAttribute("title")).toBe(PENDING_TITLE);
+    expect(stagedTrigger.className).toContain("bg-brand-50");
+  });
+
+  it("取消暂存（选回当前生效值）→ 高亮消失回现状外观与默认 title", async () => {
+    renderBarControlled({ llmProviderId: "prov-kimi" });
+    openCtrl("配置-供应商");
+    fireEvent.click(await screen.findByRole("button", { name: "选择 GLM 平台" }));
+    await waitFor(() =>
+      expect(
+        screen.getByRole("button", { name: "配置-供应商 GLM 平台" }),
+      ).toHaveAttribute("data-staged-pending", "true"),
+    );
+    // 选回生效供应商 → cancel 暂存
+    openCtrl("配置-供应商");
+    fireEvent.click(
+      await screen.findByRole("button", { name: "选择 Kimi 中转" }),
+    );
+    const providerBtn = await waitFor(() => {
+      const btn = screen.getByRole("button", { name: "配置-供应商 Kimi 中转" });
+      expect(btn).not.toHaveAttribute("data-staged-pending");
+      return btn;
+    });
+    expect(providerBtn.className).not.toContain("bg-brand-50");
+    expect(providerBtn.getAttribute("title")).not.toBe(PENDING_TITLE);
+  });
+
+  // FR-05 回归锚：未挂 onStagedSwitch 的存量调用面无高亮（无 staged 无标记）。
+  it("存量调用面（未挂 onStagedSwitch）→ 四控件均无 data-staged-pending", async () => {
+    renderBar({ llmProviderId: "prov-kimi" });
+    // 供应商名经 react-query 异步解析 → findBy + 正则子串匹配
+    const providerBtn = await screen.findByRole("button", {
+      name: /配置-供应商/,
+    });
+    expect(providerBtn).not.toHaveAttribute("data-staged-pending");
+    expect(
+      screen.getByRole("button", { name: "配置-档案 未指定" }),
+    ).not.toHaveAttribute("data-staged-pending");
+  });
+
+  // D-009：禁用态 title 优先——暂存挂着时会话 ended，高亮仍在但 title 显示
+  // 禁用原因（比 pending 文案更关键，防误导用户去发消息）。
+  it("会话 ended + 有暂存 → 高亮仍在但 title 显示禁用原因（D-009 优先级）", async () => {
+    // ended 下控件禁用点不开下拉，staged prop 直接受控传入（渲染态与交互暂存等价）
+    renderBar({
+      llmProviderId: "prov-kimi",
+      ended: true,
+      staged: { llm_provider_id: "prov-glm" },
+    });
+    const providerBtn = await screen.findByRole("button", {
+      name: "配置-供应商 GLM 平台",
+    });
+    expect(providerBtn).toHaveAttribute("data-staged-pending", "true");
+    expect(providerBtn.getAttribute("title")).toBe(
+      "会话已结束或机器离线，不可切换供应商",
+    );
+  });
+});
+
 // ── 4.1 task-07：供应商下拉 agent_kind 按引擎过滤（FR-03 / D-002@v1） ─────
 
 describe("SessionConfigBar 供应商下拉 kind 过滤（task-07 / FR-03 / D-002@v1）", () => {

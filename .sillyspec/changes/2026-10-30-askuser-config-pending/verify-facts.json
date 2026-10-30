@@ -1,0 +1,119 @@
+{
+  "schemaVersion": 2,
+  "change": "2026-10-30-askuser-config-pending",
+  "generatedAt": "2026-10-30T04:23:05.907Z",
+  "probes": {
+    "probe1": {
+      "command": "sillyspec verify-probes --change 2026-10-30-askuser-config-pending",
+      "metrics": {
+        "matches": 0,
+        "skippedFiles": 0,
+        "worktreeHits": 0,
+        "globEntries": 0
+      }
+    },
+    "probe3": {
+      "command": "sillyspec verify-probes --change 2026-10-30-askuser-config-pending",
+      "metrics": {
+        "tasks": 2,
+        "hasTest": 2
+      }
+    },
+    "probe5": {
+      "command": "sillyspec verify-probes --change 2026-10-30-askuser-config-pending",
+      "metrics": {
+        "backendEndpoints": 666,
+        "frontendCalls": 0
+      }
+    },
+    "probe6": {
+      "command": "sillyspec verify-probes --change 2026-10-30-askuser-config-pending",
+      "metrics": {
+        "deletions": 0,
+        "unavailable": false
+      }
+    },
+    "probe8": {
+      "command": "sillyspec verify-probes --change 2026-10-30-askuser-config-pending",
+      "metrics": {
+        "mispairs": 0,
+        "feOnly": 0,
+        "missingNotNull": 0,
+        "contractCount": 0,
+        "contractOrphans": 0,
+        "missingRequired": 0,
+        "feKeys": 0,
+        "backendFields": 0
+      }
+    },
+    "probe9": {
+      "command": "sillyspec verify-probes --change 2026-10-30-askuser-config-pending",
+      "metrics": {
+        "javaFileCount": 0,
+        "groupCount": 0,
+        "inconsistentGroups": 0
+      }
+    },
+    "probe10": {
+      "command": "sillyspec verify-probes --change 2026-10-30-askuser-config-pending",
+      "metrics": {
+        "checkedFiles": 3,
+        "unclearedFiles": 0
+      }
+    }
+  },
+  "apiFace": {
+    "endpoints": [],
+    "declared": null,
+    "writeEndpoints": []
+  },
+  "conclusion": "PASS WITH NOTES",
+  "runtimeEvidence": [
+    {
+      "claim": "本变更纯前端视觉+浏览器本地持久化，无 daemon/backend 跨进程面（design 措辞中的 session 指 sessionStorage/会话隔离键，非 daemon session 通道）；集成级证据=面板组件树 integration test（jsdom 全链路：SessionPanel+SessionConfigBar+react-query 渲染→暂存→持久化→刷新恢复→发送收敛）",
+      "command": "pnpm exec vitest run src/components/daemon/__tests__/session-panel-staged-list-refresh.test.tsx src/components/sessions/__tests__/session-config-bar.test.tsx",
+      "exitCode": 0,
+      "logPath": "C:\\Users\\qinyi\\IdeaProjects\\multi-agent-platform\\.sillyspec\\.runtime\\logs\\askuser-config-pending-t02-verify.log"
+    }
+  ],
+  "handover": {
+    "count": 1,
+    "items": [
+      {
+        "type": "manual-acceptance",
+        "item": "部署后浏览器肉眼验收四态高亮（对照原型 prototype-config-pending.html：现状/部分暂存/全暂存/askuser 待答）+ 刷新恢复",
+        "condition": "部署到测试环境后在主会话页面：改供应商→控件亮 brand 描边浅底+悬停提示；F5 刷新→高亮恢复；发消息→高亮消失配置生效；askuser 待答期间改配置→亮标且提交回答不打断",
+        "severity": "advisory"
+      }
+    ]
+  },
+  "dbScriptDeclarations": [],
+  "runtimeEndpointExcluded": false,
+  "integrationRan": "ran",
+  "matrixPartialRows": 0,
+  "consumerHints": {
+    "script": [
+      "frontend/scripts/prototype-build.mjs"
+    ]
+  },
+  "smokeRan": "not-configured",
+  "factsConsistency": {
+    "checked": [
+      "probe1",
+      "probe3",
+      "probe5",
+      "probe6",
+      "probe8",
+      "probe9"
+    ],
+    "verdict": "match",
+    "detail": null
+  },
+  "tests": {
+    "command": "module[]+deps(jsx2)",
+    "exitCode": 0,
+    "strategy": "dynamic-subset",
+    "failedRemaining": [],
+    "passedAt": "2026-10-30T04:29:37.325Z"
+  }
+}

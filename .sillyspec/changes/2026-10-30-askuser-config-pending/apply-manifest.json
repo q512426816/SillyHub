@@ -1,0 +1,24 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-30-askuser-config-pending",
+  "appliedAt": "2026-10-30T04:31:25.982Z",
+  "baseHash": "efaf4d9d5aff99a5818e7687b38cc086e4db7387",
+  "files": [
+    {
+      "path": "frontend/src/components/daemon/__tests__/session-panel-staged-list-refresh.test.tsx",
+      "sha256": "2abfbf68b203b99ddecc1d1caea85feadc6d92c44cfede9e04775c11f2c8dbaa"
+    },
+    {
+      "path": "frontend/src/components/daemon/session-panel/session-panel-page.tsx",
+      "sha256": "b30588569464be4d1dbab321969b7c877696f9a4ed63aa023a67aa4b4ea73400"
+    },
+    {
+      "path": "frontend/src/components/sessions/__tests__/session-config-bar.test.tsx",
+      "sha256": "2bd07f8ab1fbe1f41b7e676552362120134c2f08069a6c66f6009559df853581"
+    },
+    {
+      "path": "frontend/src/components/sessions/session-config-bar.tsx",
+      "sha256": "41a2f2c2ef577449861120ac473775ef01321c1c171c546004b141e2806563f7"
+    }
+  ]
+}
