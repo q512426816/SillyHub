@@ -781,6 +781,9 @@ class TestSwitchValidation:
                 provider="claude",
                 status="active",
                 config={},
+                # 真实会话常态：config_snapshot.model 非空 → model_override=True；
+                # 撤销共享后 provider_config_payload=None 时不得 dict(None) 硬拒（P2）。
+                config_snapshot={"model": "glm-4.7"},
                 turn_count=1,
                 llm_provider_id=shared_provider.id,
                 created_at=datetime.now(UTC),
@@ -804,6 +807,17 @@ class TestSwitchValidation:
         assert mocked_hub.send_session_control.await_args.args[1] == (
             DAEMON_MSG_SESSION_SWITCH_CONFIG
         )
+
+        # 显式切模型同样不得因 provider_config_payload=None 而 dict(None) 硬拒。
+        await _finish_first_turn(db_session, result)
+        result2 = await svc.inject_session(
+            session_id,
+            borrower,
+            prompt="model switch after revoke",
+            llm_provider_id=str(shared_provider.id),
+            model="glm-4.7",
+        )
+        assert result2.agent_run is not None
 
     @pytest.mark.asyncio
     async def test_foreign_profile_denied_403(self, db_session, mocked_hub, mocked_redis) -> None:

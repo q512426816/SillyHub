@@ -457,7 +457,13 @@ async def _finalize_inject_turn_writes(
             # 均为**快照级覆盖**（copy 后改写），不动 llm_providers 原配置。
             # openai_chat 快照无 default_fallback_model 键（单模型经
             # litellm_model_name 路由），仅同步 model。
-            if model_override and effective_model is not None:
+            # 2026-10-30 评审 P2：provider_config_payload 为 None（共享已撤销回落
+            # 默认链）时不得做 R-07 覆盖——dict(None) 会把回落变成 500。
+            if (
+                model_override
+                and effective_model is not None
+                and provider_config_payload is not None
+            ):
                 provider_config_payload = dict(provider_config_payload)
                 provider_config_payload["model"] = effective_model
                 if "default_fallback_model" in provider_config_payload:
