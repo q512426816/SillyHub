@@ -1,0 +1,23 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-30-marquee-awaiting-loop-scroll",
+  "reviewer": "subagent",
+  "verdict": "PASS",
+  "reviewedAgainst": "eb94bc69497eac507f7004ada494a41873de3ea6",
+  "findings": [
+    {
+      "severity": "P2",
+      "status": "resolved",
+      "title": "短文本相位（一份文本宽 < 滚动窗口宽）双份拼接填不满窗口，循环中窗口右侧仍周期性露出空白，FR-01「任意时刻窗口不出现空白区段」在该相位未兑现且未在 design 声明",
+      "evidence": "初评（8258d74a）：无 token/心跳短文本（≈117px vs 窗口≈218px）下 offset 滚过 −(T−V) 后窗口右缘每循环露渐增空白（最宽≈101px）。已修复（eb94bc69）：新增纯函数 loopScrollWidth(copyWidth,viewWidth,gapPx)——一份文字宽 ≤ 窗口宽返回 0（不起滚，measureLoop 静止归位 offset=0 显示开头），严格超窗才返回周期宽度起滚；起滚条件 textWidth>V 数学上蕴含 V−T<−W≤offset，右缘露白恒不可能，静止分支亦无死白。时序核验通过：measureLoop 在两测量入口（ResizeObserver update + entry.text effect）均先于 ensureTickerScroll 调用，滚动中折回静止时在飞 rAF 下一帧读 loopWidth=0 停排且不再写 transform，最后一帧写入即归位值，无竞态覆盖；48px 间隔改为 TICKER_LOOP_GAP_PX 常量与第二份 paddingLeft inline style 同源；测试补 loopScrollWidth 四断言（含 218/218 相等边界归静止侧）、requirements FR-01 补短文本场景、design 接口契约/风险节同步。48px 轮间隔空隙经窗口属跑马灯轮次分隔常态，与初评 P2 指的『右缘无内容死白』是两类空白，口径一致成立。残余：极端短文本（挂载骨架「等待模型响应…」≈84px，双份总宽 216px vs 窗口 218px）静止右缘可能露 ≤2px 瞬态，与 design 已声明『1-2px 抖动』同量级，可接受，不开新 finding",
+      "location": "frontend/src/components/daemon/turn-live-marquee.tsx:462"
+    }
+  ],
+  "dimensionNotes": {
+    "乱序": "ok",
+    "并发": "ok",
+    "切换": "ok",
+    "作用域": "n/a"
+  },
+  "reviewedAt": "2026-10-30T09:26:30+08:00"
+}

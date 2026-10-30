@@ -2368,3 +2368,79 @@ created_at: 2026-10-16T01:30:35.950Z
 - 场景：静态检查 — When 运行 tsc --noEmit 与 lint；Then 0 error
 全文：.sillyspec/changes/archive/2026-10-29-edit-diff-stat-badge/requirements.md#FR-06
 最近确认：5e89be8febddf3883db1e01c22bccb6ef5572af9
+
+## FR-test-utils-129 marquee-awaiting 条目文本区为双份文本无缝循环滚动：恒速慢速（72px/s 量级）、滚满一份宽度即回卷、任意时刻窗口不出现空白区段
+变更：2026-10-30-marquee-awaiting-loop-scroll
+状态：active
+摘要：主路径；文本实时变化（秒数/token 每秒更新、>30s 追加提示语）；短文本（一份文字 ≤ 窗口宽，如等待初期无 token/心跳数据）
+全文：.sillyspec/changes/archive/2026-10-30-marquee-awaiting-loop-scroll/requirements.md#FR-01
+最近确认：eb94bc69497eac507f7004ada494a41873de3ea6
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-30-marquee-awaiting-loop-scroll:flow:测试绑定FR-01
+  tests: test/frontend/src/components/daemon/__tests__/turn-live-marquee.test.tsx「等待条目循环滚动：双份文本渲染 + wrapLoopOffset 回卷纯函数」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-30-marquee-awaiting-loop-scroll
+  status: active
+
+## FR-test-utils-130 循环滚动尊重 prefers-reduced-motion（静态截断）
+变更：2026-10-30-marquee-awaiting-loop-scroll
+状态：active
+摘要：主路径
+全文：.sillyspec/changes/archive/2026-10-30-marquee-awaiting-loop-scroll/requirements.md#FR-02
+最近确认：eb94bc69497eac507f7004ada494a41873de3ea6
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-30-marquee-awaiting-loop-scroll:flow:测试绑定FR-02
+  tests: test/frontend/src/components/daemon/__tests__/turn-live-marquee.test.tsx「reduced-motion 下等待条目静态截断（沿用既有 reduced 分支，新增 awaiting 场景断言）」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-30-marquee-awaiting-loop-scroll
+  status: active
+
+## FR-test-utils-131 其他 running 条目（thinking 流式等）保持现有单份一次滚行为不变
+变更：2026-10-30-marquee-awaiting-loop-scroll
+状态：active
+摘要：主路径
+全文：.sillyspec/changes/archive/2026-10-30-marquee-awaiting-loop-scroll/requirements.md#FR-03
+最近确认：eb94bc69497eac507f7004ada494a41873de3ea6
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-30-marquee-awaiting-loop-scroll:flow:测试绑定FR-03
+  tests: test/frontend/src/components/daemon/__tests__/turn-live-marquee.test.tsx「ticker 一次滚到末尾即停、不复制循环，跟随流式增长（FR-02）」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-30-marquee-awaiting-loop-scroll
+  status: active
+
+## FR-test-utils-132 turn-live-marquee 现有测试不回归，新增用例覆盖循环模式渲染与回卷纯函数
+变更：2026-10-30-marquee-awaiting-loop-scroll
+状态：active
+摘要：主路径
+全文：.sillyspec/changes/archive/2026-10-30-marquee-awaiting-loop-scroll/requirements.md#FR-04
+最近确认：eb94bc69497eac507f7004ada494a41873de3ea6
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-30-marquee-awaiting-loop-scroll:flow:测试绑定FR-04
+  tests: frontend/src/components/daemon/__tests__/turn-live-marquee.test.tsx
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-30-marquee-awaiting-loop-scroll
+  status: active

@@ -195,3 +195,4 @@ created_at: 2026-08-30 22:23:33
 | 2026-10-29 | 2026-10-29-edit-diff-stat-badge | 用户反馈：agent 完成 Edit/Write 文件操作后，对话视图运行条（跑马灯）与进度视图命令… |
 | 2026-10-29 | 2026-10-29-engine-live-perception | 2026-10-29-engine-live-perception |
 | 2026-10-29 | 2026-10-30-task-resume-revive-notify-retry | 子代理续唤复活终态任务行+上报502重试 |
+| 2026-10-30 | 2026-10-30-marquee-awaiting-loop-scroll | 会话页对话tab底部跑马灯的「等待模型响应 · 秒数 · token」合成条目：现行为一次滚到末尾即… |
