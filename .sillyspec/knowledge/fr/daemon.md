@@ -9229,3 +9229,105 @@
 摘要：回归门
 全文：.sillyspec/changes/archive/2026-10-30-quota-error-visible/requirements.md#FR-05
 最近确认：fe96adb720f84d5d4273565f87343d8cdec5bb7b
+
+## FR-daemon-348 供应商属主可按用户名/邮箱把供应商共享给指定用户，可查看/撤销共享；共享记录唯一、重复共享幂等、不能共享给自己、目标不存在/禁用时明确报错。
+变更：2026-10-30-provider-user-share
+状态：active
+摘要：按用户名共享并幂等；拒绝异常目标
+全文：.sillyspec/changes/archive/2026-10-30-provider-user-share/requirements.md#FR-01
+最近确认：3a4250dacc83daba3eb2f5fa2776f3172e4647d4
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-30-provider-user-share:flow:测试绑定FR-01
+  tests: backend/app/modules/llm_provider/tests/test_provider_shares.py「test_share_is_idempotent_and_listed」 | backend/app/modules/llm_provider/tests/test_provider_shares.py「test_share_rejects_self_unknown_and_disabled」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-30-provider-user-share
+  status: active
+
+## FR-daemon-349 被共享用户 GET 可用供应商列表（自己的 + 共享给自己的）可用于会话页；共享项带 shared_by 标识且只读；设置页仍只列自己的供应商，不提供编辑/共享入口。
+变更：2026-10-30-provider-user-share
+状态：active
+摘要：共享项只读标识
+全文：.sillyspec/changes/archive/2026-10-30-provider-user-share/requirements.md#FR-02
+最近确认：3a4250dacc83daba3eb2f5fa2776f3172e4647d4
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-30-provider-user-share:flow:测试绑定FR-02
+  tests: backend/app/modules/llm_provider/tests/test_provider_shares.py「test_usable_list_marks_shared_and_clears_default」 | frontend/src/components/sessions/__tests__/session-config-bar.test.tsx「共享供应商出现在候选并带共享标识」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-30-provider-user-share
+  status: active
+
+## FR-daemon-350 被共享用户可在会话页选择共享供应商并实际生效：会话创建/切换校验改为「属主或有效共享」，daemon claim 的会话级供应商解析按会话属主 + 共享授权放行（runtime 属主不同也能用）。
+变更：2026-10-30-provider-user-share
+状态：active
+摘要：共享供应商在他人 runtime 上生效
+全文：.sillyspec/changes/archive/2026-10-30-provider-user-share/requirements.md#FR-03
+最近确认：3a4250dacc83daba3eb2f5fa2776f3172e4647d4
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-30-provider-user-share:flow:测试绑定FR-03
+  tests: backend/app/modules/daemon/tests/test_lease_context_provider_share.py「test_session_provider_shared_with_session_owner_is_injected」 | backend/app/modules/daemon/tests/test_session_switch_config.py「test_switch_to_shared_provider_allowed」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-30-provider-user-share
+  status: active
+
+## FR-daemon-351 被共享用户调用供应商编辑/删除/设默认/额度查询接口仍 404/403（不可修改、不泄漏明文 key）。
+变更：2026-10-30-provider-user-share
+状态：active
+摘要：被共享方不可写
+全文：.sillyspec/changes/archive/2026-10-30-provider-user-share/requirements.md#FR-04
+最近确认：3a4250dacc83daba3eb2f5fa2776f3172e4647d4
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-30-provider-user-share:flow:测试绑定FR-04
+  tests: backend/app/modules/llm_provider/tests/test_provider_shares.py「test_recipient_cannot_mutate_or_query_usage」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-30-provider-user-share
+  status: active
+
+## FR-daemon-352 共享撤销后，新会话不再可见/不可选；已选会话下一轮回落默认链（不阻断），且不得泄漏已撤销供应商的 key。
+变更：2026-10-30-provider-user-share
+状态：active
+摘要：撤销后的下一轮
+全文：.sillyspec/changes/archive/2026-10-30-provider-user-share/requirements.md#FR-05
+最近确认：3a4250dacc83daba3eb2f5fa2776f3172e4647d4
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-30-provider-user-share:flow:测试绑定FR-05
+  tests: backend/app/modules/daemon/tests/test_lease_context_provider_share.py「test_revoked_share_falls_back_to_default_chain」 | backend/app/modules/daemon/tests/test_session_switch_config.py「test_revoked_share_profile_switch_falls_back」 | backend/app/modules/llm_provider/tests/test_provider_shares.py「test_revoked_share_disappears_from_usable_list」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-30-provider-user-share
+  status: active
+
+## FR-daemon-353 新增 backend 共享 CRUD/授权/claim 解析用例与 frontend 可用列表/只读标识用例，相关测试全绿。
+变更：2026-10-30-provider-user-share
+状态：active
+摘要：回归门
+全文：.sillyspec/changes/archive/2026-10-30-provider-user-share/requirements.md#FR-06
+最近确认：3a4250dacc83daba3eb2f5fa2776f3172e4647d4

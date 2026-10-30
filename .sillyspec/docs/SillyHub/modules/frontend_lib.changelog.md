@@ -58,3 +58,4 @@ created_at: 2026-10-16 16:40:00
 - 2026-10-28-session-config-default-provider-fix | 会话配置条默认供应商显示与模型联动缺陷：pi 等引擎会话显示了不匹配引擎的默认供应商名（兜底查找未按…
 - 2026-10-29-engine-live-perception | 2026-10-29-engine-live-perception
 - 2026-10-30-task-resume-revive-notify-retry | 子代理续唤复活终态任务行+上报502重试
+- 2026-10-30-provider-user-share | 供应商按用户共享且被共享方只读选用

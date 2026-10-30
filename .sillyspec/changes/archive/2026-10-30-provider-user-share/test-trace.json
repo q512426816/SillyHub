@@ -1,0 +1,86 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-30-provider-user-share",
+  "rows": [
+    {
+      "anchor": "FR-01",
+      "row_id": "2026-10-30-provider-user-share:flow:测试绑定FR-01",
+      "tests": [
+        "backend/app/modules/llm_provider/tests/test_provider_shares.py「test_share_is_idempotent_and_listed」",
+        "backend/app/modules/llm_provider/tests/test_provider_shares.py「test_share_rejects_self_unknown_and_disabled」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-30-provider-user-share"
+    },
+    {
+      "anchor": "FR-02",
+      "row_id": "2026-10-30-provider-user-share:flow:测试绑定FR-02",
+      "tests": [
+        "backend/app/modules/llm_provider/tests/test_provider_shares.py「test_usable_list_marks_shared_and_clears_default」",
+        "frontend/src/components/sessions/__tests__/session-config-bar.test.tsx「共享供应商出现在候选并带共享标识」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-30-provider-user-share"
+    },
+    {
+      "anchor": "FR-03",
+      "row_id": "2026-10-30-provider-user-share:flow:测试绑定FR-03",
+      "tests": [
+        "backend/app/modules/daemon/tests/test_lease_context_provider_share.py「test_session_provider_shared_with_session_owner_is_injected」",
+        "backend/app/modules/daemon/tests/test_session_switch_config.py「test_switch_to_shared_provider_allowed」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-30-provider-user-share"
+    },
+    {
+      "anchor": "FR-04",
+      "row_id": "2026-10-30-provider-user-share:flow:测试绑定FR-04",
+      "tests": [
+        "backend/app/modules/llm_provider/tests/test_provider_shares.py「test_recipient_cannot_mutate_or_query_usage」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-30-provider-user-share"
+    },
+    {
+      "anchor": "FR-05",
+      "row_id": "2026-10-30-provider-user-share:flow:测试绑定FR-05",
+      "tests": [
+        "backend/app/modules/daemon/tests/test_lease_context_provider_share.py「test_revoked_share_falls_back_to_default_chain」",
+        "backend/app/modules/daemon/tests/test_session_switch_config.py「test_revoked_share_profile_switch_falls_back」",
+        "backend/app/modules/llm_provider/tests/test_provider_shares.py「test_revoked_share_disappears_from_usable_list」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-30-provider-user-share"
+    }
+  ]
+}

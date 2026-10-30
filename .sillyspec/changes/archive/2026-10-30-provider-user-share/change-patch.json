@@ -1,0 +1,278 @@
+{
+  "change": "2026-10-30-provider-user-share",
+  "baseline": "a3110752ade2a45d8f89b04e9830541044780e87",
+  "head": "d711cd1bac5c1250639cf82e9b1ce4482a051304",
+  "files": [
+    "backend/app/modules/daemon/lease/context.py",
+    "backend/app/modules/daemon/session/service/attachments.py",
+    "backend/app/modules/daemon/session/service/inject_gates.py",
+    "backend/app/modules/daemon/tests/test_lease_context_provider_priority.py",
+    "backend/app/modules/daemon/tests/test_lease_context_provider_share.py",
+    "backend/app/modules/daemon/tests/test_session_switch_config.py",
+    "backend/app/modules/llm_provider/model.py",
+    "backend/app/modules/llm_provider/router.py",
+    "backend/app/modules/llm_provider/schema.py",
+    "backend/app/modules/llm_provider/service.py",
+    "backend/app/modules/llm_provider/tests/test_provider_shares.py",
+    "backend/migrations/versions/20261030180000_provider_user_shares.py",
+    "backend/tests/test_align_platform_change_events_migration.py",
+    "frontend/src/components/llm-providers/__tests__/share-provider-dialog.test.tsx",
+    "frontend/src/components/llm-providers/llm-provider-list.tsx",
+    "frontend/src/components/llm-providers/share-provider-dialog.tsx",
+    "frontend/src/components/sessions/__tests__/session-config-bar.test.tsx",
+    "frontend/src/components/sessions/session-config-bar.tsx",
+    "frontend/src/lib/api/llm-providers.ts"
+  ],
+  "totals": {
+    "files": 19,
+    "additions": 1417,
+    "deletions": 32
+  },
+  "savedAt": "2026-10-30T09:04:26.563Z",
+  "note": "flow done 时点冻结（本变更可归属交付面：baseline..HEAD 提交面过滤 .sillyspec/ 只留 .sillyspec/docs/ 交付文档 + 独占树未提交交付；治理工件目录不入冻结——2026-10-12-close-trace-freeze-integrity FR-01）",
+  "modules": [
+    {
+      "id": "daemon",
+      "files": 6,
+      "doc": "docs/backend/modules/daemon.md",
+      "docTouched": false,
+      "docMissing": false
+    },
+    {
+      "id": "llm_provider",
+      "files": 5,
+      "doc": "docs/backend/modules/llm_provider.md",
+      "docTouched": false,
+      "docMissing": false
+    },
+    {
+      "id": "migrations",
+      "files": 1,
+      "doc": "docs/backend/modules/migrations.md",
+      "docTouched": false,
+      "docMissing": false
+    },
+    {
+      "id": "backend",
+      "files": 13,
+      "doc": "docs/multi-agent-platform/modules/backend.md",
+      "docTouched": false,
+      "docMissing": false
+    },
+    {
+      "id": "frontend",
+      "files": 6,
+      "doc": "docs/multi-agent-platform/modules/frontend.md",
+      "docTouched": false,
+      "docMissing": false
+    },
+    {
+      "id": "daemon",
+      "files": 6,
+      "doc": "docs/SillyHub/modules/daemon.md",
+      "docTouched": false,
+      "docMissing": false
+    },
+    {
+      "id": "llm_provider",
+      "files": 5,
+      "doc": "docs/SillyHub/modules/llm_provider.md",
+      "docTouched": false,
+      "docMissing": false
+    },
+    {
+      "id": "frontend_components",
+      "files": 5,
+      "doc": "docs/SillyHub/modules/frontend_components.md",
+      "docTouched": false,
+      "docMissing": false
+    },
+    {
+      "id": "frontend_lib",
+      "files": 1,
+      "doc": "docs/SillyHub/modules/frontend_lib.md",
+      "docTouched": false,
+      "docMissing": false
+    }
+  ],
+  "uncoveredDirs": [],
+  "moduleMaps": [
+    "docs/backend/modules/_module-map.yaml",
+    "docs/frontend/modules/_module-map.yaml",
+    "docs/multi-agent-platform/modules/_module-map.yaml",
+    "docs/SillyHub/modules/_module-map.yaml",
+    "docs/sillyhub-daemon/modules/_module-map.yaml"
+  ],
+  "scopeAudit": {
+    "mode": "full-flow",
+    "ok": true,
+    "degradedReason": null,
+    "baseAnchor": "a3110752ade2a45d8f89b04e9830541044780e87",
+    "totals": {
+      "files": 19,
+      "additions": 1417,
+      "deletions": 32
+    },
+    "rows": [
+      {
+        "path": "backend/app/modules/daemon/lease/context.py",
+        "additions": 66,
+        "deletions": 2,
+        "kind": "modified",
+        "planned": "修改",
+        "verdict": "planned"
+      },
+      {
+        "path": "backend/app/modules/daemon/session/service/attachments.py",
+        "additions": 9,
+        "deletions": 4,
+        "kind": "modified",
+        "planned": "修改",
+        "verdict": "planned"
+      },
+      {
+        "path": "backend/app/modules/daemon/session/service/inject_gates.py",
+        "additions": 13,
+        "deletions": 2,
+        "kind": "modified",
+        "planned": "修改",
+        "verdict": "planned"
+      },
+      {
+        "path": "backend/app/modules/daemon/tests/test_lease_context_provider_priority.py",
+        "additions": 6,
+        "deletions": 11,
+        "kind": "modified",
+        "planned": "修改",
+        "verdict": "planned"
+      },
+      {
+        "path": "backend/app/modules/daemon/tests/test_lease_context_provider_share.py",
+        "additions": 185,
+        "deletions": 0,
+        "kind": "new",
+        "planned": "新增",
+        "verdict": "planned"
+      },
+      {
+        "path": "backend/app/modules/daemon/tests/test_session_switch_config.py",
+        "additions": 61,
+        "deletions": 1,
+        "kind": "modified",
+        "planned": "修改",
+        "verdict": "planned"
+      },
+      {
+        "path": "backend/app/modules/llm_provider/model.py",
+        "additions": 64,
+        "deletions": 1,
+        "kind": "modified",
+        "planned": "修改",
+        "verdict": "planned"
+      },
+      {
+        "path": "backend/app/modules/llm_provider/router.py",
+        "additions": 79,
+        "deletions": 0,
+        "kind": "modified",
+        "planned": "修改",
+        "verdict": "planned"
+      },
+      {
+        "path": "backend/app/modules/llm_provider/schema.py",
+        "additions": 23,
+        "deletions": 0,
+        "kind": "modified",
+        "planned": "修改",
+        "verdict": "planned"
+      },
+      {
+        "path": "backend/app/modules/llm_provider/service.py",
+        "additions": 213,
+        "deletions": 2,
+        "kind": "modified",
+        "planned": "修改",
+        "verdict": "planned"
+      },
+      {
+        "path": "backend/app/modules/llm_provider/tests/test_provider_shares.py",
+        "additions": 230,
+        "deletions": 0,
+        "kind": "new",
+        "planned": "新增",
+        "verdict": "planned"
+      },
+      {
+        "path": "backend/migrations/versions/20261030180000_provider_user_shares.py",
+        "additions": 58,
+        "deletions": 0,
+        "kind": "new",
+        "planned": "新增",
+        "verdict": "planned"
+      },
+      {
+        "path": "backend/tests/test_align_platform_change_events_migration.py",
+        "additions": 4,
+        "deletions": 2,
+        "kind": "modified",
+        "planned": "修改",
+        "verdict": "planned"
+      },
+      {
+        "path": "frontend/src/components/llm-providers/__tests__/share-provider-dialog.test.tsx",
+        "additions": 98,
+        "deletions": 0,
+        "kind": "new",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": "frontend/src/components/llm-providers/llm-provider-list.tsx",
+        "additions": 22,
+        "deletions": 1,
+        "kind": "modified",
+        "planned": "修改",
+        "verdict": "planned"
+      },
+      {
+        "path": "frontend/src/components/llm-providers/share-provider-dialog.tsx",
+        "additions": 176,
+        "deletions": 0,
+        "kind": "new",
+        "planned": "新增",
+        "verdict": "planned"
+      },
+      {
+        "path": "frontend/src/components/sessions/__tests__/session-config-bar.test.tsx",
+        "additions": 33,
+        "deletions": 1,
+        "kind": "modified",
+        "planned": "修改",
+        "verdict": "planned"
+      },
+      {
+        "path": "frontend/src/components/sessions/session-config-bar.tsx",
+        "additions": 15,
+        "deletions": 5,
+        "kind": "modified",
+        "planned": "修改",
+        "verdict": "planned"
+      },
+      {
+        "path": "frontend/src/lib/api/llm-providers.ts",
+        "additions": 62,
+        "deletions": 0,
+        "kind": "modified",
+        "planned": "修改",
+        "verdict": "planned"
+      }
+    ],
+    "excluded": {
+      "foreignDeclared": []
+    },
+    "note": "flow done 时点冻结（本文件落盘时采集）",
+    "closedBy": "flow done"
+  },
+  "patchSha256": "7b99e4f33767060313545be46597c8f44cba64fd66b5a6ed11ad7a4b5a54df3a",
+  "patchStatus": "ok"
+}

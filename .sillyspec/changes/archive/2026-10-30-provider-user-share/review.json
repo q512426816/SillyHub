@@ -1,0 +1,107 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-30-provider-user-share",
+  "reviewer": "subagent",
+  "verdict": "PASS",
+  "reviewedAgainst": "3a4250dacc83daba3eb2f5fa2776f3172e4647d4",
+  "findings": [
+    {
+      "severity": "P2",
+      "status": "resolved",
+      "title": "并发重复共享的 IntegrityError 幂等分支在 rollback 后访问已过期 ORM 属性，异步会话抛 MissingGreenlet（500）",
+      "evidence": "f636c73ac 修复：service.py:655-660 在 commit/rollback 前取 provider_pk/target_pk/target_username/target_display_name 纯值；IntegrityError 分支（683-699）与成功日志（701-706）不再访问 provider/target ORM 属性，回查用纯 UUID，rollback 后只操作新查询的 row。原 MissingGreenlet 机理已消除；该并发分支仍无专门用例（顺序幂等用例照旧）。",
+      "location": "backend/app/modules/llm_provider/service.py:670"
+    },
+    {
+      "severity": "P2",
+      "status": "resolved",
+      "title": "撤销共享后，已选该供应商的会话在切档案/切模型轮硬报 DaemonSessionConfigInvalid，而非回落默认链（与 FR-05「不阻断」及 design 盲维③不符）",
+      "evidence": "3a4250dac 修复：attachments.py:462-466 的 R-07 覆盖条件增加 provider_config_payload is not None 守卫，撤销共享回落默认链（payload=None）时跳过 dict 覆盖，不再 dict(None) 抛 TypeError。test_session_switch_config.py:786 补 config_snapshot={'model':'glm-4.7'}（prior_model 非空 → model_override=True），813-820 追加显式切模型（同 provider + model='glm-4.7'，provider_changed=False 不触发 404 校验），两次调用均断言 agent_run 非 None，实际走到 model_override=True + payload=None 分支。test_session_switch_config.py 21 passed，ruff 通过。",
+      "location": "backend/app/modules/daemon/session/service/attachments.py:460"
+    },
+    {
+      "severity": "P2",
+      "status": "resolved",
+      "title": "/usable 共享行复用完整 LlmProviderRead，向被共享方返回 settings_config/extra_env（用户可手填令牌），存在明文凭证外泄面",
+      "evidence": "f636c73ac 修复：service.py:596-605 to_usable_read 对 shared 行置 settings_config=None/extra_env=None；test_provider_shares.py:160-180 注入 secret-extra/secret-settings/sk-share-secret 三标记并断言 extra_env/settings_config 为 None 且 dump 不含三标记。requirements.md FR-02 已同步声明该禁止项。",
+      "location": "backend/app/modules/llm_provider/service.py:594"
+    },
+    {
+      "severity": "P3",
+      "status": "open",
+      "title": "FR-03 claim 绑定用例只测 resolve_session_provider_config 返回值，未走 _inject_provider_config payload 注入，也未传 runtime 属主 fallback",
+      "evidence": "f636c73ac 未改 test_lease_context_provider_share.py；该文件 104-121 仍直接调用 resolver 并断言 cfg['api_key']，未构造 lease/runtime 或断言 payload.provider_config，也未传 fallback_user_id=host，故「runtime 属主不同也能用」与 claim 下发链路未被该用例直接覆盖。",
+      "location": "backend/app/modules/daemon/tests/test_lease_context_provider_share.py:104"
+    },
+    {
+      "severity": "P3",
+      "status": "resolved",
+      "title": "FR-04 绑定用例名含 query_usage，但未直接断言 usage/quota；仅靠 query_usage 内部调用 service.get 的传递性保护",
+      "evidence": "f636c73ac 修复：test_provider_shares.py:203-204 增加 with pytest.raises(PermissionDenied): await svc.query_usage(provider.id, grantee)；query_usage 首行 self.get 的 owner 校验被直接断言。",
+      "location": "backend/app/modules/llm_provider/tests/test_provider_shares.py:178"
+    },
+    {
+      "severity": "P3",
+      "status": "open",
+      "title": "新增 /usable 与 /{id}/shares 四个端点无 HTTP 层用例（路由顺序/状态码/404 语义仅靠 service 级间接覆盖）",
+      "evidence": "f636c73ac 未扩展 test_router.py；/usable 与 /{id}/shares 仍无 AsyncClient 用例，路由顺序（router.py:61 vs 236）与 201/204/404 语义无测试守护。新增 test_revoked_share_profile_switch_falls_back 走 DaemonService.inject_session，不是 HTTP 层。",
+      "location": "backend/app/modules/llm_provider/router.py:61"
+    },
+    {
+      "severity": "P3",
+      "status": "resolved",
+      "title": "新增端点未同步契约生成物 backend/openapi.json（及 frontend/sillyhub-daemon 两份 api-types）",
+      "evidence": "f636c73ac 已重新生成并同提交：backend/openapi.json 含 /api/llm-providers/usable 与 /{provider_id}/shares[/{grantee_user_id}] 及 LlmProviderShareCreate/Read/List；frontend/src/lib/api-types.ts 与 sillyhub-daemon/src/api-types.ts 内容一致（diff 为空），均含新路径与 schema。",
+      "location": "backend/openapi.json"
+    },
+    {
+      "severity": "P3",
+      "status": "accepted",
+      "title": "边界裁决（可接受）：前端 /usable 30s staleTime 可能短暂显示已撤销共享项",
+      "evidence": "选择时后端 provider_usable_by 失败按 404 拒绝（inject_gates.py:580+），且 30s 后刷新；不产生越权使用，属既有刷新节奏。",
+      "location": ".sillyspec/changes/2026-10-30-provider-user-share/design.md:32"
+    },
+    {
+      "severity": "P3",
+      "status": "accepted",
+      "title": "边界裁决（可接受）：lease_meta.session_id 缺失/指向不存在会话行时回落 runtime 属主",
+      "evidence": "context.py:307 actor_id = session_owner or fallback_user_id；lease 元数据由平台写入、非用户可控；回落仍要求 provider 属主匹配，保持改造前行为。",
+      "location": "backend/app/modules/daemon/lease/context.py:307"
+    },
+    {
+      "severity": "P3",
+      "status": "accepted",
+      "title": "边界裁决（可接受）：撤销与共享并发以最终库态为准，claim 读取任一状态均为合法授权快照",
+      "evidence": "provider_usable_by 每次实时查询 share 行（service.py:186-214），无缓存；与 design.md:36 一致。",
+      "location": "backend/app/modules/llm_provider/service.py:186"
+    },
+    {
+      "severity": "P3",
+      "status": "accepted",
+      "title": "边界裁决（可接受）：共享 201/404 可区分目标存在性（用户枚举面）",
+      "evidence": "FR-01 明确要求目标不存在/禁用返回明确错误；实现仅精确匹配、不提供列表/模糊搜索（service.py:643-660），枚举面为需求固有取舍。",
+      "location": "backend/app/modules/llm_provider/service.py:643"
+    },
+    {
+      "severity": "P3",
+      "status": "accepted",
+      "title": "边界裁决（可接受）：claim 授权主体从 runtime 属主改为会话属主会改变存量共享守护进程会话的解析结果",
+      "evidence": "design.md:50 已声明；仅当会话属主有自有或共享授权时注入，否则回落既有 bound/default 链（context.py:307-315）。",
+      "location": ".sillyspec/changes/2026-10-30-provider-user-share/design.md:50"
+    },
+    {
+      "severity": "P3",
+      "status": "accepted",
+      "title": "边界裁决（可接受）：共享供应商 provider_config（含解密 key）会下发到会话实际运行的 runtime 属主守护进程",
+      "evidence": "FR-03 明确要求「runtime 属主不同也能用」；共享守护进程本就以 runtime 属主身份执行会话，属既有信任模型；建议产品文档显式告知共享方该可见性。",
+      "location": "backend/app/modules/daemon/lease/context.py:315"
+    }
+  ],
+  "dimensionNotes": {
+    "乱序": "ok（边界已裁决：可接受）",
+    "并发": "ok（边界已裁决：可接受）",
+    "切换": "ok（边界已裁决：可接受）",
+    "作用域": "ok（边界已裁决：可接受）"
+  },
+  "reviewedAt": "2026-10-30T17:40:57+08:00"
+}
