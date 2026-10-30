@@ -9101,3 +9101,48 @@
 摘要：验收口径
 全文：.sillyspec/changes/archive/2026-10-30-task-resume-revive-notify-retry/requirements.md#FR-06
 最近确认：fe76ef065bf68f74d521fccc6c1247973c1eed65
+
+## FR-daemon-340 新增 alembic 迁移为 business_member 幂等授予 change:read，含回滚
+变更：2026-10-30-business-member-change-read
+状态：active
+摘要：角色存在且尚未授予；重复执行（幂等）；回滚
+全文：.sillyspec/changes/archive/2026-10-30-business-member-change-read/requirements.md#FR-01
+最近确认：18b93f19fdb14a2d921faa22ca33d0730de8975f
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-30-business-member-change-read:flow:测试绑定FR-01
+  tests: backend/tests/modules/auth/test_business_member_change_read_migration.py「test_downgrade_removes_only_change_read」 | backend/tests/modules/auth/test_business_member_change_read_migration.py「test_upgrade_grants_change_read_idempotently」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-30-business-member-change-read
+  status: active
+
+## FR-daemon-341 迁移单测覆盖 upgrade 幂等与 downgrade 清理并通过
+变更：2026-10-30-business-member-change-read
+状态：active
+摘要：单测执行
+全文：.sillyspec/changes/archive/2026-10-30-business-member-change-read/requirements.md#FR-02
+最近确认：18b93f19fdb14a2d921faa22ca33d0730de8975f
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-30-business-member-change-read:flow:测试绑定FR-02
+  tests: backend/tests/modules/auth/test_business_member_change_read_migration.py「test_downgrade_removes_only_change_read」 | backend/tests/modules/auth/test_business_member_change_read_migration.py「test_migration_metadata」 | backend/tests/modules/auth/test_business_member_change_read_migration.py「test_upgrade_grants_change_read_idempotently」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-30-business-member-change-read
+  status: active
+
+## FR-daemon-342 线上 business_member 已含 change:read 且权限缓存已失效，181228 工作区权限解析含 change:read
+变更：2026-10-30-business-member-change-read
+状态：active
+摘要：线上核验
+全文：.sillyspec/changes/archive/2026-10-30-business-member-change-read/requirements.md#FR-03
+最近确认：18b93f19fdb14a2d921faa22ca33d0730de8975f

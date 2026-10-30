@@ -247,3 +247,4 @@
 | 2026-10-29 | 2026-10-29-engine-live-perception | 2026-10-29-engine-live-perception |
 | 2026-10-29 | 2026-10-30-task-resume-revive-notify-retry | 子代理续唤复活终态任务行+上报502重试 |
 | 2026-10-30 | 2026-10-30-marquee-awaiting-loop-scroll | 会话页对话tab底部跑马灯的「等待模型响应 · 秒数 · token」合成条目：现行为一次滚到末尾即… |
+| 2026-10-30 | 2026-10-30-business-member-change-read | 业务成员角色补变更查看权限 |

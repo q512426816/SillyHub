@@ -1,0 +1,37 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-30-business-member-change-read",
+  "reviewer": "subagent (general-purpose)",
+  "verdict": "PASS",
+  "reviewedAgainst": "b525da26fdabacaa9716ee5c4b3607041c50132f",
+  "findings": [
+    {
+      "severity": "P3",
+      "status": "accepted",
+      "title": "冻结补丁混入并行变更 2026-10-30-quota-error-visible 的 5 个文件（out-of-scope）",
+      "evidence": "change.patch 含 close_run_steps.py 等 5 个文件，均属已提交 commit f69a4074c / b525da26f（quota-error-visible），与本变更交付面无关；按要求标 out-of-scope，不据此评判本变更。",
+      "location": ".sillyspec/changes/2026-10-30-business-member-change-read/change.patch:1"
+    },
+    {
+      "severity": "P3",
+      "status": "accepted",
+      "title": "迁移不主动失效 Redis 权限缓存，未来部署存在最长 TTL 300s 的旧快照窗口",
+      "evidence": "upgrade() 只执行 INSERT，不调用 invalidate_all_permissions（app/core/permission_cache.py:231）；未来重建部署时若 Redis 仍有旧 perm:* 键，最长 permission_cache_ttl=300s 内 change:read 仍缺失 → 仅短暂 403（增量授权，无越权面）。本次线上已手工清空，边界可接受。",
+      "location": "backend/migrations/versions/20261030160000_grant_business_member_change_read.py:55"
+    },
+    {
+      "severity": "P3",
+      "status": "accepted",
+      "title": "测试 docstring 写「权限集 8 → 9」，实际种子 3 条权限断言 4 条",
+      "evidence": "fixture 只种 202607251600 的 3 条基础权限（:29,:79），断言 set == 3 | {change:read} 且 COUNT==1（:129-139）；行为断言（恰好 +1、不重复）有效，仅注释与线上 8→9 口径不一致，无行为影响。",
+      "location": "backend/tests/modules/auth/test_business_member_change_read_migration.py:8"
+    }
+  ],
+  "dimensionNotes": {
+    "乱序": "ok",
+    "并发": "ok",
+    "切换": "finding",
+    "作用域": "ok"
+  },
+  "reviewedAt": "2026-10-30T16:08:22+08:00"
+}

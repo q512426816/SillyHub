@@ -1,0 +1,142 @@
+{
+  "change": "2026-10-30-business-member-change-read",
+  "baseline": "cc822fdf7e21ee5bbfd9c46d889b7a7bf5037856",
+  "head": "b525da26fdabacaa9716ee5c4b3607041c50132f",
+  "files": [
+    "backend/app/modules/daemon/run_sync/service/close_run_steps.py",
+    "backend/app/modules/daemon/tests/test_close_interactive_run_quota_log_fallback.py",
+    "backend/migrations/versions/20261030160000_grant_business_member_change_read.py",
+    "backend/tests/modules/auth/test_business_member_change_read_migration.py",
+    "backend/tests/test_align_platform_change_events_migration.py",
+    "frontend/src/components/daemon/__tests__/runtime-session-helpers.test.tsx",
+    "frontend/src/components/daemon/runtime-session-helpers.tsx",
+    "frontend/src/components/daemon/turn-timeline.tsx"
+  ],
+  "totals": {
+    "files": 8,
+    "additions": 566,
+    "deletions": 6
+  },
+  "savedAt": "2026-10-30T08:00:22.038Z",
+  "note": "flow done 时点冻结（本变更可归属交付面：baseline..HEAD 提交面过滤 .sillyspec/ 只留 .sillyspec/docs/ 交付文档 + 独占树未提交交付；治理工件目录不入冻结——2026-10-12-close-trace-freeze-integrity FR-01）",
+  "modules": [
+    {
+      "id": "daemon",
+      "files": 2,
+      "doc": "docs/backend/modules/daemon.md",
+      "docTouched": false,
+      "docMissing": false
+    },
+    {
+      "id": "migrations",
+      "files": 1,
+      "doc": "docs/backend/modules/migrations.md",
+      "docTouched": false,
+      "docMissing": false
+    },
+    {
+      "id": "backend",
+      "files": 5,
+      "doc": "docs/multi-agent-platform/modules/backend.md",
+      "docTouched": false,
+      "docMissing": false
+    },
+    {
+      "id": "frontend",
+      "files": 3,
+      "doc": "docs/multi-agent-platform/modules/frontend.md",
+      "docTouched": false,
+      "docMissing": false
+    },
+    {
+      "id": "daemon",
+      "files": 2,
+      "doc": "docs/SillyHub/modules/daemon.md",
+      "docTouched": false,
+      "docMissing": false
+    },
+    {
+      "id": "frontend_components",
+      "files": 3,
+      "doc": "docs/SillyHub/modules/frontend_components.md",
+      "docTouched": false,
+      "docMissing": false
+    }
+  ],
+  "uncoveredDirs": [],
+  "moduleMaps": [
+    "docs/backend/modules/_module-map.yaml",
+    "docs/frontend/modules/_module-map.yaml",
+    "docs/multi-agent-platform/modules/_module-map.yaml",
+    "docs/SillyHub/modules/_module-map.yaml",
+    "docs/sillyhub-daemon/modules/_module-map.yaml"
+  ],
+  "scopeAudit": {
+    "mode": "full-flow",
+    "ok": true,
+    "degradedReason": null,
+    "baseAnchor": "cc822fdf7e21ee5bbfd9c46d889b7a7bf5037856",
+    "totals": {
+      "files": 8,
+      "additions": 566,
+      "deletions": 6
+    },
+    "rows": [
+      {
+        "path": "backend/app/modules/daemon/run_sync/service/close_run_steps.py",
+        "additions": 71,
+        "deletions": 0,
+        "kind": "modified"
+      },
+      {
+        "path": "backend/app/modules/daemon/tests/test_close_interactive_run_quota_log_fallback.py",
+        "additions": 105,
+        "deletions": 2,
+        "kind": "modified"
+      },
+      {
+        "path": "backend/migrations/versions/20261030160000_grant_business_member_change_read.py",
+        "additions": 60,
+        "deletions": 0,
+        "kind": "new"
+      },
+      {
+        "path": "backend/tests/modules/auth/test_business_member_change_read_migration.py",
+        "additions": 190,
+        "deletions": 0,
+        "kind": "new"
+      },
+      {
+        "path": "backend/tests/test_align_platform_change_events_migration.py",
+        "additions": 4,
+        "deletions": 2,
+        "kind": "modified"
+      },
+      {
+        "path": "frontend/src/components/daemon/__tests__/runtime-session-helpers.test.tsx",
+        "additions": 82,
+        "deletions": 0,
+        "kind": "modified"
+      },
+      {
+        "path": "frontend/src/components/daemon/runtime-session-helpers.tsx",
+        "additions": 52,
+        "deletions": 1,
+        "kind": "modified"
+      },
+      {
+        "path": "frontend/src/components/daemon/turn-timeline.tsx",
+        "additions": 2,
+        "deletions": 1,
+        "kind": "modified"
+      }
+    ],
+    "excluded": {
+      "foreignDeclared": []
+    },
+    "note": "flow done 时点冻结（本文件落盘时采集）",
+    "closedBy": "flow done"
+  },
+  "patchSha256": "7c81f27533de47b54d790a6786aa336ea656b32b77c4feaf16520ca8a4a2367e",
+  "patchStatus": "ok"
+}

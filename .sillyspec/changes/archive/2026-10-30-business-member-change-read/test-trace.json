@@ -1,0 +1,39 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-30-business-member-change-read",
+  "rows": [
+    {
+      "anchor": "FR-01",
+      "row_id": "2026-10-30-business-member-change-read:flow:测试绑定FR-01",
+      "tests": [
+        "backend/tests/modules/auth/test_business_member_change_read_migration.py「test_downgrade_removes_only_change_read」",
+        "backend/tests/modules/auth/test_business_member_change_read_migration.py「test_upgrade_grants_change_read_idempotently」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-30-business-member-change-read"
+    },
+    {
+      "anchor": "FR-02",
+      "row_id": "2026-10-30-business-member-change-read:flow:测试绑定FR-02",
+      "tests": [
+        "backend/tests/modules/auth/test_business_member_change_read_migration.py「test_downgrade_removes_only_change_read」",
+        "backend/tests/modules/auth/test_business_member_change_read_migration.py「test_migration_metadata」",
+        "backend/tests/modules/auth/test_business_member_change_read_migration.py「test_upgrade_grants_change_read_idempotently」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-30-business-member-change-read"
+    }
+  ]
+}
