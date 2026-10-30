@@ -69,5 +69,6 @@ created_at: 2026-10-30T08:31:22.030Z
 | 修改 | frontend/src/lib/api/llm-providers.ts | usable/共享客户端与类型 |
 | 修改 | frontend/src/components/sessions/session-config-bar.tsx | 可用列表 + 共享标识 |
 | 新增 | frontend/src/components/llm-providers/share-provider-dialog.tsx | 属主侧共享弹窗 |
+| 新增 | frontend/src/components/llm-providers/__tests__/share-provider-dialog.test.tsx | 共享弹窗列表/添加/撤销用例 |
 | 修改 | frontend/src/components/llm-providers/llm-provider-list.tsx | 「共享」入口 |
 | 修改 | frontend/src/components/sessions/__tests__/session-config-bar.test.tsx | 共享候选展示用例 |
