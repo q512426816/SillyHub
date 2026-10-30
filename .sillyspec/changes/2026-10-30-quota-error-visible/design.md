@@ -53,3 +53,4 @@ created_at: 2026-10-30T07:46:14.817Z
 | 修改 | backend/app/modules/daemon/tests/test_close_interactive_run_quota_log_fallback.py | 新增 FR-01/FR-02 用例（success 形态 / 重试后成功 / 最后一条 MODEL_RETRY） |
 | 修改 | frontend/src/components/daemon/runtime-session-helpers.tsx | logsToTurns 末条 [ASSISTANT] 额度错误回填 errorDetail + failed |
 | 修改 | frontend/src/components/daemon/__tests__/runtime-session-helpers.test.tsx | 新增 FR-03/FR-04 前端用例 |
+| 修改 | frontend/src/components/daemon/turn-timeline.tsx | errorDetail 字段注释同步 logsToTurns 回填语义（注释级，无行为变化） |
