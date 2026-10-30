@@ -88,23 +88,47 @@ describe("enrichDisplayTurns — interactive_interrupted 错误可见性（FR-01
     expect(enriched!.errorDetail!.raw).toBe("codex exited code=1");
   });
 
-  it("turn 已有 errorDetail 时不覆盖（?? 链只补缺）", () => {
+  it("run 快照 error_detail 优先于 turn 日志兜底（2026-10-30 评审 P1）", () => {
     const [enriched] = enrich(
       [
         makeTurn({
           errorDetail: {
-            type: "network",
-            code: "ETIMEDOUT",
-            message: "网络连接失败",
-            retryable: true,
+            type: "quota_exceeded",
+            code: "1308",
+            message: "供应商额度或用量已达上限",
+            retryable: false,
             hint: null,
-            raw: "ETIMEDOUT",
+            raw: "API Error: Request rejected (429)",
           },
         }),
       ],
       [makeRun()],
     );
-    expect(enriched!.errorDetail!.type).toBe("network");
+    // daemon/run 快照回传的 error_detail（MODEL_ERROR_DETAIL）必须优先，
+    // 日志兜底不得覆盖其 code/raw/类型。
+    expect(enriched!.errorDetail!.raw).toBe("codex exited code=1");
+    expect(enriched!.errorDetail!.type).toBe("unknown");
+  });
+
+  it("run 快照无 error_detail 时保留 turn 日志兜底（额度卡）", () => {
+    const [enriched] = enrich(
+      [
+        makeTurn({
+          status: "failed",
+          errorDetail: {
+            type: "quota_exceeded",
+            code: "1308",
+            message: "供应商额度或用量已达上限",
+            retryable: false,
+            hint: null,
+            raw: "API Error: Request rejected (429)",
+          },
+        }),
+      ],
+      [makeRun({ error_detail: null, failure_summary: null })],
+    );
+    expect(enriched!.errorDetail!.type).toBe("quota_exceeded");
+    expect(enriched!.errorDetail!.code).toBe("1308");
   });
 
   it("非 interrupted 的 failed（interactive_failed）→ failed + errorDetail（既有行为锁定）", () => {

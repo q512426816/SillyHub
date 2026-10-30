@@ -18,7 +18,7 @@ created_at: 2026-10-30T07:46:14.817Z
 
 ### FR-02: 错误行之后仍有正常 [ASSISTANT] 文本（CLI 自动重试成功）或最后一条是 [MODEL_RETRY] 协议行时不得误判，run 保持 completed 且 error_detail 为空。
 
-- 收口兜底**禁止**仅因 run 中出现过 API Error 行就判失败：`[ASSISTANT]` 日志中只有**最后一条**具备终态语义；若其后还有正常 `[ASSISTANT]` 文本，或最后一条是 `[ASSISTANT] [MODEL_RETRY]` 协议行，则 run **必须**保持 `completed`、`error_detail` 为 NULL。
+- 收口兜底**禁止**仅因 run 中出现过 API Error 行就判失败：`[ASSISTANT]` 日志中只有**最后一条**具备终态语义；若其后还有正常 `[ASSISTANT]` 文本，或最后一条是 `[ASSISTANT] [MODEL_RETRY]` 协议行，则 run **必须**保持 `completed`、`error_detail` 为 NULL。同一 timestamp 的多行（daemon 微批落库）无法用随机 id 表达先后，**必须**按「同刻组内出现任一非错误文本即判成功」的保守规则处理，禁止依赖 id 排序误杀重试成功的轮次。
 
 #### 场景：CLI 自动重试后成功
 
@@ -44,7 +44,7 @@ created_at: 2026-10-30T07:46:14.817Z
 
 ### FR-04: daemon 已回传 is_error=true 的既有失败轮错误卡行为零变化；成功且无错误文本的轮次零变化。
 
-- 本变更**禁止**改动 daemon 已回传 `is_error=true` / `error_detail` 的既有失败轮映射（daemon 回传优先，日志兜底不覆盖）；成功且末条 `[ASSISTANT]` 非模型错误文本的轮次**必须**保持 `completed`、无错误卡。
+- 本变更**禁止**改动 daemon 已回传 `is_error=true` / `error_detail` 的既有失败轮映射（daemon 回传优先，日志兜底不覆盖）；成功且末条 `[ASSISTANT]` 非模型错误文本的轮次**必须**保持 `completed`、无错误卡。前端合并 turn 时，run 快照回传的 `error_detail` **必须**优先于 `logsToTurns` 的日志兜底（含系统级 error_detail 占位），日志兜底只在快照无 error_detail 时补位。
 
 #### 场景：daemon 回传额度错误不被覆盖
 
@@ -71,7 +71,7 @@ created_at: 2026-10-30T07:46:14.817Z
 ## 测试绑定（每条 FR 至少一行——`FR-NN: test/路径「用例名」`；空行/待填在 flow done 拒收）
 
 FR-01: backend/app/modules/daemon/tests/test_close_interactive_run_quota_log_fallback.py「test_success_result_with_quota_error_log_closed_as_failed」
-FR-02: backend/app/modules/daemon/tests/test_close_interactive_run_quota_log_fallback.py「test_quota_error_followed_by_normal_assistant_text_keeps_completed」「test_model_retry_line_as_last_assistant_keeps_completed」
+FR-02: backend/app/modules/daemon/tests/test_close_interactive_run_quota_log_fallback.py「test_quota_error_followed_by_normal_assistant_text_keeps_completed」「test_model_retry_line_as_last_assistant_keeps_completed」「test_same_timestamp_normal_answer_keeps_completed」；frontend/src/components/daemon/__tests__/runtime-session-helpers.test.tsx「logsToTurns 同刻正常答复与额度错误并存 → 保守 completed（同刻组判定）」
 FR-03: frontend/src/components/daemon/__tests__/runtime-session-helpers.test.tsx「logsToTurns 末条 [ASSISTANT] 额度错误文本回填 quota_exceeded 与 failed」
-FR-04: backend/app/modules/daemon/tests/test_close_interactive_run_quota_log_fallback.py「test_daemon_error_takes_precedence_over_log_inference」；frontend/src/components/daemon/__tests__/runtime-session-helpers.test.tsx「logsToTurns 正常成功轮不产生 errorDetail」
+FR-04: backend/app/modules/daemon/tests/test_close_interactive_run_quota_log_fallback.py「test_daemon_error_takes_precedence_over_log_inference」；frontend/src/components/daemon/__tests__/page-helpers-error-visibility.test.ts「run 快照 error_detail 优先于 turn 日志兜底（2026-10-30 评审 P1）」「run 快照无 error_detail 时保留 turn 日志兜底（额度卡）」；frontend/src/components/daemon/__tests__/runtime-session-helpers.test.tsx「logsToTurns 正常成功轮不产生 errorDetail」
 FR-05: 不适用：验收由 FR-01..FR-04 所列测试用例的执行结果承担（无独立可执行面）

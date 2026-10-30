@@ -225,10 +225,38 @@ export function enrichDisplayTurns(
       // （error_detail 空/无模型错误键）维持 killed（ql-20260918-003 打断≠失败
       // 语义保留）。升级后走 failed 分支，errorDetail ?? 链对同输入 buildErrorLogItem
       // 必然命中（不落到系统级兜底）。
+      const metaModelError = buildErrorLogItem(meta.error_detail);
+      // 2026-10-30-quota-error-visible 评审 P1：daemon/run 快照回传的 error_detail
+      // 优先于日志兜底（t.errorDetail）。此前 t.errorDetail ?? meta 的顺序会让
+      // logsToTurns 的日志推断盖掉 daemon 的 code/reset_at，甚至把其它 ModelError
+      // 显示成 quota 卡。系统级 error_detail（无模型键）同样占位，仍走
+      // buildSystemFailureItem，不被日志推断抢走。
+      const hasMetaErrorDetail =
+        meta.error_detail !== null && Object.keys(meta.error_detail).length > 0;
+      const metaFailureItem =
+        metaModelError ??
+        buildSystemFailureItem(meta.error_code, meta.failure_summary);
+      const failureItem = hasMetaErrorDetail
+        ? (metaFailureItem ?? {
+            // 无详情兜底（先例 normalize.ts runStatus=failed 无 detail）。
+            type: "unknown" as const,
+            code: null,
+            message: "运行失败（无详情）",
+            retryable: false,
+            hint: null,
+            raw: null,
+          })
+        : (t.errorDetail ??
+          metaFailureItem ?? {
+            type: "unknown" as const,
+            code: null,
+            message: "运行失败（无详情）",
+            retryable: false,
+            hint: null,
+            raw: null,
+          });
       const killedUpgradeDetail =
-        terminal === "killed" && meta.status === "failed"
-          ? buildErrorLogItem(meta.error_detail)
-          : null;
+        terminal === "killed" && meta.status === "failed" ? metaModelError : null;
       const effectiveTerminal =
         terminal === "killed" && killedUpgradeDetail !== null ? "failed" : terminal;
       const terminalPatch =
@@ -237,20 +265,7 @@ export function enrichDisplayTurns(
                   : effectiveTerminal === "failed"
                     ? {
                         status: "failed" as const,
-                        errorDetail:
-                          t.errorDetail ??
-                          buildErrorLogItem(meta.error_detail) ??
-                          // ql-20260831-004：系统级失败（撞闸/inject 过期等
-                          // error_detail 为空）兜 failure_summary + error_code。
-                          buildSystemFailureItem(meta.error_code, meta.failure_summary) ?? {
-                            // 无详情兜底（先例 normalize.ts runStatus=failed 无 detail）。
-                            type: "unknown" as const,
-                            code: null,
-                            message: "运行失败（无详情）",
-                            retryable: false,
-                            hint: null,
-                            raw: null,
-                          },
+                        errorDetail: failureItem,
                       }
                     : { status: "killed" as const };
       return {

@@ -1001,6 +1001,20 @@ describe("logsToTurns 额度耗尽终态兜底（2026-10-30-quota-error-visible�
     expect(turn.errorDetail).toBeUndefined();
   });
 
+  it("logsToTurns 同刻正常答复与额度错误并存 → 保守 completed（同刻组判定）", () => {
+    const turns = logsToTurns([
+      makeLog("u1", "run-q", "user_input", "继续", { timestamp: TS(0) }),
+      makeLog("e1", "run-q", "stdout", QUOTA_LINE, { timestamp: TS(47) }),
+      makeLog("a1", "run-q", "stdout", "[ASSISTANT] 同刻落库的正常答复", {
+        timestamp: TS(47),
+      }),
+    ]);
+
+    const turn = turns[0]!;
+    expect(turn.status).toBe("completed");
+    expect(turn.errorDetail).toBeUndefined();
+  });
+
   it("logsToTurns 正常成功轮不产生 errorDetail", () => {
     const turns = logsToTurns([
       makeLog("u1", "run-ok", "user_input", "问题", { timestamp: TS(0) }),

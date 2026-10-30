@@ -393,3 +393,33 @@ async def test_model_retry_line_as_last_assistant_keeps_completed(
     assert run.status == "completed"
     assert run.exit_code == 0
     assert run.error_detail is None
+
+
+@pytest.mark.asyncio
+async def test_same_timestamp_normal_answer_keeps_completed(
+    db_session: AsyncSession, mocked_redis
+) -> None:
+    """FR-02 同刻防误判：额度错误行与正常答复共享同一 timestamp（微批落库）时，
+    uuid 排序不可表达先后——必须保守判成功，禁止误杀重试成功的轮次。"""
+    lease_id, run_id, token, _ = await _seed_session_and_run(db_session)
+    same = datetime(2026, 10, 30, 7, 24, 47, tzinfo=UTC)
+    await _seed_log_line(db_session, run_id, SUCCESS_QUOTA_LOG_LINE, timestamp=same)
+    await _seed_log_line(
+        db_session,
+        run_id,
+        "[ASSISTANT] 同刻落库的正常答复",
+        timestamp=same,
+    )
+    svc = DaemonService(db_session)
+    run = await svc.close_interactive_run(
+        lease_id,
+        run_id,
+        token,
+        status="success",
+        is_error=False,
+        error=None,
+        result_summary=None,
+    )
+    assert run.status == "completed"
+    assert run.exit_code == 0
+    assert run.error_detail is None

@@ -290,12 +290,17 @@ export function runTerminalTurnStatus(
  * 判定只认**最后一条** `[ASSISTANT]` 行：CLI 自动重试成功时末条是正常答复，
  * `[MODEL_RETRY]` 协议行（`[ASSISTANT] [MODEL_RETRY] {...}`）也不匹配错误特征词，
  * 均保持成功语义。仅额度类错误回填（其余模型错误维持既有路径，避免扩大面）。
+ *
+ * 同刻组保守判定（对齐后端 close 兜底）：daemon 微批落库时多行共享同一
+ * timestamp，数组/id 顺序无法表达先后——最新时刻组内出现任何非错误文本即
+ * 判成功，宁可漏报也不误杀重试成功的轮次。
  */
 export function terminalQuotaErrorFromEntries(
   entries: AgentRunLogEntry[],
 ): ErrorLogItem | null {
-  let lastBody: string | null = null;
-  let lastTs: number | null = null;
+  let latestTs: number | null = null;
+  let latestBodies: string[] = [];
+  let untimedBody: string | null = null;
   for (const entry of entries) {
     if (entry.channel !== "stdout") continue;
     const match = /^\[ASSISTANT\]\s*([\s\S]*)$/.exec(
@@ -304,15 +309,23 @@ export function terminalQuotaErrorFromEntries(
     if (!match) continue;
     const body = match[1] ?? "";
     const parsed = entry.timestamp ? Date.parse(entry.timestamp) : Number.NaN;
-    const ts = Number.isFinite(parsed) ? parsed : null;
-    // 同一轮日志通常已按时间序；时间戳可解析时以时间为准，缺省保持数组序。
-    if (lastBody === null || ts === null || lastTs === null || ts >= lastTs) {
-      lastBody = body;
-      lastTs = ts;
+    if (!Number.isFinite(parsed)) {
+      // 无时间戳的旧数据按数组序取最后一条。
+      untimedBody = body;
+      continue;
+    }
+    if (latestTs === null || parsed > latestTs) {
+      latestTs = parsed;
+      latestBodies = [body];
+    } else if (parsed === latestTs) {
+      latestBodies.push(body);
     }
   }
-  if (lastBody === null || !isAssistantApiErrorText(lastBody)) return null;
-  const item = buildErrorLogItem({ type: "unknown", raw: lastBody });
+  const group =
+    latestTs === null ? (untimedBody === null ? [] : [untimedBody]) : latestBodies;
+  if (group.length === 0) return null;
+  if (group.some((body) => !isAssistantApiErrorText(body))) return null;
+  const item = buildErrorLogItem({ type: "unknown", raw: group[0]! });
   return item && item.type === "quota_exceeded" ? item : null;
 }
 

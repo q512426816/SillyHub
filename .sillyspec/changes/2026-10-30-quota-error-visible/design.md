@@ -10,7 +10,7 @@ created_at: 2026-10-30T07:46:14.817Z
 
 畸形组合是「daemon 上报 success + 末条助手输出为模型额度错误文本」：后端 close 只管 is_error=true 的兜底，前端装配器又把 `[ASSISTANT] API Error` 行无条件丢弃（假定错误卡由 turn.errorDetail 承载），于是两边都没接管，页面整轮空白。
 
-后端在 `backend/app/modules/daemon/run_sync/service/close_run_steps.py` 增加 success 轮终态兜底：查该 run 最后一条 `channel='stdout'` 且以 `[ASSISTANT]` 开头的日志，剥前缀后按行首锚定匹配模型错误特征词，再复用既有 `_infer_quota_error`（429 + 额度关键词双锚定）推断 `quota_exceeded`；命中则把本轮按 is_error=true 收口（failed + error_detail），未命中保持 completed。前端在 `frontend/src/components/daemon/runtime-session-helpers.tsx` 的 `logsToTurns` 里对每个 run 做同口径判定，命中时给 turn 回填 `status="failed"` 与 `quota_exceeded` 的 ErrorLogItem，交给既有 RunErrorItem 渲染错误卡——历史/刷新路径立即恢复可见，也是后端上线前旧数据的兜底。
+后端在 `backend/app/modules/daemon/run_sync/service/close_run_steps.py` 增加 success 轮终态兜底：查该 run 最后一条 `channel='stdout'` 且以 `[ASSISTANT]` 开头的日志，剥前缀后按行首锚定匹配模型错误特征词，再复用既有 `_infer_quota_error`（429 + 额度关键词双锚定）推断 `quota_exceeded`；命中则把本轮按 is_error=true 收口（failed + error_detail），未命中保持 completed。同一 timestamp 的多行取整组判定：组内出现任一非错误文本即判成功（daemon 微批落库的 id 是随机 uuid4，不能表达同刻先后，宁可漏报不可误杀）。前端在 `frontend/src/components/daemon/runtime-session-helpers.tsx` 的 `logsToTurns` 里对每个 run 做同口径判定，命中时给 turn 回填 `status="failed"` 与 `quota_exceeded` 的 ErrorLogItem，交给既有 RunErrorItem 渲染错误卡——历史/刷新路径立即恢复可见，也是后端上线前旧数据的兜底。`enrichDisplayTurns` 合并时 run 快照的 `error_detail` 优先于该日志兜底，避免覆盖 daemon 回传的 code/reset_at 或把其它 ModelError 误显示成额度卡。
 
 ## 接口契约
 
@@ -19,13 +19,14 @@ created_at: 2026-10-30T07:46:14.817Z
 - 后端新增内部函数 `_infer_quota_error_from_last_assistant_output(svc, agent_run) -> ModelErrorDTO | None`（`close_run_steps.py`，仅供收口路径使用，不新增 HTTP 端点）。
 - `close_interactive_run` 行为变化：`status="success" and not is_error` 时若末条 `[ASSISTANT]` 命中额度错误，则按 failed 落库（`error_code=interactive_failed`、`error_detail` 为 ModelError JSON：type/code/message/retryable/hint/raw/reset_at）。其余签名与字段零变化。
 - 前端新增内部函数 `terminalQuotaErrorFromEntries(entries) -> ErrorLogItem | null`（`runtime-session-helpers.tsx`，仅模块内/测试可见），复用 `buildErrorLogItem({type:"unknown", raw})` + `isAssistantApiErrorText`；`logsToTurns` 产出的 turn 在该形态下 `status="failed"`、`errorDetail` 非空。`SessionTurnView` 结构零变化。
+- `enrichDisplayTurns`（`session-panel/page-helpers.tsx`）合并顺序调整为 run 快照 `error_detail` 优先：快照有非空 `error_detail` 时走 `buildErrorLogItem` / `buildSystemFailureItem`，日志兜底的 `turn.errorDetail` 仅在快照无 `error_detail` 时补位。对外无签名变化。
 - 无新增/修改 HTTP 端点、无数据库迁移、无配置文件格式变化。
 
 ## 边界与并发（盲维四问——每问必答，答不了即设计缺口）
 
 1. 乱序/迟到到达：输入或事件乱序时，本设计的假设还成立吗？
 
-   以 `timestamp desc, id desc` 取最后一条 `[ASSISTANT]` 行，不依赖事件到达顺序；同毫秒并发用 id 兜底排序。仅末条具备终态语义，因此「错误后又有正常答复」不会误判（FR-02）。日志微批可能晚于 close 请求落库：与既有 quota 兜底同风险面——最坏退化为保持 completed（行为同今日），不新增错误。
+   以 `timestamp desc` 取该 run 的 `[ASSISTANT]` 日志，再按最新时刻取整组判定；不依赖事件到达顺序，也不依赖随机 uuid4 id 排序（评审 P2：daemon 微批落库多行同 timestamp，id 无法表达先后）。同刻组内出现任一非错误文本即判成功——宁可漏报也不误杀重试成功的轮次。仅末条具备终态语义，因此「错误后又有正常答复」不会误判（FR-02）。日志微批可能晚于 close 请求落库：与既有 quota 兜底同风险面——最坏退化为保持 completed（行为同今日），不新增错误。
 
 2. 并发写：两个执行体同时操作同一数据/文件会发生什么？
 
@@ -51,6 +52,8 @@ created_at: 2026-10-30T07:46:14.817Z
 | --- | --- | --- |
 | 修改 | backend/app/modules/daemon/run_sync/service/close_run_steps.py | success 轮末条 [ASSISTANT] 额度错误兜底推断并落 failed/error_detail |
 | 修改 | backend/app/modules/daemon/tests/test_close_interactive_run_quota_log_fallback.py | 新增 FR-01/FR-02 用例（success 形态 / 重试后成功 / 最后一条 MODEL_RETRY） |
-| 修改 | frontend/src/components/daemon/runtime-session-helpers.tsx | logsToTurns 末条 [ASSISTANT] 额度错误回填 errorDetail + failed |
-| 修改 | frontend/src/components/daemon/__tests__/runtime-session-helpers.test.tsx | 新增 FR-03/FR-04 前端用例 |
+| 修改 | frontend/src/components/daemon/runtime-session-helpers.tsx | logsToTurns 末条 [ASSISTANT] 额度错误回填 errorDetail + failed（同刻组保守判定） |
+| 修改 | frontend/src/components/daemon/__tests__/runtime-session-helpers.test.tsx | 新增 FR-02/FR-03/FR-04 前端用例（含同刻组） |
 | 修改 | frontend/src/components/daemon/turn-timeline.tsx | errorDetail 字段注释同步 logsToTurns 回填语义（注释级，无行为变化） |
+| 修改 | frontend/src/components/daemon/session-panel/page-helpers.tsx | enrichDisplayTurns 合并顺序：run 快照 error_detail 优先于日志兜底（评审 P1） |
+| 修改 | frontend/src/components/daemon/__tests__/page-helpers-error-visibility.test.ts | 新增快照优先/日志兜底补位两用例 |

@@ -202,25 +202,26 @@ async def _infer_quota_error_from_last_assistant_output(
 
     只在**最后一条** `[ASSISTANT]` 日志上判定：CLI 自动重试成功的情形末条是正常
     答复（或 [MODEL_RETRY] 协议行，不匹配错误特征词），必须保持 completed。
+
+    2026-10-30 评审 P2：daemon 微批落库时同批多行共享同一 timestamp，而
+    AgentRunLog.id 是随机 uuid4，`timestamp desc, id desc` 无法表达同刻先后。
+    故取最新时刻的**整组** `[ASSISTANT]` 行：组内只要出现一条非错误文本（正常
+    答复/协议行）即保守判成功，不推断——宁可漏报也不误杀重试成功的轮次。
     best-effort：异常仅 warn，不阻塞收口主链路。
     """
     try:
-        row = (
-            (
-                await svc._session.execute(
-                    select(AgentRunLog.content_redacted)
-                    .where(
-                        AgentRunLog.run_id == agent_run.id,
-                        AgentRunLog.channel == "stdout",
-                        AgentRunLog.content_redacted.like("[ASSISTANT]%"),
-                    )
-                    .order_by(AgentRunLog.timestamp.desc(), AgentRunLog.id.desc())
-                    .limit(1)
+        rows = (
+            await svc._session.execute(
+                select(AgentRunLog.content_redacted, AgentRunLog.timestamp)
+                .where(
+                    AgentRunLog.run_id == agent_run.id,
+                    AgentRunLog.channel == "stdout",
+                    AgentRunLog.content_redacted.like("[ASSISTANT]%"),
                 )
+                .order_by(AgentRunLog.timestamp.desc())
+                .limit(50)
             )
-            .scalars()
-            .first()
-        )
+        ).all()
     except Exception as exc:
         _rsvc.log.warning(
             "success_quota_log_fallback_query_failed",
@@ -228,12 +229,18 @@ async def _infer_quota_error_from_last_assistant_output(
             error=str(exc),
         )
         return None
-    if not row:
+    if not rows:
         return None
-    body = row[len("[ASSISTANT]") :].lstrip()
-    if not _ASSISTANT_API_ERROR_PREFIX_RE.match(body):
+    latest_ts = rows[0].timestamp
+    latest_bodies = [
+        (content or "")[len("[ASSISTANT]") :].lstrip() for content, ts in rows if ts == latest_ts
+    ]
+    if not latest_bodies:
         return None
-    inferred = _infer_quota_error(body)
+    if any(not _ASSISTANT_API_ERROR_PREFIX_RE.match(body) for body in latest_bodies):
+        # 同刻组内混有正常答复/协议行：无法安全判定终态，保守保持 success。
+        return None
+    inferred = _infer_quota_error(latest_bodies[0])
     if inferred is not None:
         _rsvc.log.info(
             "success_quota_log_fallback_inferred",
