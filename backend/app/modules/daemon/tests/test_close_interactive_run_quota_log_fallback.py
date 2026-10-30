@@ -135,12 +135,17 @@ async def _seed_log_line(
     db_session: AsyncSession,
     run_id: uuid.UUID,
     content: str,
+    *,
+    timestamp: datetime | None = None,
 ) -> None:
-    """种一条 stdout 日志行（对齐 daemon 落库形态：channel='stdout'）。"""
+    """种一条 stdout 日志行（对齐 daemon 落库形态：channel='stdout'）。
+
+    timestamp 可选：多条日志的末条判定用例用显式时序，防同毫秒排序抖动。
+    """
     db_session.add(
         AgentRunLog(
             run_id=run_id,
-            timestamp=datetime.now(UTC),
+            timestamp=timestamp or datetime.now(UTC),
             channel="stdout",
             content_redacted=content,
         )
@@ -290,3 +295,101 @@ async def test_no_api_error_log_keeps_legacy_behavior(
     assert run.error_code == "interactive_failed"
     assert run.error_detail is None
     assert run.output_redacted == "本轮执行失败（执行端未回传详细原因）"
+
+
+# ── 2026-10-30-quota-error-visible：success 收口兜底 ──────────────────────────
+# 生产实证 b696aa0c（2026-10-30 15:24/15:28）：daemon 上报 status=success /
+# is_error=false，唯一助手输出是 429 额度错误文本；旧收口只对 is_error=true 做
+# 日志兜底，于是 run 落 completed + error_detail=NULL，前端又丢弃 API Error 文本
+# → 会话页整轮空白。以下用例锁定「末条 [ASSISTANT] 决定本轮终态」语义。
+
+
+SUCCESS_QUOTA_LOG_LINE = (
+    "[ASSISTANT] API Error: Request rejected (429) · [1308][已达到 5 小时的使用上限。"
+    "您的限额将在 2026-10-30 17:13:29 重置。][20261030152446a5c9169226a54dc6]"
+)
+
+
+@pytest.mark.asyncio
+async def test_success_result_with_quota_error_log_closed_as_failed(
+    db_session: AsyncSession, mocked_redis
+) -> None:
+    """FR-01：success + 末条 [ASSISTANT] 额度错误 → 收口为 failed + quota_exceeded。"""
+    lease_id, run_id, token, _ = await _seed_session_and_run(db_session)
+    await _seed_log_line(db_session, run_id, SUCCESS_QUOTA_LOG_LINE)
+    svc = DaemonService(db_session)
+    run = await svc.close_interactive_run(
+        lease_id,
+        run_id,
+        token,
+        status="success",
+        is_error=False,
+        error=None,
+        result_summary=None,
+    )
+    assert run.status == "failed"
+    assert run.exit_code == 1
+    assert run.error_code == "interactive_failed"
+    assert run.error_detail is not None
+    assert run.error_detail["type"] == "quota_exceeded"
+    assert run.error_detail["code"] == "1308"
+    assert run.error_detail["reset_at"] == "2026-10-30T17:13:29+08:00"
+    assert "使用上限" in run.error_detail["raw"]
+
+
+@pytest.mark.asyncio
+async def test_quota_error_followed_by_normal_assistant_text_keeps_completed(
+    db_session: AsyncSession, mocked_redis
+) -> None:
+    """FR-02：额度错误行之后还有正常 [ASSISTANT] 答复（CLI 重试成功）→ completed。"""
+    lease_id, run_id, token, _ = await _seed_session_and_run(db_session)
+    base = datetime(2026, 10, 30, 7, 24, 47, tzinfo=UTC)
+    await _seed_log_line(db_session, run_id, SUCCESS_QUOTA_LOG_LINE, timestamp=base)
+    await _seed_log_line(
+        db_session,
+        run_id,
+        "[ASSISTANT] 重试后正常答复：这个原型一共五个页面。",
+        timestamp=base.replace(second=48),
+    )
+    svc = DaemonService(db_session)
+    run = await svc.close_interactive_run(
+        lease_id,
+        run_id,
+        token,
+        status="success",
+        is_error=False,
+        error=None,
+        result_summary=None,
+    )
+    assert run.status == "completed"
+    assert run.exit_code == 0
+    assert run.error_detail is None
+
+
+@pytest.mark.asyncio
+async def test_model_retry_line_as_last_assistant_keeps_completed(
+    db_session: AsyncSession, mocked_redis
+) -> None:
+    """FR-02：末条是 [ASSISTANT] [MODEL_RETRY] 协议行（载荷含 429）→ 不误判。"""
+    lease_id, run_id, token, _ = await _seed_session_and_run(db_session)
+    base = datetime(2026, 10, 30, 7, 24, 47, tzinfo=UTC)
+    await _seed_log_line(db_session, run_id, SUCCESS_QUOTA_LOG_LINE, timestamp=base)
+    await _seed_log_line(
+        db_session,
+        run_id,
+        '[ASSISTANT] [MODEL_RETRY] {"attempt":2,"max_retries":5,"error_status":429}',
+        timestamp=base.replace(second=48),
+    )
+    svc = DaemonService(db_session)
+    run = await svc.close_interactive_run(
+        lease_id,
+        run_id,
+        token,
+        status="success",
+        is_error=False,
+        error=None,
+        result_summary=None,
+    )
+    assert run.status == "completed"
+    assert run.exit_code == 0
+    assert run.error_detail is None

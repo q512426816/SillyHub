@@ -93,6 +93,13 @@ _QUOTA_BRACKET_CODE_RE = re.compile(r"\[(\d+)\]")
 _QUOTA_RESET_AT_RE = re.compile(
     r"将[在于]\s*(\d{4})-(\d{2})-(\d{2})[ T](\d{2}):(\d{2}):(\d{2})\s*重置"
 )
+# 2026-10-30-quota-error-visible：CLI 合成的模型错误行特征词（与前端
+# normalize.isAssistantApiErrorText / daemon classifier 同口径）。收口只认
+# 行首锚定——正文中段提到 API Error 的成功答复不得误判。
+_ASSISTANT_API_ERROR_PREFIX_RE = re.compile(
+    r"^(API\s*Error|Request\s+rejected|Not\s+logged\s+in|Please\s+run\s+/login)",
+    re.IGNORECASE,
+)
 
 
 def _infer_quota_error(blob: str) -> ModelErrorDTO | None:
@@ -173,6 +180,63 @@ async def _infer_quota_model_error_from_logs(
     if inferred is not None:
         _rsvc.log.info(
             "quota_log_fallback_inferred",
+            run_id=str(agent_run.id),
+            code=inferred.code,
+            reset_at=inferred.reset_at,
+        )
+    return inferred
+
+
+async def _infer_quota_error_from_last_assistant_output(
+    svc,
+    agent_run: AgentRun,
+) -> ModelErrorDTO | None:
+    """2026-10-30-quota-error-visible：success 轮的末条助手输出兜底。
+
+    畸形组合：CLI 把额度耗尽写成一条 synthetic assistant 消息（
+    `API Error: Request rejected (429) · [1308]...使用上限...`），却以
+    result.subtype=success / is_error=false 结束 turn（生产实证会话 b696aa0c，
+    2026-10-30）。旧收口只在 is_error=true 时做日志兜底，于是 run 落 completed、
+    error_detail=NULL；前端装配器又把该错误文本行丢弃（假定失败卡由
+    error_detail 承载）→ 会话页整轮空白。
+
+    只在**最后一条** `[ASSISTANT]` 日志上判定：CLI 自动重试成功的情形末条是正常
+    答复（或 [MODEL_RETRY] 协议行，不匹配错误特征词），必须保持 completed。
+    best-effort：异常仅 warn，不阻塞收口主链路。
+    """
+    try:
+        row = (
+            (
+                await svc._session.execute(
+                    select(AgentRunLog.content_redacted)
+                    .where(
+                        AgentRunLog.run_id == agent_run.id,
+                        AgentRunLog.channel == "stdout",
+                        AgentRunLog.content_redacted.like("[ASSISTANT]%"),
+                    )
+                    .order_by(AgentRunLog.timestamp.desc(), AgentRunLog.id.desc())
+                    .limit(1)
+                )
+            )
+            .scalars()
+            .first()
+        )
+    except Exception as exc:
+        _rsvc.log.warning(
+            "success_quota_log_fallback_query_failed",
+            run_id=str(agent_run.id),
+            error=str(exc),
+        )
+        return None
+    if not row:
+        return None
+    body = row[len("[ASSISTANT]") :].lstrip()
+    if not _ASSISTANT_API_ERROR_PREFIX_RE.match(body):
+        return None
+    inferred = _infer_quota_error(body)
+    if inferred is not None:
+        _rsvc.log.info(
+            "success_quota_log_fallback_inferred",
             run_id=str(agent_run.id),
             code=inferred.code,
             reset_at=inferred.reset_at,
@@ -287,6 +351,13 @@ async def close_interactive_run(
     # error 时绝不覆盖（FR-02：daemon 分类更全、raw 更准，后端兜底仅是降级面）。
     if is_error and error is None:
         error = await _infer_quota_model_error_from_logs(svc, agent_run, result_summary)
+    elif status == "success" and not is_error and error is None:
+        # 2026-10-30-quota-error-visible：success + 末条助手输出为额度错误（CLI
+        # synthetic API Error 却报 success）→ 按失败收口，避免页面整轮空白。
+        inferred = await _infer_quota_error_from_last_assistant_output(svc, agent_run)
+        if inferred is not None:
+            is_error = True
+            error = inferred
     await _close_apply_terminal(
         svc,
         agent_run,
