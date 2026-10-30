@@ -16,6 +16,7 @@ import {
   marqueeTickerEnd,
   resolveMarqueeTarget,
   wrapLoopOffset,
+  loopScrollWidth,
   TICKER_LOOP_SPEED,
   LIVE_MARQUEE_MAX_ENTRIES,
 } from "@/components/daemon/turn-live-marquee";
@@ -393,6 +394,13 @@ describe("TurnLiveMarquee 连续轨道（FR-01 / FR-02 / FR-05）", () => {
     // 循环速度：用户能看清的慢速（72px/s，±10% 容差——2026-10-30 用户裁决）。
     expect(TICKER_LOOP_SPEED).toBeGreaterThanOrEqual(65);
     expect(TICKER_LOOP_SPEED).toBeLessThanOrEqual(79);
+
+    // 短文本不起滚（评审 P2 修复）：一份文字 ≤ 窗口宽 → 0（静止显示开头，
+    // 循环滚动右缘会露空白）；超窗 → 周期宽度（第二份 offsetWidth 含 48px 间隔）。
+    expect(loopScrollWidth(117 + 48, 218, 48)).toBe(0);
+    expect(loopScrollWidth(218 + 48, 218, 48)).toBe(0);
+    expect(loopScrollWidth(219 + 48, 218, 48)).toBe(267);
+    expect(loopScrollWidth(440 + 48, 218, 48)).toBe(488);
 
     // 组件层：等待条目 ticker 渲染双份相同文本，第二份 aria-hidden（屏读不重复）。
     const { getByTestId } = render(

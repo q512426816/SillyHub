@@ -451,6 +451,19 @@ const TICKER_SPEED = 220;
  */
 export const TICKER_LOOP_SPEED = 72;
 
+/** 循环模式轮间隔（px）：双份文本之间留一轮呼吸空隙（与第二份 paddingLeft 同源）。 */
+const TICKER_LOOP_GAP_PX = 48;
+
+/**
+ * 循环模式起滚宽度（FR-01，评审 P2 修复）：一份文字不超窗口宽时返回 0
+ * ——短文本无滚动必要，循环滚动右缘会露空白（一份填不满窗口），应静止
+ * 显示开头；超窗时返回周期宽度（copyWidth=第二份 offsetWidth，含间隔）。
+ */
+export function loopScrollWidth(copyWidth: number, viewWidth: number, gapPx: number): number {
+  const textWidth = copyWidth - gapPx;
+  return textWidth > viewWidth ? copyWidth : 0;
+}
+
 /**
  * ticker 终点（2026-10-23-marquee-thinking-fulltext / FR-02）：
  * 文本末尾贴住窗口右缘（<=0）；文本不溢出窗口时为 0。
@@ -521,6 +534,22 @@ function MarqueeItemView({
     }
   }, []);
 
+  // 循环模式测量：一份文字不超窗口宽时不滚、静止回开头（短文本循环滚动
+  // 右缘会露空白——评审 P2 修复）；超窗取周期宽度（第二份 offsetWidth 含间隔）。
+  const measureLoop = useCallback(() => {
+    const win = tickerWindowRef.current;
+    if (!win) return;
+    tickerLoopWidthRef.current = loopScrollWidth(
+      tickerCopyRef.current?.offsetWidth ?? 0,
+      win.clientWidth,
+      TICKER_LOOP_GAP_PX,
+    );
+    if (tickerLoopWidthRef.current === 0 && tickerOffsetRef.current !== 0) {
+      tickerOffsetRef.current = 0;
+      tickerTextRef.current?.style.setProperty("transform", "translate3d(0, 0, 0)");
+    }
+  }, []);
+
   /** 起排：once 向终点滚动到达即停；loop 恒速无缝循环（滚满一份回卷一份）。 */
   const ensureTickerScroll = useCallback(() => {
     if (!running || reduced || tickerRafRef.current !== null) return;
@@ -572,7 +601,7 @@ function MarqueeItemView({
     if (!text || !win) return;
     const update = () => {
       if (loop) {
-        tickerLoopWidthRef.current = tickerCopyRef.current?.offsetWidth ?? 0;
+        measureLoop();
       } else {
         tickerEndRef.current = marqueeTickerEnd(text.scrollWidth, win.clientWidth);
       }
@@ -584,7 +613,7 @@ function MarqueeItemView({
     observer.observe(text);
     observer.observe(win);
     return () => observer.disconnect();
-  }, [running, reduced, ensureTickerScroll, loop]);
+  }, [running, reduced, ensureTickerScroll, loop, measureLoop]);
 
   // 流式思考持续增长：每次文本变化重新测量终点并继续滚（不重置位置），
   // 直到思考结束（status 变为 done 后切换到开头截断展示）；loop 模式文本
@@ -595,12 +624,12 @@ function MarqueeItemView({
     const win = tickerWindowRef.current;
     if (!text || !win) return;
     if (loop) {
-      tickerLoopWidthRef.current = tickerCopyRef.current?.offsetWidth ?? 0;
+      measureLoop();
     } else {
       tickerEndRef.current = marqueeTickerEnd(text.scrollWidth, win.clientWidth);
     }
     ensureTickerScroll();
-  }, [entry.text, running, reduced, ensureTickerScroll, loop]);
+  }, [entry.text, running, reduced, ensureTickerScroll, loop, measureLoop]);
 
   // 新条目从开头开始；卸载/完成后停排。文本增长（同 id）不重置位置。
   useEffect(() => {
@@ -644,7 +673,7 @@ function MarqueeItemView({
                 ref={tickerCopyRef}
                 data-marquee-copy="second"
                 aria-hidden="true"
-                className="pl-12"
+                style={{ paddingLeft: TICKER_LOOP_GAP_PX }}
               >
                 {entry.text}
               </span>

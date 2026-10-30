@@ -18,7 +18,8 @@ created_at: 2026-10-30T00:49:06.115Z
 
 - MarqueeItemView（组件内部，未对外导出）新增可选 prop `scrollMode?: "once" | "loop"`，缺省 "once"——既有调用方行为不变。
 - 新增导出纯函数 `wrapLoopOffset(offset: number, loopWidth: number): number`：offset 萊入 [-loopWidth, 0) 区间（宽度变化时折回），供测试与回卷共用。
-- 新增常量 TICKER_LOOP_SPEED = 72（px/s）；既有 TICKER_SPEED/marqueeTickerEnd/deriveLiveMarqueeEntries 导出签名不变。
+- 新增导出纯函数 `loopScrollWidth(copyWidth, viewWidth, gapPx): number`（评审 P2 修复）：一份文字 ≤ 窗口宽返回 0（不起滚、静止显示开头），超窗返回周期宽度。
+- 新增常量 TICKER_LOOP_SPEED = 72（px/s）与轮间隔 TICKER_LOOP_GAP_PX = 48（px，与第二份 paddingLeft 同源）；既有 TICKER_SPEED/marqueeTickerEnd/deriveLiveMarqueeEntries 导出签名不变。
 - 无后端 / API / 数据格式变化（纯前端组件行为变更）。
 
 ## 边界与并发（盲维四问——每问必答，答不了即设计缺口）
@@ -43,7 +44,8 @@ created_at: 2026-10-30T00:49:06.115Z
 
 本方案最大的风险是什么？试过但放弃的方案及放弃理由？
 
-- 最大风险：jsdom 无真实布局，回卷视觉正确性（无缝、无空白）无法在单测里直接验证，只能靠纯函数 wrapLoopOffset + 双份 DOM 结构断言覆盖；上线后需在真实页面肉眼确认一轮循环（视觉证据 visual-evidence.md 记录）。
+- 最大风险：jsdom 无真实布局，回卷视觉正确性（无缝、无空白）无法在单测里直接验证，只能靠纯函数 wrapLoopOffset/loopScrollWidth + 双份 DOM 结构断言覆盖；上线后需在真实页面肉眼确认一轮循环（视觉证据 visual-evidence.md 记录）。
+- 评审 P2（短文本相位露白，turn-live-marquee.tsx loopScrollWidth 锚点）已实装修复：一份文字 ≤ 窗口宽时不起滚、静止显示开头（等待初期无 token 数据的常态阶段），文本增长超窗后自然起滚；48px 轮间隔空隙经过窗口属跑马灯轮次分隔的常态运动空白，非静止死白。
 - 放弃方案 ①（单份文本滚到末尾后直接跳回开头继续）：末尾贴右缘时跳变突兀，且若滚过末尾继续左移，窗口右侧必然出现空白区段——正是用户本次抱怨的现象，故必须双份拼接。
 - 放弃方案 ②（用户最初提议：删掉 inline-block class）：span 退回 display:inline 后 CSS transform 对 inline 非替换元素不生效，滚动"悄悄失效"，属碰巧坏掉式修法、代码意图不明，被否。
 - 放弃方案 ③（所有 running 条目统一改循环）：thinking 流式文本持续增长，"循环一轮"与"跟随新末尾"语义冲突（慢速下一轮极长且内容一直在变），保持 once 模式；仅每秒变化、内容收敛的 marquee-awaiting 条目改 loop。
