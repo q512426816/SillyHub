@@ -446,6 +446,12 @@ function dotClass(status: LiveMarqueeEntry["status"]): string {
 const TICKER_SPEED = 220;
 
 /**
+ * 条目内部循环滚动速度（px/s）：用户能看清的慢速（2026-10-30 用户裁决，
+ * 2026-10-30-marquee-awaiting-loop-scroll FR-01 ±10% 由测试锚定）。
+ */
+export const TICKER_LOOP_SPEED = 72;
+
+/**
  * ticker 终点（2026-10-23-marquee-thinking-fulltext / FR-02）：
  * 文本末尾贴住窗口右缘（<=0）；文本不溢出窗口时为 0。
  * 规则：一次滚到最后一个字符即停，**不循环**；完成态回到开头截断显示。
@@ -455,11 +461,26 @@ export function marqueeTickerEnd(textWidth: number, viewWidth: number): number {
 }
 
 /**
+ * 循环模式回卷（2026-10-30-marquee-awaiting-loop-scroll / FR-01）：
+ * 把 offset 折回 [-loopWidth, 0)——滚满一份周期加回一份无缝续滚；
+ * 周期宽度变化（秒数/token 文本更新）时同样折回，循环不中断不越界。
+ * loopWidth 非正（文本为空/未测到宽度）时原样返回（防御）。
+ */
+export function wrapLoopOffset(offset: number, loopWidth: number): number {
+  if (loopWidth <= 0) return offset;
+  const wrapped = ((offset % loopWidth) + loopWidth) % loopWidth; // [0, loopWidth)
+  return wrapped === 0 ? 0 : wrapped - loopWidth;
+}
+
+/**
  * 单条目视图（FR-01~FR-05）：固定 lucide 图标 + 文本区 + 状态/耗时区。
- *   - running：文本从开头一次向左滚到当前最后一个字符；流式思考持续增长时
+ *   - running + once：文本从开头一次向左滚到当前最后一个字符；流式思考持续增长时
  *     跟随新末尾继续滚（落后越多越快），不循环；
+ *   - running + loop（2026-10-30-marquee-awaiting-loop-scroll）：双份相同文本
+ *     首尾拼接、恒速慢速无缝循环（滚满一份回卷一份，窗口恒有文字），
+ *     适用于内容每秒变化、一次滚到末尾即停语义不佳的等待状态条；
  *   - 完成：停止滚动，回到开头单份截断，右侧 Timer 图标 + 耗时；
- *   - reduced-motion：不滚动、不转圈，静态截断；
+ *   - reduced-motion：不滚动、不转圈，静态截断（once/loop 同）；
  * 只有文本区参与滚动，图标与耗时区固定。
  */
 function MarqueeItemView({
@@ -469,6 +490,7 @@ function MarqueeItemView({
   fixedWidth = true,
   testId = "marquee-item",
   runningElapsedMs,
+  scrollMode = "once",
 }: {
   entry: LiveMarqueeEntry;
   durationMs: number | null;
@@ -477,13 +499,19 @@ function MarqueeItemView({
   testId?: string;
   /** 运行中已耗时（FR-02/FR-03，2026-10-25-marquee-subagent-outer-only）；无起点为 null（只转圈）。 */
   runningElapsedMs?: number | null;
+  /** 条目内滚动模式："once"=单份一次滚到末尾即停+流式跟随；"loop"=双份无缝循环慢速滚。 */
+  scrollMode?: "once" | "loop";
 }) {
   const running = entry.status === "running";
+  const loop = scrollMode === "loop";
   const Icon = ICON_COMPONENTS[entry.icon];
   const tickerWindowRef = useRef<HTMLSpanElement | null>(null);
   const tickerTextRef = useRef<HTMLSpanElement | null>(null);
+  // 循环模式第二份文本（含间隔 padding）：offsetWidth 即无缝回卷的周期宽度。
+  const tickerCopyRef = useRef<HTMLSpanElement | null>(null);
   const tickerOffsetRef = useRef(0);
   const tickerEndRef = useRef(0);
+  const tickerLoopWidthRef = useRef(0);
   const tickerRafRef = useRef<number | null>(null);
 
   const stopTicker = useCallback(() => {
@@ -493,7 +521,7 @@ function MarqueeItemView({
     }
   }, []);
 
-  /** 起排：向终点滚动，到达最后一个字符即停（不循环）。 */
+  /** 起排：once 向终点滚动到达即停；loop 恒速无缝循环（滚满一份回卷一份）。 */
   const ensureTickerScroll = useCallback(() => {
     if (!running || reduced || tickerRafRef.current !== null) return;
     const text = tickerTextRef.current;
@@ -502,6 +530,21 @@ function MarqueeItemView({
     const step = (now: number) => {
       const dt = Math.min(80, now - last);
       last = now;
+      if (loop) {
+        const loopWidth = tickerLoopWidthRef.current;
+        if (loopWidth <= 0) {
+          // 未测到周期宽度（空文本/布局前）：停排，测量入口更新后重起。
+          tickerRafRef.current = null;
+          return;
+        }
+        tickerOffsetRef.current = wrapLoopOffset(
+          tickerOffsetRef.current - (TICKER_LOOP_SPEED * dt) / 1000,
+          loopWidth,
+        );
+        text.style.transform = `translate3d(${tickerOffsetRef.current}px, 0, 0)`;
+        tickerRafRef.current = requestAnimationFrame(step);
+        return;
+      }
       const end = tickerEndRef.current;
       const distance = tickerOffsetRef.current - end;
       if (distance > 0) {
@@ -519,16 +562,20 @@ function MarqueeItemView({
       }
     };
     tickerRafRef.current = requestAnimationFrame(step);
-  }, [running, reduced]);
+  }, [running, reduced, loop]);
 
-  // 测量文本/窗口宽度 → 更新终点；文本流式增长时终点变远，继续滚。
+  // 测量文本/窗口宽度 → 更新终点（once）/周期宽度（loop）；文本变化时终点变远继续滚。
   useEffect(() => {
     if (!running || reduced) return;
     const text = tickerTextRef.current;
     const win = tickerWindowRef.current;
     if (!text || !win) return;
     const update = () => {
-      tickerEndRef.current = marqueeTickerEnd(text.scrollWidth, win.clientWidth);
+      if (loop) {
+        tickerLoopWidthRef.current = tickerCopyRef.current?.offsetWidth ?? 0;
+      } else {
+        tickerEndRef.current = marqueeTickerEnd(text.scrollWidth, win.clientWidth);
+      }
       ensureTickerScroll();
     };
     update();
@@ -537,18 +584,23 @@ function MarqueeItemView({
     observer.observe(text);
     observer.observe(win);
     return () => observer.disconnect();
-  }, [running, reduced, ensureTickerScroll]);
+  }, [running, reduced, ensureTickerScroll, loop]);
 
   // 流式思考持续增长：每次文本变化重新测量终点并继续滚（不重置位置），
-  // 直到思考结束（status 变为 done 后切换到开头截断展示）。
+  // 直到思考结束（status 变为 done 后切换到开头截断展示）；loop 模式文本
+  // 变化（秒数/token 更新）重测周期宽度并折回区间，循环不中断。
   useEffect(() => {
     if (!running || reduced) return;
     const text = tickerTextRef.current;
     const win = tickerWindowRef.current;
     if (!text || !win) return;
-    tickerEndRef.current = marqueeTickerEnd(text.scrollWidth, win.clientWidth);
+    if (loop) {
+      tickerLoopWidthRef.current = tickerCopyRef.current?.offsetWidth ?? 0;
+    } else {
+      tickerEndRef.current = marqueeTickerEnd(text.scrollWidth, win.clientWidth);
+    }
     ensureTickerScroll();
-  }, [entry.text, running, reduced, ensureTickerScroll]);
+  }, [entry.text, running, reduced, ensureTickerScroll, loop]);
 
   // 新条目从开头开始；卸载/完成后停排。文本增长（同 id）不重置位置。
   useEffect(() => {
@@ -579,13 +631,33 @@ function MarqueeItemView({
         )}
       >
         {running && !reduced ? (
-          <span
-            ref={tickerTextRef}
-            data-testid="marquee-ticker"
-            className="sh-live-marquee-ticker inline-block whitespace-nowrap font-medium text-foreground"
-          >
-            {entry.text}
-          </span>
+          loop ? (
+            // 循环模式：双份相同文本首尾拼接（第二份 aria-hidden+间隔 padding），
+            // 滚满一份（=第二份 offsetWidth，含间隔）回卷一份，窗口恒有文字。
+            <span
+              ref={tickerTextRef}
+              data-testid="marquee-ticker"
+              className="sh-live-marquee-ticker inline-block whitespace-nowrap font-medium text-foreground"
+            >
+              <span data-marquee-copy="first">{entry.text}</span>
+              <span
+                ref={tickerCopyRef}
+                data-marquee-copy="second"
+                aria-hidden="true"
+                className="pl-12"
+              >
+                {entry.text}
+              </span>
+            </span>
+          ) : (
+            <span
+              ref={tickerTextRef}
+              data-testid="marquee-ticker"
+              className="sh-live-marquee-ticker inline-block whitespace-nowrap font-medium text-foreground"
+            >
+              {entry.text}
+            </span>
+          )
         ) : (
           <span className="block truncate font-medium text-foreground" title={entry.text}>
             {entry.text}
@@ -1071,6 +1143,8 @@ export const TurnLiveMarquee = memo(function TurnLiveMarquee({
                 durationMs={entry.durationMs ?? runtimeDurations[entry.id] ?? null}
                 runningElapsedMs={runningElapsedFor(entry)}
                 reduced={false}
+                // 等待状态条（内容每秒变化）走慢速无缝循环；其余条目保持一次滚即停。
+                scrollMode={entry.id === "marquee-awaiting" ? "loop" : "once"}
                 testId={
                   entry.id === "marquee-awaiting" ? awaitingTestId : itemTestId
                 }
