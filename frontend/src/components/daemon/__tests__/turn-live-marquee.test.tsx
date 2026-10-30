@@ -15,6 +15,8 @@ import {
   marqueeSpeedForDistance,
   marqueeTickerEnd,
   resolveMarqueeTarget,
+  wrapLoopOffset,
+  TICKER_LOOP_SPEED,
   LIVE_MARQUEE_MAX_ENTRIES,
 } from "@/components/daemon/turn-live-marquee";
 import {
@@ -374,6 +376,49 @@ describe("TurnLiveMarquee 连续轨道（FR-01 / FR-02 / FR-05）", () => {
     );
 
     expect(queryByTestId("marquee-awaiting")).toBeNull();
+  });
+
+  it("等待条目循环滚动：双份文本渲染 + wrapLoopOffset 回卷（FR-01）", () => {
+    // 回卷纯函数：区间内不动。
+    expect(wrapLoopOffset(0, 200)).toBe(0);
+    expect(wrapLoopOffset(-30, 200)).toBe(-30);
+    // 滚满一份周期（含小数越界）：加回一个周期无缝回卷。
+    expect(wrapLoopOffset(-200, 200)).toBe(0);
+    expect(wrapLoopOffset(-210.5, 200)).toBeCloseTo(-10.5);
+    // 周期宽度变化（秒数/token 文本更新）：折回新区间不越界。
+    expect(wrapLoopOffset(-150, 120)).toBe(-30);
+    // 防御：周期非正不折（文本为空/未测到宽度）。
+    expect(wrapLoopOffset(-50, 0)).toBe(-50);
+
+    // 循环速度：用户能看清的慢速（72px/s，±10% 容差——2026-10-30 用户裁决）。
+    expect(TICKER_LOOP_SPEED).toBeGreaterThanOrEqual(65);
+    expect(TICKER_LOOP_SPEED).toBeLessThanOrEqual(79);
+
+    // 组件层：等待条目 ticker 渲染双份相同文本，第二份 aria-hidden（屏读不重复）。
+    const { getByTestId } = render(
+      <TurnLiveMarquee entries={deriveLiveMarqueeEntries([thinking("t-done", "思考完成")])} />,
+    );
+    const awaiting = getByTestId("marquee-awaiting");
+    const ticker = awaiting.querySelector('[data-testid="marquee-ticker"]');
+    expect(ticker).not.toBeNull();
+    const copies = ticker!.querySelectorAll("[data-marquee-copy]");
+    expect(copies).toHaveLength(2);
+    expect(copies[0]!.textContent).toContain("等待模型响应");
+    expect(copies[0]!.textContent).toBe(copies[1]!.textContent);
+    expect(copies[1]!.getAttribute("aria-hidden")).toBe("true");
+  });
+
+  it("reduced-motion 下等待条目静态截断，不渲染循环 ticker（FR-02）", () => {
+    const { getByTestId } = render(
+      <TurnLiveMarquee
+        entries={deriveLiveMarqueeEntries([thinking("t-done", "思考完成")])}
+        reducedMotion
+      />,
+    );
+
+    expect(
+      getByTestId("marquee-awaiting").querySelector('[data-testid="marquee-ticker"]'),
+    ).toBeNull();
   });
 
   it("新事件到达后等待条目消失（FR-02）", () => {
