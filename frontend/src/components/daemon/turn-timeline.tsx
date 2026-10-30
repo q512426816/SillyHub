@@ -351,7 +351,8 @@ export interface SessionTurnView {
    * 2026-07-29-model-error-visibility / FR-04：turn 终态=failed 时拉取的结构化错误
    * 详情（GET /sessions/{id}/runs 的 error_detail 经 buildErrorLogItem 映射）。
    * null/undefined（成功 turn / brownfield / attach 历史 turn）→ 不渲染 RunErrorItem。
-   * 可选：外部 logsToTurns 构造的历史 turn 不带此字段（只读 import，不改其构造）。
+   * 2026-10-30-quota-error-visible：logsToTurns 对「末条 [ASSISTANT] 为额度错误」的
+   * 历史轮直接回填该字段（daemon 曾以 success 收口、run 侧无 error_detail）。
    */
   errorDetail?: ErrorLogItem | null;
 

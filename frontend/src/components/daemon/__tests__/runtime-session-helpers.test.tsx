@@ -931,3 +931,85 @@ describe("logsToTurns 轮触发溯源段（2026-10-22-turn-trigger-generalize）
     expect((first as { trigger?: string }).trigger).toBe("task_wakeup");
   });
 });
+
+/**
+ * 2026-10-30-quota-error-visible：历史/刷新路径的额度耗尽兜底。
+ *
+ * 生产实证会话 b696aa0c：daemon 以 success 收口且唯一助手输出是 429 额度错误文本；
+ * 装配器按既有约定丢弃该文本（假定失败卡由 errorDetail 承载），而 run 无
+ * error_detail → 会话页整轮空白。logsToTurns 需按「末条 [ASSISTANT]」判定并回填
+ * quota_exceeded 失败卡；错误后仍有正常答复（CLI 重试成功）时不得误判。
+ */
+describe("logsToTurns 额度耗尽终态兜底（2026-10-30-quota-error-visible）", () => {
+  const TS = (sec: number) =>
+    new Date(Date.UTC(2026, 9, 30, 7, 24, sec)).toISOString();
+  const QUOTA_LINE =
+    "[ASSISTANT] API Error: Request rejected (429) · [1308][已达到 5 小时的使用上限。" +
+    "您的限额将在 2026-10-30 17:13:29 重置。][20261030152446a5c9169226a54dc6]";
+
+  it("logsToTurns 末条 [ASSISTANT] 额度错误文本回填 quota_exceeded 与 failed", () => {
+    const turns = logsToTurns([
+      makeLog("u1", "run-q", "user_input", "继续", { timestamp: TS(0) }),
+      makeLog("e1", "run-q", "stdout", QUOTA_LINE, { timestamp: TS(47) }),
+      // override 行与错误行同刻落库——必须被排除在「末条 [ASSISTANT]」之外。
+      makeLog("e2", "run-q", "stdout", "[ASSISTANT_OVERRIDE] main:abc:text", {
+        timestamp: TS(47),
+      }),
+    ]);
+
+    expect(turns).toHaveLength(1);
+    const turn = turns[0]!;
+    expect(turn.status).toBe("failed");
+    expect(turn.errorDetail).toMatchObject({
+      type: "quota_exceeded",
+      raw: expect.stringContaining("使用上限"),
+    });
+    // 文本仍不进正文（错误卡承担展示，避免「原文气泡 + 错误卡」双显）。
+    expect(turn.output).toBe("");
+  });
+
+  it("额度错误后仍有正常 [ASSISTANT] 答复 → completed 且无 errorDetail", () => {
+    const turns = logsToTurns([
+      makeLog("u1", "run-q", "user_input", "继续", { timestamp: TS(0) }),
+      makeLog("e1", "run-q", "stdout", QUOTA_LINE, { timestamp: TS(47) }),
+      makeLog("a1", "run-q", "stdout", "[ASSISTANT] 重试后正常答复", {
+        timestamp: TS(48),
+      }),
+    ]);
+
+    const turn = turns[0]!;
+    expect(turn.status).toBe("completed");
+    expect(turn.errorDetail).toBeUndefined();
+    expect(turn.output).toBe("重试后正常答复");
+  });
+
+  it("logsToTurns 末条为 [MODEL_RETRY] 协议行 → completed 且无 errorDetail", () => {
+    const turns = logsToTurns([
+      makeLog("u1", "run-q", "user_input", "继续", { timestamp: TS(0) }),
+      makeLog("e1", "run-q", "stdout", QUOTA_LINE, { timestamp: TS(47) }),
+      makeLog(
+        "r1",
+        "run-q",
+        "stdout",
+        '[ASSISTANT] [MODEL_RETRY] {"attempt":2,"max_retries":5,"error_status":429}',
+        { timestamp: TS(48) },
+      ),
+    ]);
+
+    const turn = turns[0]!;
+    expect(turn.status).toBe("completed");
+    expect(turn.errorDetail).toBeUndefined();
+  });
+
+  it("logsToTurns 正常成功轮不产生 errorDetail", () => {
+    const turns = logsToTurns([
+      makeLog("u1", "run-ok", "user_input", "问题", { timestamp: TS(0) }),
+      makeLog("a1", "run-ok", "stdout", "[ASSISTANT] 正常答复", {
+        timestamp: TS(30),
+      }),
+    ]);
+
+    expect(turns[0]!.status).toBe("completed");
+    expect(turns[0]!.errorDetail).toBeUndefined();
+  });
+});

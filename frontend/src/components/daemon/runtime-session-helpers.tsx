@@ -26,6 +26,14 @@ import {
   type UserMsgTurnSegment,
 } from "@/components/daemon/session-log-assembler";
 import { type AgentRunLogEntry } from "@/lib/agent";
+// 2026-10-30-quota-error-visible：历史轮末条模型错误兜底——复用 agent-log 既有
+// 识别/映射（isAssistantApiErrorText 行首锚定 + buildErrorLogItem 额度升级），
+// 保证与实时错误卡同一文案与类型口径。
+import {
+  buildErrorLogItem,
+  isAssistantApiErrorText,
+  type ErrorLogItem,
+} from "@/components/agent-log/normalize";
 // 2026-10-22-session-composer-slim：标记行解析迁入纯函数库（展示层格式化共用同一实现），
 // 本模块保持既有导出面，调用方零改动。
 import {
@@ -267,6 +275,45 @@ export function runTerminalTurnStatus(
   }
   if (status === "interrupted" || status === "cancelled") return "killed";
   return null;
+}
+
+/**
+ * 2026-10-30-quota-error-visible：从该 run 的日志还原「末条助手输出」，
+ * 命中额度耗尽时产出结构化错误项（供 logsToTurns 回填失败卡）。
+ *
+ * 背景（生产实证会话 b696aa0c）：CLI 把额度耗尽写成 synthetic assistant 消息
+ * （`API Error: Request rejected (429) · [1308]...使用上限...`），却以
+ * result.subtype=success / is_error=false 结束 turn。后端新收口会兜底改判 failed；
+ * 本函数是旧数据与刷新/历史路径的前端兜底——装配器按既有约定丢弃该错误文本
+ * （避免与错误卡双显），若无本回填整轮就是空白。
+ *
+ * 判定只认**最后一条** `[ASSISTANT]` 行：CLI 自动重试成功时末条是正常答复，
+ * `[MODEL_RETRY]` 协议行（`[ASSISTANT] [MODEL_RETRY] {...}`）也不匹配错误特征词，
+ * 均保持成功语义。仅额度类错误回填（其余模型错误维持既有路径，避免扩大面）。
+ */
+export function terminalQuotaErrorFromEntries(
+  entries: AgentRunLogEntry[],
+): ErrorLogItem | null {
+  let lastBody: string | null = null;
+  let lastTs: number | null = null;
+  for (const entry of entries) {
+    if (entry.channel !== "stdout") continue;
+    const match = /^\[ASSISTANT\]\s*([\s\S]*)$/.exec(
+      (entry.content_redacted ?? "").trimStart(),
+    );
+    if (!match) continue;
+    const body = match[1] ?? "";
+    const parsed = entry.timestamp ? Date.parse(entry.timestamp) : Number.NaN;
+    const ts = Number.isFinite(parsed) ? parsed : null;
+    // 同一轮日志通常已按时间序；时间戳可解析时以时间为准，缺省保持数组序。
+    if (lastBody === null || ts === null || lastTs === null || ts >= lastTs) {
+      lastBody = body;
+      lastTs = ts;
+    }
+  }
+  if (lastBody === null || !isAssistantApiErrorText(lastBody)) return null;
+  const item = buildErrorLogItem({ type: "unknown", raw: lastBody });
+  return item && item.type === "quota_exceeded" ? item : null;
 }
 
 /**
@@ -679,6 +726,9 @@ export function logsToTurns(logs: AgentRunLogEntry[]): SessionTurnView[] {
     // 兼容投影（§9.4）：output / processItems 形状与改前手写路径等价（user_msg
     // 段不进投影——正文气泡由渲染层 user_msg 分支承载）。
     const legacy = segmentsToLegacy(segments);
+    // 2026-10-30-quota-error-visible：末条助手输出为额度错误时还原失败卡
+    // （装配器丢弃了该文本行；无此回填则整轮空白）。
+    const terminalQuotaError = terminalQuotaErrorFromEntries(entries);
     turns.push({
       runId: `__attach_history_${turnIndex}__`,
       // ql-20260802-001：保留真实 run_id 供 AskUser 提问历史穿插到对应 turn（跟会话顺序）
@@ -688,7 +738,8 @@ export function logsToTurns(logs: AgentRunLogEntry[]): SessionTurnView[] {
       prompt: prompts[0] ?? "",
       // ql-20260730-004：reply 流式 delta 直接 concat（投影按序拼接，语义同前）。
       output: legacy.output,
-      status: "completed",
+      status: terminalQuotaError ? "failed" : "completed",
+      errorDetail: terminalQuotaError ?? undefined,
       seenLogIds: new Set(entries.map((e) => e.id)),
       processItems: legacy.processItems,
       segments: [
