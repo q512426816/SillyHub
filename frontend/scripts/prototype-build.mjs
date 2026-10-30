@@ -52,6 +52,11 @@ const VIEWS = [
     title: "长操作实时感知",
     desc: "跑马灯等待条目三态（现状/等待首字/生成大段内容·估算/权威）+ 慢提示 + 心跳过期回落（2026-10-29-engine-live-perception）",
   },
+  {
+    file: "session-config-pending-view",
+    title: "会话配置条待生效标记",
+    desc: "四控件逐控件待生效标记（现状静默对照/部分暂存/全暂存/askuser 待答场景）（2026-10-30-askuser-config-pending）",
+  },
 ];
 
 function run(cmd, args) {
