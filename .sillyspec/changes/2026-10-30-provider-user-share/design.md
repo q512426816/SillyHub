@@ -29,7 +29,7 @@ created_at: 2026-10-30T08:31:22.030Z
 
 1. 乱序/迟到到达：输入或事件乱序时，本设计的假设还成立吗？
 
-   授权判定是每次 claim 实时查询（provider + share 行），不缓存、不依赖事件顺序；共享刚创建/刚撤销在下一轮即生效。会话已选供应商后共享被撤销，claim 解析失败走既有 fallback 链，不阻断（FR-05）。前端列表 30s staleTime 可能短暂显示已撤销项，但选择时后端 404，属既有刷新节奏。
+   授权判定是每次 claim 实时查询（provider + share 行），不缓存、不依赖事件顺序；共享刚创建/刚撤销在下一轮即生效。会话已选供应商后共享被撤销，claim 解析失败走既有 fallback 链，不阻断（FR-05）。前端列表 30s staleTime 可能短暂显示已撤销项，但选择时后端 404，属既有刷新节奏。lease_meta.session_id 指向不存在会话行（旧夹具/极端竞态）时，解析回落到调用方传入的 runtime 属主，保持改造前行为。
 
 2. 并发写：两个执行体同时操作同一数据/文件会发生什么？
 
@@ -60,7 +60,9 @@ created_at: 2026-10-30T08:31:22.030Z
 | 修改 | backend/app/modules/llm_provider/service.py | 共享 CRUD/可用列表/授权判定/配置构造抽取 |
 | 修改 | backend/app/modules/llm_provider/router.py | usable/shares 端点 |
 | 修改 | backend/app/modules/daemon/session/service/inject_gates.py | 创建/切换 provider 授权放宽为属主或共享 |
+| 修改 | backend/app/modules/daemon/session/service/attachments.py | 切换轮 provider_config 改走会话属主 + 共享授权解析 |
 | 修改 | backend/app/modules/daemon/lease/context.py | 会话级 provider 按会话属主 + 共享授权解析 |
+| 修改 | backend/app/modules/daemon/tests/test_lease_context_provider_priority.py | 会话级解析函数更名后同步 mock 目标（行为断言不变） |
 | 新增 | backend/app/modules/llm_provider/tests/test_provider_shares.py | FR-01/02/04/05 用例 |
 | 新增 | backend/app/modules/daemon/tests/test_lease_context_provider_share.py | FR-03/05 claim 用例 |
 | 修改 | backend/app/modules/daemon/tests/test_session_switch_config.py | 共享供应商切换用例 |
