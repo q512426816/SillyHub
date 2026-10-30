@@ -350,22 +350,17 @@ class TestSessionProviderDegradesToOriginalChain:
     ) -> None:
         """会话分支解析抛异常（如 DB 抖动）→ try/except 降级走原链，不阻断会话创建。
 
-        mock 只让**首次**调用（即会话级分支）抛错，后续调用透传真实实现——原链
-        bound 分支同样调 ``resolve_bound_provider_config``，不能一并炸掉。被测方法
+        mock 只让会话级解析函数抛错；原链 bound/default 分支不受影响。被测方法
         ``_inject_provider_config`` 本身不 mock。降级后原链命中用户默认。
+        2026-10-30-provider-user-share：会话级分支改调
+        ``resolve_session_provider_config``（按会话属主 + 共享授权），mock 目标同步。
         """
         from app.modules.daemon.lease import context as ctx_module
 
-        real_resolve = ctx_module.resolve_bound_provider_config
-        calls = {"n": 0}
+        async def _raise_session_resolve(*args, **kwargs):
+            raise RuntimeError("simulated session-provider resolution failure")
 
-        async def _raise_first_then_real(*args, **kwargs):
-            calls["n"] += 1
-            if calls["n"] == 1:
-                raise RuntimeError("simulated session-provider resolution failure")
-            return await real_resolve(*args, **kwargs)
-
-        monkeypatch.setattr(ctx_module, "resolve_bound_provider_config", _raise_first_then_real)
+        monkeypatch.setattr(ctx_module, "resolve_session_provider_config", _raise_session_resolve)
 
         user_id = await _create_user(db_session)
         await _seed_provider(

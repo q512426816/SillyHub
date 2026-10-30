@@ -20,7 +20,18 @@ import uuid
 from datetime import datetime
 from typing import Any
 
-from sqlalchemy import JSON, Boolean, Column, DateTime, ForeignKey, Index, LargeBinary, String, Uuid
+from sqlalchemy import (
+    JSON,
+    Boolean,
+    Column,
+    DateTime,
+    ForeignKey,
+    Index,
+    LargeBinary,
+    String,
+    UniqueConstraint,
+    Uuid,
+)
 from sqlmodel import Field
 
 from app.models.base import BaseModel
@@ -118,4 +129,56 @@ class LlmProvider(BaseModel, table=True):
         # 原 (user_id, agent_kind, is_default) 复合索引随 agent_kind 列删除而退役
         # （迁移 20261006120000）；默认/引擎过滤转行级 Python 判断（每用户行数几十级）。
         Index("ix_llm_providers_user", "user_id"),
+    )
+
+
+class LlmProviderShare(BaseModel, table=True):
+    """供应商按用户共享（2026-10-30-provider-user-share）。
+
+    语义：provider 属主把凭证的**使用权**授予 grantee；grantee 只能在会话配置条
+    选择（只读），不可编辑/删除/设默认/查额度（写权限仍由 LlmProviderService 的
+    owner 级过滤保证）。``(provider_id, grantee_user_id)`` 唯一——重复共享幂等；
+    provider 删除级联清共享，用户删除级联清共享。
+    """
+
+    __tablename__ = "llm_provider_shares"
+
+    id: uuid.UUID = Field(
+        default_factory=uuid.uuid4,
+        sa_column=Column(Uuid(as_uuid=True), primary_key=True),
+    )
+    provider_id: uuid.UUID = Field(
+        sa_column=Column(
+            Uuid(as_uuid=True),
+            ForeignKey("llm_providers.id", ondelete="CASCADE"),
+            nullable=False,
+        ),
+    )
+    grantee_user_id: uuid.UUID = Field(
+        sa_column=Column(
+            Uuid(as_uuid=True),
+            ForeignKey("users.id", ondelete="CASCADE"),
+            nullable=False,
+        ),
+    )
+    shared_by_user_id: uuid.UUID = Field(
+        sa_column=Column(
+            Uuid(as_uuid=True),
+            ForeignKey("users.id", ondelete="CASCADE"),
+            nullable=False,
+        ),
+    )
+    created_at: datetime = Field(
+        default_factory=datetime.utcnow,
+        sa_column=Column(DateTime, nullable=False, default=datetime.utcnow),
+    )
+
+    __table_args__ = (
+        UniqueConstraint(
+            "provider_id",
+            "grantee_user_id",
+            name="ux_llm_provider_shares_provider_grantee",
+        ),
+        Index("ix_llm_provider_shares_provider", "provider_id"),
+        Index("ix_llm_provider_shares_grantee", "grantee_user_id"),
     )

@@ -24,6 +24,9 @@ from app.modules.llm_provider.schema import (
     LlmProviderList,
     LlmProviderQuotaResponse,
     LlmProviderRead,
+    LlmProviderShareCreate,
+    LlmProviderShareList,
+    LlmProviderShareRead,
     LlmProviderUpdate,
     SetDefaultResult,
     UsageResult,
@@ -53,6 +56,82 @@ async def list_providers(
         items=[service._to_read(i) for i in items],
         total=len(items),
     )
+
+
+@router.get("/usable", response_model=LlmProviderList)
+async def list_usable_providers(
+    session: SessionDep,
+    user: CurrentUser,
+) -> LlmProviderList:
+    """2026-10-30-provider-user-share：会话页可用供应商（自己的 + 共享给自己的）。
+
+    共享行 is_shared=true / shared_by_name=属主显示名 / is_default 强制 false；
+    api_key 仍只回 masked（NFR-02）。设置页仍用 ``GET /llm-providers``（own-only），
+    本端点不改变其语义。
+    """
+    service = LlmProviderService(session)
+    items = await service.list_usable(user.id)
+    return LlmProviderList(
+        items=[service.to_usable_read(i) for i in items],
+        total=len(items),
+    )
+
+
+@router.get("/{provider_id}/shares", response_model=LlmProviderShareList)
+async def list_provider_shares(
+    provider_id: str,
+    session: SessionDep,
+    user: CurrentUser,
+) -> LlmProviderShareList:
+    """列共享（仅属主；非属主 404/403，不泄漏存在性）。"""
+    service = LlmProviderService(session)
+    rows = await service.list_shares(_parse_id(provider_id), user.id)
+    items = [
+        LlmProviderShareRead(
+            user_id=share.grantee_user_id,
+            username=username,
+            display_name=display_name,
+            created_at=share.created_at,
+        )
+        for share, username, display_name in rows
+    ]
+    return LlmProviderShareList(items=items, total=len(items))
+
+
+@router.post(
+    "/{provider_id}/shares",
+    response_model=LlmProviderShareRead,
+    status_code=status.HTTP_201_CREATED,
+)
+async def share_provider(
+    provider_id: str,
+    data: LlmProviderShareCreate,
+    session: SessionDep,
+    user: CurrentUser,
+) -> LlmProviderShareRead:
+    """按 username/email 共享给指定用户（仅属主；幂等）。"""
+    service = LlmProviderService(session)
+    share, username, display_name = await service.share(
+        _parse_id(provider_id), user.id, data.identifier.strip()
+    )
+    return LlmProviderShareRead(
+        user_id=share.grantee_user_id,
+        username=username,
+        display_name=display_name,
+        created_at=share.created_at,
+    )
+
+
+@router.delete("/{provider_id}/shares/{grantee_user_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def unshare_provider(
+    provider_id: str,
+    grantee_user_id: str,
+    session: SessionDep,
+    user: CurrentUser,
+) -> None:
+    """撤销共享（仅属主；记录不存在也返回 204 幂等）。"""
+    service = LlmProviderService(session)
+    await service.unshare(_parse_id(provider_id), user.id, _parse_id(grantee_user_id))
 
 
 @router.post(

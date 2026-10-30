@@ -126,8 +126,10 @@ class TestMigrationStructure:
         # 20261023090100（agent_session_queued_messages.network_context 排队
         # 网络块快照列——同变更 task-08 / D-012@v1 派发实时重算）→
         # 20261030160000（business_member 补 change:read 权限——2026-10-30-
-        # business-member-change-read / D-001；系统角色后台不可编辑，走迁移）。
-        assert heads[0] == "20261030160000"  # 链尾锚随主线新迁移前移（注释链续写）
+        # business-member-change-read / D-001；系统角色后台不可编辑，走迁移）→
+        # 20261030180000（llm_provider_shares 按用户共享供应商——
+        # 2026-10-30-provider-user-share）。
+        assert heads[0] == "20261030180000"  # 链尾锚随主线新迁移前移（注释链续写）
 
     def test_revision_chain(self) -> None:
         mod = _load_migration_module()

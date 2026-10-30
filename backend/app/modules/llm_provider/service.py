@@ -15,13 +15,14 @@ from dataclasses import dataclass
 from urllib.parse import urlparse
 
 import httpx
-from sqlalchemy import select, update
+from sqlalchemy import delete, or_, select, update
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.crypto import CredentialCipher
 from app.core.errors import AppError, PermissionDenied
 from app.core.logging import get_logger
-from app.modules.llm_provider.model import LlmProvider
+from app.modules.llm_provider.model import LlmProvider, LlmProviderShare
 from app.modules.llm_provider.schema import (
     FetchModelsItem,
     FetchModelsRequest,
@@ -49,6 +50,18 @@ log = get_logger(__name__)
 class LlmProviderNotFound(AppError):
     code = "HTTP_404_LLM_PROVIDER_NOT_FOUND"
     http_status = 404
+
+
+class LlmProviderShareTargetNotFound(AppError):
+    """共享目标不存在/未激活/登录禁用——统一 404，不区分原因防用户枚举。"""
+
+    code = "HTTP_404_LLM_PROVIDER_SHARE_TARGET_NOT_FOUND"
+    http_status = 404
+
+
+class LlmProviderShareSelfForbidden(AppError):
+    code = "HTTP_400_LLM_PROVIDER_SHARE_SELF"
+    http_status = 400
 
 
 class LlmProviderKindFormatForbidden(AppError):
@@ -160,6 +173,43 @@ class DefaultSwitchResult:
     # task-09（D-003 / R-09）：openai 格式 set-default 联动 LiteLLM 注册结果（True/False）；
     # anthropic 格式 / 凭证失败 / unset 场景为 None（router 透传 SetDefaultResult.litellm_registered）。
     litellm_registered: bool | None = None
+
+
+@dataclass
+class UsableProviderItem:
+    """``list_usable`` 的单行：provider + 共享来源显示名（own 为 None）。"""
+
+    provider: LlmProvider
+    shared_by_name: str | None = None
+
+
+async def provider_usable_by(
+    session: AsyncSession,
+    provider_id: uuid.UUID,
+    user_id: uuid.UUID,
+) -> bool:
+    """2026-10-30-provider-user-share：provider 是否可被 user 使用（属主或有效共享）。
+
+    独立模块级函数（不构造 Service，避免每次授权都初始化 CredentialCipher）；
+    session 创建/切换与 daemon claim 授权共用同一判定，防两处口径漂移。
+    不存在 provider → False（调用方按既有 404/回退语义处理）。
+    """
+    provider = await session.get(LlmProvider, provider_id)
+    if provider is None:
+        return False
+    if provider.user_id == user_id:
+        return True
+    shared = (
+        await session.execute(
+            select(LlmProviderShare.id)
+            .where(
+                LlmProviderShare.provider_id == provider_id,
+                LlmProviderShare.grantee_user_id == user_id,
+            )
+            .limit(1)
+        )
+    ).scalar_one_or_none()
+    return shared is not None
 
 
 class LlmProviderService:
@@ -503,6 +553,167 @@ class LlmProviderService:
         if len(plaintext) < 8:
             return "****"
         return f"{plaintext[:4]}...{plaintext[-4:]}"
+
+    # ── 2026-10-30-provider-user-share：可用列表 + 共享 CRUD ────────────────
+
+    async def list_usable(self, user_id: uuid.UUID) -> list[UsableProviderItem]:
+        """可用供应商 = 自己的（is_default 照实）+ 共享给自己的（is_default 恒 False）。
+
+        共享来源显示名取属主 display_name 优先、username 兜底；两者皆空时用占位
+        文案，保证前端共享标识不会因空名退回「已共享但不知来自谁」。
+        """
+        from app.modules.auth.model import User
+
+        own_rows = (
+            (await self._session.execute(select(LlmProvider).where(LlmProvider.user_id == user_id)))
+            .scalars()
+            .all()
+        )
+        items = [UsableProviderItem(provider=row) for row in own_rows]
+        shared_rows = (
+            await self._session.execute(
+                select(LlmProvider, User.display_name, User.username)
+                .join(LlmProviderShare, LlmProviderShare.provider_id == LlmProvider.id)
+                .join(User, User.id == LlmProvider.user_id)
+                .where(LlmProviderShare.grantee_user_id == user_id)
+                .order_by(LlmProvider.created_at.desc())
+            )
+        ).all()
+        for provider, display_name, username in shared_rows:
+            items.append(
+                UsableProviderItem(
+                    provider=provider,
+                    shared_by_name=display_name or username or "其他用户",
+                )
+            )
+        items.sort(key=lambda it: it.provider.created_at, reverse=True)
+        return items
+
+    def to_usable_read(self, item: UsableProviderItem) -> LlmProviderRead:
+        """usable 列表 DTO：共享行强制 is_default=False（不得冒充接收方默认）。"""
+        read = self._to_read(item.provider)
+        if item.shared_by_name is not None:
+            read.is_shared = True
+            read.shared_by_name = item.shared_by_name
+            read.is_default = False
+        return read
+
+    async def list_shares(
+        self,
+        provider_id: uuid.UUID,
+        owner_id: uuid.UUID,
+    ) -> list[tuple[LlmProviderShare, str | None, str | None]]:
+        """属主列共享（grantee 用户名/显示名）；非属主按 get 的 404/403 语义拒绝。"""
+        from app.modules.auth.model import User
+
+        await self.get(provider_id, owner_id)
+        rows = await self._session.execute(
+            select(LlmProviderShare, User.username, User.display_name)
+            .join(User, User.id == LlmProviderShare.grantee_user_id)
+            .where(LlmProviderShare.provider_id == provider_id)
+            .order_by(LlmProviderShare.created_at.asc())
+        )
+        return list(rows.all())
+
+    async def share(
+        self,
+        provider_id: uuid.UUID,
+        owner_id: uuid.UUID,
+        identifier: str,
+    ) -> tuple[LlmProviderShare, str | None, str | None]:
+        """按 username/email 精确共享；幂等；拒绝自己/未知/禁用目标。
+
+        并发重复共享由唯一约束兜底：IntegrityError 后回滚回查既有行。返回
+        (share, grantee username, grantee display_name) 供 router 组 DTO。
+        """
+        from app.modules.auth.model import User
+
+        provider = await self.get(provider_id, owner_id)
+        target = (
+            (
+                await self._session.execute(
+                    select(User).where(or_(User.username == identifier, User.email == identifier))
+                )
+            )
+            .scalars()
+            .first()
+        )
+        if target is None or target.status != "active" or not target.login_enabled:
+            raise LlmProviderShareTargetNotFound(
+                "共享目标用户不存在或不可用。",
+                details={"identifier": identifier},
+            )
+        if target.id == owner_id:
+            raise LlmProviderShareSelfForbidden("不能共享给自己。")
+        existing = (
+            (
+                await self._session.execute(
+                    select(LlmProviderShare).where(
+                        LlmProviderShare.provider_id == provider.id,
+                        LlmProviderShare.grantee_user_id == target.id,
+                    )
+                )
+            )
+            .scalars()
+            .first()
+        )
+        if existing is not None:
+            return existing, target.username, target.display_name
+        row = LlmProviderShare(
+            provider_id=provider.id,
+            grantee_user_id=target.id,
+            shared_by_user_id=owner_id,
+        )
+        self._session.add(row)
+        try:
+            await self._session.commit()
+        except IntegrityError:
+            await self._session.rollback()
+            row = (
+                (
+                    await self._session.execute(
+                        select(LlmProviderShare).where(
+                            LlmProviderShare.provider_id == provider.id,
+                            LlmProviderShare.grantee_user_id == target.id,
+                        )
+                    )
+                )
+                .scalars()
+                .first()
+            )
+            if row is None:
+                raise
+            return row, target.username, target.display_name
+        await self._session.refresh(row)
+        log.info(
+            "llm_provider.shared",
+            provider_id=str(provider.id),
+            grantee_user_id=str(target.id),
+            shared_by=str(owner_id),
+        )
+        return row, target.username, target.display_name
+
+    async def unshare(
+        self,
+        provider_id: uuid.UUID,
+        owner_id: uuid.UUID,
+        grantee_user_id: uuid.UUID,
+    ) -> None:
+        """撤销共享（幂等：记录不存在也返回成功）；非属主按 get 语义拒绝。"""
+        await self.get(provider_id, owner_id)
+        await self._session.execute(
+            delete(LlmProviderShare).where(
+                LlmProviderShare.provider_id == provider_id,
+                LlmProviderShare.grantee_user_id == grantee_user_id,
+            )
+        )
+        await self._session.commit()
+        log.info(
+            "llm_provider.unshared",
+            provider_id=str(provider_id),
+            grantee_user_id=str(grantee_user_id),
+            shared_by=str(owner_id),
+        )
 
     # ── fetch-models（task-02 / D-001/D-006）──────────────────────────────
 

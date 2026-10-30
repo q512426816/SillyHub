@@ -418,13 +418,18 @@ async def _finalize_inject_turn_writes(
         # GLM）。会话供应商 NULL（本机默认）才发 null。
         if effective_provider is not None:
             from app.modules.daemon.lease.context import (
-                resolve_bound_provider_config,
+                resolve_session_provider_config,
             )
 
-            provider_config_payload = await resolve_bound_provider_config(
+            # 2026-10-30-provider-user-share：会话级 provider 走「会话属主 +
+            # 共享授权」解析（与 claim 下发同源），owner-only 的 bound 解析不再
+            # 适用于被共享供应商；None = 授权失效/契约破裂 → 显式报错不降级。
+            provider_config_payload = await resolve_session_provider_config(
                 svc._session,
-                {"llm_provider_id": str(effective_provider.id)},
-                session.user_id,
+                {
+                    "session_llm_provider_id": str(effective_provider.id),
+                    "session_id": str(session.id),
+                },
                 session.provider,
             )
             if provider_config_payload is None:

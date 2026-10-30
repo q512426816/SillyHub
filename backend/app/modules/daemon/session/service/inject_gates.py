@@ -294,7 +294,13 @@ async def _resolve_create_inputs(
                 details={"llm_provider_id": llm_provider_id},
             ) from exc
         llm_provider_row = await svc._session.get(LlmProvider, _provider_uuid)
-        if llm_provider_row is None or llm_provider_row.user_id != user_id:
+        # 2026-10-30-provider-user-share：属主或有效共享均可选；不可用仍按 404
+        # 不泄漏存在性（口径与 switch 分支一致）。
+        from app.modules.llm_provider.service import provider_usable_by
+
+        if llm_provider_row is None or not await provider_usable_by(
+            svc._session, llm_provider_row.id, user_id
+        ):
             raise DaemonSessionLlmProviderNotFound(
                 f"LlmProvider '{llm_provider_id}' not found.",
                 details={"llm_provider_id": llm_provider_id},
@@ -574,7 +580,12 @@ async def _resolve_inject_turn_config(
                 provider_row = await svc._session.get(LlmProvider, _new_provider_uuid)
                 # 归属按 AgentSession.user_id（Grill C-05：借用 runtime 场景
                 # borrower 供应商不被静默拒绝），404 不泄露存在性。
-                if provider_row is None or provider_row.user_id != session.user_id:
+                # 2026-10-30-provider-user-share：放宽为「属主或有效共享」。
+                from app.modules.llm_provider.service import provider_usable_by
+
+                if provider_row is None or not await provider_usable_by(
+                    svc._session, provider_row.id, session.user_id
+                ):
                     raise DaemonSessionLlmProviderNotFound(
                         f"LlmProvider '{llm_provider_id}' not found.",
                         details={"llm_provider_id": llm_provider_id},

@@ -1,0 +1,36 @@
+tier: thin
+legacy_fallback: false
+substeps: {}
+born_face: thin
+with_tasks: false
+review_force: null
+input: >-
+  供应商按用户共享且被共享方只读选用
+
+
+  动机与背景：共享守护进程场景下，用户 B 的会话跑在用户 A 的机器上、使用 A 的 Claude 登录额度（2026-10-30 会话 b696aa0c 实证：会话属主 a489... 与 runtime 属主 1b68...
+  不同）。目前 llm_providers 严格 owner 级（list/get/会话创建均校验 provider.user_id），A 无法把自己的供应商指定给 B 使用，B 只能吃 A 机器的本机凭证。需要：A
+  把自己的供应商按用户共享给指定用户；B 在会话配置条能看到并选择（只读，不可编辑/删除/设默认/查看额度）；后台 claim 解析会话级供应商时按会话属主（而非 runtime 属主）+ 共享授权放行。
+
+
+  成功标准：
+
+  - 供应商属主可按用户名/邮箱把供应商共享给指定用户，可查看/撤销共享；共享记录唯一、重复共享幂等、不能共享给自己、目标不存在/禁用时明确报错。
+
+  - 被共享用户 GET 可用供应商列表（自己的 + 共享给自己的）可用于会话页；共享项带 shared_by 标识且只读；设置页仍只列自己的供应商，不提供编辑/共享入口。
+
+  - 被共享用户可在会话页选择共享供应商并实际生效：会话创建/切换校验改为「属主或有效共享」，daemon claim 的会话级供应商解析按会话属主 + 共享授权放行（runtime 属主不同也能用）。
+
+  - 被共享用户调用供应商编辑/删除/设默认/额度查询接口仍 404/403（不可修改、不泄漏明文 key）。
+
+  - 共享撤销后，新会话不再可见/不可选；已选会话下一轮回落默认链（不阻断），且不得泄漏已撤销供应商的 key。
+
+  - 新增 backend 共享 CRUD/授权/claim 解析用例与 frontend 可用列表/只读标识用例，相关测试全绿。
+autopilot: false
+prestage_ack: true
+baseline_commit: a3110752ade2a45d8f89b04e9830541044780e87
+updatedAt: '2026-10-30T08:31:22.056Z'
+cross_baselines:
+  sillyspec: 05901a963032f87e9c0c0f40b6d94810413730c1
+baseline_sha256: 88c6116bb4b242fa1fc8323ddc95de1f92b3a4edd0e9237666905b4ca750aae2
+

@@ -219,6 +219,15 @@ async def resolve_bound_provider_config(
     if provider.user_id != user_id or agent_kind not in (provider.agent_kinds or []):
         return None
 
+    return _provider_config_from_row(provider, agent_kind)
+
+
+def _provider_config_from_row(provider, agent_kind: str) -> dict:
+    """LlmProvider 行 → daemon provider_config 中性 dict（anthropic / openai_chat）。
+
+    2026-10-30-provider-user-share：自 ``resolve_bound_provider_config`` 原样
+    抽出，供 owner 绑定与「会话属主 + 共享」两条解析链共用，防配置构造漂移。
+    """
     if provider.api_format == "openai_chat":
         from app.modules.llm_provider.litellm_client import litellm_model_name
 
@@ -251,6 +260,59 @@ async def resolve_bound_provider_config(
         "extra_env": provider.extra_env,
         "settings_config": provider.settings_config,
     }
+
+
+async def resolve_session_provider_config(
+    session: AsyncSession,
+    lease_meta: dict,
+    agent_kind: str,
+    fallback_user_id: uuid.UUID | None = None,
+) -> dict | None:
+    """2026-10-30-provider-user-share：会话级供应商按**会话属主** + 共享授权解析。
+
+    与 ``resolve_bound_provider_config`` 的区别（共享守护进程场景）：
+    - 授权主体取 ``lease_meta.session_id → AgentSession.user_id``（真正选择供应商
+      的用户），而非 ``runtime.user_id``（机器出借方）；
+    - 允许「属主本人」或「有效共享受赠者」（provider_usable_by 统一判定）。
+
+    历史测试/边界：lease_meta.session_id 指向不存在的会话行（旧夹具/极端竞态）时
+    回落到 ``fallback_user_id``（调用方传 runtime 属主），保持改造前行为。
+    返回 None 时调用方回落既有 bound/default 链（撤销共享后下一轮即回落，不阻断）。
+    """
+    raw = lease_meta.get("session_llm_provider_id")
+    if not raw:
+        return None
+    try:
+        provider_id = uuid.UUID(str(raw))
+    except (ValueError, AttributeError, TypeError):
+        return None
+
+    from app.modules.agent.model import AgentSession
+    from app.modules.llm_provider.model import LlmProvider
+    from app.modules.llm_provider.service import provider_usable_by
+
+    session_owner: uuid.UUID | None = None
+    session_raw = lease_meta.get("session_id")
+    if session_raw:
+        try:
+            session_id = uuid.UUID(str(session_raw))
+        except (ValueError, AttributeError, TypeError):
+            session_id = None
+        if session_id is not None:
+            session_owner = (
+                await session.execute(
+                    select(AgentSession.user_id).where(AgentSession.id == session_id).limit(1)
+                )
+            ).scalar()
+    actor_id = session_owner or fallback_user_id
+    if actor_id is None:
+        return None
+    provider = await session.get(LlmProvider, provider_id)
+    if provider is None or agent_kind not in (provider.agent_kinds or []):
+        return None
+    if not await provider_usable_by(session, provider.id, actor_id):
+        return None
+    return _provider_config_from_row(provider, agent_kind)
 
 
 async def _inject_provider_config(
@@ -328,8 +390,10 @@ async def _inject_provider_config(
     _session_pid_raw = lease_meta.get("session_llm_provider_id")
     if _session_pid_raw:
         try:
-            session_config = await resolve_bound_provider_config(
-                session, {"llm_provider_id": _session_pid_raw}, user_id, agent_kind
+            # 2026-10-30-provider-user-share：按会话属主 + 共享授权解析（共享守护
+            # 进程下 runtime 属主可不同）；授权失败/撤销 → None 回落 bound/default。
+            session_config = await resolve_session_provider_config(
+                session, lease_meta, agent_kind, fallback_user_id=user_id
             )
         except Exception:
             log.warning(

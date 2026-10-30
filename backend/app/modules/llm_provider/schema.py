@@ -145,10 +145,33 @@ class LlmProviderRead(BaseModel):
     # 供应商级字段退役（2026-10-06-provider-model-list）。
     created_at: datetime
     updated_at: datetime
+    # 2026-10-30-provider-user-share：/usable 端点对共享行置 True + 属主显示名；
+    # own-only 端点恒默认值（零回归）。共享行 is_default 恒 False（不得让接收方
+    # 误以为共享供应商是自己的默认）。
+    is_shared: bool = False
+    shared_by_name: str | None = None
 
 
 class LlmProviderList(BaseModel):
     items: list[LlmProviderRead]
+    total: int
+
+
+class LlmProviderShareCreate(BaseModel):
+    """共享目标：username 或 email 精确匹配（不做模糊搜索/用户枚举）。"""
+
+    identifier: str = Field(min_length=1, max_length=255)
+
+
+class LlmProviderShareRead(BaseModel):
+    user_id: uuid.UUID
+    username: str | None
+    display_name: str | None
+    created_at: datetime
+
+
+class LlmProviderShareList(BaseModel):
+    items: list[LlmProviderShareRead]
     total: int
 
 

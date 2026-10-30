@@ -43,7 +43,7 @@ from app.modules.daemon.session.service import (
     DaemonSessionNotActive,
     SessionEmptyPrompt,
 )
-from app.modules.llm_provider.model import LlmProvider
+from app.modules.llm_provider.model import LlmProvider, LlmProviderShare
 
 # ── Fixtures / helpers（镜像 test_session_create_config.py）──────────────────
 
@@ -677,6 +677,66 @@ class TestSwitchValidation:
         )
 
         assert result.agent_run.llm_provider_id == borrower_provider.id
+        assert mocked_hub.send_session_control.await_args.args[1] == (
+            DAEMON_MSG_SESSION_SWITCH_CONFIG
+        )
+
+    @pytest.mark.asyncio
+    async def test_switch_to_shared_provider_allowed(
+        self, db_session, mocked_hub, mocked_redis
+    ) -> None:
+        """FR-03：runtime 属 admin、会话属 borrower，admin 把 provider 共享给
+        borrower → borrower 可切换使用（属主或有效共享）。"""
+        admin = await _create_user(db_session)
+        borrower = await _create_user(db_session)
+        rt = await _create_runtime(db_session, admin)
+        shared_provider = await _seed_provider(db_session, admin, name="admin shared GLM")
+        db_session.add(
+            LlmProviderShare(
+                provider_id=shared_provider.id,
+                grantee_user_id=borrower,
+                shared_by_user_id=admin,
+            )
+        )
+        await db_session.commit()
+
+        session_id = uuid.uuid4()
+        lease = DaemonTaskLease(
+            id=uuid.uuid4(),
+            runtime_id=rt.id,
+            agent_run_id=None,
+            kind="interactive",
+            status="claimed",
+            lease_expires_at=None,
+            attempt_number=1,
+            metadata_={"session_id": str(session_id), "claim_token": "share-token"},
+        )
+        db_session.add(lease)
+        await db_session.flush()
+        db_session.add(
+            AgentSession(
+                id=session_id,
+                user_id=borrower,
+                runtime_id=rt.id,
+                lease_id=lease.id,
+                provider="claude",
+                status="active",
+                config={},
+                turn_count=1,
+                created_at=datetime.now(UTC),
+            )
+        )
+        await db_session.commit()
+
+        svc = DaemonService(db_session)
+        result = await svc.inject_session(
+            session_id,
+            borrower,
+            prompt="shared switch",
+            llm_provider_id=str(shared_provider.id),
+        )
+
+        assert result.agent_run.llm_provider_id == shared_provider.id
         assert mocked_hub.send_session_control.await_args.args[1] == (
             DAEMON_MSG_SESSION_SWITCH_CONFIG
         )
