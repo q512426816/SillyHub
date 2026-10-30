@@ -1,0 +1,34 @@
+tier: thin
+legacy_fallback: false
+substeps: {}
+born_face: thin
+with_tasks: false
+review_force: null
+input: >-
+  业务成员角色补变更查看权限
+
+
+  动机与背景：工作区成员 181228（业务成员 business_member）访问 GET /api/workspaces/{id}/changes 返回 403 change:read。business_member
+  是系统内置角色（is_system=true），管理后台接口禁止编辑，需用迁移补权限。
+
+
+  成功标准：
+
+  - 新增 alembic 迁移为 business_member 幂等授予 change:read，含回滚
+
+  - 迁移单测覆盖 upgrade 幂等与 downgrade 清理并通过
+
+  - 线上 business_member 已含 change:read 且权限缓存已失效，181228 工作区权限解析含 change:read
+autopilot: false
+prestage_ack: false
+baseline_commit: cc822fdf7e21ee5bbfd9c46d889b7a7bf5037856
+updatedAt: '2026-10-30T07:49:42.983Z'
+cross_baselines:
+  sillyspec: 05901a963032f87e9c0c0f40b6d94810413730c1
+baseline_sha256: fdf3ac91878a457d780d370ea48ef61ef6adbd9993639127dc4e9b3fec729b1f
+spec_approved: true
+spec_approved_at: '2026-10-30T07:49:42.982Z'
+spec_approved_by: zcode-qinyi-rbac-business-member
+spec_approved_channel: user-confirmed
+spec_attested_by: zcode-qinyi-rbac-business-member
+
