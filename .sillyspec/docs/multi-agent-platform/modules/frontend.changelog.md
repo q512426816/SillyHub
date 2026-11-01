@@ -250,3 +250,4 @@
 | 2026-10-30 | 2026-10-30-business-member-change-read | 业务成员角色补变更查看权限 |
 | 2026-10-30 | 2026-10-30-quota-error-visible | 共享守护进程额度耗尽时页面不显示错误 |
 | 2026-10-30 | 2026-10-30-provider-user-share | 供应商按用户共享且被共享方只读选用 |
+| 2026-11-01 | 2026-11-01-provider-share-audit-fixes | 供应商共享审计问题修复 |

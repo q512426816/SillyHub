@@ -1,0 +1,51 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-11-01-provider-share-audit-fixes",
+  "reviewer": "subagent",
+  "verdict": "PASS",
+  "reviewedAgainst": "2d6a3eb56576a5fdb2fc3d4886ea86ac977d6d60",
+  "findings": [
+    {
+      "severity": "P3",
+      "status": "accepted",
+      "title": "design「openapi.json 不受影响（错误码非 schema 面）」为模块级事实而非全仓事实",
+      "evidence": "backend/openapi.json 全文 0 处 LLM_PROVIDER 字符串（llm_provider 路由未用 responses= 声明、docstring 不嵌错误码），故本变更新增 HTTP_422_LLM_PROVIDER_ID_INVALID 确无同步义务、声明在本变更成立；但仓内 spec_bundle/agent_log 模块经端点 docstring 描述把 HTTP_422_SPEC_BUNDLE_INVALID/HTTP_422_AGENT_LOG_UNSUPPORTED 等码嵌入 openapi.json 与 frontend/src/lib/api-types.ts（各 4 处/2 处）——「错误码非 schema 面」作为全仓命题不成立，未来变更若泛化引用该表述会漏同步。本变更无实际漏同步面。",
+      "location": "backend/openapi.json(HTTP_422_SPEC_BUNDLE_INVALID 出现处); .sillyspec/changes/2026-11-01-provider-share-audit-fixes/design.md 接口契约段"
+    }
+  ],
+  "boundaryAdjudications": [
+    {
+      "boundary": "design「风险与死路」放弃 404 方案选 422（D-001）",
+      "verdict": "可接受",
+      "reason": "畸形 UUID 是客户端格式错误，422 与 RequestValidationError 同族且 FastAPI 惯例一致；owner 级 404 不泄漏存在性语义保留给合法 UUID（test_valid_uuid_unknown_provider_404 护栏在）；前端 api.ts apiFetch 对非 2xx 统一抛 ApiError(status,payload{code,details})，422 零适配声明已核实。"
+    },
+    {
+      "boundary": "requirements FR-03「SQL 禁止改动」",
+      "verdict": "可接受",
+      "reason": "迁移 20261030160000 已提交且其自身 docstring 即声明「已部署的迁移不会再跑，改历史迁移对存量库无效」——改 SQL 违反仓库迁移范式；diff 证实本变更为纯 #: 注释行（47-51 行），_GRANT_SQL/_REVOKE_SQL/revision/down_revision 零改动，注释现与 _REVOKE_SQL「删除 business_member 名下全部 change:read 行」逐字一致。"
+    },
+    {
+      "boundary": "design 接口契约「openapi.json 不受影响（错误码非 schema 面）」",
+      "verdict": "可接受（带保留，见 P3 finding）",
+      "reason": "llm_provider 模块错误码从不进 schema 面（openapi.json 前后均 0 处 LLM_PROVIDER），端点签名/导出 docstring 零改动，本变更确无同步义务；但该表述非全仓通则，已记 P3 accepted 提示后续变更勿泛化引用。"
+    },
+    {
+      "boundary": "盲维四问 1-3（乱序/并发写/切换）声明不适用",
+      "verdict": "声明核实为真（无声明边界）",
+      "reason": "_parse_id 为纯函数无状态无事件流；迁移仅注释不重跑已应用迁移；弹窗文案静态渲染与加载/错误态无交互——三个维度确实无新增风险面，声明与 diff 一致。"
+    }
+  ],
+  "dimensionNotes": {
+    "乱序": "n/a",
+    "并发": "n/a",
+    "切换": "n/a",
+    "作用域": "ok"
+  },
+  "checklistNotes": {
+    "FR一致性": "FR-01..06 全兑现：绑定用例 test_shares_invalid_provider_uuid_returns_422/test_route_not_shadowed_and_shared_row_sanitized/test_share_list_unshare_semantics/test_inject_chain_* 与前端「描述区含密钥可见性告知」均真实存在且断言承诺行为；llm_provider.md 共享语义+密钥可见性段落落盘；FR-03/06 的不适用声明成立。",
+    "防护声明": "router.py:52-57 try/except(ValueError,AttributeError,TypeError)→LlmProviderIdInvalid 真实存在，service.py:67-77 code=HTTP_422_LLM_PROVIDER_ID_INVALID/http_status=422，AppError handler(core/errors.py:390-405)出 {code,message,request_id,details}；_parse_id 覆盖全部含 {provider_id}/{grantee_user_id} 端点（router.py:99,126,145,203,224,254,266,277,294,320）；/usable(L72)先于/{provider_id}(L247)注册。",
+    "测试有效性": "空实现判据不通过——回退 _parse_id 则 422 用例收 500、注入链用例对 payload 断言明文 key/model 覆盖/absent 键；根因判据通过——500→422 是在校验点显式转换语义（路径参声明 str 绕过 FastAPI 校验的根因被补上），非吞崩溃 guard。",
+    "复跑": "backend 5 文件 42 passed（test_router+test_provider_shares+test_lease_context_provider_share+两迁移测试）；frontend vitest 2 passed。"
+  },
+  "reviewedAt": "2026-11-02T07:48:47+08:00"
+}

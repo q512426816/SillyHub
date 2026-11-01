@@ -1,0 +1,28 @@
+{"ts":1793575213300,"kind":"file","stage":"requirements","detail":"requirements.md 出现","provisional":true}
+{"ts":1793575213300,"kind":"file","stage":"design","detail":"design.md 出现","provisional":true}
+{"ts":1793575213300,"kind":"file","stage":"tasks","detail":"tasks.md 出现","provisional":true}
+{"ts":1793575474847,"kind":"file-update","stage":"requirements","detail":"requirements.md 内容变更","provisional":true}
+{"ts":1793575494786,"kind":"file-update","stage":"design","detail":"design.md 内容变更","provisional":true}
+{"ts":1793575514733,"kind":"file-update","stage":"design","detail":"design.md 内容变更","provisional":true}
+{"ts":1793576192042,"kind":"task-done","stage":"tasks","detail":"checked 0→1","provisional":true,"source":"task-tick"}
+{"ts":1793576193065,"kind":"file-update","stage":"tasks","detail":"tasks.md 内容变更","provisional":true}
+{"ts":1793576193065,"kind":"task-done","stage":"tasks","detail":"checked 0→1","provisional":true}
+{"ts":1793576202753,"kind":"task-done","stage":"tasks","detail":"checked 1→2","provisional":true,"source":"task-tick"}
+{"ts":1793576203511,"kind":"file-update","stage":"tasks","detail":"tasks.md 内容变更","provisional":true}
+{"ts":1793576203511,"kind":"task-done","stage":"tasks","detail":"checked 1→2","provisional":true}
+{"ts":1793576207418,"kind":"task-done","stage":"tasks","detail":"checked 2→3","provisional":true,"source":"task-tick"}
+{"ts":1793576210647,"kind":"file-update","stage":"tasks","detail":"tasks.md 内容变更","provisional":true}
+{"ts":1793576210647,"kind":"task-done","stage":"tasks","detail":"checked 2→3","provisional":true}
+{"ts":1793576211722,"kind":"task-done","stage":"tasks","detail":"checked 3→4","provisional":true,"source":"task-tick"}
+{"ts":1793576214445,"kind":"file-update","stage":"tasks","detail":"tasks.md 内容变更","provisional":true}
+{"ts":1793576214445,"kind":"task-done","stage":"tasks","detail":"checked 3→4","provisional":true}
+{"ts":1793576216631,"kind":"task-done","stage":"tasks","detail":"checked 4→5","provisional":true,"source":"task-tick"}
+{"ts":1793576218055,"kind":"file-update","stage":"tasks","detail":"tasks.md 内容变更","provisional":true}
+{"ts":1793576218055,"kind":"task-done","stage":"tasks","detail":"checked 4→5","provisional":true}
+{"ts":1793576231624,"kind":"file","stage":"proposal","detail":"decisions.md 出现","provisional":true}
+{"ts":1793576241728,"kind":"file-update","stage":"proposal","detail":"decisions.md 内容变更","provisional":true}
+{"ts":1793576275453,"kind":"task-done","stage":"tasks","detail":"checked 5→6","provisional":true,"source":"task-tick"}
+{"ts":1793576278102,"kind":"file-update","stage":"tasks","detail":"tasks.md 内容变更","provisional":true}
+{"ts":1793576278102,"kind":"task-done","stage":"tasks","detail":"checked 5→6","provisional":true}
+{"ts":1793576470559,"kind":"commit","stage":null,"detail":"2d6a3eb56","provisional":true}
+{"ts":1793576530098,"kind":"gate-run","stage":"verify","detail":"门实测 passed（23.3s） · 20261101234209","provisional":true}

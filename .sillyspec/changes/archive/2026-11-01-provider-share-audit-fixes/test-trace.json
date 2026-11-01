@@ -1,0 +1,68 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-11-01-provider-share-audit-fixes",
+  "rows": [
+    {
+      "anchor": "FR-01",
+      "row_id": "2026-11-01-provider-share-audit-fixes:flow:测试绑定FR-01",
+      "tests": [
+        "backend/app/modules/llm_provider/tests/test_router.py「test_shares_invalid_provider_uuid_returns_422」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-11-01-provider-share-audit-fixes"
+    },
+    {
+      "anchor": "FR-02",
+      "row_id": "2026-11-01-provider-share-audit-fixes:flow:测试绑定FR-02",
+      "tests": [
+        "frontend/src/components/llm-providers/__tests__/share-provider-dialog.test.tsx「密钥可见性告知文案」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-11-01-provider-share-audit-fixes"
+    },
+    {
+      "anchor": "FR-04",
+      "row_id": "2026-11-01-provider-share-audit-fixes:flow:测试绑定FR-04",
+      "tests": [
+        "backend/app/modules/llm_provider/tests/test_router.py「shares CRUD 201/204/404 语义」",
+        "backend/app/modules/llm_provider/tests/test_router.py「usable 路由顺序与共享行脱敏」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-11-01-provider-share-audit-fixes"
+    },
+    {
+      "anchor": "FR-05",
+      "row_id": "2026-11-01-provider-share-audit-fixes:flow:测试绑定FR-05",
+      "tests": [
+        "backend/app/modules/daemon/tests/test_lease_context_provider_share.py「inject 链 session 缺行回落 fallback_user_id」",
+        "backend/app/modules/daemon/tests/test_lease_context_provider_share.py「inject 链共享注入」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-11-01-provider-share-audit-fixes"
+    }
+  ]
+}
