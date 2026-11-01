@@ -69,6 +69,17 @@ afterEach(() => {
 });
 
 describe("ShareProviderDialog（2026-10-30-provider-user-share）", () => {
+  it("2026-11-01-provider-share-audit-fixes：描述区含密钥可见性告知（防静默移除）", () => {
+    render(<ShareProviderDialog provider={PROVIDER} onOpenChange={() => {}} />);
+
+    // 告知三要素：密钥解密下发 / 会到达对方机器 / 仅共享可信用户。
+    expect(
+      screen.getByText(/解密形式下发到会话实际运行的守护进程/),
+    ).toBeInTheDocument();
+    expect(screen.getByText(/对方自己的机器/)).toBeInTheDocument();
+    expect(screen.getByText(/仅共享给可信用户/)).toBeInTheDocument();
+  });
+
   it("打开拉取共享列表；按用户名共享追加行；撤销移除行", async () => {
     render(<ShareProviderDialog provider={PROVIDER} onOpenChange={() => {}} />);
 

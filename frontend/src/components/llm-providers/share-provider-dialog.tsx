@@ -107,6 +107,7 @@ export function ShareProviderDialog({
           <DialogTitle>共享供应商{provider ? ` · ${provider.name}` : ""}</DialogTitle>
           <DialogDescription>
             被共享用户只能在会话配置条中选择该供应商，不能编辑、删除、设默认或查看额度。
+            注意：共享后，该供应商的访问密钥会以解密形式下发到会话实际运行的守护进程（包括对方自己的机器），请仅共享给可信用户。
           </DialogDescription>
         </DialogHeader>
 

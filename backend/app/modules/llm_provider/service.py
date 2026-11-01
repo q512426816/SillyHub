@@ -64,6 +64,18 @@ class LlmProviderShareSelfForbidden(AppError):
     http_status = 400
 
 
+class LlmProviderIdInvalid(AppError):
+    """路径参数非 UUID（2026-11-01-provider-share-audit-fixes）。
+
+    此前 router ``_parse_id`` 裸 ``uuid.UUID`` 的 ValueError 落通用 Exception
+    handler 变 500；改抛 422（客户端格式错误，与 RequestValidationError 同族），
+    code 循 ``HTTP_<status>_<EVENT>`` 范式。全端点单点受益。
+    """
+
+    code = "HTTP_422_LLM_PROVIDER_ID_INVALID"
+    http_status = 422
+
+
 class LlmProviderKindFormatForbidden(AppError):
     """pi × openai_chat 禁配 Update 侧兜底（task-05 / FR-04 / D-012 连带声明）。
 

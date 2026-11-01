@@ -22,6 +22,9 @@ created_at: 2026-08-18 01:45:00
   - `POST /{id}/usage` — 余额/套餐用量代查
   - `GET /{id}/quota` — 配额查询（智谱 query_zhipu_quota）
   - `POST /{id}/set-default` — 「启动」；`POST /{id}/unset-default` — 「停止」；均返回 `SetDefaultResult{switched, affected_sessions, error, litellm_registered?}`（router 包装 service 的 DefaultSwitchResult）
+  - `GET /usable` — 会话页可用列表（自己的 + 共享给自己的，2026-10-30-provider-user-share）；共享行 `is_shared=true`/`shared_by_name`/`is_default` 强制 false，且 `settings_config`/`extra_env` 置 None（自由配置可能手填令牌，评审 P2 脱敏）；设置页仍用 `GET ""`（own-only，零回归）
+  - `GET /{id}/shares` — 列共享（仅属主）；`POST /{id}/shares` — 共享（201，幂等；identifier 按 username/email **精确匹配**，未知/禁用目标统一 404 防枚举，共享给自己 400）；`DELETE /{id}/shares/{grantee_user_id}` — 撤销（204 幂等）
+- 按用户共享语义（表 `llm_provider_shares`，`(provider_id, grantee_user_id)` 唯一约束幂等，provider/用户删除级联清理）：授权判定 `provider_usable_by`（属主或有效共享，每次 claim/turn 实时查询不缓存）为会话创建、切换与 daemon claim 三链同源；撤销后下一轮回落默认链不阻断（FR-05）。**密钥可见性（共享方须知，评审 P3 accepted 落地）**：anthropic 形态共享行的**解密 api_key 会随 claim 的 provider_config 下发到会话实际运行时 daemon——包括被共享方自己机器上的守护进程**；openai_chat 形态经 hub LiteLLM 代理不下发密钥。共享即授予凭证使用权，请仅共享给可信用户。
 - `LlmProvider` 列：
   - agent_kinds（JSON 数组，D-004 单值改集合）/ base_url / auth_field / api_format
   - encrypted_api_key(bytes) + key_id（CredentialCipher，xchacha20-poly1305，照 git_identity）
@@ -38,6 +41,9 @@ created_at: 2026-08-18 01:45:00
   - `LlmProviderModelsTimeout`(504) — 上游请求超时（10s）
   - `LlmProviderSsrfBlocked`(400) — base_url 解析私网/保留 IP 或 DNS 失败
   - `LlmProviderUsageTransient`(502) — 用量查询瞬时失败（前端保上次成功值 10min）
+  - `LlmProviderShareTargetNotFound`(404) — 共享目标不存在/未激活/登录禁用（统一文案防枚举）
+  - `LlmProviderShareSelfForbidden`(400) — 共享给自己
+  - `LlmProviderIdInvalid`(422) — 路径参数非 UUID（2026-11-01-provider-share-audit-fixes；此前裸 ValueError 落通用 handler 变 500）
 
 ## 关键逻辑
 ```

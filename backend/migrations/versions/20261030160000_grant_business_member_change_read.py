@@ -44,7 +44,11 @@ WHERE r.key = 'business_member'
 ON CONFLICT DO NOTHING
 """
 
-#: 只撤销本迁移授予的权限，不动角色行与其他权限。
+#: 降级删除 business_member 名下**全部** change:read 行——role_permissions 无来源
+#: 标记，无法只删「本迁移授予的」（2026-11-01-provider-share-audit-fixes 如实化）。
+#: 可接受：business_member 是后台不可修改的系统内置角色（RoleSystemProtected），
+#: 本迁移即该 (角色, 权限) 组合的唯一合法来源；升级幂等（NOT EXISTS）保证手工
+#: 预置行不重复，降级一并移除语义等价。不动角色行与其他权限。
 _REVOKE_SQL = """
 DELETE FROM role_permissions
 WHERE permission = 'change:read'

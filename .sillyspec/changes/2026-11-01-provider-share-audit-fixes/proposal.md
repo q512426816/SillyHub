@@ -1,0 +1,38 @@
+---
+author: flow-machine-draft
+created_at: 2026-11-01T23:20:09.257Z
+---
+# 提案书（Proposal）— 2026-11-01-provider-share-audit-fixes
+
+## 动机
+
+任务原话转写：供应商共享审计问题修复
+
+动机:只读审查 2026-10-30-provider-user-share 等三变更后遗留 5 项待闭环问题:①评审 P3 accepted 裁决附带的「产品文档显式告知共享方密钥可见性」建议未落地——anthropic 形态共享供应商的解密 api_key 会随 claim 下发到会话实际运行时 daemon(含被共享方自己机器);②新共享端点沿用裸 uuid.UUID,畸形 UUID 返回 500 而非 422;③迁移 20261030160000 docstring 称「只撤销本迁移授予的权限」但降级 SQL 实删 business_member 名下全部 change:read,口径不一;④评审 P3 open:/usable 与 /{id}/shares 四端点无 HTTP 层用例;⑤评审 P3 open:claim 注入链用例未走 _inject_provider_config 也未覆盖 fallback_user_id 回落。本变更一次性闭环,不改已裁决的信任模型(密钥下发行为本身不动)。
+
+成功标准:
+- 对 /api/llm-providers/{非UUID}/shares 传畸形 UUID 时返回 422 JSON 错误体(不再 500),合法 UUID 路径零回归
+- 共享弹窗 DialogDescription 与产品文档明示:共享后解密密钥会下发到会话实际运行的守护进程(包括对方自己的机器),仅共享给可信用户
+- 迁移 20261030160000 的 docstring/注释如实描述降级实际删除范围,不再声称「只撤销本迁移授予的」
+- 新增 HTTP 层用例覆盖 GET /usable(路由不被 /{provider_id} 遮蔽/共享行脱敏)与 shares CRUD(201/204/404 语义),全绿
+- 新增 claim 注入链用例:runtime 属主≠会话属主时共享供应商经 _inject_provider_config 注入 payload.provider_config,且 session 缺行回落 fallback_user_id,全绿
+- 相关 backend/frontend 测试全绿,lint 零新增
+
+## 变更范围
+
+按成功标准机械推导，共 6 条验收面：
+1. 对 /api/llm-providers/{非UUID}/shares 传畸形 UUID 时返回 422 JSON 错误体(不再 500),合法 UUID 路径零回归
+2. 共享弹窗 DialogDescription 与产品文档明示:共享后解密密钥会下发到会话实际运行的守护进程(包括对方自己的机器),仅共享给可信用户
+3. 迁移 20261030160000 的 docstring/注释如实描述降级实际删除范围,不再声称「只撤销本迁移授予的」
+4. 新增 HTTP 层用例覆盖 GET /usable(路由不被 /{provider_id} 遮蔽/共享行脱敏)与 shares CRUD(201/204/404 语义),全绿
+5. 新增 claim 注入链用例:runtime 属主≠会话属主时共享供应商经 _inject_provider_config 注入 payload.provider_config,且 session 缺行回落 fallback_user_id,全绿
+6. 相关 backend/frontend 测试全绿,lint 零新增
+
+## 成功标准（可验证）
+
+1. 对 /api/llm-providers/{非UUID}/shares 传畸形 UUID 时返回 422 JSON 错误体(不再 500),合法 UUID 路径零回归
+2. 共享弹窗 DialogDescription 与产品文档明示:共享后解密密钥会下发到会话实际运行的守护进程(包括对方自己的机器),仅共享给可信用户
+3. 迁移 20261030160000 的 docstring/注释如实描述降级实际删除范围,不再声称「只撤销本迁移授予的」
+4. 新增 HTTP 层用例覆盖 GET /usable(路由不被 /{provider_id} 遮蔽/共享行脱敏)与 shares CRUD(201/204/404 语义),全绿
+5. 新增 claim 注入链用例:runtime 属主≠会话属主时共享供应商经 _inject_provider_config 注入 payload.provider_config,且 session 缺行回落 fallback_user_id,全绿
+6. 相关 backend/frontend 测试全绿,lint 零新增

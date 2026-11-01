@@ -31,7 +31,7 @@ from app.modules.llm_provider.schema import (
     SetDefaultResult,
     UsageResult,
 )
-from app.modules.llm_provider.service import LlmProviderService
+from app.modules.llm_provider.service import LlmProviderIdInvalid, LlmProviderService
 from app.modules.llm_provider.usage_handlers import query_zhipu_quota
 from app.modules.tool_gateway.tool_policy import SsrfBlocked, ToolPolicyService
 
@@ -42,7 +42,18 @@ CurrentUser = Annotated[User, Depends(get_current_user)]
 
 
 def _parse_id(provider_id: str) -> uuid.UUID:
-    return uuid.UUID(provider_id)
+    """畸形 UUID → ``LlmProviderIdInvalid`` 422（2026-11-01-provider-share-audit-fixes）。
+
+    路径参声明为 str 不走 FastAPI 校验；此前裸 ValueError 落通用 Exception
+    handler 变 500。合法 UUID 路径零变化。
+    """
+    try:
+        return uuid.UUID(provider_id)
+    except (ValueError, AttributeError, TypeError) as exc:
+        raise LlmProviderIdInvalid(
+            "供应商 ID 格式无效。",
+            details={"provider_id": provider_id},
+        ) from exc
 
 
 @router.get("", response_model=LlmProviderList)

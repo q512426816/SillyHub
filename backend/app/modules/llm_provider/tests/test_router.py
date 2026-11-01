@@ -304,3 +304,193 @@ class TestUnsetDefaultEndpoint:
         resp = await client.post(f"/api/llm-providers/{pid}/unset-default", headers=auth_headers)
 
         assert resp.status_code == 403, resp.text
+
+
+# ── 2026-11-01-provider-share-audit-fixes：/usable 与 shares CRUD HTTP 层 ──────
+
+
+async def _create_grantee(
+    db_session: AsyncSession, *, label: str = "g"
+) -> tuple[uuid.UUID, dict[str, str], str]:
+    """建被共享方用户并签发 Bearer（复刻 conftest.auth_admin_token 范式）。
+
+    返回 (user_id, headers, email)——email 即共享 identifier（精确匹配）。
+    """
+    from app.core.config import get_settings
+    from app.core.security import create_access_token
+    from app.modules.auth.model import User
+
+    settings = get_settings()
+    uid = uuid.uuid4()
+    email = f"grantee-{uid.hex[:8]}-{label}@example.com"
+    db_session.add(
+        User(
+            id=uid,
+            email=email,
+            username=f"grantee-{uid.hex[:8]}",
+            password_hash="irrelevant",
+            display_name=f"Grantee {label}",
+            status="active",
+            login_enabled=True,
+        )
+    )
+    await db_session.commit()
+    token, _ = create_access_token(user_id=uid, email=email, is_admin=False, settings=settings)
+    return uid, {"Authorization": f"Bearer {token}"}, email
+
+
+class TestUsableEndpoint:
+    """``GET /api/llm-providers/usable``：路由顺序 + 共享行脱敏（FR-04）。"""
+
+    async def test_route_not_shadowed_and_shared_row_sanitized(
+        self,
+        client: AsyncClient,
+        auth_headers: dict,
+        db_session: AsyncSession,
+    ) -> None:
+        """GET /usable 先于 GET /{provider_id} 注册不被吞；共享行四脱敏。"""
+        _, grantee_headers, grantee_email = await _create_grantee(db_session)
+
+        # admin（属主）经 HTTP 建 provider，自由配置里埋秘密标记（NFR-02/评审 P2 脱敏面）。
+        create = await client.post(
+            "/api/llm-providers",
+            headers=auth_headers,
+            json={
+                **_create_body(name="share-src"),
+                "extra_env": {"MY_SECRET_ENV": "secret-extra-marker"},
+                "settings_config": {"env": {"MY_SECRET_KEY": "secret-settings-marker"}},
+            },
+        )
+        assert create.status_code == 201, create.text
+        pid = create.json()["id"]
+
+        share = await client.post(
+            f"/api/llm-providers/{pid}/shares",
+            headers=auth_headers,
+            json={"identifier": grantee_email},
+        )
+        assert share.status_code == 201, share.text
+
+        usable = await client.get("/api/llm-providers/usable", headers=grantee_headers)
+        # 路由顺序断言：若被 GET /{provider_id}（provider_id="usable"）遮蔽，
+        # 这里会是 404/422 而非列表。
+        assert usable.status_code == 200, usable.text
+        rows = {item["id"]: item for item in usable.json()["items"]}
+        assert pid in rows, rows.keys()
+        shared = rows[pid]
+        assert shared["is_shared"] is True
+        assert shared["shared_by_name"] == "Admin"
+        assert shared["is_default"] is False
+        # 评审 P2 脱敏：自由配置不回传（可能手填令牌）；密钥仅 masked。
+        assert shared["settings_config"] is None
+        assert shared["extra_env"] is None
+        assert "secret-extra-marker" not in usable.text
+        assert "secret-settings-marker" not in usable.text
+        assert shared["api_key_masked"]
+
+        # own-only 列表零回归：被共享方在设置页列表看不到共享项。
+        own = await client.get("/api/llm-providers", headers=grantee_headers)
+        assert own.status_code == 200, own.text
+        assert pid not in {item["id"] for item in own.json()["items"]}
+
+
+class TestSharesCrudEndpoints:
+    """shares CRUD：201/204/404/403 语义 + 畸形 UUID 422（FR-01/FR-04）。"""
+
+    async def test_share_list_unshare_semantics(
+        self,
+        client: AsyncClient,
+        auth_headers: dict,
+        db_session: AsyncSession,
+    ) -> None:
+        """共享 201（body 带 grantee user_id）→ 列表可见 → 撤销 204 幂等。"""
+        grantee_uid, _, grantee_email = await _create_grantee(db_session, label="crud")
+
+        create = await client.post(
+            "/api/llm-providers", headers=auth_headers, json=_create_body(name="crud-src")
+        )
+        pid = create.json()["id"]
+
+        share = await client.post(
+            f"/api/llm-providers/{pid}/shares",
+            headers=auth_headers,
+            json={"identifier": grantee_email},
+        )
+        assert share.status_code == 201, share.text
+        assert share.json()["user_id"] == str(grantee_uid)
+
+        listed = await client.get(f"/api/llm-providers/{pid}/shares", headers=auth_headers)
+        assert listed.status_code == 200, listed.text
+        assert [item["user_id"] for item in listed.json()["items"]] == [str(grantee_uid)]
+
+        delete = await client.delete(
+            f"/api/llm-providers/{pid}/shares/{grantee_uid}", headers=auth_headers
+        )
+        assert delete.status_code == 204, delete.text
+        # 幂等：再删一次仍 204。
+        again = await client.delete(
+            f"/api/llm-providers/{pid}/shares/{grantee_uid}", headers=auth_headers
+        )
+        assert again.status_code == 204, again.text
+
+        listed2 = await client.get(f"/api/llm-providers/{pid}/shares", headers=auth_headers)
+        assert listed2.json()["items"] == []
+
+    async def test_share_unknown_target_404(self, client: AsyncClient, auth_headers: dict) -> None:
+        """identifier 无匹配用户 → 统一 404（防用户枚举）。"""
+        create = await client.post(
+            "/api/llm-providers", headers=auth_headers, json=_create_body(name="t404")
+        )
+        pid = create.json()["id"]
+
+        resp = await client.post(
+            f"/api/llm-providers/{pid}/shares",
+            headers=auth_headers,
+            json={"identifier": "nobody-unknown@example.com"},
+        )
+        assert resp.status_code == 404, resp.text
+
+    async def test_non_owner_shares_denied(
+        self,
+        client: AsyncClient,
+        auth_headers: dict,
+        db_session: AsyncSession,
+    ) -> None:
+        """非属主列共享/撤销 → service.get 403（owner 级不泄漏）。"""
+        _, grantee_headers, _ = await _create_grantee(db_session, label="nonowner")
+        create = await client.post(
+            "/api/llm-providers", headers=auth_headers, json=_create_body(name="own-only")
+        )
+        pid = create.json()["id"]
+
+        listed = await client.get(f"/api/llm-providers/{pid}/shares", headers=grantee_headers)
+        assert listed.status_code == 403, listed.text
+        delete = await client.delete(
+            f"/api/llm-providers/{pid}/shares/{uuid.uuid4()}", headers=grantee_headers
+        )
+        assert delete.status_code == 403, delete.text
+
+    async def test_valid_uuid_unknown_provider_404(
+        self, client: AsyncClient, auth_headers: dict
+    ) -> None:
+        """合法 UUID 但 provider 不存在 → 404（422 改动零回归护栏）。"""
+        resp = await client.get(f"/api/llm-providers/{uuid.uuid4()}/shares", headers=auth_headers)
+        assert resp.status_code == 404, resp.text
+
+    async def test_shares_invalid_provider_uuid_returns_422(
+        self, client: AsyncClient, auth_headers: dict
+    ) -> None:
+        """畸形 UUID → 422 JSON 错误体（HTTP_422_LLM_PROVIDER_ID_INVALID），不再 500。"""
+        for method, path in (
+            ("GET", "/api/llm-providers/not-a-uuid/shares"),
+            ("POST", "/api/llm-providers/not-a-uuid/shares"),
+            ("DELETE", f"/api/llm-providers/not-a-uuid/shares/{uuid.uuid4()}"),
+            ("GET", "/api/llm-providers/12345/shares"),
+        ):
+            resp = await client.request(
+                method, path, headers=auth_headers, json={"identifier": "x@example.com"}
+            )
+            assert resp.status_code == 422, f"{method} {path}: {resp.status_code} {resp.text}"
+            body = resp.json()
+            assert body["code"] == "HTTP_422_LLM_PROVIDER_ID_INVALID"
+            assert "request_id" in body

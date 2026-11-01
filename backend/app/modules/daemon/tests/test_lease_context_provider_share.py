@@ -183,3 +183,124 @@ async def test_revoked_share_falls_back_to_default_chain(
 
     cfg = await resolve_session_provider_config(db_session, lease_meta, "claude")
     assert cfg is None
+
+
+# ── 2026-11-01-provider-share-audit-fixes：_inject_provider_config 真实注入链 ──
+# 评审 P3 open：此前用例只测 resolve_session_provider_config 返回值，未走
+# _inject_provider_config 的 payload 注入，也未覆盖 session 缺行回落 runtime 属主。
+
+
+async def _create_lease_with_runtime(session: AsyncSession, host_id: uuid.UUID, metadata: dict):
+    """建 runtime + claimed lease（镜像 test_build_claim_payload._create_dispatch_style_lease，
+    agent_run_id 留 NULL——interactive lease D-005 形态）。"""
+    from app.modules.daemon.model import DaemonTaskLease
+    from app.modules.daemon.tests.test_lease_service import _create_runtime
+
+    rt = await _create_runtime(session, host_id)
+    lease = DaemonTaskLease(
+        id=uuid.uuid4(),
+        runtime_id=rt.id,
+        status="claimed",
+        kind="interactive",
+        metadata_=dict(metadata),
+    )
+    session.add(lease)
+    await session.commit()
+    await session.refresh(lease)
+    return lease
+
+
+@pytest.mark.asyncio
+async def test_inject_chain_shared_provider_runtime_owner_differs(
+    db_session: AsyncSession,
+) -> None:
+    """runtime 属主（出借方）≠ 会话属主（借用方）→ 共享供应商注入 payload。
+
+    agent_kind_raw=claude_code 同时覆盖 X-08 归一化；断言含明文 key 下发与
+    X-10 model 覆盖（FR-05 场景一）。
+    """
+    from app.modules.daemon.lease.context import _inject_provider_config
+
+    host = await _create_user(db_session, label="host-inject")
+    borrower = await _create_user(db_session, label="borrower-inject")
+    provider = await _seed_provider(db_session, host, api_key="sk-inject-chain")
+    sid = await _create_session(db_session, borrower)
+    await _share(db_session, provider, host, borrower)
+    lease = await _create_lease_with_runtime(
+        db_session,
+        host,
+        {"session_llm_provider_id": str(provider.id), "session_id": str(sid)},
+    )
+
+    payload: dict = {}
+    await _inject_provider_config(
+        db_session,
+        lease,
+        dict(lease.metadata_ or {}),
+        payload,
+        agent_kind_raw="claude_code",
+    )
+
+    cfg = payload.get("provider_config")
+    assert cfg is not None, payload
+    assert cfg["api_key"] == "sk-inject-chain"
+    assert payload["model"] == "claude-sonnet-4"
+
+
+@pytest.mark.asyncio
+async def test_inject_chain_missing_session_row_falls_back_to_runtime_owner(
+    db_session: AsyncSession,
+) -> None:
+    """session_id 指向不存在会话行 → 回落 fallback_user_id（runtime 属主）。
+
+    属主自有供应商照常注入——与改造前（按 runtime 属主解析）行为一致（FR-05 场景二）。
+    """
+    from app.modules.daemon.lease.context import _inject_provider_config
+
+    host = await _create_user(db_session, label="host-fb")
+    provider = await _seed_provider(db_session, host, api_key="sk-fallback-owner")
+    lease = await _create_lease_with_runtime(
+        db_session,
+        host,
+        {"session_llm_provider_id": str(provider.id), "session_id": str(uuid.uuid4())},
+    )
+
+    payload: dict = {}
+    await _inject_provider_config(
+        db_session,
+        lease,
+        dict(lease.metadata_ or {}),
+        payload,
+        agent_kind_raw="claude",
+    )
+
+    cfg = payload.get("provider_config")
+    assert cfg is not None, payload
+    assert cfg["api_key"] == "sk-fallback-owner"
+
+
+@pytest.mark.asyncio
+async def test_inject_chain_unshared_provider_absent(db_session: AsyncSession) -> None:
+    """会话属主无授权（未共享）→ provider_config absent，回落 bound/default 链。"""
+    from app.modules.daemon.lease.context import _inject_provider_config
+
+    host = await _create_user(db_session, label="host-noauth")
+    borrower = await _create_user(db_session, label="borrower-noauth")
+    provider = await _seed_provider(db_session, host, api_key="sk-not-shared")
+    sid = await _create_session(db_session, borrower)
+    lease = await _create_lease_with_runtime(
+        db_session,
+        host,
+        {"session_llm_provider_id": str(provider.id), "session_id": str(sid)},
+    )
+
+    payload: dict = {}
+    await _inject_provider_config(
+        db_session,
+        lease,
+        dict(lease.metadata_ or {}),
+        payload,
+        agent_kind_raw="claude",
+    )
+
+    assert "provider_config" not in payload
