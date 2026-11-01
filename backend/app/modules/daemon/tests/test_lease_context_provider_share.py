@@ -16,7 +16,9 @@ import pytest
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.modules.daemon.lease.context import resolve_session_provider_config
+from app.modules.llm_provider.litellm_client import litellm_model_name
 from app.modules.llm_provider.model import LlmProvider, LlmProviderShare
+from app.modules.llm_provider.proxy_token import verify_llm_proxy_token
 
 
 async def _create_user(session: AsyncSession, *, label: str = "") -> uuid.UUID:
@@ -43,6 +45,7 @@ async def _seed_provider(
     *,
     api_key: str = "sk-pshare-secret-0001",
     model: str = "claude-sonnet-4",
+    api_format: str = "anthropic",
 ) -> LlmProvider:
     from app.core.crypto import get_cipher
 
@@ -55,9 +58,9 @@ async def _seed_provider(
         agent_kinds=["claude"],
         encrypted_api_key=ct,
         key_id=key_id,
-        base_url="https://api.anthropic.com",
+        base_url=None if api_format == "openai_chat" else "https://api.anthropic.com",
         models=[{"name": model, "roles": ["sonnet"]}],
-        api_format="anthropic",
+        api_format=api_format,
     )
     session.add(row)
     await session.commit()
@@ -120,6 +123,8 @@ async def test_session_provider_shared_with_session_owner_is_injected(
     assert cfg is not None
     assert cfg["api_key"] == "sk-borrower-can-use"
     assert cfg["model"] == "claude-sonnet-4"
+    # anthropic 格式禁止出现代理令牌（令牌只服务 openai_chat 的 hub 代理链）。
+    assert "litellm_proxy_token" not in cfg
 
 
 @pytest.mark.asyncio
@@ -304,3 +309,86 @@ async def test_inject_chain_unshared_provider_absent(db_session: AsyncSession) -
     )
 
     assert "provider_config" not in payload
+
+
+# ── 2026-10-31-share-openai-chat-proxy-token：openai_chat 链限域令牌 ──────────
+# llm-proxy 归属断言的认证主体是守护进程属主，与共享/借出场景的模型名 uid（供应
+# 商属主）必然不等——令牌把会话属主身份带到子进程，代理端按 (o,p) 严格断言。
+
+
+@pytest.mark.asyncio
+async def test_openai_chat_shared_provider_gets_proxy_token(
+    db_session: AsyncSession,
+) -> None:
+    """FR-01：受赠者选共享 openai_chat 供应商 → 含令牌，模型名仍为属主 uid。"""
+    host = await _create_user(db_session, label="host-oai")
+    borrower = await _create_user(db_session, label="borrower-oai")
+    provider = await _seed_provider(db_session, host, api_format="openai_chat")
+    sid = await _create_session(db_session, borrower)
+    await _share(db_session, provider, host, borrower)
+
+    cfg = await resolve_session_provider_config(
+        db_session,
+        {"session_llm_provider_id": str(provider.id), "session_id": str(sid)},
+        "claude",
+        fallback_user_id=host,
+    )
+
+    assert cfg is not None
+    token = cfg.get("litellm_proxy_token")
+    assert isinstance(token, str) and token.startswith("shlp_")
+    grant = verify_llm_proxy_token(token)
+    assert grant is not None
+    assert grant.session_user_id == borrower
+    assert grant.owner_user_id == host
+    assert grant.provider_id == provider.id
+    assert cfg["litellm_model_name"] == litellm_model_name(host, provider.id)
+    assert grant.expected_model_name == cfg["litellm_model_name"]
+
+
+@pytest.mark.asyncio
+async def test_openai_chat_own_provider_borrowed_runtime_gets_proxy_token(
+    db_session: AsyncSession,
+) -> None:
+    """FR-02：会话属主自有供应商跑借出守护进程（runtime≠属主）→ 同样含令牌。"""
+    borrower = await _create_user(db_session, label="self-borrow")
+    host = await _create_user(db_session, label="runtime-host")
+    provider = await _seed_provider(db_session, borrower, api_format="openai_chat")
+    sid = await _create_session(db_session, borrower)
+
+    cfg = await resolve_session_provider_config(
+        db_session,
+        {"session_llm_provider_id": str(provider.id), "session_id": str(sid)},
+        "claude",
+        fallback_user_id=host,
+    )
+
+    assert cfg is not None
+    grant = verify_llm_proxy_token(cfg["litellm_proxy_token"])
+    assert grant is not None
+    # 会话属主=供应商属主=自有供应商；令牌只为「Bearer 主体（runtime 出借方）
+    # ≠ 属主」的身份缺口服务。
+    assert grant.session_user_id == borrower
+    assert grant.owner_user_id == borrower
+    assert grant.provider_id == provider.id
+
+
+@pytest.mark.asyncio
+async def test_openai_chat_own_machine_no_token(
+    db_session: AsyncSession,
+) -> None:
+    """FR-02 零改动锚：会话属主=供应商属主=守护进程属主 → 不下发令牌。"""
+    borrower = await _create_user(db_session, label="self-host")
+    provider = await _seed_provider(db_session, borrower, api_format="openai_chat")
+    sid = await _create_session(db_session, borrower)
+
+    cfg = await resolve_session_provider_config(
+        db_session,
+        {"session_llm_provider_id": str(provider.id), "session_id": str(sid)},
+        "claude",
+        fallback_user_id=borrower,
+    )
+
+    assert cfg is not None
+    assert "litellm_proxy_token" not in cfg
+    assert cfg["litellm_model_name"] == litellm_model_name(borrower, provider.id)

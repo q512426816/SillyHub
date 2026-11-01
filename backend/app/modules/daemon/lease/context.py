@@ -312,7 +312,41 @@ async def resolve_session_provider_config(
         return None
     if not await provider_usable_by(session, provider.id, actor_id):
         return None
-    return _provider_config_from_row(provider, agent_kind)
+    config = _provider_config_from_row(provider, agent_kind)
+    _maybe_mint_proxy_token(config, provider, actor_id, fallback_user_id)
+    return config
+
+
+def _maybe_mint_proxy_token(
+    config: dict,
+    provider,
+    actor_id: uuid.UUID,
+    runtime_user_id: uuid.UUID | None,
+) -> None:
+    """2026-10-31-share-openai-chat-proxy-token：openai_chat 且守护进程/会话
+    属主任一≠供应商属主时附限域代理令牌（provider_config 新键）。
+
+    llm-proxy 归属断言的认证主体是守护进程属主（子进程 Bearer=daemon apiKey），
+    共享/借出场景下模型名 uid（供应商属主）与之必然不等 → 403。令牌把会话
+    属主身份随 provider_config 带到子进程（litellm_proxy_token，daemon 侧
+    优先作 Bearer），代理端验签后按 (o, p) 严格断言模型名。仅在「会话属主=
+    供应商属主=守护进程属主」的现状可用链路跳过——payload 与改造前逐字一致，
+    可用路径零改动。runtime_user_id=None（切换附件路径，runtime 未知）时按
+    需要铸造：宁多铸（令牌对该模型名恒可验）不漏铸（漏铸即残留 403）。
+    撤销共享后本函数不再被触达（上游 provider_usable_by 已拒），在途令牌
+    存活至 exp——对齐 anthropic 分支「撤销只影响后续 claim」的凭证时效语义。
+    """
+    if config.get("api_format") != "openai_chat":
+        return
+    if actor_id == provider.user_id and runtime_user_id == provider.user_id:
+        return
+    from app.modules.llm_provider.proxy_token import mint_llm_proxy_token
+
+    config["litellm_proxy_token"] = mint_llm_proxy_token(
+        session_user_id=actor_id,
+        owner_user_id=provider.user_id,
+        provider_id=provider.id,
+    )
 
 
 async def _inject_provider_config(
