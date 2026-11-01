@@ -34,6 +34,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.config import get_settings
 from app.modules.auth.api_key_service import ApiKeyService
 from app.modules.auth.model import User
+from app.modules.llm_provider.proxy_token import PROXY_TOKEN_PREFIX, mint_llm_proxy_token
 
 # ── seed / app helpers（范式对齐 test_ws_auth.py）────────────────────────────
 
@@ -468,3 +469,147 @@ class TestLlmProxyForwarding:
         )
         assert resp.status_code == 200
         assert captured["headers"]["Authorization"] == "Bearer sk-litellm-master-test"
+
+
+# ════════════════════════════════════════════════════════════════════════════
+# 5. 限域代理令牌（2026-10-31-share-openai-chat-proxy-token / FR-03）
+#    共享/借出 openai_chat 链的子进程 Bearer = shlp_ 令牌（身份是令牌三元组，
+#    非守护进程属主）——验签分支按 (o,p) 严格断言模型名，不触达 apiKey/JWT。
+# ════════════════════════════════════════════════════════════════════════════
+
+
+class TestLlmProxyScopedToken:
+    @staticmethod
+    def _mint(*, ttl_seconds: int | None = None) -> tuple[str, str]:
+        """铸一把 (session_user, owner, provider) 令牌，返回 (token, 匹配模型名)。"""
+        kwargs: dict[str, Any] = {}
+        if ttl_seconds is not None:
+            kwargs["ttl_seconds"] = ttl_seconds
+        owner, provider = uuid.uuid4(), uuid.uuid4()
+        token = mint_llm_proxy_token(
+            session_user_id=uuid.uuid4(),
+            owner_user_id=owner,
+            provider_id=provider,
+            **kwargs,
+        )
+        # 模型名由 (owner, provider) 直算——过期用例（ttl<0）验签按设计返回 None，
+        # 不能经 grant 取。
+        from app.modules.llm_provider.litellm_client import litellm_model_name
+
+        return token, litellm_model_name(owner, provider)
+
+    async def test_token_with_matching_model_forwards(
+        self,
+        db_session: AsyncSession,
+        proxy_client: AsyncClient,
+        proxy_settings: None,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """令牌 + 本令牌模型名 → 转发；master key 注入、令牌本体被剥除。"""
+        token, model = self._mint()
+        captured = _install_fake_upstream(monkeypatch)
+
+        resp = await proxy_client.post(
+            "/api/daemon/llm-proxy/v1/messages",
+            headers={"Authorization": f"Bearer {token}"},
+            json={"model": model},
+        )
+        assert resp.status_code == 200
+        assert captured["url"] == "http://litellm-test:4000/v1/messages"
+        assert captured["headers"]["Authorization"] == "Bearer sk-litellm-master-test"
+        # 令牌是限域 Bearer 凭证，绝不随转发头外泄（R-02 同款纪律）。
+        assert token not in str(captured)
+
+    async def test_token_with_foreign_usr_model_403(
+        self,
+        db_session: AsyncSession,
+        proxy_client: AsyncClient,
+        proxy_settings: None,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """令牌 + 他人 usr 模型名 → 403，上游不被触达。"""
+        token, _ = self._mint()
+        foreign = f"usr-{uuid.uuid4()}-{uuid.uuid4()}"
+        _install_fake_upstream(monkeypatch)
+
+        resp = await proxy_client.post(
+            "/api/daemon/llm-proxy/v1/messages",
+            headers={"Authorization": f"Bearer {token}"},
+            json={"model": foreign},
+        )
+        assert resp.status_code == 403
+        assert resp.json()["detail"] == "model ownership mismatch"
+
+    async def test_token_non_usr_model_forwarded(
+        self,
+        db_session: AsyncSession,
+        proxy_client: AsyncClient,
+        proxy_settings: None,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """令牌 + 非 usr 形态模型名 → 放行转发（与 principal 路径同语义，
+        LiteLLM 自会按无 deployment 失败）。"""
+        token, _ = self._mint()
+        captured = _install_fake_upstream(monkeypatch)
+
+        resp = await proxy_client.post(
+            "/api/daemon/llm-proxy/v1/messages",
+            headers={"Authorization": f"Bearer {token}"},
+            json={"model": "glm-5.3-flash"},
+        )
+        assert resp.status_code == 200
+        assert captured["url"] == "http://litellm-test:4000/v1/messages"
+
+    async def test_token_get_models_forwards(
+        self,
+        db_session: AsyncSession,
+        proxy_client: AsyncClient,
+        proxy_settings: None,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """令牌 GET /v1/models（无 model 语义）→ 放行转发。"""
+        token, _ = self._mint()
+        captured = _install_fake_upstream(monkeypatch)
+
+        resp = await proxy_client.get(
+            "/api/daemon/llm-proxy/v1/models",
+            headers={"Authorization": f"Bearer {token}"},
+        )
+        assert resp.status_code == 200
+        assert captured["method"] == "GET"
+
+    async def test_tampered_token_401(
+        self,
+        db_session: AsyncSession,
+        proxy_client: AsyncClient,
+        proxy_settings: None,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """签名篡改的 shlp_ 令牌 → 401（fail-closed），不触上游。"""
+        token, _ = self._mint()
+        payload_b64, sig = token[len(PROXY_TOKEN_PREFIX) :].split(".")
+        flipped = ("A" if not sig.startswith("A") else "B") + sig[1:]
+        _install_fake_upstream(monkeypatch)
+
+        resp = await proxy_client.get(
+            "/api/daemon/llm-proxy/v1/models",
+            headers={"Authorization": f"Bearer {PROXY_TOKEN_PREFIX}{payload_b64}.{flipped}"},
+        )
+        assert resp.status_code == 401
+
+    async def test_expired_token_401(
+        self,
+        db_session: AsyncSession,
+        proxy_client: AsyncClient,
+        proxy_settings: None,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """过期令牌 → 401（fail-closed）。"""
+        token, _ = self._mint(ttl_seconds=-60)
+        _install_fake_upstream(monkeypatch)
+
+        resp = await proxy_client.get(
+            "/api/daemon/llm-proxy/v1/models",
+            headers={"Authorization": f"Bearer {token}"},
+        )
+        assert resp.status_code == 401

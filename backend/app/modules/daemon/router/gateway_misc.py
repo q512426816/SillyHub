@@ -48,6 +48,7 @@ from app.modules.daemon.protocol import (
 )
 from app.modules.daemon.router import router
 from app.modules.daemon.service import DaemonService
+from app.modules.llm_provider.proxy_token import PROXY_TOKEN_PREFIX, verify_llm_proxy_token
 
 log = get_logger("app.modules.daemon.router")
 
@@ -160,6 +161,21 @@ def _extract_proxy_model_name(body_bytes: bytes, path: str) -> str | None:
     return seg or None
 
 
+def _extract_bearer_value(request: Request) -> str | None:
+    """Authorization Bearer 原值提取（无 Bearer 头/形态不符返回 None）。
+
+    2026-10-31-share-openai-chat-proxy-token：llm-proxy 需在 principal 鉴权前
+    短路识别 shlp_ 限域代理令牌（令牌不映射 User，走独立验签分支）。
+    """
+    raw = request.headers.get("authorization")
+    if not raw:
+        return None
+    parts = raw.split()
+    if len(parts) == 2 and parts[0].lower() == "bearer":
+        return parts[1].strip() or None
+    return None
+
+
 # 拆 GET/POST 两个入口共享内部实现：api_route 多方法会让 FastAPI 为每个 method 生成
 # 同名 operation id，openapi-typescript 生成重复 TS 标识符（api-types.ts 编译炸）。
 # GET/HEAD 同读语义、POST 主通道；OPTIONS 由 Starlette CORSMiddleware 处理。
@@ -216,13 +232,35 @@ async def _llm_proxy_impl(path: str, request: Request) -> StreamingResponse:
         )
 
     # ── 1. 鉴权（复用 task-01 分流口径，失败 401）──
-    principal = await _authenticate_http_bearer(request)
-    if principal is None:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="authentication required",
-            headers={"WWW-Authenticate": "Bearer"},
+    # 2026-10-31-share-openai-chat-proxy-token：Bearer 值带 shlp_ 前缀 → 限域
+    # 代理令牌验签分支（共享/借出 openai_chat 链——认证主体是令牌三元组，非
+    # 守护进程属主）。验签失败同 401（fail-closed）；成功以 Grant 替代 principal
+    # 做步骤 2 断言，不触达 apiKey/JWT 路径——存量流量一行不差走旧路径。
+    principal: User | None = None
+    proxy_grant = None
+    bearer = _extract_bearer_value(request)
+    if bearer is not None and bearer.startswith(PROXY_TOKEN_PREFIX):
+        proxy_grant = verify_llm_proxy_token(bearer)
+        if proxy_grant is None:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="authentication required",
+                headers={"WWW-Authenticate": "Bearer"},
+            )
+        log.info(
+            "llm_proxy_proxy_token_auth",
+            path=path,
+            session_user_id=str(proxy_grant.session_user_id),
+            provider_id=str(proxy_grant.provider_id),
         )
+    else:
+        principal = await _authenticate_http_bearer(request)
+        if principal is None:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="authentication required",
+                headers={"WWW-Authenticate": "Bearer"},
+            )
 
     # ── 2. model 归属断言（Grill UB-4b）──
     body_bytes = b""
@@ -231,18 +269,36 @@ async def _llm_proxy_impl(path: str, request: Request) -> StreamingResponse:
         body_bytes = await request.body()
         model_name = _extract_proxy_model_name(body_bytes, path)
         if model_name is not None:
-            m = _LITELLM_MODEL_NAME_RE.match(model_name)
-            if m is not None and m.group(1) != str(principal.id):
-                # 不回显 model 名 / uid——403 detail 固定短语，不泄请求内容。
-                log.warning(
-                    "llm_proxy_model_ownership_mismatch",
-                    path=path,
-                    principal_user_id=str(principal.id),
-                )
-                raise HTTPException(
-                    status_code=status.HTTP_403_FORBIDDEN,
-                    detail="model ownership mismatch",
-                )
+            if proxy_grant is not None:
+                # 令牌路径：usr 形态模型名必须等于令牌 (o,p)——窄授权，仅本令牌
+                # 供应商可达；非 usr 形态与 principal 路径同语义放行（LiteLLM
+                # 自会按无 deployment 失败）。不回显 model 名——403 detail 固定短语。
+                if (
+                    _LITELLM_MODEL_NAME_RE.match(model_name) is not None
+                    and model_name != proxy_grant.expected_model_name
+                ):
+                    log.warning(
+                        "llm_proxy_model_ownership_mismatch",
+                        path=path,
+                        session_user_id=str(proxy_grant.session_user_id),
+                    )
+                    raise HTTPException(
+                        status_code=status.HTTP_403_FORBIDDEN,
+                        detail="model ownership mismatch",
+                    )
+            else:
+                m = _LITELLM_MODEL_NAME_RE.match(model_name)
+                if m is not None and m.group(1) != str(principal.id):
+                    # 不回显 model 名 / uid——403 detail 固定短语，不泄请求内容。
+                    log.warning(
+                        "llm_proxy_model_ownership_mismatch",
+                        path=path,
+                        principal_user_id=str(principal.id),
+                    )
+                    raise HTTPException(
+                        status_code=status.HTTP_403_FORBIDDEN,
+                        detail="model ownership mismatch",
+                    )
 
     if not model_name:
         # GET /models 等无 model 语义请求放行（warn 留痕，不拦——LiteLLM 侧
