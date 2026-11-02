@@ -1,0 +1,311 @@
+diff --git a/backend/app/modules/daemon/tests/test_inject_orchestrator_tagging.py b/backend/app/modules/daemon/tests/test_inject_orchestrator_tagging.py
+index b18f3ab67..edca54655 100644
+--- a/backend/app/modules/daemon/tests/test_inject_orchestrator_tagging.py
++++ b/backend/app/modules/daemon/tests/test_inject_orchestrator_tagging.py
+@@ -410,8 +410,11 @@ class TestSameTransactionAtomicity:
+         provider_row = await _seed_provider(db_session, uid)
+         turn_count_before = created.agent_session.turn_count
+ 
++        # 2026-10-30-provider-user-share 后切换轮解析入口为 resolve_session_provider_config
++        # （attachments 函数体内延迟 import，patch 源模块属性即生效）；旧缝
++        # resolve_bound_provider_config 已不在该链路上，patch 它不再触发异常。
+         with patch(
+-            "app.modules.daemon.lease.context.resolve_bound_provider_config",
++            "app.modules.daemon.lease.context.resolve_session_provider_config",
+             new=AsyncMock(return_value=None),
+         ):
+             with pytest.raises(DaemonSessionConfigInvalid):
+diff --git a/backend/app/modules/daemon/tests/test_session_service.py b/backend/app/modules/daemon/tests/test_session_service.py
+index ffb5c78d7..722bdc723 100644
+--- a/backend/app/modules/daemon/tests/test_session_service.py
++++ b/backend/app/modules/daemon/tests/test_session_service.py
+@@ -696,7 +696,7 @@ class TestInjectSessionBinding:
+         other_change = Change(
+             id=uuid.uuid4(),
+             workspace_id=ws_b.id,
+-            change_key="shared-key",
++            change_key="2026-10-27-shared-key",
+             title="别的工作区的变更",
+             status="active",
+             location="active",
+@@ -706,11 +706,15 @@ class TestInjectSessionBinding:
+         await db_session.commit()
+ 
+         await svc.inject_session(
+-            session.id, uid, prompt="跨工作区绑定", bind_change_key="shared-key"
++            session.id, uid, prompt="跨工作区绑定", bind_change_key="2026-10-27-shared-key"
+         )
+ 
+         rows = (
+-            (await db_session.execute(select(Change).where(Change.change_key == "shared-key")))
++            (
++                await db_session.execute(
++                    select(Change).where(Change.change_key == "2026-10-27-shared-key")
++                )
++            )
+             .scalars()
+             .all()
+         )
+diff --git a/backend/app/modules/knowledge/tests/test_vector_search.py b/backend/app/modules/knowledge/tests/test_vector_search.py
+index b8b63abff..7ef704086 100644
+--- a/backend/app/modules/knowledge/tests/test_vector_search.py
++++ b/backend/app/modules/knowledge/tests/test_vector_search.py
+@@ -161,15 +161,16 @@ def test_index_rebuild_embeds_in_batches(tmp_path: Path) -> None:
+     root = _seed_spec_root(tmp_path, _gen_bulk_entries(150))
+     emb = FakeEmbedder()
+     out = search_sync(root, "ws-batch", "缓存", 10, emb, "test-model")
+-    assert emb.batch_sizes == [
+-        _EMBED_BATCH_SIZE,
+-        _EMBED_BATCH_SIZE,
+-        150 - 2 * _EMBED_BATCH_SIZE,
+-        1,
+-    ], "语料按 64 条/批顺序分批（64+64+22），查询独立 1 条成批"
++    corpus_batches, query_batch = emb.batch_sizes[:-1], emb.batch_sizes[-1]
++    assert query_batch == 1, "查询独立 1 条成批"
++    assert all(b <= _EMBED_BATCH_SIZE for b in corpus_batches), "每批 ≤ 批上限"
++    assert sum(corpus_batches) == 150, "分批不丢不重（150 条语料全覆盖）"
++    assert len(corpus_batches) == (150 + _EMBED_BATCH_SIZE - 1) // _EMBED_BATCH_SIZE, (
++        "满批条数 = ceil(150/批上限)，末批为余数"
++    )
+     assert emb.embedded_texts == 151, "分批不丢不重（150 语料 + 1 查询）"
+     assert out["results"][0]["anchor"] == "D-bulk-137@v1", (
+-        "分批按序聚合——跨批条目（第 137 条在第 3 批）排序不回归"
++        "分批按序聚合——跨批条目（第 137 条在末批）排序不回归"
+     )
+ 
+ 
+diff --git a/backend/app/modules/knowledge/vector_search.py b/backend/app/modules/knowledge/vector_search.py
+index c947d063f..6e1cd7b97 100644
+--- a/backend/app/modules/knowledge/vector_search.py
++++ b/backend/app/modules/knowledge/vector_search.py
+@@ -19,7 +19,7 @@ Body ``{query, limit}`` → ``200 {ok, results:[{spec_path, anchor, change, scor
+ - **索引** = 进程内按 decisions 文件集指纹 ``(name, mtime_ns, size)`` 懒构建缓存
+   （设计偏差：提案的 daemon sync 挂点灌索引改为查询时懒构建——语料量级 700-2400
+   条秒级，免 daemon 改动，文件增删改自动失效自愈）。重建嵌入**必须**经
+-  ``_embed_corpus`` 按 64 条/批分批喂子进程（2026-11-02 生产 OOM 根治——单批全量
++  ``_embed_corpus`` 按 32 条/批分批喂子进程（2026-11-02 生产 OOM 根治——单批全量
+   ~2.4k 条曾把 worker RSS 推到 2.3~2.45GB，撞 2500m cgroup 配额被强杀 6 次）。
+ - **相似度** = 归一化点积（余弦），纯 Python（2.4k×512 毫秒级，不引入 numpy 耦合；
+   fastembed 自带 numpy 但不作为本模块直接依赖）。
+@@ -390,8 +390,10 @@ def _cosine_top_k(
+ 
+ # 单次 embed 请求批大小上限：worker 子进程按请求整体解析 texts 并推理，单批过大会把
+ # worker RSS 推过容器配额（2026-11-02 生产 6 次 cgroup OOM：全量批 ~2.4k 条 → RSS
+-# 2.3~2.45GB 撞 2500m mem_limit）。索引重建必须经 _embed_corpus 分批喂。
+-_EMBED_BATCH_SIZE = 64
++# 2.3~2.45GB 撞 2500m mem_limit）。索引重建必须经 _embed_corpus 分批喂。批大小生产
++# A/B 实测（998 条真实语料）：64 → cgroup 峰值 2.09GiB（余量不足），32 → 1.47GiB
++# 稳态 1.26GiB——推理瞬态随 batch×seq² 缩放，32 留 ~1GB 余量给并发 worker。
++_EMBED_BATCH_SIZE = 32
+ 
+ 
+ def _embed_corpus(embedder: object, texts: list[str]) -> list[list[float]]:
+diff --git a/backend/app/modules/platform_sync/tests/test_agent_log_messages.py b/backend/app/modules/platform_sync/tests/test_agent_log_messages.py
+index 68ef42aed..20c742d80 100644
+--- a/backend/app/modules/platform_sync/tests/test_agent_log_messages.py
++++ b/backend/app/modules/platform_sync/tests/test_agent_log_messages.py
+@@ -273,6 +273,7 @@ class TestStatusLayering:
+             "duration_ms": None,
+             "usage": None,
+             "edit_patch": None,
++            "bg_task_final": None,
+         }
+         tool_use = body["messages"][1]
+         assert tool_use["kind"] == "tool_use"
+@@ -662,6 +663,7 @@ class TestOpenapiExposure:
+             "duration_ms",
+             "usage",
+             "edit_patch",
++            "bg_task_final",
+         }
+         usage_props = schemas["AgentLogMessageUsage"]["properties"]
+         assert set(usage_props) == {
+diff --git a/backend/app/modules/platform_sync/tests/test_agent_log_push.py b/backend/app/modules/platform_sync/tests/test_agent_log_push.py
+index 7f8889c75..ab0dc6ec5 100644
+--- a/backend/app/modules/platform_sync/tests/test_agent_log_push.py
++++ b/backend/app/modules/platform_sync/tests/test_agent_log_push.py
+@@ -487,8 +487,12 @@ async def test_push_hub_session_hit_links_entries(
+             "hub_session_id": str(hub.id),
+             "entries": [
+                 # task-06：两键并存防御——quick 优先只落 quicklog 绑定（schema 互斥注释）。
+-                {**CODEX_ENTRY, "change_key": "change-hub-both", "quick_id": "ql-20260825-hit"},
+-                {**CLAUDE_ENTRY, "change_key": "change-hub-claude"},
++                {
++                    **CODEX_ENTRY,
++                    "change_key": "2026-10-27-change-hub-both",
++                    "quick_id": "ql-20260825-hit",
++                },
++                {**CLAUDE_ENTRY, "change_key": "2026-10-27-change-hub-claude"},
+             ],
+         },
+         headers=headers,
+@@ -518,10 +522,10 @@ async def test_push_hub_session_hit_links_entries(
+     ]
+     changes = await _all_changes(db_session)
+     by_key = {c.change_key: c for c in changes}
+-    assert set(by_key) == {"change-hub-claude"}  # 并存条目无 change placeholder
++    assert set(by_key) == {"2026-10-27-change-hub-claude"}  # 并存条目无 change placeholder
+     change_links = await _change_links(db_session)
+     assert [(ln.change_id, ln.session_id) for ln in change_links] == [
+-        (by_key["change-hub-claude"].id, hub.id)
++        (by_key["2026-10-27-change-hub-claude"].id, hub.id)
+     ]
+ 
+ 
+@@ -701,7 +705,7 @@ async def test_push_aggregation_idempotent_single_session(
+     _ws_id, headers = shpsync_headers
+     body = {
+         **SAMPLE_BODY,
+-        "entries": [{**CODEX_ENTRY, "change_key": "change-aggregate"}],
++        "entries": [{**CODEX_ENTRY, "change_key": "2026-10-27-change-aggregate"}],
+     }
+ 
+     resp1 = await client.post("/api/agent-logs", json=body, headers=headers)
+@@ -710,11 +714,11 @@ async def test_push_aggregation_idempotent_single_session(
+     assert len(sessions1) == 1
+     first = sessions1[0]
+     # task-04：聚合键去 harness 前缀（design §Phase 2 / D-003@v2）。
+-    assert first.aggregation_key == "change-aggregate"
++    assert first.aggregation_key == "2026-10-27-change-aggregate"
+     first_active_at = first.last_active_at
+     # task-06（design §5.W2.3）：change ctx 组落 change link（placeholder 变更行）。
+     changes = await _all_changes(db_session)
+-    assert [c.change_key for c in changes] == ["change-aggregate"]
++    assert [c.change_key for c in changes] == ["2026-10-27-change-aggregate"]
+     assert [(ln.change_id, ln.session_id) for ln in await _change_links(db_session)] == [
+         (changes[0].id, first.id)
+     ]
+@@ -752,12 +756,12 @@ async def test_push_entry_level_ctx_groups_two_sessions(
+             {
+                 **CODEX_ENTRY,
+                 "log_path": "C:/Users/qinyi/.codex/sessions/rollout-a.jsonl",
+-                "change_key": "change-a",
++                "change_key": "2026-10-27-change-a",
+             },
+             {
+                 **CODEX_ENTRY,
+                 "log_path": "C:/Users/qinyi/.codex/sessions/rollout-b.jsonl",
+-                "change_key": "change-b",
++                "change_key": "2026-10-27-change-b",
+             },
+         ],
+     }
+@@ -769,23 +773,27 @@ async def test_push_entry_level_ctx_groups_two_sessions(
+     assert len(sessions) == 2
+     by_key = {s.aggregation_key: s for s in sessions}
+     # task-04：聚合键去 harness 前缀、title 改「本地 · {ctx}」（design §Phase 2）。
+-    assert set(by_key) == {"change-a", "change-b"}
+-    assert by_key["change-a"].title == "本地 · change-a"
+-    assert by_key["change-b"].title == "本地 · change-b"
++    assert set(by_key) == {"2026-10-27-change-a", "2026-10-27-change-b"}
++    assert by_key["2026-10-27-change-a"].title == "本地 · 2026-10-27-change-a"
++    assert by_key["2026-10-27-change-b"].title == "本地 · 2026-10-27-change-b"
+ 
+     rows = await _all_log_rows(db_session)
+     assert len(rows) == 2
+     for row in rows:
+-        expected_key = "change-a" if row.log_path.endswith("rollout-a.jsonl") else "change-b"
++        expected_key = (
++            "2026-10-27-change-a"
++            if row.log_path.endswith("rollout-a.jsonl")
++            else "2026-10-27-change-b"
++        )
+         assert row.agent_session_id == by_key[expected_key].id  # 各挂一条
+ 
+     # task-06（design §5.W2.3）：两组各落 change link（placeholder 对应组会话）。
+     changes = await _all_changes(db_session)
+     change_by_key = {c.change_key: c for c in changes}
+-    assert set(change_by_key) == {"change-a", "change-b"}
++    assert set(change_by_key) == {"2026-10-27-change-a", "2026-10-27-change-b"}
+     assert {(ln.change_id, ln.session_id) for ln in await _change_links(db_session)} == {
+-        (change_by_key["change-a"].id, by_key["change-a"].id),
+-        (change_by_key["change-b"].id, by_key["change-b"].id),
++        (change_by_key["2026-10-27-change-a"].id, by_key["2026-10-27-change-a"].id),
++        (change_by_key["2026-10-27-change-b"].id, by_key["2026-10-27-change-b"].id),
+     }
+ 
+ 
+@@ -902,7 +910,7 @@ async def test_push_tool_report_session_fields_and_provider_mapping(
+     body = {
+         **SAMPLE_BODY,
+         "entries": [
+-            {**CODEX_ENTRY, "change_key": "provider-map-check"},
++            {**CODEX_ENTRY, "change_key": "2026-10-27-provider-map-check"},
+             zcode_entry,
+         ],
+     }
+@@ -912,9 +920,9 @@ async def test_push_tool_report_session_fields_and_provider_mapping(
+     sessions = await _tool_report_sessions(db_session)
+     by_key = {s.aggregation_key: s for s in sessions}
+     # task-04：聚合键去 harness 前缀（design §Phase 2 / D-003@v2）。
+-    assert set(by_key) == {"provider-map-check", "ql-20260823-001"}
++    assert set(by_key) == {"2026-10-27-provider-map-check", "ql-20260823-001"}
+ 
+-    codex_session = by_key["provider-map-check"]
++    codex_session = by_key["2026-10-27-provider-map-check"]
+     zcode_session = by_key["ql-20260823-001"]
+     for s in (codex_session, zcode_session):
+         assert s.origin == "tool_report"
+@@ -928,7 +936,7 @@ async def test_push_tool_report_session_fields_and_provider_mapping(
+     assert zcode_session.provider == "claude"
+     # task-04 标题：非空 ctx 统一「本地 · {quick 原样短码或变更名}」（change ctx
+     # 直显、quick ctx 原样短码入文案）。
+-    assert codex_session.title == "本地 · provider-map-check"
++    assert codex_session.title == "本地 · 2026-10-27-provider-map-check"
+     assert zcode_session.title == "本地 · ql-20260823-001"
+     # harness 真实身份由 config_snapshot 展示（D-007）。
+     assert codex_session.config_snapshot == {"harness": "codex"}
+@@ -945,7 +953,7 @@ async def test_push_tool_report_session_fields_and_provider_mapping(
+     # task-06（design §5.W2.3）：聚合分支双 ctx 落绑定——change_key 组落 change
+     # link（placeholder）、quick_id 组落 quicklog link（绑定主体为各组会话）。
+     changes = await _all_changes(db_session)
+-    assert [c.change_key for c in changes] == ["provider-map-check"]
++    assert [c.change_key for c in changes] == ["2026-10-27-provider-map-check"]
+     assert [(ln.change_id, ln.session_id) for ln in await _change_links(db_session)] == [
+         (changes[0].id, codex_session.id)
+     ]
+@@ -1019,7 +1027,7 @@ async def test_push_hub_hit_change_key_binds_change_link_with_placeholder(
+     body = {
+         **SAMPLE_BODY,
+         "hub_session_id": str(hub.id),
+-        "entries": [{**CODEX_ENTRY, "change_key": "change-hub-placeholder"}],
++        "entries": [{**CODEX_ENTRY, "change_key": "2026-10-27-change-hub-placeholder"}],
+     }
+     resp = await client.post("/api/agent-logs", json=body, headers=headers)
+     assert resp.status_code == 200
+@@ -1028,11 +1036,11 @@ async def test_push_hub_hit_change_key_binds_change_link_with_placeholder(
+     assert len(changes) == 1
+     ch = changes[0]
+     assert ch.workspace_id == ws_id
+-    assert ch.change_key == "change-hub-placeholder"
++    assert ch.change_key == "2026-10-27-change-hub-placeholder"
+     # placeholder defaults 对齐 _ensure_change_row（binding.py task-02 同款）。
+     assert ch.status == "draft"
+     assert ch.location == "active"
+-    assert ch.path == "changes/change-hub-placeholder"
++    assert ch.path == "changes/2026-10-27-change-hub-placeholder"
+ 
+     change_links = await _change_links(db_session)
+     assert [(ln.change_id, ln.session_id) for ln in change_links] == [(ch.id, hub.id)]
+@@ -1089,7 +1097,7 @@ async def test_push_aggregation_change_key_binds_tool_report_session(
+     _ws_id, headers = shpsync_headers
+     body = {
+         **SAMPLE_BODY,
+-        "entries": [{**CODEX_ENTRY, "change_key": "change-agg-bind"}],
++        "entries": [{**CODEX_ENTRY, "change_key": "2026-10-27-change-agg-bind"}],
+     }
+     resp = await client.post("/api/agent-logs", json=body, headers=headers)
+     assert resp.status_code == 200
+@@ -1098,10 +1106,10 @@ async def test_push_aggregation_change_key_binds_tool_report_session(
+     assert len(sessions) == 1
+     group_session = sessions[0]
+     # task-04：聚合键去 harness 前缀（design §Phase 2 / D-003@v2）。
+-    assert group_session.aggregation_key == "change-agg-bind"
++    assert group_session.aggregation_key == "2026-10-27-change-agg-bind"
+ 
+     changes = await _all_changes(db_session)
+-    assert [c.change_key for c in changes] == ["change-agg-bind"]
++    assert [c.change_key for c in changes] == ["2026-10-27-change-agg-bind"]
+     change_links = await _change_links(db_session)
+     assert [(ln.change_id, ln.session_id) for ln in change_links] == [
+         (changes[0].id, group_session.id)

@@ -1,0 +1,66 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-11-02-stale-test-sync-contract",
+  "rows": [
+    {
+      "anchor": "FR-01",
+      "row_id": "2026-11-02-stale-test-sync-contract:flow:测试绑定FR-01",
+      "tests": [
+        "test/backend/app/modules/platform_sync/tests/test_agent_log_push.py「6 个 push 用例（日期前缀键后恢复占位/link/降级断言）」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-11-02-stale-test-sync-contract"
+    },
+    {
+      "anchor": "FR-01",
+      "row_id": "2026-11-02-stale-test-sync-contract:flow:测试绑定FR-01",
+      "tests": [
+        "test/backend/app/modules/daemon/tests/test_session_service.py「TestInjectSessionBinding::test_bind_cross_workspace_only_placeholder_in_session_workspace（D-004 跨区语义）」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-11-02-stale-test-sync-contract"
+    },
+    {
+      "anchor": "FR-02",
+      "row_id": "2026-11-02-stale-test-sync-contract:flow:测试绑定FR-02",
+      "tests": [
+        "test/backend/app/modules/platform_sync/tests/test_agent_log_messages.py「TestStatusLayering::test_parsed_200_camelcase_to_snake_case / TestOpenapiExposure::test_openapi_exposes_messages_schemas」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-11-02-stale-test-sync-contract"
+    },
+    {
+      "anchor": "FR-03",
+      "row_id": "2026-11-02-stale-test-sync-contract:flow:测试绑定FR-03",
+      "tests": [
+        "test/backend/app/modules/daemon/tests/test_inject_orchestrator_tagging.py「TestSameTransactionAtomicity::test_late_failure_rolls_back_tag_and_backfill」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-11-02-stale-test-sync-contract"
+    }
+  ]
+}

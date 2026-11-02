@@ -135,3 +135,4 @@
 - 2026-10-30-provider-user-share | 供应商按用户共享且被共享方只读选用
 - 2026-11-01-provider-share-audit-fixes | 供应商共享审计问题修复
 - 2026-10-31-share-openai-chat-proxy-token | 共享openai_chat供应商代理403修复
+- 2026-11-02-stale-test-sync-contract | 契约演进后测试欠同步修复

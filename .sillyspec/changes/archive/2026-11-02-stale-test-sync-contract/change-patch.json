@@ -1,0 +1,135 @@
+{
+  "change": "2026-11-02-stale-test-sync-contract",
+  "baseline": "c559200fd9d9b117ea7429d376284e79d51660cb",
+  "head": "fe213906aa3547e28d43ffc321d8f7826ef9005e",
+  "files": [
+    "backend/app/modules/daemon/tests/test_inject_orchestrator_tagging.py",
+    "backend/app/modules/daemon/tests/test_session_service.py",
+    "backend/app/modules/knowledge/tests/test_vector_search.py",
+    "backend/app/modules/knowledge/vector_search.py",
+    "backend/app/modules/platform_sync/tests/test_agent_log_messages.py",
+    "backend/app/modules/platform_sync/tests/test_agent_log_push.py"
+  ],
+  "totals": {
+    "files": 6,
+    "additions": 61,
+    "deletions": 41
+  },
+  "savedAt": "2026-11-02T01:44:34.392Z",
+  "note": "flow done 时点冻结（本变更可归属交付面：baseline..HEAD 提交面过滤 .sillyspec/ 只留 .sillyspec/docs/ 交付文档 + 独占树未提交交付；治理工件目录不入冻结——2026-10-12-close-trace-freeze-integrity FR-01）",
+  "modules": [
+    {
+      "id": "platform_sync",
+      "files": 2,
+      "doc": "docs/backend/modules/platform_sync.md",
+      "docTouched": false,
+      "docMissing": false
+    },
+    {
+      "id": "daemon",
+      "files": 2,
+      "doc": "docs/backend/modules/daemon.md",
+      "docTouched": false,
+      "docMissing": false
+    },
+    {
+      "id": "knowledge",
+      "files": 2,
+      "doc": "docs/backend/modules/knowledge.md",
+      "docTouched": false,
+      "docMissing": false
+    },
+    {
+      "id": "backend",
+      "files": 6,
+      "doc": "docs/multi-agent-platform/modules/backend.md",
+      "docTouched": false,
+      "docMissing": false
+    },
+    {
+      "id": "daemon",
+      "files": 2,
+      "doc": "docs/SillyHub/modules/daemon.md",
+      "docTouched": false,
+      "docMissing": false
+    },
+    {
+      "id": "knowledge",
+      "files": 2,
+      "doc": "docs/SillyHub/modules/knowledge.md",
+      "docTouched": false,
+      "docMissing": false
+    },
+    {
+      "id": "platform_sync",
+      "files": 2,
+      "doc": "docs/SillyHub/modules/platform_sync.md",
+      "docTouched": false,
+      "docMissing": false
+    }
+  ],
+  "uncoveredDirs": [],
+  "moduleMaps": [
+    "docs/backend/modules/_module-map.yaml",
+    "docs/frontend/modules/_module-map.yaml",
+    "docs/multi-agent-platform/modules/_module-map.yaml",
+    "docs/SillyHub/modules/_module-map.yaml",
+    "docs/sillyhub-daemon/modules/_module-map.yaml"
+  ],
+  "scopeAudit": {
+    "mode": "full-flow",
+    "ok": true,
+    "degradedReason": null,
+    "baseAnchor": "c559200fd9d9b117ea7429d376284e79d51660cb",
+    "totals": {
+      "files": 6,
+      "additions": 61,
+      "deletions": 41
+    },
+    "rows": [
+      {
+        "path": "backend/app/modules/daemon/tests/test_inject_orchestrator_tagging.py",
+        "additions": 4,
+        "deletions": 1,
+        "kind": "modified"
+      },
+      {
+        "path": "backend/app/modules/daemon/tests/test_session_service.py",
+        "additions": 7,
+        "deletions": 3,
+        "kind": "modified"
+      },
+      {
+        "path": "backend/app/modules/knowledge/tests/test_vector_search.py",
+        "additions": 8,
+        "deletions": 7,
+        "kind": "modified"
+      },
+      {
+        "path": "backend/app/modules/knowledge/vector_search.py",
+        "additions": 5,
+        "deletions": 3,
+        "kind": "modified"
+      },
+      {
+        "path": "backend/app/modules/platform_sync/tests/test_agent_log_messages.py",
+        "additions": 2,
+        "deletions": 0,
+        "kind": "modified"
+      },
+      {
+        "path": "backend/app/modules/platform_sync/tests/test_agent_log_push.py",
+        "additions": 35,
+        "deletions": 27,
+        "kind": "modified"
+      }
+    ],
+    "excluded": {
+      "foreignDeclared": []
+    },
+    "note": "flow done 时点冻结（本文件落盘时采集）",
+    "closedBy": "flow done"
+  },
+  "patchSha256": "36cee23e8b33fb0f00b378a135e6ad86020b5f3f220440d864de1fe1b81b1af8",
+  "patchStatus": "ok"
+}

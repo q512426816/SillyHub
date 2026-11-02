@@ -9414,3 +9414,67 @@
 摘要：收口实测
 全文：.sillyspec/changes/archive/2026-10-31-share-openai-chat-proxy-token/requirements.md#FR-05
 最近确认：bb8f1bfe50f8888a580d18007b9407758c4a1d05
+
+## FR-daemon-359 7 个 placeholder 主题用例改用日期前缀键（形如 2026-10-27-xxx，符合新契约合法名）后，占位行创建/change link/跨区 D-004/降级语义等原断言全部恢复且通过——测试验证的仍是占位与绑定行为本身，非快照现状
+变更：2026-11-02-stale-test-sync-contract
+状态：active
+摘要：push 条目 change_key 建占位与 link
+全文：.sillyspec/changes/archive/2026-11-02-stale-test-sync-contract/requirements.md#FR-01
+最近确认：fe213906aa3547e28d43ffc321d8f7826ef9005e
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-11-02-stale-test-sync-contract:flow:测试绑定FR-01
+  tests: test/backend/app/modules/daemon/tests/test_session_service.py「TestInjectSessionBinding::test_bind_cross_workspace_only_placeholder_in_session_workspace（D-004 跨区语义）」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-11-02-stale-test-sync-contract
+  status: active
+
+## FR-daemon-360 2 个 messages 用例按新 schema 把 bg_task_final 纳入精确断言（item dict 增 bg_task_final: None / openapi properties 集合增 bg_task_final）后通过
+变更：2026-11-02-stale-test-sync-contract
+状态：active
+摘要：schema 新字段进精确断言
+全文：.sillyspec/changes/archive/2026-11-02-stale-test-sync-contract/requirements.md#FR-02
+最近确认：fe213906aa3547e28d43ffc321d8f7826ef9005e
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-11-02-stale-test-sync-contract:flow:测试绑定FR-02
+  tests: test/backend/app/modules/platform_sync/tests/test_agent_log_messages.py「TestStatusLayering::test_parsed_200_camelcase_to_snake_case / TestOpenapiExposure::test_openapi_exposes_messages_schemas」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-11-02-stale-test-sync-contract
+  status: active
+
+## FR-daemon-361 tagging 回滚用例 monkeypatch 缝换为 resolve_session_provider_config 后恢复 DID raise 语义并通过（回滚断言原样保留）
+变更：2026-11-02-stale-test-sync-contract
+状态：active
+摘要：切换轮解析破裂回滚
+全文：.sillyspec/changes/archive/2026-11-02-stale-test-sync-contract/requirements.md#FR-03
+最近确认：fe213906aa3547e28d43ffc321d8f7826ef9005e
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-11-02-stale-test-sync-contract:flow:测试绑定FR-03
+  tests: test/backend/app/modules/daemon/tests/test_inject_orchestrator_tagging.py「TestSameTransactionAtomicity::test_late_failure_rolls_back_tag_and_backfill」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-11-02-stale-test-sync-contract
+  status: active
+
+## FR-daemon-362 触及的四个测试文件全量绿；platform_sync + daemon 注入相邻面零回归（CLI 亲测）
+变更：2026-11-02-stale-test-sync-contract
+状态：active
+摘要：收口实测
+全文：.sillyspec/changes/archive/2026-11-02-stale-test-sync-contract/requirements.md#FR-04
+最近确认：fe213906aa3547e28d43ffc321d8f7826ef9005e
