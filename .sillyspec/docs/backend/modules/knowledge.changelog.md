@@ -6,3 +6,4 @@
 - 2026-10-22-merge-test-debt | 合并后测试债清偿：l10n文案与守卫钉子同步
 - 2026-10-23-knowledge-scope-maintenance | 知识注入作用域维护面板
 - 2026-11-02-stale-test-sync-contract | 契约演进后测试欠同步修复
+- 2026-11-02-embed-batch-chunk | embedding 全量批分批化根治 cgroup OOM

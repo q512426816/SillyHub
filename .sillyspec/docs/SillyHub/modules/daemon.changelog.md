@@ -126,3 +126,4 @@ created_at: 2026-08-27 14:32:24
 - 2026-11-01-provider-share-audit-fixes | 供应商共享审计收尾——畸形UUID 422、密钥可见性告知（弹窗+模块卡）、HTTP层/claim注入链用例补全、迁移降级注释如实化
 - 2026-10-31-share-openai-chat-proxy-token | 共享openai_chat供应商代理403修复
 - 2026-11-02-stale-test-sync-contract | 契约演进后测试欠同步修复
+- 2026-11-02-embed-batch-chunk | embedding 全量批分批化根治 cgroup OOM

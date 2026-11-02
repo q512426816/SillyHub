@@ -1,0 +1,37 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-11-02-embed-batch-chunk",
+  "reviewer": "subagent",
+  "verdict": "PASS",
+  "reviewedAgainst": "55d501f483e7bc3b984511d067239ae4c14e55f5",
+  "findings": [
+    {
+      "severity": "P3",
+      "status": "resolved",
+      "title": "design 盲维第2问机制描述失实：分批并非发生在 _index_lock 锁内，并发首查并非一个重建者",
+      "evidence": "复核：design.md 第2问答案已重写——如实描述 _index_cache_get/_index_cache_put 各自持 _index_lock 短临界区、重建（含分批 embed）发生在两锁之间锁外区、并发首查可能双双重建为既有行为（重建幂等 + put 原子整体替换无撕裂）、批间经 EmbeddingSubprocessProxy.self._lock 串行——与 vector_search.py:343-363/434-439 及路由 run_in_threadpool 直调无外层锁的实况逐点吻合，机制描述不再失实。原裁定维持：该并发行为分批前后一致、无新增风险面。",
+      "location": ".sillyspec/changes/2026-11-02-embed-batch-chunk/design.md:29"
+    },
+    {
+      "severity": "P3",
+      "status": "resolved",
+      "title": "64→32 调参后冻结文档残留 64 口径，变更材料内部自相矛盾",
+      "evidence": "复核：design.md 接口契约 ⌈N/64⌉→⌈N/32⌉、tasks.md task-01『≤32』/task-02『_EMBED_BATCH_SIZE=32（64→32 经生产 A/B 定档）』、test_vector_search.py 断言消息去硬编码（『≤64 条』→『≤批上限』，diff 仅消息一行、断言逻辑 [3,1] 未动无弱化）均已修正；requirements FR-01 标题『≤64』按锚逐字钉死规则保留——字面为真（32≤64）且正文规范口径 =32 附 A/B 数据，可接受。备注（不阻断）：design.md:43 风险段『批大小 64…64×百字』残留 64 算例——属 A/B 被拒上界情形的保守推演，其结论（单批字节量远低于风险线）对 32 a fortiori 成立，非规范面，判定装饰性残留。所有规范面（契约/任务/常量/测试）口径已统一为 32，审计歧义消除。",
+      "location": ".sillyspec/changes/2026-11-02-embed-batch-chunk/design.md:19"
+    },
+    {
+      "severity": "P3",
+      "status": "accepted",
+      "title": "change.patch 冻结件夹带并行变更文件，超出 design 文件清单声明的 2 文件",
+      "evidence": "补丁含 daemon/platform_sync 测试改动、多条 changelog、release 文档等 13 个额外文件，属同批发布的 2026-11-02-stale-test-sync-contract 等并行变更内容（patch 内 release 文档提交列表自证）；本变更自身 hunks（vector_search.py / test_vector_search.py）与 HEAD 55d501f 实现逐行核对一致，夹带项未混入本变更语义——共享仓冻结时点快照可接受，但削弱审计件对单一变更的针对性。维持 accepted 裁定，无需动作。",
+      "location": ".sillyspec/changes/2026-11-02-embed-batch-chunk/change.patch:1-124"
+    }
+  ],
+  "dimensionNotes": {
+    "乱序": "ok",
+    "并发": "ok",
+    "切换": "ok",
+    "作用域": "ok"
+  },
+  "reviewedAt": "2026-11-02T09:59:18+08:00"
+}

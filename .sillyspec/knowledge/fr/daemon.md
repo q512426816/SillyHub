@@ -9478,3 +9478,48 @@
 摘要：收口实测
 全文：.sillyspec/changes/archive/2026-11-02-stale-test-sync-contract/requirements.md#FR-04
 最近确认：fe213906aa3547e28d43ffc321d8f7826ef9005e
+
+## FR-daemon-363 search_sync 索引重建路径按固定批大小（≤64 条/批）分批调用 embed，不再存在单次全量调用；
+变更：2026-11-02-embed-batch-chunk
+状态：active
+摘要：索引重建分批；小语料单批
+全文：.sillyspec/changes/archive/2026-11-02-embed-batch-chunk/requirements.md#FR-01
+最近确认：55d501f483e7bc3b984511d067239ae4c14e55f5
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-11-02-embed-batch-chunk:flow:测试绑定FR-01
+  tests: backend/app/modules/knowledge/tests/test_vector_search.py「test_index_rebuild_embeds_in_batches（新增：批上限/顺序聚合/查询独立成批）」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-11-02-embed-batch-chunk
+  status: active
+
+## FR-daemon-364 既有向量搜索行为不回归（检索结果排序/缓存语义不变）；
+变更：2026-11-02-embed-batch-chunk
+状态：active
+摘要：排序与缓存不回归
+全文：.sillyspec/changes/archive/2026-11-02-embed-batch-chunk/requirements.md#FR-02
+最近确认：55d501f483e7bc3b984511d067239ae4c14e55f5
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-11-02-embed-batch-chunk:flow:测试绑定FR-02
+  tests: backend/app/modules/knowledge/tests/test_vector_search.py「test_index_fingerprint_cache_and_invalidation / test_search_ranking_limit_and_contract（既有断言零改动通过）」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-11-02-embed-batch-chunk
+  status: active
+
+## FR-daemon-365 backend 相关测试全绿，ruff 零告警。
+变更：2026-11-02-embed-batch-chunk
+状态：active
+摘要：验收
+全文：.sillyspec/changes/archive/2026-11-02-embed-batch-chunk/requirements.md#FR-03
+最近确认：55d501f483e7bc3b984511d067239ae4c14e55f5
