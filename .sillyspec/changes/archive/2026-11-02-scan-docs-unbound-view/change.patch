@@ -1,0 +1,907 @@
+diff --git a/backend/app/modules/daemon/session/service/control.py b/backend/app/modules/daemon/session/service/control.py
+index eabac8b06..cf1940b50 100644
+--- a/backend/app/modules/daemon/session/service/control.py
++++ b/backend/app/modules/daemon/session/service/control.py
+@@ -767,6 +767,11 @@ async def _dispatch_inject_turn(
+                 {
+                     "sessionId": str(session.id),
+                     "runId": str(run.id),
++                    # FR-02（2026-11-02-daemon-resume-gate-fix）：daemon 丢弃切换轮
++                    # 时回报 run 失败需 lease_id 寻址（对齐 INJECT payload 既有
++                    # lease_id 键语义；旧 daemon 忽略未知键，向后兼容）。lease 缺失
++                    # 归一空串——daemon 侧要素不全自动降级为仅 warn 不回报。
++                    "leaseId": str(session.lease_id) if session.lease_id else "",
+                     "claimToken": inject_claim_token,
+                     # ql-20260901-002：切换轮带文本时同样剥 /team 前缀（切换
+                     # 轮 prompt 也直达 agent）。
+diff --git a/backend/app/modules/daemon/tests/test_session_switch_config.py b/backend/app/modules/daemon/tests/test_session_switch_config.py
+index fd1316d48..b8bc5a462 100644
+--- a/backend/app/modules/daemon/tests/test_session_switch_config.py
++++ b/backend/app/modules/daemon/tests/test_session_switch_config.py
+@@ -266,6 +266,9 @@ class TestSwitchSuccess:
+         assert msg_type == DAEMON_MSG_SESSION_SWITCH_CONFIG
+         assert payload["sessionId"] == str(s.id)
+         assert payload["runId"] == str(run.id)
++        # FR-02（2026-11-02-daemon-resume-gate-fix）：daemon 丢弃切换轮回报
++        # run 失败需 lease_id 寻址——payload 必须携带会话当前 lease。
++        assert payload["leaseId"] == str(s.lease_id)
+         assert payload["prompt"] == "switch turn"
+         assert payload["claimToken"] == meta["claim_token"]
+         assert payload["profile"] == {
+diff --git a/frontend/src/app/(dashboard)/workspaces/[id]/__tests__/scan-docs-page.test.tsx b/frontend/src/app/(dashboard)/workspaces/[id]/__tests__/scan-docs-page.test.tsx
+index ed1c57a0b..e07c645a3 100644
+--- a/frontend/src/app/(dashboard)/workspaces/[id]/__tests__/scan-docs-page.test.tsx
++++ b/frontend/src/app/(dashboard)/workspaces/[id]/__tests__/scan-docs-page.test.tsx
+@@ -44,6 +44,20 @@ vi.mock("@/lib/workspace-binding", async (importOriginal) => {
+   };
+ });
+ 
++// 2026-11-02-scan-docs-unbound-view：无绑定用例会经 DaemonRequiredNotice
++// degraded 横幅的「配置我的守护进程」展开 WorkspaceAccessGuide（真实组件内部
++// 拉 daemon 实例列表会打 jsdom 缺失的 fetch），同 daemon-required-notice.test
++// 替换为静态渲染聚焦横幅↔主区联动。
++vi.mock("@/components/workspace-access-guide", () => ({
++  WorkspaceAccessGuide: ({ onConfigured }: { onConfigured: () => void }) => (
++    <div data-testid="access-guide">
++      <button data-testid="access-configured" onClick={onConfigured}>
++        done
++      </button>
++    </div>
++  ),
++}));
++
+ vi.mock("@/stores/session", () => ({
+   useSession: (sel: (_s: unknown) => unknown) =>
+     sel({ user: { permissions: [], is_platform_admin: false } }),
+@@ -272,6 +286,56 @@ describe("运营指标面板挂载（task-03 / 2026-09-21-scan-docs-ops-panel）
+ });
+ 
+ 
++// ── 2026-11-02-scan-docs-unbound-view：无绑定也可浏览服务端存量数据 ──────────
++//
++// 后端 list/get/stats/reparse 全为服务端读取（不触 daemon），页面不应因无绑定
++// 拒绝展示：文档树/搜索/详情/统计照常，reparse 照发（失败静默既有语义）；
++// DaemonRequiredNotice 从「整页替换主区」降级为非阻断横幅。
++
++describe("无 daemon 绑定：服务端存量数据照常可看（2026-11-02-scan-docs-unbound-view）", () => {
++  it("无绑定：文档树/详情照常渲染服务端数据，reparse 照发（FR-01）", async () => {
++    mockBinding.mockResolvedValue(null);
++    mockGetDoc.mockResolvedValue(
++      summary({ id: "id-arch", path: "backend/ARCHITECTURE.md", title: "架构文档", content: "# hello" }),
++    );
++    renderPage();
++    // 数据面不依赖 binding：列表照拉、树照常渲染（旧实现 hasDaemon=false 直接 return）。
++    await waitForTree(["backend", "ARCHITECTURE.md"]);
++    await waitFor(() => expect(mockReparse).toHaveBeenCalledWith(WS));
++    // 详情照常可看。
++    fireEvent.click(
++      screen.getByText("ARCHITECTURE.md").closest(".ant-tree-node-content-wrapper")!,
++    );
++    await waitFor(() => expect(mockGetDoc).toHaveBeenCalledWith(WS, "id-arch"));
++    await waitFor(() => expect(screen.getByText("架构文档")).toBeInTheDocument());
++  });
++
++  it("无绑定：降级横幅非阻断且保留配置入口，配置成功后横幅消失（FR-02）", async () => {
++    mockBinding.mockResolvedValue(null);
++    renderPage();
++    await waitForTree(["backend", "ARCHITECTURE.md"]);
++    // degraded 横幅与主区共存（blocked 整页口径下树会被替换不可见），文案为已有数据口径。
++    const notice = screen.getByTestId("daemon-required-notice");
++    expect(notice.getAttribute("data-variant")).toBe("degraded");
++    expect(screen.getByText(/当前展示的是工作区已有数据/)).toBeInTheDocument();
++    expect(screen.getByTestId("daemon-required-config-btn")).toBeInTheDocument();
++    // 配置入口 → 内联展开引导 → 配置成功刷新 binding → 横幅消失、主区不动。
++    fireEvent.click(screen.getByTestId("daemon-required-config-btn"));
++    expect(screen.getByTestId("access-guide")).toBeInTheDocument();
++    mockBinding.mockResolvedValue({ daemon_id: "d-9" });
++    fireEvent.click(screen.getByTestId("access-configured"));
++    await waitFor(() => expect(screen.queryByTestId("daemon-required-notice")).toBeNull());
++    expect(screen.getByText("ARCHITECTURE.md")).toBeInTheDocument();
++  });
++
++  it("有绑定：不渲染降级横幅，行为与现状一致（FR-03 回归）", async () => {
++    renderPage();
++    await waitForTree(["backend", "ARCHITECTURE.md"]);
++    expect(screen.queryByTestId("daemon-required-notice")).toBeNull();
++  });
++});
++
++
+ // ── task-04（2026-10-15-platform-knowledge-search）：?path= 深链 ─────────────
+ //
+ // 覆盖：?path=（docs/ 前缀形态）归一匹配后自动选中；目标未同步静默待命、
+diff --git a/frontend/src/app/(dashboard)/workspaces/[id]/scan-docs/page.tsx b/frontend/src/app/(dashboard)/workspaces/[id]/scan-docs/page.tsx
+index 684fffbdd..61750dee6 100644
+--- a/frontend/src/app/(dashboard)/workspaces/[id]/scan-docs/page.tsx
++++ b/frontend/src/app/(dashboard)/workspaces/[id]/scan-docs/page.tsx
+@@ -219,8 +219,10 @@ export default function ScanDocsPage({ params }: Props) {
+   /** 内容区视图 tab（对齐知识库 FR-04/D-004@v2）：cards=人类可读卡片（默认）/
+    *  raw=原文阅读视图；每次重新选文件回默认卡片。 */
+   const [viewMode, setViewMode] = useState<"cards" | "raw">("cards");
+-  // 2026-07-26-ungate-workspace-entry / FR-04：扫描文档 reparse 经 host_fs 读源码
+-  // （daemon-client），无 binding 时失败。门禁后移后，无 binding 主区渲染 DaemonRequiredNotice。
++  // 2026-11-02-scan-docs-unbound-view：list/get/stats/reparse 后端均为纯服务端
++  // 读取（scan_documents 表 + 服务端 spec 镜像，reparse 权限 WORKSPACE_WRITE），
++  // 全程不触 daemon——页面不再以 daemon 绑定为数据门槛；无绑定时数据照常展示，
++  // 另以 DaemonRequiredNotice degraded 横幅（非阻断）保留配置入口。
+   const [myBinding, setMyBinding] = useState<MemberBindingView | null>(null);
+   const [bindingReady, setBindingReady] = useState(false);
+   /** 左栏（文档树）宽度：默认 280px，拖拽/键盘调整 200~480px，记忆到 localStorage。 */
+@@ -261,7 +263,8 @@ export default function ScanDocsPage({ params }: Props) {
+   // 当前搜索词镜像（后台 reparse 完成后的静默刷新复用，避免把搜索态回退成全量）。
+   const qRef = useRef("");
+ 
+-  // 先判 binding：无 binding 不 reparse（避免无谓失败），主区渲染 DaemonRequiredNotice。
++  // binding 只服务降级横幅显隐（unbound-view：数据面已与 binding 解耦）；
++  // 拉取失败降级 null 等价无绑定横幅态，数据照常展示。
+   useEffect(() => {
+     let active = true;
+     setBindingReady(false);
+@@ -287,10 +290,10 @@ export default function ScanDocsPage({ params }: Props) {
+ 
+   // 进页加载策略（perf）：列表先行（DB 快查，数百文档也是轻查询），reparse 转
+   // 后台——不再让全量文件解析阻塞首屏；后台完成后按当前搜索词静默刷新列表。
+-  // 失败静默（如只读权限 403 / daemon 瞬断）：页面仍可浏览 DB 既有数据，
+-  // 需要强同步时点头部「重新扫描」。
++  // 失败静默（如只读权限 403 / 服务端瞬断）：页面仍可浏览 DB 既有数据，
++  // 需要强同步时点头部「重新扫描」。reparse 为服务端本地执行，无绑定账号
++  // 照发（unbound-view）；只读账号 403 同走静默分支。
+   useEffect(() => {
+-    if (!hasDaemon) return;
+     let active = true;
+     void fetchDocs();
+     setBgSyncing(true);
+@@ -305,7 +308,9 @@ export default function ScanDocsPage({ params }: Props) {
+     return () => {
+       active = false;
+     };
+-  }, [hasDaemon, workspaceId, fetchDocs]);
++    // hasDaemon 不入依赖（unbound-view 后数据面与 binding 解耦）：binding 迟到
++    // 翻转不应触发二次进页加载。
++  }, [workspaceId, fetchDocs]);
+ 
+   // 搜索框输入 debounce 300ms → debouncedQ。
+   useEffect(() => {
+@@ -451,19 +456,25 @@ export default function ScanDocsPage({ params }: Props) {
+         </SectionCard>
+       )}
+ 
+-      {!bindingReady ? (
+-        <p className="py-12 text-center text-xs text-muted-foreground">加载中…</p>
+-      ) : !hasDaemon ? (
++      {/* 无绑定降级横幅（2026-11-02-scan-docs-unbound-view）：非阻断——主区照常
++          渲染服务端存量数据，横幅只提示数据口径并保留配置入口，配置成功刷新
++          binding 后消失（degraded 变体文案为「当前展示工作区已有数据」口径）。 */}
++      {bindingReady && !hasDaemon && (
+         <DaemonRequiredNotice
+           feature="扫描文档"
+           workspaceId={workspaceId}
+           canBorrow={canBorrow}
++          variant="degraded"
+           onConfigured={() => {
+             void fetchMyBinding(workspaceId)
+               .then((b) => setMyBinding(b))
+               .catch(() => {});
+           }}
+         />
++      )}
++
++      {!bindingReady ? (
++        <p className="py-12 text-center text-xs text-muted-foreground">加载中…</p>
+       ) : loading ? (
+         <p className="py-12 text-center text-xs text-muted-foreground">加载中…</p>
+       ) : docs.length === 0 ? (
+diff --git a/frontend/src/components/daemon-required-notice.test.tsx b/frontend/src/components/daemon-required-notice.test.tsx
+index de27ff305..29a73dabc 100644
+--- a/frontend/src/components/daemon-required-notice.test.tsx
++++ b/frontend/src/components/daemon-required-notice.test.tsx
+@@ -72,4 +72,52 @@ describe("DaemonRequiredNotice", () => {
+     expect(onConfigured).toHaveBeenCalledTimes(1);
+     expect(screen.queryByTestId("access-guide")).toBeNull();
+   });
++
++  // 2026-11-02-scan-docs-unbound-view：degraded 变体（服务端有存量数据的页面，
++  // 横幅非阻断、文案如实说明「当前展示工作区已有数据」，不得沿用 blocked 的
++  // 「需要读取本机守护进程上的项目文件」阻断口径）。
++  it("缺省 variant=blocked：data-variant 钉住阻断口径文案", () => {
++    render(
++      <DaemonRequiredNotice
++        feature="运行时"
++        workspaceId="ws-1"
++        canBorrow={false}
++      />,
++    );
++    expect(screen.getByTestId("daemon-required-notice").getAttribute("data-variant")).toBe("blocked");
++    expect(screen.getByText(/此功能需要读取本机守护进程上的项目文件/)).toBeTruthy();
++  });
++
++  it("degraded 变体：已有数据口径文案 + 保留配置按钮", () => {
++    render(
++      <DaemonRequiredNotice
++        feature="扫描文档"
++        workspaceId="ws-1"
++        canBorrow={false}
++        variant="degraded"
++      />,
++    );
++    expect(screen.getByTestId("daemon-required-notice").getAttribute("data-variant")).toBe("degraded");
++    expect(screen.getByText(/当前展示的是工作区已有数据/)).toBeTruthy();
++    expect(screen.queryByText(/此功能需要读取本机守护进程上的项目文件/)).toBeNull();
++    expect(screen.getByTestId("daemon-required-config-btn")).toBeTruthy();
++  });
++
++  it("degraded 变体：配置入口与 onConfigured 回调复用同一状态机", () => {
++    const onConfigured = vi.fn();
++    render(
++      <DaemonRequiredNotice
++        feature="扫描文档"
++        workspaceId="ws-1"
++        canBorrow={false}
++        variant="degraded"
++        onConfigured={onConfigured}
++      />,
++    );
++    fireEvent.click(screen.getByTestId("daemon-required-config-btn"));
++    expect(screen.getByTestId("access-guide")).toBeTruthy();
++    fireEvent.click(screen.getByTestId("access-configured"));
++    expect(onConfigured).toHaveBeenCalledTimes(1);
++    expect(screen.queryByTestId("access-guide")).toBeNull();
++  });
+ });
+diff --git a/frontend/src/components/daemon-required-notice.tsx b/frontend/src/components/daemon-required-notice.tsx
+index bd1639c51..8218f0659 100644
+--- a/frontend/src/components/daemon-required-notice.tsx
++++ b/frontend/src/components/daemon-required-notice.tsx
+@@ -19,6 +19,12 @@ import { WorkspaceAccessGuide } from "@/components/workspace-access-guide";
+  * - canBorrow=true：额外提示已有借用能力，可去 Agent 页触发借用
+  *   （借用发生在 agent 派发，非读源码页，此处仅引导）。
+  *
++ * variant（2026-11-02-scan-docs-unbound-view）：服务端有存量数据的页面
++ *（scan-docs：列表/详情/统计/reparse 全为服务端读取，无绑定也有数据可看）用
++ * degraded 非阻断横幅——主区照常渲染数据，横幅只提示「当前展示工作区已有数据」
++ * 并保留配置入口；缺省 blocked 维持整页空态（runtime 页等真依赖 daemon 实体的
++ * 页面），既有调用与 testid 不变。
++ *
+  * 复用：canBorrowSharedDaemon 判定由调用方算好传入（本组件不直接读 session）；
+  * WorkspaceAccessGuide 复用既有首次/编辑表单。
+  */
+@@ -30,6 +36,8 @@ interface Props {
+   canBorrow: boolean;
+   /** 配置成功回调（调用方刷新 binding 后，主区切回正常数据视图）。 */
+   onConfigured?: () => void;
++  /** blocked=整页空态（缺省）；degraded=非阻断横幅（服务端有存量数据的页面）。 */
++  variant?: "blocked" | "degraded";
+ }
+ 
+ export function DaemonRequiredNotice({
+@@ -37,6 +45,7 @@ export function DaemonRequiredNotice({
+   workspaceId,
+   canBorrow,
+   onConfigured,
++  variant = "blocked",
+ }: Props): JSX.Element {
+   const [configuring, setConfiguring] = useState(false);
+ 
+@@ -52,9 +61,35 @@ export function DaemonRequiredNotice({
+     );
+   }
+ 
++  if (variant === "degraded") {
++    return (
++      <div
++        data-testid="daemon-required-notice"
++        data-variant="degraded"
++        className="flex flex-wrap items-center gap-x-3 gap-y-1 rounded-lg border border-dashed border-warning/40 bg-warning/5 px-3 py-2"
++      >
++        <p className="text-xs font-medium text-foreground">
++          未绑定守护进程：当前展示的是工作区已有数据
++        </p>
++        <p className="min-w-0 flex-1 text-[11px] text-muted-foreground">
++          数据由成员守护进程同步到工作区镜像；绑定后可用本机仓库持续更新。
++          {canBorrow ? "你已有借用能力，也可去 Agent 页借用共享守护进程。" : ""}
++        </p>
++        <Button
++          size="sm"
++          data-testid="daemon-required-config-btn"
++          onClick={() => setConfiguring(true)}
++        >
++          配置我的守护进程
++        </Button>
++      </div>
++    );
++  }
++
+   return (
+     <div
+       data-testid="daemon-required-notice"
++      data-variant="blocked"
+       className="flex flex-col items-center gap-2 rounded-lg border border-dashed border-warning/40 bg-warning/5 px-4 py-8 text-center"
+     >
+       <div className="text-2xl" aria-hidden>
+diff --git a/sillyhub-daemon/src/daemon.ts b/sillyhub-daemon/src/daemon.ts
+index 195b6dba7..2cd5374dc 100644
+--- a/sillyhub-daemon/src/daemon.ts
++++ b/sillyhub-daemon/src/daemon.ts
+@@ -9214,6 +9214,63 @@ export class Daemon {
+     }
+   }
+ 
++  /**
++   * FR-02（2026-11-02-daemon-resume-gate-fix）：SESSION_SWITCH_CONFIG 被丢弃时
++   * 立即回报 run failed——对齐 _reportInjectDropped 手法与语义。
++   *
++   * 背景（本机 2026-11-02 09:08 实证）：daemon 会话闸拒建后 backend 换配置重发
++   * 「继续」，SESSION_SWITCH_CONFIG 到达时目标会话不在 store，原实现仅 warn
++   * （session_switch_config_session_not_found）静默丢弃——backend 侧 run 卡
++   * pending 300 秒才被僵尸轮清扫兜底，用户侧输入框一直转圈。修：丢弃时回报
++   * error_during_execution，backend 秒级收敛。
++   *
++   * 约束：与 INJECT 同款三要素（run_id/lease_id/claim_token）齐才上报。lease_id
++   * 由 backend 切换 payload 下发（control.py 切换分支新增键；INJECT payload
++   * 既有同义键）——旧 backend 缺键 → 要素不全仅 warn 维持现状（降级零回归）。
++   * 上报失败仅 warn，不阻塞 WS 主循环。
++   */
++  private async _reportSwitchDropped(
++    raw: Record<string, unknown>,
++    reason: string,
++  ): Promise<void> {
++    const runId =
++      (raw.run_id as string | undefined) ?? (raw.runId as string | undefined) ?? '';
++    const leaseId =
++      (raw.lease_id as string | undefined) ?? (raw.leaseId as string | undefined) ?? '';
++    const claimToken =
++      (raw.claim_token as string | undefined) ??
++      (raw.claimToken as string | undefined) ??
++      '';
++    if (!runId || !leaseId || !claimToken) {
++      this._logger.warn('switch_drop_report_skipped_missing_fields', {
++        run_id: runId,
++        has_lease_id: Boolean(leaseId),
++        has_claim_token: Boolean(claimToken),
++        reason,
++      });
++      return;
++    }
++    try {
++      await this._client.notifyRunResult(leaseId, claimToken, runId, {
++        status: 'error_during_execution',
++        is_error: true,
++        result_summary: `daemon 丢弃切换配置指令：${reason}；本轮失败`,
++      });
++      this._logger.info('switch_drop_reported', {
++        run_id: runId,
++        lease_id: leaseId,
++        reason,
++      });
++    } catch (e) {
++      this._logger.warn('switch_drop_report_failed', {
++        run_id: runId,
++        lease_id: leaseId,
++        reason,
++        error: e,
++      });
++    }
++  }
++
+   /**
+    * 2026-10-21-daemon-zombie-turn FR-02：打断 no-op 回报。
+    *
+@@ -9297,6 +9354,45 @@ export class Daemon {
+    *   - confirmReconnected / markRecoveryFailed 自身失败仅 warn（best-effort：
+    *     不回滚本地已恢复状态，backend 180s sweeper 兜底收敛）。
+    */
++  /**
++   * FR-01（2026-11-02-daemon-resume-gate-fix）：reopen 恢复的 lastActiveAt 取值。
++   *
++   * 三级：payload 显式值（`last_active_at`/`lastActiveAt`，协议前向兼容位——
++   * backend 本期不下发，未来补发即生效零 daemon 改动）→ 本地 sessions.json
++   * 持久化记录原值（恢复不续命：会话闸 30 分钟活跃窗口与 7 天超龄判定都不被
++   * 恢复行为污染）→ Date.now() 兜底（查无记录的跨机移交/记录超龄清除形态，
++   * 维持旧行为）。load 失败（损坏隔离/权限）静默兜底，不阻断 resume。
++   */
++  private async _resolveResumeLastActiveAt(
++    raw: Record<string, unknown>,
++    sessionId: string,
++  ): Promise<number> {
++    const payloadTs =
++      (raw.last_active_at as number | undefined) ??
++      (raw.lastActiveAt as number | undefined);
++    if (typeof payloadTs === 'number' && Number.isFinite(payloadTs) && payloadTs > 0) {
++      return payloadTs;
++    }
++    if (this._persistence) {
++      try {
++        const local = (await this._persistence.load()).find(
++          (r) => r.sessionId === sessionId,
++        );
++        if (
++          local &&
++          typeof local.lastActiveAt === 'number' &&
++          Number.isFinite(local.lastActiveAt) &&
++          local.lastActiveAt > 0
++        ) {
++          return local.lastActiveAt;
++        }
++      } catch {
++        // 读失败当无记录：兜底 Date.now()（与旧行为一致），不阻断 resume。
++      }
++    }
++    return Date.now();
++  }
++
+   private async _routeSessionResume(
+     raw: Record<string, unknown>,
+   ): Promise<void> {
+@@ -9357,10 +9453,17 @@ export class Daemon {
+       provider,
+       pathToClaudeCodeExecutable: exePath,
+       pathToAgentExecutable: exePath,
+-      // backend reopen payload 不带 turnCount/lastActiveAt（非恢复必需），
+-      // 给合理默认：turnCount=0（新进程无内存计数），lastActiveAt=now。
++      // backend reopen payload 不带 turnCount（非恢复必需）→ 给合理默认 0
++      //（新进程无内存计数）。
+       turnCount: 0,
+-      lastActiveAt: Date.now(),
++      // FR-01（2026-11-02-daemon-resume-gate-fix）：恢复不续命——lastActiveAt
++      // 三级取值：payload 显式值（协议前向兼容位，backend 本期不下发）→ 本地
++      // sessions.json 持久化记录原值 → Date.now() 兜底。恒写 now 会把断网恢复
++      // 风暴全量 reopen 的会话集体顶成「30 分钟内活跃」，被 create 前置会话闸
++      // 误拒新建（2026-11-02 46≥20 实证 SESSION_LIMIT_REACHED）；boot 恢复路径
++      // （restoreAndReconnect）本就保留 record.lastActiveAt，此处对齐。查无记录
++      //（跨机移交/记录超龄清除）维持 now 兜底：单点 reopen 不足以顶满闸。
++      lastActiveAt: await this._resolveResumeLastActiveAt(raw, sessionId),
+       // null 归一缺省（record 类型不收 null；backend 不发 null，防御性归一）。
+       ...(rawProviderConfig != null ? { providerConfig: rawProviderConfig } : {}),
+     };
+@@ -9599,6 +9702,13 @@ export class Daemon {
+       this._logger.warn('session_switch_config_session_not_found', {
+         session_id: sessionId,
+       });
++      // FR-02（2026-11-02-daemon-resume-gate-fix）：丢弃即回报——run 否则卡
++      // pending 300 秒才被僵尸轮清扫兜底（实证事故形态）。三要素不齐（旧
++      // backend payload 无 lease_id）时 _reportSwitchDropped 内部降级仅 warn。
++      await this._reportSwitchDropped(
++        raw,
++        'daemon 侧无该会话（可能创建失败或已被回收），切换轮未执行',
++      );
+       return;
+     }
+     // 切换轮三要素（design §7.2）：runId=切换轮新 AgentRun，claimToken=切换轮
+@@ -9659,6 +9769,12 @@ export class Daemon {
+         session_id: sessionId,
+         error: e,
+       });
++      // FR-02（2026-11-02-daemon-resume-gate-fix）：切换未执行即回报——同
++      // not_found 分支语义，run 秒级收敛；三要素不齐降级仅 warn。
++      await this._reportSwitchDropped(
++        raw,
++        `daemon 执行切换指令异常（${e instanceof Error ? e.message : String(e)}），切换轮未执行`,
++      );
+     }
+   }
+ 
+diff --git a/sillyhub-daemon/src/interactive/session-manager/lifecycle.ts b/sillyhub-daemon/src/interactive/session-manager/lifecycle.ts
+index a0b8856c6..d2d1bf84f 100644
+--- a/sillyhub-daemon/src/interactive/session-manager/lifecycle.ts
++++ b/sillyhub-daemon/src/interactive/session-manager/lifecycle.ts
+@@ -110,7 +110,11 @@ export async function scanIdle(mgr: SessionManagerCore): Promise<void> {
+     if (!state) continue;
+     // 守卫：仅 active/running 回收；ended/failed/reconnecting 跳过。
+     if (state.status !== 'active' && state.status !== 'running') continue;
+-    const idleSec = (now - state.lastActiveAt) / 1000;
++    // FR-01（2026-11-02-daemon-resume-gate-fix）：恢复保留的 lastActiveAt 是
++    // 真实历史活跃（可远超阈值）——空闲时长从 max(lastActiveAt, restoredAt)
++    // 起算，防恢复会话被立即误杀；restoredAt 缺席（create/旧行为）回落原值。
++    const idleSec =
++      (now - Math.max(state.lastActiveAt, state.restoredAt ?? 0)) / 1000;
+     if (idleSec > mgr._idleTimeoutSec) {
+       try {
+         await onIdleExpire(mgr, state);
+diff --git a/sillyhub-daemon/src/interactive/session-manager/persistence.ts b/sillyhub-daemon/src/interactive/session-manager/persistence.ts
+index 49591ec22..78fbed97e 100644
+--- a/sillyhub-daemon/src/interactive/session-manager/persistence.ts
++++ b/sillyhub-daemon/src/interactive/session-manager/persistence.ts
+@@ -237,6 +237,11 @@ export async function restoreAndReconnect(
+     status: 'reconnecting',
+     currentRunId: undefined, // 崩溃 currentRun 由 backend 收敛，daemon 不持有。
+     lastActiveAt: record.lastActiveAt,
++    // FR-01（2026-11-02-daemon-resume-gate-fix）：恢复时刻——保留的 lastActiveAt
++    // 是真实历史活跃（可远超 idle 阈值），idle 回收改从 max(lastActiveAt,
++    // restoredAt) 起算，防 SESSION_IDLE_TIMEOUT_SEC>0 部署把刚恢复的会话立即误杀。
++    // 仅内存态（staleRunResetAt 同款，不进 snapshotPersistable）。
++    restoredAt: Date.now(),
+     cwd: record.cwd,
+     provider: record.provider,
+     pathToClaudeCodeExecutable: record.pathToClaudeCodeExecutable ?? '',
+diff --git a/sillyhub-daemon/src/interactive/types.ts b/sillyhub-daemon/src/interactive/types.ts
+index 3b6c582aa..7feae1e66 100644
+--- a/sillyhub-daemon/src/interactive/types.ts
++++ b/sillyhub-daemon/src/interactive/types.ts
+@@ -204,6 +204,14 @@ export interface SessionState {
+   staleRunResetAt?: number;
+   /** 最后活动时间（D-004 空闲 30min 回收，task-07 实现）。 */
+   lastActiveAt: number;
++  /**
++   * FR-01（2026-11-02-daemon-resume-gate-fix）：恢复时刻（restoreAndReconnect
++   * 写入，boot 恢复与 reopen 共用）。恢复保留持久化 lastActiveAt 原值（不续命
++   * 会话闸 30 分钟活跃窗口与 7 天超龄判定），idle 回收（SESSION_IDLE_TIMEOUT_SEC>0
++   * 形态）改从 max(lastActiveAt, restoredAt) 起算，防恢复会话被立即误杀。
++   * 仅内存态，不参与持久化语义（同 staleRunResetAt 先例）。
++   */
++  restoredAt?: number;
+   /**
+    * 2026-10-23-watchdog-steering-guard FR-02：最后一次轮内事件时间（onMessage
+    * 每个 envelope 刷新）。inject 的 >60s stale-running 自愈以此作为「引擎是否
+diff --git a/sillyhub-daemon/tests/daemon-session-resume-route.test.ts b/sillyhub-daemon/tests/daemon-session-resume-route.test.ts
+index 2c2186382..d90bb10db 100644
+--- a/sillyhub-daemon/tests/daemon-session-resume-route.test.ts
++++ b/sillyhub-daemon/tests/daemon-session-resume-route.test.ts
+@@ -500,3 +500,167 @@ describe('daemon SESSION_RESUME 供应商凭证透传（ql-20260827-014）', ()
+     expect(record.providerConfig).toBeUndefined();
+   });
+ });
++
++// FR-01（2026-11-02-daemon-resume-gate-fix）：恢复不续命——reopen 记录的
++// lastActiveAt 三级取值（payload 显式值 → 本地 sessions.json 记录原值 →
++// Date.now() 兜底）。恒写 now 会把断网恢复风暴全量 reopen 的会话集体顶成
++// 「30 分钟内活跃」，被 create 前置会话闸误拒新建（2026-11-02 46≥20 实证
++// SESSION_LIMIT_REACHED）；boot 恢复路径（restoreAndReconnect）本就保留
++// record.lastActiveAt，本行为与其对齐。
++describe('daemon SESSION_RESUME 恢复不续命 lastActiveAt（FR-01 / 2026-11-02-daemon-resume-gate-fix）', () => {
++  let daemons: Daemon[] = [];
++
++  afterEach(async () => {
++    for (const d of daemons) {
++      if (d.isRunning) {
++        await d.stop().catch(() => undefined);
++      }
++    }
++    daemons = [];
++  });
++
++  function createFakePersistence(records: unknown[]) {
++    return {
++      load: vi.fn(async () => records),
++      save: vi.fn(async () => {}),
++    };
++  }
++
++  function buildDaemonWithPersistence(
++    persistence: ReturnType<typeof createFakePersistence>,
++  ): {
++    daemon: Daemon;
++    sm: SessionManager;
++    client: ReturnType<typeof createMockClient>;
++    persistence: ReturnType<typeof createFakePersistence>;
++  } {
++    const detector = { detectAgents: vi.fn(async () => [] as DetectedAgent[]) };
++    const client = createMockClient();
++    const sm = createMockSessionManager();
++    const daemon = new Daemon(
++      mockConfig,
++      client as never,
++      createMockTaskRunner() as never,
++      { detector, sessionManager: sm, persistence } as never,
++    );
++    return { daemon, sm: sm as SessionManager, client, persistence };
++  }
++
++  it('本地持久化记录存在 → record.lastActiveAt 保留原值（恢复不续命）', async () => {
++    // 2023-11 的真实历史活跃，远早于当下——若实现仍恒写 Date.now() 即红。
++    const preserved = 1700000000000;
++    const persistence = createFakePersistence([
++      {
++        sessionId: 'sess-preserve',
++        leaseId: 'lease-old',
++        agentSessionId: 'agent-sid-preserve',
++        cwd: '/tmp/preserve',
++        provider: 'claude',
++        turnCount: 3,
++        lastActiveAt: preserved,
++      },
++    ]);
++    const { daemon, sm } = buildDaemonWithPersistence(persistence);
++    daemons.push(daemon);
++
++    await emit(daemon, {
++      type: MSG.SESSION_RESUME,
++      payload: {
++        session_id: 'sess-preserve',
++        lease_id: 'lease-new',
++        agent_session_id: 'agent-sid-preserve',
++        cwd: '/tmp/preserve',
++        provider: 'claude',
++      },
++    });
++    await new Promise((r) => setTimeout(r, 5));
++
++    expect(sm.restoreAndReconnect).toHaveBeenCalledTimes(1);
++    const record = sm.restoreAndReconnect.mock.calls[0]![0] as PersistedSessionRecord;
++    expect(record.lastActiveAt).toBe(preserved);
++    expect(record.lastActiveAt).toBeLessThan(Date.now() - 60_000);
++  });
++
++  it('payload 显式 last_active_at 优先于本地记录（协议前向兼容位）', async () => {
++    const payloadTs = 1750000000000;
++    const localTs = 1700000000000;
++    const persistence = createFakePersistence([
++      {
++        sessionId: 'sess-payload-ts',
++        leaseId: 'lease-old-ts',
++        agentSessionId: 'agent-sid-ts',
++        cwd: '/tmp/ts',
++        provider: 'claude',
++        turnCount: 1,
++        lastActiveAt: localTs,
++      },
++    ]);
++    const { daemon, sm } = buildDaemonWithPersistence(persistence);
++    daemons.push(daemon);
++
++    await emit(daemon, {
++      type: MSG.SESSION_RESUME,
++      payload: {
++        session_id: 'sess-payload-ts',
++        lease_id: 'lease-new-ts',
++        agent_session_id: 'agent-sid-ts',
++        cwd: '/tmp/ts',
++        provider: 'claude',
++        last_active_at: payloadTs,
++      },
++    });
++    await new Promise((r) => setTimeout(r, 5));
++
++    const record = sm.restoreAndReconnect.mock.calls[0]![0] as PersistedSessionRecord;
++    expect(record.lastActiveAt).toBe(payloadTs);
++  });
++
++  it('无本地记录且 payload 未带 → 兜底 Date.now()（现状维持）', async () => {
++    const persistence = createFakePersistence([]);
++    const { daemon, sm } = buildDaemonWithPersistence(persistence);
++    daemons.push(daemon);
++
++    const before = Date.now();
++    await emit(daemon, {
++      type: MSG.SESSION_RESUME,
++      payload: {
++        session_id: 'sess-no-record',
++        lease_id: 'lease-no-record',
++        agent_session_id: 'agent-sid-nr',
++        cwd: '/tmp/nr',
++        provider: 'claude',
++      },
++    });
++    await new Promise((r) => setTimeout(r, 5));
++
++    const record = sm.restoreAndReconnect.mock.calls[0]![0] as PersistedSessionRecord;
++    expect(record.lastActiveAt).toBeGreaterThanOrEqual(before);
++    expect(record.lastActiveAt).toBeLessThanOrEqual(Date.now() + 1000);
++  });
++
++  it('persistence.load 抛错 → 兜底 Date.now() 且 resume 不中断', async () => {
++    const persistence = createFakePersistence([]);
++    persistence.load = vi.fn(async () => {
++      throw new Error('corrupt sessions.json');
++    });
++    const { daemon, sm } = buildDaemonWithPersistence(persistence);
++    daemons.push(daemon);
++
++    const before = Date.now();
++    await emit(daemon, {
++      type: MSG.SESSION_RESUME,
++      payload: {
++        session_id: 'sess-load-boom',
++        lease_id: 'lease-load-boom',
++        agent_session_id: 'agent-sid-lb',
++        cwd: '/tmp/lb',
++        provider: 'claude',
++      },
++    });
++    await new Promise((r) => setTimeout(r, 5));
++
++    expect(sm.restoreAndReconnect).toHaveBeenCalledTimes(1);
++    const record = sm.restoreAndReconnect.mock.calls[0]![0] as PersistedSessionRecord;
++    expect(record.lastActiveAt).toBeGreaterThanOrEqual(before);
++  });
++});
+diff --git a/sillyhub-daemon/tests/daemon-session-switch-config.test.ts b/sillyhub-daemon/tests/daemon-session-switch-config.test.ts
+index 878207413..a94a3745a 100644
+--- a/sillyhub-daemon/tests/daemon-session-switch-config.test.ts
++++ b/sillyhub-daemon/tests/daemon-session-switch-config.test.ts
+@@ -120,15 +120,17 @@ function makeState(sessionId: string, leaseId: string): SessionState {
+ function buildDaemon(sm: SessionManager | null = createMockSessionManager()): {
+   daemon: Daemon;
+   sm: SessionManager;
++  client: ReturnType<typeof createMockClient>;
+ } {
+   const detector = { detectAgents: vi.fn(async () => [] as DetectedAgent[]) };
++  const client = createMockClient();
+   const daemon = new Daemon(
+     mockConfig,
+-    createMockClient() as never,
++    client as never,
+     createMockTaskRunner() as never,
+     { detector, sessionManager: sm } as never,
+   );
+-  return { daemon, sm: sm as SessionManager };
++  return { daemon, sm: sm as SessionManager, client };
+ }
+ 
+ async function emit(daemon: Daemon, msg: {
+@@ -523,3 +525,141 @@ describe('task-09 / FR-05 / D-012@v1: daemon SESSION_SWITCH_CONFIG WS handler 
+     expect(second.profile).toBeNull();
+   });
+ });
++
++// FR-02（2026-11-02-daemon-resume-gate-fix）：切换轮丢弃即回报——会话不存在 /
++// markPendingConfigSwitch 抛错时，对齐 _reportInjectDropped 先例回报 run 失败
++//（error_during_execution → backend 落 interactive_interrupted），run 秒级收敛
++// 而非卡 pending 300 秒等僵尸轮清扫（2026-11-02 09:08 实证：
++// session_switch_config_session_not_found 仅 warn，run 永停 pending）。
++// 寻址三要素 run_id/lease_id/claim_token——lease_id 由 backend 切换 payload
++// 下发（control.py 切换分支新增键）；旧 payload 缺键降级为仅 warn 不回报。
++describe('daemon SESSION_SWITCH_CONFIG 丢弃回报（FR-02 / 2026-11-02-daemon-resume-gate-fix）', () => {
++  let daemons: Daemon[] = [];
++
++  afterEach(async () => {
++    for (const d of daemons) {
++      if (d.isRunning) {
++        await d.stop().catch(() => undefined);
++      }
++    }
++    daemons = [];
++  });
++
++  it('store 无目标会话且三要素齐全 → notifyRunResult 回报 run 失败', async () => {
++    // get 返回 undefined：模拟会话创建失败 / 已被清出 store（实证事故形态）。
++    const sm = createMockSessionManager(undefined);
++    const { daemon, client } = buildDaemon(sm);
++    daemons.push(daemon);
++
++    await emit(daemon, {
++      type: SESSION_SWITCH_CONFIG_MSG,
++      payload: {
++        session_id: 'sess-gone-report',
++        run_id: 'run-switch-gone',
++        lease_id: 'lease-switch-gone',
++        claim_token: CLAIM_TOKEN,
++        prompt: '继续',
++        profile: null,
++        provider_config: null,
++      },
++    });
++    await flushMicro();
++    await flushMicro();
++
++    expect(sm.markPendingConfigSwitch).not.toHaveBeenCalled();
++    expect(client.notifyRunResult).toHaveBeenCalledTimes(1);
++    expect(client.notifyRunResult).toHaveBeenCalledWith(
++      'lease-switch-gone',
++      CLAIM_TOKEN,
++      'run-switch-gone',
++      expect.objectContaining({
++        status: 'error_during_execution',
++        is_error: true,
++      }),
++    );
++  });
++
++  it('payload 缺 lease_id（旧 backend）→ 维持仅 warn 不回报（降级零回归）', async () => {
++    const sm = createMockSessionManager(undefined);
++    const { daemon, client } = buildDaemon(sm);
++    daemons.push(daemon);
++
++    await emit(daemon, {
++      type: SESSION_SWITCH_CONFIG_MSG,
++      payload: {
++        session_id: 'sess-gone-no-lease',
++        run_id: 'run-switch-nolease',
++        claim_token: CLAIM_TOKEN,
++        prompt: '旧 backend 切换',
++        profile: null,
++        provider_config: null,
++      },
++    });
++    await flushMicro();
++    await flushMicro();
++
++    expect(sm.markPendingConfigSwitch).not.toHaveBeenCalled();
++    expect(client.notifyRunResult).not.toHaveBeenCalled();
++  });
++
++  it('markPendingConfigSwitch 抛错且三要素齐全 → 同样回报 run 失败', async () => {
++    const boom = new Error('SessionNotFoundError: not in store');
++    const sm = createMockSessionManager(
++      makeState(SESSION_ID, LEASE_ID),
++      () => {
++        throw boom;
++      },
++    );
++    const { daemon, client } = buildDaemon(sm);
++    daemons.push(daemon);
++
++    await emit(daemon, {
++      type: SESSION_SWITCH_CONFIG_MSG,
++      payload: {
++        session_id: SESSION_ID,
++        run_id: RUN_ID,
++        lease_id: LEASE_ID,
++        claim_token: CLAIM_TOKEN,
++        prompt: '竞态丢弃',
++        profile: null,
++        provider_config: null,
++      },
++    });
++    await flushMicro();
++    await flushMicro();
++
++    expect(client.notifyRunResult).toHaveBeenCalledTimes(1);
++    expect(client.notifyRunResult).toHaveBeenCalledWith(
++      LEASE_ID,
++      CLAIM_TOKEN,
++      RUN_ID,
++      expect.objectContaining({
++        status: 'error_during_execution',
++        is_error: true,
++      }),
++    );
++  });
++
++  it('会话存在且正常路由 → 不回报（零误伤）', async () => {
++    const sm = createMockSessionManager(makeState(SESSION_ID, LEASE_ID));
++    const { daemon, client } = buildDaemon(sm);
++    daemons.push(daemon);
++
++    await emit(daemon, {
++      type: SESSION_SWITCH_CONFIG_MSG,
++      payload: {
++        session_id: SESSION_ID,
++        run_id: RUN_ID,
++        lease_id: LEASE_ID,
++        claim_token: CLAIM_TOKEN,
++        prompt: '正常切换',
++        profile: null,
++        provider_config: null,
++      },
++    });
++    await flushMicro();
++
++    expect(sm.markPendingConfigSwitch).toHaveBeenCalledTimes(1);
++    expect(client.notifyRunResult).not.toHaveBeenCalled();
++  });
++});
+diff --git a/sillyhub-daemon/tests/interactive/session-idle-scanner.test.ts b/sillyhub-daemon/tests/interactive/session-idle-scanner.test.ts
+index b2a260524..763d6d9ed 100644
+--- a/sillyhub-daemon/tests/interactive/session-idle-scanner.test.ts
++++ b/sillyhub-daemon/tests/interactive/session-idle-scanner.test.ts
+@@ -406,3 +406,30 @@ describe('task-07 AC-12 start/stop 生命周期（真实定时器）', () => {
+     expect(() => sm.stop()).not.toThrow();
+   });
+ });
++
++// FR-01（2026-11-02-daemon-resume-gate-fix）配套保护：恢复保留的 lastActiveAt
++// 是真实历史活跃（可能远超 idle 阈值）——空闲时长必须从 max(lastActiveAt,
++// restoredAt) 起算，防 SESSION_IDLE_TIMEOUT_SEC>0 部署把刚恢复的会话立即回收。
++describe('FR-01 restoredAt 空闲起算保护（2026-11-02-daemon-resume-gate-fix）', () => {
++  it('lastActiveAt 历史久远 + restoredAt 新鲜 → 自恢复时刻起算，不立即回收', async () => {
++    const { driver } = makeMockDriver();
++    const deps = makeDeps();
++    const sm = new SessionManager(
++      { driver, ...deps },
++      { idleTimeoutSec: 2, idleScanSec: 1 },
++    );
++    await sm.create(BASE_INPUT);
++    const st = sm.get(BASE_INPUT.sessionId)!;
++    vi.useFakeTimers();
++    // 模拟恢复形态：lastActiveAt=8 天前真实活跃；restoredAt=恢复时刻（当下）。
++    st.lastActiveAt = Date.now() - 8 * 24 * 3600 * 1000;
++    st.restoredAt = Date.now();
++    vi.advanceTimersByTime(1000); // 自 restoredAt 起算 1s < 2s 阈值
++    await sm.scanOnce();
++    expect(deps.onSessionEnd).not.toHaveBeenCalled();
++    vi.advanceTimersByTime(2000); // 自 restoredAt 起算 3s > 2s → 正常回收
++    await sm.scanOnce();
++    expect(deps.onSessionEnd).toHaveBeenCalledWith('sess-1', 'ended');
++    vi.useRealTimers();
++  });
++});

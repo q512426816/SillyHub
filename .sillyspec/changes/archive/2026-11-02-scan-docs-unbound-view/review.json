@@ -1,0 +1,37 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-11-02-scan-docs-unbound-view",
+  "reviewer": "subagent",
+  "verdict": "PASS",
+  "reviewedAgainst": "e3a2efbe1d6cba9012dd3d97791cf730ec373991",
+  "findings": [
+    {
+      "severity": "P3",
+      "status": "accepted",
+      "title": "并行提交混入冻结面：bfd895df3/90258c5a5/e3a2efbe1 属 2026-11-02-daemon-resume-gate-fix",
+      "evidence": "三提交 commit message 携带 task-01/02、task-03/04、task-05 标记，与 .sillyspec/changes/2026-11-02-daemon-resume-gate-fix/tasks.md 五条任务逐一对应，有独立变更与收口流程；共享主仓多会话并行的既定现实（AGENTS.md 规则 9/11），不进入本变更深度评审，不影响 verdict。",
+      "location": "git log 892d72104..e3a2efbe1; .sillyspec/changes/2026-11-02-daemon-resume-gate-fix/tasks.md"
+    },
+    {
+      "severity": "P3",
+      "status": "accepted",
+      "title": "FR-03 测试绑定措辞与实际落位偏差（覆盖等价或更强）",
+      "evidence": "requirements.md:49 称有绑定不渲染横幅的断言放在 FR-01 用例内，实际落为独立用例「有绑定：不渲染降级横幅，行为与现状一致（FR-03 回归）」+ 既有用例默认 mockBinding={daemon_id:\"d-1\"} 全数回归（复跑 36/36 绿）；独立用例隔离更清晰，覆盖等价或更强，接受。",
+      "location": ".sillyspec/changes/2026-11-02-scan-docs-unbound-view/requirements.md:49; frontend/src/app/(dashboard)/workspaces/[id]/__tests__/scan-docs-page.test.tsx:331-336"
+    },
+    {
+      "severity": "P3",
+      "status": "accepted",
+      "title": "reparse 触发人群扩大：design「并发面与现状同构」措辞略宽",
+      "evidence": "门槛放开后无绑定可写成员进页也发 reparse（触发时机不变、人群扩大）；后端 reparse 按 path upsert + content_hash 相等跳过（service.py:595）+ 纯解析移线程（service.py:486-491 注释 design R-01），并发最坏重复劳动无数据损坏，与既有多绑定成员并发同机制，接受。",
+      "location": "backend/app/modules/scan_docs/service.py:458-520,595; frontend/src/app/(dashboard)/workspaces/[id]/scan-docs/page.tsx:296-313"
+    }
+  ],
+  "dimensionNotes": {
+    "乱序": "ok",
+    "并发": "ok",
+    "切换": "ok",
+    "作用域": "ok"
+  },
+  "reviewedAt": "2026-11-02T11:14:03+08:00"
+}

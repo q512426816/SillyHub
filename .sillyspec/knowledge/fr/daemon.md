@@ -9523,3 +9523,67 @@
 摘要：验收
 全文：.sillyspec/changes/archive/2026-11-02-embed-batch-chunk/requirements.md#FR-03
 最近确认：55d501f483e7bc3b984511d067239ae4c14e55f5
+
+## FR-daemon-366 无 daemon 绑定账号进入扫描文档页：文档树/搜索/详情/统计面板照常展示服务端已有数据
+变更：2026-11-02-scan-docs-unbound-view
+状态：active
+摘要：无绑定账号正常浏览；无绑定且服务端无数据
+场景正文：
+- 场景：无绑定账号正常浏览 — Given 当前账号在 该工作区无 daemon 绑定（fetchMyBinding 返回 null）且服务端已有扫描文档数据；When 进入扫描文档页；Then 文档树渲染出文档条目，统计面板正常加载，点击文件可查看详情，搜索可过滤
+- 场景：无绑定且服务端无数据 — Given 无 daemon 绑定且该工作区 scan_documents 表无 exists 数据；When 进入扫描文档页；Then 展示既有空态文案，不报错、不出现整页引导替换
+全文：.sillyspec/changes/archive/2026-11-02-scan-docs-unbound-view/requirements.md#FR-01
+最近确认：e3a2efbe1d6cba9012dd3d97791cf730ec373991
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-11-02-scan-docs-unbound-view:flow:测试绑定FR-01
+  tests: frontend/src/app/(dashboard)/workspaces/[id]/__tests__/scan-docs-page.test.tsx「无绑定：文档树/详情照常渲染服务端数据」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-11-02-scan-docs-unbound-view
+  status: active
+
+## FR-daemon-367 无绑定时主区不再被 DaemonRequiredNotice 整页替换，改为非阻断降级横幅（保留配置守护进程入口）
+变更：2026-11-02-scan-docs-unbound-view
+状态：active
+摘要：无绑定横幅非阻断
+场景正文：
+- 场景：无绑定横幅非阻断 — Given 无 daemon 绑定且服务端有文档数据；When 进入扫描文档页；Then 文档树与降级横幅同时可见（横幅不遮挡/不替换主区）；点击「配置我的守护进程」内联展开引导，配置成功回调后横幅消失
+全文：.sillyspec/changes/archive/2026-11-02-scan-docs-unbound-view/requirements.md#FR-02
+最近确认：e3a2efbe1d6cba9012dd3d97791cf730ec373991
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-11-02-scan-docs-unbound-view:flow:测试绑定FR-02
+  tests: frontend/src/app/(dashboard)/workspaces/[id]/__tests__/scan-docs-page.test.tsx「无绑定：降级横幅非阻断且保留配置入口」 | frontend/src/components/daemon-required-notice.test.tsx「degraded 变体：横幅文案与配置入口」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-11-02-scan-docs-unbound-view
+  status: active
+
+## FR-daemon-368 有绑定账号页面行为与现状完全一致
+变更：2026-11-02-scan-docs-unbound-view
+状态：active
+摘要：有绑定回归
+场景正文：
+- 场景：有绑定回归 — Given 账号有 daemon 绑定（fetchMyBinding 返回含 daemon_id 的 binding）；When 进入扫描文档页；Then 行为与现状一致：无降级横幅，文档树照常渲染，reparse 照发
+全文：.sillyspec/changes/archive/2026-11-02-scan-docs-unbound-view/requirements.md#FR-03
+最近确认：e3a2efbe1d6cba9012dd3d97791cf730ec373991
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-11-02-scan-docs-unbound-view:flow:测试绑定FR-03
+  tests: frontend/src/app/(dashboard)/workspaces/[id]/__tests__/scan-docs-page.test.tsx「无绑定：文档树/详情照常渲染服务端数据」用例
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-11-02-scan-docs-unbound-view
+  status: active

@@ -64,3 +64,4 @@
 - 2026-10-29-engine-live-perception | 2026-10-29-engine-live-perception
 - 2026-10-30-task-resume-revive-notify-retry | 子代理续唤复活终态任务行+上报502重试
 - 2026-10-31-share-openai-chat-proxy-token | 共享openai_chat供应商代理403修复
+- 2026-11-02-scan-docs-unbound-view | 扫描文档页无绑定也可浏览服务端存量数据

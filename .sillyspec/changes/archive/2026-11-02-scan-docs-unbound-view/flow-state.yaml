@@ -1,0 +1,48 @@
+tier: thin
+legacy_fallback: false
+substeps:
+  artifacts: done
+  ledger: done
+  patch: done
+  review: done
+  probes: done
+  distill: done
+  archive: done
+  events: done
+born_face: thin
+with_tasks: false
+review_force: null
+input: >-
+  扫描文档页无绑定也可浏览服务端存量数据
+
+
+  动机：扫描文档的列表/详情/搜索/统计/重新扫描在后端均为纯服务端读取（scan_documents 表 + 服务端 spec 镜像；reparse 权限为 WORKSPACE_WRITE，全程不触
+  daemon），但前端页面要求当前账号有 daemon 绑定才拉列表，无绑定账号整页只见 DaemonRequiredNotice 引导页，服务端已有数据不可见。工作区镜像由成员 daemon 推送保持新鲜（60-90s
+  周期），知识库列表页已是零绑定门槛先例，扫描文档页应同口径。
+
+
+  成功标准：
+
+  - 无 daemon 绑定账号进入扫描文档页：文档树/搜索/详情/统计面板照常展示服务端已有数据
+
+  - 无绑定时主区不再被 DaemonRequiredNotice 整页替换，改为非阻断降级横幅（保留配置守护进程入口）
+
+  - 有绑定账号页面行为与现状完全一致
+autopilot: false
+prestage_ack: false
+baseline_commit: 892d72104582ed700c32a4f1897e69f6a4364799
+updatedAt: '2026-11-02T03:15:11.602Z'
+cross_baselines:
+  sillyspec: 8d9d57c387161937c11cd436275834875ebd64d9
+baseline_sha256: f7014b79496735581f2568e64a083fd51d712a3960b1221a162be40e591e8536
+spec_approved: true
+spec_approved_at: '2026-11-02T02:48:01.765Z'
+spec_approved_by: zcode-scan-docs-unbound-20261102
+spec_approved_channel: user-confirmed
+spec_attested_by: zcode-scan-docs-unbound-20261102
+batch_ticked: true
+gate_summary: >-
+  test: passed ← module[]+deps(py1+jsx2+jsx3)（20.1s）
+  结果：C:\Users\qinyi\IdeaProjects\multi-agent-platform\.sillyspec\.runtime\verify-runs\20261102030338\test-result.json｜lint:
+  skipped — 跳过原因：local.yaml 未配置 commands.lint（或标记 unavailable）。｜门文件 13 个
+

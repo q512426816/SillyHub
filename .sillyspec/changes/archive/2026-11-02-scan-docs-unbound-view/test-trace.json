@@ -1,0 +1,52 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-11-02-scan-docs-unbound-view",
+  "rows": [
+    {
+      "anchor": "FR-01",
+      "row_id": "2026-11-02-scan-docs-unbound-view:flow:测试绑定FR-01",
+      "tests": [
+        "frontend/src/app/(dashboard)/workspaces/[id]/__tests__/scan-docs-page.test.tsx「无绑定：文档树/详情照常渲染服务端数据」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-11-02-scan-docs-unbound-view"
+    },
+    {
+      "anchor": "FR-02",
+      "row_id": "2026-11-02-scan-docs-unbound-view:flow:测试绑定FR-02",
+      "tests": [
+        "frontend/src/app/(dashboard)/workspaces/[id]/__tests__/scan-docs-page.test.tsx「无绑定：降级横幅非阻断且保留配置入口」",
+        "frontend/src/components/daemon-required-notice.test.tsx「degraded 变体：横幅文案与配置入口」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-11-02-scan-docs-unbound-view"
+    },
+    {
+      "anchor": "FR-03",
+      "row_id": "2026-11-02-scan-docs-unbound-view:flow:测试绑定FR-03",
+      "tests": [
+        "frontend/src/app/(dashboard)/workspaces/[id]/__tests__/scan-docs-page.test.tsx「无绑定：文档树/详情照常渲染服务端数据」用例"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-11-02-scan-docs-unbound-view"
+    }
+  ]
+}
