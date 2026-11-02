@@ -219,8 +219,10 @@ export default function ScanDocsPage({ params }: Props) {
   /** 内容区视图 tab（对齐知识库 FR-04/D-004@v2）：cards=人类可读卡片（默认）/
    *  raw=原文阅读视图；每次重新选文件回默认卡片。 */
   const [viewMode, setViewMode] = useState<"cards" | "raw">("cards");
-  // 2026-07-26-ungate-workspace-entry / FR-04：扫描文档 reparse 经 host_fs 读源码
-  // （daemon-client），无 binding 时失败。门禁后移后，无 binding 主区渲染 DaemonRequiredNotice。
+  // 2026-11-02-scan-docs-unbound-view：list/get/stats/reparse 后端均为纯服务端
+  // 读取（scan_documents 表 + 服务端 spec 镜像，reparse 权限 WORKSPACE_WRITE），
+  // 全程不触 daemon——页面不再以 daemon 绑定为数据门槛；无绑定时数据照常展示，
+  // 另以 DaemonRequiredNotice degraded 横幅（非阻断）保留配置入口。
   const [myBinding, setMyBinding] = useState<MemberBindingView | null>(null);
   const [bindingReady, setBindingReady] = useState(false);
   /** 左栏（文档树）宽度：默认 280px，拖拽/键盘调整 200~480px，记忆到 localStorage。 */
@@ -261,7 +263,8 @@ export default function ScanDocsPage({ params }: Props) {
   // 当前搜索词镜像（后台 reparse 完成后的静默刷新复用，避免把搜索态回退成全量）。
   const qRef = useRef("");
 
-  // 先判 binding：无 binding 不 reparse（避免无谓失败），主区渲染 DaemonRequiredNotice。
+  // binding 只服务降级横幅显隐（unbound-view：数据面已与 binding 解耦）；
+  // 拉取失败降级 null 等价无绑定横幅态，数据照常展示。
   useEffect(() => {
     let active = true;
     setBindingReady(false);
@@ -287,10 +290,10 @@ export default function ScanDocsPage({ params }: Props) {
 
   // 进页加载策略（perf）：列表先行（DB 快查，数百文档也是轻查询），reparse 转
   // 后台——不再让全量文件解析阻塞首屏；后台完成后按当前搜索词静默刷新列表。
-  // 失败静默（如只读权限 403 / daemon 瞬断）：页面仍可浏览 DB 既有数据，
-  // 需要强同步时点头部「重新扫描」。
+  // 失败静默（如只读权限 403 / 服务端瞬断）：页面仍可浏览 DB 既有数据，
+  // 需要强同步时点头部「重新扫描」。reparse 为服务端本地执行，无绑定账号
+  // 照发（unbound-view）；只读账号 403 同走静默分支。
   useEffect(() => {
-    if (!hasDaemon) return;
     let active = true;
     void fetchDocs();
     setBgSyncing(true);
@@ -305,7 +308,9 @@ export default function ScanDocsPage({ params }: Props) {
     return () => {
       active = false;
     };
-  }, [hasDaemon, workspaceId, fetchDocs]);
+    // hasDaemon 不入依赖（unbound-view 后数据面与 binding 解耦）：binding 迟到
+    // 翻转不应触发二次进页加载。
+  }, [workspaceId, fetchDocs]);
 
   // 搜索框输入 debounce 300ms → debouncedQ。
   useEffect(() => {
@@ -451,19 +456,25 @@ export default function ScanDocsPage({ params }: Props) {
         </SectionCard>
       )}
 
-      {!bindingReady ? (
-        <p className="py-12 text-center text-xs text-muted-foreground">加载中…</p>
-      ) : !hasDaemon ? (
+      {/* 无绑定降级横幅（2026-11-02-scan-docs-unbound-view）：非阻断——主区照常
+          渲染服务端存量数据，横幅只提示数据口径并保留配置入口，配置成功刷新
+          binding 后消失（degraded 变体文案为「当前展示工作区已有数据」口径）。 */}
+      {bindingReady && !hasDaemon && (
         <DaemonRequiredNotice
           feature="扫描文档"
           workspaceId={workspaceId}
           canBorrow={canBorrow}
+          variant="degraded"
           onConfigured={() => {
             void fetchMyBinding(workspaceId)
               .then((b) => setMyBinding(b))
               .catch(() => {});
           }}
         />
+      )}
+
+      {!bindingReady ? (
+        <p className="py-12 text-center text-xs text-muted-foreground">加载中…</p>
       ) : loading ? (
         <p className="py-12 text-center text-xs text-muted-foreground">加载中…</p>
       ) : docs.length === 0 ? (
