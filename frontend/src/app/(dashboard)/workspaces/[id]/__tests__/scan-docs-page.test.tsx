@@ -44,6 +44,20 @@ vi.mock("@/lib/workspace-binding", async (importOriginal) => {
   };
 });
 
+// 2026-11-02-scan-docs-unbound-view：无绑定用例会经 DaemonRequiredNotice
+// degraded 横幅的「配置我的守护进程」展开 WorkspaceAccessGuide（真实组件内部
+// 拉 daemon 实例列表会打 jsdom 缺失的 fetch），同 daemon-required-notice.test
+// 替换为静态渲染聚焦横幅↔主区联动。
+vi.mock("@/components/workspace-access-guide", () => ({
+  WorkspaceAccessGuide: ({ onConfigured }: { onConfigured: () => void }) => (
+    <div data-testid="access-guide">
+      <button data-testid="access-configured" onClick={onConfigured}>
+        done
+      </button>
+    </div>
+  ),
+}));
+
 vi.mock("@/stores/session", () => ({
   useSession: (sel: (_s: unknown) => unknown) =>
     sel({ user: { permissions: [], is_platform_admin: false } }),
@@ -268,6 +282,56 @@ describe("运营指标面板挂载（task-03 / 2026-09-21-scan-docs-ops-panel）
     expect(screen.getByTestId("scan-docs-ops-panel")).toBeInTheDocument();
     expect(screen.getByTestId("scan-docs-ops-panel-empty")).toBeInTheDocument();
     await waitFor(() => expect(mockStats).toHaveBeenCalledWith(WS));
+  });
+});
+
+
+// ── 2026-11-02-scan-docs-unbound-view：无绑定也可浏览服务端存量数据 ──────────
+//
+// 后端 list/get/stats/reparse 全为服务端读取（不触 daemon），页面不应因无绑定
+// 拒绝展示：文档树/搜索/详情/统计照常，reparse 照发（失败静默既有语义）；
+// DaemonRequiredNotice 从「整页替换主区」降级为非阻断横幅。
+
+describe("无 daemon 绑定：服务端存量数据照常可看（2026-11-02-scan-docs-unbound-view）", () => {
+  it("无绑定：文档树/详情照常渲染服务端数据，reparse 照发（FR-01）", async () => {
+    mockBinding.mockResolvedValue(null);
+    mockGetDoc.mockResolvedValue(
+      summary({ id: "id-arch", path: "backend/ARCHITECTURE.md", title: "架构文档", content: "# hello" }),
+    );
+    renderPage();
+    // 数据面不依赖 binding：列表照拉、树照常渲染（旧实现 hasDaemon=false 直接 return）。
+    await waitForTree(["backend", "ARCHITECTURE.md"]);
+    await waitFor(() => expect(mockReparse).toHaveBeenCalledWith(WS));
+    // 详情照常可看。
+    fireEvent.click(
+      screen.getByText("ARCHITECTURE.md").closest(".ant-tree-node-content-wrapper")!,
+    );
+    await waitFor(() => expect(mockGetDoc).toHaveBeenCalledWith(WS, "id-arch"));
+    await waitFor(() => expect(screen.getByText("架构文档")).toBeInTheDocument());
+  });
+
+  it("无绑定：降级横幅非阻断且保留配置入口，配置成功后横幅消失（FR-02）", async () => {
+    mockBinding.mockResolvedValue(null);
+    renderPage();
+    await waitForTree(["backend", "ARCHITECTURE.md"]);
+    // degraded 横幅与主区共存（blocked 整页口径下树会被替换不可见），文案为已有数据口径。
+    const notice = screen.getByTestId("daemon-required-notice");
+    expect(notice.getAttribute("data-variant")).toBe("degraded");
+    expect(screen.getByText(/当前展示的是工作区已有数据/)).toBeInTheDocument();
+    expect(screen.getByTestId("daemon-required-config-btn")).toBeInTheDocument();
+    // 配置入口 → 内联展开引导 → 配置成功刷新 binding → 横幅消失、主区不动。
+    fireEvent.click(screen.getByTestId("daemon-required-config-btn"));
+    expect(screen.getByTestId("access-guide")).toBeInTheDocument();
+    mockBinding.mockResolvedValue({ daemon_id: "d-9" });
+    fireEvent.click(screen.getByTestId("access-configured"));
+    await waitFor(() => expect(screen.queryByTestId("daemon-required-notice")).toBeNull());
+    expect(screen.getByText("ARCHITECTURE.md")).toBeInTheDocument();
+  });
+
+  it("有绑定：不渲染降级横幅，行为与现状一致（FR-03 回归）", async () => {
+    renderPage();
+    await waitForTree(["backend", "ARCHITECTURE.md"]);
+    expect(screen.queryByTestId("daemon-required-notice")).toBeNull();
   });
 });
 
