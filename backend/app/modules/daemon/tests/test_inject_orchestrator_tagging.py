@@ -410,8 +410,11 @@ class TestSameTransactionAtomicity:
         provider_row = await _seed_provider(db_session, uid)
         turn_count_before = created.agent_session.turn_count
 
+        # 2026-10-30-provider-user-share 后切换轮解析入口为 resolve_session_provider_config
+        # （attachments 函数体内延迟 import，patch 源模块属性即生效）；旧缝
+        # resolve_bound_provider_config 已不在该链路上，patch 它不再触发异常。
         with patch(
-            "app.modules.daemon.lease.context.resolve_bound_provider_config",
+            "app.modules.daemon.lease.context.resolve_session_provider_config",
             new=AsyncMock(return_value=None),
         ):
             with pytest.raises(DaemonSessionConfigInvalid):
