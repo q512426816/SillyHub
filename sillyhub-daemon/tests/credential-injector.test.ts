@@ -553,6 +553,20 @@ describe('ClaudeCredentialInjector', () => {
       expect(env.ANTHROPIC_BASE_URL).toBe('http://hub:8000/api/daemon/llm-proxy');
     });
 
+    // 2026-10-31-share-openai-chat-proxy-token：共享/借出链的限域令牌优先
+    // （Bearer 主体是令牌三元组，非守护进程属主）；缺省回落 daemon apiKey。
+    it('litellm_proxy_token 优先作 AUTH_TOKEN（setDaemonApiKey 已注入亦不覆盖）', () => {
+      setDaemonApiKey('shk_live_daemon_key_xyz');
+      const env = injector.toEnv({ ...proxyConfig, litellm_proxy_token: 'shlp_scoped_token' });
+      expect(env.ANTHROPIC_AUTH_TOKEN).toBe('shlp_scoped_token');
+    });
+
+    it('litellm_proxy_token 空串 → 等价未下发，回落 daemon apiKey（旧 payload 兼容）', () => {
+      setDaemonApiKey('shk_live_daemon_key_xyz');
+      const env = injector.toEnv({ ...proxyConfig, litellm_proxy_token: '' });
+      expect(env.ANTHROPIC_AUTH_TOKEN).toBe('shk_live_daemon_key_xyz');
+    });
+
     it('litellm_proxy 优先于老 litellm_auth_token（两者并存取 daemon apiKey，防御性）', () => {
       setDaemonApiKey('shk_live_daemon_key_xyz');
       const env = injector.toEnv({

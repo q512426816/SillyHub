@@ -185,7 +185,14 @@ export class ClaudeCredentialInjector implements CredentialInjector {
     if (c.api_format === 'openai_chat') {
       if (c.litellm_base_url) env.ANTHROPIC_BASE_URL = c.litellm_base_url;
       if (c.litellm_proxy) {
-        if (_daemonApiKey) env.ANTHROPIC_AUTH_TOKEN = _daemonApiKey;
+        // 2026-10-31-share-openai-chat-proxy-token：限域令牌优先（共享/借出链
+        // Bearer 主体是令牌三元组，非守护进程属主）；缺省回落 daemon 自身
+        // apiKey（旧 payload 兼容，零回归）。
+        if (c.litellm_proxy_token) {
+          env.ANTHROPIC_AUTH_TOKEN = c.litellm_proxy_token;
+        } else if (_daemonApiKey) {
+          env.ANTHROPIC_AUTH_TOKEN = _daemonApiKey;
+        }
       } else if (c.litellm_auth_token) {
         env.ANTHROPIC_AUTH_TOKEN = c.litellm_auth_token;
       }

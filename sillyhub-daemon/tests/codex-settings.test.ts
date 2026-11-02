@@ -252,6 +252,30 @@ describe('writeCodexHome openai_chat 形态（litellm_proxy 通道，D-006）', 
     );
   });
 
+  // 2026-10-31-share-openai-chat-proxy-token：限域令牌优先（共享/借出链 Bearer
+  // 主体），空串/缺省回落 daemonApiKey（旧 payload 兼容）。
+  it('litellm_proxy_token 存在 → auth.json key 取令牌（优先于 daemonApiKey）', async () => {
+    const home = newCodexHome();
+    await writeCodexHome({
+      codexHome: home,
+      provider: openaiChatProvider({ litellm_proxy_token: 'shlp_scoped_token' }),
+      daemonApiKey: 'sk-daemon-master-1',
+    });
+    const auth = readJson(home, 'auth.json');
+    expect(auth.OPENAI_API_KEY).toBe('shlp_scoped_token');
+  });
+
+  it('litellm_proxy_token 空串 → 回落 daemonApiKey（旧 payload 兼容）', async () => {
+    const home = newCodexHome();
+    await writeCodexHome({
+      codexHome: home,
+      provider: openaiChatProvider({ litellm_proxy_token: '' }),
+      daemonApiKey: 'sk-daemon-master-1',
+    });
+    const auth = readJson(home, 'auth.json');
+    expect(auth.OPENAI_API_KEY).toBe('sk-daemon-master-1');
+  });
+
   it('全程不引用 provider.api_key（master key 不出 backend；诱饵 key 不落盘）', async () => {
     const home = newCodexHome();
     // 诱饵：即使 payload 意外带上 anthropic 分支字段，openai_chat 产物也不得引用

@@ -157,7 +157,9 @@ function resolveCodexForm(
     const baseUrl = nonEmpty(provider.litellm_base_url);
     const model = nonEmpty(provider.litellm_model_name);
     return {
-      key: nonEmpty(daemonApiKey),
+      // 2026-10-31-share-openai-chat-proxy-token：限域代理令牌优先（共享/借出链
+      // Bearer 主体），缺省回落 daemon 自身 key（旧 payload 兼容）。
+      key: nonEmpty(provider.litellm_proxy_token) ?? nonEmpty(daemonApiKey),
       baseUrl,
       model,
       requireOpenAiAuth: false,

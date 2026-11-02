@@ -385,6 +385,15 @@ export interface ProviderConfig {
    */
   litellm_proxy?: boolean;
   /**
+   * 2026-10-31-share-openai-chat-proxy-token：限域代理令牌（共享/借出
+   * openai_chat 链）。litellm_proxy 形态下优先于 daemon 自身 apiKey 作子进程
+   * Bearer（ANTHROPIC_AUTH_TOKEN / zcode provider_config.json / codex auth.toml
+   * 三消费点同口径）；backend llm-proxy 验签后按令牌 (o,p) 断言模型名。缺省
+   * undefined=旧 payload，回落 daemon 自身 apiKey（向后兼容）。限域凭证，
+   * 遵守 R-02 不泄漏铁律：不进日志/序列化（与 api_key 同处置）。
+   */
+  litellm_proxy_token?: string;
+  /**
    * task-11：LiteLLM 内 model_name（openai 形态）→ ANTHROPIC_MODEL。
    * = `usr-{user_id}-{provider_id}`（R-03，与 backend task-09 register 写入 LiteLLM 的
    * model_name 逐字一致），LiteLLM 据此路由命中 openai 上游。

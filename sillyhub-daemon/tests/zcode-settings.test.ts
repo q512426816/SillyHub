@@ -97,6 +97,40 @@ describe('buildZcodeProviderConfig 形状（anthropic-messages 形态）', () =>
     expect(rule.config.access['apiKey']).toBe('daemon-key');
   });
 
+  // 2026-10-31-share-openai-chat-proxy-token：限域令牌优先（共享/借出链 Bearer
+  // 主体），空串/缺省回落 daemonApiKey（旧 payload 兼容）。
+  it('litellm_proxy + litellm_proxy_token → apiKey 取令牌（优先于 daemonApiKey）', () => {
+    const cfg = buildZcodeProviderConfig({
+      zcodeDir: dir,
+      provider: baseProvider({
+        api_format: 'openai_chat',
+        litellm_base_url: 'http://hub/proxy',
+        litellm_proxy: true,
+        litellm_proxy_token: 'shlp_scoped_token',
+      }),
+      daemonApiKey: 'daemon-key',
+    });
+    const rule = (cfg as { config: { providerConfigRules: { providerRules: Array<{ config: { access: Record<string, unknown> } }> } } })
+      .config.providerConfigRules.providerRules[0]!;
+    expect(rule.config.access['apiKey']).toBe('shlp_scoped_token');
+  });
+
+  it('litellm_proxy_token 空串 → 回落 daemonApiKey（旧 payload 兼容）', () => {
+    const cfg = buildZcodeProviderConfig({
+      zcodeDir: dir,
+      provider: baseProvider({
+        api_format: 'openai_chat',
+        litellm_base_url: 'http://hub/proxy',
+        litellm_proxy: true,
+        litellm_proxy_token: '',
+      }),
+      daemonApiKey: 'daemon-key',
+    });
+    const rule = (cfg as { config: { providerConfigRules: { providerRules: Array<{ config: { access: Record<string, unknown> } }> } } })
+      .config.providerConfigRules.providerRules[0]!;
+    expect(rule.config.access['apiKey']).toBe('daemon-key');
+  });
+
   it('default_fallback_model 优先于 model（D-010 取值链）', () => {
     const cfg = buildZcodeProviderConfig({
       zcodeDir: dir,

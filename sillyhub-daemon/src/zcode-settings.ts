@@ -72,15 +72,16 @@ function effectiveBaseUrl(provider: ProviderConfig): string | undefined {
 }
 
 /**
- * 有效密钥：openai_chat + litellm_proxy 形态用 daemon 自身 key（hub 代理凭据）；
- * 其余形态用 provider.api_key。
+ * 有效密钥：openai_chat + litellm_proxy 形态优先限域代理令牌（2026-10-31-
+ * share-openai-chat-proxy-token，共享/借出链 Bearer 主体），缺省回落 daemon
+ * 自身 key（hub 代理凭据，旧 payload 兼容）；其余形态用 provider.api_key。
  */
 function effectiveApiKey(
   provider: ProviderConfig,
   daemonApiKey: string | null | undefined,
 ): string | undefined {
   if (provider.api_format === 'openai_chat' && provider.litellm_proxy === true) {
-    return nonEmpty(daemonApiKey);
+    return nonEmpty(provider.litellm_proxy_token) ?? nonEmpty(daemonApiKey);
   }
   return nonEmpty(provider.api_key);
 }
