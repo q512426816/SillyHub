@@ -696,7 +696,7 @@ class TestInjectSessionBinding:
         other_change = Change(
             id=uuid.uuid4(),
             workspace_id=ws_b.id,
-            change_key="shared-key",
+            change_key="2026-10-27-shared-key",
             title="别的工作区的变更",
             status="active",
             location="active",
@@ -706,11 +706,15 @@ class TestInjectSessionBinding:
         await db_session.commit()
 
         await svc.inject_session(
-            session.id, uid, prompt="跨工作区绑定", bind_change_key="shared-key"
+            session.id, uid, prompt="跨工作区绑定", bind_change_key="2026-10-27-shared-key"
         )
 
         rows = (
-            (await db_session.execute(select(Change).where(Change.change_key == "shared-key")))
+            (
+                await db_session.execute(
+                    select(Change).where(Change.change_key == "2026-10-27-shared-key")
+                )
+            )
             .scalars()
             .all()
         )

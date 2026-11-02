@@ -487,8 +487,12 @@ async def test_push_hub_session_hit_links_entries(
             "hub_session_id": str(hub.id),
             "entries": [
                 # task-06：两键并存防御——quick 优先只落 quicklog 绑定（schema 互斥注释）。
-                {**CODEX_ENTRY, "change_key": "change-hub-both", "quick_id": "ql-20260825-hit"},
-                {**CLAUDE_ENTRY, "change_key": "change-hub-claude"},
+                {
+                    **CODEX_ENTRY,
+                    "change_key": "2026-10-27-change-hub-both",
+                    "quick_id": "ql-20260825-hit",
+                },
+                {**CLAUDE_ENTRY, "change_key": "2026-10-27-change-hub-claude"},
             ],
         },
         headers=headers,
@@ -518,10 +522,10 @@ async def test_push_hub_session_hit_links_entries(
     ]
     changes = await _all_changes(db_session)
     by_key = {c.change_key: c for c in changes}
-    assert set(by_key) == {"change-hub-claude"}  # 并存条目无 change placeholder
+    assert set(by_key) == {"2026-10-27-change-hub-claude"}  # 并存条目无 change placeholder
     change_links = await _change_links(db_session)
     assert [(ln.change_id, ln.session_id) for ln in change_links] == [
-        (by_key["change-hub-claude"].id, hub.id)
+        (by_key["2026-10-27-change-hub-claude"].id, hub.id)
     ]
 
 
@@ -701,7 +705,7 @@ async def test_push_aggregation_idempotent_single_session(
     _ws_id, headers = shpsync_headers
     body = {
         **SAMPLE_BODY,
-        "entries": [{**CODEX_ENTRY, "change_key": "change-aggregate"}],
+        "entries": [{**CODEX_ENTRY, "change_key": "2026-10-27-change-aggregate"}],
     }
 
     resp1 = await client.post("/api/agent-logs", json=body, headers=headers)
@@ -710,11 +714,11 @@ async def test_push_aggregation_idempotent_single_session(
     assert len(sessions1) == 1
     first = sessions1[0]
     # task-04：聚合键去 harness 前缀（design §Phase 2 / D-003@v2）。
-    assert first.aggregation_key == "change-aggregate"
+    assert first.aggregation_key == "2026-10-27-change-aggregate"
     first_active_at = first.last_active_at
     # task-06（design §5.W2.3）：change ctx 组落 change link（placeholder 变更行）。
     changes = await _all_changes(db_session)
-    assert [c.change_key for c in changes] == ["change-aggregate"]
+    assert [c.change_key for c in changes] == ["2026-10-27-change-aggregate"]
     assert [(ln.change_id, ln.session_id) for ln in await _change_links(db_session)] == [
         (changes[0].id, first.id)
     ]
@@ -752,12 +756,12 @@ async def test_push_entry_level_ctx_groups_two_sessions(
             {
                 **CODEX_ENTRY,
                 "log_path": "C:/Users/qinyi/.codex/sessions/rollout-a.jsonl",
-                "change_key": "change-a",
+                "change_key": "2026-10-27-change-a",
             },
             {
                 **CODEX_ENTRY,
                 "log_path": "C:/Users/qinyi/.codex/sessions/rollout-b.jsonl",
-                "change_key": "change-b",
+                "change_key": "2026-10-27-change-b",
             },
         ],
     }
@@ -769,23 +773,27 @@ async def test_push_entry_level_ctx_groups_two_sessions(
     assert len(sessions) == 2
     by_key = {s.aggregation_key: s for s in sessions}
     # task-04：聚合键去 harness 前缀、title 改「本地 · {ctx}」（design §Phase 2）。
-    assert set(by_key) == {"change-a", "change-b"}
-    assert by_key["change-a"].title == "本地 · change-a"
-    assert by_key["change-b"].title == "本地 · change-b"
+    assert set(by_key) == {"2026-10-27-change-a", "2026-10-27-change-b"}
+    assert by_key["2026-10-27-change-a"].title == "本地 · 2026-10-27-change-a"
+    assert by_key["2026-10-27-change-b"].title == "本地 · 2026-10-27-change-b"
 
     rows = await _all_log_rows(db_session)
     assert len(rows) == 2
     for row in rows:
-        expected_key = "change-a" if row.log_path.endswith("rollout-a.jsonl") else "change-b"
+        expected_key = (
+            "2026-10-27-change-a"
+            if row.log_path.endswith("rollout-a.jsonl")
+            else "2026-10-27-change-b"
+        )
         assert row.agent_session_id == by_key[expected_key].id  # 各挂一条
 
     # task-06（design §5.W2.3）：两组各落 change link（placeholder 对应组会话）。
     changes = await _all_changes(db_session)
     change_by_key = {c.change_key: c for c in changes}
-    assert set(change_by_key) == {"change-a", "change-b"}
+    assert set(change_by_key) == {"2026-10-27-change-a", "2026-10-27-change-b"}
     assert {(ln.change_id, ln.session_id) for ln in await _change_links(db_session)} == {
-        (change_by_key["change-a"].id, by_key["change-a"].id),
-        (change_by_key["change-b"].id, by_key["change-b"].id),
+        (change_by_key["2026-10-27-change-a"].id, by_key["2026-10-27-change-a"].id),
+        (change_by_key["2026-10-27-change-b"].id, by_key["2026-10-27-change-b"].id),
     }
 
 
@@ -902,7 +910,7 @@ async def test_push_tool_report_session_fields_and_provider_mapping(
     body = {
         **SAMPLE_BODY,
         "entries": [
-            {**CODEX_ENTRY, "change_key": "provider-map-check"},
+            {**CODEX_ENTRY, "change_key": "2026-10-27-provider-map-check"},
             zcode_entry,
         ],
     }
@@ -912,9 +920,9 @@ async def test_push_tool_report_session_fields_and_provider_mapping(
     sessions = await _tool_report_sessions(db_session)
     by_key = {s.aggregation_key: s for s in sessions}
     # task-04：聚合键去 harness 前缀（design §Phase 2 / D-003@v2）。
-    assert set(by_key) == {"provider-map-check", "ql-20260823-001"}
+    assert set(by_key) == {"2026-10-27-provider-map-check", "ql-20260823-001"}
 
-    codex_session = by_key["provider-map-check"]
+    codex_session = by_key["2026-10-27-provider-map-check"]
     zcode_session = by_key["ql-20260823-001"]
     for s in (codex_session, zcode_session):
         assert s.origin == "tool_report"
@@ -928,7 +936,7 @@ async def test_push_tool_report_session_fields_and_provider_mapping(
     assert zcode_session.provider == "claude"
     # task-04 标题：非空 ctx 统一「本地 · {quick 原样短码或变更名}」（change ctx
     # 直显、quick ctx 原样短码入文案）。
-    assert codex_session.title == "本地 · provider-map-check"
+    assert codex_session.title == "本地 · 2026-10-27-provider-map-check"
     assert zcode_session.title == "本地 · ql-20260823-001"
     # harness 真实身份由 config_snapshot 展示（D-007）。
     assert codex_session.config_snapshot == {"harness": "codex"}
@@ -945,7 +953,7 @@ async def test_push_tool_report_session_fields_and_provider_mapping(
     # task-06（design §5.W2.3）：聚合分支双 ctx 落绑定——change_key 组落 change
     # link（placeholder）、quick_id 组落 quicklog link（绑定主体为各组会话）。
     changes = await _all_changes(db_session)
-    assert [c.change_key for c in changes] == ["provider-map-check"]
+    assert [c.change_key for c in changes] == ["2026-10-27-provider-map-check"]
     assert [(ln.change_id, ln.session_id) for ln in await _change_links(db_session)] == [
         (changes[0].id, codex_session.id)
     ]
@@ -1019,7 +1027,7 @@ async def test_push_hub_hit_change_key_binds_change_link_with_placeholder(
     body = {
         **SAMPLE_BODY,
         "hub_session_id": str(hub.id),
-        "entries": [{**CODEX_ENTRY, "change_key": "change-hub-placeholder"}],
+        "entries": [{**CODEX_ENTRY, "change_key": "2026-10-27-change-hub-placeholder"}],
     }
     resp = await client.post("/api/agent-logs", json=body, headers=headers)
     assert resp.status_code == 200
@@ -1028,11 +1036,11 @@ async def test_push_hub_hit_change_key_binds_change_link_with_placeholder(
     assert len(changes) == 1
     ch = changes[0]
     assert ch.workspace_id == ws_id
-    assert ch.change_key == "change-hub-placeholder"
+    assert ch.change_key == "2026-10-27-change-hub-placeholder"
     # placeholder defaults 对齐 _ensure_change_row（binding.py task-02 同款）。
     assert ch.status == "draft"
     assert ch.location == "active"
-    assert ch.path == "changes/change-hub-placeholder"
+    assert ch.path == "changes/2026-10-27-change-hub-placeholder"
 
     change_links = await _change_links(db_session)
     assert [(ln.change_id, ln.session_id) for ln in change_links] == [(ch.id, hub.id)]
@@ -1089,7 +1097,7 @@ async def test_push_aggregation_change_key_binds_tool_report_session(
     _ws_id, headers = shpsync_headers
     body = {
         **SAMPLE_BODY,
-        "entries": [{**CODEX_ENTRY, "change_key": "change-agg-bind"}],
+        "entries": [{**CODEX_ENTRY, "change_key": "2026-10-27-change-agg-bind"}],
     }
     resp = await client.post("/api/agent-logs", json=body, headers=headers)
     assert resp.status_code == 200
@@ -1098,10 +1106,10 @@ async def test_push_aggregation_change_key_binds_tool_report_session(
     assert len(sessions) == 1
     group_session = sessions[0]
     # task-04：聚合键去 harness 前缀（design §Phase 2 / D-003@v2）。
-    assert group_session.aggregation_key == "change-agg-bind"
+    assert group_session.aggregation_key == "2026-10-27-change-agg-bind"
 
     changes = await _all_changes(db_session)
-    assert [c.change_key for c in changes] == ["change-agg-bind"]
+    assert [c.change_key for c in changes] == ["2026-10-27-change-agg-bind"]
     change_links = await _change_links(db_session)
     assert [(ln.change_id, ln.session_id) for ln in change_links] == [
         (changes[0].id, group_session.id)
